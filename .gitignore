@@ -1,0 +1,15 @@
+# UE5 插件编译产物
+Binaries/
+Intermediate/
+Saved/
+
+# 调试符号
+*.pdb
+
+# 库文件
+*.lib
+*.dll
+
+# IDE
+.vs/
+.idea/
