@@ -40,118 +40,6 @@ DEFINE_LOG_CATEGORY(LogImageToUMG);
 // 并发请求保护
 static TAtomic<bool> bAnalysisInProgress(false);
 
-/**
- * AI 分析上下文 - 替代全局变量
- */
-struct FAnalyzeContext
-{
-	TArray<uint8> SourceImageData;    // 原始图片（用于裁剪，保持最高质量）
-	TArray<uint8> ImageDataForAI;     // 压缩后图片（用于AI API）
-	FIntPoint SourceImageSize;        // 原始尺寸
-	FIntPoint AIImageSize;            // AI用尺寸
-	FString OutputPath;
-	FString AssetName;
-	TWeakObjectPtr<UTexture2D> Texture;
-
-	/** 准备AI用图像数据（自动缩放大图） */
-	void PrepareForAI(const TArray<uint8>& InSourceData, int32 W, int32 H)
-	{
-		SourceImageData = InSourceData;
-		SourceImageSize = FIntPoint(W, H);
-
-		if (W <= ImageToUMGConstants::MaxAIDimension && H <= ImageToUMGConstants::MaxAIDimension)
-		{
-			ImageDataForAI = InSourceData;
-			AIImageSize = SourceImageSize;
-			return;
-		}
-
-		float Scale = FMath::Min(
-			static_cast<float>(ImageToUMGConstants::MaxAIDimension) / W,
-			static_cast<float>(ImageToUMGConstants::MaxAIDimension) / H
-		);
-		int32 NewW = FMath::RoundToInt(W * Scale);
-		int32 NewH = FMath::RoundToInt(H * Scale);
-
-		TArray<uint8> ScaledData;
-		if (FImageAssetProcessor::ScaleImageData(InSourceData, W, H, NewW, NewH, ScaledData))
-		{
-			ImageDataForAI = MoveTemp(ScaledData);
-			AIImageSize = FIntPoint(NewW, NewH);
-			UE_LOG(LogImageToUMG, Log, TEXT("Image scaled to %dx%d for AI (original: %dx%d)"), NewW, NewH, W, H);
-		}
-		else
-		{
-			ImageDataForAI = InSourceData;
-			AIImageSize = SourceImageSize;
-		}
-	}
-};
-
-// 核心 AI 调用逻辑
-static void AnalyzeAndPreview(TSharedRef<FAnalyzeContext> Context, const FString& Format)
-{
-	// 并发请求保护：防止用户快速连续触发多次分析
-	if (bAnalysisInProgress.Exchange(true))
-	{
-		FNotificationInfo Info(LOCTEXT("AnalysisInProgress", "Analysis already in progress, please wait..."));
-		Info.ExpireDuration = ImageToUMGConstants::NotificationDuration;
-		FSlateNotificationManager::Get().AddNotification(Info);
-		return;
-	}
-
-	const UImageToUMGSettings* S = UImageToUMGSettings::Get();
-	if (S->APIKey.IsEmpty())
-	{
-		bAnalysisInProgress = false;
-		FNotificationInfo Info(LOCTEXT("NoAPIKey", "Please configure API Key in Editor Preferences -> Plugins -> Image To UMG"));
-		Info.ExpireDuration = ImageToUMGConstants::NotificationDuration;
-		FSlateNotificationManager::Get().AddNotification(Info);
-		return;
-	}
-
-	FNotificationInfo Info(LOCTEXT("Analyzing", "Analyzing image with AI..."));
-	Info.bFireAndForget = false;
-	auto Notif = FSlateNotificationManager::Get().AddNotification(Info);
-	Notif->SetCompletionState(SNotificationItem::CS_Pending);
-
-	TSharedRef<FHttpAIClient> Client = MakeShared<FHttpAIClient>();
-
-	// 使用压缩后的图片发送给 AI（ImageDataForAI），但传递原始图片用于裁剪（SourceImageData）
-	Client->AnalyzeImage(Context->ImageDataForAI, Format, Context->AIImageSize.X, Context->AIImageSize.Y,
-		FOnAIResponseReceived::CreateLambda([Notif, Context, Client](const FString& Json)
-		{
-			bAnalysisInProgress = false;
-			Notif->SetCompletionState(SNotificationItem::CS_Success);
-			Notif->ExpireAndFadeout();
-
-			AsyncTask(ENamedThreads::GameThread, [Json, Context]() {
-				if (FModuleManager::Get().IsModuleLoaded("ImageToUMGEditor"))
-				{
-					// 传递原始图片数据用于裁剪（保持最高质量）
-					FModuleManager::GetModuleChecked<FImageToUMGEditorModule>("ImageToUMGEditor")
-						.OpenPreviewWindow(Json, Context->Texture.Get(), Context->OutputPath, Context->AssetName,
-							Context->SourceImageData, Context->SourceImageSize, Context->AIImageSize);
-				}
-			});
-		}),
-		FOnAIRequestFailed::CreateLambda([Notif, Client](const FString& Err)
-		{
-			bAnalysisInProgress = false;
-			Notif->SetText(FText::FromString(FString::Printf(TEXT("AI Error: %s"), *Err)));
-			Notif->SetCompletionState(SNotificationItem::CS_Fail);
-			Notif->ExpireAndFadeout();
-
-			AsyncTask(ENamedThreads::GameThread, [Err]() {
-				FString Message = FString::Printf(
-					TEXT("AI Request Failed\n\n%s\n\nCheck the Output Log (LogImageToUMG) for more details."),
-					*Err);
-				FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Message));
-			});
-		})
-	);
-}
-
 class FImageToUMGCommands : public TCommands<FImageToUMGCommands>
 {
 public:
@@ -188,7 +76,7 @@ void FImageToUMGEditorModule::StartupModule()
 
 		Ctx->FindOrAddSection("GetAssetActions").AddMenuEntry("ImageToUMG_Generate",
 			LOCTEXT("GenUMG", "Generate UMG Widget"),
-			LOCTEXT("GenUMGTip", "Use AI to generate Widget Blueprint"),
+			LOCTEXT("GenUMGTip", "Open preview window to generate Widget Blueprint"),
 			FSlateIcon(),
 			FToolMenuExecuteAction::CreateLambda([](const FToolMenuContext& MenuContext)
 			{
@@ -203,13 +91,15 @@ void FImageToUMGEditorModule::StartupModule()
 				int32 W, H;
 				if (!FImageEncoder::GetImageDataFromTexture(Tex, Data, Fmt, W, H)) return;
 
-				TSharedRef<FAnalyzeContext> Context = MakeShared<FAnalyzeContext>();
-				Context->PrepareForAI(Data, W, H);
-				Context->OutputPath = FPackageName::GetLongPackagePath(AC->SelectedAssets[0].PackageName.ToString());
-				Context->AssetName = AC->SelectedAssets[0].AssetName.ToString();
-				Context->Texture = Tex;
+				FString OutputPath = FPackageName::GetLongPackagePath(AC->SelectedAssets[0].PackageName.ToString());
+				FString AssetName = AC->SelectedAssets[0].AssetName.ToString();
 
-				AnalyzeAndPreview(Context, Fmt);
+				// 直接打开预览窗口，不调用 AI
+				if (FModuleManager::Get().IsModuleLoaded("ImageToUMGEditor"))
+				{
+					FImageToUMGEditorModule& Module = FModuleManager::GetModuleChecked<FImageToUMGEditorModule>("ImageToUMGEditor");
+					Module.OpenPreviewWindowDirect(Tex, OutputPath, AssetName, Data, FIntPoint(W, H));
+				}
 			})
 		);
 	}));
@@ -249,28 +139,27 @@ void FImageToUMGEditorModule::OnGenerateFromFile()
 	if (W == 0 || H == 0) return;
 
 	const UImageToUMGSettings* S = UImageToUMGSettings::Get();
+	FString AssetName = FPaths::GetBaseFilename(Files[0]);
 
-	TSharedRef<FAnalyzeContext> Context = MakeShared<FAnalyzeContext>();
-	Context->PrepareForAI(Data, W, H);
-	Context->OutputPath = S->DefaultOutputPath;
-	Context->AssetName = FPaths::GetBaseFilename(Files[0]);
-
-	// 创建临时 Texture2D 用于预览窗口显示源图（使用原始尺寸）
+	// 创建临时 Texture2D 用于预览窗口显示源图
+	UTexture2D* TempTex = nullptr;
 	TArray64<uint8> RawData;
 	if (Wrap->GetRaw(ERGBFormat::BGRA, 8, RawData))
 	{
-		UTexture2D* TempTex = UTexture2D::CreateTransient(W, H, PF_B8G8R8A8);
+		TempTex = UTexture2D::CreateTransient(W, H, PF_B8G8R8A8);
 		if (TempTex)
 		{
 			void* TextureData = TempTex->GetPlatformData()->Mips[0].BulkData.Lock(LOCK_READ_WRITE);
 			FMemory::Memcpy(TextureData, RawData.GetData(), RawData.Num());
 			TempTex->GetPlatformData()->Mips[0].BulkData.Unlock();
 			TempTex->UpdateResource();
-			Context->Texture = TempTex;
+			// 持有临时纹理防止GC
+			TempTextureHolder.Reset(TempTex);
 		}
 	}
 
-	AnalyzeAndPreview(Context, Fmt == EImageFormat::PNG ? TEXT("png") : TEXT("jpeg"));
+	// 直接打开预览窗口，不调用 AI
+	OpenPreviewWindowDirect(TempTex, S->DefaultOutputPath, AssetName, Data, FIntPoint(W, H));
 }
 
 void FImageToUMGEditorModule::OpenPreviewWindow(const FString& Json, UTexture2D* Tex, const FString& Path, const FString& Name,
@@ -295,7 +184,115 @@ void FImageToUMGEditorModule::OpenPreviewWindow(const FString& Json, UTexture2D*
 	FSlateApplication::Get().AddWindow(Win);
 }
 
-void FImageToUMGEditorModule::OnPreviewConfirmed(const FString& Json, const FString& OutputPath, const TArray<uint8>& SourceImageData, FIntPoint SourceImageSize, float CoordScale)
+void FImageToUMGEditorModule::OpenPreviewWindowDirect(UTexture2D* Tex, const FString& Path, const FString& Name,
+	const TArray<uint8>& ImageData, FIntPoint ImageSize)
+{
+	// 追踪窗口打开次数
+	static int32 OpenCount = 0;
+	OpenCount++;
+	UE_LOG(LogImageToUMG, Log, TEXT("[EditorModule] OpenPreviewWindowDirect #%d - 纹理: %s, 尺寸: %dx%d, ImageData: %d bytes"),
+		OpenCount,
+		Tex ? *Tex->GetName() : TEXT("NULL"),
+		ImageSize.X, ImageSize.Y,
+		ImageData.Num());
+	const UImageToUMGSettings* S = UImageToUMGSettings::Get();
+	FString OutPath = S->DefaultOutputPath.IsEmpty() ? Path : S->DefaultOutputPath;
+
+	// 默认 JSON 模板（包含提示文本，避免空容器被解析器拒绝）
+	FString DefaultJson = TEXT(R"({
+  "WidgetName": "WBP_)") + Name + TEXT(R"(",
+  "RootWidget": {
+    "Type": "Overlay",
+    "Name": "Root",
+    "Children": [
+      {
+        "Type": "TextBlock",
+        "Name": "PlaceholderText",
+        "Properties": {
+          "Text": "Click 'Send to AI' or edit JSON manually",
+          "Color": "#888888",
+          "FontSize": 24
+        },
+        "Slot": {
+          "HAlign": "Center",
+          "VAlign": "Center"
+        }
+      }
+    ]
+  },
+  "ImageAssets": []
+})");
+
+	TSharedRef<SWindow> Win = SNew(SWindow)
+		.Title(LOCTEXT("PreviewDirect", "ImageToUMG Preview"))
+		.ClientSize(FVector2D(ImageToUMGConstants::PreviewWindowWidth, ImageToUMGConstants::PreviewWindowHeight))
+		.SupportsMinimize(true).SupportsMaximize(true);
+
+	Win->SetContent(SNew(SImageToUMGPreviewWindow)
+		.OriginalJson(DefaultJson).SourceTexture(Tex)
+		.OutputPath(OutPath / FString::Printf(TEXT("WBP_%s"), *Name))
+		.SourceImageData(ImageData)
+		.SourceImageSize(ImageSize)
+		.AIImageSize(ImageSize)  // 初始时 AI 尺寸等于源图尺寸
+		.OnConfirmed(FOnPreviewConfirmed::CreateRaw(this, &FImageToUMGEditorModule::OnPreviewConfirmed))
+		.OnRequestAIAnalysis(FOnPreviewRequestAI::CreateRaw(this, &FImageToUMGEditorModule::OnRequestAIAnalysis)));
+
+	FSlateApplication::Get().AddWindow(Win);
+}
+
+void FImageToUMGEditorModule::OnRequestAIAnalysis(const TArray<uint8>& ImageData, FIntPoint ImageSize, TFunction<void(const FString&)> OnSuccess, TFunction<void(const FString&)> OnError)
+{
+	// 并发请求保护
+	if (bAnalysisInProgress.Exchange(true))
+	{
+		OnError(TEXT("Analysis already in progress, please wait..."));
+		return;
+	}
+
+	const UImageToUMGSettings* S = UImageToUMGSettings::Get();
+	if (S->APIKey.IsEmpty())
+	{
+		bAnalysisInProgress = false;
+		OnError(TEXT("Please configure API Key in Editor Preferences -> Plugins -> Image To UMG"));
+		return;
+	}
+
+	// 准备 AI 用图像数据（自动缩放大图）
+	TArray<uint8> ImageDataForAI;
+	FIntPoint AIImageSize;
+	FImageAssetProcessor::PrepareImageForAI(ImageData, ImageSize, ImageToUMGConstants::MaxAIDimension, ImageDataForAI, AIImageSize);
+
+	// 检查图片大小限制（2MB = 2 * 1024 * 1024 bytes）
+	constexpr int32 MaxImageSizeBytes = 2 * 1024 * 1024;
+	if (ImageDataForAI.Num() > MaxImageSizeBytes)
+	{
+		bAnalysisInProgress = false;
+		const float SizeMB = ImageDataForAI.Num() / (1024.0f * 1024.0f);
+		OnError(FString::Printf(TEXT("Image too large: %.2f MB (max 2 MB).\nPlease use a smaller image or reduce resolution."), SizeMB));
+		return;
+	}
+
+	TSharedRef<FHttpAIClient> Client = MakeShared<FHttpAIClient>();
+
+	Client->AnalyzeImage(ImageDataForAI, TEXT("png"), AIImageSize.X, AIImageSize.Y,
+		FOnAIResponseReceived::CreateLambda([OnSuccess, Client](const FString& Json)
+		{
+			bAnalysisInProgress = false;
+			AsyncTask(ENamedThreads::GameThread, [Json, OnSuccess]() {
+				OnSuccess(Json);
+			});
+		}),
+		FOnAIRequestFailed::CreateLambda([OnError, Client](const FString& Err)
+		{
+			bAnalysisInProgress = false;
+			AsyncTask(ENamedThreads::GameThread, [Err, OnError]() {
+				OnError(Err);
+			});
+		})
+	);
+}
+
+void FImageToUMGEditorModule::OnPreviewConfirmed(const FString& Json, const FString& OutputPath, const TArray<uint8>& SourceImageData, FIntPoint SourceImageSize, FVector2D CoordScale)
 {
 	FUMGWidgetData Data;
 	FString Error;

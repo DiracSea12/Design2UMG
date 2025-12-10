@@ -82,10 +82,6 @@ public:
 	UPROPERTY()
 	TArray<FString> CachedModels;
 
-	/** 缓存的图像生成模型列表 */
-	UPROPERTY()
-	TArray<FString> CachedImageModels;
-
 	// ========== 提示词配置 ==========
 
 	/** 系统提示词（可使用 {WIDTH} 和 {HEIGHT} 占位符） */

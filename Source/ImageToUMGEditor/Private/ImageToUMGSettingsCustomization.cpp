@@ -129,19 +129,6 @@ void FImageToUMGSettingsCustomization::CustomizeDetails(IDetailLayoutBuilder& De
 			})
 		];
 
-	// ========== Image Generation Category ==========
-	IDetailCategoryBuilder& ImageCategory = DetailBuilder.EditCategory("Image Generation");
-
-	// 添加图像生成说明
-	ImageCategory.AddCustomRow(LOCTEXT("ImageGenNote", "Image Generation Note"))
-		.WholeRowContent()
-		[
-			SNew(STextBlock)
-			.Text(LOCTEXT("ImageGenNoteText", "If image generation is enabled but fails (unsupported model, quota exceeded, etc.), the plugin will automatically fall back to cropping from the source screenshot."))
-			.Font(IDetailLayoutBuilder::GetDetailFontItalic())
-			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-			.AutoWrapText(true)
-		];
 }
 
 #undef LOCTEXT_NAMESPACE

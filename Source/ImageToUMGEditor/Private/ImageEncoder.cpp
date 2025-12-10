@@ -138,7 +138,21 @@ bool FImageEncoder::GetImageDataFromTexture(UTexture2D* Texture, TArray<uint8>& 
 		FString SourcePath = Texture->AssetImportData->GetFirstFilename();
 		if (!SourcePath.IsEmpty() && FPaths::FileExists(SourcePath))
 		{
-			return GetImageDataFromFile(SourcePath, OutImageData, OutFormat);
+			if (GetImageDataFromFile(SourcePath, OutImageData, OutFormat))
+			{
+				// 从文件数据中解析实际尺寸（关键修复！）
+				IImageWrapperModule& Mod = FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
+				EImageFormat Fmt = Mod.DetectImageFormat(OutImageData.GetData(), OutImageData.Num());
+				TSharedPtr<IImageWrapper> Wrap = Mod.CreateImageWrapper(Fmt);
+				if (Wrap.IsValid() && Wrap->SetCompressed(OutImageData.GetData(), OutImageData.Num()))
+				{
+					OutWidth = Wrap->GetWidth();
+					OutHeight = Wrap->GetHeight();
+					UE_LOG(LogImageToUMG, Log, TEXT("ImageEncoder: 从原始文件读取尺寸: %dx%d (纹理报告: %dx%d)"),
+						OutWidth, OutHeight, Texture->GetSizeX(), Texture->GetSizeY());
+				}
+				return true;
+			}
 		}
 	}
 

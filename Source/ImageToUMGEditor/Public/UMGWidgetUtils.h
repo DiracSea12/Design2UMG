@@ -19,14 +19,20 @@ class FUMGWidgetUtils
 public:
 	// ========== Widget 创建 ==========
 
-	/** 递归创建 Widget 树（统一入口，供 Generator 和 Preview 使用） */
-	static UWidget* CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget = nullptr);
+	/** 递归创建 Widget 树（统一入口，TextureMap 为空时不绑定纹理） */
+	static UWidget* CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget = nullptr, const TMap<FString, UTexture2D*>* TextureMap = nullptr);
 
 	/** 绑定图像资产到 Widget 节点（将处理后的纹理路径写入 Properties） */
 	static void BindImageAssets(FUMGWidgetNode& RootNode, const TArray<FProcessedImageAsset>& Assets);
 
+	/** 构建 ImageRef -> Texture 的映射表（用于预览） */
+	static TMap<FString, UTexture2D*> BuildTextureMap(const TArray<FProcessedImageAsset>& Assets);
+
 	/** 从Widget节点的Slot信息生成ImageAssets（AI未返回时的兜底），同时给Widget添加ImageRef */
 	static void GenerateImageAssetsFromWidgets(FUMGWidgetNode& Node, TArray<FUMGImageAsset>& OutAssets);
+
+	/** 从Widget树计算所需的设计尺寸（遍历所有子节点，找出最大边界） */
+	static FVector2D CalculateDesignSize(const FUMGWidgetNode& RootNode, FVector2D DefaultSize = FVector2D(1920, 1080));
 
 	// ========== Widget 类型解析 ==========
 

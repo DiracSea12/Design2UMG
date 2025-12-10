@@ -39,6 +39,9 @@ namespace ImageToUMGConstants
 	/** 预览窗口默认高度 */
 	constexpr int32 PreviewWindowHeight = 900;
 
+	/** JSON 编辑防抖延迟（秒） */
+	constexpr float JsonEditDebounceSeconds = 0.5f;
+
 	// ============================================================================
 	// 图像处理
 	// ============================================================================
@@ -51,4 +54,10 @@ namespace ImageToUMGConstants
 
 	/** Widget Blueprint 名称后缀最大尝试次数 */
 	constexpr int32 MaxWidgetNameSuffix = 1000;
+
+	/** 并行处理阈值（图像高度超过此值时使用并行处理） */
+	constexpr int32 ParallelProcessingThreshold = 256;
+
+	/** HTTP 请求体大小警告阈值（MB） */
+	constexpr int32 MaxRequestBodySizeMB = 20;
 }

@@ -3,13 +3,16 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "ImageToUMGSettings.h"
+
+// 前向声明
+class IAIProviderStrategy;
 
 DECLARE_DELEGATE_OneParam(FOnAIResponseReceived, const FString& /*JsonResponse*/);
 DECLARE_DELEGATE_OneParam(FOnAIRequestFailed, const FString& /*ErrorMessage*/);
 
 /**
  * HTTP AI 客户端 - 调用多模态 LLM API 分析图片
+ * 使用策略模式支持多种 AI 提供商
  * 注意：调用方需持有 TSharedPtr/TSharedRef 直到回调完成
  */
 class FHttpAIClient : public TSharedFromThis<FHttpAIClient>
@@ -39,22 +42,20 @@ private:
 		TSharedPtr<class IHttpRequest, ESPMode::ThreadSafe> HttpRequest,
 		TSharedPtr<class IHttpResponse, ESPMode::ThreadSafe> HttpResponse,
 		bool bSucceeded,
-		EAIProvider Provider,
+		TSharedPtr<IAIProviderStrategy> Strategy,
 		const FString& DebugInfo,
 		FOnAIResponseReceived OnSuccess,
 		FOnAIRequestFailed OnError);
 
-	/** 构建请求体 */
-	FString BuildRequestBody(EAIProvider Provider, const FString& Base64Image, const FString& MimeType, const FString& Prompt, int32 MaxTokens, const FString& ModelName);
-
 	/** 获取 System Prompt */
 	FString GetSystemPrompt(int32 ImageWidth, int32 ImageHeight) const;
 
-	/** 从嵌套 JSON 提取字符串值 */
-	static bool GetNestedString(const TSharedPtr<class FJsonObject>& Obj, const TArray<FString>& Path, FString& OutValue);
-
-	/** 从响应中提取 JSON */
-	bool ExtractJsonFromResponse(const FString& Response, EAIProvider Provider, FString& OutJson, FString& OutError);
+	/** 从响应中提取 JSON（使用策略） */
+	bool ExtractJsonFromResponse(
+		const FString& Response,
+		TSharedPtr<IAIProviderStrategy> Strategy,
+		FString& OutJson,
+		FString& OutError);
 
 	/** JSON 序列化辅助 */
 	static FString SerializeJson(const TSharedPtr<class FJsonObject>& JsonObject);

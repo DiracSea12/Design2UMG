@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "HttpAIClient.h"
+#include "AIProviderStrategy.h"
 #include "ImageToUMGSettings.h"
 #include "ImageToUMGLog.h"
 #include "ImageToUMGConstants.h"
@@ -15,75 +16,11 @@
 #include "Serialization/JsonSerializer.h"
 
 // ============================================================================
-// 私有辅助函数（匿名namespace）
+// 私有辅助函数
 // ============================================================================
 
 namespace
 {
-	// --- 请求配置 ---
-
-	struct FRequestConfig
-	{
-		FString URL;
-		TMap<FString, FString> Headers;
-		bool bValid = false;
-	};
-
-	FRequestConfig BuildRequestConfig(EAIProvider Provider, const UImageToUMGSettings* Settings)
-	{
-		FRequestConfig Config;
-		FString Endpoint = Settings->CustomEndpoint.IsEmpty()
-			? UImageToUMGSettings::GetProviderEndpoint(Provider)
-			: Settings->CustomEndpoint;
-
-		switch (Provider)
-		{
-		case EAIProvider::OpenAI:
-		case EAIProvider::DeepSeek:
-		case EAIProvider::Groq:
-		case EAIProvider::Together:
-		case EAIProvider::OpenRouter:
-		case EAIProvider::Mistral:
-		case EAIProvider::Volcengine:
-			Config.URL = Endpoint + TEXT("/chat/completions");
-			Config.Headers.Add(TEXT("Authorization"), FString::Printf(TEXT("Bearer %s"), *Settings->APIKey));
-			Config.bValid = true;
-			break;
-
-		case EAIProvider::Anthropic:
-			Config.URL = Endpoint + TEXT("/messages");
-			Config.Headers.Add(TEXT("x-api-key"), Settings->APIKey);
-			Config.Headers.Add(TEXT("anthropic-version"), TEXT("2023-06-01"));
-			Config.bValid = true;
-			break;
-
-		case EAIProvider::Google:
-			if (!Settings->ModelName.IsEmpty())
-			{
-				Config.URL = FString::Printf(TEXT("%s/models/%s:generateContent?key=%s"),
-					*Endpoint, *Settings->ModelName, *Settings->APIKey);
-				Config.bValid = true;
-			}
-			break;
-
-		case EAIProvider::Custom:
-			Config.URL = Settings->CustomEndpoint;
-			Config.Headers.Add(TEXT("Authorization"), FString::Printf(TEXT("Bearer %s"), *Settings->APIKey));
-			Config.bValid = true;
-			break;
-
-		default:
-			break;
-		}
-
-		if (Config.bValid)
-		{
-			Config.Headers.Add(TEXT("Content-Type"), TEXT("application/json"));
-		}
-
-		return Config;
-	}
-
 	FString GetHttpStatusDescription(EHttpRequestStatus::Type Status)
 	{
 		switch (Status)
@@ -95,97 +32,6 @@ namespace
 		default: return FString::Printf(TEXT("Unknown status: %d"), static_cast<int32>(Status));
 		}
 	}
-
-	// --- 请求体构建 ---
-
-	TSharedPtr<FJsonObject> BuildOpenAICompatibleBody(const FString& Base64Image, const FString& MimeType, const FString& Prompt, int32 MaxTokens, const FString& ModelName, bool bIsVolcengine = false)
-	{
-		TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
-		Root->SetStringField(TEXT("model"), ModelName);
-
-		// 火山引擎使用 max_completion_tokens，其他使用 max_tokens
-		if (bIsVolcengine)
-		{
-			Root->SetNumberField(TEXT("max_completion_tokens"), MaxTokens);
-		}
-		else
-		{
-			Root->SetNumberField(TEXT("max_tokens"), MaxTokens);
-		}
-
-		TSharedPtr<FJsonObject> ImageUrl = MakeShared<FJsonObject>();
-		ImageUrl->SetStringField(TEXT("url"), FString::Printf(TEXT("data:%s;base64,%s"), *MimeType, *Base64Image));
-
-		TSharedPtr<FJsonObject> ImagePart = MakeShared<FJsonObject>();
-		ImagePart->SetStringField(TEXT("type"), TEXT("image_url"));
-		ImagePart->SetObjectField(TEXT("image_url"), ImageUrl);
-
-		TSharedPtr<FJsonObject> TextPart = MakeShared<FJsonObject>();
-		TextPart->SetStringField(TEXT("type"), TEXT("text"));
-		TextPart->SetStringField(TEXT("text"), Prompt);
-
-		TSharedPtr<FJsonObject> UserMsg = MakeShared<FJsonObject>();
-		UserMsg->SetStringField(TEXT("role"), TEXT("user"));
-		// 火山引擎要求 image_url 在 text 之前
-		UserMsg->SetArrayField(TEXT("content"), { MakeShared<FJsonValueObject>(ImagePart), MakeShared<FJsonValueObject>(TextPart) });
-
-		Root->SetArrayField(TEXT("messages"), { MakeShared<FJsonValueObject>(UserMsg) });
-
-		return Root;
-	}
-
-	TSharedPtr<FJsonObject> BuildAnthropicBody(const FString& Base64Image, const FString& MimeType, const FString& Prompt, int32 MaxTokens, const FString& ModelName)
-	{
-		TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
-		Root->SetStringField(TEXT("model"), ModelName);
-		Root->SetNumberField(TEXT("max_tokens"), MaxTokens);
-
-		TSharedPtr<FJsonObject> Source = MakeShared<FJsonObject>();
-		Source->SetStringField(TEXT("type"), TEXT("base64"));
-		Source->SetStringField(TEXT("media_type"), MimeType);
-		Source->SetStringField(TEXT("data"), Base64Image);
-
-		TSharedPtr<FJsonObject> ImagePart = MakeShared<FJsonObject>();
-		ImagePart->SetStringField(TEXT("type"), TEXT("image"));
-		ImagePart->SetObjectField(TEXT("source"), Source);
-
-		TSharedPtr<FJsonObject> TextPart = MakeShared<FJsonObject>();
-		TextPart->SetStringField(TEXT("type"), TEXT("text"));
-		TextPart->SetStringField(TEXT("text"), Prompt);
-
-		TSharedPtr<FJsonObject> UserMsg = MakeShared<FJsonObject>();
-		UserMsg->SetStringField(TEXT("role"), TEXT("user"));
-		UserMsg->SetArrayField(TEXT("content"), { MakeShared<FJsonValueObject>(ImagePart), MakeShared<FJsonValueObject>(TextPart) });
-
-		Root->SetArrayField(TEXT("messages"), { MakeShared<FJsonValueObject>(UserMsg) });
-		return Root;
-	}
-
-	TSharedPtr<FJsonObject> BuildGoogleBody(const FString& Base64Image, const FString& MimeType, const FString& Prompt, int32 MaxTokens)
-	{
-		TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
-
-		TSharedPtr<FJsonObject> TextPart = MakeShared<FJsonObject>();
-		TextPart->SetStringField(TEXT("text"), Prompt);
-
-		TSharedPtr<FJsonObject> InlineData = MakeShared<FJsonObject>();
-		InlineData->SetStringField(TEXT("mimeType"), MimeType);
-		InlineData->SetStringField(TEXT("data"), Base64Image);
-
-		TSharedPtr<FJsonObject> ImagePart = MakeShared<FJsonObject>();
-		ImagePart->SetObjectField(TEXT("inlineData"), InlineData);
-
-		TSharedPtr<FJsonObject> ContentObj = MakeShared<FJsonObject>();
-		ContentObj->SetArrayField(TEXT("parts"), { MakeShared<FJsonValueObject>(TextPart), MakeShared<FJsonValueObject>(ImagePart) });
-		Root->SetArrayField(TEXT("contents"), { MakeShared<FJsonValueObject>(ContentObj) });
-
-		TSharedPtr<FJsonObject> GenConfig = MakeShared<FJsonObject>();
-		GenConfig->SetNumberField(TEXT("maxOutputTokens"), MaxTokens);
-		Root->SetObjectField(TEXT("generationConfig"), GenConfig);
-		return Root;
-	}
-
-	// --- JSON 响应处理 ---
 
 	FString SanitizeJsonString(const FString& Input)
 	{
@@ -299,50 +145,11 @@ FString FHttpAIClient::SerializeJson(const TSharedPtr<FJsonObject>& JsonObject)
 	return Output;
 }
 
-bool FHttpAIClient::GetNestedString(const TSharedPtr<FJsonObject>& Obj, const TArray<FString>& Path, FString& OutValue)
-{
-	if (!Obj.IsValid() || Path.Num() == 0) return false;
-
-	TSharedPtr<FJsonObject> Current = Obj;
-
-	for (int32 i = 0; i < Path.Num(); ++i)
-	{
-		const FString& Key = Path[i];
-		const bool bIsLast = (i == Path.Num() - 1);
-
-		int32 BracketIdx = Key.Find(TEXT("["));
-		FString FieldName = (BracketIdx != INDEX_NONE) ? Key.Left(BracketIdx) : Key;
-		int32 ArrayIndex = (BracketIdx != INDEX_NONE) ? FCString::Atoi(*Key.Mid(BracketIdx + 1)) : -1;
-
-		if (ArrayIndex >= 0)
-		{
-			const TArray<TSharedPtr<FJsonValue>>* ArrayField;
-			if (!Current->TryGetArrayField(FieldName, ArrayField) || ArrayIndex >= ArrayField->Num())
-				return false;
-
-			if (bIsLast) return (*ArrayField)[ArrayIndex]->TryGetString(OutValue);
-
-			const TSharedPtr<FJsonObject>* NextObj;
-			if (!(*ArrayField)[ArrayIndex]->TryGetObject(NextObj)) return false;
-			Current = *NextObj;
-		}
-		else
-		{
-			if (bIsLast) return Current->TryGetStringField(FieldName, OutValue);
-
-			const TSharedPtr<FJsonObject>* NextObj;
-			if (!Current->TryGetObjectField(FieldName, NextObj)) return false;
-			Current = *NextObj;
-		}
-	}
-	return false;
-}
-
 void FHttpAIClient::HandleResponse(
 	FHttpRequestPtr HttpRequest,
 	FHttpResponsePtr HttpResponse,
 	bool bSucceeded,
-	EAIProvider Provider,
+	TSharedPtr<IAIProviderStrategy> Strategy,
 	const FString& DebugInfo,
 	FOnAIResponseReceived OnSuccess,
 	FOnAIRequestFailed OnError)
@@ -384,7 +191,7 @@ void FHttpAIClient::HandleResponse(
 	}
 
 	FString ExtractedJson, ExtractError;
-	if (ExtractJsonFromResponse(ResponseBody, Provider, ExtractedJson, ExtractError))
+	if (ExtractJsonFromResponse(ResponseBody, Strategy, ExtractedJson, ExtractError))
 	{
 		UE_LOG(LogImageToUMG, Log, TEXT("AI request successful"));
 		OnSuccess.ExecuteIfBound(ExtractedJson);
@@ -396,10 +203,6 @@ void FHttpAIClient::HandleResponse(
 			*ExtractError, *ResponseBody.Left(ImageToUMGConstants::ErrorResponsePreviewLen)));
 	}
 }
-
-// ============================================================================
-// 主要实现
-// ============================================================================
 
 void FHttpAIClient::AnalyzeImage(
 	const TArray<uint8>& ImageData,
@@ -429,49 +232,75 @@ void FHttpAIClient::AnalyzeImage(
 		}
 	}
 
+	// 获取策略
+	TSharedPtr<IAIProviderStrategy> Strategy = FAIProviderStrategyFactory::GetStrategy(Provider);
+	if (!Strategy.IsValid())
+	{
+		OnError.ExecuteIfBound(FString::Printf(
+			TEXT("Unsupported AI provider: %s"),
+			*UImageToUMGSettings::GetProviderName(Provider)));
+		return;
+	}
+
 	// 校验 ModelName（除 Custom 外都需要）
 	if (Settings->ModelName.IsEmpty() && Provider != EAIProvider::Custom)
 	{
 		OnError.ExecuteIfBound(FString::Printf(
 			TEXT("No model specified for %s.\nPlease select a model in Project Settings > Plugins > ImageToUMG."),
-			*UImageToUMGSettings::GetProviderName(Provider)));
+			*Strategy->GetDisplayName()));
 		return;
 	}
 
-	// 构建请求配置
-	FRequestConfig Config = BuildRequestConfig(Provider, Settings);
-	if (!Config.bValid)
+	// 构建 URL
+	FString Endpoint = Settings->CustomEndpoint.IsEmpty()
+		? UImageToUMGSettings::GetProviderEndpoint(Provider)
+		: Settings->CustomEndpoint;
+
+	FString URL;
+	if (Provider == EAIProvider::Google)
 	{
-		OnError.ExecuteIfBound(FString::Printf(
-			TEXT("Failed to configure request for %s.\nThis provider may not support vision API or requires additional configuration."),
-			*UImageToUMGSettings::GetProviderName(Provider)));
-		return;
+		// Google 需要特殊的 URL 构建
+		URL = StaticCastSharedPtr<FGoogleStrategy>(Strategy)->BuildFullURL(Endpoint, Settings->ModelName, Settings->APIKey);
 	}
+	else
+	{
+		URL = Endpoint + Strategy->GetEndpointSuffix();
+	}
+
+	// 获取请求头
+	TMap<FString, FString> Headers = Strategy->GetHeaders(Settings->APIKey);
 
 	// 准备请求数据
 	const FString Base64Image = FBase64::Encode(ImageData);
 	const FString MimeType = ImageFormat.ToLower() == TEXT("png") ? TEXT("image/png") : TEXT("image/jpeg");
 	const FString Prompt = GetSystemPrompt(ImageWidth, ImageHeight);
-	FString RequestBody = BuildRequestBody(Provider, Base64Image, MimeType, Prompt, Settings->MaxTokens, Settings->ModelName);
 
-	// 创建 HTTP 请求
-	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
-	Request->SetURL(Config.URL);
-	Request->SetVerb(TEXT("POST"));
-	Request->SetTimeout(FMath::Max(ImageToUMGConstants::DefaultTimeoutSeconds, Settings->TimeoutSeconds));
-	Request->SetHeader(TEXT("Connection"), TEXT("keep-alive"));
+	// 构建请求体
+	TSharedPtr<FJsonObject> RequestBodyJson = Strategy->BuildRequestBody(
+		Base64Image, MimeType, Prompt, Settings->MaxTokens, Settings->ModelName);
+	FString RequestBody = SerializeJson(RequestBodyJson);
 
-	// 调试选项：禁用SSL验证（用于排查网络问题）
-	if (Settings->bDisableSSLVerification)
+	// 调试选项：禁用SSL验证（必须在创建请求之前设置）
+	const bool bDisableSSL = Settings->bDisableSSLVerification;
+	if (bDisableSSL)
 	{
-		UE_LOG(LogImageToUMG, Warning, TEXT("SSL verification disabled - this is insecure, use only for debugging!"));
+		UE_LOG(LogImageToUMG, Warning, TEXT("SSL verification disabled for this request"));
 		FPlatformHttp::VerifyPeerSslCertificate(false);
 	}
 
-	// 禁用代理（UE5可能从系统读取了错误的代理配置）
-	FHttpModule::Get().SetProxyAddress(TEXT(""));
+	// 创建 HTTP 请求
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
+	Request->SetURL(URL);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetTimeout(FMath::Max(ImageToUMGConstants::DefaultTimeoutSeconds, Settings->TimeoutSeconds));
 
-	for (const auto& Header : Config.Headers)
+	// 添加必要的 HTTP 头
+	Request->SetHeader(TEXT("Connection"), TEXT("keep-alive"));
+	Request->SetHeader(TEXT("User-Agent"), TEXT("UnrealEngine/5.0"));
+	Request->SetHeader(TEXT("Accept"), TEXT("application/json"));
+	Request->SetHeader(TEXT("Accept-Encoding"), TEXT("identity")); // 禁用压缩，避免兼容性问题
+
+	for (const auto& Header : Headers)
 	{
 		Request->SetHeader(Header.Key, Header.Value);
 	}
@@ -480,9 +309,9 @@ void FHttpAIClient::AnalyzeImage(
 	TArray<uint8> RequestBodyBytes;
 	RequestBodyBytes.Append((const uint8*)Converter.Get(), Converter.Length());
 
-	// 检查请求体大小（某些服务器限制请求大小）
+	// 检查请求体大小
 	const int32 BodySizeMB = RequestBodyBytes.Num() / (1024 * 1024);
-	if (BodySizeMB > 20)
+	if (BodySizeMB > ImageToUMGConstants::MaxRequestBodySizeMB)
 	{
 		UE_LOG(LogImageToUMG, Warning, TEXT("Request body is very large: %d MB. This may cause network issues."), BodySizeMB);
 	}
@@ -491,19 +320,27 @@ void FHttpAIClient::AnalyzeImage(
 
 	// 日志
 	UE_LOG(LogImageToUMG, Log, TEXT("Sending AI request: %s, Model: %s, Image: %dx%d, Body: %.2f MB"),
-		*UImageToUMGSettings::GetProviderName(Provider), *Settings->ModelName, ImageWidth, ImageHeight,
+		*Strategy->GetDisplayName(), *Settings->ModelName, ImageWidth, ImageHeight,
 		RequestBodyBytes.Num() / (1024.0f * 1024.0f));
-	UE_LOG(LogImageToUMG, Verbose, TEXT("URL: %s"), *Config.URL);
+	UE_LOG(LogImageToUMG, Log, TEXT("URL: %s"), *URL);
+	UE_LOG(LogImageToUMG, Log, TEXT("SSL Verification: %s, Timeout: %.0f seconds"),
+		bDisableSSL ? TEXT("DISABLED") : TEXT("enabled"), Settings->TimeoutSeconds);
 
 	// 调试信息
 	FString DebugInfo = FString::Printf(TEXT("Provider: %s\nModel: %s\nURL: %s"),
-		*UImageToUMGSettings::GetProviderName(Provider), *Settings->ModelName, *Config.URL);
+		*Strategy->GetDisplayName(), *Settings->ModelName, *URL);
 
 	TWeakPtr<FHttpAIClient> WeakSelf = AsShared();
 
 	Request->OnProcessRequestComplete().BindLambda(
-		[WeakSelf, Provider, OnSuccess, OnError, DebugInfo](FHttpRequestPtr HttpRequest, FHttpResponsePtr HttpResponse, bool bSucceeded)
+		[WeakSelf, Strategy, OnSuccess, OnError, DebugInfo, bDisableSSL](FHttpRequestPtr HttpRequest, FHttpResponsePtr HttpResponse, bool bSucceeded)
 		{
+			// 恢复 SSL 设置
+			if (bDisableSSL)
+			{
+				FPlatformHttp::VerifyPeerSslCertificate(true);
+			}
+
 			TSharedPtr<FHttpAIClient> StrongThis = WeakSelf.Pin();
 			if (!StrongThis.IsValid())
 			{
@@ -520,33 +357,10 @@ void FHttpAIClient::AnalyzeImage(
 					static_cast<int32>(Status), static_cast<int32>(FailureReason));
 			}
 
-			StrongThis->HandleResponse(HttpRequest, HttpResponse, bSucceeded, Provider, DebugInfo, OnSuccess, OnError);
+			StrongThis->HandleResponse(HttpRequest, HttpResponse, bSucceeded, Strategy, DebugInfo, OnSuccess, OnError);
 		});
 
 	Request->ProcessRequest();
-}
-
-FString FHttpAIClient::BuildRequestBody(EAIProvider Provider, const FString& Base64Image, const FString& MimeType, const FString& Prompt, int32 MaxTokens, const FString& ModelName)
-{
-	TSharedPtr<FJsonObject> Body;
-
-	switch (Provider)
-	{
-	case EAIProvider::Anthropic:
-		Body = BuildAnthropicBody(Base64Image, MimeType, Prompt, MaxTokens, ModelName);
-		break;
-	case EAIProvider::Google:
-		Body = BuildGoogleBody(Base64Image, MimeType, Prompt, MaxTokens);
-		break;
-	case EAIProvider::Volcengine:
-		Body = BuildOpenAICompatibleBody(Base64Image, MimeType, Prompt, MaxTokens, ModelName, true);
-		break;
-	default:
-		Body = BuildOpenAICompatibleBody(Base64Image, MimeType, Prompt, MaxTokens, ModelName, false);
-		break;
-	}
-
-	return SerializeJson(Body);
 }
 
 FString FHttpAIClient::GetSystemPrompt(int32 ImageWidth, int32 ImageHeight) const
@@ -564,7 +378,11 @@ FString FHttpAIClient::GetSystemPrompt(int32 ImageWidth, int32 ImageHeight) cons
 	return Prompt;
 }
 
-bool FHttpAIClient::ExtractJsonFromResponse(const FString& Response, EAIProvider Provider, FString& OutJson, FString& OutError)
+bool FHttpAIClient::ExtractJsonFromResponse(
+	const FString& Response,
+	TSharedPtr<IAIProviderStrategy> Strategy,
+	FString& OutJson,
+	FString& OutError)
 {
 	TSharedPtr<FJsonObject> ResponseObject;
 	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Response);
@@ -577,20 +395,8 @@ bool FHttpAIClient::ExtractJsonFromResponse(const FString& Response, EAIProvider
 
 	FString ContentText;
 
-	switch (Provider)
-	{
-	case EAIProvider::Anthropic:
-		GetNestedString(ResponseObject, { TEXT("content[0]"), TEXT("text") }, ContentText);
-		break;
-	case EAIProvider::Google:
-		GetNestedString(ResponseObject, { TEXT("candidates[0]"), TEXT("content"), TEXT("parts[0]"), TEXT("text") }, ContentText);
-		break;
-	default:
-		GetNestedString(ResponseObject, { TEXT("choices[0]"), TEXT("message"), TEXT("content") }, ContentText);
-		break;
-	}
-
-	if (ContentText.IsEmpty())
+	// 使用策略提取内容
+	if (!Strategy->ExtractContent(ResponseObject, ContentText) || ContentText.IsEmpty())
 	{
 		OutError = TEXT("No content in API response");
 		return false;
@@ -616,7 +422,6 @@ bool FHttpAIClient::ExtractJsonFromResponse(const FString& Response, EAIProvider
 	// 步骤4：Fallback - 括号匹配提取
 	if (ExtractJsonByBraceMatching(CleanedJson, OutJson))
 	{
-		// 验证提取的 JSON 是否有效
 		TSharedPtr<FJsonObject> ValidateParse;
 		TSharedRef<TJsonReader<>> ValidateReader = TJsonReaderFactory<>::Create(OutJson);
 		if (FJsonSerializer::Deserialize(ValidateReader, ValidateParse) && ValidateParse.IsValid())
