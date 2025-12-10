@@ -148,7 +148,7 @@ namespace
 // Widget 创建（统一入口）
 // ============================================================================
 
-UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget)
+UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget, const TMap<FString, UTexture2D*>* TextureMap)
 {
 	UClass* WidgetClass = ResolveWidgetClass(Node.Type);
 	if (!WidgetClass)
@@ -176,19 +176,37 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 
 	ApplyWidgetProperties(NewWidget, Node.Properties);
 
+	// 如果是 Image 控件且提供了 TextureMap，尝试绑定纹理
+	if (TextureMap)
+	{
+		if (UImage* ImageWidget = Cast<UImage>(NewWidget))
+		{
+			if (const FString* ImageRef = Node.Properties.Find(TEXT("ImageRef")))
+			{
+				if (UTexture2D* const* FoundTexture = TextureMap->Find(*ImageRef))
+				{
+					if (*FoundTexture)
+					{
+						ImageWidget->SetBrushFromTexture(*FoundTexture);
+					}
+				}
+			}
+		}
+	}
+
 	// 递归处理子控件
 	if (UPanelWidget* AsPanel = Cast<UPanelWidget>(NewWidget))
 	{
 		for (const FUMGWidgetNode& Child : Node.Children)
 		{
-			CreateWidgetRecursive(WidgetTree, Child, AsPanel);
+			CreateWidgetRecursive(WidgetTree, Child, AsPanel, TextureMap);
 		}
 	}
 	else if (UContentWidget* Content = Cast<UContentWidget>(NewWidget))
 	{
 		if (Node.Children.Num() > 0)
 		{
-			if (UWidget* ChildWidget = CreateWidgetRecursive(WidgetTree, Node.Children[0], nullptr))
+			if (UWidget* ChildWidget = CreateWidgetRecursive(WidgetTree, Node.Children[0], nullptr, TextureMap))
 			{
 				Content->SetContent(ChildWidget);
 			}
@@ -200,6 +218,19 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 	}
 
 	return NewWidget;
+}
+
+TMap<FString, UTexture2D*> FUMGWidgetUtils::BuildTextureMap(const TArray<FProcessedImageAsset>& Assets)
+{
+	TMap<FString, UTexture2D*> TextureMap;
+	for (const FProcessedImageAsset& Asset : Assets)
+	{
+		if (Asset.Texture)
+		{
+			TextureMap.Add(Asset.Id, Asset.Texture);
+		}
+	}
+	return TextureMap;
 }
 
 // ============================================================================
@@ -345,34 +376,30 @@ namespace
 		CS->SetOffsets(FMargin(S.Offsets.Left, S.Offsets.Top, S.Offsets.Right, S.Offsets.Bottom));
 	}
 
-	void ApplyVerticalBoxSlot(UPanelSlot* Slot, const FUMGSlotData& S)
+	// VBox/HBox Slot 共用逻辑
+	template<typename TSlot>
+	void ApplyBoxSlotCommon(TSlot* BoxSlot, const FUMGSlotData& S)
 	{
-		UVerticalBoxSlot* VS = CastChecked<UVerticalBoxSlot>(Slot);
-		VS->SetPadding(S.Padding);
-		VS->SetHorizontalAlignment(FUMGWidgetUtils::ParseHAlign(S.HorizontalAlignment));
-		VS->SetVerticalAlignment(FUMGWidgetUtils::ParseVAlign(S.VerticalAlignment));
+		BoxSlot->SetPadding(S.Padding);
+		BoxSlot->SetHorizontalAlignment(FUMGWidgetUtils::ParseHAlign(S.HorizontalAlignment));
+		BoxSlot->SetVerticalAlignment(FUMGWidgetUtils::ParseVAlign(S.VerticalAlignment));
 		if (S.SizeRule == TEXT("Fill"))
 		{
 			FSlateChildSize Size;
 			Size.SizeRule = ESlateSizeRule::Fill;
 			Size.Value = S.FillWeight;
-			VS->SetSize(Size);
+			BoxSlot->SetSize(Size);
 		}
+	}
+
+	void ApplyVerticalBoxSlot(UPanelSlot* Slot, const FUMGSlotData& S)
+	{
+		ApplyBoxSlotCommon(CastChecked<UVerticalBoxSlot>(Slot), S);
 	}
 
 	void ApplyHorizontalBoxSlot(UPanelSlot* Slot, const FUMGSlotData& S)
 	{
-		UHorizontalBoxSlot* HS = CastChecked<UHorizontalBoxSlot>(Slot);
-		HS->SetPadding(S.Padding);
-		HS->SetHorizontalAlignment(FUMGWidgetUtils::ParseHAlign(S.HorizontalAlignment));
-		HS->SetVerticalAlignment(FUMGWidgetUtils::ParseVAlign(S.VerticalAlignment));
-		if (S.SizeRule == TEXT("Fill"))
-		{
-			FSlateChildSize Size;
-			Size.SizeRule = ESlateSizeRule::Fill;
-			Size.Value = S.FillWeight;
-			HS->SetSize(Size);
-		}
+		ApplyBoxSlotCommon(CastChecked<UHorizontalBoxSlot>(Slot), S);
 	}
 
 	void ApplyOverlaySlot(UPanelSlot* Slot, const FUMGSlotData& S)
@@ -625,16 +652,6 @@ namespace
 		if (const FString* V = GET_PROP("BlurStrength")) CastChecked<UBackgroundBlur>(W)->SetBlurStrength(FCString::Atof(**V));
 	}
 
-	void ApplyCanvasPanelProps(UWidget* W, const TMap<FString, FString>& P)
-	{
-		// CanvasPanel 本身无特殊属性，子控件通过 Slot 配置
-	}
-
-	void ApplyOverlayProps(UWidget* W, const TMap<FString, FString>& P)
-	{
-		// Overlay 本身无特殊属性，子控件通过 Slot 配置
-	}
-
 	void ApplyGridPanelProps(UWidget* W, const TMap<FString, FString>& P)
 	{
 		UGridPanel* G = CastChecked<UGridPanel>(W);
@@ -781,9 +798,7 @@ namespace
 			{UMultiLineEditableTextBox::StaticClass(), &ApplyMultiLineEditableTextBoxProps},
 			{UComboBoxString::StaticClass(), &ApplyComboBoxStringProps},
 			{USpinBox::StaticClass(), &ApplySpinBoxProps},
-			// 容器类
-			{UCanvasPanel::StaticClass(), &ApplyCanvasPanelProps},
-			{UOverlay::StaticClass(), &ApplyOverlayProps},
+			// 容器类（CanvasPanel/Overlay 无特殊属性，子控件通过 Slot 配置）
 			{UGridPanel::StaticClass(), &ApplyGridPanelProps},
 			{UUniformGridPanel::StaticClass(), &ApplyUniformGridPanelProps},
 			{UWrapBox::StaticClass(), &ApplyWrapBoxProps},
@@ -870,22 +885,41 @@ void FUMGWidgetUtils::GenerateImageAssetsFromWidgets(FUMGWidgetNode& Node, TArra
 		Asset.Id = Node.Name;
 		Asset.Type = TEXT("Icon");
 
-		// 从 Slot.Offsets 获取位置和尺寸
-		Asset.X = FMath::RoundToInt(Node.Slot.Offsets.Left);
-		Asset.Y = FMath::RoundToInt(Node.Slot.Offsets.Top);
-		Asset.Width = FMath::RoundToInt(Node.Slot.Offsets.Right);
-		Asset.Height = FMath::RoundToInt(Node.Slot.Offsets.Bottom);
+		// 从 Properties 获取 Widget 的设计尺寸
+		int32 WidthOverride = 0, HeightOverride = 0;
+		if (const FString* W = Node.Properties.Find(TEXT("WidthOverride")))
+			WidthOverride = FCString::Atoi(**W);
+		if (const FString* H = Node.Properties.Find(TEXT("HeightOverride")))
+			HeightOverride = FCString::Atoi(**H);
 
-		// 如果 Offsets 无效，尝试从 Properties 获取尺寸
-		if (Asset.Width <= 0 || Asset.Height <= 0)
+		// 当 AI 没有返回 ImageAssets 时，我们无法知道图像在源图中的位置
+		// 使用特殊值 -1 表示"使用整个源图"
+		// ProcessImageAssetsForPreview 会检测这个值并使用整个源图
+		Asset.X = -1;
+		Asset.Y = -1;
+		Asset.Width = -1;
+		Asset.Height = -1;
+
+		// SuggestedWidth/Height 用于指定输出纹理的尺寸
+		if (WidthOverride > 0 && HeightOverride > 0)
 		{
-			if (const FString* W = Node.Properties.Find(TEXT("WidthOverride")))
-				Asset.Width = FCString::Atoi(**W);
-			if (const FString* H = Node.Properties.Find(TEXT("HeightOverride")))
-				Asset.Height = FCString::Atoi(**H);
+			Asset.SuggestedWidth = WidthOverride;
+			Asset.SuggestedHeight = HeightOverride;
+		}
+		else
+		{
+			// 从 Offsets 推断尺寸
+			const FUMGSlotData& Slot = Node.Slot;
+			int32 W = FMath::RoundToInt(Slot.Offsets.Right - Slot.Offsets.Left);
+			int32 H = FMath::RoundToInt(Slot.Offsets.Bottom - Slot.Offsets.Top);
+			if (W > 0 && H > 0)
+			{
+				Asset.SuggestedWidth = W;
+				Asset.SuggestedHeight = H;
+			}
 		}
 
-		if (Asset.Width > 0 && Asset.Height > 0)
+		if (Asset.SuggestedWidth > 0 && Asset.SuggestedHeight > 0)
 		{
 			// 给 Widget 添加 ImageRef，以便后续 BindImageAssets 能匹配
 			Node.Properties.Add(TEXT("ImageRef"), Asset.Id);
@@ -898,4 +932,51 @@ void FUMGWidgetUtils::GenerateImageAssetsFromWidgets(FUMGWidgetNode& Node, TArra
 	{
 		GenerateImageAssetsFromWidgets(Child, OutAssets);
 	}
+}
+
+namespace
+{
+	// 递归遍历节点计算最大边界
+	void TraverseNodeForDesignSize(const FUMGWidgetNode& Node, FVector2D& MaxBounds)
+	{
+		const FUMGSlotData& Slot = Node.Slot;
+
+		// 检查是否是点锚点（Min == Max）
+		bool bIsPointAnchor = FMath::IsNearlyEqual(Slot.Anchors.Min.X, Slot.Anchors.Max.X) &&
+		                      FMath::IsNearlyEqual(Slot.Anchors.Min.Y, Slot.Anchors.Max.Y);
+
+		if (bIsPointAnchor)
+		{
+			// 位置（Left/Top 是相对于锚点的偏移）
+			float PosX = Slot.Offsets.Left;
+			float PosY = Slot.Offsets.Top;
+
+			// Widget 尺寸
+			float Width = Slot.Offsets.Right - Slot.Offsets.Left;
+			float Height = Slot.Offsets.Bottom - Slot.Offsets.Top;
+
+			// 如果有 WidthOverride/HeightOverride，使用它们
+			if (const FString* W = Node.Properties.Find(TEXT("WidthOverride")))
+				Width = FCString::Atof(**W);
+			if (const FString* H = Node.Properties.Find(TEXT("HeightOverride")))
+				Height = FCString::Atof(**H);
+
+			// 计算右下角边界 = 位置 + 尺寸
+			MaxBounds.X = FMath::Max(MaxBounds.X, FMath::Abs(PosX) + Width);
+			MaxBounds.Y = FMath::Max(MaxBounds.Y, FMath::Abs(PosY) + Height);
+		}
+
+		// 递归处理子节点
+		for (const FUMGWidgetNode& Child : Node.Children)
+		{
+			TraverseNodeForDesignSize(Child, MaxBounds);
+		}
+	}
+}
+
+FVector2D FUMGWidgetUtils::CalculateDesignSize(const FUMGWidgetNode& RootNode, FVector2D DefaultSize)
+{
+	FVector2D MaxBounds = DefaultSize;
+	TraverseNodeForDesignSize(RootNode, MaxBounds);
+	return MaxBounds;
 }

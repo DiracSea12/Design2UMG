@@ -249,7 +249,6 @@ void UImageToUMGSettings::RefreshAvailableModels()
 		{
 			UE_LOG(LogImageToUMG, Warning, TEXT("Failed to fetch models list"));
 			S->CachedModels = { TEXT("(Enter model name manually)") };
-			S->CachedImageModels = { TEXT("(Enter image model name manually)") };
 			return;
 		}
 
@@ -264,9 +263,8 @@ void UImageToUMGSettings::RefreshAvailableModels()
 		ParseModelsResponse(ActualProvider, Json, Result);
 
 		S->CachedModels = Result.TextModels.Num() > 0 ? Result.TextModels : TArray<FString>{ TEXT("(No models found)") };
-		S->CachedImageModels = Result.ImageModels.Num() > 0 ? Result.ImageModels : TArray<FString>{ TEXT("(No image models)") };
 
-		UE_LOG(LogImageToUMG, Log, TEXT("Fetched %d text, %d image models"), Result.TextModels.Num(), Result.ImageModels.Num());
+		UE_LOG(LogImageToUMG, Log, TEXT("Fetched %d models"), Result.TextModels.Num());
 	});
 
 	Request->ProcessRequest();
@@ -303,22 +301,30 @@ void UImageToUMGSettings::PostEditChangeProperty(FPropertyChangedEvent& Property
 FString UImageToUMGSettings::GetDefaultSystemPrompt()
 {
 	return TEXT(
-		"You are an Unreal Engine UMG expert. Analyze the UI screenshot ({WIDTH}x{HEIGHT}) and output JSON.\n\n"
-		"CONTAINERS: CanvasPanel, VerticalBox, HorizontalBox, Overlay, ScrollBox, Border, SizeBox\n"
-		"WIDGETS: TextBlock, Button (ONE TextBlock child), Image, EditableTextBox, CheckBox, Slider, ProgressBar, Spacer\n\n"
-		"WIDGET NODE FORMAT:\n"
-		"{\"Type\":\"WidgetType\", \"Name\":\"UniqueName\", \"Slot\":{...}, \"Children\":[...], property1:value1, ...}\n\n"
-		"SLOT (CanvasPanel): {\"Anchors\":{\"Min\":{\"X\":0,\"Y\":0},\"Max\":{\"X\":1,\"Y\":1}}, \"Alignment\":{\"X\":0.5,\"Y\":0.5}, \"Offsets\":{\"Left\":0,\"Top\":0,\"Right\":100,\"Bottom\":50}}\n"
-		"SLOT (Box): {\"HAlign\":\"Left|Center|Right|Fill\", \"VAlign\":\"Top|Center|Bottom|Fill\", \"SizeRule\":\"Auto|Fill\", \"Padding\":\"L,T,R,B\"}\n\n"
-		"PROPERTIES: Text, FontSize, Color(#RRGGBB), BackgroundColor, Padding, WidthOverride, HeightOverride\n\n"
-		"IMAGE WIDGETS - CRITICAL:\n"
-		"1. EVERY Image widget MUST have \"ImageRef\":\"unique_id\" property\n"
-		"2. EVERY ImageRef MUST have corresponding entry in ImageAssets array\n"
-		"3. ImageAssets entry: {\"Id\":\"unique_id\", \"Type\":\"Icon|Background\", \"Description\":\"what it shows\", \"BoundingBox\":{\"X\":px,\"Y\":py,\"Width\":w,\"Height\":h}}\n"
-		"4. BoundingBox coordinates are in pixels relative to the screenshot\n\n"
-		"OUTPUT FORMAT:\n"
-		"{\"WidgetName\":\"WBP_Name\", \"RootWidget\":{...}, \"ImageAssets\":[...]}\n\n"
-		"IF NOT UI: {\"error\":\"NOT_UI_IMAGE\", \"reason\":\"description\"}\n\n"
-		"RULES: Unique Names, ONLY valid JSON, no markdown, no explanation"
+		"分析图片 ({WIDTH}x{HEIGHT}px)，识别所有可独立编辑的 UI 元素，输出 UMG Widget JSON。\n\n"
+		"【核心原则】\n"
+		"将图片拆分为多个独立控件，每个视觉元素单独一个控件，便于后续编辑和复用。\n\n"
+		"【强制要求】\n"
+		"1. 每个 Image 必须有 ImageRef 属性\n"
+		"2. 必须输出 ImageAssets 数组\n"
+		"3. BoundingBox 是元素在源图中的像素坐标 (X,Y,Width,Height)\n\n"
+		"【元素识别】\n"
+		"文字 -> TextBlock (提取内容、字号、颜色)\n"
+		"按钮 -> Button + TextBlock\n"
+		"图标/图形/背景 -> Image + ImageRef + BoundingBox\n"
+		"进度条 -> ProgressBar\n"
+		"输入框 -> EditableTextBox\n"
+		"复选框 -> CheckBox\n"
+		"滑块 -> Slider\n\n"
+		"【容器】Overlay(层叠), CanvasPanel(绝对定位), VerticalBox, HorizontalBox, Border, SizeBox\n\n"
+		"【输出格式】\n"
+		"{\"WidgetName\":\"WBP_Name\",\n"
+		"\"RootWidget\":{\"Type\":\"Overlay\",\"Name\":\"Root\",\"Children\":[{\"Type\":\"Image\",\"Name\":\"Img1\",\"ImageRef\":\"img1\",\"WidthOverride\":100,\"HeightOverride\":100,\"Slot\":{\"HAlign\":\"Center\",\"VAlign\":\"Center\"}}]},\n"
+		"\"ImageAssets\":[{\"Id\":\"img1\",\"BoundingBox\":{\"X\":0,\"Y\":0,\"Width\":100,\"Height\":100}}]}\n\n"
+		"【Slot】\n"
+		"Overlay/Box: {\"HAlign\":\"Center\",\"VAlign\":\"Center\"}\n"
+		"CanvasPanel: {\"Anchors\":{\"Min\":{\"X\":0.5,\"Y\":0.5},\"Max\":{\"X\":0.5,\"Y\":0.5}},\"Alignment\":{\"X\":0.5,\"Y\":0.5},\"Offsets\":{\"Left\":-50,\"Top\":-50,\"Right\":50,\"Bottom\":50}}\n\n"
+		"【规则】仅输出JSON，无markdown，无解释，控件名唯一\n"
+		"【非UI图片】{\"error\":\"NOT_UI_IMAGE\",\"reason\":\"原因\"}"
 	);
 }

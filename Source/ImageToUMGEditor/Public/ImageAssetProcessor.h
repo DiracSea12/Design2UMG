@@ -34,7 +34,7 @@ public:
 	 * @param SourceImageData 原始截图数据（PNG/JPEG）
 	 * @param OutputPath 输出路径（UE 资产路径，如 /Game/UI/Textures）
 	 * @param OutResults 处理结果
-	 * @param CoordScale 坐标缩放因子（AI坐标 * CoordScale = 原始坐标，默认1.0无缩放）
+	 * @param CoordScale 坐标缩放因子（AI坐标 * CoordScale = 原始坐标，X/Y分别缩放）
 	 * @return 成功处理的资产数量
 	 */
 	static int32 ProcessImageAssets(
@@ -42,7 +42,7 @@ public:
 		const TArray<uint8>& SourceImageData,
 		const FString& OutputPath,
 		TArray<FProcessedImageAsset>& OutResults,
-		float CoordScale = 1.0f
+		FVector2D CoordScale = FVector2D(1.0f, 1.0f)
 	);
 
 	/**
@@ -51,7 +51,7 @@ public:
 	 * @param SourceImageData 原始截图数据（PNG/JPEG）
 	 * @param OutResults 处理结果（TexturePath 为空，Texture 为临时对象）
 	 * @param OutTextures 输出的纹理强引用（调用者需持有以防GC）
-	 * @param CoordScale 坐标缩放因子（AI坐标 * CoordScale = 原始坐标，默认1.0无缩放）
+	 * @param CoordScale 坐标缩放因子（AI坐标 * CoordScale = 原始坐标，X/Y分别缩放）
 	 * @return 成功处理的资产数量
 	 */
 	static int32 ProcessImageAssetsForPreview(
@@ -59,7 +59,7 @@ public:
 		const TArray<uint8>& SourceImageData,
 		TArray<FProcessedImageAsset>& OutResults,
 		TArray<TStrongObjectPtr<UTexture2D>>& OutTextures,
-		float CoordScale = 1.0f
+		FVector2D CoordScale = FVector2D(1.0f, 1.0f)
 	);
 
 	/**
@@ -81,18 +81,52 @@ public:
 		TArray<uint8>& OutScaledData
 	);
 
+	/**
+	 * 为 AI API 准备图像数据（自动缩放超过最大尺寸的图像）
+	 * @param SourceData 原始图像数据
+	 * @param SourceSize 原始尺寸
+	 * @param MaxDimension 最大允许尺寸
+	 * @param OutImageData 输出的图像数据（可能是原始数据或缩放后数据）
+	 * @param OutSize 输出的图像尺寸
+	 */
+	static void PrepareImageForAI(
+		const TArray<uint8>& SourceData,
+		FIntPoint SourceSize,
+		int32 MaxDimension,
+		TArray<uint8>& OutImageData,
+		FIntPoint& OutSize
+	);
+
 private:
 	/**
-	 * 从原始图像裁剪并缩放指定区域
-	 * @param SourceData 原始图像数据（PNG/JPEG）
+	 * 从已解压的原始像素数据裁剪并缩放指定区域（避免重复解压）
+	 * @param RawData 已解压的 BGRA 像素数据
+	 * @param SourceWidth 源图宽度
+	 * @param SourceHeight 源图高度
 	 * @param CropX 裁剪起点 X
 	 * @param CropY 裁剪起点 Y
 	 * @param CropWidth 裁剪宽度
 	 * @param CropHeight 裁剪高度
-	 * @param TargetWidth 目标宽度（0 表示使用裁剪宽度）
-	 * @param TargetHeight 目标高度（0 表示使用裁剪高度）
+	 * @param TargetWidth 目标宽度
+	 * @param TargetHeight 目标高度
 	 * @param OutCroppedData 输出的裁剪后图像数据（PNG）
 	 * @return 是否成功
+	 */
+	static bool CropAndResizeImageFromRaw(
+		const TArray<uint8>& RawData,
+		int32 SourceWidth,
+		int32 SourceHeight,
+		int32 CropX,
+		int32 CropY,
+		int32 CropWidth,
+		int32 CropHeight,
+		int32 TargetWidth,
+		int32 TargetHeight,
+		TArray<uint8>& OutCroppedData
+	);
+
+	/**
+	 * 从压缩图像裁剪并缩放指定区域（内部会解压，用于单次调用场景）
 	 */
 	static bool CropAndResizeImage(
 		const TArray<uint8>& SourceData,

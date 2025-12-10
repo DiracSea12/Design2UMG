@@ -19,6 +19,43 @@
 
 namespace
 {
+	// 裁剪参数结构
+	struct FCropParams
+	{
+		int32 CropX, CropY, CropW, CropH;
+		int32 TargetWidth, TargetHeight;
+	};
+
+	// 计算裁剪参数（消除重复代码，支持X/Y分别缩放）
+	FCropParams CalculateCropParams(
+		const FUMGImageAsset& Asset,
+		int32 SourceWidth, int32 SourceHeight,
+		FVector2D CoordScale)
+	{
+		FCropParams P;
+		if (Asset.X < 0 || Asset.Y < 0 || Asset.Width <= 0 || Asset.Height <= 0)
+		{
+			// 使用整个源图
+			P.CropX = 0;
+			P.CropY = 0;
+			P.CropW = SourceWidth;
+			P.CropH = SourceHeight;
+			P.TargetWidth = (Asset.SuggestedWidth > 0) ? Asset.SuggestedWidth : SourceWidth;
+			P.TargetHeight = (Asset.SuggestedHeight > 0) ? Asset.SuggestedHeight : SourceHeight;
+		}
+		else
+		{
+			// 坐标缩放：AI返回的坐标基于缩放后图像，需要转换到原始图像坐标（X/Y分别缩放）
+			P.CropX = FMath::RoundToInt(Asset.X * CoordScale.X);
+			P.CropY = FMath::RoundToInt(Asset.Y * CoordScale.Y);
+			P.CropW = FMath::RoundToInt(Asset.Width * CoordScale.X);
+			P.CropH = FMath::RoundToInt(Asset.Height * CoordScale.Y);
+			P.TargetWidth = (Asset.SuggestedWidth > 0) ? Asset.SuggestedWidth : P.CropW;
+			P.TargetHeight = (Asset.SuggestedHeight > 0) ? Asset.SuggestedHeight : P.CropH;
+		}
+		return P;
+	}
+
 	// 双线性采样单个像素
 	FORCEINLINE void BilinearSample(
 		const uint8* Src, int32 SrcWidth, int32 SrcHeight,
@@ -51,9 +88,7 @@ namespace
 		uint8* Dst, int32 DstW, int32 DstH)
 	{
 		// 小图像使用串行处理，大图像使用并行处理
-		constexpr int32 ParallelThreshold = 256;
-
-		if (DstH < ParallelThreshold)
+		if (DstH < ImageToUMGConstants::ParallelProcessingThreshold)
 		{
 			// 串行处理小图像
 			for (int32 Y = 0; Y < DstH; ++Y)
@@ -98,10 +133,19 @@ int32 FImageAssetProcessor::ProcessImageAssets(
 	const TArray<uint8>& SourceImageData,
 	const FString& OutputPath,
 	TArray<FProcessedImageAsset>& OutResults,
-	float CoordScale)
+	FVector2D CoordScale)
 {
 	if (ImageAssets.Num() == 0 || SourceImageData.Num() == 0)
 	{
+		return 0;
+	}
+
+	// 解压源图一次，后续复用
+	TArray<uint8> SourceRawData;
+	int32 SourceWidth, SourceHeight;
+	if (!FImageEncoder::DecompressImageData(SourceImageData, SourceRawData, SourceWidth, SourceHeight))
+	{
+		UE_LOG(LogImageToUMG, Error, TEXT("ProcessImageAssets: Failed to decompress source image"));
 		return 0;
 	}
 
@@ -109,23 +153,11 @@ int32 FImageAssetProcessor::ProcessImageAssets(
 
 	for (const FUMGImageAsset& Asset : ImageAssets)
 	{
-		if (Asset.Width <= 0 || Asset.Height <= 0)
-		{
-			UE_LOG(LogImageToUMG, Warning, TEXT("Skipping asset '%s': invalid dimensions"), *Asset.Id);
-			continue;
-		}
-
-		// 坐标缩放：AI返回的坐标基于缩放后图像，需要转换到原始图像坐标
-		int32 ScaledX = FMath::RoundToInt(Asset.X * CoordScale);
-		int32 ScaledY = FMath::RoundToInt(Asset.Y * CoordScale);
-		int32 ScaledW = FMath::RoundToInt(Asset.Width * CoordScale);
-		int32 ScaledH = FMath::RoundToInt(Asset.Height * CoordScale);
-
-		int32 TargetWidth = (Asset.SuggestedWidth > 0) ? Asset.SuggestedWidth : ScaledW;
-		int32 TargetHeight = (Asset.SuggestedHeight > 0) ? Asset.SuggestedHeight : ScaledH;
+		FCropParams P = CalculateCropParams(Asset, SourceWidth, SourceHeight, CoordScale);
 
 		TArray<uint8> CroppedData;
-		if (!CropAndResizeImage(SourceImageData, ScaledX, ScaledY, ScaledW, ScaledH, TargetWidth, TargetHeight, CroppedData))
+		if (!CropAndResizeImageFromRaw(SourceRawData, SourceWidth, SourceHeight,
+			P.CropX, P.CropY, P.CropW, P.CropH, P.TargetWidth, P.TargetHeight, CroppedData))
 		{
 			UE_LOG(LogImageToUMG, Warning, TEXT("Failed to crop image for asset '%s'"), *Asset.Id);
 			continue;
@@ -168,8 +200,10 @@ int32 FImageAssetProcessor::ProcessImageAssets(
 	return SuccessCount;
 }
 
-bool FImageAssetProcessor::CropAndResizeImage(
-	const TArray<uint8>& SourceData,
+bool FImageAssetProcessor::CropAndResizeImageFromRaw(
+	const TArray<uint8>& RawData,
+	int32 SourceWidth,
+	int32 SourceHeight,
 	int32 CropX,
 	int32 CropY,
 	int32 CropWidth,
@@ -178,14 +212,6 @@ bool FImageAssetProcessor::CropAndResizeImage(
 	int32 TargetHeight,
 	TArray<uint8>& OutCroppedData)
 {
-	TArray<uint8> RawData;
-	int32 SourceWidth, SourceHeight;
-	if (!FImageEncoder::DecompressImageData(SourceData, RawData, SourceWidth, SourceHeight))
-	{
-		UE_LOG(LogImageToUMG, Error, TEXT("Failed to decompress source image"));
-		return false;
-	}
-
 	// 边界检查和调整
 	CropX = FMath::Clamp(CropX, 0, SourceWidth - 1);
 	CropY = FMath::Clamp(CropY, 0, SourceHeight - 1);
@@ -237,6 +263,28 @@ bool FImageAssetProcessor::CropAndResizeImage(
 
 	OutCroppedData = OutputWrapper->GetCompressed();
 	return OutCroppedData.Num() > 0;
+}
+
+bool FImageAssetProcessor::CropAndResizeImage(
+	const TArray<uint8>& SourceData,
+	int32 CropX,
+	int32 CropY,
+	int32 CropWidth,
+	int32 CropHeight,
+	int32 TargetWidth,
+	int32 TargetHeight,
+	TArray<uint8>& OutCroppedData)
+{
+	TArray<uint8> RawData;
+	int32 SourceWidth, SourceHeight;
+	if (!FImageEncoder::DecompressImageData(SourceData, RawData, SourceWidth, SourceHeight))
+	{
+		UE_LOG(LogImageToUMG, Error, TEXT("Failed to decompress source image"));
+		return false;
+	}
+
+	return CropAndResizeImageFromRaw(RawData, SourceWidth, SourceHeight,
+		CropX, CropY, CropWidth, CropHeight, TargetWidth, TargetHeight, OutCroppedData);
 }
 
 UTexture2D* FImageAssetProcessor::ImportAsTexture(
@@ -307,7 +355,7 @@ int32 FImageAssetProcessor::ProcessImageAssetsForPreview(
 	const TArray<uint8>& SourceImageData,
 	TArray<FProcessedImageAsset>& OutResults,
 	TArray<TStrongObjectPtr<UTexture2D>>& OutTextures,
-	float CoordScale)
+	FVector2D CoordScale)
 {
 	if (ImageAssets.Num() == 0 || SourceImageData.Num() == 0)
 	{
@@ -318,31 +366,29 @@ int32 FImageAssetProcessor::ProcessImageAssetsForPreview(
 	OutTextures.Empty();
 	OutResults.Empty();
 
+	// 解压源图一次，后续复用
+	TArray<uint8> SourceRawData;
+	int32 SourceWidth, SourceHeight;
+	if (!FImageEncoder::DecompressImageData(SourceImageData, SourceRawData, SourceWidth, SourceHeight))
+	{
+		UE_LOG(LogImageToUMG, Error, TEXT("ProcessImageAssetsForPreview: Failed to decompress source image"));
+		return 0;
+	}
+
 	int32 SuccessCount = 0;
 
 	for (const FUMGImageAsset& Asset : ImageAssets)
 	{
-		if (Asset.Width <= 0 || Asset.Height <= 0)
-		{
-			continue;
-		}
-
-		// 坐标缩放：AI返回的坐标基于缩放后图像，需要转换到原始图像坐标
-		int32 ScaledX = FMath::RoundToInt(Asset.X * CoordScale);
-		int32 ScaledY = FMath::RoundToInt(Asset.Y * CoordScale);
-		int32 ScaledW = FMath::RoundToInt(Asset.Width * CoordScale);
-		int32 ScaledH = FMath::RoundToInt(Asset.Height * CoordScale);
-
-		int32 TargetWidth = (Asset.SuggestedWidth > 0) ? Asset.SuggestedWidth : ScaledW;
-		int32 TargetHeight = (Asset.SuggestedHeight > 0) ? Asset.SuggestedHeight : ScaledH;
+		FCropParams P = CalculateCropParams(Asset, SourceWidth, SourceHeight, CoordScale);
 
 		TArray<uint8> CroppedData;
-		if (!CropAndResizeImage(SourceImageData, ScaledX, ScaledY, ScaledW, ScaledH, TargetWidth, TargetHeight, CroppedData))
+		if (!CropAndResizeImageFromRaw(SourceRawData, SourceWidth, SourceHeight,
+			P.CropX, P.CropY, P.CropW, P.CropH, P.TargetWidth, P.TargetHeight, CroppedData))
 		{
 			continue;
 		}
 
-		// 解压为原始像素数据
+		// 解压裁剪后的 PNG 数据
 		TArray<uint8> RawData;
 		int32 Width, Height;
 		if (!FImageEncoder::DecompressImageData(CroppedData, RawData, Width, Height))
@@ -429,4 +475,42 @@ bool FImageAssetProcessor::ScaleImageData(
 
 	OutScaledData = OutputWrapper->GetCompressed();
 	return OutScaledData.Num() > 0;
+}
+
+void FImageAssetProcessor::PrepareImageForAI(
+	const TArray<uint8>& SourceData,
+	FIntPoint SourceSize,
+	int32 MaxDimension,
+	TArray<uint8>& OutImageData,
+	FIntPoint& OutSize)
+{
+	// 如果图像尺寸在限制内，直接使用原始数据
+	if (SourceSize.X <= MaxDimension && SourceSize.Y <= MaxDimension)
+	{
+		OutImageData = SourceData;
+		OutSize = SourceSize;
+		return;
+	}
+
+	// 计算缩放比例，保持宽高比
+	float Scale = FMath::Min(
+		static_cast<float>(MaxDimension) / SourceSize.X,
+		static_cast<float>(MaxDimension) / SourceSize.Y
+	);
+	int32 NewW = FMath::RoundToInt(SourceSize.X * Scale);
+	int32 NewH = FMath::RoundToInt(SourceSize.Y * Scale);
+
+	TArray<uint8> ScaledData;
+	if (ScaleImageData(SourceData, SourceSize.X, SourceSize.Y, NewW, NewH, ScaledData))
+	{
+		OutImageData = MoveTemp(ScaledData);
+		OutSize = FIntPoint(NewW, NewH);
+		UE_LOG(LogImageToUMG, Log, TEXT("Image scaled to %dx%d for AI (original: %dx%d)"), NewW, NewH, SourceSize.X, SourceSize.Y);
+	}
+	else
+	{
+		// 缩放失败，使用原始数据
+		OutImageData = SourceData;
+		OutSize = SourceSize;
+	}
 }

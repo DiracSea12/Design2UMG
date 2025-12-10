@@ -10,8 +10,9 @@
 #include "Engine/Texture2D.h"
 #include "Blueprint/UserWidget.h"
 
-DECLARE_DELEGATE_FiveParams(FOnPreviewConfirmed, const FString& /*EditedJson*/, const FString& /*OutputPath*/, const TArray<uint8>& /*SourceImageData*/, FIntPoint /*SourceSize*/, float /*CoordScale*/);
+DECLARE_DELEGATE_FiveParams(FOnPreviewConfirmed, const FString& /*EditedJson*/, const FString& /*OutputPath*/, const TArray<uint8>& /*SourceImageData*/, FIntPoint /*SourceSize*/, FVector2D /*CoordScale*/);
 DECLARE_DELEGATE(FOnPreviewCancelled);
+DECLARE_DELEGATE_FourParams(FOnPreviewRequestAI, const TArray<uint8>& /*ImageData*/, FIntPoint /*ImageSize*/, TFunction<void(const FString&)> /*OnSuccess*/, TFunction<void(const FString&)> /*OnError*/);
 
 /**
  * ImageToUMG 预览窗口 - 显示 AI 生成的 JSON 并允许编辑
@@ -28,6 +29,7 @@ public:
 		SLATE_ARGUMENT(FIntPoint, AIImageSize)
 		SLATE_EVENT(FOnPreviewConfirmed, OnConfirmed)
 		SLATE_EVENT(FOnPreviewCancelled, OnCancelled)
+		SLATE_EVENT(FOnPreviewRequestAI, OnRequestAIAnalysis)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -38,23 +40,26 @@ private:
 	TSharedPtr<SEditableTextBox> OutputPathBox;
 	TSharedPtr<FSlateBrush> ImageBrush;
 	TSharedPtr<SBox> UMGPreviewContainer;
-	TWeakObjectPtr<UUserWidget> PreviewWidget;
+	TStrongObjectPtr<UUserWidget> PreviewWidget;  // 使用强引用防止GC
 	TArray<TStrongObjectPtr<UTexture2D>> PreviewTextures;  // 预览用临时纹理
 
 	TArray<uint8> SourceImageData;
 	FIntPoint SourceImageSize;
 	FIntPoint AIImageSize;
-	float CoordScale = 1.0f;
+	FVector2D CoordScale = FVector2D(1.0f, 1.0f);  // 分别存储X/Y缩放因子
 	FString CurrentJson;
 	FString CurrentOutputPath;
+	bool bAIAnalysisInProgress = false;
 
 	FOnPreviewConfirmed OnConfirmed;
 	FOnPreviewCancelled OnCancelled;
+	FOnPreviewRequestAI OnRequestAIAnalysis;
 
 	FReply OnGenerateClicked();
 	FReply OnCancelClicked();
 	FReply OnFormatJsonClicked();
 	FReply OnPreviewUMGClicked();
+	FReply OnSendToAIClicked();
 
 	void RefreshUMGPreview();
 	void CleanupPreviewWidget();

@@ -25,6 +25,7 @@
 #include "Framework/Application/SlateApplication.h"
 #include "Blueprint/WidgetTree.h"
 #include "Blueprint/UserWidget.h"
+#include "PreviewUserWidget.h"
 #include "Components/PanelWidget.h"
 #include "Components/PanelSlot.h"
 #include "Components/ContentWidget.h"
@@ -37,14 +38,16 @@ void SImageToUMGPreviewWindow::Construct(const FArguments& InArgs)
 	CurrentOutputPath = InArgs._OutputPath;
 	OnConfirmed = InArgs._OnConfirmed;
 	OnCancelled = InArgs._OnCancelled;
+	OnRequestAIAnalysis = InArgs._OnRequestAIAnalysis;
 	SourceImageData = InArgs._SourceImageData;
 	SourceImageSize = InArgs._SourceImageSize;
 	AIImageSize = InArgs._AIImageSize;
 
-	// 计算坐标缩放因子：AI坐标 * CoordScale = 原始坐标
+	// 计算坐标缩放因子：AI坐标 * CoordScale = 原始坐标（分别计算X/Y，支持非等比缩放）
 	if (AIImageSize.X > 0 && AIImageSize.Y > 0)
 	{
-		CoordScale = static_cast<float>(SourceImageSize.X) / AIImageSize.X;
+		CoordScale.X = static_cast<float>(SourceImageSize.X) / AIImageSize.X;
+		CoordScale.Y = static_cast<float>(SourceImageSize.Y) / AIImageSize.Y;
 	}
 
 	CurrentJson = FormatJson(CurrentJson);
@@ -54,8 +57,16 @@ void SImageToUMGPreviewWindow::Construct(const FArguments& InArgs)
 	{
 		ImageBrush = MakeShareable(new FSlateBrush());
 		ImageBrush->SetResourceObject(Texture);
-		ImageBrush->ImageSize = FVector2D(Texture->GetSizeX(), Texture->GetSizeY());
+		ImageBrush->ImageSize = FVector2D(SourceImageSize.X, SourceImageSize.Y);
 		ImageBrush->DrawAs = ESlateBrushDrawType::Image;
+		
+		UE_LOG(LogImageToUMG, Log, TEXT("[预览窗口] 构造 - 纹理原始尺寸: %dx%d, 使用 SourceImageSize: (%d, %d)"),
+			Texture->GetSizeX(), Texture->GetSizeY(),
+			SourceImageSize.X, SourceImageSize.Y);
+	}
+	else
+	{
+		UE_LOG(LogImageToUMG, Warning, TEXT("[预览窗口] 构造 - 纹理为空!"));
 	}
 
 	ChildSlot
@@ -96,6 +107,12 @@ void SImageToUMGPreviewWindow::Construct(const FArguments& InArgs)
 
 TSharedRef<SWidget> SImageToUMGPreviewWindow::BuildSourceImagePanel()
 {
+	UE_LOG(LogImageToUMG, Log, TEXT("[预览窗口] BuildSourceImagePanel - ImageBrush有效: %s, ImageSize: (%.1f, %.1f), SourceImageSize: (%d, %d)"),
+		ImageBrush.IsValid() ? TEXT("是") : TEXT("否"),
+		ImageBrush.IsValid() ? ImageBrush->ImageSize.X : 0.0f,
+		ImageBrush.IsValid() ? ImageBrush->ImageSize.Y : 0.0f,
+		SourceImageSize.X, SourceImageSize.Y);
+
 	return SNew(SBorder)
 		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
 		.Padding(4)
@@ -115,28 +132,42 @@ TSharedRef<SWidget> SImageToUMGPreviewWindow::BuildSourceImagePanel()
 			.FillHeight(1.0f)
 			.Padding(4)
 			[
-				SNew(SScrollBox)
-				+ SScrollBox::Slot()
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+				.BorderBackgroundColor(FLinearColor(0.02f, 0.02f, 0.02f, 1.0f))
 				[
-					SNew(SBox)
-					.HAlign(HAlign_Center)
-					.VAlign(VAlign_Center)
-					[
-						ImageBrush.IsValid()
-							? StaticCastSharedRef<SWidget>(
-								SNew(SScaleBox)
-								.Stretch(EStretch::ScaleToFit)
-								[
-									SNew(SImage)
-									.Image(ImageBrush.Get())
-								]
-							)
-							: StaticCastSharedRef<SWidget>(
+					ImageBrush.IsValid()
+						? StaticCastSharedRef<SWidget>(
+							SNew(SScaleBox)
+							.Stretch(EStretch::ScaleToFit)
+							.HAlign(HAlign_Center)
+							.VAlign(VAlign_Center)
+							[
+								SNew(SImage)
+								.Image(ImageBrush.Get())
+							]
+						)
+						: StaticCastSharedRef<SWidget>(
+							SNew(SBox)
+							.HAlign(HAlign_Center)
+							.VAlign(VAlign_Center)
+							[
 								SNew(STextBlock)
 								.Text(LOCTEXT("NoImage", "No image available"))
-							)
-					]
+							]
+						)
 				]
+			]
+
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(4)
+			[
+				SNew(SButton)
+				.Text(LOCTEXT("SendToAI", "Send to AI"))
+				.HAlign(HAlign_Center)
+				.OnClicked(this, &SImageToUMGPreviewWindow::OnSendToAIClicked)
+				.IsEnabled_Lambda([this]() { return OnRequestAIAnalysis.IsBound() && !bAIAnalysisInProgress; })
 			]
 		];
 }
@@ -177,23 +208,19 @@ TSharedRef<SWidget> SImageToUMGPreviewWindow::BuildUMGPreviewPanel()
 			.FillHeight(1.0f)
 			.Padding(4)
 			[
-				SNew(SScrollBox)
-				+ SScrollBox::Slot()
+				SAssignNew(UMGPreviewContainer, SBox)
+				.HAlign(HAlign_Fill)
+				.VAlign(VAlign_Fill)
 				[
-					SAssignNew(UMGPreviewContainer, SBox)
-					.HAlign(HAlign_Fill)
-					.VAlign(VAlign_Fill)
+					SNew(SBorder)
+					.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+					.BorderBackgroundColor(FLinearColor(0.02f, 0.02f, 0.02f, 1.0f))
+					.Padding(8)
 					[
-						SNew(SBorder)
-						.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
-						.BorderBackgroundColor(FLinearColor(0.02f, 0.02f, 0.02f, 1.0f))
-						.Padding(8)
-						[
-							SNew(STextBlock)
-							.Text(LOCTEXT("ClickToPreview", "Click 'Refresh Preview' to see the UMG layout"))
-							.ColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.5f, 0.5f)))
-							.Justification(ETextJustify::Center)
-						]
+						SNew(STextBlock)
+						.Text(LOCTEXT("ClickToPreview", "Click 'Refresh Preview' to see the UMG layout"))
+						.ColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.5f, 0.5f)))
+						.Justification(ETextJustify::Center)
 					]
 				]
 			]
@@ -311,6 +338,8 @@ SImageToUMGPreviewWindow::~SImageToUMGPreviewWindow()
 		GEditor->GetTimerManager()->ClearTimer(PreviewRefreshTimerHandle);
 	}
 	CleanupPreviewWidget();
+	// 清理预览纹理
+	PreviewTextures.Empty();
 }
 
 FReply SImageToUMGPreviewWindow::OnGenerateClicked()
@@ -371,6 +400,57 @@ FReply SImageToUMGPreviewWindow::OnPreviewUMGClicked()
 	return FReply::Handled();
 }
 
+FReply SImageToUMGPreviewWindow::OnSendToAIClicked()
+{
+	if (!OnRequestAIAnalysis.IsBound() || bAIAnalysisInProgress)
+	{
+		return FReply::Handled();
+	}
+
+	bAIAnalysisInProgress = true;
+
+	// 更新 JSON 编辑器显示分析中状态
+	if (JsonEditor.IsValid())
+	{
+		JsonEditor->SetText(LOCTEXT("AnalyzingAI", "Analyzing image with AI, please wait..."));
+	}
+
+	TWeakPtr<SImageToUMGPreviewWindow> WeakSelf = SharedThis(this);
+
+	OnRequestAIAnalysis.Execute(
+		SourceImageData,
+		SourceImageSize,
+		// OnSuccess
+		[WeakSelf](const FString& Json)
+		{
+			TSharedPtr<SImageToUMGPreviewWindow> Self = WeakSelf.Pin();
+			if (!Self.IsValid()) return;
+
+			Self->bAIAnalysisInProgress = false;
+			Self->CurrentJson = Self->FormatJson(Json);
+			if (Self->JsonEditor.IsValid())
+			{
+				Self->JsonEditor->SetText(FText::FromString(Self->CurrentJson));
+			}
+			Self->RefreshUMGPreview();
+		},
+		// OnError
+		[WeakSelf](const FString& Error)
+		{
+			TSharedPtr<SImageToUMGPreviewWindow> Self = WeakSelf.Pin();
+			if (!Self.IsValid()) return;
+
+			Self->bAIAnalysisInProgress = false;
+			if (Self->JsonEditor.IsValid())
+			{
+				Self->JsonEditor->SetText(FText::FromString(FString::Printf(TEXT("AI Error: %s\n\nYou can manually edit the JSON below."), *Error)));
+			}
+		}
+	);
+
+	return FReply::Handled();
+}
+
 void SImageToUMGPreviewWindow::OnJsonTextChanged(const FText& NewText)
 {
 	CurrentJson = NewText.ToString();
@@ -379,14 +459,14 @@ void SImageToUMGPreviewWindow::OnJsonTextChanged(const FText& NewText)
 
 void SImageToUMGPreviewWindow::SchedulePreviewRefresh()
 {
-	// 防抖：500ms 内的连续输入只触发一次刷新
+	// 防抖：连续输入只触发一次刷新
 	if (GEditor)
 	{
 		GEditor->GetTimerManager()->ClearTimer(PreviewRefreshTimerHandle);
 		GEditor->GetTimerManager()->SetTimer(
 			PreviewRefreshTimerHandle,
 			FTimerDelegate::CreateSP(this, &SImageToUMGPreviewWindow::RefreshUMGPreview),
-			0.5f,  // 500ms 防抖延迟
+			ImageToUMGConstants::JsonEditDebounceSeconds,
 			false  // 不循环
 		);
 	}
@@ -452,9 +532,14 @@ FString SImageToUMGPreviewWindow::FormatJson(const FString& JsonString)
 
 void SImageToUMGPreviewWindow::CleanupPreviewWidget()
 {
-	if (PreviewWidget.IsValid())
+	if (PreviewWidget.Get())
 	{
 		PreviewWidget->RemoveFromParent();
+		// 显式清理 WidgetTree 防止悬挂引用
+		if (PreviewWidget->WidgetTree)
+		{
+			PreviewWidget->WidgetTree->RootWidget = nullptr;
+		}
 		PreviewWidget.Reset();
 	}
 }
@@ -484,12 +569,29 @@ void SImageToUMGPreviewWindow::RefreshUMGPreview()
 		return;
 	}
 
+	// 先解析 JSON 计算设计尺寸
+	// 使用固定的标准设计尺寸（3840x2160）作为默认值，确保占位文字缩放效果一致
+	// 当 AI 返回真实布局后，CalculateDesignSize 会根据实际内容计算正确的尺寸
+	FUMGWidgetData TempWidgetData;
+	FString ParseError;
+	FVector2D DefaultSize(3840.0f, 2160.0f);
+	FVector2D DesignSize = DefaultSize;
+	if (FUMGJsonParser::ParseJson(CurrentJson, TempWidgetData, &ParseError))
+	{
+		DesignSize = FUMGWidgetUtils::CalculateDesignSize(TempWidgetData.RootWidget, DefaultSize);
+	}
+
+	UE_LOG(LogImageToUMG, Log, TEXT("[预览窗口] RefreshUMGPreview - SourceImageSize: (%d, %d), DefaultSize: (%.1f, %.1f), DesignSize: (%.1f, %.1f)"),
+		SourceImageSize.X, SourceImageSize.Y,
+		DefaultSize.X, DefaultSize.Y,
+		DesignSize.X, DesignSize.Y);
+
 	CleanupPreviewWidget();
 
 	UUserWidget* NewWidget = CreatePreviewWidgetFromJson(CurrentJson);
 	if (NewWidget)
 	{
-		PreviewWidget = NewWidget;
+		PreviewWidget.Reset(NewWidget);  // 使用 TStrongObjectPtr 持有
 		TSharedRef<SWidget> SlateWidget = NewWidget->TakeWidget();
 
 		UMGPreviewContainer->SetContent(
@@ -498,7 +600,18 @@ void SImageToUMGPreviewWindow::RefreshUMGPreview()
 			.BorderBackgroundColor(FLinearColor(0.05f, 0.05f, 0.05f, 1.0f))
 			.Padding(4)
 			[
-				SlateWidget
+				SNew(SScaleBox)
+				.Stretch(EStretch::ScaleToFit)
+				.HAlign(HAlign_Center)
+				.VAlign(VAlign_Center)
+				[
+					SNew(SBox)
+					.WidthOverride(DesignSize.X)
+					.HeightOverride(DesignSize.Y)
+					[
+						SlateWidget
+					]
+				]
 			]
 		);
 	}
@@ -538,36 +651,47 @@ UUserWidget* SImageToUMGPreviewWindow::CreatePreviewWidgetFromJson(const FString
 		FUMGWidgetUtils::GenerateImageAssetsFromWidgets(WidgetData.RootWidget, ImageAssets);
 	}
 
+	// 处理图像资产并构建纹理映射表
+	TMap<FString, UTexture2D*> TextureMap;
 	if (ImageAssets.Num() > 0 && SourceImageData.Num() > 0)
 	{
 		TArray<FProcessedImageAsset> PreviewAssets;
 		FImageAssetProcessor::ProcessImageAssetsForPreview(
 			ImageAssets, SourceImageData, PreviewAssets, PreviewTextures, CoordScale);
+		// 构建纹理映射表，用于直接绑定临时纹理
+		TextureMap = FUMGWidgetUtils::BuildTextureMap(PreviewAssets);
+		// 同时绑定路径（用于最终生成时）
 		FUMGWidgetUtils::BindImageAssets(WidgetData.RootWidget, PreviewAssets);
 	}
 
-	UUserWidget* TempWidget = NewObject<UUserWidget>(GetTransientPackage(), UUserWidget::StaticClass());
+	// 使用 RF_Transient 标记，明确告知 GC 这是临时对象
+	UUserWidget* TempWidget = NewObject<UPreviewUserWidget>(GetTransientPackage(), UPreviewUserWidget::StaticClass(), NAME_None, RF_Transient);
 	if (!TempWidget)
 	{
+		UE_LOG(LogImageToUMG, Error, TEXT("Failed to create UUserWidget"));
 		return nullptr;
 	}
 
-	TempWidget->WidgetTree = NewObject<UWidgetTree>(TempWidget, UWidgetTree::StaticClass());
+	TempWidget->WidgetTree = NewObject<UWidgetTree>(TempWidget, UWidgetTree::StaticClass(), NAME_None, RF_Transient);
 	if (!TempWidget->WidgetTree)
 	{
+		UE_LOG(LogImageToUMG, Error, TEXT("Failed to create WidgetTree"));
 		return nullptr;
 	}
 
-	// 使用统一的 Widget 创建函数
-	UWidget* RootWidget = FUMGWidgetUtils::CreateWidgetRecursive(TempWidget->WidgetTree, WidgetData.RootWidget);
-	if (RootWidget)
+	// 使用带纹理映射的 Widget 创建函数（预览时直接绑定临时纹理）
+	UWidget* RootWidget = FUMGWidgetUtils::CreateWidgetRecursive(TempWidget->WidgetTree, WidgetData.RootWidget, nullptr, &TextureMap);
+	if (!RootWidget)
 	{
-		TempWidget->WidgetTree->RootWidget = RootWidget;
-		TempWidget->Initialize();
-		return TempWidget;
+		UE_LOG(LogImageToUMG, Error, TEXT("Failed to create root widget of type: %s"), *WidgetData.RootWidget.Type);
+		return nullptr;
 	}
 
-	return nullptr;
+	TempWidget->WidgetTree->RootWidget = RootWidget;
+
+	// 注意：不调用 Initialize()，因为预览 Widget 不需要完整初始化
+	// Initialize() 需要 PlayerController 等运行时对象，在编辑器预览中不可用
+	return TempWidget;
 }
 
 #undef LOCTEXT_NAMESPACE
