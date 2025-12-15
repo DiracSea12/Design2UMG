@@ -20,6 +20,12 @@ namespace ImageToUMGConstants
 	/** 默认 HTTP 请求超时时间（秒） */
 	constexpr float DefaultTimeoutSeconds = 120.0f;
 
+	/** 网络错误自动重试次数 */
+	constexpr int32 MaxRetryCount = 2;
+
+	/** 重试间隔（秒） */
+	constexpr float RetryDelaySeconds = 2.0f;
+
 	/** 错误响应预览长度 */
 	constexpr int32 ErrorResponsePreviewLen = 500;
 
@@ -60,4 +66,7 @@ namespace ImageToUMGConstants
 
 	/** HTTP 请求体大小警告阈值（MB） */
 	constexpr int32 MaxRequestBodySizeMB = 20;
+
+	/** AI 分析图片大小限制（字节） */
+	constexpr int32 MaxImageSizeForAI = 2 * 1024 * 1024;
 }

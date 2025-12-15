@@ -162,7 +162,7 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 
 	// 同时解析直接放在节点上的属性（排除结构字段）
 	static const TSet<FString> StructuralFields = {
-		TEXT("Type"), TEXT("Name"), TEXT("Children"),
+		TEXT("Type"), TEXT("Name"), TEXT("Children"), TEXT("Slots"),
 		TEXT("Slot"), TEXT("CanvasSlot"), TEXT("Properties")
 	};
 	for (const auto& Pair : JsonObject->Values)
@@ -182,9 +182,17 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 		{
 			OutNode.Properties.Add(Pair.Key, Pair.Value->AsBool() ? TEXT("true") : TEXT("false"));
 		}
+		else if (Pair.Value->Type == EJson::Object)
+		{
+			// 将嵌套对象序列化为 JSON 字符串（用于 MaterialParams 等）
+			FString JsonStr;
+			TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonStr);
+			FJsonSerializer::Serialize(Pair.Value->AsObject().ToSharedRef(), Writer);
+			OutNode.Properties.Add(Pair.Key, JsonStr);
+		}
 	}
 
-	// 解析 Children
+	// 解析 Children（标准格式）
 	const TArray<TSharedPtr<FJsonValue>>* ChildrenArray;
 	if (JsonObject->TryGetArrayField(TEXT("Children"), ChildrenArray))
 	{
@@ -197,6 +205,31 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 				if (ParseWidgetNode(*ChildObject, ChildNode))
 				{
 					OutNode.Children.Add(ChildNode);
+				}
+			}
+		}
+	}
+
+	// 解析 Slots（替代格式：槽位数组，每个槽位包含 Content 和布局信息）
+	const TArray<TSharedPtr<FJsonValue>>* SlotsArray;
+	if (JsonObject->TryGetArrayField(TEXT("Slots"), SlotsArray))
+	{
+		for (const TSharedPtr<FJsonValue>& SlotValue : *SlotsArray)
+		{
+			const TSharedPtr<FJsonObject>* SlotItemObject;
+			if (SlotValue->TryGetObject(SlotItemObject))
+			{
+				// 获取 Content（子控件）
+				const TSharedPtr<FJsonObject>* ContentObject;
+				if ((*SlotItemObject)->TryGetObjectField(TEXT("Content"), ContentObject))
+				{
+					FUMGWidgetNode ChildNode;
+					if (ParseWidgetNode(*ContentObject, ChildNode))
+					{
+						// 将槽位本身的布局信息应用到子控件的 Slot
+						ParseSlotData(*SlotItemObject, ChildNode.Slot);
+						OutNode.Children.Add(ChildNode);
+					}
 				}
 			}
 		}
@@ -401,4 +434,10 @@ void FUMGJsonParser::ParseImageAsset(const TSharedPtr<FJsonObject>& JsonObject, 
 	int32 Val;
 	if (JsonObject->TryGetNumberField(TEXT("SuggestedWidth"), Val)) OutAsset.SuggestedWidth = Val;
 	if (JsonObject->TryGetNumberField(TEXT("SuggestedHeight"), Val)) OutAsset.SuggestedHeight = Val;
+
+	// 解析背景移除相关字段
+	bool bRemoveBg;
+	if (JsonObject->TryGetBoolField(TEXT("RemoveBg"), bRemoveBg)) OutAsset.bRemoveBg = bRemoveBg;
+	JsonObject->TryGetStringField(TEXT("BgColor"), OutAsset.BgColor);
+	JsonObject->TryGetStringField(TEXT("FgColor"), OutAsset.FgColor);
 }

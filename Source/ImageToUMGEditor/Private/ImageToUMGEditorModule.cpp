@@ -9,6 +9,7 @@
 #include "UMGJsonParser.h"
 #include "ImageToUMGSettings.h"
 #include "HttpAIClient.h"
+#include "ScriptAIClient.h"
 #include "ImageEncoder.h"
 #include "SImageToUMGPreviewWindow.h"
 #include "ImageAssetProcessor.h"
@@ -39,6 +40,9 @@ DEFINE_LOG_CATEGORY(LogImageToUMG);
 
 // 并发请求保护
 static TAtomic<bool> bAnalysisInProgress(false);
+
+// Script AI Client 单例（避免重复创建）
+static TSharedPtr<FScriptAIClient> GScriptAIClient;
 
 class FImageToUMGCommands : public TCommands<FImageToUMGCommands>
 {
@@ -107,6 +111,9 @@ void FImageToUMGEditorModule::StartupModule()
 
 void FImageToUMGEditorModule::ShutdownModule()
 {
+	// 清理临时纹理
+	TempTextureHolder.Reset();
+
 	UToolMenus::UnRegisterStartupCallback(this);
 	FImageToUMGCommands::Unregister();
 
@@ -190,7 +197,7 @@ void FImageToUMGEditorModule::OpenPreviewWindowDirect(UTexture2D* Tex, const FSt
 	// 追踪窗口打开次数
 	static int32 OpenCount = 0;
 	OpenCount++;
-	UE_LOG(LogImageToUMG, Log, TEXT("[EditorModule] OpenPreviewWindowDirect #%d - 纹理: %s, 尺寸: %dx%d, ImageData: %d bytes"),
+	UE_LOG(LogImageToUMG, Verbose, TEXT("[EditorModule] OpenPreviewWindowDirect #%d - 纹理: %s, 尺寸: %dx%d, ImageData: %d bytes"),
 		OpenCount,
 		Tex ? *Tex->GetName() : TEXT("NULL"),
 		ImageSize.X, ImageSize.Y,
@@ -262,34 +269,64 @@ void FImageToUMGEditorModule::OnRequestAIAnalysis(const TArray<uint8>& ImageData
 	FIntPoint AIImageSize;
 	FImageAssetProcessor::PrepareImageForAI(ImageData, ImageSize, ImageToUMGConstants::MaxAIDimension, ImageDataForAI, AIImageSize);
 
-	// 检查图片大小限制（2MB = 2 * 1024 * 1024 bytes）
-	constexpr int32 MaxImageSizeBytes = 2 * 1024 * 1024;
-	if (ImageDataForAI.Num() > MaxImageSizeBytes)
+	// 检查图片大小限制
+	if (ImageDataForAI.Num() > ImageToUMGConstants::MaxImageSizeForAI)
 	{
 		bAnalysisInProgress = false;
 		const float SizeMB = ImageDataForAI.Num() / (1024.0f * 1024.0f);
-		OnError(FString::Printf(TEXT("Image too large: %.2f MB (max 2 MB).\nPlease use a smaller image or reduce resolution."), SizeMB));
+		const float MaxMB = ImageToUMGConstants::MaxImageSizeForAI / (1024.0f * 1024.0f);
+		OnError(FString::Printf(TEXT("Image too large: %.2f MB (max %.0f MB).\nPlease use a smaller image or reduce resolution."), SizeMB, MaxMB));
 		return;
 	}
 
-	TSharedRef<FHttpAIClient> Client = MakeShared<FHttpAIClient>();
+	// 根据设置选择客户端
+	if (S->bUseScriptClient)
+	{
+		// 使用 Python 脚本客户端
+		if (!GScriptAIClient.IsValid())
+		{
+			GScriptAIClient = MakeShared<FScriptAIClient>();
+		}
 
-	Client->AnalyzeImage(ImageDataForAI, TEXT("png"), AIImageSize.X, AIImageSize.Y,
-		FOnAIResponseReceived::CreateLambda([OnSuccess, Client](const FString& Json)
-		{
-			bAnalysisInProgress = false;
-			AsyncTask(ENamedThreads::GameThread, [Json, OnSuccess]() {
-				OnSuccess(Json);
-			});
-		}),
-		FOnAIRequestFailed::CreateLambda([OnError, Client](const FString& Err)
-		{
-			bAnalysisInProgress = false;
-			AsyncTask(ENamedThreads::GameThread, [Err, OnError]() {
-				OnError(Err);
-			});
-		})
-	);
+		GScriptAIClient->AnalyzeImage(ImageDataForAI, AIImageSize.X, AIImageSize.Y,
+			FOnScriptAIComplete::CreateLambda([OnSuccess](const FString& Json)
+			{
+				bAnalysisInProgress = false;
+				AsyncTask(ENamedThreads::GameThread, [Json, OnSuccess]() {
+					OnSuccess(Json);
+				});
+			}),
+			FOnScriptAIError::CreateLambda([OnError](const FString& Err)
+			{
+				bAnalysisInProgress = false;
+				AsyncTask(ENamedThreads::GameThread, [Err, OnError]() {
+					OnError(Err);
+				});
+			})
+		);
+	}
+	else
+	{
+		// 使用 HTTP 客户端
+		TSharedRef<FHttpAIClient> Client = MakeShared<FHttpAIClient>();
+
+		Client->AnalyzeImage(ImageDataForAI, TEXT("png"), AIImageSize.X, AIImageSize.Y,
+			FOnAIResponseReceived::CreateLambda([OnSuccess, Client](const FString& Json)
+			{
+				bAnalysisInProgress = false;
+				AsyncTask(ENamedThreads::GameThread, [Json, OnSuccess]() {
+					OnSuccess(Json);
+				});
+			}),
+			FOnAIRequestFailed::CreateLambda([OnError, Client](const FString& Err)
+			{
+				bAnalysisInProgress = false;
+				AsyncTask(ENamedThreads::GameThread, [Err, OnError]() {
+					OnError(Err);
+				});
+			})
+		);
+	}
 }
 
 void FImageToUMGEditorModule::OnPreviewConfirmed(const FString& Json, const FString& OutputPath, const TArray<uint8>& SourceImageData, FIntPoint SourceImageSize, FVector2D CoordScale)

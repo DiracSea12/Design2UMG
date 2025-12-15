@@ -2,6 +2,7 @@
 
 #include "UMGWidgetUtils.h"
 #include "ImageToUMGLog.h"
+#include "ImageToUMGSettings.h"
 
 #include "Components/Widget.h"
 #include "Components/PanelSlot.h"
@@ -48,6 +49,8 @@
 #include "Components/SafeZone.h"
 #include "Components/SafeZoneSlot.h"
 #include "Components/WidgetSwitcherSlot.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "ProceduralShapeGenerator.h"
 #include "Components/ListView.h"
 #include "Components/TileView.h"
 #include "Components/TreeView.h"
@@ -56,6 +59,9 @@
 #include "Components/MultiLineEditableText.h"
 #include "Components/ContentWidget.h"
 #include "Blueprint/WidgetTree.h"
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 
 // ============================================================================
 // 静态映射表
@@ -176,21 +182,14 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 
 	ApplyWidgetProperties(NewWidget, Node.Properties);
 
-	// 如果是 Image 控件且提供了 TextureMap，尝试绑定纹理
-	if (TextureMap)
+	// Image 控件：优先 MaterialRef，其次 TextureMap
+	if (UImage* ImageWidget = Cast<UImage>(NewWidget))
 	{
-		if (UImage* ImageWidget = Cast<UImage>(NewWidget))
+		bool bBound = HandleImageMaterialRef(ImageWidget, Node) || HandleImageTextureRef(ImageWidget, Node, TextureMap);
+
+		if (!bBound && !Node.Properties.Contains(TEXT("MaterialRef")) && !Node.Properties.Contains(TEXT("ImageRef")))
 		{
-			if (const FString* ImageRef = Node.Properties.Find(TEXT("ImageRef")))
-			{
-				if (UTexture2D* const* FoundTexture = TextureMap->Find(*ImageRef))
-				{
-					if (*FoundTexture)
-					{
-						ImageWidget->SetBrushFromTexture(*FoundTexture);
-					}
-				}
-			}
+			UE_LOG(LogImageToUMG, Warning, TEXT("Image '%s' 没有 MaterialRef 或 ImageRef 属性"), *Node.Name);
 		}
 	}
 
@@ -244,7 +243,7 @@ UClass* FUMGWidgetUtils::ResolveWidgetClass(const FString& TypeName)
 		return *Found;
 	}
 
-	// Fallback: 动态查找
+	// 回退: 动态查找
 	FString ClassName = FString::Printf(TEXT("U%s"), *TypeName);
 	UClass* FoundClass = FindFirstObject<UClass>(*ClassName, EFindFirstObjectOptions::EnsureIfAmbiguous);
 	if (FoundClass && FoundClass->IsChildOf(UWidget::StaticClass()))
@@ -478,6 +477,157 @@ namespace
 		};
 		return Map;
 	}
+
+	// ============================================================================
+	// Image 控件辅助函数
+	// ============================================================================
+
+	/**
+	 * 处理 Image 控件的 MaterialRef（程序化形状生成）
+	 * @return true 如果成功生成并绑定纹理
+	 */
+	bool HandleImageMaterialRef(UImage* ImageWidget, const FUMGWidgetNode& Node)
+	{
+		const FString* MaterialRef = Node.Properties.Find(TEXT("MaterialRef"));
+		if (!MaterialRef) return false;
+
+		UE_LOG(LogImageToUMG, Verbose, TEXT("Image '%s' 程序化生成 MaterialRef='%s'"), *Node.Name, **MaterialRef);
+
+		// 解析参数
+		FLinearColor Color = FLinearColor::White;
+		FLinearColor ColorStart = FLinearColor::White;
+		FLinearColor ColorEnd = FLinearColor::Black;
+		float Thickness = 0.15f;
+		float CornerRadius = 0.2f;
+
+		// 解析 MaterialParams
+		if (const FString* ParamsStr = Node.Properties.Find(TEXT("MaterialParams")))
+		{
+			TSharedPtr<FJsonObject> ParamsJson;
+			TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(*ParamsStr);
+			if (FJsonSerializer::Deserialize(Reader, ParamsJson) && ParamsJson.IsValid())
+			{
+				FString ColorStr;
+				if (ParamsJson->TryGetStringField(TEXT("Color"), ColorStr))
+				{
+					Color = FProceduralShapeGenerator::ParseHexColor(ColorStr);
+				}
+				if (ParamsJson->TryGetStringField(TEXT("ColorStart"), ColorStr) ||
+					ParamsJson->TryGetStringField(TEXT("ColorCenter"), ColorStr))
+				{
+					ColorStart = FProceduralShapeGenerator::ParseHexColor(ColorStr);
+				}
+				if (ParamsJson->TryGetStringField(TEXT("ColorEnd"), ColorStr) ||
+					ParamsJson->TryGetStringField(TEXT("ColorEdge"), ColorStr))
+				{
+					ColorEnd = FProceduralShapeGenerator::ParseHexColor(ColorStr);
+				}
+
+				double NumValue;
+				if (ParamsJson->TryGetNumberField(TEXT("Thickness"), NumValue))
+				{
+					Thickness = (NumValue > 1.0) ? static_cast<float>(NumValue) / 100.0f : static_cast<float>(NumValue);
+				}
+				if (ParamsJson->TryGetNumberField(TEXT("CornerRadius"), NumValue))
+				{
+					CornerRadius = (NumValue > 1.0) ? static_cast<float>(NumValue) / 100.0f : static_cast<float>(NumValue);
+				}
+			}
+		}
+
+		// 获取尺寸
+		int32 Width = 64, Height = 64;
+		if (const FString* W = Node.Properties.Find(TEXT("WidthOverride"))) Width = FCString::Atoi(**W);
+		if (const FString* H = Node.Properties.Find(TEXT("HeightOverride"))) Height = FCString::Atoi(**H);
+
+		// 根据形状类型生成纹理
+		UTexture2D* Texture = nullptr;
+		FString ShapeName = (*MaterialRef).ToLower();
+
+		if (ShapeName == TEXT("circle"))
+		{
+			Texture = FProceduralShapeGenerator::GenerateCircle(FMath::Max(Width, Height), Color, ImageWidget);
+		}
+		else if (ShapeName == TEXT("ring"))
+		{
+			Texture = FProceduralShapeGenerator::GenerateRing(FMath::Max(Width, Height), Color, Thickness, ImageWidget);
+		}
+		else if (ShapeName == TEXT("roundedrect"))
+		{
+			Texture = FProceduralShapeGenerator::GenerateRoundedRect(Width, Height, Color, CornerRadius, ImageWidget);
+		}
+		else if (ShapeName == TEXT("gradienth"))
+		{
+			Texture = FProceduralShapeGenerator::GenerateGradientH(Width, Height, ColorStart, ColorEnd, ImageWidget);
+		}
+		else if (ShapeName == TEXT("gradientv"))
+		{
+			Texture = FProceduralShapeGenerator::GenerateGradientV(Width, Height, ColorStart, ColorEnd, ImageWidget);
+		}
+		else if (ShapeName == TEXT("radialgradient"))
+		{
+			Texture = FProceduralShapeGenerator::GenerateRadialGradient(FMath::Max(Width, Height), ColorStart, ColorEnd, ImageWidget);
+		}
+
+		if (!Texture)
+		{
+			UE_LOG(LogImageToUMG, Warning, TEXT("  -> 未知形状类型: %s"), **MaterialRef);
+			return false;
+		}
+
+		ImageWidget->SetBrushFromTexture(Texture);
+		FSlateBrush Brush = ImageWidget->GetBrush();
+		Brush.ImageSize = FVector2D(Width, Height);
+		Brush.Tiling = ESlateBrushTileType::NoTile;
+		ImageWidget->SetBrush(Brush);
+		ImageWidget->SetDesiredSizeOverride(Brush.ImageSize);
+		ImageWidget->SynchronizeProperties();
+
+		UE_LOG(LogImageToUMG, Verbose, TEXT("  -> 程序化生成成功: %s (%dx%d)"), **MaterialRef, Width, Height);
+		return true;
+	}
+
+	/**
+	 * 处理 Image 控件的 ImageRef（纹理映射绑定）
+	 * @return true 如果成功绑定纹理
+	 */
+	bool HandleImageTextureRef(UImage* ImageWidget, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap)
+	{
+		if (!TextureMap) return false;
+
+		const FString* ImageRef = Node.Properties.Find(TEXT("ImageRef"));
+		if (!ImageRef) return false;
+
+		UE_LOG(LogImageToUMG, Verbose, TEXT("Image '%s' 查找纹理 ImageRef='%s'"), *Node.Name, **ImageRef);
+
+		UTexture2D* const* FoundTexture = TextureMap->Find(*ImageRef);
+		if (!FoundTexture || !*FoundTexture)
+		{
+			UE_LOG(LogImageToUMG, Warning, TEXT("  -> 未找到纹理 '%s', TextureMap 有 %d 条目"),
+				**ImageRef, TextureMap->Num());
+			return false;
+		}
+
+		ImageWidget->SetBrushFromTexture(*FoundTexture);
+
+		// 绑定后重新应用尺寸（SetBrushFromTexture 会重置 Brush）
+		const FString* WidthStr = Node.Properties.Find(TEXT("WidthOverride"));
+		const FString* HeightStr = Node.Properties.Find(TEXT("HeightOverride"));
+		if (WidthStr || HeightStr)
+		{
+			FSlateBrush Brush = ImageWidget->GetBrush();
+			if (WidthStr) Brush.ImageSize.X = FCString::Atof(**WidthStr);
+			if (HeightStr) Brush.ImageSize.Y = FCString::Atof(**HeightStr);
+			Brush.Tiling = ESlateBrushTileType::NoTile;
+			ImageWidget->SetBrush(Brush);
+			ImageWidget->SetDesiredSizeOverride(Brush.ImageSize);
+		}
+
+		ImageWidget->SynchronizeProperties();
+		UE_LOG(LogImageToUMG, Verbose, TEXT("  -> 绑定成功: %s (%dx%d)"),
+			*(*FoundTexture)->GetName(), (*FoundTexture)->GetSizeX(), (*FoundTexture)->GetSizeY());
+		return true;
+	}
 }
 
 void FUMGWidgetUtils::ApplySlotProperties(UPanelSlot* Slot, const FUMGSlotData& S)
@@ -547,6 +697,29 @@ namespace
 			UTexture2D* Tex = LoadObject<UTexture2D>(nullptr, **V);
 			if (!Tex) Tex = FindObject<UTexture2D>(nullptr, **V);
 			if (Tex) I->SetBrushFromTexture(Tex);
+		}
+
+		// 处理 WidthOverride/HeightOverride - 设置 Brush 的 ImageSize
+		// UImage 本身没有这些属性，但 AI 经常返回它们
+		FSlateBrush Brush = I->GetBrush();
+		bool bBrushModified = false;
+		if (const FString* V = GET_PROP("WidthOverride"))
+		{
+			Brush.ImageSize.X = FCString::Atof(**V);
+			bBrushModified = true;
+		}
+		if (const FString* V = GET_PROP("HeightOverride"))
+		{
+			Brush.ImageSize.Y = FCString::Atof(**V);
+			bBrushModified = true;
+		}
+		if (bBrushModified)
+		{
+			// 设置 SizeBox Stretch 为 UserSpecifiedWithClipping 以使用自定义尺寸
+			Brush.Tiling = ESlateBrushTileType::NoTile;
+			I->SetBrush(Brush);
+			// 设置 DesiredSizeOverride
+			I->SetDesiredSizeOverride(Brush.ImageSize);
 		}
 	}
 
@@ -980,3 +1153,38 @@ FVector2D FUMGWidgetUtils::CalculateDesignSize(const FUMGWidgetNode& RootNode, F
 	TraverseNodeForDesignSize(RootNode, MaxBounds);
 	return MaxBounds;
 }
+
+void FUMGWidgetUtils::ConvertRatioToPixels(FUMGWidgetNode& Node, FIntPoint CanvasSize)
+{
+	// 转换 WidthRatio -> WidthOverride
+	if (const FString* WidthRatioStr = Node.Properties.Find(TEXT("WidthRatio")))
+	{
+		float Ratio = FCString::Atof(**WidthRatioStr);
+		int32 Pixels = FMath::RoundToInt(CanvasSize.X * Ratio);
+		Node.Properties.Add(TEXT("WidthOverride"), FString::FromInt(Pixels));
+		Node.Properties.Remove(TEXT("WidthRatio"));
+	}
+
+	// 转换 HeightRatio -> HeightOverride
+	if (const FString* HeightRatioStr = Node.Properties.Find(TEXT("HeightRatio")))
+	{
+		float Ratio = FCString::Atof(**HeightRatioStr);
+		int32 Pixels = FMath::RoundToInt(CanvasSize.Y * Ratio);
+		Node.Properties.Add(TEXT("HeightOverride"), FString::FromInt(Pixels));
+		Node.Properties.Remove(TEXT("HeightRatio"));
+	}
+
+	// 转换 Offsets 中的比例字段（如果有）
+	// LeftRatio, TopRatio -> Left, Top (相对画布尺寸)
+	FUMGSlotData& Slot = Node.Slot;
+
+	// 注意: Offsets.Right/Bottom 在点锚点时表示尺寸，拉伸锚点时表示边距
+	// 这里只处理显式的 Ratio 字段，不改变现有的 Offsets 逻辑
+
+	// 递归处理子节点
+	for (FUMGWidgetNode& Child : Node.Children)
+	{
+		ConvertRatioToPixels(Child, CanvasSize);
+	}
+}
+

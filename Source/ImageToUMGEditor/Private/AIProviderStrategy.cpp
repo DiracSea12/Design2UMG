@@ -4,6 +4,24 @@
 #include "ImageToUMGSettings.h"
 
 // ============================================================================
+// 基类默认实现
+// ============================================================================
+
+FString IAIProviderStrategy::BuildURL(const FString& Endpoint, const FString& ModelName) const
+{
+	// 默认实现：Endpoint + EndpointSuffix
+	FString Suffix = GetEndpointSuffix();
+
+	// 如果 Endpoint 以 / 结尾，去掉 Suffix 开头的 /
+	if (Endpoint.EndsWith(TEXT("/")))
+	{
+		return Endpoint + (Suffix.StartsWith(TEXT("/")) ? Suffix.Mid(1) : Suffix);
+	}
+
+	return Endpoint + Suffix;
+}
+
+// ============================================================================
 // 辅助函数
 // ============================================================================
 
@@ -17,31 +35,38 @@ namespace
 
 		for (int32 i = 0; i < Path.Num(); ++i)
 		{
+			if (!Current.IsValid()) return false;
+
 			const FString& Key = Path[i];
 			const bool bIsLast = (i == Path.Num() - 1);
 
-			int32 BracketIdx = Key.Find(TEXT("["));
-			FString FieldName = (BracketIdx != INDEX_NONE) ? Key.Left(BracketIdx) : Key;
-			int32 ArrayIndex = (BracketIdx != INDEX_NONE) ? FCString::Atoi(*Key.Mid(BracketIdx + 1)) : -1;
+			const int32 BracketIdx = Key.Find(TEXT("["));
+			const FString FieldName = (BracketIdx != INDEX_NONE) ? Key.Left(BracketIdx) : Key;
+			const int32 ArrayIndex = (BracketIdx != INDEX_NONE) ? FCString::Atoi(*Key.Mid(BracketIdx + 1)) : -1;
 
 			if (ArrayIndex >= 0)
 			{
-				const TArray<TSharedPtr<FJsonValue>>* ArrayField;
-				if (!Current->TryGetArrayField(FieldName, ArrayField) || ArrayIndex >= ArrayField->Num())
+				const TArray<TSharedPtr<FJsonValue>>* ArrayField = nullptr;
+				if (!Current->TryGetArrayField(FieldName, ArrayField) || !ArrayField || ArrayIndex >= ArrayField->Num())
 					return false;
 
-				if (bIsLast) return (*ArrayField)[ArrayIndex]->TryGetString(OutValue);
+				const TSharedPtr<FJsonValue>& Element = (*ArrayField)[ArrayIndex];
+				if (!Element.IsValid()) return false;
 
-				const TSharedPtr<FJsonObject>* NextObj;
-				if (!(*ArrayField)[ArrayIndex]->TryGetObject(NextObj)) return false;
+				if (bIsLast) return Element->TryGetString(OutValue);
+
+				const TSharedPtr<FJsonObject>* NextObj = nullptr;
+				if (!Element->TryGetObject(NextObj) || !NextObj || !(*NextObj).IsValid())
+					return false;
 				Current = *NextObj;
 			}
 			else
 			{
 				if (bIsLast) return Current->TryGetStringField(FieldName, OutValue);
 
-				const TSharedPtr<FJsonObject>* NextObj;
-				if (!Current->TryGetObjectField(FieldName, NextObj)) return false;
+				const TSharedPtr<FJsonObject>* NextObj = nullptr;
+				if (!Current->TryGetObjectField(FieldName, NextObj) || !NextObj || !(*NextObj).IsValid())
+					return false;
 				Current = *NextObj;
 			}
 		}
@@ -154,13 +179,15 @@ TMap<FString, FString> FGoogleStrategy::GetHeaders(const FString& APIKey) const
 {
 	TMap<FString, FString> Headers;
 	Headers.Add(TEXT("Content-Type"), TEXT("application/json"));
-	// Google 使用 URL 参数传递 API Key，不需要 Authorization header
+	// 使用 x-goog-api-key header 传递密钥，避免URL泄露
+	Headers.Add(TEXT("x-goog-api-key"), APIKey);
 	return Headers;
 }
 
-FString FGoogleStrategy::BuildFullURL(const FString& Endpoint, const FString& ModelName, const FString& APIKey) const
+FString FGoogleStrategy::BuildURL(const FString& Endpoint, const FString& ModelName) const
 {
-	return FString::Printf(TEXT("%s/models/%s:generateContent?key=%s"), *Endpoint, *ModelName, *APIKey);
+	// 密钥通过 x-goog-api-key header 传递，不在URL中暴露
+	return FString::Printf(TEXT("%s/models/%s:generateContent"), *Endpoint, *ModelName);
 }
 
 TSharedPtr<FJsonObject> FGoogleStrategy::BuildRequestBody(
@@ -243,6 +270,8 @@ TSharedPtr<FJsonObject> FVolcengineStrategy::BuildRequestBody(
 
 bool FVolcengineStrategy::ExtractContent(const TSharedPtr<FJsonObject>& Response, FString& OutContent) const
 {
+	if (!Response.IsValid()) return false;
+
 	// 火山引擎 /responses 端点的响应格式:
 	// output 数组中包含多个项，需要找到 type="message" 的项
 	// output: [
@@ -250,8 +279,8 @@ bool FVolcengineStrategy::ExtractContent(const TSharedPtr<FJsonObject>& Response
 	//   {"type": "message", "content": [{"type": "output_text", "text": "..."}]}
 	// ]
 
-	const TArray<TSharedPtr<FJsonValue>>* OutputArray;
-	if (!Response->TryGetArrayField(TEXT("output"), OutputArray))
+	const TArray<TSharedPtr<FJsonValue>>* OutputArray = nullptr;
+	if (!Response->TryGetArrayField(TEXT("output"), OutputArray) || !OutputArray)
 	{
 		// 备用路径：尝试 choices 格式（兼容旧版本）
 		return GetNestedString(Response, { TEXT("choices[0]"), TEXT("message"), TEXT("content") }, OutContent);
@@ -260,8 +289,11 @@ bool FVolcengineStrategy::ExtractContent(const TSharedPtr<FJsonObject>& Response
 	// 遍历 output 数组，找到 type="message" 的项
 	for (const TSharedPtr<FJsonValue>& OutputItem : *OutputArray)
 	{
-		const TSharedPtr<FJsonObject>* OutputObj;
-		if (!OutputItem->TryGetObject(OutputObj)) continue;
+		if (!OutputItem.IsValid()) continue;
+
+		const TSharedPtr<FJsonObject>* OutputObj = nullptr;
+		if (!OutputItem->TryGetObject(OutputObj) || !OutputObj || !(*OutputObj).IsValid())
+			continue;
 
 		FString Type;
 		if (!(*OutputObj)->TryGetStringField(TEXT("type"), Type)) continue;
@@ -269,12 +301,16 @@ bool FVolcengineStrategy::ExtractContent(const TSharedPtr<FJsonObject>& Response
 		if (Type == TEXT("message"))
 		{
 			// 找到 message 类型，提取 content[0].text
-			const TArray<TSharedPtr<FJsonValue>>* ContentArray;
-			if (!(*OutputObj)->TryGetArrayField(TEXT("content"), ContentArray) || ContentArray->Num() == 0)
+			const TArray<TSharedPtr<FJsonValue>>* ContentArray = nullptr;
+			if (!(*OutputObj)->TryGetArrayField(TEXT("content"), ContentArray) || !ContentArray || ContentArray->Num() == 0)
 				continue;
 
-			const TSharedPtr<FJsonObject>* ContentObj;
-			if (!(*ContentArray)[0]->TryGetObject(ContentObj)) continue;
+			const TSharedPtr<FJsonValue>& FirstContent = (*ContentArray)[0];
+			if (!FirstContent.IsValid()) continue;
+
+			const TSharedPtr<FJsonObject>* ContentObj = nullptr;
+			if (!FirstContent->TryGetObject(ContentObj) || !ContentObj || !(*ContentObj).IsValid())
+				continue;
 
 			// 尝试 "text" 字段（output_text 类型）
 			if ((*ContentObj)->TryGetStringField(TEXT("text"), OutContent))
@@ -288,38 +324,41 @@ bool FVolcengineStrategy::ExtractContent(const TSharedPtr<FJsonObject>& Response
 }
 
 // ============================================================================
-// 策略工厂
+// 策略工厂 (Meyers Singleton 模式，避免静态初始化顺序问题)
 // ============================================================================
 
-TMap<EAIProvider, TSharedPtr<IAIProviderStrategy>> FAIProviderStrategyFactory::Strategies;
-bool FAIProviderStrategyFactory::bInitialized = false;
-
-void FAIProviderStrategyFactory::Initialize()
+namespace
 {
-	if (bInitialized) return;
+	TMap<EAIProvider, TSharedPtr<IAIProviderStrategy>>& GetStrategiesMap()
+	{
+		static TMap<EAIProvider, TSharedPtr<IAIProviderStrategy>> Strategies = []()
+		{
+			TMap<EAIProvider, TSharedPtr<IAIProviderStrategy>> Map;
 
-	// OpenAI 兼容提供商
-	TSharedPtr<IAIProviderStrategy> OpenAIStrategy = MakeShared<FOpenAICompatibleStrategy>();
-	Strategies.Add(EAIProvider::OpenAI, OpenAIStrategy);
-	Strategies.Add(EAIProvider::DeepSeek, OpenAIStrategy);
-	Strategies.Add(EAIProvider::Groq, OpenAIStrategy);
-	Strategies.Add(EAIProvider::Together, OpenAIStrategy);
-	Strategies.Add(EAIProvider::OpenRouter, OpenAIStrategy);
-	Strategies.Add(EAIProvider::Mistral, OpenAIStrategy);
-	Strategies.Add(EAIProvider::Custom, OpenAIStrategy);
+			// OpenAI 兼容提供商
+			TSharedPtr<IAIProviderStrategy> OpenAIStrategy = MakeShared<FOpenAICompatibleStrategy>();
+			Map.Add(EAIProvider::OpenAI, OpenAIStrategy);
+			Map.Add(EAIProvider::DeepSeek, OpenAIStrategy);
+			Map.Add(EAIProvider::Groq, OpenAIStrategy);
+			Map.Add(EAIProvider::Together, OpenAIStrategy);
+			Map.Add(EAIProvider::OpenRouter, OpenAIStrategy);
+			Map.Add(EAIProvider::Mistral, OpenAIStrategy);
+			Map.Add(EAIProvider::Custom, OpenAIStrategy);
 
-	// 特殊格式提供商
-	Strategies.Add(EAIProvider::Anthropic, MakeShared<FAnthropicStrategy>());
-	Strategies.Add(EAIProvider::Google, MakeShared<FGoogleStrategy>());
-	Strategies.Add(EAIProvider::Volcengine, MakeShared<FVolcengineStrategy>());
+			// 特殊格式提供商
+			Map.Add(EAIProvider::Anthropic, MakeShared<FAnthropicStrategy>());
+			Map.Add(EAIProvider::Google, MakeShared<FGoogleStrategy>());
+			Map.Add(EAIProvider::Volcengine, MakeShared<FVolcengineStrategy>());
 
-	bInitialized = true;
+			return Map;
+		}();
+		return Strategies;
+	}
 }
 
 TSharedPtr<IAIProviderStrategy> FAIProviderStrategyFactory::GetStrategy(EAIProvider Provider)
 {
-	Initialize();
-
+	TMap<EAIProvider, TSharedPtr<IAIProviderStrategy>>& Strategies = GetStrategiesMap();
 	if (TSharedPtr<IAIProviderStrategy>* Found = Strategies.Find(Provider))
 	{
 		return *Found;
@@ -329,6 +368,5 @@ TSharedPtr<IAIProviderStrategy> FAIProviderStrategyFactory::GetStrategy(EAIProvi
 
 bool FAIProviderStrategyFactory::IsSupported(EAIProvider Provider)
 {
-	Initialize();
-	return Strategies.Contains(Provider);
+	return GetStrategiesMap().Contains(Provider);
 }

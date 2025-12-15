@@ -17,6 +17,9 @@ public:
 	/** 获取 API 端点后缀（如 /chat/completions, /messages, /responses） */
 	virtual FString GetEndpointSuffix() const = 0;
 
+	/** 构建完整 API URL（默认实现：Endpoint + Suffix，子类可覆盖） */
+	virtual FString BuildURL(const FString& Endpoint, const FString& ModelName) const;
+
 	/** 获取请求头 */
 	virtual TMap<FString, FString> GetHeaders(const FString& APIKey) const = 0;
 
@@ -68,13 +71,11 @@ class FGoogleStrategy : public IAIProviderStrategy
 {
 public:
 	virtual FString GetEndpointSuffix() const override { return TEXT(""); } // Google 使用完整 URL
+	virtual FString BuildURL(const FString& Endpoint, const FString& ModelName) const override;
 	virtual TMap<FString, FString> GetHeaders(const FString& APIKey) const override;
 	virtual TSharedPtr<FJsonObject> BuildRequestBody(const FString& Base64Image, const FString& MimeType, const FString& Prompt, int32 MaxTokens, const FString& ModelName) const override;
 	virtual bool ExtractContent(const TSharedPtr<FJsonObject>& Response, FString& OutContent) const override;
 	virtual FString GetDisplayName() const override { return TEXT("Google AI"); }
-
-	/** Google 需要特殊的 URL 构建 */
-	FString BuildFullURL(const FString& Endpoint, const FString& ModelName, const FString& APIKey) const;
 };
 
 /** 火山引擎 Doubao（使用 /responses 端点） */
@@ -102,9 +103,4 @@ public:
 
 	/** 检查提供商是否支持 */
 	static bool IsSupported(EAIProvider Provider);
-
-private:
-	static TMap<EAIProvider, TSharedPtr<IAIProviderStrategy>> Strategies;
-	static bool bInitialized;
-	static void Initialize();
 };

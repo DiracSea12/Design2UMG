@@ -6,6 +6,31 @@
 #include "UMGSchema.generated.h"
 
 /**
+ * 预设 Material 条目 - 用于 AI 引用
+ */
+USTRUCT(BlueprintType)
+struct FUMGPresetMaterial
+{
+	GENERATED_BODY()
+
+	/** AI 引用名称，如 "Circle", "Ring" */
+	UPROPERTY(EditAnywhere, Category = "Material")
+	FString Name;
+
+	/** Material 资产路径 */
+	UPROPERTY(EditAnywhere, Category = "Material", meta = (AllowedClasses = "/Script/Engine.MaterialInterface"))
+	FSoftObjectPath MaterialPath;
+
+	/** 给 AI 的描述，说明用途 */
+	UPROPERTY(EditAnywhere, Category = "Material")
+	FString Description;
+
+	/** 支持的参数名称列表 */
+	UPROPERTY(EditAnywhere, Category = "Material")
+	TArray<FString> Parameters;
+};
+
+/**
  * Anchor 数据结构
  */
 USTRUCT()
@@ -172,6 +197,18 @@ struct FUMGImageAsset
 
 	UPROPERTY()
 	int32 SuggestedHeight = 256;
+
+	/** 是否需要移除背景 */
+	UPROPERTY()
+	bool bRemoveBg = false;
+
+	/** 背景色（十六进制，如 "#000000"） */
+	UPROPERTY()
+	FString BgColor;
+
+	/** 前景色（可选，用于优化抠图） */
+	UPROPERTY()
+	FString FgColor;
 };
 
 /**

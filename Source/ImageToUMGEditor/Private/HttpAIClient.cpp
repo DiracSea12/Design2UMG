@@ -5,6 +5,7 @@
 #include "ImageToUMGSettings.h"
 #include "ImageToUMGLog.h"
 #include "ImageToUMGConstants.h"
+#include "JsonExtractUtils.h"
 #include "HttpModule.h"
 #include "Http.h"
 #include "Interfaces/IHttpRequest.h"
@@ -14,6 +15,15 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
+#include "TimerManager.h"
+#include "Engine/World.h"
+#include "Editor.h"
+#include "HAL/PlatformMisc.h"
+#include "HAL/PlatformProcess.h"
+#include "HAL/FileManager.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Async/Async.h"
 
 // ============================================================================
 // 私有辅助函数
@@ -33,99 +43,59 @@ namespace
 		}
 	}
 
-	FString SanitizeJsonString(const FString& Input)
+	/**
+	 * 掩码URL中的敏感参数（如key=xxx, token=xxx等）
+	 * 避免在日志中泄露密钥
+	 */
+	FString MaskSensitiveURL(const FString& URL)
 	{
-		FString Result = Input;
+		FString Result = URL;
 
-		if (Result.Len() > 0 && Result[0] == 0xFEFF)
+		// 常见的敏感参数名
+		const TArray<FString> SensitiveParams = { TEXT("key"), TEXT("token"), TEXT("api_key"), TEXT("apikey"), TEXT("secret") };
+
+		for (const FString& Param : SensitiveParams)
 		{
-			Result.RemoveAt(0);
-		}
-
-		Result.ReplaceInline(TEXT("\r\n"), TEXT("\n"));
-		Result.ReplaceInline(TEXT("\r"), TEXT("\n"));
-
-		FString Cleaned;
-		Cleaned.Reserve(Result.Len());
-		for (TCHAR Ch : Result)
-		{
-			if (Ch >= 32 || Ch == TEXT('\n') || Ch == TEXT('\t'))
+			// 匹配 param=value 格式
+			FString Pattern = Param + TEXT("=");
+			int32 StartIdx = Result.Find(Pattern, ESearchCase::IgnoreCase);
+			if (StartIdx != INDEX_NONE)
 			{
-				Cleaned.AppendChar(Ch);
+				int32 ValueStart = StartIdx + Pattern.Len();
+				int32 ValueEnd = Result.Find(TEXT("&"), ESearchCase::IgnoreCase, ESearchDir::FromStart, ValueStart);
+				if (ValueEnd == INDEX_NONE)
+				{
+					ValueEnd = Result.Len();
+				}
+				// 替换值为 ***
+				Result = Result.Left(ValueStart) + TEXT("***") + Result.Mid(ValueEnd);
 			}
 		}
 
-		return Cleaned.TrimStartAndEnd();
+		return Result;
 	}
 
-	FString ExtractFromCodeBlock(const FString& Input)
+	/**
+	 * 判断HTTP错误是否可重试
+	 * 可重试的情况：网络错误、超时、服务器错误(5xx)、限流(429)
+	 */
+	bool IsRetryableError(bool bSucceeded, int32 ResponseCode)
 	{
-		int32 CodeBlockStart = Input.Find(TEXT("```"));
-		if (CodeBlockStart == INDEX_NONE)
+		// 网络层失败
+		if (!bSucceeded)
 		{
-			return Input;
+			return true;
 		}
 
-		int32 ContentStart = Input.Find(TEXT("\n"), ESearchCase::IgnoreCase, ESearchDir::FromStart, CodeBlockStart);
-		int32 ContentEnd = Input.Find(TEXT("```"), ESearchCase::IgnoreCase, ESearchDir::FromStart, ContentStart + 1);
-
-		if (ContentStart != INDEX_NONE && ContentEnd != INDEX_NONE)
+		// 服务器错误 (5xx)
+		if (ResponseCode >= 500 && ResponseCode < 600)
 		{
-			return Input.Mid(ContentStart + 1, ContentEnd - ContentStart - 1).TrimStartAndEnd();
+			return true;
 		}
 
-		return Input;
-	}
-
-	bool ExtractJsonByBraceMatching(const FString& Input, FString& OutJson)
-	{
-		int32 JsonStart = Input.Find(TEXT("{"));
-		if (JsonStart == INDEX_NONE)
+		// 限流 (429 Too Many Requests)
+		if (ResponseCode == 429)
 		{
-			return false;
-		}
-
-		int32 BraceCount = 0;
-		int32 JsonEnd = INDEX_NONE;
-		bool bInString = false;
-
-		for (int32 i = JsonStart; i < Input.Len(); ++i)
-		{
-			TCHAR Ch = Input[i];
-
-			if (Ch == TEXT('\\') && i + 1 < Input.Len())
-			{
-				++i;
-				continue;
-			}
-
-			if (Ch == TEXT('"'))
-			{
-				bInString = !bInString;
-				continue;
-			}
-
-			if (!bInString)
-			{
-				if (Ch == TEXT('{'))
-				{
-					++BraceCount;
-				}
-				else if (Ch == TEXT('}'))
-				{
-					--BraceCount;
-					if (BraceCount == 0)
-					{
-						JsonEnd = i;
-						break;
-					}
-				}
-			}
-		}
-
-		if (JsonEnd != INDEX_NONE)
-		{
-			OutJson = Input.Mid(JsonStart, JsonEnd - JsonStart + 1);
 			return true;
 		}
 
@@ -154,6 +124,10 @@ void FHttpAIClient::HandleResponse(
 	FOnAIResponseReceived OnSuccess,
 	FOnAIRequestFailed OnError)
 {
+	const int32 ResponseCode = HttpResponse.IsValid() ? HttpResponse->GetResponseCode() : 0;
+	const bool bIsRetryable = IsRetryableError(bSucceeded, ResponseCode);
+	const FString RetryHint = bIsRetryable ? TEXT("\n\n[This error is typically temporary. Please try again.]") : TEXT("");
+
 	if (!bSucceeded)
 	{
 		FString ErrorDetail = TEXT("Unknown error");
@@ -162,31 +136,41 @@ void FHttpAIClient::HandleResponse(
 			ErrorDetail = GetHttpStatusDescription(HttpRequest->GetStatus());
 			if (HttpResponse.IsValid())
 			{
-				ErrorDetail += FString::Printf(TEXT(" (HTTP %d)"), HttpResponse->GetResponseCode());
+				ErrorDetail += FString::Printf(TEXT(" (HTTP %d)"), ResponseCode);
 			}
 		}
 		UE_LOG(LogImageToUMG, Error, TEXT("HTTP Request Failed: %s - %s"), *DebugInfo, *ErrorDetail);
-		OnError.ExecuteIfBound(FString::Printf(TEXT("HTTP request failed: %s\n\n%s"), *ErrorDetail, *DebugInfo));
+		OnError.ExecuteIfBound(FString::Printf(TEXT("HTTP request failed: %s\n\n%s%s"), *ErrorDetail, *DebugInfo, *RetryHint));
 		return;
 	}
 
 	if (!HttpResponse.IsValid())
 	{
 		UE_LOG(LogImageToUMG, Error, TEXT("Invalid HTTP response"));
-		OnError.ExecuteIfBound(TEXT("Invalid HTTP response"));
+		OnError.ExecuteIfBound(TEXT("Invalid HTTP response") + RetryHint);
 		return;
 	}
 
-	const int32 ResponseCode = HttpResponse->GetResponseCode();
 	const FString ResponseBody = HttpResponse->GetContentAsString();
 
 	UE_LOG(LogImageToUMG, Verbose, TEXT("Response: HTTP %d, %d bytes"), ResponseCode, ResponseBody.Len());
 
 	if (ResponseCode != 200)
 	{
+		// 特殊处理429限流错误
+		FString ErrorMsg;
+		if (ResponseCode == 429)
+		{
+			ErrorMsg = FString::Printf(TEXT("Rate limited by API (HTTP 429)\n\nPlease wait a moment and try again.\n\n%s"),
+				*DebugInfo);
+		}
+		else
+		{
+			ErrorMsg = FString::Printf(TEXT("API Error (HTTP %d)\n\n%s\n\nResponse:\n%s%s"),
+				ResponseCode, *DebugInfo, *ResponseBody.Left(ImageToUMGConstants::ErrorResponseDetailLen), *RetryHint);
+		}
 		UE_LOG(LogImageToUMG, Error, TEXT("API Error (HTTP %d): %s"), ResponseCode, *ResponseBody.Left(ImageToUMGConstants::ErrorResponsePreviewLen));
-		OnError.ExecuteIfBound(FString::Printf(TEXT("API Error (HTTP %d)\n\n%s\n\nResponse:\n%s"),
-			ResponseCode, *DebugInfo, *ResponseBody.Left(ImageToUMGConstants::ErrorResponseDetailLen)));
+		OnError.ExecuteIfBound(ErrorMsg);
 		return;
 	}
 
@@ -212,12 +196,22 @@ void FHttpAIClient::AnalyzeImage(
 	FOnAIResponseReceived OnSuccess,
 	FOnAIRequestFailed OnError)
 {
+	// 调用内部实现，初始重试次数为0
+	SendRequestInternal(ImageData, ImageFormat, ImageWidth, ImageHeight, OnSuccess, OnError, 0);
+}
+
+// ============================================================================
+// 拆分后的辅助函数实现
+// ============================================================================
+
+TSharedPtr<IAIProviderStrategy> FHttpAIClient::ValidateAndGetStrategy(FOnAIRequestFailed& OnError) const
+{
 	const UImageToUMGSettings* Settings = UImageToUMGSettings::Get();
 
 	if (Settings->APIKey.IsEmpty())
 	{
 		OnError.ExecuteIfBound(TEXT("API Key is not configured"));
-		return;
+		return nullptr;
 	}
 
 	// 确定实际提供商
@@ -228,7 +222,7 @@ void FHttpAIClient::AnalyzeImage(
 		if (Provider == EAIProvider::Auto)
 		{
 			OnError.ExecuteIfBound(TEXT("Could not detect AI provider from API key.\nPlease select a provider manually in Project Settings > Plugins > ImageToUMG."));
-			return;
+			return nullptr;
 		}
 	}
 
@@ -236,146 +230,233 @@ void FHttpAIClient::AnalyzeImage(
 	TSharedPtr<IAIProviderStrategy> Strategy = FAIProviderStrategyFactory::GetStrategy(Provider);
 	if (!Strategy.IsValid())
 	{
-		OnError.ExecuteIfBound(FString::Printf(
-			TEXT("Unsupported AI provider: %s"),
+		OnError.ExecuteIfBound(FString::Printf(TEXT("Unsupported AI provider: %s"),
 			*UImageToUMGSettings::GetProviderName(Provider)));
-		return;
+		return nullptr;
 	}
 
 	// 校验 ModelName（除 Custom 外都需要）
 	if (Settings->ModelName.IsEmpty() && Provider != EAIProvider::Custom)
 	{
-		OnError.ExecuteIfBound(FString::Printf(
-			TEXT("No model specified for %s.\nPlease select a model in Project Settings > Plugins > ImageToUMG."),
+		OnError.ExecuteIfBound(FString::Printf(TEXT("No model specified for %s.\nPlease select a model in Project Settings > Plugins > ImageToUMG."),
 			*Strategy->GetDisplayName()));
-		return;
+		return nullptr;
 	}
 
-	// 构建 URL
-	FString Endpoint = Settings->CustomEndpoint.IsEmpty()
-		? UImageToUMGSettings::GetProviderEndpoint(Provider)
-		: Settings->CustomEndpoint;
+	return Strategy;
+}
 
-	FString URL;
-	if (Provider == EAIProvider::Google)
+FString FHttpAIClient::BuildRequestURL(TSharedPtr<IAIProviderStrategy> Strategy) const
+{
+	const UImageToUMGSettings* Settings = UImageToUMGSettings::Get();
+
+	FString Endpoint = Settings->APIHost.IsEmpty()
+		? UImageToUMGSettings::GetProviderEndpoint(Settings->Provider == EAIProvider::Auto
+			? UImageToUMGSettings::DetectProviderFromAPIKey(Settings->APIKey) : Settings->Provider)
+		: Settings->APIHost;
+
+	// 处理 APIHost 的智能拼接标记
+	if (Endpoint.EndsWith(TEXT("#")))
 	{
-		// Google 需要特殊的 URL 构建
-		URL = StaticCastSharedPtr<FGoogleStrategy>(Strategy)->BuildFullURL(Endpoint, Settings->ModelName, Settings->APIKey);
-	}
-	else
-	{
-		URL = Endpoint + Strategy->GetEndpointSuffix();
+		Endpoint = Endpoint.LeftChop(1);
 	}
 
-	// 获取请求头
-	TMap<FString, FString> Headers = Strategy->GetHeaders(Settings->APIKey);
+	return Strategy->BuildURL(Endpoint, Settings->ModelName);
+}
 
-	// 准备请求数据
-	const FString Base64Image = FBase64::Encode(ImageData);
-	const FString MimeType = ImageFormat.ToLower() == TEXT("png") ? TEXT("image/png") : TEXT("image/jpeg");
-	const FString Prompt = GetSystemPrompt(ImageWidth, ImageHeight);
+FString FHttpAIClient::BuildRequestBody(
+	TSharedPtr<IAIProviderStrategy> Strategy,
+	const FString& Base64Image,
+	const FString& MimeType,
+	int32 ImageWidth,
+	int32 ImageHeight) const
+{
+	const UImageToUMGSettings* Settings = UImageToUMGSettings::Get();
+	const FString Prompt = Settings->GetFormattedSystemPrompt(ImageWidth, ImageHeight);
 
-	// 构建请求体
 	TSharedPtr<FJsonObject> RequestBodyJson = Strategy->BuildRequestBody(
 		Base64Image, MimeType, Prompt, Settings->MaxTokens, Settings->ModelName);
-	FString RequestBody = SerializeJson(RequestBodyJson);
 
-	// 调试选项：禁用SSL验证（必须在创建请求之前设置）
-	const bool bDisableSSL = Settings->bDisableSSLVerification;
-	if (bDisableSSL)
+	return SerializeJson(RequestBodyJson);
+}
+
+bool FHttpAIClient::ConfigureProxySettings(FString& OutOriginalProxy) const
+{
+	const UImageToUMGSettings* Settings = UImageToUMGSettings::Get();
+	const bool bUseCustomProxy = !Settings->HttpProxy.IsEmpty();
+	const bool bBypassProxy = Settings->bBypassSystemProxy;
+
+	// 警告：UE HTTP 模块只支持模块级别的代理设置。
+	// 并发请求可能会受影响。如需可靠的代理控制，请在插件设置中启用"使用 Python 脚本"。
+
+	if (bBypassProxy)
 	{
-		UE_LOG(LogImageToUMG, Warning, TEXT("SSL verification disabled for this request"));
-		FPlatformHttp::VerifyPeerSslCertificate(false);
+		OutOriginalProxy = FHttpModule::Get().GetProxyAddress();
+		FHttpModule::Get().SetProxyAddress(TEXT(""));
+		// 注意：不再修改 NO_PROXY 环境变量，因为会影响整个进程
+		UE_LOG(LogImageToUMG, Verbose, TEXT("绕过系统代理 (原: %s)。注意：这会影响所有并发的HTTP请求。"),
+			OutOriginalProxy.IsEmpty() ? TEXT("无") : *OutOriginalProxy);
+		return true;
 	}
 
-	// 创建 HTTP 请求
+	if (bUseCustomProxy)
+	{
+		OutOriginalProxy = FHttpModule::Get().GetProxyAddress();
+		FHttpModule::Get().SetProxyAddress(Settings->HttpProxy);
+		UE_LOG(LogImageToUMG, Verbose, TEXT("使用自定义HTTP代理: %s。注意：这会影响所有并发的HTTP请求。"), *Settings->HttpProxy);
+		return true;
+	}
+
+	return false;
+}
+
+void FHttpAIClient::RestoreProxySettings(const FString& OriginalProxy)
+{
+	FHttpModule::Get().SetProxyAddress(OriginalProxy);
+}
+
+void FHttpAIClient::LogRequestDiagnostics(
+	TSharedPtr<IAIProviderStrategy> Strategy,
+	const FString& URL,
+	int32 BodySizeBytes) const
+{
+	const UImageToUMGSettings* Settings = UImageToUMGSettings::Get();
+	const FString& ProxyAddress = FHttpModule::Get().GetProxyAddress();
+
+	UE_LOG(LogImageToUMG, Log, TEXT("=== AI Request ==="));
+	UE_LOG(LogImageToUMG, Log, TEXT("  Provider: %s, Model: %s"), *Strategy->GetDisplayName(), *Settings->ModelName);
+	UE_LOG(LogImageToUMG, Log, TEXT("  URL: %s"), *MaskSensitiveURL(URL));
+	UE_LOG(LogImageToUMG, Log, TEXT("  Body: %.2f MB, Timeout: %.0fs, Proxy: %s"),
+		BodySizeBytes / (1024.0f * 1024.0f), Settings->TimeoutSeconds,
+		ProxyAddress.IsEmpty() ? TEXT("none") : *ProxyAddress);
+}
+
+void FHttpAIClient::SendRequestInternal(
+	const TArray<uint8>& ImageData,
+	const FString& ImageFormat,
+	int32 ImageWidth,
+	int32 ImageHeight,
+	FOnAIResponseReceived OnSuccess,
+	FOnAIRequestFailed OnError,
+	int32 RetryCount)
+{
+	// 1. 验证设置并获取策略
+	TSharedPtr<IAIProviderStrategy> Strategy = ValidateAndGetStrategy(OnError);
+	if (!Strategy.IsValid()) return;
+
+	// 2. 构建 URL 和请求体
+	const FString URL = BuildRequestURL(Strategy);
+	const FString Base64Image = FBase64::Encode(ImageData);
+	const FString MimeType = ImageFormat.ToLower() == TEXT("png") ? TEXT("image/png") : TEXT("image/jpeg");
+	const FString RequestBody = BuildRequestBody(Strategy, Base64Image, MimeType, ImageWidth, ImageHeight);
+
+	// 3. 调试：保存请求体到文件
+	const UImageToUMGSettings* Settings = UImageToUMGSettings::Get();
+	if (Settings->bDebugSaveRequestBody)
+	{
+		const FString DebugDir = FPaths::ProjectSavedDir() / TEXT("ImageToUMG/Debug");
+		IFileManager::Get().MakeDirectory(*DebugDir, true);
+		FFileHelper::SaveStringToFile(RequestBody, *(DebugDir / TEXT("last_request_body.json")),
+			FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	}
+
+	// 4. 配置代理
+	FString OriginalProxy;
+	const bool bNeedRestoreProxy = ConfigureProxySettings(OriginalProxy);
+
+	// 5. 创建 HTTP 请求
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
 	Request->SetURL(URL);
 	Request->SetVerb(TEXT("POST"));
 	Request->SetTimeout(FMath::Max(ImageToUMGConstants::DefaultTimeoutSeconds, Settings->TimeoutSeconds));
 
-	// 添加必要的 HTTP 头
+	// 设置 Headers
 	Request->SetHeader(TEXT("Connection"), TEXT("keep-alive"));
 	Request->SetHeader(TEXT("User-Agent"), TEXT("UnrealEngine/5.0"));
 	Request->SetHeader(TEXT("Accept"), TEXT("application/json"));
-	Request->SetHeader(TEXT("Accept-Encoding"), TEXT("identity")); // 禁用压缩，避免兼容性问题
+	Request->SetHeader(TEXT("Accept-Encoding"), TEXT("identity"));
 
-	for (const auto& Header : Headers)
+	for (const auto& Header : Strategy->GetHeaders(Settings->APIKey))
 	{
 		Request->SetHeader(Header.Key, Header.Value);
 	}
 
+	// 设置请求体
 	FTCHARToUTF8 Converter(*RequestBody);
 	TArray<uint8> RequestBodyBytes;
 	RequestBodyBytes.Append((const uint8*)Converter.Get(), Converter.Length());
-
-	// 检查请求体大小
-	const int32 BodySizeMB = RequestBodyBytes.Num() / (1024 * 1024);
-	if (BodySizeMB > ImageToUMGConstants::MaxRequestBodySizeMB)
-	{
-		UE_LOG(LogImageToUMG, Warning, TEXT("Request body is very large: %d MB. This may cause network issues."), BodySizeMB);
-	}
-
 	Request->SetContent(RequestBodyBytes);
 
-	// 日志
-	UE_LOG(LogImageToUMG, Log, TEXT("Sending AI request: %s, Model: %s, Image: %dx%d, Body: %.2f MB"),
-		*Strategy->GetDisplayName(), *Settings->ModelName, ImageWidth, ImageHeight,
-		RequestBodyBytes.Num() / (1024.0f * 1024.0f));
-	UE_LOG(LogImageToUMG, Log, TEXT("URL: %s"), *URL);
-	UE_LOG(LogImageToUMG, Log, TEXT("SSL Verification: %s, Timeout: %.0f seconds"),
-		bDisableSSL ? TEXT("DISABLED") : TEXT("enabled"), Settings->TimeoutSeconds);
+	// 6. 记录诊断日志
+	LogRequestDiagnostics(Strategy, URL, RequestBodyBytes.Num());
 
-	// 调试信息
+	// 7. 设置完成回调
 	FString DebugInfo = FString::Printf(TEXT("Provider: %s\nModel: %s\nURL: %s"),
-		*Strategy->GetDisplayName(), *Settings->ModelName, *URL);
+		*Strategy->GetDisplayName(), *Settings->ModelName, *MaskSensitiveURL(URL));
 
 	TWeakPtr<FHttpAIClient> WeakSelf = AsShared();
+	TArray<uint8> CapturedImageData = ImageData;
+	FString CapturedImageFormat = ImageFormat;
 
 	Request->OnProcessRequestComplete().BindLambda(
-		[WeakSelf, Strategy, OnSuccess, OnError, DebugInfo, bDisableSSL](FHttpRequestPtr HttpRequest, FHttpResponsePtr HttpResponse, bool bSucceeded)
-		{
-			// 恢复 SSL 设置
-			if (bDisableSSL)
-			{
-				FPlatformHttp::VerifyPeerSslCertificate(true);
-			}
-
-			TSharedPtr<FHttpAIClient> StrongThis = WeakSelf.Pin();
-			if (!StrongThis.IsValid())
-			{
-				UE_LOG(LogImageToUMG, Warning, TEXT("FHttpAIClient destroyed before callback"));
-				return;
-			}
-
-			// 详细的失败原因日志
-			if (!bSucceeded && HttpRequest.IsValid())
-			{
-				EHttpRequestStatus::Type Status = HttpRequest->GetStatus();
-				EHttpFailureReason FailureReason = HttpRequest->GetFailureReason();
-				UE_LOG(LogImageToUMG, Error, TEXT("HTTP Request Status: %d, FailureReason: %d"),
-					static_cast<int32>(Status), static_cast<int32>(FailureReason));
-			}
-
-			StrongThis->HandleResponse(HttpRequest, HttpResponse, bSucceeded, Strategy, DebugInfo, OnSuccess, OnError);
-		});
-
-	Request->ProcessRequest();
-}
-
-FString FHttpAIClient::GetSystemPrompt(int32 ImageWidth, int32 ImageHeight) const
-{
-	const UImageToUMGSettings* Settings = UImageToUMGSettings::Get();
-	FString Prompt = Settings->SystemPrompt;
-
-	if (Prompt.IsEmpty())
+		[WeakSelf, Strategy, OnSuccess, OnError, DebugInfo, bNeedRestoreProxy, OriginalProxy,
+		 CapturedImageData, CapturedImageFormat, ImageWidth, ImageHeight, RetryCount]
+		(FHttpRequestPtr HttpRequest, FHttpResponsePtr HttpResponse, bool bSucceeded)
 	{
-		Prompt = UImageToUMGSettings::GetDefaultSystemPrompt();
-	}
+		// 恢复代理设置
+		if (bNeedRestoreProxy)
+		{
+			RestoreProxySettings(OriginalProxy);
+		}
 
-	Prompt.ReplaceInline(TEXT("{WIDTH}"), *FString::FromInt(ImageWidth));
-	Prompt.ReplaceInline(TEXT("{HEIGHT}"), *FString::FromInt(ImageHeight));
-	return Prompt;
+		TSharedPtr<FHttpAIClient> StrongThis = WeakSelf.Pin();
+		if (!StrongThis.IsValid())
+		{
+			UE_LOG(LogImageToUMG, Warning, TEXT("FHttpAIClient destroyed before callback"));
+			return;
+		}
+
+		// 检查是否需要重试（仅网络层失败）
+		const bool bIsNetworkError = !bSucceeded && HttpRequest.IsValid() &&
+			HttpRequest->GetStatus() == EHttpRequestStatus::Failed;
+
+		if (bIsNetworkError && RetryCount < ImageToUMGConstants::MaxRetryCount)
+		{
+			UE_LOG(LogImageToUMG, Warning, TEXT("Network error, retry %d/%d in %.1fs..."),
+				RetryCount + 1, ImageToUMGConstants::MaxRetryCount, ImageToUMGConstants::RetryDelaySeconds);
+
+			if (GEditor)
+			{
+				FTimerHandle RetryTimer;
+				GEditor->GetTimerManager()->SetTimer(RetryTimer,
+					FTimerDelegate::CreateLambda([WeakSelf, CapturedImageData, CapturedImageFormat,
+						ImageWidth, ImageHeight, OnSuccess, OnError, RetryCount]()
+					{
+						if (TSharedPtr<FHttpAIClient> RetryThis = WeakSelf.Pin())
+						{
+							RetryThis->SendRequestInternal(CapturedImageData, CapturedImageFormat,
+								ImageWidth, ImageHeight, OnSuccess, OnError, RetryCount + 1);
+						}
+					}),
+					ImageToUMGConstants::RetryDelaySeconds, false);
+			}
+			return;
+		}
+
+		// 记录失败详情
+		if (!bSucceeded && HttpRequest.IsValid())
+		{
+			UE_LOG(LogImageToUMG, Error, TEXT("HTTP Failed: Status=%d, Reason=%s, Elapsed=%.2fs"),
+				static_cast<int32>(HttpRequest->GetStatus()),
+				LexToString(HttpRequest->GetFailureReason()),
+				HttpRequest->GetElapsedTime());
+		}
+
+		StrongThis->HandleResponse(HttpRequest, HttpResponse, bSucceeded, Strategy, DebugInfo, OnSuccess, OnError);
+	});
+
+	// 8. 发送请求
+	Request->ProcessRequest();
 }
 
 bool FHttpAIClient::ExtractJsonFromResponse(

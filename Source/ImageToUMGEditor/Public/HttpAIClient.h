@@ -47,9 +47,6 @@ private:
 		FOnAIResponseReceived OnSuccess,
 		FOnAIRequestFailed OnError);
 
-	/** 获取 System Prompt */
-	FString GetSystemPrompt(int32 ImageWidth, int32 ImageHeight) const;
-
 	/** 从响应中提取 JSON（使用策略） */
 	bool ExtractJsonFromResponse(
 		const FString& Response,
@@ -57,6 +54,44 @@ private:
 		FString& OutJson,
 		FString& OutError);
 
+	/** 内部发送请求（支持重试） */
+	void SendRequestInternal(
+		const TArray<uint8>& ImageData,
+		const FString& ImageFormat,
+		int32 ImageWidth,
+		int32 ImageHeight,
+		FOnAIResponseReceived OnSuccess,
+		FOnAIRequestFailed OnError,
+		int32 RetryCount);
+
 	/** JSON 序列化辅助 */
 	static FString SerializeJson(const TSharedPtr<class FJsonObject>& JsonObject);
+
+	// ========== 拆分后的辅助函数 ==========
+
+	/** 验证设置并获取策略，失败时通过 OnError 报告 */
+	TSharedPtr<IAIProviderStrategy> ValidateAndGetStrategy(FOnAIRequestFailed& OnError) const;
+
+	/** 构建请求 URL */
+	FString BuildRequestURL(TSharedPtr<IAIProviderStrategy> Strategy) const;
+
+	/** 构建请求体 */
+	FString BuildRequestBody(
+		TSharedPtr<IAIProviderStrategy> Strategy,
+		const FString& Base64Image,
+		const FString& MimeType,
+		int32 ImageWidth,
+		int32 ImageHeight) const;
+
+	/** 配置代理设置，返回是否需要在请求完成后恢复 */
+	bool ConfigureProxySettings(FString& OutOriginalProxy) const;
+
+	/** 恢复代理设置 */
+	static void RestoreProxySettings(const FString& OriginalProxy);
+
+	/** 记录请求诊断日志 */
+	void LogRequestDiagnostics(
+		TSharedPtr<IAIProviderStrategy> Strategy,
+		const FString& URL,
+		int32 BodySizeBytes) const;
 };

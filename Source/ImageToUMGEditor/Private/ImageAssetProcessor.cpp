@@ -4,6 +4,7 @@
 #include "ImageToUMGLog.h"
 #include "ImageToUMGConstants.h"
 #include "ImageEncoder.h"
+#include "JsonExtractUtils.h"
 
 #include "IImageWrapper.h"
 #include "IImageWrapperModule.h"
@@ -26,34 +27,77 @@ namespace
 		int32 TargetWidth, TargetHeight;
 	};
 
+	// 背景移除：将匹配背景色的像素设为透明
+	void RemoveBackgroundColor(TArray<uint8>& RawData, int32 Width, int32 Height,
+		const FString& BgColor, int32 Tolerance = 30)
+	{
+		uint8 BgR, BgG, BgB;
+		if (!FJsonExtractUtils::ParseHexColor(BgColor, BgR, BgG, BgB))
+		{
+			UE_LOG(LogImageToUMG, Warning, TEXT("Invalid BgColor: %s"), *BgColor);
+			return;
+		}
+
+		UE_LOG(LogImageToUMG, Verbose, TEXT("正在移除背景色: R=%d G=%d B=%d (容差=%d)"),
+			BgR, BgG, BgB, Tolerance);
+
+		int32 RemovedCount = 0;
+		const int32 PixelCount = Width * Height;
+
+		for (int32 i = 0; i < PixelCount; ++i)
+		{
+			uint8* Pixel = RawData.GetData() + i * 4;
+			// BGRA 格式
+			uint8 B = Pixel[0];
+			uint8 G = Pixel[1];
+			uint8 R = Pixel[2];
+
+			// 计算颜色差异
+			int32 Diff = FMath::Abs(R - BgR) + FMath::Abs(G - BgG) + FMath::Abs(B - BgB);
+
+			if (Diff <= Tolerance)
+			{
+				// 设置为完全透明
+				Pixel[3] = 0;
+				RemovedCount++;
+			}
+		}
+
+		UE_LOG(LogImageToUMG, Verbose, TEXT("背景移除完成: %d/%d 像素 (%.1f%%)"),
+			RemovedCount, PixelCount, 100.0f * RemovedCount / PixelCount);
+	}
+
 	// 计算裁剪参数（消除重复代码，支持X/Y分别缩放）
 	FCropParams CalculateCropParams(
 		const FUMGImageAsset& Asset,
 		int32 SourceWidth, int32 SourceHeight,
 		FVector2D CoordScale)
 	{
-		FCropParams P;
+		FCropParams Params;
 		if (Asset.X < 0 || Asset.Y < 0 || Asset.Width <= 0 || Asset.Height <= 0)
 		{
 			// 使用整个源图
-			P.CropX = 0;
-			P.CropY = 0;
-			P.CropW = SourceWidth;
-			P.CropH = SourceHeight;
-			P.TargetWidth = (Asset.SuggestedWidth > 0) ? Asset.SuggestedWidth : SourceWidth;
-			P.TargetHeight = (Asset.SuggestedHeight > 0) ? Asset.SuggestedHeight : SourceHeight;
+			Params.CropX = 0;
+			Params.CropY = 0;
+			Params.CropW = SourceWidth;
+			Params.CropH = SourceHeight;
+			Params.TargetWidth = (Asset.SuggestedWidth > 0) ? Asset.SuggestedWidth : SourceWidth;
+			Params.TargetHeight = (Asset.SuggestedHeight > 0) ? Asset.SuggestedHeight : SourceHeight;
 		}
 		else
 		{
-			// 坐标缩放：AI返回的坐标基于缩放后图像，需要转换到原始图像坐标（X/Y分别缩放）
-			P.CropX = FMath::RoundToInt(Asset.X * CoordScale.X);
-			P.CropY = FMath::RoundToInt(Asset.Y * CoordScale.Y);
-			P.CropW = FMath::RoundToInt(Asset.Width * CoordScale.X);
-			P.CropH = FMath::RoundToInt(Asset.Height * CoordScale.Y);
-			P.TargetWidth = (Asset.SuggestedWidth > 0) ? Asset.SuggestedWidth : P.CropW;
-			P.TargetHeight = (Asset.SuggestedHeight > 0) ? Asset.SuggestedHeight : P.CropH;
+			// 坐标缩放：AI返回的坐标基于缩放后图像，需要转换到原始图像坐标
+			// 先计算终点坐标再取整，避免分别取整导致的累计误差
+			Params.CropX = FMath::RoundToInt(Asset.X * CoordScale.X);
+			Params.CropY = FMath::RoundToInt(Asset.Y * CoordScale.Y);
+			int32 CropRight = FMath::RoundToInt((Asset.X + Asset.Width) * CoordScale.X);
+			int32 CropBottom = FMath::RoundToInt((Asset.Y + Asset.Height) * CoordScale.Y);
+			Params.CropW = FMath::Max(1, CropRight - Params.CropX);
+			Params.CropH = FMath::Max(1, CropBottom - Params.CropY);
+			Params.TargetWidth = (Asset.SuggestedWidth > 0) ? Asset.SuggestedWidth : Params.CropW;
+			Params.TargetHeight = (Asset.SuggestedHeight > 0) ? Asset.SuggestedHeight : Params.CropH;
 		}
-		return P;
+		return Params;
 	}
 
 	// 双线性采样单个像素
@@ -153,14 +197,34 @@ int32 FImageAssetProcessor::ProcessImageAssets(
 
 	for (const FUMGImageAsset& Asset : ImageAssets)
 	{
-		FCropParams P = CalculateCropParams(Asset, SourceWidth, SourceHeight, CoordScale);
+		FCropParams Params = CalculateCropParams(Asset, SourceWidth, SourceHeight, CoordScale);
 
 		TArray<uint8> CroppedData;
 		if (!CropAndResizeImageFromRaw(SourceRawData, SourceWidth, SourceHeight,
-			P.CropX, P.CropY, P.CropW, P.CropH, P.TargetWidth, P.TargetHeight, CroppedData))
+			Params.CropX, Params.CropY, Params.CropW, Params.CropH, Params.TargetWidth, Params.TargetHeight, CroppedData))
 		{
 			UE_LOG(LogImageToUMG, Warning, TEXT("Failed to crop image for asset '%s'"), *Asset.Id);
 			continue;
+		}
+
+		// 背景移除：如果 AI 标记需要移除背景且提供了背景色
+		if (Asset.bRemoveBg && !Asset.BgColor.IsEmpty())
+		{
+			TArray<uint8> RawData;
+			int32 Width, Height;
+			if (FImageEncoder::DecompressImageData(CroppedData, RawData, Width, Height))
+			{
+				UE_LOG(LogImageToUMG, Verbose, TEXT("Asset '%s' 需要背景移除, BgColor=%s"), *Asset.Id, *Asset.BgColor);
+				RemoveBackgroundColor(RawData, Width, Height, Asset.BgColor);
+
+				// 重新压缩为 PNG
+				IImageWrapperModule& ImageWrapperModule = FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
+				TSharedPtr<IImageWrapper> Wrapper = ImageWrapperModule.CreateImageWrapper(EImageFormat::PNG);
+				if (Wrapper.IsValid() && Wrapper->SetRaw(RawData.GetData(), RawData.Num(), Width, Height, ERGBFormat::BGRA, 8))
+				{
+					CroppedData = Wrapper->GetCompressed();
+				}
+			}
 		}
 
 		// 生成安全的资产名称
@@ -193,7 +257,7 @@ int32 FImageAssetProcessor::ProcessImageAssets(
 			OutResults.Add(Result);
 			SuccessCount++;
 
-			UE_LOG(LogImageToUMG, Log, TEXT("Created texture '%s'"), *Result.TexturePath);
+			UE_LOG(LogImageToUMG, Verbose, TEXT("已创建纹理 '%s'"), *Result.TexturePath);
 		}
 	}
 
@@ -379,12 +443,19 @@ int32 FImageAssetProcessor::ProcessImageAssetsForPreview(
 
 	for (const FUMGImageAsset& Asset : ImageAssets)
 	{
-		FCropParams P = CalculateCropParams(Asset, SourceWidth, SourceHeight, CoordScale);
+		FCropParams Params = CalculateCropParams(Asset, SourceWidth, SourceHeight, CoordScale);
+
+		UE_LOG(LogImageToUMG, Verbose, TEXT("处理图像资产 '%s': AI坐标(%d,%d,%d,%d) -> 源图坐标(%d,%d,%d,%d), 源图尺寸=%dx%d"),
+			*Asset.Id,
+			Asset.X, Asset.Y, Asset.Width, Asset.Height,
+			Params.CropX, Params.CropY, Params.CropW, Params.CropH,
+			SourceWidth, SourceHeight);
 
 		TArray<uint8> CroppedData;
 		if (!CropAndResizeImageFromRaw(SourceRawData, SourceWidth, SourceHeight,
-			P.CropX, P.CropY, P.CropW, P.CropH, P.TargetWidth, P.TargetHeight, CroppedData))
+			Params.CropX, Params.CropY, Params.CropW, Params.CropH, Params.TargetWidth, Params.TargetHeight, CroppedData))
 		{
+			UE_LOG(LogImageToUMG, Warning, TEXT("裁剪失败: '%s'"), *Asset.Id);
 			continue;
 		}
 
@@ -394,6 +465,13 @@ int32 FImageAssetProcessor::ProcessImageAssetsForPreview(
 		if (!FImageEncoder::DecompressImageData(CroppedData, RawData, Width, Height))
 		{
 			continue;
+		}
+
+		// 背景移除：如果 AI 标记需要移除背景且提供了背景色
+		if (Asset.bRemoveBg && !Asset.BgColor.IsEmpty())
+		{
+			UE_LOG(LogImageToUMG, Verbose, TEXT("Asset '%s' 需要背景移除, BgColor=%s"), *Asset.Id, *Asset.BgColor);
+			RemoveBackgroundColor(RawData, Width, Height, Asset.BgColor);
 		}
 
 		// 创建临时纹理（不保存到磁盘）
@@ -505,7 +583,7 @@ void FImageAssetProcessor::PrepareImageForAI(
 	{
 		OutImageData = MoveTemp(ScaledData);
 		OutSize = FIntPoint(NewW, NewH);
-		UE_LOG(LogImageToUMG, Log, TEXT("Image scaled to %dx%d for AI (original: %dx%d)"), NewW, NewH, SourceSize.X, SourceSize.Y);
+		UE_LOG(LogImageToUMG, Verbose, TEXT("Image scaled to %dx%d for AI (original: %dx%d)"), NewW, NewH, SourceSize.X, SourceSize.Y);
 	}
 	else
 	{

@@ -11,7 +11,15 @@
 
 UImageToUMGSettings* UImageToUMGSettings::Get()
 {
-	return GetMutableDefault<UImageToUMGSettings>();
+	UImageToUMGSettings* Settings = GetMutableDefault<UImageToUMGSettings>();
+
+	// 首次使用时初始化默认 Material 列表
+	if (Settings && Settings->PresetMaterials.Num() == 0)
+	{
+		Settings->PresetMaterials = GetDefaultPresetMaterials();
+	}
+
+	return Settings;
 }
 
 EAIProvider UImageToUMGSettings::DetectProviderFromAPIKey(const FString& InAPIKey)
@@ -41,13 +49,13 @@ FString UImageToUMGSettings::GetProviderName(EAIProvider InProvider)
 	case EAIProvider::Auto: return TEXT("Auto Detect");
 	case EAIProvider::OpenAI: return TEXT("OpenAI");
 	case EAIProvider::Anthropic: return TEXT("Anthropic");
-	case EAIProvider::Google: return TEXT("Google AI");
+	case EAIProvider::Google: return TEXT("Google");
 	case EAIProvider::DeepSeek: return TEXT("DeepSeek");
-	case EAIProvider::Mistral: return TEXT("Mistral AI");
+	case EAIProvider::Mistral: return TEXT("Mistral");
 	case EAIProvider::Groq: return TEXT("Groq");
-	case EAIProvider::Together: return TEXT("Together AI");
+	case EAIProvider::Together: return TEXT("Together");
 	case EAIProvider::OpenRouter: return TEXT("OpenRouter");
-	case EAIProvider::Volcengine: return TEXT("Volcengine (Doubao)");
+	case EAIProvider::Volcengine: return TEXT("Volcengine");
 	case EAIProvider::Custom: return TEXT("Custom");
 	default: return TEXT("Unknown");
 	}
@@ -68,6 +76,80 @@ FString UImageToUMGSettings::GetProviderEndpoint(EAIProvider InProvider)
 	case EAIProvider::Volcengine: return TEXT("https://ark.cn-beijing.volces.com/api/v3");
 	default: return TEXT("");
 	}
+}
+
+FString UImageToUMGSettings::GetEndpointSuffixForProvider(EAIProvider InProvider)
+{
+	switch (InProvider)
+	{
+	case EAIProvider::OpenAI:
+	case EAIProvider::DeepSeek:
+	case EAIProvider::Mistral:
+	case EAIProvider::Groq:
+	case EAIProvider::Together:
+	case EAIProvider::OpenRouter:
+		return TEXT("/chat/completions");
+	case EAIProvider::Anthropic:
+		return TEXT("/messages");
+	case EAIProvider::Volcengine:
+		return TEXT("/responses");
+	case EAIProvider::Google:
+		return TEXT("");  // Google 使用特殊 URL 构建
+	default:
+		return TEXT("");
+	}
+}
+
+FString UImageToUMGSettings::BuildAPIURL(EAIProvider InProvider, const FString& Suffix)
+{
+	UImageToUMGSettings* Settings = Get();
+	FString UserHost = Settings ? Settings->APIHost : TEXT("");
+	FString DefaultEndpoint = GetProviderEndpoint(InProvider);
+
+	// 留空用默认
+	if (UserHost.IsEmpty())
+	{
+		return DefaultEndpoint + Suffix;
+	}
+
+	// 以 # 结尾：不拼接
+	if (UserHost.EndsWith(TEXT("#")))
+	{
+		return UserHost.LeftChop(1);
+	}
+
+	// 以 / 结尾：去掉后缀开头的 /
+	if (UserHost.EndsWith(TEXT("/")))
+	{
+		return UserHost + (Suffix.StartsWith(TEXT("/")) ? Suffix.Mid(1) : Suffix);
+	}
+
+	// 普通情况：直接拼接
+	return UserHost + Suffix;
+}
+
+void UImageToUMGSettings::UpdateURLPreview()
+{
+	EAIProvider ActualProvider = (Provider == EAIProvider::Auto)
+		? DetectProviderFromAPIKey(APIKey)
+		: Provider;
+
+	if (ActualProvider == EAIProvider::Custom || ActualProvider == EAIProvider::Auto)
+	{
+		URLPreview = TEXT("(Select provider to preview)");
+		return;
+	}
+
+	if (ActualProvider == EAIProvider::Google)
+	{
+		// Google 使用 x-goog-api-key header 传递密钥
+		FString Endpoint = APIHost.IsEmpty() ? GetProviderEndpoint(ActualProvider) : APIHost;
+		URLPreview = FString::Printf(TEXT("%s/models/{MODEL}:generateContent (key via header)"), *Endpoint);
+		return;
+	}
+
+	FString Suffix = GetEndpointSuffixForProvider(ActualProvider);
+	URLPreview = BuildAPIURL(ActualProvider, Suffix);
 }
 
 TArray<FString> UImageToUMGSettings::GetAvailableModels() const
@@ -94,6 +176,57 @@ namespace
 		TArray<FString> TextModels;
 		TArray<FString> ImageModels;
 	};
+
+	/**
+	 * 验证URL格式和安全性
+	 * @return 空字符串表示有效，否则返回错误信息
+	 */
+	FString ValidateEndpointURL(const FString& URL)
+	{
+		if (URL.IsEmpty())
+		{
+			return TEXT(""); // 空URL是允许的（使用默认）
+		}
+
+		// 移除末尾的 # 和 /（用于智能拼接）
+		FString CleanURL = URL;
+		if (CleanURL.EndsWith(TEXT("#")))
+		{
+			CleanURL = CleanURL.LeftChop(1);
+		}
+		if (CleanURL.EndsWith(TEXT("/")))
+		{
+			CleanURL = CleanURL.LeftChop(1);
+		}
+
+		// 检查协议
+		if (!CleanURL.StartsWith(TEXT("https://")) && !CleanURL.StartsWith(TEXT("http://")))
+		{
+			return TEXT("URL must start with https:// or http://");
+		}
+
+		// 警告HTTP（不安全）
+		if (CleanURL.StartsWith(TEXT("http://")) && !CleanURL.Contains(TEXT("localhost")) && !CleanURL.Contains(TEXT("127.0.0.1")))
+		{
+			UE_LOG(LogImageToUMG, Warning, TEXT("Using insecure HTTP protocol for API endpoint. Consider using HTTPS."));
+		}
+
+		// 基本格式检查
+		int32 SchemeEnd = CleanURL.Find(TEXT("://"));
+		if (SchemeEnd == INDEX_NONE || SchemeEnd + 3 >= CleanURL.Len())
+		{
+			return TEXT("Invalid URL format");
+		}
+
+		// 检查是否有域名部分
+		FString AfterScheme = CleanURL.Mid(SchemeEnd + 3);
+		if (AfterScheme.IsEmpty() || AfterScheme.StartsWith(TEXT("/")))
+		{
+			return TEXT("URL must include a domain name");
+		}
+
+		return TEXT(""); // 有效
+	}
 
 	// 统一的数组字符串查找（bExact=true 精确匹配，false 包含匹配）
 	bool ArrayFind(const TArray<TSharedPtr<FJsonValue>>* Arr, const FString& Search, bool bExact = true)
@@ -210,7 +343,9 @@ namespace
 			Cfg.Headers.Add(TEXT("anthropic-version"), TEXT("2023-06-01"));
 			break;
 		case EAIProvider::Google:
-			Cfg.URL = FString::Printf(TEXT("%s/models?key=%s"), *UImageToUMGSettings::GetProviderEndpoint(Provider), *APIKey);
+			// Google 使用 x-goog-api-key header 传递密钥，避免URL泄露
+			Cfg.URL = FString::Printf(TEXT("%s/models"), *UImageToUMGSettings::GetProviderEndpoint(Provider));
+			Cfg.Headers.Add(TEXT("x-goog-api-key"), APIKey);
 			break;
 		default:
 			Cfg.bValid = false;
@@ -239,7 +374,7 @@ void UImageToUMGSettings::RefreshAvailableModels()
 	Request->SetVerb(TEXT("GET"));
 	for (const auto& H : Cfg.Headers) Request->SetHeader(H.Key, H.Value);
 
-	UE_LOG(LogImageToUMG, Log, TEXT("Fetching models: %s (%s)"), *GetProviderName(ActualProvider), *Cfg.URL);
+	UE_LOG(LogImageToUMG, Verbose, TEXT("Fetching models: %s"), *GetProviderName(ActualProvider));
 
 	Request->OnProcessRequestComplete().BindLambda([ActualProvider](FHttpRequestPtr Req, FHttpResponsePtr Resp, bool bSuccess)
 	{
@@ -264,10 +399,35 @@ void UImageToUMGSettings::RefreshAvailableModels()
 
 		S->CachedModels = Result.TextModels.Num() > 0 ? Result.TextModels : TArray<FString>{ TEXT("(No models found)") };
 
-		UE_LOG(LogImageToUMG, Log, TEXT("Fetched %d models"), Result.TextModels.Num());
+		UE_LOG(LogImageToUMG, Verbose, TEXT("Fetched %d models"), Result.TextModels.Num());
 	});
 
 	Request->ProcessRequest();
+}
+
+void UImageToUMGSettings::CancelPendingModelRefresh()
+{
+	if (ModelRefreshDebounceHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(ModelRefreshDebounceHandle);
+		ModelRefreshDebounceHandle.Reset();
+	}
+}
+
+void UImageToUMGSettings::ScheduleModelRefresh()
+{
+	// 取消之前的待处理刷新
+	CancelPendingModelRefresh();
+
+	// 延迟0.5秒后刷新（防抖）
+	ModelRefreshDebounceHandle = FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateLambda([this](float DeltaTime)
+		{
+			RefreshAvailableModels();
+			return false; // 只执行一次
+		}),
+		0.5f // 延迟秒数
+	);
 }
 
 
@@ -278,7 +438,7 @@ void UImageToUMGSettings::PostEditChangeProperty(FPropertyChangedEvent& Property
 
 	const FName PropertyName = PropertyChangedEvent.GetPropertyName();
 
-	// API Key 变化时刷新模型列表
+	// API Key 或 Provider 变化时刷新模型列表
 	if (PropertyName == GET_MEMBER_NAME_CHECKED(UImageToUMGSettings, APIKey) ||
 		PropertyName == GET_MEMBER_NAME_CHECKED(UImageToUMGSettings, Provider))
 	{
@@ -288,11 +448,40 @@ void UImageToUMGSettings::PostEditChangeProperty(FPropertyChangedEvent& Property
 		{
 			EAIProvider Detected = DetectProviderFromAPIKey(APIKey);
 			DetectedProvider = GetProviderName(Detected);
-			RefreshAvailableModels();
+			// 使用防抖刷新，避免频繁输入时重复请求
+			ScheduleModelRefresh();
 		}
 		else
 		{
 			DetectedProvider.Empty();
+			CancelPendingModelRefresh();
+		}
+
+		// 更新 URL 预览
+		UpdateURLPreview();
+	}
+
+	// API Host 变化时验证并更新 URL 预览
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(UImageToUMGSettings, APIHost))
+	{
+		// 验证URL格式
+		FString ValidationError = ValidateEndpointURL(APIHost);
+		if (!ValidationError.IsEmpty())
+		{
+			UE_LOG(LogImageToUMG, Error, TEXT("Invalid API Host URL: %s"), *ValidationError);
+			// 不阻止保存，但记录错误
+		}
+
+		UpdateURLPreview();
+	}
+
+	// CustomEndpoint 变化时验证
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(UImageToUMGSettings, CustomEndpoint))
+	{
+		FString ValidationError = ValidateEndpointURL(CustomEndpoint);
+		if (!ValidationError.IsEmpty())
+		{
+			UE_LOG(LogImageToUMG, Error, TEXT("Invalid Custom Endpoint URL: %s"), *ValidationError);
 		}
 	}
 }
@@ -300,31 +489,159 @@ void UImageToUMGSettings::PostEditChangeProperty(FPropertyChangedEvent& Property
 
 FString UImageToUMGSettings::GetDefaultSystemPrompt()
 {
+	// 尝试从外部文件加载
+	const FString PluginDir = FPaths::ConvertRelativePathToFull(
+		FPaths::Combine(FPaths::EnginePluginsDir(), TEXT("Marketplace/ImageToUMG")));
+	const FString PromptFile = FPaths::Combine(PluginDir, TEXT("Content/Config/DefaultPrompt.txt"));
+
+	FString FileContent;
+	if (FFileHelper::LoadFileToString(FileContent, *PromptFile))
+	{
+		UE_LOG(LogImageToUMG, Verbose, TEXT("从文件加载提示词: %s"), *PromptFile);
+		return FileContent;
+	}
+
+	// 回退：使用内嵌的最小提示词
+	UE_LOG(LogImageToUMG, Verbose, TEXT("提示词文件未找到: %s, 使用内嵌默认值"), *PromptFile);
 	return TEXT(
-		"分析图片 ({WIDTH}x{HEIGHT}px)，识别所有可独立编辑的 UI 元素，输出 UMG Widget JSON。\n\n"
-		"【核心原则】\n"
-		"将图片拆分为多个独立控件，每个视觉元素单独一个控件，便于后续编辑和复用。\n\n"
-		"【强制要求】\n"
-		"1. 每个 Image 必须有 ImageRef 属性\n"
-		"2. 必须输出 ImageAssets 数组\n"
-		"3. BoundingBox 是元素在源图中的像素坐标 (X,Y,Width,Height)\n\n"
-		"【元素识别】\n"
-		"文字 -> TextBlock (提取内容、字号、颜色)\n"
-		"按钮 -> Button + TextBlock\n"
-		"图标/图形/背景 -> Image + ImageRef + BoundingBox\n"
-		"进度条 -> ProgressBar\n"
-		"输入框 -> EditableTextBox\n"
-		"复选框 -> CheckBox\n"
-		"滑块 -> Slider\n\n"
-		"【容器】Overlay(层叠), CanvasPanel(绝对定位), VerticalBox, HorizontalBox, Border, SizeBox\n\n"
-		"【输出格式】\n"
-		"{\"WidgetName\":\"WBP_Name\",\n"
-		"\"RootWidget\":{\"Type\":\"Overlay\",\"Name\":\"Root\",\"Children\":[{\"Type\":\"Image\",\"Name\":\"Img1\",\"ImageRef\":\"img1\",\"WidthOverride\":100,\"HeightOverride\":100,\"Slot\":{\"HAlign\":\"Center\",\"VAlign\":\"Center\"}}]},\n"
-		"\"ImageAssets\":[{\"Id\":\"img1\",\"BoundingBox\":{\"X\":0,\"Y\":0,\"Width\":100,\"Height\":100}}]}\n\n"
-		"【Slot】\n"
-		"Overlay/Box: {\"HAlign\":\"Center\",\"VAlign\":\"Center\"}\n"
-		"CanvasPanel: {\"Anchors\":{\"Min\":{\"X\":0.5,\"Y\":0.5},\"Max\":{\"X\":0.5,\"Y\":0.5}},\"Alignment\":{\"X\":0.5,\"Y\":0.5},\"Offsets\":{\"Left\":-50,\"Top\":-50,\"Right\":50,\"Bottom\":50}}\n\n"
-		"【规则】仅输出JSON，无markdown，无解释，控件名唯一\n"
-		"【非UI图片】{\"error\":\"NOT_UI_IMAGE\",\"reason\":\"原因\"}"
+		"Analyze image ({WIDTH}x{HEIGHT}px), output UMG Widget JSON.\n\n"
+		"Output format:\n"
+		"{\"WidgetName\":\"WBP_Name\",\"RootWidget\":{\"Type\":\"CanvasPanel\",\"Name\":\"Root\",\"Children\":[...]},\"ImageAssets\":[]}\n\n"
+		"Widget types: CanvasPanel, Overlay, VerticalBox, HorizontalBox, Image, TextBlock, Border, Button, ProgressBar\n"
+		"Image with MaterialRef: Circle, Ring, RoundedRect (use MaterialParams:{Color:\"#RRGGBB\"})\n"
+		"Image with ImageRef: reference ImageAssets by Id\n"
+		"Slot for CanvasPanel children: {\"Anchors\":{\"Min\":{\"X\":0.5,\"Y\":0.5},\"Max\":{\"X\":0.5,\"Y\":0.5}},\"Alignment\":{\"X\":0.5,\"Y\":0.5},\"Offsets\":{\"Left\":0,\"Top\":0,\"Right\":100,\"Bottom\":100}}\n\n"
+		"Output only JSON, no markdown, no explanation."
 	);
+}
+
+FString UImageToUMGSettings::GetFormattedSystemPrompt(int32 ImageWidth, int32 ImageHeight) const
+{
+	FString Prompt = SystemPrompt;
+
+	if (Prompt.IsEmpty())
+	{
+		Prompt = GetDefaultSystemPrompt();
+	}
+
+	// 替换占位符
+	Prompt.ReplaceInline(TEXT("{WIDTH}"), *FString::FromInt(ImageWidth));
+	Prompt.ReplaceInline(TEXT("{HEIGHT}"), *FString::FromInt(ImageHeight));
+
+	// 追加 Material 预置片段
+	FString MaterialSection = GenerateMaterialPromptSection();
+	if (!MaterialSection.IsEmpty())
+	{
+		Prompt += MaterialSection;
+	}
+
+	return Prompt;
+}
+
+// ============================================================================
+// Material 预置系统
+// ============================================================================
+
+TArray<FUMGPresetMaterial> UImageToUMGSettings::GetDefaultPresetMaterials()
+{
+	TArray<FUMGPresetMaterial> Defaults;
+
+	// 圆形
+	{
+		FUMGPresetMaterial M;
+		M.Name = TEXT("Circle");
+		M.Description = TEXT("纯色圆形（程序化生成）");
+		M.Parameters = { TEXT("Color") };
+		Defaults.Add(M);
+	}
+
+	// 圆环
+	{
+		FUMGPresetMaterial M;
+		M.Name = TEXT("Ring");
+		M.Description = TEXT("空心圆环（程序化生成）");
+		M.Parameters = { TEXT("Color"), TEXT("Thickness") };
+		Defaults.Add(M);
+	}
+
+	// 圆角矩形
+	{
+		FUMGPresetMaterial M;
+		M.Name = TEXT("RoundedRect");
+		M.Description = TEXT("圆角矩形（程序化生成）");
+		M.Parameters = { TEXT("Color"), TEXT("CornerRadius") };
+		Defaults.Add(M);
+	}
+
+	// 渐变（水平）
+	{
+		FUMGPresetMaterial M;
+		M.Name = TEXT("GradientH");
+		M.Description = TEXT("水平渐变（程序化生成）");
+		M.Parameters = { TEXT("ColorStart"), TEXT("ColorEnd") };
+		Defaults.Add(M);
+	}
+
+	// 渐变（垂直）
+	{
+		FUMGPresetMaterial M;
+		M.Name = TEXT("GradientV");
+		M.Description = TEXT("垂直渐变（程序化生成）");
+		M.Parameters = { TEXT("ColorStart"), TEXT("ColorEnd") };
+		Defaults.Add(M);
+	}
+
+	// 径向渐变
+	{
+		FUMGPresetMaterial M;
+		M.Name = TEXT("RadialGradient");
+		M.Description = TEXT("径向渐变（程序化生成）");
+		M.Parameters = { TEXT("ColorCenter"), TEXT("ColorEdge") };
+		Defaults.Add(M);
+	}
+
+	return Defaults;
+}
+
+FString UImageToUMGSettings::GenerateMaterialPromptSection() const
+{
+	if (PresetMaterials.Num() == 0)
+	{
+		return TEXT("");
+	}
+
+	FString Section = TEXT("\n\n=== MaterialRef 预置形状 ===\n");
+	Section += TEXT("Image控件可用MaterialRef绘制程序化形状(比裁图更清晰):\n\n");
+
+	for (const FUMGPresetMaterial& M : PresetMaterials)
+	{
+		Section += FString::Printf(TEXT("%s: "), *M.Name);
+		if (M.Parameters.Num() > 0)
+		{
+			Section += TEXT("MaterialParams={");
+			for (int32 i = 0; i < M.Parameters.Num(); ++i)
+			{
+				if (i > 0) Section += TEXT(",");
+				Section += M.Parameters[i];
+			}
+			Section += TEXT("}");
+		}
+		Section += TEXT("\n");
+	}
+
+	Section += TEXT("\n示例: {\"Type\":\"Image\",\"MaterialRef\":\"Circle\",\"MaterialParams\":{\"Color\":\"#FFFFFF\"},\"WidthOverride\":64,\"HeightOverride\":64,\"Slot\":{...}}\n");
+
+	return Section;
+}
+
+const FUMGPresetMaterial* UImageToUMGSettings::FindPresetMaterial(const FString& Name) const
+{
+	for (const FUMGPresetMaterial& M : PresetMaterials)
+	{
+		if (M.Name.Equals(Name, ESearchCase::IgnoreCase))
+		{
+			return &M;
+		}
+	}
+	return nullptr;
 }

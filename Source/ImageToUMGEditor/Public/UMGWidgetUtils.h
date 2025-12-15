@@ -34,6 +34,9 @@ public:
 	/** 从Widget树计算所需的设计尺寸（遍历所有子节点，找出最大边界） */
 	static FVector2D CalculateDesignSize(const FUMGWidgetNode& RootNode, FVector2D DefaultSize = FVector2D(1920, 1080));
 
+	/** 将比例字段(WidthRatio/HeightRatio)转换为像素值(WidthOverride/HeightOverride) */
+	static void ConvertRatioToPixels(FUMGWidgetNode& Node, FIntPoint CanvasSize);
+
 	// ========== Widget 类型解析 ==========
 
 	/** 根据类型名称获取 Widget 类 */

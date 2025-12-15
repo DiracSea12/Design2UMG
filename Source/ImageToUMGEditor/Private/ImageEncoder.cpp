@@ -148,7 +148,7 @@ bool FImageEncoder::GetImageDataFromTexture(UTexture2D* Texture, TArray<uint8>& 
 				{
 					OutWidth = Wrap->GetWidth();
 					OutHeight = Wrap->GetHeight();
-					UE_LOG(LogImageToUMG, Log, TEXT("ImageEncoder: 从原始文件读取尺寸: %dx%d (纹理报告: %dx%d)"),
+					UE_LOG(LogImageToUMG, Verbose, TEXT("ImageEncoder: 从原始文件读取尺寸: %dx%d (纹理报告: %dx%d)"),
 						OutWidth, OutHeight, Texture->GetSizeX(), Texture->GetSizeY());
 				}
 				return true;
