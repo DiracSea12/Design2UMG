@@ -27,44 +27,220 @@ namespace
 		int32 TargetWidth, TargetHeight;
 	};
 
-	// 背景移除：将匹配背景色的像素设为透明
+	// 背景移除：将背景像素设为透明
+	// BgColor: 背景色，智能模式下用于筛选起始点和作为扩散参考
+	// Tolerance: 颜色容差 (0-255)
+	// bEdgeOnly: true=智能模式（从边缘扩散），false=全局模式
+	// MaxDepth: 最大扩散深度（像素），0=无限制
 	void RemoveBackgroundColor(TArray<uint8>& RawData, int32 Width, int32 Height,
-		const FString& BgColor, int32 Tolerance = 30)
+		const FString& BgColor, int32 Tolerance = 30, bool bEdgeOnly = false, int32 MaxDepth = 0)
 	{
-		uint8 BgR, BgG, BgB;
-		if (!FJsonExtractUtils::ParseHexColor(BgColor, BgR, BgG, BgB))
-		{
-			UE_LOG(LogImageToUMG, Warning, TEXT("Invalid BgColor: %s"), *BgColor);
-			return;
-		}
+		// 获取像素颜色
+		auto GetPixel = [&](int32 X, int32 Y, uint8& R, uint8& G, uint8& B) {
+			const uint8* P = RawData.GetData() + (Y * Width + X) * 4;
+			B = P[0]; G = P[1]; R = P[2];
+		};
 
-		UE_LOG(LogImageToUMG, Verbose, TEXT("正在移除背景色: R=%d G=%d B=%d (容差=%d)"),
-			BgR, BgG, BgB, Tolerance);
+		// 颜色差异
+		auto ColorDiff = [](uint8 R1, uint8 G1, uint8 B1, uint8 R2, uint8 G2, uint8 B2) -> int32 {
+			return FMath::Abs(R1 - R2) + FMath::Abs(G1 - G2) + FMath::Abs(B1 - B2);
+		};
+
+		// 解析背景色
+		uint8 BgR = 0, BgG = 0, BgB = 0;
+		bool bHasBgColor = !BgColor.IsEmpty() && FJsonExtractUtils::ParseHexColor(BgColor, BgR, BgG, BgB);
 
 		int32 RemovedCount = 0;
-		const int32 PixelCount = Width * Height;
 
-		for (int32 i = 0; i < PixelCount; ++i)
+		if (bEdgeOnly)
 		{
-			uint8* Pixel = RawData.GetData() + i * 4;
-			// BGRA 格式
-			uint8 B = Pixel[0];
-			uint8 G = Pixel[1];
-			uint8 R = Pixel[2];
+			// 智能模式：从边缘扩散，带深度限制
+			// 使用 BgColor 作为参考色（如果指定）
 
-			// 计算颜色差异
-			int32 Diff = FMath::Abs(R - BgR) + FMath::Abs(G - BgG) + FMath::Abs(B - BgB);
+			TArray<bool> Visited;
+			Visited.SetNumZeroed(Width * Height);
+			TArray<bool> ToRemove;
+			ToRemove.SetNumZeroed(Width * Height);
+			// 深度追踪：记录每个像素距离边缘的深度
+			TArray<int32> PixelDepth;
+			PixelDepth.SetNumZeroed(Width * Height);
 
-			if (Diff <= Tolerance)
+			// 使用结构体存储位置和深度
+			struct FQueueItem { int32 X, Y, Depth; };
+			TArray<FQueueItem> Queue;
+			Queue.Reserve(Width * Height / 4);
+
+			// 从边缘添加匹配背景色的像素
+			auto TryAddEdgePixel = [&](int32 X, int32 Y) {
+				int32 Idx = Y * Width + X;
+				if (Visited[Idx]) return;
+
+				uint8 R, G, B;
+				GetPixel(X, Y, R, G, B);
+
+				// 必须与背景色匹配才能成为起始点
+				if (bHasBgColor && ColorDiff(R, G, B, BgR, BgG, BgB) > Tolerance)
+				{
+					return;  // 不匹配，跳过（不标记为已访问，可能从其他方向到达）
+				}
+
+				Visited[Idx] = true;
+				ToRemove[Idx] = true;
+				PixelDepth[Idx] = 1;
+				Queue.Add({X, Y, 1});
+			};
+
+			// 添加四边像素
+			for (int32 X = 0; X < Width; ++X)
 			{
-				// 设置为完全透明
-				Pixel[3] = 0;
-				RemovedCount++;
+				TryAddEdgePixel(X, 0);
+				TryAddEdgePixel(X, Height - 1);
+			}
+			for (int32 Y = 1; Y < Height - 1; ++Y)
+			{
+				TryAddEdgePixel(0, Y);
+				TryAddEdgePixel(Width - 1, Y);
+			}
+
+			UE_LOG(LogImageToUMG, Verbose, TEXT("智能背景移除: BgColor=#%02X%02X%02X, %d个起始点 (容差=%d, 最大深度=%d)"),
+				BgR, BgG, BgB, Queue.Num(), Tolerance, MaxDepth);
+
+			// 四邻域
+			const int32 DX[] = {0, 0, -1, 1};
+			const int32 DY[] = {-1, 1, 0, 0};
+
+			// BFS 扩散 - 使用宽松条件扩散，让光晕区域也被访问
+			// 实际透明度由颜色差异决定，而非扩散条件
+			int32 Head = 0;
+			while (Head < Queue.Num())
+			{
+				FQueueItem Cur = Queue[Head++];
+
+				// 深度限制检查：如果超过最大深度则不再扩散
+				if (MaxDepth > 0 && Cur.Depth >= MaxDepth)
+				{
+					continue;
+				}
+
+				for (int32 D = 0; D < 4; ++D)
+				{
+					int32 NX = Cur.X + DX[D];
+					int32 NY = Cur.Y + DY[D];
+
+					if (NX < 0 || NX >= Width || NY < 0 || NY >= Height)
+						continue;
+
+					int32 NIdx = NY * Width + NX;
+					if (Visited[NIdx])
+						continue;
+
+					Visited[NIdx] = true;
+
+					uint8 NR, NG, NB;
+					GetPixel(NX, NY, NR, NG, NB);
+
+					int32 Diff = ColorDiff(NR, NG, NB, BgR, BgG, BgB);
+
+					// 使用 3 倍容差作为扩散边界，覆盖整个光晕渐变区域
+					if (Diff <= Tolerance * 3)
+					{
+						ToRemove[NIdx] = true;
+						PixelDepth[NIdx] = Cur.Depth + 1;
+						Queue.Add({NX, NY, Cur.Depth + 1});
+					}
+				}
+			}
+
+			// 应用渐变透明度
+			for (int32 i = 0; i < Width * Height; ++i)
+			{
+				if (ToRemove[i])
+				{
+					uint8* Pixel = RawData.GetData() + i * 4;
+					int32 Diff = ColorDiff(Pixel[2], Pixel[1], Pixel[0], BgR, BgG, BgB);
+
+					// 渐变 Alpha：差异越大越不透明，差异越小越透明
+					// Diff <= Tolerance: 完全透明 (Alpha = 0)
+					// Diff >= Tolerance * 3: 完全不透明 (保持原 Alpha)
+					// 中间：线性渐变
+					if (Diff <= Tolerance)
+					{
+						Pixel[3] = 0;
+						RemovedCount++;
+					}
+					else if (Diff < Tolerance * 3)
+					{
+						// 渐变区域：保留部分透明度
+						int32 GradientAlpha = (Diff - Tolerance) * 255 / (Tolerance * 2);
+						Pixel[3] = FMath::Min(Pixel[3], (uint8)GradientAlpha);
+						RemovedCount++;
+					}
+					// else: 保持原始 Alpha，不修改
+				}
+			}
+		}
+		else
+		{
+			// 全局模式：移除所有匹配 BgColor 的像素（带渐变）
+			if (!bHasBgColor)
+			{
+				UE_LOG(LogImageToUMG, Warning, TEXT("全局模式需要指定 BgColor"));
+				return;
+			}
+
+			UE_LOG(LogImageToUMG, Verbose, TEXT("全局背景移除: #%02X%02X%02X (容差=%d)"), BgR, BgG, BgB, Tolerance);
+
+			const int32 PixelCount = Width * Height;
+			for (int32 i = 0; i < PixelCount; ++i)
+			{
+				uint8* Pixel = RawData.GetData() + i * 4;
+				int32 Diff = ColorDiff(Pixel[2], Pixel[1], Pixel[0], BgR, BgG, BgB);
+
+				if (Diff <= Tolerance)
+				{
+					Pixel[3] = 0;
+					RemovedCount++;
+				}
+				else if (Diff < Tolerance * 3)
+				{
+					int32 GradientAlpha = (Diff - Tolerance) * 255 / (Tolerance * 2);
+					Pixel[3] = FMath::Min(Pixel[3], (uint8)GradientAlpha);
+					RemovedCount++;
+				}
 			}
 		}
 
 		UE_LOG(LogImageToUMG, Verbose, TEXT("背景移除完成: %d/%d 像素 (%.1f%%)"),
-			RemovedCount, PixelCount, 100.0f * RemovedCount / PixelCount);
+			RemovedCount, Width * Height, 100.0f * RemovedCount / (Width * Height));
+	}
+
+	// 应用透明区域：将指定矩形区域设为透明
+	void ApplyTransparentRegions(TArray<uint8>& RawData, int32 Width, int32 Height,
+		const TArray<FUMGTransparentRegion>& Regions)
+	{
+		if (Regions.Num() == 0) return;
+
+		int32 TotalRemoved = 0;
+		for (const FUMGTransparentRegion& Region : Regions)
+		{
+			// 边界检查
+			int32 X1 = FMath::Clamp(Region.X, 0, Width);
+			int32 Y1 = FMath::Clamp(Region.Y, 0, Height);
+			int32 X2 = FMath::Clamp(Region.X + Region.Width, 0, Width);
+			int32 Y2 = FMath::Clamp(Region.Y + Region.Height, 0, Height);
+
+			for (int32 Y = Y1; Y < Y2; ++Y)
+			{
+				for (int32 X = X1; X < X2; ++X)
+				{
+					RawData[(Y * Width + X) * 4 + 3] = 0;  // 设置 alpha = 0
+					TotalRemoved++;
+				}
+			}
+		}
+
+		UE_LOG(LogImageToUMG, Verbose, TEXT("透明区域处理完成: %d 个区域, %d 像素"),
+			Regions.Num(), TotalRemoved);
 	}
 
 	// 计算裁剪参数（消除重复代码，支持X/Y分别缩放）
@@ -207,15 +383,24 @@ int32 FImageAssetProcessor::ProcessImageAssets(
 			continue;
 		}
 
-		// 背景移除：如果 AI 标记需要移除背景且提供了背景色
-		if (Asset.bRemoveBg && !Asset.BgColor.IsEmpty())
+		// 背景移除或透明区域处理
+		bool bNeedProcess = Asset.bRemoveBg || Asset.TransparentRegions.Num() > 0;
+		if (bNeedProcess)
 		{
 			TArray<uint8> RawData;
 			int32 Width, Height;
 			if (FImageEncoder::DecompressImageData(CroppedData, RawData, Width, Height))
 			{
-				UE_LOG(LogImageToUMG, Verbose, TEXT("Asset '%s' 需要背景移除, BgColor=%s"), *Asset.Id, *Asset.BgColor);
-				RemoveBackgroundColor(RawData, Width, Height, Asset.BgColor);
+				// 背景移除：EdgeOnly模式不需要BgColor，全局模式需要
+				if (Asset.bRemoveBg && (Asset.bEdgeOnly || !Asset.BgColor.IsEmpty()))
+				{
+					UE_LOG(LogImageToUMG, Verbose, TEXT("Asset '%s' 需要背景移除, EdgeOnly=%d, Tolerance=%d"),
+						*Asset.Id, Asset.bEdgeOnly ? 1 : 0, Asset.BgTolerance);
+					RemoveBackgroundColor(RawData, Width, Height, Asset.BgColor, Asset.BgTolerance, Asset.bEdgeOnly, Asset.EdgeDepth);
+				}
+
+				// 应用内部透明区域
+				ApplyTransparentRegions(RawData, Width, Height, Asset.TransparentRegions);
 
 				// 重新压缩为 PNG
 				IImageWrapperModule& ImageWrapperModule = FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
@@ -467,12 +652,16 @@ int32 FImageAssetProcessor::ProcessImageAssetsForPreview(
 			continue;
 		}
 
-		// 背景移除：如果 AI 标记需要移除背景且提供了背景色
-		if (Asset.bRemoveBg && !Asset.BgColor.IsEmpty())
+		// 背景移除：EdgeOnly模式不需要BgColor，全局模式需要
+		if (Asset.bRemoveBg && (Asset.bEdgeOnly || !Asset.BgColor.IsEmpty()))
 		{
-			UE_LOG(LogImageToUMG, Verbose, TEXT("Asset '%s' 需要背景移除, BgColor=%s"), *Asset.Id, *Asset.BgColor);
-			RemoveBackgroundColor(RawData, Width, Height, Asset.BgColor);
+			UE_LOG(LogImageToUMG, Verbose, TEXT("Asset '%s' 需要背景移除, EdgeOnly=%d, Tolerance=%d"),
+				*Asset.Id, Asset.bEdgeOnly ? 1 : 0, Asset.BgTolerance);
+			RemoveBackgroundColor(RawData, Width, Height, Asset.BgColor, Asset.BgTolerance, Asset.bEdgeOnly, Asset.EdgeDepth);
 		}
+
+		// 应用内部透明区域（无论是否移除背景都应用）
+		ApplyTransparentRegions(RawData, Width, Height, Asset.TransparentRegions);
 
 		// 创建临时纹理（不保存到磁盘）
 		UTexture2D* Texture = UTexture2D::CreateTransient(Width, Height, PF_B8G8R8A8);

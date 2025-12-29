@@ -440,4 +440,34 @@ void FUMGJsonParser::ParseImageAsset(const TSharedPtr<FJsonObject>& JsonObject, 
 	if (JsonObject->TryGetBoolField(TEXT("RemoveBg"), bRemoveBg)) OutAsset.bRemoveBg = bRemoveBg;
 	JsonObject->TryGetStringField(TEXT("BgColor"), OutAsset.BgColor);
 	JsonObject->TryGetStringField(TEXT("FgColor"), OutAsset.FgColor);
+
+	// 解析背景移除高级参数
+	int32 BgTolerance;
+	if (JsonObject->TryGetNumberField(TEXT("BgTolerance"), BgTolerance)) OutAsset.BgTolerance = BgTolerance;
+	bool bEdgeOnly;
+	if (JsonObject->TryGetBoolField(TEXT("EdgeOnly"), bEdgeOnly)) OutAsset.bEdgeOnly = bEdgeOnly;
+	int32 EdgeDepth;
+	if (JsonObject->TryGetNumberField(TEXT("EdgeDepth"), EdgeDepth)) OutAsset.EdgeDepth = EdgeDepth;
+
+	// 解析透明区域列表
+	const TArray<TSharedPtr<FJsonValue>>* RegionsArray;
+	if (JsonObject->TryGetArrayField(TEXT("TransparentRegions"), RegionsArray))
+	{
+		for (const TSharedPtr<FJsonValue>& RegionValue : *RegionsArray)
+		{
+			const TSharedPtr<FJsonObject>* RegionObj;
+			if (RegionValue->TryGetObject(RegionObj))
+			{
+				FUMGTransparentRegion Region;
+				(*RegionObj)->TryGetNumberField(TEXT("X"), Region.X);
+				(*RegionObj)->TryGetNumberField(TEXT("Y"), Region.Y);
+				(*RegionObj)->TryGetNumberField(TEXT("Width"), Region.Width);
+				(*RegionObj)->TryGetNumberField(TEXT("Height"), Region.Height);
+				if (Region.Width > 0 && Region.Height > 0)
+				{
+					OutAsset.TransparentRegions.Add(Region);
+				}
+			}
+		}
+	}
 }

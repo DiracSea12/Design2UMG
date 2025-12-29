@@ -3,6 +3,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Interfaces/IHttpRequest.h"
+#include "Interfaces/IHttpResponse.h"
 
 // 前向声明
 class IAIProviderStrategy;
@@ -39,8 +41,8 @@ public:
 private:
 	/** 处理 HTTP 响应 */
 	void HandleResponse(
-		TSharedPtr<class IHttpRequest, ESPMode::ThreadSafe> HttpRequest,
-		TSharedPtr<class IHttpResponse, ESPMode::ThreadSafe> HttpResponse,
+		FHttpRequestPtr HttpRequest,
+		FHttpResponsePtr HttpResponse,
 		bool bSucceeded,
 		TSharedPtr<IAIProviderStrategy> Strategy,
 		const FString& DebugInfo,

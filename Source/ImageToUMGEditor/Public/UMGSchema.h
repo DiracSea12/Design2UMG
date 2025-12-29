@@ -159,6 +159,27 @@ struct FUMGWidgetNode
 };
 
 /**
+ * 透明区域 - 描述图像内部需要透明化的矩形区域
+ */
+USTRUCT()
+struct FUMGTransparentRegion
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	int32 X = 0;
+
+	UPROPERTY()
+	int32 Y = 0;
+
+	UPROPERTY()
+	int32 Width = 0;
+
+	UPROPERTY()
+	int32 Height = 0;
+};
+
+/**
  * 图像资产数据结构 - 描述需要提取/生成的图像
  */
 USTRUCT()
@@ -202,13 +223,28 @@ struct FUMGImageAsset
 	UPROPERTY()
 	bool bRemoveBg = false;
 
-	/** 背景色（十六进制，如 "#000000"） */
+	/** 背景色（十六进制，如 "#000000"），仅 bEdgeOnly=false 时使用 */
 	UPROPERTY()
 	FString BgColor;
+
+	/** 颜色容差 (0-255)，相邻像素差异在此范围内视为同一背景，默认 30 */
+	UPROPERTY()
+	int32 BgTolerance = 30;
+
+	/** 洪水填充模式：从边缘开始扩散移除背景，自动处理渐变/多色背景，保护内部内容 */
+	UPROPERTY()
+	bool bEdgeOnly = false;
+
+	/** 最大扩散深度（像素），限制背景移除向内延伸的距离，默认50防止穿透内容 */
+	UPROPERTY()
+	int32 EdgeDepth = 50;
 
 	/** 前景色（可选，用于优化抠图） */
 	UPROPERTY()
 	FString FgColor;
+
+	/** 内部透明区域列表（相对于裁剪后图像的坐标） */
+	TArray<FUMGTransparentRegion> TransparentRegions;
 };
 
 /**

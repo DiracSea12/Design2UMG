@@ -148,6 +148,10 @@ namespace
 		};
 		return Map;
 	}
+
+	// 前向声明 Image 控件辅助函数（定义在后面）
+	bool HandleImageMaterialRef(UImage* ImageWidget, const FUMGWidgetNode& Node);
+	bool HandleImageTextureRef(UImage* ImageWidget, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap);
 }
 
 // ============================================================================

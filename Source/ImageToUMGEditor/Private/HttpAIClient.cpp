@@ -483,34 +483,6 @@ bool FHttpAIClient::ExtractJsonFromResponse(
 		return false;
 	}
 
-	// 步骤1：清理和预处理
-	FString CleanedJson = SanitizeJsonString(ContentText);
-
-	// 步骤2：移除 markdown 代码块
-	CleanedJson = ExtractFromCodeBlock(CleanedJson);
-
-	// 步骤3：快速路径 - 直接解析
-	{
-		TSharedPtr<FJsonObject> TestParse;
-		TSharedRef<TJsonReader<>> TestReader = TJsonReaderFactory<>::Create(CleanedJson);
-		if (FJsonSerializer::Deserialize(TestReader, TestParse) && TestParse.IsValid())
-		{
-			OutJson = CleanedJson;
-			return true;
-		}
-	}
-
-	// 步骤4：Fallback - 括号匹配提取
-	if (ExtractJsonByBraceMatching(CleanedJson, OutJson))
-	{
-		TSharedPtr<FJsonObject> ValidateParse;
-		TSharedRef<TJsonReader<>> ValidateReader = TJsonReaderFactory<>::Create(OutJson);
-		if (FJsonSerializer::Deserialize(ValidateReader, ValidateParse) && ValidateParse.IsValid())
-		{
-			return true;
-		}
-	}
-
-	OutError = TEXT("Could not extract valid JSON from response");
-	return false;
+	// 使用 FJsonExtractUtils 统一提取 JSON
+	return FJsonExtractUtils::ExtractJson(ContentText, OutJson, OutError);
 }
