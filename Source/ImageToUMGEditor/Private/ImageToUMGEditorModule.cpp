@@ -14,6 +14,7 @@
 #include "SImageToUMGPreviewWindow.h"
 #include "ImageAssetProcessor.h"
 #include "UMGWidgetUtils.h"
+#include "UMGExtractorTest.h"
 #include "Misc/MessageDialog.h"
 
 #include "ContentBrowserMenuContexts.h"
@@ -64,6 +65,7 @@ void FImageToUMGEditorModule::StartupModule()
 	);
 
 	FImageToUMGCommands::Register();
+	FUMGExtractorTest::Register();
 	PluginCommands = MakeShareable(new FUICommandList);
 	PluginCommands->MapAction(FImageToUMGCommands::Get().GenerateFromImage,
 		FExecuteAction::CreateRaw(this, &FImageToUMGEditorModule::OnGenerateFromFile));
