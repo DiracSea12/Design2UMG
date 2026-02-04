@@ -68,13 +68,24 @@ FUMGWidgetNode FPenToUMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Node,
 	// 递归转换子节点
 	for (const auto& Child : Node->Children)
 	{
-		if (Child.IsValid())
+		if (Child.IsValid() && Child->bEnabled)
 		{
 			auto ChildWidget = ConvertNode(Child, Doc);
 			ApplySlotProperties(ChildWidget, Child, Node->Layout);
+			ApplyAlignItems(ChildWidget, Node->AlignItems, Node->Layout);
 			Widget.Children.Add(ChildWidget);
 		}
 	}
+
+	// 应用布局属性
+	if (Node->Gap > 0)
+		ApplyGap(Widget.Children, Node->Gap, Node->Layout);
+
+	if (Node->Padding.Top > 0 || Node->Padding.Right > 0 || Node->Padding.Bottom > 0 || Node->Padding.Left > 0)
+		ApplyPadding(Widget, Node->Padding);
+
+	if (Node->JustifyContent != EPenJustifyContent::Start)
+		ApplyJustifyContent(Widget.Children, Node->JustifyContent, Node->Layout);
 
 	return Widget;
 }
@@ -171,4 +182,82 @@ TSharedPtr<FPenNode> FPenToUMGConverter::FindReusableComponent(const FString& Re
 			return Found;
 	}
 	return nullptr;
+}
+
+void FPenToUMGConverter::ApplyGap(TArray<FUMGWidgetNode>& Children, float Gap, EPenLayout Layout)
+{
+	if (Gap <= 0 || Children.Num() < 2)
+		return;
+
+	// 从第二个子元素开始添加 Padding
+	for (int32 i = 1; i < Children.Num(); ++i)
+	{
+		if (Layout == EPenLayout::Vertical)
+			Children[i].Slot.Padding.Top = Gap;
+		else if (Layout == EPenLayout::Horizontal)
+			Children[i].Slot.Padding.Left = Gap;
+	}
+}
+
+void FPenToUMGConverter::ApplyPadding(FUMGWidgetNode& Widget, const FPenPadding& Padding)
+{
+	Widget.Properties.Add(TEXT("Padding"), FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"),
+		Padding.Left, Padding.Top, Padding.Right, Padding.Bottom));
+}
+
+void FPenToUMGConverter::ApplyJustifyContent(TArray<FUMGWidgetNode>& Children, EPenJustifyContent Justify, EPenLayout Layout)
+{
+	if (Justify == EPenJustifyContent::Start || Children.Num() == 0)
+		return;
+
+	// 创建 Spacer Widget
+	auto CreateSpacer = []() -> FUMGWidgetNode {
+		FUMGWidgetNode Spacer;
+		Spacer.Type = TEXT("Spacer");
+		Spacer.Slot.SizeRule = TEXT("Fill");
+		return Spacer;
+	};
+
+	switch (Justify)
+	{
+	case EPenJustifyContent::Center:
+		Children.Insert(CreateSpacer(), 0);
+		Children.Add(CreateSpacer());
+		break;
+	case EPenJustifyContent::End:
+		Children.Insert(CreateSpacer(), 0);
+		break;
+	case EPenJustifyContent::SpaceBetween:
+		if (Children.Num() > 1)
+		{
+			for (int32 i = Children.Num() - 1; i > 0; --i)
+				Children.Insert(CreateSpacer(), i);
+		}
+		break;
+	case EPenJustifyContent::SpaceAround:
+		Children.Insert(CreateSpacer(), 0);
+		for (int32 i = Children.Num() - 1; i > 0; --i)
+			Children.Insert(CreateSpacer(), i);
+		Children.Add(CreateSpacer());
+		break;
+	default:
+		break;
+	}
+}
+
+void FPenToUMGConverter::ApplyAlignItems(FUMGWidgetNode& Widget, EPenAlignItems Align, EPenLayout ParentLayout)
+{
+	// fill_container 优先级高于 alignItems
+	if (ParentLayout == EPenLayout::Vertical)
+	{
+		if (Widget.Slot.HorizontalAlignment != TEXT("Fill"))
+			Widget.Slot.HorizontalAlignment = FPenTypeMapper::MapAlignItemsH(Align) == HAlign_Center ? TEXT("Center") :
+				FPenTypeMapper::MapAlignItemsH(Align) == HAlign_Right ? TEXT("Right") : TEXT("Left");
+	}
+	else if (ParentLayout == EPenLayout::Horizontal)
+	{
+		if (Widget.Slot.VerticalAlignment != TEXT("Fill"))
+			Widget.Slot.VerticalAlignment = FPenTypeMapper::MapAlignItemsV(Align) == VAlign_Center ? TEXT("Center") :
+				FPenTypeMapper::MapAlignItemsV(Align) == VAlign_Bottom ? TEXT("Bottom") : TEXT("Top");
+	}
 }

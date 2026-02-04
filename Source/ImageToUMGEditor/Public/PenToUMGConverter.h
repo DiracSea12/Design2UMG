@@ -36,4 +36,16 @@ private:
 
 	/** 查找可复用组件 */
 	static TSharedPtr<FPenNode> FindReusableComponent(const FString& RefId, const TArray<TSharedPtr<FPenNode>>& Nodes);
+
+	/** 应用 gap - 转换为子元素 Padding */
+	static void ApplyGap(TArray<FUMGWidgetNode>& Children, float Gap, EPenLayout Layout);
+
+	/** 应用 padding - 通过 Slot.Padding 实现 */
+	static void ApplyPadding(FUMGWidgetNode& Widget, const FPenPadding& Padding);
+
+	/** 应用 justifyContent - 通过 Spacer 实现主轴对齐 */
+	static void ApplyJustifyContent(TArray<FUMGWidgetNode>& Children, EPenJustifyContent Justify, EPenLayout Layout);
+
+	/** 应用 alignItems - 交叉轴对齐映射到 Slot */
+	static void ApplyAlignItems(FUMGWidgetNode& Widget, EPenAlignItems Align, EPenLayout ParentLayout);
 };
