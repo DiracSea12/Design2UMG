@@ -34,6 +34,12 @@ private:
 	/** 应用视觉属性 */
 	static void ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedPtr<FPenNode>& Node);
 
+	/** 应用圆角 */
+	static void ApplyRoundedCorner(FUMGWidgetNode& Widget, const FPenCornerRadius& Radius);
+
+	/** 应用描边 */
+	static void ApplyStroke(FUMGWidgetNode& Widget, const FPenStroke& Stroke);
+
 	/** 展开组件引用 */
 	static TSharedPtr<FPenNode> ExpandRef(const TSharedPtr<FPenNode>& RefNode, const FPenDocument& Doc);
 

@@ -177,7 +177,7 @@ void FPenToUMGConverter::ApplySlotProperties(FUMGWidgetNode& Widget, const TShar
 void FPenToUMGConverter::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedPtr<FPenNode>& Node)
 {
 	// 填充颜色
-	if (Node->Fill.Type == EPenFillType::Color)
+	if (Node->Fill.Type == EPenFillType::Color && Node->Fill.bEnabled)
 	{
 		FLinearColor Color = FPenTypeMapper::ParseColor(Node->Fill.SolidColor);
 		Widget.Properties.Add(TEXT("BrushColor"), Color.ToString());
@@ -193,6 +193,12 @@ void FPenToUMGConverter::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSh
 	// 透明度
 	if (Node->Opacity < 1.0f)
 		Widget.Properties.Add(TEXT("RenderOpacity"), FString::SanitizeFloat(Node->Opacity));
+
+	// 圆角
+	ApplyRoundedCorner(Widget, Node->CornerRadius);
+
+	// 描边
+	ApplyStroke(Widget, Node->Stroke);
 }
 
 TSharedPtr<FPenNode> FPenToUMGConverter::ExpandRef(const TSharedPtr<FPenNode>& RefNode, const FPenDocument& Doc)
@@ -296,5 +302,39 @@ void FPenToUMGConverter::ApplyAlignItems(FUMGWidgetNode& Widget, EPenAlignItems 
 		if (Widget.Slot.VerticalAlignment != TEXT("Fill"))
 			Widget.Slot.VerticalAlignment = FPenTypeMapper::MapAlignItemsV(Align) == VAlign_Center ? TEXT("Center") :
 				FPenTypeMapper::MapAlignItemsV(Align) == VAlign_Bottom ? TEXT("Bottom") : TEXT("Top");
+	}
+}
+
+void FPenToUMGConverter::ApplyRoundedCorner(FUMGWidgetNode& Widget, const FPenCornerRadius& Radius)
+{
+	if (Radius.bUniform)
+	{
+		if (Radius.Uniform > 0)
+		{
+			Widget.Properties.Add(TEXT("DrawAs"), TEXT("RoundedBox"));
+			Widget.Properties.Add(TEXT("OutlineCornerRadius"), FString::SanitizeFloat(Radius.Uniform));
+		}
+	}
+	else
+	{
+		// 四值圆角
+		Widget.Properties.Add(TEXT("DrawAs"), TEXT("RoundedBox"));
+		Widget.Properties.Add(TEXT("CornerRadii"), FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"),
+			Radius.TopLeft, Radius.TopRight, Radius.BottomRight, Radius.BottomLeft));
+	}
+}
+
+void FPenToUMGConverter::ApplyStroke(FUMGWidgetNode& Widget, const FPenStroke& Stroke)
+{
+	float Thickness = Stroke.Thickness.bUniform ? Stroke.Thickness.Uniform : Stroke.Thickness.Top;
+	if (Thickness <= 0)
+		return;
+
+	Widget.Properties.Add(TEXT("OutlineThickness"), FString::SanitizeFloat(Thickness));
+
+	if (Stroke.Fill.Type == EPenFillType::Color)
+	{
+		FLinearColor Color = FPenTypeMapper::ParseColor(Stroke.Fill.SolidColor);
+		Widget.Properties.Add(TEXT("OutlineColor"), Color.ToString());
 	}
 }
