@@ -71,16 +71,22 @@ public:
 	 * API 主机地址（代理服务器）
 	 * - 留空：使用官方默认地址
 	 * - 填根地址：自动拼接路径（如 https://proxy.com → https://proxy.com/v1/chat/completions）
-	 * - 以 / 结尾：只拼接后半段（如 https://proxy.com/v1/ → https://proxy.com/v1/chat/completions）
-	 * - 以 # 结尾：不拼接，使用完整地址
+	 * - 以 / 结尾：只拼接后半段（如 https://proxy.com/v1/ → https://proxy.com/v1/chat/completions）	 * - 以 # 结尾：不拼接，使用完整地址
 	 */
 	UPROPERTY(Config, EditAnywhere, Category = "API Settings", meta = (DisplayName = "API Host",
 		EditCondition = "Provider != EAIProvider::Custom", EditConditionHides))
 	FString APIHost;
 
+	/**
+	 * 自定义 URL 预览
+	 * 勾选后，您可以手动修改下方的 URL Preview，系统将强制使用该 URL 发送请求
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "API Settings", meta = (DisplayName = "Customize URL"))
+	bool bCustomizeURL = false;
+
 	/** 完整 API URL 预览（只读，实时显示最终请求地址） */
-	UPROPERTY(VisibleAnywhere, Category = "API Settings", meta = (DisplayName = "URL Preview",
-		EditCondition = "Provider != EAIProvider::Custom", EditConditionHides))
+	UPROPERTY(Config, EditAnywhere, Category = "API Settings", meta = (DisplayName = "URL Preview",
+		EditCondition = "bCustomizeURL"))
 	FString URLPreview;
 
 	/** 自定义 API 端点（仅 Custom 模式） */
@@ -91,6 +97,14 @@ public:
 	/** 最大输出 Token 数 */
 	UPROPERTY(Config, EditAnywhere, Category = "API Settings", meta = (DisplayName = "Max Tokens", ClampMin = "1024", ClampMax = "32768"))
 	int32 MaxTokens = 4096;
+
+	/** 采样温度（越低越稳定） */
+	UPROPERTY(Config, EditAnywhere, Category = "API Settings", meta = (DisplayName = "Temperature", ClampMin = "0.0", ClampMax = "2.0"))
+	float Temperature = 0.2f;
+
+	/** Top-P 采样（0-1） */
+	UPROPERTY(Config, EditAnywhere, Category = "API Settings", meta = (DisplayName = "Top P", ClampMin = "0.0", ClampMax = "1.0"))
+	float TopP = 1.0f;
 
 	/** HTTP 请求超时时间（秒） */
 	UPROPERTY(Config, EditAnywhere, Category = "API Settings", meta = (DisplayName = "Timeout (seconds)", ClampMin = "30", ClampMax = "300"))
@@ -117,6 +131,31 @@ public:
 	/** 图像资产保存路径 */
 	UPROPERTY(Config, EditAnywhere, Category = "Generation Settings", meta = (DisplayName = "Image Assets Output Path"))
 	FString ImageAssetsOutputPath = TEXT("/Game/UI/Generated/Textures");
+
+	/** UMG设计分辨率宽度 */
+	UPROPERTY(Config, EditAnywhere, Category = "Generation Settings", meta = (DisplayName = "Design Width", ClampMin = "320", ClampMax = "7680"))
+	int32 DesignWidth = 1920;
+
+	/** UMG设计分辨率高度 */
+	UPROPERTY(Config, EditAnywhere, Category = "Generation Settings", meta = (DisplayName = "Design Height", ClampMin = "240", ClampMax = "4320"))
+	int32 DesignHeight = 1080;
+
+	/** 获取设计尺寸 */
+	FIntPoint GetDesignSize() const { return FIntPoint(DesignWidth, DesignHeight); }
+
+	/** 纵横比处理模式：Stretch=拉伸(默认), Fit=保持比例(letterbox) */
+	UPROPERTY(Config, EditAnywhere, Category = "Generation Settings", meta = (DisplayName = "Aspect Ratio Mode"))
+	bool bUseStretchMode = true;
+
+	// ========== PenToUMG 设置 ==========
+
+	/** .pen 文件默认导入路径 */
+	UPROPERTY(Config, EditAnywhere, Category = "PenToUMG Settings", meta = (DisplayName = "Pen Files Path"))
+	FString PenFilesPath = TEXT("/Game/UI/PenDesigns");
+
+	/** 是否自动展开组件引用 */
+	UPROPERTY(Config, EditAnywhere, Category = "PenToUMG Settings", meta = (DisplayName = "Auto Expand Refs"))
+	bool bAutoExpandRefs = true;
 
 	// ========== Material 预置设置 ==========
 
