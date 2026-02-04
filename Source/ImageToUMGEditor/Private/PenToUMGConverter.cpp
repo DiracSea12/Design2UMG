@@ -103,16 +103,53 @@ FUMGWidgetNode FPenToUMGConverter::CreateTextWidget(const TSharedPtr<FPenNode>& 
 	Widget.Type = TEXT("TextBlock");
 	Widget.Properties.Add(TEXT("Text"), Node->Content);
 
+	ApplyTextProperties(Widget, Node);
+	return Widget;
+}
+
+void FPenToUMGConverter::ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FPenNode>& Node)
+{
+	// 字体大小
 	if (Node->FontSize > 0)
 		Widget.Properties.Add(TEXT("FontSize"), FString::FromInt((int32)Node->FontSize));
 
+	// 字体族
 	if (!Node->FontFamily.IsEmpty())
 		Widget.Properties.Add(TEXT("FontFamily"), Node->FontFamily);
 
+	// 字重
 	if (!Node->FontWeight.IsEmpty())
 		Widget.Properties.Add(TEXT("TypefaceFontName"), FPenTypeMapper::MapFontWeight(Node->FontWeight).ToString());
 
-	return Widget;
+	// 文本对齐
+	Widget.Properties.Add(TEXT("Justification"),
+		Node->TextAlign == EPenTextAlign::Center ? TEXT("Center") :
+		Node->TextAlign == EPenTextAlign::Right ? TEXT("Right") : TEXT("Left"));
+
+	// 行高
+	if (Node->LineHeight > 0 && Node->FontSize > 0)
+	{
+		float Percentage = Node->LineHeight / Node->FontSize;
+		Widget.Properties.Add(TEXT("LineHeightPercentage"), FString::SanitizeFloat(Percentage));
+	}
+
+	// 字间距
+	if (Node->LetterSpacing != 0)
+		Widget.Properties.Add(TEXT("LetterSpacing"), FString::FromInt((int32)Node->LetterSpacing));
+
+	// textGrowth 处理
+	switch (Node->TextGrowth)
+	{
+	case EPenTextGrowth::FixedWidth:
+		Widget.Properties.Add(TEXT("AutoWrapText"), TEXT("true"));
+		break;
+	case EPenTextGrowth::FixedWidthHeight:
+		Widget.Properties.Add(TEXT("AutoWrapText"), TEXT("true"));
+		Widget.Properties.Add(TEXT("Clipping"), TEXT("ClipToBounds"));
+		break;
+	default:
+		break;
+	}
 }
 
 void FPenToUMGConverter::ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr<FPenNode>& Node, EPenLayout ParentLayout)

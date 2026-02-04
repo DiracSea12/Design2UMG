@@ -25,6 +25,9 @@ private:
 	/** 创建文本 Widget */
 	static FUMGWidgetNode CreateTextWidget(const TSharedPtr<FPenNode>& Node);
 
+	/** 应用文本属性 */
+	static void ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FPenNode>& Node);
+
 	/** 应用 Slot 属性 */
 	static void ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr<FPenNode>& Node, EPenLayout ParentLayout);
 
