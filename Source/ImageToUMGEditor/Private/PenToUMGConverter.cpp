@@ -44,6 +44,9 @@ FUMGWidgetNode FPenToUMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Node,
 	case EPenNodeType::Text:
 		Widget = CreateTextWidget(Node);
 		break;
+	case EPenNodeType::IconFont:
+		Widget = CreateIconFontWidget(Node);
+		break;
 	case EPenNodeType::Frame:
 	case EPenNodeType::Group:
 		Widget = CreateContainerWidget(Node);
@@ -150,6 +153,32 @@ void FPenToUMGConverter::ApplyTextProperties(FUMGWidgetNode& Widget, const TShar
 	default:
 		break;
 	}
+}
+
+FUMGWidgetNode FPenToUMGConverter::CreateIconFontWidget(const TSharedPtr<FPenNode>& Node)
+{
+	FUMGWidgetNode Widget;
+	Widget.Type = TEXT("TextBlock");
+
+	// 图标字体族
+	if (!Node->IconFontFamily.IsEmpty())
+		Widget.Properties.Add(TEXT("FontFamily"), Node->IconFontFamily);
+
+	// 图标名称作为文本内容（需要映射到码点）
+	Widget.Properties.Add(TEXT("IconName"), Node->IconFontName);
+
+	// 图标大小
+	if (Node->FontSize > 0)
+		Widget.Properties.Add(TEXT("FontSize"), FString::FromInt((int32)Node->FontSize));
+
+	// 图标颜色
+	if (Node->Fill.Type == EPenFillType::Color)
+	{
+		FLinearColor Color = FPenTypeMapper::ParseColor(Node->Fill.SolidColor);
+		Widget.Properties.Add(TEXT("ColorAndOpacity"), Color.ToString());
+	}
+
+	return Widget;
 }
 
 void FPenToUMGConverter::ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr<FPenNode>& Node, EPenLayout ParentLayout)
