@@ -3,6 +3,7 @@
 #include "UMGGenerator.h"
 #include "UMGWidgetUtils.h"
 #include "ImageToUMGLog.h"
+#include "ImageToUMGSettings.h"
 
 #include "WidgetBlueprint.h"
 #include "Blueprint/WidgetTree.h"
@@ -66,8 +67,13 @@ UWidgetBlueprint* FUMGGenerator::GenerateWidgetBlueprint(const FUMGWidgetData& W
 		return nullptr;
 	}
 
+	// v2.2: 应用Fixer修正Bounds（创建可修改副本）
+	FUMGWidgetNode FixedRoot = WidgetData.RootWidget;
+	FIntPoint DesignSize = UImageToUMGSettings::Get()->GetDesignSize();
+	FUMGWidgetUtils::ApplyFixer(FixedRoot, WidgetData.SourceSize, DesignSize);
+
 	// 使用统一的 Widget 创建函数
-	UWidget* Root = FUMGWidgetUtils::CreateWidgetRecursive(WBP->WidgetTree, WidgetData.RootWidget);
+	UWidget* Root = FUMGWidgetUtils::CreateWidgetRecursive(WBP->WidgetTree, FixedRoot);
 	if (!Root)
 	{
 		UE_LOG(LogImageToUMG, Error, TEXT("Failed to create root widget for '%s'"), *WidgetData.WidgetName);

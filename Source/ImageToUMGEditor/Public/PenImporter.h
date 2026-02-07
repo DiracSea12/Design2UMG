@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 
-class FUMGWidgetData;
+struct FUMGWidgetData;
 
 /**
  * .pen 文件导入入口

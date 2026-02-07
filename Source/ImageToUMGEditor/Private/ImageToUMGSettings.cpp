@@ -136,7 +136,17 @@ void UImageToUMGSettings::UpdateURLPreview()
 
 	if (ActualProvider == EAIProvider::Custom || ActualProvider == EAIProvider::Auto)
 	{
-		URLPreview = TEXT("(Select provider to preview)");
+		// 如果在这个状态下勾选了 CustomizeURL，我们保留当前的 URLPreview
+		if (!bCustomizeURL)
+		{
+			URLPreview = TEXT("(Select provider to preview)");
+		}
+		return;
+	}
+
+	// 如果开启了自定义 URL，不再自动更新预览
+	if (bCustomizeURL)
+	{
 		return;
 	}
 
@@ -484,6 +494,52 @@ void UImageToUMGSettings::PostEditChangeProperty(FPropertyChangedEvent& Property
 			UE_LOG(LogImageToUMG, Error, TEXT("Invalid Custom Endpoint URL: %s"), *ValidationError);
 		}
 	}
+
+	// CustomizeURL 切换
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(UImageToUMGSettings, bCustomizeURL))
+	{
+		if (bCustomizeURL)
+		{
+			// 开启自定义：如果 URLPreview 为空或无效，先填入当前的自动值
+			if (URLPreview.IsEmpty() || URLPreview.Contains(TEXT("Select provider")))
+			{
+				UpdateURLPreview();
+			}
+			
+			// 立即将 APIHost 设置为自定义 URL（带 # 后缀）
+			APIHost = URLPreview + TEXT("#");
+		}
+		else
+		{
+			// 关闭自定义：恢复自动更新，并清空可能被修改的 APIHost
+			// 这里我们选择不清空 APIHost，而是让它重新参与自动构建
+			// 如果 APIHost 之前被设置为 "url#"，我们去掉 "#" 或者是直接清空？
+			// 最安全的做法是：如果是手动模式设置的，清空它让其回退到默认；或者保留它作为 base_url
+			// 简单起见，我们只触发 UpdateURLPreview，用户可能通过 APIHost 字段自己通过修改
+			UpdateURLPreview();
+			
+			// 如果 APIHost 是我们自动设置的那个带 # 的值，尝试还原?
+			// 为了避免混淆，我们可以提示用户检查 API Host
+		}
+	}
+
+	// URLPreview 更改（仅在自定义模式下）
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(UImageToUMGSettings, URLPreview) && bCustomizeURL)
+	{
+		// 自动同步到 API Host，确保底层逻辑使用完整的 URL
+		if (!URLPreview.IsEmpty())
+		{
+			// 如果用户输入了 #，我们也保留；主要目的是确保 ScriptAIClient 拿到的是全路径
+			if (URLPreview.EndsWith(TEXT("#")))
+			{
+				APIHost = URLPreview;
+			}
+			else
+			{
+				APIHost = URLPreview + TEXT("#");
+			}
+		}
+	}
 }
 #endif
 
@@ -492,7 +548,7 @@ FString UImageToUMGSettings::GetDefaultSystemPrompt()
 	// 尝试从外部文件加载
 	const FString PluginDir = FPaths::ConvertRelativePathToFull(
 		FPaths::Combine(FPaths::EnginePluginsDir(), TEXT("Marketplace/ImageToUMG")));
-	const FString PromptFile = FPaths::Combine(PluginDir, TEXT("Content/Config/DefaultPrompt.txt"));
+	const FString PromptFile = FPaths::Combine(PluginDir, TEXT("Content/Config/DefaultPrompt_v2.txt"));
 
 	FString FileContent;
 	if (FFileHelper::LoadFileToString(FileContent, *PromptFile))
@@ -501,16 +557,16 @@ FString UImageToUMGSettings::GetDefaultSystemPrompt()
 		return FileContent;
 	}
 
-	// 回退：使用内嵌的最小提示词
+	// 回退：使用内嵌的v2最小提示词（Bounds格式）
 	UE_LOG(LogImageToUMG, Verbose, TEXT("提示词文件未找到: %s, 使用内嵌默认值"), *PromptFile);
 	return TEXT(
-		"Analyze image ({WIDTH}x{HEIGHT}px), output UMG Widget JSON.\n\n"
+		"Analyze image ({WIDTH}x{HEIGHT}px), output UMG Widget JSON with Bounds format.\n\n"
 		"Output format:\n"
-		"{\"WidgetName\":\"WBP_Name\",\"RootWidget\":{\"Type\":\"CanvasPanel\",\"Name\":\"Root\",\"Children\":[...]},\"ImageAssets\":[]}\n\n"
+		"{\"WidgetName\":\"WBP_Name\",\"RootWidget\":{\"Type\":\"CanvasPanel\",\"Id\":\"Canvas_Root\",\"Name\":\"Root\",\"Bounds\":{\"X\":0,\"Y\":0,\"W\":1,\"H\":1},\"Children\":[...]},\"ImageAssets\":[]}\n\n"
+		"Bounds: normalized 0-1 coordinates relative to image size. X=left/width, Y=top/height, W=width/imageWidth, H=height/imageHeight. Use 4 decimal places.\n\n"
 		"Widget types: CanvasPanel, Overlay, VerticalBox, HorizontalBox, Image, TextBlock, Border, Button, ProgressBar\n"
-		"Image with MaterialRef: Circle, Ring, RoundedRect (use MaterialParams:{Color:\"#RRGGBB\"})\n"
-		"Image with ImageRef: reference ImageAssets by Id\n"
-		"Slot for CanvasPanel children: {\"Anchors\":{\"Min\":{\"X\":0.5,\"Y\":0.5},\"Max\":{\"X\":0.5,\"Y\":0.5}},\"Alignment\":{\"X\":0.5,\"Y\":0.5},\"Offsets\":{\"Left\":0,\"Top\":0,\"Right\":100,\"Bottom\":100}}\n\n"
+		"Each widget needs: Type, Id (path format: ParentId/Type_Index), Name, Bounds\n"
+		"Optional: Properties, Children, _meta:{confidence:0-1, source:\"ai\"}\n\n"
 		"Output only JSON, no markdown, no explanation."
 	);
 }

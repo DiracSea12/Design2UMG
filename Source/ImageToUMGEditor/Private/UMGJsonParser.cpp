@@ -91,7 +91,8 @@ bool FUMGJsonParser::ParseJson(const FString& JsonString, FUMGWidgetData& OutWid
 	static const TSet<FString> ContainerTypes = {
 		TEXT("CanvasPanel"), TEXT("VerticalBox"), TEXT("HorizontalBox"),
 		TEXT("Overlay"), TEXT("ScrollBox"), TEXT("GridPanel"),
-		TEXT("UniformGridPanel"), TEXT("WrapBox"), TEXT("WidgetSwitcher")
+		TEXT("UniformGridPanel"), TEXT("WrapBox"), TEXT("WidgetSwitcher"),
+		TEXT("SafeZone")
 	};
 	if (OutWidgetData.RootWidget.Children.Num() == 0 &&
 		ContainerTypes.Contains(OutWidgetData.RootWidget.Type))
@@ -102,6 +103,19 @@ bool FUMGJsonParser::ParseJson(const FString& JsonString, FUMGWidgetData& OutWid
 
 	Root->TryGetStringField(TEXT("WidgetName"), OutWidgetData.WidgetName);
 	if (OutWidgetData.WidgetName.IsEmpty()) OutWidgetData.WidgetName = TEXT("WBP_Generated");
+
+	// v2.2: 解析 SourceSize（可选，用于ViewportMapping）
+	const TSharedPtr<FJsonObject>* SourceSizeObj;
+	if (Root->TryGetObjectField(TEXT("SourceSize"), SourceSizeObj))
+	{
+		int32 W = 0, H = 0;
+		(*SourceSizeObj)->TryGetNumberField(TEXT("Width"), W);
+		(*SourceSizeObj)->TryGetNumberField(TEXT("Height"), H);
+		if (W > 0 && H > 0)
+		{
+			OutWidgetData.SourceSize = FIntPoint(W, H);
+		}
+	}
 
 	// 解析 ImageAssets（可选）
 	const TArray<TSharedPtr<FJsonValue>>* ImageAssetsArray;
@@ -145,6 +159,40 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 		OutNode.Name = FString::Printf(TEXT("%s_%s"), *OutNode.Type, *FGuid::NewGuid().ToString(EGuidFormats::Short));
 	}
 
+	// 解析 Id（v2.2新增，路径式稳定标识）
+	JsonObject->TryGetStringField(TEXT("Id"), OutNode.Id);
+
+	// 解析 Bounds（v2.2新增，归一化坐标）
+	const TSharedPtr<FJsonObject>* BoundsObject;
+	if (JsonObject->TryGetObjectField(TEXT("Bounds"), BoundsObject))
+	{
+		double Val;
+		if ((*BoundsObject)->TryGetNumberField(TEXT("X"), Val)) OutNode.Bounds.X = (float)Val;
+		if ((*BoundsObject)->TryGetNumberField(TEXT("Y"), Val)) OutNode.Bounds.Y = (float)Val;
+		if ((*BoundsObject)->TryGetNumberField(TEXT("W"), Val)) OutNode.Bounds.W = (float)Val;
+		if ((*BoundsObject)->TryGetNumberField(TEXT("H"), Val)) OutNode.Bounds.H = (float)Val;
+	}
+
+	// 解析 _meta（v2.2新增，AI识别元数据）
+	const TSharedPtr<FJsonObject>* MetaObject;
+	if (JsonObject->TryGetObjectField(TEXT("_meta"), MetaObject))
+	{
+		double Conf;
+		if ((*MetaObject)->TryGetNumberField(TEXT("confidence"), Conf)) OutNode.Meta.Confidence = (float)Conf;
+		(*MetaObject)->TryGetStringField(TEXT("source"), OutNode.Meta.Source);
+		(*MetaObject)->TryGetBoolField(TEXT("fix_exempt"), OutNode.Meta.bFixExempt);
+
+		const TArray<TSharedPtr<FJsonValue>>* UncertainArray;
+		if ((*MetaObject)->TryGetArrayField(TEXT("uncertain_props"), UncertainArray))
+		{
+			for (const auto& Item : *UncertainArray)
+			{
+				FString PropName;
+				if (Item->TryGetString(PropName)) OutNode.Meta.UncertainProps.Add(PropName);
+			}
+		}
+	}
+
 	// 解析 Slot 数据（支持 "Slot" 或 "CanvasSlot" 键名）
 	const TSharedPtr<FJsonObject>* SlotObject;
 	if (JsonObject->TryGetObjectField(TEXT("Slot"), SlotObject) ||
@@ -163,7 +211,8 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 	// 同时解析直接放在节点上的属性（排除结构字段）
 	static const TSet<FString> StructuralFields = {
 		TEXT("Type"), TEXT("Name"), TEXT("Children"), TEXT("Slots"),
-		TEXT("Slot"), TEXT("CanvasSlot"), TEXT("Properties")
+		TEXT("Slot"), TEXT("CanvasSlot"), TEXT("Properties"),
+		TEXT("Id"), TEXT("Bounds"), TEXT("_meta")  // v2.2新增
 	};
 	for (const auto& Pair : JsonObject->Values)
 	{
@@ -413,6 +462,21 @@ void FUMGJsonParser::ParseProperties(const TSharedPtr<FJsonObject>& JsonObject, 
 		else if (Pair.Value->Type == EJson::Boolean)
 		{
 			OutProperties.Add(Pair.Key, Pair.Value->AsBool() ? TEXT("true") : TEXT("false"));
+		}
+		// v2.2: 支持Object和Array类型，序列化为JSON字符串
+		else if (Pair.Value->Type == EJson::Object)
+		{
+			FString JsonStr;
+			TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonStr);
+			FJsonSerializer::Serialize(Pair.Value->AsObject().ToSharedRef(), Writer);
+			OutProperties.Add(Pair.Key, JsonStr);
+		}
+		else if (Pair.Value->Type == EJson::Array)
+		{
+			FString JsonStr;
+			TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonStr);
+			FJsonSerializer::Serialize(Pair.Value->AsArray(), Writer);
+			OutProperties.Add(Pair.Key, JsonStr);
 		}
 	}
 }

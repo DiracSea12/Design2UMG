@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "LayoutCalculator.h"
+#include "Evaluation/OptimizationMetrics.h"
 
 /**
  * 布局精度指标
@@ -19,10 +20,10 @@ struct FLayoutMetrics
 	/** 样本数量 */
 	int32 SampleCount = 0;
 
-	/** 是否通过验收（MAE≤4px, P95≤8px） */
+	/** 是否通过验收 */
 	bool IsAcceptable() const
 	{
-		return MAE <= 4.0f && P95 <= 8.0f;
+		return MAE <= EvalThresholds::Acceptance_MAE && P95 <= EvalThresholds::Acceptance_P95;
 	}
 };
 
@@ -36,6 +37,14 @@ public:
 	 * 计算单个Bounds的误差（像素）
 	 */
 	static float CalculateBoundsError(
+		const FBounds& Actual,
+		const FBounds& Expected,
+		const FIntPoint& DesignSize);
+
+	/**
+	 * 计算单个Bounds的位置误差（像素）
+	 */
+	static float CalculatePosError(
 		const FBounds& Actual,
 		const FBounds& Expected,
 		const FIntPoint& DesignSize);

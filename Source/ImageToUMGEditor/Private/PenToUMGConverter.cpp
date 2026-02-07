@@ -76,7 +76,30 @@ FUMGWidgetNode FPenToUMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Node,
 			auto ChildWidget = ConvertNode(Child, Doc);
 			ApplySlotProperties(ChildWidget, Child, Node->Layout);
 			ApplyAlignItems(ChildWidget, Node->AlignItems, Node->Layout);
-			Widget.Children.Add(ChildWidget);
+
+			// Box 布局中固定尺寸子节点需要 SizeBox 包裹
+			bool bNeedsSizeBox = (Node->Layout == EPenLayout::Vertical || Node->Layout == EPenLayout::Horizontal)
+				&& (Child->Width.IsFixed() || Child->Height.IsFixed());
+			if (bNeedsSizeBox)
+			{
+				FUMGWidgetNode SizeBox;
+				SizeBox.Type = TEXT("SizeBox");
+				SizeBox.Id = ChildWidget.Id + TEXT("_sz");
+				SizeBox.Name = ChildWidget.Name + TEXT("_sz");
+				if (Child->Width.IsFixed())
+					SizeBox.Properties.Add(TEXT("WidthOverride"), FString::FromInt((int32)Child->Width.Value));
+				if (Child->Height.IsFixed())
+					SizeBox.Properties.Add(TEXT("HeightOverride"), FString::FromInt((int32)Child->Height.Value));
+				// Slot 属性转移到 SizeBox
+				SizeBox.Slot = ChildWidget.Slot;
+				ChildWidget.Slot = FUMGSlotData();
+				SizeBox.Children.Add(ChildWidget);
+				Widget.Children.Add(SizeBox);
+			}
+			else
+			{
+				Widget.Children.Add(ChildWidget);
+			}
 		}
 	}
 
@@ -84,11 +107,71 @@ FUMGWidgetNode FPenToUMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Node,
 	if (Node->Gap > 0)
 		ApplyGap(Widget.Children, Node->Gap, Node->Layout);
 
-	if (Node->Padding.Top > 0 || Node->Padding.Right > 0 || Node->Padding.Bottom > 0 || Node->Padding.Left > 0)
-		ApplyPadding(Widget, Node->Padding);
-
 	if (Node->JustifyContent != EPenJustifyContent::Start)
 		ApplyJustifyContent(Widget.Children, Node->JustifyContent, Node->Layout);
+
+	// VerticalBox/HorizontalBox 不支持背景色和 Padding，需要 Border 包裹
+	bool bNeedsBorder = (Node->Type == EPenNodeType::Frame || Node->Type == EPenNodeType::Group)
+		&& Widget.Type != TEXT("CanvasPanel")
+		&& (HasFillColor(Node) || HasPadding(Node));
+
+	if (bNeedsBorder)
+	{
+		FUMGWidgetNode Border;
+		Border.Type = TEXT("Border");
+		Border.Id = Widget.Id;
+		Border.Name = Widget.Name;
+		Border.Bounds = Widget.Bounds;
+
+		// 背景色 → Border
+		if (HasFillColor(Node))
+		{
+			Border.Properties.Add(TEXT("BrushColor"), Node->Fill.SolidColor);
+			Widget.Properties.Remove(TEXT("BrushColor"));
+		}
+		else
+		{
+			// 仅 padding 用途时，Border 默认 brush 是白色，必须显式设透明
+			Border.Properties.Add(TEXT("BrushColor"), TEXT("#00000000"));
+		}
+
+		// Padding → Border
+		if (HasPadding(Node))
+		{
+			ApplyPadding(Border, Node->Padding);
+		}
+
+		// 圆角/描边也转移到 Border
+		if (Widget.Properties.Contains(TEXT("DrawAs")))
+		{
+			for (const FString& Key : {TEXT("DrawAs"), TEXT("OutlineCornerRadius"), TEXT("CornerRadii"), TEXT("OutlineThickness"), TEXT("OutlineColor")})
+			{
+				if (const FString* V = Widget.Properties.Find(Key))
+				{
+					Border.Properties.Add(Key, *V);
+					Widget.Properties.Remove(Key);
+				}
+			}
+		}
+
+		// 透明度
+		if (Node->Opacity < 1.0f)
+			Border.Properties.Add(TEXT("RenderOpacity"), FString::SanitizeFloat(Node->Opacity));
+
+		// 内层容器填满 Border
+		Widget.Id = Widget.Id + TEXT("_inner");
+		Widget.Name = Widget.Name + TEXT("_inner");
+		Widget.Bounds = FBounds();
+		Widget.Slot.HorizontalAlignment = TEXT("Fill");
+		Widget.Slot.VerticalAlignment = TEXT("Fill");
+
+		Border.Children.Add(Widget);
+		return Border;
+	}
+
+	// 无 Border 时正常处理 Padding（设在容器上，仅 CanvasPanel 等支持）
+	if (Node->Padding.Top > 0 || Node->Padding.Right > 0 || Node->Padding.Bottom > 0 || Node->Padding.Left > 0)
+		ApplyPadding(Widget, Node->Padding);
 
 	return Widget;
 }
@@ -129,11 +212,10 @@ void FPenToUMGConverter::ApplyTextProperties(FUMGWidgetNode& Widget, const TShar
 		Node->TextAlign == EPenTextAlign::Center ? TEXT("Center") :
 		Node->TextAlign == EPenTextAlign::Right ? TEXT("Right") : TEXT("Left"));
 
-	// 行高
-	if (Node->LineHeight > 0 && Node->FontSize > 0)
+	// 行高 - lineHeight 本身就是倍率（如 1.2 表示 120%）
+	if (Node->LineHeight > 0)
 	{
-		float Percentage = Node->LineHeight / Node->FontSize;
-		Widget.Properties.Add(TEXT("LineHeightPercentage"), FString::SanitizeFloat(Percentage));
+		Widget.Properties.Add(TEXT("LineHeightPercentage"), FString::SanitizeFloat(Node->LineHeight));
 	}
 
 	// 字间距
@@ -174,8 +256,7 @@ FUMGWidgetNode FPenToUMGConverter::CreateIconFontWidget(const TSharedPtr<FPenNod
 	// 图标颜色
 	if (Node->Fill.Type == EPenFillType::Color)
 	{
-		FLinearColor Color = FPenTypeMapper::ParseColor(Node->Fill.SolidColor);
-		Widget.Properties.Add(TEXT("ColorAndOpacity"), Color.ToString());
+		Widget.Properties.Add(TEXT("Color"), Node->Fill.SolidColor);
 	}
 
 	return Widget;
@@ -205,18 +286,16 @@ void FPenToUMGConverter::ApplySlotProperties(FUMGWidgetNode& Widget, const TShar
 
 void FPenToUMGConverter::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedPtr<FPenNode>& Node)
 {
-	// 填充颜色
+	// 填充颜色 - 直接传 hex 字符串，ParseColor 只认 #hex 格式
 	if (Node->Fill.Type == EPenFillType::Color && Node->Fill.bEnabled)
 	{
-		FLinearColor Color = FPenTypeMapper::ParseColor(Node->Fill.SolidColor);
-		Widget.Properties.Add(TEXT("BrushColor"), Color.ToString());
+		Widget.Properties.Add(TEXT("BrushColor"), Node->Fill.SolidColor);
 	}
 
 	// 文本颜色
 	if (Node->Type == EPenNodeType::Text && Node->Fill.Type == EPenFillType::Color)
 	{
-		FLinearColor Color = FPenTypeMapper::ParseColor(Node->Fill.SolidColor);
-		Widget.Properties.Add(TEXT("ColorAndOpacity"), Color.ToString());
+		Widget.Properties.Add(TEXT("Color"), Node->Fill.SolidColor);
 	}
 
 	// 透明度
@@ -235,7 +314,26 @@ TSharedPtr<FPenNode> FPenToUMGConverter::ExpandRef(const TSharedPtr<FPenNode>& R
 	if (!RefNode.IsValid() || RefNode->Ref.IsEmpty())
 		return nullptr;
 
-	return FindReusableComponent(RefNode->Ref, Doc.Children);
+	auto SourceNode = FindReusableComponent(RefNode->Ref, Doc.Children);
+	if (!SourceNode.IsValid())
+		return nullptr;
+
+	// 深拷贝源组件
+	auto Expanded = DeepCopyNode(SourceNode);
+
+	// 应用 descendants 覆盖
+	for (const auto& Pair : RefNode->Descendants)
+	{
+		ApplyDescendantOverride(Expanded, Pair.Key, Pair.Value);
+	}
+
+	// 应用 ref 节点自身的位置/尺寸覆盖
+	if (RefNode->X != 0) Expanded->X = RefNode->X;
+	if (RefNode->Y != 0) Expanded->Y = RefNode->Y;
+	if (RefNode->Width.Value > 0) Expanded->Width = RefNode->Width;
+	if (RefNode->Height.Value > 0) Expanded->Height = RefNode->Height;
+
+	return Expanded;
 }
 
 TSharedPtr<FPenNode> FPenToUMGConverter::FindReusableComponent(const FString& RefId, const TArray<TSharedPtr<FPenNode>>& Nodes)
@@ -280,6 +378,19 @@ void FPenToUMGConverter::ApplyPadding(FUMGWidgetNode& Widget, const FPenPadding&
 void FPenToUMGConverter::ApplyJustifyContent(TArray<FUMGWidgetNode>& Children, EPenJustifyContent Justify, EPenLayout Layout)
 {
 	if (Justify == EPenJustifyContent::Start || Children.Num() == 0)
+		return;
+
+	// 如果已有 Fill 子节点，Spacer 会与之竞争空间，跳过
+	bool bHasFillChild = false;
+	for (const auto& C : Children)
+	{
+		if (C.Slot.SizeRule == TEXT("Fill"))
+		{
+			bHasFillChild = true;
+			break;
+		}
+	}
+	if (bHasFillChild)
 		return;
 
 	// 创建 Spacer Widget
@@ -363,7 +474,87 @@ void FPenToUMGConverter::ApplyStroke(FUMGWidgetNode& Widget, const FPenStroke& S
 
 	if (Stroke.Fill.Type == EPenFillType::Color)
 	{
-		FLinearColor Color = FPenTypeMapper::ParseColor(Stroke.Fill.SolidColor);
-		Widget.Properties.Add(TEXT("OutlineColor"), Color.ToString());
+		Widget.Properties.Add(TEXT("OutlineColor"), Stroke.Fill.SolidColor);
 	}
+}
+
+TSharedPtr<FPenNode> FPenToUMGConverter::DeepCopyNode(const TSharedPtr<FPenNode>& Source)
+{
+	if (!Source.IsValid())
+		return nullptr;
+
+	auto Copy = MakeShared<FPenNode>();
+	*Copy = *Source;
+
+	// 深拷贝子节点
+	Copy->Children.Empty();
+	for (const auto& Child : Source->Children)
+	{
+		Copy->Children.Add(DeepCopyNode(Child));
+	}
+
+	return Copy;
+}
+
+void FPenToUMGConverter::ApplyDescendantOverride(TSharedPtr<FPenNode>& Node, const FString& Path, const TSharedPtr<FPenNode>& Override)
+{
+	if (!Node.IsValid() || !Override.IsValid())
+		return;
+
+	// 解析路径（支持 "childId" 或 "childId/grandchildId" 格式）
+	FString FirstPart, Remaining;
+	if (Path.Split(TEXT("/"), &FirstPart, &Remaining))
+	{
+		// 多级路径，递归查找
+		for (auto& Child : Node->Children)
+		{
+			if (Child.IsValid() && Child->Id == FirstPart)
+			{
+				ApplyDescendantOverride(Child, Remaining, Override);
+				return;
+			}
+		}
+	}
+	else
+	{
+		// 单级路径，直接查找并应用覆盖
+		for (auto& Child : Node->Children)
+		{
+			if (Child.IsValid() && Child->Id == Path)
+			{
+				// 应用覆盖属性
+				if (!Override->Content.IsEmpty())
+					Child->Content = Override->Content;
+				if (Override->FontSize > 0)
+					Child->FontSize = Override->FontSize;
+				if (!Override->FontWeight.IsEmpty())
+					Child->FontWeight = Override->FontWeight;
+				if (Override->Fill.Type != EPenFillType::None)
+					Child->Fill = Override->Fill;
+				if (Override->Width.Value > 0)
+					Child->Width = Override->Width;
+				if (Override->Height.Value > 0)
+					Child->Height = Override->Height;
+				if (Override->X != 0)
+					Child->X = Override->X;
+				if (Override->Y != 0)
+					Child->Y = Override->Y;
+				if (!Override->bEnabled)
+					Child->bEnabled = Override->bEnabled;
+				return;
+			}
+		}
+	}
+}
+
+bool FPenToUMGConverter::HasFillColor(const TSharedPtr<FPenNode>& Node)
+{
+	return Node.IsValid() && Node->Fill.Type == EPenFillType::Color && Node->Fill.bEnabled;
+}
+
+bool FPenToUMGConverter::HasPadding(const TSharedPtr<FPenNode>& Node)
+{
+	return Node.IsValid() &&
+		(Node->Padding.Top > 0 || Node->Padding.Right > 0 ||
+		 Node->Padding.Bottom > 0 || Node->Padding.Left > 0);
 }

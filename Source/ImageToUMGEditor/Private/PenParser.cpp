@@ -140,7 +140,7 @@ TSharedPtr<FPenNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonOb
 	if (!JsonObj.IsValid())
 		return nullptr;
 
-	auto Node = MakeShared<FPenNode>();
+	TSharedPtr<FPenNode> Node = MakeShared<FPenNode>();
 
 	// 基础属性
 	Node->Id = JsonObj->GetStringField(TEXT("id"));
@@ -175,9 +175,12 @@ TSharedPtr<FPenNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonOb
 	JsonObj->TryGetBoolField(TEXT("flipX"), Node->bFlipX);
 	JsonObj->TryGetBoolField(TEXT("flipY"), Node->bFlipY);
 
-	// 布局属性
+	// 布局属性 - 根据节点类型设置默认值（Frame默认horizontal，Group默认none）
 	if (JsonObj->HasField(TEXT("layout")))
 		Node->Layout = ParseLayout(JsonObj->GetStringField(TEXT("layout")));
+	else if (Node->Type == EPenNodeType::Group)
+		Node->Layout = EPenLayout::None;  // Group 默认 none
+	// Frame 保持默认 Horizontal（在 FPenNode 中定义）
 	JsonObj->TryGetNumberField(TEXT("gap"), Node->Gap);
 	if (JsonObj->HasField(TEXT("padding")))
 		Node->Padding = ParsePadding(JsonObj->TryGetField(TEXT("padding")), Resolver);
@@ -250,6 +253,36 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 	// 组件引用属性
 	JsonObj->TryGetStringField(TEXT("ref"), Node->Ref);
 	JsonObj->TryGetBoolField(TEXT("reusable"), Node->bReusable);
+
+	// 解析 descendants（ref 实例的属性覆盖）
+	if (JsonObj->HasField(TEXT("descendants")))
+	{
+		const TSharedPtr<FJsonObject>& DescObj = JsonObj->GetObjectField(TEXT("descendants"));
+		for (const auto& Pair : DescObj->Values)
+		{
+			if (Pair.Value->Type == EJson::Object)
+			{
+				TSharedPtr<FPenNode> DescNode = MakeShared<FPenNode>();
+				// 重置默认值，避免污染覆盖判断
+				DescNode->FontSize = 0.0f;
+				DescNode->FontWeight = TEXT("");
+				// 只解析覆盖的属性，不递归解析完整节点
+				const TSharedPtr<FJsonObject>& OverrideObj = Pair.Value->AsObject();
+				OverrideObj->TryGetStringField(TEXT("content"), DescNode->Content);
+				OverrideObj->TryGetNumberField(TEXT("fontSize"), DescNode->FontSize);
+				OverrideObj->TryGetStringField(TEXT("fontWeight"), DescNode->FontWeight);
+				if (OverrideObj->HasField(TEXT("fill")))
+					DescNode->Fill = ParseFill(OverrideObj->TryGetField(TEXT("fill")), Resolver);
+				OverrideObj->TryGetNumberField(TEXT("width"), DescNode->Width.Value);
+				OverrideObj->TryGetNumberField(TEXT("height"), DescNode->Height.Value);
+				OverrideObj->TryGetNumberField(TEXT("x"), DescNode->X);
+				OverrideObj->TryGetNumberField(TEXT("y"), DescNode->Y);
+				if (OverrideObj->HasField(TEXT("enabled")))
+					DescNode->bEnabled = OverrideObj->GetBoolField(TEXT("enabled"));
+				Node->Descendants.Add(Pair.Key, DescNode);
+			}
+		}
+	}
 }
 
 FPenSize FPenParser::ParseSize(const TSharedPtr<FJsonValue>& Value, EPenNodeType NodeType, const FPenVariableResolver& Resolver)

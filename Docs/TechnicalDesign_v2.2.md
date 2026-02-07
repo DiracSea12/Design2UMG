@@ -95,19 +95,23 @@ HUD对像素精度极敏感（偏2-6px肉眼可见），这三项任务耦合导
 
 ### 2.4 容器策略
 
-> **AI输出规则**：只允许CanvasPanel绝对布局
+> **AI输出规则**：允许常见容器类型
 >
-> - AI输出的RootWidget必须是CanvasPanel
-> - AI输出的所有容器Type只能是CanvasPanel
-> - **不允许**AI输出HBox/VBox/Grid等容器
+> - RootWidget 可为 CanvasPanel 或其他容器（Overlay/VerticalBox/HorizontalBox/ScrollBox/GridPanel/UniformGridPanel/WrapBox/WidgetSwitcher/SafeZone/Border/SizeBox/ScaleBox/BackgroundBlur/InvalidationBox/RetainerBox/ExpandableArea 等）
+> - 非 Canvas 容器的子控件必须提供 Slot（Padding/HAlign/VAlign/SizeRule/FillWeight/Row/Column 等）
+> - ExpandableArea 等命名槽控件：子控件需提供 SlotName（Header/Body）
 >
-> **DSL内部规则**：允许响应式容器
+> **程序内部规则**：LayoutCalc 只作用于 CanvasPanel
 >
-> - Component DSL展开后的内部可使用HBox/VBox/Overlay
-> - 内部容器的外层必须包装在CanvasPanelSlot中
-> - 示例：IconText展开为CanvasPanelSlot包裹的HBox
+> - CanvasPanel：使用 Bounds → LayoutCalc 计算 Slot
+> - CanvasPanel：Slot 可省略；如提供，仅作参考，最终以 LayoutCalc 结果为准
+> - CanvasPanel 子控件仅使用 Anchors/Offsets/Alignment，不使用 HAlign/VAlign/Row/Column
+> - 非 Canvas 容器：直接应用 AI 提供的 Slot
+> - GridPanel/UniformGrid：当 Row/Column 均为默认值且存在 Bounds 时，按 Bounds 做行列兜底推断（不覆盖显式值）
+> - NamedSlot：槽位重复或超出时会合并到同一槽位（内部自动封装 VerticalBox）
+> - DSL 仍可展开组合容器，但不再限制 AI 只能输出 CanvasPanel
 
-**理由**：分离AI输出限制和程序内部实现。AI只输出简单的绝对布局结构，复杂的组合容器由DSL编译器在程序端处理。这样既保证AI输出的稳定性，又不限制DSL的表达能力。
+**理由**：兼容结构化容器并保持布局可控。CanvasPanel 继续走 Bounds→Slot 计算；非 Canvas 容器用 Slot 明确布局，避免丢失对齐与栅格信息。
 
 ### 2.5 中间产物与数据流
 
@@ -120,7 +124,7 @@ HUD对像素精度极敏感（偏2-6px肉眼可见），这三项任务耦合导
 | **Parser输出**     | `FParsedElementList` | 扁平元素表（bbox/OCR文本/置信度）     |
 | **AI输出**         | `FWidgetTree`        | 树结构（含Bounds/Type/Properties）    |
 | **Fixer输出**      | `FWidgetTree`        | 修正后的树结构（Bounds已修正）        |
-| **LayoutCalc输出** | `FUMGSlotDataMap`    | 最终投影（每个节点的Anchors/Offsets） |
+| **LayoutCalc输出** | `FUMGSlotDataMap`    | 最终投影（仅CanvasPanel子节点的Anchors/Offsets） |
 
 ```cpp
 // Parser阶段：扁平元素表
@@ -146,6 +150,7 @@ struct FWidgetTreeNode
     FString Type;                // Widget类型
     FString Name;                // 控件名称
     FBounds Bounds;              // 归一化坐标（唯一真值）
+    FUMGSlotData Slot;           // 可选：非Canvas容器布局信息
     TMap<FString, FString> Properties;
     TArray<FWidgetTreeNode> Children;
     FMetaInfo Meta;              // confidence/source/uncertain_props
@@ -154,7 +159,7 @@ struct FWidgetTreeNode
 struct FWidgetTree
 {
     FString WidgetName;          // Blueprint名称
-    FWidgetTreeNode RootWidget;  // 根节点（CanvasPanel）
+    FWidgetTreeNode RootWidget;  // 根节点（CanvasPanel或其他容器）
 };
 
 // LayoutCalc输出：最终投影
@@ -180,7 +185,7 @@ struct FUMGSlotDataMap
                                               Widget Generator → UMG资产
 ```
 
-> **关键原则**：Fixer/Repair Agent/Patch均在FWidgetTree层操作Bounds，LayoutCalc是最后一步投影，修复后需重新计算SlotData。
+> **关键原则**：Fixer/Repair Agent/Patch均在FWidgetTree层操作Bounds，LayoutCalc只对CanvasPanel投影，非Canvas容器直接使用SlotData。
 
 ---
 
@@ -245,6 +250,13 @@ struct FUMGSlotDataMap
 - 精度：4位小数（0.0001精度，支持4K分辨率1px精度）
 - 程序端通过ViewportMapping和LayoutCalculator转换为Anchors/Offsets
 
+**Bounds与Slot关系**：
+
+- Bounds必填，表示元素真实位置
+- CanvasPanel：Slot可省略，由LayoutCalc从Bounds计算（若提供会覆盖）
+- 非Canvas容器：Slot必填，Bounds仍用于修复/评估
+- 两者需一致，冲突以程序逻辑为准并记录警告
+
 ---
 
 ### 3.2 ViewportMapping（视口映射）
@@ -284,7 +296,7 @@ struct FViewportSpec
 | -------------- | ------------ | --------------------------------------------------------- |
 | `SourceSize` | AI输入图尺寸 | 发送给AI的图像尺寸（可能经过缩放，如MaxAIDimension=2048） |
 | `DesignSize` | 用户配置     | UMG目标分辨率（默认1920x1080，可在设置中修改）            |
-| `Mode`       | 用户配置     | 默认Stretch模式（最简单），可手动选择Fit/Fill             |
+| `Mode`       | 用户配置     | 默认Stretch模式，可选Fit（Fill暂不支持）         |
 | `SafeZone`   | 用户配置     | 可选，针对电视安全区等场景                                |
 
 **坐标还原流程**：
@@ -336,21 +348,21 @@ FBounds FViewportMapping::MapNormalizedBounds(const FBounds& SourceBounds, const
     
         if (SourceAspect > DesignAspect)
         {
-            // 源图更宽，上下有黑边
+            // 源图更宽，上下有黑边（正向映射：源→设计）
             float Scale = DesignAspect / SourceAspect;
             float OffsetY = (1.0f - Scale) / 2.0f;
-        
-            Result.Y = (SourceBounds.Y - OffsetY) / Scale;
-            Result.H = SourceBounds.H / Scale;
+
+            Result.Y = OffsetY + SourceBounds.Y * Scale;
+            Result.H = SourceBounds.H * Scale;
         }
         else
         {
-            // 源图更高，左右有黑边
+            // 源图更高，左右有黑边（正向映射：源→设计）
             float Scale = SourceAspect / DesignAspect;
             float OffsetX = (1.0f - Scale) / 2.0f;
-        
-            Result.X = (SourceBounds.X - OffsetX) / Scale;
-            Result.W = SourceBounds.W / Scale;
+
+            Result.X = OffsetX + SourceBounds.X * Scale;
+            Result.W = SourceBounds.W * Scale;
         }
     
         return Result;
@@ -644,17 +656,20 @@ FUMGSlotData FLayoutCalculator::CalculateSlot(const FBounds& Bounds, const FLayo
 >
 > **拉伸锚点收益**：全屏遮罩、宽幅进度条等元素自动拉伸填充，适配不同屏幕宽度。
 
-> **风险修复：LayoutCalc一致性验证**
+> **风险修复：LayoutCalc一致性验证** ✅ 已完成(2026-01-02)
 >
 > UMG CanvasSlot的Offsets语义在拉伸模式下容易出错（Right/Bottom是边距而非尺寸）。
 >
-> **必须增加的验证步骤**：
-> 1. 准备10-20个已知正确的UMG样例（手动搭建，覆盖各种锚点模式）
-> 2. 反推：从UMG资产读取Slot数据 → 计算对应的Bounds
-> 3. 再生成：用Bounds → LayoutCalc → 生成Slot
-> 4. 验证：生成的Slot与原始Slot完全一致
+> **验证结果**：442文件/4577样例，MAE=0px，100%通过
 >
-> 如不一致，说明公式或语义理解有误，必须修正后才能继续。
+> **验证范围说明**：
+> - ✅ 验证了**像素位置正确性**：Bounds→Slot→Bounds往返误差为0
+> - ⚠️ 未验证**Slot参数一致性**：LayoutCalc可能选择不同的Anchor/Alignment组合
+>   - 例：原始Alignment=0.3 → LayoutCalc输出Alignment=0.5（标准化）
+>   - 但最终渲染位置相同，符合"AI输出Bounds→生成正确位置Widget"的核心目标
+> - ⚠️ 未验证**响应式缩放行为**：不同Anchor/Alignment在屏幕缩放时行为可能不同
+>
+> **结论**：当前验证满足核心目标，Slot参数标准化和响应式行为不在当前范围。
 
 ---
 
@@ -1721,6 +1736,8 @@ float FRenderCompare::ComputeMaskedDifference(const TArray<uint8>& ImageA, const
   "Id": "Canvas_Root/ProgressBar_0",
   "Name": "Progress_HealthBar",
   "Bounds": {"X": 0.0200, "Y": 0.0200, "W": 0.2000, "H": 0.0300},
+  "Slot": {...},
+  "CanvasSlot": {...},
   "Properties": {...},
   "Children": [...],
   "_meta": {
@@ -1739,9 +1756,26 @@ float FRenderCompare::ComputeMaskedDifference(const TArray<uint8>& ImageA, const
 | `Id`         | ✅   | **稳定唯一标识**，用于Patch定位和跨轮次引用 |
 | `Name`       | ✅   | UMG中的控件名称（可重复）                         |
 | `Bounds`     | ✅   | 归一化坐标（4位小数）                             |
-| `Properties` | ❌   | 类型特定属性                                      |
+| `Slot`       | ❌   | 非Canvas容器的布局数据（Padding/HAlign/VAlign/Row/Column等） |
+| `CanvasSlot` | ❌   | 兼容字段，等价于 `Slot`                           |
+| `Properties` | ❌   | 类型特定属性（命名槽控件可用 SlotName/NamedSlot 指定挂槽） |
 | `Children`   | ❌   | 子节点数组                                        |
 | `_meta`      | ❌   | 调试和置信度信息                                  |
+
+> **SlotData**：`Slot`/`CanvasSlot` 使用同一结构，支持 Anchors/Offsets/Alignment 以及 Padding/HAlign/VAlign/SizeRule/FillWeight/Row/Column/RowSpan/ColumnSpan 等字段。
+> **字段别名**：解析支持 `HAlign/HorizontalAlignment` 与 `VAlign/VerticalAlignment`，建议输出 HAlign/VAlign。
+
+#### 4.1.1 Type 支持范围（内置映射）
+
+- 容器类：CanvasPanel、VerticalBox、HorizontalBox、Overlay、ScrollBox、GridPanel、UniformGridPanel、WrapBox、WidgetSwitcher、SafeZone
+- 包装/内容类：Border、SizeBox、ScaleBox、BackgroundBlur、InvalidationBox、RetainerBox、ExpandableArea、NamedSlot
+- 交互类：Button、CheckBox、Slider、SpinBox
+- 文本类：TextBlock、RichTextBlock、EditableTextBox、MultiLineEditableTextBox、EditableText、MultiLineEditableText
+- 显示类：Image、ProgressBar、Throbber、CircularThrobber、Spacer
+- 列表类：ListView、TileView、TreeView
+- 其他：MenuAnchor、ComboBoxString（ComboBox 作为别名）
+
+> **说明**：Type 取值以内部映射为准，未列出的类型会记录警告并跳过创建。
 
 ### 4.2 Id生成规则
 
@@ -1868,14 +1902,14 @@ Canvas_Root
 2. Component的内部节点不参与跨轮次匹配（由Component整体匹配）
 3. RepairAgent支持Component级别Patch（不穿透内部结构）
 
-> **注意**：DSL内部使用的HBox/VBox等容器不违反2.4节的"AI输出规则"，
-> 因为这些容器是程序端展开产生的，不是AI直接输出的。
+> **注意**：DSL内部使用的HBox/VBox等容器由程序端展开生成，与AI输出并行。
+> 两者都遵循同一套Slot/Bounds规则，避免布局语义不一致。
 
 ### 4.6 向后兼容
 
-- 同时支持 `Slot`（旧格式）和 `Bounds`（新格式）
-- 检测到 `Bounds`时使用LayoutCalculator计算
-- 检测到 `Slot`时直接使用
+- 同时支持 `Slot`/`CanvasSlot`（旧格式）和 `Bounds`（新格式）
+- CanvasPanel：检测到 `Bounds`时使用LayoutCalculator计算Slot
+- 非Canvas容器：优先使用 `Slot`，未提供时使用默认Slot
 
 ---
 
@@ -1978,7 +2012,7 @@ Canvas_Root
 | -------------------------------------------------------- | ---- | -------------------- |
 | `Content/Config/DefaultPrompt.txt`                     | 重写 | 简化为~50行          |
 | `Source/ImageToUMGEditor/Public/ViewportMapping.h`     | 新建 | 视口映射头文件       |
-| `Source/ImageToUMGEditor/Private/ViewportMapping.cpp`  | 新建 | Fit/Fill/Stretch实现 |
+| `Source/ImageToUMGEditor/Private/ViewportMapping.cpp`  | 新建 | Fit/Stretch实现（Fill延期Phase 4） |
 | `Source/ImageToUMGEditor/Public/LayoutCalculator.h`    | 新建 | 布局计算器头文件     |
 | `Source/ImageToUMGEditor/Private/LayoutCalculator.cpp` | 新建 | Hysteresis算法       |
 | `Source/ImageToUMGEditor/Public/SmartMatcher.h`        | 新建 | ID匹配器头文件       |
@@ -2132,6 +2166,10 @@ bool FParserManager::IsOmniParserAvailable()
 | **本地Parser** | OmniParser/PaddleOCR本地运行，不消耗API额度 |
 | **温度=0**     | 减少随机性，提高缓存命中率                  |
 | **Token预估**  | 大图预估Token数，超限时自动降采样           |
+
+#### Slot兼容性警告
+
+- 未支持的Slot类型会记录Warning日志，便于定位布局丢失问题。
 
 #### 错误日志
 

@@ -1,0 +1,671 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+#include "LayoutFixer.h"
+
+// ============================================================================
+// Helper Functions (v2.2 Fixer优化)
+// ============================================================================
+
+/**
+ * 从多个候选位移中选择最小位移（绝对值最小）
+ * @param Deltas 候选位移数组
+ * @param Threshold 阈值，只考虑小于阈值的位移
+ * @param Eps 容差
+ * @param OutDelta 输出最佳位移
+ * @return 是否找到有效位移
+ */
+static bool ChooseBestDelta(const TArray<float>& Deltas, float Threshold, float Eps, float& OutDelta)
+{
+	float BestAbs = Threshold + 1.0f;
+	bool bFound = false;
+	for (float D : Deltas)
+	{
+		float AbsD = FMath::Abs(D);
+		if (AbsD <= Threshold + Eps && (AbsD + Eps) < BestAbs)
+		{
+			BestAbs = AbsD;
+			OutDelta = D;
+			bFound = true;
+		}
+	}
+	return bFound;
+}
+
+/**
+ * 计算1D区间重叠比例
+ * @return 重叠长度 / 较短区间长度
+ */
+static float OverlapRatio1D(float A0, float A1, float B0, float B1)
+{
+	float L = FMath::Max(A0, B0);
+	float R = FMath::Min(A1, B1);
+	float O = FMath::Max(0.0f, R - L);
+	float MinLen = FMath::Max(1e-6f, FMath::Min(A1 - A0, B1 - B0));
+	return O / MinLen;
+}
+
+/**
+ * 计算中位数（比平均值更稳健）
+ */
+static float GetMedian(TArray<float> Values)
+{
+	if (Values.Num() == 0) return 0.0f;
+	Values.Sort();
+	int32 Mid = Values.Num() / 2;
+	if (Values.Num() % 2 == 1) return Values[Mid];
+	return 0.5f * (Values[Mid - 1] + Values[Mid]);
+}
+
+// ============================================================================
+// FLayoutFixer Implementation
+// ============================================================================
+
+void FLayoutFixer::Initialize(const FIntPoint& DesignSize, FFixerPreset& OutPreset)
+{
+	OutPreset.DesignSize = DesignSize;
+	int32 MinDim = FMath::Min(DesignSize.X, DesignSize.Y);
+	OutPreset.SnapPx = FMath::Clamp(FMath::RoundToInt(MinDim * 0.002f), 2, 6);
+	// 1080p: 2px, 4K: 4px
+}
+
+float FLayoutFixer::GetAverage(const TArray<float>& Values)
+{
+	if (Values.Num() == 0) return 0.0f;
+	float Sum = 0.0f;
+	for (float V : Values) Sum += V;
+	return Sum / Values.Num();
+}
+
+float FLayoutFixer::GetMaxDeviation(const TArray<float>& Values, float Average)
+{
+	float MaxDiff = 0.0f;
+	for (float V : Values)
+	{
+		MaxDiff = FMath::Max(MaxDiff, FMath::Abs(V - Average));
+	}
+	return MaxDiff;
+}
+
+bool FLayoutFixer::FixBoundsOverflow(
+	FBounds& ChildBounds,
+	const FBounds& ParentBounds,
+	FFixerLogEntry* OutLog)
+{
+	FBounds OldBounds = ChildBounds;
+	bool bFixed = false;
+
+	const float ParentRight = ParentBounds.X + ParentBounds.W;
+	const float ParentBottom = ParentBounds.Y + ParentBounds.H;
+
+	// 左/上越界
+	if (ChildBounds.X < ParentBounds.X)
+	{
+		ChildBounds.X = ParentBounds.X;
+		bFixed = true;
+	}
+	if (ChildBounds.Y < ParentBounds.Y)
+	{
+		ChildBounds.Y = ParentBounds.Y;
+		bFixed = true;
+	}
+
+	// 右/下越界
+	const float ChildRight = ChildBounds.X + ChildBounds.W;
+	const float ChildBottom = ChildBounds.Y + ChildBounds.H;
+
+	// 最小尺寸阈值，防止Bounds被裁剪为0导致节点被过滤
+	const float MinSize = 0.001f;
+
+	if (ChildRight > ParentRight)
+	{
+		// 如果元素完全在父节点右侧，先移动到父节点内
+		if (ChildBounds.X >= ParentRight - MinSize)
+		{
+			ChildBounds.X = ParentRight - ChildBounds.W;
+			// 确保X不会变成负数
+			if (ChildBounds.X < ParentBounds.X)
+			{
+				ChildBounds.X = ParentBounds.X;
+				ChildBounds.W = FMath::Max(MinSize, ParentBounds.W);
+			}
+		}
+		else
+		{
+			ChildBounds.W = FMath::Max(MinSize, ParentRight - ChildBounds.X);
+		}
+		bFixed = true;
+	}
+	if (ChildBottom > ParentBottom)
+	{
+		// 如果元素完全在父节点下方，先移动到父节点内
+		if (ChildBounds.Y >= ParentBottom - MinSize)
+		{
+			ChildBounds.Y = ParentBottom - ChildBounds.H;
+			// 确保Y不会变成负数
+			if (ChildBounds.Y < ParentBounds.Y)
+			{
+				ChildBounds.Y = ParentBounds.Y;
+				ChildBounds.H = FMath::Max(MinSize, ParentBounds.H);
+			}
+		}
+		else
+		{
+			ChildBounds.H = FMath::Max(MinSize, ParentBottom - ChildBounds.Y);
+		}
+		bFixed = true;
+	}
+
+	if (bFixed && OutLog)
+	{
+		OutLog->FixType = TEXT("Overflow");
+		OutLog->OldBounds = OldBounds;
+		OutLog->NewBounds = ChildBounds;
+	}
+
+	return bFixed;
+}
+
+bool FLayoutFixer::SnapToAlignment(
+	FBounds& Bounds,
+	const FBounds& ParentBounds,
+	float SnapThresholdX,
+	float SnapThresholdY,
+	FFixerLogEntry* OutLog)
+{
+	FBounds OldBounds = Bounds;
+	bool bFixed = false;
+	const float Eps = 1e-6f;
+
+	const float ParentCenterX = ParentBounds.X + ParentBounds.W / 2.0f;
+	const float ParentCenterY = ParentBounds.Y + ParentBounds.H / 2.0f;
+	const float ParentRight = ParentBounds.X + ParentBounds.W;
+	const float ParentBottom = ParentBounds.Y + ParentBounds.H;
+
+	const float CenterX = Bounds.X + Bounds.W / 2.0f;
+	const float CenterY = Bounds.Y + Bounds.H / 2.0f;
+	const float Right = Bounds.X + Bounds.W;
+	const float Bottom = Bounds.Y + Bounds.H;
+
+	// v2.2: 收集所有候选位移，选择最小的
+	// X方向候选：左边缘、右边缘、中线
+	TArray<float> DeltasX;
+	DeltasX.Add(ParentBounds.X - Bounds.X);           // 左边缘吸附
+	DeltasX.Add(ParentRight - Right);                  // 右边缘吸附
+	DeltasX.Add(ParentCenterX - CenterX);              // 中线吸附（需要调整为中心对齐）
+
+	float BestDeltaX = 0.0f;
+	if (ChooseBestDelta(DeltasX, SnapThresholdX, Eps, BestDeltaX))
+	{
+		Bounds.X += BestDeltaX;
+		bFixed = true;
+	}
+
+	// Y方向候选：上边缘、下边缘、中线
+	TArray<float> DeltasY;
+	DeltasY.Add(ParentBounds.Y - Bounds.Y);           // 上边缘吸附
+	DeltasY.Add(ParentBottom - Bottom);                // 下边缘吸附
+	DeltasY.Add(ParentCenterY - CenterY);              // 中线吸附
+
+	float BestDeltaY = 0.0f;
+	if (ChooseBestDelta(DeltasY, SnapThresholdY, Eps, BestDeltaY))
+	{
+		Bounds.Y += BestDeltaY;
+		bFixed = true;
+	}
+
+	if (bFixed && OutLog)
+	{
+		OutLog->FixType = TEXT("Snap");
+		OutLog->OldBounds = OldBounds;
+		OutLog->NewBounds = Bounds;
+	}
+
+	return bFixed;
+}
+
+bool FLayoutFixer::SnapToSiblings(
+	FBounds& Bounds,
+	const TArray<FBounds>& SiblingBounds,
+	float SnapThresholdX,
+	float SnapThresholdY,
+	FFixerLogEntry* OutLog)
+{
+	FBounds OldBounds = Bounds;
+	bool bFixed = false;
+	const float Eps = 1e-6f;
+	const float MinOverlapRatio = 0.5f;  // v2.2: 正交方向需要50%重叠才吸附
+
+	// v2.2: 收集所有候选位移，选择最小的
+	TArray<float> DeltasX;
+	TArray<float> DeltasY;
+
+	const float Right = Bounds.X + Bounds.W;
+	const float Bottom = Bounds.Y + Bounds.H;
+
+	for (const FBounds& Sibling : SiblingBounds)
+	{
+		const float SibRight = Sibling.X + Sibling.W;
+		const float SibBottom = Sibling.Y + Sibling.H;
+
+		// X方向吸附需要Y方向有足够重叠
+		float OverlapY = OverlapRatio1D(Bounds.Y, Bottom, Sibling.Y, SibBottom);
+		if (OverlapY >= MinOverlapRatio)
+		{
+			DeltasX.Add(Sibling.X - Bounds.X);      // 左边缘对齐
+			DeltasX.Add(SibRight - Right);           // 右边缘对齐
+		}
+
+		// Y方向吸附需要X方向有足够重叠
+		float OverlapX = OverlapRatio1D(Bounds.X, Right, Sibling.X, SibRight);
+		if (OverlapX >= MinOverlapRatio)
+		{
+			DeltasY.Add(Sibling.Y - Bounds.Y);      // 上边缘对齐
+			DeltasY.Add(SibBottom - Bottom);         // 下边缘对齐
+		}
+	}
+
+	float BestDeltaX = 0.0f;
+	if (ChooseBestDelta(DeltasX, SnapThresholdX, Eps, BestDeltaX))
+	{
+		Bounds.X += BestDeltaX;
+		bFixed = true;
+	}
+
+	float BestDeltaY = 0.0f;
+	if (ChooseBestDelta(DeltasY, SnapThresholdY, Eps, BestDeltaY))
+	{
+		Bounds.Y += BestDeltaY;
+		bFixed = true;
+	}
+
+	if (bFixed && OutLog)
+	{
+		OutLog->FixType = TEXT("SiblingSnap");
+		OutLog->OldBounds = OldBounds;
+		OutLog->NewBounds = Bounds;
+	}
+
+	return bFixed;
+}
+
+TArray<TArray<int32>> FLayoutFixer::DetectRows(
+	const TArray<FBounds>& Bounds,
+	float OverlapThreshold)
+{
+	TArray<TArray<int32>> Rows;
+
+	for (int32 i = 0; i < Bounds.Num(); ++i)
+	{
+		const FBounds& Node = Bounds[i];
+		bool bFoundRow = false;
+
+		for (auto& Row : Rows)
+		{
+			if (Row.Num() == 0) continue;
+
+			const FBounds& First = Bounds[Row[0]];
+			float OverlapTop = FMath::Max(Node.Y, First.Y);
+			float OverlapBottom = FMath::Min(Node.Y + Node.H, First.Y + First.H);
+			float OverlapHeight = FMath::Max(0.0f, OverlapBottom - OverlapTop);
+			float MinHeight = FMath::Min(Node.H, First.H);
+
+			if (MinHeight > 0 && OverlapHeight / MinHeight > OverlapThreshold)
+			{
+				Row.Add(i);
+				bFoundRow = true;
+				break;
+			}
+		}
+
+		if (!bFoundRow)
+		{
+			TArray<int32> NewRow;
+			NewRow.Add(i);
+			Rows.Add(NewRow);
+		}
+	}
+
+	return Rows;
+}
+
+TArray<TArray<int32>> FLayoutFixer::DetectColumns(
+	const TArray<FBounds>& Bounds,
+	float OverlapThreshold)
+{
+	TArray<TArray<int32>> Columns;
+
+	for (int32 i = 0; i < Bounds.Num(); ++i)
+	{
+		const FBounds& Node = Bounds[i];
+		bool bFoundCol = false;
+
+		for (auto& Col : Columns)
+		{
+			if (Col.Num() == 0) continue;
+
+			const FBounds& First = Bounds[Col[0]];
+			float OverlapLeft = FMath::Max(Node.X, First.X);
+			float OverlapRight = FMath::Min(Node.X + Node.W, First.X + First.W);
+			float OverlapWidth = FMath::Max(0.0f, OverlapRight - OverlapLeft);
+			float MinWidth = FMath::Min(Node.W, First.W);
+
+			if (MinWidth > 0 && OverlapWidth / MinWidth > OverlapThreshold)
+			{
+				Col.Add(i);
+				bFoundCol = true;
+				break;
+			}
+		}
+
+		if (!bFoundCol)
+		{
+			TArray<int32> NewCol;
+			NewCol.Add(i);
+			Columns.Add(NewCol);
+		}
+	}
+
+	return Columns;
+}
+
+bool FLayoutFixer::FixEqualSpacing(
+	TArray<FBounds>& Bounds,
+	const TArray<int32>& Indices,
+	bool bHorizontal,
+	float Threshold,
+	TArray<FFixerLogEntry>* OutLog)
+{
+	if (Indices.Num() < 3) return false;
+
+	// 按位置排序
+	TArray<int32> Sorted = Indices;
+	Sorted.Sort([&Bounds, bHorizontal](int32 A, int32 B)
+	{
+		return bHorizontal ? Bounds[A].X < Bounds[B].X : Bounds[A].Y < Bounds[B].Y;
+	});
+
+	// 计算间距
+	TArray<float> Gaps;
+	for (int32 i = 1; i < Sorted.Num(); ++i)
+	{
+		float Gap;
+		if (bHorizontal)
+		{
+			Gap = Bounds[Sorted[i]].X - (Bounds[Sorted[i-1]].X + Bounds[Sorted[i-1]].W);
+		}
+		else
+		{
+			Gap = Bounds[Sorted[i]].Y - (Bounds[Sorted[i-1]].Y + Bounds[Sorted[i-1]].H);
+		}
+		Gaps.Add(Gap);
+	}
+
+	// v2.2: 使用中位数而非平均值（更稳健）
+	float MedianGap = GetMedian(Gaps);
+	float AvgGap = GetAverage(Gaps);
+	float MaxDiff = GetMaxDeviation(Gaps, AvgGap);
+
+	// v2.2: 使用相对阈值（15%间距偏差 或 2倍SnapThreshold的绝对阈值）
+	float AbsThreshold = 2.0f * Threshold;
+	float RatioThreshold = 0.15f;
+	float EffectiveThreshold = FMath::Max(AbsThreshold, FMath::Abs(MedianGap) * RatioThreshold);
+
+	if (MaxDiff <= EffectiveThreshold) return false;
+
+	// v2.2: 限制单次最大移动距离（3倍SnapThreshold）
+	float MaxMove = 3.0f * Threshold;
+
+	// 应用等距修正
+	bool bApplied = false;
+	for (int32 i = 1; i < Sorted.Num(); ++i)
+	{
+		int32 Idx = Sorted[i];
+		int32 PrevIdx = Sorted[i-1];
+
+		if (bHorizontal)
+		{
+			float PrevRight = Bounds[PrevIdx].X + Bounds[PrevIdx].W;
+			float NewX = PrevRight + MedianGap;
+			float DeltaX = NewX - Bounds[Idx].X;
+
+			// v2.2: 限制移动幅度
+			if (FMath::Abs(DeltaX) > MaxMove)
+			{
+				NewX = Bounds[Idx].X + FMath::Sign(DeltaX) * MaxMove;
+			}
+
+			// 边界检查
+			if (NewX >= 0.0f && NewX + Bounds[Idx].W <= 1.0f)
+			{
+				Bounds[Idx].X = NewX;
+				bApplied = true;
+			}
+		}
+		else
+		{
+			float PrevBottom = Bounds[PrevIdx].Y + Bounds[PrevIdx].H;
+			float NewY = PrevBottom + MedianGap;
+			float DeltaY = NewY - Bounds[Idx].Y;
+
+			// v2.2: 限制移动幅度
+			if (FMath::Abs(DeltaY) > MaxMove)
+			{
+				NewY = Bounds[Idx].Y + FMath::Sign(DeltaY) * MaxMove;
+			}
+
+			// 边界检查
+			if (NewY >= 0.0f && NewY + Bounds[Idx].H <= 1.0f)
+			{
+				Bounds[Idx].Y = NewY;
+				bApplied = true;
+			}
+		}
+	}
+
+	return bApplied;
+}
+
+void FLayoutFixer::FixWidgetTree(
+	FFixerWidgetNode& Root,
+	const FFixerPreset& Preset,
+	TArray<FFixerLogEntry>& OutLog,
+	FFixerStats* OutStats)
+{
+	// v2.3: 初始化统计
+	FFixerStats LocalStats;
+	FFixerStats& Stats = OutStats ? *OutStats : LocalStats;
+
+	// 分别计算X/Y方向的归一化阈值
+	float SnapThresholdX = (float)Preset.SnapPx / (float)Preset.DesignSize.X;
+	float SnapThresholdY = (float)Preset.SnapPx / (float)Preset.DesignSize.Y;
+
+	// 递归处理子节点
+	TFunction<void(FFixerWidgetNode&, const FBounds&)> ProcessNode;
+	ProcessNode = [&](FFixerWidgetNode& Node, const FBounds& ParentBounds)
+	{
+		// v2.3: 置信度检查 - 反转逻辑：仅修正低置信度节点
+		bool bShouldFix = true;
+		if (Node.bFixExempt)
+		{
+			bShouldFix = false;
+			Stats.SkippedExempt++;
+		}
+		else if (Preset.bOnlyFixLowConfidence && Node.Confidence >= Preset.ConfidenceThreshold)
+		{
+			// 高置信度节点跳过修正（保护已经正确的识别结果）
+			bShouldFix = false;
+			Stats.SkippedHighConfidence++;
+		}
+
+		// 保存修正前的Bounds用于回退
+		FBounds OriginalNodeBounds = Node.Bounds;
+
+		// 越界修正
+		if (bShouldFix && Preset.bEnableOverflowFix)
+		{
+			FFixerLogEntry OverflowLog;
+			OverflowLog.WidgetId = Node.Id;
+			if (FixBoundsOverflow(Node.Bounds, ParentBounds, &OverflowLog))
+			{
+				OutLog.Add(OverflowLog);
+				Stats.OverflowFixTriggered++;
+			}
+		}
+
+		// 对齐吸附（独立于越界修正）
+		if (bShouldFix && Preset.bEnableAlignSnap)
+		{
+			FFixerLogEntry SnapLog;
+			SnapLog.WidgetId = Node.Id;
+			if (SnapToAlignment(Node.Bounds, ParentBounds, SnapThresholdX, SnapThresholdY, &SnapLog))
+			{
+				OutLog.Add(SnapLog);
+				Stats.AlignSnapTriggered++;
+			}
+		}
+
+		// 处理子节点
+		if (Node.Children.Num() > 0)
+		{
+			// v2.3: 收集可修正的子节点（低置信度或非豁免）
+			TArray<int32> FixableIndices;
+			TArray<FBounds> OriginalBounds;
+			for (int32 i = 0; i < Node.Children.Num(); ++i)
+			{
+				bool bChildFixable = !Node.Children[i].bFixExempt;
+				if (Preset.bOnlyFixLowConfidence)
+				{
+					// 仅低置信度可修正
+					bChildFixable = bChildFixable && (Node.Children[i].Confidence < Preset.ConfidenceThreshold);
+				}
+				if (bChildFixable)
+				{
+					FixableIndices.Add(i);
+					OriginalBounds.Add(Node.Children[i].Bounds);
+				}
+			}
+
+			TArray<FBounds> ProposedBounds = OriginalBounds;
+
+			// 同级元素吸附
+			if (Preset.bEnableSiblingSnap && ProposedBounds.Num() >= 2)
+			{
+				for (int32 i = 0; i < ProposedBounds.Num(); ++i)
+				{
+					TArray<FBounds> OtherBounds;
+					for (int32 j = 0; j < OriginalBounds.Num(); ++j)
+					{
+						if (i != j) OtherBounds.Add(OriginalBounds[j]);
+					}
+					if (SnapToSiblings(ProposedBounds[i], OtherBounds, SnapThresholdX, SnapThresholdY, nullptr))
+					{
+						Stats.SiblingSnapTriggered++;
+					}
+				}
+			}
+
+			// 等距修正 - v2.3: 增加间距方差检查
+			if (Preset.bEnableEqualSpacing && ProposedBounds.Num() >= Preset.MinElementsForEqualSpacing)
+			{
+				auto Rows = DetectRows(OriginalBounds, Preset.RowOverlapThreshold);
+				for (auto& Row : Rows)
+				{
+					if (Row.Num() >= Preset.MinElementsForEqualSpacing)
+					{
+						// v2.3: 计算间距方差，只有方差足够小才修正
+						TArray<float> Gaps;
+						Row.Sort([&](int32 A, int32 B) { return OriginalBounds[A].X < OriginalBounds[B].X; });
+						for (int32 k = 1; k < Row.Num(); ++k)
+						{
+							float Gap = OriginalBounds[Row[k]].X - (OriginalBounds[Row[k-1]].X + OriginalBounds[Row[k-1]].W);
+							Gaps.Add(Gap);
+						}
+						if (Gaps.Num() > 0)
+						{
+							float AvgGap = GetAverage(Gaps);
+							float MaxDev = GetMaxDeviation(Gaps, AvgGap);
+							// 只有方差足够小才认为是"接近等距"，值得修正
+							if (MaxDev <= Preset.MaxSpacingVarianceForEqualSpacing)
+							{
+								if (FixEqualSpacing(ProposedBounds, Row, true, SnapThresholdX, &OutLog))
+								{
+									Stats.EqualSpacingTriggered++;
+								}
+							}
+						}
+					}
+				}
+
+				auto Columns = DetectColumns(OriginalBounds, Preset.RowOverlapThreshold);
+				for (auto& Col : Columns)
+				{
+					if (Col.Num() >= Preset.MinElementsForEqualSpacing)
+					{
+						TArray<float> Gaps;
+						Col.Sort([&](int32 A, int32 B) { return OriginalBounds[A].Y < OriginalBounds[B].Y; });
+						for (int32 k = 1; k < Col.Num(); ++k)
+						{
+							float Gap = OriginalBounds[Col[k]].Y - (OriginalBounds[Col[k-1]].Y + OriginalBounds[Col[k-1]].H);
+							Gaps.Add(Gap);
+						}
+						if (Gaps.Num() > 0)
+						{
+							float AvgGap = GetAverage(Gaps);
+							float MaxDev = GetMaxDeviation(Gaps, AvgGap);
+							if (MaxDev <= Preset.MaxSpacingVarianceForEqualSpacing)
+							{
+								if (FixEqualSpacing(ProposedBounds, Col, false, SnapThresholdY, &OutLog))
+								{
+									Stats.EqualSpacingTriggered++;
+								}
+							}
+						}
+					}
+				}
+			}
+
+			// v2.3: 保守性检查 - 更严格的回滚条件
+			float TotalMove = 0.0f;
+			float MaxMove = 0.0f;
+			for (int32 i = 0; i < OriginalBounds.Num(); ++i)
+			{
+				float Dx = ProposedBounds[i].X - OriginalBounds[i].X;
+				float Dy = ProposedBounds[i].Y - OriginalBounds[i].Y;
+				float D = FMath::Sqrt(Dx*Dx + Dy*Dy);
+				TotalMove += D;
+				MaxMove = FMath::Max(MaxMove, D);
+			}
+
+			// v2.3: 更保守的阈值
+			float MaxTotalMove = FMath::Max(0.03f, OriginalBounds.Num() * 2.0f * FMath::Max(SnapThresholdX, SnapThresholdY));
+			float MaxSingleMove = FMath::Max(0.02f, 3.0f * FMath::Max(SnapThresholdX, SnapThresholdY));
+
+			bool bPassesCheck = (TotalMove <= MaxTotalMove) && (MaxMove <= MaxSingleMove);
+
+			if (!bPassesCheck)
+			{
+				Stats.RolledBack++;
+			}
+
+			// 更新可修正子节点Bounds
+			for (int32 i = 0; i < FixableIndices.Num(); ++i)
+			{
+				if (bPassesCheck)
+				{
+					Node.Children[FixableIndices[i]].Bounds = ProposedBounds[i];
+				}
+			}
+
+			// 递归处理所有子节点
+			FBounds ChildParent = (Node.Bounds.W > 0.0f && Node.Bounds.H > 0.0f) ? Node.Bounds : ParentBounds;
+			for (auto& Child : Node.Children)
+			{
+				ProcessNode(Child, ChildParent);
+			}
+		}
+	};
+
+	// 从根节点开始处理
+	FBounds RootParent = {0.0f, 0.0f, 1.0f, 1.0f};
+	ProcessNode(Root, RootParent);
+}

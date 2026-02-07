@@ -25,6 +25,12 @@ struct FLayoutPreset
 	/** 拉伸锚点阈值（默认0.60） */
 	float StretchThreshold = 0.60f;
 
+	/** Enable nine-grid anchor selection */
+	bool bEnableNineGrid = true;
+	bool bEnableHysteresis = true;
+	bool bEnableEdgeSnap = true;
+	bool bEnableStretchAnchors = true;
+
 	/** 获取标准HUD预设 */
 	static FLayoutPreset GetStandardHUDPreset()
 	{
@@ -50,28 +56,7 @@ struct FLayoutContext
 	FLayoutPreset Preset;
 };
 
-/**
- * 归一化边界框
- */
-struct FBounds
-{
-	float X = 0.0f;  // 左上角X（0-1）
-	float Y = 0.0f;  // 左上角Y（0-1）
-	float W = 0.0f;  // 宽度（0-1）
-	float H = 0.0f;  // 高度（0-1）
-
-	/** 获取中心点X */
-	float GetCenterX() const { return X + W / 2.0f; }
-
-	/** 获取中心点Y */
-	float GetCenterY() const { return Y + H / 2.0f; }
-
-	/** 获取右边界 */
-	float GetRight() const { return X + W; }
-
-	/** 获取下边界 */
-	float GetBottom() const { return Y + H; }
-};
+// FBounds已在UMGSchema.h中定义
 
 /**
  * 布局计算器 - 将Bounds转换为UMG的Anchors/Offsets
@@ -86,6 +71,27 @@ public:
 	 * @return 计算得到的Slot数据
 	 */
 	static FUMGSlotData CalculateSlot(const FBounds& Bounds, const FLayoutContext& Context);
+
+	// ========== 指标采集接口 (问题5) ==========
+
+	/**
+	 * 检测边缘吸附状态（公开接口用于评估）
+	 * @param Bounds 归一化边界框
+	 * @param EdgeThreshold 边缘阈值
+	 * @param bOutEdgeSnapX 输出：X方向是否触发边缘吸附
+	 * @param bOutEdgeSnapY 输出：Y方向是否触发边缘吸附
+	 */
+	static void DetectEdgeSnap(const FBounds& Bounds, float EdgeThreshold, bool& bOutEdgeSnapX, bool& bOutEdgeSnapY);
+
+	/**
+	 * 检测拉伸锚点状态（公开接口用于评估）
+	 * @param Bounds 归一化边界框
+	 * @param StretchThreshold 拉伸阈值
+	 * @param EdgeThreshold 边缘阈值（拉伸需要同时靠近两端边缘）
+	 * @param bOutStretchX 输出：X方向是否触发拉伸
+	 * @param bOutStretchY 输出：Y方向是否触发拉伸
+	 */
+	static void DetectStretchAnchors(const FBounds& Bounds, float StretchThreshold, float EdgeThreshold, bool& bOutStretchX, bool& bOutStretchY);
 
 private:
 	/**

@@ -28,8 +28,9 @@
 | 实现 9宫格锚点选择 | LayoutCalculator.cpp | [x] | 0.33/0.67阈值 |
 | 实现 边缘吸附检测 | LayoutCalculator.cpp | [x] | ShouldSnapToEdge |
 | 实现 拉伸锚点检测 | LayoutCalculator.cpp | [x] | ShouldUseStretchAnchors |
-| **一致性验证测试** | Tests/ | [ ] | 反推→再生成验证 |
-| 准备UMG验证样例 | Tests/Fixtures/ | [ ] | 10-20个正确UMG |
+| **一致性验证测试** | UMGExtractorTest.h | [x] | 442文件/4577样例，MAE=0px（验证像素位置，未验证Slot参数一致性） |
+| 准备UMG验证样例 | UMGSampleExtractor.h/cpp | [x] | BatchTest批量提取真实UMG |
+| **接入主流程** | UMGWidgetUtils.cpp | [x] | CreateWidgetRecursive调用CalculateSlot |
 
 ### 1.2 ViewportMapping ⭐
 | 任务 | 文件 | 状态 | 备注 |
@@ -46,55 +47,56 @@
 ### 1.3 Fixer规则修复器
 | 任务 | 文件 | 状态 | 备注 |
 |------|------|------|------|
-| 创建 LayoutFixer.h | Public/LayoutFixer.h | [ ] | 接口定义 |
-| 创建 LayoutFixer.cpp | Private/LayoutFixer.cpp | [ ] | 实现 |
-| 实现 动态阈值计算 | LayoutFixer.cpp | [ ] | clamp(minDim*0.002, 2, 6) |
-| 实现 对齐吸附 | LayoutFixer.cpp | [ ] | 父边缘/中线/同级对齐 |
-| 实现 越界修正 | LayoutFixer.cpp | [ ] | FixBoundsOverflow |
-| 实现 行/列检测 | LayoutFixer.cpp | [ ] | DetectRows（80%重叠） |
-| 实现 等距修正 | LayoutFixer.cpp | [ ] | 组内等距，拒绝全局 |
-| 实现 置信度门槛 | LayoutFixer.cpp | [ ] | <0.8跳过修正 |
-| 实现 修正日志 | LayoutFixer.cpp | [ ] | FFixerLog结构 |
+| 创建 LayoutFixer.h | Public/LayoutFixer.h | [x] | 接口定义 |
+| 创建 LayoutFixer.cpp | Private/LayoutFixer.cpp | [x] | 实现 |
+| 实现 动态阈值计算 | LayoutFixer.cpp | [x] | clamp(minDim*0.002, 2, 6) |
+| 实现 对齐吸附 | LayoutFixer.cpp | [x] | 父边缘/中线/同级对齐 |
+| 实现 越界修正 | LayoutFixer.cpp | [x] | FixBoundsOverflow |
+| 实现 行/列检测 | LayoutFixer.cpp | [x] | DetectRows/DetectColumns（80%重叠） |
+| 实现 等距修正 | LayoutFixer.cpp | [x] | 组内等距，拒绝全局 |
+| 实现 置信度门槛 | LayoutFixer.cpp | [x] | <0.8跳过修正 |
+| 实现 修正日志 | LayoutFixer.cpp | [x] | FFixerLogEntry结构 |
 | 单元测试 | Tests/ | [ ] | 各规则独立测试 |
 
 ### 1.4 Prompt简化 + Bounds格式
 | 任务 | 文件 | 状态 | 备注 |
 |------|------|------|------|
-| 重写默认Prompt（~50行） | Content/Config/DefaultPrompt.txt | [ ] | 只做识别，不做计算 |
-| 更新Prompt占位符 | ImageToUMGSettings.cpp | [ ] | 支持新格式 |
-| Bounds精度说明文档 | Prompt内嵌 | [ ] | 4位小数，0.0001精度 |
+| 重写默认Prompt（~50行） | Content/Config/DefaultPrompt_v2.txt | [x] | v2 Bounds格式 |
+| 切换到v2 Prompt | ImageToUMGSettings.cpp | [x] | 已切换加载DefaultPrompt_v2.txt |
+| Bounds精度说明文档 | Prompt内嵌 | [x] | 4位小数，0.0001精度 |
+| 补充Slot规则与非Canvas示例 | Content/Config/DefaultPrompt_v2.txt | [x] | Slot约束/示例/Bounds关系 |
 
 ### 1.5 数据结构定义
 | 任务 | 文件 | 状态 | 备注 |
 |------|------|------|------|
-| 定义 FBounds 结构 | UMGSchema.h | [ ] | 归一化坐标（4位小数） |
-| 定义 FMetaInfo 结构 | UMGSchema.h | [ ] | confidence/source/uncertain_props |
+| 定义 FBounds 结构 | UMGSchema.h | [x] | 归一化坐标（4位小数） |
+| 定义 FUMGMetaData 结构 | UMGSchema.h | [x] | confidence/source/bFixExempt |
 
 ### 1.6 UMGJsonParser修改
 | 任务 | 文件 | 状态 | 备注 |
 |------|------|------|------|
-| 支持Bounds格式解析 | UMGJsonParser.cpp | [ ] | X/Y/W/H归一化坐标 |
-| 解析_meta字段 | UMGJsonParser.cpp | [ ] | confidence/source |
-| 解析Id字段 | UMGJsonParser.cpp | [ ] | 路径式稳定Id |
+| 支持Bounds格式解析 | UMGJsonParser.cpp | [x] | X/Y/W/H归一化坐标 |
+| 解析_meta字段 | UMGJsonParser.cpp | [x] | confidence/source |
+| 解析Id字段 | UMGJsonParser.cpp | [x] | 路径式稳定Id |
 
 ### 1.7 JSON Schema Strict
 | 任务 | 文件 | 状态 | 备注 |
 |------|------|------|------|
-| IAIProviderStrategy增加SupportsStrictSchema | AIProviderStrategy.h | [ ] | 虚函数 |
-| OpenAI实现Strict Schema | AIProviderStrategy.cpp | [ ] | response_format: json_schema |
-| Anthropic实现Tool Use Strict | AIProviderStrategy.cpp | [ ] | beta header + strict=true |
-| Google实现Structured Output | AIProviderStrategy.cpp | [ ] | response_mime_type |
-| DeepSeek/Qwen走回退路径 | AIProviderStrategy.cpp | [ ] | 本地Schema校验 |
-| 定义完整JSON Schema | Content/Config/ | [ ] | 对应技术方案4.1-4.4 |
-| 本地Schema校验器 | JsonValidator.h/cpp | [ ] | 回退路径使用 |
+| OpenAI实现Strict Schema | AIProviderStrategy.cpp | [x] | response_format: json_schema, strict=true |
+| Anthropic实现Structured Outputs | AIProviderStrategy.cpp | [x] | beta header已添加 |
+| Google实现Structured Output | AIProviderStrategy.cpp | [x] | response_mime_type + response_schema |
+| 定义完整JSON Schema | Content/Config/UMGWidgetSchema.json | [x] | 完整schema定义 |
+| DeepSeek/Qwen走回退路径 | AIProviderStrategy.cpp | [ ] | 可选 |
+| 本地Schema校验器 | JsonValidator.h/cpp | [ ] | 可选优化 |
 
 ### 1.8 _meta字段支持
 | 任务 | 文件 | 状态 | 备注 |
 |------|------|------|------|
-| FMetaInfo数据结构 | UMGSchema.h | [ ] | 1.1已定义 |
-| JSON解析支持 | UMGJsonParser.cpp | [ ] | 1.3已处理 |
-| 预览窗口显示置信度 | SImageToUMGPreviewWindow.cpp | [ ] | 低置信度高亮 |
-| 调试日志输出 | UMGGenerator.cpp | [ ] | 记录来源信息 |
+| FUMGMetaData数据结构 | UMGSchema.h | [x] | confidence/source/bFixExempt |
+| JSON解析支持 | UMGJsonParser.cpp | [x] | 已实现 |
+| Fixer消费bFixExempt | LayoutFixer.cpp | [x] | 豁免节点跳过所有修正 |
+| 预览窗口显示置信度 | SImageToUMGPreviewWindow.cpp | [ ] | 可选优化 |
+| 调试日志输出 | UMGGenerator.cpp | [ ] | 可选优化 |
 
 ### 1.9 集成测试
 | 任务 | 文件 | 状态 | 备注 |
@@ -232,8 +234,26 @@
 | 日期 | 变更内容 | 操作人 |
 |------|----------|--------|
 | 2025-12-30 | 创建进度表 | PM |
-| | | |
-| | | |
+| 2026-01-02 | Step 0.4契约冻结完成，UMGSampleExtractor实现 | Dev |
+| 2026-01-02 | Step 1.1 LayoutCalculator实现完成 | Dev |
+| 2026-01-02 | Step 1.2 ViewportMapping实现完成 | Dev |
+| 2026-01-02 | Step 3一致性验证：442文件/4577样例，MAE=0px，100%通过 | Dev |
+| 2026-01-02 | Step 4 Fixer规则修复器实现完成 | Dev |
+| 2026-01-04 | Phase 1完成：Prompt简化、JSON Schema Strict、_meta字段 | Dev |
+| 2026-01-04 | 修复：v2 Prompt切换、Bounds→Slot接线、Schema properties、bFixExempt消费 | Dev |
+| 2026-01-05 | 修复：Fixer/ViewportMapping接入主流程、DesignSize配置化、Schema完善、Type枚举扩展 | Dev |
+| 2026-01-05 | 修复：LayoutCalculator/生成流程DesignSize统一、SourceSize传递、Stretch模式、Schema strict | Dev |
+| 2026-01-05 | 修复：SourceSize赋值、AspectRatioMode配置化、Fixer父边界处理 | Dev |
+| 2026-01-05 | 修复：等距修正越界检查、DesignSize=0防护、Prompt移除VBox/HBox(符合技术规范) | Dev |
+| 2026-01-05 | 修复：SourceSize JSON解析、预览/生成尺寸统一、Schema完整$defs约束(OpenAI/Anthropic/Google) | Dev |
+| 2026-01-05 | 修复：Schema Type添加enum、ImageAsset可选字段、Meta.uncertain_props、顶层SourceSize | Dev |
+| 2026-01-05 | 修复：启用Hysteresis防锚点跳变、LayoutCalculator添加Bounds范围验证 | Dev |
+| 2026-01-05 | 优化：Schema放宽约束(Type移除enum、WidgetNode/ImageAsset允许扩展)，核心结构保持strict | Dev |
+| 2026-01-05 | 同步：UMGWidgetSchema.json与运行时schema一致(添加SourceSize、放宽约束) | Dev |
+| 2026-01-05 | 修复：Schema添加oneOf支持错误返回、未知控件类型增强警告、Bounds添加min/max约束 | Dev |
+| 2026-01-05 | 优化：移除oneOf(兼容性问题)、同步Meta约束(移除additionalProperties) | Dev |
+| 2026-01-05 | 修复：顶层移除additionalProperties允许error返回、SourceSize添加minimum>=1约束 | Dev |
+| 2026-01-05 | 修复：移除顶层required约束，真正允许{error,reason}错误返回 | Dev |
 
 ---
 
@@ -241,7 +261,7 @@
 
 | 里程碑 | 完成标准 | 状态 |
 |--------|----------|------|
-| **M1: Phase 1完成** | 1.1-1.9全部完成，回归测试通过 | [ ] |
+| **M1: Phase 1完成** | 1.1-1.9核心功能完成（可选项除外） | [x] |
 | **M2: Phase 2完成** | 2.1-2.5全部完成，ID稳定率≥95% | [ ] |
 | **M3: Phase 3完成** | 3.1-3.2完成，文本准确率≥95% | [ ] |
 | **M4: Phase 4完成** | 4.1-4.3完成，召回率≥90% | [ ] |

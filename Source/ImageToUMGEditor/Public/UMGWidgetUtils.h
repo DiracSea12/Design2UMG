@@ -4,12 +4,12 @@
 
 #include "CoreMinimal.h"
 #include "UMGSchema.h"
-#include "ImageAssetProcessor.h"
 
 class UWidget;
 class UPanelSlot;
 class UPanelWidget;
 class UWidgetTree;
+class UWidgetBlueprint;
 
 /**
  * UMG Widget 工具类 - 共享的 Widget 创建和属性应用逻辑
@@ -27,6 +27,13 @@ public:
 
 	/** 构建 ImageRef -> Texture 的映射表（用于预览） */
 	static TMap<FString, UTexture2D*> BuildTextureMap(const TArray<FProcessedImageAsset>& Assets);
+
+	/** 应用Fixer修正Bounds（在CreateWidgetRecursive之前调用）
+	 * @param RootNode Widget树根节点
+	 * @param SourceSize 源图尺寸（AI输入图）
+	 * @param DesignSize 设计尺寸（UMG目标）
+	 */
+	static void ApplyFixer(FUMGWidgetNode& RootNode, const FIntPoint& SourceSize, const FIntPoint& DesignSize);
 
 	/** 从Widget节点的Slot信息生成ImageAssets（AI未返回时的兜底），同时给Widget添加ImageRef */
 	static void GenerateImageAssetsFromWidgets(FUMGWidgetNode& Node, TArray<FUMGImageAsset>& OutAssets);
@@ -67,6 +74,11 @@ public:
 
 	/** 应用类型特定的 Widget 属性 */
 	static void ApplyWidgetProperties(UWidget* Widget, const TMap<FString, FString>& Properties);
+
+	// ========== Widget 渲染 ==========
+
+	/** 将 WidgetBlueprint 渲染为 PNG 图片数据 */
+	static bool RenderWidgetToPng(UWidgetBlueprint* WidgetBP, const FIntPoint& RenderSize, TArray<uint8>& OutPngData, FIntPoint& OutSize);
 
 	// ========== Widget 名称处理 ==========
 

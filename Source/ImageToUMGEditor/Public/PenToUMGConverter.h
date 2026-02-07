@@ -60,4 +60,16 @@ private:
 
 	/** 应用 alignItems - 交叉轴对齐映射到 Slot */
 	static void ApplyAlignItems(FUMGWidgetNode& Widget, EPenAlignItems Align, EPenLayout ParentLayout);
+
+	/** 节点是否有填充色 */
+	static bool HasFillColor(const TSharedPtr<FPenNode>& Node);
+
+	/** 节点是否有内边距 */
+	static bool HasPadding(const TSharedPtr<FPenNode>& Node);
+
+	/** 深拷贝节点 */
+	static TSharedPtr<FPenNode> DeepCopyNode(const TSharedPtr<FPenNode>& Source);
+
+	/** 应用 descendants 覆盖 */
+	static void ApplyDescendantOverride(TSharedPtr<FPenNode>& Node, const FString& Path, const TSharedPtr<FPenNode>& Override);
 };

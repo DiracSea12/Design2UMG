@@ -13,3 +13,5 @@ Saved/
 # IDE
 .vs/
 .idea/
+.vscode/nul  
+tmpclaude-*  

@@ -6,6 +6,22 @@
 #include "UMGSchema.generated.h"
 
 /**
+ * 归一化坐标Bounds（v2.2新增，定义在UMGSchema避免循环依赖）
+ */
+struct FBounds
+{
+	float X = 0.0f;  // 左上角X（0-1）
+	float Y = 0.0f;  // 左上角Y（0-1）
+	float W = 0.0f;  // 宽度（0-1）
+	float H = 0.0f;  // 高度（0-1）
+
+	float GetRight() const { return X + W; }
+	float GetBottom() const { return Y + H; }
+	float GetCenterX() const { return X + W / 2.0f; }
+	float GetCenterY() const { return Y + H / 2.0f; }
+};
+
+/**
  * 预设 Material 条目 - 用于 AI 引用
  */
 USTRUCT(BlueprintType)
@@ -28,6 +44,31 @@ struct FUMGPresetMaterial
 	/** 支持的参数名称列表 */
 	UPROPERTY(EditAnywhere, Category = "Material")
 	TArray<FString> Parameters;
+};
+
+/**
+ * _meta字段 - AI识别的不确定性信息（v2.2新增）
+ */
+USTRUCT()
+struct FUMGMetaData
+{
+	GENERATED_BODY()
+
+	/** 置信度 0-1 */
+	UPROPERTY()
+	float Confidence = 1.0f;
+
+	/** 来源: "ai", "ocr", "user" */
+	UPROPERTY()
+	FString Source = TEXT("ai");
+
+	/** 不确定的属性列表 */
+	UPROPERTY()
+	TArray<FString> UncertainProps;
+
+	/** 是否禁止Fixer修正 */
+	UPROPERTY()
+	bool bFixExempt = false;
 };
 
 /**
@@ -131,7 +172,7 @@ struct FUMGSlotData
 };
 
 /**
- * Widget 节点数据结构 - 描述单个控件
+ * Widget 节点数据结构 - 描述单个控件（v2.2更新）
  */
 USTRUCT()
 struct FUMGWidgetNode
@@ -142,17 +183,27 @@ struct FUMGWidgetNode
 	UPROPERTY()
 	FString Type;
 
+	/** 稳定唯一标识，路径式：{ParentId}/{Type}_{Index}（v2.2新增） */
+	UPROPERTY()
+	FString Id;
+
 	/** 控件名称 */
 	UPROPERTY()
 	FString Name;
 
-	/** 布局槽数据 */
+	/** 归一化坐标Bounds（v2.2新增，AI输出格式） */
+	FBounds Bounds;
+
+	/** 布局槽数据（由LayoutCalculator从Bounds计算） */
 	UPROPERTY()
 	FUMGSlotData Slot;
 
 	/** 属性键值对 */
 	UPROPERTY()
 	TMap<FString, FString> Properties;
+
+	/** AI识别元数据（v2.2新增） */
+	FUMGMetaData Meta;
 
 	/** 子控件 (不可序列化，UHT 不支持递归 USTRUCT) */
 	TArray<FUMGWidgetNode> Children;
@@ -265,4 +316,7 @@ struct FUMGWidgetData
 
 	/** 需要提取/生成的图像资产列表 */
 	TArray<FUMGImageAsset> ImageAssets;
+
+	/** AI输入图尺寸（用于ViewportMapping，v2.2新增） */
+	FIntPoint SourceSize = FIntPoint(1920, 1080);
 };

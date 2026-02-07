@@ -3,6 +3,20 @@
 #include "UMGWidgetUtils.h"
 #include "ImageToUMGLog.h"
 #include "ImageToUMGSettings.h"
+#include "LayoutCalculator.h"
+
+#include "WidgetBlueprint.h"
+#include "Blueprint/UserWidget.h"
+#include "Editor.h"
+#include "Engine/TextureRenderTarget2D.h"
+#include "Framework/Application/SlateApplication.h"
+#include "IImageWrapper.h"
+#include "IImageWrapperModule.h"
+#include "Input/HittestGrid.h"
+#include "Misc/ConfigCacheIni.h"
+#include "Slate/WidgetRenderer.h"
+#include "WidgetBlueprintEditorUtils.h"
+#include "Widgets/SVirtualWindow.h"
 
 #include "Components/Widget.h"
 #include "Components/PanelSlot.h"
@@ -21,9 +35,11 @@
 #include "Components/Slider.h"
 #include "Components/ProgressBar.h"
 #include "Components/Border.h"
+#include "Components/BorderSlot.h"
 #include "Components/Overlay.h"
 #include "Components/OverlaySlot.h"
 #include "Components/SizeBox.h"
+#include "Components/SizeBoxSlot.h"
 #include "Components/Spacer.h"
 #include "Components/ScrollBox.h"
 #include "Components/ScrollBoxSlot.h"
@@ -34,6 +50,7 @@
 #include "Components/WrapBox.h"
 #include "Components/WrapBoxSlot.h"
 #include "Components/ScaleBox.h"
+#include "Components/ScaleBoxSlot.h"
 #include "Components/RichTextBlock.h"
 #include "Components/CircularThrobber.h"
 #include "Components/Throbber.h"
@@ -42,13 +59,16 @@
 #include "Components/SpinBox.h"
 #include "Components/MultiLineEditableTextBox.h"
 #include "Components/BackgroundBlur.h"
+#include "Components/BackgroundBlurSlot.h"
 #include "Components/InvalidationBox.h"
 #include "Components/RetainerBox.h"
 #include "Components/WidgetSwitcher.h"
 #include "Components/NamedSlot.h"
+#include "Components/NamedSlotInterface.h"
 #include "Components/SafeZone.h"
 #include "Components/SafeZoneSlot.h"
 #include "Components/WidgetSwitcherSlot.h"
+#include "Components/ButtonSlot.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "ProceduralShapeGenerator.h"
 #include "Components/ListView.h"
@@ -149,6 +169,188 @@ namespace
 		return Map;
 	}
 
+	bool IsNearlyEqualMargin(const FMargin& A, const FMargin& B)
+	{
+		return FMath::IsNearlyEqual(A.Left, B.Left) &&
+			FMath::IsNearlyEqual(A.Top, B.Top) &&
+			FMath::IsNearlyEqual(A.Right, B.Right) &&
+			FMath::IsNearlyEqual(A.Bottom, B.Bottom);
+	}
+
+	bool HasMeaningfulSlotData(const FUMGSlotData& Slot)
+	{
+		const FUMGSlotData Default;
+		const bool bAnchors =
+			!FMath::IsNearlyEqual(Slot.Anchors.Min.X, Default.Anchors.Min.X) ||
+			!FMath::IsNearlyEqual(Slot.Anchors.Min.Y, Default.Anchors.Min.Y) ||
+			!FMath::IsNearlyEqual(Slot.Anchors.Max.X, Default.Anchors.Max.X) ||
+			!FMath::IsNearlyEqual(Slot.Anchors.Max.Y, Default.Anchors.Max.Y);
+		const bool bAlignment =
+			!FMath::IsNearlyEqual(Slot.Alignment.X, Default.Alignment.X) ||
+			!FMath::IsNearlyEqual(Slot.Alignment.Y, Default.Alignment.Y);
+		const bool bOffsets =
+			!FMath::IsNearlyEqual(Slot.Offsets.Left, Default.Offsets.Left) ||
+			!FMath::IsNearlyEqual(Slot.Offsets.Top, Default.Offsets.Top) ||
+			!FMath::IsNearlyEqual(Slot.Offsets.Right, Default.Offsets.Right) ||
+			!FMath::IsNearlyEqual(Slot.Offsets.Bottom, Default.Offsets.Bottom);
+		const bool bPadding = !IsNearlyEqualMargin(Slot.Padding, Default.Padding);
+		const bool bBox =
+			Slot.HorizontalAlignment != Default.HorizontalAlignment ||
+			Slot.VerticalAlignment != Default.VerticalAlignment ||
+			Slot.SizeRule != Default.SizeRule ||
+			!FMath::IsNearlyEqual(Slot.FillWeight, Default.FillWeight);
+		const bool bGrid =
+			Slot.Row != Default.Row ||
+			Slot.Column != Default.Column ||
+			Slot.RowSpan != Default.RowSpan ||
+			Slot.ColumnSpan != Default.ColumnSpan;
+		return bAnchors || bAlignment || bOffsets || bPadding || bBox || bGrid;
+	}
+
+	bool HasExplicitGridData(const FUMGSlotData& Slot)
+	{
+		const FUMGSlotData Default;
+		return Slot.Row != Default.Row ||
+			Slot.Column != Default.Column ||
+			Slot.RowSpan != Default.RowSpan ||
+			Slot.ColumnSpan != Default.ColumnSpan;
+	}
+
+	bool HasValidBounds(const FBounds& Bounds)
+	{
+		return Bounds.W > 0.0f && Bounds.H > 0.0f;
+	}
+
+	struct FAutoGridItem
+	{
+		int32 Index = INDEX_NONE;
+		float CenterX = 0.0f;
+		float CenterY = 0.0f;
+		float Height = 0.0f;
+	};
+
+	bool ShouldAutoAssignGridSlots(const TArray<FUMGWidgetNode>& Children)
+	{
+		for (const FUMGWidgetNode& Child : Children)
+		{
+			if (!HasExplicitGridData(Child.Slot) && HasValidBounds(Child.Bounds))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	void BuildAutoGridSlots(const TArray<FUMGWidgetNode>& Children, TMap<int32, FIntPoint>& OutSlots)
+	{
+		OutSlots.Reset();
+
+		TSet<int32> ExplicitIndices;
+		TSet<FIntPoint> OccupiedCells;
+		for (int32 Index = 0; Index < Children.Num(); ++Index)
+		{
+			const FUMGWidgetNode& Child = Children[Index];
+			if (HasExplicitGridData(Child.Slot))
+			{
+				const FIntPoint Cell(Child.Slot.Row, Child.Slot.Column);
+				OutSlots.Add(Index, Cell);
+				OccupiedCells.Add(Cell);
+				ExplicitIndices.Add(Index);
+			}
+		}
+
+		TArray<FAutoGridItem> Items;
+		Items.Reserve(Children.Num());
+
+		float HeightSum = 0.0f;
+		for (int32 Index = 0; Index < Children.Num(); ++Index)
+		{
+			const FUMGWidgetNode& Child = Children[Index];
+			if (!HasValidBounds(Child.Bounds))
+			{
+				continue;
+			}
+
+			FAutoGridItem Item;
+			Item.Index = Index;
+			Item.CenterX = Child.Bounds.GetCenterX();
+			Item.CenterY = Child.Bounds.GetCenterY();
+			Item.Height = Child.Bounds.H;
+			Items.Add(Item);
+			HeightSum += Child.Bounds.H;
+		}
+
+		if (Items.Num() == 0)
+		{
+			return;
+		}
+
+		const float AvgHeight = HeightSum / Items.Num();
+		const float RowThreshold = FMath::Max(AvgHeight * 0.5f, 0.01f);
+
+		Items.Sort([](const FAutoGridItem& A, const FAutoGridItem& B)
+		{
+			if (FMath::IsNearlyEqual(A.CenterY, B.CenterY))
+			{
+				return A.CenterX < B.CenterX;
+			}
+			return A.CenterY < B.CenterY;
+		});
+
+		TArray<TArray<FAutoGridItem>> Rows;
+		float CurrentRowCenter = 0.0f;
+		int32 CurrentRowCount = 0;
+
+		for (const FAutoGridItem& Item : Items)
+		{
+			if (Rows.Num() == 0)
+			{
+				Rows.Add({ Item });
+				CurrentRowCenter = Item.CenterY;
+				CurrentRowCount = 1;
+				continue;
+			}
+
+			if (FMath::Abs(Item.CenterY - CurrentRowCenter) <= RowThreshold)
+			{
+				Rows.Last().Add(Item);
+				CurrentRowCenter = (CurrentRowCenter * CurrentRowCount + Item.CenterY) / (CurrentRowCount + 1);
+				++CurrentRowCount;
+				continue;
+			}
+
+			Rows.Add({ Item });
+			CurrentRowCenter = Item.CenterY;
+			CurrentRowCount = 1;
+		}
+
+		for (int32 RowIndex = 0; RowIndex < Rows.Num(); ++RowIndex)
+		{
+			TArray<FAutoGridItem>& RowItems = Rows[RowIndex];
+			RowItems.Sort([](const FAutoGridItem& A, const FAutoGridItem& B)
+			{
+				return A.CenterX < B.CenterX;
+			});
+
+			for (int32 ColIndex = 0; ColIndex < RowItems.Num(); ++ColIndex)
+			{
+				const FAutoGridItem& Item = RowItems[ColIndex];
+				if (ExplicitIndices.Contains(Item.Index))
+				{
+					continue;
+				}
+
+				FIntPoint Cell(RowIndex, ColIndex);
+				while (OccupiedCells.Contains(Cell))
+				{
+					Cell.Y++;
+				}
+				OutSlots.Add(Item.Index, Cell);
+				OccupiedCells.Add(Cell);
+			}
+		}
+	}
+
 	// 前向声明 Image 控件辅助函数（定义在后面）
 	bool HandleImageMaterialRef(UImage* ImageWidget, const FUMGWidgetNode& Node);
 	bool HandleImageTextureRef(UImage* ImageWidget, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap);
@@ -163,7 +365,18 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 	UClass* WidgetClass = ResolveWidgetClass(Node.Type);
 	if (!WidgetClass)
 	{
-		UE_LOG(LogImageToUMG, Warning, TEXT("Unknown widget type: %s"), *Node.Type);
+		// v2.2: 增强警告，明确说明子树丢失
+		int32 ChildCount = Node.Children.Num();
+		if (ChildCount > 0)
+		{
+			UE_LOG(LogImageToUMG, Warning, TEXT("Unknown widget type '%s' (Id: %s), skipping with %d children"),
+				*Node.Type, *Node.Id, ChildCount);
+		}
+		else
+		{
+			UE_LOG(LogImageToUMG, Warning, TEXT("Unknown widget type '%s' (Id: %s), skipping"),
+				*Node.Type, *Node.Id);
+		}
 		return nullptr;
 	}
 
@@ -180,7 +393,41 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 	{
 		if (UPanelSlot* Slot = ParentWidget->AddChild(NewWidget))
 		{
-			ApplySlotProperties(Slot, Node.Slot);
+			// v2.2: 只对CanvasPanel使用LayoutCalculator计算Slot
+			// 其他容器（VerticalBox/HorizontalBox/Overlay）使用原始Slot数据
+			FUMGSlotData SlotData = Node.Slot;
+			UCanvasPanel* CanvasParent = Cast<UCanvasPanel>(ParentWidget);
+			if (CanvasParent && Node.Bounds.W > 0.0f && Node.Bounds.H > 0.0f)
+			{
+				FLayoutContext Context;
+				Context.DesignSize = UImageToUMGSettings::Get()->GetDesignSize();
+				Context.Preset = FLayoutPreset::GetStandardHUDPreset();
+				// v2.2: Hysteresis - 只有当Slot有有效历史数据时才设置OldAnchor
+				const bool bHasValidSlot =
+					!FMath::IsNearlyEqual(Node.Slot.Offsets.Left, 0.0f) ||
+					!FMath::IsNearlyEqual(Node.Slot.Offsets.Top, 0.0f) ||
+					!FMath::IsNearlyEqual(Node.Slot.Offsets.Right, 100.0f) ||
+					!FMath::IsNearlyEqual(Node.Slot.Offsets.Bottom, 100.0f) ||
+					!FMath::IsNearlyEqual(Node.Slot.Anchors.Min.X, 0.0f) ||
+					!FMath::IsNearlyEqual(Node.Slot.Anchors.Min.Y, 0.0f) ||
+					!FMath::IsNearlyEqual(Node.Slot.Anchors.Max.X, 0.0f) ||
+					!FMath::IsNearlyEqual(Node.Slot.Anchors.Max.Y, 0.0f) ||
+					!FMath::IsNearlyEqual(Node.Slot.Alignment.X, 0.0f) ||
+					!FMath::IsNearlyEqual(Node.Slot.Alignment.Y, 0.0f);
+				if (bHasValidSlot)
+				{
+					if (Node.Slot.Anchors.Min.X == Node.Slot.Anchors.Max.X)
+					{
+						Context.OldAnchorX = Node.Slot.Anchors.Min.X;
+					}
+					if (Node.Slot.Anchors.Min.Y == Node.Slot.Anchors.Max.Y)
+					{
+						Context.OldAnchorY = Node.Slot.Anchors.Min.Y;
+					}
+				}
+				SlotData = FLayoutCalculator::CalculateSlot(Node.Bounds, Context);
+			}
+			ApplySlotProperties(Slot, SlotData);
 		}
 	}
 
@@ -198,20 +445,182 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 	}
 
 	// 递归处理子控件
-	if (UPanelWidget* AsPanel = Cast<UPanelWidget>(NewWidget))
+		if (UPanelWidget* AsPanel = Cast<UPanelWidget>(NewWidget))
 	{
-		for (const FUMGWidgetNode& Child : Node.Children)
+		TMap<int32, FIntPoint> AutoGridSlots;
+		if ((AsPanel->IsA<UGridPanel>() || AsPanel->IsA<UUniformGridPanel>()) && ShouldAutoAssignGridSlots(Node.Children))
 		{
-			CreateWidgetRecursive(WidgetTree, Child, AsPanel, TextureMap);
+			BuildAutoGridSlots(Node.Children, AutoGridSlots);
+		}
+
+		for (int32 ChildIndex = 0; ChildIndex < Node.Children.Num(); ++ChildIndex)
+		{
+			const FUMGWidgetNode& Child = Node.Children[ChildIndex];
+			if (const FIntPoint* SlotIndex = AutoGridSlots.Find(ChildIndex))
+			{
+				FUMGWidgetNode ChildCopy = Child;
+				ChildCopy.Slot.Row = SlotIndex->X;
+				ChildCopy.Slot.Column = SlotIndex->Y;
+				CreateWidgetRecursive(WidgetTree, ChildCopy, AsPanel, TextureMap);
+			}
+			else
+			{
+				CreateWidgetRecursive(WidgetTree, Child, AsPanel, TextureMap);
+			}
+		}
+	}
+	else if (INamedSlotInterface* NamedSlotHost = Cast<INamedSlotInterface>(NewWidget))
+	{
+		TArray<FName> SlotNames;
+		NamedSlotHost->GetSlotNames(SlotNames);
+
+		if (SlotNames.Num() == 0)
+		{
+			if (Node.Children.Num() > 0)
+			{
+				UE_LOG(LogImageToUMG, Warning, TEXT("NamedSlot 宿主 '%s' 没有槽位名称但有 %d 个子控件"),
+					*Node.Name, Node.Children.Num());
+			}
+		}
+		else
+		{
+			TSet<FName> UsedSlots;
+			TMap<FName, UWidget*> SlotContent;
+			int32 NextSlotIndex = 0;
+
+			auto AppendToSlot = [&](const FName& SlotName, UWidget* ChildWidget, const FUMGWidgetNode& ChildNode)
+			{
+				if (UWidget** ExistingPtr = SlotContent.Find(SlotName))
+				{
+					if (UPanelWidget* Panel = Cast<UPanelWidget>(*ExistingPtr))
+					{
+						if (UPanelSlot* NewSlot = Panel->AddChild(ChildWidget))
+						{
+							ApplySlotProperties(NewSlot, ChildNode.Slot);
+						}
+						return;
+					}
+
+					FName WrapName = SanitizeWidgetName(Node.Name + TEXT("_SlotWrap_") + SlotName.ToString(), TEXT("SlotWrap"));
+					if (UVerticalBox* WrapBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), WrapName))
+					{
+						WrapBox->AddChild(*ExistingPtr);
+						if (UPanelSlot* NewSlot = WrapBox->AddChild(ChildWidget))
+						{
+							ApplySlotProperties(NewSlot, ChildNode.Slot);
+						}
+						NamedSlotHost->SetContentForSlot(SlotName, WrapBox);
+						SlotContent[SlotName] = WrapBox;
+					}
+					return;
+				}
+
+				NamedSlotHost->SetContentForSlot(SlotName, ChildWidget);
+				SlotContent.Add(SlotName, ChildWidget);
+			};
+
+			for (const FUMGWidgetNode& ChildNode : Node.Children)
+			{
+				UWidget* ChildWidget = CreateWidgetRecursive(WidgetTree, ChildNode, nullptr, TextureMap);
+				if (!ChildWidget)
+				{
+					continue;
+				}
+
+				FName TargetSlot = NAME_None;
+				const FString* SlotNameProp = ChildNode.Properties.Find(TEXT("SlotName"));
+				if (!SlotNameProp) SlotNameProp = ChildNode.Properties.Find(TEXT("NamedSlot"));
+				if (SlotNameProp && !SlotNameProp->IsEmpty())
+				{
+					for (const FName& SlotName : SlotNames)
+					{
+						if (SlotName.ToString().Equals(*SlotNameProp, ESearchCase::IgnoreCase))
+						{
+							TargetSlot = SlotName;
+							break;
+						}
+					}
+				}
+
+				if (TargetSlot.IsNone())
+				{
+					while (NextSlotIndex < SlotNames.Num() && UsedSlots.Contains(SlotNames[NextSlotIndex]))
+					{
+						++NextSlotIndex;
+					}
+					if (NextSlotIndex < SlotNames.Num())
+					{
+						TargetSlot = SlotNames[NextSlotIndex];
+						++NextSlotIndex;
+					}
+				}
+
+				bool bFallbackAppend = false;
+				if (TargetSlot.IsNone() && SlotNames.Num() > 0)
+				{
+					TargetSlot = SlotNames.Last();
+					bFallbackAppend = true;
+				}
+
+				if (TargetSlot.IsNone())
+				{
+					UE_LOG(LogImageToUMG, Warning, TEXT("NamedSlot 宿主 '%s' 没有可用槽位，子控件 '%s' 已跳过"),
+						*Node.Name, *ChildNode.Name);
+					continue;
+				}
+
+				if (HasMeaningfulSlotData(ChildNode.Slot))
+				{
+					UE_LOG(LogImageToUMG, Warning, TEXT("NamedSlot 子控件 '%s' 的 Slot 不生效，已忽略（宿主 '%s'）"),
+						*ChildNode.Name, *Node.Name);
+				}
+
+				if (bFallbackAppend)
+				{
+					UE_LOG(LogImageToUMG, Warning, TEXT("NamedSlot 宿主 '%s' 槽位已满，子控件 '%s' 追加到 '%s'"),
+						*Node.Name, *ChildNode.Name, *TargetSlot.ToString());
+				}
+				else if (SlotContent.Contains(TargetSlot))
+				{
+					UE_LOG(LogImageToUMG, Warning, TEXT("NamedSlot '%s' 在 '%s' 已存在内容，合并子控件 '%s'"),
+						*TargetSlot.ToString(), *Node.Name, *ChildNode.Name);
+				}
+
+				AppendToSlot(TargetSlot, ChildWidget, ChildNode);
+				UsedSlots.Add(TargetSlot);
+			}
 		}
 	}
 	else if (UContentWidget* Content = Cast<UContentWidget>(NewWidget))
 	{
 		if (Node.Children.Num() > 0)
 		{
-			if (UWidget* ChildWidget = CreateWidgetRecursive(WidgetTree, Node.Children[0], nullptr, TextureMap))
+			const FUMGWidgetNode& ChildNode = Node.Children[0];
+			if (UWidget* ChildWidget = CreateWidgetRecursive(WidgetTree, ChildNode, nullptr, TextureMap))
 			{
-				Content->SetContent(ChildWidget);
+				if (UPanelSlot* ContentSlot = Content->SetContent(ChildWidget))
+				{
+					ApplySlotProperties(ContentSlot, ChildNode.Slot);
+				}
+
+				// v2.2: 将子控件的Alignment应用到ContentWidget
+				// ContentWidget不使用CanvasSlot，而是通过自身属性控制子控件布局
+				if (UBorder* Border = Cast<UBorder>(Content))
+				{
+					EHorizontalAlignment HAlign = FUMGWidgetUtils::ParseHAlign(ChildNode.Slot.HorizontalAlignment);
+					EVerticalAlignment VAlign = FUMGWidgetUtils::ParseVAlign(ChildNode.Slot.VerticalAlignment);
+					if (ChildNode.Slot.HorizontalAlignment == TEXT("Fill") && ChildNode.Slot.VerticalAlignment == TEXT("Fill"))
+					{
+						const int32 HIndex = FMath::RoundToInt(ChildNode.Slot.Alignment.X * 2.0f);
+						const int32 VIndex = FMath::RoundToInt(ChildNode.Slot.Alignment.Y * 2.0f);
+						static const EHorizontalAlignment HMap[] = { HAlign_Left, HAlign_Center, HAlign_Right };
+						static const EVerticalAlignment VMap[] = { VAlign_Top, VAlign_Center, VAlign_Bottom };
+						if (HIndex >= 0 && HIndex < 3) HAlign = HMap[HIndex];
+						if (VIndex >= 0 && VIndex < 3) VAlign = VMap[VIndex];
+					}
+					Border->SetHorizontalAlignment(HAlign);
+					Border->SetVerticalAlignment(VAlign);
+				}
 			}
 			if (Node.Children.Num() > 1)
 			{
@@ -237,6 +646,89 @@ TMap<FString, UTexture2D*> FUMGWidgetUtils::BuildTextureMap(const TArray<FProces
 }
 
 // ============================================================================
+// Fixer 应用
+// ============================================================================
+
+namespace
+{
+	// 将FUMGWidgetNode转换为FFixerWidgetNode
+	void ConvertToFixerNode(const FUMGWidgetNode& Src, FFixerWidgetNode& Dst)
+	{
+		Dst.Id = Src.Id;
+		Dst.Type = Src.Type;
+		Dst.Bounds = Src.Bounds;
+		Dst.Confidence = Src.Meta.Confidence;
+		Dst.bFixExempt = Src.Meta.bFixExempt;
+
+		for (const FUMGWidgetNode& Child : Src.Children)
+		{
+			FFixerWidgetNode ChildDst;
+			ConvertToFixerNode(Child, ChildDst);
+			Dst.Children.Add(ChildDst);
+		}
+	}
+
+	// 将修正后的Bounds写回FUMGWidgetNode
+	void ApplyFixedBounds(FUMGWidgetNode& Dst, const FFixerWidgetNode& Src)
+	{
+		Dst.Bounds = Src.Bounds;
+
+		for (int32 i = 0; i < Dst.Children.Num() && i < Src.Children.Num(); ++i)
+		{
+			ApplyFixedBounds(Dst.Children[i], Src.Children[i]);
+		}
+	}
+}
+
+void FUMGWidgetUtils::ApplyFixer(FUMGWidgetNode& RootNode, const FIntPoint& SourceSize, const FIntPoint& DesignSize)
+{
+	// v2.2: 先应用ViewportMapping（源图→设计尺寸）
+	FViewportSpec Spec;
+	Spec.SourceSize = SourceSize;
+	Spec.DesignSize = DesignSize;
+	Spec.Mode = UImageToUMGSettings::Get()->bUseStretchMode ? EAspectRatioMode::Stretch : EAspectRatioMode::Fit;
+
+	// 递归映射所有节点的Bounds（包括Root无效但子节点有效的情况）
+	TFunction<void(FUMGWidgetNode&)> MapBounds;
+	MapBounds = [&](FUMGWidgetNode& Node)
+	{
+		if (Node.Bounds.W > 0.0f && Node.Bounds.H > 0.0f)
+		{
+			Node.Bounds = FViewportMapping::MapNormalizedBounds(Node.Bounds, Spec);
+		}
+		for (FUMGWidgetNode& Child : Node.Children)
+		{
+			MapBounds(Child);
+		}
+	};
+	MapBounds(RootNode);
+
+	// 初始化Fixer预设
+	FFixerPreset Preset;
+	FLayoutFixer::Initialize(DesignSize, Preset);
+
+	// 转换为Fixer节点
+	FFixerWidgetNode FixerRoot;
+	ConvertToFixerNode(RootNode, FixerRoot);
+
+	// 执行修正
+	TArray<FFixerLogEntry> Log;
+	FLayoutFixer::FixWidgetTree(FixerRoot, Preset, Log);
+
+	// 写回修正后的Bounds
+	ApplyFixedBounds(RootNode, FixerRoot);
+
+	// 输出修正日志
+	for (const FFixerLogEntry& Entry : Log)
+	{
+		UE_LOG(LogImageToUMG, Verbose, TEXT("Fixer [%s] %s: (%.4f,%.4f,%.4f,%.4f) -> (%.4f,%.4f,%.4f,%.4f)"),
+			*Entry.WidgetId, *Entry.FixType,
+			Entry.OldBounds.X, Entry.OldBounds.Y, Entry.OldBounds.W, Entry.OldBounds.H,
+			Entry.NewBounds.X, Entry.NewBounds.Y, Entry.NewBounds.W, Entry.NewBounds.H);
+	}
+}
+
+// ============================================================================
 // Widget 类型解析
 // ============================================================================
 
@@ -247,16 +739,24 @@ UClass* FUMGWidgetUtils::ResolveWidgetClass(const FString& TypeName)
 		return *Found;
 	}
 
-	// 回退: 动态查找
+	static TMap<FString, UClass*> DynamicClassCache;
+	if (UClass* const* Cached = DynamicClassCache.Find(TypeName))
+	{
+		return *Cached;
+	}
+
 	FString ClassName = FString::Printf(TEXT("U%s"), *TypeName);
 	UClass* FoundClass = FindFirstObject<UClass>(*ClassName, EFindFirstObjectOptions::EnsureIfAmbiguous);
 	if (FoundClass && FoundClass->IsChildOf(UWidget::StaticClass()))
 	{
+		DynamicClassCache.Add(TypeName, FoundClass);
 		return FoundClass;
 	}
 
+	DynamicClassCache.Add(TypeName, nullptr);
 	return nullptr;
 }
+
 
 // ============================================================================
 // 颜色解析（简化版：只支持 #RRGGBB 和颜色名称）
@@ -440,6 +940,7 @@ namespace
 		WS->SetPadding(S.Padding);
 		WS->SetHorizontalAlignment(FUMGWidgetUtils::ParseHAlign(S.HorizontalAlignment));
 		WS->SetVerticalAlignment(FUMGWidgetUtils::ParseVAlign(S.VerticalAlignment));
+		WS->SetFillEmptySpace(S.SizeRule == TEXT("Fill"));
 	}
 
 	void ApplyScrollBoxSlot(UPanelSlot* Slot, const FUMGSlotData& S)
@@ -447,6 +948,53 @@ namespace
 		UScrollBoxSlot* SS = CastChecked<UScrollBoxSlot>(Slot);
 		SS->SetPadding(S.Padding);
 		SS->SetHorizontalAlignment(FUMGWidgetUtils::ParseHAlign(S.HorizontalAlignment));
+		SS->SetVerticalAlignment(FUMGWidgetUtils::ParseVAlign(S.VerticalAlignment));
+		if (S.SizeRule == TEXT("Fill"))
+		{
+			FSlateChildSize Size;
+			Size.SizeRule = ESlateSizeRule::Fill;
+			Size.Value = S.FillWeight;
+			SS->SetSize(Size);
+		}
+	}
+
+	void ApplyBorderSlot(UPanelSlot* Slot, const FUMGSlotData& S)
+	{
+		UBorderSlot* BS = CastChecked<UBorderSlot>(Slot);
+		BS->SetPadding(S.Padding);
+		BS->SetHorizontalAlignment(FUMGWidgetUtils::ParseHAlign(S.HorizontalAlignment));
+		BS->SetVerticalAlignment(FUMGWidgetUtils::ParseVAlign(S.VerticalAlignment));
+	}
+
+	void ApplyButtonSlot(UPanelSlot* Slot, const FUMGSlotData& S)
+	{
+		UButtonSlot* BS = CastChecked<UButtonSlot>(Slot);
+		BS->SetPadding(S.Padding);
+		BS->SetHorizontalAlignment(FUMGWidgetUtils::ParseHAlign(S.HorizontalAlignment));
+		BS->SetVerticalAlignment(FUMGWidgetUtils::ParseVAlign(S.VerticalAlignment));
+	}
+
+	void ApplySizeBoxSlot(UPanelSlot* Slot, const FUMGSlotData& S)
+	{
+		USizeBoxSlot* SS = CastChecked<USizeBoxSlot>(Slot);
+		SS->SetPadding(S.Padding);
+		SS->SetHorizontalAlignment(FUMGWidgetUtils::ParseHAlign(S.HorizontalAlignment));
+		SS->SetVerticalAlignment(FUMGWidgetUtils::ParseVAlign(S.VerticalAlignment));
+	}
+
+	void ApplyScaleBoxSlot(UPanelSlot* Slot, const FUMGSlotData& S)
+	{
+		UScaleBoxSlot* SS = CastChecked<UScaleBoxSlot>(Slot);
+		SS->SetHorizontalAlignment(FUMGWidgetUtils::ParseHAlign(S.HorizontalAlignment));
+		SS->SetVerticalAlignment(FUMGWidgetUtils::ParseVAlign(S.VerticalAlignment));
+	}
+
+	void ApplyBackgroundBlurSlot(UPanelSlot* Slot, const FUMGSlotData& S)
+	{
+		UBackgroundBlurSlot* BS = CastChecked<UBackgroundBlurSlot>(Slot);
+		BS->SetPadding(S.Padding);
+		BS->SetHorizontalAlignment(FUMGWidgetUtils::ParseHAlign(S.HorizontalAlignment));
+		BS->SetVerticalAlignment(FUMGWidgetUtils::ParseVAlign(S.VerticalAlignment));
 	}
 
 	void ApplyWidgetSwitcherSlot(UPanelSlot* Slot, const FUMGSlotData& S)
@@ -476,6 +1024,11 @@ namespace
 			{UUniformGridSlot::StaticClass(), &ApplyUniformGridSlot},
 			{UWrapBoxSlot::StaticClass(), &ApplyWrapBoxSlot},
 			{UScrollBoxSlot::StaticClass(), &ApplyScrollBoxSlot},
+			{UBorderSlot::StaticClass(), &ApplyBorderSlot},
+			{UButtonSlot::StaticClass(), &ApplyButtonSlot},
+			{USizeBoxSlot::StaticClass(), &ApplySizeBoxSlot},
+			{UScaleBoxSlot::StaticClass(), &ApplyScaleBoxSlot},
+			{UBackgroundBlurSlot::StaticClass(), &ApplyBackgroundBlurSlot},
 			{UWidgetSwitcherSlot::StaticClass(), &ApplyWidgetSwitcherSlot},
 			{USafeZoneSlot::StaticClass(), &ApplySafeZoneSlot},
 		};
@@ -637,9 +1190,62 @@ namespace
 void FUMGWidgetUtils::ApplySlotProperties(UPanelSlot* Slot, const FUMGSlotData& S)
 {
 	if (!Slot) return;
+	const FUMGSlotData Default;
+	const bool bHasNonDefaultCanvas =
+		!FMath::IsNearlyEqual(S.Anchors.Min.X, Default.Anchors.Min.X) ||
+		!FMath::IsNearlyEqual(S.Anchors.Min.Y, Default.Anchors.Min.Y) ||
+		!FMath::IsNearlyEqual(S.Anchors.Max.X, Default.Anchors.Max.X) ||
+		!FMath::IsNearlyEqual(S.Anchors.Max.Y, Default.Anchors.Max.Y) ||
+		!FMath::IsNearlyEqual(S.Alignment.X, Default.Alignment.X) ||
+		!FMath::IsNearlyEqual(S.Alignment.Y, Default.Alignment.Y) ||
+		!FMath::IsNearlyEqual(S.Offsets.Left, Default.Offsets.Left) ||
+		!FMath::IsNearlyEqual(S.Offsets.Top, Default.Offsets.Top) ||
+		!FMath::IsNearlyEqual(S.Offsets.Right, Default.Offsets.Right) ||
+		!FMath::IsNearlyEqual(S.Offsets.Bottom, Default.Offsets.Bottom);
+	const bool bHasNonDefaultPadding = !IsNearlyEqualMargin(S.Padding, Default.Padding);
+	const bool bHasNonDefaultBox =
+		S.HorizontalAlignment != Default.HorizontalAlignment ||
+		S.VerticalAlignment != Default.VerticalAlignment ||
+		S.SizeRule != Default.SizeRule ||
+		!FMath::IsNearlyEqual(S.FillWeight, Default.FillWeight);
+	const bool bHasNonDefaultGrid =
+		S.Row != Default.Row ||
+		S.Column != Default.Column ||
+		S.RowSpan != Default.RowSpan ||
+		S.ColumnSpan != Default.ColumnSpan;
+
+	const bool bIsCanvas = Slot->IsA<UCanvasPanelSlot>();
+	const bool bIsGrid = Slot->IsA<UGridSlot>() || Slot->IsA<UUniformGridSlot>();
+	if (bIsCanvas)
+	{
+		if (bHasNonDefaultPadding || bHasNonDefaultBox || bHasNonDefaultGrid)
+		{
+			UE_LOG(LogImageToUMG, Warning, TEXT("CanvasPanelSlot 忽略非Canvas字段（Padding/HAlign/VAlign/SizeRule/FillWeight/Row/Column等）"));
+		}
+	}
+	else
+	{
+		if (bHasNonDefaultCanvas)
+		{
+			UE_LOG(LogImageToUMG, Warning, TEXT("%s 忽略 Anchors/Offsets/Alignment"), *Slot->GetClass()->GetName());
+		}
+		if (!bIsGrid && bHasNonDefaultGrid)
+		{
+			UE_LOG(LogImageToUMG, Warning, TEXT("%s 忽略 Row/Column/RowSpan/ColumnSpan"), *Slot->GetClass()->GetName());
+		}
+		if (Slot->IsA<UScaleBoxSlot>() && bHasNonDefaultPadding)
+		{
+			UE_LOG(LogImageToUMG, Warning, TEXT("ScaleBoxSlot 不支持 Padding"));
+		}
+	}
+
 	if (const FApplySlotFunc* Func = GetSlotApplierMap().Find(Slot->GetClass()))
 	{
 		(*Func)(Slot, S);
+	}
+	else
+	{
+		UE_LOG(LogImageToUMG, Warning, TEXT("未支持的Slot类型: %s"), *Slot->GetClass()->GetName());
 	}
 }
 
@@ -669,6 +1275,8 @@ namespace
 			};
 			if (const ETextJustify::Type* J = JustifyMap.Find(*V)) T->SetJustification(*J);
 		}
+		if (const FString* V = GET_PROP("LineHeightPercentage"))
+			T->SetLineHeightPercentage(FCString::Atof(**V));
 	}
 
 	void ApplyButtonProps(UWidget* W, const TMap<FString, FString>& P)
@@ -734,6 +1342,30 @@ namespace
 		if (const FString* V = GET_PROP("FillColor")) PB->SetFillColorAndOpacity(FUMGWidgetUtils::ParseColor(*V));
 	}
 
+	void ApplyThrobberProps(UWidget* W, const TMap<FString, FString>& P)
+	{
+		UThrobber* T = CastChecked<UThrobber>(W);
+		if (const FString* V = GET_PROP("NumberOfPieces")) T->SetNumberOfPieces(FCString::Atoi(**V));
+		if (const FString* V = GET_PROP("Animate"))
+		{
+			const bool bAnimate = V->ToBool();
+			T->SetAnimateHorizontally(bAnimate);
+			T->SetAnimateVertically(bAnimate);
+			T->SetAnimateOpacity(bAnimate);
+		}
+		if (const FString* V = GET_PROP("AnimateHorizontally")) T->SetAnimateHorizontally(V->ToBool());
+		if (const FString* V = GET_PROP("AnimateVertically")) T->SetAnimateVertically(V->ToBool());
+		if (const FString* V = GET_PROP("AnimateOpacity")) T->SetAnimateOpacity(V->ToBool());
+	}
+
+	void ApplyCircularThrobberProps(UWidget* W, const TMap<FString, FString>& P)
+	{
+		UCircularThrobber* T = CastChecked<UCircularThrobber>(W);
+		if (const FString* V = GET_PROP("NumberOfPieces")) T->SetNumberOfPieces(FCString::Atoi(**V));
+		if (const FString* V = GET_PROP("Period")) T->SetPeriod(FCString::Atof(**V));
+		if (const FString* V = GET_PROP("Radius")) T->SetRadius(FCString::Atof(**V));
+	}
+
 	void ApplySliderProps(UWidget* W, const TMap<FString, FString>& P)
 	{
 		if (const FString* V = GET_PROP("Value")) CastChecked<USlider>(W)->SetValue(FCString::Atof(**V));
@@ -758,10 +1390,44 @@ namespace
 		if (const FString* V = GET_PROP("HintText")) M->SetHintText(FText::FromString(*V));
 	}
 
+	void ApplyEditableTextProps(UWidget* W, const TMap<FString, FString>& P)
+	{
+		UEditableText* E = CastChecked<UEditableText>(W);
+		if (const FString* V = GET_PROP("Text")) E->SetText(FText::FromString(*V));
+		if (const FString* V = GET_PROP("HintText")) E->SetHintText(FText::FromString(*V));
+		if (const FString* V = GET_PROP("IsReadOnly")) E->SetIsReadOnly(V->ToBool());
+		if (const FString* V = GET_PROP("IsPassword")) E->SetIsPassword(V->ToBool());
+		if (const FString* V = GET_PROP("MinimumDesiredWidth")) E->SetMinimumDesiredWidth(FCString::Atof(**V));
+	}
+
+	void ApplyMultiLineEditableTextProps(UWidget* W, const TMap<FString, FString>& P)
+	{
+		UMultiLineEditableText* M = CastChecked<UMultiLineEditableText>(W);
+		if (const FString* V = GET_PROP("Text")) M->SetText(FText::FromString(*V));
+		if (const FString* V = GET_PROP("HintText")) M->SetHintText(FText::FromString(*V));
+		if (const FString* V = GET_PROP("IsReadOnly")) M->SetIsReadOnly(V->ToBool());
+	}
+
 	void ApplyBorderProps(UWidget* W, const TMap<FString, FString>& P)
 	{
 		UBorder* Bd = CastChecked<UBorder>(W);
-		if (const FString* V = GET_PROP("BrushColor")) Bd->SetBrushColor(FUMGWidgetUtils::ParseColor(*V));
+		if (const FString* V = GET_PROP("BrushColor"))
+		{
+			FLinearColor Color = FUMGWidgetUtils::ParseColor(*V);
+			// 用引擎白色纹理做 brush 基底，再用 BrushColor 着色
+			UTexture2D* WhiteTex = LoadObject<UTexture2D>(nullptr,
+				TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"));
+			if (WhiteTex)
+			{
+				FSlateBrush Brush;
+				Brush.DrawAs = ESlateBrushDrawType::Image;
+				Brush.SetResourceObject(WhiteTex);
+				Brush.TintColor = FSlateColor(FLinearColor::White);
+				Brush.ImageSize = FVector2D(1.f, 1.f);
+				Bd->SetBrush(Brush);
+			}
+			Bd->SetBrushColor(Color);
+		}
 		if (const FString* V = GET_PROP("ContentColor")) Bd->SetContentColorAndOpacity(FUMGWidgetUtils::ParseColor(*V));
 		if (const FString* V = GET_PROP("Padding")) Bd->SetPadding(FUMGWidgetUtils::ParseMargin(*V));
 	}
@@ -827,6 +1493,32 @@ namespace
 	void ApplyBackgroundBlurProps(UWidget* W, const TMap<FString, FString>& P)
 	{
 		if (const FString* V = GET_PROP("BlurStrength")) CastChecked<UBackgroundBlur>(W)->SetBlurStrength(FCString::Atof(**V));
+	}
+
+	void ApplyRetainerBoxProps(UWidget* W, const TMap<FString, FString>& P)
+	{
+		URetainerBox* RB = CastChecked<URetainerBox>(W);
+		if (const FString* V = GET_PROP("RetainRendering")) RB->SetRetainRendering(V->ToBool());
+		int32 Phase = RB->GetPhase();
+		int32 PhaseCount = RB->GetPhaseCount();
+		bool bHasPhase = false;
+		if (const FString* V = GET_PROP("Phase"))
+		{
+			Phase = FCString::Atoi(**V);
+			bHasPhase = true;
+		}
+		if (const FString* V = GET_PROP("PhaseCount"))
+		{
+			PhaseCount = FMath::Max(1, FCString::Atoi(**V));
+			bHasPhase = true;
+		}
+		if (bHasPhase) RB->SetRenderingPhase(Phase, PhaseCount);
+	}
+
+	void ApplyInvalidationBoxProps(UWidget* W, const TMap<FString, FString>& P)
+	{
+		UInvalidationBox* IB = CastChecked<UInvalidationBox>(W);
+		if (const FString* V = GET_PROP("CanCache")) IB->SetCanCache(V->ToBool());
 	}
 
 	void ApplyGridPanelProps(UWidget* W, const TMap<FString, FString>& P)
@@ -966,6 +1658,8 @@ namespace
 			{URichTextBlock::StaticClass(), &ApplyRichTextBlockProps},
 			{UImage::StaticClass(), &ApplyImageProps},
 			{UProgressBar::StaticClass(), &ApplyProgressBarProps},
+			{UThrobber::StaticClass(), &ApplyThrobberProps},
+			{UCircularThrobber::StaticClass(), &ApplyCircularThrobberProps},
 			{USpacer::StaticClass(), &ApplySpacerProps},
 			// 交互类
 			{UButton::StaticClass(), &ApplyButtonProps},
@@ -973,6 +1667,8 @@ namespace
 			{UCheckBox::StaticClass(), &ApplyCheckBoxProps},
 			{UEditableTextBox::StaticClass(), &ApplyEditableTextBoxProps},
 			{UMultiLineEditableTextBox::StaticClass(), &ApplyMultiLineEditableTextBoxProps},
+			{UEditableText::StaticClass(), &ApplyEditableTextProps},
+			{UMultiLineEditableText::StaticClass(), &ApplyMultiLineEditableTextProps},
 			{UComboBoxString::StaticClass(), &ApplyComboBoxStringProps},
 			{USpinBox::StaticClass(), &ApplySpinBoxProps},
 			// 容器类（CanvasPanel/Overlay 无特殊属性，子控件通过 Slot 配置）
@@ -986,6 +1682,8 @@ namespace
 			{USizeBox::StaticClass(), &ApplySizeBoxProps},
 			{UScaleBox::StaticClass(), &ApplyScaleBoxProps},
 			{UBackgroundBlur::StaticClass(), &ApplyBackgroundBlurProps},
+			{URetainerBox::StaticClass(), &ApplyRetainerBoxProps},
+			{UInvalidationBox::StaticClass(), &ApplyInvalidationBoxProps},
 			{UExpandableArea::StaticClass(), &ApplyExpandableAreaProps},
 			// 列表类
 			{UListView::StaticClass(), &ApplyListViewProps},
@@ -1053,6 +1751,18 @@ void FUMGWidgetUtils::BindImageAssets(FUMGWidgetNode& Node, const TArray<FProces
 
 void FUMGWidgetUtils::GenerateImageAssetsFromWidgets(FUMGWidgetNode& Node, TArray<FUMGImageAsset>& OutAssets)
 {
+	const auto HasValidSlotData = [](const FUMGSlotData& Slot)
+	{
+		const FUMGSlotData DefaultSlot;
+		return !FMath::IsNearlyEqual(Slot.Offsets.Right, DefaultSlot.Offsets.Right) ||
+			!FMath::IsNearlyEqual(Slot.Offsets.Bottom, DefaultSlot.Offsets.Bottom) ||
+			!FMath::IsNearlyEqual(Slot.Offsets.Left, DefaultSlot.Offsets.Left) ||
+			!FMath::IsNearlyEqual(Slot.Offsets.Top, DefaultSlot.Offsets.Top) ||
+			!FMath::IsNearlyEqual(Slot.Anchors.Min.X, DefaultSlot.Anchors.Min.X) ||
+			!FMath::IsNearlyEqual(Slot.Anchors.Min.Y, DefaultSlot.Anchors.Min.Y) ||
+			!FMath::IsNearlyEqual(Slot.Anchors.Max.X, DefaultSlot.Anchors.Max.X) ||
+			!FMath::IsNearlyEqual(Slot.Anchors.Max.Y, DefaultSlot.Anchors.Max.Y);
+	};
 	// 如果是 Image 类型且没有 ImageRef，根据 Slot 信息生成 ImageAsset
 	if (Node.Type.Equals(TEXT("Image"), ESearchCase::IgnoreCase) &&
 		!Node.Properties.Contains(TEXT("ImageRef")) &&
@@ -1085,14 +1795,57 @@ void FUMGWidgetUtils::GenerateImageAssetsFromWidgets(FUMGWidgetNode& Node, TArra
 		}
 		else
 		{
-			// 从 Offsets 推断尺寸
+			// v2.2: 修复尺寸推断逻辑
+			// 点锚点：Offsets.Right/Bottom 为尺寸；拉伸锚点：根据锚点跨度和边距计算
 			const FUMGSlotData& Slot = Node.Slot;
-			int32 W = FMath::RoundToInt(Slot.Offsets.Right - Slot.Offsets.Left);
-			int32 H = FMath::RoundToInt(Slot.Offsets.Bottom - Slot.Offsets.Top);
-			if (W > 0 && H > 0)
+			const FIntPoint DesignSize = UImageToUMGSettings::Get()->GetDesignSize();
+			const int32 CanvasW = FMath::Max(1, DesignSize.X);
+			const int32 CanvasH = FMath::Max(1, DesignSize.Y);
+			bool bSetFromSlot = false;
+			if (HasValidSlotData(Slot))
 			{
-				Asset.SuggestedWidth = W;
-				Asset.SuggestedHeight = H;
+				const bool bPointAnchorX = FMath::IsNearlyEqual(Slot.Anchors.Min.X, Slot.Anchors.Max.X);
+				const bool bPointAnchorY = FMath::IsNearlyEqual(Slot.Anchors.Min.Y, Slot.Anchors.Max.Y);
+
+				int32 W = 0;
+				if (bPointAnchorX)
+				{
+					W = FMath::RoundToInt(Slot.Offsets.Right);
+				}
+				else
+				{
+					const float Span = (Slot.Anchors.Max.X - Slot.Anchors.Min.X) * CanvasW;
+					W = FMath::RoundToInt(Span - Slot.Offsets.Left - Slot.Offsets.Right);
+				}
+
+				int32 H = 0;
+				if (bPointAnchorY)
+				{
+					H = FMath::RoundToInt(Slot.Offsets.Bottom);
+				}
+				else
+				{
+					const float Span = (Slot.Anchors.Max.Y - Slot.Anchors.Min.Y) * CanvasH;
+					H = FMath::RoundToInt(Span - Slot.Offsets.Top - Slot.Offsets.Bottom);
+				}
+
+				if (W > 0 && H > 0)
+				{
+					Asset.SuggestedWidth = W;
+					Asset.SuggestedHeight = H;
+					bSetFromSlot = true;
+				}
+			}
+
+			if (!bSetFromSlot && Node.Bounds.W > 0.0f && Node.Bounds.H > 0.0f)
+			{
+				const int32 BoundW = FMath::RoundToInt(Node.Bounds.W * CanvasW);
+				const int32 BoundH = FMath::RoundToInt(Node.Bounds.H * CanvasH);
+				if (BoundW > 0 && BoundH > 0)
+				{
+					Asset.SuggestedWidth = BoundW;
+					Asset.SuggestedHeight = BoundH;
+				}
 			}
 		}
 
@@ -1192,3 +1945,114 @@ void FUMGWidgetUtils::ConvertRatioToPixels(FUMGWidgetNode& Node, FIntPoint Canva
 	}
 }
 
+// ============================================================================
+// Widget 渲染（从 UMGExtractorTest 迁移）
+// ============================================================================
+
+namespace
+{
+	FIntPoint GetDesignerPreviewWindowSize(const FIntPoint& FallbackSize)
+	{
+		int32 PreviewWidth = 0;
+		int32 PreviewHeight = 0;
+		if (GConfig)
+		{
+			GConfig->GetInt(TEXT("UMGEditor.Designer"), TEXT("PreviewWidth"), PreviewWidth, GEditorPerProjectIni);
+			GConfig->GetInt(TEXT("UMGEditor.Designer"), TEXT("PreviewHeight"), PreviewHeight, GEditorPerProjectIni);
+		}
+		if (PreviewWidth > 0 && PreviewHeight > 0)
+		{
+			return FIntPoint(PreviewWidth, PreviewHeight);
+		}
+		return FallbackSize;
+	}
+
+	FIntPoint ComputePreviewRenderSize(UUserWidget* Widget, const FIntPoint& FallbackSize, const TSharedRef<SVirtualWindow>& Window)
+	{
+		FIntPoint Result = FallbackSize;
+		if (!Widget) return Result;
+
+		const FIntPoint WindowSize = GetDesignerPreviewWindowSize(FallbackSize);
+		Window->Resize(FVector2D(WindowSize.X, WindowSize.Y));
+		Window->SlatePrepass(1.0f);
+
+		FVector2D DesiredSize = Window->GetDesiredSize();
+		if (DesiredSize.X <= SMALL_NUMBER || DesiredSize.Y <= SMALL_NUMBER)
+			DesiredSize = FVector2D(WindowSize.X, WindowSize.Y);
+
+		FVector2D UnscaledSize = FWidgetBlueprintEditorUtils::GetWidgetPreviewUnScaledCustomSize(
+			DesiredSize, Widget, TOptional<FVector2D>(), EThumbnailPreviewSizeMode::MatchDesignerMode);
+		if (UnscaledSize.X <= SMALL_NUMBER || UnscaledSize.Y <= SMALL_NUMBER)
+			UnscaledSize = DesiredSize;
+
+		Result.X = FMath::Max(1, FMath::CeilToInt(UnscaledSize.X));
+		Result.Y = FMath::Max(1, FMath::CeilToInt(UnscaledSize.Y));
+		return Result;
+	}
+}
+
+bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, const FIntPoint& RenderSize, TArray<uint8>& OutPngData, FIntPoint& OutSize)
+{
+	if (!WidgetBP || !WidgetBP->GeneratedClass)
+	{
+		UE_LOG(LogImageToUMG, Warning, TEXT("RenderWidgetToPng: invalid WidgetBP"));
+		return false;
+	}
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!World) return false;
+
+	UUserWidget* Widget = CreateWidget<UUserWidget>(World, TSubclassOf<UUserWidget>(WidgetBP->GeneratedClass));
+	if (!Widget) return false;
+
+	Widget->SetDesignerFlags(EWidgetDesignFlags::Designing | EWidgetDesignFlags::ExecutePreConstruct);
+	Widget->PreConstruct(true);
+	Widget->SynchronizeProperties();
+	Widget->ForceLayoutPrepass();
+	Widget->SetFlags(RF_Transient);
+	Widget->AddToRoot();
+
+	TSharedRef<SWidget> SlateWidget = Widget->TakeWidget();
+	TSharedRef<SVirtualWindow> Window = SNew(SVirtualWindow);
+	Window->SetContent(SlateWidget);
+	const FIntPoint EffectiveSize = ComputePreviewRenderSize(Widget, RenderSize, Window);
+
+	UTextureRenderTarget2D* RT = NewObject<UTextureRenderTarget2D>();
+	RT->Filter = TF_Bilinear;
+	RT->ClearColor = FLinearColor::Transparent;
+	RT->SRGB = true;
+	RT->RenderTargetFormat = RTF_RGBA8;
+	const EPixelFormat Fmt = FSlateApplication::Get().GetRenderer()->GetSlateRecommendedColorFormat();
+	RT->InitCustomFormat(EffectiveSize.X, EffectiveSize.Y, Fmt, false);
+
+	FWidgetRenderer Renderer(true);
+	Renderer.SetIsPrepassNeeded(false);
+	TUniquePtr<FHittestGrid> HitTestGrid = MakeUnique<FHittestGrid>();
+	Renderer.DrawWindow(RT, *HitTestGrid, Window, 1.0f, FVector2D(EffectiveSize.X, EffectiveSize.Y), 0.1f);
+
+	FTextureRenderTargetResource* Resource = RT->GameThread_GetRenderTargetResource();
+	if (!Resource)
+	{
+		Widget->RemoveFromRoot();
+		RT->ReleaseResource();
+		RT->MarkAsGarbage();
+		return false;
+	}
+
+	TArray<FColor> Pixels;
+	Resource->ReadPixels(Pixels);
+	RT->ReleaseResource();
+	RT->MarkAsGarbage();
+	Widget->RemoveFromRoot();
+
+	if (Pixels.Num() == 0) return false;
+
+	IImageWrapperModule& WrapperModule = FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
+	TSharedPtr<IImageWrapper> Wrapper = WrapperModule.CreateImageWrapper(EImageFormat::PNG);
+	if (!Wrapper.IsValid()) return false;
+
+	Wrapper->SetRaw(Pixels.GetData(), Pixels.Num() * sizeof(FColor), EffectiveSize.X, EffectiveSize.Y, ERGBFormat::BGRA, 8);
+	OutPngData = Wrapper->GetCompressed();
+	OutSize = EffectiveSize;
+	return OutPngData.Num() > 0;
+}
