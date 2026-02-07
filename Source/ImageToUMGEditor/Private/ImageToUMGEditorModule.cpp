@@ -6,7 +6,6 @@
 #include "UMGJsonParser.h"
 #include "UMGWidgetUtils.h"
 #include "PenMCPBridge.h"
-#include "VisualComparator.h"
 
 #include "WidgetBlueprint.h"
 #include "Misc/FileHelper.h"
@@ -78,38 +77,6 @@ void FImageToUMGEditorModule::StartupModule()
 			{
 				UE_LOG(LogImageToUMG, Error, TEXT("[FAIL] PenConvert 失败"));
 			}
-		}),
-		ECVF_Default
-	);
-
-	// VisualComparator 控制台入口
-	IConsoleManager::Get().RegisterConsoleCommand(
-		TEXT("ImageToUMG.PenCompare"),
-		TEXT("对比两张PNG: ImageToUMG.PenCompare <design.png> <rendered.png> [threshold]"),
-		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
-		{
-			if (Args.Num() < 2)
-			{
-				UE_LOG(LogImageToUMG, Warning, TEXT("用法: ImageToUMG.PenCompare <design.png> <rendered.png> [threshold=0.85]"));
-				return;
-			}
-			TArray<uint8> PngA, PngB;
-			if (!FFileHelper::LoadFileToArray(PngA, *Args[0]))
-			{
-				UE_LOG(LogImageToUMG, Error, TEXT("无法读取: %s"), *Args[0]);
-				return;
-			}
-			if (!FFileHelper::LoadFileToArray(PngB, *Args[1]))
-			{
-				UE_LOG(LogImageToUMG, Error, TEXT("无法读取: %s"), *Args[1]);
-				return;
-			}
-			float Threshold = Args.Num() > 2 ? FCString::Atof(*Args[2]) : 0.85f;
-			FVisualCompareReport Report = FVisualComparator::CompareImages(PngA, PngB, Threshold);
-			UE_LOG(LogImageToUMG, Log, TEXT("=== VisualComparator 结果 ==="));
-			UE_LOG(LogImageToUMG, Log, TEXT("SSIM: %.4f"), Report.SSIM);
-			UE_LOG(LogImageToUMG, Log, TEXT("DiffPixelRatio: %.4f"), Report.DiffPixelRatio);
-			UE_LOG(LogImageToUMG, Log, TEXT("Pass: %s (threshold=%.2f)"), Report.bPassThreshold ? TEXT("YES") : TEXT("NO"), Threshold);
 		}),
 		ECVF_Default
 	);
