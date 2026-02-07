@@ -632,19 +632,6 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 	return NewWidget;
 }
 
-TMap<FString, UTexture2D*> FUMGWidgetUtils::BuildTextureMap(const TArray<FProcessedImageAsset>& Assets)
-{
-	TMap<FString, UTexture2D*> TextureMap;
-	for (const FProcessedImageAsset& Asset : Assets)
-	{
-		if (Asset.Texture)
-		{
-			TextureMap.Add(Asset.Id, Asset.Texture);
-		}
-	}
-	return TextureMap;
-}
-
 // ============================================================================
 // Fixer 应用
 // ============================================================================
@@ -682,27 +669,6 @@ namespace
 
 void FUMGWidgetUtils::ApplyFixer(FUMGWidgetNode& RootNode, const FIntPoint& SourceSize, const FIntPoint& DesignSize)
 {
-	// v2.2: 先应用ViewportMapping（源图→设计尺寸）
-	FViewportSpec Spec;
-	Spec.SourceSize = SourceSize;
-	Spec.DesignSize = DesignSize;
-	Spec.Mode = UImageToUMGSettings::Get()->bUseStretchMode ? EAspectRatioMode::Stretch : EAspectRatioMode::Fit;
-
-	// 递归映射所有节点的Bounds（包括Root无效但子节点有效的情况）
-	TFunction<void(FUMGWidgetNode&)> MapBounds;
-	MapBounds = [&](FUMGWidgetNode& Node)
-	{
-		if (Node.Bounds.W > 0.0f && Node.Bounds.H > 0.0f)
-		{
-			Node.Bounds = FViewportMapping::MapNormalizedBounds(Node.Bounds, Spec);
-		}
-		for (FUMGWidgetNode& Child : Node.Children)
-		{
-			MapBounds(Child);
-		}
-	};
-	MapBounds(RootNode);
-
 	// 初始化Fixer预设
 	FFixerPreset Preset;
 	FLayoutFixer::Initialize(DesignSize, Preset);
@@ -1724,145 +1690,6 @@ void FUMGWidgetUtils::ApplyWidgetProperties(UWidget* Widget, const TMap<FString,
 }
 
 // ============================================================================
-// 图像资产绑定
-// ============================================================================
-
-void FUMGWidgetUtils::BindImageAssets(FUMGWidgetNode& Node, const TArray<FProcessedImageAsset>& Assets)
-{
-	// 检查当前节点的 ImageRef 属性
-	if (const FString* ImageRef = Node.Properties.Find(TEXT("ImageRef")))
-	{
-		for (const FProcessedImageAsset& Asset : Assets)
-		{
-			if (Asset.Id == *ImageRef)
-			{
-				Node.Properties.Add(TEXT("TexturePath"), Asset.TexturePath);
-				break;
-			}
-		}
-	}
-
-	// 递归处理子节点
-	for (FUMGWidgetNode& Child : Node.Children)
-	{
-		BindImageAssets(Child, Assets);
-	}
-}
-
-void FUMGWidgetUtils::GenerateImageAssetsFromWidgets(FUMGWidgetNode& Node, TArray<FUMGImageAsset>& OutAssets)
-{
-	const auto HasValidSlotData = [](const FUMGSlotData& Slot)
-	{
-		const FUMGSlotData DefaultSlot;
-		return !FMath::IsNearlyEqual(Slot.Offsets.Right, DefaultSlot.Offsets.Right) ||
-			!FMath::IsNearlyEqual(Slot.Offsets.Bottom, DefaultSlot.Offsets.Bottom) ||
-			!FMath::IsNearlyEqual(Slot.Offsets.Left, DefaultSlot.Offsets.Left) ||
-			!FMath::IsNearlyEqual(Slot.Offsets.Top, DefaultSlot.Offsets.Top) ||
-			!FMath::IsNearlyEqual(Slot.Anchors.Min.X, DefaultSlot.Anchors.Min.X) ||
-			!FMath::IsNearlyEqual(Slot.Anchors.Min.Y, DefaultSlot.Anchors.Min.Y) ||
-			!FMath::IsNearlyEqual(Slot.Anchors.Max.X, DefaultSlot.Anchors.Max.X) ||
-			!FMath::IsNearlyEqual(Slot.Anchors.Max.Y, DefaultSlot.Anchors.Max.Y);
-	};
-	// 如果是 Image 类型且没有 ImageRef，根据 Slot 信息生成 ImageAsset
-	if (Node.Type.Equals(TEXT("Image"), ESearchCase::IgnoreCase) &&
-		!Node.Properties.Contains(TEXT("ImageRef")) &&
-		!Node.Properties.Contains(TEXT("TexturePath")))
-	{
-		FUMGImageAsset Asset;
-		Asset.Id = Node.Name;
-		Asset.Type = TEXT("Icon");
-
-		// 从 Properties 获取 Widget 的设计尺寸
-		int32 WidthOverride = 0, HeightOverride = 0;
-		if (const FString* W = Node.Properties.Find(TEXT("WidthOverride")))
-			WidthOverride = FCString::Atoi(**W);
-		if (const FString* H = Node.Properties.Find(TEXT("HeightOverride")))
-			HeightOverride = FCString::Atoi(**H);
-
-		// 当 AI 没有返回 ImageAssets 时，我们无法知道图像在源图中的位置
-		// 使用特殊值 -1 表示"使用整个源图"
-		// ProcessImageAssetsForPreview 会检测这个值并使用整个源图
-		Asset.X = -1;
-		Asset.Y = -1;
-		Asset.Width = -1;
-		Asset.Height = -1;
-
-		// SuggestedWidth/Height 用于指定输出纹理的尺寸
-		if (WidthOverride > 0 && HeightOverride > 0)
-		{
-			Asset.SuggestedWidth = WidthOverride;
-			Asset.SuggestedHeight = HeightOverride;
-		}
-		else
-		{
-			// v2.2: 修复尺寸推断逻辑
-			// 点锚点：Offsets.Right/Bottom 为尺寸；拉伸锚点：根据锚点跨度和边距计算
-			const FUMGSlotData& Slot = Node.Slot;
-			const FIntPoint DesignSize = UImageToUMGSettings::Get()->GetDesignSize();
-			const int32 CanvasW = FMath::Max(1, DesignSize.X);
-			const int32 CanvasH = FMath::Max(1, DesignSize.Y);
-			bool bSetFromSlot = false;
-			if (HasValidSlotData(Slot))
-			{
-				const bool bPointAnchorX = FMath::IsNearlyEqual(Slot.Anchors.Min.X, Slot.Anchors.Max.X);
-				const bool bPointAnchorY = FMath::IsNearlyEqual(Slot.Anchors.Min.Y, Slot.Anchors.Max.Y);
-
-				int32 W = 0;
-				if (bPointAnchorX)
-				{
-					W = FMath::RoundToInt(Slot.Offsets.Right);
-				}
-				else
-				{
-					const float Span = (Slot.Anchors.Max.X - Slot.Anchors.Min.X) * CanvasW;
-					W = FMath::RoundToInt(Span - Slot.Offsets.Left - Slot.Offsets.Right);
-				}
-
-				int32 H = 0;
-				if (bPointAnchorY)
-				{
-					H = FMath::RoundToInt(Slot.Offsets.Bottom);
-				}
-				else
-				{
-					const float Span = (Slot.Anchors.Max.Y - Slot.Anchors.Min.Y) * CanvasH;
-					H = FMath::RoundToInt(Span - Slot.Offsets.Top - Slot.Offsets.Bottom);
-				}
-
-				if (W > 0 && H > 0)
-				{
-					Asset.SuggestedWidth = W;
-					Asset.SuggestedHeight = H;
-					bSetFromSlot = true;
-				}
-			}
-
-			if (!bSetFromSlot && Node.Bounds.W > 0.0f && Node.Bounds.H > 0.0f)
-			{
-				const int32 BoundW = FMath::RoundToInt(Node.Bounds.W * CanvasW);
-				const int32 BoundH = FMath::RoundToInt(Node.Bounds.H * CanvasH);
-				if (BoundW > 0 && BoundH > 0)
-				{
-					Asset.SuggestedWidth = BoundW;
-					Asset.SuggestedHeight = BoundH;
-				}
-			}
-		}
-
-		if (Asset.SuggestedWidth > 0 && Asset.SuggestedHeight > 0)
-		{
-			// 给 Widget 添加 ImageRef，以便后续 BindImageAssets 能匹配
-			Node.Properties.Add(TEXT("ImageRef"), Asset.Id);
-			OutAssets.Add(Asset);
-		}
-	}
-
-	// 递归处理子节点
-	for (FUMGWidgetNode& Child : Node.Children)
-	{
-		GenerateImageAssetsFromWidgets(Child, OutAssets);
-	}
-}
 
 namespace
 {
