@@ -20,10 +20,15 @@ public class ImageToUMGEditor : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
+			"PropertyEditor",
 			"UnrealEd",
 			"UMGEditor",
 			"Blutility",
 			"AssetTools",
+			"ContentBrowser",
+			"ContentBrowserData",
+			"ToolMenus",
+			"HTTP",
 			"Json",
 			"JsonUtilities",
 			"BlueprintGraph",
@@ -32,6 +37,9 @@ public class ImageToUMGEditor : ModuleRules
 			"Projects",
 			"DeveloperSettings",
 			"ImageWrapper",
+			"EditorSubsystem",
+			"EditorFramework",
+			"ApplicationCore",
 			"RenderCore",
 		});
 	}

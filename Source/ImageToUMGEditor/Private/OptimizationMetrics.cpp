@@ -9,7 +9,8 @@
 
 namespace
 {
-	// 容器类型列表 - 这些布局容器在评估时跳过（只评估叶子控件）
+	// 容器类型列表 - 与 UMGSampleExtractor::ShouldSkipWidgetType 保持一致
+	// 这些类型在 Ground Truth 提取时被跳过，因此评估时也应该跳过
 	bool IsContainerType(const FString& TypeName)
 	{
 		static const TSet<FString> ContainerTypes = {
@@ -39,7 +40,8 @@ namespace
 		const bool bValidBounds = Node.Bounds.W > 0.0f && Node.Bounds.H > 0.0f;
 		const bool bHasChildren = Node.Children.Num() > 0;
 
-		// 跳过容器类型（无条件跳过，只评估叶子控件）
+		// 跳过容器类型（无条件跳过，与 UMGSampleExtractor::ShouldSkipWidgetType 完全一致）
+		// Ground Truth 提取时无条件跳过这些类型，评估时也应该无条件跳过
 		const bool bIsContainer = IsContainerType(Node.Type);
 
 		bool bSkipRoot = bIsRoot && !bIncludeRoot;

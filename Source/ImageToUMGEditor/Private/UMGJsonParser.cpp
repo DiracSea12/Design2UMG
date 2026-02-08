@@ -104,7 +104,7 @@ bool FUMGJsonParser::ParseJson(const FString& JsonString, FUMGWidgetData& OutWid
 	Root->TryGetStringField(TEXT("WidgetName"), OutWidgetData.WidgetName);
 	if (OutWidgetData.WidgetName.IsEmpty()) OutWidgetData.WidgetName = TEXT("WBP_Generated");
 
-	// v2.2: 解析 SourceSize（可选，用于坐标比例计算）
+	// v2.2: 解析 SourceSize（可选，用于ViewportMapping）
 	const TSharedPtr<FJsonObject>* SourceSizeObj;
 	if (Root->TryGetObjectField(TEXT("SourceSize"), SourceSizeObj))
 	{

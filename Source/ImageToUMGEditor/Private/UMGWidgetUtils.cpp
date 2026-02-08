@@ -1773,7 +1773,7 @@ void FUMGWidgetUtils::ConvertRatioToPixels(FUMGWidgetNode& Node, FIntPoint Canva
 }
 
 // ============================================================================
-// Widget 渲染
+// Widget 渲染（从 UMGExtractorTest 迁移）
 // ============================================================================
 
 namespace

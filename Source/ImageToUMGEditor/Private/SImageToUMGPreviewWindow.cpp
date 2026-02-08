@@ -761,8 +761,47 @@ UUserWidget* SImageToUMGPreviewWindow::CreatePreviewWidgetFromJson(const FString
 	// 将比例字段转换为像素值
 	FUMGWidgetUtils::ConvertRatioToPixels(WidgetData.RootWidget, SourceImageSize);
 
-	// 纹理映射表（Pen 工作流不需要从源图裁剪纹理，留空即可）
+	// 从源图像裁剪实际纹理用于预览
+	TArray<FUMGImageAsset>& ImageAssets = WidgetData.ImageAssets;
+
+	// 兜底：AI没有返回ImageAssets时，从Widget节点的位置信息生成
+	if (ImageAssets.Num() == 0)
+	{
+		FUMGWidgetUtils::GenerateImageAssetsFromWidgets(WidgetData.RootWidget, ImageAssets);
+	}
+
+	// 处理图像资产并构建纹理映射表
 	TMap<FString, UTexture2D*> TextureMap;
+	if (ImageAssets.Num() > 0 && SourceImageData.Num() > 0)
+	{
+		UE_LOG(LogImageToUMG, Verbose, TEXT("[预览窗口] 开始处理 %d 个图像资产, 源图数据 %d bytes, CoordScale: (%.2f, %.2f)"),
+			ImageAssets.Num(), SourceImageData.Num(), CoordScale.X, CoordScale.Y);
+
+		TArray<FProcessedImageAsset> PreviewAssets;
+		int32 ProcessedCount = FImageAssetProcessor::ProcessImageAssetsForPreview(
+			ImageAssets, SourceImageData, PreviewAssets, PreviewTextures, CoordScale);
+
+		UE_LOG(LogImageToUMG, Verbose, TEXT("[预览窗口] 图像处理完成: 成功 %d/%d 个"),
+			ProcessedCount, ImageAssets.Num());
+
+		// 构建纹理映射表，用于直接绑定临时纹理
+		TextureMap = FUMGWidgetUtils::BuildTextureMap(PreviewAssets);
+
+		UE_LOG(LogImageToUMG, Verbose, TEXT("[预览窗口] 纹理映射表: %d 条目"), TextureMap.Num());
+		for (const auto& Entry : TextureMap)
+		{
+			UE_LOG(LogImageToUMG, Verbose, TEXT("  - %s -> %s"),
+				*Entry.Key, Entry.Value ? *Entry.Value->GetName() : TEXT("(null)"));
+		}
+
+		// 同时绑定路径（用于最终生成时）
+		FUMGWidgetUtils::BindImageAssets(WidgetData.RootWidget, PreviewAssets);
+	}
+	else
+	{
+		UE_LOG(LogImageToUMG, Warning, TEXT("[预览窗口] 跳过图像处理: ImageAssets=%d, SourceImageData=%d bytes"),
+			ImageAssets.Num(), SourceImageData.Num());
+	}
 
 	// 使用 RF_Transient 标记，明确告知 GC 这是临时对象
 	UUserWidget* TempWidget = NewObject<UPreviewUserWidget>(GetTransientPackage(), UPreviewUserWidget::StaticClass(), NAME_None, RF_Transient);

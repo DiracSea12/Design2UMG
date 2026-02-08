@@ -317,6 +317,6 @@ struct FUMGWidgetData
 	/** 需要提取/生成的图像资产列表 */
 	TArray<FUMGImageAsset> ImageAssets;
 
-	/** 源图尺寸（用于坐标比例计算） */
+	/** AI输入图尺寸（用于ViewportMapping，v2.2新增） */
 	FIntPoint SourceSize = FIntPoint(1920, 1080);
 };
