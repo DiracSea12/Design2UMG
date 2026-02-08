@@ -9,9 +9,13 @@
 void FPenToUMGTest::LogResult(const FString& TestName, bool bPassed)
 {
 	if (bPassed)
+	{
 		UE_LOG(LogTemp, Log, TEXT("[PASS] %s"), *TestName);
+	}
 	else
+	{
 		UE_LOG(LogTemp, Error, TEXT("[FAIL] %s"), *TestName);
+	}
 }
 
 bool FPenToUMGTest::RunAllTests()
