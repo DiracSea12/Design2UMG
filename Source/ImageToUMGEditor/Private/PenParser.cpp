@@ -148,8 +148,10 @@ TSharedPtr<FPenNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonOb
 	Node->Type = ParseNodeType(JsonObj->GetStringField(TEXT("type")));
 
 	// 位置
-	JsonObj->TryGetNumberField(TEXT("x"), Node->X);
-	JsonObj->TryGetNumberField(TEXT("y"), Node->Y);
+	if (JsonObj->HasField(TEXT("x")))
+		Node->bHasX = JsonObj->TryGetNumberField(TEXT("x"), Node->X);
+	if (JsonObj->HasField(TEXT("y")))
+		Node->bHasY = JsonObj->TryGetNumberField(TEXT("y"), Node->Y);
 	JsonObj->TryGetNumberField(TEXT("rotation"), Node->Rotation);
 
 	// 尺寸 - 先检查 size 对象（兼容非标准格式）
@@ -273,10 +275,14 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 				OverrideObj->TryGetStringField(TEXT("fontWeight"), DescNode->FontWeight);
 				if (OverrideObj->HasField(TEXT("fill")))
 					DescNode->Fill = ParseFill(OverrideObj->TryGetField(TEXT("fill")), Resolver);
-				OverrideObj->TryGetNumberField(TEXT("width"), DescNode->Width.Value);
-				OverrideObj->TryGetNumberField(TEXT("height"), DescNode->Height.Value);
-				OverrideObj->TryGetNumberField(TEXT("x"), DescNode->X);
-				OverrideObj->TryGetNumberField(TEXT("y"), DescNode->Y);
+				if (OverrideObj->HasField(TEXT("width")) && OverrideObj->TryGetNumberField(TEXT("width"), DescNode->Width.Value))
+					DescNode->Width.Mode = EPenSizeMode::Fixed;
+				if (OverrideObj->HasField(TEXT("height")) && OverrideObj->TryGetNumberField(TEXT("height"), DescNode->Height.Value))
+					DescNode->Height.Mode = EPenSizeMode::Fixed;
+				if (OverrideObj->HasField(TEXT("x")))
+					DescNode->bHasX = OverrideObj->TryGetNumberField(TEXT("x"), DescNode->X);
+				if (OverrideObj->HasField(TEXT("y")))
+					DescNode->bHasY = OverrideObj->TryGetNumberField(TEXT("y"), DescNode->Y);
 				if (OverrideObj->HasField(TEXT("enabled")))
 					DescNode->bEnabled = OverrideObj->GetBoolField(TEXT("enabled"));
 				Node->Descendants.Add(Pair.Key, DescNode);

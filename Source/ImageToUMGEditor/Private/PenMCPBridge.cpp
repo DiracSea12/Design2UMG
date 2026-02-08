@@ -17,8 +17,20 @@ namespace
 		for (const auto& Node : Nodes)
 		{
 			const TSharedPtr<FJsonObject>& Obj = Node->AsObject();
-			if (Obj.IsValid() && Obj->GetStringField(TEXT("id")) == TargetId)
+			if (!Obj.IsValid())
+				continue;
+
+			FString NodeId;
+			if (Obj->TryGetStringField(TEXT("id"), NodeId) && NodeId == TargetId)
 				return Node;
+
+			const TArray<TSharedPtr<FJsonValue>>* Children = nullptr;
+			if (Obj->TryGetArrayField(TEXT("children"), Children) && Children != nullptr)
+			{
+				TSharedPtr<FJsonValue> FoundInChildren = FindNodeById(*Children, TargetId);
+				if (FoundInChildren.IsValid())
+					return FoundInChildren;
+			}
 		}
 		return nullptr;
 	}

@@ -482,6 +482,8 @@ struct FPenNode
 	// 位置和尺寸
 	float X = 0.0f;
 	float Y = 0.0f;
+	bool bHasX = false;
+	bool bHasY = false;
 	FPenSize Width;
 	FPenSize Height;
 	float Rotation = 0.0f;

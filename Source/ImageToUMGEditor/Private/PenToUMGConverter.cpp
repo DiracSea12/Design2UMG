@@ -328,8 +328,8 @@ TSharedPtr<FPenNode> FPenToUMGConverter::ExpandRef(const TSharedPtr<FPenNode>& R
 	}
 
 	// 应用 ref 节点自身的位置/尺寸覆盖
-	if (RefNode->X != 0) Expanded->X = RefNode->X;
-	if (RefNode->Y != 0) Expanded->Y = RefNode->Y;
+	if (RefNode->bHasX) Expanded->X = RefNode->X;
+	if (RefNode->bHasY) Expanded->Y = RefNode->Y;
 	if (RefNode->Width.Value > 0) Expanded->Width = RefNode->Width;
 	if (RefNode->Height.Value > 0) Expanded->Height = RefNode->Height;
 

@@ -4,6 +4,7 @@
 #include "ImageToUMGLog.h"
 #include "ImageToUMGSettings.h"
 #include "LayoutCalculator.h"
+#include "LayoutFixer.h"
 
 #include "WidgetBlueprint.h"
 #include "Blueprint/UserWidget.h"
