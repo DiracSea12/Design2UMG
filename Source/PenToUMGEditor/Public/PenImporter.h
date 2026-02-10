@@ -17,4 +17,7 @@ public:
 
 	/** 从 JSON 字符串导入 */
 	static bool ImportFromJson(const FString& JsonString, FUMGWidgetData& OutData);
+
+	/** 从 .pen 文件导入指定 TargetNodeId 的 frame（多 frame 选择路径） */
+	static bool ImportFileWithTargetNode(const FString& FilePath, const FString& TargetNodeId, FUMGWidgetData& OutData);
 };

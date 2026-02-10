@@ -3,12 +3,13 @@
 #include "PenFileImportFactory.h"
 #include "PenToUMGLog.h"
 #include "PenParser.h"
-#include "PenMCPBridge.h"
+#include "PenImporter.h"
 #include "PenRemoteImageImporter.h"
 #include "DesignSourceRegistry.h"
 #include "SPenToUMGPreviewWindow.h"
 #include "UMGGenerator.h"
 #include "UMGJsonParser.h"
+#include "UMGJsonSerializer.h"
 #include "UMGWidgetUtils.h"
 #include "PenToUMGSettings.h"
 
@@ -25,24 +26,11 @@
 
 #define LOCTEXT_NAMESPACE "PenFileImportFactory"
 
-// ── Frame 选择器数据 ──
-
-struct FPenFrameInfo
-{
-	FString Id;
-	FString Name;
-	float Width;
-	float Height;
-};
-
 // ── 前向声明内部函数 ──
 
 namespace PenImportInternal
 {
 	static const TCHAR* DefaultOutputPath = TEXT("/Game/PenToUMG/PenConvert_Output");
-
-	/** 提取顶层 frame 列表 */
-	static TArray<FPenFrameInfo> ExtractTopFrames(const FPenDocument& Document);
 
 	/** 执行导入（单 frame 快速路径） */
 	static void ImportSingleFrame(const FString& FilePath, const FString& OutputPath);
@@ -93,7 +81,7 @@ UObject* UPenFileImportFactory::FactoryCreateFile(
 		return nullptr;
 	}
 
-	TArray<FPenFrameInfo> Frames = PenImportInternal::ExtractTopFrames(Document);
+	TArray<FPenFrameInfo> Frames = ::ExtractTopFrames(Document);
 
 	if (Frames.Num() == 0)
 	{
@@ -123,24 +111,6 @@ UObject* UPenFileImportFactory::FactoryCreateFile(
 
 namespace PenImportInternal
 {
-
-TArray<FPenFrameInfo> ExtractTopFrames(const FPenDocument& Document)
-{
-	TArray<FPenFrameInfo> Result;
-	for (const auto& Child : Document.Children)
-	{
-		if (!Child.IsValid() || Child->Type != EPenNodeType::Frame)
-			continue;
-
-		FPenFrameInfo Info;
-		Info.Id = Child->Id;
-		Info.Name = Child->Name.IsEmpty() ? Child->Id : Child->Name;
-		Info.Width = Child->Width.IsFixed() ? Child->Width.Value : 0.0f;
-		Info.Height = Child->Height.IsFixed() ? Child->Height.Value : 0.0f;
-		Result.Add(MoveTemp(Info));
-	}
-	return Result;
-}
 
 void ImportSingleFrame(const FString& FilePath, const FString& OutputPath)
 {
@@ -172,65 +142,17 @@ void ImportSingleFrame(const FString& FilePath, const FString& OutputPath)
 
 void ImportWithTargetNode(const FString& FilePath, const FString& TargetNodeId, const FString& OutputPath)
 {
-	// 读取原始 JSON，走 ConvertFromMCP 路径复用 TargetNodeId 过滤
-	FString JsonString;
-	if (!FFileHelper::LoadFileToString(JsonString, *FilePath))
-	{
-		UE_LOG(LogPenToUMG, Error, TEXT("PenFileImport: Failed to read file: %s"), *FilePath);
-		return;
-	}
-
-	// .pen 文件的 children 数组就是 NodesJson，variables 部分作为 VarsJson
-	// 但 ConvertFromMCP 期望 NodesJson 是纯数组，VarsJson 是对象
-	// .pen 文件是完整文档，需要提取 children 和 variables
-	TSharedPtr<FJsonObject> DocObj;
-	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonString);
-	if (!FJsonSerializer::Deserialize(Reader, DocObj) || !DocObj.IsValid())
-	{
-		UE_LOG(LogPenToUMG, Error, TEXT("PenFileImport: JSON parse failed: %s"), *FilePath);
-		return;
-	}
-
-	// 提取 children 数组为 JSON 字符串
-	FString NodesJson;
-	if (DocObj->HasField(TEXT("children")))
-	{
-		const TArray<TSharedPtr<FJsonValue>>& ChildrenArr = DocObj->GetArrayField(TEXT("children"));
-		TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&NodesJson);
-		FJsonSerializer::Serialize(ChildrenArr, Writer);
-	}
-
-	// 提取 variables/themes/fonts 为 JSON 对象字符串
-	TSharedPtr<FJsonObject> VarsObj = MakeShared<FJsonObject>();
-	if (DocObj->HasField(TEXT("variables")))
-		VarsObj->SetField(TEXT("variables"), DocObj->TryGetField(TEXT("variables")));
-	if (DocObj->HasField(TEXT("themes")))
-		VarsObj->SetField(TEXT("themes"), DocObj->TryGetField(TEXT("themes")));
-	if (DocObj->HasField(TEXT("fonts")))
-		VarsObj->SetField(TEXT("fonts"), DocObj->TryGetField(TEXT("fonts")));
-
-	FString VarsJson;
-	TSharedRef<TJsonWriter<>> VarsWriter = TJsonWriterFactory<>::Create(&VarsJson);
-	FJsonSerializer::Serialize(VarsObj.ToSharedRef(), VarsWriter);
-
 	FUMGWidgetData Data;
-	if (!FPenMCPBridge::ConvertFromMCP(NodesJson, VarsJson, Data, TargetNodeId))
-	{
-		UE_LOG(LogPenToUMG, Error, TEXT("PenFileImport: ConvertFromMCP failed for node %s"), *TargetNodeId);
+	if (!FPenImporter::ImportFileWithTargetNode(FilePath, TargetNodeId, Data))
 		return;
-	}
 
 	FString RemoteImageReport;
 	FPenRemoteImageImporter::ResolveRemoteImages(Data, &RemoteImageReport);
 	if (!RemoteImageReport.IsEmpty())
-	{
 		UE_LOG(LogPenToUMG, Log, TEXT("%s"), *RemoteImageReport);
-	}
 
 	if (!OpenPreview(Data, OutputPath))
-	{
 		GenerateAndRender(Data, OutputPath);
-	}
 }
 
 void RunGenerateFromJson(const FString& EditedJson, const FString& OutputPath)
@@ -265,133 +187,6 @@ void GenerateAndRender(const FUMGWidgetData& Data, const FString& OutputPath)
 	UE_LOG(LogPenToUMG, Log, TEXT("PenFileImport: Generated %s"), *WBP->GetPathName());
 }
 
-// ── 序列化辅助（与 EditorModule 中相同模式） ──
-
-static TSharedRef<FJsonObject> SerializeAnchorLocal(const FUMGAnchorData& A)
-{
-	TSharedRef<FJsonObject> J = MakeShared<FJsonObject>();
-	J->SetNumberField(TEXT("X"), A.X);
-	J->SetNumberField(TEXT("Y"), A.Y);
-	return J;
-}
-
-static TSharedRef<FJsonObject> SerializeOffsetsLocal(const FUMGOffsetsData& O)
-{
-	TSharedRef<FJsonObject> J = MakeShared<FJsonObject>();
-	J->SetNumberField(TEXT("Left"), O.Left);
-	J->SetNumberField(TEXT("Top"), O.Top);
-	J->SetNumberField(TEXT("Right"), O.Right);
-	J->SetNumberField(TEXT("Bottom"), O.Bottom);
-	return J;
-}
-
-static TSharedRef<FJsonObject> SerializeAnchorsLocal(const FUMGAnchorsData& A)
-{
-	TSharedRef<FJsonObject> J = MakeShared<FJsonObject>();
-	J->SetObjectField(TEXT("Min"), SerializeAnchorLocal(A.Min));
-	J->SetObjectField(TEXT("Max"), SerializeAnchorLocal(A.Max));
-	return J;
-}
-
-static TSharedRef<FJsonObject> SerializeSlotLocal(const FUMGSlotData& S)
-{
-	TSharedRef<FJsonObject> J = MakeShared<FJsonObject>();
-	J->SetObjectField(TEXT("Anchors"), SerializeAnchorsLocal(S.Anchors));
-	J->SetObjectField(TEXT("Alignment"), SerializeAnchorLocal(S.Alignment));
-	J->SetObjectField(TEXT("Offsets"), SerializeOffsetsLocal(S.Offsets));
-
-	const bool bHasPadding =
-		!FMath::IsNearlyEqual(S.Padding.Left, 0.0f) ||
-		!FMath::IsNearlyEqual(S.Padding.Top, 0.0f) ||
-		!FMath::IsNearlyEqual(S.Padding.Right, 0.0f) ||
-		!FMath::IsNearlyEqual(S.Padding.Bottom, 0.0f);
-	if (bHasPadding)
-	{
-		J->SetStringField(TEXT("Padding"), FString::Printf(
-			TEXT("%.2f,%.2f,%.2f,%.2f"),
-			S.Padding.Left, S.Padding.Top, S.Padding.Right, S.Padding.Bottom));
-	}
-
-	if (S.HorizontalAlignment != TEXT("Fill"))
-		J->SetStringField(TEXT("HorizontalAlignment"), S.HorizontalAlignment);
-	if (S.VerticalAlignment != TEXT("Fill"))
-		J->SetStringField(TEXT("VerticalAlignment"), S.VerticalAlignment);
-	if (S.SizeRule != TEXT("Auto"))
-		J->SetStringField(TEXT("SizeRule"), S.SizeRule);
-	if (!FMath::IsNearlyEqual(S.FillWeight, 1.0f))
-		J->SetNumberField(TEXT("FillWeight"), S.FillWeight);
-	if (S.Row != 0)
-		J->SetNumberField(TEXT("Row"), S.Row);
-	if (S.Column != 0)
-		J->SetNumberField(TEXT("Column"), S.Column);
-	if (S.RowSpan != 1)
-		J->SetNumberField(TEXT("RowSpan"), S.RowSpan);
-	if (S.ColumnSpan != 1)
-		J->SetNumberField(TEXT("ColumnSpan"), S.ColumnSpan);
-
-	return J;
-}
-
-static TSharedRef<FJsonObject> SerializeBoundsLocal(const FBounds& B)
-{
-	TSharedRef<FJsonObject> J = MakeShared<FJsonObject>();
-	J->SetNumberField(TEXT("X"), B.X);
-	J->SetNumberField(TEXT("Y"), B.Y);
-	J->SetNumberField(TEXT("W"), B.W);
-	J->SetNumberField(TEXT("H"), B.H);
-	return J;
-}
-
-static TSharedRef<FJsonObject> SerializeWidgetNodeLocal(const FUMGWidgetNode& Node)
-{
-	TSharedRef<FJsonObject> J = MakeShared<FJsonObject>();
-	J->SetStringField(TEXT("Type"), Node.Type);
-	if (!Node.Id.IsEmpty())
-		J->SetStringField(TEXT("Id"), Node.Id);
-	if (!Node.Name.IsEmpty())
-		J->SetStringField(TEXT("Name"), Node.Name);
-
-	const bool bHasBounds =
-		!FMath::IsNearlyZero(Node.Bounds.X) || !FMath::IsNearlyZero(Node.Bounds.Y) ||
-		!FMath::IsNearlyZero(Node.Bounds.W) || !FMath::IsNearlyZero(Node.Bounds.H);
-	if (bHasBounds)
-		J->SetObjectField(TEXT("Bounds"), SerializeBoundsLocal(Node.Bounds));
-
-	J->SetObjectField(TEXT("Slot"), SerializeSlotLocal(Node.Slot));
-
-	if (Node.Properties.Num() > 0)
-	{
-		TSharedRef<FJsonObject> Props = MakeShared<FJsonObject>();
-		for (const auto& Pair : Node.Properties)
-			Props->SetStringField(Pair.Key, Pair.Value);
-		J->SetObjectField(TEXT("Properties"), Props);
-	}
-
-	if (Node.Children.Num() > 0)
-	{
-		TArray<TSharedPtr<FJsonValue>> Arr;
-		Arr.Reserve(Node.Children.Num());
-		for (const FUMGWidgetNode& Child : Node.Children)
-			Arr.Add(MakeShared<FJsonValueObject>(SerializeWidgetNodeLocal(Child)));
-		J->SetArrayField(TEXT("Children"), Arr);
-	}
-
-	return J;
-}
-
-static FString SerializeWidgetDataToJsonLocal(const FUMGWidgetData& Data)
-{
-	TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
-	Root->SetStringField(TEXT("WidgetName"), Data.WidgetName);
-	Root->SetObjectField(TEXT("RootWidget"), SerializeWidgetNodeLocal(Data.RootWidget));
-
-	FString Output;
-	TSharedRef<TJsonWriter<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>> Writer =
-		TJsonWriterFactory<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>::Create(&Output);
-	FJsonSerializer::Serialize(Root, Writer);
-	return Output;
-}
-
 // ── OpenPreview ──
 
 bool OpenPreview(const FUMGWidgetData& Data, const FString& OutputPath)
@@ -399,7 +194,7 @@ bool OpenPreview(const FUMGWidgetData& Data, const FString& OutputPath)
 	if (!FSlateApplication::IsInitialized())
 		return false;
 
-	const FString JsonPayload = SerializeWidgetDataToJsonLocal(Data);
+	const FString JsonPayload = FUMGJsonSerializer::Serialize(Data);
 	const FString FinalPath = OutputPath.IsEmpty() ? FString(DefaultOutputPath) : OutputPath;
 
 	TSharedRef<SWindow> Window = SNew(SWindow)
@@ -458,7 +253,7 @@ void ShowFrameSelector(const FString& FilePath, const TArray<FPenFrameInfo>& Fra
 		.Padding(8.0f)
 		[
 			SNew(STextBlock)
-			.Text(LOCTEXT("FrameSelectorHint", "This file contains multiple frames. Select one to import:"))
+			.Text(LOCTEXT("FrameSelectorHint", "This file contains multiple frames. Double-click to import:"))
 		]
 		+ SVerticalBox::Slot()
 		.FillHeight(1.0f)

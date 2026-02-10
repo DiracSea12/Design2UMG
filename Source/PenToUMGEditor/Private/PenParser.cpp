@@ -579,3 +579,21 @@ EPenTextGrowth FPenParser::ParseTextGrowth(const FString& S)
 	if (S == TEXT("fixed-width-height")) return EPenTextGrowth::FixedWidthHeight;
 	return EPenTextGrowth::Auto;
 }
+
+TArray<FPenFrameInfo> ExtractTopFrames(const FPenDocument& Document)
+{
+	TArray<FPenFrameInfo> Result;
+	for (const auto& Child : Document.Children)
+	{
+		if (!Child.IsValid() || Child->Type != EPenNodeType::Frame)
+			continue;
+
+		FPenFrameInfo Info;
+		Info.Id = Child->Id;
+		Info.Name = Child->Name.IsEmpty() ? Child->Id : Child->Name;
+		Info.Width = Child->Width.IsFixed() ? Child->Width.Value : 0.0f;
+		Info.Height = Child->Height.IsFixed() ? Child->Height.Value : 0.0f;
+		Result.Add(MoveTemp(Info));
+	}
+	return Result;
+}

@@ -64,3 +64,15 @@ private:
 	/** 解析节点扩展属性（文本、图标、椭圆等） */
 	static void ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TSharedPtr<FPenNode>& Node, const FPenVariableResolver& Resolver);
 };
+
+/** 顶层 Frame 信息（供 Frame 选择器使用） */
+struct FPenFrameInfo
+{
+	FString Id;
+	FString Name;
+	float Width;
+	float Height;
+};
+
+/** 从 FPenDocument 提取顶层 Frame 列表 */
+TArray<FPenFrameInfo> ExtractTopFrames(const FPenDocument& Document);

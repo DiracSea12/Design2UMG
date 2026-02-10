@@ -12,6 +12,7 @@
 #include "PenParser.h"
 #include "PenImporter.h"
 #include "DesignSourceRegistry.h"
+#include "UMGJsonSerializer.h"
 
 #include "WidgetBlueprint.h"
 #include "Dom/JsonObject.h"
@@ -21,6 +22,10 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "Widgets/SWindow.h"
+#include "Widgets/Views/SListView.h"
+#include "Widgets/Layout/SBox.h"
+#include "Widgets/Input/SButton.h"
+#include "Widgets/Text/STextBlock.h"
 #include "ToolMenus.h"
 #include "DesktopPlatformModule.h"
 #include "IDesktopPlatform.h"
@@ -41,162 +46,6 @@ namespace
 		FString OutputPath = DefaultPenOutputPath;
 		bool bUsePreview = true;
 	};
-
-	TSharedRef<FJsonObject> SerializeAnchor(const FUMGAnchorData& Anchor)
-	{
-		TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
-		Json->SetNumberField(TEXT("X"), Anchor.X);
-		Json->SetNumberField(TEXT("Y"), Anchor.Y);
-		return Json;
-	}
-
-	TSharedRef<FJsonObject> SerializeAnchors(const FUMGAnchorsData& Anchors)
-	{
-		TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
-		Json->SetObjectField(TEXT("Min"), SerializeAnchor(Anchors.Min));
-		Json->SetObjectField(TEXT("Max"), SerializeAnchor(Anchors.Max));
-		return Json;
-	}
-
-	TSharedRef<FJsonObject> SerializeOffsets(const FUMGOffsetsData& Offsets)
-	{
-		TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
-		Json->SetNumberField(TEXT("Left"), Offsets.Left);
-		Json->SetNumberField(TEXT("Top"), Offsets.Top);
-		Json->SetNumberField(TEXT("Right"), Offsets.Right);
-		Json->SetNumberField(TEXT("Bottom"), Offsets.Bottom);
-		return Json;
-	}
-
-	TSharedRef<FJsonObject> SerializeSlot(const FUMGSlotData& Slot)
-	{
-		TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
-		Json->SetObjectField(TEXT("Anchors"), SerializeAnchors(Slot.Anchors));
-		Json->SetObjectField(TEXT("Alignment"), SerializeAnchor(Slot.Alignment));
-		Json->SetObjectField(TEXT("Offsets"), SerializeOffsets(Slot.Offsets));
-
-		const bool bHasPadding =
-			!FMath::IsNearlyEqual(Slot.Padding.Left, 0.0f) ||
-			!FMath::IsNearlyEqual(Slot.Padding.Top, 0.0f) ||
-			!FMath::IsNearlyEqual(Slot.Padding.Right, 0.0f) ||
-			!FMath::IsNearlyEqual(Slot.Padding.Bottom, 0.0f);
-		if (bHasPadding)
-		{
-			Json->SetStringField(TEXT("Padding"), FString::Printf(
-				TEXT("%.2f,%.2f,%.2f,%.2f"),
-				Slot.Padding.Left,
-				Slot.Padding.Top,
-				Slot.Padding.Right,
-				Slot.Padding.Bottom));
-		}
-
-		if (Slot.HorizontalAlignment != TEXT("Fill"))
-		{
-			Json->SetStringField(TEXT("HorizontalAlignment"), Slot.HorizontalAlignment);
-		}
-		if (Slot.VerticalAlignment != TEXT("Fill"))
-		{
-			Json->SetStringField(TEXT("VerticalAlignment"), Slot.VerticalAlignment);
-		}
-		if (Slot.SizeRule != TEXT("Auto"))
-		{
-			Json->SetStringField(TEXT("SizeRule"), Slot.SizeRule);
-		}
-		if (!FMath::IsNearlyEqual(Slot.FillWeight, 1.0f))
-		{
-			Json->SetNumberField(TEXT("FillWeight"), Slot.FillWeight);
-		}
-		if (Slot.Row != 0)
-		{
-			Json->SetNumberField(TEXT("Row"), Slot.Row);
-		}
-		if (Slot.Column != 0)
-		{
-			Json->SetNumberField(TEXT("Column"), Slot.Column);
-		}
-		if (Slot.RowSpan != 1)
-		{
-			Json->SetNumberField(TEXT("RowSpan"), Slot.RowSpan);
-		}
-		if (Slot.ColumnSpan != 1)
-		{
-			Json->SetNumberField(TEXT("ColumnSpan"), Slot.ColumnSpan);
-		}
-
-		return Json;
-	}
-
-	TSharedRef<FJsonObject> SerializeBounds(const FBounds& Bounds)
-	{
-		TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
-		Json->SetNumberField(TEXT("X"), Bounds.X);
-		Json->SetNumberField(TEXT("Y"), Bounds.Y);
-		Json->SetNumberField(TEXT("W"), Bounds.W);
-		Json->SetNumberField(TEXT("H"), Bounds.H);
-		return Json;
-	}
-
-	TSharedRef<FJsonObject> SerializeWidgetNode(const FUMGWidgetNode& Node)
-	{
-		TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
-		Json->SetStringField(TEXT("Type"), Node.Type);
-		if (!Node.Id.IsEmpty())
-		{
-			Json->SetStringField(TEXT("Id"), Node.Id);
-		}
-		if (!Node.Name.IsEmpty())
-		{
-			Json->SetStringField(TEXT("Name"), Node.Name);
-		}
-
-		const bool bHasBounds =
-			!FMath::IsNearlyZero(Node.Bounds.X) ||
-			!FMath::IsNearlyZero(Node.Bounds.Y) ||
-			!FMath::IsNearlyZero(Node.Bounds.W) ||
-			!FMath::IsNearlyZero(Node.Bounds.H);
-		if (bHasBounds)
-		{
-			Json->SetObjectField(TEXT("Bounds"), SerializeBounds(Node.Bounds));
-		}
-
-		Json->SetObjectField(TEXT("Slot"), SerializeSlot(Node.Slot));
-
-		if (Node.Properties.Num() > 0)
-		{
-			TSharedRef<FJsonObject> Props = MakeShared<FJsonObject>();
-			for (const TPair<FString, FString>& Pair : Node.Properties)
-			{
-				Props->SetStringField(Pair.Key, Pair.Value);
-			}
-			Json->SetObjectField(TEXT("Properties"), Props);
-		}
-
-		if (Node.Children.Num() > 0)
-		{
-			TArray<TSharedPtr<FJsonValue>> ChildArray;
-			ChildArray.Reserve(Node.Children.Num());
-			for (const FUMGWidgetNode& Child : Node.Children)
-			{
-				ChildArray.Add(MakeShared<FJsonValueObject>(SerializeWidgetNode(Child)));
-			}
-			Json->SetArrayField(TEXT("Children"), ChildArray);
-		}
-
-		return Json;
-	}
-
-	FString SerializeWidgetDataToJson(const FUMGWidgetData& Data)
-	{
-		TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
-		Root->SetStringField(TEXT("WidgetName"), Data.WidgetName);
-		Root->SetObjectField(TEXT("RootWidget"), SerializeWidgetNode(Data.RootWidget));
-
-		FString Output;
-		TSharedRef<TJsonWriter<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>> Writer =
-			TJsonWriterFactory<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>::Create(&Output);
-		FJsonSerializer::Serialize(Root, Writer);
-		return Output;
-	}
 
 	bool GenerateWidgetAndPreviewPng(const FUMGWidgetData& Data, const FString& OutputPath)
 	{
@@ -291,7 +140,7 @@ namespace
 			return false;
 		}
 
-		const FString JsonPayload = SerializeWidgetDataToJson(Data);
+		const FString JsonPayload = FUMGJsonSerializer::Serialize(Data);
 		const FString InitialOutputPath = OutputPath.IsEmpty() ? FString(DefaultPenOutputPath) : OutputPath;
 
 		TSharedRef<SWindow> PreviewWindow = SNew(SWindow)
@@ -320,35 +169,128 @@ namespace
 		return true;
 	}
 
-	/** 导入 .pen 文件（工具栏 + 控制台命令共用） */
-	void ImportPenFile(const FString& FilePath, const FString& OutputPath, bool bUsePreview = true)
+	/** 导入指定 TargetNodeId 的 frame */
+	void ImportPenFileWithTargetNode(const FString& FilePath, const FString& TargetNodeId, const FString& OutputPath, bool bUsePreview)
 	{
 		FUMGWidgetData Data;
-		FString JsonStr;
-		if (!FFileHelper::LoadFileToString(JsonStr, *FilePath))
-		{
-			UE_LOG(LogPenToUMG, Error, TEXT("PenToUMG.Import: Failed to read file: %s"), *FilePath);
+		if (!FPenImporter::ImportFileWithTargetNode(FilePath, TargetNodeId, Data))
 			return;
-		}
-		if (!FDesignSourceRegistry::Convert(TEXT("Pen"), JsonStr, Data))
-		{
-			UE_LOG(LogPenToUMG, Error, TEXT("PenToUMG.Import: Convert failed: %s"), *FilePath);
-			return;
-		}
 
 		FString RemoteImageReport;
 		FPenRemoteImageImporter::ResolveRemoteImages(Data, &RemoteImageReport);
 		if (!RemoteImageReport.IsEmpty())
-		{
 			UE_LOG(LogPenToUMG, Log, TEXT("%s"), *RemoteImageReport);
-		}
 
 		if (bUsePreview && TryOpenPreviewWindow(Data, OutputPath))
+			return;
+
+		GenerateWidgetAndPreviewPng(Data, OutputPath);
+	}
+
+	/** 导入 .pen 文件（工具栏 + 控制台命令共用） */
+	void ImportPenFile(const FString& FilePath, const FString& OutputPath, bool bUsePreview = true)
+	{
+		// 先解析文档，检查顶层 frame 数量
+		FPenDocument Document;
+		if (!FPenParser::ParseFromFile(FilePath, Document))
 		{
+			UE_LOG(LogPenToUMG, Error, TEXT("PenToUMG.Import: Failed to parse %s"), *FilePath);
 			return;
 		}
 
-		GenerateWidgetAndPreviewPng(Data, OutputPath);
+		TArray<FPenFrameInfo> Frames = ExtractTopFrames(Document);
+		if (Frames.Num() == 0)
+		{
+			UE_LOG(LogPenToUMG, Error, TEXT("PenToUMG.Import: No frames found in %s"), *FilePath);
+			return;
+		}
+
+		if (Frames.Num() == 1)
+		{
+			// 单 frame 快速路径
+			FUMGWidgetData Data;
+			FString JsonStr;
+			if (!FFileHelper::LoadFileToString(JsonStr, *FilePath))
+			{
+				UE_LOG(LogPenToUMG, Error, TEXT("PenToUMG.Import: Failed to read file: %s"), *FilePath);
+				return;
+			}
+			if (!FDesignSourceRegistry::Convert(TEXT("Pen"), JsonStr, Data))
+			{
+				UE_LOG(LogPenToUMG, Error, TEXT("PenToUMG.Import: Convert failed: %s"), *FilePath);
+				return;
+			}
+
+			FString RemoteImageReport;
+			FPenRemoteImageImporter::ResolveRemoteImages(Data, &RemoteImageReport);
+			if (!RemoteImageReport.IsEmpty())
+				UE_LOG(LogPenToUMG, Log, TEXT("%s"), *RemoteImageReport);
+
+			if (bUsePreview && TryOpenPreviewWindow(Data, OutputPath))
+				return;
+
+			GenerateWidgetAndPreviewPng(Data, OutputPath);
+			return;
+		}
+
+		// 多 frame → 弹出选择器
+		if (!FSlateApplication::IsInitialized())
+			return;
+
+		TSharedPtr<TArray<TSharedPtr<FPenFrameInfo>>> Items = MakeShared<TArray<TSharedPtr<FPenFrameInfo>>>();
+		for (const FPenFrameInfo& F : Frames)
+			Items->Add(MakeShared<FPenFrameInfo>(F));
+
+		TSharedRef<SWindow> Window = SNew(SWindow)
+			.Title(LOCTEXT("FrameSelectorTitle", "Select Frame to Import"))
+			.ClientSize(FVector2D(420.0f, 360.0f))
+			.SupportsMinimize(false)
+			.SupportsMaximize(false);
+
+		FString CapturedFilePath = FilePath;
+		FString CapturedOutputPath = OutputPath;
+		bool bCapturedPreview = bUsePreview;
+		TWeakPtr<SWindow> WeakWindow = Window;
+
+		Window->SetContent(
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(8.0f)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("FrameSelectorHint", "This file contains multiple frames. Double-click to import:"))
+			]
+			+ SVerticalBox::Slot()
+			.FillHeight(1.0f)
+			.Padding(8.0f)
+			[
+				SNew(SListView<TSharedPtr<FPenFrameInfo>>)
+				.ListItemsSource(Items.Get())
+				.OnGenerateRow_Lambda([Items](TSharedPtr<FPenFrameInfo> Item, const TSharedRef<STableViewBase>& OwnerTable)
+				{
+					return SNew(STableRow<TSharedPtr<FPenFrameInfo>>, OwnerTable)
+						.Padding(FMargin(4.0f, 2.0f))
+						[
+							SNew(STextBlock)
+							.Text(FText::FromString(FString::Printf(
+								TEXT("%s  (%.0f x %.0f)"),
+								*Item->Name, Item->Width, Item->Height)))
+						];
+				})
+				.OnMouseButtonDoubleClick_Lambda([CapturedFilePath, CapturedOutputPath, bCapturedPreview, WeakWindow](TSharedPtr<FPenFrameInfo> Item)
+				{
+					if (Item.IsValid())
+					{
+						ImportPenFileWithTargetNode(CapturedFilePath, Item->Id, CapturedOutputPath, bCapturedPreview);
+						if (TSharedPtr<SWindow> Win = WeakWindow.Pin())
+							Win->RequestDestroyWindow();
+					}
+				})
+			]
+		);
+
+		FSlateApplication::Get().AddWindow(Window);
 	}
 
 	/** 打开文件对话框选择 .pen 文件并导入 */
