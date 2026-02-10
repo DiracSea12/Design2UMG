@@ -13,6 +13,7 @@
 #include "PenImporter.h"
 #include "DesignSourceRegistry.h"
 #include "UMGJsonSerializer.h"
+#include "PencilConnector.h"
 
 #include "WidgetBlueprint.h"
 #include "Dom/JsonObject.h"
@@ -37,6 +38,9 @@ DEFINE_LOG_CATEGORY(LogPenToUMG);
 namespace
 {
 	const TCHAR* DefaultPenOutputPath = TEXT("/Game/PenToUMG/PenConvert_Output");
+
+	/** 模块级 Pencil MCP 连接器 */
+	TUniquePtr<FPencilConnector> GConnector;
 
 	struct FPenConvertCommandArgs
 	{
@@ -167,6 +171,194 @@ namespace
 
 		FSlateApplication::Get().AddWindow(PreviewWindow);
 		return true;
+	}
+
+	/** 从 MCP 数据执行转换 + 预览/生成 */
+	void ProcessMCPData(const FString& NodesJson, const FString& VarsJson, const FString& TargetNodeId, const FString& OutputPath)
+	{
+		FUMGWidgetData Data;
+		if (!FPenMCPBridge::ConvertFromMCP(NodesJson, VarsJson, Data, TargetNodeId))
+		{
+			UE_LOG(LogPenToUMG, Error, TEXT("ConnectToPencil: ConvertFromMCP failed"));
+			return;
+		}
+
+		FString RemoteImageReport;
+		FPenRemoteImageImporter::ResolveRemoteImages(Data, &RemoteImageReport);
+		if (!RemoteImageReport.IsEmpty())
+			UE_LOG(LogPenToUMG, Log, TEXT("%s"), *RemoteImageReport);
+
+		if (TryOpenPreviewWindow(Data, OutputPath))
+			return;
+
+		GenerateWidgetAndPreviewPng(Data, OutputPath);
+	}
+
+	/** 从 batch_get 结果中提取 frame 信息列表 */
+	TArray<FPenFrameInfo> ExtractFramesFromMCPResult(const FString& NodesJson)
+	{
+		TArray<FPenFrameInfo> Result;
+
+		TArray<TSharedPtr<FJsonValue>> Arr;
+		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(NodesJson);
+		if (!FJsonSerializer::Deserialize(Reader, Arr))
+			return Result;
+
+		for (const auto& Val : Arr)
+		{
+			const TSharedPtr<FJsonObject>& Obj = Val->AsObject();
+			if (!Obj.IsValid())
+				continue;
+
+			FPenFrameInfo Info;
+			Obj->TryGetStringField(TEXT("id"), Info.Id);
+			Obj->TryGetStringField(TEXT("name"), Info.Name);
+			if (Info.Name.IsEmpty())
+				Info.Name = Info.Id;
+
+			Info.Width = 0.0f;
+			Info.Height = 0.0f;
+			double W = 0, H = 0;
+			Obj->TryGetNumberField(TEXT("width"), W);
+			Obj->TryGetNumberField(TEXT("height"), H);
+			Info.Width = static_cast<float>(W);
+			Info.Height = static_cast<float>(H);
+
+			Result.Add(MoveTemp(Info));
+		}
+		return Result;
+	}
+
+	/** Connect to Pencil 主流程 */
+	void ConnectToPencilAndImport()
+	{
+		// 防止 Slate Tick 期间用户重复触发
+		static bool bInProgress = false;
+		if (bInProgress)
+			return;
+		TGuardValue<bool> Guard(bInProgress, true);
+
+		// 1. 启动 / 复用连接
+		if (!GConnector)
+			GConnector = MakeUnique<FPencilConnector>();
+
+		if (!GConnector->IsRunning())
+		{
+			if (!GConnector->Launch())
+			{
+				UE_LOG(LogPenToUMG, Error, TEXT("ConnectToPencil: Failed to launch MCP Server"));
+				return;
+			}
+		}
+
+		FMCPHttpClient& Client = GConnector->GetClient();
+
+		// 2. batch_get: 获取顶层 frame 列表
+		TSharedPtr<FJsonObject> BatchArgs = MakeShared<FJsonObject>();
+		BatchArgs->SetStringField(TEXT("filePath"), TEXT(""));
+
+		TArray<TSharedPtr<FJsonValue>> Patterns;
+		TSharedPtr<FJsonObject> Pattern = MakeShared<FJsonObject>();
+		Pattern->SetStringField(TEXT("type"), TEXT("frame"));
+		Patterns.Add(MakeShared<FJsonValueObject>(Pattern));
+		BatchArgs->SetArrayField(TEXT("patterns"), Patterns);
+		BatchArgs->SetNumberField(TEXT("searchDepth"), 1);
+		BatchArgs->SetNumberField(TEXT("readDepth"), 99);
+
+		FString NodesJson;
+		if (!Client.CallTool(TEXT("batch_get"), BatchArgs, NodesJson))
+		{
+			UE_LOG(LogPenToUMG, Error, TEXT("ConnectToPencil: batch_get failed"));
+			return;
+		}
+
+		// 3. get_variables: 获取变量/主题
+		TSharedPtr<FJsonObject> VarsArgs = MakeShared<FJsonObject>();
+		VarsArgs->SetStringField(TEXT("filePath"), TEXT(""));
+
+		FString VarsJson;
+		if (!Client.CallTool(TEXT("get_variables"), VarsArgs, VarsJson))
+		{
+			UE_LOG(LogPenToUMG, Warning, TEXT("ConnectToPencil: get_variables failed, using empty"));
+			VarsJson = TEXT("{}");
+		}
+
+		// 4. 解析 frame 列表
+		TArray<FPenFrameInfo> Frames = ExtractFramesFromMCPResult(NodesJson);
+		if (Frames.Num() == 0)
+		{
+			UE_LOG(LogPenToUMG, Error, TEXT("ConnectToPencil: No frames found in Pencil document"));
+			return;
+		}
+
+		const FString OutputPath = DefaultPenOutputPath;
+
+		if (Frames.Num() == 1)
+		{
+			ProcessMCPData(NodesJson, VarsJson, TEXT(""), OutputPath);
+			return;
+		}
+
+		// 5. 多 frame → 弹出选择器
+		if (!FSlateApplication::IsInitialized())
+			return;
+
+		TSharedPtr<TArray<TSharedPtr<FPenFrameInfo>>> Items = MakeShared<TArray<TSharedPtr<FPenFrameInfo>>>();
+		for (const FPenFrameInfo& F : Frames)
+			Items->Add(MakeShared<FPenFrameInfo>(F));
+
+		// 捕获 MCP 数据供选择器回调使用
+		FString CapturedNodes = NodesJson;
+		FString CapturedVars = VarsJson;
+		FString CapturedOutput = OutputPath;
+
+		TSharedRef<SWindow> Window = SNew(SWindow)
+			.Title(LOCTEXT("PencilFrameSelectorTitle", "Select Frame from Pencil"))
+			.ClientSize(FVector2D(420.0f, 360.0f))
+			.SupportsMinimize(false)
+			.SupportsMaximize(false);
+
+		TWeakPtr<SWindow> WeakWindow = Window;
+
+		Window->SetContent(
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(8.0f)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("PencilFrameSelectorHint", "Multiple frames found. Double-click to import:"))
+			]
+			+ SVerticalBox::Slot()
+			.FillHeight(1.0f)
+			.Padding(8.0f)
+			[
+				SNew(SListView<TSharedPtr<FPenFrameInfo>>)
+				.ListItemsSource(Items.Get())
+				.OnGenerateRow_Lambda([Items](TSharedPtr<FPenFrameInfo> Item, const TSharedRef<STableViewBase>& OwnerTable)
+				{
+					return SNew(STableRow<TSharedPtr<FPenFrameInfo>>, OwnerTable)
+						.Padding(FMargin(4.0f, 2.0f))
+						[
+							SNew(STextBlock)
+							.Text(FText::FromString(FString::Printf(
+								TEXT("%s  (%.0f x %.0f)"),
+								*Item->Name, Item->Width, Item->Height)))
+						];
+				})
+				.OnMouseButtonDoubleClick_Lambda([CapturedNodes, CapturedVars, CapturedOutput, WeakWindow](TSharedPtr<FPenFrameInfo> Item)
+				{
+					if (Item.IsValid())
+					{
+						ProcessMCPData(CapturedNodes, CapturedVars, Item->Id, CapturedOutput);
+						if (TSharedPtr<SWindow> Win = WeakWindow.Pin())
+							Win->RequestDestroyWindow();
+					}
+				})
+			]
+		);
+
+		FSlateApplication::Get().AddWindow(Window);
 	}
 
 	/** 导入指定 TargetNodeId 的 frame */
@@ -511,7 +703,7 @@ void FPenToUMGEditorModule::StartupModule()
 			FSlateIcon(),
 			FUIAction(FExecuteAction::CreateLambda([]()
 			{
-				UE_LOG(LogPenToUMG, Log, TEXT("Connect to Pencil: Not yet implemented (Path B)"));
+				ConnectToPencilAndImport();
 			})));
 	}));
 
@@ -519,6 +711,13 @@ void FPenToUMGEditorModule::StartupModule()
 
 void FPenToUMGEditorModule::ShutdownModule()
 {
+	// 关闭 Pencil MCP 连接
+	if (GConnector)
+	{
+		GConnector->Shutdown();
+		GConnector.Reset();
+	}
+
 	UToolMenus::UnRegisterStartupCallback(ToolMenusStartupHandle);
 	UToolMenus::UnregisterOwner(this);
 	IConsoleManager::Get().UnregisterConsoleObject(TEXT("PenToUMG.Import"), false);

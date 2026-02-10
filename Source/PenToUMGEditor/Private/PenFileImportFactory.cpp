@@ -32,8 +32,8 @@ namespace PenImportInternal
 {
 	static const TCHAR* DefaultOutputPath = TEXT("/Game/PenToUMG/PenConvert_Output");
 
-	/** 执行导入（单 frame 快速路径） */
-	static void ImportSingleFrame(const FString& FilePath, const FString& OutputPath);
+	/** 执行导入（单 frame 快速路径），返回生成的 Blueprint（预览模式返回 nullptr） */
+	static UWidgetBlueprint* ImportSingleFrame(const FString& FilePath, const FString& OutputPath);
 
 	/** 执行导入（多 frame 选择路径） */
 	static void ImportWithTargetNode(const FString& FilePath, const FString& TargetNodeId, const FString& OutputPath);
@@ -41,8 +41,8 @@ namespace PenImportInternal
 	/** 打开预览窗口 */
 	static bool OpenPreview(const FUMGWidgetData& Data, const FString& OutputPath);
 
-	/** 生成 Widget Blueprint + 渲染 PNG */
-	static void GenerateAndRender(const FUMGWidgetData& Data, const FString& OutputPath);
+	/** 生成 Widget Blueprint，返回生成的对象 */
+	static UWidgetBlueprint* GenerateAndRender(const FUMGWidgetData& Data, const FString& OutputPath);
 
 	/** 从编辑后的 JSON 生成 */
 	static void RunGenerateFromJson(const FString& EditedJson, const FString& OutputPath);
@@ -93,17 +93,19 @@ UObject* UPenFileImportFactory::FactoryCreateFile(
 
 	if (Frames.Num() == 1)
 	{
-		// 单 frame 快速路径
-		PenImportInternal::ImportSingleFrame(Filename, OutputPath);
-	}
-	else
-	{
-		// 多 frame → 弹出选择器
-		PenImportInternal::ShowFrameSelector(Filename, Frames, OutputPath);
+		// 单 frame 快速路径：无预览时同步返回生成的 Blueprint
+		UWidgetBlueprint* Result = PenImportInternal::ImportSingleFrame(Filename, OutputPath);
+		if (Result)
+			return Result;
+
+		// 返回 nullptr 说明预览窗口已打开，异步生成
+		bOutOperationCanceled = true;
+		return nullptr;
 	}
 
-	// UFactory 返回 nullptr，实际生成在预览确认后异步完成
-	bOutOperationCanceled = false;
+	// 多 frame → 弹出选择器，异步生成
+	PenImportInternal::ShowFrameSelector(Filename, Frames, OutputPath);
+	bOutOperationCanceled = true;
 	return nullptr;
 }
 
@@ -112,19 +114,19 @@ UObject* UPenFileImportFactory::FactoryCreateFile(
 namespace PenImportInternal
 {
 
-void ImportSingleFrame(const FString& FilePath, const FString& OutputPath)
+UWidgetBlueprint* ImportSingleFrame(const FString& FilePath, const FString& OutputPath)
 {
 	FUMGWidgetData Data;
 	FString JsonStr;
 	if (!FFileHelper::LoadFileToString(JsonStr, *FilePath))
 	{
 		UE_LOG(LogPenToUMG, Error, TEXT("PenFileImport: Failed to read file: %s"), *FilePath);
-		return;
+		return nullptr;
 	}
 	if (!FDesignSourceRegistry::Convert(TEXT("Pen"), JsonStr, Data))
 	{
 		UE_LOG(LogPenToUMG, Error, TEXT("PenFileImport: Convert failed: %s"), *FilePath);
-		return;
+		return nullptr;
 	}
 
 	FString RemoteImageReport;
@@ -136,8 +138,11 @@ void ImportSingleFrame(const FString& FilePath, const FString& OutputPath)
 
 	if (!OpenPreview(Data, OutputPath))
 	{
-		GenerateAndRender(Data, OutputPath);
+		return GenerateAndRender(Data, OutputPath);
 	}
+
+	// 预览窗口已打开，生成将在用户确认后异步完成
+	return nullptr;
 }
 
 void ImportWithTargetNode(const FString& FilePath, const FString& TargetNodeId, const FString& OutputPath)
@@ -175,16 +180,17 @@ void RunGenerateFromJson(const FString& EditedJson, const FString& OutputPath)
 	GenerateAndRender(EditedData, OutputPath);
 }
 
-void GenerateAndRender(const FUMGWidgetData& Data, const FString& OutputPath)
+UWidgetBlueprint* GenerateAndRender(const FUMGWidgetData& Data, const FString& OutputPath)
 {
 	const FString FinalPath = OutputPath.IsEmpty() ? FString(DefaultOutputPath) : OutputPath;
 	UWidgetBlueprint* WBP = FUMGGenerator::GenerateWidgetBlueprint(Data, FinalPath);
 	if (!WBP)
 	{
 		UE_LOG(LogPenToUMG, Error, TEXT("PenFileImport: Widget Blueprint generation failed"));
-		return;
+		return nullptr;
 	}
 	UE_LOG(LogPenToUMG, Log, TEXT("PenFileImport: Generated %s"), *WBP->GetPathName());
+	return WBP;
 }
 
 // ── OpenPreview ──

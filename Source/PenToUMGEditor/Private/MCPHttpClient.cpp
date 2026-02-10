@@ -10,6 +10,7 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "Framework/Application/SlateApplication.h"
 
 bool FMCPHttpClient::Connect(const FString& Endpoint)
 {
@@ -122,7 +123,7 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 
 	HttpRequest->ProcessRequest();
 
-	// 阻塞等待（Game Thread tick）
+	// 阻塞等待，同时 tick Slate 保持编辑器 UI 响应
 	const double StartTime = FPlatformTime::Seconds();
 	const double Timeout = 30.0;
 	while (!bCompleted)
@@ -134,6 +135,11 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 			return false;
 		}
 		FHttpModule::Get().GetHttpManager().Tick(0.01f);
+		if (FSlateApplication::IsInitialized())
+		{
+			FSlateApplication::Get().PumpMessages();
+			FSlateApplication::Get().Tick();
+		}
 		FPlatformProcess::Sleep(0.01f);
 	}
 

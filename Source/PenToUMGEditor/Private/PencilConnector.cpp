@@ -146,21 +146,39 @@ bool FPencilConnector::Launch(int32 Port)
 		return false;
 	}
 
-	// 等待服务器就绪后连接
-	FPlatformProcess::Sleep(1.0f);
-
 	const FString Endpoint = FString::Printf(
 		TEXT("http://localhost:%d/mcp"), ServerPort);
 
-	if (!Client.Connect(Endpoint))
+	// 轮询等待服务器就绪，每 200ms 尝试一次，最多 10 秒
+	constexpr float PollInterval = 0.2f;
+	constexpr float MaxWait = 10.0f;
+	float Elapsed = 0.0f;
+
+	while (Elapsed < MaxWait)
 	{
-		UE_LOG(LogPenToUMG, Error,
-			TEXT("PencilConnector: Failed to connect to %s"), *Endpoint);
-		Shutdown();
-		return false;
+		if (!FPlatformProcess::IsProcRunning(ServerProcess))
+		{
+			UE_LOG(LogPenToUMG, Error,
+				TEXT("PencilConnector: MCP Server process exited prematurely"));
+			Shutdown();
+			return false;
+		}
+
+		if (Client.Connect(Endpoint))
+		{
+			UE_LOG(LogPenToUMG, Log,
+				TEXT("PencilConnector: Connected after %.1fs"), Elapsed);
+			return true;
+		}
+
+		FPlatformProcess::Sleep(PollInterval);
+		Elapsed += PollInterval;
 	}
 
-	return true;
+	UE_LOG(LogPenToUMG, Error,
+		TEXT("PencilConnector: Timed out waiting for %s (%.0fs)"), *Endpoint, MaxWait);
+	Shutdown();
+	return false;
 }
 
 void FPencilConnector::Shutdown()

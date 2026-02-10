@@ -474,8 +474,8 @@ void FLayoutFixer::FixWidgetTree(
 	FFixerStats LocalStats;
 	FFixerStats& Stats = OutStats ? *OutStats : LocalStats;
 
-	float SnapThresholdX = (float)Preset.SnapPx / (float)Preset.DesignSize.X;
-	float SnapThresholdY = (float)Preset.SnapPx / (float)Preset.DesignSize.Y;
+	float SnapThresholdX = (Preset.DesignSize.X > 0) ? (float)Preset.SnapPx / (float)Preset.DesignSize.X : 0.0f;
+	float SnapThresholdY = (Preset.DesignSize.Y > 0) ? (float)Preset.SnapPx / (float)Preset.DesignSize.Y : 0.0f;
 
 	FBounds RootParent = {0.0f, 0.0f, 1.0f, 1.0f};
 	ProcessNode(Root, RootParent, Preset, SnapThresholdX, SnapThresholdY, OutLog, Stats);

@@ -177,7 +177,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateGradientH(int32 Width, int32 Heig
 	{
 		for (int32 X = 0; X < Width; ++X)
 		{
-			float T = static_cast<float>(X) / (Width - 1);
+			float T = (Width > 1) ? static_cast<float>(X) / (Width - 1) : 0.0f;
 			FLinearColor Blended = FMath::Lerp(ColorStart, ColorEnd, T);
 			Pixels[Y * Width + X] = Blended.ToFColor(true);
 		}
@@ -197,7 +197,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateGradientV(int32 Width, int32 Heig
 
 	for (int32 Y = 0; Y < Height; ++Y)
 	{
-		float T = static_cast<float>(Y) / (Height - 1);
+		float T = (Height > 1) ? static_cast<float>(Y) / (Height - 1) : 0.0f;
 		FLinearColor Blended = FMath::Lerp(ColorStart, ColorEnd, T);
 		FColor RowColor = Blended.ToFColor(true);
 
@@ -227,7 +227,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateRadialGradient(int32 Size, FLinea
 		for (int32 X = 0; X < Size; ++X)
 		{
 			float Dist = FMath::Sqrt(FMath::Square(X - Center) + FMath::Square(Y - Center));
-			float T = FMath::Clamp(Dist / MaxDist, 0.0f, 1.0f);
+			float T = (MaxDist > 0.0f) ? FMath::Clamp(Dist / MaxDist, 0.0f, 1.0f) : 0.0f;
 			FLinearColor Blended = FMath::Lerp(ColorCenter, ColorEdge, T);
 			Pixels[Y * Size + X] = Blended.ToFColor(true);
 		}
