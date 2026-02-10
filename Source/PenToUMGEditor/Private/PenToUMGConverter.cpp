@@ -2,6 +2,7 @@
 
 #include "PenToUMGConverter.h"
 #include "PenTypeMapper.h"
+#include "PenToUMGLog.h"
 
 namespace
 {
@@ -153,6 +154,22 @@ FUMGWidgetNode FPenToUMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Node,
 	case EPenNodeType::Group:
 		Widget = CreateContainerWidget(Node);
 		break;
+	case EPenNodeType::Ellipse:
+		Widget = CreateContainerWidget(Node);
+		UE_LOG(LogPenToUMG, Warning, TEXT("PenToUMG: Ellipse '%s' mapped to Border (UMG has no ellipse widget)"), *Node->Name);
+		break;
+	case EPenNodeType::Polygon:
+		Widget = CreateContainerWidget(Node);
+		UE_LOG(LogPenToUMG, Warning, TEXT("PenToUMG: Polygon '%s' mapped to Border (UMG has no polygon widget)"), *Node->Name);
+		break;
+	case EPenNodeType::Path:
+		Widget = CreateContainerWidget(Node);
+		UE_LOG(LogPenToUMG, Warning, TEXT("PenToUMG: Path '%s' mapped to Border (UMG has no SVG path widget)"), *Node->Name);
+		break;
+	case EPenNodeType::Line:
+		Widget = CreateContainerWidget(Node);
+		UE_LOG(LogPenToUMG, Warning, TEXT("PenToUMG: Line '%s' mapped to Border (UMG has no line widget)"), *Node->Name);
+		break;
 	default:
 		Widget = CreateContainerWidget(Node);
 		break;
@@ -207,10 +224,18 @@ FUMGWidgetNode FPenToUMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Node,
 		&& (bHasVisualFill || HasPadding(Node) || bHasCornerRadius || Node->Stroke.HasStroke());
 
 	if (bNeedsBorder)
-		return WrapWithBorder(MoveTemp(Widget), Node);
-
-	if (HasPadding(Node))
+		Widget = WrapWithBorder(MoveTemp(Widget), Node);
+	else if (HasPadding(Node))
 		ApplyPadding(Widget, Node->Padding);
+
+	// BackgroundBlur Effect → 用 BackgroundBlur widget 包裹
+	for (const FPenEffect& Effect : Node->Effects)
+	{
+		if (Effect.bEnabled && Effect.Type == EPenEffectType::BackgroundBlur && Effect.Radius > 0)
+		{
+			return WrapWithBackgroundBlur(MoveTemp(Widget), Effect.Radius);
+		}
+	}
 
 	return Widget;
 }
@@ -364,6 +389,41 @@ void FPenToUMGConverter::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSh
 	// clip → Clipping
 	if (Node->bClip)
 		Widget.Properties.Add(TEXT("Clipping"), TEXT("ClipToBounds"));
+
+	// Effects 处理
+	for (const FPenEffect& Effect : Node->Effects)
+	{
+		if (!Effect.bEnabled)
+			continue;
+
+		switch (Effect.Type)
+		{
+		case EPenEffectType::Blur:
+			UE_LOG(LogPenToUMG, Warning,
+				TEXT("PenToUMG: Blur effect on '%s' ignored (UMG has no foreground blur widget)"),
+				*Node->Name);
+			break;
+		case EPenEffectType::Shadow:
+			if (Node->Type == EPenNodeType::Text)
+			{
+				Widget.Properties.Add(TEXT("ShadowOffset"),
+					FString::Printf(TEXT("%.1f,%.1f"),
+						Effect.Shadow.OffsetX, Effect.Shadow.OffsetY));
+				if (!Effect.Shadow.Color.IsEmpty())
+					Widget.Properties.Add(TEXT("ShadowColorAndOpacity"),
+						Effect.Shadow.Color);
+			}
+			else
+			{
+				UE_LOG(LogPenToUMG, Warning,
+					TEXT("PenToUMG: Shadow effect on '%s' ignored (UMG only supports text shadows)"),
+					*Node->Name);
+			}
+			break;
+		default:
+			break;
+		}
+	}
 }
 
 TSharedPtr<FPenNode> FPenToUMGConverter::ExpandRef(const TSharedPtr<FPenNode>& RefNode, const FPenDocument& Doc)
@@ -662,4 +722,23 @@ FUMGWidgetNode FPenToUMGConverter::WrapWithBorder(FUMGWidgetNode&& Widget, const
 
 	Border.Children.Add(MoveTemp(Widget));
 	return Border;
+}
+
+FUMGWidgetNode FPenToUMGConverter::WrapWithBackgroundBlur(FUMGWidgetNode&& Widget, float BlurStrength)
+{
+	FUMGWidgetNode Blur;
+	Blur.Type = TEXT("BackgroundBlur");
+	Blur.Id = Widget.Id + TEXT("_blur");
+	Blur.Name = Widget.Name + TEXT("_blur");
+	Blur.Bounds = Widget.Bounds;
+	Blur.Slot = Widget.Slot;
+	Blur.Properties.Add(TEXT("BlurStrength"), FString::SanitizeFloat(BlurStrength));
+
+	Widget.Bounds = FBounds();
+	Widget.Slot = FUMGSlotData();
+	Widget.Slot.HorizontalAlignment = TEXT("Fill");
+	Widget.Slot.VerticalAlignment = TEXT("Fill");
+
+	Blur.Children.Add(MoveTemp(Widget));
+	return Blur;
 }

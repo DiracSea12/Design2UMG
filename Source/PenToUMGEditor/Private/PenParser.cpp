@@ -261,6 +261,71 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 	JsonObj->TryGetStringField(TEXT("geometry"), Node->Geometry);
 	JsonObj->TryGetStringField(TEXT("fillRule"), Node->FillRule);
 
+	// 特效 - 兼容 "effect"(schema) 和 "effects"(旧格式)
+	const FString EffectKey = JsonObj->HasField(TEXT("effect")) ? TEXT("effect") : TEXT("effects");
+	if (JsonObj->HasField(EffectKey))
+	{
+		TArray<TSharedPtr<FJsonValue>> EffectsArr;
+		const TSharedPtr<FJsonValue>& EffectField = JsonObj->TryGetField(EffectKey);
+		if (EffectField->Type == EJson::Array)
+			EffectsArr = EffectField->AsArray();
+		else if (EffectField->Type == EJson::Object)
+			EffectsArr.Add(EffectField);
+		for (const auto& EffectVal : EffectsArr)
+		{
+			const TSharedPtr<FJsonObject>& EffectObj = EffectVal->AsObject();
+			if (!EffectObj.IsValid())
+				continue;
+
+			FPenEffect Effect;
+			if (EffectObj->HasField(TEXT("enabled")))
+				Effect.bEnabled = EffectObj->GetBoolField(TEXT("enabled"));
+
+			FString TypeStr;
+			EffectObj->TryGetStringField(TEXT("type"), TypeStr);
+			if (TypeStr == TEXT("blur"))
+				Effect.Type = EPenEffectType::Blur;
+			else if (TypeStr == TEXT("background_blur"))
+				Effect.Type = EPenEffectType::BackgroundBlur;
+			else if (TypeStr == TEXT("shadow"))
+				Effect.Type = EPenEffectType::Shadow;
+
+			EffectObj->TryGetNumberField(TEXT("radius"), Effect.Radius);
+
+			if (Effect.Type == EPenEffectType::Shadow)
+			{
+				// shadowType: "inner"|"outer" (schema 格式)
+				FString ShadowTypeStr;
+				if (EffectObj->TryGetStringField(TEXT("shadowType"), ShadowTypeStr))
+					Effect.Shadow.bInner = (ShadowTypeStr == TEXT("inner"));
+				else
+					EffectObj->TryGetBoolField(TEXT("inner"), Effect.Shadow.bInner);
+
+				// offset: {x, y} (schema 格式) 或 offsetX/offsetY (旧格式)
+				if (EffectObj->HasField(TEXT("offset")))
+				{
+					const TSharedPtr<FJsonObject>& OffsetObj = EffectObj->GetObjectField(TEXT("offset"));
+					OffsetObj->TryGetNumberField(TEXT("x"), Effect.Shadow.OffsetX);
+					OffsetObj->TryGetNumberField(TEXT("y"), Effect.Shadow.OffsetY);
+				}
+				else
+				{
+					EffectObj->TryGetNumberField(TEXT("offsetX"), Effect.Shadow.OffsetX);
+					EffectObj->TryGetNumberField(TEXT("offsetY"), Effect.Shadow.OffsetY);
+				}
+
+				EffectObj->TryGetNumberField(TEXT("blur"), Effect.Shadow.Blur);
+				EffectObj->TryGetNumberField(TEXT("spread"), Effect.Shadow.Spread);
+				Effect.Shadow.Color = Resolver.ResolveColor(
+					EffectObj->HasField(TEXT("color"))
+					? EffectObj->GetStringField(TEXT("color"))
+					: TEXT("#00000040"));
+			}
+
+			Node->Effects.Add(MoveTemp(Effect));
+		}
+	}
+
 	// 组件引用属性
 	JsonObj->TryGetStringField(TEXT("ref"), Node->Ref);
 	JsonObj->TryGetBoolField(TEXT("reusable"), Node->bReusable);

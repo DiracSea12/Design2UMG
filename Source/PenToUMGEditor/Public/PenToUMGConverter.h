@@ -72,4 +72,7 @@ private:
 
 	/** 应用 descendants 覆盖 */
 	static void ApplyDescendantOverride(TSharedPtr<FPenNode>& Node, const FString& Path, const TSharedPtr<FPenNode>& Override);
+
+	/** BackgroundBlur Effect 包裹 */
+	static FUMGWidgetNode WrapWithBackgroundBlur(FUMGWidgetNode&& Widget, float BlurStrength);
 };

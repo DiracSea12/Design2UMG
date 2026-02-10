@@ -11,6 +11,7 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Misc/ScopedSlowTask.h"
 
 bool FMCPHttpClient::Connect(const FString& Endpoint)
 {
@@ -123,11 +124,23 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 
 	HttpRequest->ProcessRequest();
 
-	// 阻塞等待，同时 tick Slate 保持编辑器 UI 响应
+	// 阻塞等待，同时显示进度条并 tick Slate 保持编辑器 UI 响应
 	const double StartTime = FPlatformTime::Seconds();
 	const double Timeout = 30.0;
+	const float TotalSteps = static_cast<float>(Timeout / 0.01);
+
+	FScopedSlowTask SlowTask(TotalSteps,
+		FText::FromString(FString::Printf(TEXT("PenToUMG: Waiting for MCP response (%s)..."), *Method)));
+	SlowTask.MakeDialog(true);
+
 	while (!bCompleted)
 	{
+		if (SlowTask.ShouldCancel())
+		{
+			UE_LOG(LogPenToUMG, Warning, TEXT("MCPHttpClient: Cancelled by user for %s"), *Method);
+			HttpRequest->CancelRequest();
+			return false;
+		}
 		if (FPlatformTime::Seconds() - StartTime > Timeout)
 		{
 			UE_LOG(LogPenToUMG, Error, TEXT("MCPHttpClient: Timeout for %s"), *Method);
@@ -140,6 +153,7 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 			FSlateApplication::Get().PumpMessages();
 			FSlateApplication::Get().Tick();
 		}
+		SlowTask.EnterProgressFrame(1.0f);
 		FPlatformProcess::Sleep(0.01f);
 	}
 

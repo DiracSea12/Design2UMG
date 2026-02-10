@@ -151,6 +151,10 @@ namespace
 			T->SetLineHeightPercentage(FCString::Atof(**V));
 		if (const FString* V = GET_PROP("AutoWrapText"))
 			T->SetAutoWrapText(V->ToBool());
+		if (const FString* V = GET_PROP("ShadowOffset"))
+			T->SetShadowOffset(FUMGWidgetUtils::ParseVector2D(*V));
+		if (const FString* V = GET_PROP("ShadowColorAndOpacity"))
+			T->SetShadowColorAndOpacity(FUMGWidgetUtils::ParseColor(*V));
 	}
 
 	void ApplyButtonProps(UWidget* W, const TMap<FString, FString>& P)
