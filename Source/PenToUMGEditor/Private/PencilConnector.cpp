@@ -38,10 +38,14 @@ FString FPencilConnector::DiscoverMCPServerPath()
 #endif
 
 	// 2. 搜索 antigravity 扩展目录
-	const FString UserProfile = FPlatformMisc::GetEnvironmentVariable(TEXT("USERPROFILE"));
+#if PLATFORM_WINDOWS
+	const FString UserHome = FPlatformMisc::GetEnvironmentVariable(TEXT("USERPROFILE"));
+#else
+	const FString UserHome = FPlatformMisc::GetEnvironmentVariable(TEXT("HOME"));
+#endif
 	TArray<FString> SearchDirs;
-	SearchDirs.Add(UserProfile / TEXT(".antigravity/extensions"));
-	SearchDirs.Add(UserProfile / TEXT(".vscode/extensions"));
+	SearchDirs.Add(UserHome / TEXT(".antigravity/extensions"));
+	SearchDirs.Add(UserHome / TEXT(".vscode/extensions"));
 
 	for (const FString& Dir : SearchDirs)
 	{
@@ -70,17 +74,20 @@ FString FPencilConnector::DetectAppName()
 		return Settings->PencilAppName;
 
 	// 2. 检测运行中的进程
-#if PLATFORM_WINDOWS
 	FPlatformProcess::FProcEnumerator ProcEnum;
 	while (ProcEnum.MoveNext())
 	{
 		const FString Name = ProcEnum.GetCurrent().GetName();
 		if (Name.Contains(TEXT("antigravity")))
 			return TEXT("antigravity");
+#if PLATFORM_WINDOWS
 		if (Name.Equals(TEXT("Code.exe"), ESearchCase::IgnoreCase))
 			return TEXT("code");
-	}
+#else
+		if (Name.Equals(TEXT("code"), ESearchCase::IgnoreCase))
+			return TEXT("code");
 #endif
+	}
 
 	// 3. 默认
 	return TEXT("antigravity");

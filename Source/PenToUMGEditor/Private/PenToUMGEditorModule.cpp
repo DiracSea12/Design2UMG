@@ -3,16 +3,11 @@
 #include "PenToUMGEditorModule.h"
 #include "PenToUMGLog.h"
 #include "PenMCPBridge.h"
-#include "PenRemoteImageImporter.h"
-#include "SPenToUMGPreviewWindow.h"
-#include "UMGGenerator.h"
-#include "UMGJsonParser.h"
-#include "UMGWidgetUtils.h"
+#include "PenImportUtils.h"
 
 #include "PenParser.h"
 #include "PenImporter.h"
 #include "DesignSourceRegistry.h"
-#include "UMGJsonSerializer.h"
 #include "PencilConnector.h"
 
 #include "WidgetBlueprint.h"
@@ -21,12 +16,6 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonSerializer.h"
-#include "Serialization/JsonWriter.h"
-#include "Widgets/SWindow.h"
-#include "Widgets/Views/SListView.h"
-#include "Widgets/Layout/SBox.h"
-#include "Widgets/Input/SButton.h"
-#include "Widgets/Text/STextBlock.h"
 #include "ToolMenus.h"
 #include "DesktopPlatformModule.h"
 #include "IDesktopPlatform.h"
@@ -50,31 +39,6 @@ namespace
 		FString OutputPath = DefaultPenOutputPath;
 		bool bUsePreview = true;
 	};
-
-	bool GenerateWidgetAndPreviewPng(const FUMGWidgetData& Data, const FString& OutputPath)
-	{
-		UWidgetBlueprint* WidgetBP = FUMGGenerator::GenerateWidgetBlueprint(Data, OutputPath);
-		if (!WidgetBP)
-		{
-			UE_LOG(LogPenToUMG, Error, TEXT("[FAIL] Widget Blueprint generation failed"));
-			return false;
-		}
-
-		UE_LOG(LogPenToUMG, Log, TEXT("[OK] Widget Blueprint generated: %s"), *WidgetBP->GetPathName());
-
-		TArray<uint8> PngData;
-		FIntPoint Size;
-		if (!FUMGWidgetUtils::RenderWidgetToPng(WidgetBP, FIntPoint(400, 300), PngData, Size))
-		{
-			UE_LOG(LogPenToUMG, Error, TEXT("[FAIL] Widget PNG render failed"));
-			return false;
-		}
-
-		const FString OutPng = FPaths::ProjectSavedDir() / TEXT("PenToUMG/rendered.png");
-		FFileHelper::SaveArrayToFile(PngData, *OutPng);
-		UE_LOG(LogPenToUMG, Log, TEXT("[OK] Rendered PNG saved: %s (%dx%d)"), *OutPng, Size.X, Size.Y);
-		return true;
-	}
 
 	bool ParsePenConvertCommandArgs(const TArray<FString>& Args, FPenConvertCommandArgs& Out)
 	{
@@ -112,67 +76,6 @@ namespace
 		return true;
 	}
 
-	void RunGenerateFromJson(const FString& EditedJson, const FString& OutputPath)
-	{
-		FUMGWidgetData EditedData;
-		FString ParseError;
-		if (!FUMGJsonParser::ParseJson(EditedJson, EditedData, &ParseError))
-		{
-			UE_LOG(LogPenToUMG, Error, TEXT("[FAIL] Edited JSON parse failed: %s"), *ParseError);
-			return;
-		}
-
-		FString RemoteImageReport;
-		const bool bRemoteImagesResolved = FPenRemoteImageImporter::ResolveRemoteImages(EditedData, &RemoteImageReport);
-		if (!RemoteImageReport.IsEmpty())
-		{
-			UE_LOG(LogPenToUMG, Log, TEXT("%s"), *RemoteImageReport);
-		}
-		if (!bRemoteImagesResolved)
-		{
-			UE_LOG(LogPenToUMG, Warning, TEXT("Edited JSON contains unresolved remote images; generation will continue"));
-		}
-
-		const FString FinalOutputPath = OutputPath.IsEmpty() ? FString(DefaultPenOutputPath) : OutputPath;
-		GenerateWidgetAndPreviewPng(EditedData, FinalOutputPath);
-	}
-
-	bool TryOpenPreviewWindow(const FUMGWidgetData& Data, const FString& OutputPath)
-	{
-		if (!FSlateApplication::IsInitialized())
-		{
-			return false;
-		}
-
-		const FString JsonPayload = FUMGJsonSerializer::Serialize(Data);
-		const FString InitialOutputPath = OutputPath.IsEmpty() ? FString(DefaultPenOutputPath) : OutputPath;
-
-		TSharedRef<SWindow> PreviewWindow = SNew(SWindow)
-			.Title(LOCTEXT("PenConvertPreviewWindowTitle", "PenToUMG Pen Preview"))
-			.ClientSize(FVector2D(1600.0f, 980.0f))
-			.SupportsMinimize(false)
-			.SupportsMaximize(true);
-
-		PreviewWindow->SetContent(
-			SNew(SPenToUMGPreviewWindow)
-			.OriginalJson(JsonPayload)
-			.OutputPath(InitialOutputPath)
-			.OnConfirmed(FOnPreviewConfirmed::CreateLambda(
-				[](const FString& EditedJson, const FString& ConfirmedOutputPath)
-				{
-					RunGenerateFromJson(EditedJson, ConfirmedOutputPath);
-				}))
-			.OnCancelled(FOnPreviewCancelled::CreateLambda(
-				[]()
-				{
-					UE_LOG(LogPenToUMG, Log, TEXT("PenConvert preview cancelled"));
-				}))
-		);
-
-		FSlateApplication::Get().AddWindow(PreviewWindow);
-		return true;
-	}
-
 	/** 从 MCP 数据执行转换 + 预览/生成 */
 	void ProcessMCPData(const FString& NodesJson, const FString& VarsJson, const FString& TargetNodeId, const FString& OutputPath)
 	{
@@ -183,15 +86,13 @@ namespace
 			return;
 		}
 
-		FString RemoteImageReport;
-		FPenRemoteImageImporter::ResolveRemoteImages(Data, &RemoteImageReport);
-		if (!RemoteImageReport.IsEmpty())
-			UE_LOG(LogPenToUMG, Log, TEXT("%s"), *RemoteImageReport);
+		PenImportUtils::ResolveImages(Data);
 
-		if (TryOpenPreviewWindow(Data, OutputPath))
+		if (PenImportUtils::OpenPreviewWindow(Data, OutputPath,
+			LOCTEXT("PenConvertPreviewWindowTitle", "PenToUMG Pen Preview")))
 			return;
 
-		GenerateWidgetAndPreviewPng(Data, OutputPath);
+		PenImportUtils::GenerateBlueprintAndPng(Data, OutputPath);
 	}
 
 	/** 从 batch_get 结果中提取 frame 信息列表 */
@@ -300,65 +201,18 @@ namespace
 		}
 
 		// 5. 多 frame → 弹出选择器
-		if (!FSlateApplication::IsInitialized())
-			return;
-
-		TSharedPtr<TArray<TSharedPtr<FPenFrameInfo>>> Items = MakeShared<TArray<TSharedPtr<FPenFrameInfo>>>();
-		for (const FPenFrameInfo& F : Frames)
-			Items->Add(MakeShared<FPenFrameInfo>(F));
-
-		// 捕获 MCP 数据供选择器回调使用
 		FString CapturedNodes = NodesJson;
 		FString CapturedVars = VarsJson;
 		FString CapturedOutput = OutputPath;
 
-		TSharedRef<SWindow> Window = SNew(SWindow)
-			.Title(LOCTEXT("PencilFrameSelectorTitle", "Select Frame from Pencil"))
-			.ClientSize(FVector2D(420.0f, 360.0f))
-			.SupportsMinimize(false)
-			.SupportsMaximize(false);
-
-		TWeakPtr<SWindow> WeakWindow = Window;
-
-		Window->SetContent(
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(8.0f)
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("PencilFrameSelectorHint", "Multiple frames found. Double-click to import:"))
-			]
-			+ SVerticalBox::Slot()
-			.FillHeight(1.0f)
-			.Padding(8.0f)
-			[
-				SNew(SListView<TSharedPtr<FPenFrameInfo>>)
-				.ListItemsSource(Items.Get())
-				.OnGenerateRow_Lambda([Items](TSharedPtr<FPenFrameInfo> Item, const TSharedRef<STableViewBase>& OwnerTable)
-				{
-					return SNew(STableRow<TSharedPtr<FPenFrameInfo>>, OwnerTable)
-						.Padding(FMargin(4.0f, 2.0f))
-						[
-							SNew(STextBlock)
-							.Text(FText::FromString(FString::Printf(
-								TEXT("%s  (%.0f x %.0f)"),
-								*Item->Name, Item->Width, Item->Height)))
-						];
-				})
-				.OnMouseButtonDoubleClick_Lambda([CapturedNodes, CapturedVars, CapturedOutput, WeakWindow](TSharedPtr<FPenFrameInfo> Item)
-				{
-					if (Item.IsValid())
-					{
-						ProcessMCPData(CapturedNodes, CapturedVars, Item->Id, CapturedOutput);
-						if (TSharedPtr<SWindow> Win = WeakWindow.Pin())
-							Win->RequestDestroyWindow();
-					}
-				})
-			]
-		);
-
-		FSlateApplication::Get().AddWindow(Window);
+		PenImportUtils::ShowFrameSelector(
+			Frames,
+			LOCTEXT("PencilFrameSelectorTitle", "Select Frame from Pencil"),
+			LOCTEXT("PencilFrameSelectorHint", "Multiple frames found. Double-click to import:"),
+			[CapturedNodes, CapturedVars, CapturedOutput](const FString& FrameId)
+			{
+				ProcessMCPData(CapturedNodes, CapturedVars, FrameId, CapturedOutput);
+			});
 	}
 
 	/** 导入指定 TargetNodeId 的 frame */
@@ -368,15 +222,13 @@ namespace
 		if (!FPenImporter::ImportFileWithTargetNode(FilePath, TargetNodeId, Data))
 			return;
 
-		FString RemoteImageReport;
-		FPenRemoteImageImporter::ResolveRemoteImages(Data, &RemoteImageReport);
-		if (!RemoteImageReport.IsEmpty())
-			UE_LOG(LogPenToUMG, Log, TEXT("%s"), *RemoteImageReport);
+		PenImportUtils::ResolveImages(Data);
 
-		if (bUsePreview && TryOpenPreviewWindow(Data, OutputPath))
+		if (bUsePreview && PenImportUtils::OpenPreviewWindow(Data, OutputPath,
+			LOCTEXT("PenConvertPreviewWindowTitle", "PenToUMG Pen Preview")))
 			return;
 
-		GenerateWidgetAndPreviewPng(Data, OutputPath);
+		PenImportUtils::GenerateBlueprintAndPng(Data, OutputPath);
 	}
 
 	/** 导入 .pen 文件（工具栏 + 控制台命令共用） */
@@ -413,76 +265,29 @@ namespace
 				return;
 			}
 
-			FString RemoteImageReport;
-			FPenRemoteImageImporter::ResolveRemoteImages(Data, &RemoteImageReport);
-			if (!RemoteImageReport.IsEmpty())
-				UE_LOG(LogPenToUMG, Log, TEXT("%s"), *RemoteImageReport);
+			PenImportUtils::ResolveImages(Data);
 
-			if (bUsePreview && TryOpenPreviewWindow(Data, OutputPath))
+			if (bUsePreview && PenImportUtils::OpenPreviewWindow(Data, OutputPath,
+				LOCTEXT("PenConvertPreviewWindowTitle", "PenToUMG Pen Preview")))
 				return;
 
-			GenerateWidgetAndPreviewPng(Data, OutputPath);
+			PenImportUtils::GenerateBlueprintAndPng(Data, OutputPath);
 			return;
 		}
 
 		// 多 frame → 弹出选择器
-		if (!FSlateApplication::IsInitialized())
-			return;
-
-		TSharedPtr<TArray<TSharedPtr<FPenFrameInfo>>> Items = MakeShared<TArray<TSharedPtr<FPenFrameInfo>>>();
-		for (const FPenFrameInfo& F : Frames)
-			Items->Add(MakeShared<FPenFrameInfo>(F));
-
-		TSharedRef<SWindow> Window = SNew(SWindow)
-			.Title(LOCTEXT("FrameSelectorTitle", "Select Frame to Import"))
-			.ClientSize(FVector2D(420.0f, 360.0f))
-			.SupportsMinimize(false)
-			.SupportsMaximize(false);
-
 		FString CapturedFilePath = FilePath;
 		FString CapturedOutputPath = OutputPath;
 		bool bCapturedPreview = bUsePreview;
-		TWeakPtr<SWindow> WeakWindow = Window;
 
-		Window->SetContent(
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(8.0f)
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("FrameSelectorHint", "This file contains multiple frames. Double-click to import:"))
-			]
-			+ SVerticalBox::Slot()
-			.FillHeight(1.0f)
-			.Padding(8.0f)
-			[
-				SNew(SListView<TSharedPtr<FPenFrameInfo>>)
-				.ListItemsSource(Items.Get())
-				.OnGenerateRow_Lambda([Items](TSharedPtr<FPenFrameInfo> Item, const TSharedRef<STableViewBase>& OwnerTable)
-				{
-					return SNew(STableRow<TSharedPtr<FPenFrameInfo>>, OwnerTable)
-						.Padding(FMargin(4.0f, 2.0f))
-						[
-							SNew(STextBlock)
-							.Text(FText::FromString(FString::Printf(
-								TEXT("%s  (%.0f x %.0f)"),
-								*Item->Name, Item->Width, Item->Height)))
-						];
-				})
-				.OnMouseButtonDoubleClick_Lambda([CapturedFilePath, CapturedOutputPath, bCapturedPreview, WeakWindow](TSharedPtr<FPenFrameInfo> Item)
-				{
-					if (Item.IsValid())
-					{
-						ImportPenFileWithTargetNode(CapturedFilePath, Item->Id, CapturedOutputPath, bCapturedPreview);
-						if (TSharedPtr<SWindow> Win = WeakWindow.Pin())
-							Win->RequestDestroyWindow();
-					}
-				})
-			]
-		);
-
-		FSlateApplication::Get().AddWindow(Window);
+		PenImportUtils::ShowFrameSelector(
+			Frames,
+			LOCTEXT("FrameSelectorTitle", "Select Frame to Import"),
+			LOCTEXT("FrameSelectorHint", "This file contains multiple frames. Double-click to import:"),
+			[CapturedFilePath, CapturedOutputPath, bCapturedPreview](const FString& FrameId)
+			{
+				ImportPenFileWithTargetNode(CapturedFilePath, FrameId, CapturedOutputPath, bCapturedPreview);
+			});
 	}
 
 	/** 打开文件对话框选择 .pen 文件并导入 */
@@ -548,16 +353,7 @@ void FPenToUMGEditorModule::StartupModule()
 				return;
 			}
 
-			FString RemoteImageReport;
-			const bool bRemoteImagesResolved = FPenRemoteImageImporter::ResolveRemoteImages(Data, &RemoteImageReport);
-			if (!RemoteImageReport.IsEmpty())
-			{
-				UE_LOG(LogPenToUMG, Log, TEXT("%s"), *RemoteImageReport);
-			}
-			if (!bRemoteImagesResolved)
-			{
-				UE_LOG(LogPenToUMG, Warning, TEXT("PenConvert contains unresolved remote images; generation will continue"));
-			}
+			PenImportUtils::ResolveImages(Data);
 
 			UE_LOG(LogPenToUMG, Log, TEXT("[OK] PenConvert succeeded, root children: %d"), Data.RootWidget.Children.Num());
 			for (int32 Index = 0; Index < Data.RootWidget.Children.Num(); ++Index)
@@ -566,12 +362,13 @@ void FPenToUMGEditorModule::StartupModule()
 				UE_LOG(LogPenToUMG, Log, TEXT("  [%d] %s (%s)"), Index, *Child.Name, *Child.Type);
 			}
 
-			if (CmdArgs.bUsePreview && TryOpenPreviewWindow(Data, CmdArgs.OutputPath))
+			if (CmdArgs.bUsePreview && PenImportUtils::OpenPreviewWindow(Data, CmdArgs.OutputPath,
+				LOCTEXT("PenConvertPreviewWindowTitle", "PenToUMG Pen Preview")))
 			{
 				return;
 			}
 
-			GenerateWidgetAndPreviewPng(Data, CmdArgs.OutputPath);
+			PenImportUtils::GenerateBlueprintAndPng(Data, CmdArgs.OutputPath);
 		}),
 		ECVF_Default);
 
@@ -668,12 +465,13 @@ void FPenToUMGEditorModule::StartupModule()
 
 			UE_LOG(LogPenToUMG, Log, TEXT("[OK] ImportSource succeeded (%s), root children: %d"), *SourceId.ToString(), Data.RootWidget.Children.Num());
 
-			if (bPreview && TryOpenPreviewWindow(Data, OutputPath))
+			if (bPreview && PenImportUtils::OpenPreviewWindow(Data, OutputPath,
+				LOCTEXT("ImportSourcePreviewTitle", "PenToUMG Import Preview")))
 			{
 				return;
 			}
 
-			GenerateWidgetAndPreviewPng(Data, OutputPath);
+			PenImportUtils::GenerateBlueprintAndPng(Data, OutputPath);
 		}),
 		ECVF_Default);
 

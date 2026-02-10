@@ -8,7 +8,6 @@
 #include "UMGSchema.h"
 #include "Misc/FileHelper.h"
 #include "Serialization/JsonSerializer.h"
-#include "Serialization/JsonWriter.h"
 #include "Dom/JsonObject.h"
 
 bool FPenImporter::ImportFromFile(const FString& FilePath, FUMGWidgetData& OutData)
@@ -54,31 +53,9 @@ bool FPenImporter::ImportFileWithTargetNode(const FString& FilePath, const FStri
 		return false;
 	}
 
-	// 提取 children 数组
-	FString NodesJson;
-	if (DocObj->HasField(TEXT("children")))
+	if (!FPenMCPBridge::ConvertFromParsedDoc(DocObj, OutData, TargetNodeId))
 	{
-		const TArray<TSharedPtr<FJsonValue>>& Arr = DocObj->GetArrayField(TEXT("children"));
-		TSharedRef<TJsonWriter<>> W = TJsonWriterFactory<>::Create(&NodesJson);
-		FJsonSerializer::Serialize(Arr, W);
-	}
-
-	// 提取 variables/themes/fonts
-	TSharedPtr<FJsonObject> VarsObj = MakeShared<FJsonObject>();
-	if (DocObj->HasField(TEXT("variables")))
-		VarsObj->SetField(TEXT("variables"), DocObj->TryGetField(TEXT("variables")));
-	if (DocObj->HasField(TEXT("themes")))
-		VarsObj->SetField(TEXT("themes"), DocObj->TryGetField(TEXT("themes")));
-	if (DocObj->HasField(TEXT("fonts")))
-		VarsObj->SetField(TEXT("fonts"), DocObj->TryGetField(TEXT("fonts")));
-
-	FString VarsJson;
-	TSharedRef<TJsonWriter<>> VW = TJsonWriterFactory<>::Create(&VarsJson);
-	FJsonSerializer::Serialize(VarsObj.ToSharedRef(), VW);
-
-	if (!FPenMCPBridge::ConvertFromMCP(NodesJson, VarsJson, OutData, TargetNodeId))
-	{
-		UE_LOG(LogPenToUMG, Error, TEXT("PenImporter: ConvertFromMCP failed for node %s"), *TargetNodeId);
+		UE_LOG(LogPenToUMG, Error, TEXT("PenImporter: ConvertFromParsedDoc failed for node %s"), *TargetNodeId);
 		return false;
 	}
 

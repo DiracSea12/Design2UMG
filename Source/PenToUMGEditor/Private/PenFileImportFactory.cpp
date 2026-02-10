@@ -4,51 +4,24 @@
 #include "PenToUMGLog.h"
 #include "PenParser.h"
 #include "PenImporter.h"
-#include "PenRemoteImageImporter.h"
+#include "PenImportUtils.h"
 #include "DesignSourceRegistry.h"
-#include "SPenToUMGPreviewWindow.h"
-#include "UMGGenerator.h"
-#include "UMGJsonParser.h"
-#include "UMGJsonSerializer.h"
-#include "UMGWidgetUtils.h"
-#include "PenToUMGSettings.h"
 
 #include "WidgetBlueprint.h"
-#include "Framework/Application/SlateApplication.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
-#include "Serialization/JsonSerializer.h"
-#include "Serialization/JsonWriter.h"
-#include "Widgets/SWindow.h"
-#include "Widgets/Views/SListView.h"
-#include "Widgets/Input/SButton.h"
-#include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "PenFileImportFactory"
 
-// ── 前向声明内部函数 ──
-
-namespace PenImportInternal
+namespace
 {
-	static const TCHAR* DefaultOutputPath = TEXT("/Game/PenToUMG/PenConvert_Output");
+	const TCHAR* DefaultOutputPath = TEXT("/Game/PenToUMG/PenConvert_Output");
 
-	/** 执行导入（单 frame 快速路径），返回生成的 Blueprint（预览模式返回 nullptr） */
-	static UWidgetBlueprint* ImportSingleFrame(const FString& FilePath, const FString& OutputPath);
+	/** 导入单 frame：尝试预览，无预览时同步返回 Blueprint */
+	UWidgetBlueprint* ImportSingleFrame(const FString& FilePath, const FString& OutputPath);
 
-	/** 执行导入（多 frame 选择路径） */
-	static void ImportWithTargetNode(const FString& FilePath, const FString& TargetNodeId, const FString& OutputPath);
-
-	/** 打开预览窗口 */
-	static bool OpenPreview(const FUMGWidgetData& Data, const FString& OutputPath);
-
-	/** 生成 Widget Blueprint，返回生成的对象 */
-	static UWidgetBlueprint* GenerateAndRender(const FUMGWidgetData& Data, const FString& OutputPath);
-
-	/** 从编辑后的 JSON 生成 */
-	static void RunGenerateFromJson(const FString& EditedJson, const FString& OutputPath);
-
-	/** 弹出 Frame 选择器对话框 */
-	static void ShowFrameSelector(const FString& FilePath, const TArray<FPenFrameInfo>& Frames, const FString& OutputPath);
+	/** 导入指定 TargetNodeId 的 frame */
+	void ImportWithTargetNode(const FString& FilePath, const FString& TargetNodeId, const FString& OutputPath);
 }
 
 // ── UFactory 实现 ──
@@ -89,12 +62,12 @@ UObject* UPenFileImportFactory::FactoryCreateFile(
 		return nullptr;
 	}
 
-	const FString OutputPath = InParent ? InParent->GetPathName() : FString(PenImportInternal::DefaultOutputPath);
+	const FString OutputPath = InParent ? InParent->GetPathName() : FString(DefaultOutputPath);
 
 	if (Frames.Num() == 1)
 	{
 		// 单 frame 快速路径：无预览时同步返回生成的 Blueprint
-		UWidgetBlueprint* Result = PenImportInternal::ImportSingleFrame(Filename, OutputPath);
+		UWidgetBlueprint* Result = ImportSingleFrame(Filename, OutputPath);
 		if (Result)
 			return Result;
 
@@ -104,14 +77,21 @@ UObject* UPenFileImportFactory::FactoryCreateFile(
 	}
 
 	// 多 frame → 弹出选择器，异步生成
-	PenImportInternal::ShowFrameSelector(Filename, Frames, OutputPath);
+	PenImportUtils::ShowFrameSelector(
+		Frames,
+		LOCTEXT("FrameSelectorTitle", "Select Frame to Import"),
+		LOCTEXT("FrameSelectorHint", "This file contains multiple frames. Double-click to import:"),
+		[Filename, OutputPath](const FString& FrameId)
+		{
+			ImportWithTargetNode(Filename, FrameId, OutputPath);
+		});
 	bOutOperationCanceled = true;
 	return nullptr;
 }
 
 // ── 内部实现 ──
 
-namespace PenImportInternal
+namespace
 {
 
 UWidgetBlueprint* ImportSingleFrame(const FString& FilePath, const FString& OutputPath)
@@ -129,20 +109,15 @@ UWidgetBlueprint* ImportSingleFrame(const FString& FilePath, const FString& Outp
 		return nullptr;
 	}
 
-	FString RemoteImageReport;
-	FPenRemoteImageImporter::ResolveRemoteImages(Data, &RemoteImageReport);
-	if (!RemoteImageReport.IsEmpty())
+	PenImportUtils::ResolveImages(Data);
+
+	if (PenImportUtils::OpenPreviewWindow(Data, OutputPath,
+		LOCTEXT("PenImportPreviewTitle", "PenToUMG Import Preview")))
 	{
-		UE_LOG(LogPenToUMG, Log, TEXT("%s"), *RemoteImageReport);
+		return nullptr;
 	}
 
-	if (!OpenPreview(Data, OutputPath))
-	{
-		return GenerateAndRender(Data, OutputPath);
-	}
-
-	// 预览窗口已打开，生成将在用户确认后异步完成
-	return nullptr;
+	return PenImportUtils::GenerateBlueprint(Data, OutputPath);
 }
 
 void ImportWithTargetNode(const FString& FilePath, const FString& TargetNodeId, const FString& OutputPath)
@@ -151,148 +126,15 @@ void ImportWithTargetNode(const FString& FilePath, const FString& TargetNodeId, 
 	if (!FPenImporter::ImportFileWithTargetNode(FilePath, TargetNodeId, Data))
 		return;
 
-	FString RemoteImageReport;
-	FPenRemoteImageImporter::ResolveRemoteImages(Data, &RemoteImageReport);
-	if (!RemoteImageReport.IsEmpty())
-		UE_LOG(LogPenToUMG, Log, TEXT("%s"), *RemoteImageReport);
+	PenImportUtils::ResolveImages(Data);
 
-	if (!OpenPreview(Data, OutputPath))
-		GenerateAndRender(Data, OutputPath);
-}
-
-void RunGenerateFromJson(const FString& EditedJson, const FString& OutputPath)
-{
-	FUMGWidgetData EditedData;
-	FString ParseError;
-	if (!FUMGJsonParser::ParseJson(EditedJson, EditedData, &ParseError))
+	if (!PenImportUtils::OpenPreviewWindow(Data, OutputPath,
+		LOCTEXT("PenImportPreviewTitle", "PenToUMG Import Preview")))
 	{
-		UE_LOG(LogPenToUMG, Error, TEXT("PenFileImport: JSON parse failed: %s"), *ParseError);
-		return;
+		PenImportUtils::GenerateBlueprint(Data, OutputPath);
 	}
-
-	FString RemoteImageReport;
-	FPenRemoteImageImporter::ResolveRemoteImages(EditedData, &RemoteImageReport);
-	if (!RemoteImageReport.IsEmpty())
-	{
-		UE_LOG(LogPenToUMG, Log, TEXT("%s"), *RemoteImageReport);
-	}
-
-	GenerateAndRender(EditedData, OutputPath);
 }
 
-UWidgetBlueprint* GenerateAndRender(const FUMGWidgetData& Data, const FString& OutputPath)
-{
-	const FString FinalPath = OutputPath.IsEmpty() ? FString(DefaultOutputPath) : OutputPath;
-	UWidgetBlueprint* WBP = FUMGGenerator::GenerateWidgetBlueprint(Data, FinalPath);
-	if (!WBP)
-	{
-		UE_LOG(LogPenToUMG, Error, TEXT("PenFileImport: Widget Blueprint generation failed"));
-		return nullptr;
-	}
-	UE_LOG(LogPenToUMG, Log, TEXT("PenFileImport: Generated %s"), *WBP->GetPathName());
-	return WBP;
-}
-
-// ── OpenPreview ──
-
-bool OpenPreview(const FUMGWidgetData& Data, const FString& OutputPath)
-{
-	if (!FSlateApplication::IsInitialized())
-		return false;
-
-	const FString JsonPayload = FUMGJsonSerializer::Serialize(Data);
-	const FString FinalPath = OutputPath.IsEmpty() ? FString(DefaultOutputPath) : OutputPath;
-
-	TSharedRef<SWindow> Window = SNew(SWindow)
-		.Title(LOCTEXT("PenImportPreviewTitle", "PenToUMG Import Preview"))
-		.ClientSize(FVector2D(1600.0f, 980.0f))
-		.SupportsMinimize(false)
-		.SupportsMaximize(true);
-
-	Window->SetContent(
-		SNew(SPenToUMGPreviewWindow)
-		.OriginalJson(JsonPayload)
-		.OutputPath(FinalPath)
-		.OnConfirmed(FOnPreviewConfirmed::CreateLambda(
-			[](const FString& EditedJson, const FString& ConfirmedPath)
-			{
-				RunGenerateFromJson(EditedJson, ConfirmedPath);
-			}))
-		.OnCancelled(FOnPreviewCancelled::CreateLambda(
-			[]()
-			{
-				UE_LOG(LogPenToUMG, Log, TEXT("PenFileImport: Preview cancelled"));
-			}))
-	);
-
-	FSlateApplication::Get().AddWindow(Window);
-	return true;
-}
-
-// ── ShowFrameSelector ──
-
-void ShowFrameSelector(const FString& FilePath, const TArray<FPenFrameInfo>& Frames, const FString& OutputPath)
-{
-	if (!FSlateApplication::IsInitialized())
-		return;
-
-	// 构建列表数据（SListView 需要 TSharedPtr）
-	TSharedPtr<TArray<TSharedPtr<FPenFrameInfo>>> Items = MakeShared<TArray<TSharedPtr<FPenFrameInfo>>>();
-	for (const FPenFrameInfo& F : Frames)
-		Items->Add(MakeShared<FPenFrameInfo>(F));
-
-	TSharedRef<SWindow> Window = SNew(SWindow)
-		.Title(LOCTEXT("FrameSelectorTitle", "Select Frame to Import"))
-		.ClientSize(FVector2D(420.0f, 360.0f))
-		.SupportsMinimize(false)
-		.SupportsMaximize(false);
-
-	// 捕获变量供 lambda 使用
-	FString CapturedFilePath = FilePath;
-	FString CapturedOutputPath = OutputPath;
-	TWeakPtr<SWindow> WeakWindow = Window;
-
-	Window->SetContent(
-		SNew(SVerticalBox)
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.Padding(8.0f)
-		[
-			SNew(STextBlock)
-			.Text(LOCTEXT("FrameSelectorHint", "This file contains multiple frames. Double-click to import:"))
-		]
-		+ SVerticalBox::Slot()
-		.FillHeight(1.0f)
-		.Padding(8.0f)
-		[
-			SNew(SListView<TSharedPtr<FPenFrameInfo>>)
-			.ListItemsSource(Items.Get())
-			.OnGenerateRow_Lambda([Items](TSharedPtr<FPenFrameInfo> Item, const TSharedRef<STableViewBase>& OwnerTable)
-			{
-				return SNew(STableRow<TSharedPtr<FPenFrameInfo>>, OwnerTable)
-					.Padding(FMargin(4.0f, 2.0f))
-					[
-						SNew(STextBlock)
-						.Text(FText::FromString(FString::Printf(
-							TEXT("%s  (%.0f x %.0f)"),
-							*Item->Name, Item->Width, Item->Height)))
-					];
-			})
-			.OnMouseButtonDoubleClick_Lambda([CapturedFilePath, CapturedOutputPath, WeakWindow, Items](TSharedPtr<FPenFrameInfo> Item)
-			{
-				if (Item.IsValid())
-				{
-					ImportWithTargetNode(CapturedFilePath, Item->Id, CapturedOutputPath);
-					if (TSharedPtr<SWindow> Win = WeakWindow.Pin())
-						Win->RequestDestroyWindow();
-				}
-			})
-		]
-	);
-
-	FSlateApplication::Get().AddWindow(Window);
-}
-
-} // namespace PenImportInternal
+} // anonymous namespace
 
 #undef LOCTEXT_NAMESPACE

@@ -34,6 +34,39 @@ namespace
 		}
 		return nullptr;
 	}
+
+	/** 从源对象组装标准文档 JSON 并序列化 */
+	FString BuildDocumentJson(
+		const TSharedPtr<FJsonObject>& SourceObj,
+		const TArray<TSharedPtr<FJsonValue>>& Children)
+	{
+		TSharedPtr<FJsonObject> Doc = MakeShared<FJsonObject>();
+
+		// 优先使用原始版本号，回退到 "2.6"
+		FString Version = TEXT("2.6");
+		if (SourceObj->HasField(TEXT("version")))
+		{
+			SourceObj->TryGetStringField(TEXT("version"), Version);
+		}
+		Doc->SetStringField(TEXT("version"), Version);
+
+		for (const TCHAR* Field : { TEXT("variables"), TEXT("themes"), TEXT("fonts") })
+		{
+			if (SourceObj->HasField(Field))
+				Doc->SetField(Field, SourceObj->TryGetField(Field));
+		}
+
+		Doc->SetArrayField(TEXT("children"), Children);
+
+		FString Output;
+		TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Output);
+		FJsonSerializer::Serialize(Doc.ToSharedRef(), Writer);
+
+		UE_LOG(LogPenMCPBridge, Log, TEXT("BuildDocumentJson: %d children, json length=%d"),
+			Children.Num(), Output.Len());
+
+		return Output;
+	}
 }
 
 FString FPenMCPBridge::AssembleDocumentJson(
@@ -76,34 +109,7 @@ FString FPenMCPBridge::AssembleDocumentJson(
 		Children = NodesArr;
 	}
 
-	// 组装文档
-	TSharedPtr<FJsonObject> Doc = MakeShared<FJsonObject>();
-	Doc->SetStringField(TEXT("version"), TEXT("2.6"));
-
-	// variables
-	if (VarsObj->HasField(TEXT("variables")))
-		Doc->SetField(TEXT("variables"), VarsObj->TryGetField(TEXT("variables")));
-
-	// themes
-	if (VarsObj->HasField(TEXT("themes")))
-		Doc->SetField(TEXT("themes"), VarsObj->TryGetField(TEXT("themes")));
-
-	// fonts
-	if (VarsObj->HasField(TEXT("fonts")))
-		Doc->SetField(TEXT("fonts"), VarsObj->TryGetField(TEXT("fonts")));
-
-	// children
-	Doc->SetArrayField(TEXT("children"), Children);
-
-	// 序列化
-	FString Output;
-	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Output);
-	FJsonSerializer::Serialize(Doc.ToSharedRef(), Writer);
-
-	UE_LOG(LogPenMCPBridge, Log, TEXT("Assembled document: %d children, json length=%d"),
-		Children.Num(), Output.Len());
-
-	return Output;
+	return BuildDocumentJson(VarsObj, Children);
 }
 
 bool FPenMCPBridge::ConvertFromMCP(
@@ -113,6 +119,42 @@ bool FPenMCPBridge::ConvertFromMCP(
 	const FString& TargetNodeId)
 {
 	FString Json = AssembleDocumentJson(NodesJson, VariablesJson, TargetNodeId);
+	if (Json.IsEmpty())
+		return false;
+
+	return FDesignSourceRegistry::Convert(TEXT("Pen"), Json, OutData);
+}
+
+bool FPenMCPBridge::ConvertFromParsedDoc(
+	const TSharedPtr<FJsonObject>& DocObj,
+	FUMGWidgetData& OutData,
+	const FString& TargetNodeId)
+{
+	if (!DocObj.IsValid())
+		return false;
+
+	// 提取 children
+	TArray<TSharedPtr<FJsonValue>> Children;
+	const TArray<TSharedPtr<FJsonValue>>* ChildrenPtr = nullptr;
+	if (DocObj->TryGetArrayField(TEXT("children"), ChildrenPtr) && ChildrenPtr)
+	{
+		Children = *ChildrenPtr;
+	}
+
+	// 按 TargetNodeId 过滤
+	if (!TargetNodeId.IsEmpty())
+	{
+		TSharedPtr<FJsonValue> Found = FindNodeById(Children, TargetNodeId);
+		if (!Found.IsValid())
+		{
+			UE_LOG(LogPenMCPBridge, Error, TEXT("TargetNodeId '%s' not found"), *TargetNodeId);
+			return false;
+		}
+		Children.Empty();
+		Children.Add(Found);
+	}
+
+	FString Json = BuildDocumentJson(DocObj, Children);
 	if (Json.IsEmpty())
 		return false;
 

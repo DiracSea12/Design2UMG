@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Dom/JsonObject.h"
 
 struct FUMGWidgetData;
 
@@ -41,6 +42,20 @@ public:
 	static bool ConvertFromMCP(
 		const FString& NodesJson,
 		const FString& VariablesJson,
+		FUMGWidgetData& OutData,
+		const FString& TargetNodeId = TEXT("")
+	);
+
+	/**
+	 * 从已解析的 JSON 对象直接转换（避免重复序列化/反序列化）
+	 *
+	 * @param DocObj          已解析的完整文档 JSON 对象
+	 * @param OutData         输出的 UMG Widget 数据
+	 * @param TargetNodeId    可选，只导出指定 frame 节点
+	 * @return 成功返回 true
+	 */
+	static bool ConvertFromParsedDoc(
+		const TSharedPtr<FJsonObject>& DocObj,
 		FUMGWidgetData& OutData,
 		const FString& TargetNodeId = TEXT("")
 	);

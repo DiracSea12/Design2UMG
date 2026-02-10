@@ -3,6 +3,38 @@
 #include "LayoutFixer.h"
 
 // ============================================================================
+// Fixer算法常量
+// ============================================================================
+
+namespace FixerConstants
+{
+	/** 动态SnapPx计算系数：MinDim * Factor */
+	constexpr float SnapPxFactor = 0.002f;
+	/** SnapPx最小/最大像素值 */
+	constexpr int32 SnapPxMin = 2;
+	constexpr int32 SnapPxMax = 6;
+
+	/** 越界修正：最小尺寸阈值，防止Bounds被裁剪为0 */
+	constexpr float MinBoundsSize = 0.001f;
+
+	/** 等距修正：间距偏差比率阈值 */
+	constexpr float SpacingRatioThreshold = 0.15f;
+	/** 等距修正：绝对阈值乘数（相对于SnapThreshold） */
+	constexpr float SpacingAbsThresholdMultiplier = 2.0f;
+	/** 等距修正：单次最大移动距离乘数（相对于SnapThreshold） */
+	constexpr float SpacingMaxMoveMultiplier = 3.0f;
+
+	/** 保守性检查：总移动距离下限 */
+	constexpr float ConservatismTotalMoveFloor = 0.03f;
+	/** 保守性检查：总移动距离乘数（每元素） */
+	constexpr float ConservatismTotalMovePerElement = 2.0f;
+	/** 保守性检查：单次移动距离下限 */
+	constexpr float ConservatismSingleMoveFloor = 0.02f;
+	/** 保守性检查：单次移动距离乘数 */
+	constexpr float ConservatismSingleMoveMultiplier = 3.0f;
+}
+
+// ============================================================================
 // Helper Functions (v2.2 Fixer优化)
 // ============================================================================
 
@@ -64,7 +96,9 @@ void FLayoutFixer::Initialize(const FIntPoint& DesignSize, FFixerPreset& OutPres
 {
 	OutPreset.DesignSize = DesignSize;
 	int32 MinDim = FMath::Min(DesignSize.X, DesignSize.Y);
-	OutPreset.SnapPx = FMath::Clamp(FMath::RoundToInt(MinDim * 0.002f), 2, 6);
+	OutPreset.SnapPx = FMath::Clamp(
+		FMath::RoundToInt(MinDim * FixerConstants::SnapPxFactor),
+		FixerConstants::SnapPxMin, FixerConstants::SnapPxMax);
 	// 1080p: 2px, 4K: 4px
 }
 
@@ -113,8 +147,7 @@ bool FLayoutFixer::FixBoundsOverflow(
 	const float ChildRight = ChildBounds.X + ChildBounds.W;
 	const float ChildBottom = ChildBounds.Y + ChildBounds.H;
 
-	// 最小尺寸阈值，防止Bounds被裁剪为0导致节点被过滤
-	const float MinSize = 0.001f;
+	const float MinSize = FixerConstants::MinBoundsSize;
 
 	if (ChildRight > ParentRight)
 	{
@@ -405,15 +438,13 @@ bool FLayoutFixer::FixEqualSpacing(
 	float AvgGap = GetAverage(Gaps);
 	float MaxDiff = GetMaxDeviation(Gaps, AvgGap);
 
-	// v2.2: 使用相对阈值（15%间距偏差 或 2倍SnapThreshold的绝对阈值）
-	float AbsThreshold = 2.0f * Threshold;
-	float RatioThreshold = 0.15f;
+	float AbsThreshold = FixerConstants::SpacingAbsThresholdMultiplier * Threshold;
+	float RatioThreshold = FixerConstants::SpacingRatioThreshold;
 	float EffectiveThreshold = FMath::Max(AbsThreshold, FMath::Abs(MedianGap) * RatioThreshold);
 
 	if (MaxDiff <= EffectiveThreshold) return false;
 
-	// v2.2: 限制单次最大移动距离（3倍SnapThreshold）
-	float MaxMove = 3.0f * Threshold;
+	float MaxMove = FixerConstants::SpacingMaxMoveMultiplier * Threshold;
 
 	// 应用等距修正
 	bool bApplied = false;
@@ -499,8 +530,12 @@ bool FLayoutFixer::PassesConservatismCheck(
 	}
 
 	float MaxSnap = FMath::Max(SnapThresholdX, SnapThresholdY);
-	float MaxTotalMove = FMath::Max(0.03f, OriginalBounds.Num() * 2.0f * MaxSnap);
-	float MaxSingleMove = FMath::Max(0.02f, 3.0f * MaxSnap);
+	float MaxTotalMove = FMath::Max(
+		FixerConstants::ConservatismTotalMoveFloor,
+		OriginalBounds.Num() * FixerConstants::ConservatismTotalMovePerElement * MaxSnap);
+	float MaxSingleMove = FMath::Max(
+		FixerConstants::ConservatismSingleMoveFloor,
+		FixerConstants::ConservatismSingleMoveMultiplier * MaxSnap);
 
 	return (TotalMove <= MaxTotalMove) && (MaxMove <= MaxSingleMove);
 }
