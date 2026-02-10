@@ -356,6 +356,21 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 	}
 
 	FName WidgetName = SanitizeWidgetName(Node.Name, Node.Type);
+
+	// 去重：WidgetTree 中同名对象已存在时追加数字后缀
+	if (FindObject<UObject>(WidgetTree, *WidgetName.ToString()))
+	{
+		for (int32 Suffix = 1; Suffix < 1000; ++Suffix)
+		{
+			FName Candidate = FName(*FString::Printf(TEXT("%s_%d"), *WidgetName.ToString(), Suffix));
+			if (!FindObject<UObject>(WidgetTree, *Candidate.ToString()))
+			{
+				WidgetName = Candidate;
+				break;
+			}
+		}
+	}
+
 	UWidget* NewWidget = WidgetTree->ConstructWidget<UWidget>(WidgetClass, WidgetName);
 	if (!NewWidget)
 	{
