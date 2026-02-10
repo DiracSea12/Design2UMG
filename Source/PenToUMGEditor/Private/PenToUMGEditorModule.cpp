@@ -324,9 +324,15 @@ namespace
 	void ImportPenFile(const FString& FilePath, const FString& OutputPath, bool bUsePreview = true)
 	{
 		FUMGWidgetData Data;
-		if (!FPenImporter::ImportFromFile(FilePath, Data))
+		FString JsonStr;
+		if (!FFileHelper::LoadFileToString(JsonStr, *FilePath))
 		{
-			UE_LOG(LogPenToUMG, Error, TEXT("PenToUMG.Import: ImportFromFile failed: %s"), *FilePath);
+			UE_LOG(LogPenToUMG, Error, TEXT("PenToUMG.Import: Failed to read file: %s"), *FilePath);
+			return;
+		}
+		if (!FDesignSourceRegistry::Convert(TEXT("Pen"), JsonStr, Data))
+		{
+			UE_LOG(LogPenToUMG, Error, TEXT("PenToUMG.Import: Convert failed: %s"), *FilePath);
 			return;
 		}
 

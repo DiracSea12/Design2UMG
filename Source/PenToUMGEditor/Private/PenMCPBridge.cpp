@@ -1,7 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "PenMCPBridge.h"
-#include "PenImporter.h"
+#include "DesignSourceRegistry.h"
 #include "UMGSchema.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -116,5 +116,5 @@ bool FPenMCPBridge::ConvertFromMCP(
 	if (Json.IsEmpty())
 		return false;
 
-	return FPenImporter::ImportFromJson(Json, OutData);
+	return FDesignSourceRegistry::Convert(TEXT("Pen"), Json, OutData);
 }

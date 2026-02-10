@@ -3,9 +3,9 @@
 #include "PenFileImportFactory.h"
 #include "PenToUMGLog.h"
 #include "PenParser.h"
-#include "PenImporter.h"
 #include "PenMCPBridge.h"
 #include "PenRemoteImageImporter.h"
+#include "DesignSourceRegistry.h"
 #include "SPenToUMGPreviewWindow.h"
 #include "UMGGenerator.h"
 #include "UMGJsonParser.h"
@@ -145,9 +145,15 @@ TArray<FPenFrameInfo> ExtractTopFrames(const FPenDocument& Document)
 void ImportSingleFrame(const FString& FilePath, const FString& OutputPath)
 {
 	FUMGWidgetData Data;
-	if (!FPenImporter::ImportFromFile(FilePath, Data))
+	FString JsonStr;
+	if (!FFileHelper::LoadFileToString(JsonStr, *FilePath))
 	{
-		UE_LOG(LogPenToUMG, Error, TEXT("PenFileImport: ImportFromFile failed: %s"), *FilePath);
+		UE_LOG(LogPenToUMG, Error, TEXT("PenFileImport: Failed to read file: %s"), *FilePath);
+		return;
+	}
+	if (!FDesignSourceRegistry::Convert(TEXT("Pen"), JsonStr, Data))
+	{
+		UE_LOG(LogPenToUMG, Error, TEXT("PenFileImport: Convert failed: %s"), *FilePath);
 		return;
 	}
 
