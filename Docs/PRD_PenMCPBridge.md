@@ -2,7 +2,7 @@
 
 ## 1. 概述
 
-为 ImageToUMG 插件新增两个 C++ 模块：
+为 PenToUMG 插件新增两个 C++ 模块：
 
 1. **PenMCPBridge** — 从 Pencil MCP 协议获取 .pen 数据，组装为 PenParser 可消费的 JSON，喂入现有转换管线
 2. **VisualComparator** — 对比 Pencil 设计截图与 UE 渲染截图，输出结构化差异报告，供自动化迭代消费
@@ -197,7 +197,7 @@ JSON 报告，供自动化工作流消费：
 
 ### 4.1 依赖
 
-- 仅依赖 ImageToUMG 插件现有模块 + UE 核心模块
+- 仅依赖 PenToUMG 插件现有模块 + UE 核心模块
 - SSIM 实现不引入外部库（OpenCV 等）
 - AI 对比复用现有 `AIProviderStrategy` + `HttpAIClient`/`ScriptAIClient`
 
@@ -205,10 +205,10 @@ JSON 报告，供自动化工作流消费：
 
 | 文件 | 路径 |
 |------|------|
-| PenMCPBridge.h | `Source/ImageToUMGEditor/Public/` |
-| PenMCPBridge.cpp | `Source/ImageToUMGEditor/Private/` |
-| VisualComparator.h | `Source/ImageToUMGEditor/Public/` |
-| VisualComparator.cpp | `Source/ImageToUMGEditor/Private/` |
+| PenMCPBridge.h | `Source/PenToUMGEditor/Public/` |
+| PenMCPBridge.cpp | `Source/PenToUMGEditor/Private/` |
+| VisualComparator.h | `Source/PenToUMGEditor/Public/` |
+| VisualComparator.cpp | `Source/PenToUMGEditor/Private/` |
 
 ### 4.3 不做什么
 

@@ -1,14 +1,14 @@
-# ImageToUMG 插件使用指南
+# PenToUMG 插件使用指南
 
 ## 概述
 
-ImageToUMG 是一个 AI 驱动的图片转 UMG Widget Blueprint 生成器。它通过多模态 LLM（GPT-4o/Claude/Gemini）分析 UI 截图，自动生成对应的 Widget Blueprint。
+PenToUMG 是一个 AI 驱动的图片转 UMG Widget Blueprint 生成器。它通过多模态 LLM（GPT-4o/Claude/Gemini）分析 UI 截图，自动生成对应的 Widget Blueprint。
 
 ## 配置
 
 ### 1. 打开设置面板
 
-**路径**: `Edit → Editor Preferences → Plugins → Image To UMG`
+**路径**: `Edit → Editor Preferences → Plugins → Pen To UMG`
 
 ### 2. 配置 API
 
