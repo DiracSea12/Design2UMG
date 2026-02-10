@@ -11,6 +11,7 @@
 
 #include "PenParser.h"
 #include "PenImporter.h"
+#include "DesignSourceRegistry.h"
 
 #include "WidgetBlueprint.h"
 #include "Dom/JsonObject.h"
@@ -370,6 +371,11 @@ namespace
 
 void FPenToUMGEditorModule::StartupModule()
 {
+	// 注册 Pen 数据源适配器
+	FDesignSourceRegistry::Register(TEXT("Pen"), [](const FString& RawJson, FUMGWidgetData& OutData){
+		return FPenImporter::ImportFromJson(RawJson, OutData);
+	});
+
 	IConsoleManager::Get().RegisterConsoleCommand(
 		TEXT("PenToUMG.PenConvert"),
 		TEXT("Convert from MCP JSON: PenToUMG.PenConvert <nodes.json> <vars.json> [TargetNodeId] [--preview|--no-preview] [--out=/Game/Path]"),
@@ -463,6 +469,74 @@ void FPenToUMGEditorModule::StartupModule()
 		}),
 		ECVF_Default);
 
+	// PenToUMG.ImportSource 通用数据源导入命令
+	IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("PenToUMG.ImportSource"),
+		TEXT("Import from registered source: PenToUMG.ImportSource <SourceId> <json_file> [--out=/Game/Path] [--no-preview]"),
+		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
+		{
+			if (Args.Num() < 1)
+			{
+				TArray<FName> Sources = FDesignSourceRegistry::GetRegisteredSources();
+				UE_LOG(LogPenToUMG, Log, TEXT("Usage: PenToUMG.ImportSource <SourceId> <json_file> [--out=/Game/Path] [--no-preview]"));
+				UE_LOG(LogPenToUMG, Log, TEXT("Registered sources (%d):"), Sources.Num());
+				for (const FName& S : Sources)
+				{
+					UE_LOG(LogPenToUMG, Log, TEXT("  - %s"), *S.ToString());
+				}
+				return;
+			}
+
+			if (Args.Num() < 2)
+			{
+				UE_LOG(LogPenToUMG, Warning, TEXT("Usage: PenToUMG.ImportSource <SourceId> <json_file> [--out=/Game/Path] [--no-preview]"));
+				return;
+			}
+
+			const FName SourceId(*Args[0]);
+			const FString JsonPath = Args[1];
+			FString OutputPath = DefaultPenOutputPath;
+			bool bPreview = true;
+
+			for (int32 i = 2; i < Args.Num(); ++i)
+			{
+				if (Args[i].StartsWith(TEXT("--out=")))
+					OutputPath = Args[i].RightChop(6);
+				else if (Args[i] == TEXT("--no-preview"))
+					bPreview = false;
+			}
+
+			if (!FDesignSourceRegistry::IsRegistered(SourceId))
+			{
+				UE_LOG(LogPenToUMG, Error, TEXT("Unknown source: %s"), *SourceId.ToString());
+				return;
+			}
+
+			FString JsonStr;
+			if (!FFileHelper::LoadFileToString(JsonStr, *JsonPath))
+			{
+				UE_LOG(LogPenToUMG, Error, TEXT("Failed to read file: %s"), *JsonPath);
+				return;
+			}
+
+			FUMGWidgetData Data;
+			if (!FDesignSourceRegistry::Convert(SourceId, JsonStr, Data))
+			{
+				UE_LOG(LogPenToUMG, Error, TEXT("[FAIL] ImportSource convert failed for: %s"), *SourceId.ToString());
+				return;
+			}
+
+			UE_LOG(LogPenToUMG, Log, TEXT("[OK] ImportSource succeeded (%s), root children: %d"), *SourceId.ToString(), Data.RootWidget.Children.Num());
+
+			if (bPreview && TryOpenPreviewWindow(Data, OutputPath))
+			{
+				return;
+			}
+
+			GenerateWidgetAndPreviewPng(Data, OutputPath);
+		}),
+		ECVF_Default);
+
 	// 工具栏菜单注册
 	ToolMenusStartupHandle = UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateLambda([]()
 	{
@@ -501,6 +575,10 @@ void FPenToUMGEditorModule::ShutdownModule()
 	UToolMenus::UnregisterOwner(this);
 	IConsoleManager::Get().UnregisterConsoleObject(TEXT("PenToUMG.Import"), false);
 	IConsoleManager::Get().UnregisterConsoleObject(TEXT("PenToUMG.PenConvert"), false);
+	IConsoleManager::Get().UnregisterConsoleObject(TEXT("PenToUMG.ImportSource"), false);
+
+	// 反注册 Pen 数据源适配器
+	FDesignSourceRegistry::Unregister(TEXT("Pen"));
 }
 
 #undef LOCTEXT_NAMESPACE
