@@ -4,6 +4,7 @@
 #include "PenToUMGLog.h"
 
 #include "HttpModule.h"
+#include "HttpManager.h"
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
 #include "Serialization/JsonReader.h"

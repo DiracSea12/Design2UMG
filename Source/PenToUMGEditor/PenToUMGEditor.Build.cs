@@ -37,6 +37,8 @@ public class PenToUMGEditor : ModuleRules
 			"RenderCore",
 			"ToolMenus",
 			"DesktopPlatform",
+			"Sockets",
+			"Networking",
 		});
 	}
 }

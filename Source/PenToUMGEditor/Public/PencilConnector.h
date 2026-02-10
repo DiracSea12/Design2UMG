@@ -31,7 +31,7 @@ public:
 	bool IsRunning() const;
 
 private:
-	FProcHandle ServerProcess;
+	mutable FProcHandle ServerProcess;
 	FMCPHttpClient Client;
 	int32 ServerPort = 0;
 
