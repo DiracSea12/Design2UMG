@@ -4,10 +4,14 @@
 
 #include "CoreMinimal.h"
 #include "PenSchema.h"
+#include "PenVariableResolver.h"
 #include "UMGSchema.h"
 
 /**
- * .pen 节点树到 UMG Widget 树的转换器
+ * .pen 节点树到 UMG Widget 树的转换器（遍历+分发）
+ * 布局映射 → FPenLayoutMapper
+ * 视觉属性 → FPenVisualMapper
+ * 组件展开 → FPenRefExpander
  */
 class FPenToUMGConverter
 {
@@ -17,7 +21,7 @@ public:
 
 private:
 	/** 递归转换节点 */
-	static FUMGWidgetNode ConvertNode(const TSharedPtr<FPenNode>& Node, const FPenDocument& Doc);
+	static FUMGWidgetNode ConvertNode(const TSharedPtr<FPenNode>& Node, const FPenDocument& Doc, const TMap<FString, FString>& ThemeContext = TMap<FString, FString>());
 
 	/** 创建容器 Widget */
 	static FUMGWidgetNode CreateContainerWidget(const TSharedPtr<FPenNode>& Node);
@@ -30,49 +34,4 @@ private:
 
 	/** 应用文本属性 */
 	static void ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FPenNode>& Node);
-
-	/** 应用 Slot 属性 */
-	static void ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr<FPenNode>& Node, EPenLayout ParentLayout);
-
-	/** 应用视觉属性 */
-	static void ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedPtr<FPenNode>& Node);
-
-	/** 应用圆角 */
-	static void ApplyRoundedCorner(FUMGWidgetNode& Widget, const FPenCornerRadius& Radius);
-
-	/** 应用描边 */
-	static void ApplyStroke(FUMGWidgetNode& Widget, const FPenStroke& Stroke);
-
-	/** 展开组件引用 */
-	static TSharedPtr<FPenNode> ExpandRef(const TSharedPtr<FPenNode>& RefNode, const FPenDocument& Doc);
-
-	/** 应用 gap - 转换为子元素 Padding */
-	static void ApplyGap(TArray<FUMGWidgetNode>& Children, float Gap, EPenLayout Layout);
-
-	/** 应用 padding - 写入 Properties["Padding"] */
-	static void ApplyPadding(FUMGWidgetNode& Widget, const FPenPadding& Padding);
-
-	/** 应用 justifyContent - 通过 Spacer 实现主轴对齐 */
-	static void ApplyJustifyContent(TArray<FUMGWidgetNode>& Children, EPenJustifyContent Justify);
-
-	/** 应用 alignItems - 交叉轴对齐映射到 Slot */
-	static void ApplyAlignItems(FUMGWidgetNode& Widget, EPenAlignItems Align, EPenLayout ParentLayout);
-
-	/** 节点是否有内边距 */
-	static bool HasPadding(const TSharedPtr<FPenNode>& Node);
-
-	/** Box 布局中固定尺寸子节点需要 SizeBox 包裹 */
-	static FUMGWidgetNode WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, const TSharedPtr<FPenNode>& ChildNode);
-
-	/** VerticalBox/HorizontalBox 不支持背景色和 Padding，需要 Border 包裹 */
-	static FUMGWidgetNode WrapWithBorder(FUMGWidgetNode&& Widget, const TSharedPtr<FPenNode>& Node);
-
-	/** 深拷贝节点 */
-	static TSharedPtr<FPenNode> DeepCopyNode(const TSharedPtr<FPenNode>& Source);
-
-	/** 应用 descendants 覆盖 */
-	static void ApplyDescendantOverride(TSharedPtr<FPenNode>& Node, const FString& Path, const TSharedPtr<FPenNode>& Override);
-
-	/** BackgroundBlur Effect 包裹 */
-	static FUMGWidgetNode WrapWithBackgroundBlur(FUMGWidgetNode&& Widget, float BlurStrength);
 };
