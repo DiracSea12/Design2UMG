@@ -68,8 +68,11 @@ public:
 
 	// ========== Widget 属性应用 ==========
 
-	/** 应用类型特定的 Widget 属性 */
+	/** 应用类型特定的 Widget 属性（legacy string map） */
 	static void ApplyWidgetProperties(UWidget* Widget, const TMap<FString, FString>& Properties);
+
+	/** 应用类型特定的 Widget 属性（typed 优先，legacy 回退） */
+	static void ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNode& Node);
 
 	// ========== Widget 渲染 ==========
 

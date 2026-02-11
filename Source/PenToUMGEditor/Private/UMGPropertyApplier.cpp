@@ -652,6 +652,61 @@ namespace
 		};
 		return Map;
 	}
+
+	void ApplyTypedBorderBrush(UBorder* Bd, const FUMGBrushData& B)
+	{
+		FSlateBrush Brush = Bd->Background;
+		bool bChanged = false;
+
+		if (B.DrawAs != ESlateBrushDrawType::NoDrawType)
+		{
+			Brush.DrawAs = B.DrawAs;
+			bChanged = true;
+		}
+
+		if (B.OutlineCornerRadius >= 0)
+		{
+			if (B.OutlineCornerRadius >= 999.0f)
+				Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::HalfHeightRadius;
+			else
+			{
+				Brush.OutlineSettings.CornerRadii = FVector4(B.OutlineCornerRadius, B.OutlineCornerRadius, B.OutlineCornerRadius, B.OutlineCornerRadius);
+				Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
+			}
+			bChanged = true;
+		}
+
+		if (B.HasCornerRadii())
+		{
+			const float MaxR = FMath::Max3(B.CornerRadii.X, B.CornerRadii.Y, FMath::Max(B.CornerRadii.Z, B.CornerRadii.W));
+			if (MaxR >= 999.0f)
+				Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::HalfHeightRadius;
+			else
+			{
+				Brush.OutlineSettings.CornerRadii = B.CornerRadii;
+				Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
+			}
+			bChanged = true;
+		}
+
+		if (B.OutlineThickness > 0)
+		{
+			Brush.OutlineSettings.Width = B.OutlineThickness;
+			bChanged = true;
+		}
+
+		if (B.bHasOutlineColor)
+		{
+			Brush.OutlineSettings.Color = FSlateColor(B.OutlineColor);
+			bChanged = true;
+		}
+
+		if (bChanged)
+			Bd->Background = Brush;
+
+		if (B.bHasBrushColor)
+			Bd->SetBrushColor(B.BrushColor);
+	}
 }
 
 void FUMGWidgetUtils::ApplyCommonProperties(UWidget* W, const TMap<FString, FString>& Properties)
@@ -695,4 +750,46 @@ void FUMGWidgetUtils::ApplyWidgetProperties(UWidget* Widget, const TMap<FString,
 	}
 
 	ApplyCommonProperties(Widget, Properties);
+}
+
+void FUMGWidgetUtils::ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNode& Node)
+{
+	if (!Widget) return;
+
+	const FUMGBrushData& B = Node.Brush;
+
+	// TextBlock: typed FontSize / LetterSpacing 优先
+	if (UTextBlock* T = Cast<UTextBlock>(Widget))
+	{
+		if (B.FontSize > 0 || B.bHasLetterSpacing)
+		{
+			FSlateFontInfo FontInfo = T->GetFont();
+			bool bFontChanged = false;
+
+			if (B.FontSize > 0)
+			{
+				const float FontDPI = static_cast<float>(GetDefault<UUserInterfaceSettings>()->GetFontDisplayDPI());
+				FontInfo.Size = FMath::GridSnap(B.FontSize * FontDPI / static_cast<float>(FontConstants::RenderDPI), 0.01f);
+				bFontChanged = true;
+			}
+
+			if (B.bHasLetterSpacing && FontInfo.Size > 0)
+			{
+				FontInfo.LetterSpacing = FMath::RoundToInt(B.LetterSpacing / FontInfo.Size * 1000.0f);
+				bFontChanged = true;
+			}
+
+			if (bFontChanged)
+				T->SetFont(FontInfo);
+		}
+	}
+
+	// Border: typed Brush 属性优先
+	if (UBorder* Bd = Cast<UBorder>(Widget))
+	{
+		ApplyTypedBorderBrush(Bd, B);
+	}
+
+	// legacy 流程处理剩余属性
+	ApplyWidgetProperties(Widget, Node.Properties);
 }

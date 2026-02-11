@@ -423,7 +423,7 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 		}
 	}
 
-	ApplyWidgetProperties(NewWidget, Node.Properties);
+	ApplyWidgetProperties(NewWidget, Node);
 
 	// Image 控件：优先 MaterialRef 程序化生成，回退 TexturePath 纹理绑定
 	if (UImage* ImageWidget = Cast<UImage>(NewWidget))
@@ -900,13 +900,19 @@ namespace
 	 */
 	bool HandleImageMaterialRef(UImage* ImageWidget, const FUMGWidgetNode& Node)
 	{
-		const FString* MaterialRef = Node.Properties.Find(TEXT("MaterialRef"));
-		if (!MaterialRef) return false;
+		// typed 优先，legacy 回退
+		FString MatRef = Node.Brush.MaterialRef;
+		if (MatRef.IsEmpty())
+		{
+			const FString* Legacy = Node.Properties.Find(TEXT("MaterialRef"));
+			if (!Legacy) return false;
+			MatRef = *Legacy;
+		}
 
-		UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(*MaterialRef, Node.Properties, ImageWidget);
+		UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(MatRef, Node.Properties, ImageWidget);
 		if (!Texture)
 		{
-			UE_LOG(LogPenToUMG, Warning, TEXT("Image '%s' 未知形状类型: %s"), *Node.Name, **MaterialRef);
+			UE_LOG(LogPenToUMG, Warning, TEXT("Image '%s' 未知形状类型: %s"), *Node.Name, *MatRef);
 			return false;
 		}
 
@@ -922,10 +928,16 @@ namespace
 
 	bool HandleImageTextureRef(UImage* ImageWidget, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap)
 	{
-		const FString* TexturePath = Node.Properties.Find(TEXT("TexturePath"));
-		if (!TexturePath || TexturePath->IsEmpty()) return false;
+		// typed 优先，legacy 回退
+		FString TexPath = Node.Brush.TexturePath;
+		if (TexPath.IsEmpty())
+		{
+			const FString* Legacy = Node.Properties.Find(TEXT("TexturePath"));
+			if (!Legacy || Legacy->IsEmpty()) return false;
+			TexPath = *Legacy;
+		}
 
-		const FString TrimmedPath = TexturePath->TrimStartAndEnd();
+		const FString TrimmedPath = TexPath.TrimStartAndEnd();
 		UTexture2D* Texture = nullptr;
 
 		// 优先从 TextureMap 查找（预览场景使用内存纹理）

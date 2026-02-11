@@ -3,6 +3,7 @@
 #include "PenVisualMapper.h"
 #include "PenLayoutMapper.h"
 #include "PenToUMGLog.h"
+#include "UMGWidgetUtils.h"
 
 namespace
 {
@@ -36,6 +37,8 @@ namespace
 		if (Node->Fill.Type == EPenFillType::Color)
 		{
 			Widget.Properties.Add(TEXT("BrushColor"), Node->Fill.SolidColor);
+			Widget.Brush.BrushColor = FUMGWidgetUtils::ParseColor(Node->Fill.SolidColor);
+			Widget.Brush.bHasBrushColor = true;
 			if (Node->Type == EPenNodeType::Text)
 				Widget.Properties.Add(TEXT("Color"), Node->Fill.SolidColor);
 			return;
@@ -63,9 +66,13 @@ namespace
 			}
 
 			Widget.Properties.Add(TEXT("MaterialRef"), MaterialRef);
+			Widget.Brush.MaterialRef = MaterialRef;
 			const FString MaterialParams = BuildGradientMaterialParams(Node->Fill.Gradient);
 			if (!MaterialParams.IsEmpty())
+			{
 				Widget.Properties.Add(TEXT("MaterialParams"), MaterialParams);
+				Widget.Brush.MaterialParams = MaterialParams;
+			}
 			AddTextureSizeHints(Widget, Node);
 			return;
 		}
@@ -73,6 +80,7 @@ namespace
 		if (Node->Fill.Type == EPenFillType::Image && !Node->Fill.Image.Url.IsEmpty())
 		{
 			Widget.Properties.Add(TEXT("TexturePath"), Node->Fill.Image.Url);
+			Widget.Brush.TexturePath = Node->Fill.Image.Url;
 			AddTextureSizeHints(Widget, Node);
 		}
 	}
@@ -142,6 +150,8 @@ void FPenVisualMapper::ApplyRoundedCorner(FUMGWidgetNode& Widget, const FPenCorn
 		{
 			Widget.Properties.Add(TEXT("DrawAs"), TEXT("RoundedBox"));
 			Widget.Properties.Add(TEXT("OutlineCornerRadius"), FString::SanitizeFloat(Radius.Uniform));
+			Widget.Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
+			Widget.Brush.OutlineCornerRadius = Radius.Uniform;
 		}
 	}
 	else if (Radius.TopLeft > 0 || Radius.TopRight > 0 || Radius.BottomRight > 0 || Radius.BottomLeft > 0)
@@ -149,6 +159,8 @@ void FPenVisualMapper::ApplyRoundedCorner(FUMGWidgetNode& Widget, const FPenCorn
 		Widget.Properties.Add(TEXT("DrawAs"), TEXT("RoundedBox"));
 		Widget.Properties.Add(TEXT("CornerRadii"), FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"),
 			Radius.TopLeft, Radius.TopRight, Radius.BottomRight, Radius.BottomLeft));
+		Widget.Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
+		Widget.Brush.CornerRadii = FVector4(Radius.TopLeft, Radius.TopRight, Radius.BottomRight, Radius.BottomLeft);
 	}
 }
 
@@ -162,12 +174,21 @@ void FPenVisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FPenStroke& Str
 		return;
 
 	if (!Widget.Properties.Contains(TEXT("DrawAs")))
+	{
 		Widget.Properties.Add(TEXT("DrawAs"), TEXT("RoundedBox"));
+		if (Widget.Brush.DrawAs == ESlateBrushDrawType::NoDrawType)
+			Widget.Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
+	}
 
 	Widget.Properties.Add(TEXT("OutlineThickness"), FString::SanitizeFloat(Thickness));
+	Widget.Brush.OutlineThickness = Thickness;
 
 	if (Stroke.Fill.Type == EPenFillType::Color)
+	{
 		Widget.Properties.Add(TEXT("OutlineColor"), Stroke.Fill.SolidColor);
+		Widget.Brush.OutlineColor = FUMGWidgetUtils::ParseColor(Stroke.Fill.SolidColor);
+		Widget.Brush.bHasOutlineColor = true;
+	}
 }
 
 FUMGWidgetNode FPenVisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TSharedPtr<FPenNode>& Node)
@@ -177,6 +198,10 @@ FUMGWidgetNode FPenVisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const T
 	Border.Id = Widget.Id;
 	Border.Name = Widget.Name;
 	Border.Bounds = Widget.Bounds;
+
+	// 转移 Brush typed 数据到 Border
+	Border.Brush = Widget.Brush;
+	Widget.Brush = FUMGBrushData();
 
 	bool bHasBackgroundProperty = false;
 	for (const FString& Key : {TEXT("BrushColor"), TEXT("TexturePath"), TEXT("MaterialRef"), TEXT("MaterialParams"), TEXT("WidthOverride"), TEXT("HeightOverride")})
@@ -189,7 +214,14 @@ FUMGWidgetNode FPenVisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const T
 		}
 	}
 	if (!bHasBackgroundProperty)
+	{
 		Border.Properties.Add(TEXT("BrushColor"), TEXT("#00000000"));
+		if (!Border.Brush.bHasBrushColor)
+		{
+			Border.Brush.BrushColor = FLinearColor::Transparent;
+			Border.Brush.bHasBrushColor = true;
+		}
+	}
 
 	if (FPenLayoutMapper::HasPadding(Node))
 		FPenLayoutMapper::ApplyPadding(Border, Node->Padding);
