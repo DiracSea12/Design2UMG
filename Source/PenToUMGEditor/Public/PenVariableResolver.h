@@ -20,6 +20,12 @@ public:
 		Variables = InVariables;
 	}
 
+	/** 设置当前主题上下文，用于选择正确的主题值 */
+	void SetThemeContext(const TMap<FString, FString>& InTheme)
+	{
+		ThemeContext = InTheme;
+	}
+
 	/** 解析字符串值，替换变量引用 */
 	FString ResolveString(const FString& Value) const;
 
@@ -37,7 +43,11 @@ public:
 
 private:
 	TMap<FString, FPenVariable> Variables;
+	TMap<FString, FString> ThemeContext;
 
 	/** 获取变量值 */
 	const FPenVariable* GetVariable(const FString& VarName) const;
+
+	/** 根据当前主题上下文从变量的主题值数组中选择正确的值 */
+	FString ResolveThemedValue(const FPenVariable& Var) const;
 };

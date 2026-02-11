@@ -119,6 +119,9 @@ struct FPenGradientStop
 	UPROPERTY()
 	FString Color;
 
+	/** 原始变量引用名，用于主题切换时重新解析 */
+	FString SourceVar;
+
 	UPROPERTY()
 	float Position = 0.0f;
 };
@@ -196,6 +199,9 @@ struct FPenFill
 	UPROPERTY()
 	FString SolidColor;
 
+	/** 原始变量引用名（如 "$--background"），用于主题切换时重新解析 */
+	FString SourceVar;
+
 	UPROPERTY()
 	FPenGradient Gradient;
 
@@ -204,6 +210,7 @@ struct FPenFill
 
 	UPROPERTY()
 	bool bEnabled = true;
+	bool bExplicitClear = false;  // fill:[] 显式清除
 
 	bool IsNone() const { return Type == EPenFillType::None; }
 	bool IsColor() const { return Type == EPenFillType::Color; }
@@ -392,6 +399,21 @@ enum class EPenVariableType : uint8
 };
 
 /**
+ * 主题值条目（变量在某个主题下的值）
+ */
+USTRUCT()
+struct FPenThemeValue
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TMap<FString, FString> ThemeMatch;  // 如 {"Mode": "Dark"}
+
+	UPROPERTY()
+	FString Value;
+};
+
+/**
  * 变量定义结构
  */
 USTRUCT()
@@ -406,7 +428,10 @@ struct FPenVariable
 	EPenVariableType Type = EPenVariableType::String;
 
 	UPROPERTY()
-	FString Value;  // 存储为字符串，使用时转换
+	FString Value;  // 默认值（无主题时使用）
+
+	UPROPERTY()
+	TArray<FPenThemeValue> ThemedValues;  // 主题值数组
 };
 
 /**
@@ -446,6 +471,9 @@ struct FPenShadow
 
 	UPROPERTY()
 	FString Color;
+
+	/** 原始变量引用名，用于主题切换时重新解析 */
+	FString ColorSourceVar;
 };
 
 /**
@@ -478,6 +506,7 @@ struct FPenNode
 	FString Id;
 	FString Name;
 	EPenNodeType Type = EPenNodeType::Unknown;
+	TMap<FString, FString> Theme;  // 节点级主题设置，如 {"Mode": "Dark"}
 
 	// 位置和尺寸
 	float X = 0.0f;
@@ -486,6 +515,8 @@ struct FPenNode
 	bool bHasY = false;
 	FPenSize Width;
 	FPenSize Height;
+	bool bHasWidth = false;
+	bool bHasHeight = false;
 	float Rotation = 0.0f;
 
 	// 可见性

@@ -51,9 +51,19 @@ bool PenImportUtils::GenerateBlueprintAndPng(const FUMGWidgetData& Data, const F
 	if (!WBP)
 		return false;
 
+	// 优先用 RootWidget 自身的 Bounds，否则从子节点边界计算
+	float MaxRight = FMath::Max(400.0f, Data.RootWidget.Bounds.W);
+	float MaxBottom = FMath::Max(300.0f, Data.RootWidget.Bounds.H);
+	for (const auto& Child : Data.RootWidget.Children)
+	{
+		MaxRight = FMath::Max(MaxRight, Child.Bounds.X + Child.Bounds.W);
+		MaxBottom = FMath::Max(MaxBottom, Child.Bounds.Y + Child.Bounds.H);
+	}
+	const FIntPoint FallbackSize(FMath::CeilToInt(MaxRight), FMath::CeilToInt(MaxBottom));
+
 	TArray<uint8> PngData;
 	FIntPoint Size;
-	if (!FUMGWidgetUtils::RenderWidgetToPng(WBP, FIntPoint(400, 300), PngData, Size))
+	if (!FUMGWidgetUtils::RenderWidgetToPng(WBP, FallbackSize, PngData, Size))
 	{
 		UE_LOG(LogPenToUMG, Error, TEXT("PenImportUtils: Widget PNG render failed"));
 		return false;

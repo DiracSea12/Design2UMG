@@ -35,6 +35,66 @@ namespace
 		return nullptr;
 	}
 
+	/** 收集所有 reusable 节点（组件定义），ref 展开时需要 */
+	void CollectReusableNodes(const TArray<TSharedPtr<FJsonValue>>& Nodes, TArray<TSharedPtr<FJsonValue>>& OutReusable)
+	{
+		for (const auto& Node : Nodes)
+		{
+			const TSharedPtr<FJsonObject>& Obj = Node->AsObject();
+			if (!Obj.IsValid())
+				continue;
+
+			bool bReusable = false;
+			if (Obj->TryGetBoolField(TEXT("reusable"), bReusable) && bReusable)
+			{
+				OutReusable.Add(Node);
+			}
+
+			const TArray<TSharedPtr<FJsonValue>>* Children = nullptr;
+			if (Obj->TryGetArrayField(TEXT("children"), Children) && Children != nullptr)
+			{
+				CollectReusableNodes(*Children, OutReusable);
+			}
+		}
+	}
+
+	/** 按 TargetNodeId 过滤，同时保留所有 reusable 组件定义 */
+	TArray<TSharedPtr<FJsonValue>> FilterWithReusables(
+		const TArray<TSharedPtr<FJsonValue>>& AllChildren,
+		const FString& TargetNodeId)
+	{
+		TSharedPtr<FJsonValue> Found = FindNodeById(AllChildren, TargetNodeId);
+		if (!Found.IsValid())
+			return TArray<TSharedPtr<FJsonValue>>();
+
+		// 收集所有 reusable 节点
+		TArray<TSharedPtr<FJsonValue>> Result;
+		CollectReusableNodes(AllChildren, Result);
+
+		// 去重：如果目标节点本身就是 reusable，不要重复添加
+		FString TargetId;
+		if (const TSharedPtr<FJsonObject>& FoundObj = Found->AsObject())
+			FoundObj->TryGetStringField(TEXT("id"), TargetId);
+
+		bool bAlreadyIncluded = false;
+		for (const auto& R : Result)
+		{
+			FString RId;
+			if (const TSharedPtr<FJsonObject>& RObj = R->AsObject())
+				RObj->TryGetStringField(TEXT("id"), RId);
+			if (RId == TargetId)
+			{
+				bAlreadyIncluded = true;
+				break;
+			}
+		}
+
+		if (!bAlreadyIncluded)
+			Result.Add(Found);
+
+		return Result;
+	}
+
 	/** 从源对象组装标准文档 JSON 并序列化 */
 	FString BuildDocumentJson(
 		const TSharedPtr<FJsonObject>& SourceObj,
@@ -92,17 +152,16 @@ FString FPenMCPBridge::AssembleDocumentJson(
 		VarsObj = MakeShared<FJsonObject>();
 	}
 
-	// 如果指定了 TargetNodeId，过滤
+	// 如果指定了 TargetNodeId，过滤（保留 reusable 组件定义）
 	TArray<TSharedPtr<FJsonValue>> Children;
 	if (!TargetNodeId.IsEmpty())
 	{
-		TSharedPtr<FJsonValue> Found = FindNodeById(NodesArr, TargetNodeId);
-		if (!Found.IsValid())
+		Children = FilterWithReusables(NodesArr, TargetNodeId);
+		if (Children.Num() == 0)
 		{
 			UE_LOG(LogPenMCPBridge, Error, TEXT("TargetNodeId '%s' not found"), *TargetNodeId);
 			return TEXT("");
 		}
-		Children.Add(Found);
 	}
 	else
 	{
@@ -141,17 +200,16 @@ bool FPenMCPBridge::ConvertFromParsedDoc(
 		Children = *ChildrenPtr;
 	}
 
-	// 按 TargetNodeId 过滤
+	// 按 TargetNodeId 过滤（保留 reusable 组件定义）
 	if (!TargetNodeId.IsEmpty())
 	{
-		TSharedPtr<FJsonValue> Found = FindNodeById(Children, TargetNodeId);
-		if (!Found.IsValid())
+		TArray<TSharedPtr<FJsonValue>> Filtered = FilterWithReusables(Children, TargetNodeId);
+		if (Filtered.Num() == 0)
 		{
 			UE_LOG(LogPenMCPBridge, Error, TEXT("TargetNodeId '%s' not found"), *TargetNodeId);
 			return false;
 		}
-		Children.Empty();
-		Children.Add(Found);
+		Children = MoveTemp(Filtered);
 	}
 
 	FString Json = BuildDocumentJson(DocObj, Children);

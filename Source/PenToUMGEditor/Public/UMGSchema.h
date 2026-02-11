@@ -107,6 +107,10 @@ struct FUMGSlotData
 	UPROPERTY()
 	float FillWeight = 1.0f;
 
+	// CanvasPanel: Size To Content
+	UPROPERTY()
+	bool bAutoSize = false;
+
 	// GridPanel 专用
 	UPROPERTY()
 	int32 Row = 0;

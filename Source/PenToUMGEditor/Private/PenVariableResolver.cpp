@@ -14,15 +14,42 @@ const FPenVariable* FPenVariableResolver::GetVariable(const FString& VarName) co
 	return Variables.Find(VarName);
 }
 
+FString FPenVariableResolver::ResolveThemedValue(const FPenVariable& Var) const
+{
+	if (Var.ThemedValues.Num() == 0 || ThemeContext.Num() == 0)
+		return Var.Value;
+
+	// 遍历主题值，找到与当前主题上下文匹配的
+	for (const FPenThemeValue& TV : Var.ThemedValues)
+	{
+		if (TV.ThemeMatch.Num() == 0)
+			continue;
+
+		bool bMatch = true;
+		for (const auto& Pair : TV.ThemeMatch)
+		{
+			const FString* ContextVal = ThemeContext.Find(Pair.Key);
+			if (!ContextVal || *ContextVal != Pair.Value)
+			{
+				bMatch = false;
+				break;
+			}
+		}
+		if (bMatch)
+			return TV.Value;
+	}
+
+	return Var.Value;
+}
+
 FString FPenVariableResolver::ResolveString(const FString& Value) const
 {
 	if (!IsVariableRef(Value))
 		return Value;
 
-	// 去掉 $ 前缀，保留完整变量名（可能包含 --）
 	FString VarName = Value.Mid(1);
 	if (const FPenVariable* Var = GetVariable(VarName))
-		return Var->Value;
+		return ResolveThemedValue(*Var);
 
 	UE_LOG(LogPenToUMG, Warning, TEXT("PenVariableResolver: Variable not found: %s"), *VarName);
 	return Value;

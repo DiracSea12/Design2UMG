@@ -375,23 +375,26 @@ void FPenToUMGEditorModule::StartupModule()
 	// PenToUMG.Import 命令
 	IConsoleManager::Get().RegisterConsoleCommand(
 		TEXT("PenToUMG.Import"),
-		TEXT("Import .pen file: PenToUMG.Import <file.pen> [--out=/Game/Path] [--no-preview]"),
+		TEXT("Import .pen file: PenToUMG.Import <file.pen> [--node=<id>] [--out=/Game/Path] [--no-preview]"),
 		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
 		{
 			if (Args.Num() < 1)
 			{
-				UE_LOG(LogPenToUMG, Warning, TEXT("Usage: PenToUMG.Import <file.pen> [--out=/Game/Path] [--no-preview]"));
+				UE_LOG(LogPenToUMG, Warning, TEXT("Usage: PenToUMG.Import <file.pen> [--node=<id>] [--out=/Game/Path] [--no-preview]"));
 				return;
 			}
 
 			const FString FilePath = Args[0];
 			FString OutputPath = DefaultPenOutputPath;
+			FString TargetNodeId;
 			bool bPreview = true;
 
 			for (int32 i = 1; i < Args.Num(); ++i)
 			{
 				if (Args[i].StartsWith(TEXT("--out=")))
 					OutputPath = Args[i].RightChop(6);
+				else if (Args[i].StartsWith(TEXT("--node=")))
+					TargetNodeId = Args[i].RightChop(7);
 				else if (Args[i] == TEXT("--no-preview"))
 					bPreview = false;
 			}
@@ -402,7 +405,14 @@ void FPenToUMGEditorModule::StartupModule()
 				return;
 			}
 
-			ImportPenFile(FilePath, OutputPath, bPreview);
+			if (TargetNodeId.IsEmpty())
+			{
+				ImportPenFile(FilePath, OutputPath, bPreview);
+			}
+			else
+			{
+				ImportPenFileWithTargetNode(FilePath, TargetNodeId, OutputPath, bPreview);
+			}
 		}),
 		ECVF_Default);
 

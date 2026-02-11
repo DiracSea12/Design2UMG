@@ -40,25 +40,12 @@ namespace
 
 	FIntPoint ComputePreviewRenderSize(UUserWidget* Widget, const FIntPoint& FallbackSize, const TSharedRef<SVirtualWindow>& Window)
 	{
-		FIntPoint Result = FallbackSize;
-		if (!Widget) return Result;
+		if (!Widget) return FallbackSize;
 
-		const FIntPoint WindowSize = GetDesignerPreviewWindowSize(FallbackSize);
-		Window->Resize(FVector2D(WindowSize.X, WindowSize.Y));
+		// 直接用调用方传入的尺寸，不读编辑器 Designer 配置（那是给 UMG 预览用的）
+		Window->Resize(FVector2D(FallbackSize.X, FallbackSize.Y));
 		Window->SlatePrepass(1.0f);
-
-		FVector2D DesiredSize = Window->GetDesiredSize();
-		if (DesiredSize.X <= SMALL_NUMBER || DesiredSize.Y <= SMALL_NUMBER)
-			DesiredSize = FVector2D(WindowSize.X, WindowSize.Y);
-
-		FVector2D UnscaledSize = FWidgetBlueprintEditorUtils::GetWidgetPreviewUnScaledCustomSize(
-			DesiredSize, Widget, TOptional<FVector2D>(), EThumbnailPreviewSizeMode::MatchDesignerMode);
-		if (UnscaledSize.X <= SMALL_NUMBER || UnscaledSize.Y <= SMALL_NUMBER)
-			UnscaledSize = DesiredSize;
-
-		Result.X = FMath::Max(1, FMath::CeilToInt(UnscaledSize.X));
-		Result.Y = FMath::Max(1, FMath::CeilToInt(UnscaledSize.Y));
-		return Result;
+		return FallbackSize;
 	}
 }
 
@@ -94,7 +81,7 @@ bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, const FIntPo
 	RT->SRGB = true;
 	RT->RenderTargetFormat = RTF_RGBA8;
 	const EPixelFormat Fmt = FSlateApplication::Get().GetRenderer()->GetSlateRecommendedColorFormat();
-	RT->InitCustomFormat(EffectiveSize.X, EffectiveSize.Y, Fmt, false);
+	RT->InitCustomFormat(EffectiveSize.X, EffectiveSize.Y, Fmt, true);
 
 	FWidgetRenderer Renderer(true);
 	Renderer.SetIsPrepassNeeded(false);

@@ -112,21 +112,42 @@ void FPenParser::ParseVariables(const TSharedPtr<FJsonObject>& JsonObj, TMap<FSt
 		}
 		if (ValueField->Type == EJson::Array)
 		{
-			// 主题值数组，取第一个作为默认值
 			const TArray<TSharedPtr<FJsonValue>>& Arr = ValueField->AsArray();
-			if (Arr.Num() > 0)
+			for (int32 i = 0; i < Arr.Num(); ++i)
 			{
-				const TSharedPtr<FJsonObject>& FirstObj = Arr[0]->AsObject();
-				const TSharedPtr<FJsonValue>& Val = FirstObj->TryGetField(TEXT("value"));
+				const TSharedPtr<FJsonObject>& EntryObj = Arr[i]->AsObject();
+				if (!EntryObj.IsValid())
+					continue;
+
+				FString EntryValue;
+				const TSharedPtr<FJsonValue>& Val = EntryObj->TryGetField(TEXT("value"));
 				if (Val.IsValid())
 				{
 					if (Val->Type == EJson::String)
-						Var.Value = Val->AsString();
+						EntryValue = Val->AsString();
 					else if (Val->Type == EJson::Number)
-						Var.Value = FString::SanitizeFloat(Val->AsNumber());
+						EntryValue = FString::SanitizeFloat(Val->AsNumber());
 					else if (Val->Type == EJson::Boolean)
-						Var.Value = Val->AsBool() ? TEXT("true") : TEXT("false");
+						EntryValue = Val->AsBool() ? TEXT("true") : TEXT("false");
 				}
+
+				// 第一个条目作为默认值
+				if (i == 0)
+					Var.Value = EntryValue;
+
+				// 保存主题值条目
+				FPenThemeValue TV;
+				TV.Value = EntryValue;
+				if (EntryObj->HasField(TEXT("theme")))
+				{
+					const TSharedPtr<FJsonObject>& ThemeObj = EntryObj->GetObjectField(TEXT("theme"));
+					for (const auto& TP : ThemeObj->Values)
+					{
+						if (TP.Value->Type == EJson::String)
+							TV.ThemeMatch.Add(TP.Key, TP.Value->AsString());
+					}
+				}
+				Var.ThemedValues.Add(MoveTemp(TV));
 			}
 		}
 		else
@@ -156,6 +177,25 @@ TSharedPtr<FPenNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonOb
 	JsonObj->TryGetStringField(TEXT("name"), Node->Name);
 	Node->Type = ParseNodeType(JsonObj->GetStringField(TEXT("type")));
 
+	// 节点级主题设置 - 影响当前节点及子节点的变量解析
+	const FPenVariableResolver* ActiveResolver = &Resolver;
+	FPenVariableResolver ThemedResolver;
+	if (JsonObj->HasField(TEXT("theme")))
+	{
+		const TSharedPtr<FJsonObject>& ThemeObj = JsonObj->GetObjectField(TEXT("theme"));
+		for (const auto& Pair : ThemeObj->Values)
+		{
+			if (Pair.Value->Type == EJson::String)
+				Node->Theme.Add(Pair.Key, Pair.Value->AsString());
+		}
+		if (Node->Theme.Num() > 0)
+		{
+			ThemedResolver = Resolver;
+			ThemedResolver.SetThemeContext(Node->Theme);
+			ActiveResolver = &ThemedResolver;
+		}
+	}
+
 	// 位置
 	if (JsonObj->HasField(TEXT("x")))
 		Node->bHasX = JsonObj->TryGetNumberField(TEXT("x"), Node->X);
@@ -168,16 +208,28 @@ TSharedPtr<FPenNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonOb
 	{
 		const auto& SizeObj = JsonObj->GetObjectField(TEXT("size"));
 		if (SizeObj->HasField(TEXT("width")))
+		{
 			Node->Width = FPenSize::Fixed(SizeObj->GetNumberField(TEXT("width")));
+			Node->bHasWidth = true;
+		}
 		if (SizeObj->HasField(TEXT("height")))
+		{
 			Node->Height = FPenSize::Fixed(SizeObj->GetNumberField(TEXT("height")));
+			Node->bHasHeight = true;
+		}
 	}
 
 	// 顶层 width/height 优先级更高
 	if (JsonObj->HasField(TEXT("width")))
-		Node->Width = ParseSize(JsonObj->TryGetField(TEXT("width")), Node->Type, Resolver);
+	{
+		Node->Width = ParseSize(JsonObj->TryGetField(TEXT("width")), Node->Type, *ActiveResolver);
+		Node->bHasWidth = true;
+	}
 	if (JsonObj->HasField(TEXT("height")))
-		Node->Height = ParseSize(JsonObj->TryGetField(TEXT("height")), Node->Type, Resolver);
+	{
+		Node->Height = ParseSize(JsonObj->TryGetField(TEXT("height")), Node->Type, *ActiveResolver);
+		Node->bHasHeight = true;
+	}
 
 	// 可见性
 	if (JsonObj->HasField(TEXT("enabled")))
@@ -186,12 +238,11 @@ TSharedPtr<FPenNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonOb
 	JsonObj->TryGetBoolField(TEXT("flipX"), Node->bFlipX);
 	JsonObj->TryGetBoolField(TEXT("flipY"), Node->bFlipY);
 
-	// 布局属性 - 根据节点类型设置默认值（Frame默认horizontal，Group默认none）
+	// 布局属性 - Frame 默认 Horizontal，Group 默认 None
 	if (JsonObj->HasField(TEXT("layout")))
 		Node->Layout = ParseLayout(JsonObj->GetStringField(TEXT("layout")));
 	else if (Node->Type == EPenNodeType::Group)
-		Node->Layout = EPenLayout::None;  // Group 默认 none
-	// Frame 保持默认 Horizontal（在 FPenNode 中定义）
+		Node->Layout = EPenLayout::None;
 	JsonObj->TryGetNumberField(TEXT("gap"), Node->Gap);
 	if (JsonObj->HasField(TEXT("padding")))
 		Node->Padding = ParsePadding(JsonObj->TryGetField(TEXT("padding")));
@@ -204,22 +255,22 @@ TSharedPtr<FPenNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonOb
 
 	// 视觉属性
 	if (JsonObj->HasField(TEXT("fill")))
-		Node->Fill = ParseFill(JsonObj->TryGetField(TEXT("fill")), Resolver);
+		Node->Fill = ParseFill(JsonObj->TryGetField(TEXT("fill")), *ActiveResolver);
 	if (JsonObj->HasField(TEXT("stroke")))
-		Node->Stroke = ParseStroke(JsonObj->GetObjectField(TEXT("stroke")), Resolver);
+		Node->Stroke = ParseStroke(JsonObj->GetObjectField(TEXT("stroke")), *ActiveResolver);
 	if (JsonObj->HasField(TEXT("cornerRadius")))
-		Node->CornerRadius = Resolver.ResolveCornerRadius(JsonObj->TryGetField(TEXT("cornerRadius")));
+		Node->CornerRadius = ActiveResolver->ResolveCornerRadius(JsonObj->TryGetField(TEXT("cornerRadius")));
 
 	// 继续解析其他属性...
-	ParseNodeExtended(JsonObj, Node, Resolver);
+	ParseNodeExtended(JsonObj, Node, *ActiveResolver);
 
-	// 子节点
+	// 子节点（继承主题上下文）
 	if (JsonObj->HasField(TEXT("children")))
 	{
 		const auto& ChildrenArr = JsonObj->GetArrayField(TEXT("children"));
 		for (const auto& ChildVal : ChildrenArr)
 		{
-			if (auto Child = ParseNode(ChildVal->AsObject(), Resolver))
+			if (auto Child = ParseNode(ChildVal->AsObject(), *ActiveResolver))
 				Node->Children.Add(Child);
 		}
 	}
@@ -316,10 +367,12 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 
 				EffectObj->TryGetNumberField(TEXT("blur"), Effect.Shadow.Blur);
 				EffectObj->TryGetNumberField(TEXT("spread"), Effect.Shadow.Spread);
-				Effect.Shadow.Color = Resolver.ResolveColor(
-					EffectObj->HasField(TEXT("color"))
+				FString ShadowColorStr = EffectObj->HasField(TEXT("color"))
 					? EffectObj->GetStringField(TEXT("color"))
-					: TEXT("#00000040"));
+					: TEXT("#00000040");
+				if (FPenVariableResolver::IsVariableRef(ShadowColorStr))
+					Effect.Shadow.ColorSourceVar = ShadowColorStr;
+				Effect.Shadow.Color = Resolver.ResolveColor(ShadowColorStr);
 			}
 
 			Node->Effects.Add(MoveTemp(Effect));
@@ -330,37 +383,82 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 	JsonObj->TryGetStringField(TEXT("ref"), Node->Ref);
 	JsonObj->TryGetBoolField(TEXT("reusable"), Node->bReusable);
 
-	// 解析 descendants（ref 实例的属性覆盖）
+	// 解析 descendants（ref 实例的属性覆盖或对象替换）
 	if (JsonObj->HasField(TEXT("descendants")))
 	{
 		const TSharedPtr<FJsonObject>& DescObj = JsonObj->GetObjectField(TEXT("descendants"));
 		for (const auto& Pair : DescObj->Values)
 		{
-			if (Pair.Value->Type == EJson::Object)
+			if (Pair.Value->Type != EJson::Object)
+				continue;
+
+			const TSharedPtr<FJsonObject>& OverrideObj = Pair.Value->AsObject();
+
+			// 对象替换模式：含 type 字段，用 ParseNode 完整解析
+			if (OverrideObj->HasField(TEXT("type")))
 			{
-				TSharedPtr<FPenNode> DescNode = MakeShared<FPenNode>();
-				// 重置默认值，避免污染覆盖判断
-				DescNode->FontSize = 0.0f;
-				DescNode->FontWeight = TEXT("");
-				// 只解析覆盖的属性，不递归解析完整节点
-				const TSharedPtr<FJsonObject>& OverrideObj = Pair.Value->AsObject();
-				OverrideObj->TryGetStringField(TEXT("content"), DescNode->Content);
-				OverrideObj->TryGetNumberField(TEXT("fontSize"), DescNode->FontSize);
-				OverrideObj->TryGetStringField(TEXT("fontWeight"), DescNode->FontWeight);
-				if (OverrideObj->HasField(TEXT("fill")))
-					DescNode->Fill = ParseFill(OverrideObj->TryGetField(TEXT("fill")), Resolver);
-				if (OverrideObj->TryGetNumberField(TEXT("width"), DescNode->Width.Value))
-					DescNode->Width.Mode = EPenSizeMode::Fixed;
-				if (OverrideObj->TryGetNumberField(TEXT("height"), DescNode->Height.Value))
-					DescNode->Height.Mode = EPenSizeMode::Fixed;
-				if (OverrideObj->HasField(TEXT("x")))
-					DescNode->bHasX = OverrideObj->TryGetNumberField(TEXT("x"), DescNode->X);
-				if (OverrideObj->HasField(TEXT("y")))
-					DescNode->bHasY = OverrideObj->TryGetNumberField(TEXT("y"), DescNode->Y);
-				if (OverrideObj->HasField(TEXT("enabled")))
-					DescNode->bEnabled = OverrideObj->GetBoolField(TEXT("enabled"));
-				Node->Descendants.Add(Pair.Key, DescNode);
+				if (auto FullNode = ParseNode(OverrideObj, Resolver))
+					Node->Descendants.Add(Pair.Key, FullNode);
+				continue;
 			}
+
+			// 属性覆盖模式
+			TSharedPtr<FPenNode> DescNode = MakeShared<FPenNode>();
+			DescNode->FontSize = 0.0f;
+			DescNode->FontWeight = TEXT("");
+
+			OverrideObj->TryGetStringField(TEXT("content"), DescNode->Content);
+			OverrideObj->TryGetNumberField(TEXT("fontSize"), DescNode->FontSize);
+			OverrideObj->TryGetStringField(TEXT("fontWeight"), DescNode->FontWeight);
+			OverrideObj->TryGetStringField(TEXT("fontFamily"), DescNode->FontFamily);
+			if (OverrideObj->HasField(TEXT("fill")))
+				DescNode->Fill = ParseFill(OverrideObj->TryGetField(TEXT("fill")), Resolver);
+			if (OverrideObj->HasField(TEXT("stroke")))
+				DescNode->Stroke = ParseStroke(OverrideObj->GetObjectField(TEXT("stroke")), Resolver);
+
+			// 尺寸覆盖（支持字符串格式如 "fill_container"、"fit_content"）
+			if (OverrideObj->HasField(TEXT("width")))
+			{
+				DescNode->Width = ParseSize(OverrideObj->TryGetField(TEXT("width")), EPenNodeType::Frame, Resolver);
+				DescNode->bHasWidth = true;
+			}
+			if (OverrideObj->HasField(TEXT("height")))
+			{
+				DescNode->Height = ParseSize(OverrideObj->TryGetField(TEXT("height")), EPenNodeType::Frame, Resolver);
+				DescNode->bHasHeight = true;
+			}
+
+			if (OverrideObj->HasField(TEXT("x")))
+				DescNode->bHasX = OverrideObj->TryGetNumberField(TEXT("x"), DescNode->X);
+			if (OverrideObj->HasField(TEXT("y")))
+				DescNode->bHasY = OverrideObj->TryGetNumberField(TEXT("y"), DescNode->Y);
+			if (OverrideObj->HasField(TEXT("enabled")))
+				DescNode->bEnabled = OverrideObj->GetBoolField(TEXT("enabled"));
+			if (OverrideObj->HasField(TEXT("padding")))
+				DescNode->Padding = ParsePadding(OverrideObj->TryGetField(TEXT("padding")));
+			OverrideObj->TryGetNumberField(TEXT("gap"), DescNode->Gap);
+			if (OverrideObj->HasField(TEXT("justifyContent")))
+				DescNode->JustifyContent = ParseJustifyContent(OverrideObj->GetStringField(TEXT("justifyContent")));
+			if (OverrideObj->HasField(TEXT("alignItems")))
+				DescNode->AlignItems = ParseAlignItems(OverrideObj->GetStringField(TEXT("alignItems")));
+			if (OverrideObj->HasField(TEXT("textAlign")))
+				DescNode->TextAlign = ParseTextAlign(OverrideObj->GetStringField(TEXT("textAlign")));
+			OverrideObj->TryGetNumberField(TEXT("lineHeight"), DescNode->LineHeight);
+			if (OverrideObj->HasField(TEXT("textGrowth")))
+				DescNode->TextGrowth = ParseTextGrowth(OverrideObj->GetStringField(TEXT("textGrowth")));
+
+			// children 覆盖：完整替换子节点
+			if (OverrideObj->HasField(TEXT("children")))
+			{
+				const auto& ChildArr = OverrideObj->GetArrayField(TEXT("children"));
+				for (const auto& ChildVal : ChildArr)
+				{
+					if (auto Child = ParseNode(ChildVal->AsObject(), Resolver))
+						DescNode->Children.Add(Child);
+				}
+			}
+
+			Node->Descendants.Add(Pair.Key, DescNode);
 		}
 	}
 }
@@ -436,9 +534,12 @@ FPenFill FPenParser::ParseFill(const TSharedPtr<FJsonValue>& Value, const FPenVa
 	if (!Value.IsValid())
 		return Result;
 
-	// 空数组（清除填充）
+	// 空数组（显式清除填充）
 	if (Value->Type == EJson::Array && Value->AsArray().Num() == 0)
+	{
+		Result.bExplicitClear = true;
 		return Result;
+	}
 
 	// 字符串格式（纯色或变量）
 	if (Value->Type == EJson::String)
@@ -447,6 +548,8 @@ FPenFill FPenParser::ParseFill(const TSharedPtr<FJsonValue>& Value, const FPenVa
 		if (Str == TEXT("transparent"))
 			return Result;
 		Result.Type = EPenFillType::Color;
+		if (FPenVariableResolver::IsVariableRef(Str))
+			Result.SourceVar = Str;
 		Result.SolidColor = Resolver.ResolveColor(Str);
 		return Result;
 	}
@@ -463,7 +566,10 @@ FPenFill FPenParser::ParseFill(const TSharedPtr<FJsonValue>& Value, const FPenVa
 		if (FillType == TEXT("color"))
 		{
 			Result.Type = EPenFillType::Color;
-			Result.SolidColor = Resolver.ResolveColor(Obj->GetStringField(TEXT("color")));
+			FString ColorStr = Obj->GetStringField(TEXT("color"));
+			if (FPenVariableResolver::IsVariableRef(ColorStr))
+				Result.SourceVar = ColorStr;
+			Result.SolidColor = Resolver.ResolveColor(ColorStr);
 		}
 		else if (FillType == TEXT("gradient"))
 		{
@@ -484,7 +590,10 @@ FPenFill FPenParser::ParseFill(const TSharedPtr<FJsonValue>& Value, const FPenVa
 				{
 					const auto& StopObj = StopVal->AsObject();
 					FPenGradientStop Stop;
-					Stop.Color = Resolver.ResolveColor(StopObj->GetStringField(TEXT("color")));
+					FString StopColorStr = StopObj->GetStringField(TEXT("color"));
+					if (FPenVariableResolver::IsVariableRef(StopColorStr))
+						Stop.SourceVar = StopColorStr;
+					Stop.Color = Resolver.ResolveColor(StopColorStr);
 					Stop.Position = StopObj->GetNumberField(TEXT("position"));
 					Result.Gradient.Colors.Add(Stop);
 				}

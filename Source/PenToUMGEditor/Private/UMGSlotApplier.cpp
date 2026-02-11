@@ -37,6 +37,7 @@ namespace
 		CS->SetAnchors(Anchors);
 		CS->SetAlignment(FVector2D(S.Alignment.X, S.Alignment.Y));
 		CS->SetOffsets(FMargin(S.Offsets.Left, S.Offsets.Top, S.Offsets.Right, S.Offsets.Bottom));
+		CS->SetAutoSize(S.bAutoSize);
 	}
 
 	// VBox/HBox Slot 共用逻辑
@@ -121,7 +122,14 @@ namespace
 	void ApplyBorderSlot(UPanelSlot* Slot, const FUMGSlotData& S)
 	{
 		UBorderSlot* BS = CastChecked<UBorderSlot>(Slot);
-		BS->SetPadding(S.Padding);
+		// UBorderSlot::SetPadding 内部会调用 UBorder::SetPadding，
+		// 会覆盖 ApplyBorderProps 中已设置的 Border padding。
+		// 只在 slot 显式指定了非零 padding 时才覆盖。
+		const FUMGSlotData Default;
+		if (!FUMGWidgetUtils::IsNearlyEqualMargin(S.Padding, Default.Padding))
+		{
+			BS->SetPadding(S.Padding);
+		}
 		BS->SetHorizontalAlignment(FUMGWidgetUtils::ParseHAlign(S.HorizontalAlignment));
 		BS->SetVerticalAlignment(FUMGWidgetUtils::ParseVAlign(S.VerticalAlignment));
 	}
