@@ -10,6 +10,11 @@
 #include "DesignSourceRegistry.h"
 #include "PencilConnector.h"
 
+#include "FigmaParser.h"
+#include "FigmaHttpClient.h"
+#include "FigmaImageExporter.h"
+#include "PenToUMGConverter.h"
+
 #include "WidgetBlueprint.h"
 #include "Framework/Notifications/NotificationManager.h"
 #include "Widgets/Notifications/SNotificationList.h"
@@ -21,6 +26,7 @@
 #include "ToolMenus.h"
 #include "DesktopPlatformModule.h"
 #include "IDesktopPlatform.h"
+#include "Widgets/Input/SEditableTextBox.h"
 
 DEFINE_LOG_CATEGORY(LogPenToUMG);
 
@@ -320,6 +326,133 @@ namespace
 			});
 	}
 
+	// ── Figma 导入 ──
+
+	const TCHAR* DefaultFigmaOutputPath = TEXT("/Game/PenToUMG/FigmaConvert_Output");
+
+	/** 模块级 Figma HTTP 客户端 */
+	TUniquePtr<FFigmaHttpClient> GFigmaClient;
+
+	/** Figma 导入主流程（异步） */
+	void ImportFromFigma(const FString& FileUrl, const FString& Token)
+	{
+		FString FileKey;
+		if (!FFigmaParser::ExtractFileKey(FileUrl, FileKey))
+		{
+			ShowNotification(LOCTEXT("FigmaInvalidUrl", "PenToUMG: Invalid Figma URL or file key"), SNotificationItem::CS_Fail);
+			return;
+		}
+
+		if (!GFigmaClient)
+			GFigmaClient = MakeUnique<FFigmaHttpClient>();
+		GFigmaClient->SetToken(Token);
+
+		ShowNotification(LOCTEXT("FigmaFetching", "PenToUMG: Fetching design from Figma..."), SNotificationItem::CS_Pending);
+
+		GFigmaClient->GetFile(FileKey,
+			[FileKey](bool bSuccess, const FString& Body)
+			{
+				if (!bSuccess)
+				{
+					ShowNotification(LOCTEXT("FigmaGetFileFailed", "PenToUMG: Figma API request failed"), SNotificationItem::CS_Fail);
+					return;
+				}
+
+				FPenDocument Doc;
+				if (!FFigmaParser::ParseDocument(Body, Doc))
+				{
+					ShowNotification(LOCTEXT("FigmaParseFailed", "PenToUMG: Failed to parse Figma file"), SNotificationItem::CS_Fail);
+					return;
+				}
+
+				// 解析图片引用
+				if (GFigmaClient)
+				{
+					FFigmaImageExporter::ResolveImageRefs(*GFigmaClient, FileKey, Doc,
+						[Doc = MoveTemp(Doc)](bool bImgOk) mutable
+						{
+							if (!bImgOk)
+								UE_LOG(LogPenToUMG, Warning, TEXT("FigmaImport: Some image refs unresolved"));
+
+							FUMGWidgetData Data = FPenToUMGConverter::Convert(Doc);
+							PenImportUtils::ResolveImages(Data);
+
+							if (Data.RootWidget.Children.Num() == 0)
+							{
+								ShowNotification(LOCTEXT("FigmaNoFrames", "PenToUMG: No frames found in Figma file"), SNotificationItem::CS_Fail);
+								return;
+							}
+
+							ShowNotification(
+								FText::Format(LOCTEXT("FigmaSuccess", "PenToUMG: Imported {0} frame(s) from Figma"),
+									FText::AsNumber(Data.RootWidget.Children.Num())),
+								SNotificationItem::CS_Success);
+
+							PenImportUtils::OpenPreviewWindow(Data, DefaultFigmaOutputPath,
+								LOCTEXT("FigmaPreviewTitle", "PenToUMG Figma Preview"));
+						});
+				}
+			});
+	}
+
+	/** 弹出 Figma 导入对话框 */
+	void ShowFigmaImportDialog()
+	{
+		if (!FSlateApplication::IsInitialized())
+			return;
+
+		TSharedRef<SWindow> Window = SNew(SWindow)
+			.Title(LOCTEXT("FigmaImportDialogTitle", "Import from Figma"))
+			.ClientSize(FVector2D(500.0f, 160.0f))
+			.SupportsMinimize(false)
+			.SupportsMaximize(false);
+
+		TSharedPtr<SEditableTextBox> UrlBox;
+		TSharedPtr<SEditableTextBox> TokenBox;
+		TWeakPtr<SWindow> WeakWindow = Window;
+
+		Window->SetContent(
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight().Padding(8)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 8, 0)
+				[ SNew(STextBlock).Text(LOCTEXT("FigmaUrl", "Figma URL:")) ]
+				+ SHorizontalBox::Slot().FillWidth(1.0f)
+				[ SAssignNew(UrlBox, SEditableTextBox).HintText(LOCTEXT("FigmaUrlHint", "https://www.figma.com/design/... or file key")) ]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(8)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 8, 0)
+				[ SNew(STextBlock).Text(LOCTEXT("FigmaToken", "Access Token:")) ]
+				+ SHorizontalBox::Slot().FillWidth(1.0f)
+				[ SAssignNew(TokenBox, SEditableTextBox).IsPassword(true).HintText(LOCTEXT("FigmaTokenHint", "Personal Access Token")) ]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(8).HAlign(HAlign_Right)
+			[
+				SNew(SButton)
+				.Text(LOCTEXT("FigmaImportBtn", "Import"))
+				.ButtonStyle(FAppStyle::Get(), "PrimaryButton")
+				.OnClicked_Lambda([UrlBox, TokenBox, WeakWindow]()
+				{
+					FString Url = UrlBox->GetText().ToString().TrimStartAndEnd();
+					FString Token = TokenBox->GetText().ToString().TrimStartAndEnd();
+					if (Url.IsEmpty() || Token.IsEmpty())
+						return FReply::Handled();
+
+					if (TSharedPtr<SWindow> Win = WeakWindow.Pin())
+						Win->RequestDestroyWindow();
+
+					ImportFromFigma(Url, Token);
+					return FReply::Handled();
+				})
+			]
+		);
+
+		FSlateApplication::Get().AddWindow(Window);
+	}
+
 	/** 打开文件对话框选择 .pen 文件并导入 */
 	void OpenPenFileDialog()
 	{
@@ -349,6 +482,15 @@ void FPenToUMGEditorModule::StartupModule()
 	// 注册 Pen 数据源适配器
 	FDesignSourceRegistry::Register(TEXT("Pen"), [](const FString& RawJson, FUMGWidgetData& OutData){
 		return FPenImporter::ImportFromJson(RawJson, OutData);
+	});
+
+	// 注册 Figma 数据源适配器
+	FDesignSourceRegistry::Register(TEXT("Figma"), [](const FString& RawJson, FUMGWidgetData& OutData){
+		FPenDocument Doc;
+		if (!FFigmaParser::ParseDocument(RawJson, Doc))
+			return false;
+		OutData = FPenToUMGConverter::Convert(Doc);
+		return true;
 	});
 
 	IConsoleManager::Get().RegisterConsoleCommand(
@@ -515,6 +657,21 @@ void FPenToUMGEditorModule::StartupModule()
 		}),
 		ECVF_Default);
 
+	// PenToUMG.FigmaImport 控制台命令
+	IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("PenToUMG.FigmaImport"),
+		TEXT("Import from Figma: PenToUMG.FigmaImport <file_url_or_key> <token>"),
+		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
+		{
+			if (Args.Num() < 2)
+			{
+				UE_LOG(LogPenToUMG, Warning, TEXT("Usage: PenToUMG.FigmaImport <file_url_or_key> <token>"));
+				return;
+			}
+			ImportFromFigma(Args[0], Args[1]);
+		}),
+		ECVF_Default);
+
 	// 工具栏菜单注册
 	ToolMenusStartupHandle = UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateLambda([]()
 	{
@@ -543,6 +700,16 @@ void FPenToUMGEditorModule::StartupModule()
 			{
 				ConnectToPencilAndImport();
 			})));
+
+		Section.AddMenuEntry(
+			TEXT("ImportFromFigma"),
+			LOCTEXT("ImportFromFigma", "Import from Figma..."),
+			LOCTEXT("ImportFromFigmaTooltip", "Import a Figma design file and convert to Widget Blueprint"),
+			FSlateIcon(),
+			FUIAction(FExecuteAction::CreateLambda([]()
+			{
+				ShowFigmaImportDialog();
+			})));
 	}));
 
 }
@@ -556,14 +723,19 @@ void FPenToUMGEditorModule::ShutdownModule()
 		GConnector.Reset();
 	}
 
+	// 清理 Figma 客户端
+	GFigmaClient.Reset();
+
 	UToolMenus::UnRegisterStartupCallback(ToolMenusStartupHandle);
 	UToolMenus::UnregisterOwner(this);
 	IConsoleManager::Get().UnregisterConsoleObject(TEXT("PenToUMG.Import"), false);
 	IConsoleManager::Get().UnregisterConsoleObject(TEXT("PenToUMG.PenConvert"), false);
 	IConsoleManager::Get().UnregisterConsoleObject(TEXT("PenToUMG.ImportSource"), false);
+	IConsoleManager::Get().UnregisterConsoleObject(TEXT("PenToUMG.FigmaImport"), false);
 
-	// 反注册 Pen 数据源适配器
+	// 反注册数据源适配器
 	FDesignSourceRegistry::Unregister(TEXT("Pen"));
+	FDesignSourceRegistry::Unregister(TEXT("Figma"));
 }
 
 #undef LOCTEXT_NAMESPACE
