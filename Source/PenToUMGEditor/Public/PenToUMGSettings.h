@@ -4,7 +4,25 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DeveloperSettings.h"
+#include "Components/Widget.h"
 #include "PenToUMGSettings.generated.h"
+
+/**
+ * Widget 类覆盖规则：节点名称包含指定字符串时，替换为指定 Widget 类
+ */
+USTRUCT()
+struct FWidgetClassOverride
+{
+	GENERATED_BODY()
+
+	/** 节点名称匹配模式（包含匹配） */
+	UPROPERTY(Config, EditAnywhere, Category = "Widget Class Overrides", meta = (DisplayName = "Name Contains"))
+	FString NamePattern;
+
+	/** 替换为的 Widget 类（必须继承自 UWidget） */
+	UPROPERTY(Config, EditAnywhere, Category = "Widget Class Overrides", meta = (DisplayName = "Widget Class", AllowAbstract = "false"))
+	TSoftClassPtr<UWidget> WidgetClass;
+};
 
 /**
  * Pen To UMG 插件设置
@@ -51,4 +69,11 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Pencil Connection", meta = (DisplayName = "App Name (Optional)", ToolTip = "Override -app parameter. Leave empty for auto-detection (antigravity/code)."))
 	FString PencilAppName;
 
+	// ========== Widget Class Overrides ==========
+
+	UPROPERTY(Config, EditAnywhere, Category = "Widget Class Overrides", meta = (DisplayName = "Class Override Rules", ToolTip = "When a node name contains the pattern, use the specified Widget class instead of the default."))
+	TArray<FWidgetClassOverride> ClassOverrides;
+
+	/** 根据节点名称查找覆盖类，无匹配返回 nullptr */
+	UClass* FindClassOverride(const FString& NodeName) const;
 };

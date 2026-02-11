@@ -338,6 +338,13 @@ static bool HasValidSlotHistory(const FUMGSlotData& Slot);
 UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget, const TMap<FString, UTexture2D*>* TextureMap)
 {
 	UClass* WidgetClass = ResolveWidgetClass(Node.Type);
+
+	// Widget 类覆盖：按节点名称匹配用户配置的替换规则
+	if (UClass* Override = UPenToUMGSettings::Get()->FindClassOverride(Node.Name))
+	{
+		WidgetClass = Override;
+	}
+
 	if (!WidgetClass)
 	{
 		// v2.2: 增强警告，明确说明子树丢失
