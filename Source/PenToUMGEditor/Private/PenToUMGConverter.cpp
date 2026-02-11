@@ -205,7 +205,7 @@ void FPenToUMGConverter::ApplyTextProperties(FUMGWidgetNode& Widget, const TShar
 	if (Node->FontSize > 0)
 	{
 		Widget.Properties.Add(TEXT("FontSize"), FString::SanitizeFloat(Node->FontSize));
-		Widget.Brush.FontSize = Node->FontSize;
+		Widget.TextStyle.FontSize = Node->FontSize;
 	}
 
 	if (!Node->FontFamily.IsEmpty())
@@ -224,8 +224,8 @@ void FPenToUMGConverter::ApplyTextProperties(FUMGWidgetNode& Widget, const TShar
 	if (Node->LetterSpacing != 0)
 	{
 		Widget.Properties.Add(TEXT("LetterSpacing"), FString::SanitizeFloat(Node->LetterSpacing));
-		Widget.Brush.LetterSpacing = Node->LetterSpacing;
-		Widget.Brush.bHasLetterSpacing = true;
+		Widget.TextStyle.LetterSpacing = Node->LetterSpacing;
+		Widget.TextStyle.bHasLetterSpacing = true;
 	}
 
 	switch (Node->TextGrowth)
@@ -263,7 +263,7 @@ FUMGWidgetNode FPenToUMGConverter::CreateIconFontWidget(const TSharedPtr<FPenNod
 	if (Node->FontSize > 0)
 	{
 		Widget.Properties.Add(TEXT("FontSize"), FString::SanitizeFloat(Node->FontSize));
-		Widget.Brush.FontSize = Node->FontSize;
+		Widget.TextStyle.FontSize = Node->FontSize;
 	}
 
 	if (Node->Fill.Type == EPenFillType::Color)

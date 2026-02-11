@@ -653,12 +653,12 @@ namespace
 		return Map;
 	}
 
-	void ApplyTypedBorderBrush(UBorder* Bd, const FUMGBrushData& B)
+	void ApplyTypedBorderBrush(UBorder* Bd, const FUMGVisualBrushData& B)
 	{
 		FSlateBrush Brush = Bd->Background;
 		bool bChanged = false;
 
-		if (B.DrawAs != ESlateBrushDrawType::NoDrawType)
+		if (B.bHasDrawAs)
 		{
 			Brush.DrawAs = B.DrawAs;
 			bChanged = true;
@@ -756,26 +756,25 @@ void FUMGWidgetUtils::ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNod
 {
 	if (!Widget) return;
 
-	const FUMGBrushData& B = Node.Brush;
-
 	// TextBlock: typed FontSize / LetterSpacing 优先
 	if (UTextBlock* T = Cast<UTextBlock>(Widget))
 	{
-		if (B.FontSize > 0 || B.bHasLetterSpacing)
+		const FUMGTextStyleData& TS = Node.TextStyle;
+		if (TS.FontSize > 0 || TS.bHasLetterSpacing)
 		{
 			FSlateFontInfo FontInfo = T->GetFont();
 			bool bFontChanged = false;
 
-			if (B.FontSize > 0)
+			if (TS.FontSize > 0)
 			{
 				const float FontDPI = static_cast<float>(GetDefault<UUserInterfaceSettings>()->GetFontDisplayDPI());
-				FontInfo.Size = FMath::GridSnap(B.FontSize * FontDPI / static_cast<float>(FontConstants::RenderDPI), 0.01f);
+				FontInfo.Size = FMath::GridSnap(TS.FontSize * FontDPI / static_cast<float>(FontConstants::RenderDPI), 0.01f);
 				bFontChanged = true;
 			}
 
-			if (B.bHasLetterSpacing && FontInfo.Size > 0)
+			if (TS.bHasLetterSpacing && FontInfo.Size > 0)
 			{
-				FontInfo.LetterSpacing = FMath::RoundToInt(B.LetterSpacing / FontInfo.Size * 1000.0f);
+				FontInfo.LetterSpacing = FMath::RoundToInt(TS.LetterSpacing / FontInfo.Size * 1000.0f);
 				bFontChanged = true;
 			}
 
@@ -787,7 +786,7 @@ void FUMGWidgetUtils::ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNod
 	// Border: typed Brush 属性优先
 	if (UBorder* Bd = Cast<UBorder>(Widget))
 	{
-		ApplyTypedBorderBrush(Bd, B);
+		ApplyTypedBorderBrush(Bd, Node.Brush);
 	}
 
 	// legacy 流程处理剩余属性

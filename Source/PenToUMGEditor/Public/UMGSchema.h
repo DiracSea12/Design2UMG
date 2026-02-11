@@ -127,27 +127,33 @@ struct FUMGSlotData
 };
 
 /**
- * 类型化视觉属性（渐进式替代 TMap<FString, FString> Properties 中的视觉相关 key）
- * 未设置的字段用哨兵值标记，消费端据此判断是否回退到 legacy string
+ * 类型化文本样式属性（FontSize, LetterSpacing 等文本专属字段）
+ * WrapWithBorder 时不随视觉属性转移，留在原 Widget 上
  */
-struct FUMGBrushData
+struct FUMGTextStyleData
 {
-	// ---- 第一批：数值属性 ----
 	float FontSize = 0;              // 0 = 未设置
-	float LetterSpacing = 0;         // 0 = 未设置（注意：0 也是合法值，用 bHasLetterSpacing 区分）
-	bool bHasLetterSpacing = false;
-	float OutlineCornerRadius = -1;  // -1 = 未设置
-	FVector4 CornerRadii = FVector4(-1, -1, -1, -1); // 全 -1 = 未设置
-	float OutlineThickness = 0;      // 0 = 未设置
+	float LetterSpacing = 0;
+	bool bHasLetterSpacing = false;  // 区分"显式设置为0"和"未设置"
+};
 
-	// ---- 第二批：枚举 + 颜色 ----
+/**
+ * 类型化视觉画刷属性（渐进式替代 Properties 中的视觉相关 key）
+ * WrapWithBorder 时整体转移到 Border 节点
+ */
+struct FUMGVisualBrushData
+{
+	float OutlineCornerRadius = -1;  // -1 = 未设置
+	FVector4 CornerRadii = FVector4(-1, -1, -1, -1);
+	float OutlineThickness = 0;
+
 	ESlateBrushDrawType::Type DrawAs = ESlateBrushDrawType::NoDrawType;
+	bool bHasDrawAs = false;         // 区分"显式NoDrawType"和"未设置"
 	FLinearColor BrushColor = FLinearColor::Transparent;
 	bool bHasBrushColor = false;
 	FLinearColor OutlineColor = FLinearColor::Transparent;
 	bool bHasOutlineColor = false;
 
-	// ---- 第三批：材质/纹理（保留 string 语义）----
 	FString MaterialRef;
 	FString MaterialParams;
 	FString TexturePath;
@@ -156,7 +162,7 @@ struct FUMGBrushData
 };
 
 /**
- * Widget 节点数据结构 - 描述单个控件（v2.3更新）
+ * Widget 节点数据结构 - 描述单个控件（v2.4更新）
  */
 USTRUCT()
 struct FUMGWidgetNode
@@ -186,8 +192,11 @@ struct FUMGWidgetNode
 	UPROPERTY()
 	TMap<FString, FString> Properties;
 
-	/** 类型化视觉属性（v2.3 新增，typed 优先于 Properties） */
-	FUMGBrushData Brush;
+	/** 类型化文本样式（v2.4 拆分自 Brush） */
+	FUMGTextStyleData TextStyle;
+
+	/** 类型化视觉画刷（v2.4 拆分自 Brush，WrapWithBorder 时转移） */
+	FUMGVisualBrushData Brush;
 
 	/** 子控件 (不可序列化，UHT 不支持递归 USTRUCT) */
 	TArray<FUMGWidgetNode> Children;

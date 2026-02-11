@@ -151,6 +151,7 @@ void FPenVisualMapper::ApplyRoundedCorner(FUMGWidgetNode& Widget, const FPenCorn
 			Widget.Properties.Add(TEXT("DrawAs"), TEXT("RoundedBox"));
 			Widget.Properties.Add(TEXT("OutlineCornerRadius"), FString::SanitizeFloat(Radius.Uniform));
 			Widget.Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
+			Widget.Brush.bHasDrawAs = true;
 			Widget.Brush.OutlineCornerRadius = Radius.Uniform;
 		}
 	}
@@ -160,6 +161,7 @@ void FPenVisualMapper::ApplyRoundedCorner(FUMGWidgetNode& Widget, const FPenCorn
 		Widget.Properties.Add(TEXT("CornerRadii"), FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"),
 			Radius.TopLeft, Radius.TopRight, Radius.BottomRight, Radius.BottomLeft));
 		Widget.Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
+		Widget.Brush.bHasDrawAs = true;
 		Widget.Brush.CornerRadii = FVector4(Radius.TopLeft, Radius.TopRight, Radius.BottomRight, Radius.BottomLeft);
 	}
 }
@@ -176,8 +178,11 @@ void FPenVisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FPenStroke& Str
 	if (!Widget.Properties.Contains(TEXT("DrawAs")))
 	{
 		Widget.Properties.Add(TEXT("DrawAs"), TEXT("RoundedBox"));
-		if (Widget.Brush.DrawAs == ESlateBrushDrawType::NoDrawType)
+		if (!Widget.Brush.bHasDrawAs)
+		{
 			Widget.Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
+			Widget.Brush.bHasDrawAs = true;
+		}
 	}
 
 	Widget.Properties.Add(TEXT("OutlineThickness"), FString::SanitizeFloat(Thickness));
@@ -199,9 +204,9 @@ FUMGWidgetNode FPenVisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const T
 	Border.Name = Widget.Name;
 	Border.Bounds = Widget.Bounds;
 
-	// 转移 Brush typed 数据到 Border
+	// 转移视觉画刷到 Border（TextStyle 留在原 Widget 上）
 	Border.Brush = Widget.Brush;
-	Widget.Brush = FUMGBrushData();
+	Widget.Brush = FUMGVisualBrushData();
 
 	bool bHasBackgroundProperty = false;
 	for (const FString& Key : {TEXT("BrushColor"), TEXT("TexturePath"), TEXT("MaterialRef"), TEXT("MaterialParams"), TEXT("WidthOverride"), TEXT("HeightOverride")})
