@@ -1,17 +1,26 @@
-# UE5 插件编译产物
+# UE5 build artifacts
 Binaries/
 Intermediate/
 Saved/
+DerivedDataCache/
 
-# 调试符号
+# Debug symbols & libraries
 *.pdb
-
-# 库文件
 *.lib
 *.dll
 
 # IDE
 .vs/
 .idea/
-.vscode/nul  
-tmpclaude-*  
+.vscode/
+
+# OS
+Thumbs.db
+.DS_Store
+Desktop.ini
+
+# Project-specific
+nul
+CLAUDE.md
+tmpclaude-*
+specs/

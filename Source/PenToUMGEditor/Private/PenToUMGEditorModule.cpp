@@ -11,6 +11,8 @@
 #include "PencilConnector.h"
 
 #include "WidgetBlueprint.h"
+#include "Framework/Notifications/NotificationManager.h"
+#include "Widgets/Notifications/SNotificationList.h"
 #include "Dom/JsonObject.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Misc/FileHelper.h"
@@ -130,65 +132,23 @@ namespace
 		return Result;
 	}
 
-	/** Connect to Pencil 主流程 */
-	void ConnectToPencilAndImport()
+	/** 显示通知 */
+	void ShowNotification(const FText& Text, SNotificationItem::ECompletionState State)
 	{
-		// 防止 Slate Tick 期间用户重复触发
-		static bool bInProgress = false;
-		if (bInProgress)
-			return;
-		TGuardValue<bool> Guard(bInProgress, true);
+		FNotificationInfo Info(Text);
+		Info.ExpireDuration = 4.0f;
+		Info.bUseSuccessFailIcons = true;
+		if (TSharedPtr<SNotificationItem> Item = FSlateNotificationManager::Get().AddNotification(Info))
+			Item->SetCompletionState(State);
+	}
 
-		// 1. 启动 / 复用连接
-		if (!GConnector)
-			GConnector = MakeUnique<FPencilConnector>();
-
-		if (!GConnector->IsRunning())
-		{
-			if (!GConnector->Launch())
-			{
-				UE_LOG(LogPenToUMG, Error, TEXT("ConnectToPencil: Failed to launch MCP Server"));
-				return;
-			}
-		}
-
-		FMCPHttpClient& Client = GConnector->GetClient();
-
-		// 2. batch_get: 获取顶层 frame 列表
-		TSharedPtr<FJsonObject> BatchArgs = MakeShared<FJsonObject>();
-		BatchArgs->SetStringField(TEXT("filePath"), TEXT(""));
-
-		TArray<TSharedPtr<FJsonValue>> Patterns;
-		TSharedPtr<FJsonObject> Pattern = MakeShared<FJsonObject>();
-		Pattern->SetStringField(TEXT("type"), TEXT("frame"));
-		Patterns.Add(MakeShared<FJsonValueObject>(Pattern));
-		BatchArgs->SetArrayField(TEXT("patterns"), Patterns);
-		BatchArgs->SetNumberField(TEXT("searchDepth"), 1);
-		BatchArgs->SetNumberField(TEXT("readDepth"), 99);
-
-		FString NodesJson;
-		if (!Client.CallTool(TEXT("batch_get"), BatchArgs, NodesJson))
-		{
-			UE_LOG(LogPenToUMG, Error, TEXT("ConnectToPencil: batch_get failed"));
-			return;
-		}
-
-		// 3. get_variables: 获取变量/主题
-		TSharedPtr<FJsonObject> VarsArgs = MakeShared<FJsonObject>();
-		VarsArgs->SetStringField(TEXT("filePath"), TEXT(""));
-
-		FString VarsJson;
-		if (!Client.CallTool(TEXT("get_variables"), VarsArgs, VarsJson))
-		{
-			UE_LOG(LogPenToUMG, Warning, TEXT("ConnectToPencil: get_variables failed, using empty"));
-			VarsJson = TEXT("{}");
-		}
-
-		// 4. 解析 frame 列表
+	/** 异步导入完成后的处理 */
+	void OnMCPDataReady(const FString& NodesJson, const FString& VarsJson)
+	{
 		TArray<FPenFrameInfo> Frames = ExtractFramesFromMCPResult(NodesJson);
 		if (Frames.Num() == 0)
 		{
-			UE_LOG(LogPenToUMG, Error, TEXT("ConnectToPencil: No frames found in Pencil document"));
+			ShowNotification(LOCTEXT("NoFrames", "PenToUMG: No frames found in Pencil document"), SNotificationItem::CS_Fail);
 			return;
 		}
 
@@ -200,7 +160,6 @@ namespace
 			return;
 		}
 
-		// 5. 多 frame → 弹出选择器
 		FString CapturedNodes = NodesJson;
 		FString CapturedVars = VarsJson;
 		FString CapturedOutput = OutputPath;
@@ -213,6 +172,77 @@ namespace
 			{
 				ProcessMCPData(CapturedNodes, CapturedVars, FrameId, CapturedOutput);
 			});
+	}
+
+	/** Connect to Pencil 主流程（异步） */
+	void ConnectToPencilAndImport()
+	{
+		static bool bInProgress = false;
+		if (bInProgress)
+			return;
+		bInProgress = true;
+
+		// 1. 启动 / 复用连接
+		if (!GConnector)
+			GConnector = MakeUnique<FPencilConnector>();
+
+		if (!GConnector->IsRunning())
+		{
+			if (!GConnector->Launch())
+			{
+				ShowNotification(LOCTEXT("LaunchFailed", "PenToUMG: Failed to launch MCP Server"), SNotificationItem::CS_Fail);
+				bInProgress = false;
+				return;
+			}
+		}
+
+		ShowNotification(LOCTEXT("Connecting", "PenToUMG: Fetching design from Pencil..."), SNotificationItem::CS_Pending);
+
+		// 2. 异步 batch_get
+		TSharedPtr<FJsonObject> BatchArgs = MakeShared<FJsonObject>();
+		BatchArgs->SetStringField(TEXT("filePath"), TEXT(""));
+
+		TArray<TSharedPtr<FJsonValue>> Patterns;
+		TSharedPtr<FJsonObject> Pattern = MakeShared<FJsonObject>();
+		Pattern->SetStringField(TEXT("type"), TEXT("frame"));
+		Patterns.Add(MakeShared<FJsonValueObject>(Pattern));
+		BatchArgs->SetArrayField(TEXT("patterns"), Patterns);
+		BatchArgs->SetNumberField(TEXT("searchDepth"), 1);
+		BatchArgs->SetNumberField(TEXT("readDepth"), 99);
+
+		GConnector->GetClient().CallToolAsync(TEXT("batch_get"), BatchArgs,
+			[](bool bBatchOk, const FString& NodesJson)
+		{
+			if (!bBatchOk)
+			{
+				ShowNotification(LOCTEXT("BatchGetFailed", "PenToUMG: batch_get failed"), SNotificationItem::CS_Fail);
+				bInProgress = false;
+				return;
+			}
+
+			// 3. 异步 get_variables
+			if (!GConnector)
+			{
+				bInProgress = false;
+				return;
+			}
+
+			TSharedPtr<FJsonObject> VarsArgs = MakeShared<FJsonObject>();
+			VarsArgs->SetStringField(TEXT("filePath"), TEXT(""));
+
+			FString CapturedNodes = NodesJson;
+
+			GConnector->GetClient().CallToolAsync(TEXT("get_variables"), VarsArgs,
+				[CapturedNodes](bool bVarsOk, const FString& VarsJson)
+			{
+				FString FinalVars = bVarsOk ? VarsJson : TEXT("{}");
+				if (!bVarsOk)
+					UE_LOG(LogPenToUMG, Warning, TEXT("ConnectToPencil: get_variables failed, using empty"));
+
+				OnMCPDataReady(CapturedNodes, FinalVars);
+				bInProgress = false;
+			});
+		});
 	}
 
 	/** 导入指定 TargetNodeId 的 frame */

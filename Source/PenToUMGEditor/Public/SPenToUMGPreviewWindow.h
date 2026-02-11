@@ -37,6 +37,7 @@ public:
 	SLATE_BEGIN_ARGS(SPenToUMGPreviewWindow) {}
 		SLATE_ARGUMENT(FString, OriginalJson)
 		SLATE_ARGUMENT(FString, OutputPath)
+		SLATE_ARGUMENT(TArray<FString>, Warnings)
 		SLATE_EVENT(FOnPreviewConfirmed, OnConfirmed)
 		SLATE_EVENT(FOnPreviewCancelled, OnCancelled)
 	SLATE_END_ARGS()
@@ -58,6 +59,8 @@ private:
 	// 控件调整数据
 	TArray<FWidgetAdjustData> WidgetAdjustItems;
 	bool bUpdatingFromAdjustPanel = false;  // 防止双向同步时的无限循环
+
+	TArray<FString> ConversionWarnings;
 
 	FOnPreviewConfirmed OnConfirmed;
 	FOnPreviewCancelled OnCancelled;

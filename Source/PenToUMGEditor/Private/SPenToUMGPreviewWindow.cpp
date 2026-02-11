@@ -39,6 +39,7 @@ void SPenToUMGPreviewWindow::Construct(const FArguments& InArgs)
 {
 	CurrentJson = InArgs._OriginalJson;
 	CurrentOutputPath = InArgs._OutputPath;
+	ConversionWarnings = InArgs._Warnings;
 	OnConfirmed = InArgs._OnConfirmed;
 	OnCancelled = InArgs._OnCancelled;
 
@@ -230,13 +231,40 @@ TSharedRef<SWidget> SPenToUMGPreviewWindow::BuildJsonEditorPanel()
 
 TSharedRef<SWidget> SPenToUMGPreviewWindow::BuildBottomBar()
 {
-	return SNew(SVerticalBox)
+	TSharedRef<SVerticalBox> BottomBox = SNew(SVerticalBox);
 
-		+ SVerticalBox::Slot()
+	// 降级警告摘要
+	if (ConversionWarnings.Num() > 0)
+	{
+		FString WarningText = FString::Printf(TEXT("%d element(s) degraded during conversion:"), ConversionWarnings.Num());
+		for (const FString& W : ConversionWarnings)
+		{
+			WarningText += TEXT("\n  - ") + W;
+		}
+
+		BottomBox->AddSlot()
 		.AutoHeight()
-		.Padding(0, 0, 0, 8)
+		.Padding(0, 0, 0, 6)
 		[
-			SNew(SHorizontalBox)
+			SNew(SBorder)
+			.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+			.BorderBackgroundColor(FLinearColor(0.25f, 0.18f, 0.0f, 1.0f))
+			.Padding(FMargin(8, 4))
+			[
+				SNew(STextBlock)
+				.Text(FText::FromString(WarningText))
+				.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.85f, 0.3f)))
+				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+				.AutoWrapText(true)
+			]
+		];
+	}
+
+	BottomBox->AddSlot()
+	.AutoHeight()
+	.Padding(0, 0, 0, 8)
+	[
+		SNew(SHorizontalBox)
 
 			+ SHorizontalBox::Slot()
 			.AutoWidth()
@@ -254,35 +282,37 @@ TSharedRef<SWidget> SPenToUMGPreviewWindow::BuildBottomBar()
 				.Text(FText::FromString(CurrentOutputPath))
 				.OnTextChanged(this, &SPenToUMGPreviewWindow::OnOutputPathChanged)
 			]
+		];
+
+	BottomBox->AddSlot()
+	.AutoHeight()
+	[
+		SNew(SHorizontalBox)
+
+		+ SHorizontalBox::Slot()
+		.FillWidth(1.0f)
+
+		+ SHorizontalBox::Slot()
+		.AutoWidth()
+		.Padding(4, 0)
+		[
+			SNew(SButton)
+			.Text(LOCTEXT("Cancel", "Cancel"))
+			.OnClicked(this, &SPenToUMGPreviewWindow::OnCancelClicked)
 		]
 
-		+ SVerticalBox::Slot()
-		.AutoHeight()
+		+ SHorizontalBox::Slot()
+		.AutoWidth()
+		.Padding(4, 0)
 		[
-			SNew(SHorizontalBox)
+			SNew(SButton)
+			.Text(LOCTEXT("Generate", "Generate Widget Blueprint"))
+			.OnClicked(this, &SPenToUMGPreviewWindow::OnGenerateClicked)
+			.ButtonStyle(FAppStyle::Get(), "PrimaryButton")
+		]
+	];
 
-			+ SHorizontalBox::Slot()
-			.FillWidth(1.0f)
-
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.Padding(4, 0)
-			[
-				SNew(SButton)
-				.Text(LOCTEXT("Cancel", "Cancel"))
-				.OnClicked(this, &SPenToUMGPreviewWindow::OnCancelClicked)
-			]
-
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.Padding(4, 0)
-			[
-				SNew(SButton)
-				.Text(LOCTEXT("Generate", "Generate Widget Blueprint"))
-				.OnClicked(this, &SPenToUMGPreviewWindow::OnGenerateClicked)
-				.ButtonStyle(FAppStyle::Get(), "PrimaryButton")
-			]
-		];
+	return BottomBox;
 }
 
 SPenToUMGPreviewWindow::~SPenToUMGPreviewWindow()

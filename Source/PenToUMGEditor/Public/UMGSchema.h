@@ -217,4 +217,7 @@ struct FUMGWidgetData
 	/** 根控件 */
 	UPROPERTY()
 	FUMGWidgetNode RootWidget;
+
+	/** 转换过程中的降级警告（如 Ellipse→Border） */
+	TArray<FString> Warnings;
 };

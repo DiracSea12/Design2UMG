@@ -122,6 +122,7 @@ bool PenImportUtils::OpenPreviewWindow(
 		SNew(SPenToUMGPreviewWindow)
 		.OriginalJson(JsonPayload)
 		.OutputPath(FinalPath)
+		.Warnings(Data.Warnings)
 		.OnConfirmed(FOnPreviewConfirmed::CreateLambda(
 			[](const FString& EditedJson, const FString& ConfirmedPath)
 			{

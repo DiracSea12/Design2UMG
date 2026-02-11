@@ -37,7 +37,7 @@ FUMGWidgetData FPenToUMGConverter::Convert(const FPenDocument& Document)
 		Child->X = 0.0f;
 		Child->Y = 0.0f;
 
-		FUMGWidgetNode ChildWidget = ConvertNode(Child, Document);
+		FUMGWidgetNode ChildWidget = ConvertNode(Child, Document, TMap<FString, FString>(), &Result.Warnings);
 		if (!ChildWidget.Type.IsEmpty())
 			RenderWidgets.Add(MoveTemp(ChildWidget));
 	}
@@ -57,7 +57,7 @@ FUMGWidgetData FPenToUMGConverter::Convert(const FPenDocument& Document)
 	return Result;
 }
 
-FUMGWidgetNode FPenToUMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Node, const FPenDocument& Doc, const TMap<FString, FString>& ThemeContext)
+FUMGWidgetNode FPenToUMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Node, const FPenDocument& Doc, const TMap<FString, FString>& ThemeContext, TArray<FString>* OutWarnings)
 {
 	if (ShouldSkipNode(Node))
 		return FUMGWidgetNode();
@@ -78,7 +78,7 @@ FUMGWidgetNode FPenToUMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Node,
 			Resolver.SetThemeContext(ActiveTheme);
 			FPenRefExpander::ReThemeNode(Expanded, Resolver);
 		}
-		return ConvertNode(Expanded, Doc, ActiveTheme);
+		return ConvertNode(Expanded, Doc, ActiveTheme, OutWarnings);
 	}
 
 	FUMGWidgetNode Widget;
@@ -98,18 +98,26 @@ FUMGWidgetNode FPenToUMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Node,
 	case EPenNodeType::Ellipse:
 		Widget = CreateContainerWidget(Node);
 		UE_LOG(LogPenToUMG, Warning, TEXT("PenToUMG: Ellipse '%s' mapped to Border (UMG has no ellipse widget)"), *Node->Name);
+		if (OutWarnings)
+			OutWarnings->Add(FString::Printf(TEXT("Ellipse '%s' → Border (UMG 无椭圆控件)"), *Node->Name));
 		break;
 	case EPenNodeType::Polygon:
 		Widget = CreateContainerWidget(Node);
 		UE_LOG(LogPenToUMG, Warning, TEXT("PenToUMG: Polygon '%s' mapped to Border (UMG has no polygon widget)"), *Node->Name);
+		if (OutWarnings)
+			OutWarnings->Add(FString::Printf(TEXT("Polygon '%s' → Border (UMG 无多边形控件)"), *Node->Name));
 		break;
 	case EPenNodeType::Path:
 		Widget = CreateContainerWidget(Node);
 		UE_LOG(LogPenToUMG, Warning, TEXT("PenToUMG: Path '%s' mapped to Border (UMG has no SVG path widget)"), *Node->Name);
+		if (OutWarnings)
+			OutWarnings->Add(FString::Printf(TEXT("Path '%s' → Border (UMG 无 SVG 路径控件)"), *Node->Name));
 		break;
 	case EPenNodeType::Line:
 		Widget = CreateContainerWidget(Node);
 		UE_LOG(LogPenToUMG, Warning, TEXT("PenToUMG: Line '%s' mapped to Border (UMG has no line widget)"), *Node->Name);
+		if (OutWarnings)
+			OutWarnings->Add(FString::Printf(TEXT("Line '%s' → Border (UMG 无线条控件)"), *Node->Name));
 		break;
 	default:
 		Widget = CreateContainerWidget(Node);
@@ -138,7 +146,7 @@ FUMGWidgetNode FPenToUMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Node,
 				EffectiveChild = Expanded;
 		}
 
-		auto ChildWidget = ConvertNode(Child, Doc, ActiveTheme);
+		auto ChildWidget = ConvertNode(Child, Doc, ActiveTheme, OutWarnings);
 		if (ChildWidget.Type.IsEmpty())
 			continue;
 
