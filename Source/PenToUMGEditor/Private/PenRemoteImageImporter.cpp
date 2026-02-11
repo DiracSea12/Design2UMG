@@ -357,6 +357,8 @@ namespace
 		{
 			const FString DebugName = Node.Name.IsEmpty() ? Node.Id : Node.Name;
 			ResolveTexturePath(*TexturePath, DebugName.IsEmpty() ? TEXT("UnnamedWidget") : DebugName, Context);
+			// 同步 typed 字段，避免 typed-first 读到未 resolve 的原始 URL
+			Node.Brush.TexturePath = *TexturePath;
 		}
 
 		for (FUMGWidgetNode& Child : Node.Children)
