@@ -37,6 +37,7 @@
 #include "Components/MenuAnchor.h"
 #include "Components/SafeZone.h"
 #include "Styling/SlateBrush.h"
+#include "Engine/UserInterfaceSettings.h"
 
 // ============================================================================
 // Widget 属性应用（函数指针映射表模式）
@@ -108,7 +109,9 @@ namespace
 		bool bFontChanged = false;
 		if (const FString* V = GET_PROP("FontSize"))
 		{
-			FontInfo.Size = FCString::Atoi(**V);
+			const float DisplaySize = FCString::Atof(**V);
+			const float FontDPI = static_cast<float>(GetDefault<UUserInterfaceSettings>()->GetFontDisplayDPI());
+			FontInfo.Size = FMath::GridSnap(DisplaySize * FontDPI / static_cast<float>(FontConstants::RenderDPI), 0.01f);
 			bFontChanged = true;
 		}
 		if (const FString* V = GET_PROP("FontFamily"))
@@ -133,7 +136,13 @@ namespace
 		}
 		if (const FString* V = GET_PROP("LetterSpacing"))
 		{
-			FontInfo.LetterSpacing = FMath::RoundToInt(FCString::Atof(**V));
+			// .pen letterSpacing is in pixels; UE5 LetterSpacing is tracking (1/1000 em)
+			// Conversion: tracking = pixelSpacing / fontSize * 1000
+			const float PixelSpacing = FCString::Atof(**V);
+			if (FontInfo.Size > 0)
+			{
+				FontInfo.LetterSpacing = FMath::RoundToInt(PixelSpacing / FontInfo.Size * 1000.0f);
+			}
 			bFontChanged = true;
 		}
 		if (bFontChanged)
@@ -324,8 +333,16 @@ namespace
 		if (const FString* V = GET_PROP("OutlineCornerRadius"))
 		{
 			const float Radius = FMath::Max(0.0f, FCString::Atof(**V));
-			Brush.OutlineSettings.CornerRadii = FVector4(Radius, Radius, Radius, Radius);
-			Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
+			// Pill 形状（radius >= 999）使用 HalfHeightRadius，UE5 自动 clamp 到控件半高
+			if (Radius >= 999.0f)
+			{
+				Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::HalfHeightRadius;
+			}
+			else
+			{
+				Brush.OutlineSettings.CornerRadii = FVector4(Radius, Radius, Radius, Radius);
+				Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
+			}
 			bBrushChanged = true;
 		}
 
@@ -334,8 +351,16 @@ namespace
 			FVector4 CornerRadii;
 			if (TryParseVector4(*V, CornerRadii))
 			{
-				Brush.OutlineSettings.CornerRadii = CornerRadii;
-				Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
+				const float MaxR = FMath::Max3(CornerRadii.X, CornerRadii.Y, FMath::Max(CornerRadii.Z, CornerRadii.W));
+				if (MaxR >= 999.0f)
+				{
+					Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::HalfHeightRadius;
+				}
+				else
+				{
+					Brush.OutlineSettings.CornerRadii = CornerRadii;
+					Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
+				}
 				bBrushChanged = true;
 			}
 		}
@@ -659,9 +684,14 @@ void FUMGWidgetUtils::ApplyWidgetProperties(UWidget* Widget, const TMap<FString,
 {
 	if (!Widget || Properties.Num() == 0) return;
 
-	if (const FApplyPropsFunc* Func = GetPropsApplierMap().Find(Widget->GetClass()))
+	const auto& ApplierMap = GetPropsApplierMap();
+	for (UClass* Class = Widget->GetClass(); Class; Class = Class->GetSuperClass())
 	{
-		(*Func)(Widget, Properties);
+		if (const FApplyPropsFunc* Func = ApplierMap.Find(Class))
+		{
+			(*Func)(Widget, Properties);
+			break;
+		}
 	}
 
 	ApplyCommonProperties(Widget, Properties);
