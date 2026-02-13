@@ -13,11 +13,11 @@ class FPenVariableResolver
 public:
 	FPenVariableResolver() = default;
 	explicit FPenVariableResolver(const TMap<FString, FPenVariable>& InVariables)
-		: Variables(InVariables) {}
+		: Variables(&InVariables) {}
 
 	void SetVariables(const TMap<FString, FPenVariable>& InVariables)
 	{
-		Variables = InVariables;
+		Variables = &InVariables;
 	}
 
 	/** 设置当前主题上下文，用于选择正确的主题值 */
@@ -42,7 +42,7 @@ public:
 	static bool IsVariableRef(const FString& Value);
 
 private:
-	TMap<FString, FPenVariable> Variables;
+	const TMap<FString, FPenVariable>* Variables = nullptr;
 	TMap<FString, FString> ThemeContext;
 
 	/** 获取变量值 */

@@ -146,9 +146,7 @@ bool FPenConverterTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Root type not empty"), Data.RootWidget.Type.IsEmpty());
 	TestTrue(TEXT("Root has children"), Data.RootWidget.Children.Num() > 0);
 
-	// 降级警告：Ellipse 应产生一条警告
-	TestTrue(TEXT("Has degradation warnings"), Data.Warnings.Num() > 0);
-
+	// Ellipse 用圆角近似，正圆完美匹配，不产生降级警告
 	bool bFoundEllipseWarning = false;
 	for (const FString& W : Data.Warnings)
 	{
@@ -158,7 +156,7 @@ bool FPenConverterTest::RunTest(const FString& Parameters)
 			break;
 		}
 	}
-	TestTrue(TEXT("Ellipse degradation warning present"), bFoundEllipseWarning);
+	TestFalse(TEXT("Ellipse should not produce warning"), bFoundEllipseWarning);
 
 	return true;
 }
@@ -179,7 +177,8 @@ bool FLayoutCalculatorTest::RunTest(const FString& Parameters)
 	// Case 1: 左上角元素 → 锚点 (0,0)
 	{
 		FBounds B;
-		B.X = 50.0f; B.Y = 30.0f; B.W = 200.0f; B.H = 100.0f;
+		B.X = 50.0f / 1920.0f; B.Y = 30.0f / 1080.0f;
+		B.W = 200.0f / 1920.0f; B.H = 100.0f / 1080.0f;
 		FUMGSlotData Slot = FLayoutCalculator::CalculateSlot(B, Ctx);
 		TestEqual(TEXT("TopLeft anchor MinX"), Slot.Anchors.Min.X, 0.0f);
 		TestEqual(TEXT("TopLeft anchor MinY"), Slot.Anchors.Min.Y, 0.0f);
@@ -188,9 +187,9 @@ bool FLayoutCalculatorTest::RunTest(const FString& Parameters)
 	// Case 2: 居中元素 → 锚点 (0.5, 0.5)
 	{
 		FBounds B;
-		B.W = 300.0f; B.H = 200.0f;
-		B.X = (1920.0f - B.W) / 2.0f;
-		B.Y = (1080.0f - B.H) / 2.0f;
+		B.W = 300.0f / 1920.0f; B.H = 200.0f / 1080.0f;
+		B.X = (1.0f - B.W) / 2.0f;
+		B.Y = (1.0f - B.H) / 2.0f;
 		FUMGSlotData Slot = FLayoutCalculator::CalculateSlot(B, Ctx);
 		TestEqual(TEXT("Center anchor MinX"), Slot.Anchors.Min.X, 0.5f);
 		TestEqual(TEXT("Center anchor MinY"), Slot.Anchors.Min.Y, 0.5f);
@@ -199,9 +198,9 @@ bool FLayoutCalculatorTest::RunTest(const FString& Parameters)
 	// Case 3: 右下角元素 → 锚点 (1,1)
 	{
 		FBounds B;
-		B.W = 200.0f; B.H = 100.0f;
-		B.X = 1920.0f - B.W - 30.0f;
-		B.Y = 1080.0f - B.H - 20.0f;
+		B.W = 200.0f / 1920.0f; B.H = 100.0f / 1080.0f;
+		B.X = 1.0f - B.W - 30.0f / 1920.0f;
+		B.Y = 1.0f - B.H - 20.0f / 1080.0f;
 		FUMGSlotData Slot = FLayoutCalculator::CalculateSlot(B, Ctx);
 		TestEqual(TEXT("BottomRight anchor MinX"), Slot.Anchors.Min.X, 1.0f);
 		TestEqual(TEXT("BottomRight anchor MinY"), Slot.Anchors.Min.Y, 1.0f);
@@ -210,8 +209,8 @@ bool FLayoutCalculatorTest::RunTest(const FString& Parameters)
 	// Case 4: 宽度超过 60% 画布 → 拉伸锚点 (0,0)-(1,0)
 	{
 		FBounds B;
-		B.X = 50.0f; B.Y = 50.0f;
-		B.W = 1800.0f; B.H = 100.0f;  // ~93.75% 宽度
+		B.X = 50.0f / 1920.0f; B.Y = 50.0f / 1080.0f;
+		B.W = 1800.0f / 1920.0f; B.H = 100.0f / 1080.0f;  // ~93.75% 宽度
 		FUMGSlotData Slot = FLayoutCalculator::CalculateSlot(B, Ctx);
 		TestTrue(TEXT("Stretch anchor: MinX < MaxX"),
 			Slot.Anchors.Min.X < Slot.Anchors.Max.X);

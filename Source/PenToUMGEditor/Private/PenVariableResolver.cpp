@@ -11,7 +11,7 @@ bool FPenVariableResolver::IsVariableRef(const FString& Value)
 
 const FPenVariable* FPenVariableResolver::GetVariable(const FString& VarName) const
 {
-	return Variables.Find(VarName);
+	return Variables ? Variables->Find(VarName) : nullptr;
 }
 
 FString FPenVariableResolver::ResolveThemedValue(const FPenVariable& Var) const

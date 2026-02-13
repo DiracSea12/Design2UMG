@@ -1,0 +1,49 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Engine/Texture2D.h"
+
+/**
+ * SVG Path Data → UTexture2D 栅格化器
+ *
+ * 支持指令：M/m, L/l, H/h, V/v, C/c, Q/q, Z/z, A/a
+ * 使用 scanline fill，支持 nonzero 和 evenodd 填充规则
+ */
+class FPenPathRasterizer
+{
+public:
+	static UTexture2D* Rasterize(
+		const FString& Geometry,
+		int32 Width, int32 Height,
+		FLinearColor FillColor,
+		const FString& FillRule = TEXT("nonzero"),
+		UObject* Outer = nullptr);
+
+private:
+	struct FPathPoint { float X; float Y; };
+
+	static bool ParsePathData(const FString& Data, TArray<TArray<FPathPoint>>& OutSubPaths, FBox2D& OutBounds);
+
+	static void SampleCubicBezier(
+		const FPathPoint& P0, const FPathPoint& P1,
+		const FPathPoint& P2, const FPathPoint& P3,
+		TArray<FPathPoint>& OutPoints, int32 Segments = 16);
+
+	static void SampleQuadBezier(
+		const FPathPoint& P0, const FPathPoint& P1, const FPathPoint& P2,
+		TArray<FPathPoint>& OutPoints, int32 Segments = 12);
+
+	static void SampleArc(
+		const FPathPoint& From, float Rx, float Ry, float Rotation,
+		bool bLargeArc, bool bSweep, const FPathPoint& To,
+		TArray<FPathPoint>& OutPoints, int32 Segments = 24);
+
+	static void ScanlineFill(
+		const TArray<TArray<FPathPoint>>& SubPaths,
+		TArray<FColor>& OutPixels,
+		int32 Width, int32 Height,
+		FColor FillColor,
+		bool bEvenOdd);
+};

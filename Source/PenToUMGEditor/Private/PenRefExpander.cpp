@@ -44,7 +44,10 @@ TSharedPtr<FPenNode> FPenRefExpander::ExpandRef(const TSharedPtr<FPenNode>& RefN
 	if (RefNode->bHasHeight) Expanded->Height = RefNode->Height;
 
 	if (RefNode->Fill.Type != EPenFillType::None || RefNode->Fill.bExplicitClear)
+	{
 		Expanded->Fill = RefNode->Fill;
+		Expanded->Fills = RefNode->Fills;
+	}
 	if (RefNode->Stroke.HasStroke())
 		Expanded->Stroke = RefNode->Stroke;
 	if (!RefNode->Padding.IsZero())
@@ -110,7 +113,10 @@ void FPenRefExpander::ApplyDescendantOverride(TSharedPtr<FPenNode>& Node, const 
 			if (!Override->FontFamily.IsEmpty())
 				Child->FontFamily = Override->FontFamily;
 			if (Override->Fill.Type != EPenFillType::None || Override->Fill.bExplicitClear)
+			{
 				Child->Fill = Override->Fill;
+				Child->Fills = Override->Fills;
+			}
 			if (Override->Stroke.HasStroke())
 				Child->Stroke = Override->Stroke;
 			if (!Override->Width.IsFit())
@@ -151,6 +157,7 @@ void FPenRefExpander::ReThemeNode(TSharedPtr<FPenNode>& Node, const FPenVariable
 	if (!Node.IsValid())
 		return;
 
+	// 主填充
 	if (!Node->Fill.SourceVar.IsEmpty())
 	{
 		FString OldColor = Node->Fill.SolidColor;
@@ -163,6 +170,18 @@ void FPenRefExpander::ReThemeNode(TSharedPtr<FPenNode>& Node, const FPenVariable
 	{
 		if (!Stop.SourceVar.IsEmpty())
 			Stop.Color = Resolver.ResolveColor(Stop.SourceVar);
+	}
+
+	// 多层填充
+	for (FPenFill& F : Node->Fills)
+	{
+		if (!F.SourceVar.IsEmpty())
+			F.SolidColor = Resolver.ResolveColor(F.SourceVar);
+		for (auto& Stop : F.Gradient.Colors)
+		{
+			if (!Stop.SourceVar.IsEmpty())
+				Stop.Color = Resolver.ResolveColor(Stop.SourceVar);
+		}
 	}
 
 	if (!Node->Stroke.Fill.SourceVar.IsEmpty())

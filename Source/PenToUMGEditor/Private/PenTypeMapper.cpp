@@ -44,23 +44,24 @@ FString FPenTypeMapper::MapNodeTypeToWidget(EPenNodeType Type, EPenLayout Layout
 
 FName FPenTypeMapper::MapFontWeight(const FString& Weight)
 {
-	if (Weight == TEXT("100") || Weight == TEXT("thin"))
+	FString W = Weight.ToLower();
+	if (W == TEXT("100") || W == TEXT("thin"))
 		return TEXT("Thin");
-	if (Weight == TEXT("200") || Weight == TEXT("extralight"))
+	if (W == TEXT("200") || W == TEXT("extralight"))
 		return TEXT("ExtraLight");
-	if (Weight == TEXT("300") || Weight == TEXT("light"))
+	if (W == TEXT("300") || W == TEXT("light"))
 		return TEXT("Light");
-	if (Weight == TEXT("400") || Weight == TEXT("normal") || Weight == TEXT("regular"))
+	if (W == TEXT("400") || W == TEXT("normal") || W == TEXT("regular"))
 		return TEXT("Regular");
-	if (Weight == TEXT("500") || Weight == TEXT("medium"))
+	if (W == TEXT("500") || W == TEXT("medium"))
 		return TEXT("Medium");
-	if (Weight == TEXT("600") || Weight == TEXT("semibold"))
+	if (W == TEXT("600") || W == TEXT("semibold"))
 		return TEXT("SemiBold");
-	if (Weight == TEXT("700") || Weight == TEXT("bold"))
+	if (W == TEXT("700") || W == TEXT("bold"))
 		return TEXT("Bold");
-	if (Weight == TEXT("800") || Weight == TEXT("extrabold"))
+	if (W == TEXT("800") || W == TEXT("extrabold"))
 		return TEXT("ExtraBold");
-	if (Weight == TEXT("900") || Weight == TEXT("black"))
+	if (W == TEXT("900") || W == TEXT("black"))
 		return TEXT("Black");
 	return TEXT("Regular");
 }

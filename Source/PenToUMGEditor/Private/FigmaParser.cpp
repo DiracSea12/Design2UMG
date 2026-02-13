@@ -65,7 +65,7 @@ EPenNodeType FFigmaParser::MapNodeType(const FString& FigmaType)
 	if (FigmaType == TEXT("COMPONENT"))
 		return EPenNodeType::Frame;
 	if (FigmaType == TEXT("INSTANCE"))
-		return EPenNodeType::Ref;
+		return EPenNodeType::Frame;  // Figma API已展开INSTANCE children，直接当Frame处理
 	if (FigmaType == TEXT("GROUP"))
 		return EPenNodeType::Group;
 	if (FigmaType == TEXT("RECTANGLE"))
@@ -193,7 +193,127 @@ void FFigmaParser::ParseSize(const TSharedPtr<FJsonObject>& NodeObj, FPenNode& O
 }
 
 // ---------------------------------------------------------------------------
-// ParseFill
+// ParseSingleFill - 解析单个 Figma fill 对象
+// ---------------------------------------------------------------------------
+
+FPenFill FFigmaParser::ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)
+{
+	FPenFill Result;
+	if (!FillObj || !GetBool(FillObj, TEXT("visible"), true))
+		return Result;
+
+	FString FillType = GetStr(FillObj, TEXT("type"));
+	float FillOpacity = GetNum(FillObj, TEXT("opacity"), 1.0);
+
+	if (FillType == TEXT("SOLID"))
+	{
+		auto ColorObj = GetObj(FillObj, TEXT("color"));
+		Result = FPenFill::FromColor(ColorToHex(ColorObj, FillOpacity));
+		return Result;
+	}
+
+	if (FillType == TEXT("GRADIENT_LINEAR") || FillType == TEXT("GRADIENT_RADIAL") || FillType == TEXT("GRADIENT_ANGULAR") || FillType == TEXT("GRADIENT_DIAMOND"))
+	{
+		Result.Type = EPenFillType::Gradient;
+
+		if (FillType == TEXT("GRADIENT_LINEAR"))
+			Result.Gradient.GradientType = EPenGradientType::Linear;
+		else if (FillType == TEXT("GRADIENT_RADIAL"))
+			Result.Gradient.GradientType = EPenGradientType::Radial;
+		else
+			Result.Gradient.GradientType = EPenGradientType::Angular;
+
+		const auto* Handles = GetArr(FillObj, TEXT("gradientHandlePositions"));
+		if (Handles && Handles->Num() >= 2)
+		{
+			auto P0 = (*Handles)[0]->AsObject();
+			auto P1 = (*Handles)[1]->AsObject();
+			if (P0 && P1)
+			{
+				float DX = GetNum(P1, TEXT("x")) - GetNum(P0, TEXT("x"));
+				float DY = GetNum(P1, TEXT("y")) - GetNum(P0, TEXT("y"));
+				Result.Gradient.Rotation = FMath::RadiansToDegrees(FMath::Atan2(DY, DX));
+			}
+		}
+
+		const auto* Stops = GetArr(FillObj, TEXT("gradientStops"));
+		if (Stops)
+		{
+			for (const auto& StopVal : *Stops)
+			{
+				auto StopObj = StopVal->AsObject();
+				if (!StopObj) continue;
+
+				FPenGradientStop Stop;
+				Stop.Color = ColorToHex(GetObj(StopObj, TEXT("color")), FillOpacity);
+				Stop.Position = GetNum(StopObj, TEXT("position"));
+				Result.Gradient.Colors.Add(Stop);
+			}
+		}
+		return Result;
+	}
+
+	if (FillType == TEXT("IMAGE"))
+	{
+		Result.Type = EPenFillType::Image;
+		Result.Image.Url = GetStr(FillObj, TEXT("imageRef"));
+		Result.Image.Opacity = FillOpacity;
+
+		FString ScaleMode = GetStr(FillObj, TEXT("scaleMode"));
+		if (ScaleMode == TEXT("FILL"))
+			Result.Image.Mode = EPenImageMode::Fill;
+		else if (ScaleMode == TEXT("FIT"))
+			Result.Image.Mode = EPenImageMode::Fit;
+		else if (ScaleMode == TEXT("CROP"))
+			Result.Image.Mode = EPenImageMode::Crop;
+		else
+			Result.Image.Mode = EPenImageMode::Stretch;
+
+		// 解析 imageTransform（2x3 仿射矩阵 [[a,b,tx],[c,d,ty]]）
+		const auto* TransformArr = GetArr(FillObj, TEXT("imageTransform"));
+		if (TransformArr && TransformArr->Num() == 2)
+		{
+			auto Row0 = (*TransformArr)[0]->AsArray();
+			auto Row1 = (*TransformArr)[1]->AsArray();
+			if (Row0.Num() == 3 && Row1.Num() == 3)
+			{
+				Result.Image.Transform.A  = Row0[0]->AsNumber();
+				Result.Image.Transform.B  = Row0[1]->AsNumber();
+				Result.Image.Transform.TX = Row0[2]->AsNumber();
+				Result.Image.Transform.C  = Row1[0]->AsNumber();
+				Result.Image.Transform.D  = Row1[1]->AsNumber();
+				Result.Image.Transform.TY = Row1[2]->AsNumber();
+			}
+		}
+
+		return Result;
+	}
+
+	return Result;
+}
+
+// ---------------------------------------------------------------------------
+// ParseFills - 收集所有可见填充层（底→顶顺序）
+// ---------------------------------------------------------------------------
+
+TArray<FPenFill> FFigmaParser::ParseFills(const TArray<TSharedPtr<FJsonValue>>& Fills)
+{
+	TArray<FPenFill> Result;
+	for (int32 i = 0; i < Fills.Num(); ++i)
+	{
+		auto FillObj = Fills[i]->AsObject();
+		if (!FillObj || !GetBool(FillObj, TEXT("visible"), true))
+			continue;
+
+		FPenFill Fill = ParseSingleFill(FillObj);
+		if (Fill.Type != EPenFillType::None)
+			Result.Add(MoveTemp(Fill));
+	}
+	return Result;
+}
+
+// ---------------------------------------------------------------------------
+// ParseFill - 返回最顶层可见填充（向后兼容）
 // ---------------------------------------------------------------------------
 
 FPenFill FFigmaParser::ParseFill(const TArray<TSharedPtr<FJsonValue>>& Fills)
@@ -205,78 +325,10 @@ FPenFill FFigmaParser::ParseFill(const TArray<TSharedPtr<FJsonValue>>& Fills)
 		if (!FillObj || !GetBool(FillObj, TEXT("visible"), true))
 			continue;
 
-		FString FillType = GetStr(FillObj, TEXT("type"));
-		float FillOpacity = GetNum(FillObj, TEXT("opacity"), 1.0);
-
-		if (FillType == TEXT("SOLID"))
-		{
-			auto ColorObj = GetObj(FillObj, TEXT("color"));
-			FPenFill Fill = FPenFill::FromColor(ColorToHex(ColorObj, FillOpacity));
+		FPenFill Fill = ParseSingleFill(FillObj);
+		if (Fill.Type != EPenFillType::None)
 			return Fill;
-		}
-
-		if (FillType == TEXT("GRADIENT_LINEAR") || FillType == TEXT("GRADIENT_RADIAL") || FillType == TEXT("GRADIENT_ANGULAR") || FillType == TEXT("GRADIENT_DIAMOND"))
-		{
-			FPenFill Fill;
-			Fill.Type = EPenFillType::Gradient;
-
-			if (FillType == TEXT("GRADIENT_LINEAR"))
-				Fill.Gradient.GradientType = EPenGradientType::Linear;
-			else if (FillType == TEXT("GRADIENT_RADIAL"))
-				Fill.Gradient.GradientType = EPenGradientType::Radial;
-			else
-				Fill.Gradient.GradientType = EPenGradientType::Angular;
-
-			// Compute rotation from gradient handle positions
-			const auto* Handles = GetArr(FillObj, TEXT("gradientHandlePositions"));
-			if (Handles && Handles->Num() >= 2)
-			{
-				auto P0 = (*Handles)[0]->AsObject();
-				auto P1 = (*Handles)[1]->AsObject();
-				if (P0 && P1)
-				{
-					float DX = GetNum(P1, TEXT("x")) - GetNum(P0, TEXT("x"));
-					float DY = GetNum(P1, TEXT("y")) - GetNum(P0, TEXT("y"));
-					Fill.Gradient.Rotation = FMath::RadiansToDegrees(FMath::Atan2(DY, DX));
-				}
-			}
-
-			const auto* Stops = GetArr(FillObj, TEXT("gradientStops"));
-			if (Stops)
-			{
-				for (const auto& StopVal : *Stops)
-				{
-					auto StopObj = StopVal->AsObject();
-					if (!StopObj) continue;
-
-					FPenGradientStop Stop;
-					Stop.Color = ColorToHex(GetObj(StopObj, TEXT("color")), FillOpacity);
-					Stop.Position = GetNum(StopObj, TEXT("position"));
-					Fill.Gradient.Colors.Add(Stop);
-				}
-			}
-			return Fill;
-		}
-
-		if (FillType == TEXT("IMAGE"))
-		{
-			FPenFill Fill;
-			Fill.Type = EPenFillType::Image;
-			Fill.Image.Url = GetStr(FillObj, TEXT("imageRef"));
-			Fill.Image.Opacity = FillOpacity;
-
-			FString ScaleMode = GetStr(FillObj, TEXT("scaleMode"));
-			if (ScaleMode == TEXT("FILL"))
-				Fill.Image.Mode = EPenImageMode::Fill;
-			else if (ScaleMode == TEXT("FIT"))
-				Fill.Image.Mode = EPenImageMode::Fit;
-			else
-				Fill.Image.Mode = EPenImageMode::Stretch;
-
-			return Fill;
-		}
 	}
-
 	return FPenFill();
 }
 
@@ -385,7 +437,8 @@ TArray<FPenEffect> FFigmaParser::ParseEffects(const TArray<TSharedPtr<FJsonValue
 			Eff.Shadow.OffsetY = Offset ? GetNum(Offset, TEXT("y")) : 0.0f;
 			Eff.Shadow.Blur = GetNum(EffObj, TEXT("radius"));
 			Eff.Shadow.Spread = GetNum(EffObj, TEXT("spread"));
-			Eff.Shadow.Color = ColorToHex(GetObj(EffObj, TEXT("color")));
+			float ShadowOpacity = GetNum(EffObj, TEXT("opacity"), 1.0);
+			Eff.Shadow.Color = ColorToHex(GetObj(EffObj, TEXT("color")), ShadowOpacity);
 		}
 		else if (EffType == TEXT("LAYER_BLUR"))
 		{
@@ -453,6 +506,15 @@ void FFigmaParser::ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, F
 		OutNode.TextAlignVertical = EPenTextAlignVertical::Bottom;
 	else
 		OutNode.TextAlignVertical = EPenTextAlignVertical::Top;
+
+	// textAutoResize → TextGrowth
+	FString AutoResize = GetStr(NodeObj, TEXT("textAutoResize"), TEXT("NONE"));
+	if (AutoResize == TEXT("WIDTH_AND_HEIGHT"))
+		OutNode.TextGrowth = EPenTextGrowth::Auto;
+	else if (AutoResize == TEXT("HEIGHT"))
+		OutNode.TextGrowth = EPenTextGrowth::FixedWidth;
+	else
+		OutNode.TextGrowth = EPenTextGrowth::FixedWidthHeight;
 }
 
 // ---------------------------------------------------------------------------
@@ -505,12 +567,46 @@ TSharedPtr<FPenNode> FFigmaParser::ParseNode(const TSharedPtr<FJsonObject>& Node
 	Node->Opacity = GetNum(NodeObj, TEXT("opacity"), 1.0);
 	Node->Rotation = GetNum(NodeObj, TEXT("rotation"));
 
+	// relativeTransform → flipX/flipY
+	// 矩阵 [[a, b, tx], [c, d, ty]]，用行列式(ad-bc)判断是否有镜像翻转
+	// 纯旋转时 det=1，单轴翻转时 det=-1，避免旋转角>90°时cos为负被误判
+	const auto* TransformArr = GetArr(NodeObj, TEXT("relativeTransform"));
+	if (TransformArr && TransformArr->Num() == 2)
+	{
+		auto Row0 = (*TransformArr)[0]->AsArray();
+		auto Row1 = (*TransformArr)[1]->AsArray();
+		if (Row0.Num() == 3 && Row1.Num() == 3)
+		{
+			float A = Row0[0]->AsNumber();  // cos or -cos(flipped)
+			float B = Row0[1]->AsNumber();  // -sin
+			float C = Row1[0]->AsNumber();  // sin
+			float D = Row1[1]->AsNumber();  // cos or -cos(flipped)
+			float Det = A * D - B * C;
+			// det < 0 表示有一次镜像翻转
+			// 通过分解判断是X翻转还是Y翻转：
+			// 去掉旋转分量后，scaleX = sqrt(a²+c²), scaleY = sqrt(b²+d²)
+			// 如果 det < 0，翻转轴由 atan2(c,a) vs atan2(-b,d) 的一致性决定
+			if (Det < -KINDA_SMALL_NUMBER)
+			{
+				float ScaleX = FMath::Sqrt(A * A + C * C);
+				float ScaleY = FMath::Sqrt(B * B + D * D);
+				// Figma 通常只做单轴翻转，用 a 的符号区分：
+				// 如果去旋转后 a/scaleX 接近 -1 → X翻转，否则 Y翻转
+				float CosFromX = A / FMath::Max(ScaleX, KINDA_SMALL_NUMBER);
+				float CosFromY = D / FMath::Max(ScaleY, KINDA_SMALL_NUMBER);
+				// 两个cos应该同号（来自同一旋转角），如果异号说明其中一个被翻转
+				Node->bFlipX = (CosFromX * CosFromY < 0.0f) ? (CosFromX < 0.0f) : false;
+				Node->bFlipY = (CosFromX * CosFromY < 0.0f) ? (CosFromY < 0.0f) : true;
+			}
+		}
+	}
+
 	Node->Type = MapNodeType(FigmaType);
 
 	if (FigmaType == TEXT("COMPONENT"))
 		Node->bReusable = true;
 
-	// INSTANCE → Ref with componentId
+	// INSTANCE: 记录componentId作为元数据（不走Ref展开，Figma API已展开children）
 	if (FigmaType == TEXT("INSTANCE"))
 	{
 		Node->Ref = GetStr(NodeObj, TEXT("componentId"));
@@ -530,7 +626,10 @@ TSharedPtr<FPenNode> FFigmaParser::ParseNode(const TSharedPtr<FJsonObject>& Node
 	// Fills
 	const auto* FillsArr = GetArr(NodeObj, TEXT("fills"));
 	if (FillsArr)
+	{
+		Node->Fills = ParseFills(*FillsArr);
 		Node->Fill = ParseFill(*FillsArr);
+	}
 
 	// Stroke
 	Node->Stroke = ParseStroke(NodeObj);
@@ -611,40 +710,6 @@ bool FFigmaParser::ParseDocument(const FString& FigmaJson, FPenDocument& OutDocu
 }
 
 // ---------------------------------------------------------------------------
-// ParseNodes
-// ---------------------------------------------------------------------------
-
-bool FFigmaParser::ParseNodes(const FString& NodesJson, FPenDocument& OutDocument)
-{
-	auto Root = ParseJsonString(NodesJson);
-	if (!Root)
-	{
-		UE_LOG(LogPenToUMG, Error, TEXT("FigmaParser: Failed to parse nodes JSON"));
-		return false;
-	}
-
-	auto NodesObj = GetObj(Root, TEXT("nodes"));
-	if (!NodesObj)
-	{
-		UE_LOG(LogPenToUMG, Error, TEXT("FigmaParser: Missing 'nodes' field"));
-		return false;
-	}
-
-	for (const auto& Pair : NodesObj->Values)
-	{
-		auto EntryObj = Pair.Value->AsObject();
-		if (!EntryObj) continue;
-
-		auto DocObj = GetObj(EntryObj, TEXT("document"));
-		if (auto Node = ParseNode(DocObj, nullptr))
-			OutDocument.Children.Add(Node);
-	}
-
-	UE_LOG(LogPenToUMG, Log, TEXT("FigmaParser: Parsed %d nodes"), OutDocument.Children.Num());
-	return true;
-}
-
-// ---------------------------------------------------------------------------
 // ExtractFileKey
 // ---------------------------------------------------------------------------
 
@@ -685,8 +750,15 @@ void FFigmaParser::CollectImageRefsRecursive(const TArray<TSharedPtr<FPenNode>>&
 	for (const auto& Node : Nodes)
 	{
 		if (!Node) continue;
+		// 主填充
 		if (Node->Fill.IsImage() && !Node->Fill.Image.Url.IsEmpty())
 			OutRefs.Add(Node->Fill.Image.Url);
+		// 多层填充
+		for (const FPenFill& F : Node->Fills)
+		{
+			if (F.IsImage() && !F.Image.Url.IsEmpty())
+				OutRefs.Add(F.Image.Url);
+		}
 		CollectImageRefsRecursive(Node->Children, OutRefs);
 	}
 }
@@ -701,10 +773,20 @@ void FFigmaParser::ApplyImageUrlsRecursive(TArray<TSharedPtr<FPenNode>>& Nodes, 
 	for (auto& Node : Nodes)
 	{
 		if (!Node) continue;
+		// 主填充
 		if (Node->Fill.IsImage() && !Node->Fill.Image.Url.IsEmpty())
 		{
 			if (const FString* Url = Map.Find(Node->Fill.Image.Url))
 				Node->Fill.Image.Url = *Url;
+		}
+		// 多层填充
+		for (FPenFill& F : Node->Fills)
+		{
+			if (F.IsImage() && !F.Image.Url.IsEmpty())
+			{
+				if (const FString* Url = Map.Find(F.Image.Url))
+					F.Image.Url = *Url;
+			}
 		}
 		ApplyImageUrlsRecursive(Node->Children, Map);
 	}

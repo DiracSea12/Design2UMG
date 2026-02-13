@@ -14,12 +14,6 @@ void FFigmaHttpClient::GetFile(const FString& FileKey, FOnComplete OnComplete)
 	SendGet(FString::Printf(TEXT("%s/v1/files/%s"), *FigmaApiBase, *FileKey), MoveTemp(OnComplete));
 }
 
-void FFigmaHttpClient::GetNodes(const FString& FileKey, const TArray<FString>& NodeIds, FOnComplete OnComplete)
-{
-	FString Ids = FString::Join(NodeIds, TEXT(","));
-	SendGet(FString::Printf(TEXT("%s/v1/files/%s/nodes?ids=%s"), *FigmaApiBase, *FileKey, *Ids), MoveTemp(OnComplete));
-}
-
 void FFigmaHttpClient::GetFileImages(const FString& FileKey, FOnComplete OnComplete)
 {
 	SendGet(FString::Printf(TEXT("%s/v1/files/%s/images"), *FigmaApiBase, *FileKey), MoveTemp(OnComplete));

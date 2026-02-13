@@ -79,13 +79,14 @@ static float OverlapRatio1D(float A0, float A1, float B0, float B1)
 /**
  * 计算中位数（比平均值更稳健）
  */
-static float GetMedian(TArray<float> Values)
+static float GetMedian(const TArray<float>& InValues)
 {
-	if (Values.Num() == 0) return 0.0f;
-	Values.Sort();
-	int32 Mid = Values.Num() / 2;
-	if (Values.Num() % 2 == 1) return Values[Mid];
-	return 0.5f * (Values[Mid - 1] + Values[Mid]);
+	if (InValues.Num() == 0) return 0.0f;
+	TArray<float> Sorted = InValues;
+	Sorted.Sort();
+	int32 Mid = Sorted.Num() / 2;
+	if (Sorted.Num() % 2 == 1) return Sorted[Mid];
+	return 0.5f * (Sorted[Mid - 1] + Sorted[Mid]);
 }
 
 // ============================================================================

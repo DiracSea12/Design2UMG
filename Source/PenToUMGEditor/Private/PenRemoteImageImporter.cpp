@@ -31,6 +31,7 @@ namespace
 		int32 ReusedCount = 0;
 		int32 FailedCount = 0;
 		TArray<FString> Messages;
+		TMap<FString, FString> UrlToAssetPath;  // 同次导入内的URL去重缓存
 	};
 
 	void AddReportMessage(FResolveContext& Context, const FString& Message)
@@ -302,6 +303,15 @@ namespace
 		}
 
 		const FString NormalizedUrl = NormalizeUrl(InOutTexturePath);
+
+		// 同次导入内的URL去重：已下载过的直接复用
+		if (const FString* CachedPath = Context.UrlToAssetPath.Find(NormalizedUrl))
+		{
+			InOutTexturePath = *CachedPath;
+			++Context.ReusedCount;
+			return true;
+		}
+
 		const FString UrlHash = MakeUrlHash(NormalizedUrl);
 		const FString AssetName = FString::Printf(TEXT("T_IMG_%s"), *UrlHash);
 		const FString LongPackageName = BuildLongPackageName(Context.ImportPath, AssetName);
@@ -312,6 +322,7 @@ namespace
 		{
 			InOutTexturePath = ObjectPath;
 			++Context.ReusedCount;
+			Context.UrlToAssetPath.Add(NormalizedUrl, ObjectPath);
 			AddReportMessage(Context, FString::Printf(TEXT("Reuse texture asset: %s"), *ObjectPath));
 			return true;
 		}
@@ -347,6 +358,7 @@ namespace
 
 		InOutTexturePath = ImportedObjectPath;
 		++Context.ImportedCount;
+		Context.UrlToAssetPath.Add(NormalizedUrl, ImportedObjectPath);
 		AddReportMessage(Context, FString::Printf(TEXT("Imported texture asset: %s"), *ImportedObjectPath));
 		return true;
 	}

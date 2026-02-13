@@ -3,6 +3,7 @@
 #include "UMGWidgetUtils.h"
 #include "PenToUMGLog.h"
 #include "ProceduralShapeGenerator.h"
+#include "PenPathRasterizer.h"
 
 #include "Components/Widget.h"
 #include "Components/TextBlock.h"
@@ -190,6 +191,23 @@ namespace
 		if (ColorVal) I->SetColorAndOpacity(FUMGWidgetUtils::ParseColor(*ColorVal));
 
 		if (const FString* V = GET_PROP("BrushColor")) I->SetBrushTintColor(FSlateColor(FUMGWidgetUtils::ParseColor(*V)));
+		if (const FString* Geom = GET_PROP("PathGeometry"))
+		{
+			const FString FillRuleStr = P.Contains(TEXT("PathFillRule")) ? P[TEXT("PathFillRule")] : TEXT("nonzero");
+			const FString ColorStr = P.Contains(TEXT("PathFillColor")) ? P[TEXT("PathFillColor")] : TEXT("#ffffffff");
+			FLinearColor PathColor = FUMGWidgetUtils::ParseColor(ColorStr);
+
+			int32 PW = FMath::Max(1, P.Contains(TEXT("WidthOverride")) ? FCString::Atoi(*P[TEXT("WidthOverride")]) : 64);
+			int32 PH = FMath::Max(1, P.Contains(TEXT("HeightOverride")) ? FCString::Atoi(*P[TEXT("HeightOverride")]) : 64);
+
+			if (UTexture2D* Tex = FPenPathRasterizer::Rasterize(*Geom, PW, PH, PathColor, FillRuleStr, I))
+			{
+				I->SetBrushFromTexture(Tex);
+				I->SetDesiredSizeOverride(FVector2D(PW, PH));
+				return;
+			}
+		}
+
 		if (const FString* V = GET_PROP("TexturePath"))
 		{
 			UTexture2D* Tex = LoadObject<UTexture2D>(nullptr, **V);
@@ -209,11 +227,50 @@ namespace
 			Brush.ImageSize.Y = FCString::Atof(**V);
 			bBrushModified = true;
 		}
+
+		// ImageMode + ImageTransform → FSlateBrush UV/Tiling
+		if (const FString* Mode = GET_PROP("ImageMode"))
+		{
+			if (*Mode == TEXT("Crop"))
+			{
+				if (const FString* TransformStr = GET_PROP("ImageTransform"))
+				{
+					TArray<FString> Parts;
+					TransformStr->ParseIntoArray(Parts, TEXT(","));
+					if (Parts.Num() == 6)
+					{
+						// 仿射矩阵 [[a,b,tx],[c,d,ty]]：图片UV空间→节点空间
+						const float A  = FCString::Atof(*Parts[0]);
+						const float B  = FCString::Atof(*Parts[1]);
+						const float TX = FCString::Atof(*Parts[2]);
+						const float C  = FCString::Atof(*Parts[3]);
+						const float D  = FCString::Atof(*Parts[4]);
+						const float TY = FCString::Atof(*Parts[5]);
+
+						// 无旋转/倾斜时直接提取 UV 区域
+						if (FMath::IsNearlyZero(B) && FMath::IsNearlyZero(C) && A > KINDA_SMALL_NUMBER && D > KINDA_SMALL_NUMBER)
+						{
+							Brush.SetUVRegion(FBox2f(FVector2f(TX, TY), FVector2f(TX + A, TY + D)));
+							bBrushModified = true;
+						}
+					}
+				}
+			}
+			else if (*Mode == TEXT("Fit"))
+			{
+				Brush.Tiling = ESlateBrushTileType::NoTile;
+				bBrushModified = true;
+			}
+			// Fill 是默认行为，不需要额外处理
+		}
+
 		if (bBrushModified)
 		{
-			Brush.Tiling = ESlateBrushTileType::NoTile;
+			if (Brush.Tiling == ESlateBrushTileType::Both && !P.Contains(TEXT("ImageMode")))
+				Brush.Tiling = ESlateBrushTileType::NoTile;
 			I->SetBrush(Brush);
-			I->SetDesiredSizeOverride(Brush.ImageSize);
+			if (Brush.ImageSize.X > 0 && Brush.ImageSize.Y > 0)
+				I->SetDesiredSizeOverride(Brush.ImageSize);
 		}
 	}
 
@@ -393,6 +450,39 @@ namespace
 				}
 			}
 			Bd->SetBrushColor(Color);
+		}
+
+		// ImageMode + ImageTransform → Border Brush UVRegion（从 WrapWithBorder 转移过来）
+		if (const FString* Mode = GET_PROP("ImageMode"))
+		{
+			if (*Mode == TEXT("Crop"))
+			{
+				if (const FString* TransformStr = GET_PROP("ImageTransform"))
+				{
+					TArray<FString> Parts;
+					TransformStr->ParseIntoArray(Parts, TEXT(","));
+					if (Parts.Num() == 6)
+					{
+						const float A  = FCString::Atof(*Parts[0]);
+						const float B  = FCString::Atof(*Parts[1]);
+						const float TX = FCString::Atof(*Parts[2]);
+						const float C  = FCString::Atof(*Parts[3]);
+						const float D  = FCString::Atof(*Parts[4]);
+						const float TY = FCString::Atof(*Parts[5]);
+
+						if (FMath::IsNearlyZero(B) && FMath::IsNearlyZero(C) && A > KINDA_SMALL_NUMBER && D > KINDA_SMALL_NUMBER)
+						{
+							Brush.SetUVRegion(FBox2f(FVector2f(TX, TY), FVector2f(TX + A, TY + D)));
+							bBrushChanged = true;
+						}
+					}
+				}
+			}
+			else if (*Mode == TEXT("Fit"))
+			{
+				Brush.Tiling = ESlateBrushTileType::NoTile;
+				bBrushChanged = true;
+			}
 		}
 
 		if (bBrushChanged)

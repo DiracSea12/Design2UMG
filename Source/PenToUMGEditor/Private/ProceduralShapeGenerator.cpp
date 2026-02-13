@@ -242,7 +242,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 	FLinearColor Color = FLinearColor::White;
 	FLinearColor ColorStart = FLinearColor::White;
 	FLinearColor ColorEnd = FLinearColor::Black;
-	float Thickness = 0.15f;
+	float Thickness = 0.1f;  // 与 .h 默认参数一致
 	float CornerRadius = 0.2f;
 
 	if (const FString* ParamsStr = Properties.Find(TEXT("MaterialParams")))
@@ -262,6 +262,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 				ColorEnd = FUMGWidgetUtils::ParseColor(ColorStr);
 
 			double NumVal;
+			// 归一化：>1.0 视为百分比值（如 10 → 0.10），<=1.0 视为已归一化的 0~1 比例
 			if (Params->TryGetNumberField(TEXT("Thickness"), NumVal))
 				Thickness = NumVal > 1.0 ? static_cast<float>(NumVal) / 100.0f : static_cast<float>(NumVal);
 			if (Params->TryGetNumberField(TEXT("CornerRadius"), NumVal))
@@ -275,11 +276,11 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 	const int32 Height = FMath::Max(1, HStr ? FMath::RoundToInt(FCString::Atof(**HStr)) : 64);
 
 	const FString Shape = MaterialRef.ToLower();
-	if (Shape == TEXT("circle"))
+	if (Shape == TEXT("circle") || Shape == TEXT("ellipse"))
 		return GenerateCircle(FMath::Max(Width, Height), Color, Outer);
 	if (Shape == TEXT("ring"))
 		return GenerateRing(FMath::Max(Width, Height), Color, Thickness, Outer);
-	if (Shape == TEXT("roundedrect"))
+	if (Shape == TEXT("roundedrect") || Shape == TEXT("polygon"))
 		return GenerateRoundedRect(Width, Height, Color, CornerRadius, Outer);
 	if (Shape == TEXT("gradienth"))
 		return GenerateGradientH(Width, Height, ColorStart, ColorEnd, Outer);

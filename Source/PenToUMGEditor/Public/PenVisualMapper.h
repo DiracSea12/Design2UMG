@@ -17,4 +17,6 @@ public:
 	static void ApplyStroke(FUMGWidgetNode& Widget, const FPenStroke& Stroke);
 	static FUMGWidgetNode WrapWithBorder(FUMGWidgetNode&& Widget, const TSharedPtr<FPenNode>& Node);
 	static FUMGWidgetNode WrapWithBackgroundBlur(FUMGWidgetNode&& Widget, float BlurStrength);
+	static FUMGWidgetNode WrapWithBoxShadow(FUMGWidgetNode&& Widget, const TSharedPtr<FPenNode>& Node);
+	static FUMGWidgetNode WrapWithMultiFill(FUMGWidgetNode&& Widget, const TSharedPtr<FPenNode>& Node);
 };

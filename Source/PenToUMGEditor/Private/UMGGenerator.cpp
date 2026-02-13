@@ -31,11 +31,12 @@ UWidgetBlueprint* FUMGGenerator::GenerateWidgetBlueprint(const FUMGWidgetData& W
 		constexpr int32 MaxAttempts = 1000;
 
 		do {
-			NewName = FString::Printf(TEXT("%s_%d"), *WidgetData.WidgetName, Suffix++);
+			NewName = FString::Printf(TEXT("%s_%d"), *WidgetData.WidgetName, Suffix);
 			TestPath = PackagePath / NewName + TEXT(".") + NewName;
-		} while (AR.GetAssetByObjectPath(FSoftObjectPath(TestPath)).IsValid() && Suffix < MaxAttempts);
+			++Suffix;
+		} while (AR.GetAssetByObjectPath(FSoftObjectPath(TestPath)).IsValid() && Suffix <= MaxAttempts);
 
-		if (Suffix >= MaxAttempts)
+		if (Suffix > MaxAttempts && AR.GetAssetByObjectPath(FSoftObjectPath(TestPath)).IsValid())
 		{
 			UE_LOG(LogPenToUMG, Error, TEXT("Failed to find unique name for asset '%s'"), *WidgetData.WidgetName);
 			return nullptr;
@@ -53,7 +54,7 @@ UWidgetBlueprint* FUMGGenerator::GenerateWidgetBlueprint(const FUMGWidgetData& W
 		return nullptr;
 	}
 
-	UWidgetBlueprint* WBP = CastChecked<UWidgetBlueprint>(
+	UWidgetBlueprint* WBP = Cast<UWidgetBlueprint>(
 		FKismetEditorUtilities::CreateBlueprint(
 			UUserWidget::StaticClass(), Package, FName(*AssetName),
 			BPTYPE_Normal, UWidgetBlueprint::StaticClass(),

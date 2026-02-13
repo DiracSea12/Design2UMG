@@ -86,10 +86,12 @@ void FPenLayoutMapper::ApplyJustifyContent(TArray<FUMGWidgetNode>& Children, EPe
 	if (bHasFillChild)
 		return;
 
-	auto CreateSpacer = []() -> FUMGWidgetNode {
+	auto CreateSpacer = [](float FillWeight = 1.0f) -> FUMGWidgetNode {
 		FUMGWidgetNode Spacer;
 		Spacer.Type = TEXT("Spacer");
 		Spacer.Slot.SizeRule = TEXT("Fill");
+		if (!FMath::IsNearlyEqual(FillWeight, 1.0f))
+			Spacer.Slot.FillWeight = FillWeight;
 		return Spacer;
 	};
 
@@ -110,10 +112,10 @@ void FPenLayoutMapper::ApplyJustifyContent(TArray<FUMGWidgetNode>& Children, EPe
 		}
 		break;
 	case EPenJustifyContent::SpaceAround:
-		Children.Insert(CreateSpacer(), 0);
+		Children.Insert(CreateSpacer(0.5f), 0);
 		for (int32 i = Children.Num() - 1; i > 1; --i)
 			Children.Insert(CreateSpacer(), i);
-		Children.Add(CreateSpacer());
+		Children.Add(CreateSpacer(0.5f));
 		break;
 	default:
 		break;
@@ -157,14 +159,14 @@ FUMGWidgetNode FPenLayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, c
 	SizeBox.Name = ChildWidget.Name + TEXT("_sz");
 
 	if (ChildNode->Width.IsFixed())
-		SizeBox.Properties.Add(TEXT("WidthOverride"), FString::FromInt((int32)ChildNode->Width.Value));
+		SizeBox.Properties.Add(TEXT("WidthOverride"), FString::SanitizeFloat(ChildNode->Width.Value));
 	else if (ChildNode->Width.IsFit() && ChildNode->Width.Value > 0)
-		SizeBox.Properties.Add(TEXT("MinDesiredWidth"), FString::FromInt((int32)ChildNode->Width.Value));
+		SizeBox.Properties.Add(TEXT("MinDesiredWidth"), FString::SanitizeFloat(ChildNode->Width.Value));
 
 	if (ChildNode->Height.IsFixed())
-		SizeBox.Properties.Add(TEXT("HeightOverride"), FString::FromInt((int32)ChildNode->Height.Value));
+		SizeBox.Properties.Add(TEXT("HeightOverride"), FString::SanitizeFloat(ChildNode->Height.Value));
 	else if (ChildNode->Height.IsFit() && ChildNode->Height.Value > 0)
-		SizeBox.Properties.Add(TEXT("MinDesiredHeight"), FString::FromInt((int32)ChildNode->Height.Value));
+		SizeBox.Properties.Add(TEXT("MinDesiredHeight"), FString::SanitizeFloat(ChildNode->Height.Value));
 
 	SizeBox.Slot = MoveTemp(ChildWidget.Slot);
 	ChildWidget.Slot = FUMGSlotData();

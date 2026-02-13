@@ -70,8 +70,8 @@ struct FPenFrameInfo
 {
 	FString Id;
 	FString Name;
-	float Width;
-	float Height;
+	float Width = 0.0f;
+	float Height = 0.0f;
 };
 
 /** 从 FPenDocument 提取顶层 Frame 列表 */

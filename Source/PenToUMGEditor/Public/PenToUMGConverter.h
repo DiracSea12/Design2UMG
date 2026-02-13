@@ -32,6 +32,9 @@ private:
 	/** 创建图标字体 Widget */
 	static FUMGWidgetNode CreateIconFontWidget(const TSharedPtr<FPenNode>& Node);
 
+	/** 创建 Path Widget（栅格化 SVG geometry 为 Image） */
+	static FUMGWidgetNode CreatePathWidget(const TSharedPtr<FPenNode>& Node);
+
 	/** 应用文本属性 */
 	static void ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FPenNode>& Node);
 };

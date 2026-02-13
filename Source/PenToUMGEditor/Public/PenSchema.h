@@ -152,7 +152,38 @@ enum class EPenImageMode : uint8
 {
 	Stretch,
 	Fill,
-	Fit
+	Fit,
+	Crop
+};
+
+/**
+ * 图片裁剪变换（2x3 仿射矩阵）
+ * Figma imageTransform: [[a, b, tx], [c, d, ty]]
+ * 将图片 UV 空间 [0,1]x[0,1] 映射到节点空间
+ */
+USTRUCT()
+struct FPenImageTransform
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	float A = 1.0f;
+	UPROPERTY()
+	float B = 0.0f;
+	UPROPERTY()
+	float TX = 0.0f;
+	UPROPERTY()
+	float C = 0.0f;
+	UPROPERTY()
+	float D = 1.0f;
+	UPROPERTY()
+	float TY = 0.0f;
+
+	bool IsIdentity() const
+	{
+		return FMath::IsNearlyEqual(A, 1.0f) && FMath::IsNearlyZero(B) && FMath::IsNearlyZero(TX)
+			&& FMath::IsNearlyZero(C) && FMath::IsNearlyEqual(D, 1.0f) && FMath::IsNearlyZero(TY);
+	}
 };
 
 /**
@@ -171,6 +202,9 @@ struct FPenImageFill
 
 	UPROPERTY()
 	float Opacity = 1.0f;
+
+	UPROPERTY()
+	FPenImageTransform Transform;
 };
 
 /**
@@ -535,7 +569,8 @@ struct FPenNode
 	bool bPlaceholder = false;
 
 	// 视觉属性
-	FPenFill Fill;
+	FPenFill Fill;                   // 主填充（最顶层可见填充，向后兼容）
+	TArray<FPenFill> Fills;          // 所有填充层（底→顶顺序，多层叠加时使用）
 	FPenStroke Stroke;
 	FPenCornerRadius CornerRadius;
 	TArray<FPenEffect> Effects;
@@ -584,7 +619,12 @@ struct FPenNode
 
 	bool HasVisualProperties() const
 	{
-		return !Fill.IsNone() || Stroke.HasStroke() || CornerRadius.HasRadius();
+		return !Fill.IsNone() || Fills.Num() > 0 || Stroke.HasStroke() || CornerRadius.HasRadius();
+	}
+
+	bool HasMultiFill() const
+	{
+		return Fills.Num() > 1;
 	}
 
 	bool IsCollapsed() const { return !bEnabled; }

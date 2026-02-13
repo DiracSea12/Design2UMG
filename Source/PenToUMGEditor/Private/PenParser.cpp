@@ -255,7 +255,25 @@ TSharedPtr<FPenNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonOb
 
 	// 视觉属性
 	if (JsonObj->HasField(TEXT("fill")))
-		Node->Fill = ParseFill(JsonObj->TryGetField(TEXT("fill")), *ActiveResolver);
+	{
+		const TSharedPtr<FJsonValue>& FillField = JsonObj->TryGetField(TEXT("fill"));
+		Node->Fill = ParseFill(FillField, *ActiveResolver);
+		// 多层填充：fill 为非空数组时，逐个解析到 Fills
+		if (FillField.IsValid() && FillField->Type == EJson::Array)
+		{
+			const auto& Arr = FillField->AsArray();
+			for (const auto& Item : Arr)
+			{
+				FPenFill F = ParseFill(Item, *ActiveResolver);
+				if (F.Type != EPenFillType::None && F.bEnabled)
+					Node->Fills.Add(MoveTemp(F));
+			}
+		}
+		else if (Node->Fill.Type != EPenFillType::None)
+		{
+			Node->Fills.Add(Node->Fill);
+		}
+	}
 	if (JsonObj->HasField(TEXT("stroke")))
 		Node->Stroke = ParseStroke(JsonObj->GetObjectField(TEXT("stroke")), *ActiveResolver);
 	if (JsonObj->HasField(TEXT("cornerRadius")))
@@ -412,7 +430,24 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 			OverrideObj->TryGetStringField(TEXT("fontWeight"), DescNode->FontWeight);
 			OverrideObj->TryGetStringField(TEXT("fontFamily"), DescNode->FontFamily);
 			if (OverrideObj->HasField(TEXT("fill")))
-				DescNode->Fill = ParseFill(OverrideObj->TryGetField(TEXT("fill")), Resolver);
+			{
+				const TSharedPtr<FJsonValue>& FillField = OverrideObj->TryGetField(TEXT("fill"));
+				DescNode->Fill = ParseFill(FillField, Resolver);
+				DescNode->Fills.Empty();  // override 替换而非叠加
+				if (FillField.IsValid() && FillField->Type == EJson::Array)
+				{
+					for (const auto& Item : FillField->AsArray())
+					{
+						FPenFill F = ParseFill(Item, Resolver);
+						if (F.Type != EPenFillType::None && F.bEnabled)
+							DescNode->Fills.Add(MoveTemp(F));
+					}
+				}
+				else if (DescNode->Fill.Type != EPenFillType::None)
+				{
+					DescNode->Fills.Add(DescNode->Fill);
+				}
+			}
 			if (OverrideObj->HasField(TEXT("stroke")))
 				DescNode->Stroke = ParseStroke(OverrideObj->GetObjectField(TEXT("stroke")), Resolver);
 
@@ -487,6 +522,9 @@ FPenSize FPenParser::ParseSize(const TSharedPtr<FJsonValue>& Value, EPenNodeType
 		if (FPenVariableResolver::IsVariableRef(Str))
 		{
 			float Resolved = Resolver.ResolveNumber(Str);
+			// 与数值路径保持一致：0 → Fit()（Line节点除外）
+			if (Resolved == 0 && NodeType != EPenNodeType::Line)
+				return FPenSize::Fit();
 			return FPenSize::Fixed(Resolved);
 		}
 
@@ -538,6 +576,19 @@ FPenFill FPenParser::ParseFill(const TSharedPtr<FJsonValue>& Value, const FPenVa
 	if (Value->Type == EJson::Array && Value->AsArray().Num() == 0)
 	{
 		Result.bExplicitClear = true;
+		return Result;
+	}
+
+	// 非空数组 → 取最后一个可见元素作为主填充
+	if (Value->Type == EJson::Array)
+	{
+		const auto& Arr = Value->AsArray();
+		for (int32 i = Arr.Num() - 1; i >= 0; --i)
+		{
+			FPenFill Fill = ParseFill(Arr[i], Resolver);
+			if (Fill.Type != EPenFillType::None && Fill.bEnabled)
+				return Fill;
+		}
 		return Result;
 	}
 
@@ -610,8 +661,30 @@ FPenFill FPenParser::ParseFill(const TSharedPtr<FJsonValue>& Value, const FPenVa
 					Result.Image.Mode = EPenImageMode::Fill;
 				else if (Mode == TEXT("fit"))
 					Result.Image.Mode = EPenImageMode::Fit;
+				else if (Mode == TEXT("crop"))
+					Result.Image.Mode = EPenImageMode::Crop;
 			}
 			Obj->TryGetNumberField(TEXT("opacity"), Result.Image.Opacity);
+
+			// imageTransform（2x3 仿射矩阵）
+			if (Obj->HasField(TEXT("imageTransform")))
+			{
+				const auto& TransformArr = Obj->GetArrayField(TEXT("imageTransform"));
+				if (TransformArr.Num() == 2)
+				{
+					auto Row0 = TransformArr[0]->AsArray();
+					auto Row1 = TransformArr[1]->AsArray();
+					if (Row0.Num() == 3 && Row1.Num() == 3)
+					{
+						Result.Image.Transform.A  = Row0[0]->AsNumber();
+						Result.Image.Transform.B  = Row0[1]->AsNumber();
+						Result.Image.Transform.TX = Row0[2]->AsNumber();
+						Result.Image.Transform.C  = Row1[0]->AsNumber();
+						Result.Image.Transform.D  = Row1[1]->AsNumber();
+						Result.Image.Transform.TY = Row1[2]->AsNumber();
+					}
+				}
+			}
 		}
 	}
 

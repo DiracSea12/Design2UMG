@@ -358,38 +358,52 @@ namespace
 					return;
 				}
 
-				FPenDocument Doc;
-				if (!FFigmaParser::ParseDocument(Body, Doc))
+				FPenDocument ParsedDoc;
+				if (!FFigmaParser::ParseDocument(Body, ParsedDoc))
 				{
 					ShowNotification(LOCTEXT("FigmaParseFailed", "PenToUMG: Failed to parse Figma file"), SNotificationItem::CS_Fail);
 					return;
 				}
 
+				// shared ownership for async safety
+				TSharedRef<FPenDocument> Doc = MakeShared<FPenDocument>(MoveTemp(ParsedDoc));
+
 				// 解析图片引用
 				if (GFigmaClient)
 				{
 					FFigmaImageExporter::ResolveImageRefs(*GFigmaClient, FileKey, Doc,
-						[Doc = MoveTemp(Doc)](bool bImgOk) mutable
+						[Doc, FileKey](bool bImgOk)
 						{
 							if (!bImgOk)
 								UE_LOG(LogPenToUMG, Warning, TEXT("FigmaImport: Some image refs unresolved"));
 
-							FUMGWidgetData Data = FPenToUMGConverter::Convert(Doc);
-							PenImportUtils::ResolveImages(Data);
-
-							if (Data.RootWidget.Children.Num() == 0)
+							// 将向量节点导出为 PNG
+							if (GFigmaClient)
 							{
-								ShowNotification(LOCTEXT("FigmaNoFrames", "PenToUMG: No frames found in Figma file"), SNotificationItem::CS_Fail);
-								return;
+								FFigmaImageExporter::ExportVectorNodes(*GFigmaClient, FileKey, Doc,
+									[Doc](bool bVecOk)
+									{
+										if (!bVecOk)
+											UE_LOG(LogPenToUMG, Warning, TEXT("FigmaImport: Some vector nodes not exported"));
+
+										FUMGWidgetData Data = FPenToUMGConverter::Convert(*Doc);
+										PenImportUtils::ResolveImages(Data);
+
+										if (Data.RootWidget.Children.Num() == 0)
+										{
+											ShowNotification(LOCTEXT("FigmaNoFrames", "PenToUMG: No frames found in Figma file"), SNotificationItem::CS_Fail);
+											return;
+										}
+
+										ShowNotification(
+											FText::Format(LOCTEXT("FigmaSuccess", "PenToUMG: Imported {0} frame(s) from Figma"),
+												FText::AsNumber(Data.RootWidget.Children.Num())),
+											SNotificationItem::CS_Success);
+
+										PenImportUtils::OpenPreviewWindow(Data, DefaultFigmaOutputPath,
+											LOCTEXT("FigmaPreviewTitle", "PenToUMG Figma Preview"));
+									});
 							}
-
-							ShowNotification(
-								FText::Format(LOCTEXT("FigmaSuccess", "PenToUMG: Imported {0} frame(s) from Figma"),
-									FText::AsNumber(Data.RootWidget.Children.Num())),
-								SNotificationItem::CS_Success);
-
-							PenImportUtils::OpenPreviewWindow(Data, DefaultFigmaOutputPath,
-								LOCTEXT("FigmaPreviewTitle", "PenToUMG Figma Preview"));
 						});
 				}
 			});

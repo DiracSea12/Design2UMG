@@ -23,9 +23,6 @@ public:
 	/** GET /v1/files/:key — 获取完整文件 */
 	void GetFile(const FString& FileKey, FOnComplete OnComplete);
 
-	/** GET /v1/files/:key/nodes?ids=... — 获取指定节点 */
-	void GetNodes(const FString& FileKey, const TArray<FString>& NodeIds, FOnComplete OnComplete);
-
 	/** GET /v1/files/:key/images — 获取文件中所有图片的 imageRef→URL 映射 */
 	void GetFileImages(const FString& FileKey, FOnComplete OnComplete);
 

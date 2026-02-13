@@ -17,9 +17,6 @@ public:
 	/** 从 Figma GET /v1/files/:key 返回的完整 JSON 解析文档 */
 	static bool ParseDocument(const FString& FigmaJson, FPenDocument& OutDocument);
 
-	/** 从 Figma GET /v1/files/:key/nodes 返回的 nodes JSON 解析（指定节点） */
-	static bool ParseNodes(const FString& NodesJson, FPenDocument& OutDocument);
-
 	/** 从 Figma file URL 提取 file key */
 	static bool ExtractFileKey(const FString& UrlOrKey, FString& OutKey);
 
@@ -42,8 +39,14 @@ private:
 	/** 解析尺寸（layoutSizing / absoluteBoundingBox） */
 	static void ParseSize(const TSharedPtr<FJsonObject>& NodeObj, FPenNode& OutNode, bool bParentHasAutoLayout);
 
-	/** 解析填充 */
+	/** 解析填充（返回最顶层可见填充，向后兼容） */
 	static FPenFill ParseFill(const TArray<TSharedPtr<FJsonValue>>& Fills);
+
+	/** 解析所有可见填充层（底→顶顺序） */
+	static TArray<FPenFill> ParseFills(const TArray<TSharedPtr<FJsonValue>>& Fills);
+
+	/** 解析单个填充对象 */
+	static FPenFill ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj);
 
 	/** 解析描边 */
 	static FPenStroke ParseStroke(const TSharedPtr<FJsonObject>& NodeObj);

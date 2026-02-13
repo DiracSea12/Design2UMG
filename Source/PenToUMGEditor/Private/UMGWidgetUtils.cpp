@@ -758,10 +758,12 @@ UClass* FUMGWidgetUtils::ResolveWidgetClass(const FString& TypeName)
 		return *Found;
 	}
 
-	static TMap<FString, UClass*> DynamicClassCache;
-	if (UClass* const* Cached = DynamicClassCache.Find(TypeName))
+	static TMap<FString, TWeakObjectPtr<UClass>> DynamicClassCache;
+	if (TWeakObjectPtr<UClass>* Cached = DynamicClassCache.Find(TypeName))
 	{
-		return *Cached;
+		if (Cached->IsValid())
+			return Cached->Get();
+		DynamicClassCache.Remove(TypeName);
 	}
 
 	FString ClassName = FString::Printf(TEXT("U%s"), *TypeName);
@@ -772,7 +774,6 @@ UClass* FUMGWidgetUtils::ResolveWidgetClass(const FString& TypeName)
 		return FoundClass;
 	}
 
-	DynamicClassCache.Add(TypeName, nullptr);
 	return nullptr;
 }
 
@@ -853,6 +854,13 @@ FMargin FUMGWidgetUtils::ParseMargin(const FString& Str)
 	if (Parts.Num() == 1)
 	{
 		return FMargin(FCString::Atof(*Parts[0]));
+	}
+	if (Parts.Num() == 2)
+	{
+		// CSS简写：水平, 垂直
+		float H = FCString::Atof(*Parts[0].TrimStartAndEnd());
+		float V = FCString::Atof(*Parts[1].TrimStartAndEnd());
+		return FMargin(H, V, H, V);
 	}
 	if (Parts.Num() == 4)
 	{
@@ -957,10 +965,24 @@ namespace
 
 		if (!Texture) return false;
 
+		// 保留 ApplyWidgetProperties 已设置的 ImageSize 和 UVRegion
+		const FSlateBrush OldBrush = ImageWidget->GetBrush();
+		const FVector2D OldImageSize = OldBrush.ImageSize;
+		const FBox2f OldUVRegion = OldBrush.GetUVRegion();
+
 		ImageWidget->SetBrushFromTexture(Texture);
 		FSlateBrush Brush = ImageWidget->GetBrush();
-		Brush.ImageSize = FVector2D(Texture->GetSizeX(), Texture->GetSizeY());
 		Brush.Tiling = ESlateBrushTileType::NoTile;
+
+		// WidthOverride/HeightOverride 优先（设计稿指定尺寸），否则用纹理原始尺寸
+		// 注意：FSlateBrush 默认 ImageSize 是 32x32，不能用它判断是否有显式覆盖
+		const bool bHadSizeOverride = Node.Properties.Contains(TEXT("WidthOverride")) || Node.Properties.Contains(TEXT("HeightOverride"));
+		Brush.ImageSize = bHadSizeOverride ? OldImageSize : FVector2D(Texture->GetSizeX(), Texture->GetSizeY());
+
+		// 恢复 UVRegion（非默认值说明 Crop 已设置）
+		if (OldUVRegion.GetSize().GetMax() > KINDA_SMALL_NUMBER)
+			Brush.SetUVRegion(OldUVRegion);
+
 		ImageWidget->SetBrush(Brush);
 		ImageWidget->SetDesiredSizeOverride(Brush.ImageSize);
 		ImageWidget->SynchronizeProperties();

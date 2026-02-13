@@ -95,11 +95,23 @@ FUMGWidgetNode FPenToUMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Node,
 	case EPenNodeType::Group:
 		Widget = CreateContainerWidget(Node);
 		break;
-	case EPenNodeType::Ellipse:
+	case EPenNodeType::Rectangle:
 		Widget = CreateContainerWidget(Node);
-		UE_LOG(LogPenToUMG, Warning, TEXT("PenToUMG: Ellipse '%s' mapped to Border (UMG has no ellipse widget)"), *Node->Name);
-		if (OutWarnings)
-			OutWarnings->Add(FString::Printf(TEXT("Ellipse '%s' → Border (UMG 无椭圆控件)"), *Node->Name));
+		break;
+	case EPenNodeType::Ellipse:
+		{
+			Widget = CreateContainerWidget(Node);
+			// 用圆角近似椭圆：cornerRadius = min(w, h) / 2，不改写源 Node
+			float W = Node->Width.IsFixed() ? Node->Width.Value : 0.0f;
+			float H = Node->Height.IsFixed() ? Node->Height.Value : 0.0f;
+			if (W > 0 && H > 0)
+			{
+				FPenCornerRadius EllipseRadius;
+				EllipseRadius.bUniform = true;
+				EllipseRadius.Uniform = FMath::Min(W, H) / 2.0f;
+				FPenVisualMapper::ApplyRoundedCorner(Widget, EllipseRadius);
+			}
+		}
 		break;
 	case EPenNodeType::Polygon:
 		Widget = CreateContainerWidget(Node);
@@ -108,10 +120,7 @@ FUMGWidgetNode FPenToUMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Node,
 			OutWarnings->Add(FString::Printf(TEXT("Polygon '%s' → Border (UMG 无多边形控件)"), *Node->Name));
 		break;
 	case EPenNodeType::Path:
-		Widget = CreateContainerWidget(Node);
-		UE_LOG(LogPenToUMG, Warning, TEXT("PenToUMG: Path '%s' mapped to Border (UMG has no SVG path widget)"), *Node->Name);
-		if (OutWarnings)
-			OutWarnings->Add(FString::Printf(TEXT("Path '%s' → Border (UMG 无 SVG 路径控件)"), *Node->Name));
+		Widget = CreatePathWidget(Node);
 		break;
 	case EPenNodeType::Line:
 		Widget = CreateContainerWidget(Node);
@@ -146,7 +155,7 @@ FUMGWidgetNode FPenToUMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Node,
 				EffectiveChild = Expanded;
 		}
 
-		auto ChildWidget = ConvertNode(Child, Doc, ActiveTheme, OutWarnings);
+		auto ChildWidget = ConvertNode(EffectiveChild, Doc, ActiveTheme, OutWarnings);
 		if (ChildWidget.Type.IsEmpty())
 			continue;
 
@@ -170,7 +179,8 @@ FUMGWidgetNode FPenToUMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Node,
 	if (Node->JustifyContent != EPenJustifyContent::Start)
 		FPenLayoutMapper::ApplyJustifyContent(Widget.Children, Node->JustifyContent);
 
-	const bool bHasVisualFill = Node->Fill.bEnabled && Node->Fill.Type != EPenFillType::None;
+	const bool bHasVisualFill = (Node->Fill.bEnabled && Node->Fill.Type != EPenFillType::None)
+		|| Node->Fills.Num() > 0;
 	const bool bHasCornerRadius = Node->CornerRadius.bUniform ? Node->CornerRadius.Uniform > 0
 		: (Node->CornerRadius.TopLeft > 0 || Node->CornerRadius.TopRight > 0
 			|| Node->CornerRadius.BottomRight > 0 || Node->CornerRadius.BottomLeft > 0);
@@ -182,6 +192,13 @@ FUMGWidgetNode FPenToUMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Node,
 		Widget = FPenVisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
 	else if (FPenLayoutMapper::HasPadding(Node))
 		FPenLayoutMapper::ApplyPadding(Widget, Node->Padding);
+
+	// 多层填充叠加（Overlay 包裹）
+	if (Node->HasMultiFill())
+		Widget = FPenVisualMapper::WrapWithMultiFill(MoveTemp(Widget), Node);
+
+	if (Widget.Properties.Contains(TEXT("BoxShadowOffsetX")))
+		Widget = FPenVisualMapper::WrapWithBoxShadow(MoveTemp(Widget), Node);
 
 	for (const FPenEffect& Effect : Node->Effects)
 	{
@@ -277,5 +294,37 @@ FUMGWidgetNode FPenToUMGConverter::CreateIconFontWidget(const TSharedPtr<FPenNod
 	if (Node->Fill.Type == EPenFillType::Color)
 		Widget.Properties.Add(TEXT("Color"), Node->Fill.SolidColor);
 
+	return Widget;
+}
+
+FUMGWidgetNode FPenToUMGConverter::CreatePathWidget(const TSharedPtr<FPenNode>& Node)
+{
+	FUMGWidgetNode Widget;
+
+	// 已被 FigmaImageExporter 转为 Image Fill → 走 Image 路径
+	if (Node->Fill.Type == EPenFillType::Image && !Node->Fill.Image.Url.IsEmpty())
+	{
+		Widget.Type = TEXT("Image");
+		Widget.Properties.Add(TEXT("TexturePath"), Node->Fill.Image.Url);
+		return Widget;
+	}
+
+	// 有 geometry 数据且有颜色填充 → 栅格化；fill:none 的 stroke-only path 走 fallback
+	if (!Node->Geometry.IsEmpty() && Node->Fill.Type == EPenFillType::Color)
+	{
+		int32 W = FMath::Max(1, FMath::RoundToInt(Node->Width.Value));
+		int32 H = FMath::Max(1, FMath::RoundToInt(Node->Height.Value));
+
+		Widget.Type = TEXT("Image");
+		Widget.Properties.Add(TEXT("PathGeometry"), Node->Geometry);
+		Widget.Properties.Add(TEXT("PathFillRule"), Node->FillRule);
+		Widget.Properties.Add(TEXT("PathFillColor"), Node->Fill.SolidColor);
+		Widget.Properties.Add(TEXT("WidthOverride"), FString::FromInt(W));
+		Widget.Properties.Add(TEXT("HeightOverride"), FString::FromInt(H));
+		return Widget;
+	}
+
+	// Fallback
+	Widget.Type = FPenTypeMapper::MapNodeTypeToWidget(Node->Type, Node->Layout);
 	return Widget;
 }
