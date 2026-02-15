@@ -100,16 +100,30 @@ FUMGWidgetNode FPenToUMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Node,
 		break;
 	case EPenNodeType::Ellipse:
 		{
-			Widget = CreateContainerWidget(Node);
-			// 用圆角近似椭圆：cornerRadius = min(w, h) / 2，不改写源 Node
 			float W = Node->Width.IsFixed() ? Node->Width.Value : 0.0f;
 			float H = Node->Height.IsFixed() ? Node->Height.Value : 0.0f;
-			if (W > 0 && H > 0)
+			// 有尺寸、有颜色填充、无描边 → 生成椭圆 SVG path，走栅格化
+			// 有描边时走 fallback（Border 支持 OutlineThickness，Image 不支持）
+			bool bHasStroke = Node->Stroke.Fill.Type != EPenFillType::None;
+			if (W > 0 && H > 0 && Node->Fill.IsColor() && Node->Fill.bEnabled && !bHasStroke)
 			{
-				FPenCornerRadius EllipseRadius;
-				EllipseRadius.bUniform = true;
-				EllipseRadius.Uniform = FMath::Min(W, H) / 2.0f;
-				FPenVisualMapper::ApplyRoundedCorner(Widget, EllipseRadius);
+				float Rx = W / 2.0f, Ry = H / 2.0f;
+				Node->Geometry = FString::Printf(
+					TEXT("M 0,%.2f A %.2f,%.2f 0 1,1 %.2f,%.2f A %.2f,%.2f 0 1,1 0,%.2f Z"),
+					Ry, Rx, Ry, W, Ry, Rx, Ry, Ry);
+				Widget = CreatePathWidget(Node);
+			}
+			else
+			{
+				// Fallback: 圆角近似
+				Widget = CreateContainerWidget(Node);
+				if (W > 0 && H > 0)
+				{
+					FPenCornerRadius EllipseRadius;
+					EllipseRadius.bUniform = true;
+					EllipseRadius.Uniform = FMath::Min(W, H) / 2.0f;
+					FPenVisualMapper::ApplyRoundedCorner(Widget, EllipseRadius);
+				}
 			}
 		}
 		break;
