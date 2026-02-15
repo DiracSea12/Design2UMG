@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
 #pragma once
 
@@ -10,6 +10,7 @@
  *
  * 支持指令：M/m, L/l, H/h, V/v, C/c, Q/q, Z/z, A/a
  * 使用 scanline fill，支持 nonzero 和 evenodd 填充规则
+ * 内置 WeakPtr 缓存，相同参数直接复用已有纹理
  */
 class FPenPathRasterizer
 {

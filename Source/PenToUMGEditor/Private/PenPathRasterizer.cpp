@@ -1,8 +1,68 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
 #include "PenPathRasterizer.h"
 #include "ProceduralShapeGenerator.h"
 #include "PenToUMGLog.h"
+#include "HAL/IConsoleManager.h"
+
+// --- Path cache (file-local) ---
+namespace
+{
+	uint32 MakeCacheKey(const FString& Geometry, int32 W, int32 H, FLinearColor C, const FString& Rule)
+	{
+		uint32 K = GetTypeHash(Geometry);
+		K = HashCombine(K, GetTypeHash(W));
+		K = HashCombine(K, GetTypeHash(H));
+		K = HashCombine(K, GetTypeHash(C.R));
+		K = HashCombine(K, GetTypeHash(C.G));
+		K = HashCombine(K, GetTypeHash(C.B));
+		K = HashCombine(K, GetTypeHash(C.A));
+		K = HashCombine(K, GetTypeHash(Rule));
+		return K;
+	}
+
+	TMap<uint32, TWeakObjectPtr<UTexture2D>> GPathCache;
+	int32 GCacheHits = 0;
+	int32 GCacheMisses = 0;
+	constexpr int32 GMaxCacheEntries = 256;
+
+	void EvictStale()
+	{
+		for (auto It = GPathCache.CreateIterator(); It; ++It)
+		{
+			if (!It->Value.IsValid())
+				It.RemoveCurrent();
+		}
+		if (GPathCache.Num() > GMaxCacheEntries)
+		{
+			int32 ToRemove = GPathCache.Num() - GMaxCacheEntries;
+			for (auto It = GPathCache.CreateIterator(); ToRemove > 0 && It; ++It, --ToRemove)
+				It.RemoveCurrent();
+		}
+	}
+
+	FAutoConsoleCommand GCacheStatsCmd(
+		TEXT("PenToUMG.CacheStats"),
+		TEXT("Print path rasterization cache statistics"),
+		FConsoleCommandDelegate::CreateLambda([]()
+		{
+			int32 Total = GCacheHits + GCacheMisses;
+			float Rate = Total > 0 ? 100.0f * GCacheHits / Total : 0.0f;
+			UE_LOG(LogPenToUMG, Display,
+				TEXT("PathCache: Entries=%d, Hits=%d, Misses=%d, HitRate=%.1f%%"),
+				GPathCache.Num(), GCacheHits, GCacheMisses, Rate);
+		}));
+
+	FAutoConsoleCommand GCacheClearCmd(
+		TEXT("PenToUMG.CacheClear"),
+		TEXT("Clear path rasterization cache"),
+		FConsoleCommandDelegate::CreateLambda([]()
+		{
+			GPathCache.Empty();
+			GCacheHits = GCacheMisses = 0;
+			UE_LOG(LogPenToUMG, Log, TEXT("PenPathRasterizer: cache cleared"));
+		}));
+}
 
 namespace
 {
@@ -487,6 +547,19 @@ UTexture2D* FPenPathRasterizer::Rasterize(
 	if (Geometry.IsEmpty() || Width <= 0 || Height <= 0)
 		return nullptr;
 
+	// --- Cache lookup ---
+	uint32 CacheKey = MakeCacheKey(Geometry, Width, Height, FillColor, FillRule);
+	if (TWeakObjectPtr<UTexture2D>* Found = GPathCache.Find(CacheKey))
+	{
+		if (Found->IsValid())
+		{
+			++GCacheHits;
+			return Found->Get();
+		}
+		GPathCache.Remove(CacheKey);
+	}
+	++GCacheMisses;
+
 	TArray<TArray<FPathPoint>> SubPaths;
 	FBox2D Bounds;
 	if (!ParsePathData(Geometry, SubPaths, Bounds))
@@ -545,6 +618,10 @@ UTexture2D* FPenPathRasterizer::Rasterize(
 	FMemory::Memcpy(TextureData, Pixels.GetData(), Pixels.Num() * sizeof(FColor));
 	Texture->GetPlatformData()->Mips[0].BulkData.Unlock();
 	Texture->UpdateResource();
+
+	// --- Cache write ---
+	EvictStale();
+	GPathCache.Add(CacheKey, Texture);
 
 	return Texture;
 }

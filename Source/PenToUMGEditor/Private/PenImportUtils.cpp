@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
 #include "PenImportUtils.h"
 #include "PenToUMGLog.h"
@@ -52,8 +52,8 @@ bool PenImportUtils::GenerateBlueprintAndPng(const FUMGWidgetData& Data, const F
 		return false;
 
 	// 优先用 RootWidget 自身的 Bounds，否则从子节点边界计算
-	float MaxRight = FMath::Max(400.0f, Data.RootWidget.Bounds.W);
-	float MaxBottom = FMath::Max(300.0f, Data.RootWidget.Bounds.H);
+	float MaxRight = FMath::Max(1.0f, Data.RootWidget.Bounds.W);
+	float MaxBottom = FMath::Max(1.0f, Data.RootWidget.Bounds.H);
 	for (const auto& Child : Data.RootWidget.Children)
 	{
 		MaxRight = FMath::Max(MaxRight, Child.Bounds.X + Child.Bounds.W);
@@ -69,7 +69,9 @@ bool PenImportUtils::GenerateBlueprintAndPng(const FUMGWidgetData& Data, const F
 		return false;
 	}
 
-	const FString OutPng = FPaths::ProjectSavedDir() / TEXT("PenToUMG/rendered.png");
+	// 从 OutputPath 提取名称作为 PNG 文件名，避免多 frame 输出互相覆盖
+	const FString PngName = FPaths::GetBaseFilename(OutputPath);
+	const FString OutPng = FPaths::ProjectSavedDir() / TEXT("PenToUMG") / (PngName + TEXT(".png"));
 	FFileHelper::SaveArrayToFile(PngData, *OutPng);
 	UE_LOG(LogPenToUMG, Log, TEXT("PenImportUtils: Rendered PNG saved: %s (%dx%d)"), *OutPng, Size.X, Size.Y);
 	return true;
