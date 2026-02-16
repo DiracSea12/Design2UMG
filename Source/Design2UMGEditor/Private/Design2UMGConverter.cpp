@@ -666,7 +666,24 @@ FVector2D FDesign2UMGConverter::PreComputeFitContentSizes(const TSharedPtr<FPenN
 		return FVector2D(S, S);
 	}
 
-	// 非容器叶子节点
+	// 矢量叶子节点（Path/Line/Ellipse/Polygon）：亚像素钳制到 1px 并回写
+	// CreatePathWidget 用 Max(1, RoundToInt) 算 WidthOverride，这里对齐
+	const bool bIsVectorLeaf = Node->Type == EPenNodeType::Path
+		|| Node->Type == EPenNodeType::Line
+		|| Node->Type == EPenNodeType::Ellipse
+		|| Node->Type == EPenNodeType::Polygon;
+	if (bIsVectorLeaf)
+	{
+		float W = FMath::Max(1.0f, FMath::RoundToFloat(Node->Width.Value));
+		float H = FMath::Max(1.0f, FMath::RoundToFloat(Node->Height.Value));
+		if (!Node->Width.IsFixed() || Node->Width.Value < 1.0f)
+			Node->Width.Value = W;
+		if (!Node->Height.IsFixed() || Node->Height.Value < 1.0f)
+			Node->Height.Value = H;
+		return FVector2D(W, H);
+	}
+
+	// 其他非容器叶子节点
 	if (!Node->IsContainer() && Node->Type != EPenNodeType::Rectangle)
 	{
 		return FVector2D(
