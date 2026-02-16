@@ -37,4 +37,7 @@ private:
 
 	/** 应用文本属性 */
 	static void ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FPenNode>& Node);
+
+	/** 递归预计算 FitContent 节点的实际尺寸（从子节点推算） */
+	static FVector2D PreComputeFitContentSizes(const TSharedPtr<FPenNode>& Node, const FPenDocument& Doc);
 };

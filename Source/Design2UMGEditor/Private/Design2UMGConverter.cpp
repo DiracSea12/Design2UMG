@@ -53,7 +53,7 @@ namespace
 				float CH = C->Height.Value;
 				if (C->Width.IsFit() && CW == 0 && C->Children.Num() > 0)
 				{
-					FVector2D Sub = EstimateContentSize(C);
+					const FVector2D Sub(EstimateContentSize(C));
 					CW = Sub.X; CH = FMath::Max(CH, Sub.Y);
 				}
 				W += CW;
@@ -69,7 +69,7 @@ namespace
 				float CH = C->Height.Value;
 				if (C->Height.IsFit() && CH == 0 && C->Children.Num() > 0)
 				{
-					FVector2D Sub = EstimateContentSize(C);
+					const FVector2D Sub(EstimateContentSize(C));
 					CW = FMath::Max(CW, Sub.X); CH = Sub.Y;
 				}
 				W = FMath::Max(W, CW);
@@ -88,7 +88,7 @@ namespace
 				{
 					if (C->Children.Num() > 0)
 					{
-						FVector2D Sub = EstimateContentSize(C);
+						const FVector2D Sub(EstimateContentSize(C));
 						if (CW == 0) CW = Sub.X;
 						if (CH == 0) CH = Sub.Y;
 					}
@@ -106,6 +106,13 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FPenDocument& Document)
 {
 	FUMGWidgetData Result;
 	Result.WidgetName = TEXT("WBP_FromPen");
+
+	// 预计算 FitContent 节点的实际尺寸（从子节点递归推算）
+	for (const auto& Child : Document.Children)
+	{
+		if (!ShouldSkipNode(Child))
+			PreComputeFitContentSizes(Child, Document);
+	}
 
 	TArray<FUMGWidgetNode> RenderWidgets;
 	for (const auto& Child : Document.Children)
@@ -337,7 +344,7 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 		if ((Child->Width.IsFit() && Child->Width.Value == 0.0f)
 			|| (Child->Height.IsFit() && Child->Height.Value == 0.0f))
 		{
-			FVector2D Est = EstimateContentSize(Child);
+			const FVector2D Est(EstimateContentSize(Child));
 			ResolveFit(Child, true, Est.X);
 			ResolveFit(Child, false, Est.Y);
 
@@ -588,4 +595,87 @@ FUMGWidgetNode FDesign2UMGConverter::CreatePathWidget(const TSharedPtr<FPenNode>
 	// Fallback
 	Widget.Type = FPenTypeMapper::MapNodeTypeToWidget(Node->Type, Node->Layout);
 	return Widget;
+}
+
+FVector2D FDesign2UMGConverter::PreComputeFitContentSizes(const TSharedPtr<FPenNode>& Node, const FPenDocument& Doc)
+{
+	if (!Node.IsValid() || !Node->bEnabled)
+	{
+		return FVector2D(0.0, 0.0);
+	}
+
+	// Ref 节点：展开后递归，回写尺寸到原始节点
+	if (Node->Type == EPenNodeType::Ref)
+	{
+		auto Expanded = FPenRefExpander::ExpandRef(Node, Doc);
+		if (Expanded.IsValid())
+		{
+			const FVector2D RefSize(PreComputeFitContentSizes(Expanded, Doc));
+			if (Node->Width.IsFit() && Node->Width.Value == 0 && RefSize.X > 0)
+				Node->Width.Value = static_cast<float>(RefSize.X);
+			if (Node->Height.IsFit() && Node->Height.Value == 0 && RefSize.Y > 0)
+				Node->Height.Value = static_cast<float>(RefSize.Y);
+			return RefSize;
+		}
+		return FVector2D(0.0, 0.0);
+	}
+
+	// Text 叶子节点：用 FontSize 估算
+	if (Node->Type == EPenNodeType::Text)
+	{
+		float W = Node->Width.IsFixed() ? Node->Width.Value : 0.0f;
+		float H = Node->Height.IsFixed() ? Node->Height.Value : 0.0f;
+		if (H == 0 && Node->FontSize > 0)
+			H = Node->FontSize * 1.5f;
+		if (W == 0 && Node->FontSize > 0 && !Node->Content.IsEmpty())
+			W = Node->Content.Len() * Node->FontSize * 0.6f;
+		return FVector2D(W, H);
+	}
+
+	// IconFont 叶子节点
+	if (Node->Type == EPenNodeType::IconFont)
+	{
+		float S = Node->FontSize > 0 ? Node->FontSize : 16.0f;
+		return FVector2D(S, S);
+	}
+
+	// 非容器叶子节点
+	if (!Node->IsContainer() && Node->Type != EPenNodeType::Rectangle)
+	{
+		return FVector2D(
+			Node->Width.IsFixed() ? Node->Width.Value : 0.0f,
+			Node->Height.IsFixed() ? Node->Height.Value : 0.0f);
+	}
+
+	// 容器节点：先递归子节点
+	for (const auto& Child : Node->Children)
+	{
+		(void)PreComputeFitContentSizes(Child, Doc);
+	}
+
+	// 如果本节点有 FitContent 轴且 Value=0，用 EstimateContentSize 回填
+	const bool bNeedW = Node->Width.IsFit() && Node->Width.Value == 0;
+	const bool bNeedH = Node->Height.IsFit() && Node->Height.Value == 0;
+
+	float FinalW = Node->Width.Value;
+	float FinalH = Node->Height.Value;
+
+	if (bNeedW || bNeedH)
+	{
+		const FVector2D Est(EstimateContentSize(Node));
+		if (bNeedW && Est.X > 0)
+		{
+			Node->Width.Value = static_cast<float>(Est.X);
+			FinalW = static_cast<float>(Est.X);
+			UE_LOG(LogDesign2UMG, Log, TEXT("PreCompute: '%s' width fit→%.0f"), *Node->Name, Est.X);
+		}
+		if (bNeedH && Est.Y > 0)
+		{
+			Node->Height.Value = static_cast<float>(Est.Y);
+			FinalH = static_cast<float>(Est.Y);
+			UE_LOG(LogDesign2UMG, Log, TEXT("PreCompute: '%s' height fit→%.0f"), *Node->Name, Est.Y);
+		}
+	}
+
+	return FVector2D(FinalW, FinalH);
 }

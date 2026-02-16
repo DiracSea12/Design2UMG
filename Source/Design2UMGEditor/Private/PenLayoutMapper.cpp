@@ -185,6 +185,7 @@ FUMGWidgetNode FPenLayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, c
 	else if (ChildNode->Height.IsFit() && ChildNode->Height.Value > 0)
 		SizeBox.Properties.Add(TEXT("MinDesiredHeight"), FString::SanitizeFloat(ChildNode->Height.Value));
 
+	SizeBox.Bounds = ChildWidget.Bounds;
 	SizeBox.Slot = MoveTemp(ChildWidget.Slot);
 	ChildWidget.Slot = FUMGSlotData();
 	SizeBox.Children.Add(MoveTemp(ChildWidget));
