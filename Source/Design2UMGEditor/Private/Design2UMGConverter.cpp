@@ -164,6 +164,80 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 
 	FPenVisualMapper::ApplyVisualProperties(Widget, Node);
 
+	// 预处理：在递归子节点之前，解析 FillContainer 尺寸写入 PenNode
+	// 这样子节点递归时 Width.Value / Height.Value 已经是正确的像素值
+	// 直接修改原始子节点（Ref 节点的 Width/Height 会被 ExpandRef 传递给展开节点）
+	if (Widget.Bounds.W > 0 && Widget.Bounds.H > 0
+		&& (Node->Layout == EPenLayout::Horizontal || Node->Layout == EPenLayout::Vertical))
+	{
+		const float PadL = Node->Padding.Left, PadR = Node->Padding.Right;
+		const float PadT = Node->Padding.Top, PadB = Node->Padding.Bottom;
+		const float InnerW = Widget.Bounds.W - PadL - PadR;
+		const float InnerH = Widget.Bounds.H - PadT - PadB;
+		const bool bHorizontal = (Node->Layout == EPenLayout::Horizontal);
+
+		// 收集有效子节点（不展开 Ref，直接用原始节点）
+		TArray<TSharedPtr<FPenNode>> EffChildren;
+		for (const auto& Child : Node->Children)
+		{
+			if (!ShouldSkipNode(Child))
+				EffChildren.Add(Child);
+		}
+
+		// 统计主轴 Fixed 占用和 Fill 数量
+		float FixedMainSum = 0.0f;
+		int32 FillCount = 0;
+		const float TotalGap = EffChildren.Num() > 1 ? Node->Gap * (EffChildren.Num() - 1) : 0.0f;
+		for (const auto& EC : EffChildren)
+		{
+			const FPenSize& MainSize = bHorizontal ? EC->Width : EC->Height;
+			if (MainSize.IsFill())
+				FillCount++;
+			else
+				FixedMainSum += MainSize.Value;
+		}
+
+		// 辅助 lambda：只修改 Value 不改 Mode，保留 FillContainer 语义给下游 Slot 映射
+		// 同时设置 bHas 标志确保 Ref 节点的 ExpandRef 传递
+		auto ResolveSize = [](TSharedPtr<FPenNode>& N, bool bWidth, float Px)
+		{
+			FPenSize& Size = bWidth ? N->Width : N->Height;
+			Size.Value = FMath::Max(0.0f, Px);
+			if (bWidth) N->bHasWidth = true;
+			else N->bHasHeight = true;
+		};
+
+		if (FillCount > 0)
+		{
+			const float AvailMain = (bHorizontal ? InnerW : InnerH) - FixedMainSum - TotalGap;
+			const float FillMain = FMath::Max(0.0f, AvailMain / FillCount);
+
+			for (auto& EC : EffChildren)
+			{
+				const FPenSize& MainSize = bHorizontal ? EC->Width : EC->Height;
+				if (MainSize.IsFill())
+					ResolveSize(EC, bHorizontal, FillMain);
+				const FPenSize& CrossSize = bHorizontal ? EC->Height : EC->Width;
+				if (CrossSize.IsFill())
+					ResolveSize(EC, !bHorizontal, bHorizontal ? InnerH : InnerW);
+			}
+
+			UE_LOG(LogDesign2UMG, Log, TEXT("PreResolveFill: '%s' layout=%s inner=(%.0f,%.0f) fixed=%.0f fill=%d each=%.0f"),
+				*Widget.Name, bHorizontal ? TEXT("H") : TEXT("V"),
+				InnerW, InnerH, FixedMainSum, FillCount, FillMain);
+		}
+		else
+		{
+			// 没有 Fill 子节点，但交叉轴可能有 FillContainer
+			for (auto& EC : EffChildren)
+			{
+				const FPenSize& CrossSize = bHorizontal ? EC->Height : EC->Width;
+				if (CrossSize.IsFill())
+					ResolveSize(EC, !bHorizontal, bHorizontal ? InnerH : InnerW);
+			}
+		}
+	}
+
 	for (const auto& Child : Node->Children)
 	{
 		if (ShouldSkipNode(Child))
@@ -174,7 +248,15 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 		{
 			auto Expanded = FPenRefExpander::ExpandRef(Child, Doc);
 			if (Expanded.IsValid())
+			{
+				if (ActiveTheme.Num() > 0)
+				{
+					FPenVariableResolver Resolver(Doc.Variables);
+					Resolver.SetThemeContext(ActiveTheme);
+					FPenRefExpander::ReThemeNode(Expanded, Resolver);
+				}
 				EffectiveChild = Expanded;
+			}
 		}
 
 		auto ChildWidget = ConvertNode(EffectiveChild, Doc, ActiveTheme, OutWarnings);
@@ -187,8 +269,11 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 		const bool bHasFixedSize = EffectiveChild->Width.IsFixed() || EffectiveChild->Height.IsFixed();
 		const bool bHasMinSize = (EffectiveChild->Width.IsFit() && EffectiveChild->Width.Value > 0)
 			|| (EffectiveChild->Height.IsFit() && EffectiveChild->Height.Value > 0);
-		bool bNeedsSizeBox = (Node->Layout == EPenLayout::Vertical || Node->Layout == EPenLayout::Horizontal)
-			&& (bHasFixedSize || bHasMinSize);
+		// Canvas children with mixed FitContent+Fixed axes need SizeBox to enforce the Fixed axis
+		const bool bCanvasMixedAxis = Node->Layout == EPenLayout::None
+			&& ((EffectiveChild->Width.IsFit() && EffectiveChild->Height.IsFixed())
+				|| (EffectiveChild->Height.IsFit() && EffectiveChild->Width.IsFixed()));
+		bool bNeedsSizeBox = (bHasFixedSize || bHasMinSize || bCanvasMixedAxis);
 		if (bNeedsSizeBox)
 		{
 			UE_LOG(LogDesign2UMG, Verbose, TEXT("  child '%s' → SizeBox wrap (fixed=%d min=%d w=%.1f h=%.1f)"),
