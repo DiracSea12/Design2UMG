@@ -15,7 +15,7 @@ public:
 	static void ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr<FPenNode>& Node, EPenLayout ParentLayout);
 	static void ApplyGap(TArray<FUMGWidgetNode>& Children, float Gap, EPenLayout Layout);
 	static void ApplyPadding(FUMGWidgetNode& Widget, const FPenPadding& Padding);
-	static void ApplyJustifyContent(TArray<FUMGWidgetNode>& Children, EPenJustifyContent Justify);
+	static void ApplyJustifyContent(TArray<FUMGWidgetNode>& Children, EPenJustifyContent Justify, EPenSizeMode MainAxisMode = EPenSizeMode::Fixed, EPenLayout ParentLayout = EPenLayout::None);
 	static void ApplyAlignItems(FUMGWidgetNode& Widget, EPenAlignItems Align, EPenLayout ParentLayout);
 	static bool HasPadding(const TSharedPtr<FPenNode>& Node);
 	static FUMGWidgetNode WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, const TSharedPtr<FPenNode>& ChildNode);

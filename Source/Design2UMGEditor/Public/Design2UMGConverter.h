@@ -21,7 +21,7 @@ public:
 
 private:
 	/** 递归转换节点 */
-	static FUMGWidgetNode ConvertNode(const TSharedPtr<FPenNode>& Node, const FPenDocument& Doc, const TMap<FString, FString>& ThemeContext = TMap<FString, FString>(), TArray<FString>* OutWarnings = nullptr);
+	static FUMGWidgetNode ConvertNode(const TSharedPtr<FPenNode>& Node, const FPenDocument& Doc, const TMap<FString, FString>& ThemeContext = TMap<FString, FString>(), TArray<FString>* OutWarnings = nullptr, EPenLayout ParentLayout = EPenLayout::None);
 
 	/** 创建容器 Widget */
 	static FUMGWidgetNode CreateContainerWidget(const TSharedPtr<FPenNode>& Node);

@@ -81,9 +81,14 @@ void FPenLayoutMapper::ApplyPadding(FUMGWidgetNode& Widget, const FPenPadding& P
 		Padding.Left, Padding.Top, Padding.Right, Padding.Bottom));
 }
 
-void FPenLayoutMapper::ApplyJustifyContent(TArray<FUMGWidgetNode>& Children, EPenJustifyContent Justify)
+void FPenLayoutMapper::ApplyJustifyContent(TArray<FUMGWidgetNode>& Children, EPenJustifyContent Justify, EPenSizeMode MainAxisMode, EPenLayout ParentLayout)
 {
 	if (Justify == EPenJustifyContent::Start || Children.Num() == 0)
+		return;
+
+	// FitContent container in CanvasPanel: Spacer DesiredSize is (0,0),
+	// injecting them collapses the container's DesiredSize to zero.
+	if (MainAxisMode == EPenSizeMode::FitContent && ParentLayout == EPenLayout::None)
 		return;
 
 	bool bHasFillChild = false;

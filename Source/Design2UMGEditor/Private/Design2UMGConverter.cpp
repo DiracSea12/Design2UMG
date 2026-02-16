@@ -60,7 +60,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FPenDocument& Document)
 	return Result;
 }
 
-FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Node, const FPenDocument& Doc, const TMap<FString, FString>& ThemeContext, TArray<FString>* OutWarnings)
+FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Node, const FPenDocument& Doc, const TMap<FString, FString>& ThemeContext, TArray<FString>* OutWarnings, EPenLayout ParentLayout)
 {
 	if (ShouldSkipNode(Node))
 		return FUMGWidgetNode();
@@ -81,7 +81,7 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 			Resolver.SetThemeContext(ActiveTheme);
 			FPenRefExpander::ReThemeNode(Expanded, Resolver);
 		}
-		return ConvertNode(Expanded, Doc, ActiveTheme, OutWarnings);
+		return ConvertNode(Expanded, Doc, ActiveTheme, OutWarnings, ParentLayout);
 	}
 
 	FUMGWidgetNode Widget;
@@ -259,7 +259,7 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 			}
 		}
 
-		auto ChildWidget = ConvertNode(EffectiveChild, Doc, ActiveTheme, OutWarnings);
+		auto ChildWidget = ConvertNode(EffectiveChild, Doc, ActiveTheme, OutWarnings, Node->Layout);
 		if (ChildWidget.Type.IsEmpty())
 			continue;
 
@@ -289,7 +289,13 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 		FPenLayoutMapper::ApplyGap(Widget.Children, Node->Gap, Node->Layout);
 
 	if (Node->JustifyContent != EPenJustifyContent::Start)
-		FPenLayoutMapper::ApplyJustifyContent(Widget.Children, Node->JustifyContent);
+	{
+		// Determine the container's main-axis size mode for Spacer suppression.
+		// ParentLayout tells us if this container sits inside a CanvasPanel.
+		const EPenSizeMode MainAxisMode = (Node->Layout == EPenLayout::Horizontal)
+			? Node->Width.Mode : Node->Height.Mode;
+		FPenLayoutMapper::ApplyJustifyContent(Widget.Children, Node->JustifyContent, MainAxisMode, ParentLayout);
+	}
 
 	const bool bHasVisualFill = (Node->Fill.bEnabled && Node->Fill.Type != EPenFillType::None)
 		|| Node->Fills.Num() > 0;
