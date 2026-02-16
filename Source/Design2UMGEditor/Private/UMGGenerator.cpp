@@ -98,9 +98,13 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 			FString Indent;
 			for (int32 i = 0; i < Depth; ++i) Indent += TEXT("  ");
 
-			FString SlotInfo = FString::Printf(TEXT("slot[h=%s v=%s sz=%s fw=%.1f]"),
+			FString SlotInfo = FString::Printf(TEXT("slot[h=%s v=%s sz=%s fw=%.1f off=(%.0f,%.0f,%.0f,%.0f) anc=(%.2f,%.2f,%.2f,%.2f) aln=(%.2f,%.2f) auto=%d]"),
 				*Node.Slot.HorizontalAlignment, *Node.Slot.VerticalAlignment,
-				*Node.Slot.SizeRule, Node.Slot.FillWeight);
+				*Node.Slot.SizeRule, Node.Slot.FillWeight,
+				Node.Slot.Offsets.Left, Node.Slot.Offsets.Top, Node.Slot.Offsets.Right, Node.Slot.Offsets.Bottom,
+				Node.Slot.Anchors.Min.X, Node.Slot.Anchors.Min.Y, Node.Slot.Anchors.Max.X, Node.Slot.Anchors.Max.Y,
+				Node.Slot.Alignment.X, Node.Slot.Alignment.Y,
+				Node.Slot.bAutoSize ? 1 : 0);
 
 			FString PropsInfo;
 			for (const auto& P : Node.Properties)
