@@ -423,7 +423,9 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 				NormalizedBounds.Y = Node.Bounds.Y / Context.DesignSize.Y;
 				NormalizedBounds.W = Node.Bounds.W / Context.DesignSize.X;
 				NormalizedBounds.H = Node.Bounds.H / Context.DesignSize.Y;
+				const bool bOrigAutoSize = SlotData.bAutoSize;
 				SlotData = FLayoutCalculator::CalculateSlot(NormalizedBounds, Context);
+				SlotData.bAutoSize = bOrigAutoSize;
 			}
 			ApplySlotProperties(Slot, SlotData);
 		}
