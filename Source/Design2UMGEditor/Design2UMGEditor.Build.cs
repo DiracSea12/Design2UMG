@@ -1,0 +1,44 @@
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+
+using UnrealBuildTool;
+
+public class Design2UMGEditor : ModuleRules
+{
+	public Design2UMGEditor(ReadOnlyTargetRules Target) : base(Target)
+	{
+		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+
+		PublicDependencyModuleNames.AddRange(new string[]
+		{
+			"Core",
+			"CoreUObject",
+			"Engine",
+			"UMG",
+			"Slate",
+			"SlateCore",
+		});
+
+		PrivateDependencyModuleNames.AddRange(new string[]
+		{
+			"UnrealEd",
+			"UMGEditor",
+			"Blutility",
+			"AssetTools",
+			"AssetRegistry",
+			"Json",
+			"JsonUtilities",
+			"BlueprintGraph",
+			"Kismet",
+			"InputCore",
+			"Projects",
+			"DeveloperSettings",
+			"ImageWrapper",
+			"HTTP",
+			"RenderCore",
+			"ToolMenus",
+			"DesktopPlatform",
+			"Sockets",
+			"Networking",
+		});
+	}
+}

@@ -1,0 +1,23 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "Pen To UMG",
+	"Description": "Generate UMG Widget Blueprints from .pen design files",
+	"Category": "Editor",
+	"CreatedBy": "Diracsea12",
+	"CreatedByURL": "https://github.com/Diracsea12",
+	"DocsURL": "https://github.com/Diracsea12/Design2UMG",
+	"MarketplaceURL": "",
+	"SupportURL": "https://github.com/Diracsea12/Design2UMG/issues",
+	"EnabledByDefault": true,
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"Modules": [
+		{
+			"Name": "Design2UMGEditor",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		}
+	]
+}

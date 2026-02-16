@@ -1,0 +1,31 @@
+name: Build Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ue-version: ['5.4', '5.5', '5.6', '5.7']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # UE5 plugin CI requires a self-hosted runner with engine installed,
+      # or a third-party action like unrealcontainers/unreal-ci.
+      # This is a template — adapt to your build infrastructure.
+
+      - name: Build Plugin (UE ${{ matrix.ue-version }})
+        run: |
+          echo "TODO: Configure UE ${{ matrix.ue-version }} build environment"
+          echo "Example with UnrealBuildTool:"
+          echo "  UnrealBuildTool.exe PenToUMGEditor Win64 Development -Plugin=PenToUMG.uplugin"
+          # Uncomment and adapt when self-hosted runner is ready:
+          # $UE_ROOT/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.exe \
+          #   PenToUMGEditor Win64 Development \
+          #   -Plugin="${{ github.workspace }}/PenToUMG.uplugin"

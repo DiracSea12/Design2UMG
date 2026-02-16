@@ -1,8 +1,8 @@
-# PenToUMG 属性类型化改造方案
+# Design2UMG 属性类型化改造方案
 
 ## 一、问题是什么
 
-PenToUMG 的转换流水线分两步：
+Design2UMG 的转换流水线分两步：
 
 ```
 .pen JSON → FUMGWidgetNode (中间表示) → UWidget (最终控件)
@@ -42,7 +42,7 @@ FVector4 Radii = ParseVector4(*Props["CornerRadii"]);
 | FigmaToCode | AltNode (TypeScript) | 强类型接口：`fills: Paint[]`, `cornerRadius: number` |
 | FairyGUI-unreal | GObject (C++) | 强类型成员：`FVector2D Position`, `float Alpha` |
 | DivKit | DivText/DivContainer | 每种控件独立强类型 struct |
-| **PenToUMG (当前)** | FUMGWidgetNode | `TMap<FString, FString>` — 全部字符串 |
+| **Design2UMG (当前)** | FUMGWidgetNode | `TMap<FString, FString>` — 全部字符串 |
 
 **没有一个成熟项目用 string map 做主通道。**
 
@@ -138,6 +138,6 @@ else if (const FString* V = GET_PROP("OutlineThickness"))  // legacy 回退
 |------|------|
 | `UMGSchema.h` | 新增 FUMGBrushData struct + FUMGWidgetNode.Brush 字段 |
 | `PenVisualMapper.cpp` | 写入端：双写 Brush.xxx + Properties["xxx"] |
-| `PenToUMGConverter.cpp` | 写入端：FontSize/LetterSpacing 双写 |
+| `Design2UMGConverter.cpp` | 写入端：FontSize/LetterSpacing 双写 |
 | `UMGPropertyApplier.cpp` | 消费端：typed 优先读取 |
 | `UMGWidgetUtils.cpp` | 消费端：Image 控件 typed 优先读取 |

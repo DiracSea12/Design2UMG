@@ -1,8 +1,8 @@
-# PRD: PenToUMG 傻瓜式导入方案
+# PRD: Design2UMG 傻瓜式导入方案
 
 ## 1. 概述
 
-为 PenToUMG 插件新增**双路径导入**能力，让用户（TA、UI 设计师、策划）无需命令行知识，在 UE5 编辑器里点几下就能完成从 Pencil 设计稿到 Widget Blueprint 的全部流程。
+为 Design2UMG 插件新增**双路径导入**能力，让用户（TA、UI 设计师、策划）无需命令行知识，在 UE5 编辑器里点几下就能完成从 Pencil 设计稿到 Widget Blueprint 的全部流程。
 
 | 路径 | 名称 | 优先级 | 依赖 |
 |------|------|--------|------|
@@ -14,14 +14,14 @@
 ### 2.1 现有管线
 
 ```
-.pen JSON → PenParser → PenToUMGConverter → LayoutFixer → LayoutCalculator → UMGGenerator → Widget Blueprint
+.pen JSON → PenParser → Design2UMGConverter → LayoutFixer → LayoutCalculator → UMGGenerator → Widget Blueprint
 ```
 
 ### 2.2 现有入口
 
 | 入口 | 接口 | 问题 |
 |------|------|------|
-| 控制台命令 | `PenToUMG.PenConvert <nodes.json> <vars.json>` | 需要手动拆分 nodes/vars，非傻瓜式 |
+| 控制台命令 | `Design2UMG.PenConvert <nodes.json> <vars.json>` | 需要手动拆分 nodes/vars，非傻瓜式 |
 | C++ API | `FPenImporter::ImportFromFile(FilePath)` | 无 UI 入口 |
 | C++ API | `FPenImporter::ImportFromJson(JsonString)` | 无 UI 入口 |
 
@@ -51,7 +51,7 @@
 
 #### 3.2.1 工具栏按钮
 
-在 UE5 编辑器主工具栏添加 "PenToUMG" 下拉菜单：
+在 UE5 编辑器主工具栏添加 "Design2UMG" 下拉菜单：
 
 | 菜单项 | 功能 |
 |--------|------|
@@ -68,7 +68,7 @@
 #### 3.2.3 控制台命令（保留并增强）
 
 ```
-PenToUMG.Import <file.pen> [--out=/Game/Path] [--no-preview]
+Design2UMG.Import <file.pen> [--out=/Game/Path] [--no-preview]
 ```
 
 简化现有 `PenConvert` 命令，直接接受 .pen 文件路径。
@@ -103,7 +103,7 @@ FPenRemoteImageImporter::ResolveRemoteImages
 TryOpenPreviewWindow → FUMGGenerator::GenerateWidgetBlueprint
 ```
 
-**关键设计决策**：多 frame 时不走 `ImportFromFile`（它会转换所有顶层 children），而是先解析 JSON 再走 `ConvertFromMCP` 路径，复用其已有的 `TargetNodeId` 过滤能力（`PenMCPBridge.cpp:64`）。这样不需要修改 `PenImporter` 或 `PenToUMGConverter`。
+**关键设计决策**：多 frame 时不走 `ImportFromFile`（它会转换所有顶层 children），而是先解析 JSON 再走 `ConvertFromMCP` 路径，复用其已有的 `TargetNodeId` 过滤能力（`PenMCPBridge.cpp:64`）。这样不需要修改 `PenImporter` 或 `Design2UMGConverter`。
 
 ### 3.4 Frame 选择器
 
@@ -300,7 +300,7 @@ data: {"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"..."}]},"id":
 
 ### 5.1 依赖
 
-- 仅依赖 PenToUMG 插件现有模块 + UE 核心模块
+- 仅依赖 Design2UMG 插件现有模块 + UE 核心模块
 - MCP HTTP 客户端使用 UE 内置 `FHttpModule`
 - 子进程管理使用 `FPlatformProcess::CreateProc`
 - 不引入外部库
@@ -308,10 +308,10 @@ data: {"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"..."}]},"id":
 ### 5.2 不修改的代码
 
 - PenParser（已验证兼容）
-- PenToUMGConverter
+- Design2UMGConverter
 - LayoutFixer / LayoutCalculator
 - UMGGenerator
-- SPenToUMGPreviewWindow（复用现有预览窗口）
+- SDesign2UMGPreviewWindow（复用现有预览窗口）
 
 ### 5.3 最小修改原则
 
@@ -329,9 +329,9 @@ data: {"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"..."}]},"id":
 
 | 文件 | 改动 |
 |------|------|
-| `PenToUMGEditorModule.cpp` | `StartupModule` 中注册工具栏按钮和新控制台命令 |
-| `PenToUMGEditor.Build.cs` | 新增 `ToolMenus` 依赖（工具栏菜单注册所需） |
-| `PenToUMGSettings.h/cpp` | 新增 MCP Server 路径、App Name 两个可选设置字段 |
+| `Design2UMGEditorModule.cpp` | `StartupModule` 中注册工具栏按钮和新控制台命令 |
+| `Design2UMGEditor.Build.cs` | 新增 `ToolMenus` 依赖（工具栏菜单注册所需） |
+| `Design2UMGSettings.h/cpp` | 新增 MCP Server 路径、App Name 两个可选设置字段 |
 
 **不新增的文件**：
 - 不新增 Settings UI（复用 `UDeveloperSettings` 已有机制）
@@ -346,7 +346,7 @@ data: {"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"..."}]},"id":
 | A1 | 拖拽单 frame 的 .pen 文件到 Content Browser | 弹出预览窗口，确认后生成 Widget Blueprint |
 | A2 | 拖拽多 frame 的 .pen 文件 | 弹出 Frame 选择器 → 选择后预览 → 生成 |
 | A3 | 工具栏 Import .pen File → 选择文件 | 同 A1/A2 |
-| A4 | 控制台 `PenToUMG.Import test.pen` | 同 A1 |
+| A4 | 控制台 `Design2UMG.Import test.pen` | 同 A1 |
 | A5 | 选择非 .pen 文件 | 提示格式错误，不崩溃 |
 
 ### 6.2 路径 B

@@ -1,4 +1,4 @@
-# PenToUMG v2.2 开发进度表
+# Design2UMG v2.2 开发进度表
 
 **创建日期**：2025-12-30
 **技术方案版本**：v2.2
@@ -62,7 +62,7 @@
 | 任务 | 文件 | 状态 | 备注 |
 |------|------|------|------|
 | 重写默认Prompt（~50行） | Content/Config/DefaultPrompt_v2.txt | [x] | v2 Bounds格式 |
-| 切换到v2 Prompt | PenToUMGSettings.cpp | [x] | 已切换加载DefaultPrompt_v2.txt |
+| 切换到v2 Prompt | Design2UMGSettings.cpp | [x] | 已切换加载DefaultPrompt_v2.txt |
 | Bounds精度说明文档 | Prompt内嵌 | [x] | 4位小数，0.0001精度 |
 | 补充Slot规则与非Canvas示例 | Content/Config/DefaultPrompt_v2.txt | [x] | Slot约束/示例/Bounds关系 |
 
@@ -95,7 +95,7 @@
 | FUMGMetaData数据结构 | UMGSchema.h | [x] | confidence/source/bFixExempt |
 | JSON解析支持 | UMGJsonParser.cpp | [x] | 已实现 |
 | Fixer消费bFixExempt | LayoutFixer.cpp | [x] | 豁免节点跳过所有修正 |
-| 预览窗口显示置信度 | SPenToUMGPreviewWindow.cpp | [ ] | 可选优化 |
+| 预览窗口显示置信度 | SDesign2UMGPreviewWindow.cpp | [ ] | 可选优化 |
 | 调试日志输出 | UMGGenerator.cpp | [ ] | 可选优化 |
 
 ### 1.9 集成测试
@@ -159,7 +159,7 @@
 | 实现 差异优先级 | RenderCompare.cpp | [ ] | 结构>位置>尺寸>颜色>像素 |
 | 输出：差异报告 | RenderCompare.cpp | [ ] | 评测工具，供人工判断 |
 | 自动触发修复 | RepairAgent.cpp | [ ] | 可选功能，默认关闭 |
-| 设置项：启用自动修复 | PenToUMGSettings.h | [ ] | bEnableAutoRepair = false |
+| 设置项：启用自动修复 | Design2UMGSettings.h | [ ] | bEnableAutoRepair = false |
 
 ### 2.5 回归测试框架
 | 任务 | 文件 | 状态 | 备注 |
@@ -187,7 +187,7 @@
 |------|------|------|------|
 | 本地embedding检索 | Scripts/rag_server.py | [ ] | 案例库 |
 | Prompt注入 | HttpAIClient.cpp | [ ] | Few-shot示例 |
-| 案例管理UI | SPenToUMGPreviewWindow.cpp | [ ] | 可选 |
+| 案例管理UI | SDesign2UMGPreviewWindow.cpp | [ ] | 可选 |
 
 ---
 
@@ -212,7 +212,7 @@
 | 任务 | 文件 | 状态 | 备注 |
 |------|------|------|------|
 | 创建 T3DExporter.h/cpp | T3DExporter.h/cpp | [ ] | T3D格式生成 |
-| 导出选项 | SPenToUMGPreviewWindow.cpp | [ ] | UI按钮 |
+| 导出选项 | SDesign2UMGPreviewWindow.cpp | [ ] | UI按钮 |
 
 ---
 
@@ -225,7 +225,7 @@
 | FRetryPolicy实现 | HttpAIClient.cpp | [ ] | 指数退避 |
 | 响应缓存 | CacheManager.h/cpp | [ ] | 图片哈希+Prompt版本 |
 | FAIProviderChain降级链 | HttpAIClient.cpp | [ ] | OpenAI→Anthropic→Gemini→DeepSeek |
-| API调用日志 | Saved/PenToUMG/Logs/ | [ ] | JSONL格式 |
+| API调用日志 | Saved/Design2UMG/Logs/ | [ ] | JSONL格式 |
 
 ---
 

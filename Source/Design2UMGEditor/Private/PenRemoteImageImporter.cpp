@@ -1,0 +1,513 @@
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+
+#include "PenRemoteImageImporter.h"
+
+#include "Design2UMGLog.h"
+#include "Design2UMGSettings.h"
+
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Engine/Texture.h"
+#include "Engine/Texture2D.h"
+#include "HAL/FileManager.h"
+#include "HttpManager.h"
+#include "HttpModule.h"
+#include "IImageWrapper.h"
+#include "IImageWrapperModule.h"
+#include "Interfaces/IHttpRequest.h"
+#include "Interfaces/IHttpResponse.h"
+#include "Misc/PackageName.h"
+#include "Misc/Paths.h"
+#include "Misc/SecureHash.h"
+#include "Modules/ModuleManager.h"
+#include "UObject/SavePackage.h"
+
+namespace
+{
+	struct FResolveContext
+	{
+		FString ImportPath;
+		float TimeoutSeconds = 20.0f;
+		int32 ImportedCount = 0;
+		int32 ReusedCount = 0;
+		int32 FailedCount = 0;
+		TArray<FString> Messages;
+		TMap<FString, FString> UrlToAssetPath;  // 同次导入内的URL去重缓存
+	};
+
+	void AddReportMessage(FResolveContext& Context, const FString& Message)
+	{
+		if (Context.Messages.Num() < 32)
+		{
+			Context.Messages.Add(Message);
+		}
+	}
+
+	bool IsRemoteUrl(const FString& Value)
+	{
+		return Value.StartsWith(TEXT("http://"), ESearchCase::IgnoreCase)
+			|| Value.StartsWith(TEXT("https://"), ESearchCase::IgnoreCase);
+	}
+
+	bool IsAssetPath(const FString& Value)
+	{
+		return Value.StartsWith(TEXT("/Game/"), ESearchCase::CaseSensitive)
+			|| Value.StartsWith(TEXT("/Engine/"), ESearchCase::CaseSensitive);
+	}
+
+	FString NormalizeUrl(const FString& InUrl)
+	{
+		FString Url = InUrl.TrimStartAndEnd();
+		if (Url.StartsWith(TEXT("https://"), ESearchCase::IgnoreCase))
+		{
+			return FString(TEXT("https://")) + Url.RightChop(8);
+		}
+		if (Url.StartsWith(TEXT("http://"), ESearchCase::IgnoreCase))
+		{
+			return FString(TEXT("http://")) + Url.RightChop(7);
+		}
+		return Url;
+	}
+
+	FString MakeUrlHash(const FString& InUrl)
+	{
+		const FTCHARToUTF8 Utf8(*InUrl);
+		uint8 Hash[FSHA1::DigestSize] = { 0 };
+		FSHA1::HashBuffer(Utf8.Get(), Utf8.Length(), Hash);
+		return BytesToHex(Hash, UE_ARRAY_COUNT(Hash));
+	}
+
+	FString NormalizeImportPath(const FString& InPath)
+	{
+		FString Path = InPath.TrimStartAndEnd();
+		Path.ReplaceInline(TEXT("\\"), TEXT("/"));
+		while (Path.EndsWith(TEXT("/")))
+		{
+			Path.LeftChopInline(1);
+		}
+
+		if (Path.IsEmpty())
+		{
+			return TEXT("/Game/Design2UMG/ImportedImages");
+		}
+
+		if (!Path.StartsWith(TEXT("/Game/"), ESearchCase::CaseSensitive))
+		{
+			return TEXT("/Game/Design2UMG/ImportedImages");
+		}
+
+		if (!FPackageName::IsValidLongPackageName(Path))
+		{
+			return TEXT("/Game/Design2UMG/ImportedImages");
+		}
+
+		return Path;
+	}
+
+	FString BuildLongPackageName(const FString& ImportPath, const FString& AssetName)
+	{
+		return ImportPath + TEXT("/") + AssetName;
+	}
+
+	FString BuildObjectPath(const FString& LongPackageName, const FString& AssetName)
+	{
+		return LongPackageName + TEXT(".") + AssetName;
+	}
+
+	bool DownloadUrl(const FString& Url, float TimeoutSeconds, TArray<uint8>& OutData, FString& OutError)
+	{
+		bool bDone = false;
+		bool bSuccess = false;
+		int32 ResponseCode = 0;
+		TArray<uint8> Downloaded;
+		FString ErrorString;
+
+		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
+		Request->SetURL(Url);
+		Request->SetVerb(TEXT("GET"));
+		Request->SetHeader(TEXT("User-Agent"), TEXT("Design2UMG/RemoteImageImporter"));
+		Request->SetTimeout(FMath::Max(1.0f, TimeoutSeconds));
+		Request->OnProcessRequestComplete().BindLambda(
+			[&bDone, &bSuccess, &ResponseCode, &Downloaded, &ErrorString](FHttpRequestPtr, FHttpResponsePtr Response, bool bWasSuccessful)
+			{
+				bDone = true;
+				if (!bWasSuccessful || !Response.IsValid())
+				{
+					ErrorString = TEXT("HTTP request failed");
+					return;
+				}
+
+				ResponseCode = Response->GetResponseCode();
+				if (ResponseCode < 200 || ResponseCode >= 300)
+				{
+					ErrorString = FString::Printf(TEXT("HTTP %d"), ResponseCode);
+					return;
+				}
+
+				Downloaded = Response->GetContent();
+				if (Downloaded.Num() == 0)
+				{
+					ErrorString = TEXT("HTTP response content is empty");
+					return;
+				}
+
+				bSuccess = true;
+			});
+
+		if (!Request->ProcessRequest())
+		{
+			OutError = TEXT("Failed to start HTTP request");
+			return false;
+		}
+
+		FHttpModule::Get().GetHttpManager().Flush(EHttpFlushReason::FullFlush);
+		if (!bDone || !bSuccess)
+		{
+			OutError = ErrorString.IsEmpty()
+				? FString::Printf(TEXT("HTTP request failed (%d)"), ResponseCode)
+				: ErrorString;
+			return false;
+		}
+
+		OutData = MoveTemp(Downloaded);
+		return true;
+	}
+
+	bool DecodeToBGRA8(const TArray<uint8>& CompressedData, int32& OutWidth, int32& OutHeight, TArray64<uint8>& OutRawData, FString& OutError)
+	{
+		if (CompressedData.Num() == 0)
+		{
+			OutError = TEXT("Image data is empty");
+			return false;
+		}
+
+		IImageWrapperModule& ImageWrapperModule = FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
+		const EImageFormat Format = ImageWrapperModule.DetectImageFormat(CompressedData.GetData(), CompressedData.Num());
+		if (Format == EImageFormat::Invalid)
+		{
+			OutError = TEXT("Unsupported image format (engine image wrapper cannot decode it)");
+			return false;
+		}
+
+		TSharedPtr<IImageWrapper> Wrapper = ImageWrapperModule.CreateImageWrapper(Format);
+		if (!Wrapper.IsValid() || !Wrapper->SetCompressed(CompressedData.GetData(), CompressedData.Num()))
+		{
+			OutError = TEXT("Failed to parse compressed image data");
+			return false;
+		}
+
+		OutWidth = Wrapper->GetWidth();
+		OutHeight = Wrapper->GetHeight();
+		if (OutWidth <= 0 || OutHeight <= 0)
+		{
+			OutError = TEXT("Invalid decoded image size");
+			return false;
+		}
+
+		if (!Wrapper->GetRaw(ERGBFormat::BGRA, 8, OutRawData))
+		{
+			OutError = TEXT("Failed to decode image to BGRA8");
+			return false;
+		}
+
+		const int64 ExpectedSize = static_cast<int64>(OutWidth) * static_cast<int64>(OutHeight) * 4;
+		if (OutRawData.Num() < ExpectedSize)
+		{
+			OutError = TEXT("Decoded image data size is invalid");
+			return false;
+		}
+
+		return true;
+	}
+
+	bool CreateTextureAsset(
+		const FString& ImportPath,
+		const FString& AssetName,
+		const TArray64<uint8>& RawData,
+		int32 Width,
+		int32 Height,
+		FString& OutObjectPath,
+		FString& OutError)
+	{
+		const FString LongPackageName = BuildLongPackageName(ImportPath, AssetName);
+		if (!FPackageName::IsValidLongPackageName(LongPackageName))
+		{
+			OutError = FString::Printf(TEXT("Invalid package name: %s"), *LongPackageName);
+			return false;
+		}
+
+		const FString ObjectPath = BuildObjectPath(LongPackageName, AssetName);
+
+		UPackage* Package = CreatePackage(*LongPackageName);
+		if (!Package)
+		{
+			OutError = FString::Printf(TEXT("CreatePackage failed: %s"), *LongPackageName);
+			return false;
+		}
+
+		UTexture2D* Texture = NewObject<UTexture2D>(Package, *AssetName, RF_Public | RF_Standalone);
+		if (!Texture)
+		{
+			OutError = FString::Printf(TEXT("Failed to create texture object: %s"), *AssetName);
+			return false;
+		}
+
+		Texture->PreEditChange(nullptr);
+		Texture->Source.Init(Width, Height, 1, 1, TSF_BGRA8, RawData.GetData());
+		Texture->SRGB = true;
+		Texture->NeverStream = true;
+		Texture->LODGroup = TEXTUREGROUP_UI;
+		Texture->CompressionSettings = TC_Default;
+		Texture->MipGenSettings = TMGS_NoMipmaps;
+		Texture->Filter = TF_Bilinear;
+		Texture->AddressX = TA_Clamp;
+		Texture->AddressY = TA_Clamp;
+		Texture->UpdateResource();
+		Texture->PostEditChange();
+		Texture->MarkPackageDirty();
+
+		FAssetRegistryModule::AssetCreated(Texture);
+		Package->MarkPackageDirty();
+
+		const FString PackageFilename = FPackageName::LongPackageNameToFilename(LongPackageName, FPackageName::GetAssetPackageExtension());
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(PackageFilename), true);
+
+		FSavePackageArgs SaveArgs;
+		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+		if (!UPackage::SavePackage(Package, Texture, *PackageFilename, SaveArgs))
+		{
+			OutError = FString::Printf(TEXT("Failed to save package: %s"), *PackageFilename);
+			return false;
+		}
+
+		OutObjectPath = ObjectPath;
+		return true;
+	}
+
+	bool ResolveTexturePath(FString& InOutTexturePath, const FString& WidgetName, FResolveContext& Context)
+	{
+		InOutTexturePath = InOutTexturePath.TrimStartAndEnd();
+		if (InOutTexturePath.IsEmpty())
+		{
+			return true;
+		}
+
+		if (IsAssetPath(InOutTexturePath))
+		{
+			return true;
+		}
+
+		if (!IsRemoteUrl(InOutTexturePath))
+		{
+			AddReportMessage(Context, FString::Printf(TEXT("Skip non-asset/non-url TexturePath on '%s': %s"), *WidgetName, *InOutTexturePath));
+			return true;
+		}
+
+		const FString NormalizedUrl = NormalizeUrl(InOutTexturePath);
+
+		// 同次导入内的URL去重：已下载过的直接复用
+		if (const FString* CachedPath = Context.UrlToAssetPath.Find(NormalizedUrl))
+		{
+			InOutTexturePath = *CachedPath;
+			++Context.ReusedCount;
+			return true;
+		}
+
+		const FString UrlHash = MakeUrlHash(NormalizedUrl);
+		const FString AssetName = FString::Printf(TEXT("T_IMG_%s"), *UrlHash);
+		const FString LongPackageName = BuildLongPackageName(Context.ImportPath, AssetName);
+		const FString ObjectPath = BuildObjectPath(LongPackageName, AssetName);
+
+		// Reuse existing asset by URL hash
+		if (UTexture2D* ExistingTexture = LoadObject<UTexture2D>(nullptr, *ObjectPath))
+		{
+			InOutTexturePath = ObjectPath;
+			++Context.ReusedCount;
+			Context.UrlToAssetPath.Add(NormalizedUrl, ObjectPath);
+			AddReportMessage(Context, FString::Printf(TEXT("Reuse texture asset: %s"), *ObjectPath));
+			return true;
+		}
+
+		TArray<uint8> CompressedData;
+		FString DownloadError;
+		if (!DownloadUrl(NormalizedUrl, Context.TimeoutSeconds, CompressedData, DownloadError))
+		{
+			++Context.FailedCount;
+			AddReportMessage(Context, FString::Printf(TEXT("Download failed on '%s': %s (%s)"), *WidgetName, *NormalizedUrl, *DownloadError));
+			return false;
+		}
+
+		int32 Width = 0;
+		int32 Height = 0;
+		TArray64<uint8> RawBGRA;
+		FString DecodeError;
+		if (!DecodeToBGRA8(CompressedData, Width, Height, RawBGRA, DecodeError))
+		{
+			++Context.FailedCount;
+			AddReportMessage(Context, FString::Printf(TEXT("Decode failed on '%s': %s (%s)"), *WidgetName, *NormalizedUrl, *DecodeError));
+			return false;
+		}
+
+		FString ImportedObjectPath;
+		FString ImportError;
+		if (!CreateTextureAsset(Context.ImportPath, AssetName, RawBGRA, Width, Height, ImportedObjectPath, ImportError))
+		{
+			++Context.FailedCount;
+			AddReportMessage(Context, FString::Printf(TEXT("Import failed on '%s': %s (%s)"), *WidgetName, *NormalizedUrl, *ImportError));
+			return false;
+		}
+
+		InOutTexturePath = ImportedObjectPath;
+		++Context.ImportedCount;
+		Context.UrlToAssetPath.Add(NormalizedUrl, ImportedObjectPath);
+		AddReportMessage(Context, FString::Printf(TEXT("Imported texture asset: %s"), *ImportedObjectPath));
+		return true;
+	}
+
+	void ResolveNodeRecursive(FUMGWidgetNode& Node, FResolveContext& Context)
+	{
+		if (FString* TexturePath = Node.Properties.Find(TEXT("TexturePath")))
+		{
+			const FString DebugName = Node.Name.IsEmpty() ? Node.Id : Node.Name;
+			ResolveTexturePath(*TexturePath, DebugName.IsEmpty() ? TEXT("UnnamedWidget") : DebugName, Context);
+			// 同步 typed 字段，避免 typed-first 读到未 resolve 的原始 URL
+			Node.Brush.TexturePath = *TexturePath;
+		}
+
+		for (FUMGWidgetNode& Child : Node.Children)
+		{
+			ResolveNodeRecursive(Child, Context);
+		}
+	}
+}
+
+bool FPenRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, FString* OutReport)
+{
+	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+	if (!Settings)
+	{
+		if (OutReport)
+		{
+			*OutReport = TEXT("RemoteImageImport: settings unavailable");
+		}
+		return false;
+	}
+
+	if (!Settings->bEnableRemoteImageImport)
+	{
+		if (OutReport)
+		{
+			*OutReport = TEXT("RemoteImageImport: disabled");
+		}
+		return true;
+	}
+
+	FResolveContext Context;
+	Context.ImportPath = NormalizeImportPath(Settings->RemoteImageImportPath);
+	Context.TimeoutSeconds = FMath::Max(1.0f, Settings->RemoteImageTimeoutSeconds);
+
+	ResolveNodeRecursive(InOutData.RootWidget, Context);
+
+	if (OutReport)
+	{
+		FString Summary = FString::Printf(
+			TEXT("RemoteImageImport: imported=%d reused=%d failed=%d path=%s"),
+			Context.ImportedCount,
+			Context.ReusedCount,
+			Context.FailedCount,
+			*Context.ImportPath);
+		if (Context.Messages.Num() > 0)
+		{
+			Summary += TEXT("\n");
+			Summary += FString::Join(Context.Messages, TEXT("\n"));
+		}
+		*OutReport = MoveTemp(Summary);
+	}
+
+	if (Context.FailedCount > 0)
+	{
+		UE_LOG(LogDesign2UMG, Warning, TEXT("Remote image import finished with failures (%d)"), Context.FailedCount);
+		return false;
+	}
+
+	UE_LOG(LogDesign2UMG, Log, TEXT("Remote image import finished: imported=%d reused=%d"),
+		Context.ImportedCount, Context.ReusedCount);
+	return true;
+}
+
+// ============================================================================
+// ResolveTransientTextures - 预览用：下载远程图片为内存纹理
+// ============================================================================
+
+namespace
+{
+	void CollectRemoteUrls(const FUMGWidgetNode& Node, TSet<FString>& OutUrls)
+	{
+		if (const FString* TexturePath = Node.Properties.Find(TEXT("TexturePath")))
+		{
+			const FString Trimmed = TexturePath->TrimStartAndEnd();
+			if (IsRemoteUrl(Trimmed))
+			{
+				OutUrls.Add(Trimmed);
+			}
+		}
+		for (const FUMGWidgetNode& Child : Node.Children)
+		{
+			CollectRemoteUrls(Child, OutUrls);
+		}
+	}
+
+	UTexture2D* CreateTransientTexture(const TArray64<uint8>& RawBGRA, int32 Width, int32 Height)
+	{
+		UTexture2D* Texture = UTexture2D::CreateTransient(Width, Height, PF_B8G8R8A8);
+		if (!Texture) return nullptr;
+
+		// RF_DuplicateTransient 使 FDuplicateDataWriter 写 nullptr 而非复制，避免空 mip 副本。
+		Texture->AddToRoot();
+		Texture->SetFlags(RF_DuplicateTransient);
+
+		void* MipData = Texture->GetPlatformData()->Mips[0].BulkData.Lock(LOCK_READ_WRITE);
+		FMemory::Memcpy(MipData, RawBGRA.GetData(), RawBGRA.Num());
+		Texture->GetPlatformData()->Mips[0].BulkData.Unlock();
+
+		Texture->SRGB = true;
+		Texture->UpdateResource();
+		FlushRenderingCommands();
+		return Texture;
+	}
+}
+
+void FPenRemoteImageImporter::ResolveTransientTextures(const FUMGWidgetNode& RootNode, TMap<FString, UTexture2D*>& OutTextureMap)
+{
+	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+	const float Timeout = Settings ? FMath::Max(1.0f, Settings->RemoteImageTimeoutSeconds) : 20.0f;
+
+	TSet<FString> Urls;
+	CollectRemoteUrls(RootNode, Urls);
+
+	for (const FString& Url : Urls)
+	{
+		if (OutTextureMap.Contains(Url)) continue;
+
+		TArray<uint8> CompressedData;
+		FString Error;
+		if (!DownloadUrl(NormalizeUrl(Url), Timeout, CompressedData, Error))
+		{
+			UE_LOG(LogDesign2UMG, Warning, TEXT("Transient download failed: %s (%s)"), *Url, *Error);
+			continue;
+		}
+
+		int32 Width = 0, Height = 0;
+		TArray64<uint8> RawBGRA;
+		if (!DecodeToBGRA8(CompressedData, Width, Height, RawBGRA, Error))
+		{
+			UE_LOG(LogDesign2UMG, Warning, TEXT("Transient decode failed: %s (%s)"), *Url, *Error);
+			continue;
+		}
+
+		UTexture2D* Texture = CreateTransientTexture(RawBGRA, Width, Height);
+		if (Texture)
+		{
+			OutTextureMap.Add(Url, Texture);
+		}
+	}
+}
