@@ -23,6 +23,46 @@ namespace
 		return !Node.IsValid() || !Node->bEnabled || IsDesignerOnlyNodeType(Node->Type);
 	}
 
+	/** Estimate a single node's size, handling leaf nodes (text, icon) via font metrics. */
+	FVector2D EstimateNodeSize(const TSharedPtr<FPenNode>& Node);
+
+	FVector2D EstimateContentSize(const TSharedPtr<FPenNode>& Node);
+
+	FVector2D EstimateNodeSize(const TSharedPtr<FPenNode>& Node)
+	{
+		float W = Node->Width.Value;
+		float H = Node->Height.Value;
+
+		// Text leaf: estimate from FontSize
+		if (Node->Type == EPenNodeType::Text)
+		{
+			if (H == 0 && Node->FontSize > 0)
+				H = Node->FontSize * 1.5f;
+			if (W == 0 && Node->FontSize > 0 && !Node->Content.IsEmpty())
+				W = Node->Content.Len() * Node->FontSize * 0.6f;
+			return FVector2D(W, H);
+		}
+
+		// IconFont leaf: square based on FontSize
+		if (Node->Type == EPenNodeType::IconFont)
+		{
+			const float S = Node->FontSize > 0 ? Node->FontSize : 16.0f;
+			if (W == 0) W = S;
+			if (H == 0) H = S;
+			return FVector2D(W, H);
+		}
+
+		// Container with children: recurse
+		if ((W == 0 || H == 0) && Node->Children.Num() > 0)
+		{
+			const FVector2D Sub(EstimateContentSize(Node));
+			if (W == 0) W = Sub.X;
+			if (H == 0) H = Sub.Y;
+		}
+
+		return FVector2D(W, H);
+	}
+
 	/**
 	 * Estimate content size for a FitContent node by examining its children.
 	 * Returns (width, height) based on layout mode and children's known sizes.
@@ -49,15 +89,9 @@ namespace
 		{
 			for (const auto& C : Visible)
 			{
-				float CW = C->Width.Value;
-				float CH = C->Height.Value;
-				if (C->Width.IsFit() && CW == 0 && C->Children.Num() > 0)
-				{
-					const FVector2D Sub(EstimateContentSize(C));
-					CW = Sub.X; CH = FMath::Max(CH, Sub.Y);
-				}
-				W += CW;
-				H = FMath::Max(H, CH);
+				const FVector2D CS(EstimateNodeSize(C));
+				W += CS.X;
+				H = FMath::Max(H, CS.Y);
 			}
 			W += TotalGap;
 		}
@@ -65,15 +99,9 @@ namespace
 		{
 			for (const auto& C : Visible)
 			{
-				float CW = C->Width.Value;
-				float CH = C->Height.Value;
-				if (C->Height.IsFit() && CH == 0 && C->Children.Num() > 0)
-				{
-					const FVector2D Sub(EstimateContentSize(C));
-					CW = FMath::Max(CW, Sub.X); CH = Sub.Y;
-				}
-				W = FMath::Max(W, CW);
-				H += CH;
+				const FVector2D CS(EstimateNodeSize(C));
+				W = FMath::Max(W, CS.X);
+				H += CS.Y;
 			}
 			H += TotalGap;
 		}
@@ -82,19 +110,9 @@ namespace
 			// Absolute positioning: max extent
 			for (const auto& C : Visible)
 			{
-				float CW = C->Width.Value;
-				float CH = C->Height.Value;
-				if ((C->Width.IsFit() && CW == 0) || (C->Height.IsFit() && CH == 0))
-				{
-					if (C->Children.Num() > 0)
-					{
-						const FVector2D Sub(EstimateContentSize(C));
-						if (CW == 0) CW = Sub.X;
-						if (CH == 0) CH = Sub.Y;
-					}
-				}
-				W = FMath::Max(W, C->X + CW);
-				H = FMath::Max(H, C->Y + CH);
+				const FVector2D CS(EstimateNodeSize(C));
+				W = FMath::Max(W, C->X + CS.X);
+				H = FMath::Max(H, C->Y + CS.Y);
 			}
 		}
 
