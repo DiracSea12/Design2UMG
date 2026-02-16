@@ -42,9 +42,21 @@ void FPenLayoutMapper::ApplySlotProperties(FUMGWidgetNode& Widget, const TShared
 
 		const bool bFitWidth = Node->Width.Mode == EPenSizeMode::FitContent;
 		const bool bFitHeight = Node->Height.Mode == EPenSizeMode::FitContent;
+		const bool bFixedWidth = Node->Width.Mode == EPenSizeMode::Fixed;
+		const bool bFixedHeight = Node->Height.Mode == EPenSizeMode::Fixed;
+
 		if (bFitWidth || bFitHeight)
 		{
 			Widget.Slot.bAutoSize = true;
+
+			// Mixed-axis: one axis FitContent, the other Fixed.
+			// bAutoSize overrides both axes to use DesiredSize, so we must
+			// preserve the Fixed axis value in Offsets for the SizeBox wrapper
+			// to pick up via WidthOverride / HeightOverride.
+			if (bFitWidth && bFixedHeight)
+				Widget.Slot.Offsets.Bottom = Node->Height.Value;
+			else if (bFitHeight && bFixedWidth)
+				Widget.Slot.Offsets.Right = Node->Width.Value;
 		}
 	}
 }
