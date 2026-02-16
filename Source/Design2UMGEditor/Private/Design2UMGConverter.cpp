@@ -647,6 +647,11 @@ FVector2D FDesign2UMGConverter::PreComputeFitContentSizes(const TSharedPtr<FPenN
 			H = Node->FontSize * 1.5f;
 		if (W == 0 && Node->FontSize > 0 && !Node->Content.IsEmpty())
 			W = Node->Content.Len() * Node->FontSize * 0.6f;
+		// 回写估算值，使 ConvertNode 的 Bounds.W/H 非零
+		if (W > 0 && !Node->Width.IsFixed())
+			Node->Width.Value = W;
+		if (H > 0 && !Node->Height.IsFixed())
+			Node->Height.Value = H;
 		return FVector2D(W, H);
 	}
 
@@ -654,6 +659,10 @@ FVector2D FDesign2UMGConverter::PreComputeFitContentSizes(const TSharedPtr<FPenN
 	if (Node->Type == EPenNodeType::IconFont)
 	{
 		float S = Node->FontSize > 0 ? Node->FontSize : 16.0f;
+		if (!Node->Width.IsFixed())
+			Node->Width.Value = S;
+		if (!Node->Height.IsFixed())
+			Node->Height.Value = S;
 		return FVector2D(S, S);
 	}
 
