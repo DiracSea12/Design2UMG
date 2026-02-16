@@ -113,7 +113,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 				PropsInfo += FString::Printf(TEXT(" %s=%s"), *P.Key, *P.Value.Left(40));
 			}
 
-			UE_LOG(LogDesign2UMG, Log, TEXT("TREE: %s[%s] '%s' bounds=(%.0f,%.0f,%.0f,%.0f) %s%s"),
+			UE_LOG(LogDesign2UMG, Log, TEXT("TREE: %s[%s] '%s' bounds=(%.1f,%.1f,%.1f,%.1f) %s%s"),
 				*Indent, *Node.Type, *Node.Name,
 				Node.Bounds.X, Node.Bounds.Y, Node.Bounds.W, Node.Bounds.H,
 				*SlotInfo, *PropsInfo);
