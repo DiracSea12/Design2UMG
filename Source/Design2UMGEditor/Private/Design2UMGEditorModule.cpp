@@ -27,6 +27,7 @@
 #include "DesktopPlatformModule.h"
 #include "IDesktopPlatform.h"
 #include "Widgets/Input/SEditableTextBox.h"
+#include "Misc/App.h"
 
 DEFINE_LOG_CATEGORY(LogDesign2UMG);
 
@@ -598,6 +599,13 @@ void FDesign2UMGEditorModule::StartupModule()
 			else
 			{
 				ImportPenFileWithTargetNode(FilePath, TargetNodeId, OutputPath, bPreview);
+			}
+
+			// Unattended 模式下自动退出，避免编辑器空转渲染导致 GPU PageFault
+			if (FApp::IsUnattended())
+			{
+				UE_LOG(LogDesign2UMG, Log, TEXT("Unattended mode: requesting engine exit after import"));
+				FPlatformMisc::RequestExit(false);
 			}
 		}),
 		ECVF_Default);

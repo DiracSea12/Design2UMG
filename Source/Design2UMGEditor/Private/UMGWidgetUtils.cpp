@@ -59,6 +59,8 @@
 #include "Components/ContentWidget.h"
 #include "Blueprint/WidgetTree.h"
 
+FIntPoint FUMGWidgetUtils::EffectiveDesignSize = FIntPoint(1920, 1080);
+
 // ============================================================================
 // 静态映射表
 // ============================================================================
@@ -401,7 +403,7 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 			if (CanvasParent && Node.Bounds.W > 0.0f && Node.Bounds.H > 0.0f)
 			{
 				FLayoutContext Context;
-				Context.DesignSize = UDesign2UMGSettings::Get()->GetDesignSize();
+				Context.DesignSize = FUMGWidgetUtils::EffectiveDesignSize;
 				Context.Preset = FLayoutPreset::GetStandardHUDPreset();
 				// v2.2: Hysteresis - 只有当Slot有有效历史数据时才设置OldAnchor
 				if (HasValidSlotHistory(Node.Slot))

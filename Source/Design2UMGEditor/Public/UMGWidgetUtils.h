@@ -28,6 +28,9 @@ public:
 	 */
 	static void ApplyFixer(FUMGWidgetNode& RootNode, const FIntPoint& DesignSize);
 
+	/** Fixer/LayoutCalculator 使用的实际 DesignSize（可能被设计稿尺寸覆盖） */
+	static FIntPoint EffectiveDesignSize;
+
 	/** 从Widget树计算所需的设计尺寸（遍历所有子节点，找出最大边界） */
 	static FVector2D CalculateDesignSize(const FUMGWidgetNode& RootNode, FVector2D DefaultSize = FVector2D(1920, 1080));
 

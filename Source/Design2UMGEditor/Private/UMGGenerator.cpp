@@ -79,6 +79,16 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 	// v2.2: 应用Fixer修正Bounds（创建可修改副本）
 	FUMGWidgetNode FixedRoot = WidgetData.RootWidget;
 	FIntPoint DesignSize = UDesign2UMGSettings::Get()->GetDesignSize();
+	// 设计稿实际尺寸可能超过配置的 DesignSize（如设计系统组件库 4865x2781）
+	// Fixer 归一化/反归一化必须使用实际尺寸，否则坐标会被压缩
+	if (FixedRoot.Bounds.W > DesignSize.X || FixedRoot.Bounds.H > DesignSize.Y)
+	{
+		DesignSize.X = FMath::Max(DesignSize.X, FMath::CeilToInt(FixedRoot.Bounds.W));
+		DesignSize.Y = FMath::Max(DesignSize.Y, FMath::CeilToInt(FixedRoot.Bounds.H));
+		UE_LOG(LogDesign2UMG, Log, TEXT("DesignSize overridden to %dx%d (root bounds %.0fx%.0f)"),
+			DesignSize.X, DesignSize.Y, FixedRoot.Bounds.W, FixedRoot.Bounds.H);
+	}
+	FUMGWidgetUtils::EffectiveDesignSize = DesignSize;
 	FUMGWidgetUtils::ApplyFixer(FixedRoot, DesignSize);
 
 	// Dump widget tree for debugging
