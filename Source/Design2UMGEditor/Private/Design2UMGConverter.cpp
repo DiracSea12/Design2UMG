@@ -22,6 +22,84 @@ namespace
 	{
 		return !Node.IsValid() || !Node->bEnabled || IsDesignerOnlyNodeType(Node->Type);
 	}
+
+	/**
+	 * Estimate content size for a FitContent node by examining its children.
+	 * Returns (width, height) based on layout mode and children's known sizes.
+	 */
+	FVector2D EstimateContentSize(const TSharedPtr<FPenNode>& Node)
+	{
+		float W = 0.0f, H = 0.0f;
+		const float PadH = Node->Padding.Left + Node->Padding.Right;
+		const float PadV = Node->Padding.Top + Node->Padding.Bottom;
+
+		TArray<TSharedPtr<FPenNode>> Visible;
+		for (const auto& C : Node->Children)
+		{
+			if (!ShouldSkipNode(C))
+				Visible.Add(C);
+		}
+
+		if (Visible.Num() == 0)
+			return FVector2D(PadH, PadV);
+
+		const float TotalGap = Visible.Num() > 1 ? Node->Gap * (Visible.Num() - 1) : 0.0f;
+
+		if (Node->Layout == EPenLayout::Horizontal)
+		{
+			for (const auto& C : Visible)
+			{
+				float CW = C->Width.Value;
+				float CH = C->Height.Value;
+				if (C->Width.IsFit() && CW == 0 && C->Children.Num() > 0)
+				{
+					FVector2D Sub = EstimateContentSize(C);
+					CW = Sub.X; CH = FMath::Max(CH, Sub.Y);
+				}
+				W += CW;
+				H = FMath::Max(H, CH);
+			}
+			W += TotalGap;
+		}
+		else if (Node->Layout == EPenLayout::Vertical)
+		{
+			for (const auto& C : Visible)
+			{
+				float CW = C->Width.Value;
+				float CH = C->Height.Value;
+				if (C->Height.IsFit() && CH == 0 && C->Children.Num() > 0)
+				{
+					FVector2D Sub = EstimateContentSize(C);
+					CW = FMath::Max(CW, Sub.X); CH = Sub.Y;
+				}
+				W = FMath::Max(W, CW);
+				H += CH;
+			}
+			H += TotalGap;
+		}
+		else
+		{
+			// Absolute positioning: max extent
+			for (const auto& C : Visible)
+			{
+				float CW = C->Width.Value;
+				float CH = C->Height.Value;
+				if ((C->Width.IsFit() && CW == 0) || (C->Height.IsFit() && CH == 0))
+				{
+					if (C->Children.Num() > 0)
+					{
+						FVector2D Sub = EstimateContentSize(C);
+						if (CW == 0) CW = Sub.X;
+						if (CH == 0) CH = Sub.Y;
+					}
+				}
+				W = FMath::Max(W, C->X + CW);
+				H = FMath::Max(H, C->Y + CH);
+			}
+		}
+
+		return FVector2D(W + PadH, H + PadV);
+	}
 }
 
 FUMGWidgetData FDesign2UMGConverter::Convert(const FPenDocument& Document)
@@ -234,6 +312,39 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 				const FPenSize& CrossSize = bHorizontal ? EC->Height : EC->Width;
 				if (CrossSize.IsFill())
 					ResolveSize(EC, !bHorizontal, bHorizontal ? InnerH : InnerW);
+			}
+		}
+	}
+
+	// Pre-compute FitContent sizes: for children with FitContent+Value=0,
+	// estimate content size from their subtree so they don't collapse to zero.
+	for (auto& Child : Node->Children)
+	{
+		if (ShouldSkipNode(Child))
+			continue;
+
+		auto ResolveFit = [](TSharedPtr<FPenNode>& N, bool bWidth, float Px)
+		{
+			FPenSize& Size = bWidth ? N->Width : N->Height;
+			if (Size.IsFit() && Size.Value == 0.0f && Px > 0.0f)
+			{
+				Size.Value = Px;
+				if (bWidth) N->bHasWidth = true;
+				else N->bHasHeight = true;
+			}
+		};
+
+		if ((Child->Width.IsFit() && Child->Width.Value == 0.0f)
+			|| (Child->Height.IsFit() && Child->Height.Value == 0.0f))
+		{
+			FVector2D Est = EstimateContentSize(Child);
+			ResolveFit(Child, true, Est.X);
+			ResolveFit(Child, false, Est.Y);
+
+			if (Est.X > 0 || Est.Y > 0)
+			{
+				UE_LOG(LogDesign2UMG, Log, TEXT("PreResolveFitContent: '%s' estimated=(%.0f,%.0f)"),
+					*Child->Name, Est.X, Est.Y);
 			}
 		}
 	}
