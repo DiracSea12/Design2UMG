@@ -9,8 +9,11 @@ UDesign2UMGSettings* UDesign2UMGSettings::Get()
 
 FString UDesign2UMGSettings::FindIconFontAssetPath(const FString& FontFamily) const
 {
-	if (const FString* Path = IconFontAssetMap.Find(FontFamily))
-		return *Path;
+	if (const TSoftObjectPtr<UFont>* FontPtr = IconFontAssetMap.Find(FontFamily))
+	{
+		if (!FontPtr->IsNull())
+			return FontPtr->ToString();
+	}
 	return FString();
 }
 

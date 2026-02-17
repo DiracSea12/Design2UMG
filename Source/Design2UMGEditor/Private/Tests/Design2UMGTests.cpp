@@ -597,7 +597,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIconFontNoMappingFallbackTest,
 bool FIconFontNoMappingFallbackTest::RunTest(const FString& Parameters)
 {
 	UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
-	const TMap<FString, FString> SavedMap = Settings->IconFontAssetMap;
+	const TMap<FString, TSoftObjectPtr<UFont>> SavedMap = Settings->IconFontAssetMap;
 	const FString SavedDefaultPath = Settings->DefaultIconFontAssetPath;
 	const FString SavedPlaceholder = Settings->MissingIconFontPlaceholder;
 

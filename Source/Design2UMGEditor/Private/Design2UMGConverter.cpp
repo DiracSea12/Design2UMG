@@ -662,10 +662,10 @@ FUMGWidgetNode FDesign2UMGConverter::CreateIconFontWidget(const TSharedPtr<FPenN
 	// If family mapping is missing but a valid default icon font path exists, persist it once.
 	if (bUsedDefaultIconPath && MutableSettings && !Node->IconFontFamily.IsEmpty())
 	{
-		const FString* ExistingPath = MutableSettings->IconFontAssetMap.Find(Node->IconFontFamily);
-		if (!ExistingPath || ExistingPath->IsEmpty())
+		const TSoftObjectPtr<UFont>* Existing = MutableSettings->IconFontAssetMap.Find(Node->IconFontFamily);
+		if (!Existing || Existing->IsNull())
 		{
-			MutableSettings->IconFontAssetMap.Add(Node->IconFontFamily, AssetPath);
+			MutableSettings->IconFontAssetMap.Add(Node->IconFontFamily, TSoftObjectPtr<UFont>(FSoftObjectPath(AssetPath)));
 			MutableSettings->SaveConfig();
 			UE_LOG(LogDesign2UMG, Display,
 				TEXT("Auto-mapped icon font family '%s' to default asset path '%s'"),

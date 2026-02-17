@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DeveloperSettings.h"
+#include "Engine/Font.h"
 #include "Components/Widget.h"
 #include "Design2UMGSettings.generated.h"
 
@@ -76,9 +77,9 @@ public:
 
 	// ========== Icon Font ==========
 
-	/** 图标字体族名 → UE5 字体资产路径映射（如 "Material Symbols Sharp" → "/Game/Fonts/MaterialSymbolsSharp"） */
-	UPROPERTY(Config, EditAnywhere, Category = "Icon Font", meta = (DisplayName = "Font Family → Asset Path", ToolTip = "Map icon font family names to UE5 font asset paths. The font asset must be imported into the project first."))
-	TMap<FString, FString> IconFontAssetMap;
+	/** 图标字体族名 → UE5 字体资产映射（如 "Material Symbols Sharp" → 对应的 UFont 资产） */
+	UPROPERTY(Config, EditAnywhere, Category = "Icon Font", meta = (DisplayName = "Font Family → Font Asset", ToolTip = "Map icon font family names to UE5 font assets."))
+	TMap<FString, TSoftObjectPtr<UFont>> IconFontAssetMap;
 
 	/** 当字体族未命中 IconFontAssetMap 时，使用该默认字体资产路径（可选） */
 	UPROPERTY(Config, EditAnywhere, Category = "Icon Font", meta = (DisplayName = "Default Icon Font Asset Path", ToolTip = "Optional fallback font asset path for icon fonts when no explicit family mapping is found."))
