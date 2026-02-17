@@ -26,12 +26,14 @@ namespace
 	struct FResolveContext
 	{
 		FString ImportPath;
+		FString FrameName;
 		float TimeoutSeconds = 20.0f;
 		int32 ImportedCount = 0;
 		int32 ReusedCount = 0;
 		int32 FailedCount = 0;
 		TArray<FString> Messages;
-		TMap<FString, FString> UrlToAssetPath;  // 同次导入内的URL去重缓存
+		TMap<FString, FString> UrlToAssetPath;      // URL去重缓存
+		TMap<FString, FString> ContentHashToAsset;   // 内容hash去重缓存
 	};
 
 	void AddReportMessage(FResolveContext& Context, const FString& Message)
@@ -74,6 +76,23 @@ namespace
 		uint8 Hash[FSHA1::DigestSize] = { 0 };
 		FSHA1::HashBuffer(Utf8.Get(), Utf8.Length(), Hash);
 		return BytesToHex(Hash, UE_ARRAY_COUNT(Hash));
+	}
+
+	FString MakeContentHash(const TArray<uint8>& Data)
+	{
+		uint8 Hash[FSHA1::DigestSize] = { 0 };
+		FSHA1::HashBuffer(Data.GetData(), Data.Num(), Hash);
+		return BytesToHex(Hash, UE_ARRAY_COUNT(Hash));
+	}
+
+	FString SanitizeAssetName(const FString& Name)
+	{
+		FString Safe = Name;
+		Safe.ReplaceInline(TEXT(" "), TEXT("_"));
+		Safe.ReplaceInline(TEXT("."), TEXT("_"));
+		Safe.ReplaceInline(TEXT("/"), TEXT("_"));
+		Safe.ReplaceInline(TEXT("\\"), TEXT("_"));
+		return Safe;
 	}
 
 	FString NormalizeImportPath(const FString& InPath)
@@ -304,7 +323,7 @@ namespace
 
 		const FString NormalizedUrl = NormalizeUrl(InOutTexturePath);
 
-		// 同次导入内的URL去重：已下载过的直接复用
+		// URL去重：已下载过的直接复用
 		if (const FString* CachedPath = Context.UrlToAssetPath.Find(NormalizedUrl))
 		{
 			InOutTexturePath = *CachedPath;
@@ -312,12 +331,15 @@ namespace
 			return true;
 		}
 
-		const FString UrlHash = MakeUrlHash(NormalizedUrl);
-		const FString AssetName = FString::Printf(TEXT("T_IMG_%s"), *UrlHash);
-		const FString LongPackageName = BuildLongPackageName(Context.ImportPath, AssetName);
+		// 构建子目录和命名: ImportedImages/{FrameName}/T_{FrameName}_{NodeName}
+		const FString SafeFrame = SanitizeAssetName(Context.FrameName);
+		const FString SafeNode = SanitizeAssetName(WidgetName);
+		const FString SubDir = Context.ImportPath / SafeFrame;
+		const FString AssetName = FString::Printf(TEXT("T_%s_%s"), *SafeFrame, *SafeNode);
+		const FString LongPackageName = BuildLongPackageName(SubDir, AssetName);
 		const FString ObjectPath = BuildObjectPath(LongPackageName, AssetName);
 
-		// Reuse existing asset by URL hash
+		// Reuse existing asset
 		if (UTexture2D* ExistingTexture = LoadObject<UTexture2D>(nullptr, *ObjectPath))
 		{
 			InOutTexturePath = ObjectPath;
@@ -336,6 +358,17 @@ namespace
 			return false;
 		}
 
+		// 内容hash去重：不同URL但内容相同的图片复用同一资产
+		const FString ContentHash = MakeContentHash(CompressedData);
+		if (const FString* ExistingPath = Context.ContentHashToAsset.Find(ContentHash))
+		{
+			InOutTexturePath = *ExistingPath;
+			++Context.ReusedCount;
+			Context.UrlToAssetPath.Add(NormalizedUrl, *ExistingPath);
+			AddReportMessage(Context, FString::Printf(TEXT("内容去重复用: %s"), **ExistingPath));
+			return true;
+		}
+
 		int32 Width = 0;
 		int32 Height = 0;
 		TArray64<uint8> RawBGRA;
@@ -349,7 +382,7 @@ namespace
 
 		FString ImportedObjectPath;
 		FString ImportError;
-		if (!CreateTextureAsset(Context.ImportPath, AssetName, RawBGRA, Width, Height, ImportedObjectPath, ImportError))
+		if (!CreateTextureAsset(SubDir, AssetName, RawBGRA, Width, Height, ImportedObjectPath, ImportError))
 		{
 			++Context.FailedCount;
 			AddReportMessage(Context, FString::Printf(TEXT("图片 '%s' 导入失败: %s (原因: %s)"), *WidgetName, *NormalizedUrl, *ImportError));
@@ -359,6 +392,7 @@ namespace
 		InOutTexturePath = ImportedObjectPath;
 		++Context.ImportedCount;
 		Context.UrlToAssetPath.Add(NormalizedUrl, ImportedObjectPath);
+		Context.ContentHashToAsset.Add(ContentHash, ImportedObjectPath);
 		AddReportMessage(Context, FString::Printf(TEXT("已导入纹理: %s"), *ImportedObjectPath));
 		return true;
 	}
@@ -404,6 +438,7 @@ bool FPenRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, FSt
 	FResolveContext Context;
 	Context.ImportPath = NormalizeImportPath(Settings->RemoteImageImportPath);
 	Context.TimeoutSeconds = FMath::Max(1.0f, Settings->RemoteImageTimeoutSeconds);
+	Context.FrameName = InOutData.WidgetName;
 
 	ResolveNodeRecursive(InOutData.RootWidget, Context);
 
