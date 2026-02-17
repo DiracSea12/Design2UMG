@@ -11,6 +11,9 @@
 #include "UMGJsonSerializer.h"
 #include "UMGWidgetUtils.h"
 #include "PenParser.h"
+#include "Design2UMGSettings.h"
+#include "IncrementalUpdater.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 
 #include "WidgetBlueprint.h"
 #include "Framework/Application/SlateApplication.h"
@@ -39,6 +42,35 @@ UWidgetBlueprint* PenImportUtils::GenerateBlueprint(const FUMGWidgetData& Data, 
 {
 	const double StartTime = FPlatformTime::Seconds();
 	const FString FinalPath = ResolveOutputPath(OutputPath);
+
+	// Incremental update: check for existing BP
+	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+	if (Settings && Settings->bEnableIncrementalUpdate)
+	{
+		FString AssetPath = FinalPath / Data.WidgetName + TEXT(".") + Data.WidgetName;
+		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+		FAssetData ExistingAsset = ARM.Get().GetAssetByObjectPath(FSoftObjectPath(AssetPath));
+		if (ExistingAsset.IsValid())
+		{
+			UWidgetBlueprint* ExistingBP = Cast<UWidgetBlueprint>(ExistingAsset.GetAsset());
+			if (ExistingBP)
+			{
+				FDiffResult Diff = FIncrementalUpdater::ComputeDiff(Data.RootWidget, ExistingBP);
+				if (Diff.HasChanges())
+				{
+					if (!FIncrementalUpdater::ShowDiffPreviewDialog(Diff))
+					{
+						UE_LOG(LogDesign2UMG, Log, TEXT("PenImportUtils: Incremental update cancelled"));
+						return nullptr;
+					}
+					// Filter and regenerate with accepted changes only
+					FUMGWidgetData FilteredData = Data;
+					FilteredData.RootWidget = FIncrementalUpdater::FilterByAccepted(Data.RootWidget, Diff);
+				}
+			}
+		}
+	}
+
 	UWidgetBlueprint* WBP = FUMGGenerator::GenerateWidgetBlueprint(Data, FinalPath);
 	if (!WBP)
 	{
