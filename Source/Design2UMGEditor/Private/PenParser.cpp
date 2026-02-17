@@ -522,9 +522,10 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 	JsonObj->TryGetBoolField(TEXT("reusable"), Node->bReusable);
 
 	// 解析 descendants（ref 实例的属性覆盖或对象替换）
-	if (JsonObj->HasField(TEXT("descendants")))
+	const TSharedPtr<FJsonValue>& DescField = JsonObj->TryGetField(TEXT("descendants"));
+	if (DescField.IsValid() && DescField->Type == EJson::Object)
 	{
-		const TSharedPtr<FJsonObject>& DescObj = JsonObj->GetObjectField(TEXT("descendants"));
+		const TSharedPtr<FJsonObject>& DescObj = DescField->AsObject();
 		for (const auto& Pair : DescObj->Values)
 		{
 			if (Pair.Value->Type != EJson::Object)
@@ -568,8 +569,11 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 					DescNode->Fills.Add(DescNode->Fill);
 				}
 			}
-			if (OverrideObj->HasField(TEXT("stroke")))
-				DescNode->Stroke = ParseStroke(OverrideObj->GetObjectField(TEXT("stroke")), Resolver);
+			{
+				const TSharedPtr<FJsonValue>& StrokeOvField = OverrideObj->TryGetField(TEXT("stroke"));
+				if (StrokeOvField.IsValid() && StrokeOvField->Type == EJson::Object)
+					DescNode->Stroke = ParseStroke(StrokeOvField->AsObject(), Resolver);
+			}
 
 			// 尺寸覆盖（支持字符串格式如 "fill_container"、"fit_content"）
 			if (OverrideObj->HasField(TEXT("width")))
@@ -622,9 +626,10 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 			}
 
 			// children 覆盖：完整替换子节点
-			if (OverrideObj->HasField(TEXT("children")))
+			const TSharedPtr<FJsonValue>& ChildOvField = OverrideObj->TryGetField(TEXT("children"));
+			if (ChildOvField.IsValid() && ChildOvField->Type == EJson::Array)
 			{
-				const auto& ChildArr = OverrideObj->GetArrayField(TEXT("children"));
+				const auto& ChildArr = ChildOvField->AsArray();
 				for (const auto& ChildVal : ChildArr)
 				{
 					if (auto Child = ParseNode(ChildVal->AsObject(), Resolver))
@@ -779,9 +784,10 @@ FPenFill FPenParser::ParseFill(const TSharedPtr<FJsonValue>& Value, const FPenVa
 			}
 			TryGetNumberFieldFlexible(Obj, TEXT("rotation"), Result.Gradient.Rotation);
 
-			if (Obj->HasField(TEXT("colors")))
+			const TSharedPtr<FJsonValue>& ColorsField = Obj->TryGetField(TEXT("colors"));
+			if (ColorsField.IsValid() && ColorsField->Type == EJson::Array)
 			{
-				for (const auto& StopVal : Obj->GetArrayField(TEXT("colors")))
+				for (const auto& StopVal : ColorsField->AsArray())
 				{
 					const auto& StopObj = StopVal->AsObject();
 					if (!StopObj.IsValid())
@@ -814,9 +820,10 @@ FPenFill FPenParser::ParseFill(const TSharedPtr<FJsonValue>& Value, const FPenVa
 					Result.Image.Mode = EPenImageMode::Crop;
 			}
 			TryGetNumberFieldFlexible(Obj, TEXT("opacity"), Result.Image.Opacity);
-			if (Obj->HasField(TEXT("imageTransform")))
+			const TSharedPtr<FJsonValue>& TransformField = Obj->TryGetField(TEXT("imageTransform"));
+			if (TransformField.IsValid() && TransformField->Type == EJson::Array)
 			{
-				const auto& TransformArr = Obj->GetArrayField(TEXT("imageTransform"));
+				const auto& TransformArr = TransformField->AsArray();
 				if (TransformArr.Num() == 2)
 				{
 					auto Row0 = TransformArr[0]->AsArray();
