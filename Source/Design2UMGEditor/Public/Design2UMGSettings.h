@@ -97,6 +97,11 @@ public:
 	/** 查找图标字体的资产路径，无匹配返回空字符串 */
 	FString FindIconFontAssetPath(const FString& FontFamily) const;
 
+	// ========== Incremental Update ==========
+
+	UPROPERTY(Config, EditAnywhere, Category = "Incremental Update", meta = (DisplayName = "Enable Incremental Update", ToolTip = "Store .pen node IDs on generated widgets to enable incremental re-import."))
+	bool bEnableIncrementalUpdate = false;
+
 	// ========== Widget Class Overrides ==========
 
 	UPROPERTY(Config, EditAnywhere, Category = "Widget Class Overrides", meta = (DisplayName = "Class Override Rules", ToolTip = "When a node name contains the pattern, use the specified Widget class instead of the default."))

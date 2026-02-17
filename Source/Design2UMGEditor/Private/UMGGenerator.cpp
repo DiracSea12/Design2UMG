@@ -134,6 +134,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 	}
 
 	// 使用统一的 Widget 创建函数
+	FUMGWidgetUtils::ClearNodeIdMap();
 	UWidget* Root = FUMGWidgetUtils::CreateWidgetRecursive(WBP->WidgetTree, FixedRoot);
 	if (!Root)
 	{

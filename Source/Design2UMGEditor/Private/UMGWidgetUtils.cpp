@@ -60,6 +60,14 @@
 #include "Blueprint/WidgetTree.h"
 
 FIntPoint FUMGWidgetUtils::EffectiveDesignSize = FIntPoint(1920, 1080);
+TMap<TWeakObjectPtr<UWidget>, FString> FUMGWidgetUtils::NodeIdMap;
+
+FString FUMGWidgetUtils::FindNodeId(const UWidget* Widget)
+{
+	if (const FString* Found = NodeIdMap.Find(const_cast<UWidget*>(Widget)))
+		return *Found;
+	return FString();
+}
 
 // ============================================================================
 // 静态映射表
@@ -385,6 +393,12 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to construct widget: %s"), *Node.Name);
 		return nullptr;
+	}
+
+	// 增量更新：记录 Widget → .pen 节点 ID 映射
+	if (!Node.Id.IsEmpty() && UDesign2UMGSettings::Get()->bEnableIncrementalUpdate)
+	{
+		NodeIdMap.Add(NewWidget, Node.Id);
 	}
 
 	// 添加到父容器并应用 Slot 属性

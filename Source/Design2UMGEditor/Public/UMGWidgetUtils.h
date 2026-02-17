@@ -85,6 +85,17 @@ public:
 	/** 直接从 WidgetTree 渲染为 PNG（编译前调用，transient 纹理数据仍有效） */
 	static bool RenderWidgetTreeToPng(UWidgetBlueprint* WidgetBP, const FIntPoint& RenderSize, TArray<uint8>& OutPngData, FIntPoint& OutSize);
 
+	// ========== Node ID Metadata ==========
+
+	/** Widget → .pen 节点 ID 映射（增量更新基础设施） */
+	static TMap<TWeakObjectPtr<UWidget>, FString> NodeIdMap;
+
+	/** 查询 Widget 对应的 .pen 节点 ID，未找到返回空 */
+	static FString FindNodeId(const UWidget* Widget);
+
+	/** 清空映射表（每次导入前调用） */
+	static void ClearNodeIdMap() { NodeIdMap.Empty(); }
+
 	// ========== Widget 名称处理 ==========
 
 	/** 清理 Widget 名称，移除非法字符 */
