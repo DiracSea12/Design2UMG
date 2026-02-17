@@ -479,13 +479,14 @@ namespace
 
 		TSharedRef<SWindow> Window = SNew(SWindow)
 			.Title(LOCTEXT("WelcomeTitle", "Welcome to Design2UMG"))
-			.ClientSize(FVector2D(420.0f, 260.0f))
+			.ClientSize(FVector2D(450.0f, 300.0f))
 			.SupportsMinimize(false)
 			.SupportsMaximize(false);
 
 		TWeakPtr<SWindow> WeakWindow = Window;
 		TSharedPtr<SEditableTextBox> WidthBox;
 		TSharedPtr<SEditableTextBox> HeightBox;
+		TSharedPtr<SEditableTextBox> OutputPathBox;
 
 		Window->SetContent(
 			SNew(SVerticalBox)
@@ -507,15 +508,24 @@ namespace
 				+ SHorizontalBox::Slot().FillWidth(1.0f)
 				[ SAssignNew(HeightBox, SEditableTextBox).Text(FText::AsNumber(Settings->DesignHeight)) ]
 			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 4.0f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 8, 0)
+				[ SNew(STextBlock).Text(LOCTEXT("WelcomeOutputPath", "Default Output Path:")) ]
+				+ SHorizontalBox::Slot().FillWidth(1.0f)
+				[ SAssignNew(OutputPathBox, SEditableTextBox).Text(FText::FromString(Settings->RemoteImageImportPath)) ]
+			]
 			+ SVerticalBox::Slot().FillHeight(1.0f)
 			+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 8.0f)
 			[
 				SNew(SButton).HAlign(HAlign_Center)
 				.Text(LOCTEXT("WelcomeOk", "Get Started"))
-				.OnClicked_Lambda([WeakWindow, Settings, WidthBox, HeightBox]()
+				.OnClicked_Lambda([WeakWindow, Settings, WidthBox, HeightBox, OutputPathBox]()
 				{
 					Settings->DesignWidth = FCString::Atoi(*WidthBox->GetText().ToString());
 					Settings->DesignHeight = FCString::Atoi(*HeightBox->GetText().ToString());
+					Settings->RemoteImageImportPath = OutputPathBox->GetText().ToString();
 					Settings->bFirstRunCompleted = true;
 					Settings->SaveConfig();
 					if (auto Win = WeakWindow.Pin())
