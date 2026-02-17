@@ -119,9 +119,11 @@ bool FPenParser::ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, F
 		for (const auto& FontVal : FontsArr)
 		{
 			const TSharedPtr<FJsonObject>& FontObj = FontVal->AsObject();
+			if (!FontObj.IsValid())
+				continue;
 			FPenFont Font;
-			Font.Name = FontObj->GetStringField(TEXT("name"));
-			Font.Url = FontObj->GetStringField(TEXT("url"));
+			FontObj->TryGetStringField(TEXT("name"), Font.Name);
+			FontObj->TryGetStringField(TEXT("url"), Font.Url);
 			OutDocument.Fonts.Add(Font);
 		}
 	}
@@ -171,7 +173,10 @@ void FPenParser::ParseVariables(const TSharedPtr<FJsonObject>& JsonObj, TMap<FSt
 		Var.Name = Pair.Key;
 
 		const TSharedPtr<FJsonObject>& VarObj = Pair.Value->AsObject();
-		FString TypeStr = VarObj->GetStringField(TEXT("type"));
+		if (!VarObj.IsValid())
+			continue;
+		FString TypeStr;
+		VarObj->TryGetStringField(TEXT("type"), TypeStr);
 
 		if (TypeStr == TEXT("boolean"))
 			Var.Type = EPenVariableType::Boolean;
@@ -251,9 +256,19 @@ TSharedPtr<FPenNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonOb
 	TSharedPtr<FPenNode> Node = MakeShared<FPenNode>();
 
 	// 基础属性
-	Node->Id = JsonObj->GetStringField(TEXT("id"));
+	if (!JsonObj->TryGetStringField(TEXT("id"), Node->Id))
+	{
+		UE_LOG(LogDesign2UMG, Warning, TEXT("PenParser: Node missing 'id' field, skipping"));
+		return nullptr;
+	}
 	JsonObj->TryGetStringField(TEXT("name"), Node->Name);
-	Node->Type = ParseNodeType(JsonObj->GetStringField(TEXT("type")));
+	FString TypeStr;
+	if (!JsonObj->TryGetStringField(TEXT("type"), TypeStr))
+	{
+		UE_LOG(LogDesign2UMG, Warning, TEXT("PenParser: Node '%s' missing 'type' field, skipping"), *Node->Id);
+		return nullptr;
+	}
+	Node->Type = ParseNodeType(TypeStr);
 
 	// 节点级主题设置 - 影响当前节点及子节点的变量解析
 	const FPenVariableResolver* ActiveResolver = &Resolver;
@@ -318,10 +333,13 @@ TSharedPtr<FPenNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonOb
 	JsonObj->TryGetBoolField(TEXT("flipY"), Node->bFlipY);
 
 	// 布局属性 - Frame 默认 Horizontal，Group 默认 None
-	if (JsonObj->HasField(TEXT("layout")))
-		Node->Layout = ParseLayout(JsonObj->GetStringField(TEXT("layout")));
-	else if (Node->Type == EPenNodeType::Group)
-		Node->Layout = EPenLayout::None;
+	{
+		FString LayoutStr;
+		if (JsonObj->TryGetStringField(TEXT("layout"), LayoutStr))
+			Node->Layout = ParseLayout(LayoutStr);
+		else if (Node->Type == EPenNodeType::Group)
+			Node->Layout = EPenLayout::None;
+	}
 	if (JsonObj->HasField(TEXT("gap")))
 		Node->bHasGap = TryGetNumberFieldFlexible(JsonObj, TEXT("gap"), Node->Gap);
 	if (JsonObj->HasField(TEXT("padding")))
@@ -329,10 +347,16 @@ TSharedPtr<FPenNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonOb
 		Node->Padding = ParsePadding(JsonObj->TryGetField(TEXT("padding")));
 		Node->bHasPadding = true;
 	}
-	if (JsonObj->HasField(TEXT("justifyContent")))
-		Node->JustifyContent = ParseJustifyContent(JsonObj->GetStringField(TEXT("justifyContent")));
-	if (JsonObj->HasField(TEXT("alignItems")))
-		Node->AlignItems = ParseAlignItems(JsonObj->GetStringField(TEXT("alignItems")));
+	{
+		FString JCStr;
+		if (JsonObj->TryGetStringField(TEXT("justifyContent"), JCStr))
+			Node->JustifyContent = ParseJustifyContent(JCStr);
+	}
+	{
+		FString AIStr;
+		if (JsonObj->TryGetStringField(TEXT("alignItems"), AIStr))
+			Node->AlignItems = ParseAlignItems(AIStr);
+	}
 	if (JsonObj->HasField(TEXT("clip")))
 		Node->bHasClip = JsonObj->TryGetBoolField(TEXT("clip"), Node->bClip);
 	JsonObj->TryGetBoolField(TEXT("placeholder"), Node->bPlaceholder);
@@ -463,9 +487,8 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 
 				TryGetNumberFieldFlexible(EffectObj, TEXT("blur"), Effect.Shadow.Blur);
 				TryGetNumberFieldFlexible(EffectObj, TEXT("spread"), Effect.Shadow.Spread);
-				FString ShadowColorStr = EffectObj->HasField(TEXT("color"))
-					? EffectObj->GetStringField(TEXT("color"))
-					: TEXT("#00000040");
+				FString ShadowColorStr = TEXT("#00000040");
+				EffectObj->TryGetStringField(TEXT("color"), ShadowColorStr);
 				if (FPenVariableResolver::IsVariableRef(ShadowColorStr))
 					Effect.Shadow.ColorSourceVar = ShadowColorStr;
 				Effect.Shadow.Color = Resolver.ResolveColor(ShadowColorStr);
@@ -695,7 +718,10 @@ FPenFill FPenParser::ParseFill(const TSharedPtr<FJsonValue>& Value, const FPenVa
 	if (Value->Type == EJson::Object)
 	{
 		const auto& Obj = Value->AsObject();
-		FString FillType = Obj->GetStringField(TEXT("type"));
+		if (!Obj.IsValid())
+			return Result;
+		FString FillType;
+		Obj->TryGetStringField(TEXT("type"), FillType);
 
 		if (Obj->HasField(TEXT("enabled")))
 			Result.bEnabled = Obj->GetBoolField(TEXT("enabled"));
@@ -703,10 +729,13 @@ FPenFill FPenParser::ParseFill(const TSharedPtr<FJsonValue>& Value, const FPenVa
 		if (FillType == TEXT("color"))
 		{
 			Result.Type = EPenFillType::Color;
-			FString ColorStr = Obj->GetStringField(TEXT("color"));
-			if (FPenVariableResolver::IsVariableRef(ColorStr))
-				Result.SourceVar = ColorStr;
-			Result.SolidColor = Resolver.ResolveColor(ColorStr);
+			FString ColorStr;
+			if (Obj->TryGetStringField(TEXT("color"), ColorStr))
+			{
+				if (FPenVariableResolver::IsVariableRef(ColorStr))
+					Result.SourceVar = ColorStr;
+				Result.SolidColor = Resolver.ResolveColor(ColorStr);
+			}
 		}
 		else if (FillType == TEXT("gradient"))
 		{
@@ -726,11 +755,16 @@ FPenFill FPenParser::ParseFill(const TSharedPtr<FJsonValue>& Value, const FPenVa
 				for (const auto& StopVal : Obj->GetArrayField(TEXT("colors")))
 				{
 					const auto& StopObj = StopVal->AsObject();
+					if (!StopObj.IsValid())
+						continue;
 					FPenGradientStop Stop;
-					FString StopColorStr = StopObj->GetStringField(TEXT("color"));
-					if (FPenVariableResolver::IsVariableRef(StopColorStr))
-						Stop.SourceVar = StopColorStr;
-					Stop.Color = Resolver.ResolveColor(StopColorStr);
+					FString StopColorStr;
+					if (StopObj->TryGetStringField(TEXT("color"), StopColorStr))
+					{
+						if (FPenVariableResolver::IsVariableRef(StopColorStr))
+							Stop.SourceVar = StopColorStr;
+						Stop.Color = Resolver.ResolveColor(StopColorStr);
+					}
 					TryGetNumberFieldFlexible(StopObj, TEXT("position"), Stop.Position);
 					Result.Gradient.Colors.Add(Stop);
 				}
@@ -739,7 +773,7 @@ FPenFill FPenParser::ParseFill(const TSharedPtr<FJsonValue>& Value, const FPenVa
 		else if (FillType == TEXT("image"))
 		{
 			Result.Type = EPenFillType::Image;
-			Result.Image.Url = Obj->GetStringField(TEXT("url"));
+			Obj->TryGetStringField(TEXT("url"), Result.Image.Url);
 			if (Obj->HasField(TEXT("mode")))
 			{
 				FString Mode = Obj->GetStringField(TEXT("mode"));
