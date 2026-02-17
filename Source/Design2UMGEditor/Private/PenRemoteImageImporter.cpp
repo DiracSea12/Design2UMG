@@ -132,21 +132,21 @@ namespace
 				bDone = true;
 				if (!bWasSuccessful || !Response.IsValid())
 				{
-					ErrorString = TEXT("HTTP request failed");
+					ErrorString = TEXT("网络请求失败");
 					return;
 				}
 
 				ResponseCode = Response->GetResponseCode();
 				if (ResponseCode < 200 || ResponseCode >= 300)
 				{
-					ErrorString = FString::Printf(TEXT("HTTP %d"), ResponseCode);
+					ErrorString = FString::Printf(TEXT("服务器返回错误 (HTTP %d)"), ResponseCode);
 					return;
 				}
 
 				Downloaded = Response->GetContent();
 				if (Downloaded.Num() == 0)
 				{
-					ErrorString = TEXT("HTTP response content is empty");
+					ErrorString = TEXT("服务器返回了空内容");
 					return;
 				}
 
@@ -155,7 +155,7 @@ namespace
 
 		if (!Request->ProcessRequest())
 		{
-			OutError = TEXT("Failed to start HTTP request");
+			OutError = TEXT("无法发起网络请求");
 			return false;
 		}
 
@@ -163,7 +163,7 @@ namespace
 		if (!bDone || !bSuccess)
 		{
 			OutError = ErrorString.IsEmpty()
-				? FString::Printf(TEXT("HTTP request failed (%d)"), ResponseCode)
+				? FString::Printf(TEXT("网络请求失败 (HTTP %d)"), ResponseCode)
 				: ErrorString;
 			return false;
 		}
@@ -176,7 +176,7 @@ namespace
 	{
 		if (CompressedData.Num() == 0)
 		{
-			OutError = TEXT("Image data is empty");
+			OutError = TEXT("图片数据为空");
 			return false;
 		}
 
@@ -184,14 +184,14 @@ namespace
 		const EImageFormat Format = ImageWrapperModule.DetectImageFormat(CompressedData.GetData(), CompressedData.Num());
 		if (Format == EImageFormat::Invalid)
 		{
-			OutError = TEXT("Unsupported image format (engine image wrapper cannot decode it)");
+			OutError = TEXT("不支持的图片格式");
 			return false;
 		}
 
 		TSharedPtr<IImageWrapper> Wrapper = ImageWrapperModule.CreateImageWrapper(Format);
 		if (!Wrapper.IsValid() || !Wrapper->SetCompressed(CompressedData.GetData(), CompressedData.Num()))
 		{
-			OutError = TEXT("Failed to parse compressed image data");
+			OutError = TEXT("图片数据解析失败");
 			return false;
 		}
 
@@ -199,20 +199,20 @@ namespace
 		OutHeight = Wrapper->GetHeight();
 		if (OutWidth <= 0 || OutHeight <= 0)
 		{
-			OutError = TEXT("Invalid decoded image size");
+			OutError = TEXT("图片尺寸无效");
 			return false;
 		}
 
 		if (!Wrapper->GetRaw(ERGBFormat::BGRA, 8, OutRawData))
 		{
-			OutError = TEXT("Failed to decode image to BGRA8");
+			OutError = TEXT("图片解码失败");
 			return false;
 		}
 
 		const int64 ExpectedSize = static_cast<int64>(OutWidth) * static_cast<int64>(OutHeight) * 4;
 		if (OutRawData.Num() < ExpectedSize)
 		{
-			OutError = TEXT("Decoded image data size is invalid");
+			OutError = TEXT("图片解码数据大小异常");
 			return false;
 		}
 
@@ -231,7 +231,7 @@ namespace
 		const FString LongPackageName = BuildLongPackageName(ImportPath, AssetName);
 		if (!FPackageName::IsValidLongPackageName(LongPackageName))
 		{
-			OutError = FString::Printf(TEXT("Invalid package name: %s"), *LongPackageName);
+			OutError = FString::Printf(TEXT("资产路径无效: %s"), *LongPackageName);
 			return false;
 		}
 
@@ -240,14 +240,14 @@ namespace
 		UPackage* Package = CreatePackage(*LongPackageName);
 		if (!Package)
 		{
-			OutError = FString::Printf(TEXT("CreatePackage failed: %s"), *LongPackageName);
+			OutError = FString::Printf(TEXT("无法创建资产包: %s"), *LongPackageName);
 			return false;
 		}
 
 		UTexture2D* Texture = NewObject<UTexture2D>(Package, *AssetName, RF_Public | RF_Standalone);
 		if (!Texture)
 		{
-			OutError = FString::Printf(TEXT("Failed to create texture object: %s"), *AssetName);
+			OutError = FString::Printf(TEXT("无法创建纹理对象: %s"), *AssetName);
 			return false;
 		}
 
@@ -275,7 +275,7 @@ namespace
 		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
 		if (!UPackage::SavePackage(Package, Texture, *PackageFilename, SaveArgs))
 		{
-			OutError = FString::Printf(TEXT("Failed to save package: %s"), *PackageFilename);
+			OutError = FString::Printf(TEXT("无法保存资产包: %s"), *PackageFilename);
 			return false;
 		}
 
@@ -298,7 +298,7 @@ namespace
 
 		if (!IsRemoteUrl(InOutTexturePath))
 		{
-			AddReportMessage(Context, FString::Printf(TEXT("Skip non-asset/non-url TexturePath on '%s': %s"), *WidgetName, *InOutTexturePath));
+			AddReportMessage(Context, FString::Printf(TEXT("跳过非资产路径 '%s': %s"), *WidgetName, *InOutTexturePath));
 			return true;
 		}
 
@@ -323,7 +323,7 @@ namespace
 			InOutTexturePath = ObjectPath;
 			++Context.ReusedCount;
 			Context.UrlToAssetPath.Add(NormalizedUrl, ObjectPath);
-			AddReportMessage(Context, FString::Printf(TEXT("Reuse texture asset: %s"), *ObjectPath));
+			AddReportMessage(Context, FString::Printf(TEXT("复用已有纹理: %s"), *ObjectPath));
 			return true;
 		}
 
@@ -332,7 +332,7 @@ namespace
 		if (!DownloadUrl(NormalizedUrl, Context.TimeoutSeconds, CompressedData, DownloadError))
 		{
 			++Context.FailedCount;
-			AddReportMessage(Context, FString::Printf(TEXT("Download failed on '%s': %s (%s)"), *WidgetName, *NormalizedUrl, *DownloadError));
+			AddReportMessage(Context, FString::Printf(TEXT("图片 '%s' 下载失败: %s (原因: %s)"), *WidgetName, *NormalizedUrl, *DownloadError));
 			return false;
 		}
 
@@ -343,7 +343,7 @@ namespace
 		if (!DecodeToBGRA8(CompressedData, Width, Height, RawBGRA, DecodeError))
 		{
 			++Context.FailedCount;
-			AddReportMessage(Context, FString::Printf(TEXT("Decode failed on '%s': %s (%s)"), *WidgetName, *NormalizedUrl, *DecodeError));
+			AddReportMessage(Context, FString::Printf(TEXT("图片 '%s' 解码失败: %s (原因: %s)"), *WidgetName, *NormalizedUrl, *DecodeError));
 			return false;
 		}
 
@@ -352,14 +352,14 @@ namespace
 		if (!CreateTextureAsset(Context.ImportPath, AssetName, RawBGRA, Width, Height, ImportedObjectPath, ImportError))
 		{
 			++Context.FailedCount;
-			AddReportMessage(Context, FString::Printf(TEXT("Import failed on '%s': %s (%s)"), *WidgetName, *NormalizedUrl, *ImportError));
+			AddReportMessage(Context, FString::Printf(TEXT("图片 '%s' 导入失败: %s (原因: %s)"), *WidgetName, *NormalizedUrl, *ImportError));
 			return false;
 		}
 
 		InOutTexturePath = ImportedObjectPath;
 		++Context.ImportedCount;
 		Context.UrlToAssetPath.Add(NormalizedUrl, ImportedObjectPath);
-		AddReportMessage(Context, FString::Printf(TEXT("Imported texture asset: %s"), *ImportedObjectPath));
+		AddReportMessage(Context, FString::Printf(TEXT("已导入纹理: %s"), *ImportedObjectPath));
 		return true;
 	}
 
@@ -387,7 +387,7 @@ bool FPenRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, FSt
 	{
 		if (OutReport)
 		{
-			*OutReport = TEXT("RemoteImageImport: settings unavailable");
+			*OutReport = TEXT("远程图片导入: 设置不可用");
 		}
 		return false;
 	}
@@ -396,7 +396,7 @@ bool FPenRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, FSt
 	{
 		if (OutReport)
 		{
-			*OutReport = TEXT("RemoteImageImport: disabled");
+			*OutReport = TEXT("远程图片导入: 已禁用");
 		}
 		return true;
 	}
@@ -410,7 +410,7 @@ bool FPenRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, FSt
 	if (OutReport)
 	{
 		FString Summary = FString::Printf(
-			TEXT("RemoteImageImport: imported=%d reused=%d failed=%d path=%s"),
+			TEXT("远程图片导入: 新增=%d 复用=%d 失败=%d 路径=%s"),
 			Context.ImportedCount,
 			Context.ReusedCount,
 			Context.FailedCount,
