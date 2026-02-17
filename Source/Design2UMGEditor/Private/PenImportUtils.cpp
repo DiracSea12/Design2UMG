@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
 #include "PenImportUtils.h"
+#include "PenImporter.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGNotification.h"
 #include "PenRemoteImageImporter.h"
@@ -36,6 +37,7 @@ namespace
 
 UWidgetBlueprint* PenImportUtils::GenerateBlueprint(const FUMGWidgetData& Data, const FString& OutputPath)
 {
+	const double StartTime = FPlatformTime::Seconds();
 	const FString FinalPath = ResolveOutputPath(OutputPath);
 	UWidgetBlueprint* WBP = FUMGGenerator::GenerateWidgetBlueprint(Data, FinalPath);
 	if (!WBP)
@@ -45,9 +47,9 @@ UWidgetBlueprint* PenImportUtils::GenerateBlueprint(const FUMGWidgetData& Data, 
 		return nullptr;
 	}
 	UE_LOG(LogDesign2UMG, Log, TEXT("PenImportUtils: Generated %s"), *WBP->GetPathName());
-	FDesign2UMGNotification::Success(
-		FText::Format(LOCTEXT("GenSuccess", "Design2UMG: Generated {0}"), FText::FromString(WBP->GetName())),
-		WBP->GetPathName());
+
+	FImportResult Result = FImportResult::FromData(Data, FPlatformTime::Seconds() - StartTime);
+	Result.ShowSummaryNotification();
 	return WBP;
 }
 

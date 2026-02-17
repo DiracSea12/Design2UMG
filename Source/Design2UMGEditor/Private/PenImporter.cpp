@@ -4,8 +4,6 @@
 #include "Design2UMGLog.h"
 #include "Design2UMGNotification.h"
 #include "FontResolver.h"
-#include "Framework/Notifications/NotificationManager.h"
-#include "Widgets/Notifications/SNotificationList.h"
 #include "PenParser.h"
 #include "Design2UMGConverter.h"
 #include "PenMCPBridge.h"
@@ -14,6 +12,8 @@
 #include "Misc/ScopedSlowTask.h"
 #include "Serialization/JsonSerializer.h"
 #include "Dom/JsonObject.h"
+#include "Framework/Notifications/NotificationManager.h"
+#include "Widgets/Notifications/SNotificationList.h"
 
 #define LOCTEXT_NAMESPACE "PenImporter"
 
@@ -48,9 +48,24 @@ void FImportResult::ShowSummaryNotification() const
 		FText::FromString(FString::Printf(TEXT("%.1f"), ElapsedSeconds)));
 
 	if (WarningCount > 0)
-		FDesign2UMGNotification::Warning(Msg);
+	{
+		for (const FString& W : Warnings)
+			UE_LOG(LogDesign2UMG, Warning, TEXT("  - %s"), *W);
+
+		FNotificationInfo Info(Msg);
+		Info.ExpireDuration = 5.0f;
+		Info.bUseSuccessFailIcons = true;
+		Info.Hyperlink = FSimpleDelegate::CreateLambda([]()
+		{
+			FGlobalTabmanager::Get()->TryInvokeTab(FName("OutputLog"));
+		});
+		Info.HyperlinkText = LOCTEXT("ViewWarnings", "View warnings in Output Log");
+		FSlateNotificationManager::Get().AddNotification(Info);
+	}
 	else
+	{
 		FDesign2UMGNotification::Success(Msg);
+	}
 }
 
 bool FPenImporter::ImportFromFile(const FString& FilePath, FUMGWidgetData& OutData)
