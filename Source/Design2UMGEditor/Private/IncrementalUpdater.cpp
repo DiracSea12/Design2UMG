@@ -6,6 +6,14 @@
 #include "WidgetBlueprint.h"
 #include "Components/PanelWidget.h"
 #include "Components/Widget.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Widgets/SWindow.h"
+#include "Widgets/Text/STextBlock.h"
+#include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SCheckBox.h"
+#include "Widgets/Layout/SScrollBox.h"
+
+#define LOCTEXT_NAMESPACE "IncrementalUpdater"
 
 int32 FDiffResult::CountAdded() const
 {

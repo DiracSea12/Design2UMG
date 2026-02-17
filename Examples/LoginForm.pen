@@ -3,114 +3,115 @@
   "children": [
     {
       "id": "login-frame",
-      "name": "LoginForm",
       "type": "frame",
+      "name": "LoginForm",
       "width": 400,
-      "height": 500,
+      "height": 480,
       "layout": "vertical",
-      "gap": 16,
       "padding": [32, 32, 32, 32],
+      "gap": 16,
+      "fill": "#FFFFFF",
+      "cornerRadius": 12,
       "justifyContent": "center",
       "alignItems": "center",
-      "fill": { "type": "color", "color": "#1A1A2E" },
-      "cornerRadius": [12, 12, 12, 12],
       "children": [
         {
           "id": "title",
-          "name": "Title",
           "type": "text",
+          "name": "Title",
+          "width": "fill_container",
           "content": "Welcome Back",
           "fontSize": 28,
           "fontWeight": "bold",
-          "fill": { "type": "color", "color": "#EAEAEA" },
+          "fill": "#1A1A2E",
           "textAlign": "center"
         },
         {
           "id": "subtitle",
-          "name": "Subtitle",
           "type": "text",
+          "name": "Subtitle",
+          "width": "fill_container",
           "content": "Sign in to continue",
           "fontSize": 14,
-          "fill": { "type": "color", "color": "#888888" },
+          "fill": "#6C757D",
           "textAlign": "center"
         },
         {
-          "id": "email-field",
-          "name": "EmailField",
+          "id": "email-input",
           "type": "frame",
+          "name": "EmailInput",
           "width": "fill_container",
           "height": 48,
-          "fill": { "type": "color", "color": "#16213E" },
-          "cornerRadius": [8, 8, 8, 8],
-          "stroke": { "fill": { "type": "color", "color": "#0F3460" }, "thickness": 1 },
-          "padding": [12, 0, 12, 0],
-          "alignItems": "center",
           "layout": "horizontal",
+          "padding": [12, 0, 12, 0],
+          "fill": "#F8F9FA",
+          "cornerRadius": 8,
+          "alignItems": "center",
+          "stroke": { "thickness": 1, "fill": "#DEE2E6" },
           "children": [
             {
               "id": "email-text",
-              "name": "EmailPlaceholder",
               "type": "text",
+              "name": "EmailPlaceholder",
               "content": "Email address",
               "fontSize": 14,
-              "fill": { "type": "color", "color": "#666666" }
+              "fill": "#ADB5BD"
             }
           ]
         },
         {
-          "id": "password-field",
-          "name": "PasswordField",
+          "id": "password-input",
           "type": "frame",
+          "name": "PasswordInput",
           "width": "fill_container",
           "height": 48,
-          "fill": { "type": "color", "color": "#16213E" },
-          "cornerRadius": [8, 8, 8, 8],
-          "stroke": { "fill": { "type": "color", "color": "#0F3460" }, "thickness": 1 },
-          "padding": [12, 0, 12, 0],
-          "alignItems": "center",
           "layout": "horizontal",
+          "padding": [12, 0, 12, 0],
+          "fill": "#F8F9FA",
+          "cornerRadius": 8,
+          "alignItems": "center",
+          "stroke": { "thickness": 1, "fill": "#DEE2E6" },
           "children": [
             {
               "id": "password-text",
-              "name": "PasswordPlaceholder",
               "type": "text",
+              "name": "PasswordPlaceholder",
               "content": "Password",
               "fontSize": 14,
-              "fill": { "type": "color", "color": "#666666" }
+              "fill": "#ADB5BD"
             }
           ]
         },
         {
           "id": "login-btn",
-          "name": "LoginButton",
           "type": "frame",
+          "name": "LoginButton",
           "width": "fill_container",
           "height": 48,
-          "fill": { "type": "color", "color": "#E94560" },
-          "cornerRadius": [8, 8, 8, 8],
           "layout": "horizontal",
+          "fill": "#4361EE",
+          "cornerRadius": 8,
           "justifyContent": "center",
           "alignItems": "center",
           "children": [
             {
-              "id": "login-btn-text",
-              "name": "LoginButtonText",
+              "id": "btn-text",
               "type": "text",
+              "name": "ButtonLabel",
               "content": "Sign In",
               "fontSize": 16,
-              "fontWeight": "semibold",
-              "fill": { "type": "color", "color": "#FFFFFF" }
+              "fontWeight": "600",
+              "fill": "#FFFFFF"
             }
           ]
         },
         {
-          "id": "forgot-link",
-          "name": "ForgotPassword",
+          "id": "forgot",
           "type": "text",
+          "name": "ForgotPassword",
           "content": "Forgot password?",
-          "fontSize": 12,
-          "fill": { "type": "color", "color": "#E94560" },
-          "textAlign": "center"
+          "fontSize": 13,
+          "fill": "#4361EE"
         }
       ]
     }

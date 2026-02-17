@@ -1,0 +1,91 @@
+{
+  "version": "1.0",
+  "children": [
+    {
+      "id": "hud",
+      "type": "frame",
+      "name": "GameHUD",
+      "width": 1920,
+      "height": 1080,
+      "children": [
+        {
+          "id": "health-bar",
+          "type": "frame",
+          "name": "HealthBar",
+          "x": 32,
+          "y": 32,
+          "width": 240,
+          "height": 32,
+          "cornerRadius": 4,
+          "fill": "#1A1A2E",
+          "clip": true,
+          "children": [
+            {
+              "id": "health-fill",
+              "type": "rectangle",
+              "name": "HealthFill",
+              "width": 180,
+              "height": 32,
+              "fill": "#E63946",
+              "cornerRadius": 4
+            }
+          ]
+        },
+        {
+          "id": "score",
+          "type": "text",
+          "name": "Score",
+          "x": 960,
+          "y": 24,
+          "content": "SCORE: 12,450",
+          "fontSize": 20,
+          "fontWeight": "bold",
+          "fill": "#FFFFFF",
+          "textAlign": "center"
+        },
+        {
+          "id": "ammo-panel",
+          "type": "frame",
+          "name": "AmmoPanel",
+          "x": 1640,
+          "y": 980,
+          "width": 248,
+          "height": 68,
+          "layout": "horizontal",
+          "padding": [16, 12, 16, 12],
+          "gap": 8,
+          "fill": "#1A1A2ECC",
+          "cornerRadius": 8,
+          "alignItems": "end",
+          "children": [
+            {
+              "id": "ammo-current",
+              "type": "text",
+              "name": "AmmoCurrent",
+              "content": "24",
+              "fontSize": 36,
+              "fontWeight": "bold",
+              "fill": "#FFFFFF"
+            },
+            {
+              "id": "ammo-sep",
+              "type": "text",
+              "name": "AmmoSeparator",
+              "content": "/",
+              "fontSize": 20,
+              "fill": "#6C757D"
+            },
+            {
+              "id": "ammo-max",
+              "type": "text",
+              "name": "AmmoMax",
+              "content": "120",
+              "fontSize": 20,
+              "fill": "#6C757D"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

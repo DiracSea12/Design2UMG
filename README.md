@@ -53,7 +53,8 @@ Enable in Edit > Plugins > "Pen To UMG".
 使用 [Pencil](https://pencil.evolves.dev/) 创建设计，导出为 `.pen` 文件。插件附带两个示例文件可直接体验：
 
 - `Examples/LoginForm.pen` — 登录表单（垂直布局、圆角卡片、按钮）
-- `Examples/Dashboard.pen` — 仪表盘（水平卡片行、统计数据、嵌套布局）
+- `Examples/Dashboard.pen` — 仪表盘卡片（阴影、徽章、嵌套布局）
+- `Examples/GameHUD.pen` — 游戏 HUD（绝对定位、血条、弹药面板）
 
 ### Step 3 — 导入
 

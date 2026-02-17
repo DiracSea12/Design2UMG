@@ -21,6 +21,7 @@ struct FDiffEntry
 	FString NodeId;
 	FString NodeName;
 	FString NodeType;
+	bool bAccepted = true;
 };
 
 struct FDiffResult
@@ -40,4 +41,10 @@ public:
 	static FDiffResult ComputeDiff(
 		const FUMGWidgetNode& NewRoot,
 		UWidgetBlueprint* ExistingBP);
+
+	/** 显示 Diff 预览对话框，用户可逐项勾选。返回 true = 用户确认，false = 取消 */
+	static bool ShowDiffPreviewDialog(FDiffResult& InOutDiff);
+
+	/** 根据用户选择过滤新节点树，移除被拒绝的节点 */
+	static FUMGWidgetNode FilterByAccepted(const FUMGWidgetNode& Root, const FDiffResult& Diff);
 };
