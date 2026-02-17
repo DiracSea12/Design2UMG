@@ -1,0 +1,20 @@
+{
+  "children": [
+    {
+      "id": "root",
+      "type": "frame",
+      "width": 320,
+      "height": 64,
+      "layout": "horizontal",
+      "children": [
+        {
+          "id": "icon1",
+          "type": "icon_font",
+          "iconFontFamily": "Material Symbols Sharp",
+          "iconFontName": "dashboard",
+          "fontSize": 20
+        }
+      ]
+    }
+  ]
+}

@@ -13,6 +13,7 @@ DerivedDataCache/
 .vs/
 .idea/
 .vscode/
+.vscode/settings.json
 
 # OS
 Thumbs.db
@@ -25,3 +26,4 @@ CLAUDE.md
 tmpclaude-*
 specs/
 Docs/LessonsLearned.md
+Source/Design2UMGEditor/Private/image/

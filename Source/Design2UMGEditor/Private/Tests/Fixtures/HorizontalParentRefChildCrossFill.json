@@ -1,0 +1,27 @@
+{
+  "children": [
+    {
+      "id": "d5ZTS",
+      "type": "frame",
+      "name": "Sidebar",
+      "reusable": true,
+      "layout": "vertical",
+      "width": 280,
+      "height": "fill_container(640)",
+      "children": [
+        { "id": "header", "type": "frame", "width": "fill_container", "height": 80 }
+      ]
+    },
+    {
+      "id": "root",
+      "type": "frame",
+      "layout": "horizontal",
+      "width": 1440,
+      "height": 900,
+      "children": [
+        { "id": "sidebar", "type": "ref", "ref": "d5ZTS" },
+        { "id": "content", "type": "frame", "layout": "vertical", "width": "fill_container", "height": 900 }
+      ]
+    }
+  ]
+}

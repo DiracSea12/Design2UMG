@@ -1,0 +1,55 @@
+{
+  "children": [
+    {
+      "id": "KbyBJ",
+      "type": "frame",
+      "reusable": true,
+      "layout": "horizontal",
+      "children": [
+        { "id": "248ys", "type": "text", "content": "Tab Item" }
+      ]
+    },
+    {
+      "id": "BdBJJ",
+      "type": "ref",
+      "reusable": true,
+      "ref": "KbyBJ",
+      "descendants": {
+        "248ys": { "fill": "#666666" }
+      }
+    },
+    {
+      "id": "screen",
+      "type": "frame",
+      "width": 640,
+      "height": 120,
+      "layout": "horizontal",
+      "children": [
+        {
+          "id": "tab1",
+          "type": "ref",
+          "ref": "KbyBJ",
+          "descendants": { "248ys": { "content": "Integrations" } }
+        },
+        {
+          "id": "tab2",
+          "type": "ref",
+          "ref": "BdBJJ",
+          "descendants": { "248ys": { "content": "Billing" } }
+        },
+        {
+          "id": "tab3",
+          "type": "ref",
+          "ref": "BdBJJ",
+          "descendants": { "248ys": { "content": "Profile" } }
+        },
+        {
+          "id": "tab4",
+          "type": "ref",
+          "ref": "BdBJJ",
+          "descendants": { "248ys": { "content": "Advanced" } }
+        }
+      ]
+    }
+  ]
+}

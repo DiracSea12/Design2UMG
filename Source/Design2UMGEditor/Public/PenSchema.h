@@ -556,16 +556,20 @@ struct FPenNode
 	// 可见性
 	bool bEnabled = true;
 	float Opacity = 1.0f;
+	bool bHasOpacity = false;
 	bool bFlipX = false;
 	bool bFlipY = false;
 
 	// 布局属性 (frame/group)
 	EPenLayout Layout = EPenLayout::Horizontal;
 	float Gap = 0.0f;
+	bool bHasGap = false;
 	FPenPadding Padding;
+	bool bHasPadding = false;
 	EPenJustifyContent JustifyContent = EPenJustifyContent::Start;
 	EPenAlignItems AlignItems = EPenAlignItems::Start;
 	bool bClip = false;
+	bool bHasClip = false;
 	bool bPlaceholder = false;
 
 	// 视觉属性

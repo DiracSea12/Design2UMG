@@ -1,0 +1,43 @@
+{
+  "children": [
+    {
+      "id": "root",
+      "type": "frame",
+      "x": "12",
+      "y": "34.5",
+      "rotation": "3",
+      "width": 800,
+      "height": 600,
+      "layout": "vertical",
+      "gap": "8",
+      "opacity": "0.75",
+      "padding": ["1", "2", "3", "4"],
+      "cornerRadius": ["5", "6", "7", "8"],
+      "stroke": {
+        "align": "inside",
+        "thickness": "2.5"
+      },
+      "fill": {
+        "type": "image",
+        "url": "https://example.com/icon.png",
+        "imageTransform": [["1", "0", "0"], ["0", "1", "0"]]
+      },
+      "children": [
+        {
+          "id": "txt",
+          "type": "text",
+          "content": "Label",
+          "fontSize": "16",
+          "lineHeight": "1.5",
+          "letterSpacing": "0.2"
+        },
+        {
+          "id": "icon",
+          "type": "icon_font",
+          "iconFontName": "dashboard",
+          "weight": "500"
+        }
+      ]
+    }
+  ]
+}

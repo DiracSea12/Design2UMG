@@ -312,7 +312,8 @@ TSharedPtr<FPenNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonOb
 	// 可见性
 	if (JsonObj->HasField(TEXT("enabled")))
 		Node->bEnabled = JsonObj->GetBoolField(TEXT("enabled"));
-	TryGetNumberFieldFlexible(JsonObj, TEXT("opacity"), Node->Opacity);
+	if (JsonObj->HasField(TEXT("opacity")))
+		Node->bHasOpacity = TryGetNumberFieldFlexible(JsonObj, TEXT("opacity"), Node->Opacity);
 	JsonObj->TryGetBoolField(TEXT("flipX"), Node->bFlipX);
 	JsonObj->TryGetBoolField(TEXT("flipY"), Node->bFlipY);
 
@@ -321,14 +322,19 @@ TSharedPtr<FPenNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonOb
 		Node->Layout = ParseLayout(JsonObj->GetStringField(TEXT("layout")));
 	else if (Node->Type == EPenNodeType::Group)
 		Node->Layout = EPenLayout::None;
-	TryGetNumberFieldFlexible(JsonObj, TEXT("gap"), Node->Gap);
+	if (JsonObj->HasField(TEXT("gap")))
+		Node->bHasGap = TryGetNumberFieldFlexible(JsonObj, TEXT("gap"), Node->Gap);
 	if (JsonObj->HasField(TEXT("padding")))
+	{
 		Node->Padding = ParsePadding(JsonObj->TryGetField(TEXT("padding")));
+		Node->bHasPadding = true;
+	}
 	if (JsonObj->HasField(TEXT("justifyContent")))
 		Node->JustifyContent = ParseJustifyContent(JsonObj->GetStringField(TEXT("justifyContent")));
 	if (JsonObj->HasField(TEXT("alignItems")))
 		Node->AlignItems = ParseAlignItems(JsonObj->GetStringField(TEXT("alignItems")));
-	JsonObj->TryGetBoolField(TEXT("clip"), Node->bClip);
+	if (JsonObj->HasField(TEXT("clip")))
+		Node->bHasClip = JsonObj->TryGetBoolField(TEXT("clip"), Node->bClip);
 	JsonObj->TryGetBoolField(TEXT("placeholder"), Node->bPlaceholder);
 
 	// 视觉属性
@@ -542,8 +548,16 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 			if (OverrideObj->HasField(TEXT("enabled")))
 				DescNode->bEnabled = OverrideObj->GetBoolField(TEXT("enabled"));
 			if (OverrideObj->HasField(TEXT("padding")))
+			{
 				DescNode->Padding = ParsePadding(OverrideObj->TryGetField(TEXT("padding")));
-			TryGetNumberFieldFlexible(OverrideObj, TEXT("gap"), DescNode->Gap);
+				DescNode->bHasPadding = true;
+			}
+			if (OverrideObj->HasField(TEXT("gap")))
+				DescNode->bHasGap = TryGetNumberFieldFlexible(OverrideObj, TEXT("gap"), DescNode->Gap);
+			if (OverrideObj->HasField(TEXT("clip")))
+				DescNode->bHasClip = OverrideObj->TryGetBoolField(TEXT("clip"), DescNode->bClip);
+			if (OverrideObj->HasField(TEXT("opacity")))
+				DescNode->bHasOpacity = TryGetNumberFieldFlexible(OverrideObj, TEXT("opacity"), DescNode->Opacity);
 			if (OverrideObj->HasField(TEXT("justifyContent")))
 				DescNode->JustifyContent = ParseJustifyContent(OverrideObj->GetStringField(TEXT("justifyContent")));
 			if (OverrideObj->HasField(TEXT("alignItems")))

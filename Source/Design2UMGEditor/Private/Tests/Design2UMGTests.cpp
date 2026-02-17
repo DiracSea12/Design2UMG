@@ -6,6 +6,9 @@
 #include "Design2UMGSettings.h"
 #include "LayoutCalculator.h"
 #include "FigmaParser.h"
+#include "Interfaces/IPluginManager.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 
 #if WITH_AUTOMATION_WORKER
 
@@ -50,6 +53,19 @@ namespace
 		}
 		for (const FUMGWidgetNode& Child : Node.Children)
 			CollectTextValues(Child, OutTexts);
+	}
+
+	bool LoadFixtureJson(const FString& FixtureFileName, FString& OutJson)
+	{
+		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
+		if (!Plugin.IsValid())
+			return false;
+
+		const FString FixturePath = FPaths::Combine(
+			Plugin->GetBaseDir(),
+			TEXT("Source/Design2UMGEditor/Private/Tests/Fixtures"),
+			FixtureFileName);
+		return FFileHelper::LoadFileToString(OutJson, *FixturePath);
 	}
 }
 
@@ -522,61 +538,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRefOfRefDescendantsOverrideTest,
 
 bool FRefOfRefDescendantsOverrideTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"JSON({
-		"children": [
-			{
-				"id": "KbyBJ",
-				"type": "frame",
-				"reusable": true,
-				"layout": "horizontal",
-				"children": [
-					{ "id": "248ys", "type": "text", "content": "Tab Item" }
-				]
-			},
-			{
-				"id": "BdBJJ",
-				"type": "ref",
-				"reusable": true,
-				"ref": "KbyBJ",
-				"descendants": {
-					"248ys": { "fill": "#666666" }
-				}
-			},
-			{
-				"id": "screen",
-				"type": "frame",
-				"width": 640,
-				"height": 120,
-				"layout": "horizontal",
-				"children": [
-					{
-						"id": "tab1",
-						"type": "ref",
-						"ref": "KbyBJ",
-						"descendants": { "248ys": { "content": "Integrations" } }
-					},
-					{
-						"id": "tab2",
-						"type": "ref",
-						"ref": "BdBJJ",
-						"descendants": { "248ys": { "content": "Billing" } }
-					},
-					{
-						"id": "tab3",
-						"type": "ref",
-						"ref": "BdBJJ",
-						"descendants": { "248ys": { "content": "Profile" } }
-					},
-					{
-						"id": "tab4",
-						"type": "ref",
-						"ref": "BdBJJ",
-						"descendants": { "248ys": { "content": "Advanced" } }
-					}
-				]
-			}
-		]
-	})JSON");
+	FString Json;
+	TestTrue(TEXT("Load fixture RefOfRefDescendantsOverride"), LoadFixtureJson(TEXT("RefOfRefDescendantsOverride.json"), Json));
+	if (Json.IsEmpty())
+		return false;
 
 	FPenDocument Doc;
 	TestTrue(TEXT("RefOfRef parse succeeds"), FPenParser::ParseDocument(Json, Doc));
@@ -602,33 +567,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHorizontalParentRefChildCrossFillTest,
 
 bool FHorizontalParentRefChildCrossFillTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"JSON({
-		"children": [
-			{
-				"id": "d5ZTS",
-				"type": "frame",
-				"name": "Sidebar",
-				"reusable": true,
-				"layout": "vertical",
-				"width": 280,
-				"height": "fill_container(640)",
-				"children": [
-					{ "id": "header", "type": "frame", "width": "fill_container", "height": 80 }
-				]
-			},
-			{
-				"id": "root",
-				"type": "frame",
-				"layout": "horizontal",
-				"width": 1440,
-				"height": 900,
-				"children": [
-					{ "id": "sidebar", "type": "ref", "ref": "d5ZTS" },
-					{ "id": "content", "type": "frame", "layout": "vertical", "width": "fill_container", "height": 900 }
-				]
-			}
-		]
-	})JSON");
+	FString Json;
+	TestTrue(TEXT("Load fixture HorizontalParentRefChildCrossFill"), LoadFixtureJson(TEXT("HorizontalParentRefChildCrossFill.json"), Json));
+	if (Json.IsEmpty())
+		return false;
 
 	FPenDocument Doc;
 	TestTrue(TEXT("CrossFill parse succeeds"), FPenParser::ParseDocument(Json, Doc));
@@ -663,26 +605,15 @@ bool FIconFontNoMappingFallbackTest::RunTest(const FString& Parameters)
 	Settings->DefaultIconFontAssetPath.Empty();
 	Settings->MissingIconFontPlaceholder = TEXT("[missing-icon]");
 
-	const FString Json = TEXT(R"JSON({
-		"children": [
-			{
-				"id": "root",
-				"type": "frame",
-				"width": 320,
-				"height": 64,
-				"layout": "horizontal",
-				"children": [
-					{
-						"id": "icon1",
-						"type": "icon_font",
-						"iconFontFamily": "Material Symbols Sharp",
-						"iconFontName": "dashboard",
-						"fontSize": 20
-					}
-				]
-			}
-		]
-	})JSON");
+	FString Json;
+	TestTrue(TEXT("Load fixture IconFontNoMappingFallback"), LoadFixtureJson(TEXT("IconFontNoMappingFallback.json"), Json));
+	if (Json.IsEmpty())
+	{
+		Settings->IconFontAssetMap = SavedMap;
+		Settings->DefaultIconFontAssetPath = SavedDefaultPath;
+		Settings->MissingIconFontPlaceholder = SavedPlaceholder;
+		return false;
+	}
 
 	FPenDocument Doc;
 	TestTrue(TEXT("Icon fallback parse succeeds"), FPenParser::ParseDocument(Json, Doc));
@@ -715,49 +646,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FParserNumberStringFlexibleTest,
 
 bool FParserNumberStringFlexibleTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"JSON({
-		"children": [
-			{
-				"id": "root",
-				"type": "frame",
-				"x": "12",
-				"y": "34.5",
-				"rotation": "3",
-				"width": 800,
-				"height": 600,
-				"layout": "vertical",
-				"gap": "8",
-				"opacity": "0.75",
-				"padding": ["1", "2", "3", "4"],
-				"cornerRadius": ["5", "6", "7", "8"],
-				"stroke": {
-					"align": "inside",
-					"thickness": "2.5"
-				},
-				"fill": {
-					"type": "image",
-					"url": "https://example.com/icon.png",
-					"imageTransform": [["1", "0", "0"], ["0", "1", "0"]]
-				},
-				"children": [
-					{
-						"id": "txt",
-						"type": "text",
-						"content": "Label",
-						"fontSize": "16",
-						"lineHeight": "1.5",
-						"letterSpacing": "0.2"
-					},
-					{
-						"id": "icon",
-						"type": "icon_font",
-						"iconFontName": "dashboard",
-						"weight": "500"
-					}
-				]
-			}
-		]
-	})JSON");
+	FString Json;
+	TestTrue(TEXT("Load fixture ParserNumberStringFlexible"), LoadFixtureJson(TEXT("ParserNumberStringFlexible.json"), Json));
+	if (Json.IsEmpty())
+		return false;
 
 	FPenDocument Doc;
 	TestTrue(TEXT("String number parse succeeds"), FPenParser::ParseDocument(Json, Doc));
