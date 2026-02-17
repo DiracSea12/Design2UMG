@@ -69,6 +69,11 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Pencil Connection", meta = (DisplayName = "App Name (Optional)", ToolTip = "Override -app parameter. Leave empty for auto-detection (antigravity/code)."))
 	FString PencilAppName;
 
+	// ========== Font Import ==========
+
+	UPROPERTY(Config, EditAnywhere, Category = "Font Import", meta = (DisplayName = "Auto Import Fonts", ToolTip = "Automatically download and import fonts from .pen file URLs during import."))
+	bool bAutoImportFonts = false;
+
 	// ========== Icon Font ==========
 
 	/** 图标字体族名 → UE5 字体资产路径映射（如 "Material Symbols Sharp" → "/Game/Fonts/MaterialSymbolsSharp"） */

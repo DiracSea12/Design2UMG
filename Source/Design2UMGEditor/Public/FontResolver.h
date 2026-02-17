@@ -6,13 +6,22 @@
 
 struct FPenDocument;
 struct FPenNode;
+struct FPenFont;
+class UFont;
 
 struct DESIGN2UMGEDITOR_API FFontResolver
 {
 	/** Scan document for all used font families, compare with project assets, return missing list */
 	static TArray<FString> FindMissingFonts(const FPenDocument& Document);
 
+	/** Download font from URL and import as UFont asset. Returns asset path or empty on failure. */
+	static FString ResolveFont(const FString& FontName, const FString& Url);
+
+	/** Auto-import all fonts from document if bAutoImportFonts is enabled */
+	static void AutoImportFonts(const FPenDocument& Document);
+
 private:
 	static void CollectFontFamilies(const TArray<TSharedPtr<FPenNode>>& Nodes, TSet<FString>& OutFamilies);
 	static TSet<FString> ScanProjectFontAssets();
+	static bool DownloadToFile(const FString& Url, const FString& LocalPath);
 };

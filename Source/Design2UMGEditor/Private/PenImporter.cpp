@@ -26,6 +26,7 @@ bool FPenImporter::ImportFromFile(const FString& FilePath, FUMGWidgetData& OutDa
 	}
 	if (SlowTask.ShouldCancel()) return false;
 
+	FFontResolver::AutoImportFonts(Document);
 	FFontResolver::FindMissingFonts(Document);
 
 	SlowTask.EnterProgressFrame(1.0f, FText::FromString(TEXT("Converting design to widgets...")));
@@ -47,6 +48,7 @@ bool FPenImporter::ImportFromJson(const FString& JsonString, FUMGWidgetData& Out
 	}
 	if (SlowTask.ShouldCancel()) return false;
 
+	FFontResolver::AutoImportFonts(Document);
 	FFontResolver::FindMissingFonts(Document);
 
 	SlowTask.EnterProgressFrame(1.0f, FText::FromString(TEXT("Converting design to widgets...")));
