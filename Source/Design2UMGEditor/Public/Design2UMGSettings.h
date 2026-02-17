@@ -41,6 +41,11 @@ public:
 	virtual FName GetCategoryName() const override { return TEXT("Plugins"); }
 	virtual FName GetSectionName() const override { return TEXT("Pen To UMG"); }
 
+	// ========== First Run ==========
+
+	UPROPERTY(Config)
+	bool bFirstRunCompleted = false;
+
 	// ========== UMG 设计分辨率 ==========
 
 	UPROPERTY(Config, EditAnywhere, Category = "Generation Settings", meta = (DisplayName = "Design Width", ClampMin = "320", ClampMax = "7680"))

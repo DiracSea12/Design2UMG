@@ -14,6 +14,7 @@
 #include "FigmaHttpClient.h"
 #include "FigmaImageExporter.h"
 #include "Design2UMGConverter.h"
+#include "Design2UMGSettings.h"
 
 #include "WidgetBlueprint.h"
 #include "Framework/Notifications/NotificationManager.h"
@@ -27,6 +28,9 @@
 #include "DesktopPlatformModule.h"
 #include "IDesktopPlatform.h"
 #include "Widgets/Input/SEditableTextBox.h"
+#include "Widgets/Input/SSpinBox.h"
+#include "Widgets/Input/SCheckBox.h"
+#include "Widgets/Layout/SSeparator.h"
 #include "Misc/App.h"
 
 DEFINE_LOG_CATEGORY(LogDesign2UMG);
@@ -468,6 +472,62 @@ namespace
 		FSlateApplication::Get().AddWindow(Window);
 	}
 
+	void ShowWelcomeDialog(UDesign2UMGSettings* Settings)
+	{
+		if (!FSlateApplication::IsInitialized() || !Settings)
+			return;
+
+		TSharedRef<SWindow> Window = SNew(SWindow)
+			.Title(LOCTEXT("WelcomeTitle", "Welcome to Design2UMG"))
+			.ClientSize(FVector2D(420.0f, 260.0f))
+			.SupportsMinimize(false)
+			.SupportsMaximize(false);
+
+		TWeakPtr<SWindow> WeakWindow = Window;
+		TSharedPtr<SEditableTextBox> WidthBox;
+		TSharedPtr<SEditableTextBox> HeightBox;
+
+		Window->SetContent(
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight().Padding(12.0f)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("WelcomeMsg", "Configure your default import settings:"))
+				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 8.0f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 8, 0)
+				[ SNew(STextBlock).Text(LOCTEXT("DesignRes", "Design Resolution:")) ]
+				+ SHorizontalBox::Slot().FillWidth(1.0f)
+				[ SAssignNew(WidthBox, SEditableTextBox).Text(FText::AsNumber(Settings->DesignWidth)) ]
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4, 0)
+				[ SNew(STextBlock).Text(LOCTEXT("ResX", "x")) ]
+				+ SHorizontalBox::Slot().FillWidth(1.0f)
+				[ SAssignNew(HeightBox, SEditableTextBox).Text(FText::AsNumber(Settings->DesignHeight)) ]
+			]
+			+ SVerticalBox::Slot().FillHeight(1.0f)
+			+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 8.0f)
+			[
+				SNew(SButton).HAlign(HAlign_Center)
+				.Text(LOCTEXT("WelcomeOk", "Get Started"))
+				.OnClicked_Lambda([WeakWindow, Settings, WidthBox, HeightBox]()
+				{
+					Settings->DesignWidth = FCString::Atoi(*WidthBox->GetText().ToString());
+					Settings->DesignHeight = FCString::Atoi(*HeightBox->GetText().ToString());
+					Settings->bFirstRunCompleted = true;
+					Settings->SaveConfig();
+					if (auto Win = WeakWindow.Pin())
+						Win->RequestDestroyWindow();
+					return FReply::Handled();
+				})
+			]
+		);
+
+		FSlateApplication::Get().AddWindow(Window);
+	}
+
 	/** 打开文件对话框选择 .pen 文件并导入 */
 	void OpenPenFileDialog()
 	{
@@ -490,6 +550,7 @@ namespace
 			ImportPenFile(OutFiles[0], DefaultPenOutputPath);
 		}
 	}
+
 }
 
 void FDesign2UMGEditorModule::StartupModule()
@@ -733,6 +794,22 @@ void FDesign2UMGEditorModule::StartupModule()
 				ShowFigmaImportDialog();
 			})));
 	}));
+
+	// 首次使用 Welcome 引导
+	if (!FApp::IsUnattended())
+	{
+		UDesign2UMGSettings* WelcomeSettings = UDesign2UMGSettings::Get();
+		if (WelcomeSettings && !WelcomeSettings->bFirstRunCompleted && FSlateApplication::IsInitialized())
+		{
+			FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
+				[WelcomeSettings](float) -> bool
+				{
+					if (!WelcomeSettings->bFirstRunCompleted)
+						ShowWelcomeDialog(WelcomeSettings);
+					return false; // one-shot
+				}), 1.0f);
+		}
+	}
 
 }
 

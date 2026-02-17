@@ -39,13 +39,25 @@ namespace
 		if (!Override.bEnabled)
 			Target.bEnabled = false;
 		if (Override.bHasPadding)
+		{
 			Target.Padding = Override.Padding;
+			Target.bHasPadding = true;
+		}
 		if (Override.bHasGap)
+		{
 			Target.Gap = Override.Gap;
+			Target.bHasGap = true;
+		}
 		if (Override.bHasClip)
+		{
 			Target.bClip = Override.bClip;
+			Target.bHasClip = true;
+		}
 		if (Override.bHasOpacity)
+		{
 			Target.Opacity = Override.Opacity;
+			Target.bHasOpacity = true;
+		}
 		if (Override.JustifyContent != EPenJustifyContent::Start)
 			Target.JustifyContent = Override.JustifyContent;
 		if (Override.AlignItems != EPenAlignItems::Start)
@@ -128,13 +140,27 @@ namespace
 		if (RefNode->Stroke.HasStroke())
 			Expanded->Stroke = RefNode->Stroke;
 		if (RefNode->bHasPadding)
+		{
 			Expanded->Padding = RefNode->Padding;
+			Expanded->bHasPadding = true;
+		}
+		if (RefNode->bHasGap)
+		{
+			Expanded->Gap = RefNode->Gap;
+			Expanded->bHasGap = true;
+		}
 		if (RefNode->bHasClip)
+		{
 			Expanded->bClip = RefNode->bClip;
+			Expanded->bHasClip = true;
+		}
 		if (!RefNode->bEnabled)
 			Expanded->bEnabled = false;
 		if (RefNode->bHasOpacity)
+		{
 			Expanded->Opacity = RefNode->Opacity;
+			Expanded->bHasOpacity = true;
+		}
 		if (!FMath::IsNearlyZero(RefNode->Rotation))
 			Expanded->Rotation = RefNode->Rotation;
 		if (RefNode->bFlipX)
