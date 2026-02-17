@@ -2,6 +2,7 @@
 
 #include "PenFileImportFactory.h"
 #include "Design2UMGLog.h"
+#include "Design2UMGNotification.h"
 #include "PenParser.h"
 #include "PenImporter.h"
 #include "PenImportUtils.h"
@@ -52,6 +53,7 @@ UObject* UPenFileImportFactory::FactoryCreateFile(
 	if (!FPenParser::ParseFromFile(Filename, Document))
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("PenFileImport: Failed to parse %s"), *Filename);
+		FDesign2UMGNotification::Error(LOCTEXT("ParseFailed", "Design2UMG: Failed to parse .pen file"));
 		return nullptr;
 	}
 
@@ -60,6 +62,7 @@ UObject* UPenFileImportFactory::FactoryCreateFile(
 	if (Frames.Num() == 0)
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("PenFileImport: No frames found in %s"), *Filename);
+		FDesign2UMGNotification::Error(LOCTEXT("NoFrames", "Design2UMG: No frames found in file"));
 		return nullptr;
 	}
 

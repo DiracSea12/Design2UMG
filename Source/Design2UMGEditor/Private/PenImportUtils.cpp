@@ -2,6 +2,7 @@
 
 #include "PenImportUtils.h"
 #include "Design2UMGLog.h"
+#include "Design2UMGNotification.h"
 #include "PenRemoteImageImporter.h"
 #include "SDesign2UMGPreviewWindow.h"
 #include "UMGGenerator.h"
@@ -40,9 +41,13 @@ UWidgetBlueprint* PenImportUtils::GenerateBlueprint(const FUMGWidgetData& Data, 
 	if (!WBP)
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("PenImportUtils: Widget Blueprint generation failed"));
+		FDesign2UMGNotification::Error(LOCTEXT("GenFailed", "Design2UMG: Widget Blueprint generation failed"));
 		return nullptr;
 	}
 	UE_LOG(LogDesign2UMG, Log, TEXT("PenImportUtils: Generated %s"), *WBP->GetPathName());
+	FDesign2UMGNotification::Success(
+		FText::Format(LOCTEXT("GenSuccess", "Design2UMG: Generated {0}"), FText::FromString(WBP->GetName())),
+		WBP->GetPathName());
 	return WBP;
 }
 
@@ -96,7 +101,10 @@ void PenImportUtils::ResolveImages(FUMGWidgetData& Data)
 	if (!Report.IsEmpty())
 		UE_LOG(LogDesign2UMG, Log, TEXT("%s"), *Report);
 	if (!bOk)
+	{
 		UE_LOG(LogDesign2UMG, Warning, TEXT("PenImportUtils: Unresolved remote images; generation will continue"));
+		FDesign2UMGNotification::Warning(LOCTEXT("ImageWarning", "Design2UMG: Some images failed to download"));
+	}
 }
 
 void PenImportUtils::GenerateFromEditedJson(const FString& EditedJson, const FString& OutputPath)
@@ -110,6 +118,7 @@ void PenImportUtils::GenerateFromEditedJson(const FString& EditedJson, const FSt
 	if (!FUMGJsonParser::ParseJson(EditedJson, Data, &ParseError))
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("PenImportUtils: Edited JSON parse failed: %s"), *ParseError);
+		FDesign2UMGNotification::Error(LOCTEXT("EditedJsonParseFailed", "Design2UMG: Failed to parse edited design data"));
 		return;
 	}
 	if (SlowTask.ShouldCancel()) return;
