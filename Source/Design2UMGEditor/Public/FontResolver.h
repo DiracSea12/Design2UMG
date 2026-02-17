@@ -20,7 +20,14 @@ struct DESIGN2UMGEDITOR_API FFontResolver
 	/** Auto-import all fonts from document if bAutoImportFonts is enabled */
 	static void AutoImportFonts(const FPenDocument& Document);
 
+	/** Look up cached asset path for a font family name. Returns empty if not found. */
+	static FString FindFontAssetPath(const FString& FontFamily);
+
+	/** Clear the font asset path cache */
+	static void ClearCache();
+
 private:
+	static TMap<FString, FString> FontAssetCache;
 	static void CollectFontFamilies(const TArray<TSharedPtr<FPenNode>>& Nodes, TSet<FString>& OutFamilies);
 	static TSet<FString> ScanProjectFontAssets();
 	static bool DownloadToFile(const FString& Url, const FString& LocalPath);

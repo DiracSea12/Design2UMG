@@ -19,6 +19,20 @@
 
 #define LOCTEXT_NAMESPACE "FontResolver"
 
+TMap<FString, FString> FFontResolver::FontAssetCache;
+
+FString FFontResolver::FindFontAssetPath(const FString& FontFamily)
+{
+	if (const FString* Path = FontAssetCache.Find(FontFamily))
+		return *Path;
+	return FString();
+}
+
+void FFontResolver::ClearCache()
+{
+	FontAssetCache.Empty();
+}
+
 TArray<FString> FFontResolver::FindMissingFonts(const FPenDocument& Document)
 {
 	TSet<FString> UsedFamilies;
@@ -145,6 +159,7 @@ FString FFontResolver::ResolveFont(const FString& FontName, const FString& Url)
 	if (UFont* Existing = LoadObject<UFont>(nullptr, *FontObjPath))
 	{
 		UE_LOG(LogDesign2UMG, Log, TEXT("Font '%s' already exists: %s"), *FontName, *FontObjPath);
+		FontAssetCache.Add(FontName, FontObjPath);
 		return FontObjPath;
 	}
 
@@ -215,6 +230,7 @@ FString FFontResolver::ResolveFont(const FString& FontName, const FString& Url)
 	UPackage::SavePackage(FontPkg, Font, *FontFile, SaveArgs);
 
 	UE_LOG(LogDesign2UMG, Log, TEXT("Imported font '%s' → %s"), *FontName, *FontObjPath);
+	FontAssetCache.Add(FontName, FontObjPath);
 	return FontObjPath;
 }
 

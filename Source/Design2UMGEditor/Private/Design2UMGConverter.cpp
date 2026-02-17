@@ -4,6 +4,7 @@
 #include "PenTypeMapper.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
+#include "FontResolver.h"
 #include "PenLayoutMapper.h"
 #include "PenVisualMapper.h"
 #include "PenRefExpander.h"
@@ -597,7 +598,10 @@ void FDesign2UMGConverter::ApplyTextProperties(FUMGWidgetNode& Widget, const TSh
 	}
 
 	if (!Node->FontFamily.IsEmpty())
-		Widget.Properties.Add(TEXT("FontFamily"), Node->FontFamily);
+	{
+		FString AssetPath = FFontResolver::FindFontAssetPath(Node->FontFamily);
+		Widget.Properties.Add(TEXT("FontFamily"), AssetPath.IsEmpty() ? Node->FontFamily : AssetPath);
+	}
 
 	if (!Node->FontWeight.IsEmpty())
 		Widget.Properties.Add(TEXT("TypefaceFontName"), FPenTypeMapper::MapFontWeight(Node->FontWeight).ToString());
