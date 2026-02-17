@@ -178,3 +178,15 @@
 | Stroke alignment | UMG 始终居中对齐 |
 | Icon font weight | 存储但未应用到 UMG |
 | Line dash patterns | 不支持 |
+
+## Container Wrapping Strategy
+
+转换过程中，节点可能被额外的容器包裹以实现特定效果：
+
+| 条件 | 包裹控件 | 用途 |
+|------|---------|------|
+| 有填充/内边距/圆角/描边 | Border | 合并视觉属性 |
+| 多层填充 (Fills > 1) | Overlay | 自底向上叠加填充层 |
+| 有阴影效果 | Overlay + Image | 阴影层渲染在内容下方 |
+| 有背景模糊效果 | BackgroundBlur | 模糊背景 |
+| 需要固定/最小尺寸 | SizeBox | 强制尺寸约束 |
