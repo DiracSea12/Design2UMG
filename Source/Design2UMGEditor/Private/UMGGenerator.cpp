@@ -73,6 +73,8 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 	if (!WBP || !WBP->WidgetTree)
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create Widget Blueprint"));
+		Package->ClearDirtyFlag();
+		Package->SetFlags(RF_Transient);
 		return nullptr;
 	}
 
@@ -132,6 +134,8 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 	if (!Root)
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create root widget for '%s'"), *WidgetData.WidgetName);
+		Package->ClearDirtyFlag();
+		Package->SetFlags(RF_Transient);
 		return nullptr;
 	}
 	WBP->WidgetTree->RootWidget = Root;
