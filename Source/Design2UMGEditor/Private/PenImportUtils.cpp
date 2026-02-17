@@ -42,6 +42,7 @@ UWidgetBlueprint* PenImportUtils::GenerateBlueprint(const FUMGWidgetData& Data, 
 {
 	const double StartTime = FPlatformTime::Seconds();
 	const FString FinalPath = ResolveOutputPath(OutputPath);
+	FUMGWidgetData EffectiveData = Data;
 
 	// Incremental update: check for existing BP
 	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
@@ -63,15 +64,13 @@ UWidgetBlueprint* PenImportUtils::GenerateBlueprint(const FUMGWidgetData& Data, 
 						UE_LOG(LogDesign2UMG, Log, TEXT("PenImportUtils: Incremental update cancelled"));
 						return nullptr;
 					}
-					// Filter and regenerate with accepted changes only
-					FUMGWidgetData FilteredData = Data;
-					FilteredData.RootWidget = FIncrementalUpdater::FilterByAccepted(Data.RootWidget, Diff);
+					EffectiveData.RootWidget = FIncrementalUpdater::FilterByAccepted(Data.RootWidget, Diff);
 				}
 			}
 		}
 	}
 
-	UWidgetBlueprint* WBP = FUMGGenerator::GenerateWidgetBlueprint(Data, FinalPath);
+	UWidgetBlueprint* WBP = FUMGGenerator::GenerateWidgetBlueprint(EffectiveData, FinalPath);
 	if (!WBP)
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("PenImportUtils: Widget Blueprint generation failed"));
