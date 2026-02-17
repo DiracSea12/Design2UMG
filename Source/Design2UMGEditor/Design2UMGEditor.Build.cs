@@ -39,6 +39,7 @@ public class Design2UMGEditor : ModuleRules
 			"DesktopPlatform",
 			"Sockets",
 			"Networking",
+			"ContentBrowser",
 		});
 	}
 }
