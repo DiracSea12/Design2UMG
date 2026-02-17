@@ -10,25 +10,30 @@
 | Frame | HorizontalBox | Layout == Horizontal |
 | Frame | CanvasPanel | Layout == None |
 | Rectangle | Border | |
-| Ellipse | Border | ⚠️ 降级为矩形 |
+| Ellipse | Image (SVG) / Border | 有尺寸+纯色填充+无描边 → SVG 光栅化；否则 → 圆角 Border |
 | Polygon | Border | ⚠️ 降级为矩形 |
-| Path | Image | ✅ SVG 路径光栅化 |
+| Path | Image | ✅ SVG 路径光栅化（有 geometry+颜色时）；Image fill → 直接纹理 |
 | Text | TextBlock | |
-| IconFont | TextBlock | |
-| Line | Image | |
+| IconFont | TextBlock | 连字文本渲染图标 |
+| Line | Border | ⚠️ 降级为矩形 |
 | Group | CanvasPanel | |
+| Ref | (展开为引用节点) | 组件实例展开，支持主题覆盖 |
 
 ## Text Properties
 
 | .pen | UMG TextBlock | Notes |
 |------|--------------|-------|
-| Content | Text | FText::FromString |
-| FontSize | Font.Size | DisplaySize × FontDPI / RenderDPI |
-| FontFamily | Font.FontObject / TypefaceFontName | 资产路径 → LoadObject; 名称 → FName |
+| Content | Text | 纯文本字符串 |
+| FontSize | Font.Size | 像素大小 |
+| FontFamily | Font.FontObject | 通过 FFontResolver 解析为资产路径 → LoadObject |
 | FontWeight | Font.TypefaceFontName | 见下方权重映射表 |
-| LetterSpacing | Font.LetterSpacing | tracking = pixelSpacing / fontSize × 1000 |
-| TextAlign | Justification | Left / Center / Right / Justify |
-| TextAlignVertical | VerticalAlignment | Top / Middle / Bottom |
+| LetterSpacing | Font.LetterSpacing | 像素间距 |
+| LineHeight | LineHeightPercentage | 百分比乘数 |
+| TextAlign | Justification | Left / Center / Right |
+| TextAlignVertical | TextAlignVertical | Top / Center / Bottom |
+| TextGrowth (Auto) | (默认) | 不换行 |
+| TextGrowth (FixedWidth) | AutoWrapText=true | 固定宽度换行 |
+| TextGrowth (FixedWidthHeight) | AutoWrapText=true + Clipping=ClipToBounds | 换行+裁剪溢出 |
 | Color (from Fill) | ColorAndOpacity | FSlateColor |
 
 ### Font Weight Mapping
@@ -114,9 +119,15 @@
 |------|-----|-------|
 | Opacity | RenderOpacity | 与图片 opacity 合并（乘积） |
 | Rotation | RenderAngle | 旋转角度 |
-| CornerRadius | Brush.OutlineSettings | 支持单值或四角独立 |
+| FlipX | RenderTransformScale.X = -1 | 水平翻转 |
+| FlipY | RenderTransformScale.Y = -1 | 垂直翻转 |
+| Clipping | Clipping=ClipToBounds | 裁剪子元素 |
+| CornerRadius (Uniform) | Brush.DrawAs=RoundedBox + OutlineCornerRadius | 超过半尺寸时钳制为药丸形 |
+| CornerRadius (Per-corner) | Brush.CornerRadii | "TL,TR,BR,BL" 四角独立 |
 | Stroke.Color | Brush.OutlineColor | |
-| Stroke.Thickness | Brush.OutlineThickness | |
+| Stroke.Thickness (Uniform) | Brush.OutlineThickness | 单值 |
+| Stroke.Thickness (Per-side) | Brush.OutlineThickness | ⚠️ 取四边最大值（UMG 限制） |
+| Stroke.Align | — | ❌ UMG 始终居中对齐 |
 
 ## Effects
 
@@ -145,13 +156,25 @@
 | Center | VAlign_Center |
 | End | VAlign_Bottom |
 
+## Icon Font Properties
+
+| .pen | UMG TextBlock | Notes |
+|------|--------------|-------|
+| IconFontName | Text (连字文本) | 如 "dashboard" 在 Material Symbols 中渲染为图标 |
+| IconFontFamily | FontFamily | 通过 Settings.IconFontAssetMap 解析为资产路径 |
+| FontSize | FontSize | 图标像素大小 |
+| Fill (Color) | Color | 图标颜色 |
+
 ## Unsupported Properties
 
 | Property | Reason |
 |----------|--------|
-| Blur effect | 需要自定义 Material 实现 |
-| Multi-stop gradient | 仅支持双色渐变 |
-| Complex polygon shapes | 降级为矩形 Border |
-| Ellipse arc (StartAngle/SweepAngle) | 降级为矩形 |
+| Blur effect (前景) | UMG 无前景模糊控件 |
+| Multi-stop gradient | 仅支持双色渐变（ColorStart/ColorEnd） |
+| Gradient Angular | ⚠️ 部分支持：降级为径向渐变 |
+| Polygon shapes | 降级为 Border（UMG 无多边形控件） |
+| Line shapes | 降级为 Border（UMG 无线条控件） |
+| Stroke per-side thickness | ⚠️ 部分支持：取四边最大值 |
+| Stroke alignment | UMG 始终居中对齐 |
+| Icon font weight | 存储但未应用到 UMG |
 | Line dash patterns | 不支持 |
-| FlipX / FlipY | RenderTransformScale = -1 | ✅ 通过缩放实现 |
