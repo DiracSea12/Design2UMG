@@ -212,7 +212,18 @@ namespace
 FUMGWidgetData FDesign2UMGConverter::Convert(const FPenDocument& Document)
 {
 	FUMGWidgetData Result;
-	Result.WidgetName = TEXT("WBP_FromPen");
+
+	// WidgetName 使用第一个非跳过 frame 的名称，fallback 到 WBP_FromPen
+	for (const auto& Child : Document.Children)
+	{
+		if (!ShouldSkipNode(Child) && !Child->Name.IsEmpty())
+		{
+			Result.WidgetName = FString::Printf(TEXT("WBP_%s"), *Child->Name);
+			break;
+		}
+	}
+	if (Result.WidgetName.IsEmpty())
+		Result.WidgetName = TEXT("WBP_FromPen");
 
 	// 预计算 FitContent 节点的实际尺寸（从子节点递归推算）
 	for (const auto& Child : Document.Children)
