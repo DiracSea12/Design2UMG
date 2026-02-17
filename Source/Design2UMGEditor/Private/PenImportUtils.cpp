@@ -17,6 +17,7 @@
 #include "Widgets/SWindow.h"
 #include "Widgets/Views/SListView.h"
 #include "Widgets/Text/STextBlock.h"
+#include "Misc/ScopedSlowTask.h"
 
 #define LOCTEXT_NAMESPACE "PenImportUtils"
 
@@ -100,6 +101,10 @@ void PenImportUtils::ResolveImages(FUMGWidgetData& Data)
 
 void PenImportUtils::GenerateFromEditedJson(const FString& EditedJson, const FString& OutputPath)
 {
+	FScopedSlowTask SlowTask(3.0f, NSLOCTEXT("PenImportUtils", "Generating", "Generating Widget Blueprint..."));
+	SlowTask.MakeDialog(true);
+
+	SlowTask.EnterProgressFrame(1.0f, NSLOCTEXT("PenImportUtils", "GenParse", "Parsing edited design..."));
 	FUMGWidgetData Data;
 	FString ParseError;
 	if (!FUMGJsonParser::ParseJson(EditedJson, Data, &ParseError))
@@ -107,8 +112,13 @@ void PenImportUtils::GenerateFromEditedJson(const FString& EditedJson, const FSt
 		UE_LOG(LogDesign2UMG, Error, TEXT("PenImportUtils: Edited JSON parse failed: %s"), *ParseError);
 		return;
 	}
+	if (SlowTask.ShouldCancel()) return;
 
+	SlowTask.EnterProgressFrame(1.0f, NSLOCTEXT("PenImportUtils", "GenImages", "Downloading remote images..."));
 	ResolveImages(Data);
+	if (SlowTask.ShouldCancel()) return;
+
+	SlowTask.EnterProgressFrame(1.0f, NSLOCTEXT("PenImportUtils", "GenBP", "Generating Widget Blueprint..."));
 	GenerateBlueprint(Data, OutputPath);
 }
 

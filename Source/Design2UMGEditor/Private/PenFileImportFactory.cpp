@@ -10,6 +10,7 @@
 #include "WidgetBlueprint.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopedSlowTask.h"
 
 #define LOCTEXT_NAMESPACE "PenFileImportFactory"
 
@@ -96,6 +97,10 @@ namespace
 
 UWidgetBlueprint* ImportSingleFrame(const FString& FilePath, const FString& OutputPath)
 {
+	FScopedSlowTask SlowTask(5.0f, LOCTEXT("ImportingPen", "Importing .pen file..."));
+	SlowTask.MakeDialog(true);
+
+	SlowTask.EnterProgressFrame(1.0f, LOCTEXT("Step1_Parse", "Parsing design file..."));
 	FUMGWidgetData Data;
 	FString JsonStr;
 	if (!FFileHelper::LoadFileToString(JsonStr, *FilePath))
@@ -103,34 +108,51 @@ UWidgetBlueprint* ImportSingleFrame(const FString& FilePath, const FString& Outp
 		UE_LOG(LogDesign2UMG, Error, TEXT("PenFileImport: Failed to read file: %s"), *FilePath);
 		return nullptr;
 	}
+	if (SlowTask.ShouldCancel()) return nullptr;
+
+	SlowTask.EnterProgressFrame(1.0f, LOCTEXT("Step2_Convert", "Converting design to widgets..."));
 	if (!FDesignSourceRegistry::Convert(TEXT("Pen"), JsonStr, Data))
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("PenFileImport: Convert failed: %s"), *FilePath);
 		return nullptr;
 	}
+	if (SlowTask.ShouldCancel()) return nullptr;
 
+	SlowTask.EnterProgressFrame(1.0f, LOCTEXT("Step3_Images", "Downloading remote images..."));
 	PenImportUtils::ResolveImages(Data);
+	if (SlowTask.ShouldCancel()) return nullptr;
 
+	SlowTask.EnterProgressFrame(1.0f, LOCTEXT("Step4_Preview", "Preparing preview..."));
 	if (PenImportUtils::OpenPreviewWindow(Data, OutputPath,
 		LOCTEXT("PenImportPreviewTitle", "Design2UMG Import Preview")))
 	{
 		return nullptr;
 	}
 
+	SlowTask.EnterProgressFrame(1.0f, LOCTEXT("Step5_Generate", "Generating Widget Blueprint..."));
 	return PenImportUtils::GenerateBlueprint(Data, OutputPath);
 }
 
 void ImportWithTargetNode(const FString& FilePath, const FString& TargetNodeId, const FString& OutputPath)
 {
+	FScopedSlowTask SlowTask(4.0f, LOCTEXT("ImportingPenNode", "Importing .pen frame..."));
+	SlowTask.MakeDialog(true);
+
+	SlowTask.EnterProgressFrame(1.0f, LOCTEXT("Step1_ParseNode", "Parsing design file..."));
 	FUMGWidgetData Data;
 	if (!FPenImporter::ImportFileWithTargetNode(FilePath, TargetNodeId, Data))
 		return;
+	if (SlowTask.ShouldCancel()) return;
 
+	SlowTask.EnterProgressFrame(1.0f, LOCTEXT("Step2_ImagesNode", "Downloading remote images..."));
 	PenImportUtils::ResolveImages(Data);
+	if (SlowTask.ShouldCancel()) return;
 
+	SlowTask.EnterProgressFrame(1.0f, LOCTEXT("Step3_PreviewNode", "Preparing preview..."));
 	if (!PenImportUtils::OpenPreviewWindow(Data, OutputPath,
 		LOCTEXT("PenImportPreviewTitle", "Design2UMG Import Preview")))
 	{
+		SlowTask.EnterProgressFrame(1.0f, LOCTEXT("Step4_GenerateNode", "Generating Widget Blueprint..."));
 		PenImportUtils::GenerateBlueprint(Data, OutputPath);
 	}
 }
