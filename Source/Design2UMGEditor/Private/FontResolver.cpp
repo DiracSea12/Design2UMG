@@ -25,6 +25,30 @@ FString FFontResolver::FindFontAssetPath(const FString& FontFamily)
 {
 	if (const FString* Path = FontAssetCache.Find(FontFamily))
 		return *Path;
+
+	// Scan project fonts and try to match
+	FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+	IAssetRegistry& AR = ARM.Get();
+
+	TArray<FAssetData> FontAssets;
+	AR.GetAssetsByClass(UFont::StaticClass()->GetClassPathName(), FontAssets, true);
+
+	// Sanitized name for comparison (spaces → underscores)
+	FString SafeFamily = FontFamily;
+	SafeFamily.ReplaceInline(TEXT(" "), TEXT("_"));
+
+	for (const FAssetData& Asset : FontAssets)
+	{
+		FString AssetName = Asset.AssetName.ToString();
+		if (AssetName.Equals(FontFamily, ESearchCase::IgnoreCase)
+			|| AssetName.Equals(SafeFamily, ESearchCase::IgnoreCase))
+		{
+			FString ObjPath = Asset.GetObjectPathString();
+			FontAssetCache.Add(FontFamily, ObjPath);
+			return ObjPath;
+		}
+	}
+
 	return FString();
 }
 
