@@ -12,7 +12,7 @@
 | Rectangle | Border | |
 | Ellipse | Border | ⚠️ 降级为矩形 |
 | Polygon | Border | ⚠️ 降级为矩形 |
-| Path | Border | ⚠️ 降级为矩形 |
+| Path | Image | ✅ SVG 路径光栅化 |
 | Text | TextBlock | |
 | IconFont | TextBlock | |
 | Line | Image | |
@@ -153,6 +153,5 @@
 | Multi-stop gradient | 仅支持双色渐变 |
 | Complex polygon shapes | 降级为矩形 Border |
 | Ellipse arc (StartAngle/SweepAngle) | 降级为矩形 |
-| Path geometry | 降级为矩形 |
 | Line dash patterns | 不支持 |
-| FlipX / FlipY | 不支持 |
+| FlipX / FlipY | RenderTransformScale = -1 | ✅ 通过缩放实现 |
