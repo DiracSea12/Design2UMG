@@ -2,6 +2,7 @@
 
 #include "PenImporter.h"
 #include "Design2UMGLog.h"
+#include "FontResolver.h"
 #include "PenParser.h"
 #include "Design2UMGConverter.h"
 #include "PenMCPBridge.h"
@@ -25,6 +26,8 @@ bool FPenImporter::ImportFromFile(const FString& FilePath, FUMGWidgetData& OutDa
 	}
 	if (SlowTask.ShouldCancel()) return false;
 
+	FFontResolver::FindMissingFonts(Document);
+
 	SlowTask.EnterProgressFrame(1.0f, FText::FromString(TEXT("Converting design to widgets...")));
 	OutData = FDesign2UMGConverter::Convert(Document);
 	return true;
@@ -43,6 +46,8 @@ bool FPenImporter::ImportFromJson(const FString& JsonString, FUMGWidgetData& Out
 		return false;
 	}
 	if (SlowTask.ShouldCancel()) return false;
+
+	FFontResolver::FindMissingFonts(Document);
 
 	SlowTask.EnterProgressFrame(1.0f, FText::FromString(TEXT("Converting design to widgets...")));
 	OutData = FDesign2UMGConverter::Convert(Document);
