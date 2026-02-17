@@ -91,7 +91,8 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 	FUMGWidgetUtils::EffectiveDesignSize = DesignSize;
 	FUMGWidgetUtils::ApplyFixer(FixedRoot, DesignSize);
 
-	// Dump widget tree for debugging
+	// Dump widget tree only in verbose mode.
+	if (UE_LOG_ACTIVE(LogDesign2UMG, Verbose))
 	{
 		TFunction<void(const FUMGWidgetNode&, int32)> DumpNode = [&](const FUMGWidgetNode& Node, int32 Depth)
 		{
@@ -113,7 +114,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 				PropsInfo += FString::Printf(TEXT(" %s=%s"), *P.Key, *P.Value.Left(40));
 			}
 
-			UE_LOG(LogDesign2UMG, Log, TEXT("TREE: %s[%s] '%s' bounds=(%.1f,%.1f,%.1f,%.1f) %s%s"),
+			UE_LOG(LogDesign2UMG, Verbose, TEXT("TREE: %s[%s] '%s' bounds=(%.1f,%.1f,%.1f,%.1f) %s%s"),
 				*Indent, *Node.Type, *Node.Name,
 				Node.Bounds.X, Node.Bounds.Y, Node.Bounds.W, Node.Bounds.H,
 				*SlotInfo, *PropsInfo);
@@ -121,9 +122,9 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 			for (const auto& Child : Node.Children)
 				DumpNode(Child, Depth + 1);
 		};
-		UE_LOG(LogDesign2UMG, Log, TEXT("=== Widget Tree Dump (after Fixer) ==="));
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("=== Widget Tree Dump (after Fixer) ==="));
 		DumpNode(FixedRoot, 0);
-		UE_LOG(LogDesign2UMG, Log, TEXT("=== End Widget Tree Dump ==="));
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("=== End Widget Tree Dump ==="));
 	}
 
 	// 使用统一的 Widget 创建函数

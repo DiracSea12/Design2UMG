@@ -10,6 +10,32 @@
 
 namespace
 {
+	constexpr int32 MaxTreeRecursionDepth = 512;
+
+	thread_local int32 GConvertNodeDepth = 0;
+	thread_local int32 GPrecomputeDepth = 0;
+	thread_local int32 GEstimateDepth = 0;
+
+	struct FRecursionGuard
+	{
+		explicit FRecursionGuard(int32& InDepth)
+			: Depth(InDepth)
+			, bValid(InDepth < MaxTreeRecursionDepth)
+		{
+			if (bValid)
+				++Depth;
+		}
+
+		~FRecursionGuard()
+		{
+			if (bValid)
+				--Depth;
+		}
+
+		int32& Depth;
+		bool bValid = false;
+	};
+
 	const TCHAR* ToSizeModeLogString(EPenSizeMode Mode)
 	{
 		switch (Mode)
@@ -77,6 +103,18 @@ namespace
 
 	FVector2D EstimateNodeSize(const TSharedPtr<FPenNode>& Node)
 	{
+		FRecursionGuard Guard(GEstimateDepth);
+		if (!Guard.bValid)
+		{
+			static bool bLogged = false;
+			if (!bLogged)
+			{
+				UE_LOG(LogDesign2UMG, Error, TEXT("EstimateNodeSize: recursion depth exceeded (%d)"), MaxTreeRecursionDepth);
+				bLogged = true;
+			}
+			return FVector2D::ZeroVector;
+		}
+
 		float W = Node->Width.Value;
 		float H = Node->Height.Value;
 
@@ -116,6 +154,18 @@ namespace
 	 */
 	FVector2D EstimateContentSize(const TSharedPtr<FPenNode>& Node)
 	{
+		FRecursionGuard Guard(GEstimateDepth);
+		if (!Guard.bValid)
+		{
+			static bool bLogged = false;
+			if (!bLogged)
+			{
+				UE_LOG(LogDesign2UMG, Error, TEXT("EstimateContentSize: recursion depth exceeded (%d)"), MaxTreeRecursionDepth);
+				bLogged = true;
+			}
+			return FVector2D::ZeroVector;
+		}
+
 		float W = 0.0f, H = 0.0f;
 		const float PadH = Node->Padding.Left + Node->Padding.Right;
 		const float PadV = Node->Padding.Top + Node->Padding.Bottom;
@@ -212,6 +262,18 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FPenDocument& Document)
 
 FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Node, const FPenDocument& Doc, const TMap<FString, FString>& ThemeContext, TArray<FString>* OutWarnings, EPenLayout ParentLayout)
 {
+	FRecursionGuard Guard(GConvertNodeDepth);
+	if (!Guard.bValid)
+	{
+		static bool bLogged = false;
+		if (!bLogged)
+		{
+			UE_LOG(LogDesign2UMG, Error, TEXT("ConvertNode: recursion depth exceeded (%d)"), MaxTreeRecursionDepth);
+			bLogged = true;
+		}
+		return FUMGWidgetNode();
+	}
+
 	if (ShouldSkipNode(Node))
 		return FUMGWidgetNode();
 
@@ -711,6 +773,18 @@ FUMGWidgetNode FDesign2UMGConverter::CreatePathWidget(const TSharedPtr<FPenNode>
 
 FVector2D FDesign2UMGConverter::PreComputeFitContentSizes(const TSharedPtr<FPenNode>& Node, const FPenDocument& Doc)
 {
+	FRecursionGuard Guard(GPrecomputeDepth);
+	if (!Guard.bValid)
+	{
+		static bool bLogged = false;
+		if (!bLogged)
+		{
+			UE_LOG(LogDesign2UMG, Error, TEXT("PreComputeFitContentSizes: recursion depth exceeded (%d)"), MaxTreeRecursionDepth);
+			bLogged = true;
+		}
+		return FVector2D::ZeroVector;
+	}
+
 	if (!Node.IsValid() || !Node->bEnabled)
 	{
 		return FVector2D(0.0, 0.0);

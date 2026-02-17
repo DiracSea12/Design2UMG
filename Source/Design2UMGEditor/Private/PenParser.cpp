@@ -100,7 +100,17 @@ bool FPenParser::ParseDocument(const FString& JsonString, FPenDocument& OutDocum
 
 bool FPenParser::ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FPenDocument& OutDocument)
 {
-	OutDocument.Version = JsonObj->GetStringField(TEXT("version"));
+	if (!JsonObj.IsValid())
+	{
+		UE_LOG(LogDesign2UMG, Error, TEXT("PenParser: Invalid root json object"));
+		return false;
+	}
+
+	if (!JsonObj->TryGetStringField(TEXT("version"), OutDocument.Version) || OutDocument.Version.IsEmpty())
+	{
+		OutDocument.Version = TEXT("1.0");
+		UE_LOG(LogDesign2UMG, Warning, TEXT("PenParser: missing 'version', fallback to %s"), *OutDocument.Version);
+	}
 
 	// 解析字体
 	if (JsonObj->HasField(TEXT("fonts")))
