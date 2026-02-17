@@ -18,12 +18,19 @@ namespace
 
 	struct FRecursionGuard
 	{
-		explicit FRecursionGuard(int32& InDepth)
+		explicit FRecursionGuard(int32& InDepth, const TCHAR* InName = TEXT(""))
 			: Depth(InDepth)
 			, bValid(InDepth < MaxTreeRecursionDepth)
 		{
 			if (bValid)
+			{
 				++Depth;
+			}
+			else
+			{
+				UE_LOG(LogDesign2UMG, Verbose, TEXT("%s: recursion depth exceeded (%d)"), InName, MaxTreeRecursionDepth);
+				UE_LOG(LogDesign2UMG, Error, TEXT("设计文件节点嵌套层级过深（超过 %d 层），可能存在循环引用。"), MaxTreeRecursionDepth);
+			}
 		}
 
 		~FRecursionGuard()
@@ -103,17 +110,9 @@ namespace
 
 	FVector2D EstimateNodeSize(const TSharedPtr<FPenNode>& Node)
 	{
-		FRecursionGuard Guard(GEstimateDepth);
+		FRecursionGuard Guard(GEstimateDepth, TEXT("EstimateNodeSize"));
 		if (!Guard.bValid)
-		{
-			static bool bLogged = false;
-			if (!bLogged)
-			{
-				UE_LOG(LogDesign2UMG, Error, TEXT("EstimateNodeSize: recursion depth exceeded (%d)"), MaxTreeRecursionDepth);
-				bLogged = true;
-			}
 			return FVector2D::ZeroVector;
-		}
 
 		float W = Node->Width.Value;
 		float H = Node->Height.Value;
@@ -154,17 +153,9 @@ namespace
 	 */
 	FVector2D EstimateContentSize(const TSharedPtr<FPenNode>& Node)
 	{
-		FRecursionGuard Guard(GEstimateDepth);
+		FRecursionGuard Guard(GEstimateDepth, TEXT("EstimateContentSize"));
 		if (!Guard.bValid)
-		{
-			static bool bLogged = false;
-			if (!bLogged)
-			{
-				UE_LOG(LogDesign2UMG, Error, TEXT("EstimateContentSize: recursion depth exceeded (%d)"), MaxTreeRecursionDepth);
-				bLogged = true;
-			}
 			return FVector2D::ZeroVector;
-		}
 
 		float W = 0.0f, H = 0.0f;
 		const float PadH = Node->Padding.Left + Node->Padding.Right;
@@ -262,17 +253,9 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FPenDocument& Document)
 
 FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Node, const FPenDocument& Doc, const TMap<FString, FString>& ThemeContext, TArray<FString>* OutWarnings, EPenLayout ParentLayout)
 {
-	FRecursionGuard Guard(GConvertNodeDepth);
+	FRecursionGuard Guard(GConvertNodeDepth, TEXT("ConvertNode"));
 	if (!Guard.bValid)
-	{
-		static bool bLogged = false;
-		if (!bLogged)
-		{
-			UE_LOG(LogDesign2UMG, Error, TEXT("ConvertNode: recursion depth exceeded (%d)"), MaxTreeRecursionDepth);
-			bLogged = true;
-		}
 		return FUMGWidgetNode();
-	}
 
 	if (ShouldSkipNode(Node))
 		return FUMGWidgetNode();
@@ -344,7 +327,8 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 		break;
 	case EPenNodeType::Polygon:
 		Widget = CreateContainerWidget(Node);
-		UE_LOG(LogDesign2UMG, Warning, TEXT("Design2UMG: Polygon '%s' mapped to Border (UMG has no polygon widget)"), *Node->Name);
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("Design2UMG: Polygon '%s' mapped to Border (UMG has no polygon widget)"), *Node->Name);
+		UE_LOG(LogDesign2UMG, Warning, TEXT("多边形 '%s' 已转换为 Border（UMG 不支持多边形控件）"), *Node->Name);
 		if (OutWarnings)
 			OutWarnings->Add(FString::Printf(TEXT("Polygon '%s' → Border (UMG 无多边形控件)"), *Node->Name));
 		break;
@@ -353,7 +337,8 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 		break;
 	case EPenNodeType::Line:
 		Widget = CreateContainerWidget(Node);
-		UE_LOG(LogDesign2UMG, Warning, TEXT("Design2UMG: Line '%s' mapped to Border (UMG has no line widget)"), *Node->Name);
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("Design2UMG: Line '%s' mapped to Border (UMG has no line widget)"), *Node->Name);
+		UE_LOG(LogDesign2UMG, Warning, TEXT("线条 '%s' 已转换为 Border（UMG 不支持线条控件）"), *Node->Name);
 		if (OutWarnings)
 			OutWarnings->Add(FString::Printf(TEXT("Line '%s' → Border (UMG 无线条控件)"), *Node->Name));
 		break;
@@ -693,9 +678,11 @@ FUMGWidgetNode FDesign2UMGConverter::CreateIconFontWidget(const TSharedPtr<FPenN
 		static TSet<FString> WarnedFamilies;
 		if (!WarnedFamilies.Contains(Node->IconFontFamily))
 		{
+			UE_LOG(LogDesign2UMG, Verbose,
+				TEXT("IconFont '%s': font family '%s' has no asset mapping"),
+				*Node->IconFontName, *Node->IconFontFamily);
 			UE_LOG(LogDesign2UMG, Warning,
-				TEXT("IconFont '%s': font family '%s' has no asset mapping. "
-					 "Configure mapping or Default Icon Font Asset Path in Editor Preferences > Plugins > Pen To UMG"),
+				TEXT("图标字体 '%s' (字体族 '%s') 未配置资产映射。请在 编辑器偏好设置 > 插件 > Pen To UMG 中配置。"),
 				*Node->IconFontName, *Node->IconFontFamily);
 			WarnedFamilies.Add(Node->IconFontFamily);
 		}
@@ -773,17 +760,9 @@ FUMGWidgetNode FDesign2UMGConverter::CreatePathWidget(const TSharedPtr<FPenNode>
 
 FVector2D FDesign2UMGConverter::PreComputeFitContentSizes(const TSharedPtr<FPenNode>& Node, const FPenDocument& Doc)
 {
-	FRecursionGuard Guard(GPrecomputeDepth);
+	FRecursionGuard Guard(GPrecomputeDepth, TEXT("PreComputeFitContentSizes"));
 	if (!Guard.bValid)
-	{
-		static bool bLogged = false;
-		if (!bLogged)
-		{
-			UE_LOG(LogDesign2UMG, Error, TEXT("PreComputeFitContentSizes: recursion depth exceeded (%d)"), MaxTreeRecursionDepth);
-			bLogged = true;
-		}
 		return FVector2D::ZeroVector;
-	}
 
 	if (!Node.IsValid() || !Node->bEnabled)
 	{

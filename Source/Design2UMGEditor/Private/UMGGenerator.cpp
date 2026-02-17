@@ -46,19 +46,22 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 
 		if (Suffix > MaxAttempts && AR.GetAssetByObjectPath(FSoftObjectPath(TestPath)).IsValid())
 		{
-			UE_LOG(LogDesign2UMG, Error, TEXT("Failed to find unique name for asset '%s'"), *WidgetData.WidgetName);
+			UE_LOG(LogDesign2UMG, Verbose, TEXT("Failed to find unique name for asset '%s'"), *WidgetData.WidgetName);
+			UE_LOG(LogDesign2UMG, Error, TEXT("无法为资产 '%s' 生成唯一名称。请清理输出目录后重试。"), *WidgetData.WidgetName);
 			return nullptr;
 		}
 
 		AssetName = NewName;
 		FullPath = PackagePath / AssetName;
-		UE_LOG(LogDesign2UMG, Warning, TEXT("Asset renamed to %s"), *AssetName);
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("Asset renamed to %s"), *AssetName);
+		UE_LOG(LogDesign2UMG, Warning, TEXT("输出路径已存在同名资产，自动重命名为 %s"), *AssetName);
 	}
 
 	UPackage* Package = CreatePackage(*FullPath);
 	if (!Package)
 	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create package at %s"), *FullPath);
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("Failed to create package at %s"), *FullPath);
+		UE_LOG(LogDesign2UMG, Error, TEXT("无法创建资产包。请检查输出路径是否有效: %s"), *FullPath);
 		return nullptr;
 	}
 
@@ -72,7 +75,8 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 
 	if (!WBP || !WBP->WidgetTree)
 	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create Widget Blueprint"));
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("Failed to create Widget Blueprint"));
+		UE_LOG(LogDesign2UMG, Error, TEXT("无法创建 Widget Blueprint。请检查引擎版本兼容性。"));
 		Package->ClearDirtyFlag();
 		Package->SetFlags(RF_Transient);
 		return nullptr;
@@ -133,7 +137,8 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 	UWidget* Root = FUMGWidgetUtils::CreateWidgetRecursive(WBP->WidgetTree, FixedRoot);
 	if (!Root)
 	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create root widget for '%s'"), *WidgetData.WidgetName);
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("Failed to create root widget for '%s'"), *WidgetData.WidgetName);
+		UE_LOG(LogDesign2UMG, Error, TEXT("无法创建根控件 '%s'。设计文件可能包含不支持的节点类型。"), *WidgetData.WidgetName);
 		Package->ClearDirtyFlag();
 		Package->SetFlags(RF_Transient);
 		return nullptr;

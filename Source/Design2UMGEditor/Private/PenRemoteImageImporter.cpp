@@ -425,7 +425,8 @@ bool FPenRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, FSt
 
 	if (Context.FailedCount > 0)
 	{
-		UE_LOG(LogDesign2UMG, Warning, TEXT("Remote image import finished with failures (%d)"), Context.FailedCount);
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("Remote image import finished with failures (%d)"), Context.FailedCount);
+		UE_LOG(LogDesign2UMG, Warning, TEXT("%d 张图片下载失败，生成将继续但部分图片可能缺失。"), Context.FailedCount);
 		return false;
 	}
 
@@ -492,7 +493,8 @@ void FPenRemoteImageImporter::ResolveTransientTextures(const FUMGWidgetNode& Roo
 		FString Error;
 		if (!DownloadUrl(NormalizeUrl(Url), Timeout, CompressedData, Error))
 		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("Transient download failed: %s (%s)"), *Url, *Error);
+			UE_LOG(LogDesign2UMG, Verbose, TEXT("Transient download failed: %s (%s)"), *Url, *Error);
+			UE_LOG(LogDesign2UMG, Warning, TEXT("图片下载失败: %s (原因: %s)"), *Url, *Error);
 			continue;
 		}
 
@@ -500,7 +502,8 @@ void FPenRemoteImageImporter::ResolveTransientTextures(const FUMGWidgetNode& Roo
 		TArray64<uint8> RawBGRA;
 		if (!DecodeToBGRA8(CompressedData, Width, Height, RawBGRA, Error))
 		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("Transient decode failed: %s (%s)"), *Url, *Error);
+			UE_LOG(LogDesign2UMG, Verbose, TEXT("Transient decode failed: %s (%s)"), *Url, *Error);
+			UE_LOG(LogDesign2UMG, Warning, TEXT("图片解码失败: %s (原因: %s)"), *Url, *Error);
 			continue;
 		}
 

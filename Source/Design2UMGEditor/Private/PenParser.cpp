@@ -80,7 +80,8 @@ bool FPenParser::ParseFromFile(const FString& FilePath, FPenDocument& OutDocumen
 	FString JsonString;
 	if (!FFileHelper::LoadFileToString(JsonString, *FilePath))
 	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("PenParser: Failed to load file: %s"), *FilePath);
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("PenParser: Failed to load file: %s"), *FilePath);
+		UE_LOG(LogDesign2UMG, Error, TEXT("无法读取设计文件。请确认文件路径有效且文件未被占用: %s"), *FilePath);
 		return false;
 	}
 	return ParseDocument(JsonString, OutDocument);
@@ -92,7 +93,8 @@ bool FPenParser::ParseDocument(const FString& JsonString, FPenDocument& OutDocum
 	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonString);
 	if (!FJsonSerializer::Deserialize(Reader, JsonObj) || !JsonObj.IsValid())
 	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("PenParser: Failed to parse JSON"));
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("PenParser: Failed to parse JSON"));
+		UE_LOG(LogDesign2UMG, Error, TEXT("设计文件格式无效。请确认这是一个有效的 .pen 文件。"));
 		return false;
 	}
 	return ParseDocumentInternal(JsonObj, OutDocument);
@@ -102,14 +104,16 @@ bool FPenParser::ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, F
 {
 	if (!JsonObj.IsValid())
 	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("PenParser: Invalid root json object"));
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("PenParser: Invalid root json object"));
+		UE_LOG(LogDesign2UMG, Error, TEXT("设计文件内容为空或格式损坏。"));
 		return false;
 	}
 
 	if (!JsonObj->TryGetStringField(TEXT("version"), OutDocument.Version) || OutDocument.Version.IsEmpty())
 	{
 		OutDocument.Version = TEXT("1.0");
-		UE_LOG(LogDesign2UMG, Warning, TEXT("PenParser: missing 'version', fallback to %s"), *OutDocument.Version);
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("PenParser: missing 'version', fallback to %s"), *OutDocument.Version);
+		UE_LOG(LogDesign2UMG, Warning, TEXT("设计文件缺少版本号，使用默认版本 %s"), *OutDocument.Version);
 	}
 
 	// 解析字体
@@ -263,14 +267,16 @@ TSharedPtr<FPenNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonOb
 	// 基础属性
 	if (!JsonObj->TryGetStringField(TEXT("id"), Node->Id))
 	{
-		UE_LOG(LogDesign2UMG, Warning, TEXT("PenParser: Node missing 'id' field, skipping"));
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("PenParser: Node missing 'id' field, skipping"));
+		UE_LOG(LogDesign2UMG, Warning, TEXT("设计文件中存在缺少 ID 的节点，已跳过"));
 		return nullptr;
 	}
 	JsonObj->TryGetStringField(TEXT("name"), Node->Name);
 	FString TypeStr;
 	if (!JsonObj->TryGetStringField(TEXT("type"), TypeStr))
 	{
-		UE_LOG(LogDesign2UMG, Warning, TEXT("PenParser: Node '%s' missing 'type' field, skipping"), *Node->Id);
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("PenParser: Node '%s' missing 'type' field, skipping"), *Node->Id);
+		UE_LOG(LogDesign2UMG, Warning, TEXT("节点 '%s' 缺少类型信息，已跳过"), *Node->Id);
 		return nullptr;
 	}
 	Node->Type = ParseNodeType(TypeStr);
