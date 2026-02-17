@@ -4,6 +4,29 @@
 #include "Design2UMGLog.h"
 #include "Dom/JsonValue.h"
 
+namespace
+{
+	bool TryResolveCornerNumber(const TSharedPtr<FJsonValue>& Value, const FPenVariableResolver& Resolver, float& OutValue)
+	{
+		if (!Value.IsValid())
+			return false;
+
+		if (Value->Type == EJson::Number)
+		{
+			OutValue = Value->AsNumber();
+			return true;
+		}
+
+		if (Value->Type == EJson::String)
+		{
+			OutValue = Resolver.ResolveNumber(Value->AsString());
+			return true;
+		}
+
+		return false;
+	}
+}
+
 bool FPenVariableResolver::IsVariableRef(const FString& Value)
 {
 	return Value.StartsWith(TEXT("$"));
@@ -102,10 +125,10 @@ FPenCornerRadius FPenVariableResolver::ResolveCornerRadius(const TSharedPtr<FJso
 		if (Arr.Num() >= 4)
 		{
 			Result.bUniform = false;
-			Result.TopLeft = Arr[0]->AsNumber();
-			Result.TopRight = Arr[1]->AsNumber();
-			Result.BottomRight = Arr[2]->AsNumber();
-			Result.BottomLeft = Arr[3]->AsNumber();
+			TryResolveCornerNumber(Arr[0], *this, Result.TopLeft);
+			TryResolveCornerNumber(Arr[1], *this, Result.TopRight);
+			TryResolveCornerNumber(Arr[2], *this, Result.BottomRight);
+			TryResolveCornerNumber(Arr[3], *this, Result.BottomLeft);
 		}
 		return Result;
 	}

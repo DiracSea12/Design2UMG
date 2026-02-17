@@ -141,7 +141,7 @@ void FPenVisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TShar
 		}
 	}
 
-	ApplyRoundedCorner(Widget, Node->CornerRadius);
+	ApplyRoundedCorner(Widget, Node->CornerRadius, Node->Width.Value, Node->Height.Value);
 	ApplyStroke(Widget, Node->Stroke);
 
 	if (!FMath::IsNearlyZero(Node->Rotation))
@@ -193,17 +193,30 @@ void FPenVisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TShar
 	}
 }
 
-void FPenVisualMapper::ApplyRoundedCorner(FUMGWidgetNode& Widget, const FPenCornerRadius& Radius)
+void FPenVisualMapper::ApplyRoundedCorner(FUMGWidgetNode& Widget, const FPenCornerRadius& Radius, float Width, float Height)
 {
 	if (Radius.bUniform)
 	{
 		if (Radius.Uniform > 0)
 		{
 			Widget.Properties.Add(TEXT("DrawAs"), TEXT("RoundedBox"));
-			Widget.Properties.Add(TEXT("OutlineCornerRadius"), FString::SanitizeFloat(Radius.Uniform));
+			float ExportRadius = Radius.Uniform;
+			const bool bHasResolvedSize = (Width > 0.0f && Height > 0.0f);
+			const float MinDim = bHasResolvedSize ? FMath::Min(Width, Height) : 0.0f;
+			if (MinDim > 0.0f && Radius.Uniform >= (MinDim * 0.5f - KINDA_SMALL_NUMBER))
+			{
+				// Treat large uniform radius as pill to match design tools that clamp radius to half-height.
+				ExportRadius = 999.0f;
+			}
+			else if (!bHasResolvedSize && Radius.Uniform >= 100.0f)
+			{
+				// Height can be unresolved for fit-content nodes; large radii are typically intended as pill.
+				ExportRadius = 999.0f;
+			}
+			Widget.Properties.Add(TEXT("OutlineCornerRadius"), FString::SanitizeFloat(ExportRadius));
 			Widget.Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
 			Widget.Brush.bHasDrawAs = true;
-			Widget.Brush.OutlineCornerRadius = Radius.Uniform;
+			Widget.Brush.OutlineCornerRadius = ExportRadius;
 		}
 	}
 	else if (Radius.TopLeft > 0 || Radius.TopRight > 0 || Radius.BottomRight > 0 || Radius.BottomLeft > 0)
@@ -228,10 +241,10 @@ void FPenVisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FPenStroke& Str
 
 	if (!Widget.Properties.Contains(TEXT("DrawAs")))
 	{
-		Widget.Properties.Add(TEXT("DrawAs"), TEXT("RoundedBox"));
+		Widget.Properties.Add(TEXT("DrawAs"), TEXT("Box"));
 		if (!Widget.Brush.bHasDrawAs)
 		{
-			Widget.Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
+			Widget.Brush.DrawAs = ESlateBrushDrawType::Box;
 			Widget.Brush.bHasDrawAs = true;
 		}
 	}
@@ -515,7 +528,7 @@ FUMGWidgetNode FPenVisualMapper::WrapWithMultiFill(FUMGWidgetNode&& Widget, cons
 
 		// 圆角应用到每层
 		if (Node->CornerRadius.HasRadius())
-			ApplyRoundedCorner(Layer, Node->CornerRadius);
+			ApplyRoundedCorner(Layer, Node->CornerRadius, Node->Width.Value, Node->Height.Value);
 
 		Overlay.Children.Add(MoveTemp(Layer));
 	}

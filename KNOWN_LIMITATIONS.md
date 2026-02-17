@@ -51,3 +51,10 @@
 ### ~~非正圆椭圆近似为胶囊形~~ [已修复]
 - **文件**: `Design2UMGConverter.cpp` Ellipse case
 - **状态**: ✅ 已修复。有尺寸+颜色填充+无描边的椭圆自动生成 SVG path（两段半弧），走 Path 栅格化管线；有描边/无填充/无尺寸时 fallback 到圆角近似（Border 支持 OutlineThickness，Image 不支持）
+
+## Font Assets
+
+- Design2UMG does not generate font assets from design metadata alone.
+- `fontFamily` / `iconFontFamily` values in `.pen` are names only; glyph files are not embedded in the design file.
+- Current scope only supports mapping existing UE font assets (for example via `IconFontAssetMap` and `DefaultIconFontAssetPath`).
+- If a project needs full automation, provide local/remote font files first, then import them and bind mappings.

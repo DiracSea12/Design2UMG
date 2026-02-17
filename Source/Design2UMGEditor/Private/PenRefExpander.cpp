@@ -3,6 +3,197 @@
 #include "PenRefExpander.h"
 #include "Design2UMGLog.h"
 
+namespace
+{
+	void ApplyOverrideProperties(FPenNode& Target, const FPenNode& Override)
+	{
+		if (!Override.Content.IsEmpty())
+			Target.Content = Override.Content;
+		if (Override.FontSize > 0)
+			Target.FontSize = Override.FontSize;
+		if (!Override.FontWeight.IsEmpty())
+			Target.FontWeight = Override.FontWeight;
+		if (!Override.FontFamily.IsEmpty())
+			Target.FontFamily = Override.FontFamily;
+		if (Override.Fill.Type != EPenFillType::None || Override.Fill.bExplicitClear)
+		{
+			Target.Fill = Override.Fill;
+			Target.Fills = Override.Fills;
+		}
+		if (Override.Stroke.HasStroke())
+			Target.Stroke = Override.Stroke;
+		if (!Override.Width.IsFit())
+			Target.Width = Override.Width;
+		if (!Override.Height.IsFit())
+			Target.Height = Override.Height;
+		if (Override.bHasX)
+		{
+			Target.X = Override.X;
+			Target.bHasX = true;
+		}
+		if (Override.bHasY)
+		{
+			Target.Y = Override.Y;
+			Target.bHasY = true;
+		}
+		if (!Override.bEnabled)
+			Target.bEnabled = false;
+		if (!Override.Padding.IsZero())
+			Target.Padding = Override.Padding;
+		if (Override.Gap > 0)
+			Target.Gap = Override.Gap;
+		if (Override.JustifyContent != EPenJustifyContent::Start)
+			Target.JustifyContent = Override.JustifyContent;
+		if (Override.AlignItems != EPenAlignItems::Start)
+			Target.AlignItems = Override.AlignItems;
+		if (Override.TextAlign != EPenTextAlign::Left)
+			Target.TextAlign = Override.TextAlign;
+		if (Override.LineHeight > 0)
+			Target.LineHeight = Override.LineHeight;
+		if (Override.TextGrowth != EPenTextGrowth::Auto)
+			Target.TextGrowth = Override.TextGrowth;
+		if (Override.Children.Num() > 0)
+			Target.Children = Override.Children;
+	}
+
+	TSharedPtr<FPenNode> MergeDescendantOverrideNodes(
+		const TSharedPtr<FPenNode>& BaseOverride,
+		const TSharedPtr<FPenNode>& OuterOverride)
+	{
+		if (!OuterOverride.IsValid())
+			return BaseOverride;
+		if (!BaseOverride.IsValid())
+			return FPenRefExpander::DeepCopyNode(OuterOverride);
+		if (OuterOverride->Type != EPenNodeType::Unknown)
+			return FPenRefExpander::DeepCopyNode(OuterOverride);
+
+		auto Merged = FPenRefExpander::DeepCopyNode(BaseOverride);
+		if (!Merged.IsValid())
+			return FPenRefExpander::DeepCopyNode(OuterOverride);
+
+		ApplyOverrideProperties(*Merged, *OuterOverride);
+		return Merged;
+	}
+
+	void MergeDescendants(
+		TMap<FString, TSharedPtr<FPenNode>>& InOut,
+		const TMap<FString, TSharedPtr<FPenNode>>& Outer)
+	{
+		for (const auto& Pair : Outer)
+		{
+			TSharedPtr<FPenNode> Existing = InOut.FindRef(Pair.Key);
+			InOut.Add(Pair.Key, MergeDescendantOverrideNodes(Existing, Pair.Value));
+		}
+	}
+
+	void ApplyInstanceOverrides(TSharedPtr<FPenNode>& Expanded, const TSharedPtr<FPenNode>& RefNode)
+	{
+		if (!Expanded.IsValid() || !RefNode.IsValid())
+			return;
+
+		Expanded->Id = RefNode->Id;
+		if (!RefNode->Name.IsEmpty())
+			Expanded->Name = RefNode->Name;
+
+		if (RefNode->bHasX)
+		{
+			Expanded->X = RefNode->X;
+			Expanded->bHasX = true;
+		}
+		if (RefNode->bHasY)
+		{
+			Expanded->Y = RefNode->Y;
+			Expanded->bHasY = true;
+		}
+		if (RefNode->bHasWidth)
+		{
+			Expanded->Width = RefNode->Width;
+			Expanded->bHasWidth = true;
+		}
+		if (RefNode->bHasHeight)
+		{
+			Expanded->Height = RefNode->Height;
+			Expanded->bHasHeight = true;
+		}
+
+		if (RefNode->Fill.Type != EPenFillType::None || RefNode->Fill.bExplicitClear)
+		{
+			Expanded->Fill = RefNode->Fill;
+			Expanded->Fills = RefNode->Fills;
+		}
+		if (RefNode->Stroke.HasStroke())
+			Expanded->Stroke = RefNode->Stroke;
+		if (!RefNode->Padding.IsZero())
+			Expanded->Padding = RefNode->Padding;
+		if (RefNode->bClip)
+			Expanded->bClip = RefNode->bClip;
+		if (!RefNode->bEnabled)
+			Expanded->bEnabled = false;
+		if (RefNode->Opacity < 1.0f)
+			Expanded->Opacity = RefNode->Opacity;
+		if (!FMath::IsNearlyZero(RefNode->Rotation))
+			Expanded->Rotation = RefNode->Rotation;
+		if (RefNode->bFlipX)
+			Expanded->bFlipX = RefNode->bFlipX;
+		if (RefNode->bFlipY)
+			Expanded->bFlipY = RefNode->bFlipY;
+
+		// Slot override has the highest priority.
+		if (RefNode->Children.Num() > 0)
+			Expanded->Children = RefNode->Children;
+	}
+
+	TSharedPtr<FPenNode> ExpandRefInternal(
+		const TSharedPtr<FPenNode>& RefNode,
+		const FPenDocument& Doc,
+		TSet<FString>& RefChain)
+	{
+		if (!RefNode.IsValid() || RefNode->Ref.IsEmpty())
+			return nullptr;
+
+		const FString RefTargetId = RefNode->Ref;
+		if (RefChain.Contains(RefTargetId))
+		{
+			UE_LOG(LogDesign2UMG, Error, TEXT("ExpandRef: circular ref detected at '%s' -> '%s'"),
+				*RefNode->Id, *RefTargetId);
+			return nullptr;
+		}
+
+		RefChain.Add(RefTargetId);
+
+		auto SourceNode = Doc.FindReusableNode(RefTargetId);
+		if (!SourceNode.IsValid())
+		{
+			UE_LOG(LogDesign2UMG, Warning, TEXT("ExpandRef: ref '%s' -> '%s' NOT FOUND"), *RefNode->Id, *RefTargetId);
+			RefChain.Remove(RefTargetId);
+			return nullptr;
+		}
+
+		auto Expanded = FPenRefExpander::DeepCopyNode(SourceNode);
+		if (!Expanded.IsValid())
+		{
+			RefChain.Remove(RefTargetId);
+			return nullptr;
+		}
+		MergeDescendants(Expanded->Descendants, RefNode->Descendants);
+		ApplyInstanceOverrides(Expanded, RefNode);
+
+		TSharedPtr<FPenNode> Result = Expanded;
+		if (Expanded->Type == EPenNodeType::Ref && !Expanded->Ref.IsEmpty())
+		{
+			Result = ExpandRefInternal(Expanded, Doc, RefChain);
+		}
+		else
+		{
+			for (const auto& Pair : Expanded->Descendants)
+				FPenRefExpander::ApplyDescendantOverride(Result, Pair.Key, Pair.Value);
+		}
+
+		RefChain.Remove(RefTargetId);
+		return Result;
+	}
+}
+
 TSharedPtr<FPenNode> FPenRefExpander::DeepCopyNode(const TSharedPtr<FPenNode>& Source)
 {
 	if (!Source.IsValid())
@@ -20,55 +211,8 @@ TSharedPtr<FPenNode> FPenRefExpander::DeepCopyNode(const TSharedPtr<FPenNode>& S
 
 TSharedPtr<FPenNode> FPenRefExpander::ExpandRef(const TSharedPtr<FPenNode>& RefNode, const FPenDocument& Doc)
 {
-	if (!RefNode.IsValid() || RefNode->Ref.IsEmpty())
-		return nullptr;
-
-	auto SourceNode = Doc.FindReusableNode(RefNode->Ref);
-	if (!SourceNode.IsValid())
-	{
-		UE_LOG(LogDesign2UMG, Warning, TEXT("ExpandRef: ref '%s' -> '%s' NOT FOUND"), *RefNode->Id, *RefNode->Ref);
-		return nullptr;
-	}
-	auto Expanded = DeepCopyNode(SourceNode);
-
-	for (const auto& Pair : RefNode->Descendants)
-		ApplyDescendantOverride(Expanded, Pair.Key, Pair.Value);
-
-	Expanded->Id = RefNode->Id;
-	if (!RefNode->Name.IsEmpty())
-		Expanded->Name = RefNode->Name;
-
-	if (RefNode->bHasX) Expanded->X = RefNode->X;
-	if (RefNode->bHasY) Expanded->Y = RefNode->Y;
-	if (RefNode->bHasWidth) Expanded->Width = RefNode->Width;
-	if (RefNode->bHasHeight) Expanded->Height = RefNode->Height;
-
-	if (RefNode->Fill.Type != EPenFillType::None || RefNode->Fill.bExplicitClear)
-	{
-		Expanded->Fill = RefNode->Fill;
-		Expanded->Fills = RefNode->Fills;
-	}
-	if (RefNode->Stroke.HasStroke())
-		Expanded->Stroke = RefNode->Stroke;
-	if (!RefNode->Padding.IsZero())
-		Expanded->Padding = RefNode->Padding;
-	if (RefNode->bClip)
-		Expanded->bClip = RefNode->bClip;
-	if (!RefNode->bEnabled)
-		Expanded->bEnabled = false;
-	if (RefNode->Opacity < 1.0f)
-		Expanded->Opacity = RefNode->Opacity;
-	if (!FMath::IsNearlyZero(RefNode->Rotation))
-		Expanded->Rotation = RefNode->Rotation;
-	if (RefNode->bFlipX)
-		Expanded->bFlipX = RefNode->bFlipX;
-	if (RefNode->bFlipY)
-		Expanded->bFlipY = RefNode->bFlipY;
-
-	if (RefNode->Children.Num() > 0)
-		Expanded->Children = RefNode->Children;
-
-	return Expanded;
+	TSet<FString> RefChain;
+	return ExpandRefInternal(RefNode, Doc, RefChain);
 }
 
 void FPenRefExpander::ApplyDescendantOverride(TSharedPtr<FPenNode>& Node, const FString& Path, const TSharedPtr<FPenNode>& Override)
@@ -103,50 +247,7 @@ void FPenRefExpander::ApplyDescendantOverride(TSharedPtr<FPenNode>& Node, const 
 				return;
 			}
 
-			// 属性覆盖模式
-			if (!Override->Content.IsEmpty())
-				Child->Content = Override->Content;
-			if (Override->FontSize > 0)
-				Child->FontSize = Override->FontSize;
-			if (!Override->FontWeight.IsEmpty())
-				Child->FontWeight = Override->FontWeight;
-			if (!Override->FontFamily.IsEmpty())
-				Child->FontFamily = Override->FontFamily;
-			if (Override->Fill.Type != EPenFillType::None || Override->Fill.bExplicitClear)
-			{
-				Child->Fill = Override->Fill;
-				Child->Fills = Override->Fills;
-			}
-			if (Override->Stroke.HasStroke())
-				Child->Stroke = Override->Stroke;
-			if (!Override->Width.IsFit())
-				Child->Width = Override->Width;
-			if (!Override->Height.IsFit())
-				Child->Height = Override->Height;
-			if (Override->bHasX)
-				Child->X = Override->X;
-			if (Override->bHasY)
-				Child->Y = Override->Y;
-			if (!Override->bEnabled)
-				Child->bEnabled = Override->bEnabled;
-			if (!Override->Padding.IsZero())
-				Child->Padding = Override->Padding;
-			if (Override->Gap > 0)
-				Child->Gap = Override->Gap;
-			if (Override->JustifyContent != EPenJustifyContent::Start)
-				Child->JustifyContent = Override->JustifyContent;
-			if (Override->AlignItems != EPenAlignItems::Start)
-				Child->AlignItems = Override->AlignItems;
-			if (Override->TextAlign != EPenTextAlign::Left)
-				Child->TextAlign = Override->TextAlign;
-			if (Override->LineHeight > 0)
-				Child->LineHeight = Override->LineHeight;
-			if (Override->TextGrowth != EPenTextGrowth::Auto)
-				Child->TextGrowth = Override->TextGrowth;
-
-			if (Override->Children.Num() > 0)
-				Child->Children = Override->Children;
-
+			ApplyOverrideProperties(*Child, *Override);
 			return;
 		}
 	}

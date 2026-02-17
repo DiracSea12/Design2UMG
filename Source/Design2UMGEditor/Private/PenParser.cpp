@@ -5,6 +5,75 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Misc/FileHelper.h"
+#include "Misc/DefaultValueHelper.h"
+
+namespace
+{
+    bool TryParseNumericString(const FString& InValue, double& OutValue)
+    {
+        const FString Trimmed = InValue.TrimStartAndEnd();
+        if (Trimmed.IsEmpty())
+            return false;
+
+        double Parsed = 0.0;
+        if (!FDefaultValueHelper::ParseDouble(Trimmed, Parsed))
+            return false;
+
+        OutValue = Parsed;
+        return true;
+    }
+
+	bool TryGetNumberValueFlexible(const TSharedPtr<FJsonValue>& Value, double& OutValue)
+	{
+		if (!Value.IsValid())
+			return false;
+
+		if (Value->Type == EJson::Number)
+		{
+			OutValue = Value->AsNumber();
+			return true;
+		}
+
+		if (Value->Type == EJson::String)
+		{
+			return TryParseNumericString(Value->AsString(), OutValue);
+		}
+
+		return false;
+	}
+
+	template <typename NumberType>
+	bool TryGetNumberValueFlexible(const TSharedPtr<FJsonValue>& Value, NumberType& OutValue)
+	{
+		double Parsed = 0.0;
+		if (!TryGetNumberValueFlexible(Value, Parsed))
+			return false;
+
+		OutValue = static_cast<NumberType>(Parsed);
+		return true;
+	}
+
+	template <typename NumberType>
+	bool TryGetNumberFieldFlexible(
+		const TSharedPtr<FJsonObject>& Obj,
+		const FString& FieldName,
+		NumberType& OutValue)
+	{
+		if (!Obj.IsValid() || !Obj->HasField(FieldName))
+			return false;
+
+		const TSharedPtr<FJsonValue> FieldValue = Obj->TryGetField(FieldName);
+		if (!FieldValue.IsValid())
+			return false;
+
+		double Parsed = 0.0;
+		if (!TryGetNumberValueFlexible(FieldValue, Parsed))
+			return false;
+
+		OutValue = static_cast<NumberType>(Parsed);
+		return true;
+	}
+}
 
 bool FPenParser::ParseFromFile(const FString& FilePath, FPenDocument& OutDocument)
 {
@@ -152,7 +221,6 @@ void FPenParser::ParseVariables(const TSharedPtr<FJsonObject>& JsonObj, TMap<FSt
 		}
 		else
 		{
-			// 单值
 			if (ValueField->Type == EJson::String)
 				Var.Value = ValueField->AsString();
 			else if (ValueField->Type == EJson::Number)
@@ -198,23 +266,23 @@ TSharedPtr<FPenNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonOb
 
 	// 位置
 	if (JsonObj->HasField(TEXT("x")))
-		Node->bHasX = JsonObj->TryGetNumberField(TEXT("x"), Node->X);
+		Node->bHasX = TryGetNumberFieldFlexible(JsonObj, TEXT("x"), Node->X);
 	if (JsonObj->HasField(TEXT("y")))
-		Node->bHasY = JsonObj->TryGetNumberField(TEXT("y"), Node->Y);
-	JsonObj->TryGetNumberField(TEXT("rotation"), Node->Rotation);
-
-	// 尺寸 - 先检查 size 对象（兼容非标准格式）
+		Node->bHasY = TryGetNumberFieldFlexible(JsonObj, TEXT("y"), Node->Y);
+	TryGetNumberFieldFlexible(JsonObj, TEXT("rotation"), Node->Rotation);
 	if (JsonObj->HasField(TEXT("size")))
 	{
 		const auto& SizeObj = JsonObj->GetObjectField(TEXT("size"));
-		if (SizeObj->HasField(TEXT("width")))
+		float SizeWidth = 0.0f;
+		if (TryGetNumberFieldFlexible(SizeObj, TEXT("width"), SizeWidth))
 		{
-			Node->Width = FPenSize::Fixed(SizeObj->GetNumberField(TEXT("width")));
+			Node->Width = FPenSize::Fixed(SizeWidth);
 			Node->bHasWidth = true;
 		}
-		if (SizeObj->HasField(TEXT("height")))
+		float SizeHeight = 0.0f;
+		if (TryGetNumberFieldFlexible(SizeObj, TEXT("height"), SizeHeight))
 		{
-			Node->Height = FPenSize::Fixed(SizeObj->GetNumberField(TEXT("height")));
+			Node->Height = FPenSize::Fixed(SizeHeight);
 			Node->bHasHeight = true;
 		}
 	}
@@ -234,7 +302,7 @@ TSharedPtr<FPenNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonOb
 	// 可见性
 	if (JsonObj->HasField(TEXT("enabled")))
 		Node->bEnabled = JsonObj->GetBoolField(TEXT("enabled"));
-	JsonObj->TryGetNumberField(TEXT("opacity"), Node->Opacity);
+	TryGetNumberFieldFlexible(JsonObj, TEXT("opacity"), Node->Opacity);
 	JsonObj->TryGetBoolField(TEXT("flipX"), Node->bFlipX);
 	JsonObj->TryGetBoolField(TEXT("flipY"), Node->bFlipY);
 
@@ -243,7 +311,7 @@ TSharedPtr<FPenNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonOb
 		Node->Layout = ParseLayout(JsonObj->GetStringField(TEXT("layout")));
 	else if (Node->Type == EPenNodeType::Group)
 		Node->Layout = EPenLayout::None;
-	JsonObj->TryGetNumberField(TEXT("gap"), Node->Gap);
+	TryGetNumberFieldFlexible(JsonObj, TEXT("gap"), Node->Gap);
 	if (JsonObj->HasField(TEXT("padding")))
 		Node->Padding = ParsePadding(JsonObj->TryGetField(TEXT("padding")));
 	if (JsonObj->HasField(TEXT("justifyContent")))
@@ -301,10 +369,10 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 	// 文本属性
 	JsonObj->TryGetStringField(TEXT("content"), Node->Content);
 	JsonObj->TryGetStringField(TEXT("fontFamily"), Node->FontFamily);
-	JsonObj->TryGetNumberField(TEXT("fontSize"), Node->FontSize);
+	TryGetNumberFieldFlexible(JsonObj, TEXT("fontSize"), Node->FontSize);
 	JsonObj->TryGetStringField(TEXT("fontWeight"), Node->FontWeight);
-	JsonObj->TryGetNumberField(TEXT("lineHeight"), Node->LineHeight);
-	JsonObj->TryGetNumberField(TEXT("letterSpacing"), Node->LetterSpacing);
+	TryGetNumberFieldFlexible(JsonObj, TEXT("lineHeight"), Node->LineHeight);
+	TryGetNumberFieldFlexible(JsonObj, TEXT("letterSpacing"), Node->LetterSpacing);
 
 	if (JsonObj->HasField(TEXT("textAlign")))
 		Node->TextAlign = ParseTextAlign(JsonObj->GetStringField(TEXT("textAlign")));
@@ -316,17 +384,11 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 	// 图标字体属性
 	JsonObj->TryGetStringField(TEXT("iconFontName"), Node->IconFontName);
 	JsonObj->TryGetStringField(TEXT("iconFontFamily"), Node->IconFontFamily);
-	JsonObj->TryGetNumberField(TEXT("weight"), Node->IconWeight);
-
-	// 椭圆属性
-	JsonObj->TryGetNumberField(TEXT("innerRadius"), Node->InnerRadius);
-	JsonObj->TryGetNumberField(TEXT("startAngle"), Node->StartAngle);
-	JsonObj->TryGetNumberField(TEXT("sweepAngle"), Node->SweepAngle);
-
-	// 多边形属性
-	JsonObj->TryGetNumberField(TEXT("polygonCount"), Node->PolygonCount);
-
-	// 路径属性
+	TryGetNumberFieldFlexible(JsonObj, TEXT("weight"), Node->IconWeight);
+	TryGetNumberFieldFlexible(JsonObj, TEXT("innerRadius"), Node->InnerRadius);
+	TryGetNumberFieldFlexible(JsonObj, TEXT("startAngle"), Node->StartAngle);
+	TryGetNumberFieldFlexible(JsonObj, TEXT("sweepAngle"), Node->SweepAngle);
+	TryGetNumberFieldFlexible(JsonObj, TEXT("polygonCount"), Node->PolygonCount);
 	JsonObj->TryGetStringField(TEXT("geometry"), Node->Geometry);
 	JsonObj->TryGetStringField(TEXT("fillRule"), Node->FillRule);
 
@@ -359,7 +421,7 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 			else if (TypeStr == TEXT("shadow"))
 				Effect.Type = EPenEffectType::Shadow;
 
-			EffectObj->TryGetNumberField(TEXT("radius"), Effect.Radius);
+			TryGetNumberFieldFlexible(EffectObj, TEXT("radius"), Effect.Radius);
 
 			if (Effect.Type == EPenEffectType::Shadow)
 			{
@@ -374,17 +436,17 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 				if (EffectObj->HasField(TEXT("offset")))
 				{
 					const TSharedPtr<FJsonObject>& OffsetObj = EffectObj->GetObjectField(TEXT("offset"));
-					OffsetObj->TryGetNumberField(TEXT("x"), Effect.Shadow.OffsetX);
-					OffsetObj->TryGetNumberField(TEXT("y"), Effect.Shadow.OffsetY);
+					TryGetNumberFieldFlexible(OffsetObj, TEXT("x"), Effect.Shadow.OffsetX);
+					TryGetNumberFieldFlexible(OffsetObj, TEXT("y"), Effect.Shadow.OffsetY);
 				}
 				else
 				{
-					EffectObj->TryGetNumberField(TEXT("offsetX"), Effect.Shadow.OffsetX);
-					EffectObj->TryGetNumberField(TEXT("offsetY"), Effect.Shadow.OffsetY);
+					TryGetNumberFieldFlexible(EffectObj, TEXT("offsetX"), Effect.Shadow.OffsetX);
+					TryGetNumberFieldFlexible(EffectObj, TEXT("offsetY"), Effect.Shadow.OffsetY);
 				}
 
-				EffectObj->TryGetNumberField(TEXT("blur"), Effect.Shadow.Blur);
-				EffectObj->TryGetNumberField(TEXT("spread"), Effect.Shadow.Spread);
+				TryGetNumberFieldFlexible(EffectObj, TEXT("blur"), Effect.Shadow.Blur);
+				TryGetNumberFieldFlexible(EffectObj, TEXT("spread"), Effect.Shadow.Spread);
 				FString ShadowColorStr = EffectObj->HasField(TEXT("color"))
 					? EffectObj->GetStringField(TEXT("color"))
 					: TEXT("#00000040");
@@ -426,14 +488,14 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 			DescNode->FontWeight = TEXT("");
 
 			OverrideObj->TryGetStringField(TEXT("content"), DescNode->Content);
-			OverrideObj->TryGetNumberField(TEXT("fontSize"), DescNode->FontSize);
+			TryGetNumberFieldFlexible(OverrideObj, TEXT("fontSize"), DescNode->FontSize);
 			OverrideObj->TryGetStringField(TEXT("fontWeight"), DescNode->FontWeight);
 			OverrideObj->TryGetStringField(TEXT("fontFamily"), DescNode->FontFamily);
 			if (OverrideObj->HasField(TEXT("fill")))
 			{
 				const TSharedPtr<FJsonValue>& FillField = OverrideObj->TryGetField(TEXT("fill"));
 				DescNode->Fill = ParseFill(FillField, Resolver);
-				DescNode->Fills.Empty();  // override 替换而非叠加
+				DescNode->Fills.Empty();  
 				if (FillField.IsValid() && FillField->Type == EJson::Array)
 				{
 					for (const auto& Item : FillField->AsArray())
@@ -464,21 +526,21 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 			}
 
 			if (OverrideObj->HasField(TEXT("x")))
-				DescNode->bHasX = OverrideObj->TryGetNumberField(TEXT("x"), DescNode->X);
+				DescNode->bHasX = TryGetNumberFieldFlexible(OverrideObj, TEXT("x"), DescNode->X);
 			if (OverrideObj->HasField(TEXT("y")))
-				DescNode->bHasY = OverrideObj->TryGetNumberField(TEXT("y"), DescNode->Y);
+				DescNode->bHasY = TryGetNumberFieldFlexible(OverrideObj, TEXT("y"), DescNode->Y);
 			if (OverrideObj->HasField(TEXT("enabled")))
 				DescNode->bEnabled = OverrideObj->GetBoolField(TEXT("enabled"));
 			if (OverrideObj->HasField(TEXT("padding")))
 				DescNode->Padding = ParsePadding(OverrideObj->TryGetField(TEXT("padding")));
-			OverrideObj->TryGetNumberField(TEXT("gap"), DescNode->Gap);
+			TryGetNumberFieldFlexible(OverrideObj, TEXT("gap"), DescNode->Gap);
 			if (OverrideObj->HasField(TEXT("justifyContent")))
 				DescNode->JustifyContent = ParseJustifyContent(OverrideObj->GetStringField(TEXT("justifyContent")));
 			if (OverrideObj->HasField(TEXT("alignItems")))
 				DescNode->AlignItems = ParseAlignItems(OverrideObj->GetStringField(TEXT("alignItems")));
 			if (OverrideObj->HasField(TEXT("textAlign")))
 				DescNode->TextAlign = ParseTextAlign(OverrideObj->GetStringField(TEXT("textAlign")));
-			OverrideObj->TryGetNumberField(TEXT("lineHeight"), DescNode->LineHeight);
+			TryGetNumberFieldFlexible(OverrideObj, TEXT("lineHeight"), DescNode->LineHeight);
 			if (OverrideObj->HasField(TEXT("textGrowth")))
 				DescNode->TextGrowth = ParseTextGrowth(OverrideObj->GetStringField(TEXT("textGrowth")));
 
@@ -633,7 +695,7 @@ FPenFill FPenParser::ParseFill(const TSharedPtr<FJsonValue>& Value, const FPenVa
 				else if (GradType == TEXT("angular"))
 					Result.Gradient.GradientType = EPenGradientType::Angular;
 			}
-			Obj->TryGetNumberField(TEXT("rotation"), Result.Gradient.Rotation);
+			TryGetNumberFieldFlexible(Obj, TEXT("rotation"), Result.Gradient.Rotation);
 
 			if (Obj->HasField(TEXT("colors")))
 			{
@@ -645,7 +707,7 @@ FPenFill FPenParser::ParseFill(const TSharedPtr<FJsonValue>& Value, const FPenVa
 					if (FPenVariableResolver::IsVariableRef(StopColorStr))
 						Stop.SourceVar = StopColorStr;
 					Stop.Color = Resolver.ResolveColor(StopColorStr);
-					Stop.Position = StopObj->GetNumberField(TEXT("position"));
+					TryGetNumberFieldFlexible(StopObj, TEXT("position"), Stop.Position);
 					Result.Gradient.Colors.Add(Stop);
 				}
 			}
@@ -664,9 +726,7 @@ FPenFill FPenParser::ParseFill(const TSharedPtr<FJsonValue>& Value, const FPenVa
 				else if (Mode == TEXT("crop"))
 					Result.Image.Mode = EPenImageMode::Crop;
 			}
-			Obj->TryGetNumberField(TEXT("opacity"), Result.Image.Opacity);
-
-			// imageTransform（2x3 仿射矩阵）
+			TryGetNumberFieldFlexible(Obj, TEXT("opacity"), Result.Image.Opacity);
 			if (Obj->HasField(TEXT("imageTransform")))
 			{
 				const auto& TransformArr = Obj->GetArrayField(TEXT("imageTransform"));
@@ -676,12 +736,12 @@ FPenFill FPenParser::ParseFill(const TSharedPtr<FJsonValue>& Value, const FPenVa
 					auto Row1 = TransformArr[1]->AsArray();
 					if (Row0.Num() == 3 && Row1.Num() == 3)
 					{
-						Result.Image.Transform.A  = Row0[0]->AsNumber();
-						Result.Image.Transform.B  = Row0[1]->AsNumber();
-						Result.Image.Transform.TX = Row0[2]->AsNumber();
-						Result.Image.Transform.C  = Row1[0]->AsNumber();
-						Result.Image.Transform.D  = Row1[1]->AsNumber();
-						Result.Image.Transform.TY = Row1[2]->AsNumber();
+						TryGetNumberValueFlexible(Row0[0], Result.Image.Transform.A);
+						TryGetNumberValueFlexible(Row0[1], Result.Image.Transform.B);
+						TryGetNumberValueFlexible(Row0[2], Result.Image.Transform.TX);
+						TryGetNumberValueFlexible(Row1[0], Result.Image.Transform.C);
+						TryGetNumberValueFlexible(Row1[1], Result.Image.Transform.D);
+						TryGetNumberValueFlexible(Row1[2], Result.Image.Transform.TY);
 					}
 				}
 			}
@@ -707,24 +767,21 @@ FPenStroke FPenParser::ParseStroke(const TSharedPtr<FJsonObject>& JsonObj, const
 		else if (Align == TEXT("outside"))
 			Result.Align = EPenStrokeAlign::Outside;
 	}
-
-	// 厚度
 	if (JsonObj->HasField(TEXT("thickness")))
 	{
 		const auto& ThickVal = JsonObj->TryGetField(TEXT("thickness"));
-		if (ThickVal->Type == EJson::Number)
+		if (TryGetNumberValueFlexible(ThickVal, Result.Thickness.Uniform))
 		{
 			Result.Thickness.bUniform = true;
-			Result.Thickness.Uniform = ThickVal->AsNumber();
 		}
 		else if (ThickVal->Type == EJson::Object)
 		{
 			Result.Thickness.bUniform = false;
 			const auto& ThickObj = ThickVal->AsObject();
-			ThickObj->TryGetNumberField(TEXT("top"), Result.Thickness.Top);
-			ThickObj->TryGetNumberField(TEXT("right"), Result.Thickness.Right);
-			ThickObj->TryGetNumberField(TEXT("bottom"), Result.Thickness.Bottom);
-			ThickObj->TryGetNumberField(TEXT("left"), Result.Thickness.Left);
+			TryGetNumberFieldFlexible(ThickObj, TEXT("top"), Result.Thickness.Top);
+			TryGetNumberFieldFlexible(ThickObj, TEXT("right"), Result.Thickness.Right);
+			TryGetNumberFieldFlexible(ThickObj, TEXT("bottom"), Result.Thickness.Bottom);
+			TryGetNumberFieldFlexible(ThickObj, TEXT("left"), Result.Thickness.Left);
 		}
 	}
 
@@ -740,24 +797,28 @@ FPenPadding FPenParser::ParsePadding(const TSharedPtr<FJsonValue>& Value)
 	FPenPadding R;
 	if (!Value.IsValid()) return R;
 
-	if (Value->Type == EJson::Number)
+	if (TryGetNumberValueFlexible(Value, R.Top))
 	{
-		R.Top = R.Right = R.Bottom = R.Left = Value->AsNumber();
+		R.Right = R.Bottom = R.Left = R.Top;
 	}
 	else if (Value->Type == EJson::Array)
 	{
 		const auto& Arr = Value->AsArray();
 		if (Arr.Num() == 2)
 		{
-			R.Left = R.Right = Arr[0]->AsNumber();
-			R.Top = R.Bottom = Arr[1]->AsNumber();
+			float H = 0.0f;
+			float V = 0.0f;
+			if (TryGetNumberValueFlexible(Arr[0], H))
+				R.Left = R.Right = H;
+			if (TryGetNumberValueFlexible(Arr[1], V))
+				R.Top = R.Bottom = V;
 		}
 		else if (Arr.Num() >= 4)
 		{
-			R.Top = Arr[0]->AsNumber();
-			R.Right = Arr[1]->AsNumber();
-			R.Bottom = Arr[2]->AsNumber();
-			R.Left = Arr[3]->AsNumber();
+			TryGetNumberValueFlexible(Arr[0], R.Top);
+			TryGetNumberValueFlexible(Arr[1], R.Right);
+			TryGetNumberValueFlexible(Arr[2], R.Bottom);
+			TryGetNumberValueFlexible(Arr[3], R.Left);
 		}
 	}
 	return R;

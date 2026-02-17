@@ -75,6 +75,14 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Icon Font", meta = (DisplayName = "Font Family → Asset Path", ToolTip = "Map icon font family names to UE5 font asset paths. The font asset must be imported into the project first."))
 	TMap<FString, FString> IconFontAssetMap;
 
+	/** 当字体族未命中 IconFontAssetMap 时，使用该默认字体资产路径（可选） */
+	UPROPERTY(Config, EditAnywhere, Category = "Icon Font", meta = (DisplayName = "Default Icon Font Asset Path", ToolTip = "Optional fallback font asset path for icon fonts when no explicit family mapping is found."))
+	FString DefaultIconFontAssetPath;
+
+	/** 无可用字体资产时的占位文本；留空则回退为 IconName 原文 */
+	UPROPERTY(Config, EditAnywhere, Category = "Icon Font", meta = (DisplayName = "Missing Icon Placeholder", ToolTip = "When icon font asset is missing, use this placeholder text instead of IconName. Leave empty to keep IconName."))
+	FString MissingIconFontPlaceholder;
+
 	/** 查找图标字体的资产路径，无匹配返回空字符串 */
 	FString FindIconFontAssetPath(const FString& FontFamily) const;
 

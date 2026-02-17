@@ -3,10 +3,55 @@
 #include "Misc/AutomationTest.h"
 #include "PenParser.h"
 #include "Design2UMGConverter.h"
+#include "Design2UMGSettings.h"
 #include "LayoutCalculator.h"
 #include "FigmaParser.h"
 
 #if WITH_AUTOMATION_WORKER
+
+namespace
+{
+	const FUMGWidgetNode* FindWidgetById(const FUMGWidgetNode& Node, const FString& TargetId)
+	{
+		if (Node.Id == TargetId)
+			return &Node;
+		for (const FUMGWidgetNode& Child : Node.Children)
+		{
+			if (const FUMGWidgetNode* Found = FindWidgetById(Child, TargetId))
+				return Found;
+		}
+		return nullptr;
+	}
+
+	const FUMGWidgetNode* FindWidgetByProperty(
+		const FUMGWidgetNode& Node,
+		const FString& Key,
+		const FString* OptionalValue = nullptr)
+	{
+		if (const FString* Current = Node.Properties.Find(Key))
+		{
+			if (!OptionalValue || *Current == *OptionalValue)
+				return &Node;
+		}
+		for (const FUMGWidgetNode& Child : Node.Children)
+		{
+			if (const FUMGWidgetNode* Found = FindWidgetByProperty(Child, Key, OptionalValue))
+				return Found;
+		}
+		return nullptr;
+	}
+
+	void CollectTextValues(const FUMGWidgetNode& Node, TArray<FString>& OutTexts)
+	{
+		if (Node.Type == TEXT("TextBlock"))
+		{
+			if (const FString* Text = Node.Properties.Find(TEXT("Text")))
+				OutTexts.Add(*Text);
+		}
+		for (const FUMGWidgetNode& Child : Node.Children)
+			CollectTextValues(Child, OutTexts);
+	}
+}
 
 // ============================================================
 // Test 1: Parser - 解析硬编码 JSON，验证节点类型/数量/属性
@@ -464,6 +509,287 @@ bool FFigmaConverterTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("E2E root type"), Data.RootWidget.Type.IsEmpty());
 	TestTrue(TEXT("E2E has children"), Data.RootWidget.Children.Num() > 0);
 
+	return true;
+}
+
+// ============================================================
+// Test 7: Ref-of-Ref descendants 覆盖
+// ============================================================
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRefOfRefDescendantsOverrideTest,
+	"Design2UMG.Ref.RefOfRefDescendantsContentOverride",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FRefOfRefDescendantsOverrideTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"JSON({
+		"children": [
+			{
+				"id": "KbyBJ",
+				"type": "frame",
+				"reusable": true,
+				"layout": "horizontal",
+				"children": [
+					{ "id": "248ys", "type": "text", "content": "Tab Item" }
+				]
+			},
+			{
+				"id": "BdBJJ",
+				"type": "ref",
+				"reusable": true,
+				"ref": "KbyBJ",
+				"descendants": {
+					"248ys": { "fill": "#666666" }
+				}
+			},
+			{
+				"id": "screen",
+				"type": "frame",
+				"width": 640,
+				"height": 120,
+				"layout": "horizontal",
+				"children": [
+					{
+						"id": "tab1",
+						"type": "ref",
+						"ref": "KbyBJ",
+						"descendants": { "248ys": { "content": "Integrations" } }
+					},
+					{
+						"id": "tab2",
+						"type": "ref",
+						"ref": "BdBJJ",
+						"descendants": { "248ys": { "content": "Billing" } }
+					},
+					{
+						"id": "tab3",
+						"type": "ref",
+						"ref": "BdBJJ",
+						"descendants": { "248ys": { "content": "Profile" } }
+					},
+					{
+						"id": "tab4",
+						"type": "ref",
+						"ref": "BdBJJ",
+						"descendants": { "248ys": { "content": "Advanced" } }
+					}
+				]
+			}
+		]
+	})JSON");
+
+	FPenDocument Doc;
+	TestTrue(TEXT("RefOfRef parse succeeds"), FPenParser::ParseDocument(Json, Doc));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+
+	TArray<FString> TextValues;
+	CollectTextValues(Data.RootWidget, TextValues);
+	TestTrue(TEXT("Text contains Integrations"), TextValues.Contains(TEXT("Integrations")));
+	TestTrue(TEXT("Text contains Billing"), TextValues.Contains(TEXT("Billing")));
+	TestTrue(TEXT("Text contains Profile"), TextValues.Contains(TEXT("Profile")));
+	TestTrue(TEXT("Text contains Advanced"), TextValues.Contains(TEXT("Advanced")));
+	TestFalse(TEXT("Text should not keep default Tab Item"), TextValues.Contains(TEXT("Tab Item")));
+	return true;
+}
+
+// ============================================================
+// Test 8: Horizontal 父容器 + Ref 子节点交叉轴 Fill
+// ============================================================
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHorizontalParentRefChildCrossFillTest,
+	"Design2UMG.Layout.HorizontalParentRefChildCrossFill",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FHorizontalParentRefChildCrossFillTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"JSON({
+		"children": [
+			{
+				"id": "d5ZTS",
+				"type": "frame",
+				"name": "Sidebar",
+				"reusable": true,
+				"layout": "vertical",
+				"width": 280,
+				"height": "fill_container(640)",
+				"children": [
+					{ "id": "header", "type": "frame", "width": "fill_container", "height": 80 }
+				]
+			},
+			{
+				"id": "root",
+				"type": "frame",
+				"layout": "horizontal",
+				"width": 1440,
+				"height": 900,
+				"children": [
+					{ "id": "sidebar", "type": "ref", "ref": "d5ZTS" },
+					{ "id": "content", "type": "frame", "layout": "vertical", "width": "fill_container", "height": 900 }
+				]
+			}
+		]
+	})JSON");
+
+	FPenDocument Doc;
+	TestTrue(TEXT("CrossFill parse succeeds"), FPenParser::ParseDocument(Json, Doc));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+
+	const FUMGWidgetNode* Sidebar = FindWidgetById(Data.RootWidget, TEXT("sidebar"));
+	TestTrue(TEXT("Sidebar widget exists"), Sidebar != nullptr);
+	if (Sidebar)
+	{
+		TestTrue(TEXT("Sidebar resolved height should use parent inner height (900)"),
+			FMath::IsNearlyEqual(Sidebar->Bounds.H, 900.0f, 0.01f));
+	}
+	return true;
+}
+
+// ============================================================
+// Test 9: IconFont 无映射降级
+// ============================================================
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIconFontNoMappingFallbackTest,
+	"Design2UMG.IconFont.NoMappingFallback",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FIconFontNoMappingFallbackTest::RunTest(const FString& Parameters)
+{
+	UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+	const TMap<FString, FString> SavedMap = Settings->IconFontAssetMap;
+	const FString SavedDefaultPath = Settings->DefaultIconFontAssetPath;
+	const FString SavedPlaceholder = Settings->MissingIconFontPlaceholder;
+
+	Settings->IconFontAssetMap.Empty();
+	Settings->DefaultIconFontAssetPath.Empty();
+	Settings->MissingIconFontPlaceholder = TEXT("[missing-icon]");
+
+	const FString Json = TEXT(R"JSON({
+		"children": [
+			{
+				"id": "root",
+				"type": "frame",
+				"width": 320,
+				"height": 64,
+				"layout": "horizontal",
+				"children": [
+					{
+						"id": "icon1",
+						"type": "icon_font",
+						"iconFontFamily": "Material Symbols Sharp",
+						"iconFontName": "dashboard",
+						"fontSize": 20
+					}
+				]
+			}
+		]
+	})JSON");
+
+	FPenDocument Doc;
+	TestTrue(TEXT("Icon fallback parse succeeds"), FPenParser::ParseDocument(Json, Doc));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+
+	const FUMGWidgetNode* IconNode = FindWidgetByProperty(Data.RootWidget, TEXT("IconName"));
+	TestTrue(TEXT("Icon widget exists"), IconNode != nullptr);
+	if (IconNode)
+	{
+		TestFalse(TEXT("Missing mapping should not inject invalid FontFamily string as Typeface"),
+			IconNode->Properties.Contains(TEXT("FontFamily")));
+		const FString* TextValue = IconNode->Properties.Find(TEXT("Text"));
+		TestTrue(TEXT("Missing mapping uses configured placeholder text"),
+			TextValue && *TextValue == TEXT("[missing-icon]"));
+	}
+
+	Settings->IconFontAssetMap = SavedMap;
+	Settings->DefaultIconFontAssetPath = SavedDefaultPath;
+	Settings->MissingIconFontPlaceholder = SavedPlaceholder;
+	return true;
+}
+
+// ============================================================
+// Test 10: Parser number/string 宽容解析
+// ============================================================
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FParserNumberStringFlexibleTest,
+	"Design2UMG.Parser.NumberStringFlexible",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FParserNumberStringFlexibleTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"JSON({
+		"children": [
+			{
+				"id": "root",
+				"type": "frame",
+				"x": "12",
+				"y": "34.5",
+				"rotation": "3",
+				"width": 800,
+				"height": 600,
+				"layout": "vertical",
+				"gap": "8",
+				"opacity": "0.75",
+				"padding": ["1", "2", "3", "4"],
+				"cornerRadius": ["5", "6", "7", "8"],
+				"stroke": {
+					"align": "inside",
+					"thickness": "2.5"
+				},
+				"fill": {
+					"type": "image",
+					"url": "https://example.com/icon.png",
+					"imageTransform": [["1", "0", "0"], ["0", "1", "0"]]
+				},
+				"children": [
+					{
+						"id": "txt",
+						"type": "text",
+						"content": "Label",
+						"fontSize": "16",
+						"lineHeight": "1.5",
+						"letterSpacing": "0.2"
+					},
+					{
+						"id": "icon",
+						"type": "icon_font",
+						"iconFontName": "dashboard",
+						"weight": "500"
+					}
+				]
+			}
+		]
+	})JSON");
+
+	FPenDocument Doc;
+	TestTrue(TEXT("String number parse succeeds"), FPenParser::ParseDocument(Json, Doc));
+	TestEqual(TEXT("Top-level child count"), Doc.Children.Num(), 1);
+	if (Doc.Children.Num() == 0)
+		return false;
+
+	const TSharedPtr<FPenNode>& Root = Doc.Children[0];
+	TestTrue(TEXT("Root has parsed X"), Root->bHasX);
+	TestTrue(TEXT("Root has parsed Y"), Root->bHasY);
+	TestEqual(TEXT("Root gap parsed from string"), Root->Gap, 8.0f);
+	TestEqual(TEXT("Root opacity parsed from string"), Root->Opacity, 0.75f);
+	TestEqual(TEXT("Root padding top parsed from string"), Root->Padding.Top, 1.0f);
+	TestEqual(TEXT("Root padding right parsed from string"), Root->Padding.Right, 2.0f);
+	TestEqual(TEXT("Root padding bottom parsed from string"), Root->Padding.Bottom, 3.0f);
+	TestEqual(TEXT("Root padding left parsed from string"), Root->Padding.Left, 4.0f);
+	TestTrue(TEXT("Root cornerRadius parsed as per-corner"), !Root->CornerRadius.bUniform);
+	TestEqual(TEXT("Root cornerRadius TL parsed from string"), Root->CornerRadius.TopLeft, 5.0f);
+	TestEqual(TEXT("Root cornerRadius TR parsed from string"), Root->CornerRadius.TopRight, 6.0f);
+	TestEqual(TEXT("Root cornerRadius BR parsed from string"), Root->CornerRadius.BottomRight, 7.0f);
+	TestEqual(TEXT("Root cornerRadius BL parsed from string"), Root->CornerRadius.BottomLeft, 8.0f);
+	TestTrue(TEXT("Root stroke thickness parsed as uniform"), Root->Stroke.Thickness.bUniform);
+	TestEqual(TEXT("Root stroke thickness parsed from string"), Root->Stroke.Thickness.Uniform, 2.5f);
+	TestEqual(TEXT("Root image transform A parsed from string"), Root->Fill.Image.Transform.A, 1.0f);
+	TestEqual(TEXT("Root image transform D parsed from string"), Root->Fill.Image.Transform.D, 1.0f);
+	TestEqual(TEXT("Root child count"), Root->Children.Num(), 2);
+	if (Root->Children.Num() < 2)
+		return false;
+	TestEqual(TEXT("Text fontSize parsed from string"), Root->Children[0]->FontSize, 16.0f);
+	TestEqual(TEXT("Text lineHeight parsed from string"), Root->Children[0]->LineHeight, 1.5f);
+	TestEqual(TEXT("Text letterSpacing parsed from string"), Root->Children[0]->LetterSpacing, 0.2f);
+	TestEqual(TEXT("Icon weight parsed from string"), Root->Children[1]->IconWeight, 500);
 	return true;
 }
 

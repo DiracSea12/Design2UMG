@@ -108,6 +108,7 @@ namespace
 		if (const FString* V = GET_PROP("Color")) T->SetColorAndOpacity(FSlateColor(FUMGWidgetUtils::ParseColor(*V)));
 		FSlateFontInfo FontInfo = T->GetFont();
 		bool bFontChanged = false;
+		const bool bIsIconFontWidget = P.Contains(TEXT("IconName"));
 		if (const FString* V = GET_PROP("FontSize"))
 		{
 			const float DisplaySize = FCString::Atof(**V);
@@ -124,7 +125,7 @@ namespace
 					FontInfo.FontObject = FontObject;
 				}
 			}
-			else if (!V->IsEmpty())
+			else if (!V->IsEmpty() && !bIsIconFontWidget)
 			{
 				FontInfo.TypefaceFontName = FName(**V);
 			}
@@ -356,6 +357,7 @@ namespace
 		UBorder* Bd = CastChecked<UBorder>(W);
 		FSlateBrush Brush = Bd->Background;
 		bool bBrushChanged = false;
+		const bool bHasCornerRadiusProp = P.Contains(TEXT("OutlineCornerRadius")) || P.Contains(TEXT("CornerRadii"));
 
 		if (const FString* V = GET_PROP("TexturePath"))
 		{
@@ -389,6 +391,15 @@ namespace
 				Brush.DrawAs = DrawAsType;
 				bBrushChanged = true;
 			}
+		}
+
+		// For RoundedBox without explicit corner data, pin to square corners.
+		// Otherwise UE may keep a previous HalfHeight rounding state and create capsule artifacts.
+		if (Brush.DrawAs == ESlateBrushDrawType::RoundedBox && !bHasCornerRadiusProp)
+		{
+			Brush.OutlineSettings.CornerRadii = FVector4(0, 0, 0, 0);
+			Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
+			bBrushChanged = true;
 		}
 
 		if (const FString* V = GET_PROP("OutlineCornerRadius"))
@@ -780,6 +791,13 @@ namespace
 				Brush.OutlineSettings.CornerRadii = B.CornerRadii;
 				Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
 			}
+			bChanged = true;
+		}
+
+		if (Brush.DrawAs == ESlateBrushDrawType::RoundedBox && B.OutlineCornerRadius < 0 && !B.HasCornerRadii())
+		{
+			Brush.OutlineSettings.CornerRadii = FVector4(0, 0, 0, 0);
+			Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
 			bChanged = true;
 		}
 

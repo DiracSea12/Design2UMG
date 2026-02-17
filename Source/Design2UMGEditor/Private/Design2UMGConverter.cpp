@@ -10,12 +10,59 @@
 
 namespace
 {
+	const TCHAR* ToSizeModeLogString(EPenSizeMode Mode)
+	{
+		switch (Mode)
+		{
+		case EPenSizeMode::Fixed: return TEXT("fixed");
+		case EPenSizeMode::FillContainer: return TEXT("fill");
+		case EPenSizeMode::FitContent: return TEXT("fit");
+		default: return TEXT("unknown");
+		}
+	}
+
 	bool IsDesignerOnlyNodeType(EPenNodeType Type)
 	{
 		return Type == EPenNodeType::Connection
 			|| Type == EPenNodeType::Note
 			|| Type == EPenNodeType::Prompt
 			|| Type == EPenNodeType::Context;
+	}
+
+	struct FChildSizeSnapshot
+	{
+		TSharedPtr<FPenNode> Child;
+		FPenSize RawWidth;
+		FPenSize RawHeight;
+		FPenSize EffectiveWidth;
+		FPenSize EffectiveHeight;
+		bool bUsedExpandedRef = false;
+	};
+
+	FChildSizeSnapshot BuildChildSizeSnapshot(const TSharedPtr<FPenNode>& Child, const FPenDocument& Doc)
+	{
+		FChildSizeSnapshot Snapshot;
+		Snapshot.Child = Child;
+		if (!Child.IsValid())
+			return Snapshot;
+
+		Snapshot.RawWidth = Child->Width;
+		Snapshot.RawHeight = Child->Height;
+		Snapshot.EffectiveWidth = Child->Width;
+		Snapshot.EffectiveHeight = Child->Height;
+
+		if (Child->Type == EPenNodeType::Ref)
+		{
+			if (auto Expanded = FPenRefExpander::ExpandRef(Child, Doc))
+			{
+				Snapshot.bUsedExpandedRef = true;
+				if (!Child->bHasWidth)
+					Snapshot.EffectiveWidth = Expanded->Width;
+				if (!Child->bHasHeight)
+					Snapshot.EffectiveHeight = Expanded->Height;
+			}
+		}
+		return Snapshot;
 	}
 
 	bool ShouldSkipNode(const TSharedPtr<FPenNode>& Node)
@@ -279,12 +326,12 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 		const float InnerH = Widget.Bounds.H - PadT - PadB;
 		const bool bHorizontal = (Node->Layout == EPenLayout::Horizontal);
 
-		// 收集有效子节点（不展开 Ref，直接用原始节点）
-		TArray<TSharedPtr<FPenNode>> EffChildren;
+		// Build effective size snapshots (ref children use expanded mode/value for stats).
+		TArray<FChildSizeSnapshot> EffChildren;
 		for (const auto& Child : Node->Children)
 		{
 			if (!ShouldSkipNode(Child))
-				EffChildren.Add(Child);
+				EffChildren.Add(BuildChildSizeSnapshot(Child, Doc));
 		}
 
 		// 统计主轴 Fixed 占用和 Fill 数量
@@ -293,11 +340,22 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 		const float TotalGap = EffChildren.Num() > 1 ? Node->Gap * (EffChildren.Num() - 1) : 0.0f;
 		for (const auto& EC : EffChildren)
 		{
-			const FPenSize& MainSize = bHorizontal ? EC->Width : EC->Height;
+			const FPenSize& MainSize = bHorizontal ? EC.EffectiveWidth : EC.EffectiveHeight;
 			if (MainSize.IsFill())
 				FillCount++;
 			else
 				FixedMainSum += MainSize.Value;
+
+			const FPenSize& RawMain = bHorizontal ? EC.RawWidth : EC.RawHeight;
+			const FPenSize& RawCross = bHorizontal ? EC.RawHeight : EC.RawWidth;
+			const FPenSize& EffectiveCross = bHorizontal ? EC.EffectiveHeight : EC.EffectiveWidth;
+			UE_LOG(LogDesign2UMG, Verbose, TEXT("PreResolveFill Child '%s': ref=%d rawMain=%s(%.0f) effMain=%s(%.0f) rawCross=%s(%.0f) effCross=%s(%.0f)"),
+				EC.Child.IsValid() ? *EC.Child->Id : TEXT("<invalid>"),
+				EC.bUsedExpandedRef ? 1 : 0,
+				ToSizeModeLogString(RawMain.Mode), RawMain.Value,
+				ToSizeModeLogString(MainSize.Mode), MainSize.Value,
+				ToSizeModeLogString(RawCross.Mode), RawCross.Value,
+				ToSizeModeLogString(EffectiveCross.Mode), EffectiveCross.Value);
 		}
 
 		// 辅助 lambda：只修改 Value 不改 Mode，保留 FillContainer 语义给下游 Slot 映射
@@ -317,12 +375,12 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 
 			for (auto& EC : EffChildren)
 			{
-				const FPenSize& MainSize = bHorizontal ? EC->Width : EC->Height;
+				const FPenSize& MainSize = bHorizontal ? EC.EffectiveWidth : EC.EffectiveHeight;
 				if (MainSize.IsFill())
-					ResolveSize(EC, bHorizontal, FillMain);
-				const FPenSize& CrossSize = bHorizontal ? EC->Height : EC->Width;
+					ResolveSize(EC.Child, bHorizontal, FillMain);
+				const FPenSize& CrossSize = bHorizontal ? EC.EffectiveHeight : EC.EffectiveWidth;
 				if (CrossSize.IsFill())
-					ResolveSize(EC, !bHorizontal, bHorizontal ? InnerH : InnerW);
+					ResolveSize(EC.Child, !bHorizontal, bHorizontal ? InnerH : InnerW);
 			}
 
 			UE_LOG(LogDesign2UMG, Log, TEXT("PreResolveFill: '%s' layout=%s inner=(%.0f,%.0f) fixed=%.0f fill=%d each=%.0f"),
@@ -334,9 +392,9 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 			// 没有 Fill 子节点，但交叉轴可能有 FillContainer
 			for (auto& EC : EffChildren)
 			{
-				const FPenSize& CrossSize = bHorizontal ? EC->Height : EC->Width;
+				const FPenSize& CrossSize = bHorizontal ? EC.EffectiveHeight : EC.EffectiveWidth;
 				if (CrossSize.IsFill())
-					ResolveSize(EC, !bHorizontal, bHorizontal ? InnerH : InnerW);
+					ResolveSize(EC.Child, !bHorizontal, bHorizontal ? InnerH : InnerW);
 			}
 		}
 	}
@@ -536,28 +594,64 @@ FUMGWidgetNode FDesign2UMGConverter::CreateIconFontWidget(const TSharedPtr<FPenN
 	FUMGWidgetNode Widget;
 	Widget.Type = TEXT("TextBlock");
 
-	// 图标字体族 → UE5 字体资产路径（需用户在设置中配置映射）
-	if (!Node->IconFontFamily.IsEmpty())
+	UDesign2UMGSettings* MutableSettings = UDesign2UMGSettings::Get();
+	const UDesign2UMGSettings* Settings = MutableSettings;
+	FString AssetPath;
+	bool bUsedDefaultIconPath = false;
+	if (Settings && !Node->IconFontFamily.IsEmpty())
 	{
-		FString AssetPath = UDesign2UMGSettings::Get()->FindIconFontAssetPath(Node->IconFontFamily);
+		AssetPath = Settings->FindIconFontAssetPath(Node->IconFontFamily);
 		if (AssetPath.IsEmpty())
+		{
+			AssetPath = Settings->DefaultIconFontAssetPath;
+			bUsedDefaultIconPath = !AssetPath.IsEmpty();
+		}
+	}
+
+	// If family mapping is missing but a valid default icon font path exists, persist it once.
+	if (bUsedDefaultIconPath && MutableSettings && !Node->IconFontFamily.IsEmpty())
+	{
+		const FString* ExistingPath = MutableSettings->IconFontAssetMap.Find(Node->IconFontFamily);
+		if (!ExistingPath || ExistingPath->IsEmpty())
+		{
+			MutableSettings->IconFontAssetMap.Add(Node->IconFontFamily, AssetPath);
+			MutableSettings->SaveConfig();
+			UE_LOG(LogDesign2UMG, Display,
+				TEXT("Auto-mapped icon font family '%s' to default asset path '%s'"),
+				*Node->IconFontFamily, *AssetPath);
+		}
+	}
+
+	if (!AssetPath.IsEmpty())
+	{
+		Widget.Properties.Add(TEXT("FontFamily"), AssetPath);
+	}
+	else if (!Node->IconFontFamily.IsEmpty())
+	{
+		static TSet<FString> WarnedFamilies;
+		if (!WarnedFamilies.Contains(Node->IconFontFamily))
 		{
 			UE_LOG(LogDesign2UMG, Warning,
 				TEXT("IconFont '%s': font family '%s' has no asset mapping. "
-					 "Configure in Editor Preferences > Plugins > Pen To UMG > Icon Font Asset Map"),
+					 "Configure mapping or Default Icon Font Asset Path in Editor Preferences > Plugins > Pen To UMG"),
 				*Node->IconFontName, *Node->IconFontFamily);
-			Widget.Properties.Add(TEXT("FontFamily"), Node->IconFontFamily);
-		}
-		else
-		{
-			Widget.Properties.Add(TEXT("FontFamily"), AssetPath);
+			WarnedFamilies.Add(Node->IconFontFamily);
 		}
 	}
 
 	// 图标名称即连字文本（如 "dashboard" 在 Material Symbols 中渲染为图标）
 	Widget.Properties.Add(TEXT("IconName"), Node->IconFontName);
-	if (!Node->IconFontName.IsEmpty())
-		Widget.Properties.Add(TEXT("Text"), Node->IconFontName);
+	FString IconText;
+	if (!AssetPath.IsEmpty())
+	{
+		IconText = Node->IconFontName;
+	}
+	else if (Settings && !Settings->MissingIconFontPlaceholder.IsEmpty())
+	{
+		IconText = Settings->MissingIconFontPlaceholder;
+	}
+	if (!IconText.IsEmpty())
+		Widget.Properties.Add(TEXT("Text"), IconText);
 
 	if (Node->FontSize > 0)
 	{
@@ -629,9 +723,9 @@ FVector2D FDesign2UMGConverter::PreComputeFitContentSizes(const TSharedPtr<FPenN
 		if (Expanded.IsValid())
 		{
 			const FVector2D RefSize(PreComputeFitContentSizes(Expanded, Doc));
-			if (Node->Width.IsFit() && Node->Width.Value == 0 && RefSize.X > 0)
+			if (Node->Width.IsFit() && Node->Width.Value == 0 && RefSize.X > 0 && !Expanded->Width.IsFill())
 				Node->Width.Value = static_cast<float>(RefSize.X);
-			if (Node->Height.IsFit() && Node->Height.Value == 0 && RefSize.Y > 0)
+			if (Node->Height.IsFit() && Node->Height.Value == 0 && RefSize.Y > 0 && !Expanded->Height.IsFill())
 				Node->Height.Value = static_cast<float>(RefSize.Y);
 			return RefSize;
 		}

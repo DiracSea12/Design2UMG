@@ -13,7 +13,7 @@ class FPenVisualMapper
 {
 public:
 	static void ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedPtr<FPenNode>& Node);
-	static void ApplyRoundedCorner(FUMGWidgetNode& Widget, const FPenCornerRadius& Radius);
+	static void ApplyRoundedCorner(FUMGWidgetNode& Widget, const FPenCornerRadius& Radius, float Width = -1.0f, float Height = -1.0f);
 	static void ApplyStroke(FUMGWidgetNode& Widget, const FPenStroke& Stroke);
 	static FUMGWidgetNode WrapWithBorder(FUMGWidgetNode&& Widget, const TSharedPtr<FPenNode>& Node);
 	static FUMGWidgetNode WrapWithBackgroundBlur(FUMGWidgetNode&& Widget, float BlurStrength);
