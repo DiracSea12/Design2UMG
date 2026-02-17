@@ -109,6 +109,7 @@ UWidgetBlueprint* ImportSingleFrame(const FString& FilePath, const FString& Outp
 	if (!FFileHelper::LoadFileToString(JsonStr, *FilePath))
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("PenFileImport: Failed to read file: %s"), *FilePath);
+		FDesign2UMGNotification::Error(LOCTEXT("ReadFailed", "Design2UMG: Failed to read .pen file"));
 		return nullptr;
 	}
 	if (SlowTask.ShouldCancel()) return nullptr;
@@ -117,6 +118,7 @@ UWidgetBlueprint* ImportSingleFrame(const FString& FilePath, const FString& Outp
 	if (!FDesignSourceRegistry::Convert(TEXT("Pen"), JsonStr, Data))
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("PenFileImport: Convert failed: %s"), *FilePath);
+		FDesign2UMGNotification::Error(LOCTEXT("ConvertFailed", "Design2UMG: Failed to convert design to widgets"));
 		return nullptr;
 	}
 	if (SlowTask.ShouldCancel()) return nullptr;
@@ -144,7 +146,10 @@ void ImportWithTargetNode(const FString& FilePath, const FString& TargetNodeId, 
 	SlowTask.EnterProgressFrame(1.0f, LOCTEXT("Step1_ParseNode", "Parsing design file..."));
 	FUMGWidgetData Data;
 	if (!FPenImporter::ImportFileWithTargetNode(FilePath, TargetNodeId, Data))
+	{
+		FDesign2UMGNotification::Error(LOCTEXT("TargetNodeFailed", "Design2UMG: Failed to import selected frame"));
 		return;
+	}
 	if (SlowTask.ShouldCancel()) return;
 
 	SlowTask.EnterProgressFrame(1.0f, LOCTEXT("Step2_ImagesNode", "Downloading remote images..."));
