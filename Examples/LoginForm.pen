@@ -1,0 +1,118 @@
+{
+  "version": "1.0",
+  "children": [
+    {
+      "id": "login-frame",
+      "name": "LoginForm",
+      "type": "frame",
+      "width": 400,
+      "height": 500,
+      "layout": "vertical",
+      "gap": 16,
+      "padding": [32, 32, 32, 32],
+      "justifyContent": "center",
+      "alignItems": "center",
+      "fill": { "type": "color", "color": "#1A1A2E" },
+      "cornerRadius": [12, 12, 12, 12],
+      "children": [
+        {
+          "id": "title",
+          "name": "Title",
+          "type": "text",
+          "content": "Welcome Back",
+          "fontSize": 28,
+          "fontWeight": "bold",
+          "fill": { "type": "color", "color": "#EAEAEA" },
+          "textAlign": "center"
+        },
+        {
+          "id": "subtitle",
+          "name": "Subtitle",
+          "type": "text",
+          "content": "Sign in to continue",
+          "fontSize": 14,
+          "fill": { "type": "color", "color": "#888888" },
+          "textAlign": "center"
+        },
+        {
+          "id": "email-field",
+          "name": "EmailField",
+          "type": "frame",
+          "width": "fill_container",
+          "height": 48,
+          "fill": { "type": "color", "color": "#16213E" },
+          "cornerRadius": [8, 8, 8, 8],
+          "stroke": { "fill": { "type": "color", "color": "#0F3460" }, "thickness": 1 },
+          "padding": [12, 0, 12, 0],
+          "alignItems": "center",
+          "layout": "horizontal",
+          "children": [
+            {
+              "id": "email-text",
+              "name": "EmailPlaceholder",
+              "type": "text",
+              "content": "Email address",
+              "fontSize": 14,
+              "fill": { "type": "color", "color": "#666666" }
+            }
+          ]
+        },
+        {
+          "id": "password-field",
+          "name": "PasswordField",
+          "type": "frame",
+          "width": "fill_container",
+          "height": 48,
+          "fill": { "type": "color", "color": "#16213E" },
+          "cornerRadius": [8, 8, 8, 8],
+          "stroke": { "fill": { "type": "color", "color": "#0F3460" }, "thickness": 1 },
+          "padding": [12, 0, 12, 0],
+          "alignItems": "center",
+          "layout": "horizontal",
+          "children": [
+            {
+              "id": "password-text",
+              "name": "PasswordPlaceholder",
+              "type": "text",
+              "content": "Password",
+              "fontSize": 14,
+              "fill": { "type": "color", "color": "#666666" }
+            }
+          ]
+        },
+        {
+          "id": "login-btn",
+          "name": "LoginButton",
+          "type": "frame",
+          "width": "fill_container",
+          "height": 48,
+          "fill": { "type": "color", "color": "#E94560" },
+          "cornerRadius": [8, 8, 8, 8],
+          "layout": "horizontal",
+          "justifyContent": "center",
+          "alignItems": "center",
+          "children": [
+            {
+              "id": "login-btn-text",
+              "name": "LoginButtonText",
+              "type": "text",
+              "content": "Sign In",
+              "fontSize": 16,
+              "fontWeight": "semibold",
+              "fill": { "type": "color", "color": "#FFFFFF" }
+            }
+          ]
+        },
+        {
+          "id": "forgot-link",
+          "name": "ForgotPassword",
+          "type": "text",
+          "content": "Forgot password?",
+          "fontSize": 12,
+          "fill": { "type": "color", "color": "#E94560" },
+          "textAlign": "center"
+        }
+      ]
+    }
+  ]
+}

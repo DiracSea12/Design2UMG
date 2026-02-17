@@ -1,0 +1,187 @@
+{
+  "version": "1.0",
+  "children": [
+    {
+      "id": "dashboard",
+      "name": "Dashboard",
+      "type": "frame",
+      "width": 800,
+      "height": 480,
+      "layout": "vertical",
+      "gap": 24,
+      "padding": [24, 24, 24, 24],
+      "fill": { "type": "color", "color": "#0F0F0F" },
+      "children": [
+        {
+          "id": "header",
+          "name": "Header",
+          "type": "text",
+          "content": "Dashboard",
+          "fontSize": 24,
+          "fontWeight": "bold",
+          "fill": { "type": "color", "color": "#FFFFFF" }
+        },
+        {
+          "id": "cards-row",
+          "name": "CardsRow",
+          "type": "frame",
+          "width": "fill_container",
+          "height": "fit_content",
+          "layout": "horizontal",
+          "gap": 16,
+          "children": [
+            {
+              "id": "card1",
+              "name": "RevenueCard",
+              "type": "frame",
+              "width": "fill_container",
+              "height": 120,
+              "layout": "vertical",
+              "gap": 8,
+              "padding": [16, 16, 16, 16],
+              "fill": { "type": "color", "color": "#1A1A2E" },
+              "cornerRadius": [12, 12, 12, 12],
+              "children": [
+                {
+                  "id": "card1-label",
+                  "name": "RevenueLabel",
+                  "type": "text",
+                  "content": "Revenue",
+                  "fontSize": 12,
+                  "fill": { "type": "color", "color": "#888888" }
+                },
+                {
+                  "id": "card1-value",
+                  "name": "RevenueValue",
+                  "type": "text",
+                  "content": "$12,450",
+                  "fontSize": 28,
+                  "fontWeight": "bold",
+                  "fill": { "type": "color", "color": "#4ADE80" }
+                },
+                {
+                  "id": "card1-change",
+                  "name": "RevenueChange",
+                  "type": "text",
+                  "content": "+12.5% from last month",
+                  "fontSize": 11,
+                  "fill": { "type": "color", "color": "#666666" }
+                }
+              ]
+            },
+            {
+              "id": "card2",
+              "name": "UsersCard",
+              "type": "frame",
+              "width": "fill_container",
+              "height": 120,
+              "layout": "vertical",
+              "gap": 8,
+              "padding": [16, 16, 16, 16],
+              "fill": { "type": "color", "color": "#1A1A2E" },
+              "cornerRadius": [12, 12, 12, 12],
+              "children": [
+                {
+                  "id": "card2-label",
+                  "name": "UsersLabel",
+                  "type": "text",
+                  "content": "Active Users",
+                  "fontSize": 12,
+                  "fill": { "type": "color", "color": "#888888" }
+                },
+                {
+                  "id": "card2-value",
+                  "name": "UsersValue",
+                  "type": "text",
+                  "content": "3,842",
+                  "fontSize": 28,
+                  "fontWeight": "bold",
+                  "fill": { "type": "color", "color": "#60A5FA" }
+                },
+                {
+                  "id": "card2-change",
+                  "name": "UsersChange",
+                  "type": "text",
+                  "content": "+8.2% from last week",
+                  "fontSize": 11,
+                  "fill": { "type": "color", "color": "#666666" }
+                }
+              ]
+            },
+            {
+              "id": "card3",
+              "name": "OrdersCard",
+              "type": "frame",
+              "width": "fill_container",
+              "height": 120,
+              "layout": "vertical",
+              "gap": 8,
+              "padding": [16, 16, 16, 16],
+              "fill": { "type": "color", "color": "#1A1A2E" },
+              "cornerRadius": [12, 12, 12, 12],
+              "children": [
+                {
+                  "id": "card3-label",
+                  "name": "OrdersLabel",
+                  "type": "text",
+                  "content": "Orders",
+                  "fontSize": 12,
+                  "fill": { "type": "color", "color": "#888888" }
+                },
+                {
+                  "id": "card3-value",
+                  "name": "OrdersValue",
+                  "type": "text",
+                  "content": "284",
+                  "fontSize": 28,
+                  "fontWeight": "bold",
+                  "fill": { "type": "color", "color": "#F472B6" }
+                },
+                {
+                  "id": "card3-change",
+                  "name": "OrdersChange",
+                  "type": "text",
+                  "content": "-3.1% from yesterday",
+                  "fontSize": 11,
+                  "fill": { "type": "color", "color": "#666666" }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "content-area",
+          "name": "ContentArea",
+          "type": "frame",
+          "width": "fill_container",
+          "height": "fill_container",
+          "fill": { "type": "color", "color": "#1A1A2E" },
+          "cornerRadius": [12, 12, 12, 12],
+          "padding": [20, 20, 20, 20],
+          "layout": "vertical",
+          "gap": 12,
+          "children": [
+            {
+              "id": "content-title",
+              "name": "ContentTitle",
+              "type": "text",
+              "content": "Recent Activity",
+              "fontSize": 16,
+              "fontWeight": "semibold",
+              "fill": { "type": "color", "color": "#EAEAEA" }
+            },
+            {
+              "id": "content-desc",
+              "name": "ContentDesc",
+              "type": "text",
+              "content": "Your latest transactions and events will appear here.",
+              "fontSize": 13,
+              "fill": { "type": "color", "color": "#666666" },
+              "lineHeight": 1.5
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

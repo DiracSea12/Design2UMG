@@ -42,30 +42,53 @@ Enable in Edit > Plugins > "Pen To UMG".
 
 ## Quick Start
 
-### Drag & Drop
+5 步上手，从设计稿到可运行的 Widget Blueprint：
 
-Drag a `.pen` file into the Content Browser. Select a frame if multiple exist. Done.
+### Step 1 — 安装插件
 
-### Commandlet
+将插件复制到引擎或项目插件目录（见上方 Installation），重启编辑器。首次启动会弹出 Welcome 对话框，设置设计分辨率和输出路径。
 
+### Step 2 — 准备设计文件
+
+使用 [Pencil](https://pencil.evolves.dev/) 创建设计，导出为 `.pen` 文件。插件附带两个示例文件可直接体验：
+
+- `Examples/LoginForm.pen` — 登录表单（垂直布局、圆角卡片、按钮）
+- `Examples/Dashboard.pen` — 仪表盘（水平卡片行、统计数据、嵌套布局）
+
+### Step 3 — 导入
+
+将 `.pen` 文件拖入 Content Browser，插件自动解析并弹出 Frame 选择器（多 Frame 时）。
+
+也可通过控制台命令导入：
 ```bash
-UnrealEditor.exe "YourProject.uproject" \
-  -ExecCmds="Design2UMG.Import path/to/design.pen --node=<NodeId> --no-preview" \
-  -log -nosplash -stdout -unattended
+Design2UMG.Import Examples/LoginForm.pen
 ```
 
-### Figma Import
+### Step 4 — 预览与调整
 
+导入完成后，编辑器显示摘要通知（Widget 数量、耗时、警告）。有警告时弹出详情对话框。
+
+在 Edit > Editor Preferences > Plugins > Pen To UMG 中可调整：
+- 设计分辨率（Design Width / Height）
+- 远程图片导入路径
+- 字体自动导入开关
+- 图标字体映射
+
+### Step 5 — 生成 Widget Blueprint
+
+导入成功后，Widget Blueprint 自动保存到输出路径（默认 `/Game/Design2UMG/`）。双击打开 UMG Designer 即可预览和编辑。
+
+### 其他导入方式
+
+**Figma 导入：**
 ```bash
-# In UE5 console
 Design2UMG.FigmaImport <file_key> <personal_access_token> [node_id]
 ```
 
-### Live Pencil Connection
-
-1. Open Pencil desktop app with your design
-2. In UE5 Editor, open Design2UMG toolbar > "Connect"
-3. Select a frame — changes sync in real-time
+**Pencil 实时同步：**
+1. 打开 Pencil 桌面应用
+2. UE5 编辑器中点击 Design2UMG 工具栏 > "Connect"
+3. 选择 Frame — 设计变更实时同步
 
 ## Architecture
 
