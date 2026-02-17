@@ -5,6 +5,22 @@
 #include "CoreMinimal.h"
 
 struct FUMGWidgetData;
+struct FUMGWidgetNode;
+
+struct FImportResult
+{
+	bool bSuccess = false;
+	int32 WidgetCount = 0;
+	int32 SkippedNodeCount = 0;
+	int32 WarningCount = 0;
+	double ElapsedSeconds = 0.0;
+	TArray<FString> Warnings;
+
+	static int32 CountWidgets(const FUMGWidgetNode& Node);
+	static FImportResult FromData(const FUMGWidgetData& Data, double Elapsed);
+	void ShowSummaryNotification() const;
+	void ShowSummaryDialog() const;
+};
 
 /**
  * .pen 文件导入入口
