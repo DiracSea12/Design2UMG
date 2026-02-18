@@ -40,7 +40,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 		constexpr int32 MaxAttempts = 1000;
 
 		do {
-			NewName = FString::Printf(TEXT("%s_%d"), *WidgetData.WidgetName, Suffix);
+			NewName = FString::Printf(TEXT("%s_%d"), *AssetName, Suffix);
 			TestPath = PackagePath / NewName + TEXT(".") + NewName;
 			++Suffix;
 		} while (AR.GetAssetByObjectPath(FSoftObjectPath(TestPath)).IsValid() && Suffix <= MaxAttempts);

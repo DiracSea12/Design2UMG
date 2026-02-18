@@ -216,7 +216,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FPenDocument& Document)
 	// WidgetName 使用第一个非跳过 frame 的名称，fallback 到 WBP_FromPen
 	for (const auto& Child : Document.Children)
 	{
-		if (!ShouldSkipNode(Child) && !Child->Name.IsEmpty())
+		if (!ShouldSkipNode(Child) && !Child->bReusable && !Child->Name.IsEmpty())
 		{
 			Result.WidgetName = FString::Printf(TEXT("WBP_%s"), *Child->Name);
 			break;

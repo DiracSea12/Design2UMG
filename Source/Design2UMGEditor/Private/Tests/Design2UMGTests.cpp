@@ -685,4 +685,40 @@ bool FParserNumberStringFlexibleTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// ============================================================
+// Batch import: pencil-welcome.pen 4 frames
+// ============================================================
+#include "PenImporter.h"
+#include "PenImportUtils.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenWelcomeBatchImportTest,
+	"Design2UMG.BatchImport.PencilWelcome",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FPenWelcomeBatchImportTest::RunTest(const FString& Parameters)
+{
+	const FString PenFile = TEXT("G:/UE5/FPSRoguelike/Designs/pencil-welcome.pen");
+	const FString OutputPath = TEXT("/Game/Design2UMG/PencilWelcome");
+
+	struct FFrameInfo { FString Id; FString Name; };
+	TArray<FFrameInfo> Frames = {
+		{TEXT("sbChi"), TEXT("welcome")},
+		{TEXT("cOnQP"), TEXT("Step1")},
+		{TEXT("tlPHu"), TEXT("Step2")},
+		{TEXT("CzlXB"), TEXT("Step3")}
+	};
+
+	for (const auto& F : Frames)
+	{
+		FUMGWidgetData Data;
+		bool bOk = FPenImporter::ImportFileWithTargetNode(PenFile, F.Id, Data);
+		TestTrue(*FString::Printf(TEXT("Parse %s"), *F.Name), bOk);
+		if (!bOk) continue;
+
+		bool bPng = PenImportUtils::GenerateBlueprintAndPng(Data, OutputPath / Data.WidgetName);
+		TestTrue(*FString::Printf(TEXT("Render %s"), *F.Name), bPng);
+	}
+	return true;
+}
+
 #endif // WITH_AUTOMATION_WORKER
