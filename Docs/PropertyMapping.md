@@ -30,7 +30,7 @@
 | LetterSpacing | Font.LetterSpacing | 像素间距 |
 | LineHeight | LineHeightPercentage | 百分比乘数 |
 | TextAlign | Justification | Left / Center / Right |
-| TextAlignVertical | TextAlignVertical | Top / Center / Bottom |
+| TextAlignVertical | TextAlignVertical | Top / Center / Bottom ⚠️ 写入属性但运行时未应用 |
 | TextGrowth (Auto) | (默认) | 不换行 |
 | TextGrowth (FixedWidth) | AutoWrapText=true | 固定宽度换行 |
 | TextGrowth (FixedWidthHeight) | AutoWrapText=true + Clipping=ClipToBounds | 换行+裁剪溢出 |
@@ -55,8 +55,8 @@
 | .pen Fill Type | UMG | Notes |
 |---------------|-----|-------|
 | Color | BrushColor / ColorAndOpacity | Text 用 ColorAndOpacity，其他用 BrushColor |
-| Gradient (Linear H) | MaterialRef = "gradienth" | 角度 0-45° 或 225-315° |
-| Gradient (Linear V) | MaterialRef = "gradientv" | 角度 45-135° 或 315-45° |
+| Gradient (Linear H) | MaterialRef = "gradienth" | 角度 [0°,45°] ∪ [135°,225°] ∪ [315°,360°)（含边界） |
+| Gradient (Linear V) | MaterialRef = "gradientv" | 角度 (45°,135°) ∪ (225°,315°)（不含边界） |
 | Gradient (Radial/Angular) | MaterialRef = "radialgradient" | |
 | Image | TexturePath | URL 远程下载或本地路径 |
 
@@ -134,7 +134,7 @@
 | .pen Effect | UMG | Support |
 |------------|-----|---------|
 | Shadow (outer) | BoxShadow 包裹 | ✅ Offset, Blur, Spread, Color |
-| Shadow (inner) | BoxShadow 包裹 | ✅ bIsInner |
+| Shadow (inner) | BoxShadow 包裹 | ⚠️ bInner 已解析但未区分渲染，与 outer 走同一逻辑 |
 | BackgroundBlur | BackgroundBlur 包裹 | ✅ BlurStrength |
 | Blur | — | ❌ 不支持（需自定义 Material） |
 

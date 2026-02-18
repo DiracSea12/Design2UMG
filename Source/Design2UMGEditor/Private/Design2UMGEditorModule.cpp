@@ -512,7 +512,7 @@ namespace
 			[
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 8, 0)
-				[ SNew(STextBlock).Text(LOCTEXT("WelcomeOutputPath", "Default Output Path:")) ]
+				[ SNew(STextBlock).Text(LOCTEXT("WelcomeImagePath", "Image Import Path:")) ]
 				+ SHorizontalBox::Slot().FillWidth(1.0f)
 				[ SAssignNew(OutputPathBox, SEditableTextBox).Text(FText::FromString(Settings->RemoteImageImportPath)) ]
 			]

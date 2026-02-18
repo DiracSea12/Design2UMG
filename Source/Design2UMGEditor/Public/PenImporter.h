@@ -11,7 +11,6 @@ struct FImportResult
 {
 	bool bSuccess = false;
 	int32 WidgetCount = 0;
-	int32 SkippedNodeCount = 0;
 	int32 WarningCount = 0;
 	double ElapsedSeconds = 0.0;
 	TArray<FString> Warnings;

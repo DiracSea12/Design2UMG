@@ -151,8 +151,8 @@ bool FIncrementalUpdater::ShowDiffPreviewDialog(FDiffResult& InOutDiff)
 			+ SHorizontalBox::Slot().AutoWidth().Padding(4.0f, 2.0f)
 			[
 				SNew(SCheckBox)
-				.IsChecked_Lambda([&Entry]() { return Entry.bAccepted ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
-				.OnCheckStateChanged_Lambda([&Entry](ECheckBoxState State) { Entry.bAccepted = (State == ECheckBoxState::Checked); })
+				.IsChecked_Lambda([DiffPtr, i]() { return DiffPtr->Entries[i].bAccepted ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+				.OnCheckStateChanged_Lambda([DiffPtr, i](ECheckBoxState State) { DiffPtr->Entries[i].bAccepted = (State == ECheckBoxState::Checked); })
 			]
 			+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(4.0f, 2.0f).VAlign(VAlign_Center)
 			[
