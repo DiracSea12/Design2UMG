@@ -4,6 +4,7 @@
 #include "UMGWidgetUtils.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
+#include "ObjectTools.h"
 
 #include "WidgetBlueprint.h"
 #include "Blueprint/WidgetTree.h"
@@ -24,7 +25,7 @@ UWidgetBlueprint* FUMGGenerator::GenerateWidgetBlueprint(const FUMGWidgetData& W
 
 UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& WidgetData, const FString& PackagePath)
 {
-	FString AssetName = WidgetData.WidgetName;
+	FString AssetName = ObjectTools::SanitizeObjectName(WidgetData.WidgetName);
 	FString FullPath = PackagePath / AssetName;
 
 	// 检查资产冲突

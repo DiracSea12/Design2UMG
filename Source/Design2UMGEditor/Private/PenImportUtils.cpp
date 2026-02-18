@@ -79,7 +79,7 @@ UWidgetBlueprint* PenImportUtils::GenerateBlueprint(const FUMGWidgetData& Data, 
 	}
 	UE_LOG(LogDesign2UMG, Log, TEXT("PenImportUtils: Generated %s"), *WBP->GetPathName());
 
-	FImportResult Result = FImportResult::FromData(Data, FPlatformTime::Seconds() - StartTime);
+	FImportResult Result = FImportResult::FromData(EffectiveData, FPlatformTime::Seconds() - StartTime);
 	Result.ShowSummaryNotification();
 	return WBP;
 }
