@@ -257,6 +257,19 @@ namespace
 							Brush.SetUVRegion(FBox2f(FVector2f(TX, TY), FVector2f(TX + A, TY + D)));
 							bBrushModified = true;
 						}
+						else if (!FMath::IsNearlyZero(B) || !FMath::IsNearlyZero(C))
+						{
+							// 有旋转：CPU 仿射重采样生成新纹理
+							UTexture2D* SrcTex = Cast<UTexture2D>(Brush.GetResourceObject());
+							int32 CropW = FMath::Max(1, GET_PROP("WidthOverride") ? FCString::Atoi(**GET_PROP("WidthOverride")) : 64);
+							int32 CropH = FMath::Max(1, GET_PROP("HeightOverride") ? FCString::Atoi(**GET_PROP("HeightOverride")) : 64);
+							if (UTexture2D* Cropped = FProceduralShapeGenerator::ApplyAffineCrop(SrcTex, A, B, TX, C, D, TY, CropW, CropH))
+							{
+								I->SetBrushFromTexture(Cropped);
+								Brush = I->GetBrush();
+								bBrushModified = false; // Brush 已通过 SetBrushFromTexture 设置
+							}
+						}
 					}
 				}
 			}
@@ -488,6 +501,17 @@ namespace
 						{
 							Brush.SetUVRegion(FBox2f(FVector2f(TX, TY), FVector2f(TX + A, TY + D)));
 							bBrushChanged = true;
+						}
+						else if (!FMath::IsNearlyZero(B) || !FMath::IsNearlyZero(C))
+						{
+							UTexture2D* SrcTex = Cast<UTexture2D>(Brush.GetResourceObject());
+							int32 CropW = FMath::Max(1, GET_PROP("WidthOverride") ? FCString::Atoi(**GET_PROP("WidthOverride")) : 64);
+							int32 CropH = FMath::Max(1, GET_PROP("HeightOverride") ? FCString::Atoi(**GET_PROP("HeightOverride")) : 64);
+							if (UTexture2D* Cropped = FProceduralShapeGenerator::ApplyAffineCrop(SrcTex, A, B, TX, C, D, TY, CropW, CropH))
+							{
+								Brush.SetResourceObject(Cropped);
+								bBrushChanged = true;
+							}
 						}
 					}
 				}

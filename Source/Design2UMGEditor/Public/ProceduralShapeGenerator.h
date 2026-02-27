@@ -74,6 +74,9 @@ public:
 	 */
 	static UTexture2D* GenerateFromMaterialRef(const FString& MaterialRef, const TMap<FString, FString>& Properties, UObject* Outer = nullptr);
 
+	/** 对源纹理应用仿射变换裁剪（支持旋转），输出新纹理 */
+	static UTexture2D* ApplyAffineCrop(UTexture2D* Source, float A, float B, float TX, float C, float D, float TY, int32 OutW, int32 OutH);
+
 	/** 释放所有通过 Generate* 创建的临时纹理的 Root 引用，允许 GC 回收 */
 	static void ReleaseTransientTextures();
 

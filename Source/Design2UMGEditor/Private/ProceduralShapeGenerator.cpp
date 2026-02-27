@@ -616,6 +616,99 @@ UTexture2D* FProceduralShapeGenerator::GenerateBoxShadow(int32 Width, int32 Heig
 	return Texture;
 }
 
+UTexture2D* FProceduralShapeGenerator::ApplyAffineCrop(UTexture2D* Source, float A, float B, float TX, float C, float D, float TY, int32 OutW, int32 OutH)
+{
+	if (!Source || OutW <= 0 || OutH <= 0) return nullptr;
+
+	const int32 SrcW = Source->GetSizeX();
+	const int32 SrcH = Source->GetSizeY();
+	if (SrcW <= 0 || SrcH <= 0) return nullptr;
+
+	// Read source pixels
+	const FColor* SrcData = nullptr;
+	FTexturePlatformData* PlatformData = Source->GetPlatformData();
+	if (!PlatformData || PlatformData->Mips.Num() == 0) return nullptr;
+
+	const void* RawData = PlatformData->Mips[0].BulkData.LockReadOnly();
+	if (!RawData) return nullptr;
+	SrcData = static_cast<const FColor*>(RawData);
+
+	// Invert affine matrix [[a,b,tx],[c,d,ty]]
+	const float Det = A * D - B * C;
+	if (FMath::IsNearlyZero(Det))
+	{
+		PlatformData->Mips[0].BulkData.Unlock();
+		return nullptr;
+	}
+	const float InvDet = 1.0f / Det;
+	const float IA =  D * InvDet, IB = -B * InvDet;
+	const float IC = -C * InvDet, ID =  A * InvDet;
+	const float ITX = (B * TY - D * TX) * InvDet;
+	const float ITY = (C * TX - A * TY) * InvDet;
+
+	// Resample with bilinear interpolation
+	TArray<FColor> Pixels;
+	Pixels.SetNumUninitialized(OutW * OutH);
+
+	for (int32 Y = 0; Y < OutH; ++Y)
+	{
+		const float NY = static_cast<float>(Y) / FMath::Max(1, OutH - 1);
+		for (int32 X = 0; X < OutW; ++X)
+		{
+			const float NX = static_cast<float>(X) / FMath::Max(1, OutW - 1);
+
+			// Map output normalized coords back to source UV
+			const float SU = IA * NX + IB * NY + ITX;
+			const float SV = IC * NX + ID * NY + ITY;
+
+			// Source pixel coords (float)
+			const float SX = SU * (SrcW - 1);
+			const float SY = SV * (SrcH - 1);
+
+			// Bilinear sample
+			if (SX < -0.5f || SX >= SrcW || SY < -0.5f || SY >= SrcH)
+			{
+				Pixels[Y * OutW + X] = FColor(0, 0, 0, 0);
+				continue;
+			}
+
+			const int32 X0 = FMath::Clamp(FMath::FloorToInt(SX), 0, SrcW - 1);
+			const int32 Y0 = FMath::Clamp(FMath::FloorToInt(SY), 0, SrcH - 1);
+			const int32 X1 = FMath::Min(X0 + 1, SrcW - 1);
+			const int32 Y1 = FMath::Min(Y0 + 1, SrcH - 1);
+			const float FX = SX - FMath::FloorToFloat(SX);
+			const float FY = SY - FMath::FloorToFloat(SY);
+
+			const FColor& C00 = SrcData[Y0 * SrcW + X0];
+			const FColor& C10 = SrcData[Y0 * SrcW + X1];
+			const FColor& C01 = SrcData[Y1 * SrcW + X0];
+			const FColor& C11 = SrcData[Y1 * SrcW + X1];
+
+			auto Lerp = [](uint8 V0, uint8 V1, float T) -> uint8 {
+				return FMath::RoundToInt(V0 + (V1 - V0) * T);
+			};
+			auto BiLerp = [&](uint8 V00, uint8 V10, uint8 V01, uint8 V11) -> uint8 {
+				uint8 Top = Lerp(V00, V10, FX);
+				uint8 Bot = Lerp(V01, V11, FX);
+				return Lerp(Top, Bot, FY);
+			};
+
+			FColor& Out = Pixels[Y * OutW + X];
+			Out.R = BiLerp(C00.R, C10.R, C01.R, C11.R);
+			Out.G = BiLerp(C00.G, C10.G, C01.G, C11.G);
+			Out.B = BiLerp(C00.B, C10.B, C01.B, C11.B);
+			Out.A = BiLerp(C00.A, C10.A, C01.A, C11.A);
+		}
+	}
+
+	PlatformData->Mips[0].BulkData.Unlock();
+
+	UTexture2D* Result = CreateTransientTexture(OutW, OutH, nullptr);
+	if (!Result) return nullptr;
+	FillTextureData(Result, Pixels);
+	return Result;
+}
+
 UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& MaterialRef, const TMap<FString, FString>& Properties, UObject* Outer)
 {
 	FLinearColor Color = FLinearColor::White;
@@ -749,4 +842,86 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 	}
 
 	return nullptr;
+}
+
+UTexture2D* FProceduralShapeGenerator::ApplyAffineCrop(UTexture2D* Source, float A, float B, float TX, float C, float D, float TY, int32 OutW, int32 OutH)
+{
+	if (!Source || OutW <= 0 || OutH <= 0) return nullptr;
+
+	const int32 SrcW = Source->GetSizeX();
+	const int32 SrcH = Source->GetSizeY();
+	if (SrcW <= 0 || SrcH <= 0) return nullptr;
+
+	// Read source pixels
+	TArray<FColor> SrcPixels;
+	{
+		FTexture2DMipMap& Mip = Source->GetPlatformData()->Mips[0];
+		const void* Data = Mip.BulkData.LockReadOnly();
+		if (!Data) { Mip.BulkData.Unlock(); return nullptr; }
+		SrcPixels.SetNumUninitialized(SrcW * SrcH);
+		FMemory::Memcpy(SrcPixels.GetData(), Data, SrcW * SrcH * sizeof(FColor));
+		Mip.BulkData.Unlock();
+	}
+
+	// Inverse affine: source = inv([A,B;C,D]) * (out - [TX,TY])
+	const float Det = A * D - B * C;
+	if (FMath::IsNearlyZero(Det)) return nullptr;
+	const float InvDet = 1.0f / Det;
+	const float IA =  D * InvDet, IB = -B * InvDet;
+	const float IC = -C * InvDet, ID =  A * InvDet;
+
+	UTexture2D* Result = CreateTransientTexture(OutW, OutH, nullptr);
+	if (!Result) return nullptr;
+
+	TArray<FColor> OutPixels;
+	OutPixels.SetNumUninitialized(OutW * OutH);
+
+	for (int32 Y = 0; Y < OutH; ++Y)
+	{
+		for (int32 X = 0; X < OutW; ++X)
+		{
+			// Node-space normalized coords
+			float NX = (float)X / OutW;
+			float NY = (float)Y / OutH;
+			// Map to source UV via inverse affine
+			float SU = IA * (NX - TX) + IB * (NY - TY);
+			float SV = IC * (NX - TX) + ID * (NY - TY);
+			// Source pixel coords
+			float SX = SU * SrcW - 0.5f;
+			float SY = SV * SrcH - 0.5f;
+
+			// Bilinear interpolation
+			int32 X0 = FMath::FloorToInt(SX), Y0 = FMath::FloorToInt(SY);
+			float FX = SX - X0, FY = SY - Y0;
+
+			auto Sample = [&](int32 PX, int32 PY) -> FColor
+			{
+				PX = FMath::Clamp(PX, 0, SrcW - 1);
+				PY = FMath::Clamp(PY, 0, SrcH - 1);
+				return SrcPixels[PY * SrcW + PX];
+			};
+
+			FColor C00 = Sample(X0, Y0);
+			FColor C10 = Sample(X0 + 1, Y0);
+			FColor C01 = Sample(X0, Y0 + 1);
+			FColor C11 = Sample(X0 + 1, Y0 + 1);
+
+			auto Lerp = [](uint8 A, uint8 B, float T) -> uint8
+			{
+				return FMath::RoundToInt(A + (B - A) * T);
+			};
+
+			FColor Top(Lerp(C00.R, C10.R, FX), Lerp(C00.G, C10.G, FX),
+			           Lerp(C00.B, C10.B, FX), Lerp(C00.A, C10.A, FX));
+			FColor Bot(Lerp(C01.R, C11.R, FX), Lerp(C01.G, C11.G, FX),
+			           Lerp(C01.B, C11.B, FX), Lerp(C01.A, C11.A, FX));
+
+			OutPixels[Y * OutW + X] = FColor(
+				Lerp(Top.R, Bot.R, FY), Lerp(Top.G, Bot.G, FY),
+				Lerp(Top.B, Bot.B, FY), Lerp(Top.A, Bot.A, FY));
+		}
+	}
+
+	FillTextureData(Result, OutPixels);
+	return Result;
 }
