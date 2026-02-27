@@ -468,25 +468,27 @@ UTexture2D* FProceduralShapeGenerator::GenerateAngularGradient(int32 Width, int3
 	return Texture;
 }
 
-UTexture2D* FProceduralShapeGenerator::GenerateRadialGradient(int32 Size, FLinearColor ColorCenter, FLinearColor ColorEdge, UObject* Outer)
+UTexture2D* FProceduralShapeGenerator::GenerateRadialGradient(int32 Width, int32 Height, FLinearColor ColorCenter, FLinearColor ColorEdge, UObject* Outer)
 {
-	UTexture2D* Texture = CreateTransientTexture(Size, Size, Outer);
+	UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer);
 	if (!Texture) return nullptr;
 
 	TArray<FColor> Pixels;
-	Pixels.SetNumUninitialized(Size * Size);
+	Pixels.SetNumUninitialized(Width * Height);
 
-	const float Center = (Size - 1) / 2.0f;
-	const float MaxDist = Center;
+	const float CX = (Width - 1) / 2.0f;
+	const float CY = (Height - 1) / 2.0f;
 
-	for (int32 Y = 0; Y < Size; ++Y)
+	for (int32 Y = 0; Y < Height; ++Y)
 	{
-		for (int32 X = 0; X < Size; ++X)
+		for (int32 X = 0; X < Width; ++X)
 		{
-			float Dist = FMath::Sqrt(FMath::Square(X - Center) + FMath::Square(Y - Center));
-			float T = (MaxDist > 0.0f) ? FMath::Clamp(Dist / MaxDist, 0.0f, 1.0f) : 0.0f;
+			// Elliptical distance: normalize dx/dy by half-extents
+			float NX = (CX > 0.0f) ? (X - CX) / CX : 0.0f;
+			float NY = (CY > 0.0f) ? (Y - CY) / CY : 0.0f;
+			float T = FMath::Clamp(FMath::Sqrt(NX * NX + NY * NY), 0.0f, 1.0f);
 			FLinearColor Blended = FMath::Lerp(ColorCenter, ColorEdge, T);
-			Pixels[Y * Size + X] = Blended.ToFColor(true);
+			Pixels[Y * Width + X] = Blended.ToFColor(true);
 		}
 	}
 
@@ -604,7 +606,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 		return GenerateGradientV(Width, Height, ColorStart, ColorEnd, Outer);
 	}
 	if (Shape == TEXT("radialgradient"))
-		return GenerateRadialGradient(FMath::Max(Width, Height), ColorStart, ColorEnd, Outer);
+		return GenerateRadialGradient(Width, Height, ColorStart, ColorEnd, Outer);
 	if (Shape == TEXT("angulargradient"))
 	{
 		if (MultiStops.Num() < 2)
