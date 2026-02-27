@@ -10,6 +10,7 @@ namespace
 	// 材质引用标识符（ProceduralShapeGenerator 内部 key，非资产路径）
 	const TCHAR* MatRef_GradientH = TEXT("gradienth");
 	const TCHAR* MatRef_GradientV = TEXT("gradientv");
+	const TCHAR* MatRef_GradientLinear = TEXT("gradientlinear");
 	const TCHAR* MatRef_Radial    = TEXT("radialgradient");
 	const TCHAR* MatRef_RoundedRect = TEXT("roundedrect");
 
@@ -25,10 +26,13 @@ namespace
 		if (Gradient.GradientType == EPenGradientType::Radial)
 			return FString::Printf(TEXT("{\"ColorCenter\":\"%s\",\"ColorEdge\":\"%s\"}"), *StartColor, *EndColor);
 
-		// Multi-stop linear: output Stops array
+		// Linear: always include Rotation for angled rendering
+		const float Rotation = Gradient.Rotation;
+
+		// Multi-stop linear: output Stops array + Rotation
 		if (Gradient.Colors.Num() > 2)
 		{
-			FString Stops = TEXT("{\"Stops\":[");
+			FString Stops = FString::Printf(TEXT("{\"Rotation\":%.4f,\"Stops\":["), Rotation);
 			for (int32 i = 0; i < Gradient.Colors.Num(); ++i)
 			{
 				if (i > 0) Stops += TEXT(",");
@@ -39,8 +43,8 @@ namespace
 			return Stops;
 		}
 
-		// 2-stop: backward compatible format
-		return FString::Printf(TEXT("{\"ColorStart\":\"%s\",\"ColorEnd\":\"%s\"}"), *StartColor, *EndColor);
+		// 2-stop: include Rotation
+		return FString::Printf(TEXT("{\"Rotation\":%.4f,\"ColorStart\":\"%s\",\"ColorEnd\":\"%s\"}"), Rotation, *StartColor, *EndColor);
 	}
 
 	void AddTextureSizeHints(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
@@ -97,14 +101,8 @@ namespace
 				break;
 			case EPenGradientType::Linear:
 			default:
-			{
-				float Rotation = FMath::Fmod(Node->Fill.Gradient.Rotation, 360.0f);
-				if (Rotation < 0.0f)
-					Rotation += 360.0f;
-				const bool bVertical = (Rotation > 45.0f && Rotation < 135.0f) || (Rotation > 225.0f && Rotation < 315.0f);
-				MaterialRef = bVertical ? MatRef_GradientV : MatRef_GradientH;
+				MaterialRef = MatRef_GradientLinear;
 				break;
-			}
 			}
 
 			Widget.Properties.Add(TEXT("MaterialRef"), MaterialRef);
@@ -533,13 +531,8 @@ FUMGWidgetNode FVisualMapper::WrapWithMultiFill(FUMGWidgetNode&& Widget, const T
 				break;
 			case EPenGradientType::Linear:
 			default:
-			{
-				float Rotation = FMath::Fmod(Fill.Gradient.Rotation, 360.0f);
-				if (Rotation < 0.0f) Rotation += 360.0f;
-				const bool bVertical = (Rotation > 45.0f && Rotation < 135.0f) || (Rotation > 225.0f && Rotation < 315.0f);
-				MaterialRef = bVertical ? MatRef_GradientV : MatRef_GradientH;
+				MaterialRef = MatRef_GradientLinear;
 				break;
-			}
 			}
 			Layer.Properties.Add(TEXT("MaterialRef"), MaterialRef);
 			Layer.Brush.MaterialRef = MaterialRef;

@@ -50,6 +50,9 @@ public:
 	/** 生成多色标垂直渐变纹理 */
 	static UTexture2D* GenerateGradientVMultiStop(int32 Width, int32 Height, const TArray<FGradientStop>& Stops, UObject* Outer = nullptr);
 
+	/** 生成任意角度线性渐变纹理 */
+	static UTexture2D* GenerateGradientAngled(int32 Width, int32 Height, float RotationDeg, const TArray<FGradientStop>& Stops, UObject* Outer = nullptr);
+
 	/**
 	 * 根据 MaterialRef 和 Properties 生成程序化纹理（统一入口）
 	 * @param MaterialRef 形状名称（circle/ring/roundedrect/gradienth/gradientv/radialgradient）

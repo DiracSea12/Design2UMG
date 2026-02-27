@@ -302,6 +302,64 @@ UTexture2D* FProceduralShapeGenerator::GenerateGradientVMultiStop(int32 Width, i
 	return Texture;
 }
 
+UTexture2D* FProceduralShapeGenerator::GenerateGradientAngled(int32 Width, int32 Height, float RotationDeg, const TArray<FGradientStop>& Stops, UObject* Outer)
+{
+	if (Stops.Num() < 2)
+		return nullptr;
+
+	UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer);
+	if (!Texture) return nullptr;
+
+	TArray<FColor> Pixels;
+	Pixels.SetNumUninitialized(Width * Height);
+
+	// Gradient direction from rotation angle (degrees, 0° = left-to-right)
+	const float Rad = FMath::DegreesToRadians(RotationDeg);
+	const float DirX = FMath::Cos(Rad);
+	const float DirY = FMath::Sin(Rad);
+
+	// Project corners onto gradient axis to find min/max T for normalization
+	const float T00 = 0.0f;
+	const float T10 = DirX;
+	const float T01 = DirY;
+	const float T11 = DirX + DirY;
+	const float TMin = FMath::Min(FMath::Min(T00, T10), FMath::Min(T01, T11));
+	const float TMax = FMath::Max(FMath::Max(T00, T10), FMath::Max(T01, T11));
+	const float TRange = TMax - TMin;
+
+	for (int32 Y = 0; Y < Height; ++Y)
+	{
+		const float NY = (Height > 1) ? static_cast<float>(Y) / (Height - 1) : 0.0f;
+		for (int32 X = 0; X < Width; ++X)
+		{
+			const float NX = (Width > 1) ? static_cast<float>(X) / (Width - 1) : 0.0f;
+
+			// Project normalized pixel position onto gradient axis
+			float T = (NX * DirX + NY * DirY - TMin);
+			T = (TRange > KINDA_SMALL_NUMBER) ? FMath::Clamp(T / TRange, 0.0f, 1.0f) : 0.0f;
+
+			// Piecewise lerp across stops
+			FLinearColor Blended = Stops[0].Color;
+			for (int32 i = 1; i < Stops.Num(); ++i)
+			{
+				if (T <= Stops[i].Position || i == Stops.Num() - 1)
+				{
+					float Span = Stops[i].Position - Stops[i - 1].Position;
+					float LocalT = (Span > KINDA_SMALL_NUMBER) ? (T - Stops[i - 1].Position) / Span : 0.0f;
+					LocalT = FMath::Clamp(LocalT, 0.0f, 1.0f);
+					Blended = FMath::Lerp(Stops[i - 1].Color, Stops[i].Color, LocalT);
+					break;
+				}
+			}
+
+			Pixels[Y * Width + X] = Blended.ToFColor(true);
+		}
+	}
+
+	FillTextureData(Texture, Pixels);
+	return Texture;
+}
+
 UTexture2D* FProceduralShapeGenerator::GenerateRadialGradient(int32 Size, FLinearColor ColorCenter, FLinearColor ColorEdge, UObject* Outer)
 {
 	UTexture2D* Texture = CreateTransientTexture(Size, Size, Outer);
@@ -335,6 +393,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 	FLinearColor ColorEnd = FLinearColor::Black;
 	float Thickness = 0.1f;
 	float CornerRadius = 0.2f;
+	float RotationDeg = 0.0f;
 	TArray<FGradientStop> MultiStops;
 
 	if (const FString* ParamsStr = Properties.Find(TEXT("MaterialParams")))
@@ -358,6 +417,8 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 				Thickness = NumVal > 1.0 ? static_cast<float>(NumVal) / 100.0f : static_cast<float>(NumVal);
 			if (Params->TryGetNumberField(TEXT("CornerRadius"), NumVal))
 				CornerRadius = NumVal > 1.0 ? static_cast<float>(NumVal) / 100.0f : static_cast<float>(NumVal);
+			if (Params->TryGetNumberField(TEXT("Rotation"), NumVal))
+				RotationDeg = static_cast<float>(NumVal);
 
 			// 多色标渐变 Stops 数组
 			const TArray<TSharedPtr<FJsonValue>>* StopsArr = nullptr;
@@ -395,6 +456,17 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 		return GenerateRing(FMath::Max(Width, Height), Color, Thickness, Outer);
 	if (Shape == TEXT("roundedrect") || Shape == TEXT("polygon"))
 		return GenerateRoundedRect(Width, Height, Color, CornerRadius, Outer);
+	if (Shape == TEXT("gradientlinear"))
+	{
+		// Build stops from 2-color fallback if no multi-stop array
+		if (MultiStops.Num() < 2)
+		{
+			MultiStops.Empty();
+			MultiStops.Add({0.0f, ColorStart});
+			MultiStops.Add({1.0f, ColorEnd});
+		}
+		return GenerateGradientAngled(Width, Height, RotationDeg, MultiStops, Outer);
+	}
 	if (Shape == TEXT("gradienth"))
 	{
 		if (MultiStops.Num() >= 2)
