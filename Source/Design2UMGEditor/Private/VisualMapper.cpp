@@ -359,19 +359,15 @@ FUMGWidgetNode FVisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TSha
 		}
 	}
 
-	// Outside stroke: expand Border bounds so the centered UMG outline appears fully outside,
-	// then add StrokePadding to keep content at its original position.
+	// Outside stroke: visual bounds from the parser already include the stroke expansion,
+	// so do NOT expand Border.Bounds again. Only add StrokePadding so the centered UMG
+	// outline doesn't eat into content space.
 	if (const FString* SM = Widget.Properties.Find(TEXT("StrokeMargin")))
 	{
 		FMargin M = FUMGWidgetUtils::ParseMargin(*SM);
 		float Outset = -M.Left; // StrokeMargin stores negative values
 		if (Outset > 0)
 		{
-			Border.Bounds.X -= Outset;
-			Border.Bounds.Y -= Outset;
-			Border.Bounds.W += Outset * 2.0f;
-			Border.Bounds.H += Outset * 2.0f;
-
 			FString Pad = FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"), Outset, Outset, Outset, Outset);
 			if (const FString* Existing = Border.Properties.Find(TEXT("StrokePadding")))
 			{
