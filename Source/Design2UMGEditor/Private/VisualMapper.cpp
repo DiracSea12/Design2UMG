@@ -12,6 +12,7 @@ namespace
 	const TCHAR* MatRef_GradientV = TEXT("gradientv");
 	const TCHAR* MatRef_GradientLinear = TEXT("gradientlinear");
 	const TCHAR* MatRef_Radial    = TEXT("radialgradient");
+	const TCHAR* MatRef_Angular   = TEXT("angulargradient");
 	const TCHAR* MatRef_RoundedRect = TEXT("roundedrect");
 
 	FString BuildGradientMaterialParams(const FPenGradient& Gradient)
@@ -94,10 +95,7 @@ namespace
 				MaterialRef = MatRef_Radial;
 				break;
 			case EPenGradientType::Angular:
-				UE_LOG(LogDesign2UMG, Warning,
-					TEXT("Design2UMG: Angular gradient on '%s' approximated as Radial (no Angular material)"),
-					*Node->Name);
-				MaterialRef = MatRef_Radial;
+				MaterialRef = MatRef_Angular;
 				break;
 			case EPenGradientType::Linear:
 			default:
@@ -575,9 +573,7 @@ FUMGWidgetNode FVisualMapper::WrapWithMultiFill(FUMGWidgetNode&& Widget, const T
 				MaterialRef = MatRef_Radial;
 				break;
 			case EPenGradientType::Angular:
-				UE_LOG(LogDesign2UMG, Warning,
-					TEXT("Design2UMG: Angular gradient in multi-fill approximated as Radial (no Angular material)"));
-				MaterialRef = MatRef_Radial;
+				MaterialRef = MatRef_Angular;
 				break;
 			case EPenGradientType::Linear:
 			default:
