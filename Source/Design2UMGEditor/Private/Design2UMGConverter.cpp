@@ -420,21 +420,34 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FDesignNode>& 
 		}
 		break;
 	case EPenNodeType::Polygon:
-		Widget = CreateContainerWidget(Node);
-		UE_LOG(LogDesign2UMG, Verbose, TEXT("Design2UMG: Polygon '%s' mapped to Border (UMG has no polygon widget)"), *Node->Name);
-		UE_LOG(LogDesign2UMG, Warning, TEXT("多边形 '%s' 已转换为 Border（UMG 不支持多边形控件）"), *Node->Name);
-		if (OutWarnings)
-			OutWarnings->Add(FString::Printf(TEXT("Polygon '%s' → Border (UMG 无多边形控件)"), *Node->Name));
+		if (!Node->Geometry.IsEmpty())
+		{
+			Widget = CreatePathWidget(Node);
+		}
+		else
+		{
+			Widget = CreateContainerWidget(Node);
+			UE_LOG(LogDesign2UMG, Warning, TEXT("多边形 '%s' 无 PathGeometry，降级为 Border"), *Node->Name);
+			if (OutWarnings)
+				OutWarnings->Add(FString::Printf(TEXT("Polygon '%s' → Border (无 PathGeometry)"), *Node->Name));
+		}
 		break;
 	case EPenNodeType::Path:
 		Widget = CreatePathWidget(Node);
 		break;
 	case EPenNodeType::Line:
-		Widget = CreateContainerWidget(Node);
-		UE_LOG(LogDesign2UMG, Verbose, TEXT("Design2UMG: Line '%s' mapped to Image (UMG has no line widget)"), *Node->Name);
-		UE_LOG(LogDesign2UMG, Warning, TEXT("线条 '%s' 已转换为 Image（UMG 不支持线条控件）"), *Node->Name);
-		if (OutWarnings)
-			OutWarnings->Add(FString::Printf(TEXT("Line '%s' → Image (UMG 无线条控件)"), *Node->Name));
+		if (!Node->Geometry.IsEmpty())
+		{
+			Widget = CreatePathWidget(Node);
+		}
+		else
+		{
+			// 无 Geometry 时用 Width/Height 构造水平线段
+			float W = FMath::Max(1.0f, Node->Width.Value);
+			float H = FMath::Max(1.0f, Node->Height.Value);
+			Node->Geometry = FString::Printf(TEXT("M 0,%.1f L %.1f,%.1f"), H * 0.5f, W, H * 0.5f);
+			Widget = CreatePathWidget(Node);
+		}
 		break;
 	default:
 		Widget = CreateContainerWidget(Node);
