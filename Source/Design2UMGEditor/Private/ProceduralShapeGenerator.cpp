@@ -496,6 +496,126 @@ UTexture2D* FProceduralShapeGenerator::GenerateRadialGradient(int32 Width, int32
 	return Texture;
 }
 
+// --- Box Shadow with Gaussian Blur ---
+
+// Helper: generate rounded rect alpha mask into float buffer
+static void GenerateRoundedRectMask(TArray<float>& OutAlpha, int32 W, int32 H, float RTL, float RTR, float RBR, float RBL)
+{
+	OutAlpha.SetNumUninitialized(W * H);
+	for (int32 Y = 0; Y < H; ++Y)
+	{
+		for (int32 X = 0; X < W; ++X)
+		{
+			float A = 1.0f;
+			float R = 0.0f;
+			FVector2D Center;
+			bool bCorner = false;
+
+			if (X < RTL && Y < RTL)      { R = RTL; Center = FVector2D(RTL, RTL); bCorner = true; }
+			else if (X >= W - RTR && Y < RTR) { R = RTR; Center = FVector2D(W - RTR - 1, RTR); bCorner = true; }
+			else if (X >= W - RBR && Y >= H - RBR) { R = RBR; Center = FVector2D(W - RBR - 1, H - RBR - 1); bCorner = true; }
+			else if (X < RBL && Y >= H - RBL) { R = RBL; Center = FVector2D(RBL, H - RBL - 1); bCorner = true; }
+
+			if (bCorner)
+			{
+				float Dist = FMath::Sqrt(FMath::Square(X - Center.X) + FMath::Square(Y - Center.Y));
+				A = FMath::Clamp(R - Dist + 0.5f, 0.0f, 1.0f);
+			}
+			OutAlpha[Y * W + X] = A;
+		}
+	}
+}
+
+// Helper: separable gaussian blur on float alpha buffer
+static void GaussianBlurAlpha(TArray<float>& Alpha, int32 W, int32 H, float Sigma)
+{
+	if (Sigma < 0.5f) return;
+
+	const int32 KernelRadius = FMath::CeilToInt(Sigma * 3.0f);
+	TArray<float> Kernel;
+	Kernel.SetNumUninitialized(KernelRadius * 2 + 1);
+	float Sum = 0.0f;
+	for (int32 i = -KernelRadius; i <= KernelRadius; ++i)
+	{
+		float V = FMath::Exp(-(i * i) / (2.0f * Sigma * Sigma));
+		Kernel[i + KernelRadius] = V;
+		Sum += V;
+	}
+	for (float& V : Kernel) V /= Sum;
+
+	// Horizontal pass
+	TArray<float> Temp;
+	Temp.SetNumUninitialized(W * H);
+	for (int32 Y = 0; Y < H; ++Y)
+	{
+		for (int32 X = 0; X < W; ++X)
+		{
+			float Acc = 0.0f;
+			for (int32 k = -KernelRadius; k <= KernelRadius; ++k)
+			{
+				int32 SX = FMath::Clamp(X + k, 0, W - 1);
+				Acc += Alpha[Y * W + SX] * Kernel[k + KernelRadius];
+			}
+			Temp[Y * W + X] = Acc;
+		}
+	}
+
+	// Vertical pass
+	for (int32 Y = 0; Y < H; ++Y)
+	{
+		for (int32 X = 0; X < W; ++X)
+		{
+			float Acc = 0.0f;
+			for (int32 k = -KernelRadius; k <= KernelRadius; ++k)
+			{
+				int32 SY = FMath::Clamp(Y + k, 0, H - 1);
+				Acc += Temp[SY * W + X] * Kernel[k + KernelRadius];
+			}
+			Alpha[Y * W + X] = Acc;
+		}
+	}
+}
+
+UTexture2D* FProceduralShapeGenerator::GenerateBoxShadow(int32 Width, int32 Height, FLinearColor ShadowColor, float CornerRadius, float BlurRadius, UObject* Outer)
+{
+	return GenerateBoxShadow(Width, Height, ShadowColor, CornerRadius, CornerRadius, CornerRadius, CornerRadius, BlurRadius, Outer);
+}
+
+UTexture2D* FProceduralShapeGenerator::GenerateBoxShadow(int32 Width, int32 Height, FLinearColor ShadowColor, float RTL, float RTR, float RBR, float RBL, float BlurRadius, UObject* Outer)
+{
+	UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer);
+	if (!Texture) return nullptr;
+
+	// Convert normalized radii (0-1) to pixel values, same as GenerateRoundedRect
+	const float HalfMin = FMath::Min(Width, Height) * 0.5f;
+	const float PxTL = HalfMin * RTL;
+	const float PxTR = HalfMin * RTR;
+	const float PxBR = HalfMin * RBR;
+	const float PxBL = HalfMin * RBL;
+
+	// Generate rounded rect alpha mask
+	TArray<float> Alpha;
+	GenerateRoundedRectMask(Alpha, Width, Height, PxTL, PxTR, PxBR, PxBL);
+
+	// Apply gaussian blur (sigma = BlurRadius / 2)
+	GaussianBlurAlpha(Alpha, Width, Height, BlurRadius * 0.5f);
+
+	// Compose final pixels: shadow color * blurred alpha
+	TArray<FColor> Pixels;
+	Pixels.SetNumUninitialized(Width * Height);
+	const FColor SC = ShadowColor.ToFColor(true);
+	for (int32 i = 0; i < Width * Height; ++i)
+	{
+		Pixels[i].R = SC.R;
+		Pixels[i].G = SC.G;
+		Pixels[i].B = SC.B;
+		Pixels[i].A = FMath::RoundToInt(SC.A * FMath::Clamp(Alpha[i], 0.0f, 1.0f));
+	}
+
+	FillTextureData(Texture, Pixels);
+	return Texture;
+}
+
 UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& MaterialRef, const TMap<FString, FString>& Properties, UObject* Outer)
 {
 	FLinearColor Color = FLinearColor::White;
@@ -616,6 +736,16 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 			MultiStops.Add({1.0f, ColorEnd});
 		}
 		return GenerateAngularGradient(Width, Height, RotationDeg, MultiStops, Outer);
+	}
+	if (Shape == TEXT("boxshadow"))
+	{
+		float BlurPx = 0.0f;
+		if (const FString* BlurStr = Properties.Find(TEXT("ShadowBlur")))
+			BlurPx = FCString::Atof(**BlurStr);
+
+		if (CornerRadii[0] >= 0.f)
+			return GenerateBoxShadow(Width, Height, Color, CornerRadii[0], CornerRadii[1], CornerRadii[2], CornerRadii[3], BlurPx, Outer);
+		return GenerateBoxShadow(Width, Height, Color, CornerRadius, BlurPx, Outer);
 	}
 
 	return nullptr;
