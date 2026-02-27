@@ -695,6 +695,15 @@ void FDesign2UMGConverter::ApplyTextProperties(FUMGWidgetNode& Widget, const TSh
 		Node->TextAlign == EPenTextAlign::Center ? TEXT("Center") :
 		Node->TextAlign == EPenTextAlign::Right ? TEXT("Right") : TEXT("Left"));
 
+	if (Node->TextAlign == EPenTextAlign::Justify)
+		Widget.Properties.Add(TEXT("AutoWrapText"), TEXT("true"));
+
+	// TextAlignVertical → parent Slot VerticalAlignment
+	if (Node->TextAlignVertical == EPenTextAlignVertical::Middle)
+		Widget.Slot.VerticalAlignment = TEXT("Center");
+	else if (Node->TextAlignVertical == EPenTextAlignVertical::Bottom)
+		Widget.Slot.VerticalAlignment = TEXT("Bottom");
+
 	if (Node->LineHeight > 0)
 		Widget.Properties.Add(TEXT("LineHeightPercentage"), FString::SanitizeFloat(Node->LineHeight));
 
