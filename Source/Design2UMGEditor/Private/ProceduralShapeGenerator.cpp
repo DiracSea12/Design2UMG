@@ -422,6 +422,52 @@ UTexture2D* FProceduralShapeGenerator::GenerateGradientAngled(int32 Width, int32
 	return Texture;
 }
 
+UTexture2D* FProceduralShapeGenerator::GenerateAngularGradient(int32 Width, int32 Height, float StartAngleDeg, const TArray<FGradientStop>& Stops, UObject* Outer)
+{
+	if (Stops.Num() < 2)
+		return nullptr;
+
+	UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer);
+	if (!Texture) return nullptr;
+
+	TArray<FColor> Pixels;
+	Pixels.SetNumUninitialized(Width * Height);
+
+	const float CX = (Width - 1) / 2.0f;
+	const float CY = (Height - 1) / 2.0f;
+	const float StartRad = FMath::DegreesToRadians(StartAngleDeg);
+
+	for (int32 Y = 0; Y < Height; ++Y)
+	{
+		for (int32 X = 0; X < Width; ++X)
+		{
+			float Angle = FMath::Atan2(Y - CY, X - CX) - StartRad;
+			// Normalize to [0, 1)
+			float T = Angle / (2.0f * PI);
+			T = T - FMath::FloorToFloat(T); // wrap to [0, 1)
+
+			// Piecewise lerp across stops
+			FLinearColor Blended = Stops[0].Color;
+			for (int32 i = 1; i < Stops.Num(); ++i)
+			{
+				if (T <= Stops[i].Position || i == Stops.Num() - 1)
+				{
+					float Span = Stops[i].Position - Stops[i - 1].Position;
+					float LocalT = (Span > KINDA_SMALL_NUMBER) ? (T - Stops[i - 1].Position) / Span : 0.0f;
+					LocalT = FMath::Clamp(LocalT, 0.0f, 1.0f);
+					Blended = FMath::Lerp(Stops[i - 1].Color, Stops[i].Color, LocalT);
+					break;
+				}
+			}
+
+			Pixels[Y * Width + X] = Blended.ToFColor(true);
+		}
+	}
+
+	FillTextureData(Texture, Pixels);
+	return Texture;
+}
+
 UTexture2D* FProceduralShapeGenerator::GenerateRadialGradient(int32 Size, FLinearColor ColorCenter, FLinearColor ColorEdge, UObject* Outer)
 {
 	UTexture2D* Texture = CreateTransientTexture(Size, Size, Outer);
@@ -559,6 +605,16 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 	}
 	if (Shape == TEXT("radialgradient"))
 		return GenerateRadialGradient(FMath::Max(Width, Height), ColorStart, ColorEnd, Outer);
+	if (Shape == TEXT("angulargradient"))
+	{
+		if (MultiStops.Num() < 2)
+		{
+			MultiStops.Empty();
+			MultiStops.Add({0.0f, ColorStart});
+			MultiStops.Add({1.0f, ColorEnd});
+		}
+		return GenerateAngularGradient(Width, Height, RotationDeg, MultiStops, Outer);
+	}
 
 	return nullptr;
 }
