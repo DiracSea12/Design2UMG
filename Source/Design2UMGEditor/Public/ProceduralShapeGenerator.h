@@ -37,8 +37,8 @@ public:
 	/** 生成垂直渐变纹理 */
 	static UTexture2D* GenerateGradientV(int32 Width, int32 Height, FLinearColor ColorStart, FLinearColor ColorEnd, UObject* Outer = nullptr);
 
-	/** 生成径向渐变纹理 */
-	static UTexture2D* GenerateRadialGradient(int32 Size, FLinearColor ColorCenter, FLinearColor ColorEdge, UObject* Outer = nullptr);
+	/** 生成径向渐变纹理（椭圆，按实际宽高比） */
+	static UTexture2D* GenerateRadialGradient(int32 Width, int32 Height, FLinearColor ColorCenter, FLinearColor ColorEdge, UObject* Outer = nullptr);
 
 	/** 色标结构（用于多色标渐变） */
 	struct FGradientStop
