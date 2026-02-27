@@ -405,13 +405,24 @@ FUMGWidgetNode FVisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TSha
 		}
 	}
 
-	// BoxShadow 属性上卷到 Border，确保 ConvertNode 能检测到并包裹阴影
-	for (const FString& Key : {TEXT("BoxShadowOffsetX"), TEXT("BoxShadowOffsetY"), TEXT("BoxShadowBlur"), TEXT("BoxShadowSpread"), TEXT("BoxShadowColor")})
+	// BoxShadow 索引属性上卷到 Border（键格式: BoxShadow_N_OffsetX 等）
+	if (const FString* CountStr = Widget.Properties.Find(TEXT("BoxShadowCount")))
 	{
-		if (const FString* V = Widget.Properties.Find(Key))
+		int32 Count = FCString::Atoi(**CountStr);
+		Border.Properties.Add(TEXT("BoxShadowCount"), *CountStr);
+		Widget.Properties.Remove(TEXT("BoxShadowCount"));
+		for (int32 i = 0; i < Count; ++i)
 		{
-			Border.Properties.Add(Key, *V);
-			Widget.Properties.Remove(Key);
+			FString Prefix = FString::Printf(TEXT("BoxShadow_%d_"), i);
+			for (const TCHAR* Suffix : {TEXT("OffsetX"), TEXT("OffsetY"), TEXT("Blur"), TEXT("Spread"), TEXT("Color")})
+			{
+				FString Key = Prefix + Suffix;
+				if (const FString* V = Widget.Properties.Find(Key))
+				{
+					Border.Properties.Add(Key, *V);
+					Widget.Properties.Remove(Key);
+				}
+			}
 		}
 	}
 
@@ -589,6 +600,7 @@ FUMGWidgetNode FVisualMapper::WrapWithMultiFill(FUMGWidgetNode&& Widget, const T
 				Layer.Properties.Add(TEXT("MaterialParams"), MaterialParams);
 				Layer.Brush.MaterialParams = MaterialParams;
 			}
+			AddTextureSizeHints(Layer, Node);
 		}
 		else if (Fill.Type == EPenFillType::Image && !Fill.Image.Url.IsEmpty())
 		{
@@ -615,6 +627,7 @@ FUMGWidgetNode FVisualMapper::WrapWithMultiFill(FUMGWidgetNode&& Widget, const T
 
 			if (Fill.Image.Opacity < 1.0f)
 				Layer.Properties.Add(TEXT("RenderOpacity"), FString::SanitizeFloat(Fill.Image.Opacity));
+			AddTextureSizeHints(Layer, Node);
 		}
 		else
 		{
