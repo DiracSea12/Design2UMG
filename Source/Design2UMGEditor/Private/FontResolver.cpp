@@ -59,6 +59,71 @@ void FFontResolver::ClearCache()
 	FontAssetCache.Empty();
 }
 
+int32 FFontResolver::ParseWeightValue(const FString& Weight)
+{
+	FString W = Weight.ToLower().TrimStartAndEnd();
+	if (W == TEXT("thin"))       return 100;
+	if (W == TEXT("extralight") || W == TEXT("ultralight")) return 200;
+	if (W == TEXT("light"))      return 300;
+	if (W == TEXT("normal") || W == TEXT("regular")) return 400;
+	if (W == TEXT("medium"))     return 500;
+	if (W == TEXT("semibold") || W == TEXT("demibold")) return 600;
+	if (W == TEXT("bold"))       return 700;
+	if (W == TEXT("extrabold") || W == TEXT("ultrabold")) return 800;
+	if (W == TEXT("black") || W == TEXT("heavy")) return 900;
+
+	int32 Num = FCString::Atoi(*W);
+	if (Num >= 100 && Num <= 900)
+		return FMath::Clamp(FMath::RoundToInt(Num / 100.0f) * 100, 100, 900);
+
+	return 400;
+}
+
+int32 FFontResolver::WeightFromTypefaceName(const FString& Name)
+{
+	FString N = Name.ToLower();
+	if (N.Contains(TEXT("black")) || N.Contains(TEXT("heavy")))  return 900;
+	if (N.Contains(TEXT("extrabold")) || N.Contains(TEXT("ultrabold"))) return 800;
+	if (N.Contains(TEXT("semibold")) || N.Contains(TEXT("demibold"))) return 600;
+	if (N.Contains(TEXT("bold")))     return 700;
+	if (N.Contains(TEXT("medium")))   return 500;
+	if (N.Contains(TEXT("light")) && N.Contains(TEXT("extra")))  return 200;
+	if (N.Contains(TEXT("light")) && N.Contains(TEXT("ultra")))  return 200;
+	if (N.Contains(TEXT("thin")))     return 100;
+	if (N.Contains(TEXT("light")))    return 300;
+	return 400;
+}
+
+FString FFontResolver::FindBestTypeface(const FString& FontFamily, const FString& RequestedWeight)
+{
+	FString AssetPath = FindFontAssetPath(FontFamily);
+	if (AssetPath.IsEmpty())
+		return FString();
+
+	UFont* Font = LoadObject<UFont>(nullptr, *AssetPath);
+	const FCompositeFont* Composite = Font ? Font->GetCompositeFont() : nullptr;
+	if (!Composite || Composite->DefaultTypeface.Fonts.Num() == 0)
+		return FString();
+
+	int32 TargetWeight = ParseWeightValue(RequestedWeight);
+	int32 BestDist = INT_MAX;
+	FString BestName;
+
+	for (const FTypefaceEntry& Entry : Composite->DefaultTypeface.Fonts)
+	{
+		FString EntryName = Entry.Name.ToString();
+		int32 EntryWeight = WeightFromTypefaceName(EntryName);
+		int32 Dist = FMath::Abs(EntryWeight - TargetWeight);
+		if (Dist < BestDist)
+		{
+			BestDist = Dist;
+			BestName = EntryName;
+		}
+	}
+
+	return BestName;
+}
+
 TArray<FString> FFontResolver::FindMissingFonts(const FDesignDocument& Document)
 {
 	TSet<FString> UsedFamilies;

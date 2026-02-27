@@ -684,7 +684,12 @@ void FDesign2UMGConverter::ApplyTextProperties(FUMGWidgetNode& Widget, const TSh
 	}
 
 	if (!Node->FontWeight.IsEmpty())
-		Widget.Properties.Add(TEXT("TypefaceFontName"), FPenTypeMapper::MapFontWeight(Node->FontWeight).ToString());
+	{
+		FString Typeface = FFontResolver::FindBestTypeface(Node->FontFamily, Node->FontWeight);
+		if (Typeface.IsEmpty())
+			Typeface = FPenTypeMapper::MapFontWeight(Node->FontWeight).ToString();
+		Widget.Properties.Add(TEXT("TypefaceFontName"), Typeface);
+	}
 
 	Widget.Properties.Add(TEXT("Justification"),
 		Node->TextAlign == EPenTextAlign::Center ? TEXT("Center") :

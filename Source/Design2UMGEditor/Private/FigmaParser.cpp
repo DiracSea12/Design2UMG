@@ -707,12 +707,9 @@ void FFigmaParser::ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, F
 	OutNode.FontSize = GetNum(Style, TEXT("fontSize"), 16.0);
 
 	int32 Weight = FMath::RoundToInt(GetNum(Style, TEXT("fontWeight"), 400.0));
-	if (Weight >= 700)
-		OutNode.FontWeight = TEXT("bold");
-	else if (Weight >= 500)
-		OutNode.FontWeight = TEXT("medium");
-	else
-		OutNode.FontWeight = TEXT("normal");
+	// Snap to nearest standard weight (100-900)
+	Weight = FMath::Clamp(FMath::RoundToInt(Weight / 100.0f) * 100, 100, 900);
+	OutNode.FontWeight = FString::FromInt(Weight);
 
 	FString LineHeightUnit = GetStr(Style, TEXT("lineHeightUnit"));
 	if (LineHeightUnit != TEXT("AUTO"))

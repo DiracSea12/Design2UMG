@@ -477,11 +477,11 @@ bool FFigmaComplexParserTest::RunTest(const FString& Parameters)
 	if (Sidebar->Children.Num() < 4)
 		return false;
 
-	// Logo text: fontWeight 700→bold, textAutoResize→Auto, textAlignVertical CENTER
+	// Logo text: fontWeight 700 preserved, textAutoResize→Auto, textAlignVertical CENTER
 	const auto& Logo = Sidebar->Children[0];
 	TestEqual(TEXT("Logo type"), Logo->Type, EPenNodeType::Text);
 	TestEqual(TEXT("Logo content"), Logo->Content, TEXT("Acme Dashboard"));
-	TestEqual(TEXT("Logo fontWeight"), Logo->FontWeight, TEXT("bold"));
+	TestEqual(TEXT("Logo fontWeight"), Logo->FontWeight, TEXT("700"));
 	TestEqual(TEXT("Logo fontSize"), Logo->FontSize, 20.0f);
 	TestEqual(TEXT("Logo textGrowth"), Logo->TextGrowth, EPenTextGrowth::Auto);
 	TestEqual(TEXT("Logo textAlignV"), Logo->TextAlignVertical, EPenTextAlignVertical::Middle);

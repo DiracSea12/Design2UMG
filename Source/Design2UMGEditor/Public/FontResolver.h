@@ -23,10 +23,17 @@ struct DESIGN2UMGEDITOR_API FFontResolver
 	/** Look up cached asset path for a font family name. Returns empty if not found. */
 	static FString FindFontAssetPath(const FString& FontFamily);
 
+	/** Find best matching typeface name for a given weight. Returns empty if font not loaded. */
+	static FString FindBestTypeface(const FString& FontFamily, const FString& RequestedWeight);
+
+	/** Parse a weight string ("bold", "700", etc.) to numeric value (100-900). */
+	static int32 ParseWeightValue(const FString& Weight);
+
 	/** Clear the font asset path cache */
 	static void ClearCache();
 
 private:
+	static int32 WeightFromTypefaceName(const FString& Name);
 	static TMap<FString, FString> FontAssetCache;
 	static void CollectFontFamilies(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSet<FString>& OutFamilies);
 	static TSet<FString> ScanProjectFontAssets();
