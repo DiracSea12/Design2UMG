@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "PenSchema.h"
+#include "DesignSchema.h"
 
 /**
  * .pen 属性到 UMG 属性的映射
@@ -11,9 +11,6 @@
 class FPenTypeMapper
 {
 public:
-	/** 解析颜色 #RGB/#RRGGBB/#RRGGBBAA -> FLinearColor */
-	static FLinearColor ParseColor(const FString& HexColor);
-
 	/** 节点类型到 Widget 类型 */
 	static FString MapNodeTypeToWidget(EPenNodeType Type, EPenLayout Layout);
 

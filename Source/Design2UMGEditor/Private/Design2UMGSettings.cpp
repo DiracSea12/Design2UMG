@@ -23,7 +23,7 @@ UClass* UDesign2UMGSettings::FindClassOverride(const FString& NodeName) const
 	{
 		if (Rule.NamePattern.IsEmpty() || Rule.WidgetClass.IsNull())
 			continue;
-		if (NodeName.Contains(Rule.NamePattern))
+		if (NodeName.Contains(Rule.NamePattern, ESearchCase::IgnoreCase))
 		{
 			UClass* Loaded = Rule.WidgetClass.LoadSynchronous();
 			if (Loaded && Loaded->IsChildOf(UWidget::StaticClass()))

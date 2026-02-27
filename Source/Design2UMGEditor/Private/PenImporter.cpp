@@ -127,7 +127,7 @@ bool FPenImporter::ImportFromFile(const FString& FilePath, FUMGWidgetData& OutDa
 	SlowTask.MakeDialog(true);
 
 	SlowTask.EnterProgressFrame(1.0f, FText::FromString(TEXT("Parsing design file...")));
-	FPenDocument Document;
+	FDesignDocument Document;
 	if (!FPenParser::ParseFromFile(FilePath, Document))
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("PenImporter: Failed to parse file: %s"), *FilePath);
@@ -149,7 +149,7 @@ bool FPenImporter::ImportFromJson(const FString& JsonString, FUMGWidgetData& Out
 	SlowTask.MakeDialog(true);
 
 	SlowTask.EnterProgressFrame(1.0f, FText::FromString(TEXT("Parsing design...")));
-	FPenDocument Document;
+	FDesignDocument Document;
 	if (!FPenParser::ParseDocument(JsonString, Document))
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("PenImporter: Failed to parse JSON"));

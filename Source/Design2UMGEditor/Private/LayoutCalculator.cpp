@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
 #include "LayoutCalculator.h"
 
@@ -125,12 +125,14 @@ FUMGSlotData FLayoutCalculator::CalculateSlot(const FBounds& Bounds, const FLayo
 	const int32 CanvasH = FMath::Max(1, Context.DesignSize.Y);
 	const FLayoutPreset& Preset = Context.Preset;
 
-	// v2.2: Bounds范围验证（防止越界值）
+	// 不要把超出设计尺寸的节点强行裁进 [0,1]。
+	// 设计稿里常有“部分超出画布”的节点（如滚动区域、阴影、分页），
+	// 若在这里裁剪，会把尺寸压扁并导致后续 UMG 严重错位。
 	FBounds SafeBounds;
-	SafeBounds.X = FMath::Clamp(Bounds.X, 0.0f, 1.0f);
-	SafeBounds.Y = FMath::Clamp(Bounds.Y, 0.0f, 1.0f);
-	SafeBounds.W = FMath::Clamp(Bounds.W, 0.0f, 1.0f - SafeBounds.X);
-	SafeBounds.H = FMath::Clamp(Bounds.H, 0.0f, 1.0f - SafeBounds.Y);
+	SafeBounds.X = Bounds.X;
+	SafeBounds.Y = Bounds.Y;
+	SafeBounds.W = FMath::Max(0.0f, Bounds.W);
+	SafeBounds.H = FMath::Max(0.0f, Bounds.H);
 
 	FUMGSlotData Slot;
 

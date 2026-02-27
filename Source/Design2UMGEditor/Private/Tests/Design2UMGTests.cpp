@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
 #include "Misc/AutomationTest.h"
 #include "PenParser.h"
@@ -71,7 +71,6 @@ namespace
 
 // ============================================================
 // Test 1: Parser - 解析硬编码 JSON，验证节点类型/数量/属性
-// ============================================================
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenParserTest,
 	"Design2UMG.Parser.BasicDocument",
@@ -119,7 +118,7 @@ bool FPenParserTest::RunTest(const FString& Parameters)
 		]
 	})");
 
-	FPenDocument Doc;
+	FDesignDocument Doc;
 	const bool bParsed = FPenParser::ParseDocument(Json, Doc);
 	TestTrue(TEXT("ParseDocument succeeds"), bParsed);
 	if (!bParsed || Doc.Children.Num() == 0)
@@ -127,7 +126,7 @@ bool FPenParserTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Top-level children count"), Doc.Children.Num(), 1);
 
 	// Frame 节点
-	const TSharedPtr<FPenNode>& Screen = Doc.Children[0];
+	const TSharedPtr<FDesignNode>& Screen = Doc.Children[0];
 	TestTrue(TEXT("Screen node valid"), Screen.IsValid());
 	if (!Screen.IsValid())
 		return false;
@@ -142,18 +141,18 @@ bool FPenParserTest::RunTest(const FString& Parameters)
 		return false;
 
 	// Text 节点
-	const TSharedPtr<FPenNode>& Title = Screen->Children[0];
+	const TSharedPtr<FDesignNode>& Title = Screen->Children[0];
 	TestEqual(TEXT("Title type"), Title->Type, EPenNodeType::Text);
 	TestEqual(TEXT("Title content"), Title->Content, TEXT("Hello World"));
 	TestEqual(TEXT("Title fontSize"), Title->FontSize, 24.0f);
 	TestEqual(TEXT("Title fontWeight"), Title->FontWeight, TEXT("bold"));
 
 	// Ellipse 节点
-	const TSharedPtr<FPenNode>& Ellipse = Screen->Children[1];
+	const TSharedPtr<FDesignNode>& Ellipse = Screen->Children[1];
 	TestEqual(TEXT("Ellipse type"), Ellipse->Type, EPenNodeType::Ellipse);
 
 	// Rectangle 节点
-	const TSharedPtr<FPenNode>& Rect = Screen->Children[2];
+	const TSharedPtr<FDesignNode>& Rect = Screen->Children[2];
 	TestEqual(TEXT("Rect type"), Rect->Type, EPenNodeType::Rectangle);
 	TestTrue(TEXT("Rect has corner radius"), Rect->CornerRadius.HasRadius());
 
@@ -162,7 +161,6 @@ bool FPenParserTest::RunTest(const FString& Parameters)
 
 // ============================================================
 // Test 2: Converter - AST 转 Widget 树，验证结构和降级警告
-// ============================================================
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenConverterTest,
 	"Design2UMG.Converter.BasicConversion",
@@ -198,7 +196,7 @@ bool FPenConverterTest::RunTest(const FString& Parameters)
 		]
 	})");
 
-	FPenDocument Doc;
+	FDesignDocument Doc;
 	TestTrue(TEXT("Parse succeeds"), FPenParser::ParseDocument(Json, Doc));
 
 	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
@@ -281,255 +279,7 @@ bool FLayoutCalculatorTest::RunTest(const FString& Parameters)
 }
 
 // ============================================================
-// Test 4: FigmaParser - Figma JSON → FPenDocument
-// ============================================================
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaParserTest,
-	"Design2UMG.FigmaParser.BasicDocument",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-
-bool FFigmaParserTest::RunTest(const FString& Parameters)
-{
-	// 模拟 Figma GET /v1/files/:key 返回的 JSON（精简版）
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Document",
-			"type": "DOCUMENT",
-			"children": [
-				{
-					"id": "0:1",
-					"name": "Page 1",
-					"type": "CANVAS",
-					"children": [
-						{
-							"id": "1:2",
-							"name": "LoginScreen",
-							"type": "FRAME",
-							"absoluteBoundingBox": {"x": 0, "y": 0, "width": 1920, "height": 1080},
-							"layoutMode": "VERTICAL",
-							"itemSpacing": 24,
-							"paddingLeft": 32, "paddingRight": 32,
-							"paddingTop": 48, "paddingBottom": 48,
-							"primaryAxisAlignItems": "CENTER",
-							"counterAxisAlignItems": "CENTER",
-							"clipsContent": true,
-							"fills": [{"type": "SOLID", "color": {"r": 0.1, "g": 0.1, "b": 0.18, "a": 1}}],
-							"cornerRadius": 0,
-							"children": [
-								{
-									"id": "1:3",
-									"name": "Title",
-									"type": "TEXT",
-									"characters": "Welcome Back",
-									"style": {
-										"fontFamily": "Inter",
-										"fontSize": 32,
-										"fontWeight": 700,
-										"lineHeightPx": 40,
-										"lineHeightUnit": "PIXELS",
-										"letterSpacing": -0.5,
-										"textAlignHorizontal": "CENTER",
-										"textAlignVertical": "TOP"
-									},
-									"absoluteBoundingBox": {"x": 100, "y": 48, "width": 300, "height": 40},
-									"layoutSizingHorizontal": "HUG",
-									"layoutSizingVertical": "HUG",
-									"fills": [{"type": "SOLID", "color": {"r": 1, "g": 1, "b": 1, "a": 1}}]
-								},
-								{
-									"id": "1:4",
-									"name": "InputBox",
-									"type": "RECTANGLE",
-									"absoluteBoundingBox": {"x": 32, "y": 112, "width": 400, "height": 48},
-									"layoutSizingHorizontal": "FILL",
-									"layoutSizingVertical": "FIXED",
-									"fills": [{"type": "SOLID", "color": {"r": 0.2, "g": 0.2, "b": 0.25, "a": 1}}],
-									"cornerRadius": 8,
-									"strokes": [{"type": "SOLID", "color": {"r": 0.4, "g": 0.4, "b": 0.5, "a": 1}, "visible": true}],
-									"strokeWeight": 1,
-									"strokeAlign": "INSIDE"
-								},
-								{
-									"id": "1:5",
-									"name": "Avatar",
-									"type": "ELLIPSE",
-									"absoluteBoundingBox": {"x": 200, "y": 180, "width": 80, "height": 80},
-									"layoutSizingHorizontal": "FIXED",
-									"layoutSizingVertical": "FIXED",
-									"fills": [{"type": "SOLID", "color": {"r": 0.91, "g": 0.27, "b": 0.38, "a": 1}}]
-								},
-								{
-									"id": "1:6",
-									"name": "Shadow Box",
-									"type": "RECTANGLE",
-									"absoluteBoundingBox": {"x": 32, "y": 280, "width": 400, "height": 100},
-									"layoutSizingHorizontal": "FILL",
-									"layoutSizingVertical": "FIXED",
-									"fills": [{"type": "SOLID", "color": {"r": 0.15, "g": 0.15, "b": 0.2, "a": 1}}],
-									"effects": [
-										{
-											"type": "DROP_SHADOW",
-											"visible": true,
-											"color": {"r": 0, "g": 0, "b": 0, "a": 0.25},
-											"offset": {"x": 0, "y": 4},
-											"radius": 12,
-											"spread": 0
-										}
-									],
-									"rectangleCornerRadii": [12, 12, 0, 0]
-								}
-							]
-						}
-					]
-				}
-			]
-		},
-		"components": {
-		},
-		"componentSets": {
-		}
-	})");
-
-	FPenDocument Doc;
-	const bool bParsed = FFigmaParser::ParseDocument(Json, Doc);
-	TestTrue(TEXT("Figma ParseDocument succeeds"), bParsed);
-	if (!bParsed || Doc.Children.Num() == 0)
-		return false;
-	TestEqual(TEXT("Figma top-level children"), Doc.Children.Num(), 1);
-
-	// Frame
-	const TSharedPtr<FPenNode>& Screen = Doc.Children[0];
-	TestTrue(TEXT("Figma screen valid"), Screen.IsValid());
-	if (!Screen.IsValid())
-		return false;
-	TestEqual(TEXT("Figma screen type"), Screen->Type, EPenNodeType::Frame);
-	TestEqual(TEXT("Figma screen name"), Screen->Name, TEXT("LoginScreen"));
-	TestEqual(TEXT("Figma layout"), Screen->Layout, EPenLayout::Vertical);
-	TestEqual(TEXT("Figma gap"), Screen->Gap, 24.0f);
-	TestEqual(TEXT("Figma padding left"), Screen->Padding.Left, 32.0f);
-	TestEqual(TEXT("Figma padding top"), Screen->Padding.Top, 48.0f);
-	TestEqual(TEXT("Figma justify"), Screen->JustifyContent, EPenJustifyContent::Center);
-	TestEqual(TEXT("Figma align"), Screen->AlignItems, EPenAlignItems::Center);
-	TestTrue(TEXT("Figma clip"), Screen->bClip);
-	TestEqual(TEXT("Figma children count"), Screen->Children.Num(), 4);
-	if (Screen->Children.Num() < 4)
-		return false;
-
-	// Text
-	const TSharedPtr<FPenNode>& Title = Screen->Children[0];
-	TestEqual(TEXT("Figma title type"), Title->Type, EPenNodeType::Text);
-	TestEqual(TEXT("Figma title content"), Title->Content, TEXT("Welcome Back"));
-	TestEqual(TEXT("Figma title font"), Title->FontFamily, TEXT("Inter"));
-	TestEqual(TEXT("Figma title fontSize"), Title->FontSize, 32.0f);
-	TestEqual(TEXT("Figma title fontWeight"), Title->FontWeight, TEXT("bold"));
-	TestTrue(TEXT("Figma title lineHeight > 0"), Title->LineHeight > 0.0f);
-	TestEqual(TEXT("Figma title textAlign"), Title->TextAlign, EPenTextAlign::Center);
-	TestTrue(TEXT("Figma title width HUG"), Title->Width.IsFit());
-
-	// Rectangle with stroke
-	const TSharedPtr<FPenNode>& Input = Screen->Children[1];
-	TestEqual(TEXT("Figma input type"), Input->Type, EPenNodeType::Rectangle);
-	TestTrue(TEXT("Figma input width FILL"), Input->Width.IsFill());
-	TestTrue(TEXT("Figma input height FIXED"), Input->Height.IsFixed());
-	TestTrue(TEXT("Figma input has corner radius"), Input->CornerRadius.HasRadius());
-	TestTrue(TEXT("Figma input has stroke"), Input->Stroke.HasStroke());
-	TestEqual(TEXT("Figma input stroke align"), Input->Stroke.Align, EPenStrokeAlign::Inside);
-
-	// Ellipse
-	const TSharedPtr<FPenNode>& Avatar = Screen->Children[2];
-	TestEqual(TEXT("Figma avatar type"), Avatar->Type, EPenNodeType::Ellipse);
-
-	// Rectangle with effects and individual corner radii
-	const TSharedPtr<FPenNode>& ShadowBox = Screen->Children[3];
-	TestEqual(TEXT("Figma shadow box type"), ShadowBox->Type, EPenNodeType::Rectangle);
-	TestTrue(TEXT("Figma shadow box has effects"), ShadowBox->Effects.Num() > 0);
-	TestEqual(TEXT("Figma shadow effect type"), ShadowBox->Effects[0].Type, EPenEffectType::Shadow);
-	TestFalse(TEXT("Figma shadow not inner"), ShadowBox->Effects[0].Shadow.bInner);
-	TestFalse(TEXT("Figma shadow box non-uniform radius"), ShadowBox->CornerRadius.bUniform);
-	TestEqual(TEXT("Figma shadow box TopLeft"), ShadowBox->CornerRadius.TopLeft, 12.0f);
-	TestEqual(TEXT("Figma shadow box BottomLeft"), ShadowBox->CornerRadius.BottomLeft, 0.0f);
-
-	return true;
-}
-
-// ============================================================
-// Test 5: FigmaParser - ExtractFileKey URL 解析
-// ============================================================
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaExtractKeyTest,
-	"Design2UMG.FigmaParser.ExtractFileKey",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-
-bool FFigmaExtractKeyTest::RunTest(const FString& Parameters)
-{
-	FString Key;
-
-	TestTrue(TEXT("Design URL"), FFigmaParser::ExtractFileKey(TEXT("https://www.figma.com/design/abc123XYZ/MyFile"), Key));
-	TestEqual(TEXT("Design URL key"), Key, TEXT("abc123XYZ"));
-
-	TestTrue(TEXT("File URL"), FFigmaParser::ExtractFileKey(TEXT("https://www.figma.com/file/def456/OtherFile?node-id=1:2"), Key));
-	TestEqual(TEXT("File URL key"), Key, TEXT("def456"));
-
-	TestTrue(TEXT("Raw key"), FFigmaParser::ExtractFileKey(TEXT("abc123XYZ"), Key));
-	TestEqual(TEXT("Raw key value"), Key, TEXT("abc123XYZ"));
-
-	TestFalse(TEXT("Invalid URL"), FFigmaParser::ExtractFileKey(TEXT("https://example.com/not/figma"), Key));
-
-	return true;
-}
-
-// ============================================================
-// Test 6: FigmaParser → Converter 端到端
-// ============================================================
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaConverterTest,
-	"Design2UMG.FigmaParser.EndToEndConversion",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-
-bool FFigmaConverterTest::RunTest(const FString& Parameters)
-{
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0", "name": "Doc", "type": "DOCUMENT",
-			"children": [{
-				"id": "0:1", "name": "Page", "type": "CANVAS",
-				"children": [{
-					"id": "2:1", "name": "Card", "type": "FRAME",
-					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 400, "height": 300},
-					"layoutMode": "VERTICAL",
-					"itemSpacing": 8,
-					"fills": [{"type": "SOLID", "color": {"r": 1, "g": 1, "b": 1, "a": 1}}],
-					"children": [
-						{
-							"id": "2:2", "name": "Label", "type": "TEXT",
-							"characters": "Hello Figma",
-							"style": {"fontFamily": "Roboto", "fontSize": 18, "fontWeight": 400,
-								"textAlignHorizontal": "LEFT", "textAlignVertical": "TOP",
-								"lineHeightUnit": "AUTO"},
-							"absoluteBoundingBox": {"x": 0, "y": 0, "width": 200, "height": 24},
-							"layoutSizingHorizontal": "HUG", "layoutSizingVertical": "HUG",
-							"fills": [{"type": "SOLID", "color": {"r": 0, "g": 0, "b": 0, "a": 1}}]
-						}
-					]
-				}]
-			}]
-		},
-		"components": {}, "componentSets": {}
-	})");
-
-	FPenDocument Doc;
-	TestTrue(TEXT("E2E parse"), FFigmaParser::ParseDocument(Json, Doc));
-
-	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
-	TestFalse(TEXT("E2E root type"), Data.RootWidget.Type.IsEmpty());
-	TestTrue(TEXT("E2E has children"), Data.RootWidget.Children.Num() > 0);
-
-	return true;
-}
-
-// ============================================================
-// Test 7: Ref-of-Ref descendants 覆盖
+// Test 4: Ref-of-Ref descendants 覆盖
 // ============================================================
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRefOfRefDescendantsOverrideTest,
@@ -543,7 +293,7 @@ bool FRefOfRefDescendantsOverrideTest::RunTest(const FString& Parameters)
 	if (Json.IsEmpty())
 		return false;
 
-	FPenDocument Doc;
+	FDesignDocument Doc;
 	TestTrue(TEXT("RefOfRef parse succeeds"), FPenParser::ParseDocument(Json, Doc));
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
 
@@ -558,7 +308,7 @@ bool FRefOfRefDescendantsOverrideTest::RunTest(const FString& Parameters)
 }
 
 // ============================================================
-// Test 8: Horizontal 父容器 + Ref 子节点交叉轴 Fill
+// Test 5: Horizontal 父容器 + Ref 子节点交叉轴 Fill
 // ============================================================
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHorizontalParentRefChildCrossFillTest,
@@ -572,7 +322,7 @@ bool FHorizontalParentRefChildCrossFillTest::RunTest(const FString& Parameters)
 	if (Json.IsEmpty())
 		return false;
 
-	FPenDocument Doc;
+	FDesignDocument Doc;
 	TestTrue(TEXT("CrossFill parse succeeds"), FPenParser::ParseDocument(Json, Doc));
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
 
@@ -587,8 +337,7 @@ bool FHorizontalParentRefChildCrossFillTest::RunTest(const FString& Parameters)
 }
 
 // ============================================================
-// Test 9: IconFont 无映射降级
-// ============================================================
+// Test 6: IconFont 无映射降级
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIconFontNoMappingFallbackTest,
 	"Design2UMG.IconFont.NoMappingFallback",
@@ -615,7 +364,7 @@ bool FIconFontNoMappingFallbackTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	FPenDocument Doc;
+	FDesignDocument Doc;
 	TestTrue(TEXT("Icon fallback parse succeeds"), FPenParser::ParseDocument(Json, Doc));
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
 
@@ -637,7 +386,7 @@ bool FIconFontNoMappingFallbackTest::RunTest(const FString& Parameters)
 }
 
 // ============================================================
-// Test 10: Parser number/string 宽容解析
+// Test 7: Parser number/string 宽松解析
 // ============================================================
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FParserNumberStringFlexibleTest,
@@ -651,13 +400,13 @@ bool FParserNumberStringFlexibleTest::RunTest(const FString& Parameters)
 	if (Json.IsEmpty())
 		return false;
 
-	FPenDocument Doc;
+	FDesignDocument Doc;
 	TestTrue(TEXT("String number parse succeeds"), FPenParser::ParseDocument(Json, Doc));
 	TestEqual(TEXT("Top-level child count"), Doc.Children.Num(), 1);
 	if (Doc.Children.Num() == 0)
 		return false;
 
-	const TSharedPtr<FPenNode>& Root = Doc.Children[0];
+	const TSharedPtr<FDesignNode>& Root = Doc.Children[0];
 	TestTrue(TEXT("Root has parsed X"), Root->bHasX);
 	TestTrue(TEXT("Root has parsed Y"), Root->bHasY);
 	TestEqual(TEXT("Root gap parsed from string"), Root->Gap, 8.0f);
@@ -686,10 +435,382 @@ bool FParserNumberStringFlexibleTest::RunTest(const FString& Parameters)
 }
 
 // ============================================================
+// Test 8: FigmaParser - 复杂 Dashboard 全路径覆盖
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaComplexParserTest,
+	"Design2UMG.FigmaParser.ComplexDashboard",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFigmaComplexParserTest::RunTest(const FString& Parameters)
+{
+	FString Json;
+	TestTrue(TEXT("Load FigmaComplex fixture"), LoadFixtureJson(TEXT("FigmaComplex.json"), Json));
+	if (Json.IsEmpty())
+		return false;
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Figma complex parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	TestEqual(TEXT("Top-level frame count"), Doc.Children.Num(), 1);
+	if (Doc.Children.Num() == 0)
+		return false;
+
+	// Dashboard root: HORIZONTAL auto layout
+	const auto& Dashboard = Doc.Children[0];
+	TestEqual(TEXT("Dashboard type"), Dashboard->Type, EPenNodeType::Frame);
+	TestEqual(TEXT("Dashboard layout"), Dashboard->Layout, EPenLayout::Horizontal);
+	TestFalse(TEXT("Dashboard clip (Figma clipsContent not mapped)"), Dashboard->bClip);
+	TestEqual(TEXT("Dashboard children"), Dashboard->Children.Num(), 2);
+	if (Dashboard->Children.Num() < 2)
+		return false;
+
+	// Sidebar: VERTICAL + individualStrokeWeights + FILL height
+	const auto& Sidebar = Dashboard->Children[0];
+	TestEqual(TEXT("Sidebar layout"), Sidebar->Layout, EPenLayout::Vertical);
+	TestTrue(TEXT("Sidebar height FILL"), Sidebar->Height.IsFill());
+	TestTrue(TEXT("Sidebar width FIXED"), Sidebar->Width.IsFixed());
+	TestEqual(TEXT("Sidebar gap"), Sidebar->Gap, 8.0f);
+	TestEqual(TEXT("Sidebar padding left"), Sidebar->Padding.Left, 16.0f);
+	TestFalse(TEXT("Sidebar stroke non-uniform"), Sidebar->Stroke.Thickness.bUniform);
+	TestEqual(TEXT("Sidebar stroke right"), Sidebar->Stroke.Thickness.Right, 1.0f);
+	TestEqual(TEXT("Sidebar stroke top"), Sidebar->Stroke.Thickness.Top, 0.0f);
+	TestEqual(TEXT("Sidebar children"), Sidebar->Children.Num(), 4);
+	if (Sidebar->Children.Num() < 4)
+		return false;
+
+	// Logo text: fontWeight 700→bold, textAutoResize→Auto, textAlignVertical CENTER
+	const auto& Logo = Sidebar->Children[0];
+	TestEqual(TEXT("Logo type"), Logo->Type, EPenNodeType::Text);
+	TestEqual(TEXT("Logo content"), Logo->Content, TEXT("Acme Dashboard"));
+	TestEqual(TEXT("Logo fontWeight"), Logo->FontWeight, TEXT("bold"));
+	TestEqual(TEXT("Logo fontSize"), Logo->FontSize, 20.0f);
+	TestEqual(TEXT("Logo textGrowth"), Logo->TextGrowth, EPenTextGrowth::Auto);
+	TestEqual(TEXT("Logo textAlignV"), Logo->TextAlignVertical, EPenTextAlignVertical::Middle);
+	TestTrue(TEXT("Logo lineHeight > 0"), Logo->LineHeight > 0.0f);
+
+	// Divider: LINE type
+	TestEqual(TEXT("Divider type"), Sidebar->Children[1]->Type, EPenNodeType::Line);
+
+	// NavItem: COMPONENT → bReusable
+	const auto& NavItem = Sidebar->Children[2];
+	TestTrue(TEXT("NavItem reusable"), NavItem->bReusable);
+	TestEqual(TEXT("NavItem layout"), NavItem->Layout, EPenLayout::Horizontal);
+	TestEqual(TEXT("NavItem children"), NavItem->Children.Num(), 2);
+
+	// NavItem child: VECTOR → Path
+	if (NavItem->Children.Num() >= 1)
+		TestEqual(TEXT("NavIcon type"), NavItem->Children[0]->Type, EPenNodeType::Path);
+
+	// NavItem Instance: INSTANCE → Ref = componentId
+	const auto& NavInst = Sidebar->Children[3];
+	TestEqual(TEXT("NavInst ref"), NavInst->Ref, TEXT("10:5"));
+
+	// MainContent
+	const auto& Main = Dashboard->Children[1];
+	TestTrue(TEXT("Main width FILL"), Main->Width.IsFill());
+	TestEqual(TEXT("Main padding"), Main->Padding.Top, 32.0f);
+	TestEqual(TEXT("Main children"), Main->Children.Num(), 4);
+	if (Main->Children.Num() < 4)
+		return false;
+
+	// Header: SPACE_BETWEEN
+	const auto& Header = Main->Children[0];
+	TestEqual(TEXT("Header justify"), Header->JustifyContent, EPenJustifyContent::SpaceBetween);
+	TestEqual(TEXT("Header align"), Header->AlignItems, EPenAlignItems::Center);
+
+	// Avatar: ELLIPSE + multi-fill (SOLID + IMAGE)
+	if (Header->Children.Num() >= 2)
+	{
+		const auto& Avatar = Header->Children[1];
+		TestEqual(TEXT("Avatar type"), Avatar->Type, EPenNodeType::Ellipse);
+		TestTrue(TEXT("Avatar has image fill"), Avatar->Fill.IsImage());
+		TestTrue(TEXT("Avatar multi-fills >= 2"), Avatar->Fills.Num() >= 2);
+	}
+
+	// StatCard: GRADIENT_LINEAR + DROP_SHADOW
+	const auto& StatsRow = Main->Children[1];
+	if (StatsRow->Children.Num() >= 1)
+	{
+		const auto& Card = StatsRow->Children[0];
+		TestEqual(TEXT("Card fill gradient"), Card->Fill.Type, EPenFillType::Gradient);
+		TestEqual(TEXT("Card gradient type"), Card->Fill.Gradient.GradientType, EPenGradientType::Linear);
+		TestTrue(TEXT("Card gradient stops >= 2"), Card->Fill.Gradient.Colors.Num() >= 2);
+		TestTrue(TEXT("Card has effects"), Card->Effects.Num() > 0);
+		TestEqual(TEXT("Card shadow type"), Card->Effects[0].Type, EPenEffectType::Shadow);
+		TestFalse(TEXT("Card shadow not inner"), Card->Effects[0].Shadow.bInner);
+	}
+
+	// ChartArea: INNER_SHADOW + BACKGROUND_BLUR + rectangleCornerRadii child
+	const auto& Chart = Main->Children[2];
+	TestTrue(TEXT("Chart effects >= 2"), Chart->Effects.Num() >= 2);
+	bool bFoundInner = false, bFoundBgBlur = false;
+	for (const auto& E : Chart->Effects)
+	{
+		if (E.Type == EPenEffectType::Shadow && E.Shadow.bInner) bFoundInner = true;
+		if (E.Type == EPenEffectType::BackgroundBlur) bFoundBgBlur = true;
+	}
+	TestTrue(TEXT("Chart has inner shadow"), bFoundInner);
+	TestTrue(TEXT("Chart has bg blur"), bFoundBgBlur);
+
+	// ChartPlaceholder: non-uniform corner radius
+	if (Chart->Children.Num() >= 2)
+	{
+		const auto& Placeholder = Chart->Children[1];
+		TestEqual(TEXT("Placeholder type"), Placeholder->Type, EPenNodeType::Rectangle);
+		TestFalse(TEXT("Placeholder non-uniform radius"), Placeholder->CornerRadius.bUniform);
+		TestEqual(TEXT("Placeholder TL"), Placeholder->CornerRadius.TopLeft, 12.0f);
+		TestEqual(TEXT("Placeholder BL"), Placeholder->CornerRadius.BottomLeft, 0.0f);
+	}
+
+	// GROUP: absolute positioned children
+	const auto& Overlay = Main->Children[3];
+	TestEqual(TEXT("Overlay type"), Overlay->Type, EPenNodeType::Group);
+	TestTrue(TEXT("Overlay children >= 7"), Overlay->Children.Num() >= 7);
+
+	if (Overlay->Children.Num() >= 7)
+	{
+		// LAYER_BLUR
+		TestTrue(TEXT("Badge has effects"), Overlay->Children[0]->Effects.Num() > 0);
+		TestEqual(TEXT("Badge blur type"), Overlay->Children[0]->Effects[0].Type, EPenEffectType::Blur);
+
+		// FlippedIcon: relativeTransform flip detection
+		TestTrue(TEXT("FlippedIcon flipX"), Overlay->Children[1]->bFlipX);
+
+		// STAR → Polygon
+		TestEqual(TEXT("Star type"), Overlay->Children[2]->Type, EPenNodeType::Polygon);
+
+		// REGULAR_POLYGON → Polygon
+		TestEqual(TEXT("Polygon type"), Overlay->Children[3]->Type, EPenNodeType::Polygon);
+
+		// BOOLEAN_OPERATION → Path
+		TestEqual(TEXT("BoolOp type"), Overlay->Children[4]->Type, EPenNodeType::Path);
+
+		// IMAGE fill with imageTransform + opacity
+		const auto& ImgCard = Overlay->Children[5];
+		TestTrue(TEXT("ImgCard has image fill"), ImgCard->Fill.IsImage());
+		TestTrue(TEXT("ImgCard opacity < 1"), ImgCard->Opacity < 1.0f);
+
+		// GRADIENT_RADIAL
+		const auto& GradBg = Overlay->Children[6];
+		TestEqual(TEXT("GradBg gradient type"), GradBg->Fill.Gradient.GradientType, EPenGradientType::Radial);
+	}
+
+	// Justified text + textAlignVertical BOTTOM + textAutoResize NONE
+	if (Overlay->Children.Num() >= 8)
+	{
+		const auto& JustText = Overlay->Children[7];
+		TestEqual(TEXT("JustText align"), JustText->TextAlign, EPenTextAlign::Justify);
+		TestEqual(TEXT("JustText valign"), JustText->TextAlignVertical, EPenTextAlignVertical::Bottom);
+		TestEqual(TEXT("JustText growth"), JustText->TextGrowth, EPenTextGrowth::FixedWidthHeight);
+	}
+
+	return true;
+}
+
+// ============================================================
+// Test 8.5: FigmaParser - lineHeight unit mapping
+// ============================================================
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLineHeightMappingTest,
+	"Design2UMG.FigmaParser.LineHeightMapping",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFigmaLineHeightMappingTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page 1",
+				"type": "CANVAS",
+				"children": [{
+					"id": "0:2",
+					"name": "Root",
+					"type": "FRAME",
+					"visible": true,
+					"absoluteBoundingBox": {"x":0,"y":0,"width":100,"height":100},
+					"children": [
+						{
+							"id": "0:3",
+							"name": "TextPx",
+							"type": "TEXT",
+							"visible": true,
+							"absoluteBoundingBox": {"x":1,"y":1,"width":30,"height":12},
+							"fills": [{"type":"SOLID","visible":true,"color":{"r":1,"g":1,"b":1,"a":1}}],
+							"style": {
+								"fontFamily": "Inter",
+								"fontSize": 10,
+								"fontWeight": 400,
+								"lineHeightUnit": "PIXELS",
+								"lineHeightPx": 15
+							},
+							"characters": "A",
+							"textAutoResize": "HEIGHT"
+						},
+						{
+							"id": "0:4",
+							"name": "TextPercent",
+							"type": "TEXT",
+							"visible": true,
+							"absoluteBoundingBox": {"x":1,"y":20,"width":30,"height":12},
+							"fills": [{"type":"SOLID","visible":true,"color":{"r":1,"g":1,"b":1,"a":1}}],
+							"style": {
+								"fontFamily": "Inter",
+								"fontSize": 10,
+								"fontWeight": 400,
+								"lineHeightUnit": "FONT_SIZE_%",
+								"lineHeightPercentFontSize": 140
+							},
+							"characters": "B",
+							"textAutoResize": "HEIGHT"
+						}
+					]
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Figma parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	if (Doc.Children.Num() == 0 || Doc.Children[0]->Children.Num() < 2)
+		return false;
+
+	const TSharedPtr<FDesignNode>& PxText = Doc.Children[0]->Children[0];
+	const TSharedPtr<FDesignNode>& PercentText = Doc.Children[0]->Children[1];
+
+	TestTrue(TEXT("PIXELS line height mapped as ratio"), FMath::IsNearlyEqual(PxText->LineHeight, 1.5f, 0.001f));
+	TestTrue(TEXT("FONT_SIZE_% line height mapped as ratio"), FMath::IsNearlyEqual(PercentText->LineHeight, 1.4f, 0.001f));
+	return true;
+}
+
+// ============================================================
+// Test 9: FigmaParser - ExtractFileKey URL 解析
+// ============================================================
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaExtractKeyTest,
+	"Design2UMG.FigmaParser.ExtractFileKey",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFigmaExtractKeyTest::RunTest(const FString& Parameters)
+{
+	FString Key;
+
+	TestTrue(TEXT("Design URL"), FFigmaParser::ExtractFileKey(TEXT("https://www.figma.com/design/abc123XYZ/MyFile"), Key));
+	TestEqual(TEXT("Design URL key"), Key, TEXT("abc123XYZ"));
+
+	TestTrue(TEXT("File URL"), FFigmaParser::ExtractFileKey(TEXT("https://www.figma.com/file/def456/OtherFile?node-id=1:2"), Key));
+	TestEqual(TEXT("File URL key"), Key, TEXT("def456"));
+
+	TestTrue(TEXT("Raw key"), FFigmaParser::ExtractFileKey(TEXT("abc123XYZ"), Key));
+	TestEqual(TEXT("Raw key value"), Key, TEXT("abc123XYZ"));
+
+	TestFalse(TEXT("Invalid URL"), FFigmaParser::ExtractFileKey(TEXT("https://example.com/not/figma"), Key));
+
+	return true;
+}
+
+// ============================================================
+// Test 10: FigmaParser → Converter 端到端
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaComplexConverterTest,
+	"Design2UMG.FigmaParser.ComplexEndToEnd",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFigmaComplexConverterTest::RunTest(const FString& Parameters)
+{
+	FString Json;
+	TestTrue(TEXT("Load FigmaComplex fixture"), LoadFixtureJson(TEXT("FigmaComplex.json"), Json));
+	if (Json.IsEmpty())
+		return false;
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("E2E parse"), FFigmaParser::ParseDocument(Json, Doc));
+
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	TestFalse(TEXT("E2E root type"), Data.RootWidget.Type.IsEmpty());
+	TestTrue(TEXT("E2E has children"), Data.RootWidget.Children.Num() > 0);
+
+	// 验证关键文本 Widget 存在
+	TArray<FString> Texts;
+	CollectTextValues(Data.RootWidget, Texts);
+	TestTrue(TEXT("Contains Dashboard Overview"), Texts.Contains(TEXT("Dashboard Overview")));
+	TestTrue(TEXT("Contains $48,290"), Texts.Contains(TEXT("$48,290")));
+	TestTrue(TEXT("Contains Overview"), Texts.Contains(TEXT("Overview")));
+
+	// CollectImageRefs 应该能收集到 imageRef
+	TSet<FString> ImageRefs;
+	FFigmaParser::CollectImageRefs(Doc, ImageRefs);
+	TestTrue(TEXT("Has avatar imageRef"), ImageRefs.Contains(TEXT("img_avatar_001")));
+	TestTrue(TEXT("Has card bg imageRef"), ImageRefs.Contains(TEXT("img_card_bg_002")));
+
+	return true;
+}
+
+// ============================================================
+// Test 11: FigmaParser - 真实 Dashboard 设计稿解析
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaRealDashboardTest,
+	"Design2UMG.FigmaParser.RealDashboard",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFigmaRealDashboardTest::RunTest(const FString& Parameters)
+{
+	FString Json;
+	TestTrue(TEXT("Load FigmaRealDashboard fixture"), LoadFixtureJson(TEXT("FigmaRealDashboard.json"), Json));
+	if (Json.IsEmpty())
+		return false;
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Real dashboard parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	TestTrue(TEXT("Has top-level children"), Doc.Children.Num() > 0);
+	if (Doc.Children.Num() == 0)
+		return false;
+
+	const auto& Root = Doc.Children[0];
+	TestEqual(TEXT("Root type is Frame"), Root->Type, EPenNodeType::Frame);
+	TestTrue(TEXT("Root has children"), Root->Children.Num() > 0);
+
+	// 统计各节点类型数量，验证解析完整性
+	TMap<EPenNodeType, int32> TypeCounts;
+	TFunction<void(const TSharedPtr<FDesignNode>&)> CountNodes = [&](const TSharedPtr<FDesignNode>& Node)
+	{
+		TypeCounts.FindOrAdd(Node->Type)++;
+		for (const auto& Child : Node->Children)
+			CountNodes(Child);
+	};
+	CountNodes(Root);
+
+	int32 TotalNodes = 0;
+	for (const auto& Pair : TypeCounts)
+		TotalNodes += Pair.Value;
+
+	TestTrue(TEXT("Total nodes > 50"), TotalNodes > 50);
+	TestTrue(TEXT("Has Frame nodes"), TypeCounts.Contains(EPenNodeType::Frame));
+	TestTrue(TEXT("Has Text nodes"), TypeCounts.Contains(EPenNodeType::Text));
+	TestTrue(TEXT("Has Rectangle nodes"), TypeCounts.Contains(EPenNodeType::Rectangle));
+
+	// 端到端转换
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	TestFalse(TEXT("Widget root type not empty"), Data.RootWidget.Type.IsEmpty());
+	TestTrue(TEXT("Widget has children"), Data.RootWidget.Children.Num() > 0);
+
+	// 验证关键文本 Widget 存在
+	TArray<FString> Texts;
+	CollectTextValues(Data.RootWidget, Texts);
+	TestTrue(TEXT("Has text content"), Texts.Num() > 0);
+
+	return true;
+}
+
+// ============================================================
 // Batch import: pencil-welcome.pen 4 frames
 // ============================================================
 #include "PenImporter.h"
-#include "PenImportUtils.h"
+#include "DesignImportUtils.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "ObjectTools.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenWelcomeBatchImportTest,
 	"Design2UMG.BatchImport.PencilWelcome",
@@ -697,8 +818,24 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenWelcomeBatchImportTest,
 
 bool FPenWelcomeBatchImportTest::RunTest(const FString& Parameters)
 {
-	const FString PenFile = TEXT("G:/UE5/FPSRoguelike/Designs/pencil-welcome.pen");
-	const FString OutputPath = TEXT("/Game/Design2UMG/PencilWelcome");
+	// 使用插件 Fixtures 目录，避免硬编码绝对路径
+	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
+	if (!Plugin.IsValid())
+	{
+		AddError(TEXT("Design2UMG plugin not found"));
+		return false;
+	}
+	const FString PenFile = FPaths::Combine(
+		Plugin->GetBaseDir(),
+		TEXT("Source/Design2UMGEditor/Private/Tests/Fixtures/pencil-welcome.pen"));
+	if (!FPaths::FileExists(PenFile))
+	{
+		AddWarning(FString::Printf(TEXT("Test fixture not found, skipping: %s"), *PenFile));
+		return true;
+	}
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/PencilWelcome");
+	TArray<FString> GeneratedAssetPaths;
 
 	struct FFrameInfo { FString Id; FString Name; };
 	TArray<FFrameInfo> Frames = {
@@ -715,10 +852,30 @@ bool FPenWelcomeBatchImportTest::RunTest(const FString& Parameters)
 		TestTrue(*FString::Printf(TEXT("Parse %s"), *F.Name), bOk);
 		if (!bOk) continue;
 
-		bool bPng = PenImportUtils::GenerateBlueprintAndPng(Data, OutputPath / Data.WidgetName);
+		FString FrameOutputPath = OutputPath / Data.WidgetName;
+		bool bPng = DesignImportUtils::GenerateBlueprintAndPng(Data, FrameOutputPath);
 		TestTrue(*FString::Printf(TEXT("Render %s"), *F.Name), bPng);
+		GeneratedAssetPaths.Add(FrameOutputPath);
 	}
+
+	// 清理测试产物，避免污染项目资产库
+	FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+	TArray<UObject*> ObjectsToDelete;
+	for (const FString& AssetDir : GeneratedAssetPaths)
+	{
+		TArray<FAssetData> Assets;
+		ARM.Get().GetAssetsByPath(FName(*AssetDir), Assets, true);
+		for (const FAssetData& AD : Assets)
+		{
+			if (UObject* Obj = AD.GetAsset())
+				ObjectsToDelete.Add(Obj);
+		}
+	}
+	if (ObjectsToDelete.Num() > 0)
+		ObjectTools::ForceDeleteObjects(ObjectsToDelete, false);
+
 	return true;
 }
 
 #endif // WITH_AUTOMATION_WORKER
+

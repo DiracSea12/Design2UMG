@@ -19,8 +19,10 @@ public:
 		const FString& Geometry,
 		int32 Width, int32 Height,
 		FLinearColor FillColor,
-		const FString& FillRule = TEXT("nonzero"),
-		UObject* Outer = nullptr);
+		const FString& FillRule = TEXT("nonzero"));
+
+	/** Clear the path rasterization cache (call on module shutdown) */
+	static void ClearCache();
 
 private:
 	struct FPathPoint { float X; float Y; };

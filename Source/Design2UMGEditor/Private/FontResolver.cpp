@@ -4,7 +4,7 @@
 #include "Design2UMGLog.h"
 #include "Design2UMGNotification.h"
 #include "Design2UMGSettings.h"
-#include "PenSchema.h"
+#include "DesignSchema.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Engine/Font.h"
 #include "Engine/FontFace.h"
@@ -16,6 +16,8 @@
 #include "Misc/PackageName.h"
 #include "UObject/SavePackage.h"
 #include "HAL/FileManager.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Misc/ScopedSlowTask.h"
 
 #define LOCTEXT_NAMESPACE "FontResolver"
 
@@ -57,7 +59,7 @@ void FFontResolver::ClearCache()
 	FontAssetCache.Empty();
 }
 
-TArray<FString> FFontResolver::FindMissingFonts(const FPenDocument& Document)
+TArray<FString> FFontResolver::FindMissingFonts(const FDesignDocument& Document)
 {
 	TSet<FString> UsedFamilies;
 
@@ -74,14 +76,12 @@ TArray<FString> FFontResolver::FindMissingFonts(const FPenDocument& Document)
 	if (UsedFamilies.Num() == 0)
 		return {};
 
-	// Scan project font assets
-	TSet<FString> ProjectFonts = ScanProjectFontAssets();
-
-	// Find missing
+	// Find missing — 使用 FindFontAssetPath 的模糊匹配（IgnoreCase + 空格转下划线），
+	// 避免与精确匹配结论矛盾
 	TArray<FString> Missing;
 	for (const FString& Family : UsedFamilies)
 	{
-		if (!ProjectFonts.Contains(Family))
+		if (FindFontAssetPath(Family).IsEmpty())
 			Missing.Add(Family);
 	}
 
@@ -97,7 +97,7 @@ TArray<FString> FFontResolver::FindMissingFonts(const FPenDocument& Document)
 	return Missing;
 }
 
-void FFontResolver::CollectFontFamilies(const TArray<TSharedPtr<FPenNode>>& Nodes, TSet<FString>& OutFamilies)
+void FFontResolver::CollectFontFamilies(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSet<FString>& OutFamilies)
 {
 	for (const auto& Node : Nodes)
 	{
@@ -153,7 +153,33 @@ bool FFontResolver::DownloadToFile(const FString& Url, const FString& LocalPath)
 	if (!Request->ProcessRequest())
 		return false;
 
-	FHttpModule::Get().GetHttpManager().Flush(EHttpFlushReason::FullFlush);
+	FScopedSlowTask SlowTask(30.0f, FText::Format(
+		LOCTEXT("DownloadingFont", "Downloading font: {0}"), FText::FromString(Url)));
+	SlowTask.MakeDialog(true);
+
+	const double StartTime = FPlatformTime::Seconds();
+	constexpr double Timeout = 30.0;
+	while (!bDone)
+	{
+		const double Elapsed = FPlatformTime::Seconds() - StartTime;
+		if (Elapsed > Timeout)
+		{
+			UE_LOG(LogDesign2UMG, Warning, TEXT("FontResolver: Download timeout for %s"), *Url);
+			Request->CancelRequest();
+			return false;
+		}
+		if (SlowTask.ShouldCancel())
+		{
+			Request->CancelRequest();
+			return false;
+		}
+		SlowTask.EnterProgressFrame(0.01f);
+		FHttpModule::Get().GetHttpManager().Tick(0.01f);
+		if (FSlateApplication::IsInitialized())
+			FSlateApplication::Get().PumpMessages();
+		FPlatformProcess::Sleep(0.01f);
+	}
+
 	if (!bSuccess)
 		return false;
 
@@ -194,7 +220,10 @@ FString FFontResolver::ResolveFont(const FString& FontName, const FString& Url)
 	TArray<uint8> FontData;
 	if (bIsRemote)
 	{
-		FString TempPath = FPaths::ProjectSavedDir() / TEXT("Design2UMG") / SafeName + TEXT(".ttf");
+		FString Extension = FPaths::GetExtension(Url, false);
+		if (Extension.IsEmpty() || !(Extension == TEXT("ttf") || Extension == TEXT("otf") || Extension == TEXT("woff2")))
+			Extension = TEXT("ttf");
+		FString TempPath = FPaths::ProjectSavedDir() / TEXT("Design2UMG") / SafeName + TEXT(".") + Extension;
 		if (!DownloadToFile(Url, TempPath))
 		{
 			UE_LOG(LogDesign2UMG, Warning, TEXT("字体下载失败: %s (%s)"), *FontName, *Url);
@@ -258,7 +287,7 @@ FString FFontResolver::ResolveFont(const FString& FontName, const FString& Url)
 	return FontObjPath;
 }
 
-void FFontResolver::AutoImportFonts(const FPenDocument& Document)
+void FFontResolver::AutoImportFonts(const FDesignDocument& Document)
 {
 	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
 	if (!Settings || !Settings->bAutoImportFonts)

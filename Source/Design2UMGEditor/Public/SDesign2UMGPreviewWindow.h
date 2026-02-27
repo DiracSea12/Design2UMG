@@ -40,6 +40,9 @@ private:
 	FOnPreviewConfirmed OnConfirmed;
 	FOnPreviewCancelled OnCancelled;
 
+	/** 预览用临时纹理，销毁时需释放 Root 引用 */
+	TMap<FString, UTexture2D*> PreviewTextureMap;
+
 	FReply OnGenerateClicked();
 	FReply OnCancelClicked();
 	FReply OnFormatJsonClicked();

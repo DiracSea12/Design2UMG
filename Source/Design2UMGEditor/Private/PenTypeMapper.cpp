@@ -1,12 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
 #include "PenTypeMapper.h"
-#include "UMGWidgetUtils.h"
-
-FLinearColor FPenTypeMapper::ParseColor(const FString& HexColor)
-{
-	return FUMGWidgetUtils::ParseColor(HexColor);
-}
 
 FString FPenTypeMapper::MapNodeTypeToWidget(EPenNodeType Type, EPenLayout Layout)
 {
@@ -35,6 +29,13 @@ FString FPenTypeMapper::MapNodeTypeToWidget(EPenNodeType Type, EPenLayout Layout
 		return TEXT("Image");
 
 	case EPenNodeType::Group:
+		return TEXT("CanvasPanel");
+
+	case EPenNodeType::Ref:
+		if (Layout == EPenLayout::Vertical)
+			return TEXT("VerticalBox");
+		if (Layout == EPenLayout::Horizontal)
+			return TEXT("HorizontalBox");
 		return TEXT("CanvasPanel");
 
 	default:

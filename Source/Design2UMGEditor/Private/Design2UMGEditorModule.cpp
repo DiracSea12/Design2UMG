@@ -1,9 +1,9 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
 #include "Design2UMGEditorModule.h"
 #include "Design2UMGLog.h"
 #include "PenMCPBridge.h"
-#include "PenImportUtils.h"
+#include "DesignImportUtils.h"
 
 #include "PenParser.h"
 #include "PenImporter.h"
@@ -15,6 +15,10 @@
 #include "FigmaImageExporter.h"
 #include "Design2UMGConverter.h"
 #include "Design2UMGSettings.h"
+#include "FontResolver.h"
+#include "PenPathRasterizer.h"
+#include "UMGWidgetUtils.h"
+#include "ProceduralShapeGenerator.h"
 
 #include "WidgetBlueprint.h"
 #include "Framework/Notifications/NotificationManager.h"
@@ -32,6 +36,7 @@
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Layout/SSeparator.h"
 #include "Misc/App.h"
+#include <atomic>
 
 DEFINE_LOG_CATEGORY(LogDesign2UMG);
 
@@ -99,13 +104,13 @@ namespace
 			return;
 		}
 
-		PenImportUtils::ResolveImages(Data);
+		DesignImportUtils::ResolveImages(Data);
 
-		if (PenImportUtils::OpenPreviewWindow(Data, OutputPath,
+		if (DesignImportUtils::OpenPreviewWindow(Data, OutputPath,
 			LOCTEXT("PenConvertPreviewWindowTitle", "Design2UMG Pen Preview")))
 			return;
 
-		PenImportUtils::GenerateBlueprintAndPng(Data, OutputPath);
+		DesignImportUtils::GenerateBlueprintAndPng(Data, OutputPath);
 	}
 
 	/** 从 batch_get 结果中提取 frame 信息列表 */
@@ -175,7 +180,7 @@ namespace
 		FString CapturedVars = VarsJson;
 		FString CapturedOutput = OutputPath;
 
-		PenImportUtils::ShowFrameSelector(
+		DesignImportUtils::ShowFrameSelector(
 			Frames,
 			LOCTEXT("PencilFrameSelectorTitle", "Select Frame from Pencil"),
 			LOCTEXT("PencilFrameSelectorHint", "Multiple frames found. Double-click to import:"),
@@ -188,10 +193,10 @@ namespace
 	/** Connect to Pencil 主流程（异步） */
 	void ConnectToPencilAndImport()
 	{
-		static bool bInProgress = false;
-		if (bInProgress)
+		static std::atomic<bool> bInProgress{false};
+		bool bExpected = false;
+		if (!bInProgress.compare_exchange_strong(bExpected, true))
 			return;
-		bInProgress = true;
 
 		// 1. 启动 / 复用连接
 		if (!GConnector)
@@ -218,6 +223,8 @@ namespace
 		Pattern->SetStringField(TEXT("type"), TEXT("frame"));
 		Patterns.Add(MakeShared<FJsonValueObject>(Pattern));
 		BatchArgs->SetArrayField(TEXT("patterns"), Patterns);
+		// Keep full path geometry from MCP; otherwise path nodes become "..." and vector rendering breaks.
+		BatchArgs->SetBoolField(TEXT("includePathGeometry"), true);
 		BatchArgs->SetNumberField(TEXT("searchDepth"), 1);
 		BatchArgs->SetNumberField(TEXT("readDepth"), 99);
 
@@ -263,20 +270,20 @@ namespace
 		if (!FPenImporter::ImportFileWithTargetNode(FilePath, TargetNodeId, Data))
 			return;
 
-		PenImportUtils::ResolveImages(Data);
+		DesignImportUtils::ResolveImages(Data);
 
-		if (bUsePreview && PenImportUtils::OpenPreviewWindow(Data, OutputPath,
+		if (bUsePreview && DesignImportUtils::OpenPreviewWindow(Data, OutputPath,
 			LOCTEXT("PenConvertPreviewWindowTitle", "Design2UMG Pen Preview")))
 			return;
 
-		PenImportUtils::GenerateBlueprintAndPng(Data, OutputPath);
+		DesignImportUtils::GenerateBlueprintAndPng(Data, OutputPath);
 	}
 
 	/** 导入 .pen 文件（工具栏 + 控制台命令共用） */
 	void ImportPenFile(const FString& FilePath, const FString& OutputPath, bool bUsePreview = true)
 	{
 		// 先解析文档，检查顶层 frame 数量
-		FPenDocument Document;
+		FDesignDocument Document;
 		if (!FPenParser::ParseFromFile(FilePath, Document))
 		{
 			UE_LOG(LogDesign2UMG, Error, TEXT("Design2UMG.Import: Failed to parse %s"), *FilePath);
@@ -306,13 +313,13 @@ namespace
 				return;
 			}
 
-			PenImportUtils::ResolveImages(Data);
+			DesignImportUtils::ResolveImages(Data);
 
-			if (bUsePreview && PenImportUtils::OpenPreviewWindow(Data, OutputPath,
+			if (bUsePreview && DesignImportUtils::OpenPreviewWindow(Data, OutputPath,
 				LOCTEXT("PenConvertPreviewWindowTitle", "Design2UMG Pen Preview")))
 				return;
 
-			PenImportUtils::GenerateBlueprintAndPng(Data, OutputPath);
+			DesignImportUtils::GenerateBlueprintAndPng(Data, OutputPath);
 			return;
 		}
 
@@ -321,7 +328,7 @@ namespace
 		FString CapturedOutputPath = OutputPath;
 		bool bCapturedPreview = bUsePreview;
 
-		PenImportUtils::ShowFrameSelector(
+		DesignImportUtils::ShowFrameSelector(
 			Frames,
 			LOCTEXT("FrameSelectorTitle", "Select Frame to Import"),
 			LOCTEXT("FrameSelectorHint", "This file contains multiple frames. Double-click to import:"),
@@ -345,6 +352,11 @@ namespace
 		if (!FFigmaParser::ExtractFileKey(FileUrl, FileKey))
 		{
 			ShowNotification(LOCTEXT("FigmaInvalidUrl", "Design2UMG: Invalid Figma URL or file key"), SNotificationItem::CS_Fail);
+			if (FApp::IsUnattended())
+			{
+				UE_LOG(LogDesign2UMG, Log, TEXT("Unattended mode: requesting engine exit after figma url validation failed"));
+				FPlatformMisc::RequestExit(false);
+			}
 			return;
 		}
 
@@ -360,18 +372,28 @@ namespace
 				if (!bSuccess)
 				{
 					ShowNotification(LOCTEXT("FigmaGetFileFailed", "Design2UMG: Figma API request failed"), SNotificationItem::CS_Fail);
+					if (FApp::IsUnattended())
+					{
+						UE_LOG(LogDesign2UMG, Log, TEXT("Unattended mode: requesting engine exit after figma api request failed"));
+						FPlatformMisc::RequestExit(false);
+					}
 					return;
 				}
 
-				FPenDocument ParsedDoc;
+				FDesignDocument ParsedDoc;
 				if (!FFigmaParser::ParseDocument(Body, ParsedDoc))
 				{
 					ShowNotification(LOCTEXT("FigmaParseFailed", "Design2UMG: Failed to parse Figma file"), SNotificationItem::CS_Fail);
+					if (FApp::IsUnattended())
+					{
+						UE_LOG(LogDesign2UMG, Log, TEXT("Unattended mode: requesting engine exit after figma parse failed"));
+						FPlatformMisc::RequestExit(false);
+					}
 					return;
 				}
 
 				// shared ownership for async safety
-				TSharedRef<FPenDocument> Doc = MakeShared<FPenDocument>(MoveTemp(ParsedDoc));
+				TSharedRef<FDesignDocument> Doc = MakeShared<FDesignDocument>(MoveTemp(ParsedDoc));
 
 				// 解析图片引用
 				if (GFigmaClient)
@@ -386,17 +408,25 @@ namespace
 							if (GFigmaClient)
 							{
 								FFigmaImageExporter::ExportVectorNodes(*GFigmaClient, FileKey, Doc,
-									[Doc](bool bVecOk)
+									[Doc](bool bVecOk, const TMap<FString, FString>& IdToUrl)
 									{
 										if (!bVecOk)
 											UE_LOG(LogDesign2UMG, Warning, TEXT("FigmaImport: Some vector nodes not exported"));
 
+										if (IdToUrl.Num() > 0)
+											FFigmaImageExporter::ApplyExportedImages(Doc->Children, IdToUrl);
+
 										FUMGWidgetData Data = FDesign2UMGConverter::Convert(*Doc);
-										PenImportUtils::ResolveImages(Data);
+										DesignImportUtils::ResolveImages(Data);
 
 										if (Data.RootWidget.Children.Num() == 0)
 										{
 											ShowNotification(LOCTEXT("FigmaNoFrames", "Design2UMG: No frames found in Figma file"), SNotificationItem::CS_Fail);
+											if (FApp::IsUnattended())
+											{
+												UE_LOG(LogDesign2UMG, Log, TEXT("Unattended mode: requesting engine exit after figma no frames"));
+												FPlatformMisc::RequestExit(false);
+											}
 											return;
 										}
 
@@ -404,14 +434,226 @@ namespace
 											FText::Format(LOCTEXT("FigmaSuccess", "Design2UMG: Imported {0} frame(s) from Figma"),
 												FText::AsNumber(Data.RootWidget.Children.Num())),
 											SNotificationItem::CS_Success);
+										if (FApp::IsUnattended())
+										{
+											DesignImportUtils::GenerateBlueprintAndPng(Data, DefaultFigmaOutputPath);
+											UE_LOG(LogDesign2UMG, Log, TEXT("Unattended mode: requesting engine exit after figma import"));
+											FPlatformMisc::RequestExit(false);
+											return;
+										}
 
-										PenImportUtils::OpenPreviewWindow(Data, DefaultFigmaOutputPath,
+										DesignImportUtils::OpenPreviewWindow(Data, DefaultFigmaOutputPath,
 											LOCTEXT("FigmaPreviewTitle", "Design2UMG Figma Preview"));
 									});
 							}
 						});
 				}
 			});
+	}
+
+	FString MakeVecKey(const FString& RawId)
+	{
+		return TEXT("vec_")
+			+ RawId
+				.Replace(TEXT(":"), TEXT("_"))
+				.Replace(TEXT("/"), TEXT("_"));
+	}
+
+	bool TryResolveVectorPngPath(const FString& NodeId, const FString& ImagesDir, FString& OutVecKey, FString& OutPngPath)
+	{
+		TArray<FString> CandidateIds;
+		CandidateIds.Add(NodeId);
+
+		int32 DelimIndex = INDEX_NONE;
+		if (NodeId.FindLastChar(TEXT(';'), DelimIndex) && DelimIndex + 1 < NodeId.Len())
+		{
+			CandidateIds.Add(NodeId.Mid(DelimIndex + 1));
+		}
+
+		if (NodeId.FindLastChar(TEXT('/'), DelimIndex) && DelimIndex + 1 < NodeId.Len())
+		{
+			CandidateIds.Add(NodeId.Mid(DelimIndex + 1));
+		}
+
+		for (const FString& CandidateId : CandidateIds)
+		{
+			const FString VecKey = MakeVecKey(CandidateId);
+			const FString PngPath = ImagesDir / (VecKey + TEXT(".png"));
+			if (FPaths::FileExists(PngPath))
+			{
+				OutVecKey = VecKey;
+				OutPngPath = PngPath;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	bool ShouldSkipTinyVectorPng(const FString& PngPath, float NodeWidth, float NodeHeight)
+	{
+		const int64 FileSize = IFileManager::Get().FileSize(*PngPath);
+		if (FileSize <= 0)
+		{
+			return true;
+		}
+
+		TArray<uint8> Header;
+		if (!FFileHelper::LoadFileToArray(Header, *PngPath) || Header.Num() < 24)
+		{
+			return false;
+		}
+
+		// PNG IHDR width/height are big-endian at byte 16..23.
+		const int32 W = (int32(Header[16]) << 24) | (int32(Header[17]) << 16) | (int32(Header[18]) << 8) | int32(Header[19]);
+		const int32 H = (int32(Header[20]) << 24) | (int32(Header[21]) << 16) | (int32(Header[22]) << 8) | int32(Header[23]);
+
+		const bool bDegenerateImage = (W <= 1 || H <= 1);
+		const bool bTinyImage = (W <= 2 && H <= 2);
+		const bool bSuspiciousPayload = FileSize <= 200;
+		const bool bSizeMismatch = bTinyImage && (NodeWidth > 4.0f || NodeHeight > 4.0f);
+		return bDegenerateImage || (bTinyImage && bSuspiciousPayload) || bSizeMismatch;
+	}
+
+	bool CanRasterizeVectorFromGeometry(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid() || Node->Geometry.IsEmpty())
+		{
+			return false;
+		}
+
+		if (Node->Fill.bEnabled
+			&& Node->Fill.Type == EPenFillType::Color)
+		{
+			return true;
+		}
+
+		for (const FPenFill& Fill : Node->Fills)
+		{
+			if (Fill.bEnabled
+				&& Fill.Type == EPenFillType::Color)
+			{
+				return true;
+			}
+		}
+
+		if (Node->Stroke.HasStroke()
+			&& Node->Stroke.Fill.bEnabled
+			&& Node->Stroke.Fill.Type == EPenFillType::Color)
+		{
+			return true;
+		}
+
+		return false;
+	}
+
+	/** 为本地导出的向量节点注入 image fill（vec_*） */
+	int32 InjectVectorImageFills(TArray<TSharedPtr<FDesignNode>>& Nodes, const FString& ImagesDir, TMap<FString, FString>& OutMapping)
+	{
+		int32 InjectedCount = 0;
+
+		for (TSharedPtr<FDesignNode>& Node : Nodes)
+		{
+			if (!Node.IsValid())
+				continue;
+
+			const bool bIsVector =
+				(Node->Type == EPenNodeType::Path) ||
+				(Node->Type == EPenNodeType::Line) ||
+				(Node->Type == EPenNodeType::Ellipse) ||
+				(Node->Type == EPenNodeType::Polygon);
+
+			if (bIsVector && !Node->Fill.IsImage())
+			{
+				FString VecKey;
+				FString PngPath;
+				if (TryResolveVectorPngPath(Node->Id, ImagesDir, VecKey, PngPath))
+				{
+					if (ShouldSkipTinyVectorPng(PngPath, Node->Width.Value, Node->Height.Value))
+					{
+						continue;
+					}
+
+					FPenFill ImgFill;
+					ImgFill.Type = EPenFillType::Image;
+					ImgFill.Image.Url = VecKey;
+					ImgFill.Image.Mode = EPenImageMode::Fill;
+					Node->Fill = ImgFill;
+					Node->Fills.Empty();
+					Node->Fills.Add(ImgFill);
+					if (!OutMapping.Contains(VecKey))
+					{
+						OutMapping.Add(VecKey, PngPath);
+					}
+					++InjectedCount;
+				}
+			}
+
+			InjectedCount += InjectVectorImageFills(Node->Children, ImagesDir, OutMapping);
+		}
+
+		return InjectedCount;
+	}
+
+	/** 导入本地 Figma 导出（design.json + images/） */
+	void ImportLocalFigmaExport(const FString& JsonFilePath, const FString& OutputPath, bool bUsePreview)
+	{
+		FString JsonStr;
+		if (!FFileHelper::LoadFileToString(JsonStr, *JsonFilePath))
+		{
+			ShowNotification(LOCTEXT("LocalFigmaReadFail", "Design2UMG: Failed to read design.json"), SNotificationItem::CS_Fail);
+			return;
+		}
+
+		FDesignDocument ParsedDoc;
+		if (!FFigmaParser::ParseDocument(JsonStr, ParsedDoc))
+		{
+			ShowNotification(LOCTEXT("LocalFigmaParseFail", "Design2UMG: Failed to parse Figma JSON"), SNotificationItem::CS_Fail);
+			return;
+		}
+
+		const FString ImagesDir = FPaths::GetPath(JsonFilePath) / TEXT("images");
+		TMap<FString, FString> ImageRefToLocalPath;
+		const int32 VecCount = InjectVectorImageFills(ParsedDoc.Children, ImagesDir, ImageRefToLocalPath);
+
+		TSet<FString> ImageRefs;
+		FFigmaParser::CollectImageRefs(ParsedDoc, ImageRefs);
+		for (const FString& Ref : ImageRefs)
+		{
+			if (ImageRefToLocalPath.Contains(Ref))
+				continue;
+			const FString PngPath = ImagesDir / (Ref + TEXT(".png"));
+			if (FPaths::FileExists(PngPath))
+			{
+				ImageRefToLocalPath.Add(Ref, PngPath);
+			}
+		}
+
+		UE_LOG(LogDesign2UMG, Log, TEXT("LocalFigmaImport: %d image mappings (%d vec_*, %d image fills)"),
+			ImageRefToLocalPath.Num(), VecCount, ImageRefToLocalPath.Num() - VecCount);
+
+		FFigmaParser::ApplyImageUrls(ParsedDoc, ImageRefToLocalPath);
+
+		FUMGWidgetData Data = FDesign2UMGConverter::Convert(ParsedDoc);
+		DesignImportUtils::ResolveImages(Data);
+
+		if (Data.RootWidget.Children.Num() == 0)
+		{
+			ShowNotification(LOCTEXT("LocalFigmaNoFrames", "Design2UMG: No frames found in export"), SNotificationItem::CS_Fail);
+			return;
+		}
+
+		const FString FinalOutputPath = OutputPath.IsEmpty()
+			? FString::Printf(TEXT("/Game/Design2UMG/Figma_%s"), *FDateTime::Now().ToString(TEXT("%m%d_%H%M%S")))
+			: OutputPath;
+
+		if (bUsePreview && !FApp::IsUnattended())
+		{
+			DesignImportUtils::OpenPreviewWindow(Data, FinalOutputPath,
+				LOCTEXT("LocalFigmaPreviewTitle", "Design2UMG Local Figma Preview"));
+			return;
+		}
+
+		DesignImportUtils::GenerateBlueprintAndPng(Data, FinalOutputPath);
 	}
 
 	/** 弹出 Figma 导入对话框 */
@@ -561,6 +803,29 @@ namespace
 		}
 	}
 
+	/** 打开文件对话框选择本地 design.json 并导入 */
+	void OpenLocalFigmaJsonDialog()
+	{
+		IDesktopPlatform* Desktop = FDesktopPlatformModule::Get();
+		if (!Desktop)
+			return;
+
+		TArray<FString> OutFiles;
+		const bool bOpened = Desktop->OpenFileDialog(
+			FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr),
+			TEXT("Import Local Figma Export (design.json)"),
+			FPaths::ProjectDir(),
+			TEXT("design.json"),
+			TEXT("Figma Export JSON (design.json)|design.json|JSON Files (*.json)|*.json"),
+			EFileDialogFlags::None,
+			OutFiles);
+
+		if (bOpened && OutFiles.Num() > 0)
+		{
+			ImportLocalFigmaExport(OutFiles[0], DefaultFigmaOutputPath, true);
+		}
+	}
+
 }
 
 void FDesign2UMGEditorModule::StartupModule()
@@ -572,7 +837,7 @@ void FDesign2UMGEditorModule::StartupModule()
 
 	// 注册 Figma 数据源适配器
 	FDesignSourceRegistry::Register(TEXT("Figma"), [](const FString& RawJson, FUMGWidgetData& OutData){
-		FPenDocument Doc;
+		FDesignDocument Doc;
 		if (!FFigmaParser::ParseDocument(RawJson, Doc))
 			return false;
 		OutData = FDesign2UMGConverter::Convert(Doc);
@@ -611,7 +876,7 @@ void FDesign2UMGEditorModule::StartupModule()
 				return;
 			}
 
-			PenImportUtils::ResolveImages(Data);
+			DesignImportUtils::ResolveImages(Data);
 
 			UE_LOG(LogDesign2UMG, Log, TEXT("[OK] PenConvert succeeded, root children: %d"), Data.RootWidget.Children.Num());
 			for (int32 Index = 0; Index < Data.RootWidget.Children.Num(); ++Index)
@@ -620,13 +885,19 @@ void FDesign2UMGEditorModule::StartupModule()
 				UE_LOG(LogDesign2UMG, Log, TEXT("  [%d] %s (%s)"), Index, *Child.Name, *Child.Type);
 			}
 
-			if (CmdArgs.bUsePreview && PenImportUtils::OpenPreviewWindow(Data, CmdArgs.OutputPath,
+			if (CmdArgs.bUsePreview && DesignImportUtils::OpenPreviewWindow(Data, CmdArgs.OutputPath,
 				LOCTEXT("PenConvertPreviewWindowTitle", "Design2UMG Pen Preview")))
 			{
 				return;
 			}
 
-			PenImportUtils::GenerateBlueprintAndPng(Data, CmdArgs.OutputPath);
+			DesignImportUtils::GenerateBlueprintAndPng(Data, CmdArgs.OutputPath);
+
+			if (FApp::IsUnattended())
+			{
+				UE_LOG(LogDesign2UMG, Log, TEXT("Unattended mode: requesting engine exit after pen convert"));
+				FPlatformMisc::RequestExit(false);
+			}
 		}),
 		ECVF_Default);
 
@@ -740,13 +1011,19 @@ void FDesign2UMGEditorModule::StartupModule()
 
 			UE_LOG(LogDesign2UMG, Log, TEXT("[OK] ImportSource succeeded (%s), root children: %d"), *SourceId.ToString(), Data.RootWidget.Children.Num());
 
-			if (bPreview && PenImportUtils::OpenPreviewWindow(Data, OutputPath,
+			if (bPreview && DesignImportUtils::OpenPreviewWindow(Data, OutputPath,
 				LOCTEXT("ImportSourcePreviewTitle", "Design2UMG Import Preview")))
 			{
 				return;
 			}
 
-			PenImportUtils::GenerateBlueprintAndPng(Data, OutputPath);
+			DesignImportUtils::GenerateBlueprintAndPng(Data, OutputPath);
+
+			if (FApp::IsUnattended())
+			{
+				UE_LOG(LogDesign2UMG, Log, TEXT("Unattended mode: requesting engine exit after import source"));
+				FPlatformMisc::RequestExit(false);
+			}
 		}),
 		ECVF_Default);
 
@@ -762,6 +1039,45 @@ void FDesign2UMGEditorModule::StartupModule()
 				return;
 			}
 			ImportFromFigma(Args[0], Args[1]);
+		}),
+		ECVF_Default);
+
+	// Design2UMG.LocalFigmaImport 控制台命令
+	IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("Design2UMG.LocalFigmaImport"),
+		TEXT("Import local Figma export: Design2UMG.LocalFigmaImport <design.json> [--out=/Game/Path] [--no-preview]"),
+		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
+		{
+			if (Args.Num() < 1)
+			{
+				UE_LOG(LogDesign2UMG, Warning, TEXT("Usage: Design2UMG.LocalFigmaImport <design.json> [--out=/Game/Path] [--no-preview]"));
+				return;
+			}
+
+			const FString JsonPath = Args[0];
+			FString OutputPath;
+			bool bPreview = true;
+			for (int32 i = 1; i < Args.Num(); ++i)
+			{
+				if (Args[i].StartsWith(TEXT("--out=")))
+					OutputPath = Args[i].RightChop(6);
+				else if (Args[i] == TEXT("--no-preview"))
+					bPreview = false;
+			}
+
+			if (!FPaths::FileExists(JsonPath))
+			{
+				UE_LOG(LogDesign2UMG, Error, TEXT("File not found: %s"), *JsonPath);
+				return;
+			}
+			ImportLocalFigmaExport(JsonPath, OutputPath, bPreview);
+
+			// Unattended 模式下自动退出，避免命令行导入完成后编辑器继续空转渲染导致 GPU 崩溃。
+			if (FApp::IsUnattended())
+			{
+				UE_LOG(LogDesign2UMG, Log, TEXT("Unattended mode: requesting engine exit after local figma import"));
+				FPlatformMisc::RequestExit(false);
+			}
 		}),
 		ECVF_Default);
 
@@ -794,16 +1110,26 @@ void FDesign2UMGEditorModule::StartupModule()
 				ConnectToPencilAndImport();
 			})));
 
-		Section.AddMenuEntry(
-			TEXT("ImportFromFigma"),
-			LOCTEXT("ImportFromFigma", "Import from Figma..."),
-			LOCTEXT("ImportFromFigmaTooltip", "Import a Figma design file and convert to Widget Blueprint"),
-			FSlateIcon(),
-			FUIAction(FExecuteAction::CreateLambda([]()
-			{
-				ShowFigmaImportDialog();
-			})));
-	}));
+			Section.AddMenuEntry(
+				TEXT("ImportFromFigma"),
+				LOCTEXT("ImportFromFigma", "Import from Figma..."),
+				LOCTEXT("ImportFromFigmaTooltip", "Import a Figma design file and convert to Widget Blueprint"),
+				FSlateIcon(),
+				FUIAction(FExecuteAction::CreateLambda([]()
+				{
+					ShowFigmaImportDialog();
+				})));
+
+			Section.AddMenuEntry(
+				TEXT("ImportLocalFigma"),
+				LOCTEXT("ImportLocalFigma", "Import Local Figma Export..."),
+				LOCTEXT("ImportLocalFigmaTooltip", "Import a local Figma export design.json + images folder"),
+				FSlateIcon(),
+				FUIAction(FExecuteAction::CreateLambda([]()
+				{
+					OpenLocalFigmaJsonDialog();
+				})));
+		}));
 
 	// 首次使用 Welcome 引导
 	if (!FApp::IsUnattended())
@@ -835,12 +1161,20 @@ void FDesign2UMGEditorModule::ShutdownModule()
 	// 清理 Figma 客户端
 	GFigmaClient.Reset();
 
+	// 清理静态缓存，避免热重载/插件卸载后残留过期数据
+	FFontResolver::ClearCache();
+	FPenPathRasterizer::ClearCache();
+	FProceduralShapeGenerator::ReleaseTransientTextures();
+	FUMGWidgetUtils::ClearNodeIdMap();
+	FUMGWidgetUtils::EffectiveDesignSize = FIntPoint(1920, 1080);
+
 	UToolMenus::UnRegisterStartupCallback(ToolMenusStartupHandle);
 	UToolMenus::UnregisterOwner(this);
 	IConsoleManager::Get().UnregisterConsoleObject(TEXT("Design2UMG.Import"), false);
 	IConsoleManager::Get().UnregisterConsoleObject(TEXT("Design2UMG.PenConvert"), false);
 	IConsoleManager::Get().UnregisterConsoleObject(TEXT("Design2UMG.ImportSource"), false);
 	IConsoleManager::Get().UnregisterConsoleObject(TEXT("Design2UMG.FigmaImport"), false);
+	IConsoleManager::Get().UnregisterConsoleObject(TEXT("Design2UMG.LocalFigmaImport"), false);
 
 	// 反注册数据源适配器
 	FDesignSourceRegistry::Unregister(TEXT("Pen"));

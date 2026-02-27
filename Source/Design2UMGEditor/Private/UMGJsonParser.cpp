@@ -68,8 +68,9 @@ bool FUMGJsonParser::ParseJson(const FString& JsonString, FUMGWidgetData& OutWid
 		return false;
 	}
 
-	// 空结果检测：纯容器类型但没有子节点
-	// 使用精确白名单，避免误判 CheckBox/EditableTextBox 等含 "Box" 的控件
+	// 空结果检测：纯布局容器但没有子节点 → 视为空结果
+	// 注意：不能用 UPanelWidget::IsChildOf 运行时检查，因为 CheckBox/EditableTextBox
+	// 等也是 UPanelWidget 子类，空的它们仍是有效控件。此白名单仅列出"纯布局"容器。
 	static const TSet<FString> ContainerTypes = {
 		TEXT("CanvasPanel"), TEXT("VerticalBox"), TEXT("HorizontalBox"),
 		TEXT("Overlay"), TEXT("ScrollBox"), TEXT("GridPanel"),
@@ -138,11 +139,70 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 		ParseProperties(*PropertiesObject, OutNode.Properties);
 	}
 
+	// 解析 TextStyle (v2.4)
+	const TSharedPtr<FJsonObject>* TSObject;
+	if (JsonObject->TryGetObjectField(TEXT("TextStyle"), TSObject))
+	{
+		double Val;
+		if ((*TSObject)->TryGetNumberField(TEXT("FontSize"), Val))
+			OutNode.TextStyle.FontSize = (float)Val;
+		if ((*TSObject)->TryGetNumberField(TEXT("LetterSpacing"), Val))
+		{
+			OutNode.TextStyle.LetterSpacing = (float)Val;
+			OutNode.TextStyle.bHasLetterSpacing = true;
+		}
+	}
+
+	// 解析 Brush (v2.4)
+	const TSharedPtr<FJsonObject>* BrushObject;
+	if (JsonObject->TryGetObjectField(TEXT("Brush"), BrushObject))
+	{
+		double Val;
+		FString Str;
+		if ((*BrushObject)->TryGetNumberField(TEXT("OutlineCornerRadius"), Val))
+			OutNode.Brush.OutlineCornerRadius = (float)Val;
+		if ((*BrushObject)->TryGetNumberField(TEXT("OutlineThickness"), Val))
+			OutNode.Brush.OutlineThickness = (float)Val;
+		if ((*BrushObject)->TryGetNumberField(TEXT("DrawAs"), Val))
+		{
+			OutNode.Brush.DrawAs = (ESlateBrushDrawType::Type)(int32)Val;
+			OutNode.Brush.bHasDrawAs = true;
+		}
+		if ((*BrushObject)->TryGetStringField(TEXT("BrushColor"), Str))
+		{
+			OutNode.Brush.BrushColor.InitFromString(Str);
+			OutNode.Brush.bHasBrushColor = true;
+		}
+		if ((*BrushObject)->TryGetStringField(TEXT("OutlineColor"), Str))
+		{
+			OutNode.Brush.OutlineColor.InitFromString(Str);
+			OutNode.Brush.bHasOutlineColor = true;
+		}
+		if ((*BrushObject)->TryGetStringField(TEXT("MaterialRef"), Str))
+			OutNode.Brush.MaterialRef = Str;
+		if ((*BrushObject)->TryGetStringField(TEXT("MaterialParams"), Str))
+			OutNode.Brush.MaterialParams = Str;
+		if ((*BrushObject)->TryGetStringField(TEXT("TexturePath"), Str))
+			OutNode.Brush.TexturePath = Str;
+		if ((*BrushObject)->TryGetStringField(TEXT("CornerRadii"), Str))
+		{
+			TArray<FString> Parts;
+			Str.ParseIntoArray(Parts, TEXT(","));
+			if (Parts.Num() == 4)
+			{
+				OutNode.Brush.CornerRadii = FVector4(
+					FCString::Atof(*Parts[0]), FCString::Atof(*Parts[1]),
+					FCString::Atof(*Parts[2]), FCString::Atof(*Parts[3]));
+			}
+		}
+	}
+
 	// 同时解析直接放在节点上的属性（排除结构字段）
 	static const TSet<FString> StructuralFields = {
 		TEXT("Type"), TEXT("Name"), TEXT("Children"), TEXT("Slots"),
 		TEXT("Slot"), TEXT("CanvasSlot"), TEXT("Properties"),
-		TEXT("Id"), TEXT("Bounds"), TEXT("_meta")  // v2.2新增
+		TEXT("Id"), TEXT("Bounds"), TEXT("_meta"),  // v2.2新增
+		TEXT("TextStyle"), TEXT("Brush")            // v2.4新增
 	};
 	for (const auto& Pair : JsonObject->Values)
 	{
@@ -299,6 +359,13 @@ void FUMGJsonParser::ParseSlotData(const TSharedPtr<FJsonObject>& JsonObject, FU
 	if (JsonObject->TryGetNumberField(TEXT("Column"), IntValue)) OutSlot.Column = IntValue;
 	if (JsonObject->TryGetNumberField(TEXT("RowSpan"), IntValue)) OutSlot.RowSpan = IntValue;
 	if (JsonObject->TryGetNumberField(TEXT("ColumnSpan"), IntValue)) OutSlot.ColumnSpan = IntValue;
+
+	// 解析 bAutoSize (Size To Content)
+	bool bAutoSize = false;
+	if (JsonObject->TryGetBoolField(TEXT("bAutoSize"), bAutoSize))
+	{
+		OutSlot.bAutoSize = bAutoSize;
+	}
 }
 
 void FUMGJsonParser::ParseAnchorsData(const TSharedPtr<FJsonObject>& JsonObject, FUMGAnchorsData& OutAnchors)

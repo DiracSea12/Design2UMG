@@ -37,7 +37,11 @@ namespace
 		{
 			int32 ToRemove = GPathCache.Num() - GMaxCacheEntries;
 			for (auto It = GPathCache.CreateIterator(); ToRemove > 0 && It; ++It, --ToRemove)
+			{
+				if (UTexture2D* Tex = It->Value.Get())
+					Tex->RemoveFromRoot();
 				It.RemoveCurrent();
+			}
 		}
 	}
 
@@ -58,6 +62,11 @@ namespace
 		TEXT("Clear path rasterization cache"),
 		FConsoleCommandDelegate::CreateLambda([]()
 		{
+			for (auto& Pair : GPathCache)
+			{
+				if (UTexture2D* Tex = Pair.Value.Get())
+					Tex->RemoveFromRoot();
+			}
 			GPathCache.Empty();
 			GCacheHits = GCacheMisses = 0;
 			UE_LOG(LogDesign2UMG, Log, TEXT("PenPathRasterizer: cache cleared"));
@@ -541,9 +550,9 @@ UTexture2D* FPenPathRasterizer::Rasterize(
 	const FString& Geometry,
 	int32 Width, int32 Height,
 	FLinearColor FillColor,
-	const FString& FillRule,
-	UObject* Outer)
+	const FString& FillRule)
 {
+	check(IsInGameThread());
 	if (Geometry.IsEmpty() || Width <= 0 || Height <= 0)
 		return nullptr;
 
@@ -629,4 +638,15 @@ UTexture2D* FPenPathRasterizer::Rasterize(
 	GPathCache.Add(CacheKey, Texture);
 
 	return Texture;
+}
+
+void FPenPathRasterizer::ClearCache()
+{
+	for (auto& Pair : GPathCache)
+	{
+		if (UTexture2D* Tex = Pair.Value.Get())
+			Tex->RemoveFromRoot();
+	}
+	GPathCache.Empty();
+	GCacheHits = GCacheMisses = 0;
 }

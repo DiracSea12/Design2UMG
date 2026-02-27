@@ -1,9 +1,9 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
-#include "PenLayoutMapper.h"
+#include "LayoutMapper.h"
 #include "PenTypeMapper.h"
 
-void FPenLayoutMapper::ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr<FPenNode>& Node, EPenLayout ParentLayout)
+void FLayoutMapper::ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node, EPenLayout ParentLayout)
 {
 	if (ParentLayout == EPenLayout::Vertical)
 	{
@@ -61,7 +61,7 @@ void FPenLayoutMapper::ApplySlotProperties(FUMGWidgetNode& Widget, const TShared
 	}
 }
 
-void FPenLayoutMapper::ApplyGap(TArray<FUMGWidgetNode>& Children, float Gap, EPenLayout Layout)
+void FLayoutMapper::ApplyGap(TArray<FUMGWidgetNode>& Children, float Gap, EPenLayout Layout)
 {
 	if (Gap <= 0 || Children.Num() < 2)
 		return;
@@ -75,13 +75,13 @@ void FPenLayoutMapper::ApplyGap(TArray<FUMGWidgetNode>& Children, float Gap, EPe
 	}
 }
 
-void FPenLayoutMapper::ApplyPadding(FUMGWidgetNode& Widget, const FPenPadding& Padding)
+void FLayoutMapper::ApplyPadding(FUMGWidgetNode& Widget, const FPenPadding& Padding)
 {
 	Widget.Properties.Add(TEXT("Padding"), FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"),
 		Padding.Left, Padding.Top, Padding.Right, Padding.Bottom));
 }
 
-void FPenLayoutMapper::ApplyJustifyContent(TArray<FUMGWidgetNode>& Children, EPenJustifyContent Justify, EPenSizeMode MainAxisMode, EPenLayout ParentLayout)
+void FLayoutMapper::ApplyJustifyContent(TArray<FUMGWidgetNode>& Children, EPenJustifyContent Justify, EPenSizeMode MainAxisMode, EPenLayout ParentLayout)
 {
 	if (Justify == EPenJustifyContent::Start || Children.Num() == 0)
 		return;
@@ -139,7 +139,7 @@ void FPenLayoutMapper::ApplyJustifyContent(TArray<FUMGWidgetNode>& Children, EPe
 	}
 }
 
-void FPenLayoutMapper::ApplyAlignItems(FUMGWidgetNode& Widget, EPenAlignItems Align, EPenLayout ParentLayout)
+void FLayoutMapper::ApplyAlignItems(FUMGWidgetNode& Widget, EPenAlignItems Align, EPenLayout ParentLayout)
 {
 	if (ParentLayout == EPenLayout::Vertical)
 	{
@@ -161,14 +161,14 @@ void FPenLayoutMapper::ApplyAlignItems(FUMGWidgetNode& Widget, EPenAlignItems Al
 	}
 }
 
-bool FPenLayoutMapper::HasPadding(const TSharedPtr<FPenNode>& Node)
+bool FLayoutMapper::HasPadding(const TSharedPtr<FDesignNode>& Node)
 {
 	return Node.IsValid() &&
 		(Node->Padding.Top > 0 || Node->Padding.Right > 0 ||
 		 Node->Padding.Bottom > 0 || Node->Padding.Left > 0);
 }
 
-FUMGWidgetNode FPenLayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, const TSharedPtr<FPenNode>& ChildNode)
+FUMGWidgetNode FLayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, const TSharedPtr<FDesignNode>& ChildNode)
 {
 	FUMGWidgetNode SizeBox;
 	SizeBox.Type = TEXT("SizeBox");

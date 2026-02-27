@@ -17,7 +17,7 @@ class UWidgetBlueprint;
  * - Frame 选择器 UI
  * - Widget Blueprint 生成
  */
-namespace PenImportUtils
+namespace DesignImportUtils
 {
 	/** 生成 Widget Blueprint 并返回 */
 	UWidgetBlueprint* GenerateBlueprint(const FUMGWidgetData& Data, const FString& OutputPath);
@@ -33,10 +33,8 @@ namespace PenImportUtils
 
 	/**
 	 * 打开预览窗口
-	 * @param OnGenerate 用户确认后的生成回调（接收 EditedJson 和 OutputPath）
 	 * @return true 表示窗口已打开
 	 */
-	using FGenerateCallback = TFunction<void(const FString& EditedJson, const FString& OutputPath)>;
 	bool OpenPreviewWindow(
 		const FUMGWidgetData& Data,
 		const FString& OutputPath,

@@ -1,11 +1,11 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
 #include "PenFileImportFactory.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGNotification.h"
 #include "PenParser.h"
 #include "PenImporter.h"
-#include "PenImportUtils.h"
+#include "DesignImportUtils.h"
 #include "DesignSourceRegistry.h"
 
 #include "WidgetBlueprint.h"
@@ -19,14 +19,14 @@ namespace
 {
 	const TCHAR* DefaultOutputPath = TEXT("/Game/Design2UMG/PenConvert_Output");
 
-	/** 导入单 frame：尝试预览，无预览时同步返回 Blueprint */
-	UWidgetBlueprint* ImportSingleFrame(const FString& FilePath, const FString& OutputPath);
+	/** 导入单个 frame：优先预览，无预览时同步返回 Blueprint */
+	UWidgetBlueprint* ImportSingleFrame(const FString& FilePath, const FString& OutputPath, bool& bOutPreviewOpened);
 
-	/** 导入指定 TargetNodeId 的 frame */
+	/** 导入指定 TargetNodeId 对应的 frame */
 	void ImportWithTargetNode(const FString& FilePath, const FString& TargetNodeId, const FString& OutputPath);
 }
 
-// ── UFactory 实现 ──
+// --- UFactory 实现 ---
 
 UPenFileImportFactory::UPenFileImportFactory()
 {
@@ -49,7 +49,7 @@ UObject* UPenFileImportFactory::FactoryCreateFile(
 	bOutOperationCanceled = false;
 
 	// 解析文档，检查顶层 frame 数量
-	FPenDocument Document;
+	FDesignDocument Document;
 	if (!FPenParser::ParseFromFile(Filename, Document))
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("PenFileImport: Failed to parse %s"), *Filename);
@@ -71,17 +71,18 @@ UObject* UPenFileImportFactory::FactoryCreateFile(
 	if (Frames.Num() == 1)
 	{
 		// 单 frame 快速路径：无预览时同步返回生成的 Blueprint
-		UWidgetBlueprint* Result = ImportSingleFrame(Filename, OutputPath);
+		bool bPreviewOpened = false;
+		UWidgetBlueprint* Result = ImportSingleFrame(Filename, OutputPath, bPreviewOpened);
 		if (Result)
 			return Result;
 
-		// 返回 nullptr 说明预览窗口已打开，异步生成
-		bOutOperationCanceled = true;
+		// 仅当预览窗口打开（异步生成）时才标记取消，其他 nullptr 情况为真正的错误/取消
+		bOutOperationCanceled = bPreviewOpened;
 		return nullptr;
 	}
 
-	// 多 frame → 弹出选择器，异步生成
-	PenImportUtils::ShowFrameSelector(
+	// 多 frame：弹出选择器，异步生成
+	DesignImportUtils::ShowFrameSelector(
 		Frames,
 		LOCTEXT("FrameSelectorTitle", "Select Frame to Import"),
 		LOCTEXT("FrameSelectorHint", "This file contains multiple frames. Double-click to import:"),
@@ -93,13 +94,15 @@ UObject* UPenFileImportFactory::FactoryCreateFile(
 	return nullptr;
 }
 
-// ── 内部实现 ──
+// --- 内部实现 ---
 
 namespace
 {
 
-UWidgetBlueprint* ImportSingleFrame(const FString& FilePath, const FString& OutputPath)
+UWidgetBlueprint* ImportSingleFrame(const FString& FilePath, const FString& OutputPath, bool& bOutPreviewOpened)
 {
+	bOutPreviewOpened = false;
+
 	FScopedSlowTask SlowTask(5.0f, LOCTEXT("ImportingPen", "Importing .pen file..."));
 	SlowTask.MakeDialog(true);
 
@@ -124,18 +127,19 @@ UWidgetBlueprint* ImportSingleFrame(const FString& FilePath, const FString& Outp
 	if (SlowTask.ShouldCancel()) return nullptr;
 
 	SlowTask.EnterProgressFrame(1.0f, LOCTEXT("Step3_Images", "Downloading remote images..."));
-	PenImportUtils::ResolveImages(Data);
+	DesignImportUtils::ResolveImages(Data);
 	if (SlowTask.ShouldCancel()) return nullptr;
 
 	SlowTask.EnterProgressFrame(1.0f, LOCTEXT("Step4_Preview", "Preparing preview..."));
-	if (PenImportUtils::OpenPreviewWindow(Data, OutputPath,
+	if (DesignImportUtils::OpenPreviewWindow(Data, OutputPath,
 		LOCTEXT("PenImportPreviewTitle", "Design2UMG Import Preview")))
 	{
+		bOutPreviewOpened = true;
 		return nullptr;
 	}
 
 	SlowTask.EnterProgressFrame(1.0f, LOCTEXT("Step5_Generate", "Generating Widget Blueprint..."));
-	return PenImportUtils::GenerateBlueprint(Data, OutputPath);
+	return DesignImportUtils::GenerateBlueprint(Data, OutputPath);
 }
 
 void ImportWithTargetNode(const FString& FilePath, const FString& TargetNodeId, const FString& OutputPath)
@@ -153,18 +157,19 @@ void ImportWithTargetNode(const FString& FilePath, const FString& TargetNodeId, 
 	if (SlowTask.ShouldCancel()) return;
 
 	SlowTask.EnterProgressFrame(1.0f, LOCTEXT("Step2_ImagesNode", "Downloading remote images..."));
-	PenImportUtils::ResolveImages(Data);
+	DesignImportUtils::ResolveImages(Data);
 	if (SlowTask.ShouldCancel()) return;
 
 	SlowTask.EnterProgressFrame(1.0f, LOCTEXT("Step3_PreviewNode", "Preparing preview..."));
-	if (!PenImportUtils::OpenPreviewWindow(Data, OutputPath,
+	if (!DesignImportUtils::OpenPreviewWindow(Data, OutputPath,
 		LOCTEXT("PenImportPreviewTitle", "Design2UMG Import Preview")))
 	{
 		SlowTask.EnterProgressFrame(1.0f, LOCTEXT("Step4_GenerateNode", "Generating Widget Blueprint..."));
-		PenImportUtils::GenerateBlueprint(Data, OutputPath);
+		DesignImportUtils::GenerateBlueprint(Data, OutputPath);
 	}
 }
 
 } // anonymous namespace
 
 #undef LOCTEXT_NAMESPACE
+

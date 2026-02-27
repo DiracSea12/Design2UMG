@@ -1,6 +1,6 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
-#include "PenRemoteImageImporter.h"
+#include "DesignRemoteImageImporter.h"
 
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
@@ -30,10 +30,11 @@ namespace
 		float TimeoutSeconds = 20.0f;
 		int32 ImportedCount = 0;
 		int32 ReusedCount = 0;
+		int32 RepairedCount = 0;
 		int32 FailedCount = 0;
 		TArray<FString> Messages;
 		TMap<FString, FString> UrlToAssetPath;      // URL去重缓存
-		TMap<FString, FString> ContentHashToAsset;   // 内容hash去重缓存
+		TMap<FString, FString> ContentHashToAsset;   // 内容hash去重缓存（本地/远程共享）
 	};
 
 	void AddReportMessage(FResolveContext& Context, const FString& Message)
@@ -92,7 +93,49 @@ namespace
 		Safe.ReplaceInline(TEXT("."), TEXT("_"));
 		Safe.ReplaceInline(TEXT("/"), TEXT("_"));
 		Safe.ReplaceInline(TEXT("\\"), TEXT("_"));
-		return Safe;
+		Safe.ReplaceInline(TEXT(":"), TEXT("_"));
+		Safe.ReplaceInline(TEXT(";"), TEXT("_"));
+		Safe.ReplaceInline(TEXT(","), TEXT("_"));
+		Safe.ReplaceInline(TEXT("-"), TEXT("_"));
+		return Safe.IsEmpty() ? TEXT("Image") : Safe;
+	}
+
+		FString BuildTextureAssetName(const FString& FrameName, const FString& WidgetName, const FString& WidgetId, const FString& SourceKey)
+		{
+			constexpr TCHAR TextureImportVersion[] = TEXT("ui4");
+		const FString SafeFrame = SanitizeAssetName(FrameName).Left(24);
+		FString NodeBase = WidgetName;
+		if (NodeBase.IsEmpty())
+		{
+			NodeBase = WidgetId;
+		}
+		const FString SafeNode = SanitizeAssetName(NodeBase).Left(24);
+		const FString SourceHash = MakeUrlHash(SourceKey).Left(10);
+		return FString::Printf(TEXT("T_%s_%s_%s_%s"), *SafeFrame, *SafeNode, *SourceHash, TextureImportVersion);
+	}
+
+	FString BuildSubImportPath(const FString& ImportPath, const FString& FrameName)
+	{
+		return ImportPath / SanitizeAssetName(FrameName);
+	}
+
+	FString BuildObjectPathFromImport(const FString& ImportPath, const FString& AssetName)
+	{
+		const FString LongPackageName = ImportPath + TEXT("/") + AssetName;
+		return LongPackageName + TEXT(".") + AssetName;
+	}
+
+		FString BuildSourceKeyForLocal(const FString& LocalPath)
+		{
+			FString FullPath = FPaths::ConvertRelativePathToFull(LocalPath);
+			FPaths::NormalizeFilename(FullPath);
+			FullPath.ToLowerInline();
+			return FString::Printf(TEXT("local://%s"), *FullPath);
+		}
+
+	FString BuildSourceKeyForRemote(const FString& Url)
+	{
+		return FString::Printf(TEXT("remote://%s"), *Url);
 	}
 
 	FString NormalizeImportPath(const FString& InPath)
@@ -238,6 +281,82 @@ namespace
 		return true;
 	}
 
+	bool ApplyTextureUiSettings(UTexture2D* Texture)
+	{
+		if (!Texture)
+		{
+			return false;
+		}
+
+		bool bChanged = false;
+		if (!Texture->SRGB)
+		{
+			Texture->SRGB = true;
+			bChanged = true;
+		}
+		if (!Texture->NeverStream)
+		{
+			Texture->NeverStream = true;
+			bChanged = true;
+		}
+		if (Texture->LODGroup != TEXTUREGROUP_UI)
+		{
+			Texture->LODGroup = TEXTUREGROUP_UI;
+			bChanged = true;
+		}
+		if (Texture->CompressionSettings != TC_EditorIcon)
+		{
+			Texture->CompressionSettings = TC_EditorIcon;
+			bChanged = true;
+		}
+		if (Texture->MipGenSettings != TMGS_NoMipmaps)
+		{
+			Texture->MipGenSettings = TMGS_NoMipmaps;
+			bChanged = true;
+		}
+		if (Texture->Filter != TF_Bilinear)
+		{
+			Texture->Filter = TF_Bilinear;
+			bChanged = true;
+		}
+		if (Texture->AddressX != TA_Clamp)
+		{
+			Texture->AddressX = TA_Clamp;
+			bChanged = true;
+		}
+		if (Texture->AddressY != TA_Clamp)
+		{
+			Texture->AddressY = TA_Clamp;
+			bChanged = true;
+		}
+
+		if (bChanged)
+		{
+			Texture->Modify();
+			Texture->UpdateResource();
+			Texture->MarkPackageDirty();
+		}
+		return bChanged;
+	}
+
+	bool EnsureUiTextureReady(UTexture2D* Texture)
+	{
+		if (!Texture)
+		{
+			return false;
+		}
+
+		Texture->ConditionalPostLoad();
+		ApplyTextureUiSettings(Texture);
+
+		if (!Texture->GetResource())
+		{
+			Texture->UpdateResource();
+			FlushRenderingCommands();
+		}
+		return true;
+	}
+
 	bool CreateTextureAsset(
 		const FString& ImportPath,
 		const FString& AssetName,
@@ -272,15 +391,7 @@ namespace
 
 		Texture->PreEditChange(nullptr);
 		Texture->Source.Init(Width, Height, 1, 1, TSF_BGRA8, RawData.GetData());
-		Texture->SRGB = true;
-		Texture->NeverStream = true;
-		Texture->LODGroup = TEXTUREGROUP_UI;
-		Texture->CompressionSettings = TC_Default;
-		Texture->MipGenSettings = TMGS_NoMipmaps;
-		Texture->Filter = TF_Bilinear;
-		Texture->AddressX = TA_Clamp;
-		Texture->AddressY = TA_Clamp;
-		Texture->UpdateResource();
+		ApplyTextureUiSettings(Texture);
 		Texture->PostEditChange();
 		Texture->MarkPackageDirty();
 
@@ -302,7 +413,47 @@ namespace
 		return true;
 	}
 
-	bool ResolveTexturePath(FString& InOutTexturePath, const FString& WidgetName, FResolveContext& Context)
+	bool RewriteTextureAsset(
+		UTexture2D* Texture,
+		const TArray64<uint8>& RawData,
+		int32 Width,
+		int32 Height,
+		FString& OutError)
+	{
+		if (!Texture || Width <= 0 || Height <= 0 || RawData.Num() <= 0)
+		{
+			OutError = TEXT("参数无效");
+			return false;
+		}
+
+		UPackage* Package = Texture->GetPackage();
+		if (!Package)
+		{
+			OutError = TEXT("纹理包无效");
+			return false;
+		}
+
+		Texture->PreEditChange(nullptr);
+		Texture->Source.Init(Width, Height, 1, 1, TSF_BGRA8, RawData.GetData());
+		ApplyTextureUiSettings(Texture);
+		Texture->PostEditChange();
+		Texture->MarkPackageDirty();
+		Package->MarkPackageDirty();
+
+		const FString LongPackageName = Package->GetName();
+		const FString PackageFilename = FPackageName::LongPackageNameToFilename(LongPackageName, FPackageName::GetAssetPackageExtension());
+		FSavePackageArgs SaveArgs;
+		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+		if (!UPackage::SavePackage(Package, Texture, *PackageFilename, SaveArgs))
+		{
+			OutError = FString::Printf(TEXT("保存纹理失败: %s"), *PackageFilename);
+			return false;
+		}
+
+		return true;
+	}
+
+	bool ResolveTexturePath(FString& InOutTexturePath, const FString& WidgetName, const FString& WidgetId, FResolveContext& Context)
 	{
 		InOutTexturePath = InOutTexturePath.TrimStartAndEnd();
 		if (InOutTexturePath.IsEmpty())
@@ -315,6 +466,113 @@ namespace
 			return true;
 		}
 
+		// 本地文件路径：直接读取并创建纹理资产
+		if (!IsRemoteUrl(InOutTexturePath) && FPaths::FileExists(InOutTexturePath))
+		{
+			const FString LocalPath = InOutTexturePath;
+			const FString LocalKey = BuildSourceKeyForLocal(LocalPath);
+
+			if (const FString* CachedPath = Context.UrlToAssetPath.Find(LocalKey))
+			{
+				if (UTexture2D* CachedTexture = LoadObject<UTexture2D>(nullptr, **CachedPath))
+				{
+					EnsureUiTextureReady(CachedTexture);
+				}
+				InOutTexturePath = *CachedPath;
+				++Context.ReusedCount;
+				return true;
+			}
+
+			TArray<uint8> FileData;
+			if (!FFileHelper::LoadFileToArray(FileData, *LocalPath))
+			{
+				++Context.FailedCount;
+				AddReportMessage(Context, FString::Printf(TEXT("本地文件读取失败 '%s': %s"), *WidgetName, *LocalPath));
+				return false;
+			}
+
+			// 以内容 hash 作为缓存键，避免同路径文件更新后误复用旧纹理。
+			const FString ContentHash = MakeContentHash(FileData);
+			const FString ContentKey = FString::Printf(TEXT("local-content://%s"), *ContentHash);
+			if (const FString* ExistingPath = Context.ContentHashToAsset.Find(ContentKey))
+			{
+				if (UTexture2D* CachedTexture = LoadObject<UTexture2D>(nullptr, **ExistingPath))
+				{
+					EnsureUiTextureReady(CachedTexture);
+				}
+				InOutTexturePath = *ExistingPath;
+				++Context.ReusedCount;
+				Context.UrlToAssetPath.Add(LocalKey, *ExistingPath);
+				return true;
+			}
+
+				const FString SubDir = BuildSubImportPath(Context.ImportPath, Context.FrameName);
+				const FString SourceKey = FString::Printf(TEXT("%s#%s"), *LocalKey, *ContentHash.Left(10));
+				const FString AssetName = BuildTextureAssetName(Context.FrameName, WidgetName, WidgetId, SourceKey);
+				const FString ObjectPath = BuildObjectPathFromImport(SubDir, AssetName);
+				if (UTexture2D* Existing = LoadObject<UTexture2D>(nullptr, *ObjectPath))
+				{
+					int32 SourceWidth = 0;
+					int32 SourceHeight = 0;
+					TArray64<uint8> SourceRawBGRA;
+					FString SourceDecodeError;
+					const bool bDecoded = DecodeToBGRA8(FileData, SourceWidth, SourceHeight, SourceRawBGRA, SourceDecodeError);
+					if (bDecoded)
+					{
+						const int32 ExistingWidth = Existing->GetSizeX();
+						const int32 ExistingHeight = Existing->GetSizeY();
+						const bool bDimensionMismatch = ExistingWidth != SourceWidth || ExistingHeight != SourceHeight;
+						const bool bLooksBroken = (ExistingWidth <= 1 || ExistingHeight <= 1) && (SourceWidth > 1 || SourceHeight > 1);
+						if (bDimensionMismatch || bLooksBroken)
+						{
+							FString RewriteError;
+							if (RewriteTextureAsset(Existing, SourceRawBGRA, SourceWidth, SourceHeight, RewriteError))
+							{
+								++Context.RepairedCount;
+								AddReportMessage(Context, FString::Printf(TEXT("修复本地纹理: %s (%dx%d -> %dx%d)"),
+									*ObjectPath, ExistingWidth, ExistingHeight, SourceWidth, SourceHeight));
+							}
+							else
+							{
+								AddReportMessage(Context, FString::Printf(TEXT("修复纹理失败 '%s': %s"), *WidgetName, *RewriteError));
+							}
+						}
+					}
+
+					EnsureUiTextureReady(Existing);
+					InOutTexturePath = ObjectPath;
+					++Context.ReusedCount;
+					Context.UrlToAssetPath.Add(LocalKey, ObjectPath);
+					Context.ContentHashToAsset.Add(ContentKey, ObjectPath);
+					return true;
+				}
+
+			int32 Width = 0, Height = 0;
+			TArray64<uint8> RawBGRA;
+			FString DecodeError;
+			if (!DecodeToBGRA8(FileData, Width, Height, RawBGRA, DecodeError))
+			{
+				++Context.FailedCount;
+				AddReportMessage(Context, FString::Printf(TEXT("本地图片解码失败 '%s': %s"), *WidgetName, *DecodeError));
+				return false;
+			}
+
+			FString ImportedObjectPath, ImportError;
+			if (!CreateTextureAsset(SubDir, AssetName, RawBGRA, Width, Height, ImportedObjectPath, ImportError))
+			{
+				++Context.FailedCount;
+				AddReportMessage(Context, FString::Printf(TEXT("本地图片导入失败 '%s': %s"), *WidgetName, *ImportError));
+				return false;
+			}
+
+			InOutTexturePath = ImportedObjectPath;
+			++Context.ImportedCount;
+			Context.UrlToAssetPath.Add(LocalKey, ImportedObjectPath);
+			Context.ContentHashToAsset.Add(ContentKey, ImportedObjectPath);
+			AddReportMessage(Context, FString::Printf(TEXT("已导入本地纹理: %s"), *ImportedObjectPath));
+			return true;
+		}
+
 		if (!IsRemoteUrl(InOutTexturePath))
 		{
 			AddReportMessage(Context, FString::Printf(TEXT("跳过非资产路径 '%s': %s"), *WidgetName, *InOutTexturePath));
@@ -322,26 +580,28 @@ namespace
 		}
 
 		const FString NormalizedUrl = NormalizeUrl(InOutTexturePath);
+		const FString SubDir = BuildSubImportPath(Context.ImportPath, Context.FrameName);
+		const FString SourceKey = BuildSourceKeyForRemote(NormalizedUrl);
+		const FString AssetName = BuildTextureAssetName(Context.FrameName, WidgetName, WidgetId, SourceKey);
+		const FString ObjectPath = BuildObjectPathFromImport(SubDir, AssetName);
 
 		// URL去重：已下载过的直接复用
 		if (const FString* CachedPath = Context.UrlToAssetPath.Find(NormalizedUrl))
 		{
+			if (UTexture2D* CachedTexture = LoadObject<UTexture2D>(nullptr, **CachedPath))
+			{
+				EnsureUiTextureReady(CachedTexture);
+			}
 			InOutTexturePath = *CachedPath;
 			++Context.ReusedCount;
 			return true;
 		}
 
 		// 构建子目录和命名: ImportedImages/{FrameName}/T_{FrameName}_{NodeName}
-		const FString SafeFrame = SanitizeAssetName(Context.FrameName);
-		const FString SafeNode = SanitizeAssetName(WidgetName);
-		const FString SubDir = Context.ImportPath / SafeFrame;
-		const FString AssetName = FString::Printf(TEXT("T_%s_%s"), *SafeFrame, *SafeNode);
-		const FString LongPackageName = BuildLongPackageName(SubDir, AssetName);
-		const FString ObjectPath = BuildObjectPath(LongPackageName, AssetName);
-
 		// Reuse existing asset
 		if (UTexture2D* ExistingTexture = LoadObject<UTexture2D>(nullptr, *ObjectPath))
 		{
+			EnsureUiTextureReady(ExistingTexture);
 			InOutTexturePath = ObjectPath;
 			++Context.ReusedCount;
 			Context.UrlToAssetPath.Add(NormalizedUrl, ObjectPath);
@@ -362,6 +622,10 @@ namespace
 		const FString ContentHash = MakeContentHash(CompressedData);
 		if (const FString* ExistingPath = Context.ContentHashToAsset.Find(ContentHash))
 		{
+			if (UTexture2D* CachedTexture = LoadObject<UTexture2D>(nullptr, **ExistingPath))
+			{
+				EnsureUiTextureReady(CachedTexture);
+			}
 			InOutTexturePath = *ExistingPath;
 			++Context.ReusedCount;
 			Context.UrlToAssetPath.Add(NormalizedUrl, *ExistingPath);
@@ -402,7 +666,11 @@ namespace
 		if (FString* TexturePath = Node.Properties.Find(TEXT("TexturePath")))
 		{
 			const FString DebugName = Node.Name.IsEmpty() ? Node.Id : Node.Name;
-			ResolveTexturePath(*TexturePath, DebugName.IsEmpty() ? TEXT("UnnamedWidget") : DebugName, Context);
+			ResolveTexturePath(
+				*TexturePath,
+				DebugName.IsEmpty() ? TEXT("UnnamedWidget") : DebugName,
+				Node.Id,
+				Context);
 			// 同步 typed 字段，避免 typed-first 读到未 resolve 的原始 URL
 			Node.Brush.TexturePath = *TexturePath;
 		}
@@ -414,7 +682,7 @@ namespace
 	}
 }
 
-bool FPenRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, FString* OutReport)
+bool FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, FString* OutReport)
 {
 	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
 	if (!Settings)
@@ -444,12 +712,13 @@ bool FPenRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, FSt
 
 	if (OutReport)
 	{
-		FString Summary = FString::Printf(
-			TEXT("远程图片导入: 新增=%d 复用=%d 失败=%d 路径=%s"),
-			Context.ImportedCount,
-			Context.ReusedCount,
-			Context.FailedCount,
-			*Context.ImportPath);
+			FString Summary = FString::Printf(
+				TEXT("远程图片导入: 新增=%d 复用=%d 修复=%d 失败=%d 路径=%s"),
+				Context.ImportedCount,
+				Context.ReusedCount,
+				Context.RepairedCount,
+				Context.FailedCount,
+				*Context.ImportPath);
 		if (Context.Messages.Num() > 0)
 		{
 			Summary += TEXT("\n");
@@ -465,8 +734,8 @@ bool FPenRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, FSt
 		return false;
 	}
 
-	UE_LOG(LogDesign2UMG, Log, TEXT("Remote image import finished: imported=%d reused=%d"),
-		Context.ImportedCount, Context.ReusedCount);
+	UE_LOG(LogDesign2UMG, Log, TEXT("Remote image import finished: imported=%d reused=%d repaired=%d"),
+		Context.ImportedCount, Context.ReusedCount, Context.RepairedCount);
 	return true;
 }
 
@@ -505,14 +774,13 @@ namespace
 		FMemory::Memcpy(MipData, RawBGRA.GetData(), RawBGRA.Num());
 		Texture->GetPlatformData()->Mips[0].BulkData.Unlock();
 
-		Texture->SRGB = true;
-		Texture->UpdateResource();
+		ApplyTextureUiSettings(Texture);
 		FlushRenderingCommands();
 		return Texture;
 	}
 }
 
-void FPenRemoteImageImporter::ResolveTransientTextures(const FUMGWidgetNode& RootNode, TMap<FString, UTexture2D*>& OutTextureMap)
+void FDesignRemoteImageImporter::ResolveTransientTextures(const FUMGWidgetNode& RootNode, TMap<FString, UTexture2D*>& OutTextureMap)
 {
 	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
 	const float Timeout = Settings ? FMath::Max(1.0f, Settings->RemoteImageTimeoutSeconds) : 20.0f;
@@ -548,4 +816,14 @@ void FPenRemoteImageImporter::ResolveTransientTextures(const FUMGWidgetNode& Roo
 			OutTextureMap.Add(Url, Texture);
 		}
 	}
+}
+
+void FDesignRemoteImageImporter::ReleaseTransientTextures(TMap<FString, UTexture2D*>& InOutTextureMap)
+{
+	for (auto& Pair : InOutTextureMap)
+	{
+		if (IsValid(Pair.Value) && Pair.Value->IsRooted())
+			Pair.Value->RemoveFromRoot();
+	}
+	InOutTextureMap.Empty();
 }

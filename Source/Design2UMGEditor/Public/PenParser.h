@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "PenSchema.h"
+#include "DesignSchema.h"
 #include "PenVariableResolver.h"
 
 /**
@@ -13,17 +13,17 @@ class FPenParser
 {
 public:
 	/** 从 JSON 字符串解析文档 */
-	static bool ParseDocument(const FString& JsonString, FPenDocument& OutDocument);
+	static bool ParseDocument(const FString& JsonString, FDesignDocument& OutDocument);
 
 	/** 从文件解析文档 */
-	static bool ParseFromFile(const FString& FilePath, FPenDocument& OutDocument);
+	static bool ParseFromFile(const FString& FilePath, FDesignDocument& OutDocument);
 
 private:
 	/** 解析顶层文档 */
-	static bool ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FPenDocument& OutDocument);
+	static bool ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FDesignDocument& OutDocument);
 
 	/** 解析节点 */
-	static TSharedPtr<FPenNode> ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const FPenVariableResolver& Resolver);
+	static TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const FPenVariableResolver& Resolver);
 
 	/** 解析节点类型 */
 	static EPenNodeType ParseNodeType(const FString& TypeStr);
@@ -62,7 +62,7 @@ private:
 	static EPenTextGrowth ParseTextGrowth(const FString& Str);
 
 	/** 解析节点扩展属性（文本、图标、椭圆等） */
-	static void ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TSharedPtr<FPenNode>& Node, const FPenVariableResolver& Resolver);
+	static void ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TSharedPtr<FDesignNode>& Node, const FPenVariableResolver& Resolver);
 };
 
 /** 顶层 Frame 信息（供 Frame 选择器使用） */
@@ -74,5 +74,5 @@ struct FPenFrameInfo
 	float Height = 0.0f;
 };
 
-/** 从 FPenDocument 提取顶层 Frame 列表 */
-TArray<FPenFrameInfo> ExtractTopFrames(const FPenDocument& Document);
+/** 从 FDesignDocument 提取顶层 Frame 列表 */
+TArray<FPenFrameInfo> ExtractTopFrames(const FDesignDocument& Document);

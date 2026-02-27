@@ -35,6 +35,7 @@ public class Design2UMGEditor : ModuleRules
 			"ImageWrapper",
 			"HTTP",
 			"RenderCore",
+			"RHI",
 			"ToolMenus",
 			"DesktopPlatform",
 			"Sockets",

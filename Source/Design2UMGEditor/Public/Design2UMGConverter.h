@@ -3,41 +3,41 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "PenSchema.h"
+#include "DesignSchema.h"
 #include "PenVariableResolver.h"
 #include "UMGSchema.h"
 
 /**
  * .pen 节点树到 UMG Widget 树的转换器（遍历+分发）
- * 布局映射 → FPenLayoutMapper
- * 视觉属性 → FPenVisualMapper
- * 组件展开 → FPenRefExpander
+ * 布局映射 → FLayoutMapper
+ * 视觉属性 → FVisualMapper
+ * 组件展开 → FRefExpander
  */
 class FDesign2UMGConverter
 {
 public:
 	/** 主入口：转换整个文档 */
-	static FUMGWidgetData Convert(const FPenDocument& Document);
+	static FUMGWidgetData Convert(const FDesignDocument& Document);
 
 private:
 	/** 递归转换节点 */
-	static FUMGWidgetNode ConvertNode(const TSharedPtr<FPenNode>& Node, const FPenDocument& Doc, const TMap<FString, FString>& ThemeContext = TMap<FString, FString>(), TArray<FString>* OutWarnings = nullptr, EPenLayout ParentLayout = EPenLayout::None);
+	static FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FDesignDocument& Doc, const TMap<FString, FString>& ThemeContext = TMap<FString, FString>(), TArray<FString>* OutWarnings = nullptr, EPenLayout ParentLayout = EPenLayout::None);
 
 	/** 创建容器 Widget */
-	static FUMGWidgetNode CreateContainerWidget(const TSharedPtr<FPenNode>& Node);
+	static FUMGWidgetNode CreateContainerWidget(const TSharedPtr<FDesignNode>& Node);
 
 	/** 创建文本 Widget */
-	static FUMGWidgetNode CreateTextWidget(const TSharedPtr<FPenNode>& Node);
+	static FUMGWidgetNode CreateTextWidget(const TSharedPtr<FDesignNode>& Node);
 
 	/** 创建图标字体 Widget */
-	static FUMGWidgetNode CreateIconFontWidget(const TSharedPtr<FPenNode>& Node);
+	static FUMGWidgetNode CreateIconFontWidget(const TSharedPtr<FDesignNode>& Node);
 
 	/** 创建 Path Widget（栅格化 SVG geometry 为 Image） */
-	static FUMGWidgetNode CreatePathWidget(const TSharedPtr<FPenNode>& Node);
+	static FUMGWidgetNode CreatePathWidget(const TSharedPtr<FDesignNode>& Node);
 
 	/** 应用文本属性 */
-	static void ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FPenNode>& Node);
+	static void ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node);
 
 	/** 递归预计算 FitContent 节点的实际尺寸（从子节点推算） */
-	static FVector2D PreComputeFitContentSizes(const TSharedPtr<FPenNode>& Node, const FPenDocument& Doc);
+	static FVector2D PreComputeFitContentSizes(const TSharedPtr<FDesignNode>& Node, const FDesignDocument& Doc);
 };

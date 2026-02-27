@@ -1,10 +1,10 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
-#include "PenImportUtils.h"
+#include "DesignImportUtils.h"
 #include "PenImporter.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGNotification.h"
-#include "PenRemoteImageImporter.h"
+#include "DesignRemoteImageImporter.h"
 #include "SDesign2UMGPreviewWindow.h"
 #include "UMGGenerator.h"
 #include "UMGJsonParser.h"
@@ -24,7 +24,7 @@
 #include "Widgets/Text/STextBlock.h"
 #include "Misc/ScopedSlowTask.h"
 
-#define LOCTEXT_NAMESPACE "PenImportUtils"
+#define LOCTEXT_NAMESPACE "DesignImportUtils"
 
 namespace
 {
@@ -36,9 +36,9 @@ namespace
 	}
 }
 
-// ── 生成 ──
+// Blueprint 生成
 
-UWidgetBlueprint* PenImportUtils::GenerateBlueprint(const FUMGWidgetData& Data, const FString& OutputPath)
+UWidgetBlueprint* DesignImportUtils::GenerateBlueprint(const FUMGWidgetData& Data, const FString& OutputPath)
 {
 	const double StartTime = FPlatformTime::Seconds();
 	const FString FinalPath = ResolveOutputPath(OutputPath);
@@ -61,7 +61,7 @@ UWidgetBlueprint* PenImportUtils::GenerateBlueprint(const FUMGWidgetData& Data, 
 				{
 					if (!FIncrementalUpdater::ShowDiffPreviewDialog(Diff))
 					{
-						UE_LOG(LogDesign2UMG, Log, TEXT("PenImportUtils: Incremental update cancelled"));
+						UE_LOG(LogDesign2UMG, Log, TEXT("DesignImportUtils: Incremental update cancelled"));
 						return nullptr;
 					}
 					EffectiveData.RootWidget = FIncrementalUpdater::FilterByAccepted(Data.RootWidget, Diff);
@@ -73,100 +73,105 @@ UWidgetBlueprint* PenImportUtils::GenerateBlueprint(const FUMGWidgetData& Data, 
 	UWidgetBlueprint* WBP = FUMGGenerator::GenerateWidgetBlueprint(EffectiveData, FinalPath);
 	if (!WBP)
 	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("PenImportUtils: Widget Blueprint generation failed"));
+		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint generation failed"));
 		FDesign2UMGNotification::Error(LOCTEXT("GenFailed", "Design2UMG: Widget Blueprint generation failed"));
 		return nullptr;
 	}
-	UE_LOG(LogDesign2UMG, Log, TEXT("PenImportUtils: Generated %s"), *WBP->GetPathName());
+	UE_LOG(LogDesign2UMG, Log, TEXT("DesignImportUtils: Generated %s"), *WBP->GetPathName());
 
 	FImportResult Result = FImportResult::FromData(EffectiveData, FPlatformTime::Seconds() - StartTime);
 	Result.ShowSummaryNotification();
 	return WBP;
 }
 
-bool PenImportUtils::GenerateBlueprintAndPng(const FUMGWidgetData& Data, const FString& OutputPath)
+bool DesignImportUtils::GenerateBlueprintAndPng(const FUMGWidgetData& Data, const FString& OutputPath)
 {
 	const FString FinalPath = ResolveOutputPath(OutputPath);
 
-	// Build（不编译），此时 transient 纹理仍在内存中
+	// 先构建（不立即落盘），再用瞬态实例渲染 PNG，最后统一保存 Blueprint。
 	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(Data, FinalPath);
 	if (!WBP)
 	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("PenImportUtils: Widget Blueprint build failed"));
+		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint build failed"));
 		return false;
 	}
 
-	// 在编译前渲染 PNG，transient 纹理 mip 数据此时仍有效
-	float MaxRight = FMath::Max(1.0f, Data.RootWidget.Bounds.W);
-	float MaxBottom = FMath::Max(1.0f, Data.RootWidget.Bounds.H);
-	for (const auto& Child : Data.RootWidget.Children)
+	// 渲染尺寸优先使用根节点 Bounds；合成根（如多 frame 的 CanvasPanel）Bounds 为 0，
+	// 退化到 1x1 会导致 PNG 无意义，此时使用 1920x1080 默认尺寸。
+	int32 RenderW = FMath::CeilToInt(Data.RootWidget.Bounds.W);
+	int32 RenderH = FMath::CeilToInt(Data.RootWidget.Bounds.H);
+	if (RenderW < 2 || RenderH < 2)
 	{
-		MaxRight = FMath::Max(MaxRight, Child.Bounds.X + Child.Bounds.W);
-		MaxBottom = FMath::Max(MaxBottom, Child.Bounds.Y + Child.Bounds.H);
+		RenderW = 1920;
+		RenderH = 1080;
 	}
-	const FIntPoint FallbackSize(FMath::CeilToInt(MaxRight), FMath::CeilToInt(MaxBottom));
+	const FIntPoint FallbackSize(RenderW, RenderH);
 
 	TArray<uint8> PngData;
 	FIntPoint Size;
 	if (!FUMGWidgetUtils::RenderWidgetTreeToPng(WBP, FallbackSize, PngData, Size))
 	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("PenImportUtils: Widget PNG render failed"));
-		// 渲染失败仍然保存 Blueprint
+		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget PNG render failed"));
+		// 渲染失败时也保存 Blueprint，方便定位问题。
 		FUMGGenerator::SaveWidgetBlueprint(WBP);
 		return false;
 	}
 
-	// 保存 Blueprint 到磁盘
+	// 成功渲染后保存 Blueprint
 	FUMGGenerator::SaveWidgetBlueprint(WBP);
 
-	// 保存 PNG
-	const FString PngName = FPaths::GetBaseFilename(OutputPath);
+	// 保存 PNG 到 Saved/Design2UMG
+	const FString PngName = FPaths::GetBaseFilename(FinalPath);
 	const FString OutPng = FPaths::ProjectSavedDir() / TEXT("Design2UMG") / (PngName + TEXT(".png"));
-	FFileHelper::SaveArrayToFile(PngData, *OutPng);
-	UE_LOG(LogDesign2UMG, Log, TEXT("PenImportUtils: Rendered PNG saved: %s (%dx%d)"), *OutPng, Size.X, Size.Y);
+	if (!FFileHelper::SaveArrayToFile(PngData, *OutPng))
+	{
+		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Failed to save PNG: %s"), *OutPng);
+		return false;
+	}
+	UE_LOG(LogDesign2UMG, Log, TEXT("DesignImportUtils: Rendered PNG saved: %s (%dx%d)"), *OutPng, Size.X, Size.Y);
 	return true;
 }
 
-void PenImportUtils::ResolveImages(FUMGWidgetData& Data)
+void DesignImportUtils::ResolveImages(FUMGWidgetData& Data)
 {
 	FString Report;
-	const bool bOk = FPenRemoteImageImporter::ResolveRemoteImages(Data, &Report);
+	const bool bOk = FDesignRemoteImageImporter::ResolveRemoteImages(Data, &Report);
 	if (!Report.IsEmpty())
 		UE_LOG(LogDesign2UMG, Log, TEXT("%s"), *Report);
 	if (!bOk)
 	{
-		UE_LOG(LogDesign2UMG, Warning, TEXT("PenImportUtils: Unresolved remote images; generation will continue"));
+		UE_LOG(LogDesign2UMG, Warning, TEXT("DesignImportUtils: Unresolved remote images; generation will continue"));
 		FDesign2UMGNotification::Warning(LOCTEXT("ImageWarning", "Design2UMG: Some images failed to download"));
 	}
 }
 
-void PenImportUtils::GenerateFromEditedJson(const FString& EditedJson, const FString& OutputPath)
+void DesignImportUtils::GenerateFromEditedJson(const FString& EditedJson, const FString& OutputPath)
 {
-	FScopedSlowTask SlowTask(3.0f, NSLOCTEXT("PenImportUtils", "Generating", "Generating Widget Blueprint..."));
+	FScopedSlowTask SlowTask(3.0f, NSLOCTEXT("DesignImportUtils", "Generating", "Generating Widget Blueprint..."));
 	SlowTask.MakeDialog(true);
 
-	SlowTask.EnterProgressFrame(1.0f, NSLOCTEXT("PenImportUtils", "GenParse", "Parsing edited design..."));
+	SlowTask.EnterProgressFrame(1.0f, NSLOCTEXT("DesignImportUtils", "GenParse", "Parsing edited design..."));
 	FUMGWidgetData Data;
 	FString ParseError;
 	if (!FUMGJsonParser::ParseJson(EditedJson, Data, &ParseError))
 	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("PenImportUtils: Edited JSON parse failed: %s"), *ParseError);
+		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Edited JSON parse failed: %s"), *ParseError);
 		FDesign2UMGNotification::Error(LOCTEXT("EditedJsonParseFailed", "Design2UMG: Failed to parse edited design data"));
 		return;
 	}
 	if (SlowTask.ShouldCancel()) return;
 
-	SlowTask.EnterProgressFrame(1.0f, NSLOCTEXT("PenImportUtils", "GenImages", "Downloading remote images..."));
+	SlowTask.EnterProgressFrame(1.0f, NSLOCTEXT("DesignImportUtils", "GenImages", "Downloading remote images..."));
 	ResolveImages(Data);
 	if (SlowTask.ShouldCancel()) return;
 
-	SlowTask.EnterProgressFrame(1.0f, NSLOCTEXT("PenImportUtils", "GenBP", "Generating Widget Blueprint..."));
+	SlowTask.EnterProgressFrame(1.0f, NSLOCTEXT("DesignImportUtils", "GenBP", "Generating Widget Blueprint..."));
 	GenerateBlueprint(Data, OutputPath);
 }
 
-// ── 预览窗口 ──
+// 预览窗口
 
-bool PenImportUtils::OpenPreviewWindow(
+bool DesignImportUtils::OpenPreviewWindow(
 	const FUMGWidgetData& Data,
 	const FString& OutputPath,
 	const FText& WindowTitle)
@@ -191,12 +196,12 @@ bool PenImportUtils::OpenPreviewWindow(
 		.OnConfirmed(FOnPreviewConfirmed::CreateLambda(
 			[](const FString& EditedJson, const FString& ConfirmedPath)
 			{
-				PenImportUtils::GenerateFromEditedJson(EditedJson, ConfirmedPath);
+				DesignImportUtils::GenerateFromEditedJson(EditedJson, ConfirmedPath);
 			}))
 		.OnCancelled(FOnPreviewCancelled::CreateLambda(
 			[]()
 			{
-				UE_LOG(LogDesign2UMG, Log, TEXT("PenImportUtils: Preview cancelled"));
+				UE_LOG(LogDesign2UMG, Log, TEXT("DesignImportUtils: Preview cancelled"));
 			}))
 	);
 
@@ -204,9 +209,9 @@ bool PenImportUtils::OpenPreviewWindow(
 	return true;
 }
 
-// ── Frame 选择器 ──
+// Frame 选择窗口
 
-void PenImportUtils::ShowFrameSelector(
+void DesignImportUtils::ShowFrameSelector(
 	const TArray<FPenFrameInfo>& Frames,
 	const FText& WindowTitle,
 	const FText& HintText,
@@ -270,3 +275,4 @@ void PenImportUtils::ShowFrameSelector(
 }
 
 #undef LOCTEXT_NAMESPACE
+

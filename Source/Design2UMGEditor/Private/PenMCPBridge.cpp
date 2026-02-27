@@ -168,7 +168,17 @@ FString FPenMCPBridge::AssembleDocumentJson(
 		Children = NodesArr;
 	}
 
-	return BuildDocumentJson(VarsObj, Children);
+	// VarsObj 可能是完整文档元数据（含 version/variables/themes/fonts），
+	// 也可能只是变量对象本身。确保 BuildDocumentJson 能正确读取各字段。
+	TSharedPtr<FJsonObject> SourceObj = VarsObj;
+	if (!VarsObj->HasField(TEXT("variables")))
+	{
+		// VarsObj 本身就是变量内容，包装为文档级对象
+		SourceObj = MakeShared<FJsonObject>();
+		SourceObj->SetObjectField(TEXT("variables"), VarsObj);
+	}
+
+	return BuildDocumentJson(SourceObj, Children);
 }
 
 bool FPenMCPBridge::ConvertFromMCP(

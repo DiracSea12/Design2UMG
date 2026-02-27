@@ -5,6 +5,7 @@
 #include "Widgets/Notifications/SNotificationList.h"
 #include "ContentBrowserModule.h"
 #include "IContentBrowserSingleton.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 
 void FDesign2UMGNotification::Success(const FText& Message, const FString& AssetPath)
 {
@@ -16,8 +17,12 @@ void FDesign2UMGNotification::Success(const FText& Message, const FString& Asset
 	{
 		Info.Hyperlink = FSimpleDelegate::CreateLambda([AssetPath]()
 		{
+			// 用 AssetRegistry 获取 FAssetData，避免同步加载完整对象
+			FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+			FAssetData AD = ARM.Get().GetAssetByObjectPath(FSoftObjectPath(AssetPath));
 			TArray<FAssetData> Assets;
-			Assets.Add(FAssetData(FSoftObjectPath(AssetPath).TryLoad()));
+			if (AD.IsValid())
+				Assets.Add(AD);
 			FContentBrowserModule& CB = FModuleManager::LoadModuleChecked<FContentBrowserModule>("ContentBrowser");
 			CB.Get().SyncBrowserToAssets(Assets);
 		});

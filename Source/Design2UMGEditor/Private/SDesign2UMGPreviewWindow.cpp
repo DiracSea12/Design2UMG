@@ -3,7 +3,7 @@
 #include "SDesign2UMGPreviewWindow.h"
 #include "UMGWidgetUtils.h"
 #include "UMGJsonParser.h"
-#include "PenRemoteImageImporter.h"
+#include "DesignRemoteImageImporter.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGConstants.h"
 #include "Design2UMGSettings.h"
@@ -418,6 +418,12 @@ FString SDesign2UMGPreviewWindow::FormatJson(const FString& JsonString)
 
 void SDesign2UMGPreviewWindow::CleanupPreviewWidget()
 {
+	// 释放预览用临时纹理的 Root 引用，允许 GC 回收
+	if (PreviewTextureMap.Num() > 0)
+	{
+		FDesignRemoteImageImporter::ReleaseTransientTextures(PreviewTextureMap);
+	}
+
 	if (PreviewWidget.Get())
 	{
 		PreviewWidget->RemoveFromParent();
@@ -565,8 +571,8 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(const FString& JsonString)
 UUserWidget* SDesign2UMGPreviewWindow::CreatePreviewWidgetFromJson(const FUMGWidgetData& WidgetData)
 {
 	// Download remote images as transient textures.
-	TMap<FString, UTexture2D*> TextureMap;
-	FPenRemoteImageImporter::ResolveTransientTextures(WidgetData.RootWidget, TextureMap);
+	PreviewTextureMap.Empty();
+	FDesignRemoteImageImporter::ResolveTransientTextures(WidgetData.RootWidget, PreviewTextureMap);
 
 	// Keep the same fixer path as final generation.
 	FUMGWidgetNode FixedRoot = WidgetData.RootWidget;
@@ -590,7 +596,7 @@ UUserWidget* SDesign2UMGPreviewWindow::CreatePreviewWidgetFromJson(const FUMGWid
 	}
 
 	// Build preview widget tree with transient texture map.
-	UWidget* RootWidget = FUMGWidgetUtils::CreateWidgetRecursive(TempWidget->WidgetTree, FixedRoot, nullptr, &TextureMap);
+	UWidget* RootWidget = FUMGWidgetUtils::CreateWidgetRecursive(TempWidget->WidgetTree, FixedRoot, nullptr, &PreviewTextureMap);
 	if (!RootWidget)
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create root widget of type: %s"), *WidgetData.RootWidget.Type);
@@ -604,4 +610,5 @@ UUserWidget* SDesign2UMGPreviewWindow::CreatePreviewWidgetFromJson(const FUMGWid
 }
 
 #undef LOCTEXT_NAMESPACE
+
 

@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "PenSchema.h"
+#include "DesignSchema.h"
 
 /**
  * 变量解析器 - 解析 $variableName 格式的变量引用

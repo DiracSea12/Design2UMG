@@ -7,6 +7,18 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 
+TArray<TWeakObjectPtr<UTexture2D>> FProceduralShapeGenerator::RootedTextures;
+
+void FProceduralShapeGenerator::ReleaseTransientTextures()
+{
+	for (const TWeakObjectPtr<UTexture2D>& Weak : RootedTextures)
+	{
+		if (UTexture2D* Tex = Weak.Get())
+			Tex->RemoveFromRoot();
+	}
+	RootedTextures.Empty();
+}
+
 UTexture2D* FProceduralShapeGenerator::CreateTransientTexture(int32 Width, int32 Height, UObject* Outer)
 {
 	UTexture2D* Texture = UTexture2D::CreateTransient(Width, Height, PF_B8G8R8A8, NAME_None);
@@ -16,6 +28,7 @@ UTexture2D* FProceduralShapeGenerator::CreateTransientTexture(int32 Width, int32
 		// RF_Transient 纹理的 PlatformData/Mips 在拷贝中丢失。
 		// RF_DuplicateTransient 使 FDuplicateDataWriter 写 nullptr 而非复制，避免空 mip 副本。
 		Texture->AddToRoot();
+		RootedTextures.Add(Texture);
 		Texture->SetFlags(RF_DuplicateTransient);
 		Texture->SRGB = true;
 		Texture->CompressionSettings = TC_EditorIcon;

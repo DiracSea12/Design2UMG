@@ -1,10 +1,10 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
 #include "FigmaImageExporter.h"
 #include "FigmaParser.h"
 #include "FigmaHttpClient.h"
 #include "Design2UMGLog.h"
-#include "PenSchema.h"
+#include "DesignSchema.h"
 
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -12,7 +12,7 @@
 void FFigmaImageExporter::ResolveImageRefs(
 	FFigmaHttpClient& Client,
 	const FString& FileKey,
-	TSharedRef<FPenDocument> Document,
+	TSharedRef<FDesignDocument> Document,
 	FOnComplete OnComplete)
 {
 	TSet<FString> ImageRefs;
@@ -84,7 +84,7 @@ void FFigmaImageExporter::ResolveImageRefs(
 // ExportVectorNodes
 // ---------------------------------------------------------------------------
 
-static void CollectVectorNodeIds(const TArray<TSharedPtr<FPenNode>>& Nodes, TArray<FString>& OutIds)
+static void CollectVectorNodeIds(const TArray<TSharedPtr<FDesignNode>>& Nodes, TArray<FString>& OutIds)
 {
 	for (const auto& Node : Nodes)
 	{
@@ -95,7 +95,7 @@ static void CollectVectorNodeIds(const TArray<TSharedPtr<FPenNode>>& Nodes, TArr
 	}
 }
 
-static void ApplyExportedImages(TArray<TSharedPtr<FPenNode>>& Nodes, const TMap<FString, FString>& IdToUrl)
+void FFigmaImageExporter::ApplyExportedImages(TArray<TSharedPtr<FDesignNode>>& Nodes, const TMap<FString, FString>& IdToUrl)
 {
 	for (auto& Node : Nodes)
 	{
@@ -107,7 +107,6 @@ static void ApplyExportedImages(TArray<TSharedPtr<FPenNode>>& Nodes, const TMap<
 				Node->Type = EPenNodeType::Rectangle;
 				Node->Fill.Type = EPenFillType::Image;
 				Node->Fill.Image.Url = *Url;
-				// 同步 Fills 数组
 				Node->Fills.Empty();
 				Node->Fills.Add(Node->Fill);
 			}
@@ -119,27 +118,27 @@ static void ApplyExportedImages(TArray<TSharedPtr<FPenNode>>& Nodes, const TMap<
 void FFigmaImageExporter::ExportVectorNodes(
 	FFigmaHttpClient& Client,
 	const FString& FileKey,
-	TSharedRef<FPenDocument> Document,
-	FOnComplete OnComplete)
+	TSharedRef<FDesignDocument> Document,
+	FOnVectorExportComplete OnComplete)
 {
 	TArray<FString> VectorIds;
 	CollectVectorNodeIds(Document->Children, VectorIds);
 
 	if (VectorIds.Num() == 0)
 	{
-		if (OnComplete) OnComplete(true);
+		if (OnComplete) OnComplete(true, {});
 		return;
 	}
 
 	UE_LOG(LogDesign2UMG, Log, TEXT("FigmaImageExporter: Exporting %d vector nodes as PNG"), VectorIds.Num());
 
 	Client.ExportImages(FileKey, VectorIds,
-		[Document, OnComplete](bool bSuccess, const FString& Body)
+		[OnComplete](bool bSuccess, const FString& Body)
 		{
 			if (!bSuccess)
 			{
 				UE_LOG(LogDesign2UMG, Warning, TEXT("FigmaImageExporter: ExportImages failed"));
-				if (OnComplete) OnComplete(false);
+				if (OnComplete) OnComplete(false, {});
 				return;
 			}
 
@@ -148,16 +147,15 @@ void FFigmaImageExporter::ExportVectorNodes(
 			if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
 			{
 				UE_LOG(LogDesign2UMG, Warning, TEXT("FigmaImageExporter: Failed to parse export response"));
-				if (OnComplete) OnComplete(false);
+				if (OnComplete) OnComplete(false, {});
 				return;
 			}
 
-			// Figma GET /v1/images/:key 返回 { "images": { "nodeId": "url", ... } }
 			const TSharedPtr<FJsonObject>* ImagesObj = nullptr;
 			if (!Root->TryGetObjectField(TEXT("images"), ImagesObj) || !ImagesObj || !(*ImagesObj).IsValid())
 			{
 				UE_LOG(LogDesign2UMG, Warning, TEXT("FigmaImageExporter: No 'images' in export response"));
-				if (OnComplete) OnComplete(true);
+				if (OnComplete) OnComplete(true, {});
 				return;
 			}
 
@@ -170,8 +168,6 @@ void FFigmaImageExporter::ExportVectorNodes(
 			}
 
 			UE_LOG(LogDesign2UMG, Log, TEXT("FigmaImageExporter: Exported %d vector nodes"), IdToUrl.Num());
-			ApplyExportedImages(Document->Children, IdToUrl);
-
-			if (OnComplete) OnComplete(true);
+			if (OnComplete) OnComplete(true, IdToUrl);
 		});
 }

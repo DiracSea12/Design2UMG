@@ -1,9 +1,14 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
 #include "DesignSourceRegistry.h"
+#include "Design2UMGLog.h"
 
 void FDesignSourceRegistry::Register(FName SourceId, FDesignSourceConvertFunc Func)
 {
+	if (GetRegistry().Contains(SourceId))
+	{
+		UE_LOG(LogDesign2UMG, Warning, TEXT("DesignSourceRegistry: Overwriting existing source '%s'"), *SourceId.ToString());
+	}
 	GetRegistry().Add(SourceId, MoveTemp(Func));
 }
 

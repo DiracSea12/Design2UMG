@@ -27,3 +27,18 @@ tmpclaude-*
 specs/
 Docs/LessonsLearned.md
 Source/Design2UMGEditor/Private/image/
+
+# 文档和非代码文件
+*.md
+!KNOWN_LIMITATIONS.md
+!CHANGELOG.md
+Docs/
+AGENTS.md
+ENCODING_GUARD.md
+prd.json
+
+# 测试 fixtures 和工具脚本
+Source/Design2UMGEditor/Private/Tests/Fixtures/*.json
+Source/Design2UMGEditor/Private/Tests/Fixtures/*.py
+Examples/
+Tools/

@@ -16,6 +16,7 @@
 #include "Misc/ConfigCacheIni.h"
 #include "Slate/WidgetRenderer.h"
 #include "WidgetBlueprintEditorUtils.h"
+#include "RenderingThread.h"
 #include "Widgets/SVirtualWindow.h"
 
 // ============================================================================
@@ -46,6 +47,7 @@ namespace
 
 		// 直接用调用方传入的尺寸，不读编辑器 Designer 配置（那是给 UMG 预览用的）
 		Window->Resize(FVector2D(FallbackSize.X, FallbackSize.Y));
+		Window->SlatePrepass(1.0f);
 		Window->SlatePrepass(1.0f);
 		return FallbackSize;
 	}
@@ -82,13 +84,13 @@ bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, const FIntPo
 	RT->ClearColor = FLinearColor::Transparent;
 	RT->SRGB = true;
 	RT->RenderTargetFormat = RTF_RGBA8;
-	const EPixelFormat Fmt = FSlateApplication::Get().GetRenderer()->GetSlateRecommendedColorFormat();
-	RT->InitCustomFormat(EffectiveSize.X, EffectiveSize.Y, Fmt, true);
+	RT->InitCustomFormat(EffectiveSize.X, EffectiveSize.Y, PF_B8G8R8A8, true);
 
 	FWidgetRenderer Renderer(true);
 	Renderer.SetIsPrepassNeeded(false);
 	TUniquePtr<FHittestGrid> HitTestGrid = MakeUnique<FHittestGrid>();
 	Renderer.DrawWindow(RT, *HitTestGrid, Window, 1.0f, FVector2D(EffectiveSize.X, EffectiveSize.Y), 0.1f);
+	if (!GUsingNullRHI) { FlushRenderingCommands(); }
 
 	FTextureRenderTargetResource* Resource = RT->GameThread_GetRenderTargetResource();
 	if (!Resource)
@@ -135,13 +137,13 @@ namespace
 		RT->ClearColor = FLinearColor::Transparent;
 		RT->SRGB = true;
 		RT->RenderTargetFormat = RTF_RGBA8;
-		const EPixelFormat Fmt = FSlateApplication::Get().GetRenderer()->GetSlateRecommendedColorFormat();
-		RT->InitCustomFormat(RenderSize.X, RenderSize.Y, Fmt, true);
+		RT->InitCustomFormat(RenderSize.X, RenderSize.Y, PF_B8G8R8A8, true);
 
 		FWidgetRenderer Renderer(true);
 		Renderer.SetIsPrepassNeeded(false);
 		TUniquePtr<FHittestGrid> HitTestGrid = MakeUnique<FHittestGrid>();
 		Renderer.DrawWindow(RT, *HitTestGrid, Window, 1.0f, FVector2D(RenderSize.X, RenderSize.Y), 0.1f);
+		if (!GUsingNullRHI) { FlushRenderingCommands(); }
 
 		FTextureRenderTargetResource* Resource = RT->GameThread_GetRenderTargetResource();
 		if (!Resource)
@@ -179,15 +181,16 @@ bool FUMGWidgetUtils::RenderWidgetTreeToPng(UWidgetBlueprint* WidgetBP, const FI
 
 	if (!FSlateApplication::IsInitialized()) return false;
 
-	// 直接从 WidgetTree RootWidget 获取 SWidget，绕过 GeneratedClass CDO
-	// 此时 transient 纹理 mip 数据仍在内存中
+	// 遍历 WidgetTree 所有 Widget，确保 SWidget 被创建并同步属性
+	WidgetBP->WidgetTree->ForEachWidget([](UWidget* W)
+	{
+		if (!W) return;
+		W->TakeWidget();
+		W->SynchronizeProperties();
+	});
+
 	UWidget* RootWidget = WidgetBP->WidgetTree->RootWidget;
 	TSharedPtr<SWidget> SlateWidget = RootWidget->GetCachedWidget();
-	if (!SlateWidget.IsValid())
-	{
-		SlateWidget = RootWidget->TakeWidget();
-	}
-
 	if (!SlateWidget.IsValid())
 	{
 		UE_LOG(LogDesign2UMG, Warning, TEXT("RenderWidgetTreeToPng: failed to get SWidget from RootWidget"));

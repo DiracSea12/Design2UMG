@@ -1,11 +1,11 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
-#include "PenRefExpander.h"
+#include "RefExpander.h"
 #include "Design2UMGLog.h"
 
 namespace
 {
-	void ApplyOverrideProperties(FPenNode& Target, const FPenNode& Override)
+	void ApplyOverrideProperties(FDesignNode& Target, const FDesignNode& Override)
 	{
 		if (!Override.Content.IsEmpty())
 			Target.Content = Override.Content;
@@ -22,9 +22,9 @@ namespace
 		}
 		if (Override.Stroke.HasStroke())
 			Target.Stroke = Override.Stroke;
-		if (!Override.Width.IsFit())
+		if (Override.bHasWidth)
 			Target.Width = Override.Width;
-		if (!Override.Height.IsFit())
+		if (Override.bHasHeight)
 			Target.Height = Override.Height;
 		if (Override.bHasX)
 		{
@@ -72,37 +72,37 @@ namespace
 			Target.Children = Override.Children;
 	}
 
-	TSharedPtr<FPenNode> MergeDescendantOverrideNodes(
-		const TSharedPtr<FPenNode>& BaseOverride,
-		const TSharedPtr<FPenNode>& OuterOverride)
+	TSharedPtr<FDesignNode> MergeDescendantOverrideNodes(
+		const TSharedPtr<FDesignNode>& BaseOverride,
+		const TSharedPtr<FDesignNode>& OuterOverride)
 	{
 		if (!OuterOverride.IsValid())
 			return BaseOverride;
 		if (!BaseOverride.IsValid())
-			return FPenRefExpander::DeepCopyNode(OuterOverride);
+			return FRefExpander::DeepCopyNode(OuterOverride);
 		if (OuterOverride->Type != EPenNodeType::Unknown)
-			return FPenRefExpander::DeepCopyNode(OuterOverride);
+			return FRefExpander::DeepCopyNode(OuterOverride);
 
-		auto Merged = FPenRefExpander::DeepCopyNode(BaseOverride);
+		auto Merged = FRefExpander::DeepCopyNode(BaseOverride);
 		if (!Merged.IsValid())
-			return FPenRefExpander::DeepCopyNode(OuterOverride);
+			return FRefExpander::DeepCopyNode(OuterOverride);
 
 		ApplyOverrideProperties(*Merged, *OuterOverride);
 		return Merged;
 	}
 
 	void MergeDescendants(
-		TMap<FString, TSharedPtr<FPenNode>>& InOut,
-		const TMap<FString, TSharedPtr<FPenNode>>& Outer)
+		TMap<FString, TSharedPtr<FDesignNode>>& InOut,
+		const TMap<FString, TSharedPtr<FDesignNode>>& Outer)
 	{
 		for (const auto& Pair : Outer)
 		{
-			TSharedPtr<FPenNode> Existing = InOut.FindRef(Pair.Key);
+			TSharedPtr<FDesignNode> Existing = InOut.FindRef(Pair.Key);
 			InOut.Add(Pair.Key, MergeDescendantOverrideNodes(Existing, Pair.Value));
 		}
 	}
 
-	void ApplyInstanceOverrides(TSharedPtr<FPenNode>& Expanded, const TSharedPtr<FPenNode>& RefNode)
+	void ApplyInstanceOverrides(TSharedPtr<FDesignNode>& Expanded, const TSharedPtr<FDesignNode>& RefNode)
 	{
 		if (!Expanded.IsValid() || !RefNode.IsValid())
 			return;
@@ -173,9 +173,9 @@ namespace
 			Expanded->Children = RefNode->Children;
 	}
 
-	TSharedPtr<FPenNode> ExpandRefInternal(
-		const TSharedPtr<FPenNode>& RefNode,
-		const FPenDocument& Doc,
+	TSharedPtr<FDesignNode> ExpandRefInternal(
+		const TSharedPtr<FDesignNode>& RefNode,
+		const FDesignDocument& Doc,
 		TSet<FString>& RefChain)
 	{
 		if (!RefNode.IsValid() || RefNode->Ref.IsEmpty())
@@ -199,7 +199,7 @@ namespace
 			return nullptr;
 		}
 
-		auto Expanded = FPenRefExpander::DeepCopyNode(SourceNode);
+		auto Expanded = FRefExpander::DeepCopyNode(SourceNode);
 		if (!Expanded.IsValid())
 		{
 			RefChain.Remove(RefTargetId);
@@ -208,7 +208,7 @@ namespace
 		MergeDescendants(Expanded->Descendants, RefNode->Descendants);
 		ApplyInstanceOverrides(Expanded, RefNode);
 
-		TSharedPtr<FPenNode> Result = Expanded;
+		TSharedPtr<FDesignNode> Result = Expanded;
 		if (Expanded->Type == EPenNodeType::Ref && !Expanded->Ref.IsEmpty())
 		{
 			Result = ExpandRefInternal(Expanded, Doc, RefChain);
@@ -216,7 +216,7 @@ namespace
 		else
 		{
 			for (const auto& Pair : Expanded->Descendants)
-				FPenRefExpander::ApplyDescendantOverride(Result, Pair.Key, Pair.Value);
+				FRefExpander::ApplyDescendantOverride(Result, Pair.Key, Pair.Value);
 		}
 
 		RefChain.Remove(RefTargetId);
@@ -224,28 +224,33 @@ namespace
 	}
 }
 
-TSharedPtr<FPenNode> FPenRefExpander::DeepCopyNode(const TSharedPtr<FPenNode>& Source)
+TSharedPtr<FDesignNode> FRefExpander::DeepCopyNode(const TSharedPtr<FDesignNode>& Source)
 {
 	if (!Source.IsValid())
 		return nullptr;
 
-	auto Copy = MakeShared<FPenNode>();
+	auto Copy = MakeShared<FDesignNode>();
 	*Copy = *Source;
 
+	// 深拷贝 Children
 	Copy->Children.Empty();
 	for (const auto& Child : Source->Children)
 		Copy->Children.Add(DeepCopyNode(Child));
 
+	// 深拷贝 Descendants，避免多实例共享节点导致交叉污染
+	for (auto& Pair : Copy->Descendants)
+		Pair.Value = DeepCopyNode(Pair.Value);
+
 	return Copy;
 }
 
-TSharedPtr<FPenNode> FPenRefExpander::ExpandRef(const TSharedPtr<FPenNode>& RefNode, const FPenDocument& Doc)
+TSharedPtr<FDesignNode> FRefExpander::ExpandRef(const TSharedPtr<FDesignNode>& RefNode, const FDesignDocument& Doc)
 {
 	TSet<FString> RefChain;
 	return ExpandRefInternal(RefNode, Doc, RefChain);
 }
 
-void FPenRefExpander::ApplyDescendantOverride(TSharedPtr<FPenNode>& Node, const FString& Path, const TSharedPtr<FPenNode>& Override)
+void FRefExpander::ApplyDescendantOverride(TSharedPtr<FDesignNode>& Node, const FString& Path, const TSharedPtr<FDesignNode>& Override)
 {
 	if (!Node.IsValid() || !Override.IsValid())
 		return;
@@ -270,10 +275,10 @@ void FPenRefExpander::ApplyDescendantOverride(TSharedPtr<FPenNode>& Node, const 
 			if (!Child.IsValid() || Child->Id != Path)
 				continue;
 
-			// 对象替换模式
+			// 对象替换模式：深拷贝避免多实例共享同一节点
 			if (Override->Type != EPenNodeType::Unknown)
 			{
-				Node->Children[i] = Override;
+				Node->Children[i] = DeepCopyNode(Override);
 				return;
 			}
 
@@ -283,7 +288,7 @@ void FPenRefExpander::ApplyDescendantOverride(TSharedPtr<FPenNode>& Node, const 
 	}
 }
 
-void FPenRefExpander::ReThemeNode(TSharedPtr<FPenNode>& Node, const FPenVariableResolver& Resolver)
+void FRefExpander::ReThemeNode(TSharedPtr<FDesignNode>& Node, const FPenVariableResolver& Resolver)
 {
 	if (!Node.IsValid())
 		return;

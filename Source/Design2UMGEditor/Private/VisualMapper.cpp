@@ -1,12 +1,18 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
-#include "PenVisualMapper.h"
-#include "PenLayoutMapper.h"
+#include "VisualMapper.h"
+#include "LayoutMapper.h"
 #include "Design2UMGLog.h"
 #include "UMGWidgetUtils.h"
 
 namespace
 {
+	// 材质引用标识符（ProceduralShapeGenerator 内部 key，非资产路径）
+	const TCHAR* MatRef_GradientH = TEXT("gradienth");
+	const TCHAR* MatRef_GradientV = TEXT("gradientv");
+	const TCHAR* MatRef_Radial    = TEXT("radialgradient");
+	const TCHAR* MatRef_RoundedRect = TEXT("roundedrect");
+
 	FString BuildGradientMaterialParams(const FPenGradient& Gradient)
 	{
 		if (Gradient.Colors.Num() == 0)
@@ -15,13 +21,20 @@ namespace
 		const FString& StartColor = Gradient.Colors[0].Color;
 		const FString& EndColor = Gradient.Colors.Last().Color;
 
+		if (Gradient.Colors.Num() > 2)
+		{
+			UE_LOG(LogDesign2UMG, Warning,
+				TEXT("Gradient has %d color stops; only first and last are used (UE5 material limitation)"),
+				Gradient.Colors.Num());
+		}
+
 		if (Gradient.GradientType == EPenGradientType::Radial)
 			return FString::Printf(TEXT("{\"ColorCenter\":\"%s\",\"ColorEdge\":\"%s\"}"), *StartColor, *EndColor);
 
 		return FString::Printf(TEXT("{\"ColorStart\":\"%s\",\"ColorEnd\":\"%s\"}"), *StartColor, *EndColor);
 	}
 
-	void AddTextureSizeHints(FUMGWidgetNode& Widget, const TSharedPtr<FPenNode>& Node)
+	void AddTextureSizeHints(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
 	{
 		if (Node->Width.IsFixed() && Node->Width.Value > 0.0f)
 			Widget.Properties.Add(TEXT("WidthOverride"), FString::SanitizeFloat(Node->Width.Value));
@@ -29,7 +42,7 @@ namespace
 			Widget.Properties.Add(TEXT("HeightOverride"), FString::SanitizeFloat(Node->Height.Value));
 	}
 
-	void ApplyFillProperties(FUMGWidgetNode& Widget, const TSharedPtr<FPenNode>& Node)
+	void ApplyFillProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
 	{
 		if (!Node.IsValid() || !Node->Fill.bEnabled)
 			return;
@@ -61,12 +74,17 @@ namespace
 
 		if (Node->Fill.Type == EPenFillType::Gradient && Node->Fill.Gradient.Colors.Num() > 0)
 		{
-			FString MaterialRef = TEXT("gradienth");
+			FString MaterialRef = MatRef_GradientH;
 			switch (Node->Fill.Gradient.GradientType)
 			{
 			case EPenGradientType::Radial:
+				MaterialRef = MatRef_Radial;
+				break;
 			case EPenGradientType::Angular:
-				MaterialRef = TEXT("radialgradient");
+				UE_LOG(LogDesign2UMG, Warning,
+					TEXT("Design2UMG: Angular gradient on '%s' approximated as Radial (no Angular material)"),
+					*Node->Name);
+				MaterialRef = MatRef_Radial;
 				break;
 			case EPenGradientType::Linear:
 			default:
@@ -75,7 +93,7 @@ namespace
 				if (Rotation < 0.0f)
 					Rotation += 360.0f;
 				const bool bVertical = (Rotation > 45.0f && Rotation < 135.0f) || (Rotation > 225.0f && Rotation < 315.0f);
-				MaterialRef = bVertical ? TEXT("gradientv") : TEXT("gradienth");
+				MaterialRef = bVertical ? MatRef_GradientV : MatRef_GradientH;
 				break;
 			}
 			}
@@ -123,7 +141,7 @@ namespace
 	}
 }
 
-void FPenVisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedPtr<FPenNode>& Node)
+void FVisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
 {
 	ApplyFillProperties(Widget, Node);
 
@@ -154,9 +172,10 @@ void FPenVisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TShar
 		Widget.Properties.Add(TEXT("RenderTransformScale"), FString::Printf(TEXT("%.1f,%.1f"), ScaleX, ScaleY));
 	}
 
-	if (Node->bClip)
+	if (Node->bHasClip && Node->bClip)
 		Widget.Properties.Add(TEXT("Clipping"), TEXT("ClipToBounds"));
 
+	int32 ShadowCount = 0;
 	for (const FPenEffect& Effect : Node->Effects)
 	{
 		if (!Effect.bEnabled)
@@ -170,12 +189,25 @@ void FPenVisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TShar
 				*Node->Name);
 			break;
 		case EPenEffectType::Shadow:
+			if (Effect.Shadow.bInner)
+			{
+				UE_LOG(LogDesign2UMG, Warning,
+					TEXT("Design2UMG: Inner shadow on '%s' ignored (UMG has no inner shadow support)"),
+					*Node->Name);
+				break;
+			}
+			if (++ShadowCount > 1)
+			{
+				UE_LOG(LogDesign2UMG, Warning,
+					TEXT("Design2UMG: Multiple shadows on '%s', only the last one will be applied (UMG limitation)"),
+					*Node->Name);
+			}
 			if (Node->Type == EPenNodeType::Text)
 			{
 				Widget.Properties.Add(TEXT("ShadowOffset"),
 					FString::Printf(TEXT("%.1f,%.1f"), Effect.Shadow.OffsetX, Effect.Shadow.OffsetY));
-				if (!Effect.Shadow.Color.IsEmpty())
-					Widget.Properties.Add(TEXT("ShadowColorAndOpacity"), Effect.Shadow.Color);
+				Widget.Properties.Add(TEXT("ShadowColorAndOpacity"),
+					Effect.Shadow.Color.IsEmpty() ? TEXT("#00000040") : Effect.Shadow.Color);
 			}
 			else
 			{
@@ -193,7 +225,7 @@ void FPenVisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TShar
 	}
 }
 
-void FPenVisualMapper::ApplyRoundedCorner(FUMGWidgetNode& Widget, const FPenCornerRadius& Radius, float Width, float Height)
+void FVisualMapper::ApplyRoundedCorner(FUMGWidgetNode& Widget, const FPenCornerRadius& Radius, float Width, float Height)
 {
 	if (Radius.bUniform)
 	{
@@ -230,7 +262,7 @@ void FPenVisualMapper::ApplyRoundedCorner(FUMGWidgetNode& Widget, const FPenCorn
 	}
 }
 
-void FPenVisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FPenStroke& Stroke)
+void FVisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FPenStroke& Stroke)
 {
 	float Thickness = Stroke.Thickness.bUniform ? Stroke.Thickness.Uniform
 		: FMath::Max(FMath::Max(Stroke.Thickness.Top, Stroke.Thickness.Bottom),
@@ -260,7 +292,7 @@ void FPenVisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FPenStroke& Str
 	}
 }
 
-FUMGWidgetNode FPenVisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TSharedPtr<FPenNode>& Node)
+FUMGWidgetNode FVisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node)
 {
 	FUMGWidgetNode Border;
 	Border.Type = TEXT("Border");
@@ -292,8 +324,8 @@ FUMGWidgetNode FPenVisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const T
 		}
 	}
 
-	if (FPenLayoutMapper::HasPadding(Node))
-		FPenLayoutMapper::ApplyPadding(Border, Node->Padding);
+	if (FLayoutMapper::HasPadding(Node))
+		FLayoutMapper::ApplyPadding(Border, Node->Padding);
 
 	for (const FString& Key : {TEXT("DrawAs"), TEXT("OutlineCornerRadius"), TEXT("CornerRadii"), TEXT("OutlineThickness"), TEXT("OutlineColor")})
 	{
@@ -312,6 +344,16 @@ FUMGWidgetNode FPenVisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const T
 	else if (Node->Opacity < 1.0f)
 	{
 		Border.Properties.Add(TEXT("RenderOpacity"), FString::SanitizeFloat(Node->Opacity));
+	}
+
+	// 包装后仍需保持节点级裁剪与变换语义，避免外层背景与内层内容表现不一致。
+	for (const FString& Key : {TEXT("Clipping"), TEXT("RenderAngle"), TEXT("RenderTransformScale"), TEXT("RenderTranslation")})
+	{
+		if (const FString* V = Widget.Properties.Find(Key))
+		{
+			Border.Properties.Add(Key, *V);
+			Widget.Properties.Remove(Key);
+		}
 	}
 
 	// BoxShadow 属性上卷到 Border，确保 ConvertNode 能检测到并包裹阴影
@@ -334,7 +376,7 @@ FUMGWidgetNode FPenVisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const T
 	return Border;
 }
 
-FUMGWidgetNode FPenVisualMapper::WrapWithBackgroundBlur(FUMGWidgetNode&& Widget, float BlurStrength)
+FUMGWidgetNode FVisualMapper::WrapWithBackgroundBlur(FUMGWidgetNode&& Widget, float BlurStrength)
 {
 	FUMGWidgetNode Blur;
 	Blur.Type = TEXT("BackgroundBlur");
@@ -353,7 +395,7 @@ FUMGWidgetNode FPenVisualMapper::WrapWithBackgroundBlur(FUMGWidgetNode&& Widget,
 	return Blur;
 }
 
-FUMGWidgetNode FPenVisualMapper::WrapWithBoxShadow(FUMGWidgetNode&& Widget, const TSharedPtr<FPenNode>& Node)
+FUMGWidgetNode FVisualMapper::WrapWithBoxShadow(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node)
 {
 	// 从 Widget 属性中提取阴影参数
 	const FString* OffXStr = Widget.Properties.Find(TEXT("BoxShadowOffsetX"));
@@ -405,7 +447,7 @@ FUMGWidgetNode FPenVisualMapper::WrapWithBoxShadow(FUMGWidgetNode&& Widget, cons
 	int32 TexH = FMath::Max(1, FMath::RoundToInt(Node->Height.Value + Extent * 2));
 	Shadow.Properties.Add(TEXT("WidthOverride"), FString::FromInt(TexW));
 	Shadow.Properties.Add(TEXT("HeightOverride"), FString::FromInt(TexH));
-	Shadow.Properties.Add(TEXT("MaterialRef"), TEXT("roundedrect"));
+	Shadow.Properties.Add(TEXT("MaterialRef"), MatRef_RoundedRect);
 
 	float NormRadius = (TexW > 0 && TexH > 0) ? (CornerRadius + Extent) / (FMath::Min(TexW, TexH) * 0.5f) : 0.0f;
 	Shadow.Properties.Add(TEXT("MaterialParams"),
@@ -433,7 +475,7 @@ FUMGWidgetNode FPenVisualMapper::WrapWithBoxShadow(FUMGWidgetNode&& Widget, cons
 	return Wrapper;
 }
 
-FUMGWidgetNode FPenVisualMapper::WrapWithMultiFill(FUMGWidgetNode&& Widget, const TSharedPtr<FPenNode>& Node)
+FUMGWidgetNode FVisualMapper::WrapWithMultiFill(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node)
 {
 	if (!Node.IsValid() || Node->Fills.Num() <= 1)
 		return MoveTemp(Widget);
@@ -469,12 +511,16 @@ FUMGWidgetNode FPenVisualMapper::WrapWithMultiFill(FUMGWidgetNode&& Widget, cons
 		else if (Fill.Type == EPenFillType::Gradient && Fill.Gradient.Colors.Num() > 0)
 		{
 			Layer.Type = TEXT("Image");
-			FString MaterialRef = TEXT("gradienth");
+			FString MaterialRef = MatRef_GradientH;
 			switch (Fill.Gradient.GradientType)
 			{
 			case EPenGradientType::Radial:
+				MaterialRef = MatRef_Radial;
+				break;
 			case EPenGradientType::Angular:
-				MaterialRef = TEXT("radialgradient");
+				UE_LOG(LogDesign2UMG, Warning,
+					TEXT("Design2UMG: Angular gradient in multi-fill approximated as Radial (no Angular material)"));
+				MaterialRef = MatRef_Radial;
 				break;
 			case EPenGradientType::Linear:
 			default:
@@ -482,7 +528,7 @@ FUMGWidgetNode FPenVisualMapper::WrapWithMultiFill(FUMGWidgetNode&& Widget, cons
 				float Rotation = FMath::Fmod(Fill.Gradient.Rotation, 360.0f);
 				if (Rotation < 0.0f) Rotation += 360.0f;
 				const bool bVertical = (Rotation > 45.0f && Rotation < 135.0f) || (Rotation > 225.0f && Rotation < 315.0f);
-				MaterialRef = bVertical ? TEXT("gradientv") : TEXT("gradienth");
+				MaterialRef = bVertical ? MatRef_GradientV : MatRef_GradientH;
 				break;
 			}
 			}

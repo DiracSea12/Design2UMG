@@ -1,22 +1,24 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
 #pragma once
 
 #include "CoreMinimal.h"
 
-struct FPenDocument;
+struct FDesignDocument;
+struct FDesignNode;
 class FFigmaHttpClient;
 
 /**
  * Figma 图片导出器
  *
- * 收集 FPenDocument 中的 imageRef，调用 Figma images API 获取实际 URL，
- * 然后回填到节点树中。后续由 PenRemoteImageImporter 下载并导入 UE 资产。
+ * 收集 FDesignDocument 中的 imageRef，调用 Figma images API 获取实际 URL，
+ * 然后回填到节点树中。后续由 FDesignRemoteImageImporter 下载并导入 UE 资产。
  */
 class FFigmaImageExporter
 {
 public:
 	using FOnComplete = TFunction<void(bool bSuccess)>;
+	using FOnVectorExportComplete = TFunction<void(bool bSuccess, const TMap<FString, FString>& IdToUrl)>;
 
 	/**
 	 * 异步解析文档中所有 imageRef 为实际 URL
@@ -28,18 +30,24 @@ public:
 	static void ResolveImageRefs(
 		FFigmaHttpClient& Client,
 		const FString& FileKey,
-		TSharedRef<FPenDocument> Document,
+		TSharedRef<FDesignDocument> Document,
 		FOnComplete OnComplete);
 
 	/**
 	 * 将无法原生渲染的向量节点（VECTOR/BOOLEAN_OPERATION）导出为 PNG
 	 *
 	 * 调用 Figma GET /v1/images/:key?ids=...&format=png 获取渲染图，
-	 * 然后将节点类型从 Path 改为 Rectangle + Image Fill。
+	 * 回调返回 NodeId→ImageUrl 映射，由调用方通过 ApplyExportedImages 应用。
 	 */
 	static void ExportVectorNodes(
 		FFigmaHttpClient& Client,
 		const FString& FileKey,
-		TSharedRef<FPenDocument> Document,
-		FOnComplete OnComplete);
+		TSharedRef<FDesignDocument> Document,
+		FOnVectorExportComplete OnComplete);
+
+	/**
+	 * 将导出的向量图片 URL 应用到文档节点树：Path → Rectangle + Image Fill。
+	 * 调用方显式调用，避免在 async 回调中隐式变异共享文档。
+	 */
+	static void ApplyExportedImages(TArray<TSharedPtr<FDesignNode>>& Nodes, const TMap<FString, FString>& IdToUrl);
 };

@@ -130,6 +130,22 @@ FPenCornerRadius FPenVariableResolver::ResolveCornerRadius(const TSharedPtr<FJso
 			TryResolveCornerNumber(Arr[2], *this, Result.BottomRight);
 			TryResolveCornerNumber(Arr[3], *this, Result.BottomLeft);
 		}
+		else if (Arr.Num() == 1)
+		{
+			// 单元素数组视为 uniform
+			Result.bUniform = true;
+			TryResolveCornerNumber(Arr[0], *this, Result.Uniform);
+		}
+		else if (Arr.Num() >= 2)
+		{
+			// 2-3 元素：尽量填充，缺失角复用已有值
+			Result.bUniform = false;
+			TryResolveCornerNumber(Arr[0], *this, Result.TopLeft);
+			TryResolveCornerNumber(Arr[1], *this, Result.TopRight);
+			Result.BottomRight = (Arr.Num() > 2) ? 0.0f : Result.TopLeft;
+			if (Arr.Num() > 2) TryResolveCornerNumber(Arr[2], *this, Result.BottomRight);
+			Result.BottomLeft = Result.TopRight;
+		}
 		return Result;
 	}
 

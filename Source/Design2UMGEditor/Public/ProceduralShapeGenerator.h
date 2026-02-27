@@ -12,10 +12,9 @@ class FUMGWidgetUtils;
  * 无需手动创建 Material 资产
  *
  * 生命周期说明: 所有 Generate* 函数返回临时纹理 (UTexture2D::CreateTransient)
- * - 无引用时，纹理会被垃圾回收
- * - 调用方必须持有引用 (如 TStrongObjectPtr<UTexture2D>) 以保持纹理存活
- * - 无需显式清理 - Unreal GC 自动处理销毁
- * - 预览窗口中，纹理以 ImageWidget 为 Outer，生命周期跟随 Widget
+ * - 纹理通过 AddToRoot() 防止 GC 回收（CreateBlueprint 深拷贝时 Transient Mips 会丢失）
+ * - 必须在适当时机调用 ReleaseTransientTextures() 释放 Root 引用
+ * - 模块卸载时自动调用 ReleaseTransientTextures()
  */
 class FProceduralShapeGenerator
 {
@@ -47,10 +46,16 @@ public:
 	 */
 	static UTexture2D* GenerateFromMaterialRef(const FString& MaterialRef, const TMap<FString, FString>& Properties, UObject* Outer = nullptr);
 
+	/** 释放所有通过 Generate* 创建的临时纹理的 Root 引用，允许 GC 回收 */
+	static void ReleaseTransientTextures();
+
 private:
 	/** 创建临时纹理 */
 	static UTexture2D* CreateTransientTexture(int32 Width, int32 Height, UObject* Outer);
 
 	/** 填充纹理数据 */
 	static void FillTextureData(UTexture2D* Texture, const TArray<FColor>& PixelData);
+
+	/** 追踪所有 AddToRoot 的临时纹理 */
+	static TArray<TWeakObjectPtr<UTexture2D>> RootedTextures;
 };

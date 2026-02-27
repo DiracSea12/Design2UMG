@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
 #pragma once
 
@@ -10,7 +10,7 @@
  * - /Game/... and /Engine/... paths are preserved
  * - http/https URLs are downloaded and imported as Texture2D assets
  */
-class FPenRemoteImageImporter
+class FDesignRemoteImageImporter
 {
 public:
 	/**
@@ -26,5 +26,7 @@ public:
 	 * @param OutTextureMap 输出：TexturePath(URL) → UTexture2D*
 	 */
 	static void ResolveTransientTextures(const FUMGWidgetNode& RootNode, TMap<FString, UTexture2D*>& OutTextureMap);
-};
 
+	/** 释放 ResolveTransientTextures 创建的临时纹理的 Root 引用 */
+	static void ReleaseTransientTextures(TMap<FString, UTexture2D*>& InOutTextureMap);
+};

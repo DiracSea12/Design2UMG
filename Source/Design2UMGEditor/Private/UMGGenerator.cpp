@@ -160,6 +160,10 @@ void FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP)
 
 	// 编译（此时 transient 纹理数据可能丢失，但渲染已完成）
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WBP);
+
+	// MarkBlueprintAsStructurallyModified 可能触发中间编译填充 GUID map，
+	// 清除后让 CompileBlueprint 走 IsEmpty() 分支从 widget tree 重建，避免 stale entry
+	WBP->WidgetVariableNameToGuidMap.Empty();
 	FKismetEditorUtilities::CompileBlueprint(WBP);
 
 	UPackage* Package = WBP->GetOutermost();

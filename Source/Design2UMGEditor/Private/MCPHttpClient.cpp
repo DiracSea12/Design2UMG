@@ -3,6 +3,7 @@
 #include "MCPHttpClient.h"
 #include "Design2UMGLog.h"
 
+#include <atomic>
 #include "HttpModule.h"
 #include "HttpManager.h"
 #include "Interfaces/IHttpRequest.h"
@@ -86,29 +87,32 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 	HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
 	HttpRequest->SetHeader(TEXT("Accept"), TEXT("text/event-stream"));
 	HttpRequest->SetContentAsString(RequestBody);
+	HttpRequest->SetTimeout(30.0f);
 
 	if (!SessionId.IsEmpty())
 		HttpRequest->SetHeader(TEXT("Mcp-Session-Id"), SessionId);
 
-	// 同步等待
-	bool bCompleted = false;
-	bool bSuccess = false;
+	// 同步等待 — 状态放堆上，防止 timeout/cancel 后回调写悬垂栈变量
+	struct FRequestState
+	{
+		std::atomic<bool> bCompleted{false};
+		bool bSuccess = false;
+		FString ResponseBody;
+		FString NewSessionId;
+	};
+	TSharedRef<FRequestState> State = MakeShared<FRequestState>();
 
 	HttpRequest->OnProcessRequestComplete().BindLambda(
-		[&](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnectedSuccessfully)
+		[State, Method](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnectedSuccessfully)
 		{
 			if (bConnectedSuccessfully && Response.IsValid())
 			{
 				const int32 Code = Response->GetResponseCode();
 				if (Code >= 200 && Code < 300)
 				{
-					// 提取 Mcp-Session-Id（initialize 响应）
-					const FString NewSessionId = Response->GetHeader(TEXT("Mcp-Session-Id"));
-					if (!NewSessionId.IsEmpty())
-						SessionId = NewSessionId;
-
-					OutResponseBody = Response->GetContentAsString();
-					bSuccess = true;
+					State->NewSessionId = Response->GetHeader(TEXT("Mcp-Session-Id"));
+					State->ResponseBody = Response->GetContentAsString();
+					State->bSuccess = true;
 				}
 				else
 				{
@@ -119,10 +123,14 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 			{
 				UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: Connection failed for %s"), *Method);
 			}
-			bCompleted = true;
+			State->bCompleted.store(true);
 		});
 
-	HttpRequest->ProcessRequest();
+	if (!HttpRequest->ProcessRequest())
+	{
+		UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: ProcessRequest failed for %s"), *Method);
+		return false;
+	}
 
 	// 阻塞等待，同时显示进度条并 tick Slate 保持编辑器 UI 响应
 	const double StartTime = FPlatformTime::Seconds();
@@ -133,7 +141,7 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 		FText::FromString(FString::Printf(TEXT("Design2UMG: Waiting for MCP response (%s)..."), *Method)));
 	SlowTask.MakeDialog(true);
 
-	while (!bCompleted)
+	while (!State->bCompleted.load())
 	{
 		if (SlowTask.ShouldCancel())
 		{
@@ -157,7 +165,10 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 		FPlatformProcess::Sleep(0.01f);
 	}
 
-	return bSuccess;
+	if (!State->NewSessionId.IsEmpty())
+		SessionId = State->NewSessionId;
+	OutResponseBody = MoveTemp(State->ResponseBody);
+	return State->bSuccess;
 }
 
 bool FMCPHttpClient::ParseSSEResponse(const FString& SSEBody, TSharedPtr<FJsonObject>& OutResult)
@@ -189,7 +200,18 @@ bool FMCPHttpClient::ParseSSEResponse(const FString& SSEBody, TSharedPtr<FJsonOb
 		return false;
 
 	OutResult = RpcObj->GetObjectField(TEXT("result"));
-	return OutResult.IsValid();
+	if (!OutResult.IsValid())
+	{
+		const TSharedPtr<FJsonObject>* ErrObj = nullptr;
+		if (RpcObj->TryGetObjectField(TEXT("error"), ErrObj) && ErrObj)
+		{
+			int32 Code = (*ErrObj)->GetIntegerField(TEXT("code"));
+			FString Msg = (*ErrObj)->GetStringField(TEXT("message"));
+			UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: JSON-RPC error %d: %s"), Code, *Msg);
+		}
+		return false;
+	}
+	return true;
 }
 
 bool FMCPHttpClient::ExtractToolResult(const TSharedPtr<FJsonObject>& Result, FString& OutText)
@@ -271,6 +293,7 @@ void FMCPHttpClient::CallToolAsync(const FString& ToolName,
 	HttpRequest->SetHeader(TEXT("Accept"), TEXT("text/event-stream"));
 	HttpRequest->SetHeader(TEXT("Mcp-Session-Id"), SessionId);
 	HttpRequest->SetContentAsString(RequestBody);
+	HttpRequest->SetTimeout(30.0f);
 
 	HttpRequest->OnProcessRequestComplete().BindLambda(
 		[OnComplete, ToolName](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnected)
@@ -302,5 +325,10 @@ void FMCPHttpClient::CallToolAsync(const FString& ToolName,
 			}
 		});
 
-	HttpRequest->ProcessRequest();
+	if (!HttpRequest->ProcessRequest())
+	{
+		UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: ProcessRequest failed for %s"), *ToolName);
+		if (OnComplete)
+			OnComplete(false, TEXT(""));
+	}
 }

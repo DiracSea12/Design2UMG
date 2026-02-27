@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "PenSchema.generated.h"
+#include "DesignSchema.generated.h"
 
 /**
  * .pen 节点类型枚举
@@ -534,7 +534,7 @@ struct FPenEffect
 /**
  * .pen 节点结构
  */
-struct FPenNode
+struct FDesignNode
 {
 	// 基础属性
 	FString Id;
@@ -610,10 +610,10 @@ struct FPenNode
 	// 组件引用属性
 	FString Ref;
 	bool bReusable = false;
-	TMap<FString, TSharedPtr<FPenNode>> Descendants;
+	TMap<FString, TSharedPtr<FDesignNode>> Descendants;
 
 	// 子节点
-	TArray<TSharedPtr<FPenNode>> Children;
+	TArray<TSharedPtr<FDesignNode>> Children;
 
 	// 辅助方法
 	bool IsContainer() const
@@ -652,23 +652,23 @@ struct FPenFont
 /**
  * .pen 文档结构
  */
-struct FPenDocument
+struct FDesignDocument
 {
 	FString Version;
 	TArray<FPenFont> Fonts;
 	TMap<FString, TArray<FString>> Themes;  // 主题轴定义
 	TMap<FString, FPenVariable> Variables;
-	TArray<TSharedPtr<FPenNode>> Children;
+	TArray<TSharedPtr<FDesignNode>> Children;
 
 	// 查找可复用组件
-	TSharedPtr<FPenNode> FindReusableNode(const FString& Id) const
+	TSharedPtr<FDesignNode> FindReusableNode(const FString& Id) const
 	{
 		return FindNodeRecursive(Children, Id, true);
 	}
 
 private:
-	static TSharedPtr<FPenNode> FindNodeRecursive(
-		const TArray<TSharedPtr<FPenNode>>& Nodes,
+	static TSharedPtr<FDesignNode> FindNodeRecursive(
+		const TArray<TSharedPtr<FDesignNode>>& Nodes,
 		const FString& Id,
 		bool bReusableOnly)
 	{

@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
 #include "UMGWidgetUtils.h"
 #include "Design2UMGLog.h"
@@ -410,11 +410,12 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 			// 其他容器（VerticalBox/HorizontalBox/Overlay）使用原始Slot数据
 			FUMGSlotData SlotData = Node.Slot;
 			UCanvasPanel* CanvasParent = Cast<UCanvasPanel>(ParentWidget);
+			const bool bIsRootCanvasParent = CanvasParent && (WidgetTree && WidgetTree->RootWidget == ParentWidget);
 			UE_LOG(LogDesign2UMG, Verbose, TEXT("CreateWidget: '%s' parent=%s slot_path=%s bounds=(%.1f,%.1f,%.1f,%.1f)"),
 				*Node.Name, *ParentWidget->GetClass()->GetName(),
-				CanvasParent ? TEXT("LayoutCalc") : TEXT("Direct"),
+				bIsRootCanvasParent ? TEXT("LayoutCalc") : TEXT("Direct"),
 				Node.Bounds.X, Node.Bounds.Y, Node.Bounds.W, Node.Bounds.H);
-			if (CanvasParent && Node.Bounds.W > 0.0f && Node.Bounds.H > 0.0f)
+			if (bIsRootCanvasParent && Node.Bounds.W > 0.0f && Node.Bounds.H > 0.0f)
 			{
 				FLayoutContext Context;
 				Context.DesignSize = FUMGWidgetUtils::EffectiveDesignSize;
@@ -441,6 +442,14 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 				SlotData = FLayoutCalculator::CalculateSlot(NormalizedBounds, Context);
 				SlotData.bAutoSize = bOrigAutoSize;
 			}
+			UE_LOG(LogDesign2UMG, Verbose,
+				TEXT("CreateWidgetSlot: '%s' anc=(%.2f,%.2f)-(%.2f,%.2f) off=(%.1f,%.1f,%.1f,%.1f) align=(%.2f,%.2f) auto=%d"),
+				*Node.Name,
+				SlotData.Anchors.Min.X, SlotData.Anchors.Min.Y,
+				SlotData.Anchors.Max.X, SlotData.Anchors.Max.Y,
+				SlotData.Offsets.Left, SlotData.Offsets.Top, SlotData.Offsets.Right, SlotData.Offsets.Bottom,
+				SlotData.Alignment.X, SlotData.Alignment.Y,
+				SlotData.bAutoSize ? 1 : 0);
 			ApplySlotProperties(Slot, SlotData);
 		}
 	}
@@ -739,6 +748,8 @@ void FUMGWidgetUtils::ApplyFixer(FUMGWidgetNode& RootNode, const FIntPoint& Desi
 	// 初始化Fixer预设
 	FFixerPreset Preset;
 	FLayoutFixer::Initialize(DesignSize, Preset);
+	// 设计稿导入强调“还原优先”，禁止自动越界裁剪，否则会把本应越界显示的区域压扁。
+	Preset.bEnableOverflowFix = false;
 
 	// 转换为Fixer节点
 	FFixerWidgetNode FixerRoot;

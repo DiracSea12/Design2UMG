@@ -67,6 +67,8 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeSlot(const FUMGSlotData& Sl
 		J->SetNumberField(TEXT("RowSpan"), Slot.RowSpan);
 	if (Slot.ColumnSpan != 1)
 		J->SetNumberField(TEXT("ColumnSpan"), Slot.ColumnSpan);
+	if (Slot.bAutoSize)
+		J->SetBoolField(TEXT("bAutoSize"), true);
 
 	return J;
 }
@@ -87,8 +89,7 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeWidgetNode(const FUMGWidget
 	J->SetStringField(TEXT("Type"), Node.Type);
 	if (!Node.Id.IsEmpty())
 		J->SetStringField(TEXT("Id"), Node.Id);
-	if (!Node.Name.IsEmpty())
-		J->SetStringField(TEXT("Name"), Node.Name);
+	J->SetStringField(TEXT("Name"), Node.Name);
 
 	const bool bHasBounds =
 		!FMath::IsNearlyZero(Node.Bounds.X) || !FMath::IsNearlyZero(Node.Bounds.Y) ||
@@ -104,6 +105,35 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeWidgetNode(const FUMGWidget
 		for (const auto& Pair : Node.Properties)
 			Props->SetStringField(Pair.Key, Pair.Value);
 		J->SetObjectField(TEXT("Properties"), Props);
+	}
+
+	// TextStyle (v2.4)
+	if (Node.TextStyle.FontSize > 0 || Node.TextStyle.bHasLetterSpacing)
+	{
+		TSharedRef<FJsonObject> TS = MakeShared<FJsonObject>();
+		if (Node.TextStyle.FontSize > 0)
+			TS->SetNumberField(TEXT("FontSize"), Node.TextStyle.FontSize);
+		if (Node.TextStyle.bHasLetterSpacing)
+			TS->SetNumberField(TEXT("LetterSpacing"), Node.TextStyle.LetterSpacing);
+		J->SetObjectField(TEXT("TextStyle"), TS);
+	}
+
+	// Brush (v2.4)
+	{
+		const FUMGVisualBrushData& B = Node.Brush;
+		TSharedRef<FJsonObject> BJ = MakeShared<FJsonObject>();
+		bool bHasAny = false;
+		if (B.OutlineCornerRadius >= 0)    { BJ->SetNumberField(TEXT("OutlineCornerRadius"), B.OutlineCornerRadius); bHasAny = true; }
+		if (B.HasCornerRadii())            { BJ->SetStringField(TEXT("CornerRadii"), FString::Printf(TEXT("%.2f,%.2f,%.2f,%.2f"), B.CornerRadii.X, B.CornerRadii.Y, B.CornerRadii.Z, B.CornerRadii.W)); bHasAny = true; }
+		if (B.OutlineThickness > 0)        { BJ->SetNumberField(TEXT("OutlineThickness"), B.OutlineThickness); bHasAny = true; }
+		if (B.bHasDrawAs)                  { BJ->SetNumberField(TEXT("DrawAs"), (int32)B.DrawAs); bHasAny = true; }
+		if (B.bHasBrushColor)              { BJ->SetStringField(TEXT("BrushColor"), B.BrushColor.ToString()); bHasAny = true; }
+		if (B.bHasOutlineColor)            { BJ->SetStringField(TEXT("OutlineColor"), B.OutlineColor.ToString()); bHasAny = true; }
+		if (!B.MaterialRef.IsEmpty())      { BJ->SetStringField(TEXT("MaterialRef"), B.MaterialRef); bHasAny = true; }
+		if (!B.MaterialParams.IsEmpty())   { BJ->SetStringField(TEXT("MaterialParams"), B.MaterialParams); bHasAny = true; }
+		if (!B.TexturePath.IsEmpty())      { BJ->SetStringField(TEXT("TexturePath"), B.TexturePath); bHasAny = true; }
+		if (bHasAny)
+			J->SetObjectField(TEXT("Brush"), BJ);
 	}
 
 	if (Node.Children.Num() > 0)

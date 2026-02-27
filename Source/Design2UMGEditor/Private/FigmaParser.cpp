@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
 #include "FigmaParser.h"
 #include "Design2UMGLog.h"
@@ -52,6 +52,228 @@ static TSharedPtr<FJsonObject> ParseJsonString(const FString& Json)
 	auto Reader = TJsonReaderFactory<>::Create(Json);
 	FJsonSerializer::Deserialize(Reader, Root);
 	return Root;
+}
+
+static bool IsVisibleSolidBlackFill(const TSharedPtr<FJsonObject>& NodeObj)
+{
+	const auto* Fills = GetArr(NodeObj, TEXT("fills"));
+	if (!Fills || Fills->Num() == 0)
+		return false;
+
+	const TSharedPtr<FJsonObject> FillObj = (*Fills)[0]->AsObject();
+	if (!FillObj.IsValid() || !GetBool(FillObj, TEXT("visible"), true))
+		return false;
+	if (GetStr(FillObj, TEXT("type")) != TEXT("SOLID"))
+		return false;
+
+	const TSharedPtr<FJsonObject> ColorObj = GetObj(FillObj, TEXT("color"));
+	if (!ColorObj.IsValid())
+		return false;
+
+	const double R = GetNum(ColorObj, TEXT("r"), 1.0);
+	const double G = GetNum(ColorObj, TEXT("g"), 1.0);
+	const double B = GetNum(ColorObj, TEXT("b"), 1.0);
+	const double A = GetNum(ColorObj, TEXT("a"), 1.0);
+	return R <= 0.01 && G <= 0.01 && B <= 0.01 && A >= 0.99;
+}
+
+static bool HasSameBoundsAsParent(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj)
+{
+	const TSharedPtr<FJsonObject> ChildBBox = GetObj(NodeObj, TEXT("absoluteBoundingBox"));
+	const TSharedPtr<FJsonObject> ParentBBox = GetObj(ParentObj, TEXT("absoluteBoundingBox"));
+	if (!ChildBBox.IsValid() || !ParentBBox.IsValid())
+		return false;
+
+	const double CX = GetNum(ChildBBox, TEXT("x"));
+	const double CY = GetNum(ChildBBox, TEXT("y"));
+	const double CW = GetNum(ChildBBox, TEXT("width"));
+	const double CH = GetNum(ChildBBox, TEXT("height"));
+	const double PX = GetNum(ParentBBox, TEXT("x"));
+	const double PY = GetNum(ParentBBox, TEXT("y"));
+	const double PW = GetNum(ParentBBox, TEXT("width"));
+	const double PH = GetNum(ParentBBox, TEXT("height"));
+	return FMath::IsNearlyEqual(CX, PX, 0.5) &&
+		FMath::IsNearlyEqual(CY, PY, 0.5) &&
+		FMath::IsNearlyEqual(CW, PW, 0.5) &&
+		FMath::IsNearlyEqual(CH, PH, 0.5);
+}
+
+static FString NormalizeWindingRule(const FString& InRule)
+{
+	if (InRule.Equals(TEXT("EVENODD"), ESearchCase::IgnoreCase))
+		return TEXT("evenodd");
+	return TEXT("nonzero");
+}
+
+static bool ParseGeometryArray(
+	const TArray<TSharedPtr<FJsonValue>>* GeometryArr,
+	FString& OutPath,
+	FString& OutRule)
+{
+	if (!GeometryArr)
+		return false;
+
+	for (const TSharedPtr<FJsonValue>& GeometryVal : *GeometryArr)
+	{
+		const TSharedPtr<FJsonObject> GeometryObj = GeometryVal->AsObject();
+		if (!GeometryObj.IsValid())
+			continue;
+
+		const FString Path = GetStr(GeometryObj, TEXT("path"));
+		if (Path.IsEmpty())
+			continue;
+
+		OutPath = Path;
+		OutRule = GetStr(GeometryObj, TEXT("windingRule"));
+		return true;
+	}
+
+	return false;
+}
+
+struct FNodeBounds
+{
+	float X = 0.0f;
+	float Y = 0.0f;
+	float W = 0.0f;
+	float H = 0.0f;
+};
+
+static bool TryReadBounds(const TSharedPtr<FJsonObject>& BoundsObj, FNodeBounds& OutBounds)
+{
+	if (!BoundsObj.IsValid())
+	{
+		return false;
+	}
+
+	OutBounds.X = GetNum(BoundsObj, TEXT("x"));
+	OutBounds.Y = GetNum(BoundsObj, TEXT("y"));
+	OutBounds.W = GetNum(BoundsObj, TEXT("width"));
+	OutBounds.H = GetNum(BoundsObj, TEXT("height"));
+	return OutBounds.W > 0.0f && OutBounds.H > 0.0f;
+}
+
+static bool HasVisibleStroke(const TSharedPtr<FJsonObject>& NodeObj)
+{
+	const TArray<TSharedPtr<FJsonValue>>* Strokes = GetArr(NodeObj, TEXT("strokes"));
+	if (!Strokes || Strokes->Num() == 0)
+	{
+		return false;
+	}
+
+	for (const TSharedPtr<FJsonValue>& StrokeVal : *Strokes)
+	{
+		const TSharedPtr<FJsonObject> StrokeObj = StrokeVal->AsObject();
+		if (StrokeObj.IsValid() && GetBool(StrokeObj, TEXT("visible"), true))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+static void GetStrokeExpansion(const TSharedPtr<FJsonObject>& NodeObj, float& OutLeft, float& OutRight, float& OutTop, float& OutBottom)
+{
+	OutLeft = 0.0f;
+	OutRight = 0.0f;
+	OutTop = 0.0f;
+	OutBottom = 0.0f;
+
+	if (!HasVisibleStroke(NodeObj))
+	{
+		return;
+	}
+
+	float Left = 0.0f;
+	float Right = 0.0f;
+	float Top = 0.0f;
+	float Bottom = 0.0f;
+	const TSharedPtr<FJsonObject> IndividualWeights = GetObj(NodeObj, TEXT("individualStrokeWeights"));
+	if (IndividualWeights.IsValid())
+	{
+		Top = GetNum(IndividualWeights, TEXT("top"));
+		Right = GetNum(IndividualWeights, TEXT("right"));
+		Bottom = GetNum(IndividualWeights, TEXT("bottom"));
+		Left = GetNum(IndividualWeights, TEXT("left"));
+	}
+	else
+	{
+		const float Uniform = GetNum(NodeObj, TEXT("strokeWeight"));
+		Top = Uniform;
+		Right = Uniform;
+		Bottom = Uniform;
+		Left = Uniform;
+	}
+
+	const FString Align = GetStr(NodeObj, TEXT("strokeAlign"), TEXT("INSIDE"));
+	if (Align == TEXT("OUTSIDE"))
+	{
+		OutLeft = Left;
+		OutRight = Right;
+		OutTop = Top;
+		OutBottom = Bottom;
+	}
+	else if (Align == TEXT("CENTER"))
+	{
+		OutLeft = Left * 0.5f;
+		OutRight = Right * 0.5f;
+		OutTop = Top * 0.5f;
+		OutBottom = Bottom * 0.5f;
+	}
+}
+
+static bool TryGetVisualBounds(const TSharedPtr<FJsonObject>& NodeObj, FNodeBounds& OutBounds)
+{
+	if (!NodeObj.IsValid())
+	{
+		return false;
+	}
+
+	// Prefer Figma visual bounds when present (includes stroke/effects).
+	if (TryReadBounds(GetObj(NodeObj, TEXT("absoluteRenderBounds")), OutBounds))
+	{
+		return true;
+	}
+
+	if (!TryReadBounds(GetObj(NodeObj, TEXT("absoluteBoundingBox")), OutBounds))
+	{
+		return false;
+	}
+
+	// Local export may omit absoluteRenderBounds; expand bbox by stroke align as fallback.
+	float ExpandLeft = 0.0f;
+	float ExpandRight = 0.0f;
+	float ExpandTop = 0.0f;
+	float ExpandBottom = 0.0f;
+	GetStrokeExpansion(NodeObj, ExpandLeft, ExpandRight, ExpandTop, ExpandBottom);
+
+	OutBounds.X -= ExpandLeft;
+	OutBounds.Y -= ExpandTop;
+	OutBounds.W += ExpandLeft + ExpandRight;
+	OutBounds.H += ExpandTop + ExpandBottom;
+	return OutBounds.W > 0.0f && OutBounds.H > 0.0f;
+}
+
+static void ParsePathGeometry(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
+{
+	FString GeometryPath;
+	FString WindingRule;
+
+	// Prefer fillGeometry (visual fill shape). Fallback to strokeGeometry for stroke-only vectors/lines.
+	if (!ParseGeometryArray(GetArr(NodeObj, TEXT("fillGeometry")), GeometryPath, WindingRule))
+	{
+		ParseGeometryArray(GetArr(NodeObj, TEXT("strokeGeometry")), GeometryPath, WindingRule);
+	}
+
+	if (!GeometryPath.IsEmpty())
+	{
+		OutNode.Geometry = GeometryPath;
+		if (!WindingRule.IsEmpty())
+		{
+			OutNode.FillRule = NormalizeWindingRule(WindingRule);
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -116,7 +338,7 @@ FString FFigmaParser::ColorToHex(const TSharedPtr<FJsonObject>& ColorObj, float 
 // ParseLayout
 // ---------------------------------------------------------------------------
 
-void FFigmaParser::ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FPenNode& OutNode)
+void FFigmaParser::ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 {
 	FString Mode = GetStr(NodeObj, TEXT("layoutMode"));
 	if (Mode == TEXT("HORIZONTAL"))
@@ -151,18 +373,27 @@ void FFigmaParser::ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FPenNode&
 	else
 		OutNode.AlignItems = EPenAlignItems::Start;
 
-	OutNode.bClip = GetBool(NodeObj, TEXT("clipsContent"), false);
+	// Figma clipsContent 不映射 —— UMG 布局尺寸与 Figma 不一致，盲目裁剪会隐藏文字
 }
 
 // ---------------------------------------------------------------------------
 // ParseSize
 // ---------------------------------------------------------------------------
 
-void FFigmaParser::ParseSize(const TSharedPtr<FJsonObject>& NodeObj, FPenNode& OutNode, bool bParentHasAutoLayout)
+void FFigmaParser::ParseSize(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode, bool bParentHasAutoLayout)
 {
-	auto BBox = GetObj(NodeObj, TEXT("absoluteBoundingBox"));
-	float W = BBox ? GetNum(BBox, TEXT("width")) : 0.0f;
-	float H = BBox ? GetNum(BBox, TEXT("height")) : 0.0f;
+	FNodeBounds VisualBounds;
+	FNodeBounds LayoutBounds;
+	const bool bHasVisualBounds = TryGetVisualBounds(NodeObj, VisualBounds);
+	const bool bHasLayoutBounds = TryReadBounds(GetObj(NodeObj, TEXT("absoluteBoundingBox")), LayoutBounds);
+
+	// Auto layout should remain in layout space; absolute layout uses visual bounds.
+	const FNodeBounds& EffectiveBounds = bParentHasAutoLayout
+		? (bHasLayoutBounds ? LayoutBounds : VisualBounds)
+		: (bHasVisualBounds ? VisualBounds : LayoutBounds);
+
+	float W = EffectiveBounds.W;
+	float H = EffectiveBounds.H;
 
 	if (bParentHasAutoLayout)
 	{
@@ -218,7 +449,7 @@ FPenFill FFigmaParser::ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)
 
 		if (FillType == TEXT("GRADIENT_LINEAR"))
 			Result.Gradient.GradientType = EPenGradientType::Linear;
-		else if (FillType == TEXT("GRADIENT_RADIAL"))
+		else if (FillType == TEXT("GRADIENT_RADIAL") || FillType == TEXT("GRADIENT_DIAMOND"))
 			Result.Gradient.GradientType = EPenGradientType::Radial;
 		else
 			Result.Gradient.GradientType = EPenGradientType::Angular;
@@ -465,7 +696,7 @@ TArray<FPenEffect> FFigmaParser::ParseEffects(const TArray<TSharedPtr<FJsonValue
 // ParseTextProperties
 // ---------------------------------------------------------------------------
 
-void FFigmaParser::ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, FPenNode& OutNode)
+void FFigmaParser::ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 {
 	OutNode.Content = GetStr(NodeObj, TEXT("characters"));
 
@@ -485,7 +716,29 @@ void FFigmaParser::ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, F
 
 	FString LineHeightUnit = GetStr(Style, TEXT("lineHeightUnit"));
 	if (LineHeightUnit != TEXT("AUTO"))
-		OutNode.LineHeight = GetNum(Style, TEXT("lineHeightPx"));
+	{
+		// UMG TextBlock::LineHeightPercentage expects a ratio (e.g. 1.2),
+		// while Figma provides px or percent-based values.
+		if (LineHeightUnit == TEXT("PIXELS"))
+		{
+			const float LineHeightPx = GetNum(Style, TEXT("lineHeightPx"));
+			if (LineHeightPx > 0.0f && OutNode.FontSize > 0.0f)
+				OutNode.LineHeight = LineHeightPx / OutNode.FontSize;
+		}
+		else if (LineHeightUnit == TEXT("FONT_SIZE_%"))
+		{
+			const float Percent = GetNum(Style, TEXT("lineHeightPercentFontSize"));
+			if (Percent > 0.0f)
+				OutNode.LineHeight = Percent / 100.0f;
+		}
+		else
+		{
+			// Fallback for less common payloads.
+			const float Percent = GetNum(Style, TEXT("lineHeightPercentFontSize"));
+			if (Percent > 0.0f)
+				OutNode.LineHeight = Percent / 100.0f;
+		}
+	}
 
 	OutNode.LetterSpacing = GetNum(Style, TEXT("letterSpacing"));
 
@@ -507,8 +760,12 @@ void FFigmaParser::ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, F
 	else
 		OutNode.TextAlignVertical = EPenTextAlignVertical::Top;
 
-	// textAutoResize → TextGrowth
-	FString AutoResize = GetStr(NodeObj, TEXT("textAutoResize"), TEXT("NONE"));
+	// textAutoResize can appear on node root or inside style (nodes API payload).
+	FString AutoResize = GetStr(NodeObj, TEXT("textAutoResize"));
+	if (AutoResize.IsEmpty())
+	{
+		AutoResize = GetStr(Style, TEXT("textAutoResize"), TEXT("NONE"));
+	}
 	if (AutoResize == TEXT("WIDTH_AND_HEIGHT"))
 		OutNode.TextGrowth = EPenTextGrowth::Auto;
 	else if (AutoResize == TEXT("HEIGHT"))
@@ -521,7 +778,7 @@ void FFigmaParser::ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, F
 // ParsePosition
 // ---------------------------------------------------------------------------
 
-void FFigmaParser::ParsePosition(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj, FPenNode& OutNode, bool bParentHasAutoLayout)
+void FFigmaParser::ParsePosition(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj, FDesignNode& OutNode, bool bParentHasAutoLayout)
 {
 	if (bParentHasAutoLayout)
 	{
@@ -530,20 +787,23 @@ void FFigmaParser::ParsePosition(const TSharedPtr<FJsonObject>& NodeObj, const T
 		return;
 	}
 
-	auto ChildBBox = GetObj(NodeObj, TEXT("absoluteBoundingBox"));
-	auto ParentBBox = ParentObj ? GetObj(ParentObj, TEXT("absoluteBoundingBox")) : nullptr;
+	FNodeBounds ChildBounds;
+	const bool bHasChildBounds = TryGetVisualBounds(NodeObj, ChildBounds);
 
-	if (ChildBBox && ParentBBox)
+	FNodeBounds ParentBounds;
+	const bool bHasParentBounds = ParentObj && TryGetVisualBounds(ParentObj, ParentBounds);
+
+	if (bHasChildBounds && bHasParentBounds)
 	{
-		OutNode.X = GetNum(ChildBBox, TEXT("x")) - GetNum(ParentBBox, TEXT("x"));
-		OutNode.Y = GetNum(ChildBBox, TEXT("y")) - GetNum(ParentBBox, TEXT("y"));
+		OutNode.X = ChildBounds.X - ParentBounds.X;
+		OutNode.Y = ChildBounds.Y - ParentBounds.Y;
 		OutNode.bHasX = true;
 		OutNode.bHasY = true;
 	}
-	else if (ChildBBox)
+	else if (bHasChildBounds)
 	{
-		OutNode.X = GetNum(ChildBBox, TEXT("x"));
-		OutNode.Y = GetNum(ChildBBox, TEXT("y"));
+		OutNode.X = ChildBounds.X;
+		OutNode.Y = ChildBounds.Y;
 		OutNode.bHasX = true;
 		OutNode.bHasY = true;
 	}
@@ -553,14 +813,36 @@ void FFigmaParser::ParsePosition(const TSharedPtr<FJsonObject>& NodeObj, const T
 // ParseNode (recursive)
 // ---------------------------------------------------------------------------
 
-TSharedPtr<FPenNode> FFigmaParser::ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj)
+TSharedPtr<FDesignNode> FFigmaParser::ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj)
 {
 	if (!NodeObj) return nullptr;
 
 	FString FigmaType = GetStr(NodeObj, TEXT("type"));
 	if (FigmaType.IsEmpty()) return nullptr;
 
-	auto Node = MakeShared<FPenNode>();
+	// Figma mask 节点是裁剪几何，不应直接生成可视控件。
+	const bool bIsMaskNode = GetBool(NodeObj, TEXT("isMask"), false) || !GetStr(NodeObj, TEXT("maskType")).IsEmpty();
+	if (bIsMaskNode)
+	{
+		return nullptr;
+	}
+
+	// 本地导出数据可能丢失 isMask 字段：对典型“黑色同尺寸遮罩矩形”做保守兜底。
+	if (ParentObj &&
+		FigmaType == TEXT("RECTANGLE") &&
+		GetStr(NodeObj, TEXT("name")) == TEXT("Rectangle") &&
+		IsVisibleSolidBlackFill(NodeObj) &&
+		HasSameBoundsAsParent(NodeObj, ParentObj))
+	{
+		const bool bParentClips = GetBool(ParentObj, TEXT("clipsContent"), false);
+		const bool bParentGroup = (GetStr(ParentObj, TEXT("type")) == TEXT("GROUP"));
+		if (bParentClips || bParentGroup)
+		{
+			return nullptr;
+		}
+	}
+
+	auto Node = MakeShared<FDesignNode>();
 	Node->Id = GetStr(NodeObj, TEXT("id"));
 	Node->Name = GetStr(NodeObj, TEXT("name"));
 	Node->bEnabled = GetBool(NodeObj, TEXT("visible"), true);
@@ -634,6 +916,15 @@ TSharedPtr<FPenNode> FFigmaParser::ParseNode(const TSharedPtr<FJsonObject>& Node
 	// Stroke
 	Node->Stroke = ParseStroke(NodeObj);
 
+	// Vector geometry (for VECTOR / BOOLEAN_OPERATION / LINE / etc.)
+	if (Node->Type == EPenNodeType::Path
+		|| Node->Type == EPenNodeType::Line
+		|| Node->Type == EPenNodeType::Polygon
+		|| Node->Type == EPenNodeType::Ellipse)
+	{
+		ParsePathGeometry(NodeObj, *Node);
+	}
+
 	// Corner radius
 	Node->CornerRadius = ParseCornerRadius(NodeObj);
 
@@ -646,15 +937,18 @@ TSharedPtr<FPenNode> FFigmaParser::ParseNode(const TSharedPtr<FJsonObject>& Node
 	if (Node->Type == EPenNodeType::Text)
 		ParseTextProperties(NodeObj, *Node);
 
-	// Children
-	const auto* ChildrenArr = GetArr(NodeObj, TEXT("children"));
-	if (ChildrenArr)
+	// Children — skip for BOOLEAN_OPERATION/VECTOR (operands, not visual children)
+	if (FigmaType != TEXT("BOOLEAN_OPERATION") && FigmaType != TEXT("VECTOR"))
 	{
-		for (const auto& ChildVal : *ChildrenArr)
+		const auto* ChildrenArr = GetArr(NodeObj, TEXT("children"));
+		if (ChildrenArr)
 		{
-			auto ChildObj = ChildVal->AsObject();
-			if (auto ChildNode = ParseNode(ChildObj, NodeObj))
-				Node->Children.Add(ChildNode);
+			for (const auto& ChildVal : *ChildrenArr)
+			{
+				auto ChildObj = ChildVal->AsObject();
+				if (auto ChildNode = ParseNode(ChildObj, NodeObj))
+					Node->Children.Add(ChildNode);
+			}
 		}
 	}
 
@@ -665,7 +959,7 @@ TSharedPtr<FPenNode> FFigmaParser::ParseNode(const TSharedPtr<FJsonObject>& Node
 // ParseDocument
 // ---------------------------------------------------------------------------
 
-bool FFigmaParser::ParseDocument(const FString& FigmaJson, FPenDocument& OutDocument)
+bool FFigmaParser::ParseDocument(const FString& FigmaJson, FDesignDocument& OutDocument)
 {
 	auto Root = ParseJsonString(FigmaJson);
 	if (!Root)
@@ -677,32 +971,76 @@ bool FFigmaParser::ParseDocument(const FString& FigmaJson, FPenDocument& OutDocu
 	auto DocObj = GetObj(Root, TEXT("document"));
 	if (!DocObj)
 	{
+		// Fallback: Figma nodes API payload (e.g. /v1/files/{key}/nodes?...),
+		// structure is usually Root.nodes["node-id"].document.
+		const TSharedPtr<FJsonObject> NodesObj = GetObj(Root, TEXT("nodes"));
+		if (NodesObj.IsValid())
+		{
+			for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : NodesObj->Values)
+			{
+				const TSharedPtr<FJsonObject> NodeEntry = Pair.Value.IsValid() ? Pair.Value->AsObject() : nullptr;
+				if (!NodeEntry.IsValid())
+					continue;
+
+				DocObj = GetObj(NodeEntry, TEXT("document"));
+				if (DocObj.IsValid())
+					break;
+			}
+		}
+	}
+
+	if (!DocObj)
+	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("FigmaParser: Missing 'document' field"));
 		return false;
 	}
 
-	// Flatten: collect top-level frames from all pages
-	const auto* Pages = GetArr(DocObj, TEXT("children"));
-	if (!Pages)
+	const FString DocType = GetStr(DocObj, TEXT("type"));
+
+	// Standard file payload: DOCUMENT -> pages -> frames.
+	if (DocType == TEXT("DOCUMENT"))
 	{
-		UE_LOG(LogDesign2UMG, Warning, TEXT("FigmaParser: No pages found"));
-		return true;
-	}
-
-	for (const auto& PageVal : *Pages)
-	{
-		auto PageObj = PageVal->AsObject();
-		if (!PageObj) continue;
-
-		const auto* Frames = GetArr(PageObj, TEXT("children"));
-		if (!Frames) continue;
-
-		for (const auto& FrameVal : *Frames)
+		const auto* Pages = GetArr(DocObj, TEXT("children"));
+		if (!Pages)
 		{
-			auto FrameObj = FrameVal->AsObject();
-			if (auto Node = ParseNode(FrameObj, nullptr))
-				OutDocument.Children.Add(Node);
+			UE_LOG(LogDesign2UMG, Warning, TEXT("FigmaParser: No pages found"));
+			return true;
 		}
+
+		for (const auto& PageVal : *Pages)
+		{
+			auto PageObj = PageVal->AsObject();
+			if (!PageObj) continue;
+
+			const auto* Frames = GetArr(PageObj, TEXT("children"));
+			if (!Frames) continue;
+
+			for (const auto& FrameVal : *Frames)
+			{
+				auto FrameObj = FrameVal->AsObject();
+				if (auto Node = ParseNode(FrameObj, nullptr))
+					OutDocument.Children.Add(Node);
+			}
+		}
+	}
+	// Nodes API may directly return FRAME / CANVAS / COMPONENT roots.
+	else if (DocType == TEXT("CANVAS"))
+	{
+		const auto* Frames = GetArr(DocObj, TEXT("children"));
+		if (Frames)
+		{
+			for (const auto& FrameVal : *Frames)
+			{
+				auto FrameObj = FrameVal->AsObject();
+				if (auto Node = ParseNode(FrameObj, nullptr))
+					OutDocument.Children.Add(Node);
+			}
+		}
+	}
+	else
+	{
+		if (auto Node = ParseNode(DocObj, nullptr))
+			OutDocument.Children.Add(Node);
 	}
 
 	UE_LOG(LogDesign2UMG, Log, TEXT("FigmaParser: Parsed %d top-level frames"), OutDocument.Children.Num());
@@ -740,12 +1078,12 @@ bool FFigmaParser::ExtractFileKey(const FString& UrlOrKey, FString& OutKey)
 // CollectImageRefs / ApplyImageUrls
 // ---------------------------------------------------------------------------
 
-void FFigmaParser::CollectImageRefs(const FPenDocument& Document, TSet<FString>& OutImageRefs)
+void FFigmaParser::CollectImageRefs(const FDesignDocument& Document, TSet<FString>& OutImageRefs)
 {
 	CollectImageRefsRecursive(Document.Children, OutImageRefs);
 }
 
-void FFigmaParser::CollectImageRefsRecursive(const TArray<TSharedPtr<FPenNode>>& Nodes, TSet<FString>& OutRefs)
+void FFigmaParser::CollectImageRefsRecursive(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSet<FString>& OutRefs)
 {
 	for (const auto& Node : Nodes)
 	{
@@ -763,12 +1101,12 @@ void FFigmaParser::CollectImageRefsRecursive(const TArray<TSharedPtr<FPenNode>>&
 	}
 }
 
-void FFigmaParser::ApplyImageUrls(FPenDocument& Document, const TMap<FString, FString>& ImageRefToUrl)
+void FFigmaParser::ApplyImageUrls(FDesignDocument& Document, const TMap<FString, FString>& ImageRefToUrl)
 {
 	ApplyImageUrlsRecursive(Document.Children, ImageRefToUrl);
 }
 
-void FFigmaParser::ApplyImageUrlsRecursive(TArray<TSharedPtr<FPenNode>>& Nodes, const TMap<FString, FString>& Map)
+void FFigmaParser::ApplyImageUrlsRecursive(TArray<TSharedPtr<FDesignNode>>& Nodes, const TMap<FString, FString>& Map)
 {
 	for (auto& Node : Nodes)
 	{

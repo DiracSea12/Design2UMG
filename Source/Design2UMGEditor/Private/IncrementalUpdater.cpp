@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
 #include "IncrementalUpdater.h"
+#include "Design2UMGLog.h"
 #include "UMGWidgetUtils.h"
 #include "Blueprint/WidgetTree.h"
 #include "WidgetBlueprint.h"
@@ -72,6 +73,13 @@ bool IsNodeModified(const FUMGWidgetNode& Node, UWidget* Widget)
 	FName Expected = FUMGWidgetUtils::SanitizeWidgetName(Node.Name, Node.Type);
 	if (Widget->GetFName() != Expected)
 		return true;
+
+	// Children count change — 捕获结构性变更
+	if (UPanelWidget* Panel = Cast<UPanelWidget>(Widget))
+	{
+		if (Node.Children.Num() != Panel->GetChildrenCount())
+			return true;
+	}
 
 	return false;
 }
@@ -153,6 +161,8 @@ bool FIncrementalUpdater::ShowDiffPreviewDialog(FDiffResult& InOutDiff)
 				SNew(SCheckBox)
 				.IsChecked_Lambda([DiffPtr, i]() { return DiffPtr->Entries[i].bAccepted ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
 				.OnCheckStateChanged_Lambda([DiffPtr, i](ECheckBoxState State) { DiffPtr->Entries[i].bAccepted = (State == ECheckBoxState::Checked); })
+				// Removed 条目无法通过新树过滤来保留旧节点，禁用复选框
+				.IsEnabled(Entry.Action != EDiffAction::Removed)
 			]
 			+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(4.0f, 2.0f).VAlign(VAlign_Center)
 			[
@@ -215,12 +225,22 @@ bool FIncrementalUpdater::ShowDiffPreviewDialog(FDiffResult& InOutDiff)
 
 FUMGWidgetNode FIncrementalUpdater::FilterByAccepted(const FUMGWidgetNode& Root, const FDiffResult& Diff)
 {
-	// Build set of rejected node IDs
+	// Build set of rejected node IDs (Added/Modified only)
+	// Removed 条目的 NodeId 不存在于新树中，过滤无效，跳过并警告
 	TSet<FString> RejectedIds;
 	for (const auto& E : Diff.Entries)
 	{
 		if (!E.bAccepted)
+		{
+			if (E.Action == EDiffAction::Removed)
+			{
+				UE_LOG(LogDesign2UMG, Warning,
+					TEXT("IncrementalUpdater: Cannot preserve removed node '%s' (%s) — not present in new design"),
+					*E.NodeName, *E.NodeId);
+				continue;
+			}
 			RejectedIds.Add(E.NodeId);
+		}
 	}
 
 	if (RejectedIds.Num() == 0)

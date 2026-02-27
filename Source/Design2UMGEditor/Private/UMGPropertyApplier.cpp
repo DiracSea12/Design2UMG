@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
 #include "UMGWidgetUtils.h"
 #include "Design2UMGLog.h"
@@ -112,8 +112,7 @@ namespace
 		if (const FString* V = GET_PROP("FontSize"))
 		{
 			const float DisplaySize = FCString::Atof(**V);
-			const float FontDPI = static_cast<float>(GetDefault<UUserInterfaceSettings>()->GetFontDisplayDPI());
-			FontInfo.Size = FMath::GridSnap(DisplaySize * FontDPI / static_cast<float>(FontConstants::RenderDPI), 0.01f);
+			FontInfo.Size = FMath::Max(1, FMath::RoundToInt(DisplaySize));
 			bFontChanged = true;
 		}
 		if (const FString* V = GET_PROP("FontFamily"))
@@ -201,7 +200,7 @@ namespace
 			int32 PW = FMath::Max(1, P.Contains(TEXT("WidthOverride")) ? FCString::Atoi(*P[TEXT("WidthOverride")]) : 64);
 			int32 PH = FMath::Max(1, P.Contains(TEXT("HeightOverride")) ? FCString::Atoi(*P[TEXT("HeightOverride")]) : 64);
 
-			if (UTexture2D* Tex = FPenPathRasterizer::Rasterize(*Geom, PW, PH, PathColor, FillRuleStr, I))
+			if (UTexture2D* Tex = FPenPathRasterizer::Rasterize(*Geom, PW, PH, PathColor, FillRuleStr))
 			{
 				I->SetBrushFromTexture(Tex);
 				I->SetDesiredSizeOverride(FVector2D(PW, PH));
@@ -879,8 +878,7 @@ void FUMGWidgetUtils::ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNod
 
 			if (TS.FontSize > 0)
 			{
-				const float FontDPI = static_cast<float>(GetDefault<UUserInterfaceSettings>()->GetFontDisplayDPI());
-				FontInfo.Size = FMath::GridSnap(TS.FontSize * FontDPI / static_cast<float>(FontConstants::RenderDPI), 0.01f);
+				FontInfo.Size = FMath::Max(1, FMath::RoundToInt(TS.FontSize));
 				bFontChanged = true;
 			}
 

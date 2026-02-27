@@ -75,7 +75,7 @@ namespace
 	}
 }
 
-bool FPenParser::ParseFromFile(const FString& FilePath, FPenDocument& OutDocument)
+bool FPenParser::ParseFromFile(const FString& FilePath, FDesignDocument& OutDocument)
 {
 	FString JsonString;
 	if (!FFileHelper::LoadFileToString(JsonString, *FilePath))
@@ -87,7 +87,7 @@ bool FPenParser::ParseFromFile(const FString& FilePath, FPenDocument& OutDocumen
 	return ParseDocument(JsonString, OutDocument);
 }
 
-bool FPenParser::ParseDocument(const FString& JsonString, FPenDocument& OutDocument)
+bool FPenParser::ParseDocument(const FString& JsonString, FDesignDocument& OutDocument)
 {
 	TSharedPtr<FJsonObject> JsonObj;
 	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonString);
@@ -100,7 +100,7 @@ bool FPenParser::ParseDocument(const FString& JsonString, FPenDocument& OutDocum
 	return ParseDocumentInternal(JsonObj, OutDocument);
 }
 
-bool FPenParser::ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FPenDocument& OutDocument)
+bool FPenParser::ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FDesignDocument& OutDocument)
 {
 	if (!JsonObj.IsValid())
 	{
@@ -140,6 +140,8 @@ bool FPenParser::ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, F
 		const TSharedPtr<FJsonObject>& ThemesObj = ThemesField->AsObject();
 		for (const auto& Pair : ThemesObj->Values)
 		{
+			if (Pair.Value->Type != EJson::Array)
+				continue;
 			TArray<FString> Values;
 			const TArray<TSharedPtr<FJsonValue>>& Arr = Pair.Value->AsArray();
 			for (const auto& Val : Arr)
@@ -257,12 +259,12 @@ void FPenParser::ParseVariables(const TSharedPtr<FJsonObject>& JsonObj, TMap<FSt
 	}
 }
 
-TSharedPtr<FPenNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const FPenVariableResolver& Resolver)
+TSharedPtr<FDesignNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const FPenVariableResolver& Resolver)
 {
 	if (!JsonObj.IsValid())
 		return nullptr;
 
-	TSharedPtr<FPenNode> Node = MakeShared<FPenNode>();
+	TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
 
 	// 基础属性
 	if (!JsonObj->TryGetStringField(TEXT("id"), Node->Id))
@@ -420,7 +422,7 @@ TSharedPtr<FPenNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonOb
 	return Node;
 }
 
-void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TSharedPtr<FPenNode>& Node, const FPenVariableResolver& Resolver)
+void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TSharedPtr<FDesignNode>& Node, const FPenVariableResolver& Resolver)
 {
 	// 文本属性
 	JsonObj->TryGetStringField(TEXT("content"), Node->Content);
@@ -548,7 +550,7 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 			}
 
 			// 属性覆盖模式
-			TSharedPtr<FPenNode> DescNode = MakeShared<FPenNode>();
+			TSharedPtr<FDesignNode> DescNode = MakeShared<FDesignNode>();
 			DescNode->FontSize = 0.0f;
 			DescNode->FontWeight = TEXT("");
 
@@ -685,9 +687,12 @@ FPenSize FPenParser::ParseSize(const TSharedPtr<FJsonValue>& Value, EPenNodeType
 			int32 Start = Str.Find(TEXT("("));
 			if (Start != INDEX_NONE)
 			{
-				int32 End = Str.Find(TEXT(")"));
-				FString NumStr = Str.Mid(Start + 1, End - Start - 1);
-				Fallback = FCString::Atof(*NumStr);
+				int32 End = Str.Find(TEXT(")"), ESearchCase::IgnoreCase, ESearchDir::FromStart, Start + 1);
+				if (End != INDEX_NONE)
+				{
+					FString NumStr = Str.Mid(Start + 1, End - Start - 1);
+					Fallback = FCString::Atof(*NumStr);
+				}
 			}
 			return FPenSize::Fill(Fallback);
 		}
@@ -699,9 +704,12 @@ FPenSize FPenParser::ParseSize(const TSharedPtr<FJsonValue>& Value, EPenNodeType
 			int32 Start = Str.Find(TEXT("("));
 			if (Start != INDEX_NONE)
 			{
-				int32 End = Str.Find(TEXT(")"));
-				FString NumStr = Str.Mid(Start + 1, End - Start - 1);
-				Min = FCString::Atof(*NumStr);
+				int32 End = Str.Find(TEXT(")"), ESearchCase::IgnoreCase, ESearchDir::FromStart, Start + 1);
+				if (End != INDEX_NONE)
+				{
+					FString NumStr = Str.Mid(Start + 1, End - Start - 1);
+					Min = FCString::Atof(*NumStr);
+				}
 			}
 			return FPenSize::Fit(Min);
 		}
@@ -988,7 +996,7 @@ EPenTextGrowth FPenParser::ParseTextGrowth(const FString& S)
 	return EPenTextGrowth::Auto;
 }
 
-TArray<FPenFrameInfo> ExtractTopFrames(const FPenDocument& Document)
+TArray<FPenFrameInfo> ExtractTopFrames(const FDesignDocument& Document)
 {
 	TArray<FPenFrameInfo> Result;
 	for (const auto& Child : Document.Children)

@@ -1,13 +1,13 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
 #include "Design2UMGConverter.h"
 #include "PenTypeMapper.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
 #include "FontResolver.h"
-#include "PenLayoutMapper.h"
-#include "PenVisualMapper.h"
-#include "PenRefExpander.h"
+#include "LayoutMapper.h"
+#include "VisualMapper.h"
+#include "RefExpander.h"
 
 namespace
 {
@@ -63,9 +63,43 @@ namespace
 			|| Type == EPenNodeType::Context;
 	}
 
+	bool HasVisibleFill(const FPenFill& Fill)
+	{
+		return Fill.bEnabled && Fill.Type != EPenFillType::None;
+	}
+
+	bool HasRenderableVisual(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid())
+			return false;
+
+		if (Node->Type == EPenNodeType::Text || Node->Type == EPenNodeType::IconFont)
+			return true;
+
+		if (HasVisibleFill(Node->Fill))
+			return true;
+
+		for (const FPenFill& Fill : Node->Fills)
+		{
+			if (HasVisibleFill(Fill))
+				return true;
+		}
+
+		if (Node->Stroke.HasStroke())
+			return true;
+
+		for (const FPenEffect& Effect : Node->Effects)
+		{
+			if (Effect.bEnabled)
+				return true;
+		}
+
+		return false;
+	}
+
 	struct FChildSizeSnapshot
 	{
-		TSharedPtr<FPenNode> Child;
+		TSharedPtr<FDesignNode> Child;
 		FPenSize RawWidth;
 		FPenSize RawHeight;
 		FPenSize EffectiveWidth;
@@ -73,7 +107,7 @@ namespace
 		bool bUsedExpandedRef = false;
 	};
 
-	FChildSizeSnapshot BuildChildSizeSnapshot(const TSharedPtr<FPenNode>& Child, const FPenDocument& Doc)
+	FChildSizeSnapshot BuildChildSizeSnapshot(const TSharedPtr<FDesignNode>& Child, const FDesignDocument& Doc)
 	{
 		FChildSizeSnapshot Snapshot;
 		Snapshot.Child = Child;
@@ -87,7 +121,7 @@ namespace
 
 		if (Child->Type == EPenNodeType::Ref)
 		{
-			if (auto Expanded = FPenRefExpander::ExpandRef(Child, Doc))
+			if (auto Expanded = FRefExpander::ExpandRef(Child, Doc))
 			{
 				Snapshot.bUsedExpandedRef = true;
 				if (!Child->bHasWidth)
@@ -99,17 +133,28 @@ namespace
 		return Snapshot;
 	}
 
-	bool ShouldSkipNode(const TSharedPtr<FPenNode>& Node)
+	bool ShouldSkipNode(const TSharedPtr<FDesignNode>& Node)
 	{
-		return !Node.IsValid() || !Node->bEnabled || IsDesignerOnlyNodeType(Node->Type);
+		if (!Node.IsValid() || !Node->bEnabled || IsDesignerOnlyNodeType(Node->Type))
+			return true;
+
+		// Ref 节点必须保留，后续展开后才有实际内容
+		if (Node->Type == EPenNodeType::Ref)
+			return false;
+
+		// Figma 常见”占位/遮罩辅助层”：无子节点且无可渲染视觉，避免 UMG Border 默认白底污染画面。
+		if (Node->Children.Num() == 0 && !HasRenderableVisual(Node))
+			return true;
+
+		return false;
 	}
 
 	/** Estimate a single node's size, handling leaf nodes (text, icon) via font metrics. */
-	FVector2D EstimateNodeSize(const TSharedPtr<FPenNode>& Node);
+	FVector2D EstimateNodeSize(const TSharedPtr<FDesignNode>& Node);
 
-	FVector2D EstimateContentSize(const TSharedPtr<FPenNode>& Node);
+	FVector2D EstimateContentSize(const TSharedPtr<FDesignNode>& Node);
 
-	FVector2D EstimateNodeSize(const TSharedPtr<FPenNode>& Node)
+	FVector2D EstimateNodeSize(const TSharedPtr<FDesignNode>& Node)
 	{
 		FRecursionGuard Guard(GEstimateDepth, TEXT("EstimateNodeSize"));
 		if (!Guard.bValid)
@@ -152,7 +197,7 @@ namespace
 	 * Estimate content size for a FitContent node by examining its children.
 	 * Returns (width, height) based on layout mode and children's known sizes.
 	 */
-	FVector2D EstimateContentSize(const TSharedPtr<FPenNode>& Node)
+	FVector2D EstimateContentSize(const TSharedPtr<FDesignNode>& Node)
 	{
 		FRecursionGuard Guard(GEstimateDepth, TEXT("EstimateContentSize"));
 		if (!Guard.bValid)
@@ -162,7 +207,7 @@ namespace
 		const float PadH = Node->Padding.Left + Node->Padding.Right;
 		const float PadV = Node->Padding.Top + Node->Padding.Bottom;
 
-		TArray<TSharedPtr<FPenNode>> Visible;
+		TArray<TSharedPtr<FDesignNode>> Visible;
 		for (const auto& C : Node->Children)
 		{
 			if (!ShouldSkipNode(C))
@@ -209,12 +254,18 @@ namespace
 	}
 }
 
-FUMGWidgetData FDesign2UMGConverter::Convert(const FPenDocument& Document)
+FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document)
 {
 	FUMGWidgetData Result;
 
-	// WidgetName 使用第一个非跳过 frame 的名称，fallback 到 WBP_FromPen
+	// 深拷贝 Children，避免通过 TSharedPtr 修改调用者的原始数据
+	TArray<TSharedPtr<FDesignNode>> Children;
+	Children.Reserve(Document.Children.Num());
 	for (const auto& Child : Document.Children)
+		Children.Add(FRefExpander::DeepCopyNode(Child));
+
+	// WidgetName 使用第一个非跳过 frame 的名称，fallback 到 WBP_FromPen
+	for (const auto& Child : Children)
 	{
 		if (!ShouldSkipNode(Child) && !Child->bReusable && !Child->Name.IsEmpty())
 		{
@@ -226,14 +277,14 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FPenDocument& Document)
 		Result.WidgetName = TEXT("WBP_FromPen");
 
 	// 预计算 FitContent 节点的实际尺寸（从子节点递归推算）
-	for (const auto& Child : Document.Children)
+	for (const auto& Child : Children)
 	{
 		if (!ShouldSkipNode(Child))
 			PreComputeFitContentSizes(Child, Document);
 	}
 
 	TArray<FUMGWidgetNode> RenderWidgets;
-	for (const auto& Child : Document.Children)
+	for (const auto& Child : Children)
 	{
 		if (ShouldSkipNode(Child) || Child->bReusable)
 			continue;
@@ -263,7 +314,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FPenDocument& Document)
 	return Result;
 }
 
-FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Node, const FPenDocument& Doc, const TMap<FString, FString>& ThemeContext, TArray<FString>* OutWarnings, EPenLayout ParentLayout)
+FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FDesignNode>& Node, const FDesignDocument& Doc, const TMap<FString, FString>& ThemeContext, TArray<FString>* OutWarnings, EPenLayout ParentLayout)
 {
 	FRecursionGuard Guard(GConvertNodeDepth, TEXT("ConvertNode"));
 	if (!Guard.bValid)
@@ -278,7 +329,7 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 
 	if (Node->Type == EPenNodeType::Ref)
 	{
-		auto Expanded = FPenRefExpander::ExpandRef(Node, Doc);
+		auto Expanded = FRefExpander::ExpandRef(Node, Doc);
 		if (!Expanded.IsValid())
 			return FUMGWidgetNode();
 
@@ -286,7 +337,7 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 		{
 			FPenVariableResolver Resolver(Doc.Variables);
 			Resolver.SetThemeContext(ActiveTheme);
-			FPenRefExpander::ReThemeNode(Expanded, Resolver);
+			FRefExpander::ReThemeNode(Expanded, Resolver);
 		}
 		return ConvertNode(Expanded, Doc, ActiveTheme, OutWarnings, ParentLayout);
 	}
@@ -314,7 +365,7 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 			float H = Node->Height.IsFixed() ? Node->Height.Value : 0.0f;
 			// 有尺寸、有颜色填充、无描边 → 生成椭圆 SVG path，走栅格化
 			// 有描边时走 fallback（Border 支持 OutlineThickness，Image 不支持）
-			bool bHasStroke = Node->Stroke.Fill.Type != EPenFillType::None;
+			bool bHasStroke = Node->Stroke.HasStroke();
 			if (W > 0 && H > 0 && Node->Fill.IsColor() && Node->Fill.bEnabled && !bHasStroke)
 			{
 				float Rx = W / 2.0f, Ry = H / 2.0f;
@@ -332,7 +383,7 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 					FPenCornerRadius EllipseRadius;
 					EllipseRadius.bUniform = true;
 					EllipseRadius.Uniform = FMath::Min(W, H) / 2.0f;
-					FPenVisualMapper::ApplyRoundedCorner(Widget, EllipseRadius);
+					FVisualMapper::ApplyRoundedCorner(Widget, EllipseRadius);
 				}
 			}
 		}
@@ -349,10 +400,10 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 		break;
 	case EPenNodeType::Line:
 		Widget = CreateContainerWidget(Node);
-		UE_LOG(LogDesign2UMG, Verbose, TEXT("Design2UMG: Line '%s' mapped to Border (UMG has no line widget)"), *Node->Name);
-		UE_LOG(LogDesign2UMG, Warning, TEXT("线条 '%s' 已转换为 Border（UMG 不支持线条控件）"), *Node->Name);
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("Design2UMG: Line '%s' mapped to Image (UMG has no line widget)"), *Node->Name);
+		UE_LOG(LogDesign2UMG, Warning, TEXT("线条 '%s' 已转换为 Image（UMG 不支持线条控件）"), *Node->Name);
 		if (OutWarnings)
-			OutWarnings->Add(FString::Printf(TEXT("Line '%s' → Border (UMG 无线条控件)"), *Node->Name));
+			OutWarnings->Add(FString::Printf(TEXT("Line '%s' → Image (UMG 无线条控件)"), *Node->Name));
 		break;
 	default:
 		Widget = CreateContainerWidget(Node);
@@ -371,7 +422,16 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 		Widget.Bounds.X, Widget.Bounds.Y, Widget.Bounds.W, Widget.Bounds.H,
 		(int32)Node->Layout, Node->Children.Num());
 
-	FPenVisualMapper::ApplyVisualProperties(Widget, Node);
+	FVisualMapper::ApplyVisualProperties(Widget, Node);
+	if (Widget.Type == TEXT("Border")
+		&& !Widget.Properties.Contains(TEXT("BrushColor"))
+		&& !Widget.Properties.Contains(TEXT("TexturePath"))
+		&& !Widget.Properties.Contains(TEXT("MaterialRef")))
+	{
+		// Stroke-only / no-fill Border should keep transparent interior.
+		// UBorder default brush is opaque white, which can cover siblings.
+		Widget.Properties.Add(TEXT("BrushColor"), TEXT("#00000000"));
+	}
 
 	// 预处理：在递归子节点之前，解析 FillContainer 尺寸写入 PenNode
 	// 这样子节点递归时 Width.Value / Height.Value 已经是正确的像素值
@@ -419,7 +479,7 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 
 		// 辅助 lambda：只修改 Value 不改 Mode，保留 FillContainer 语义给下游 Slot 映射
 		// 同时设置 bHas 标志确保 Ref 节点的 ExpandRef 传递
-		auto ResolveSize = [](TSharedPtr<FPenNode>& N, bool bWidth, float Px)
+		auto ResolveSize = [](TSharedPtr<FDesignNode>& N, bool bWidth, float Px)
 		{
 			FPenSize& Size = bWidth ? N->Width : N->Height;
 			Size.Value = FMath::Max(0.0f, Px);
@@ -465,7 +525,7 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 		if (ShouldSkipNode(Child))
 			continue;
 
-		auto ResolveFit = [](TSharedPtr<FPenNode>& N, bool bWidth, float Px)
+		auto ResolveFit = [](TSharedPtr<FDesignNode>& N, bool bWidth, float Px)
 		{
 			FPenSize& Size = bWidth ? N->Width : N->Height;
 			if (Size.IsFit() && Size.Value == 0.0f && Px > 0.0f)
@@ -496,17 +556,17 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 		if (ShouldSkipNode(Child))
 			continue;
 
-		TSharedPtr<FPenNode> EffectiveChild = Child;
+		TSharedPtr<FDesignNode> EffectiveChild = Child;
 		if (Child->Type == EPenNodeType::Ref)
 		{
-			auto Expanded = FPenRefExpander::ExpandRef(Child, Doc);
+			auto Expanded = FRefExpander::ExpandRef(Child, Doc);
 			if (Expanded.IsValid())
 			{
 				if (ActiveTheme.Num() > 0)
 				{
 					FPenVariableResolver Resolver(Doc.Variables);
 					Resolver.SetThemeContext(ActiveTheme);
-					FPenRefExpander::ReThemeNode(Expanded, Resolver);
+					FRefExpander::ReThemeNode(Expanded, Resolver);
 				}
 				EffectiveChild = Expanded;
 			}
@@ -516,8 +576,8 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 		if (ChildWidget.Type.IsEmpty())
 			continue;
 
-		FPenLayoutMapper::ApplySlotProperties(ChildWidget, EffectiveChild, Node->Layout);
-		FPenLayoutMapper::ApplyAlignItems(ChildWidget, Node->AlignItems, Node->Layout);
+		FLayoutMapper::ApplySlotProperties(ChildWidget, EffectiveChild, Node->Layout);
+		FLayoutMapper::ApplyAlignItems(ChildWidget, Node->AlignItems, Node->Layout);
 
 		const bool bHasFixedSize = EffectiveChild->Width.IsFixed() || EffectiveChild->Height.IsFixed();
 		const bool bHasMinSize = (EffectiveChild->Width.IsFit() && EffectiveChild->Width.Value > 0)
@@ -526,20 +586,30 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 		const bool bCanvasMixedAxis = Node->Layout == EPenLayout::None
 			&& ((EffectiveChild->Width.IsFit() && EffectiveChild->Height.IsFixed())
 				|| (EffectiveChild->Height.IsFit() && EffectiveChild->Width.IsFixed()));
-		bool bNeedsSizeBox = (bHasFixedSize || bHasMinSize || bCanvasMixedAxis);
+		// CanvasPanel 的尺寸本来就由 Slot 偏移控制；给“普通 fixed 子节点”再套 SizeBox
+		// 会把内部控件退化为默认 100x100 期望尺寸，导致大面积错位/压扁。
+		bool bNeedsSizeBox = false;
+		if (Node->Layout == EPenLayout::None)
+		{
+			bNeedsSizeBox = bCanvasMixedAxis;
+		}
+		else
+		{
+			bNeedsSizeBox = (bHasFixedSize || bHasMinSize);
+		}
 		if (bNeedsSizeBox)
 		{
 			UE_LOG(LogDesign2UMG, Verbose, TEXT("  child '%s' → SizeBox wrap (fixed=%d min=%d w=%.1f h=%.1f)"),
 				*ChildWidget.Name, bHasFixedSize, bHasMinSize,
 				EffectiveChild->Width.Value, EffectiveChild->Height.Value);
-			Widget.Children.Add(FPenLayoutMapper::WrapWithSizeBox(MoveTemp(ChildWidget), EffectiveChild));
+			Widget.Children.Add(FLayoutMapper::WrapWithSizeBox(MoveTemp(ChildWidget), EffectiveChild));
 		}
 		else
 			Widget.Children.Add(MoveTemp(ChildWidget));
 	}
 
 	if (Node->Gap > 0)
-		FPenLayoutMapper::ApplyGap(Widget.Children, Node->Gap, Node->Layout);
+		FLayoutMapper::ApplyGap(Widget.Children, Node->Gap, Node->Layout);
 
 	if (Node->JustifyContent != EPenJustifyContent::Start)
 	{
@@ -547,7 +617,7 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 		// ParentLayout tells us if this container sits inside a CanvasPanel.
 		const EPenSizeMode MainAxisMode = (Node->Layout == EPenLayout::Horizontal)
 			? Node->Width.Mode : Node->Height.Mode;
-		FPenLayoutMapper::ApplyJustifyContent(Widget.Children, Node->JustifyContent, MainAxisMode, ParentLayout);
+		FLayoutMapper::ApplyJustifyContent(Widget.Children, Node->JustifyContent, MainAxisMode, ParentLayout);
 	}
 
 	const bool bHasVisualFill = (Node->Fill.bEnabled && Node->Fill.Type != EPenFillType::None)
@@ -556,42 +626,41 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FPenNode>& Nod
 		: (Node->CornerRadius.TopLeft > 0 || Node->CornerRadius.TopRight > 0
 			|| Node->CornerRadius.BottomRight > 0 || Node->CornerRadius.BottomLeft > 0);
 	bool bNeedsBorder = (Node->Type == EPenNodeType::Frame || Node->Type == EPenNodeType::Group)
-		&& Widget.Type != TEXT("CanvasPanel")
-		&& (bHasVisualFill || FPenLayoutMapper::HasPadding(Node) || bHasCornerRadius || Node->Stroke.HasStroke());
+		&& (bHasVisualFill || FLayoutMapper::HasPadding(Node) || bHasCornerRadius || Node->Stroke.HasStroke());
 
 	if (bNeedsBorder)
 	{
 		UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: '%s' → WrapWithBorder (fill=%d corner=%d stroke=%d)"),
 			*Widget.Name, bHasVisualFill, bHasCornerRadius, Node->Stroke.HasStroke());
-		Widget = FPenVisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
+		Widget = FVisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
 	}
-	else if (FPenLayoutMapper::HasPadding(Node))
-		FPenLayoutMapper::ApplyPadding(Widget, Node->Padding);
+	else if (FLayoutMapper::HasPadding(Node))
+		FLayoutMapper::ApplyPadding(Widget, Node->Padding);
 
 	// 多层填充叠加（Overlay 包裹）
 	if (Node->HasMultiFill())
-		Widget = FPenVisualMapper::WrapWithMultiFill(MoveTemp(Widget), Node);
+		Widget = FVisualMapper::WrapWithMultiFill(MoveTemp(Widget), Node);
 
 	if (Widget.Properties.Contains(TEXT("BoxShadowOffsetX")))
-		Widget = FPenVisualMapper::WrapWithBoxShadow(MoveTemp(Widget), Node);
+		Widget = FVisualMapper::WrapWithBoxShadow(MoveTemp(Widget), Node);
 
 	for (const FPenEffect& Effect : Node->Effects)
 	{
 		if (Effect.bEnabled && Effect.Type == EPenEffectType::BackgroundBlur && Effect.Radius > 0)
-			return FPenVisualMapper::WrapWithBackgroundBlur(MoveTemp(Widget), Effect.Radius);
+			return FVisualMapper::WrapWithBackgroundBlur(MoveTemp(Widget), Effect.Radius);
 	}
 
 	return Widget;
 }
 
-FUMGWidgetNode FDesign2UMGConverter::CreateContainerWidget(const TSharedPtr<FPenNode>& Node)
+FUMGWidgetNode FDesign2UMGConverter::CreateContainerWidget(const TSharedPtr<FDesignNode>& Node)
 {
 	FUMGWidgetNode Widget;
 	Widget.Type = FPenTypeMapper::MapNodeTypeToWidget(Node->Type, Node->Layout);
 	return Widget;
 }
 
-FUMGWidgetNode FDesign2UMGConverter::CreateTextWidget(const TSharedPtr<FPenNode>& Node)
+FUMGWidgetNode FDesign2UMGConverter::CreateTextWidget(const TSharedPtr<FDesignNode>& Node)
 {
 	FUMGWidgetNode Widget;
 	Widget.Type = TEXT("TextBlock");
@@ -600,7 +669,7 @@ FUMGWidgetNode FDesign2UMGConverter::CreateTextWidget(const TSharedPtr<FPenNode>
 	return Widget;
 }
 
-void FDesign2UMGConverter::ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FPenNode>& Node)
+void FDesign2UMGConverter::ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
 {
 	if (Node->FontSize > 0)
 	{
@@ -651,7 +720,7 @@ void FDesign2UMGConverter::ApplyTextProperties(FUMGWidgetNode& Widget, const TSh
 	}
 }
 
-FUMGWidgetNode FDesign2UMGConverter::CreateIconFontWidget(const TSharedPtr<FPenNode>& Node)
+FUMGWidgetNode FDesign2UMGConverter::CreateIconFontWidget(const TSharedPtr<FDesignNode>& Node)
 {
 	FUMGWidgetNode Widget;
 	Widget.Type = TEXT("TextBlock");
@@ -677,7 +746,6 @@ FUMGWidgetNode FDesign2UMGConverter::CreateIconFontWidget(const TSharedPtr<FPenN
 		if (!Existing || Existing->IsNull())
 		{
 			MutableSettings->IconFontAssetMap.Add(Node->IconFontFamily, TSoftObjectPtr<UFont>(FSoftObjectPath(AssetPath)));
-			MutableSettings->SaveConfig();
 			UE_LOG(LogDesign2UMG, Display,
 				TEXT("Auto-mapped icon font family '%s' to default asset path '%s'"),
 				*Node->IconFontFamily, *AssetPath);
@@ -729,7 +797,7 @@ FUMGWidgetNode FDesign2UMGConverter::CreateIconFontWidget(const TSharedPtr<FPenN
 	return Widget;
 }
 
-FUMGWidgetNode FDesign2UMGConverter::CreatePathWidget(const TSharedPtr<FPenNode>& Node)
+FUMGWidgetNode FDesign2UMGConverter::CreatePathWidget(const TSharedPtr<FDesignNode>& Node)
 {
 	FUMGWidgetNode Widget;
 
@@ -738,6 +806,30 @@ FUMGWidgetNode FDesign2UMGConverter::CreatePathWidget(const TSharedPtr<FPenNode>
 	{
 		Widget.Type = TEXT("Image");
 		Widget.Properties.Add(TEXT("TexturePath"), Node->Fill.Image.Url);
+		if (Node->Fill.Image.Mode == EPenImageMode::Crop && !Node->Fill.Image.Transform.IsIdentity())
+		{
+			const FPenImageTransform& T = Node->Fill.Image.Transform;
+			Widget.Properties.Add(TEXT("ImageMode"), TEXT("Crop"));
+			Widget.Properties.Add(TEXT("ImageTransform"),
+				FString::Printf(TEXT("%.6f,%.6f,%.6f,%.6f,%.6f,%.6f"),
+					T.A, T.B, T.TX, T.C, T.D, T.TY));
+		}
+		else if (Node->Fill.Image.Mode == EPenImageMode::Fill)
+		{
+			Widget.Properties.Add(TEXT("ImageMode"), TEXT("Fill"));
+		}
+		else if (Node->Fill.Image.Mode == EPenImageMode::Fit)
+		{
+			Widget.Properties.Add(TEXT("ImageMode"), TEXT("Fit"));
+		}
+		if (Node->Fill.Image.Opacity < 1.0f)
+		{
+			Widget.Properties.Add(TEXT("RenderOpacity"), FString::SanitizeFloat(Node->Fill.Image.Opacity));
+		}
+		int32 W = FMath::Max(1, FMath::RoundToInt(Node->Width.Value));
+		int32 H = FMath::Max(1, FMath::RoundToInt(Node->Height.Value));
+		Widget.Properties.Add(TEXT("WidthOverride"), FString::FromInt(W));
+		Widget.Properties.Add(TEXT("HeightOverride"), FString::FromInt(H));
 		return Widget;
 	}
 
@@ -747,8 +839,26 @@ FUMGWidgetNode FDesign2UMGConverter::CreatePathWidget(const TSharedPtr<FPenNode>
 		FString RasterColor;
 		if (Node->Fill.Type == EPenFillType::Color)
 			RasterColor = Node->Fill.SolidColor;
+		else if (Node->Fill.Type == EPenFillType::Gradient && Node->Fill.Gradient.Colors.Num() > 0)
+			RasterColor = Node->Fill.Gradient.Colors[0].Color;
 		else if (Node->Stroke.HasStroke() && Node->Stroke.Fill.Type == EPenFillType::Color)
 			RasterColor = Node->Stroke.Fill.SolidColor;
+		else
+		{
+			for (const FPenFill& Fill : Node->Fills)
+			{
+				if (Fill.Type == EPenFillType::Color)
+				{
+					RasterColor = Fill.SolidColor;
+					break;
+				}
+				if (Fill.Type == EPenFillType::Gradient && Fill.Gradient.Colors.Num() > 0)
+				{
+					RasterColor = Fill.Gradient.Colors[0].Color;
+					break;
+				}
+			}
+		}
 
 		if (!RasterColor.IsEmpty())
 		{
@@ -773,7 +883,7 @@ FUMGWidgetNode FDesign2UMGConverter::CreatePathWidget(const TSharedPtr<FPenNode>
 	return Widget;
 }
 
-FVector2D FDesign2UMGConverter::PreComputeFitContentSizes(const TSharedPtr<FPenNode>& Node, const FPenDocument& Doc)
+FVector2D FDesign2UMGConverter::PreComputeFitContentSizes(const TSharedPtr<FDesignNode>& Node, const FDesignDocument& Doc)
 {
 	FRecursionGuard Guard(GPrecomputeDepth, TEXT("PreComputeFitContentSizes"));
 	if (!Guard.bValid)
@@ -787,7 +897,7 @@ FVector2D FDesign2UMGConverter::PreComputeFitContentSizes(const TSharedPtr<FPenN
 	// Ref 节点：展开后递归，回写尺寸到原始节点
 	if (Node->Type == EPenNodeType::Ref)
 	{
-		auto Expanded = FPenRefExpander::ExpandRef(Node, Doc);
+		auto Expanded = FRefExpander::ExpandRef(Node, Doc);
 		if (Expanded.IsValid())
 		{
 			const FVector2D RefSize(PreComputeFitContentSizes(Expanded, Doc));
