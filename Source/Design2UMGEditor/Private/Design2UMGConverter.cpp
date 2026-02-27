@@ -672,8 +672,14 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FDesignNode>& 
 	if (Node->HasMultiFill())
 		Widget = FVisualMapper::WrapWithMultiFill(MoveTemp(Widget), Node);
 
-	if (Widget.Properties.Contains(TEXT("BoxShadowOffsetX")))
-		Widget = FVisualMapper::WrapWithBoxShadow(MoveTemp(Widget), Node);
+	const FString* ShadowCountStr = Widget.Properties.Find(TEXT("BoxShadowCount"));
+	if (ShadowCountStr)
+	{
+		int32 ShadowCount = FCString::Atoi(**ShadowCountStr);
+		Widget.Properties.Remove(TEXT("BoxShadowCount"));
+		for (int32 i = 0; i < ShadowCount; ++i)
+			Widget = FVisualMapper::WrapWithBoxShadow(MoveTemp(Widget), Node, i);
+	}
 
 	for (const FPenEffect& Effect : Node->Effects)
 	{

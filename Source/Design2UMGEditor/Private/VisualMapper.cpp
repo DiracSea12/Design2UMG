@@ -203,14 +203,9 @@ void FVisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedP
 					*Node->Name);
 				break;
 			}
-			if (++ShadowCount > 1)
-			{
-				UE_LOG(LogDesign2UMG, Warning,
-					TEXT("Design2UMG: Multiple shadows on '%s', only the last one will be applied (UMG limitation)"),
-					*Node->Name);
-			}
 			if (Node->Type == EPenNodeType::Text)
 			{
+				// TextBlock 只支持单阴影（UE5 限制），后者覆盖前者
 				Widget.Properties.Add(TEXT("ShadowOffset"),
 					FString::Printf(TEXT("%.1f,%.1f"), Effect.Shadow.OffsetX, Effect.Shadow.OffsetY));
 				Widget.Properties.Add(TEXT("ShadowColorAndOpacity"),
@@ -218,18 +213,23 @@ void FVisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedP
 			}
 			else
 			{
-				Widget.Properties.Add(TEXT("BoxShadowOffsetX"), FString::SanitizeFloat(Effect.Shadow.OffsetX));
-				Widget.Properties.Add(TEXT("BoxShadowOffsetY"), FString::SanitizeFloat(Effect.Shadow.OffsetY));
-				Widget.Properties.Add(TEXT("BoxShadowBlur"), FString::SanitizeFloat(Effect.Shadow.Blur));
-				Widget.Properties.Add(TEXT("BoxShadowSpread"), FString::SanitizeFloat(Effect.Shadow.Spread));
-				Widget.Properties.Add(TEXT("BoxShadowColor"),
+				FString Idx = FString::FromInt(ShadowCount);
+				Widget.Properties.Add(FString::Printf(TEXT("BoxShadow_%s_OffsetX"), *Idx), FString::SanitizeFloat(Effect.Shadow.OffsetX));
+				Widget.Properties.Add(FString::Printf(TEXT("BoxShadow_%s_OffsetY"), *Idx), FString::SanitizeFloat(Effect.Shadow.OffsetY));
+				Widget.Properties.Add(FString::Printf(TEXT("BoxShadow_%s_Blur"), *Idx), FString::SanitizeFloat(Effect.Shadow.Blur));
+				Widget.Properties.Add(FString::Printf(TEXT("BoxShadow_%s_Spread"), *Idx), FString::SanitizeFloat(Effect.Shadow.Spread));
+				Widget.Properties.Add(FString::Printf(TEXT("BoxShadow_%s_Color"), *Idx),
 					Effect.Shadow.Color.IsEmpty() ? TEXT("#00000040") : Effect.Shadow.Color);
+				++ShadowCount;
 			}
 			break;
 		default:
 			break;
 		}
 	}
+
+	if (ShadowCount > 0)
+		Widget.Properties.Add(TEXT("BoxShadowCount"), FString::FromInt(ShadowCount));
 }
 
 void FVisualMapper::ApplyRoundedCorner(FUMGWidgetNode& Widget, const FPenCornerRadius& Radius, float Width, float Height)
@@ -402,14 +402,14 @@ FUMGWidgetNode FVisualMapper::WrapWithBackgroundBlur(FUMGWidgetNode&& Widget, fl
 	return Blur;
 }
 
-FUMGWidgetNode FVisualMapper::WrapWithBoxShadow(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node)
+FUMGWidgetNode FVisualMapper::WrapWithBoxShadow(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, int32 ShadowIndex)
 {
-	// 从 Widget 属性中提取阴影参数
-	const FString* OffXStr = Widget.Properties.Find(TEXT("BoxShadowOffsetX"));
-	const FString* OffYStr = Widget.Properties.Find(TEXT("BoxShadowOffsetY"));
-	const FString* BlurStr = Widget.Properties.Find(TEXT("BoxShadowBlur"));
-	const FString* SpreadStr = Widget.Properties.Find(TEXT("BoxShadowSpread"));
-	const FString* ColorStr = Widget.Properties.Find(TEXT("BoxShadowColor"));
+	FString Prefix = FString::Printf(TEXT("BoxShadow_%d_"), ShadowIndex);
+	const FString* OffXStr = Widget.Properties.Find(Prefix + TEXT("OffsetX"));
+	const FString* OffYStr = Widget.Properties.Find(Prefix + TEXT("OffsetY"));
+	const FString* BlurStr = Widget.Properties.Find(Prefix + TEXT("Blur"));
+	const FString* SpreadStr = Widget.Properties.Find(Prefix + TEXT("Spread"));
+	const FString* ColorStr = Widget.Properties.Find(Prefix + TEXT("Color"));
 
 	if (!OffXStr || !OffYStr) return MoveTemp(Widget);
 
@@ -419,12 +419,11 @@ FUMGWidgetNode FVisualMapper::WrapWithBoxShadow(FUMGWidgetNode&& Widget, const T
 	float Spread = SpreadStr ? FCString::Atof(**SpreadStr) : 0.0f;
 	FString ShadowColor = ColorStr ? *ColorStr : TEXT("#00000040");
 
-	// 清除 Widget 上的 BoxShadow 属性
-	Widget.Properties.Remove(TEXT("BoxShadowOffsetX"));
-	Widget.Properties.Remove(TEXT("BoxShadowOffsetY"));
-	Widget.Properties.Remove(TEXT("BoxShadowBlur"));
-	Widget.Properties.Remove(TEXT("BoxShadowSpread"));
-	Widget.Properties.Remove(TEXT("BoxShadowColor"));
+	Widget.Properties.Remove(Prefix + TEXT("OffsetX"));
+	Widget.Properties.Remove(Prefix + TEXT("OffsetY"));
+	Widget.Properties.Remove(Prefix + TEXT("Blur"));
+	Widget.Properties.Remove(Prefix + TEXT("Spread"));
+	Widget.Properties.Remove(Prefix + TEXT("Color"));
 
 	// Overlay 容纳阴影 Image + 原 Widget（Overlay 子节点的 Fill alignment 有效）
 	FUMGWidgetNode Wrapper;
@@ -438,8 +437,9 @@ FUMGWidgetNode FVisualMapper::WrapWithBoxShadow(FUMGWidgetNode&& Widget, const T
 	float Extent = Blur + FMath::Max(0.0f, Spread);
 	FUMGWidgetNode Shadow;
 	Shadow.Type = TEXT("Image");
-	Shadow.Id = Widget.Id + TEXT("_shadow");
-	Shadow.Name = Widget.Name + TEXT("_shadow");
+	FString ShadowSuffix = FString::Printf(TEXT("_shadow%d"), ShadowIndex);
+	Shadow.Id = Widget.Id + ShadowSuffix;
+	Shadow.Name = Widget.Name + ShadowSuffix;
 	Shadow.Properties.Add(TEXT("BrushColor"), ShadowColor);
 
 	// 阴影纹理参数
