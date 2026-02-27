@@ -297,6 +297,24 @@ void FVisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FPenStroke& Stroke
 		Widget.Brush.OutlineColor = FUMGWidgetUtils::ParseColor(Stroke.Fill.SolidColor);
 		Widget.Brush.bHasOutlineColor = true;
 	}
+
+	// Stroke alignment compensation:
+	// UMG outline is always centered on the edge. Adjust padding to simulate inside/outside.
+	if (Stroke.Align == EPenStrokeAlign::Inside)
+	{
+		// Inside: entire stroke within bounds → add padding = Thickness/2
+		float Inset = Thickness * 0.5f;
+		Widget.Properties.Add(TEXT("StrokePadding"),
+			FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"), Inset, Inset, Inset, Inset));
+	}
+	else if (Stroke.Align == EPenStrokeAlign::Outside)
+	{
+		// Outside: entire stroke outside bounds → expand by Thickness/2
+		float Outset = Thickness * 0.5f;
+		Widget.Properties.Add(TEXT("StrokeMargin"),
+			FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"), -Outset, -Outset, -Outset, -Outset));
+	}
+	// Center: default UMG behavior, no adjustment needed
 }
 
 FUMGWidgetNode FVisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node)
@@ -334,7 +352,7 @@ FUMGWidgetNode FVisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TSha
 	if (FLayoutMapper::HasPadding(Node))
 		FLayoutMapper::ApplyPadding(Border, Node->Padding);
 
-	for (const FString& Key : {TEXT("DrawAs"), TEXT("OutlineCornerRadius"), TEXT("CornerRadii"), TEXT("OutlineThickness"), TEXT("OutlineColor")})
+	for (const FString& Key : {TEXT("DrawAs"), TEXT("OutlineCornerRadius"), TEXT("CornerRadii"), TEXT("OutlineThickness"), TEXT("OutlineColor"), TEXT("StrokePadding"), TEXT("StrokeMargin")})
 	{
 		if (const FString* V = Widget.Properties.Find(Key))
 		{

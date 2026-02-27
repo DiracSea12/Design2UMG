@@ -506,6 +506,15 @@ namespace
 
 		if (const FString* V = GET_PROP("ContentColor")) Bd->SetContentColorAndOpacity(FUMGWidgetUtils::ParseColor(*V));
 		if (const FString* V = GET_PROP("Padding")) Bd->SetPadding(FUMGWidgetUtils::ParseMargin(*V));
+
+		// StrokePadding: additional inset for inside-aligned strokes
+		if (const FString* V = GET_PROP("StrokePadding"))
+		{
+			FMargin Extra = FUMGWidgetUtils::ParseMargin(*V);
+			FMargin Current = Bd->GetPadding();
+			Bd->SetPadding(FMargin(Current.Left + Extra.Left, Current.Top + Extra.Top,
+				Current.Right + Extra.Right, Current.Bottom + Extra.Bottom));
+		}
 	}
 
 	void ApplySizeBoxProps(UWidget* W, const TMap<FString, FString>& P)
