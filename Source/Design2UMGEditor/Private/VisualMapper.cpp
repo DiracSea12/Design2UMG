@@ -489,7 +489,8 @@ FUMGWidgetNode FVisualMapper::WrapWithBoxShadow(FUMGWidgetNode&& Widget, const T
 	int32 TexH = FMath::Max(1, FMath::RoundToInt(Node->Height.Value + Extent * 2));
 	Shadow.Properties.Add(TEXT("WidthOverride"), FString::FromInt(TexW));
 	Shadow.Properties.Add(TEXT("HeightOverride"), FString::FromInt(TexH));
-	Shadow.Properties.Add(TEXT("MaterialRef"), MatRef_RoundedRect);
+	Shadow.Properties.Add(TEXT("MaterialRef"), (Blur > 0.0f) ? TEXT("boxshadow") : MatRef_RoundedRect);
+	Shadow.Properties.Add(TEXT("ShadowBlur"), FString::SanitizeFloat(Blur));
 
 	const float HalfMin = FMath::Min(TexW, TexH) * 0.5f;
 	if (Node->CornerRadius.bUniform)

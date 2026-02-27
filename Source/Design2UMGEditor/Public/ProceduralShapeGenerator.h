@@ -59,6 +59,12 @@ public:
 	/** 生成锥形（Angular/Conic）渐变纹理 */
 	static UTexture2D* GenerateAngularGradient(int32 Width, int32 Height, float StartAngleDeg, const TArray<FGradientStop>& Stops, UObject* Outer = nullptr);
 
+	/** 生成带高斯模糊的外阴影纹理（均匀圆角） */
+	static UTexture2D* GenerateBoxShadow(int32 Width, int32 Height, FLinearColor ShadowColor, float CornerRadius, float BlurRadius, UObject* Outer = nullptr);
+
+	/** 生成带高斯模糊的外阴影纹理（非均匀圆角） */
+	static UTexture2D* GenerateBoxShadow(int32 Width, int32 Height, FLinearColor ShadowColor, float RadiusTL, float RadiusTR, float RadiusBR, float RadiusBL, float BlurRadius, UObject* Outer = nullptr);
+
 	/**
 	 * 根据 MaterialRef 和 Properties 生成程序化纹理（统一入口）
 	 * @param MaterialRef 形状名称（circle/ring/roundedrect/gradienth/gradientv/radialgradient）
