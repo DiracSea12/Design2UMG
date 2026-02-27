@@ -487,22 +487,28 @@ FUMGWidgetNode FVisualMapper::WrapWithBoxShadow(FUMGWidgetNode&& Widget, const T
 	Shadow.Properties.Add(TEXT("BrushColor"), ShadowColor);
 
 	// 阴影纹理参数
-	float CornerRadius = 0.0f;
-	if (Node->CornerRadius.bUniform)
-		CornerRadius = Node->CornerRadius.Uniform;
-	else
-		CornerRadius = FMath::Max(FMath::Max(Node->CornerRadius.TopLeft, Node->CornerRadius.TopRight),
-			FMath::Max(Node->CornerRadius.BottomRight, Node->CornerRadius.BottomLeft));
-
 	int32 TexW = FMath::Max(1, FMath::RoundToInt(Node->Width.Value + Extent * 2));
 	int32 TexH = FMath::Max(1, FMath::RoundToInt(Node->Height.Value + Extent * 2));
 	Shadow.Properties.Add(TEXT("WidthOverride"), FString::FromInt(TexW));
 	Shadow.Properties.Add(TEXT("HeightOverride"), FString::FromInt(TexH));
 	Shadow.Properties.Add(TEXT("MaterialRef"), MatRef_RoundedRect);
 
-	float NormRadius = (TexW > 0 && TexH > 0) ? (CornerRadius + Extent) / (FMath::Min(TexW, TexH) * 0.5f) : 0.0f;
-	Shadow.Properties.Add(TEXT("MaterialParams"),
-		FString::Printf(TEXT("{\"Color\":\"%s\",\"CornerRadius\":%.3f}"), *ShadowColor, NormRadius));
+	const float HalfMin = FMath::Min(TexW, TexH) * 0.5f;
+	if (Node->CornerRadius.bUniform)
+	{
+		float NR = (HalfMin > 0.f) ? (Node->CornerRadius.Uniform + Extent) / HalfMin : 0.f;
+		Shadow.Properties.Add(TEXT("MaterialParams"),
+			FString::Printf(TEXT("{\"Color\":\"%s\",\"CornerRadius\":%.3f}"), *ShadowColor, NR));
+	}
+	else
+	{
+		auto Norm = [&](float R) { return (HalfMin > 0.f) ? (R + Extent) / HalfMin : 0.f; };
+		Shadow.Properties.Add(TEXT("MaterialParams"),
+			FString::Printf(TEXT("{\"Color\":\"%s\",\"CornerRadii\":[%.3f,%.3f,%.3f,%.3f]}"),
+				*ShadowColor,
+				Norm(Node->CornerRadius.TopLeft), Norm(Node->CornerRadius.TopRight),
+				Norm(Node->CornerRadius.BottomRight), Norm(Node->CornerRadius.BottomLeft)));
+	}
 
 	// 阴影偏移定位
 	Shadow.Slot.HorizontalAlignment = TEXT("Fill");

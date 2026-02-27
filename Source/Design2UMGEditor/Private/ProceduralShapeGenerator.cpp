@@ -180,6 +180,68 @@ UTexture2D* FProceduralShapeGenerator::GenerateRoundedRect(int32 Width, int32 He
 	return Texture;
 }
 
+UTexture2D* FProceduralShapeGenerator::GenerateRoundedRect(int32 Width, int32 Height, FLinearColor Color, float RadiusTL, float RadiusTR, float RadiusBR, float RadiusBL, UObject* Outer)
+{
+	if (FMath::IsNearlyEqual(RadiusTL, RadiusTR) && FMath::IsNearlyEqual(RadiusTR, RadiusBR) && FMath::IsNearlyEqual(RadiusBR, RadiusBL))
+		return GenerateRoundedRect(Width, Height, Color, RadiusTL, Outer);
+
+	UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer);
+	if (!Texture) return nullptr;
+
+	TArray<FColor> Pixels;
+	Pixels.SetNumUninitialized(Width * Height);
+
+	const float HalfMin = FMath::Min(Width, Height) * 0.5f;
+	const float RTL = HalfMin * RadiusTL;
+	const float RTR = HalfMin * RadiusTR;
+	const float RBR = HalfMin * RadiusBR;
+	const float RBL = HalfMin * RadiusBL;
+	const FColor FillColor = Color.ToFColor(true);
+
+	for (int32 Y = 0; Y < Height; ++Y)
+	{
+		for (int32 X = 0; X < Width; ++X)
+		{
+			float Alpha = 1.0f;
+			float R = 0.0f;
+			FVector2D Center = FVector2D::ZeroVector;
+			bool bInCorner = false;
+
+			if (X < RTL && Y < RTL)
+			{
+				R = RTL; Center = FVector2D(RTL, RTL); bInCorner = true;
+			}
+			else if (X >= Width - RTR && Y < RTR)
+			{
+				R = RTR; Center = FVector2D(Width - RTR - 1, RTR); bInCorner = true;
+			}
+			else if (X >= Width - RBR && Y >= Height - RBR)
+			{
+				R = RBR; Center = FVector2D(Width - RBR - 1, Height - RBR - 1); bInCorner = true;
+			}
+			else if (X < RBL && Y >= Height - RBL)
+			{
+				R = RBL; Center = FVector2D(RBL, Height - RBL - 1); bInCorner = true;
+			}
+
+			if (bInCorner)
+			{
+				float Dist = FMath::Sqrt(FMath::Square(X - Center.X) + FMath::Square(Y - Center.Y));
+				Alpha = FMath::Clamp(R - Dist + 0.5f, 0.0f, 1.0f);
+			}
+
+			FColor& Pixel = Pixels[Y * Width + X];
+			Pixel.R = FillColor.R;
+			Pixel.G = FillColor.G;
+			Pixel.B = FillColor.B;
+			Pixel.A = FMath::RoundToInt(FillColor.A * Alpha);
+		}
+	}
+
+	FillTextureData(Texture, Pixels);
+	return Texture;
+}
+
 UTexture2D* FProceduralShapeGenerator::GenerateGradientH(int32 Width, int32 Height, FLinearColor ColorStart, FLinearColor ColorEnd, UObject* Outer)
 {
 	UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer);
@@ -393,6 +455,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 	FLinearColor ColorEnd = FLinearColor::Black;
 	float Thickness = 0.1f;
 	float CornerRadius = 0.2f;
+	float CornerRadii[4] = { -1.f, -1.f, -1.f, -1.f }; // TL, TR, BR, BL; -1 = not set
 	float RotationDeg = 0.0f;
 	TArray<FGradientStop> MultiStops;
 
@@ -417,6 +480,17 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 				Thickness = NumVal > 1.0 ? static_cast<float>(NumVal) / 100.0f : static_cast<float>(NumVal);
 			if (Params->TryGetNumberField(TEXT("CornerRadius"), NumVal))
 				CornerRadius = NumVal > 1.0 ? static_cast<float>(NumVal) / 100.0f : static_cast<float>(NumVal);
+
+			const TArray<TSharedPtr<FJsonValue>>* RadiiArr = nullptr;
+			if (Params->TryGetArrayField(TEXT("CornerRadii"), RadiiArr) && RadiiArr && RadiiArr->Num() == 4)
+			{
+				for (int32 i = 0; i < 4; ++i)
+				{
+					double V = (*RadiiArr)[i]->AsNumber();
+					CornerRadii[i] = V > 1.0 ? static_cast<float>(V) / 100.0f : static_cast<float>(V);
+				}
+			}
+
 			if (Params->TryGetNumberField(TEXT("Rotation"), NumVal))
 				RotationDeg = static_cast<float>(NumVal);
 
@@ -455,7 +529,11 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 	if (Shape == TEXT("ring"))
 		return GenerateRing(FMath::Max(Width, Height), Color, Thickness, Outer);
 	if (Shape == TEXT("roundedrect") || Shape == TEXT("polygon"))
+	{
+		if (CornerRadii[0] >= 0.f)
+			return GenerateRoundedRect(Width, Height, Color, CornerRadii[0], CornerRadii[1], CornerRadii[2], CornerRadii[3], Outer);
 		return GenerateRoundedRect(Width, Height, Color, CornerRadius, Outer);
+	}
 	if (Shape == TEXT("gradientlinear"))
 	{
 		// Build stops from 2-color fallback if no multi-stop array

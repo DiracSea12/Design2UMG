@@ -25,8 +25,11 @@ public:
 	/** 生成圆环纹理 */
 	static UTexture2D* GenerateRing(int32 Size, FLinearColor Color, float Thickness = 0.1f, UObject* Outer = nullptr);
 
-	/** 生成圆角矩形纹理 */
+	/** 生成圆角矩形纹理（均匀圆角） */
 	static UTexture2D* GenerateRoundedRect(int32 Width, int32 Height, FLinearColor Color, float CornerRadius = 0.2f, UObject* Outer = nullptr);
+
+	/** 生成圆角矩形纹理（非均匀圆角，各角独立半径） */
+	static UTexture2D* GenerateRoundedRect(int32 Width, int32 Height, FLinearColor Color, float RadiusTL, float RadiusTR, float RadiusBR, float RadiusBL, UObject* Outer = nullptr);
 
 	/** 生成水平渐变纹理 */
 	static UTexture2D* GenerateGradientH(int32 Width, int32 Height, FLinearColor ColorStart, FLinearColor ColorEnd, UObject* Outer = nullptr);
