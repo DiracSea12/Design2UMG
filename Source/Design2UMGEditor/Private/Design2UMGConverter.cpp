@@ -8,6 +8,8 @@
 #include "LayoutMapper.h"
 #include "VisualMapper.h"
 #include "RefExpander.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Fonts/FontMeasure.h"
 
 namespace
 {
@@ -149,6 +151,28 @@ namespace
 		return false;
 	}
 
+	/** Use FSlateFontMeasure for precise text size; falls back to heuristic. */
+	FVector2D MeasureTextSize(const FString& Text, float FontSize)
+	{
+		if (FSlateApplication::IsInitialized())
+		{
+			FSlateRenderer* Renderer = FSlateApplication::Get().GetRenderer();
+			if (Renderer)
+			{
+				TSharedRef<FSlateFontMeasure> Measure = Renderer->GetFontMeasureService();
+				FSlateFontInfo FontInfo;
+				FontInfo.Size = FontSize;
+				FVector2D Size = Measure->Measure(Text, FontInfo);
+				if (Size.X > 0 && Size.Y > 0)
+					return Size;
+			}
+		}
+		// Fallback: heuristic
+		float W = Text.Len() * FontSize * 0.6f;
+		float H = FontSize * 1.5f;
+		return FVector2D(W, H);
+	}
+
 	/** Estimate a single node's size, handling leaf nodes (text, icon) via font metrics. */
 	FVector2D EstimateNodeSize(const TSharedPtr<FDesignNode>& Node);
 
@@ -163,13 +187,20 @@ namespace
 		float W = Node->Width.Value;
 		float H = Node->Height.Value;
 
-		// Text leaf: estimate from FontSize
+		// Text leaf: use FSlateFontMeasure when available
 		if (Node->Type == EPenNodeType::Text)
 		{
-			if (H == 0 && Node->FontSize > 0)
-				H = Node->FontSize * 1.5f;
-			if (W == 0 && Node->FontSize > 0 && !Node->Content.IsEmpty())
-				W = Node->Content.Len() * Node->FontSize * 0.6f;
+			if ((W == 0 || H == 0) && Node->FontSize > 0 && !Node->Content.IsEmpty())
+			{
+				FVector2D Measured = MeasureTextSize(Node->Content, Node->FontSize);
+				if (W == 0) W = Measured.X;
+				if (H == 0) H = Measured.Y;
+			}
+			else
+			{
+				if (H == 0 && Node->FontSize > 0)
+					H = Node->FontSize * 1.5f;
+			}
 			return FVector2D(W, H);
 		}
 
@@ -929,10 +960,17 @@ FVector2D FDesign2UMGConverter::PreComputeFitContentSizes(const TSharedPtr<FDesi
 	{
 		float W = Node->Width.IsFixed() ? Node->Width.Value : 0.0f;
 		float H = Node->Height.IsFixed() ? Node->Height.Value : 0.0f;
-		if (H == 0 && Node->FontSize > 0)
-			H = Node->FontSize * 1.5f;
-		if (W == 0 && Node->FontSize > 0 && !Node->Content.IsEmpty())
-			W = Node->Content.Len() * Node->FontSize * 0.6f;
+		if ((W == 0 || H == 0) && Node->FontSize > 0 && !Node->Content.IsEmpty())
+		{
+			FVector2D Measured = MeasureTextSize(Node->Content, Node->FontSize);
+			if (W == 0) W = Measured.X;
+			if (H == 0) H = Measured.Y;
+		}
+		else
+		{
+			if (H == 0 && Node->FontSize > 0)
+				H = Node->FontSize * 1.5f;
+		}
 		// 回写估算值，使 ConvertNode 的 Bounds.W/H 非零
 		if (W > 0 && !Node->Width.IsFixed())
 			Node->Width.Value = W;
