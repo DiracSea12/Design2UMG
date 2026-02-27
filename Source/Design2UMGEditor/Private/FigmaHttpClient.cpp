@@ -11,7 +11,7 @@ static const FString FigmaApiBase = TEXT("https://api.figma.com");
 
 void FFigmaHttpClient::GetFile(const FString& FileKey, FOnComplete OnComplete)
 {
-	SendGet(FString::Printf(TEXT("%s/v1/files/%s"), *FigmaApiBase, *FileKey), MoveTemp(OnComplete));
+	SendGet(FString::Printf(TEXT("%s/v1/files/%s?geometry=paths"), *FigmaApiBase, *FileKey), MoveTemp(OnComplete));
 }
 
 void FFigmaHttpClient::GetFileImages(const FString& FileKey, FOnComplete OnComplete)
