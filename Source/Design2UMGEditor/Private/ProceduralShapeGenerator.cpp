@@ -202,6 +202,45 @@ UTexture2D* FProceduralShapeGenerator::GenerateGradientH(int32 Width, int32 Heig
 	return Texture;
 }
 
+UTexture2D* FProceduralShapeGenerator::GenerateGradientHMultiStop(int32 Width, int32 Height, const TArray<FGradientStop>& Stops, UObject* Outer)
+{
+	if (Stops.Num() < 2)
+		return nullptr;
+
+	UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer);
+	if (!Texture) return nullptr;
+
+	TArray<FColor> Pixels;
+	Pixels.SetNumUninitialized(Width * Height);
+
+	for (int32 Y = 0; Y < Height; ++Y)
+	{
+		for (int32 X = 0; X < Width; ++X)
+		{
+			float T = (Width > 1) ? static_cast<float>(X) / (Width - 1) : 0.0f;
+
+			// Find enclosing stop pair
+			FLinearColor Blended = Stops[0].Color;
+			for (int32 i = 1; i < Stops.Num(); ++i)
+			{
+				if (T <= Stops[i].Position || i == Stops.Num() - 1)
+				{
+					float Span = Stops[i].Position - Stops[i - 1].Position;
+					float LocalT = (Span > KINDA_SMALL_NUMBER) ? (T - Stops[i - 1].Position) / Span : 0.0f;
+					LocalT = FMath::Clamp(LocalT, 0.0f, 1.0f);
+					Blended = FMath::Lerp(Stops[i - 1].Color, Stops[i].Color, LocalT);
+					break;
+				}
+			}
+
+			Pixels[Y * Width + X] = Blended.ToFColor(true);
+		}
+	}
+
+	FillTextureData(Texture, Pixels);
+	return Texture;
+}
+
 UTexture2D* FProceduralShapeGenerator::GenerateGradientV(int32 Width, int32 Height, FLinearColor ColorStart, FLinearColor ColorEnd, UObject* Outer)
 {
 	UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer);
@@ -220,6 +259,43 @@ UTexture2D* FProceduralShapeGenerator::GenerateGradientV(int32 Width, int32 Heig
 		{
 			Pixels[Y * Width + X] = RowColor;
 		}
+	}
+
+	FillTextureData(Texture, Pixels);
+	return Texture;
+}
+
+UTexture2D* FProceduralShapeGenerator::GenerateGradientVMultiStop(int32 Width, int32 Height, const TArray<FGradientStop>& Stops, UObject* Outer)
+{
+	if (Stops.Num() < 2)
+		return nullptr;
+
+	UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer);
+	if (!Texture) return nullptr;
+
+	TArray<FColor> Pixels;
+	Pixels.SetNumUninitialized(Width * Height);
+
+	for (int32 Y = 0; Y < Height; ++Y)
+	{
+		float T = (Height > 1) ? static_cast<float>(Y) / (Height - 1) : 0.0f;
+
+		FLinearColor Blended = Stops[0].Color;
+		for (int32 i = 1; i < Stops.Num(); ++i)
+		{
+			if (T <= Stops[i].Position || i == Stops.Num() - 1)
+			{
+				float Span = Stops[i].Position - Stops[i - 1].Position;
+				float LocalT = (Span > KINDA_SMALL_NUMBER) ? (T - Stops[i - 1].Position) / Span : 0.0f;
+				LocalT = FMath::Clamp(LocalT, 0.0f, 1.0f);
+				Blended = FMath::Lerp(Stops[i - 1].Color, Stops[i].Color, LocalT);
+				break;
+			}
+		}
+
+		FColor RowColor = Blended.ToFColor(true);
+		for (int32 X = 0; X < Width; ++X)
+			Pixels[Y * Width + X] = RowColor;
 	}
 
 	FillTextureData(Texture, Pixels);
@@ -257,8 +333,9 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 	FLinearColor Color = FLinearColor::White;
 	FLinearColor ColorStart = FLinearColor::White;
 	FLinearColor ColorEnd = FLinearColor::Black;
-	float Thickness = 0.1f;  // 与 .h 默认参数一致
+	float Thickness = 0.1f;
 	float CornerRadius = 0.2f;
+	TArray<FGradientStop> MultiStops;
 
 	if (const FString* ParamsStr = Properties.Find(TEXT("MaterialParams")))
 	{
@@ -277,11 +354,32 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 				ColorEnd = FUMGWidgetUtils::ParseColor(ColorStr);
 
 			double NumVal;
-			// 归一化：>1.0 视为百分比值（如 10 → 0.10），<=1.0 视为已归一化的 0~1 比例
 			if (Params->TryGetNumberField(TEXT("Thickness"), NumVal))
 				Thickness = NumVal > 1.0 ? static_cast<float>(NumVal) / 100.0f : static_cast<float>(NumVal);
 			if (Params->TryGetNumberField(TEXT("CornerRadius"), NumVal))
 				CornerRadius = NumVal > 1.0 ? static_cast<float>(NumVal) / 100.0f : static_cast<float>(NumVal);
+
+			// 多色标渐变 Stops 数组
+			const TArray<TSharedPtr<FJsonValue>>* StopsArr = nullptr;
+			if (Params->TryGetArrayField(TEXT("Stops"), StopsArr) && StopsArr)
+			{
+				for (const TSharedPtr<FJsonValue>& StopVal : *StopsArr)
+				{
+					const TSharedPtr<FJsonObject> StopObj = StopVal->AsObject();
+					if (!StopObj.IsValid()) continue;
+
+					FGradientStop Stop;
+					double Pos = 0.0;
+					StopObj->TryGetNumberField(TEXT("Pos"), Pos);
+					Stop.Position = static_cast<float>(Pos);
+
+					FString StopColor;
+					if (StopObj->TryGetStringField(TEXT("Color"), StopColor))
+						Stop.Color = FUMGWidgetUtils::ParseColor(StopColor);
+
+					MultiStops.Add(Stop);
+				}
+			}
 		}
 	}
 
@@ -298,9 +396,17 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 	if (Shape == TEXT("roundedrect") || Shape == TEXT("polygon"))
 		return GenerateRoundedRect(Width, Height, Color, CornerRadius, Outer);
 	if (Shape == TEXT("gradienth"))
+	{
+		if (MultiStops.Num() >= 2)
+			return GenerateGradientHMultiStop(Width, Height, MultiStops, Outer);
 		return GenerateGradientH(Width, Height, ColorStart, ColorEnd, Outer);
+	}
 	if (Shape == TEXT("gradientv"))
+	{
+		if (MultiStops.Num() >= 2)
+			return GenerateGradientVMultiStop(Width, Height, MultiStops, Outer);
 		return GenerateGradientV(Width, Height, ColorStart, ColorEnd, Outer);
+	}
 	if (Shape == TEXT("radialgradient"))
 		return GenerateRadialGradient(FMath::Max(Width, Height), ColorStart, ColorEnd, Outer);
 

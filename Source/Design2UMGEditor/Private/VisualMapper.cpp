@@ -21,16 +21,25 @@ namespace
 		const FString& StartColor = Gradient.Colors[0].Color;
 		const FString& EndColor = Gradient.Colors.Last().Color;
 
-		if (Gradient.Colors.Num() > 2)
-		{
-			UE_LOG(LogDesign2UMG, Warning,
-				TEXT("Gradient has %d color stops; only first and last are used (UE5 material limitation)"),
-				Gradient.Colors.Num());
-		}
-
+		// Radial: center/edge pair
 		if (Gradient.GradientType == EPenGradientType::Radial)
 			return FString::Printf(TEXT("{\"ColorCenter\":\"%s\",\"ColorEdge\":\"%s\"}"), *StartColor, *EndColor);
 
+		// Multi-stop linear: output Stops array
+		if (Gradient.Colors.Num() > 2)
+		{
+			FString Stops = TEXT("{\"Stops\":[");
+			for (int32 i = 0; i < Gradient.Colors.Num(); ++i)
+			{
+				if (i > 0) Stops += TEXT(",");
+				Stops += FString::Printf(TEXT("{\"Pos\":%.4f,\"Color\":\"%s\"}"),
+					Gradient.Colors[i].Position, *Gradient.Colors[i].Color);
+			}
+			Stops += TEXT("]}");
+			return Stops;
+		}
+
+		// 2-stop: backward compatible format
 		return FString::Printf(TEXT("{\"ColorStart\":\"%s\",\"ColorEnd\":\"%s\"}"), *StartColor, *EndColor);
 	}
 

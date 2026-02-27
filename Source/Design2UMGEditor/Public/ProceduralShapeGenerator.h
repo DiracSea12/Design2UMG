@@ -37,6 +37,19 @@ public:
 	/** 生成径向渐变纹理 */
 	static UTexture2D* GenerateRadialGradient(int32 Size, FLinearColor ColorCenter, FLinearColor ColorEdge, UObject* Outer = nullptr);
 
+	/** 色标结构（用于多色标渐变） */
+	struct FGradientStop
+	{
+		float Position; // 0.0 ~ 1.0
+		FLinearColor Color;
+	};
+
+	/** 生成多色标水平渐变纹理 */
+	static UTexture2D* GenerateGradientHMultiStop(int32 Width, int32 Height, const TArray<FGradientStop>& Stops, UObject* Outer = nullptr);
+
+	/** 生成多色标垂直渐变纹理 */
+	static UTexture2D* GenerateGradientVMultiStop(int32 Width, int32 Height, const TArray<FGradientStop>& Stops, UObject* Outer = nullptr);
+
 	/**
 	 * 根据 MaterialRef 和 Properties 生成程序化纹理（统一入口）
 	 * @param MaterialRef 形状名称（circle/ring/roundedrect/gradienth/gradientv/radialgradient）
