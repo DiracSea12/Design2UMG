@@ -465,8 +465,8 @@ FUMGWidgetNode FVisualMapper::WrapWithBoxShadow(FUMGWidgetNode&& Widget, const T
 	if (Node->CornerRadius.bUniform)
 		CornerRadius = Node->CornerRadius.Uniform;
 	else
-		CornerRadius = (Node->CornerRadius.TopLeft + Node->CornerRadius.TopRight
-			+ Node->CornerRadius.BottomRight + Node->CornerRadius.BottomLeft) * 0.25f;
+		CornerRadius = FMath::Max(FMath::Max(Node->CornerRadius.TopLeft, Node->CornerRadius.TopRight),
+			FMath::Max(Node->CornerRadius.BottomRight, Node->CornerRadius.BottomLeft));
 
 	int32 TexW = FMath::Max(1, FMath::RoundToInt(Node->Width.Value + Extent * 2));
 	int32 TexH = FMath::Max(1, FMath::RoundToInt(Node->Height.Value + Extent * 2));
