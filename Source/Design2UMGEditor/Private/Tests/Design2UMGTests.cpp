@@ -458,7 +458,7 @@ bool FFigmaComplexParserTest::RunTest(const FString& Parameters)
 	const auto& Dashboard = Doc.Children[0];
 	TestEqual(TEXT("Dashboard type"), Dashboard->Type, EPenNodeType::Frame);
 	TestEqual(TEXT("Dashboard layout"), Dashboard->Layout, EPenLayout::Horizontal);
-	TestFalse(TEXT("Dashboard clip (Figma clipsContent not mapped)"), Dashboard->bClip);
+	TestTrue(TEXT("Dashboard clip (Figma clipsContent mapped)"), Dashboard->bClip);
 	TestEqual(TEXT("Dashboard children"), Dashboard->Children.Num(), 2);
 	if (Dashboard->Children.Num() < 2)
 		return false;

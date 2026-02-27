@@ -373,7 +373,8 @@ void FFigmaParser::ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNo
 	else
 		OutNode.AlignItems = EPenAlignItems::Start;
 
-	// Figma clipsContent 不映射 —— UMG 布局尺寸与 Figma 不一致，盲目裁剪会隐藏文字
+	OutNode.bHasClip = true;
+	OutNode.bClip = GetBool(NodeObj, TEXT("clipsContent"), false);
 }
 
 // ---------------------------------------------------------------------------
