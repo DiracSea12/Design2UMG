@@ -124,6 +124,75 @@ FString FFontResolver::FindBestTypeface(const FString& FontFamily, const FString
 	return BestName;
 }
 
+FString FFontResolver::WeightNameFromFile(const FString& FilePath, const FString& FamilyName)
+{
+	FString Base = FPaths::GetBaseFilename(FilePath);
+	// Strip family prefix (e.g. "Roboto-Bold" → "Bold", "Roboto_Light" → "Light")
+	FString Suffix = Base;
+	if (Base.StartsWith(FamilyName, ESearchCase::IgnoreCase))
+	{
+		Suffix = Base.Mid(FamilyName.Len());
+		// Strip separator
+		if (Suffix.StartsWith(TEXT("-")) || Suffix.StartsWith(TEXT("_")))
+			Suffix = Suffix.Mid(1);
+	}
+	if (Suffix.IsEmpty())
+		return TEXT("Regular");
+
+	// Map common suffixes to standard weight names
+	FString S = Suffix.ToLower();
+	if (S == TEXT("thin") || S == TEXT("hairline"))       return TEXT("Thin");
+	if (S == TEXT("extralight") || S == TEXT("ultralight")) return TEXT("ExtraLight");
+	if (S == TEXT("light"))      return TEXT("Light");
+	if (S == TEXT("regular") || S == TEXT("normal"))       return TEXT("Regular");
+	if (S == TEXT("medium"))     return TEXT("Medium");
+	if (S == TEXT("semibold") || S == TEXT("demibold"))    return TEXT("SemiBold");
+	if (S == TEXT("bold"))       return TEXT("Bold");
+	if (S == TEXT("extrabold") || S == TEXT("ultrabold"))  return TEXT("ExtraBold");
+	if (S == TEXT("black") || S == TEXT("heavy"))          return TEXT("Black");
+	// Italic variants: strip "italic" and re-check
+	if (S.Contains(TEXT("italic")))
+	{
+		FString Base2 = S.Replace(TEXT("italic"), TEXT("")).TrimStartAndEnd();
+		Base2.ReplaceInline(TEXT("-"), TEXT(""));
+		Base2.ReplaceInline(TEXT("_"), TEXT(""));
+		if (Base2.IsEmpty() || Base2 == TEXT("regular"))
+			return TEXT("Regular");
+		// Recurse with cleaned name
+		return WeightNameFromFile(Base2, TEXT(""));
+	}
+	return Suffix; // Use as-is if unrecognized
+}
+
+TArray<FString> FFontResolver::FindSiblingFontFiles(const FString& FilePath, const FString& FamilyName)
+{
+	TArray<FString> Result;
+	FString Dir = FPaths::GetPath(FilePath);
+	FString PrimaryFile = FPaths::GetCleanFilename(FilePath);
+
+	TArray<FString> Files;
+	IFileManager::Get().FindFiles(Files, *(Dir / TEXT("*.*")), true, false);
+
+	FString SafeFamily = FamilyName;
+	SafeFamily.ReplaceInline(TEXT(" "), TEXT(""));
+
+	for (const FString& File : Files)
+	{
+		if (File == PrimaryFile)
+			continue;
+		FString Ext = FPaths::GetExtension(File, false).ToLower();
+		if (Ext != TEXT("ttf") && Ext != TEXT("otf"))
+			continue;
+		FString Base = FPaths::GetBaseFilename(File);
+		if (Base.StartsWith(FamilyName, ESearchCase::IgnoreCase)
+			|| Base.StartsWith(SafeFamily, ESearchCase::IgnoreCase))
+		{
+			Result.Add(Dir / File);
+		}
+	}
+	return Result;
+}
+
 TArray<FString> FFontResolver::FindMissingFonts(const FDesignDocument& Document)
 {
 	TSet<FString> UsedFamilies;
@@ -330,19 +399,59 @@ FString FFontResolver::ResolveFont(const FString& FontName, const FString& Url)
 	if (!Font) return FString();
 
 	Font->FontCacheType = EFontCacheType::Runtime;
-	FTypefaceEntry& Entry = Font->GetMutableInternalCompositeFont().DefaultTypeface.Fonts.AddDefaulted_GetRef();
-	Entry.Name = "Default";
-	Entry.Font = FFontData(FontFace);
-	FontPkg->MarkPackageDirty();
-	FAssetRegistryModule::AssetCreated(Font);
 
-	// Save both packages
+	// Primary typeface entry
+	FString PrimaryWeightName = bIsRemote ? TEXT("Regular") : WeightNameFromFile(Url, FontName);
+	FTypefaceEntry& Entry = Font->GetMutableInternalCompositeFont().DefaultTypeface.Fonts.AddDefaulted_GetRef();
+	Entry.Name = *PrimaryWeightName;
+	Entry.Font = FFontData(FontFace);
+
+	// Save primary FontFace package
 	FSavePackageArgs SaveArgs;
 	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
 
 	FString FaceFile = FPackageName::LongPackageNameToFilename(FacePkgName, FPackageName::GetAssetPackageExtension());
 	IFileManager::Get().MakeDirectory(*FPaths::GetPath(FaceFile), true);
 	UPackage::SavePackage(FacePkg, FontFace, *FaceFile, SaveArgs);
+
+	// Scan sibling font files for additional weight variants (local files only)
+	if (!bIsRemote)
+	{
+		TArray<FString> Siblings = FindSiblingFontFiles(Url, FontName);
+		for (const FString& SibPath : Siblings)
+		{
+			TArray<uint8> SibData;
+			if (!FFileHelper::LoadFileToArray(SibData, *SibPath) || SibData.Num() == 0)
+				continue;
+
+			FString SibWeightName = WeightNameFromFile(SibPath, FontName);
+			FString SibFaceName = SafeName + TEXT("_") + SibWeightName + TEXT("_Face");
+			FString SibFacePkgName = FontImportPath / SibFaceName;
+
+			UPackage* SibFacePkg = CreatePackage(*SibFacePkgName);
+			if (!SibFacePkg) continue;
+
+			UFontFace* SibFace = NewObject<UFontFace>(SibFacePkg, *SibFaceName, RF_Public | RF_Standalone);
+			if (!SibFace) continue;
+
+			SibFace->FontFaceData->SetData(MoveTemp(SibData));
+			SibFace->CacheSubFaces();
+			SibFacePkg->MarkPackageDirty();
+			FAssetRegistryModule::AssetCreated(SibFace);
+
+			FTypefaceEntry& SibEntry = Font->GetMutableInternalCompositeFont().DefaultTypeface.Fonts.AddDefaulted_GetRef();
+			SibEntry.Name = *SibWeightName;
+			SibEntry.Font = FFontData(SibFace);
+
+			FString SibFaceFile = FPackageName::LongPackageNameToFilename(SibFacePkgName, FPackageName::GetAssetPackageExtension());
+			UPackage::SavePackage(SibFacePkg, SibFace, *SibFaceFile, SaveArgs);
+
+			UE_LOG(LogDesign2UMG, Log, TEXT("  Added typeface '%s' from %s"), *SibWeightName, *FPaths::GetCleanFilename(SibPath));
+		}
+	}
+
+	FontPkg->MarkPackageDirty();
+	FAssetRegistryModule::AssetCreated(Font);
 
 	FString FontFile = FPackageName::LongPackageNameToFilename(FontPkgName, FPackageName::GetAssetPackageExtension());
 	UPackage::SavePackage(FontPkg, Font, *FontFile, SaveArgs);

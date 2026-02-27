@@ -34,6 +34,8 @@ struct DESIGN2UMGEDITOR_API FFontResolver
 
 private:
 	static int32 WeightFromTypefaceName(const FString& Name);
+	static FString WeightNameFromFile(const FString& FilePath, const FString& FamilyName);
+	static TArray<FString> FindSiblingFontFiles(const FString& FilePath, const FString& FamilyName);
 	static TMap<FString, FString> FontAssetCache;
 	static void CollectFontFamilies(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSet<FString>& OutFamilies);
 	static TSet<FString> ScanProjectFontAssets();
