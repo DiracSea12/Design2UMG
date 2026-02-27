@@ -374,6 +374,7 @@ TSharedPtr<FDesignNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& Jso
 	if (JsonObj->HasField(TEXT("clip")))
 		Node->bHasClip = JsonObj->TryGetBoolField(TEXT("clip"), Node->bClip);
 	JsonObj->TryGetBoolField(TEXT("placeholder"), Node->bPlaceholder);
+	TryGetNumberFieldFlexible(JsonObj, TEXT("layoutGrow"), Node->LayoutGrow);
 
 	// 视觉属性
 	if (JsonObj->HasField(TEXT("fill")))

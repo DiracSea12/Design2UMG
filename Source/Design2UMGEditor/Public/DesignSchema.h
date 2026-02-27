@@ -571,6 +571,7 @@ struct FDesignNode
 	bool bClip = false;
 	bool bHasClip = false;
 	bool bPlaceholder = false;
+	float LayoutGrow = -1.0f;  // flex-grow 权重，-1 表示未设置
 
 	// 视觉属性
 	FPenFill Fill;                   // 主填充（最顶层可见填充，向后兼容）

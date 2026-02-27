@@ -9,11 +9,25 @@ void FLayoutMapper::ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr
 	{
 		Widget.Slot.HorizontalAlignment = Node->Width.Mode == EPenSizeMode::FillContainer ? TEXT("Fill") : TEXT("Left");
 		Widget.Slot.SizeRule = Node->Height.Mode == EPenSizeMode::FillContainer ? TEXT("Fill") : TEXT("Auto");
+		if (Widget.Slot.SizeRule == TEXT("Fill") && Node->LayoutGrow >= 0.0f)
+		{
+			if (FMath::IsNearlyZero(Node->LayoutGrow))
+				Widget.Slot.SizeRule = TEXT("Auto");
+			else
+				Widget.Slot.FillWeight = Node->LayoutGrow;
+		}
 	}
 	else if (ParentLayout == EPenLayout::Horizontal)
 	{
 		Widget.Slot.VerticalAlignment = Node->Height.Mode == EPenSizeMode::FillContainer ? TEXT("Fill") : TEXT("Top");
 		Widget.Slot.SizeRule = Node->Width.Mode == EPenSizeMode::FillContainer ? TEXT("Fill") : TEXT("Auto");
+		if (Widget.Slot.SizeRule == TEXT("Fill") && Node->LayoutGrow >= 0.0f)
+		{
+			if (FMath::IsNearlyZero(Node->LayoutGrow))
+				Widget.Slot.SizeRule = TEXT("Auto");
+			else
+				Widget.Slot.FillWeight = Node->LayoutGrow;
+		}
 	}
 	else
 	{

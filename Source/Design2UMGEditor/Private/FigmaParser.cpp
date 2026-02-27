@@ -419,6 +419,11 @@ void FFigmaParser::ParseSize(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode
 		OutNode.Height = FPenSize::Fixed(H);
 	}
 
+	// Figma layoutGrow: 1.0 = fill, 0.0 = fixed (only meaningful in auto-layout)
+	double GrowVal = 0.0;
+	if (NodeObj->TryGetNumberField(TEXT("layoutGrow"), GrowVal))
+		OutNode.LayoutGrow = static_cast<float>(GrowVal);
+
 	OutNode.bHasWidth = true;
 	OutNode.bHasHeight = true;
 }
