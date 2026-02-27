@@ -352,13 +352,39 @@ FUMGWidgetNode FVisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TSha
 	if (FLayoutMapper::HasPadding(Node))
 		FLayoutMapper::ApplyPadding(Border, Node->Padding);
 
-	for (const FString& Key : {TEXT("DrawAs"), TEXT("OutlineCornerRadius"), TEXT("CornerRadii"), TEXT("OutlineThickness"), TEXT("OutlineColor"), TEXT("StrokePadding"), TEXT("StrokeMargin")})
+	for (const FString& Key : {TEXT("DrawAs"), TEXT("OutlineCornerRadius"), TEXT("CornerRadii"), TEXT("OutlineThickness"), TEXT("OutlineColor"), TEXT("StrokePadding")})
 	{
 		if (const FString* V = Widget.Properties.Find(Key))
 		{
 			Border.Properties.Add(Key, *V);
 			Widget.Properties.Remove(Key);
 		}
+	}
+
+	// Outside stroke: expand Border bounds so the centered UMG outline appears fully outside,
+	// then add StrokePadding to keep content at its original position.
+	if (const FString* SM = Widget.Properties.Find(TEXT("StrokeMargin")))
+	{
+		FMargin M = FUMGWidgetUtils::ParseMargin(*SM);
+		float Outset = -M.Left; // StrokeMargin stores negative values
+		if (Outset > 0)
+		{
+			Border.Bounds.X -= Outset;
+			Border.Bounds.Y -= Outset;
+			Border.Bounds.W += Outset * 2.0f;
+			Border.Bounds.H += Outset * 2.0f;
+
+			FString Pad = FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"), Outset, Outset, Outset, Outset);
+			if (const FString* Existing = Border.Properties.Find(TEXT("StrokePadding")))
+			{
+				FMargin EP = FUMGWidgetUtils::ParseMargin(*Existing);
+				Pad = FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"),
+					EP.Left + Outset, EP.Top + Outset, EP.Right + Outset, EP.Bottom + Outset);
+				Border.Properties.Remove(TEXT("StrokePadding"));
+			}
+			Border.Properties.Add(TEXT("StrokePadding"), Pad);
+		}
+		Widget.Properties.Remove(TEXT("StrokeMargin"));
 	}
 
 	if (const FString* Opacity = Widget.Properties.Find(TEXT("RenderOpacity")))
