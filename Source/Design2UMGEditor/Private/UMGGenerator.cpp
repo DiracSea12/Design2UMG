@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
 #include "UMGGenerator.h"
 #include "UMGWidgetUtils.h"
@@ -14,6 +14,69 @@
 #include "Kismet2/KismetEditorUtilities.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "UObject/SavePackage.h"
+
+namespace
+{
+	FUMGSlotData MakeCanvasFillSlot()
+	{
+		FUMGSlotData Slot;
+		Slot.Anchors.Min.X = 0.0f;
+		Slot.Anchors.Min.Y = 0.0f;
+		Slot.Anchors.Max.X = 1.0f;
+		Slot.Anchors.Max.Y = 1.0f;
+		Slot.Alignment.X = 0.0f;
+		Slot.Alignment.Y = 0.0f;
+		Slot.Offsets.Left = 0.0f;
+		Slot.Offsets.Top = 0.0f;
+		Slot.Offsets.Right = 0.0f;
+		Slot.Offsets.Bottom = 0.0f;
+		Slot.bAutoSize = false;
+		return Slot;
+	}
+
+	FUMGWidgetNode WrapRootForViewport(
+		FUMGWidgetNode&& InRoot,
+		const FIntPoint& ViewportSize,
+		const FIntPoint& ContentSize,
+		bool bDownOnly)
+	{
+		FUMGWidgetNode SizeBoxNode;
+		SizeBoxNode.Type = TEXT("SizeBox");
+		SizeBoxNode.Id = TEXT("__d2u_root_sizebox");
+		SizeBoxNode.Name = TEXT("D2U_RootSizeBox");
+		SizeBoxNode.Bounds.X = 0.0f;
+		SizeBoxNode.Bounds.Y = 0.0f;
+		SizeBoxNode.Bounds.W = static_cast<float>(ContentSize.X);
+		SizeBoxNode.Bounds.H = static_cast<float>(ContentSize.Y);
+		SizeBoxNode.Properties.Add(TEXT("WidthOverride"), FString::FromInt(ContentSize.X));
+		SizeBoxNode.Properties.Add(TEXT("HeightOverride"), FString::FromInt(ContentSize.Y));
+		SizeBoxNode.Children.Add(MoveTemp(InRoot));
+
+		FUMGWidgetNode ScaleBoxNode;
+		ScaleBoxNode.Type = TEXT("ScaleBox");
+		ScaleBoxNode.Id = TEXT("__d2u_root_scalebox");
+		ScaleBoxNode.Name = TEXT("D2U_RootScaleBox");
+		ScaleBoxNode.Bounds.X = 0.0f;
+		ScaleBoxNode.Bounds.Y = 0.0f;
+		ScaleBoxNode.Bounds.W = static_cast<float>(ViewportSize.X);
+		ScaleBoxNode.Bounds.H = static_cast<float>(ViewportSize.Y);
+		ScaleBoxNode.Slot = MakeCanvasFillSlot();
+		ScaleBoxNode.Properties.Add(TEXT("Stretch"), TEXT("ScaleToFit"));
+		ScaleBoxNode.Properties.Add(TEXT("StretchDirection"), bDownOnly ? TEXT("DownOnly") : TEXT("Both"));
+		ScaleBoxNode.Children.Add(MoveTemp(SizeBoxNode));
+
+		FUMGWidgetNode CanvasRoot;
+		CanvasRoot.Type = TEXT("CanvasPanel");
+		CanvasRoot.Id = TEXT("__d2u_viewport_root");
+		CanvasRoot.Name = TEXT("D2U_ViewportRoot");
+		CanvasRoot.Bounds.X = 0.0f;
+		CanvasRoot.Bounds.Y = 0.0f;
+		CanvasRoot.Bounds.W = static_cast<float>(ViewportSize.X);
+		CanvasRoot.Bounds.H = static_cast<float>(ViewportSize.Y);
+		CanvasRoot.Children.Add(MoveTemp(ScaleBoxNode));
+		return CanvasRoot;
+	}
+}
 
 UWidgetBlueprint* FUMGGenerator::GenerateWidgetBlueprint(const FUMGWidgetData& WidgetData, const FString& PackagePath)
 {
@@ -85,18 +148,52 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 
 	// v2.2: 应用Fixer修正Bounds（创建可修改副本）
 	FUMGWidgetNode FixedRoot = WidgetData.RootWidget;
-	FIntPoint DesignSize = UDesign2UMGSettings::Get()->GetDesignSize();
-	// 设计稿实际尺寸可能超过配置的 DesignSize（如设计系统组件库 4865x2781）
-	// Fixer 归一化/反归一化必须使用实际尺寸，否则坐标会被压缩
-	if (FixedRoot.Bounds.W > DesignSize.X || FixedRoot.Bounds.H > DesignSize.Y)
+	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+	const FIntPoint ConfigDesignSize = Settings->GetDesignSize();
+	const int32 RootWidth = FMath::CeilToInt(FixedRoot.Bounds.W);
+	const int32 RootHeight = FMath::CeilToInt(FixedRoot.Bounds.H);
+	const bool bHasValidRootSize = RootWidth >= 2 && RootHeight >= 2;
+	// Fidelity-first: Fixer/LayoutCalc 使用设计稿根节点的真实像素尺寸，
+	// 避免被用户配置尺寸放大/压缩而产生系统性偏移。
+	FIntPoint DesignSize = bHasValidRootSize
+		? FIntPoint(RootWidth, RootHeight)
+		: ConfigDesignSize;
+	if (bHasValidRootSize && (DesignSize != ConfigDesignSize))
 	{
-		DesignSize.X = FMath::Max(DesignSize.X, FMath::CeilToInt(FixedRoot.Bounds.W));
-		DesignSize.Y = FMath::Max(DesignSize.Y, FMath::CeilToInt(FixedRoot.Bounds.H));
-		UE_LOG(LogDesign2UMG, Log, TEXT("DesignSize overridden to %dx%d (root bounds %.0fx%.0f)"),
-			DesignSize.X, DesignSize.Y, FixedRoot.Bounds.W, FixedRoot.Bounds.H);
+		UE_LOG(LogDesign2UMG, Log,
+			TEXT("Using root design size %dx%d (config %dx%d, root bounds %.0fx%.0f)"),
+			DesignSize.X, DesignSize.Y,
+			ConfigDesignSize.X, ConfigDesignSize.Y,
+			FixedRoot.Bounds.W, FixedRoot.Bounds.H);
+	}
+	else if (!bHasValidRootSize)
+	{
+		UE_LOG(LogDesign2UMG, Warning,
+			TEXT("Root bounds invalid (%.2fx%.2f), fallback to config design size %dx%d"),
+			FixedRoot.Bounds.W, FixedRoot.Bounds.H,
+			ConfigDesignSize.X, ConfigDesignSize.Y);
 	}
 	FUMGWidgetUtils::EffectiveDesignSize = DesignSize;
-	FUMGWidgetUtils::ApplyFixer(FixedRoot, DesignSize);
+	if (Settings->bEnableLayoutFixer)
+	{
+		FUMGWidgetUtils::ApplyFixer(FixedRoot, DesignSize);
+	}
+
+	const bool bOversizedRoot =
+		(FixedRoot.Bounds.W > static_cast<float>(ConfigDesignSize.X)) ||
+		(FixedRoot.Bounds.H > static_cast<float>(ConfigDesignSize.Y));
+	if (Settings->bAutoWrapOversizedRootForViewport && bOversizedRoot)
+	{
+		UE_LOG(LogDesign2UMG, Log, TEXT("Wrapping oversized root for viewport fit: root=%.0fx%.0f config=%dx%d stretch=%s"),
+			FixedRoot.Bounds.W, FixedRoot.Bounds.H,
+			ConfigDesignSize.X, ConfigDesignSize.Y,
+			Settings->bViewportScaleDownOnly ? TEXT("DownOnly") : TEXT("Both"));
+		FixedRoot = WrapRootForViewport(
+			MoveTemp(FixedRoot),
+			ConfigDesignSize,
+			DesignSize,
+			Settings->bViewportScaleDownOnly);
+	}
 
 	// Dump widget tree only in verbose mode.
 	if (UE_LOG_ACTIVE(LogDesign2UMG, Verbose))
@@ -146,6 +243,18 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 		return nullptr;
 	}
 	WBP->WidgetTree->RootWidget = Root;
+
+	// 设置编辑器显示尺寸到 CDO，避免编辑器中显示偏差
+	if (UClass* GeneratedClass = WBP->GeneratedClass)
+	{
+		if (UUserWidget* CDO = Cast<UUserWidget>(GeneratedClass->GetDefaultObject()))
+		{
+			CDO->DesignTimeSize = FVector2D(DesignSize.X, DesignSize.Y);
+			CDO->DesignSizeMode = EDesignPreviewSizeMode::Custom;
+			UE_LOG(LogDesign2UMG, Log, TEXT("Set DesignTimeSize to %.0fx%.0f (mode=Custom)"),
+				CDO->DesignTimeSize.X, CDO->DesignTimeSize.Y);
+		}
+	}
 
 	Package->MarkPackageDirty();
 	FAssetRegistryModule::AssetCreated(WBP);
