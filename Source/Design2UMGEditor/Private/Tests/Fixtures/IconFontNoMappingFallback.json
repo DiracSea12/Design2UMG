@@ -1,4 +1,4 @@
-{
+﻿{
   "children": [
     {
       "id": "root",
@@ -10,7 +10,7 @@
         {
           "id": "icon1",
           "type": "icon_font",
-          "iconFontFamily": "Material Symbols Sharp",
+          "iconFontFamily": "MissingIconFamily_UnitTest",
           "iconFontName": "dashboard",
           "fontSize": 20
         }

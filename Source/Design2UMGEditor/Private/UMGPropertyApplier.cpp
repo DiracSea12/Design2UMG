@@ -7,6 +7,7 @@
 
 #include "Components/Widget.h"
 #include "Components/TextBlock.h"
+#include "Components/TextWidgetTypes.h"
 #include "Components/RichTextBlock.h"
 #include "Components/Image.h"
 #include "Components/Button.h"
@@ -37,6 +38,7 @@
 #include "Components/TileView.h"
 #include "Components/MenuAnchor.h"
 #include "Components/SafeZone.h"
+#include "Fonts/FontCache.h"
 #include "Styling/SlateBrush.h"
 #include "Engine/UserInterfaceSettings.h"
 
@@ -161,10 +163,19 @@ namespace
 			T->SetLineHeightPercentage(FCString::Atof(**V));
 		if (const FString* V = GET_PROP("AutoWrapText"))
 			T->SetAutoWrapText(V->ToBool());
+		if (const FString* V = GET_PROP("WrapTextAt"))
+			T->SetWrapTextAt(FCString::Atof(**V));
 		if (const FString* V = GET_PROP("ShadowOffset"))
 			T->SetShadowOffset(FUMGWidgetUtils::ParseVector2D(*V));
 		if (const FString* V = GET_PROP("ShadowColorAndOpacity"))
 			T->SetShadowColorAndOpacity(FUMGWidgetUtils::ParseColor(*V));
+		if (bIsIconFontWidget)
+		{
+			FShapedTextOptions IconShaping;
+			IconShaping.bOverride_TextShapingMethod = true;
+			IconShaping.TextShapingMethod = ETextShapingMethod::FullShaping;
+			T->SetShapedTextOptions(IconShaping);
+		}
 	}
 
 	void ApplyButtonProps(UWidget* W, const TMap<FString, FString>& P)
@@ -203,9 +214,13 @@ namespace
 			if (UTexture2D* Tex = FPenPathRasterizer::Rasterize(*Geom, PW, PH, PathColor, FillRuleStr))
 			{
 				I->SetBrushFromTexture(Tex);
+				FSlateBrush PathBrush = I->GetBrush();
+				PathBrush.ImageSize = FVector2D(PW, PH);
+				PathBrush.Tiling = ESlateBrushTileType::NoTile;
+				I->SetBrush(PathBrush);
 				I->SetDesiredSizeOverride(FVector2D(PW, PH));
 				FSlateBrush DbgBrush = I->GetBrush();
-				UE_LOG(LogDesign2UMG, Log, TEXT("PathGeometry applied: name=%s tex=%dx%d desired=%dx%d brush.ImageSize=%.0fx%.0f brush.DrawAs=%d"),
+				UE_LOG(LogDesign2UMG, Verbose, TEXT("PathGeometry applied: name=%s tex=%dx%d desired=%dx%d brush.ImageSize=%.0fx%.0f brush.DrawAs=%d"),
 					*W->GetName(), Tex->GetSizeX(), Tex->GetSizeY(), PW, PH,
 					DbgBrush.ImageSize.X, DbgBrush.ImageSize.Y, (int32)DbgBrush.GetDrawType());
 				return;

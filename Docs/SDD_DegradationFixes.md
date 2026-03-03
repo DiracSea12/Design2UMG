@@ -49,7 +49,7 @@ case EPenNodeType::Ellipse:
 **新增函数：`Design2UMGConverter.cpp` + `.h`**
 
 ```cpp
-FUMGWidgetNode FDesign2UMGConverter::CreateEllipseWidget(const TSharedPtr<FPenNode>& Node)
+FUMGWidgetNode FDesign2UMGConverter::CreateEllipseWidget(const TSharedPtr<FDesignNode>& Node)
 {
     FUMGWidgetNode Widget;
     Widget.Type = TEXT("Border");
@@ -80,7 +80,7 @@ FUMGWidgetNode FDesign2UMGConverter::CreateEllipseWidget(const TSharedPtr<FPenNo
 
 ### 3.1 原理
 
-.pen 文件的 Path 节点携带完整的 SVG path data（`FPenNode::Geometry`，如 `"M0 64L249.38 64..."`）。在导入阶段将 geometry 解析并栅格化为像素数据，生成 `UTexture2D`，然后将节点类型从 Path 改为 Image。
+.pen 文件的 Path 节点携带完整的 SVG path data（`FDesignNode::Geometry`，如 `"M0 64L249.38 64..."`）。在导入阶段将 geometry 解析并栅格化为像素数据，生成 `UTexture2D`，然后将节点类型从 Path 改为 Image。
 
 ### 3.2 架构决策：自研 vs 外部库
 
@@ -201,7 +201,7 @@ case EPenNodeType::Path:
 
 **新增函数：**
 ```cpp
-FUMGWidgetNode FDesign2UMGConverter::CreatePathWidget(const TSharedPtr<FPenNode>& Node)
+FUMGWidgetNode FDesign2UMGConverter::CreatePathWidget(const TSharedPtr<FDesignNode>& Node)
 {
     FUMGWidgetNode Widget;
 
@@ -337,7 +337,7 @@ case EPenEffectType::Shadow:
 
 新增包裹函数：
 ```cpp
-static FUMGWidgetNode WrapWithBoxShadow(FUMGWidgetNode&& Widget, const TSharedPtr<FPenNode>& Node);
+static FUMGWidgetNode WrapWithBoxShadow(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node);
 ```
 
 在 `Design2UMGConverter.cpp` 的 `ConvertNode` 中，BackgroundBlur 包裹之前检测 BoxShadow 属性并包裹。

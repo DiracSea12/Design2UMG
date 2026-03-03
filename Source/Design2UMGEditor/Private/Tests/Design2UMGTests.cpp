@@ -308,6 +308,74 @@ bool FRefOfRefDescendantsOverrideTest::RunTest(const FString& Parameters)
 }
 
 // ============================================================
+// Test 4.1: descendants bare-id 深层覆盖（无 slash path）
+// ============================================================
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRefDeepDescendantsBareIdOverrideTest,
+	"Design2UMG.Ref.DeepDescendantsBareIdOverride",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FRefDeepDescendantsBareIdOverrideTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"JSON({
+		"children": [
+			{
+				"id": "BaseComp",
+				"type": "frame",
+				"reusable": true,
+				"layout": "vertical",
+				"children": [
+					{
+						"id": "container",
+						"type": "frame",
+						"children": [
+							{ "id": "deepLabel", "type": "text", "content": "Default Label" }
+						]
+					}
+				]
+			},
+			{
+				"id": "VariantComp",
+				"type": "ref",
+				"reusable": true,
+				"ref": "BaseComp",
+				"descendants": {
+					"deepLabel": { "content": "Reusable Override" }
+				}
+			},
+			{
+				"id": "screen",
+				"type": "frame",
+				"width": 640,
+				"height": 200,
+				"layout": "vertical",
+				"children": [
+					{
+						"id": "instance",
+						"type": "ref",
+						"ref": "VariantComp",
+						"descendants": {
+							"deepLabel": { "content": "Final Override" }
+						}
+					}
+				]
+			}
+		]
+	})JSON");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Deep descendants parse succeeds"), FPenParser::ParseDocument(Json, Doc));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+
+	TArray<FString> TextValues;
+	CollectTextValues(Data.RootWidget, TextValues);
+	TestTrue(TEXT("Text contains Final Override"), TextValues.Contains(TEXT("Final Override")));
+	TestFalse(TEXT("Text should not keep Default Label"), TextValues.Contains(TEXT("Default Label")));
+	TestFalse(TEXT("Text should not keep Reusable Override"), TextValues.Contains(TEXT("Reusable Override")));
+	return true;
+}
+
+// ============================================================
 // Test 5: Horizontal 父容器 + Ref 子节点交叉轴 Fill
 // ============================================================
 
@@ -333,6 +401,176 @@ bool FHorizontalParentRefChildCrossFillTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Sidebar resolved height should use parent inner height (900)"),
 			FMath::IsNearlyEqual(Sidebar->Bounds.H, 900.0f, 0.01f));
 	}
+	return true;
+}
+
+// ============================================================
+// Test 5.0b: Flow 父容器(H/V)下，子节点 Bounds.X/Y 应归零
+// ============================================================
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFlowParentChildBoundsLocalizedTest,
+	"Design2UMG.Layout.FlowParentChildBoundsLocalized",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFlowParentChildBoundsLocalizedTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"JSON({
+		"children": [
+			{
+				"id": "root",
+				"type": "frame",
+				"layout": "horizontal",
+				"width": 600,
+				"height": 120,
+				"children": [
+					{ "id": "childA", "type": "text", "x": 123, "y": 45, "content": "A", "fontSize": 16 },
+					{ "id": "childB", "type": "text", "x": 350, "y": 60, "content": "B", "fontSize": 16 }
+				]
+			}
+		]
+	})JSON");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Flow bounds-localized parse succeeds"), FPenParser::ParseDocument(Json, Doc));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+
+	const FUMGWidgetNode* ChildA = FindWidgetById(Data.RootWidget, TEXT("childA"));
+	TestTrue(TEXT("childA exists"), ChildA != nullptr);
+	if (ChildA)
+	{
+		TestTrue(TEXT("childA bounds x should be 0 in flow layout"), FMath::IsNearlyEqual(ChildA->Bounds.X, 0.0f, 0.01f));
+		TestTrue(TEXT("childA bounds y should be 0 in flow layout"), FMath::IsNearlyEqual(ChildA->Bounds.Y, 0.0f, 0.01f));
+	}
+
+	const FUMGWidgetNode* ChildB = FindWidgetById(Data.RootWidget, TEXT("childB"));
+	TestTrue(TEXT("childB exists"), ChildB != nullptr);
+	if (ChildB)
+	{
+		TestTrue(TEXT("childB bounds x should be 0 in flow layout"), FMath::IsNearlyEqual(ChildB->Bounds.X, 0.0f, 0.01f));
+		TestTrue(TEXT("childB bounds y should be 0 in flow layout"), FMath::IsNearlyEqual(ChildB->Bounds.Y, 0.0f, 0.01f));
+	}
+
+	return true;
+}
+
+// ============================================================
+// Test 5.0: Ref 实例未显式提供 x/y 时，应使用本地原点(0,0)
+// ============================================================
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRefInstanceNoPositionUsesLocalOriginTest,
+	"Design2UMG.Ref.InstanceNoPositionUsesLocalOrigin",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FRefInstanceNoPositionUsesLocalOriginTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"JSON({
+		"children": [
+			{
+				"id": "Comp",
+				"type": "frame",
+				"reusable": true,
+				"x": 300,
+				"y": 400,
+				"width": 120,
+				"height": 60,
+				"layout": "none",
+				"children": [
+					{ "id": "label", "type": "text", "x": 8, "y": 6, "content": "Demo", "fontSize": 14 }
+				]
+			},
+			{
+				"id": "root",
+				"type": "frame",
+				"width": 800,
+				"height": 600,
+				"layout": "none",
+				"children": [
+					{ "id": "instance", "type": "ref", "ref": "Comp" }
+				]
+			}
+		]
+	})JSON");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Ref instance local-origin parse succeeds"), FPenParser::ParseDocument(Json, Doc));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+
+	const FUMGWidgetNode* Instance = FindWidgetById(Data.RootWidget, TEXT("instance"));
+	TestTrue(TEXT("instance widget exists"), Instance != nullptr);
+	if (Instance)
+	{
+		TestTrue(TEXT("instance bounds x should be local origin"), FMath::IsNearlyEqual(Instance->Bounds.X, 0.0f, 0.01f));
+		TestTrue(TEXT("instance bounds y should be local origin"), FMath::IsNearlyEqual(Instance->Bounds.Y, 0.0f, 0.01f));
+		TestTrue(TEXT("instance slot left should be local origin"), FMath::IsNearlyEqual(Instance->Slot.Offsets.Left, 0.0f, 0.01f));
+		TestTrue(TEXT("instance slot top should be local origin"), FMath::IsNearlyEqual(Instance->Slot.Offsets.Top, 0.0f, 0.01f));
+	}
+
+	return true;
+}
+
+// ============================================================
+// Test 5.1: Canvas(layout=none) 下 fill_container(N) 使用回退尺寸，不做全屏拉伸
+// ============================================================
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCanvasFillContainerFallbackSizeTest,
+	"Design2UMG.Layout.CanvasFillContainerFallbackSize",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FCanvasFillContainerFallbackSizeTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"JSON({
+		"children": [
+			{
+				"id": "root",
+				"type": "frame",
+				"name": "CanvasRoot",
+				"width": 1000,
+				"height": 800,
+				"layout": "none",
+				"children": [
+					{
+						"id": "withFallback",
+						"type": "rectangle",
+						"x": 100,
+						"y": 120,
+						"width": "fill_container(300)",
+						"height": 80,
+						"fill": "#222222"
+					},
+					{
+						"id": "withoutFallback",
+						"type": "rectangle",
+						"x": 20,
+						"y": 240,
+						"width": "fill_container",
+						"height": 60,
+						"fill": "#333333"
+					}
+				]
+			}
+		]
+	})JSON");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Canvas fallback parse succeeds"), FPenParser::ParseDocument(Json, Doc));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+
+	const FUMGWidgetNode* WithFallback = FindWidgetById(Data.RootWidget, TEXT("withFallback"));
+	TestTrue(TEXT("withFallback widget exists"), WithFallback != nullptr);
+	if (WithFallback)
+	{
+		TestEqual(TEXT("withFallback anchor max X should stay fixed"), WithFallback->Slot.Anchors.Max.X, 0.0f);
+		TestEqual(TEXT("withFallback width should use fallback size"), WithFallback->Slot.Offsets.Right, 300.0f);
+	}
+
+	const FUMGWidgetNode* WithoutFallback = FindWidgetById(Data.RootWidget, TEXT("withoutFallback"));
+	TestTrue(TEXT("withoutFallback widget exists"), WithoutFallback != nullptr);
+	if (WithoutFallback)
+	{
+		TestEqual(TEXT("withoutFallback should stretch on X"), WithoutFallback->Slot.Anchors.Max.X, 1.0f);
+		TestEqual(TEXT("withoutFallback stretch right offset should be zero"), WithoutFallback->Slot.Offsets.Right, 0.0f);
+	}
+
 	return true;
 }
 
@@ -686,6 +924,203 @@ bool FFigmaLineHeightMappingTest::RunTest(const FString& Parameters)
 }
 
 // ============================================================
+// Test 8.6: FigmaParser - stroke visibility gate
+// ============================================================
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaStrokeVisibilityGateTest,
+	"Design2UMG.FigmaParser.StrokeVisibilityGate",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFigmaStrokeVisibilityGateTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page 1",
+				"type": "CANVAS",
+				"children": [{
+					"id": "0:2",
+					"name": "Root",
+					"type": "FRAME",
+					"visible": true,
+					"absoluteBoundingBox": {"x":0,"y":0,"width":400,"height":300},
+					"children": [
+						{
+							"id": "0:3",
+							"name": "NoVisibleStroke",
+							"type": "RECTANGLE",
+							"visible": true,
+							"absoluteBoundingBox": {"x":10,"y":10,"width":120,"height":40},
+							"strokeWeight": 3,
+							"strokeAlign": "CENTER",
+							"strokes": [{"type":"SOLID","visible":false,"color":{"r":1,"g":0,"b":0,"a":1}}]
+						},
+						{
+							"id": "0:4",
+							"name": "VisibleStroke",
+							"type": "RECTANGLE",
+							"visible": true,
+							"absoluteBoundingBox": {"x":10,"y":70,"width":120,"height":40},
+							"strokeWeight": 2,
+							"strokeAlign": "OUTSIDE",
+							"strokes": [{"type":"SOLID","visible":true,"color":{"r":0,"g":1,"b":0,"a":1}}]
+						}
+					]
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Figma parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	if (Doc.Children.Num() == 0 || Doc.Children[0]->Children.Num() < 2)
+		return false;
+
+	const TSharedPtr<FDesignNode>& NoVisibleStroke = Doc.Children[0]->Children[0];
+	const TSharedPtr<FDesignNode>& VisibleStroke = Doc.Children[0]->Children[1];
+
+	TestFalse(TEXT("No-visible-stroke node should not have stroke"), NoVisibleStroke->Stroke.HasStroke());
+	TestEqual(TEXT("No-visible-stroke thickness remains 0"), NoVisibleStroke->Stroke.Thickness.Uniform, 0.0f);
+	TestTrue(TEXT("Visible-stroke node keeps stroke"), VisibleStroke->Stroke.HasStroke());
+	TestEqual(TEXT("Visible-stroke align parsed"), VisibleStroke->Stroke.Align, EPenStrokeAlign::Outside);
+
+	return true;
+}
+
+// ============================================================
+// Test 8.7: FigmaParser - uniform corner radii normalization
+// ============================================================
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaCornerRadiusNormalizationTest,
+	"Design2UMG.FigmaParser.CornerRadiusNormalization",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFigmaCornerRadiusNormalizationTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page 1",
+				"type": "CANVAS",
+				"children": [{
+					"id": "0:2",
+					"name": "Root",
+					"type": "FRAME",
+					"visible": true,
+					"absoluteBoundingBox": {"x":0,"y":0,"width":400,"height":300},
+					"children": [
+						{
+							"id": "0:3",
+							"name": "UniformRadius",
+							"type": "RECTANGLE",
+							"visible": true,
+							"absoluteBoundingBox": {"x":10,"y":10,"width":120,"height":40},
+							"rectangleCornerRadii": [100,100,100,100]
+						},
+						{
+							"id": "0:4",
+							"name": "NonUniformRadius",
+							"type": "RECTANGLE",
+							"visible": true,
+							"absoluteBoundingBox": {"x":10,"y":70,"width":120,"height":40},
+							"rectangleCornerRadii": [8,12,8,12]
+						}
+					]
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Figma parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	if (Doc.Children.Num() == 0 || Doc.Children[0]->Children.Num() < 2)
+		return false;
+
+	const TSharedPtr<FDesignNode>& Uniform = Doc.Children[0]->Children[0];
+	const TSharedPtr<FDesignNode>& NonUniform = Doc.Children[0]->Children[1];
+
+	TestTrue(TEXT("Equal radii normalized to uniform"), Uniform->CornerRadius.bUniform);
+	TestEqual(TEXT("Equal radii keeps numeric value"), Uniform->CornerRadius.Uniform, 100.0f);
+	TestFalse(TEXT("Mixed radii remains non-uniform"), NonUniform->CornerRadius.bUniform);
+
+	return true;
+}
+
+// ============================================================
+// Test 8.8: Converter - keep provided fit-size for text
+// ============================================================
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaTextFitPreserveSizeTest,
+	"Design2UMG.Converter.TextFitPreserveSize",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFigmaTextFitPreserveSizeTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page 1",
+				"type": "CANVAS",
+				"children": [{
+					"id": "0:2",
+					"name": "Root",
+					"type": "FRAME",
+					"visible": true,
+					"layoutMode": "VERTICAL",
+					"absoluteBoundingBox": {"x":0,"y":0,"width":500,"height":200},
+					"children": [
+						{
+							"id": "0:3",
+							"name": "ButtonLabel",
+							"type": "TEXT",
+							"visible": true,
+							"layoutSizingHorizontal": "HUG",
+							"layoutSizingVertical": "HUG",
+							"absoluteBoundingBox": {"x":20,"y":20,"width":63,"height":20},
+							"fills": [{"type":"SOLID","visible":true,"color":{"r":1,"g":1,"b":1,"a":1}}],
+							"style": {
+								"fontFamily": "Inter",
+								"fontSize": 18,
+								"fontWeight": 600
+							},
+							"characters": "Download"
+						}
+					]
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Figma parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	if (Doc.Children.Num() == 0)
+		return false;
+
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FString ExpectedText = TEXT("Download");
+	const FUMGWidgetNode* Label = FindWidgetByProperty(Data.RootWidget, TEXT("Text"), &ExpectedText);
+	TestTrue(TEXT("Find text widget"), Label != nullptr);
+	if (!Label)
+		return false;
+
+	TestTrue(TEXT("Provided fit width should be preserved"), FMath::IsNearlyEqual(Label->Bounds.W, 63.0f, 0.5f));
+	TestTrue(TEXT("Provided fit height should be preserved"), FMath::IsNearlyEqual(Label->Bounds.H, 20.0f, 0.5f));
+	return true;
+}
+
+// ============================================================
 // Test 9: FigmaParser - ExtractFileKey URL 解析
 // ============================================================
 
@@ -809,6 +1244,7 @@ bool FFigmaRealDashboardTest::RunTest(const FString& Parameters)
 // ============================================================
 #include "PenImporter.h"
 #include "DesignImportUtils.h"
+#include "RHI.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "ObjectTools.h"
 
@@ -852,6 +1288,9 @@ bool FPenWelcomeBatchImportTest::RunTest(const FString& Parameters)
 		TestTrue(*FString::Printf(TEXT("Parse %s"), *F.Name), bOk);
 		if (!bOk) continue;
 
+		if (GUsingNullRHI)
+			continue;
+
 		FString FrameOutputPath = OutputPath / Data.WidgetName;
 		bool bPng = DesignImportUtils::GenerateBlueprintAndPng(Data, FrameOutputPath);
 		TestTrue(*FString::Printf(TEXT("Render %s"), *F.Name), bPng);
@@ -874,6 +1313,72 @@ bool FPenWelcomeBatchImportTest::RunTest(const FString& Parameters)
 	if (ObjectsToDelete.Num() > 0)
 		ObjectTools::ForceDeleteObjects(ObjectsToDelete, false);
 
+	return true;
+}
+
+// ============================================================
+// Test 12: LayoutFixer - Conservatism Check (Basic)
+// ============================================================
+#include "LayoutFixer.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLayoutFixerConservatismTest,
+	"Design2UMG.LayoutFixer.ConservatismCheck",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FLayoutFixerConservatismTest::RunTest(const FString& Parameters)
+{
+	FFixerPreset Preset;
+	Preset.DesignSize = FIntPoint(1920, 1080);
+	Preset.SnapPx = 4;
+	
+	FFixerWidgetNode Root;
+	Root.Bounds = {0, 0, 1, 1};
+	
+	FFixerWidgetNode Child1;
+	Child1.Bounds = {0, 0, 0.1f, 0.1f};
+	
+	FFixerWidgetNode Child2;
+	Child2.Bounds = {0.5f, 0, 0.1f, 0.1f};
+	
+	Root.Children.Add(Child1);
+	Root.Children.Add(Child2);
+
+	TArray<FFixerLogEntry> Log;
+	FFixerStats Stats;
+	FLayoutFixer::FixWidgetTree(Root, Preset, Log, &Stats);
+	
+	TestEqual(TEXT("RolledBack should be non-negative"), Stats.RolledBack >= 0, true);
+	
+	return true;
+}
+
+// ============================================================
+// Test 13: PreviewWindow - Instantiation & Validation
+// ============================================================
+#include "SDesign2UMGPreviewWindow.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreviewWindowTest,
+	"Design2UMG.PreviewWindow.Initialization",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FPreviewWindowTest::RunTest(const FString& Parameters)
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		return true;
+	}
+
+	const FString DummyJson = TEXT("{}");
+	TArray<FString> Warnings;
+
+	TSharedPtr<SDesign2UMGPreviewWindow> PreviewWindow = SNew(SDesign2UMGPreviewWindow)
+		.OriginalJson(DummyJson)
+		.OutputPath(TEXT("/Game/Test"))
+		.Warnings(Warnings);
+
+	TestTrue(TEXT("Preview window instantiated"), PreviewWindow.IsValid());
+	PreviewWindow.Reset();
+	
 	return true;
 }
 

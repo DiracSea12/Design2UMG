@@ -59,4 +59,18 @@ public:
 		FUMGWidgetData& OutData,
 		const FString& TargetNodeId = TEXT("")
 	);
+
+	/**
+	 * Build filtered/full pen document JSON from an already parsed document object.
+	 *
+	 * @param DocObj          Parsed full document JSON object
+	 * @param OutDocumentJson Output pen document JSON string
+	 * @param TargetNodeId    Optional target frame/node id
+	 * @return true if JSON was built successfully
+	 */
+	static bool BuildFilteredDocumentJson(
+		const TSharedPtr<FJsonObject>& DocObj,
+		FString& OutDocumentJson,
+		const FString& TargetNodeId = TEXT("")
+	);
 };

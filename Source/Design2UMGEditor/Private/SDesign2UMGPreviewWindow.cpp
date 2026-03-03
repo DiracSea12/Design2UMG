@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
 #include "SDesign2UMGPreviewWindow.h"
 #include "UMGWidgetUtils.h"
@@ -578,7 +578,10 @@ UUserWidget* SDesign2UMGPreviewWindow::CreatePreviewWidgetFromJson(const FUMGWid
 	FUMGWidgetNode FixedRoot = WidgetData.RootWidget;
 	const FVector2D PreviewSize = ResolvePreviewDesignSize(WidgetData);
 	const FIntPoint DesignSize(FMath::Max(1, FMath::RoundToInt(PreviewSize.X)), FMath::Max(1, FMath::RoundToInt(PreviewSize.Y)));
-	FUMGWidgetUtils::ApplyFixer(FixedRoot, DesignSize);
+	if (UDesign2UMGSettings::Get()->bEnableLayoutFixer)
+	{
+		FUMGWidgetUtils::ApplyFixer(FixedRoot, DesignSize);
+	}
 
 	// Mark transient so GC treats it as preview-only object.
 	UUserWidget* TempWidget = NewObject<UPreviewUserWidget>(GetTransientPackage(), UPreviewUserWidget::StaticClass(), NAME_None, RF_Transient);
@@ -610,5 +613,4 @@ UUserWidget* SDesign2UMGPreviewWindow::CreatePreviewWidgetFromJson(const FUMGWid
 }
 
 #undef LOCTEXT_NAMESPACE
-
 

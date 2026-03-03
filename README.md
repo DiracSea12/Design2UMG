@@ -38,7 +38,7 @@ Clone or copy this plugin to your engine or project plugin directory:
 <Project>/Plugins/Design2UMG/
 ```
 
-Enable in Edit > Plugins > "Pen To UMG".
+Enable in Edit > Plugins > "Design2UMG".
 
 ## Quick Start
 
@@ -120,8 +120,8 @@ Key principle: **Bounds is the single source of truth.** All layout works on pix
 
 | Module | Responsibility |
 |--------|---------------|
-| `PenParser` | Parse `.pen` JSON into `FPenDocument` AST |
-| `FigmaParser` | Parse Figma REST API JSON into `FPenDocument` |
+| `PenParser` | Parse `.pen` JSON into `FDesignDocument` AST |
+| `FigmaParser` | Parse Figma REST API JSON into `FDesignDocument` |
 | `Design2UMGConverter` | Transform Pen nodes to `FUMGWidgetNode` tree |
 | `LayoutFixer` | Fix bounds overflow, alignment snapping, equal spacing |
 | `LayoutCalculator` | 9-grid anchor selection with hysteresis, edge snapping |

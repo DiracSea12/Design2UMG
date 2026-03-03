@@ -120,8 +120,8 @@ bool DesignImportUtils::GenerateBlueprintAndPng(const FUMGWidgetData& Data, cons
 	// 成功渲染后保存 Blueprint
 	FUMGGenerator::SaveWidgetBlueprint(WBP);
 
-	// 保存 PNG 到 Saved/Design2UMG
-	const FString PngName = FPaths::GetBaseFilename(FinalPath);
+	// 保存 PNG 到 Saved/Design2UMG（使用最终生成的资产名，避免同输出目录下多次导入互相覆盖）
+	const FString PngName = WBP ? WBP->GetName() : FPaths::GetBaseFilename(FinalPath);
 	const FString OutPng = FPaths::ProjectSavedDir() / TEXT("Design2UMG") / (PngName + TEXT(".png"));
 	if (!FFileHelper::SaveArrayToFile(PngData, *OutPng))
 	{

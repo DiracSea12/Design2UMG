@@ -12,6 +12,36 @@ DEFINE_LOG_CATEGORY_STATIC(LogPenMCPBridge, Log, All);
 namespace
 {
 	/** 在 JSON 数组中按 id 查找节点 */
+	FString CanonicalizeNodeId(const FString& InId)
+	{
+		FString Id = InId.TrimStartAndEnd();
+		const FString Lower = Id.ToLower();
+		if (Lower.StartsWith(TEXT("frame-"))
+			|| Lower.StartsWith(TEXT("node-"))
+			|| Lower.StartsWith(TEXT("screen-"))
+			|| Lower.StartsWith(TEXT("canvas-")))
+		{
+			int32 DashIndex = INDEX_NONE;
+			if (Id.FindChar(TEXT('-'), DashIndex))
+			{
+				const FString Suffix = Id.Mid(DashIndex + 1);
+				// 如果后缀非空，返回后缀；否则返回原始 ID
+				return Suffix.IsEmpty() ? Id : Suffix;
+			}
+		}
+		return Id;
+	}
+
+	bool IsEquivalentNodeId(const FString& NodeId, const FString& TargetId)
+	{
+		if (NodeId.Equals(TargetId, ESearchCase::CaseSensitive)
+			|| NodeId.Equals(TargetId, ESearchCase::IgnoreCase))
+		{
+			return true;
+		}
+		return CanonicalizeNodeId(NodeId).Equals(CanonicalizeNodeId(TargetId), ESearchCase::IgnoreCase);
+	}
+
 	TSharedPtr<FJsonValue> FindNodeById(const TArray<TSharedPtr<FJsonValue>>& Nodes, const FString& TargetId)
 	{
 		for (const auto& Node : Nodes)
@@ -21,7 +51,7 @@ namespace
 				continue;
 
 			FString NodeId;
-			if (Obj->TryGetStringField(TEXT("id"), NodeId) && NodeId == TargetId)
+			if (Obj->TryGetStringField(TEXT("id"), NodeId) && IsEquivalentNodeId(NodeId, TargetId))
 				return Node;
 
 			const TArray<TSharedPtr<FJsonValue>>* Children = nullptr;
@@ -159,7 +189,9 @@ FString FPenMCPBridge::AssembleDocumentJson(
 		Children = FilterWithReusables(NodesArr, TargetNodeId);
 		if (Children.Num() == 0)
 		{
-			UE_LOG(LogPenMCPBridge, Error, TEXT("TargetNodeId '%s' not found"), *TargetNodeId);
+			const FString CanonicalId = CanonicalizeNodeId(TargetNodeId);
+			UE_LOG(LogPenMCPBridge, Error, TEXT("TargetNodeId '%s' not found (hint: '%s' / 'frame-%s')"),
+				*TargetNodeId, *CanonicalId, *CanonicalId);
 			return TEXT("");
 		}
 	}
@@ -199,6 +231,19 @@ bool FPenMCPBridge::ConvertFromParsedDoc(
 	FUMGWidgetData& OutData,
 	const FString& TargetNodeId)
 {
+	FString Json;
+	if (!BuildFilteredDocumentJson(DocObj, Json, TargetNodeId))
+		return false;
+
+	return FDesignSourceRegistry::Convert(TEXT("Pen"), Json, OutData);
+}
+
+bool FPenMCPBridge::BuildFilteredDocumentJson(
+	const TSharedPtr<FJsonObject>& DocObj,
+	FString& OutDocumentJson,
+	const FString& TargetNodeId)
+{
+	OutDocumentJson.Reset();
 	if (!DocObj.IsValid())
 		return false;
 
@@ -216,15 +261,14 @@ bool FPenMCPBridge::ConvertFromParsedDoc(
 		TArray<TSharedPtr<FJsonValue>> Filtered = FilterWithReusables(Children, TargetNodeId);
 		if (Filtered.Num() == 0)
 		{
-			UE_LOG(LogPenMCPBridge, Error, TEXT("TargetNodeId '%s' not found"), *TargetNodeId);
+			const FString CanonicalId = CanonicalizeNodeId(TargetNodeId);
+			UE_LOG(LogPenMCPBridge, Error, TEXT("TargetNodeId '%s' not found (hint: '%s' / 'frame-%s')"),
+				*TargetNodeId, *CanonicalId, *CanonicalId);
 			return false;
 		}
 		Children = MoveTemp(Filtered);
 	}
 
-	FString Json = BuildDocumentJson(DocObj, Children);
-	if (Json.IsEmpty())
-		return false;
-
-	return FDesignSourceRegistry::Convert(TEXT("Pen"), Json, OutData);
+	OutDocumentJson = BuildDocumentJson(DocObj, Children);
+	return !OutDocumentJson.IsEmpty();
 }

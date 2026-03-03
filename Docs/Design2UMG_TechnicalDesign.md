@@ -188,19 +188,19 @@ if (JsonObj->HasField(TEXT("height")))
 
 ```cpp
 // 判断节点是否为固定像素宽度
-bool IsFixedPixelWidth(const FPenNode& Node)
+bool IsFixedPixelWidth(const FDesignNode& Node)
 {
     return Node.Width.Mode == EPenSizeMode::Fixed && Node.Width.Value > 0;
 }
 
 // 判断节点是否为固定像素高度
-bool IsFixedPixelHeight(const FPenNode& Node)
+bool IsFixedPixelHeight(const FDesignNode& Node)
 {
     return Node.Height.Mode == EPenSizeMode::Fixed && Node.Height.Value > 0;
 }
 
 // 判断节点是否为 Collapsed（不可见且不占空间）
-bool IsCollapsed(const FPenNode& Node)
+bool IsCollapsed(const FDesignNode& Node)
 {
     return !Node.bEnabled;  // .pen 中 enabled=false 映射为 Collapsed
 }
@@ -540,7 +540,7 @@ UMG 的 CanvasPanel/VerticalBox/HorizontalBox 本身不渲染背景。当 frame 
 
 ```cpp
 // padding 通过 UBorder 包装实现容器级内边距
-UWidget* ApplyPadding(UPanelWidget* Container, const FPenNode& Node, UWidgetTree* WidgetTree)
+UWidget* ApplyPadding(UPanelWidget* Container, const FDesignNode& Node, UWidgetTree* WidgetTree)
 {
     if (Node.Padding.Left == 0 && Node.Padding.Top == 0 &&
         Node.Padding.Right == 0 && Node.Padding.Bottom == 0)
@@ -560,7 +560,7 @@ UWidget* ApplyPadding(UPanelWidget* Container, const FPenNode& Node, UWidgetTree
 > **限制**：RenderTransform不参与布局计算，旋转后的AABB不会反映到Slot尺寸。仅对固定位置的CanvasPanel子元素调整Slot。
 
 ```cpp
-void ApplyRotation(UWidget* Widget, const FPenNode& Node, UPanelSlot* Slot)
+void ApplyRotation(UWidget* Widget, const FDesignNode& Node, UPanelSlot* Slot)
 {
     if (Node.Rotation == 0.0f)
         return;
@@ -795,7 +795,7 @@ UCanvasPanelSlot 的 `AutoSize` 是单一布尔开关，无法独立控制宽高
 ```cpp
 // 应用文本属性到 TextBlock
 // @param Settings 转换设置，包含 FontMapping
-void ApplyTextProperties(UTextBlock* TextBlock, const FPenNode& Node,
+void ApplyTextProperties(UTextBlock* TextBlock, const FDesignNode& Node,
                          const FPenConversionSettings& Settings)
 {
     TextBlock->SetText(FText::FromString(Node.Content));
@@ -909,7 +909,7 @@ UMG 的 TextBlock 不支持垂直对齐。需要通过容器实现：
 
 ```cpp
 // 水平对齐映射
-// Review 修复: FPenNode::TextAlign 是 ETextJustify::Type 枚举，直接比较
+// Review 修复: FDesignNode::TextAlign 是 ETextJustify::Type 枚举，直接比较
 if (Node.TextAlign == ETextJustify::Center)
     TextBlock->SetJustification(ETextJustify::Center);
 else if (Node.TextAlign == ETextJustify::Right)
@@ -977,7 +977,7 @@ FLinearColor ParseColor(const FString& HexColor)
 #### 3.7.2 RoundedBox 实现（推荐）
 
 ```cpp
-void ApplyRoundedCorner(UBorder* Border, const FPenNode& Node,
+void ApplyRoundedCorner(UBorder* Border, const FDesignNode& Node,
                         const FPenVariableResolver& Resolver)
 {
     FSlateBrush Brush;
@@ -1077,10 +1077,10 @@ private:
 #### 3.8.4 集成到解析流程
 
 ```cpp
-FPenNode FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonObj,
+FDesignNode FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonObj,
                                 const FPenVariableResolver& Resolver)
 {
-    FPenNode Node;
+    FDesignNode Node;
 
     // 解析填充色（支持变量和对象格式）
     if (JsonObj->HasField(TEXT("fill")))
@@ -1122,7 +1122,7 @@ FPenNode FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonObj,
 }
 ```
 
-> **变量解析时机**：变量在 JSON 解析阶段统一替换，FPenNode 存储已解析的实际值。
+> **变量解析时机**：变量在 JSON 解析阶段统一替换，FDesignNode 存储已解析的实际值。
 > **设计决策**：Widget Blueprint 是静态资产，运行时主题切换需要 SlateStyle 系统，超出本模块范围。
 
 ### 3.9 图标字体 (icon_font)
@@ -1150,7 +1150,7 @@ FPenNode FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonObj,
 #### 3.9.2 实现方案
 
 ```cpp
-UWidget* CreateIconFontWidget(const FPenNode& Node, const FPenConversionSettings& Settings)
+UWidget* CreateIconFontWidget(const FDesignNode& Node, const FPenConversionSettings& Settings)
 {
     UTextBlock* TextBlock = WidgetTree->ConstructWidget<UTextBlock>();
 
@@ -1269,7 +1269,7 @@ UMG 无原生椭圆、线条、多边形控件，通过运行时生成纹理实�
 **UMG 映射**：`UImage` + 运行时生成椭圆纹理
 
 ```cpp
-UTexture2D* GenerateEllipseTexture(const FPenNode& Node)
+UTexture2D* GenerateEllipseTexture(const FDesignNode& Node)
 {
     int32 Width = FMath::Max(1, FMath::RoundToInt(Node.Width.Value));
     int32 Height = FMath::Max(1, FMath::RoundToInt(Node.Height.Value));

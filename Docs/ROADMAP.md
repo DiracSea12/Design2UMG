@@ -135,7 +135,7 @@
 
 | 任务 | 文件 | 状态 |
 |------|------|------|
-| FPenNode 新增 `TArray<FPenInteraction> Interactions` | PenSchema.h | [ ] |
+| FDesignNode 新增 `TArray<FPenInteraction> Interactions` | PenSchema.h | [ ] |
 | 定义 `FPenInteraction`（Trigger + Action + TargetNodeId） | PenSchema.h | [ ] |
 | 定义 `EPenTriggerType`（OnClick / OnHover / OnPress） | PenSchema.h | [ ] |
 | 定义 `EPenActionType`（NavigateTo / SetVisibility / OpenURL） | PenSchema.h | [ ] |

@@ -264,7 +264,7 @@ namespace
 	}
 
 	/** 导入指定 TargetNodeId 的 frame */
-	void ImportPenFileWithTargetNode(const FString& FilePath, const FString& TargetNodeId, const FString& OutputPath, bool bUsePreview)
+	void ImportPenFileWithTargetNode(const FString& FilePath, const FString& TargetNodeId, const FString& OutputPath, bool bUsePreview, bool bRenderPng)
 	{
 		FUMGWidgetData Data;
 		if (!FPenImporter::ImportFileWithTargetNode(FilePath, TargetNodeId, Data))
@@ -276,11 +276,14 @@ namespace
 			LOCTEXT("PenConvertPreviewWindowTitle", "Design2UMG Pen Preview")))
 			return;
 
-		DesignImportUtils::GenerateBlueprintAndPng(Data, OutputPath);
+		if (bRenderPng)
+			DesignImportUtils::GenerateBlueprintAndPng(Data, OutputPath);
+		else
+			DesignImportUtils::GenerateBlueprint(Data, OutputPath);
 	}
 
 	/** 导入 .pen 文件（工具栏 + 控制台命令共用） */
-	void ImportPenFile(const FString& FilePath, const FString& OutputPath, bool bUsePreview = true)
+	void ImportPenFile(const FString& FilePath, const FString& OutputPath, bool bUsePreview = true, bool bRenderPng = true)
 	{
 		// 先解析文档，检查顶层 frame 数量
 		FDesignDocument Document;
@@ -319,7 +322,10 @@ namespace
 				LOCTEXT("PenConvertPreviewWindowTitle", "Design2UMG Pen Preview")))
 				return;
 
-			DesignImportUtils::GenerateBlueprintAndPng(Data, OutputPath);
+			if (bRenderPng)
+				DesignImportUtils::GenerateBlueprintAndPng(Data, OutputPath);
+			else
+				DesignImportUtils::GenerateBlueprint(Data, OutputPath);
 			return;
 		}
 
@@ -327,14 +333,15 @@ namespace
 		FString CapturedFilePath = FilePath;
 		FString CapturedOutputPath = OutputPath;
 		bool bCapturedPreview = bUsePreview;
+		bool bCapturedRenderPng = bRenderPng;
 
 		DesignImportUtils::ShowFrameSelector(
 			Frames,
 			LOCTEXT("FrameSelectorTitle", "Select Frame to Import"),
 			LOCTEXT("FrameSelectorHint", "This file contains multiple frames. Double-click to import:"),
-			[CapturedFilePath, CapturedOutputPath, bCapturedPreview](const FString& FrameId)
+			[CapturedFilePath, CapturedOutputPath, bCapturedPreview, bCapturedRenderPng](const FString& FrameId)
 			{
-				ImportPenFileWithTargetNode(CapturedFilePath, FrameId, CapturedOutputPath, bCapturedPreview);
+				ImportPenFileWithTargetNode(CapturedFilePath, FrameId, CapturedOutputPath, bCapturedPreview, bCapturedRenderPng);
 			});
 	}
 
@@ -904,12 +911,12 @@ void FDesign2UMGEditorModule::StartupModule()
 	// Design2UMG.Import 命令
 	IConsoleManager::Get().RegisterConsoleCommand(
 		TEXT("Design2UMG.Import"),
-		TEXT("Import .pen file: Design2UMG.Import <file.pen> [--node=<id>] [--out=/Game/Path] [--no-preview]"),
+		TEXT("Import .pen file: Design2UMG.Import <file.pen> [--node=<id>] [--out=/Game/Path] [--no-preview] [--no-png]"),
 		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
 		{
 			if (Args.Num() < 1)
 			{
-				UE_LOG(LogDesign2UMG, Warning, TEXT("Usage: Design2UMG.Import <file.pen> [--node=<id>] [--out=/Game/Path] [--no-preview]"));
+				UE_LOG(LogDesign2UMG, Warning, TEXT("Usage: Design2UMG.Import <file.pen> [--node=<id>] [--out=/Game/Path] [--no-preview] [--no-png]"));
 				return;
 			}
 
@@ -917,6 +924,7 @@ void FDesign2UMGEditorModule::StartupModule()
 			FString OutputPath = DefaultPenOutputPath;
 			FString TargetNodeId;
 			bool bPreview = true;
+			bool bRenderPng = true;
 
 			for (int32 i = 1; i < Args.Num(); ++i)
 			{
@@ -926,6 +934,10 @@ void FDesign2UMGEditorModule::StartupModule()
 					TargetNodeId = Args[i].RightChop(7);
 				else if (Args[i] == TEXT("--no-preview"))
 					bPreview = false;
+				else if (Args[i] == TEXT("--no-png"))
+					bRenderPng = false;
+				else if (Args[i] == TEXT("--png"))
+					bRenderPng = true;
 			}
 
 			if (!FPaths::FileExists(FilePath))
@@ -936,11 +948,11 @@ void FDesign2UMGEditorModule::StartupModule()
 
 			if (TargetNodeId.IsEmpty())
 			{
-				ImportPenFile(FilePath, OutputPath, bPreview);
+				ImportPenFile(FilePath, OutputPath, bPreview, bRenderPng);
 			}
 			else
 			{
-				ImportPenFileWithTargetNode(FilePath, TargetNodeId, OutputPath, bPreview);
+				ImportPenFileWithTargetNode(FilePath, TargetNodeId, OutputPath, bPreview, bRenderPng);
 			}
 
 			// Unattended 模式下自动退出，避免编辑器空转渲染导致 GPU PageFault

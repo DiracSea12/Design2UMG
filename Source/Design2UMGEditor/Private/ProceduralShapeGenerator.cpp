@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
 #include "ProceduralShapeGenerator.h"
 #include "UMGWidgetUtils.h"
@@ -6,17 +6,22 @@
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "RenderingThread.h"
 
 TArray<TWeakObjectPtr<UTexture2D>> FProceduralShapeGenerator::RootedTextures;
+bool FProceduralShapeGenerator::bHasPendingTextureUpdates = false;
 
 void FProceduralShapeGenerator::ReleaseTransientTextures()
 {
+	FlushPendingTextureUpdates();
+
 	for (const TWeakObjectPtr<UTexture2D>& Weak : RootedTextures)
 	{
 		if (UTexture2D* Tex = Weak.Get())
 			Tex->RemoveFromRoot();
 	}
 	RootedTextures.Empty();
+	bHasPendingTextureUpdates = false;
 }
 
 UTexture2D* FProceduralShapeGenerator::CreateTransientTexture(int32 Width, int32 Height, UObject* Outer)
@@ -48,7 +53,17 @@ void FProceduralShapeGenerator::FillTextureData(UTexture2D* Texture, const TArra
 	FMemory::Memcpy(TextureData, PixelData.GetData(), PixelData.Num() * sizeof(FColor));
 	Texture->GetPlatformData()->Mips[0].BulkData.Unlock();
 	Texture->UpdateResource();
-	FlushRenderingCommands();
+	bHasPendingTextureUpdates = true;
+}
+
+void FProceduralShapeGenerator::FlushPendingTextureUpdates()
+{
+	if (!bHasPendingTextureUpdates)
+		return;
+
+	if (!GUsingNullRHI)
+		FlushRenderingCommands();
+	bHasPendingTextureUpdates = false;
 }
 
 UTexture2D* FProceduralShapeGenerator::GenerateCircle(int32 Size, FLinearColor Color, UObject* Outer)
@@ -508,7 +523,7 @@ static void GenerateRoundedRectMask(TArray<float>& OutAlpha, int32 W, int32 H, f
 		{
 			float A = 1.0f;
 			float R = 0.0f;
-			FVector2D Center;
+			FVector2D Center = FVector2D::Zero();
 			bool bCorner = false;
 
 			if (X < RTL && Y < RTL)      { R = RTL; Center = FVector2D(RTL, RTL); bCorner = true; }

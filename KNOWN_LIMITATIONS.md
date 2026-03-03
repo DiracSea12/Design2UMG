@@ -35,16 +35,14 @@
 ## Box Shadow
 
 ### Overlay 不扩展尺寸，阴影在 ClipToBounds 下被裁剪
-- **文件**: `PenVisualMapper.cpp` `WrapWithBoxShadow()`
+- **文件**: `VisualMapper.cpp` `WrapWithBoxShadow()`
 - **现象**: Overlay 外层尺寸等于内容尺寸，阴影 Image 通过 RenderTranslation 偏移+更大的 WidthOverride/HeightOverride 实现，但父级 ClipToBounds 会裁掉溢出部分
 - **影响**: 紧凑布局或有裁剪的容器中阴影不完整
 - **修复方向**: 需要在 Overlay 外再包一层 SizeBox 扩展尺寸，或改用 Slate 层的 OnPaint 自绘阴影
 
-### 只支持单个外阴影 + 均匀圆角
-- **文件**: `PenVisualMapper.cpp` `WrapWithBoxShadow()`
-- **现象**: 多个 shadow effect 只取第一个；非均匀圆角（四角不同）时只用 Uniform 值
-- **影响**: 多层阴影设计和非均匀圆角阴影不准确
-- **修复方向**: 多阴影需要多层 Image 叠加；非均匀圆角需要自定义 material
+### ~~只支持单个外阴影 + 均匀圆角~~ [已修复]
+- **文件**: `VisualMapper.cpp` `WrapWithBoxShadow()` / `Design2UMGConverter.cpp`
+- **状态**: ✅ 已修复。Converter 循环调用 `WrapWithBoxShadow` 支持多层阴影叠加；`WrapWithBoxShadow` 已支持非均匀四角独立 `CornerRadii` 参数传递给材质
 
 ## Ellipse
 

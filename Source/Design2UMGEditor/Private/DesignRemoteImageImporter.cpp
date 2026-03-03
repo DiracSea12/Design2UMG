@@ -19,10 +19,29 @@
 #include "Misc/Paths.h"
 #include "Misc/SecureHash.h"
 #include "Modules/ModuleManager.h"
+#include "RenderingThread.h"
 #include "UObject/SavePackage.h"
 
 namespace
 {
+	int32 GPendingTextureResourceUpdates = 0;
+
+	void MarkPendingTextureResourceUpdate()
+	{
+		++GPendingTextureResourceUpdates;
+	}
+
+	void FlushPendingTextureResourceUpdatesIfNeeded()
+	{
+		if (GPendingTextureResourceUpdates <= 0)
+		{
+			return;
+		}
+
+		FlushRenderingCommands();
+		GPendingTextureResourceUpdates = 0;
+	}
+
 	struct FResolveContext
 	{
 		FString ImportPath;
@@ -349,11 +368,12 @@ namespace
 		Texture->ConditionalPostLoad();
 		ApplyTextureUiSettings(Texture);
 
-		if (!Texture->GetResource())
-		{
-			Texture->UpdateResource();
-			FlushRenderingCommands();
-		}
+		// Always force resource update + flush. After RewriteTextureAsset the
+		// old GPU resource still exists (GetResource() != null) but contains
+		// stale 32x32 data. Unconditional update ensures the GPU has the
+		// correct pixels before the widget tree is rendered.
+		Texture->UpdateResource();
+		MarkPendingTextureResourceUpdate();
 		return true;
 	}
 
@@ -709,6 +729,7 @@ bool FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, 
 	Context.FrameName = InOutData.WidgetName;
 
 	ResolveNodeRecursive(InOutData.RootWidget, Context);
+	FlushPendingTextureResourceUpdatesIfNeeded();
 
 	if (OutReport)
 	{
@@ -775,7 +796,7 @@ namespace
 		Texture->GetPlatformData()->Mips[0].BulkData.Unlock();
 
 		ApplyTextureUiSettings(Texture);
-		FlushRenderingCommands();
+		MarkPendingTextureResourceUpdate();
 		return Texture;
 	}
 }
@@ -816,6 +837,8 @@ void FDesignRemoteImageImporter::ResolveTransientTextures(const FUMGWidgetNode& 
 			OutTextureMap.Add(Url, Texture);
 		}
 	}
+
+	FlushPendingTextureResourceUpdatesIfNeeded();
 }
 
 void FDesignRemoteImageImporter::ReleaseTransientTextures(TMap<FString, UTexture2D*>& InOutTextureMap)

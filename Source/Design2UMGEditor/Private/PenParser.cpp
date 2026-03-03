@@ -167,8 +167,16 @@ bool FPenParser::ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, F
 		const TArray<TSharedPtr<FJsonValue>>& ChildrenArr = ChildrenField->AsArray();
 		for (const auto& ChildVal : ChildrenArr)
 		{
-			if (auto Node = ParseNode(ChildVal->AsObject(), Resolver))
-				OutDocument.Children.Add(Node);
+			// 顶层节点：提取其x,y作为父坐标传递给子节点
+			const TSharedPtr<FJsonObject>& ChildObj = ChildVal->AsObject();
+			if (ChildObj.IsValid())
+			{
+				float FrameX = 0.0f, FrameY = 0.0f;
+				TryGetNumberFieldFlexible(ChildObj, TEXT("x"), FrameX);
+				TryGetNumberFieldFlexible(ChildObj, TEXT("y"), FrameY);
+				if (auto Node = ParseNode(ChildObj, Resolver, FrameX, FrameY))
+					OutDocument.Children.Add(Node);
+			}
 		}
 	}
 
@@ -259,7 +267,7 @@ void FPenParser::ParseVariables(const TSharedPtr<FJsonObject>& JsonObj, TMap<FSt
 	}
 }
 
-TSharedPtr<FDesignNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const FPenVariableResolver& Resolver)
+TSharedPtr<FDesignNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const FPenVariableResolver& Resolver, float ParentX, float ParentY)
 {
 	if (!JsonObj.IsValid())
 		return nullptr;
@@ -303,11 +311,24 @@ TSharedPtr<FDesignNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& Jso
 		}
 	}
 
-	// 位置
+	// 位置 - 转换为相对于父节点的坐标
+	float AbsoluteX = 0.0f, AbsoluteY = 0.0f;
 	if (JsonObj->HasField(TEXT("x")))
-		Node->bHasX = TryGetNumberFieldFlexible(JsonObj, TEXT("x"), Node->X);
+	{
+		if (TryGetNumberFieldFlexible(JsonObj, TEXT("x"), AbsoluteX))
+		{
+			Node->X = AbsoluteX - ParentX;
+			Node->bHasX = true;
+		}
+	}
 	if (JsonObj->HasField(TEXT("y")))
-		Node->bHasY = TryGetNumberFieldFlexible(JsonObj, TEXT("y"), Node->Y);
+	{
+		if (TryGetNumberFieldFlexible(JsonObj, TEXT("y"), AbsoluteY))
+		{
+			Node->Y = AbsoluteY - ParentY;
+			Node->bHasY = true;
+		}
+	}
 	TryGetNumberFieldFlexible(JsonObj, TEXT("rotation"), Node->Rotation);
 	const TSharedPtr<FJsonValue>& SizeField = JsonObj->TryGetField(TEXT("size"));
 	if (SizeField.IsValid() && SizeField->Type == EJson::Object)
@@ -415,7 +436,8 @@ TSharedPtr<FDesignNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& Jso
 		const auto& ChildrenArr = NodeChildrenField->AsArray();
 		for (const auto& ChildVal : ChildrenArr)
 		{
-			if (auto Child = ParseNode(ChildVal->AsObject(), *ActiveResolver))
+			// 传递当前节点的绝对坐标作为子节点的父坐标
+			if (auto Child = ParseNode(ChildVal->AsObject(), *ActiveResolver, AbsoluteX, AbsoluteY))
 				Node->Children.Add(Child);
 		}
 	}
@@ -427,7 +449,11 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 {
 	// 文本属性
 	JsonObj->TryGetStringField(TEXT("content"), Node->Content);
-	JsonObj->TryGetStringField(TEXT("fontFamily"), Node->FontFamily);
+	{
+		FString RawFontFamily;
+		if (JsonObj->TryGetStringField(TEXT("fontFamily"), RawFontFamily))
+			Node->FontFamily = Resolver.ResolveString(RawFontFamily);
+	}
 	TryGetNumberFieldFlexible(JsonObj, TEXT("fontSize"), Node->FontSize);
 	JsonObj->TryGetStringField(TEXT("fontWeight"), Node->FontWeight);
 	TryGetNumberFieldFlexible(JsonObj, TEXT("lineHeight"), Node->LineHeight);
@@ -451,7 +477,11 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 
 	// 图标字体属性
 	JsonObj->TryGetStringField(TEXT("iconFontName"), Node->IconFontName);
-	JsonObj->TryGetStringField(TEXT("iconFontFamily"), Node->IconFontFamily);
+	{
+		FString RawIconFontFamily;
+		if (JsonObj->TryGetStringField(TEXT("iconFontFamily"), RawIconFontFamily))
+			Node->IconFontFamily = Resolver.ResolveString(RawIconFontFamily);
+	}
 	TryGetNumberFieldFlexible(JsonObj, TEXT("weight"), Node->IconWeight);
 	TryGetNumberFieldFlexible(JsonObj, TEXT("innerRadius"), Node->InnerRadius);
 	TryGetNumberFieldFlexible(JsonObj, TEXT("startAngle"), Node->StartAngle);
@@ -545,7 +575,11 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 			// 对象替换模式：含 type 字段，用 ParseNode 完整解析
 			if (OverrideObj->HasField(TEXT("type")))
 			{
-				if (auto FullNode = ParseNode(OverrideObj, Resolver))
+				// Descendants通常是组件实例，继承父节点坐标系
+				float DescX = 0.0f, DescY = 0.0f;
+				TryGetNumberFieldFlexible(OverrideObj, TEXT("x"), DescX);
+				TryGetNumberFieldFlexible(OverrideObj, TEXT("y"), DescY);
+				if (auto FullNode = ParseNode(OverrideObj, Resolver, DescX, DescY))
 					Node->Descendants.Add(Pair.Key, FullNode);
 				continue;
 			}
@@ -558,7 +592,11 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 			OverrideObj->TryGetStringField(TEXT("content"), DescNode->Content);
 			TryGetNumberFieldFlexible(OverrideObj, TEXT("fontSize"), DescNode->FontSize);
 			OverrideObj->TryGetStringField(TEXT("fontWeight"), DescNode->FontWeight);
-			OverrideObj->TryGetStringField(TEXT("fontFamily"), DescNode->FontFamily);
+			{
+				FString RawFontFamily;
+				if (OverrideObj->TryGetStringField(TEXT("fontFamily"), RawFontFamily))
+					DescNode->FontFamily = Resolver.ResolveString(RawFontFamily);
+			}
 			if (OverrideObj->HasField(TEXT("fill")))
 			{
 				const TSharedPtr<FJsonValue>& FillField = OverrideObj->TryGetField(TEXT("fill"));
@@ -639,9 +677,13 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 			if (ChildOvField.IsValid() && ChildOvField->Type == EJson::Array)
 			{
 				const auto& ChildArr = ChildOvField->AsArray();
+				// 获取DescNode的绝对坐标作为子节点的父坐标
+				float DescNodeX = 0.0f, DescNodeY = 0.0f;
+				TryGetNumberFieldFlexible(OverrideObj, TEXT("x"), DescNodeX);
+				TryGetNumberFieldFlexible(OverrideObj, TEXT("y"), DescNodeY);
 				for (const auto& ChildVal : ChildArr)
 				{
-					if (auto Child = ParseNode(ChildVal->AsObject(), Resolver))
+					if (auto Child = ParseNode(ChildVal->AsObject(), Resolver, DescNodeX, DescNodeY))
 						DescNode->Children.Add(Child);
 				}
 			}

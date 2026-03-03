@@ -411,11 +411,17 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 			FUMGSlotData SlotData = Node.Slot;
 			UCanvasPanel* CanvasParent = Cast<UCanvasPanel>(ParentWidget);
 			const bool bIsRootCanvasParent = CanvasParent && (WidgetTree && WidgetTree->RootWidget == ParentWidget);
+			const bool bHasMeaningfulSlotData = HasMeaningfulSlotData(SlotData);
+			const bool bEnableAdaptiveAnchors = UDesign2UMGSettings::Get()->bEnableAdaptiveRootCanvasAnchors;
 			UE_LOG(LogDesign2UMG, Verbose, TEXT("CreateWidget: '%s' parent=%s slot_path=%s bounds=(%.1f,%.1f,%.1f,%.1f)"),
 				*Node.Name, *ParentWidget->GetClass()->GetName(),
-				bIsRootCanvasParent ? TEXT("LayoutCalc") : TEXT("Direct"),
+				(bIsRootCanvasParent && bEnableAdaptiveAnchors && !bHasMeaningfulSlotData) ? TEXT("LayoutCalc") : TEXT("Direct"),
 				Node.Bounds.X, Node.Bounds.Y, Node.Bounds.W, Node.Bounds.H);
-			if (bIsRootCanvasParent && Node.Bounds.W > 0.0f && Node.Bounds.H > 0.0f)
+			if (bIsRootCanvasParent
+				&& bEnableAdaptiveAnchors
+				&& !bHasMeaningfulSlotData
+				&& Node.Bounds.W > 0.0f
+				&& Node.Bounds.H > 0.0f)
 			{
 				FLayoutContext Context;
 				Context.DesignSize = FUMGWidgetUtils::EffectiveDesignSize;

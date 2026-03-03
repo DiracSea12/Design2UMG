@@ -23,7 +23,7 @@ private:
 	static bool ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FDesignDocument& OutDocument);
 
 	/** 解析节点 */
-	static TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const FPenVariableResolver& Resolver);
+	static TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const FPenVariableResolver& Resolver, float ParentX = 0.0f, float ParentY = 0.0f);
 
 	/** 解析节点类型 */
 	static EPenNodeType ParseNodeType(const FString& TypeStr);

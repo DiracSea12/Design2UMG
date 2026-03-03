@@ -90,7 +90,7 @@ TryOpenPreviewWindow → FUMGGenerator::GenerateWidgetBlueprint
 ```
 用户选择 .pen 文件
     ↓
-FPenParser::ParseFromFile → FPenDocument  （仅解析，不转换）
+FPenParser::ParseFromFile → FDesignDocument  （仅解析，不转换）
     ↓
 提取顶层 frame 列表 → Frame 选择器对话框
     ↓

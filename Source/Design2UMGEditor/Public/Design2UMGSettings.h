@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
 #pragma once
 
@@ -29,7 +29,7 @@ struct FWidgetClassOverride
  * Design To UMG 插件设置
  * 保存于 Editor Preferences（用户级，不提交版本库）
  */
-UCLASS(config=EditorPerProjectUserSettings, meta=(DisplayName="Pen To UMG"))
+UCLASS(config=EditorPerProjectUserSettings, meta=(DisplayName="Design2UMG"))
 class UDesign2UMGSettings : public UDeveloperSettings
 {
 	GENERATED_BODY()
@@ -39,7 +39,7 @@ public:
 	static UDesign2UMGSettings* Get();
 
 	virtual FName GetCategoryName() const override { return TEXT("Plugins"); }
-	virtual FName GetSectionName() const override { return TEXT("Pen To UMG"); }
+	virtual FName GetSectionName() const override { return TEXT("Design2UMG"); }
 
 	// ========== First Run ==========
 
@@ -54,7 +54,23 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Generation Settings", meta = (DisplayName = "Design Height", ClampMin = "240", ClampMax = "4320"))
 	int32 DesignHeight = 1080;
 
-	FIntPoint GetDesignSize() const { return FIntPoint(DesignWidth, DesignHeight); }
+	FIntPoint GetDesignSize() const;
+
+	/** 是否启用导入后的自动布局修正(Fixer)。关闭可最大化还原设计稿原始坐标。 */
+	UPROPERTY(Config, EditAnywhere, Category = "Generation Settings", meta = (DisplayName = "Enable Layout Fixer"))
+	bool bEnableLayoutFixer = false;
+
+	/** 是否启用根 Canvas 子节点的自适应锚点重算。关闭可保留转换器输出的 Slot。 */
+	UPROPERTY(Config, EditAnywhere, Category = "Generation Settings", meta = (DisplayName = "Enable Adaptive Root Canvas Anchors"))
+	bool bEnableAdaptiveRootCanvasAnchors = false;
+
+	/** 当设计稿尺寸显著大于 DesignWidth/DesignHeight 时，自动用 ScaleBox 包装根节点以适配运行时视口。默认关闭以优先保证设计稿还原一致性。 */
+	UPROPERTY(Config, EditAnywhere, Category = "Generation Settings", meta = (DisplayName = "Auto Wrap Oversized Root For Viewport"))
+	bool bAutoWrapOversizedRootForViewport = false;
+
+	/** 根 ScaleBox 的缩放方向：仅缩小可避免小稿在大屏被放大失真。 */
+	UPROPERTY(Config, EditAnywhere, Category = "Generation Settings", meta = (DisplayName = "Viewport Scale Down Only"))
+	bool bViewportScaleDownOnly = true;
 
 	// ========== Remote Image Import ==========
 
@@ -79,6 +95,10 @@ public:
 
 	UPROPERTY(Config, EditAnywhere, Category = "Font Import", meta = (DisplayName = "Auto Import Fonts", ToolTip = "Automatically download and import fonts from .pen file URLs during import."))
 	bool bAutoImportFonts = false;
+
+	/** Whether to auto-import known web fonts (Inter/Geist/JetBrainsMono/Material Symbols, etc.) when family is used but not found locally. */
+	UPROPERTY(Config, EditAnywhere, Category = "Font Import", meta = (DisplayName = "Auto Import Known Web Fonts", ToolTip = "When a known font family is referenced but no local asset exists, try one-time auto import from curated public URLs."))
+	bool bAutoImportKnownWebFonts = true;
 
 	// ========== Icon Font ==========
 

@@ -188,7 +188,11 @@ struct FUMGWidgetNode
 	UPROPERTY()
 	FUMGSlotData Slot;
 
-	/** 属性键值对（legacy，逐步由 Brush 替代） */
+	/** 
+	 * 属性键值对（legacy，逐步由 Brush 替代） 
+	 * @note [TODO] 完全重构为强类型数据，消除字符串 Map 带来的类型安全和维护风险。
+	 *       为向后兼容当前版本保留，但新属性系统不应再添加到此 Map 中。
+	 */
 	UPROPERTY()
 	TMap<FString, FString> Properties;
 

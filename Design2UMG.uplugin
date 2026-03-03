@@ -2,7 +2,7 @@
 	"FileVersion": 3,
 	"Version": 1,
 	"VersionName": "1.0",
-	"FriendlyName": "Pen To UMG",
+	"FriendlyName": "Design2UMG",
 	"Description": "Generate UMG Widget Blueprints from .pen design files",
 	"Category": "Editor",
 	"CreatedBy": "Diracsea12",

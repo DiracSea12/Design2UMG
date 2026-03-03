@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
 #include "LayoutMapper.h"
 #include "PenTypeMapper.h"
@@ -33,19 +33,23 @@ void FLayoutMapper::ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr
 	{
 		const bool bFillWidth = Node->Width.Mode == EPenSizeMode::FillContainer;
 		const bool bFillHeight = Node->Height.Mode == EPenSizeMode::FillContainer;
+		const bool bFillWidthHasFallback = bFillWidth && Node->Width.Value > 0.0f;
+		const bool bFillHeightHasFallback = bFillHeight && Node->Height.Value > 0.0f;
+		const bool bStretchWidth = bFillWidth && !bFillWidthHasFallback;
+		const bool bStretchHeight = bFillHeight && !bFillHeightHasFallback;
 
-		if (bFillWidth || bFillHeight)
+		if (bStretchWidth || bStretchHeight)
 		{
 			Widget.Slot.Anchors.Min.X = 0.0f;
-			Widget.Slot.Anchors.Max.X = bFillWidth ? 1.0f : 0.0f;
+			Widget.Slot.Anchors.Max.X = bStretchWidth ? 1.0f : 0.0f;
 			Widget.Slot.Anchors.Min.Y = 0.0f;
-			Widget.Slot.Anchors.Max.Y = bFillHeight ? 1.0f : 0.0f;
+			Widget.Slot.Anchors.Max.Y = bStretchHeight ? 1.0f : 0.0f;
 			Widget.Slot.Alignment.X = 0.0f;
 			Widget.Slot.Alignment.Y = 0.0f;
 			Widget.Slot.Offsets.Left = Node->X;
 			Widget.Slot.Offsets.Top = Node->Y;
-			Widget.Slot.Offsets.Right = bFillWidth ? 0.0f : Node->Width.Value;
-			Widget.Slot.Offsets.Bottom = bFillHeight ? 0.0f : Node->Height.Value;
+			Widget.Slot.Offsets.Right = bStretchWidth ? 0.0f : Node->Width.Value;
+			Widget.Slot.Offsets.Bottom = bStretchHeight ? 0.0f : Node->Height.Value;
 			return;
 		}
 
@@ -58,8 +62,13 @@ void FLayoutMapper::ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr
 		const bool bFitHeight = Node->Height.Mode == EPenSizeMode::FitContent;
 		const bool bFixedWidth = Node->Width.Mode == EPenSizeMode::Fixed;
 		const bool bFixedHeight = Node->Height.Mode == EPenSizeMode::Fixed;
+		const bool bFitWidthNeedsAuto = bFitWidth && Node->Width.Value <= 0.0f;
+		const bool bFitHeightNeedsAuto = bFitHeight && Node->Height.Value <= 0.0f;
 
-		if (bFitWidth || bFitHeight)
+		// CanvasPanel fidelity rule:
+		// FitContent 只有在该轴没有显式像素值时才走 AutoSize。
+		// 若已有设计稿像素值（常见于组件实例），优先保留 offsets 以贴近设计稿静态布局。
+		if (bFitWidthNeedsAuto || bFitHeightNeedsAuto)
 		{
 			Widget.Slot.bAutoSize = true;
 
@@ -205,3 +214,4 @@ FUMGWidgetNode FLayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, cons
 	SizeBox.Children.Add(MoveTemp(ChildWidget));
 	return SizeBox;
 }
+

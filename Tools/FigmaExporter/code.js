@@ -212,6 +212,21 @@ function serializeNode(node) {
         out.style = buildTextStyle(tn);
         out.textAutoResize = tn.textAutoResize || 'NONE';
     }
+    // Vector nodes: add synthetic IMAGE fill pointing to vec_* export
+    const vectorTypes = ['VECTOR', 'BOOLEAN_OPERATION', 'STAR', 'LINE', 'ELLIPSE', 'POLYGON'];
+    if (vectorTypes.includes(node.type)) {
+        const vecKey = `vec_${node.id.replace(/[:/]/g, '_')}`;
+        if (!out.fills)
+            out.fills = [];
+        out.fills.push({
+            type: 'IMAGE',
+            visible: true,
+            opacity: 1,
+            blendMode: 'NORMAL',
+            imageRef: vecKey,
+            scaleMode: 'FILL',
+        });
+    }
     // Children
     if ('children' in node) {
         const children = [];

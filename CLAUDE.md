@@ -20,6 +20,7 @@ PenToUMG 是一个 UE5 编辑器插件，从 Pencil .pen 设计文件生成 Widg
 2. **Never break userspace** - 向后兼容性神圣不可侵犯
 3. **实用主义至上** - 解决实际问题，拒绝过度设计
 4. **简洁执念** - 不超过3层缩进，函数只做一件事，删除优于添加
+5. **验证 = 验证 + 修复** - "验证"不是只跑一遍看结果，发现问题必须解决。验证未通过 = 任务未完成。不要验完报个分就完事
 
 ## 构建与测试
 
@@ -40,16 +41,32 @@ UMGExtractorTest::BatchTest(TEXT("/Game/UI"));
 ### 数据流 Pipeline
 
 ```
-.pen File → PenParser → PenToUMGConverter → Fixer → LayoutCalc → Widget Generator
-             (解析)       (节点转换)        (规则修复)  (Slot计算)    (UMG生成)
+.pen  File → PenParser   ─┐
+                           ├→ FDesignNode (共用IR) → VisualMapper → Design2UMGConverter → Fixer → LayoutCalc → Widget Generator
+Figma JSON → FigmaParser ─┘
 ```
+
+### 解耦铁律
+
+**格式特有问题只改格式特有的 Parser，共用层（IR 之后）不动。**
+
+- `PenParser` 负责 .pen 格式的字段映射（如 `clip` → `bClip` + `bHasClip`）
+- `FigmaParser` 负责 Figma JSON 的字段映射（如 `clipsContent`）
+- `VisualMapper`、`Design2UMGConverter` 等共用代码只认 IR（`FDesignNode`），不关心数据来源
+- `bHasClip` 是源感知守卫：Parser 设了才生效，共用层用 `bHasClip && bClip` 双重检查
+
+**反面教材**：Figma 的 `clipsContent` 盲映射导致文字被裁剪 → 正确做法是只改 `FigmaParser` 停止映射，而不是去简化 `VisualMapper` 的守卫条件。共用代码的防御逻辑是给所有 Parser 兜底的，不能因为某个 Parser 的问题就拆掉。
 
 ### 核心模块
 
 | 模块 | 文件 | 职责 |
 |------|------|------|
-| **PenParser** | PenParser.h/cpp | .pen 文件解析 |
-| **PenToUMGConverter** | PenToUMGConverter.h/cpp | .pen 节点转换为 UMG 节点 |
+| **PenParser** | PenParser.h/cpp | .pen 文件解析 → FDesignNode IR |
+| **FigmaParser** | FigmaParser.h/cpp | Figma JSON 解析 → FDesignNode IR |
+| **RefExpander** | RefExpander.h/cpp | 组件引用展开、DeepCopy、Descendants 覆盖 |
+| **LayoutMapper** | LayoutMapper.h/cpp | Slot 属性、Gap、Padding、SizeBox 包裹 |
+| **VisualMapper** | VisualMapper.h/cpp | IR 视觉属性 → UMG 属性（填充、圆角、裁剪、阴影等） |
+| **Design2UMGConverter** | Design2UMGConverter.h/cpp | FDesignNode → FUMGWidgetNode 转换 |
 | **LayoutCalculator** | LayoutCalculator.h/cpp | Bounds→Anchors/Offsets转换，9宫格锚点+Hysteresis |
 | **LayoutFixer** | LayoutFixer.h/cpp | 规则修复：对齐吸附、越界修正、等距检测 |
 | **UMGJsonParser** | UMGJsonParser.h/cpp | JSON解析（手动编辑/预览用） |

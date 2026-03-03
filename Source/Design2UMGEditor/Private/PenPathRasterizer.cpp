@@ -4,6 +4,7 @@
 #include "ProceduralShapeGenerator.h"
 #include "Design2UMGLog.h"
 #include "HAL/IConsoleManager.h"
+#include "RenderingThread.h"
 
 // --- Path cache (file-local) ---
 namespace
@@ -24,6 +25,7 @@ namespace
 	TMap<uint32, TWeakObjectPtr<UTexture2D>> GPathCache;
 	int32 GCacheHits = 0;
 	int32 GCacheMisses = 0;
+	bool bHasPendingTextureUpdates = false;
 	constexpr int32 GMaxCacheEntries = 256;
 
 	void EvictStale()
@@ -69,6 +71,7 @@ namespace
 			}
 			GPathCache.Empty();
 			GCacheHits = GCacheMisses = 0;
+			bHasPendingTextureUpdates = false;
 			UE_LOG(LogDesign2UMG, Log, TEXT("PenPathRasterizer: cache cleared"));
 		}));
 }
@@ -631,13 +634,22 @@ UTexture2D* FPenPathRasterizer::Rasterize(
 	FMemory::Memcpy(TextureData, Pixels.GetData(), Pixels.Num() * sizeof(FColor));
 	Texture->GetPlatformData()->Mips[0].BulkData.Unlock();
 	Texture->UpdateResource();
-	FlushRenderingCommands();
+	bHasPendingTextureUpdates = true;
 
 	// --- Cache write ---
 	EvictStale();
 	GPathCache.Add(CacheKey, Texture);
 
 	return Texture;
+}
+
+void FPenPathRasterizer::FlushPendingTextureUpdates()
+{
+	if (!bHasPendingTextureUpdates)
+		return;
+
+	FlushRenderingCommands();
+	bHasPendingTextureUpdates = false;
 }
 
 void FPenPathRasterizer::ClearCache()
@@ -649,4 +661,5 @@ void FPenPathRasterizer::ClearCache()
 	}
 	GPathCache.Empty();
 	GCacheHits = GCacheMisses = 0;
+	bHasPendingTextureUpdates = false;
 }
