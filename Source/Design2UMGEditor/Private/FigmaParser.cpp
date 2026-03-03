@@ -77,6 +77,59 @@ static bool IsVisibleSolidBlackFill(const TSharedPtr<FJsonObject>& NodeObj)
 	return R <= 0.01 && G <= 0.01 && B <= 0.01 && A >= 0.99;
 }
 
+static bool IsWrapLayout(const TSharedPtr<FJsonObject>& NodeObj)
+{
+	const FString Wrap = GetStr(NodeObj, TEXT("layoutWrap"));
+	return Wrap.Equals(TEXT("WRAP"), ESearchCase::IgnoreCase);
+}
+
+static bool IsLikelyWrappedHorizontalLayout(const TSharedPtr<FJsonObject>& NodeObj)
+{
+	if (!NodeObj.IsValid() || GetStr(NodeObj, TEXT("layoutMode")) != TEXT("HORIZONTAL"))
+		return false;
+
+	const TArray<TSharedPtr<FJsonValue>>* Children = GetArr(NodeObj, TEXT("children"));
+	// Threshold: 6 children minimum - typical wrapped layouts have multiple items per row
+	if (!Children || Children->Num() < 6)
+		return false;
+
+	int32 FillChildren = 0;
+	TArray<float> ChildRowsY;
+	ChildRowsY.Reserve(Children->Num());
+
+	for (const TSharedPtr<FJsonValue>& ChildVal : *Children)
+	{
+		const TSharedPtr<FJsonObject> ChildObj = ChildVal->AsObject();
+		if (!ChildObj.IsValid())
+			continue;
+
+		if (GetStr(ChildObj, TEXT("layoutSizingHorizontal")) == TEXT("FILL"))
+			++FillChildren;
+
+		if (const TSharedPtr<FJsonObject> BoundsObj = GetObj(ChildObj, TEXT("absoluteBoundingBox")))
+			ChildRowsY.Add(GetNum(BoundsObj, TEXT("y")));
+	}
+
+	// Threshold: 4 FILL children minimum - wrapped layouts typically have multiple fill items
+	if (FillChildren < 4 || ChildRowsY.Num() < 4)
+		return false;
+
+	ChildRowsY.Sort();
+	int32 RowCount = 1;
+	float LastY = ChildRowsY[0];
+	for (int32 Index = 1; Index < ChildRowsY.Num(); ++Index)
+	{
+		// Threshold: 1.0f Y deviation - items on different rows differ by at least 1 pixel vertically
+		if (FMath::Abs(ChildRowsY[Index] - LastY) > 1.0f)
+		{
+			++RowCount;
+			LastY = ChildRowsY[Index];
+		}
+	}
+
+	return RowCount >= 2;
+}
+
 static bool HasSameBoundsAsParent(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj)
 {
 	const TSharedPtr<FJsonObject> ChildBBox = GetObj(NodeObj, TEXT("absoluteBoundingBox"));
@@ -311,6 +364,11 @@ EPenNodeType FFigmaParser::MapNodeType(const FString& FigmaType)
 
 bool FFigmaParser::HasAutoLayout(const TSharedPtr<FJsonObject>& NodeObj)
 {
+	if (IsWrapLayout(NodeObj) || IsLikelyWrappedHorizontalLayout(NodeObj))
+	{
+		return false;
+	}
+
 	FString Mode = GetStr(NodeObj, TEXT("layoutMode"));
 	return Mode == TEXT("HORIZONTAL") || Mode == TEXT("VERTICAL");
 }
@@ -340,38 +398,59 @@ FString FFigmaParser::ColorToHex(const TSharedPtr<FJsonObject>& ColorObj, float 
 
 void FFigmaParser::ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 {
+	const bool bWrapLayout = IsWrapLayout(NodeObj) || IsLikelyWrappedHorizontalLayout(NodeObj);
 	FString Mode = GetStr(NodeObj, TEXT("layoutMode"));
-	if (Mode == TEXT("HORIZONTAL"))
-		OutNode.Layout = EPenLayout::Horizontal;
-	else if (Mode == TEXT("VERTICAL"))
-		OutNode.Layout = EPenLayout::Vertical;
-	else
+	if (bWrapLayout)
+	{
+		// Figma AutoLayout WRAP still lacks a 1:1 UMG mapping in current pipeline.
+		// Fall back to absolute layout so child bounds/positions stay visually correct.
 		OutNode.Layout = EPenLayout::None;
-
-	OutNode.Gap = GetNum(NodeObj, TEXT("itemSpacing"));
-
-	OutNode.Padding.Left = GetNum(NodeObj, TEXT("paddingLeft"));
-	OutNode.Padding.Right = GetNum(NodeObj, TEXT("paddingRight"));
-	OutNode.Padding.Top = GetNum(NodeObj, TEXT("paddingTop"));
-	OutNode.Padding.Bottom = GetNum(NodeObj, TEXT("paddingBottom"));
-
-	FString Primary = GetStr(NodeObj, TEXT("primaryAxisAlignItems"));
-	if (Primary == TEXT("CENTER"))
-		OutNode.JustifyContent = EPenJustifyContent::Center;
-	else if (Primary == TEXT("MAX"))
-		OutNode.JustifyContent = EPenJustifyContent::End;
-	else if (Primary == TEXT("SPACE_BETWEEN"))
-		OutNode.JustifyContent = EPenJustifyContent::SpaceBetween;
+	}
+	else if (Mode == TEXT("HORIZONTAL"))
+	{
+		OutNode.Layout = EPenLayout::Horizontal;
+	}
+	else if (Mode == TEXT("VERTICAL"))
+	{
+		OutNode.Layout = EPenLayout::Vertical;
+	}
 	else
+	{
+		OutNode.Layout = EPenLayout::None;
+	}
+
+	OutNode.Gap = bWrapLayout ? 0.0f : GetNum(NodeObj, TEXT("itemSpacing"));
+
+	OutNode.Padding.Left = bWrapLayout ? 0.0f : GetNum(NodeObj, TEXT("paddingLeft"));
+	OutNode.Padding.Right = bWrapLayout ? 0.0f : GetNum(NodeObj, TEXT("paddingRight"));
+	OutNode.Padding.Top = bWrapLayout ? 0.0f : GetNum(NodeObj, TEXT("paddingTop"));
+	OutNode.Padding.Bottom = bWrapLayout ? 0.0f : GetNum(NodeObj, TEXT("paddingBottom"));
+
+	if (bWrapLayout)
+	{
 		OutNode.JustifyContent = EPenJustifyContent::Start;
-
-	FString Counter = GetStr(NodeObj, TEXT("counterAxisAlignItems"));
-	if (Counter == TEXT("CENTER"))
-		OutNode.AlignItems = EPenAlignItems::Center;
-	else if (Counter == TEXT("MAX"))
-		OutNode.AlignItems = EPenAlignItems::End;
-	else
 		OutNode.AlignItems = EPenAlignItems::Start;
+	}
+	else
+	{
+		FString Primary = GetStr(NodeObj, TEXT("primaryAxisAlignItems"));
+		if (Primary == TEXT("CENTER"))
+			OutNode.JustifyContent = EPenJustifyContent::Center;
+		else if (Primary == TEXT("MAX"))
+			OutNode.JustifyContent = EPenJustifyContent::End;
+		else if (Primary == TEXT("SPACE_BETWEEN"))
+			OutNode.JustifyContent = EPenJustifyContent::SpaceBetween;
+		else
+			OutNode.JustifyContent = EPenJustifyContent::Start;
+
+		FString Counter = GetStr(NodeObj, TEXT("counterAxisAlignItems"));
+		if (Counter == TEXT("CENTER"))
+			OutNode.AlignItems = EPenAlignItems::Center;
+		else if (Counter == TEXT("MAX"))
+			OutNode.AlignItems = EPenAlignItems::End;
+		else
+			OutNode.AlignItems = EPenAlignItems::Start;
+	}
 
 	OutNode.bHasClip = true;
 	OutNode.bClip = GetBool(NodeObj, TEXT("clipsContent"), false);
@@ -576,6 +655,7 @@ FPenFill FFigmaParser::ParseFill(const TArray<TSharedPtr<FJsonValue>>& Fills)
 FPenStroke FFigmaParser::ParseStroke(const TSharedPtr<FJsonObject>& NodeObj)
 {
 	FPenStroke Result;
+	bool bHasVisibleStroke = false;
 
 	const auto* Strokes = GetArr(NodeObj, TEXT("strokes"));
 	if (Strokes)
@@ -586,11 +666,21 @@ FPenStroke FFigmaParser::ParseStroke(const TSharedPtr<FJsonObject>& NodeObj)
 			if (!StrokeObj || !GetBool(StrokeObj, TEXT("visible"), true))
 				continue;
 
+			bHasVisibleStroke = true;
 			auto ColorObj = GetObj(StrokeObj, TEXT("color"));
 			float StrokeOpacity = GetNum(StrokeObj, TEXT("opacity"), 1.0);
 			Result.Fill = FPenFill::FromColor(ColorToHex(ColorObj, StrokeOpacity));
 			break;
 		}
+	}
+
+	// Figma nodes often carry default strokeWeight fields even when no stroke is enabled.
+	// Only map thickness/alignment when at least one visible stroke exists.
+	if (!bHasVisibleStroke)
+	{
+		// Explicitly clear thickness to avoid confusion from default strokeWeight fields
+		Result.Thickness = FPenStrokeThickness();
+		return Result;
 	}
 
 	// Stroke align
@@ -632,11 +722,28 @@ FPenCornerRadius FFigmaParser::ParseCornerRadius(const TSharedPtr<FJsonObject>& 
 	const auto* Radii = GetArr(NodeObj, TEXT("rectangleCornerRadii"));
 	if (Radii && Radii->Num() == 4)
 	{
-		Result.bUniform = false;
-		Result.TopLeft = (*Radii)[0]->AsNumber();
-		Result.TopRight = (*Radii)[1]->AsNumber();
-		Result.BottomRight = (*Radii)[2]->AsNumber();
-		Result.BottomLeft = (*Radii)[3]->AsNumber();
+		const float TopLeft = (*Radii)[0]->AsNumber();
+		const float TopRight = (*Radii)[1]->AsNumber();
+		const float BottomRight = (*Radii)[2]->AsNumber();
+		const float BottomLeft = (*Radii)[3]->AsNumber();
+		const bool bAllEqual =
+			FMath::IsNearlyEqual(TopLeft, TopRight, KINDA_SMALL_NUMBER) &&
+			FMath::IsNearlyEqual(TopLeft, BottomRight, KINDA_SMALL_NUMBER) &&
+			FMath::IsNearlyEqual(TopLeft, BottomLeft, KINDA_SMALL_NUMBER);
+
+		if (bAllEqual)
+		{
+			Result.bUniform = true;
+			Result.Uniform = TopLeft;
+		}
+		else
+		{
+			Result.bUniform = false;
+			Result.TopLeft = TopLeft;
+			Result.TopRight = TopRight;
+			Result.BottomRight = BottomRight;
+			Result.BottomLeft = BottomLeft;
+		}
 	}
 	else
 	{

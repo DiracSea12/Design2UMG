@@ -1,10 +1,24 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
 #include "RefExpander.h"
 #include "Design2UMGLog.h"
 
 namespace
 {
+	bool ShouldApplySizeOverride(const FPenSize& Size, bool bHasExplicitFlag)
+	{
+		// Explicit width/height always wins.
+		if (bHasExplicitFlag)
+			return true;
+
+		// Pre-computed fit_content size (value > 0) should also propagate for ref instances.
+		if (Size.Mode == EPenSizeMode::FitContent)
+			return Size.Value > 0.0f;
+
+		// Non-fit modes (fixed/fill) are meaningful overrides even when explicit flags are absent.
+		return true;
+	}
+
 	void ApplyOverrideProperties(FDesignNode& Target, const FDesignNode& Override)
 	{
 		if (!Override.Content.IsEmpty())
@@ -102,6 +116,62 @@ namespace
 		}
 	}
 
+	bool ApplyOverrideToDirectChild(
+		TSharedPtr<FDesignNode>& Parent,
+		const FString& TargetId,
+		const TSharedPtr<FDesignNode>& Override)
+	{
+		if (!Parent.IsValid() || !Override.IsValid())
+			return false;
+
+		for (int32 i = 0; i < Parent->Children.Num(); ++i)
+		{
+			auto& Child = Parent->Children[i];
+			if (!Child.IsValid() || Child->Id != TargetId)
+				continue;
+
+			if (Override->Type != EPenNodeType::Unknown)
+			{
+				Parent->Children[i] = FRefExpander::DeepCopyNode(Override);
+				return true;
+			}
+
+			ApplyOverrideProperties(*Child, *Override);
+			return true;
+		}
+
+		return false;
+	}
+
+	bool ApplyOverrideByIdRecursive(
+		TSharedPtr<FDesignNode>& Node,
+		const FString& TargetId,
+		const TSharedPtr<FDesignNode>& Override,
+		int32 Depth = 0)
+	{
+		constexpr int32 MaxDepth = 100;
+		if (Depth > MaxDepth)
+		{
+			UE_LOG(LogDesign2UMG, Warning, TEXT("ApplyOverrideByIdRecursive: max depth %d exceeded for target '%s'"), MaxDepth, *TargetId);
+			return false;
+		}
+
+		if (!Node.IsValid() || !Override.IsValid())
+			return false;
+
+		if (ApplyOverrideToDirectChild(Node, TargetId, Override))
+			return true;
+
+		// descendants key may be a bare node id instead of a slash path.
+		for (auto& Child : Node->Children)
+		{
+			if (ApplyOverrideByIdRecursive(Child, TargetId, Override, Depth + 1))
+				return true;
+		}
+
+		return false;
+	}
+
 	void ApplyInstanceOverrides(TSharedPtr<FDesignNode>& Expanded, const TSharedPtr<FDesignNode>& RefNode)
 	{
 		if (!Expanded.IsValid() || !RefNode.IsValid())
@@ -116,17 +186,29 @@ namespace
 			Expanded->X = RefNode->X;
 			Expanded->bHasX = true;
 		}
+		else
+		{
+			// Instance with no explicit x should use local origin, not component definition canvas coordinate.
+			Expanded->X = 0.0f;
+			Expanded->bHasX = false;
+		}
 		if (RefNode->bHasY)
 		{
 			Expanded->Y = RefNode->Y;
 			Expanded->bHasY = true;
 		}
-		if (RefNode->bHasWidth)
+		else
+		{
+			// Instance with no explicit y should use local origin, not component definition canvas coordinate.
+			Expanded->Y = 0.0f;
+			Expanded->bHasY = false;
+		}
+		if (ShouldApplySizeOverride(RefNode->Width, RefNode->bHasWidth))
 		{
 			Expanded->Width = RefNode->Width;
 			Expanded->bHasWidth = true;
 		}
-		if (RefNode->bHasHeight)
+		if (ShouldApplySizeOverride(RefNode->Height, RefNode->bHasHeight))
 		{
 			Expanded->Height = RefNode->Height;
 			Expanded->bHasHeight = true;
@@ -232,12 +314,12 @@ TSharedPtr<FDesignNode> FRefExpander::DeepCopyNode(const TSharedPtr<FDesignNode>
 	auto Copy = MakeShared<FDesignNode>();
 	*Copy = *Source;
 
-	// 深拷贝 Children
+	// Deep copy children
 	Copy->Children.Empty();
 	for (const auto& Child : Source->Children)
 		Copy->Children.Add(DeepCopyNode(Child));
 
-	// 深拷贝 Descendants，避免多实例共享节点导致交叉污染
+	// Deep copy descendants to avoid cross-instance mutation.
 	for (auto& Pair : Copy->Descendants)
 		Pair.Value = DeepCopyNode(Pair.Value);
 
@@ -269,22 +351,7 @@ void FRefExpander::ApplyDescendantOverride(TSharedPtr<FDesignNode>& Node, const 
 	}
 	else
 	{
-		for (int32 i = 0; i < Node->Children.Num(); ++i)
-		{
-			auto& Child = Node->Children[i];
-			if (!Child.IsValid() || Child->Id != Path)
-				continue;
-
-			// 对象替换模式：深拷贝避免多实例共享同一节点
-			if (Override->Type != EPenNodeType::Unknown)
-			{
-				Node->Children[i] = DeepCopyNode(Override);
-				return;
-			}
-
-			ApplyOverrideProperties(*Child, *Override);
-			return;
-		}
+		ApplyOverrideByIdRecursive(Node, Path, Override);
 	}
 }
 
@@ -293,12 +360,12 @@ void FRefExpander::ReThemeNode(TSharedPtr<FDesignNode>& Node, const FPenVariable
 	if (!Node.IsValid())
 		return;
 
-	// 主填充
+	// Primary fill
 	if (!Node->Fill.SourceVar.IsEmpty())
 	{
 		FString OldColor = Node->Fill.SolidColor;
 		Node->Fill.SolidColor = Resolver.ResolveColor(Node->Fill.SourceVar);
-		UE_LOG(LogDesign2UMG, Log, TEXT("ReThemeNode '%s': Fill %s -> %s (var=%s)"),
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("ReThemeNode '%s': Fill %s -> %s (var=%s)"),
 			*Node->Id, *OldColor, *Node->Fill.SolidColor, *Node->Fill.SourceVar);
 	}
 
@@ -308,7 +375,7 @@ void FRefExpander::ReThemeNode(TSharedPtr<FDesignNode>& Node, const FPenVariable
 			Stop.Color = Resolver.ResolveColor(Stop.SourceVar);
 	}
 
-	// 多层填充
+	// Multi-layer fills
 	for (FPenFill& F : Node->Fills)
 	{
 		if (!F.SourceVar.IsEmpty())

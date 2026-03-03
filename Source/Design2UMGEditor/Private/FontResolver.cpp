@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
 
 #include "FontResolver.h"
 #include "Design2UMGLog.h"
@@ -23,40 +23,158 @@
 
 TMap<FString, FString> FFontResolver::FontAssetCache;
 
-FString FFontResolver::FindFontAssetPath(const FString& FontFamily)
+namespace
 {
-	if (const FString* Path = FontAssetCache.Find(FontFamily))
-		return *Path;
+	TMap<FString, FString> GNormalizedProjectFontAssetIndex;
+	bool bProjectFontIndexBuilt = false;
+	FCriticalSection GFontIndexMutex;
 
-	// Scan project fonts and try to match
-	FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
-	IAssetRegistry& AR = ARM.Get();
-
-	TArray<FAssetData> FontAssets;
-	AR.GetAssetsByClass(UFont::StaticClass()->GetClassPathName(), FontAssets, true);
-
-	// Sanitized name for comparison (spaces → underscores)
-	FString SafeFamily = FontFamily;
-	SafeFamily.ReplaceInline(TEXT(" "), TEXT("_"));
-
-	for (const FAssetData& Asset : FontAssets)
+	FString NormalizeFontFamilyKey(const FString& InFamily)
 	{
-		FString AssetName = Asset.AssetName.ToString();
-		if (AssetName.Equals(FontFamily, ESearchCase::IgnoreCase)
-			|| AssetName.Equals(SafeFamily, ESearchCase::IgnoreCase))
+		FString Key = InFamily.ToLower().TrimStartAndEnd();
+		Key.ReplaceInline(TEXT(" "), TEXT(""));
+		Key.ReplaceInline(TEXT("-"), TEXT(""));
+		Key.ReplaceInline(TEXT("_"), TEXT(""));
+		return Key;
+	}
+
+	void IndexFontAssetName(const FString& AssetName, const FString& ObjectPath)
+	{
+		const FString Normalized = NormalizeFontFamilyKey(AssetName);
+		if (!Normalized.IsEmpty())
 		{
-			FString ObjPath = Asset.GetObjectPathString();
-			FontAssetCache.Add(FontFamily, ObjPath);
-			return ObjPath;
+			GNormalizedProjectFontAssetIndex.FindOrAdd(Normalized, ObjectPath);
 		}
 	}
 
-	return FString();
+	void BuildProjectFontAssetIndexIfNeeded()
+	{
+		FScopeLock Lock(&GFontIndexMutex);
+
+		if (bProjectFontIndexBuilt)
+			return;
+
+		GNormalizedProjectFontAssetIndex.Reset();
+
+		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+		IAssetRegistry& AR = ARM.Get();
+
+		TArray<FAssetData> FontAssets;
+		AR.GetAssetsByClass(UFont::StaticClass()->GetClassPathName(), FontAssets, true);
+		for (const FAssetData& Asset : FontAssets)
+		{
+			IndexFontAssetName(Asset.AssetName.ToString(), Asset.GetObjectPathString());
+		}
+
+		bProjectFontIndexBuilt = true;
+	}
+
+	void InvalidateProjectFontAssetIndex()
+	{
+		bProjectFontIndexBuilt = false;
+		GNormalizedProjectFontAssetIndex.Reset();
+	}
+
+	bool TryResolveEngineFontFallback(const FString& FontFamily, FString& OutAssetPath)
+	{
+		const FString Normalized = NormalizeFontFamilyKey(FontFamily);
+		if (Normalized == TEXT("roboto"))
+		{
+			const FString RobotoPath = TEXT("/Engine/EngineFonts/Roboto.Roboto");
+			if (LoadObject<UFont>(nullptr, *RobotoPath))
+			{
+				OutAssetPath = RobotoPath;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	const TMap<FString, FString>& GetKnownWebFontUrls()
+	{
+		static const TMap<FString, FString> KnownUrls = {
+			{TEXT("inter"), TEXT("https://github.com/google/fonts/raw/main/ofl/inter/Inter%5Bopsz,wght%5D.ttf")},
+			{TEXT("rubik"), TEXT("https://github.com/google/fonts/raw/main/ofl/rubik/Rubik%5Bwght%5D.ttf")},
+			{TEXT("funneldisplay"), TEXT("https://github.com/google/fonts/raw/main/ofl/funneldisplay/FunnelDisplay%5Bwght%5D.ttf")},
+			{TEXT("oxygen"), TEXT("https://github.com/google/fonts/raw/main/ofl/oxygen/Oxygen-Regular.ttf")},
+			{TEXT("geist"), TEXT("https://github.com/google/fonts/raw/main/ofl/geist/Geist%5Bwght%5D.ttf")},
+			{TEXT("jetbrainsmono"), TEXT("https://github.com/google/fonts/raw/main/ofl/jetbrainsmono/JetBrainsMono%5Bwght%5D.ttf")},
+			{TEXT("materialsymbolssharp"), TEXT("https://github.com/google/material-design-icons/raw/master/variablefont/MaterialSymbolsSharp%5BFILL,GRAD,opsz,wght%5D.ttf")},
+			{TEXT("pingfangsc"), TEXT("https://github.com/google/fonts/raw/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf")},
+			// Buenos Aires is not publicly available in Google Fonts; closest fallback for layout parity.
+			{TEXT("buenosaires"), TEXT("https://github.com/google/fonts/raw/main/ofl/inter/Inter%5Bopsz,wght%5D.ttf")},
+		};
+		return KnownUrls;
+	}
 }
+
+FString FFontResolver::FindFontAssetPath(const FString& FontFamily)
+{
+	if (FontFamily.TrimStartAndEnd().IsEmpty())
+		return FString();
+
+	const FString NormalizedFamily = NormalizeFontFamilyKey(FontFamily);
+
+	if (const FString* Path = FontAssetCache.Find(NormalizedFamily))
+		return *Path;
+
+	BuildProjectFontAssetIndexIfNeeded();
+	if (const FString* IndexedPath = GNormalizedProjectFontAssetIndex.Find(NormalizedFamily))
+	{
+		FontAssetCache.FindOrAdd(NormalizedFamily) = *IndexedPath;
+		return *IndexedPath;
+	}
+
+	// Material Symbols families differ by variant suffix (Sharp/Rounded/Outlined).
+	// If exact family name is absent, resolve to any imported Material Symbols asset.
+	if (NormalizedFamily.Contains(TEXT("materialsymbol")) || NormalizedFamily.Contains(TEXT("materialicon")))
+	{
+		for (const TPair<FString, FString>& Pair : GNormalizedProjectFontAssetIndex)
+		{
+			if (Pair.Key.Contains(TEXT("materialsymbol")) || Pair.Key.Contains(TEXT("materialicon")))
+			{
+				FontAssetCache.FindOrAdd(NormalizedFamily) = Pair.Value;
+				return Pair.Value;
+			}
+		}
+	}
+
+	FString EngineFallbackPath;
+	if (TryResolveEngineFontFallback(FontFamily, EngineFallbackPath))
+	{
+		FontAssetCache.FindOrAdd(NormalizedFamily) = EngineFallbackPath;
+		return EngineFallbackPath;
+	}
+
+		const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+		const bool bAllowKnownFontAutoImport = !Settings
+			|| Settings->bAutoImportKnownWebFonts
+			|| Settings->bAutoImportFonts;
+		static TSet<FString> AttemptedKnownWebFonts;
+		if (bAllowKnownFontAutoImport && !AttemptedKnownWebFonts.Contains(NormalizedFamily))
+		{
+			AttemptedKnownWebFonts.Add(NormalizedFamily);
+			if (const FString* KnownUrl = GetKnownWebFontUrls().Find(NormalizedFamily))
+			{
+			UE_LOG(LogDesign2UMG, Log, TEXT("FontResolver: auto-import known web font '%s'"), *FontFamily);
+				const FString ImportedPath = ResolveFont(FontFamily, *KnownUrl);
+				if (!ImportedPath.IsEmpty())
+				{
+					FontAssetCache.FindOrAdd(NormalizedFamily) = ImportedPath;
+					IndexFontAssetName(FontFamily, ImportedPath);
+					return ImportedPath;
+				}
+			}
+		}
+
+		FontAssetCache.FindOrAdd(NormalizedFamily) = FString();
+		return FString();
+	}
 
 void FFontResolver::ClearCache()
 {
 	FontAssetCache.Empty();
+	InvalidateProjectFontAssetIndex();
 }
 
 int32 FFontResolver::ParseWeightValue(const FString& Weight)
@@ -127,7 +245,7 @@ FString FFontResolver::FindBestTypeface(const FString& FontFamily, const FString
 FString FFontResolver::WeightNameFromFile(const FString& FilePath, const FString& FamilyName)
 {
 	FString Base = FPaths::GetBaseFilename(FilePath);
-	// Strip family prefix (e.g. "Roboto-Bold" → "Bold", "Roboto_Light" → "Light")
+	// Strip family prefix (e.g. "Roboto-Bold" -> "Bold", "Roboto_Light" -> "Light")
 	FString Suffix = Base;
 	if (Base.StartsWith(FamilyName, ESearchCase::IgnoreCase))
 	{
@@ -210,8 +328,8 @@ TArray<FString> FFontResolver::FindMissingFonts(const FDesignDocument& Document)
 	if (UsedFamilies.Num() == 0)
 		return {};
 
-	// Find missing — 使用 FindFontAssetPath 的模糊匹配（IgnoreCase + 空格转下划线），
-	// 避免与精确匹配结论矛盾
+	// Find missing fonts by using FindFontAssetPath fuzzy matching.
+	// This keeps result consistent with runtime resolution behavior.
 	TArray<FString> Missing;
 	for (const FString& Family : UsedFamilies)
 	{
@@ -222,7 +340,7 @@ TArray<FString> FFontResolver::FindMissingFonts(const FDesignDocument& Document)
 	if (Missing.Num() > 0)
 	{
 		FString List = FString::Join(Missing, TEXT(", "));
-		UE_LOG(LogDesign2UMG, Warning, TEXT("缺失字体: %s"), *List);
+		UE_LOG(LogDesign2UMG, Warning, TEXT("Missing fonts: %s"), *List);
 		FDesign2UMGNotification::Warning(
 			FText::Format(LOCTEXT("MissingFonts", "Design2UMG: {0} font(s) not found in project: {1}"),
 				FText::AsNumber(Missing.Num()), FText::FromString(List)));
@@ -343,7 +461,8 @@ FString FFontResolver::ResolveFont(const FString& FontName, const FString& Url)
 	if (UFont* Existing = LoadObject<UFont>(nullptr, *FontObjPath))
 	{
 		UE_LOG(LogDesign2UMG, Log, TEXT("Font '%s' already exists: %s"), *FontName, *FontObjPath);
-		FontAssetCache.Add(FontName, FontObjPath);
+		FontAssetCache.FindOrAdd(NormalizeFontFamilyKey(FontName)) = FontObjPath;
+		IndexFontAssetName(FontName, FontObjPath);
 		return FontObjPath;
 	}
 
@@ -360,7 +479,7 @@ FString FFontResolver::ResolveFont(const FString& FontName, const FString& Url)
 		FString TempPath = FPaths::ProjectSavedDir() / TEXT("Design2UMG") / SafeName + TEXT(".") + Extension;
 		if (!DownloadToFile(Url, TempPath))
 		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("字体下载失败: %s (%s)"), *FontName, *Url);
+			UE_LOG(LogDesign2UMG, Warning, TEXT("Font download failed: %s (%s)"), *FontName, *Url);
 			return FString();
 		}
 		FFileHelper::LoadFileToArray(FontData, *TempPath);
@@ -370,7 +489,7 @@ FString FFontResolver::ResolveFont(const FString& FontName, const FString& Url)
 	{
 		if (!FFileHelper::LoadFileToArray(FontData, *Url))
 		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("字体文件读取失败: %s (%s)"), *FontName, *Url);
+			UE_LOG(LogDesign2UMG, Warning, TEXT("Font file read failed: %s (%s)"), *FontName, *Url);
 			return FString();
 		}
 	}
@@ -456,8 +575,9 @@ FString FFontResolver::ResolveFont(const FString& FontName, const FString& Url)
 	FString FontFile = FPackageName::LongPackageNameToFilename(FontPkgName, FPackageName::GetAssetPackageExtension());
 	UPackage::SavePackage(FontPkg, Font, *FontFile, SaveArgs);
 
-	UE_LOG(LogDesign2UMG, Log, TEXT("Imported font '%s' → %s"), *FontName, *FontObjPath);
-	FontAssetCache.Add(FontName, FontObjPath);
+	UE_LOG(LogDesign2UMG, Log, TEXT("Imported font '%s' -> %s"), *FontName, *FontObjPath);
+	FontAssetCache.FindOrAdd(NormalizeFontFamilyKey(FontName)) = FontObjPath;
+	IndexFontAssetName(FontName, FontObjPath);
 	return FontObjPath;
 }
 
