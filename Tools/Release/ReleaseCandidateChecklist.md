@@ -18,7 +18,7 @@ Use this checklist before cutting a GitHub release branch or tag.
 ## 3. Encoding and Text Integrity
 
 - [ ] UTF-8 BOM encoding guard passed for tracked `.h/.cpp/.cs/.py/.md/.json/.yml/.yaml`
-- [ ] Mojibake markers check passed (`Design2UMG鍥剧墖`, replacement char `�`)
+- [ ] Mojibake markers check passed (garbled-path marker and replacement-character marker not found)
 - [ ] Critical files manually spot-checked for readable logs/comments
 
 ## 4. Security and Secrets

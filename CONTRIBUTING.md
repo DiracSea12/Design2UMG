@@ -24,10 +24,11 @@ Build with UE 5.4+.
 
 1. Build the plugin locally.
 2. Run relevant automation tests.
-3. Update docs for any user-facing behavior change.
-4. Keep commits focused and reviewable.
-5. Run `powershell -NoProfile -ExecutionPolicy Bypass -File Tools/Release/Assert-CleanWorkspace.ps1` and ensure workspace hygiene checks pass.
-6. Keep version strings aligned: `Design2UMG.uplugin` `VersionName` must match the release version in `CHANGELOG.md` (semantic versioning: `MAJOR.MINOR.PATCH`).
+3. If `Tools/FigmaExporter` changed, run `npm ci && npm run build` in that directory.
+4. Update docs for any user-facing behavior change.
+5. Keep commits focused and reviewable.
+6. Run `powershell -NoProfile -ExecutionPolicy Bypass -File Tools/Release/Assert-CleanWorkspace.ps1` and ensure workspace hygiene checks pass.
+7. Keep version strings aligned: `Design2UMG.uplugin` `VersionName` must match the release version in `CHANGELOG.md` (semantic versioning: `MAJOR.MINOR.PATCH`).
 
 ## Pull Request Checklist
 

@@ -85,7 +85,26 @@ jobs:
               sys.exit(1)
           PY
 
+  build-figma-exporter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: Tools/FigmaExporter/package-lock.json
+
+      - name: Build Figma exporter
+        run: |
+          cd Tools/FigmaExporter
+          npm ci
+          npm run build
+
   build-plugin:
+    needs: [repository-hygiene, build-figma-exporter]
     runs-on: [self-hosted, windows, ue5]
     defaults:
       run:
