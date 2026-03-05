@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "MCPHttpClient.h"
 #include "Design2UMGLog.h"
@@ -51,6 +51,55 @@ bool FMCPHttpClient::Connect(const FString& Endpoint)
 	return true;
 }
 
+void FMCPHttpClient::ConnectAsync(const FString& Endpoint, TFunction<void(bool bSuccess)> OnComplete)
+{
+	Disconnect();
+	ServerEndpoint = Endpoint;
+
+	TSharedPtr<FJsonObject> InitParams = MakeShared<FJsonObject>();
+	TSharedPtr<FJsonObject> ClientInfo = MakeShared<FJsonObject>();
+	ClientInfo->SetStringField(TEXT("name"), TEXT("Design2UMG"));
+	ClientInfo->SetStringField(TEXT("version"), TEXT("1.0.0"));
+	InitParams->SetObjectField(TEXT("clientInfo"), ClientInfo);
+	InitParams->SetStringField(TEXT("protocolVersion"), TEXT("2024-11-05"));
+
+	TSharedPtr<FJsonObject> Capabilities = MakeShared<FJsonObject>();
+	InitParams->SetObjectField(TEXT("capabilities"), Capabilities);
+
+	SendRequestAsync(TEXT("initialize"), InitParams, true,
+		[this, OnComplete](bool bInitOk, const FString&, const FString& NewSessionId)
+	{
+		if (!bInitOk)
+		{
+			UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: async initialize handshake failed"));
+			if (OnComplete)
+				OnComplete(false);
+			return;
+		}
+
+		if (NewSessionId.IsEmpty())
+		{
+			UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: No Mcp-Session-Id in async initialize response"));
+			if (OnComplete)
+				OnComplete(false);
+			return;
+		}
+
+		SessionId = NewSessionId;
+
+		SendRequestAsync(TEXT("notifications/initialized"), nullptr, false,
+			[this, OnComplete](bool bNotifyOk, const FString&, const FString&)
+		{
+			if (!bNotifyOk)
+				UE_LOG(LogDesign2UMG, Warning, TEXT("MCPHttpClient: notifications/initialized failed after async initialize"));
+
+			UE_LOG(LogDesign2UMG, Log, TEXT("MCPHttpClient: Connected to %s (session: %s)"), *ServerEndpoint, *SessionId);
+			if (OnComplete)
+				OnComplete(true);
+		});
+	});
+}
+
 void FMCPHttpClient::Disconnect()
 {
 	SessionId.Empty();
@@ -58,12 +107,12 @@ void FMCPHttpClient::Disconnect()
 	NextRequestId = 1;
 }
 
-bool FMCPHttpClient::SendRequest(const FString& Method,
-								 const TSharedPtr<FJsonObject>& Params,
-								 FString& OutResponseBody,
-								 bool bExpectResponse)
+void FMCPHttpClient::SendRequestAsync(
+	const FString& Method,
+	const TSharedPtr<FJsonObject>& Params,
+	bool bExpectResponse,
+	TFunction<void(bool bSuccess, const FString& ResponseBody, const FString& NewSessionId)> OnComplete)
 {
-	// 构建 JSON-RPC 2.0 请求
 	TSharedRef<FJsonObject> RequestObj = MakeShared<FJsonObject>();
 	RequestObj->SetStringField(TEXT("jsonrpc"), TEXT("2.0"));
 	RequestObj->SetStringField(TEXT("method"), Method);
@@ -71,7 +120,6 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 	if (Params.IsValid())
 		RequestObj->SetObjectField(TEXT("params"), Params);
 
-	// notifications 不需要 id
 	const bool bIsNotification = Method.StartsWith(TEXT("notifications/"));
 	if (!bIsNotification)
 		RequestObj->SetNumberField(TEXT("id"), NextRequestId++);
@@ -80,7 +128,6 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&RequestBody);
 	FJsonSerializer::Serialize(RequestObj, Writer);
 
-	// 创建 HTTP 请求
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = FHttpModule::Get().CreateRequest();
 	HttpRequest->SetURL(ServerEndpoint);
 	HttpRequest->SetVerb(TEXT("POST"));
@@ -92,7 +139,75 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 	if (!SessionId.IsEmpty())
 		HttpRequest->SetHeader(TEXT("Mcp-Session-Id"), SessionId);
 
-	// 同步等待 — 状态放堆上，防止 timeout/cancel 后回调写悬垂栈变量
+	HttpRequest->OnProcessRequestComplete().BindLambda(
+		[OnComplete, Method, bExpectResponse](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnectedSuccessfully)
+	{
+		if (!bConnectedSuccessfully || !Response.IsValid())
+		{
+			UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: Connection failed for %s"), *Method);
+			if (OnComplete)
+				OnComplete(false, TEXT(""), TEXT(""));
+			return;
+		}
+
+		const int32 Code = Response->GetResponseCode();
+		if (Code < 200 || Code >= 300)
+		{
+			UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: HTTP %d for %s"), Code, *Method);
+			if (OnComplete)
+				OnComplete(false, TEXT(""), TEXT(""));
+			return;
+		}
+
+		const FString ResponseBody = bExpectResponse ? Response->GetContentAsString() : FString();
+		const FString NewSessionId = Response->GetHeader(TEXT("Mcp-Session-Id"));
+		if (OnComplete)
+			OnComplete(true, ResponseBody, NewSessionId);
+	});
+
+	if (!HttpRequest->ProcessRequest())
+	{
+		UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: ProcessRequest failed for %s"), *Method);
+		if (OnComplete)
+			OnComplete(false, TEXT(""), TEXT(""));
+	}
+}
+
+bool FMCPHttpClient::SendRequest(const FString& Method,
+								 const TSharedPtr<FJsonObject>& Params,
+								 FString& OutResponseBody,
+								 bool bExpectResponse)
+{
+	// 鏋勫缓 JSON-RPC 2.0 璇锋眰
+	TSharedRef<FJsonObject> RequestObj = MakeShared<FJsonObject>();
+	RequestObj->SetStringField(TEXT("jsonrpc"), TEXT("2.0"));
+	RequestObj->SetStringField(TEXT("method"), Method);
+
+	if (Params.IsValid())
+		RequestObj->SetObjectField(TEXT("params"), Params);
+
+	// notifications 涓嶉渶瑕?id
+	const bool bIsNotification = Method.StartsWith(TEXT("notifications/"));
+	if (!bIsNotification)
+		RequestObj->SetNumberField(TEXT("id"), NextRequestId++);
+
+	FString RequestBody;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&RequestBody);
+	FJsonSerializer::Serialize(RequestObj, Writer);
+
+	// 鍒涘缓 HTTP 璇锋眰
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = FHttpModule::Get().CreateRequest();
+	HttpRequest->SetURL(ServerEndpoint);
+	HttpRequest->SetVerb(TEXT("POST"));
+	HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+	HttpRequest->SetHeader(TEXT("Accept"), TEXT("text/event-stream"));
+	HttpRequest->SetContentAsString(RequestBody);
+	HttpRequest->SetTimeout(30.0f);
+
+	if (!SessionId.IsEmpty())
+		HttpRequest->SetHeader(TEXT("Mcp-Session-Id"), SessionId);
+
+	// 鍚屾绛夊緟 鈥?鐘舵€佹斁鍫嗕笂锛岄槻姝?timeout/cancel 鍚庡洖璋冨啓鎮瀭鏍堝彉閲?
 	struct FRequestState
 	{
 		std::atomic<bool> bCompleted{false};
@@ -132,7 +247,7 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 		return false;
 	}
 
-	// 阻塞等待，同时显示进度条并 tick Slate 保持编辑器 UI 响应
+	// 闃诲绛夊緟锛屽悓鏃舵樉绀鸿繘搴︽潯骞?tick Slate 淇濇寔缂栬緫鍣?UI 鍝嶅簲
 	const double StartTime = FPlatformTime::Seconds();
 	const double Timeout = 30.0;
 	const float TotalSteps = static_cast<float>(Timeout / 0.01);
@@ -173,8 +288,8 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 
 bool FMCPHttpClient::ParseSSEResponse(const FString& SSEBody, TSharedPtr<FJsonObject>& OutResult)
 {
-	// SSE 格式: "event: message\ndata: {json}\n\n"
-	// 提取最后一个 "data:" 行
+	// SSE 鏍煎紡: "event: message\ndata: {json}\n\n"
+	// 鎻愬彇鏈€鍚庝竴涓?"data:" 琛?
 	FString JsonLine;
 	TArray<FString> Lines;
 	SSEBody.ParseIntoArrayLines(Lines);
@@ -190,7 +305,7 @@ bool FMCPHttpClient::ParseSSEResponse(const FString& SSEBody, TSharedPtr<FJsonOb
 
 	if (JsonLine.IsEmpty())
 	{
-		// 可能不是 SSE 格式，直接尝试解析整个 body
+		// 鍙兘涓嶆槸 SSE 鏍煎紡锛岀洿鎺ュ皾璇曡В鏋愭暣涓?body
 		JsonLine = SSEBody;
 	}
 
@@ -270,7 +385,7 @@ void FMCPHttpClient::CallToolAsync(const FString& ToolName,
 		return;
 	}
 
-	// 构建 JSON-RPC 请求
+	// 鏋勫缓 JSON-RPC 璇锋眰
 	TSharedRef<FJsonObject> RequestObj = MakeShared<FJsonObject>();
 	RequestObj->SetStringField(TEXT("jsonrpc"), TEXT("2.0"));
 	RequestObj->SetStringField(TEXT("method"), TEXT("tools/call"));
@@ -332,3 +447,4 @@ void FMCPHttpClient::CallToolAsync(const FString& ToolName,
 			OnComplete(false, TEXT(""));
 	}
 }
+

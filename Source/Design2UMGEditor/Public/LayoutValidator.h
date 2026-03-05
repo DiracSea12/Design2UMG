@@ -1,11 +1,11 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "LayoutCalculator.h"
 
-// 布局验收阈值常量
+// 甯冨眬楠屾敹闃堝€煎父閲?
 namespace EvalThresholds
 {
 	constexpr float Acceptance_MAE = 4.0f;
@@ -13,20 +13,20 @@ namespace EvalThresholds
 }
 
 /**
- * 布局精度指标
+ * 甯冨眬绮惧害鎸囨爣
  */
 struct FLayoutMetrics
 {
-	/** 平均绝对误差（像素） */
+	/** 骞冲潎缁濆璇樊锛堝儚绱狅級 */
 	float MAE = 0.0f;
 
-	/** 95分位误差（像素） */
+	/** 95鍒嗕綅璇樊锛堝儚绱狅級 */
 	float P95 = 0.0f;
 
-	/** 样本数量 */
+	/** 鏍锋湰鏁伴噺 */
 	int32 SampleCount = 0;
 
-	/** 是否通过验收 */
+	/** 鏄惁閫氳繃楠屾敹 */
 	bool IsAcceptable() const
 	{
 		return MAE <= EvalThresholds::Acceptance_MAE && P95 <= EvalThresholds::Acceptance_P95;
@@ -34,13 +34,13 @@ struct FLayoutMetrics
 };
 
 /**
- * 布局验证器 - 计算MAE/P95指标
+ * 甯冨眬楠岃瘉鍣?- 璁＄畻MAE/P95鎸囨爣
  */
 class FLayoutValidator
 {
 public:
 	/**
-	 * 计算单个Bounds的误差（像素）
+	 * 璁＄畻鍗曚釜Bounds鐨勮宸紙鍍忕礌锛?
 	 */
 	static float CalculateBoundsError(
 		const FBounds& Actual,
@@ -48,7 +48,7 @@ public:
 		const FIntPoint& DesignSize);
 
 	/**
-	 * 计算单个Bounds的位置误差（像素）
+	 * 璁＄畻鍗曚釜Bounds鐨勪綅缃宸紙鍍忕礌锛?
 	 */
 	static float CalculatePosError(
 		const FBounds& Actual,
@@ -56,10 +56,11 @@ public:
 		const FIntPoint& DesignSize);
 
 	/**
-	 * 计算一组样本的MAE/P95指标
+	 * 璁＄畻涓€缁勬牱鏈殑MAE/P95鎸囨爣
 	 */
 	static FLayoutMetrics CalculateMetrics(
 		const TArray<FBounds>& ActualBounds,
 		const TArray<FBounds>& ExpectedBounds,
 		const FIntPoint& DesignSize);
 };
+

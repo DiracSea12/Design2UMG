@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "FigmaHttpClient.h"
 #include "Design2UMGLog.h"
@@ -55,3 +55,4 @@ void FFigmaHttpClient::SendGet(const FString& Url, FOnComplete OnComplete)
 
 	Request->ProcessRequest();
 }
+

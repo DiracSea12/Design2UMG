@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "IncrementalUpdater.h"
 #include "Design2UMGLog.h"
@@ -74,7 +74,7 @@ bool IsNodeModified(const FUMGWidgetNode& Node, UWidget* Widget)
 	if (Widget->GetFName() != Expected)
 		return true;
 
-	// Children count change — 捕获结构性变更
+	// Children count change 鈥?鎹曡幏缁撴瀯鎬у彉鏇?
 	if (UPanelWidget* Panel = Cast<UPanelWidget>(Widget))
 	{
 		if (Node.Children.Num() != Panel->GetChildrenCount())
@@ -161,7 +161,7 @@ bool FIncrementalUpdater::ShowDiffPreviewDialog(FDiffResult& InOutDiff)
 				SNew(SCheckBox)
 				.IsChecked_Lambda([DiffPtr, i]() { return DiffPtr->Entries[i].bAccepted ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
 				.OnCheckStateChanged_Lambda([DiffPtr, i](ECheckBoxState State) { DiffPtr->Entries[i].bAccepted = (State == ECheckBoxState::Checked); })
-				// Removed 条目无法通过新树过滤来保留旧节点，禁用复选框
+				// Removed 鏉＄洰鏃犳硶閫氳繃鏂版爲杩囨护鏉ヤ繚鐣欐棫鑺傜偣锛岀鐢ㄥ閫夋
 				.IsEnabled(Entry.Action != EDiffAction::Removed)
 			]
 			+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(4.0f, 2.0f).VAlign(VAlign_Center)
@@ -226,7 +226,7 @@ bool FIncrementalUpdater::ShowDiffPreviewDialog(FDiffResult& InOutDiff)
 FUMGWidgetNode FIncrementalUpdater::FilterByAccepted(const FUMGWidgetNode& Root, const FDiffResult& Diff)
 {
 	// Build set of rejected node IDs (Added/Modified only)
-	// Removed 条目的 NodeId 不存在于新树中，过滤无效，跳过并警告
+	// Removed 鏉＄洰鐨?NodeId 涓嶅瓨鍦ㄤ簬鏂版爲涓紝杩囨护鏃犳晥锛岃烦杩囧苟璀﹀憡
 	TSet<FString> RejectedIds;
 	for (const auto& E : Diff.Entries)
 	{
@@ -235,7 +235,7 @@ FUMGWidgetNode FIncrementalUpdater::FilterByAccepted(const FUMGWidgetNode& Root,
 			if (E.Action == EDiffAction::Removed)
 			{
 				UE_LOG(LogDesign2UMG, Warning,
-					TEXT("IncrementalUpdater: Cannot preserve removed node '%s' (%s) — not present in new design"),
+					TEXT("IncrementalUpdater: Cannot preserve removed node '%s' (%s) 鈥?not present in new design"),
 					*E.NodeName, *E.NodeId);
 				continue;
 			}
@@ -263,3 +263,4 @@ FUMGWidgetNode FIncrementalUpdater::FilterByAccepted(const FUMGWidgetNode& Root,
 }
 
 #undef LOCTEXT_NAMESPACE
+

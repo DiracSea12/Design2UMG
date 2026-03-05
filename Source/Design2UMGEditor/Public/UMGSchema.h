@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -7,14 +7,13 @@
 #include "UMGSchema.generated.h"
 
 /**
- * 像素坐标Bounds（定义在UMGSchema避免循环依赖）
- */
+ * 鍍忕礌鍧愭爣Bounds锛堝畾涔夊湪UMGSchema閬垮厤寰幆渚濊禆锛? */
 struct FBounds
 {
-	float X = 0.0f;  // 左上角X（像素）
-	float Y = 0.0f;  // 左上角Y（像素）
-	float W = 0.0f;  // 宽度（像素）
-	float H = 0.0f;  // 高度（像素）
+	float X = 0.0f;  // 宸︿笂瑙扻锛堝儚绱狅級
+	float Y = 0.0f;  // 宸︿笂瑙扽锛堝儚绱狅級
+	float W = 0.0f;  // 瀹藉害锛堝儚绱狅級
+	float H = 0.0f;  // 楂樺害锛堝儚绱狅級
 
 	float GetRight() const { return X + W; }
 	float GetBottom() const { return Y + H; }
@@ -23,7 +22,7 @@ struct FBounds
 };
 
 /**
- * Anchor 数据结构
+ * Anchor 鏁版嵁缁撴瀯
  */
 USTRUCT()
 struct FUMGAnchorData
@@ -38,7 +37,7 @@ struct FUMGAnchorData
 };
 
 /**
- * Anchors 数据结构 (Min/Max)
+ * Anchors 鏁版嵁缁撴瀯 (Min/Max)
  */
 USTRUCT()
 struct FUMGAnchorsData
@@ -53,7 +52,7 @@ struct FUMGAnchorsData
 };
 
 /**
- * Offsets 数据结构
+ * Offsets 鏁版嵁缁撴瀯
  */
 USTRUCT()
 struct FUMGOffsetsData
@@ -74,14 +73,14 @@ struct FUMGOffsetsData
 };
 
 /**
- * Slot 数据结构 - 描述控件在父容器中的布局信息
+ * Slot 鏁版嵁缁撴瀯 - 鎻忚堪鎺т欢鍦ㄧ埗瀹瑰櫒涓殑甯冨眬淇℃伅
  */
 USTRUCT()
 struct FUMGSlotData
 {
 	GENERATED_BODY()
 
-	// CanvasPanel 专用
+	// CanvasPanel 涓撶敤
 	UPROPERTY()
 	FUMGAnchorsData Anchors;
 
@@ -91,11 +90,11 @@ struct FUMGSlotData
 	UPROPERTY()
 	FUMGOffsetsData Offsets;
 
-	// 通用
+	// 閫氱敤
 	UPROPERTY()
 	FMargin Padding = FMargin(0.0f);
 
-	// VerticalBox/HorizontalBox/Overlay 专用
+	// VerticalBox/HorizontalBox/Overlay 涓撶敤
 	UPROPERTY()
 	FString HorizontalAlignment = TEXT("Fill"); // Left, Center, Right, Fill
 
@@ -112,7 +111,7 @@ struct FUMGSlotData
 	UPROPERTY()
 	bool bAutoSize = false;
 
-	// GridPanel 专用
+	// GridPanel 涓撶敤
 	UPROPERTY()
 	int32 Row = 0;
 
@@ -127,28 +126,26 @@ struct FUMGSlotData
 };
 
 /**
- * 类型化文本样式属性（FontSize, LetterSpacing 等文本专属字段）
- * WrapWithBorder 时不随视觉属性转移，留在原 Widget 上
- */
+ * 绫诲瀷鍖栨枃鏈牱寮忓睘鎬э紙FontSize, LetterSpacing 绛夋枃鏈笓灞炲瓧娈碉級
+ * WrapWithBorder 鏃朵笉闅忚瑙夊睘鎬ц浆绉伙紝鐣欏湪鍘?Widget 涓? */
 struct FUMGTextStyleData
 {
-	float FontSize = 0;              // 0 = 未设置
+	float FontSize = 0;              // 0 = 鏈缃?
 	float LetterSpacing = 0;
-	bool bHasLetterSpacing = false;  // 区分"显式设置为0"和"未设置"
+	bool bHasLetterSpacing = false;  // 鍖哄垎"鏄惧紡璁剧疆涓?"鍜?鏈缃?
 };
 
 /**
- * 类型化视觉画刷属性（渐进式替代 Properties 中的视觉相关 key）
- * WrapWithBorder 时整体转移到 Border 节点
+ * 绫诲瀷鍖栬瑙夌敾鍒峰睘鎬э紙娓愯繘寮忔浛浠?Properties 涓殑瑙嗚鐩稿叧 key锛? * WrapWithBorder 鏃舵暣浣撹浆绉诲埌 Border 鑺傜偣
  */
 struct FUMGVisualBrushData
 {
-	float OutlineCornerRadius = -1;  // -1 = 未设置
+	float OutlineCornerRadius = -1;  // -1 = 鏈缃?
 	FVector4 CornerRadii = FVector4(-1, -1, -1, -1);
 	float OutlineThickness = 0;
 
 	ESlateBrushDrawType::Type DrawAs = ESlateBrushDrawType::NoDrawType;
-	bool bHasDrawAs = false;         // 区分"显式NoDrawType"和"未设置"
+	bool bHasDrawAs = false;         // 鍖哄垎"鏄惧紡NoDrawType"鍜?鏈缃?
 	FLinearColor BrushColor = FLinearColor::Transparent;
 	bool bHasBrushColor = false;
 	FLinearColor OutlineColor = FLinearColor::Transparent;
@@ -162,18 +159,18 @@ struct FUMGVisualBrushData
 };
 
 /**
- * Widget 节点数据结构 - 描述单个控件（v2.4更新）
+ * Widget 节点数据结构 - 描述单个控件（v2.4 更新）
  */
 USTRUCT()
 struct FUMGWidgetNode
 {
 	GENERATED_BODY()
 
-	/** 控件类型: CanvasPanel, VerticalBox, HorizontalBox, Button, TextBlock, Image, etc. */
+	/** 控件类型: CanvasPanel, VerticalBox, HorizontalBox, Button, TextBlock, Image 等 */
 	UPROPERTY()
 	FString Type;
 
-	/** 稳定唯一标识，路径式：{ParentId}/{Type}_{Index}（v2.2新增） */
+	/** 稳定唯一标识，路径格式：{ParentId}/{Type}_{Index}（v2.2 新增） */
 	UPROPERTY()
 	FString Id;
 
@@ -181,47 +178,47 @@ struct FUMGWidgetNode
 	UPROPERTY()
 	FString Name;
 
-	/** 像素坐标Bounds（由LayoutCalculator从Slot计算） */
+	/** 像素坐标 Bounds（由 LayoutCalculator 从 Slot 反推） */
 	FBounds Bounds;
 
-	/** 布局槽数据（由LayoutCalculator从Bounds计算） */
+	/** 布局槽数据（由 LayoutCalculator 从 Bounds 计算） */
 	UPROPERTY()
 	FUMGSlotData Slot;
 
-	/** 
-	 * 属性键值对（legacy，逐步由 Brush 替代） 
-	 * @note [TODO] 完全重构为强类型数据，消除字符串 Map 带来的类型安全和维护风险。
-	 *       为向后兼容当前版本保留，但新属性系统不应再添加到此 Map 中。
+	/**
+	 * 属性键值对（legacy，逐步由 Brush 替代）
+	 * @note [TODO] 后续重构为强类型数据，减少 string map 带来的类型安全和维护风险。
+	 *       当前为向后兼容保留，新属性系统不应继续写入此 Map。
 	 */
 	UPROPERTY()
 	TMap<FString, FString> Properties;
 
-	/** 类型化文本样式（v2.4 拆分自 Brush） */
+	/** 类型化文本样式（v2.4 从 Brush 中拆分） */
 	FUMGTextStyleData TextStyle;
 
-	/** 类型化视觉画刷（v2.4 拆分自 Brush，WrapWithBorder 时转移） */
+	/** 类型化视觉画刷（v2.4 从 Brush 中拆分；WrapWithBorder 时会转移） */
 	FUMGVisualBrushData Brush;
 
-	/** 子控件 (不可序列化，UHT 不支持递归 USTRUCT) */
+	/** 子控件（不可序列化，UHT 不支持递归 USTRUCT） */
 	TArray<FUMGWidgetNode> Children;
 };
 
 /**
- * Widget 蓝图数据结构 - 描述整个 Widget Blueprint
+ * Widget 钃濆浘鏁版嵁缁撴瀯 - 鎻忚堪鏁翠釜 Widget Blueprint
  */
 USTRUCT()
 struct FUMGWidgetData
 {
 	GENERATED_BODY()
 
-	/** 生成的 Widget Blueprint 名称 */
+	/** 鐢熸垚鐨?Widget Blueprint 鍚嶇О */
 	UPROPERTY()
 	FString WidgetName = TEXT("WBP_Generated");
 
-	/** 根控件 */
+	/** 鏍规帶浠?*/
 	UPROPERTY()
 	FUMGWidgetNode RootWidget;
 
-	/** 转换过程中的降级警告（如 Ellipse→Border） */
+	/** 杞崲杩囩▼涓殑闄嶇骇璀﹀憡锛堝 Ellipse鈫払order锛?*/
 	TArray<FString> Warnings;
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -6,23 +6,23 @@
 #include "LayoutCalculator.h"
 
 /**
- * Fixer配置参数
+ * Fixer閰嶇疆鍙傛暟
  */
 struct FFixerPreset
 {
-	/** 设计尺寸 */
+	/** 璁捐灏哄 */
 	FIntPoint DesignSize = FIntPoint(1920, 1080);
 
-	/** 动态吸附阈值（像素），运行时根据DesignSize计算 */
+	/** 鍔ㄦ€佸惛闄勯槇鍊硷紙鍍忕礌锛夛紝杩愯鏃舵牴鎹瓺esignSize璁＄畻 */
 	int32 SnapPx = 4;
 
-	/** 行/列检测的重叠度阈值 */
+	/** 琛?鍒楁娴嬬殑閲嶅彔搴﹂槇鍊?*/
 	float RowOverlapThreshold = 0.8f;
 
-	/** 等距修正最小元素数 */
+	/** 绛夎窛淇鏈€灏忓厓绱犳暟 */
 	int32 MinElementsForEqualSpacing = 3;
 
-	/** 等距修正最大间距方差（归一化），超过则不修正 */
+	/** 绛夎窛淇鏈€澶ч棿璺濇柟宸紙褰掍竴鍖栵級锛岃秴杩囧垯涓嶄慨姝?*/
 	float MaxSpacingVarianceForEqualSpacing = 0.02f;
 
 	bool bEnableOverflowFix = true;
@@ -33,7 +33,7 @@ struct FFixerPreset
 };
 
 /**
- * 修正日志条目
+ * 淇鏃ュ織鏉＄洰
  */
 struct FFixerLogEntry
 {
@@ -45,7 +45,7 @@ struct FFixerLogEntry
 };
 
 /**
- * v2.3: Fixer触发统计
+ * v2.3: Fixer瑙﹀彂缁熻
  */
 struct FFixerStats
 {
@@ -58,32 +58,31 @@ struct FFixerStats
 };
 
 /**
- * Widget节点（用于Fixer处理）
- */
+ * Widget鑺傜偣锛堢敤浜嶧ixer澶勭悊锛? */
 struct FFixerWidgetNode
 {
 	FString Id;
 	FString Type;
 	FBounds Bounds;
-	bool bFixExempt = false;  // v2.2: 禁止修正标记
+	bool bFixExempt = false;  // v2.2: 绂佹淇鏍囪
 	TArray<FFixerWidgetNode> Children;
 };
 
 /**
- * 布局修复器 - 纯规则层自动修复
- * 执行位置：在LayoutCalc之前，直接修改Bounds
+ * 甯冨眬淇鍣?- 绾鍒欏眰鑷姩淇
+ * 鎵ц浣嶇疆锛氬湪LayoutCalc涔嬪墠锛岀洿鎺ヤ慨鏀笲ounds
  */
 class FLayoutFixer
 {
 public:
 	/**
-	 * 初始化Fixer，计算动态阈值
+	 * 鍒濆鍖朏ixer锛岃绠楀姩鎬侀槇鍊?
 	 */
 	static void Initialize(const FIntPoint& DesignSize, FFixerPreset& OutPreset);
 
 	/**
-	 * 修复整个Widget树
-	 * @param OutStats v2.3: 可选的统计输出
+	 * 淇鏁翠釜Widget鏍?
+	 * @param OutStats v2.3: 鍙€夌殑缁熻杈撳嚭
 	 */
 	static void FixWidgetTree(
 		FFixerWidgetNode& Root,
@@ -92,7 +91,7 @@ public:
 		FFixerStats* OutStats = nullptr);
 
 	/**
-	 * 越界修正：确保子元素不超出父容器
+	 * 瓒婄晫淇锛氱‘淇濆瓙鍏冪礌涓嶈秴鍑虹埗瀹瑰櫒
 	 */
 	static bool FixBoundsOverflow(
 		FBounds& ChildBounds,
@@ -100,7 +99,7 @@ public:
 		FFixerLogEntry* OutLog = nullptr);
 
 	/**
-	 * 对齐吸附：吸附到父边缘/中线
+	 * 瀵归綈鍚搁檮锛氬惛闄勫埌鐖惰竟缂?涓嚎
 	 */
 	static bool SnapToAlignment(
 		FBounds& Bounds,
@@ -110,7 +109,7 @@ public:
 		FFixerLogEntry* OutLog = nullptr);
 
 	/**
-	 * 同级元素对齐吸附
+	 * 鍚岀骇鍏冪礌瀵归綈鍚搁檮
 	 */
 	static bool SnapToSiblings(
 		FBounds& Bounds,
@@ -120,21 +119,21 @@ public:
 		FFixerLogEntry* OutLog = nullptr);
 
 	/**
-	 * 检测同一行的元素（Y轴重叠度>阈值视为同一行）
+	 * 妫€娴嬪悓涓€琛岀殑鍏冪礌锛圷杞撮噸鍙犲害>闃堝€艰涓哄悓涓€琛岋級
 	 */
 	static TArray<TArray<int32>> DetectRows(
 		const TArray<FBounds>& Bounds,
 		float OverlapThreshold);
 
 	/**
-	 * 检测同一列的元素（X轴重叠度>阈值视为同一列）
+	 * 妫€娴嬪悓涓€鍒楃殑鍏冪礌锛圶杞撮噸鍙犲害>闃堝€艰涓哄悓涓€鍒楋級
 	 */
 	static TArray<TArray<int32>> DetectColumns(
 		const TArray<FBounds>& Bounds,
 		float OverlapThreshold);
 
 	/**
-	 * 组内等距修正
+	 * 缁勫唴绛夎窛淇
 	 */
 	static bool FixEqualSpacing(
 		TArray<FBounds>& Bounds,
@@ -147,7 +146,7 @@ private:
 	static float GetAverage(const TArray<float>& Values);
 	static float GetMaxDeviation(const TArray<float>& Values, float Average);
 
-	/** 递归处理单个节点及其子树 */
+	/** 閫掑綊澶勭悊鍗曚釜鑺傜偣鍙婂叾瀛愭爲 */
 	static void ProcessNode(
 		FFixerWidgetNode& Node,
 		const FBounds& ParentBounds,
@@ -157,7 +156,7 @@ private:
 		TArray<FFixerLogEntry>& OutLog,
 		FFixerStats& Stats);
 
-	/** 修正子节点的同级吸附和等距间距 */
+	/** 淇瀛愯妭鐐圭殑鍚岀骇鍚搁檮鍜岀瓑璺濋棿璺?*/
 	static void FixChildrenSpacing(
 		TArray<FBounds>& ProposedBounds,
 		const TArray<FBounds>& OriginalBounds,
@@ -167,10 +166,11 @@ private:
 		TArray<FFixerLogEntry>& OutLog,
 		FFixerStats& Stats);
 
-	/** 保守性检查：验证修正幅度是否合理 */
+	/** 淇濆畧鎬ф鏌ワ細楠岃瘉淇骞呭害鏄惁鍚堢悊 */
 	static bool PassesConservatismCheck(
 		const TArray<FBounds>& OriginalBounds,
 		const TArray<FBounds>& ProposedBounds,
 		float SnapThresholdX,
 		float SnapThresholdY);
 };
+

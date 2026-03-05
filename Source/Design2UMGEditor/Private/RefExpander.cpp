@@ -1,18 +1,18 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "RefExpander.h"
 #include "Design2UMGLog.h"
 
 namespace
 {
-	bool ShouldApplySizeOverride(const FPenSize& Size, bool bHasExplicitFlag)
+	bool ShouldApplySizeOverride(const FDesignSize& Size, bool bHasExplicitFlag)
 	{
 		// Explicit width/height always wins.
 		if (bHasExplicitFlag)
 			return true;
 
 		// Pre-computed fit_content size (value > 0) should also propagate for ref instances.
-		if (Size.Mode == EPenSizeMode::FitContent)
+		if (Size.Mode == EDesignSizeMode::FitContent)
 			return Size.Value > 0.0f;
 
 		// Non-fit modes (fixed/fill) are meaningful overrides even when explicit flags are absent.
@@ -27,9 +27,11 @@ namespace
 			Target.FontSize = Override.FontSize;
 		if (!Override.FontWeight.IsEmpty())
 			Target.FontWeight = Override.FontWeight;
+		if (!Override.FontStyle.IsEmpty())
+			Target.FontStyle = Override.FontStyle;
 		if (!Override.FontFamily.IsEmpty())
 			Target.FontFamily = Override.FontFamily;
-		if (Override.Fill.Type != EPenFillType::None || Override.Fill.bExplicitClear)
+		if (Override.Fill.Type != EDesignFillType::None || Override.Fill.bExplicitClear)
 		{
 			Target.Fill = Override.Fill;
 			Target.Fills = Override.Fills;
@@ -72,16 +74,22 @@ namespace
 			Target.Opacity = Override.Opacity;
 			Target.bHasOpacity = true;
 		}
-		if (Override.JustifyContent != EPenJustifyContent::Start)
+		if (Override.JustifyContent != EDesignJustifyContent::Start)
 			Target.JustifyContent = Override.JustifyContent;
-		if (Override.AlignItems != EPenAlignItems::Start)
+		if (Override.AlignItems != EDesignAlignItems::Start)
 			Target.AlignItems = Override.AlignItems;
-		if (Override.TextAlign != EPenTextAlign::Left)
+		if (Override.TextAlign != EDesignTextAlign::Left)
 			Target.TextAlign = Override.TextAlign;
 		if (Override.LineHeight > 0)
 			Target.LineHeight = Override.LineHeight;
-		if (Override.TextGrowth != EPenTextGrowth::Auto)
+		if (Override.TextGrowth != EDesignTextGrowth::Auto)
 			Target.TextGrowth = Override.TextGrowth;
+		if (Override.bUnderline)
+			Target.bUnderline = true;
+		if (Override.bStrikethrough)
+			Target.bStrikethrough = true;
+		if (!Override.Href.IsEmpty())
+			Target.Href = Override.Href;
 		if (Override.Children.Num() > 0)
 			Target.Children = Override.Children;
 	}
@@ -94,7 +102,7 @@ namespace
 			return BaseOverride;
 		if (!BaseOverride.IsValid())
 			return FRefExpander::DeepCopyNode(OuterOverride);
-		if (OuterOverride->Type != EPenNodeType::Unknown)
+		if (OuterOverride->Type != EDesignNodeType::Unknown)
 			return FRefExpander::DeepCopyNode(OuterOverride);
 
 		auto Merged = FRefExpander::DeepCopyNode(BaseOverride);
@@ -130,7 +138,7 @@ namespace
 			if (!Child.IsValid() || Child->Id != TargetId)
 				continue;
 
-			if (Override->Type != EPenNodeType::Unknown)
+			if (Override->Type != EDesignNodeType::Unknown)
 			{
 				Parent->Children[i] = FRefExpander::DeepCopyNode(Override);
 				return true;
@@ -214,7 +222,7 @@ namespace
 			Expanded->bHasHeight = true;
 		}
 
-		if (RefNode->Fill.Type != EPenFillType::None || RefNode->Fill.bExplicitClear)
+		if (RefNode->Fill.Type != EDesignFillType::None || RefNode->Fill.bExplicitClear)
 		{
 			Expanded->Fill = RefNode->Fill;
 			Expanded->Fills = RefNode->Fills;
@@ -291,7 +299,7 @@ namespace
 		ApplyInstanceOverrides(Expanded, RefNode);
 
 		TSharedPtr<FDesignNode> Result = Expanded;
-		if (Expanded->Type == EPenNodeType::Ref && !Expanded->Ref.IsEmpty())
+		if (Expanded->Type == EDesignNodeType::Ref && !Expanded->Ref.IsEmpty())
 		{
 			Result = ExpandRefInternal(Expanded, Doc, RefChain);
 		}
@@ -355,7 +363,7 @@ void FRefExpander::ApplyDescendantOverride(TSharedPtr<FDesignNode>& Node, const 
 	}
 }
 
-void FRefExpander::ReThemeNode(TSharedPtr<FDesignNode>& Node, const FPenVariableResolver& Resolver)
+void FRefExpander::ReThemeNode(TSharedPtr<FDesignNode>& Node, const FDesignVariableResolver& Resolver)
 {
 	if (!Node.IsValid())
 		return;
@@ -376,7 +384,7 @@ void FRefExpander::ReThemeNode(TSharedPtr<FDesignNode>& Node, const FPenVariable
 	}
 
 	// Multi-layer fills
-	for (FPenFill& F : Node->Fills)
+	for (FDesignFill& F : Node->Fills)
 	{
 		if (!F.SourceVar.IsEmpty())
 			F.SolidColor = Resolver.ResolveColor(F.SourceVar);
@@ -399,3 +407,6 @@ void FRefExpander::ReThemeNode(TSharedPtr<FDesignNode>& Node, const FPenVariable
 	for (auto& Child : Node->Children)
 		ReThemeNode(Child, Resolver);
 }
+
+
+

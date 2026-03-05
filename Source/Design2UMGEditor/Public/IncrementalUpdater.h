@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -37,14 +37,15 @@ struct FDiffResult
 class FIncrementalUpdater
 {
 public:
-	/** 计算新节点树与已有 Widget 之间的 diff */
+	/** 璁＄畻鏂拌妭鐐规爲涓庡凡鏈?Widget 涔嬮棿鐨?diff */
 	static FDiffResult ComputeDiff(
 		const FUMGWidgetNode& NewRoot,
 		UWidgetBlueprint* ExistingBP);
 
-	/** 显示 Diff 预览对话框，用户可逐项勾选。返回 true = 用户确认，false = 取消 */
+	/** 鏄剧ず Diff 棰勮瀵硅瘽妗嗭紝鐢ㄦ埛鍙€愰」鍕鹃€夈€傝繑鍥?true = 鐢ㄦ埛纭锛宖alse = 鍙栨秷 */
 	static bool ShowDiffPreviewDialog(FDiffResult& InOutDiff);
 
-	/** 根据用户选择过滤新节点树，移除被拒绝的节点 */
+	/** 鏍规嵁鐢ㄦ埛閫夋嫨杩囨护鏂拌妭鐐规爲锛岀Щ闄よ鎷掔粷鐨勮妭鐐?*/
 	static FUMGWidgetNode FilterByAccepted(const FUMGWidgetNode& Root, const FDiffResult& Diff);
 };
+

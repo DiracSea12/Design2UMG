@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -23,7 +23,7 @@ public:
 	/** GET /v1/files/:key — 获取完整文件 */
 	void GetFile(const FString& FileKey, FOnComplete OnComplete);
 
-	/** GET /v1/files/:key/images — 获取文件中所有图片的 imageRef→URL 映射 */
+	/** GET /v1/files/:key/images - Official "get file image fills" endpoint (imageRef -> URL map). */
 	void GetFileImages(const FString& FileKey, FOnComplete OnComplete);
 
 	/** GET /v1/images/:key?ids=...&format=png&scale=2 — 导出节点为图片 */
@@ -34,3 +34,4 @@ private:
 
 	void SendGet(const FString& Url, FOnComplete OnComplete);
 };
+

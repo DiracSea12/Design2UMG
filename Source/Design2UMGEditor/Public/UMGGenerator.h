@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -8,22 +8,23 @@
 class UWidgetBlueprint;
 
 /**
- * UMG 生成器 - 将解析后的数据结构转换为 Widget Blueprint
+ * UMG 鐢熸垚鍣?- 灏嗚В鏋愬悗鐨勬暟鎹粨鏋勮浆鎹负 Widget Blueprint
  */
 class FUMGGenerator
 {
 public:
 	/**
-	 * 生成 Widget Blueprint（构建 + 编译 + 保存）
-	 * @param WidgetData 解析后的 Widget 数据
-	 * @param PackagePath 保存路径 (例如 "/Game/UI")
-	 * @return 生成的 Widget Blueprint，失败返回 nullptr
+	 * 鐢熸垚 Widget Blueprint锛堟瀯寤?+ 缂栬瘧 + 淇濆瓨锛?
+	 * @param WidgetData 瑙ｆ瀽鍚庣殑 Widget 鏁版嵁
+	 * @param PackagePath 淇濆瓨璺緞 (渚嬪 "/Game/UI")
+	 * @return 鐢熸垚鐨?Widget Blueprint锛屽け璐ヨ繑鍥?nullptr
 	 */
 	static UWidgetBlueprint* GenerateWidgetBlueprint(const FUMGWidgetData& WidgetData, const FString& PackagePath);
 
-	/** 构建 + 编译 Widget Blueprint，但不保存到磁盘。transient 纹理此时仍在内存中。 */
+	/** 鏋勫缓 + 缂栬瘧 Widget Blueprint锛屼絾涓嶄繚瀛樺埌纾佺洏銆倀ransient 绾圭悊姝ゆ椂浠嶅湪鍐呭瓨涓€?*/
 	static UWidgetBlueprint* BuildWidgetBlueprint(const FUMGWidgetData& WidgetData, const FString& PackagePath);
 
-	/** 将已编译的 Widget Blueprint 保存到磁盘。 */
+	/** 灏嗗凡缂栬瘧鐨?Widget Blueprint 淇濆瓨鍒扮鐩樸€?*/
 	static void SaveWidgetBlueprint(UWidgetBlueprint* WBP);
 };
+

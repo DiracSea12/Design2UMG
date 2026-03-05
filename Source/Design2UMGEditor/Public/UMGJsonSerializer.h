@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -8,18 +8,16 @@
 class FJsonObject;
 
 /**
- * JSON 序列化器 - 将 UMG 数据结构序列化为 JSON
+ * JSON 搴忓垪鍖栧櫒 - 灏?UMG 鏁版嵁缁撴瀯搴忓垪鍖栦负 JSON
  *
- * 与 FUMGJsonParser（反序列化）对称。
- * 供预览窗口、导入流程等多处复用。
- */
+ * 涓?FUMGJsonParser锛堝弽搴忓垪鍖栵級瀵圭О銆? * 渚涢瑙堢獥鍙ｃ€佸鍏ユ祦绋嬬瓑澶氬澶嶇敤銆? */
 class FUMGJsonSerializer
 {
 public:
-	/** 将 FUMGWidgetData 序列化为 Pretty JSON 字符串 */
+	/** 灏?FUMGWidgetData 搴忓垪鍖栦负 Pretty JSON 瀛楃涓?*/
 	static FString Serialize(const FUMGWidgetData& Data);
 
-	/** 将单个 FUMGWidgetNode 序列化为 FJsonObject */
+	/** 灏嗗崟涓?FUMGWidgetNode 搴忓垪鍖栦负 FJsonObject */
 	static TSharedRef<FJsonObject> SerializeWidgetNode(const FUMGWidgetNode& Node);
 
 private:
@@ -29,3 +27,4 @@ private:
 	static TSharedRef<FJsonObject> SerializeSlot(const FUMGSlotData& Slot);
 	static TSharedRef<FJsonObject> SerializeBounds(const FBounds& Bounds);
 };
+

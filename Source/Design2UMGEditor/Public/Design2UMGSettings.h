@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -117,6 +117,24 @@ public:
 	/** 查找图标字体的资产路径，无匹配返回空字符串 */
 	FString FindIconFontAssetPath(const FString& FontFamily) const;
 
+	// ========== Placeholder Hatch ==========
+
+	/** placeholderhatch 占位纹理背景色（当节点自身无可用纯色填充时使用） */
+	UPROPERTY(Config, EditAnywhere, Category = "Placeholder Hatch", meta = (DisplayName = "Fallback Background Color", ToolTip = "Fallback hatch background color when node has no explicit solid fill color."))
+	FString PlaceholderHatchBackgroundColor = TEXT("#222229");
+
+	/** placeholderhatch 占位纹理斜线色（当节点自身无可用描边色时使用） */
+	UPROPERTY(Config, EditAnywhere, Category = "Placeholder Hatch", meta = (DisplayName = "Fallback Stripe Color", ToolTip = "Fallback hatch stripe color when node has no explicit stroke color."))
+	FString PlaceholderHatchStripeColor = TEXT("#B2B2FF");
+
+	/** placeholderhatch 斜线宽度（像素） */
+	UPROPERTY(Config, EditAnywhere, Category = "Placeholder Hatch", meta = (DisplayName = "Stripe Width", ClampMin = "1", ClampMax = "32"))
+	int32 PlaceholderHatchStripeWidth = 1;
+
+	/** placeholderhatch 斜线间距（像素） */
+	UPROPERTY(Config, EditAnywhere, Category = "Placeholder Hatch", meta = (DisplayName = "Stripe Gap", ClampMin = "1", ClampMax = "64"))
+	int32 PlaceholderHatchStripeGap = 4;
+
 	// ========== Incremental Update ==========
 
 	UPROPERTY(Config, EditAnywhere, Category = "Incremental Update", meta = (DisplayName = "Enable Incremental Update", ToolTip = "Store .pen node IDs on generated widgets to enable incremental re-import."))
@@ -130,3 +148,4 @@ public:
 	/** 根据节点名称查找覆盖类，无匹配返回 nullptr */
 	UClass* FindClassOverride(const FString& NodeName) const;
 };
+

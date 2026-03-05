@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "FigmaParser.h"
 #include "Design2UMGLog.h"
@@ -6,6 +6,7 @@
 #include "Dom/JsonValue.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 #include "Internationalization/Regex.h"
 
 // ---------------------------------------------------------------------------
@@ -22,6 +23,11 @@ static double GetNum(const TSharedPtr<FJsonObject>& Obj, const FString& Key, dou
 {
 	double Val;
 	return (Obj && Obj->TryGetNumberField(Key, Val)) ? Val : Default;
+}
+
+static bool TryGetNum(const TSharedPtr<FJsonObject>& Obj, const FString& Key, double& OutVal)
+{
+	return Obj && Obj->TryGetNumberField(Key, OutVal);
 }
 
 static bool GetBool(const TSharedPtr<FJsonObject>& Obj, const FString& Key, bool Default = true)
@@ -44,6 +50,41 @@ static const TArray<TSharedPtr<FJsonValue>>* GetArr(const TSharedPtr<FJsonObject
 	if (Obj && Obj->TryGetArrayField(Key, Arr))
 		return Arr;
 	return nullptr;
+}
+
+static FString JsonValueToCompactString(const TSharedPtr<FJsonValue>& Value)
+{
+	if (!Value.IsValid())
+		return FString();
+
+	FString Output;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Output);
+	if (!FJsonSerializer::Serialize(Value.ToSharedRef(), FString(), Writer))
+		return FString();
+	return Output;
+}
+
+static void AddExtensionIfNonEmpty(TMap<FString, FString>& Extensions, const FString& Key, const FString& Value)
+{
+	if (!Value.IsEmpty())
+		Extensions.Add(Key, Value);
+}
+
+static void AddNumericExtensionIfPresent(const TSharedPtr<FJsonObject>& Obj, TMap<FString, FString>& Extensions, const FString& SourceKey, const FString& ExtKey)
+{
+	double Val = 0.0;
+	if (TryGetNum(Obj, SourceKey, Val))
+		Extensions.Add(ExtKey, FString::SanitizeFloat(static_cast<float>(Val)));
+}
+
+static void AddJsonExtensionIfPresent(const TSharedPtr<FJsonObject>& Obj, TMap<FString, FString>& Extensions, const FString& SourceKey, const FString& ExtKey)
+{
+	if (!Obj.IsValid())
+		return;
+	const TSharedPtr<FJsonValue> FieldValue = Obj->TryGetField(SourceKey);
+	if (!FieldValue.IsValid())
+		return;
+	Extensions.Add(ExtKey, JsonValueToCompactString(FieldValue));
 }
 
 static TSharedPtr<FJsonObject> ParseJsonString(const FString& Json)
@@ -182,6 +223,131 @@ static bool ParseGeometryArray(
 	}
 
 	return false;
+}
+
+static bool IsSemanticFieldName(const FString& FieldName)
+{
+	return FieldName.Equals(TEXT("placeholder"), ESearchCase::IgnoreCase)
+		|| FieldName.Equals(TEXT("slot"), ESearchCase::IgnoreCase);
+}
+
+static bool IsExplicitFalseString(const FString& InValue)
+{
+	const FString V = InValue.TrimStartAndEnd().ToLower();
+	return V.IsEmpty()
+		|| V == TEXT("false")
+		|| V == TEXT("0")
+		|| V == TEXT("no")
+		|| V == TEXT("off")
+		|| V == TEXT("none")
+		|| V == TEXT("null");
+}
+
+static bool ReadSemanticSignalField(const TSharedPtr<FJsonValue>& Value)
+{
+	if (!Value.IsValid())
+	{
+		return false;
+	}
+
+	switch (Value->Type)
+	{
+	case EJson::Boolean:
+		return Value->AsBool();
+	case EJson::Number:
+		return !FMath::IsNearlyZero(static_cast<float>(Value->AsNumber()));
+	case EJson::String:
+		return !IsExplicitFalseString(Value->AsString());
+	case EJson::Array:
+		// Keep behavior aligned with PenParser: slot/placeholder arrays signal semantic intent,
+		// even if currently empty.
+		return true;
+	case EJson::Object:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static bool TryReadSemanticHintFromJsonValue(const TSharedPtr<FJsonValue>& Value)
+{
+	if (!Value.IsValid())
+	{
+		return false;
+	}
+
+	if (Value->Type == EJson::Object)
+	{
+		const TSharedPtr<FJsonObject> Obj = Value->AsObject();
+		if (!Obj.IsValid())
+		{
+			return false;
+		}
+
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Obj->Values)
+		{
+			if (IsSemanticFieldName(Pair.Key) && ReadSemanticSignalField(Pair.Value))
+			{
+				return true;
+			}
+			if (TryReadSemanticHintFromJsonValue(Pair.Value))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	if (Value->Type == EJson::Array)
+	{
+		for (const TSharedPtr<FJsonValue>& Child : Value->AsArray())
+		{
+			if (TryReadSemanticHintFromJsonValue(Child))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	if (Value->Type == EJson::String)
+	{
+		const FString Str = Value->AsString().TrimStartAndEnd();
+		if (Str.IsEmpty())
+		{
+			return false;
+		}
+
+		// pluginData 常见为 JSON 字符串，优先按 JSON 解。
+		TSharedPtr<FJsonObject> JsonObj;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Str);
+		if (FJsonSerializer::Deserialize(Reader, JsonObj) && JsonObj.IsValid())
+		{
+			return TryReadSemanticHintFromJsonValue(MakeShared<FJsonValueObject>(JsonObj));
+		}
+
+		return IsSemanticFieldName(Str);
+	}
+
+	return false;
+}
+
+static void ApplyFigmaSemanticHints(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& Node)
+{
+	const TSharedPtr<FJsonValue> PlaceholderField = NodeObj->TryGetField(TEXT("placeholder"));
+	const TSharedPtr<FJsonValue> SlotField = NodeObj->TryGetField(TEXT("slot"));
+
+	const bool bExplicitPlaceholder = ReadSemanticSignalField(PlaceholderField);
+	const bool bExplicitSlot = ReadSemanticSignalField(SlotField);
+
+	const bool bHasPluginSemanticMarker =
+		TryReadSemanticHintFromJsonValue(NodeObj->TryGetField(TEXT("pluginData")))
+		|| TryReadSemanticHintFromJsonValue(NodeObj->TryGetField(TEXT("sharedPluginData")));
+
+	Node.bSemanticPlaceholderSurface =
+		bExplicitPlaceholder
+		|| bExplicitSlot
+		|| bHasPluginSemanticMarker;
 }
 
 struct FNodeBounds
@@ -333,29 +499,29 @@ static void ParsePathGeometry(const TSharedPtr<FJsonObject>& NodeObj, FDesignNod
 // MapNodeType
 // ---------------------------------------------------------------------------
 
-EPenNodeType FFigmaParser::MapNodeType(const FString& FigmaType)
+EDesignNodeType FFigmaParser::MapNodeType(const FString& FigmaType)
 {
 	if (FigmaType == TEXT("FRAME") || FigmaType == TEXT("COMPONENT_SET") || FigmaType == TEXT("SECTION"))
-		return EPenNodeType::Frame;
+		return EDesignNodeType::Frame;
 	if (FigmaType == TEXT("COMPONENT"))
-		return EPenNodeType::Frame;
+		return EDesignNodeType::Frame;
 	if (FigmaType == TEXT("INSTANCE"))
-		return EPenNodeType::Frame;  // Figma API已展开INSTANCE children，直接当Frame处理
+		return EDesignNodeType::Frame;  // Figma API已展开INSTANCE children，直接当Frame处理
 	if (FigmaType == TEXT("GROUP"))
-		return EPenNodeType::Group;
+		return EDesignNodeType::Group;
 	if (FigmaType == TEXT("RECTANGLE"))
-		return EPenNodeType::Rectangle;
+		return EDesignNodeType::Rectangle;
 	if (FigmaType == TEXT("ELLIPSE"))
-		return EPenNodeType::Ellipse;
+		return EDesignNodeType::Ellipse;
 	if (FigmaType == TEXT("LINE"))
-		return EPenNodeType::Line;
+		return EDesignNodeType::Line;
 	if (FigmaType == TEXT("REGULAR_POLYGON") || FigmaType == TEXT("STAR"))
-		return EPenNodeType::Polygon;
+		return EDesignNodeType::Polygon;
 	if (FigmaType == TEXT("VECTOR") || FigmaType == TEXT("BOOLEAN_OPERATION"))
-		return EPenNodeType::Path;
+		return EDesignNodeType::Path;
 	if (FigmaType == TEXT("TEXT"))
-		return EPenNodeType::Text;
-	return EPenNodeType::Unknown;
+		return EDesignNodeType::Text;
+	return EDesignNodeType::Unknown;
 }
 
 // ---------------------------------------------------------------------------
@@ -365,12 +531,10 @@ EPenNodeType FFigmaParser::MapNodeType(const FString& FigmaType)
 bool FFigmaParser::HasAutoLayout(const TSharedPtr<FJsonObject>& NodeObj)
 {
 	if (IsWrapLayout(NodeObj) || IsLikelyWrappedHorizontalLayout(NodeObj))
-	{
-		return false;
-	}
+		return true;
 
 	FString Mode = GetStr(NodeObj, TEXT("layoutMode"));
-	return Mode == TEXT("HORIZONTAL") || Mode == TEXT("VERTICAL");
+	return Mode == TEXT("HORIZONTAL") || Mode == TEXT("VERTICAL") || Mode == TEXT("GRID");
 }
 
 // ---------------------------------------------------------------------------
@@ -402,54 +566,126 @@ void FFigmaParser::ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNo
 	FString Mode = GetStr(NodeObj, TEXT("layoutMode"));
 	if (bWrapLayout)
 	{
-		// Figma AutoLayout WRAP still lacks a 1:1 UMG mapping in current pipeline.
-		// Fall back to absolute layout so child bounds/positions stay visually correct.
-		OutNode.Layout = EPenLayout::None;
+		OutNode.Layout = EDesignLayout::Wrap;
 	}
 	else if (Mode == TEXT("HORIZONTAL"))
 	{
-		OutNode.Layout = EPenLayout::Horizontal;
+		OutNode.Layout = EDesignLayout::Horizontal;
 	}
 	else if (Mode == TEXT("VERTICAL"))
 	{
-		OutNode.Layout = EPenLayout::Vertical;
+		OutNode.Layout = EDesignLayout::Vertical;
+	}
+	else if (Mode == TEXT("GRID"))
+	{
+		OutNode.Layout = EDesignLayout::Grid;
 	}
 	else
 	{
-		OutNode.Layout = EPenLayout::None;
+		OutNode.Layout = EDesignLayout::None;
 	}
 
-	OutNode.Gap = bWrapLayout ? 0.0f : GetNum(NodeObj, TEXT("itemSpacing"));
+	OutNode.Gap = GetNum(NodeObj, TEXT("itemSpacing"));
 
-	OutNode.Padding.Left = bWrapLayout ? 0.0f : GetNum(NodeObj, TEXT("paddingLeft"));
-	OutNode.Padding.Right = bWrapLayout ? 0.0f : GetNum(NodeObj, TEXT("paddingRight"));
-	OutNode.Padding.Top = bWrapLayout ? 0.0f : GetNum(NodeObj, TEXT("paddingTop"));
-	OutNode.Padding.Bottom = bWrapLayout ? 0.0f : GetNum(NodeObj, TEXT("paddingBottom"));
+	OutNode.Padding.Left = GetNum(NodeObj, TEXT("paddingLeft"));
+	OutNode.Padding.Right = GetNum(NodeObj, TEXT("paddingRight"));
+	OutNode.Padding.Top = GetNum(NodeObj, TEXT("paddingTop"));
+	OutNode.Padding.Bottom = GetNum(NodeObj, TEXT("paddingBottom"));
+	OutNode.bAbsoluteLayoutPositioning = GetStr(NodeObj, TEXT("layoutPositioning")).Equals(TEXT("ABSOLUTE"), ESearchCase::IgnoreCase);
 
-	if (bWrapLayout)
 	{
-		OutNode.JustifyContent = EPenJustifyContent::Start;
-		OutNode.AlignItems = EPenAlignItems::Start;
+		AddExtensionIfNonEmpty(OutNode.Metadata, TEXT("counterAxisAlignContent"), GetStr(NodeObj, TEXT("counterAxisAlignContent")));
+		AddExtensionIfNonEmpty(OutNode.Metadata, TEXT("layoutPositioning"), GetStr(NodeObj, TEXT("layoutPositioning")));
+		AddExtensionIfNonEmpty(OutNode.Metadata, TEXT("layoutWrap"), GetStr(NodeObj, TEXT("layoutWrap")));
+		AddExtensionIfNonEmpty(OutNode.Metadata, TEXT("layoutAlign"), GetStr(NodeObj, TEXT("layoutAlign")));
+		AddExtensionIfNonEmpty(OutNode.Metadata, TEXT("primaryAxisSizingMode"), GetStr(NodeObj, TEXT("primaryAxisSizingMode")));
+		AddExtensionIfNonEmpty(OutNode.Metadata, TEXT("counterAxisSizingMode"), GetStr(NodeObj, TEXT("counterAxisSizingMode")));
+		AddNumericExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("counterAxisSpacing"), TEXT("counterAxisSpacing"));
+		AddNumericExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("minWidth"), TEXT("minWidth"));
+		AddNumericExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("maxWidth"), TEXT("maxWidth"));
+		AddNumericExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("minHeight"), TEXT("minHeight"));
+		AddNumericExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("maxHeight"), TEXT("maxHeight"));
+		AddNumericExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("gridRowCount"), TEXT("gridRowCount"));
+		AddNumericExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("gridColumnCount"), TEXT("gridColumnCount"));
+		AddNumericExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("gridRowGap"), TEXT("gridRowGap"));
+		AddNumericExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("gridColumnGap"), TEXT("gridColumnGap"));
+		AddExtensionIfNonEmpty(OutNode.Metadata, TEXT("gridRowsSizing"), GetStr(NodeObj, TEXT("gridRowsSizing")));
+		AddExtensionIfNonEmpty(OutNode.Metadata, TEXT("gridColumnsSizing"), GetStr(NodeObj, TEXT("gridColumnsSizing")));
+		AddExtensionIfNonEmpty(OutNode.Metadata, TEXT("gridChildHorizontalAlign"), GetStr(NodeObj, TEXT("gridChildHorizontalAlign")));
+		AddExtensionIfNonEmpty(OutNode.Metadata, TEXT("gridChildVerticalAlign"), GetStr(NodeObj, TEXT("gridChildVerticalAlign")));
+		AddNumericExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("gridRowSpan"), TEXT("gridRowSpan"));
+		AddNumericExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("gridColumnSpan"), TEXT("gridColumnSpan"));
+		AddNumericExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("gridColumnAnchorIndex"), TEXT("gridColumnAnchorIndex"));
+		AddNumericExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("gridRowAnchorIndex"), TEXT("gridRowAnchorIndex"));
+		AddExtensionIfNonEmpty(OutNode.Metadata, TEXT("overflowDirection"), GetStr(NodeObj, TEXT("overflowDirection")));
+		AddExtensionIfNonEmpty(OutNode.Metadata, TEXT("prototypeStartNodeID"), GetStr(NodeObj, TEXT("prototypeStartNodeID")));
+		AddExtensionIfNonEmpty(OutNode.Metadata, TEXT("transitionNodeID"), GetStr(NodeObj, TEXT("transitionNodeID")));
+		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("layoutGrids"), TEXT("layoutGrids"));
+		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("interactions"), TEXT("interactions"));
+		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("flowStartingPoints"), TEXT("flowStartingPoints"));
+		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("prototypeDevice"), TEXT("prototypeDevice"));
+		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("componentPropertyReferences"), TEXT("componentPropertyReferences"));
+		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("explicitVariableModes"), TEXT("explicitVariableModes"));
+		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("annotations"), TEXT("annotations"));
+		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("measurements"), TEXT("measurements"));
+		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("exportSettings"), TEXT("exportSettings"));
+		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("devStatus"), TEXT("devStatus"));
+		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("branchData"), TEXT("branchData"));
+		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("componentProperties"), TEXT("componentProperties"));
+		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("overrides"), TEXT("overrides"));
+		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("exposedInstances"), TEXT("exposedInstances"));
+
+		if (NodeObj->HasField(TEXT("itemReverseZIndex")))
+		{
+			bool bItemReverseZIndex = false;
+			if (NodeObj->TryGetBoolField(TEXT("itemReverseZIndex"), bItemReverseZIndex))
+				OutNode.Metadata.Add(TEXT("itemReverseZIndex"), bItemReverseZIndex ? TEXT("true") : TEXT("false"));
+		}
+
+		if (NodeObj->HasField(TEXT("isExposedInstance")))
+		{
+			bool bIsExposedInstance = false;
+			if (NodeObj->TryGetBoolField(TEXT("isExposedInstance"), bIsExposedInstance))
+				OutNode.Metadata.Add(TEXT("isExposedInstance"), bIsExposedInstance ? TEXT("true") : TEXT("false"));
+		}
+
+		if (NodeObj->HasField(TEXT("strokesIncludedInLayout")))
+		{
+			bool bStrokesIncludedInLayout = false;
+			if (NodeObj->TryGetBoolField(TEXT("strokesIncludedInLayout"), bStrokesIncludedInLayout))
+				OutNode.Metadata.Add(TEXT("strokesIncludedInLayout"), bStrokesIncludedInLayout ? TEXT("true") : TEXT("false"));
+		}
+
+		const TSharedPtr<FJsonValue> BoundVarsField = NodeObj->TryGetField(TEXT("boundVariables"));
+		if (BoundVarsField.IsValid() && BoundVarsField->Type == EJson::Object)
+		{
+			OutNode.Metadata.Add(TEXT("boundVariables"), JsonValueToCompactString(BoundVarsField));
+			const TSharedPtr<FJsonObject> BoundVarsObj = BoundVarsField->AsObject();
+			for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : BoundVarsObj->Values)
+			{
+				OutNode.Metadata.Add(FString::Printf(TEXT("boundVariables.%s"), *Pair.Key), JsonValueToCompactString(Pair.Value));
+			}
+		}
 	}
-	else
+
 	{
 		FString Primary = GetStr(NodeObj, TEXT("primaryAxisAlignItems"));
 		if (Primary == TEXT("CENTER"))
-			OutNode.JustifyContent = EPenJustifyContent::Center;
+			OutNode.JustifyContent = EDesignJustifyContent::Center;
 		else if (Primary == TEXT("MAX"))
-			OutNode.JustifyContent = EPenJustifyContent::End;
+			OutNode.JustifyContent = EDesignJustifyContent::End;
 		else if (Primary == TEXT("SPACE_BETWEEN"))
-			OutNode.JustifyContent = EPenJustifyContent::SpaceBetween;
+			OutNode.JustifyContent = EDesignJustifyContent::SpaceBetween;
 		else
-			OutNode.JustifyContent = EPenJustifyContent::Start;
+			OutNode.JustifyContent = EDesignJustifyContent::Start;
 
 		FString Counter = GetStr(NodeObj, TEXT("counterAxisAlignItems"));
 		if (Counter == TEXT("CENTER"))
-			OutNode.AlignItems = EPenAlignItems::Center;
+			OutNode.AlignItems = EDesignAlignItems::Center;
 		else if (Counter == TEXT("MAX"))
-			OutNode.AlignItems = EPenAlignItems::End;
+			OutNode.AlignItems = EDesignAlignItems::End;
 		else
-			OutNode.AlignItems = EPenAlignItems::Start;
+			OutNode.AlignItems = EDesignAlignItems::Start;
 	}
 
 	OutNode.bHasClip = true;
@@ -479,24 +715,24 @@ void FFigmaParser::ParseSize(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode
 	{
 		FString SizingH = GetStr(NodeObj, TEXT("layoutSizingHorizontal"), TEXT("FIXED"));
 		if (SizingH == TEXT("FILL"))
-			OutNode.Width = FPenSize::Fill(W);
+			OutNode.Width = FDesignSize::Fill(W);
 		else if (SizingH == TEXT("HUG"))
-			OutNode.Width = FPenSize::Fit(W);
+			OutNode.Width = FDesignSize::Fit(W);
 		else
-			OutNode.Width = FPenSize::Fixed(W);
+			OutNode.Width = FDesignSize::Fixed(W);
 
 		FString SizingV = GetStr(NodeObj, TEXT("layoutSizingVertical"), TEXT("FIXED"));
 		if (SizingV == TEXT("FILL"))
-			OutNode.Height = FPenSize::Fill(H);
+			OutNode.Height = FDesignSize::Fill(H);
 		else if (SizingV == TEXT("HUG"))
-			OutNode.Height = FPenSize::Fit(H);
+			OutNode.Height = FDesignSize::Fit(H);
 		else
-			OutNode.Height = FPenSize::Fixed(H);
+			OutNode.Height = FDesignSize::Fixed(H);
 	}
 	else
 	{
-		OutNode.Width = FPenSize::Fixed(W);
-		OutNode.Height = FPenSize::Fixed(H);
+		OutNode.Width = FDesignSize::Fixed(W);
+		OutNode.Height = FDesignSize::Fixed(H);
 	}
 
 	// Figma layoutGrow: 1.0 = fill, 0.0 = fixed (only meaningful in auto-layout)
@@ -512,32 +748,35 @@ void FFigmaParser::ParseSize(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode
 // ParseSingleFill - 解析单个 Figma fill 对象
 // ---------------------------------------------------------------------------
 
-FPenFill FFigmaParser::ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)
+FDesignFill FFigmaParser::ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)
 {
-	FPenFill Result;
+	FDesignFill Result;
 	if (!FillObj || !GetBool(FillObj, TEXT("visible"), true))
 		return Result;
 
 	FString FillType = GetStr(FillObj, TEXT("type"));
 	float FillOpacity = GetNum(FillObj, TEXT("opacity"), 1.0);
+	Result.Opacity = FillOpacity;
+	FillObj->TryGetStringField(TEXT("blendMode"), Result.BlendMode);
 
 	if (FillType == TEXT("SOLID"))
 	{
 		auto ColorObj = GetObj(FillObj, TEXT("color"));
-		Result = FPenFill::FromColor(ColorToHex(ColorObj, FillOpacity));
+		Result.Type = EDesignFillType::Color;
+		Result.SolidColor = ColorToHex(ColorObj, FillOpacity);
 		return Result;
 	}
 
 	if (FillType == TEXT("GRADIENT_LINEAR") || FillType == TEXT("GRADIENT_RADIAL") || FillType == TEXT("GRADIENT_ANGULAR") || FillType == TEXT("GRADIENT_DIAMOND"))
 	{
-		Result.Type = EPenFillType::Gradient;
+		Result.Type = EDesignFillType::Gradient;
 
 		if (FillType == TEXT("GRADIENT_LINEAR"))
-			Result.Gradient.GradientType = EPenGradientType::Linear;
+			Result.Gradient.GradientType = EDesignGradientType::Linear;
 		else if (FillType == TEXT("GRADIENT_RADIAL") || FillType == TEXT("GRADIENT_DIAMOND"))
-			Result.Gradient.GradientType = EPenGradientType::Radial;
+			Result.Gradient.GradientType = EDesignGradientType::Radial;
 		else
-			Result.Gradient.GradientType = EPenGradientType::Angular;
+			Result.Gradient.GradientType = EDesignGradientType::Angular;
 
 		const auto* Handles = GetArr(FillObj, TEXT("gradientHandlePositions"));
 		if (Handles && Handles->Num() >= 2)
@@ -560,7 +799,7 @@ FPenFill FFigmaParser::ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)
 				auto StopObj = StopVal->AsObject();
 				if (!StopObj) continue;
 
-				FPenGradientStop Stop;
+				FDesignGradientStop Stop;
 				Stop.Color = ColorToHex(GetObj(StopObj, TEXT("color")), FillOpacity);
 				Stop.Position = GetNum(StopObj, TEXT("position"));
 				Result.Gradient.Colors.Add(Stop);
@@ -571,19 +810,19 @@ FPenFill FFigmaParser::ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)
 
 	if (FillType == TEXT("IMAGE"))
 	{
-		Result.Type = EPenFillType::Image;
+		Result.Type = EDesignFillType::Image;
 		Result.Image.Url = GetStr(FillObj, TEXT("imageRef"));
 		Result.Image.Opacity = FillOpacity;
 
 		FString ScaleMode = GetStr(FillObj, TEXT("scaleMode"));
 		if (ScaleMode == TEXT("FILL"))
-			Result.Image.Mode = EPenImageMode::Fill;
+			Result.Image.Mode = EDesignImageMode::Fill;
 		else if (ScaleMode == TEXT("FIT"))
-			Result.Image.Mode = EPenImageMode::Fit;
+			Result.Image.Mode = EDesignImageMode::Fit;
 		else if (ScaleMode == TEXT("CROP"))
-			Result.Image.Mode = EPenImageMode::Crop;
+			Result.Image.Mode = EDesignImageMode::Crop;
 		else
-			Result.Image.Mode = EPenImageMode::Stretch;
+			Result.Image.Mode = EDesignImageMode::Stretch;
 
 		// 解析 imageTransform（2x3 仿射矩阵 [[a,b,tx],[c,d,ty]]）
 		const auto* TransformArr = GetArr(FillObj, TEXT("imageTransform"));
@@ -612,17 +851,17 @@ FPenFill FFigmaParser::ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)
 // ParseFills - 收集所有可见填充层（底→顶顺序）
 // ---------------------------------------------------------------------------
 
-TArray<FPenFill> FFigmaParser::ParseFills(const TArray<TSharedPtr<FJsonValue>>& Fills)
+TArray<FDesignFill> FFigmaParser::ParseFills(const TArray<TSharedPtr<FJsonValue>>& Fills)
 {
-	TArray<FPenFill> Result;
+	TArray<FDesignFill> Result;
 	for (int32 i = 0; i < Fills.Num(); ++i)
 	{
 		auto FillObj = Fills[i]->AsObject();
 		if (!FillObj || !GetBool(FillObj, TEXT("visible"), true))
 			continue;
 
-		FPenFill Fill = ParseSingleFill(FillObj);
-		if (Fill.Type != EPenFillType::None)
+		FDesignFill Fill = ParseSingleFill(FillObj);
+		if (Fill.Type != EDesignFillType::None)
 			Result.Add(MoveTemp(Fill));
 	}
 	return Result;
@@ -632,7 +871,7 @@ TArray<FPenFill> FFigmaParser::ParseFills(const TArray<TSharedPtr<FJsonValue>>& 
 // ParseFill - 返回最顶层可见填充（向后兼容）
 // ---------------------------------------------------------------------------
 
-FPenFill FFigmaParser::ParseFill(const TArray<TSharedPtr<FJsonValue>>& Fills)
+FDesignFill FFigmaParser::ParseFill(const TArray<TSharedPtr<FJsonValue>>& Fills)
 {
 	// Take the last visible fill (Figma renders last on top)
 	for (int32 i = Fills.Num() - 1; i >= 0; --i)
@@ -641,20 +880,20 @@ FPenFill FFigmaParser::ParseFill(const TArray<TSharedPtr<FJsonValue>>& Fills)
 		if (!FillObj || !GetBool(FillObj, TEXT("visible"), true))
 			continue;
 
-		FPenFill Fill = ParseSingleFill(FillObj);
-		if (Fill.Type != EPenFillType::None)
+		FDesignFill Fill = ParseSingleFill(FillObj);
+		if (Fill.Type != EDesignFillType::None)
 			return Fill;
 	}
-	return FPenFill();
+	return FDesignFill();
 }
 
 // ---------------------------------------------------------------------------
 // ParseStroke
 // ---------------------------------------------------------------------------
 
-FPenStroke FFigmaParser::ParseStroke(const TSharedPtr<FJsonObject>& NodeObj)
+FDesignStroke FFigmaParser::ParseStroke(const TSharedPtr<FJsonObject>& NodeObj)
 {
-	FPenStroke Result;
+	FDesignStroke Result;
 	bool bHasVisibleStroke = false;
 
 	const auto* Strokes = GetArr(NodeObj, TEXT("strokes"));
@@ -669,7 +908,7 @@ FPenStroke FFigmaParser::ParseStroke(const TSharedPtr<FJsonObject>& NodeObj)
 			bHasVisibleStroke = true;
 			auto ColorObj = GetObj(StrokeObj, TEXT("color"));
 			float StrokeOpacity = GetNum(StrokeObj, TEXT("opacity"), 1.0);
-			Result.Fill = FPenFill::FromColor(ColorToHex(ColorObj, StrokeOpacity));
+			Result.Fill = FDesignFill::FromColor(ColorToHex(ColorObj, StrokeOpacity));
 			break;
 		}
 	}
@@ -679,18 +918,18 @@ FPenStroke FFigmaParser::ParseStroke(const TSharedPtr<FJsonObject>& NodeObj)
 	if (!bHasVisibleStroke)
 	{
 		// Explicitly clear thickness to avoid confusion from default strokeWeight fields
-		Result.Thickness = FPenStrokeThickness();
+		Result.Thickness = FDesignStrokeThickness();
 		return Result;
 	}
 
 	// Stroke align
 	FString Align = GetStr(NodeObj, TEXT("strokeAlign"), TEXT("INSIDE"));
 	if (Align == TEXT("OUTSIDE"))
-		Result.Align = EPenStrokeAlign::Outside;
+		Result.Align = EDesignStrokeAlign::Outside;
 	else if (Align == TEXT("CENTER"))
-		Result.Align = EPenStrokeAlign::Center;
+		Result.Align = EDesignStrokeAlign::Center;
 	else
-		Result.Align = EPenStrokeAlign::Inside;
+		Result.Align = EDesignStrokeAlign::Inside;
 
 	// Individual stroke weights
 	auto IndividualWeights = GetObj(NodeObj, TEXT("individualStrokeWeights"));
@@ -715,9 +954,9 @@ FPenStroke FFigmaParser::ParseStroke(const TSharedPtr<FJsonObject>& NodeObj)
 // ParseCornerRadius
 // ---------------------------------------------------------------------------
 
-FPenCornerRadius FFigmaParser::ParseCornerRadius(const TSharedPtr<FJsonObject>& NodeObj)
+FDesignCornerRadius FFigmaParser::ParseCornerRadius(const TSharedPtr<FJsonObject>& NodeObj)
 {
-	FPenCornerRadius Result;
+	FDesignCornerRadius Result;
 
 	const auto* Radii = GetArr(NodeObj, TEXT("rectangleCornerRadii"));
 	if (Radii && Radii->Num() == 4)
@@ -758,9 +997,9 @@ FPenCornerRadius FFigmaParser::ParseCornerRadius(const TSharedPtr<FJsonObject>& 
 // ParseEffects
 // ---------------------------------------------------------------------------
 
-TArray<FPenEffect> FFigmaParser::ParseEffects(const TArray<TSharedPtr<FJsonValue>>& Effects)
+TArray<FDesignEffect> FFigmaParser::ParseEffects(const TArray<TSharedPtr<FJsonValue>>& Effects)
 {
-	TArray<FPenEffect> Result;
+	TArray<FDesignEffect> Result;
 
 	for (const auto& EffVal : Effects)
 	{
@@ -769,12 +1008,14 @@ TArray<FPenEffect> FFigmaParser::ParseEffects(const TArray<TSharedPtr<FJsonValue
 			continue;
 
 		FString EffType = GetStr(EffObj, TEXT("type"));
-		FPenEffect Eff;
+		FDesignEffect Eff;
+		EffObj->TryGetStringField(TEXT("blendMode"), Eff.BlendMode);
 
 		if (EffType == TEXT("DROP_SHADOW") || EffType == TEXT("INNER_SHADOW"))
 		{
-			Eff.Type = EPenEffectType::Shadow;
+			Eff.Type = EDesignEffectType::Shadow;
 			Eff.Shadow.bInner = (EffType == TEXT("INNER_SHADOW"));
+			Eff.Shadow.BlendMode = Eff.BlendMode;
 
 			auto Offset = GetObj(EffObj, TEXT("offset"));
 			Eff.Shadow.OffsetX = Offset ? GetNum(Offset, TEXT("x")) : 0.0f;
@@ -786,12 +1027,12 @@ TArray<FPenEffect> FFigmaParser::ParseEffects(const TArray<TSharedPtr<FJsonValue
 		}
 		else if (EffType == TEXT("LAYER_BLUR"))
 		{
-			Eff.Type = EPenEffectType::Blur;
+			Eff.Type = EDesignEffectType::Blur;
 			Eff.Radius = GetNum(EffObj, TEXT("radius"));
 		}
 		else if (EffType == TEXT("BACKGROUND_BLUR"))
 		{
-			Eff.Type = EPenEffectType::BackgroundBlur;
+			Eff.Type = EDesignEffectType::BackgroundBlur;
 			Eff.Radius = GetNum(EffObj, TEXT("radius"));
 		}
 		else
@@ -818,6 +1059,7 @@ void FFigmaParser::ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, F
 
 	OutNode.FontFamily = GetStr(Style, TEXT("fontFamily"));
 	OutNode.FontSize = GetNum(Style, TEXT("fontSize"), 16.0);
+	OutNode.FontStyle = GetStr(Style, TEXT("fontStyle"), TEXT("normal"));
 
 	int32 Weight = FMath::RoundToInt(GetNum(Style, TEXT("fontWeight"), 400.0));
 	// Snap to nearest standard weight (100-900)
@@ -851,24 +1093,31 @@ void FFigmaParser::ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, F
 	}
 
 	OutNode.LetterSpacing = GetNum(Style, TEXT("letterSpacing"));
+	FString TextDecoration = GetStr(Style, TEXT("textDecoration"));
+	OutNode.bUnderline = (TextDecoration == TEXT("UNDERLINE"));
+	OutNode.bStrikethrough = (TextDecoration == TEXT("STRIKETHROUGH"));
+	if (const TSharedPtr<FJsonObject> HyperlinkObj = GetObj(NodeObj, TEXT("hyperlink")))
+	{
+		OutNode.Href = GetStr(HyperlinkObj, TEXT("url"));
+	}
 
 	FString HAlign = GetStr(Style, TEXT("textAlignHorizontal"), TEXT("LEFT"));
 	if (HAlign == TEXT("CENTER"))
-		OutNode.TextAlign = EPenTextAlign::Center;
+		OutNode.TextAlign = EDesignTextAlign::Center;
 	else if (HAlign == TEXT("RIGHT"))
-		OutNode.TextAlign = EPenTextAlign::Right;
+		OutNode.TextAlign = EDesignTextAlign::Right;
 	else if (HAlign == TEXT("JUSTIFIED"))
-		OutNode.TextAlign = EPenTextAlign::Justify;
+		OutNode.TextAlign = EDesignTextAlign::Justify;
 	else
-		OutNode.TextAlign = EPenTextAlign::Left;
+		OutNode.TextAlign = EDesignTextAlign::Left;
 
 	FString VAlign = GetStr(Style, TEXT("textAlignVertical"), TEXT("TOP"));
 	if (VAlign == TEXT("CENTER"))
-		OutNode.TextAlignVertical = EPenTextAlignVertical::Middle;
+		OutNode.TextAlignVertical = EDesignTextAlignVertical::Middle;
 	else if (VAlign == TEXT("BOTTOM"))
-		OutNode.TextAlignVertical = EPenTextAlignVertical::Bottom;
+		OutNode.TextAlignVertical = EDesignTextAlignVertical::Bottom;
 	else
-		OutNode.TextAlignVertical = EPenTextAlignVertical::Top;
+		OutNode.TextAlignVertical = EDesignTextAlignVertical::Top;
 
 	// textAutoResize can appear on node root or inside style (nodes API payload).
 	FString AutoResize = GetStr(NodeObj, TEXT("textAutoResize"));
@@ -877,11 +1126,11 @@ void FFigmaParser::ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, F
 		AutoResize = GetStr(Style, TEXT("textAutoResize"), TEXT("NONE"));
 	}
 	if (AutoResize == TEXT("WIDTH_AND_HEIGHT"))
-		OutNode.TextGrowth = EPenTextGrowth::Auto;
+		OutNode.TextGrowth = EDesignTextGrowth::Auto;
 	else if (AutoResize == TEXT("HEIGHT"))
-		OutNode.TextGrowth = EPenTextGrowth::FixedWidth;
+		OutNode.TextGrowth = EDesignTextGrowth::FixedWidth;
 	else
-		OutNode.TextGrowth = EPenTextGrowth::FixedWidthHeight;
+		OutNode.TextGrowth = EDesignTextGrowth::FixedWidthHeight;
 }
 
 // ---------------------------------------------------------------------------
@@ -994,14 +1243,21 @@ TSharedPtr<FDesignNode> FFigmaParser::ParseNode(const TSharedPtr<FJsonObject>& N
 	}
 
 	Node->Type = MapNodeType(FigmaType);
+	Node->Metadata.Add(TEXT("sourceNodeType"), FigmaType);
 
 	if (FigmaType == TEXT("COMPONENT"))
 		Node->bReusable = true;
 
-	// INSTANCE: 记录componentId作为元数据（不走Ref展开，Figma API已展开children）
+	// INSTANCE: 保留组件实例追踪信息（不走 Ref 展开，Figma API 已展开 children）
 	if (FigmaType == TEXT("INSTANCE"))
 	{
-		Node->Ref = GetStr(NodeObj, TEXT("componentId"));
+		const FString ComponentId = GetStr(NodeObj, TEXT("componentId"));
+		if (!ComponentId.IsEmpty())
+		{
+			// Keep legacy instance linkage for downstream logic/tests expecting Ref semantics.
+			Node->Ref = ComponentId;
+			Node->Metadata.Add(TEXT("instanceComponentId"), ComponentId);
+		}
 	}
 
 	bool bParentAutoLayout = ParentObj ? HasAutoLayout(ParentObj) : false;
@@ -1027,10 +1283,10 @@ TSharedPtr<FDesignNode> FFigmaParser::ParseNode(const TSharedPtr<FJsonObject>& N
 	Node->Stroke = ParseStroke(NodeObj);
 
 	// Vector geometry (for VECTOR / BOOLEAN_OPERATION / LINE / etc.)
-	if (Node->Type == EPenNodeType::Path
-		|| Node->Type == EPenNodeType::Line
-		|| Node->Type == EPenNodeType::Polygon
-		|| Node->Type == EPenNodeType::Ellipse)
+	if (Node->Type == EDesignNodeType::Path
+		|| Node->Type == EDesignNodeType::Line
+		|| Node->Type == EDesignNodeType::Polygon
+		|| Node->Type == EDesignNodeType::Ellipse)
 	{
 		ParsePathGeometry(NodeObj, *Node);
 	}
@@ -1044,7 +1300,7 @@ TSharedPtr<FDesignNode> FFigmaParser::ParseNode(const TSharedPtr<FJsonObject>& N
 		Node->Effects = ParseEffects(*EffectsArr);
 
 	// Text
-	if (Node->Type == EPenNodeType::Text)
+	if (Node->Type == EDesignNodeType::Text)
 		ParseTextProperties(NodeObj, *Node);
 
 	// Children — skip for BOOLEAN_OPERATION/VECTOR (operands, not visual children)
@@ -1061,6 +1317,8 @@ TSharedPtr<FDesignNode> FFigmaParser::ParseNode(const TSharedPtr<FJsonObject>& N
 			}
 		}
 	}
+
+	ApplyFigmaSemanticHints(NodeObj, *Node);
 
 	return Node;
 }
@@ -1106,6 +1364,28 @@ bool FFigmaParser::ParseDocument(const FString& FigmaJson, FDesignDocument& OutD
 	}
 
 	const FString DocType = GetStr(DocObj, TEXT("type"));
+
+	auto CaptureDocumentMetadata = [&OutDocument](const TSharedPtr<FJsonObject>& SourceObj)
+	{
+		if (!SourceObj.IsValid())
+			return;
+		AddExtensionIfNonEmpty(OutDocument.Metadata, TEXT("overflowDirection"), GetStr(SourceObj, TEXT("overflowDirection")));
+		AddExtensionIfNonEmpty(OutDocument.Metadata, TEXT("prototypeStartNodeID"), GetStr(SourceObj, TEXT("prototypeStartNodeID")));
+		AddExtensionIfNonEmpty(OutDocument.Metadata, TEXT("transitionNodeID"), GetStr(SourceObj, TEXT("transitionNodeID")));
+		AddJsonExtensionIfPresent(SourceObj, OutDocument.Metadata, TEXT("layoutGrids"), TEXT("layoutGrids"));
+		AddJsonExtensionIfPresent(SourceObj, OutDocument.Metadata, TEXT("interactions"), TEXT("interactions"));
+		AddJsonExtensionIfPresent(SourceObj, OutDocument.Metadata, TEXT("flowStartingPoints"), TEXT("flowStartingPoints"));
+		AddJsonExtensionIfPresent(SourceObj, OutDocument.Metadata, TEXT("prototypeDevice"), TEXT("prototypeDevice"));
+		AddJsonExtensionIfPresent(SourceObj, OutDocument.Metadata, TEXT("componentPropertyReferences"), TEXT("componentPropertyReferences"));
+		AddJsonExtensionIfPresent(SourceObj, OutDocument.Metadata, TEXT("explicitVariableModes"), TEXT("explicitVariableModes"));
+		AddJsonExtensionIfPresent(SourceObj, OutDocument.Metadata, TEXT("annotations"), TEXT("annotations"));
+		AddJsonExtensionIfPresent(SourceObj, OutDocument.Metadata, TEXT("measurements"), TEXT("measurements"));
+		AddJsonExtensionIfPresent(SourceObj, OutDocument.Metadata, TEXT("exportSettings"), TEXT("exportSettings"));
+		AddJsonExtensionIfPresent(SourceObj, OutDocument.Metadata, TEXT("devStatus"), TEXT("devStatus"));
+		AddJsonExtensionIfPresent(SourceObj, OutDocument.Metadata, TEXT("branchData"), TEXT("branchData"));
+	};
+	CaptureDocumentMetadata(DocObj);
+	CaptureDocumentMetadata(Root);
 
 	// Standard file payload: DOCUMENT -> pages -> frames.
 	if (DocType == TEXT("DOCUMENT"))
@@ -1202,7 +1482,7 @@ void FFigmaParser::CollectImageRefsRecursive(const TArray<TSharedPtr<FDesignNode
 		if (Node->Fill.IsImage() && !Node->Fill.Image.Url.IsEmpty())
 			OutRefs.Add(Node->Fill.Image.Url);
 		// 多层填充
-		for (const FPenFill& F : Node->Fills)
+		for (const FDesignFill& F : Node->Fills)
 		{
 			if (F.IsImage() && !F.Image.Url.IsEmpty())
 				OutRefs.Add(F.Image.Url);
@@ -1228,7 +1508,7 @@ void FFigmaParser::ApplyImageUrlsRecursive(TArray<TSharedPtr<FDesignNode>>& Node
 				Node->Fill.Image.Url = *Url;
 		}
 		// 多层填充
-		for (FPenFill& F : Node->Fills)
+		for (FDesignFill& F : Node->Fills)
 		{
 			if (F.IsImage() && !F.Image.Url.IsEmpty())
 			{
@@ -1239,3 +1519,5 @@ void FFigmaParser::ApplyImageUrlsRecursive(TArray<TSharedPtr<FDesignNode>>& Node
 		ApplyImageUrlsRecursive(Node->Children, Map);
 	}
 }
+
+

@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -7,9 +7,8 @@
 #include "PenFileImportFactory.generated.h"
 
 /**
- * .pen 文件导入工厂
- * 支持 Content Browser 拖拽和右键导入
- */
+ * .pen 鏂囦欢瀵煎叆宸ュ巶
+ * 鏀寔 Content Browser 鎷栨嫿鍜屽彸閿鍏? */
 UCLASS()
 class UPenFileImportFactory : public UFactory
 {
@@ -25,3 +24,4 @@ public:
 
 	virtual bool FactoryCanImport(const FString& Filename) override;
 };
+

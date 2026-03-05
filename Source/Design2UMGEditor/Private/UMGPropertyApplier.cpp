@@ -1,9 +1,9 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGWidgetUtils.h"
 #include "Design2UMGLog.h"
 #include "ProceduralShapeGenerator.h"
-#include "PenPathRasterizer.h"
+#include "DesignPathRasterizer.h"
 
 #include "Components/Widget.h"
 #include "Components/TextBlock.h"
@@ -211,7 +211,7 @@ namespace
 			int32 PW = FMath::Max(1, P.Contains(TEXT("WidthOverride")) ? FCString::Atoi(*P[TEXT("WidthOverride")]) : 64);
 			int32 PH = FMath::Max(1, P.Contains(TEXT("HeightOverride")) ? FCString::Atoi(*P[TEXT("HeightOverride")]) : 64);
 
-			if (UTexture2D* Tex = FPenPathRasterizer::Rasterize(*Geom, PW, PH, PathColor, FillRuleStr))
+			if (UTexture2D* Tex = FDesignPathRasterizer::Rasterize(*Geom, PW, PH, PathColor, FillRuleStr))
 			{
 				I->SetBrushFromTexture(Tex);
 				FSlateBrush PathBrush = I->GetBrush();
@@ -950,3 +950,5 @@ void FUMGWidgetUtils::ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNod
 	// legacy 流程处理剩余属性
 	ApplyWidgetProperties(Widget, Node.Properties);
 }
+
+

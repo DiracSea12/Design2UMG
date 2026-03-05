@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -6,23 +6,22 @@
 #include "UMGSchema.h"
 
 /**
- * 布局预设 - 可配置的阈值参数
- */
+ * 甯冨眬棰勮 - 鍙厤缃殑闃堝€煎弬鏁? */
 struct FLayoutPreset
 {
-	/** 9宫格左阈值（默认0.33） */
+	/** 9瀹牸宸﹂槇鍊硷紙榛樿0.33锛?*/
 	float AnchorThresholdL = 0.33f;
 
-	/** 9宫格右阈值（默认0.67） */
+	/** 9瀹牸鍙抽槇鍊硷紙榛樿0.67锛?*/
 	float AnchorThresholdR = 0.67f;
 
-	/** Hysteresis缓冲区（默认0.05） */
+	/** Hysteresis缂撳啿鍖猴紙榛樿0.05锛?*/
 	float HysteresisBuffer = 0.05f;
 
-	/** 边缘吸附阈值（默认0.05） */
+	/** 杈圭紭鍚搁檮闃堝€硷紙榛樿0.05锛?*/
 	float EdgeSnapThreshold = 0.05f;
 
-	/** 拉伸锚点阈值（默认0.60） */
+	/** 鎷変几閿氱偣闃堝€硷紙榛樿0.60锛?*/
 	float StretchThreshold = 0.60f;
 
 	/** Enable nine-grid anchor selection */
@@ -31,7 +30,7 @@ struct FLayoutPreset
 	bool bEnableEdgeSnap = true;
 	bool bEnableStretchAnchors = true;
 
-	/** 获取标准HUD预设 */
+	/** 鑾峰彇鏍囧噯HUD棰勮 */
 	static FLayoutPreset GetStandardHUDPreset()
 	{
 		return FLayoutPreset();
@@ -39,41 +38,40 @@ struct FLayoutPreset
 };
 
 /**
- * 布局上下文 - 计算时的环境信息
+ * 甯冨眬涓婁笅鏂?- 璁＄畻鏃剁殑鐜淇℃伅
  */
 struct FLayoutContext
 {
-	/** 设计分辨率（UMG目标） */
+	/** 璁捐鍒嗚鲸鐜囷紙UMG鐩爣锛?*/
 	FIntPoint DesignSize = FIntPoint(1920, 1080);
 
-	/** 上一轮的锚点X（用于Hysteresis） */
+	/** 涓婁竴杞殑閿氱偣X锛堢敤浜嶩ysteresis锛?*/
 	TOptional<float> OldAnchorX;
 
-	/** 上一轮的锚点Y（用于Hysteresis） */
+	/** 涓婁竴杞殑閿氱偣Y锛堢敤浜嶩ysteresis锛?*/
 	TOptional<float> OldAnchorY;
 
-	/** 布局预设 */
+	/** 甯冨眬棰勮 */
 	FLayoutPreset Preset;
 };
 
-// FBounds已在UMGSchema.h中定义
-
+// FBounds宸插湪UMGSchema.h涓畾涔?
 /**
- * 布局计算器 - 将Bounds转换为UMG的Anchors/Offsets
+ * 甯冨眬璁＄畻鍣?- 灏咮ounds杞崲涓篣MG鐨凙nchors/Offsets
  */
 class FLayoutCalculator
 {
 public:
 	/**
-	 * 计算单个Widget的Slot数据
-	 * @param Bounds 归一化边界框
-	 * @param Context 布局上下文
-	 * @return 计算得到的Slot数据
+	 * 璁＄畻鍗曚釜Widget鐨凷lot鏁版嵁
+	 * @param Bounds 褰掍竴鍖栬竟鐣屾
+	 * @param Context 甯冨眬涓婁笅鏂?
+	 * @return 璁＄畻寰楀埌鐨凷lot鏁版嵁
 	 */
 	static FUMGSlotData CalculateSlot(const FBounds& Bounds, const FLayoutContext& Context);
 
 private:
-	/** 单轴计算结果 */
+	/** 鍗曡酱璁＄畻缁撴灉 */
 	struct FAxisResult
 	{
 		float AnchorMin = 0.f;
@@ -83,11 +81,11 @@ private:
 		float OffsetEnd = 0.f;    // Right or Bottom
 	};
 
-	/** 单轴 Slot 计算（水平/垂直共用） */
+	/** 鍗曡酱 Slot 璁＄畻锛堟按骞?鍨傜洿鍏辩敤锛?*/
 	static FAxisResult CalculateAxis(float Pos, float Size, int32 CanvasSize, TOptional<float> OldAnchor, const FLayoutPreset& Preset);
 
 	/**
-	 * 9宫格锚点选择（带Hysteresis防跳变）
+	 * 9瀹牸閿氱偣閫夋嫨锛堝甫Hysteresis闃茶烦鍙橈級
 	 */
 	static float SelectAnchorWithHysteresis(
 		float Center,
@@ -96,13 +94,13 @@ private:
 	);
 
 	/**
-	 * 边缘吸附检测
-	 * @param Position 元素位置（0-1）
-	 * @param Size 元素尺寸（0-1）
-	 * @param EdgeThreshold 边缘阈值
-	 * @param bSnapToStart 输出：是否吸附到起始边缘
-	 * @param bSnapToEnd 输出：是否吸附到结束边缘
-	 * @return 是否需要边缘吸附
+	 * 杈圭紭鍚搁檮妫€娴?
+	 * @param Position 鍏冪礌浣嶇疆锛?-1锛?
+	 * @param Size 鍏冪礌灏哄锛?-1锛?
+	 * @param EdgeThreshold 杈圭紭闃堝€?
+	 * @param bSnapToStart 杈撳嚭锛氭槸鍚﹀惛闄勫埌璧峰杈圭紭
+	 * @param bSnapToEnd 杈撳嚭锛氭槸鍚﹀惛闄勫埌缁撴潫杈圭紭
+	 * @return 鏄惁闇€瑕佽竟缂樺惛闄?
 	 */
 	static bool ShouldSnapToEdge(
 		float Position,
@@ -113,10 +111,11 @@ private:
 	);
 
 	/**
-	 * 拉伸锚点检测
-	 * @param Size 元素尺寸（0-1）
-	 * @param StretchThreshold 拉伸阈值
-	 * @return 是否应使用拉伸锚点
+	 * 鎷変几閿氱偣妫€娴?
+	 * @param Size 鍏冪礌灏哄锛?-1锛?
+	 * @param StretchThreshold 鎷変几闃堝€?
+	 * @return 鏄惁搴斾娇鐢ㄦ媺浼搁敋鐐?
 	 */
 	static bool ShouldUseStretchAnchors(float Size, float StretchThreshold);
 };
+

@@ -1,9 +1,11 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "UMGSchema.h"
+
+class UTexture2D;
 
 /**
  * Resolve TexturePath fields in generated UMG data.
@@ -30,3 +32,4 @@ public:
 	/** 释放 ResolveTransientTextures 创建的临时纹理的 Root 引用 */
 	static void ReleaseTransientTextures(TMap<FString, UTexture2D*>& InOutTextureMap);
 };
+

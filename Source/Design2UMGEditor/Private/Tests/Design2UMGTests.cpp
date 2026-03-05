@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Misc/AutomationTest.h"
 #include "PenParser.h"
@@ -7,6 +7,7 @@
 #include "LayoutCalculator.h"
 #include "FigmaParser.h"
 #include "Interfaces/IPluginManager.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
@@ -130,11 +131,11 @@ bool FPenParserTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Screen node valid"), Screen.IsValid());
 	if (!Screen.IsValid())
 		return false;
-	TestEqual(TEXT("Screen type"), Screen->Type, EPenNodeType::Frame);
+	TestEqual(TEXT("Screen type"), Screen->Type, EDesignNodeType::Frame);
 	TestEqual(TEXT("Screen name"), Screen->Name, TEXT("MainScreen"));
 	TestTrue(TEXT("Screen width fixed"), Screen->Width.IsFixed());
 	TestEqual(TEXT("Screen width value"), Screen->Width.Value, 1920.0f);
-	TestEqual(TEXT("Screen layout"), Screen->Layout, EPenLayout::Vertical);
+	TestEqual(TEXT("Screen layout"), Screen->Layout, EDesignLayout::Vertical);
 	TestEqual(TEXT("Screen gap"), Screen->Gap, 16.0f);
 	TestEqual(TEXT("Screen children count"), Screen->Children.Num(), 3);
 	if (Screen->Children.Num() < 3)
@@ -142,18 +143,18 @@ bool FPenParserTest::RunTest(const FString& Parameters)
 
 	// Text 节点
 	const TSharedPtr<FDesignNode>& Title = Screen->Children[0];
-	TestEqual(TEXT("Title type"), Title->Type, EPenNodeType::Text);
+	TestEqual(TEXT("Title type"), Title->Type, EDesignNodeType::Text);
 	TestEqual(TEXT("Title content"), Title->Content, TEXT("Hello World"));
 	TestEqual(TEXT("Title fontSize"), Title->FontSize, 24.0f);
 	TestEqual(TEXT("Title fontWeight"), Title->FontWeight, TEXT("bold"));
 
 	// Ellipse 节点
 	const TSharedPtr<FDesignNode>& Ellipse = Screen->Children[1];
-	TestEqual(TEXT("Ellipse type"), Ellipse->Type, EPenNodeType::Ellipse);
+	TestEqual(TEXT("Ellipse type"), Ellipse->Type, EDesignNodeType::Ellipse);
 
 	// Rectangle 节点
 	const TSharedPtr<FDesignNode>& Rect = Screen->Children[2];
-	TestEqual(TEXT("Rect type"), Rect->Type, EPenNodeType::Rectangle);
+	TestEqual(TEXT("Rect type"), Rect->Type, EDesignNodeType::Rectangle);
 	TestTrue(TEXT("Rect has corner radius"), Rect->CornerRadius.HasRadius());
 
 	return true;
@@ -694,8 +695,8 @@ bool FFigmaComplexParserTest::RunTest(const FString& Parameters)
 
 	// Dashboard root: HORIZONTAL auto layout
 	const auto& Dashboard = Doc.Children[0];
-	TestEqual(TEXT("Dashboard type"), Dashboard->Type, EPenNodeType::Frame);
-	TestEqual(TEXT("Dashboard layout"), Dashboard->Layout, EPenLayout::Horizontal);
+	TestEqual(TEXT("Dashboard type"), Dashboard->Type, EDesignNodeType::Frame);
+	TestEqual(TEXT("Dashboard layout"), Dashboard->Layout, EDesignLayout::Horizontal);
 	TestTrue(TEXT("Dashboard clip (Figma clipsContent mapped)"), Dashboard->bClip);
 	TestEqual(TEXT("Dashboard children"), Dashboard->Children.Num(), 2);
 	if (Dashboard->Children.Num() < 2)
@@ -703,7 +704,7 @@ bool FFigmaComplexParserTest::RunTest(const FString& Parameters)
 
 	// Sidebar: VERTICAL + individualStrokeWeights + FILL height
 	const auto& Sidebar = Dashboard->Children[0];
-	TestEqual(TEXT("Sidebar layout"), Sidebar->Layout, EPenLayout::Vertical);
+	TestEqual(TEXT("Sidebar layout"), Sidebar->Layout, EDesignLayout::Vertical);
 	TestTrue(TEXT("Sidebar height FILL"), Sidebar->Height.IsFill());
 	TestTrue(TEXT("Sidebar width FIXED"), Sidebar->Width.IsFixed());
 	TestEqual(TEXT("Sidebar gap"), Sidebar->Gap, 8.0f);
@@ -717,26 +718,26 @@ bool FFigmaComplexParserTest::RunTest(const FString& Parameters)
 
 	// Logo text: fontWeight 700 preserved, textAutoResize→Auto, textAlignVertical CENTER
 	const auto& Logo = Sidebar->Children[0];
-	TestEqual(TEXT("Logo type"), Logo->Type, EPenNodeType::Text);
+	TestEqual(TEXT("Logo type"), Logo->Type, EDesignNodeType::Text);
 	TestEqual(TEXT("Logo content"), Logo->Content, TEXT("Acme Dashboard"));
 	TestEqual(TEXT("Logo fontWeight"), Logo->FontWeight, TEXT("700"));
 	TestEqual(TEXT("Logo fontSize"), Logo->FontSize, 20.0f);
-	TestEqual(TEXT("Logo textGrowth"), Logo->TextGrowth, EPenTextGrowth::Auto);
-	TestEqual(TEXT("Logo textAlignV"), Logo->TextAlignVertical, EPenTextAlignVertical::Middle);
+	TestEqual(TEXT("Logo textGrowth"), Logo->TextGrowth, EDesignTextGrowth::Auto);
+	TestEqual(TEXT("Logo textAlignV"), Logo->TextAlignVertical, EDesignTextAlignVertical::Middle);
 	TestTrue(TEXT("Logo lineHeight > 0"), Logo->LineHeight > 0.0f);
 
 	// Divider: LINE type
-	TestEqual(TEXT("Divider type"), Sidebar->Children[1]->Type, EPenNodeType::Line);
+	TestEqual(TEXT("Divider type"), Sidebar->Children[1]->Type, EDesignNodeType::Line);
 
 	// NavItem: COMPONENT → bReusable
 	const auto& NavItem = Sidebar->Children[2];
 	TestTrue(TEXT("NavItem reusable"), NavItem->bReusable);
-	TestEqual(TEXT("NavItem layout"), NavItem->Layout, EPenLayout::Horizontal);
+	TestEqual(TEXT("NavItem layout"), NavItem->Layout, EDesignLayout::Horizontal);
 	TestEqual(TEXT("NavItem children"), NavItem->Children.Num(), 2);
 
 	// NavItem child: VECTOR → Path
 	if (NavItem->Children.Num() >= 1)
-		TestEqual(TEXT("NavIcon type"), NavItem->Children[0]->Type, EPenNodeType::Path);
+		TestEqual(TEXT("NavIcon type"), NavItem->Children[0]->Type, EDesignNodeType::Path);
 
 	// NavItem Instance: INSTANCE → Ref = componentId
 	const auto& NavInst = Sidebar->Children[3];
@@ -752,14 +753,14 @@ bool FFigmaComplexParserTest::RunTest(const FString& Parameters)
 
 	// Header: SPACE_BETWEEN
 	const auto& Header = Main->Children[0];
-	TestEqual(TEXT("Header justify"), Header->JustifyContent, EPenJustifyContent::SpaceBetween);
-	TestEqual(TEXT("Header align"), Header->AlignItems, EPenAlignItems::Center);
+	TestEqual(TEXT("Header justify"), Header->JustifyContent, EDesignJustifyContent::SpaceBetween);
+	TestEqual(TEXT("Header align"), Header->AlignItems, EDesignAlignItems::Center);
 
 	// Avatar: ELLIPSE + multi-fill (SOLID + IMAGE)
 	if (Header->Children.Num() >= 2)
 	{
 		const auto& Avatar = Header->Children[1];
-		TestEqual(TEXT("Avatar type"), Avatar->Type, EPenNodeType::Ellipse);
+		TestEqual(TEXT("Avatar type"), Avatar->Type, EDesignNodeType::Ellipse);
 		TestTrue(TEXT("Avatar has image fill"), Avatar->Fill.IsImage());
 		TestTrue(TEXT("Avatar multi-fills >= 2"), Avatar->Fills.Num() >= 2);
 	}
@@ -769,11 +770,11 @@ bool FFigmaComplexParserTest::RunTest(const FString& Parameters)
 	if (StatsRow->Children.Num() >= 1)
 	{
 		const auto& Card = StatsRow->Children[0];
-		TestEqual(TEXT("Card fill gradient"), Card->Fill.Type, EPenFillType::Gradient);
-		TestEqual(TEXT("Card gradient type"), Card->Fill.Gradient.GradientType, EPenGradientType::Linear);
+		TestEqual(TEXT("Card fill gradient"), Card->Fill.Type, EDesignFillType::Gradient);
+		TestEqual(TEXT("Card gradient type"), Card->Fill.Gradient.GradientType, EDesignGradientType::Linear);
 		TestTrue(TEXT("Card gradient stops >= 2"), Card->Fill.Gradient.Colors.Num() >= 2);
 		TestTrue(TEXT("Card has effects"), Card->Effects.Num() > 0);
-		TestEqual(TEXT("Card shadow type"), Card->Effects[0].Type, EPenEffectType::Shadow);
+		TestEqual(TEXT("Card shadow type"), Card->Effects[0].Type, EDesignEffectType::Shadow);
 		TestFalse(TEXT("Card shadow not inner"), Card->Effects[0].Shadow.bInner);
 	}
 
@@ -783,8 +784,8 @@ bool FFigmaComplexParserTest::RunTest(const FString& Parameters)
 	bool bFoundInner = false, bFoundBgBlur = false;
 	for (const auto& E : Chart->Effects)
 	{
-		if (E.Type == EPenEffectType::Shadow && E.Shadow.bInner) bFoundInner = true;
-		if (E.Type == EPenEffectType::BackgroundBlur) bFoundBgBlur = true;
+		if (E.Type == EDesignEffectType::Shadow && E.Shadow.bInner) bFoundInner = true;
+		if (E.Type == EDesignEffectType::BackgroundBlur) bFoundBgBlur = true;
 	}
 	TestTrue(TEXT("Chart has inner shadow"), bFoundInner);
 	TestTrue(TEXT("Chart has bg blur"), bFoundBgBlur);
@@ -793,7 +794,7 @@ bool FFigmaComplexParserTest::RunTest(const FString& Parameters)
 	if (Chart->Children.Num() >= 2)
 	{
 		const auto& Placeholder = Chart->Children[1];
-		TestEqual(TEXT("Placeholder type"), Placeholder->Type, EPenNodeType::Rectangle);
+		TestEqual(TEXT("Placeholder type"), Placeholder->Type, EDesignNodeType::Rectangle);
 		TestFalse(TEXT("Placeholder non-uniform radius"), Placeholder->CornerRadius.bUniform);
 		TestEqual(TEXT("Placeholder TL"), Placeholder->CornerRadius.TopLeft, 12.0f);
 		TestEqual(TEXT("Placeholder BL"), Placeholder->CornerRadius.BottomLeft, 0.0f);
@@ -801,26 +802,26 @@ bool FFigmaComplexParserTest::RunTest(const FString& Parameters)
 
 	// GROUP: absolute positioned children
 	const auto& Overlay = Main->Children[3];
-	TestEqual(TEXT("Overlay type"), Overlay->Type, EPenNodeType::Group);
+	TestEqual(TEXT("Overlay type"), Overlay->Type, EDesignNodeType::Group);
 	TestTrue(TEXT("Overlay children >= 7"), Overlay->Children.Num() >= 7);
 
 	if (Overlay->Children.Num() >= 7)
 	{
 		// LAYER_BLUR
 		TestTrue(TEXT("Badge has effects"), Overlay->Children[0]->Effects.Num() > 0);
-		TestEqual(TEXT("Badge blur type"), Overlay->Children[0]->Effects[0].Type, EPenEffectType::Blur);
+		TestEqual(TEXT("Badge blur type"), Overlay->Children[0]->Effects[0].Type, EDesignEffectType::Blur);
 
 		// FlippedIcon: relativeTransform flip detection
 		TestTrue(TEXT("FlippedIcon flipX"), Overlay->Children[1]->bFlipX);
 
 		// STAR → Polygon
-		TestEqual(TEXT("Star type"), Overlay->Children[2]->Type, EPenNodeType::Polygon);
+		TestEqual(TEXT("Star type"), Overlay->Children[2]->Type, EDesignNodeType::Polygon);
 
 		// REGULAR_POLYGON → Polygon
-		TestEqual(TEXT("Polygon type"), Overlay->Children[3]->Type, EPenNodeType::Polygon);
+		TestEqual(TEXT("Polygon type"), Overlay->Children[3]->Type, EDesignNodeType::Polygon);
 
 		// BOOLEAN_OPERATION → Path
-		TestEqual(TEXT("BoolOp type"), Overlay->Children[4]->Type, EPenNodeType::Path);
+		TestEqual(TEXT("BoolOp type"), Overlay->Children[4]->Type, EDesignNodeType::Path);
 
 		// IMAGE fill with imageTransform + opacity
 		const auto& ImgCard = Overlay->Children[5];
@@ -829,16 +830,16 @@ bool FFigmaComplexParserTest::RunTest(const FString& Parameters)
 
 		// GRADIENT_RADIAL
 		const auto& GradBg = Overlay->Children[6];
-		TestEqual(TEXT("GradBg gradient type"), GradBg->Fill.Gradient.GradientType, EPenGradientType::Radial);
+		TestEqual(TEXT("GradBg gradient type"), GradBg->Fill.Gradient.GradientType, EDesignGradientType::Radial);
 	}
 
 	// Justified text + textAlignVertical BOTTOM + textAutoResize NONE
 	if (Overlay->Children.Num() >= 8)
 	{
 		const auto& JustText = Overlay->Children[7];
-		TestEqual(TEXT("JustText align"), JustText->TextAlign, EPenTextAlign::Justify);
-		TestEqual(TEXT("JustText valign"), JustText->TextAlignVertical, EPenTextAlignVertical::Bottom);
-		TestEqual(TEXT("JustText growth"), JustText->TextGrowth, EPenTextGrowth::FixedWidthHeight);
+		TestEqual(TEXT("JustText align"), JustText->TextAlign, EDesignTextAlign::Justify);
+		TestEqual(TEXT("JustText valign"), JustText->TextAlignVertical, EDesignTextAlignVertical::Bottom);
+		TestEqual(TEXT("JustText growth"), JustText->TextGrowth, EDesignTextGrowth::FixedWidthHeight);
 	}
 
 	return true;
@@ -986,7 +987,7 @@ bool FFigmaStrokeVisibilityGateTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("No-visible-stroke node should not have stroke"), NoVisibleStroke->Stroke.HasStroke());
 	TestEqual(TEXT("No-visible-stroke thickness remains 0"), NoVisibleStroke->Stroke.Thickness.Uniform, 0.0f);
 	TestTrue(TEXT("Visible-stroke node keeps stroke"), VisibleStroke->Stroke.HasStroke());
-	TestEqual(TEXT("Visible-stroke align parsed"), VisibleStroke->Stroke.Align, EPenStrokeAlign::Outside);
+	TestEqual(TEXT("Visible-stroke align parsed"), VisibleStroke->Stroke.Align, EDesignStrokeAlign::Outside);
 
 	return true;
 }
@@ -1121,6 +1122,482 @@ bool FFigmaTextFitPreserveSizeTest::RunTest(const FString& Parameters)
 }
 
 // ============================================================
+// Test 8.9: PenParser - mesh_gradient + extended text fields
+// ============================================================
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenExtendedFieldsAndMeshGradientTest,
+	"Design2UMG.PenParser.ExtendedFieldsAndMeshGradient",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FPenExtendedFieldsAndMeshGradientTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"children": [
+			{
+				"id": "txt1",
+				"type": "text",
+				"content": "Hello",
+				"fontStyle": "italic",
+				"underline": true,
+				"strikethrough": true,
+				"href": "https://example.com",
+				"fill": {
+					"type": "mesh_gradient",
+					"colors": [
+						{"color": "#FF0000", "position": 0.0},
+						{"color": "#00FF00", "position": 1.0}
+					]
+				}
+			},
+			{
+				"id": "comp1",
+				"type": "frame",
+				"reusable": true,
+				"layoutIncludeStroke": true,
+				"stroke": {
+					"align": "inside",
+					"thickness": 1,
+					"fill": "#000000",
+					"join": "round",
+					"miterAngle": 45,
+					"cap": "square",
+					"dashPattern": [2, 4]
+				},
+				"children": [
+					{
+						"id": "label",
+						"type": "text",
+						"content": "Default"
+					}
+				]
+			},
+			{
+				"id": "inst1",
+				"type": "ref",
+				"ref": "comp1",
+				"descendants": {
+					"label": {
+						"content": "Go",
+						"fontStyle": "italic",
+						"underline": true,
+						"href": "https://override.example"
+					}
+				}
+			}
+		]
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Pen parse succeeds"), FPenParser::ParseDocument(Json, Doc));
+	if (Doc.Children.Num() < 2)
+		return false;
+
+	const TSharedPtr<FDesignNode>& TextNode = Doc.Children[0];
+	TestEqual(TEXT("Text node type"), TextNode->Type, EDesignNodeType::Text);
+	TestEqual(TEXT("fontStyle parsed"), TextNode->FontStyle, TEXT("italic"));
+	TestTrue(TEXT("underline parsed"), TextNode->bUnderline);
+	TestTrue(TEXT("strikethrough parsed"), TextNode->bStrikethrough);
+	TestEqual(TEXT("href parsed"), TextNode->Href, TEXT("https://example.com"));
+	TestEqual(TEXT("mesh_gradient maps to gradient"), TextNode->Fill.Type, EDesignFillType::Gradient);
+	TestTrue(TEXT("mesh_gradient marker set"), TextNode->Fill.bFromMeshGradient);
+	TestTrue(TEXT("mesh_gradient raw payload kept"), !TextNode->Fill.MeshGradientRaw.IsEmpty());
+	const TSharedPtr<FDesignNode>& ComponentNode = Doc.Children[1];
+	const FString* LayoutIncludeStroke = ComponentNode->Metadata.Find(TEXT("layoutIncludeStroke"));
+	TestTrue(TEXT("layoutIncludeStroke preserved"), LayoutIncludeStroke && *LayoutIncludeStroke == TEXT("true"));
+	const FString* StrokeJoin = ComponentNode->Metadata.Find(TEXT("stroke.join"));
+	TestTrue(TEXT("stroke join preserved"), StrokeJoin && *StrokeJoin == TEXT("round"));
+	const FString* StrokeCap = ComponentNode->Metadata.Find(TEXT("stroke.cap"));
+	TestTrue(TEXT("stroke cap preserved"), StrokeCap && *StrokeCap == TEXT("square"));
+	const FString* StrokeMiterAngle = ComponentNode->Metadata.Find(TEXT("stroke.miterAngle"));
+	TestTrue(TEXT("stroke miterAngle preserved"), StrokeMiterAngle && !StrokeMiterAngle->IsEmpty());
+	const FString* StrokeDashPattern = ComponentNode->Metadata.Find(TEXT("stroke.dashPattern"));
+	TestTrue(TEXT("stroke dashPattern preserved"), StrokeDashPattern && StrokeDashPattern->Contains(TEXT("2")) && StrokeDashPattern->Contains(TEXT("4")));
+
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FString OverrideText = TEXT("Go");
+	const FUMGWidgetNode* OverrideLabel = FindWidgetByProperty(Data.RootWidget, TEXT("Text"), &OverrideText);
+	TestTrue(TEXT("Find override text widget"), OverrideLabel != nullptr);
+	if (!OverrideLabel)
+		return false;
+
+	const FString* FontStyle = OverrideLabel->Properties.Find(TEXT("FontStyle"));
+	TestTrue(TEXT("Override fontStyle propagated"), FontStyle && *FontStyle == TEXT("italic"));
+	const FString* Underline = OverrideLabel->Properties.Find(TEXT("Underline"));
+	TestTrue(TEXT("Override underline propagated"), Underline && *Underline == TEXT("true"));
+	const FString* Href = OverrideLabel->Properties.Find(TEXT("Href"));
+	TestTrue(TEXT("Override href propagated"), Href && *Href == TEXT("https://override.example"));
+
+	return true;
+}
+
+// ============================================================
+// Test 8.10: FigmaParser - GRID/WRAP and metadata preservation
+// ============================================================
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaGridWrapMetadataTest,
+	"Design2UMG.FigmaParser.GridWrapMetadata",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFigmaGridWrapMetadataTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page 1",
+				"type": "CANVAS",
+				"children": [{
+					"id": "0:2",
+					"name": "Root",
+					"type": "FRAME",
+					"visible": true,
+					"absoluteBoundingBox": {"x":0,"y":0,"width":900,"height":600},
+					"children": [
+						{
+							"id": "grid1",
+							"name": "GridContainer",
+							"type": "FRAME",
+							"visible": true,
+							"layoutMode": "GRID",
+							"itemSpacing": 12,
+							"paddingLeft": 10,
+							"paddingRight": 20,
+							"paddingTop": 30,
+							"paddingBottom": 40,
+							"counterAxisSpacing": 6,
+							"counterAxisAlignContent": "SPACE_BETWEEN",
+							"layoutPositioning": "ABSOLUTE",
+							"layoutAlign": "STRETCH",
+							"primaryAxisSizingMode": "AUTO",
+							"counterAxisSizingMode": "FIXED",
+							"minWidth": 100,
+							"maxWidth": 500,
+							"minHeight": 80,
+							"maxHeight": 400,
+							"gridRowCount": 2,
+							"gridColumnCount": 3,
+							"gridRowGap": 14,
+							"gridColumnGap": 16,
+							"gridRowsSizing": "AUTO",
+							"gridColumnsSizing": "FIXED",
+							"gridChildHorizontalAlign": "CENTER",
+							"gridChildVerticalAlign": "MIN",
+							"gridRowSpan": 2,
+							"gridColumnSpan": 3,
+							"gridColumnAnchorIndex": 1,
+							"gridRowAnchorIndex": 0,
+							"itemReverseZIndex": true,
+							"strokesIncludedInLayout": true,
+							"boundVariables": {
+								"itemSpacing": {"type": "VARIABLE_ALIAS", "id": "VariableID:1:2"}
+							},
+							"absoluteBoundingBox": {"x":20,"y":20,"width":300,"height":200},
+							"children": []
+						},
+						{
+							"id": "wrap1",
+							"name": "WrapContainer",
+							"type": "FRAME",
+							"visible": true,
+							"layoutMode": "HORIZONTAL",
+							"layoutWrap": "WRAP",
+							"itemSpacing": 8,
+							"paddingLeft": 5,
+							"paddingRight": 6,
+							"paddingTop": 7,
+							"paddingBottom": 9,
+							"absoluteBoundingBox": {"x":20,"y":260,"width":400,"height":200},
+							"children": []
+						}
+					]
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Figma parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	if (Doc.Children.Num() == 0 || Doc.Children[0]->Children.Num() < 2)
+		return false;
+
+	const TSharedPtr<FDesignNode>& GridNode = Doc.Children[0]->Children[0];
+	const TSharedPtr<FDesignNode>& WrapNode = Doc.Children[0]->Children[1];
+
+	TestEqual(TEXT("GRID layout parsed"), GridNode->Layout, EDesignLayout::Grid);
+	TestEqual(TEXT("WRAP layout parsed"), WrapNode->Layout, EDesignLayout::Wrap);
+	TestTrue(TEXT("GRID gap preserved"), FMath::IsNearlyEqual(GridNode->Gap, 12.0f, 0.001f));
+	TestTrue(TEXT("WRAP gap preserved"), FMath::IsNearlyEqual(WrapNode->Gap, 8.0f, 0.001f));
+	TestTrue(TEXT("GRID padding left preserved"), FMath::IsNearlyEqual(GridNode->Padding.Left, 10.0f, 0.001f));
+	TestTrue(TEXT("WRAP padding top preserved"), FMath::IsNearlyEqual(WrapNode->Padding.Top, 7.0f, 0.001f));
+	const FString* CounterAxisAlignContent = GridNode->Metadata.Find(TEXT("counterAxisAlignContent"));
+	TestTrue(TEXT("counterAxisAlignContent preserved"), CounterAxisAlignContent && *CounterAxisAlignContent == TEXT("SPACE_BETWEEN"));
+	const FString* LayoutPositioning = GridNode->Metadata.Find(TEXT("layoutPositioning"));
+	TestTrue(TEXT("layoutPositioning preserved"), LayoutPositioning && *LayoutPositioning == TEXT("ABSOLUTE"));
+	TestTrue(TEXT("layoutPositioning semantic flag"), GridNode->bAbsoluteLayoutPositioning);
+	const FString* ItemReverseZIndex = GridNode->Metadata.Find(TEXT("itemReverseZIndex"));
+	TestTrue(TEXT("itemReverseZIndex preserved"), ItemReverseZIndex && *ItemReverseZIndex == TEXT("true"));
+	const FString* StrokesIncludedInLayout = GridNode->Metadata.Find(TEXT("strokesIncludedInLayout"));
+	TestTrue(TEXT("strokesIncludedInLayout preserved"), StrokesIncludedInLayout && *StrokesIncludedInLayout == TEXT("true"));
+	TestTrue(TEXT("boundVariables preserved"), GridNode->Metadata.Contains(TEXT("boundVariables.itemSpacing")));
+	TestTrue(TEXT("counterAxisSpacing preserved"), GridNode->Metadata.Contains(TEXT("counterAxisSpacing")));
+	TestTrue(TEXT("layoutAlign preserved"), GridNode->Metadata.Contains(TEXT("layoutAlign")));
+	TestTrue(TEXT("primaryAxisSizingMode preserved"), GridNode->Metadata.Contains(TEXT("primaryAxisSizingMode")));
+	TestTrue(TEXT("counterAxisSizingMode preserved"), GridNode->Metadata.Contains(TEXT("counterAxisSizingMode")));
+	TestTrue(TEXT("min/max size preserved"), GridNode->Metadata.Contains(TEXT("minWidth")) && GridNode->Metadata.Contains(TEXT("maxHeight")));
+	TestTrue(TEXT("grid count/gap preserved"), GridNode->Metadata.Contains(TEXT("gridRowCount")) && GridNode->Metadata.Contains(TEXT("gridColumnGap")));
+	TestTrue(TEXT("grid sizing preserved"), GridNode->Metadata.Contains(TEXT("gridRowsSizing")) && GridNode->Metadata.Contains(TEXT("gridColumnsSizing")));
+	TestTrue(TEXT("grid child align preserved"), GridNode->Metadata.Contains(TEXT("gridChildHorizontalAlign")) && GridNode->Metadata.Contains(TEXT("gridChildVerticalAlign")));
+	TestTrue(TEXT("grid child span/anchor preserved"), GridNode->Metadata.Contains(TEXT("gridRowSpan")) && GridNode->Metadata.Contains(TEXT("gridColumnAnchorIndex")));
+
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* GridWidget = FindWidgetById(Data.RootWidget, TEXT("grid1"));
+	const FUMGWidgetNode* WrapWidget = FindWidgetById(Data.RootWidget, TEXT("wrap1"));
+	TestTrue(TEXT("Grid widget exists"), GridWidget != nullptr);
+	TestTrue(TEXT("Wrap widget exists"), WrapWidget != nullptr);
+	if (!GridWidget || !WrapWidget)
+		return false;
+
+	TestEqual(TEXT("Grid widget type"), GridWidget->Type, TEXT("UniformGridPanel"));
+	TestEqual(TEXT("Wrap widget type"), WrapWidget->Type, TEXT("WrapBox"));
+
+	return true;
+}
+
+// ============================================================
+// Test 8.11: Official-field parity smoke tests (.pen / Figma)
+// ============================================================
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenOfficialFieldParityTest,
+	"Design2UMG.Parity.PenOfficialFields",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FPenOfficialFieldParityTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"variables": {
+			"flagDisabled": {"type":"boolean","value":false},
+			"alphaVar": {"type":"number","value":0.66},
+			"underVar": {"type":"boolean","value":true},
+			"segA": {"type":"string","value":"Hi"}
+		},
+		"children": [{
+			"id": "frame1",
+			"type": "frame",
+			"layout": "horizontal",
+			"layoutIncludeStroke": false,
+			"stroke": {
+				"align": "inside",
+				"thickness": 2,
+				"fill": "#112233",
+				"join": "miter",
+				"miterAngle": 30,
+				"cap": "round",
+				"dashPattern": [1, 2]
+			},
+			"children": [{
+				"id": "text1",
+				"type": "text",
+				"content": "Spec",
+				"fontStyle": "normal",
+				"underline": false,
+				"strikethrough": true,
+				"href": "https://docs.pencil.dev",
+				"fill": {
+					"type": "mesh_gradient",
+					"blendMode": "multiply",
+					"opacity": 0.42,
+					"rows": 2,
+					"columns": 2,
+					"points": [
+						{"x": 0, "y": 0, "color": "#000000", "in": [-0.1, 0.0], "out": [0.1, 0.0]},
+						{"position": {"x": 1, "y": 1}, "color": "#FFFFFF", "handleIn": [0.9, 1.0], "handleOut": [1.1, 1.0]}
+					],
+					"colors": [
+						{"color": "#000000", "position": 0},
+						{"color": "#FFFFFF", "position": 1}
+					]
+				}
+			},{
+				"id": "rect1",
+				"type": "rectangle",
+				"fill": {
+					"type": "gradient",
+					"gradientType": "radial",
+					"center": {"x": 0.2, "y": 0.8},
+					"size": {"width": "2.5", "height": 1.25},
+					"colors": [
+						{"color": "#000000", "position": 0},
+						{"color": "#FFFFFF", "position": 1}
+					]
+				},
+				"effect": [{
+					"type": "shadow",
+					"blendMode": "screen",
+					"shadowType": "outer",
+					"offset": {"x": 2, "y": 3},
+					"blur": 4,
+					"spread": 1,
+					"color": "#01020340"
+				}]
+			},{
+				"id": "rich1",
+				"type": "text",
+				"enabled": "$flagDisabled",
+				"opacity": "$alphaVar",
+				"underline": "$underVar",
+				"content": [
+					{"content": "$segA", "fontWeight": "700"},
+					{"content": " there", "fontStyle": "italic"}
+				]
+			}]
+		}]
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Pen official parity parse succeeds"), FPenParser::ParseDocument(Json, Doc));
+	if (Doc.Children.Num() == 0 || Doc.Children[0]->Children.Num() < 3)
+		return false;
+
+	const TSharedPtr<FDesignNode>& FrameNode = Doc.Children[0];
+	const TSharedPtr<FDesignNode>& TextNode = FrameNode->Children[0];
+	const TSharedPtr<FDesignNode>& GradientNode = FrameNode->Children[1];
+	const TSharedPtr<FDesignNode>& RichTextNode = FrameNode->Children[2];
+	TestTrue(TEXT("layoutIncludeStroke false preserved"), FrameNode->Metadata.FindRef(TEXT("layoutIncludeStroke")) == TEXT("false"));
+	TestTrue(TEXT("stroke.join preserved"), FrameNode->Metadata.FindRef(TEXT("stroke.join")) == TEXT("miter"));
+	TestTrue(TEXT("stroke.cap preserved"), FrameNode->Metadata.FindRef(TEXT("stroke.cap")) == TEXT("round"));
+	TestTrue(TEXT("stroke.dashPattern preserved"), FrameNode->Metadata.FindRef(TEXT("stroke.dashPattern")).Contains(TEXT("1")));
+	TestTrue(TEXT("mesh gradient preserved"), TextNode->Fill.bFromMeshGradient && !TextNode->Fill.MeshGradientRaw.IsEmpty());
+	TestTrue(TEXT("mesh gradient rows/columns parsed"), TextNode->Fill.MeshGradient.bHasRows
+		&& TextNode->Fill.MeshGradient.bHasColumns
+		&& TextNode->Fill.MeshGradient.Rows == 2
+		&& TextNode->Fill.MeshGradient.Columns == 2);
+	TestTrue(TEXT("mesh gradient points parsed"), TextNode->Fill.MeshGradient.Points.Num() == 2
+		&& TextNode->Fill.MeshGradient.Points[0].bHasPosition
+		&& TextNode->Fill.MeshGradient.Points[0].InHandle.bHasValue
+		&& TextNode->Fill.MeshGradient.Points[1].OutHandle.bHasValue);
+	TestTrue(TEXT("fill blendMode preserved"), TextNode->Fill.BlendMode == TEXT("multiply"));
+	TestTrue(TEXT("fill opacity preserved"), FMath::IsNearlyEqual(TextNode->Fill.Opacity, 0.42f, 0.001f));
+	TestTrue(TEXT("text href preserved"), TextNode->Href == TEXT("https://docs.pencil.dev"));
+	TestTrue(TEXT("text strikethrough preserved"), TextNode->bStrikethrough);
+	TestTrue(TEXT("gradient center parsed"), GradientNode->Fill.Gradient.bHasCenter
+		&& FMath::IsNearlyEqual(GradientNode->Fill.Gradient.CenterX, 0.2f, 0.001f)
+		&& FMath::IsNearlyEqual(GradientNode->Fill.Gradient.CenterY, 0.8f, 0.001f));
+	TestTrue(TEXT("gradient size parsed"), GradientNode->Fill.Gradient.bHasSize
+		&& FMath::IsNearlyEqual(GradientNode->Fill.Gradient.SizeWidth, 2.5f, 0.001f)
+		&& FMath::IsNearlyEqual(GradientNode->Fill.Gradient.SizeHeight, 1.25f, 0.001f));
+	TestTrue(TEXT("shadow blendMode preserved"), GradientNode->Effects.Num() > 0
+		&& GradientNode->Effects[0].BlendMode == TEXT("screen")
+		&& GradientNode->Effects[0].Shadow.BlendMode == TEXT("screen"));
+	TestTrue(TEXT("text content array fallback"), RichTextNode->Content == TEXT("Hi there"));
+	TestTrue(TEXT("text content array raw preserved"), RichTextNode->Metadata.Contains(TEXT("text.content.raw")));
+	TestTrue(TEXT("text runs parsed"), RichTextNode->TextRuns.Num() == 2
+		&& RichTextNode->TextRuns[0].FontWeight == TEXT("700")
+		&& RichTextNode->TextRuns[1].FontStyle == TEXT("italic"));
+	TestTrue(TEXT("boolean variable parsed"), !RichTextNode->bEnabled && RichTextNode->bUnderline);
+	TestTrue(TEXT("number variable parsed"), FMath::IsNearlyEqual(RichTextNode->Opacity, 0.66f, 0.001f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaOfficialFieldParityTest,
+	"Design2UMG.Parity.FigmaOfficialFields",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFigmaOfficialFieldParityTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {"id":"0:0","name":"Doc","type":"DOCUMENT","prototypeStartNodeID":"0:2","prototypeDevice":{"type":"PRESET","size":"DESKTOP"},"children":[
+			{"id":"0:1","name":"Page","type":"CANVAS","children":[
+				{"id":"0:2","name":"Root","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":800,"height":600},"children":[
+					{"id":"gridp","name":"GridParity","type":"FRAME","visible":true,"layoutMode":"GRID","layoutWrap":"WRAP","itemSpacing":8,
+					 "paddingLeft":1,"paddingRight":2,"paddingTop":3,"paddingBottom":4,
+					 "counterAxisAlignContent":"SPACE_BETWEEN","counterAxisSpacing":6,
+					 "layoutPositioning":"ABSOLUTE","layoutAlign":"STRETCH",
+					 "overflowDirection":"HORIZONTAL_SCROLLING",
+					 "primaryAxisSizingMode":"AUTO","counterAxisSizingMode":"FIXED",
+					 "itemReverseZIndex":true,"strokesIncludedInLayout":false,
+					 "minWidth":100,"maxWidth":300,"minHeight":50,"maxHeight":200,
+					 "gridRowCount":2,"gridColumnCount":3,"gridRowGap":10,"gridColumnGap":12,
+					 "gridRowsSizing":"AUTO","gridColumnsSizing":"FIXED",
+					 "gridChildHorizontalAlign":"CENTER","gridChildVerticalAlign":"MAX",
+					 "gridRowSpan":2,"gridColumnSpan":1,"gridColumnAnchorIndex":0,"gridRowAnchorIndex":1,
+					 "layoutGrids":[{"pattern":"GRID","sectionSize":8,"visible":true}],
+					 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"NODE","destinationId":"1:2","navigation":"NAVIGATE"}]}],
+					 "flowStartingPoints":[{"nodeId":"0:2","name":"Flow 1"}],
+					 "componentPropertyReferences":{"width":"123:1"},
+					 "explicitVariableModes":{"1":"2:3"},
+					 "annotations":[{"label":"todo","properties":{}}],
+					 "measurements":[{"label":"w","value":320}],
+					 "exportSettings":[{"suffix":"@2x","format":"PNG"}],
+					 "devStatus":{"type":"READY_FOR_DEV"},
+					 "branchData":{"mainFileKey":"main1","branchKey":"branch1"},
+					 "boundVariables":{"itemSpacing":{"type":"VARIABLE_ALIAS","id":"VariableID:1:2"}},
+					 "absoluteBoundingBox":{"x":10,"y":10,"width":320,"height":240},"children":[]},
+					{"id":"paint1","name":"PaintParity","type":"RECTANGLE","visible":true,
+					 "absoluteBoundingBox":{"x":400,"y":10,"width":120,"height":80},
+					 "fills":[{"type":"SOLID","visible":true,"opacity":0.5,"blendMode":"MULTIPLY","color":{"r":1,"g":0,"b":0}}],
+					 "effects":[{"type":"DROP_SHADOW","visible":true,"blendMode":"SCREEN","offset":{"x":1,"y":2},"radius":3,"spread":0.5,"opacity":0.6,"color":{"r":0,"g":0,"b":0}}]},
+					{"id":"inst1","name":"InstanceParity","type":"INSTANCE","componentId":"12:34","visible":true,
+					 "componentProperties":{"title":{"type":"TEXT","value":"Hello"}},
+					 "overrides":[{"id":"inst1_txt","path":["characters"],"value":"Override"}],
+					 "isExposedInstance":true,
+					 "absoluteBoundingBox":{"x":560,"y":10,"width":120,"height":80},
+					 "children":[{"id":"inst1_txt","name":"Label","type":"TEXT","visible":true,
+						"absoluteBoundingBox":{"x":570,"y":20,"width":100,"height":24},
+						"characters":"Instance text","style":{"fontSize":16}}]}
+				]}
+			]}
+		]}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Figma official parity parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	if (Doc.Children.Num() == 0 || Doc.Children[0]->Children.Num() < 3)
+		return false;
+
+	const TSharedPtr<FDesignNode>& Node = Doc.Children[0]->Children[0];
+	const TSharedPtr<FDesignNode>& PaintNode = Doc.Children[0]->Children[1];
+	const TSharedPtr<FDesignNode>& InstanceNode = Doc.Children[0]->Children[2];
+	TestTrue(TEXT("figma layoutPositioning"), Node->Metadata.FindRef(TEXT("layoutPositioning")) == TEXT("ABSOLUTE"));
+	TestTrue(TEXT("figma counterAxisSpacing"), Node->Metadata.Contains(TEXT("counterAxisSpacing")));
+	TestTrue(TEXT("figma layoutAlign"), Node->Metadata.FindRef(TEXT("layoutAlign")) == TEXT("STRETCH"));
+	TestTrue(TEXT("figma sizing modes"), Node->Metadata.Contains(TEXT("primaryAxisSizingMode")) && Node->Metadata.Contains(TEXT("counterAxisSizingMode")));
+	TestTrue(TEXT("figma min/max"), Node->Metadata.Contains(TEXT("minWidth")) && Node->Metadata.Contains(TEXT("maxHeight")));
+	TestTrue(TEXT("figma grid keys"), Node->Metadata.Contains(TEXT("gridRowCount")) && Node->Metadata.Contains(TEXT("gridColumnsSizing")));
+	TestTrue(TEXT("figma grid child align"), Node->Metadata.Contains(TEXT("gridChildHorizontalAlign")) && Node->Metadata.Contains(TEXT("gridChildVerticalAlign")));
+	TestTrue(TEXT("figma grid span/anchor"), Node->Metadata.Contains(TEXT("gridRowSpan")) && Node->Metadata.Contains(TEXT("gridColumnAnchorIndex")));
+	TestTrue(TEXT("figma bool keys"), Node->Metadata.FindRef(TEXT("itemReverseZIndex")) == TEXT("true"));
+	TestTrue(TEXT("figma boundVariables"), Node->Metadata.Contains(TEXT("boundVariables.itemSpacing")));
+	TestTrue(TEXT("figma overflowDirection"), Node->Metadata.FindRef(TEXT("overflowDirection")) == TEXT("HORIZONTAL_SCROLLING"));
+	TestTrue(TEXT("figma layoutGrids"), Node->Metadata.Contains(TEXT("layoutGrids")));
+	TestTrue(TEXT("figma interactions"), Node->Metadata.Contains(TEXT("interactions")));
+	TestTrue(TEXT("figma flowStartingPoints"), Node->Metadata.Contains(TEXT("flowStartingPoints")));
+	TestTrue(TEXT("figma componentPropertyReferences"), Node->Metadata.Contains(TEXT("componentPropertyReferences")));
+	TestTrue(TEXT("figma explicitVariableModes"), Node->Metadata.Contains(TEXT("explicitVariableModes")));
+	TestTrue(TEXT("figma annotations"), Node->Metadata.Contains(TEXT("annotations")));
+	TestTrue(TEXT("figma measurements"), Node->Metadata.Contains(TEXT("measurements")));
+	TestTrue(TEXT("figma exportSettings"), Node->Metadata.Contains(TEXT("exportSettings")));
+	TestTrue(TEXT("figma devStatus"), Node->Metadata.Contains(TEXT("devStatus")));
+	TestTrue(TEXT("figma branchData"), Node->Metadata.Contains(TEXT("branchData")));
+	TestTrue(TEXT("figma doc prototypeStartNodeID"), Doc.Metadata.FindRef(TEXT("prototypeStartNodeID")) == TEXT("0:2"));
+	TestTrue(TEXT("figma doc prototypeDevice"), Doc.Metadata.Contains(TEXT("prototypeDevice")));
+	TestTrue(TEXT("figma absolute positioning semantic"), Node->bAbsoluteLayoutPositioning);
+	TestTrue(TEXT("figma fill blendMode preserved"), PaintNode->Fill.BlendMode == TEXT("MULTIPLY"));
+	TestTrue(TEXT("figma fill opacity preserved"), FMath::IsNearlyEqual(PaintNode->Fill.Opacity, 0.5f, 0.001f));
+	TestTrue(TEXT("figma effect blendMode preserved"), PaintNode->Effects.Num() > 0
+		&& PaintNode->Effects[0].BlendMode == TEXT("SCREEN")
+		&& PaintNode->Effects[0].Shadow.BlendMode == TEXT("SCREEN"));
+	TestTrue(TEXT("figma source node type preserved"), InstanceNode->Metadata.FindRef(TEXT("sourceNodeType")) == TEXT("INSTANCE"));
+	TestTrue(TEXT("figma instance componentId preserved"), InstanceNode->Metadata.FindRef(TEXT("instanceComponentId")) == TEXT("12:34"));
+	TestTrue(TEXT("figma instance componentProperties preserved"), InstanceNode->Metadata.Contains(TEXT("componentProperties")));
+	TestTrue(TEXT("figma instance overrides preserved"), InstanceNode->Metadata.Contains(TEXT("overrides")));
+	TestTrue(TEXT("figma instance isExposedInstance preserved"), InstanceNode->Metadata.FindRef(TEXT("isExposedInstance")) == TEXT("true"));
+	return true;
+}
+
+// ============================================================
 // Test 9: FigmaParser - ExtractFileKey URL 解析
 // ============================================================
 
@@ -1204,11 +1681,11 @@ bool FFigmaRealDashboardTest::RunTest(const FString& Parameters)
 		return false;
 
 	const auto& Root = Doc.Children[0];
-	TestEqual(TEXT("Root type is Frame"), Root->Type, EPenNodeType::Frame);
+	TestEqual(TEXT("Root type is Frame"), Root->Type, EDesignNodeType::Frame);
 	TestTrue(TEXT("Root has children"), Root->Children.Num() > 0);
 
 	// 统计各节点类型数量，验证解析完整性
-	TMap<EPenNodeType, int32> TypeCounts;
+	TMap<EDesignNodeType, int32> TypeCounts;
 	TFunction<void(const TSharedPtr<FDesignNode>&)> CountNodes = [&](const TSharedPtr<FDesignNode>& Node)
 	{
 		TypeCounts.FindOrAdd(Node->Type)++;
@@ -1222,9 +1699,9 @@ bool FFigmaRealDashboardTest::RunTest(const FString& Parameters)
 		TotalNodes += Pair.Value;
 
 	TestTrue(TEXT("Total nodes > 50"), TotalNodes > 50);
-	TestTrue(TEXT("Has Frame nodes"), TypeCounts.Contains(EPenNodeType::Frame));
-	TestTrue(TEXT("Has Text nodes"), TypeCounts.Contains(EPenNodeType::Text));
-	TestTrue(TEXT("Has Rectangle nodes"), TypeCounts.Contains(EPenNodeType::Rectangle));
+	TestTrue(TEXT("Has Frame nodes"), TypeCounts.Contains(EDesignNodeType::Frame));
+	TestTrue(TEXT("Has Text nodes"), TypeCounts.Contains(EDesignNodeType::Text));
+	TestTrue(TEXT("Has Rectangle nodes"), TypeCounts.Contains(EDesignNodeType::Rectangle));
 
 	// 端到端转换
 	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
@@ -1383,4 +1860,6 @@ bool FPreviewWindowTest::RunTest(const FString& Parameters)
 }
 
 #endif // WITH_AUTOMATION_WORKER
+
+
 

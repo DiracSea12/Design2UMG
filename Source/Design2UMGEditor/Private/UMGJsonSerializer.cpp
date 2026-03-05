@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGJsonSerializer.h"
 #include "Serialization/JsonSerializer.h"
@@ -160,3 +160,4 @@ FString FUMGJsonSerializer::Serialize(const FUMGWidgetData& Data)
 	FJsonSerializer::Serialize(Root, Writer);
 	return Output;
 }
+

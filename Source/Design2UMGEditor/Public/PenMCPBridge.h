@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -8,21 +8,18 @@
 struct FUMGWidgetData;
 
 /**
- * Pencil MCP → PenDocument JSON 桥接层
- *
- * 接收 Pencil MCP 的 batch_get / get_variables 返回数据，
- * 组装为 PenParser::ParseDocument 期望的完整文档 JSON。
- */
+ * Pencil MCP 鈫?PenDocument JSON 妗ユ帴灞? *
+ * 鎺ユ敹 Pencil MCP 鐨?batch_get / get_variables 杩斿洖鏁版嵁锛? * 缁勮涓?PenParser::ParseDocument 鏈熸湜鐨勫畬鏁存枃妗?JSON銆? */
 class FPenMCPBridge
 {
 public:
 	/**
-	 * 从 MCP 返回数据组装 PenDocument JSON
+	 * 浠?MCP 杩斿洖鏁版嵁缁勮 PenDocument JSON
 	 *
-	 * @param NodesJson      batch_get() 返回的 JSON 数组字符串（嵌套树结构）
-	 * @param VariablesJson  get_variables() 返回的 JSON 对象字符串（含 variables/themes）
-	 * @param TargetNodeId   可选，只导出指定 frame 节点
-	 * @return 符合 PenParser 期望的完整文档 JSON，失败返回空字符串
+	 * @param NodesJson      batch_get() 杩斿洖鐨?JSON 鏁扮粍瀛楃涓诧紙宓屽鏍戠粨鏋勶級
+	 * @param VariablesJson  get_variables() 杩斿洖鐨?JSON 瀵硅薄瀛楃涓诧紙鍚?variables/themes锛?
+	 * @param TargetNodeId   鍙€夛紝鍙鍑烘寚瀹?frame 鑺傜偣
+	 * @return 绗﹀悎 PenParser 鏈熸湜鐨勫畬鏁存枃妗?JSON锛屽け璐ヨ繑鍥炵┖瀛楃涓?
 	 */
 	static FString AssembleDocumentJson(
 		const FString& NodesJson,
@@ -31,13 +28,13 @@ public:
 	);
 
 	/**
-	 * 一步到位：组装 + 解析 + 转换
+	 * 涓€姝ュ埌浣嶏細缁勮 + 瑙ｆ瀽 + 杞崲
 	 *
-	 * @param NodesJson      batch_get() 返回的 JSON 数组
-	 * @param VariablesJson  get_variables() 返回的 JSON 对象
-	 * @param OutData        输出的 UMG Widget 数据
-	 * @param TargetNodeId   可选，只导出指定 frame 节点
-	 * @return 成功返回 true
+	 * @param NodesJson      batch_get() 杩斿洖鐨?JSON 鏁扮粍
+	 * @param VariablesJson  get_variables() 杩斿洖鐨?JSON 瀵硅薄
+	 * @param OutData        杈撳嚭鐨?UMG Widget 鏁版嵁
+	 * @param TargetNodeId   鍙€夛紝鍙鍑烘寚瀹?frame 鑺傜偣
+	 * @return 鎴愬姛杩斿洖 true
 	 */
 	static bool ConvertFromMCP(
 		const FString& NodesJson,
@@ -47,12 +44,12 @@ public:
 	);
 
 	/**
-	 * 从已解析的 JSON 对象直接转换（避免重复序列化/反序列化）
+	 * 浠庡凡瑙ｆ瀽鐨?JSON 瀵硅薄鐩存帴杞崲锛堥伩鍏嶉噸澶嶅簭鍒楀寲/鍙嶅簭鍒楀寲锛?
 	 *
-	 * @param DocObj          已解析的完整文档 JSON 对象
-	 * @param OutData         输出的 UMG Widget 数据
-	 * @param TargetNodeId    可选，只导出指定 frame 节点
-	 * @return 成功返回 true
+	 * @param DocObj          宸茶В鏋愮殑瀹屾暣鏂囨。 JSON 瀵硅薄
+	 * @param OutData         杈撳嚭鐨?UMG Widget 鏁版嵁
+	 * @param TargetNodeId    鍙€夛紝鍙鍑烘寚瀹?frame 鑺傜偣
+	 * @return 鎴愬姛杩斿洖 true
 	 */
 	static bool ConvertFromParsedDoc(
 		const TSharedPtr<FJsonObject>& DocObj,
@@ -74,3 +71,4 @@ public:
 		const FString& TargetNodeId = TEXT("")
 	);
 };
+

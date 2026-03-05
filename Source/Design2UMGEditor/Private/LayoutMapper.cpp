@@ -1,14 +1,14 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "LayoutMapper.h"
-#include "PenTypeMapper.h"
+#include "DesignTypeMapper.h"
 
-void FLayoutMapper::ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node, EPenLayout ParentLayout)
+void FLayoutMapper::ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node, EDesignLayout ParentLayout)
 {
-	if (ParentLayout == EPenLayout::Vertical)
+	if (ParentLayout == EDesignLayout::Vertical)
 	{
-		Widget.Slot.HorizontalAlignment = Node->Width.Mode == EPenSizeMode::FillContainer ? TEXT("Fill") : TEXT("Left");
-		Widget.Slot.SizeRule = Node->Height.Mode == EPenSizeMode::FillContainer ? TEXT("Fill") : TEXT("Auto");
+		Widget.Slot.HorizontalAlignment = Node->Width.Mode == EDesignSizeMode::FillContainer ? TEXT("Fill") : TEXT("Left");
+		Widget.Slot.SizeRule = Node->Height.Mode == EDesignSizeMode::FillContainer ? TEXT("Fill") : TEXT("Auto");
 		if (Widget.Slot.SizeRule == TEXT("Fill") && Node->LayoutGrow >= 0.0f)
 		{
 			if (FMath::IsNearlyZero(Node->LayoutGrow))
@@ -17,10 +17,10 @@ void FLayoutMapper::ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr
 				Widget.Slot.FillWeight = Node->LayoutGrow;
 		}
 	}
-	else if (ParentLayout == EPenLayout::Horizontal)
+	else if (ParentLayout == EDesignLayout::Horizontal)
 	{
-		Widget.Slot.VerticalAlignment = Node->Height.Mode == EPenSizeMode::FillContainer ? TEXT("Fill") : TEXT("Top");
-		Widget.Slot.SizeRule = Node->Width.Mode == EPenSizeMode::FillContainer ? TEXT("Fill") : TEXT("Auto");
+		Widget.Slot.VerticalAlignment = Node->Height.Mode == EDesignSizeMode::FillContainer ? TEXT("Fill") : TEXT("Top");
+		Widget.Slot.SizeRule = Node->Width.Mode == EDesignSizeMode::FillContainer ? TEXT("Fill") : TEXT("Auto");
 		if (Widget.Slot.SizeRule == TEXT("Fill") && Node->LayoutGrow >= 0.0f)
 		{
 			if (FMath::IsNearlyZero(Node->LayoutGrow))
@@ -28,11 +28,16 @@ void FLayoutMapper::ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr
 			else
 				Widget.Slot.FillWeight = Node->LayoutGrow;
 		}
+	}
+	else if (ParentLayout == EDesignLayout::Wrap || ParentLayout == EDesignLayout::Grid)
+	{
+		Widget.Slot.Padding = FMargin(0.0f);
+		Widget.Slot.SizeRule = TEXT("Auto");
 	}
 	else
 	{
-		const bool bFillWidth = Node->Width.Mode == EPenSizeMode::FillContainer;
-		const bool bFillHeight = Node->Height.Mode == EPenSizeMode::FillContainer;
+		const bool bFillWidth = Node->Width.Mode == EDesignSizeMode::FillContainer;
+		const bool bFillHeight = Node->Height.Mode == EDesignSizeMode::FillContainer;
 		const bool bFillWidthHasFallback = bFillWidth && Node->Width.Value > 0.0f;
 		const bool bFillHeightHasFallback = bFillHeight && Node->Height.Value > 0.0f;
 		const bool bStretchWidth = bFillWidth && !bFillWidthHasFallback;
@@ -58,10 +63,10 @@ void FLayoutMapper::ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr
 		Widget.Slot.Offsets.Right = Node->Width.Value;
 		Widget.Slot.Offsets.Bottom = Node->Height.Value;
 
-		const bool bFitWidth = Node->Width.Mode == EPenSizeMode::FitContent;
-		const bool bFitHeight = Node->Height.Mode == EPenSizeMode::FitContent;
-		const bool bFixedWidth = Node->Width.Mode == EPenSizeMode::Fixed;
-		const bool bFixedHeight = Node->Height.Mode == EPenSizeMode::Fixed;
+		const bool bFitWidth = Node->Width.Mode == EDesignSizeMode::FitContent;
+		const bool bFitHeight = Node->Height.Mode == EDesignSizeMode::FitContent;
+		const bool bFixedWidth = Node->Width.Mode == EDesignSizeMode::Fixed;
+		const bool bFixedHeight = Node->Height.Mode == EDesignSizeMode::Fixed;
 		const bool bFitWidthNeedsAuto = bFitWidth && Node->Width.Value <= 0.0f;
 		const bool bFitHeightNeedsAuto = bFitHeight && Node->Height.Value <= 0.0f;
 
@@ -84,34 +89,44 @@ void FLayoutMapper::ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr
 	}
 }
 
-void FLayoutMapper::ApplyGap(TArray<FUMGWidgetNode>& Children, float Gap, EPenLayout Layout)
+void FLayoutMapper::ApplyGap(TArray<FUMGWidgetNode>& Children, float Gap, EDesignLayout Layout)
 {
 	if (Gap <= 0 || Children.Num() < 2)
 		return;
 
 	for (int32 i = 1; i < Children.Num(); ++i)
 	{
-		if (Layout == EPenLayout::Vertical)
+		if (Layout == EDesignLayout::Vertical)
 			Children[i].Slot.Padding.Top = Gap;
-		else if (Layout == EPenLayout::Horizontal)
+		else if (Layout == EDesignLayout::Horizontal)
 			Children[i].Slot.Padding.Left = Gap;
+		else if (Layout == EDesignLayout::Wrap)
+		{
+			Children[i].Slot.Padding.Left = Gap;
+			Children[i].Slot.Padding.Top = Gap;
+		}
+		else if (Layout == EDesignLayout::Grid)
+		{
+			Children[i].Slot.Padding.Left = Gap;
+			Children[i].Slot.Padding.Top = Gap;
+		}
 	}
 }
 
-void FLayoutMapper::ApplyPadding(FUMGWidgetNode& Widget, const FPenPadding& Padding)
+void FLayoutMapper::ApplyPadding(FUMGWidgetNode& Widget, const FDesignPadding& Padding)
 {
 	Widget.Properties.Add(TEXT("Padding"), FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"),
 		Padding.Left, Padding.Top, Padding.Right, Padding.Bottom));
 }
 
-void FLayoutMapper::ApplyJustifyContent(TArray<FUMGWidgetNode>& Children, EPenJustifyContent Justify, EPenSizeMode MainAxisMode, EPenLayout ParentLayout)
+void FLayoutMapper::ApplyJustifyContent(TArray<FUMGWidgetNode>& Children, EDesignJustifyContent Justify, EDesignSizeMode MainAxisMode, EDesignLayout ParentLayout)
 {
-	if (Justify == EPenJustifyContent::Start || Children.Num() == 0)
+	if (Justify == EDesignJustifyContent::Start || Children.Num() == 0)
 		return;
 
 	// FitContent container in CanvasPanel: Spacer DesiredSize is (0,0),
 	// injecting them collapses the container's DesiredSize to zero.
-	if (MainAxisMode == EPenSizeMode::FitContent && ParentLayout == EPenLayout::None)
+	if (MainAxisMode == EDesignSizeMode::FitContent && ParentLayout == EDesignLayout::None)
 		return;
 
 	bool bHasFillChild = false;
@@ -137,21 +152,21 @@ void FLayoutMapper::ApplyJustifyContent(TArray<FUMGWidgetNode>& Children, EPenJu
 
 	switch (Justify)
 	{
-	case EPenJustifyContent::Center:
+	case EDesignJustifyContent::Center:
 		Children.Insert(CreateSpacer(), 0);
 		Children.Add(CreateSpacer());
 		break;
-	case EPenJustifyContent::End:
+	case EDesignJustifyContent::End:
 		Children.Insert(CreateSpacer(), 0);
 		break;
-	case EPenJustifyContent::SpaceBetween:
+	case EDesignJustifyContent::SpaceBetween:
 		if (Children.Num() > 1)
 		{
 			for (int32 i = Children.Num() - 1; i > 0; --i)
 				Children.Insert(CreateSpacer(), i);
 		}
 		break;
-	case EPenJustifyContent::SpaceAround:
+	case EDesignJustifyContent::SpaceAround:
 		Children.Insert(CreateSpacer(0.5f), 0);
 		for (int32 i = Children.Num() - 1; i > 1; --i)
 			Children.Insert(CreateSpacer(), i);
@@ -162,22 +177,22 @@ void FLayoutMapper::ApplyJustifyContent(TArray<FUMGWidgetNode>& Children, EPenJu
 	}
 }
 
-void FLayoutMapper::ApplyAlignItems(FUMGWidgetNode& Widget, EPenAlignItems Align, EPenLayout ParentLayout)
+void FLayoutMapper::ApplyAlignItems(FUMGWidgetNode& Widget, EDesignAlignItems Align, EDesignLayout ParentLayout)
 {
-	if (ParentLayout == EPenLayout::Vertical)
+	if (ParentLayout == EDesignLayout::Vertical)
 	{
 		if (Widget.Slot.HorizontalAlignment != TEXT("Fill"))
 		{
-			EHorizontalAlignment H = FPenTypeMapper::MapAlignItemsH(Align);
+			EHorizontalAlignment H = FDesignTypeMapper::MapAlignItemsH(Align);
 			Widget.Slot.HorizontalAlignment = H == HAlign_Center ? TEXT("Center") :
 				H == HAlign_Right ? TEXT("Right") : TEXT("Left");
 		}
 	}
-	else if (ParentLayout == EPenLayout::Horizontal)
+	else if (ParentLayout == EDesignLayout::Horizontal)
 	{
 		if (Widget.Slot.VerticalAlignment != TEXT("Fill"))
 		{
-			EVerticalAlignment V = FPenTypeMapper::MapAlignItemsV(Align);
+			EVerticalAlignment V = FDesignTypeMapper::MapAlignItemsV(Align);
 			Widget.Slot.VerticalAlignment = V == VAlign_Center ? TEXT("Center") :
 				V == VAlign_Bottom ? TEXT("Bottom") : TEXT("Top");
 		}
@@ -214,4 +229,7 @@ FUMGWidgetNode FLayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, cons
 	SizeBox.Children.Add(MoveTemp(ChildWidget));
 	return SizeBox;
 }
+
+
+
 

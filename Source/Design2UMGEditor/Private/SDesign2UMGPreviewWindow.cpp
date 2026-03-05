@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "SDesign2UMGPreviewWindow.h"
 #include "UMGWidgetUtils.h"
@@ -24,6 +24,7 @@
 #include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Misc/MessageDialog.h"
 #include "Blueprint/WidgetTree.h"
 #include "Blueprint/UserWidget.h"
 #include "PreviewUserWidget.h"
@@ -613,4 +614,5 @@ UUserWidget* SDesign2UMGPreviewWindow::CreatePreviewWidgetFromJson(const FUMGWid
 }
 
 #undef LOCTEXT_NAMESPACE
+
 

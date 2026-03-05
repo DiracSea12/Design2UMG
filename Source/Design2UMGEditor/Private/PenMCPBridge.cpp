@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "PenMCPBridge.h"
 #include "DesignSourceRegistry.h"
@@ -11,7 +11,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogPenMCPBridge, Log, All);
 
 namespace
 {
-	/** 在 JSON 数组中按 id 查找节点 */
+	/** 鍦?JSON 鏁扮粍涓寜 id 鏌ユ壘鑺傜偣 */
 	FString CanonicalizeNodeId(const FString& InId)
 	{
 		FString Id = InId.TrimStartAndEnd();
@@ -25,7 +25,7 @@ namespace
 			if (Id.FindChar(TEXT('-'), DashIndex))
 			{
 				const FString Suffix = Id.Mid(DashIndex + 1);
-				// 如果后缀非空，返回后缀；否则返回原始 ID
+				// 濡傛灉鍚庣紑闈炵┖锛岃繑鍥炲悗缂€锛涘惁鍒欒繑鍥炲師濮?ID
 				return Suffix.IsEmpty() ? Id : Suffix;
 			}
 		}
@@ -65,7 +65,7 @@ namespace
 		return nullptr;
 	}
 
-	/** 收集所有 reusable 节点（组件定义），ref 展开时需要 */
+	/** 鏀堕泦鎵€鏈?reusable 鑺傜偣锛堢粍浠跺畾涔夛級锛宺ef 灞曞紑鏃堕渶瑕?*/
 	void CollectReusableNodes(const TArray<TSharedPtr<FJsonValue>>& Nodes, TArray<TSharedPtr<FJsonValue>>& OutReusable)
 	{
 		for (const auto& Node : Nodes)
@@ -88,7 +88,7 @@ namespace
 		}
 	}
 
-	/** 按 TargetNodeId 过滤，同时保留所有 reusable 组件定义 */
+	/** 鎸?TargetNodeId 杩囨护锛屽悓鏃朵繚鐣欐墍鏈?reusable 缁勪欢瀹氫箟 */
 	TArray<TSharedPtr<FJsonValue>> FilterWithReusables(
 		const TArray<TSharedPtr<FJsonValue>>& AllChildren,
 		const FString& TargetNodeId)
@@ -97,11 +97,11 @@ namespace
 		if (!Found.IsValid())
 			return TArray<TSharedPtr<FJsonValue>>();
 
-		// 收集所有 reusable 节点
+		// 鏀堕泦鎵€鏈?reusable 鑺傜偣
 		TArray<TSharedPtr<FJsonValue>> Result;
 		CollectReusableNodes(AllChildren, Result);
 
-		// 去重：如果目标节点本身就是 reusable，不要重复添加
+		// 鍘婚噸锛氬鏋滅洰鏍囪妭鐐规湰韬氨鏄?reusable锛屼笉瑕侀噸澶嶆坊鍔?
 		FString TargetId;
 		if (const TSharedPtr<FJsonObject>& FoundObj = Found->AsObject())
 			FoundObj->TryGetStringField(TEXT("id"), TargetId);
@@ -125,14 +125,14 @@ namespace
 		return Result;
 	}
 
-	/** 从源对象组装标准文档 JSON 并序列化 */
+	/** 浠庢簮瀵硅薄缁勮鏍囧噯鏂囨。 JSON 骞跺簭鍒楀寲 */
 	FString BuildDocumentJson(
 		const TSharedPtr<FJsonObject>& SourceObj,
 		const TArray<TSharedPtr<FJsonValue>>& Children)
 	{
 		TSharedPtr<FJsonObject> Doc = MakeShared<FJsonObject>();
 
-		// 优先使用原始版本号，回退到 "2.6"
+		// 浼樺厛浣跨敤鍘熷鐗堟湰鍙凤紝鍥為€€鍒?"2.6"
 		FString Version = TEXT("2.6");
 		if (SourceObj->HasField(TEXT("version")))
 		{
@@ -164,7 +164,7 @@ FString FPenMCPBridge::AssembleDocumentJson(
 	const FString& VariablesJson,
 	const FString& TargetNodeId)
 {
-	// 解析节点数组
+	// 瑙ｆ瀽鑺傜偣鏁扮粍
 	TArray<TSharedPtr<FJsonValue>> NodesArr;
 	TSharedRef<TJsonReader<>> NodesReader = TJsonReaderFactory<>::Create(NodesJson);
 	if (!FJsonSerializer::Deserialize(NodesReader, NodesArr))
@@ -173,7 +173,7 @@ FString FPenMCPBridge::AssembleDocumentJson(
 		return TEXT("");
 	}
 
-	// 解析变量对象
+	// 瑙ｆ瀽鍙橀噺瀵硅薄
 	TSharedPtr<FJsonObject> VarsObj;
 	TSharedRef<TJsonReader<>> VarsReader = TJsonReaderFactory<>::Create(VariablesJson);
 	if (!FJsonSerializer::Deserialize(VarsReader, VarsObj) || !VarsObj.IsValid())
@@ -182,7 +182,7 @@ FString FPenMCPBridge::AssembleDocumentJson(
 		VarsObj = MakeShared<FJsonObject>();
 	}
 
-	// 如果指定了 TargetNodeId，过滤（保留 reusable 组件定义）
+	// 濡傛灉鎸囧畾浜?TargetNodeId锛岃繃婊わ紙淇濈暀 reusable 缁勪欢瀹氫箟锛?
 	TArray<TSharedPtr<FJsonValue>> Children;
 	if (!TargetNodeId.IsEmpty())
 	{
@@ -200,12 +200,12 @@ FString FPenMCPBridge::AssembleDocumentJson(
 		Children = NodesArr;
 	}
 
-	// VarsObj 可能是完整文档元数据（含 version/variables/themes/fonts），
-	// 也可能只是变量对象本身。确保 BuildDocumentJson 能正确读取各字段。
+	// VarsObj 鍙兘鏄畬鏁存枃妗ｅ厓鏁版嵁锛堝惈 version/variables/themes/fonts锛夛紝
+	// 涔熷彲鑳藉彧鏄彉閲忓璞℃湰韬€傜‘淇?BuildDocumentJson 鑳芥纭鍙栧悇瀛楁銆?
 	TSharedPtr<FJsonObject> SourceObj = VarsObj;
 	if (!VarsObj->HasField(TEXT("variables")))
 	{
-		// VarsObj 本身就是变量内容，包装为文档级对象
+		// VarsObj 鏈韩灏辨槸鍙橀噺鍐呭锛屽寘瑁呬负鏂囨。绾у璞?
 		SourceObj = MakeShared<FJsonObject>();
 		SourceObj->SetObjectField(TEXT("variables"), VarsObj);
 	}
@@ -247,7 +247,7 @@ bool FPenMCPBridge::BuildFilteredDocumentJson(
 	if (!DocObj.IsValid())
 		return false;
 
-	// 提取 children
+	// 鎻愬彇 children
 	TArray<TSharedPtr<FJsonValue>> Children;
 	const TArray<TSharedPtr<FJsonValue>>* ChildrenPtr = nullptr;
 	if (DocObj->TryGetArrayField(TEXT("children"), ChildrenPtr) && ChildrenPtr)
@@ -255,7 +255,7 @@ bool FPenMCPBridge::BuildFilteredDocumentJson(
 		Children = *ChildrenPtr;
 	}
 
-	// 按 TargetNodeId 过滤（保留 reusable 组件定义）
+	// 鎸?TargetNodeId 杩囨护锛堜繚鐣?reusable 缁勪欢瀹氫箟锛?
 	if (!TargetNodeId.IsEmpty())
 	{
 		TArray<TSharedPtr<FJsonValue>> Filtered = FilterWithReusables(Children, TargetNodeId);
@@ -272,3 +272,4 @@ bool FPenMCPBridge::BuildFilteredDocumentJson(
 	OutDocumentJson = BuildDocumentJson(DocObj, Children);
 	return !OutDocumentJson.IsEmpty();
 }
+

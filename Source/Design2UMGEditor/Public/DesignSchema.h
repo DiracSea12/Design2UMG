@@ -1,15 +1,16 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Layout/Margin.h"
 #include "DesignSchema.generated.h"
 
 /**
- * .pen 节点类型枚举
+ * .pen 鑺傜偣绫诲瀷鏋氫妇
  */
 UENUM()
-enum class EPenNodeType : uint8
+enum class EDesignNodeType : uint8
 {
 	Frame,
 	Rectangle,
@@ -29,55 +30,56 @@ enum class EPenNodeType : uint8
 };
 
 /**
- * 尺寸模式枚举
+ * 灏哄妯″紡鏋氫妇
  */
 UENUM()
-enum class EPenSizeMode : uint8
+enum class EDesignSizeMode : uint8
 {
-	Fixed,          // 固定像素值
-	FillContainer,  // 填充父容器
-	FitContent      // 适应内容
+	Fixed,
+	FillContainer,
+	FitContent
 };
 
 /**
- * 尺寸值结构
- */
+ * 灏哄鍊肩粨鏋? */
 USTRUCT()
-struct FPenSize
+struct FDesignSize
 {
 	GENERATED_BODY()
 
 	UPROPERTY()
-	EPenSizeMode Mode = EPenSizeMode::FitContent;
+	EDesignSizeMode Mode = EDesignSizeMode::FitContent;
 
 	UPROPERTY()
 	float Value = 0.0f;
 
-	static FPenSize Fixed(float InValue) { return {EPenSizeMode::Fixed, InValue}; }
-	static FPenSize Fill(float Fallback = 0.0f) { return {EPenSizeMode::FillContainer, Fallback}; }
-	static FPenSize Fit(float Min = 0.0f) { return {EPenSizeMode::FitContent, Min}; }
+	static FDesignSize Fixed(float InValue) { return {EDesignSizeMode::Fixed, InValue}; }
+	static FDesignSize Fill(float Fallback = 0.0f) { return {EDesignSizeMode::FillContainer, Fallback}; }
+	static FDesignSize Fit(float Min = 0.0f) { return {EDesignSizeMode::FitContent, Min}; }
 
-	bool IsFixed() const { return Mode == EPenSizeMode::Fixed; }
-	bool IsFill() const { return Mode == EPenSizeMode::FillContainer; }
-	bool IsFit() const { return Mode == EPenSizeMode::FitContent; }
+	bool IsFixed() const { return Mode == EDesignSizeMode::Fixed; }
+	bool IsFill() const { return Mode == EDesignSizeMode::FillContainer; }
+	bool IsFit() const { return Mode == EDesignSizeMode::FitContent; }
 };
 
 /**
- * 布局模式枚举
+ * 甯冨眬妯″紡鏋氫妇
  */
 UENUM()
-enum class EPenLayout : uint8
+enum class EDesignLayout : uint8
 {
-	None,       // 绝对定位
-	Vertical,   // 垂直布局
-	Horizontal  // 水平布局
+	None,       // 缁濆瀹氫綅
+	Vertical,   // 鍨傜洿甯冨眬
+	Horizontal, // 姘村钩甯冨眬
+	Wrap,       // 鎹㈣鑷姩甯冨眬
+	Grid        // 缃戞牸甯冨眬
 };
 
 /**
- * 主轴对齐枚举
+ * 涓昏酱瀵归綈鏋氫妇
  */
 UENUM()
-enum class EPenJustifyContent : uint8
+enum class EDesignJustifyContent : uint8
 {
 	Start,
 	Center,
@@ -87,10 +89,9 @@ enum class EPenJustifyContent : uint8
 };
 
 /**
- * 交叉轴对齐枚举
- */
+ * 浜ゅ弶杞村榻愭灇涓? */
 UENUM()
-enum class EPenAlignItems : uint8
+enum class EDesignAlignItems : uint8
 {
 	Start,
 	Center,
@@ -98,10 +99,10 @@ enum class EPenAlignItems : uint8
 };
 
 /**
- * 渐变类型枚举
+ * 娓愬彉绫诲瀷鏋氫妇
  */
 UENUM()
-enum class EPenGradientType : uint8
+enum class EDesignGradientType : uint8
 {
 	Linear,
 	Radial,
@@ -109,17 +110,17 @@ enum class EPenGradientType : uint8
 };
 
 /**
- * 渐变色标
+ * 娓愬彉鑹叉爣
  */
 USTRUCT()
-struct FPenGradientStop
+struct FDesignGradientStop
 {
 	GENERATED_BODY()
 
 	UPROPERTY()
 	FString Color;
 
-	/** 原始变量引用名，用于主题切换时重新解析 */
+	/** 鍘熷鍙橀噺寮曠敤鍚嶏紝鐢ㄤ簬涓婚鍒囨崲鏃堕噸鏂拌В鏋?*/
 	FString SourceVar;
 
 	UPROPERTY()
@@ -127,28 +128,111 @@ struct FPenGradientStop
 };
 
 /**
- * 渐变填充
+ * 娓愬彉濉厖
  */
 USTRUCT()
-struct FPenGradient
+struct FDesignGradient
 {
 	GENERATED_BODY()
 
 	UPROPERTY()
-	EPenGradientType GradientType = EPenGradientType::Linear;
+	EDesignGradientType GradientType = EDesignGradientType::Linear;
 
 	UPROPERTY()
 	float Rotation = 0.0f;
 
 	UPROPERTY()
-	TArray<FPenGradientStop> Colors;
+	float CenterX = 0.5f;
+
+	UPROPERTY()
+	float CenterY = 0.5f;
+
+	UPROPERTY()
+	float SizeWidth = 1.0f;
+
+	UPROPERTY()
+	float SizeHeight = 1.0f;
+
+	UPROPERTY()
+	bool bHasCenter = false;
+
+	UPROPERTY()
+	bool bHasSize = false;
+
+	UPROPERTY()
+	TArray<FDesignGradientStop> Colors;
+};
+
+USTRUCT()
+struct FDesignMeshGradientHandle
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	float X = 0.0f;
+
+	UPROPERTY()
+	float Y = 0.0f;
+
+	UPROPERTY()
+	bool bHasValue = false;
+};
+
+USTRUCT()
+struct FDesignMeshGradientPoint
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	float X = 0.0f;
+
+	UPROPERTY()
+	float Y = 0.0f;
+
+	UPROPERTY()
+	bool bHasPosition = false;
+
+	UPROPERTY()
+	FString Color;
+
+	FString SourceVar;
+
+	UPROPERTY()
+	FDesignMeshGradientHandle InHandle;
+
+	UPROPERTY()
+	FDesignMeshGradientHandle OutHandle;
+
+	UPROPERTY()
+	FString RawJson;
+};
+
+USTRUCT()
+struct FDesignMeshGradient
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	int32 Rows = 0;
+
+	UPROPERTY()
+	int32 Columns = 0;
+
+	UPROPERTY()
+	bool bHasRows = false;
+
+	UPROPERTY()
+	bool bHasColumns = false;
+
+	UPROPERTY()
+	TArray<FDesignMeshGradientPoint> Points;
 };
 
 /**
- * 图片填充模式
+ * 鍥剧墖濉厖妯″紡
  */
 UENUM()
-enum class EPenImageMode : uint8
+enum class EDesignImageMode : uint8
 {
 	Stretch,
 	Fill,
@@ -157,12 +241,10 @@ enum class EPenImageMode : uint8
 };
 
 /**
- * 图片裁剪变换（2x3 仿射矩阵）
- * Figma imageTransform: [[a, b, tx], [c, d, ty]]
- * 将图片 UV 空间 [0,1]x[0,1] 映射到节点空间
- */
+ * 鍥剧墖瑁佸壀鍙樻崲锛?x3 浠垮皠鐭╅樀锛? * Source imageTransform: [[a, b, tx], [c, d, ty]]
+ * 灏嗗浘鐗?UV 绌洪棿 [0,1]x[0,1] 鏄犲皠鍒拌妭鐐圭┖闂? */
 USTRUCT()
-struct FPenImageTransform
+struct FDesignImageTransform
 {
 	GENERATED_BODY()
 
@@ -187,10 +269,10 @@ struct FPenImageTransform
 };
 
 /**
- * 图片填充
+ * 鍥剧墖濉厖
  */
 USTRUCT()
-struct FPenImageFill
+struct FDesignImageFill
 {
 	GENERATED_BODY()
 
@@ -198,20 +280,20 @@ struct FPenImageFill
 	FString Url;
 
 	UPROPERTY()
-	EPenImageMode Mode = EPenImageMode::Stretch;
+	EDesignImageMode Mode = EDesignImageMode::Stretch;
 
 	UPROPERTY()
 	float Opacity = 1.0f;
 
 	UPROPERTY()
-	FPenImageTransform Transform;
+	FDesignImageTransform Transform;
 };
 
 /**
- * 填充类型枚举
+ * 濉厖绫诲瀷鏋氫妇
  */
 UENUM()
-enum class EPenFillType : uint8
+enum class EDesignFillType : uint8
 {
 	None,
 	Color,
@@ -220,51 +302,60 @@ enum class EPenFillType : uint8
 };
 
 /**
- * 填充结构（支持纯色、渐变、图片）
+ * 濉厖缁撴瀯锛堟敮鎸佺函鑹层€佹笎鍙樸€佸浘鐗囷級
  */
 USTRUCT()
-struct FPenFill
+struct FDesignFill
 {
 	GENERATED_BODY()
 
 	UPROPERTY()
-	EPenFillType Type = EPenFillType::None;
+	EDesignFillType Type = EDesignFillType::None;
 
 	UPROPERTY()
 	FString SolidColor;
 
-	/** 原始变量引用名（如 "$--background"），用于主题切换时重新解析 */
+	/** 鍘熷鍙橀噺寮曠敤鍚嶏紙濡?"$--background"锛夛紝鐢ㄤ簬涓婚鍒囨崲鏃堕噸鏂拌В鏋?*/
 	FString SourceVar;
 
 	UPROPERTY()
-	FPenGradient Gradient;
+	FDesignGradient Gradient;
 
 	UPROPERTY()
-	FPenImageFill Image;
+	FDesignImageFill Image;
+
+	UPROPERTY()
+	FDesignMeshGradient MeshGradient;
 
 	UPROPERTY()
 	bool bEnabled = true;
-	bool bExplicitClear = false;  // fill:[] 显式清除
+	UPROPERTY()
+	float Opacity = 1.0f;
+	UPROPERTY()
+	FString BlendMode;
+	bool bExplicitClear = false;  // fill:[] 鏄惧紡娓呴櫎
+	bool bFromMeshGradient = false;
+	FString MeshGradientRaw;
 
-	bool IsNone() const { return Type == EPenFillType::None; }
-	bool IsColor() const { return Type == EPenFillType::Color; }
-	bool IsGradient() const { return Type == EPenFillType::Gradient; }
-	bool IsImage() const { return Type == EPenFillType::Image; }
+	bool IsNone() const { return Type == EDesignFillType::None; }
+	bool IsColor() const { return Type == EDesignFillType::Color; }
+	bool IsGradient() const { return Type == EDesignFillType::Gradient; }
+	bool IsImage() const { return Type == EDesignFillType::Image; }
 
-	static FPenFill FromColor(const FString& Color)
+	static FDesignFill FromColor(const FString& Color)
 	{
-		FPenFill Fill;
-		Fill.Type = EPenFillType::Color;
+		FDesignFill Fill;
+		Fill.Type = EDesignFillType::Color;
 		Fill.SolidColor = Color;
 		return Fill;
 	}
 };
 
 /**
- * 描边对齐枚举
+ * 鎻忚竟瀵归綈鏋氫妇
  */
 UENUM()
-enum class EPenStrokeAlign : uint8
+enum class EDesignStrokeAlign : uint8
 {
 	Inside,
 	Center,
@@ -272,10 +363,9 @@ enum class EPenStrokeAlign : uint8
 };
 
 /**
- * 描边厚度（支持单值或四边）
- */
+ * 鎻忚竟鍘氬害锛堟敮鎸佸崟鍊兼垨鍥涜竟锛? */
 USTRUCT()
-struct FPenStrokeThickness
+struct FDesignStrokeThickness
 {
 	GENERATED_BODY()
 
@@ -301,31 +391,30 @@ struct FPenStrokeThickness
 };
 
 /**
- * 描边结构
+ * 鎻忚竟缁撴瀯
  */
 USTRUCT()
-struct FPenStroke
+struct FDesignStroke
 {
 	GENERATED_BODY()
 
 	UPROPERTY()
-	EPenStrokeAlign Align = EPenStrokeAlign::Inside;
+	EDesignStrokeAlign Align = EDesignStrokeAlign::Inside;
 
 	UPROPERTY()
-	FPenStrokeThickness Thickness;
+	FDesignStrokeThickness Thickness;
 
 	UPROPERTY()
-	FPenFill Fill;
+	FDesignFill Fill;
 
 	bool HasStroke() const { return Thickness.bUniform ? Thickness.Uniform > 0 :
 		(Thickness.Top > 0 || Thickness.Right > 0 || Thickness.Bottom > 0 || Thickness.Left > 0); }
 };
 
 /**
- * 内边距结构
- */
+ * 鍐呰竟璺濈粨鏋? */
 USTRUCT()
-struct FPenPadding
+struct FDesignPadding
 {
 	GENERATED_BODY()
 
@@ -346,10 +435,9 @@ struct FPenPadding
 };
 
 /**
- * 圆角结构（支持单值或四角）
- */
+ * 鍦嗚缁撴瀯锛堟敮鎸佸崟鍊兼垨鍥涜锛? */
 USTRUCT()
-struct FPenCornerRadius
+struct FDesignCornerRadius
 {
 	GENERATED_BODY()
 
@@ -359,7 +447,7 @@ struct FPenCornerRadius
 	UPROPERTY()
 	float Uniform = 0.0f;
 
-	// [左上, 右上, 右下, 左下]
+	// [宸︿笂, 鍙充笂, 鍙充笅, 宸︿笅]
 	UPROPERTY()
 	float TopLeft = 0.0f;
 
@@ -387,21 +475,21 @@ struct FPenCornerRadius
 };
 
 /**
- * 文本增长模式
+ * 鏂囨湰澧為暱妯″紡
  */
 UENUM()
-enum class EPenTextGrowth : uint8
+enum class EDesignTextGrowth : uint8
 {
-	Auto,            // 自动适应内容
-	FixedWidth,      // 固定宽度，高度自动
-	FixedWidthHeight // 固定宽高
+	Auto,
+	FixedWidth,
+	FixedWidthHeight
 };
 
 /**
- * 文本水平对齐
+ * 鏂囨湰姘村钩瀵归綈
  */
 UENUM()
-enum class EPenTextAlign : uint8
+enum class EDesignTextAlign : uint8
 {
 	Left,
 	Center,
@@ -410,21 +498,75 @@ enum class EPenTextAlign : uint8
 };
 
 /**
- * 文本垂直对齐
+ * 鏂囨湰鍨傜洿瀵归綈
  */
 UENUM()
-enum class EPenTextAlignVertical : uint8
+enum class EDesignTextAlignVertical : uint8
 {
 	Top,
 	Middle,
 	Bottom
 };
 
+USTRUCT()
+struct FDesignTextRun
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	FString Content;
+
+	UPROPERTY()
+	FString FontFamily;
+
+	UPROPERTY()
+	float FontSize = 0.0f;
+
+	UPROPERTY()
+	bool bHasFontSize = false;
+
+	UPROPERTY()
+	FString FontWeight;
+
+	UPROPERTY()
+	FString FontStyle;
+
+	UPROPERTY()
+	float LineHeight = 0.0f;
+
+	UPROPERTY()
+	bool bHasLineHeight = false;
+
+	UPROPERTY()
+	float LetterSpacing = 0.0f;
+
+	UPROPERTY()
+	bool bHasLetterSpacing = false;
+
+	UPROPERTY()
+	bool bUnderline = false;
+
+	UPROPERTY()
+	bool bHasUnderline = false;
+
+	UPROPERTY()
+	bool bStrikethrough = false;
+
+	UPROPERTY()
+	bool bHasStrikethrough = false;
+
+	UPROPERTY()
+	FString Href;
+
+	UPROPERTY()
+	FString RawJson;
+};
+
 /**
- * 变量类型枚举
+ * 鍙橀噺绫诲瀷鏋氫妇
  */
 UENUM()
-enum class EPenVariableType : uint8
+enum class EDesignVariableType : uint8
 {
 	Boolean,
 	Color,
@@ -433,25 +575,22 @@ enum class EPenVariableType : uint8
 };
 
 /**
- * 主题值条目（变量在某个主题下的值）
+ * 涓婚鍊兼潯鐩紙鍙橀噺鍦ㄦ煇涓富棰樹笅鐨勫€硷級
  */
 USTRUCT()
-struct FPenThemeValue
+struct FDesignThemeValue
 {
 	GENERATED_BODY()
 
 	UPROPERTY()
-	TMap<FString, FString> ThemeMatch;  // 如 {"Mode": "Dark"}
+	TMap<FString, FString> ThemeMatch;
 
 	UPROPERTY()
 	FString Value;
 };
 
-/**
- * 变量定义结构
- */
 USTRUCT()
-struct FPenVariable
+struct FDesignVariable
 {
 	GENERATED_BODY()
 
@@ -459,20 +598,17 @@ struct FPenVariable
 	FString Name;
 
 	UPROPERTY()
-	EPenVariableType Type = EPenVariableType::String;
+	EDesignVariableType Type = EDesignVariableType::String;
 
 	UPROPERTY()
-	FString Value;  // 默认值（无主题时使用）
+	FString Value;
 
 	UPROPERTY()
-	TArray<FPenThemeValue> ThemedValues;  // 主题值数组
+	TArray<FDesignThemeValue> ThemedValues;
 };
 
-/**
- * 特效类型枚举
- */
 UENUM()
-enum class EPenEffectType : uint8
+enum class EDesignEffectType : uint8
 {
 	None,
 	Blur,
@@ -480,16 +616,13 @@ enum class EPenEffectType : uint8
 	Shadow
 };
 
-/**
- * 阴影特效
- */
 USTRUCT()
-struct FPenShadow
+struct FDesignShadow
 {
 	GENERATED_BODY()
 
 	UPROPERTY()
-	bool bInner = false;  // inner vs outer
+	bool bInner = false;
 
 	UPROPERTY()
 	float OffsetX = 0.0f;
@@ -506,120 +639,112 @@ struct FPenShadow
 	UPROPERTY()
 	FString Color;
 
-	/** 原始变量引用名，用于主题切换时重新解析 */
+	UPROPERTY()
+	FString BlendMode;
+
 	FString ColorSourceVar;
 };
 
-/**
- * 特效结构
- */
 USTRUCT()
-struct FPenEffect
+struct FDesignEffect
 {
 	GENERATED_BODY()
 
 	UPROPERTY()
-	EPenEffectType Type = EPenEffectType::None;
+	EDesignEffectType Type = EDesignEffectType::None;
 
 	UPROPERTY()
 	bool bEnabled = true;
 
 	UPROPERTY()
-	float Radius = 0.0f;  // for blur
+	float Radius = 0.0f;
 
 	UPROPERTY()
-	FPenShadow Shadow;
+	FString BlendMode;
+
+	UPROPERTY()
+	FDesignShadow Shadow;
 };
 
-/**
- * .pen 节点结构
- */
 struct FDesignNode
 {
-	// 基础属性
 	FString Id;
 	FString Name;
-	EPenNodeType Type = EPenNodeType::Unknown;
-	TMap<FString, FString> Theme;  // 节点级主题设置，如 {"Mode": "Dark"}
+	EDesignNodeType Type = EDesignNodeType::Unknown;
+	TMap<FString, FString> Theme;
 
-	// 位置和尺寸
 	float X = 0.0f;
 	float Y = 0.0f;
 	bool bHasX = false;
 	bool bHasY = false;
-	FPenSize Width;
-	FPenSize Height;
+	FDesignSize Width;
+	FDesignSize Height;
 	bool bHasWidth = false;
 	bool bHasHeight = false;
 	float Rotation = 0.0f;
 
-	// 可见性
 	bool bEnabled = true;
 	float Opacity = 1.0f;
 	bool bHasOpacity = false;
 	bool bFlipX = false;
 	bool bFlipY = false;
 
-	// 布局属性 (frame/group)
-	EPenLayout Layout = EPenLayout::Horizontal;
+	EDesignLayout Layout = EDesignLayout::Horizontal;
 	float Gap = 0.0f;
 	bool bHasGap = false;
-	FPenPadding Padding;
+	FDesignPadding Padding;
 	bool bHasPadding = false;
-	EPenJustifyContent JustifyContent = EPenJustifyContent::Start;
-	EPenAlignItems AlignItems = EPenAlignItems::Start;
+	EDesignJustifyContent JustifyContent = EDesignJustifyContent::Start;
+	EDesignAlignItems AlignItems = EDesignAlignItems::Start;
+	bool bAbsoluteLayoutPositioning = false;
 	bool bClip = false;
 	bool bHasClip = false;
-	bool bPlaceholder = false;
-	float LayoutGrow = -1.0f;  // flex-grow 权重，-1 表示未设置
+	bool bSemanticPlaceholderSurface = false;
+	TMap<FString, FString> Metadata;
+	float LayoutGrow = -1.0f;
 
-	// 视觉属性
-	FPenFill Fill;                   // 主填充（最顶层可见填充，向后兼容）
-	TArray<FPenFill> Fills;          // 所有填充层（底→顶顺序，多层叠加时使用）
-	FPenStroke Stroke;
-	FPenCornerRadius CornerRadius;
-	TArray<FPenEffect> Effects;
+	FDesignFill Fill;
+	TArray<FDesignFill> Fills;
+	FDesignStroke Stroke;
+	FDesignCornerRadius CornerRadius;
+	TArray<FDesignEffect> Effects;
 
-	// 文本属性
 	FString Content;
 	FString FontFamily;
 	float FontSize = 16.0f;
 	FString FontWeight = TEXT("normal");
+	FString FontStyle = TEXT("normal");
 	float LineHeight = 0.0f;
 	float LetterSpacing = 0.0f;
-	EPenTextAlign TextAlign = EPenTextAlign::Left;
-	EPenTextAlignVertical TextAlignVertical = EPenTextAlignVertical::Top;
-	EPenTextGrowth TextGrowth = EPenTextGrowth::Auto;
+	EDesignTextAlign TextAlign = EDesignTextAlign::Left;
+	EDesignTextAlignVertical TextAlignVertical = EDesignTextAlignVertical::Top;
+	EDesignTextGrowth TextGrowth = EDesignTextGrowth::Auto;
+	bool bUnderline = false;
+	bool bStrikethrough = false;
+	FString Href;
+	TArray<FDesignTextRun> TextRuns;
 
-	// 图标字体属性
 	FString IconFontName;
 	FString IconFontFamily;
 	int32 IconWeight = 400;
 
-	// 椭圆属性
 	float InnerRadius = 0.0f;
 	float StartAngle = 0.0f;
 	float SweepAngle = 360.0f;
 
-	// 多边形属性
 	int32 PolygonCount = 6;
 
-	// 路径属性
 	FString Geometry;
 	FString FillRule = TEXT("nonzero");
 
-	// 组件引用属性
 	FString Ref;
 	bool bReusable = false;
 	TMap<FString, TSharedPtr<FDesignNode>> Descendants;
-
-	// 子节点
 	TArray<TSharedPtr<FDesignNode>> Children;
 
-	// 辅助方法
 	bool IsContainer() const
 	{
-		return Type == EPenNodeType::Frame || Type == EPenNodeType::Group;
+		return Type == EDesignNodeType::Frame || Type == EDesignNodeType::Group;
 	}
 
 	bool HasVisualProperties() const
@@ -632,14 +757,14 @@ struct FDesignNode
 		return Fills.Num() > 1;
 	}
 
-	bool IsCollapsed() const { return !bEnabled; }
+	bool IsCollapsed() const
+	{
+		return !bEnabled;
+	}
 };
 
-/**
- * 字体定义
- */
 USTRUCT()
-struct FPenFont
+struct FDesignFont
 {
 	GENERATED_BODY()
 
@@ -650,18 +775,15 @@ struct FPenFont
 	FString Url;
 };
 
-/**
- * .pen 文档结构
- */
 struct FDesignDocument
 {
 	FString Version;
-	TArray<FPenFont> Fonts;
-	TMap<FString, TArray<FString>> Themes;  // 主题轴定义
-	TMap<FString, FPenVariable> Variables;
+	TArray<FDesignFont> Fonts;
+	TMap<FString, TArray<FString>> Themes;
+	TMap<FString, FDesignVariable> Variables;
+	TMap<FString, FString> Metadata;
 	TArray<TSharedPtr<FDesignNode>> Children;
 
-	// 查找可复用组件
 	TSharedPtr<FDesignNode> FindReusableNode(const FString& Id) const
 	{
 		return FindNodeRecursive(Children, Id, true);
@@ -673,14 +795,19 @@ private:
 		const FString& Id,
 		bool bReusableOnly)
 	{
-		for (const auto& Node : Nodes)
+		for (const TSharedPtr<FDesignNode>& Node : Nodes)
 		{
-			if (!Node) continue;
+			if (!Node.IsValid())
+				continue;
 			if (Node->Id == Id && (!bReusableOnly || Node->bReusable))
 				return Node;
-			if (auto Found = FindNodeRecursive(Node->Children, Id, bReusableOnly))
+			if (const TSharedPtr<FDesignNode> Found = FindNodeRecursive(Node->Children, Id, bReusableOnly))
 				return Found;
 		}
 		return nullptr;
 	}
 };
+
+
+
+

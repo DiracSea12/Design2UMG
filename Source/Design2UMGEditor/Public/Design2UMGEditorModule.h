@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -6,8 +6,7 @@
 #include "Modules/ModuleManager.h"
 
 /**
- * Design2UMG 编辑器模块
- * .pen 文件 → Widget Blueprint 生成
+ * Design2UMG 缂栬緫鍣ㄦā鍧? * .pen 鏂囦欢 鈫?Widget Blueprint 鐢熸垚
  */
 class FDesign2UMGEditorModule : public IModuleInterface
 {
@@ -18,3 +17,4 @@ public:
 private:
 	FDelegateHandle ToolMenusStartupHandle;
 };
+

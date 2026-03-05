@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -6,7 +6,7 @@
 
 struct FDesignDocument;
 struct FDesignNode;
-struct FPenFont;
+struct FDesignFont;
 class UFont;
 
 struct DESIGN2UMGEDITOR_API FFontResolver
@@ -41,3 +41,5 @@ private:
 	static TSet<FString> ScanProjectFontAssets();
 	static bool DownloadToFile(const FString& Url, const FString& LocalPath);
 };
+
+

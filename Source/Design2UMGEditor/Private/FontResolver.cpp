@@ -1,10 +1,11 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "FontResolver.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGNotification.h"
 #include "Design2UMGSettings.h"
 #include "DesignSchema.h"
+#include "AssetRegistry/AssetData.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Engine/Font.h"
 #include "Engine/FontFace.h"
@@ -45,6 +46,11 @@ namespace
 		{
 			GNormalizedProjectFontAssetIndex.FindOrAdd(Normalized, ObjectPath);
 		}
+	}
+
+	bool IsLoadableFontPath(const FString& ObjectPath)
+	{
+		return !ObjectPath.IsEmpty() && LoadObject<UFont>(nullptr, *ObjectPath) != nullptr;
 	}
 
 	void BuildProjectFontAssetIndexIfNeeded()
@@ -116,13 +122,23 @@ FString FFontResolver::FindFontAssetPath(const FString& FontFamily)
 	const FString NormalizedFamily = NormalizeFontFamilyKey(FontFamily);
 
 	if (const FString* Path = FontAssetCache.Find(NormalizedFamily))
-		return *Path;
+	{
+		if (IsLoadableFontPath(*Path))
+		{
+			return *Path;
+		}
+		FontAssetCache.Remove(NormalizedFamily);
+	}
 
 	BuildProjectFontAssetIndexIfNeeded();
 	if (const FString* IndexedPath = GNormalizedProjectFontAssetIndex.Find(NormalizedFamily))
 	{
-		FontAssetCache.FindOrAdd(NormalizedFamily) = *IndexedPath;
-		return *IndexedPath;
+		if (IsLoadableFontPath(*IndexedPath))
+		{
+			FontAssetCache.FindOrAdd(NormalizedFamily) = *IndexedPath;
+			return *IndexedPath;
+		}
+		GNormalizedProjectFontAssetIndex.Remove(NormalizedFamily);
 	}
 
 	// Material Symbols families differ by variant suffix (Sharp/Rounded/Outlined).
@@ -133,8 +149,11 @@ FString FFontResolver::FindFontAssetPath(const FString& FontFamily)
 		{
 			if (Pair.Key.Contains(TEXT("materialsymbol")) || Pair.Key.Contains(TEXT("materialicon")))
 			{
-				FontAssetCache.FindOrAdd(NormalizedFamily) = Pair.Value;
-				return Pair.Value;
+				if (IsLoadableFontPath(Pair.Value))
+				{
+					FontAssetCache.FindOrAdd(NormalizedFamily) = Pair.Value;
+					return Pair.Value;
+				}
 			}
 		}
 	}
@@ -316,7 +335,7 @@ TArray<FString> FFontResolver::FindMissingFonts(const FDesignDocument& Document)
 	TSet<FString> UsedFamilies;
 
 	// Collect from Document.Fonts[]
-	for (const FPenFont& Font : Document.Fonts)
+	for (const FDesignFont& Font : Document.Fonts)
 	{
 		if (!Font.Name.IsEmpty())
 			UsedFamilies.Add(Font.Name);
@@ -588,7 +607,7 @@ void FFontResolver::AutoImportFonts(const FDesignDocument& Document)
 		return;
 
 	int32 Imported = 0;
-	for (const FPenFont& Font : Document.Fonts)
+	for (const FDesignFont& Font : Document.Fonts)
 	{
 		if (Font.Name.IsEmpty() || Font.Url.IsEmpty())
 			continue;
@@ -608,3 +627,5 @@ void FFontResolver::AutoImportFonts(const FDesignDocument& Document)
 }
 
 #undef LOCTEXT_NAMESPACE
+
+

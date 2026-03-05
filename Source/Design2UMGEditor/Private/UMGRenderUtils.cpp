@@ -1,8 +1,8 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGWidgetUtils.h"
 #include "Design2UMGLog.h"
-#include "PenPathRasterizer.h"
+#include "DesignPathRasterizer.h"
 #include "ProceduralShapeGenerator.h"
 
 #include "WidgetBlueprint.h"
@@ -11,6 +11,7 @@
 #include "Components/Widget.h"
 #include "Editor.h"
 #include "Engine/TextureRenderTarget2D.h"
+#include "TextureResource.h"
 #include "Framework/Application/SlateApplication.h"
 #include "IImageWrapper.h"
 #include "IImageWrapperModule.h"
@@ -92,7 +93,7 @@ bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, const FIntPo
 	Renderer.SetIsPrepassNeeded(false);
 	TUniquePtr<FHittestGrid> HitTestGrid = MakeUnique<FHittestGrid>();
 	FProceduralShapeGenerator::FlushPendingTextureUpdates();
-	FPenPathRasterizer::FlushPendingTextureUpdates();
+	FDesignPathRasterizer::FlushPendingTextureUpdates();
 	Renderer.DrawWindow(RT, *HitTestGrid, Window, 1.0f, FVector2D(EffectiveSize.X, EffectiveSize.Y), 0.1f);
 	if (!GUsingNullRHI) { FlushRenderingCommands(); }
 
@@ -147,7 +148,7 @@ namespace
 		Renderer.SetIsPrepassNeeded(false);
 		TUniquePtr<FHittestGrid> HitTestGrid = MakeUnique<FHittestGrid>();
 		FProceduralShapeGenerator::FlushPendingTextureUpdates();
-		FPenPathRasterizer::FlushPendingTextureUpdates();
+		FDesignPathRasterizer::FlushPendingTextureUpdates();
 		Renderer.DrawWindow(RT, *HitTestGrid, Window, 1.0f, FVector2D(RenderSize.X, RenderSize.Y), 0.1f);
 		if (!GUsingNullRHI) { FlushRenderingCommands(); }
 
@@ -206,3 +207,5 @@ bool FUMGWidgetUtils::RenderWidgetTreeToPng(UWidgetBlueprint* WidgetBP, const FI
 	UE_LOG(LogDesign2UMG, Log, TEXT("RenderWidgetTreeToPng: rendering directly from WidgetTree (%dx%d)"), RenderSize.X, RenderSize.Y);
 	return RenderSlateWidgetToPngData(SlateWidget.ToSharedRef(), RenderSize, OutPngData, OutSize);
 }
+
+

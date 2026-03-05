@@ -1,7 +1,6 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignImportUtils.h"
-#include "PenImporter.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGNotification.h"
 #include "DesignRemoteImageImporter.h"
@@ -10,9 +9,9 @@
 #include "UMGJsonParser.h"
 #include "UMGJsonSerializer.h"
 #include "UMGWidgetUtils.h"
-#include "PenParser.h"
 #include "Design2UMGSettings.h"
 #include "IncrementalUpdater.h"
+#include "AssetRegistry/AssetData.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 
 #include "WidgetBlueprint.h"
@@ -79,7 +78,7 @@ UWidgetBlueprint* DesignImportUtils::GenerateBlueprint(const FUMGWidgetData& Dat
 	}
 	UE_LOG(LogDesign2UMG, Log, TEXT("DesignImportUtils: Generated %s"), *WBP->GetPathName());
 
-	FImportResult Result = FImportResult::FromData(EffectiveData, FPlatformTime::Seconds() - StartTime);
+	FDesignImportResult Result = FDesignImportResult::FromData(EffectiveData, FPlatformTime::Seconds() - StartTime);
 	Result.ShowSummaryNotification();
 	return WBP;
 }
@@ -212,7 +211,7 @@ bool DesignImportUtils::OpenPreviewWindow(
 // Frame 选择窗口
 
 void DesignImportUtils::ShowFrameSelector(
-	const TArray<FPenFrameInfo>& Frames,
+	const TArray<FDesignFrameInfo>& Frames,
 	const FText& WindowTitle,
 	const FText& HintText,
 	FFrameSelectedCallback OnFrameSelected)
@@ -220,9 +219,9 @@ void DesignImportUtils::ShowFrameSelector(
 	if (!FSlateApplication::IsInitialized())
 		return;
 
-	TSharedPtr<TArray<TSharedPtr<FPenFrameInfo>>> Items = MakeShared<TArray<TSharedPtr<FPenFrameInfo>>>();
-	for (const FPenFrameInfo& F : Frames)
-		Items->Add(MakeShared<FPenFrameInfo>(F));
+	TSharedPtr<TArray<TSharedPtr<FDesignFrameInfo>>> Items = MakeShared<TArray<TSharedPtr<FDesignFrameInfo>>>();
+	for (const FDesignFrameInfo& F : Frames)
+		Items->Add(MakeShared<FDesignFrameInfo>(F));
 
 	TSharedRef<SWindow> Window = SNew(SWindow)
 		.Title(WindowTitle)
@@ -246,11 +245,11 @@ void DesignImportUtils::ShowFrameSelector(
 		.FillHeight(1.0f)
 		.Padding(8.0f)
 		[
-			SNew(SListView<TSharedPtr<FPenFrameInfo>>)
+			SNew(SListView<TSharedPtr<FDesignFrameInfo>>)
 			.ListItemsSource(Items.Get())
-			.OnGenerateRow_Lambda([Items](TSharedPtr<FPenFrameInfo> Item, const TSharedRef<STableViewBase>& OwnerTable)
+			.OnGenerateRow_Lambda([Items](TSharedPtr<FDesignFrameInfo> Item, const TSharedRef<STableViewBase>& OwnerTable)
 			{
-				return SNew(STableRow<TSharedPtr<FPenFrameInfo>>, OwnerTable)
+				return SNew(STableRow<TSharedPtr<FDesignFrameInfo>>, OwnerTable)
 					.Padding(FMargin(4.0f, 2.0f))
 					[
 						SNew(STextBlock)
@@ -259,7 +258,7 @@ void DesignImportUtils::ShowFrameSelector(
 							*Item->Name, Item->Width, Item->Height)))
 					];
 			})
-			.OnMouseButtonDoubleClick_Lambda([Callback, WeakWindow](TSharedPtr<FPenFrameInfo> Item)
+			.OnMouseButtonDoubleClick_Lambda([Callback, WeakWindow](TSharedPtr<FDesignFrameInfo> Item)
 			{
 				if (Item.IsValid() && *Callback)
 				{
@@ -275,4 +274,7 @@ void DesignImportUtils::ShowFrameSelector(
 }
 
 #undef LOCTEXT_NAMESPACE
+
+
+
 

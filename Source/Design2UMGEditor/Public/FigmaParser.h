@@ -1,9 +1,12 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "DesignSchema.h"
+
+class FJsonObject;
+class FJsonValue;
 
 /**
  * Figma REST API JSON → FDesignDocument 解析器
@@ -31,7 +34,7 @@ private:
 	static TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj);
 
 	/** 映射 Figma 节点类型 */
-	static EPenNodeType MapNodeType(const FString& FigmaType);
+	static EDesignNodeType MapNodeType(const FString& FigmaType);
 
 	/** 解析布局属性（Auto Layout） */
 	static void ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode);
@@ -40,22 +43,22 @@ private:
 	static void ParseSize(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode, bool bParentHasAutoLayout);
 
 	/** 解析填充（返回最顶层可见填充，向后兼容） */
-	static FPenFill ParseFill(const TArray<TSharedPtr<FJsonValue>>& Fills);
+	static FDesignFill ParseFill(const TArray<TSharedPtr<FJsonValue>>& Fills);
 
 	/** 解析所有可见填充层（底→顶顺序） */
-	static TArray<FPenFill> ParseFills(const TArray<TSharedPtr<FJsonValue>>& Fills);
+	static TArray<FDesignFill> ParseFills(const TArray<TSharedPtr<FJsonValue>>& Fills);
 
 	/** 解析单个填充对象 */
-	static FPenFill ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj);
+	static FDesignFill ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj);
 
 	/** 解析描边 */
-	static FPenStroke ParseStroke(const TSharedPtr<FJsonObject>& NodeObj);
+	static FDesignStroke ParseStroke(const TSharedPtr<FJsonObject>& NodeObj);
 
 	/** 解析圆角 */
-	static FPenCornerRadius ParseCornerRadius(const TSharedPtr<FJsonObject>& NodeObj);
+	static FDesignCornerRadius ParseCornerRadius(const TSharedPtr<FJsonObject>& NodeObj);
 
 	/** 解析特效 */
-	static TArray<FPenEffect> ParseEffects(const TArray<TSharedPtr<FJsonValue>>& Effects);
+	static TArray<FDesignEffect> ParseEffects(const TArray<TSharedPtr<FJsonValue>>& Effects);
 
 	/** 解析文本属性 */
 	static void ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode);
@@ -75,3 +78,5 @@ private:
 	/** 检查节点是否有 Auto Layout */
 	static bool HasAutoLayout(const TSharedPtr<FJsonObject>& NodeObj);
 };
+
+

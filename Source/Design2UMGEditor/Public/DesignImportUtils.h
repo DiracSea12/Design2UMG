@@ -1,39 +1,38 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DesignImportTypes.h"
 
 struct FUMGWidgetData;
-struct FPenFrameInfo;
 class UWidgetBlueprint;
 
 /**
- * Design2UMG 导入流程共享工具函数
+ * Design2UMG 瀵煎叆娴佺▼鍏变韩宸ュ叿鍑芥暟
  *
- * 提供 Design2UMGEditorModule 和 PenFileImportFactory 共用的：
- * - 预览窗口打开
- * - JSON 编辑后生成
- * - Frame 选择器 UI
- * - Widget Blueprint 生成
+ * 鎻愪緵 Design2UMGEditorModule 鍜?PenFileImportFactory 鍏辩敤鐨勶細
+ * - 棰勮绐楀彛鎵撳紑
+ * - JSON 缂栬緫鍚庣敓鎴? * - Frame 閫夋嫨鍣?UI
+ * - Widget Blueprint 鐢熸垚
  */
 namespace DesignImportUtils
 {
-	/** 生成 Widget Blueprint 并返回 */
+	/** 鐢熸垚 Widget Blueprint 骞惰繑鍥?*/
 	UWidgetBlueprint* GenerateBlueprint(const FUMGWidgetData& Data, const FString& OutputPath);
 
-	/** 生成 Widget Blueprint + 渲染 PNG 预览图 */
+	/** 鐢熸垚 Widget Blueprint + 娓叉煋 PNG 棰勮鍥?*/
 	bool GenerateBlueprintAndPng(const FUMGWidgetData& Data, const FString& OutputPath);
 
-	/** 从编辑后的 JSON 解析 + 远程图片 + 生成 Blueprint */
+	/** 浠庣紪杈戝悗鐨?JSON 瑙ｆ瀽 + 杩滅▼鍥剧墖 + 鐢熸垚 Blueprint */
 	void GenerateFromEditedJson(const FString& EditedJson, const FString& OutputPath);
 
-	/** 解析远程图片引用并导入 */
+	/** 瑙ｆ瀽杩滅▼鍥剧墖寮曠敤骞跺鍏?*/
 	void ResolveImages(FUMGWidgetData& Data);
 
 	/**
-	 * 打开预览窗口
-	 * @return true 表示窗口已打开
+	 * 鎵撳紑棰勮绐楀彛
+	 * @return true 琛ㄧず绐楀彛宸叉墦寮€
 	 */
 	bool OpenPreviewWindow(
 		const FUMGWidgetData& Data,
@@ -41,13 +40,15 @@ namespace DesignImportUtils
 		const FText& WindowTitle);
 
 	/**
-	 * 弹出 Frame 选择器对话框
-	 * @param OnFrameSelected 用户双击选择后的回调（接收 FrameId）
+	 * 寮瑰嚭 Frame 閫夋嫨鍣ㄥ璇濇
+	 * @param OnFrameSelected 鐢ㄦ埛鍙屽嚮閫夋嫨鍚庣殑鍥炶皟锛堟帴鏀?FrameId锛?
 	 */
 	using FFrameSelectedCallback = TFunction<void(const FString& FrameId)>;
 	void ShowFrameSelector(
-		const TArray<FPenFrameInfo>& Frames,
+		const TArray<FDesignFrameInfo>& Frames,
 		const FText& WindowTitle,
 		const FText& HintText,
 		FFrameSelectedCallback OnFrameSelected);
 }
+
+

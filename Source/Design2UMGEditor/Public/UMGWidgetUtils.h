@@ -1,8 +1,9 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Components/SlateWrapperTypes.h"
 #include "UMGSchema.h"
 
 class UWidget;
@@ -10,52 +11,53 @@ class UPanelSlot;
 class UPanelWidget;
 class UWidgetTree;
 class UWidgetBlueprint;
+class UTexture2D;
 
 /**
- * UMG Widget 工具类 - 共享的 Widget 创建和属性应用逻辑
+ * UMG Widget 宸ュ叿绫?- 鍏变韩鐨?Widget 鍒涘缓鍜屽睘鎬у簲鐢ㄩ€昏緫
  */
 class FUMGWidgetUtils
 {
 public:
-	// ========== Widget 创建 ==========
+	// ========== Widget 鍒涘缓 ==========
 
-	/** 递归创建 Widget 树（TextureMap 非空时将匹配的纹理绑定到 Image 控件） */
+	/** 閫掑綊鍒涘缓 Widget 鏍戯紙TextureMap 闈炵┖鏃跺皢鍖归厤鐨勭汗鐞嗙粦瀹氬埌 Image 鎺т欢锛?*/
 	static UWidget* CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget = nullptr, const TMap<FString, UTexture2D*>* TextureMap = nullptr);
 
-	/** 应用Fixer修正Bounds（在CreateWidgetRecursive之前调用）
-	 * @param RootNode Widget树根节点
-	 * @param DesignSize 设计尺寸（UMG目标）
+	/** 搴旂敤Fixer淇Bounds锛堝湪CreateWidgetRecursive涔嬪墠璋冪敤锛?
+	 * @param RootNode Widget鏍戞牴鑺傜偣
+	 * @param DesignSize 璁捐灏哄锛圲MG鐩爣锛?
 	 */
 	static void ApplyFixer(FUMGWidgetNode& RootNode, const FIntPoint& DesignSize);
 
-	/** Fixer/LayoutCalculator 使用的实际 DesignSize（可能被设计稿尺寸覆盖） */
+	/** Fixer/LayoutCalculator 浣跨敤鐨勫疄闄?DesignSize锛堝彲鑳借璁捐绋垮昂瀵歌鐩栵級 */
 	static FIntPoint EffectiveDesignSize;
 
-	/** 从Widget树计算所需的设计尺寸（遍历所有子节点，找出最大边界） */
+	/** 浠嶹idget鏍戣绠楁墍闇€鐨勮璁″昂瀵革紙閬嶅巻鎵€鏈夊瓙鑺傜偣锛屾壘鍑烘渶澶ц竟鐣岋級 */
 	static FVector2D CalculateDesignSize(const FUMGWidgetNode& RootNode, FVector2D DefaultSize = FVector2D(1920, 1080));
 
-	// ========== Widget 类型解析 ==========
+	// ========== Widget 绫诲瀷瑙ｆ瀽 ==========
 
-	/** 根据类型名称获取 Widget 类 */
+	/** 鏍规嵁绫诲瀷鍚嶇О鑾峰彇 Widget 绫?*/
 	static UClass* ResolveWidgetClass(const FString& TypeName);
 
-	// ========== 颜色解析 ==========
+	// ========== 棰滆壊瑙ｆ瀽 ==========
 
-	/** 解析颜色字符串 - 支持 #RRGGBB 和颜色名称 */
+	/** 瑙ｆ瀽棰滆壊瀛楃涓?- 鏀寔 #RRGGBB 鍜岄鑹插悕绉?*/
 	static FLinearColor ParseColor(const FString& ColorStr);
 
-	// ========== 对齐方式解析 ==========
+	// ========== 瀵归綈鏂瑰紡瑙ｆ瀽 ==========
 
 	static EHorizontalAlignment ParseHAlign(const FString& Str);
 	static EVerticalAlignment ParseVAlign(const FString& Str);
 	static ESlateVisibility ParseVisibility(const FString& Str);
 
-	// ========== 几何解析 ==========
+	// ========== 鍑犱綍瑙ｆ瀽 ==========
 
 	static FVector2D ParseVector2D(const FString& Str, FVector2D Default = FVector2D::ZeroVector);
 	static FMargin ParseMargin(const FString& Str);
 
-	/** FMargin 近似相等比较 */
+	/** FMargin 杩戜技鐩哥瓑姣旇緝 */
 	static bool IsNearlyEqualMargin(const FMargin& A, const FMargin& B)
 	{
 		return FMath::IsNearlyEqual(A.Left, B.Left) &&
@@ -64,44 +66,45 @@ public:
 			FMath::IsNearlyEqual(A.Bottom, B.Bottom);
 	}
 
-	// ========== Slot 属性应用 ==========
+	// ========== Slot 灞炴€у簲鐢?==========
 
-	/** 应用 Slot 属性到各种类型的 Slot */
+	/** 搴旂敤 Slot 灞炴€у埌鍚勭绫诲瀷鐨?Slot */
 	static void ApplySlotProperties(UPanelSlot* Slot, const FUMGSlotData& SlotData);
 
-	// ========== Widget 属性应用 ==========
+	// ========== Widget 灞炴€у簲鐢?==========
 
-	/** 应用类型特定的 Widget 属性（legacy string map） */
+	/** 搴旂敤绫诲瀷鐗瑰畾鐨?Widget 灞炴€э紙legacy string map锛?*/
 	static void ApplyWidgetProperties(UWidget* Widget, const TMap<FString, FString>& Properties);
 
-	/** 应用类型特定的 Widget 属性（typed 优先，legacy 回退） */
+	/** 搴旂敤绫诲瀷鐗瑰畾鐨?Widget 灞炴€э紙typed 浼樺厛锛宭egacy 鍥為€€锛?*/
 	static void ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNode& Node);
 
-	// ========== Widget 渲染 ==========
+	// ========== Widget 娓叉煋 ==========
 
-	/** 将 WidgetBlueprint 渲染为 PNG 图片数据（需要已编译的 GeneratedClass） */
+	/** 灏?WidgetBlueprint 娓叉煋涓?PNG 鍥剧墖鏁版嵁锛堥渶瑕佸凡缂栬瘧鐨?GeneratedClass锛?*/
 	static bool RenderWidgetToPng(UWidgetBlueprint* WidgetBP, const FIntPoint& RenderSize, TArray<uint8>& OutPngData, FIntPoint& OutSize);
 
-	/** 直接从 WidgetTree 渲染为 PNG（编译前调用，transient 纹理数据仍有效） */
+	/** 鐩存帴浠?WidgetTree 娓叉煋涓?PNG锛堢紪璇戝墠璋冪敤锛宼ransient 绾圭悊鏁版嵁浠嶆湁鏁堬級 */
 	static bool RenderWidgetTreeToPng(UWidgetBlueprint* WidgetBP, const FIntPoint& RenderSize, TArray<uint8>& OutPngData, FIntPoint& OutSize);
 
 	// ========== Node ID Metadata ==========
 
-	/** Widget → .pen 节点 ID 映射（增量更新基础设施） */
+	/** Widget 鈫?.pen 鑺傜偣 ID 鏄犲皠锛堝閲忔洿鏂板熀纭€璁炬柦锛?*/
 	static TMap<TWeakObjectPtr<UWidget>, FString> NodeIdMap;
 
-	/** 查询 Widget 对应的 .pen 节点 ID，未找到返回空 */
+	/** 鏌ヨ Widget 瀵瑰簲鐨?.pen 鑺傜偣 ID锛屾湭鎵惧埌杩斿洖绌?*/
 	static FString FindNodeId(const UWidget* Widget);
 
-	/** 清空映射表（每次导入前调用） */
+	/** 娓呯┖鏄犲皠琛紙姣忔瀵煎叆鍓嶈皟鐢級 */
 	static void ClearNodeIdMap() { NodeIdMap.Empty(); }
 
-	// ========== Widget 名称处理 ==========
+	// ========== Widget 鍚嶇О澶勭悊 ==========
 
-	/** 清理 Widget 名称，移除非法字符 */
+	/** 娓呯悊 Widget 鍚嶇О锛岀Щ闄ら潪娉曞瓧绗?*/
 	static FName SanitizeWidgetName(const FString& InName, const FString& FallbackPrefix);
 
 private:
-	/** 应用通用 Widget 属性（内部使用） */
+	/** 搴旂敤閫氱敤 Widget 灞炴€э紙鍐呴儴浣跨敤锛?*/
 	static void ApplyCommonProperties(UWidget* Widget, const TMap<FString, FString>& Properties);
 };
+

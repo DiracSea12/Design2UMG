@@ -1,38 +1,26 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DesignImportTypes.h"
 
 struct FUMGWidgetData;
 struct FUMGWidgetNode;
 
-struct FImportResult
-{
-	bool bSuccess = false;
-	int32 WidgetCount = 0;
-	int32 WarningCount = 0;
-	double ElapsedSeconds = 0.0;
-	TArray<FString> Warnings;
-
-	static int32 CountWidgets(const FUMGWidgetNode& Node);
-	static FImportResult FromData(const FUMGWidgetData& Data, double Elapsed);
-	void ShowSummaryNotification() const;
-	void ShowSummaryDialog() const;
-};
-
 /**
- * .pen 文件导入入口
+ * .pen 鏂囦欢瀵煎叆鍏ュ彛
  */
 class FPenImporter
 {
 public:
-	/** 从文件导入 .pen 并转换为 UMG */
+	/** 浠庢枃浠跺鍏?.pen 骞惰浆鎹负 UMG */
 	static bool ImportFromFile(const FString& FilePath, FUMGWidgetData& OutData);
 
-	/** 从 JSON 字符串导入 */
+	/** 浠?JSON 瀛楃涓插鍏?*/
 	static bool ImportFromJson(const FString& JsonString, FUMGWidgetData& OutData);
 
-	/** 从 .pen 文件导入指定 TargetNodeId 的 frame（多 frame 选择路径） */
+	/** 浠?.pen 鏂囦欢瀵煎叆鎸囧畾 TargetNodeId 鐨?frame锛堝 frame 閫夋嫨璺緞锛?*/
 	static bool ImportFileWithTargetNode(const FString& FilePath, const FString& TargetNodeId, FUMGWidgetData& OutData);
 };
+

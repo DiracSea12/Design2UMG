@@ -1,43 +1,45 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "DesignSchema.h"
-#include "PenVariableResolver.h"
+#include "DesignVariableResolver.h"
 #include "UMGSchema.h"
 
 /**
- * .pen 节点树到 UMG Widget 树的转换器（遍历+分发）
- * 布局映射 → FLayoutMapper
- * 视觉属性 → FVisualMapper
- * 组件展开 → FRefExpander
+ * .pen 鑺傜偣鏍戝埌 UMG Widget 鏍戠殑杞崲鍣紙閬嶅巻+鍒嗗彂锛? * 甯冨眬鏄犲皠 鈫?FLayoutMapper
+ * 瑙嗚灞炴€?鈫?FVisualMapper
+ * 缁勪欢灞曞紑 鈫?FRefExpander
  */
 class FDesign2UMGConverter
 {
 public:
-	/** 主入口：转换整个文档 */
+	/** 涓诲叆鍙ｏ細杞崲鏁翠釜鏂囨。 */
 	static FUMGWidgetData Convert(const FDesignDocument& Document);
 
 private:
-	/** 递归转换节点 */
-	static FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FDesignDocument& Doc, const TMap<FString, FString>& ThemeContext = TMap<FString, FString>(), TArray<FString>* OutWarnings = nullptr, EPenLayout ParentLayout = EPenLayout::None);
+	/** 閫掑綊杞崲鑺傜偣 */
+	static FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FDesignDocument& Doc, const TMap<FString, FString>& ThemeContext = TMap<FString, FString>(), TArray<FString>* OutWarnings = nullptr, EDesignLayout ParentLayout = EDesignLayout::None);
 
-	/** 创建容器 Widget */
+	/** 鍒涘缓瀹瑰櫒 Widget */
 	static FUMGWidgetNode CreateContainerWidget(const TSharedPtr<FDesignNode>& Node);
 
-	/** 创建文本 Widget */
+	/** 鍒涘缓鏂囨湰 Widget */
 	static FUMGWidgetNode CreateTextWidget(const TSharedPtr<FDesignNode>& Node);
 
-	/** 创建图标字体 Widget */
+	/** 鍒涘缓鍥炬爣瀛椾綋 Widget */
 	static FUMGWidgetNode CreateIconFontWidget(const TSharedPtr<FDesignNode>& Node);
 
-	/** 创建 Path Widget（栅格化 SVG geometry 为 Image） */
+	/** 鍒涘缓 Path Widget锛堟爡鏍煎寲 SVG geometry 涓?Image锛?*/
 	static FUMGWidgetNode CreatePathWidget(const TSharedPtr<FDesignNode>& Node);
 
-	/** 应用文本属性 */
+	/** 搴旂敤鏂囨湰灞炴€?*/
 	static void ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node);
 
-	/** 递归预计算 FitContent 节点的实际尺寸（从子节点推算） */
+	/** 閫掑綊棰勮绠?FitContent 鑺傜偣鐨勫疄闄呭昂瀵革紙浠庡瓙鑺傜偣鎺ㄧ畻锛?*/
 	static FVector2D PreComputeFitContentSizes(const TSharedPtr<FDesignNode>& Node, const FDesignDocument& Doc);
 };
+
+
+

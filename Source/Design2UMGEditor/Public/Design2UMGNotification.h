@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -10,3 +10,4 @@ struct DESIGN2UMGEDITOR_API FDesign2UMGNotification
 	static void Warning(const FText& Message);
 	static void Error(const FText& Message);
 };
+

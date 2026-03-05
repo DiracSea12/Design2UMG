@@ -1,78 +1,73 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "DesignSchema.h"
-#include "PenVariableResolver.h"
+#include "DesignVariableResolver.h"
+#include "DesignImportTypes.h"
+
+class FJsonObject;
+class FJsonValue;
 
 /**
- * .pen 文件 JSON 解析器
- */
+ * .pen 鏂囦欢 JSON 瑙ｆ瀽鍣? */
 class FPenParser
 {
 public:
-	/** 从 JSON 字符串解析文档 */
+	/** 浠?JSON 瀛楃涓茶В鏋愭枃妗?*/
 	static bool ParseDocument(const FString& JsonString, FDesignDocument& OutDocument);
 
-	/** 从文件解析文档 */
+	/** 浠庢枃浠惰В鏋愭枃妗?*/
 	static bool ParseFromFile(const FString& FilePath, FDesignDocument& OutDocument);
 
 private:
-	/** 解析顶层文档 */
+	/** 瑙ｆ瀽椤跺眰鏂囨。 */
 	static bool ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FDesignDocument& OutDocument);
 
-	/** 解析节点 */
-	static TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const FPenVariableResolver& Resolver, float ParentX = 0.0f, float ParentY = 0.0f);
+	/** 瑙ｆ瀽鑺傜偣 */
+	static TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver, float ParentX = 0.0f, float ParentY = 0.0f);
 
-	/** 解析节点类型 */
-	static EPenNodeType ParseNodeType(const FString& TypeStr);
+	/** 瑙ｆ瀽鑺傜偣绫诲瀷 */
+	static EDesignNodeType ParseNodeType(const FString& TypeStr);
 
-	/** 解析尺寸值 */
-	static FPenSize ParseSize(const TSharedPtr<FJsonValue>& Value, EPenNodeType NodeType, const FPenVariableResolver& Resolver);
+	/** 瑙ｆ瀽灏哄鍊?*/
+	static FDesignSize ParseSize(const TSharedPtr<FJsonValue>& Value, EDesignNodeType NodeType, const FDesignVariableResolver& Resolver);
 
-	/** 解析填充 */
-	static FPenFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FPenVariableResolver& Resolver);
+	/** 瑙ｆ瀽濉厖 */
+	static FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver);
 
-	/** 解析描边 */
-	static FPenStroke ParseStroke(const TSharedPtr<FJsonObject>& JsonObj, const FPenVariableResolver& Resolver);
+	/** 瑙ｆ瀽鎻忚竟 */
+	static FDesignStroke ParseStroke(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver);
 
-	/** 解析内边距 */
-	static FPenPadding ParsePadding(const TSharedPtr<FJsonValue>& Value);
+	/** 瑙ｆ瀽鍐呰竟璺?*/
+	static FDesignPadding ParsePadding(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver);
 
-	/** 解析变量定义 */
-	static void ParseVariables(const TSharedPtr<FJsonObject>& JsonObj, TMap<FString, FPenVariable>& OutVariables);
+	/** 瑙ｆ瀽鍙橀噺瀹氫箟 */
+	static void ParseVariables(const TSharedPtr<FJsonObject>& JsonObj, TMap<FString, FDesignVariable>& OutVariables);
 
-	/** 解析布局模式 */
-	static EPenLayout ParseLayout(const FString& LayoutStr);
+	/** 瑙ｆ瀽甯冨眬妯″紡 */
+	static EDesignLayout ParseLayout(const FString& LayoutStr);
 
-	/** 解析主轴对齐 */
-	static EPenJustifyContent ParseJustifyContent(const FString& Str);
+	/** 瑙ｆ瀽涓昏酱瀵归綈 */
+	static EDesignJustifyContent ParseJustifyContent(const FString& Str);
 
-	/** 解析交叉轴对齐 */
-	static EPenAlignItems ParseAlignItems(const FString& Str);
+	/** 瑙ｆ瀽浜ゅ弶杞村榻?*/
+	static EDesignAlignItems ParseAlignItems(const FString& Str);
 
-	/** 解析文本对齐 */
-	static EPenTextAlign ParseTextAlign(const FString& Str);
+	/** 瑙ｆ瀽鏂囨湰瀵归綈 */
+	static EDesignTextAlign ParseTextAlign(const FString& Str);
 
-	/** 解析文本垂直对齐 */
-	static EPenTextAlignVertical ParseTextAlignVertical(const FString& Str);
+	/** 瑙ｆ瀽鏂囨湰鍨傜洿瀵归綈 */
+	static EDesignTextAlignVertical ParseTextAlignVertical(const FString& Str);
 
-	/** 解析文本增长模式 */
-	static EPenTextGrowth ParseTextGrowth(const FString& Str);
+	/** 瑙ｆ瀽鏂囨湰澧為暱妯″紡 */
+	static EDesignTextGrowth ParseTextGrowth(const FString& Str);
 
-	/** 解析节点扩展属性（文本、图标、椭圆等） */
-	static void ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TSharedPtr<FDesignNode>& Node, const FPenVariableResolver& Resolver);
+	/** 瑙ｆ瀽鑺傜偣鎵╁睍灞炴€э紙鏂囨湰銆佸浘鏍囥€佹き鍦嗙瓑锛?*/
+	static void ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TSharedPtr<FDesignNode>& Node, const FDesignVariableResolver& Resolver);
 };
 
-/** 顶层 Frame 信息（供 Frame 选择器使用） */
-struct FPenFrameInfo
-{
-	FString Id;
-	FString Name;
-	float Width = 0.0f;
-	float Height = 0.0f;
-};
 
-/** 从 FDesignDocument 提取顶层 Frame 列表 */
-TArray<FPenFrameInfo> ExtractTopFrames(const FDesignDocument& Document);
+
+

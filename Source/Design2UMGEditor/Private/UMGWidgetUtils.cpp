@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGWidgetUtils.h"
 #include "Design2UMGLog.h"
@@ -671,19 +671,10 @@ static void HandleContentWidgetChild(UWidgetTree* WidgetTree, UContentWidget* Co
 		// ContentWidget 通过自身属性控制子控件对齐
 		if (UBorder* Border = Cast<UBorder>(Content))
 		{
-			EHorizontalAlignment HAlign = FUMGWidgetUtils::ParseHAlign(ChildNode.Slot.HorizontalAlignment);
-			EVerticalAlignment VAlign = FUMGWidgetUtils::ParseVAlign(ChildNode.Slot.VerticalAlignment);
-			if (ChildNode.Slot.HorizontalAlignment == TEXT("Fill") && ChildNode.Slot.VerticalAlignment == TEXT("Fill"))
-			{
-				const int32 HIndex = FMath::RoundToInt(ChildNode.Slot.Alignment.X * 2.0f);
-				const int32 VIndex = FMath::RoundToInt(ChildNode.Slot.Alignment.Y * 2.0f);
-				static const EHorizontalAlignment HMap[] = { HAlign_Left, HAlign_Center, HAlign_Right };
-				static const EVerticalAlignment VMap[] = { VAlign_Top, VAlign_Center, VAlign_Bottom };
-				if (HIndex >= 0 && HIndex < 3) HAlign = HMap[HIndex];
-				if (VIndex >= 0 && VIndex < 3) VAlign = VMap[VIndex];
-			}
-			Border->SetHorizontalAlignment(HAlign);
-			Border->SetVerticalAlignment(VAlign);
+			// Keep Fill semantics for Border content. Mapping Fill+Alignment(0,0) to Left/Top
+			// causes root canvases to collapse to desired size and drift to top-left.
+			Border->SetHorizontalAlignment(FUMGWidgetUtils::ParseHAlign(ChildNode.Slot.HorizontalAlignment));
+			Border->SetVerticalAlignment(FUMGWidgetUtils::ParseVAlign(ChildNode.Slot.VerticalAlignment));
 		}
 	}
 
@@ -1079,3 +1070,4 @@ FVector2D FUMGWidgetUtils::CalculateDesignSize(const FUMGWidgetNode& RootNode, F
 	TraverseNodeForDesignSize(RootNode, MaxBounds);
 	return MaxBounds;
 }
+

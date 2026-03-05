@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "PencilConnector.h"
 #include "Design2UMGLog.h"
@@ -7,8 +7,21 @@
 #include "HAL/PlatformProcess.h"
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
+#include "Containers/Ticker.h"
 #include "Sockets.h"
 #include "SocketSubsystem.h"
+
+namespace
+{
+	void CompleteLaunchOnce(const TSharedRef<TFunction<void(bool bSuccess)>>& OnComplete, bool bSuccess)
+	{
+		if (*OnComplete)
+		{
+			(*OnComplete)(bSuccess);
+			*OnComplete = nullptr;
+		}
+	}
+}
 
 FPencilConnector::~FPencilConnector()
 {
@@ -17,7 +30,7 @@ FPencilConnector::~FPencilConnector()
 
 FString FPencilConnector::DiscoverMCPServerPath()
 {
-	// 1. 用户手动指定
+	// 1. 鐢ㄦ埛鎵嬪姩鎸囧畾
 	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
 	if (Settings && !Settings->MCPServerPath.IsEmpty())
 	{
@@ -37,7 +50,7 @@ FString FPencilConnector::DiscoverMCPServerPath()
 	const FString BinaryName = TEXT("mcp-server-linux-x64");
 #endif
 
-	// 2. 搜索 antigravity 扩展目录
+	// 2. 鎼滅储 antigravity 鎵╁睍鐩綍
 #if PLATFORM_WINDOWS
 	const FString UserHome = FPlatformMisc::GetEnvironmentVariable(TEXT("USERPROFILE"));
 #else
@@ -68,12 +81,12 @@ FString FPencilConnector::DiscoverMCPServerPath()
 
 FString FPencilConnector::DetectAppName()
 {
-	// 1. 用户手动指定
+	// 1. 鐢ㄦ埛鎵嬪姩鎸囧畾
 	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
 	if (Settings && !Settings->PencilAppName.IsEmpty())
 		return Settings->PencilAppName;
 
-	// 2. 检测运行中的进程
+	// 2. 妫€娴嬭繍琛屼腑鐨勮繘绋?
 	FPlatformProcess::FProcEnumerator ProcEnum;
 	while (ProcEnum.MoveNext())
 	{
@@ -89,7 +102,7 @@ FString FPencilConnector::DetectAppName()
 #endif
 	}
 
-	// 3. 默认
+	// 3. 榛樿
 	return TEXT("antigravity");
 }
 
@@ -156,7 +169,7 @@ bool FPencilConnector::Launch(int32 Port)
 	const FString Endpoint = FString::Printf(
 		TEXT("http://localhost:%d/mcp"), ServerPort);
 
-	// 轮询等待服务器就绪，每 200ms 尝试一次，最多 10 秒
+	// 杞绛夊緟鏈嶅姟鍣ㄥ氨缁紝姣?200ms 灏濊瘯涓€娆★紝鏈€澶?10 绉?
 	constexpr float PollInterval = 0.2f;
 	constexpr float MaxWait = 10.0f;
 	float Elapsed = 0.0f;
@@ -188,8 +201,101 @@ bool FPencilConnector::Launch(int32 Port)
 	return false;
 }
 
+void FPencilConnector::LaunchAsync(int32 Port, TFunction<void(bool bSuccess)> OnComplete)
+{
+	Shutdown();
+	const int32 LaunchToken = ++ActiveLaunchToken;
+	const TSharedRef<TFunction<void(bool bSuccess)>> SharedComplete =
+		MakeShared<TFunction<void(bool bSuccess)>>(MoveTemp(OnComplete));
+
+	const FString ServerPath = DiscoverMCPServerPath();
+	if (ServerPath.IsEmpty())
+	{
+		UE_LOG(LogDesign2UMG, Error, TEXT("PencilConnector: MCP Server binary not found"));
+		CompleteLaunchOnce(SharedComplete, false);
+		return;
+	}
+
+	const FString AppName = DetectAppName();
+	ServerPort = (Port > 0) ? Port : FindAvailablePort();
+
+	const FString Args = FString::Printf(TEXT("-app %s -http -http-port %d"), *AppName, ServerPort);
+	UE_LOG(LogDesign2UMG, Log, TEXT("PencilConnector: Launching %s %s"), *ServerPath, *Args);
+
+	ServerProcess = FPlatformProcess::CreateProc(
+		*ServerPath, *Args,
+		false, true, true,
+		nullptr, 0, nullptr, nullptr);
+
+	if (!ServerProcess.IsValid())
+	{
+		UE_LOG(LogDesign2UMG, Error, TEXT("PencilConnector: Failed to launch MCP Server"));
+		CompleteLaunchOnce(SharedComplete, false);
+		return;
+	}
+
+	const FString Endpoint = FString::Printf(TEXT("http://localhost:%d/mcp"), ServerPort);
+	constexpr double MaxWaitSeconds = 10.0;
+	const double DeadlineSeconds = FPlatformTime::Seconds() + MaxWaitSeconds;
+	TryConnectAsync(Endpoint, DeadlineSeconds, LaunchToken, SharedComplete);
+}
+
+void FPencilConnector::TryConnectAsync(
+	const FString& Endpoint,
+	double DeadlineSeconds,
+	int32 LaunchToken,
+	const TSharedRef<TFunction<void(bool bSuccess)>>& OnComplete)
+{
+	if (LaunchToken != ActiveLaunchToken)
+	{
+		CompleteLaunchOnce(OnComplete, false);
+		return;
+	}
+
+	if (!ServerProcess.IsValid() || !FPlatformProcess::IsProcRunning(ServerProcess))
+	{
+		UE_LOG(LogDesign2UMG, Error, TEXT("PencilConnector: MCP Server process exited prematurely"));
+		Shutdown();
+		CompleteLaunchOnce(OnComplete, false);
+		return;
+	}
+
+	Client.ConnectAsync(Endpoint, [this, Endpoint, DeadlineSeconds, LaunchToken, OnComplete](bool bConnected)
+	{
+		if (LaunchToken != ActiveLaunchToken)
+		{
+			CompleteLaunchOnce(OnComplete, false);
+			return;
+		}
+
+		if (bConnected)
+		{
+			UE_LOG(LogDesign2UMG, Log, TEXT("PencilConnector: Connected asynchronously"));
+			CompleteLaunchOnce(OnComplete, true);
+			return;
+		}
+
+		if (FPlatformTime::Seconds() >= DeadlineSeconds)
+		{
+			UE_LOG(LogDesign2UMG, Error, TEXT("PencilConnector: Timed out waiting for %s"), *Endpoint);
+			Shutdown();
+			CompleteLaunchOnce(OnComplete, false);
+			return;
+		}
+
+		FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateLambda([this, Endpoint, DeadlineSeconds, LaunchToken, OnComplete](float)
+			{
+				TryConnectAsync(Endpoint, DeadlineSeconds, LaunchToken, OnComplete);
+				return false;
+			}),
+			0.2f);
+	});
+}
+
 void FPencilConnector::Shutdown()
 {
+	++ActiveLaunchToken;
 	Client.Disconnect();
 
 	if (ServerProcess.IsValid())

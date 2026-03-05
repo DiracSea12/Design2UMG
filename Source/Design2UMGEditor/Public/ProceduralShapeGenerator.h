@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -96,3 +96,4 @@ private:
 	/** Whether there are pending texture resource updates that still need a render-thread flush. */
 	static bool bHasPendingTextureUpdates;
 };
+

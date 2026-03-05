@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "VisualMapper.h"
 #include "LayoutMapper.h"
@@ -15,7 +15,7 @@ namespace
 	const TCHAR* MatRef_Angular   = TEXT("angulargradient");
 	const TCHAR* MatRef_RoundedRect = TEXT("roundedrect");
 
-	FString BuildGradientMaterialParams(const FPenGradient& Gradient)
+	FString BuildGradientMaterialParams(const FDesignGradient& Gradient)
 	{
 		if (Gradient.Colors.Num() == 0)
 			return FString();
@@ -24,7 +24,7 @@ namespace
 		const FString& EndColor = Gradient.Colors.Last().Color;
 
 		// Radial: center/edge pair
-		if (Gradient.GradientType == EPenGradientType::Radial)
+		if (Gradient.GradientType == EDesignGradientType::Radial)
 			return FString::Printf(TEXT("{\"ColorCenter\":\"%s\",\"ColorEdge\":\"%s\"}"), *StartColor, *EndColor);
 
 		// Linear: always include Rotation for angled rendering
@@ -65,17 +65,17 @@ namespace
 		// 但文本颜色仍需写入，否则 Text 节点会丢失字形颜色
 		if (Node->HasMultiFill())
 		{
-			if ((Node->Type == EPenNodeType::Text || Node->Type == EPenNodeType::IconFont)
-				&& Node->Fill.Type == EPenFillType::Color)
+			if ((Node->Type == EDesignNodeType::Text || Node->Type == EDesignNodeType::IconFont)
+				&& Node->Fill.Type == EDesignFillType::Color)
 				Widget.Properties.FindOrAdd(TEXT("Color"), Node->Fill.SolidColor);
 			return;
 		}
 
-		if (Node->Fill.Type == EPenFillType::Color)
+		if (Node->Fill.Type == EDesignFillType::Color)
 		{
 			// Text / IconFont → 只设文字颜色，不设 BrushColor（避免被 Border 包裹后变色块）
 			// CreateIconFontWidget/CreateTextWidget 可能已写入 Color，FindOrAdd 不覆盖已有值
-			if (Node->Type == EPenNodeType::Text || Node->Type == EPenNodeType::IconFont)
+			if (Node->Type == EDesignNodeType::Text || Node->Type == EDesignNodeType::IconFont)
 			{
 				Widget.Properties.FindOrAdd(TEXT("Color"), Node->Fill.SolidColor);
 				return;
@@ -86,18 +86,18 @@ namespace
 			return;
 		}
 
-		if (Node->Fill.Type == EPenFillType::Gradient && Node->Fill.Gradient.Colors.Num() > 0)
+		if (Node->Fill.Type == EDesignFillType::Gradient && Node->Fill.Gradient.Colors.Num() > 0)
 		{
 			FString MaterialRef = MatRef_GradientH;
 			switch (Node->Fill.Gradient.GradientType)
 			{
-			case EPenGradientType::Radial:
+			case EDesignGradientType::Radial:
 				MaterialRef = MatRef_Radial;
 				break;
-			case EPenGradientType::Angular:
+			case EDesignGradientType::Angular:
 				MaterialRef = MatRef_Angular;
 				break;
-			case EPenGradientType::Linear:
+			case EDesignGradientType::Linear:
 			default:
 				MaterialRef = MatRef_GradientLinear;
 				break;
@@ -115,25 +115,25 @@ namespace
 			return;
 		}
 
-		if (Node->Fill.Type == EPenFillType::Image && !Node->Fill.Image.Url.IsEmpty())
+		if (Node->Fill.Type == EDesignFillType::Image && !Node->Fill.Image.Url.IsEmpty())
 		{
 			Widget.Properties.Add(TEXT("TexturePath"), Node->Fill.Image.Url);
 			Widget.Brush.TexturePath = Node->Fill.Image.Url;
 
 			// imageTransform → UMG UV 裁剪参数
-			if (Node->Fill.Image.Mode == EPenImageMode::Crop && !Node->Fill.Image.Transform.IsIdentity())
+			if (Node->Fill.Image.Mode == EDesignImageMode::Crop && !Node->Fill.Image.Transform.IsIdentity())
 			{
-				const FPenImageTransform& T = Node->Fill.Image.Transform;
+				const FDesignImageTransform& T = Node->Fill.Image.Transform;
 				Widget.Properties.Add(TEXT("ImageMode"), TEXT("Crop"));
 				Widget.Properties.Add(TEXT("ImageTransform"),
 					FString::Printf(TEXT("%.6f,%.6f,%.6f,%.6f,%.6f,%.6f"),
 						T.A, T.B, T.TX, T.C, T.D, T.TY));
 			}
-			else if (Node->Fill.Image.Mode == EPenImageMode::Fill)
+			else if (Node->Fill.Image.Mode == EDesignImageMode::Fill)
 			{
 				Widget.Properties.Add(TEXT("ImageMode"), TEXT("Fill"));
 			}
-			else if (Node->Fill.Image.Mode == EPenImageMode::Fit)
+			else if (Node->Fill.Image.Mode == EDesignImageMode::Fit)
 			{
 				Widget.Properties.Add(TEXT("ImageMode"), TEXT("Fit"));
 			}
@@ -181,19 +181,19 @@ void FVisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedP
 		Widget.Properties.Add(TEXT("Clipping"), TEXT("ClipToBounds"));
 
 	int32 ShadowCount = 0;
-	for (const FPenEffect& Effect : Node->Effects)
+	for (const FDesignEffect& Effect : Node->Effects)
 	{
 		if (!Effect.bEnabled)
 			continue;
 
 		switch (Effect.Type)
 		{
-		case EPenEffectType::Blur:
+		case EDesignEffectType::Blur:
 			UE_LOG(LogDesign2UMG, Warning,
 				TEXT("Design2UMG: Blur effect on '%s' ignored (UMG has no foreground blur widget)"),
 				*Node->Name);
 			break;
-		case EPenEffectType::Shadow:
+		case EDesignEffectType::Shadow:
 			if (Effect.Shadow.bInner)
 			{
 				UE_LOG(LogDesign2UMG, Warning,
@@ -201,7 +201,7 @@ void FVisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedP
 					*Node->Name);
 				break;
 			}
-			if (Node->Type == EPenNodeType::Text)
+			if (Node->Type == EDesignNodeType::Text)
 			{
 				// TextBlock 只支持单阴影（UE5 限制），后者覆盖前者
 				Widget.Properties.Add(TEXT("ShadowOffset"),
@@ -230,7 +230,7 @@ void FVisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedP
 		Widget.Properties.Add(TEXT("BoxShadowCount"), FString::FromInt(ShadowCount));
 }
 
-void FVisualMapper::ApplyRoundedCorner(FUMGWidgetNode& Widget, const FPenCornerRadius& Radius, float Width, float Height)
+void FVisualMapper::ApplyRoundedCorner(FUMGWidgetNode& Widget, const FDesignCornerRadius& Radius, float Width, float Height)
 {
 	if (Radius.bUniform)
 	{
@@ -267,7 +267,7 @@ void FVisualMapper::ApplyRoundedCorner(FUMGWidgetNode& Widget, const FPenCornerR
 	}
 }
 
-void FVisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FPenStroke& Stroke)
+void FVisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FDesignStroke& Stroke)
 {
 	float Thickness = Stroke.Thickness.bUniform ? Stroke.Thickness.Uniform
 		: FMath::Max(FMath::Max(Stroke.Thickness.Top, Stroke.Thickness.Bottom),
@@ -289,7 +289,7 @@ void FVisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FPenStroke& Stroke
 	Widget.Properties.Add(TEXT("OutlineThickness"), FString::SanitizeFloat(Thickness));
 	Widget.Brush.OutlineThickness = Thickness;
 
-	if (Stroke.Fill.Type == EPenFillType::Color)
+	if (Stroke.Fill.Type == EDesignFillType::Color)
 	{
 		Widget.Properties.Add(TEXT("OutlineColor"), Stroke.Fill.SolidColor);
 		Widget.Brush.OutlineColor = FUMGWidgetUtils::ParseColor(Stroke.Fill.SolidColor);
@@ -298,14 +298,14 @@ void FVisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FPenStroke& Stroke
 
 	// Stroke alignment compensation:
 	// UMG outline is always centered on the edge. Adjust padding to simulate inside/outside.
-	if (Stroke.Align == EPenStrokeAlign::Inside)
+	if (Stroke.Align == EDesignStrokeAlign::Inside)
 	{
 		// Inside: entire stroke within bounds → add padding = Thickness/2
 		float Inset = Thickness * 0.5f;
 		Widget.Properties.Add(TEXT("StrokePadding"),
 			FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"), Inset, Inset, Inset, Inset));
 	}
-	else if (Stroke.Align == EPenStrokeAlign::Outside)
+	else if (Stroke.Align == EDesignStrokeAlign::Outside)
 	{
 		// Outside: entire stroke outside bounds → expand by Thickness/2
 		float Outset = Thickness * 0.5f;
@@ -554,8 +554,8 @@ FUMGWidgetNode FVisualMapper::WrapWithMultiFill(FUMGWidgetNode&& Widget, const T
 	// 每层填充创建一个 Image/Border 子节点（底→顶顺序）
 	for (int32 i = 0; i < Node->Fills.Num(); ++i)
 	{
-		const FPenFill& Fill = Node->Fills[i];
-		if (!Fill.bEnabled || Fill.Type == EPenFillType::None)
+		const FDesignFill& Fill = Node->Fills[i];
+		if (!Fill.bEnabled || Fill.Type == EDesignFillType::None)
 			continue;
 
 		FUMGWidgetNode Layer;
@@ -564,26 +564,26 @@ FUMGWidgetNode FVisualMapper::WrapWithMultiFill(FUMGWidgetNode&& Widget, const T
 		Layer.Slot.HorizontalAlignment = TEXT("Fill");
 		Layer.Slot.VerticalAlignment = TEXT("Fill");
 
-		if (Fill.Type == EPenFillType::Color)
+		if (Fill.Type == EDesignFillType::Color)
 		{
 			Layer.Type = TEXT("Border");
 			Layer.Properties.Add(TEXT("BrushColor"), Fill.SolidColor);
 			Layer.Brush.BrushColor = FUMGWidgetUtils::ParseColor(Fill.SolidColor);
 			Layer.Brush.bHasBrushColor = true;
 		}
-		else if (Fill.Type == EPenFillType::Gradient && Fill.Gradient.Colors.Num() > 0)
+		else if (Fill.Type == EDesignFillType::Gradient && Fill.Gradient.Colors.Num() > 0)
 		{
 			Layer.Type = TEXT("Image");
 			FString MaterialRef = MatRef_GradientH;
 			switch (Fill.Gradient.GradientType)
 			{
-			case EPenGradientType::Radial:
+			case EDesignGradientType::Radial:
 				MaterialRef = MatRef_Radial;
 				break;
-			case EPenGradientType::Angular:
+			case EDesignGradientType::Angular:
 				MaterialRef = MatRef_Angular;
 				break;
-			case EPenGradientType::Linear:
+			case EDesignGradientType::Linear:
 			default:
 				MaterialRef = MatRef_GradientLinear;
 				break;
@@ -598,25 +598,25 @@ FUMGWidgetNode FVisualMapper::WrapWithMultiFill(FUMGWidgetNode&& Widget, const T
 			}
 			AddTextureSizeHints(Layer, Node);
 		}
-		else if (Fill.Type == EPenFillType::Image && !Fill.Image.Url.IsEmpty())
+		else if (Fill.Type == EDesignFillType::Image && !Fill.Image.Url.IsEmpty())
 		{
 			Layer.Type = TEXT("Image");
 			Layer.Properties.Add(TEXT("TexturePath"), Fill.Image.Url);
 			Layer.Brush.TexturePath = Fill.Image.Url;
 
-			if (Fill.Image.Mode == EPenImageMode::Crop && !Fill.Image.Transform.IsIdentity())
+			if (Fill.Image.Mode == EDesignImageMode::Crop && !Fill.Image.Transform.IsIdentity())
 			{
-				const FPenImageTransform& T = Fill.Image.Transform;
+				const FDesignImageTransform& T = Fill.Image.Transform;
 				Layer.Properties.Add(TEXT("ImageMode"), TEXT("Crop"));
 				Layer.Properties.Add(TEXT("ImageTransform"),
 					FString::Printf(TEXT("%.6f,%.6f,%.6f,%.6f,%.6f,%.6f"),
 						T.A, T.B, T.TX, T.C, T.D, T.TY));
 			}
-			else if (Fill.Image.Mode == EPenImageMode::Fill)
+			else if (Fill.Image.Mode == EDesignImageMode::Fill)
 			{
 				Layer.Properties.Add(TEXT("ImageMode"), TEXT("Fill"));
 			}
-			else if (Fill.Image.Mode == EPenImageMode::Fit)
+			else if (Fill.Image.Mode == EDesignImageMode::Fit)
 			{
 				Layer.Properties.Add(TEXT("ImageMode"), TEXT("Fit"));
 			}
@@ -658,3 +658,5 @@ FUMGWidgetNode FVisualMapper::WrapWithMultiFill(FUMGWidgetNode&& Widget, const T
 	Overlay.Children.Add(MoveTemp(Widget));
 	return Overlay;
 }
+
+

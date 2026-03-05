@@ -1,22 +1,22 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGEditorModule.h"
 #include "Design2UMGLog.h"
 #include "PenMCPBridge.h"
 #include "DesignImportUtils.h"
-
-#include "PenParser.h"
-#include "PenImporter.h"
+#include "DesignSourceFacade.h"
 #include "DesignSourceRegistry.h"
 #include "PencilConnector.h"
-
+#include "PenParser.h"
+#include "PenImporter.h"
 #include "FigmaParser.h"
+#include "Design2UMGConverter.h"
+
 #include "FigmaHttpClient.h"
 #include "FigmaImageExporter.h"
-#include "Design2UMGConverter.h"
 #include "Design2UMGSettings.h"
 #include "FontResolver.h"
-#include "PenPathRasterizer.h"
+#include "DesignPathRasterizer.h"
 #include "UMGWidgetUtils.h"
 #include "ProceduralShapeGenerator.h"
 
@@ -31,10 +31,13 @@
 #include "ToolMenus.h"
 #include "DesktopPlatformModule.h"
 #include "IDesktopPlatform.h"
+#include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SSpinBox.h"
 #include "Widgets/Input/SCheckBox.h"
+#include "Widgets/SBoxPanel.h"
 #include "Widgets/Layout/SSeparator.h"
+#include "Widgets/Text/STextBlock.h"
 #include "Misc/App.h"
 #include <atomic>
 
@@ -48,6 +51,27 @@ namespace
 
 	/** 模块级 Pencil MCP 连接器 */
 	TUniquePtr<FPencilConnector> GConnector;
+
+	void RegisterBuiltInDesignSources()
+	{
+		FDesignSourceRegistry::Register(TEXT("Pen"), [](const FString& RawJson, FUMGWidgetData& OutData) {
+			return FPenImporter::ImportFromJson(RawJson, OutData);
+		});
+
+		FDesignSourceRegistry::Register(TEXT("Figma"), [](const FString& RawJson, FUMGWidgetData& OutData) {
+			FDesignDocument Doc;
+			if (!FFigmaParser::ParseDocument(RawJson, Doc))
+				return false;
+			OutData = FDesign2UMGConverter::Convert(Doc);
+			return true;
+		});
+	}
+
+	void UnregisterBuiltInDesignSources()
+	{
+		FDesignSourceRegistry::Unregister(TEXT("Pen"));
+		FDesignSourceRegistry::Unregister(TEXT("Figma"));
+	}
 
 	struct FPenConvertCommandArgs
 	{
@@ -114,9 +138,9 @@ namespace
 	}
 
 	/** 从 batch_get 结果中提取 frame 信息列表 */
-	TArray<FPenFrameInfo> ExtractFramesFromMCPResult(const FString& NodesJson)
+	TArray<FDesignFrameInfo> ExtractFramesFromMCPResult(const FString& NodesJson)
 	{
-		TArray<FPenFrameInfo> Result;
+		TArray<FDesignFrameInfo> Result;
 
 		TArray<TSharedPtr<FJsonValue>> Arr;
 		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(NodesJson);
@@ -129,7 +153,7 @@ namespace
 			if (!Obj.IsValid())
 				continue;
 
-			FPenFrameInfo Info;
+			FDesignFrameInfo Info;
 			Obj->TryGetStringField(TEXT("id"), Info.Id);
 			Obj->TryGetStringField(TEXT("name"), Info.Name);
 			if (Info.Name.IsEmpty())
@@ -161,7 +185,7 @@ namespace
 	/** 异步导入完成后的处理 */
 	void OnMCPDataReady(const FString& NodesJson, const FString& VarsJson)
 	{
-		TArray<FPenFrameInfo> Frames = ExtractFramesFromMCPResult(NodesJson);
+		TArray<FDesignFrameInfo> Frames = ExtractFramesFromMCPResult(NodesJson);
 		if (Frames.Num() == 0)
 		{
 			ShowNotification(LOCTEXT("NoFrames", "Design2UMG: No frames found in Pencil document"), SNotificationItem::CS_Fail);
@@ -202,65 +226,76 @@ namespace
 		if (!GConnector)
 			GConnector = MakeUnique<FPencilConnector>();
 
+		auto BeginFetch = []()
+		{
+			ShowNotification(LOCTEXT("Connecting", "Design2UMG: Fetching design from Pencil..."), SNotificationItem::CS_Pending);
+
+			// 2. 异步 batch_get
+			TSharedPtr<FJsonObject> BatchArgs = MakeShared<FJsonObject>();
+			BatchArgs->SetStringField(TEXT("filePath"), TEXT(""));
+
+			TArray<TSharedPtr<FJsonValue>> Patterns;
+			TSharedPtr<FJsonObject> Pattern = MakeShared<FJsonObject>();
+			Pattern->SetStringField(TEXT("type"), TEXT("frame"));
+			Patterns.Add(MakeShared<FJsonValueObject>(Pattern));
+			BatchArgs->SetArrayField(TEXT("patterns"), Patterns);
+			// Keep full path geometry from MCP; otherwise path nodes become "..." and vector rendering breaks.
+			BatchArgs->SetBoolField(TEXT("includePathGeometry"), true);
+			BatchArgs->SetNumberField(TEXT("searchDepth"), 1);
+			BatchArgs->SetNumberField(TEXT("readDepth"), 99);
+
+			GConnector->GetClient().CallToolAsync(TEXT("batch_get"), BatchArgs,
+				[](bool bBatchOk, const FString& NodesJson)
+			{
+				if (!bBatchOk)
+				{
+					ShowNotification(LOCTEXT("BatchGetFailed", "Design2UMG: batch_get failed"), SNotificationItem::CS_Fail);
+					bInProgress = false;
+					return;
+				}
+
+				// 3. 异步 get_variables
+				if (!GConnector)
+				{
+					bInProgress = false;
+					return;
+				}
+
+				TSharedPtr<FJsonObject> VarsArgs = MakeShared<FJsonObject>();
+				VarsArgs->SetStringField(TEXT("filePath"), TEXT(""));
+
+				FString CapturedNodes = NodesJson;
+
+				GConnector->GetClient().CallToolAsync(TEXT("get_variables"), VarsArgs,
+					[CapturedNodes](bool bVarsOk, const FString& VarsJson)
+				{
+					FString FinalVars = bVarsOk ? VarsJson : TEXT("{}");
+					if (!bVarsOk)
+						UE_LOG(LogDesign2UMG, Warning, TEXT("ConnectToPencil: get_variables failed, using empty"));
+
+					OnMCPDataReady(CapturedNodes, FinalVars);
+					bInProgress = false;
+				});
+			});
+		};
+
 		if (!GConnector->IsRunning())
 		{
-			if (!GConnector->Launch())
+			ShowNotification(LOCTEXT("LaunchingMCP", "Design2UMG: Launching MCP Server..."), SNotificationItem::CS_Pending);
+			GConnector->LaunchAsync(0, [BeginFetch](bool bLaunchOk)
 			{
-				ShowNotification(LOCTEXT("LaunchFailed", "Design2UMG: Failed to launch MCP Server"), SNotificationItem::CS_Fail);
-				bInProgress = false;
-				return;
-			}
+				if (!bLaunchOk)
+				{
+					ShowNotification(LOCTEXT("LaunchFailed", "Design2UMG: Failed to launch MCP Server"), SNotificationItem::CS_Fail);
+					bInProgress = false;
+					return;
+				}
+				BeginFetch();
+			});
+			return;
 		}
 
-		ShowNotification(LOCTEXT("Connecting", "Design2UMG: Fetching design from Pencil..."), SNotificationItem::CS_Pending);
-
-		// 2. 异步 batch_get
-		TSharedPtr<FJsonObject> BatchArgs = MakeShared<FJsonObject>();
-		BatchArgs->SetStringField(TEXT("filePath"), TEXT(""));
-
-		TArray<TSharedPtr<FJsonValue>> Patterns;
-		TSharedPtr<FJsonObject> Pattern = MakeShared<FJsonObject>();
-		Pattern->SetStringField(TEXT("type"), TEXT("frame"));
-		Patterns.Add(MakeShared<FJsonValueObject>(Pattern));
-		BatchArgs->SetArrayField(TEXT("patterns"), Patterns);
-		// Keep full path geometry from MCP; otherwise path nodes become "..." and vector rendering breaks.
-		BatchArgs->SetBoolField(TEXT("includePathGeometry"), true);
-		BatchArgs->SetNumberField(TEXT("searchDepth"), 1);
-		BatchArgs->SetNumberField(TEXT("readDepth"), 99);
-
-		GConnector->GetClient().CallToolAsync(TEXT("batch_get"), BatchArgs,
-			[](bool bBatchOk, const FString& NodesJson)
-		{
-			if (!bBatchOk)
-			{
-				ShowNotification(LOCTEXT("BatchGetFailed", "Design2UMG: batch_get failed"), SNotificationItem::CS_Fail);
-				bInProgress = false;
-				return;
-			}
-
-			// 3. 异步 get_variables
-			if (!GConnector)
-			{
-				bInProgress = false;
-				return;
-			}
-
-			TSharedPtr<FJsonObject> VarsArgs = MakeShared<FJsonObject>();
-			VarsArgs->SetStringField(TEXT("filePath"), TEXT(""));
-
-			FString CapturedNodes = NodesJson;
-
-			GConnector->GetClient().CallToolAsync(TEXT("get_variables"), VarsArgs,
-				[CapturedNodes](bool bVarsOk, const FString& VarsJson)
-			{
-				FString FinalVars = bVarsOk ? VarsJson : TEXT("{}");
-				if (!bVarsOk)
-					UE_LOG(LogDesign2UMG, Warning, TEXT("ConnectToPencil: get_variables failed, using empty"));
-
-				OnMCPDataReady(CapturedNodes, FinalVars);
-				bInProgress = false;
-			});
-		});
+		BeginFetch();
 	}
 
 	/** 导入指定 TargetNodeId 的 frame */
@@ -293,7 +328,7 @@ namespace
 			return;
 		}
 
-		TArray<FPenFrameInfo> Frames = ExtractTopFrames(Document);
+		TArray<FDesignFrameInfo> Frames = ExtractTopFrames(Document);
 		if (Frames.Num() == 0)
 		{
 			UE_LOG(LogDesign2UMG, Error, TEXT("Design2UMG.Import: No frames found in %s"), *FilePath);
@@ -310,7 +345,7 @@ namespace
 				UE_LOG(LogDesign2UMG, Error, TEXT("Design2UMG.Import: Failed to read file: %s"), *FilePath);
 				return;
 			}
-			if (!FDesignSourceRegistry::Convert(TEXT("Pen"), JsonStr, Data))
+			if (!FDesignSourceFacade::ConvertBySource(TEXT("Pen"), JsonStr, Data))
 			{
 				UE_LOG(LogDesign2UMG, Error, TEXT("Design2UMG.Import: Convert failed: %s"), *FilePath);
 				return;
@@ -423,7 +458,7 @@ namespace
 										if (IdToUrl.Num() > 0)
 											FFigmaImageExporter::ApplyExportedImages(Doc->Children, IdToUrl);
 
-										FUMGWidgetData Data = FDesign2UMGConverter::Convert(*Doc);
+										FUMGWidgetData Data = FDesignSourceFacade::ConvertDocument(*Doc);
 										DesignImportUtils::ResolveImages(Data);
 
 										if (Data.RootWidget.Children.Num() == 0)
@@ -529,15 +564,15 @@ namespace
 		}
 
 		if (Node->Fill.bEnabled
-			&& Node->Fill.Type == EPenFillType::Color)
+			&& Node->Fill.Type == EDesignFillType::Color)
 		{
 			return true;
 		}
 
-		for (const FPenFill& Fill : Node->Fills)
+		for (const FDesignFill& Fill : Node->Fills)
 		{
 			if (Fill.bEnabled
-				&& Fill.Type == EPenFillType::Color)
+				&& Fill.Type == EDesignFillType::Color)
 			{
 				return true;
 			}
@@ -545,7 +580,7 @@ namespace
 
 		if (Node->Stroke.HasStroke()
 			&& Node->Stroke.Fill.bEnabled
-			&& Node->Stroke.Fill.Type == EPenFillType::Color)
+			&& Node->Stroke.Fill.Type == EDesignFillType::Color)
 		{
 			return true;
 		}
@@ -564,10 +599,10 @@ namespace
 				continue;
 
 			const bool bIsVector =
-				(Node->Type == EPenNodeType::Path) ||
-				(Node->Type == EPenNodeType::Line) ||
-				(Node->Type == EPenNodeType::Ellipse) ||
-				(Node->Type == EPenNodeType::Polygon);
+				(Node->Type == EDesignNodeType::Path) ||
+				(Node->Type == EDesignNodeType::Line) ||
+				(Node->Type == EDesignNodeType::Ellipse) ||
+				(Node->Type == EDesignNodeType::Polygon);
 
 			if (bIsVector && !Node->Fill.IsImage())
 			{
@@ -580,10 +615,10 @@ namespace
 						continue;
 					}
 
-					FPenFill ImgFill;
-					ImgFill.Type = EPenFillType::Image;
+					FDesignFill ImgFill;
+					ImgFill.Type = EDesignFillType::Image;
 					ImgFill.Image.Url = VecKey;
-					ImgFill.Image.Mode = EPenImageMode::Fill;
+					ImgFill.Image.Mode = EDesignImageMode::Fill;
 					Node->Fill = ImgFill;
 					Node->Fills.Empty();
 					Node->Fills.Add(ImgFill);
@@ -640,7 +675,7 @@ namespace
 
 		FFigmaParser::ApplyImageUrls(ParsedDoc, ImageRefToLocalPath);
 
-		FUMGWidgetData Data = FDesign2UMGConverter::Convert(ParsedDoc);
+		FUMGWidgetData Data = FDesignSourceFacade::ConvertDocument(ParsedDoc);
 		DesignImportUtils::ResolveImages(Data);
 
 		if (Data.RootWidget.Children.Num() == 0)
@@ -837,19 +872,7 @@ namespace
 
 void FDesign2UMGEditorModule::StartupModule()
 {
-	// 注册 Pen 数据源适配器
-	FDesignSourceRegistry::Register(TEXT("Pen"), [](const FString& RawJson, FUMGWidgetData& OutData){
-		return FPenImporter::ImportFromJson(RawJson, OutData);
-	});
-
-	// 注册 Figma 数据源适配器
-	FDesignSourceRegistry::Register(TEXT("Figma"), [](const FString& RawJson, FUMGWidgetData& OutData){
-		FDesignDocument Doc;
-		if (!FFigmaParser::ParseDocument(RawJson, Doc))
-			return false;
-		OutData = FDesign2UMGConverter::Convert(Doc);
-		return true;
-	});
+	RegisterBuiltInDesignSources();
 
 	IConsoleManager::Get().RegisterConsoleCommand(
 		TEXT("Design2UMG.PenConvert"),
@@ -1042,15 +1065,60 @@ void FDesign2UMGEditorModule::StartupModule()
 	// Design2UMG.FigmaImport 控制台命令
 	IConsoleManager::Get().RegisterConsoleCommand(
 		TEXT("Design2UMG.FigmaImport"),
-		TEXT("Import from Figma: Design2UMG.FigmaImport <file_url_or_key> <token>"),
+		TEXT("Import from Figma: Design2UMG.FigmaImport <file_url_or_key> [<token>] [--token-env=FIGMA_TOKEN]"),
 		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
 		{
-			if (Args.Num() < 2)
+			if (Args.Num() < 1)
 			{
-				UE_LOG(LogDesign2UMG, Warning, TEXT("Usage: Design2UMG.FigmaImport <file_url_or_key> <token>"));
+				UE_LOG(LogDesign2UMG, Warning, TEXT("Usage: Design2UMG.FigmaImport <file_url_or_key> [<token>] [--token-env=FIGMA_TOKEN] [--token=<token>]"));
 				return;
 			}
-			ImportFromFigma(Args[0], Args[1]);
+
+			const FString FileUrl = Args[0];
+			FString TokenEnvName = TEXT("FIGMA_TOKEN");
+			FString Token;
+			bool bUsedPlaintextToken = false;
+
+			for (int32 i = 1; i < Args.Num(); ++i)
+			{
+				const FString& Arg = Args[i];
+				if (Arg.StartsWith(TEXT("--token-env=")))
+				{
+					TokenEnvName = Arg.RightChop(12).TrimStartAndEnd();
+					continue;
+				}
+				if (Arg.StartsWith(TEXT("--token=")))
+				{
+					Token = Arg.RightChop(8);
+					bUsedPlaintextToken = !Token.IsEmpty();
+					continue;
+				}
+				if (Token.IsEmpty())
+				{
+					// Backward compatible positional token: Design2UMG.FigmaImport <file_url_or_key> <token>
+					Token = Arg;
+					bUsedPlaintextToken = !Token.IsEmpty();
+				}
+			}
+
+			if (Token.IsEmpty())
+			{
+				Token = FPlatformMisc::GetEnvironmentVariable(*TokenEnvName).TrimStartAndEnd();
+			}
+
+			if (Token.IsEmpty())
+			{
+				UE_LOG(LogDesign2UMG, Warning, TEXT("Figma token not found. Set env %s or pass token explicitly."), *TokenEnvName);
+				UE_LOG(LogDesign2UMG, Warning, TEXT("Recommended: set FIGMA_TOKEN and run Design2UMG.FigmaImport <file_url_or_key>"));
+				return;
+			}
+
+			if (bUsedPlaintextToken)
+			{
+				UE_LOG(LogDesign2UMG, Warning, TEXT("Security warning: plaintext token in command args is not recommended (shell history/log risk)."));
+			}
+
+			ImportFromFigma(FileUrl, Token);
 		}),
 		ECVF_Default);
 
@@ -1175,7 +1243,7 @@ void FDesign2UMGEditorModule::ShutdownModule()
 
 	// 清理静态缓存，避免热重载/插件卸载后残留过期数据
 	FFontResolver::ClearCache();
-	FPenPathRasterizer::ClearCache();
+	FDesignPathRasterizer::ClearCache();
 	FProceduralShapeGenerator::ReleaseTransientTextures();
 	FUMGWidgetUtils::ClearNodeIdMap();
 	FUMGWidgetUtils::EffectiveDesignSize = FIntPoint(1920, 1080);
@@ -1189,8 +1257,7 @@ void FDesign2UMGEditorModule::ShutdownModule()
 	IConsoleManager::Get().UnregisterConsoleObject(TEXT("Design2UMG.LocalFigmaImport"), false);
 
 	// 反注册数据源适配器
-	FDesignSourceRegistry::Unregister(TEXT("Pen"));
-	FDesignSourceRegistry::Unregister(TEXT("Figma"));
+	UnregisterBuiltInDesignSources();
 }
 
 #undef LOCTEXT_NAMESPACE

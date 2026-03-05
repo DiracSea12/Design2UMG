@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "PenImporter.h"
 #include "Design2UMGLog.h"
@@ -22,7 +22,7 @@
 
 #define LOCTEXT_NAMESPACE "PenImporter"
 
-int32 FImportResult::CountWidgets(const FUMGWidgetNode& Node)
+int32 FDesignImportResult::CountWidgets(const FUMGWidgetNode& Node)
 {
 	int32 Count = 1;
 	for (const auto& Child : Node.Children)
@@ -30,9 +30,9 @@ int32 FImportResult::CountWidgets(const FUMGWidgetNode& Node)
 	return Count;
 }
 
-FImportResult FImportResult::FromData(const FUMGWidgetData& Data, double Elapsed)
+FDesignImportResult FDesignImportResult::FromData(const FUMGWidgetData& Data, double Elapsed)
 {
-	FImportResult R;
+	FDesignImportResult R;
 	R.bSuccess = true;
 	R.WidgetCount = CountWidgets(Data.RootWidget);
 	R.WarningCount = Data.Warnings.Num();
@@ -41,7 +41,7 @@ FImportResult FImportResult::FromData(const FUMGWidgetData& Data, double Elapsed
 	return R;
 }
 
-void FImportResult::ShowSummaryDialog() const
+void FDesignImportResult::ShowSummaryDialog() const
 {
 	if (!FSlateApplication::IsInitialized())
 		return;
@@ -104,7 +104,7 @@ void FImportResult::ShowSummaryDialog() const
 	FSlateApplication::Get().AddWindow(Window);
 }
 
-void FImportResult::ShowSummaryNotification() const
+void FDesignImportResult::ShowSummaryNotification() const
 {
 	if (!bSuccess)
 		return;
@@ -221,3 +221,5 @@ bool FPenImporter::ImportFileWithTargetNode(const FString& FilePath, const FStri
 }
 
 #undef LOCTEXT_NAMESPACE
+
+

@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignSourceRegistry.h"
 #include "Design2UMGLog.h"
@@ -43,3 +43,4 @@ TMap<FName, FDesignSourceConvertFunc>& FDesignSourceRegistry::GetRegistry()
 	static TMap<FName, FDesignSourceConvertFunc> Registry;
 	return Registry;
 }
+

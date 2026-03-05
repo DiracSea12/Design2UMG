@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGWidgetUtils.h"
 #include "Design2UMGLog.h"
@@ -21,7 +21,7 @@
 #include "Components/SafeZoneSlot.h"
 
 // ============================================================================
-// Slot 属性应用（函数指针映射表模式）
+// Slot 灞炴€у簲鐢紙鍑芥暟鎸囬拡鏄犲皠琛ㄦā寮忥級
 // ============================================================================
 
 namespace
@@ -40,7 +40,7 @@ namespace
 		CS->SetAutoSize(S.bAutoSize);
 	}
 
-	// VBox/HBox Slot 共用逻辑
+	// VBox/HBox Slot 鍏辩敤閫昏緫
 	template<typename TSlot>
 	void ApplyBoxSlotCommon(TSlot* BoxSlot, const FUMGSlotData& S)
 	{
@@ -122,9 +122,9 @@ namespace
 	void ApplyBorderSlot(UPanelSlot* Slot, const FUMGSlotData& S)
 	{
 		UBorderSlot* BS = CastChecked<UBorderSlot>(Slot);
-		// UBorderSlot::SetPadding 内部会调用 UBorder::SetPadding，
-		// 会覆盖 ApplyBorderProps 中已设置的 Border padding。
-		// 只在 slot 显式指定了非零 padding 时才覆盖。
+		// UBorderSlot::SetPadding 鍐呴儴浼氳皟鐢?UBorder::SetPadding锛?
+		// 浼氳鐩?ApplyBorderProps 涓凡璁剧疆鐨?Border padding銆?
+		// 鍙湪 slot 鏄惧紡鎸囧畾浜嗛潪闆?padding 鏃舵墠瑕嗙洊銆?
 		const FUMGSlotData Default;
 		if (!FUMGWidgetUtils::IsNearlyEqualMargin(S.Padding, Default.Padding))
 		{
@@ -237,22 +237,22 @@ void FUMGWidgetUtils::ApplySlotProperties(UPanelSlot* Slot, const FUMGSlotData& 
 	{
 		if (bHasNonDefaultPadding || bHasNonDefaultBox || bHasNonDefaultGrid)
 		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("CanvasPanelSlot 忽略非Canvas字段（Padding/HAlign/VAlign/SizeRule/FillWeight/Row/Column等）"));
+			UE_LOG(LogDesign2UMG, Warning, TEXT("CanvasPanelSlot 蹇界暐闈濩anvas瀛楁锛圥adding/HAlign/VAlign/SizeRule/FillWeight/Row/Column绛夛級"));
 		}
 	}
 	else
 	{
 		if (bHasNonDefaultCanvas)
 		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("%s 忽略 Anchors/Offsets/Alignment"), *Slot->GetClass()->GetName());
+			UE_LOG(LogDesign2UMG, Warning, TEXT("%s 蹇界暐 Anchors/Offsets/Alignment"), *Slot->GetClass()->GetName());
 		}
 		if (!bIsGrid && bHasNonDefaultGrid)
 		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("%s 忽略 Row/Column/RowSpan/ColumnSpan"), *Slot->GetClass()->GetName());
+			UE_LOG(LogDesign2UMG, Warning, TEXT("%s 蹇界暐 Row/Column/RowSpan/ColumnSpan"), *Slot->GetClass()->GetName());
 		}
 		if (Slot->IsA<UScaleBoxSlot>() && bHasNonDefaultPadding)
 		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("ScaleBoxSlot 不支持 Padding"));
+			UE_LOG(LogDesign2UMG, Warning, TEXT("ScaleBoxSlot 涓嶆敮鎸?Padding"));
 		}
 	}
 
@@ -262,6 +262,7 @@ void FUMGWidgetUtils::ApplySlotProperties(UPanelSlot* Slot, const FUMGSlotData& 
 	}
 	else
 	{
-		UE_LOG(LogDesign2UMG, Warning, TEXT("未支持的Slot类型: %s"), *Slot->GetClass()->GetName());
+		UE_LOG(LogDesign2UMG, Warning, TEXT("鏈敮鎸佺殑Slot绫诲瀷: %s"), *Slot->GetClass()->GetName());
 	}
 }
+

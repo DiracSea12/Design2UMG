@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "FigmaImageExporter.h"
 #include "FigmaParser.h"
@@ -89,7 +89,7 @@ static void CollectVectorNodeIds(const TArray<TSharedPtr<FDesignNode>>& Nodes, T
 	for (const auto& Node : Nodes)
 	{
 		if (!Node) continue;
-		if (Node->Type == EPenNodeType::Path && !Node->Id.IsEmpty())
+		if (Node->Type == EDesignNodeType::Path && !Node->Id.IsEmpty())
 			OutIds.Add(Node->Id);
 		CollectVectorNodeIds(Node->Children, OutIds);
 	}
@@ -100,12 +100,12 @@ void FFigmaImageExporter::ApplyExportedImages(TArray<TSharedPtr<FDesignNode>>& N
 	for (auto& Node : Nodes)
 	{
 		if (!Node) continue;
-		if (Node->Type == EPenNodeType::Path)
+		if (Node->Type == EDesignNodeType::Path)
 		{
 			if (const FString* Url = IdToUrl.Find(Node->Id))
 			{
-				Node->Type = EPenNodeType::Rectangle;
-				Node->Fill.Type = EPenFillType::Image;
+				Node->Type = EDesignNodeType::Rectangle;
+				Node->Fill.Type = EDesignFillType::Image;
 				Node->Fill.Image.Url = *Url;
 				Node->Fills.Empty();
 				Node->Fills.Add(Node->Fill);
@@ -171,3 +171,5 @@ void FFigmaImageExporter::ExportVectorNodes(
 			if (OnComplete) OnComplete(true, IdToUrl);
 		});
 }
+
+

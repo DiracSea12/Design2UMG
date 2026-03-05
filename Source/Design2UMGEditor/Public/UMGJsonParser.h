@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -6,17 +6,17 @@
 #include "UMGSchema.h"
 
 /**
- * JSON 解析器 - 将 JSON 字符串解析为 UMG 数据结构
+ * JSON 瑙ｆ瀽鍣?- 灏?JSON 瀛楃涓茶В鏋愪负 UMG 鏁版嵁缁撴瀯
  */
 class FUMGJsonParser
 {
 public:
 	/**
-	 * 解析 JSON 字符串为 Widget 数据
-	 * @param JsonString JSON 字符串
-	 * @param OutWidgetData 输出的 Widget 数据
-	 * @param OutError 错误信息（可选）
-	 * @return 解析是否成功
+	 * 瑙ｆ瀽 JSON 瀛楃涓蹭负 Widget 鏁版嵁
+	 * @param JsonString JSON 瀛楃涓?
+	 * @param OutWidgetData 杈撳嚭鐨?Widget 鏁版嵁
+	 * @param OutError 閿欒淇℃伅锛堝彲閫夛級
+	 * @return 瑙ｆ瀽鏄惁鎴愬姛
 	 */
 	static bool ParseJson(const FString& JsonString, FUMGWidgetData& OutWidgetData, FString* OutError = nullptr);
 
@@ -28,3 +28,4 @@ private:
 	static void ParseOffsetsData(const TSharedPtr<class FJsonObject>& JsonObject, FUMGOffsetsData& OutOffsets);
 	static void ParseProperties(const TSharedPtr<class FJsonObject>& JsonObject, TMap<FString, FString>& OutProperties);
 };
+

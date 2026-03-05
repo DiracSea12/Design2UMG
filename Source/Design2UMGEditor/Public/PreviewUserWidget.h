@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -7,9 +7,9 @@
 #include "PreviewUserWidget.generated.h"
 
 /**
- * 非抽象的 UserWidget 子类，专门用于编辑器预览
- * UUserWidget 在 UE5 中被标记为 Abstract，不能直接实例化
- * 此类提供一个可实例化的替代方案用于临时预览
+ * 闈炴娊璞＄殑 UserWidget 瀛愮被锛屼笓闂ㄧ敤浜庣紪杈戝櫒棰勮
+ * UUserWidget 鍦?UE5 涓鏍囪涓?Abstract锛屼笉鑳界洿鎺ュ疄渚嬪寲
+ * 姝ょ被鎻愪緵涓€涓彲瀹炰緥鍖栫殑鏇夸唬鏂规鐢ㄤ簬涓存椂棰勮
  */
 UCLASS(MinimalAPI)
 class UPreviewUserWidget : public UUserWidget
@@ -19,3 +19,4 @@ class UPreviewUserWidget : public UUserWidget
 public:
 	UPreviewUserWidget(const FObjectInitializer& ObjectInitializer);
 };
+

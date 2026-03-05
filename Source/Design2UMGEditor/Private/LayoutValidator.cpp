@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "LayoutValidator.h"
 
@@ -7,13 +7,13 @@ float FLayoutValidator::CalculateBoundsError(
 	const FBounds& Expected,
 	const FIntPoint& DesignSize)
 {
-	// v2.2: 计算位置和尺寸误差，转换为像素
+	// v2.2: 璁＄畻浣嶇疆鍜屽昂瀵歌宸紝杞崲涓哄儚绱?
 	float ErrorX = FMath::Abs(Actual.X - Expected.X) * DesignSize.X;
 	float ErrorY = FMath::Abs(Actual.Y - Expected.Y) * DesignSize.Y;
 	float ErrorW = FMath::Abs(Actual.W - Expected.W) * DesignSize.X;
 	float ErrorH = FMath::Abs(Actual.H - Expected.H) * DesignSize.Y;
 
-	// 返回位置+尺寸平均误差
+	// 杩斿洖浣嶇疆+灏哄骞冲潎璇樊
 	float PosError = (ErrorX + ErrorY) * 0.5f;
 	float SizeError = (ErrorW + ErrorH) * 0.5f;
 	return FMath::Max(PosError, SizeError);
@@ -67,3 +67,4 @@ FLayoutMetrics FLayoutValidator::CalculateMetrics(
 
 	return Metrics;
 }
+

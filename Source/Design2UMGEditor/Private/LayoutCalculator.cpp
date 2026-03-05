@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "LayoutCalculator.h"
 
@@ -154,3 +154,4 @@ FUMGSlotData FLayoutCalculator::CalculateSlot(const FBounds& Bounds, const FLayo
 
 	return Slot;
 }
+

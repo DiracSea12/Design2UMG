@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGNotification.h"
 #include "Framework/Notifications/NotificationManager.h"
@@ -17,7 +17,7 @@ void FDesign2UMGNotification::Success(const FText& Message, const FString& Asset
 	{
 		Info.Hyperlink = FSimpleDelegate::CreateLambda([AssetPath]()
 		{
-			// 用 AssetRegistry 获取 FAssetData，避免同步加载完整对象
+			// 鐢?AssetRegistry 鑾峰彇 FAssetData锛岄伩鍏嶅悓姝ュ姞杞藉畬鏁村璞?
 			FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 			FAssetData AD = ARM.Get().GetAssetByObjectPath(FSoftObjectPath(AssetPath));
 			TArray<FAssetData> Assets;
@@ -58,3 +58,4 @@ void FDesign2UMGNotification::Error(const FText& Message)
 	if (auto Item = FSlateNotificationManager::Get().AddNotification(Info))
 		Item->SetCompletionState(SNotificationItem::CS_Fail);
 }
+

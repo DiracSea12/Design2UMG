@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "PenFileImportFactory.h"
 #include "Design2UMGLog.h"
@@ -57,7 +57,7 @@ UObject* UPenFileImportFactory::FactoryCreateFile(
 		return nullptr;
 	}
 
-	TArray<FPenFrameInfo> Frames = ::ExtractTopFrames(Document);
+	TArray<FDesignFrameInfo> Frames = ::ExtractTopFrames(Document);
 
 	if (Frames.Num() == 0)
 	{
@@ -172,4 +172,6 @@ void ImportWithTargetNode(const FString& FilePath, const FString& TargetNodeId, 
 } // anonymous namespace
 
 #undef LOCTEXT_NAMESPACE
+
+
 

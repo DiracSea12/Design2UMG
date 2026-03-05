@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignRemoteImageImporter.h"
 
@@ -18,9 +18,11 @@
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Misc/SecureHash.h"
+#include "Misc/FileHelper.h"
 #include "Modules/ModuleManager.h"
 #include "RenderingThread.h"
 #include "UObject/SavePackage.h"
+#include "TextureResource.h"
 
 namespace
 {
@@ -850,3 +852,4 @@ void FDesignRemoteImageImporter::ReleaseTransientTextures(TMap<FString, UTexture
 	}
 	InOutTextureMap.Empty();
 }
+

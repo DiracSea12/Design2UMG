@@ -1,44 +1,46 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "CoreMinimal.h"
 
+class FJsonObject;
+
 /**
- * MCP Streamable HTTP 客户端
- * 实现 JSON-RPC 2.0 + Mcp-Session-Id 协议
- * 响应格式为 SSE (text/event-stream)
+ * MCP Streamable HTTP 瀹㈡埛绔? * 瀹炵幇 JSON-RPC 2.0 + Mcp-Session-Id 鍗忚
+ * 鍝嶅簲鏍煎紡涓?SSE (text/event-stream)
  */
 class FMCPHttpClient
 {
 public:
 	/**
-	 * 连接到 MCP Server 并完成握手。
-	 * 内部执行：
-	 *   1. POST initialize (Accept: text/event-stream) → 从响应头提取 Mcp-Session-Id
-	 *   2. POST notifications/initialized (携带 Mcp-Session-Id)
-	 * 成功后 IsConnected() 返回 true。
+	 * 杩炴帴鍒?MCP Server 骞跺畬鎴愭彙鎵嬨€?
+	 * 鍐呴儴鎵ц锛?
+	 *   1. POST initialize (Accept: text/event-stream) 鈫?浠庡搷搴斿ご鎻愬彇 Mcp-Session-Id
+	 *   2. POST notifications/initialized (鎼哄甫 Mcp-Session-Id)
+	 * 鎴愬姛鍚?IsConnected() 杩斿洖 true銆?
 	 */
 	bool Connect(const FString& Endpoint);
+	void ConnectAsync(const FString& Endpoint, TFunction<void(bool bSuccess)> OnComplete);
 
-	/** 断开连接 */
+	/** 鏂紑杩炴帴 */
 	void Disconnect();
 
 	/**
-	 * 调用 MCP 工具（同步，阻塞 Game Thread）。
-	 * OutResult 为 result.content[0].text 解包后的纯 JSON 字符串。
+	 * 璋冪敤 MCP 宸ュ叿锛堝悓姝ワ紝闃诲 Game Thread锛夈€?
+	 * OutResult 涓?result.content[0].text 瑙ｅ寘鍚庣殑绾?JSON 瀛楃涓层€?
 	 *
-	 * 响应格式为 SSE，客户端提取 "data:" 行后的 JSON-RPC body。
-	 * 不支持并发调用，必须等上一次完成后再发起下一次。
+	 * 鍝嶅簲鏍煎紡涓?SSE锛屽鎴风鎻愬彇 "data:" 琛屽悗鐨?JSON-RPC body銆?
+	 * 涓嶆敮鎸佸苟鍙戣皟鐢紝蹇呴』绛変笂涓€娆″畬鎴愬悗鍐嶅彂璧蜂笅涓€娆°€?
 	 */
 	bool CallTool(const FString& ToolName,
 				  const TSharedPtr<FJsonObject>& Arguments,
 				  FString& OutResult);
 
 	/**
-	 * 调用 MCP 工具（异步，不阻塞 Game Thread）。
-	 * 回调在 Game Thread 触发。Result 格式同 CallTool。
-	 * 不支持并发调用，必须等上一次完成后再发起下一次。
+	 * 璋冪敤 MCP 宸ュ叿锛堝紓姝ワ紝涓嶉樆濉?Game Thread锛夈€?
+	 * 鍥炶皟鍦?Game Thread 瑙﹀彂銆俁esult 鏍煎紡鍚?CallTool銆?
+	 * 涓嶆敮鎸佸苟鍙戣皟鐢紝蹇呴』绛変笂涓€娆″畬鎴愬悗鍐嶅彂璧蜂笅涓€娆°€?
 	 */
 	void CallToolAsync(const FString& ToolName,
 					   const TSharedPtr<FJsonObject>& Arguments,
@@ -51,15 +53,21 @@ private:
 	FString SessionId;
 	int32 NextRequestId = 1;
 
-	/** 发送 JSON-RPC 请求并等待 SSE 响应 */
+	/** 鍙戦€?JSON-RPC 璇锋眰骞剁瓑寰?SSE 鍝嶅簲 */
 	bool SendRequest(const FString& Method,
 					 const TSharedPtr<FJsonObject>& Params,
 					 FString& OutResponseBody,
 					 bool bExpectResponse = true);
+	void SendRequestAsync(
+		const FString& Method,
+		const TSharedPtr<FJsonObject>& Params,
+		bool bExpectResponse,
+		TFunction<void(bool bSuccess, const FString& ResponseBody, const FString& NewSessionId)> OnComplete);
 
-	/** 从 SSE 响应体中提取 JSON-RPC result */
+	/** 浠?SSE 鍝嶅簲浣撲腑鎻愬彇 JSON-RPC result */
 	static bool ParseSSEResponse(const FString& SSEBody, TSharedPtr<FJsonObject>& OutResult);
 
-	/** 从 tools/call result 中提取 content[0].text */
+	/** 浠?tools/call result 涓彁鍙?content[0].text */
 	static bool ExtractToolResult(const TSharedPtr<FJsonObject>& Result, FString& OutText);
 };
+

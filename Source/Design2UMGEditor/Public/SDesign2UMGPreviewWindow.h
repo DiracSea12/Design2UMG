@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -40,7 +40,7 @@ private:
 	FOnPreviewConfirmed OnConfirmed;
 	FOnPreviewCancelled OnCancelled;
 
-	/** 预览用临时纹理，销毁时需释放 Root 引用 */
+	/** 棰勮鐢ㄤ复鏃剁汗鐞嗭紝閿€姣佹椂闇€閲婃斁 Root 寮曠敤 */
 	TMap<FString, UTexture2D*> PreviewTextureMap;
 
 	FReply OnGenerateClicked();
@@ -64,3 +64,4 @@ private:
 	void SchedulePreviewRefresh();
 	FTimerHandle PreviewRefreshTimerHandle;
 };
+

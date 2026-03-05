@@ -1,19 +1,21 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "DesignSchema.h"
-#include "PenVariableResolver.h"
+#include "DesignVariableResolver.h"
 
 /**
- * 组件引用展开：ExpandRef、DeepCopy、Descendants 覆盖、ReTheme
+ * 缁勪欢寮曠敤灞曞紑锛欵xpandRef銆丏eepCopy銆丏escendants 瑕嗙洊銆丷eTheme
  */
 class FRefExpander
 {
 public:
 	static TSharedPtr<FDesignNode> ExpandRef(const TSharedPtr<FDesignNode>& RefNode, const FDesignDocument& Doc);
-	static void ReThemeNode(TSharedPtr<FDesignNode>& Node, const FPenVariableResolver& Resolver);
+	static void ReThemeNode(TSharedPtr<FDesignNode>& Node, const FDesignVariableResolver& Resolver);
 	static TSharedPtr<FDesignNode> DeepCopyNode(const TSharedPtr<FDesignNode>& Source);
 	static void ApplyDescendantOverride(TSharedPtr<FDesignNode>& Node, const FString& Path, const TSharedPtr<FDesignNode>& Override);
 };
+
+

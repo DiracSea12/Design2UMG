@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGGenerator.h"
 #include "UMGWidgetUtils.h"
@@ -17,6 +17,54 @@
 
 namespace
 {
+	void ApplyDesignPreviewSize(UWidgetBlueprint* WBP, const FIntPoint& DesignSize, const TCHAR* Phase)
+	{
+		if (!WBP)
+		{
+			return;
+		}
+
+		UClass* GeneratedClass = WBP->GeneratedClass;
+		if (!GeneratedClass)
+		{
+			UE_LOG(LogDesign2UMG, Warning, TEXT("ApplyDesignPreviewSize(%s): GeneratedClass is null"), Phase ? Phase : TEXT("unknown"));
+			return;
+		}
+
+		UUserWidget* CDO = Cast<UUserWidget>(GeneratedClass->GetDefaultObject());
+		if (!CDO)
+		{
+			UE_LOG(LogDesign2UMG, Warning, TEXT("ApplyDesignPreviewSize(%s): Failed to get UUserWidget CDO"), Phase ? Phase : TEXT("unknown"));
+			return;
+		}
+
+		CDO->DesignTimeSize = FVector2D(DesignSize.X, DesignSize.Y);
+		CDO->DesignSizeMode = EDesignPreviewSizeMode::Custom;
+		UE_LOG(LogDesign2UMG, Log, TEXT("Set DesignTimeSize to %.0fx%.0f (mode=Custom, phase=%s)"),
+			CDO->DesignTimeSize.X, CDO->DesignTimeSize.Y, Phase ? Phase : TEXT("unknown"));
+	}
+
+	FIntPoint ReadDesignPreviewSize(UWidgetBlueprint* WBP)
+	{
+		if (!WBP || !WBP->GeneratedClass)
+		{
+			return FIntPoint::ZeroValue;
+		}
+
+		if (UUserWidget* CDO = Cast<UUserWidget>(WBP->GeneratedClass->GetDefaultObject()))
+		{
+			const FVector2D CurrentSize = CDO->DesignTimeSize;
+			if (CurrentSize.X > 1.0f && CurrentSize.Y > 1.0f)
+			{
+				return FIntPoint(
+					FMath::RoundToInt(CurrentSize.X),
+					FMath::RoundToInt(CurrentSize.Y));
+			}
+		}
+
+		return FIntPoint::ZeroValue;
+	}
+
 	FUMGSlotData MakeCanvasFillSlot()
 	{
 		FUMGSlotData Slot;
@@ -244,17 +292,8 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 	}
 	WBP->WidgetTree->RootWidget = Root;
 
-	// 设置编辑器显示尺寸到 CDO，避免编辑器中显示偏差
-	if (UClass* GeneratedClass = WBP->GeneratedClass)
-	{
-		if (UUserWidget* CDO = Cast<UUserWidget>(GeneratedClass->GetDefaultObject()))
-		{
-			CDO->DesignTimeSize = FVector2D(DesignSize.X, DesignSize.Y);
-			CDO->DesignSizeMode = EDesignPreviewSizeMode::Custom;
-			UE_LOG(LogDesign2UMG, Log, TEXT("Set DesignTimeSize to %.0fx%.0f (mode=Custom)"),
-				CDO->DesignTimeSize.X, CDO->DesignTimeSize.Y);
-		}
-	}
+	// 设置编辑器显示尺寸到 CDO；保存时会在编译后再次回写，避免编译重置默认值。
+	ApplyDesignPreviewSize(WBP, DesignSize, TEXT("pre-compile"));
 
 	Package->MarkPackageDirty();
 	FAssetRegistryModule::AssetCreated(WBP);
@@ -267,6 +306,12 @@ void FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP)
 {
 	if (!WBP) return;
 
+	FIntPoint DesiredDesignSize = ReadDesignPreviewSize(WBP);
+	if (DesiredDesignSize.X <= 1 || DesiredDesignSize.Y <= 1)
+	{
+		DesiredDesignSize = UDesign2UMGSettings::Get()->GetDesignSize();
+	}
+
 	// 编译（此时 transient 纹理数据可能丢失，但渲染已完成）
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WBP);
 
@@ -274,6 +319,7 @@ void FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP)
 	// 清除后让 CompileBlueprint 走 IsEmpty() 分支从 widget tree 重建，避免 stale entry
 	WBP->WidgetVariableNameToGuidMap.Empty();
 	FKismetEditorUtilities::CompileBlueprint(WBP);
+	ApplyDesignPreviewSize(WBP, DesiredDesignSize, TEXT("post-compile"));
 
 	UPackage* Package = WBP->GetOutermost();
 	FString FullPath = Package->GetName();
@@ -284,3 +330,4 @@ void FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP)
 
 	UE_LOG(LogDesign2UMG, Log, TEXT("Saved Widget Blueprint at %s"), *FullPath);
 }
+

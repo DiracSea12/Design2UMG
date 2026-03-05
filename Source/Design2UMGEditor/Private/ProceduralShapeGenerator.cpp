@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. PDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "ProceduralShapeGenerator.h"
 #include "UMGWidgetUtils.h"
@@ -7,6 +7,7 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "RenderingThread.h"
+#include "TextureResource.h"
 
 TArray<TWeakObjectPtr<UTexture2D>> FProceduralShapeGenerator::RootedTextures;
 bool FProceduralShapeGenerator::bHasPendingTextureUpdates = false;
@@ -733,6 +734,9 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 	float CornerRadius = 0.2f;
 	float CornerRadii[4] = { -1.f, -1.f, -1.f, -1.f }; // TL, TR, BR, BL; -1 = not set
 	float RotationDeg = 0.0f;
+	FLinearColor StripeColor = FLinearColor(0.67f, 0.58f, 0.94f, 0.66f);
+	int32 StripeWidthPx = 2;
+	int32 StripeGapPx = 6;
 	TArray<FGradientStop> MultiStops;
 
 	if (const FString* ParamsStr = Properties.Find(TEXT("MaterialParams")))
@@ -769,6 +773,12 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 
 			if (Params->TryGetNumberField(TEXT("Rotation"), NumVal))
 				RotationDeg = static_cast<float>(NumVal);
+			if (Params->TryGetStringField(TEXT("StripeColor"), ColorStr))
+				StripeColor = FUMGWidgetUtils::ParseColor(ColorStr);
+			if (Params->TryGetNumberField(TEXT("StripeWidth"), NumVal))
+				StripeWidthPx = FMath::Max(1, FMath::RoundToInt(static_cast<float>(NumVal)));
+			if (Params->TryGetNumberField(TEXT("StripeGap"), NumVal))
+				StripeGapPx = FMath::Max(1, FMath::RoundToInt(static_cast<float>(NumVal)));
 
 			// 多色标渐变 Stops 数组
 			const TArray<TSharedPtr<FJsonValue>>* StopsArr = nullptr;
@@ -855,6 +865,32 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 			return GenerateBoxShadow(Width, Height, Color, CornerRadii[0], CornerRadii[1], CornerRadii[2], CornerRadii[3], BlurPx, Outer);
 		return GenerateBoxShadow(Width, Height, Color, CornerRadius, BlurPx, Outer);
 	}
+	if (Shape == TEXT("placeholderhatch"))
+	{
+		UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer);
+		if (!Texture)
+			return nullptr;
+
+		TArray<FColor> Pixels;
+		Pixels.SetNumUninitialized(Width * Height);
+
+		const FColor BgColor = Color.ToFColor(true);
+		const FColor LineColor = StripeColor.ToFColor(true);
+		const int32 Period = FMath::Max(1, StripeWidthPx + StripeGapPx);
+
+		for (int32 Y = 0; Y < Height; ++Y)
+		{
+			for (int32 X = 0; X < Width; ++X)
+			{
+				const bool bOnStripe = ((X + Y) % Period) < StripeWidthPx;
+				Pixels[Y * Width + X] = bOnStripe ? LineColor : BgColor;
+			}
+		}
+
+		FillTextureData(Texture, Pixels);
+		return Texture;
+	}
 
 	return nullptr;
 }
+
