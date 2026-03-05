@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { font-family: Inter, sans-serif; font-size: 12px; margin: 0; padding: 12px; background: #2c2c2c; color: #e0e0e0; }
+  h3 { margin: 0 0 8px; font-size: 13px; }
+  .row { display: flex; align-items: center; margin-bottom: 8px; gap: 8px; }
+  label { min-width: 70px; }
+  input[type=text] { flex: 1; padding: 4px 6px; border: 1px solid #555; border-radius: 4px; background: #3c3c3c; color: #e0e0e0; font-size: 12px; }
+  button { padding: 6px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600; }
+  #exportBtn { background: #18a0fb; color: #fff; width: 100%; margin-top: 4px; }
+  #exportBtn:hover { background: #0d8ce0; }
+  #exportBtn:disabled { background: #555; cursor: not-allowed; }
+  #progress { margin-top: 8px; display: none; }
+  #progressBar { width: 100%; height: 6px; background: #444; border-radius: 3px; overflow: hidden; }
+  #progressFill { height: 100%; background: #18a0fb; width: 0%; transition: width 0.2s; }
+  #status { margin-top: 4px; font-size: 11px; color: #aaa; }
+  .warn { color: #f5a623; font-size: 11px; margin-top: 8px; }
+</style>
+</head>
+<body>
+  <h3>Design2UMG Exporter</h3>
+  <div class="row">
+    <label>Scale:</label>
+    <input type="text" id="scale" value="2" style="width:40px;flex:none" />
+  </div>
+  <button id="exportBtn">Export Selected Frame</button>
+  <div id="progress">
+    <div id="progressBar"><div id="progressFill"></div></div>
+    <div id="status">Preparing...</div>
+  </div>
+  <div class="warn" id="hint">Select a frame in Figma, then click Export.</div>
+
+  <script>
+    const btn = document.getElementById('exportBtn');
+    const progressDiv = document.getElementById('progress');
+    const progressFill = document.getElementById('progressFill');
+    const statusEl = document.getElementById('status');
+    const hintEl = document.getElementById('hint');
+
+    btn.onclick = () => {
+      const scale = parseFloat(document.getElementById('scale').value) || 2;
+      btn.disabled = true;
+      progressDiv.style.display = 'block';
+      hintEl.textContent = '';
+      parent.postMessage({ pluginMessage: { type: 'export', scale } }, '*');
+    };
+
+    // Minimal store-only ZIP builder (no compression, PNGs are already compressed)
+    function buildZip(files) {
+      const enc = new TextEncoder();
+      const parts = [];
+      const central = [];
+      let offset = 0;
+      for (const f of files) {
+        const name = enc.encode(f.name);
+        const data = f.data;
+        const crc = crc32(data);
+        // Local file header (30 + name.length)
+        const lh = new Uint8Array(30 + name.length);
+        const lv = new DataView(lh.buffer);
+        lv.setUint32(0, 0x04034b50, true);  // signature
+        lv.setUint16(4, 20, true);           // version needed
+        lv.setUint32(14, crc, true);         // crc32
+        lv.setUint32(18, data.length, true); // compressed size
+        lv.setUint32(22, data.length, true); // uncompressed size
+        lv.setUint16(26, name.length, true); // filename length
+        lh.set(name, 30);
+        // Central directory entry (46 + name.length)
+        const ch = new Uint8Array(46 + name.length);
+        const cv = new DataView(ch.buffer);
+        cv.setUint32(0, 0x02014b50, true);
+        cv.setUint16(4, 20, true);
+        cv.setUint16(6, 20, true);
+        cv.setUint32(16, crc, true);
+        cv.setUint32(20, data.length, true);
+        cv.setUint32(24, data.length, true);
+        cv.setUint16(28, name.length, true);
+        cv.setUint32(42, offset, true);      // local header offset
+        ch.set(name, 46);
+        parts.push(lh, data);
+        central.push(ch);
+        offset += lh.length + data.length;
+      }
+      const cdOffset = offset;
+      let cdSize = 0;
+      for (const c of central) { parts.push(c); cdSize += c.length; }
+      // End of central directory (22 bytes)
+      const eocd = new Uint8Array(22);
+      const ev = new DataView(eocd.buffer);
+      ev.setUint32(0, 0x06054b50, true);
+      ev.setUint16(8, files.length, true);
+      ev.setUint16(10, files.length, true);
+      ev.setUint32(12, cdSize, true);
+      ev.setUint32(16, cdOffset, true);
+      parts.push(eocd);
+      return new Blob(parts, { type: 'application/zip' });
+    }
+
+    // CRC32 lookup table
+    const crcTable = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let c = i;
+      for (let j = 0; j < 8; j++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      crcTable[i] = c;
+    }
+    function crc32(buf) {
+      let crc = 0xFFFFFFFF;
+      for (let i = 0; i < buf.length; i++) crc = crcTable[(crc ^ buf[i]) & 0xFF] ^ (crc >>> 8);
+      return (crc ^ 0xFFFFFFFF) >>> 0;
+    }
+
+    function handleDone(msg) {
+      const files = [];
+      const jsonBytes = new TextEncoder().encode(msg.json);
+      files.push({ name: 'design.json', data: jsonBytes });
+      for (const img of (msg.images || [])) {
+        files.push({ name: 'images/' + img.name + '.png', data: new Uint8Array(img.data) });
+      }
+      const zip = buildZip(files);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(zip);
+      a.download = 'figma_export.zip';
+      a.click();
+      URL.revokeObjectURL(a.href);
+      statusEl.textContent = 'Done!';
+      hintEl.textContent = 'Downloaded figma_export.zip — extract and import in UE5.';
+      hintEl.style.color = '#1bc47d';
+      btn.disabled = false;
+    }
+
+    onmessage = (e) => {
+      const msg = e.data.pluginMessage;
+      if (!msg) return;
+      if (msg.type === 'progress') {
+        progressFill.style.width = msg.percent + '%';
+        statusEl.textContent = msg.text;
+      } else if (msg.type === 'done') {
+        progressFill.style.width = '100%';
+        statusEl.textContent = msg.text;
+        handleDone(msg);
+      } else if (msg.type === 'error') {
+        statusEl.textContent = msg.text;
+        btn.disabled = false;
+        hintEl.textContent = msg.text;
+        hintEl.style.color = '#f55';
+      }
+    };
+  </script>
+</body>
+</html>

@@ -5,6 +5,7 @@ Convert design files into Unreal Engine 5 UMG Widget Blueprints.
 Supported inputs:
 - Pencil `.pen` files
 - Figma REST API
+- Figma desktop local exporter package (`design.json` + `images/`)
 - Live Pencil MCP connection
 
 ![Light Theme](Docs/Images/step1_light_theme.png)
@@ -80,6 +81,12 @@ Design2UMG.FigmaImport <file_url_or_key> --token-env=FIGMA_TOKEN
 Design2UMG.LocalFigmaImport <design.json> [--out=/Game/Path] [--no-preview]
 ```
 
+When Figma REST API is unavailable (for example, token/quota constraints), use the local exporter in [`Tools/FigmaExporter`](Tools/FigmaExporter/README.md):
+
+1. Install the local Figma plugin from `Tools/FigmaExporter/manifest.json`.
+2. Export selected frame to `figma_export.zip`.
+3. Extract and import the generated `design.json` with `Design2UMG.LocalFigmaImport`.
+
 ### 4. Import from MCP JSON files
 
 ```text
@@ -116,6 +123,10 @@ Key principle: **Bounds is the source of truth** for layout projection.
 ## Known Limitations
 
 See [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) for the current list and mitigation notes.
+
+## Examples
+
+Sample design inputs are available under [`Examples/`](Examples), including dashboard/login/HUD and a compact card sample.
 
 ## Contributing
 

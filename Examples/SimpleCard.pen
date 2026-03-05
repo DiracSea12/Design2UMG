@@ -1,0 +1,57 @@
+{
+  "version": "1.0",
+  "children": [
+    {
+      "id": "card",
+      "type": "frame",
+      "name": "SimpleCard",
+      "width": 320,
+      "height": 200,
+      "layout": "vertical",
+      "padding": [20, 20, 20, 20],
+      "gap": 12,
+      "fill": "#FFFFFF",
+      "cornerRadius": 12,
+      "children": [
+        {
+          "id": "title",
+          "type": "text",
+          "name": "Title",
+          "width": "fill_container",
+          "height": "fit_content",
+          "content": "Card Title",
+          "fontSize": 24,
+          "fontWeight": "bold",
+          "fill": "#1A1A2E"
+        },
+        {
+          "id": "desc",
+          "type": "text",
+          "name": "Description",
+          "width": "fill_container",
+          "height": "fit_content",
+          "content": "This is a simple card with a title, description, and a colored accent bar.",
+          "fontSize": 14,
+          "fill": "#666666",
+          "textGrowth": "fixed-width"
+        },
+        {
+          "id": "spacer_frame",
+          "type": "frame",
+          "name": "Spacer",
+          "width": "fill_container",
+          "height": "fill_container"
+        },
+        {
+          "id": "accent",
+          "type": "rectangle",
+          "name": "AccentBar",
+          "width": "fill_container",
+          "height": 4,
+          "fill": "#E94560",
+          "cornerRadius": 2
+        }
+      ]
+    }
+  ]
+}

@@ -6,6 +6,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- Local Figma exporter tool under `Tools/FigmaExporter` (manifest/UI/serializer) for offline `design.json + images/` export flow.
+- `Examples/SimpleCard.pen` lightweight input sample for quick pipeline smoke tests.
+
 ### Changed
 - Release hygiene cleanup for GitHub publishing (docs, CI, ignore rules).
 - Figma import command now supports environment-variable token flow and warns on plaintext CLI token usage.
