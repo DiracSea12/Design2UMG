@@ -1,31 +1,172 @@
-name: Build Check
+﻿name: Plugin CI
 
 on:
   push:
-    branches: [main]
+    branches: [master, main]
   pull_request:
-    branches: [main]
+    branches: [master, main]
+  workflow_dispatch:
 
 jobs:
-  build:
+  repository-hygiene:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        ue-version: ['5.4', '5.5', '5.6', '5.7']
-
     steps:
       - uses: actions/checkout@v4
 
-      # UE5 plugin CI requires a self-hosted runner with engine installed,
-      # or a third-party action like unrealcontainers/unreal-ci.
-      # This is a template — adapt to your build infrastructure.
-
-      - name: Build Plugin (UE ${{ matrix.ue-version }})
+      - name: Verify required files exist
         run: |
-          echo "TODO: Configure UE ${{ matrix.ue-version }} build environment"
-          echo "Example with UnrealBuildTool:"
-          echo "  UnrealBuildTool.exe PenToUMGEditor Win64 Development -Plugin=PenToUMG.uplugin"
-          # Uncomment and adapt when self-hosted runner is ready:
-          # $UE_ROOT/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.exe \
-          #   PenToUMGEditor Win64 Development \
-          #   -Plugin="${{ github.workspace }}/PenToUMG.uplugin"
+          test -f Design2UMG.uplugin
+          test -f README.md
+          test -f Source/Design2UMGEditor/Private/Tests/Fixtures/FigmaComplex.json
+          test -f Source/Design2UMGEditor/Private/Tests/Fixtures/FigmaRealDashboard.json
+
+      - name: Fail on local-only tracked files
+        run: |
+          if git ls-files | grep -E '^\.cowork-temp/|^\.claude/|^\.codex/|^openspec/|^ocr_result\.txt$|^CLAUDE\.md$|^Design2UMG[^/]*/|^capture_editor_screenshot\.py$|^capture_umg_screenshot\.py$|^compare_coordinates\.py$|^screenshot\.ps1$|^screenshot\.py$|^show_expected_coords\.py$|^test_import\.py$|^verify_coords\.py$|^verify_design_size\.py$|^editor_screenshot\.png$'; then
+            echo "Local-only files are tracked. Remove them before release."
+            exit 1
+          fi
+
+      - name: Encoding guard (tracked text files)
+        run: |
+          python - <<'PY'
+          import subprocess
+          from pathlib import Path
+          import sys
+
+          exts = {".h", ".hpp", ".cpp", ".cs", ".py", ".md", ".json", ".yml", ".yaml"}
+          tracked = subprocess.check_output(["git", "ls-files"], text=True).splitlines()
+          files = []
+          for rel in tracked:
+              p = Path(rel)
+              if p.suffix.lower() in exts and p.exists():
+                  files.append(p)
+
+          if not files:
+              print("No tracked text files matched encoding guard.")
+              sys.exit(1)
+
+          non_bom = []
+          decode_errors = []
+          mojibake_hits = []
+          mojibake_markers = ("Design2UMG鍥剧墖", "\ufffd")
+
+          for p in files:
+              data = p.read_bytes()
+              if not data.startswith(b"\xef\xbb\xbf"):
+                  non_bom.append(str(p))
+                  continue
+
+              try:
+                  text = data.decode("utf-8-sig")
+              except UnicodeDecodeError:
+                  decode_errors.append(str(p))
+                  continue
+
+              if any(marker in text for marker in mojibake_markers):
+                  mojibake_hits.append(str(p))
+
+          if non_bom:
+              print("UTF-8 BOM check failed:")
+              for item in non_bom:
+                  print(" -", item)
+              sys.exit(1)
+
+          if decode_errors:
+              print("UTF-8 decode check failed:")
+              for item in decode_errors:
+                  print(" -", item)
+              sys.exit(1)
+
+          if mojibake_hits:
+              print("Mojibake marker check failed:")
+              for item in mojibake_hits:
+                  print(" -", item)
+              sys.exit(1)
+          PY
+
+  build-plugin:
+    runs-on: [self-hosted, windows, ue5]
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build plugin package with RunUAT
+        run: |
+          if (-not $env:UE_ROOT) {
+            throw "UE_ROOT is not set on runner. Point it to your UnrealEngine root."
+          }
+
+          $uat = Join-Path $env:UE_ROOT "Engine\Build\BatchFiles\RunUAT.bat"
+          if (-not (Test-Path $uat)) {
+            throw "RunUAT not found at: $uat"
+          }
+
+          & $uat BuildPlugin `
+            -Plugin="$pwd\Design2UMG.uplugin" `
+            -Package="$pwd\dist\Design2UMG" `
+            -Rocket `
+            -StrictIncludes
+
+      - name: Run Design2UMG automation tests
+        run: |
+          if (-not $env:UE_ROOT) {
+            throw "UE_ROOT is not set on runner."
+          }
+          if (-not $env:UE_AUTOMATION_PROJECT) {
+            throw "UE_AUTOMATION_PROJECT is not set. Example: G:\\UE5\\FPSRoguelike\\FPSRoguelike.uproject"
+          }
+
+          $editor = Join-Path $env:UE_ROOT "Engine\Binaries\Win64\UnrealEditor-Cmd.exe"
+          if (-not (Test-Path $editor)) {
+            throw "UnrealEditor-Cmd.exe not found at: $editor"
+          }
+
+          $logDir = Join-Path $pwd "Saved\Logs"
+          New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+          $logPath = Join-Path $logDir "Design2UMG-Automation.log"
+
+          & $editor $env:UE_AUTOMATION_PROJECT `
+            -unattended -nop4 -nosplash -NoSound -NullRHI `
+            -TestExit="Automation Test Queue Empty" `
+            "-ExecCmds=Automation RunTests Design2UMG; Quit" `
+            "-log=$logPath"
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Automation command failed with exit code $LASTEXITCODE"
+          }
+          if (-not (Test-Path $logPath)) {
+            throw "Automation log not found: $logPath"
+          }
+          if (Select-String -Path $logPath -Pattern "Found 0 automation tests" -Quiet) {
+            throw "No Design2UMG automation tests were discovered."
+          }
+
+          $failurePatterns = @(
+            "Automation Test Failed",
+            "Result=\{Failed\}",
+            "Result=\{Fail\}",
+            "Result=\{`u5931`u8d25\}"
+          )
+          if (Select-String -Path $logPath -Pattern $failurePatterns -Quiet) {
+            throw "Design2UMG automation tests failed. Inspect the uploaded log artifact."
+          }
+
+      - name: Upload plugin package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Design2UMG-Win64-Plugin
+          path: dist/Design2UMG
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload automation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Design2UMG-Automation-Logs
+          path: Saved/Logs/Design2UMG-Automation.log
+          if-no-files-found: warn
+          retention-days: 14
