@@ -1,44 +1,87 @@
-# UE5 build artifacts
+﻿# UE build artifacts
 Binaries/
 Intermediate/
 Saved/
 DerivedDataCache/
 
-# Debug symbols & libraries
+# Debug symbols and local binaries
 *.pdb
 *.lib
 *.dll
 
-# IDE
+# IDE and OS
 .vs/
 .idea/
 .vscode/
-.vscode/settings.json
-
-# OS
 Thumbs.db
 .DS_Store
 Desktop.ini
 
-# Project-specific
+# Local workspace noise (must not be released)
+.cowork-temp/
+.claude/
+.codex/
+openspec/
+tmpclaude-*
 nul
 CLAUDE.md
-tmpclaude-*
-specs/
-Docs/LessonsLearned.md
-Source/Design2UMGEditor/Private/image/
+Design2UMG*/
 
-# 文档和非代码文件
-*.md
-!KNOWN_LIMITATIONS.md
-!CHANGELOG.md
-Docs/
+# Local helper outputs
+progress.txt
+ocr_result.txt
+editor_current.png
+editor_screen.png
+top_region.png
+umg_editor_open.png
+umg_verify.png
+editor_screenshot.png
+capture_editor_screenshot.py
+capture_umg_screenshot.py
+compare_coordinates.py
+screenshot.ps1
+screenshot.py
+show_expected_coords.py
+test_import.py
+verify_coords.py
+verify_design_size.py
+
+# Script caches / local dependencies
+__pycache__/
+*.pyc
+Tools/FigmaExporter/node_modules/
+
+# Local review artifacts (non-release)
 AGENTS.md
-ENCODING_GUARD.md
-prd.json
-
-# 测试 fixtures 和工具脚本
-Source/Design2UMGEditor/Private/Tests/Fixtures/*.json
-Source/Design2UMGEditor/Private/Tests/Fixtures/*.py
-Examples/
-Tools/
+Docs/LessonsLearned.md
+Docs/NodeReview.md
+Docs/ProductPolishPlan.md
+Docs/node*.md
+Docs/verify_h_batch*.md
+Tools/comparison_results/
+Tools/*step*.png
+Tools/*viewport*.png
+Tools/*hierarchy*.png
+Tools/*details*.png
+Tools/*table*.png
+Tools/*_full.png
+Tools/comparison_step1.png
+Tools/designer_step1.png
+Tools/design_step1_layout.png
+Tools/sim_*.png
+Tools/welcome_*.png
+Tools/ue_editor_screenshot*.png
+Tools/analyze_pen.py
+Tools/pen2umg_sim.py
+Tools/render_pen_layout.py
+Tools/ue_compare.py
+analyze_screenshot.py
+analyze_with_vision.py
+fix_design_size.py
+ocr_canvas_size.py
+open_umg.py
+open_umg_asset.py
+query_design_size.py
+reimport_pen.py
+take_screenshot.py
+verify_umg_display.py
