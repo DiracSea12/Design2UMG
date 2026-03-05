@@ -85,3 +85,5 @@ query_design_size.py
 reimport_pen.py
 take_screenshot.py
 verify_umg_display.py
+prd.json
+specs/
