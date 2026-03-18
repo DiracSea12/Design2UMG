@@ -13,8 +13,7 @@ class FUMGJsonParser
 public:
 	/**
 	 * 瑙ｆ瀽 JSON 瀛楃涓蹭负 Widget 鏁版嵁
-	 * @param JsonString JSON 瀛楃涓?
-	 * @param OutWidgetData 杈撳嚭鐨?Widget 鏁版嵁
+	 * @param JsonString JSON 瀛楃涓?	 * @param OutWidgetData 杈撳嚭鐨?Widget 鏁版嵁
 	 * @param OutError 閿欒淇℃伅锛堝彲閫夛級
 	 * @return 瑙ｆ瀽鏄惁鎴愬姛
 	 */

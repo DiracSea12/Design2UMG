@@ -5,7 +5,6 @@
 #include "Design2UMGNotification.h"
 #include "Design2UMGSettings.h"
 #include "DesignSchema.h"
-#include "AssetRegistry/AssetData.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Engine/Font.h"
 #include "Engine/FontFace.h"
@@ -30,7 +29,7 @@ namespace
 	bool bProjectFontIndexBuilt = false;
 	FCriticalSection GFontIndexMutex;
 
-	FString NormalizeFontFamilyKey(const FString& InFamily)
+	FString NormalizeFontFamilyKeyForResolver(const FString& InFamily)
 	{
 		FString Key = InFamily.ToLower().TrimStartAndEnd();
 		Key.ReplaceInline(TEXT(" "), TEXT(""));
@@ -41,7 +40,7 @@ namespace
 
 	void IndexFontAssetName(const FString& AssetName, const FString& ObjectPath)
 	{
-		const FString Normalized = NormalizeFontFamilyKey(AssetName);
+		const FString Normalized = NormalizeFontFamilyKeyForResolver(AssetName);
 		if (!Normalized.IsEmpty())
 		{
 			GNormalizedProjectFontAssetIndex.FindOrAdd(Normalized, ObjectPath);
@@ -83,7 +82,7 @@ namespace
 
 	bool TryResolveEngineFontFallback(const FString& FontFamily, FString& OutAssetPath)
 	{
-		const FString Normalized = NormalizeFontFamilyKey(FontFamily);
+		const FString Normalized = NormalizeFontFamilyKeyForResolver(FontFamily);
 		if (Normalized == TEXT("roboto"))
 		{
 			const FString RobotoPath = TEXT("/Engine/EngineFonts/Roboto.Roboto");
@@ -112,6 +111,27 @@ namespace
 		};
 		return KnownUrls;
 	}
+
+	const TSet<FString>& GetKnownCssFontFamilies()
+	{
+		static const TSet<FString> KnownCssFamilies = {
+			TEXT("inter"),
+			TEXT("rubik"),
+			TEXT("funneldisplay"),
+			TEXT("geist"),
+			TEXT("jetbrainsmono"),
+			TEXT("oxygen"),
+		};
+		return KnownCssFamilies;
+	}
+
+	const TArray<int32>& GetKnownCssFontWeights()
+	{
+		static const TArray<int32> KnownCssWeights = {
+			400, 500, 600, 700
+		};
+		return KnownCssWeights;
+	}
 }
 
 FString FFontResolver::FindFontAssetPath(const FString& FontFamily)
@@ -119,7 +139,7 @@ FString FFontResolver::FindFontAssetPath(const FString& FontFamily)
 	if (FontFamily.TrimStartAndEnd().IsEmpty())
 		return FString();
 
-	const FString NormalizedFamily = NormalizeFontFamilyKey(FontFamily);
+	const FString NormalizedFamily = NormalizeFontFamilyKeyForResolver(FontFamily);
 
 	if (const FString* Path = FontAssetCache.Find(NormalizedFamily))
 	{
@@ -231,13 +251,339 @@ int32 FFontResolver::WeightFromTypefaceName(const FString& Name)
 	return 400;
 }
 
+FString FFontResolver::WeightNameFromNumeric(int32 Weight)
+{
+	switch (FMath::Clamp(FMath::RoundToInt(Weight / 100.0f) * 100, 100, 900))
+	{
+	case 100: return TEXT("Thin");
+	case 200: return TEXT("ExtraLight");
+	case 300: return TEXT("Light");
+	case 400: return TEXT("Regular");
+	case 500: return TEXT("Medium");
+	case 600: return TEXT("SemiBold");
+	case 700: return TEXT("Bold");
+	case 800: return TEXT("ExtraBold");
+	case 900: return TEXT("Black");
+	default: return TEXT("Regular");
+	}
+}
+
+bool FFontResolver::QueryKnownWebFontTypefaces(const FString& FontFamily, TMap<FString, FString>& OutTypefaceUrls)
+{
+	OutTypefaceUrls.Reset();
+
+	const FString NormalizedFamily = NormalizeFontFamilyKeyForResolver(FontFamily);
+	if (!GetKnownCssFontFamilies().Contains(NormalizedFamily))
+	{
+		return false;
+	}
+
+	TArray<FString> WeightValues;
+	for (const int32 Weight : GetKnownCssFontWeights())
+	{
+		WeightValues.Add(FString::FromInt(Weight));
+	}
+
+	FString EncodedFamily = FontFamily.TrimStartAndEnd();
+	EncodedFamily.ReplaceInline(TEXT(" "), TEXT("+"));
+	const FString CssUrl = FString::Printf(
+		TEXT("https://fonts.googleapis.com/css2?family=%s:wght@%s&display=swap"),
+		*EncodedFamily,
+		*FString::Join(WeightValues, TEXT(";")));
+
+	const FString TempCssPath = FPaths::ProjectSavedDir() / TEXT("Design2UMG") / (NormalizedFamily + TEXT("_weights.css"));
+	if (!DownloadToFile(CssUrl, TempCssPath))
+	{
+		return false;
+	}
+
+	FString CssContent;
+	const bool bLoaded = FFileHelper::LoadFileToString(CssContent, *TempCssPath);
+	IFileManager::Get().Delete(*TempCssPath);
+	if (!bLoaded || CssContent.IsEmpty())
+	{
+		return false;
+	}
+
+	TArray<FString> Blocks;
+	CssContent.ParseIntoArray(Blocks, TEXT("@font-face"), true);
+	for (const FString& Block : Blocks)
+	{
+		FString WeightSection;
+		if (!Block.Split(TEXT("font-weight:"), nullptr, &WeightSection))
+		{
+			continue;
+		}
+
+		const int32 WeightValue = FCString::Atoi(*WeightSection.TrimStartAndEnd());
+		if (WeightValue <= 0)
+		{
+			continue;
+		}
+
+		FString SrcSection;
+		if (!Block.Split(TEXT("src:"), nullptr, &SrcSection))
+		{
+			continue;
+		}
+
+		const int32 UrlStartMarker = SrcSection.Find(TEXT("url("), ESearchCase::IgnoreCase);
+		if (UrlStartMarker == INDEX_NONE)
+		{
+			continue;
+		}
+
+		const int32 UrlStart = UrlStartMarker + 4;
+		const int32 UrlEnd = SrcSection.Find(TEXT(")"), ESearchCase::IgnoreCase, ESearchDir::FromStart, UrlStart);
+		if (UrlEnd == INDEX_NONE)
+		{
+			continue;
+		}
+
+		FString TypefaceUrl = SrcSection.Mid(UrlStart, UrlEnd - UrlStart).TrimStartAndEnd();
+		TypefaceUrl.RemoveFromStart(TEXT("'"));
+		TypefaceUrl.RemoveFromStart(TEXT("\""));
+		TypefaceUrl.RemoveFromEnd(TEXT("'"));
+		TypefaceUrl.RemoveFromEnd(TEXT("\""));
+		if (TypefaceUrl.IsEmpty())
+		{
+			continue;
+		}
+
+		OutTypefaceUrls.FindOrAdd(WeightNameFromNumeric(WeightValue)) = TypefaceUrl;
+	}
+
+	return OutTypefaceUrls.Num() > 0;
+}
+
+bool FFontResolver::EnsureKnownWebFontTypefaces(const FString& FontFamily, UFont* Font, const FString& FontObjectPath)
+{
+	if (!Font)
+	{
+		return false;
+	}
+
+	const FCompositeFont* ExistingComposite = Font->GetCompositeFont();
+	if (ExistingComposite && ExistingComposite->DefaultTypeface.Fonts.Num() > 0)
+	{
+		TSet<FString> ExistingTypefaces;
+		for (const FTypefaceEntry& Entry : ExistingComposite->DefaultTypeface.Fonts)
+		{
+			ExistingTypefaces.Add(Entry.Name.ToString());
+		}
+
+		bool bHasAllKnownWeights = true;
+		for (const int32 Weight : GetKnownCssFontWeights())
+		{
+			if (!ExistingTypefaces.Contains(WeightNameFromNumeric(Weight)))
+			{
+				bHasAllKnownWeights = false;
+				break;
+			}
+		}
+
+		if (bHasAllKnownWeights)
+		{
+			return false;
+		}
+	}
+
+	const FString FontPackageName = FPackageName::ObjectPathToPackageName(FontObjectPath);
+	const FString FontImportPath = FPaths::GetPath(FontPackageName);
+	if (FontImportPath.IsEmpty())
+	{
+		return false;
+	}
+
+	const FString SafeName = Font->GetName();
+	TMap<FString, FString> TypefaceUrls;
+	if (!QueryKnownWebFontTypefaces(FontFamily, TypefaceUrls))
+	{
+		return false;
+	}
+
+	FCompositeFont& Composite = Font->GetMutableInternalCompositeFont();
+	TMap<FString, int32> ExistingEntryIndices;
+	for (int32 Index = 0; Index < Composite.DefaultTypeface.Fonts.Num(); ++Index)
+	{
+		ExistingEntryIndices.Add(Composite.DefaultTypeface.Fonts[Index].Name.ToString(), Index);
+	}
+
+	bool bModifiedFont = false;
+
+	FSavePackageArgs SaveArgs;
+	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+
+	for (const TPair<FString, FString>& TypefacePair : TypefaceUrls)
+	{
+		const FString& TypefaceName = TypefacePair.Key;
+		const FString& TypefaceUrl = TypefacePair.Value;
+		if (TypefaceName.IsEmpty() || TypefaceUrl.IsEmpty())
+		{
+			continue;
+		}
+
+		const FString FaceAssetName = SafeName + TEXT("_") + TypefaceName + TEXT("_Face");
+		const FString FacePackageName = FontImportPath / FaceAssetName;
+		const FString FaceObjectPath = FacePackageName + TEXT(".") + FaceAssetName;
+
+		UFontFace* TypefaceFace = LoadObject<UFontFace>(nullptr, *FaceObjectPath);
+		if (!TypefaceFace)
+		{
+			FString Extension = FPaths::GetExtension(TypefaceUrl, false);
+			if (Extension.IsEmpty())
+			{
+				Extension = TEXT("ttf");
+			}
+
+			const FString TempFontPath = FPaths::ProjectSavedDir() / TEXT("Design2UMG") / (FaceAssetName + TEXT(".") + Extension);
+			if (!DownloadToFile(TypefaceUrl, TempFontPath))
+			{
+				UE_LOG(LogDesign2UMG, Warning, TEXT("FontResolver: failed to download '%s' typeface '%s' from %s"),
+					*FontFamily, *TypefaceName, *TypefaceUrl);
+				continue;
+			}
+
+			TArray<uint8> FontData;
+			const bool bLoadedData = FFileHelper::LoadFileToArray(FontData, *TempFontPath);
+			IFileManager::Get().Delete(*TempFontPath);
+			if (!bLoadedData || FontData.Num() == 0)
+			{
+				continue;
+			}
+
+			UPackage* FacePackage = CreatePackage(*FacePackageName);
+			if (!FacePackage)
+			{
+				continue;
+			}
+
+			TypefaceFace = NewObject<UFontFace>(FacePackage, *FaceAssetName, RF_Public | RF_Standalone);
+			if (!TypefaceFace)
+			{
+				continue;
+			}
+
+			TypefaceFace->FontFaceData->SetData(MoveTemp(FontData));
+			TypefaceFace->CacheSubFaces();
+			TypefaceFace->MarkPackageDirty();
+			FacePackage->MarkPackageDirty();
+			FAssetRegistryModule::AssetCreated(TypefaceFace);
+
+			const FString FaceFilename = FPackageName::LongPackageNameToFilename(FacePackageName, FPackageName::GetAssetPackageExtension());
+			IFileManager::Get().MakeDirectory(*FPaths::GetPath(FaceFilename), true);
+			UPackage::SavePackage(FacePackage, TypefaceFace, *FaceFilename, SaveArgs);
+		}
+
+		if (!TypefaceFace)
+		{
+			continue;
+		}
+
+		if (int32* ExistingIndex = ExistingEntryIndices.Find(TypefaceName))
+		{
+			FTypefaceEntry& ExistingEntry = Composite.DefaultTypeface.Fonts[*ExistingIndex];
+			if (TypefaceName == TEXT("Regular"))
+			{
+				const FString LegacyFaceAssetName = SafeName + TEXT("_Face");
+				const FString LegacyFacePackageName = FontImportPath / LegacyFaceAssetName;
+				const FString LegacyFaceObjectPath = LegacyFacePackageName + TEXT(".") + LegacyFaceAssetName;
+				if (UFontFace* LegacyFace = LoadObject<UFontFace>(nullptr, *LegacyFaceObjectPath))
+				{
+					if (ExistingEntry.Font.GetFontFaceAsset() != LegacyFace)
+					{
+						ExistingEntry.Name = *TypefaceName;
+						ExistingEntry.Font = FFontData(LegacyFace);
+						bModifiedFont = true;
+					}
+				}
+				continue;
+			}
+
+			if (ExistingEntry.Font.GetFontFaceAsset() != TypefaceFace)
+			{
+				ExistingEntry.Name = *TypefaceName;
+				ExistingEntry.Font = FFontData(TypefaceFace);
+				bModifiedFont = true;
+			}
+		}
+		else
+		{
+			FTypefaceEntry& NewEntry = Composite.DefaultTypeface.Fonts.AddDefaulted_GetRef();
+			NewEntry.Name = *TypefaceName;
+			NewEntry.Font = FFontData(TypefaceFace);
+			ExistingEntryIndices.Add(TypefaceName, Composite.DefaultTypeface.Fonts.Num() - 1);
+			bModifiedFont = true;
+		}
+	}
+
+	if (!bModifiedFont)
+	{
+		return false;
+	}
+
+	UPackage* FontPackage = Font->GetOutermost();
+	if (!FontPackage)
+	{
+		return false;
+	}
+
+	Font->MarkPackageDirty();
+	FontPackage->MarkPackageDirty();
+
+	const FString FontFilename = FPackageName::LongPackageNameToFilename(FontPackageName, FPackageName::GetAssetPackageExtension());
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(FontFilename), true);
+	const bool bSaved = UPackage::SavePackage(FontPackage, Font, *FontFilename, SaveArgs);
+	if (bSaved)
+	{
+		UE_LOG(LogDesign2UMG, Log, TEXT("FontResolver: refreshed known web font '%s' with %d typefaces"),
+			*FontFamily, Composite.DefaultTypeface.Fonts.Num());
+	}
+	return bSaved;
+}
+
 FString FFontResolver::FindBestTypeface(const FString& FontFamily, const FString& RequestedWeight)
 {
 	FString AssetPath = FindFontAssetPath(FontFamily);
 	if (AssetPath.IsEmpty())
 		return FString();
 
+	const FString NormalizedFamily = NormalizeFontFamilyKeyForResolver(FontFamily);
 	UFont* Font = LoadObject<UFont>(nullptr, *AssetPath);
+	if (GetKnownCssFontFamilies().Contains(NormalizedFamily))
+	{
+		if (Font)
+		{
+			const FString FontPackageName = FPackageName::ObjectPathToPackageName(AssetPath);
+			const FString FontImportPath = FPaths::GetPath(FontPackageName);
+			const FString LegacyFaceAssetName = Font->GetName() + TEXT("_Face");
+			const FString LegacyFacePackageName = FontImportPath / LegacyFaceAssetName;
+			const FString LegacyFaceObjectPath = LegacyFacePackageName + TEXT(".") + LegacyFaceAssetName;
+			if (UFontFace* LegacyFace = LoadObject<UFontFace>(nullptr, *LegacyFaceObjectPath))
+			{
+				FCompositeFont& Composite = Font->GetMutableInternalCompositeFont();
+				for (FTypefaceEntry& Entry : Composite.DefaultTypeface.Fonts)
+				{
+					if (Entry.Name == TEXT("Regular") && Entry.Font.GetFontFaceAsset() != LegacyFace)
+					{
+						Entry.Font = FFontData(LegacyFace);
+						if (UPackage* FontPackage = Font->GetOutermost())
+						{
+							FSavePackageArgs SaveArgs;
+							SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+							Font->MarkPackageDirty();
+							FontPackage->MarkPackageDirty();
+							const FString FontFilename = FPackageName::LongPackageNameToFilename(FontPackageName, FPackageName::GetAssetPackageExtension());
+							UPackage::SavePackage(FontPackage, Font, *FontFilename, SaveArgs);
+						}
+						break;
+					}
+				}
+			}
+		}
+	}
+
+	EnsureKnownWebFontTypefaces(FontFamily, Font, AssetPath);
 	const FCompositeFont* Composite = Font ? Font->GetCompositeFont() : nullptr;
 	if (!Composite || Composite->DefaultTypeface.Fonts.Num() == 0)
 		return FString();
@@ -258,6 +604,8 @@ FString FFontResolver::FindBestTypeface(const FString& FontFamily, const FString
 		}
 	}
 
+	UE_LOG(LogDesign2UMG, Verbose, TEXT("FontResolver: family='%s' requested='%s' selected='%s' entries=%d"),
+		*FontFamily, *RequestedWeight, *BestName, Composite->DefaultTypeface.Fonts.Num());
 	return BestName;
 }
 
@@ -480,7 +828,7 @@ FString FFontResolver::ResolveFont(const FString& FontName, const FString& Url)
 	if (UFont* Existing = LoadObject<UFont>(nullptr, *FontObjPath))
 	{
 		UE_LOG(LogDesign2UMG, Log, TEXT("Font '%s' already exists: %s"), *FontName, *FontObjPath);
-		FontAssetCache.FindOrAdd(NormalizeFontFamilyKey(FontName)) = FontObjPath;
+		FontAssetCache.FindOrAdd(NormalizeFontFamilyKeyForResolver(FontName)) = FontObjPath;
 		IndexFontAssetName(FontName, FontObjPath);
 		return FontObjPath;
 	}
@@ -595,7 +943,7 @@ FString FFontResolver::ResolveFont(const FString& FontName, const FString& Url)
 	UPackage::SavePackage(FontPkg, Font, *FontFile, SaveArgs);
 
 	UE_LOG(LogDesign2UMG, Log, TEXT("Imported font '%s' -> %s"), *FontName, *FontObjPath);
-	FontAssetCache.FindOrAdd(NormalizeFontFamilyKey(FontName)) = FontObjPath;
+	FontAssetCache.FindOrAdd(NormalizeFontFamilyKeyForResolver(FontName)) = FontObjPath;
 	IndexFontAssetName(FontName, FontObjPath);
 	return FontObjPath;
 }

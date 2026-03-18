@@ -5,7 +5,6 @@ Convert design files into Unreal Engine 5 UMG Widget Blueprints.
 Supported inputs:
 - Pencil `.pen` files
 - Figma REST API
-- Figma desktop local exporter package (`design.json` + `images/`)
 - Live Pencil MCP connection
 
 ![Light Theme](Docs/Images/step1_light_theme.png)
@@ -57,22 +56,8 @@ Design2UMG.Import <file.pen> [--node=<id>] [--out=/Game/Path] [--no-preview] [--
 
 ### 2. Import from Figma
 
-Recommended (safer): use environment variable `FIGMA_TOKEN` and pass only file key/url.
-
-```text
-Design2UMG.FigmaImport <file_url_or_key>
-```
-
-Compatibility mode (not recommended, token may leak in shell history/logs):
-
 ```text
 Design2UMG.FigmaImport <file_url_or_key> <personal_access_token>
-```
-
-Optional explicit env key:
-
-```text
-Design2UMG.FigmaImport <file_url_or_key> --token-env=FIGMA_TOKEN
 ```
 
 ### 3. Import local Figma export JSON
@@ -81,16 +66,31 @@ Design2UMG.FigmaImport <file_url_or_key> --token-env=FIGMA_TOKEN
 Design2UMG.LocalFigmaImport <design.json> [--out=/Game/Path] [--no-preview]
 ```
 
-When Figma REST API is unavailable (for example, token/quota constraints), use the local exporter in [`Tools/FigmaExporter`](Tools/FigmaExporter/README.md):
-
-1. Install the local Figma plugin from `Tools/FigmaExporter/manifest.json`.
-2. Export selected frame to `figma_export.zip`.
-3. Extract and import the generated `design.json` with `Design2UMG.LocalFigmaImport`.
-
 ### 4. Import from MCP JSON files
 
 ```text
 Design2UMG.PenConvert <nodes.json> <vars.json> [TargetNodeId] [--preview|--no-preview] [--out=/Game/Path]
+```
+
+## Automation
+
+Full automation visual verification now has two layers:
+
+1. `Design2UMG.AutomationRender <spec.json>`
+   Renders the final compiled Widget Blueprint to a PNG from a manifest file.
+2. `Tools/design2umg_auto_verify.py`
+   Prepares a design reference image, launches Unreal Editor unattended, renders the candidate PNG, then writes diff and JSON reports.
+
+Example:
+
+```text
+python Tools/design2umg_auto_verify.py pen --source G:\path\screen.pen --node sbChi --reference-provider png --reference G:\path\design.png
+```
+
+Figma reference export is also supported:
+
+```text
+python Tools/design2umg_auto_verify.py local-figma --source G:\path\design.json --reference-provider figma --figma-file <fileKeyOrUrl> --figma-node 123:456 --figma-token <token>
 ```
 
 ## Settings
@@ -124,19 +124,11 @@ Key principle: **Bounds is the source of truth** for layout projection.
 
 See [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) for the current list and mitigation notes.
 
-## Examples
-
-Sample design inputs are available under [`Examples/`](Examples), including dashboard/login/HUD and a compact card sample.
-
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Versioning
-
-Design2UMG uses semantic versioning (`MAJOR.MINOR.PATCH`).
-Each release must keep `Design2UMG.uplugin -> VersionName` and `CHANGELOG.md` aligned to the same version string.
-
 ## License
 
 [MIT](LICENSE)
+

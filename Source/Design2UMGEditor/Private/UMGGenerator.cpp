@@ -4,19 +4,56 @@
 #include "UMGWidgetUtils.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
+#include "DesignPathRasterizer.h"
+#include "ProceduralShapeGenerator.h"
 #include "ObjectTools.h"
 
 #include "WidgetBlueprint.h"
 #include "Blueprint/WidgetTree.h"
 #include "Blueprint/UserWidget.h"
+#include "Components/TextBlock.h"
+#include "Engine/Texture2D.h"
 
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "Misc/PackageName.h"
 #include "UObject/SavePackage.h"
 
 namespace
 {
+	void DumpTemplateTextBlockFontState(const TCHAR* Stage, UWidgetBlueprint* WidgetBlueprint)
+	{
+		if (!UE_LOG_ACTIVE(LogDesign2UMG, Verbose) || !WidgetBlueprint || !WidgetBlueprint->WidgetTree)
+		{
+			return;
+		}
+
+		WidgetBlueprint->WidgetTree->ForEachWidget([Stage, WidgetBlueprint](UWidget* Widget)
+		{
+			UTextBlock* TextBlock = Cast<UTextBlock>(Widget);
+			if (!TextBlock)
+			{
+				return;
+			}
+
+			const FSlateFontInfo FontInfo = TextBlock->GetFont();
+			const UObject* FontObject = FontInfo.FontObject;
+			UE_LOG(LogDesign2UMG, Verbose,
+				TEXT("TextFont[%s]: blueprint='%s' widget='%s' text='%s' fontObject='%s' typeface='%s' size=%.1f tracking=%d wrap=%.1f autoWrap=%d"),
+				Stage,
+				*WidgetBlueprint->GetPathName(),
+				*TextBlock->GetName(),
+				*TextBlock->GetText().ToString(),
+				FontObject ? *FontObject->GetPathName() : TEXT("<null>"),
+				*FontInfo.TypefaceFontName.ToString(),
+				FontInfo.Size,
+				FontInfo.LetterSpacing,
+				TextBlock->GetWrapTextAt(),
+				TextBlock->GetAutoWrapText() ? 1 : 0);
+		});
+	}
+
 	void ApplyDesignPreviewSize(UWidgetBlueprint* WBP, const FIntPoint& DesignSize, const TCHAR* Phase)
 	{
 		if (!WBP)
@@ -123,6 +160,288 @@ namespace
 		CanvasRoot.Bounds.H = static_cast<float>(ViewportSize.Y);
 		CanvasRoot.Children.Add(MoveTemp(ScaleBoxNode));
 		return CanvasRoot;
+	}
+
+	uint32 MakePathTextureKey(const FUMGWidgetNode& Node)
+	{
+		const FString* Geometry = Node.Properties.Find(TEXT("PathGeometry"));
+		const FString* FillRule = Node.Properties.Find(TEXT("PathFillRule"));
+		const FString* FillColor = Node.Properties.Find(TEXT("PathFillColor"));
+		const FString* WidthOverride = Node.Properties.Find(TEXT("WidthOverride"));
+		const FString* HeightOverride = Node.Properties.Find(TEXT("HeightOverride"));
+
+		uint32 Key = Geometry ? GetTypeHash(*Geometry) : 0u;
+		Key = HashCombine(Key, FillRule ? GetTypeHash(*FillRule) : 0u);
+		Key = HashCombine(Key, FillColor ? GetTypeHash(*FillColor) : 0u);
+		Key = HashCombine(Key, WidthOverride ? GetTypeHash(*WidthOverride) : 0u);
+		Key = HashCombine(Key, HeightOverride ? GetTypeHash(*HeightOverride) : 0u);
+		return Key;
+	}
+
+	uint32 MakeProceduralTextureKey(const FUMGWidgetNode& Node)
+	{
+		const FString MaterialRef = Node.Properties.Contains(TEXT("MaterialRef"))
+			? Node.Properties[TEXT("MaterialRef")]
+			: Node.Brush.MaterialRef;
+		const FString MaterialParams = Node.Properties.Contains(TEXT("MaterialParams"))
+			? Node.Properties[TEXT("MaterialParams")]
+			: Node.Brush.MaterialParams;
+		const FString TextureWidth = Node.Properties.Contains(TEXT("WidthOverride"))
+			? Node.Properties[TEXT("WidthOverride")]
+			: FString();
+		const FString TextureHeight = Node.Properties.Contains(TEXT("HeightOverride"))
+			? Node.Properties[TEXT("HeightOverride")]
+			: FString();
+		const FString ShadowBlur = Node.Properties.Contains(TEXT("ShadowBlur"))
+			? Node.Properties[TEXT("ShadowBlur")]
+			: FString();
+		const FString BrushColor = Node.Properties.Contains(TEXT("BrushColor"))
+			? Node.Properties[TEXT("BrushColor")]
+			: FString();
+
+		uint32 Key = GetTypeHash(MaterialRef);
+		Key = HashCombine(Key, GetTypeHash(MaterialParams));
+		Key = HashCombine(Key, GetTypeHash(TextureWidth));
+		Key = HashCombine(Key, GetTypeHash(TextureHeight));
+		Key = HashCombine(Key, GetTypeHash(ShadowBlur));
+		Key = HashCombine(Key, GetTypeHash(BrushColor));
+		return Key;
+	}
+
+	bool ApplyPathTextureUiSettings(UTexture2D* Texture)
+	{
+		if (!Texture)
+		{
+			return false;
+		}
+
+		Texture->SRGB = true;
+		Texture->NeverStream = true;
+		Texture->LODGroup = TEXTUREGROUP_UI;
+		Texture->CompressionSettings = TC_EditorIcon;
+		Texture->MipGenSettings = TMGS_NoMipmaps;
+		Texture->Filter = TF_Bilinear;
+		Texture->AddressX = TA_Clamp;
+		Texture->AddressY = TA_Clamp;
+		return true;
+	}
+
+	bool ExtractTextureRawData(UTexture2D* Texture, TArray64<uint8>& OutRawData, int32& OutWidth, int32& OutHeight)
+	{
+		if (!Texture || !Texture->GetPlatformData() || Texture->GetPlatformData()->Mips.Num() <= 0)
+		{
+			return false;
+		}
+
+		FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
+		OutWidth = Mip.SizeX;
+		OutHeight = Mip.SizeY;
+		if (OutWidth <= 0 || OutHeight <= 0)
+		{
+			return false;
+		}
+
+		const int64 ExpectedBytes = static_cast<int64>(OutWidth) * static_cast<int64>(OutHeight) * 4;
+		const void* LockedData = Mip.BulkData.LockReadOnly();
+		if (!LockedData)
+		{
+			Mip.BulkData.Unlock();
+			return false;
+		}
+
+		OutRawData.SetNumUninitialized(ExpectedBytes);
+		FMemory::Memcpy(OutRawData.GetData(), LockedData, ExpectedBytes);
+		Mip.BulkData.Unlock();
+		return true;
+	}
+
+	bool CreateOrUpdatePathTextureAsset(
+		const FString& ImportPath,
+		const FString& AssetName,
+		const TArray64<uint8>& RawData,
+		int32 Width,
+		int32 Height,
+		FString& OutObjectPath)
+	{
+		const FString LongPackageName = ImportPath / AssetName;
+		if (!FPackageName::IsValidLongPackageName(LongPackageName))
+		{
+			return false;
+		}
+
+		const FString ObjectPath = LongPackageName + TEXT(".") + AssetName;
+		UTexture2D* Texture = LoadObject<UTexture2D>(nullptr, *ObjectPath);
+		const bool bNewAsset = (Texture == nullptr);
+		if (!Texture)
+		{
+			UPackage* Package = CreatePackage(*LongPackageName);
+			if (!Package)
+			{
+				return false;
+			}
+
+			Texture = NewObject<UTexture2D>(Package, *AssetName, RF_Public | RF_Standalone);
+			if (!Texture)
+			{
+				return false;
+			}
+		}
+
+		UPackage* Package = Texture->GetOutermost();
+		if (!Package)
+		{
+			return false;
+		}
+
+		Texture->PreEditChange(nullptr);
+		Texture->Source.Init(Width, Height, 1, 1, TSF_BGRA8, RawData.GetData());
+		ApplyPathTextureUiSettings(Texture);
+		Texture->PostEditChange();
+		Texture->UpdateResource();
+		Texture->MarkPackageDirty();
+		Package->MarkPackageDirty();
+
+		if (bNewAsset)
+		{
+			FAssetRegistryModule::AssetCreated(Texture);
+		}
+
+		const FString PackageFilename = FPackageName::LongPackageNameToFilename(LongPackageName, FPackageName::GetAssetPackageExtension());
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(PackageFilename), true);
+
+		FSavePackageArgs SaveArgs;
+		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+		if (!UPackage::SavePackage(Package, Texture, *PackageFilename, SaveArgs))
+		{
+			return false;
+		}
+
+		OutObjectPath = ObjectPath;
+		return true;
+	}
+
+	void PersistPathTexturesInNodeTree(
+		FUMGWidgetNode& Node,
+		const FString& TextureImportPath,
+		const FString& AssetPrefix,
+		TMap<uint32, FString>& PathTextureCache)
+	{
+		if (Node.Type == TEXT("Image") && Node.Properties.Contains(TEXT("PathGeometry")))
+		{
+			const uint32 TextureKey = MakePathTextureKey(Node);
+			if (const FString* CachedPath = PathTextureCache.Find(TextureKey))
+			{
+				Node.Properties.Remove(TEXT("PathGeometry"));
+				Node.Properties.Remove(TEXT("PathFillRule"));
+				Node.Properties.Remove(TEXT("PathFillColor"));
+				Node.Properties.Add(TEXT("TexturePath"), *CachedPath);
+			}
+			else
+			{
+				const FString* Geometry = Node.Properties.Find(TEXT("PathGeometry"));
+				const FString FillRule = Node.Properties.Contains(TEXT("PathFillRule")) ? Node.Properties[TEXT("PathFillRule")] : TEXT("nonzero");
+				const FString FillColor = Node.Properties.Contains(TEXT("PathFillColor")) ? Node.Properties[TEXT("PathFillColor")] : TEXT("#ffffffff");
+				const int32 Width = FMath::Max(1, Node.Properties.Contains(TEXT("WidthOverride")) ? FCString::Atoi(*Node.Properties[TEXT("WidthOverride")]) : 64);
+				const int32 Height = FMath::Max(1, Node.Properties.Contains(TEXT("HeightOverride")) ? FCString::Atoi(*Node.Properties[TEXT("HeightOverride")]) : 64);
+
+				if (Geometry)
+				{
+					if (UTexture2D* Rasterized = FDesignPathRasterizer::Rasterize(*Geometry, Width, Height, FUMGWidgetUtils::ParseColor(FillColor), FillRule))
+					{
+						TArray64<uint8> RawData;
+						int32 RawWidth = 0;
+						int32 RawHeight = 0;
+						if (ExtractTextureRawData(Rasterized, RawData, RawWidth, RawHeight))
+						{
+							const FString SanitizedNodeName = ObjectTools::SanitizeObjectName(Node.Name.IsEmpty() ? Node.Id : Node.Name);
+							const FString AssetName = ObjectTools::SanitizeObjectName(
+								FString::Printf(TEXT("%s_%s_%08X"), *AssetPrefix, *SanitizedNodeName, TextureKey));
+
+							FString ObjectPath;
+							if (CreateOrUpdatePathTextureAsset(TextureImportPath, AssetName, RawData, RawWidth, RawHeight, ObjectPath))
+							{
+								Node.Properties.Remove(TEXT("PathGeometry"));
+								Node.Properties.Remove(TEXT("PathFillRule"));
+								Node.Properties.Remove(TEXT("PathFillColor"));
+								Node.Properties.Add(TEXT("TexturePath"), ObjectPath);
+								PathTextureCache.Add(TextureKey, ObjectPath);
+								UE_LOG(LogDesign2UMG, Log, TEXT("Persisted path texture '%s' -> %s"), *Node.Name, *ObjectPath);
+							}
+						}
+					}
+				}
+			}
+		}
+
+		for (FUMGWidgetNode& Child : Node.Children)
+		{
+			PersistPathTexturesInNodeTree(Child, TextureImportPath, AssetPrefix, PathTextureCache);
+		}
+	}
+
+	void PersistProceduralTexturesInNodeTree(
+		FUMGWidgetNode& Node,
+		const FString& TextureImportPath,
+		const FString& AssetPrefix,
+		TMap<uint32, FString>& ProceduralTextureCache)
+	{
+		const FString MaterialRef = Node.Properties.Contains(TEXT("MaterialRef"))
+			? Node.Properties[TEXT("MaterialRef")]
+			: Node.Brush.MaterialRef;
+		if (!MaterialRef.IsEmpty())
+		{
+			const uint32 TextureKey = MakeProceduralTextureKey(Node);
+			if (const FString* CachedPath = ProceduralTextureCache.Find(TextureKey))
+			{
+				Node.Properties.Remove(TEXT("MaterialRef"));
+				Node.Properties.Remove(TEXT("MaterialParams"));
+				Node.Properties.Add(TEXT("TexturePath"), *CachedPath);
+				Node.Brush.MaterialRef.Reset();
+				Node.Brush.MaterialParams.Reset();
+				Node.Brush.TexturePath = *CachedPath;
+			}
+			else
+			{
+				TMap<FString, FString> GenerationProps = Node.Properties;
+				GenerationProps.FindOrAdd(TEXT("MaterialRef")) = MaterialRef;
+				if (!Node.Brush.MaterialParams.IsEmpty() && !GenerationProps.Contains(TEXT("MaterialParams")))
+				{
+					GenerationProps.Add(TEXT("MaterialParams"), Node.Brush.MaterialParams);
+				}
+
+				if (UTexture2D* Generated = FProceduralShapeGenerator::GenerateFromMaterialRef(MaterialRef, GenerationProps, nullptr))
+				{
+					TArray64<uint8> RawData;
+					int32 RawWidth = 0;
+					int32 RawHeight = 0;
+					if (ExtractTextureRawData(Generated, RawData, RawWidth, RawHeight))
+					{
+						const FString SanitizedNodeName = ObjectTools::SanitizeObjectName(Node.Name.IsEmpty() ? Node.Id : Node.Name);
+						const FString SanitizedMaterialRef = ObjectTools::SanitizeObjectName(MaterialRef);
+						const FString AssetName = ObjectTools::SanitizeObjectName(
+							FString::Printf(TEXT("%s_%s_%s_%08X"), *AssetPrefix, *SanitizedNodeName, *SanitizedMaterialRef, TextureKey));
+
+						FString ObjectPath;
+						if (CreateOrUpdatePathTextureAsset(TextureImportPath, AssetName, RawData, RawWidth, RawHeight, ObjectPath))
+						{
+							Node.Properties.Remove(TEXT("MaterialRef"));
+							Node.Properties.Remove(TEXT("MaterialParams"));
+							Node.Properties.Add(TEXT("TexturePath"), ObjectPath);
+							Node.Brush.MaterialRef.Reset();
+							Node.Brush.MaterialParams.Reset();
+							Node.Brush.TexturePath = ObjectPath;
+							ProceduralTextureCache.Add(TextureKey, ObjectPath);
+							UE_LOG(LogDesign2UMG, Log, TEXT("Persisted procedural texture '%s' (%s) -> %s"), *Node.Name, *MaterialRef, *ObjectPath);
+						}
+					}
+				}
+			}
+		}
+
+		for (FUMGWidgetNode& Child : Node.Children)
+		{
+			PersistProceduralTexturesInNodeTree(Child, TextureImportPath, AssetPrefix, ProceduralTextureCache);
+		}
 	}
 }
 
@@ -243,6 +562,16 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 			Settings->bViewportScaleDownOnly);
 	}
 
+	{
+		TMap<uint32, FString> PathTextureCache;
+		const FString PathTextureImportPath = PackagePath / TEXT("D2U_PathTextures");
+		PersistPathTexturesInNodeTree(FixedRoot, PathTextureImportPath, AssetName, PathTextureCache);
+
+		TMap<uint32, FString> ProceduralTextureCache;
+		const FString ProceduralTextureImportPath = PackagePath / TEXT("D2U_ProceduralTextures");
+		PersistProceduralTexturesInNodeTree(FixedRoot, ProceduralTextureImportPath, AssetName, ProceduralTextureCache);
+	}
+
 	// Dump widget tree only in verbose mode.
 	if (UE_LOG_ACTIVE(LogDesign2UMG, Verbose))
 	{
@@ -291,6 +620,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 		return nullptr;
 	}
 	WBP->WidgetTree->RootWidget = Root;
+	DumpTemplateTextBlockFontState(TEXT("template-precompile"), WBP);
 
 	// 设置编辑器显示尺寸到 CDO；保存时会在编译后再次回写，避免编译重置默认值。
 	ApplyDesignPreviewSize(WBP, DesignSize, TEXT("pre-compile"));
@@ -319,6 +649,7 @@ void FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP)
 	// 清除后让 CompileBlueprint 走 IsEmpty() 分支从 widget tree 重建，避免 stale entry
 	WBP->WidgetVariableNameToGuidMap.Empty();
 	FKismetEditorUtilities::CompileBlueprint(WBP);
+	DumpTemplateTextBlockFontState(TEXT("template-postcompile"), WBP);
 	ApplyDesignPreviewSize(WBP, DesiredDesignSize, TEXT("post-compile"));
 
 	UPackage* Package = WBP->GetOutermost();

@@ -5,9 +5,6 @@
 #include "CoreMinimal.h"
 #include "DesignSchema.h"
 
-class FJsonObject;
-class FJsonValue;
-
 /**
  * Figma REST API JSON → FDesignDocument 解析器
  *

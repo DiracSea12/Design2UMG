@@ -1,4 +1,4 @@
-﻿# Changelog
+# Changelog
 
 All notable changes to this project are documented here.
 
@@ -6,16 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-### Added
-- Local Figma exporter tool under `Tools/FigmaExporter` (manifest/UI/serializer) for offline `design.json + images/` export flow.
-- `Examples/SimpleCard.pen` lightweight input sample for quick pipeline smoke tests.
-
 ### Changed
 - Release hygiene cleanup for GitHub publishing (docs, CI, ignore rules).
-- Figma import command now supports environment-variable token flow and warns on plaintext CLI token usage.
-- CI now gates release with hygiene checks, plugin build, automation tests, and uploaded artifacts.
-- Public naming/version consistency updates (`Design2UMG`, `VersionName: 1.0.0`).
-- Critical mojibake cleanup in parser/schema comments and release rules.
 
 ## [1.0.0] - 2026-02-15
 

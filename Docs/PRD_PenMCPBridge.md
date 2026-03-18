@@ -1,4 +1,4 @@
-﻿# PRD: Pencil MCP Bridge + Visual Comparison
+# PRD: Pencil MCP Bridge + Visual Comparison
 
 ## 1. 概述
 

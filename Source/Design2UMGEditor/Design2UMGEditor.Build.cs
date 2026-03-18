@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SSPDX-License-Identifier: MIT
 
 using UnrealBuildTool;
 
@@ -44,6 +44,5 @@ public class Design2UMGEditor : ModuleRules
 		});
 	}
 }
-
 
 

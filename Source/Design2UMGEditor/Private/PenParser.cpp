@@ -296,7 +296,7 @@ bool FPenParser::ParseFromFile(const FString& FilePath, FDesignDocument& OutDocu
 	if (!FFileHelper::LoadFileToString(JsonString, *FilePath))
 	{
 		UE_LOG(LogDesign2UMG, Verbose, TEXT("PenParser: Failed to load file: %s"), *FilePath);
-		UE_LOG(LogDesign2UMG, Error, TEXT("无法读取设计文件，请确认路径有效且文件未被占用: %s"), *FilePath);
+		UE_LOG(LogDesign2UMG, Error, TEXT("鏃犳硶璇诲彇璁捐鏂囦欢銆傝纭鏂囦欢璺緞鏈夋晥涓旀枃浠舵湭琚崰鐢? %s"), *FilePath);
 		return false;
 	}
 	return ParseDocument(JsonString, OutDocument);
@@ -328,7 +328,7 @@ bool FPenParser::ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, F
 	{
 		OutDocument.Version = TEXT("1.0");
 		UE_LOG(LogDesign2UMG, Verbose, TEXT("PenParser: missing 'version', fallback to %s"), *OutDocument.Version);
-		UE_LOG(LogDesign2UMG, Warning, TEXT("设计文件缺少版本号，使用默认版本 %s"), *OutDocument.Version);
+		UE_LOG(LogDesign2UMG, Warning, TEXT("璁捐鏂囦欢缂哄皯鐗堟湰鍙凤紝浣跨敤榛樿鐗堟湰 %s"), *OutDocument.Version);
 	}
 
 	// 瑙ｆ瀽瀛椾綋
@@ -635,6 +635,13 @@ TSharedPtr<FDesignNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& Jso
 			if (SlotVal->TryGetString(SlotId))
 				++PenSlotNodeCount;
 		}
+	}
+	if (bPenHasSlot)
+	{
+		Node->Metadata.Add(TEXT("pen.slot.present"), TEXT("true"));
+		Node->Metadata.Add(TEXT("pen.slot.count"), FString::FromInt(PenSlotNodeCount));
+		if (PenSlotNodeCount == 0)
+			Node->Metadata.Add(TEXT("pen.slot.empty"), TEXT("true"));
 	}
 	TryGetResolvedNumberField(JsonObj, TEXT("layoutGrow"), *ActiveResolver, Node->LayoutGrow);
 
@@ -996,6 +1003,13 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 					if (SlotVal->TryGetString(SlotId))
 						++PenSlotNodeCount;
 				}
+			}
+			if (bPenHasSlot)
+			{
+				DescNode->Metadata.Add(TEXT("pen.slot.present"), TEXT("true"));
+				DescNode->Metadata.Add(TEXT("pen.slot.count"), FString::FromInt(PenSlotNodeCount));
+				if (PenSlotNodeCount == 0)
+					DescNode->Metadata.Add(TEXT("pen.slot.empty"), TEXT("true"));
 			}
 
 			// children 瑕嗙洊锛氬畬鏁存浛鎹㈠瓙鑺傜偣
@@ -1512,3 +1526,8 @@ TArray<FDesignFrameInfo> ExtractTopFrames(const FDesignDocument& Document)
 	}
 	return Result;
 }
+
+
+
+
+

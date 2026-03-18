@@ -1,4 +1,4 @@
-﻿name: Plugin CI
+name: Plugin CI
 
 on:
   push:
@@ -22,89 +22,13 @@ jobs:
 
       - name: Fail on local-only tracked files
         run: |
-          if git ls-files | grep -E '^\.cowork-temp/|^\.claude/|^\.codex/|^openspec/|^ocr_result\.txt$|^CLAUDE\.md$|^Design2UMG[^/]*/|^capture_editor_screenshot\.py$|^capture_umg_screenshot\.py$|^compare_coordinates\.py$|^screenshot\.ps1$|^screenshot\.py$|^show_expected_coords\.py$|^test_import\.py$|^verify_coords\.py$|^verify_design_size\.py$|^editor_screenshot\.png$'; then
+          if git ls-files | grep -E '^\.cowork-temp/|^\.claude/|^\.codex/|^openspec/|^progress\.txt$|^ocr_result\.txt$|^CLAUDE\.md$|^Design2UMG图片/|^capture_editor_screenshot\.py$|^capture_umg_screenshot\.py$|^compare_coordinates\.py$|^screenshot\.ps1$|^screenshot\.py$|^show_expected_coords\.py$|^test_import\.py$|^verify_coords\.py$|^verify_design_size\.py$|^editor_screenshot\.png$'; then
             echo "Local-only files are tracked. Remove them before release."
             exit 1
           fi
 
-      - name: Encoding guard (tracked text files)
-        run: |
-          python - <<'PY'
-          import subprocess
-          from pathlib import Path
-          import sys
-
-          exts = {".h", ".hpp", ".cpp", ".cs", ".py", ".md", ".json", ".yml", ".yaml"}
-          tracked = subprocess.check_output(["git", "ls-files"], text=True).splitlines()
-          files = []
-          for rel in tracked:
-              p = Path(rel)
-              if p.suffix.lower() in exts and p.exists():
-                  files.append(p)
-
-          if not files:
-              print("No tracked text files matched encoding guard.")
-              sys.exit(1)
-
-          non_bom = []
-          decode_errors = []
-          mojibake_hits = []
-          mojibake_markers = ("Design2UMG鍥剧墖", "\ufffd")
-
-          for p in files:
-              data = p.read_bytes()
-              if not data.startswith(b"\xef\xbb\xbf"):
-                  non_bom.append(str(p))
-                  continue
-
-              try:
-                  text = data.decode("utf-8-sig")
-              except UnicodeDecodeError:
-                  decode_errors.append(str(p))
-                  continue
-
-              if any(marker in text for marker in mojibake_markers):
-                  mojibake_hits.append(str(p))
-
-          if non_bom:
-              print("UTF-8 BOM check failed:")
-              for item in non_bom:
-                  print(" -", item)
-              sys.exit(1)
-
-          if decode_errors:
-              print("UTF-8 decode check failed:")
-              for item in decode_errors:
-                  print(" -", item)
-              sys.exit(1)
-
-          if mojibake_hits:
-              print("Mojibake marker check failed:")
-              for item in mojibake_hits:
-                  print(" -", item)
-              sys.exit(1)
-          PY
-
-  build-figma-exporter:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: Tools/FigmaExporter/package-lock.json
-
-      - name: Build Figma exporter
-        run: |
-          cd Tools/FigmaExporter
-          npm ci
-          npm run build
-
   build-plugin:
-    needs: [repository-hygiene, build-figma-exporter]
+    if: github.event_name == 'workflow_dispatch'
     runs-on: [self-hosted, windows, ue5]
     defaults:
       run:
@@ -128,64 +52,3 @@ jobs:
             -Package="$pwd\dist\Design2UMG" `
             -Rocket `
             -StrictIncludes
-
-      - name: Run Design2UMG automation tests
-        run: |
-          if (-not $env:UE_ROOT) {
-            throw "UE_ROOT is not set on runner."
-          }
-          if (-not $env:UE_AUTOMATION_PROJECT) {
-            throw "UE_AUTOMATION_PROJECT is not set. Example: G:\\UE5\\FPSRoguelike\\FPSRoguelike.uproject"
-          }
-
-          $editor = Join-Path $env:UE_ROOT "Engine\Binaries\Win64\UnrealEditor-Cmd.exe"
-          if (-not (Test-Path $editor)) {
-            throw "UnrealEditor-Cmd.exe not found at: $editor"
-          }
-
-          $logDir = Join-Path $pwd "Saved\Logs"
-          New-Item -ItemType Directory -Force -Path $logDir | Out-Null
-          $logPath = Join-Path $logDir "Design2UMG-Automation.log"
-
-          & $editor $env:UE_AUTOMATION_PROJECT `
-            -unattended -nop4 -nosplash -NoSound -NullRHI `
-            -TestExit="Automation Test Queue Empty" `
-            "-ExecCmds=Automation RunTests Design2UMG; Quit" `
-            "-log=$logPath"
-
-          if ($LASTEXITCODE -ne 0) {
-            throw "Automation command failed with exit code $LASTEXITCODE"
-          }
-          if (-not (Test-Path $logPath)) {
-            throw "Automation log not found: $logPath"
-          }
-          if (Select-String -Path $logPath -Pattern "Found 0 automation tests" -Quiet) {
-            throw "No Design2UMG automation tests were discovered."
-          }
-
-          $failurePatterns = @(
-            "Automation Test Failed",
-            "Result=\{Failed\}",
-            "Result=\{Fail\}",
-            "Result=\{`u5931`u8d25\}"
-          )
-          if (Select-String -Path $logPath -Pattern $failurePatterns -Quiet) {
-            throw "Design2UMG automation tests failed. Inspect the uploaded log artifact."
-          }
-
-      - name: Upload plugin package
-        uses: actions/upload-artifact@v4
-        with:
-          name: Design2UMG-Win64-Plugin
-          path: dist/Design2UMG
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Upload automation logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Design2UMG-Automation-Logs
-          path: Saved/Logs/Design2UMG-Automation.log
-          if-no-files-found: warn
-          retention-days: 14

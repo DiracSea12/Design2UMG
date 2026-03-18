@@ -1,0 +1,433 @@
+{
+	"document": {
+		"id": "0:0", "name": "Document", "type": "DOCUMENT",
+		"children": [{
+			"id": "0:1", "name": "Page 1", "type": "CANVAS",
+			"children": [
+				{
+					"id": "10:1", "name": "Dashboard", "type": "FRAME",
+					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 1440, "height": 900},
+					"layoutMode": "HORIZONTAL",
+					"itemSpacing": 0,
+					"paddingLeft": 0, "paddingRight": 0, "paddingTop": 0, "paddingBottom": 0,
+					"primaryAxisAlignItems": "MIN",
+					"counterAxisAlignItems": "MIN",
+					"clipsContent": true,
+					"fills": [{"type": "SOLID", "color": {"r": 0.07, "g": 0.07, "b": 0.11, "a": 1}}],
+					"cornerRadius": 0,
+					"children": [
+						{
+							"id": "10:2", "name": "Sidebar", "type": "FRAME",
+							"absoluteBoundingBox": {"x": 0, "y": 0, "width": 240, "height": 900},
+							"layoutMode": "VERTICAL",
+							"itemSpacing": 8,
+							"paddingLeft": 16, "paddingRight": 16, "paddingTop": 24, "paddingBottom": 24,
+							"primaryAxisAlignItems": "MIN",
+							"counterAxisAlignItems": "MIN",
+							"clipsContent": false,
+							"layoutSizingHorizontal": "FIXED",
+							"layoutSizingVertical": "FILL",
+							"fills": [{"type": "SOLID", "color": {"r": 0.1, "g": 0.1, "b": 0.15, "a": 1}}],
+							"strokes": [{"type": "SOLID", "color": {"r": 0.2, "g": 0.2, "b": 0.28, "a": 1}, "visible": true}],
+							"strokeWeight": 1,
+							"strokeAlign": "INSIDE",
+							"individualStrokeWeights": {"top": 0, "right": 1, "bottom": 0, "left": 0},
+							"children": [
+								{
+									"id": "10:3", "name": "Logo", "type": "TEXT",
+									"characters": "Acme Dashboard",
+									"absoluteBoundingBox": {"x": 16, "y": 24, "width": 180, "height": 32},
+									"layoutSizingHorizontal": "FILL",
+									"layoutSizingVertical": "HUG",
+									"style": {
+										"fontFamily": "Inter",
+										"fontSize": 20,
+										"fontWeight": 700,
+										"lineHeightPx": 28,
+										"lineHeightUnit": "PIXELS",
+										"letterSpacing": -0.4,
+										"textAlignHorizontal": "LEFT",
+										"textAlignVertical": "CENTER"
+									},
+									"fills": [{"type": "SOLID", "color": {"r": 1, "g": 1, "b": 1, "a": 1}}],
+									"textAutoResize": "WIDTH_AND_HEIGHT"
+								},
+								{
+									"id": "10:4", "name": "Divider", "type": "LINE",
+									"absoluteBoundingBox": {"x": 16, "y": 64, "width": 208, "height": 0},
+									"layoutSizingHorizontal": "FILL",
+									"layoutSizingVertical": "FIXED",
+									"strokes": [{"type": "SOLID", "color": {"r": 0.3, "g": 0.3, "b": 0.38, "a": 1}, "visible": true}],
+									"strokeWeight": 1,
+									"strokeAlign": "CENTER"
+								},
+								{
+									"id": "10:5", "name": "NavItem", "type": "COMPONENT",
+									"absoluteBoundingBox": {"x": 16, "y": 72, "width": 208, "height": 40},
+									"layoutMode": "HORIZONTAL",
+									"itemSpacing": 12,
+									"paddingLeft": 12, "paddingRight": 12, "paddingTop": 8, "paddingBottom": 8,
+									"primaryAxisAlignItems": "MIN",
+									"counterAxisAlignItems": "CENTER",
+									"layoutSizingHorizontal": "FILL",
+									"layoutSizingVertical": "HUG",
+									"fills": [{"type": "SOLID", "color": {"r": 0.18, "g": 0.35, "b": 0.95, "a": 1}}],
+									"cornerRadius": 8,
+									"children": [
+										{
+											"id": "10:6", "name": "Icon", "type": "VECTOR",
+											"absoluteBoundingBox": {"x": 28, "y": 80, "width": 20, "height": 20},
+											"layoutSizingHorizontal": "FIXED",
+											"layoutSizingVertical": "FIXED",
+											"fills": [{"type": "SOLID", "color": {"r": 1, "g": 1, "b": 1, "a": 1}}]
+										},
+										{
+											"id": "10:7", "name": "Label", "type": "TEXT",
+											"characters": "Overview",
+											"absoluteBoundingBox": {"x": 60, "y": 80, "width": 100, "height": 24},
+											"layoutSizingHorizontal": "FILL",
+											"layoutSizingVertical": "HUG",
+											"style": {
+												"fontFamily": "Inter",
+												"fontSize": 14,
+												"fontWeight": 500,
+												"lineHeightUnit": "AUTO",
+												"letterSpacing": 0,
+												"textAlignHorizontal": "LEFT",
+												"textAlignVertical": "TOP"
+											},
+											"fills": [{"type": "SOLID", "color": {"r": 1, "g": 1, "b": 1, "a": 1}}],
+											"textAutoResize": "HEIGHT"
+										}
+									]
+								},
+								{
+									"id": "10:8", "name": "NavItem Instance", "type": "INSTANCE",
+									"componentId": "10:5",
+									"absoluteBoundingBox": {"x": 16, "y": 120, "width": 208, "height": 40},
+									"layoutMode": "HORIZONTAL",
+									"itemSpacing": 12,
+									"paddingLeft": 12, "paddingRight": 12, "paddingTop": 8, "paddingBottom": 8,
+									"primaryAxisAlignItems": "MIN",
+									"counterAxisAlignItems": "CENTER",
+									"layoutSizingHorizontal": "FILL",
+									"layoutSizingVertical": "HUG",
+									"fills": [],
+									"cornerRadius": 8,
+									"children": [
+										{
+											"id": "10:9", "name": "Icon", "type": "VECTOR",
+											"absoluteBoundingBox": {"x": 28, "y": 128, "width": 20, "height": 20},
+											"layoutSizingHorizontal": "FIXED",
+											"layoutSizingVertical": "FIXED",
+											"fills": [{"type": "SOLID", "color": {"r": 0.6, "g": 0.6, "b": 0.7, "a": 1}}]
+										},
+										{
+											"id": "10:10", "name": "Label", "type": "TEXT",
+											"characters": "Analytics",
+											"absoluteBoundingBox": {"x": 60, "y": 128, "width": 100, "height": 24},
+											"layoutSizingHorizontal": "FILL",
+											"layoutSizingVertical": "HUG",
+											"style": {
+												"fontFamily": "Inter",
+												"fontSize": 14,
+												"fontWeight": 400,
+												"lineHeightUnit": "AUTO",
+												"letterSpacing": 0,
+												"textAlignHorizontal": "LEFT",
+												"textAlignVertical": "TOP"
+											},
+											"fills": [{"type": "SOLID", "color": {"r": 0.6, "g": 0.6, "b": 0.7, "a": 1}}],
+											"textAutoResize": "HEIGHT"
+										}
+									]
+								}
+							]
+						},
+						{
+							"id": "20:1", "name": "MainContent", "type": "FRAME",
+							"absoluteBoundingBox": {"x": 240, "y": 0, "width": 1200, "height": 900},
+							"layoutMode": "VERTICAL",
+							"itemSpacing": 24,
+							"paddingLeft": 32, "paddingRight": 32, "paddingTop": 32, "paddingBottom": 32,
+							"primaryAxisAlignItems": "MIN",
+							"counterAxisAlignItems": "MIN",
+							"clipsContent": true,
+							"layoutSizingHorizontal": "FILL",
+							"layoutSizingVertical": "FILL",
+							"fills": [],
+							"children": [
+								{
+									"id": "20:2", "name": "Header", "type": "FRAME",
+									"absoluteBoundingBox": {"x": 272, "y": 32, "width": 1136, "height": 48},
+									"layoutMode": "HORIZONTAL",
+									"itemSpacing": 16,
+									"paddingLeft": 0, "paddingRight": 0, "paddingTop": 0, "paddingBottom": 0,
+									"primaryAxisAlignItems": "SPACE_BETWEEN",
+									"counterAxisAlignItems": "CENTER",
+									"layoutSizingHorizontal": "FILL",
+									"layoutSizingVertical": "HUG",
+									"fills": [],
+									"children": [
+										{
+											"id": "20:3", "name": "PageTitle", "type": "TEXT",
+											"characters": "Dashboard Overview",
+											"absoluteBoundingBox": {"x": 272, "y": 32, "width": 300, "height": 40},
+											"layoutSizingHorizontal": "HUG",
+											"layoutSizingVertical": "HUG",
+											"style": {
+												"fontFamily": "Inter",
+												"fontSize": 28,
+												"fontWeight": 700,
+												"lineHeightPx": 36,
+												"lineHeightUnit": "PIXELS",
+												"letterSpacing": -0.5,
+												"textAlignHorizontal": "LEFT",
+												"textAlignVertical": "TOP"
+											},
+											"fills": [{"type": "SOLID", "color": {"r": 1, "g": 1, "b": 1, "a": 1}}],
+											"textAutoResize": "WIDTH_AND_HEIGHT"
+										},
+										{
+											"id": "20:4", "name": "Avatar", "type": "ELLIPSE",
+											"absoluteBoundingBox": {"x": 1368, "y": 36, "width": 40, "height": 40},
+											"layoutSizingHorizontal": "FIXED",
+											"layoutSizingVertical": "FIXED",
+											"fills": [
+												{"type": "SOLID", "color": {"r": 0.3, "g": 0.3, "b": 0.4, "a": 1}},
+												{"type": "IMAGE", "imageRef": "img_avatar_001", "scaleMode": "FILL", "visible": true}
+											]
+										}
+									]
+								},
+								{
+									"id": "30:1", "name": "StatsRow", "type": "FRAME",
+									"absoluteBoundingBox": {"x": 272, "y": 104, "width": 1136, "height": 120},
+									"layoutMode": "HORIZONTAL",
+									"itemSpacing": 16,
+									"paddingLeft": 0, "paddingRight": 0, "paddingTop": 0, "paddingBottom": 0,
+									"primaryAxisAlignItems": "MIN",
+									"counterAxisAlignItems": "MIN",
+									"layoutSizingHorizontal": "FILL",
+									"layoutSizingVertical": "HUG",
+									"fills": [],
+									"children": [
+										{
+											"id": "30:2", "name": "StatCard", "type": "FRAME",
+											"absoluteBoundingBox": {"x": 272, "y": 104, "width": 268, "height": 120},
+											"layoutMode": "VERTICAL",
+											"itemSpacing": 8,
+											"paddingLeft": 20, "paddingRight": 20, "paddingTop": 20, "paddingBottom": 20,
+											"primaryAxisAlignItems": "MIN",
+											"counterAxisAlignItems": "MIN",
+											"layoutSizingHorizontal": "FILL",
+											"layoutSizingVertical": "HUG",
+											"fills": [
+												{"type": "GRADIENT_LINEAR", "visible": true,
+												 "gradientHandlePositions": [{"x": 0, "y": 0.5}, {"x": 1, "y": 0.5}],
+												 "gradientStops": [
+													{"position": 0, "color": {"r": 0.18, "g": 0.35, "b": 0.95, "a": 1}},
+													{"position": 1, "color": {"r": 0.45, "g": 0.2, "b": 0.9, "a": 1}}
+												 ]}
+											],
+											"cornerRadius": 16,
+											"effects": [
+												{"type": "DROP_SHADOW", "visible": true,
+												 "color": {"r": 0.18, "g": 0.35, "b": 0.95, "a": 0.3},
+												 "offset": {"x": 0, "y": 8}, "radius": 24, "spread": -4}
+											],
+											"children": [
+												{
+													"id": "30:3", "name": "StatLabel", "type": "TEXT",
+													"characters": "Total Revenue",
+													"absoluteBoundingBox": {"x": 292, "y": 124, "width": 100, "height": 20},
+													"layoutSizingHorizontal": "FILL",
+													"layoutSizingVertical": "HUG",
+													"style": {"fontFamily": "Inter", "fontSize": 13, "fontWeight": 400,
+														"lineHeightUnit": "AUTO", "letterSpacing": 0.2,
+														"textAlignHorizontal": "LEFT", "textAlignVertical": "TOP"},
+													"fills": [{"type": "SOLID", "color": {"r": 1, "g": 1, "b": 1, "a": 0.7}}],
+													"textAutoResize": "HEIGHT"
+												},
+												{
+													"id": "30:4", "name": "StatValue", "type": "TEXT",
+													"characters": "$48,290",
+													"absoluteBoundingBox": {"x": 292, "y": 152, "width": 150, "height": 36},
+													"layoutSizingHorizontal": "HUG",
+													"layoutSizingVertical": "HUG",
+													"style": {"fontFamily": "Inter", "fontSize": 32, "fontWeight": 700,
+														"lineHeightPx": 36, "lineHeightUnit": "PIXELS", "letterSpacing": -0.5,
+														"textAlignHorizontal": "LEFT", "textAlignVertical": "TOP"},
+													"fills": [{"type": "SOLID", "color": {"r": 1, "g": 1, "b": 1, "a": 1}}],
+													"textAutoResize": "WIDTH_AND_HEIGHT"
+												}
+											]
+										},
+										{
+											"id": "30:10", "name": "StatCard2", "type": "FRAME",
+											"absoluteBoundingBox": {"x": 556, "y": 104, "width": 268, "height": 120},
+											"layoutMode": "VERTICAL",
+											"itemSpacing": 8,
+											"paddingLeft": 20, "paddingRight": 20, "paddingTop": 20, "paddingBottom": 20,
+											"primaryAxisAlignItems": "MIN",
+											"counterAxisAlignItems": "MIN",
+											"layoutSizingHorizontal": "FILL",
+											"layoutSizingVertical": "HUG",
+											"fills": [{"type": "SOLID", "color": {"r": 0.12, "g": 0.12, "b": 0.18, "a": 1}}],
+											"cornerRadius": 16,
+											"strokes": [{"type": "SOLID", "color": {"r": 0.2, "g": 0.2, "b": 0.28, "a": 1}, "visible": true}],
+											"strokeWeight": 1,
+											"strokeAlign": "INSIDE",
+											"children": [
+												{
+													"id": "30:11", "name": "StatLabel", "type": "TEXT",
+													"characters": "Active Users",
+													"absoluteBoundingBox": {"x": 576, "y": 124, "width": 100, "height": 20},
+													"layoutSizingHorizontal": "FILL",
+													"layoutSizingVertical": "HUG",
+													"style": {"fontFamily": "Inter", "fontSize": 13, "fontWeight": 400,
+														"lineHeightUnit": "AUTO", "letterSpacing": 0.2,
+														"textAlignHorizontal": "LEFT", "textAlignVertical": "TOP"},
+													"fills": [{"type": "SOLID", "color": {"r": 0.6, "g": 0.6, "b": 0.7, "a": 1}}],
+													"textAutoResize": "HEIGHT"
+												},
+												{
+													"id": "30:12", "name": "StatValue", "type": "TEXT",
+													"characters": "2,847",
+													"absoluteBoundingBox": {"x": 576, "y": 152, "width": 100, "height": 36},
+													"layoutSizingHorizontal": "HUG",
+													"layoutSizingVertical": "HUG",
+													"style": {"fontFamily": "Inter", "fontSize": 32, "fontWeight": 700,
+														"lineHeightPx": 36, "lineHeightUnit": "PIXELS", "letterSpacing": -0.5,
+														"textAlignHorizontal": "LEFT", "textAlignVertical": "TOP"},
+													"fills": [{"type": "SOLID", "color": {"r": 1, "g": 1, "b": 1, "a": 1}}],
+													"textAutoResize": "WIDTH_AND_HEIGHT"
+												}
+											]
+										}
+									]
+								},
+								{
+									"id": "40:1", "name": "ChartArea", "type": "FRAME",
+									"absoluteBoundingBox": {"x": 272, "y": 248, "width": 1136, "height": 400},
+									"layoutMode": "VERTICAL",
+									"itemSpacing": 16,
+									"paddingLeft": 24, "paddingRight": 24, "paddingTop": 24, "paddingBottom": 24,
+									"primaryAxisAlignItems": "MIN",
+									"counterAxisAlignItems": "MIN",
+									"layoutSizingHorizontal": "FILL",
+									"layoutSizingVertical": "FILL",
+									"fills": [{"type": "SOLID", "color": {"r": 0.12, "g": 0.12, "b": 0.18, "a": 1}}],
+									"cornerRadius": 16,
+									"strokes": [{"type": "SOLID", "color": {"r": 0.2, "g": 0.2, "b": 0.28, "a": 1}, "visible": true}],
+									"strokeWeight": 1,
+									"strokeAlign": "INSIDE",
+									"effects": [
+										{"type": "INNER_SHADOW", "visible": true,
+										 "color": {"r": 1, "g": 1, "b": 1, "a": 0.05},
+										 "offset": {"x": 0, "y": 1}, "radius": 0, "spread": 0},
+										{"type": "BACKGROUND_BLUR", "visible": true, "radius": 40}
+									],
+									"children": [
+										{
+											"id": "40:2", "name": "ChartTitle", "type": "TEXT",
+											"characters": "Revenue Trend",
+											"absoluteBoundingBox": {"x": 296, "y": 272, "width": 200, "height": 24},
+											"layoutSizingHorizontal": "FILL",
+											"layoutSizingVertical": "HUG",
+											"style": {"fontFamily": "Inter", "fontSize": 16, "fontWeight": 600,
+												"lineHeightPx": 24, "lineHeightUnit": "PIXELS", "letterSpacing": 0,
+												"textAlignHorizontal": "LEFT", "textAlignVertical": "TOP"},
+											"fills": [{"type": "SOLID", "color": {"r": 1, "g": 1, "b": 1, "a": 1}}],
+											"textAutoResize": "HEIGHT"
+										},
+										{
+											"id": "40:3", "name": "ChartPlaceholder", "type": "RECTANGLE",
+											"absoluteBoundingBox": {"x": 296, "y": 312, "width": 1088, "height": 312},
+											"layoutSizingHorizontal": "FILL",
+											"layoutSizingVertical": "FILL",
+											"fills": [{"type": "SOLID", "color": {"r": 0.15, "g": 0.15, "b": 0.22, "a": 1}}],
+											"rectangleCornerRadii": [12, 12, 0, 0]
+										}
+									]
+								},
+								{
+									"id": "50:1", "name": "AbsoluteOverlay", "type": "GROUP",
+									"absoluteBoundingBox": {"x": 272, "y": 700, "width": 1136, "height": 160},
+									"children": [
+										{
+											"id": "50:2", "name": "Badge", "type": "RECTANGLE",
+											"absoluteBoundingBox": {"x": 1340, "y": 710, "width": 60, "height": 28},
+											"fills": [{"type": "SOLID", "color": {"r": 0.2, "g": 0.8, "b": 0.4, "a": 1}}],
+											"cornerRadius": 14,
+											"effects": [{"type": "LAYER_BLUR", "visible": true, "radius": 4}]
+										},
+										{
+											"id": "50:3", "name": "FlippedIcon", "type": "VECTOR",
+											"absoluteBoundingBox": {"x": 280, "y": 720, "width": 24, "height": 24},
+											"fills": [{"type": "SOLID", "color": {"r": 1, "g": 0.4, "b": 0.4, "a": 1}}],
+											"relativeTransform": [[-1, 0, 24], [0, 1, 0]]
+										},
+										{
+											"id": "50:4", "name": "Star", "type": "STAR",
+											"absoluteBoundingBox": {"x": 320, "y": 720, "width": 24, "height": 24},
+											"fills": [{"type": "SOLID", "color": {"r": 1, "g": 0.85, "b": 0, "a": 1}}]
+										},
+										{
+											"id": "50:5", "name": "Polygon", "type": "REGULAR_POLYGON",
+											"absoluteBoundingBox": {"x": 360, "y": 720, "width": 24, "height": 24},
+											"fills": [{"type": "SOLID", "color": {"r": 0.5, "g": 0.8, "b": 1, "a": 1}}]
+										},
+										{
+											"id": "50:6", "name": "BoolOp", "type": "BOOLEAN_OPERATION",
+											"absoluteBoundingBox": {"x": 400, "y": 720, "width": 24, "height": 24},
+											"fills": [{"type": "SOLID", "color": {"r": 0.9, "g": 0.5, "b": 1, "a": 1}}]
+										},
+										{
+											"id": "50:7", "name": "ImageCard", "type": "RECTANGLE",
+											"absoluteBoundingBox": {"x": 440, "y": 700, "width": 200, "height": 160},
+											"fills": [
+												{"type": "SOLID", "color": {"r": 0.1, "g": 0.1, "b": 0.15, "a": 1}},
+												{"type": "IMAGE", "imageRef": "img_card_bg_002", "scaleMode": "CROP", "visible": true,
+												 "imageTransform": [[0.8, 0, 0.1], [0, 0.8, 0.1]]}
+											],
+											"cornerRadius": 12,
+											"opacity": 0.95
+										},
+										{
+											"id": "50:8", "name": "GradientBg", "type": "RECTANGLE",
+											"absoluteBoundingBox": {"x": 660, "y": 700, "width": 200, "height": 160},
+											"fills": [
+												{"type": "GRADIENT_RADIAL", "visible": true,
+												 "gradientHandlePositions": [{"x": 0.5, "y": 0.5}, {"x": 1, "y": 0.5}],
+												 "gradientStops": [
+													{"position": 0, "color": {"r": 0.95, "g": 0.3, "b": 0.5, "a": 1}},
+													{"position": 1, "color": {"r": 0.1, "g": 0.1, "b": 0.15, "a": 0}}
+												 ]}
+											],
+											"cornerRadius": 12
+										},
+										{
+											"id": "50:9", "name": "CenteredText", "type": "TEXT",
+											"characters": "Justified paragraph text for testing textAlignHorizontal JUSTIFIED and textAutoResize NONE modes.",
+											"absoluteBoundingBox": {"x": 880, "y": 700, "width": 300, "height": 160},
+											"style": {"fontFamily": "Georgia", "fontSize": 14, "fontWeight": 400,
+												"lineHeightPx": 22, "lineHeightUnit": "PIXELS", "letterSpacing": 0.1,
+												"textAlignHorizontal": "JUSTIFIED", "textAlignVertical": "BOTTOM"},
+											"fills": [{"type": "SOLID", "color": {"r": 0.8, "g": 0.8, "b": 0.85, "a": 1}}],
+											"textAutoResize": "NONE"
+										}
+									]
+								}
+							]
+						}
+					]
+				}
+			]
+		}]
+	},
+	"components": {
+		"10:5": {"key": "nav_item_component", "name": "NavItem", "description": "Navigation menu item"}
+	},
+	"componentSets": {}
+}

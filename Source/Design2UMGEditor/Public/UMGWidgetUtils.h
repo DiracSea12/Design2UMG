@@ -3,7 +3,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/SlateWrapperTypes.h"
 #include "UMGSchema.h"
 
 class UWidget;
@@ -11,7 +10,6 @@ class UPanelSlot;
 class UPanelWidget;
 class UWidgetTree;
 class UWidgetBlueprint;
-class UTexture2D;
 
 /**
  * UMG Widget 宸ュ叿绫?- 鍏变韩鐨?Widget 鍒涘缓鍜屽睘鎬у簲鐢ㄩ€昏緫
@@ -24,10 +22,8 @@ public:
 	/** 閫掑綊鍒涘缓 Widget 鏍戯紙TextureMap 闈炵┖鏃跺皢鍖归厤鐨勭汗鐞嗙粦瀹氬埌 Image 鎺т欢锛?*/
 	static UWidget* CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget = nullptr, const TMap<FString, UTexture2D*>* TextureMap = nullptr);
 
-	/** 搴旂敤Fixer淇Bounds锛堝湪CreateWidgetRecursive涔嬪墠璋冪敤锛?
-	 * @param RootNode Widget鏍戞牴鑺傜偣
-	 * @param DesignSize 璁捐灏哄锛圲MG鐩爣锛?
-	 */
+	/** 搴旂敤Fixer淇Bounds锛堝湪CreateWidgetRecursive涔嬪墠璋冪敤锛?	 * @param RootNode Widget鏍戞牴鑺傜偣
+	 * @param DesignSize 璁捐灏哄锛圲MG鐩爣锛?	 */
 	static void ApplyFixer(FUMGWidgetNode& RootNode, const FIntPoint& DesignSize);
 
 	/** Fixer/LayoutCalculator 浣跨敤鐨勫疄闄?DesignSize锛堝彲鑳借璁捐绋垮昂瀵歌鐩栵級 */

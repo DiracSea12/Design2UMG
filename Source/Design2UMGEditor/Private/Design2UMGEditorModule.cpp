@@ -25,19 +25,17 @@
 #include "Widgets/Notifications/SNotificationList.h"
 #include "Dom/JsonObject.h"
 #include "Framework/Application/SlateApplication.h"
+#include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonSerializer.h"
 #include "ToolMenus.h"
 #include "DesktopPlatformModule.h"
 #include "IDesktopPlatform.h"
-#include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SSpinBox.h"
 #include "Widgets/Input/SCheckBox.h"
-#include "Widgets/SBoxPanel.h"
 #include "Widgets/Layout/SSeparator.h"
-#include "Widgets/Text/STextBlock.h"
 #include "Misc/App.h"
 #include <atomic>
 
@@ -116,6 +114,132 @@ namespace
 			}
 		}
 		return true;
+	}
+
+	struct FAutomationRenderSpec
+	{
+		FString Mode;
+		FString SourcePath;
+		FString NodeId;
+		FString OutputPath;
+		FString RenderPngPath;
+		FString ResultJsonPath;
+		FIntPoint RenderSize = FIntPoint::ZeroValue;
+	};
+
+	struct FAutomationRenderResult
+	{
+		bool bSuccess = false;
+		FString Mode;
+		FString SourcePath;
+		FString GeneratedAssetPath;
+		FString RenderPngPath;
+		FString ErrorMessage;
+		FIntPoint RenderSize = FIntPoint::ZeroValue;
+	};
+
+	bool LoadAutomationRenderSpec(const FString& SpecPath, FAutomationRenderSpec& OutSpec, FString& OutError)
+	{
+		FString JsonStr;
+		if (!FFileHelper::LoadFileToString(JsonStr, *SpecPath))
+		{
+			OutError = FString::Printf(TEXT("Failed to read automation spec: %s"), *SpecPath);
+			return false;
+		}
+
+		TSharedPtr<FJsonObject> Root;
+		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonStr);
+		if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+		{
+			OutError = FString::Printf(TEXT("Failed to parse automation spec JSON: %s"), *SpecPath);
+			return false;
+		}
+
+		Root->TryGetStringField(TEXT("mode"), OutSpec.Mode);
+		Root->TryGetStringField(TEXT("source_path"), OutSpec.SourcePath);
+		Root->TryGetStringField(TEXT("node_id"), OutSpec.NodeId);
+		Root->TryGetStringField(TEXT("output_path"), OutSpec.OutputPath);
+		Root->TryGetStringField(TEXT("render_png_path"), OutSpec.RenderPngPath);
+		Root->TryGetStringField(TEXT("result_json_path"), OutSpec.ResultJsonPath);
+
+		double RenderWidth = 0.0;
+		double RenderHeight = 0.0;
+		Root->TryGetNumberField(TEXT("render_width"), RenderWidth);
+		Root->TryGetNumberField(TEXT("render_height"), RenderHeight);
+		if (RenderWidth > 1 && RenderHeight > 1)
+		{
+			OutSpec.RenderSize = FIntPoint(
+				FMath::RoundToInt(RenderWidth),
+				FMath::RoundToInt(RenderHeight));
+		}
+
+		if (OutSpec.Mode.IsEmpty())
+		{
+			OutError = TEXT("Automation spec missing 'mode'");
+			return false;
+		}
+		if (OutSpec.SourcePath.IsEmpty())
+		{
+			OutError = TEXT("Automation spec missing 'source_path'");
+			return false;
+		}
+		if (OutSpec.RenderPngPath.IsEmpty())
+		{
+			OutError = TEXT("Automation spec missing 'render_png_path'");
+			return false;
+		}
+
+		return true;
+	}
+
+	bool WriteAutomationRenderResult(const FAutomationRenderSpec& Spec, const FAutomationRenderResult& Result)
+	{
+		if (Spec.ResultJsonPath.IsEmpty())
+		{
+			return true;
+		}
+
+		const FString OutputDir = FPaths::GetPath(Spec.ResultJsonPath);
+		if (!OutputDir.IsEmpty())
+		{
+			IFileManager::Get().MakeDirectory(*OutputDir, true);
+		}
+
+		TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+		Root->SetBoolField(TEXT("success"), Result.bSuccess);
+		Root->SetStringField(TEXT("mode"), Result.Mode);
+		Root->SetStringField(TEXT("source_path"), Result.SourcePath);
+		Root->SetStringField(TEXT("generated_asset_path"), Result.GeneratedAssetPath);
+		Root->SetStringField(TEXT("render_png_path"), Result.RenderPngPath);
+		Root->SetStringField(TEXT("error_message"), Result.ErrorMessage);
+		Root->SetNumberField(TEXT("render_width"), Result.RenderSize.X);
+		Root->SetNumberField(TEXT("render_height"), Result.RenderSize.Y);
+
+		FString JsonStr;
+		TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonStr);
+		if (!FJsonSerializer::Serialize(Root, Writer))
+		{
+			return false;
+		}
+
+		return FFileHelper::SaveStringToFile(JsonStr, *Spec.ResultJsonPath, FFileHelper::EEncodingOptions::ForceUTF8);
+	}
+
+	FString NormalizeWidgetBlueprintObjectPath(const FString& AssetPath)
+	{
+		FString Normalized = AssetPath.TrimStartAndEnd();
+		if (Normalized.IsEmpty())
+		{
+			return Normalized;
+		}
+
+		const FString AssetName = FPaths::GetBaseFilename(Normalized);
+		const FString ObjectSuffix = TEXT(".") + AssetName;
+		if (!AssetName.IsEmpty() && !Normalized.EndsWith(ObjectSuffix))
+		{
+			Normalized += ObjectSuffix;
+		}
+		return Normalized;
 	}
 
 	/** 从 MCP 数据执行转换 + 预览/生成 */
@@ -637,20 +761,20 @@ namespace
 	}
 
 	/** 导入本地 Figma 导出（design.json + images/） */
-	void ImportLocalFigmaExport(const FString& JsonFilePath, const FString& OutputPath, bool bUsePreview)
+	bool BuildLocalFigmaWidgetData(const FString& JsonFilePath, FUMGWidgetData& OutData, FString& OutError)
 	{
 		FString JsonStr;
 		if (!FFileHelper::LoadFileToString(JsonStr, *JsonFilePath))
 		{
-			ShowNotification(LOCTEXT("LocalFigmaReadFail", "Design2UMG: Failed to read design.json"), SNotificationItem::CS_Fail);
-			return;
+			OutError = FString::Printf(TEXT("Failed to read design.json: %s"), *JsonFilePath);
+			return false;
 		}
 
 		FDesignDocument ParsedDoc;
 		if (!FFigmaParser::ParseDocument(JsonStr, ParsedDoc))
 		{
-			ShowNotification(LOCTEXT("LocalFigmaParseFail", "Design2UMG: Failed to parse Figma JSON"), SNotificationItem::CS_Fail);
-			return;
+			OutError = FString::Printf(TEXT("Failed to parse Figma JSON: %s"), *JsonFilePath);
+			return false;
 		}
 
 		const FString ImagesDir = FPaths::GetPath(JsonFilePath) / TEXT("images");
@@ -675,12 +799,112 @@ namespace
 
 		FFigmaParser::ApplyImageUrls(ParsedDoc, ImageRefToLocalPath);
 
-		FUMGWidgetData Data = FDesignSourceFacade::ConvertDocument(ParsedDoc);
-		DesignImportUtils::ResolveImages(Data);
+		OutData = FDesignSourceFacade::ConvertDocument(ParsedDoc);
+		DesignImportUtils::ResolveImages(OutData);
 
-		if (Data.RootWidget.Children.Num() == 0)
+		if (OutData.RootWidget.Children.Num() == 0)
 		{
-			ShowNotification(LOCTEXT("LocalFigmaNoFrames", "Design2UMG: No frames found in export"), SNotificationItem::CS_Fail);
+			OutError = FString::Printf(TEXT("No frames found in export: %s"), *JsonFilePath);
+			return false;
+		}
+
+		return true;
+	}
+
+	bool RunAutomationRender(const FAutomationRenderSpec& Spec, FAutomationRenderResult& OutResult)
+	{
+		OutResult.Mode = Spec.Mode;
+		OutResult.SourcePath = Spec.SourcePath;
+		OutResult.RenderPngPath = Spec.RenderPngPath;
+		UE_LOG(LogDesign2UMG, Log,
+			TEXT("AutomationRender: mode=%s source=%s node=%s output=%s png=%s size=%dx%d"),
+			*Spec.Mode, *Spec.SourcePath, *Spec.NodeId, *Spec.OutputPath, *Spec.RenderPngPath,
+			Spec.RenderSize.X, Spec.RenderSize.Y);
+
+		UWidgetBlueprint* WidgetBlueprint = nullptr;
+		if (Spec.Mode.Equals(TEXT("asset"), ESearchCase::IgnoreCase))
+		{
+			const FString ObjectPath = NormalizeWidgetBlueprintObjectPath(Spec.SourcePath);
+			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: loading asset %s"), *ObjectPath);
+			WidgetBlueprint = LoadObject<UWidgetBlueprint>(nullptr, *ObjectPath);
+			if (!WidgetBlueprint)
+			{
+				OutResult.ErrorMessage = FString::Printf(TEXT("Failed to load Widget Blueprint: %s"), *ObjectPath);
+				return false;
+			}
+
+			OutResult.GeneratedAssetPath = WidgetBlueprint->GetPathName();
+			if (!DesignImportUtils::RenderCompiledBlueprintToPngFile(
+				WidgetBlueprint,
+				Spec.RenderPngPath,
+				Spec.RenderSize,
+				&OutResult.RenderSize))
+			{
+				OutResult.ErrorMessage = FString::Printf(TEXT("Failed to render compiled Widget Blueprint: %s"), *ObjectPath);
+				return false;
+			}
+
+			OutResult.bSuccess = true;
+			return true;
+		}
+
+		FUMGWidgetData Data;
+		if (Spec.Mode.Equals(TEXT("pen"), ESearchCase::IgnoreCase))
+		{
+			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: importing pen source"));
+			const bool bOk = Spec.NodeId.IsEmpty()
+				? FPenImporter::ImportFromFile(Spec.SourcePath, Data)
+				: FPenImporter::ImportFileWithTargetNode(Spec.SourcePath, Spec.NodeId, Data);
+			if (!bOk)
+			{
+				OutResult.ErrorMessage = FString::Printf(TEXT("Failed to import pen source: %s"), *Spec.SourcePath);
+				return false;
+			}
+			DesignImportUtils::ResolveImages(Data);
+		}
+		else if (Spec.Mode.Equals(TEXT("local_figma"), ESearchCase::IgnoreCase))
+		{
+			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: importing local figma export"));
+			FString ErrorMessage;
+			if (!BuildLocalFigmaWidgetData(Spec.SourcePath, Data, ErrorMessage))
+			{
+				OutResult.ErrorMessage = ErrorMessage;
+				return false;
+			}
+		}
+		else
+		{
+			OutResult.ErrorMessage = FString::Printf(TEXT("Unsupported automation render mode: %s"), *Spec.Mode);
+			return false;
+		}
+
+		UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: generating blueprint and compiled png"));
+		if (!DesignImportUtils::GenerateBlueprintAndCompiledPng(
+			Data,
+			Spec.OutputPath,
+			Spec.RenderPngPath,
+			Spec.RenderSize,
+			&OutResult.GeneratedAssetPath,
+			&OutResult.RenderSize))
+		{
+			OutResult.ErrorMessage = FString::Printf(
+				TEXT("Failed to generate compiled PNG for %s"),
+				*Spec.SourcePath);
+			return false;
+		}
+
+		OutResult.bSuccess = true;
+		return true;
+	}
+
+	void ImportLocalFigmaExport(const FString& JsonFilePath, const FString& OutputPath, bool bUsePreview)
+	{
+		FUMGWidgetData Data;
+		FString ErrorMessage;
+		if (!BuildLocalFigmaWidgetData(JsonFilePath, Data, ErrorMessage))
+		{
+			ShowNotification(LOCTEXT("LocalFigmaImportFailed", "Design2UMG: Failed to import local Figma export"), SNotificationItem::CS_Fail);
+			UE_LOG(LogDesign2UMG, Error, TEXT("%s"), *ErrorMessage);
 			return;
 		}
 
@@ -1065,60 +1289,15 @@ void FDesign2UMGEditorModule::StartupModule()
 	// Design2UMG.FigmaImport 控制台命令
 	IConsoleManager::Get().RegisterConsoleCommand(
 		TEXT("Design2UMG.FigmaImport"),
-		TEXT("Import from Figma: Design2UMG.FigmaImport <file_url_or_key> [<token>] [--token-env=FIGMA_TOKEN]"),
+		TEXT("Import from Figma: Design2UMG.FigmaImport <file_url_or_key> <token>"),
 		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
 		{
-			if (Args.Num() < 1)
+			if (Args.Num() < 2)
 			{
-				UE_LOG(LogDesign2UMG, Warning, TEXT("Usage: Design2UMG.FigmaImport <file_url_or_key> [<token>] [--token-env=FIGMA_TOKEN] [--token=<token>]"));
+				UE_LOG(LogDesign2UMG, Warning, TEXT("Usage: Design2UMG.FigmaImport <file_url_or_key> <token>"));
 				return;
 			}
-
-			const FString FileUrl = Args[0];
-			FString TokenEnvName = TEXT("FIGMA_TOKEN");
-			FString Token;
-			bool bUsedPlaintextToken = false;
-
-			for (int32 i = 1; i < Args.Num(); ++i)
-			{
-				const FString& Arg = Args[i];
-				if (Arg.StartsWith(TEXT("--token-env=")))
-				{
-					TokenEnvName = Arg.RightChop(12).TrimStartAndEnd();
-					continue;
-				}
-				if (Arg.StartsWith(TEXT("--token=")))
-				{
-					Token = Arg.RightChop(8);
-					bUsedPlaintextToken = !Token.IsEmpty();
-					continue;
-				}
-				if (Token.IsEmpty())
-				{
-					// Backward compatible positional token: Design2UMG.FigmaImport <file_url_or_key> <token>
-					Token = Arg;
-					bUsedPlaintextToken = !Token.IsEmpty();
-				}
-			}
-
-			if (Token.IsEmpty())
-			{
-				Token = FPlatformMisc::GetEnvironmentVariable(*TokenEnvName).TrimStartAndEnd();
-			}
-
-			if (Token.IsEmpty())
-			{
-				UE_LOG(LogDesign2UMG, Warning, TEXT("Figma token not found. Set env %s or pass token explicitly."), *TokenEnvName);
-				UE_LOG(LogDesign2UMG, Warning, TEXT("Recommended: set FIGMA_TOKEN and run Design2UMG.FigmaImport <file_url_or_key>"));
-				return;
-			}
-
-			if (bUsedPlaintextToken)
-			{
-				UE_LOG(LogDesign2UMG, Warning, TEXT("Security warning: plaintext token in command args is not recommended (shell history/log risk)."));
-			}
-
-			ImportFromFigma(FileUrl, Token);
+			ImportFromFigma(Args[0], Args[1]);
 		}),
 		ECVF_Default);
 
@@ -1157,6 +1336,65 @@ void FDesign2UMGEditorModule::StartupModule()
 			{
 				UE_LOG(LogDesign2UMG, Log, TEXT("Unattended mode: requesting engine exit after local figma import"));
 				FPlatformMisc::RequestExit(false);
+			}
+		}),
+		ECVF_Default);
+
+	IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("Design2UMG.AutomationRender"),
+		TEXT("Automation render from manifest JSON: Design2UMG.AutomationRender <spec.json>"),
+		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
+		{
+			FAutomationRenderResult Result;
+			Result.Mode = TEXT("unknown");
+
+			if (Args.Num() < 1)
+			{
+				UE_LOG(LogDesign2UMG, Error, TEXT("Usage: Design2UMG.AutomationRender <spec.json>"));
+				if (FApp::IsUnattended())
+				{
+					FPlatformMisc::RequestExitWithStatus(false, 1);
+				}
+				return;
+			}
+
+			const FString SpecPath = Args[0];
+			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender command invoked: spec=%s unattended=%d"), *SpecPath, FApp::IsUnattended() ? 1 : 0);
+			FAutomationRenderSpec Spec;
+			FString LoadError;
+			if (!LoadAutomationRenderSpec(SpecPath, Spec, LoadError))
+			{
+				UE_LOG(LogDesign2UMG, Error, TEXT("%s"), *LoadError);
+				Result.ErrorMessage = LoadError;
+				WriteAutomationRenderResult(Spec, Result);
+				if (FApp::IsUnattended())
+				{
+					FPlatformMisc::RequestExitWithStatus(false, 1);
+				}
+				return;
+			}
+
+			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: spec loaded successfully"));
+			const bool bOk = RunAutomationRender(Spec, Result);
+			WriteAutomationRenderResult(Spec, Result);
+
+			if (!bOk)
+			{
+				UE_LOG(LogDesign2UMG, Error, TEXT("Design2UMG.AutomationRender failed: %s"), *Result.ErrorMessage);
+			}
+			else
+			{
+				UE_LOG(LogDesign2UMG, Log,
+					TEXT("Design2UMG.AutomationRender succeeded: asset=%s png=%s (%dx%d)"),
+					*Result.GeneratedAssetPath,
+					*Result.RenderPngPath,
+					Result.RenderSize.X,
+					Result.RenderSize.Y);
+			}
+
+			if (FApp::IsUnattended())
+			{
+				FPlatformMisc::RequestExitWithStatus(false, bOk ? 0 : 1);
 			}
 		}),
 		ECVF_Default);
@@ -1255,6 +1493,7 @@ void FDesign2UMGEditorModule::ShutdownModule()
 	IConsoleManager::Get().UnregisterConsoleObject(TEXT("Design2UMG.ImportSource"), false);
 	IConsoleManager::Get().UnregisterConsoleObject(TEXT("Design2UMG.FigmaImport"), false);
 	IConsoleManager::Get().UnregisterConsoleObject(TEXT("Design2UMG.LocalFigmaImport"), false);
+	IConsoleManager::Get().UnregisterConsoleObject(TEXT("Design2UMG.AutomationRender"), false);
 
 	// 反注册数据源适配器
 	UnregisterBuiltInDesignSources();
@@ -1263,3 +1502,8 @@ void FDesign2UMGEditorModule::ShutdownModule()
 #undef LOCTEXT_NAMESPACE
 
 IMPLEMENT_MODULE(FDesign2UMGEditorModule, Design2UMGEditor)
+
+
+
+
+

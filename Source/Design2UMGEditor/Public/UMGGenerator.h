@@ -14,8 +14,7 @@ class FUMGGenerator
 {
 public:
 	/**
-	 * 鐢熸垚 Widget Blueprint锛堟瀯寤?+ 缂栬瘧 + 淇濆瓨锛?
-	 * @param WidgetData 瑙ｆ瀽鍚庣殑 Widget 鏁版嵁
+	 * 鐢熸垚 Widget Blueprint锛堟瀯寤?+ 缂栬瘧 + 淇濆瓨锛?	 * @param WidgetData 瑙ｆ瀽鍚庣殑 Widget 鏁版嵁
 	 * @param PackagePath 淇濆瓨璺緞 (渚嬪 "/Game/UI")
 	 * @return 鐢熸垚鐨?Widget Blueprint锛屽け璐ヨ繑鍥?nullptr
 	 */

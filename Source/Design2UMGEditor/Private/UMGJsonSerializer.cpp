@@ -108,11 +108,13 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeWidgetNode(const FUMGWidget
 	}
 
 	// TextStyle (v2.4)
-	if (Node.TextStyle.FontSize > 0 || Node.TextStyle.bHasLetterSpacing)
+	if (Node.TextStyle.FontSize > 0 || Node.TextStyle.SourceFontSize > 0 || Node.TextStyle.bHasLetterSpacing)
 	{
 		TSharedRef<FJsonObject> TS = MakeShared<FJsonObject>();
 		if (Node.TextStyle.FontSize > 0)
 			TS->SetNumberField(TEXT("FontSize"), Node.TextStyle.FontSize);
+		if (Node.TextStyle.SourceFontSize > 0)
+			TS->SetNumberField(TEXT("SourceFontSize"), Node.TextStyle.SourceFontSize);
 		if (Node.TextStyle.bHasLetterSpacing)
 			TS->SetNumberField(TEXT("LetterSpacing"), Node.TextStyle.LetterSpacing);
 		J->SetObjectField(TEXT("TextStyle"), TS);

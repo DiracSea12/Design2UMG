@@ -7,9 +7,6 @@
 #include "DesignVariableResolver.h"
 #include "DesignImportTypes.h"
 
-class FJsonObject;
-class FJsonValue;
-
 /**
  * .pen 鏂囦欢 JSON 瑙ｆ瀽鍣? */
 class FPenParser

@@ -18,11 +18,9 @@
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Misc/SecureHash.h"
-#include "Misc/FileHelper.h"
 #include "Modules/ModuleManager.h"
 #include "RenderingThread.h"
 #include "UObject/SavePackage.h"
-#include "TextureResource.h"
 
 namespace
 {

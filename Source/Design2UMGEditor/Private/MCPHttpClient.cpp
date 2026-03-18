@@ -207,7 +207,7 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 	if (!SessionId.IsEmpty())
 		HttpRequest->SetHeader(TEXT("Mcp-Session-Id"), SessionId);
 
-	// 鍚屾绛夊緟 鈥?鐘舵€佹斁鍫嗕笂锛岄槻姝?timeout/cancel 鍚庡洖璋冨啓鎮瀭鏍堝彉閲?
+	// Keep request state on the heap so timeout/cancel cannot leave a dangling stack capture.
 	struct FRequestState
 	{
 		std::atomic<bool> bCompleted{false};
@@ -289,7 +289,7 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 bool FMCPHttpClient::ParseSSEResponse(const FString& SSEBody, TSharedPtr<FJsonObject>& OutResult)
 {
 	// SSE 鏍煎紡: "event: message\ndata: {json}\n\n"
-	// 鎻愬彇鏈€鍚庝竴涓?"data:" 琛?
+	// Extract the last "data:" line from the SSE payload.
 	FString JsonLine;
 	TArray<FString> Lines;
 	SSEBody.ParseIntoArrayLines(Lines);

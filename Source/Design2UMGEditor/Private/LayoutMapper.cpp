@@ -3,6 +3,50 @@
 #include "LayoutMapper.h"
 #include "DesignTypeMapper.h"
 
+namespace
+{
+	bool UsesWrappingText(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid())
+		{
+			return false;
+		}
+
+		if (Node->Type == EDesignNodeType::Text)
+		{
+			return Node->TextGrowth == EDesignTextGrowth::FixedWidth
+				|| Node->TextGrowth == EDesignTextGrowth::FixedWidthHeight
+				|| Node->TextAlign == EDesignTextAlign::Justify
+				|| Node->Content.Contains(TEXT("\n"));
+		}
+
+		for (const TSharedPtr<FDesignNode>& Child : Node->Children)
+		{
+			if (UsesWrappingText(Child))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	bool ShouldUseFitOverride(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid())
+		{
+			return false;
+		}
+
+		if (Node->Type == EDesignNodeType::Text || Node->Type == EDesignNodeType::IconFont)
+		{
+			return !UsesWrappingText(Node);
+		}
+
+		return !UsesWrappingText(Node);
+	}
+}
+
 void FLayoutMapper::ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node, EDesignLayout ParentLayout)
 {
 	if (ParentLayout == EDesignLayout::Vertical)
@@ -212,16 +256,21 @@ FUMGWidgetNode FLayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, cons
 	SizeBox.Type = TEXT("SizeBox");
 	SizeBox.Id = ChildWidget.Id + TEXT("_sz");
 	SizeBox.Name = ChildWidget.Name + TEXT("_sz");
+	const bool bUseFitOverride = ShouldUseFitOverride(ChildNode);
 
 	if (ChildNode->Width.IsFixed())
 		SizeBox.Properties.Add(TEXT("WidthOverride"), FString::SanitizeFloat(ChildNode->Width.Value));
 	else if (ChildNode->Width.IsFit() && ChildNode->Width.Value > 0)
-		SizeBox.Properties.Add(TEXT("MinDesiredWidth"), FString::SanitizeFloat(ChildNode->Width.Value));
+		SizeBox.Properties.Add(
+			bUseFitOverride ? TEXT("WidthOverride") : TEXT("MinDesiredWidth"),
+			FString::SanitizeFloat(ChildNode->Width.Value));
 
 	if (ChildNode->Height.IsFixed())
 		SizeBox.Properties.Add(TEXT("HeightOverride"), FString::SanitizeFloat(ChildNode->Height.Value));
 	else if (ChildNode->Height.IsFit() && ChildNode->Height.Value > 0)
-		SizeBox.Properties.Add(TEXT("MinDesiredHeight"), FString::SanitizeFloat(ChildNode->Height.Value));
+		SizeBox.Properties.Add(
+			bUseFitOverride ? TEXT("HeightOverride") : TEXT("MinDesiredHeight"),
+			FString::SanitizeFloat(ChildNode->Height.Value));
 
 	SizeBox.Bounds = ChildWidget.Bounds;
 	SizeBox.Slot = MoveTemp(ChildWidget.Slot);

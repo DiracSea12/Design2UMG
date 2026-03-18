@@ -50,6 +50,17 @@ namespace
 {
 	#define GET_PROP(Key) P.Find(TEXT(Key))
 
+	int32 ConvertLetterSpacingPxToTracking(float PixelSpacing, float DesignFontSize, float AppliedFontSize)
+	{
+		const float BaseFontSize = DesignFontSize > 0.0f ? DesignFontSize : AppliedFontSize;
+		if (BaseFontSize <= 0.0f)
+		{
+			return 0;
+		}
+
+		return FMath::RoundToInt(PixelSpacing / BaseFontSize * 1000.0f);
+	}
+
 	bool TryParseVector4(const FString& Value, FVector4& OutVector)
 	{
 		TArray<FString> Parts;
@@ -139,12 +150,16 @@ namespace
 		}
 		if (const FString* V = GET_PROP("LetterSpacing"))
 		{
-			// .pen letterSpacing is in pixels; UE5 LetterSpacing is tracking (1/1000 em)
-			// Conversion: tracking = pixelSpacing / fontSize * 1000
+			// .pen letterSpacing is in px on the original design font size.
+			// UE tracking is 1/1000 em, so the correct basis is the source font size,
+			// not the scaled UMG font size.
 			const float PixelSpacing = FCString::Atof(**V);
-			if (FontInfo.Size > 0)
+			const float DesignFontSize = GET_PROP("DesignFontSize")
+				? FCString::Atof(**GET_PROP("DesignFontSize"))
+				: 0.0f;
+			if (FontInfo.Size > 0 || DesignFontSize > 0.0f)
 			{
-				FontInfo.LetterSpacing = FMath::RoundToInt(PixelSpacing / FontInfo.Size * 1000.0f);
+				FontInfo.LetterSpacing = ConvertLetterSpacingPxToTracking(PixelSpacing, DesignFontSize, FontInfo.Size);
 			}
 			bFontChanged = true;
 		}
@@ -202,6 +217,18 @@ namespace
 		if (ColorVal) I->SetColorAndOpacity(FUMGWidgetUtils::ParseColor(*ColorVal));
 
 		if (const FString* V = GET_PROP("BrushColor")) I->SetBrushTintColor(FSlateColor(FUMGWidgetUtils::ParseColor(*V)));
+		if (const FString* V = GET_PROP("MaterialRef"))
+		{
+			if (UTexture2D* GeneratedTex = FProceduralShapeGenerator::GenerateFromMaterialRef(*V, P, I))
+			{
+				I->SetBrushFromTexture(GeneratedTex);
+				FSlateBrush GeneratedBrush = I->GetBrush();
+				GeneratedBrush.ImageSize = FVector2D(GeneratedTex->GetSizeX(), GeneratedTex->GetSizeY());
+				GeneratedBrush.Tiling = ESlateBrushTileType::NoTile;
+				I->SetBrush(GeneratedBrush);
+				return;
+			}
+		}
 		if (const FString* Geom = GET_PROP("PathGeometry"))
 		{
 			const FString FillRuleStr = P.Contains(TEXT("PathFillRule")) ? P[TEXT("PathFillRule")] : TEXT("nonzero");
@@ -930,9 +957,9 @@ void FUMGWidgetUtils::ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNod
 				bFontChanged = true;
 			}
 
-			if (TS.bHasLetterSpacing && FontInfo.Size > 0)
+			if (TS.bHasLetterSpacing && (FontInfo.Size > 0 || TS.SourceFontSize > 0))
 			{
-				FontInfo.LetterSpacing = FMath::RoundToInt(TS.LetterSpacing / FontInfo.Size * 1000.0f);
+				FontInfo.LetterSpacing = ConvertLetterSpacingPxToTracking(TS.LetterSpacing, TS.SourceFontSize, FontInfo.Size);
 				bFontChanged = true;
 			}
 

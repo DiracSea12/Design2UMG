@@ -5,8 +5,6 @@
 #include "CoreMinimal.h"
 #include "UMGSchema.h"
 
-class UTexture2D;
-
 /**
  * Resolve TexturePath fields in generated UMG data.
  * - /Game/... and /Engine/... paths are preserved

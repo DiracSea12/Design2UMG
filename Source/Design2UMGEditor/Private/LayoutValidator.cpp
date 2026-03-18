@@ -7,7 +7,7 @@ float FLayoutValidator::CalculateBoundsError(
 	const FBounds& Expected,
 	const FIntPoint& DesignSize)
 {
-	// v2.2: 璁＄畻浣嶇疆鍜屽昂瀵歌宸紝杞崲涓哄儚绱?
+	// Convert normalized error back into pixels.
 	float ErrorX = FMath::Abs(Actual.X - Expected.X) * DesignSize.X;
 	float ErrorY = FMath::Abs(Actual.Y - Expected.Y) * DesignSize.Y;
 	float ErrorW = FMath::Abs(Actual.W - Expected.W) * DesignSize.X;

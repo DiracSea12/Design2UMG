@@ -130,7 +130,8 @@ struct FUMGSlotData
  * WrapWithBorder 鏃朵笉闅忚瑙夊睘鎬ц浆绉伙紝鐣欏湪鍘?Widget 涓? */
 struct FUMGTextStyleData
 {
-	float FontSize = 0;              // 0 = 鏈缃?
+	float FontSize = 0;              // 0 = unset
+	float SourceFontSize = 0;        // Original design font size before px->UMG scaling
 	float LetterSpacing = 0;
 	bool bHasLetterSpacing = false;  // 鍖哄垎"鏄惧紡璁剧疆涓?"鍜?鏈缃?
 };
@@ -140,7 +141,7 @@ struct FUMGTextStyleData
  */
 struct FUMGVisualBrushData
 {
-	float OutlineCornerRadius = -1;  // -1 = 鏈缃?
+	float OutlineCornerRadius = -1;  // -1 = unset
 	FVector4 CornerRadii = FVector4(-1, -1, -1, -1);
 	float OutlineThickness = 0;
 
@@ -159,47 +160,44 @@ struct FUMGVisualBrushData
 };
 
 /**
- * Widget 节点数据结构 - 描述单个控件（v2.4 更新）
- */
+ * Widget 鑺傜偣鏁版嵁缁撴瀯 - 鎻忚堪鍗曚釜鎺т欢锛坴2.4鏇存柊锛? */
 USTRUCT()
 struct FUMGWidgetNode
 {
 	GENERATED_BODY()
 
-	/** 控件类型: CanvasPanel, VerticalBox, HorizontalBox, Button, TextBlock, Image 等 */
+	/** 鎺т欢绫诲瀷: CanvasPanel, VerticalBox, HorizontalBox, Button, TextBlock, Image, etc. */
 	UPROPERTY()
 	FString Type;
 
-	/** 稳定唯一标识，路径格式：{ParentId}/{Type}_{Index}（v2.2 新增） */
+	/** 绋冲畾鍞竴鏍囪瘑锛岃矾寰勫紡锛歿ParentId}/{Type}_{Index}锛坴2.2鏂板锛?*/
 	UPROPERTY()
 	FString Id;
 
-	/** 控件名称 */
+	/** 鎺т欢鍚嶇О */
 	UPROPERTY()
 	FString Name;
 
-	/** 像素坐标 Bounds（由 LayoutCalculator 从 Slot 反推） */
+	/** 鍍忕礌鍧愭爣Bounds锛堢敱LayoutCalculator浠嶴lot璁＄畻锛?*/
 	FBounds Bounds;
 
-	/** 布局槽数据（由 LayoutCalculator 从 Bounds 计算） */
+	/** 甯冨眬妲芥暟鎹紙鐢盠ayoutCalculator浠嶣ounds璁＄畻锛?*/
 	UPROPERTY()
 	FUMGSlotData Slot;
 
-	/**
-	 * 属性键值对（legacy，逐步由 Brush 替代）
-	 * @note [TODO] 后续重构为强类型数据，减少 string map 带来的类型安全和维护风险。
-	 *       当前为向后兼容保留，新属性系统不应继续写入此 Map。
-	 */
+	/** 
+	 * 灞炴€ч敭鍊煎锛坙egacy锛岄€愭鐢?Brush 鏇夸唬锛?
+	 * @note [TODO] 瀹屽叏閲嶆瀯涓哄己绫诲瀷鏁版嵁锛屾秷闄ゅ瓧绗︿覆 Map 甯︽潵鐨勭被鍨嬪畨鍏ㄥ拰缁存姢椋庨櫓銆?	 *       涓哄悜鍚庡吋瀹瑰綋鍓嶇増鏈繚鐣欙紝浣嗘柊灞炴€х郴缁熶笉搴斿啀娣诲姞鍒版 Map 涓€?	 */
 	UPROPERTY()
 	TMap<FString, FString> Properties;
 
-	/** 类型化文本样式（v2.4 从 Brush 中拆分） */
+	/** 绫诲瀷鍖栨枃鏈牱寮忥紙v2.4 鎷嗗垎鑷?Brush锛?*/
 	FUMGTextStyleData TextStyle;
 
-	/** 类型化视觉画刷（v2.4 从 Brush 中拆分；WrapWithBorder 时会转移） */
+	/** 绫诲瀷鍖栬瑙夌敾鍒凤紙v2.4 鎷嗗垎鑷?Brush锛學rapWithBorder 鏃惰浆绉伙級 */
 	FUMGVisualBrushData Brush;
 
-	/** 子控件（不可序列化，UHT 不支持递归 USTRUCT） */
+	/** 瀛愭帶浠?(涓嶅彲搴忓垪鍖栵紝UHT 涓嶆敮鎸侀€掑綊 USTRUCT) */
 	TArray<FUMGWidgetNode> Children;
 };
 
@@ -222,3 +220,4 @@ struct FUMGWidgetData
 	/** 杞崲杩囩▼涓殑闄嶇骇璀﹀憡锛堝 Ellipse鈫払order锛?*/
 	TArray<FString> Warnings;
 };
+

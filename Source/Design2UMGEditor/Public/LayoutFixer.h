@@ -76,13 +76,11 @@ class FLayoutFixer
 {
 public:
 	/**
-	 * 鍒濆鍖朏ixer锛岃绠楀姩鎬侀槇鍊?
-	 */
+	 * 鍒濆鍖朏ixer锛岃绠楀姩鎬侀槇鍊?	 */
 	static void Initialize(const FIntPoint& DesignSize, FFixerPreset& OutPreset);
 
 	/**
-	 * 淇鏁翠釜Widget鏍?
-	 * @param OutStats v2.3: 鍙€夌殑缁熻杈撳嚭
+	 * 淇鏁翠釜Widget鏍?	 * @param OutStats v2.3: 鍙€夌殑缁熻杈撳嚭
 	 */
 	static void FixWidgetTree(
 		FFixerWidgetNode& Root,

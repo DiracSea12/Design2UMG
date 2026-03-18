@@ -121,11 +121,11 @@ public:
 
 	/** placeholderhatch 占位纹理背景色（当节点自身无可用纯色填充时使用） */
 	UPROPERTY(Config, EditAnywhere, Category = "Placeholder Hatch", meta = (DisplayName = "Fallback Background Color", ToolTip = "Fallback hatch background color when node has no explicit solid fill color."))
-	FString PlaceholderHatchBackgroundColor = TEXT("#222229");
+	FString PlaceholderHatchBackgroundColor = TEXT("#D282FF33");
 
 	/** placeholderhatch 占位纹理斜线色（当节点自身无可用描边色时使用） */
 	UPROPERTY(Config, EditAnywhere, Category = "Placeholder Hatch", meta = (DisplayName = "Fallback Stripe Color", ToolTip = "Fallback hatch stripe color when node has no explicit stroke color."))
-	FString PlaceholderHatchStripeColor = TEXT("#B2B2FF");
+	FString PlaceholderHatchStripeColor = TEXT("#D480FF");
 
 	/** placeholderhatch 斜线宽度（像素） */
 	UPROPERTY(Config, EditAnywhere, Category = "Placeholder Hatch", meta = (DisplayName = "Stripe Width", ClampMin = "1", ClampMax = "32"))

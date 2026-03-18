@@ -74,7 +74,7 @@ bool IsNodeModified(const FUMGWidgetNode& Node, UWidget* Widget)
 	if (Widget->GetFName() != Expected)
 		return true;
 
-	// Children count change 鈥?鎹曡幏缁撴瀯鎬у彉鏇?
+	// Children count change captures structural differences.
 	if (UPanelWidget* Panel = Cast<UPanelWidget>(Widget))
 	{
 		if (Node.Children.Num() != Panel->GetChildrenCount())

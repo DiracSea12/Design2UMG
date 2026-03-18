@@ -129,7 +129,7 @@ bool FLayoutFixer::FixBoundsOverflow(
 	const float ParentRight = ParentBounds.X + ParentBounds.W;
 	const float ParentBottom = ParentBounds.Y + ParentBounds.H;
 
-	// 宸?涓婅秺鐣?
+	// Clamp left/top overflow.
 	if (ChildBounds.X < ParentBounds.X)
 	{
 		ChildBounds.X = ParentBounds.X;
@@ -141,7 +141,7 @@ bool FLayoutFixer::FixBoundsOverflow(
 		bFixed = true;
 	}
 
-	// 鍙?涓嬭秺鐣?
+	// Clamp right/bottom overflow.
 	const float ChildRight = ChildBounds.X + ChildBounds.W;
 	const float ChildBottom = ChildBounds.Y + ChildBounds.H;
 
@@ -149,7 +149,7 @@ bool FLayoutFixer::FixBoundsOverflow(
 
 	if (ChildRight > ParentRight)
 	{
-		// 濡傛灉鍏冪礌瀹屽叏鍦ㄧ埗鑺傜偣鍙充晶锛屽厛绉诲姩鍒扮埗鑺傜偣鍐?
+		// If the child is fully outside on the right, move it back first.
 		if (ChildBounds.X >= ParentRight - MinSize)
 		{
 			ChildBounds.X = ParentRight - ChildBounds.W;
@@ -168,7 +168,7 @@ bool FLayoutFixer::FixBoundsOverflow(
 	}
 	if (ChildBottom > ParentBottom)
 	{
-		// 濡傛灉鍏冪礌瀹屽叏鍦ㄧ埗鑺傜偣涓嬫柟锛屽厛绉诲姩鍒扮埗鑺傜偣鍐?
+		// If the child is fully outside on the bottom, move it back first.
 		if (ChildBounds.Y >= ParentBottom - MinSize)
 		{
 			ChildBounds.Y = ParentBottom - ChildBounds.H;
@@ -218,11 +218,11 @@ bool FLayoutFixer::SnapToAlignment(
 	const float Bottom = Bounds.Y + Bounds.H;
 
 	// v2.2: 鏀堕泦鎵€鏈夊€欓€変綅绉伙紝閫夋嫨鏈€灏忕殑
-	// X鏂瑰悜鍊欓€夛細宸﹁竟缂樸€佸彸杈圭紭銆佷腑绾?
+	// Candidate X offsets: left edge, right edge, center line.
 	TArray<float> DeltasX;
-	DeltasX.Add(ParentBounds.X - Bounds.X);           // 宸﹁竟缂樺惛闄?
-	DeltasX.Add(ParentRight - Right);                  // 鍙宠竟缂樺惛闄?
-	DeltasX.Add(ParentCenterX - CenterX);              // 涓嚎鍚搁檮
+	DeltasX.Add(ParentBounds.X - Bounds.X);           // snap left edge
+	DeltasX.Add(ParentRight - Right);                 // snap right edge
+	DeltasX.Add(ParentCenterX - CenterX);             // snap center line
 
 	float BestDeltaX = 0.0f;
 	if (ChooseBestDelta(DeltasX, SnapThresholdX, Eps, BestDeltaX))
@@ -231,11 +231,11 @@ bool FLayoutFixer::SnapToAlignment(
 		bFixed = true;
 	}
 
-	// Y鏂瑰悜鍊欓€夛細涓婅竟缂樸€佷笅杈圭紭銆佷腑绾?
+	// Candidate Y offsets: top edge, bottom edge, center line.
 	TArray<float> DeltasY;
-	DeltasY.Add(ParentBounds.Y - Bounds.Y);           // 涓婅竟缂樺惛闄?
-	DeltasY.Add(ParentBottom - Bottom);                // 涓嬭竟缂樺惛闄?
-	DeltasY.Add(ParentCenterY - CenterY);              // 涓嚎鍚搁檮
+	DeltasY.Add(ParentBounds.Y - Bounds.Y);           // snap top edge
+	DeltasY.Add(ParentBottom - Bottom);               // snap bottom edge
+	DeltasY.Add(ParentCenterY - CenterY);             // snap center line
 
 	float BestDeltaY = 0.0f;
 	if (ChooseBestDelta(DeltasY, SnapThresholdY, Eps, BestDeltaY))
@@ -277,20 +277,20 @@ bool FLayoutFixer::SnapToSiblings(
 		const float SibRight = Sibling.X + Sibling.W;
 		const float SibBottom = Sibling.Y + Sibling.H;
 
-		// X鏂瑰悜鍚搁檮闇€瑕乊鏂瑰悜鏈夎冻澶熼噸鍙?
+		// X snapping requires enough overlap on Y.
 		float OverlapY = OverlapRatio1D(Bounds.Y, Bottom, Sibling.Y, SibBottom);
 		if (OverlapY >= MinOverlapRatio)
 		{
-			DeltasX.Add(Sibling.X - Bounds.X);      // 宸﹁竟缂樺榻?
-			DeltasX.Add(SibRight - Right);           // 鍙宠竟缂樺榻?
+			DeltasX.Add(Sibling.X - Bounds.X);      // align left edges
+			DeltasX.Add(SibRight - Right);          // align right edges
 		}
 
-		// Y鏂瑰悜鍚搁檮闇€瑕乆鏂瑰悜鏈夎冻澶熼噸鍙?
+		// Y snapping requires enough overlap on X.
 		float OverlapX = OverlapRatio1D(Bounds.X, Right, Sibling.X, SibRight);
 		if (OverlapX >= MinOverlapRatio)
 		{
-			DeltasY.Add(Sibling.Y - Bounds.Y);      // 涓婅竟缂樺榻?
-			DeltasY.Add(SibBottom - Bottom);         // 涓嬭竟缂樺榻?
+			DeltasY.Add(Sibling.Y - Bounds.Y);      // align top edges
+			DeltasY.Add(SibBottom - Bottom);        // align bottom edges
 		}
 	}
 
@@ -407,7 +407,7 @@ bool FLayoutFixer::FixEqualSpacing(
 {
 	if (Indices.Num() < 3) return false;
 
-	// 鎸変綅缃帓搴?
+	// Sort by position before measuring gaps.
 	TArray<int32> Sorted = Indices;
 	Sorted.Sort([&Bounds, bHorizontal](int32 A, int32 B)
 	{
@@ -462,7 +462,7 @@ bool FLayoutFixer::FixEqualSpacing(
 				NewX = Bounds[Idx].X + FMath::Sign(DeltaX) * MaxMove;
 			}
 
-			// 杈圭晫妫€鏌?
+			// Respect normalized bounds.
 			if (NewX >= 0.0f && NewX + Bounds[Idx].W <= 1.0f)
 			{
 				Bounds[Idx].X = NewX;
@@ -481,7 +481,7 @@ bool FLayoutFixer::FixEqualSpacing(
 				NewY = Bounds[Idx].Y + FMath::Sign(DeltaY) * MaxMove;
 			}
 
-			// 杈圭晫妫€鏌?
+			// Respect normalized bounds.
 			if (NewY >= 0.0f && NewY + Bounds[Idx].H <= 1.0f)
 			{
 				Bounds[Idx].Y = NewY;
@@ -567,7 +567,7 @@ void FLayoutFixer::FixChildrenSpacing(
 	if (!Preset.bEnableEqualSpacing || ProposedBounds.Num() < Preset.MinElementsForEqualSpacing)
 		return;
 
-	// 琛屾柟鍚戠瓑璺?
+	// Equal spacing by rows.
 	auto Rows = DetectRows(OriginalBounds, Preset.RowOverlapThreshold);
 	for (auto& Row : Rows)
 	{
@@ -587,7 +587,7 @@ void FLayoutFixer::FixChildrenSpacing(
 		}
 	}
 
-	// 鍒楁柟鍚戠瓑璺?
+	// Equal spacing by columns.
 	auto Columns = DetectColumns(OriginalBounds, Preset.RowOverlapThreshold);
 	for (auto& Col : Columns)
 	{
@@ -649,7 +649,7 @@ void FLayoutFixer::ProcessNode(
 	if (Node.Children.Num() == 0)
 		return;
 
-	// 鏀堕泦鍙慨姝ｇ殑瀛愯妭鐐?
+	// Collect children that are allowed to be adjusted.
 	TArray<int32> FixableIndices;
 	TArray<FBounds> OriginalBounds;
 	for (int32 i = 0; i < Node.Children.Num(); ++i)
@@ -666,7 +666,7 @@ void FLayoutFixer::ProcessNode(
 	// 鍚岀骇鍚搁檮 + 绛夎窛淇
 	FixChildrenSpacing(ProposedBounds, OriginalBounds, Preset, SnapThresholdX, SnapThresholdY, OutLog, Stats);
 
-	// 淇濆畧鎬ф鏌ワ紝涓嶉€氳繃鍒欏洖婊?
+	// Roll back when the conservative check fails.
 	bool bPass = PassesConservatismCheck(OriginalBounds, ProposedBounds, SnapThresholdX, SnapThresholdY);
 	if (!bPass)
 		Stats.RolledBack++;
@@ -678,7 +678,7 @@ void FLayoutFixer::ProcessNode(
 			Node.Children[FixableIndices[i]].Bounds = ProposedBounds[i];
 	}
 
-	// 閫掑綊澶勭悊瀛愯妭鐐?
+	// Recurse into child nodes with the best available parent bounds.
 	FBounds ChildParent = (Node.Bounds.W > 0.0f && Node.Bounds.H > 0.0f) ? Node.Bounds : ParentBounds;
 	for (auto& Child : Node.Children)
 		ProcessNode(Child, ChildParent, Preset, SnapThresholdX, SnapThresholdY, OutLog, Stats);

@@ -34,8 +34,11 @@ struct DESIGN2UMGEDITOR_API FFontResolver
 
 private:
 	static int32 WeightFromTypefaceName(const FString& Name);
+	static FString WeightNameFromNumeric(int32 Weight);
 	static FString WeightNameFromFile(const FString& FilePath, const FString& FamilyName);
 	static TArray<FString> FindSiblingFontFiles(const FString& FilePath, const FString& FamilyName);
+	static bool QueryKnownWebFontTypefaces(const FString& FontFamily, TMap<FString, FString>& OutTypefaceUrls);
+	static bool EnsureKnownWebFontTypefaces(const FString& FontFamily, UFont* Font, const FString& FontObjectPath);
 	static TMap<FString, FString> FontAssetCache;
 	static void CollectFontFamilies(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSet<FString>& OutFamilies);
 	static TSet<FString> ScanProjectFontAssets();

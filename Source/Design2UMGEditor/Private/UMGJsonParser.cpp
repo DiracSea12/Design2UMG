@@ -68,9 +68,8 @@ bool FUMGJsonParser::ParseJson(const FString& JsonString, FUMGWidgetData& OutWid
 		return false;
 	}
 
-	// 绌虹粨鏋滄娴嬶細绾竷灞€瀹瑰櫒浣嗘病鏈夊瓙鑺傜偣 鈫?瑙嗕负绌虹粨鏋?
-	// 娉ㄦ剰锛氫笉鑳界敤 UPanelWidget::IsChildOf 杩愯鏃舵鏌ワ紝鍥犱负 CheckBox/EditableTextBox
-	// 绛変篃鏄?UPanelWidget 瀛愮被锛岀┖鐨勫畠浠粛鏄湁鏁堟帶浠躲€傛鐧藉悕鍗曚粎鍒楀嚭"绾竷灞€"瀹瑰櫒銆?
+	// Treat an empty pure-layout container as an invalid result.
+	// Interactive widgets such as CheckBox can also derive from panel types, so keep this allowlist narrow.
 	static const TSet<FString> ContainerTypes = {
 		TEXT("CanvasPanel"), TEXT("VerticalBox"), TEXT("HorizontalBox"),
 		TEXT("Overlay"), TEXT("ScrollBox"), TEXT("GridPanel"),
@@ -97,20 +96,20 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 		return false;
 	}
 
-	// 瑙ｆ瀽蹇呴渶瀛楁 - 浣跨敤 TryGetStringField 閬垮厤瀛楁缂哄け鏃跺穿婧?
+	// Parse required fields without crashing on missing keys.
 	if (!JsonObject->TryGetStringField(TEXT("Type"), OutNode.Type) || OutNode.Type.IsEmpty())
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("FUMGJsonParser: Widget node missing Type field"));
 		return false;
 	}
 
-	// Name 鍙€夛紝缂哄け鏃惰嚜鍔ㄧ敓鎴?
+	// Name is optional; synthesize one when absent.
 	if (!JsonObject->TryGetStringField(TEXT("Name"), OutNode.Name) || OutNode.Name.IsEmpty())
 	{
 		OutNode.Name = FString::Printf(TEXT("%s_%s"), *OutNode.Type, *FGuid::NewGuid().ToString(EGuidFormats::Short));
 	}
 
-	// 瑙ｆ瀽 Id锛坴2.2鏂板锛岃矾寰勫紡绋冲畾鏍囪瘑锛?
+	// Parse v2.2 path-based stable id.
 	JsonObject->TryGetStringField(TEXT("Id"), OutNode.Id);
 
 	// 瑙ｆ瀽 Bounds锛坴2.2鏂板锛屽綊涓€鍖栧潗鏍囷級
@@ -124,7 +123,7 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 		if ((*BoundsObject)->TryGetNumberField(TEXT("H"), Val)) OutNode.Bounds.H = (float)Val;
 	}
 
-	// 瑙ｆ瀽 Slot 鏁版嵁锛堟敮鎸?"Slot" 鎴?"CanvasSlot" 閿悕锛?
+	// Parse Slot data and accept the legacy CanvasSlot key.
 	const TSharedPtr<FJsonObject>* SlotObject;
 	if (JsonObject->TryGetObjectField(TEXT("Slot"), SlotObject) ||
 		JsonObject->TryGetObjectField(TEXT("CanvasSlot"), SlotObject))
@@ -132,7 +131,7 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 		ParseSlotData(*SlotObject, OutNode.Slot);
 	}
 
-	// 瑙ｆ瀽 Properties锛堟敮鎸佸祵濂楀湪 "Properties" 瀵硅薄鎴栫洿鎺ユ斁鍦ㄨ妭鐐逛笂锛?
+	// Parse explicit Properties payload when present.
 	const TSharedPtr<FJsonObject>* PropertiesObject;
 	if (JsonObject->TryGetObjectField(TEXT("Properties"), PropertiesObject))
 	{
@@ -146,6 +145,8 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 		double Val;
 		if ((*TSObject)->TryGetNumberField(TEXT("FontSize"), Val))
 			OutNode.TextStyle.FontSize = (float)Val;
+		if ((*TSObject)->TryGetNumberField(TEXT("SourceFontSize"), Val))
+			OutNode.TextStyle.SourceFontSize = (float)Val;
 		if ((*TSObject)->TryGetNumberField(TEXT("LetterSpacing"), Val))
 		{
 			OutNode.TextStyle.LetterSpacing = (float)Val;
@@ -197,7 +198,7 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 		}
 	}
 
-	// 鍚屾椂瑙ｆ瀽鐩存帴鏀惧湪鑺傜偣涓婄殑灞炴€э紙鎺掗櫎缁撴瀯瀛楁锛?
+	// Also capture flat properties placed directly on the node.
 	static const TSet<FString> StructuralFields = {
 		TEXT("Type"), TEXT("Name"), TEXT("Children"), TEXT("Slots"),
 		TEXT("Slot"), TEXT("CanvasSlot"), TEXT("Properties"),
@@ -249,7 +250,7 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 		}
 	}
 
-	// 瑙ｆ瀽 Slots锛堟浛浠ｆ牸寮忥細妲戒綅鏁扮粍锛屾瘡涓Ы浣嶅寘鍚?Content 鍜屽竷灞€淇℃伅锛?
+	// Parse alternative slot array format where each slot contains Content + layout info.
 	const TArray<TSharedPtr<FJsonValue>>* SlotsArray;
 	if (JsonObject->TryGetArrayField(TEXT("Slots"), SlotsArray))
 	{
@@ -258,7 +259,7 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 			const TSharedPtr<FJsonObject>* SlotItemObject;
 			if (SlotValue->TryGetObject(SlotItemObject))
 			{
-				// 鑾峰彇 Content锛堝瓙鎺т欢锛?
+				// Read the child widget payload from Content.
 				const TSharedPtr<FJsonObject>* ContentObject;
 				if ((*SlotItemObject)->TryGetObjectField(TEXT("Content"), ContentObject))
 				{
@@ -291,7 +292,7 @@ void FUMGJsonParser::ParseSlotData(const TSharedPtr<FJsonObject>& JsonObject, FU
 		ParseAnchorsData(*AnchorsObject, OutSlot.Anchors);
 	}
 
-	// 瑙ｆ瀽 Alignment (CanvasPanel) - 鏀寔瀵硅薄鎴栨暟缁勬牸寮?
+	// Parse Alignment in either object or array form.
 	if (JsonObject->HasField(TEXT("Alignment")))
 	{
 		const TSharedPtr<FJsonValue>& AlignValue = JsonObject->Values.FindRef(TEXT("Alignment"));
@@ -375,7 +376,7 @@ void FUMGJsonParser::ParseAnchorsData(const TSharedPtr<FJsonObject>& JsonObject,
 		return;
 	}
 
-	// 瑙ｆ瀽 Min - 鏀寔瀵硅薄鎴栨暟缁勬牸寮?
+	// Parse Min in either object or array form.
 	if (JsonObject->HasField(TEXT("Min")))
 	{
 		const TSharedPtr<FJsonValue>& Value = JsonObject->Values.FindRef(TEXT("Min"));
@@ -394,7 +395,7 @@ void FUMGJsonParser::ParseAnchorsData(const TSharedPtr<FJsonObject>& JsonObject,
 		}
 	}
 
-	// 瑙ｆ瀽 Max - 鏀寔瀵硅薄鎴栨暟缁勬牸寮?
+	// Parse Max in either object or array form.
 	if (JsonObject->HasField(TEXT("Max")))
 	{
 		const TSharedPtr<FJsonValue>& Value = JsonObject->Values.FindRef(TEXT("Max"));
@@ -460,7 +461,7 @@ void FUMGJsonParser::ParseProperties(const TSharedPtr<FJsonObject>& JsonObject, 
 		{
 			OutProperties.Add(Pair.Key, Pair.Value->AsBool() ? TEXT("true") : TEXT("false"));
 		}
-		// v2.2: 鏀寔Object鍜孉rray绫诲瀷锛屽簭鍒楀寲涓篔SON瀛楃涓?
+		// Serialize object/array values to JSON strings for legacy property storage.
 		else if (Pair.Value->Type == EJson::Object)
 		{
 			FString JsonStr;

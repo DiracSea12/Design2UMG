@@ -12,6 +12,7 @@
 #include "Fonts/FontMeasure.h"
 #include "Engine/Font.h"
 #include "Misc/PackageName.h"
+#include "Widgets/Text/STextBlock.h"
 
 namespace
 {
@@ -199,7 +200,7 @@ namespace
 	}
 
 	/** Use FSlateFontMeasure for precise text size; falls back to heuristic. */
-	FVector2D MeasureTextSize(const FString& Text, float FontSize, const FString& FontFamily, const FString& FontWeight)
+	FVector2D MeasureTextSize(const FString& Text, float FontSize, const FString& FontFamily, const FString& FontWeight, int32 LetterSpacing = 0)
 	{
 		if (FSlateApplication::IsInitialized())
 		{
@@ -224,7 +225,12 @@ namespace
 					{
 						FontInfo.TypefaceFontName = FName(*Typeface);
 					}
+					else if (!FontWeight.IsEmpty())
+					{
+						FontInfo.TypefaceFontName = FDesignTypeMapper::MapFontWeight(FontWeight);
+					}
 				}
+				FontInfo.LetterSpacing = LetterSpacing;
 				FVector2D Size = Measure->Measure(Text, FontInfo);
 				if (Size.X > 0 && Size.Y > 0)
 					return Size;
@@ -236,12 +242,359 @@ namespace
 		return FVector2D(W, H);
 	}
 
+	float ResolveWidthHint(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth)
+	{
+		if (!Node.IsValid())
+		{
+			return 0.0f;
+		}
+
+		if (Node->Width.IsFill())
+		{
+			if (Node->Width.Value > 0.0f)
+			{
+				return Node->Width.Value;
+			}
+			return ParentContentWidth;
+		}
+
+		if (Node->Width.Value > 0.0f)
+		{
+			return Node->Width.Value;
+		}
+
+		return 0.0f;
+	}
+
+	void GatherVisibleChildren(const TSharedPtr<FDesignNode>& Node, TArray<TSharedPtr<FDesignNode>>& OutVisibleChildren)
+	{
+		if (!Node.IsValid())
+		{
+			return;
+		}
+
+		for (const TSharedPtr<FDesignNode>& Child : Node->Children)
+		{
+			if (!ShouldSkipNode(Child))
+			{
+				OutVisibleChildren.Add(Child);
+			}
+		}
+	}
+
+	float ComputeChildContentWidthHint(const TSharedPtr<FDesignNode>& Node, const TSharedPtr<FDesignNode>& Child, float ParentContentWidth)
+	{
+		if (!Node.IsValid() || !Child.IsValid())
+		{
+			return 0.0f;
+		}
+
+		if (Node->Layout == EDesignLayout::Wrap || Node->Layout == EDesignLayout::Grid)
+		{
+			return 0.0f;
+		}
+
+		TArray<TSharedPtr<FDesignNode>> VisibleChildren;
+		GatherVisibleChildren(Node, VisibleChildren);
+		if (VisibleChildren.Num() <= 0)
+		{
+			return 0.0f;
+		}
+
+		const float ResolvedWidth = ResolveWidthHint(Node, ParentContentWidth);
+		if (ResolvedWidth <= 0.0f)
+		{
+			return 0.0f;
+		}
+
+		const float InnerWidth = FMath::Max(0.0f, ResolvedWidth - Node->Padding.Left - Node->Padding.Right);
+		if (InnerWidth <= 0.0f)
+		{
+			return 0.0f;
+		}
+
+		if (Node->Layout != EDesignLayout::Horizontal || VisibleChildren.Num() == 1)
+		{
+			return InnerWidth;
+		}
+
+		float RemainingWidth = InnerWidth - Node->Gap * (VisibleChildren.Num() - 1);
+		int32 FillChildCount = 0;
+		for (const TSharedPtr<FDesignNode>& VisibleChild : VisibleChildren)
+		{
+			if (VisibleChild->Width.IsFill())
+			{
+				++FillChildCount;
+				continue;
+			}
+
+			RemainingWidth -= ResolveWidthHint(VisibleChild, 0.0f);
+		}
+
+		if (!Child->Width.IsFill() || FillChildCount <= 0 || RemainingWidth <= 0.0f)
+		{
+			return InnerWidth;
+		}
+
+		return RemainingWidth / FillChildCount;
+	}
+
+	float ResolveTextFontSizeForUMG(const TSharedPtr<FDesignNode>& Node);
+
+	bool ShouldUseSingleLineTextHeight(const TSharedPtr<FDesignNode>& Node, float UnwrappedWidth, float ParentContentWidth)
+	{
+		if (!Node.IsValid())
+		{
+			return false;
+		}
+
+		if (Node->Content.Contains(TEXT("\n")))
+		{
+			return false;
+		}
+
+		const bool bWrappingMode =
+			Node->TextGrowth == EDesignTextGrowth::FixedWidth
+			|| Node->TextGrowth == EDesignTextGrowth::FixedWidthHeight
+			|| Node->TextAlign == EDesignTextAlign::Justify;
+		if (!bWrappingMode)
+		{
+			return true;
+		}
+
+		float WidthLimit = ResolveWidthHint(Node, ParentContentWidth);
+		if (WidthLimit <= 0.0f)
+		{
+			return false;
+		}
+
+		const float AppliedFontSize = ResolveTextFontSizeForUMG(Node);
+		const float HeuristicFontSize = AppliedFontSize > 0.0f ? AppliedFontSize : Node->FontSize;
+		const float HeuristicWidth = Node->Content.Len() * HeuristicFontSize * 0.55f;
+		const float EffectiveWidth = UnwrappedWidth > 0.0f ? UnwrappedWidth : HeuristicWidth;
+		return EffectiveWidth <= WidthLimit + 0.5f;
+	}
+
+	float EstimateSingleLineTextHeight(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid() || Node->FontSize <= 0.0f)
+		{
+			return 0.0f;
+		}
+
+		const float AppliedFontSize = ResolveTextFontSizeForUMG(Node);
+		const float BaseFontSize = AppliedFontSize > 0.0f ? AppliedFontSize : Node->FontSize;
+		const float LineHeightMultiplier = Node->LineHeight > 0.0f
+			? Node->LineHeight
+			: 1.285714f;
+		return FMath::Max(BaseFontSize, BaseFontSize * LineHeightMultiplier);
+	}
+
+	int32 ConvertLetterSpacingPxToTracking(float PixelSpacing, float DesignFontSize, float AppliedFontSize)
+	{
+		const float BaseFontSize = DesignFontSize > 0.0f ? DesignFontSize : AppliedFontSize;
+		if (BaseFontSize <= 0.0f)
+		{
+			return 0;
+		}
+
+		return FMath::RoundToInt(PixelSpacing / BaseFontSize * 1000.0f);
+	}
+
+	ETextJustify::Type ToSlateJustification(EDesignTextAlign TextAlign)
+	{
+		switch (TextAlign)
+		{
+		case EDesignTextAlign::Center:
+			return ETextJustify::Center;
+		case EDesignTextAlign::Right:
+			return ETextJustify::Right;
+		default:
+			return ETextJustify::Left;
+		}
+	}
+
+	FString NormalizeFontFamilyKey(const FString& FontFamily)
+	{
+		FString Normalized = FontFamily.ToLower();
+		Normalized.ReplaceInline(TEXT(" "), TEXT(""));
+		Normalized.ReplaceInline(TEXT("-"), TEXT(""));
+		Normalized.ReplaceInline(TEXT("_"), TEXT(""));
+		return Normalized;
+	}
+
+	float ResolveTextFontSizeForUMG(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid())
+		{
+			return 0.0f;
+		}
+
+		const FString NormalizedFamily = NormalizeFontFamilyKey(Node->FontFamily);
+		if (NormalizedFamily == TEXT("funneldisplay"))
+		{
+			return Node->FontSize * 0.75f;
+		}
+		if (NormalizedFamily == TEXT("rubik"))
+		{
+			return Node->FontSize * 0.70f;
+		}
+		if (NormalizedFamily == TEXT("inter") && Node->FontSize >= 34.0f)
+		{
+			return Node->FontSize * 0.70f;
+		}
+
+		// Design tools report text sizes in px while Slate font sizes are effectively pt-based.
+		// Map px -> pt globally so compiled widget renders match the exported design raster.
+		return Node->FontSize * 0.75f;
+	}
+
+	FSlateFontInfo BuildSlateFontInfo(const TSharedPtr<FDesignNode>& Node)
+	{
+		FSlateFontInfo FontInfo = FTextBlockStyle::GetDefault().Font;
+		if (!Node.IsValid())
+		{
+			return FontInfo;
+		}
+
+		const float ResolvedFontSize = ResolveTextFontSizeForUMG(Node);
+		if (ResolvedFontSize > 0.0f)
+		{
+			FontInfo.Size = ResolvedFontSize;
+		}
+
+		if (!Node->FontFamily.IsEmpty())
+		{
+			const FString AssetPath = FFontResolver::FindFontAssetPath(Node->FontFamily);
+			if (!AssetPath.IsEmpty())
+			{
+				if (UObject* FontObject = LoadObject<UObject>(nullptr, *AssetPath))
+				{
+					FontInfo.FontObject = FontObject;
+				}
+			}
+		}
+
+		FString Typeface = FFontResolver::FindBestTypeface(Node->FontFamily, Node->FontWeight);
+		if (Typeface.IsEmpty() && !Node->FontWeight.IsEmpty())
+		{
+			Typeface = FDesignTypeMapper::MapFontWeight(Node->FontWeight).ToString();
+		}
+		if (!Typeface.IsEmpty())
+		{
+			FontInfo.TypefaceFontName = FName(*Typeface);
+		}
+
+		if (Node->LetterSpacing != 0.0f && FontInfo.Size > 0)
+		{
+			FontInfo.LetterSpacing = ConvertLetterSpacingPxToTracking(Node->LetterSpacing, Node->FontSize, FontInfo.Size);
+		}
+
+		return FontInfo;
+	}
+
+	float ResolveTextWrapAt(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth)
+	{
+		if (!Node.IsValid())
+		{
+			return 0.0f;
+		}
+
+		const float WidthLimit = ResolveWidthHint(Node, ParentContentWidth);
+		if (WidthLimit <= 0.0f)
+		{
+			return 0.0f;
+		}
+
+		const bool bNeedsExplicitWrap =
+			Node->TextGrowth == EDesignTextGrowth::FixedWidth
+			|| Node->TextGrowth == EDesignTextGrowth::FixedWidthHeight
+			|| Node->TextAlign == EDesignTextAlign::Justify
+			|| Node->Content.Contains(TEXT("\n"));
+		return bNeedsExplicitWrap ? WidthLimit : 0.0f;
+	}
+
+	bool ShouldAutoWrapText(const TSharedPtr<FDesignNode>& Node)
+	{
+		return Node.IsValid()
+			&& (Node->TextGrowth == EDesignTextGrowth::FixedWidth
+				|| Node->TextGrowth == EDesignTextGrowth::FixedWidthHeight
+				|| Node->TextAlign == EDesignTextAlign::Justify);
+	}
+
+	FVector2D MeasureTextNodeSize(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth)
+	{
+		if (!Node.IsValid())
+		{
+			return FVector2D::ZeroVector;
+		}
+
+		const float AppliedFontSize = ResolveTextFontSizeForUMG(Node);
+		const int32 LetterSpacingTracking = (AppliedFontSize > 0.0f && Node->LetterSpacing != 0.0f)
+			? ConvertLetterSpacingPxToTracking(Node->LetterSpacing, Node->FontSize, AppliedFontSize)
+			: 0;
+		FVector2D FallbackSize = MeasureTextSize(
+			Node->Content,
+			AppliedFontSize > 0.0f ? AppliedFontSize : Node->FontSize,
+			Node->FontFamily,
+			Node->FontWeight,
+			LetterSpacingTracking);
+		if (ShouldUseSingleLineTextHeight(Node, FallbackSize.X, ParentContentWidth))
+		{
+			FallbackSize.Y = EstimateSingleLineTextHeight(Node);
+			return FallbackSize;
+		}
+
+		const float WrapTextAt = ResolveTextWrapAt(Node, ParentContentWidth);
+		if (WrapTextAt <= 0.0f && !Node->Content.Contains(TEXT("\n")))
+		{
+			return FallbackSize;
+		}
+
+		if (FSlateApplication::IsInitialized())
+		{
+			FSlateRenderer* Renderer = FSlateApplication::Get().GetRenderer();
+			if (Renderer)
+			{
+				const FSlateFontInfo FontInfo = BuildSlateFontInfo(Node);
+
+				FTextBlockStyle TextStyle = FTextBlockStyle::GetDefault();
+				TextStyle.SetFont(FontInfo);
+
+				TSharedRef<STextBlock> TextBlock = SNew(STextBlock)
+					.Text(FText::FromString(Node->Content))
+					.TextStyle(&TextStyle)
+					.WrapTextAt(WrapTextAt)
+					.AutoWrapText(ShouldAutoWrapText(Node))
+					.LineHeightPercentage(Node->LineHeight > 0.0f ? Node->LineHeight : 1.0f)
+					.ApplyLineHeightToBottomLine(true)
+					.Justification(ToSlateJustification(Node->TextAlign));
+
+				const FVector2D Size = TextBlock->ComputeDesiredSize(1.0f);
+				if (Size.X > 0.0f && Size.Y > 0.0f)
+				{
+					return Size;
+				}
+			}
+		}
+
+		if (WrapTextAt > 0.0f && FallbackSize.X > WrapTextAt + 0.5f)
+		{
+			const float LineHeight = EstimateSingleLineTextHeight(Node);
+			const int32 EstimatedLineCount = FMath::Max(1, FMath::CeilToInt(FallbackSize.X / FMath::Max(1.0f, WrapTextAt)));
+			FallbackSize.X = WrapTextAt;
+			FallbackSize.Y = LineHeight * EstimatedLineCount;
+		}
+
+		return FallbackSize;
+	}
+
 	/** Estimate a single node's size, handling leaf nodes (text, icon) via font metrics. */
-	FVector2D EstimateNodeSize(const TSharedPtr<FDesignNode>& Node);
+	FVector2D EstimateNodeSize(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth = 0.0f);
 
-	FVector2D EstimateContentSize(const TSharedPtr<FDesignNode>& Node);
+	FVector2D EstimateContentSize(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth = 0.0f);
 
-	FVector2D EstimateNodeSize(const TSharedPtr<FDesignNode>& Node)
+	FVector2D EstimateNodeSize(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth)
 	{
 		FRecursionGuard Guard(GEstimateDepth, TEXT("EstimateNodeSize"));
 		if (!Guard.bValid)
@@ -249,15 +602,27 @@ namespace
 
 		float W = Node->Width.Value;
 		float H = Node->Height.Value;
+		if (Node->Width.IsFill())
+		{
+			const float FillWidth = ResolveWidthHint(Node, ParentContentWidth);
+			if (FillWidth > 0.0f)
+			{
+				W = FMath::Max(W, FillWidth);
+			}
+		}
 
-		// Text leaf: use FSlateFontMeasure when available
+		// Text leaf: fit_content(N) uses N as a minimum, so measured text may grow past it.
 		if (Node->Type == EDesignNodeType::Text)
 		{
-			if ((W == 0 || H == 0) && Node->FontSize > 0 && !Node->Content.IsEmpty())
+			if ((W == 0 || H == 0 || Node->Width.IsFit() || Node->Height.IsFit())
+				&& Node->FontSize > 0
+				&& !Node->Content.IsEmpty())
 			{
-				FVector2D Measured = MeasureTextSize(Node->Content, Node->FontSize, Node->FontFamily, Node->FontWeight);
+				FVector2D Measured = MeasureTextNodeSize(Node, ParentContentWidth);
 				if (W == 0) W = Measured.X;
+				else if (Node->Width.IsFit()) W = FMath::Max(W, Measured.X);
 				if (H == 0) H = Measured.Y;
+				else if (Node->Height.IsFit()) H = FMath::Max(H, Measured.Y);
 			}
 			else
 			{
@@ -272,16 +637,20 @@ namespace
 		{
 			const float S = Node->FontSize > 0 ? Node->FontSize : 16.0f;
 			if (W == 0) W = S;
+			else if (Node->Width.IsFit()) W = FMath::Max(W, S);
 			if (H == 0) H = S;
+			else if (Node->Height.IsFit()) H = FMath::Max(H, S);
 			return FVector2D(W, H);
 		}
 
-		// Container with children: recurse
-		if ((W == 0 || H == 0) && Node->Children.Num() > 0)
+		// Container with children: recurse. fit_content(N) keeps N as a minimum.
+		if (Node->Children.Num() > 0)
 		{
-			const FVector2D Sub(EstimateContentSize(Node));
+			const FVector2D Sub(EstimateContentSize(Node, ParentContentWidth));
 			if (W == 0) W = Sub.X;
+			else if (Node->Width.IsFit()) W = FMath::Max(W, Sub.X);
 			if (H == 0) H = Sub.Y;
+			else if (Node->Height.IsFit()) H = FMath::Max(H, Sub.Y);
 		}
 
 		return FVector2D(W, H);
@@ -291,7 +660,7 @@ namespace
 	 * Estimate content size for a FitContent node by examining its children.
 	 * Returns (width, height) based on layout mode and children's known sizes.
 	 */
-	FVector2D EstimateContentSize(const TSharedPtr<FDesignNode>& Node)
+	FVector2D EstimateContentSize(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth)
 	{
 		FRecursionGuard Guard(GEstimateDepth, TEXT("EstimateContentSize"));
 		if (!Guard.bValid)
@@ -317,7 +686,8 @@ namespace
 		{
 			for (const auto& C : Visible)
 			{
-				const FVector2D CS(EstimateNodeSize(C));
+				const float ChildContentWidth = ComputeChildContentWidthHint(Node, C, ParentContentWidth);
+				const FVector2D CS(EstimateNodeSize(C, ChildContentWidth));
 				W += CS.X;
 				H = FMath::Max(H, CS.Y);
 			}
@@ -327,7 +697,8 @@ namespace
 		{
 			for (const auto& C : Visible)
 			{
-				const FVector2D CS(EstimateNodeSize(C));
+				const float ChildContentWidth = ComputeChildContentWidthHint(Node, C, ParentContentWidth);
+				const FVector2D CS(EstimateNodeSize(C, ChildContentWidth));
 				W = FMath::Max(W, CS.X);
 				H += CS.Y;
 			}
@@ -338,13 +709,161 @@ namespace
 			// Absolute positioning: max extent
 			for (const auto& C : Visible)
 			{
-				const FVector2D CS(EstimateNodeSize(C));
+				const float ChildContentWidth = ComputeChildContentWidthHint(Node, C, ParentContentWidth);
+				const FVector2D CS(EstimateNodeSize(C, ChildContentWidth));
 				W = FMath::Max(W, C->X + CS.X);
 				H = FMath::Max(H, C->Y + CS.Y);
 			}
 		}
 
 		return FVector2D(W + PadH, H + PadV);
+	}
+
+	FVector2D PreComputeFitContentSizesImpl(const TSharedPtr<FDesignNode>& Node, const FDesignDocument& Doc, float ParentContentWidth)
+	{
+		FRecursionGuard Guard(GPrecomputeDepth, TEXT("PreComputeFitContentSizes"));
+		if (!Guard.bValid)
+			return FVector2D::ZeroVector;
+
+		if (!Node.IsValid() || !Node->bEnabled)
+		{
+			return FVector2D(0.0, 0.0);
+		}
+
+		// Ref 节点：展开后递归，回写尺寸到原始节点
+		if (Node->Type == EDesignNodeType::Ref)
+		{
+			auto Expanded = FRefExpander::ExpandRef(Node, Doc);
+			if (Expanded.IsValid())
+			{
+				const FVector2D RefSize(PreComputeFitContentSizesImpl(Expanded, Doc, ParentContentWidth));
+				if (Node->Width.IsFit() && RefSize.X > Node->Width.Value && !Expanded->Width.IsFill())
+					Node->Width.Value = static_cast<float>(RefSize.X);
+				if (Node->Height.IsFit() && RefSize.Y > Node->Height.Value && !Expanded->Height.IsFill())
+					Node->Height.Value = static_cast<float>(RefSize.Y);
+				return RefSize;
+			}
+			return FVector2D(0.0, 0.0);
+		}
+
+		// Text 叶子节点：用 FontSize 估算
+		if (Node->Type == EDesignNodeType::Text)
+		{
+			float W = Node->Width.Value;
+			float H = Node->Height.Value;
+			if (Node->Width.IsFill())
+			{
+				const float FillWidth = ResolveWidthHint(Node, ParentContentWidth);
+				if (FillWidth > 0.0f)
+				{
+					W = FMath::Max(W, FillWidth);
+				}
+			}
+			const bool bNeedWidthEstimate = !Node->Width.IsFixed() && W <= 0.0f;
+			const bool bNeedHeightEstimate = !Node->Height.IsFixed() && H <= 0.0f;
+			if ((bNeedWidthEstimate || bNeedHeightEstimate || Node->Width.IsFit() || Node->Height.IsFit())
+				&& Node->FontSize > 0
+				&& !Node->Content.IsEmpty())
+			{
+				FVector2D Measured = MeasureTextNodeSize(Node, ParentContentWidth);
+				if (bNeedWidthEstimate) W = Measured.X;
+				else if (Node->Width.IsFit()) W = FMath::Max(W, Measured.X);
+				if (bNeedHeightEstimate) H = Measured.Y;
+				else if (Node->Height.IsFit()) H = FMath::Max(H, Measured.Y);
+			}
+			else
+			{
+				if (bNeedHeightEstimate && Node->FontSize > 0)
+					H = Node->FontSize * 1.5f;
+			}
+			// fit_content(N) 中的 N 是最小值，不是固定值。
+			if (W > Node->Width.Value && Node->Width.IsFit())
+				Node->Width.Value = W;
+			if (H > Node->Height.Value && Node->Height.IsFit())
+				Node->Height.Value = H;
+			return FVector2D(W, H);
+		}
+
+		// IconFont 叶子节点
+		if (Node->Type == EDesignNodeType::IconFont)
+		{
+			const float S = Node->FontSize > 0 ? Node->FontSize : 16.0f;
+			float W = Node->Width.Value;
+			float H = Node->Height.Value;
+			if (!Node->Width.IsFixed() && W <= 0.0f)
+				W = S;
+			else if (Node->Width.IsFit())
+				W = FMath::Max(W, S);
+			if (!Node->Height.IsFixed() && H <= 0.0f)
+				H = S;
+			else if (Node->Height.IsFit())
+				H = FMath::Max(H, S);
+
+			// fit_content(N) 中的 N 是最小值，不是固定值。
+			if (W > Node->Width.Value && Node->Width.IsFit())
+				Node->Width.Value = W;
+			if (H > Node->Height.Value && Node->Height.IsFit())
+				Node->Height.Value = H;
+			return FVector2D(W, H);
+		}
+
+		// 矢量叶子节点（Path/Line/Ellipse/Polygon）：亚像素钳制到 1px 并回写
+		// CreatePathWidget 用 Max(1, RoundToInt) 算 WidthOverride，这里对齐
+		const bool bIsVectorLeaf = Node->Type == EDesignNodeType::Path
+			|| Node->Type == EDesignNodeType::Line
+			|| Node->Type == EDesignNodeType::Ellipse
+			|| Node->Type == EDesignNodeType::Polygon;
+		if (bIsVectorLeaf)
+		{
+			float W = FMath::Max(1.0f, FMath::RoundToFloat(Node->Width.Value));
+			float H = FMath::Max(1.0f, FMath::RoundToFloat(Node->Height.Value));
+			if (!Node->Width.IsFixed() || Node->Width.Value < 1.0f)
+				Node->Width.Value = W;
+			if (!Node->Height.IsFixed() || Node->Height.Value < 1.0f)
+				Node->Height.Value = H;
+			return FVector2D(W, H);
+		}
+
+		// 其他非容器叶子节点
+		if (!Node->IsContainer() && Node->Type != EDesignNodeType::Rectangle)
+		{
+			return FVector2D(
+				Node->Width.IsFixed() ? Node->Width.Value : 0.0f,
+				Node->Height.IsFixed() ? Node->Height.Value : 0.0f);
+		}
+
+		// 容器节点：先递归子节点
+		for (const auto& Child : Node->Children)
+		{
+			const float ChildContentWidth = ComputeChildContentWidthHint(Node, Child, ParentContentWidth);
+			(void)PreComputeFitContentSizesImpl(Child, Doc, ChildContentWidth);
+		}
+
+		// fit_content(N) 中的 N 是最小值，不是固定值。
+		const bool bNeedW = Node->Width.IsFit();
+		const bool bNeedH = Node->Height.IsFit();
+
+		float FinalW = Node->Width.Value;
+		float FinalH = Node->Height.Value;
+
+		if (bNeedW || bNeedH)
+		{
+			const FVector2D Est(EstimateContentSize(Node, ParentContentWidth));
+			if (bNeedW && Est.X > Node->Width.Value)
+			{
+				Node->Width.Value = static_cast<float>(Est.X);
+				FinalW = static_cast<float>(Est.X);
+				UE_LOG(LogDesign2UMG, Log, TEXT("PreCompute: '%s' width fit→%.0f"), *Node->Name, Est.X);
+			}
+			if (bNeedH && Est.Y > Node->Height.Value)
+			{
+				Node->Height.Value = static_cast<float>(Est.Y);
+				FinalH = static_cast<float>(Est.Y);
+				UE_LOG(LogDesign2UMG, Log, TEXT("PreCompute: '%s' height fit→%.0f"), *Node->Name, Est.Y);
+			}
+		}
+
+		return FVector2D(FinalW, FinalH);
 	}
 }
 
@@ -541,6 +1060,12 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FDesignNode>& 
 		// Stroke-only / no-fill Border should keep transparent interior.
 		// UBorder default brush is opaque white, which can cover siblings.
 		Widget.Properties.Add(TEXT("BrushColor"), TEXT("#00000000"));
+		if (Widget.Properties.Contains(TEXT("OutlineThickness")))
+		{
+			// Box + WhiteSquareTexture can still flash an opaque interior in UBorder.
+			// RoundedBox with zero radii keeps the interior transparent while preserving the outline.
+			Widget.Properties.Add(TEXT("DrawAs"), TEXT("RoundedBox"));
+		}
 	}
 
 	// 预处理：在递归子节点之前，解析 FillContainer 尺寸写入 PenNode
@@ -638,7 +1163,7 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FDesignNode>& 
 		auto ResolveFit = [](TSharedPtr<FDesignNode>& N, bool bWidth, float Px)
 		{
 			FDesignSize& Size = bWidth ? N->Width : N->Height;
-			if (Size.IsFit() && Size.Value == 0.0f && Px > 0.0f)
+			if (Size.IsFit() && Px > Size.Value)
 			{
 				Size.Value = Px;
 				if (bWidth) N->bHasWidth = true;
@@ -646,10 +1171,26 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FDesignNode>& 
 			}
 		};
 
-		if ((Child->Width.IsFit() && Child->Width.Value == 0.0f)
-			|| (Child->Height.IsFit() && Child->Height.Value == 0.0f))
+		if (Child->Width.IsFit() || Child->Height.IsFit())
 		{
-			const FVector2D Est(EstimateContentSize(Child));
+			const float ChildContentWidth = ComputeChildContentWidthHint(Node, Child, 0.0f);
+			TSharedPtr<FDesignNode> EstimateChild = Child;
+			if (Child->Type == EDesignNodeType::Ref)
+			{
+				auto Expanded = FRefExpander::ExpandRef(Child, Doc);
+				if (Expanded.IsValid())
+				{
+					if (ActiveTheme.Num() > 0)
+					{
+						FDesignVariableResolver Resolver(Doc.Variables);
+						Resolver.SetThemeContext(ActiveTheme);
+						FRefExpander::ReThemeNode(Expanded, Resolver);
+					}
+					EstimateChild = Expanded;
+				}
+			}
+
+			const FVector2D Est(EstimateNodeSize(EstimateChild, ChildContentWidth));
 			ResolveFit(Child, true, Est.X);
 			ResolveFit(Child, false, Est.Y);
 
@@ -761,6 +1302,36 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FDesignNode>& 
 		const int32 Len = ColorValue.Len();
 		return Len == 4 || Len == 7 || Len == 9;
 	};
+	const auto BuildHexColorWithAlpha = [&](const FString& ColorValue, uint8 Alpha) -> FString
+	{
+		if (!IsHexColorLiteral(ColorValue))
+		{
+			return FString();
+		}
+
+		FColor Parsed = FColor::FromHex(ColorValue);
+		Parsed.A = Alpha;
+		return FString::Printf(TEXT("#%02X%02X%02X%02X"), Parsed.R, Parsed.G, Parsed.B, Parsed.A);
+	};
+	const auto IsNeutralPlaceholderColor = [&](const FString& ColorValue) -> bool
+	{
+		if (!IsHexColorLiteral(ColorValue))
+		{
+			return true;
+		}
+
+		const FColor Parsed = FColor::FromHex(ColorValue);
+		const uint8 MaxChannel = FMath::Max3(Parsed.R, Parsed.G, Parsed.B);
+		const uint8 MinChannel = FMath::Min3(Parsed.R, Parsed.G, Parsed.B);
+		return (Parsed.A <= 0x20) || ((MaxChannel - MinChannel) <= 0x10);
+	};
+	const auto HasMetadataFlag = [&](const TCHAR* Key) -> bool
+	{
+		const FString* Value = Node->Metadata.Find(Key);
+		return Value && Value->Equals(TEXT("true"), ESearchCase::IgnoreCase);
+	};
+	const FString DefaultPlaceholderFillColor = TEXT("#D282FF33");
+	const FString DefaultPlaceholderOutlineColor = TEXT("#D480FF");
 
 	const bool bIsLeafContainer =
 		(Node->Type == EDesignNodeType::Frame
@@ -768,41 +1339,49 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FDesignNode>& 
 			|| Node->Type == EDesignNodeType::Rectangle) &&
 		Node->Children.Num() == 0;
 	const bool bIsLargeEnoughPlaceholderSurface = Node->Width.Value >= 24.0f && Node->Height.Value >= 12.0f;
+	const bool bIsExplicitEmptySlotSurface =
+		HasMetadataFlag(TEXT("pen.slot.empty")) || HasMetadataFlag(TEXT("figma.slot.empty"));
 	const bool bUseSlotPlaceholderTint =
 		bIsLeafContainer
 		&& bIsLargeEnoughPlaceholderSurface
-		&& Node->bSemanticPlaceholderSurface;
+		&& (Node->bSemanticPlaceholderSurface || bIsExplicitEmptySlotSurface);
+	bool bForcePlaceholderBorder = false;
+	bool bPlaceholderUsesDirectImage = false;
 	if (bUseSlotPlaceholderTint)
 	{
-		const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
 		const FString FillColor = IsHexColorLiteral(VisualNode->Fill.SolidColor) ? VisualNode->Fill.SolidColor : FString();
 		const FString StrokeColor = IsHexColorLiteral(VisualNode->Stroke.Fill.SolidColor) ? VisualNode->Stroke.Fill.SolidColor : FString();
-		const FString FallbackBgColor =
-			(Settings && IsHexColorLiteral(Settings->PlaceholderHatchBackgroundColor))
-			? Settings->PlaceholderHatchBackgroundColor
-			: FString();
-		const FString FallbackStripeColor =
-			(Settings && IsHexColorLiteral(Settings->PlaceholderHatchStripeColor))
-			? Settings->PlaceholderHatchStripeColor
-			: FString();
-		const int32 StripeWidth = (Settings && Settings->PlaceholderHatchStripeWidth > 0)
-			? Settings->PlaceholderHatchStripeWidth
-			: 1;
-		const int32 StripeGap = (Settings && Settings->PlaceholderHatchStripeGap > 0)
-			? Settings->PlaceholderHatchStripeGap
-			: 4;
-		const FString HatchBgColor = !FillColor.IsEmpty() ? FillColor : FallbackBgColor;
-		const FString HatchStripeColor = !StrokeColor.IsEmpty() ? StrokeColor : FallbackStripeColor;
-		if (!HatchBgColor.IsEmpty() && !HatchStripeColor.IsEmpty())
+		const FString PlaceholderOutlineColor =
+			(!StrokeColor.IsEmpty() && !IsNeutralPlaceholderColor(StrokeColor)) ? StrokeColor : DefaultPlaceholderOutlineColor;
+		FString PlaceholderFillColor =
+			(!FillColor.IsEmpty() && !IsNeutralPlaceholderColor(FillColor)) ? FillColor : DefaultPlaceholderFillColor;
+		if (PlaceholderFillColor.IsEmpty() && !PlaceholderOutlineColor.IsEmpty())
 		{
-			UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: applying data-driven placeholder hatch to '%s'"), *Node->Name);
-			Widget.Properties.Add(TEXT("MaterialRef"), TEXT("placeholderhatch"));
+			PlaceholderFillColor = BuildHexColorWithAlpha(PlaceholderOutlineColor, 0x33);
+		}
+		if (!PlaceholderFillColor.IsEmpty() && !PlaceholderOutlineColor.IsEmpty())
+		{
+			UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: applying placeholder surface tint to '%s'"), *Node->Name);
+			Widget.Type = TEXT("Image");
+			Widget.Children.Empty();
+			const int32 InsetPx = FMath::Clamp(
+				FMath::RoundToInt(FMath::Min3(10.0f, Node->Width.Value * 0.25f, Node->Height.Value * 0.25f)),
+				1,
+				10);
+			Widget.Brush = FUMGVisualBrushData();
+			for (const TCHAR* Key : {TEXT("BrushColor"), TEXT("TexturePath"), TEXT("DrawAs"), TEXT("OutlineThickness"), TEXT("OutlineColor"), TEXT("StrokePadding"), TEXT("StrokeMargin")})
+			{
+				Widget.Properties.Remove(Key);
+			}
+			Widget.Properties.Add(TEXT("MaterialRef"), TEXT("placeholdersurface"));
 			Widget.Properties.Add(TEXT("MaterialParams"),
-				FString::Printf(TEXT("{\"Color\":\"%s\",\"StripeColor\":\"%s\",\"StripeWidth\":%d,\"StripeGap\":%d}"),
-					*HatchBgColor, *HatchStripeColor, StripeWidth, StripeGap));
-			// 由程序化纹理负责颜色输出，避免 BrushColor 叠乘导致偏色。
-			Widget.Properties.Remove(TEXT("BrushColor"));
-			Widget.Brush.bHasBrushColor = false;
+				FString::Printf(TEXT("{\"Color\":\"%s\",\"StripeColor\":\"%s\",\"StripeWidth\":1,\"Inset\":%d}"),
+					*PlaceholderFillColor, *PlaceholderOutlineColor, InsetPx));
+			if (Node->Width.Value > 0.0f)
+				Widget.Properties.Add(TEXT("WidthOverride"), FString::SanitizeFloat(Node->Width.Value));
+			if (Node->Height.Value > 0.0f)
+				Widget.Properties.Add(TEXT("HeightOverride"), FString::SanitizeFloat(Node->Height.Value));
+			bPlaceholderUsesDirectImage = true;
 		}
 	}
 
@@ -814,7 +1393,8 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FDesignNode>& 
 	const bool bTreatPaddingAsBorder = (Node->Layout == EDesignLayout::None);
 	bool bNeedsBorder = (Node->Type == EDesignNodeType::Frame || Node->Type == EDesignNodeType::Group)
 		&& (bHasVisualFill || (bTreatPaddingAsBorder && FLayoutMapper::HasPadding(VisualNode))
-			|| bHasCornerRadius || VisualNode->Stroke.HasStroke());
+			|| bHasCornerRadius || VisualNode->Stroke.HasStroke() || bForcePlaceholderBorder)
+		&& !bPlaceholderUsesDirectImage;
 
 	if (bNeedsBorder)
 	{
@@ -822,7 +1402,7 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FDesignNode>& 
 			*Widget.Name, bHasVisualFill, bHasCornerRadius, VisualNode->Stroke.HasStroke());
 		Widget = FVisualMapper::WrapWithBorder(MoveTemp(Widget), VisualNode);
 	}
-	else if (FLayoutMapper::HasPadding(VisualNode))
+	else if (FLayoutMapper::HasPadding(VisualNode) && !bPlaceholderUsesDirectImage)
 		FLayoutMapper::ApplyPadding(Widget, VisualNode->Padding);
 
 	// 多层填充叠加（Overlay 包裹）
@@ -865,10 +1445,13 @@ FUMGWidgetNode FDesign2UMGConverter::CreateTextWidget(const TSharedPtr<FDesignNo
 
 void FDesign2UMGConverter::ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
 {
-	if (Node->FontSize > 0)
+	const float ResolvedFontSize = ResolveTextFontSizeForUMG(Node);
+	if (ResolvedFontSize > 0)
 	{
-		Widget.Properties.Add(TEXT("FontSize"), FString::SanitizeFloat(Node->FontSize));
-		Widget.TextStyle.FontSize = Node->FontSize;
+		Widget.Properties.Add(TEXT("FontSize"), FString::SanitizeFloat(ResolvedFontSize));
+		Widget.Properties.Add(TEXT("DesignFontSize"), FString::SanitizeFloat(Node->FontSize));
+		Widget.TextStyle.FontSize = ResolvedFontSize;
+		Widget.TextStyle.SourceFontSize = Node->FontSize;
 	}
 
 	if (!Node->FontFamily.IsEmpty())
@@ -897,11 +1480,9 @@ void FDesign2UMGConverter::ApplyTextProperties(FUMGWidgetNode& Widget, const TSh
 	if (Node->TextAlign == EDesignTextAlign::Justify)
 		Widget.Properties.Add(TEXT("AutoWrapText"), TEXT("true"));
 
-	// TextAlignVertical → parent Slot VerticalAlignment
-	if (Node->TextAlignVertical == EDesignTextAlignVertical::Middle)
-		Widget.Slot.VerticalAlignment = TEXT("Center");
-	else if (Node->TextAlignVertical == EDesignTextAlignVertical::Bottom)
-		Widget.Slot.VerticalAlignment = TEXT("Bottom");
+	// textAlignVertical is alignment inside the text box, not the parent layout slot.
+	// Mapping it onto the parent slot shifts text widgets inside buttons/tabs/tables and
+	// causes widespread component drift. Keep it as text metadata only.
 
 	if (Node->LineHeight > 0)
 		Widget.Properties.Add(TEXT("LineHeightPercentage"), FString::SanitizeFloat(Node->LineHeight));
@@ -930,9 +1511,17 @@ void FDesign2UMGConverter::ApplyTextProperties(FUMGWidgetNode& Widget, const TSh
 	{
 	case EDesignTextGrowth::FixedWidth:
 		Widget.Properties.Add(TEXT("AutoWrapText"), TEXT("true"));
+		if (const float WrapTextAt = ResolveTextWrapAt(Node, 0.0f); WrapTextAt > 0.0f)
+		{
+			Widget.Properties.Add(TEXT("WrapTextAt"), FString::SanitizeFloat(WrapTextAt));
+		}
 		break;
 	case EDesignTextGrowth::FixedWidthHeight:
 		Widget.Properties.Add(TEXT("AutoWrapText"), TEXT("true"));
+		if (const float WrapTextAt = ResolveTextWrapAt(Node, 0.0f); WrapTextAt > 0.0f)
+		{
+			Widget.Properties.Add(TEXT("WrapTextAt"), FString::SanitizeFloat(WrapTextAt));
+		}
 		Widget.Properties.Add(TEXT("Clipping"), TEXT("ClipToBounds"));
 		break;
 	default:
@@ -1160,132 +1749,7 @@ FUMGWidgetNode FDesign2UMGConverter::CreatePathWidget(const TSharedPtr<FDesignNo
 
 FVector2D FDesign2UMGConverter::PreComputeFitContentSizes(const TSharedPtr<FDesignNode>& Node, const FDesignDocument& Doc)
 {
-	FRecursionGuard Guard(GPrecomputeDepth, TEXT("PreComputeFitContentSizes"));
-	if (!Guard.bValid)
-		return FVector2D::ZeroVector;
-
-	if (!Node.IsValid() || !Node->bEnabled)
-	{
-		return FVector2D(0.0, 0.0);
-	}
-
-	// Ref 节点：展开后递归，回写尺寸到原始节点
-	if (Node->Type == EDesignNodeType::Ref)
-	{
-		auto Expanded = FRefExpander::ExpandRef(Node, Doc);
-		if (Expanded.IsValid())
-		{
-			const FVector2D RefSize(PreComputeFitContentSizes(Expanded, Doc));
-			if (Node->Width.IsFit() && Node->Width.Value == 0 && RefSize.X > 0 && !Expanded->Width.IsFill())
-				Node->Width.Value = static_cast<float>(RefSize.X);
-			if (Node->Height.IsFit() && Node->Height.Value == 0 && RefSize.Y > 0 && !Expanded->Height.IsFill())
-				Node->Height.Value = static_cast<float>(RefSize.Y);
-			return RefSize;
-		}
-		return FVector2D(0.0, 0.0);
-	}
-
-	// Text 叶子节点：用 FontSize 估算
-	if (Node->Type == EDesignNodeType::Text)
-	{
-		float W = Node->Width.Value;
-		float H = Node->Height.Value;
-		const bool bNeedWidthEstimate = !Node->Width.IsFixed() && W <= 0.0f;
-		const bool bNeedHeightEstimate = !Node->Height.IsFixed() && H <= 0.0f;
-		if ((bNeedWidthEstimate || bNeedHeightEstimate) && Node->FontSize > 0 && !Node->Content.IsEmpty())
-		{
-			FVector2D Measured = MeasureTextSize(Node->Content, Node->FontSize, Node->FontFamily, Node->FontWeight);
-			if (bNeedWidthEstimate) W = Measured.X;
-			if (bNeedHeightEstimate) H = Measured.Y;
-		}
-		else
-		{
-			if (bNeedHeightEstimate && Node->FontSize > 0)
-				H = Node->FontSize * 1.5f;
-		}
-		// 仅在 FitContent 且无像素值时回写，避免污染 FillContainer 语义。
-		if (W > 0 && Node->Width.IsFit() && Node->Width.Value <= 0.0f)
-			Node->Width.Value = W;
-		if (H > 0 && Node->Height.IsFit() && Node->Height.Value <= 0.0f)
-			Node->Height.Value = H;
-		return FVector2D(W, H);
-	}
-
-	// IconFont 叶子节点
-	if (Node->Type == EDesignNodeType::IconFont)
-	{
-		const float S = Node->FontSize > 0 ? Node->FontSize : 16.0f;
-		float W = Node->Width.Value;
-		float H = Node->Height.Value;
-		if (!Node->Width.IsFixed() && W <= 0.0f)
-			W = S;
-		if (!Node->Height.IsFixed() && H <= 0.0f)
-			H = S;
-
-		// 仅回写 FitContent，避免 FillContainer 被误改为像素 fallback。
-		if (W > 0 && Node->Width.IsFit() && Node->Width.Value <= 0.0f)
-			Node->Width.Value = W;
-		if (H > 0 && Node->Height.IsFit() && Node->Height.Value <= 0.0f)
-			Node->Height.Value = H;
-		return FVector2D(W, H);
-	}
-
-	// 矢量叶子节点（Path/Line/Ellipse/Polygon）：亚像素钳制到 1px 并回写
-	// CreatePathWidget 用 Max(1, RoundToInt) 算 WidthOverride，这里对齐
-	const bool bIsVectorLeaf = Node->Type == EDesignNodeType::Path
-		|| Node->Type == EDesignNodeType::Line
-		|| Node->Type == EDesignNodeType::Ellipse
-		|| Node->Type == EDesignNodeType::Polygon;
-	if (bIsVectorLeaf)
-	{
-		float W = FMath::Max(1.0f, FMath::RoundToFloat(Node->Width.Value));
-		float H = FMath::Max(1.0f, FMath::RoundToFloat(Node->Height.Value));
-		if (!Node->Width.IsFixed() || Node->Width.Value < 1.0f)
-			Node->Width.Value = W;
-		if (!Node->Height.IsFixed() || Node->Height.Value < 1.0f)
-			Node->Height.Value = H;
-		return FVector2D(W, H);
-	}
-
-	// 其他非容器叶子节点
-	if (!Node->IsContainer() && Node->Type != EDesignNodeType::Rectangle)
-	{
-		return FVector2D(
-			Node->Width.IsFixed() ? Node->Width.Value : 0.0f,
-			Node->Height.IsFixed() ? Node->Height.Value : 0.0f);
-	}
-
-	// 容器节点：先递归子节点
-	for (const auto& Child : Node->Children)
-	{
-		(void)PreComputeFitContentSizes(Child, Doc);
-	}
-
-	// 如果本节点有 FitContent 轴且 Value=0，用 EstimateContentSize 回填
-	const bool bNeedW = Node->Width.IsFit() && Node->Width.Value == 0;
-	const bool bNeedH = Node->Height.IsFit() && Node->Height.Value == 0;
-
-	float FinalW = Node->Width.Value;
-	float FinalH = Node->Height.Value;
-
-	if (bNeedW || bNeedH)
-	{
-		const FVector2D Est(EstimateContentSize(Node));
-		if (bNeedW && Est.X > 0)
-		{
-			Node->Width.Value = static_cast<float>(Est.X);
-			FinalW = static_cast<float>(Est.X);
-			UE_LOG(LogDesign2UMG, Log, TEXT("PreCompute: '%s' width fit→%.0f"), *Node->Name, Est.X);
-		}
-		if (bNeedH && Est.Y > 0)
-		{
-			Node->Height.Value = static_cast<float>(Est.Y);
-			FinalH = static_cast<float>(Est.Y);
-			UE_LOG(LogDesign2UMG, Log, TEXT("PreCompute: '%s' height fit→%.0f"), *Node->Name, Est.Y);
-		}
-	}
-
-	return FVector2D(FinalW, FinalH);
+	return PreComputeFitContentSizesImpl(Node, Doc, 0.0f);
 }
 
 

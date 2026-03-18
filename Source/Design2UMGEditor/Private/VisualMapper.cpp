@@ -15,6 +15,37 @@ namespace
 	const TCHAR* MatRef_Angular   = TEXT("angulargradient");
 	const TCHAR* MatRef_RoundedRect = TEXT("roundedrect");
 
+	float GetStrokeSideThickness(const FDesignStrokeThickness& Thickness, TCHAR Side)
+	{
+		if (Thickness.bUniform)
+		{
+			return Thickness.Uniform;
+		}
+
+		switch (Side)
+		{
+		case 'T':
+			return Thickness.Top;
+		case 'R':
+			return Thickness.Right;
+		case 'B':
+			return Thickness.Bottom;
+		case 'L':
+			return Thickness.Left;
+		default:
+			return 0.0f;
+		}
+	}
+
+	FMargin GetStrokeHalfInsets(const FDesignStrokeThickness& Thickness)
+	{
+		return FMargin(
+			GetStrokeSideThickness(Thickness, 'L') * 0.5f,
+			GetStrokeSideThickness(Thickness, 'T') * 0.5f,
+			GetStrokeSideThickness(Thickness, 'R') * 0.5f,
+			GetStrokeSideThickness(Thickness, 'B') * 0.5f);
+	}
+
 	FString BuildGradientMaterialParams(const FDesignGradient& Gradient)
 	{
 		if (Gradient.Colors.Num() == 0)
@@ -269,6 +300,7 @@ void FVisualMapper::ApplyRoundedCorner(FUMGWidgetNode& Widget, const FDesignCorn
 
 void FVisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FDesignStroke& Stroke)
 {
+	const FMargin HalfInsets = GetStrokeHalfInsets(Stroke.Thickness);
 	float Thickness = Stroke.Thickness.bUniform ? Stroke.Thickness.Uniform
 		: FMath::Max(FMath::Max(Stroke.Thickness.Top, Stroke.Thickness.Bottom),
 			FMath::Max(Stroke.Thickness.Left, Stroke.Thickness.Right));
@@ -300,17 +332,17 @@ void FVisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FDesignStroke& Str
 	// UMG outline is always centered on the edge. Adjust padding to simulate inside/outside.
 	if (Stroke.Align == EDesignStrokeAlign::Inside)
 	{
-		// Inside: entire stroke within bounds → add padding = Thickness/2
-		float Inset = Thickness * 0.5f;
+		// Inside: only inset sides that actually carry a stroke.
 		Widget.Properties.Add(TEXT("StrokePadding"),
-			FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"), Inset, Inset, Inset, Inset));
+			FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"),
+				HalfInsets.Left, HalfInsets.Top, HalfInsets.Right, HalfInsets.Bottom));
 	}
 	else if (Stroke.Align == EDesignStrokeAlign::Outside)
 	{
-		// Outside: entire stroke outside bounds → expand by Thickness/2
-		float Outset = Thickness * 0.5f;
+		// Outside: only compensate on stroked sides, otherwise we shift content for no reason.
 		Widget.Properties.Add(TEXT("StrokeMargin"),
-			FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"), -Outset, -Outset, -Outset, -Outset));
+			FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"),
+				-HalfInsets.Left, -HalfInsets.Top, -HalfInsets.Right, -HalfInsets.Bottom));
 	}
 	// Center: default UMG behavior, no adjustment needed
 }
@@ -365,17 +397,25 @@ FUMGWidgetNode FVisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TSha
 	if (const FString* SM = Widget.Properties.Find(TEXT("StrokeMargin")))
 	{
 		FMargin M = FUMGWidgetUtils::ParseMargin(*SM);
-		float Outset = -M.Left; // StrokeMargin stores negative values
-		if (Outset > 0)
+		const FMargin Outset(
+			FMath::Max(0.0f, -M.Left),
+			FMath::Max(0.0f, -M.Top),
+			FMath::Max(0.0f, -M.Right),
+			FMath::Max(0.0f, -M.Bottom));
+		if (Outset.Left > 0.0f || Outset.Top > 0.0f || Outset.Right > 0.0f || Outset.Bottom > 0.0f)
 		{
-			FString Pad = FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"), Outset, Outset, Outset, Outset);
+			FMargin Combined = Outset;
 			if (const FString* Existing = Border.Properties.Find(TEXT("StrokePadding")))
 			{
 				FMargin EP = FUMGWidgetUtils::ParseMargin(*Existing);
-				Pad = FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"),
-					EP.Left + Outset, EP.Top + Outset, EP.Right + Outset, EP.Bottom + Outset);
+				Combined.Left += EP.Left;
+				Combined.Top += EP.Top;
+				Combined.Right += EP.Right;
+				Combined.Bottom += EP.Bottom;
 				Border.Properties.Remove(TEXT("StrokePadding"));
 			}
+			const FString Pad = FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"),
+				Combined.Left, Combined.Top, Combined.Right, Combined.Bottom);
 			Border.Properties.Add(TEXT("StrokePadding"), Pad);
 		}
 		Widget.Properties.Remove(TEXT("StrokeMargin"));

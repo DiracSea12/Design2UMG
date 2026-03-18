@@ -24,6 +24,22 @@ namespace DesignImportUtils
 	/** 鐢熸垚 Widget Blueprint + 娓叉煋 PNG 棰勮鍥?*/
 	bool GenerateBlueprintAndPng(const FUMGWidgetData& Data, const FString& OutputPath);
 
+	/** 生成并编译 Blueprint，然后渲染最终可打开状态的 PNG。*/
+	bool GenerateBlueprintAndCompiledPng(
+		const FUMGWidgetData& Data,
+		const FString& OutputPath,
+		const FString& OutputPngFilePath,
+		const FIntPoint& RequestedRenderSize = FIntPoint::ZeroValue,
+		FString* OutGeneratedAssetPath = nullptr,
+		FIntPoint* OutRenderedSize = nullptr);
+
+	/** 对现有 Widget Blueprint 做编译后渲染并保存为 PNG。*/
+	bool RenderCompiledBlueprintToPngFile(
+		UWidgetBlueprint* WidgetBlueprint,
+		const FString& OutputPngFilePath,
+		const FIntPoint& RequestedRenderSize = FIntPoint::ZeroValue,
+		FIntPoint* OutRenderedSize = nullptr);
+
 	/** 浠庣紪杈戝悗鐨?JSON 瑙ｆ瀽 + 杩滅▼鍥剧墖 + 鐢熸垚 Blueprint */
 	void GenerateFromEditedJson(const FString& EditedJson, const FString& OutputPath);
 
@@ -41,8 +57,7 @@ namespace DesignImportUtils
 
 	/**
 	 * 寮瑰嚭 Frame 閫夋嫨鍣ㄥ璇濇
-	 * @param OnFrameSelected 鐢ㄦ埛鍙屽嚮閫夋嫨鍚庣殑鍥炶皟锛堟帴鏀?FrameId锛?
-	 */
+	 * @param OnFrameSelected 鐢ㄦ埛鍙屽嚮閫夋嫨鍚庣殑鍥炶皟锛堟帴鏀?FrameId锛?	 */
 	using FFrameSelectedCallback = TFunction<void(const FString& FrameId)>;
 	void ShowFrameSelector(
 		const TArray<FDesignFrameInfo>& Frames,
@@ -50,5 +65,6 @@ namespace DesignImportUtils
 		const FText& HintText,
 		FFrameSelectedCallback OnFrameSelected);
 }
+
 
 

@@ -65,8 +65,7 @@ public:
 	/**
 	 * 璁＄畻鍗曚釜Widget鐨凷lot鏁版嵁
 	 * @param Bounds 褰掍竴鍖栬竟鐣屾
-	 * @param Context 甯冨眬涓婁笅鏂?
-	 * @return 璁＄畻寰楀埌鐨凷lot鏁版嵁
+	 * @param Context 甯冨眬涓婁笅鏂?	 * @return 璁＄畻寰楀埌鐨凷lot鏁版嵁
 	 */
 	static FUMGSlotData CalculateSlot(const FBounds& Bounds, const FLayoutContext& Context);
 
@@ -94,14 +93,9 @@ private:
 	);
 
 	/**
-	 * 杈圭紭鍚搁檮妫€娴?
-	 * @param Position 鍏冪礌浣嶇疆锛?-1锛?
-	 * @param Size 鍏冪礌灏哄锛?-1锛?
-	 * @param EdgeThreshold 杈圭紭闃堝€?
-	 * @param bSnapToStart 杈撳嚭锛氭槸鍚﹀惛闄勫埌璧峰杈圭紭
+	 * 杈圭紭鍚搁檮妫€娴?	 * @param Position 鍏冪礌浣嶇疆锛?-1锛?	 * @param Size 鍏冪礌灏哄锛?-1锛?	 * @param EdgeThreshold 杈圭紭闃堝€?	 * @param bSnapToStart 杈撳嚭锛氭槸鍚﹀惛闄勫埌璧峰杈圭紭
 	 * @param bSnapToEnd 杈撳嚭锛氭槸鍚﹀惛闄勫埌缁撴潫杈圭紭
-	 * @return 鏄惁闇€瑕佽竟缂樺惛闄?
-	 */
+	 * @return 鏄惁闇€瑕佽竟缂樺惛闄?	 */
 	static bool ShouldSnapToEdge(
 		float Position,
 		float Size,
@@ -111,11 +105,7 @@ private:
 	);
 
 	/**
-	 * 鎷変几閿氱偣妫€娴?
-	 * @param Size 鍏冪礌灏哄锛?-1锛?
-	 * @param StretchThreshold 鎷変几闃堝€?
-	 * @return 鏄惁搴斾娇鐢ㄦ媺浼搁敋鐐?
-	 */
+	 * 鎷変几閿氱偣妫€娴?	 * @param Size 鍏冪礌灏哄锛?-1锛?	 * @param StretchThreshold 鎷変几闃堝€?	 * @return 鏄惁搴斾娇鐢ㄦ媺浼搁敋鐐?	 */
 	static bool ShouldUseStretchAnchors(float Size, float StretchThreshold);
 };
 

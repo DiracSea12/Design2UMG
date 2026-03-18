@@ -1,4 +1,4 @@
-﻿# Design2UMG Property Mapping Reference
+# Design2UMG Property Mapping Reference
 
 .pen 节点属性到 UMG Widget 属性的完整映射关系。
 

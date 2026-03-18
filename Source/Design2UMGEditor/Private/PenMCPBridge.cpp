@@ -101,7 +101,7 @@ namespace
 		TArray<TSharedPtr<FJsonValue>> Result;
 		CollectReusableNodes(AllChildren, Result);
 
-		// 鍘婚噸锛氬鏋滅洰鏍囪妭鐐规湰韬氨鏄?reusable锛屼笉瑕侀噸澶嶆坊鍔?
+		// Deduplicate when the target node itself is reusable.
 		FString TargetId;
 		if (const TSharedPtr<FJsonObject>& FoundObj = Found->AsObject())
 			FoundObj->TryGetStringField(TEXT("id"), TargetId);
@@ -182,7 +182,7 @@ FString FPenMCPBridge::AssembleDocumentJson(
 		VarsObj = MakeShared<FJsonObject>();
 	}
 
-	// 濡傛灉鎸囧畾浜?TargetNodeId锛岃繃婊わ紙淇濈暀 reusable 缁勪欢瀹氫箟锛?
+	// Filter children when TargetNodeId is specified while preserving reusable definitions.
 	TArray<TSharedPtr<FJsonValue>> Children;
 	if (!TargetNodeId.IsEmpty())
 	{
@@ -201,11 +201,11 @@ FString FPenMCPBridge::AssembleDocumentJson(
 	}
 
 	// VarsObj 鍙兘鏄畬鏁存枃妗ｅ厓鏁版嵁锛堝惈 version/variables/themes/fonts锛夛紝
-	// 涔熷彲鑳藉彧鏄彉閲忓璞℃湰韬€傜‘淇?BuildDocumentJson 鑳芥纭鍙栧悇瀛楁銆?
+	// The returned object may already be the variables object itself.
 	TSharedPtr<FJsonObject> SourceObj = VarsObj;
 	if (!VarsObj->HasField(TEXT("variables")))
 	{
-		// VarsObj 鏈韩灏辨槸鍙橀噺鍐呭锛屽寘瑁呬负鏂囨。绾у璞?
+		// VarsObj itself is the variables payload; wrap it to match BuildDocumentJson input.
 		SourceObj = MakeShared<FJsonObject>();
 		SourceObj->SetObjectField(TEXT("variables"), VarsObj);
 	}
@@ -255,7 +255,7 @@ bool FPenMCPBridge::BuildFilteredDocumentJson(
 		Children = *ChildrenPtr;
 	}
 
-	// 鎸?TargetNodeId 杩囨护锛堜繚鐣?reusable 缁勪欢瀹氫箟锛?
+	// Filter by TargetNodeId while keeping reusable component definitions.
 	if (!TargetNodeId.IsEmpty())
 	{
 		TArray<TSharedPtr<FJsonValue>> Filtered = FilterWithReusables(Children, TargetNodeId);

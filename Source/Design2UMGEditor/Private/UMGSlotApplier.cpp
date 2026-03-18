@@ -122,9 +122,7 @@ namespace
 	void ApplyBorderSlot(UPanelSlot* Slot, const FUMGSlotData& S)
 	{
 		UBorderSlot* BS = CastChecked<UBorderSlot>(Slot);
-		// UBorderSlot::SetPadding 鍐呴儴浼氳皟鐢?UBorder::SetPadding锛?
-		// 浼氳鐩?ApplyBorderProps 涓凡璁剧疆鐨?Border padding銆?
-		// 鍙湪 slot 鏄惧紡鎸囧畾浜嗛潪闆?padding 鏃舵墠瑕嗙洊銆?
+		// Only override border padding when the slot explicitly carries non-default padding.
 		const FUMGSlotData Default;
 		if (!FUMGWidgetUtils::IsNearlyEqualMargin(S.Padding, Default.Padding))
 		{

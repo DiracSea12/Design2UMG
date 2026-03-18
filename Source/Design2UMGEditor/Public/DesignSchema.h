@@ -3,7 +3,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Layout/Margin.h"
 #include "DesignSchema.generated.h"
 
 /**

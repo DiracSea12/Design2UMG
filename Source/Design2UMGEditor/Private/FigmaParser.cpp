@@ -337,6 +337,15 @@ static void ApplyFigmaSemanticHints(const TSharedPtr<FJsonObject>& NodeObj, FDes
 	const TSharedPtr<FJsonValue> PlaceholderField = NodeObj->TryGetField(TEXT("placeholder"));
 	const TSharedPtr<FJsonValue> SlotField = NodeObj->TryGetField(TEXT("slot"));
 
+	if (SlotField.IsValid() && SlotField->Type == EJson::Array)
+	{
+		const int32 SlotCount = SlotField->AsArray().Num();
+		Node.Metadata.Add(TEXT("figma.slot.present"), TEXT("true"));
+		Node.Metadata.Add(TEXT("figma.slot.count"), FString::FromInt(SlotCount));
+		if (SlotCount == 0)
+			Node.Metadata.Add(TEXT("figma.slot.empty"), TEXT("true"));
+	}
+
 	const bool bExplicitPlaceholder = ReadSemanticSignalField(PlaceholderField);
 	const bool bExplicitSlot = ReadSemanticSignalField(SlotField);
 
@@ -1254,8 +1263,6 @@ TSharedPtr<FDesignNode> FFigmaParser::ParseNode(const TSharedPtr<FJsonObject>& N
 		const FString ComponentId = GetStr(NodeObj, TEXT("componentId"));
 		if (!ComponentId.IsEmpty())
 		{
-			// Keep legacy instance linkage for downstream logic/tests expecting Ref semantics.
-			Node->Ref = ComponentId;
 			Node->Metadata.Add(TEXT("instanceComponentId"), ComponentId);
 		}
 	}

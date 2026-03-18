@@ -1,0 +1,10 @@
+﻿## H 级发现核实 - Batch 1
+
+| # | 发现 | 结论 | 理由 |
+|---|------|------|------|
+| 4-H | `PenFileImportFactory.cpp` 中 `ImportSingleFrame` 返回 nullptr 有两种含义（取消和失败），都设 `bOutOperationCanceled=true` | ✅ 确认 | `ImportSingleFrame` 内部在文件读取失败(L113)、转换失败(L122)、用户取消(L115/L124)、预览窗口打开(L134) 四种情况均返回 nullptr。调用方(L74-80)无法区分失败与预览异步，统一走 `bOutOperationCanceled=true`。UE5 的 `FactoryCreateFile` 约定中，`bOutOperationCanceled=true` + 返回 nullptr 表示"用户取消"，但此处失败也走同一路径，会导致编辑器误认为是用户取消而吞掉错误提示 |
+| 5-H | `PenMCPBridge.cpp` 中 `BuildDocumentJson` 接收 VarsObj 而非 SourceObj，version 始终为 "2.6" | ✅ 确认 | `AssembleDocumentJson`(L171) 传入 `VarsObj`（纯变量对象），而 `BuildDocumentJson` 内部从 `SourceObj` 读取 `version`(L107-109)、`variables`/`themes`/`fonts`(L113-117)。VarsObj 通常不含这些字段，导致：(1) version 始终回退 "2.6"；(2) variables/themes/fonts 丢失。对比 `ConvertFromParsedDoc`(L215) 正确传入 `DocObj`（完整文档对象），可确认 `AssembleDocumentJson` 路径存在 bug |
+| 6-H | `PencilConnector.cpp` 中 `FindAvailablePort` TOCTOU 竞态 | ❌ 误报 | 虽然 `FindAvailablePort`(L96-120) 确实存在 bind→release→reuse 的时间窗口（经典 TOCTOU），但这是端口探测的标准做法，几乎所有语言/框架的 find-free-port 实现都有此特征。在编辑器插件场景下（非高并发服务器），竞态窗口极短且发生概率极低，即使发生也只是启动失败可重试。不构成需要修复的 H 级问题 |
+| 7-H | `PenVariableResolver.cpp` 中变量循环引用导致无限递归栈溢出 | ❌ 误报 | `ResolveString`(L68-79) 查找变量后调用 `ResolveThemedValue`(L40-66)，后者直接返回 `Var.Value` 字符串，**不会递归调用 `ResolveString`**。即使 `$A` 的值是 `"$B"`，`ResolveString("$A")` 只会返回字面字符串 `"$B"`，不会继续解析。不存在递归调用链，不可能栈溢出 |
+| 8-H1 | `RefExpander.cpp` 中 `DeepCopyNode` 只深拷贝 Children，遗漏 Descendants | ✅ 确认 | `DeepCopyNode`(L227-240) 执行 `*Copy = *Source` 浅拷贝后，仅对 `Children` 做递归深拷贝。`Descendants`（`TMap<FString, TSharedPtr<FDesignNode>>`）的 TMap 容器虽然是值拷贝，但 map 中的 `TSharedPtr<FDesignNode>` 值仍指向原始节点对象。Copy 和 Source 共享 Descendants 中的节点实例，后续对 Descendants 节点的修改（如 `ApplyOverrideProperties`）会污染原始 Source 数据 |
+| 8-H2 | `RefExpander.cpp` 中 `ApplyDescendantOverride` 对象替换直接插入外部指针未做 DeepCopy | ✅ 确认 | `ApplyDescendantOverride`(L274-277) 在对象替换模式下直接 `Node->Children[i] = Override`，将 Descendants map 中的共享指针直接插入 Children。如果同一组件被多次实例化，多个实例的 Children 会指向同一个 Override 节点对象，后续对任一实例的修改会影响所有实例 |

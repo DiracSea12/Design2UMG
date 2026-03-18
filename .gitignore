@@ -1,4 +1,4 @@
-﻿# UE build artifacts
+# UE build artifacts
 Binaries/
 Intermediate/
 Saved/
@@ -25,7 +25,7 @@ openspec/
 tmpclaude-*
 nul
 CLAUDE.md
-Design2UMG*/
+Design2UMG图片/
 
 # Local helper outputs
 progress.txt
@@ -50,40 +50,3 @@ verify_design_size.py
 __pycache__/
 *.pyc
 Tools/FigmaExporter/node_modules/
-
-# Local review artifacts (non-release)
-AGENTS.md
-Docs/LessonsLearned.md
-Docs/NodeReview.md
-Docs/ProductPolishPlan.md
-Docs/node*.md
-Docs/verify_h_batch*.md
-Tools/comparison_results/
-Tools/*step*.png
-Tools/*viewport*.png
-Tools/*hierarchy*.png
-Tools/*details*.png
-Tools/*table*.png
-Tools/*_full.png
-Tools/comparison_step1.png
-Tools/designer_step1.png
-Tools/design_step1_layout.png
-Tools/sim_*.png
-Tools/welcome_*.png
-Tools/ue_editor_screenshot*.png
-Tools/analyze_pen.py
-Tools/pen2umg_sim.py
-Tools/render_pen_layout.py
-Tools/ue_compare.py
-analyze_screenshot.py
-analyze_with_vision.py
-fix_design_size.py
-ocr_canvas_size.py
-open_umg.py
-open_umg_asset.py
-query_design_size.py
-reimport_pen.py
-take_screenshot.py
-verify_umg_display.py
-prd.json
-specs/

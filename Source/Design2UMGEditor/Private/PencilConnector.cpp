@@ -86,7 +86,7 @@ FString FPencilConnector::DetectAppName()
 	if (Settings && !Settings->PencilAppName.IsEmpty())
 		return Settings->PencilAppName;
 
-	// 2. 妫€娴嬭繍琛屼腑鐨勮繘绋?
+	// 2. Detect a running Pencil-compatible process.
 	FPlatformProcess::FProcEnumerator ProcEnum;
 	while (ProcEnum.MoveNext())
 	{
@@ -169,7 +169,7 @@ bool FPencilConnector::Launch(int32 Port)
 	const FString Endpoint = FString::Printf(
 		TEXT("http://localhost:%d/mcp"), ServerPort);
 
-	// 杞绛夊緟鏈嶅姟鍣ㄥ氨缁紝姣?200ms 灏濊瘯涓€娆★紝鏈€澶?10 绉?
+	// Poll until the local MCP server is ready.
 	constexpr float PollInterval = 0.2f;
 	constexpr float MaxWait = 10.0f;
 	float Elapsed = 0.0f;

@@ -4,6 +4,7 @@
 #include "PenParser.h"
 #include "Design2UMGConverter.h"
 #include "Design2UMGSettings.h"
+#include "DesignVariableResolver.h"
 #include "LayoutCalculator.h"
 #include "FigmaParser.h"
 #include "Interfaces/IPluginManager.h"
@@ -670,6 +671,25 @@ bool FParserNumberStringFlexibleTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Text lineHeight parsed from string"), Root->Children[0]->LineHeight, 1.5f);
 	TestEqual(TEXT("Text letterSpacing parsed from string"), Root->Children[0]->LetterSpacing, 0.2f);
 	TestEqual(TEXT("Icon weight parsed from string"), Root->Children[1]->IconWeight, 500);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVariableResolverLiteralDollarTextTest,
+	"Design2UMG.Parser.LiteralDollarTextIsNotVariable",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FVariableResolverLiteralDollarTextTest::RunTest(const FString& Parameters)
+{
+	TMap<FString, FDesignVariable> Variables;
+	FDesignVariableResolver Resolver;
+	Resolver.SetVariables(Variables);
+
+	TestFalse(TEXT("$45.00 should not be treated as variable ref"), Resolver.IsVariableRef(TEXT("$45.00")));
+	TestEqual(TEXT("Literal dollar text should round-trip unchanged"),
+		Resolver.ResolveString(TEXT("$45.00")),
+		FString(TEXT("$45.00")));
+	TestTrue(TEXT("$--font-primary remains a variable ref"), Resolver.IsVariableRef(TEXT("$--font-primary")));
+
 	return true;
 }
 
@@ -1367,6 +1387,264 @@ bool FFigmaGridWrapMetadataTest::RunTest(const FString& Parameters)
 }
 
 // ============================================================
+// Test 8.10b: Empty slot arrays should preserve placeholder semantics
+// ============================================================
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenEmptySlotSemanticHintTest,
+	"Design2UMG.PenParser.EmptySlotSemanticHint",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FPenEmptySlotSemanticHintTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"children": [
+			{ "id":"n1", "type":"frame", "name":"Card Header", "slot":[], "width":100, "height":32 },
+			{ "id":"n2", "type":"frame", "name":"Page Numbers", "slot":["s1"], "width":100, "height":32 },
+			{ "id":"n3", "type":"frame", "name":"Any Node", "placeholder":true, "width":100, "height":32 }
+		]
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Pen parse succeeds"), FPenParser::ParseDocument(Json, Doc));
+	if (Doc.Children.Num() != 3)
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("Empty slot array should mark placeholder surface"), Doc.Children[0]->bSemanticPlaceholderSurface);
+	TestTrue(TEXT("Non-empty slot array should mark placeholder surface"), Doc.Children[1]->bSemanticPlaceholderSurface);
+	TestTrue(TEXT("Explicit placeholder=true should mark placeholder surface"), Doc.Children[2]->bSemanticPlaceholderSurface);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaEmptySlotSemanticHintTest,
+	"Design2UMG.FigmaParser.EmptySlotSemanticHint",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFigmaEmptySlotSemanticHintTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page",
+				"type": "CANVAS",
+				"children": [{
+					"id": "root",
+					"name": "Root",
+					"type": "FRAME",
+					"visible": true,
+					"absoluteBoundingBox": {"x":0,"y":0,"width":300,"height":200},
+					"children": [
+						{
+							"id":"e1",
+							"name":"Card Header",
+							"type":"FRAME",
+							"visible": true,
+							"slot": [],
+							"absoluteBoundingBox": {"x":10,"y":10,"width":80,"height":20}
+						},
+						{
+							"id":"e2",
+							"name":"Page Numbers",
+							"type":"FRAME",
+							"visible": true,
+							"slot": ["s1"],
+							"absoluteBoundingBox": {"x":10,"y":40,"width":80,"height":20}
+						},
+						{
+							"id":"e3",
+							"name":"Any",
+							"type":"FRAME",
+							"visible": true,
+							"placeholder": true,
+							"absoluteBoundingBox": {"x":10,"y":70,"width":80,"height":20}
+						}
+					]
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Figma parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	if (Doc.Children.Num() == 0 || Doc.Children[0]->Children.Num() < 3)
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("Empty slot array should mark placeholder surface"), Doc.Children[0]->Children[0]->bSemanticPlaceholderSurface);
+	TestTrue(TEXT("Non-empty slot array should mark placeholder surface"), Doc.Children[0]->Children[1]->bSemanticPlaceholderSurface);
+	TestTrue(TEXT("Explicit placeholder=true should mark placeholder surface"), Doc.Children[0]->Children[2]->bSemanticPlaceholderSurface);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPlaceholderSurfaceConversionTest,
+	"Design2UMG.Converter.PlaceholderSurfaceConversion",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FPlaceholderSurfaceConversionTest::RunTest(const FString& Parameters)
+{
+	UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+	if (!TestNotNull(TEXT("Settings available"), Settings))
+	{
+		return false;
+	}
+
+	const FString SavedBg = Settings->PlaceholderHatchBackgroundColor;
+	const FString SavedStripe = Settings->PlaceholderHatchStripeColor;
+	Settings->PlaceholderHatchBackgroundColor = TEXT("#D282FF33");
+	Settings->PlaceholderHatchStripeColor = TEXT("#D480FF");
+
+	const FString Json = TEXT(R"({
+		"children": [
+			{ "id":"slotCell", "type":"frame", "name":"Table Cell", "slot":[], "width":100, "height":40 },
+			{ "id":"pageSlot", "type":"frame", "name":"Page Numbers Slot", "width":40, "height":40, "x":0, "y":48 }
+		]
+	})");
+
+	FDesignDocument Doc;
+	const bool bParsed = FPenParser::ParseDocument(Json, Doc);
+	TestTrue(TEXT("Pen parse succeeds"), bParsed);
+	if (!bParsed || Doc.Children.Num() != 2)
+	{
+		Settings->PlaceholderHatchBackgroundColor = SavedBg;
+		Settings->PlaceholderHatchStripeColor = SavedStripe;
+		return false;
+	}
+
+	TestEqual(TEXT("Empty slot metadata preserved"), Doc.Children[0]->Metadata.FindRef(TEXT("pen.slot.empty")), TEXT("true"));
+	TestTrue(TEXT("Empty slot array keeps semantic placeholder"), Doc.Children[0]->bSemanticPlaceholderSurface);
+
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* SlotCell = FindWidgetById(Data.RootWidget, TEXT("slotCell"));
+	const FUMGWidgetNode* PageSlot = FindWidgetById(Data.RootWidget, TEXT("pageSlot"));
+
+	TestTrue(TEXT("slotCell widget exists"), SlotCell != nullptr);
+	TestTrue(TEXT("pageSlot widget exists"), PageSlot != nullptr);
+	if (!SlotCell || !PageSlot)
+	{
+		Settings->PlaceholderHatchBackgroundColor = SavedBg;
+		Settings->PlaceholderHatchStripeColor = SavedStripe;
+		return false;
+	}
+
+	TestEqual(TEXT("slotCell uses Image"), SlotCell->Type, TEXT("Image"));
+	TestEqual(TEXT("slotCell placeholder material"), SlotCell->Properties.FindRef(TEXT("MaterialRef")), TEXT("placeholdersurface"));
+	TestTrue(TEXT("slotCell placeholder params carry fill color"), SlotCell->Properties.FindRef(TEXT("MaterialParams")).Contains(TEXT("#D282FF33")));
+	TestTrue(TEXT("slotCell placeholder params carry outline color"), SlotCell->Properties.FindRef(TEXT("MaterialParams")).Contains(TEXT("#D480FF")));
+	TestTrue(TEXT("slotCell placeholder width override exists"), SlotCell->Properties.Contains(TEXT("WidthOverride")));
+	TestTrue(TEXT("slotCell placeholder height override exists"), SlotCell->Properties.Contains(TEXT("HeightOverride")));
+
+	TestEqual(TEXT("pageSlot uses Image"), PageSlot->Type, TEXT("Image"));
+	TestEqual(TEXT("pageSlot placeholder material"), PageSlot->Properties.FindRef(TEXT("MaterialRef")), TEXT("placeholdersurface"));
+	TestTrue(TEXT("pageSlot placeholder params carry fill color"), PageSlot->Properties.FindRef(TEXT("MaterialParams")).Contains(TEXT("#D282FF33")));
+	TestTrue(TEXT("pageSlot placeholder params carry outline color"), PageSlot->Properties.FindRef(TEXT("MaterialParams")).Contains(TEXT("#D480FF")));
+
+	Settings->PlaceholderHatchBackgroundColor = SavedBg;
+	Settings->PlaceholderHatchStripeColor = SavedStripe;
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConverterTextAlignVerticalDoesNotMoveSlotTest,
+	"Design2UMG.Converter.TextAlignVerticalDoesNotMoveSlot",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FConverterTextAlignVerticalDoesNotMoveSlotTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"children": [
+			{
+				"id": "root",
+				"type": "frame",
+				"width": 200,
+				"height": 60,
+				"layout": "horizontal",
+				"alignItems": "start",
+				"children": [
+					{
+						"id": "label",
+						"type": "text",
+						"content": "Button",
+						"fill": "#FFFFFF",
+						"fontFamily": "Geist",
+						"fontSize": 14,
+						"textAlignVertical": "middle"
+					}
+				]
+			}
+		]
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("ParseDocument succeeds"), FPenParser::ParseDocument(Json, Doc));
+
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* Label = FindWidgetById(Data.RootWidget, TEXT("label"));
+	TestNotNull(TEXT("Converted label exists"), Label);
+	if (!Label)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("textAlignVertical kept as metadata"), Label->Properties.FindRef(TEXT("TextAlignVertical")), TEXT("Center"));
+	TestEqual(TEXT("Parent slot stays top-aligned"), Label->Slot.VerticalAlignment, TEXT("Top"));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConverterNonUniformStrokePaddingTest,
+	"Design2UMG.Converter.NonUniformStrokePadding",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FConverterNonUniformStrokePaddingTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"children": [
+			{
+				"id": "panel",
+				"type": "frame",
+				"width": 240,
+				"height": 60,
+				"layout": "horizontal",
+				"padding": [10, 12],
+				"stroke": {
+					"align": "outside",
+					"thickness": { "right": 1 },
+					"fill": "#FFFFFF"
+				},
+				"children": [
+					{
+						"id": "text",
+						"type": "text",
+						"content": "Item",
+						"fill": "#FFFFFF",
+						"fontFamily": "Geist",
+						"fontSize": 16
+					}
+				]
+			}
+		]
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("ParseDocument succeeds"), FPenParser::ParseDocument(Json, Doc));
+
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* Panel = FindWidgetById(Data.RootWidget, TEXT("panel"));
+	TestNotNull(TEXT("Converted panel exists"), Panel);
+	if (!Panel)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Outside right stroke only adds right inset"), Panel->Properties.FindRef(TEXT("StrokePadding")), TEXT("0.0,0.0,0.5,0.0"));
+	return true;
+}
+
+// ============================================================
 // Test 8.11: Official-field parity smoke tests (.pen / Figma)
 // ============================================================
 
@@ -1856,6 +2134,157 @@ bool FPreviewWindowTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Preview window instantiated"), PreviewWindow.IsValid());
 	PreviewWindow.Reset();
 	
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFitContentMinimumExpandsToContentTest,
+	"Design2UMG.Converter.FitContentMinimumExpandsToContent",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFitContentMinimumExpandsToContentTest::RunTest(const FString& Parameters)
+{
+	FDesignDocument Doc;
+
+	const TSharedPtr<FDesignNode> Root = MakeShared<FDesignNode>();
+	Root->Id = TEXT("fit-min-root");
+	Root->Name = TEXT("FitMinRoot");
+	Root->Type = EDesignNodeType::Frame;
+	Root->Layout = EDesignLayout::Vertical;
+	Root->Width = FDesignSize::Fixed(320.0f);
+	Root->Height = FDesignSize::Fit();
+	Root->bHasWidth = true;
+
+	const TSharedPtr<FDesignNode> Row = MakeShared<FDesignNode>();
+	Row->Id = TEXT("fit-min-row");
+	Row->Name = TEXT("FitMinRow");
+	Row->Type = EDesignNodeType::Frame;
+	Row->Layout = EDesignLayout::Vertical;
+	Row->Width = FDesignSize::Fixed(320.0f);
+	Row->Height = FDesignSize::Fit(44.0f);
+	Row->bHasWidth = true;
+	Row->bHasHeight = true;
+
+	const TSharedPtr<FDesignNode> Content = MakeShared<FDesignNode>();
+	Content->Id = TEXT("fit-min-content");
+	Content->Name = TEXT("FitMinContent");
+	Content->Type = EDesignNodeType::Frame;
+	Content->Layout = EDesignLayout::Vertical;
+	Content->Width = FDesignSize::Fixed(320.0f);
+	Content->Height = FDesignSize::Fixed(56.0f);
+	Content->bHasWidth = true;
+	Content->bHasHeight = true;
+
+	Row->Children.Add(Content);
+	Root->Children.Add(Row);
+	Doc.Children.Add(Root);
+
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* RootWidget = FindWidgetById(Data.RootWidget, TEXT("fit-min-root"));
+	const FUMGWidgetNode* RowSizeBox = FindWidgetById(Data.RootWidget, TEXT("fit-min-row_sz"));
+
+	TestTrue(TEXT("Find fit-content minimum root widget"), RootWidget != nullptr);
+	TestTrue(TEXT("Find fit-content minimum row size box"), RowSizeBox != nullptr);
+	if (!RootWidget || !RowSizeBox)
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("Root fit-content height should grow beyond the minimum fallback"),
+		RootWidget->Bounds.H >= 56.0f - 0.5f);
+
+	const FString* HeightOverride = RowSizeBox->Properties.Find(TEXT("HeightOverride"));
+	const FString* MinDesiredHeight = RowSizeBox->Properties.Find(TEXT("MinDesiredHeight"));
+	TestTrue(TEXT("Flow fit-content(min) row should export a concrete height constraint"),
+		HeightOverride != nullptr || MinDesiredHeight != nullptr);
+	if (HeightOverride)
+	{
+		TestTrue(TEXT("HeightOverride should be at least the larger child content height"),
+			FCString::Atof(**HeightOverride) >= 56.0f - 0.5f);
+	}
+	if (MinDesiredHeight)
+	{
+		TestTrue(TEXT("MinDesiredHeight should be at least the larger child content height"),
+			FCString::Atof(**MinDesiredHeight) >= 56.0f - 0.5f);
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFillWidthSingleLineTextDoesNotInflateFitHeightTest,
+	"Design2UMG.Converter.FillWidthSingleLineTextDoesNotInflateFitHeight",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFillWidthSingleLineTextDoesNotInflateFitHeightTest::RunTest(const FString& Parameters)
+{
+	FDesignDocument Doc;
+
+	const TSharedPtr<FDesignNode> Root = MakeShared<FDesignNode>();
+	Root->Id = TEXT("text-fit-root");
+	Root->Name = TEXT("TextFitRoot");
+	Root->Type = EDesignNodeType::Frame;
+	Root->Layout = EDesignLayout::Vertical;
+	Root->Width = FDesignSize::Fixed(160.0f);
+	Root->Height = FDesignSize::Fit();
+	Root->bHasWidth = true;
+
+	const TSharedPtr<FDesignNode> HeaderCell = MakeShared<FDesignNode>();
+	HeaderCell->Id = TEXT("header-cell");
+	HeaderCell->Name = TEXT("HeaderCell");
+	HeaderCell->Type = EDesignNodeType::Frame;
+	HeaderCell->Layout = EDesignLayout::Horizontal;
+	HeaderCell->Width = FDesignSize::Fixed(160.0f);
+	HeaderCell->Height = FDesignSize::Fit(44.0f);
+	HeaderCell->bHasWidth = true;
+	HeaderCell->bHasHeight = true;
+	HeaderCell->Padding.Top = 12.0f;
+	HeaderCell->Padding.Right = 12.0f;
+	HeaderCell->Padding.Bottom = 12.0f;
+	HeaderCell->Padding.Left = 12.0f;
+	HeaderCell->bHasPadding = true;
+	HeaderCell->AlignItems = EDesignAlignItems::Center;
+
+	const TSharedPtr<FDesignNode> HeaderText = MakeShared<FDesignNode>();
+	HeaderText->Id = TEXT("header-text");
+	HeaderText->Name = TEXT("HeaderText");
+	HeaderText->Type = EDesignNodeType::Text;
+	HeaderText->Width = FDesignSize::Fill();
+	HeaderText->Height = FDesignSize::Fit();
+	HeaderText->Content = TEXT("Status");
+	HeaderText->FontFamily = TEXT("Inter");
+	HeaderText->FontSize = 14.0f;
+	HeaderText->FontWeight = TEXT("normal");
+	HeaderText->LineHeight = 1.4285714285714286f;
+	HeaderText->TextGrowth = EDesignTextGrowth::FixedWidth;
+
+	HeaderCell->Children.Add(HeaderText);
+	Root->Children.Add(HeaderCell);
+	Doc.Children.Add(Root);
+
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* RootWidget = FindWidgetById(Data.RootWidget, TEXT("text-fit-root"));
+	const FUMGWidgetNode* HeaderCellSizeBox = FindWidgetById(Data.RootWidget, TEXT("header-cell_sz"));
+
+	TestTrue(TEXT("Find single-line text fit root widget"), RootWidget != nullptr);
+	TestTrue(TEXT("Find header cell size box"), HeaderCellSizeBox != nullptr);
+	if (!RootWidget || !HeaderCellSizeBox)
+	{
+		return false;
+	}
+
+	const FString* HeightOverride = HeaderCellSizeBox->Properties.Find(TEXT("HeightOverride"));
+	const FString* MinDesiredHeight = HeaderCellSizeBox->Properties.Find(TEXT("MinDesiredHeight"));
+	TestTrue(TEXT("Header cell should export a height constraint"),
+		HeightOverride != nullptr || MinDesiredHeight != nullptr);
+
+	const float ExportedHeight = HeightOverride
+		? FCString::Atof(**HeightOverride)
+		: (MinDesiredHeight ? FCString::Atof(**MinDesiredHeight) : 0.0f);
+
+	TestTrue(TEXT("Single-line fill-width text should keep the 44px fit-content minimum"),
+		FMath::IsNearlyEqual(ExportedHeight, 44.0f, 0.5f));
+	TestTrue(TEXT("Root fit height should remain at the 44px minimum"),
+		FMath::IsNearlyEqual(RootWidget->Bounds.H, 44.0f, 0.5f));
+
 	return true;
 }
 

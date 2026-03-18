@@ -7,7 +7,6 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "RenderingThread.h"
-#include "TextureResource.h"
 
 TArray<TWeakObjectPtr<UTexture2D>> FProceduralShapeGenerator::RootedTextures;
 bool FProceduralShapeGenerator::bHasPendingTextureUpdates = false;
@@ -737,6 +736,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 	FLinearColor StripeColor = FLinearColor(0.67f, 0.58f, 0.94f, 0.66f);
 	int32 StripeWidthPx = 2;
 	int32 StripeGapPx = 6;
+	int32 InsetPx = 10;
 	TArray<FGradientStop> MultiStops;
 
 	if (const FString* ParamsStr = Properties.Find(TEXT("MaterialParams")))
@@ -779,6 +779,8 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 				StripeWidthPx = FMath::Max(1, FMath::RoundToInt(static_cast<float>(NumVal)));
 			if (Params->TryGetNumberField(TEXT("StripeGap"), NumVal))
 				StripeGapPx = FMath::Max(1, FMath::RoundToInt(static_cast<float>(NumVal)));
+			if (Params->TryGetNumberField(TEXT("Inset"), NumVal))
+				InsetPx = FMath::Max(0, FMath::RoundToInt(static_cast<float>(NumVal)));
 
 			// 多色标渐变 Stops 数组
 			const TArray<TSharedPtr<FJsonValue>>* StopsArr = nullptr;
@@ -884,6 +886,46 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 			{
 				const bool bOnStripe = ((X + Y) % Period) < StripeWidthPx;
 				Pixels[Y * Width + X] = bOnStripe ? LineColor : BgColor;
+			}
+		}
+
+		FillTextureData(Texture, Pixels);
+		return Texture;
+	}
+	if (Shape == TEXT("placeholdersurface"))
+	{
+		UE_LOG(LogDesign2UMG, Verbose,
+			TEXT("ProceduralShapeGenerator: placeholdersurface size=%dx%d color=(%.3f,%.3f,%.3f,%.3f) outline=(%.3f,%.3f,%.3f,%.3f) inset=%d outlineWidth=%d"),
+			Width, Height,
+			Color.R, Color.G, Color.B, Color.A,
+			StripeColor.R, StripeColor.G, StripeColor.B, StripeColor.A,
+			InsetPx, StripeWidthPx);
+		UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer);
+		if (!Texture)
+			return nullptr;
+
+		TArray<FColor> Pixels;
+		Pixels.Init(FColor(0, 0, 0, 0), Width * Height);
+
+		const FColor FillColor = Color.ToFColor(true);
+		const FColor OutlineColor = StripeColor.ToFColor(true);
+		const int32 OutlineWidth = FMath::Max(1, StripeWidthPx);
+		const int32 EffectiveInset = FMath::Clamp(InsetPx, 0, FMath::Max(0, FMath::Min(Width, Height) / 2 - 1));
+		const int32 MinX = EffectiveInset;
+		const int32 MinY = EffectiveInset;
+		const int32 MaxX = Width - EffectiveInset - 1;
+		const int32 MaxY = Height - EffectiveInset - 1;
+
+		for (int32 Y = MinY; Y <= MaxY; ++Y)
+		{
+			for (int32 X = MinX; X <= MaxX; ++X)
+			{
+				const bool bOutline =
+					(X - MinX) < OutlineWidth
+					|| (MaxX - X) < OutlineWidth
+					|| (Y - MinY) < OutlineWidth
+					|| (MaxY - Y) < OutlineWidth;
+				Pixels[Y * Width + X] = bOutline ? OutlineColor : FillColor;
 			}
 		}
 

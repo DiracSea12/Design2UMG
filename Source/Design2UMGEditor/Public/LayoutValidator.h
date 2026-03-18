@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "LayoutCalculator.h"
 
-// 甯冨眬楠屾敹闃堝€煎父閲?
+// Layout validation thresholds.
 namespace EvalThresholds
 {
 	constexpr float Acceptance_MAE = 4.0f;
@@ -40,16 +40,14 @@ class FLayoutValidator
 {
 public:
 	/**
-	 * 璁＄畻鍗曚釜Bounds鐨勮宸紙鍍忕礌锛?
-	 */
+	 * 璁＄畻鍗曚釜Bounds鐨勮宸紙鍍忕礌锛?	 */
 	static float CalculateBoundsError(
 		const FBounds& Actual,
 		const FBounds& Expected,
 		const FIntPoint& DesignSize);
 
 	/**
-	 * 璁＄畻鍗曚釜Bounds鐨勪綅缃宸紙鍍忕礌锛?
-	 */
+	 * 璁＄畻鍗曚釜Bounds鐨勪綅缃宸紙鍍忕礌锛?	 */
 	static float CalculatePosError(
 		const FBounds& Actual,
 		const FBounds& Expected,

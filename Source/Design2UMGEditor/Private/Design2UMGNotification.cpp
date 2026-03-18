@@ -17,7 +17,7 @@ void FDesign2UMGNotification::Success(const FText& Message, const FString& Asset
 	{
 		Info.Hyperlink = FSimpleDelegate::CreateLambda([AssetPath]()
 		{
-			// 鐢?AssetRegistry 鑾峰彇 FAssetData锛岄伩鍏嶅悓姝ュ姞杞藉畬鏁村璞?
+			// Resolve asset metadata without forcing a full load.
 			FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 			FAssetData AD = ARM.Get().GetAssetByObjectPath(FSoftObjectPath(AssetPath));
 			TArray<FAssetData> Assets;
