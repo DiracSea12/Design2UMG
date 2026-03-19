@@ -46,6 +46,296 @@ namespace
 			GetStrokeSideThickness(Thickness, 'B') * 0.5f);
 	}
 
+	bool HasUniformRectStroke(const FDesignStroke& Stroke)
+	{
+		const float Top = GetStrokeSideThickness(Stroke.Thickness, 'T');
+		const float Right = GetStrokeSideThickness(Stroke.Thickness, 'R');
+		const float Bottom = GetStrokeSideThickness(Stroke.Thickness, 'B');
+		const float Left = GetStrokeSideThickness(Stroke.Thickness, 'L');
+		return Top > KINDA_SMALL_NUMBER
+			&& Right > KINDA_SMALL_NUMBER
+			&& Bottom > KINDA_SMALL_NUMBER
+			&& Left > KINDA_SMALL_NUMBER
+			&& FMath::IsNearlyEqual(Top, Right)
+			&& FMath::IsNearlyEqual(Top, Bottom)
+			&& FMath::IsNearlyEqual(Top, Left);
+	}
+
+	bool NeedsExplicitSideStroke(const TSharedPtr<FDesignNode>& Node)
+	{
+		return Node.IsValid()
+			&& Node->Stroke.HasStroke()
+			&& !Node->CornerRadius.HasRadius()
+			&& !HasUniformRectStroke(Node->Stroke);
+	}
+
+	bool HasOpaqueSolidFill(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid() || !Node->Fill.bEnabled || Node->Fill.Type != EDesignFillType::Color || Node->Fill.SolidColor.IsEmpty())
+		{
+			return false;
+		}
+
+		return FUMGWidgetUtils::ParseColor(Node->Fill.SolidColor).A > KINDA_SMALL_NUMBER;
+	}
+
+	bool HasPlaceholderSurfaceChildren(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid())
+		{
+			return false;
+		}
+
+		for (const TSharedPtr<FDesignNode>& Child : Node->Children)
+		{
+			if (Child.IsValid() && Child->bSemanticPlaceholderSurface)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	bool TryResolveStrokeColor(const FDesignStroke& Stroke, FLinearColor& OutColor)
+	{
+		if (Stroke.Fill.Type != EDesignFillType::Color || Stroke.Fill.SolidColor.IsEmpty())
+		{
+			return false;
+		}
+
+		OutColor = FUMGWidgetUtils::ParseColor(Stroke.Fill.SolidColor);
+		return true;
+	}
+
+	bool ContainsExplicitStrokeSuffixRecursive(const FUMGWidgetNode& Widget, const TCHAR* Suffix)
+	{
+		if (Widget.Name.EndsWith(Suffix))
+		{
+			return true;
+		}
+
+		for (const FUMGWidgetNode& Child : Widget.Children)
+		{
+			if (ContainsExplicitStrokeSuffixRecursive(Child, Suffix))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	bool HasConvertedChildStrokeCoverage(const FUMGWidgetNode& Border, const TCHAR* Suffix)
+	{
+		if (Border.Children.Num() == 0)
+		{
+			return false;
+		}
+
+		const FUMGWidgetNode& Content = Border.Children[0];
+		if (Content.Children.Num() == 0)
+		{
+			return false;
+		}
+
+		for (const FUMGWidgetNode& Child : Content.Children)
+		{
+			if (!ContainsExplicitStrokeSuffixRecursive(Child, Suffix))
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	bool HasAnyConvertedChildStrokeCoverage(const FUMGWidgetNode& Border)
+	{
+		return HasConvertedChildStrokeCoverage(Border, TEXT("_stroke_top"))
+			|| HasConvertedChildStrokeCoverage(Border, TEXT("_stroke_right"))
+			|| HasConvertedChildStrokeCoverage(Border, TEXT("_stroke_bottom"))
+			|| HasConvertedChildStrokeCoverage(Border, TEXT("_stroke_left"));
+	}
+
+	void RemoveExplicitStrokeSuffixRecursive(FUMGWidgetNode& Widget, const TCHAR* Suffix)
+	{
+		for (int32 Index = Widget.Children.Num() - 1; Index >= 0; --Index)
+		{
+			if (Widget.Children[Index].Name.EndsWith(Suffix))
+			{
+				Widget.Children.RemoveAt(Index);
+				continue;
+			}
+
+			RemoveExplicitStrokeSuffixRecursive(Widget.Children[Index], Suffix);
+		}
+	}
+
+	void PruneConvertedChildStrokeCoverage(FUMGWidgetNode& Border, const TCHAR* Suffix)
+	{
+		if (Border.Children.Num() == 0)
+		{
+			return;
+		}
+
+		FUMGWidgetNode& Content = Border.Children[0];
+		for (FUMGWidgetNode& Child : Content.Children)
+		{
+			RemoveExplicitStrokeSuffixRecursive(Child, Suffix);
+		}
+	}
+
+	void ResetChildToFill(FUMGWidgetNode& Widget)
+	{
+		Widget.Bounds = FBounds();
+		Widget.Slot = FUMGSlotData();
+		Widget.Slot.HorizontalAlignment = TEXT("Fill");
+		Widget.Slot.VerticalAlignment = TEXT("Fill");
+	}
+
+	void StripExplicitStrokeFromSurface(FUMGWidgetNode& BorderSurface)
+	{
+		for (const FString& Key : {TEXT("OutlineThickness"), TEXT("OutlineColor"), TEXT("StrokePadding"), TEXT("StrokeMargin")})
+		{
+			BorderSurface.Properties.Remove(Key);
+		}
+
+		BorderSurface.Brush.OutlineThickness = 0.0f;
+		BorderSurface.Brush.bHasOutlineColor = false;
+		BorderSurface.Brush.OutlineColor = FLinearColor::Transparent;
+	}
+
+	FUMGWidgetNode MakeStrokeLineNode(
+		const FString& Id,
+		const FString& Name,
+		const FLinearColor& Color,
+		float Width,
+		float Height,
+		const FString& HorizontalAlignment,
+		const FString& VerticalAlignment)
+	{
+		FUMGWidgetNode Line;
+		Line.Type = TEXT("Image");
+		Line.Id = Id;
+		Line.Name = Name;
+		Line.Properties.Add(TEXT("TexturePath"), TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"));
+		Line.Properties.Add(TEXT("BrushColor"), FString::Printf(TEXT("#%s"), *Color.ToFColor(true).ToHex()));
+		Line.Properties.Add(TEXT("WidthOverride"), FString::SanitizeFloat(FMath::Max(1.0f, Width)));
+		Line.Properties.Add(TEXT("HeightOverride"), FString::SanitizeFloat(FMath::Max(1.0f, Height)));
+		Line.Slot.HorizontalAlignment = HorizontalAlignment;
+		Line.Slot.VerticalAlignment = VerticalAlignment;
+		return Line;
+	}
+
+	FUMGWidgetNode WrapWithExplicitSideStroke(FUMGWidgetNode&& Border, const TSharedPtr<FDesignNode>& Node)
+	{
+		FLinearColor StrokeColor;
+		if (!TryResolveStrokeColor(Node->Stroke, StrokeColor))
+		{
+			return MoveTemp(Border);
+		}
+
+		FUMGWidgetNode Overlay;
+		Overlay.Type = TEXT("Overlay");
+		Overlay.Id = Border.Id;
+		Overlay.Name = Border.Name;
+		Overlay.Bounds = Border.Bounds;
+		Overlay.Slot = Border.Slot;
+
+		for (const FString& Key : {TEXT("Clipping"), TEXT("RenderOpacity"), TEXT("RenderAngle"), TEXT("RenderTransformScale"), TEXT("RenderTranslation")})
+		{
+			if (const FString* Value = Border.Properties.Find(Key))
+			{
+				Overlay.Properties.Add(Key, *Value);
+				Border.Properties.Remove(Key);
+			}
+		}
+
+		Border.Id += TEXT("_surface");
+		Border.Name += TEXT("_surface");
+		StripExplicitStrokeFromSurface(Border);
+
+		if (!HasUniformRectStroke(Node->Stroke))
+		{
+			const bool bRedundantTop = HasConvertedChildStrokeCoverage(Border, TEXT("_stroke_top"));
+			const bool bRedundantRight = HasConvertedChildStrokeCoverage(Border, TEXT("_stroke_right"));
+			const bool bRedundantBottom = HasConvertedChildStrokeCoverage(Border, TEXT("_stroke_bottom"));
+			const bool bRedundantLeft = HasConvertedChildStrokeCoverage(Border, TEXT("_stroke_left"));
+			if (bRedundantTop)
+			{
+				PruneConvertedChildStrokeCoverage(Border, TEXT("_stroke_top"));
+			}
+			if (bRedundantRight)
+			{
+				PruneConvertedChildStrokeCoverage(Border, TEXT("_stroke_right"));
+			}
+			if (bRedundantBottom)
+			{
+				PruneConvertedChildStrokeCoverage(Border, TEXT("_stroke_bottom"));
+			}
+			if (bRedundantLeft)
+			{
+				PruneConvertedChildStrokeCoverage(Border, TEXT("_stroke_left"));
+			}
+		}
+
+		ResetChildToFill(Border);
+		Overlay.Children.Add(MoveTemp(Border));
+
+		const float Top = GetStrokeSideThickness(Node->Stroke.Thickness, 'T');
+		const float Right = GetStrokeSideThickness(Node->Stroke.Thickness, 'R');
+		const float Bottom = GetStrokeSideThickness(Node->Stroke.Thickness, 'B');
+		const float Left = GetStrokeSideThickness(Node->Stroke.Thickness, 'L');
+
+		if (Top > KINDA_SMALL_NUMBER)
+		{
+			Overlay.Children.Add(MakeStrokeLineNode(
+				Overlay.Id + TEXT("_stroke_top"),
+				Overlay.Name + TEXT("_stroke_top"),
+				StrokeColor,
+				1.0f,
+				Top,
+				TEXT("Fill"),
+				TEXT("Top")));
+		}
+		if (Right > KINDA_SMALL_NUMBER)
+		{
+			Overlay.Children.Add(MakeStrokeLineNode(
+				Overlay.Id + TEXT("_stroke_right"),
+				Overlay.Name + TEXT("_stroke_right"),
+				StrokeColor,
+				Right,
+				1.0f,
+				TEXT("Right"),
+				TEXT("Fill")));
+		}
+		if (Bottom > KINDA_SMALL_NUMBER)
+		{
+			Overlay.Children.Add(MakeStrokeLineNode(
+				Overlay.Id + TEXT("_stroke_bottom"),
+				Overlay.Name + TEXT("_stroke_bottom"),
+				StrokeColor,
+				1.0f,
+				Bottom,
+				TEXT("Fill"),
+				TEXT("Bottom")));
+		}
+		if (Left > KINDA_SMALL_NUMBER)
+		{
+			Overlay.Children.Add(MakeStrokeLineNode(
+				Overlay.Id + TEXT("_stroke_left"),
+				Overlay.Name + TEXT("_stroke_left"),
+				StrokeColor,
+				Left,
+				1.0f,
+				TEXT("Left"),
+				TEXT("Fill")));
+		}
+
+		return Overlay;
+	}
+
 	FString BuildGradientMaterialParams(const FDesignGradient& Gradient)
 	{
 		if (Gradient.Colors.Num() == 0)
@@ -469,6 +759,23 @@ FUMGWidgetNode FVisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TSha
 	Widget.Slot.VerticalAlignment = TEXT("Fill");
 
 	Border.Children.Add(MoveTemp(Widget));
+
+	const bool bNeedsExplicitStroke =
+		(NeedsExplicitSideStroke(Node)
+			&& !HasPlaceholderSurfaceChildren(Node)
+			&& !HasOpaqueSolidFill(Node))
+		|| (Node.IsValid()
+			&& Node->Stroke.HasStroke()
+			&& !Node->CornerRadius.HasRadius()
+			&& HasUniformRectStroke(Node->Stroke)
+			&& !HasPlaceholderSurfaceChildren(Node)
+			&& HasAnyConvertedChildStrokeCoverage(Border));
+
+	if (bNeedsExplicitStroke)
+	{
+		return WrapWithExplicitSideStroke(MoveTemp(Border), Node);
+	}
+
 	return Border;
 }
 

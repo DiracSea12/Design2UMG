@@ -5,6 +5,8 @@
 #include "CoreMinimal.h"
 #include "DesignSchema.h"
 
+class FJsonValue;
+
 /**
  * 鍙橀噺瑙ｆ瀽鍣?- 瑙ｆ瀽 $variableName 鏍煎紡鐨勫彉閲忓紩鐢? */
 class FDesignVariableResolver

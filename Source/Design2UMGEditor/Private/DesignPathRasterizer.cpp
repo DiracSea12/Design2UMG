@@ -5,6 +5,7 @@
 #include "Design2UMGLog.h"
 #include "HAL/IConsoleManager.h"
 #include "RenderingThread.h"
+#include "TextureResource.h"
 
 // --- Path cache (file-local) ---
 namespace

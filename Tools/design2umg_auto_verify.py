@@ -12,6 +12,7 @@ import tempfile
 import time
 import urllib.parse
 import urllib.request
+from collections import Counter
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageStat
@@ -212,7 +213,7 @@ def parse_args():
     parser.add_argument("--figma-node", default="", help="Figma node id")
     parser.add_argument("--figma-token", default="", help="Figma personal access token")
     parser.add_argument("--mcp-server", default="", help="Override Pencil MCP server binary path")
-    parser.add_argument("--pencil-app", default="", help="Override Pencil app name (default: antigravity)")
+    parser.add_argument("--pencil-app", default="", help="Override Pencil app name (default: vscode)")
     parser.add_argument("--output-dir", default="", help="Directory for render, diff and reports")
     parser.add_argument("--game-output", default="", help="UE asset output path, default is a unique automation path")
     parser.add_argument("--project", default="", help="Project path. Leave empty to auto-build a temporary HostProject from the engine plugin source.")
@@ -222,6 +223,7 @@ def parse_args():
     parser.add_argument("--pixel-tolerance", type=int, default=6, help="Per-pixel max-channel tolerance")
     parser.add_argument("--changed-ratio-threshold", type=float, default=0.01, help="Max changed pixel ratio to pass")
     parser.add_argument("--mae-threshold", type=float, default=0.02, help="Max mean absolute error to pass")
+    parser.add_argument("--log-cmds", default="", help="Optional Unreal -LogCmds payload, for example 'LogDesign2UMG Verbose'")
     return parser.parse_args()
 
 
@@ -314,7 +316,84 @@ def sync_project_plugin_build_id(editor_path: str, project_plugin_root: Path):
     if project_data.get("BuildId") == engine_build_id:
         return
     project_data["BuildId"] = engine_build_id
-    project_manifest.write_text(json.dumps(project_data, ensure_ascii=False, indent=4), encoding="utf-8")
+    project_manifest.write_text(json.dumps(project_data, ensure_ascii=False, indent=4), encoding="utf-8-sig")
+
+
+def discover_local_font_seed_dirs(source_paths: list[str], destination_dir: Path | None = None) -> list[Path]:
+    discovered: list[Path] = []
+    seen: set[Path] = set()
+    resolved_destination = destination_dir.resolve() if destination_dir else None
+
+    for raw_source in source_paths:
+        if not raw_source:
+            continue
+
+        source_path = Path(raw_source)
+        if not source_path.is_absolute():
+            continue
+        if not source_path.exists():
+            continue
+
+        candidate_dirs: list[Path] = []
+        if source_path.is_file():
+            for parent in source_path.parents:
+                candidate_dirs.append(parent / "Content" / "Design2UMG" / "Fonts")
+                if parent.name.lower() == "designs":
+                    project_root = parent.parent
+                    candidate_dirs.append(project_root / "Content" / "Design2UMG" / "Fonts")
+                    workspace_root = project_root.parent
+                    for host_fonts_dir in workspace_root.glob("*/HostProject/Content/Design2UMG/Fonts"):
+                        candidate_dirs.append(host_fonts_dir)
+                    break
+        else:
+            candidate_dirs.append(source_path / "Content" / "Design2UMG" / "Fonts")
+
+        for candidate_dir in candidate_dirs:
+            if not candidate_dir.is_dir():
+                continue
+            resolved_dir = candidate_dir.resolve()
+            if resolved_destination and resolved_dir == resolved_destination:
+                continue
+            if resolved_dir in seen:
+                continue
+            seen.add(resolved_dir)
+            discovered.append(resolved_dir)
+
+    return discovered
+
+
+def seed_runtime_font_assets(project_path: str, source_paths: list[str]) -> dict:
+    runtime_project = Path(project_path).resolve()
+    destination_dir = runtime_project.parent / "Content" / "Design2UMG" / "Fonts"
+    source_dirs = discover_local_font_seed_dirs(source_paths, destination_dir)
+    result = {
+        "destination_dir": str(destination_dir),
+        "source_dirs": [str(path) for path in source_dirs],
+        "selected_source_dir": "",
+        "copied": [],
+    }
+
+    if not source_dirs:
+        return result
+
+    def score_source_dir(path: Path) -> tuple[int, int]:
+        files = [item for item in path.iterdir() if item.is_file()]
+        return len(files), sum(item.stat().st_size for item in files)
+
+    selected_source_dir = max(source_dirs, key=score_source_dir)
+    result["selected_source_dir"] = str(selected_source_dir)
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    for existing_path in destination_dir.iterdir():
+        if existing_path.is_file():
+            existing_path.unlink()
+
+    for asset_path in sorted(item for item in selected_source_dir.iterdir() if item.is_file()):
+        destination_path = destination_dir / asset_path.name
+        shutil.copy2(asset_path, destination_path)
+        if destination_path.is_file():
+            result["copied"].append(asset_path.name)
+
+    return result
 
 
 def ensure_clean_editor():
@@ -386,8 +465,8 @@ def discover_mcp_server(override_path: str) -> str:
         return override_path
     user_home = Path(os.environ.get("USERPROFILE", ""))
     search_dirs = [
-        user_home / ".antigravity" / "extensions",
         user_home / ".vscode" / "extensions",
+        user_home / ".antigravity" / "extensions",
     ]
     all_matches = []
     for base_dir in search_dirs:
@@ -421,7 +500,7 @@ def request_json(url: str, payload: dict, headers: dict[str, str]) -> tuple[str,
 class PencilMcpClient:
     def __init__(self, server_path: str, app_name: str):
         self.server_path = server_path
-        self.app_name = app_name or "antigravity"
+        self.app_name = app_name or "vscode"
         self.port = find_available_port()
         self.endpoint = f"http://127.0.0.1:{self.port}/mcp"
         self.session_id = ""
@@ -621,6 +700,301 @@ def compare_scaled_image_paths(source_path: Path, witness_path: Path, pixel_tole
         "mean_abs_error": comparison["mean_abs_error"],
         "diff_bbox": comparison["diff_bbox"],
     }
+
+
+def _parse_tool_text_json(parts: list[dict]):
+    if not parts:
+        return None
+    text = parts[0].get("text", "")
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None
+
+
+def _find_pencil_node_by_id(nodes, target_id: str):
+    queue = list(nodes or [])
+    while queue:
+        node = queue.pop(0)
+        if not isinstance(node, dict):
+            continue
+        if node.get("id") == target_id:
+            return node
+        children = node.get("children")
+        if isinstance(children, list):
+            queue[0:0] = children
+    return None
+
+
+def _classify_pencil_node_kind(node: dict) -> str:
+    node_type = str(node.get("type", "")).strip().lower()
+    if node.get("placeholder") is True:
+        return "placeholder"
+    if node_type in {"frame", "group", "component", "ref"}:
+        return "container"
+    if node_type in {"text", "icon_font", "iconfont"}:
+        return "text"
+    if node_type in {"rectangle", "ellipse", "line", "polygon", "path"}:
+        return "visual"
+    return "other"
+
+
+def _build_pencil_structure_snapshot(node: dict):
+    if not isinstance(node, dict):
+        return None
+
+    stats = {
+        "snapshot_type": "pencil_semantic_live",
+        "root_kind": _classify_pencil_node_kind(node),
+        "root_child_count": 0,
+        "total_nodes": 0,
+        "leaf_nodes": 0,
+        "container_nodes": 0,
+        "text_nodes": 0,
+        "visual_nodes": 0,
+        "button_nodes": 0,
+        "placeholder_nodes": 0,
+        "max_depth": 0,
+        "visible_texts": [],
+        "kind_histogram": {},
+        "truncated": False,
+    }
+
+    def visit(current: dict, depth: int):
+        if not isinstance(current, dict):
+            return
+        if current.get("enabled") is False:
+            return
+
+        node_type = str(current.get("type", "")).strip().lower()
+        if node_type in {"prompt", "note", "connection", "context"}:
+            return
+
+        stats["total_nodes"] += 1
+        stats["max_depth"] = max(stats["max_depth"], depth)
+
+        kind = _classify_pencil_node_kind(current)
+        stats["kind_histogram"][kind] = int(stats["kind_histogram"].get(kind, 0)) + 1
+        if kind == "container":
+            stats["container_nodes"] += 1
+        elif kind == "text":
+            stats["text_nodes"] += 1
+            text = normalize_structure_text(current.get("content", "") or current.get("iconFontName", ""))
+            if text:
+                stats["visible_texts"].append(text)
+        elif kind == "visual":
+            stats["visual_nodes"] += 1
+        elif kind == "placeholder":
+            stats["placeholder_nodes"] += 1
+            stats["visual_nodes"] += 1
+
+        children = current.get("children")
+        if depth == 0 and isinstance(children, list):
+            stats["root_child_count"] = len(children)
+        if children == "...":
+            stats["truncated"] = True
+            return
+        if not isinstance(children, list) or not children:
+            stats["leaf_nodes"] += 1
+            return
+
+        for child in children:
+            visit(child, depth + 1)
+
+    visit(node, 0)
+    stats["visible_texts"].sort()
+    return stats
+
+
+def try_fetch_pencil_source_structure_snapshot(
+    source_path: str,
+    node_id: str,
+    node_name: str,
+    server_path: str,
+    app_name: str,
+) -> dict | None:
+    if not source_path or not node_id:
+        return None
+
+    search_name = node_name or node_id
+    try:
+        mcp_server = discover_mcp_server(server_path)
+    except Exception:
+        return None
+
+    try:
+        with PencilMcpClient(mcp_server, app_name) as client:
+            ensure_pencil_document_open(client, source_path)
+            parts = client.call_tool_content(
+                "batch_get",
+                {
+                    "filePath": source_path,
+                    "patterns": [{"name": f"^{re.escape(search_name)}$"}],
+                    "searchDepth": 6,
+                    "readDepth": 12,
+                    "resolveInstances": True,
+                    "resolveVariables": False,
+                },
+            )
+    except Exception:
+        return None
+
+    parsed = _parse_tool_text_json(parts)
+    if not isinstance(parsed, list):
+        return None
+
+    target_node = _find_pencil_node_by_id(parsed, node_id)
+    if not target_node and len(parsed) == 1 and isinstance(parsed[0], dict):
+        target_node = parsed[0]
+    snapshot = _build_pencil_structure_snapshot(target_node)
+    if snapshot:
+        snapshot["source"] = "pencil_live"
+        snapshot["node_id"] = node_id
+        snapshot["node_name"] = node_name
+    return snapshot
+
+
+def try_get_pen_node_name(source_path: str, node_id: str) -> str:
+    try:
+        document = load_json_document(Path(source_path))
+    except Exception:
+        return ""
+    node = find_node_by_id(document.get("children", []), node_id)
+    if not isinstance(node, dict):
+        return ""
+    return str(node.get("name") or "")
+
+
+def normalize_structure_text(value: str) -> str:
+    if not isinstance(value, str):
+        return ""
+    normalized = re.sub(r"\s+", " ", value.replace("\r", " ").replace("\n", " ").replace("\t", " ")).strip()
+    return normalized
+
+
+def normalize_structure_texts(values) -> list[str]:
+    normalized = []
+    for value in values or []:
+        text = normalize_structure_text(value)
+        if text:
+            normalized.append(text)
+    normalized.sort()
+    return normalized
+
+
+def get_result_structure(step_result: dict | None, field: str) -> dict | None:
+    if not isinstance(step_result, dict):
+        return None
+    ue_result = step_result.get("ue_result", step_result)
+    if not isinstance(ue_result, dict):
+        return None
+    snapshot = ue_result.get(field)
+    return snapshot if isinstance(snapshot, dict) else None
+
+
+def compare_structure_snapshots(left: dict | None, right: dict | None) -> dict | None:
+    if not isinstance(left, dict) or not isinstance(right, dict):
+        return None
+    left_texts = normalize_structure_texts(left.get("visible_texts"))
+    right_texts = normalize_structure_texts(right.get("visible_texts"))
+    return {
+        "available": True,
+        "texts_match": left_texts == right_texts,
+        "left_total_nodes": int(left.get("total_nodes") or 0),
+        "right_total_nodes": int(right.get("total_nodes") or 0),
+        "left_leaf_nodes": int(left.get("leaf_nodes") or 0),
+        "right_leaf_nodes": int(right.get("leaf_nodes") or 0),
+        "left_container_nodes": int(left.get("container_nodes") or 0),
+        "right_container_nodes": int(right.get("container_nodes") or 0),
+        "left_text_nodes": int(left.get("text_nodes") or 0),
+        "right_text_nodes": int(right.get("text_nodes") or 0),
+    }
+
+
+def validate_structure_consistency(args, ue_result: dict, render_chain: dict, reference_context: dict | None = None) -> dict:
+    generation_result = render_chain.get("generation")
+    asset_result = render_chain.get("asset_render")
+    live_source_snapshot = (reference_context or {}).get("source_structure_live")
+    source_snapshot = live_source_snapshot or get_result_structure(generation_result, "source_structure") or get_result_structure(ue_result, "source_structure")
+    generated_asset_snapshot = get_result_structure(generation_result, "asset_structure")
+    asset_snapshot = get_result_structure(asset_result, "asset_structure") or get_result_structure(ue_result, "asset_structure")
+
+    required = args.mode == "pen"
+    result = {
+        "required": required,
+        "available": False,
+        "passed": not required,
+        "source_origin": "pencil_live" if live_source_snapshot else "local_pen_fallback",
+        "source_snapshot_type": source_snapshot.get("snapshot_type") if isinstance(source_snapshot, dict) else None,
+        "asset_snapshot_type": asset_snapshot.get("snapshot_type") if isinstance(asset_snapshot, dict) else None,
+        "reasons": [],
+        "source": source_snapshot,
+        "asset": asset_snapshot,
+        "generation_vs_asset": compare_structure_snapshots(generated_asset_snapshot, asset_snapshot),
+    }
+
+    if not isinstance(source_snapshot, dict) or not isinstance(asset_snapshot, dict):
+        if required:
+            result["passed"] = False
+            result["reasons"].append("structure_snapshot_unavailable")
+        return result
+
+    result["available"] = True
+
+    source_total = int(source_snapshot.get("total_nodes") or 0)
+    asset_total = int(asset_snapshot.get("total_nodes") or 0)
+    source_leaf = int(source_snapshot.get("leaf_nodes") or 0)
+    asset_leaf = int(asset_snapshot.get("leaf_nodes") or 0)
+    source_container = int(source_snapshot.get("container_nodes") or 0)
+    asset_container = int(asset_snapshot.get("container_nodes") or 0)
+    source_visual = int(source_snapshot.get("visual_nodes") or 0)
+    asset_visual = int(asset_snapshot.get("visual_nodes") or 0)
+    source_texts = normalize_structure_texts(source_snapshot.get("visible_texts"))
+    asset_texts = normalize_structure_texts(asset_snapshot.get("visible_texts"))
+    source_text_counter = Counter(source_texts)
+    asset_text_counter = Counter(asset_texts)
+
+    min_total_required = 1 if source_total <= 1 else max(2, int((source_total * 0.05) + 0.9999))
+    min_leaf_required = 1 if source_leaf <= 1 else max(1, int((source_leaf * 0.05) + 0.9999))
+
+    if source_text_counter != asset_text_counter:
+        result["reasons"].append("visible_text_mismatch")
+    if source_total >= 2 and asset_total < min_total_required:
+        result["reasons"].append("asset_total_nodes_collapsed")
+    if source_leaf >= 2 and asset_leaf < min_leaf_required:
+        result["reasons"].append("asset_leaf_nodes_collapsed")
+    if source_container > 0 and asset_container == 0:
+        result["reasons"].append("asset_container_missing")
+    if source_total >= 8 and asset_total <= 3:
+        result["reasons"].append("asset_tree_too_small")
+    if source_total >= 8 and not asset_texts and asset_visual <= 1 and asset_total <= 3:
+        result["reasons"].append("single_visual_cheat_suspected")
+    if source_visual >= 12 and asset_visual <= 1:
+        result["reasons"].append("visual_structure_collapsed")
+
+    result["metrics"] = {
+        "source_total_nodes": source_total,
+        "asset_total_nodes": asset_total,
+        "source_leaf_nodes": source_leaf,
+        "asset_leaf_nodes": asset_leaf,
+        "source_container_nodes": source_container,
+        "asset_container_nodes": asset_container,
+        "source_visual_nodes": source_visual,
+        "asset_visual_nodes": asset_visual,
+        "min_total_required": min_total_required,
+        "min_leaf_required": min_leaf_required,
+        "source_root_kind": source_snapshot.get("root_kind"),
+        "asset_root_kind": asset_snapshot.get("root_kind"),
+        "source_root_child_count": source_snapshot.get("root_child_count"),
+        "asset_root_child_count": asset_snapshot.get("root_child_count"),
+        "visible_texts_match": source_text_counter == asset_text_counter,
+        "missing_texts": sorted((source_text_counter - asset_text_counter).elements()),
+        "extra_texts": sorted((asset_text_counter - source_text_counter).elements()),
+    }
+    result["passed"] = len(result["reasons"]) == 0
+    return result
 
 
 def assess_provided_reference_dirty(provided_vs_canonical: dict | None) -> dict:
@@ -848,7 +1222,7 @@ def build_diff(reference: Image.Image, candidate: Image.Image, pixel_tolerance: 
     }
 
 
-def run_editor(editor_path: str, project_path: str, spec_path: Path, log_path: Path) -> int:
+def run_editor(editor_path: str, project_path: str, spec_path: Path, log_path: Path, log_cmds: str = "") -> int:
     exec_cmd = f"Design2UMG.AutomationRender {spec_path.as_posix()}"
     command = [
         editor_path,
@@ -860,8 +1234,10 @@ def run_editor(editor_path: str, project_path: str, spec_path: Path, log_path: P
         "-FullStdOutLogOutput",
         f"-ExecCmds={exec_cmd}",
     ]
+    if log_cmds:
+        command.append(f"-LogCmds={log_cmds}")
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(log_path, "w", encoding="utf-8") as handle:
+    with open(log_path, "w", encoding="utf-8-sig") as handle:
         process = subprocess.run(command, stdout=handle, stderr=subprocess.STDOUT, check=False)
     return process.returncode
 
@@ -873,7 +1249,7 @@ def read_image_size(path: Path) -> tuple[int, int]:
 
 def write_json(path: Path, payload: dict):
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as handle:
+    with open(path, "w", encoding="utf-8-sig") as handle:
         json.dump(payload, handle, ensure_ascii=False, indent=2)
 
 
@@ -891,7 +1267,7 @@ def execute_automation_render(args, spec_path: Path, log_path: Path, spec: dict)
     write_json(spec_path, spec)
     sync_project_plugin_build_id(args.editor, Path(args.project_plugin_root))
     ensure_clean_editor()
-    editor_exit_code = run_editor(args.editor, args.project, spec_path, log_path)
+    editor_exit_code = run_editor(args.editor, args.project, spec_path, log_path, args.log_cmds)
     if editor_exit_code != 0:
         print(f"Unreal editor exited with code {editor_exit_code}", file=sys.stderr)
     if not result_path.is_file():
@@ -1122,18 +1498,30 @@ def compare_and_report(
     reference_image = load_rgba(reference_path)
     candidate_image = load_rgba(candidate_path)
     comparison = build_diff(reference_image, candidate_image, args.pixel_tolerance)
+    structure_validation = validate_structure_consistency(args, ue_result, render_chain, reference_context)
 
     diff_preview_path = output_dir / "diff_overlay.png"
     comparison["preview"].save(diff_preview_path)
 
-    passed = (
+    visual_passed = (
         comparison["size_match"]
         and comparison["changed_ratio"] <= args.changed_ratio_threshold
         and comparison["mean_abs_error"] <= args.mae_threshold
     )
+    structure_passed = structure_validation["passed"] if structure_validation.get("required") else True
+    passed = visual_passed and structure_passed
+    verdict = "passed"
+    if not visual_passed and not structure_passed:
+        verdict = "visual_and_structure_mismatch"
+    elif not visual_passed:
+        verdict = "visual_mismatch"
+    elif not structure_passed:
+        verdict = "structure_mismatch"
 
     report = {
         "passed": passed,
+        "visual_passed": visual_passed,
+        "verdict": verdict,
         "editor_exit_code": editor_exit_code,
         "reference_provider": args.reference_provider,
         "effective_reference_provider": reference_context.get("effective_reference_provider"),
@@ -1153,6 +1541,7 @@ def compare_and_report(
         "ue_result": ue_result,
         "reference_context": reference_context,
         "render_chain": render_chain,
+        "structure_validation": structure_validation,
     }
     report_path = output_dir / "compare_report.json"
     write_json(report_path, report)
@@ -1209,10 +1598,22 @@ def main():
     try:
         args.project, project_plugin_root, runtime_build_root = prepare_runtime_project(args)
         args.project_plugin_root = str(project_plugin_root)
+        seed_runtime_font_assets(args.project, [args.source])
         expected_design_size = get_expected_design_size(args.mode, args.source, args.node)
         declared_design_size = get_declared_design_size(args.mode, args.source, args.node)
         reference_path, reference_context = prepare_reference(args, output_dir, expected_design_size)
         finalize_reference_context(args, reference_path, reference_context)
+        if args.mode == "pen":
+            live_node_name = try_get_pen_node_name(args.source, args.node)
+            live_source_structure = try_fetch_pencil_source_structure_snapshot(
+                args.source,
+                args.node,
+                live_node_name,
+                args.mcp_server,
+                args.pencil_app,
+            )
+            if live_source_structure:
+                reference_context["source_structure_live"] = live_source_structure
         reference_size = read_image_size(reference_path)
         if not expected_design_size:
             inferred_expected_size = infer_expected_design_size_from_reference(declared_design_size, reference_size)
@@ -1313,6 +1714,10 @@ def main():
             raise RuntimeError(f"Candidate render png not found: {candidate_path}")
         bootstrap_candidate_path = add_name_suffix(candidate_path, ".bootstrap")
         render_chain["generation_vs_asset"] = compare_image_paths(bootstrap_candidate_path, candidate_path, args.pixel_tolerance)
+        render_chain["generation_vs_asset_structure"] = compare_structure_snapshots(
+            get_result_structure(render_chain.get("generation"), "asset_structure"),
+            get_result_structure(render_chain.get("asset_render"), "asset_structure"),
+        )
         render_chain["native_self_check"] = run_native_self_check(
             args,
             output_dir,

@@ -12,6 +12,7 @@
 #include "Design2UMGSettings.h"
 #include "IncrementalUpdater.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/AssetData.h"
 
 #include "WidgetBlueprint.h"
 #include "Blueprint/UserWidget.h"

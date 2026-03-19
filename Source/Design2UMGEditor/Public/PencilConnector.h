@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HAL/PlatformProcess.h"
 #include "MCPHttpClient.h"
 
 /**
@@ -16,7 +17,7 @@ public:
 	/** 鍙戠幇鏈湴 MCP Server 浜岃繘鍒惰矾寰?*/
 	static FString DiscoverMCPServerPath();
 
-	/** 妫€娴?Pencil 搴旂敤鍚嶇О (antigravity/code) */
+	/** 检测 Pencil 应用名称（vscode/antigravity）。 */
 	static FString DetectAppName();
 
 	/** 鍚姩 MCP Server 骞惰繛鎺ワ紝Port=0 鏃惰嚜鍔ㄩ€夋嫨 */

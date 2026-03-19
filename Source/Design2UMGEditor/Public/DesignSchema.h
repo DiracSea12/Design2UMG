@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Layout/Margin.h"
 #include "DesignSchema.generated.h"
 
 /**
@@ -406,6 +407,8 @@ struct FDesignStroke
 	UPROPERTY()
 	FDesignFill Fill;
 
+	bool bHasExplicitFill = false;
+
 	bool HasStroke() const { return Thickness.bUniform ? Thickness.Uniform > 0 :
 		(Thickness.Top > 0 || Thickness.Right > 0 || Thickness.Bottom > 0 || Thickness.Left > 0); }
 };
@@ -707,6 +710,7 @@ struct FDesignNode
 	FDesignStroke Stroke;
 	FDesignCornerRadius CornerRadius;
 	TArray<FDesignEffect> Effects;
+	bool bEffectsExplicitClear = false;
 
 	FString Content;
 	FString FontFamily;

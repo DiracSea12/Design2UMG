@@ -6,6 +6,7 @@
 #include "Design2UMGSettings.h"
 #include "DesignSchema.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/AssetData.h"
 #include "Engine/Font.h"
 #include "Engine/FontFace.h"
 #include "HttpModule.h"
@@ -14,6 +15,7 @@
 #include "Interfaces/IHttpResponse.h"
 #include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
+#include "Internationalization/Regex.h"
 #include "UObject/SavePackage.h"
 #include "HAL/FileManager.h"
 #include "Framework/Application/SlateApplication.h"
@@ -26,6 +28,9 @@ TMap<FString, FString> FFontResolver::FontAssetCache;
 namespace
 {
 	TMap<FString, FString> GNormalizedProjectFontAssetIndex;
+	TMap<FString, TMap<FString, FString>> GKnownIconGlyphCache;
+	TMap<FString, TMap<FString, FString>> GKnownIconNameCache;
+	TSet<FString> GAttemptedKnownIconGlyphFamilies;
 	bool bProjectFontIndexBuilt = false;
 	FCriticalSection GFontIndexMutex;
 
@@ -35,6 +40,22 @@ namespace
 		Key.ReplaceInline(TEXT(" "), TEXT(""));
 		Key.ReplaceInline(TEXT("-"), TEXT(""));
 		Key.ReplaceInline(TEXT("_"), TEXT(""));
+		return Key;
+	}
+
+	FString NormalizeIconNameKeyForResolver(const FString& InName)
+	{
+		FString Key = InName.ToLower().TrimStartAndEnd();
+		Key.ReplaceInline(TEXT(" "), TEXT("-"));
+		Key.ReplaceInline(TEXT("_"), TEXT("-"));
+		if (Key == TEXT("more-horizontal"))
+		{
+			return TEXT("ellipsis");
+		}
+		if (Key == TEXT("more-vertical"))
+		{
+			return TEXT("ellipsis-vertical");
+		}
 		return Key;
 	}
 
@@ -104,10 +125,19 @@ namespace
 			{TEXT("oxygen"), TEXT("https://github.com/google/fonts/raw/main/ofl/oxygen/Oxygen-Regular.ttf")},
 			{TEXT("geist"), TEXT("https://github.com/google/fonts/raw/main/ofl/geist/Geist%5Bwght%5D.ttf")},
 			{TEXT("jetbrainsmono"), TEXT("https://github.com/google/fonts/raw/main/ofl/jetbrainsmono/JetBrainsMono%5Bwght%5D.ttf")},
+			{TEXT("lucide"), TEXT("https://unpkg.com/lucide-static/font/lucide.ttf")},
 			{TEXT("materialsymbolssharp"), TEXT("https://github.com/google/material-design-icons/raw/master/variablefont/MaterialSymbolsSharp%5BFILL,GRAD,opsz,wght%5D.ttf")},
 			{TEXT("pingfangsc"), TEXT("https://github.com/google/fonts/raw/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf")},
 			// Buenos Aires is not publicly available in Google Fonts; closest fallback for layout parity.
 			{TEXT("buenosaires"), TEXT("https://github.com/google/fonts/raw/main/ofl/inter/Inter%5Bopsz,wght%5D.ttf")},
+		};
+		return KnownUrls;
+	}
+
+	const TMap<FString, FString>& GetKnownIconFontCssUrls()
+	{
+		static const TMap<FString, FString> KnownUrls = {
+			{TEXT("lucide"), TEXT("https://unpkg.com/lucide-static/font/lucide.css")},
 		};
 		return KnownUrls;
 	}
@@ -132,6 +162,7 @@ namespace
 		};
 		return KnownCssWeights;
 	}
+
 }
 
 FString FFontResolver::FindFontAssetPath(const FString& FontFamily)
@@ -210,10 +241,115 @@ FString FFontResolver::FindFontAssetPath(const FString& FontFamily)
 		return FString();
 	}
 
+FString FFontResolver::FindKnownIconGlyph(const FString& FontFamily, const FString& IconName)
+{
+	if (FontFamily.TrimStartAndEnd().IsEmpty() || IconName.TrimStartAndEnd().IsEmpty())
+	{
+		return FString();
+	}
+
+	const FString NormalizedFamily = NormalizeFontFamilyKeyForResolver(FontFamily);
+	const FString NormalizedIcon = NormalizeIconNameKeyForResolver(IconName);
+	if (NormalizedIcon.IsEmpty())
+	{
+		return FString();
+	}
+
+	if (!GKnownIconGlyphCache.Contains(NormalizedFamily))
+	{
+		if (!GAttemptedKnownIconGlyphFamilies.Contains(NormalizedFamily))
+		{
+			GAttemptedKnownIconGlyphFamilies.Add(NormalizedFamily);
+
+			TMap<FString, FString> Glyphs;
+			TMap<FString, FString> IconNames;
+			if (const FString* CssUrl = GetKnownIconFontCssUrls().Find(NormalizedFamily))
+			{
+				const FString TempCssPath = FPaths::ProjectSavedDir() / TEXT("Design2UMG") / (NormalizedFamily + TEXT("_iconfont.css"));
+				if (DownloadToFile(*CssUrl, TempCssPath))
+				{
+					FString CssContent;
+					const bool bLoaded = FFileHelper::LoadFileToString(CssContent, *TempCssPath);
+					IFileManager::Get().Delete(*TempCssPath);
+					if (bLoaded && !CssContent.IsEmpty())
+					{
+						const FRegexPattern RulePattern(TEXT("\\.icon-([a-z0-9\\-]+)::before\\s*\\{\\s*content:\\s*\"\\\\([A-Fa-f0-9]+)\";"));
+						FRegexMatcher Matcher(RulePattern, CssContent);
+						while (Matcher.FindNext())
+						{
+							const FString ParsedIconName = NormalizeIconNameKeyForResolver(Matcher.GetCaptureGroup(1));
+							const FString HexCode = Matcher.GetCaptureGroup(2);
+							if (ParsedIconName.IsEmpty() || HexCode.IsEmpty())
+							{
+								continue;
+							}
+
+							const int32 Codepoint = FCString::Strtoi(*HexCode, nullptr, 16);
+							if (Codepoint <= 0)
+							{
+								continue;
+							}
+
+							FString Glyph;
+							Glyph.AppendChar(static_cast<TCHAR>(Codepoint));
+							Glyphs.FindOrAdd(ParsedIconName) = Glyph;
+							IconNames.FindOrAdd(Glyph) = ParsedIconName;
+						}
+					}
+				}
+			}
+
+			GKnownIconGlyphCache.Add(NormalizedFamily, MoveTemp(Glyphs));
+			GKnownIconNameCache.Add(NormalizedFamily, MoveTemp(IconNames));
+		}
+		else
+		{
+			GKnownIconGlyphCache.Add(NormalizedFamily, {});
+			GKnownIconNameCache.Add(NormalizedFamily, {});
+		}
+	}
+
+	if (const TMap<FString, FString>* Glyphs = GKnownIconGlyphCache.Find(NormalizedFamily))
+	{
+		if (const FString* Glyph = Glyphs->Find(NormalizedIcon))
+		{
+			return *Glyph;
+		}
+	}
+
+	return FString();
+}
+
+FString FFontResolver::FindKnownIconNameByGlyph(const FString& FontFamily, const FString& Glyph)
+{
+	if (FontFamily.TrimStartAndEnd().IsEmpty() || Glyph.TrimStartAndEnd().IsEmpty())
+	{
+		return FString();
+	}
+
+	const FString NormalizedFamily = NormalizeFontFamilyKeyForResolver(FontFamily);
+	if (!GKnownIconNameCache.Contains(NormalizedFamily))
+	{
+		FindKnownIconGlyph(FontFamily, TEXT("__design2umg_icon_probe__"));
+	}
+	if (const TMap<FString, FString>* IconNames = GKnownIconNameCache.Find(NormalizedFamily))
+	{
+		if (const FString* IconName = IconNames->Find(Glyph))
+		{
+			return *IconName;
+		}
+	}
+
+	return FString();
+}
+
 void FFontResolver::ClearCache()
 {
 	FontAssetCache.Empty();
 	InvalidateProjectFontAssetIndex();
+	GKnownIconGlyphCache.Reset();
+	GKnownIconNameCache.Reset();
+	GAttemptedKnownIconGlyphFamilies.Reset();
 }
 
 int32 FFontResolver::ParseWeightValue(const FString& Weight)

@@ -11,6 +11,7 @@
 #include "TimerManager.h"
 #include "Engine/World.h"
 #include "Editor.h"
+#include "Misc/MessageDialog.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SSplitter.h"
 #include "Widgets/Layout/SScrollBox.h"

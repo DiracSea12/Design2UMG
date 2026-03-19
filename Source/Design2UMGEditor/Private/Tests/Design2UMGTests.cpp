@@ -377,6 +377,63 @@ bool FRefDeepDescendantsBareIdOverrideTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRefExplicitEffectClearTest,
+	"Design2UMG.Ref.ExplicitEffectClear",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FRefExplicitEffectClearTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"JSON({
+		"children": [
+			{
+				"id": "BaseTab",
+				"type": "frame",
+				"reusable": true,
+				"fill": "#FFFFFF",
+				"effect": {
+					"type": "shadow",
+					"shadowType": "outer",
+					"color": "#00000033",
+					"offset": { "x": 0, "y": 1 },
+					"blur": 2
+				},
+				"children": [
+					{ "id": "label", "type": "text", "content": "Tab", "fontSize": 14 }
+				]
+			},
+			{
+				"id": "InactiveTab",
+				"type": "ref",
+				"reusable": true,
+				"ref": "BaseTab",
+				"effect": []
+			},
+			{
+				"id": "screen",
+				"type": "frame",
+				"width": 320,
+				"height": 120,
+				"layout": "vertical",
+				"children": [
+					{
+						"id": "inactiveInstance",
+						"type": "ref",
+						"ref": "InactiveTab"
+					}
+				]
+			}
+		]
+	})JSON");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Effect-clear fixture parses"), FPenParser::ParseDocument(Json, Doc));
+
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	TestNull(TEXT("Explicit effect clear should remove inherited box shadow widget"),
+		FindWidgetById(Data.RootWidget, TEXT("inactiveInstance_shadow0")));
+	return true;
+}
+
 // ============================================================
 // Test 5: Horizontal 父容器 + Ref 子节点交叉轴 Fill
 // ============================================================
@@ -403,6 +460,109 @@ bool FHorizontalParentRefChildCrossFillTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Sidebar resolved height should use parent inner height (900)"),
 			FMath::IsNearlyEqual(Sidebar->Bounds.H, 900.0f, 0.01f));
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRefFillClearSuppressesInheritedStrokeFillTest,
+	"Design2UMG.Ref.FillClearSuppressesInheritedStrokeFill",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FRefFillClearSuppressesInheritedStrokeFillTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"JSON({
+		"children": [
+			{
+				"id": "screen",
+				"type": "frame",
+				"width": 400,
+				"height": 200,
+				"layout": "vertical",
+				"gap": 12,
+				"children": [
+					{
+						"id": "ghostFrame",
+						"type": "frame",
+						"width": 120,
+						"height": 40,
+						"cornerRadius": 999,
+						"stroke": {
+							"align": "inside",
+							"thickness": 1
+						}
+					},
+					{
+						"id": "defaultItem",
+						"type": "ref",
+						"ref": "pill",
+						"fill": []
+					},
+					{
+						"id": "outlinedItem",
+						"type": "ref",
+						"ref": "pill",
+						"fill": [],
+						"stroke": {
+							"align": "inside",
+							"thickness": 1,
+							"fill": "#888888"
+						}
+					}
+				]
+			},
+			{
+				"id": "pill",
+				"type": "frame",
+				"reusable": true,
+				"width": 248,
+				"fill": "#222222",
+				"cornerRadius": 100,
+				"stroke": {
+					"align": "inside",
+					"thickness": 1
+				},
+				"padding": [12, 16],
+				"alignItems": "center",
+				"children": [
+					{
+						"id": "label",
+						"type": "text",
+						"content": "Item",
+						"fill": "#FFFFFF"
+					}
+				]
+			}
+		]
+	})JSON");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Fill clear ref parse succeeds"), FPenParser::ParseDocument(Json, Doc));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+
+	const FUMGWidgetNode* DefaultItem = FindWidgetById(Data.RootWidget, TEXT("defaultItem"));
+	TestTrue(TEXT("Default item exists"), DefaultItem != nullptr);
+	if (DefaultItem != nullptr)
+	{
+		TestFalse(TEXT("Fill clear ref should clear inherited outline color"),
+			DefaultItem->Properties.Contains(TEXT("OutlineColor")));
+	}
+
+	const FUMGWidgetNode* GhostFrame = FindWidgetById(Data.RootWidget, TEXT("ghostFrame"));
+	TestTrue(TEXT("Ghost frame exists"), GhostFrame != nullptr);
+	if (GhostFrame != nullptr)
+	{
+		TestFalse(TEXT("Stroke without explicit fill should stay invisible"),
+			GhostFrame->Properties.Contains(TEXT("OutlineColor")));
+	}
+
+	const FUMGWidgetNode* OutlinedItem = FindWidgetById(Data.RootWidget, TEXT("outlinedItem"));
+	TestTrue(TEXT("Outlined item exists"), OutlinedItem != nullptr);
+	if (OutlinedItem != nullptr)
+	{
+		const FString* OutlineColor = OutlinedItem->Properties.Find(TEXT("OutlineColor"));
+		TestTrue(TEXT("Explicit stroke fill should be preserved"),
+			OutlineColor != nullptr && *OutlineColor == TEXT("#888888"));
+	}
+
 	return true;
 }
 
@@ -626,7 +786,58 @@ bool FIconFontNoMappingFallbackTest::RunTest(const FString& Parameters)
 }
 
 // ============================================================
-// Test 7: Parser number/string 宽松解析
+// Test 7: IconFont 无映射且空占位时保留原始 IconName
+// ============================================================
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIconFontNoMappingKeepIconNameTest,
+	"Design2UMG.IconFont.NoMappingKeepsIconName",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FIconFontNoMappingKeepIconNameTest::RunTest(const FString& Parameters)
+{
+	UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+	const TMap<FString, TSoftObjectPtr<UFont>> SavedMap = Settings->IconFontAssetMap;
+	const FString SavedDefaultPath = Settings->DefaultIconFontAssetPath;
+	const FString SavedPlaceholder = Settings->MissingIconFontPlaceholder;
+
+	Settings->IconFontAssetMap.Empty();
+	Settings->DefaultIconFontAssetPath.Empty();
+	Settings->MissingIconFontPlaceholder.Empty();
+
+	FString Json;
+	TestTrue(TEXT("Load fixture IconFontNoMappingFallback"), LoadFixtureJson(TEXT("IconFontNoMappingFallback.json"), Json));
+	if (Json.IsEmpty())
+	{
+		Settings->IconFontAssetMap = SavedMap;
+		Settings->DefaultIconFontAssetPath = SavedDefaultPath;
+		Settings->MissingIconFontPlaceholder = SavedPlaceholder;
+		return false;
+	}
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Icon fallback parse succeeds"), FPenParser::ParseDocument(Json, Doc));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+
+	const FString ExpectedIconName = TEXT("dashboard");
+	const FUMGWidgetNode* IconNode = FindWidgetByProperty(Data.RootWidget, TEXT("IconName"), &ExpectedIconName);
+	TestTrue(TEXT("Icon widget exists"), IconNode != nullptr);
+	if (IconNode)
+	{
+		TestFalse(TEXT("Missing mapping should not inject invalid FontFamily string as Typeface"),
+			IconNode->Properties.Contains(TEXT("FontFamily")));
+		const FString* TextValue = IconNode->Properties.Find(TEXT("Text"));
+		TestTrue(TEXT("Empty placeholder should keep original IconName text"),
+			TextValue && *TextValue == ExpectedIconName);
+	}
+
+	Settings->IconFontAssetMap = SavedMap;
+	Settings->DefaultIconFontAssetPath = SavedDefaultPath;
+	Settings->MissingIconFontPlaceholder = SavedPlaceholder;
+	return true;
+}
+
+// ============================================================
+// Test 8: Parser number/string 宽松解析
 // ============================================================
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FParserNumberStringFlexibleTest,
@@ -671,6 +882,36 @@ bool FParserNumberStringFlexibleTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Text lineHeight parsed from string"), Root->Children[0]->LineHeight, 1.5f);
 	TestEqual(TEXT("Text letterSpacing parsed from string"), Root->Children[0]->LetterSpacing, 0.2f);
 	TestEqual(TEXT("Icon weight parsed from string"), Root->Children[1]->IconWeight, 500);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenPaddingTwoValueAxisOrderTest,
+	"Design2UMG.Parser.PenPaddingTwoValueAxisOrder",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FPenPaddingTwoValueAxisOrderTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"children": [{
+			"id": "panel",
+			"type": "frame",
+			"padding": [6, 12]
+		}]
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("ParseDocument succeeds"), FPenParser::ParseDocument(Json, Doc));
+	TestEqual(TEXT("Child count"), Doc.Children.Num(), 1);
+	if (Doc.Children.Num() == 0)
+	{
+		return false;
+	}
+
+	const TSharedPtr<FDesignNode>& Panel = Doc.Children[0];
+	TestEqual(TEXT("Two-value padding top"), Panel->Padding.Top, 6.0f);
+	TestEqual(TEXT("Two-value padding bottom"), Panel->Padding.Bottom, 6.0f);
+	TestEqual(TEXT("Two-value padding left"), Panel->Padding.Left, 12.0f);
+	TestEqual(TEXT("Two-value padding right"), Panel->Padding.Right, 12.0f);
 	return true;
 }
 
@@ -1546,6 +1787,64 @@ bool FPlaceholderSurfaceConversionTest::RunTest(const FString& Parameters)
 
 	Settings->PlaceholderHatchBackgroundColor = SavedBg;
 	Settings->PlaceholderHatchStripeColor = SavedStripe;
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPlaceholderSurfacePaletteTracksRefContextTest,
+	"Design2UMG.Converter.PlaceholderSurfacePaletteTracksRefContext",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FPlaceholderSurfacePaletteTracksRefContextTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"JSON({
+		"children": [
+			{
+				"id": "slotBase",
+				"type": "frame",
+				"reusable": true,
+				"name": "Slot Base",
+				"width": 100,
+				"height": 40,
+				"slot": []
+			},
+			{
+				"id": "screen",
+				"type": "frame",
+				"width": 200,
+				"height": 80,
+				"children": [
+					{
+						"id": "slotInstance",
+						"type": "ref",
+						"ref": "slotBase"
+					}
+				]
+			}
+		]
+	})JSON");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Ref-context placeholder parse succeeds"), FPenParser::ParseDocument(Json, Doc));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+
+	const FUMGWidgetNode* SlotBase = FindWidgetById(Data.RootWidget, TEXT("slotBase"));
+	TestTrue(TEXT("slotBase exists"), SlotBase != nullptr);
+	if (SlotBase != nullptr)
+	{
+		const FString Params = SlotBase->Properties.FindRef(TEXT("MaterialParams"));
+		TestTrue(TEXT("Base placeholder keeps definition palette"), Params.Contains(TEXT("#D282FF33")));
+		TestTrue(TEXT("Base placeholder keeps definition outline"), Params.Contains(TEXT("#D480FF")));
+	}
+
+	const FUMGWidgetNode* SlotInstance = FindWidgetById(Data.RootWidget, TEXT("slotInstance"));
+	TestTrue(TEXT("slotInstance exists"), SlotInstance != nullptr);
+	if (SlotInstance != nullptr)
+	{
+		const FString Params = SlotInstance->Properties.FindRef(TEXT("MaterialParams"));
+		TestTrue(TEXT("Expanded ref placeholder uses instance palette"), Params.Contains(TEXT("#9682FF33")));
+		TestTrue(TEXT("Expanded ref placeholder uses instance outline"), Params.Contains(TEXT("#9580FF")));
+	}
+
 	return true;
 }
 

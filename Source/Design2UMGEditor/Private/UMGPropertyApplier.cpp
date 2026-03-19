@@ -175,7 +175,10 @@ namespace
 			if (const ETextJustify::Type* J = JustifyMap.Find(*V)) T->SetJustification(*J);
 		}
 		if (const FString* V = GET_PROP("LineHeightPercentage"))
+		{
 			T->SetLineHeightPercentage(FCString::Atof(**V));
+			T->SetApplyLineHeightToBottomLine(true);
+		}
 		if (const FString* V = GET_PROP("AutoWrapText"))
 			T->SetAutoWrapText(V->ToBool());
 		if (const FString* V = GET_PROP("WrapTextAt"))
@@ -223,9 +226,16 @@ namespace
 			{
 				I->SetBrushFromTexture(GeneratedTex);
 				FSlateBrush GeneratedBrush = I->GetBrush();
-				GeneratedBrush.ImageSize = FVector2D(GeneratedTex->GetSizeX(), GeneratedTex->GetSizeY());
+				const float DesiredWidth = GET_PROP("WidthOverride")
+					? FCString::Atof(**GET_PROP("WidthOverride"))
+					: static_cast<float>(GeneratedTex->GetSizeX());
+				const float DesiredHeight = GET_PROP("HeightOverride")
+					? FCString::Atof(**GET_PROP("HeightOverride"))
+					: static_cast<float>(GeneratedTex->GetSizeY());
+				GeneratedBrush.ImageSize = FVector2D(DesiredWidth, DesiredHeight);
 				GeneratedBrush.Tiling = ESlateBrushTileType::NoTile;
 				I->SetBrush(GeneratedBrush);
+				I->SetDesiredSizeOverride(GeneratedBrush.ImageSize);
 				return;
 			}
 		}
@@ -237,8 +247,11 @@ namespace
 
 			int32 PW = FMath::Max(1, P.Contains(TEXT("WidthOverride")) ? FCString::Atoi(*P[TEXT("WidthOverride")]) : 64);
 			int32 PH = FMath::Max(1, P.Contains(TEXT("HeightOverride")) ? FCString::Atoi(*P[TEXT("HeightOverride")]) : 64);
+			constexpr int32 PathSupersample = 2;
+			const int32 RasterW = PW * PathSupersample;
+			const int32 RasterH = PH * PathSupersample;
 
-			if (UTexture2D* Tex = FDesignPathRasterizer::Rasterize(*Geom, PW, PH, PathColor, FillRuleStr))
+			if (UTexture2D* Tex = FDesignPathRasterizer::Rasterize(*Geom, RasterW, RasterH, PathColor, FillRuleStr))
 			{
 				I->SetBrushFromTexture(Tex);
 				FSlateBrush PathBrush = I->GetBrush();
@@ -409,6 +422,7 @@ namespace
 	void ApplyBorderProps(UWidget* W, const TMap<FString, FString>& P)
 	{
 		UBorder* Bd = CastChecked<UBorder>(W);
+		Bd->SetPadding(FMargin(0.0f));
 		FSlateBrush Brush = Bd->Background;
 		bool bBrushChanged = false;
 		const bool bHasCornerRadiusProp = P.Contains(TEXT("OutlineCornerRadius")) || P.Contains(TEXT("CornerRadii"));
@@ -508,12 +522,16 @@ namespace
 			FLinearColor Color = FUMGWidgetUtils::ParseColor(*V);
 			if (!Brush.GetResourceObject() && Brush.DrawAs != ESlateBrushDrawType::RoundedBox)
 			{
+				const ESlateBrushDrawType::Type ExistingDrawAs = Brush.DrawAs;
 				UTexture2D* WhiteTex = LoadObject<UTexture2D>(nullptr,
 					TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"));
 				if (WhiteTex)
 				{
 					Brush.SetResourceObject(WhiteTex);
-					Brush.DrawAs = ESlateBrushDrawType::Image;
+					if (ExistingDrawAs == ESlateBrushDrawType::NoDrawType)
+					{
+						Brush.DrawAs = ESlateBrushDrawType::Image;
+					}
 					Brush.ImageSize = FVector2D(1.0f, 1.0f);
 					bBrushChanged = true;
 				}

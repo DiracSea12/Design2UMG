@@ -50,15 +50,15 @@ FString FPencilConnector::DiscoverMCPServerPath()
 	const FString BinaryName = TEXT("mcp-server-linux-x64");
 #endif
 
-	// 2. 鎼滅储 antigravity 鎵╁睍鐩綍
+	// 2. 优先搜索 VS Code 扩展目录，其次再回退 antigravity。
 #if PLATFORM_WINDOWS
 	const FString UserHome = FPlatformMisc::GetEnvironmentVariable(TEXT("USERPROFILE"));
 #else
 	const FString UserHome = FPlatformMisc::GetEnvironmentVariable(TEXT("HOME"));
 #endif
 	TArray<FString> SearchDirs;
-	SearchDirs.Add(UserHome / TEXT(".antigravity/extensions"));
 	SearchDirs.Add(UserHome / TEXT(".vscode/extensions"));
+	SearchDirs.Add(UserHome / TEXT(".antigravity/extensions"));
 
 	for (const FString& Dir : SearchDirs)
 	{
@@ -91,19 +91,19 @@ FString FPencilConnector::DetectAppName()
 	while (ProcEnum.MoveNext())
 	{
 		const FString Name = ProcEnum.GetCurrent().GetName();
-		if (Name.Contains(TEXT("antigravity")))
-			return TEXT("antigravity");
 #if PLATFORM_WINDOWS
 		if (Name.Equals(TEXT("Code.exe"), ESearchCase::IgnoreCase))
-			return TEXT("code");
+			return TEXT("vscode");
 #else
 		if (Name.Equals(TEXT("code"), ESearchCase::IgnoreCase))
-			return TEXT("code");
+			return TEXT("vscode");
 #endif
+		if (Name.Contains(TEXT("antigravity")))
+			return TEXT("antigravity");
 	}
 
-	// 3. 榛樿
-	return TEXT("antigravity");
+	// 3. 默认回退到 VS Code。
+	return TEXT("vscode");
 }
 
 int32 FPencilConnector::FindAvailablePort(int32 StartPort)

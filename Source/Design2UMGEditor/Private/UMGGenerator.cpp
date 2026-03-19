@@ -17,7 +17,9 @@
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "HAL/FileManager.h"
 #include "Misc/PackageName.h"
+#include "TextureResource.h"
 #include "UObject/SavePackage.h"
 
 namespace
@@ -346,7 +348,10 @@ namespace
 
 				if (Geometry)
 				{
-					if (UTexture2D* Rasterized = FDesignPathRasterizer::Rasterize(*Geometry, Width, Height, FUMGWidgetUtils::ParseColor(FillColor), FillRule))
+					constexpr int32 PathSupersample = 2;
+					const int32 RasterWidth = Width * PathSupersample;
+					const int32 RasterHeight = Height * PathSupersample;
+					if (UTexture2D* Rasterized = FDesignPathRasterizer::Rasterize(*Geometry, RasterWidth, RasterHeight, FUMGWidgetUtils::ParseColor(FillColor), FillRule))
 					{
 						TArray64<uint8> RawData;
 						int32 RawWidth = 0;

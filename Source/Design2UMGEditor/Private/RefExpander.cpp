@@ -5,6 +5,8 @@
 
 namespace
 {
+	const TCHAR* ExpandedRefInstanceMetadataKey = TEXT("design2umg.expanded_ref_instance");
+
 	bool ShouldApplySizeOverride(const FDesignSize& Size, bool bHasExplicitFlag)
 	{
 		// Explicit width/height always wins.
@@ -21,6 +23,9 @@ namespace
 
 	void ApplyOverrideProperties(FDesignNode& Target, const FDesignNode& Override)
 	{
+		const bool bFillExplicitClear = Override.Fill.bExplicitClear;
+		const bool bKeepExplicitStrokeFill = Override.Stroke.bHasExplicitFill;
+
 		if (!Override.Content.IsEmpty())
 			Target.Content = Override.Content;
 		if (Override.FontSize > 0)
@@ -38,6 +43,13 @@ namespace
 		}
 		if (Override.Stroke.HasStroke())
 			Target.Stroke = Override.Stroke;
+		if (bFillExplicitClear && !bKeepExplicitStrokeFill)
+			Target.Stroke.Fill = FDesignFill();
+		if (Override.bEffectsExplicitClear || Override.Effects.Num() > 0)
+		{
+			Target.Effects = Override.Effects;
+			Target.bEffectsExplicitClear = Override.bEffectsExplicitClear;
+		}
 		if (Override.bHasWidth)
 			Target.Width = Override.Width;
 		if (Override.bHasHeight)
@@ -180,10 +192,27 @@ namespace
 		return false;
 	}
 
+	void MarkExpandedRefInstanceRecursive(TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid())
+		{
+			return;
+		}
+
+		Node->Metadata.Add(ExpandedRefInstanceMetadataKey, TEXT("true"));
+		for (TSharedPtr<FDesignNode>& Child : Node->Children)
+		{
+			MarkExpandedRefInstanceRecursive(Child);
+		}
+	}
+
 	void ApplyInstanceOverrides(TSharedPtr<FDesignNode>& Expanded, const TSharedPtr<FDesignNode>& RefNode)
 	{
 		if (!Expanded.IsValid() || !RefNode.IsValid())
 			return;
+
+		const bool bFillExplicitClear = RefNode->Fill.bExplicitClear;
+		const bool bKeepExplicitStrokeFill = RefNode->Stroke.bHasExplicitFill;
 
 		Expanded->Id = RefNode->Id;
 		if (!RefNode->Name.IsEmpty())
@@ -229,6 +258,13 @@ namespace
 		}
 		if (RefNode->Stroke.HasStroke())
 			Expanded->Stroke = RefNode->Stroke;
+		if (bFillExplicitClear && !bKeepExplicitStrokeFill)
+			Expanded->Stroke.Fill = FDesignFill();
+		if (RefNode->bEffectsExplicitClear || RefNode->Effects.Num() > 0)
+		{
+			Expanded->Effects = RefNode->Effects;
+			Expanded->bEffectsExplicitClear = RefNode->bEffectsExplicitClear;
+		}
 		if (RefNode->bHasPadding)
 		{
 			Expanded->Padding = RefNode->Padding;
@@ -307,6 +343,11 @@ namespace
 		{
 			for (const auto& Pair : Expanded->Descendants)
 				FRefExpander::ApplyDescendantOverride(Result, Pair.Key, Pair.Value);
+		}
+
+		if (Result.IsValid() && !RefNode->bReusable)
+		{
+			MarkExpandedRefInstanceRecursive(Result);
 		}
 
 		RefChain.Remove(RefTargetId);

@@ -7,6 +7,7 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "RenderingThread.h"
+#include "TextureResource.h"
 
 TArray<TWeakObjectPtr<UTexture2D>> FProceduralShapeGenerator::RootedTextures;
 bool FProceduralShapeGenerator::bHasPendingTextureUpdates = false;
@@ -894,27 +895,32 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 	}
 	if (Shape == TEXT("placeholdersurface"))
 	{
+		constexpr int32 PlaceholderSupersample = 2;
+		const int32 RasterWidth = FMath::Max(1, Width * PlaceholderSupersample);
+		const int32 RasterHeight = FMath::Max(1, Height * PlaceholderSupersample);
+		const int32 RasterInsetPx = InsetPx * PlaceholderSupersample;
+		const int32 RasterStripeWidthPx = FMath::Max(1, StripeWidthPx * PlaceholderSupersample);
 		UE_LOG(LogDesign2UMG, Verbose,
-			TEXT("ProceduralShapeGenerator: placeholdersurface size=%dx%d color=(%.3f,%.3f,%.3f,%.3f) outline=(%.3f,%.3f,%.3f,%.3f) inset=%d outlineWidth=%d"),
-			Width, Height,
+			TEXT("ProceduralShapeGenerator: placeholdersurface size=%dx%d raster=%dx%d color=(%.3f,%.3f,%.3f,%.3f) outline=(%.3f,%.3f,%.3f,%.3f) inset=%d outlineWidth=%d"),
+			Width, Height, RasterWidth, RasterHeight,
 			Color.R, Color.G, Color.B, Color.A,
 			StripeColor.R, StripeColor.G, StripeColor.B, StripeColor.A,
 			InsetPx, StripeWidthPx);
-		UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer);
+		UTexture2D* Texture = CreateTransientTexture(RasterWidth, RasterHeight, Outer);
 		if (!Texture)
 			return nullptr;
 
 		TArray<FColor> Pixels;
-		Pixels.Init(FColor(0, 0, 0, 0), Width * Height);
+		Pixels.Init(FColor(0, 0, 0, 0), RasterWidth * RasterHeight);
 
 		const FColor FillColor = Color.ToFColor(true);
 		const FColor OutlineColor = StripeColor.ToFColor(true);
-		const int32 OutlineWidth = FMath::Max(1, StripeWidthPx);
-		const int32 EffectiveInset = FMath::Clamp(InsetPx, 0, FMath::Max(0, FMath::Min(Width, Height) / 2 - 1));
+		const int32 OutlineWidth = FMath::Max(1, RasterStripeWidthPx);
+		const int32 EffectiveInset = FMath::Clamp(RasterInsetPx, 0, FMath::Max(0, FMath::Min(RasterWidth, RasterHeight) / 2 - 1));
 		const int32 MinX = EffectiveInset;
 		const int32 MinY = EffectiveInset;
-		const int32 MaxX = Width - EffectiveInset - 1;
-		const int32 MaxY = Height - EffectiveInset - 1;
+		const int32 MaxX = RasterWidth - EffectiveInset - 1;
+		const int32 MaxY = RasterHeight - EffectiveInset - 1;
 
 		for (int32 Y = MinY; Y <= MaxY; ++Y)
 		{
@@ -925,7 +931,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 					|| (MaxX - X) < OutlineWidth
 					|| (Y - MinY) < OutlineWidth
 					|| (MaxY - Y) < OutlineWidth;
-				Pixels[Y * Width + X] = bOutline ? OutlineColor : FillColor;
+				Pixels[Y * RasterWidth + X] = bOutline ? OutlineColor : FillColor;
 			}
 		}
 

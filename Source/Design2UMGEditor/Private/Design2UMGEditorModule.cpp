@@ -1,6 +1,8 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGEditorModule.h"
+#include "Automation/Design2UMGAutomationRender.h"
+#include "Design2UMGLocalFigmaImport.h"
 #include "Design2UMGLog.h"
 #include "PenMCPBridge.h"
 #include "DesignImportUtils.h"
@@ -11,7 +13,6 @@
 #include "PenImporter.h"
 #include "FigmaParser.h"
 #include "Design2UMGConverter.h"
-
 #include "FigmaHttpClient.h"
 #include "FigmaImageExporter.h"
 #include "Design2UMGSettings.h"
@@ -20,7 +21,6 @@
 #include "UMGWidgetUtils.h"
 #include "ProceduralShapeGenerator.h"
 
-#include "WidgetBlueprint.h"
 #include "Framework/Notifications/NotificationManager.h"
 #include "Widgets/Notifications/SNotificationList.h"
 #include "Dom/JsonObject.h"
@@ -32,6 +32,7 @@
 #include "ToolMenus.h"
 #include "DesktopPlatformModule.h"
 #include "IDesktopPlatform.h"
+#include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SSpinBox.h"
 #include "Widgets/Input/SCheckBox.h"
@@ -114,132 +115,6 @@ namespace
 			}
 		}
 		return true;
-	}
-
-	struct FAutomationRenderSpec
-	{
-		FString Mode;
-		FString SourcePath;
-		FString NodeId;
-		FString OutputPath;
-		FString RenderPngPath;
-		FString ResultJsonPath;
-		FIntPoint RenderSize = FIntPoint::ZeroValue;
-	};
-
-	struct FAutomationRenderResult
-	{
-		bool bSuccess = false;
-		FString Mode;
-		FString SourcePath;
-		FString GeneratedAssetPath;
-		FString RenderPngPath;
-		FString ErrorMessage;
-		FIntPoint RenderSize = FIntPoint::ZeroValue;
-	};
-
-	bool LoadAutomationRenderSpec(const FString& SpecPath, FAutomationRenderSpec& OutSpec, FString& OutError)
-	{
-		FString JsonStr;
-		if (!FFileHelper::LoadFileToString(JsonStr, *SpecPath))
-		{
-			OutError = FString::Printf(TEXT("Failed to read automation spec: %s"), *SpecPath);
-			return false;
-		}
-
-		TSharedPtr<FJsonObject> Root;
-		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonStr);
-		if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
-		{
-			OutError = FString::Printf(TEXT("Failed to parse automation spec JSON: %s"), *SpecPath);
-			return false;
-		}
-
-		Root->TryGetStringField(TEXT("mode"), OutSpec.Mode);
-		Root->TryGetStringField(TEXT("source_path"), OutSpec.SourcePath);
-		Root->TryGetStringField(TEXT("node_id"), OutSpec.NodeId);
-		Root->TryGetStringField(TEXT("output_path"), OutSpec.OutputPath);
-		Root->TryGetStringField(TEXT("render_png_path"), OutSpec.RenderPngPath);
-		Root->TryGetStringField(TEXT("result_json_path"), OutSpec.ResultJsonPath);
-
-		double RenderWidth = 0.0;
-		double RenderHeight = 0.0;
-		Root->TryGetNumberField(TEXT("render_width"), RenderWidth);
-		Root->TryGetNumberField(TEXT("render_height"), RenderHeight);
-		if (RenderWidth > 1 && RenderHeight > 1)
-		{
-			OutSpec.RenderSize = FIntPoint(
-				FMath::RoundToInt(RenderWidth),
-				FMath::RoundToInt(RenderHeight));
-		}
-
-		if (OutSpec.Mode.IsEmpty())
-		{
-			OutError = TEXT("Automation spec missing 'mode'");
-			return false;
-		}
-		if (OutSpec.SourcePath.IsEmpty())
-		{
-			OutError = TEXT("Automation spec missing 'source_path'");
-			return false;
-		}
-		if (OutSpec.RenderPngPath.IsEmpty())
-		{
-			OutError = TEXT("Automation spec missing 'render_png_path'");
-			return false;
-		}
-
-		return true;
-	}
-
-	bool WriteAutomationRenderResult(const FAutomationRenderSpec& Spec, const FAutomationRenderResult& Result)
-	{
-		if (Spec.ResultJsonPath.IsEmpty())
-		{
-			return true;
-		}
-
-		const FString OutputDir = FPaths::GetPath(Spec.ResultJsonPath);
-		if (!OutputDir.IsEmpty())
-		{
-			IFileManager::Get().MakeDirectory(*OutputDir, true);
-		}
-
-		TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
-		Root->SetBoolField(TEXT("success"), Result.bSuccess);
-		Root->SetStringField(TEXT("mode"), Result.Mode);
-		Root->SetStringField(TEXT("source_path"), Result.SourcePath);
-		Root->SetStringField(TEXT("generated_asset_path"), Result.GeneratedAssetPath);
-		Root->SetStringField(TEXT("render_png_path"), Result.RenderPngPath);
-		Root->SetStringField(TEXT("error_message"), Result.ErrorMessage);
-		Root->SetNumberField(TEXT("render_width"), Result.RenderSize.X);
-		Root->SetNumberField(TEXT("render_height"), Result.RenderSize.Y);
-
-		FString JsonStr;
-		TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonStr);
-		if (!FJsonSerializer::Serialize(Root, Writer))
-		{
-			return false;
-		}
-
-		return FFileHelper::SaveStringToFile(JsonStr, *Spec.ResultJsonPath, FFileHelper::EEncodingOptions::ForceUTF8);
-	}
-
-	FString NormalizeWidgetBlueprintObjectPath(const FString& AssetPath)
-	{
-		FString Normalized = AssetPath.TrimStartAndEnd();
-		if (Normalized.IsEmpty())
-		{
-			return Normalized;
-		}
-
-		const FString AssetName = FPaths::GetBaseFilename(Normalized);
-		const FString ObjectSuffix = TEXT(".") + AssetName;
-		if (!AssetName.IsEmpty() && !Normalized.EndsWith(ObjectSuffix))
-		{
-			Normalized += ObjectSuffix;
-		}
-		return Normalized;
 	}
 
 	/** 从 MCP 数据执行转换 + 预览/生成 */
@@ -617,291 +492,11 @@ namespace
 			});
 	}
 
-	FString MakeVecKey(const FString& RawId)
-	{
-		return TEXT("vec_")
-			+ RawId
-				.Replace(TEXT(":"), TEXT("_"))
-				.Replace(TEXT("/"), TEXT("_"));
-	}
-
-	bool TryResolveVectorPngPath(const FString& NodeId, const FString& ImagesDir, FString& OutVecKey, FString& OutPngPath)
-	{
-		TArray<FString> CandidateIds;
-		CandidateIds.Add(NodeId);
-
-		int32 DelimIndex = INDEX_NONE;
-		if (NodeId.FindLastChar(TEXT(';'), DelimIndex) && DelimIndex + 1 < NodeId.Len())
-		{
-			CandidateIds.Add(NodeId.Mid(DelimIndex + 1));
-		}
-
-		if (NodeId.FindLastChar(TEXT('/'), DelimIndex) && DelimIndex + 1 < NodeId.Len())
-		{
-			CandidateIds.Add(NodeId.Mid(DelimIndex + 1));
-		}
-
-		for (const FString& CandidateId : CandidateIds)
-		{
-			const FString VecKey = MakeVecKey(CandidateId);
-			const FString PngPath = ImagesDir / (VecKey + TEXT(".png"));
-			if (FPaths::FileExists(PngPath))
-			{
-				OutVecKey = VecKey;
-				OutPngPath = PngPath;
-				return true;
-			}
-		}
-		return false;
-	}
-
-	bool ShouldSkipTinyVectorPng(const FString& PngPath, float NodeWidth, float NodeHeight)
-	{
-		const int64 FileSize = IFileManager::Get().FileSize(*PngPath);
-		if (FileSize <= 0)
-		{
-			return true;
-		}
-
-		TArray<uint8> Header;
-		if (!FFileHelper::LoadFileToArray(Header, *PngPath) || Header.Num() < 24)
-		{
-			return false;
-		}
-
-		// PNG IHDR width/height are big-endian at byte 16..23.
-		const int32 W = (int32(Header[16]) << 24) | (int32(Header[17]) << 16) | (int32(Header[18]) << 8) | int32(Header[19]);
-		const int32 H = (int32(Header[20]) << 24) | (int32(Header[21]) << 16) | (int32(Header[22]) << 8) | int32(Header[23]);
-
-		const bool bDegenerateImage = (W <= 1 || H <= 1);
-		const bool bTinyImage = (W <= 2 && H <= 2);
-		const bool bSuspiciousPayload = FileSize <= 200;
-		const bool bSizeMismatch = bTinyImage && (NodeWidth > 4.0f || NodeHeight > 4.0f);
-		return bDegenerateImage || (bTinyImage && bSuspiciousPayload) || bSizeMismatch;
-	}
-
-	bool CanRasterizeVectorFromGeometry(const TSharedPtr<FDesignNode>& Node)
-	{
-		if (!Node.IsValid() || Node->Geometry.IsEmpty())
-		{
-			return false;
-		}
-
-		if (Node->Fill.bEnabled
-			&& Node->Fill.Type == EDesignFillType::Color)
-		{
-			return true;
-		}
-
-		for (const FDesignFill& Fill : Node->Fills)
-		{
-			if (Fill.bEnabled
-				&& Fill.Type == EDesignFillType::Color)
-			{
-				return true;
-			}
-		}
-
-		if (Node->Stroke.HasStroke()
-			&& Node->Stroke.Fill.bEnabled
-			&& Node->Stroke.Fill.Type == EDesignFillType::Color)
-		{
-			return true;
-		}
-
-		return false;
-	}
-
-	/** 为本地导出的向量节点注入 image fill（vec_*） */
-	int32 InjectVectorImageFills(TArray<TSharedPtr<FDesignNode>>& Nodes, const FString& ImagesDir, TMap<FString, FString>& OutMapping)
-	{
-		int32 InjectedCount = 0;
-
-		for (TSharedPtr<FDesignNode>& Node : Nodes)
-		{
-			if (!Node.IsValid())
-				continue;
-
-			const bool bIsVector =
-				(Node->Type == EDesignNodeType::Path) ||
-				(Node->Type == EDesignNodeType::Line) ||
-				(Node->Type == EDesignNodeType::Ellipse) ||
-				(Node->Type == EDesignNodeType::Polygon);
-
-			if (bIsVector && !Node->Fill.IsImage())
-			{
-				FString VecKey;
-				FString PngPath;
-				if (TryResolveVectorPngPath(Node->Id, ImagesDir, VecKey, PngPath))
-				{
-					if (ShouldSkipTinyVectorPng(PngPath, Node->Width.Value, Node->Height.Value))
-					{
-						continue;
-					}
-
-					FDesignFill ImgFill;
-					ImgFill.Type = EDesignFillType::Image;
-					ImgFill.Image.Url = VecKey;
-					ImgFill.Image.Mode = EDesignImageMode::Fill;
-					Node->Fill = ImgFill;
-					Node->Fills.Empty();
-					Node->Fills.Add(ImgFill);
-					if (!OutMapping.Contains(VecKey))
-					{
-						OutMapping.Add(VecKey, PngPath);
-					}
-					++InjectedCount;
-				}
-			}
-
-			InjectedCount += InjectVectorImageFills(Node->Children, ImagesDir, OutMapping);
-		}
-
-		return InjectedCount;
-	}
-
-	/** 导入本地 Figma 导出（design.json + images/） */
-	bool BuildLocalFigmaWidgetData(const FString& JsonFilePath, FUMGWidgetData& OutData, FString& OutError)
-	{
-		FString JsonStr;
-		if (!FFileHelper::LoadFileToString(JsonStr, *JsonFilePath))
-		{
-			OutError = FString::Printf(TEXT("Failed to read design.json: %s"), *JsonFilePath);
-			return false;
-		}
-
-		FDesignDocument ParsedDoc;
-		if (!FFigmaParser::ParseDocument(JsonStr, ParsedDoc))
-		{
-			OutError = FString::Printf(TEXT("Failed to parse Figma JSON: %s"), *JsonFilePath);
-			return false;
-		}
-
-		const FString ImagesDir = FPaths::GetPath(JsonFilePath) / TEXT("images");
-		TMap<FString, FString> ImageRefToLocalPath;
-		const int32 VecCount = InjectVectorImageFills(ParsedDoc.Children, ImagesDir, ImageRefToLocalPath);
-
-		TSet<FString> ImageRefs;
-		FFigmaParser::CollectImageRefs(ParsedDoc, ImageRefs);
-		for (const FString& Ref : ImageRefs)
-		{
-			if (ImageRefToLocalPath.Contains(Ref))
-				continue;
-			const FString PngPath = ImagesDir / (Ref + TEXT(".png"));
-			if (FPaths::FileExists(PngPath))
-			{
-				ImageRefToLocalPath.Add(Ref, PngPath);
-			}
-		}
-
-		UE_LOG(LogDesign2UMG, Log, TEXT("LocalFigmaImport: %d image mappings (%d vec_*, %d image fills)"),
-			ImageRefToLocalPath.Num(), VecCount, ImageRefToLocalPath.Num() - VecCount);
-
-		FFigmaParser::ApplyImageUrls(ParsedDoc, ImageRefToLocalPath);
-
-		OutData = FDesignSourceFacade::ConvertDocument(ParsedDoc);
-		DesignImportUtils::ResolveImages(OutData);
-
-		if (OutData.RootWidget.Children.Num() == 0)
-		{
-			OutError = FString::Printf(TEXT("No frames found in export: %s"), *JsonFilePath);
-			return false;
-		}
-
-		return true;
-	}
-
-	bool RunAutomationRender(const FAutomationRenderSpec& Spec, FAutomationRenderResult& OutResult)
-	{
-		OutResult.Mode = Spec.Mode;
-		OutResult.SourcePath = Spec.SourcePath;
-		OutResult.RenderPngPath = Spec.RenderPngPath;
-		UE_LOG(LogDesign2UMG, Log,
-			TEXT("AutomationRender: mode=%s source=%s node=%s output=%s png=%s size=%dx%d"),
-			*Spec.Mode, *Spec.SourcePath, *Spec.NodeId, *Spec.OutputPath, *Spec.RenderPngPath,
-			Spec.RenderSize.X, Spec.RenderSize.Y);
-
-		UWidgetBlueprint* WidgetBlueprint = nullptr;
-		if (Spec.Mode.Equals(TEXT("asset"), ESearchCase::IgnoreCase))
-		{
-			const FString ObjectPath = NormalizeWidgetBlueprintObjectPath(Spec.SourcePath);
-			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: loading asset %s"), *ObjectPath);
-			WidgetBlueprint = LoadObject<UWidgetBlueprint>(nullptr, *ObjectPath);
-			if (!WidgetBlueprint)
-			{
-				OutResult.ErrorMessage = FString::Printf(TEXT("Failed to load Widget Blueprint: %s"), *ObjectPath);
-				return false;
-			}
-
-			OutResult.GeneratedAssetPath = WidgetBlueprint->GetPathName();
-			if (!DesignImportUtils::RenderCompiledBlueprintToPngFile(
-				WidgetBlueprint,
-				Spec.RenderPngPath,
-				Spec.RenderSize,
-				&OutResult.RenderSize))
-			{
-				OutResult.ErrorMessage = FString::Printf(TEXT("Failed to render compiled Widget Blueprint: %s"), *ObjectPath);
-				return false;
-			}
-
-			OutResult.bSuccess = true;
-			return true;
-		}
-
-		FUMGWidgetData Data;
-		if (Spec.Mode.Equals(TEXT("pen"), ESearchCase::IgnoreCase))
-		{
-			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: importing pen source"));
-			const bool bOk = Spec.NodeId.IsEmpty()
-				? FPenImporter::ImportFromFile(Spec.SourcePath, Data)
-				: FPenImporter::ImportFileWithTargetNode(Spec.SourcePath, Spec.NodeId, Data);
-			if (!bOk)
-			{
-				OutResult.ErrorMessage = FString::Printf(TEXT("Failed to import pen source: %s"), *Spec.SourcePath);
-				return false;
-			}
-			DesignImportUtils::ResolveImages(Data);
-		}
-		else if (Spec.Mode.Equals(TEXT("local_figma"), ESearchCase::IgnoreCase))
-		{
-			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: importing local figma export"));
-			FString ErrorMessage;
-			if (!BuildLocalFigmaWidgetData(Spec.SourcePath, Data, ErrorMessage))
-			{
-				OutResult.ErrorMessage = ErrorMessage;
-				return false;
-			}
-		}
-		else
-		{
-			OutResult.ErrorMessage = FString::Printf(TEXT("Unsupported automation render mode: %s"), *Spec.Mode);
-			return false;
-		}
-
-		UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: generating blueprint and compiled png"));
-		if (!DesignImportUtils::GenerateBlueprintAndCompiledPng(
-			Data,
-			Spec.OutputPath,
-			Spec.RenderPngPath,
-			Spec.RenderSize,
-			&OutResult.GeneratedAssetPath,
-			&OutResult.RenderSize))
-		{
-			OutResult.ErrorMessage = FString::Printf(
-				TEXT("Failed to generate compiled PNG for %s"),
-				*Spec.SourcePath);
-			return false;
-		}
-
-		OutResult.bSuccess = true;
-		return true;
-	}
-
 	void ImportLocalFigmaExport(const FString& JsonFilePath, const FString& OutputPath, bool bUsePreview)
 	{
 		FUMGWidgetData Data;
 		FString ErrorMessage;
-		if (!BuildLocalFigmaWidgetData(JsonFilePath, Data, ErrorMessage))
+		if (!Design2UMGLocalFigmaImport::BuildLocalFigmaWidgetData(JsonFilePath, Data, ErrorMessage))
 		{
 			ShowNotification(LOCTEXT("LocalFigmaImportFailed", "Design2UMG: Failed to import local Figma export"), SNotificationItem::CS_Fail);
 			UE_LOG(LogDesign2UMG, Error, TEXT("%s"), *ErrorMessage);
@@ -1345,57 +940,7 @@ void FDesign2UMGEditorModule::StartupModule()
 		TEXT("Automation render from manifest JSON: Design2UMG.AutomationRender <spec.json>"),
 		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
 		{
-			FAutomationRenderResult Result;
-			Result.Mode = TEXT("unknown");
-
-			if (Args.Num() < 1)
-			{
-				UE_LOG(LogDesign2UMG, Error, TEXT("Usage: Design2UMG.AutomationRender <spec.json>"));
-				if (FApp::IsUnattended())
-				{
-					FPlatformMisc::RequestExitWithStatus(false, 1);
-				}
-				return;
-			}
-
-			const FString SpecPath = Args[0];
-			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender command invoked: spec=%s unattended=%d"), *SpecPath, FApp::IsUnattended() ? 1 : 0);
-			FAutomationRenderSpec Spec;
-			FString LoadError;
-			if (!LoadAutomationRenderSpec(SpecPath, Spec, LoadError))
-			{
-				UE_LOG(LogDesign2UMG, Error, TEXT("%s"), *LoadError);
-				Result.ErrorMessage = LoadError;
-				WriteAutomationRenderResult(Spec, Result);
-				if (FApp::IsUnattended())
-				{
-					FPlatformMisc::RequestExitWithStatus(false, 1);
-				}
-				return;
-			}
-
-			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: spec loaded successfully"));
-			const bool bOk = RunAutomationRender(Spec, Result);
-			WriteAutomationRenderResult(Spec, Result);
-
-			if (!bOk)
-			{
-				UE_LOG(LogDesign2UMG, Error, TEXT("Design2UMG.AutomationRender failed: %s"), *Result.ErrorMessage);
-			}
-			else
-			{
-				UE_LOG(LogDesign2UMG, Log,
-					TEXT("Design2UMG.AutomationRender succeeded: asset=%s png=%s (%dx%d)"),
-					*Result.GeneratedAssetPath,
-					*Result.RenderPngPath,
-					Result.RenderSize.X,
-					Result.RenderSize.Y);
-			}
-
-			if (FApp::IsUnattended())
-			{
-				FPlatformMisc::RequestExitWithStatus(false, bOk ? 0 : 1);
-			}
+			Design2UMGAutomationRender::HandleConsoleCommand(Args);
 		}),
 		ECVF_Default);
 

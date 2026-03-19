@@ -88,7 +88,7 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Pencil Connection", meta = (DisplayName = "MCP Server Path (Optional)", ToolTip = "Override path to mcp-server binary. Leave empty for auto-discovery."))
 	FString MCPServerPath;
 
-	UPROPERTY(Config, EditAnywhere, Category = "Pencil Connection", meta = (DisplayName = "App Name (Optional)", ToolTip = "Override -app parameter. Leave empty for auto-detection (antigravity/code)."))
+	UPROPERTY(Config, EditAnywhere, Category = "Pencil Connection", meta = (DisplayName = "App Name (Optional)", ToolTip = "Override -app parameter. Leave empty for auto-detection (vscode/antigravity)."))
 	FString PencilAppName;
 
 	// ========== Font Import ==========

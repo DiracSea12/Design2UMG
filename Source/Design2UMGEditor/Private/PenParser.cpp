@@ -797,7 +797,10 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 		TArray<TSharedPtr<FJsonValue>> EffectsArr;
 		const TSharedPtr<FJsonValue>& EffectField = JsonObj->TryGetField(EffectKey);
 		if (EffectField->Type == EJson::Array)
+		{
 			EffectsArr = EffectField->AsArray();
+			Node->bEffectsExplicitClear = EffectsArr.Num() == 0;
+		}
 		else if (EffectField->Type == EJson::Object)
 			EffectsArr.Add(EffectField);
 		for (const auto& EffectVal : EffectsArr)
@@ -1391,7 +1394,10 @@ FDesignStroke FPenParser::ParseStroke(const TSharedPtr<FJsonObject>& JsonObj, co
 
 	// 濉厖
 	if (JsonObj->HasField(TEXT("fill")))
+	{
+		Result.bHasExplicitFill = true;
 		Result.Fill = ParseFill(JsonObj->TryGetField(TEXT("fill")), Resolver);
+	}
 
 	return Result;
 }
@@ -1425,12 +1431,12 @@ FDesignPadding FPenParser::ParsePadding(const TSharedPtr<FJsonValue>& Value, con
 		const auto& Arr = Value->AsArray();
 		if (Arr.Num() == 2)
 		{
-			float H = 0.0f;
 			float V = 0.0f;
-			if (ResolvePaddingNumber(Arr[0], H))
-				R.Left = R.Right = H;
-			if (ResolvePaddingNumber(Arr[1], V))
+			float H = 0.0f;
+			if (ResolvePaddingNumber(Arr[0], V))
 				R.Top = R.Bottom = V;
+			if (ResolvePaddingNumber(Arr[1], H))
+				R.Left = R.Right = H;
 		}
 		else if (Arr.Num() >= 4)
 		{

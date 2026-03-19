@@ -23,6 +23,12 @@ struct DESIGN2UMGEDITOR_API FFontResolver
 	/** Look up cached asset path for a font family name. Returns empty if not found. */
 	static FString FindFontAssetPath(const FString& FontFamily);
 
+	/** Resolve a known icon family/name pair to a concrete glyph string when the icon set ships codepoints. */
+	static FString FindKnownIconGlyph(const FString& FontFamily, const FString& IconName);
+
+	/** Resolve a rendered glyph back to its semantic icon name when the icon set ships codepoints. */
+	static FString FindKnownIconNameByGlyph(const FString& FontFamily, const FString& Glyph);
+
 	/** Find best matching typeface name for a given weight. Returns empty if font not loaded. */
 	static FString FindBestTypeface(const FString& FontFamily, const FString& RequestedWeight);
 

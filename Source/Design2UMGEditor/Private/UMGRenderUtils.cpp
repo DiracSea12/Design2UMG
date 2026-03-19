@@ -21,6 +21,7 @@
 #include "Input/HittestGrid.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Slate/WidgetRenderer.h"
+#include "TextureResource.h"
 #include "WidgetBlueprintEditorUtils.h"
 #include "RenderingThread.h"
 #include "Styling/SlateBrush.h"
@@ -342,6 +343,10 @@ bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, const FIntPo
 	TSharedRef<SVirtualWindow> Window = SNew(SVirtualWindow);
 	Window->SetContent(WindowContent);
 	const FIntPoint EffectiveSize = ComputePreviewRenderSize(Widget, RenderSize, Window);
+	Window->Resize(FVector2D(EffectiveSize.X, EffectiveSize.Y));
+	Window->SlatePrepass(1.0f);
+	Widget->ForceLayoutPrepass();
+	DumpWidgetVisualState(TEXT("compiled-after-window-prepass"), Widget->WidgetTree, WidgetBP->GetPathName());
 
 	UTextureRenderTarget2D* RT = NewObject<UTextureRenderTarget2D>();
 	RT->Filter = TF_Bilinear;
@@ -357,6 +362,8 @@ bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, const FIntPo
 	FDesignPathRasterizer::FlushPendingTextureUpdates();
 	Renderer.DrawWindow(RT, *HitTestGrid, Window, 1.0f, FVector2D(EffectiveSize.X, EffectiveSize.Y), 0.1f);
 	if (!GUsingNullRHI) { FlushRenderingCommands(); }
+	Widget->ForceLayoutPrepass();
+	DumpWidgetVisualState(TEXT("compiled-after-draw"), Widget->WidgetTree, WidgetBP->GetPathName());
 
 	FTextureRenderTargetResource* Resource = RT->GameThread_GetRenderTargetResource();
 	if (!Resource)

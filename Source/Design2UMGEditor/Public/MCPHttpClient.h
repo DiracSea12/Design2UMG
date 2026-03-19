@@ -4,6 +4,8 @@
 
 #include "CoreMinimal.h"
 
+class FJsonObject;
+
 /**
  * MCP Streamable HTTP 瀹㈡埛绔? * 瀹炵幇 JSON-RPC 2.0 + Mcp-Session-Id 鍗忚
  * 鍝嶅簲鏍煎紡涓?SSE (text/event-stream)

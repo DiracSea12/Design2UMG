@@ -6,6 +6,7 @@
 #include "Design2UMGSettings.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/AssetData.h"
 #include "Engine/Texture.h"
 #include "Engine/Texture2D.h"
 #include "HAL/FileManager.h"
@@ -17,9 +18,11 @@
 #include "Interfaces/IHttpResponse.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
+#include "Misc/FileHelper.h"
 #include "Misc/SecureHash.h"
 #include "Modules/ModuleManager.h"
 #include "RenderingThread.h"
+#include "TextureResource.h"
 #include "UObject/SavePackage.h"
 
 namespace

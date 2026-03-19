@@ -3,6 +3,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Components/SlateWrapperTypes.h"
+#include "Layout/Margin.h"
 #include "UMGSchema.h"
 
 class UWidget;
@@ -10,6 +12,7 @@ class UPanelSlot;
 class UPanelWidget;
 class UWidgetTree;
 class UWidgetBlueprint;
+class UTexture2D;
 
 /**
  * UMG Widget 宸ュ叿绫?- 鍏变韩鐨?Widget 鍒涘缓鍜屽睘鎬у簲鐢ㄩ€昏緫
