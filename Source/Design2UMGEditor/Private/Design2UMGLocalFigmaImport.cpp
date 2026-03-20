@@ -1,8 +1,8 @@
 ﻿#include "Design2UMGLocalFigmaImport.h"
 
+#include "Design2UMGConverter.h"
 #include "Design2UMGLog.h"
 #include "DesignImportUtils.h"
-#include "DesignSourceFacade.h"
 #include "FigmaParser.h"
 #include "UMGSchema.h"
 
@@ -166,7 +166,7 @@ namespace Design2UMGLocalFigmaImport
 
 		FFigmaParser::ApplyImageUrls(ParsedDoc, ImageRefToLocalPath);
 
-		OutData = FDesignSourceFacade::ConvertDocument(ParsedDoc);
+		OutData = FDesign2UMGConverter::Convert(ParsedDoc);
 		DesignImportUtils::ResolveImages(OutData);
 
 		if (OutData.RootWidget.Children.Num() == 0)

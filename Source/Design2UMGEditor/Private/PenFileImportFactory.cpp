@@ -3,15 +3,11 @@
 #include "PenFileImportFactory.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGNotification.h"
-#include "PenParser.h"
-#include "PenImporter.h"
+#include "DesignImportPipeline.h"
 #include "DesignImportUtils.h"
-#include "DesignSourceRegistry.h"
 
 #include "WidgetBlueprint.h"
-#include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
-#include "Misc/ScopedSlowTask.h"
 
 #define LOCTEXT_NAMESPACE "PenFileImportFactory"
 
@@ -48,16 +44,13 @@ UObject* UPenFileImportFactory::FactoryCreateFile(
 {
 	bOutOperationCanceled = false;
 
-	// 解析文档，检查顶层 frame 数量
-	FDesignDocument Document;
-	if (!FPenParser::ParseFromFile(Filename, Document))
+	TArray<FDesignFrameInfo> Frames;
+	if (!DesignImportPipeline::LoadPenFrames(Filename, Frames))
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("PenFileImport: Failed to parse %s"), *Filename);
 		FDesign2UMGNotification::Error(LOCTEXT("ParseFailed", "Design2UMG: Failed to parse .pen file"));
 		return nullptr;
 	}
-
-	TArray<FDesignFrameInfo> Frames = ::ExtractTopFrames(Document);
 
 	if (Frames.Num() == 0)
 	{
@@ -103,69 +96,29 @@ UWidgetBlueprint* ImportSingleFrame(const FString& FilePath, const FString& Outp
 {
 	bOutPreviewOpened = false;
 
-	FScopedSlowTask SlowTask(5.0f, LOCTEXT("ImportingPen", "Importing .pen file..."));
-	SlowTask.MakeDialog(true);
+	FDesignImportRequest Request;
+	Request.OutputPath = OutputPath;
+	Request.PreviewWindowTitle = LOCTEXT("PenImportPreviewTitle", "Design2UMG Import Preview");
+	Request.Generation.Mode = EDesignBlueprintGenerationMode::BlueprintOnly;
 
-	SlowTask.EnterProgressFrame(1.0f, LOCTEXT("Step1_Parse", "Parsing design file..."));
-	FUMGWidgetData Data;
-	FString JsonStr;
-	if (!FFileHelper::LoadFileToString(JsonStr, *FilePath))
-	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("PenFileImport: Failed to read file: %s"), *FilePath);
-		FDesign2UMGNotification::Error(LOCTEXT("ReadFailed", "Design2UMG: Failed to read .pen file"));
-		return nullptr;
-	}
-	if (SlowTask.ShouldCancel()) return nullptr;
-
-	SlowTask.EnterProgressFrame(1.0f, LOCTEXT("Step2_Convert", "Converting design to widgets..."));
-	if (!FDesignSourceRegistry::Convert(TEXT("Pen"), JsonStr, Data))
-	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("PenFileImport: Convert failed: %s"), *FilePath);
-		FDesign2UMGNotification::Error(LOCTEXT("ConvertFailed", "Design2UMG: Failed to convert design to widgets"));
-		return nullptr;
-	}
-	if (SlowTask.ShouldCancel()) return nullptr;
-
-	SlowTask.EnterProgressFrame(1.0f, LOCTEXT("Step3_Images", "Downloading remote images..."));
-	DesignImportUtils::ResolveImages(Data);
-	if (SlowTask.ShouldCancel()) return nullptr;
-
-	SlowTask.EnterProgressFrame(1.0f, LOCTEXT("Step4_Preview", "Preparing preview..."));
-	if (DesignImportUtils::OpenPreviewWindow(Data, OutputPath,
-		LOCTEXT("PenImportPreviewTitle", "Design2UMG Import Preview")))
-	{
-		bOutPreviewOpened = true;
-		return nullptr;
-	}
-
-	SlowTask.EnterProgressFrame(1.0f, LOCTEXT("Step5_Generate", "Generating Widget Blueprint..."));
-	return DesignImportUtils::GenerateBlueprint(Data, OutputPath);
+	const FDesignImportExecutionResult Result =
+		DesignImportPipeline::ExecutePenFile(FilePath, FString(), Request);
+	bOutPreviewOpened = Result.bPreviewOpened;
+	return Result.GeneratedBlueprint;
 }
 
 void ImportWithTargetNode(const FString& FilePath, const FString& TargetNodeId, const FString& OutputPath)
 {
-	FScopedSlowTask SlowTask(4.0f, LOCTEXT("ImportingPenNode", "Importing .pen frame..."));
-	SlowTask.MakeDialog(true);
+	FDesignImportRequest Request;
+	Request.OutputPath = OutputPath;
+	Request.PreviewWindowTitle = LOCTEXT("PenImportPreviewTitle", "Design2UMG Import Preview");
+	Request.Generation.Mode = EDesignBlueprintGenerationMode::BlueprintOnly;
 
-	SlowTask.EnterProgressFrame(1.0f, LOCTEXT("Step1_ParseNode", "Parsing design file..."));
-	FUMGWidgetData Data;
-	if (!FPenImporter::ImportFileWithTargetNode(FilePath, TargetNodeId, Data))
+	const FDesignImportExecutionResult Result =
+		DesignImportPipeline::ExecutePenFile(FilePath, TargetNodeId, Request);
+	if (!Result.bSucceeded)
 	{
 		FDesign2UMGNotification::Error(LOCTEXT("TargetNodeFailed", "Design2UMG: Failed to import selected frame"));
-		return;
-	}
-	if (SlowTask.ShouldCancel()) return;
-
-	SlowTask.EnterProgressFrame(1.0f, LOCTEXT("Step2_ImagesNode", "Downloading remote images..."));
-	DesignImportUtils::ResolveImages(Data);
-	if (SlowTask.ShouldCancel()) return;
-
-	SlowTask.EnterProgressFrame(1.0f, LOCTEXT("Step3_PreviewNode", "Preparing preview..."));
-	if (!DesignImportUtils::OpenPreviewWindow(Data, OutputPath,
-		LOCTEXT("PenImportPreviewTitle", "Design2UMG Import Preview")))
-	{
-		SlowTask.EnterProgressFrame(1.0f, LOCTEXT("Step4_GenerateNode", "Generating Widget Blueprint..."));
-		DesignImportUtils::GenerateBlueprint(Data, OutputPath);
 	}
 }
 

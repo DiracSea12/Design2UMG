@@ -2,14 +2,13 @@
 
 #include "Design2UMGEditorModule.h"
 #include "Automation/Design2UMGAutomationRender.h"
+#include "DesignImportPipeline.h"
 #include "Design2UMGLocalFigmaImport.h"
 #include "Design2UMGLog.h"
 #include "PenMCPBridge.h"
 #include "DesignImportUtils.h"
-#include "DesignSourceFacade.h"
 #include "DesignSourceRegistry.h"
 #include "PencilConnector.h"
-#include "PenParser.h"
 #include "PenImporter.h"
 #include "FigmaParser.h"
 #include "Design2UMGConverter.h"
@@ -127,13 +126,11 @@ namespace
 			return;
 		}
 
-		DesignImportUtils::ResolveImages(Data);
-
-		if (DesignImportUtils::OpenPreviewWindow(Data, OutputPath,
-			LOCTEXT("PenConvertPreviewWindowTitle", "Design2UMG Pen Preview")))
-			return;
-
-		DesignImportUtils::GenerateBlueprintAndPng(Data, OutputPath);
+		FDesignImportRequest Request;
+		Request.OutputPath = OutputPath;
+		Request.PreviewWindowTitle = LOCTEXT("PenConvertPreviewWindowTitle", "Design2UMG Pen Preview");
+		Request.Generation.Mode = EDesignBlueprintGenerationMode::BlueprintAndPng;
+		DesignImportPipeline::Execute(Data, Request);
 	}
 
 	/** 从 batch_get 结果中提取 frame 信息列表 */
@@ -300,66 +297,42 @@ namespace
 	/** 导入指定 TargetNodeId 的 frame */
 	void ImportPenFileWithTargetNode(const FString& FilePath, const FString& TargetNodeId, const FString& OutputPath, bool bUsePreview, bool bRenderPng)
 	{
-		FUMGWidgetData Data;
-		if (!FPenImporter::ImportFileWithTargetNode(FilePath, TargetNodeId, Data))
-			return;
-
-		DesignImportUtils::ResolveImages(Data);
-
-		if (bUsePreview && DesignImportUtils::OpenPreviewWindow(Data, OutputPath,
-			LOCTEXT("PenConvertPreviewWindowTitle", "Design2UMG Pen Preview")))
-			return;
-
-		if (bRenderPng)
-			DesignImportUtils::GenerateBlueprintAndPng(Data, OutputPath);
-		else
-			DesignImportUtils::GenerateBlueprint(Data, OutputPath);
+		FDesignImportRequest Request;
+		Request.OutputPath = OutputPath;
+		Request.PreviewWindowTitle = LOCTEXT("PenConvertPreviewWindowTitle", "Design2UMG Pen Preview");
+		Request.bUsePreview = bUsePreview;
+		Request.Generation.Mode = bRenderPng
+			? EDesignBlueprintGenerationMode::BlueprintAndPng
+			: EDesignBlueprintGenerationMode::BlueprintOnly;
+		DesignImportPipeline::ExecutePenFile(FilePath, TargetNodeId, Request);
 	}
 
 	/** 导入 .pen 文件（工具栏 + 控制台命令共用） */
 	void ImportPenFile(const FString& FilePath, const FString& OutputPath, bool bUsePreview = true, bool bRenderPng = true)
 	{
-		// 先解析文档，检查顶层 frame 数量
-		FDesignDocument Document;
-		if (!FPenParser::ParseFromFile(FilePath, Document))
+		TArray<FDesignFrameInfo> Frames;
+		if (!DesignImportPipeline::LoadPenFrames(FilePath, Frames))
 		{
-			UE_LOG(LogDesign2UMG, Error, TEXT("Design2UMG.Import: Failed to parse %s"), *FilePath);
 			return;
 		}
 
-		TArray<FDesignFrameInfo> Frames = ExtractTopFrames(Document);
 		if (Frames.Num() == 0)
 		{
 			UE_LOG(LogDesign2UMG, Error, TEXT("Design2UMG.Import: No frames found in %s"), *FilePath);
 			return;
 		}
 
+		FDesignImportRequest Request;
+		Request.OutputPath = OutputPath;
+		Request.PreviewWindowTitle = LOCTEXT("PenConvertPreviewWindowTitle", "Design2UMG Pen Preview");
+		Request.bUsePreview = bUsePreview;
+		Request.Generation.Mode = bRenderPng
+			? EDesignBlueprintGenerationMode::BlueprintAndPng
+			: EDesignBlueprintGenerationMode::BlueprintOnly;
+
 		if (Frames.Num() == 1)
 		{
-			// 单 frame 快速路径
-			FUMGWidgetData Data;
-			FString JsonStr;
-			if (!FFileHelper::LoadFileToString(JsonStr, *FilePath))
-			{
-				UE_LOG(LogDesign2UMG, Error, TEXT("Design2UMG.Import: Failed to read file: %s"), *FilePath);
-				return;
-			}
-			if (!FDesignSourceFacade::ConvertBySource(TEXT("Pen"), JsonStr, Data))
-			{
-				UE_LOG(LogDesign2UMG, Error, TEXT("Design2UMG.Import: Convert failed: %s"), *FilePath);
-				return;
-			}
-
-			DesignImportUtils::ResolveImages(Data);
-
-			if (bUsePreview && DesignImportUtils::OpenPreviewWindow(Data, OutputPath,
-				LOCTEXT("PenConvertPreviewWindowTitle", "Design2UMG Pen Preview")))
-				return;
-
-			if (bRenderPng)
-				DesignImportUtils::GenerateBlueprintAndPng(Data, OutputPath);
-			else
-				DesignImportUtils::GenerateBlueprint(Data, OutputPath);
+			DesignImportPipeline::ExecutePenFile(FilePath, FString(), Request);
 			return;
 		}
 
@@ -457,8 +430,7 @@ namespace
 										if (IdToUrl.Num() > 0)
 											FFigmaImageExporter::ApplyExportedImages(Doc->Children, IdToUrl);
 
-										FUMGWidgetData Data = FDesignSourceFacade::ConvertDocument(*Doc);
-										DesignImportUtils::ResolveImages(Data);
+										FUMGWidgetData Data = FDesign2UMGConverter::Convert(*Doc);
 
 										if (Data.RootWidget.Children.Num() == 0)
 										{
@@ -475,16 +447,17 @@ namespace
 											FText::Format(LOCTEXT("FigmaSuccess", "Design2UMG: Imported {0} frame(s) from Figma"),
 												FText::AsNumber(Data.RootWidget.Children.Num())),
 											SNotificationItem::CS_Success);
+										FDesignImportRequest Request;
+										Request.OutputPath = DefaultFigmaOutputPath;
+										Request.PreviewWindowTitle = LOCTEXT("FigmaPreviewTitle", "Design2UMG Figma Preview");
+										Request.bUsePreview = !FApp::IsUnattended();
+										Request.Generation.Mode = EDesignBlueprintGenerationMode::BlueprintAndPng;
+										DesignImportPipeline::Execute(Data, Request);
 										if (FApp::IsUnattended())
 										{
-											DesignImportUtils::GenerateBlueprintAndPng(Data, DefaultFigmaOutputPath);
 											UE_LOG(LogDesign2UMG, Log, TEXT("Unattended mode: requesting engine exit after figma import"));
 											FPlatformMisc::RequestExit(false);
-											return;
 										}
-
-										DesignImportUtils::OpenPreviewWindow(Data, DefaultFigmaOutputPath,
-											LOCTEXT("FigmaPreviewTitle", "Design2UMG Figma Preview"));
 									});
 							}
 						});
@@ -507,14 +480,13 @@ namespace
 			? FString::Printf(TEXT("/Game/Design2UMG/Figma_%s"), *FDateTime::Now().ToString(TEXT("%m%d_%H%M%S")))
 			: OutputPath;
 
-		if (bUsePreview && !FApp::IsUnattended())
-		{
-			DesignImportUtils::OpenPreviewWindow(Data, FinalOutputPath,
-				LOCTEXT("LocalFigmaPreviewTitle", "Design2UMG Local Figma Preview"));
-			return;
-		}
-
-		DesignImportUtils::GenerateBlueprintAndPng(Data, FinalOutputPath);
+		FDesignImportRequest Request;
+		Request.OutputPath = FinalOutputPath;
+		Request.PreviewWindowTitle = LOCTEXT("LocalFigmaPreviewTitle", "Design2UMG Local Figma Preview");
+		Request.bUsePreview = bUsePreview && !FApp::IsUnattended();
+		Request.bResolveImages = false;
+		Request.Generation.Mode = EDesignBlueprintGenerationMode::BlueprintAndPng;
+		DesignImportPipeline::Execute(Data, Request);
 	}
 
 	/** 弹出 Figma 导入对话框 */
@@ -725,8 +697,6 @@ void FDesign2UMGEditorModule::StartupModule()
 				return;
 			}
 
-			DesignImportUtils::ResolveImages(Data);
-
 			UE_LOG(LogDesign2UMG, Log, TEXT("[OK] PenConvert succeeded, root children: %d"), Data.RootWidget.Children.Num());
 			for (int32 Index = 0; Index < Data.RootWidget.Children.Num(); ++Index)
 			{
@@ -734,13 +704,12 @@ void FDesign2UMGEditorModule::StartupModule()
 				UE_LOG(LogDesign2UMG, Log, TEXT("  [%d] %s (%s)"), Index, *Child.Name, *Child.Type);
 			}
 
-			if (CmdArgs.bUsePreview && DesignImportUtils::OpenPreviewWindow(Data, CmdArgs.OutputPath,
-				LOCTEXT("PenConvertPreviewWindowTitle", "Design2UMG Pen Preview")))
-			{
-				return;
-			}
-
-			DesignImportUtils::GenerateBlueprintAndPng(Data, CmdArgs.OutputPath);
+			FDesignImportRequest Request;
+			Request.OutputPath = CmdArgs.OutputPath;
+			Request.PreviewWindowTitle = LOCTEXT("PenConvertPreviewWindowTitle", "Design2UMG Pen Preview");
+			Request.bUsePreview = CmdArgs.bUsePreview;
+			Request.Generation.Mode = EDesignBlueprintGenerationMode::BlueprintAndPng;
+			DesignImportPipeline::Execute(Data, Request);
 
 			if (FApp::IsUnattended())
 			{
@@ -865,13 +834,12 @@ void FDesign2UMGEditorModule::StartupModule()
 
 			UE_LOG(LogDesign2UMG, Log, TEXT("[OK] ImportSource succeeded (%s), root children: %d"), *SourceId.ToString(), Data.RootWidget.Children.Num());
 
-			if (bPreview && DesignImportUtils::OpenPreviewWindow(Data, OutputPath,
-				LOCTEXT("ImportSourcePreviewTitle", "Design2UMG Import Preview")))
-			{
-				return;
-			}
-
-			DesignImportUtils::GenerateBlueprintAndPng(Data, OutputPath);
+			FDesignImportRequest Request;
+			Request.OutputPath = OutputPath;
+			Request.PreviewWindowTitle = LOCTEXT("ImportSourcePreviewTitle", "Design2UMG Import Preview");
+			Request.bUsePreview = bPreview;
+			Request.Generation.Mode = EDesignBlueprintGenerationMode::BlueprintAndPng;
+			DesignImportPipeline::Execute(Data, Request);
 
 			if (FApp::IsUnattended())
 			{
