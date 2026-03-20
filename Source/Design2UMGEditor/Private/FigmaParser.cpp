@@ -77,6 +77,13 @@ static void AddNumericExtensionIfPresent(const TSharedPtr<FJsonObject>& Obj, TMa
 		Extensions.Add(ExtKey, FString::SanitizeFloat(static_cast<float>(Val)));
 }
 
+static void AddBoolExtensionIfPresent(const TSharedPtr<FJsonObject>& Obj, TMap<FString, FString>& Extensions, const FString& Key)
+{
+	bool Value = false;
+	if (Obj.IsValid() && Obj->TryGetBoolField(Key, Value))
+		Extensions.Add(Key, Value ? TEXT("true") : TEXT("false"));
+}
+
 static void AddJsonExtensionIfPresent(const TSharedPtr<FJsonObject>& Obj, TMap<FString, FString>& Extensions, const FString& SourceKey, const FString& ExtKey)
 {
 	if (!Obj.IsValid())
@@ -647,27 +654,9 @@ void FFigmaParser::ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNo
 
 	{
 		CaptureLayoutMetadataExtensions(NodeObj, OutNode.Metadata);
-
-		if (NodeObj->HasField(TEXT("itemReverseZIndex")))
-		{
-			bool bItemReverseZIndex = false;
-			if (NodeObj->TryGetBoolField(TEXT("itemReverseZIndex"), bItemReverseZIndex))
-				OutNode.Metadata.Add(TEXT("itemReverseZIndex"), bItemReverseZIndex ? TEXT("true") : TEXT("false"));
-		}
-
-		if (NodeObj->HasField(TEXT("isExposedInstance")))
-		{
-			bool bIsExposedInstance = false;
-			if (NodeObj->TryGetBoolField(TEXT("isExposedInstance"), bIsExposedInstance))
-				OutNode.Metadata.Add(TEXT("isExposedInstance"), bIsExposedInstance ? TEXT("true") : TEXT("false"));
-		}
-
-		if (NodeObj->HasField(TEXT("strokesIncludedInLayout")))
-		{
-			bool bStrokesIncludedInLayout = false;
-			if (NodeObj->TryGetBoolField(TEXT("strokesIncludedInLayout"), bStrokesIncludedInLayout))
-				OutNode.Metadata.Add(TEXT("strokesIncludedInLayout"), bStrokesIncludedInLayout ? TEXT("true") : TEXT("false"));
-		}
+		AddBoolExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("itemReverseZIndex"));
+		AddBoolExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("isExposedInstance"));
+		AddBoolExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("strokesIncludedInLayout"));
 
 		const TSharedPtr<FJsonValue> BoundVarsField = NodeObj->TryGetField(TEXT("boundVariables"));
 		if (BoundVarsField.IsValid() && BoundVarsField->Type == EJson::Object)
