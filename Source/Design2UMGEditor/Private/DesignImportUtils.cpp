@@ -61,6 +61,29 @@ namespace
 		return Settings ? Settings->GetDesignSize() : FIntPoint(1920, 1080);
 	}
 
+	FIntPoint ResolveWidgetTreeRenderSize(const FUMGWidgetData& Data)
+	{
+		int32 RenderW = FMath::CeilToInt(Data.RootWidget.Bounds.W);
+		int32 RenderH = FMath::CeilToInt(Data.RootWidget.Bounds.H);
+		if (RenderW < 2 || RenderH < 2)
+		{
+			RenderW = 1920;
+			RenderH = 1080;
+		}
+
+		return FIntPoint(RenderW, RenderH);
+	}
+
+	bool RenderWidgetTreePng(
+		UWidgetBlueprint* WidgetBlueprint,
+		const FIntPoint& RenderSize,
+		TArray<uint8>& OutPngData,
+		FIntPoint& OutRenderedSize)
+	{
+		OutRenderedSize = RenderSize;
+		return FUMGWidgetUtils::RenderWidgetTreeToPng(WidgetBlueprint, RenderSize, OutPngData, OutRenderedSize);
+	}
+
 	bool SavePngBytesToFile(const TArray<uint8>& PngData, const FString& OutputPngFilePath)
 	{
 		if (OutputPngFilePath.IsEmpty())
@@ -140,18 +163,11 @@ bool DesignImportUtils::GenerateBlueprintAndPng(const FUMGWidgetData& Data, cons
 
 	// 渲染尺寸优先使用根节点 Bounds；合成根（如多 frame 的 CanvasPanel）Bounds 为 0，
 	// 退化到 1x1 会导致 PNG 无意义，此时使用 1920x1080 默认尺寸。
-	int32 RenderW = FMath::CeilToInt(Data.RootWidget.Bounds.W);
-	int32 RenderH = FMath::CeilToInt(Data.RootWidget.Bounds.H);
-	if (RenderW < 2 || RenderH < 2)
-	{
-		RenderW = 1920;
-		RenderH = 1080;
-	}
-	const FIntPoint FallbackSize(RenderW, RenderH);
+	const FIntPoint FallbackSize = ResolveWidgetTreeRenderSize(Data);
 
 	TArray<uint8> PngData;
 	FIntPoint Size;
-	if (!FUMGWidgetUtils::RenderWidgetTreeToPng(WBP, FallbackSize, PngData, Size))
+	if (!RenderWidgetTreePng(WBP, FallbackSize, PngData, Size))
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget PNG render failed"));
 		// 渲染失败时也保存 Blueprint，方便定位问题。
@@ -237,7 +253,7 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 		const FIntPoint TreeRenderSize = ResolveCompiledRenderSize(WidgetBlueprint, RequestedRenderSize);
 		TArray<uint8> TreePngData;
 		FIntPoint TreeRenderedSize = TreeRenderSize;
-		if (FUMGWidgetUtils::RenderWidgetTreeToPng(WidgetBlueprint, TreeRenderSize, TreePngData, TreeRenderedSize))
+		if (RenderWidgetTreePng(WidgetBlueprint, TreeRenderSize, TreePngData, TreeRenderedSize))
 		{
 			const FString TreeRenderPath = FPaths::Combine(
 				FPaths::GetPath(OutputPngFilePath),
