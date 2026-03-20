@@ -353,6 +353,129 @@ namespace
 
 	float ResolveTextFontSizeForUMG(const TSharedPtr<FDesignNode>& Node);
 
+	bool IsHexColorLiteral(const FString& ColorValue)
+	{
+		if (!ColorValue.StartsWith(TEXT("#")))
+			return false;
+		const int32 Len = ColorValue.Len();
+		return Len == 4 || Len == 7 || Len == 9;
+	}
+
+	FString BuildHexColorWithAlpha(const FString& ColorValue, uint8 Alpha)
+	{
+		if (!IsHexColorLiteral(ColorValue))
+			return FString();
+
+		FColor Parsed = FColor::FromHex(ColorValue);
+		Parsed.A = Alpha;
+		return FString::Printf(TEXT("#%02X%02X%02X%02X"), Parsed.R, Parsed.G, Parsed.B, Parsed.A);
+	}
+
+	bool IsNeutralPlaceholderColor(const FString& ColorValue)
+	{
+		if (!IsHexColorLiteral(ColorValue))
+			return true;
+
+		const FColor Parsed = FColor::FromHex(ColorValue);
+		const uint8 MaxChannel = FMath::Max3(Parsed.R, Parsed.G, Parsed.B);
+		const uint8 MinChannel = FMath::Min3(Parsed.R, Parsed.G, Parsed.B);
+		return (Parsed.A <= 0x20) || ((MaxChannel - MinChannel) <= 0x10);
+	}
+
+	bool HasNodeMetadataFlag(const TSharedPtr<FDesignNode>& Node, const TCHAR* Key)
+	{
+		const FString* Value = Node->Metadata.Find(Key);
+		return Value && Value->Equals(TEXT("true"), ESearchCase::IgnoreCase);
+	}
+
+	bool TryApplyPlaceholderSurfaceTint(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
+	{
+		const bool bExpandedRefInstancePlaceholder = HasNodeMetadataFlag(Node, TEXT("design2umg.expanded_ref_instance"));
+		const FString DefaultPlaceholderFillColor = bExpandedRefInstancePlaceholder ? TEXT("#9682FF33") : TEXT("#D282FF33");
+		const FString DefaultPlaceholderOutlineColor = bExpandedRefInstancePlaceholder ? TEXT("#9580FF") : TEXT("#D480FF");
+		const bool bIsLeafContainer =
+			(Node->Type == EDesignNodeType::Frame
+				|| Node->Type == EDesignNodeType::Group
+				|| Node->Type == EDesignNodeType::Rectangle)
+			&& Node->Children.Num() == 0;
+		const bool bIsExplicitEmptySlotSurface =
+			HasNodeMetadataFlag(Node, TEXT("pen.slot.empty")) || HasNodeMetadataFlag(Node, TEXT("figma.slot.empty"));
+		const bool bUseSlotPlaceholderTint =
+			bIsLeafContainer
+			&& Node->Width.Value >= 24.0f
+			&& Node->Height.Value >= 12.0f
+			&& (Node->bSemanticPlaceholderSurface || bIsExplicitEmptySlotSurface);
+		if (!bUseSlotPlaceholderTint)
+			return false;
+
+		const FString FillColor = IsHexColorLiteral(Node->Fill.SolidColor) ? Node->Fill.SolidColor : FString();
+		const FString StrokeColor = IsHexColorLiteral(Node->Stroke.Fill.SolidColor) ? Node->Stroke.Fill.SolidColor : FString();
+		const FString PlaceholderOutlineColor =
+			(!StrokeColor.IsEmpty() && !IsNeutralPlaceholderColor(StrokeColor)) ? StrokeColor : DefaultPlaceholderOutlineColor;
+		FString PlaceholderFillColor =
+			(!FillColor.IsEmpty() && !IsNeutralPlaceholderColor(FillColor)) ? FillColor : DefaultPlaceholderFillColor;
+		if (PlaceholderFillColor.IsEmpty() && !PlaceholderOutlineColor.IsEmpty())
+			PlaceholderFillColor = BuildHexColorWithAlpha(PlaceholderOutlineColor, 0x33);
+		if (PlaceholderFillColor.IsEmpty() || PlaceholderOutlineColor.IsEmpty())
+			return false;
+
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: applying placeholder surface tint to '%s'"), *Node->Name);
+		Widget.Type = TEXT("Image");
+		Widget.Children.Empty();
+		const int32 InsetPx = FMath::Clamp(
+			FMath::RoundToInt(FMath::Min3(10.0f, Node->Width.Value * 0.25f, Node->Height.Value * 0.25f)),
+			1,
+			10);
+		Widget.Brush = FUMGVisualBrushData();
+		for (const TCHAR* Key : {TEXT("BrushColor"), TEXT("TexturePath"), TEXT("DrawAs"), TEXT("OutlineThickness"), TEXT("OutlineColor"), TEXT("StrokePadding"), TEXT("StrokeMargin")})
+			Widget.Properties.Remove(Key);
+		Widget.Properties.Add(TEXT("MaterialRef"), TEXT("placeholdersurface"));
+		Widget.Properties.Add(TEXT("MaterialParams"),
+			FString::Printf(TEXT("{\"Color\":\"%s\",\"StripeColor\":\"%s\",\"StripeWidth\":1,\"Inset\":%d}"),
+				*PlaceholderFillColor, *PlaceholderOutlineColor, InsetPx));
+		if (Node->Width.Value > 0.0f)
+			Widget.Properties.Add(TEXT("WidthOverride"), FString::SanitizeFloat(Node->Width.Value));
+		if (Node->Height.Value > 0.0f)
+			Widget.Properties.Add(TEXT("HeightOverride"), FString::SanitizeFloat(Node->Height.Value));
+		return true;
+	}
+
+	bool ShouldWrapNodeWithBorder(const TSharedPtr<FDesignNode>& Node, bool bPlaceholderUsesDirectImage)
+	{
+		const bool bHasVisualFill = (Node->Fill.bEnabled && Node->Fill.Type != EDesignFillType::None) || Node->Fills.Num() > 0;
+		const bool bHasCornerRadius = Node->CornerRadius.bUniform ? Node->CornerRadius.Uniform > 0
+			: (Node->CornerRadius.TopLeft > 0 || Node->CornerRadius.TopRight > 0
+				|| Node->CornerRadius.BottomRight > 0 || Node->CornerRadius.BottomLeft > 0);
+		return (Node->Type == EDesignNodeType::Frame || Node->Type == EDesignNodeType::Group)
+			&& (bHasVisualFill
+				|| (Node->Layout == EDesignLayout::None && FLayoutMapper::HasPadding(Node))
+				|| bHasCornerRadius
+				|| Node->Stroke.HasStroke())
+			&& !bPlaceholderUsesDirectImage;
+	}
+
+	FUMGWidgetNode ApplyVisualEffectWrappers(FUMGWidgetNode Widget, const TSharedPtr<FDesignNode>& Node)
+	{
+		if (Node->HasMultiFill())
+			Widget = FVisualMapper::WrapWithMultiFill(MoveTemp(Widget), Node);
+
+		if (const FString* ShadowCountStr = Widget.Properties.Find(TEXT("BoxShadowCount")))
+		{
+			const int32 ShadowCount = FCString::Atoi(**ShadowCountStr);
+			Widget.Properties.Remove(TEXT("BoxShadowCount"));
+			for (int32 Index = 0; Index < ShadowCount; ++Index)
+				Widget = FVisualMapper::WrapWithBoxShadow(MoveTemp(Widget), Node, Index);
+		}
+
+		for (const FDesignEffect& Effect : Node->Effects)
+		{
+			if (Effect.bEnabled && Effect.Type == EDesignEffectType::BackgroundBlur && Effect.Radius > 0)
+				return FVisualMapper::WrapWithBackgroundBlur(MoveTemp(Widget), Effect.Radius);
+		}
+
+		return Widget;
+	}
+
 	bool ShouldUseSingleLineTextHeight(const TSharedPtr<FDesignNode>& Node, float UnwrappedWidth, float ParentContentWidth)
 	{
 		if (!Node.IsValid())
@@ -1360,144 +1483,23 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FDesignNode>& 
 		FLayoutMapper::ApplyJustifyContent(Widget.Children, Node->JustifyContent, MainAxisMode, ParentLayout);
 	}
 
-	TSharedPtr<FDesignNode> VisualNode = Node;
-	const auto IsHexColorLiteral = [](const FString& ColorValue) -> bool
+	const bool bPlaceholderUsesDirectImage = TryApplyPlaceholderSurfaceTint(Widget, Node);
+	if (ShouldWrapNodeWithBorder(Node, bPlaceholderUsesDirectImage))
 	{
-		if (!ColorValue.StartsWith(TEXT("#")))
-		{
-			return false;
-		}
-		const int32 Len = ColorValue.Len();
-		return Len == 4 || Len == 7 || Len == 9;
-	};
-	const auto BuildHexColorWithAlpha = [&](const FString& ColorValue, uint8 Alpha) -> FString
-	{
-		if (!IsHexColorLiteral(ColorValue))
-		{
-			return FString();
-		}
-
-		FColor Parsed = FColor::FromHex(ColorValue);
-		Parsed.A = Alpha;
-		return FString::Printf(TEXT("#%02X%02X%02X%02X"), Parsed.R, Parsed.G, Parsed.B, Parsed.A);
-	};
-	const auto IsNeutralPlaceholderColor = [&](const FString& ColorValue) -> bool
-	{
-		if (!IsHexColorLiteral(ColorValue))
-		{
-			return true;
-		}
-
-		const FColor Parsed = FColor::FromHex(ColorValue);
-		const uint8 MaxChannel = FMath::Max3(Parsed.R, Parsed.G, Parsed.B);
-		const uint8 MinChannel = FMath::Min3(Parsed.R, Parsed.G, Parsed.B);
-		return (Parsed.A <= 0x20) || ((MaxChannel - MinChannel) <= 0x10);
-	};
-	const auto HasMetadataFlag = [&](const TCHAR* Key) -> bool
-	{
-		const FString* Value = Node->Metadata.Find(Key);
-		return Value && Value->Equals(TEXT("true"), ESearchCase::IgnoreCase);
-	};
-	const bool bExpandedRefInstancePlaceholder = HasMetadataFlag(TEXT("design2umg.expanded_ref_instance"));
-	const FString DefaultPlaceholderFillColor = bExpandedRefInstancePlaceholder
-		? TEXT("#9682FF33")
-		: TEXT("#D282FF33");
-	const FString DefaultPlaceholderOutlineColor = bExpandedRefInstancePlaceholder
-		? TEXT("#9580FF")
-		: TEXT("#D480FF");
-
-	const bool bIsLeafContainer =
-		(Node->Type == EDesignNodeType::Frame
-			|| Node->Type == EDesignNodeType::Group
-			|| Node->Type == EDesignNodeType::Rectangle) &&
-		Node->Children.Num() == 0;
-	const bool bIsLargeEnoughPlaceholderSurface = Node->Width.Value >= 24.0f && Node->Height.Value >= 12.0f;
-	const bool bIsExplicitEmptySlotSurface =
-		HasMetadataFlag(TEXT("pen.slot.empty")) || HasMetadataFlag(TEXT("figma.slot.empty"));
-	const bool bUseSlotPlaceholderTint =
-		bIsLeafContainer
-		&& bIsLargeEnoughPlaceholderSurface
-		&& (Node->bSemanticPlaceholderSurface || bIsExplicitEmptySlotSurface);
-	bool bForcePlaceholderBorder = false;
-	bool bPlaceholderUsesDirectImage = false;
-	if (bUseSlotPlaceholderTint)
-	{
-		const FString FillColor = IsHexColorLiteral(VisualNode->Fill.SolidColor) ? VisualNode->Fill.SolidColor : FString();
-		const FString StrokeColor = IsHexColorLiteral(VisualNode->Stroke.Fill.SolidColor) ? VisualNode->Stroke.Fill.SolidColor : FString();
-		const FString PlaceholderOutlineColor =
-			(!StrokeColor.IsEmpty() && !IsNeutralPlaceholderColor(StrokeColor)) ? StrokeColor : DefaultPlaceholderOutlineColor;
-		FString PlaceholderFillColor =
-			(!FillColor.IsEmpty() && !IsNeutralPlaceholderColor(FillColor)) ? FillColor : DefaultPlaceholderFillColor;
-		if (PlaceholderFillColor.IsEmpty() && !PlaceholderOutlineColor.IsEmpty())
-		{
-			PlaceholderFillColor = BuildHexColorWithAlpha(PlaceholderOutlineColor, 0x33);
-		}
-		if (!PlaceholderFillColor.IsEmpty() && !PlaceholderOutlineColor.IsEmpty())
-		{
-			UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: applying placeholder surface tint to '%s'"), *Node->Name);
-			Widget.Type = TEXT("Image");
-			Widget.Children.Empty();
-			const int32 InsetPx = FMath::Clamp(
-				FMath::RoundToInt(FMath::Min3(10.0f, Node->Width.Value * 0.25f, Node->Height.Value * 0.25f)),
-				1,
-				10);
-			Widget.Brush = FUMGVisualBrushData();
-			for (const TCHAR* Key : {TEXT("BrushColor"), TEXT("TexturePath"), TEXT("DrawAs"), TEXT("OutlineThickness"), TEXT("OutlineColor"), TEXT("StrokePadding"), TEXT("StrokeMargin")})
-			{
-				Widget.Properties.Remove(Key);
-			}
-			Widget.Properties.Add(TEXT("MaterialRef"), TEXT("placeholdersurface"));
-			Widget.Properties.Add(TEXT("MaterialParams"),
-				FString::Printf(TEXT("{\"Color\":\"%s\",\"StripeColor\":\"%s\",\"StripeWidth\":1,\"Inset\":%d}"),
-					*PlaceholderFillColor, *PlaceholderOutlineColor, InsetPx));
-			if (Node->Width.Value > 0.0f)
-				Widget.Properties.Add(TEXT("WidthOverride"), FString::SanitizeFloat(Node->Width.Value));
-			if (Node->Height.Value > 0.0f)
-				Widget.Properties.Add(TEXT("HeightOverride"), FString::SanitizeFloat(Node->Height.Value));
-			bPlaceholderUsesDirectImage = true;
-		}
-	}
-
-	const bool bHasVisualFill = (VisualNode->Fill.bEnabled && VisualNode->Fill.Type != EDesignFillType::None)
-		|| VisualNode->Fills.Num() > 0;
-	const bool bHasCornerRadius = VisualNode->CornerRadius.bUniform ? VisualNode->CornerRadius.Uniform > 0
-		: (VisualNode->CornerRadius.TopLeft > 0 || VisualNode->CornerRadius.TopRight > 0
-			|| VisualNode->CornerRadius.BottomRight > 0 || VisualNode->CornerRadius.BottomLeft > 0);
-	const bool bTreatPaddingAsBorder = (Node->Layout == EDesignLayout::None);
-	bool bNeedsBorder = (Node->Type == EDesignNodeType::Frame || Node->Type == EDesignNodeType::Group)
-		&& (bHasVisualFill || (bTreatPaddingAsBorder && FLayoutMapper::HasPadding(VisualNode))
-			|| bHasCornerRadius || VisualNode->Stroke.HasStroke() || bForcePlaceholderBorder)
-		&& !bPlaceholderUsesDirectImage;
-
-	if (bNeedsBorder)
-	{
+		const bool bHasVisualFill = (Node->Fill.bEnabled && Node->Fill.Type != EDesignFillType::None) || Node->Fills.Num() > 0;
+		const bool bHasCornerRadius = Node->CornerRadius.bUniform ? Node->CornerRadius.Uniform > 0
+			: (Node->CornerRadius.TopLeft > 0 || Node->CornerRadius.TopRight > 0
+				|| Node->CornerRadius.BottomRight > 0 || Node->CornerRadius.BottomLeft > 0);
 		UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: '%s' → WrapWithBorder (fill=%d corner=%d stroke=%d)"),
-			*Widget.Name, bHasVisualFill, bHasCornerRadius, VisualNode->Stroke.HasStroke());
-		Widget = FVisualMapper::WrapWithBorder(MoveTemp(Widget), VisualNode);
+			*Widget.Name, bHasVisualFill, bHasCornerRadius, Node->Stroke.HasStroke());
+		Widget = FVisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
 	}
-	else if (FLayoutMapper::HasPadding(VisualNode) && !bPlaceholderUsesDirectImage)
-		FLayoutMapper::ApplyPadding(Widget, VisualNode->Padding);
-
-	// 多层填充叠加（Overlay 包裹）
-	if (VisualNode->HasMultiFill())
-		Widget = FVisualMapper::WrapWithMultiFill(MoveTemp(Widget), VisualNode);
-
-	const FString* ShadowCountStr = Widget.Properties.Find(TEXT("BoxShadowCount"));
-	if (ShadowCountStr)
+	else if (FLayoutMapper::HasPadding(Node) && !bPlaceholderUsesDirectImage)
 	{
-		int32 ShadowCount = FCString::Atoi(**ShadowCountStr);
-		Widget.Properties.Remove(TEXT("BoxShadowCount"));
-		for (int32 i = 0; i < ShadowCount; ++i)
-			Widget = FVisualMapper::WrapWithBoxShadow(MoveTemp(Widget), VisualNode, i);
+		FLayoutMapper::ApplyPadding(Widget, Node->Padding);
 	}
 
-	for (const FDesignEffect& Effect : VisualNode->Effects)
-	{
-		if (Effect.bEnabled && Effect.Type == EDesignEffectType::BackgroundBlur && Effect.Radius > 0)
-			return FVisualMapper::WrapWithBackgroundBlur(MoveTemp(Widget), Effect.Radius);
-	}
-
-	return Widget;
+	return ApplyVisualEffectWrappers(MoveTemp(Widget), Node);
 }
 
 FUMGWidgetNode FDesign2UMGConverter::CreateContainerWidget(const TSharedPtr<FDesignNode>& Node)
