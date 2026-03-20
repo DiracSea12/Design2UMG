@@ -422,10 +422,7 @@ bool FPenParser::ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, F
 			const TSharedPtr<FJsonObject>& ChildObj = ChildVal->AsObject();
 			if (ChildObj.IsValid())
 			{
-				float FrameX = 0.0f, FrameY = 0.0f;
-				TryGetResolvedNumberField(ChildObj, TEXT("x"), Resolver, FrameX);
-				TryGetResolvedNumberField(ChildObj, TEXT("y"), Resolver, FrameY);
-				if (auto Node = ParseNode(ChildObj, Resolver, FrameX, FrameY))
+				if (auto Node = ParseNode(ChildObj, Resolver))
 					OutDocument.Children.Add(Node);
 			}
 		}
@@ -518,11 +515,8 @@ void FPenParser::ParseVariables(const TSharedPtr<FJsonObject>& JsonObj, TMap<FSt
 	}
 }
 
-TSharedPtr<FDesignNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver, float ParentX, float ParentY)
+TSharedPtr<FDesignNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver)
 {
-	(void)ParentX;
-	(void)ParentY;
-
 	if (!JsonObj.IsValid())
 		return nullptr;
 
@@ -565,26 +559,6 @@ TSharedPtr<FDesignNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& Jso
 		}
 	}
 
-	// Position - .pen uses parent-local coordinates (not document-absolute).
-	// Keep raw x/y as-is to avoid double-subtracting parent offsets.
-	float AbsoluteX = 0.0f, AbsoluteY = 0.0f;
-	if (JsonObj->HasField(TEXT("x")))
-	{
-		if (TryGetResolvedNumberField(JsonObj, TEXT("x"), *ActiveResolver, AbsoluteX))
-		{
-			Node->X = AbsoluteX;
-			Node->bHasX = true;
-		}
-	}
-	if (JsonObj->HasField(TEXT("y")))
-	{
-		if (TryGetResolvedNumberField(JsonObj, TEXT("y"), *ActiveResolver, AbsoluteY))
-		{
-			Node->Y = AbsoluteY;
-			Node->bHasY = true;
-		}
-	}
-	TryGetResolvedNumberField(JsonObj, TEXT("rotation"), *ActiveResolver, Node->Rotation);
 	const TSharedPtr<FJsonValue>& SizeField = JsonObj->TryGetField(TEXT("size"));
 	if (SizeField.IsValid() && SizeField->Type == EJson::Object)
 	{
@@ -603,22 +577,11 @@ TSharedPtr<FDesignNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& Jso
 		}
 	}
 
-	// Top-level width/height have higher priority.
-	if (JsonObj->HasField(TEXT("width")))
-	{
-		Node->Width = ParseSize(JsonObj->TryGetField(TEXT("width")), Node->Type, *ActiveResolver);
-		Node->bHasWidth = true;
-	}
-	if (JsonObj->HasField(TEXT("height")))
-	{
-		Node->Height = ParseSize(JsonObj->TryGetField(TEXT("height")), Node->Type, *ActiveResolver);
-		Node->bHasHeight = true;
-	}
+	ApplyNodeBoxProperties(JsonObj, *Node, Node->Type, *ActiveResolver);
+	TryGetResolvedNumberField(JsonObj, TEXT("rotation"), *ActiveResolver, Node->Rotation);
 
 	// Visibility.
 	TryGetResolvedBoolField(JsonObj, TEXT("enabled"), *ActiveResolver, Node->bEnabled);
-	if (JsonObj->HasField(TEXT("opacity")))
-		Node->bHasOpacity = TryGetResolvedNumberField(JsonObj, TEXT("opacity"), *ActiveResolver, Node->Opacity);
 	TryGetResolvedBoolField(JsonObj, TEXT("flipX"), *ActiveResolver, Node->bFlipX);
 	TryGetResolvedBoolField(JsonObj, TEXT("flipY"), *ActiveResolver, Node->bFlipY);
 
@@ -630,25 +593,7 @@ TSharedPtr<FDesignNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& Jso
 		else if (Node->Type == EDesignNodeType::Group)
 			Node->Layout = EDesignLayout::None;
 	}
-	if (JsonObj->HasField(TEXT("gap")))
-		Node->bHasGap = TryGetResolvedNumberField(JsonObj, TEXT("gap"), *ActiveResolver, Node->Gap);
-	if (JsonObj->HasField(TEXT("padding")))
-	{
-		Node->Padding = ParsePadding(JsonObj->TryGetField(TEXT("padding")), *ActiveResolver);
-		Node->bHasPadding = true;
-	}
-	{
-		FString JCStr;
-		if (JsonObj->TryGetStringField(TEXT("justifyContent"), JCStr))
-			Node->JustifyContent = ParseJustifyContent(JCStr);
-	}
-	{
-		FString AIStr;
-		if (JsonObj->TryGetStringField(TEXT("alignItems"), AIStr))
-			Node->AlignItems = ParseAlignItems(AIStr);
-	}
-	if (JsonObj->HasField(TEXT("clip")))
-		Node->bHasClip = TryGetResolvedBoolField(JsonObj, TEXT("clip"), *ActiveResolver, Node->bClip);
+	ApplyNodeLayoutProperties(JsonObj, *Node, *ActiveResolver, false);
 	if (JsonObj->HasField(TEXT("layoutIncludeStroke")))
 	{
 		bool bLayoutIncludeStroke = false;
@@ -674,8 +619,7 @@ TSharedPtr<FDesignNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& Jso
 		const auto& ChildrenArr = NodeChildrenField->AsArray();
 		for (const auto& ChildVal : ChildrenArr)
 		{
-			// .pen uses local coordinates, no parent absolute transform is needed.
-			if (auto Child = ParseNode(ChildVal->AsObject(), *ActiveResolver, AbsoluteX, AbsoluteY))
+			if (auto Child = ParseNode(ChildVal->AsObject(), *ActiveResolver))
 				Node->Children.Add(Child);
 		}
 	}
@@ -869,10 +813,7 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 			if (OverrideObj->HasField(TEXT("type")))
 			{
 				// Descendants閫氬父鏄粍浠跺疄渚嬶紝缁ф壙鐖惰妭鐐瑰潗鏍囩郴
-				float DescX = 0.0f, DescY = 0.0f;
-				TryGetResolvedNumberField(OverrideObj, TEXT("x"), Resolver, DescX);
-				TryGetResolvedNumberField(OverrideObj, TEXT("y"), Resolver, DescY);
-				if (auto FullNode = ParseNode(OverrideObj, Resolver, DescX, DescY))
+				if (auto FullNode = ParseNode(OverrideObj, Resolver))
 					Node->Descendants.Add(Pair.Key, FullNode);
 				continue;
 			}
@@ -903,55 +844,9 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 				ParseNodeFillProperties(OverrideObj->TryGetField(TEXT("fill")), *DescNode, Resolver);
 			ParseNodeStrokeProperties(OverrideObj->TryGetField(TEXT("stroke")), *DescNode, Resolver);
 
-			// Size overrides (support string formats like "fill_container"/"fit_content").
-			if (OverrideObj->HasField(TEXT("width")))
-			{
-				DescNode->Width = ParseSize(OverrideObj->TryGetField(TEXT("width")), EDesignNodeType::Frame, Resolver);
-				DescNode->bHasWidth = true;
-			}
-			if (OverrideObj->HasField(TEXT("height")))
-			{
-				DescNode->Height = ParseSize(OverrideObj->TryGetField(TEXT("height")), EDesignNodeType::Frame, Resolver);
-				DescNode->bHasHeight = true;
-			}
-
-			if (OverrideObj->HasField(TEXT("x")))
-				DescNode->bHasX = TryGetResolvedNumberField(OverrideObj, TEXT("x"), Resolver, DescNode->X);
-			if (OverrideObj->HasField(TEXT("y")))
-				DescNode->bHasY = TryGetResolvedNumberField(OverrideObj, TEXT("y"), Resolver, DescNode->Y);
+			ApplyNodeBoxProperties(OverrideObj, *DescNode, EDesignNodeType::Frame, Resolver);
 			TryGetResolvedBoolField(OverrideObj, TEXT("enabled"), Resolver, DescNode->bEnabled);
-			if (OverrideObj->HasField(TEXT("padding")))
-			{
-				DescNode->Padding = ParsePadding(OverrideObj->TryGetField(TEXT("padding")), Resolver);
-				DescNode->bHasPadding = true;
-			}
-			if (OverrideObj->HasField(TEXT("gap")))
-				DescNode->bHasGap = TryGetResolvedNumberField(OverrideObj, TEXT("gap"), Resolver, DescNode->Gap);
-			if (OverrideObj->HasField(TEXT("clip")))
-				DescNode->bHasClip = TryGetResolvedBoolField(OverrideObj, TEXT("clip"), Resolver, DescNode->bClip);
-			if (OverrideObj->HasField(TEXT("opacity")))
-				DescNode->bHasOpacity = TryGetResolvedNumberField(OverrideObj, TEXT("opacity"), Resolver, DescNode->Opacity);
-			{
-				FString JCStr;
-				if (OverrideObj->TryGetStringField(TEXT("justifyContent"), JCStr))
-					DescNode->JustifyContent = ParseJustifyContent(JCStr);
-			}
-			{
-				FString AIStr;
-				if (OverrideObj->TryGetStringField(TEXT("alignItems"), AIStr))
-					DescNode->AlignItems = ParseAlignItems(AIStr);
-			}
-			{
-				FString TAStr;
-				if (OverrideObj->TryGetStringField(TEXT("textAlign"), TAStr))
-					DescNode->TextAlign = ParseTextAlign(TAStr);
-			}
-			TryGetResolvedNumberField(OverrideObj, TEXT("lineHeight"), Resolver, DescNode->LineHeight);
-			{
-				FString TGStr;
-				if (OverrideObj->TryGetStringField(TEXT("textGrowth"), TGStr))
-					DescNode->TextGrowth = ParseTextGrowth(TGStr);
-			}
+			ApplyNodeLayoutProperties(OverrideObj, *DescNode, Resolver, true);
 			OverrideObj->TryGetStringField(TEXT("name"), DescNode->Name);
 
 			// children 瑕嗙洊锛氬畬鏁存浛鎹㈠瓙鑺傜偣
@@ -959,13 +854,9 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 			if (ChildOvField.IsValid() && ChildOvField->Type == EJson::Array)
 			{
 				const auto& ChildArr = ChildOvField->AsArray();
-				// 鑾峰彇DescNode鐨勭粷瀵瑰潗鏍囦綔涓哄瓙鑺傜偣鐨勭埗鍧愭爣
-				float DescNodeX = 0.0f, DescNodeY = 0.0f;
-				TryGetResolvedNumberField(OverrideObj, TEXT("x"), Resolver, DescNodeX);
-				TryGetResolvedNumberField(OverrideObj, TEXT("y"), Resolver, DescNodeY);
 				for (const auto& ChildVal : ChildArr)
 				{
-					if (auto Child = ParseNode(ChildVal->AsObject(), Resolver, DescNodeX, DescNodeY))
+					if (auto Child = ParseNode(ChildVal->AsObject(), Resolver))
 						DescNode->Children.Add(Child);
 				}
 			}
@@ -1004,6 +895,54 @@ void FPenParser::ParseNodeStrokeProperties(const TSharedPtr<FJsonValue>& Value, 
 	const TSharedPtr<FJsonObject> StrokeObj = Value->AsObject();
 	OutNode.Stroke = ParseStroke(StrokeObj, Resolver);
 	ApplyPenStrokeExtensions(StrokeObj, OutNode, Resolver);
+}
+
+void FPenParser::ApplyNodeBoxProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, EDesignNodeType SizeNodeType, const FDesignVariableResolver& Resolver)
+{
+	if (JsonObj->HasField(TEXT("width")))
+	{
+		OutNode.Width = ParseSize(JsonObj->TryGetField(TEXT("width")), SizeNodeType, Resolver);
+		OutNode.bHasWidth = true;
+	}
+	if (JsonObj->HasField(TEXT("height")))
+	{
+		OutNode.Height = ParseSize(JsonObj->TryGetField(TEXT("height")), SizeNodeType, Resolver);
+		OutNode.bHasHeight = true;
+	}
+	if (JsonObj->HasField(TEXT("x")))
+		OutNode.bHasX = TryGetResolvedNumberField(JsonObj, TEXT("x"), Resolver, OutNode.X);
+	if (JsonObj->HasField(TEXT("y")))
+		OutNode.bHasY = TryGetResolvedNumberField(JsonObj, TEXT("y"), Resolver, OutNode.Y);
+}
+
+void FPenParser::ApplyNodeLayoutProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver, bool bIncludeTextProperties)
+{
+	if (JsonObj->HasField(TEXT("opacity")))
+		OutNode.bHasOpacity = TryGetResolvedNumberField(JsonObj, TEXT("opacity"), Resolver, OutNode.Opacity);
+	if (JsonObj->HasField(TEXT("gap")))
+		OutNode.bHasGap = TryGetResolvedNumberField(JsonObj, TEXT("gap"), Resolver, OutNode.Gap);
+	if (JsonObj->HasField(TEXT("padding")))
+	{
+		OutNode.Padding = ParsePadding(JsonObj->TryGetField(TEXT("padding")), Resolver);
+		OutNode.bHasPadding = true;
+	}
+	FString JustifyContent;
+	if (JsonObj->TryGetStringField(TEXT("justifyContent"), JustifyContent))
+		OutNode.JustifyContent = ParseJustifyContent(JustifyContent);
+	FString AlignItems;
+	if (JsonObj->TryGetStringField(TEXT("alignItems"), AlignItems))
+		OutNode.AlignItems = ParseAlignItems(AlignItems);
+	if (JsonObj->HasField(TEXT("clip")))
+		OutNode.bHasClip = TryGetResolvedBoolField(JsonObj, TEXT("clip"), Resolver, OutNode.bClip);
+	if (!bIncludeTextProperties)
+		return;
+	FString TextAlign;
+	if (JsonObj->TryGetStringField(TEXT("textAlign"), TextAlign))
+		OutNode.TextAlign = ParseTextAlign(TextAlign);
+	TryGetResolvedNumberField(JsonObj, TEXT("lineHeight"), Resolver, OutNode.LineHeight);
+	FString TextGrowth;
+	if (JsonObj->TryGetStringField(TEXT("textGrowth"), TextGrowth))
+		OutNode.TextGrowth = ParseTextGrowth(TextGrowth);
 }
 
 FDesignSize FPenParser::ParseSize(const TSharedPtr<FJsonValue>& Value, EDesignNodeType NodeType, const FDesignVariableResolver& Resolver)

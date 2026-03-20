@@ -27,7 +27,7 @@ private:
 	static bool ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FDesignDocument& OutDocument);
 
 	/** Parse a single node. */
-	static TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver, float ParentX = 0.0f, float ParentY = 0.0f);
+	static TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver);
 
 	/** Parse the node type. */
 	static EDesignNodeType ParseNodeType(const FString& TypeStr);
@@ -73,4 +73,10 @@ private:
 
 	/** Parse extended node properties such as text, icon, and ellipse data. */
 	static void ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TSharedPtr<FDesignNode>& Node, const FDesignVariableResolver& Resolver);
+
+	/** Apply shared box properties such as x/y and width/height. */
+	static void ApplyNodeBoxProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, EDesignNodeType SizeNodeType, const FDesignVariableResolver& Resolver);
+
+	/** Apply shared layout properties and optional text layout overrides. */
+	static void ApplyNodeLayoutProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver, bool bIncludeTextProperties);
 };
