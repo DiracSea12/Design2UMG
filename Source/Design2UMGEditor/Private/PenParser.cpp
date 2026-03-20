@@ -177,6 +177,42 @@ namespace
 			|| bNameLooksLikeSlot;
 	}
 
+	void ParsePenSemanticMetadata(
+		const TSharedPtr<FJsonObject>& JsonObj,
+		FDesignNode& Node,
+		const FDesignVariableResolver& Resolver)
+	{
+		bool bPenPlaceholder = false;
+		TryGetResolvedBoolField(JsonObj, TEXT("placeholder"), Resolver, bPenPlaceholder);
+
+		bool bPenHasSlot = false;
+		int32 PenSlotNodeCount = 0;
+		const TSharedPtr<FJsonValue> SlotField = JsonObj->TryGetField(TEXT("slot"));
+		if (SlotField.IsValid() && SlotField->Type == EJson::Array)
+		{
+			bPenHasSlot = true;
+			for (const TSharedPtr<FJsonValue>& SlotVal : SlotField->AsArray())
+			{
+				if (!SlotVal.IsValid())
+					continue;
+
+				FString SlotId;
+				if (SlotVal->TryGetString(SlotId))
+					++PenSlotNodeCount;
+			}
+		}
+
+		if (bPenHasSlot)
+		{
+			Node.Metadata.Add(TEXT("pen.slot.present"), TEXT("true"));
+			Node.Metadata.Add(TEXT("pen.slot.count"), FString::FromInt(PenSlotNodeCount));
+			if (PenSlotNodeCount == 0)
+				Node.Metadata.Add(TEXT("pen.slot.empty"), TEXT("true"));
+		}
+
+		ApplyPenSemanticHints(Node, bPenPlaceholder, bPenHasSlot, PenSlotNodeCount);
+	}
+
 	void ApplyPenStrokeExtensions(
 		const TSharedPtr<FJsonObject>& StrokeObj,
 		FDesignNode& Node,
@@ -619,30 +655,6 @@ TSharedPtr<FDesignNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& Jso
 		if (TryGetResolvedBoolField(JsonObj, TEXT("layoutIncludeStroke"), *ActiveResolver, bLayoutIncludeStroke))
 			Node->Metadata.Add(TEXT("layoutIncludeStroke"), bLayoutIncludeStroke ? TEXT("true") : TEXT("false"));
 	}
-	bool bPenPlaceholder = false;
-	TryGetResolvedBoolField(JsonObj, TEXT("placeholder"), *ActiveResolver, bPenPlaceholder);
-	bool bPenHasSlot = false;
-	int32 PenSlotNodeCount = 0;
-	const TSharedPtr<FJsonValue>& SlotField = JsonObj->TryGetField(TEXT("slot"));
-	if (SlotField.IsValid() && SlotField->Type == EJson::Array)
-	{
-		bPenHasSlot = true;
-		for (const TSharedPtr<FJsonValue>& SlotVal : SlotField->AsArray())
-		{
-			if (!SlotVal.IsValid())
-				continue;
-			FString SlotId;
-			if (SlotVal->TryGetString(SlotId))
-				++PenSlotNodeCount;
-		}
-	}
-	if (bPenHasSlot)
-	{
-		Node->Metadata.Add(TEXT("pen.slot.present"), TEXT("true"));
-		Node->Metadata.Add(TEXT("pen.slot.count"), FString::FromInt(PenSlotNodeCount));
-		if (PenSlotNodeCount == 0)
-			Node->Metadata.Add(TEXT("pen.slot.empty"), TEXT("true"));
-	}
 	TryGetResolvedNumberField(JsonObj, TEXT("layoutGrow"), *ActiveResolver, Node->LayoutGrow);
 
 	// Visual properties.
@@ -693,7 +705,7 @@ TSharedPtr<FDesignNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& Jso
 		}
 	}
 
-	ApplyPenSemanticHints(*Node, bPenPlaceholder, bPenHasSlot, PenSlotNodeCount);
+	ParsePenSemanticMetadata(JsonObj, *Node, *ActiveResolver);
 
 	return Node;
 }
@@ -990,30 +1002,6 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 					DescNode->TextGrowth = ParseTextGrowth(TGStr);
 			}
 			OverrideObj->TryGetStringField(TEXT("name"), DescNode->Name);
-			bool bPenPlaceholder = false;
-			TryGetResolvedBoolField(OverrideObj, TEXT("placeholder"), Resolver, bPenPlaceholder);
-			bool bPenHasSlot = false;
-			int32 PenSlotNodeCount = 0;
-			const TSharedPtr<FJsonValue>& DescSlotField = OverrideObj->TryGetField(TEXT("slot"));
-			if (DescSlotField.IsValid() && DescSlotField->Type == EJson::Array)
-			{
-				bPenHasSlot = true;
-				for (const TSharedPtr<FJsonValue>& SlotVal : DescSlotField->AsArray())
-				{
-					if (!SlotVal.IsValid())
-						continue;
-					FString SlotId;
-					if (SlotVal->TryGetString(SlotId))
-						++PenSlotNodeCount;
-				}
-			}
-			if (bPenHasSlot)
-			{
-				DescNode->Metadata.Add(TEXT("pen.slot.present"), TEXT("true"));
-				DescNode->Metadata.Add(TEXT("pen.slot.count"), FString::FromInt(PenSlotNodeCount));
-				if (PenSlotNodeCount == 0)
-					DescNode->Metadata.Add(TEXT("pen.slot.empty"), TEXT("true"));
-			}
 
 			// children 瑕嗙洊锛氬畬鏁存浛鎹㈠瓙鑺傜偣
 			const TSharedPtr<FJsonValue>& ChildOvField = OverrideObj->TryGetField(TEXT("children"));
@@ -1031,7 +1019,7 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 				}
 			}
 
-			ApplyPenSemanticHints(*DescNode, bPenPlaceholder, bPenHasSlot, PenSlotNodeCount);
+			ParsePenSemanticMetadata(OverrideObj, *DescNode, Resolver);
 
 			Node->Descendants.Add(Pair.Key, DescNode);
 		}
