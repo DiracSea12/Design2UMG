@@ -125,6 +125,29 @@ namespace
 		return Result;
 	}
 
+	bool BuildFilteredChildren(
+		const TArray<TSharedPtr<FJsonValue>>& AllChildren,
+		const FString& TargetNodeId,
+		TArray<TSharedPtr<FJsonValue>>& OutChildren)
+	{
+		if (TargetNodeId.IsEmpty())
+		{
+			OutChildren = AllChildren;
+			return true;
+		}
+
+		OutChildren = FilterWithReusables(AllChildren, TargetNodeId);
+		if (OutChildren.Num() > 0)
+		{
+			return true;
+		}
+
+		const FString CanonicalId = CanonicalizeNodeId(TargetNodeId);
+		UE_LOG(LogPenMCPBridge, Error, TEXT("TargetNodeId '%s' not found (hint: '%s' / 'frame-%s')"),
+			*TargetNodeId, *CanonicalId, *CanonicalId);
+		return false;
+	}
+
 	/** 浠庢簮瀵硅薄缁勮鏍囧噯鏂囨。 JSON 骞跺簭鍒楀寲 */
 	FString BuildDocumentJson(
 		const TSharedPtr<FJsonObject>& SourceObj,
@@ -182,22 +205,10 @@ FString FPenMCPBridge::AssembleDocumentJson(
 		VarsObj = MakeShared<FJsonObject>();
 	}
 
-	// Filter children when TargetNodeId is specified while preserving reusable definitions.
 	TArray<TSharedPtr<FJsonValue>> Children;
-	if (!TargetNodeId.IsEmpty())
+	if (!BuildFilteredChildren(NodesArr, TargetNodeId, Children))
 	{
-		Children = FilterWithReusables(NodesArr, TargetNodeId);
-		if (Children.Num() == 0)
-		{
-			const FString CanonicalId = CanonicalizeNodeId(TargetNodeId);
-			UE_LOG(LogPenMCPBridge, Error, TEXT("TargetNodeId '%s' not found (hint: '%s' / 'frame-%s')"),
-				*TargetNodeId, *CanonicalId, *CanonicalId);
-			return TEXT("");
-		}
-	}
-	else
-	{
-		Children = NodesArr;
+		return TEXT("");
 	}
 
 	// VarsObj 鍙兘鏄畬鏁存枃妗ｅ厓鏁版嵁锛堝惈 version/variables/themes/fonts锛夛紝
@@ -255,18 +266,9 @@ bool FPenMCPBridge::BuildFilteredDocumentJson(
 		Children = *ChildrenPtr;
 	}
 
-	// Filter by TargetNodeId while keeping reusable component definitions.
-	if (!TargetNodeId.IsEmpty())
+	if (!BuildFilteredChildren(Children, TargetNodeId, Children))
 	{
-		TArray<TSharedPtr<FJsonValue>> Filtered = FilterWithReusables(Children, TargetNodeId);
-		if (Filtered.Num() == 0)
-		{
-			const FString CanonicalId = CanonicalizeNodeId(TargetNodeId);
-			UE_LOG(LogPenMCPBridge, Error, TEXT("TargetNodeId '%s' not found (hint: '%s' / 'frame-%s')"),
-				*TargetNodeId, *CanonicalId, *CanonicalId);
-			return false;
-		}
-		Children = MoveTemp(Filtered);
+		return false;
 	}
 
 	OutDocumentJson = BuildDocumentJson(DocObj, Children);
