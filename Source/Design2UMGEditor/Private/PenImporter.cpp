@@ -205,14 +205,8 @@ bool FPenImporter::ImportFileWithTargetNode(const FString& FilePath, const FStri
 		return false;
 	}
 
-	// Keep font behavior consistent with ImportFromFile/ImportFromJson path,
-	// but only for the filtered document to avoid unrelated font work.
 	FDesignDocument FilteredDocument;
-	if (FPenParser::ParseDocument(FilteredDocumentJson, FilteredDocument))
-	{
-		ResolveDocumentFonts(FilteredDocument);
-	}
-	else
+	if (!FPenParser::ParseDocument(FilteredDocumentJson, FilteredDocument))
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("PenImporter: ParseDocument failed after filtering node %s"), *TargetNodeId);
 		return false;
