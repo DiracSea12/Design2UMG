@@ -9,22 +9,17 @@ struct FUMGWidgetData;
 class UWidgetBlueprint;
 
 /**
- * Design2UMG 瀵煎叆娴佺▼鍏变韩宸ュ叿鍑芥暟
- *
- * 鎻愪緵 Design2UMGEditorModule 鍜?PenFileImportFactory 鍏辩敤鐨勶細
- * - 棰勮绐楀彛鎵撳紑
- * - JSON 缂栬緫鍚庣敓鎴? * - Frame 閫夋嫨鍣?UI
- * - Widget Blueprint 鐢熸垚
+ * Shared import utilities used by the editor module and factories.
  */
 namespace DesignImportUtils
 {
-	/** 鐢熸垚 Widget Blueprint 骞惰繑鍥?*/
+	/** Generate a widget blueprint and return it. */
 	UWidgetBlueprint* GenerateBlueprint(const FUMGWidgetData& Data, const FString& OutputPath);
 
-	/** 鐢熸垚 Widget Blueprint + 娓叉煋 PNG 棰勮鍥?*/
+	/** Generate a widget blueprint and render a widget-tree PNG preview. */
 	bool GenerateBlueprintAndPng(const FUMGWidgetData& Data, const FString& OutputPath);
 
-	/** 生成并编译 Blueprint，然后渲染最终可打开状态的 PNG。*/
+	/** Generate and compile a blueprint, then render the final compiled PNG. */
 	bool GenerateBlueprintAndCompiledPng(
 		const FUMGWidgetData& Data,
 		const FString& OutputPath,
@@ -33,22 +28,22 @@ namespace DesignImportUtils
 		FString* OutGeneratedAssetPath = nullptr,
 		FIntPoint* OutRenderedSize = nullptr);
 
-	/** 对现有 Widget Blueprint 做编译后渲染并保存为 PNG。*/
+	/** Render an existing compiled widget blueprint to a PNG file. */
 	bool RenderCompiledBlueprintToPngFile(
 		UWidgetBlueprint* WidgetBlueprint,
 		const FString& OutputPngFilePath,
 		const FIntPoint& RequestedRenderSize = FIntPoint::ZeroValue,
 		FIntPoint* OutRenderedSize = nullptr);
 
-	/** 浠庣紪杈戝悗鐨?JSON 瑙ｆ瀽 + 杩滅▼鍥剧墖 + 鐢熸垚 Blueprint */
+	/** Parse edited JSON, resolve images, and generate the blueprint. */
 	void GenerateFromEditedJson(const FString& EditedJson, const FString& OutputPath);
 
-	/** 瑙ｆ瀽杩滅▼鍥剧墖寮曠敤骞跺鍏?*/
+	/** Resolve remote image references into local imports. */
 	void ResolveImages(FUMGWidgetData& Data);
 
 	/**
-	 * 鎵撳紑棰勮绐楀彛
-	 * @return true 琛ㄧず绐楀彛宸叉墦寮€
+	 * Open the preview window.
+	 * @return true if the window was opened
 	 */
 	bool OpenPreviewWindow(
 		const FUMGWidgetData& Data,
@@ -56,8 +51,9 @@ namespace DesignImportUtils
 		const FText& WindowTitle);
 
 	/**
-	 * 寮瑰嚭 Frame 閫夋嫨鍣ㄥ璇濇
-	 * @param OnFrameSelected 鐢ㄦ埛鍙屽嚮閫夋嫨鍚庣殑鍥炶皟锛堟帴鏀?FrameId锛?	 */
+	 * Show a frame picker dialog.
+	 * @param OnFrameSelected Callback invoked with the selected frame id
+	 */
 	using FFrameSelectedCallback = TFunction<void(const FString& FrameId)>;
 	void ShowFrameSelector(
 		const TArray<FDesignFrameInfo>& Frames,
@@ -65,6 +61,3 @@ namespace DesignImportUtils
 		const FText& HintText,
 		FFrameSelectedCallback OnFrameSelected);
 }
-
-
-

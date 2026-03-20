@@ -6,15 +6,15 @@
 #include "UMGSchema.h"
 
 /**
- * 璁捐鏁版嵁婧愰€傞厤鍣ㄥ嚱鏁扮鍚? *
- * 杈撳叆: 鍘熷 JSON 瀛楃涓诧紙鍚勬暟鎹簮鑷繁鐨勬牸寮忥級
- * 杈撳嚭: FUMGWidgetData锛堢粺涓€涓棿琛ㄧず锛? */
+ * Conversion function for a registered design source.
+ * Input is the raw source JSON, output is normalized widget data.
+ */
 using FDesignSourceConvertFunc = TFunction<bool(const FString& RawJson, FUMGWidgetData& OutData)>;
 
 /**
- * 璁捐鏁版嵁婧愭敞鍐岃〃
- *
- * 鍚勯€傞厤鍣ㄥ湪妯″潡 StartupModule 涓皟鐢?Register() 娉ㄥ唽锛? * ShutdownModule 涓皟鐢?Unregister() 鍙嶆敞鍐屻€? */
+ * Registry for internal design source adapters.
+ * Adapters register during startup and unregister during shutdown.
+ */
 class FDesignSourceRegistry
 {
 public:
@@ -27,4 +27,3 @@ public:
 private:
 	static TMap<FName, FDesignSourceConvertFunc>& GetRegistry();
 };
-

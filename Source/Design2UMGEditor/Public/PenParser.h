@@ -11,63 +11,60 @@ class FJsonObject;
 class FJsonValue;
 
 /**
- * .pen 鏂囦欢 JSON 瑙ｆ瀽鍣? */
+ * Parser for .pen document JSON.
+ */
 class FPenParser
 {
 public:
-	/** 浠?JSON 瀛楃涓茶В鏋愭枃妗?*/
+	/** Parse a document from a JSON string. */
 	static bool ParseDocument(const FString& JsonString, FDesignDocument& OutDocument);
 
-	/** 浠庢枃浠惰В鏋愭枃妗?*/
+	/** Parse a document from a file. */
 	static bool ParseFromFile(const FString& FilePath, FDesignDocument& OutDocument);
 
 private:
-	/** 瑙ｆ瀽椤跺眰鏂囨。 */
+	/** Parse the top-level document object. */
 	static bool ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FDesignDocument& OutDocument);
 
-	/** 瑙ｆ瀽鑺傜偣 */
+	/** Parse a single node. */
 	static TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver, float ParentX = 0.0f, float ParentY = 0.0f);
 
-	/** 瑙ｆ瀽鑺傜偣绫诲瀷 */
+	/** Parse the node type. */
 	static EDesignNodeType ParseNodeType(const FString& TypeStr);
 
-	/** 瑙ｆ瀽灏哄鍊?*/
+	/** Parse a design size value. */
 	static FDesignSize ParseSize(const TSharedPtr<FJsonValue>& Value, EDesignNodeType NodeType, const FDesignVariableResolver& Resolver);
 
-	/** 瑙ｆ瀽濉厖 */
+	/** Parse fill data. */
 	static FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver);
 
-	/** 瑙ｆ瀽鎻忚竟 */
+	/** Parse stroke data. */
 	static FDesignStroke ParseStroke(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver);
 
-	/** 瑙ｆ瀽鍐呰竟璺?*/
+	/** Parse padding data. */
 	static FDesignPadding ParsePadding(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver);
 
-	/** 瑙ｆ瀽鍙橀噺瀹氫箟 */
+	/** Parse variable definitions. */
 	static void ParseVariables(const TSharedPtr<FJsonObject>& JsonObj, TMap<FString, FDesignVariable>& OutVariables);
 
-	/** 瑙ｆ瀽甯冨眬妯″紡 */
+	/** Parse layout mode. */
 	static EDesignLayout ParseLayout(const FString& LayoutStr);
 
-	/** 瑙ｆ瀽涓昏酱瀵归綈 */
+	/** Parse justify-content. */
 	static EDesignJustifyContent ParseJustifyContent(const FString& Str);
 
-	/** 瑙ｆ瀽浜ゅ弶杞村榻?*/
+	/** Parse align-items. */
 	static EDesignAlignItems ParseAlignItems(const FString& Str);
 
-	/** 瑙ｆ瀽鏂囨湰瀵归綈 */
+	/** Parse text alignment. */
 	static EDesignTextAlign ParseTextAlign(const FString& Str);
 
-	/** 瑙ｆ瀽鏂囨湰鍨傜洿瀵归綈 */
+	/** Parse vertical text alignment. */
 	static EDesignTextAlignVertical ParseTextAlignVertical(const FString& Str);
 
-	/** 瑙ｆ瀽鏂囨湰澧為暱妯″紡 */
+	/** Parse text growth mode. */
 	static EDesignTextGrowth ParseTextGrowth(const FString& Str);
 
-	/** 瑙ｆ瀽鑺傜偣鎵╁睍灞炴€э紙鏂囨湰銆佸浘鏍囥€佹き鍦嗙瓑锛?*/
+	/** Parse extended node properties such as text, icon, and ellipse data. */
 	static void ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TSharedPtr<FDesignNode>& Node, const FDesignVariableResolver& Resolver);
 };
-
-
-
-

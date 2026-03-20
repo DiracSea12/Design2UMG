@@ -9,18 +9,17 @@ struct FUMGWidgetData;
 struct FUMGWidgetNode;
 
 /**
- * .pen 鏂囦欢瀵煎叆鍏ュ彛
+ * Entry points for importing .pen content into widget data.
  */
 class FPenImporter
 {
 public:
-	/** 浠庢枃浠跺鍏?.pen 骞惰浆鎹负 UMG */
+	/** Import a .pen file and convert it to UMG widget data. */
 	static bool ImportFromFile(const FString& FilePath, FUMGWidgetData& OutData);
 
-	/** 浠?JSON 瀛楃涓插鍏?*/
+	/** Import from a pen JSON string. */
 	static bool ImportFromJson(const FString& JsonString, FUMGWidgetData& OutData);
 
-	/** 浠?.pen 鏂囦欢瀵煎叆鎸囧畾 TargetNodeId 鐨?frame锛堝 frame 閫夋嫨璺緞锛?*/
+	/** Import a specific target node from a multi-frame .pen file. */
 	static bool ImportFileWithTargetNode(const FString& FilePath, const FString& TargetNodeId, FUMGWidgetData& OutData);
 };
-

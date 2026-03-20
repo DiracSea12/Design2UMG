@@ -7,7 +7,8 @@
 #include "UMGSchema.h"
 
 /**
- * 瑙嗚灞炴€ф槧灏勶細Fill銆佸渾瑙掋€佹弿杈广€丅order/BackgroundBlur 鍖呰９
+ * Maps visual properties such as fill, rounded corners, stroke, border,
+ * background blur, shadows, and multi-fill wrappers.
  */
 class FVisualMapper
 {
@@ -20,5 +21,3 @@ public:
 	static FUMGWidgetNode WrapWithBoxShadow(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, int32 ShadowIndex);
 	static FUMGWidgetNode WrapWithMultiFill(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node);
 };
-
-

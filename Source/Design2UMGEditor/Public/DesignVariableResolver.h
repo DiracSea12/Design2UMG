@@ -8,7 +8,8 @@
 class FJsonValue;
 
 /**
- * 鍙橀噺瑙ｆ瀽鍣?- 瑙ｆ瀽 $variableName 鏍煎紡鐨勫彉閲忓紩鐢? */
+ * Resolves design variables such as $variableName references.
+ */
 class FDesignVariableResolver
 {
 public:
@@ -21,40 +22,37 @@ public:
 		Variables = &InVariables;
 	}
 
-	/** 璁剧疆褰撳墠涓婚涓婁笅鏂囷紝鐢ㄤ簬閫夋嫨姝ｇ‘鐨勪富棰樺€?*/
+	/** Set the active theme context used for themed variable selection. */
 	void SetThemeContext(const TMap<FString, FString>& InTheme)
 	{
 		ThemeContext = InTheme;
 	}
 
-	/** 瑙ｆ瀽瀛楃涓插€硷紝鏇挎崲鍙橀噺寮曠敤 */
+	/** Resolve a string value with variable substitution. */
 	FString ResolveString(const FString& Value) const;
 
-	/** 瑙ｆ瀽鏁板€硷紝鏀寔鍙橀噺寮曠敤 */
+	/** Resolve a numeric value with variable substitution. */
 	float ResolveNumber(const FString& Value) const;
 
-	/** 瑙ｆ瀽甯冨皵鍊硷紝鏀寔鍙橀噺寮曠敤 */
+	/** Resolve a boolean value with variable substitution. */
 	bool ResolveBoolean(const FString& Value) const;
 
-	/** 瑙ｆ瀽棰滆壊锛屾敮鎸佸彉閲忓紩鐢?*/
+	/** Resolve a color value with variable substitution. */
 	FString ResolveColor(const FString& Value) const;
 
-	/** 瑙ｆ瀽鍦嗚锛屾敮鎸佸崟鍊煎拰鍥涘€兼暟缁?*/
+	/** Resolve a corner-radius value from a single or four-value payload. */
 	FDesignCornerRadius ResolveCornerRadius(const TSharedPtr<FJsonValue>& Value) const;
 
-	/** 妫€鏌ユ槸鍚︿负鍙橀噺寮曠敤 */
+	/** Check whether a value is a variable reference. */
 	static bool IsVariableRef(const FString& Value);
 
 private:
 	const TMap<FString, FDesignVariable>* Variables = nullptr;
 	TMap<FString, FString> ThemeContext;
 
-	/** 鑾峰彇鍙橀噺鍊?*/
+	/** Find a variable definition by name. */
 	const FDesignVariable* GetVariable(const FString& VarName) const;
 
-	/** 鏍规嵁褰撳墠涓婚涓婁笅鏂囦粠鍙橀噺鐨勪富棰樺€兼暟缁勪腑閫夋嫨姝ｇ‘鐨勫€?*/
+	/** Resolve the active themed value for a variable. */
 	FString ResolveThemedValue(const FDesignVariable& Var) const;
 };
-
-
-

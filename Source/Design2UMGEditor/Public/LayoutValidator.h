@@ -13,20 +13,20 @@ namespace EvalThresholds
 }
 
 /**
- * 甯冨眬绮惧害鎸囨爣
+ * Layout accuracy metrics.
  */
 struct FLayoutMetrics
 {
-	/** 骞冲潎缁濆璇樊锛堝儚绱狅級 */
+	/** Mean absolute error in pixels. */
 	float MAE = 0.0f;
 
-	/** 95鍒嗕綅璇樊锛堝儚绱狅級 */
+	/** 95th percentile error in pixels. */
 	float P95 = 0.0f;
 
-	/** 鏍锋湰鏁伴噺 */
+	/** Number of evaluated samples. */
 	int32 SampleCount = 0;
 
-	/** 鏄惁閫氳繃楠屾敹 */
+	/** Whether the metrics satisfy the acceptance thresholds. */
 	bool IsAcceptable() const
 	{
 		return MAE <= EvalThresholds::Acceptance_MAE && P95 <= EvalThresholds::Acceptance_P95;
@@ -34,31 +34,26 @@ struct FLayoutMetrics
 };
 
 /**
- * 甯冨眬楠岃瘉鍣?- 璁＄畻MAE/P95鎸囨爣
+ * Calculates layout validation metrics such as MAE and P95.
  */
 class FLayoutValidator
 {
 public:
-	/**
-	 * 璁＄畻鍗曚釜Bounds鐨勮宸紙鍍忕礌锛?	 */
+	/** Calculate the aggregate bounds error for a single widget. */
 	static float CalculateBoundsError(
 		const FBounds& Actual,
 		const FBounds& Expected,
 		const FIntPoint& DesignSize);
 
-	/**
-	 * 璁＄畻鍗曚釜Bounds鐨勪綅缃宸紙鍍忕礌锛?	 */
+	/** Calculate the position error for a single widget. */
 	static float CalculatePosError(
 		const FBounds& Actual,
 		const FBounds& Expected,
 		const FIntPoint& DesignSize);
 
-	/**
-	 * 璁＄畻涓€缁勬牱鏈殑MAE/P95鎸囨爣
-	 */
+	/** Calculate MAE and P95 for a group of bounds samples. */
 	static FLayoutMetrics CalculateMetrics(
 		const TArray<FBounds>& ActualBounds,
 		const TArray<FBounds>& ExpectedBounds,
 		const FIntPoint& DesignSize);
 };
-

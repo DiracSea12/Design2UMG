@@ -6,7 +6,7 @@
 #include "Modules/ModuleManager.h"
 
 /**
- * Design2UMG 缂栬緫鍣ㄦā鍧? * .pen 鏂囦欢 鈫?Widget Blueprint 鐢熸垚
+ * Editor module entry point for Design2UMG.
  */
 class FDesign2UMGEditorModule : public IModuleInterface
 {
@@ -17,4 +17,3 @@ public:
 private:
 	FDelegateHandle ToolMenusStartupHandle;
 };
-
