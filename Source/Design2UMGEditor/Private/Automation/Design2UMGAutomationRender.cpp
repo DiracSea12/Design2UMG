@@ -3,10 +3,10 @@
 #include "Design2UMGLocalFigmaImport.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGNotification.h"
+#include "DesignImportPipeline.h"
 #include "DesignImportUtils.h"
 #include "DesignSchema.h"
 #include "FontResolver.h"
-#include "PenImporter.h"
 #include "PenMCPBridge.h"
 #include "PenParser.h"
 #include "RefExpander.h"
@@ -842,10 +842,7 @@ namespace
 				UE_LOG(LogDesign2UMG, Warning, TEXT("AutomationRender: source structure snapshot unavailable: %s"), *StructureError);
 			}
 
-			const bool bOk = Spec.NodeId.IsEmpty()
-				? FPenImporter::ImportFromFile(Spec.SourcePath, Data)
-				: FPenImporter::ImportFileWithTargetNode(Spec.SourcePath, Spec.NodeId, Data);
-			if (!bOk)
+			if (!DesignImportPipeline::ImportPenFile(Spec.SourcePath, Spec.NodeId, Data))
 			{
 				OutResult.ErrorMessage = FString::Printf(TEXT("Failed to import pen source: %s"), *Spec.SourcePath);
 				return false;

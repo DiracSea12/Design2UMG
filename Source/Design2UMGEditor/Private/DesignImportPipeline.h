@@ -41,6 +41,7 @@ struct FDesignImportExecutionResult
 namespace DesignImportPipeline
 {
 	FDesignImportExecutionResult Execute(FUMGWidgetData& Data, const FDesignImportRequest& Request);
+	bool ImportPenFile(const FString& FilePath, const FString& TargetNodeId, FUMGWidgetData& OutData);
 	FDesignImportExecutionResult ExecutePenFile(const FString& FilePath, const FString& TargetNodeId, const FDesignImportRequest& Request);
 	bool LoadPenFrames(const FString& FilePath, TArray<FDesignFrameInfo>& OutFrames);
 }

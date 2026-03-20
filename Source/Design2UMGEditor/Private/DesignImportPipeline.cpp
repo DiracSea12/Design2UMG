@@ -50,16 +50,20 @@ namespace DesignImportPipeline
 		return Result;
 	}
 
+	bool ImportPenFile(const FString& FilePath, const FString& TargetNodeId, FUMGWidgetData& OutData)
+	{
+		return TargetNodeId.IsEmpty()
+			? FPenImporter::ImportFromFile(FilePath, OutData)
+			: FPenImporter::ImportFileWithTargetNode(FilePath, TargetNodeId, OutData);
+	}
+
 	FDesignImportExecutionResult ExecutePenFile(
 		const FString& FilePath,
 		const FString& TargetNodeId,
 		const FDesignImportRequest& Request)
 	{
 		FUMGWidgetData Data;
-		const bool bOk = TargetNodeId.IsEmpty()
-			? FPenImporter::ImportFromFile(FilePath, Data)
-			: FPenImporter::ImportFileWithTargetNode(FilePath, TargetNodeId, Data);
-		if (!bOk)
+		if (!ImportPenFile(FilePath, TargetNodeId, Data))
 		{
 			return FDesignImportExecutionResult();
 		}
