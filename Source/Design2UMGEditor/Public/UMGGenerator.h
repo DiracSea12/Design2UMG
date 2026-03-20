@@ -8,22 +8,22 @@
 class UWidgetBlueprint;
 
 /**
- * UMG 鐢熸垚鍣?- 灏嗚В鏋愬悗鐨勬暟鎹粨鏋勮浆鎹负 Widget Blueprint
+ * Generates widget blueprints from normalized widget data.
  */
 class FUMGGenerator
 {
 public:
 	/**
-	 * 鐢熸垚 Widget Blueprint锛堟瀯寤?+ 缂栬瘧 + 淇濆瓨锛?	 * @param WidgetData 瑙ｆ瀽鍚庣殑 Widget 鏁版嵁
-	 * @param PackagePath 淇濆瓨璺緞 (渚嬪 "/Game/UI")
-	 * @return 鐢熸垚鐨?Widget Blueprint锛屽け璐ヨ繑鍥?nullptr
+	 * Generate, compile, and save a widget blueprint.
+	 * @param WidgetData Parsed widget data
+	 * @param PackagePath Target package path such as "/Game/UI"
+	 * @return Generated widget blueprint, or nullptr on failure
 	 */
 	static UWidgetBlueprint* GenerateWidgetBlueprint(const FUMGWidgetData& WidgetData, const FString& PackagePath);
 
-	/** 鏋勫缓 + 缂栬瘧 Widget Blueprint锛屼絾涓嶄繚瀛樺埌纾佺洏銆倀ransient 绾圭悊姝ゆ椂浠嶅湪鍐呭瓨涓€?*/
+	/** Build and compile a widget blueprint without saving it to disk. */
 	static UWidgetBlueprint* BuildWidgetBlueprint(const FUMGWidgetData& WidgetData, const FString& PackagePath);
 
-	/** 灏嗗凡缂栬瘧鐨?Widget Blueprint 淇濆瓨鍒扮鐩樸€?*/
+	/** Save a previously compiled widget blueprint to disk. */
 	static void SaveWidgetBlueprint(UWidgetBlueprint* WBP);
 };
-

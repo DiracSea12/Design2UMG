@@ -8,16 +8,16 @@
 class FJsonObject;
 
 /**
- * JSON 搴忓垪鍖栧櫒 - 灏?UMG 鏁版嵁缁撴瀯搴忓垪鍖栦负 JSON
- *
- * 涓?FUMGJsonParser锛堝弽搴忓垪鍖栵級瀵圭О銆? * 渚涢瑙堢獥鍙ｃ€佸鍏ユ祦绋嬬瓑澶氬澶嶇敤銆? */
+ * Serializes normalized UMG widget data into JSON.
+ * It is the counterpart to FUMGJsonParser and is reused by preview and import flows.
+ */
 class FUMGJsonSerializer
 {
 public:
-	/** 灏?FUMGWidgetData 搴忓垪鍖栦负 Pretty JSON 瀛楃涓?*/
+	/** Serialize widget data into pretty-printed JSON. */
 	static FString Serialize(const FUMGWidgetData& Data);
 
-	/** 灏嗗崟涓?FUMGWidgetNode 搴忓垪鍖栦负 FJsonObject */
+	/** Serialize a single widget node into a JSON object. */
 	static TSharedRef<FJsonObject> SerializeWidgetNode(const FUMGWidgetNode& Node);
 
 private:
@@ -27,4 +27,3 @@ private:
 	static TSharedRef<FJsonObject> SerializeSlot(const FUMGSlotData& Slot);
 	static TSharedRef<FJsonObject> SerializeBounds(const FBounds& Bounds);
 };
-

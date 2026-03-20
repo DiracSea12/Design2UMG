@@ -6,16 +6,17 @@
 #include "UMGSchema.h"
 
 /**
- * JSON 瑙ｆ瀽鍣?- 灏?JSON 瀛楃涓茶В鏋愪负 UMG 鏁版嵁缁撴瀯
+ * Parses JSON payloads into normalized UMG widget data.
  */
 class FUMGJsonParser
 {
 public:
 	/**
-	 * 瑙ｆ瀽 JSON 瀛楃涓蹭负 Widget 鏁版嵁
-	 * @param JsonString JSON 瀛楃涓?	 * @param OutWidgetData 杈撳嚭鐨?Widget 鏁版嵁
-	 * @param OutError 閿欒淇℃伅锛堝彲閫夛級
-	 * @return 瑙ｆ瀽鏄惁鎴愬姛
+	 * Parse a JSON string into widget data.
+	 * @param JsonString Source JSON string
+	 * @param OutWidgetData Parsed widget data
+	 * @param OutError Optional parse error output
+	 * @return true on success
 	 */
 	static bool ParseJson(const FString& JsonString, FUMGWidgetData& OutWidgetData, FString* OutError = nullptr);
 
@@ -27,4 +28,3 @@ private:
 	static void ParseOffsetsData(const TSharedPtr<class FJsonObject>& JsonObject, FUMGOffsetsData& OutOffsets);
 	static void ParseProperties(const TSharedPtr<class FJsonObject>& JsonObject, TMap<FString, FString>& OutProperties);
 };
-

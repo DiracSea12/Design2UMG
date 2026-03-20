@@ -7,27 +7,27 @@
 #include "MCPHttpClient.h"
 
 /**
- * Pencil 瀹炰緥鍙戠幇涓?MCP Server 鐢熷懡鍛ㄦ湡绠＄悊
+ * Discovers, launches, and manages the Pencil MCP server lifecycle.
  */
 class FPencilConnector
 {
 public:
 	~FPencilConnector();
 
-	/** 鍙戠幇鏈湴 MCP Server 浜岃繘鍒惰矾寰?*/
+	/** Discover the local MCP server executable path. */
 	static FString DiscoverMCPServerPath();
 
-	/** 检测 Pencil 应用名称（vscode/antigravity）。 */
+	/** Detect the Pencil application name such as vscode or antigravity. */
 	static FString DetectAppName();
 
-	/** 鍚姩 MCP Server 骞惰繛鎺ワ紝Port=0 鏃惰嚜鍔ㄩ€夋嫨 */
+	/** Launch the MCP server and connect to it. Port 0 chooses automatically. */
 	bool Launch(int32 Port = 0);
 	void LaunchAsync(int32 Port, TFunction<void(bool bSuccess)> OnComplete);
 
-	/** 鍏抽棴 MCP Server 瀛愯繘绋?*/
+	/** Shut down the MCP server child process. */
 	void Shutdown();
 
-	/** 鑾峰彇 MCP HTTP 瀹㈡埛绔?*/
+	/** Access the MCP HTTP client. */
 	FMCPHttpClient& GetClient() { return Client; }
 
 	bool IsRunning() const;
@@ -38,7 +38,7 @@ private:
 	int32 ServerPort = 0;
 	int32 ActiveLaunchToken = 0;
 
-	/** 鎺㈡祴鍙敤绔彛 */
+	/** Find an available local port. */
 	static int32 FindAvailablePort(int32 StartPort = 18900);
 	void TryConnectAsync(
 		const FString& Endpoint,
@@ -46,4 +46,3 @@ private:
 		int32 LaunchToken,
 		const TSharedRef<TFunction<void(bool bSuccess)>>& OnComplete);
 };
-

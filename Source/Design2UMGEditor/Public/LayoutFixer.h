@@ -6,46 +6,45 @@
 #include "LayoutCalculator.h"
 
 /**
- * Fixer閰嶇疆鍙傛暟
+ * Configurable parameters for the layout fixer.
  */
 struct FFixerPreset
 {
-	/** 璁捐灏哄 */
+	/** Design resolution. */
 	FIntPoint DesignSize = FIntPoint(1920, 1080);
 
-	/** 鍔ㄦ€佸惛闄勯槇鍊硷紙鍍忕礌锛夛紝杩愯鏃舵牴鎹瓺esignSize璁＄畻 */
+	/** Dynamic snap threshold in pixels, computed from DesignSize at runtime. */
 	int32 SnapPx = 4;
 
-	/** 琛?鍒楁娴嬬殑閲嶅彔搴﹂槇鍊?*/
+	/** Overlap threshold used when detecting rows and columns. */
 	float RowOverlapThreshold = 0.8f;
 
-	/** 绛夎窛淇鏈€灏忓厓绱犳暟 */
+	/** Minimum element count required for equal-spacing correction. */
 	int32 MinElementsForEqualSpacing = 3;
 
-	/** 绛夎窛淇鏈€澶ч棿璺濇柟宸紙褰掍竴鍖栵級锛岃秴杩囧垯涓嶄慨姝?*/
+	/** Maximum normalized spacing variance allowed for equal-spacing correction. */
 	float MaxSpacingVarianceForEqualSpacing = 0.02f;
 
 	bool bEnableOverflowFix = true;
 	bool bEnableAlignSnap = true;
 	bool bEnableSiblingSnap = true;
 	bool bEnableEqualSpacing = true;
-
 };
 
 /**
- * 淇鏃ュ織鏉＄洰
+ * Single fixer log entry.
  */
 struct FFixerLogEntry
 {
 	FString WidgetId;
-	FString FixType;      // "Overflow", "Snap", "EqualSpacing"
+	FString FixType;
 	FBounds OldBounds;
 	FBounds NewBounds;
 	FString Description;
 };
 
 /**
- * v2.3: Fixer瑙﹀彂缁熻
+ * Fixer trigger statistics.
  */
 struct FFixerStats
 {
@@ -58,29 +57,29 @@ struct FFixerStats
 };
 
 /**
- * Widget鑺傜偣锛堢敤浜嶧ixer澶勭悊锛? */
+ * Simplified widget node used by the layout fixer.
+ */
 struct FFixerWidgetNode
 {
 	FString Id;
 	FString Type;
 	FBounds Bounds;
-	bool bFixExempt = false;  // v2.2: 绂佹淇鏍囪
+	bool bFixExempt = false;
 	TArray<FFixerWidgetNode> Children;
 };
 
 /**
- * 甯冨眬淇鍣?- 绾鍒欏眰鑷姩淇
- * 鎵ц浣嶇疆锛氬湪LayoutCalc涔嬪墠锛岀洿鎺ヤ慨鏀笲ounds
+ * Rule-based layout fixer that adjusts bounds before layout calculation.
  */
 class FLayoutFixer
 {
 public:
-	/**
-	 * 鍒濆鍖朏ixer锛岃绠楀姩鎬侀槇鍊?	 */
+	/** Initialize the fixer and compute dynamic thresholds. */
 	static void Initialize(const FIntPoint& DesignSize, FFixerPreset& OutPreset);
 
 	/**
-	 * 淇鏁翠釜Widget鏍?	 * @param OutStats v2.3: 鍙€夌殑缁熻杈撳嚭
+	 * Fix an entire widget tree.
+	 * @param OutStats Optional stats output
 	 */
 	static void FixWidgetTree(
 		FFixerWidgetNode& Root,
@@ -88,17 +87,13 @@ public:
 		TArray<FFixerLogEntry>& OutLog,
 		FFixerStats* OutStats = nullptr);
 
-	/**
-	 * 瓒婄晫淇锛氱‘淇濆瓙鍏冪礌涓嶈秴鍑虹埗瀹瑰櫒
-	 */
+	/** Ensure a child does not overflow its parent bounds. */
 	static bool FixBoundsOverflow(
 		FBounds& ChildBounds,
 		const FBounds& ParentBounds,
 		FFixerLogEntry* OutLog = nullptr);
 
-	/**
-	 * 瀵归綈鍚搁檮锛氬惛闄勫埌鐖惰竟缂?涓嚎
-	 */
+	/** Snap a widget to parent edges or center lines. */
 	static bool SnapToAlignment(
 		FBounds& Bounds,
 		const FBounds& ParentBounds,
@@ -106,9 +101,7 @@ public:
 		float SnapThresholdY,
 		FFixerLogEntry* OutLog = nullptr);
 
-	/**
-	 * 鍚岀骇鍏冪礌瀵归綈鍚搁檮
-	 */
+	/** Snap a widget to sibling alignment cues. */
 	static bool SnapToSiblings(
 		FBounds& Bounds,
 		const TArray<FBounds>& SiblingBounds,
@@ -116,23 +109,17 @@ public:
 		float SnapThresholdY,
 		FFixerLogEntry* OutLog = nullptr);
 
-	/**
-	 * 妫€娴嬪悓涓€琛岀殑鍏冪礌锛圷杞撮噸鍙犲害>闃堝€艰涓哄悓涓€琛岋級
-	 */
+	/** Detect groups of widgets that form a row. */
 	static TArray<TArray<int32>> DetectRows(
 		const TArray<FBounds>& Bounds,
 		float OverlapThreshold);
 
-	/**
-	 * 妫€娴嬪悓涓€鍒楃殑鍏冪礌锛圶杞撮噸鍙犲害>闃堝€艰涓哄悓涓€鍒楋級
-	 */
+	/** Detect groups of widgets that form a column. */
 	static TArray<TArray<int32>> DetectColumns(
 		const TArray<FBounds>& Bounds,
 		float OverlapThreshold);
 
-	/**
-	 * 缁勫唴绛夎窛淇
-	 */
+	/** Apply equal-spacing correction inside a row or column group. */
 	static bool FixEqualSpacing(
 		TArray<FBounds>& Bounds,
 		const TArray<int32>& Indices,
@@ -144,7 +131,7 @@ private:
 	static float GetAverage(const TArray<float>& Values);
 	static float GetMaxDeviation(const TArray<float>& Values, float Average);
 
-	/** 閫掑綊澶勭悊鍗曚釜鑺傜偣鍙婂叾瀛愭爲 */
+	/** Recursively process a node and its subtree. */
 	static void ProcessNode(
 		FFixerWidgetNode& Node,
 		const FBounds& ParentBounds,
@@ -154,7 +141,7 @@ private:
 		TArray<FFixerLogEntry>& OutLog,
 		FFixerStats& Stats);
 
-	/** 淇瀛愯妭鐐圭殑鍚岀骇鍚搁檮鍜岀瓑璺濋棿璺?*/
+	/** Fix sibling snapping and equal spacing for child bounds. */
 	static void FixChildrenSpacing(
 		TArray<FBounds>& ProposedBounds,
 		const TArray<FBounds>& OriginalBounds,
@@ -164,11 +151,10 @@ private:
 		TArray<FFixerLogEntry>& OutLog,
 		FFixerStats& Stats);
 
-	/** 淇濆畧鎬ф鏌ワ細楠岃瘉淇骞呭害鏄惁鍚堢悊 */
+	/** Conservative safety check for proposed adjustments. */
 	static bool PassesConservatismCheck(
 		const TArray<FBounds>& OriginalBounds,
 		const TArray<FBounds>& ProposedBounds,
 		float SnapThresholdX,
 		float SnapThresholdY);
 };
-
