@@ -28,6 +28,12 @@ namespace
 		FFontResolver::AutoImportFonts(Document);
 		FFontResolver::FindMissingFonts(Document);
 	}
+
+	void ConvertResolvedDocument(FDesignDocument& Document, FUMGWidgetData& OutData)
+	{
+		ResolveDocumentFonts(Document);
+		OutData = FDesign2UMGConverter::Convert(Document);
+	}
 }
 
 int32 FDesignImportResult::CountWidgets(const FUMGWidgetNode& Node)
@@ -144,10 +150,8 @@ bool FPenImporter::ImportFromFile(const FString& FilePath, FUMGWidgetData& OutDa
 	}
 	if (SlowTask.ShouldCancel()) return false;
 
-	ResolveDocumentFonts(Document);
-
 	SlowTask.EnterProgressFrame(1.0f, FText::FromString(TEXT("Converting design to widgets...")));
-	OutData = FDesign2UMGConverter::Convert(Document);
+	ConvertResolvedDocument(Document, OutData);
 	return true;
 }
 
@@ -165,10 +169,8 @@ bool FPenImporter::ImportFromJson(const FString& JsonString, FUMGWidgetData& Out
 	}
 	if (SlowTask.ShouldCancel()) return false;
 
-	ResolveDocumentFonts(Document);
-
 	SlowTask.EnterProgressFrame(1.0f, FText::FromString(TEXT("Converting design to widgets...")));
-	OutData = FDesign2UMGConverter::Convert(Document);
+	ConvertResolvedDocument(Document, OutData);
 	return true;
 }
 
@@ -217,7 +219,7 @@ bool FPenImporter::ImportFileWithTargetNode(const FString& FilePath, const FStri
 	}
 
 	SlowTask.EnterProgressFrame(1.0f, FText::FromString(TEXT("Converting design to widgets...")));
-	OutData = FDesign2UMGConverter::Convert(FilteredDocument);
+	ConvertResolvedDocument(FilteredDocument, OutData);
 	return true;
 }
 
