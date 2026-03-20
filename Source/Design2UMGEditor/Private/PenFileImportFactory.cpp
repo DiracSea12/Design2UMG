@@ -15,11 +15,22 @@ namespace
 {
 	const TCHAR* DefaultOutputPath = TEXT("/Game/Design2UMG/PenConvert_Output");
 
-	/** 导入单个 frame：优先预览，无预览时同步返回 Blueprint */
-	UWidgetBlueprint* ImportSingleFrame(const FString& FilePath, const FString& OutputPath, bool& bOutPreviewOpened);
+	FDesignImportRequest MakeFactoryImportRequest(const FString& OutputPath)
+	{
+		FDesignImportRequest Request;
+		Request.OutputPath = OutputPath;
+		Request.PreviewWindowTitle = LOCTEXT("PenImportPreviewTitle", "Design2UMG Import Preview");
+		Request.Generation.Mode = EDesignBlueprintGenerationMode::BlueprintOnly;
+		return Request;
+	}
 
-	/** 导入指定 TargetNodeId 对应的 frame */
-	void ImportWithTargetNode(const FString& FilePath, const FString& TargetNodeId, const FString& OutputPath);
+	FDesignImportExecutionResult ExecuteFactoryImport(
+		const FString& FilePath,
+		const FString& TargetNodeId,
+		const FString& OutputPath)
+	{
+		return DesignImportPipeline::ExecutePenFile(FilePath, TargetNodeId, MakeFactoryImportRequest(OutputPath));
+	}
 }
 
 // --- UFactory 实现 ---
@@ -63,15 +74,9 @@ UObject* UPenFileImportFactory::FactoryCreateFile(
 
 	if (Frames.Num() == 1)
 	{
-		// 单 frame 快速路径：无预览时同步返回生成的 Blueprint
-		bool bPreviewOpened = false;
-		UWidgetBlueprint* Result = ImportSingleFrame(Filename, OutputPath, bPreviewOpened);
-		if (Result)
-			return Result;
-
-		// 仅当预览窗口打开（异步生成）时才标记取消，其他 nullptr 情况为真正的错误/取消
-		bOutOperationCanceled = bPreviewOpened;
-		return nullptr;
+		const FDesignImportExecutionResult Result = ExecuteFactoryImport(Filename, FString(), OutputPath);
+		bOutOperationCanceled = Result.bPreviewOpened;
+		return Result.GeneratedBlueprint;
 	}
 
 	// 多 frame：弹出选择器，异步生成
@@ -81,48 +86,15 @@ UObject* UPenFileImportFactory::FactoryCreateFile(
 		LOCTEXT("FrameSelectorHint", "This file contains multiple frames. Double-click to import:"),
 		[Filename, OutputPath](const FString& FrameId)
 		{
-			ImportWithTargetNode(Filename, FrameId, OutputPath);
+			const FDesignImportExecutionResult Result = ExecuteFactoryImport(Filename, FrameId, OutputPath);
+			if (!Result.bSucceeded)
+			{
+				FDesign2UMGNotification::Error(LOCTEXT("TargetNodeFailed", "Design2UMG: Failed to import selected frame"));
+			}
 		});
 	bOutOperationCanceled = true;
 	return nullptr;
 }
-
-// --- 内部实现 ---
-
-namespace
-{
-
-UWidgetBlueprint* ImportSingleFrame(const FString& FilePath, const FString& OutputPath, bool& bOutPreviewOpened)
-{
-	bOutPreviewOpened = false;
-
-	FDesignImportRequest Request;
-	Request.OutputPath = OutputPath;
-	Request.PreviewWindowTitle = LOCTEXT("PenImportPreviewTitle", "Design2UMG Import Preview");
-	Request.Generation.Mode = EDesignBlueprintGenerationMode::BlueprintOnly;
-
-	const FDesignImportExecutionResult Result =
-		DesignImportPipeline::ExecutePenFile(FilePath, FString(), Request);
-	bOutPreviewOpened = Result.bPreviewOpened;
-	return Result.GeneratedBlueprint;
-}
-
-void ImportWithTargetNode(const FString& FilePath, const FString& TargetNodeId, const FString& OutputPath)
-{
-	FDesignImportRequest Request;
-	Request.OutputPath = OutputPath;
-	Request.PreviewWindowTitle = LOCTEXT("PenImportPreviewTitle", "Design2UMG Import Preview");
-	Request.Generation.Mode = EDesignBlueprintGenerationMode::BlueprintOnly;
-
-	const FDesignImportExecutionResult Result =
-		DesignImportPipeline::ExecutePenFile(FilePath, TargetNodeId, Request);
-	if (!Result.bSucceeded)
-	{
-		FDesign2UMGNotification::Error(LOCTEXT("TargetNodeFailed", "Design2UMG: Failed to import selected frame"));
-	}
-}
-
-} // anonymous namespace
 
 #undef LOCTEXT_NAMESPACE
 
