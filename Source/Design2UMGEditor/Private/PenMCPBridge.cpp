@@ -88,43 +88,6 @@ namespace
 		}
 	}
 
-	/** Filter by target node id while keeping reusable component definitions. */
-	TArray<TSharedPtr<FJsonValue>> FilterWithReusables(
-		const TArray<TSharedPtr<FJsonValue>>& AllChildren,
-		const FString& TargetNodeId)
-	{
-		TSharedPtr<FJsonValue> Found = FindNodeById(AllChildren, TargetNodeId);
-		if (!Found.IsValid())
-			return TArray<TSharedPtr<FJsonValue>>();
-
-		// Keep reusable definitions so downstream ref expansion still works.
-		TArray<TSharedPtr<FJsonValue>> Result;
-		CollectReusableNodes(AllChildren, Result);
-
-		// Deduplicate when the target node itself is reusable.
-		FString TargetId;
-		if (const TSharedPtr<FJsonObject>& FoundObj = Found->AsObject())
-			FoundObj->TryGetStringField(TEXT("id"), TargetId);
-
-		bool bAlreadyIncluded = false;
-		for (const auto& R : Result)
-		{
-			FString RId;
-			if (const TSharedPtr<FJsonObject>& RObj = R->AsObject())
-				RObj->TryGetStringField(TEXT("id"), RId);
-			if (RId == TargetId)
-			{
-				bAlreadyIncluded = true;
-				break;
-			}
-		}
-
-		if (!bAlreadyIncluded)
-			Result.Add(Found);
-
-		return Result;
-	}
-
 	bool BuildFilteredChildren(
 		const TArray<TSharedPtr<FJsonValue>>& AllChildren,
 		const FString& TargetNodeId,
@@ -136,9 +99,32 @@ namespace
 			return true;
 		}
 
-		OutChildren = FilterWithReusables(AllChildren, TargetNodeId);
-		if (OutChildren.Num() > 0)
+		TSharedPtr<FJsonValue> Found = FindNodeById(AllChildren, TargetNodeId);
+		if (Found.IsValid())
 		{
+			// Keep reusable definitions so downstream ref expansion still works.
+			TArray<TSharedPtr<FJsonValue>> FilteredChildren;
+			CollectReusableNodes(AllChildren, FilteredChildren);
+
+			// Deduplicate when the target node itself is reusable.
+			FString TargetId;
+			if (const TSharedPtr<FJsonObject>& FoundObj = Found->AsObject())
+				FoundObj->TryGetStringField(TEXT("id"), TargetId);
+
+			for (const auto& ReusableNode : FilteredChildren)
+			{
+				FString ReusableId;
+				if (const TSharedPtr<FJsonObject>& ReusableObj = ReusableNode->AsObject())
+					ReusableObj->TryGetStringField(TEXT("id"), ReusableId);
+				if (ReusableId == TargetId)
+				{
+					OutChildren = MoveTemp(FilteredChildren);
+					return true;
+				}
+			}
+
+			FilteredChildren.Add(Found);
+			OutChildren = MoveTemp(FilteredChildren);
 			return true;
 		}
 
