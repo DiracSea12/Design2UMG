@@ -40,4 +40,8 @@ private:
 
 	/** Recursively pre-compute fit-content sizes from child content. */
 	static FVector2D PreComputeFitContentSizes(const TSharedPtr<FDesignNode>& Node, const FDesignDocument& Doc);
+	static TSharedPtr<FDesignNode> ResolveExpandedChildForConversion(const TSharedPtr<FDesignNode>& Child, const FDesignDocument& Doc, const TMap<FString, FString>& ThemeContext, bool bPreComputeFitContent);
+	static void PreResolveFlowChildren(const TSharedPtr<FDesignNode>& Node, const FDesignDocument& Doc, const FUMGWidgetNode& Widget, const TArray<TSharedPtr<FDesignNode>>& VisibleChildren, const TMap<FString, FString>& ThemeContext);
+	static bool ShouldWrapChildWithSizeBox(const TSharedPtr<FDesignNode>& ParentNode, const TSharedPtr<FDesignNode>& ChildNode, const FUMGWidgetNode& ChildWidget);
+	static void AppendConvertedChildren(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node, const FDesignDocument& Doc, const TArray<TSharedPtr<FDesignNode>>& VisibleChildren, const TMap<FString, FString>& ActiveTheme, TArray<FString>* OutWarnings);
 };

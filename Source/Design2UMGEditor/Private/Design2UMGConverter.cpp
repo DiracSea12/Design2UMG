@@ -1333,178 +1333,8 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FDesignNode>& 
 
 	TArray<TSharedPtr<FDesignNode>> VisibleChildren;
 	GatherVisibleChildren(Node, VisibleChildren);
-	auto ResolveExpandedChild = [&](const TSharedPtr<FDesignNode>& Child, bool bPreComputeFitContent)
-	{
-		TSharedPtr<FDesignNode> ExpandedChild = ExpandRefForConversion(Child, Doc, ActiveTheme);
-		if (!ExpandedChild.IsValid())
-			return Child;
-		if (bPreComputeFitContent && ExpandedChild != Child)
-			PreComputeFitContentSizes(ExpandedChild, Doc);
-		return ExpandedChild;
-	};
-
-	// 预处理：在递归子节点之前，解析 FillContainer 尺寸写入 PenNode
-	// 这样子节点递归时 Width.Value / Height.Value 已经是正确的像素值
-	// 直接修改原始子节点（Ref 节点的 Width/Height 会被 ExpandRef 传递给展开节点）
-	if (Widget.Bounds.W > 0 && Widget.Bounds.H > 0
-		&& (Node->Layout == EDesignLayout::Horizontal || Node->Layout == EDesignLayout::Vertical))
-	{
-		const float PadL = Node->Padding.Left, PadR = Node->Padding.Right;
-		const float PadT = Node->Padding.Top, PadB = Node->Padding.Bottom;
-		const float InnerW = Widget.Bounds.W - PadL - PadR;
-		const float InnerH = Widget.Bounds.H - PadT - PadB;
-		const bool bHorizontal = (Node->Layout == EDesignLayout::Horizontal);
-
-		// Build effective size snapshots (ref children use expanded mode/value for stats).
-		TArray<FChildSizeSnapshot> EffChildren;
-		for (const auto& Child : VisibleChildren)
-		{
-			EffChildren.Add(BuildChildSizeSnapshot(Child, Doc));
-		}
-
-		// 统计主轴 Fixed 占用和 Fill 数量
-		float FixedMainSum = 0.0f;
-		int32 FillCount = 0;
-		const float TotalGap = EffChildren.Num() > 1 ? Node->Gap * (EffChildren.Num() - 1) : 0.0f;
-		for (const auto& EC : EffChildren)
-		{
-			const FDesignSize& MainSize = bHorizontal ? EC.EffectiveWidth : EC.EffectiveHeight;
-			if (MainSize.IsFill())
-				FillCount++;
-			else
-				FixedMainSum += MainSize.Value;
-
-			const FDesignSize& RawMain = bHorizontal ? EC.RawWidth : EC.RawHeight;
-			const FDesignSize& RawCross = bHorizontal ? EC.RawHeight : EC.RawWidth;
-			const FDesignSize& EffectiveCross = bHorizontal ? EC.EffectiveHeight : EC.EffectiveWidth;
-			UE_LOG(LogDesign2UMG, Verbose, TEXT("PreResolveFill Child '%s': ref=%d rawMain=%s(%.0f) effMain=%s(%.0f) rawCross=%s(%.0f) effCross=%s(%.0f)"),
-				EC.Child.IsValid() ? *EC.Child->Id : TEXT("<invalid>"),
-				EC.bUsedExpandedRef ? 1 : 0,
-				ToSizeModeLogString(RawMain.Mode), RawMain.Value,
-				ToSizeModeLogString(MainSize.Mode), MainSize.Value,
-				ToSizeModeLogString(RawCross.Mode), RawCross.Value,
-				ToSizeModeLogString(EffectiveCross.Mode), EffectiveCross.Value);
-		}
-
-		// 辅助 lambda：只修改 Value 不改 Mode，保留 FillContainer 语义给下游 Slot 映射
-		// 同时设置 bHas 标志确保 Ref 节点的 ExpandRef 传递
-		auto ResolveSize = [](TSharedPtr<FDesignNode>& N, bool bWidth, float Px)
-		{
-			FDesignSize& Size = bWidth ? N->Width : N->Height;
-			Size.Value = FMath::Max(0.0f, Px);
-			if (bWidth) N->bHasWidth = true;
-			else N->bHasHeight = true;
-		};
-
-		if (FillCount > 0)
-		{
-			const float AvailMain = (bHorizontal ? InnerW : InnerH) - FixedMainSum - TotalGap;
-			const float FillMain = FMath::Max(0.0f, AvailMain / FillCount);
-
-			for (auto& EC : EffChildren)
-			{
-				const FDesignSize& MainSize = bHorizontal ? EC.EffectiveWidth : EC.EffectiveHeight;
-				if (MainSize.IsFill())
-					ResolveSize(EC.Child, bHorizontal, FillMain);
-				const FDesignSize& CrossSize = bHorizontal ? EC.EffectiveHeight : EC.EffectiveWidth;
-				if (CrossSize.IsFill())
-					ResolveSize(EC.Child, !bHorizontal, bHorizontal ? InnerH : InnerW);
-			}
-
-			UE_LOG(LogDesign2UMG, Log, TEXT("PreResolveFill: '%s' layout=%s inner=(%.0f,%.0f) fixed=%.0f fill=%d each=%.0f"),
-				*Widget.Name, bHorizontal ? TEXT("H") : TEXT("V"),
-				InnerW, InnerH, FixedMainSum, FillCount, FillMain);
-		}
-		else
-		{
-			// 没有 Fill 子节点，但交叉轴可能有 FillContainer
-			for (auto& EC : EffChildren)
-			{
-				const FDesignSize& CrossSize = bHorizontal ? EC.EffectiveHeight : EC.EffectiveWidth;
-				if (CrossSize.IsFill())
-					ResolveSize(EC.Child, !bHorizontal, bHorizontal ? InnerH : InnerW);
-			}
-		}
-	}
-
-	// Pre-compute FitContent sizes: for children with FitContent+Value=0,
-	// estimate content size from their subtree so they don't collapse to zero.
-	for (auto& Child : VisibleChildren)
-	{
-		auto ResolveFit = [](TSharedPtr<FDesignNode>& N, bool bWidth, float Px)
-		{
-			FDesignSize& Size = bWidth ? N->Width : N->Height;
-			if (Size.IsFit() && Px > Size.Value)
-			{
-				Size.Value = Px;
-				if (bWidth) N->bHasWidth = true;
-				else N->bHasHeight = true;
-			}
-		};
-
-		if (Child->Width.IsFit() || Child->Height.IsFit())
-		{
-			const float ChildContentWidth = ComputeChildContentWidthHint(Node, Child, 0.0f);
-			const TSharedPtr<FDesignNode> EstimateChild = ResolveExpandedChild(Child, false);
-			const FVector2D Est(EstimateNodeSize(EstimateChild, ChildContentWidth));
-			ResolveFit(Child, true, Est.X);
-			ResolveFit(Child, false, Est.Y);
-
-			if (Est.X > 0 || Est.Y > 0)
-			{
-				UE_LOG(LogDesign2UMG, Log, TEXT("PreResolveFitContent: '%s' estimated=(%.0f,%.0f)"),
-					*Child->Name, Est.X, Est.Y);
-			}
-		}
-	}
-
-	for (const auto& Child : VisibleChildren)
-	{
-		TSharedPtr<FDesignNode> EffectiveChild = ResolveExpandedChild(Child, true);
-		auto ChildWidget = ConvertNode(EffectiveChild, Doc, ActiveTheme, OutWarnings, Node->Layout);
-		if (ChildWidget.Type.IsEmpty())
-			continue;
-
-		FLayoutMapper::ApplySlotProperties(ChildWidget, EffectiveChild, Node->Layout);
-		FLayoutMapper::ApplyAlignItems(ChildWidget, Node->AlignItems, Node->Layout);
-		if (Node->Layout != EDesignLayout::None
-			&& !EffectiveChild->bAbsoluteLayoutPositioning)
-		{
-			// Flow containers use slot sequencing; child local bounds origin should stay at (0,0).
-			ChildWidget.Bounds.X = 0.0f;
-			ChildWidget.Bounds.Y = 0.0f;
-		}
-
-		const bool bHasFixedSize = EffectiveChild->Width.IsFixed() || EffectiveChild->Height.IsFixed();
-		const bool bHasMinSize = (EffectiveChild->Width.IsFit() && EffectiveChild->Width.Value > 0)
-			|| (EffectiveChild->Height.IsFit() && EffectiveChild->Height.Value > 0);
-		// Canvas children with mixed FitContent+Fixed axes need SizeBox to enforce the Fixed axis
-		const bool bCanvasMixedAxis = Node->Layout == EDesignLayout::None
-			&& ((EffectiveChild->Width.IsFit() && EffectiveChild->Height.IsFixed())
-				|| (EffectiveChild->Height.IsFit() && EffectiveChild->Width.IsFixed()));
-		const bool bWidgetOwnsDesiredSize =
-			Node->Layout != EDesignLayout::None
-			&& ChildWidget.Type == TEXT("Image")
-			&& EffectiveChild->Children.Num() == 0
-			&& (ChildWidget.Properties.Contains(TEXT("WidthOverride")) || ChildWidget.Properties.Contains(TEXT("HeightOverride")))
-			&& (ChildWidget.Properties.Contains(TEXT("MaterialRef"))
-				|| ChildWidget.Properties.Contains(TEXT("TexturePath"))
-				|| ChildWidget.Properties.Contains(TEXT("PathGeometry")));
-		// CanvasPanel 的尺寸本来就由 Slot 偏移控制；给“普通 fixed 子节点”再套 SizeBox
-		// 会把内部控件退化为默认 100x100 期望尺寸，导致大面积错位/压扁。
-		const bool bNeedsSizeBox = Node->Layout == EDesignLayout::None
-			? bCanvasMixedAxis
-			: (bHasFixedSize || bHasMinSize) && !bWidgetOwnsDesiredSize;
-		if (bNeedsSizeBox)
-		{
-			UE_LOG(LogDesign2UMG, Verbose, TEXT("  child '%s' → SizeBox wrap (fixed=%d min=%d w=%.1f h=%.1f)"),
-				*ChildWidget.Name, bHasFixedSize, bHasMinSize,
-				EffectiveChild->Width.Value, EffectiveChild->Height.Value);
-			Widget.Children.Add(FLayoutMapper::WrapWithSizeBox(MoveTemp(ChildWidget), EffectiveChild));
-		}
-		else
-			Widget.Children.Add(MoveTemp(ChildWidget));
-	}
+	PreResolveFlowChildren(Node, Doc, Widget, VisibleChildren, ActiveTheme);
+	AppendConvertedChildren(Widget, Node, Doc, VisibleChildren, ActiveTheme, OutWarnings);
 
 	if (Node->Gap > 0)
 	{
@@ -2001,6 +1831,189 @@ FUMGWidgetNode FDesign2UMGConverter::CreatePathWidget(const TSharedPtr<FDesignNo
 	// Fallback
 	Widget.Type = FDesignTypeMapper::MapNodeTypeToWidget(Node->Type, Node->Layout);
 	return Widget;
+}
+
+TSharedPtr<FDesignNode> FDesign2UMGConverter::ResolveExpandedChildForConversion(
+	const TSharedPtr<FDesignNode>& Child,
+	const FDesignDocument& Doc,
+	const TMap<FString, FString>& ThemeContext,
+	bool bPreComputeFitContent)
+{
+	TSharedPtr<FDesignNode> ExpandedChild = ExpandRefForConversion(Child, Doc, ThemeContext);
+	if (!ExpandedChild.IsValid())
+		return Child;
+	if (bPreComputeFitContent && ExpandedChild != Child)
+		PreComputeFitContentSizes(ExpandedChild, Doc);
+	return ExpandedChild;
+}
+
+void FDesign2UMGConverter::PreResolveFlowChildren(
+	const TSharedPtr<FDesignNode>& Node,
+	const FDesignDocument& Doc,
+	const FUMGWidgetNode& Widget,
+	const TArray<TSharedPtr<FDesignNode>>& VisibleChildren,
+	const TMap<FString, FString>& ThemeContext)
+{
+	if (Widget.Bounds.W > 0 && Widget.Bounds.H > 0
+		&& (Node->Layout == EDesignLayout::Horizontal || Node->Layout == EDesignLayout::Vertical))
+	{
+		const float InnerW = Widget.Bounds.W - Node->Padding.Left - Node->Padding.Right;
+		const float InnerH = Widget.Bounds.H - Node->Padding.Top - Node->Padding.Bottom;
+		const bool bHorizontal = Node->Layout == EDesignLayout::Horizontal;
+		TArray<FChildSizeSnapshot> EffectiveChildren;
+		for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
+			EffectiveChildren.Add(BuildChildSizeSnapshot(Child, Doc));
+
+		float FixedMainSum = 0.0f;
+		int32 FillCount = 0;
+		const float TotalGap = EffectiveChildren.Num() > 1 ? Node->Gap * (EffectiveChildren.Num() - 1) : 0.0f;
+		for (const FChildSizeSnapshot& ChildSnapshot : EffectiveChildren)
+		{
+			const FDesignSize& MainSize = bHorizontal ? ChildSnapshot.EffectiveWidth : ChildSnapshot.EffectiveHeight;
+			if (MainSize.IsFill())
+				++FillCount;
+			else
+				FixedMainSum += MainSize.Value;
+
+			const FDesignSize& RawMain = bHorizontal ? ChildSnapshot.RawWidth : ChildSnapshot.RawHeight;
+			const FDesignSize& RawCross = bHorizontal ? ChildSnapshot.RawHeight : ChildSnapshot.RawWidth;
+			const FDesignSize& EffectiveCross = bHorizontal ? ChildSnapshot.EffectiveHeight : ChildSnapshot.EffectiveWidth;
+			UE_LOG(LogDesign2UMG, Verbose, TEXT("PreResolveFill Child '%s': ref=%d rawMain=%s(%.0f) effMain=%s(%.0f) rawCross=%s(%.0f) effCross=%s(%.0f)"),
+				ChildSnapshot.Child.IsValid() ? *ChildSnapshot.Child->Id : TEXT("<invalid>"),
+				ChildSnapshot.bUsedExpandedRef ? 1 : 0,
+				ToSizeModeLogString(RawMain.Mode), RawMain.Value,
+				ToSizeModeLogString(MainSize.Mode), MainSize.Value,
+				ToSizeModeLogString(RawCross.Mode), RawCross.Value,
+				ToSizeModeLogString(EffectiveCross.Mode), EffectiveCross.Value);
+		}
+
+		auto ResolveSize = [](TSharedPtr<FDesignNode>& TargetNode, bool bWidth, float Pixels)
+		{
+			FDesignSize& Size = bWidth ? TargetNode->Width : TargetNode->Height;
+			Size.Value = FMath::Max(0.0f, Pixels);
+			if (bWidth) TargetNode->bHasWidth = true;
+			else TargetNode->bHasHeight = true;
+		};
+
+		if (FillCount > 0)
+		{
+			const float AvailableMain = (bHorizontal ? InnerW : InnerH) - FixedMainSum - TotalGap;
+			const float FillMain = FMath::Max(0.0f, AvailableMain / FillCount);
+			for (FChildSizeSnapshot& ChildSnapshot : EffectiveChildren)
+			{
+				const FDesignSize& MainSize = bHorizontal ? ChildSnapshot.EffectiveWidth : ChildSnapshot.EffectiveHeight;
+				if (MainSize.IsFill())
+					ResolveSize(ChildSnapshot.Child, bHorizontal, FillMain);
+				const FDesignSize& CrossSize = bHorizontal ? ChildSnapshot.EffectiveHeight : ChildSnapshot.EffectiveWidth;
+				if (CrossSize.IsFill())
+					ResolveSize(ChildSnapshot.Child, !bHorizontal, bHorizontal ? InnerH : InnerW);
+			}
+
+			UE_LOG(LogDesign2UMG, Log, TEXT("PreResolveFill: '%s' layout=%s inner=(%.0f,%.0f) fixed=%.0f fill=%d each=%.0f"),
+				*Widget.Name, bHorizontal ? TEXT("H") : TEXT("V"),
+				InnerW, InnerH, FixedMainSum, FillCount, FillMain);
+		}
+		else
+		{
+			for (FChildSizeSnapshot& ChildSnapshot : EffectiveChildren)
+			{
+				const FDesignSize& CrossSize = bHorizontal ? ChildSnapshot.EffectiveHeight : ChildSnapshot.EffectiveWidth;
+				if (CrossSize.IsFill())
+					ResolveSize(ChildSnapshot.Child, !bHorizontal, bHorizontal ? InnerH : InnerW);
+			}
+		}
+	}
+
+	for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
+	{
+		auto ResolveFit = [](const TSharedPtr<FDesignNode>& TargetNode, bool bWidth, float Pixels)
+		{
+			FDesignSize& Size = bWidth ? TargetNode->Width : TargetNode->Height;
+			if (Size.IsFit() && Pixels > Size.Value)
+			{
+				Size.Value = Pixels;
+				if (bWidth) TargetNode->bHasWidth = true;
+				else TargetNode->bHasHeight = true;
+			}
+		};
+
+		if (Child->Width.IsFit() || Child->Height.IsFit())
+		{
+			const float ChildContentWidth = ComputeChildContentWidthHint(Node, Child, 0.0f);
+			const TSharedPtr<FDesignNode> EstimateChild = ResolveExpandedChildForConversion(Child, Doc, ThemeContext, false);
+			const FVector2D Estimate = EstimateNodeSize(EstimateChild, ChildContentWidth);
+			ResolveFit(Child, true, Estimate.X);
+			ResolveFit(Child, false, Estimate.Y);
+			if (Estimate.X > 0 || Estimate.Y > 0)
+			{
+				UE_LOG(LogDesign2UMG, Log, TEXT("PreResolveFitContent: '%s' estimated=(%.0f,%.0f)"),
+					*Child->Name, Estimate.X, Estimate.Y);
+			}
+		}
+	}
+}
+
+bool FDesign2UMGConverter::ShouldWrapChildWithSizeBox(
+	const TSharedPtr<FDesignNode>& ParentNode,
+	const TSharedPtr<FDesignNode>& ChildNode,
+	const FUMGWidgetNode& ChildWidget)
+{
+	const bool bHasFixedSize = ChildNode->Width.IsFixed() || ChildNode->Height.IsFixed();
+	const bool bHasMinSize = (ChildNode->Width.IsFit() && ChildNode->Width.Value > 0)
+		|| (ChildNode->Height.IsFit() && ChildNode->Height.Value > 0);
+	const bool bCanvasMixedAxis = ParentNode->Layout == EDesignLayout::None
+		&& ((ChildNode->Width.IsFit() && ChildNode->Height.IsFixed())
+			|| (ChildNode->Height.IsFit() && ChildNode->Width.IsFixed()));
+	const bool bWidgetOwnsDesiredSize =
+		ParentNode->Layout != EDesignLayout::None
+		&& ChildWidget.Type == TEXT("Image")
+		&& ChildNode->Children.Num() == 0
+		&& (ChildWidget.Properties.Contains(TEXT("WidthOverride")) || ChildWidget.Properties.Contains(TEXT("HeightOverride")))
+		&& (ChildWidget.Properties.Contains(TEXT("MaterialRef"))
+			|| ChildWidget.Properties.Contains(TEXT("TexturePath"))
+			|| ChildWidget.Properties.Contains(TEXT("PathGeometry")));
+	return ParentNode->Layout == EDesignLayout::None
+		? bCanvasMixedAxis
+		: (bHasFixedSize || bHasMinSize) && !bWidgetOwnsDesiredSize;
+}
+
+void FDesign2UMGConverter::AppendConvertedChildren(
+	FUMGWidgetNode& Widget,
+	const TSharedPtr<FDesignNode>& Node,
+	const FDesignDocument& Doc,
+	const TArray<TSharedPtr<FDesignNode>>& VisibleChildren,
+	const TMap<FString, FString>& ActiveTheme,
+	TArray<FString>* OutWarnings)
+{
+	for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
+	{
+		TSharedPtr<FDesignNode> EffectiveChild = ResolveExpandedChildForConversion(Child, Doc, ActiveTheme, true);
+		FUMGWidgetNode ChildWidget = ConvertNode(EffectiveChild, Doc, ActiveTheme, OutWarnings, Node->Layout);
+		if (ChildWidget.Type.IsEmpty())
+			continue;
+
+		FLayoutMapper::ApplySlotProperties(ChildWidget, EffectiveChild, Node->Layout);
+		FLayoutMapper::ApplyAlignItems(ChildWidget, Node->AlignItems, Node->Layout);
+		if (Node->Layout != EDesignLayout::None && !EffectiveChild->bAbsoluteLayoutPositioning)
+		{
+			ChildWidget.Bounds.X = 0.0f;
+			ChildWidget.Bounds.Y = 0.0f;
+		}
+
+		if (ShouldWrapChildWithSizeBox(Node, EffectiveChild, ChildWidget))
+		{
+			const bool bHasFixedSize = EffectiveChild->Width.IsFixed() || EffectiveChild->Height.IsFixed();
+			const bool bHasMinSize = (EffectiveChild->Width.IsFit() && EffectiveChild->Width.Value > 0)
+				|| (EffectiveChild->Height.IsFit() && EffectiveChild->Height.Value > 0);
+			UE_LOG(LogDesign2UMG, Verbose, TEXT("  child '%s' → SizeBox wrap (fixed=%d min=%d w=%.1f h=%.1f)"),
+				*ChildWidget.Name, bHasFixedSize, bHasMinSize,
+				EffectiveChild->Width.Value, EffectiveChild->Height.Value);
+			Widget.Children.Add(FLayoutMapper::WrapWithSizeBox(MoveTemp(ChildWidget), EffectiveChild));
+			continue;
+		}
+
+		Widget.Children.Add(MoveTemp(ChildWidget));
+	}
 }
 
 FVector2D FDesign2UMGConverter::PreComputeFitContentSizes(const TSharedPtr<FDesignNode>& Node, const FDesignDocument& Doc)
