@@ -659,33 +659,8 @@ TSharedPtr<FDesignNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& Jso
 
 	// Visual properties.
 	if (JsonObj->HasField(TEXT("fill")))
-	{
-		const TSharedPtr<FJsonValue>& FillField = JsonObj->TryGetField(TEXT("fill"));
-		Node->Fill = ParseFill(FillField, *ActiveResolver);
-		// 澶氬眰濉厖锛歠ill 涓洪潪绌烘暟缁勬椂锛岄€愪釜瑙ｆ瀽鍒?Fills
-		if (FillField.IsValid() && FillField->Type == EJson::Array)
-		{
-			const auto& Arr = FillField->AsArray();
-			for (const auto& Item : Arr)
-			{
-				FDesignFill F = ParseFill(Item, *ActiveResolver);
-				if (F.Type != EDesignFillType::None && F.bEnabled)
-					Node->Fills.Add(MoveTemp(F));
-			}
-		}
-		else if (Node->Fill.Type != EDesignFillType::None)
-		{
-			Node->Fills.Add(Node->Fill);
-		}
-	}
-	{
-		const TSharedPtr<FJsonValue>& StrokeField = JsonObj->TryGetField(TEXT("stroke"));
-		if (StrokeField.IsValid() && StrokeField->Type == EJson::Object)
-		{
-			Node->Stroke = ParseStroke(StrokeField->AsObject(), *ActiveResolver);
-			ApplyPenStrokeExtensions(StrokeField->AsObject(), *Node, *ActiveResolver);
-		}
-	}
+		ParseNodeFillProperties(JsonObj->TryGetField(TEXT("fill")), *Node, *ActiveResolver);
+	ParseNodeStrokeProperties(JsonObj->TryGetField(TEXT("stroke")), *Node, *ActiveResolver);
 	if (JsonObj->HasField(TEXT("cornerRadius")))
 		Node->CornerRadius = ActiveResolver->ResolveCornerRadius(JsonObj->TryGetField(TEXT("cornerRadius")));
 
@@ -925,32 +900,8 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 					DescNode->FontFamily = Resolver.ResolveString(RawFontFamily);
 			}
 			if (OverrideObj->HasField(TEXT("fill")))
-			{
-				const TSharedPtr<FJsonValue>& FillField = OverrideObj->TryGetField(TEXT("fill"));
-				DescNode->Fill = ParseFill(FillField, Resolver);
-				DescNode->Fills.Empty();  
-				if (FillField.IsValid() && FillField->Type == EJson::Array)
-				{
-					for (const auto& Item : FillField->AsArray())
-					{
-						FDesignFill F = ParseFill(Item, Resolver);
-						if (F.Type != EDesignFillType::None && F.bEnabled)
-							DescNode->Fills.Add(MoveTemp(F));
-					}
-				}
-				else if (DescNode->Fill.Type != EDesignFillType::None)
-				{
-					DescNode->Fills.Add(DescNode->Fill);
-				}
-			}
-			{
-				const TSharedPtr<FJsonValue>& StrokeOvField = OverrideObj->TryGetField(TEXT("stroke"));
-				if (StrokeOvField.IsValid() && StrokeOvField->Type == EJson::Object)
-				{
-					DescNode->Stroke = ParseStroke(StrokeOvField->AsObject(), Resolver);
-					ApplyPenStrokeExtensions(StrokeOvField->AsObject(), *DescNode, Resolver);
-				}
-			}
+				ParseNodeFillProperties(OverrideObj->TryGetField(TEXT("fill")), *DescNode, Resolver);
+			ParseNodeStrokeProperties(OverrideObj->TryGetField(TEXT("stroke")), *DescNode, Resolver);
 
 			// Size overrides (support string formats like "fill_container"/"fit_content").
 			if (OverrideObj->HasField(TEXT("width")))
@@ -1024,6 +975,35 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 			Node->Descendants.Add(Pair.Key, DescNode);
 		}
 	}
+}
+
+void FPenParser::ParseNodeFillProperties(const TSharedPtr<FJsonValue>& Value, FDesignNode& OutNode, const FDesignVariableResolver& Resolver)
+{
+	OutNode.Fill = ParseFill(Value, Resolver);
+	OutNode.Fills.Empty();
+	if (Value.IsValid() && Value->Type == EJson::Array)
+	{
+		for (const TSharedPtr<FJsonValue>& Item : Value->AsArray())
+		{
+			FDesignFill Fill = ParseFill(Item, Resolver);
+			if (Fill.Type != EDesignFillType::None && Fill.bEnabled)
+				OutNode.Fills.Add(MoveTemp(Fill));
+		}
+	}
+	else if (OutNode.Fill.Type != EDesignFillType::None)
+	{
+		OutNode.Fills.Add(OutNode.Fill);
+	}
+}
+
+void FPenParser::ParseNodeStrokeProperties(const TSharedPtr<FJsonValue>& Value, FDesignNode& OutNode, const FDesignVariableResolver& Resolver)
+{
+	if (!Value.IsValid() || Value->Type != EJson::Object)
+		return;
+
+	const TSharedPtr<FJsonObject> StrokeObj = Value->AsObject();
+	OutNode.Stroke = ParseStroke(StrokeObj, Resolver);
+	ApplyPenStrokeExtensions(StrokeObj, OutNode, Resolver);
 }
 
 FDesignSize FPenParser::ParseSize(const TSharedPtr<FJsonValue>& Value, EDesignNodeType NodeType, const FDesignVariableResolver& Resolver)

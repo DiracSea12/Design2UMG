@@ -41,6 +41,12 @@ private:
 	/** Parse stroke data. */
 	static FDesignStroke ParseStroke(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver);
 
+	/** Parse fill properties onto a node. */
+	static void ParseNodeFillProperties(const TSharedPtr<FJsonValue>& Value, FDesignNode& OutNode, const FDesignVariableResolver& Resolver);
+
+	/** Parse stroke properties onto a node. */
+	static void ParseNodeStrokeProperties(const TSharedPtr<FJsonValue>& Value, FDesignNode& OutNode, const FDesignVariableResolver& Resolver);
+
 	/** Parse padding data. */
 	static FDesignPadding ParsePadding(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver);
 
