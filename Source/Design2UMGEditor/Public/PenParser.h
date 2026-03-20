@@ -79,4 +79,7 @@ private:
 
 	/** Apply shared layout properties and optional text layout overrides. */
 	static void ApplyNodeLayoutProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver, bool bIncludeTextProperties);
+
+	/** Apply shared text style properties such as font and underline flags. */
+	static void ApplyNodeTextStyleProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver);
 };

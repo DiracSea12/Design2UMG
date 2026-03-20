@@ -676,19 +676,9 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 		Node->Content = CombinedContent;
 	}
 }
-	{
-		FString RawFontFamily;
-		if (JsonObj->TryGetStringField(TEXT("fontFamily"), RawFontFamily))
-			Node->FontFamily = Resolver.ResolveString(RawFontFamily);
-	}
-	TryGetResolvedNumberField(JsonObj, TEXT("fontSize"), Resolver, Node->FontSize);
-	JsonObj->TryGetStringField(TEXT("fontWeight"), Node->FontWeight);
-	JsonObj->TryGetStringField(TEXT("fontStyle"), Node->FontStyle);
+	ApplyNodeTextStyleProperties(JsonObj, *Node, Resolver);
 	TryGetResolvedNumberField(JsonObj, TEXT("lineHeight"), Resolver, Node->LineHeight);
 	TryGetResolvedNumberField(JsonObj, TEXT("letterSpacing"), Resolver, Node->LetterSpacing);
-	TryGetResolvedBoolField(JsonObj, TEXT("underline"), Resolver, Node->bUnderline);
-	TryGetResolvedBoolField(JsonObj, TEXT("strikethrough"), Resolver, Node->bStrikethrough);
-	JsonObj->TryGetStringField(TEXT("href"), Node->Href);
 
 	{
 		FString TAStr;
@@ -829,17 +819,7 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 				if (OverrideObj->TryGetStringField(TEXT("content"), RawContent))
 					DescNode->Content = Resolver.ResolveString(RawContent);
 			}
-			TryGetResolvedNumberField(OverrideObj, TEXT("fontSize"), Resolver, DescNode->FontSize);
-			OverrideObj->TryGetStringField(TEXT("fontWeight"), DescNode->FontWeight);
-			OverrideObj->TryGetStringField(TEXT("fontStyle"), DescNode->FontStyle);
-			TryGetResolvedBoolField(OverrideObj, TEXT("underline"), Resolver, DescNode->bUnderline);
-			TryGetResolvedBoolField(OverrideObj, TEXT("strikethrough"), Resolver, DescNode->bStrikethrough);
-			OverrideObj->TryGetStringField(TEXT("href"), DescNode->Href);
-			{
-				FString RawFontFamily;
-				if (OverrideObj->TryGetStringField(TEXT("fontFamily"), RawFontFamily))
-					DescNode->FontFamily = Resolver.ResolveString(RawFontFamily);
-			}
+			ApplyNodeTextStyleProperties(OverrideObj, *DescNode, Resolver);
 			if (OverrideObj->HasField(TEXT("fill")))
 				ParseNodeFillProperties(OverrideObj->TryGetField(TEXT("fill")), *DescNode, Resolver);
 			ParseNodeStrokeProperties(OverrideObj->TryGetField(TEXT("stroke")), *DescNode, Resolver);
@@ -943,6 +923,19 @@ void FPenParser::ApplyNodeLayoutProperties(const TSharedPtr<FJsonObject>& JsonOb
 	FString TextGrowth;
 	if (JsonObj->TryGetStringField(TEXT("textGrowth"), TextGrowth))
 		OutNode.TextGrowth = ParseTextGrowth(TextGrowth);
+}
+
+void FPenParser::ApplyNodeTextStyleProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver)
+{
+	FString FontFamily;
+	if (JsonObj->TryGetStringField(TEXT("fontFamily"), FontFamily))
+		OutNode.FontFamily = Resolver.ResolveString(FontFamily);
+	TryGetResolvedNumberField(JsonObj, TEXT("fontSize"), Resolver, OutNode.FontSize);
+	JsonObj->TryGetStringField(TEXT("fontWeight"), OutNode.FontWeight);
+	JsonObj->TryGetStringField(TEXT("fontStyle"), OutNode.FontStyle);
+	TryGetResolvedBoolField(JsonObj, TEXT("underline"), Resolver, OutNode.bUnderline);
+	TryGetResolvedBoolField(JsonObj, TEXT("strikethrough"), Resolver, OutNode.bStrikethrough);
+	JsonObj->TryGetStringField(TEXT("href"), OutNode.Href);
 }
 
 FDesignSize FPenParser::ParseSize(const TSharedPtr<FJsonValue>& Value, EDesignNodeType NodeType, const FDesignVariableResolver& Resolver)
