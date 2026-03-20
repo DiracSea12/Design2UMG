@@ -134,23 +134,6 @@ namespace
 		return false;
 	}
 
-	TSharedPtr<FJsonObject> NormalizeSourceObject(const TSharedPtr<FJsonObject>& SourceObj)
-	{
-		if (!SourceObj.IsValid() || SourceObj->HasField(TEXT("variables")))
-		{
-			return SourceObj;
-		}
-
-		TSharedPtr<FJsonObject> Wrapped = MakeShared<FJsonObject>();
-		Wrapped->SetObjectField(TEXT("variables"), SourceObj);
-		return Wrapped;
-	}
-
-	bool ImportDocumentJson(const FString& DocumentJson, FUMGWidgetData& OutData)
-	{
-		return !DocumentJson.IsEmpty() && FPenImporter::ImportFromJson(DocumentJson, OutData);
-	}
-
 	/** Build standard document JSON from source metadata and children. */
 	FString BuildDocumentJson(
 		const TSharedPtr<FJsonObject>& SourceObj,
@@ -214,7 +197,14 @@ FString FPenMCPBridge::AssembleDocumentJson(
 		return TEXT("");
 	}
 
-	return BuildDocumentJson(NormalizeSourceObject(VarsObj), Children);
+	if (!VarsObj->HasField(TEXT("variables")))
+	{
+		TSharedPtr<FJsonObject> Wrapped = MakeShared<FJsonObject>();
+		Wrapped->SetObjectField(TEXT("variables"), VarsObj);
+		VarsObj = Wrapped;
+	}
+
+	return BuildDocumentJson(VarsObj, Children);
 }
 
 bool FPenMCPBridge::ConvertFromMCP(
@@ -223,7 +213,8 @@ bool FPenMCPBridge::ConvertFromMCP(
 	FUMGWidgetData& OutData,
 	const FString& TargetNodeId)
 {
-	return ImportDocumentJson(AssembleDocumentJson(NodesJson, VariablesJson, TargetNodeId), OutData);
+	const FString DocumentJson = AssembleDocumentJson(NodesJson, VariablesJson, TargetNodeId);
+	return !DocumentJson.IsEmpty() && FPenImporter::ImportFromJson(DocumentJson, OutData);
 }
 
 bool FPenMCPBridge::ConvertFromParsedDoc(
@@ -235,7 +226,7 @@ bool FPenMCPBridge::ConvertFromParsedDoc(
 	if (!BuildFilteredDocumentJson(DocObj, Json, TargetNodeId))
 		return false;
 
-	return ImportDocumentJson(Json, OutData);
+	return !Json.IsEmpty() && FPenImporter::ImportFromJson(Json, OutData);
 }
 
 bool FPenMCPBridge::BuildFilteredDocumentJson(
