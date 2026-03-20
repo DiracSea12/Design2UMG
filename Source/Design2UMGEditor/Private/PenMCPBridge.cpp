@@ -11,7 +11,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogPenMCPBridge, Log, All);
 
 namespace
 {
-	/** 鍦?JSON 鏁扮粍涓寜 id 鏌ユ壘鑺傜偣 */
+	/** Find a node by id inside a JSON array. */
 	FString CanonicalizeNodeId(const FString& InId)
 	{
 		FString Id = InId.TrimStartAndEnd();
@@ -25,7 +25,7 @@ namespace
 			if (Id.FindChar(TEXT('-'), DashIndex))
 			{
 				const FString Suffix = Id.Mid(DashIndex + 1);
-				// 濡傛灉鍚庣紑闈炵┖锛岃繑鍥炲悗缂€锛涘惁鍒欒繑鍥炲師濮?ID
+				// Return the suffix when the prefixed form is used.
 				return Suffix.IsEmpty() ? Id : Suffix;
 			}
 		}
@@ -65,7 +65,7 @@ namespace
 		return nullptr;
 	}
 
-	/** 鏀堕泦鎵€鏈?reusable 鑺傜偣锛堢粍浠跺畾涔夛級锛宺ef 灞曞紑鏃堕渶瑕?*/
+	/** Collect reusable component definitions needed for ref expansion. */
 	void CollectReusableNodes(const TArray<TSharedPtr<FJsonValue>>& Nodes, TArray<TSharedPtr<FJsonValue>>& OutReusable)
 	{
 		for (const auto& Node : Nodes)
@@ -88,7 +88,7 @@ namespace
 		}
 	}
 
-	/** 鎸?TargetNodeId 杩囨护锛屽悓鏃朵繚鐣欐墍鏈?reusable 缁勪欢瀹氫箟 */
+	/** Filter by target node id while keeping reusable component definitions. */
 	TArray<TSharedPtr<FJsonValue>> FilterWithReusables(
 		const TArray<TSharedPtr<FJsonValue>>& AllChildren,
 		const FString& TargetNodeId)
@@ -97,7 +97,7 @@ namespace
 		if (!Found.IsValid())
 			return TArray<TSharedPtr<FJsonValue>>();
 
-		// 鏀堕泦鎵€鏈?reusable 鑺傜偣
+		// Keep reusable definitions so downstream ref expansion still works.
 		TArray<TSharedPtr<FJsonValue>> Result;
 		CollectReusableNodes(AllChildren, Result);
 
@@ -148,14 +148,31 @@ namespace
 		return false;
 	}
 
-	/** 浠庢簮瀵硅薄缁勮鏍囧噯鏂囨。 JSON 骞跺簭鍒楀寲 */
+	TSharedPtr<FJsonObject> NormalizeSourceObject(const TSharedPtr<FJsonObject>& SourceObj)
+	{
+		if (!SourceObj.IsValid() || SourceObj->HasField(TEXT("variables")))
+		{
+			return SourceObj;
+		}
+
+		TSharedPtr<FJsonObject> Wrapped = MakeShared<FJsonObject>();
+		Wrapped->SetObjectField(TEXT("variables"), SourceObj);
+		return Wrapped;
+	}
+
+	bool ImportDocumentJson(const FString& DocumentJson, FUMGWidgetData& OutData)
+	{
+		return !DocumentJson.IsEmpty() && FPenImporter::ImportFromJson(DocumentJson, OutData);
+	}
+
+	/** Build standard document JSON from source metadata and children. */
 	FString BuildDocumentJson(
 		const TSharedPtr<FJsonObject>& SourceObj,
 		const TArray<TSharedPtr<FJsonValue>>& Children)
 	{
 		TSharedPtr<FJsonObject> Doc = MakeShared<FJsonObject>();
 
-		// 浼樺厛浣跨敤鍘熷鐗堟湰鍙凤紝鍥為€€鍒?"2.6"
+		// Prefer the original version when it exists, otherwise fall back to 2.6.
 		FString Version = TEXT("2.6");
 		if (SourceObj->HasField(TEXT("version")))
 		{
@@ -187,7 +204,7 @@ FString FPenMCPBridge::AssembleDocumentJson(
 	const FString& VariablesJson,
 	const FString& TargetNodeId)
 {
-	// 瑙ｆ瀽鑺傜偣鏁扮粍
+	// Parse the node array.
 	TArray<TSharedPtr<FJsonValue>> NodesArr;
 	TSharedRef<TJsonReader<>> NodesReader = TJsonReaderFactory<>::Create(NodesJson);
 	if (!FJsonSerializer::Deserialize(NodesReader, NodesArr))
@@ -196,7 +213,7 @@ FString FPenMCPBridge::AssembleDocumentJson(
 		return TEXT("");
 	}
 
-	// 瑙ｆ瀽鍙橀噺瀵硅薄
+	// Parse the variables payload.
 	TSharedPtr<FJsonObject> VarsObj;
 	TSharedRef<TJsonReader<>> VarsReader = TJsonReaderFactory<>::Create(VariablesJson);
 	if (!FJsonSerializer::Deserialize(VarsReader, VarsObj) || !VarsObj.IsValid())
@@ -211,17 +228,7 @@ FString FPenMCPBridge::AssembleDocumentJson(
 		return TEXT("");
 	}
 
-	// VarsObj 鍙兘鏄畬鏁存枃妗ｅ厓鏁版嵁锛堝惈 version/variables/themes/fonts锛夛紝
-	// The returned object may already be the variables object itself.
-	TSharedPtr<FJsonObject> SourceObj = VarsObj;
-	if (!VarsObj->HasField(TEXT("variables")))
-	{
-		// VarsObj itself is the variables payload; wrap it to match BuildDocumentJson input.
-		SourceObj = MakeShared<FJsonObject>();
-		SourceObj->SetObjectField(TEXT("variables"), VarsObj);
-	}
-
-	return BuildDocumentJson(SourceObj, Children);
+	return BuildDocumentJson(NormalizeSourceObject(VarsObj), Children);
 }
 
 bool FPenMCPBridge::ConvertFromMCP(
@@ -230,11 +237,7 @@ bool FPenMCPBridge::ConvertFromMCP(
 	FUMGWidgetData& OutData,
 	const FString& TargetNodeId)
 {
-	FString Json = AssembleDocumentJson(NodesJson, VariablesJson, TargetNodeId);
-	if (Json.IsEmpty())
-		return false;
-
-	return FPenImporter::ImportFromJson(Json, OutData);
+	return ImportDocumentJson(AssembleDocumentJson(NodesJson, VariablesJson, TargetNodeId), OutData);
 }
 
 bool FPenMCPBridge::ConvertFromParsedDoc(
@@ -246,7 +249,7 @@ bool FPenMCPBridge::ConvertFromParsedDoc(
 	if (!BuildFilteredDocumentJson(DocObj, Json, TargetNodeId))
 		return false;
 
-	return FPenImporter::ImportFromJson(Json, OutData);
+	return ImportDocumentJson(Json, OutData);
 }
 
 bool FPenMCPBridge::BuildFilteredDocumentJson(
@@ -258,7 +261,7 @@ bool FPenMCPBridge::BuildFilteredDocumentJson(
 	if (!DocObj.IsValid())
 		return false;
 
-	// 鎻愬彇 children
+	// Extract top-level children from the source document.
 	TArray<TSharedPtr<FJsonValue>> Children;
 	const TArray<TSharedPtr<FJsonValue>>* ChildrenPtr = nullptr;
 	if (DocObj->TryGetArrayField(TEXT("children"), ChildrenPtr) && ChildrenPtr)
