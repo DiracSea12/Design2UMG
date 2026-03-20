@@ -76,6 +76,53 @@ namespace
 		return Request;
 	}
 
+	void ExecuteImportData(
+		FUMGWidgetData& Data,
+		const FString& OutputPath,
+		const FText& PreviewWindowTitle,
+		const bool bUsePreview,
+		const EDesignBlueprintGenerationMode GenerationMode,
+		const bool bResolveImages = true)
+	{
+		DesignImportPipeline::Execute(
+			Data,
+			MakeImportRequest(OutputPath, PreviewWindowTitle, bUsePreview, GenerationMode, bResolveImages));
+	}
+
+	FDesignImportRequest MakePenImportRequest(
+		const FString& OutputPath,
+		const bool bUsePreview,
+		const bool bRenderPng)
+	{
+		return MakeImportRequest(
+			OutputPath,
+			LOCTEXT("PenConvertPreviewWindowTitle", "Design2UMG Pen Preview"),
+			bUsePreview,
+			bRenderPng ? EDesignBlueprintGenerationMode::BlueprintAndPng : EDesignBlueprintGenerationMode::BlueprintOnly);
+	}
+
+	void ExecutePenImportData(
+		FUMGWidgetData& Data,
+		const FString& OutputPath,
+		const bool bUsePreview,
+		const bool bRenderPng = true)
+	{
+		DesignImportPipeline::Execute(Data, MakePenImportRequest(OutputPath, bUsePreview, bRenderPng));
+	}
+
+	void ExecutePenFileImport(
+		const FString& FilePath,
+		const FString& TargetNodeId,
+		const FString& OutputPath,
+		const bool bUsePreview,
+		const bool bRenderPng)
+	{
+		DesignImportPipeline::ExecutePenFile(
+			FilePath,
+			TargetNodeId,
+			MakePenImportRequest(OutputPath, bUsePreview, bRenderPng));
+	}
+
 	void RequestExitIfUnattended(const TCHAR* Message)
 	{
 		if (!FApp::IsUnattended())
@@ -85,6 +132,17 @@ namespace
 
 		UE_LOG(LogDesign2UMG, Log, TEXT("%s"), Message);
 		FPlatformMisc::RequestExit(false);
+	}
+
+	bool LoadTextFileOrLog(const FString& FilePath, FString& OutContents)
+	{
+		if (FFileHelper::LoadFileToString(OutContents, *FilePath))
+		{
+			return true;
+		}
+
+		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to read file: %s"), *FilePath);
+		return false;
 	}
 
 	bool ParsePenConvertCommandArgs(const TArray<FString>& Args, FPenConvertCommandArgs& Out)
@@ -133,13 +191,7 @@ namespace
 			return;
 		}
 
-		DesignImportPipeline::Execute(
-			Data,
-			MakeImportRequest(
-				OutputPath,
-				LOCTEXT("PenConvertPreviewWindowTitle", "Design2UMG Pen Preview"),
-				true,
-				EDesignBlueprintGenerationMode::BlueprintAndPng));
+		ExecutePenImportData(Data, OutputPath, true);
 	}
 
 	TArray<FDesignFrameInfo> ExtractFramesFromMCPResult(const FString& NodesJson)
@@ -307,23 +359,6 @@ namespace
 		BeginFetch();
 	}
 
-	void ImportPenFileWithTargetNode(
-		const FString& FilePath,
-		const FString& TargetNodeId,
-		const FString& OutputPath,
-		const bool bUsePreview,
-		const bool bRenderPng)
-	{
-		DesignImportPipeline::ExecutePenFile(
-			FilePath,
-			TargetNodeId,
-			MakeImportRequest(
-				OutputPath,
-				LOCTEXT("PenConvertPreviewWindowTitle", "Design2UMG Pen Preview"),
-				bUsePreview,
-				bRenderPng ? EDesignBlueprintGenerationMode::BlueprintAndPng : EDesignBlueprintGenerationMode::BlueprintOnly));
-	}
-
 	void ImportPenFile(const FString& FilePath, const FString& OutputPath, const bool bUsePreview = true, const bool bRenderPng = true)
 	{
 		TArray<FDesignFrameInfo> Frames;
@@ -340,14 +375,7 @@ namespace
 
 		if (Frames.Num() == 1)
 		{
-			DesignImportPipeline::ExecutePenFile(
-				FilePath,
-				FString(),
-				MakeImportRequest(
-					OutputPath,
-					LOCTEXT("PenConvertPreviewWindowTitle", "Design2UMG Pen Preview"),
-					bUsePreview,
-					bRenderPng ? EDesignBlueprintGenerationMode::BlueprintAndPng : EDesignBlueprintGenerationMode::BlueprintOnly));
+			ExecutePenFileImport(FilePath, FString(), OutputPath, bUsePreview, bRenderPng);
 			return;
 		}
 
@@ -357,7 +385,7 @@ namespace
 			LOCTEXT("FrameSelectorHint", "This file contains multiple frames. Double-click to import:"),
 			[CapturedFilePath = FilePath, CapturedOutputPath = OutputPath, bCapturedPreview = bUsePreview, bCapturedRenderPng = bRenderPng](const FString& FrameId)
 			{
-				ImportPenFileWithTargetNode(CapturedFilePath, FrameId, CapturedOutputPath, bCapturedPreview, bCapturedRenderPng);
+				ExecutePenFileImport(CapturedFilePath, FrameId, CapturedOutputPath, bCapturedPreview, bCapturedRenderPng);
 			});
 	}
 
@@ -450,13 +478,12 @@ namespace
 										FText::AsNumber(Data.RootWidget.Children.Num())),
 									SNotificationItem::CS_Success);
 
-								DesignImportPipeline::Execute(
+								ExecuteImportData(
 									Data,
-									MakeImportRequest(
-										DefaultFigmaOutputPath,
-										LOCTEXT("FigmaPreviewTitle", "Design2UMG Figma Preview"),
-										!FApp::IsUnattended(),
-										EDesignBlueprintGenerationMode::BlueprintAndPng));
+									DefaultFigmaOutputPath,
+									LOCTEXT("FigmaPreviewTitle", "Design2UMG Figma Preview"),
+									!FApp::IsUnattended(),
+									EDesignBlueprintGenerationMode::BlueprintAndPng);
 
 								RequestExitIfUnattended(TEXT("Unattended mode: requesting engine exit after figma import"));
 							});
@@ -479,14 +506,13 @@ namespace
 			? FString::Printf(TEXT("/Game/Design2UMG/Figma_%s"), *FDateTime::Now().ToString(TEXT("%m%d_%H%M%S")))
 			: OutputPath;
 
-		DesignImportPipeline::Execute(
+		ExecuteImportData(
 			Data,
-			MakeImportRequest(
-				FinalOutputPath,
-				LOCTEXT("LocalFigmaPreviewTitle", "Design2UMG Local Figma Preview"),
-				bUsePreview && !FApp::IsUnattended(),
-				EDesignBlueprintGenerationMode::BlueprintAndPng,
-				false));
+			FinalOutputPath,
+			LOCTEXT("LocalFigmaPreviewTitle", "Design2UMG Local Figma Preview"),
+			bUsePreview && !FApp::IsUnattended(),
+			EDesignBlueprintGenerationMode::BlueprintAndPng,
+			false);
 	}
 
 	void ShowFigmaImportDialog()
@@ -713,14 +739,9 @@ namespace Design2UMGEditorActions
 
 				FString NodesStr;
 				FString VarsStr;
-				if (!FFileHelper::LoadFileToString(NodesStr, *CmdArgs.NodesPath))
+				if (!LoadTextFileOrLog(CmdArgs.NodesPath, NodesStr)
+					|| !LoadTextFileOrLog(CmdArgs.VarsPath, VarsStr))
 				{
-					UE_LOG(LogDesign2UMG, Error, TEXT("Failed to read file: %s"), *CmdArgs.NodesPath);
-					return;
-				}
-				if (!FFileHelper::LoadFileToString(VarsStr, *CmdArgs.VarsPath))
-				{
-					UE_LOG(LogDesign2UMG, Error, TEXT("Failed to read file: %s"), *CmdArgs.VarsPath);
 					return;
 				}
 
@@ -738,13 +759,7 @@ namespace Design2UMGEditorActions
 					UE_LOG(LogDesign2UMG, Log, TEXT("  [%d] %s (%s)"), Index, *Child.Name, *Child.Type);
 				}
 
-				DesignImportPipeline::Execute(
-					Data,
-					MakeImportRequest(
-						CmdArgs.OutputPath,
-						LOCTEXT("PenConvertPreviewWindowTitle", "Design2UMG Pen Preview"),
-						CmdArgs.bUsePreview,
-						EDesignBlueprintGenerationMode::BlueprintAndPng));
+				ExecutePenImportData(Data, CmdArgs.OutputPath, CmdArgs.bUsePreview);
 
 				RequestExitIfUnattended(TEXT("Unattended mode: requesting engine exit after pen convert"));
 			}),
@@ -803,7 +818,7 @@ namespace Design2UMGEditorActions
 				}
 				else
 				{
-					ImportPenFileWithTargetNode(FilePath, TargetNodeId, OutputPath, bPreview, bRenderPng);
+					ExecutePenFileImport(FilePath, TargetNodeId, OutputPath, bPreview, bRenderPng);
 				}
 
 				RequestExitIfUnattended(TEXT("Unattended mode: requesting engine exit after import"));
@@ -857,9 +872,8 @@ namespace Design2UMGEditorActions
 				}
 
 				FString JsonStr;
-				if (!FFileHelper::LoadFileToString(JsonStr, *JsonPath))
+				if (!LoadTextFileOrLog(JsonPath, JsonStr))
 				{
-					UE_LOG(LogDesign2UMG, Error, TEXT("Failed to read file: %s"), *JsonPath);
 					return;
 				}
 
@@ -872,13 +886,12 @@ namespace Design2UMGEditorActions
 
 				UE_LOG(LogDesign2UMG, Log, TEXT("[OK] ImportSource succeeded (%s), root children: %d"), *SourceId.ToString(), Data.RootWidget.Children.Num());
 
-				DesignImportPipeline::Execute(
+				ExecuteImportData(
 					Data,
-					MakeImportRequest(
-						OutputPath,
-						LOCTEXT("ImportSourcePreviewTitle", "Design2UMG Import Preview"),
-						bPreview,
-						EDesignBlueprintGenerationMode::BlueprintAndPng));
+					OutputPath,
+					LOCTEXT("ImportSourcePreviewTitle", "Design2UMG Import Preview"),
+					bPreview,
+					EDesignBlueprintGenerationMode::BlueprintAndPng);
 
 				RequestExitIfUnattended(TEXT("Unattended mode: requesting engine exit after import source"));
 			}),
