@@ -87,6 +87,49 @@ static void AddJsonExtensionIfPresent(const TSharedPtr<FJsonObject>& Obj, TMap<F
 	Extensions.Add(ExtKey, JsonValueToCompactString(FieldValue));
 }
 
+static void CaptureSharedMetadataExtensions(const TSharedPtr<FJsonObject>& Obj, TMap<FString, FString>& Extensions)
+{
+	if (!Obj.IsValid())
+		return;
+
+	for (const TCHAR* Key : { TEXT("overflowDirection"), TEXT("prototypeStartNodeID"), TEXT("transitionNodeID") })
+		AddExtensionIfNonEmpty(Extensions, Key, GetStr(Obj, Key));
+
+	for (const TCHAR* Key : { TEXT("layoutGrids"), TEXT("interactions"), TEXT("flowStartingPoints"), TEXT("prototypeDevice"),
+		TEXT("componentPropertyReferences"), TEXT("explicitVariableModes"), TEXT("annotations"), TEXT("measurements"),
+		TEXT("exportSettings"), TEXT("devStatus"), TEXT("branchData") })
+	{
+		AddJsonExtensionIfPresent(Obj, Extensions, Key, Key);
+	}
+}
+
+static void CaptureLayoutMetadataExtensions(const TSharedPtr<FJsonObject>& Obj, TMap<FString, FString>& Extensions)
+{
+	if (!Obj.IsValid())
+		return;
+
+	for (const TCHAR* Key : { TEXT("counterAxisAlignContent"), TEXT("layoutPositioning"), TEXT("layoutWrap"), TEXT("layoutAlign"),
+		TEXT("primaryAxisSizingMode"), TEXT("counterAxisSizingMode"), TEXT("gridRowsSizing"), TEXT("gridColumnsSizing"),
+		TEXT("gridChildHorizontalAlign"), TEXT("gridChildVerticalAlign") })
+	{
+		AddExtensionIfNonEmpty(Extensions, Key, GetStr(Obj, Key));
+	}
+
+	for (const TCHAR* Key : { TEXT("counterAxisSpacing"), TEXT("minWidth"), TEXT("maxWidth"), TEXT("minHeight"),
+		TEXT("maxHeight"), TEXT("gridRowCount"), TEXT("gridColumnCount"), TEXT("gridRowGap"), TEXT("gridColumnGap"),
+		TEXT("gridRowSpan"), TEXT("gridColumnSpan"), TEXT("gridColumnAnchorIndex"), TEXT("gridRowAnchorIndex") })
+	{
+		AddNumericExtensionIfPresent(Obj, Extensions, Key, Key);
+	}
+
+	for (const TCHAR* Key : { TEXT("componentProperties"), TEXT("overrides"), TEXT("exposedInstances") })
+	{
+		AddJsonExtensionIfPresent(Obj, Extensions, Key, Key);
+	}
+
+	CaptureSharedMetadataExtensions(Obj, Extensions);
+}
+
 static TSharedPtr<FJsonObject> ParseJsonString(const FString& Json)
 {
 	TSharedPtr<FJsonObject> Root;
@@ -603,46 +646,7 @@ void FFigmaParser::ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNo
 	OutNode.bAbsoluteLayoutPositioning = GetStr(NodeObj, TEXT("layoutPositioning")).Equals(TEXT("ABSOLUTE"), ESearchCase::IgnoreCase);
 
 	{
-		AddExtensionIfNonEmpty(OutNode.Metadata, TEXT("counterAxisAlignContent"), GetStr(NodeObj, TEXT("counterAxisAlignContent")));
-		AddExtensionIfNonEmpty(OutNode.Metadata, TEXT("layoutPositioning"), GetStr(NodeObj, TEXT("layoutPositioning")));
-		AddExtensionIfNonEmpty(OutNode.Metadata, TEXT("layoutWrap"), GetStr(NodeObj, TEXT("layoutWrap")));
-		AddExtensionIfNonEmpty(OutNode.Metadata, TEXT("layoutAlign"), GetStr(NodeObj, TEXT("layoutAlign")));
-		AddExtensionIfNonEmpty(OutNode.Metadata, TEXT("primaryAxisSizingMode"), GetStr(NodeObj, TEXT("primaryAxisSizingMode")));
-		AddExtensionIfNonEmpty(OutNode.Metadata, TEXT("counterAxisSizingMode"), GetStr(NodeObj, TEXT("counterAxisSizingMode")));
-		AddNumericExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("counterAxisSpacing"), TEXT("counterAxisSpacing"));
-		AddNumericExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("minWidth"), TEXT("minWidth"));
-		AddNumericExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("maxWidth"), TEXT("maxWidth"));
-		AddNumericExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("minHeight"), TEXT("minHeight"));
-		AddNumericExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("maxHeight"), TEXT("maxHeight"));
-		AddNumericExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("gridRowCount"), TEXT("gridRowCount"));
-		AddNumericExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("gridColumnCount"), TEXT("gridColumnCount"));
-		AddNumericExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("gridRowGap"), TEXT("gridRowGap"));
-		AddNumericExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("gridColumnGap"), TEXT("gridColumnGap"));
-		AddExtensionIfNonEmpty(OutNode.Metadata, TEXT("gridRowsSizing"), GetStr(NodeObj, TEXT("gridRowsSizing")));
-		AddExtensionIfNonEmpty(OutNode.Metadata, TEXT("gridColumnsSizing"), GetStr(NodeObj, TEXT("gridColumnsSizing")));
-		AddExtensionIfNonEmpty(OutNode.Metadata, TEXT("gridChildHorizontalAlign"), GetStr(NodeObj, TEXT("gridChildHorizontalAlign")));
-		AddExtensionIfNonEmpty(OutNode.Metadata, TEXT("gridChildVerticalAlign"), GetStr(NodeObj, TEXT("gridChildVerticalAlign")));
-		AddNumericExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("gridRowSpan"), TEXT("gridRowSpan"));
-		AddNumericExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("gridColumnSpan"), TEXT("gridColumnSpan"));
-		AddNumericExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("gridColumnAnchorIndex"), TEXT("gridColumnAnchorIndex"));
-		AddNumericExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("gridRowAnchorIndex"), TEXT("gridRowAnchorIndex"));
-		AddExtensionIfNonEmpty(OutNode.Metadata, TEXT("overflowDirection"), GetStr(NodeObj, TEXT("overflowDirection")));
-		AddExtensionIfNonEmpty(OutNode.Metadata, TEXT("prototypeStartNodeID"), GetStr(NodeObj, TEXT("prototypeStartNodeID")));
-		AddExtensionIfNonEmpty(OutNode.Metadata, TEXT("transitionNodeID"), GetStr(NodeObj, TEXT("transitionNodeID")));
-		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("layoutGrids"), TEXT("layoutGrids"));
-		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("interactions"), TEXT("interactions"));
-		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("flowStartingPoints"), TEXT("flowStartingPoints"));
-		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("prototypeDevice"), TEXT("prototypeDevice"));
-		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("componentPropertyReferences"), TEXT("componentPropertyReferences"));
-		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("explicitVariableModes"), TEXT("explicitVariableModes"));
-		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("annotations"), TEXT("annotations"));
-		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("measurements"), TEXT("measurements"));
-		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("exportSettings"), TEXT("exportSettings"));
-		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("devStatus"), TEXT("devStatus"));
-		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("branchData"), TEXT("branchData"));
-		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("componentProperties"), TEXT("componentProperties"));
-		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("overrides"), TEXT("overrides"));
-		AddJsonExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("exposedInstances"), TEXT("exposedInstances"));
+		CaptureLayoutMetadataExtensions(NodeObj, OutNode.Metadata);
 
 		if (NodeObj->HasField(TEXT("itemReverseZIndex")))
 		{
@@ -1374,22 +1378,7 @@ bool FFigmaParser::ParseDocument(const FString& FigmaJson, FDesignDocument& OutD
 
 	auto CaptureDocumentMetadata = [&OutDocument](const TSharedPtr<FJsonObject>& SourceObj)
 	{
-		if (!SourceObj.IsValid())
-			return;
-		AddExtensionIfNonEmpty(OutDocument.Metadata, TEXT("overflowDirection"), GetStr(SourceObj, TEXT("overflowDirection")));
-		AddExtensionIfNonEmpty(OutDocument.Metadata, TEXT("prototypeStartNodeID"), GetStr(SourceObj, TEXT("prototypeStartNodeID")));
-		AddExtensionIfNonEmpty(OutDocument.Metadata, TEXT("transitionNodeID"), GetStr(SourceObj, TEXT("transitionNodeID")));
-		AddJsonExtensionIfPresent(SourceObj, OutDocument.Metadata, TEXT("layoutGrids"), TEXT("layoutGrids"));
-		AddJsonExtensionIfPresent(SourceObj, OutDocument.Metadata, TEXT("interactions"), TEXT("interactions"));
-		AddJsonExtensionIfPresent(SourceObj, OutDocument.Metadata, TEXT("flowStartingPoints"), TEXT("flowStartingPoints"));
-		AddJsonExtensionIfPresent(SourceObj, OutDocument.Metadata, TEXT("prototypeDevice"), TEXT("prototypeDevice"));
-		AddJsonExtensionIfPresent(SourceObj, OutDocument.Metadata, TEXT("componentPropertyReferences"), TEXT("componentPropertyReferences"));
-		AddJsonExtensionIfPresent(SourceObj, OutDocument.Metadata, TEXT("explicitVariableModes"), TEXT("explicitVariableModes"));
-		AddJsonExtensionIfPresent(SourceObj, OutDocument.Metadata, TEXT("annotations"), TEXT("annotations"));
-		AddJsonExtensionIfPresent(SourceObj, OutDocument.Metadata, TEXT("measurements"), TEXT("measurements"));
-		AddJsonExtensionIfPresent(SourceObj, OutDocument.Metadata, TEXT("exportSettings"), TEXT("exportSettings"));
-		AddJsonExtensionIfPresent(SourceObj, OutDocument.Metadata, TEXT("devStatus"), TEXT("devStatus"));
-		AddJsonExtensionIfPresent(SourceObj, OutDocument.Metadata, TEXT("branchData"), TEXT("branchData"));
+		CaptureSharedMetadataExtensions(SourceObj, OutDocument.Metadata);
 	};
 	CaptureDocumentMetadata(DocObj);
 	CaptureDocumentMetadata(Root);
