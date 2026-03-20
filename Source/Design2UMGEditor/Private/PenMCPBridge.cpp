@@ -1,7 +1,7 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "PenMCPBridge.h"
-#include "DesignSourceRegistry.h"
+#include "PenImporter.h"
 #include "UMGSchema.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -223,7 +223,7 @@ bool FPenMCPBridge::ConvertFromMCP(
 	if (Json.IsEmpty())
 		return false;
 
-	return FDesignSourceRegistry::Convert(TEXT("Pen"), Json, OutData);
+	return FPenImporter::ImportFromJson(Json, OutData);
 }
 
 bool FPenMCPBridge::ConvertFromParsedDoc(
@@ -235,7 +235,7 @@ bool FPenMCPBridge::ConvertFromParsedDoc(
 	if (!BuildFilteredDocumentJson(DocObj, Json, TargetNodeId))
 		return false;
 
-	return FDesignSourceRegistry::Convert(TEXT("Pen"), Json, OutData);
+	return FPenImporter::ImportFromJson(Json, OutData);
 }
 
 bool FPenMCPBridge::BuildFilteredDocumentJson(

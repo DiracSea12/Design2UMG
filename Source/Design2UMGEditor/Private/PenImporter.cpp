@@ -7,7 +7,6 @@
 #include "PenParser.h"
 #include "Design2UMGConverter.h"
 #include "PenMCPBridge.h"
-#include "DesignSourceRegistry.h"
 #include "UMGSchema.h"
 #include "Misc/FileHelper.h"
 #include "Misc/ScopedSlowTask.h"
@@ -21,6 +20,15 @@
 #include "Widgets/Layout/SSeparator.h"
 
 #define LOCTEXT_NAMESPACE "PenImporter"
+
+namespace
+{
+	void ResolveDocumentFonts(FDesignDocument& Document)
+	{
+		FFontResolver::AutoImportFonts(Document);
+		FFontResolver::FindMissingFonts(Document);
+	}
+}
 
 int32 FDesignImportResult::CountWidgets(const FUMGWidgetNode& Node)
 {
@@ -136,8 +144,7 @@ bool FPenImporter::ImportFromFile(const FString& FilePath, FUMGWidgetData& OutDa
 	}
 	if (SlowTask.ShouldCancel()) return false;
 
-	FFontResolver::AutoImportFonts(Document);
-	FFontResolver::FindMissingFonts(Document);
+	ResolveDocumentFonts(Document);
 
 	SlowTask.EnterProgressFrame(1.0f, FText::FromString(TEXT("Converting design to widgets...")));
 	OutData = FDesign2UMGConverter::Convert(Document);
@@ -158,8 +165,7 @@ bool FPenImporter::ImportFromJson(const FString& JsonString, FUMGWidgetData& Out
 	}
 	if (SlowTask.ShouldCancel()) return false;
 
-	FFontResolver::AutoImportFonts(Document);
-	FFontResolver::FindMissingFonts(Document);
+	ResolveDocumentFonts(Document);
 
 	SlowTask.EnterProgressFrame(1.0f, FText::FromString(TEXT("Converting design to widgets...")));
 	OutData = FDesign2UMGConverter::Convert(Document);
@@ -202,21 +208,16 @@ bool FPenImporter::ImportFileWithTargetNode(const FString& FilePath, const FStri
 	FDesignDocument FilteredDocument;
 	if (FPenParser::ParseDocument(FilteredDocumentJson, FilteredDocument))
 	{
-		FFontResolver::AutoImportFonts(FilteredDocument);
-		FFontResolver::FindMissingFonts(FilteredDocument);
+		ResolveDocumentFonts(FilteredDocument);
 	}
 	else
 	{
-		UE_LOG(LogDesign2UMG, Warning, TEXT("PenImporter: ParseDocument failed during font preflight (target node import), continue converting."));
-	}
-
-	SlowTask.EnterProgressFrame(1.0f, FText::FromString(TEXT("Converting design to widgets...")));
-	if (!FDesignSourceRegistry::Convert(TEXT("Pen"), FilteredDocumentJson, OutData))
-	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("PenImporter: Convert failed for node %s"), *TargetNodeId);
+		UE_LOG(LogDesign2UMG, Error, TEXT("PenImporter: ParseDocument failed after filtering node %s"), *TargetNodeId);
 		return false;
 	}
 
+	SlowTask.EnterProgressFrame(1.0f, FText::FromString(TEXT("Converting design to widgets...")));
+	OutData = FDesign2UMGConverter::Convert(FilteredDocument);
 	return true;
 }
 
