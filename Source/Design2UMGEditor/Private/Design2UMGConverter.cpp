@@ -1333,6 +1333,15 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FDesignNode>& 
 
 	TArray<TSharedPtr<FDesignNode>> VisibleChildren;
 	GatherVisibleChildren(Node, VisibleChildren);
+	auto ResolveExpandedChild = [&](const TSharedPtr<FDesignNode>& Child, bool bPreComputeFitContent)
+	{
+		TSharedPtr<FDesignNode> ExpandedChild = ExpandRefForConversion(Child, Doc, ActiveTheme);
+		if (!ExpandedChild.IsValid())
+			return Child;
+		if (bPreComputeFitContent && ExpandedChild != Child)
+			PreComputeFitContentSizes(ExpandedChild, Doc);
+		return ExpandedChild;
+	};
 
 	// 预处理：在递归子节点之前，解析 FillContainer 尺寸写入 PenNode
 	// 这样子节点递归时 Width.Value / Height.Value 已经是正确的像素值
@@ -1436,10 +1445,7 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FDesignNode>& 
 		if (Child->Width.IsFit() || Child->Height.IsFit())
 		{
 			const float ChildContentWidth = ComputeChildContentWidthHint(Node, Child, 0.0f);
-			TSharedPtr<FDesignNode> EstimateChild = ExpandRefForConversion(Child, Doc, ActiveTheme);
-			if (!EstimateChild.IsValid())
-				EstimateChild = Child;
-
+			const TSharedPtr<FDesignNode> EstimateChild = ResolveExpandedChild(Child, false);
 			const FVector2D Est(EstimateNodeSize(EstimateChild, ChildContentWidth));
 			ResolveFit(Child, true, Est.X);
 			ResolveFit(Child, false, Est.Y);
@@ -1454,12 +1460,7 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FDesignNode>& 
 
 	for (const auto& Child : VisibleChildren)
 	{
-		TSharedPtr<FDesignNode> EffectiveChild = ExpandRefForConversion(Child, Doc, ActiveTheme);
-		if (!EffectiveChild.IsValid())
-			EffectiveChild = Child;
-		else if (EffectiveChild != Child)
-			PreComputeFitContentSizes(EffectiveChild, Doc);
-
+		TSharedPtr<FDesignNode> EffectiveChild = ResolveExpandedChild(Child, true);
 		auto ChildWidget = ConvertNode(EffectiveChild, Doc, ActiveTheme, OutWarnings, Node->Layout);
 		if (ChildWidget.Type.IsEmpty())
 			continue;
@@ -1481,28 +1482,19 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FDesignNode>& 
 		const bool bCanvasMixedAxis = Node->Layout == EDesignLayout::None
 			&& ((EffectiveChild->Width.IsFit() && EffectiveChild->Height.IsFixed())
 				|| (EffectiveChild->Height.IsFit() && EffectiveChild->Width.IsFixed()));
+		const bool bWidgetOwnsDesiredSize =
+			Node->Layout != EDesignLayout::None
+			&& ChildWidget.Type == TEXT("Image")
+			&& EffectiveChild->Children.Num() == 0
+			&& (ChildWidget.Properties.Contains(TEXT("WidthOverride")) || ChildWidget.Properties.Contains(TEXT("HeightOverride")))
+			&& (ChildWidget.Properties.Contains(TEXT("MaterialRef"))
+				|| ChildWidget.Properties.Contains(TEXT("TexturePath"))
+				|| ChildWidget.Properties.Contains(TEXT("PathGeometry")));
 		// CanvasPanel 的尺寸本来就由 Slot 偏移控制；给“普通 fixed 子节点”再套 SizeBox
 		// 会把内部控件退化为默认 100x100 期望尺寸，导致大面积错位/压扁。
-		bool bNeedsSizeBox = false;
-		if (Node->Layout == EDesignLayout::None)
-		{
-			bNeedsSizeBox = bCanvasMixedAxis;
-		}
-		else
-		{
-			const bool bWidgetOwnsDesiredSize =
-				ChildWidget.Type == TEXT("Image")
-				&& EffectiveChild->Children.Num() == 0
-				&& (ChildWidget.Properties.Contains(TEXT("WidthOverride")) || ChildWidget.Properties.Contains(TEXT("HeightOverride")))
-				&& (ChildWidget.Properties.Contains(TEXT("MaterialRef"))
-					|| ChildWidget.Properties.Contains(TEXT("TexturePath"))
-					|| ChildWidget.Properties.Contains(TEXT("PathGeometry")));
-			bNeedsSizeBox = (bHasFixedSize || bHasMinSize);
-			if (bWidgetOwnsDesiredSize)
-			{
-				bNeedsSizeBox = false;
-			}
-		}
+		const bool bNeedsSizeBox = Node->Layout == EDesignLayout::None
+			? bCanvasMixedAxis
+			: (bHasFixedSize || bHasMinSize) && !bWidgetOwnsDesiredSize;
 		if (bNeedsSizeBox)
 		{
 			UE_LOG(LogDesign2UMG, Verbose, TEXT("  child '%s' → SizeBox wrap (fixed=%d min=%d w=%.1f h=%.1f)"),
