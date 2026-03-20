@@ -152,6 +152,32 @@ namespace
 		bool bUsedExpandedRef = false;
 	};
 
+	TSharedPtr<FDesignNode> ExpandRefForConversion(
+		const TSharedPtr<FDesignNode>& Node,
+		const FDesignDocument& Doc,
+		const TMap<FString, FString>& ThemeContext)
+	{
+		if (!Node.IsValid() || Node->Type != EDesignNodeType::Ref)
+		{
+			return Node;
+		}
+
+		TSharedPtr<FDesignNode> Expanded = FRefExpander::ExpandRef(Node, Doc);
+		if (!Expanded.IsValid())
+		{
+			return nullptr;
+		}
+
+		if (ThemeContext.Num() > 0)
+		{
+			FDesignVariableResolver Resolver(Doc.Variables);
+			Resolver.SetThemeContext(ThemeContext);
+			FRefExpander::ReThemeNode(Expanded, Resolver);
+		}
+
+		return Expanded;
+	}
+
 	FChildSizeSnapshot BuildChildSizeSnapshot(const TSharedPtr<FDesignNode>& Child, const FDesignDocument& Doc)
 	{
 		FChildSizeSnapshot Snapshot;
@@ -912,11 +938,7 @@ bool ShouldAutoWrapText(const TSharedPtr<FDesignNode>& Node)
 		const float PadV = Node->Padding.Top + Node->Padding.Bottom;
 
 		TArray<TSharedPtr<FDesignNode>> Visible;
-		for (const auto& C : Node->Children)
-		{
-			if (!ShouldSkipNode(C))
-				Visible.Add(C);
-		}
+		GatherVisibleChildren(Node, Visible);
 
 		if (Visible.Num() == 0)
 			return FVector2D(PadH, PadV);
@@ -1118,10 +1140,20 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document)
 	for (const auto& Child : Document.Children)
 		Children.Add(FRefExpander::DeepCopyNode(Child));
 
-	// WidgetName 使用第一个非跳过 frame 的名称，fallback 到 WBP_FromPen
+	TArray<TSharedPtr<FDesignNode>> VisibleChildren;
+	VisibleChildren.Reserve(Children.Num());
 	for (const auto& Child : Children)
 	{
-		if (!ShouldSkipNode(Child) && !Child->bReusable && !Child->Name.IsEmpty())
+		if (!ShouldSkipNode(Child))
+		{
+			VisibleChildren.Add(Child);
+		}
+	}
+
+	// WidgetName 使用第一个非跳过 frame 的名称，fallback 到 WBP_FromPen
+	for (const auto& Child : VisibleChildren)
+	{
+		if (!Child->bReusable && !Child->Name.IsEmpty())
 		{
 			Result.WidgetName = FString::Printf(TEXT("WBP_%s"), *Child->Name);
 			break;
@@ -1131,16 +1163,15 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document)
 		Result.WidgetName = TEXT("WBP_FromPen");
 
 	// 预计算 FitContent 节点的实际尺寸（从子节点递归推算）
-	for (const auto& Child : Children)
+	for (const auto& Child : VisibleChildren)
 	{
-		if (!ShouldSkipNode(Child))
-			PreComputeFitContentSizes(Child, Document);
+		PreComputeFitContentSizes(Child, Document);
 	}
 
 	TArray<FUMGWidgetNode> RenderWidgets;
-	for (const auto& Child : Children)
+	for (const auto& Child : VisibleChildren)
 	{
-		if (ShouldSkipNode(Child) || Child->bReusable)
+		if (Child->bReusable)
 			continue;
 
 		Child->X = 0.0f;
@@ -1183,18 +1214,9 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FDesignNode>& 
 
 	if (Node->Type == EDesignNodeType::Ref)
 	{
-		auto Expanded = FRefExpander::ExpandRef(Node, Doc);
+		auto Expanded = ExpandRefForConversion(Node, Doc, ActiveTheme);
 		if (!Expanded.IsValid())
 			return FUMGWidgetNode();
-
-		if (ActiveTheme.Num() > 0)
-		{
-			FDesignVariableResolver Resolver(Doc.Variables);
-			Resolver.SetThemeContext(ActiveTheme);
-			FRefExpander::ReThemeNode(Expanded, Resolver);
-		}
-		// Expanded refs are ephemeral copies; precompute fit-content on this copy
-		// so nested text/icon bounds don't collapse to zero in UMG designer.
 		PreComputeFitContentSizes(Expanded, Doc);
 		return ConvertNode(Expanded, Doc, ActiveTheme, OutWarnings, ParentLayout);
 	}
@@ -1309,6 +1331,9 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FDesignNode>& 
 		}
 	}
 
+	TArray<TSharedPtr<FDesignNode>> VisibleChildren;
+	GatherVisibleChildren(Node, VisibleChildren);
+
 	// 预处理：在递归子节点之前，解析 FillContainer 尺寸写入 PenNode
 	// 这样子节点递归时 Width.Value / Height.Value 已经是正确的像素值
 	// 直接修改原始子节点（Ref 节点的 Width/Height 会被 ExpandRef 传递给展开节点）
@@ -1323,10 +1348,9 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FDesignNode>& 
 
 		// Build effective size snapshots (ref children use expanded mode/value for stats).
 		TArray<FChildSizeSnapshot> EffChildren;
-		for (const auto& Child : Node->Children)
+		for (const auto& Child : VisibleChildren)
 		{
-			if (!ShouldSkipNode(Child))
-				EffChildren.Add(BuildChildSizeSnapshot(Child, Doc));
+			EffChildren.Add(BuildChildSizeSnapshot(Child, Doc));
 		}
 
 		// 统计主轴 Fixed 占用和 Fill 数量
@@ -1396,11 +1420,8 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FDesignNode>& 
 
 	// Pre-compute FitContent sizes: for children with FitContent+Value=0,
 	// estimate content size from their subtree so they don't collapse to zero.
-	for (auto& Child : Node->Children)
+	for (auto& Child : VisibleChildren)
 	{
-		if (ShouldSkipNode(Child))
-			continue;
-
 		auto ResolveFit = [](TSharedPtr<FDesignNode>& N, bool bWidth, float Px)
 		{
 			FDesignSize& Size = bWidth ? N->Width : N->Height;
@@ -1415,21 +1436,9 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FDesignNode>& 
 		if (Child->Width.IsFit() || Child->Height.IsFit())
 		{
 			const float ChildContentWidth = ComputeChildContentWidthHint(Node, Child, 0.0f);
-			TSharedPtr<FDesignNode> EstimateChild = Child;
-			if (Child->Type == EDesignNodeType::Ref)
-			{
-				auto Expanded = FRefExpander::ExpandRef(Child, Doc);
-				if (Expanded.IsValid())
-				{
-					if (ActiveTheme.Num() > 0)
-					{
-						FDesignVariableResolver Resolver(Doc.Variables);
-						Resolver.SetThemeContext(ActiveTheme);
-						FRefExpander::ReThemeNode(Expanded, Resolver);
-					}
-					EstimateChild = Expanded;
-				}
-			}
+			TSharedPtr<FDesignNode> EstimateChild = ExpandRefForConversion(Child, Doc, ActiveTheme);
+			if (!EstimateChild.IsValid())
+				EstimateChild = Child;
 
 			const FVector2D Est(EstimateNodeSize(EstimateChild, ChildContentWidth));
 			ResolveFit(Child, true, Est.X);
@@ -1443,28 +1452,13 @@ FUMGWidgetNode FDesign2UMGConverter::ConvertNode(const TSharedPtr<FDesignNode>& 
 		}
 	}
 
-	for (const auto& Child : Node->Children)
+	for (const auto& Child : VisibleChildren)
 	{
-		if (ShouldSkipNode(Child))
-			continue;
-
-		TSharedPtr<FDesignNode> EffectiveChild = Child;
-		if (Child->Type == EDesignNodeType::Ref)
-		{
-			auto Expanded = FRefExpander::ExpandRef(Child, Doc);
-			if (Expanded.IsValid())
-			{
-				if (ActiveTheme.Num() > 0)
-				{
-					FDesignVariableResolver Resolver(Doc.Variables);
-					Resolver.SetThemeContext(ActiveTheme);
-					FRefExpander::ReThemeNode(Expanded, Resolver);
-				}
-				// Ensure expanded ref subtree has concrete fit-content sizes before converting.
-				PreComputeFitContentSizes(Expanded, Doc);
-				EffectiveChild = Expanded;
-			}
-		}
+		TSharedPtr<FDesignNode> EffectiveChild = ExpandRefForConversion(Child, Doc, ActiveTheme);
+		if (!EffectiveChild.IsValid())
+			EffectiveChild = Child;
+		else if (EffectiveChild != Child)
+			PreComputeFitContentSizes(EffectiveChild, Doc);
 
 		auto ChildWidget = ConvertNode(EffectiveChild, Doc, ActiveTheme, OutWarnings, Node->Layout);
 		if (ChildWidget.Type.IsEmpty())
