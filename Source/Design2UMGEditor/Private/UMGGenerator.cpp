@@ -408,8 +408,8 @@ namespace
 			}
 			else
 			{
-				TMap<FString, FString> GenerationProps = Node.Properties;
-				GenerationProps.FindOrAdd(TEXT("MaterialRef")) = MaterialRef;
+				FUMGPropertyBag GenerationProps = Node.Properties;
+				GenerationProps.Add(TEXT("MaterialRef"), MaterialRef);
 				if (!Node.Brush.MaterialParams.IsEmpty() && !GenerationProps.Contains(TEXT("MaterialParams")))
 				{
 					GenerationProps.Add(TEXT("MaterialParams"), Node.Brush.MaterialParams);
@@ -595,7 +595,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 				Node.Slot.bAutoSize ? 1 : 0);
 
 			FString PropsInfo;
-			for (const auto& P : Node.Properties)
+			for (const auto& P : Node.Properties.AsMap())
 			{
 				if (P.Key == TEXT("PathGeometry") || P.Key == TEXT("MaterialParams")) continue;
 				PropsInfo += FString::Printf(TEXT(" %s=%s"), *P.Key, *P.Value.Left(40));

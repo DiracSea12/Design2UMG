@@ -159,6 +159,70 @@ struct FUMGVisualBrushData
 	bool HasCornerRadii() const { return CornerRadii.X >= 0; }
 };
 
+struct FUMGTypedProperty
+{
+	FString SerializedValue;
+	bool bHasValue = false;
+	bool BoolValue = false;
+	int32 IntValue = 0;
+	float FloatValue = 0.0f;
+	FVector2D Vector2DValue = FVector2D::ZeroVector;
+	FVector4 Vector4Value = FVector4(0, 0, 0, 0);
+	FMargin MarginValue = FMargin(0.0f);
+	FLinearColor ColorValue = FLinearColor::Transparent;
+};
+
+struct FUMGPropertyBag
+{
+	void Add(const FString& Key, const FString& Value);
+	void Add(const TCHAR* Key, const FString& Value);
+	void Add(const TCHAR* Key, const TCHAR* Value);
+
+	bool Contains(const FString& Key) const;
+	bool Contains(const TCHAR* Key) const;
+
+	const FString* Find(const FString& Key) const;
+	const FString* Find(const TCHAR* Key) const;
+
+	FString FindRef(const FString& Key) const;
+	FString FindRef(const TCHAR* Key) const;
+
+	int32 Remove(const FString& Key);
+	int32 Remove(const TCHAR* Key);
+	int32 Num() const;
+	void Empty();
+
+	const FString& operator[](const FString& Key) const;
+	const FString& operator[](const TCHAR* Key) const;
+	operator TMap<FString, FString>() const { return ToMap(); }
+
+	bool TryGetBool(const FString& Key, bool& OutValue) const;
+	bool TryGetBool(const TCHAR* Key, bool& OutValue) const { return TryGetBool(FString(Key), OutValue); }
+	bool TryGetInt(const FString& Key, int32& OutValue) const;
+	bool TryGetInt(const TCHAR* Key, int32& OutValue) const { return TryGetInt(FString(Key), OutValue); }
+	bool TryGetFloat(const FString& Key, float& OutValue) const;
+	bool TryGetFloat(const TCHAR* Key, float& OutValue) const { return TryGetFloat(FString(Key), OutValue); }
+	bool TryGetColor(const FString& Key, FLinearColor& OutValue) const;
+	bool TryGetColor(const TCHAR* Key, FLinearColor& OutValue) const { return TryGetColor(FString(Key), OutValue); }
+	bool TryGetVector2D(const FString& Key, FVector2D& OutValue) const;
+	bool TryGetVector2D(const TCHAR* Key, FVector2D& OutValue) const { return TryGetVector2D(FString(Key), OutValue); }
+	bool TryGetVector4(const FString& Key, FVector4& OutValue) const;
+	bool TryGetVector4(const TCHAR* Key, FVector4& OutValue) const { return TryGetVector4(FString(Key), OutValue); }
+	bool TryGetMargin(const FString& Key, FMargin& OutValue) const;
+	bool TryGetMargin(const TCHAR* Key, FMargin& OutValue) const { return TryGetMargin(FString(Key), OutValue); }
+
+	const TMap<FString, FString>& AsMap() const;
+	TMap<FString, FString> ToMap() const;
+
+	auto begin() const { return AsMap().begin(); }
+	auto end() const { return AsMap().end(); }
+
+private:
+	TMap<FString, FUMGTypedProperty> Values;
+	mutable TMap<FString, FString> CachedMap;
+	mutable bool bCacheDirty = true;
+};
+
 /**
  * Widget 节点数据结构 - 描述单个控件（v2.4更新） */
 USTRUCT()
@@ -188,8 +252,7 @@ struct FUMGWidgetNode
 	/** 
 	 * 属性键值对（legacy，逐步Brush 替代
 	 * @note [TODO] 完全重构为强类型数据，消除字符串 Map 带来的类型安全和维护风险。	 *       为向后兼容当前版本保留，但新属性系统不应再添加到此 Map 中。	 */
-	UPROPERTY()
-	TMap<FString, FString> Properties;
+	FUMGPropertyBag Properties;
 
 	/** 类型化文本样式（v2.4 拆分自Brush）*/
 	FUMGTextStyleData TextStyle;

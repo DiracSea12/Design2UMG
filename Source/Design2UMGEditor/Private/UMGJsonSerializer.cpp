@@ -102,7 +102,7 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeWidgetNode(const FUMGWidget
 	if (Node.Properties.Num() > 0)
 	{
 		TSharedRef<FJsonObject> Props = MakeShared<FJsonObject>();
-		for (const auto& Pair : Node.Properties)
+		for (const auto& Pair : Node.Properties.AsMap())
 			Props->SetStringField(Pair.Key, Pair.Value);
 		J->SetObjectField(TEXT("Properties"), Props);
 	}

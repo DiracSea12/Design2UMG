@@ -439,7 +439,7 @@ void FUMGJsonParser::ParseOffsetsData(const TSharedPtr<FJsonObject>& JsonObject,
 	JsonObject->TryGetNumberField(TEXT("Bottom"), OutOffsets.Bottom);
 }
 
-void FUMGJsonParser::ParseProperties(const TSharedPtr<FJsonObject>& JsonObject, TMap<FString, FString>& OutProperties)
+void FUMGJsonParser::ParseProperties(const TSharedPtr<FJsonObject>& JsonObject, FUMGPropertyBag& OutProperties)
 {
 	if (!JsonObject.IsValid())
 	{

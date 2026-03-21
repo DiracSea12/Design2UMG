@@ -686,16 +686,19 @@ namespace
 
 	void ResolveNodeRecursive(FUMGWidgetNode& Node, FResolveContext& Context)
 	{
-		if (FString* TexturePath = Node.Properties.Find(TEXT("TexturePath")))
+		const FString TexturePath = Node.Properties.FindRef(TEXT("TexturePath"));
+		if (!TexturePath.IsEmpty())
 		{
 			const FString DebugName = Node.Name.IsEmpty() ? Node.Id : Node.Name;
+			FString ResolvedTexturePath = TexturePath;
 			ResolveTexturePath(
-				*TexturePath,
+				ResolvedTexturePath,
 				DebugName.IsEmpty() ? TEXT("UnnamedWidget") : DebugName,
 				Node.Id,
 				Context);
+			Node.Properties.Add(TEXT("TexturePath"), ResolvedTexturePath);
 			// 同步 typed 字段，避免 typed-first 读到未 resolve 的原始 URL
-			Node.Brush.TexturePath = *TexturePath;
+			Node.Brush.TexturePath = ResolvedTexturePath;
 		}
 
 		for (FUMGWidgetNode& Child : Node.Children)

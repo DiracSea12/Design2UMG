@@ -107,7 +107,7 @@ namespace
 
 	bool ApplyImageModeToSlateBrush(
 		FSlateBrush& Brush,
-		const TMap<FString, FString>& P,
+		const FUMGPropertyBag& P,
 		TFunctionRef<void(UTexture2D*)> ApplyCroppedTexture)
 	{
 		const FString* Mode = P.Find(TEXT("ImageMode"));
@@ -147,8 +147,12 @@ namespace
 			if (!FMath::IsNearlyZero(B) || !FMath::IsNearlyZero(C))
 			{
 				UTexture2D* SrcTex = Cast<UTexture2D>(Brush.GetResourceObject());
-				const int32 CropW = FMath::Max(1, P.Contains(TEXT("WidthOverride")) ? FCString::Atoi(*P[TEXT("WidthOverride")]) : 64);
-				const int32 CropH = FMath::Max(1, P.Contains(TEXT("HeightOverride")) ? FCString::Atoi(*P[TEXT("HeightOverride")]) : 64);
+				float CropWidth = 64.0f;
+				float CropHeight = 64.0f;
+				P.TryGetFloat(TEXT("WidthOverride"), CropWidth);
+				P.TryGetFloat(TEXT("HeightOverride"), CropHeight);
+				const int32 CropW = FMath::Max(1, FMath::RoundToInt(CropWidth));
+				const int32 CropH = FMath::Max(1, FMath::RoundToInt(CropHeight));
 				if (UTexture2D* Cropped = FProceduralShapeGenerator::ApplyAffineCrop(SrcTex, A, B, TX, C, D, TY, CropW, CropH))
 				{
 					ApplyCroppedTexture(Cropped);
@@ -168,18 +172,22 @@ namespace
 		return false;
 	}
 
-	void ApplyTextBlockProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplyTextBlockProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UTextBlock* T = CastChecked<UTextBlock>(W);
 		if (const FString* V = GET_PROP("Text")) T->SetText(FText::FromString(*V));
-		if (const FString* V = GET_PROP("Color")) T->SetColorAndOpacity(FSlateColor(FUMGValueParser::ParseColor(*V)));
+		FLinearColor TextColor;
+		if (P.TryGetColor(TEXT("Color"), TextColor))
+		{
+			T->SetColorAndOpacity(FSlateColor(TextColor));
+		}
 		FSlateFontInfo FontInfo = T->GetFont();
 		bool bFontChanged = false;
 		const bool bIsIconFontWidget = P.Contains(TEXT("IconName"));
-		if (const FString* V = GET_PROP("FontSize"))
+		float FontSize = 0.0f;
+		if (P.TryGetFloat(TEXT("FontSize"), FontSize))
 		{
-			const float DisplaySize = FCString::Atof(**V);
-			FontInfo.Size = FMath::Max(1, FMath::RoundToInt(DisplaySize));
+			FontInfo.Size = FMath::Max(1, FMath::RoundToInt(FontSize));
 			bFontChanged = true;
 		}
 		if (const FString* V = GET_PROP("FontFamily"))
@@ -202,15 +210,11 @@ namespace
 			FontInfo.TypefaceFontName = FName(**V);
 			bFontChanged = true;
 		}
-		if (const FString* V = GET_PROP("LetterSpacing"))
+		float PixelSpacing = 0.0f;
+		if (P.TryGetFloat(TEXT("LetterSpacing"), PixelSpacing))
 		{
-			// .pen letterSpacing is in px on the original design font size.
-			// UE tracking is 1/1000 em, so the correct basis is the source font size,
-			// not the scaled UMG font size.
-			const float PixelSpacing = FCString::Atof(**V);
-			const float DesignFontSize = GET_PROP("DesignFontSize")
-				? FCString::Atof(**GET_PROP("DesignFontSize"))
-				: 0.0f;
+			float DesignFontSize = 0.0f;
+			P.TryGetFloat(TEXT("DesignFontSize"), DesignFontSize);
 			if (FontInfo.Size > 0 || DesignFontSize > 0.0f)
 			{
 				FontInfo.LetterSpacing = TextStyleUtils::ConvertLetterSpacingPxToTracking(PixelSpacing, DesignFontSize, FontInfo.Size);
@@ -228,19 +232,24 @@ namespace
 			};
 			if (const ETextJustify::Type* J = JustifyMap.Find(*V)) T->SetJustification(*J);
 		}
-		if (const FString* V = GET_PROP("LineHeightPercentage"))
+		float LineHeightPercentage = 0.0f;
+		if (P.TryGetFloat(TEXT("LineHeightPercentage"), LineHeightPercentage))
 		{
-			T->SetLineHeightPercentage(FCString::Atof(**V));
+			T->SetLineHeightPercentage(LineHeightPercentage);
 			T->SetApplyLineHeightToBottomLine(true);
 		}
-		if (const FString* V = GET_PROP("AutoWrapText"))
-			T->SetAutoWrapText(V->ToBool());
-		if (const FString* V = GET_PROP("WrapTextAt"))
-			T->SetWrapTextAt(FCString::Atof(**V));
-		if (const FString* V = GET_PROP("ShadowOffset"))
-			T->SetShadowOffset(FUMGValueParser::ParseVector2D(*V));
-		if (const FString* V = GET_PROP("ShadowColorAndOpacity"))
-			T->SetShadowColorAndOpacity(FUMGValueParser::ParseColor(*V));
+		bool bAutoWrapText = false;
+		if (P.TryGetBool(TEXT("AutoWrapText"), bAutoWrapText))
+			T->SetAutoWrapText(bAutoWrapText);
+		float WrapTextAt = 0.0f;
+		if (P.TryGetFloat(TEXT("WrapTextAt"), WrapTextAt))
+			T->SetWrapTextAt(WrapTextAt);
+		FVector2D ShadowOffset;
+		if (P.TryGetVector2D(TEXT("ShadowOffset"), ShadowOffset))
+			T->SetShadowOffset(ShadowOffset);
+		FLinearColor ShadowColor;
+		if (P.TryGetColor(TEXT("ShadowColorAndOpacity"), ShadowColor))
+			T->SetShadowColorAndOpacity(ShadowColor);
 		if (bIsIconFontWidget)
 		{
 			FShapedTextOptions IconShaping;
@@ -250,7 +259,7 @@ namespace
 		}
 	}
 
-	void ApplyButtonProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplyButtonProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UButton* B = CastChecked<UButton>(W);
 		FButtonStyle S = B->GetStyle();
@@ -266,26 +275,30 @@ namespace
 		B->SetStyle(S);
 	}
 
-	void ApplyImageProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplyImageProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UImage* I = CastChecked<UImage>(W);
-		const FString* ColorVal = GET_PROP("Color");
-		if (!ColorVal) ColorVal = GET_PROP("ColorAndOpacity");
-		if (ColorVal) I->SetColorAndOpacity(FUMGValueParser::ParseColor(*ColorVal));
+		FLinearColor ImageColor;
+		if (P.TryGetColor(TEXT("Color"), ImageColor) || P.TryGetColor(TEXT("ColorAndOpacity"), ImageColor))
+		{
+			I->SetColorAndOpacity(ImageColor);
+		}
 
-		if (const FString* V = GET_PROP("BrushColor")) I->SetBrushTintColor(FSlateColor(FUMGValueParser::ParseColor(*V)));
+		FLinearColor BrushTint;
+		if (P.TryGetColor(TEXT("BrushColor"), BrushTint))
+		{
+			I->SetBrushTintColor(FSlateColor(BrushTint));
+		}
 		if (const FString* V = GET_PROP("MaterialRef"))
 		{
 			if (UTexture2D* GeneratedTex = FProceduralShapeGenerator::GenerateFromMaterialRef(*V, P, I))
 			{
 				I->SetBrushFromTexture(GeneratedTex);
 				FSlateBrush GeneratedBrush = I->GetBrush();
-				const float DesiredWidth = GET_PROP("WidthOverride")
-					? FCString::Atof(**GET_PROP("WidthOverride"))
-					: static_cast<float>(GeneratedTex->GetSizeX());
-				const float DesiredHeight = GET_PROP("HeightOverride")
-					? FCString::Atof(**GET_PROP("HeightOverride"))
-					: static_cast<float>(GeneratedTex->GetSizeY());
+				float DesiredWidth = static_cast<float>(GeneratedTex->GetSizeX());
+				float DesiredHeight = static_cast<float>(GeneratedTex->GetSizeY());
+				P.TryGetFloat(TEXT("WidthOverride"), DesiredWidth);
+				P.TryGetFloat(TEXT("HeightOverride"), DesiredHeight);
 				GeneratedBrush.ImageSize = FVector2D(DesiredWidth, DesiredHeight);
 				GeneratedBrush.Tiling = ESlateBrushTileType::NoTile;
 				I->SetBrush(GeneratedBrush);
@@ -296,11 +309,15 @@ namespace
 		if (const FString* Geom = GET_PROP("PathGeometry"))
 		{
 			const FString FillRuleStr = P.Contains(TEXT("PathFillRule")) ? P[TEXT("PathFillRule")] : TEXT("nonzero");
-			const FString ColorStr = P.Contains(TEXT("PathFillColor")) ? P[TEXT("PathFillColor")] : TEXT("#ffffffff");
-			FLinearColor PathColor = FUMGValueParser::ParseColor(ColorStr);
+			FLinearColor PathColor = FLinearColor::White;
+			P.TryGetColor(TEXT("PathFillColor"), PathColor);
 
-			int32 PW = FMath::Max(1, P.Contains(TEXT("WidthOverride")) ? FCString::Atoi(*P[TEXT("WidthOverride")]) : 64);
-			int32 PH = FMath::Max(1, P.Contains(TEXT("HeightOverride")) ? FCString::Atoi(*P[TEXT("HeightOverride")]) : 64);
+			float PathWidth = 64.0f;
+			float PathHeight = 64.0f;
+			P.TryGetFloat(TEXT("WidthOverride"), PathWidth);
+			P.TryGetFloat(TEXT("HeightOverride"), PathHeight);
+			int32 PW = FMath::Max(1, FMath::RoundToInt(PathWidth));
+			int32 PH = FMath::Max(1, FMath::RoundToInt(PathHeight));
 			constexpr int32 PathSupersample = 2;
 			const int32 RasterW = PW * PathSupersample;
 			const int32 RasterH = PH * PathSupersample;
@@ -330,14 +347,16 @@ namespace
 
 		FSlateBrush Brush = I->GetBrush();
 		bool bBrushModified = false;
-		if (const FString* V = GET_PROP("WidthOverride"))
+		float WidthOverride = 0.0f;
+		if (P.TryGetFloat(TEXT("WidthOverride"), WidthOverride))
 		{
-			Brush.ImageSize.X = FCString::Atof(**V);
+			Brush.ImageSize.X = WidthOverride;
 			bBrushModified = true;
 		}
-		if (const FString* V = GET_PROP("HeightOverride"))
+		float HeightOverride = 0.0f;
+		if (P.TryGetFloat(TEXT("HeightOverride"), HeightOverride))
 		{
-			Brush.ImageSize.Y = FCString::Atof(**V);
+			Brush.ImageSize.Y = HeightOverride;
 			bBrushModified = true;
 		}
 
@@ -358,14 +377,14 @@ namespace
 		}
 	}
 
-	void ApplyProgressBarProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplyProgressBarProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UProgressBar* PB = CastChecked<UProgressBar>(W);
 		if (const FString* V = GET_PROP("Percent")) PB->SetPercent(FCString::Atof(**V));
 		if (const FString* V = GET_PROP("FillColor")) PB->SetFillColorAndOpacity(FUMGValueParser::ParseColor(*V));
 	}
 
-	void ApplyThrobberProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplyThrobberProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UThrobber* T = CastChecked<UThrobber>(W);
 		if (const FString* V = GET_PROP("NumberOfPieces")) T->SetNumberOfPieces(FCString::Atoi(**V));
@@ -381,7 +400,7 @@ namespace
 		if (const FString* V = GET_PROP("AnimateOpacity")) T->SetAnimateOpacity(V->ToBool());
 	}
 
-	void ApplyCircularThrobberProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplyCircularThrobberProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UCircularThrobber* T = CastChecked<UCircularThrobber>(W);
 		if (const FString* V = GET_PROP("NumberOfPieces")) T->SetNumberOfPieces(FCString::Atoi(**V));
@@ -389,31 +408,31 @@ namespace
 		if (const FString* V = GET_PROP("Radius")) T->SetRadius(FCString::Atof(**V));
 	}
 
-	void ApplySliderProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplySliderProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		if (const FString* V = GET_PROP("Value")) CastChecked<USlider>(W)->SetValue(FCString::Atof(**V));
 	}
 
-	void ApplyCheckBoxProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplyCheckBoxProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		if (const FString* V = GET_PROP("IsChecked")) CastChecked<UCheckBox>(W)->SetIsChecked(V->ToBool());
 	}
 
-	void ApplyEditableTextBoxProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplyEditableTextBoxProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UEditableTextBox* E = CastChecked<UEditableTextBox>(W);
 		if (const FString* V = GET_PROP("Text")) E->SetText(FText::FromString(*V));
 		if (const FString* V = GET_PROP("HintText")) E->SetHintText(FText::FromString(*V));
 	}
 
-	void ApplyMultiLineEditableTextBoxProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplyMultiLineEditableTextBoxProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UMultiLineEditableTextBox* M = CastChecked<UMultiLineEditableTextBox>(W);
 		if (const FString* V = GET_PROP("Text")) M->SetText(FText::FromString(*V));
 		if (const FString* V = GET_PROP("HintText")) M->SetHintText(FText::FromString(*V));
 	}
 
-	void ApplyEditableTextProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplyEditableTextProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UEditableText* E = CastChecked<UEditableText>(W);
 		if (const FString* V = GET_PROP("Text")) E->SetText(FText::FromString(*V));
@@ -423,7 +442,7 @@ namespace
 		if (const FString* V = GET_PROP("MinimumDesiredWidth")) E->SetMinimumDesiredWidth(FCString::Atof(**V));
 	}
 
-	void ApplyMultiLineEditableTextProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplyMultiLineEditableTextProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UMultiLineEditableText* M = CastChecked<UMultiLineEditableText>(W);
 		if (const FString* V = GET_PROP("Text")) M->SetText(FText::FromString(*V));
@@ -431,7 +450,7 @@ namespace
 		if (const FString* V = GET_PROP("IsReadOnly")) M->SetIsReadOnly(V->ToBool());
 	}
 
-	void ApplyBorderProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplyBorderProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UBorder* Bd = CastChecked<UBorder>(W);
 		Bd->SetPadding(FMargin(0.0f));
@@ -482,9 +501,10 @@ namespace
 			bBrushChanged = true;
 		}
 
-		if (const FString* V = GET_PROP("OutlineCornerRadius"))
+		float OutlineCornerRadius = 0.0f;
+		if (P.TryGetFloat(TEXT("OutlineCornerRadius"), OutlineCornerRadius))
 		{
-			const float Radius = FMath::Max(0.0f, FCString::Atof(**V));
+			const float Radius = FMath::Max(0.0f, OutlineCornerRadius);
 			// Pill 形状（radius >= 999）使用 HalfHeightRadius，UE5 自动 clamp 到控件半高
 			if (Radius >= 999.0f)
 			{
@@ -498,40 +518,39 @@ namespace
 			bBrushChanged = true;
 		}
 
-		if (const FString* V = GET_PROP("CornerRadii"))
+		FVector4 CornerRadii;
+		if (P.TryGetVector4(TEXT("CornerRadii"), CornerRadii))
 		{
-			FVector4 CornerRadii;
-			if (TryParseVector4(*V, CornerRadii))
+			const float MaxR = FMath::Max3(CornerRadii.X, CornerRadii.Y, FMath::Max(CornerRadii.Z, CornerRadii.W));
+			if (MaxR >= 999.0f)
 			{
-				const float MaxR = FMath::Max3(CornerRadii.X, CornerRadii.Y, FMath::Max(CornerRadii.Z, CornerRadii.W));
-				if (MaxR >= 999.0f)
-				{
-					Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::HalfHeightRadius;
-				}
-				else
-				{
-					Brush.OutlineSettings.CornerRadii = CornerRadii;
-					Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
-				}
-				bBrushChanged = true;
+				Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::HalfHeightRadius;
 			}
-		}
-
-		if (const FString* V = GET_PROP("OutlineThickness"))
-		{
-			Brush.OutlineSettings.Width = FMath::Max(0.0f, FCString::Atof(**V));
+			else
+			{
+				Brush.OutlineSettings.CornerRadii = CornerRadii;
+				Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
+			}
 			bBrushChanged = true;
 		}
 
-		if (const FString* V = GET_PROP("OutlineColor"))
+		float OutlineThickness = 0.0f;
+		if (P.TryGetFloat(TEXT("OutlineThickness"), OutlineThickness))
 		{
-			Brush.OutlineSettings.Color = FSlateColor(FUMGValueParser::ParseColor(*V));
+			Brush.OutlineSettings.Width = FMath::Max(0.0f, OutlineThickness);
 			bBrushChanged = true;
 		}
 
-		if (const FString* V = GET_PROP("BrushColor"))
+		FLinearColor OutlineColor;
+		if (P.TryGetColor(TEXT("OutlineColor"), OutlineColor))
 		{
-			FLinearColor Color = FUMGValueParser::ParseColor(*V);
+			Brush.OutlineSettings.Color = FSlateColor(OutlineColor);
+			bBrushChanged = true;
+		}
+
+		FLinearColor BorderColor;
+		if (P.TryGetColor(TEXT("BrushColor"), BorderColor))
+		{
 			if (!Brush.GetResourceObject() && Brush.DrawAs != ESlateBrushDrawType::RoundedBox)
 			{
 				const ESlateBrushDrawType::Type ExistingDrawAs = Brush.DrawAs;
@@ -548,7 +567,7 @@ namespace
 					bBrushChanged = true;
 				}
 			}
-			Bd->SetBrushColor(Color);
+			Bd->SetBrushColor(BorderColor);
 		}
 
 		bBrushChanged = ApplyImageModeToSlateBrush(Brush, P, [&Brush](UTexture2D* Cropped)
@@ -561,20 +580,22 @@ namespace
 			Bd->SetBrush(Brush);
 		}
 
-		if (const FString* V = GET_PROP("ContentColor")) Bd->SetContentColorAndOpacity(FUMGValueParser::ParseColor(*V));
-		if (const FString* V = GET_PROP("Padding")) Bd->SetPadding(FUMGValueParser::ParseMargin(*V));
+		FLinearColor ContentColor;
+		if (P.TryGetColor(TEXT("ContentColor"), ContentColor)) Bd->SetContentColorAndOpacity(ContentColor);
+		FMargin BorderPadding;
+		if (P.TryGetMargin(TEXT("Padding"), BorderPadding)) Bd->SetPadding(BorderPadding);
 
 		// StrokePadding: additional inset for inside-aligned strokes
-		if (const FString* V = GET_PROP("StrokePadding"))
+		FMargin StrokePadding;
+		if (P.TryGetMargin(TEXT("StrokePadding"), StrokePadding))
 		{
-			FMargin Extra = FUMGValueParser::ParseMargin(*V);
 			FMargin Current = Bd->GetPadding();
-			Bd->SetPadding(FMargin(Current.Left + Extra.Left, Current.Top + Extra.Top,
-				Current.Right + Extra.Right, Current.Bottom + Extra.Bottom));
+			Bd->SetPadding(FMargin(Current.Left + StrokePadding.Left, Current.Top + StrokePadding.Top,
+				Current.Right + StrokePadding.Right, Current.Bottom + StrokePadding.Bottom));
 		}
 	}
 
-	void ApplySizeBoxProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplySizeBoxProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		USizeBox* SB = CastChecked<USizeBox>(W);
 		if (const FString* V = GET_PROP("WidthOverride")) SB->SetWidthOverride(FCString::Atof(**V));
@@ -585,7 +606,7 @@ namespace
 		if (const FString* V = GET_PROP("MaxDesiredHeight")) SB->SetMaxDesiredHeight(FCString::Atof(**V));
 	}
 
-	void ApplyScrollBoxProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplyScrollBoxProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UScrollBox* Sc = CastChecked<UScrollBox>(W);
 		if (const FString* V = GET_PROP("Orientation"))
@@ -599,7 +620,7 @@ namespace
 		}
 	}
 
-	void ApplySpacerProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplySpacerProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		FVector2D Size(0, 0);
 		if (const FString* V = GET_PROP("Width")) Size.X = FCString::Atof(**V);
@@ -607,12 +628,12 @@ namespace
 		CastChecked<USpacer>(W)->SetSize(Size);
 	}
 
-	void ApplyRichTextBlockProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplyRichTextBlockProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		if (const FString* V = GET_PROP("Text")) CastChecked<URichTextBlock>(W)->SetText(FText::FromString(*V));
 	}
 
-	void ApplyComboBoxStringProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplyComboBoxStringProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UComboBoxString* CB = CastChecked<UComboBoxString>(W);
 		if (const FString* V = GET_PROP("Options"))
@@ -624,7 +645,7 @@ namespace
 		if (const FString* V = GET_PROP("SelectedOption")) CB->SetSelectedOption(*V);
 	}
 
-	void ApplySpinBoxProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplySpinBoxProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		USpinBox* SpB = CastChecked<USpinBox>(W);
 		if (const FString* V = GET_PROP("Value")) SpB->SetValue(FCString::Atof(**V));
@@ -632,12 +653,12 @@ namespace
 		if (const FString* V = GET_PROP("MaxValue")) SpB->SetMaxValue(FCString::Atof(**V));
 	}
 
-	void ApplyBackgroundBlurProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplyBackgroundBlurProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		if (const FString* V = GET_PROP("BlurStrength")) CastChecked<UBackgroundBlur>(W)->SetBlurStrength(FCString::Atof(**V));
 	}
 
-	void ApplyRetainerBoxProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplyRetainerBoxProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		URetainerBox* RB = CastChecked<URetainerBox>(W);
 		if (const FString* V = GET_PROP("RetainRendering")) RB->SetRetainRendering(V->ToBool());
@@ -657,13 +678,13 @@ namespace
 		if (bHasPhase) RB->SetRenderingPhase(Phase, PhaseCount);
 	}
 
-	void ApplyInvalidationBoxProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplyInvalidationBoxProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UInvalidationBox* IB = CastChecked<UInvalidationBox>(W);
 		if (const FString* V = GET_PROP("CanCache")) IB->SetCanCache(V->ToBool());
 	}
 
-	void ApplyGridPanelProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplyGridPanelProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UGridPanel* G = CastChecked<UGridPanel>(W);
 		if (const FString* V = GET_PROP("ColumnFill"))
@@ -686,7 +707,7 @@ namespace
 		}
 	}
 
-	void ApplyUniformGridPanelProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplyUniformGridPanelProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UUniformGridPanel* UG = CastChecked<UUniformGridPanel>(W);
 		if (const FString* V = GET_PROP("SlotPadding")) UG->SetSlotPadding(FUMGValueParser::ParseMargin(*V));
@@ -694,7 +715,7 @@ namespace
 		if (const FString* V = GET_PROP("MinDesiredSlotHeight")) UG->SetMinDesiredSlotHeight(FCString::Atof(**V));
 	}
 
-	void ApplyWrapBoxProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplyWrapBoxProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UWrapBox* WB = CastChecked<UWrapBox>(W);
 		if (const FString* V = GET_PROP("InnerSlotPadding")) WB->SetInnerSlotPadding(FUMGValueParser::ParseVector2D(*V));
@@ -702,7 +723,7 @@ namespace
 			WB->SetOrientation(*V == TEXT("Vertical") ? Orient_Vertical : Orient_Horizontal);
 	}
 
-	void ApplyScaleBoxProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplyScaleBoxProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UScaleBox* SB = CastChecked<UScaleBox>(W);
 		if (const FString* V = GET_PROP("Stretch"))
@@ -726,26 +747,26 @@ namespace
 		if (const FString* V = GET_PROP("UserSpecifiedScale")) SB->SetUserSpecifiedScale(FCString::Atof(**V));
 	}
 
-	void ApplyWidgetSwitcherProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplyWidgetSwitcherProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UWidgetSwitcher* WS = CastChecked<UWidgetSwitcher>(W);
 		if (const FString* V = GET_PROP("ActiveWidgetIndex")) WS->SetActiveWidgetIndex(FCString::Atoi(**V));
 	}
 
-	void ApplyExpandableAreaProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplyExpandableAreaProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UExpandableArea* EA = CastChecked<UExpandableArea>(W);
 		if (const FString* V = GET_PROP("IsExpanded")) EA->SetIsExpanded(V->ToBool());
 	}
 
-	void ApplyTileViewProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplyTileViewProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UTileView* TV = CastChecked<UTileView>(W);
 		if (const FString* V = GET_PROP("EntryWidth")) TV->SetEntryWidth(FCString::Atof(**V));
 		if (const FString* V = GET_PROP("EntryHeight")) TV->SetEntryHeight(FCString::Atof(**V));
 	}
 
-	void ApplyMenuAnchorProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplyMenuAnchorProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UMenuAnchor* MA = CastChecked<UMenuAnchor>(W);
 		if (const FString* V = GET_PROP("Placement"))
@@ -764,7 +785,7 @@ namespace
 		}
 	}
 
-	void ApplySafeZoneProps(UWidget* W, const TMap<FString, FString>& P)
+	void ApplySafeZoneProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		USafeZone* SZ = CastChecked<USafeZone>(W);
 		bool bLeft = true, bRight = true, bTop = true, bBottom = true;
@@ -778,7 +799,7 @@ namespace
 	#undef GET_PROP
 
 	// 属性应用函数映射表
-	using FApplyPropsFunc = void(*)(UWidget*, const TMap<FString, FString>&);
+	using FApplyPropsFunc = void(*)(UWidget*, const FUMGPropertyBag&);
 	const TMap<UClass*, FApplyPropsFunc>& GetPropsApplierMap()
 	{
 		static const TMap<UClass*, FApplyPropsFunc> Map = {
@@ -886,7 +907,7 @@ namespace
 	}
 }
 
-void FUMGWidgetUtils::ApplyCommonProperties(UWidget* W, const TMap<FString, FString>& Properties)
+void FUMGWidgetUtils::ApplyCommonProperties(UWidget* W, const FUMGPropertyBag& Properties)
 {
 	#define GET_PROP(Key) Properties.Find(TEXT(Key))
 	if (const FString* V = GET_PROP("Visibility")) W->SetVisibility(FUMGValueParser::ParseVisibility(*V));
@@ -899,20 +920,25 @@ void FUMGWidgetUtils::ApplyCommonProperties(UWidget* W, const TMap<FString, FStr
 		}
 	}
 	if (const FString* V = GET_PROP("ToolTipText")) W->SetToolTipText(FText::FromString(*V));
-	if (const FString* V = GET_PROP("IsEnabled")) W->SetIsEnabled(V->ToBool());
-	if (const FString* V = GET_PROP("RenderOpacity")) W->SetRenderOpacity(FCString::Atof(**V));
-	if (const FString* V = GET_PROP("RenderAngle")) W->SetRenderTransformAngle(FCString::Atof(**V));
-	if (const FString* V = GET_PROP("RenderTransformScale"))
+	bool bIsEnabled = false;
+	if (Properties.TryGetBool(TEXT("IsEnabled"), bIsEnabled)) W->SetIsEnabled(bIsEnabled);
+	float RenderOpacity = 0.0f;
+	if (Properties.TryGetFloat(TEXT("RenderOpacity"), RenderOpacity)) W->SetRenderOpacity(RenderOpacity);
+	float RenderAngle = 0.0f;
+	if (Properties.TryGetFloat(TEXT("RenderAngle"), RenderAngle)) W->SetRenderTransformAngle(RenderAngle);
+	FVector2D TransformScale;
+	if (Properties.TryGetVector2D(TEXT("RenderTransformScale"), TransformScale))
 	{
-		FVector2D Scale = FUMGValueParser::ParseVector2D(*V, FVector2D::UnitVector);
-		W->SetRenderScale(Scale);
+		W->SetRenderScale(TransformScale);
 	}
-	if (const FString* V = GET_PROP("RenderScale")) W->SetRenderScale(FUMGValueParser::ParseVector2D(*V, FVector2D::UnitVector));
-	if (const FString* V = GET_PROP("RenderTranslation")) W->SetRenderTranslation(FUMGValueParser::ParseVector2D(*V));
+	FVector2D RenderScale;
+	if (Properties.TryGetVector2D(TEXT("RenderScale"), RenderScale)) W->SetRenderScale(RenderScale);
+	FVector2D RenderTranslation;
+	if (Properties.TryGetVector2D(TEXT("RenderTranslation"), RenderTranslation)) W->SetRenderTranslation(RenderTranslation);
 	#undef GET_PROP
 }
 
-void FUMGWidgetUtils::ApplyWidgetProperties(UWidget* Widget, const TMap<FString, FString>& Properties)
+void FUMGWidgetUtils::ApplyWidgetProperties(UWidget* Widget, const FUMGPropertyBag& Properties)
 {
 	if (!Widget || Properties.Num() == 0) return;
 

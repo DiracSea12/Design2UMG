@@ -738,7 +738,7 @@ UTexture2D* FProceduralShapeGenerator::ApplyAffineCrop(UTexture2D* Source, float
 	return Result;
 }
 
-UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& MaterialRef, const TMap<FString, FString>& Properties, UObject* Outer)
+UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& MaterialRef, const FUMGPropertyBag& Properties, UObject* Outer)
 {
 	FLinearColor Color = FLinearColor::White;
 	FLinearColor ColorStart = FLinearColor::White;
