@@ -2,6 +2,7 @@
 
 #include "FigmaParser.h"
 #include "Design2UMGLog.h"
+#include "DesignJsonUtils.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Serialization/JsonReader.h"
@@ -9,65 +10,45 @@
 #include "Serialization/JsonWriter.h"
 #include "Internationalization/Regex.h"
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-static FString GetStr(const TSharedPtr<FJsonObject>& Obj, const FString& Key, const FString& Default = FString())
-{
-	FString Val;
-	return (Obj && Obj->TryGetStringField(Key, Val)) ? Val : Default;
-}
-
-static double GetNum(const TSharedPtr<FJsonObject>& Obj, const FString& Key, double Default = 0.0)
-{
-	double Val;
-	return (Obj && Obj->TryGetNumberField(Key, Val)) ? Val : Default;
-}
-
-static bool TryGetNum(const TSharedPtr<FJsonObject>& Obj, const FString& Key, double& OutVal)
-{
-	return Obj && Obj->TryGetNumberField(Key, OutVal);
-}
-
-static bool GetBool(const TSharedPtr<FJsonObject>& Obj, const FString& Key, bool Default = true)
-{
-	bool Val;
-	return (Obj && Obj->TryGetBoolField(Key, Val)) ? Val : Default;
-}
-
-static TSharedPtr<FJsonObject> GetObj(const TSharedPtr<FJsonObject>& Obj, const FString& Key)
-{
-	const TSharedPtr<FJsonObject>* Sub = nullptr;
-	if (Obj && Obj->TryGetObjectField(Key, Sub))
-		return *Sub;
-	return nullptr;
-}
-
-static const TArray<TSharedPtr<FJsonValue>>* GetArr(const TSharedPtr<FJsonObject>& Obj, const FString& Key)
-{
-	const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
-	if (Obj && Obj->TryGetArrayField(Key, Arr))
-		return Arr;
-	return nullptr;
-}
-
-static FString JsonValueToCompactString(const TSharedPtr<FJsonValue>& Value)
-{
-	if (!Value.IsValid())
-		return FString();
-
-	FString Output;
-	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Output);
-	if (!FJsonSerializer::Serialize(Value.ToSharedRef(), FString(), Writer))
-		return FString();
-	return Output;
-}
-
 static void AddExtensionIfNonEmpty(TMap<FString, FString>& Extensions, const FString& Key, const FString& Value)
 {
 	if (!Value.IsEmpty())
 		Extensions.Add(Key, Value);
+}
+
+static FString GetStr(const TSharedPtr<FJsonObject>& Obj, const FString& Key, const FString& Default = FString())
+{
+	return DesignJsonUtils::GetString(Obj, Key, Default);
+}
+
+static double GetNum(const TSharedPtr<FJsonObject>& Obj, const FString& Key, double Default = 0.0)
+{
+	return DesignJsonUtils::GetNumber(Obj, Key, Default);
+}
+
+static bool TryGetNum(const TSharedPtr<FJsonObject>& Obj, const FString& Key, double& OutVal)
+{
+	return DesignJsonUtils::TryGetNumber(Obj, Key, OutVal);
+}
+
+static bool GetBool(const TSharedPtr<FJsonObject>& Obj, const FString& Key, bool Default = true)
+{
+	return DesignJsonUtils::GetBool(Obj, Key, Default);
+}
+
+static TSharedPtr<FJsonObject> GetObj(const TSharedPtr<FJsonObject>& Obj, const FString& Key)
+{
+	return DesignJsonUtils::GetObject(Obj, Key);
+}
+
+static const TArray<TSharedPtr<FJsonValue>>* GetArr(const TSharedPtr<FJsonObject>& Obj, const FString& Key)
+{
+	return DesignJsonUtils::GetArray(Obj, Key);
+}
+
+static FString JsonValueToCompactString(const TSharedPtr<FJsonValue>& Value)
+{
+	return DesignJsonUtils::ToCompactString(Value);
 }
 
 static void AddNumericExtensionIfPresent(const TSharedPtr<FJsonObject>& Obj, TMap<FString, FString>& Extensions, const FString& SourceKey, const FString& ExtKey)
@@ -91,7 +72,7 @@ static void AddJsonExtensionIfPresent(const TSharedPtr<FJsonObject>& Obj, TMap<F
 	const TSharedPtr<FJsonValue> FieldValue = Obj->TryGetField(SourceKey);
 	if (!FieldValue.IsValid())
 		return;
-	Extensions.Add(ExtKey, JsonValueToCompactString(FieldValue));
+	Extensions.Add(ExtKey, DesignJsonUtils::ToCompactString(FieldValue));
 }
 
 static void CaptureSharedMetadataExtensions(const TSharedPtr<FJsonObject>& Obj, TMap<FString, FString>& Extensions)

@@ -6,6 +6,8 @@
 #include "DesignVariableResolver.h"
 #include "Design2UMGTestUtils.h"
 #include "LayoutCalculator.h"
+#include "LayoutMapper.h"
+#include "VisualMapper.h"
 #include "FigmaParser.h"
 #include "Framework/Application/SlateApplication.h"
 #if WITH_AUTOMATION_WORKER
@@ -185,6 +187,69 @@ bool FLayoutCalculatorTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Stretch anchor: MinX < MaxX"),
 			Slot.Anchors.Min.X < Slot.Anchors.Max.X);
 	}
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperWrapWithBorderDirectTest,
+	"Design2UMG.VisualMapper.WrapWithBorderDirect",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperWrapWithBorderDirectTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
+	Node->Type = EDesignNodeType::Frame;
+	Node->Opacity = 1.0f;
+
+	FUMGWidgetNode Widget;
+	Widget.Type = TEXT("Border");
+	Widget.Id = TEXT("panel");
+	Widget.Name = TEXT("Panel");
+	Widget.Bounds.W = 240.0f;
+	Widget.Bounds.H = 60.0f;
+	Widget.Properties.Add(TEXT("BrushColor"), TEXT("#112233FF"));
+	Widget.Properties.Add(TEXT("RenderOpacity"), TEXT("0.6"));
+	Widget.Properties.Add(TEXT("RenderAngle"), TEXT("15.0"));
+	Widget.Properties.Add(TEXT("Clipping"), TEXT("ClipToBounds"));
+
+	FUMGWidgetNode Wrapped = FVisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
+	TestEqual(TEXT("Wrapped node remains Border"), Wrapped.Type, TEXT("Border"));
+	TestEqual(TEXT("BrushColor moved to outer border"), Wrapped.Properties.FindRef(TEXT("BrushColor")), TEXT("#112233FF"));
+	TestEqual(TEXT("RenderOpacity moved to outer border"), Wrapped.Properties.FindRef(TEXT("RenderOpacity")), TEXT("0.6"));
+	TestEqual(TEXT("RenderAngle moved to outer border"), Wrapped.Properties.FindRef(TEXT("RenderAngle")), TEXT("15.0"));
+	TestEqual(TEXT("Clipping moved to outer border"), Wrapped.Properties.FindRef(TEXT("Clipping")), TEXT("ClipToBounds"));
+	TestEqual(TEXT("Wrapped child count"), Wrapped.Children.Num(), 1);
+	if (Wrapped.Children.Num() != 1)
+	{
+		return false;
+	}
+
+	const FUMGWidgetNode& Inner = Wrapped.Children[0];
+	TestEqual(TEXT("Inner widget id suffix"), Inner.Id, TEXT("panel_inner"));
+	TestEqual(TEXT("Inner widget name suffix"), Inner.Name, TEXT("Panel_inner"));
+	TestFalse(TEXT("Inner widget should not keep BrushColor"), Inner.Properties.Contains(TEXT("BrushColor")));
+	TestFalse(TEXT("Inner widget should not keep RenderOpacity"), Inner.Properties.Contains(TEXT("RenderOpacity")));
+	TestFalse(TEXT("Inner widget should not keep RenderAngle"), Inner.Properties.Contains(TEXT("RenderAngle")));
+	TestFalse(TEXT("Inner widget should not keep Clipping"), Inner.Properties.Contains(TEXT("Clipping")));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLayoutMapperDirectHelpersTest,
+	"Design2UMG.LayoutMapper.DirectHelpers",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FLayoutMapperDirectHelpersTest::RunTest(const FString& Parameters)
+{
+	TArray<FUMGWidgetNode> Children;
+	Children.SetNum(3);
+	FLayoutMapper::ApplyGap(Children, 12.0f, EDesignLayout::Horizontal);
+	TestEqual(TEXT("First child horizontal gap stays zero"), Children[0].Slot.Padding.Left, 0.0f);
+	TestEqual(TEXT("Second child horizontal gap"), Children[1].Slot.Padding.Left, 12.0f);
+	TestEqual(TEXT("Third child horizontal gap"), Children[2].Slot.Padding.Left, 12.0f);
+
+	FUMGWidgetNode Widget;
+	FDesignPadding Padding;
+	Padding.Left = 1.0f;
+	Padding.Top = 2.0f;
+	Padding.Right = 3.0f;
+	Padding.Bottom = 4.0f;
+	FLayoutMapper::ApplyPadding(Widget, Padding);
+	TestEqual(TEXT("Padding serialized directly"), Widget.Properties.FindRef(TEXT("Padding")), TEXT("1.0,2.0,3.0,4.0"));
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRefOfRefDescendantsOverrideTest,

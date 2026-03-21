@@ -31,6 +31,7 @@ namespace
 	TMap<FString, TMap<FString, FString>> GKnownIconGlyphCache;
 	TMap<FString, TMap<FString, FString>> GKnownIconNameCache;
 	TSet<FString> GAttemptedKnownIconGlyphFamilies;
+	TSet<FString> GAttemptedKnownWebFonts;
 	bool bProjectFontIndexBuilt = false;
 	FCriticalSection GFontIndexMutex;
 
@@ -216,20 +217,19 @@ FString FFontResolver::FindFontAssetPath(const FString& FontFamily)
 		return EngineFallbackPath;
 	}
 
-		const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
-		const bool bAllowKnownFontAutoImport = !Settings
-			|| Settings->bAutoImportKnownWebFonts
-			|| Settings->bAutoImportFonts;
-		static TSet<FString> AttemptedKnownWebFonts;
-		if (bAllowKnownFontAutoImport && !AttemptedKnownWebFonts.Contains(NormalizedFamily))
+	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+	const bool bAllowKnownFontAutoImport = !Settings
+		|| Settings->bAutoImportKnownWebFonts
+		|| Settings->bAutoImportFonts;
+	if (bAllowKnownFontAutoImport && !GAttemptedKnownWebFonts.Contains(NormalizedFamily))
+	{
+		GAttemptedKnownWebFonts.Add(NormalizedFamily);
+		if (const FString* KnownUrl = GetKnownWebFontUrls().Find(NormalizedFamily))
 		{
-			AttemptedKnownWebFonts.Add(NormalizedFamily);
-			if (const FString* KnownUrl = GetKnownWebFontUrls().Find(NormalizedFamily))
-			{
 			UE_LOG(LogDesign2UMG, Log, TEXT("FontResolver: auto-import known web font '%s'"), *FontFamily);
-				const FString ImportedPath = ResolveFont(FontFamily, *KnownUrl);
-				if (!ImportedPath.IsEmpty())
-				{
+			const FString ImportedPath = ResolveFont(FontFamily, *KnownUrl);
+			if (!ImportedPath.IsEmpty())
+			{
 					FontAssetCache.FindOrAdd(NormalizedFamily) = ImportedPath;
 					IndexFontAssetName(FontFamily, ImportedPath);
 					return ImportedPath;

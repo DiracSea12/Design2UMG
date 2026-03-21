@@ -2,6 +2,7 @@
 
 #include "PenParser.h"
 #include "Design2UMGLog.h"
+#include "DesignJsonUtils.h"
 #include "DesignImportTypes.h"
 #include "DesignSchema.h"
 #include "DesignVariableResolver.h"
@@ -154,18 +155,6 @@ namespace
 		return TryParseBooleanString(Resolver.ResolveString(RawValue), OutValue);
 	}
 
-	FString SerializeJsonValueCompact(const TSharedPtr<FJsonValue>& Value)
-	{
-		if (!Value.IsValid())
-			return FString();
-
-		FString Output;
-		TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Output);
-		if (!FJsonSerializer::Serialize(Value.ToSharedRef(), FString(), Writer))
-			return FString();
-		return Output;
-	}
-
 	void ApplyPenSemanticHints(FDesignNode& Node, const bool bPenPlaceholder, const bool bPenHasSlot, const int32 PenSlotNodeCount)
 	{
 		const bool bNameLooksLikePlaceholder = Node.Name.Contains(TEXT("placeholder"), ESearchCase::IgnoreCase);
@@ -238,7 +227,7 @@ namespace
 
 		const TSharedPtr<FJsonValue> DashPatternField = StrokeObj->TryGetField(TEXT("dashPattern"));
 		if (DashPatternField.IsValid() && DashPatternField->Type == EJson::Array)
-			Node.Metadata.Add(TEXT("stroke.dashPattern"), SerializeJsonValueCompact(DashPatternField));
+			Node.Metadata.Add(TEXT("stroke.dashPattern"), DesignJsonUtils::ToCompactString(DashPatternField));
 	}
 
 	bool TryParsePointXY(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver, float& OutX, float& OutY)
@@ -349,7 +338,7 @@ namespace
 			return;
 		}
 
-		Node->Metadata.Add(TEXT("text.content.raw"), SerializeJsonValueCompact(ContentField));
+		Node->Metadata.Add(TEXT("text.content.raw"), DesignJsonUtils::ToCompactString(ContentField));
 		FString CombinedContent;
 		Node->TextRuns.Reset();
 		for (const TSharedPtr<FJsonValue>& SegmentVal : ContentField->AsArray())
@@ -363,7 +352,7 @@ namespace
 			{
 				FDesignTextRun SegmentRun;
 				SegmentRun.Content = Resolver.ResolveString(SegmentVal->AsString());
-				SegmentRun.RawJson = SerializeJsonValueCompact(SegmentVal);
+				SegmentRun.RawJson = DesignJsonUtils::ToCompactString(SegmentVal);
 				CombinedContent += SegmentRun.Content;
 				Node->TextRuns.Add(MoveTemp(SegmentRun));
 				continue;
@@ -382,7 +371,7 @@ namespace
 
 			FDesignTextRun SegmentRun;
 			ParseTextRunFromObject(SegmentObj, Resolver, SegmentRun);
-			SegmentRun.RawJson = SerializeJsonValueCompact(SegmentVal);
+			SegmentRun.RawJson = DesignJsonUtils::ToCompactString(SegmentVal);
 			if (!SegmentRun.Content.IsEmpty())
 			{
 				CombinedContent += SegmentRun.Content;
@@ -1199,7 +1188,7 @@ FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariable
 		{
 			Result.Type = EDesignFillType::Gradient;
 			Result.bFromMeshGradient = true;
-			Result.MeshGradientRaw = SerializeJsonValueCompact(Value);
+			Result.MeshGradientRaw = DesignJsonUtils::ToCompactString(Value);
 			Result.MeshGradient.bHasColumns = TryGetResolvedNumberField(Obj, TEXT("columns"), Resolver, Result.MeshGradient.Columns);
 			Result.MeshGradient.bHasRows = TryGetResolvedNumberField(Obj, TEXT("rows"), Resolver, Result.MeshGradient.Rows);
 
@@ -1244,7 +1233,7 @@ FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariable
 						continue;
 
 					FDesignMeshGradientPoint MeshPoint;
-					MeshPoint.RawJson = SerializeJsonValueCompact(PointVal);
+					MeshPoint.RawJson = DesignJsonUtils::ToCompactString(PointVal);
 
 					const bool bHasXY = TryGetResolvedNumberField(PointObj, TEXT("x"), Resolver, MeshPoint.X)
 						&& TryGetResolvedNumberField(PointObj, TEXT("y"), Resolver, MeshPoint.Y);

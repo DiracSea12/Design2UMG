@@ -18,7 +18,46 @@ namespace
 {
 	constexpr int32 MaxTreeRecursionDepth = 512;
 
-	thread_local int32 GConvertNodeDepth = 0;
+	struct FConversionState
+	{
+		explicit FConversionState(const FDesignDocument& InDocument, TArray<FString>& InWarnings)
+			: Document(InDocument)
+			, Warnings(InWarnings)
+		{
+		}
+
+		const FDesignDocument& Document;
+		TArray<FString>& Warnings;
+		TSet<FString> WarnedFamilies;
+		TSet<FString> PrunedInvalidMappings;
+		int32 RecursionDepth = 0;
+	};
+
+	struct FConversionContext
+	{
+		explicit FConversionContext(FConversionState& InState)
+			: State(InState)
+		{
+		}
+
+		FConversionContext WithNodeTheme(const TSharedPtr<FDesignNode>& Node) const
+		{
+			FConversionContext Next(State);
+			Next.ThemeContext = ThemeContext;
+			if (Node.IsValid())
+			{
+				for (const auto& Pair : Node->Theme)
+				{
+					Next.ThemeContext.Add(Pair.Key, Pair.Value);
+				}
+			}
+			return Next;
+		}
+
+		FConversionState& State;
+		TMap<FString, FString> ThemeContext;
+	};
+
 	struct FRecursionGuard
 	{
 		explicit FRecursionGuard(int32& InDepth, const TCHAR* InName = TEXT(""))
@@ -155,24 +194,23 @@ namespace
 
 	TSharedPtr<FDesignNode> ExpandRefForConversion(
 		const TSharedPtr<FDesignNode>& Node,
-		const FDesignDocument& Doc,
-		const TMap<FString, FString>& ThemeContext)
+		const FConversionContext& Context)
 	{
 		if (!Node.IsValid() || Node->Type != EDesignNodeType::Ref)
 		{
 			return Node;
 		}
 
-		TSharedPtr<FDesignNode> Expanded = FRefExpander::ExpandRef(Node, Doc);
+		TSharedPtr<FDesignNode> Expanded = FRefExpander::ExpandRef(Node, Context.State.Document);
 		if (!Expanded.IsValid())
 		{
 			return nullptr;
 		}
 
-		if (ThemeContext.Num() > 0)
+		if (Context.ThemeContext.Num() > 0)
 		{
-			FDesignVariableResolver Resolver(Doc.Variables);
-			Resolver.SetThemeContext(ThemeContext);
+			FDesignVariableResolver Resolver(Context.State.Document.Variables);
+			Resolver.SetThemeContext(Context.ThemeContext);
 			FRefExpander::ReThemeNode(Expanded, Resolver);
 		}
 
@@ -348,19 +386,21 @@ namespace
 
 }
 
-FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FDesignDocument& Doc, const TMap<FString, FString>& ThemeContext = TMap<FString, FString>(), TArray<FString>* OutWarnings = nullptr, EDesignLayout ParentLayout = EDesignLayout::None);
+FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FConversionContext& Context, EDesignLayout ParentLayout = EDesignLayout::None);
 FUMGWidgetNode CreateContainerWidget(const TSharedPtr<FDesignNode>& Node);
 FUMGWidgetNode CreateTextWidget(const TSharedPtr<FDesignNode>& Node);
-FUMGWidgetNode CreateIconFontWidget(const TSharedPtr<FDesignNode>& Node);
+FUMGWidgetNode CreateIconFontWidget(const TSharedPtr<FDesignNode>& Node, FConversionState& State);
 void ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node);
-TSharedPtr<FDesignNode> ResolveExpandedChildForConversion(const TSharedPtr<FDesignNode>& Child, const FDesignDocument& Doc, const TMap<FString, FString>& ThemeContext, bool bPreComputeFitContent);
-void PreResolveFlowChildren(const TSharedPtr<FDesignNode>& Node, const FDesignDocument& Doc, const FUMGWidgetNode& Widget, const TArray<TSharedPtr<FDesignNode>>& VisibleChildren, const TMap<FString, FString>& ThemeContext);
+TSharedPtr<FDesignNode> ResolveExpandedChildForConversion(const TSharedPtr<FDesignNode>& Child, const FConversionContext& Context, bool bPreComputeFitContent);
+void PreResolveFlowChildren(const TSharedPtr<FDesignNode>& Node, const FUMGWidgetNode& Widget, const TArray<TSharedPtr<FDesignNode>>& VisibleChildren, const FConversionContext& Context);
 bool ShouldWrapChildWithSizeBox(const TSharedPtr<FDesignNode>& ParentNode, const TSharedPtr<FDesignNode>& ChildNode, const FUMGWidgetNode& ChildWidget);
-void AppendConvertedChildren(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node, const FDesignDocument& Doc, const TArray<TSharedPtr<FDesignNode>>& VisibleChildren, const TMap<FString, FString>& ActiveTheme, TArray<FString>* OutWarnings);
+void AppendConvertedChildren(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node, const TArray<TSharedPtr<FDesignNode>>& VisibleChildren, const FConversionContext& Context);
 
 FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document)
 {
 	FUMGWidgetData Result;
+	FConversionState State(Document, Result.Warnings);
+	FConversionContext RootContext(State);
 
 	TextMeasurement::ResetCache();
 
@@ -407,7 +447,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document)
 		Child->X = 0.0f;
 		Child->Y = 0.0f;
 
-		FUMGWidgetNode ChildWidget = ConvertNode(Child, Document, TMap<FString, FString>(), &Result.Warnings);
+		FUMGWidgetNode ChildWidget = ConvertNode(Child, RootContext);
 		if (!ChildWidget.Type.IsEmpty())
 			RenderWidgets.Add(MoveTemp(ChildWidget));
 	}
@@ -429,26 +469,24 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document)
 	return Result;
 }
 
-FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FDesignDocument& Doc, const TMap<FString, FString>& ThemeContext, TArray<FString>* OutWarnings, EDesignLayout ParentLayout)
+FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FConversionContext& Context, EDesignLayout ParentLayout)
 {
-	FRecursionGuard Guard(GConvertNodeDepth, TEXT("ConvertNode"));
+	FRecursionGuard Guard(Context.State.RecursionDepth, TEXT("ConvertNode"));
 	if (!Guard.bValid)
 		return FUMGWidgetNode();
 
 	if (ShouldSkipNode(Node))
 		return FUMGWidgetNode();
 
-	TMap<FString, FString> ActiveTheme = ThemeContext;
-	for (const auto& Pair : Node->Theme)
-		ActiveTheme.Add(Pair.Key, Pair.Value);
+	const FConversionContext ActiveContext = Context.WithNodeTheme(Node);
 
 	if (Node->Type == EDesignNodeType::Ref)
 	{
-		auto Expanded = ExpandRefForConversion(Node, Doc, ActiveTheme);
+		auto Expanded = ExpandRefForConversion(Node, ActiveContext);
 		if (!Expanded.IsValid())
 			return FUMGWidgetNode();
-		SizeEstimator::PreComputeFitContentSizes(Expanded, Doc);
-		return ConvertNode(Expanded, Doc, ActiveTheme, OutWarnings, ParentLayout);
+		SizeEstimator::PreComputeFitContentSizes(Expanded, Context.State.Document);
+		return ConvertNode(Expanded, ActiveContext, ParentLayout);
 	}
 
 	FUMGWidgetNode Widget;
@@ -459,7 +497,7 @@ FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FDesignDoc
 		Widget = CreateTextWidget(Node);
 		break;
 	case EDesignNodeType::IconFont:
-		Widget = CreateIconFontWidget(Node);
+		Widget = CreateIconFontWidget(Node, Context.State);
 		break;
 	case EDesignNodeType::Frame:
 	case EDesignNodeType::Group:
@@ -506,8 +544,7 @@ FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FDesignDoc
 		{
 			Widget = CreateContainerWidget(Node);
 			UE_LOG(LogDesign2UMG, Warning, TEXT("多边形 '%s' 无 PathGeometry，降级为 Border"), *Node->Name);
-			if (OutWarnings)
-				OutWarnings->Add(FString::Printf(TEXT("Polygon '%s' → Border (无 PathGeometry)"), *Node->Name));
+			Context.State.Warnings.Add(FString::Printf(TEXT("Polygon '%s' → Border (无 PathGeometry)"), *Node->Name));
 		}
 		break;
 	case EDesignNodeType::Path:
@@ -562,9 +599,9 @@ FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FDesignDoc
 	}
 
 	TArray<TSharedPtr<FDesignNode>> VisibleChildren;
-		SizeEstimator::GatherVisibleChildren(Node, VisibleChildren);
-	PreResolveFlowChildren(Node, Doc, Widget, VisibleChildren, ActiveTheme);
-	AppendConvertedChildren(Widget, Node, Doc, VisibleChildren, ActiveTheme, OutWarnings);
+	SizeEstimator::GatherVisibleChildren(Node, VisibleChildren);
+	PreResolveFlowChildren(Node, Widget, VisibleChildren, ActiveContext);
+	AppendConvertedChildren(Widget, Node, VisibleChildren, ActiveContext);
 
 	if (Node->Gap > 0)
 	{
@@ -716,7 +753,7 @@ void ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& 
 	}
 }
 
-FUMGWidgetNode CreateIconFontWidget(const TSharedPtr<FDesignNode>& Node)
+FUMGWidgetNode CreateIconFontWidget(const TSharedPtr<FDesignNode>& Node, FConversionState& State)
 {
 	FUMGWidgetNode Widget;
 	Widget.Type = TEXT("TextBlock");
@@ -751,11 +788,10 @@ FUMGWidgetNode CreateIconFontWidget(const TSharedPtr<FDesignNode>& Node)
 				*AssetPath);
 			if (MutableSettings && !Node->IconFontFamily.IsEmpty())
 			{
-				static TSet<FString> PrunedInvalidMappings;
-				if (!PrunedInvalidMappings.Contains(Node->IconFontFamily)
+				if (!State.PrunedInvalidMappings.Contains(Node->IconFontFamily)
 					&& MutableSettings->IconFontAssetMap.Remove(Node->IconFontFamily) > 0)
 				{
-					PrunedInvalidMappings.Add(Node->IconFontFamily);
+					State.PrunedInvalidMappings.Add(Node->IconFontFamily);
 					MutableSettings->SaveConfig();
 				}
 			}
@@ -810,8 +846,7 @@ FUMGWidgetNode CreateIconFontWidget(const TSharedPtr<FDesignNode>& Node)
 	}
 	else if (!Node->IconFontFamily.IsEmpty())
 	{
-		static TSet<FString> WarnedFamilies;
-		if (!WarnedFamilies.Contains(Node->IconFontFamily))
+		if (!State.WarnedFamilies.Contains(Node->IconFontFamily))
 		{
 			UE_LOG(LogDesign2UMG, Verbose,
 				TEXT("IconFont '%s': font family '%s' has no asset mapping"),
@@ -819,7 +854,7 @@ FUMGWidgetNode CreateIconFontWidget(const TSharedPtr<FDesignNode>& Node)
 			UE_LOG(LogDesign2UMG, Warning,
 				TEXT("图标字体 '%s' (字体族 '%s') 未配置资产映射。请在 编辑器偏好设置 > 插件 > Design2UMG 中配置。"),
 				*Node->IconFontName, *Node->IconFontFamily);
-			WarnedFamilies.Add(Node->IconFontFamily);
+			State.WarnedFamilies.Add(Node->IconFontFamily);
 		}
 	}
 
@@ -851,24 +886,22 @@ FUMGWidgetNode CreateIconFontWidget(const TSharedPtr<FDesignNode>& Node)
 
 TSharedPtr<FDesignNode> ResolveExpandedChildForConversion(
 	const TSharedPtr<FDesignNode>& Child,
-	const FDesignDocument& Doc,
-	const TMap<FString, FString>& ThemeContext,
+	const FConversionContext& Context,
 	bool bPreComputeFitContent)
 {
-	TSharedPtr<FDesignNode> ExpandedChild = ExpandRefForConversion(Child, Doc, ThemeContext);
+	TSharedPtr<FDesignNode> ExpandedChild = ExpandRefForConversion(Child, Context);
 	if (!ExpandedChild.IsValid())
 		return Child;
-		if (bPreComputeFitContent && ExpandedChild != Child)
-			SizeEstimator::PreComputeFitContentSizes(ExpandedChild, Doc);
+	if (bPreComputeFitContent && ExpandedChild != Child)
+		SizeEstimator::PreComputeFitContentSizes(ExpandedChild, Context.State.Document);
 	return ExpandedChild;
 }
 
 void PreResolveFlowChildren(
 	const TSharedPtr<FDesignNode>& Node,
-	const FDesignDocument& Doc,
 	const FUMGWidgetNode& Widget,
 	const TArray<TSharedPtr<FDesignNode>>& VisibleChildren,
-	const TMap<FString, FString>& ThemeContext)
+	const FConversionContext& Context)
 {
 	if (Widget.Bounds.W > 0 && Widget.Bounds.H > 0
 		&& (Node->Layout == EDesignLayout::Horizontal || Node->Layout == EDesignLayout::Vertical))
@@ -878,7 +911,7 @@ void PreResolveFlowChildren(
 		const bool bHorizontal = Node->Layout == EDesignLayout::Horizontal;
 		TArray<FChildSizeSnapshot> EffectiveChildren;
 		for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
-			EffectiveChildren.Add(BuildChildSizeSnapshot(Child, Doc));
+			EffectiveChildren.Add(BuildChildSizeSnapshot(Child, Context.State.Document));
 
 		float FixedMainSum = 0.0f;
 		int32 FillCount = 0;
@@ -937,7 +970,7 @@ void PreResolveFlowChildren(
 		if (Child->Width.IsFit() || Child->Height.IsFit())
 		{
 			const float ChildContentWidth = SizeEstimator::ComputeChildContentWidthHint(Node, Child, 0.0f);
-			const TSharedPtr<FDesignNode> EstimateChild = ResolveExpandedChildForConversion(Child, Doc, ThemeContext, false);
+			const TSharedPtr<FDesignNode> EstimateChild = ResolveExpandedChildForConversion(Child, Context, false);
 			const FVector2D Estimate = SizeEstimator::EstimateNodeSize(EstimateChild, ChildContentWidth);
 			SizeEstimator::PromoteFitNodeDimension(Child, true, Estimate.X);
 			SizeEstimator::PromoteFitNodeDimension(Child, false, Estimate.Y);
@@ -977,15 +1010,13 @@ bool ShouldWrapChildWithSizeBox(
 void AppendConvertedChildren(
 	FUMGWidgetNode& Widget,
 	const TSharedPtr<FDesignNode>& Node,
-	const FDesignDocument& Doc,
 	const TArray<TSharedPtr<FDesignNode>>& VisibleChildren,
-	const TMap<FString, FString>& ActiveTheme,
-	TArray<FString>* OutWarnings)
+	const FConversionContext& Context)
 {
 	for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
 	{
-		TSharedPtr<FDesignNode> EffectiveChild = ResolveExpandedChildForConversion(Child, Doc, ActiveTheme, true);
-		FUMGWidgetNode ChildWidget = ConvertNode(EffectiveChild, Doc, ActiveTheme, OutWarnings, Node->Layout);
+		TSharedPtr<FDesignNode> EffectiveChild = ResolveExpandedChildForConversion(Child, Context, true);
+		FUMGWidgetNode ChildWidget = ConvertNode(EffectiveChild, Context, Node->Layout);
 		if (ChildWidget.Type.IsEmpty())
 			continue;
 

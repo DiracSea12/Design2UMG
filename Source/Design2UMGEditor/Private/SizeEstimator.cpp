@@ -9,8 +9,12 @@
 namespace
 {
 	constexpr int32 MaxTreeRecursionDepth = 512;
-	thread_local int32 GEstimateDepth = 0;
-	thread_local int32 GPrecomputeDepth = 0;
+
+	struct FSizeEstimatorState
+	{
+		int32 EstimateDepth = 0;
+		int32 PrecomputeDepth = 0;
+	};
 
 	struct FRecursionGuard
 	{
@@ -151,9 +155,16 @@ namespace
 			|| Node->Type == EDesignNodeType::Polygon;
 	}
 
-	FVector2D PreComputeFitContentSizesImpl(const TSharedPtr<FDesignNode>& Node, const FDesignDocument& Doc, float ParentContentWidth)
+	FVector2D EstimateNodeSizeImpl(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth, FSizeEstimatorState& State);
+	FVector2D EstimateContentSizeImpl(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth, FSizeEstimatorState& State);
+
+	FVector2D PreComputeFitContentSizesImpl(
+		const TSharedPtr<FDesignNode>& Node,
+		const FDesignDocument& Doc,
+		float ParentContentWidth,
+		FSizeEstimatorState& State)
 	{
-		FRecursionGuard Guard(GPrecomputeDepth, TEXT("PreComputeFitContentSizes"));
+		FRecursionGuard Guard(State.PrecomputeDepth, TEXT("PreComputeFitContentSizes"));
 		if (!Guard.bValid)
 		{
 			return FVector2D::ZeroVector;
@@ -168,7 +179,7 @@ namespace
 		{
 			if (TSharedPtr<FDesignNode> Expanded = FRefExpander::ExpandRef(Node, Doc))
 			{
-				const FVector2D RefSize = PreComputeFitContentSizesImpl(Expanded, Doc, ParentContentWidth);
+				const FVector2D RefSize = PreComputeFitContentSizesImpl(Expanded, Doc, ParentContentWidth, State);
 				if (Node->Width.IsFit() && RefSize.X > Node->Width.Value && !Expanded->Width.IsFill())
 				{
 					Node->Width.Value = static_cast<float>(RefSize.X);
@@ -252,14 +263,14 @@ namespace
 		for (const TSharedPtr<FDesignNode>& Child : Node->Children)
 		{
 			const float ChildContentWidth = SizeEstimator::ComputeChildContentWidthHint(Node, Child, ParentContentWidth);
-			(void)PreComputeFitContentSizesImpl(Child, Doc, ChildContentWidth);
+			(void)PreComputeFitContentSizesImpl(Child, Doc, ChildContentWidth, State);
 		}
 
 		float FinalW = Node->Width.Value;
 		float FinalH = Node->Height.Value;
 		if (Node->Width.IsFit() || Node->Height.IsFit())
 		{
-			const FVector2D Estimated = SizeEstimator::EstimateContentSize(Node, ParentContentWidth);
+			const FVector2D Estimated = EstimateContentSizeImpl(Node, ParentContentWidth, State);
 			if (Node->Width.IsFit() && Estimated.X > Node->Width.Value)
 			{
 				SizeEstimator::PromoteFitNodeDimension(Node, true, Estimated.X);
@@ -384,118 +395,134 @@ void SizeEstimator::PromoteFitNodeDimension(const TSharedPtr<FDesignNode>& Node,
 	}
 }
 
+namespace
+{
+	FVector2D EstimateNodeSizeImpl(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth, FSizeEstimatorState& State)
+	{
+		FRecursionGuard Guard(State.EstimateDepth, TEXT("EstimateNodeSize"));
+		if (!Guard.bValid)
+		{
+			return FVector2D::ZeroVector;
+		}
+
+		float W = Node->Width.Value;
+		float H = Node->Height.Value;
+		if (Node->Width.IsFill())
+		{
+			const float FillWidth = ResolveWidthHint(Node, ParentContentWidth);
+			if (FillWidth > 0.0f)
+			{
+				W = FMath::Max(W, FillWidth);
+			}
+		}
+
+		if (Node->Type == EDesignNodeType::Text)
+		{
+			if ((W == 0 || H == 0 || Node->Width.IsFit() || Node->Height.IsFit())
+				&& Node->FontSize > 0
+				&& !Node->Content.IsEmpty())
+			{
+				const FVector2D Measured = TextMeasurement::MeasureTextNodeSize(Node, ParentContentWidth);
+				MergeEstimatedDimension(W, Node->Width, Measured.X);
+				MergeEstimatedDimension(H, Node->Height, Measured.Y);
+			}
+			else if (H == 0 && Node->FontSize > 0)
+			{
+				H = Node->FontSize * 1.5f;
+			}
+			return FVector2D(W, H);
+		}
+
+		if (Node->Type == EDesignNodeType::IconFont)
+		{
+			const float S = Node->FontSize > 0 ? Node->FontSize : 16.0f;
+			MergeEstimatedDimension(W, Node->Width, S);
+			MergeEstimatedDimension(H, Node->Height, S);
+			return FVector2D(W, H);
+		}
+
+		if (Node->Children.Num() > 0)
+		{
+			const FVector2D Sub = EstimateContentSizeImpl(Node, ParentContentWidth, State);
+			MergeEstimatedDimension(W, Node->Width, Sub.X);
+			MergeEstimatedDimension(H, Node->Height, Sub.Y);
+		}
+
+		return FVector2D(W, H);
+	}
+
+	FVector2D EstimateContentSizeImpl(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth, FSizeEstimatorState& State)
+	{
+		FRecursionGuard Guard(State.EstimateDepth, TEXT("EstimateContentSize"));
+		if (!Guard.bValid)
+		{
+			return FVector2D::ZeroVector;
+		}
+
+		float W = 0.0f;
+		float H = 0.0f;
+		const float PadH = Node->Padding.Left + Node->Padding.Right;
+		const float PadV = Node->Padding.Top + Node->Padding.Bottom;
+
+		TArray<TSharedPtr<FDesignNode>> Visible;
+		SizeEstimator::GatherVisibleChildren(Node, Visible);
+		if (Visible.Num() == 0)
+		{
+			return FVector2D(PadH, PadV);
+		}
+
+		const float TotalGap = Visible.Num() > 1 ? Node->Gap * (Visible.Num() - 1) : 0.0f;
+		if (Node->Layout == EDesignLayout::Horizontal)
+		{
+			for (const TSharedPtr<FDesignNode>& Child : Visible)
+			{
+				const float ChildContentWidth = SizeEstimator::ComputeChildContentWidthHint(Node, Child, ParentContentWidth);
+				const FVector2D ChildSize = EstimateNodeSizeImpl(Child, ChildContentWidth, State);
+				W += ChildSize.X;
+				H = FMath::Max(H, ChildSize.Y);
+			}
+			W += TotalGap;
+		}
+		else if (Node->Layout == EDesignLayout::Vertical)
+		{
+			for (const TSharedPtr<FDesignNode>& Child : Visible)
+			{
+				const float ChildContentWidth = SizeEstimator::ComputeChildContentWidthHint(Node, Child, ParentContentWidth);
+				const FVector2D ChildSize = EstimateNodeSizeImpl(Child, ChildContentWidth, State);
+				W = FMath::Max(W, ChildSize.X);
+				H += ChildSize.Y;
+			}
+			H += TotalGap;
+		}
+		else
+		{
+			for (const TSharedPtr<FDesignNode>& Child : Visible)
+			{
+				const float ChildContentWidth = SizeEstimator::ComputeChildContentWidthHint(Node, Child, ParentContentWidth);
+				const FVector2D ChildSize = EstimateNodeSizeImpl(Child, ChildContentWidth, State);
+				W = FMath::Max(W, Child->X + ChildSize.X);
+				H = FMath::Max(H, Child->Y + ChildSize.Y);
+			}
+		}
+
+		return FVector2D(W + PadH, H + PadV);
+	}
+}
+
 FVector2D SizeEstimator::EstimateNodeSize(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth)
 {
-	FRecursionGuard Guard(GEstimateDepth, TEXT("EstimateNodeSize"));
-	if (!Guard.bValid)
-	{
-		return FVector2D::ZeroVector;
-	}
-
-	float W = Node->Width.Value;
-	float H = Node->Height.Value;
-	if (Node->Width.IsFill())
-	{
-		const float FillWidth = ResolveWidthHint(Node, ParentContentWidth);
-		if (FillWidth > 0.0f)
-		{
-			W = FMath::Max(W, FillWidth);
-		}
-	}
-
-	if (Node->Type == EDesignNodeType::Text)
-	{
-		if ((W == 0 || H == 0 || Node->Width.IsFit() || Node->Height.IsFit())
-			&& Node->FontSize > 0
-			&& !Node->Content.IsEmpty())
-		{
-			const FVector2D Measured = TextMeasurement::MeasureTextNodeSize(Node, ParentContentWidth);
-			MergeEstimatedDimension(W, Node->Width, Measured.X);
-			MergeEstimatedDimension(H, Node->Height, Measured.Y);
-		}
-		else if (H == 0 && Node->FontSize > 0)
-		{
-			H = Node->FontSize * 1.5f;
-		}
-		return FVector2D(W, H);
-	}
-
-	if (Node->Type == EDesignNodeType::IconFont)
-	{
-		const float S = Node->FontSize > 0 ? Node->FontSize : 16.0f;
-		MergeEstimatedDimension(W, Node->Width, S);
-		MergeEstimatedDimension(H, Node->Height, S);
-		return FVector2D(W, H);
-	}
-
-	if (Node->Children.Num() > 0)
-	{
-		const FVector2D Sub = EstimateContentSize(Node, ParentContentWidth);
-		MergeEstimatedDimension(W, Node->Width, Sub.X);
-		MergeEstimatedDimension(H, Node->Height, Sub.Y);
-	}
-
-	return FVector2D(W, H);
+	FSizeEstimatorState State;
+	return EstimateNodeSizeImpl(Node, ParentContentWidth, State);
 }
 
 FVector2D SizeEstimator::EstimateContentSize(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth)
 {
-	FRecursionGuard Guard(GEstimateDepth, TEXT("EstimateContentSize"));
-	if (!Guard.bValid)
-	{
-		return FVector2D::ZeroVector;
-	}
-
-	float W = 0.0f;
-	float H = 0.0f;
-	const float PadH = Node->Padding.Left + Node->Padding.Right;
-	const float PadV = Node->Padding.Top + Node->Padding.Bottom;
-
-	TArray<TSharedPtr<FDesignNode>> Visible;
-	GatherVisibleChildren(Node, Visible);
-	if (Visible.Num() == 0)
-	{
-		return FVector2D(PadH, PadV);
-	}
-
-	const float TotalGap = Visible.Num() > 1 ? Node->Gap * (Visible.Num() - 1) : 0.0f;
-	if (Node->Layout == EDesignLayout::Horizontal)
-	{
-		for (const TSharedPtr<FDesignNode>& Child : Visible)
-		{
-			const float ChildContentWidth = ComputeChildContentWidthHint(Node, Child, ParentContentWidth);
-			const FVector2D ChildSize = EstimateNodeSize(Child, ChildContentWidth);
-			W += ChildSize.X;
-			H = FMath::Max(H, ChildSize.Y);
-		}
-		W += TotalGap;
-	}
-	else if (Node->Layout == EDesignLayout::Vertical)
-	{
-		for (const TSharedPtr<FDesignNode>& Child : Visible)
-		{
-			const float ChildContentWidth = ComputeChildContentWidthHint(Node, Child, ParentContentWidth);
-			const FVector2D ChildSize = EstimateNodeSize(Child, ChildContentWidth);
-			W = FMath::Max(W, ChildSize.X);
-			H += ChildSize.Y;
-		}
-		H += TotalGap;
-	}
-	else
-	{
-		for (const TSharedPtr<FDesignNode>& Child : Visible)
-		{
-			const float ChildContentWidth = ComputeChildContentWidthHint(Node, Child, ParentContentWidth);
-			const FVector2D ChildSize = EstimateNodeSize(Child, ChildContentWidth);
-			W = FMath::Max(W, Child->X + ChildSize.X);
-			H = FMath::Max(H, Child->Y + ChildSize.Y);
-		}
-	}
-
-	return FVector2D(W + PadH, H + PadV);
+	FSizeEstimatorState State;
+	return EstimateContentSizeImpl(Node, ParentContentWidth, State);
 }
 
 FVector2D SizeEstimator::PreComputeFitContentSizes(const TSharedPtr<FDesignNode>& Node, const FDesignDocument& Doc)
 {
-	return PreComputeFitContentSizesImpl(Node, Doc, 0.0f);
+	FSizeEstimatorState State;
+	return PreComputeFitContentSizesImpl(Node, Doc, 0.0f, State);
 }
