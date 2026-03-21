@@ -10,7 +10,7 @@ class FJsonValue;
 /**
  * Resolves design variables such as $variableName references.
  */
-class FDesignVariableResolver
+class DESIGN2UMGCORE_API FDesignVariableResolver
 {
 public:
 	FDesignVariableResolver() = default;

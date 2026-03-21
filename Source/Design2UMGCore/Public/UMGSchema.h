@@ -172,7 +172,7 @@ struct FUMGTypedProperty
 	FLinearColor ColorValue = FLinearColor::Transparent;
 };
 
-struct FUMGPropertyBag
+struct DESIGN2UMGCORE_API FUMGPropertyBag
 {
 	void Add(const FString& Key, const FString& Value);
 	void Add(const TCHAR* Key, const FString& Value);
@@ -186,6 +186,8 @@ struct FUMGPropertyBag
 
 	FString FindRef(const FString& Key) const;
 	FString FindRef(const TCHAR* Key) const;
+	FString GetValueOr(const FString& Key, const FString& DefaultValue) const;
+	FString GetValueOr(const TCHAR* Key, const FString& DefaultValue) const;
 
 	int32 Remove(const FString& Key);
 	int32 Remove(const TCHAR* Key);
@@ -202,6 +204,8 @@ struct FUMGPropertyBag
 	bool TryGetInt(const TCHAR* Key, int32& OutValue) const { return TryGetInt(FString(Key), OutValue); }
 	bool TryGetFloat(const FString& Key, float& OutValue) const;
 	bool TryGetFloat(const TCHAR* Key, float& OutValue) const { return TryGetFloat(FString(Key), OutValue); }
+	bool TryGetString(const FString& Key, FString& OutValue) const;
+	bool TryGetString(const TCHAR* Key, FString& OutValue) const { return TryGetString(FString(Key), OutValue); }
 	bool TryGetColor(const FString& Key, FLinearColor& OutValue) const;
 	bool TryGetColor(const TCHAR* Key, FLinearColor& OutValue) const { return TryGetColor(FString(Key), OutValue); }
 	bool TryGetVector2D(const FString& Key, FVector2D& OutValue) const;

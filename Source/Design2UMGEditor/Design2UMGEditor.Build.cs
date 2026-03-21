@@ -12,6 +12,7 @@ public class Design2UMGEditor : ModuleRules
 		{
 			"Core",
 			"CoreUObject",
+			"Design2UMGCore",
 			"Engine",
 			"UMG",
 			"Slate",

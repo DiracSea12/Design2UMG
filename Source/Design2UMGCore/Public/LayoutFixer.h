@@ -44,7 +44,7 @@ struct FFixerWidgetNode
 	TArray<FFixerWidgetNode> Children;
 };
 
-class FLayoutFixer
+class DESIGN2UMGCORE_API FLayoutFixer
 {
 public:
 	static void Initialize(const FIntPoint& DesignSize, FFixerPreset& OutPreset);

@@ -4,5 +4,5 @@
 
 #include "CoreMinimal.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogDesign2UMG, Log, All);
+DESIGN2UMGCORE_API DECLARE_LOG_CATEGORY_EXTERN(LogDesign2UMG, Log, All);
 

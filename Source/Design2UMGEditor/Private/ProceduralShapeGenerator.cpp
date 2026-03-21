@@ -1,6 +1,7 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "ProceduralShapeGenerator.h"
+#include "UMGPropertyKeys.h"
 #include "UMGWidgetUtils.h"
 #include "UMGValueParser.h"
 #include "Design2UMGLog.h"
@@ -753,10 +754,11 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 	int32 InsetPx = 10;
 	TArray<FGradientStop> MultiStops;
 
-	if (const FString* ParamsStr = Properties.Find(TEXT("MaterialParams")))
+	FString ParamsStr;
+	if (Properties.TryGetString(UMGPropertyKeys::MaterialParams, ParamsStr))
 	{
 		TSharedPtr<FJsonObject> Params;
-		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(*ParamsStr);
+		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ParamsStr);
 		if (FJsonSerializer::Deserialize(Reader, Params) && Params.IsValid())
 		{
 			FString ColorStr;
@@ -820,10 +822,12 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 		}
 	}
 
-	const FString* WStr = Properties.Find(TEXT("WidthOverride"));
-	const FString* HStr = Properties.Find(TEXT("HeightOverride"));
-	const int32 Width = FMath::Max(1, WStr ? FMath::RoundToInt(FCString::Atof(**WStr)) : 64);
-	const int32 Height = FMath::Max(1, HStr ? FMath::RoundToInt(FCString::Atof(**HStr)) : 64);
+	float WidthValue = 64.0f;
+	float HeightValue = 64.0f;
+	Properties.TryGetFloat(UMGPropertyKeys::WidthOverride, WidthValue);
+	Properties.TryGetFloat(UMGPropertyKeys::HeightOverride, HeightValue);
+	const int32 Width = FMath::Max(1, FMath::RoundToInt(WidthValue));
+	const int32 Height = FMath::Max(1, FMath::RoundToInt(HeightValue));
 
 	const FString Shape = MaterialRef.ToLower();
 	if (Shape == TEXT("circle") || Shape == TEXT("ellipse"))
@@ -874,8 +878,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 	if (Shape == TEXT("boxshadow"))
 	{
 		float BlurPx = 0.0f;
-		if (const FString* BlurStr = Properties.Find(TEXT("ShadowBlur")))
-			BlurPx = FCString::Atof(**BlurStr);
+		Properties.TryGetFloat(UMGPropertyKeys::ShadowBlur, BlurPx);
 
 		if (CornerRadii[0] >= 0.f)
 			return GenerateBoxShadow(Width, Height, Color, CornerRadii[0], CornerRadii[1], CornerRadii[2], CornerRadii[3], BlurPx, Outer);

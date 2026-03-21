@@ -26,7 +26,7 @@ struct FLayoutContext
 	FLayoutPreset Preset;
 };
 
-class FLayoutCalculator
+class DESIGN2UMGCORE_API FLayoutCalculator
 {
 public:
 	static FUMGSlotData CalculateSlot(const FBounds& Bounds, const FLayoutContext& Context);

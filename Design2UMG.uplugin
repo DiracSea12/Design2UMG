@@ -15,6 +15,11 @@
 	"IsBetaVersion": false,
 	"Modules": [
 		{
+			"Name": "Design2UMGCore",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		},
+		{
 			"Name": "Design2UMGEditor",
 			"Type": "Editor",
 			"LoadingPhase": "Default"

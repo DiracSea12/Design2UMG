@@ -9,7 +9,7 @@
 /**
  * 组件引用展开：ExpandRef、DeepCopy、Descendants 覆盖、ReTheme
  */
-class FRefExpander
+class DESIGN2UMGCORE_API FRefExpander
 {
 public:
 	static TSharedPtr<FDesignNode> ExpandRef(const TSharedPtr<FDesignNode>& RefNode, const FDesignDocument& Doc);

@@ -10,7 +10,7 @@
  * Maps visual properties such as fill, rounded corners, stroke, border,
  * background blur, shadows, and multi-fill wrappers.
  */
-class FVisualMapper
+class DESIGN2UMGCORE_API FVisualMapper
 {
 public:
 	static void ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node);

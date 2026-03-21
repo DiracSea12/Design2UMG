@@ -161,6 +161,8 @@ def prepare_external_reference(case_args, case: dict, reference_root: Path, outp
 
 def prepare_case_state(case_args, case: dict, output_root: Path) -> dict:
     output_dir = output_root / case["name"]
+    if output_dir.exists():
+        shutil.rmtree(output_dir, ignore_errors=True)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     expected_design_size = verify.get_expected_design_size(case_args.mode, case_args.source, case_args.node)
@@ -228,6 +230,9 @@ def append_spec(state: dict, key: str, filename: str, spec: dict):
         "spec_path": spec_path,
         "result_json_path": Path(spec["result_json_path"]),
         "render_png_path": Path(spec["render_png_path"]),
+        "log_path": state["ue_log_path"],
+        "editor_exit_code": None,
+        "fallback_error": "",
     }
 
 
@@ -475,7 +480,7 @@ def run_editor_driver(
         while True:
             exit_code = process.poll()
             if exit_code is not None:
-                return exit_code
+                break
 
             current_result_count = sum(1 for path in result_paths if path.is_file())
             if current_result_count > last_result_count:
@@ -499,17 +504,55 @@ def run_editor_driver(
 
             time.sleep(2)
 
+    exit_deadline = time.time() + 30.0
+    while time.time() < exit_deadline:
+        current_result_count = sum(1 for path in result_paths if path.is_file())
+        if current_result_count >= len(result_paths):
+            break
+        if current_result_count > last_result_count:
+            last_result_count = current_result_count
+            exit_deadline = time.time() + 30.0
+        time.sleep(1)
+
+    return exit_code
+
 
 def load_step_result(step: dict, batch_exit_code: int, batch_log_path: Path):
+    if step.get("result"):
+        return step["result"]
     result_path = step["result_json_path"]
     if not result_path.is_file():
         return None
     return {
-        "editor_exit_code": batch_exit_code,
-        "log_path": str(batch_log_path),
+        "editor_exit_code": step["editor_exit_code"],
+        "log_path": str(step["log_path"]),
         "spec_path": str(step["spec_path"]),
         "ue_result": verify.load_ue_result(result_path),
     }
+
+
+def execute_missing_steps_sequentially(runtime_args, states: list[dict]):
+    missing_steps = []
+    for state in states:
+        for key, step in state["steps"].items():
+            if not step["result_json_path"].is_file():
+                missing_steps.append((state, key, step))
+
+    if not missing_steps:
+        return
+
+    print(f"[FALLBACK] driver mode missed {len(missing_steps)} step results, switching to sequential execution")
+    for state, key, step in missing_steps:
+        spec = verify.load_json_document(step["spec_path"])
+        log_path = state["output_dir"] / f"{key}.log"
+        step["log_path"] = log_path
+        try:
+            result = verify.execute_automation_render(runtime_args, step["spec_path"], log_path, spec)
+            step["editor_exit_code"] = result.get("editor_exit_code")
+            step["result"] = result
+        except Exception as exc:
+            step["fallback_error"] = str(exc)
+            print(f"[FALLBACK-FAIL] {state['case']['name']} step={key} error={exc}")
 
 
 def write_render_failure_report(state: dict, ue_result: dict | None, render_chain: dict, verdict: str, message: str) -> Path:
@@ -575,6 +618,7 @@ def process_case_result(state: dict, batch_exit_code: int, batch_log_path: Path)
     reference_validation = state["reference_validation"]
     reference_context = state["reference_context"]
     candidate_path = state["candidate_path"]
+    fallback_errors = [step.get("fallback_error", "") for step in state["steps"].values() if step.get("fallback_error")]
 
     if args.mode == "asset":
         asset_result = load_step_result(state["steps"]["asset_render"], batch_exit_code, batch_log_path)
@@ -607,12 +651,15 @@ def process_case_result(state: dict, batch_exit_code: int, batch_log_path: Path)
         }
 
     if not ue_result or not ue_result.get("success") or not candidate_path.is_file():
+        failure_message = "Automation render did not produce a valid candidate image"
+        if fallback_errors:
+            failure_message += f" | fallback_errors={' ; '.join(fallback_errors)}"
         report_path = write_render_failure_report(
             state,
             ue_result,
             render_chain,
             "render_failed",
-            "Automation render did not produce a valid candidate image",
+            failure_message,
         )
         return {
             "name": state["case"]["name"],
@@ -707,6 +754,8 @@ def main():
 
     try:
         runtime_args.project, project_plugin_root, runtime_build_root = verify.prepare_runtime_project(runtime_args)
+        runtime_args.project_plugin_root = project_plugin_root
+        runtime_args.log_cmds = args.log_cmds
         verify.sync_project_plugin_build_id(args.editor, project_plugin_root)
 
         cases = discover_pen_cases(design_root, args.include, args.exclude)
@@ -738,6 +787,10 @@ def main():
             args.idle_timeout_sec,
             args.log_cmds,
         )
+        for state in states:
+            for step in state["steps"].values():
+                step["editor_exit_code"] = editor_exit_code
+        execute_missing_steps_sequentially(runtime_args, states)
 
         case_results = []
         for state in states:

@@ -6,7 +6,7 @@
 
 struct FDesignDocument;
 
-class FPenParser
+class DESIGN2UMGCORE_API FPenParser
 {
 public:
 	static bool ParseDocument(const FString& JsonString, FDesignDocument& OutDocument);

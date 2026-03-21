@@ -8,7 +8,7 @@
 /**
  * .pen 属性到 UMG 属性的映射
  */
-class FDesignTypeMapper
+class DESIGN2UMGCORE_API FDesignTypeMapper
 {
 public:
 	/** 节点类型到Widget 类型 */

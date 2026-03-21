@@ -9,7 +9,7 @@
 /**
  * 布局映射：Slot 属性、Gap、Padding、JustifyContent、AlignItems、SizeBox 包裹
  */
-class FLayoutMapper
+class DESIGN2UMGCORE_API FLayoutMapper
 {
 public:
 	static void ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node, EDesignLayout ParentLayout);

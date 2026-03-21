@@ -9,7 +9,7 @@ struct FDesignNode;
 struct FDesignFont;
 class UFont;
 
-struct DESIGN2UMGEDITOR_API FFontResolver
+struct DESIGN2UMGCORE_API FFontResolver
 {
 	/** Scan document for all used font families, compare with project assets, return missing list */
 	static TArray<FString> FindMissingFonts(const FDesignDocument& Document);

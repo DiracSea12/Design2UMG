@@ -1,6 +1,7 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGWidgetUtils.h"
+#include "UMGPropertyKeys.h"
 #include "UMGValueParser.h"
 #include "TextStyleUtils.h"
 #include "Design2UMGLog.h"
@@ -909,33 +910,38 @@ namespace
 
 void FUMGWidgetUtils::ApplyCommonProperties(UWidget* W, const FUMGPropertyBag& Properties)
 {
-	#define GET_PROP(Key) Properties.Find(TEXT(Key))
-	if (const FString* V = GET_PROP("Visibility")) W->SetVisibility(FUMGValueParser::ParseVisibility(*V));
-	if (const FString* V = GET_PROP("Clipping"))
+	FString StringValue;
+	if (Properties.TryGetString(UMGPropertyKeys::Visibility, StringValue))
+	{
+		W->SetVisibility(FUMGValueParser::ParseVisibility(StringValue));
+	}
+	if (Properties.TryGetString(UMGPropertyKeys::Clipping, StringValue))
 	{
 		EWidgetClipping ClippingType;
-		if (TryParseWidgetClipping(*V, ClippingType))
+		if (TryParseWidgetClipping(StringValue, ClippingType))
 		{
 			W->SetClipping(ClippingType);
 		}
 	}
-	if (const FString* V = GET_PROP("ToolTipText")) W->SetToolTipText(FText::FromString(*V));
+	if (Properties.TryGetString(UMGPropertyKeys::ToolTipText, StringValue))
+	{
+		W->SetToolTipText(FText::FromString(StringValue));
+	}
 	bool bIsEnabled = false;
-	if (Properties.TryGetBool(TEXT("IsEnabled"), bIsEnabled)) W->SetIsEnabled(bIsEnabled);
+	if (Properties.TryGetBool(UMGPropertyKeys::IsEnabled, bIsEnabled)) W->SetIsEnabled(bIsEnabled);
 	float RenderOpacity = 0.0f;
-	if (Properties.TryGetFloat(TEXT("RenderOpacity"), RenderOpacity)) W->SetRenderOpacity(RenderOpacity);
+	if (Properties.TryGetFloat(UMGPropertyKeys::RenderOpacity, RenderOpacity)) W->SetRenderOpacity(RenderOpacity);
 	float RenderAngle = 0.0f;
-	if (Properties.TryGetFloat(TEXT("RenderAngle"), RenderAngle)) W->SetRenderTransformAngle(RenderAngle);
+	if (Properties.TryGetFloat(UMGPropertyKeys::RenderAngle, RenderAngle)) W->SetRenderTransformAngle(RenderAngle);
 	FVector2D TransformScale;
-	if (Properties.TryGetVector2D(TEXT("RenderTransformScale"), TransformScale))
+	if (Properties.TryGetVector2D(UMGPropertyKeys::RenderTransformScale, TransformScale))
 	{
 		W->SetRenderScale(TransformScale);
 	}
 	FVector2D RenderScale;
-	if (Properties.TryGetVector2D(TEXT("RenderScale"), RenderScale)) W->SetRenderScale(RenderScale);
+	if (Properties.TryGetVector2D(UMGPropertyKeys::RenderScale, RenderScale)) W->SetRenderScale(RenderScale);
 	FVector2D RenderTranslation;
-	if (Properties.TryGetVector2D(TEXT("RenderTranslation"), RenderTranslation)) W->SetRenderTranslation(RenderTranslation);
-	#undef GET_PROP
+	if (Properties.TryGetVector2D(UMGPropertyKeys::RenderTranslation, RenderTranslation)) W->SetRenderTranslation(RenderTranslation);
 }
 
 void FUMGWidgetUtils::ApplyWidgetProperties(UWidget* Widget, const FUMGPropertyBag& Properties)

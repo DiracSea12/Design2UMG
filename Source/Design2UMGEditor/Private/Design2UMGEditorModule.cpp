@@ -5,8 +5,6 @@
 #include "Design2UMGEditorActions.h"
 #include "Design2UMGLog.h"
 
-DEFINE_LOG_CATEGORY(LogDesign2UMG);
-
 void FDesign2UMGEditorModule::StartupModule()
 {
 	Design2UMGEditorActions::RegisterBuiltInDesignSources();

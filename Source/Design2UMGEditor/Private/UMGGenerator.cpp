@@ -2,6 +2,7 @@
 
 #include "UMGGenerator.h"
 #include "UMGWidgetUtils.h"
+#include "UMGPropertyKeys.h"
 #include "UMGValueParser.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
@@ -165,13 +166,46 @@ namespace
 		return CanvasRoot;
 	}
 
+	FString FindNodeProperty(const FUMGWidgetNode& Node, const TCHAR* Key)
+	{
+		return Node.Properties.FindRef(Key);
+	}
+
+	FString FindNodePropertyOr(const FUMGWidgetNode& Node, const TCHAR* Key, const FString& DefaultValue)
+	{
+		return Node.Properties.GetValueOr(Key, DefaultValue);
+	}
+
+	int32 GetNodeRoundedIntProperty(const FUMGWidgetNode& Node, const TCHAR* Key, int32 DefaultValue)
+	{
+		float Value = 0.0f;
+		if (Node.Properties.TryGetFloat(Key, Value))
+		{
+			return FMath::RoundToInt(Value);
+		}
+		return DefaultValue;
+	}
+
+	void ReplaceNodeFillWithTexturePath(FUMGWidgetNode& Node, const FString& TexturePath)
+	{
+		Node.Properties.Remove(UMGPropertyKeys::PathGeometry);
+		Node.Properties.Remove(UMGPropertyKeys::PathFillRule);
+		Node.Properties.Remove(UMGPropertyKeys::PathFillColor);
+		Node.Properties.Remove(UMGPropertyKeys::MaterialRef);
+		Node.Properties.Remove(UMGPropertyKeys::MaterialParams);
+		Node.Properties.Add(UMGPropertyKeys::TexturePath, TexturePath);
+		Node.Brush.MaterialRef.Reset();
+		Node.Brush.MaterialParams.Reset();
+		Node.Brush.TexturePath = TexturePath;
+	}
+
 	uint32 MakePathTextureKey(const FUMGWidgetNode& Node)
 	{
-		const FString* Geometry = Node.Properties.Find(TEXT("PathGeometry"));
-		const FString* FillRule = Node.Properties.Find(TEXT("PathFillRule"));
-		const FString* FillColor = Node.Properties.Find(TEXT("PathFillColor"));
-		const FString* WidthOverride = Node.Properties.Find(TEXT("WidthOverride"));
-		const FString* HeightOverride = Node.Properties.Find(TEXT("HeightOverride"));
+		const FString* Geometry = Node.Properties.Find(UMGPropertyKeys::PathGeometry);
+		const FString* FillRule = Node.Properties.Find(UMGPropertyKeys::PathFillRule);
+		const FString* FillColor = Node.Properties.Find(UMGPropertyKeys::PathFillColor);
+		const FString* WidthOverride = Node.Properties.Find(UMGPropertyKeys::WidthOverride);
+		const FString* HeightOverride = Node.Properties.Find(UMGPropertyKeys::HeightOverride);
 
 		uint32 Key = Geometry ? GetTypeHash(*Geometry) : 0u;
 		Key = HashCombine(Key, FillRule ? GetTypeHash(*FillRule) : 0u);
@@ -183,24 +217,12 @@ namespace
 
 	uint32 MakeProceduralTextureKey(const FUMGWidgetNode& Node)
 	{
-		const FString MaterialRef = Node.Properties.Contains(TEXT("MaterialRef"))
-			? Node.Properties[TEXT("MaterialRef")]
-			: Node.Brush.MaterialRef;
-		const FString MaterialParams = Node.Properties.Contains(TEXT("MaterialParams"))
-			? Node.Properties[TEXT("MaterialParams")]
-			: Node.Brush.MaterialParams;
-		const FString TextureWidth = Node.Properties.Contains(TEXT("WidthOverride"))
-			? Node.Properties[TEXT("WidthOverride")]
-			: FString();
-		const FString TextureHeight = Node.Properties.Contains(TEXT("HeightOverride"))
-			? Node.Properties[TEXT("HeightOverride")]
-			: FString();
-		const FString ShadowBlur = Node.Properties.Contains(TEXT("ShadowBlur"))
-			? Node.Properties[TEXT("ShadowBlur")]
-			: FString();
-		const FString BrushColor = Node.Properties.Contains(TEXT("BrushColor"))
-			? Node.Properties[TEXT("BrushColor")]
-			: FString();
+		const FString MaterialRef = FindNodePropertyOr(Node, UMGPropertyKeys::MaterialRef, Node.Brush.MaterialRef);
+		const FString MaterialParams = FindNodePropertyOr(Node, UMGPropertyKeys::MaterialParams, Node.Brush.MaterialParams);
+		const FString TextureWidth = FindNodeProperty(Node, UMGPropertyKeys::WidthOverride);
+		const FString TextureHeight = FindNodeProperty(Node, UMGPropertyKeys::HeightOverride);
+		const FString ShadowBlur = FindNodeProperty(Node, UMGPropertyKeys::ShadowBlur);
+		const FString BrushColor = FindNodeProperty(Node, UMGPropertyKeys::BrushColor);
 
 		uint32 Key = GetTypeHash(MaterialRef);
 		Key = HashCombine(Key, GetTypeHash(MaterialParams));
@@ -329,23 +351,20 @@ namespace
 		const FString& AssetPrefix,
 		TMap<uint32, FString>& PathTextureCache)
 	{
-		if (Node.Type == TEXT("Image") && Node.Properties.Contains(TEXT("PathGeometry")))
+		if (Node.Type == TEXT("Image") && Node.Properties.Contains(UMGPropertyKeys::PathGeometry))
 		{
 			const uint32 TextureKey = MakePathTextureKey(Node);
 			if (const FString* CachedPath = PathTextureCache.Find(TextureKey))
 			{
-				Node.Properties.Remove(TEXT("PathGeometry"));
-				Node.Properties.Remove(TEXT("PathFillRule"));
-				Node.Properties.Remove(TEXT("PathFillColor"));
-				Node.Properties.Add(TEXT("TexturePath"), *CachedPath);
+				ReplaceNodeFillWithTexturePath(Node, *CachedPath);
 			}
 			else
 			{
-				const FString* Geometry = Node.Properties.Find(TEXT("PathGeometry"));
-				const FString FillRule = Node.Properties.Contains(TEXT("PathFillRule")) ? Node.Properties[TEXT("PathFillRule")] : TEXT("nonzero");
-				const FString FillColor = Node.Properties.Contains(TEXT("PathFillColor")) ? Node.Properties[TEXT("PathFillColor")] : TEXT("#ffffffff");
-				const int32 Width = FMath::Max(1, Node.Properties.Contains(TEXT("WidthOverride")) ? FCString::Atoi(*Node.Properties[TEXT("WidthOverride")]) : 64);
-				const int32 Height = FMath::Max(1, Node.Properties.Contains(TEXT("HeightOverride")) ? FCString::Atoi(*Node.Properties[TEXT("HeightOverride")]) : 64);
+				const FString* Geometry = Node.Properties.Find(UMGPropertyKeys::PathGeometry);
+				const FString FillRule = FindNodePropertyOr(Node, UMGPropertyKeys::PathFillRule, TEXT("nonzero"));
+				const FString FillColor = FindNodePropertyOr(Node, UMGPropertyKeys::PathFillColor, TEXT("#ffffffff"));
+				const int32 Width = FMath::Max(1, GetNodeRoundedIntProperty(Node, UMGPropertyKeys::WidthOverride, 64));
+				const int32 Height = FMath::Max(1, GetNodeRoundedIntProperty(Node, UMGPropertyKeys::HeightOverride, 64));
 
 				if (Geometry)
 				{
@@ -366,10 +385,7 @@ namespace
 							FString ObjectPath;
 							if (CreateOrUpdatePathTextureAsset(TextureImportPath, AssetName, RawData, RawWidth, RawHeight, ObjectPath))
 							{
-								Node.Properties.Remove(TEXT("PathGeometry"));
-								Node.Properties.Remove(TEXT("PathFillRule"));
-								Node.Properties.Remove(TEXT("PathFillColor"));
-								Node.Properties.Add(TEXT("TexturePath"), ObjectPath);
+								ReplaceNodeFillWithTexturePath(Node, ObjectPath);
 								PathTextureCache.Add(TextureKey, ObjectPath);
 								UE_LOG(LogDesign2UMG, Log, TEXT("Persisted path texture '%s' -> %s"), *Node.Name, *ObjectPath);
 							}
@@ -391,28 +407,21 @@ namespace
 		const FString& AssetPrefix,
 		TMap<uint32, FString>& ProceduralTextureCache)
 	{
-		const FString MaterialRef = Node.Properties.Contains(TEXT("MaterialRef"))
-			? Node.Properties[TEXT("MaterialRef")]
-			: Node.Brush.MaterialRef;
+		const FString MaterialRef = FindNodePropertyOr(Node, UMGPropertyKeys::MaterialRef, Node.Brush.MaterialRef);
 		if (!MaterialRef.IsEmpty())
 		{
 			const uint32 TextureKey = MakeProceduralTextureKey(Node);
 			if (const FString* CachedPath = ProceduralTextureCache.Find(TextureKey))
 			{
-				Node.Properties.Remove(TEXT("MaterialRef"));
-				Node.Properties.Remove(TEXT("MaterialParams"));
-				Node.Properties.Add(TEXT("TexturePath"), *CachedPath);
-				Node.Brush.MaterialRef.Reset();
-				Node.Brush.MaterialParams.Reset();
-				Node.Brush.TexturePath = *CachedPath;
+				ReplaceNodeFillWithTexturePath(Node, *CachedPath);
 			}
 			else
 			{
 				FUMGPropertyBag GenerationProps = Node.Properties;
-				GenerationProps.Add(TEXT("MaterialRef"), MaterialRef);
-				if (!Node.Brush.MaterialParams.IsEmpty() && !GenerationProps.Contains(TEXT("MaterialParams")))
+				GenerationProps.Add(UMGPropertyKeys::MaterialRef, MaterialRef);
+				if (!Node.Brush.MaterialParams.IsEmpty() && !GenerationProps.Contains(UMGPropertyKeys::MaterialParams))
 				{
-					GenerationProps.Add(TEXT("MaterialParams"), Node.Brush.MaterialParams);
+					GenerationProps.Add(UMGPropertyKeys::MaterialParams, Node.Brush.MaterialParams);
 				}
 
 				if (UTexture2D* Generated = FProceduralShapeGenerator::GenerateFromMaterialRef(MaterialRef, GenerationProps, nullptr))
@@ -430,12 +439,7 @@ namespace
 						FString ObjectPath;
 						if (CreateOrUpdatePathTextureAsset(TextureImportPath, AssetName, RawData, RawWidth, RawHeight, ObjectPath))
 						{
-							Node.Properties.Remove(TEXT("MaterialRef"));
-							Node.Properties.Remove(TEXT("MaterialParams"));
-							Node.Properties.Add(TEXT("TexturePath"), ObjectPath);
-							Node.Brush.MaterialRef.Reset();
-							Node.Brush.MaterialParams.Reset();
-							Node.Brush.TexturePath = ObjectPath;
+							ReplaceNodeFillWithTexturePath(Node, ObjectPath);
 							ProceduralTextureCache.Add(TextureKey, ObjectPath);
 							UE_LOG(LogDesign2UMG, Log, TEXT("Persisted procedural texture '%s' (%s) -> %s"), *Node.Name, *MaterialRef, *ObjectPath);
 						}

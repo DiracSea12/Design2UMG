@@ -4,7 +4,7 @@
 #include "DesignSchema.h"
 #include "UMGSchema.h"
 
-class FDesign2UMGConverter
+class DESIGN2UMGCORE_API FDesign2UMGConverter
 {
 public:
 	static FUMGWidgetData Convert(const FDesignDocument& Document);

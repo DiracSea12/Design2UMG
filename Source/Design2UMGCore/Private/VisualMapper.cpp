@@ -5,7 +5,6 @@
 #include "LayoutMapper.h"
 #include "Design2UMGLog.h"
 #include "UMGPropertyKeys.h"
-#include "UMGWidgetUtils.h"
 #include "UMGValueParser.h"
 
 namespace

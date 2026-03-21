@@ -7,7 +7,7 @@
 
 struct FUMGWidgetData;
 
-struct FDesignFrameInfo
+struct DESIGN2UMGCORE_API FDesignFrameInfo
 {
 	FString Id;
 	FString Name;
@@ -15,6 +15,6 @@ struct FDesignFrameInfo
 	float Height = 0.0f;
 };
 
-TArray<FDesignFrameInfo> ExtractTopFrames(const FDesignDocument& Document);
+DESIGN2UMGCORE_API TArray<FDesignFrameInfo> ExtractTopFrames(const FDesignDocument& Document);
 
 

@@ -181,6 +181,20 @@ FString FUMGPropertyBag::FindRef(const TCHAR* Key) const
 	return FindRef(FString(Key));
 }
 
+FString FUMGPropertyBag::GetValueOr(const FString& Key, const FString& DefaultValue) const
+{
+	if (const FString* Value = Find(Key))
+	{
+		return *Value;
+	}
+	return DefaultValue;
+}
+
+FString FUMGPropertyBag::GetValueOr(const TCHAR* Key, const FString& DefaultValue) const
+{
+	return GetValueOr(FString(Key), DefaultValue);
+}
+
 int32 FUMGPropertyBag::Remove(const FString& Key)
 {
 	const int32 Removed = Values.Remove(Key);
@@ -269,6 +283,16 @@ bool FUMGPropertyBag::TryGetFloat(const FString& Key, float& OutValue) const
 	if (const FUMGTypedProperty* Property = Values.Find(Key))
 	{
 		OutValue = Property->FloatValue;
+		return Property->bHasValue;
+	}
+	return false;
+}
+
+bool FUMGPropertyBag::TryGetString(const FString& Key, FString& OutValue) const
+{
+	if (const FUMGTypedProperty* Property = Values.Find(Key))
+	{
+		OutValue = Property->SerializedValue;
 		return Property->bHasValue;
 	}
 	return false;

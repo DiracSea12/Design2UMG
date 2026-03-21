@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 
-struct DESIGN2UMGEDITOR_API FDesign2UMGNotification
+struct DESIGN2UMGCORE_API FDesign2UMGNotification
 {
 	static void Success(const FText& Message, const FString& AssetPath = TEXT(""));
 	static void Warning(const FText& Message);

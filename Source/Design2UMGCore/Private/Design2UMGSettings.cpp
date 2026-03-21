@@ -2,11 +2,16 @@
 
 #include "Design2UMGSettings.h"
 #include "Design2UMGLog.h"
+#include "Misc/ConfigCacheIni.h"
+#include "UObject/UnrealType.h"
+#include "UObject/Package.h"
 
 namespace
 {
 	constexpr int32 DefaultDesignWidth = 1920;
 	constexpr int32 DefaultDesignHeight = 1080;
+	const TCHAR* LegacySettingsSection = TEXT("/Script/Design2UMGEditor.Design2UMGSettings");
+	const TCHAR* CurrentSettingsSection = TEXT("/Script/Design2UMGCore.Design2UMGSettings");
 
 	bool IsInvalidDesignSize(const int32 Width, const int32 Height)
 	{
@@ -47,11 +52,78 @@ namespace
 		Key.ReplaceInline(TEXT("_"), TEXT(""));
 		return Key;
 	}
+
+	FString ExportConfigValue(UObject* Object, FProperty* Property)
+	{
+		FString ExportedValue;
+		if (!Object || !Property)
+		{
+			return ExportedValue;
+		}
+
+		Property->ExportText_InContainer(0, ExportedValue, Object, Object, Object, PPF_None);
+		return ExportedValue;
+	}
+
+	void MigrateLegacySettingsSection(UDesign2UMGSettings* Settings)
+	{
+		if (!Settings || !GConfig)
+		{
+			return;
+		}
+
+		const FString ConfigPath = GEditorPerProjectIni;
+		if (!GConfig->DoesSectionExist(LegacySettingsSection, ConfigPath))
+		{
+			return;
+		}
+
+		UDesign2UMGSettings* RawDefaults = NewObject<UDesign2UMGSettings>(GetTransientPackage(), NAME_None, RF_Transient);
+		bool bUpdated = false;
+
+		for (TFieldIterator<FProperty> It(UDesign2UMGSettings::StaticClass()); It; ++It)
+		{
+			FProperty* Property = *It;
+			if (!Property->HasAnyPropertyFlags(CPF_Config))
+			{
+				continue;
+			}
+
+			const FString PropertyName = Property->GetName();
+			FString LegacyValue;
+			if (!GConfig->GetString(LegacySettingsSection, *PropertyName, LegacyValue, ConfigPath))
+			{
+				continue;
+			}
+
+			FString CurrentValue;
+			const bool bHasCurrentValue = GConfig->GetString(CurrentSettingsSection, *PropertyName, CurrentValue, ConfigPath);
+			const FString DefaultValue = ExportConfigValue(RawDefaults, Property);
+			if (bHasCurrentValue && CurrentValue != DefaultValue)
+			{
+				continue;
+			}
+
+			if (!bHasCurrentValue || CurrentValue != LegacyValue)
+			{
+				GConfig->SetString(CurrentSettingsSection, *PropertyName, *LegacyValue, ConfigPath);
+				bUpdated = true;
+			}
+		}
+
+		if (bUpdated)
+		{
+			GConfig->Flush(false, ConfigPath);
+			Settings->ReloadConfig();
+			UE_LOG(LogDesign2UMG, Log, TEXT("Migrated legacy Design2UMG settings section to Design2UMGCore"));
+		}
+	}
 }
 
 UDesign2UMGSettings* UDesign2UMGSettings::Get()
 {
 	UDesign2UMGSettings* Settings = GetMutableDefault<UDesign2UMGSettings>();
+	MigrateLegacySettingsSection(Settings);
 	EnsureValidDesignSize(Settings);
 	return Settings;
 }

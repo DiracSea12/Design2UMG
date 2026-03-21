@@ -30,7 +30,7 @@ struct FWidgetClassOverride
  * 保存于 Editor Preferences（用户级，不提交版本库）
  */
 UCLASS(config=EditorPerProjectUserSettings, meta=(DisplayName="Design2UMG"))
-class UDesign2UMGSettings : public UDeveloperSettings
+class DESIGN2UMGCORE_API UDesign2UMGSettings : public UDeveloperSettings
 {
 	GENERATED_BODY()
 
