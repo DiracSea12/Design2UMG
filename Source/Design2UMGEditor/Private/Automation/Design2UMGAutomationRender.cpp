@@ -5,12 +5,13 @@
 #include "Design2UMGNotification.h"
 #include "DesignImportPipeline.h"
 #include "DesignImportUtils.h"
+#include "DesignPathRasterizer.h"
 #include "DesignSchema.h"
 #include "FontResolver.h"
-#include "PenMCPBridge.h"
-#include "PenParser.h"
+#include "ProceduralShapeGenerator.h"
 #include "RefExpander.h"
 #include "UMGSchema.h"
+#include "UMGWidgetUtils.h"
 
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"
@@ -350,52 +351,6 @@ namespace
 		return Stats.ToJson(TEXT("design_semantic"));
 	}
 
-	bool BuildPenAutomationSourceDocument(
-		const FString& SourcePath,
-		const FString& NodeId,
-		FDesignDocument& OutDoc,
-		FString& OutError)
-	{
-		if (NodeId.IsEmpty())
-		{
-			if (!FPenParser::ParseFromFile(SourcePath, OutDoc))
-			{
-				OutError = FString::Printf(TEXT("Failed to parse pen source for structure snapshot: %s"), *SourcePath);
-				return false;
-			}
-			return true;
-		}
-
-		FString JsonString;
-		if (!FFileHelper::LoadFileToString(JsonString, *SourcePath))
-		{
-			OutError = FString::Printf(TEXT("Failed to read pen source for structure snapshot: %s"), *SourcePath);
-			return false;
-		}
-
-		TSharedPtr<FJsonObject> RootObject;
-		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonString);
-		if (!FJsonSerializer::Deserialize(Reader, RootObject) || !RootObject.IsValid())
-		{
-			OutError = FString::Printf(TEXT("Failed to parse pen source JSON for structure snapshot: %s"), *SourcePath);
-			return false;
-		}
-
-		FString FilteredDocumentJson;
-		if (!FPenMCPBridge::BuildFilteredDocumentJson(RootObject, FilteredDocumentJson, NodeId))
-		{
-			OutError = FString::Printf(TEXT("Failed to filter pen source for target node '%s'"), *NodeId);
-			return false;
-		}
-
-		if (!FPenParser::ParseDocument(FilteredDocumentJson, OutDoc))
-		{
-			OutError = FString::Printf(TEXT("Failed to parse filtered pen source for structure snapshot: %s"), *SourcePath);
-			return false;
-		}
-		return true;
-	}
-
 	bool IsWidgetVisibleForStructure(const UWidget* Widget)
 	{
 		if (!Widget)
@@ -730,37 +685,33 @@ namespace
 		return true;
 	}
 
-	bool ForceReloadAssetPackage(const FString& ObjectPath, FString& OutError)
+	void ResetAutomationTransientState()
 	{
-		const FString PackageName = FPackageName::ObjectPathToPackageName(ObjectPath);
-		if (PackageName.IsEmpty())
-		{
-			OutError = FString::Printf(TEXT("Failed to derive package name from object path: %s"), *ObjectPath);
-			return false;
-		}
-
-		UPackage* Package = FindPackage(nullptr, *PackageName);
-		if (!Package)
-		{
-			Package = LoadPackage(nullptr, *PackageName, LOAD_None);
-			if (!Package)
-			{
-				OutError = FString::Printf(TEXT("Failed to load package before reload: %s"), *PackageName);
-				return false;
-			}
-		}
-
-		FlushAsyncLoading();
-		ResetLoaders(static_cast<UObject*>(Package));
-		if (!ReloadPackage(Package, LOAD_None))
-		{
-			OutError = FString::Printf(TEXT("Failed to reload package: %s"), *PackageName);
-			return false;
-		}
-
 		FlushRenderingCommands();
+		FlushAsyncLoading();
+		FFontResolver::ClearCache();
+		FDesignPathRasterizer::ClearCache();
+		FProceduralShapeGenerator::ReleaseTransientTextures();
+		FUMGWidgetUtils::EffectiveDesignSize = FIntPoint(1920, 1080);
 		CollectGarbage(RF_NoFlags, true);
-		return true;
+	}
+
+	void PrepareAutomationTransientState(const FAutomationRenderSpec& Spec)
+	{
+		static FString LastOutputPath;
+		if (LastOutputPath.IsEmpty())
+		{
+			LastOutputPath = Spec.OutputPath;
+			return;
+		}
+
+		if (LastOutputPath.Equals(Spec.OutputPath, ESearchCase::CaseSensitive))
+		{
+			return;
+		}
+
+		ResetAutomationTransientState();
+		LastOutputPath = Spec.OutputPath;
 	}
 
 	FString NormalizeWidgetBlueprintObjectPath(const FString& AssetPath)
@@ -782,6 +733,31 @@ namespace
 
 	bool RunAutomationRender(const FAutomationRenderSpec& Spec, FAutomationRenderResult& OutResult)
 	{
+		auto MakeAutomationImportRequest = [&](const bool bResolveImages)
+		{
+			FDesignImportRequest Request;
+			Request.OutputPath = Spec.OutputPath;
+			Request.bUsePreview = false;
+			Request.bResolveImages = bResolveImages;
+			Request.Generation.Mode = EDesignBlueprintGenerationMode::BlueprintAndCompiledPng;
+			Request.Generation.CompiledPngFilePath = Spec.RenderPngPath;
+			Request.Generation.CompiledRenderSize = Spec.RenderSize;
+			Request.Generation.OutGeneratedAssetPath = &OutResult.GeneratedAssetPath;
+			Request.Generation.OutRenderedSize = &OutResult.RenderSize;
+			return Request;
+		};
+
+		auto CaptureGeneratedAssetStructure = [&]()
+		{
+			if (!OutResult.GeneratedAssetPath.IsEmpty())
+			{
+				if (UWidgetBlueprint* GeneratedBlueprint = LoadObject<UWidgetBlueprint>(nullptr, *OutResult.GeneratedAssetPath))
+				{
+					OutResult.AssetStructure = BuildWidgetTreeStructureSnapshot(GeneratedBlueprint->WidgetTree);
+				}
+			}
+		};
+
 		OutResult.Mode = Spec.Mode;
 		OutResult.SourcePath = Spec.SourcePath;
 		OutResult.RenderPngPath = Spec.RenderPngPath;
@@ -795,15 +771,6 @@ namespace
 		{
 			const FString ObjectPath = NormalizeWidgetBlueprintObjectPath(Spec.SourcePath);
 			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: loading asset %s"), *ObjectPath);
-			if (Spec.bForceReloadPackage)
-			{
-				FString ReloadError;
-				if (!ForceReloadAssetPackage(ObjectPath, ReloadError))
-				{
-					OutResult.ErrorMessage = ReloadError;
-					return false;
-				}
-			}
 			WidgetBlueprint = LoadObject<UWidgetBlueprint>(nullptr, *ObjectPath);
 			if (!WidgetBlueprint)
 			{
@@ -827,29 +794,33 @@ namespace
 			return true;
 		}
 
-		FUMGWidgetData Data;
 		if (Spec.Mode.Equals(TEXT("pen"), ESearchCase::IgnoreCase))
 		{
 			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: importing pen source"));
-			FDesignDocument StructureDocument;
-			FString StructureError;
-			if (BuildPenAutomationSourceDocument(Spec.SourcePath, Spec.NodeId, StructureDocument, StructureError))
+			FDesignDocument Document;
+			FString LoadError;
+			if (!DesignImportPipeline::LoadPenDocument(Spec.SourcePath, Spec.NodeId, Document, &LoadError))
 			{
-				OutResult.SourceStructure = BuildDesignStructureSnapshot(StructureDocument, Spec.NodeId);
-			}
-			else
-			{
-				UE_LOG(LogDesign2UMG, Warning, TEXT("AutomationRender: source structure snapshot unavailable: %s"), *StructureError);
-			}
-
-			if (!DesignImportPipeline::ImportPenFile(Spec.SourcePath, Spec.NodeId, Data))
-			{
-				OutResult.ErrorMessage = FString::Printf(TEXT("Failed to import pen source: %s"), *Spec.SourcePath);
+				OutResult.ErrorMessage = LoadError;
 				return false;
 			}
-			DesignImportUtils::ResolveImages(Data);
+
+			OutResult.SourceStructure = BuildDesignStructureSnapshot(Document, Spec.NodeId);
+
+			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: generating blueprint and compiled png"));
+			if (!DesignImportPipeline::Execute(Document, MakeAutomationImportRequest(true)).bSucceeded)
+			{
+				OutResult.ErrorMessage = FString::Printf(TEXT("Failed to generate compiled PNG for %s"), *Spec.SourcePath);
+				return false;
+			}
+
+			CaptureGeneratedAssetStructure();
+			OutResult.bSuccess = true;
+			return true;
 		}
-		else if (Spec.Mode.Equals(TEXT("local_figma"), ESearchCase::IgnoreCase))
+
+		FUMGWidgetData Data;
+		if (Spec.Mode.Equals(TEXT("local_figma"), ESearchCase::IgnoreCase))
 		{
 			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: importing local figma export"));
 			FString ErrorMessage;
@@ -866,25 +837,13 @@ namespace
 		}
 
 		UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: generating blueprint and compiled png"));
-		if (!DesignImportUtils::GenerateBlueprintAndCompiledPng(
-			Data,
-			Spec.OutputPath,
-			Spec.RenderPngPath,
-			Spec.RenderSize,
-			&OutResult.GeneratedAssetPath,
-			&OutResult.RenderSize))
+		if (!DesignImportPipeline::Execute(Data, MakeAutomationImportRequest(false)).bSucceeded)
 		{
 			OutResult.ErrorMessage = FString::Printf(TEXT("Failed to generate compiled PNG for %s"), *Spec.SourcePath);
 			return false;
 		}
 
-		if (!OutResult.GeneratedAssetPath.IsEmpty())
-		{
-			if (UWidgetBlueprint* GeneratedBlueprint = LoadObject<UWidgetBlueprint>(nullptr, *OutResult.GeneratedAssetPath))
-			{
-				OutResult.AssetStructure = BuildWidgetTreeStructureSnapshot(GeneratedBlueprint->WidgetTree);
-			}
-		}
+		CaptureGeneratedAssetStructure();
 
 		OutResult.bSuccess = true;
 		return true;
@@ -941,6 +900,7 @@ namespace Design2UMGAutomationRender
 		}
 
 		UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: spec loaded successfully"));
+		PrepareAutomationTransientState(Spec);
 		const bool bOk = RunAutomationRender(Spec, Result);
 		WriteAutomationRenderResult(Spec, Result);
 
@@ -964,3 +924,4 @@ namespace Design2UMGAutomationRender
 		}
 	}
 }
+

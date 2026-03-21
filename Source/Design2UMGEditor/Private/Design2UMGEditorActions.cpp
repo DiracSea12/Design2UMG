@@ -7,15 +7,13 @@
 #include "Design2UMGLocalFigmaImport.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
+#include "DesignImportDialogs.h"
 #include "DesignImportPipeline.h"
-#include "DesignImportUtils.h"
 #include "DesignPathRasterizer.h"
-#include "DesignSourceRegistry.h"
 #include "FigmaHttpClient.h"
 #include "FigmaImageExporter.h"
 #include "FigmaParser.h"
 #include "FontResolver.h"
-#include "PenImporter.h"
 #include "PenMCPBridge.h"
 #include "PencilConnector.h"
 #include "ProceduralShapeGenerator.h"
@@ -50,6 +48,7 @@ namespace
 
 	TUniquePtr<FPencilConnector> GConnector;
 	TUniquePtr<FFigmaHttpClient> GFigmaClient;
+	using FDesignSourceConvertFunc = TFunction<bool(const FString& RawJson, FUMGWidgetData& OutData)>;
 
 	struct FPenConvertCommandArgs
 	{
@@ -59,6 +58,37 @@ namespace
 		FString OutputPath = DefaultPenOutputPath;
 		bool bUsePreview = true;
 	};
+
+	struct FImportCommandOptions
+	{
+		FString OutputPath = DefaultPenOutputPath;
+		FString TargetNodeId;
+		bool bUsePreview = true;
+		bool bRenderPng = true;
+	};
+
+	void ApplyOutputPreviewArg(const FString& Arg, FString& OutputPath, bool& bUsePreview);
+
+	TMap<FName, FDesignSourceConvertFunc>& GetDesignSourceRegistry()
+	{
+		static TMap<FName, FDesignSourceConvertFunc> Registry;
+		return Registry;
+	}
+
+	void RegisterDesignSource(FName SourceId, FDesignSourceConvertFunc Func)
+	{
+		if (GetDesignSourceRegistry().Contains(SourceId))
+		{
+			UE_LOG(LogDesign2UMG, Warning, TEXT("DesignSourceRegistry: Overwriting existing source '%s'"), *SourceId.ToString());
+		}
+
+		GetDesignSourceRegistry().Add(SourceId, MoveTemp(Func));
+	}
+
+	void UnregisterDesignSource(FName SourceId)
+	{
+		GetDesignSourceRegistry().Remove(SourceId);
+	}
 
 	FDesignImportRequest MakeImportRequest(
 		const FString& OutputPath,
@@ -76,19 +106,6 @@ namespace
 		return Request;
 	}
 
-	void ExecuteImportData(
-		FUMGWidgetData& Data,
-		const FString& OutputPath,
-		const FText& PreviewWindowTitle,
-		const bool bUsePreview,
-		const EDesignBlueprintGenerationMode GenerationMode,
-		const bool bResolveImages = true)
-	{
-		DesignImportPipeline::Execute(
-			Data,
-			MakeImportRequest(OutputPath, PreviewWindowTitle, bUsePreview, GenerationMode, bResolveImages));
-	}
-
 	FDesignImportRequest MakePenImportRequest(
 		const FString& OutputPath,
 		const bool bUsePreview,
@@ -99,28 +116,6 @@ namespace
 			LOCTEXT("PenConvertPreviewWindowTitle", "Design2UMG Pen Preview"),
 			bUsePreview,
 			bRenderPng ? EDesignBlueprintGenerationMode::BlueprintAndPng : EDesignBlueprintGenerationMode::BlueprintOnly);
-	}
-
-	void ExecutePenImportData(
-		FUMGWidgetData& Data,
-		const FString& OutputPath,
-		const bool bUsePreview,
-		const bool bRenderPng = true)
-	{
-		DesignImportPipeline::Execute(Data, MakePenImportRequest(OutputPath, bUsePreview, bRenderPng));
-	}
-
-	void ExecutePenFileImport(
-		const FString& FilePath,
-		const FString& TargetNodeId,
-		const FString& OutputPath,
-		const bool bUsePreview,
-		const bool bRenderPng)
-	{
-		DesignImportPipeline::ExecutePenFile(
-			FilePath,
-			TargetNodeId,
-			MakePenImportRequest(OutputPath, bUsePreview, bRenderPng));
 	}
 
 	void RequestExitIfUnattended(const TCHAR* Message)
@@ -158,28 +153,57 @@ namespace
 		for (int32 Index = 2; Index < Args.Num(); ++Index)
 		{
 			const FString& Arg = Args[Index];
-			if (Arg == TEXT("--preview"))
+			if (Arg.StartsWith(TEXT("--")))
 			{
-				Out.bUsePreview = true;
-				continue;
+				ApplyOutputPreviewArg(Arg, Out.OutputPath, Out.bUsePreview);
 			}
-			if (Arg == TEXT("--no-preview"))
-			{
-				Out.bUsePreview = false;
-				continue;
-			}
-			if (Arg.StartsWith(TEXT("--out=")))
-			{
-				Out.OutputPath = Arg.RightChop(6);
-				continue;
-			}
-			if (Out.TargetNodeId.IsEmpty())
+			else if (Out.TargetNodeId.IsEmpty())
 			{
 				Out.TargetNodeId = Arg;
 			}
 		}
 
 		return true;
+	}
+
+	void ApplyOutputPreviewArg(const FString& Arg, FString& OutputPath, bool& bUsePreview)
+	{
+		if (Arg.StartsWith(TEXT("--out=")))
+		{
+			OutputPath = Arg.RightChop(6);
+		}
+		else if (Arg == TEXT("--preview"))
+		{
+			bUsePreview = true;
+		}
+		else if (Arg == TEXT("--no-preview"))
+		{
+			bUsePreview = false;
+		}
+	}
+
+	void ParsePenImportCommandArgs(const TArray<FString>& Args, const int32 StartIndex, FImportCommandOptions& Out)
+	{
+		for (int32 Index = StartIndex; Index < Args.Num(); ++Index)
+		{
+			const FString& Arg = Args[Index];
+			if (Arg.StartsWith(TEXT("--node=")))
+			{
+				Out.TargetNodeId = Arg.RightChop(7);
+			}
+			else if (Arg == TEXT("--no-png"))
+			{
+				Out.bRenderPng = false;
+			}
+			else if (Arg == TEXT("--png"))
+			{
+				Out.bRenderPng = true;
+			}
+			else
+			{
+				ApplyOutputPreviewArg(Arg, Out.OutputPath, Out.bUsePreview);
+			}
+		}
 	}
 
 	void ProcessMCPData(const FString& NodesJson, const FString& VarsJson, const FString& TargetNodeId, const FString& OutputPath)
@@ -191,7 +215,7 @@ namespace
 			return;
 		}
 
-		ExecutePenImportData(Data, OutputPath, true);
+		DesignImportPipeline::Execute(Data, MakePenImportRequest(OutputPath, true, true));
 	}
 
 	TArray<FDesignFrameInfo> ExtractFramesFromMCPResult(const FString& NodesJson)
@@ -243,6 +267,28 @@ namespace
 		}
 	}
 
+	void ExecuteFrameImport(
+		const TArray<FDesignFrameInfo>& Frames,
+		const FText& WindowTitle,
+		const FText& HintText,
+		TFunction<void(const FString&)> ImportFrame)
+	{
+		if (Frames.Num() == 1)
+		{
+			ImportFrame(FString());
+			return;
+		}
+
+		DesignImportDialogs::ShowFrameSelector(
+			Frames,
+			WindowTitle,
+			HintText,
+			[ImportFrame = MoveTemp(ImportFrame)](const FString& FrameId) mutable
+			{
+				ImportFrame(FrameId);
+			});
+	}
+
 	void OnMCPDataReady(const FString& NodesJson, const FString& VarsJson)
 	{
 		const TArray<FDesignFrameInfo> Frames = ExtractFramesFromMCPResult(NodesJson);
@@ -252,20 +298,13 @@ namespace
 			return;
 		}
 
-		const FString OutputPath = DefaultPenOutputPath;
-		if (Frames.Num() == 1)
-		{
-			ProcessMCPData(NodesJson, VarsJson, FString(), OutputPath);
-			return;
-		}
-
-		DesignImportUtils::ShowFrameSelector(
+		ExecuteFrameImport(
 			Frames,
 			LOCTEXT("PencilFrameSelectorTitle", "Select Frame from Pencil"),
 			LOCTEXT("PencilFrameSelectorHint", "Multiple frames found. Double-click to import:"),
-			[CapturedNodes = NodesJson, CapturedVars = VarsJson, CapturedOutput = OutputPath](const FString& FrameId)
+			[CapturedNodes = NodesJson, CapturedVars = VarsJson](const FString& FrameId)
 			{
-				ProcessMCPData(CapturedNodes, CapturedVars, FrameId, CapturedOutput);
+				ProcessMCPData(CapturedNodes, CapturedVars, FrameId, DefaultPenOutputPath);
 			});
 	}
 
@@ -373,19 +412,16 @@ namespace
 			return;
 		}
 
-		if (Frames.Num() == 1)
-		{
-			ExecutePenFileImport(FilePath, FString(), OutputPath, bUsePreview, bRenderPng);
-			return;
-		}
-
-		DesignImportUtils::ShowFrameSelector(
+		ExecuteFrameImport(
 			Frames,
 			LOCTEXT("FrameSelectorTitle", "Select Frame to Import"),
 			LOCTEXT("FrameSelectorHint", "This file contains multiple frames. Double-click to import:"),
 			[CapturedFilePath = FilePath, CapturedOutputPath = OutputPath, bCapturedPreview = bUsePreview, bCapturedRenderPng = bRenderPng](const FString& FrameId)
 			{
-				ExecutePenFileImport(CapturedFilePath, FrameId, CapturedOutputPath, bCapturedPreview, bCapturedRenderPng);
+				DesignImportPipeline::ExecutePenFile(
+					CapturedFilePath,
+					FrameId,
+					MakePenImportRequest(CapturedOutputPath, bCapturedPreview, bCapturedRenderPng));
 			});
 	}
 
@@ -478,12 +514,13 @@ namespace
 										FText::AsNumber(Data.RootWidget.Children.Num())),
 									SNotificationItem::CS_Success);
 
-								ExecuteImportData(
+								DesignImportPipeline::Execute(
 									Data,
-									DefaultFigmaOutputPath,
-									LOCTEXT("FigmaPreviewTitle", "Design2UMG Figma Preview"),
-									!FApp::IsUnattended(),
-									EDesignBlueprintGenerationMode::BlueprintAndPng);
+									MakeImportRequest(
+										DefaultFigmaOutputPath,
+										LOCTEXT("FigmaPreviewTitle", "Design2UMG Figma Preview"),
+										!FApp::IsUnattended(),
+										EDesignBlueprintGenerationMode::BlueprintAndPng));
 
 								RequestExitIfUnattended(TEXT("Unattended mode: requesting engine exit after figma import"));
 							});
@@ -506,13 +543,14 @@ namespace
 			? FString::Printf(TEXT("/Game/Design2UMG/Figma_%s"), *FDateTime::Now().ToString(TEXT("%m%d_%H%M%S")))
 			: OutputPath;
 
-		ExecuteImportData(
+		DesignImportPipeline::Execute(
 			Data,
-			FinalOutputPath,
-			LOCTEXT("LocalFigmaPreviewTitle", "Design2UMG Local Figma Preview"),
-			bUsePreview && !FApp::IsUnattended(),
-			EDesignBlueprintGenerationMode::BlueprintAndPng,
-			false);
+			MakeImportRequest(
+				FinalOutputPath,
+				LOCTEXT("LocalFigmaPreviewTitle", "Design2UMG Local Figma Preview"),
+				bUsePreview && !FApp::IsUnattended(),
+				EDesignBlueprintGenerationMode::BlueprintAndPng,
+				false));
 	}
 
 	void ShowFigmaImportDialog()
@@ -699,12 +737,12 @@ namespace Design2UMGEditorActions
 {
 	void RegisterBuiltInDesignSources()
 	{
-		FDesignSourceRegistry::Register(TEXT("Pen"), [](const FString& RawJson, FUMGWidgetData& OutData)
+		RegisterDesignSource(TEXT("Pen"), [](const FString& RawJson, FUMGWidgetData& OutData)
 		{
-			return FPenImporter::ImportFromJson(RawJson, OutData);
+			return DesignImportPipeline::ImportPenJson(RawJson, OutData);
 		});
 
-		FDesignSourceRegistry::Register(TEXT("Figma"), [](const FString& RawJson, FUMGWidgetData& OutData)
+		RegisterDesignSource(TEXT("Figma"), [](const FString& RawJson, FUMGWidgetData& OutData)
 		{
 			FDesignDocument Doc;
 			if (!FFigmaParser::ParseDocument(RawJson, Doc))
@@ -719,8 +757,8 @@ namespace Design2UMGEditorActions
 
 	void UnregisterBuiltInDesignSources()
 	{
-		FDesignSourceRegistry::Unregister(TEXT("Pen"));
-		FDesignSourceRegistry::Unregister(TEXT("Figma"));
+		UnregisterDesignSource(TEXT("Pen"));
+		UnregisterDesignSource(TEXT("Figma"));
 	}
 
 	void RegisterConsoleCommands()
@@ -759,7 +797,7 @@ namespace Design2UMGEditorActions
 					UE_LOG(LogDesign2UMG, Log, TEXT("  [%d] %s (%s)"), Index, *Child.Name, *Child.Type);
 				}
 
-				ExecutePenImportData(Data, CmdArgs.OutputPath, CmdArgs.bUsePreview);
+				DesignImportPipeline::Execute(Data, MakePenImportRequest(CmdArgs.OutputPath, CmdArgs.bUsePreview, true));
 
 				RequestExitIfUnattended(TEXT("Unattended mode: requesting engine exit after pen convert"));
 			}),
@@ -777,34 +815,8 @@ namespace Design2UMGEditorActions
 				}
 
 				const FString FilePath = Args[0];
-				FString OutputPath = DefaultPenOutputPath;
-				FString TargetNodeId;
-				bool bPreview = true;
-				bool bRenderPng = true;
-
-				for (int32 i = 1; i < Args.Num(); ++i)
-				{
-					if (Args[i].StartsWith(TEXT("--out=")))
-					{
-						OutputPath = Args[i].RightChop(6);
-					}
-					else if (Args[i].StartsWith(TEXT("--node=")))
-					{
-						TargetNodeId = Args[i].RightChop(7);
-					}
-					else if (Args[i] == TEXT("--no-preview"))
-					{
-						bPreview = false;
-					}
-					else if (Args[i] == TEXT("--no-png"))
-					{
-						bRenderPng = false;
-					}
-					else if (Args[i] == TEXT("--png"))
-					{
-						bRenderPng = true;
-					}
-				}
+				FImportCommandOptions Options;
+				ParsePenImportCommandArgs(Args, 1, Options);
 
 				if (!FPaths::FileExists(FilePath))
 				{
@@ -812,13 +824,16 @@ namespace Design2UMGEditorActions
 					return;
 				}
 
-				if (TargetNodeId.IsEmpty())
+				if (Options.TargetNodeId.IsEmpty())
 				{
-					ImportPenFile(FilePath, OutputPath, bPreview, bRenderPng);
+					ImportPenFile(FilePath, Options.OutputPath, Options.bUsePreview, Options.bRenderPng);
 				}
 				else
 				{
-					ExecutePenFileImport(FilePath, TargetNodeId, OutputPath, bPreview, bRenderPng);
+					DesignImportPipeline::ExecutePenFile(
+						FilePath,
+						Options.TargetNodeId,
+						MakePenImportRequest(Options.OutputPath, Options.bUsePreview, Options.bRenderPng));
 				}
 
 				RequestExitIfUnattended(TEXT("Unattended mode: requesting engine exit after import"));
@@ -832,7 +847,8 @@ namespace Design2UMGEditorActions
 			{
 				if (Args.Num() < 1)
 				{
-					const TArray<FName> Sources = FDesignSourceRegistry::GetRegisteredSources();
+					TArray<FName> Sources;
+					GetDesignSourceRegistry().GetKeys(Sources);
 					UE_LOG(LogDesign2UMG, Log, TEXT("Usage: Design2UMG.ImportSource <SourceId> <json_file> [--out=/Game/Path] [--no-preview]"));
 					UE_LOG(LogDesign2UMG, Log, TEXT("Registered sources (%d):"), Sources.Num());
 					for (const FName& Source : Sources)
@@ -855,17 +871,10 @@ namespace Design2UMGEditorActions
 
 				for (int32 i = 2; i < Args.Num(); ++i)
 				{
-					if (Args[i].StartsWith(TEXT("--out=")))
-					{
-						OutputPath = Args[i].RightChop(6);
-					}
-					else if (Args[i] == TEXT("--no-preview"))
-					{
-						bPreview = false;
-					}
+					ApplyOutputPreviewArg(Args[i], OutputPath, bPreview);
 				}
 
-				if (!FDesignSourceRegistry::IsRegistered(SourceId))
+				if (!GetDesignSourceRegistry().Contains(SourceId))
 				{
 					UE_LOG(LogDesign2UMG, Error, TEXT("Unknown source: %s"), *SourceId.ToString());
 					return;
@@ -878,7 +887,8 @@ namespace Design2UMGEditorActions
 				}
 
 				FUMGWidgetData Data;
-				if (!FDesignSourceRegistry::Convert(SourceId, JsonStr, Data))
+				FDesignSourceConvertFunc* ConvertFunc = GetDesignSourceRegistry().Find(SourceId);
+				if (!ConvertFunc || !(*ConvertFunc)(JsonStr, Data))
 				{
 					UE_LOG(LogDesign2UMG, Error, TEXT("[FAIL] ImportSource convert failed for: %s"), *SourceId.ToString());
 					return;
@@ -886,12 +896,13 @@ namespace Design2UMGEditorActions
 
 				UE_LOG(LogDesign2UMG, Log, TEXT("[OK] ImportSource succeeded (%s), root children: %d"), *SourceId.ToString(), Data.RootWidget.Children.Num());
 
-				ExecuteImportData(
+				DesignImportPipeline::Execute(
 					Data,
-					OutputPath,
-					LOCTEXT("ImportSourcePreviewTitle", "Design2UMG Import Preview"),
-					bPreview,
-					EDesignBlueprintGenerationMode::BlueprintAndPng);
+					MakeImportRequest(
+						OutputPath,
+						LOCTEXT("ImportSourcePreviewTitle", "Design2UMG Import Preview"),
+						bPreview,
+						EDesignBlueprintGenerationMode::BlueprintAndPng));
 
 				RequestExitIfUnattended(TEXT("Unattended mode: requesting engine exit after import source"));
 			}),
@@ -928,14 +939,7 @@ namespace Design2UMGEditorActions
 				bool bPreview = true;
 				for (int32 i = 1; i < Args.Num(); ++i)
 				{
-					if (Args[i].StartsWith(TEXT("--out=")))
-					{
-						OutputPath = Args[i].RightChop(6);
-					}
-					else if (Args[i] == TEXT("--no-preview"))
-					{
-						bPreview = false;
-					}
+					ApplyOutputPreviewArg(Args[i], OutputPath, bPreview);
 				}
 
 				if (!FPaths::FileExists(JsonPath))
@@ -1065,9 +1069,9 @@ namespace Design2UMGEditorActions
 		FFontResolver::ClearCache();
 		FDesignPathRasterizer::ClearCache();
 		FProceduralShapeGenerator::ReleaseTransientTextures();
-		FUMGWidgetUtils::ClearNodeIdMap();
 		FUMGWidgetUtils::EffectiveDesignSize = FIntPoint(1920, 1080);
 	}
 }
 
 #undef LOCTEXT_NAMESPACE
+

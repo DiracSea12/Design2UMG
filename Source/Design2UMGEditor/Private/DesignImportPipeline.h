@@ -41,7 +41,13 @@ struct FDesignImportExecutionResult
 namespace DesignImportPipeline
 {
 	FDesignImportExecutionResult Execute(FUMGWidgetData& Data, const FDesignImportRequest& Request);
-	bool ImportPenFile(const FString& FilePath, const FString& TargetNodeId, FUMGWidgetData& OutData);
+	FDesignImportExecutionResult Execute(FDesignDocument& Document, const FDesignImportRequest& Request);
+	void ConvertDocument(FDesignDocument& Document, FUMGWidgetData& OutData);
+	bool ParseWidgetJson(const FString& JsonString, FUMGWidgetData& OutData, FString* OutError = nullptr);
+	void ResolveImages(FUMGWidgetData& Data);
+	void GenerateFromEditedJson(const FString& EditedJson, const FString& OutputPath);
+	bool ImportPenJson(const FString& JsonString, FUMGWidgetData& OutData);
+	bool LoadPenDocument(const FString& FilePath, const FString& TargetNodeId, FDesignDocument& OutDocument, FString* OutError = nullptr);
 	FDesignImportExecutionResult ExecutePenFile(const FString& FilePath, const FString& TargetNodeId, const FDesignImportRequest& Request);
 	bool LoadPenFrames(const FString& FilePath, TArray<FDesignFrameInfo>& OutFrames);
 }

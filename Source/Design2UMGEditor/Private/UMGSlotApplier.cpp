@@ -1,6 +1,7 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGWidgetUtils.h"
+#include "UMGValueParser.h"
 #include "Design2UMGLog.h"
 
 #include "Components/PanelSlot.h"
@@ -21,7 +22,7 @@
 #include "Components/SafeZoneSlot.h"
 
 // ============================================================================
-// Slot 灞炴€у簲鐢紙鍑芥暟鎸囬拡鏄犲皠琛ㄦā寮忥級
+// Slot 属性应用（函数指针映射表模式）
 // ============================================================================
 
 namespace
@@ -40,13 +41,13 @@ namespace
 		CS->SetAutoSize(S.bAutoSize);
 	}
 
-	// VBox/HBox Slot 鍏辩敤閫昏緫
+	// VBox/HBox Slot 共用逻辑
 	template<typename TSlot>
 	void ApplyBoxSlotCommon(TSlot* BoxSlot, const FUMGSlotData& S)
 	{
 		BoxSlot->SetPadding(S.Padding);
-		BoxSlot->SetHorizontalAlignment(FUMGWidgetUtils::ParseHAlign(S.HorizontalAlignment));
-		BoxSlot->SetVerticalAlignment(FUMGWidgetUtils::ParseVAlign(S.VerticalAlignment));
+		BoxSlot->SetHorizontalAlignment(FUMGValueParser::ParseHAlign(S.HorizontalAlignment));
+		BoxSlot->SetVerticalAlignment(FUMGValueParser::ParseVAlign(S.VerticalAlignment));
 		if (S.SizeRule == TEXT("Fill"))
 		{
 			FSlateChildSize Size;
@@ -70,8 +71,8 @@ namespace
 	{
 		UOverlaySlot* OS = CastChecked<UOverlaySlot>(Slot);
 		OS->SetPadding(S.Padding);
-		OS->SetHorizontalAlignment(FUMGWidgetUtils::ParseHAlign(S.HorizontalAlignment));
-		OS->SetVerticalAlignment(FUMGWidgetUtils::ParseVAlign(S.VerticalAlignment));
+		OS->SetHorizontalAlignment(FUMGValueParser::ParseHAlign(S.HorizontalAlignment));
+		OS->SetVerticalAlignment(FUMGValueParser::ParseVAlign(S.VerticalAlignment));
 	}
 
 	void ApplyGridSlot(UPanelSlot* Slot, const FUMGSlotData& S)
@@ -82,8 +83,8 @@ namespace
 		GS->SetColumn(S.Column);
 		GS->SetRowSpan(S.RowSpan);
 		GS->SetColumnSpan(S.ColumnSpan);
-		GS->SetHorizontalAlignment(FUMGWidgetUtils::ParseHAlign(S.HorizontalAlignment));
-		GS->SetVerticalAlignment(FUMGWidgetUtils::ParseVAlign(S.VerticalAlignment));
+		GS->SetHorizontalAlignment(FUMGValueParser::ParseHAlign(S.HorizontalAlignment));
+		GS->SetVerticalAlignment(FUMGValueParser::ParseVAlign(S.VerticalAlignment));
 	}
 
 	void ApplyUniformGridSlot(UPanelSlot* Slot, const FUMGSlotData& S)
@@ -91,16 +92,16 @@ namespace
 		UUniformGridSlot* UGS = CastChecked<UUniformGridSlot>(Slot);
 		UGS->SetRow(S.Row);
 		UGS->SetColumn(S.Column);
-		UGS->SetHorizontalAlignment(FUMGWidgetUtils::ParseHAlign(S.HorizontalAlignment));
-		UGS->SetVerticalAlignment(FUMGWidgetUtils::ParseVAlign(S.VerticalAlignment));
+		UGS->SetHorizontalAlignment(FUMGValueParser::ParseHAlign(S.HorizontalAlignment));
+		UGS->SetVerticalAlignment(FUMGValueParser::ParseVAlign(S.VerticalAlignment));
 	}
 
 	void ApplyWrapBoxSlot(UPanelSlot* Slot, const FUMGSlotData& S)
 	{
 		UWrapBoxSlot* WS = CastChecked<UWrapBoxSlot>(Slot);
 		WS->SetPadding(S.Padding);
-		WS->SetHorizontalAlignment(FUMGWidgetUtils::ParseHAlign(S.HorizontalAlignment));
-		WS->SetVerticalAlignment(FUMGWidgetUtils::ParseVAlign(S.VerticalAlignment));
+		WS->SetHorizontalAlignment(FUMGValueParser::ParseHAlign(S.HorizontalAlignment));
+		WS->SetVerticalAlignment(FUMGValueParser::ParseVAlign(S.VerticalAlignment));
 		WS->SetFillEmptySpace(S.SizeRule == TEXT("Fill"));
 	}
 
@@ -108,8 +109,8 @@ namespace
 	{
 		UScrollBoxSlot* SS = CastChecked<UScrollBoxSlot>(Slot);
 		SS->SetPadding(S.Padding);
-		SS->SetHorizontalAlignment(FUMGWidgetUtils::ParseHAlign(S.HorizontalAlignment));
-		SS->SetVerticalAlignment(FUMGWidgetUtils::ParseVAlign(S.VerticalAlignment));
+		SS->SetHorizontalAlignment(FUMGValueParser::ParseHAlign(S.HorizontalAlignment));
+		SS->SetVerticalAlignment(FUMGValueParser::ParseVAlign(S.VerticalAlignment));
 		if (S.SizeRule == TEXT("Fill"))
 		{
 			FSlateChildSize Size;
@@ -124,59 +125,59 @@ namespace
 		UBorderSlot* BS = CastChecked<UBorderSlot>(Slot);
 		// Only override border padding when the slot explicitly carries non-default padding.
 		const FUMGSlotData Default;
-		if (!FUMGWidgetUtils::IsNearlyEqualMargin(S.Padding, Default.Padding))
+		if (!FUMGValueParser::IsNearlyEqualMargin(S.Padding, Default.Padding))
 		{
 			BS->SetPadding(S.Padding);
 		}
-		BS->SetHorizontalAlignment(FUMGWidgetUtils::ParseHAlign(S.HorizontalAlignment));
-		BS->SetVerticalAlignment(FUMGWidgetUtils::ParseVAlign(S.VerticalAlignment));
+		BS->SetHorizontalAlignment(FUMGValueParser::ParseHAlign(S.HorizontalAlignment));
+		BS->SetVerticalAlignment(FUMGValueParser::ParseVAlign(S.VerticalAlignment));
 	}
 
 	void ApplyButtonSlot(UPanelSlot* Slot, const FUMGSlotData& S)
 	{
 		UButtonSlot* BS = CastChecked<UButtonSlot>(Slot);
 		BS->SetPadding(S.Padding);
-		BS->SetHorizontalAlignment(FUMGWidgetUtils::ParseHAlign(S.HorizontalAlignment));
-		BS->SetVerticalAlignment(FUMGWidgetUtils::ParseVAlign(S.VerticalAlignment));
+		BS->SetHorizontalAlignment(FUMGValueParser::ParseHAlign(S.HorizontalAlignment));
+		BS->SetVerticalAlignment(FUMGValueParser::ParseVAlign(S.VerticalAlignment));
 	}
 
 	void ApplySizeBoxSlot(UPanelSlot* Slot, const FUMGSlotData& S)
 	{
 		USizeBoxSlot* SS = CastChecked<USizeBoxSlot>(Slot);
 		SS->SetPadding(S.Padding);
-		SS->SetHorizontalAlignment(FUMGWidgetUtils::ParseHAlign(S.HorizontalAlignment));
-		SS->SetVerticalAlignment(FUMGWidgetUtils::ParseVAlign(S.VerticalAlignment));
+		SS->SetHorizontalAlignment(FUMGValueParser::ParseHAlign(S.HorizontalAlignment));
+		SS->SetVerticalAlignment(FUMGValueParser::ParseVAlign(S.VerticalAlignment));
 	}
 
 	void ApplyScaleBoxSlot(UPanelSlot* Slot, const FUMGSlotData& S)
 	{
 		UScaleBoxSlot* SS = CastChecked<UScaleBoxSlot>(Slot);
-		SS->SetHorizontalAlignment(FUMGWidgetUtils::ParseHAlign(S.HorizontalAlignment));
-		SS->SetVerticalAlignment(FUMGWidgetUtils::ParseVAlign(S.VerticalAlignment));
+		SS->SetHorizontalAlignment(FUMGValueParser::ParseHAlign(S.HorizontalAlignment));
+		SS->SetVerticalAlignment(FUMGValueParser::ParseVAlign(S.VerticalAlignment));
 	}
 
 	void ApplyBackgroundBlurSlot(UPanelSlot* Slot, const FUMGSlotData& S)
 	{
 		UBackgroundBlurSlot* BS = CastChecked<UBackgroundBlurSlot>(Slot);
 		BS->SetPadding(S.Padding);
-		BS->SetHorizontalAlignment(FUMGWidgetUtils::ParseHAlign(S.HorizontalAlignment));
-		BS->SetVerticalAlignment(FUMGWidgetUtils::ParseVAlign(S.VerticalAlignment));
+		BS->SetHorizontalAlignment(FUMGValueParser::ParseHAlign(S.HorizontalAlignment));
+		BS->SetVerticalAlignment(FUMGValueParser::ParseVAlign(S.VerticalAlignment));
 	}
 
 	void ApplyWidgetSwitcherSlot(UPanelSlot* Slot, const FUMGSlotData& S)
 	{
 		UWidgetSwitcherSlot* WS = CastChecked<UWidgetSwitcherSlot>(Slot);
 		WS->SetPadding(S.Padding);
-		WS->SetHorizontalAlignment(FUMGWidgetUtils::ParseHAlign(S.HorizontalAlignment));
-		WS->SetVerticalAlignment(FUMGWidgetUtils::ParseVAlign(S.VerticalAlignment));
+		WS->SetHorizontalAlignment(FUMGValueParser::ParseHAlign(S.HorizontalAlignment));
+		WS->SetVerticalAlignment(FUMGValueParser::ParseVAlign(S.VerticalAlignment));
 	}
 
 	void ApplySafeZoneSlot(UPanelSlot* Slot, const FUMGSlotData& S)
 	{
 		USafeZoneSlot* SZ = CastChecked<USafeZoneSlot>(Slot);
 		SZ->SetPadding(S.Padding);
-		SZ->SetHorizontalAlignment(FUMGWidgetUtils::ParseHAlign(S.HorizontalAlignment));
-		SZ->SetVerticalAlignment(FUMGWidgetUtils::ParseVAlign(S.VerticalAlignment));
+		SZ->SetHorizontalAlignment(FUMGValueParser::ParseHAlign(S.HorizontalAlignment));
+		SZ->SetVerticalAlignment(FUMGValueParser::ParseVAlign(S.VerticalAlignment));
 	}
 
 	const TMap<UClass*, FApplySlotFunc>& GetSlotApplierMap()
@@ -217,7 +218,7 @@ void FUMGWidgetUtils::ApplySlotProperties(UPanelSlot* Slot, const FUMGSlotData& 
 		!FMath::IsNearlyEqual(S.Offsets.Top, Default.Offsets.Top) ||
 		!FMath::IsNearlyEqual(S.Offsets.Right, Default.Offsets.Right) ||
 		!FMath::IsNearlyEqual(S.Offsets.Bottom, Default.Offsets.Bottom);
-	const bool bHasNonDefaultPadding = !FUMGWidgetUtils::IsNearlyEqualMargin(S.Padding, Default.Padding);
+	const bool bHasNonDefaultPadding = !FUMGValueParser::IsNearlyEqualMargin(S.Padding, Default.Padding);
 	const bool bHasNonDefaultBox =
 		S.HorizontalAlignment != Default.HorizontalAlignment ||
 		S.VerticalAlignment != Default.VerticalAlignment ||
@@ -235,22 +236,22 @@ void FUMGWidgetUtils::ApplySlotProperties(UPanelSlot* Slot, const FUMGSlotData& 
 	{
 		if (bHasNonDefaultPadding || bHasNonDefaultBox || bHasNonDefaultGrid)
 		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("CanvasPanelSlot 蹇界暐闈濩anvas瀛楁锛圥adding/HAlign/VAlign/SizeRule/FillWeight/Row/Column绛夛級"));
+			UE_LOG(LogDesign2UMG, Warning, TEXT("CanvasPanelSlot 忽略非Canvas字段（Padding/HAlign/VAlign/SizeRule/FillWeight/Row/Column等）"));
 		}
 	}
 	else
 	{
 		if (bHasNonDefaultCanvas)
 		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("%s 蹇界暐 Anchors/Offsets/Alignment"), *Slot->GetClass()->GetName());
+			UE_LOG(LogDesign2UMG, Warning, TEXT("%s 忽略 Anchors/Offsets/Alignment"), *Slot->GetClass()->GetName());
 		}
 		if (!bIsGrid && bHasNonDefaultGrid)
 		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("%s 蹇界暐 Row/Column/RowSpan/ColumnSpan"), *Slot->GetClass()->GetName());
+			UE_LOG(LogDesign2UMG, Warning, TEXT("%s 忽略 Row/Column/RowSpan/ColumnSpan"), *Slot->GetClass()->GetName());
 		}
 		if (Slot->IsA<UScaleBoxSlot>() && bHasNonDefaultPadding)
 		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("ScaleBoxSlot 涓嶆敮鎸?Padding"));
+			UE_LOG(LogDesign2UMG, Warning, TEXT("ScaleBoxSlot 不支持Padding"));
 		}
 	}
 
@@ -260,7 +261,7 @@ void FUMGWidgetUtils::ApplySlotProperties(UPanelSlot* Slot, const FUMGSlotData& 
 	}
 	else
 	{
-		UE_LOG(LogDesign2UMG, Warning, TEXT("鏈敮鎸佺殑Slot绫诲瀷: %s"), *Slot->GetClass()->GetName());
+		UE_LOG(LogDesign2UMG, Warning, TEXT("未支持的Slot类型: %s"), *Slot->GetClass()->GetName());
 	}
 }
 

@@ -5,7 +5,6 @@
 #include "UMGJsonParser.h"
 #include "DesignRemoteImageImporter.h"
 #include "Design2UMGLog.h"
-#include "Design2UMGConstants.h"
 #include "Design2UMGSettings.h"
 
 #include "TimerManager.h"
@@ -28,6 +27,11 @@
 #include "Blueprint/WidgetTree.h"
 #include "Blueprint/UserWidget.h"
 #include "PreviewUserWidget.h"
+
+namespace
+{
+	constexpr float JsonEditDebounceSeconds = 0.5f;
+}
 #define LOCTEXT_NAMESPACE "SDesign2UMGPreviewWindow"
 
 namespace
@@ -353,7 +357,7 @@ void SDesign2UMGPreviewWindow::SchedulePreviewRefresh()
 		GEditor->GetTimerManager()->SetTimer(
 			PreviewRefreshTimerHandle,
 			FTimerDelegate::CreateSP(this, &SDesign2UMGPreviewWindow::RefreshUMGPreview),
-			Design2UMGConstants::JsonEditDebounceSeconds,
+			JsonEditDebounceSeconds,
 			false  // one-shot timer
 		);
 	}

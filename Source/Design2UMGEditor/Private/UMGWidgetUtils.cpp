@@ -5,6 +5,7 @@
 #include "Design2UMGSettings.h"
 #include "LayoutCalculator.h"
 #include "LayoutFixer.h"
+#include "UMGValueParser.h"
 
 #include "WidgetBlueprint.h"
 #include "Blueprint/UserWidget.h"
@@ -60,18 +61,6 @@
 #include "Blueprint/WidgetTree.h"
 
 FIntPoint FUMGWidgetUtils::EffectiveDesignSize = FIntPoint(1920, 1080);
-TMap<TWeakObjectPtr<UWidget>, FString> FUMGWidgetUtils::NodeIdMap;
-
-FString FUMGWidgetUtils::FindNodeId(const UWidget* Widget)
-{
-	if (const FString* Found = NodeIdMap.Find(const_cast<UWidget*>(Widget)))
-		return *Found;
-	return FString();
-}
-
-// ============================================================================
-// 静态映射表
-// ============================================================================
 
 namespace
 {
@@ -107,54 +96,6 @@ namespace
 		return Map;
 	}
 
-	// 对齐映射表
-	const TMap<FString, EHorizontalAlignment>& GetHAlignMap()
-	{
-		static const TMap<FString, EHorizontalAlignment> Map = {
-			{TEXT("Left"), HAlign_Left}, {TEXT("Center"), HAlign_Center},
-			{TEXT("Right"), HAlign_Right}, {TEXT("Fill"), HAlign_Fill}
-		};
-		return Map;
-	}
-
-	const TMap<FString, EVerticalAlignment>& GetVAlignMap()
-	{
-		static const TMap<FString, EVerticalAlignment> Map = {
-			{TEXT("Top"), VAlign_Top}, {TEXT("Center"), VAlign_Center},
-			{TEXT("Bottom"), VAlign_Bottom}, {TEXT("Fill"), VAlign_Fill}
-		};
-		return Map;
-	}
-
-	const TMap<FString, ESlateVisibility>& GetVisibilityMap()
-	{
-		static const TMap<FString, ESlateVisibility> Map = {
-			{TEXT("Visible"), ESlateVisibility::Visible},
-			{TEXT("Hidden"), ESlateVisibility::Hidden},
-			{TEXT("Collapsed"), ESlateVisibility::Collapsed},
-			{TEXT("HitTestInvisible"), ESlateVisibility::HitTestInvisible},
-			{TEXT("SelfHitTestInvisible"), ESlateVisibility::SelfHitTestInvisible}
-		};
-		return Map;
-	}
-
-	// 颜色名称映射
-	const TMap<FString, FLinearColor>& GetNamedColors()
-	{
-		static const TMap<FString, FLinearColor> Map = {
-			{TEXT("white"), FLinearColor::White},
-			{TEXT("black"), FLinearColor::Black},
-			{TEXT("red"), FLinearColor::Red},
-			{TEXT("green"), FLinearColor::Green},
-			{TEXT("blue"), FLinearColor::Blue},
-			{TEXT("yellow"), FLinearColor::Yellow},
-			{TEXT("gray"), FLinearColor::Gray},
-			{TEXT("grey"), FLinearColor::Gray},
-			{TEXT("transparent"), FLinearColor::Transparent}
-		};
-		return Map;
-	}
-
 	bool HasMeaningfulSlotData(const FUMGSlotData& Slot)
 	{
 		const FUMGSlotData Default;
@@ -171,7 +112,7 @@ namespace
 			!FMath::IsNearlyEqual(Slot.Offsets.Top, Default.Offsets.Top) ||
 			!FMath::IsNearlyEqual(Slot.Offsets.Right, Default.Offsets.Right) ||
 			!FMath::IsNearlyEqual(Slot.Offsets.Bottom, Default.Offsets.Bottom);
-		const bool bPadding = !FUMGWidgetUtils::IsNearlyEqualMargin(Slot.Padding, Default.Padding);
+		const bool bPadding = !FUMGValueParser::IsNearlyEqualMargin(Slot.Padding, Default.Padding);
 		const bool bBox =
 			Slot.HorizontalAlignment != Default.HorizontalAlignment ||
 			Slot.VerticalAlignment != Default.VerticalAlignment ||
@@ -341,10 +282,6 @@ static void HandleContentWidgetChild(UWidgetTree* WidgetTree, UContentWidget* Co
 // Slot 历史数据有效性判断
 static bool HasValidSlotHistory(const FUMGSlotData& Slot);
 
-// ============================================================================
-// Widget 创建（统一入口）
-// ============================================================================
-
 UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget, const TMap<FString, UTexture2D*>* TextureMap)
 {
 	UClass* WidgetClass = ResolveWidgetClass(Node.Type);
@@ -393,12 +330,6 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to construct widget: %s"), *Node.Name);
 		return nullptr;
-	}
-
-	// 增量更新：记录 Widget → .pen 节点 ID 映射
-	if (!Node.Id.IsEmpty() && UDesign2UMGSettings::Get()->bEnableIncrementalUpdate)
-	{
-		NodeIdMap.Add(NewWidget, Node.Id);
 	}
 
 	// 添加到父容器并应用 Slot 属性
@@ -508,10 +439,6 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 	return NewWidget;
 }
 
-// ============================================================================
-// HasValidSlotHistory - Slot 历史数据是否非默认值
-// ============================================================================
-
 static bool HasValidSlotHistory(const FUMGSlotData& Slot)
 {
 	return !FMath::IsNearlyEqual(Slot.Offsets.Left, 0.0f) ||
@@ -525,10 +452,6 @@ static bool HasValidSlotHistory(const FUMGSlotData& Slot)
 		!FMath::IsNearlyEqual(Slot.Alignment.X, 0.0f) ||
 		!FMath::IsNearlyEqual(Slot.Alignment.Y, 0.0f);
 }
-
-// ============================================================================
-// HandleNamedSlotChildren - NamedSlotInterface 子控件分配
-// ============================================================================
 
 static void HandleNamedSlotChildren(UWidgetTree* WidgetTree, INamedSlotInterface* NamedSlotHost, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap)
 {
@@ -651,10 +574,6 @@ static void HandleNamedSlotChildren(UWidgetTree* WidgetTree, INamedSlotInterface
 	}
 }
 
-// ============================================================================
-// HandleContentWidgetChild - ContentWidget 单子控件处理
-// ============================================================================
-
 static void HandleContentWidgetChild(UWidgetTree* WidgetTree, UContentWidget* Content, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap)
 {
 	if (Node.Children.Num() == 0) return;
@@ -673,8 +592,8 @@ static void HandleContentWidgetChild(UWidgetTree* WidgetTree, UContentWidget* Co
 		{
 			// Keep Fill semantics for Border content. Mapping Fill+Alignment(0,0) to Left/Top
 			// causes root canvases to collapse to desired size and drift to top-left.
-			Border->SetHorizontalAlignment(FUMGWidgetUtils::ParseHAlign(ChildNode.Slot.HorizontalAlignment));
-			Border->SetVerticalAlignment(FUMGWidgetUtils::ParseVAlign(ChildNode.Slot.VerticalAlignment));
+			Border->SetHorizontalAlignment(FUMGValueParser::ParseHAlign(ChildNode.Slot.HorizontalAlignment));
+			Border->SetVerticalAlignment(FUMGValueParser::ParseVAlign(ChildNode.Slot.VerticalAlignment));
 		}
 	}
 
@@ -683,10 +602,6 @@ static void HandleContentWidgetChild(UWidgetTree* WidgetTree, UContentWidget* Co
 		UE_LOG(LogDesign2UMG, Warning, TEXT("ContentWidget '%s' ignoring %d extra children"), *Node.Name, Node.Children.Num() - 1);
 	}
 }
-
-// ============================================================================
-// Fixer 应用
-// ============================================================================
 
 namespace
 {
@@ -777,10 +692,6 @@ void FUMGWidgetUtils::ApplyFixer(FUMGWidgetNode& RootNode, const FIntPoint& Desi
 	}
 }
 
-// ============================================================================
-// Widget 类型解析
-// ============================================================================
-
 UClass* FUMGWidgetUtils::ResolveWidgetClass(const FString& TypeName)
 {
 	if (UClass* const* Found = GetWidgetClassMap().Find(TypeName))
@@ -807,107 +718,6 @@ UClass* FUMGWidgetUtils::ResolveWidgetClass(const FString& TypeName)
 	return nullptr;
 }
 
-
-// ============================================================================
-// 颜色解析（支持 #RGB / #RRGGBB / #RRGGBBAA 和颜色名称）
-// ============================================================================
-
-FLinearColor FUMGWidgetUtils::ParseColor(const FString& ColorStr)
-{
-	FString Trimmed = ColorStr.TrimStartAndEnd();
-
-	if (Trimmed.StartsWith(TEXT("#")))
-	{
-		FString Hex = Trimmed.Mid(1);
-		// #RGB -> #RRGGBB
-		if (Hex.Len() == 3)
-		{
-			Hex = FString::Printf(TEXT("%c%c%c%c%c%c"),
-				Hex[0], Hex[0], Hex[1], Hex[1], Hex[2], Hex[2]);
-			return FColor::FromHex(Hex);
-		}
-		return FColor::FromHex(Trimmed);
-	}
-
-	if (const FLinearColor* Named = GetNamedColors().Find(Trimmed.ToLower()))
-	{
-		return *Named;
-	}
-
-	return FLinearColor::White;
-}
-
-// ============================================================================
-// 对齐方式解析
-// ============================================================================
-
-EHorizontalAlignment FUMGWidgetUtils::ParseHAlign(const FString& Str)
-{
-	const EHorizontalAlignment* Found = GetHAlignMap().Find(Str);
-	return Found ? *Found : HAlign_Fill;
-}
-
-EVerticalAlignment FUMGWidgetUtils::ParseVAlign(const FString& Str)
-{
-	const EVerticalAlignment* Found = GetVAlignMap().Find(Str);
-	return Found ? *Found : VAlign_Fill;
-}
-
-ESlateVisibility FUMGWidgetUtils::ParseVisibility(const FString& Str)
-{
-	const ESlateVisibility* Found = GetVisibilityMap().Find(Str);
-	return Found ? *Found : ESlateVisibility::Visible;
-}
-
-// ============================================================================
-// 几何解析
-// ============================================================================
-
-FVector2D FUMGWidgetUtils::ParseVector2D(const FString& Str, FVector2D Default)
-{
-	TArray<FString> Parts;
-	Str.ParseIntoArray(Parts, TEXT(","));
-	if (Parts.Num() == 2)
-	{
-		return FVector2D(
-			FCString::Atof(*Parts[0].TrimStartAndEnd()),
-			FCString::Atof(*Parts[1].TrimStartAndEnd())
-		);
-	}
-	return Default;
-}
-
-FMargin FUMGWidgetUtils::ParseMargin(const FString& Str)
-{
-	TArray<FString> Parts;
-	Str.ParseIntoArray(Parts, TEXT(","));
-	if (Parts.Num() == 1)
-	{
-		return FMargin(FCString::Atof(*Parts[0]));
-	}
-	if (Parts.Num() == 2)
-	{
-		// CSS简写：水平, 垂直
-		float H = FCString::Atof(*Parts[0].TrimStartAndEnd());
-		float V = FCString::Atof(*Parts[1].TrimStartAndEnd());
-		return FMargin(H, V, H, V);
-	}
-	if (Parts.Num() == 4)
-	{
-		return FMargin(
-			FCString::Atof(*Parts[0].TrimStartAndEnd()),
-			FCString::Atof(*Parts[1].TrimStartAndEnd()),
-			FCString::Atof(*Parts[2].TrimStartAndEnd()),
-			FCString::Atof(*Parts[3].TrimStartAndEnd())
-		);
-	}
-	return FMargin(0);
-}
-
-// ============================================================================
-// Widget 名称处理
-// ============================================================================
-
 FName FUMGWidgetUtils::SanitizeWidgetName(const FString& InName, const FString& FallbackPrefix)
 {
 	FString Sanitized = SlugStringForValidName(InName);
@@ -924,10 +734,6 @@ FName FUMGWidgetUtils::SanitizeWidgetName(const FString& InName, const FString& 
 
 	return FName(*Sanitized);
 }
-
-// ============================================================================
-// Image 控件辅助函数（被 CreateWidgetRecursive 使用）
-// ============================================================================
 
 namespace
 {
@@ -1019,10 +825,6 @@ namespace
 		return true;
 	}
 }
-
-// ============================================================================
-// CalculateDesignSize
-// ============================================================================
 
 namespace
 {

@@ -7,7 +7,7 @@
 #include "DesignSchema.generated.h"
 
 /**
- * .pen 鑺傜偣绫诲瀷鏋氫妇
+ * .pen 节点类型枚举
  */
 UENUM()
 enum class EDesignNodeType : uint8
@@ -30,7 +30,7 @@ enum class EDesignNodeType : uint8
 };
 
 /**
- * 灏哄妯″紡鏋氫妇
+ * 尺寸模式枚举
  */
 UENUM()
 enum class EDesignSizeMode : uint8
@@ -41,7 +41,7 @@ enum class EDesignSizeMode : uint8
 };
 
 /**
- * 灏哄鍊肩粨鏋? */
+ * 尺寸值结构 */
 USTRUCT()
 struct FDesignSize
 {
@@ -63,20 +63,20 @@ struct FDesignSize
 };
 
 /**
- * 甯冨眬妯″紡鏋氫妇
+ * 布局模式枚举
  */
 UENUM()
 enum class EDesignLayout : uint8
 {
-	None,       // 缁濆瀹氫綅
-	Vertical,   // 鍨傜洿甯冨眬
-	Horizontal, // 姘村钩甯冨眬
-	Wrap,       // 鎹㈣鑷姩甯冨眬
-	Grid        // 缃戞牸甯冨眬
+	None,       // 绝对定位
+	Vertical,   // 垂直布局
+	Horizontal, // 水平布局
+	Wrap,       // 换行自动布局
+	Grid        // 网格布局
 };
 
 /**
- * 涓昏酱瀵归綈鏋氫妇
+ * 主轴对齐枚举
  */
 UENUM()
 enum class EDesignJustifyContent : uint8
@@ -89,7 +89,7 @@ enum class EDesignJustifyContent : uint8
 };
 
 /**
- * 浜ゅ弶杞村榻愭灇涓? */
+ * 交叉轴对齐枚举 */
 UENUM()
 enum class EDesignAlignItems : uint8
 {
@@ -99,7 +99,7 @@ enum class EDesignAlignItems : uint8
 };
 
 /**
- * 娓愬彉绫诲瀷鏋氫妇
+ * 渐变类型枚举
  */
 UENUM()
 enum class EDesignGradientType : uint8
@@ -110,7 +110,7 @@ enum class EDesignGradientType : uint8
 };
 
 /**
- * 娓愬彉鑹叉爣
+ * 渐变色标
  */
 USTRUCT()
 struct FDesignGradientStop
@@ -120,7 +120,7 @@ struct FDesignGradientStop
 	UPROPERTY()
 	FString Color;
 
-	/** 鍘熷鍙橀噺寮曠敤鍚嶏紝鐢ㄤ簬涓婚鍒囨崲鏃堕噸鏂拌В鏋?*/
+	/** 原始变量引用名，用于主题切换时重新解析*/
 	FString SourceVar;
 
 	UPROPERTY()
@@ -128,7 +128,7 @@ struct FDesignGradientStop
 };
 
 /**
- * 娓愬彉濉厖
+ * 渐变填充
  */
 USTRUCT()
 struct FDesignGradient
@@ -229,7 +229,7 @@ struct FDesignMeshGradient
 };
 
 /**
- * 鍥剧墖濉厖妯″紡
+ * 图片填充模式
  */
 UENUM()
 enum class EDesignImageMode : uint8
@@ -241,8 +241,8 @@ enum class EDesignImageMode : uint8
 };
 
 /**
- * 鍥剧墖瑁佸壀鍙樻崲锛?x3 浠垮皠鐭╅樀锛? * Source imageTransform: [[a, b, tx], [c, d, ty]]
- * 灏嗗浘鐗?UV 绌洪棿 [0,1]x[0,1] 鏄犲皠鍒拌妭鐐圭┖闂? */
+ * 图片裁剪变换x3 仿射矩阵） * Source imageTransform: [[a, b, tx], [c, d, ty]]
+ * 将图UV 空间 [0,1]x[0,1] 映射到节点空间 */
 USTRUCT()
 struct FDesignImageTransform
 {
@@ -269,7 +269,7 @@ struct FDesignImageTransform
 };
 
 /**
- * 鍥剧墖濉厖
+ * 图片填充
  */
 USTRUCT()
 struct FDesignImageFill
@@ -290,7 +290,7 @@ struct FDesignImageFill
 };
 
 /**
- * 濉厖绫诲瀷鏋氫妇
+ * 填充类型枚举
  */
 UENUM()
 enum class EDesignFillType : uint8
@@ -302,7 +302,7 @@ enum class EDesignFillType : uint8
 };
 
 /**
- * 濉厖缁撴瀯锛堟敮鎸佺函鑹层€佹笎鍙樸€佸浘鐗囷級
+ * 填充结构（支持纯色、渐变、图片）
  */
 USTRUCT()
 struct FDesignFill
@@ -315,7 +315,7 @@ struct FDesignFill
 	UPROPERTY()
 	FString SolidColor;
 
-	/** 鍘熷鍙橀噺寮曠敤鍚嶏紙濡?"$--background"锛夛紝鐢ㄤ簬涓婚鍒囨崲鏃堕噸鏂拌В鏋?*/
+	/** 原始变量引用名（如"$--background"），用于主题切换时重新解析*/
 	FString SourceVar;
 
 	UPROPERTY()
@@ -333,7 +333,7 @@ struct FDesignFill
 	float Opacity = 1.0f;
 	UPROPERTY()
 	FString BlendMode;
-	bool bExplicitClear = false;  // fill:[] 鏄惧紡娓呴櫎
+	bool bExplicitClear = false;  // fill:[] 显式清除
 	bool bFromMeshGradient = false;
 	FString MeshGradientRaw;
 
@@ -352,7 +352,7 @@ struct FDesignFill
 };
 
 /**
- * 鎻忚竟瀵归綈鏋氫妇
+ * 描边对齐枚举
  */
 UENUM()
 enum class EDesignStrokeAlign : uint8
@@ -363,7 +363,7 @@ enum class EDesignStrokeAlign : uint8
 };
 
 /**
- * 鎻忚竟鍘氬害锛堟敮鎸佸崟鍊兼垨鍥涜竟锛? */
+ * 描边厚度（支持单值或四边） */
 USTRUCT()
 struct FDesignStrokeThickness
 {
@@ -391,7 +391,7 @@ struct FDesignStrokeThickness
 };
 
 /**
- * 鎻忚竟缁撴瀯
+ * 描边结构
  */
 USTRUCT()
 struct FDesignStroke
@@ -414,7 +414,7 @@ struct FDesignStroke
 };
 
 /**
- * 鍐呰竟璺濈粨鏋? */
+ * 内边距结构 */
 USTRUCT()
 struct FDesignPadding
 {
@@ -437,7 +437,7 @@ struct FDesignPadding
 };
 
 /**
- * 鍦嗚缁撴瀯锛堟敮鎸佸崟鍊兼垨鍥涜锛? */
+ * 圆角结构（支持单值或四角） */
 USTRUCT()
 struct FDesignCornerRadius
 {
@@ -449,7 +449,7 @@ struct FDesignCornerRadius
 	UPROPERTY()
 	float Uniform = 0.0f;
 
-	// [宸︿笂, 鍙充笂, 鍙充笅, 宸︿笅]
+	// [左上, 右上, 右下, 左下]
 	UPROPERTY()
 	float TopLeft = 0.0f;
 
@@ -477,7 +477,7 @@ struct FDesignCornerRadius
 };
 
 /**
- * 鏂囨湰澧為暱妯″紡
+ * 文本增长模式
  */
 UENUM()
 enum class EDesignTextGrowth : uint8
@@ -488,7 +488,7 @@ enum class EDesignTextGrowth : uint8
 };
 
 /**
- * 鏂囨湰姘村钩瀵归綈
+ * 文本水平对齐
  */
 UENUM()
 enum class EDesignTextAlign : uint8
@@ -500,7 +500,7 @@ enum class EDesignTextAlign : uint8
 };
 
 /**
- * 鏂囨湰鍨傜洿瀵归綈
+ * 文本垂直对齐
  */
 UENUM()
 enum class EDesignTextAlignVertical : uint8
@@ -565,7 +565,7 @@ struct FDesignTextRun
 };
 
 /**
- * 鍙橀噺绫诲瀷鏋氫妇
+ * 变量类型枚举
  */
 UENUM()
 enum class EDesignVariableType : uint8
@@ -577,7 +577,7 @@ enum class EDesignVariableType : uint8
 };
 
 /**
- * 涓婚鍊兼潯鐩紙鍙橀噺鍦ㄦ煇涓富棰樹笅鐨勫€硷級
+ * 主题值条目（变量在某个主题下的值）
  */
 USTRUCT()
 struct FDesignThemeValue

@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -7,7 +7,7 @@
 #include "DesignVariableResolver.h"
 
 /**
- * 缁勪欢寮曠敤灞曞紑锛欵xpandRef銆丏eepCopy銆丏escendants 瑕嗙洊銆丷eTheme
+ * 组件引用展开：ExpandRef、DeepCopy、Descendants 覆盖、ReTheme
  */
 class FRefExpander
 {

@@ -2,30 +2,43 @@
 
 #include "ProceduralShapeGenerator.h"
 #include "UMGWidgetUtils.h"
+#include "UMGValueParser.h"
 #include "Design2UMGLog.h"
 #include "Dom/JsonObject.h"
+#include "Engine/Texture2D.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "RenderingThread.h"
 #include "TextureResource.h"
 
-TArray<TWeakObjectPtr<UTexture2D>> FProceduralShapeGenerator::RootedTextures;
-bool FProceduralShapeGenerator::bHasPendingTextureUpdates = false;
+struct FGradientStop
+{
+	float Position = 0.0f;
+	FLinearColor Color = FLinearColor::Transparent;
+};
+
+UTexture2D* GenerateBoxShadow(int32 Width, int32 Height, FLinearColor ShadowColor, float RTL, float RTR, float RBR, float RBL, float BlurRadius, UObject* Outer);
+
+namespace
+{
+	TArray<TWeakObjectPtr<UTexture2D>> GRootedTextures;
+	bool GbHasPendingTextureUpdates = false;
+}
 
 void FProceduralShapeGenerator::ReleaseTransientTextures()
 {
 	FlushPendingTextureUpdates();
 
-	for (const TWeakObjectPtr<UTexture2D>& Weak : RootedTextures)
+	for (const TWeakObjectPtr<UTexture2D>& Weak : GRootedTextures)
 	{
 		if (UTexture2D* Tex = Weak.Get())
 			Tex->RemoveFromRoot();
 	}
-	RootedTextures.Empty();
-	bHasPendingTextureUpdates = false;
+	GRootedTextures.Empty();
+	GbHasPendingTextureUpdates = false;
 }
 
-UTexture2D* FProceduralShapeGenerator::CreateTransientTexture(int32 Width, int32 Height, UObject* Outer)
+UTexture2D* CreateTransientTexture(int32 Width, int32 Height, UObject* Outer)
 {
 	UTexture2D* Texture = UTexture2D::CreateTransient(Width, Height, PF_B8G8R8A8, NAME_None);
 	if (Texture)
@@ -34,7 +47,7 @@ UTexture2D* FProceduralShapeGenerator::CreateTransientTexture(int32 Width, int32
 		// RF_Transient 纹理的 PlatformData/Mips 在拷贝中丢失。
 		// RF_DuplicateTransient 使 FDuplicateDataWriter 写 nullptr 而非复制，避免空 mip 副本。
 		Texture->AddToRoot();
-		RootedTextures.Add(Texture);
+		GRootedTextures.Add(Texture);
 		Texture->SetFlags(RF_DuplicateTransient);
 		Texture->SRGB = true;
 		Texture->CompressionSettings = TC_EditorIcon;
@@ -46,7 +59,7 @@ UTexture2D* FProceduralShapeGenerator::CreateTransientTexture(int32 Width, int32
 	return Texture;
 }
 
-void FProceduralShapeGenerator::FillTextureData(UTexture2D* Texture, const TArray<FColor>& PixelData)
+void FillTextureData(UTexture2D* Texture, const TArray<FColor>& PixelData)
 {
 	if (!Texture || PixelData.Num() == 0) return;
 
@@ -54,20 +67,20 @@ void FProceduralShapeGenerator::FillTextureData(UTexture2D* Texture, const TArra
 	FMemory::Memcpy(TextureData, PixelData.GetData(), PixelData.Num() * sizeof(FColor));
 	Texture->GetPlatformData()->Mips[0].BulkData.Unlock();
 	Texture->UpdateResource();
-	bHasPendingTextureUpdates = true;
+	GbHasPendingTextureUpdates = true;
 }
 
 void FProceduralShapeGenerator::FlushPendingTextureUpdates()
 {
-	if (!bHasPendingTextureUpdates)
+	if (!GbHasPendingTextureUpdates)
 		return;
 
 	if (!GUsingNullRHI)
 		FlushRenderingCommands();
-	bHasPendingTextureUpdates = false;
+	GbHasPendingTextureUpdates = false;
 }
 
-UTexture2D* FProceduralShapeGenerator::GenerateCircle(int32 Size, FLinearColor Color, UObject* Outer)
+UTexture2D* GenerateCircle(int32 Size, FLinearColor Color, UObject* Outer)
 {
 	UTexture2D* Texture = CreateTransientTexture(Size, Size, Outer);
 	if (!Texture) return nullptr;
@@ -98,7 +111,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateCircle(int32 Size, FLinearColor C
 	return Texture;
 }
 
-UTexture2D* FProceduralShapeGenerator::GenerateRing(int32 Size, FLinearColor Color, float Thickness, UObject* Outer)
+UTexture2D* GenerateRing(int32 Size, FLinearColor Color, float Thickness, UObject* Outer)
 {
 	UTexture2D* Texture = CreateTransientTexture(Size, Size, Outer);
 	if (!Texture) return nullptr;
@@ -136,7 +149,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateRing(int32 Size, FLinearColor Col
 	return Texture;
 }
 
-UTexture2D* FProceduralShapeGenerator::GenerateRoundedRect(int32 Width, int32 Height, FLinearColor Color, float CornerRadius, UObject* Outer)
+UTexture2D* GenerateRoundedRect(int32 Width, int32 Height, FLinearColor Color, float CornerRadius, UObject* Outer)
 {
 	UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer);
 	if (!Texture) return nullptr;
@@ -196,7 +209,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateRoundedRect(int32 Width, int32 He
 	return Texture;
 }
 
-UTexture2D* FProceduralShapeGenerator::GenerateRoundedRect(int32 Width, int32 Height, FLinearColor Color, float RadiusTL, float RadiusTR, float RadiusBR, float RadiusBL, UObject* Outer)
+UTexture2D* GenerateRoundedRect(int32 Width, int32 Height, FLinearColor Color, float RadiusTL, float RadiusTR, float RadiusBR, float RadiusBL, UObject* Outer)
 {
 	if (FMath::IsNearlyEqual(RadiusTL, RadiusTR) && FMath::IsNearlyEqual(RadiusTR, RadiusBR) && FMath::IsNearlyEqual(RadiusBR, RadiusBL))
 		return GenerateRoundedRect(Width, Height, Color, RadiusTL, Outer);
@@ -258,7 +271,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateRoundedRect(int32 Width, int32 He
 	return Texture;
 }
 
-UTexture2D* FProceduralShapeGenerator::GenerateGradientH(int32 Width, int32 Height, FLinearColor ColorStart, FLinearColor ColorEnd, UObject* Outer)
+UTexture2D* GenerateGradientH(int32 Width, int32 Height, FLinearColor ColorStart, FLinearColor ColorEnd, UObject* Outer)
 {
 	UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer);
 	if (!Texture) return nullptr;
@@ -280,7 +293,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateGradientH(int32 Width, int32 Heig
 	return Texture;
 }
 
-UTexture2D* FProceduralShapeGenerator::GenerateGradientHMultiStop(int32 Width, int32 Height, const TArray<FGradientStop>& Stops, UObject* Outer)
+UTexture2D* GenerateGradientHMultiStop(int32 Width, int32 Height, const TArray<FGradientStop>& Stops, UObject* Outer)
 {
 	if (Stops.Num() < 2)
 		return nullptr;
@@ -319,7 +332,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateGradientHMultiStop(int32 Width, i
 	return Texture;
 }
 
-UTexture2D* FProceduralShapeGenerator::GenerateGradientV(int32 Width, int32 Height, FLinearColor ColorStart, FLinearColor ColorEnd, UObject* Outer)
+UTexture2D* GenerateGradientV(int32 Width, int32 Height, FLinearColor ColorStart, FLinearColor ColorEnd, UObject* Outer)
 {
 	UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer);
 	if (!Texture) return nullptr;
@@ -343,7 +356,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateGradientV(int32 Width, int32 Heig
 	return Texture;
 }
 
-UTexture2D* FProceduralShapeGenerator::GenerateGradientVMultiStop(int32 Width, int32 Height, const TArray<FGradientStop>& Stops, UObject* Outer)
+UTexture2D* GenerateGradientVMultiStop(int32 Width, int32 Height, const TArray<FGradientStop>& Stops, UObject* Outer)
 {
 	if (Stops.Num() < 2)
 		return nullptr;
@@ -380,7 +393,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateGradientVMultiStop(int32 Width, i
 	return Texture;
 }
 
-UTexture2D* FProceduralShapeGenerator::GenerateGradientAngled(int32 Width, int32 Height, float RotationDeg, const TArray<FGradientStop>& Stops, UObject* Outer)
+UTexture2D* GenerateGradientAngled(int32 Width, int32 Height, float RotationDeg, const TArray<FGradientStop>& Stops, UObject* Outer)
 {
 	if (Stops.Num() < 2)
 		return nullptr;
@@ -438,7 +451,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateGradientAngled(int32 Width, int32
 	return Texture;
 }
 
-UTexture2D* FProceduralShapeGenerator::GenerateAngularGradient(int32 Width, int32 Height, float StartAngleDeg, const TArray<FGradientStop>& Stops, UObject* Outer)
+UTexture2D* GenerateAngularGradient(int32 Width, int32 Height, float StartAngleDeg, const TArray<FGradientStop>& Stops, UObject* Outer)
 {
 	if (Stops.Num() < 2)
 		return nullptr;
@@ -484,7 +497,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateAngularGradient(int32 Width, int3
 	return Texture;
 }
 
-UTexture2D* FProceduralShapeGenerator::GenerateRadialGradient(int32 Width, int32 Height, FLinearColor ColorCenter, FLinearColor ColorEdge, UObject* Outer)
+UTexture2D* GenerateRadialGradient(int32 Width, int32 Height, FLinearColor ColorCenter, FLinearColor ColorEdge, UObject* Outer)
 {
 	UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer);
 	if (!Texture) return nullptr;
@@ -592,12 +605,12 @@ static void GaussianBlurAlpha(TArray<float>& Alpha, int32 W, int32 H, float Sigm
 	}
 }
 
-UTexture2D* FProceduralShapeGenerator::GenerateBoxShadow(int32 Width, int32 Height, FLinearColor ShadowColor, float CornerRadius, float BlurRadius, UObject* Outer)
+UTexture2D* GenerateBoxShadow(int32 Width, int32 Height, FLinearColor ShadowColor, float CornerRadius, float BlurRadius, UObject* Outer)
 {
 	return GenerateBoxShadow(Width, Height, ShadowColor, CornerRadius, CornerRadius, CornerRadius, CornerRadius, BlurRadius, Outer);
 }
 
-UTexture2D* FProceduralShapeGenerator::GenerateBoxShadow(int32 Width, int32 Height, FLinearColor ShadowColor, float RTL, float RTR, float RBR, float RBL, float BlurRadius, UObject* Outer)
+UTexture2D* GenerateBoxShadow(int32 Width, int32 Height, FLinearColor ShadowColor, float RTL, float RTR, float RBR, float RBL, float BlurRadius, UObject* Outer)
 {
 	UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer);
 	if (!Texture) return nullptr;
@@ -748,13 +761,13 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 		{
 			FString ColorStr;
 			if (Params->TryGetStringField(TEXT("Color"), ColorStr))
-				Color = FUMGWidgetUtils::ParseColor(ColorStr);
+				Color = FUMGValueParser::ParseColor(ColorStr);
 			if (Params->TryGetStringField(TEXT("ColorStart"), ColorStr) ||
 				Params->TryGetStringField(TEXT("ColorCenter"), ColorStr))
-				ColorStart = FUMGWidgetUtils::ParseColor(ColorStr);
+				ColorStart = FUMGValueParser::ParseColor(ColorStr);
 			if (Params->TryGetStringField(TEXT("ColorEnd"), ColorStr) ||
 				Params->TryGetStringField(TEXT("ColorEdge"), ColorStr))
-				ColorEnd = FUMGWidgetUtils::ParseColor(ColorStr);
+				ColorEnd = FUMGValueParser::ParseColor(ColorStr);
 
 			double NumVal;
 			if (Params->TryGetNumberField(TEXT("Thickness"), NumVal))
@@ -775,7 +788,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 			if (Params->TryGetNumberField(TEXT("Rotation"), NumVal))
 				RotationDeg = static_cast<float>(NumVal);
 			if (Params->TryGetStringField(TEXT("StripeColor"), ColorStr))
-				StripeColor = FUMGWidgetUtils::ParseColor(ColorStr);
+				StripeColor = FUMGValueParser::ParseColor(ColorStr);
 			if (Params->TryGetNumberField(TEXT("StripeWidth"), NumVal))
 				StripeWidthPx = FMath::Max(1, FMath::RoundToInt(static_cast<float>(NumVal)));
 			if (Params->TryGetNumberField(TEXT("StripeGap"), NumVal))
@@ -799,7 +812,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 
 					FString StopColor;
 					if (StopObj->TryGetStringField(TEXT("Color"), StopColor))
-						Stop.Color = FUMGWidgetUtils::ParseColor(StopColor);
+						Stop.Color = FUMGValueParser::ParseColor(StopColor);
 
 					MultiStops.Add(Stop);
 				}

@@ -319,6 +319,23 @@ static bool ReadSemanticSignalField(const TSharedPtr<FJsonValue>& Value)
 	}
 }
 
+EDesignNodeType MapNodeType(const FString& FigmaType);
+bool HasAutoLayout(const TSharedPtr<FJsonObject>& NodeObj);
+FString ColorToHex(const TSharedPtr<FJsonObject>& ColorObj, float Opacity = 1.0f);
+void ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode);
+void ParseSize(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode, bool bParentHasAutoLayout);
+FDesignFill ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj);
+TArray<FDesignFill> ParseFills(const TArray<TSharedPtr<FJsonValue>>& Fills);
+FDesignFill ParseFill(const TArray<TSharedPtr<FJsonValue>>& Fills);
+FDesignStroke ParseStroke(const TSharedPtr<FJsonObject>& NodeObj);
+FDesignCornerRadius ParseCornerRadius(const TSharedPtr<FJsonObject>& NodeObj);
+TArray<FDesignEffect> ParseEffects(const TArray<TSharedPtr<FJsonValue>>& Effects);
+void ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode);
+void ParsePosition(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj, FDesignNode& OutNode, bool bParentHasAutoLayout);
+TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj);
+void CollectImageRefsRecursive(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSet<FString>& OutRefs);
+void ApplyImageUrlsRecursive(TArray<TSharedPtr<FDesignNode>>& Nodes, const TMap<FString, FString>& Map);
+
 static bool TryReadSemanticHintFromJsonValue(const TSharedPtr<FJsonValue>& Value)
 {
 	if (!Value.IsValid())
@@ -558,7 +575,7 @@ static void ParsePathGeometry(const TSharedPtr<FJsonObject>& NodeObj, FDesignNod
 // MapNodeType
 // ---------------------------------------------------------------------------
 
-EDesignNodeType FFigmaParser::MapNodeType(const FString& FigmaType)
+EDesignNodeType MapNodeType(const FString& FigmaType)
 {
 	if (FigmaType == TEXT("FRAME") || FigmaType == TEXT("COMPONENT_SET") || FigmaType == TEXT("SECTION"))
 		return EDesignNodeType::Frame;
@@ -587,7 +604,7 @@ EDesignNodeType FFigmaParser::MapNodeType(const FString& FigmaType)
 // HasAutoLayout
 // ---------------------------------------------------------------------------
 
-bool FFigmaParser::HasAutoLayout(const TSharedPtr<FJsonObject>& NodeObj)
+bool HasAutoLayout(const TSharedPtr<FJsonObject>& NodeObj)
 {
 	if (IsWrapLayout(NodeObj) || IsLikelyWrappedHorizontalLayout(NodeObj))
 		return true;
@@ -600,7 +617,7 @@ bool FFigmaParser::HasAutoLayout(const TSharedPtr<FJsonObject>& NodeObj)
 // ColorToHex
 // ---------------------------------------------------------------------------
 
-FString FFigmaParser::ColorToHex(const TSharedPtr<FJsonObject>& ColorObj, float Opacity)
+FString ColorToHex(const TSharedPtr<FJsonObject>& ColorObj, float Opacity)
 {
 	if (!ColorObj) return TEXT("#000000");
 
@@ -619,7 +636,7 @@ FString FFigmaParser::ColorToHex(const TSharedPtr<FJsonObject>& ColorObj, float 
 // ParseLayout
 // ---------------------------------------------------------------------------
 
-void FFigmaParser::ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
+void ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 {
 	const bool bWrapLayout = IsWrapLayout(NodeObj) || IsLikelyWrappedHorizontalLayout(NodeObj);
 	FString Mode = GetStr(NodeObj, TEXT("layoutMode"));
@@ -698,7 +715,7 @@ void FFigmaParser::ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNo
 // ParseSize
 // ---------------------------------------------------------------------------
 
-void FFigmaParser::ParseSize(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode, bool bParentHasAutoLayout)
+void ParseSize(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode, bool bParentHasAutoLayout)
 {
 	FNodeBounds VisualBounds;
 	FNodeBounds LayoutBounds;
@@ -750,7 +767,7 @@ void FFigmaParser::ParseSize(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode
 // ParseSingleFill - 解析单个 Figma fill 对象
 // ---------------------------------------------------------------------------
 
-FDesignFill FFigmaParser::ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)
+FDesignFill ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)
 {
 	FDesignFill Result;
 	if (!FillObj || !GetBool(FillObj, TEXT("visible"), true))
@@ -853,7 +870,7 @@ FDesignFill FFigmaParser::ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj
 // ParseFills - 收集所有可见填充层（底→顶顺序）
 // ---------------------------------------------------------------------------
 
-TArray<FDesignFill> FFigmaParser::ParseFills(const TArray<TSharedPtr<FJsonValue>>& Fills)
+TArray<FDesignFill> ParseFills(const TArray<TSharedPtr<FJsonValue>>& Fills)
 {
 	TArray<FDesignFill> Result;
 	for (int32 i = 0; i < Fills.Num(); ++i)
@@ -873,7 +890,7 @@ TArray<FDesignFill> FFigmaParser::ParseFills(const TArray<TSharedPtr<FJsonValue>
 // ParseFill - 返回最顶层可见填充（向后兼容）
 // ---------------------------------------------------------------------------
 
-FDesignFill FFigmaParser::ParseFill(const TArray<TSharedPtr<FJsonValue>>& Fills)
+FDesignFill ParseFill(const TArray<TSharedPtr<FJsonValue>>& Fills)
 {
 	// Take the last visible fill (Figma renders last on top)
 	for (int32 i = Fills.Num() - 1; i >= 0; --i)
@@ -893,7 +910,7 @@ FDesignFill FFigmaParser::ParseFill(const TArray<TSharedPtr<FJsonValue>>& Fills)
 // ParseStroke
 // ---------------------------------------------------------------------------
 
-FDesignStroke FFigmaParser::ParseStroke(const TSharedPtr<FJsonObject>& NodeObj)
+FDesignStroke ParseStroke(const TSharedPtr<FJsonObject>& NodeObj)
 {
 	FDesignStroke Result;
 	bool bHasVisibleStroke = false;
@@ -956,7 +973,7 @@ FDesignStroke FFigmaParser::ParseStroke(const TSharedPtr<FJsonObject>& NodeObj)
 // ParseCornerRadius
 // ---------------------------------------------------------------------------
 
-FDesignCornerRadius FFigmaParser::ParseCornerRadius(const TSharedPtr<FJsonObject>& NodeObj)
+FDesignCornerRadius ParseCornerRadius(const TSharedPtr<FJsonObject>& NodeObj)
 {
 	FDesignCornerRadius Result;
 
@@ -999,7 +1016,7 @@ FDesignCornerRadius FFigmaParser::ParseCornerRadius(const TSharedPtr<FJsonObject
 // ParseEffects
 // ---------------------------------------------------------------------------
 
-TArray<FDesignEffect> FFigmaParser::ParseEffects(const TArray<TSharedPtr<FJsonValue>>& Effects)
+TArray<FDesignEffect> ParseEffects(const TArray<TSharedPtr<FJsonValue>>& Effects)
 {
 	TArray<FDesignEffect> Result;
 
@@ -1052,7 +1069,7 @@ TArray<FDesignEffect> FFigmaParser::ParseEffects(const TArray<TSharedPtr<FJsonVa
 // ParseTextProperties
 // ---------------------------------------------------------------------------
 
-void FFigmaParser::ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
+void ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 {
 	OutNode.Content = GetStr(NodeObj, TEXT("characters"));
 
@@ -1139,7 +1156,7 @@ void FFigmaParser::ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, F
 // ParsePosition
 // ---------------------------------------------------------------------------
 
-void FFigmaParser::ParsePosition(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj, FDesignNode& OutNode, bool bParentHasAutoLayout)
+void ParsePosition(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj, FDesignNode& OutNode, bool bParentHasAutoLayout)
 {
 	if (bParentHasAutoLayout)
 	{
@@ -1174,7 +1191,7 @@ void FFigmaParser::ParsePosition(const TSharedPtr<FJsonObject>& NodeObj, const T
 // ParseNode (recursive)
 // ---------------------------------------------------------------------------
 
-TSharedPtr<FDesignNode> FFigmaParser::ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj)
+TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj)
 {
 	if (!NodeObj) return nullptr;
 
@@ -1458,7 +1475,7 @@ void FFigmaParser::CollectImageRefs(const FDesignDocument& Document, TSet<FStrin
 	CollectImageRefsRecursive(Document.Children, OutImageRefs);
 }
 
-void FFigmaParser::CollectImageRefsRecursive(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSet<FString>& OutRefs)
+void CollectImageRefsRecursive(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSet<FString>& OutRefs)
 {
 	for (const auto& Node : Nodes)
 	{
@@ -1481,7 +1498,7 @@ void FFigmaParser::ApplyImageUrls(FDesignDocument& Document, const TMap<FString,
 	ApplyImageUrlsRecursive(Document.Children, ImageRefToUrl);
 }
 
-void FFigmaParser::ApplyImageUrlsRecursive(TArray<TSharedPtr<FDesignNode>>& Nodes, const TMap<FString, FString>& Map)
+void ApplyImageUrlsRecursive(TArray<TSharedPtr<FDesignNode>>& Nodes, const TMap<FString, FString>& Map)
 {
 	for (auto& Node : Nodes)
 	{
@@ -1504,5 +1521,7 @@ void FFigmaParser::ApplyImageUrlsRecursive(TArray<TSharedPtr<FDesignNode>>& Node
 		ApplyImageUrlsRecursive(Node->Children, Map);
 	}
 }
+
+
 
 

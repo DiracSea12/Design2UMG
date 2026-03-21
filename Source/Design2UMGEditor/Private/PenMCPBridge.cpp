@@ -1,11 +1,11 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "PenMCPBridge.h"
-#include "PenImporter.h"
+#include "DesignImportPipeline.h"
+#include "PenParser.h"
 #include "UMGSchema.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
-#include "Serialization/JsonWriter.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogPenMCPBridge, Log, All);
 
@@ -134,8 +134,7 @@ namespace
 		return false;
 	}
 
-	/** Build standard document JSON from source metadata and children. */
-	FString BuildDocumentJson(
+	TSharedPtr<FJsonObject> BuildDocumentObject(
 		const TSharedPtr<FJsonObject>& SourceObj,
 		const TArray<TSharedPtr<FJsonValue>>& Children)
 	{
@@ -156,55 +155,50 @@ namespace
 		}
 
 		Doc->SetArrayField(TEXT("children"), Children);
-
-		FString Output;
-		TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Output);
-		FJsonSerializer::Serialize(Doc.ToSharedRef(), Writer);
-
-		UE_LOG(LogPenMCPBridge, Log, TEXT("BuildDocumentJson: %d children, json length=%d"),
-			Children.Num(), Output.Len());
-
-		return Output;
+		return Doc;
 	}
-}
 
-FString FPenMCPBridge::AssembleDocumentJson(
-	const FString& NodesJson,
-	const FString& VariablesJson,
-	const FString& TargetNodeId)
-{
-	// Parse the node array.
-	TArray<TSharedPtr<FJsonValue>> NodesArr;
-	TSharedRef<TJsonReader<>> NodesReader = TJsonReaderFactory<>::Create(NodesJson);
-	if (!FJsonSerializer::Deserialize(NodesReader, NodesArr))
+	bool AssembleDocumentObject(
+		const FString& NodesJson,
+		const FString& VariablesJson,
+		TSharedPtr<FJsonObject>& OutDocumentObject,
+		const FString& TargetNodeId)
 	{
-		UE_LOG(LogPenMCPBridge, Error, TEXT("Failed to parse NodesJson"));
-		return TEXT("");
-	}
+		OutDocumentObject.Reset();
 
-	// Parse the variables payload.
-	TSharedPtr<FJsonObject> VarsObj;
-	TSharedRef<TJsonReader<>> VarsReader = TJsonReaderFactory<>::Create(VariablesJson);
-	if (!FJsonSerializer::Deserialize(VarsReader, VarsObj) || !VarsObj.IsValid())
-	{
-		UE_LOG(LogPenMCPBridge, Warning, TEXT("VariablesJson parse failed or empty, using defaults"));
-		VarsObj = MakeShared<FJsonObject>();
-	}
+		TArray<TSharedPtr<FJsonValue>> NodesArr;
+		TSharedRef<TJsonReader<>> NodesReader = TJsonReaderFactory<>::Create(NodesJson);
+		if (!FJsonSerializer::Deserialize(NodesReader, NodesArr))
+		{
+			UE_LOG(LogPenMCPBridge, Error, TEXT("Failed to parse NodesJson"));
+			return false;
+		}
 
-	TArray<TSharedPtr<FJsonValue>> Children;
-	if (!BuildFilteredChildren(NodesArr, TargetNodeId, Children))
-	{
-		return TEXT("");
-	}
+		TSharedPtr<FJsonObject> VarsObj;
+		TSharedRef<TJsonReader<>> VarsReader = TJsonReaderFactory<>::Create(VariablesJson);
+		if (!FJsonSerializer::Deserialize(VarsReader, VarsObj) || !VarsObj.IsValid())
+		{
+			UE_LOG(LogPenMCPBridge, Warning, TEXT("VariablesJson parse failed or empty, using defaults"));
+			VarsObj = MakeShared<FJsonObject>();
+		}
 
-	if (!VarsObj->HasField(TEXT("variables")))
-	{
-		TSharedPtr<FJsonObject> Wrapped = MakeShared<FJsonObject>();
-		Wrapped->SetObjectField(TEXT("variables"), VarsObj);
-		VarsObj = Wrapped;
-	}
+		TArray<TSharedPtr<FJsonValue>> Children;
+		if (!BuildFilteredChildren(NodesArr, TargetNodeId, Children))
+		{
+			return false;
+		}
 
-	return BuildDocumentJson(VarsObj, Children);
+		if (!VarsObj->HasField(TEXT("variables")))
+		{
+			TSharedPtr<FJsonObject> Wrapped = MakeShared<FJsonObject>();
+			Wrapped->SetObjectField(TEXT("variables"), VarsObj);
+			VarsObj = Wrapped;
+		}
+
+		OutDocumentObject = BuildDocumentObject(VarsObj, Children);
+		UE_LOG(LogPenMCPBridge, Log, TEXT("BuildDocumentJson: %d children"), Children.Num());
+		return OutDocumentObject.IsValid();
+	}
 }
 
 bool FPenMCPBridge::ConvertFromMCP(
@@ -213,28 +207,28 @@ bool FPenMCPBridge::ConvertFromMCP(
 	FUMGWidgetData& OutData,
 	const FString& TargetNodeId)
 {
-	const FString DocumentJson = AssembleDocumentJson(NodesJson, VariablesJson, TargetNodeId);
-	return !DocumentJson.IsEmpty() && FPenImporter::ImportFromJson(DocumentJson, OutData);
-}
-
-bool FPenMCPBridge::ConvertFromParsedDoc(
-	const TSharedPtr<FJsonObject>& DocObj,
-	FUMGWidgetData& OutData,
-	const FString& TargetNodeId)
-{
-	FString Json;
-	if (!BuildFilteredDocumentJson(DocObj, Json, TargetNodeId))
+	TSharedPtr<FJsonObject> DocumentObject;
+	if (!AssembleDocumentObject(NodesJson, VariablesJson, DocumentObject, TargetNodeId))
+	{
 		return false;
+	}
 
-	return !Json.IsEmpty() && FPenImporter::ImportFromJson(Json, OutData);
+	FDesignDocument Document;
+	if (!FPenParser::ParseDocumentObject(DocumentObject, Document))
+	{
+		return false;
+	}
+
+	DesignImportPipeline::ConvertDocument(Document, OutData);
+	return true;
 }
 
-bool FPenMCPBridge::BuildFilteredDocumentJson(
+bool FPenMCPBridge::BuildFilteredDocumentObject(
 	const TSharedPtr<FJsonObject>& DocObj,
-	FString& OutDocumentJson,
+	TSharedPtr<FJsonObject>& OutDocumentObject,
 	const FString& TargetNodeId)
 {
-	OutDocumentJson.Reset();
+	OutDocumentObject.Reset();
 	if (!DocObj.IsValid())
 		return false;
 
@@ -251,7 +245,7 @@ bool FPenMCPBridge::BuildFilteredDocumentJson(
 		return false;
 	}
 
-	OutDocumentJson = BuildDocumentJson(DocObj, Children);
-	return !OutDocumentJson.IsEmpty();
+	OutDocumentObject = BuildDocumentObject(DocObj, Children);
+	return OutDocumentObject.IsValid();
 }
 

@@ -1,9 +1,11 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "VisualMapper.h"
+#include "ImageFillUtils.h"
 #include "LayoutMapper.h"
 #include "Design2UMGLog.h"
 #include "UMGWidgetUtils.h"
+#include "UMGValueParser.h"
 
 namespace
 {
@@ -76,7 +78,7 @@ namespace
 			return false;
 		}
 
-		return FUMGWidgetUtils::ParseColor(Node->Fill.SolidColor).A > KINDA_SMALL_NUMBER;
+		return FUMGValueParser::ParseColor(Node->Fill.SolidColor).A > KINDA_SMALL_NUMBER;
 	}
 
 	bool HasPlaceholderSurfaceChildren(const TSharedPtr<FDesignNode>& Node)
@@ -104,7 +106,7 @@ namespace
 			return false;
 		}
 
-		OutColor = FUMGWidgetUtils::ParseColor(Stroke.Fill.SolidColor);
+		OutColor = FUMGValueParser::ParseColor(Stroke.Fill.SolidColor);
 		return true;
 	}
 
@@ -402,7 +404,7 @@ namespace
 				return;
 			}
 			Widget.Properties.Add(TEXT("BrushColor"), Node->Fill.SolidColor);
-			Widget.Brush.BrushColor = FUMGWidgetUtils::ParseColor(Node->Fill.SolidColor);
+			Widget.Brush.BrushColor = FUMGValueParser::ParseColor(Node->Fill.SolidColor);
 			Widget.Brush.bHasBrushColor = true;
 			return;
 		}
@@ -441,26 +443,7 @@ namespace
 			Widget.Properties.Add(TEXT("TexturePath"), Node->Fill.Image.Url);
 			Widget.Brush.TexturePath = Node->Fill.Image.Url;
 
-			// imageTransform → UMG UV 裁剪参数
-			if (Node->Fill.Image.Mode == EDesignImageMode::Crop && !Node->Fill.Image.Transform.IsIdentity())
-			{
-				const FDesignImageTransform& T = Node->Fill.Image.Transform;
-				Widget.Properties.Add(TEXT("ImageMode"), TEXT("Crop"));
-				Widget.Properties.Add(TEXT("ImageTransform"),
-					FString::Printf(TEXT("%.6f,%.6f,%.6f,%.6f,%.6f,%.6f"),
-						T.A, T.B, T.TX, T.C, T.D, T.TY));
-			}
-			else if (Node->Fill.Image.Mode == EDesignImageMode::Fill)
-			{
-				Widget.Properties.Add(TEXT("ImageMode"), TEXT("Fill"));
-			}
-			else if (Node->Fill.Image.Mode == EDesignImageMode::Fit)
-			{
-				Widget.Properties.Add(TEXT("ImageMode"), TEXT("Fit"));
-			}
-
-			if (Node->Fill.Image.Opacity < 1.0f)
-				Widget.Properties.Add(TEXT("RenderOpacity"), FString::SanitizeFloat(Node->Fill.Image.Opacity));
+			ImageFillUtils::ApplyImageFillProperties(Widget, Node->Fill.Image);
 
 			AddTextureSizeHints(Widget, Node);
 		}
@@ -614,7 +597,7 @@ void FVisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FDesignStroke& Str
 	if (Stroke.Fill.Type == EDesignFillType::Color)
 	{
 		Widget.Properties.Add(TEXT("OutlineColor"), Stroke.Fill.SolidColor);
-		Widget.Brush.OutlineColor = FUMGWidgetUtils::ParseColor(Stroke.Fill.SolidColor);
+		Widget.Brush.OutlineColor = FUMGValueParser::ParseColor(Stroke.Fill.SolidColor);
 		Widget.Brush.bHasOutlineColor = true;
 	}
 
@@ -686,7 +669,7 @@ FUMGWidgetNode FVisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TSha
 	// outline doesn't eat into content space.
 	if (const FString* SM = Widget.Properties.Find(TEXT("StrokeMargin")))
 	{
-		FMargin M = FUMGWidgetUtils::ParseMargin(*SM);
+		FMargin M = FUMGValueParser::ParseMargin(*SM);
 		const FMargin Outset(
 			FMath::Max(0.0f, -M.Left),
 			FMath::Max(0.0f, -M.Top),
@@ -697,7 +680,7 @@ FUMGWidgetNode FVisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TSha
 			FMargin Combined = Outset;
 			if (const FString* Existing = Border.Properties.Find(TEXT("StrokePadding")))
 			{
-				FMargin EP = FUMGWidgetUtils::ParseMargin(*Existing);
+				FMargin EP = FUMGValueParser::ParseMargin(*Existing);
 				Combined.Left += EP.Left;
 				Combined.Top += EP.Top;
 				Combined.Right += EP.Right;
@@ -915,7 +898,7 @@ FUMGWidgetNode FVisualMapper::WrapWithMultiFill(FUMGWidgetNode&& Widget, const T
 		{
 			Layer.Type = TEXT("Border");
 			Layer.Properties.Add(TEXT("BrushColor"), Fill.SolidColor);
-			Layer.Brush.BrushColor = FUMGWidgetUtils::ParseColor(Fill.SolidColor);
+			Layer.Brush.BrushColor = FUMGValueParser::ParseColor(Fill.SolidColor);
 			Layer.Brush.bHasBrushColor = true;
 		}
 		else if (Fill.Type == EDesignFillType::Gradient && Fill.Gradient.Colors.Num() > 0)
@@ -951,25 +934,7 @@ FUMGWidgetNode FVisualMapper::WrapWithMultiFill(FUMGWidgetNode&& Widget, const T
 			Layer.Properties.Add(TEXT("TexturePath"), Fill.Image.Url);
 			Layer.Brush.TexturePath = Fill.Image.Url;
 
-			if (Fill.Image.Mode == EDesignImageMode::Crop && !Fill.Image.Transform.IsIdentity())
-			{
-				const FDesignImageTransform& T = Fill.Image.Transform;
-				Layer.Properties.Add(TEXT("ImageMode"), TEXT("Crop"));
-				Layer.Properties.Add(TEXT("ImageTransform"),
-					FString::Printf(TEXT("%.6f,%.6f,%.6f,%.6f,%.6f,%.6f"),
-						T.A, T.B, T.TX, T.C, T.D, T.TY));
-			}
-			else if (Fill.Image.Mode == EDesignImageMode::Fill)
-			{
-				Layer.Properties.Add(TEXT("ImageMode"), TEXT("Fill"));
-			}
-			else if (Fill.Image.Mode == EDesignImageMode::Fit)
-			{
-				Layer.Properties.Add(TEXT("ImageMode"), TEXT("Fit"));
-			}
-
-			if (Fill.Image.Opacity < 1.0f)
-				Layer.Properties.Add(TEXT("RenderOpacity"), FString::SanitizeFloat(Fill.Image.Opacity));
+			ImageFillUtils::ApplyImageFillProperties(Layer, Fill.Image);
 			AddTextureSizeHints(Layer, Node);
 		}
 		else

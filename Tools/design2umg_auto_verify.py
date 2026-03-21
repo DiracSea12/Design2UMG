@@ -1271,6 +1271,12 @@ def execute_automation_render(args, spec_path: Path, log_path: Path, spec: dict)
     if editor_exit_code != 0:
         print(f"Unreal editor exited with code {editor_exit_code}", file=sys.stderr)
     if not result_path.is_file():
+        deadline = time.time() + 600.0
+        while time.time() < deadline:
+            if result_path.is_file():
+                break
+            time.sleep(1.0)
+    if not result_path.is_file():
         raise RuntimeError(f"UE result json not found: {result_path}")
     ue_result = load_ue_result(result_path)
     return {

@@ -3,11 +3,36 @@
 #include "DesignPathRasterizer.h"
 #include "ProceduralShapeGenerator.h"
 #include "Design2UMGLog.h"
+#include "Engine/Texture2D.h"
 #include "HAL/IConsoleManager.h"
 #include "RenderingThread.h"
 #include "TextureResource.h"
 
 // --- Path cache (file-local) ---
+struct FPathPoint
+{
+	float X = 0.0f;
+	float Y = 0.0f;
+};
+
+void SampleCubicBezier(
+	const FPathPoint& P0, const FPathPoint& P1,
+	const FPathPoint& P2, const FPathPoint& P3,
+	TArray<FPathPoint>& OutPoints, int32 Segments = 16);
+void SampleQuadBezier(
+	const FPathPoint& P0, const FPathPoint& P1, const FPathPoint& P2,
+	TArray<FPathPoint>& OutPoints, int32 Segments = 12);
+void SampleArc(
+	const FPathPoint& From, float Rx, float Ry, float Rotation,
+	bool bLargeArc, bool bSweep, const FPathPoint& To,
+	TArray<FPathPoint>& OutPoints, int32 Segments = 24);
+void ScanlineFill(
+	const TArray<TArray<FPathPoint>>& SubPaths,
+	TArray<FColor>& OutPixels,
+	int32 Width, int32 Height,
+	FColor FillColor,
+	bool bEvenOdd);
+
 namespace
 {
 	uint32 MakeCacheKey(const FString& Geometry, int32 W, int32 H, FLinearColor C, const FString& Rule)
@@ -155,7 +180,7 @@ namespace
 	}
 }
 
-bool FDesignPathRasterizer::ParsePathData(const FString& Data, TArray<TArray<FPathPoint>>& OutSubPaths, FBox2D& OutBounds)
+bool ParsePathData(const FString& Data, TArray<TArray<FPathPoint>>& OutSubPaths, FBox2D& OutBounds)
 {
 	OutBounds.Init();
 	const TCHAR* P = *Data;
@@ -359,7 +384,7 @@ bool FDesignPathRasterizer::ParsePathData(const FString& Data, TArray<TArray<FPa
 	return OutSubPaths.Num() > 0;
 }
 
-void FDesignPathRasterizer::SampleCubicBezier(
+void SampleCubicBezier(
 	const FPathPoint& P0, const FPathPoint& P1,
 	const FPathPoint& P2, const FPathPoint& P3,
 	TArray<FPathPoint>& OutPoints, int32 Segments)
@@ -374,7 +399,7 @@ void FDesignPathRasterizer::SampleCubicBezier(
 	}
 }
 
-void FDesignPathRasterizer::SampleQuadBezier(
+void SampleQuadBezier(
 	const FPathPoint& P0, const FPathPoint& P1, const FPathPoint& P2,
 	TArray<FPathPoint>& OutPoints, int32 Segments)
 {
@@ -388,7 +413,7 @@ void FDesignPathRasterizer::SampleQuadBezier(
 	}
 }
 
-void FDesignPathRasterizer::SampleArc(
+void SampleArc(
 	const FPathPoint& From, float Rx, float Ry, float Rotation,
 	bool bLargeArc, bool bSweep, const FPathPoint& To,
 	TArray<FPathPoint>& OutPoints, int32 Segments)
@@ -468,7 +493,7 @@ void FDesignPathRasterizer::SampleArc(
 	}
 }
 
-void FDesignPathRasterizer::ScanlineFill(
+void ScanlineFill(
 	const TArray<TArray<FPathPoint>>& SubPaths,
 	TArray<FColor>& OutPixels,
 	int32 Width, int32 Height,

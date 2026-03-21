@@ -3,27 +3,17 @@
 #include "DesignImportUtils.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGNotification.h"
-#include "DesignRemoteImageImporter.h"
-#include "SDesign2UMGPreviewWindow.h"
 #include "UMGGenerator.h"
-#include "UMGJsonParser.h"
-#include "UMGJsonSerializer.h"
 #include "UMGWidgetUtils.h"
 #include "Design2UMGSettings.h"
-#include "IncrementalUpdater.h"
-#include "AssetRegistry/AssetRegistryModule.h"
-#include "AssetRegistry/AssetData.h"
 
 #include "WidgetBlueprint.h"
 #include "Blueprint/UserWidget.h"
-#include "Framework/Application/SlateApplication.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
+#include "Misc/PackageName.h"
 #include "Misc/Paths.h"
-#include "Widgets/SWindow.h"
-#include "Widgets/Views/SListView.h"
-#include "Widgets/Text/STextBlock.h"
-#include "Misc/ScopedSlowTask.h"
+#include "UObject/UObjectGlobals.h"
 
 #define LOCTEXT_NAMESPACE "DesignImportUtils"
 
@@ -74,16 +64,6 @@ namespace
 		return FIntPoint(RenderW, RenderH);
 	}
 
-	bool RenderWidgetTreePng(
-		UWidgetBlueprint* WidgetBlueprint,
-		const FIntPoint& RenderSize,
-		TArray<uint8>& OutPngData,
-		FIntPoint& OutRenderedSize)
-	{
-		OutRenderedSize = RenderSize;
-		return FUMGWidgetUtils::RenderWidgetTreeToPng(WidgetBlueprint, RenderSize, OutPngData, OutRenderedSize);
-	}
-
 	bool SavePngBytesToFile(const TArray<uint8>& PngData, const FString& OutputPngFilePath)
 	{
 		if (OutputPngFilePath.IsEmpty())
@@ -99,6 +79,73 @@ namespace
 
 		return FFileHelper::SaveArrayToFile(PngData, *OutputPngFilePath);
 	}
+
+	UWidgetBlueprint* ReloadWidgetBlueprintForRender(UWidgetBlueprint* WidgetBlueprint)
+	{
+		if (!WidgetBlueprint)
+		{
+			return nullptr;
+		}
+
+		const FString ObjectPath = WidgetBlueprint->GetPathName();
+		const FString PackageName = FPackageName::ObjectPathToPackageName(ObjectPath);
+		if (PackageName.IsEmpty())
+		{
+			return WidgetBlueprint;
+		}
+
+		UPackage* Package = FindPackage(nullptr, *PackageName);
+		if (!Package)
+		{
+			Package = LoadPackage(nullptr, *PackageName, LOAD_None);
+			if (!Package)
+			{
+				return WidgetBlueprint;
+			}
+		}
+
+		FlushAsyncLoading();
+		ResetLoaders(Package);
+		if (!ReloadPackage(Package, LOAD_None))
+		{
+			return WidgetBlueprint;
+		}
+
+		FlushRenderingCommands();
+		CollectGarbage(RF_NoFlags, true);
+		if (UWidgetBlueprint* ReloadedBlueprint = LoadObject<UWidgetBlueprint>(nullptr, *ObjectPath))
+		{
+			return ReloadedBlueprint;
+		}
+
+		return WidgetBlueprint;
+	}
+
+	int32 CountWidgets(const FUMGWidgetNode& Node)
+	{
+		int32 Count = 1;
+		for (const FUMGWidgetNode& Child : Node.Children)
+		{
+			Count += CountWidgets(Child);
+		}
+		return Count;
+	}
+
+	void NotifyImportSummary(const FUMGWidgetData& Data, const double ElapsedSeconds)
+	{
+		if (Data.Warnings.Num() > 0)
+		{
+			FDesign2UMGNotification::Warning(FText::Format(
+				LOCTEXT("ImportSummaryWarnings", "Design2UMG: {0} warnings"),
+				FText::AsNumber(Data.Warnings.Num())));
+			return;
+		}
+
+		FDesign2UMGNotification::Success(FText::Format(
+			LOCTEXT("ImportSummaryOk", "Design2UMG: {0} widgets ({1}s)"),
+			FText::AsNumber(CountWidgets(Data.RootWidget)),
+			FText::FromString(FString::Printf(TEXT("%.1f"), ElapsedSeconds))));
+	}
 }
 
 // Blueprint 生成
@@ -107,35 +154,8 @@ UWidgetBlueprint* DesignImportUtils::GenerateBlueprint(const FUMGWidgetData& Dat
 {
 	const double StartTime = FPlatformTime::Seconds();
 	const FString FinalPath = ResolveOutputPath(OutputPath);
-	FUMGWidgetData EffectiveData = Data;
 
-	// Incremental update: check for existing BP
-	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
-	if (Settings && Settings->bEnableIncrementalUpdate)
-	{
-		FString AssetPath = FinalPath / Data.WidgetName + TEXT(".") + Data.WidgetName;
-		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
-		FAssetData ExistingAsset = ARM.Get().GetAssetByObjectPath(FSoftObjectPath(AssetPath));
-		if (ExistingAsset.IsValid())
-		{
-			UWidgetBlueprint* ExistingBP = Cast<UWidgetBlueprint>(ExistingAsset.GetAsset());
-			if (ExistingBP)
-			{
-				FDiffResult Diff = FIncrementalUpdater::ComputeDiff(Data.RootWidget, ExistingBP);
-				if (Diff.HasChanges())
-				{
-					if (!FIncrementalUpdater::ShowDiffPreviewDialog(Diff))
-					{
-						UE_LOG(LogDesign2UMG, Log, TEXT("DesignImportUtils: Incremental update cancelled"));
-						return nullptr;
-					}
-					EffectiveData.RootWidget = FIncrementalUpdater::FilterByAccepted(Data.RootWidget, Diff);
-				}
-			}
-		}
-	}
-
-	UWidgetBlueprint* WBP = FUMGGenerator::GenerateWidgetBlueprint(EffectiveData, FinalPath);
+	UWidgetBlueprint* WBP = FUMGGenerator::GenerateWidgetBlueprint(Data, FinalPath);
 	if (!WBP)
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint generation failed"));
@@ -144,8 +164,7 @@ UWidgetBlueprint* DesignImportUtils::GenerateBlueprint(const FUMGWidgetData& Dat
 	}
 	UE_LOG(LogDesign2UMG, Log, TEXT("DesignImportUtils: Generated %s"), *WBP->GetPathName());
 
-	FDesignImportResult Result = FDesignImportResult::FromData(EffectiveData, FPlatformTime::Seconds() - StartTime);
-	Result.ShowSummaryNotification();
+	NotifyImportSummary(Data, FPlatformTime::Seconds() - StartTime);
 	return WBP;
 }
 
@@ -166,8 +185,8 @@ bool DesignImportUtils::GenerateBlueprintAndPng(const FUMGWidgetData& Data, cons
 	const FIntPoint FallbackSize = ResolveWidgetTreeRenderSize(Data);
 
 	TArray<uint8> PngData;
-	FIntPoint Size;
-	if (!RenderWidgetTreePng(WBP, FallbackSize, PngData, Size))
+	FIntPoint Size = FallbackSize;
+	if (!FUMGWidgetUtils::RenderWidgetTreeToPng(WBP, FallbackSize, PngData, Size))
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget PNG render failed"));
 		// 渲染失败时也保存 Blueprint，方便定位问题。
@@ -253,7 +272,7 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 		const FIntPoint TreeRenderSize = ResolveCompiledRenderSize(WidgetBlueprint, RequestedRenderSize);
 		TArray<uint8> TreePngData;
 		FIntPoint TreeRenderedSize = TreeRenderSize;
-		if (RenderWidgetTreePng(WidgetBlueprint, TreeRenderSize, TreePngData, TreeRenderedSize))
+		if (FUMGWidgetUtils::RenderWidgetTreeToPng(WidgetBlueprint, TreeRenderSize, TreePngData, TreeRenderedSize))
 		{
 			const FString TreeRenderPath = FPaths::Combine(
 				FPaths::GetPath(OutputPngFilePath),
@@ -267,153 +286,13 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 		}
 	}
 
+	WidgetBlueprint = ReloadWidgetBlueprintForRender(WidgetBlueprint);
+
 	return RenderCompiledBlueprintToPngFile(
 		WidgetBlueprint,
 		OutputPngFilePath,
 		RequestedRenderSize,
 		OutRenderedSize);
-}
-
-void DesignImportUtils::ResolveImages(FUMGWidgetData& Data)
-{
-	FString Report;
-	const bool bOk = FDesignRemoteImageImporter::ResolveRemoteImages(Data, &Report);
-	if (!Report.IsEmpty())
-		UE_LOG(LogDesign2UMG, Log, TEXT("%s"), *Report);
-	if (!bOk)
-	{
-		UE_LOG(LogDesign2UMG, Warning, TEXT("DesignImportUtils: Unresolved remote images; generation will continue"));
-		FDesign2UMGNotification::Warning(LOCTEXT("ImageWarning", "Design2UMG: Some images failed to download"));
-	}
-}
-
-void DesignImportUtils::GenerateFromEditedJson(const FString& EditedJson, const FString& OutputPath)
-{
-	FScopedSlowTask SlowTask(3.0f, NSLOCTEXT("DesignImportUtils", "Generating", "Generating Widget Blueprint..."));
-	SlowTask.MakeDialog(true);
-
-	SlowTask.EnterProgressFrame(1.0f, NSLOCTEXT("DesignImportUtils", "GenParse", "Parsing edited design..."));
-	FUMGWidgetData Data;
-	FString ParseError;
-	if (!FUMGJsonParser::ParseJson(EditedJson, Data, &ParseError))
-	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Edited JSON parse failed: %s"), *ParseError);
-		FDesign2UMGNotification::Error(LOCTEXT("EditedJsonParseFailed", "Design2UMG: Failed to parse edited design data"));
-		return;
-	}
-	if (SlowTask.ShouldCancel()) return;
-
-	SlowTask.EnterProgressFrame(1.0f, NSLOCTEXT("DesignImportUtils", "GenImages", "Downloading remote images..."));
-	ResolveImages(Data);
-	if (SlowTask.ShouldCancel()) return;
-
-	SlowTask.EnterProgressFrame(1.0f, NSLOCTEXT("DesignImportUtils", "GenBP", "Generating Widget Blueprint..."));
-	GenerateBlueprint(Data, OutputPath);
-}
-
-// 预览窗口
-
-bool DesignImportUtils::OpenPreviewWindow(
-	const FUMGWidgetData& Data,
-	const FString& OutputPath,
-	const FText& WindowTitle)
-{
-	if (!FSlateApplication::IsInitialized())
-		return false;
-
-	const FString JsonPayload = FUMGJsonSerializer::Serialize(Data);
-	const FString FinalPath = ResolveOutputPath(OutputPath);
-
-	TSharedRef<SWindow> Window = SNew(SWindow)
-		.Title(WindowTitle)
-		.ClientSize(FVector2D(1600.0f, 980.0f))
-		.SupportsMinimize(false)
-		.SupportsMaximize(true);
-
-	Window->SetContent(
-		SNew(SDesign2UMGPreviewWindow)
-		.OriginalJson(JsonPayload)
-		.OutputPath(FinalPath)
-		.Warnings(Data.Warnings)
-		.OnConfirmed(FOnPreviewConfirmed::CreateLambda(
-			[](const FString& EditedJson, const FString& ConfirmedPath)
-			{
-				DesignImportUtils::GenerateFromEditedJson(EditedJson, ConfirmedPath);
-			}))
-		.OnCancelled(FOnPreviewCancelled::CreateLambda(
-			[]()
-			{
-				UE_LOG(LogDesign2UMG, Log, TEXT("DesignImportUtils: Preview cancelled"));
-			}))
-	);
-
-	FSlateApplication::Get().AddWindow(Window);
-	return true;
-}
-
-// Frame 选择窗口
-
-void DesignImportUtils::ShowFrameSelector(
-	const TArray<FDesignFrameInfo>& Frames,
-	const FText& WindowTitle,
-	const FText& HintText,
-	FFrameSelectedCallback OnFrameSelected)
-{
-	if (!FSlateApplication::IsInitialized())
-		return;
-
-	TSharedPtr<TArray<TSharedPtr<FDesignFrameInfo>>> Items = MakeShared<TArray<TSharedPtr<FDesignFrameInfo>>>();
-	for (const FDesignFrameInfo& F : Frames)
-		Items->Add(MakeShared<FDesignFrameInfo>(F));
-
-	TSharedRef<SWindow> Window = SNew(SWindow)
-		.Title(WindowTitle)
-		.ClientSize(FVector2D(420.0f, 360.0f))
-		.SupportsMinimize(false)
-		.SupportsMaximize(false);
-
-	TWeakPtr<SWindow> WeakWindow = Window;
-	TSharedPtr<FFrameSelectedCallback> Callback = MakeShared<FFrameSelectedCallback>(MoveTemp(OnFrameSelected));
-
-	Window->SetContent(
-		SNew(SVerticalBox)
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.Padding(8.0f)
-		[
-			SNew(STextBlock)
-			.Text(HintText)
-		]
-		+ SVerticalBox::Slot()
-		.FillHeight(1.0f)
-		.Padding(8.0f)
-		[
-			SNew(SListView<TSharedPtr<FDesignFrameInfo>>)
-			.ListItemsSource(Items.Get())
-			.OnGenerateRow_Lambda([Items](TSharedPtr<FDesignFrameInfo> Item, const TSharedRef<STableViewBase>& OwnerTable)
-			{
-				return SNew(STableRow<TSharedPtr<FDesignFrameInfo>>, OwnerTable)
-					.Padding(FMargin(4.0f, 2.0f))
-					[
-						SNew(STextBlock)
-						.Text(FText::FromString(FString::Printf(
-							TEXT("%s  (%.0f x %.0f)"),
-							*Item->Name, Item->Width, Item->Height)))
-					];
-			})
-			.OnMouseButtonDoubleClick_Lambda([Callback, WeakWindow](TSharedPtr<FDesignFrameInfo> Item)
-			{
-				if (Item.IsValid() && *Callback)
-				{
-					(*Callback)(Item->Id);
-					if (TSharedPtr<SWindow> Win = WeakWindow.Pin())
-						Win->RequestDestroyWindow();
-				}
-			})
-		]
-	);
-
-	FSlateApplication::Get().AddWindow(Window);
 }
 
 #undef LOCTEXT_NAMESPACE

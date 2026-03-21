@@ -2,6 +2,7 @@
 
 #include "UMGGenerator.h"
 #include "UMGWidgetUtils.h"
+#include "UMGValueParser.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
 #include "DesignPathRasterizer.h"
@@ -351,7 +352,7 @@ namespace
 					constexpr int32 PathSupersample = 2;
 					const int32 RasterWidth = Width * PathSupersample;
 					const int32 RasterHeight = Height * PathSupersample;
-					if (UTexture2D* Rasterized = FDesignPathRasterizer::Rasterize(*Geometry, RasterWidth, RasterHeight, FUMGWidgetUtils::ParseColor(FillColor), FillRule))
+					if (UTexture2D* Rasterized = FDesignPathRasterizer::Rasterize(*Geometry, RasterWidth, RasterHeight, FUMGValueParser::ParseColor(FillColor), FillRule))
 					{
 						TArray64<uint8> RawData;
 						int32 RawWidth = 0;
@@ -614,7 +615,6 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 	}
 
 	// 使用统一的 Widget 创建函数
-	FUMGWidgetUtils::ClearNodeIdMap();
 	UWidget* Root = FUMGWidgetUtils::CreateWidgetRecursive(WBP->WidgetTree, FixedRoot);
 	if (!Root)
 	{

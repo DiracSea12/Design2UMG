@@ -37,12 +37,6 @@ namespace
 		{
 			return false;
 		}
-
-		if (Node->Type == EDesignNodeType::Text || Node->Type == EDesignNodeType::IconFont)
-		{
-			return !UsesWrappingText(Node);
-		}
-
 		return !UsesWrappingText(Node);
 	}
 }

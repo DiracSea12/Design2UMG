@@ -2,6 +2,9 @@
 
 #include "PenParser.h"
 #include "Design2UMGLog.h"
+#include "DesignImportTypes.h"
+#include "DesignSchema.h"
+#include "DesignVariableResolver.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
@@ -16,9 +19,9 @@ namespace
 		if (Trimmed.IsEmpty())
 			return false;
 
-        double Parsed = 0.0;
-        if (!FDefaultValueHelper::ParseDouble(Trimmed, Parsed))
-            return false;
+		double Parsed = 0.0;
+		if (!FDefaultValueHelper::ParseDouble(Trimmed, Parsed))
+			return false;
 
 		OutValue = Parsed;
 		return true;
@@ -324,7 +327,94 @@ namespace
 		OutRun.bHasStrikethrough = TryGetResolvedBoolField(StyleObj, TEXT("strikethrough"), Resolver, OutRun.bStrikethrough);
 		StyleObj->TryGetStringField(TEXT("href"), OutRun.Href);
 	}
+
+	void ParseNodeContentField(
+		const TSharedPtr<FJsonValue>& ContentField,
+		const FDesignVariableResolver& Resolver,
+		TSharedPtr<FDesignNode>& Node)
+	{
+		if (!ContentField.IsValid())
+		{
+			return;
+		}
+
+		if (ContentField->Type == EJson::String)
+		{
+			Node->Content = Resolver.ResolveString(ContentField->AsString());
+			return;
+		}
+
+		if (ContentField->Type != EJson::Array)
+		{
+			return;
+		}
+
+		Node->Metadata.Add(TEXT("text.content.raw"), SerializeJsonValueCompact(ContentField));
+		FString CombinedContent;
+		Node->TextRuns.Reset();
+		for (const TSharedPtr<FJsonValue>& SegmentVal : ContentField->AsArray())
+		{
+			if (!SegmentVal.IsValid())
+			{
+				continue;
+			}
+
+			if (SegmentVal->Type == EJson::String)
+			{
+				FDesignTextRun SegmentRun;
+				SegmentRun.Content = Resolver.ResolveString(SegmentVal->AsString());
+				SegmentRun.RawJson = SerializeJsonValueCompact(SegmentVal);
+				CombinedContent += SegmentRun.Content;
+				Node->TextRuns.Add(MoveTemp(SegmentRun));
+				continue;
+			}
+
+			if (SegmentVal->Type != EJson::Object)
+			{
+				continue;
+			}
+
+			const TSharedPtr<FJsonObject>& SegmentObj = SegmentVal->AsObject();
+			if (!SegmentObj.IsValid())
+			{
+				continue;
+			}
+
+			FDesignTextRun SegmentRun;
+			ParseTextRunFromObject(SegmentObj, Resolver, SegmentRun);
+			SegmentRun.RawJson = SerializeJsonValueCompact(SegmentVal);
+			if (!SegmentRun.Content.IsEmpty())
+			{
+				CombinedContent += SegmentRun.Content;
+			}
+			Node->TextRuns.Add(MoveTemp(SegmentRun));
+		}
+		Node->Content = CombinedContent;
+	}
 }
+
+bool ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FDesignDocument& OutDocument);
+void ParseVariables(const TSharedPtr<FJsonObject>& JsonObj, TMap<FString, FDesignVariable>& OutVariables);
+TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver);
+void AppendParsedChildren(const TSharedPtr<FJsonValue>& ChildrenField, const FDesignVariableResolver& Resolver, TArray<TSharedPtr<FDesignNode>>& OutChildren);
+TSharedPtr<FDesignNode> ParseDescendantOverrideNode(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver);
+void ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TSharedPtr<FDesignNode>& Node, const FDesignVariableResolver& Resolver);
+void ParseNodeFillProperties(const TSharedPtr<FJsonValue>& Value, FDesignNode& OutNode, const FDesignVariableResolver& Resolver);
+void ParseNodeStrokeProperties(const TSharedPtr<FJsonValue>& Value, FDesignNode& OutNode, const FDesignVariableResolver& Resolver);
+void ApplyNodeBoxProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, EDesignNodeType SizeNodeType, const FDesignVariableResolver& Resolver);
+void ApplyNodeLayoutProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver, bool bIncludeTextProperties);
+void ApplyNodeTextStyleProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver);
+FDesignSize ParseSize(const TSharedPtr<FJsonValue>& Value, EDesignNodeType NodeType, const FDesignVariableResolver& Resolver);
+FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver);
+FDesignStroke ParseStroke(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver);
+FDesignPadding ParsePadding(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver);
+EDesignNodeType ParseNodeType(const FString& S);
+EDesignLayout ParseLayout(const FString& S);
+EDesignJustifyContent ParseJustifyContent(const FString& S);
+EDesignAlignItems ParseAlignItems(const FString& S);
+EDesignTextAlign ParseTextAlign(const FString& S);
+EDesignTextAlignVertical ParseTextAlignVertical(const FString& S);
+EDesignTextGrowth ParseTextGrowth(const FString& S);
 
 bool FPenParser::ParseFromFile(const FString& FilePath, FDesignDocument& OutDocument)
 {
@@ -332,7 +422,7 @@ bool FPenParser::ParseFromFile(const FString& FilePath, FDesignDocument& OutDocu
 	if (!FFileHelper::LoadFileToString(JsonString, *FilePath))
 	{
 		UE_LOG(LogDesign2UMG, Verbose, TEXT("PenParser: Failed to load file: %s"), *FilePath);
-		UE_LOG(LogDesign2UMG, Error, TEXT("鏃犳硶璇诲彇璁捐鏂囦欢銆傝纭鏂囦欢璺緞鏈夋晥涓旀枃浠舵湭琚崰鐢? %s"), *FilePath);
+		UE_LOG(LogDesign2UMG, Error, TEXT("无法读取设计文件。请确认文件路径有效且文件未被占用 %s"), *FilePath);
 		return false;
 	}
 	return ParseDocument(JsonString, OutDocument);
@@ -348,10 +438,15 @@ bool FPenParser::ParseDocument(const FString& JsonString, FDesignDocument& OutDo
 		UE_LOG(LogDesign2UMG, Error, TEXT("Invalid design file format. Please verify this is a valid .pen file."));
 		return false;
 	}
-	return ParseDocumentInternal(JsonObj, OutDocument);
+	return ParseDocumentObject(JsonObj, OutDocument);
 }
 
-bool FPenParser::ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FDesignDocument& OutDocument)
+bool FPenParser::ParseDocumentObject(const TSharedPtr<FJsonObject>& JsonObject, FDesignDocument& OutDocument)
+{
+	return ParseDocumentInternal(JsonObject, OutDocument);
+}
+
+bool ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FDesignDocument& OutDocument)
 {
 	if (!JsonObj.IsValid())
 	{
@@ -364,10 +459,10 @@ bool FPenParser::ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, F
 	{
 		OutDocument.Version = TEXT("1.0");
 		UE_LOG(LogDesign2UMG, Verbose, TEXT("PenParser: missing 'version', fallback to %s"), *OutDocument.Version);
-		UE_LOG(LogDesign2UMG, Warning, TEXT("璁捐鏂囦欢缂哄皯鐗堟湰鍙凤紝浣跨敤榛樿鐗堟湰 %s"), *OutDocument.Version);
+		UE_LOG(LogDesign2UMG, Warning, TEXT("设计文件缺少版本号，使用默认版本 %s"), *OutDocument.Version);
 	}
 
-	// 瑙ｆ瀽瀛椾綋
+	// 解析字体
 	const TSharedPtr<FJsonValue>& FontsField = JsonObj->TryGetField(TEXT("fonts"));
 	if (FontsField.IsValid() && FontsField->Type == EJson::Array)
 	{
@@ -384,7 +479,7 @@ bool FPenParser::ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, F
 		}
 	}
 
-	// 瑙ｆ瀽涓婚
+	// 解析主题
 	const TSharedPtr<FJsonValue>& ThemesField = JsonObj->TryGetField(TEXT("themes"));
 	if (ThemesField.IsValid() && ThemesField->Type == EJson::Object)
 	{
@@ -401,7 +496,7 @@ bool FPenParser::ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, F
 		}
 	}
 
-	// 瑙ｆ瀽鍙橀噺
+	// 解析变量
 	const TSharedPtr<FJsonValue>& VarsField = JsonObj->TryGetField(TEXT("variables"));
 	if (VarsField.IsValid() && VarsField->Type == EJson::Object)
 	{
@@ -412,26 +507,12 @@ bool FPenParser::ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, F
 	FDesignVariableResolver Resolver(OutDocument.Variables);
 
 	// Parse top-level children.
-	const TSharedPtr<FJsonValue>& ChildrenField = JsonObj->TryGetField(TEXT("children"));
-	if (ChildrenField.IsValid() && ChildrenField->Type == EJson::Array)
-	{
-		const TArray<TSharedPtr<FJsonValue>>& ChildrenArr = ChildrenField->AsArray();
-		for (const auto& ChildVal : ChildrenArr)
-		{
-			// Read top-level child node.
-			const TSharedPtr<FJsonObject>& ChildObj = ChildVal->AsObject();
-			if (ChildObj.IsValid())
-			{
-				if (auto Node = ParseNode(ChildObj, Resolver))
-					OutDocument.Children.Add(Node);
-			}
-		}
-	}
+	AppendParsedChildren(JsonObj->TryGetField(TEXT("children")), Resolver, OutDocument.Children);
 
 	return true;
 }
 
-void FPenParser::ParseVariables(const TSharedPtr<FJsonObject>& JsonObj, TMap<FString, FDesignVariable>& OutVariables)
+void ParseVariables(const TSharedPtr<FJsonObject>& JsonObj, TMap<FString, FDesignVariable>& OutVariables)
 {
 	for (const auto& Pair : JsonObj->Values)
 	{
@@ -453,7 +534,7 @@ void FPenParser::ParseVariables(const TSharedPtr<FJsonObject>& JsonObj, TMap<FSt
 		else
 			Var.Type = EDesignVariableType::String;
 
-		// 瑙ｆ瀽鍊硷紙鍙兘鏄崟鍊兼垨涓婚鍊兼暟缁勶級
+		// 解析值（可能是单值或主题值数组）
 		const TSharedPtr<FJsonValue>& ValueField = VarObj->TryGetField(TEXT("value"));
 		if (!ValueField.IsValid())
 		{
@@ -515,7 +596,7 @@ void FPenParser::ParseVariables(const TSharedPtr<FJsonObject>& JsonObj, TMap<FSt
 	}
 }
 
-TSharedPtr<FDesignNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver)
+TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver)
 {
 	if (!JsonObj.IsValid())
 		return nullptr;
@@ -534,7 +615,7 @@ TSharedPtr<FDesignNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& Jso
 	if (!JsonObj->TryGetStringField(TEXT("type"), TypeStr))
 	{
 		UE_LOG(LogDesign2UMG, Verbose, TEXT("PenParser: Node '%s' missing 'type' field, skipping"), *Node->Id);
-		UE_LOG(LogDesign2UMG, Warning, TEXT("鑺傜偣 '%s' 缂哄皯绫诲瀷淇℃伅锛屽凡璺宠繃"), *Node->Id);
+		UE_LOG(LogDesign2UMG, Warning, TEXT("节点 '%s' 缺少类型信息，已跳过"), *Node->Id);
 		return nullptr;
 	}
 	Node->Type = ParseNodeType(TypeStr);
@@ -562,15 +643,16 @@ TSharedPtr<FDesignNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& Jso
 	const TSharedPtr<FJsonValue>& SizeField = JsonObj->TryGetField(TEXT("size"));
 	if (SizeField.IsValid() && SizeField->Type == EJson::Object)
 	{
-		const auto& SizeObj = SizeField->AsObject();
+		const TSharedPtr<FJsonObject>& SizeObject = SizeField->AsObject();
 		float SizeWidth = 0.0f;
-		if (TryGetResolvedNumberField(SizeObj, TEXT("width"), *ActiveResolver, SizeWidth))
+		if (TryGetResolvedNumberField(SizeObject, TEXT("width"), *ActiveResolver, SizeWidth))
 		{
 			Node->Width = FDesignSize::Fixed(SizeWidth);
 			Node->bHasWidth = true;
 		}
+
 		float SizeHeight = 0.0f;
-		if (TryGetResolvedNumberField(SizeObj, TEXT("height"), *ActiveResolver, SizeHeight))
+		if (TryGetResolvedNumberField(SizeObject, TEXT("height"), *ActiveResolver, SizeHeight))
 		{
 			Node->Height = FDesignSize::Fixed(SizeHeight);
 			Node->bHasHeight = true;
@@ -585,7 +667,7 @@ TSharedPtr<FDesignNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& Jso
 	TryGetResolvedBoolField(JsonObj, TEXT("flipX"), *ActiveResolver, Node->bFlipX);
 	TryGetResolvedBoolField(JsonObj, TEXT("flipY"), *ActiveResolver, Node->bFlipY);
 
-	// 甯冨眬灞炴€?- Frame 榛樿 Horizontal锛孏roup 榛樿 None
+	// Default layout: frame falls back to Horizontal, group to None.
 	{
 		FString LayoutStr;
 		if (JsonObj->TryGetStringField(TEXT("layout"), LayoutStr))
@@ -609,73 +691,58 @@ TSharedPtr<FDesignNode> FPenParser::ParseNode(const TSharedPtr<FJsonObject>& Jso
 	if (JsonObj->HasField(TEXT("cornerRadius")))
 		Node->CornerRadius = ActiveResolver->ResolveCornerRadius(JsonObj->TryGetField(TEXT("cornerRadius")));
 
-	// 缁х画瑙ｆ瀽鍏朵粬灞炴€?..
 	ParseNodeExtended(JsonObj, Node, *ActiveResolver);
 
-	// 瀛愯妭鐐癸紙缁ф壙涓婚涓婁笅鏂囷級
-	const TSharedPtr<FJsonValue>& NodeChildrenField = JsonObj->TryGetField(TEXT("children"));
-	if (NodeChildrenField.IsValid() && NodeChildrenField->Type == EJson::Array)
-	{
-		const auto& ChildrenArr = NodeChildrenField->AsArray();
-		for (const auto& ChildVal : ChildrenArr)
-		{
-			if (auto Child = ParseNode(ChildVal->AsObject(), *ActiveResolver))
-				Node->Children.Add(Child);
-		}
-	}
+	AppendParsedChildren(JsonObj->TryGetField(TEXT("children")), *ActiveResolver, Node->Children);
 
 	ParsePenSemanticMetadata(JsonObj, *Node, *ActiveResolver);
 
 	return Node;
 }
 
-void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TSharedPtr<FDesignNode>& Node, const FDesignVariableResolver& Resolver)
+void AppendParsedChildren(
+	const TSharedPtr<FJsonValue>& ChildrenField,
+	const FDesignVariableResolver& Resolver,
+	TArray<TSharedPtr<FDesignNode>>& OutChildren)
 {
-	// Text properties.
-	const TSharedPtr<FJsonValue>& ContentField = JsonObj->TryGetField(TEXT("content"));
-	if (ContentField.IsValid())
+	if (!ChildrenField.IsValid() || ChildrenField->Type != EJson::Array)
+		return;
+
+	for (const TSharedPtr<FJsonValue>& ChildVal : ChildrenField->AsArray())
 	{
-		if (ContentField->Type == EJson::String)
-		{
-			Node->Content = Resolver.ResolveString(ContentField->AsString());
-		}
-	else if (ContentField->Type == EJson::Array)
-	{
-		Node->Metadata.Add(TEXT("text.content.raw"), SerializeJsonValueCompact(ContentField));
-		FString CombinedContent;
-		Node->TextRuns.Reset();
-		for (const TSharedPtr<FJsonValue>& SegmentVal : ContentField->AsArray())
-		{
-			if (!SegmentVal.IsValid())
-				continue;
-
-			if (SegmentVal->Type == EJson::String)
-			{
-				FDesignTextRun SegmentRun;
-				SegmentRun.Content = Resolver.ResolveString(SegmentVal->AsString());
-				SegmentRun.RawJson = SerializeJsonValueCompact(SegmentVal);
-				CombinedContent += SegmentRun.Content;
-				Node->TextRuns.Add(MoveTemp(SegmentRun));
-				continue;
-			}
-
-			if (SegmentVal->Type != EJson::Object)
-				continue;
-
-			const TSharedPtr<FJsonObject>& SegmentObj = SegmentVal->AsObject();
-			if (!SegmentObj.IsValid())
-				continue;
-
-			FDesignTextRun SegmentRun;
-			ParseTextRunFromObject(SegmentObj, Resolver, SegmentRun);
-			SegmentRun.RawJson = SerializeJsonValueCompact(SegmentVal);
-			if (!SegmentRun.Content.IsEmpty())
-				CombinedContent += SegmentRun.Content;
-			Node->TextRuns.Add(MoveTemp(SegmentRun));
-		}
-		Node->Content = CombinedContent;
+		if (TSharedPtr<FDesignNode> Child = ParseNode(ChildVal->AsObject(), Resolver))
+			OutChildren.Add(Child);
 	}
 }
+
+TSharedPtr<FDesignNode> ParseDescendantOverrideNode(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver)
+{
+	if (!JsonObj.IsValid())
+		return nullptr;
+
+	TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
+	Node->FontSize = 0.0f;
+
+	FString RawContent;
+	if (JsonObj->TryGetStringField(TEXT("content"), RawContent))
+		Node->Content = Resolver.ResolveString(RawContent);
+
+	ApplyNodeTextStyleProperties(JsonObj, *Node, Resolver);
+	if (JsonObj->HasField(TEXT("fill")))
+		ParseNodeFillProperties(JsonObj->TryGetField(TEXT("fill")), *Node, Resolver);
+	ParseNodeStrokeProperties(JsonObj->TryGetField(TEXT("stroke")), *Node, Resolver);
+	ApplyNodeBoxProperties(JsonObj, *Node, EDesignNodeType::Frame, Resolver);
+	TryGetResolvedBoolField(JsonObj, TEXT("enabled"), Resolver, Node->bEnabled);
+	ApplyNodeLayoutProperties(JsonObj, *Node, Resolver, true);
+	JsonObj->TryGetStringField(TEXT("name"), Node->Name);
+	AppendParsedChildren(JsonObj->TryGetField(TEXT("children")), Resolver, Node->Children);
+	ParsePenSemanticMetadata(JsonObj, *Node, Resolver);
+	return Node;
+}
+
+void ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TSharedPtr<FDesignNode>& Node, const FDesignVariableResolver& Resolver)
+{
+	ParseNodeContentField(JsonObj->TryGetField(TEXT("content")), Resolver, Node);
 	ApplyNodeTextStyleProperties(JsonObj, *Node, Resolver);
 	TryGetResolvedNumberField(JsonObj, TEXT("lineHeight"), Resolver, Node->LineHeight);
 	TryGetResolvedNumberField(JsonObj, TEXT("letterSpacing"), Resolver, Node->LetterSpacing);
@@ -711,7 +778,7 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 	JsonObj->TryGetStringField(TEXT("geometry"), Node->Geometry);
 	JsonObj->TryGetStringField(TEXT("fillRule"), Node->FillRule);
 
-	// 鐗规晥 - 鍏煎 "effect"(schema) 鍜?"effects"(鏃ф牸寮?
+	// 特效 - 兼容 "effect"(schema) "effects"(旧格式
 	const FString EffectKey = JsonObj->HasField(TEXT("effect")) ? TEXT("effect") : TEXT("effects");
 	if (JsonObj->HasField(EffectKey))
 	{
@@ -749,14 +816,14 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 			{
 				Effect.Shadow.BlendMode = Effect.BlendMode;
 
-				// shadowType: "inner"|"outer" (schema 鏍煎紡)
+				// shadowType: "inner"|"outer" in schema form.
 				FString ShadowTypeStr;
 				if (EffectObj->TryGetStringField(TEXT("shadowType"), ShadowTypeStr))
 					Effect.Shadow.bInner = (ShadowTypeStr == TEXT("inner"));
 				else
 					TryGetResolvedBoolField(EffectObj, TEXT("inner"), Resolver, Effect.Shadow.bInner);
 
-				// offset: {x, y} (schema 鏍煎紡) 鎴?offsetX/offsetY (鏃ф牸寮?
+				// offset: {x, y} in schema form, or legacy offsetX/offsetY.
 				const TSharedPtr<FJsonValue>& OffsetField = EffectObj->TryGetField(TEXT("offset"));
 				if (OffsetField.IsValid() && OffsetField->Type == EJson::Object)
 				{
@@ -799,56 +866,21 @@ void FPenParser::ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TShar
 
 			const TSharedPtr<FJsonObject>& OverrideObj = Pair.Value->AsObject();
 
-			// 瀵硅薄鏇挎崲妯″紡锛氬惈 type 瀛楁锛岀敤 ParseNode 瀹屾暣瑙ｆ瀽
+			// Full replacement mode: overrides with type are parsed as full nodes.
 			if (OverrideObj->HasField(TEXT("type")))
 			{
-				// Descendants閫氬父鏄粍浠跺疄渚嬶紝缁ф壙鐖惰妭鐐瑰潗鏍囩郴
 				if (auto FullNode = ParseNode(OverrideObj, Resolver))
 					Node->Descendants.Add(Pair.Key, FullNode);
 				continue;
 			}
 
-			// Property override mode.
-			TSharedPtr<FDesignNode> DescNode = MakeShared<FDesignNode>();
-			DescNode->FontSize = 0.0f;
-			DescNode->FontWeight = TEXT("");
-			DescNode->FontStyle = TEXT("");
-
-			{
-				FString RawContent;
-				if (OverrideObj->TryGetStringField(TEXT("content"), RawContent))
-					DescNode->Content = Resolver.ResolveString(RawContent);
-			}
-			ApplyNodeTextStyleProperties(OverrideObj, *DescNode, Resolver);
-			if (OverrideObj->HasField(TEXT("fill")))
-				ParseNodeFillProperties(OverrideObj->TryGetField(TEXT("fill")), *DescNode, Resolver);
-			ParseNodeStrokeProperties(OverrideObj->TryGetField(TEXT("stroke")), *DescNode, Resolver);
-
-			ApplyNodeBoxProperties(OverrideObj, *DescNode, EDesignNodeType::Frame, Resolver);
-			TryGetResolvedBoolField(OverrideObj, TEXT("enabled"), Resolver, DescNode->bEnabled);
-			ApplyNodeLayoutProperties(OverrideObj, *DescNode, Resolver, true);
-			OverrideObj->TryGetStringField(TEXT("name"), DescNode->Name);
-
-			// children 瑕嗙洊锛氬畬鏁存浛鎹㈠瓙鑺傜偣
-			const TSharedPtr<FJsonValue>& ChildOvField = OverrideObj->TryGetField(TEXT("children"));
-			if (ChildOvField.IsValid() && ChildOvField->Type == EJson::Array)
-			{
-				const auto& ChildArr = ChildOvField->AsArray();
-				for (const auto& ChildVal : ChildArr)
-				{
-					if (auto Child = ParseNode(ChildVal->AsObject(), Resolver))
-						DescNode->Children.Add(Child);
-				}
-			}
-
-			ParsePenSemanticMetadata(OverrideObj, *DescNode, Resolver);
-
-			Node->Descendants.Add(Pair.Key, DescNode);
+			if (TSharedPtr<FDesignNode> DescNode = ParseDescendantOverrideNode(OverrideObj, Resolver))
+				Node->Descendants.Add(Pair.Key, DescNode);
 		}
 	}
 }
 
-void FPenParser::ParseNodeFillProperties(const TSharedPtr<FJsonValue>& Value, FDesignNode& OutNode, const FDesignVariableResolver& Resolver)
+void ParseNodeFillProperties(const TSharedPtr<FJsonValue>& Value, FDesignNode& OutNode, const FDesignVariableResolver& Resolver)
 {
 	OutNode.Fill = ParseFill(Value, Resolver);
 	OutNode.Fills.Empty();
@@ -867,7 +899,7 @@ void FPenParser::ParseNodeFillProperties(const TSharedPtr<FJsonValue>& Value, FD
 	}
 }
 
-void FPenParser::ParseNodeStrokeProperties(const TSharedPtr<FJsonValue>& Value, FDesignNode& OutNode, const FDesignVariableResolver& Resolver)
+void ParseNodeStrokeProperties(const TSharedPtr<FJsonValue>& Value, FDesignNode& OutNode, const FDesignVariableResolver& Resolver)
 {
 	if (!Value.IsValid() || Value->Type != EJson::Object)
 		return;
@@ -877,7 +909,7 @@ void FPenParser::ParseNodeStrokeProperties(const TSharedPtr<FJsonValue>& Value, 
 	ApplyPenStrokeExtensions(StrokeObj, OutNode, Resolver);
 }
 
-void FPenParser::ApplyNodeBoxProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, EDesignNodeType SizeNodeType, const FDesignVariableResolver& Resolver)
+void ApplyNodeBoxProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, EDesignNodeType SizeNodeType, const FDesignVariableResolver& Resolver)
 {
 	if (JsonObj->HasField(TEXT("width")))
 	{
@@ -895,7 +927,7 @@ void FPenParser::ApplyNodeBoxProperties(const TSharedPtr<FJsonObject>& JsonObj, 
 		OutNode.bHasY = TryGetResolvedNumberField(JsonObj, TEXT("y"), Resolver, OutNode.Y);
 }
 
-void FPenParser::ApplyNodeLayoutProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver, bool bIncludeTextProperties)
+void ApplyNodeLayoutProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver, bool bIncludeTextProperties)
 {
 	if (JsonObj->HasField(TEXT("opacity")))
 		OutNode.bHasOpacity = TryGetResolvedNumberField(JsonObj, TEXT("opacity"), Resolver, OutNode.Opacity);
@@ -925,7 +957,7 @@ void FPenParser::ApplyNodeLayoutProperties(const TSharedPtr<FJsonObject>& JsonOb
 		OutNode.TextGrowth = ParseTextGrowth(TextGrowth);
 }
 
-void FPenParser::ApplyNodeTextStyleProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver)
+void ApplyNodeTextStyleProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver)
 {
 	FString FontFamily;
 	if (JsonObj->TryGetStringField(TEXT("fontFamily"), FontFamily))
@@ -938,7 +970,7 @@ void FPenParser::ApplyNodeTextStyleProperties(const TSharedPtr<FJsonObject>& Jso
 	JsonObj->TryGetStringField(TEXT("href"), OutNode.Href);
 }
 
-FDesignSize FPenParser::ParseSize(const TSharedPtr<FJsonValue>& Value, EDesignNodeType NodeType, const FDesignVariableResolver& Resolver)
+FDesignSize ParseSize(const TSharedPtr<FJsonValue>& Value, EDesignNodeType NodeType, const FDesignVariableResolver& Resolver)
 {
 	if (!Value.IsValid())
 		return FDesignSize::Fit();
@@ -958,7 +990,7 @@ FDesignSize FPenParser::ParseSize(const TSharedPtr<FJsonValue>& Value, EDesignNo
 	{
 		FString Str = Value->AsString();
 
-		// 鍙橀噺寮曠敤
+		// 变量引用
 		if (FDesignVariableResolver::IsVariableRef(Str))
 		{
 			float Resolved = Resolver.ResolveNumber(Str);
@@ -1011,7 +1043,7 @@ FDesignSize FPenParser::ParseSize(const TSharedPtr<FJsonValue>& Value, EDesignNo
 	return FDesignSize::Fit();
 }
 
-FDesignFill FPenParser::ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver)
+FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver)
 {
 	FDesignFill Result;
 
@@ -1025,7 +1057,7 @@ FDesignFill FPenParser::ParseFill(const TSharedPtr<FJsonValue>& Value, const FDe
 		return Result;
 	}
 
-	// 闈炵┖鏁扮粍 鈫?鍙栨渶鍚庝竴涓彲瑙佸厓绱犱綔涓轰富濉厖
+	// 非空数组 → 取最后一个可见元素作为主填充
 	if (Value->Type == EJson::Array)
 	{
 		const auto& Arr = Value->AsArray();
@@ -1038,7 +1070,7 @@ FDesignFill FPenParser::ParseFill(const TSharedPtr<FJsonValue>& Value, const FDe
 		return Result;
 	}
 
-	// 瀛楃涓叉牸寮忥紙绾壊鎴栧彉閲忥級
+	// 字符串格式（纯色或变量）
 	if (Value->Type == EJson::String)
 	{
 		FString Str = Value->AsString();
@@ -1051,7 +1083,7 @@ FDesignFill FPenParser::ParseFill(const TSharedPtr<FJsonValue>& Value, const FDe
 		return Result;
 	}
 
-	// 瀵硅薄鏍煎紡
+	// 对象格式
 	if (Value->Type == EJson::Object)
 	{
 		const auto& Obj = Value->AsObject();
@@ -1253,14 +1285,14 @@ FDesignFill FPenParser::ParseFill(const TSharedPtr<FJsonValue>& Value, const FDe
 	return Result;
 }
 
-FDesignStroke FPenParser::ParseStroke(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver)
+FDesignStroke ParseStroke(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver)
 {
 	FDesignStroke Result;
 
 	if (!JsonObj.IsValid())
 		return Result;
 
-	// 瀵归綈
+	// 对齐
 	FString Align;
 	if (JsonObj->TryGetStringField(TEXT("align"), Align))
 	{
@@ -1292,7 +1324,7 @@ FDesignStroke FPenParser::ParseStroke(const TSharedPtr<FJsonObject>& JsonObj, co
 		}
 	}
 
-	// 濉厖
+	// 填充
 	if (JsonObj->HasField(TEXT("fill")))
 	{
 		Result.bHasExplicitFill = true;
@@ -1302,7 +1334,7 @@ FDesignStroke FPenParser::ParseStroke(const TSharedPtr<FJsonObject>& JsonObj, co
 	return Result;
 }
 
-FDesignPadding FPenParser::ParsePadding(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver)
+FDesignPadding ParsePadding(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver)
 {
 	FDesignPadding R;
 	if (!Value.IsValid()) return R;
@@ -1349,7 +1381,7 @@ FDesignPadding FPenParser::ParsePadding(const TSharedPtr<FJsonValue>& Value, con
 	return R;
 }
 
-EDesignNodeType FPenParser::ParseNodeType(const FString& S)
+EDesignNodeType ParseNodeType(const FString& S)
 {
 	if (S == TEXT("frame")) return EDesignNodeType::Frame;
 	if (S == TEXT("rectangle")) return EDesignNodeType::Rectangle;
@@ -1368,7 +1400,7 @@ EDesignNodeType FPenParser::ParseNodeType(const FString& S)
 	return EDesignNodeType::Unknown;
 }
 
-EDesignLayout FPenParser::ParseLayout(const FString& S)
+EDesignLayout ParseLayout(const FString& S)
 {
 	if (S == TEXT("vertical")) return EDesignLayout::Vertical;
 	if (S == TEXT("horizontal")) return EDesignLayout::Horizontal;
@@ -1377,7 +1409,7 @@ EDesignLayout FPenParser::ParseLayout(const FString& S)
 	return EDesignLayout::None;
 }
 
-EDesignJustifyContent FPenParser::ParseJustifyContent(const FString& S)
+EDesignJustifyContent ParseJustifyContent(const FString& S)
 {
 	if (S == TEXT("center")) return EDesignJustifyContent::Center;
 	if (S == TEXT("end")) return EDesignJustifyContent::End;
@@ -1386,14 +1418,14 @@ EDesignJustifyContent FPenParser::ParseJustifyContent(const FString& S)
 	return EDesignJustifyContent::Start;
 }
 
-EDesignAlignItems FPenParser::ParseAlignItems(const FString& S)
+EDesignAlignItems ParseAlignItems(const FString& S)
 {
 	if (S == TEXT("center")) return EDesignAlignItems::Center;
 	if (S == TEXT("end")) return EDesignAlignItems::End;
 	return EDesignAlignItems::Start;
 }
 
-EDesignTextAlign FPenParser::ParseTextAlign(const FString& S)
+EDesignTextAlign ParseTextAlign(const FString& S)
 {
 	if (S == TEXT("center")) return EDesignTextAlign::Center;
 	if (S == TEXT("right")) return EDesignTextAlign::Right;
@@ -1401,14 +1433,14 @@ EDesignTextAlign FPenParser::ParseTextAlign(const FString& S)
 	return EDesignTextAlign::Left;
 }
 
-EDesignTextAlignVertical FPenParser::ParseTextAlignVertical(const FString& S)
+EDesignTextAlignVertical ParseTextAlignVertical(const FString& S)
 {
 	if (S == TEXT("middle")) return EDesignTextAlignVertical::Middle;
 	if (S == TEXT("bottom")) return EDesignTextAlignVertical::Bottom;
 	return EDesignTextAlignVertical::Top;
 }
 
-EDesignTextGrowth FPenParser::ParseTextGrowth(const FString& S)
+EDesignTextGrowth ParseTextGrowth(const FString& S)
 {
 	if (S == TEXT("fixed-width")) return EDesignTextGrowth::FixedWidth;
 	if (S == TEXT("fixed-width-height")) return EDesignTextGrowth::FixedWidthHeight;

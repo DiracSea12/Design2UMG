@@ -7,7 +7,7 @@
 #include "UMGSchema.h"
 
 /**
- * 甯冨眬鏄犲皠锛歋lot 灞炴€с€丟ap銆丳adding銆丣ustifyContent銆丄lignItems銆丼izeBox 鍖呰９
+ * 布局映射：Slot 属性、Gap、Padding、JustifyContent、AlignItems、SizeBox 包裹
  */
 class FLayoutMapper
 {

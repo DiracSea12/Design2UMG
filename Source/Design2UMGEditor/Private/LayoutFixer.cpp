@@ -3,46 +3,58 @@
 #include "LayoutFixer.h"
 
 // ============================================================================
-// Fixer绠楁硶甯搁噺
+// Fixer算法常量
 // ============================================================================
 
 namespace FixerConstants
 {
-	/** 鍔ㄦ€丼napPx璁＄畻绯绘暟锛歁inDim * Factor */
+	/** 动态SnapPx计算系数：MinDim * Factor */
 	constexpr float SnapPxFactor = 0.002f;
-	/** SnapPx鏈€灏?鏈€澶у儚绱犲€?*/
+	/** SnapPx最小最大像素值*/
 	constexpr int32 SnapPxMin = 2;
 	constexpr int32 SnapPxMax = 6;
 
-	/** 瓒婄晫淇锛氭渶灏忓昂瀵搁槇鍊硷紝闃叉Bounds琚鍓负0 */
+	/** 越界修正：最小尺寸阈值，防止Bounds被裁剪为0 */
 	constexpr float MinBoundsSize = 0.001f;
 
-	/** 绛夎窛淇锛氶棿璺濆亸宸瘮鐜囬槇鍊?*/
+	/** 等距修正：间距偏差比率阈值*/
 	constexpr float SpacingRatioThreshold = 0.15f;
-	/** 绛夎窛淇锛氱粷瀵归槇鍊间箻鏁帮紙鐩稿浜嶴napThreshold锛?*/
+	/** 等距修正：绝对阈值乘数（相对于SnapThreshold）?*/
 	constexpr float SpacingAbsThresholdMultiplier = 2.0f;
-	/** 绛夎窛淇锛氬崟娆℃渶澶хЩ鍔ㄨ窛绂讳箻鏁帮紙鐩稿浜嶴napThreshold锛?*/
+	/** 等距修正：单次最大移动距离乘数（相对于SnapThreshold）?*/
 	constexpr float SpacingMaxMoveMultiplier = 3.0f;
 
-	/** 淇濆畧鎬ф鏌ワ細鎬荤Щ鍔ㄨ窛绂讳笅闄?*/
+	/** 保守性检查：总移动距离下限*/
 	constexpr float ConservatismTotalMoveFloor = 0.03f;
-	/** 淇濆畧鎬ф鏌ワ細鎬荤Щ鍔ㄨ窛绂讳箻鏁帮紙姣忓厓绱狅級 */
+	/** 保守性检查：总移动距离乘数（每元素） */
 	constexpr float ConservatismTotalMovePerElement = 2.0f;
-	/** 淇濆畧鎬ф鏌ワ細鍗曟绉诲姩璺濈涓嬮檺 */
+	/** 保守性检查：单次移动距离下限 */
 	constexpr float ConservatismSingleMoveFloor = 0.02f;
-	/** 淇濆畧鎬ф鏌ワ細鍗曟绉诲姩璺濈涔樻暟 */
+	/** 保守性检查：单次移动距离乘数 */
 	constexpr float ConservatismSingleMoveMultiplier = 3.0f;
 }
 
+float GetAverage(const TArray<float>& Values);
+float GetMaxDeviation(const TArray<float>& Values, float Average);
+bool FixBoundsOverflow(FBounds& ChildBounds, const FBounds& ParentBounds, FFixerLogEntry* OutLog = nullptr);
+bool SnapToAlignment(FBounds& Bounds, const FBounds& ParentBounds, float SnapThresholdX, float SnapThresholdY, FFixerLogEntry* OutLog = nullptr);
+bool SnapToSiblings(FBounds& Bounds, const TArray<FBounds>& SiblingBounds, float SnapThresholdX, float SnapThresholdY, FFixerLogEntry* OutLog = nullptr);
+TArray<TArray<int32>> DetectRows(const TArray<FBounds>& Bounds, float OverlapThreshold);
+TArray<TArray<int32>> DetectColumns(const TArray<FBounds>& Bounds, float OverlapThreshold);
+bool FixEqualSpacing(TArray<FBounds>& Bounds, const TArray<int32>& Indices, bool bHorizontal, float Threshold, TArray<FFixerLogEntry>* OutLog = nullptr);
+bool PassesConservatismCheck(const TArray<FBounds>& OriginalBounds, const TArray<FBounds>& ProposedBounds, float SnapThresholdX, float SnapThresholdY);
+void FixChildrenSpacing(TArray<FBounds>& ProposedBounds, const TArray<FBounds>& OriginalBounds, const FFixerPreset& Preset, float SnapThresholdX, float SnapThresholdY, TArray<FFixerLogEntry>& OutLog, FFixerStats& Stats);
+void ProcessNode(FFixerWidgetNode& Node, const FBounds& ParentBounds, const FFixerPreset& Preset, float SnapThresholdX, float SnapThresholdY, TArray<FFixerLogEntry>& OutLog, FFixerStats& Stats);
+
 // ============================================================================
-// Helper Functions (v2.2 Fixer浼樺寲)
+// Helper Functions (v2.2 Fixer优化)
 // ============================================================================
 
 /**
- * 浠庡涓€欓€変綅绉讳腑閫夋嫨鏈€灏忎綅绉伙紙缁濆鍊兼渶灏忥級
- * @param Deltas 鍊欓€変綅绉绘暟缁? * @param Threshold 闃堝€硷紝鍙€冭檻灏忎簬闃堝€肩殑浣嶇Щ
- * @param Eps 瀹瑰樊
- * @param OutDelta 杈撳嚭鏈€浣充綅绉? * @return 鏄惁鎵惧埌鏈夋晥浣嶇Щ
+ * 从多个候选位移中选择最小位移（绝对值最小）
+ * @param Deltas 候选位移数组 * @param Threshold 阈值，只考虑小于阈值的位移
+ * @param Eps 容差
+ * @param OutDelta 输出最佳位移 * @return 是否找到有效位移
  */
 static bool ChooseBestDelta(const TArray<float>& Deltas, float Threshold, float Eps, float& OutDelta)
 {
@@ -62,8 +74,8 @@ static bool ChooseBestDelta(const TArray<float>& Deltas, float Threshold, float 
 }
 
 /**
- * 璁＄畻1D鍖洪棿閲嶅彔姣斾緥
- * @return 閲嶅彔闀垮害 / 杈冪煭鍖洪棿闀垮害
+ * 计算1D区间重叠比例
+ * @return 重叠长度 / 较短区间长度
  */
 static float OverlapRatio1D(float A0, float A1, float B0, float B1)
 {
@@ -75,7 +87,7 @@ static float OverlapRatio1D(float A0, float A1, float B0, float B1)
 }
 
 /**
- * 璁＄畻涓綅鏁帮紙姣斿钩鍧囧€兼洿绋冲仴锛? */
+ * 计算中位数（比平均值更稳健） */
 static float GetMedian(const TArray<float>& InValues)
 {
 	if (InValues.Num() == 0) return 0.0f;
@@ -100,7 +112,7 @@ void FLayoutFixer::Initialize(const FIntPoint& DesignSize, FFixerPreset& OutPres
 	// 1080p: 2px, 4K: 4px
 }
 
-float FLayoutFixer::GetAverage(const TArray<float>& Values)
+float GetAverage(const TArray<float>& Values)
 {
 	if (Values.Num() == 0) return 0.0f;
 	float Sum = 0.0f;
@@ -108,7 +120,7 @@ float FLayoutFixer::GetAverage(const TArray<float>& Values)
 	return Sum / Values.Num();
 }
 
-float FLayoutFixer::GetMaxDeviation(const TArray<float>& Values, float Average)
+float GetMaxDeviation(const TArray<float>& Values, float Average)
 {
 	float MaxDiff = 0.0f;
 	for (float V : Values)
@@ -118,7 +130,7 @@ float FLayoutFixer::GetMaxDeviation(const TArray<float>& Values, float Average)
 	return MaxDiff;
 }
 
-bool FLayoutFixer::FixBoundsOverflow(
+bool FixBoundsOverflow(
 	FBounds& ChildBounds,
 	const FBounds& ParentBounds,
 	FFixerLogEntry* OutLog)
@@ -153,7 +165,7 @@ bool FLayoutFixer::FixBoundsOverflow(
 		if (ChildBounds.X >= ParentRight - MinSize)
 		{
 			ChildBounds.X = ParentRight - ChildBounds.W;
-			// 纭繚X涓嶄細鍙樻垚璐熸暟
+			// 确保X不会变成负数
 			if (ChildBounds.X < ParentBounds.X)
 			{
 				ChildBounds.X = ParentBounds.X;
@@ -172,7 +184,7 @@ bool FLayoutFixer::FixBoundsOverflow(
 		if (ChildBounds.Y >= ParentBottom - MinSize)
 		{
 			ChildBounds.Y = ParentBottom - ChildBounds.H;
-			// 纭繚Y涓嶄細鍙樻垚璐熸暟
+			// 确保Y不会变成负数
 			if (ChildBounds.Y < ParentBounds.Y)
 			{
 				ChildBounds.Y = ParentBounds.Y;
@@ -196,7 +208,7 @@ bool FLayoutFixer::FixBoundsOverflow(
 	return bFixed;
 }
 
-bool FLayoutFixer::SnapToAlignment(
+bool SnapToAlignment(
 	FBounds& Bounds,
 	const FBounds& ParentBounds,
 	float SnapThresholdX,
@@ -217,7 +229,7 @@ bool FLayoutFixer::SnapToAlignment(
 	const float Right = Bounds.X + Bounds.W;
 	const float Bottom = Bounds.Y + Bounds.H;
 
-	// v2.2: 鏀堕泦鎵€鏈夊€欓€変綅绉伙紝閫夋嫨鏈€灏忕殑
+	// v2.2: 收集所有候选位移，选择最小的
 	// Candidate X offsets: left edge, right edge, center line.
 	TArray<float> DeltasX;
 	DeltasX.Add(ParentBounds.X - Bounds.X);           // snap left edge
@@ -254,7 +266,7 @@ bool FLayoutFixer::SnapToAlignment(
 	return bFixed;
 }
 
-bool FLayoutFixer::SnapToSiblings(
+bool SnapToSiblings(
 	FBounds& Bounds,
 	const TArray<FBounds>& SiblingBounds,
 	float SnapThresholdX,
@@ -264,8 +276,8 @@ bool FLayoutFixer::SnapToSiblings(
 	FBounds OldBounds = Bounds;
 	bool bFixed = false;
 	const float Eps = 1e-6f;
-	const float MinOverlapRatio = 0.5f;  // v2.2: 姝ｄ氦鏂瑰悜闇€瑕?0%閲嶅彔鎵嶅惛闄?
-	// v2.2: 鏀堕泦鎵€鏈夊€欓€変綅绉伙紝閫夋嫨鏈€灏忕殑
+	const float MinOverlapRatio = 0.5f;  // v2.2: 正交方向需要0%重叠才吸附
+	// v2.2: 收集所有候选位移，选择最小的
 	TArray<float> DeltasX;
 	TArray<float> DeltasY;
 
@@ -318,7 +330,7 @@ bool FLayoutFixer::SnapToSiblings(
 	return bFixed;
 }
 
-TArray<TArray<int32>> FLayoutFixer::DetectRows(
+TArray<TArray<int32>> DetectRows(
 	const TArray<FBounds>& Bounds,
 	float OverlapThreshold)
 {
@@ -358,7 +370,7 @@ TArray<TArray<int32>> FLayoutFixer::DetectRows(
 	return Rows;
 }
 
-TArray<TArray<int32>> FLayoutFixer::DetectColumns(
+TArray<TArray<int32>> DetectColumns(
 	const TArray<FBounds>& Bounds,
 	float OverlapThreshold)
 {
@@ -398,7 +410,7 @@ TArray<TArray<int32>> FLayoutFixer::DetectColumns(
 	return Columns;
 }
 
-bool FLayoutFixer::FixEqualSpacing(
+bool FixEqualSpacing(
 	TArray<FBounds>& Bounds,
 	const TArray<int32>& Indices,
 	bool bHorizontal,
@@ -414,7 +426,7 @@ bool FLayoutFixer::FixEqualSpacing(
 		return bHorizontal ? Bounds[A].X < Bounds[B].X : Bounds[A].Y < Bounds[B].Y;
 	});
 
-	// 璁＄畻闂磋窛
+	// 计算间距
 	TArray<float> Gaps;
 	for (int32 i = 1; i < Sorted.Num(); ++i)
 	{
@@ -430,7 +442,7 @@ bool FLayoutFixer::FixEqualSpacing(
 		Gaps.Add(Gap);
 	}
 
-	// v2.2: 浣跨敤涓綅鏁拌€岄潪骞冲潎鍊硷紙鏇寸ǔ鍋ワ級
+	// v2.2: 使用中位数而非平均值（更稳健）
 	float MedianGap = GetMedian(Gaps);
 	float AvgGap = GetAverage(Gaps);
 	float MaxDiff = GetMaxDeviation(Gaps, AvgGap);
@@ -443,7 +455,7 @@ bool FLayoutFixer::FixEqualSpacing(
 
 	float MaxMove = FixerConstants::SpacingMaxMoveMultiplier * Threshold;
 
-	// 搴旂敤绛夎窛淇
+	// 应用等距修正
 	bool bApplied = false;
 	for (int32 i = 1; i < Sorted.Num(); ++i)
 	{
@@ -456,7 +468,7 @@ bool FLayoutFixer::FixEqualSpacing(
 			float NewX = PrevRight + MedianGap;
 			float DeltaX = NewX - Bounds[Idx].X;
 
-			// v2.2: 闄愬埗绉诲姩骞呭害
+			// v2.2: 限制移动幅度
 			if (FMath::Abs(DeltaX) > MaxMove)
 			{
 				NewX = Bounds[Idx].X + FMath::Sign(DeltaX) * MaxMove;
@@ -475,7 +487,7 @@ bool FLayoutFixer::FixEqualSpacing(
 			float NewY = PrevBottom + MedianGap;
 			float DeltaY = NewY - Bounds[Idx].Y;
 
-			// v2.2: 闄愬埗绉诲姩骞呭害
+			// v2.2: 限制移动幅度
 			if (FMath::Abs(DeltaY) > MaxMove)
 			{
 				NewY = Bounds[Idx].Y + FMath::Sign(DeltaY) * MaxMove;
@@ -509,7 +521,7 @@ void FLayoutFixer::FixWidgetTree(
 	ProcessNode(Root, RootParent, Preset, SnapThresholdX, SnapThresholdY, OutLog, Stats);
 }
 
-bool FLayoutFixer::PassesConservatismCheck(
+bool PassesConservatismCheck(
 	const TArray<FBounds>& OriginalBounds,
 	const TArray<FBounds>& ProposedBounds,
 	float SnapThresholdX,
@@ -537,7 +549,7 @@ bool FLayoutFixer::PassesConservatismCheck(
 	return (TotalMove <= MaxTotalMove) && (MaxMove <= MaxSingleMove);
 }
 
-void FLayoutFixer::FixChildrenSpacing(
+void FixChildrenSpacing(
 	TArray<FBounds>& ProposedBounds,
 	const TArray<FBounds>& OriginalBounds,
 	const FFixerPreset& Preset,
@@ -546,7 +558,7 @@ void FLayoutFixer::FixChildrenSpacing(
 	TArray<FFixerLogEntry>& OutLog,
 	FFixerStats& Stats)
 {
-	// 鍚岀骇鍏冪礌鍚搁檮
+	// 同级元素吸附
 	if (Preset.bEnableSiblingSnap && ProposedBounds.Num() >= 2)
 	{
 		for (int32 i = 0; i < ProposedBounds.Num(); ++i)
@@ -563,7 +575,7 @@ void FLayoutFixer::FixChildrenSpacing(
 		}
 	}
 
-	// 绛夎窛淇
+	// 等距修正
 	if (!Preset.bEnableEqualSpacing || ProposedBounds.Num() < Preset.MinElementsForEqualSpacing)
 		return;
 
@@ -608,7 +620,7 @@ void FLayoutFixer::FixChildrenSpacing(
 	}
 }
 
-void FLayoutFixer::ProcessNode(
+void ProcessNode(
 	FFixerWidgetNode& Node,
 	const FBounds& ParentBounds,
 	const FFixerPreset& Preset,
@@ -617,12 +629,12 @@ void FLayoutFixer::ProcessNode(
 	TArray<FFixerLogEntry>& OutLog,
 	FFixerStats& Stats)
 {
-	// 璞佸厤鑺傜偣璺宠繃淇
+	// 豁免节点跳过修正
 	bool bShouldFix = !Node.bFixExempt;
 	if (Node.bFixExempt)
 		Stats.SkippedExempt++;
 
-	// 瓒婄晫淇
+	// 越界修正
 	if (bShouldFix && Preset.bEnableOverflowFix)
 	{
 		FFixerLogEntry Log;
@@ -634,7 +646,7 @@ void FLayoutFixer::ProcessNode(
 		}
 	}
 
-	// 瀵归綈鍚搁檮
+	// 对齐吸附
 	if (bShouldFix && Preset.bEnableAlignSnap)
 	{
 		FFixerLogEntry Log;
@@ -663,7 +675,7 @@ void FLayoutFixer::ProcessNode(
 
 	TArray<FBounds> ProposedBounds = OriginalBounds;
 
-	// 鍚岀骇鍚搁檮 + 绛夎窛淇
+	// 同级吸附 + 等距修正
 	FixChildrenSpacing(ProposedBounds, OriginalBounds, Preset, SnapThresholdX, SnapThresholdY, OutLog, Stats);
 
 	// Roll back when the conservative check fails.
@@ -671,7 +683,7 @@ void FLayoutFixer::ProcessNode(
 	if (!bPass)
 		Stats.RolledBack++;
 
-	// 搴旂敤淇
+	// 应用修正
 	if (bPass)
 	{
 		for (int32 i = 0; i < FixableIndices.Num(); ++i)

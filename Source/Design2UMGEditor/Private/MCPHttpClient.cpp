@@ -178,7 +178,7 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 								 FString& OutResponseBody,
 								 bool bExpectResponse)
 {
-	// 鏋勫缓 JSON-RPC 2.0 璇锋眰
+	// 构建 JSON-RPC 2.0 请求
 	TSharedRef<FJsonObject> RequestObj = MakeShared<FJsonObject>();
 	RequestObj->SetStringField(TEXT("jsonrpc"), TEXT("2.0"));
 	RequestObj->SetStringField(TEXT("method"), Method);
@@ -186,7 +186,7 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 	if (Params.IsValid())
 		RequestObj->SetObjectField(TEXT("params"), Params);
 
-	// notifications 涓嶉渶瑕?id
+	// notifications 不需要id
 	const bool bIsNotification = Method.StartsWith(TEXT("notifications/"));
 	if (!bIsNotification)
 		RequestObj->SetNumberField(TEXT("id"), NextRequestId++);
@@ -195,7 +195,7 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&RequestBody);
 	FJsonSerializer::Serialize(RequestObj, Writer);
 
-	// 鍒涘缓 HTTP 璇锋眰
+	// 创建 HTTP 请求
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = FHttpModule::Get().CreateRequest();
 	HttpRequest->SetURL(ServerEndpoint);
 	HttpRequest->SetVerb(TEXT("POST"));
@@ -247,7 +247,7 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 		return false;
 	}
 
-	// 闃诲绛夊緟锛屽悓鏃舵樉绀鸿繘搴︽潯骞?tick Slate 淇濇寔缂栬緫鍣?UI 鍝嶅簲
+	// 阻塞等待，同时显示进度条tick Slate 保持编辑器UI 响应
 	const double StartTime = FPlatformTime::Seconds();
 	const double Timeout = 30.0;
 	const float TotalSteps = static_cast<float>(Timeout / 0.01);
@@ -288,7 +288,7 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 
 bool FMCPHttpClient::ParseSSEResponse(const FString& SSEBody, TSharedPtr<FJsonObject>& OutResult)
 {
-	// SSE 鏍煎紡: "event: message\ndata: {json}\n\n"
+	// SSE 格式: "event: message\ndata: {json}\n\n"
 	// Extract the last "data:" line from the SSE payload.
 	FString JsonLine;
 	TArray<FString> Lines;
@@ -305,7 +305,7 @@ bool FMCPHttpClient::ParseSSEResponse(const FString& SSEBody, TSharedPtr<FJsonOb
 
 	if (JsonLine.IsEmpty())
 	{
-		// 鍙兘涓嶆槸 SSE 鏍煎紡锛岀洿鎺ュ皾璇曡В鏋愭暣涓?body
+		// 可能不是 SSE 格式，直接尝试解析整个body
 		JsonLine = SSEBody;
 	}
 
@@ -385,7 +385,7 @@ void FMCPHttpClient::CallToolAsync(const FString& ToolName,
 		return;
 	}
 
-	// 鏋勫缓 JSON-RPC 璇锋眰
+	// 构建 JSON-RPC 请求
 	TSharedRef<FJsonObject> RequestObj = MakeShared<FJsonObject>();
 	RequestObj->SetStringField(TEXT("jsonrpc"), TEXT("2.0"));
 	RequestObj->SetStringField(TEXT("method"), TEXT("tools/call"));

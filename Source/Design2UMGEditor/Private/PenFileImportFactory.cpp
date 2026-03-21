@@ -3,8 +3,8 @@
 #include "PenFileImportFactory.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGNotification.h"
+#include "DesignImportDialogs.h"
 #include "DesignImportPipeline.h"
-#include "DesignImportUtils.h"
 
 #include "WidgetBlueprint.h"
 #include "Misc/Paths.h"
@@ -80,7 +80,7 @@ UObject* UPenFileImportFactory::FactoryCreateFile(
 	}
 
 	// 多 frame：弹出选择器，异步生成
-	DesignImportUtils::ShowFrameSelector(
+	DesignImportDialogs::ShowFrameSelector(
 		Frames,
 		LOCTEXT("FrameSelectorTitle", "Select Frame to Import"),
 		LOCTEXT("FrameSelectorHint", "This file contains multiple frames. Double-click to import:"),

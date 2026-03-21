@@ -1,4 +1,4 @@
-### #28 IncrementalUpdater (1H 2M 1L)
+﻿### #28 IncrementalUpdater (1H 2M 1L)
 
 | 级别 | 问题 | 位置 |
 |------|------|------|

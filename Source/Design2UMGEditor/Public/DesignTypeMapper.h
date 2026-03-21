@@ -6,21 +6,21 @@
 #include "DesignSchema.h"
 
 /**
- * .pen 灞炴€у埌 UMG 灞炴€х殑鏄犲皠
+ * .pen 属性到 UMG 属性的映射
  */
 class FDesignTypeMapper
 {
 public:
-	/** 鑺傜偣绫诲瀷鍒?Widget 绫诲瀷 */
+	/** 节点类型到Widget 类型 */
 	static FString MapNodeTypeToWidget(EDesignNodeType Type, EDesignLayout Layout);
 
-	/** fontWeight 鍒?TypefaceFontName */
+	/** fontWeight TypefaceFontName */
 	static FName MapFontWeight(const FString& Weight);
 
-	/** alignItems 鍒?HAlign (Vertical甯冨眬) */
+	/** alignItems HAlign (Vertical布局) */
 	static EHorizontalAlignment MapAlignItemsH(EDesignAlignItems Align);
 
-	/** alignItems 鍒?VAlign (Horizontal甯冨眬) */
+	/** alignItems VAlign (Horizontal布局) */
 	static EVerticalAlignment MapAlignItemsV(EDesignAlignItems Align);
 };
 

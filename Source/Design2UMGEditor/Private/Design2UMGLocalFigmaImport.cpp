@@ -2,7 +2,7 @@
 
 #include "Design2UMGConverter.h"
 #include "Design2UMGLog.h"
-#include "DesignImportUtils.h"
+#include "DesignImportPipeline.h"
 #include "FigmaParser.h"
 #include "UMGSchema.h"
 
@@ -167,7 +167,7 @@ namespace Design2UMGLocalFigmaImport
 		FFigmaParser::ApplyImageUrls(ParsedDoc, ImageRefToLocalPath);
 
 		OutData = FDesign2UMGConverter::Convert(ParsedDoc);
-		DesignImportUtils::ResolveImages(OutData);
+		DesignImportPipeline::ResolveImages(OutData);
 
 		if (OutData.RootWidget.Children.Num() == 0)
 		{

@@ -1,4 +1,4 @@
-# Design2UMG 产品打磨计划
+﻿# Design2UMG 产品打磨计划
 
 **创建日期**：2026-02-17
 **背景**：与 Unity 商业竞品（Figma Converter for Unity $99、D.A. Assets Figma→UI Toolkit $49）对比后，识别出的"最后一公里"差距。核心算法（LayoutFixer、9宫格锚点）已领先竞品，瓶颈在产品化体验。

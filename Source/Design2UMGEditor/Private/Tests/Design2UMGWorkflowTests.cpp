@@ -2,9 +2,9 @@
 #include "Misc/AutomationTest.h"
 #include "Design2UMGConverter.h"
 #include "Design2UMGTestUtils.h"
+#include "DesignImportPipeline.h"
 #include "DesignImportUtils.h"
 #include "LayoutFixer.h"
-#include "PenImporter.h"
 #include "SDesign2UMGPreviewWindow.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Framework/Application/SlateApplication.h"
@@ -48,13 +48,18 @@ bool FPenWelcomeBatchImportTest::RunTest(const FString& Parameters)
 	};
 	for (const FFrameInfo& Frame : Frames)
 	{
-		FUMGWidgetData Data;
-		const bool bOk = FPenImporter::ImportFileWithTargetNode(PenFile, Frame.Id, Data);
+		FDesignDocument Document;
+		FString LoadError;
+		const bool bOk = DesignImportPipeline::LoadPenDocument(PenFile, Frame.Id, Document, &LoadError);
 		TestTrue(*FString::Printf(TEXT("Parse %s"), *Frame.Name), bOk);
 		if (!bOk)
 		{
+			AddError(LoadError);
 			continue;
 		}
+
+		FUMGWidgetData Data;
+		DesignImportPipeline::ConvertDocument(Document, Data);
 		if (GUsingNullRHI)
 		{
 			continue;

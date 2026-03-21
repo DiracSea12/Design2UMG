@@ -2,7 +2,19 @@
 
 #include "LayoutCalculator.h"
 
-float FLayoutCalculator::SelectAnchorWithHysteresis(
+namespace
+{
+	struct FAxisResult
+	{
+		float AnchorMin = 0.f;
+		float AnchorMax = 0.f;
+		float Alignment = 0.f;
+		float OffsetStart = 0.f;
+		float OffsetEnd = 0.f;
+	};
+}
+
+float SelectAnchorWithHysteresis(
 	float Center,
 	TOptional<float> OldAnchor,
 	const FLayoutPreset& Preset)
@@ -38,7 +50,7 @@ float FLayoutCalculator::SelectAnchorWithHysteresis(
 	}
 }
 
-bool FLayoutCalculator::ShouldSnapToEdge(
+bool ShouldSnapToEdge(
 	float Position,
 	float Size,
 	float EdgeThreshold,
@@ -50,12 +62,12 @@ bool FLayoutCalculator::ShouldSnapToEdge(
 	return bSnapToStart || bSnapToEnd;
 }
 
-bool FLayoutCalculator::ShouldUseStretchAnchors(float Size, float StretchThreshold)
+bool ShouldUseStretchAnchors(float Size, float StretchThreshold)
 {
 	return Size > StretchThreshold;
 }
 
-FLayoutCalculator::FAxisResult FLayoutCalculator::CalculateAxis(
+FAxisResult CalculateAxis(
 	float Pos, float Size, int32 CanvasSize, TOptional<float> OldAnchor, const FLayoutPreset& Preset)
 {
 	FAxisResult R;

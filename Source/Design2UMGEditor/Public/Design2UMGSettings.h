@@ -135,11 +135,6 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Placeholder Hatch", meta = (DisplayName = "Stripe Gap", ClampMin = "1", ClampMax = "64"))
 	int32 PlaceholderHatchStripeGap = 4;
 
-	// ========== Incremental Update ==========
-
-	UPROPERTY(Config, EditAnywhere, Category = "Incremental Update", meta = (DisplayName = "Enable Incremental Update", ToolTip = "Store .pen node IDs on generated widgets to enable incremental re-import."))
-	bool bEnableIncrementalUpdate = false;
-
 	// ========== Widget Class Overrides ==========
 
 	UPROPERTY(Config, EditAnywhere, Category = "Widget Class Overrides", meta = (DisplayName = "Class Override Rules", ToolTip = "When a node name contains the pattern, use the specified Widget class instead of the default."))
