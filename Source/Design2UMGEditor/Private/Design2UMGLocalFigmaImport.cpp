@@ -10,12 +10,16 @@
 #include "UMGSchema.h"
 
 #include "HAL/FileManager.h"
+#include "Dom/JsonObject.h"
+#include "Dom/JsonValue.h"
 #include "IImageWrapper.h"
 #include "IImageWrapperModule.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Misc/SecureHash.h"
 #include "Modules/ModuleManager.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 
 namespace
 {
@@ -25,6 +29,330 @@ namespace
 			+ RawId
 				.Replace(TEXT(":"), TEXT("_"))
 				.Replace(TEXT("/"), TEXT("_"));
+	}
+
+	FString MakeRenderFallbackKey(const FString& RawId)
+	{
+		return TEXT("render_")
+			+ RawId
+				.Replace(TEXT(":"), TEXT("_"))
+				.Replace(TEXT("/"), TEXT("_"))
+				.Replace(TEXT(";"), TEXT("_"));
+	}
+
+	struct FRawBounds
+	{
+		double X = 0.0;
+		double Y = 0.0;
+		double W = 0.0;
+		double H = 0.0;
+
+		bool IsValid() const
+		{
+			return W > 0.0 && H > 0.0;
+		}
+	};
+
+	struct FLocalRenderFallbackSpec
+	{
+		FString NodeId;
+		FString Key;
+		FString Reason;
+		FRawBounds RelativeBounds;
+	};
+
+	bool TryGetNumberField(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key, double& OutValue)
+	{
+		if (!Obj.IsValid())
+		{
+			return false;
+		}
+		return Obj->TryGetNumberField(Key, OutValue);
+	}
+
+	bool TryReadBoundsObject(const TSharedPtr<FJsonObject>& Obj, FRawBounds& OutBounds)
+	{
+		if (!Obj.IsValid())
+		{
+			return false;
+		}
+
+		return TryGetNumberField(Obj, TEXT("x"), OutBounds.X)
+			&& TryGetNumberField(Obj, TEXT("y"), OutBounds.Y)
+			&& TryGetNumberField(Obj, TEXT("width"), OutBounds.W)
+			&& TryGetNumberField(Obj, TEXT("height"), OutBounds.H)
+			&& OutBounds.IsValid();
+	}
+
+	bool TryGetNodeBounds(const TSharedPtr<FJsonObject>& NodeObj, FRawBounds& OutBounds)
+	{
+		if (!NodeObj.IsValid())
+		{
+			return false;
+		}
+
+		const TSharedPtr<FJsonObject>* BoundsObject = nullptr;
+		if (NodeObj->TryGetObjectField(TEXT("absoluteRenderBounds"), BoundsObject) && BoundsObject != nullptr)
+		{
+			if (TryReadBoundsObject(*BoundsObject, OutBounds))
+			{
+				return true;
+			}
+		}
+		if (NodeObj->TryGetObjectField(TEXT("absoluteBoundingBox"), BoundsObject) && BoundsObject != nullptr)
+		{
+			if (TryReadBoundsObject(*BoundsObject, OutBounds))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	FString GetJsonStringField(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key, const FString& DefaultValue = FString())
+	{
+		if (!Obj.IsValid())
+		{
+			return DefaultValue;
+		}
+
+		FString Value;
+		return Obj->TryGetStringField(Key, Value) ? Value : DefaultValue;
+	}
+
+	bool GetJsonBoolField(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key, const bool DefaultValue = false)
+	{
+		if (!Obj.IsValid())
+		{
+			return DefaultValue;
+		}
+
+		bool Value = DefaultValue;
+		return Obj->TryGetBoolField(Key, Value) ? Value : DefaultValue;
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* GetJsonArrayField(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key)
+	{
+		if (!Obj.IsValid())
+		{
+			return nullptr;
+		}
+		return Obj->HasTypedField<EJson::Array>(Key) ? &Obj->GetArrayField(Key) : nullptr;
+	}
+
+	bool HasVisibleJsonChildren(const TSharedPtr<FJsonObject>& NodeObj)
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Children = GetJsonArrayField(NodeObj, TEXT("children"));
+		if (!Children)
+		{
+			return false;
+		}
+
+		for (const TSharedPtr<FJsonValue>& ChildValue : *Children)
+		{
+			const TSharedPtr<FJsonObject> ChildObj = ChildValue.IsValid() ? ChildValue->AsObject() : nullptr;
+			if (ChildObj.IsValid() && GetJsonBoolField(ChildObj, TEXT("visible"), true))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	bool HasJsonArrayEntries(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key)
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Values = GetJsonArrayField(Obj, Key);
+		return Values && Values->Num() > 0;
+	}
+
+	bool HasNonEmptyJsonObjectField(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key)
+	{
+		if (!Obj.IsValid())
+		{
+			return false;
+		}
+
+		const TSharedPtr<FJsonValue> FieldValue = Obj->TryGetField(Key);
+		if (!FieldValue.IsValid() || FieldValue->Type != EJson::Object)
+		{
+			return false;
+		}
+
+		const TSharedPtr<FJsonObject> ValueObject = FieldValue->AsObject();
+		return ValueObject.IsValid() && ValueObject->Values.Num() > 0;
+	}
+
+	bool IsExcludedRenderFallbackNodeType(const FString& NodeType)
+	{
+		return NodeType == TEXT("TEXT")
+			|| NodeType == TEXT("INSTANCE")
+			|| NodeType == TEXT("COMPONENT")
+			|| NodeType == TEXT("COMPONENT_SET")
+			|| NodeType == TEXT("SECTION");
+	}
+
+	FString CollectRenderFallbackReason(const TSharedPtr<FJsonObject>& NodeObj)
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Fills = GetJsonArrayField(NodeObj, TEXT("fills"));
+		if (!Fills)
+		{
+			return FString();
+		}
+
+		TArray<FString> Reasons;
+		auto AddReason = [&Reasons](const FString& Reason)
+		{
+			if (!Reason.IsEmpty())
+			{
+				Reasons.AddUnique(Reason);
+			}
+		};
+
+		for (const TSharedPtr<FJsonValue>& FillValue : *Fills)
+		{
+			const TSharedPtr<FJsonObject> FillObj = FillValue.IsValid() ? FillValue->AsObject() : nullptr;
+			if (!FillObj.IsValid() || !GetJsonBoolField(FillObj, TEXT("visible"), true))
+			{
+				continue;
+			}
+
+			if (GetJsonStringField(FillObj, TEXT("type")) != TEXT("IMAGE"))
+			{
+				continue;
+			}
+
+			if (HasNonEmptyJsonObjectField(FillObj, TEXT("filters")))
+			{
+				AddReason(TEXT("image_filters"));
+			}
+
+			const FString BlendMode = GetJsonStringField(FillObj, TEXT("blendMode"), TEXT("NORMAL")).ToUpper();
+			if (BlendMode != TEXT("NORMAL") && BlendMode != TEXT("PASS-THROUGH") && BlendMode != TEXT("PASS_THROUGH"))
+			{
+				AddReason(FString::Printf(TEXT("image_blend_%s"), *BlendMode.ToLower()));
+			}
+		}
+
+		return FString::Join(Reasons, TEXT("+"));
+	}
+
+	bool ShouldUseLocalRenderFallback(const TSharedPtr<FJsonObject>& NodeObj, FString& OutReason)
+	{
+		OutReason.Reset();
+		if (!NodeObj.IsValid() || !GetJsonBoolField(NodeObj, TEXT("visible"), true))
+		{
+			return false;
+		}
+
+		if (IsExcludedRenderFallbackNodeType(GetJsonStringField(NodeObj, TEXT("type")).ToUpper()))
+		{
+			return false;
+		}
+
+		if (HasVisibleJsonChildren(NodeObj))
+		{
+			return false;
+		}
+
+		if (HasJsonArrayEntries(NodeObj, TEXT("reactions")) || HasJsonArrayEntries(NodeObj, TEXT("interactions")))
+		{
+			return false;
+		}
+
+		OutReason = CollectRenderFallbackReason(NodeObj);
+		return !OutReason.IsEmpty();
+	}
+
+	void CollectLocalRenderFallbackSpecs(
+		const TSharedPtr<FJsonObject>& NodeObj,
+		const FRawBounds& RootBounds,
+		TArray<FLocalRenderFallbackSpec>& OutSpecs)
+	{
+		if (!NodeObj.IsValid())
+		{
+			return;
+		}
+
+		FString Reason;
+		FRawBounds NodeBounds;
+		if (ShouldUseLocalRenderFallback(NodeObj, Reason) && TryGetNodeBounds(NodeObj, NodeBounds))
+		{
+			const FString NodeId = GetJsonStringField(NodeObj, TEXT("id"));
+			if (!NodeId.IsEmpty())
+			{
+				FLocalRenderFallbackSpec& Spec = OutSpecs.AddDefaulted_GetRef();
+				Spec.NodeId = NodeId;
+				Spec.Key = MakeRenderFallbackKey(NodeId);
+				Spec.Reason = Reason;
+				Spec.RelativeBounds.X = NodeBounds.X - RootBounds.X;
+				Spec.RelativeBounds.Y = NodeBounds.Y - RootBounds.Y;
+				Spec.RelativeBounds.W = NodeBounds.W;
+				Spec.RelativeBounds.H = NodeBounds.H;
+			}
+		}
+
+		const TArray<TSharedPtr<FJsonValue>>* Children = GetJsonArrayField(NodeObj, TEXT("children"));
+		if (!Children)
+		{
+			return;
+		}
+
+		for (const TSharedPtr<FJsonValue>& ChildValue : *Children)
+		{
+			CollectLocalRenderFallbackSpecs(ChildValue.IsValid() ? ChildValue->AsObject() : nullptr, RootBounds, OutSpecs);
+		}
+	}
+
+	bool TryParseJsonRoot(const FString& JsonString, TSharedPtr<FJsonObject>& OutRoot)
+	{
+		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonString);
+		return FJsonSerializer::Deserialize(Reader, OutRoot) && OutRoot.IsValid();
+	}
+
+	bool TryGetPrimaryLocalFigmaRoot(const FString& JsonString, TSharedPtr<FJsonObject>& OutRootNode)
+	{
+		TSharedPtr<FJsonObject> RootObject;
+		if (!TryParseJsonRoot(JsonString, RootObject))
+		{
+			return false;
+		}
+
+		const TSharedPtr<FJsonObject> DocumentObject = RootObject->HasTypedField<EJson::Object>(TEXT("document"))
+			? RootObject->GetObjectField(TEXT("document"))
+			: nullptr;
+		if (!DocumentObject.IsValid())
+		{
+			return false;
+		}
+
+		const TArray<TSharedPtr<FJsonValue>>* Pages = GetJsonArrayField(DocumentObject, TEXT("children"));
+		if (!Pages)
+		{
+			return false;
+		}
+
+		for (const TSharedPtr<FJsonValue>& PageValue : *Pages)
+		{
+			const TSharedPtr<FJsonObject> PageObject = PageValue.IsValid() ? PageValue->AsObject() : nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* Nodes = GetJsonArrayField(PageObject, TEXT("children"));
+			if (!Nodes)
+			{
+				continue;
+			}
+
+			for (const TSharedPtr<FJsonValue>& NodeValue : *Nodes)
+			{
+				const TSharedPtr<FJsonObject> NodeObject = NodeValue.IsValid() ? NodeValue->AsObject() : nullptr;
+				if (NodeObject.IsValid())
+				{
+					OutRootNode = NodeObject;
+					return true;
+				}
+			}
+		}
+
+		return false;
 	}
 
 	bool TryResolveVectorPngPath(const FString& NodeId, const FString& ImagesDir, FString& OutVecKey, FString& OutPngPath)
@@ -193,6 +521,65 @@ namespace
 		}
 
 		return true;
+	}
+
+	bool TryCropRawBgraImage(
+		const TArray64<uint8>& SourceRawData,
+		int32 SourceWidth,
+		int32 SourceHeight,
+		int32 Left,
+		int32 Top,
+		int32 CropWidth,
+		int32 CropHeight,
+		TArray64<uint8>& OutRawData)
+	{
+		if (SourceWidth <= 0 || SourceHeight <= 0 || CropWidth <= 0 || CropHeight <= 0)
+		{
+			return false;
+		}
+
+		if (Left < 0 || Top < 0 || Left + CropWidth > SourceWidth || Top + CropHeight > SourceHeight)
+		{
+			return false;
+		}
+
+		OutRawData.SetNumZeroed(static_cast<int64>(CropWidth) * static_cast<int64>(CropHeight) * 4);
+		for (int32 Row = 0; Row < CropHeight; ++Row)
+		{
+			const int64 SourceOffset = (static_cast<int64>(Top + Row) * SourceWidth + Left) * 4;
+			const int64 DestOffset = static_cast<int64>(Row) * CropWidth * 4;
+			FMemory::Memcpy(
+				OutRawData.GetData() + DestOffset,
+				SourceRawData.GetData() + SourceOffset,
+				static_cast<SIZE_T>(CropWidth) * 4);
+		}
+
+		return true;
+	}
+
+	bool TryFindPrimaryLocalFigmaReferencePng(const FString& JsonFilePath, FString& OutReferencePngPath)
+	{
+		const FString ExportDir = FPaths::GetPath(JsonFilePath);
+		TArray<FString> CandidateFiles;
+		IFileManager::Get().FindFiles(CandidateFiles, *(ExportDir / TEXT("*.png")), true, false);
+		if (CandidateFiles.Num() == 0)
+		{
+			return false;
+		}
+
+		int64 BestSize = INDEX_NONE;
+		for (const FString& CandidateFile : CandidateFiles)
+		{
+			const FString CandidatePath = ExportDir / CandidateFile;
+			const int64 CandidateSize = IFileManager::Get().FileSize(*CandidatePath);
+			if (CandidateSize > BestSize)
+			{
+				BestSize = CandidateSize;
+				OutReferencePngPath = CandidatePath;
+			}
+		}
+
+		return !OutReferencePngPath.IsEmpty() && FPaths::FileExists(OutReferencePngPath);
 	}
 
 	float ComputeLuminosity(const FVector3f& Color)
@@ -544,6 +931,137 @@ namespace
 		return nullptr;
 	}
 
+	int32 InjectLocalRenderFallbackCrops(
+		const FString& JsonString,
+		const FString& JsonFilePath,
+		FDesignDocument& ParsedDocument,
+		TMap<FString, FString>& OutMapping)
+	{
+		FString ReferencePngPath;
+		if (!TryFindPrimaryLocalFigmaReferencePng(JsonFilePath, ReferencePngPath))
+		{
+			return 0;
+		}
+
+		TSharedPtr<FJsonObject> RootNodeObject;
+		if (!TryGetPrimaryLocalFigmaRoot(JsonString, RootNodeObject))
+		{
+			return 0;
+		}
+
+		FRawBounds RootBounds;
+		if (!TryGetNodeBounds(RootNodeObject, RootBounds)
+			|| FMath::IsNearlyZero(static_cast<float>(RootBounds.W))
+			|| FMath::IsNearlyZero(static_cast<float>(RootBounds.H)))
+		{
+			return 0;
+		}
+
+		TArray<FLocalRenderFallbackSpec> Specs;
+		CollectLocalRenderFallbackSpecs(RootNodeObject, RootBounds, Specs);
+		if (Specs.Num() == 0)
+		{
+			return 0;
+		}
+		if (Specs.Num() > 12)
+		{
+			UE_LOG(LogDesign2UMG, Verbose,
+				TEXT("LocalFigmaImport: skip dense render fallback set (%d nodes) for %s"),
+				Specs.Num(),
+				*JsonFilePath);
+			return 0;
+		}
+
+		int32 ReferenceWidth = 0;
+		int32 ReferenceHeight = 0;
+		TArray64<uint8> ReferenceRawData;
+		FString ErrorMessage;
+		if (!DecodeImageFileToBGRA8(ReferencePngPath, ReferenceWidth, ReferenceHeight, ReferenceRawData, ErrorMessage))
+		{
+			UE_LOG(LogDesign2UMG, Warning,
+				TEXT("LocalFigmaImport: failed to decode primary reference png '%s': %s"),
+				*ReferencePngPath,
+				*ErrorMessage);
+			return 0;
+		}
+
+		const double ScaleX = static_cast<double>(ReferenceWidth) / RootBounds.W;
+		const double ScaleY = static_cast<double>(ReferenceHeight) / RootBounds.H;
+		if (ScaleX <= 0.0 || ScaleY <= 0.0)
+		{
+			return 0;
+		}
+
+		const FString ScopedPrefix = FPaths::GetBaseFilename(ReferencePngPath);
+		const FString DerivedDir = GetDerivedLocalFigmaImagesDir();
+		IFileManager::Get().MakeDirectory(*DerivedDir, true);
+
+		int32 InjectedCount = 0;
+		for (const FLocalRenderFallbackSpec& Spec : Specs)
+		{
+			TSharedPtr<FDesignNode> Node = FindDesignNodeByIdRecursive(ParsedDocument.Children, Spec.NodeId);
+			if (!Node.IsValid() || Node->Metadata.Contains(TEXT("figma.renderFallbackImageRef")))
+			{
+				continue;
+			}
+
+			const int32 Left = FMath::Clamp(FMath::FloorToInt(static_cast<float>(Spec.RelativeBounds.X * ScaleX)), 0, ReferenceWidth - 1);
+			const int32 Top = FMath::Clamp(FMath::FloorToInt(static_cast<float>(Spec.RelativeBounds.Y * ScaleY)), 0, ReferenceHeight - 1);
+			const int32 Right = FMath::Clamp(
+				FMath::CeilToInt(static_cast<float>((Spec.RelativeBounds.X + Spec.RelativeBounds.W) * ScaleX)),
+				Left + 1,
+				ReferenceWidth);
+			const int32 Bottom = FMath::Clamp(
+				FMath::CeilToInt(static_cast<float>((Spec.RelativeBounds.Y + Spec.RelativeBounds.H) * ScaleY)),
+				Top + 1,
+				ReferenceHeight);
+			const int32 CropWidth = Right - Left;
+			const int32 CropHeight = Bottom - Top;
+			if (CropWidth <= 0 || CropHeight <= 0)
+			{
+				continue;
+			}
+
+			const FString ScopedKey = MakeRenderFallbackKey(ScopedPrefix + TEXT("_") + Spec.NodeId);
+			const FString OutputPath = DerivedDir / (ScopedKey + TEXT(".png"));
+			if (!FPaths::FileExists(OutputPath))
+			{
+				TArray64<uint8> CroppedRawData;
+				if (!TryCropRawBgraImage(
+					ReferenceRawData,
+					ReferenceWidth,
+					ReferenceHeight,
+					Left,
+					Top,
+					CropWidth,
+					CropHeight,
+					CroppedRawData))
+				{
+					continue;
+				}
+
+				FString SaveError;
+				if (!SaveBGRA8ToPng(CroppedRawData, CropWidth, CropHeight, OutputPath, SaveError))
+				{
+					UE_LOG(LogDesign2UMG, Warning,
+						TEXT("LocalFigmaImport: failed to save render fallback crop '%s': %s"),
+						*Spec.NodeId,
+						*SaveError);
+					continue;
+				}
+			}
+
+			OutMapping.Add(ScopedKey, OutputPath);
+			Node->Metadata.Add(TEXT("figma.renderFallbackImageRef"), ScopedKey);
+			Node->Metadata.Add(TEXT("figma.renderFallbackScope"), TEXT("full"));
+			Node->Metadata.Add(TEXT("figma.renderFallbackSource"), TEXT("figma_reference_crop"));
+			Node->Metadata.Add(TEXT("figma.renderFallbackReason"), Spec.Reason);
+			++InjectedCount;
+		}
+
+		return InjectedCount;
+	}
+
 	bool FilterDocumentToTargetNode(
 		const FDesignDocument& InDocument,
 		const FString& TargetNodeId,
@@ -607,6 +1125,7 @@ namespace Design2UMGLocalFigmaImport
 		const FString ImagesDir = FPaths::GetPath(JsonFilePath) / TEXT("images");
 		TMap<FString, FString> ImageRefToLocalPath;
 		const int32 VecCount = InjectVectorImageFills(ParsedDocument.Children, ImagesDir, ImageRefToLocalPath);
+		const int32 RenderFallbackCount = InjectLocalRenderFallbackCrops(JsonStr, JsonFilePath, ParsedDocument, ImageRefToLocalPath);
 
 		TSet<FString> ImageRefs;
 		FFigmaParser::CollectImageRefs(ParsedDocument, ImageRefs);
@@ -624,8 +1143,8 @@ namespace Design2UMGLocalFigmaImport
 		}
 		const int32 LuminosityDerivedCount = BakeLuminosityOverlayImages(ParsedDocument.Children, ImageRefToLocalPath);
 
-		UE_LOG(LogDesign2UMG, Log, TEXT("LocalFigmaImport: %d image mappings (%d vec_*, %d image fills, %d baked luminosity overlays)"),
-			ImageRefToLocalPath.Num(), VecCount, ImageRefToLocalPath.Num() - VecCount, LuminosityDerivedCount);
+		UE_LOG(LogDesign2UMG, Log, TEXT("LocalFigmaImport: %d image mappings (%d vec_*, %d render fallbacks, %d image fills, %d baked luminosity overlays)"),
+			ImageRefToLocalPath.Num(), VecCount, RenderFallbackCount, ImageRefToLocalPath.Num() - VecCount - RenderFallbackCount, LuminosityDerivedCount);
 
 		FFigmaParser::ApplyImageUrls(ParsedDocument, ImageRefToLocalPath);
 		if (!FilterDocumentToTargetNode(ParsedDocument, TargetNodeId, OutDocument, OutError))

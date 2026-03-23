@@ -1,4 +1,4 @@
-# Changelog
+﻿# Changelog
 
 All notable changes to this project are documented here.
 
@@ -8,6 +8,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - Release hygiene cleanup for GitHub publishing (docs, CI, ignore rules).
+- `FUMGPropertyBag` removed legacy string-map accessors (`Contains/Find/FindRef/GetValueOr/operator[]/AsMap/ToMap`) in favor of typed getters plus `ForEachSerialized()`. External code should migrate to `TryGet*()` APIs.
 
 ## [1.0.0] - 2026-02-15
 

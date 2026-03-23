@@ -167,6 +167,46 @@ const vectorOut = api.serializeNode(vectorNode);
 assert.ok(Array.isArray(vectorOut.fills) && vectorOut.fills.length === 1, 'vector fills should preserve source fills only');
 assert.equal(vectorOut.fills[0].type, 'SOLID');
 
+const riskyLeafNode = {
+  id: '202:5356',
+  name: 'Image',
+  type: 'FRAME',
+  visible: true,
+  absoluteBoundingBox: { x: 0, y: 0, width: 160, height: 96 },
+  fills: [{
+    type: 'IMAGE',
+    visible: true,
+    opacity: 1,
+    blendMode: 'LUMINOSITY',
+    imageHash: 'img_hash_risky',
+    scaleMode: 'FIT',
+    filters: { contrast: 0.25 },
+  }],
+  strokes: [],
+  effects: [],
+  constraints: { vertical: 'MIN', horizontal: 'MIN' },
+  width: 160,
+  height: 96,
+  opacity: 1,
+  blendMode: 'NORMAL',
+  children: [],
+  reactions: [],
+  async exportAsync(options) {
+    if (options.format === 'PNG') {
+      return new Uint8Array([9, 8, 7, 6]);
+    }
+    throw new Error(`unexpected export format: ${options.format}`);
+  },
+};
+assert.equal(api.shouldExportNodeRenderFallback(riskyLeafNode).use, true, 'risky leaf should use render fallback');
+
+const safeContainerNode = {
+  ...riskyLeafNode,
+  id: '202:6000',
+  children: [{ id: 'child1', visible: true }],
+};
+assert.equal(api.shouldExportNodeRenderFallback(safeContainerNode).use, false, 'container should not use full render fallback');
+
 const restNode = api.unwrapRestExportResponse({
   document: {
     id: 'doc',
@@ -244,6 +284,16 @@ assert.ok(componentSets.set1.variantGroupProperties, 'variant group properties m
   }, images, 2, () => {});
   assert.ok(images.has('fill_hash'), 'fill image not collected');
   assert.ok(images.has('stroke_hash'), 'stroke image not collected');
+
+  const riskyRestNode = api.serializeNode(riskyLeafNode);
+  const restNodesById = api.indexRestNodes(riskyRestNode);
+  await api.collectImages(riskyLeafNode, images, 2, () => {}, restNodesById);
+  const renderKey = api.makeRenderFallbackKey('202:5356');
+  assert.ok(images.has(renderKey), 'render fallback image not collected');
+  assert.equal(riskyRestNode.design2umgRenderFallbackImageRef, renderKey, 'render fallback image ref missing');
+  assert.equal(riskyRestNode.design2umgRenderFallbackScope, 'full', 'render fallback scope missing');
+  assert.equal(riskyRestNode.design2umgRenderFallbackSource, 'figma_render_png', 'render fallback source missing');
+  assert.equal(riskyRestNode.design2umgRenderFallbackReason, 'image_filters+image_blend_luminosity', 'render fallback reason missing');
   console.log('FigmaExporter smoke test passed');
 })().catch((err) => {
   console.error(err);

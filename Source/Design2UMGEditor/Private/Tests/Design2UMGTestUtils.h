@@ -10,6 +10,24 @@
 
 namespace Design2UMGTestUtils
 {
+	inline bool TryGetWidgetProperty(const FUMGWidgetNode& Node, const TCHAR* Key, FString& OutValue)
+	{
+		return Node.Properties.TryGetString(Key, OutValue) && !OutValue.IsEmpty();
+	}
+
+	inline FString GetWidgetProperty(const FUMGWidgetNode& Node, const TCHAR* Key)
+	{
+		FString Value;
+		TryGetWidgetProperty(Node, Key, Value);
+		return Value;
+	}
+
+	inline bool HasWidgetProperty(const FUMGWidgetNode& Node, const TCHAR* Key)
+	{
+		FString Value;
+		return TryGetWidgetProperty(Node, Key, Value);
+	}
+
 	inline const FUMGWidgetNode* FindWidgetById(const FUMGWidgetNode& Node, const FString& TargetId)
 	{
 		if (Node.Id == TargetId)
@@ -31,9 +49,10 @@ namespace Design2UMGTestUtils
 		const FString& Key,
 		const FString* OptionalValue = nullptr)
 	{
-		if (const FString* Current = Node.Properties.Find(Key))
+		FString Current;
+		if (Node.Properties.TryGetString(Key, Current) && !Current.IsEmpty())
 		{
-			if (!OptionalValue || *Current == *OptionalValue)
+			if (!OptionalValue || Current == *OptionalValue)
 			{
 				return &Node;
 			}
@@ -52,9 +71,10 @@ namespace Design2UMGTestUtils
 	{
 		if (Node.Type == TEXT("TextBlock"))
 		{
-			if (const FString* Text = Node.Properties.Find(TEXT("Text")))
+			FString Text;
+			if (TryGetWidgetProperty(Node, TEXT("Text"), Text))
 			{
-				OutTexts.Add(*Text);
+				OutTexts.Add(Text);
 			}
 		}
 		for (const FUMGWidgetNode& Child : Node.Children)

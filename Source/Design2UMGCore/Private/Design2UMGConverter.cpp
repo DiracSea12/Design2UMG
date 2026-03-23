@@ -301,6 +301,76 @@ namespace
 		return Value && Value->Equals(TEXT("true"), ESearchCase::IgnoreCase);
 	}
 
+	bool HasMeaningfulNodeMetadata(const TSharedPtr<FDesignNode>& Node, const TCHAR* Key)
+	{
+		const FString Value = GetSourceExtension(Node, Key).TrimStartAndEnd();
+		return !Value.IsEmpty()
+			&& !Value.Equals(TEXT("[]"), ESearchCase::CaseSensitive)
+			&& !Value.Equals(TEXT("{}"), ESearchCase::CaseSensitive)
+			&& !Value.Equals(TEXT("null"), ESearchCase::IgnoreCase);
+	}
+
+	bool ShouldUseFigmaRenderFallback(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid() || Node->Children.Num() != 0)
+		{
+			return false;
+		}
+
+		if (Node->Type == EDesignNodeType::Text
+			|| Node->Type == EDesignNodeType::IconFont
+			|| Node->Type == EDesignNodeType::Ref)
+		{
+			return false;
+		}
+
+		const FString TexturePath = GetSourceExtension(Node, TEXT("figma.renderFallbackImageRef"));
+		if (TexturePath.IsEmpty())
+		{
+			return false;
+		}
+
+		const FString Scope = GetSourceExtension(Node, TEXT("figma.renderFallbackScope"));
+		if (!Scope.IsEmpty() && !Scope.Equals(TEXT("full"), ESearchCase::IgnoreCase))
+		{
+			return false;
+		}
+
+		const FString SourceNodeType = GetSourceExtension(Node, TEXT("sourceNodeType"));
+		if (SourceNodeType.Equals(TEXT("INSTANCE"), ESearchCase::IgnoreCase))
+		{
+			return false;
+		}
+
+		if (HasMeaningfulNodeMetadata(Node, TEXT("interactions")))
+		{
+			return false;
+		}
+
+		return true;
+	}
+
+	FUMGWidgetNode CreateFigmaRenderFallbackWidget(const TSharedPtr<FDesignNode>& Node)
+	{
+		FUMGWidgetNode Widget;
+		Widget.Type = TEXT("Image");
+
+		const FString TexturePath = GetSourceExtension(Node, TEXT("figma.renderFallbackImageRef"));
+		Widget.Properties.Add(TEXT("TexturePath"), TexturePath);
+		Widget.Brush.TexturePath = TexturePath;
+
+		if (Node->Width.IsFixed() && Node->Width.Value > 0.0f)
+		{
+			Widget.Properties.Add(TEXT("WidthOverride"), FString::SanitizeFloat(Node->Width.Value));
+		}
+		if (Node->Height.IsFixed() && Node->Height.Value > 0.0f)
+		{
+			Widget.Properties.Add(TEXT("HeightOverride"), FString::SanitizeFloat(Node->Height.Value));
+		}
+
+		return Widget;
+	}
+
 	bool HasWidgetStringProperty(const FUMGWidgetNode& Widget, const TCHAR* Key)
 	{
 		FString Value;
@@ -504,6 +574,19 @@ FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FConversio
 	}
 
 	FUMGWidgetNode Widget;
+	if (ShouldUseFigmaRenderFallback(Node))
+	{
+		Widget = CreateFigmaRenderFallbackWidget(Node);
+		Widget.Id = Node->Id;
+		Widget.Name = Node->Name.IsEmpty() ? Node->Id : Node->Name;
+		Widget.Bounds.X = Node->X;
+		Widget.Bounds.Y = Node->Y;
+		Widget.Bounds.W = Node->Width.Value;
+		Widget.Bounds.H = Node->Height.Value;
+
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: '%s' -> Figma render fallback image"), *Widget.Name);
+		return Widget;
+	}
 
 	switch (Node->Type)
 	{

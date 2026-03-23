@@ -132,6 +132,33 @@ static void SetJsonFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHA
 	}
 }
 
+static void CaptureRenderFallbackMetadata(const TSharedPtr<FJsonObject>& Obj, TMap<FString, FString>& Extensions)
+{
+	if (!Obj.IsValid())
+		return;
+
+	const struct
+	{
+		const TCHAR* SourceKey;
+		const TCHAR* TargetKey;
+	}
+	RenderFallbackKeys[] = {
+		{ TEXT("design2umgRenderFallbackImageRef"), TEXT("figma.renderFallbackImageRef") },
+		{ TEXT("design2umgRenderFallbackScope"), TEXT("figma.renderFallbackScope") },
+		{ TEXT("design2umgRenderFallbackSource"), TEXT("figma.renderFallbackSource") },
+		{ TEXT("design2umgRenderFallbackReason"), TEXT("figma.renderFallbackReason") },
+	};
+
+	for (const auto& KeyPair : RenderFallbackKeys)
+	{
+		const FString Value = GetStr(Obj, KeyPair.SourceKey);
+		if (!Value.IsEmpty())
+		{
+			Extensions.Add(KeyPair.TargetKey, Value);
+		}
+	}
+}
+
 static void CaptureSharedMetadataExtensions(const TSharedPtr<FJsonObject>& Obj, TMap<FString, FString>& Extensions)
 {
 	if (!Obj.IsValid())
@@ -1283,6 +1310,7 @@ TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const 
 			Node->Metadata.Add(TEXT("figma.vectorRasterFallback"), VectorRasterFallback);
 		}
 	}
+	CaptureRenderFallbackMetadata(NodeObj, Node->Metadata);
 
 	// Stroke
 	Node->Stroke = ParseStroke(NodeObj);
@@ -1490,6 +1518,11 @@ void CollectImageRefsRecursive(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSe
 			if (!VectorRasterFallback->IsEmpty())
 				OutRefs.Add(*VectorRasterFallback);
 		}
+		if (const FString* RenderFallback = Node->Metadata.Find(TEXT("figma.renderFallbackImageRef")))
+		{
+			if (!RenderFallback->IsEmpty())
+				OutRefs.Add(*RenderFallback);
+		}
 		CollectImageRefsRecursive(Node->Children, OutRefs);
 	}
 }
@@ -1523,6 +1556,11 @@ void ApplyImageUrlsRecursive(TArray<TSharedPtr<FDesignNode>>& Nodes, const TMap<
 		{
 			if (const FString* Url = Map.Find(*VectorRasterFallback))
 				*VectorRasterFallback = *Url;
+		}
+		if (FString* RenderFallback = Node->Metadata.Find(TEXT("figma.renderFallbackImageRef")))
+		{
+			if (const FString* Url = Map.Find(*RenderFallback))
+				*RenderFallback = *Url;
 		}
 		ApplyImageUrlsRecursive(Node->Children, Map);
 	}

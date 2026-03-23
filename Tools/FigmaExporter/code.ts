@@ -88,6 +88,10 @@ interface RestNode {
   resolvedVariableModes?: Record<string, any>;
   textTruncation?: string;
   maxLines?: number | null;
+  design2umgRenderFallbackImageRef?: string;
+  design2umgRenderFallbackScope?: string;
+  design2umgRenderFallbackSource?: string;
+  design2umgRenderFallbackReason?: string;
 }
 
 // ── Helpers ──
@@ -169,6 +173,94 @@ function setIfDefined<T extends object, K extends keyof any>(target: T, key: K, 
   if (value !== undefined && value !== null) {
     (target as any)[key] = value;
   }
+}
+
+function makeRenderFallbackKey(nodeId: string): string {
+  const sanitized = (nodeId || '')
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return `render_${sanitized || 'node'}`;
+}
+
+function indexRestNodes(node: RestNode | null | undefined, out = new Map<string, RestNode>()): Map<string, RestNode> {
+  if (!node) return out;
+  out.set(node.id, node);
+  for (const child of node.children || []) {
+    indexRestNodes(child, out);
+  }
+  return out;
+}
+
+function hasVisibleChildNodes(node: SceneNode): boolean {
+  if (!('children' in node)) return false;
+  return (node.children || []).some(child => child.visible !== false);
+}
+
+function hasNodeReactions(node: SceneNode): boolean {
+  return 'reactions' in node && Array.isArray((node as any).reactions) && (node as any).reactions.length > 0;
+}
+
+function isExcludedRenderFallbackNodeType(node: SceneNode): boolean {
+  return node.type === 'TEXT'
+    || node.type === 'INSTANCE'
+    || node.type === 'COMPONENT'
+    || node.type === 'COMPONENT_SET'
+    || node.type === 'SECTION';
+}
+
+function getRenderFallbackReasons(node: SceneNode): string[] {
+  if (!('fills' in node) || node.fills === figma.mixed) {
+    return [];
+  }
+
+  const reasons = new Set<string>();
+  for (const fill of node.fills as readonly Paint[]) {
+    if (fill.type !== 'IMAGE' || fill.visible === false) {
+      continue;
+    }
+
+    const imagePaint = fill as ImagePaint;
+    if (imagePaint.filters && Object.keys(imagePaint.filters).length > 0) {
+      reasons.add('image_filters');
+    }
+
+    const blendMode = String(imagePaint.blendMode || 'NORMAL').toUpperCase();
+    if (blendMode !== 'NORMAL' && blendMode !== 'PASS_THROUGH') {
+      reasons.add(`image_blend_${blendMode.toLowerCase()}`);
+    }
+  }
+
+  return Array.from(reasons.values());
+}
+
+function shouldExportNodeRenderFallback(node: SceneNode): { use: boolean; reason: string } {
+  if (isExcludedRenderFallbackNodeType(node)) {
+    return { use: false, reason: '' };
+  }
+  if (hasVisibleChildNodes(node)) {
+    return { use: false, reason: '' };
+  }
+  if (hasNodeReactions(node)) {
+    return { use: false, reason: '' };
+  }
+
+  const reasons = getRenderFallbackReasons(node);
+  if (reasons.length === 0) {
+    return { use: false, reason: '' };
+  }
+
+  return {
+    use: true,
+    reason: reasons.join('+'),
+  };
+}
+
+function attachRenderFallbackMetadata(restNode: RestNode | undefined, imageRef: string, reason: string): void {
+  if (!restNode) return;
+  restNode.design2umgRenderFallbackImageRef = imageRef;
+  restNode.design2umgRenderFallbackScope = 'full';
+  restNode.design2umgRenderFallbackSource = 'figma_render_png';
+  restNode.design2umgRenderFallbackReason = reason;
 }
 
 // ── Fill Serialization ──
@@ -603,8 +695,30 @@ async function collectImages(
   node: SceneNode,
   images: Map<string, Uint8Array>,
   scale: number,
-  onProgress: (text: string) => void
+  onProgress: (text: string) => void,
+  restNodesById?: Map<string, RestNode>
 ): Promise<void> {
+  const renderFallback = shouldExportNodeRenderFallback(node);
+  if (renderFallback.use && 'exportAsync' in node) {
+    const imageRef = makeRenderFallbackKey(node.id);
+    if (!images.has(imageRef)) {
+      try {
+        const bytes = await (node as any).exportAsync({
+          format: 'PNG',
+          constraint: { type: 'SCALE', value: scale },
+        });
+        images.set(imageRef, bytes);
+        onProgress(`Render: ${node.name}`);
+      } catch (e) {
+        console.warn(`Failed to export render fallback ${node.name}:`, e);
+      }
+    }
+
+    if (images.has(imageRef)) {
+      attachRenderFallbackMetadata(restNodesById?.get(node.id), imageRef, renderFallback.reason);
+    }
+  }
+
   // Image fills
   if ('fills' in node && node.fills !== figma.mixed) {
     for (const fill of node.fills as readonly Paint[]) {
@@ -667,12 +781,15 @@ async function collectImages(
   // Recurse children
   if ('children' in node) {
     for (const child of (node as any).children) {
-      await collectImages(child, images, scale, onProgress);
+      await collectImages(child, images, scale, onProgress, restNodesById);
     }
   }
 }
 
 const testApi = {
+  attachRenderFallbackMetadata,
+  indexRestNodes,
+  makeRenderFallbackKey,
   serializePaint,
   serializeEffect,
   buildTextStyle,
@@ -680,6 +797,7 @@ const testApi = {
   unwrapRestExportResponse,
   collectReferencedComponents,
   collectImages,
+  shouldExportNodeRenderFallback,
 };
 
 if (typeof globalThis !== 'undefined') {
@@ -744,9 +862,10 @@ if (typeof figma !== 'undefined') {
 
       figma.ui.postMessage({ type: 'progress', percent: 30, text: 'Collecting images...' });
       const images = new Map<string, Uint8Array>();
+      const restNodesById = indexRestNodes(serialized);
       await collectImages(root, images, scale, (text) => {
         figma.ui.postMessage({ type: 'progress', percent: 50, text });
-      });
+      }, restNodesById);
 
       figma.ui.postMessage({ type: 'progress', percent: 80, text: 'Preparing download...' });
 

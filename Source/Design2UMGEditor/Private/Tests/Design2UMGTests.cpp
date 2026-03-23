@@ -7,11 +7,60 @@
 #include "Design2UMGTestUtils.h"
 #include "LayoutCalculator.h"
 #include "LayoutMapper.h"
+#include "UMGWidgetUtils.h"
 #include "VisualMapper.h"
 #include "FigmaParser.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Components/EditableTextBox.h"
 #if WITH_AUTOMATION_WORKER
 using namespace Design2UMGTestUtils;
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPropertyBagEmptyStringStillAppliesTest,
+	"Design2UMG.PropertyBag.EmptyStringApplies",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPropertyBagEmptyStringStillAppliesTest::RunTest(const FString& Parameters)
+{
+	UEditableTextBox* Widget = NewObject<UEditableTextBox>(GetTransientPackage());
+	TestTrue(TEXT("EditableTextBox created"), Widget != nullptr);
+	if (!Widget)
+	{
+		return false;
+	}
+
+	Widget->SetText(FText::FromString(TEXT("Existing Text")));
+	Widget->SetHintText(FText::FromString(TEXT("Existing Hint")));
+
+	FUMGPropertyBag Properties;
+	Properties.Add(TEXT("Text"), TEXT(""));
+	Properties.Add(TEXT("HintText"), TEXT(""));
+	FUMGWidgetUtils::ApplyWidgetProperties(Widget, Properties);
+
+	TestTrue(TEXT("Explicit empty Text still clears widget text"), Widget->GetText().ToString().IsEmpty());
+	TestTrue(TEXT("Explicit empty HintText still clears widget hint"), Widget->GetHintText().ToString().IsEmpty());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPropertyBagDynamicFloatKeyTest,
+	"Design2UMG.PropertyBag.DynamicFloatKey",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPropertyBagDynamicFloatKeyTest::RunTest(const FString& Parameters)
+{
+	FUMGPropertyBag Properties;
+	Properties.Add(TEXT("BoxShadow_0_OffsetX"), TEXT("12.5"));
+	Properties.Add(TEXT("BoxShadow_0_OffsetY"), TEXT("-4.25"));
+	Properties.Add(TEXT("BoxShadow_0_Blur"), TEXT("16"));
+
+	float OffsetX = 0.0f;
+	float OffsetY = 0.0f;
+	float Blur = 0.0f;
+	TestTrue(TEXT("Dynamic OffsetX key is readable as float"), Properties.TryGetFloat(TEXT("BoxShadow_0_OffsetX"), OffsetX));
+	TestTrue(TEXT("Dynamic OffsetY key is readable as float"), Properties.TryGetFloat(TEXT("BoxShadow_0_OffsetY"), OffsetY));
+	TestTrue(TEXT("Dynamic Blur key is readable as float"), Properties.TryGetFloat(TEXT("BoxShadow_0_Blur"), Blur));
+	TestEqual(TEXT("OffsetX value preserved"), OffsetX, 12.5f);
+	TestEqual(TEXT("OffsetY value preserved"), OffsetY, -4.25f);
+	TestEqual(TEXT("Blur value preserved"), Blur, 16.0f);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenParserTest,
 	"Design2UMG.Parser.BasicDocument",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -211,10 +260,10 @@ bool FVisualMapperWrapWithBorderDirectTest::RunTest(const FString& Parameters)
 
 	FUMGWidgetNode Wrapped = FVisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
 	TestEqual(TEXT("Wrapped node remains Border"), Wrapped.Type, TEXT("Border"));
-	TestEqual(TEXT("BrushColor moved to outer border"), Wrapped.Properties.FindRef(TEXT("BrushColor")), TEXT("#112233FF"));
-	TestEqual(TEXT("RenderOpacity moved to outer border"), Wrapped.Properties.FindRef(TEXT("RenderOpacity")), TEXT("0.6"));
-	TestEqual(TEXT("RenderAngle moved to outer border"), Wrapped.Properties.FindRef(TEXT("RenderAngle")), TEXT("15.0"));
-	TestEqual(TEXT("Clipping moved to outer border"), Wrapped.Properties.FindRef(TEXT("Clipping")), TEXT("ClipToBounds"));
+	TestEqual(TEXT("BrushColor moved to outer border"), GetWidgetProperty(Wrapped, TEXT("BrushColor")), TEXT("#112233FF"));
+	TestEqual(TEXT("RenderOpacity moved to outer border"), GetWidgetProperty(Wrapped, TEXT("RenderOpacity")), TEXT("0.6"));
+	TestEqual(TEXT("RenderAngle moved to outer border"), GetWidgetProperty(Wrapped, TEXT("RenderAngle")), TEXT("15.0"));
+	TestEqual(TEXT("Clipping moved to outer border"), GetWidgetProperty(Wrapped, TEXT("Clipping")), TEXT("ClipToBounds"));
 	TestEqual(TEXT("Wrapped child count"), Wrapped.Children.Num(), 1);
 	if (Wrapped.Children.Num() != 1)
 	{
@@ -224,10 +273,10 @@ bool FVisualMapperWrapWithBorderDirectTest::RunTest(const FString& Parameters)
 	const FUMGWidgetNode& Inner = Wrapped.Children[0];
 	TestEqual(TEXT("Inner widget id suffix"), Inner.Id, TEXT("panel_inner"));
 	TestEqual(TEXT("Inner widget name suffix"), Inner.Name, TEXT("Panel_inner"));
-	TestFalse(TEXT("Inner widget should not keep BrushColor"), Inner.Properties.Contains(TEXT("BrushColor")));
-	TestFalse(TEXT("Inner widget should not keep RenderOpacity"), Inner.Properties.Contains(TEXT("RenderOpacity")));
-	TestFalse(TEXT("Inner widget should not keep RenderAngle"), Inner.Properties.Contains(TEXT("RenderAngle")));
-	TestFalse(TEXT("Inner widget should not keep Clipping"), Inner.Properties.Contains(TEXT("Clipping")));
+	TestFalse(TEXT("Inner widget should not keep BrushColor"), HasWidgetProperty(Inner, TEXT("BrushColor")));
+	TestFalse(TEXT("Inner widget should not keep RenderOpacity"), HasWidgetProperty(Inner, TEXT("RenderOpacity")));
+	TestFalse(TEXT("Inner widget should not keep RenderAngle"), HasWidgetProperty(Inner, TEXT("RenderAngle")));
+	TestFalse(TEXT("Inner widget should not keep Clipping"), HasWidgetProperty(Inner, TEXT("Clipping")));
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLayoutMapperDirectHelpersTest,
@@ -249,7 +298,7 @@ bool FLayoutMapperDirectHelpersTest::RunTest(const FString& Parameters)
 	Padding.Right = 3.0f;
 	Padding.Bottom = 4.0f;
 	FLayoutMapper::ApplyPadding(Widget, Padding);
-	TestEqual(TEXT("Padding serialized directly"), Widget.Properties.FindRef(TEXT("Padding")), TEXT("1.0,2.0,3.0,4.0"));
+	TestEqual(TEXT("Padding serialized directly"), GetWidgetProperty(Widget, TEXT("Padding")), TEXT("1.0,2.0,3.0,4.0"));
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRefOfRefDescendantsOverrideTest,
@@ -484,22 +533,22 @@ bool FRefFillClearSuppressesInheritedStrokeFillTest::RunTest(const FString& Para
 	if (DefaultItem != nullptr)
 	{
 		TestFalse(TEXT("Fill clear ref should clear inherited outline color"),
-			DefaultItem->Properties.Contains(TEXT("OutlineColor")));
+			HasWidgetProperty(*DefaultItem, TEXT("OutlineColor")));
 	}
 	const FUMGWidgetNode* GhostFrame = FindWidgetById(Data.RootWidget, TEXT("ghostFrame"));
 	TestTrue(TEXT("Ghost frame exists"), GhostFrame != nullptr);
 	if (GhostFrame != nullptr)
 	{
 		TestFalse(TEXT("Stroke without explicit fill should stay invisible"),
-			GhostFrame->Properties.Contains(TEXT("OutlineColor")));
+			HasWidgetProperty(*GhostFrame, TEXT("OutlineColor")));
 	}
 	const FUMGWidgetNode* OutlinedItem = FindWidgetById(Data.RootWidget, TEXT("outlinedItem"));
 	TestTrue(TEXT("Outlined item exists"), OutlinedItem != nullptr);
 	if (OutlinedItem != nullptr)
 	{
-		const FString* OutlineColor = OutlinedItem->Properties.Find(TEXT("OutlineColor"));
-		TestTrue(TEXT("Explicit stroke fill should be preserved"),
-			OutlineColor != nullptr && *OutlineColor == TEXT("#888888"));
+		TestEqual(TEXT("Explicit stroke fill should be preserved"),
+			GetWidgetProperty(*OutlinedItem, TEXT("OutlineColor")),
+			TEXT("#888888"));
 	}
 	return true;
 }
@@ -673,10 +722,10 @@ bool FIconFontNoMappingFallbackTest::RunTest(const FString& Parameters)
 	if (IconNode)
 	{
 		TestFalse(TEXT("Missing mapping should not inject invalid FontFamily string as Typeface"),
-			IconNode->Properties.Contains(TEXT("FontFamily")));
-		const FString* TextValue = IconNode->Properties.Find(TEXT("Text"));
-		TestTrue(TEXT("Missing mapping uses configured placeholder text"),
-			TextValue && *TextValue == TEXT("[missing-icon]"));
+			HasWidgetProperty(*IconNode, TEXT("FontFamily")));
+		TestEqual(TEXT("Missing mapping uses configured placeholder text"),
+			GetWidgetProperty(*IconNode, TEXT("Text")),
+			TEXT("[missing-icon]"));
 	}
 	Settings->IconFontAssetMap = SavedMap;
 	Settings->DefaultIconFontAssetPath = SavedDefaultPath;
@@ -713,10 +762,10 @@ bool FIconFontNoMappingKeepIconNameTest::RunTest(const FString& Parameters)
 	if (IconNode)
 	{
 		TestFalse(TEXT("Missing mapping should not inject invalid FontFamily string as Typeface"),
-			IconNode->Properties.Contains(TEXT("FontFamily")));
-		const FString* TextValue = IconNode->Properties.Find(TEXT("Text"));
-		TestTrue(TEXT("Empty placeholder should keep original IconName text"),
-			TextValue && *TextValue == ExpectedIconName);
+			HasWidgetProperty(*IconNode, TEXT("FontFamily")));
+		TestEqual(TEXT("Empty placeholder should keep original IconName text"),
+			GetWidgetProperty(*IconNode, TEXT("Text")),
+			ExpectedIconName);
 	}
 	Settings->IconFontAssetMap = SavedMap;
 	Settings->DefaultIconFontAssetPath = SavedDefaultPath;
@@ -1076,6 +1125,76 @@ bool FFigmaStrokeVisibilityGateTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Visible-stroke align parsed"), VisibleStroke->Stroke.Align, EDesignStrokeAlign::Outside);
 	return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaExpandedContainerRenderBoundsUseLayoutSpaceTest,
+	"Design2UMG.FigmaParser.ExpandedContainerRenderBoundsUseLayoutSpace",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaExpandedContainerRenderBoundsUseLayoutSpaceTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page 1",
+				"type": "CANVAS",
+				"children": [{
+					"id": "0:2",
+					"name": "Root",
+					"type": "FRAME",
+					"visible": true,
+					"clipsContent": true,
+					"absoluteBoundingBox": {"x":0,"y":0,"width":100,"height":80},
+					"absoluteRenderBounds": {"x":-8,"y":-8,"width":116,"height":96},
+					"effects": [{
+						"type": "DROP_SHADOW",
+						"visible": true,
+						"blendMode": "NORMAL",
+						"offset": {"x":0,"y":0},
+						"radius": 8,
+						"color": {"r":0,"g":0,"b":0,"a":0.25}
+					}],
+					"children": [{
+						"id": "0:3",
+						"name": "Child",
+						"type": "RECTANGLE",
+						"visible": true,
+						"absoluteBoundingBox": {"x":10,"y":12,"width":40,"height":20},
+						"absoluteRenderBounds": {"x":10,"y":12,"width":40,"height":20},
+						"fills": [{"type":"SOLID","visible":true,"color":{"r":1,"g":1,"b":1,"a":1}}]
+					}]
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Figma parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	TestEqual(TEXT("Top-level frame count"), Doc.Children.Num(), 1);
+	if (Doc.Children.Num() != 1)
+		return false;
+
+	const TSharedPtr<FDesignNode>& Root = Doc.Children[0];
+	TestTrue(TEXT("Root X present"), Root->bHasX);
+	TestTrue(TEXT("Root Y present"), Root->bHasY);
+	TestEqual(TEXT("Root X stays in layout space"), Root->X, 0.0f);
+	TestEqual(TEXT("Root Y stays in layout space"), Root->Y, 0.0f);
+	TestTrue(TEXT("Root width fixed"), Root->Width.IsFixed());
+	TestTrue(TEXT("Root height fixed"), Root->Height.IsFixed());
+	TestEqual(TEXT("Root width uses layout bounds"), Root->Width.Value, 100.0f);
+	TestEqual(TEXT("Root height uses layout bounds"), Root->Height.Value, 80.0f);
+	TestEqual(TEXT("Root child count"), Root->Children.Num(), 1);
+	if (Root->Children.Num() != 1)
+		return false;
+
+	const TSharedPtr<FDesignNode>& Child = Root->Children[0];
+	TestTrue(TEXT("Child X present"), Child->bHasX);
+	TestTrue(TEXT("Child Y present"), Child->bHasY);
+	TestEqual(TEXT("Child X remains relative to layout bounds"), Child->X, 10.0f);
+	TestEqual(TEXT("Child Y remains relative to layout bounds"), Child->Y, 12.0f);
+	return true;
+}
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaCornerRadiusNormalizationTest,
 	"Design2UMG.FigmaParser.CornerRadiusNormalization",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -1276,12 +1395,9 @@ bool FPenExtendedFieldsAndMeshGradientTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Find override text widget"), OverrideLabel != nullptr);
 	if (!OverrideLabel)
 		return false;
-	const FString* FontStyle = OverrideLabel->Properties.Find(TEXT("FontStyle"));
-	TestTrue(TEXT("Override fontStyle propagated"), FontStyle && *FontStyle == TEXT("italic"));
-	const FString* Underline = OverrideLabel->Properties.Find(TEXT("Underline"));
-	TestTrue(TEXT("Override underline propagated"), Underline && *Underline == TEXT("true"));
-	const FString* Href = OverrideLabel->Properties.Find(TEXT("Href"));
-	TestTrue(TEXT("Override href propagated"), Href && *Href == TEXT("https://override.example"));
+	TestEqual(TEXT("Override fontStyle propagated"), GetWidgetProperty(*OverrideLabel, TEXT("FontStyle")), TEXT("italic"));
+	TestEqual(TEXT("Override underline propagated"), GetWidgetProperty(*OverrideLabel, TEXT("Underline")), TEXT("true"));
+	TestEqual(TEXT("Override href propagated"), GetWidgetProperty(*OverrideLabel, TEXT("Href")), TEXT("https://override.example"));
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaGridWrapMetadataTest,
@@ -1406,6 +1522,295 @@ bool FFigmaGridWrapMetadataTest::RunTest(const FString& Parameters)
 		return false;
 	TestEqual(TEXT("Grid widget type"), GridWidget->Type, TEXT("UniformGridPanel"));
 	TestEqual(TEXT("Wrap widget type"), WrapWidget->Type, TEXT("WrapBox"));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWrapGapUsesInnerSlotPaddingOnlyTest,
+	"Design2UMG.Layout.WrapGapUsesInnerSlotPaddingOnly",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FWrapGapUsesInnerSlotPaddingOnlyTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page 1",
+				"type": "CANVAS",
+				"children": [{
+					"id": "0:2",
+					"name": "Root",
+					"type": "FRAME",
+					"visible": true,
+					"absoluteBoundingBox": {"x":0,"y":0,"width":400,"height":300},
+					"children": [{
+						"id": "wrap1",
+						"name": "Wrap",
+						"type": "FRAME",
+						"visible": true,
+						"layoutMode": "HORIZONTAL",
+						"layoutWrap": "WRAP",
+						"itemSpacing": 24,
+						"counterAxisSpacing": 16,
+						"absoluteBoundingBox": {"x":0,"y":0,"width":300,"height":200},
+						"children": [
+							{"id":"c1","name":"Card1","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":100,"height":50}},
+							{"id":"c2","name":"Card2","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":100,"y":0,"width":100,"height":50}}
+						]
+					}]
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Wrap gap parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* WrapWidget = FindWidgetById(Data.RootWidget, TEXT("wrap1"));
+	TestTrue(TEXT("Wrap widget exists"), WrapWidget != nullptr);
+	if (!WrapWidget || WrapWidget->Children.Num() < 2)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Wrap uses dual-axis inner slot padding"), GetWidgetProperty(*WrapWidget, TEXT("InnerSlotPadding")), TEXT("24.0,16.0"));
+	TestTrue(TEXT("Second child has no duplicated left gap"), FMath::IsNearlyZero(WrapWidget->Children[1].Slot.Padding.Left));
+	TestTrue(TEXT("Second child has no duplicated top gap"), FMath::IsNearlyZero(WrapWidget->Children[1].Slot.Padding.Top));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaWrapFillChildPreservesMeasuredSizeTest,
+	"Design2UMG.FigmaParser.WrapFillChildPreservesMeasuredSize",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaWrapFillChildPreservesMeasuredSizeTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page 1",
+				"type": "CANVAS",
+				"children": [{
+					"id": "0:2",
+					"name": "Root",
+					"type": "FRAME",
+					"visible": true,
+					"absoluteBoundingBox": {"x":0,"y":0,"width":400,"height":300},
+					"children": [{
+						"id": "wrap1",
+						"name": "Wrap",
+						"type": "FRAME",
+						"visible": true,
+						"layoutMode": "HORIZONTAL",
+						"layoutWrap": "WRAP",
+						"itemSpacing": 24,
+						"counterAxisSpacing": 16,
+						"absoluteBoundingBox": {"x":0,"y":0,"width":300,"height":200},
+						"children": [
+							{
+								"id":"card1",
+								"name":"Card1",
+								"type":"FRAME",
+								"visible":true,
+								"layoutMode":"VERTICAL",
+								"layoutSizingHorizontal":"FILL",
+								"layoutSizingVertical":"FIXED",
+								"layoutGrow":1,
+								"absoluteBoundingBox":{"x":0,"y":0,"width":100,"height":60},
+								"children":[
+									{
+										"id":"img1",
+										"name":"Image1",
+										"type":"RECTANGLE",
+										"visible":true,
+										"layoutSizingHorizontal":"FILL",
+										"layoutSizingVertical":"FIXED",
+										"absoluteBoundingBox":{"x":0,"y":0,"width":100,"height":40},
+										"fills":[{"type":"SOLID","visible":true,"color":{"r":1,"g":1,"b":1,"a":1}}]
+									}
+								]
+							},
+							{
+								"id":"card2",
+								"name":"Card2",
+								"type":"FRAME",
+								"visible":true,
+								"layoutMode":"VERTICAL",
+								"layoutSizingHorizontal":"FILL",
+								"layoutSizingVertical":"FIXED",
+								"layoutGrow":1,
+								"absoluteBoundingBox":{"x":124,"y":0,"width":100,"height":60},
+								"children":[
+									{
+										"id":"img2",
+										"name":"Image2",
+										"type":"RECTANGLE",
+										"visible":true,
+										"layoutSizingHorizontal":"FILL",
+										"layoutSizingVertical":"FIXED",
+										"absoluteBoundingBox":{"x":124,"y":0,"width":100,"height":40},
+										"fills":[{"type":"SOLID","visible":true,"color":{"r":1,"g":1,"b":1,"a":1}}]
+									}
+								]
+							}
+						]
+					}]
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Wrap fill parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* WrapWidget = FindWidgetById(Data.RootWidget, TEXT("wrap1"));
+	const FUMGWidgetNode* Card1SizeBox = FindWidgetById(Data.RootWidget, TEXT("card1_sz"));
+	TestTrue(TEXT("Wrap widget exists"), WrapWidget != nullptr);
+	TestTrue(TEXT("Wrap fill child gets SizeBox"), Card1SizeBox != nullptr);
+	if (!WrapWidget || !Card1SizeBox)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Wrap child SizeBox type"), Card1SizeBox->Type, TEXT("SizeBox"));
+	TestEqual(TEXT("Wrap fill child preserves measured width"), GetWidgetProperty(*Card1SizeBox, TEXT("WidthOverride")), TEXT("100.0"));
+	TestEqual(TEXT("Wrap fill child preserves measured height"), GetWidgetProperty(*Card1SizeBox, TEXT("HeightOverride")), TEXT("60.0"));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaCenteredFlowFillTextKeepsMeasuredWidthTest,
+	"Design2UMG.FigmaParser.CenteredFlowFillTextKeepsMeasuredWidth",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaCenteredFlowFillTextKeepsMeasuredWidthTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page 1",
+				"type": "CANVAS",
+				"children": [{
+					"id": "0:2",
+					"name": "Root",
+					"type": "FRAME",
+					"visible": true,
+					"absoluteBoundingBox": {"x":0,"y":0,"width":200,"height":120},
+					"children": [{
+						"id":"nav",
+						"name":"Nav",
+						"type":"FRAME",
+						"visible":true,
+						"layoutMode":"VERTICAL",
+						"counterAxisSizingMode":"FIXED",
+						"primaryAxisSizingMode":"FIXED",
+						"absoluteBoundingBox":{"x":0,"y":0,"width":72,"height":40},
+						"children":[
+							{
+								"id":"nav_label",
+								"name":"Label",
+								"type":"TEXT",
+								"visible":true,
+								"layoutSizingHorizontal":"FILL",
+								"layoutSizingVertical":"HUG",
+								"absoluteBoundingBox":{"x":0,"y":0,"width":72,"height":16},
+								"absoluteRenderBounds":{"x":21.2,"y":3,"width":29.5,"height":9.1},
+								"characters":"Label",
+								"style":{
+									"fontFamily":"Roboto",
+									"fontWeight":500,
+									"fontSize":12,
+									"textAlignHorizontal":"CENTER",
+									"textAlignVertical":"TOP",
+									"textCase":"ORIGINAL",
+									"textDecoration":"NONE",
+									"letterSpacing":0.5,
+									"lineHeightUnit":"PIXELS",
+									"lineHeightPx":16
+								}
+							}
+						]
+					}]
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Centered flow fill text parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* LabelSizeBox = FindWidgetById(Data.RootWidget, TEXT("nav_label_sz"));
+	TestTrue(TEXT("Centered flow fill text gets SizeBox"), LabelSizeBox != nullptr);
+	if (!LabelSizeBox)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Centered flow fill text preserves measured width"), GetWidgetProperty(*LabelSizeBox, TEXT("WidthOverride")), TEXT("72.0"));
+	TestEqual(TEXT("Centered flow fill text preserves measured height"), GetWidgetProperty(*LabelSizeBox, TEXT("HeightOverride")), TEXT("16.0"));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaWrapPaddingUsesBorderWrapperTest,
+	"Design2UMG.FigmaParser.WrapPaddingUsesBorderWrapper",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaWrapPaddingUsesBorderWrapperTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page 1",
+				"type": "CANVAS",
+				"children": [{
+					"id": "0:2",
+					"name": "Root",
+					"type": "FRAME",
+					"visible": true,
+					"absoluteBoundingBox": {"x":0,"y":0,"width":400,"height":300},
+					"children": [{
+						"id": "wrap_pad",
+						"name": "WrapPad",
+						"type": "FRAME",
+						"visible": true,
+						"layoutMode": "HORIZONTAL",
+						"layoutWrap": "WRAP",
+						"itemSpacing": 24,
+						"counterAxisSpacing": 16,
+						"paddingLeft": 24,
+						"paddingRight": 24,
+						"paddingTop": 8,
+						"paddingBottom": 32,
+						"absoluteBoundingBox": {"x":0,"y":0,"width":300,"height":200},
+						"children": [
+							{"id":"c1","name":"Card1","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":100,"height":50}},
+							{"id":"c2","name":"Card2","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":100,"y":0,"width":100,"height":50}}
+						]
+					}]
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Wrap padding parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* WrapWidget = FindWidgetById(Data.RootWidget, TEXT("wrap_pad"));
+	TestTrue(TEXT("Wrap padding widget exists"), WrapWidget != nullptr);
+	if (!WrapWidget)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Wrap padding container is promoted to border"), WrapWidget->Type, TEXT("Border"));
+	TestEqual(TEXT("Wrap padding serialized on border wrapper"), GetWidgetProperty(*WrapWidget, TEXT("Padding")), TEXT("24.0,8.0,24.0,32.0"));
+	TestTrue(TEXT("Border wrapper keeps inner wrap child"), WrapWidget->Children.Num() == 1 && WrapWidget->Children[0].Type == TEXT("WrapBox"));
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenEmptySlotSemanticHintTest,
@@ -1535,15 +1940,15 @@ bool FPlaceholderSurfaceConversionTest::RunTest(const FString& Parameters)
 		return false;
 	}
 	TestEqual(TEXT("slotCell uses Image"), SlotCell->Type, TEXT("Image"));
-	TestEqual(TEXT("slotCell placeholder material"), SlotCell->Properties.FindRef(TEXT("MaterialRef")), TEXT("placeholdersurface"));
-	TestTrue(TEXT("slotCell placeholder params carry fill color"), SlotCell->Properties.FindRef(TEXT("MaterialParams")).Contains(TEXT("#D282FF33")));
-	TestTrue(TEXT("slotCell placeholder params carry outline color"), SlotCell->Properties.FindRef(TEXT("MaterialParams")).Contains(TEXT("#D480FF")));
-	TestTrue(TEXT("slotCell placeholder width override exists"), SlotCell->Properties.Contains(TEXT("WidthOverride")));
-	TestTrue(TEXT("slotCell placeholder height override exists"), SlotCell->Properties.Contains(TEXT("HeightOverride")));
+	TestEqual(TEXT("slotCell placeholder material"), GetWidgetProperty(*SlotCell, TEXT("MaterialRef")), TEXT("placeholdersurface"));
+	TestTrue(TEXT("slotCell placeholder params carry fill color"), GetWidgetProperty(*SlotCell, TEXT("MaterialParams")).Contains(TEXT("#D282FF33")));
+	TestTrue(TEXT("slotCell placeholder params carry outline color"), GetWidgetProperty(*SlotCell, TEXT("MaterialParams")).Contains(TEXT("#D480FF")));
+	TestTrue(TEXT("slotCell placeholder width override exists"), HasWidgetProperty(*SlotCell, TEXT("WidthOverride")));
+	TestTrue(TEXT("slotCell placeholder height override exists"), HasWidgetProperty(*SlotCell, TEXT("HeightOverride")));
 	TestEqual(TEXT("pageSlot uses Image"), PageSlot->Type, TEXT("Image"));
-	TestEqual(TEXT("pageSlot placeholder material"), PageSlot->Properties.FindRef(TEXT("MaterialRef")), TEXT("placeholdersurface"));
-	TestTrue(TEXT("pageSlot placeholder params carry fill color"), PageSlot->Properties.FindRef(TEXT("MaterialParams")).Contains(TEXT("#D282FF33")));
-	TestTrue(TEXT("pageSlot placeholder params carry outline color"), PageSlot->Properties.FindRef(TEXT("MaterialParams")).Contains(TEXT("#D480FF")));
+	TestEqual(TEXT("pageSlot placeholder material"), GetWidgetProperty(*PageSlot, TEXT("MaterialRef")), TEXT("placeholdersurface"));
+	TestTrue(TEXT("pageSlot placeholder params carry fill color"), GetWidgetProperty(*PageSlot, TEXT("MaterialParams")).Contains(TEXT("#D282FF33")));
+	TestTrue(TEXT("pageSlot placeholder params carry outline color"), GetWidgetProperty(*PageSlot, TEXT("MaterialParams")).Contains(TEXT("#D480FF")));
 	Settings->PlaceholderHatchBackgroundColor = SavedBg;
 	Settings->PlaceholderHatchStripeColor = SavedStripe;
 	return true;
@@ -1586,7 +1991,7 @@ bool FPlaceholderSurfacePaletteTracksRefContextTest::RunTest(const FString& Para
 	TestTrue(TEXT("slotBase exists"), SlotBase != nullptr);
 	if (SlotBase != nullptr)
 	{
-		const FString Params = SlotBase->Properties.FindRef(TEXT("MaterialParams"));
+		const FString Params = GetWidgetProperty(*SlotBase, TEXT("MaterialParams"));
 		TestTrue(TEXT("Base placeholder keeps definition palette"), Params.Contains(TEXT("#D282FF33")));
 		TestTrue(TEXT("Base placeholder keeps definition outline"), Params.Contains(TEXT("#D480FF")));
 	}
@@ -1594,7 +1999,7 @@ bool FPlaceholderSurfacePaletteTracksRefContextTest::RunTest(const FString& Para
 	TestTrue(TEXT("slotInstance exists"), SlotInstance != nullptr);
 	if (SlotInstance != nullptr)
 	{
-		const FString Params = SlotInstance->Properties.FindRef(TEXT("MaterialParams"));
+		const FString Params = GetWidgetProperty(*SlotInstance, TEXT("MaterialParams"));
 		TestTrue(TEXT("Expanded ref placeholder uses instance palette"), Params.Contains(TEXT("#9682FF33")));
 		TestTrue(TEXT("Expanded ref placeholder uses instance outline"), Params.Contains(TEXT("#9580FF")));
 	}
@@ -1637,7 +2042,7 @@ bool FConverterTextAlignVerticalDoesNotMoveSlotTest::RunTest(const FString& Para
 	{
 		return false;
 	}
-	TestEqual(TEXT("textAlignVertical kept as metadata"), Label->Properties.FindRef(TEXT("TextAlignVertical")), TEXT("Center"));
+	TestEqual(TEXT("textAlignVertical kept as metadata"), GetWidgetProperty(*Label, TEXT("TextAlignVertical")), TEXT("Center"));
 	TestEqual(TEXT("Parent slot stays top-aligned"), Label->Slot.VerticalAlignment, TEXT("Top"));
 	return true;
 }
@@ -1682,7 +2087,7 @@ bool FConverterNonUniformStrokePaddingTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
-	TestEqual(TEXT("Outside right stroke only adds right inset"), Panel->Properties.FindRef(TEXT("StrokePadding")), TEXT("0.0,0.0,0.5,0.0"));
+	TestEqual(TEXT("Outside right stroke only adds right inset"), GetWidgetProperty(*Panel, TEXT("StrokePadding")), TEXT("0.0,0.0,0.5,0.0"));
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenOfficialFieldParityTest,
@@ -1818,6 +2223,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaOfficialFieldParityTest,
 bool FFigmaOfficialFieldParityTest::RunTest(const FString& Parameters)
 {
 	const FString Json = TEXT(R"({
+		"components":{"12:34":{"key":"component-key-1","name":"Sidebar Item Active?=True","description":"","remote":true,"componentSetId":"56:78","componentPropertyDefinitions":{"title":{"type":"TEXT","defaultValue":"Hello"}},"documentationLinks":[{"uri":"https://example.com/component"}]}},
+		"componentSets":{"56:78":{"key":"component-set-key-1","name":"Sidebar Item","description":"","remote":true,"componentPropertyDefinitions":{"Active":{"type":"BOOLEAN","defaultValue":true}},"variantGroupProperties":{"Active":{"values":["True","False"]}}}},
 		"document": {"id":"0:0","name":"Doc","type":"DOCUMENT","prototypeStartNodeID":"0:2","prototypeDevice":{"type":"PRESET","size":"DESKTOP"},"children":[
 			{"id":"0:1","name":"Page","type":"CANVAS","children":[
 				{"id":"0:2","name":"Root","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":800,"height":600},"children":[
@@ -1838,6 +2245,7 @@ bool FFigmaOfficialFieldParityTest::RunTest(const FString& Parameters)
 					 "flowStartingPoints":[{"nodeId":"0:2","name":"Flow 1"}],
 					 "componentPropertyReferences":{"width":"123:1"},
 					 "explicitVariableModes":{"1":"2:3"},
+					 "resolvedVariableModes":{"1":"2:3"},
 					 "annotations":[{"label":"todo","properties":{}}],
 					 "measurements":[{"label":"w","value":320}],
 					 "exportSettings":[{"suffix":"@2x","format":"PNG"}],
@@ -1849,8 +2257,9 @@ bool FFigmaOfficialFieldParityTest::RunTest(const FString& Parameters)
 					 "absoluteBoundingBox":{"x":400,"y":10,"width":120,"height":80},
 					 "fills":[{"type":"SOLID","visible":true,"opacity":0.5,"blendMode":"MULTIPLY","color":{"r":1,"g":0,"b":0}}],
 					 "effects":[{"type":"DROP_SHADOW","visible":true,"blendMode":"SCREEN","offset":{"x":1,"y":2},"radius":3,"spread":0.5,"opacity":0.6,"color":{"r":0,"g":0,"b":0}}]},
-					{"id":"inst1","name":"InstanceParity","type":"INSTANCE","componentId":"12:34","visible":true,
+					{"id":"inst1","name":"InstanceParity","type":"INSTANCE","componentId":"12:34","componentSetId":"56:78","mainComponentKey":"component-key-1","visible":true,
 					 "componentProperties":{"title":{"type":"TEXT","value":"Hello"}},
+					 "variantProperties":{"Active":"True","Size":"Small"},
 					 "overrides":[{"id":"inst1_txt","path":["characters"],"value":"Override"}],
 					 "isExposedInstance":true,
 					 "absoluteBoundingBox":{"x":560,"y":10,"width":120,"height":80},
@@ -1884,14 +2293,27 @@ bool FFigmaOfficialFieldParityTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("figma flowStartingPoints"), Node->Metadata.Contains(TEXT("flowStartingPoints")));
 	TestTrue(TEXT("figma componentPropertyReferences"), Node->Metadata.Contains(TEXT("componentPropertyReferences")));
 	TestTrue(TEXT("figma explicitVariableModes"), Node->Metadata.Contains(TEXT("explicitVariableModes")));
+	TestTrue(TEXT("figma resolvedVariableModes"), Node->Metadata.Contains(TEXT("resolvedVariableModes")));
 	TestTrue(TEXT("figma annotations"), Node->Metadata.Contains(TEXT("annotations")));
 	TestTrue(TEXT("figma measurements"), Node->Metadata.Contains(TEXT("measurements")));
 	TestTrue(TEXT("figma exportSettings"), Node->Metadata.Contains(TEXT("exportSettings")));
 	TestTrue(TEXT("figma devStatus"), Node->Metadata.Contains(TEXT("devStatus")));
 	TestTrue(TEXT("figma branchData"), Node->Metadata.Contains(TEXT("branchData")));
+	TestTrue(TEXT("figma components dictionary"), Doc.Metadata.Contains(TEXT("components")));
+	TestTrue(TEXT("figma componentSets dictionary"), Doc.Metadata.Contains(TEXT("componentSets")));
+	TestTrue(TEXT("figma components json field"), !Doc.FigmaDocument.ComponentsJson.IsEmpty());
+	TestTrue(TEXT("figma componentSets json field"), !Doc.FigmaDocument.ComponentSetsJson.IsEmpty());
+	TestTrue(TEXT("figma components json carries component defs"), Doc.FigmaDocument.ComponentsJson.Contains(TEXT("componentPropertyDefinitions")));
+	TestTrue(TEXT("figma componentSets json carries variant groups"), Doc.FigmaDocument.ComponentSetsJson.Contains(TEXT("variantGroupProperties")));
 	TestTrue(TEXT("figma doc prototypeStartNodeID"), Doc.Metadata.FindRef(TEXT("prototypeStartNodeID")) == TEXT("0:2"));
 	TestTrue(TEXT("figma doc prototypeDevice"), Doc.Metadata.Contains(TEXT("prototypeDevice")));
 	TestTrue(TEXT("figma absolute positioning semantic"), Node->bAbsoluteLayoutPositioning);
+	TestTrue(TEXT("figma layout ext layoutPositioning"), Node->FigmaLayout.LayoutPositioning == TEXT("ABSOLUTE"));
+	TestTrue(TEXT("figma layout ext counterAxisSpacing"), Node->FigmaLayout.bHasCounterAxisSpacing && FMath::IsNearlyEqual(Node->FigmaLayout.CounterAxisSpacing, 6.0f, 0.001f));
+	TestTrue(TEXT("figma layout ext layoutWrap"), Node->FigmaLayout.LayoutWrap == TEXT("WRAP"));
+	TestTrue(TEXT("figma layout ext strokesIncludedInLayout"), Node->FigmaLayout.bHasStrokesIncludedInLayout && Node->FigmaLayout.bStrokesIncludedInLayout == false);
+	TestTrue(TEXT("figma layout ext itemReverseZIndex"), Node->FigmaLayout.bHasItemReverseZIndex && Node->FigmaLayout.bItemReverseZIndex);
+	TestTrue(TEXT("figma layout ext boundVariables"), !Node->FigmaLayout.BoundVariablesJson.IsEmpty());
 	TestTrue(TEXT("figma fill blendMode preserved"), PaintNode->Fill.BlendMode == TEXT("MULTIPLY"));
 	TestTrue(TEXT("figma fill opacity preserved"), FMath::IsNearlyEqual(PaintNode->Fill.Opacity, 0.5f, 0.001f));
 	TestTrue(TEXT("figma effect blendMode preserved"), PaintNode->Effects.Num() > 0
@@ -1899,9 +2321,551 @@ bool FFigmaOfficialFieldParityTest::RunTest(const FString& Parameters)
 		&& PaintNode->Effects[0].Shadow.BlendMode == TEXT("SCREEN"));
 	TestTrue(TEXT("figma source node type preserved"), InstanceNode->Metadata.FindRef(TEXT("sourceNodeType")) == TEXT("INSTANCE"));
 	TestTrue(TEXT("figma instance componentId preserved"), InstanceNode->Metadata.FindRef(TEXT("instanceComponentId")) == TEXT("12:34"));
+	TestTrue(TEXT("figma instance ext flag"), InstanceNode->FigmaInstance.bIsInstance);
+	TestTrue(TEXT("figma instance ext componentId"), InstanceNode->FigmaInstance.ComponentId == TEXT("12:34"));
+	TestTrue(TEXT("figma instance ext componentSetId"), InstanceNode->FigmaInstance.ComponentSetId == TEXT("56:78"));
+	TestTrue(TEXT("figma instance ext mainComponentKey"), InstanceNode->FigmaInstance.MainComponentKey == TEXT("component-key-1"));
+	TestTrue(TEXT("figma instance ext componentProperties"), !InstanceNode->FigmaInstance.ComponentPropertiesJson.IsEmpty());
+	TestTrue(TEXT("figma instance ext variantProperties"), !InstanceNode->FigmaInstance.VariantPropertiesJson.IsEmpty());
+	TestTrue(TEXT("figma instance ext overrides"), !InstanceNode->FigmaInstance.OverridesJson.IsEmpty());
+	TestTrue(TEXT("figma instance ext isExposedInstance"), InstanceNode->FigmaInstance.bHasIsExposedInstance && InstanceNode->FigmaInstance.bIsExposedInstance);
+	TestTrue(TEXT("figma instance componentSetId preserved"), InstanceNode->Metadata.FindRef(TEXT("componentSetId")) == TEXT("56:78"));
+	TestTrue(TEXT("figma instance mainComponentKey preserved"), InstanceNode->Metadata.FindRef(TEXT("mainComponentKey")) == TEXT("component-key-1"));
 	TestTrue(TEXT("figma instance componentProperties preserved"), InstanceNode->Metadata.Contains(TEXT("componentProperties")));
-	TestTrue(TEXT("figma instance overrides preserved"), InstanceNode->Metadata.Contains(TEXT("overrides")));
-	TestTrue(TEXT("figma instance isExposedInstance preserved"), InstanceNode->Metadata.FindRef(TEXT("isExposedInstance")) == TEXT("true"));
+	TestTrue(TEXT("figma instance variantProperties preserved"), InstanceNode->Metadata.Contains(TEXT("variantProperties")));
+TestTrue(TEXT("figma instance overrides preserved"), InstanceNode->Metadata.Contains(TEXT("overrides")));
+TestTrue(TEXT("figma instance isExposedInstance preserved"), InstanceNode->Metadata.FindRef(TEXT("isExposedInstance")) == TEXT("true"));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLuminosityImageOverlayTest,
+	"Design2UMG.FigmaParser.LuminosityImageOverlay",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaLuminosityImageOverlayTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page",
+				"type": "CANVAS",
+				"children": [{
+					"id": "node_lum",
+					"name": "LumCard",
+					"type": "FRAME",
+					"visible": true,
+					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 80},
+					"absoluteRenderBounds": {"x": 0, "y": 0, "width": 120, "height": 80},
+					"fills": [
+						{"type": "SOLID", "visible": true, "blendMode": "NORMAL", "color": {"r": 0.9254902, "g": 0.9019608, "b": 0.94117647, "a": 1}},
+						{"type": "IMAGE", "visible": true, "blendMode": "LUMINOSITY", "imageRef": "img_lum", "scaleMode": "FIT", "scalingFactor": 0.5}
+					],
+					"children": []
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Figma parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	if (Doc.Children.Num() == 0)
+	{
+		return false;
+	}
+
+	const TSharedPtr<FDesignNode>& Node = Doc.Children[0];
+	TestEqual(TEXT("Luminosity placeholder keeps both fills"), Node->Fills.Num(), 2);
+	TestEqual(TEXT("Base fill remains color"), Node->Fills[0].Type, EDesignFillType::Color);
+	TestEqual(TEXT("Overlay fill remains image"), Node->Fills[1].Type, EDesignFillType::Image);
+	TestEqual(TEXT("Overlay image mode preserved"), Node->Fills[1].Image.Mode, EDesignImageMode::Fit);
+
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* Overlay = FindWidgetById(Data.RootWidget, TEXT("node_lum"));
+	TestTrue(TEXT("Converted widget found"), Overlay != nullptr);
+	if (!Overlay)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Luminosity image converts to multi-fill overlay"), Overlay->Type, TEXT("Overlay"));
+	TestTrue(TEXT("Overlay has at least base + image layers"), Overlay->Children.Num() >= 2);
+	if (Overlay->Children.Num() < 2)
+	{
+		return false;
+	}
+
+	const FUMGWidgetNode& BaseLayer = Overlay->Children[0];
+	const FUMGWidgetNode& FitLayer = Overlay->Children[1];
+	TestEqual(TEXT("Base layer is border"), BaseLayer.Type, TEXT("Border"));
+	TestEqual(TEXT("Fit layer is scale box"), FitLayer.Type, TEXT("ScaleBox"));
+	TestTrue(TEXT("Fit layer has image child"), FitLayer.Children.Num() == 1);
+	if (FitLayer.Children.Num() != 1)
+	{
+		return false;
+	}
+
+	const FUMGWidgetNode& ImageChild = FitLayer.Children[0];
+	TestEqual(TEXT("Image child type"), ImageChild.Type, TEXT("Image"));
+	TestEqual(TEXT("Image child keeps texture"), GetWidgetProperty(ImageChild, TEXT("TexturePath")), TEXT("img_lum"));
+	TestEqual(TEXT("Fit layer stretch"), GetWidgetProperty(FitLayer, TEXT("Stretch")), TEXT("ScaleToFit"));
+	TestFalse(TEXT("Luminosity fit layer should not pin synthetic pivot"), HasWidgetProperty(FitLayer, TEXT("RenderTransformPivot")));
+	TestFalse(TEXT("Luminosity fit layer should not inject synthetic scale"), HasWidgetProperty(FitLayer, TEXT("RenderTransformScale")));
+	TestFalse(TEXT("Luminosity fit layer should not inject synthetic translation"), HasWidgetProperty(FitLayer, TEXT("RenderTranslation")));
+	TestEqual(TEXT("Luminosity fit image applies opacity fallback"), GetWidgetProperty(ImageChild, TEXT("RenderOpacity")), TEXT("0.1500"));
+	TestFalse(TEXT("Non-square fit image child should not pin width override"), HasWidgetProperty(ImageChild, TEXT("WidthOverride")));
+	TestFalse(TEXT("Non-square fit image child should not pin height override"), HasWidgetProperty(ImageChild, TEXT("HeightOverride")));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaWideLuminosityImageOverlayTest,
+	"Design2UMG.FigmaParser.WideLuminosityImageOverlay",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaWideLuminosityImageOverlayTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page",
+				"type": "CANVAS",
+				"children": [{
+					"id": "overlay_wide",
+					"name": "OverlayWide",
+					"type": "FRAME",
+					"visible": true,
+					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 220, "height": 120},
+					"absoluteRenderBounds": {"x": 0, "y": 0, "width": 220, "height": 120},
+					"fills": [
+						{"type": "SOLID", "visible": true, "blendMode": "NORMAL", "color": {"r": 0.9254902, "g": 0.9019608, "b": 0.94117647, "a": 1}},
+						{"type": "IMAGE", "visible": true, "blendMode": "LUMINOSITY", "imageRef": "img_lum_wide", "scaleMode": "FIT", "scalingFactor": 0.5}
+					],
+					"children": []
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Wide luminosity parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	if (Doc.Children.Num() == 0)
+	{
+		return false;
+	}
+
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* Overlay = FindWidgetById(Data.RootWidget, TEXT("overlay_wide"));
+	TestTrue(TEXT("Wide luminosity overlay widget exists"), Overlay != nullptr);
+	if (!Overlay || Overlay->Children.Num() < 2)
+	{
+		return false;
+	}
+
+	const FUMGWidgetNode& FitLayer = Overlay->Children[1];
+	TestEqual(TEXT("Wide fit layer is scale box"), FitLayer.Type, TEXT("ScaleBox"));
+	TestTrue(TEXT("Wide fit layer has image child"), FitLayer.Children.Num() == 1);
+	if (FitLayer.Children.Num() != 1)
+	{
+		return false;
+	}
+
+	const FUMGWidgetNode& ImageChild = FitLayer.Children[0];
+	TestFalse(TEXT("Wide luminosity fit layer should not inject synthetic scale"), HasWidgetProperty(FitLayer, TEXT("RenderTransformScale")));
+	TestFalse(TEXT("Wide luminosity fit layer should not inject synthetic translation"), HasWidgetProperty(FitLayer, TEXT("RenderTranslation")));
+	TestEqual(TEXT("Wide luminosity image applies opacity fallback"), GetWidgetProperty(ImageChild, TEXT("RenderOpacity")), TEXT("0.1500"));
+	TestFalse(TEXT("Wide luminosity image should not pin width override"), HasWidgetProperty(ImageChild, TEXT("WidthOverride")));
+	TestFalse(TEXT("Wide luminosity image should not pin height override"), HasWidgetProperty(ImageChild, TEXT("HeightOverride")));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaSquareLuminosityImageOverlayTest,
+	"Design2UMG.FigmaParser.SquareLuminosityImageOverlay",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaSquareLuminosityImageOverlayTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page",
+				"type": "CANVAS",
+				"children": [{
+					"id": "overlay_square",
+					"name": "OverlaySquare",
+					"type": "FRAME",
+					"visible": true,
+					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 120},
+					"absoluteRenderBounds": {"x": 0, "y": 0, "width": 120, "height": 120},
+					"fills": [
+						{"type": "SOLID", "visible": true, "blendMode": "NORMAL", "color": {"r": 0.9254902, "g": 0.9019608, "b": 0.94117647, "a": 1}},
+						{"type": "IMAGE", "visible": true, "blendMode": "LUMINOSITY", "imageRef": "img_lum_square", "scaleMode": "FIT", "imageTransform": [[1,0,0],[0,1,0]]}
+					],
+					"children": []
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Square luminosity parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	if (Doc.Children.Num() == 0)
+	{
+		return false;
+	}
+
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* Overlay = FindWidgetById(Data.RootWidget, TEXT("overlay_square"));
+	TestTrue(TEXT("Square luminosity overlay widget exists"), Overlay != nullptr);
+	if (!Overlay)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Square luminosity image converts to overlay"), Overlay->Type, TEXT("Overlay"));
+	TestTrue(TEXT("Square luminosity overlay keeps image layer"), Overlay->Children.Num() >= 2);
+	if (Overlay->Children.Num() < 2)
+	{
+		return false;
+	}
+
+	const FUMGWidgetNode& FitLayer = Overlay->Children[1];
+	TestEqual(TEXT("Square fit layer is scale box"), FitLayer.Type, TEXT("ScaleBox"));
+	TestTrue(TEXT("Square fit layer has image child"), FitLayer.Children.Num() == 1);
+	if (FitLayer.Children.Num() != 1)
+	{
+		return false;
+	}
+
+	const FUMGWidgetNode& ImageChild = FitLayer.Children[0];
+	TestEqual(TEXT("Square image child keeps texture"), GetWidgetProperty(ImageChild, TEXT("TexturePath")), TEXT("img_lum_square"));
+	TestEqual(TEXT("Square image child pins width"), GetWidgetProperty(ImageChild, TEXT("WidthOverride")), TEXT("120.0"));
+	TestEqual(TEXT("Square image child pins height"), GetWidgetProperty(ImageChild, TEXT("HeightOverride")), TEXT("120.0"));
+	TestEqual(TEXT("Square image child applies opacity fallback"), GetWidgetProperty(ImageChild, TEXT("RenderOpacity")), TEXT("0.1500"));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLuminosityIdentityTransformOverlayTest,
+	"Design2UMG.FigmaParser.LuminosityIdentityTransformOverlay",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaLuminosityIdentityTransformOverlayTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page",
+				"type": "CANVAS",
+				"children": [{
+					"id": "overlay_id",
+					"name": "OverlayIdentity",
+					"type": "FRAME",
+					"visible": true,
+					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 80},
+					"absoluteRenderBounds": {"x": 0, "y": 0, "width": 120, "height": 80},
+					"fills": [
+						{"type": "SOLID", "visible": true, "blendMode": "NORMAL", "color": {"r": 0.9254902, "g": 0.9019608, "b": 0.94117647, "a": 1}},
+						{"type": "IMAGE", "visible": true, "blendMode": "LUMINOSITY", "imageRef": "img_lum_id", "scaleMode": "FIT", "imageTransform": [[1,0,0],[0,1,0]]}
+					],
+					"children": []
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Figma parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	if (Doc.Children.Num() == 0)
+	{
+		return false;
+	}
+
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* Overlay = FindWidgetById(Data.RootWidget, TEXT("overlay_id"));
+	TestTrue(TEXT("Identity transform overlay widget exists"), Overlay != nullptr);
+	if (!Overlay)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Identity transform luminosity image converts to overlay"), Overlay->Type, TEXT("Overlay"));
+	TestTrue(TEXT("Identity transform overlay keeps image layer"), Overlay->Children.Num() >= 2);
+	if (Overlay->Children.Num() < 2 || Overlay->Children[1].Children.Num() != 1)
+	{
+		return false;
+	}
+	const FUMGWidgetNode& FitLayer = Overlay->Children[1];
+	const FUMGWidgetNode& ImageChild = FitLayer.Children[0];
+	TestFalse(TEXT("Identity transform overlay should not inject synthetic scale"), HasWidgetProperty(FitLayer, TEXT("RenderTransformScale")));
+	TestFalse(TEXT("Identity transform overlay should not inject synthetic translation"), HasWidgetProperty(FitLayer, TEXT("RenderTranslation")));
+	TestEqual(TEXT("Identity transform overlay applies opacity fallback"), GetWidgetProperty(ImageChild, TEXT("RenderOpacity")), TEXT("0.1500"));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaVectorRasterFallbackTest,
+	"Design2UMG.FigmaParser.VectorRasterFallback",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaVectorRasterFallbackTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page",
+				"type": "CANVAS",
+				"children": [{
+					"id": "0:2",
+					"name": "Root",
+					"type": "FRAME",
+					"visible": true,
+					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 400, "height": 400},
+					"children": [{
+						"id": "ellipse_grad",
+						"name": "Ellipse Gradient",
+						"type": "ELLIPSE",
+						"visible": true,
+						"absoluteBoundingBox": {"x": 20, "y": 20, "width": 320, "height": 320},
+						"fillGeometry": [{"path":"M0 160C0 71.6 71.6 0 160 0C248.4 0 320 71.6 320 160C320 248.4 248.4 320 160 320C71.6 320 0 248.4 0 160Z","windingRule":"NONZERO"}],
+						"fills": [
+							{"type":"GRADIENT_LINEAR","visible":true,"gradientStops":[
+								{"position":0.0,"color":{"r":1,"g":0,"b":0,"a":1}},
+								{"position":1.0,"color":{"r":0,"g":0,"b":1,"a":1}}
+							],"gradientHandlePositions":[{"x":0,"y":0.5},{"x":1,"y":0.5}]},
+							{"type":"IMAGE","visible":true,"imageRef":"vec_grad_1","scaleMode":"FILL"}
+						],
+						"children": []
+					}]
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Figma vector fallback parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	if (Doc.Children.Num() == 0 || Doc.Children[0]->Children.Num() == 0)
+	{
+		return false;
+	}
+
+	const TSharedPtr<FDesignNode>& EllipseNode = Doc.Children[0]->Children[0];
+	TestTrue(TEXT("Vector raster fallback metadata captured"), EllipseNode->Metadata.FindRef(TEXT("figma.vectorRasterFallback")) == TEXT("vec_grad_1"));
+
+	TSet<FString> ImageRefs;
+	FFigmaParser::CollectImageRefs(Doc, ImageRefs);
+	TestTrue(TEXT("CollectImageRefs includes vector fallback"), ImageRefs.Contains(TEXT("vec_grad_1")));
+
+	TMap<FString, FString> ImageMap;
+	ImageMap.Add(TEXT("vec_grad_1"), TEXT("/Game/Transient/T_vec_grad_1.T_vec_grad_1"));
+	FFigmaParser::ApplyImageUrls(Doc, ImageMap);
+	TestTrue(TEXT("ApplyImageUrls remaps vector fallback"), EllipseNode->Metadata.FindRef(TEXT("figma.vectorRasterFallback")) == TEXT("/Game/Transient/T_vec_grad_1.T_vec_grad_1"));
+
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* Widget = FindWidgetById(Data.RootWidget, TEXT("ellipse_grad"));
+	TestTrue(TEXT("Gradient ellipse widget exists"), Widget != nullptr);
+	if (!Widget)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Gradient ellipse uses image fallback"), Widget->Type, TEXT("Image"));
+	TestEqual(TEXT("Gradient ellipse texture path preserved"), GetWidgetProperty(*Widget, TEXT("TexturePath")), TEXT("/Game/Transient/T_vec_grad_1.T_vec_grad_1"));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaRenderFallbackMetadataRoundTripTest,
+	"Design2UMG.FigmaParser.RenderFallbackMetadataRoundTrip",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaRenderFallbackMetadataRoundTripTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page",
+				"type": "CANVAS",
+				"children": [{
+					"id": "0:2",
+					"name": "Root",
+					"type": "FRAME",
+					"visible": true,
+					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 300, "height": 200},
+					"children": [{
+						"id": "render_leaf",
+						"name": "Image Tile",
+						"type": "FRAME",
+						"visible": true,
+						"absoluteBoundingBox": {"x": 24, "y": 16, "width": 160, "height": 96},
+						"absoluteRenderBounds": {"x": 24, "y": 16, "width": 160, "height": 96},
+						"fills": [
+							{"type":"SOLID","visible":true,"blendMode":"NORMAL","color":{"r":0.2,"g":0.2,"b":0.2,"a":1}},
+							{"type":"IMAGE","visible":true,"blendMode":"LUMINOSITY","imageRef":"img_orig","scaleMode":"FIT","filters":{"contrast":0.25}}
+						],
+						"design2umgRenderFallbackImageRef": "render_202_5356",
+						"design2umgRenderFallbackScope": "full",
+						"design2umgRenderFallbackSource": "figma_render_png",
+						"design2umgRenderFallbackReason": "image_filters+image_blend_luminosity",
+						"children": []
+					}]
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Render fallback parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	if (Doc.Children.Num() == 0 || Doc.Children[0]->Children.Num() == 0)
+	{
+		return false;
+	}
+
+	const TSharedPtr<FDesignNode>& RenderNode = Doc.Children[0]->Children[0];
+	TestEqual(TEXT("Render fallback image ref preserved"), RenderNode->Metadata.FindRef(TEXT("figma.renderFallbackImageRef")), TEXT("render_202_5356"));
+	TestEqual(TEXT("Render fallback scope preserved"), RenderNode->Metadata.FindRef(TEXT("figma.renderFallbackScope")), TEXT("full"));
+	TestEqual(TEXT("Render fallback source preserved"), RenderNode->Metadata.FindRef(TEXT("figma.renderFallbackSource")), TEXT("figma_render_png"));
+	TestEqual(TEXT("Render fallback reason preserved"), RenderNode->Metadata.FindRef(TEXT("figma.renderFallbackReason")), TEXT("image_filters+image_blend_luminosity"));
+
+	TSet<FString> ImageRefs;
+	FFigmaParser::CollectImageRefs(Doc, ImageRefs);
+	TestTrue(TEXT("CollectImageRefs includes original image"), ImageRefs.Contains(TEXT("img_orig")));
+	TestTrue(TEXT("CollectImageRefs includes render fallback image"), ImageRefs.Contains(TEXT("render_202_5356")));
+
+	TMap<FString, FString> ImageMap;
+	ImageMap.Add(TEXT("img_orig"), TEXT("/Game/Transient/T_img_orig.T_img_orig"));
+	ImageMap.Add(TEXT("render_202_5356"), TEXT("/Game/Transient/T_render_202_5356.T_render_202_5356"));
+	FFigmaParser::ApplyImageUrls(Doc, ImageMap);
+	TestEqual(TEXT("ApplyImageUrls remaps render fallback image"), RenderNode->Metadata.FindRef(TEXT("figma.renderFallbackImageRef")), TEXT("/Game/Transient/T_render_202_5356.T_render_202_5356"));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLeafRenderFallbackWidgetTest,
+	"Design2UMG.FigmaParser.LeafRenderFallbackWidget",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaLeafRenderFallbackWidgetTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page",
+				"type": "CANVAS",
+				"children": [{
+					"id": "render_leaf",
+					"name": "Image Tile",
+					"type": "FRAME",
+					"visible": true,
+					"absoluteBoundingBox": {"x": 24, "y": 16, "width": 160, "height": 96},
+					"absoluteRenderBounds": {"x": 24, "y": 16, "width": 160, "height": 96},
+					"fills": [
+						{"type":"SOLID","visible":true,"blendMode":"NORMAL","color":{"r":0.2,"g":0.2,"b":0.2,"a":1}},
+						{"type":"IMAGE","visible":true,"blendMode":"LUMINOSITY","imageRef":"img_orig","scaleMode":"FIT","filters":{"contrast":0.25}}
+					],
+					"design2umgRenderFallbackImageRef": "/Game/Transient/T_render_202_5356.T_render_202_5356",
+					"design2umgRenderFallbackScope": "full",
+					"design2umgRenderFallbackSource": "figma_render_png",
+					"design2umgRenderFallbackReason": "image_filters+image_blend_luminosity",
+					"children": []
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Leaf render fallback parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* Widget = FindWidgetById(Data.RootWidget, TEXT("render_leaf"));
+	TestTrue(TEXT("Leaf render fallback widget exists"), Widget != nullptr);
+	if (!Widget)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Leaf render fallback converts directly to image"), Widget->Type, TEXT("Image"));
+	TestEqual(TEXT("Leaf render fallback keeps texture path"), GetWidgetProperty(*Widget, TEXT("TexturePath")), TEXT("/Game/Transient/T_render_202_5356.T_render_202_5356"));
+	TestEqual(TEXT("Leaf render fallback keeps width override"), GetWidgetProperty(*Widget, TEXT("WidthOverride")), TEXT("160.0"));
+	TestEqual(TEXT("Leaf render fallback keeps height override"), GetWidgetProperty(*Widget, TEXT("HeightOverride")), TEXT("96.0"));
+	TestTrue(TEXT("Leaf render fallback keeps no structural children"), Widget->Children.Num() == 0);
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaRenderFallbackKeepsChildTreeTest,
+	"Design2UMG.FigmaParser.RenderFallbackKeepsChildTree",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaRenderFallbackKeepsChildTreeTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page",
+				"type": "CANVAS",
+				"children": [{
+					"id": "render_parent",
+					"name": "Card",
+					"type": "FRAME",
+					"visible": true,
+					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 260, "height": 160},
+					"absoluteRenderBounds": {"x": 0, "y": 0, "width": 260, "height": 160},
+					"fills": [
+						{"type":"SOLID","visible":true,"blendMode":"NORMAL","color":{"r":0.2,"g":0.2,"b":0.2,"a":1}},
+						{"type":"IMAGE","visible":true,"blendMode":"LUMINOSITY","imageRef":"img_orig","scaleMode":"FIT","filters":{"contrast":0.25}}
+					],
+					"design2umgRenderFallbackImageRef": "/Game/Transient/T_render_parent.T_render_parent",
+					"design2umgRenderFallbackScope": "full",
+					"design2umgRenderFallbackSource": "figma_render_png",
+					"design2umgRenderFallbackReason": "image_filters+image_blend_luminosity",
+					"children": [{
+						"id": "render_child",
+						"name": "Title",
+						"type": "TEXT",
+						"visible": true,
+						"absoluteBoundingBox": {"x": 20, "y": 18, "width": 80, "height": 24},
+						"characters": "Hello",
+						"style": {
+							"fontFamily": "Inter",
+							"fontSize": 16,
+							"fontWeight": 400,
+							"textAlignHorizontal": "LEFT",
+							"textAlignVertical": "TOP",
+							"textCase": "ORIGINAL",
+							"textDecoration": "NONE",
+							"letterSpacing": 0,
+							"lineHeightUnit": "AUTO",
+							"lineHeightPx": 0
+						}
+					}]
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Render fallback parent parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* ParentWidget = FindWidgetById(Data.RootWidget, TEXT("render_parent"));
+	const FUMGWidgetNode* ChildWidget = FindWidgetById(Data.RootWidget, TEXT("render_child"));
+	TestTrue(TEXT("Render fallback parent widget exists"), ParentWidget != nullptr);
+	TestTrue(TEXT("Render fallback child widget exists"), ChildWidget != nullptr);
+	if (!ParentWidget || !ChildWidget)
+	{
+		return false;
+	}
+
+	TestFalse(TEXT("Render fallback parent with children must not flatten to image"), ParentWidget->Type == TEXT("Image"));
+	TestEqual(TEXT("Child text preserved"), GetWidgetProperty(*ChildWidget, TEXT("Text")), TEXT("Hello"));
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaExtractKeyTest,

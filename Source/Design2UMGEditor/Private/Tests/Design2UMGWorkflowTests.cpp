@@ -563,6 +563,95 @@ bool FFigmaLocalLuminosityBakeScalingFactorWorkflowTest::RunTest(const FString& 
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLocalRenderFallbackCropWorkflowTest,
+	"Design2UMG.BatchImport.FigmaLocalRenderFallbackCrop",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaLocalRenderFallbackCropWorkflowTest::RunTest(const FString& Parameters)
+{
+	const FString TempRoot = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Design2UMG"), TEXT("WorkflowTemp"), TEXT("FigmaRenderFallbackCrop"));
+	IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
+	IFileManager::Get().MakeDirectory(*TempRoot, true);
+
+	const FString TempJsonPath = FPaths::Combine(TempRoot, TEXT("design.json"));
+	const FString ReferencePngPath = FPaths::Combine(TempRoot, TEXT("Reference.png"));
+	const TArray<FColor> Pixels = {
+		FColor(10, 20, 30, 255), FColor(20, 30, 40, 255), FColor(30, 40, 50, 255), FColor(40, 50, 60, 255),
+		FColor(50, 60, 70, 255), FColor(255, 0, 0, 255), FColor(0, 255, 0, 255), FColor(80, 90, 100, 255),
+		FColor(90, 100, 110, 255), FColor(0, 0, 255, 255), FColor(255, 255, 0, 255), FColor(120, 130, 140, 255),
+		FColor(130, 140, 150, 255), FColor(140, 150, 160, 255), FColor(150, 160, 170, 255), FColor(160, 170, 180, 255),
+	};
+	TestTrue(TEXT("Write top-level reference png"), WriteTestPng(ReferencePngPath, Pixels, 4, 4));
+
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page",
+				"type": "CANVAS",
+				"children": [{
+					"id": "root",
+					"name": "Root",
+					"type": "FRAME",
+					"visible": true,
+					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 4, "height": 4},
+					"absoluteRenderBounds": {"x": 0, "y": 0, "width": 4, "height": 4},
+					"children": [{
+						"id": "render_crop",
+						"name": "Image",
+						"type": "FRAME",
+						"visible": true,
+						"absoluteBoundingBox": {"x": 1, "y": 1, "width": 2, "height": 2},
+						"absoluteRenderBounds": {"x": 1, "y": 1, "width": 2, "height": 2},
+						"fills": [
+							{"type":"SOLID","visible":true,"blendMode":"NORMAL","color":{"r":0.2,"g":0.2,"b":0.2,"a":1}},
+							{"type":"IMAGE","visible":true,"blendMode":"LUMINOSITY","imageRef":"img_orig","scaleMode":"FIT","filters":{"contrast":0.25}}
+						],
+						"children": []
+					}]
+				}]
+			}]
+		}
+	})");
+	TestTrue(TEXT("Write local figma json with risky leaf"), FFileHelper::SaveStringToFile(Json, *TempJsonPath));
+
+	FDesignDocument Document;
+	FString ErrorMessage;
+	const bool bLoaded = Design2UMGLocalFigmaImport::LoadLocalFigmaDocument(TempJsonPath, Document, ErrorMessage);
+	TestTrue(TEXT("Load local figma crop fallback fixture"), bLoaded);
+	if (!ErrorMessage.IsEmpty())
+	{
+		AddInfo(ErrorMessage);
+	}
+	if (!bLoaded || Document.Children.Num() == 0 || Document.Children[0]->Children.Num() == 0)
+	{
+		IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
+		return false;
+	}
+
+	const TSharedPtr<FDesignNode>& Node = Document.Children[0]->Children[0];
+	const FString FallbackPath = Node->Metadata.FindRef(TEXT("figma.renderFallbackImageRef"));
+	TestTrue(TEXT("Local crop fallback metadata remapped to local png path"), !FallbackPath.IsEmpty() && FPaths::FileExists(FallbackPath));
+	TestTrue(TEXT("Local crop fallback source marked"), Node->Metadata.FindRef(TEXT("figma.renderFallbackSource")) == TEXT("figma_reference_crop"));
+
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	const FUMGWidgetNode* Widget = FindWidgetById(Data.RootWidget, TEXT("render_crop"));
+	TestTrue(TEXT("Crop fallback widget exists"), Widget != nullptr);
+	if (!Widget)
+	{
+		IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
+		return false;
+	}
+
+	TestEqual(TEXT("Crop fallback widget type"), Widget->Type, TEXT("Image"));
+	TestEqual(TEXT("Crop fallback widget texture path"), GetWidgetProperty(*Widget, TEXT("TexturePath")), FallbackPath);
+
+	IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLayoutFixerConservatismTest,
 	"Design2UMG.LayoutFixer.ConservatismCheck",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)

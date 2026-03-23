@@ -1,4 +1,4 @@
-﻿"use strict";
+"use strict";
 // Design2UMG Figma Exporter - Plugin Code
 // Traverses selected frame, serializes to REST API compatible JSON, exports images
 // ── Helpers ──
@@ -77,6 +77,83 @@ function setIfDefined(target, key, value) {
     if (value !== undefined && value !== null) {
         target[key] = value;
     }
+}
+function makeRenderFallbackKey(nodeId) {
+    const sanitized = (nodeId || '')
+        .replace(/[^a-zA-Z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+    return `render_${sanitized || 'node'}`;
+}
+function indexRestNodes(node, out = new Map()) {
+    if (!node)
+        return out;
+    out.set(node.id, node);
+    for (const child of node.children || []) {
+        indexRestNodes(child, out);
+    }
+    return out;
+}
+function hasVisibleChildNodes(node) {
+    if (!('children' in node))
+        return false;
+    return (node.children || []).some(child => child.visible !== false);
+}
+function hasNodeReactions(node) {
+    return 'reactions' in node && Array.isArray(node.reactions) && node.reactions.length > 0;
+}
+function isExcludedRenderFallbackNodeType(node) {
+    return node.type === 'TEXT'
+        || node.type === 'INSTANCE'
+        || node.type === 'COMPONENT'
+        || node.type === 'COMPONENT_SET'
+        || node.type === 'SECTION';
+}
+function getRenderFallbackReasons(node) {
+    if (!('fills' in node) || node.fills === figma.mixed) {
+        return [];
+    }
+    const reasons = new Set();
+    for (const fill of node.fills) {
+        if (fill.type !== 'IMAGE' || fill.visible === false) {
+            continue;
+        }
+        const imagePaint = fill;
+        if (imagePaint.filters && Object.keys(imagePaint.filters).length > 0) {
+            reasons.add('image_filters');
+        }
+        const blendMode = String(imagePaint.blendMode || 'NORMAL').toUpperCase();
+        if (blendMode !== 'NORMAL' && blendMode !== 'PASS_THROUGH') {
+            reasons.add(`image_blend_${blendMode.toLowerCase()}`);
+        }
+    }
+    return Array.from(reasons.values());
+}
+function shouldExportNodeRenderFallback(node) {
+    if (isExcludedRenderFallbackNodeType(node)) {
+        return { use: false, reason: '' };
+    }
+    if (hasVisibleChildNodes(node)) {
+        return { use: false, reason: '' };
+    }
+    if (hasNodeReactions(node)) {
+        return { use: false, reason: '' };
+    }
+    const reasons = getRenderFallbackReasons(node);
+    if (reasons.length === 0) {
+        return { use: false, reason: '' };
+    }
+    return {
+        use: true,
+        reason: reasons.join('+'),
+    };
+}
+function attachRenderFallbackMetadata(restNode, imageRef, reason) {
+    if (!restNode)
+        return;
+    restNode.design2umgRenderFallbackImageRef = imageRef;
+    restNode.design2umgRenderFallbackScope = 'full';
+    restNode.design2umgRenderFallbackSource = 'figma_render_png';
+    restNode.design2umgRenderFallbackReason = reason;
 }
 // ── Fill Serialization ──
 function serializePaint(paint) {
@@ -477,7 +554,27 @@ function collectReferencedComponents(node, components, componentSets) {
         }
     }
 }
-async function collectImages(node, images, scale, onProgress) {
+async function collectImages(node, images, scale, onProgress, restNodesById) {
+    const renderFallback = shouldExportNodeRenderFallback(node);
+    if (renderFallback.use && 'exportAsync' in node) {
+        const imageRef = makeRenderFallbackKey(node.id);
+        if (!images.has(imageRef)) {
+            try {
+                const bytes = await node.exportAsync({
+                    format: 'PNG',
+                    constraint: { type: 'SCALE', value: scale },
+                });
+                images.set(imageRef, bytes);
+                onProgress(`Render: ${node.name}`);
+            }
+            catch (e) {
+                console.warn(`Failed to export render fallback ${node.name}:`, e);
+            }
+        }
+        if (images.has(imageRef)) {
+            attachRenderFallbackMetadata(restNodesById === null || restNodesById === void 0 ? void 0 : restNodesById.get(node.id), imageRef, renderFallback.reason);
+        }
+    }
     // Image fills
     if ('fills' in node && node.fills !== figma.mixed) {
         for (const fill of node.fills) {
@@ -540,11 +637,14 @@ async function collectImages(node, images, scale, onProgress) {
     // Recurse children
     if ('children' in node) {
         for (const child of node.children) {
-            await collectImages(child, images, scale, onProgress);
+            await collectImages(child, images, scale, onProgress, restNodesById);
         }
     }
 }
 const testApi = {
+    attachRenderFallbackMetadata,
+    indexRestNodes,
+    makeRenderFallbackKey,
     serializePaint,
     serializeEffect,
     buildTextStyle,
@@ -552,6 +652,7 @@ const testApi = {
     unwrapRestExportResponse,
     collectReferencedComponents,
     collectImages,
+    shouldExportNodeRenderFallback,
 };
 if (typeof globalThis !== 'undefined') {
     globalThis.__design2umgExporterTestApi = testApi;
@@ -575,7 +676,7 @@ if (typeof figma !== 'undefined') {
         const scale = msg.scale || 2;
         try {
             figma.ui.postMessage({ type: 'progress', percent: 10, text: 'Serializing nodes...' });
-            const serialized = (await exportOfficialRestNode(root)) || serializeNode(root);
+            const serialized = await exportOfficialRestNode(root) || serializeNode(root);
             if (!serialized) {
                 figma.ui.postMessage({ type: 'error', text: 'Failed to serialize selected node.' });
                 return;
@@ -607,9 +708,10 @@ if (typeof figma !== 'undefined') {
             }
             figma.ui.postMessage({ type: 'progress', percent: 30, text: 'Collecting images...' });
             const images = new Map();
+            const restNodesById = indexRestNodes(serialized);
             await collectImages(root, images, scale, (text) => {
                 figma.ui.postMessage({ type: 'progress', percent: 50, text });
-            });
+            }, restNodesById);
             figma.ui.postMessage({ type: 'progress', percent: 80, text: 'Preparing download...' });
             const imageEntries = [];
             for (const [key, bytes] of images) {
