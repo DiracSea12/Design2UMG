@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 using UnrealBuildTool;
 
@@ -19,22 +19,11 @@ public class Design2UMGCore : ModuleRules
 			"Json",
 			"JsonUtilities",
 			"DeveloperSettings",
-			"HTTP",
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"AssetRegistry",
-			"ContentBrowser",
-			"DesktopPlatform",
-			"ImageWrapper",
-			"Networking",
-			"Projects",
-			"RenderCore",
-			"RHI",
-			"Sockets",
-			"ToolMenus",
-			"UnrealEd",
 		});
 	}
 }

@@ -208,6 +208,25 @@ namespace
 		BorderSurface.Brush.OutlineColor = FLinearColor::Transparent;
 	}
 
+	bool HasVisualMapperWidgetStringProperty(const FUMGWidgetNode& Widget, const TCHAR* Key)
+	{
+		FString Value;
+		return Widget.Properties.TryGetString(Key, Value) && !Value.IsEmpty();
+	}
+
+	bool TryMoveVisualMapperStringProperty(FUMGPropertyBag& From, FUMGPropertyBag& To, const TCHAR* Key)
+	{
+		FString Value;
+		if (!From.TryGetString(Key, Value) || Value.IsEmpty())
+		{
+			return false;
+		}
+
+		To.Add(Key, Value);
+		From.Remove(Key);
+		return true;
+	}
+
 	FUMGWidgetNode MakeStrokeLineNode(
 		const FString& Id,
 		const FString& Name,
@@ -247,9 +266,10 @@ namespace
 
 		for (const FString& Key : {TEXT("Clipping"), TEXT("RenderOpacity"), TEXT("RenderAngle"), TEXT("RenderTransformScale"), TEXT("RenderTranslation")})
 		{
-			if (const FString* Value = Border.Properties.Find(Key))
+			FString Value;
+			if (Border.Properties.TryGetString(Key, Value) && !Value.IsEmpty())
 			{
-				Overlay.Properties.Add(Key, *Value);
+				Overlay.Properties.Add(Key, Value);
 				Border.Properties.Remove(Key);
 			}
 		}
@@ -390,7 +410,7 @@ namespace
 		{
 			if ((Node->Type == EDesignNodeType::Text || Node->Type == EDesignNodeType::IconFont)
 				&& Node->Fill.Type == EDesignFillType::Color)
-				if (!Widget.Properties.Contains(TEXT("Color")))
+				if (!HasVisualMapperWidgetStringProperty(Widget, TEXT("Color")))
 				{
 					Widget.Properties.Add(TEXT("Color"), Node->Fill.SolidColor);
 				}
@@ -403,7 +423,7 @@ namespace
 			// CreateIconFontWidget/CreateTextWidget 可能已写入 Color，FindOrAdd 不覆盖已有值
 			if (Node->Type == EDesignNodeType::Text || Node->Type == EDesignNodeType::IconFont)
 			{
-				if (!Widget.Properties.Contains(TEXT("Color")))
+				if (!HasVisualMapperWidgetStringProperty(Widget, TEXT("Color")))
 				{
 					Widget.Properties.Add(TEXT("Color"), Node->Fill.SolidColor);
 				}
@@ -457,11 +477,7 @@ namespace
 
 	void MovePropertyIfPresent(FUMGPropertyBag& From, FUMGPropertyBag& To, const TCHAR* Key)
 	{
-		if (const FString* Value = From.Find(Key))
-		{
-			To.Add(Key, *Value);
-			From.Remove(Key);
-		}
+		TryMoveVisualMapperStringProperty(From, To, Key);
 	}
 
 	void MoveProperties(FUMGPropertyBag& From, FUMGPropertyBag& To, std::initializer_list<const TCHAR*> Keys, bool* bMovedAny = nullptr)
@@ -469,10 +485,8 @@ namespace
 		bool bMoved = false;
 		for (const TCHAR* Key : Keys)
 		{
-			if (const FString* Value = From.Find(Key))
+			if (TryMoveVisualMapperStringProperty(From, To, Key))
 			{
-				To.Add(Key, *Value);
-				From.Remove(Key);
 				bMoved = true;
 			}
 		}
@@ -528,7 +542,8 @@ namespace
 
 	void ApplyOutsideStrokePaddingToBorder(FUMGWidgetNode& Border, FUMGWidgetNode& Widget)
 	{
-		const FString StrokeMargin = Widget.Properties.FindRef(UMGPropertyKeys::StrokeMargin);
+		FString StrokeMargin;
+		Widget.Properties.TryGetString(UMGPropertyKeys::StrokeMargin, StrokeMargin);
 		if (StrokeMargin.IsEmpty())
 		{
 			return;
@@ -543,7 +558,8 @@ namespace
 		if (Outset.Left > 0.0f || Outset.Top > 0.0f || Outset.Right > 0.0f || Outset.Bottom > 0.0f)
 		{
 			FMargin Combined = Outset;
-			const FString ExistingStrokePadding = Border.Properties.FindRef(UMGPropertyKeys::StrokePadding);
+			FString ExistingStrokePadding;
+			Border.Properties.TryGetString(UMGPropertyKeys::StrokePadding, ExistingStrokePadding);
 			if (!ExistingStrokePadding.IsEmpty())
 			{
 				const FMargin ExistingPadding = FUMGValueParser::ParseMargin(ExistingStrokePadding);
@@ -565,7 +581,7 @@ namespace
 	void TransferBorderRenderProperties(FUMGWidgetNode& Border, FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
 	{
 		MovePropertyIfPresent(Widget.Properties, Border.Properties, UMGPropertyKeys::RenderOpacity);
-		if (!Border.Properties.Contains(UMGPropertyKeys::RenderOpacity) && Node->Opacity < 1.0f)
+		if (!HasVisualMapperWidgetStringProperty(Border, UMGPropertyKeys::RenderOpacity) && Node->Opacity < 1.0f)
 		{
 			Border.Properties.Add(UMGPropertyKeys::RenderOpacity, FString::SanitizeFloat(Node->Opacity));
 		}
@@ -583,14 +599,14 @@ namespace
 
 	void TransferBorderBoxShadowProperties(FUMGWidgetNode& Border, FUMGWidgetNode& Widget)
 	{
-		const FString* CountStr = Widget.Properties.Find(UMGPropertyKeys::BoxShadowCount);
-		if (!CountStr)
+		FString CountStr;
+		int32 Count = 0;
+		if (!Widget.Properties.TryGetString(UMGPropertyKeys::BoxShadowCount, CountStr) || !Widget.Properties.TryGetInt(UMGPropertyKeys::BoxShadowCount, Count))
 		{
 			return;
 		}
 
-		const int32 Count = FCString::Atoi(**CountStr);
-		Border.Properties.Add(UMGPropertyKeys::BoxShadowCount, *CountStr);
+		Border.Properties.Add(UMGPropertyKeys::BoxShadowCount, CountStr);
 		Widget.Properties.Remove(UMGPropertyKeys::BoxShadowCount);
 		for (int32 Index = 0; Index < Count; ++Index)
 		{
@@ -618,7 +634,8 @@ void FVisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedP
 
 	if (Node->Opacity < 1.0f)
 	{
-		const FString ExistingOpacity = Widget.Properties.FindRef(TEXT("RenderOpacity"));
+		FString ExistingOpacity;
+		Widget.Properties.TryGetString(TEXT("RenderOpacity"), ExistingOpacity);
 		if (!ExistingOpacity.IsEmpty())
 		{
 			// 图片填充层 opacity 已写入，与节点级 opacity 合并（乘积）
@@ -744,7 +761,7 @@ void FVisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FDesignStroke& Str
 	if (Thickness <= 0)
 		return;
 
-	if (!Widget.Properties.Contains(TEXT("DrawAs")))
+	if (!HasVisualMapperWidgetStringProperty(Widget, TEXT("DrawAs")))
 	{
 		Widget.Properties.Add(TEXT("DrawAs"), TEXT("Box"));
 		if (!Widget.Brush.bHasDrawAs)
@@ -853,19 +870,24 @@ FUMGWidgetNode FVisualMapper::WrapWithBackgroundBlur(FUMGWidgetNode&& Widget, fl
 FUMGWidgetNode FVisualMapper::WrapWithBoxShadow(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, int32 ShadowIndex)
 {
 	FString Prefix = FString::Printf(TEXT("BoxShadow_%d_"), ShadowIndex);
-	const FString* OffXStr = Widget.Properties.Find(Prefix + TEXT("OffsetX"));
-	const FString* OffYStr = Widget.Properties.Find(Prefix + TEXT("OffsetY"));
-	const FString* BlurStr = Widget.Properties.Find(Prefix + TEXT("Blur"));
-	const FString* SpreadStr = Widget.Properties.Find(Prefix + TEXT("Spread"));
-	const FString* ColorStr = Widget.Properties.Find(Prefix + TEXT("Color"));
+	float OffX = 0.0f;
+	float OffY = 0.0f;
+	float Blur = 0.0f;
+	float Spread = 0.0f;
+	FString ShadowColor;
 
-	if (!OffXStr || !OffYStr) return MoveTemp(Widget);
+	if (!Widget.Properties.TryGetFloat(Prefix + TEXT("OffsetX"), OffX)
+		|| !Widget.Properties.TryGetFloat(Prefix + TEXT("OffsetY"), OffY))
+	{
+		return MoveTemp(Widget);
+	}
 
-	float OffX = FCString::Atof(**OffXStr);
-	float OffY = FCString::Atof(**OffYStr);
-	float Blur = BlurStr ? FCString::Atof(**BlurStr) : 0.0f;
-	float Spread = SpreadStr ? FCString::Atof(**SpreadStr) : 0.0f;
-	FString ShadowColor = ColorStr ? *ColorStr : TEXT("#00000040");
+	Widget.Properties.TryGetFloat(Prefix + TEXT("Blur"), Blur);
+	Widget.Properties.TryGetFloat(Prefix + TEXT("Spread"), Spread);
+	if (!Widget.Properties.TryGetString(Prefix + TEXT("Color"), ShadowColor) || ShadowColor.IsEmpty())
+	{
+		ShadowColor = TEXT("#00000040");
+	}
 
 	Widget.Properties.Remove(Prefix + TEXT("OffsetX"));
 	Widget.Properties.Remove(Prefix + TEXT("OffsetY"));
@@ -999,12 +1021,50 @@ FUMGWidgetNode FVisualMapper::WrapWithMultiFill(FUMGWidgetNode&& Widget, const T
 		}
 		else if (Fill.Type == EDesignFillType::Image && !Fill.Image.Url.IsEmpty())
 		{
-			Layer.Type = TEXT("Image");
-			Layer.Properties.Add(TEXT("TexturePath"), Fill.Image.Url);
-			Layer.Brush.TexturePath = Fill.Image.Url;
+			const bool bSquareNode =
+				Node->Width.Value > 0.0f && Node->Height.Value > 0.0f
+				&& FMath::IsNearlyEqual(Node->Width.Value, Node->Height.Value, 1.0f);
 
-			ImageFillUtils::ApplyImageFillProperties(Layer, Fill.Image);
-			AddTextureSizeHints(Layer, Node);
+			if (Fill.Image.Mode == EDesignImageMode::Fit)
+			{
+				Layer.Type = TEXT("ScaleBox");
+				Layer.Properties.Add(TEXT("Stretch"), TEXT("ScaleToFit"));
+				Layer.Properties.Add(TEXT("StretchDirection"), TEXT("Both"));
+				const bool bLuminosityFit = Fill.BlendMode.Equals(TEXT("LUMINOSITY"), ESearchCase::IgnoreCase);
+
+				FUMGWidgetNode ImageChild;
+				ImageChild.Type = TEXT("Image");
+				ImageChild.Id = FString::Printf(TEXT("%s_fill%d_img"), *Widget.Id, i);
+				ImageChild.Name = FString::Printf(TEXT("%s_fill%d_img"), *Widget.Name, i);
+				ImageChild.Properties.Add(TEXT("TexturePath"), Fill.Image.Url);
+				ImageChild.Brush.TexturePath = Fill.Image.Url;
+				if (bLuminosityFit)
+				{
+					// Figma exports FIT+LUMINOSITY without a reliable geometric scale we can
+					// reproduce in UMG. Keep the normal fit sizing and approximate the subtle
+					// luminance wash via a low-opacity overlay instead of synthetic transforms.
+					const float EffectiveOpacity = FMath::Min(Fill.Image.Opacity, 0.15f);
+					ImageChild.Properties.Add(TEXT("RenderOpacity"), FString::Printf(TEXT("%.4f"), EffectiveOpacity));
+				}
+				else if (Fill.Image.Opacity < 1.0f)
+				{
+					ImageChild.Properties.Add(TEXT("RenderOpacity"), FString::SanitizeFloat(Fill.Image.Opacity));
+				}
+				if (bSquareNode)
+				{
+					AddTextureSizeHints(ImageChild, Node);
+				}
+				Layer.Children.Add(MoveTemp(ImageChild));
+			}
+			else
+			{
+				Layer.Type = TEXT("Image");
+				Layer.Properties.Add(TEXT("TexturePath"), Fill.Image.Url);
+				Layer.Brush.TexturePath = Fill.Image.Url;
+
+				ImageFillUtils::ApplyImageFillProperties(Layer, Fill.Image);
+				AddTextureSizeHints(Layer, Node);
+			}
 		}
 		else
 		{
@@ -1021,9 +1081,10 @@ FUMGWidgetNode FVisualMapper::WrapWithMultiFill(FUMGWidgetNode&& Widget, const T
 	// 节点级渲染属性上卷到 Overlay
 	for (const FString& Key : {TEXT("RenderOpacity"), TEXT("RenderAngle"), TEXT("RenderTransformScale"), TEXT("Clipping")})
 	{
-		if (const FString* V = Widget.Properties.Find(Key))
+		FString Value;
+		if (Widget.Properties.TryGetString(Key, Value) && !Value.IsEmpty())
 		{
-			Overlay.Properties.Add(Key, *V);
+			Overlay.Properties.Add(Key, Value);
 			Widget.Properties.Remove(Key);
 		}
 	}

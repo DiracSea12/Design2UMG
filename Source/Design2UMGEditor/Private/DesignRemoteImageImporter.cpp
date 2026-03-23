@@ -686,7 +686,8 @@ namespace
 
 	void ResolveNodeRecursive(FUMGWidgetNode& Node, FResolveContext& Context)
 	{
-		const FString TexturePath = Node.Properties.FindRef(TEXT("TexturePath"));
+		FString TexturePath;
+		Node.Properties.TryGetString(TEXT("TexturePath"), TexturePath);
 		if (!TexturePath.IsEmpty())
 		{
 			const FString DebugName = Node.Name.IsEmpty() ? Node.Id : Node.Name;
@@ -774,9 +775,10 @@ namespace
 {
 	void CollectRemoteUrls(const FUMGWidgetNode& Node, TSet<FString>& OutUrls)
 	{
-		if (const FString* TexturePath = Node.Properties.Find(TEXT("TexturePath")))
+		FString TexturePath;
+		if (Node.Properties.TryGetString(TEXT("TexturePath"), TexturePath))
 		{
-			const FString Trimmed = TexturePath->TrimStartAndEnd();
+			const FString Trimmed = TexturePath.TrimStartAndEnd();
 			if (IsRemoteUrl(Trimmed))
 			{
 				OutUrls.Add(Trimmed);

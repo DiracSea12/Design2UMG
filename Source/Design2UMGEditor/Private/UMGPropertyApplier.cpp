@@ -51,7 +51,21 @@
 
 namespace
 {
-	#define GET_PROP(Key) P.Find(TEXT(Key))
+	bool TryGetProp(const FUMGPropertyBag& P, const TCHAR* Key, FString& OutValue)
+	{
+		return P.TryGetString(Key, OutValue) && !OutValue.IsEmpty();
+	}
+
+	bool TryGetPropAllowEmpty(const FUMGPropertyBag& P, const TCHAR* Key, FString& OutValue)
+	{
+		return P.TryGetString(Key, OutValue);
+	}
+
+	bool HasProp(const FUMGPropertyBag& P, const TCHAR* Key)
+	{
+		FString Value;
+		return TryGetProp(P, Key, Value);
+	}
 
 	bool TryParseVector4(const FString& Value, FVector4& OutVector)
 	{
@@ -111,22 +125,22 @@ namespace
 		const FUMGPropertyBag& P,
 		TFunctionRef<void(UTexture2D*)> ApplyCroppedTexture)
 	{
-		const FString* Mode = P.Find(TEXT("ImageMode"));
-		if (!Mode)
+		FString Mode;
+		if (!TryGetProp(P, TEXT("ImageMode"), Mode))
 		{
 			return false;
 		}
 
-		if (*Mode == TEXT("Crop"))
+		if (Mode == TEXT("Crop"))
 		{
-			const FString* TransformStr = P.Find(TEXT("ImageTransform"));
-			if (!TransformStr)
+			FString TransformStr;
+			if (!TryGetProp(P, TEXT("ImageTransform"), TransformStr))
 			{
 				return false;
 			}
 
 			TArray<FString> Parts;
-			TransformStr->ParseIntoArray(Parts, TEXT(","));
+			TransformStr.ParseIntoArray(Parts, TEXT(","));
 			if (Parts.Num() != 6)
 			{
 				return false;
@@ -164,7 +178,7 @@ namespace
 			return false;
 		}
 
-		if (*Mode == TEXT("Fit"))
+		if (Mode == TEXT("Fit"))
 		{
 			Brush.Tiling = ESlateBrushTileType::NoTile;
 			return true;
@@ -176,7 +190,8 @@ namespace
 	void ApplyTextBlockProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UTextBlock* T = CastChecked<UTextBlock>(W);
-		if (const FString* V = GET_PROP("Text")) T->SetText(FText::FromString(*V));
+		FString Value;
+		if (TryGetPropAllowEmpty(P, TEXT("Text"), Value)) T->SetText(FText::FromString(Value));
 		FLinearColor TextColor;
 		if (P.TryGetColor(TEXT("Color"), TextColor))
 		{
@@ -184,31 +199,31 @@ namespace
 		}
 		FSlateFontInfo FontInfo = T->GetFont();
 		bool bFontChanged = false;
-		const bool bIsIconFontWidget = P.Contains(TEXT("IconName"));
+		const bool bIsIconFontWidget = HasProp(P, TEXT("IconName"));
 		float FontSize = 0.0f;
 		if (P.TryGetFloat(TEXT("FontSize"), FontSize))
 		{
 			FontInfo.Size = FMath::Max(1, FMath::RoundToInt(FontSize));
 			bFontChanged = true;
 		}
-		if (const FString* V = GET_PROP("FontFamily"))
+		if (TryGetProp(P, TEXT("FontFamily"), Value))
 		{
-			if (V->StartsWith(TEXT("/")))
+			if (Value.StartsWith(TEXT("/")))
 			{
-				if (UObject* FontObject = LoadObject<UObject>(nullptr, **V))
+				if (UObject* FontObject = LoadObject<UObject>(nullptr, *Value))
 				{
 					FontInfo.FontObject = FontObject;
 				}
 			}
-			else if (!V->IsEmpty() && !bIsIconFontWidget)
+			else if (!Value.IsEmpty() && !bIsIconFontWidget)
 			{
-				FontInfo.TypefaceFontName = FName(**V);
+				FontInfo.TypefaceFontName = FName(*Value);
 			}
 			bFontChanged = true;
 		}
-		if (const FString* V = GET_PROP("TypefaceFontName"))
+		if (TryGetProp(P, TEXT("TypefaceFontName"), Value))
 		{
-			FontInfo.TypefaceFontName = FName(**V);
+			FontInfo.TypefaceFontName = FName(*Value);
 			bFontChanged = true;
 		}
 		float PixelSpacing = 0.0f;
@@ -226,12 +241,12 @@ namespace
 		{
 			T->SetFont(FontInfo);
 		}
-		if (const FString* V = GET_PROP("Justification"))
+		if (TryGetProp(P, TEXT("Justification"), Value))
 		{
 			static const TMap<FString, ETextJustify::Type> JustifyMap = {
 				{TEXT("Left"), ETextJustify::Left}, {TEXT("Center"), ETextJustify::Center}, {TEXT("Right"), ETextJustify::Right}
 			};
-			if (const ETextJustify::Type* J = JustifyMap.Find(*V)) T->SetJustification(*J);
+			if (const ETextJustify::Type* J = JustifyMap.Find(Value)) T->SetJustification(*J);
 		}
 		float LineHeightPercentage = 0.0f;
 		if (P.TryGetFloat(TEXT("LineHeightPercentage"), LineHeightPercentage))
@@ -264,21 +279,24 @@ namespace
 	{
 		UButton* B = CastChecked<UButton>(W);
 		FButtonStyle S = B->GetStyle();
-		if (const FString* V = GET_PROP("BackgroundColor"))
+		FLinearColor BackgroundColor;
+		if (P.TryGetColor(TEXT("BackgroundColor"), BackgroundColor))
 		{
-			FLinearColor Color = FUMGValueParser::ParseColor(*V);
-			S.Normal.TintColor = FSlateColor(Color);
-			S.Hovered.TintColor = FSlateColor(Color * 1.1f);
-			S.Pressed.TintColor = FSlateColor(Color * 0.9f);
+			S.Normal.TintColor = FSlateColor(BackgroundColor);
+			S.Hovered.TintColor = FSlateColor(BackgroundColor * 1.1f);
+			S.Pressed.TintColor = FSlateColor(BackgroundColor * 0.9f);
 		}
-		if (const FString* V = GET_PROP("HoveredColor")) S.Hovered.TintColor = FSlateColor(FUMGValueParser::ParseColor(*V));
-		if (const FString* V = GET_PROP("PressedColor")) S.Pressed.TintColor = FSlateColor(FUMGValueParser::ParseColor(*V));
+		FLinearColor HoveredColor;
+		if (P.TryGetColor(TEXT("HoveredColor"), HoveredColor)) S.Hovered.TintColor = FSlateColor(HoveredColor);
+		FLinearColor PressedColor;
+		if (P.TryGetColor(TEXT("PressedColor"), PressedColor)) S.Pressed.TintColor = FSlateColor(PressedColor);
 		B->SetStyle(S);
 	}
 
 	void ApplyImageProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UImage* I = CastChecked<UImage>(W);
+		FString Value;
 		FLinearColor ImageColor;
 		if (P.TryGetColor(TEXT("Color"), ImageColor) || P.TryGetColor(TEXT("ColorAndOpacity"), ImageColor))
 		{
@@ -290,9 +308,9 @@ namespace
 		{
 			I->SetBrushTintColor(FSlateColor(BrushTint));
 		}
-		if (const FString* V = GET_PROP("MaterialRef"))
+		if (TryGetProp(P, TEXT("MaterialRef"), Value))
 		{
-			if (UTexture2D* GeneratedTex = FProceduralShapeGenerator::GenerateFromMaterialRef(*V, P, I))
+			if (UTexture2D* GeneratedTex = FProceduralShapeGenerator::GenerateFromMaterialRef(Value, P, I))
 			{
 				I->SetBrushFromTexture(GeneratedTex);
 				FSlateBrush GeneratedBrush = I->GetBrush();
@@ -307,9 +325,14 @@ namespace
 				return;
 			}
 		}
-		if (const FString* Geom = GET_PROP("PathGeometry"))
+		FString Geom;
+		if (TryGetProp(P, TEXT("PathGeometry"), Geom))
 		{
-			const FString FillRuleStr = P.Contains(TEXT("PathFillRule")) ? P[TEXT("PathFillRule")] : TEXT("nonzero");
+			FString FillRuleStr;
+			if (!TryGetProp(P, TEXT("PathFillRule"), FillRuleStr))
+			{
+				FillRuleStr = TEXT("nonzero");
+			}
 			FLinearColor PathColor = FLinearColor::White;
 			P.TryGetColor(TEXT("PathFillColor"), PathColor);
 
@@ -323,7 +346,7 @@ namespace
 			const int32 RasterW = PW * PathSupersample;
 			const int32 RasterH = PH * PathSupersample;
 
-			if (UTexture2D* Tex = FDesignPathRasterizer::Rasterize(*Geom, RasterW, RasterH, PathColor, FillRuleStr))
+			if (UTexture2D* Tex = FDesignPathRasterizer::Rasterize(Geom, RasterW, RasterH, PathColor, FillRuleStr))
 			{
 				I->SetBrushFromTexture(Tex);
 				FSlateBrush PathBrush = I->GetBrush();
@@ -339,10 +362,10 @@ namespace
 			}
 		}
 
-		if (const FString* V = GET_PROP("TexturePath"))
+		if (TryGetProp(P, TEXT("TexturePath"), Value))
 		{
-			UTexture2D* Tex = LoadObject<UTexture2D>(nullptr, **V);
-			if (!Tex) Tex = FindObject<UTexture2D>(nullptr, **V);
+			UTexture2D* Tex = LoadObject<UTexture2D>(nullptr, *Value);
+			if (!Tex) Tex = FindObject<UTexture2D>(nullptr, *Value);
 			if (Tex) I->SetBrushFromTexture(Tex);
 		}
 
@@ -370,7 +393,7 @@ namespace
 
 		if (bBrushModified)
 		{
-			if (Brush.Tiling == ESlateBrushTileType::Both && !P.Contains(TEXT("ImageMode")))
+			if (Brush.Tiling == ESlateBrushTileType::Both && !HasProp(P, TEXT("ImageMode")))
 				Brush.Tiling = ESlateBrushTileType::NoTile;
 			I->SetBrush(Brush);
 			if (Brush.ImageSize.X > 0 && Brush.ImageSize.Y > 0)
@@ -381,74 +404,93 @@ namespace
 	void ApplyProgressBarProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UProgressBar* PB = CastChecked<UProgressBar>(W);
-		if (const FString* V = GET_PROP("Percent")) PB->SetPercent(FCString::Atof(**V));
-		if (const FString* V = GET_PROP("FillColor")) PB->SetFillColorAndOpacity(FUMGValueParser::ParseColor(*V));
+		float Percent = 0.0f;
+		if (P.TryGetFloat(TEXT("Percent"), Percent)) PB->SetPercent(Percent);
+		FLinearColor FillColor;
+		if (P.TryGetColor(TEXT("FillColor"), FillColor)) PB->SetFillColorAndOpacity(FillColor);
 	}
 
 	void ApplyThrobberProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UThrobber* T = CastChecked<UThrobber>(W);
-		if (const FString* V = GET_PROP("NumberOfPieces")) T->SetNumberOfPieces(FCString::Atoi(**V));
-		if (const FString* V = GET_PROP("Animate"))
+		int32 NumberOfPieces = 0;
+		if (P.TryGetInt(TEXT("NumberOfPieces"), NumberOfPieces)) T->SetNumberOfPieces(NumberOfPieces);
+		bool bAnimate = false;
+		if (P.TryGetBool(TEXT("Animate"), bAnimate))
 		{
-			const bool bAnimate = V->ToBool();
 			T->SetAnimateHorizontally(bAnimate);
 			T->SetAnimateVertically(bAnimate);
 			T->SetAnimateOpacity(bAnimate);
 		}
-		if (const FString* V = GET_PROP("AnimateHorizontally")) T->SetAnimateHorizontally(V->ToBool());
-		if (const FString* V = GET_PROP("AnimateVertically")) T->SetAnimateVertically(V->ToBool());
-		if (const FString* V = GET_PROP("AnimateOpacity")) T->SetAnimateOpacity(V->ToBool());
+		bool bAnimateHorizontally = false;
+		if (P.TryGetBool(TEXT("AnimateHorizontally"), bAnimateHorizontally)) T->SetAnimateHorizontally(bAnimateHorizontally);
+		bool bAnimateVertically = false;
+		if (P.TryGetBool(TEXT("AnimateVertically"), bAnimateVertically)) T->SetAnimateVertically(bAnimateVertically);
+		bool bAnimateOpacity = false;
+		if (P.TryGetBool(TEXT("AnimateOpacity"), bAnimateOpacity)) T->SetAnimateOpacity(bAnimateOpacity);
 	}
 
 	void ApplyCircularThrobberProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UCircularThrobber* T = CastChecked<UCircularThrobber>(W);
-		if (const FString* V = GET_PROP("NumberOfPieces")) T->SetNumberOfPieces(FCString::Atoi(**V));
-		if (const FString* V = GET_PROP("Period")) T->SetPeriod(FCString::Atof(**V));
-		if (const FString* V = GET_PROP("Radius")) T->SetRadius(FCString::Atof(**V));
+		int32 NumberOfPieces = 0;
+		if (P.TryGetInt(TEXT("NumberOfPieces"), NumberOfPieces)) T->SetNumberOfPieces(NumberOfPieces);
+		float Period = 0.0f;
+		if (P.TryGetFloat(TEXT("Period"), Period)) T->SetPeriod(Period);
+		float Radius = 0.0f;
+		if (P.TryGetFloat(TEXT("Radius"), Radius)) T->SetRadius(Radius);
 	}
 
 	void ApplySliderProps(UWidget* W, const FUMGPropertyBag& P)
 	{
-		if (const FString* V = GET_PROP("Value")) CastChecked<USlider>(W)->SetValue(FCString::Atof(**V));
+		float Value = 0.0f;
+		if (P.TryGetFloat(TEXT("Value"), Value)) CastChecked<USlider>(W)->SetValue(Value);
 	}
 
 	void ApplyCheckBoxProps(UWidget* W, const FUMGPropertyBag& P)
 	{
-		if (const FString* V = GET_PROP("IsChecked")) CastChecked<UCheckBox>(W)->SetIsChecked(V->ToBool());
+		bool bIsChecked = false;
+		if (P.TryGetBool(TEXT("IsChecked"), bIsChecked)) CastChecked<UCheckBox>(W)->SetIsChecked(bIsChecked);
 	}
 
 	void ApplyEditableTextBoxProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UEditableTextBox* E = CastChecked<UEditableTextBox>(W);
-		if (const FString* V = GET_PROP("Text")) E->SetText(FText::FromString(*V));
-		if (const FString* V = GET_PROP("HintText")) E->SetHintText(FText::FromString(*V));
+		FString Value;
+		if (TryGetPropAllowEmpty(P, TEXT("Text"), Value)) E->SetText(FText::FromString(Value));
+		if (TryGetPropAllowEmpty(P, TEXT("HintText"), Value)) E->SetHintText(FText::FromString(Value));
 	}
 
 	void ApplyMultiLineEditableTextBoxProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UMultiLineEditableTextBox* M = CastChecked<UMultiLineEditableTextBox>(W);
-		if (const FString* V = GET_PROP("Text")) M->SetText(FText::FromString(*V));
-		if (const FString* V = GET_PROP("HintText")) M->SetHintText(FText::FromString(*V));
+		FString Value;
+		if (TryGetPropAllowEmpty(P, TEXT("Text"), Value)) M->SetText(FText::FromString(Value));
+		if (TryGetPropAllowEmpty(P, TEXT("HintText"), Value)) M->SetHintText(FText::FromString(Value));
 	}
 
 	void ApplyEditableTextProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UEditableText* E = CastChecked<UEditableText>(W);
-		if (const FString* V = GET_PROP("Text")) E->SetText(FText::FromString(*V));
-		if (const FString* V = GET_PROP("HintText")) E->SetHintText(FText::FromString(*V));
-		if (const FString* V = GET_PROP("IsReadOnly")) E->SetIsReadOnly(V->ToBool());
-		if (const FString* V = GET_PROP("IsPassword")) E->SetIsPassword(V->ToBool());
-		if (const FString* V = GET_PROP("MinimumDesiredWidth")) E->SetMinimumDesiredWidth(FCString::Atof(**V));
+		FString Value;
+		if (TryGetPropAllowEmpty(P, TEXT("Text"), Value)) E->SetText(FText::FromString(Value));
+		if (TryGetPropAllowEmpty(P, TEXT("HintText"), Value)) E->SetHintText(FText::FromString(Value));
+		bool bIsReadOnly = false;
+		if (P.TryGetBool(TEXT("IsReadOnly"), bIsReadOnly)) E->SetIsReadOnly(bIsReadOnly);
+		bool bIsPassword = false;
+		if (P.TryGetBool(TEXT("IsPassword"), bIsPassword)) E->SetIsPassword(bIsPassword);
+		float MinimumDesiredWidth = 0.0f;
+		if (P.TryGetFloat(TEXT("MinimumDesiredWidth"), MinimumDesiredWidth)) E->SetMinimumDesiredWidth(MinimumDesiredWidth);
 	}
 
 	void ApplyMultiLineEditableTextProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UMultiLineEditableText* M = CastChecked<UMultiLineEditableText>(W);
-		if (const FString* V = GET_PROP("Text")) M->SetText(FText::FromString(*V));
-		if (const FString* V = GET_PROP("HintText")) M->SetHintText(FText::FromString(*V));
-		if (const FString* V = GET_PROP("IsReadOnly")) M->SetIsReadOnly(V->ToBool());
+		FString Value;
+		if (TryGetPropAllowEmpty(P, TEXT("Text"), Value)) M->SetText(FText::FromString(Value));
+		if (TryGetPropAllowEmpty(P, TEXT("HintText"), Value)) M->SetHintText(FText::FromString(Value));
+		bool bIsReadOnly = false;
+		if (P.TryGetBool(TEXT("IsReadOnly"), bIsReadOnly)) M->SetIsReadOnly(bIsReadOnly);
 	}
 
 	void ApplyBorderProps(UWidget* W, const FUMGPropertyBag& P)
@@ -457,12 +499,13 @@ namespace
 		Bd->SetPadding(FMargin(0.0f));
 		FSlateBrush Brush = Bd->Background;
 		bool bBrushChanged = false;
-		const bool bHasCornerRadiusProp = P.Contains(TEXT("OutlineCornerRadius")) || P.Contains(TEXT("CornerRadii"));
+		const bool bHasCornerRadiusProp = HasProp(P, TEXT("OutlineCornerRadius")) || HasProp(P, TEXT("CornerRadii"));
 
-		if (const FString* V = GET_PROP("TexturePath"))
+		FString Value;
+		if (TryGetProp(P, TEXT("TexturePath"), Value))
 		{
-			UTexture2D* Tex = LoadObject<UTexture2D>(nullptr, **V);
-			if (!Tex) Tex = FindObject<UTexture2D>(nullptr, **V);
+			UTexture2D* Tex = LoadObject<UTexture2D>(nullptr, *Value);
+			if (!Tex) Tex = FindObject<UTexture2D>(nullptr, *Value);
 			if (Tex)
 			{
 				Brush.SetResourceObject(Tex);
@@ -472,9 +515,9 @@ namespace
 			}
 		}
 
-		if (const FString* V = GET_PROP("MaterialRef"))
+		if (TryGetProp(P, TEXT("MaterialRef"), Value))
 		{
-			if (UTexture2D* GeneratedTex = FProceduralShapeGenerator::GenerateFromMaterialRef(*V, P, Bd))
+			if (UTexture2D* GeneratedTex = FProceduralShapeGenerator::GenerateFromMaterialRef(Value, P, Bd))
 			{
 				Brush.SetResourceObject(GeneratedTex);
 				Brush.DrawAs = ESlateBrushDrawType::Image;
@@ -483,10 +526,10 @@ namespace
 			}
 		}
 
-		if (const FString* V = GET_PROP("DrawAs"))
+		if (TryGetProp(P, TEXT("DrawAs"), Value))
 		{
 			ESlateBrushDrawType::Type DrawAsType;
-			if (TryParseDrawAs(*V, DrawAsType))
+			if (TryParseDrawAs(Value, DrawAsType))
 			{
 				Brush.DrawAs = DrawAsType;
 				bBrushChanged = true;
@@ -599,81 +642,96 @@ namespace
 	void ApplySizeBoxProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		USizeBox* SB = CastChecked<USizeBox>(W);
-		if (const FString* V = GET_PROP("WidthOverride")) SB->SetWidthOverride(FCString::Atof(**V));
-		if (const FString* V = GET_PROP("HeightOverride")) SB->SetHeightOverride(FCString::Atof(**V));
-		if (const FString* V = GET_PROP("MinDesiredWidth")) SB->SetMinDesiredWidth(FCString::Atof(**V));
-		if (const FString* V = GET_PROP("MinDesiredHeight")) SB->SetMinDesiredHeight(FCString::Atof(**V));
-		if (const FString* V = GET_PROP("MaxDesiredWidth")) SB->SetMaxDesiredWidth(FCString::Atof(**V));
-		if (const FString* V = GET_PROP("MaxDesiredHeight")) SB->SetMaxDesiredHeight(FCString::Atof(**V));
+		float WidthOverride = 0.0f;
+		if (P.TryGetFloat(TEXT("WidthOverride"), WidthOverride)) SB->SetWidthOverride(WidthOverride);
+		float HeightOverride = 0.0f;
+		if (P.TryGetFloat(TEXT("HeightOverride"), HeightOverride)) SB->SetHeightOverride(HeightOverride);
+		float MinDesiredWidth = 0.0f;
+		if (P.TryGetFloat(TEXT("MinDesiredWidth"), MinDesiredWidth)) SB->SetMinDesiredWidth(MinDesiredWidth);
+		float MinDesiredHeight = 0.0f;
+		if (P.TryGetFloat(TEXT("MinDesiredHeight"), MinDesiredHeight)) SB->SetMinDesiredHeight(MinDesiredHeight);
+		float MaxDesiredWidth = 0.0f;
+		if (P.TryGetFloat(TEXT("MaxDesiredWidth"), MaxDesiredWidth)) SB->SetMaxDesiredWidth(MaxDesiredWidth);
+		float MaxDesiredHeight = 0.0f;
+		if (P.TryGetFloat(TEXT("MaxDesiredHeight"), MaxDesiredHeight)) SB->SetMaxDesiredHeight(MaxDesiredHeight);
 	}
 
 	void ApplyScrollBoxProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UScrollBox* Sc = CastChecked<UScrollBox>(W);
-		if (const FString* V = GET_PROP("Orientation"))
-			Sc->SetOrientation(*V == TEXT("Horizontal") ? Orient_Horizontal : Orient_Vertical);
-		if (const FString* V = GET_PROP("ScrollBarVisibility"))
+		FString Value;
+		if (TryGetProp(P, TEXT("Orientation"), Value))
+			Sc->SetOrientation(Value == TEXT("Horizontal") ? Orient_Horizontal : Orient_Vertical);
+		if (TryGetProp(P, TEXT("ScrollBarVisibility"), Value))
 		{
 			static const TMap<FString, ESlateVisibility> VisMap = {
 				{TEXT("Visible"), ESlateVisibility::Visible}, {TEXT("Collapsed"), ESlateVisibility::Collapsed}, {TEXT("Hidden"), ESlateVisibility::Hidden}
 			};
-			if (const ESlateVisibility* Vis = VisMap.Find(*V)) Sc->SetScrollBarVisibility(*Vis);
+			if (const ESlateVisibility* Vis = VisMap.Find(Value)) Sc->SetScrollBarVisibility(*Vis);
 		}
 	}
 
 	void ApplySpacerProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		FVector2D Size(0, 0);
-		if (const FString* V = GET_PROP("Width")) Size.X = FCString::Atof(**V);
-		if (const FString* V = GET_PROP("Height")) Size.Y = FCString::Atof(**V);
+		float Width = 0.0f;
+		if (P.TryGetFloat(TEXT("Width"), Width)) Size.X = Width;
+		float Height = 0.0f;
+		if (P.TryGetFloat(TEXT("Height"), Height)) Size.Y = Height;
 		CastChecked<USpacer>(W)->SetSize(Size);
 	}
 
 	void ApplyRichTextBlockProps(UWidget* W, const FUMGPropertyBag& P)
 	{
-		if (const FString* V = GET_PROP("Text")) CastChecked<URichTextBlock>(W)->SetText(FText::FromString(*V));
+		FString Value;
+		if (TryGetPropAllowEmpty(P, TEXT("Text"), Value)) CastChecked<URichTextBlock>(W)->SetText(FText::FromString(Value));
 	}
 
 	void ApplyComboBoxStringProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UComboBoxString* CB = CastChecked<UComboBoxString>(W);
-		if (const FString* V = GET_PROP("Options"))
+		FString Value;
+		if (TryGetProp(P, TEXT("Options"), Value))
 		{
 			TArray<FString> Opts;
-			V->ParseIntoArray(Opts, TEXT(","));
+			Value.ParseIntoArray(Opts, TEXT(","));
 			for (const FString& O : Opts) CB->AddOption(O.TrimStartAndEnd());
 		}
-		if (const FString* V = GET_PROP("SelectedOption")) CB->SetSelectedOption(*V);
+		if (TryGetPropAllowEmpty(P, TEXT("SelectedOption"), Value)) CB->SetSelectedOption(Value);
 	}
 
 	void ApplySpinBoxProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		USpinBox* SpB = CastChecked<USpinBox>(W);
-		if (const FString* V = GET_PROP("Value")) SpB->SetValue(FCString::Atof(**V));
-		if (const FString* V = GET_PROP("MinValue")) SpB->SetMinValue(FCString::Atof(**V));
-		if (const FString* V = GET_PROP("MaxValue")) SpB->SetMaxValue(FCString::Atof(**V));
+		float Value = 0.0f;
+		if (P.TryGetFloat(TEXT("Value"), Value)) SpB->SetValue(Value);
+		float MinValue = 0.0f;
+		if (P.TryGetFloat(TEXT("MinValue"), MinValue)) SpB->SetMinValue(MinValue);
+		float MaxValue = 0.0f;
+		if (P.TryGetFloat(TEXT("MaxValue"), MaxValue)) SpB->SetMaxValue(MaxValue);
 	}
 
 	void ApplyBackgroundBlurProps(UWidget* W, const FUMGPropertyBag& P)
 	{
-		if (const FString* V = GET_PROP("BlurStrength")) CastChecked<UBackgroundBlur>(W)->SetBlurStrength(FCString::Atof(**V));
+		float BlurStrength = 0.0f;
+		if (P.TryGetFloat(TEXT("BlurStrength"), BlurStrength)) CastChecked<UBackgroundBlur>(W)->SetBlurStrength(BlurStrength);
 	}
 
 	void ApplyRetainerBoxProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		URetainerBox* RB = CastChecked<URetainerBox>(W);
-		if (const FString* V = GET_PROP("RetainRendering")) RB->SetRetainRendering(V->ToBool());
+		bool bRetainRendering = false;
+		if (P.TryGetBool(TEXT("RetainRendering"), bRetainRendering)) RB->SetRetainRendering(bRetainRendering);
 		int32 Phase = RB->GetPhase();
 		int32 PhaseCount = RB->GetPhaseCount();
 		bool bHasPhase = false;
-		if (const FString* V = GET_PROP("Phase"))
+		if (P.TryGetInt(TEXT("Phase"), Phase))
 		{
-			Phase = FCString::Atoi(**V);
 			bHasPhase = true;
 		}
-		if (const FString* V = GET_PROP("PhaseCount"))
+		if (P.TryGetInt(TEXT("PhaseCount"), PhaseCount))
 		{
-			PhaseCount = FMath::Max(1, FCString::Atoi(**V));
+			PhaseCount = FMath::Max(1, PhaseCount);
 			bHasPhase = true;
 		}
 		if (bHasPhase) RB->SetRenderingPhase(Phase, PhaseCount);
@@ -682,25 +740,27 @@ namespace
 	void ApplyInvalidationBoxProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UInvalidationBox* IB = CastChecked<UInvalidationBox>(W);
-		if (const FString* V = GET_PROP("CanCache")) IB->SetCanCache(V->ToBool());
+		bool bCanCache = false;
+		if (P.TryGetBool(TEXT("CanCache"), bCanCache)) IB->SetCanCache(bCanCache);
 	}
 
 	void ApplyGridPanelProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UGridPanel* G = CastChecked<UGridPanel>(W);
-		if (const FString* V = GET_PROP("ColumnFill"))
+		FString Value;
+		if (TryGetProp(P, TEXT("ColumnFill"), Value))
 		{
 			TArray<FString> Fills;
-			V->ParseIntoArray(Fills, TEXT(","));
+			Value.ParseIntoArray(Fills, TEXT(","));
 			for (int32 i = 0; i < Fills.Num(); ++i)
 			{
 				G->SetColumnFill(i, FCString::Atof(*Fills[i].TrimStartAndEnd()));
 			}
 		}
-		if (const FString* V = GET_PROP("RowFill"))
+		if (TryGetProp(P, TEXT("RowFill"), Value))
 		{
 			TArray<FString> Fills;
-			V->ParseIntoArray(Fills, TEXT(","));
+			Value.ParseIntoArray(Fills, TEXT(","));
 			for (int32 i = 0; i < Fills.Num(); ++i)
 			{
 				G->SetRowFill(i, FCString::Atof(*Fills[i].TrimStartAndEnd()));
@@ -711,23 +771,29 @@ namespace
 	void ApplyUniformGridPanelProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UUniformGridPanel* UG = CastChecked<UUniformGridPanel>(W);
-		if (const FString* V = GET_PROP("SlotPadding")) UG->SetSlotPadding(FUMGValueParser::ParseMargin(*V));
-		if (const FString* V = GET_PROP("MinDesiredSlotWidth")) UG->SetMinDesiredSlotWidth(FCString::Atof(**V));
-		if (const FString* V = GET_PROP("MinDesiredSlotHeight")) UG->SetMinDesiredSlotHeight(FCString::Atof(**V));
+		FMargin SlotPadding;
+		if (P.TryGetMargin(TEXT("SlotPadding"), SlotPadding)) UG->SetSlotPadding(SlotPadding);
+		float MinDesiredSlotWidth = 0.0f;
+		if (P.TryGetFloat(TEXT("MinDesiredSlotWidth"), MinDesiredSlotWidth)) UG->SetMinDesiredSlotWidth(MinDesiredSlotWidth);
+		float MinDesiredSlotHeight = 0.0f;
+		if (P.TryGetFloat(TEXT("MinDesiredSlotHeight"), MinDesiredSlotHeight)) UG->SetMinDesiredSlotHeight(MinDesiredSlotHeight);
 	}
 
 	void ApplyWrapBoxProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UWrapBox* WB = CastChecked<UWrapBox>(W);
-		if (const FString* V = GET_PROP("InnerSlotPadding")) WB->SetInnerSlotPadding(FUMGValueParser::ParseVector2D(*V));
-		if (const FString* V = GET_PROP("Orientation"))
-			WB->SetOrientation(*V == TEXT("Vertical") ? Orient_Vertical : Orient_Horizontal);
+		FVector2D InnerSlotPadding;
+		if (P.TryGetVector2D(TEXT("InnerSlotPadding"), InnerSlotPadding)) WB->SetInnerSlotPadding(InnerSlotPadding);
+		FString Value;
+		if (TryGetProp(P, TEXT("Orientation"), Value))
+			WB->SetOrientation(Value == TEXT("Vertical") ? Orient_Vertical : Orient_Horizontal);
 	}
 
 	void ApplyScaleBoxProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UScaleBox* SB = CastChecked<UScaleBox>(W);
-		if (const FString* V = GET_PROP("Stretch"))
+		FString Value;
+		if (TryGetProp(P, TEXT("Stretch"), Value))
 		{
 			static const TMap<FString, EStretch::Type> StretchMap = {
 				{TEXT("None"), EStretch::None}, {TEXT("Fill"), EStretch::Fill},
@@ -736,41 +802,47 @@ namespace
 				{TEXT("UserSpecified"), EStretch::UserSpecified},
 				{TEXT("UserSpecifiedWithClipping"), EStretch::UserSpecifiedWithClipping}
 			};
-			if (const EStretch::Type* S = StretchMap.Find(*V)) SB->SetStretch(*S);
+			if (const EStretch::Type* S = StretchMap.Find(Value)) SB->SetStretch(*S);
 		}
-		if (const FString* V = GET_PROP("StretchDirection"))
+		if (TryGetProp(P, TEXT("StretchDirection"), Value))
 		{
 			static const TMap<FString, EStretchDirection::Type> DirMap = {
 				{TEXT("Both"), EStretchDirection::Both}, {TEXT("DownOnly"), EStretchDirection::DownOnly}, {TEXT("UpOnly"), EStretchDirection::UpOnly}
 			};
-			if (const EStretchDirection::Type* D = DirMap.Find(*V)) SB->SetStretchDirection(*D);
+			if (const EStretchDirection::Type* D = DirMap.Find(Value)) SB->SetStretchDirection(*D);
 		}
-		if (const FString* V = GET_PROP("UserSpecifiedScale")) SB->SetUserSpecifiedScale(FCString::Atof(**V));
+		float UserSpecifiedScale = 0.0f;
+		if (P.TryGetFloat(TEXT("UserSpecifiedScale"), UserSpecifiedScale)) SB->SetUserSpecifiedScale(UserSpecifiedScale);
 	}
 
 	void ApplyWidgetSwitcherProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UWidgetSwitcher* WS = CastChecked<UWidgetSwitcher>(W);
-		if (const FString* V = GET_PROP("ActiveWidgetIndex")) WS->SetActiveWidgetIndex(FCString::Atoi(**V));
+		int32 ActiveWidgetIndex = 0;
+		if (P.TryGetInt(TEXT("ActiveWidgetIndex"), ActiveWidgetIndex)) WS->SetActiveWidgetIndex(ActiveWidgetIndex);
 	}
 
 	void ApplyExpandableAreaProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UExpandableArea* EA = CastChecked<UExpandableArea>(W);
-		if (const FString* V = GET_PROP("IsExpanded")) EA->SetIsExpanded(V->ToBool());
+		bool bIsExpanded = false;
+		if (P.TryGetBool(TEXT("IsExpanded"), bIsExpanded)) EA->SetIsExpanded(bIsExpanded);
 	}
 
 	void ApplyTileViewProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UTileView* TV = CastChecked<UTileView>(W);
-		if (const FString* V = GET_PROP("EntryWidth")) TV->SetEntryWidth(FCString::Atof(**V));
-		if (const FString* V = GET_PROP("EntryHeight")) TV->SetEntryHeight(FCString::Atof(**V));
+		float EntryWidth = 0.0f;
+		if (P.TryGetFloat(TEXT("EntryWidth"), EntryWidth)) TV->SetEntryWidth(EntryWidth);
+		float EntryHeight = 0.0f;
+		if (P.TryGetFloat(TEXT("EntryHeight"), EntryHeight)) TV->SetEntryHeight(EntryHeight);
 	}
 
 	void ApplyMenuAnchorProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		UMenuAnchor* MA = CastChecked<UMenuAnchor>(W);
-		if (const FString* V = GET_PROP("Placement"))
+		FString Value;
+		if (TryGetProp(P, TEXT("Placement"), Value))
 		{
 			static const TMap<FString, EMenuPlacement> PlacementMap = {
 				{TEXT("MenuPlacement_BelowAnchor"), MenuPlacement_BelowAnchor},
@@ -782,7 +854,7 @@ namespace
 				{TEXT("BelowAnchor"), MenuPlacement_BelowAnchor},
 				{TEXT("AboveAnchor"), MenuPlacement_AboveAnchor},
 			};
-			if (const EMenuPlacement* Pl = PlacementMap.Find(*V)) MA->SetPlacement(*Pl);
+			if (const EMenuPlacement* Pl = PlacementMap.Find(Value)) MA->SetPlacement(*Pl);
 		}
 	}
 
@@ -790,14 +862,12 @@ namespace
 	{
 		USafeZone* SZ = CastChecked<USafeZone>(W);
 		bool bLeft = true, bRight = true, bTop = true, bBottom = true;
-		if (const FString* V = GET_PROP("PadLeft")) bLeft = V->ToBool();
-		if (const FString* V = GET_PROP("PadRight")) bRight = V->ToBool();
-		if (const FString* V = GET_PROP("PadTop")) bTop = V->ToBool();
-		if (const FString* V = GET_PROP("PadBottom")) bBottom = V->ToBool();
+		P.TryGetBool(TEXT("PadLeft"), bLeft);
+		P.TryGetBool(TEXT("PadRight"), bRight);
+		P.TryGetBool(TEXT("PadTop"), bTop);
+		P.TryGetBool(TEXT("PadBottom"), bBottom);
 		SZ->SetSidesToPad(bLeft, bRight, bTop, bBottom);
 	}
-
-	#undef GET_PROP
 
 	// 属性应用函数映射表
 	using FApplyPropsFunc = void(*)(UWidget*, const FUMGPropertyBag&);
@@ -933,6 +1003,11 @@ void FUMGWidgetUtils::ApplyCommonProperties(UWidget* W, const FUMGPropertyBag& P
 	if (Properties.TryGetFloat(UMGPropertyKeys::RenderOpacity, RenderOpacity)) W->SetRenderOpacity(RenderOpacity);
 	float RenderAngle = 0.0f;
 	if (Properties.TryGetFloat(UMGPropertyKeys::RenderAngle, RenderAngle)) W->SetRenderTransformAngle(RenderAngle);
+	FVector2D RenderTransformPivot;
+	if (Properties.TryGetVector2D(UMGPropertyKeys::RenderTransformPivot, RenderTransformPivot))
+	{
+		W->SetRenderTransformPivot(RenderTransformPivot);
+	}
 	FVector2D TransformScale;
 	if (Properties.TryGetVector2D(UMGPropertyKeys::RenderTransformScale, TransformScale))
 	{

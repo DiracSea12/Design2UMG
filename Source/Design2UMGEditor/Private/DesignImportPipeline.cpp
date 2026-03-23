@@ -1,12 +1,12 @@
-#include "DesignImportPipeline.h"
+﻿#include "DesignImportPipeline.h"
 
 #include "Design2UMGConverter.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGNotification.h"
+#include "DesignFontImportService.h"
 #include "DesignImportDialogs.h"
 #include "DesignImportUtils.h"
 #include "DesignRemoteImageImporter.h"
-#include "FontResolver.h"
 #include "PenMCPBridge.h"
 #include "PenParser.h"
 #include "UMGJsonParser.h"
@@ -19,6 +19,62 @@
 
 namespace DesignImportPipeline
 {
+	namespace
+	{
+		bool ParseResolveAndGenerate(
+			const FString& EditedJson,
+			const FString& OutputPath,
+			const FUMGIconFontMappingChanges* MappingChanges = nullptr)
+		{
+			FUMGWidgetData Data;
+			FString ParseError;
+			if (!ParseWidgetJson(EditedJson, Data, &ParseError))
+			{
+				UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportPipeline: Edited JSON parse failed: %s"), *ParseError);
+				FDesign2UMGNotification::Error(NSLOCTEXT("DesignImportPipeline", "EditedJsonParseFailed", "Design2UMG: Failed to parse edited design data"));
+				return false;
+			}
+
+			if (MappingChanges)
+			{
+				Data.IconFontMappingChanges = *MappingChanges;
+			}
+
+			ResolveImages(Data);
+			return DesignImportUtils::GenerateBlueprint(Data, OutputPath) != nullptr;
+		}
+
+		void PrepareDocumentForGeneration(FDesignDocument& Document, FUMGWidgetData& OutPreparedData)
+		{
+			DesignFontImportService::PrepareDocumentFonts(Document);
+			OutPreparedData = FDesign2UMGConverter::Convert(Document);
+		}
+
+		void ApplyDocumentImportSideEffectsToData(FDesignDocument& Document, FUMGWidgetData& Data)
+		{
+			FUMGWidgetData PreparedData;
+			PrepareDocumentForGeneration(Document, PreparedData);
+			Data.IconFontMappingChanges = PreparedData.IconFontMappingChanges;
+		}
+
+		void GenerateFromEditedJsonWithDocument(const FString& EditedJson, const FString& OutputPath, FDesignDocument Document)
+		{
+			FScopedSlowTask SlowTask(3.0f, NSLOCTEXT("DesignImportPipeline", "Generating", "Generating Widget Blueprint..."));
+			SlowTask.MakeDialog(true);
+
+			SlowTask.EnterProgressFrame(1.0f, NSLOCTEXT("DesignImportPipeline", "GenParse", "Parsing edited design..."));
+			FUMGWidgetData PreparedData;
+			PrepareDocumentForGeneration(Document, PreparedData);
+			if (SlowTask.ShouldCancel())
+			{
+				return;
+			}
+
+			SlowTask.EnterProgressFrame(2.0f, NSLOCTEXT("DesignImportPipeline", "GenApply", "Applying edited design..."));
+			ParseResolveAndGenerate(EditedJson, OutputPath, &PreparedData.IconFontMappingChanges);
+		}
+	}
+
 	FDesignImportExecutionResult Execute(FUMGWidgetData& Data, const FDesignImportRequest& Request)
 	{
 		FDesignImportExecutionResult Result;
@@ -33,7 +89,11 @@ namespace DesignImportPipeline
 				Data,
 				Request.OutputPath,
 				Request.PreviewWindowTitle,
-				FOnPreviewConfirmed::CreateStatic(&DesignImportPipeline::GenerateFromEditedJson),
+				FOnPreviewConfirmed::CreateLambda(
+					[CapturedChanges = Data.IconFontMappingChanges](const FString& EditedJson, const FString& OutputPath)
+					{
+						ParseResolveAndGenerate(EditedJson, OutputPath, &CapturedChanges);
+					}),
 				FOnPreviewCancelled::CreateLambda(
 					[]()
 					{
@@ -74,13 +134,41 @@ namespace DesignImportPipeline
 	{
 		FUMGWidgetData Data;
 		ConvertDocument(Document, Data);
-		return Execute(Data, Request);
+		if (Request.bResolveImages)
+		{
+			ResolveImages(Data);
+		}
+
+		if (Request.bUsePreview
+			&& DesignImportDialogs::OpenPreviewWindow(
+				Data,
+				Request.OutputPath,
+				Request.PreviewWindowTitle,
+				FOnPreviewConfirmed::CreateLambda(
+					[CapturedDocument = Document](const FString& EditedJson, const FString& OutputPath)
+					{
+						GenerateFromEditedJsonWithDocument(EditedJson, OutputPath, CapturedDocument);
+					}),
+				FOnPreviewCancelled::CreateLambda(
+					[]()
+					{
+						UE_LOG(LogDesign2UMG, Log, TEXT("DesignImportPipeline: Preview cancelled"));
+					})))
+		{
+			FDesignImportExecutionResult Result;
+			Result.bSucceeded = true;
+			Result.bPreviewOpened = true;
+			return Result;
+		}
+
+		ApplyDocumentImportSideEffectsToData(Document, Data);
+		FDesignImportRequest FinalRequest = Request;
+		FinalRequest.bResolveImages = false;
+		return Execute(Data, FinalRequest);
 	}
 
 	void ConvertDocument(FDesignDocument& Document, FUMGWidgetData& OutData)
 	{
-		FFontResolver::AutoImportFonts(Document);
-		FFontResolver::FindMissingFonts(Document);
 		OutData = FDesign2UMGConverter::Convert(Document);
 	}
 
@@ -119,29 +207,8 @@ namespace DesignImportPipeline
 		FScopedSlowTask SlowTask(3.0f, NSLOCTEXT("DesignImportPipeline", "Generating", "Generating Widget Blueprint..."));
 		SlowTask.MakeDialog(true);
 
-		SlowTask.EnterProgressFrame(1.0f, NSLOCTEXT("DesignImportPipeline", "GenParse", "Parsing edited design..."));
-		FUMGWidgetData Data;
-		FString ParseError;
-		if (!ParseWidgetJson(EditedJson, Data, &ParseError))
-		{
-			UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportPipeline: Edited JSON parse failed: %s"), *ParseError);
-			FDesign2UMGNotification::Error(NSLOCTEXT("DesignImportPipeline", "EditedJsonParseFailed", "Design2UMG: Failed to parse edited design data"));
-			return;
-		}
-		if (SlowTask.ShouldCancel())
-		{
-			return;
-		}
-
-		SlowTask.EnterProgressFrame(1.0f, NSLOCTEXT("DesignImportPipeline", "GenImages", "Downloading remote images..."));
-		ResolveImages(Data);
-		if (SlowTask.ShouldCancel())
-		{
-			return;
-		}
-
-		SlowTask.EnterProgressFrame(1.0f, NSLOCTEXT("DesignImportPipeline", "GenBP", "Generating Widget Blueprint..."));
-		DesignImportUtils::GenerateBlueprint(Data, OutputPath);
+		SlowTask.EnterProgressFrame(3.0f, NSLOCTEXT("DesignImportPipeline", "GenApply", "Applying edited design..."));
+		ParseResolveAndGenerate(EditedJson, OutputPath);
 	}
 
 	bool ImportPenJson(const FString& JsonString, FUMGWidgetData& OutData)

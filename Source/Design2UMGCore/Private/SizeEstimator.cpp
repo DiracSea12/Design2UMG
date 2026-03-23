@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "SizeEstimator.h"
 
@@ -8,7 +8,7 @@
 
 namespace
 {
-	constexpr int32 MaxTreeRecursionDepth = 512;
+	constexpr int32 SizeEstimatorMaxTreeRecursionDepth = 512;
 
 	struct FSizeEstimatorState
 	{
@@ -16,11 +16,11 @@ namespace
 		int32 PrecomputeDepth = 0;
 	};
 
-	struct FRecursionGuard
+	struct FSizeEstimatorRecursionGuard
 	{
-		explicit FRecursionGuard(int32& InDepth, const TCHAR* InName)
+		explicit FSizeEstimatorRecursionGuard(int32& InDepth, const TCHAR* InName)
 			: Depth(InDepth)
-			, bValid(InDepth < MaxTreeRecursionDepth)
+			, bValid(InDepth < SizeEstimatorMaxTreeRecursionDepth)
 		{
 			if (bValid)
 			{
@@ -28,12 +28,12 @@ namespace
 			}
 			else
 			{
-				UE_LOG(LogDesign2UMG, Verbose, TEXT("%s: recursion depth exceeded (%d)"), InName, MaxTreeRecursionDepth);
-				UE_LOG(LogDesign2UMG, Error, TEXT("设计文件节点嵌套层级过深（超过 %d 层），可能存在循环引用。"), MaxTreeRecursionDepth);
+				UE_LOG(LogDesign2UMG, Verbose, TEXT("%s: recursion depth exceeded (%d)"), InName, SizeEstimatorMaxTreeRecursionDepth);
+				UE_LOG(LogDesign2UMG, Error, TEXT("设计文件节点嵌套层级过深（超过 %d 层），可能存在循环引用。"), SizeEstimatorMaxTreeRecursionDepth);
 			}
 		}
 
-		~FRecursionGuard()
+		~FSizeEstimatorRecursionGuard()
 		{
 			if (bValid)
 			{
@@ -45,7 +45,7 @@ namespace
 		bool bValid = false;
 	};
 
-	bool IsDesignerOnlyNodeType(EDesignNodeType Type)
+	bool IsDesignerOnlyNodeTypeForSizing(EDesignNodeType Type)
 	{
 		return Type == EDesignNodeType::Connection
 			|| Type == EDesignNodeType::Note
@@ -53,7 +53,7 @@ namespace
 			|| Type == EDesignNodeType::Context;
 	}
 
-	bool HasRenderableVisual(const TSharedPtr<FDesignNode>& Node)
+	bool HasRenderableVisualForSizing(const TSharedPtr<FDesignNode>& Node)
 	{
 		if (!Node.IsValid())
 		{
@@ -96,7 +96,7 @@ namespace
 
 	bool ShouldSkipNodeForSizing(const TSharedPtr<FDesignNode>& Node)
 	{
-		if (!Node.IsValid() || !Node->bEnabled || IsDesignerOnlyNodeType(Node->Type))
+		if (!Node.IsValid() || !Node->bEnabled || IsDesignerOnlyNodeTypeForSizing(Node->Type))
 		{
 			return true;
 		}
@@ -106,7 +106,7 @@ namespace
 			return false;
 		}
 
-		if (Node->Children.Num() == 0 && !HasRenderableVisual(Node))
+		if (Node->Children.Num() == 0 && !HasRenderableVisualForSizing(Node))
 		{
 			const bool bIsExplicitFlowContainer =
 				(Node->Type == EDesignNodeType::Frame || Node->Type == EDesignNodeType::Group)
@@ -120,7 +120,7 @@ namespace
 		return false;
 	}
 
-	float ResolveWidthHint(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth)
+	float ResolveSizingWidthHint(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth)
 	{
 		if (!Node.IsValid())
 		{
@@ -164,7 +164,7 @@ namespace
 		float ParentContentWidth,
 		FSizeEstimatorState& State)
 	{
-		FRecursionGuard Guard(State.PrecomputeDepth, TEXT("PreComputeFitContentSizes"));
+		FSizeEstimatorRecursionGuard Guard(State.PrecomputeDepth, TEXT("PreComputeFitContentSizes"));
 		if (!Guard.bValid)
 		{
 			return FVector2D::ZeroVector;
@@ -199,7 +199,7 @@ namespace
 			float H = Node->Height.Value;
 			if (Node->Width.IsFill())
 			{
-				const float FillWidth = ResolveWidthHint(Node, ParentContentWidth);
+				const float FillWidth = ResolveSizingWidthHint(Node, ParentContentWidth);
 				if (FillWidth > 0.0f)
 				{
 					W = FMath::Max(W, FillWidth);
@@ -324,7 +324,7 @@ float SizeEstimator::ComputeChildContentWidthHint(const TSharedPtr<FDesignNode>&
 		return 0.0f;
 	}
 
-	const float ResolvedWidth = ResolveWidthHint(Node, ParentContentWidth);
+	const float ResolvedWidth = ResolveSizingWidthHint(Node, ParentContentWidth);
 	if (ResolvedWidth <= 0.0f)
 	{
 		return 0.0f;
@@ -351,7 +351,7 @@ float SizeEstimator::ComputeChildContentWidthHint(const TSharedPtr<FDesignNode>&
 			continue;
 		}
 
-		RemainingWidth -= ResolveWidthHint(VisibleChild, 0.0f);
+		RemainingWidth -= ResolveSizingWidthHint(VisibleChild, 0.0f);
 	}
 
 	if (!Child->Width.IsFill() || FillChildCount <= 0 || RemainingWidth <= 0.0f)
@@ -399,7 +399,7 @@ namespace
 {
 	FVector2D EstimateNodeSizeImpl(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth, FSizeEstimatorState& State)
 	{
-		FRecursionGuard Guard(State.EstimateDepth, TEXT("EstimateNodeSize"));
+		FSizeEstimatorRecursionGuard Guard(State.EstimateDepth, TEXT("EstimateNodeSize"));
 		if (!Guard.bValid)
 		{
 			return FVector2D::ZeroVector;
@@ -409,7 +409,7 @@ namespace
 		float H = Node->Height.Value;
 		if (Node->Width.IsFill())
 		{
-			const float FillWidth = ResolveWidthHint(Node, ParentContentWidth);
+			const float FillWidth = ResolveSizingWidthHint(Node, ParentContentWidth);
 			if (FillWidth > 0.0f)
 			{
 				W = FMath::Max(W, FillWidth);
@@ -453,7 +453,7 @@ namespace
 
 	FVector2D EstimateContentSizeImpl(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth, FSizeEstimatorState& State)
 	{
-		FRecursionGuard Guard(State.EstimateDepth, TEXT("EstimateContentSize"));
+		FSizeEstimatorRecursionGuard Guard(State.EstimateDepth, TEXT("EstimateContentSize"));
 		if (!Guard.bValid)
 		{
 			return FVector2D::ZeroVector;

@@ -44,7 +44,7 @@ namespace
 		Settings->SaveConfig();
 	}
 
-	FString NormalizeFontFamilyKey(const FString& InFamily)
+	FString NormalizeSettingsFontFamilyKey(const FString& InFamily)
 	{
 		FString Key = InFamily.ToLower().TrimStartAndEnd();
 		Key.ReplaceInline(TEXT(" "), TEXT(""));
@@ -152,12 +152,12 @@ FString UDesign2UMGSettings::FindIconFontAssetPath(const FString& FontFamily) co
 			return FontPtr->ToString();
 	}
 
-	const FString NormalizedQuery = NormalizeFontFamilyKey(FontFamily);
+	const FString NormalizedQuery = NormalizeSettingsFontFamilyKey(FontFamily);
 	for (const TPair<FString, TSoftObjectPtr<UFont>>& Pair : IconFontAssetMap)
 	{
 		if (Pair.Value.IsNull())
 			continue;
-		if (NormalizeFontFamilyKey(Pair.Key) == NormalizedQuery)
+		if (NormalizeSettingsFontFamilyKey(Pair.Key) == NormalizedQuery)
 			return Pair.Value.ToString();
 	}
 

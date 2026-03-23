@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 #include "DesignSchema.h"
 
-class FFigmaParser
+class DESIGN2UMGCORE_API FFigmaParser
 {
 public:
 	static bool ParseDocument(const FString& FigmaJson, FDesignDocument& OutDocument);

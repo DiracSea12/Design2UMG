@@ -14,6 +14,40 @@ namespace
 		Widget.Properties.Add(TEXT("HeightOverride"), FString::FromInt(FMath::Max(1, FMath::RoundToInt(Node->Height.Value))));
 	}
 
+	bool HasGradientPathFill(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid())
+		{
+			return false;
+		}
+
+		if (Node->Fill.Type == EDesignFillType::Gradient)
+		{
+			return true;
+		}
+
+		for (const FDesignFill& Fill : Node->Fills)
+		{
+			if (Fill.Type == EDesignFillType::Gradient)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	FString GetVectorRasterFallbackTexturePath(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid() || Node->Type != EDesignNodeType::Ellipse || !HasGradientPathFill(Node))
+		{
+			return FString();
+		}
+
+		const FString* TexturePath = Node->Metadata.Find(TEXT("figma.vectorRasterFallback"));
+		return TexturePath ? *TexturePath : FString();
+	}
+
 	FString ResolvePathRasterFillColor(const TSharedPtr<FDesignNode>& Node)
 	{
 		if (Node->Fill.Type == EDesignFillType::Color)
@@ -51,6 +85,14 @@ namespace
 FUMGWidgetNode PathWidgetBuilder::CreatePathWidget(const TSharedPtr<FDesignNode>& Node)
 {
 	FUMGWidgetNode Widget;
+
+	if (const FString VectorRasterFallback = GetVectorRasterFallbackTexturePath(Node); !VectorRasterFallback.IsEmpty())
+	{
+		Widget.Type = TEXT("Image");
+		Widget.Properties.Add(TEXT("TexturePath"), VectorRasterFallback);
+		ApplyPathSizeOverrides(Widget, Node);
+		return Widget;
+	}
 
 	if (Node->Fill.Type == EDesignFillType::Image && !Node->Fill.Image.Url.IsEmpty())
 	{

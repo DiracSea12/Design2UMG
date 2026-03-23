@@ -2,32 +2,35 @@
 
 #include "Design2UMGNotification.h"
 #include "Framework/Notifications/NotificationManager.h"
+#include "Framework/Docking/TabManager.h"
 #include "Widgets/Notifications/SNotificationList.h"
-#include "ContentBrowserModule.h"
-#include "IContentBrowserSingleton.h"
-#include "AssetRegistry/AssetRegistryModule.h"
+
+namespace
+{
+	FDesign2UMGSuccessNotificationHandler GSuccessHandler;
+}
+
+void FDesign2UMGNotification::RegisterSuccessHandler(FDesign2UMGSuccessNotificationHandler InHandler)
+{
+	GSuccessHandler = MoveTemp(InHandler);
+}
+
+void FDesign2UMGNotification::ResetSuccessHandler()
+{
+	GSuccessHandler.Unbind();
+}
 
 void FDesign2UMGNotification::Success(const FText& Message, const FString& AssetPath)
 {
+	if (GSuccessHandler.IsBound())
+	{
+		GSuccessHandler.Execute(Message, AssetPath);
+		return;
+	}
+
 	FNotificationInfo Info(Message);
 	Info.ExpireDuration = 4.0f;
 	Info.bUseSuccessFailIcons = true;
-
-	if (!AssetPath.IsEmpty())
-	{
-		Info.Hyperlink = FSimpleDelegate::CreateLambda([AssetPath]()
-		{
-			// Resolve asset metadata without forcing a full load.
-			FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
-			FAssetData AD = ARM.Get().GetAssetByObjectPath(FSoftObjectPath(AssetPath));
-			TArray<FAssetData> Assets;
-			if (AD.IsValid())
-				Assets.Add(AD);
-			FContentBrowserModule& CB = FModuleManager::LoadModuleChecked<FContentBrowserModule>("ContentBrowser");
-			CB.Get().SyncBrowserToAssets(Assets);
-		});
-		Info.HyperlinkText = NSLOCTEXT("Design2UMG", "GoToAsset", "Show in Content Browser");
-	}
 
 	if (auto Item = FSlateNotificationManager::Get().AddNotification(Info))
 		Item->SetCompletionState(SNotificationItem::CS_Success);

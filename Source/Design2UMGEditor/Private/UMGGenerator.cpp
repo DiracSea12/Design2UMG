@@ -168,12 +168,15 @@ namespace
 
 	FString FindNodeProperty(const FUMGWidgetNode& Node, const TCHAR* Key)
 	{
-		return Node.Properties.FindRef(Key);
+		FString Value;
+		Node.Properties.TryGetString(Key, Value);
+		return Value;
 	}
 
 	FString FindNodePropertyOr(const FUMGWidgetNode& Node, const TCHAR* Key, const FString& DefaultValue)
 	{
-		return Node.Properties.GetValueOr(Key, DefaultValue);
+		FString Value;
+		return (Node.Properties.TryGetString(Key, Value) && !Value.IsEmpty()) ? Value : DefaultValue;
 	}
 
 	int32 GetNodeRoundedIntProperty(const FUMGWidgetNode& Node, const TCHAR* Key, int32 DefaultValue)
@@ -201,17 +204,22 @@ namespace
 
 	uint32 MakePathTextureKey(const FUMGWidgetNode& Node)
 	{
-		const FString* Geometry = Node.Properties.Find(UMGPropertyKeys::PathGeometry);
-		const FString* FillRule = Node.Properties.Find(UMGPropertyKeys::PathFillRule);
-		const FString* FillColor = Node.Properties.Find(UMGPropertyKeys::PathFillColor);
-		const FString* WidthOverride = Node.Properties.Find(UMGPropertyKeys::WidthOverride);
-		const FString* HeightOverride = Node.Properties.Find(UMGPropertyKeys::HeightOverride);
+		FString Geometry;
+		FString FillRule;
+		FString FillColor;
+		FString WidthOverride;
+		FString HeightOverride;
+		Node.Properties.TryGetString(UMGPropertyKeys::PathGeometry, Geometry);
+		Node.Properties.TryGetString(UMGPropertyKeys::PathFillRule, FillRule);
+		Node.Properties.TryGetString(UMGPropertyKeys::PathFillColor, FillColor);
+		Node.Properties.TryGetString(UMGPropertyKeys::WidthOverride, WidthOverride);
+		Node.Properties.TryGetString(UMGPropertyKeys::HeightOverride, HeightOverride);
 
-		uint32 Key = Geometry ? GetTypeHash(*Geometry) : 0u;
-		Key = HashCombine(Key, FillRule ? GetTypeHash(*FillRule) : 0u);
-		Key = HashCombine(Key, FillColor ? GetTypeHash(*FillColor) : 0u);
-		Key = HashCombine(Key, WidthOverride ? GetTypeHash(*WidthOverride) : 0u);
-		Key = HashCombine(Key, HeightOverride ? GetTypeHash(*HeightOverride) : 0u);
+		uint32 Key = Geometry.IsEmpty() ? 0u : GetTypeHash(Geometry);
+		Key = HashCombine(Key, FillRule.IsEmpty() ? 0u : GetTypeHash(FillRule));
+		Key = HashCombine(Key, FillColor.IsEmpty() ? 0u : GetTypeHash(FillColor));
+		Key = HashCombine(Key, WidthOverride.IsEmpty() ? 0u : GetTypeHash(WidthOverride));
+		Key = HashCombine(Key, HeightOverride.IsEmpty() ? 0u : GetTypeHash(HeightOverride));
 		return Key;
 	}
 
@@ -351,7 +359,8 @@ namespace
 		const FString& AssetPrefix,
 		TMap<uint32, FString>& PathTextureCache)
 	{
-		if (Node.Type == TEXT("Image") && Node.Properties.Contains(UMGPropertyKeys::PathGeometry))
+		FString Geometry;
+		if (Node.Type == TEXT("Image") && Node.Properties.TryGetString(UMGPropertyKeys::PathGeometry, Geometry) && !Geometry.IsEmpty())
 		{
 			const uint32 TextureKey = MakePathTextureKey(Node);
 			if (const FString* CachedPath = PathTextureCache.Find(TextureKey))
@@ -360,13 +369,12 @@ namespace
 			}
 			else
 			{
-				const FString* Geometry = Node.Properties.Find(UMGPropertyKeys::PathGeometry);
 				const FString FillRule = FindNodePropertyOr(Node, UMGPropertyKeys::PathFillRule, TEXT("nonzero"));
 				const FString FillColor = FindNodePropertyOr(Node, UMGPropertyKeys::PathFillColor, TEXT("#ffffffff"));
 				const int32 Width = FMath::Max(1, GetNodeRoundedIntProperty(Node, UMGPropertyKeys::WidthOverride, 64));
 				const int32 Height = FMath::Max(1, GetNodeRoundedIntProperty(Node, UMGPropertyKeys::HeightOverride, 64));
 
-				if (Geometry)
+				if (!Geometry.IsEmpty())
 				{
 					constexpr int32 PathSupersample = 2;
 					const int32 RasterWidth = Width * PathSupersample;
@@ -419,7 +427,9 @@ namespace
 			{
 				FUMGPropertyBag GenerationProps = Node.Properties;
 				GenerationProps.Add(UMGPropertyKeys::MaterialRef, MaterialRef);
-				if (!Node.Brush.MaterialParams.IsEmpty() && !GenerationProps.Contains(UMGPropertyKeys::MaterialParams))
+				FString ExistingMaterialParams;
+				if (!Node.Brush.MaterialParams.IsEmpty()
+					&& !(GenerationProps.TryGetString(UMGPropertyKeys::MaterialParams, ExistingMaterialParams) && !ExistingMaterialParams.IsEmpty()))
 				{
 					GenerationProps.Add(UMGPropertyKeys::MaterialParams, Node.Brush.MaterialParams);
 				}
@@ -599,11 +609,11 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 				Node.Slot.bAutoSize ? 1 : 0);
 
 			FString PropsInfo;
-			for (const auto& P : Node.Properties.AsMap())
+			Node.Properties.ForEachSerialized([&PropsInfo](const FString& Key, const FString& Value)
 			{
-				if (P.Key == TEXT("PathGeometry") || P.Key == TEXT("MaterialParams")) continue;
-				PropsInfo += FString::Printf(TEXT(" %s=%s"), *P.Key, *P.Value.Left(40));
-			}
+				if (Key == TEXT("PathGeometry") || Key == TEXT("MaterialParams")) return;
+				PropsInfo += FString::Printf(TEXT(" %s=%s"), *Key, *Value.Left(40));
+			});
 
 			UE_LOG(LogDesign2UMG, Verbose, TEXT("TREE: %s[%s] '%s' bounds=(%.1f,%.1f,%.1f,%.1f) %s%s"),
 				*Indent, *Node.Type, *Node.Name,

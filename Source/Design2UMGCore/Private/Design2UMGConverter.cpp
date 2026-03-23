@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGConverter.h"
 #include "DesignTypeMapper.h"
@@ -30,6 +30,7 @@ namespace
 		TArray<FString>& Warnings;
 		TSet<FString> WarnedFamilies;
 		TSet<FString> PrunedInvalidMappings;
+		TMap<FString, FString> PendingIconFontMappings;
 		int32 RecursionDepth = 0;
 	};
 
@@ -300,6 +301,12 @@ namespace
 		return Value && Value->Equals(TEXT("true"), ESearchCase::IgnoreCase);
 	}
 
+	bool HasWidgetStringProperty(const FUMGWidgetNode& Widget, const TCHAR* Key)
+	{
+		FString Value;
+		return Widget.Properties.TryGetString(Key, Value) && !Value.IsEmpty();
+	}
+
 	bool TryApplyPlaceholderSurfaceTint(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
 	{
 		const bool bExpandedRefInstancePlaceholder = HasNodeMetadataFlag(Node, TEXT("design2umg.expanded_ref_instance"));
@@ -356,7 +363,10 @@ namespace
 	{
 		return (Node->Type == EDesignNodeType::Frame || Node->Type == EDesignNodeType::Group)
 			&& (HasVisualFill(Node)
-				|| (Node->Layout == EDesignLayout::None && FLayoutMapper::HasPadding(Node))
+				|| (((Node->Layout == EDesignLayout::None)
+					|| (Node->Layout == EDesignLayout::Wrap)
+					|| (Node->Layout == EDesignLayout::Grid))
+					&& FLayoutMapper::HasPadding(Node))
 				|| Node->CornerRadius.HasRadius()
 				|| Node->Stroke.HasStroke())
 			&& !bPlaceholderUsesDirectImage;
@@ -367,9 +377,9 @@ namespace
 		if (Node->HasMultiFill())
 			Widget = FVisualMapper::WrapWithMultiFill(MoveTemp(Widget), Node);
 
-		if (const FString* ShadowCountStr = Widget.Properties.Find(TEXT("BoxShadowCount")))
+		int32 ShadowCount = 0;
+		if (Widget.Properties.TryGetInt(TEXT("BoxShadowCount"), ShadowCount) && ShadowCount > 0)
 		{
-			const int32 ShadowCount = FCString::Atoi(**ShadowCountStr);
 			Widget.Properties.Remove(TEXT("BoxShadowCount"));
 			for (int32 Index = 0; Index < ShadowCount; ++Index)
 				Widget = FVisualMapper::WrapWithBoxShadow(MoveTemp(Widget), Node, Index);
@@ -456,6 +466,8 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document)
 	{
 		UE_LOG(LogDesign2UMG, Log, TEXT("Convert: single root '%s' type=%s"), *RenderWidgets[0].Name, *RenderWidgets[0].Type);
 		Result.RootWidget = MoveTemp(RenderWidgets[0]);
+		Result.IconFontMappingChanges.Upserts = MoveTemp(State.PendingIconFontMappings);
+		Result.IconFontMappingChanges.Removals = MoveTemp(State.PrunedInvalidMappings);
 		return Result;
 	}
 
@@ -466,6 +478,8 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document)
 	for (auto& W : RenderWidgets)
 		Result.RootWidget.Children.Add(MoveTemp(W));
 
+	Result.IconFontMappingChanges.Upserts = MoveTemp(State.PendingIconFontMappings);
+	Result.IconFontMappingChanges.Removals = MoveTemp(State.PrunedInvalidMappings);
 	return Result;
 }
 
@@ -510,10 +524,23 @@ FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FConversio
 		{
 			float W = Node->Width.IsFixed() ? Node->Width.Value : 0.0f;
 			float H = Node->Height.IsFixed() ? Node->Height.Value : 0.0f;
+			bool bHasGradientFill = Node->Fill.Type == EDesignFillType::Gradient;
+			if (!bHasGradientFill)
+			{
+				for (const FDesignFill& Fill : Node->Fills)
+				{
+					if (Fill.Type == EDesignFillType::Gradient)
+					{
+						bHasGradientFill = true;
+						break;
+					}
+				}
+			}
+			const bool bHasVectorRasterFallback = bHasGradientFill && Node->Metadata.Contains(TEXT("figma.vectorRasterFallback"));
 			// 有尺寸、有颜色填充、无描边 → 生成椭圆 SVG path，走栅格化
 			// 有描边时走 fallback（Border 支持 OutlineThickness，Image 不支持）
 			bool bHasStroke = Node->Stroke.HasStroke();
-			if (W > 0 && H > 0 && Node->Fill.IsColor() && Node->Fill.bEnabled && !bHasStroke)
+			if (W > 0 && H > 0 && ((Node->Fill.IsColor() && Node->Fill.bEnabled && !bHasStroke) || bHasVectorRasterFallback))
 			{
 				float Rx = W / 2.0f, Ry = H / 2.0f;
 				Node->Geometry = FString::Printf(
@@ -583,14 +610,14 @@ FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FConversio
 
 	FVisualMapper::ApplyVisualProperties(Widget, Node);
 	if (Widget.Type == TEXT("Border")
-		&& !Widget.Properties.Contains(TEXT("BrushColor"))
-		&& !Widget.Properties.Contains(TEXT("TexturePath"))
-		&& !Widget.Properties.Contains(TEXT("MaterialRef")))
+		&& !HasWidgetStringProperty(Widget, TEXT("BrushColor"))
+		&& !HasWidgetStringProperty(Widget, TEXT("TexturePath"))
+		&& !HasWidgetStringProperty(Widget, TEXT("MaterialRef")))
 	{
 		// Stroke-only / no-fill Border should keep transparent interior.
 		// UBorder default brush is opaque white, which can cover siblings.
 		Widget.Properties.Add(TEXT("BrushColor"), TEXT("#00000000"));
-		if (Widget.Properties.Contains(TEXT("OutlineThickness")))
+		if (HasWidgetStringProperty(Widget, TEXT("OutlineThickness")))
 		{
 			// Box + WhiteSquareTexture can still flash an opaque interior in UBorder.
 			// RoundedBox with zero radii keeps the interior transparent while preserving the outline.
@@ -605,13 +632,20 @@ FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FConversio
 
 	if (Node->Gap > 0)
 	{
-		FLayoutMapper::ApplyGap(Widget.Children, Node->Gap, Node->Layout);
 		if (Node->Layout == EDesignLayout::Wrap)
 		{
+			const float CrossAxisGap = Node->FigmaLayout.bHasCounterAxisSpacing
+				? Node->FigmaLayout.CounterAxisSpacing
+				: Node->Gap;
 			Widget.Properties.Add(TEXT("InnerSlotPadding"),
-				FString::Printf(TEXT("%.1f,%.1f"), Node->Gap, Node->Gap));
+				FString::Printf(TEXT("%.1f,%.1f"), Node->Gap, CrossAxisGap));
 		}
-		else if (Node->Layout == EDesignLayout::Grid)
+		else
+		{
+			FLayoutMapper::ApplyGap(Widget.Children, Node->Gap, Node->Layout);
+		}
+
+		if (Node->Layout == EDesignLayout::Grid)
 		{
 			Widget.Properties.Add(TEXT("SlotPadding"),
 				FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"), Node->Gap, Node->Gap, Node->Gap, Node->Gap));
@@ -732,6 +766,12 @@ void ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& 
 	{
 	case EDesignTextGrowth::FixedWidth:
 	case EDesignTextGrowth::FixedWidthHeight:
+		if (HasNodeMetadataFlag(Node, TEXT("figma.text.truncate")))
+		{
+			Widget.Properties.Add(TEXT("Clipping"), TEXT("ClipToBounds"));
+			break;
+		}
+
 		Widget.Properties.Add(TEXT("AutoWrapText"), TEXT("true"));
 		if (const float WrapTextAt = TextMeasurement::ResolveTextWrapAt(Node, 0.0f); WrapTextAt > 0.0f)
 		{
@@ -758,8 +798,7 @@ FUMGWidgetNode CreateIconFontWidget(const TSharedPtr<FDesignNode>& Node, FConver
 	FUMGWidgetNode Widget;
 	Widget.Type = TEXT("TextBlock");
 
-	UDesign2UMGSettings* MutableSettings = UDesign2UMGSettings::Get();
-	const UDesign2UMGSettings* Settings = MutableSettings;
+	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
 	FString AssetPath;
 	bool bUsedDefaultIconPath = false;
 	bool bUsedResolverPath = false;
@@ -786,14 +825,9 @@ FUMGWidgetNode CreateIconFontWidget(const TSharedPtr<FDesignNode>& Node, FConver
 				TEXT("Icon font path is stale or invalid for family '%s': %s"),
 				*Node->IconFontFamily,
 				*AssetPath);
-			if (MutableSettings && !Node->IconFontFamily.IsEmpty())
+			if (!Node->IconFontFamily.IsEmpty())
 			{
-				if (!State.PrunedInvalidMappings.Contains(Node->IconFontFamily)
-					&& MutableSettings->IconFontAssetMap.Remove(Node->IconFontFamily) > 0)
-				{
-					State.PrunedInvalidMappings.Add(Node->IconFontFamily);
-					MutableSettings->SaveConfig();
-				}
+				State.PrunedInvalidMappings.Add(Node->IconFontFamily);
 			}
 			AssetPath.Empty();
 			bUsedDefaultIconPath = false;
@@ -816,21 +850,15 @@ FUMGWidgetNode CreateIconFontWidget(const TSharedPtr<FDesignNode>& Node, FConver
 
 	// If family mapping is missing but we found a usable path, persist mapping once.
 	const bool bNeedsPersistMapping = (bUsedDefaultIconPath || bUsedResolverPath)
-		&& MutableSettings
 		&& !Node->IconFontFamily.IsEmpty();
 	if (bNeedsPersistMapping)
 	{
-		const TSoftObjectPtr<UFont>* Existing = MutableSettings->IconFontAssetMap.Find(Node->IconFontFamily);
-		if (!Existing || Existing->IsNull())
-		{
-			MutableSettings->IconFontAssetMap.Add(Node->IconFontFamily, TSoftObjectPtr<UFont>(FSoftObjectPath(AssetPath)));
-			UE_LOG(LogDesign2UMG, Display,
-				TEXT("Auto-mapped icon font family '%s' to '%s'%s"),
-				*Node->IconFontFamily,
-				*AssetPath,
-				bUsedResolverPath ? TEXT(" via FontResolver") : TEXT(""));
-			MutableSettings->SaveConfig();
-		}
+		State.PendingIconFontMappings.Add(Node->IconFontFamily, AssetPath);
+		UE_LOG(LogDesign2UMG, Display,
+			TEXT("Queued icon font family mapping '%s' -> '%s'%s"),
+			*Node->IconFontFamily,
+			*AssetPath,
+			bUsedResolverPath ? TEXT(" via FontResolver") : TEXT(""));
 	}
 
 	if (!AssetPath.IsEmpty())
@@ -852,7 +880,7 @@ FUMGWidgetNode CreateIconFontWidget(const TSharedPtr<FDesignNode>& Node, FConver
 				TEXT("IconFont '%s': font family '%s' has no asset mapping"),
 				*Node->IconFontName, *Node->IconFontFamily);
 			UE_LOG(LogDesign2UMG, Warning,
-				TEXT("图标字体 '%s' (字体族 '%s') 未配置资产映射。请在 编辑器偏好设置 > 插件 > Design2UMG 中配置。"),
+				TEXT("Icon font '%s' (family '%s') has no configured asset mapping. Configure it in Editor Preferences > Plugins > Design2UMG."),
 				*Node->IconFontName, *Node->IconFontFamily);
 			State.WarnedFamilies.Add(Node->IconFontFamily);
 		}
@@ -994,17 +1022,21 @@ bool ShouldWrapChildWithSizeBox(
 	const bool bCanvasMixedAxis = ParentNode->Layout == EDesignLayout::None
 		&& ((ChildNode->Width.IsFit() && ChildNode->Height.IsFixed())
 			|| (ChildNode->Height.IsFit() && ChildNode->Width.IsFixed()));
+	const bool bWrapOrGridMeasuredFill =
+		(ParentNode->Layout == EDesignLayout::Wrap || ParentNode->Layout == EDesignLayout::Grid)
+		&& ((ChildNode->Width.IsFill() && ChildNode->Width.Value > 0.0f)
+			|| (ChildNode->Height.IsFill() && ChildNode->Height.Value > 0.0f));
 	const bool bWidgetOwnsDesiredSize =
 		ParentNode->Layout != EDesignLayout::None
 		&& ChildWidget.Type == TEXT("Image")
 		&& ChildNode->Children.Num() == 0
-		&& (ChildWidget.Properties.Contains(TEXT("WidthOverride")) || ChildWidget.Properties.Contains(TEXT("HeightOverride")))
-		&& (ChildWidget.Properties.Contains(TEXT("MaterialRef"))
-			|| ChildWidget.Properties.Contains(TEXT("TexturePath"))
-			|| ChildWidget.Properties.Contains(TEXT("PathGeometry")));
+		&& (HasWidgetStringProperty(ChildWidget, TEXT("WidthOverride")) || HasWidgetStringProperty(ChildWidget, TEXT("HeightOverride")))
+		&& (HasWidgetStringProperty(ChildWidget, TEXT("MaterialRef"))
+			|| HasWidgetStringProperty(ChildWidget, TEXT("TexturePath"))
+			|| HasWidgetStringProperty(ChildWidget, TEXT("PathGeometry")));
 	return ParentNode->Layout == EDesignLayout::None
 		? bCanvasMixedAxis
-		: (bHasFixedSize || bHasMinSize) && !bWidgetOwnsDesiredSize;
+		: (bHasFixedSize || bHasMinSize || bWrapOrGridMeasuredFill) && !bWidgetOwnsDesiredSize;
 }
 
 void AppendConvertedChildren(
@@ -1036,7 +1068,7 @@ void AppendConvertedChildren(
 			UE_LOG(LogDesign2UMG, Verbose, TEXT("  child '%s' → SizeBox wrap (fixed=%d min=%d w=%.1f h=%.1f)"),
 				*ChildWidget.Name, bHasFixedSize, bHasMinSize,
 				EffectiveChild->Width.Value, EffectiveChild->Height.Value);
-			Widget.Children.Add(FLayoutMapper::WrapWithSizeBox(MoveTemp(ChildWidget), EffectiveChild));
+			Widget.Children.Add(FLayoutMapper::WrapWithSizeBox(MoveTemp(ChildWidget), EffectiveChild, Node->Layout));
 			continue;
 		}
 

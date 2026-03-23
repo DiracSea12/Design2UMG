@@ -75,6 +75,63 @@ static void AddJsonExtensionIfPresent(const TSharedPtr<FJsonObject>& Obj, TMap<F
 	Extensions.Add(ExtKey, DesignJsonUtils::ToCompactString(FieldValue));
 }
 
+static void SetStringFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key, FString& OutValue)
+{
+	if (!Obj.IsValid())
+		return;
+
+	const FString Value = GetStr(Obj, Key);
+	if (!Value.IsEmpty())
+	{
+		OutValue = Value;
+	}
+}
+
+static void SetFloatFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key, float& OutValue, bool& bOutHasValue)
+{
+	double Value = 0.0;
+	if (TryGetNum(Obj, Key, Value))
+	{
+		OutValue = static_cast<float>(Value);
+		bOutHasValue = true;
+	}
+}
+
+static void SetIntFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key, int32& OutValue, bool& bOutHasValue)
+{
+	double Value = 0.0;
+	if (TryGetNum(Obj, Key, Value))
+	{
+		OutValue = FMath::RoundToInt(Value);
+		bOutHasValue = true;
+	}
+}
+
+static void SetBoolFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key, bool& OutValue, bool& bOutHasValue)
+{
+	if (!Obj.IsValid())
+		return;
+
+	bool Value = false;
+	if (Obj->TryGetBoolField(Key, Value))
+	{
+		OutValue = Value;
+		bOutHasValue = true;
+	}
+}
+
+static void SetJsonFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key, FString& OutValue)
+{
+	if (!Obj.IsValid())
+		return;
+
+	const TSharedPtr<FJsonValue> FieldValue = Obj->TryGetField(Key);
+	if (FieldValue.IsValid())
+	{
+		OutValue = DesignJsonUtils::ToCompactString(FieldValue);
+	}
+}
+
 static void CaptureSharedMetadataExtensions(const TSharedPtr<FJsonObject>& Obj, TMap<FString, FString>& Extensions)
 {
 	if (!Obj.IsValid())
@@ -84,7 +141,8 @@ static void CaptureSharedMetadataExtensions(const TSharedPtr<FJsonObject>& Obj, 
 		AddExtensionIfNonEmpty(Extensions, Key, GetStr(Obj, Key));
 
 	for (const TCHAR* Key : { TEXT("layoutGrids"), TEXT("interactions"), TEXT("flowStartingPoints"), TEXT("prototypeDevice"),
-		TEXT("componentPropertyReferences"), TEXT("explicitVariableModes"), TEXT("annotations"), TEXT("measurements"),
+		TEXT("componentPropertyReferences"), TEXT("explicitVariableModes"), TEXT("resolvedVariableModes"),
+		TEXT("componentPropertyDefinitions"), TEXT("variantGroupProperties"), TEXT("annotations"), TEXT("measurements"),
 		TEXT("exportSettings"), TEXT("devStatus"), TEXT("branchData") })
 	{
 		AddJsonExtensionIfPresent(Obj, Extensions, Key, Key);
@@ -98,7 +156,7 @@ static void CaptureLayoutMetadataExtensions(const TSharedPtr<FJsonObject>& Obj, 
 
 	for (const TCHAR* Key : { TEXT("counterAxisAlignContent"), TEXT("layoutPositioning"), TEXT("layoutWrap"), TEXT("layoutAlign"),
 		TEXT("primaryAxisSizingMode"), TEXT("counterAxisSizingMode"), TEXT("gridRowsSizing"), TEXT("gridColumnsSizing"),
-		TEXT("gridChildHorizontalAlign"), TEXT("gridChildVerticalAlign") })
+		TEXT("gridChildHorizontalAlign"), TEXT("gridChildVerticalAlign"), TEXT("mainComponentKey"), TEXT("componentSetId") })
 	{
 		AddExtensionIfNonEmpty(Extensions, Key, GetStr(Obj, Key));
 	}
@@ -110,7 +168,7 @@ static void CaptureLayoutMetadataExtensions(const TSharedPtr<FJsonObject>& Obj, 
 		AddNumericExtensionIfPresent(Obj, Extensions, Key, Key);
 	}
 
-	for (const TCHAR* Key : { TEXT("componentProperties"), TEXT("overrides"), TEXT("exposedInstances") })
+	for (const TCHAR* Key : { TEXT("componentProperties"), TEXT("variantProperties"), TEXT("overrides"), TEXT("exposedInstances") })
 	{
 		AddJsonExtensionIfPresent(Obj, Extensions, Key, Key);
 	}
@@ -223,6 +281,69 @@ static bool HasSameBoundsAsParent(const TSharedPtr<FJsonObject>& NodeObj, const 
 		FMath::IsNearlyEqual(CH, PH, 0.5);
 }
 
+static bool HasNearlyIdenticalBoundingBox(const TSharedPtr<FJsonObject>& A, const TSharedPtr<FJsonObject>& B)
+{
+	const TSharedPtr<FJsonObject> BoundsA = GetObj(A, TEXT("absoluteBoundingBox"));
+	const TSharedPtr<FJsonObject> BoundsB = GetObj(B, TEXT("absoluteBoundingBox"));
+	if (!BoundsA.IsValid() || !BoundsB.IsValid())
+	{
+		return false;
+	}
+
+	return FMath::IsNearlyEqual(GetNum(BoundsA, TEXT("x")), GetNum(BoundsB, TEXT("x")), 0.5)
+		&& FMath::IsNearlyEqual(GetNum(BoundsA, TEXT("y")), GetNum(BoundsB, TEXT("y")), 0.5)
+		&& FMath::IsNearlyEqual(GetNum(BoundsA, TEXT("width")), GetNum(BoundsB, TEXT("width")), 0.5)
+		&& FMath::IsNearlyEqual(GetNum(BoundsA, TEXT("height")), GetNum(BoundsB, TEXT("height")), 0.5);
+}
+
+static bool ShouldSkipAutoLayoutGhostChild(
+	const TSharedPtr<FJsonObject>& ChildObj,
+	const TArray<TSharedPtr<FJsonValue>>* Siblings)
+{
+	if (!ChildObj.IsValid() || !Siblings)
+	{
+		return false;
+	}
+
+	if (GetNum(ChildObj, TEXT("opacity"), 1.0) > KINDA_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	const FString ChildName = GetStr(ChildObj, TEXT("name"));
+	const FString ChildType = GetStr(ChildObj, TEXT("type"));
+	for (const TSharedPtr<FJsonValue>& SiblingValue : *Siblings)
+	{
+		const TSharedPtr<FJsonObject> SiblingObj = SiblingValue->AsObject();
+		if (!SiblingObj.IsValid() || SiblingObj == ChildObj)
+		{
+			continue;
+		}
+
+		if (!GetBool(SiblingObj, TEXT("visible"), true) || GetNum(SiblingObj, TEXT("opacity"), 1.0) <= KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+
+		if (GetStr(SiblingObj, TEXT("type")) != ChildType)
+		{
+			continue;
+		}
+
+		if (!ChildName.IsEmpty() && GetStr(SiblingObj, TEXT("name")) != ChildName)
+		{
+			continue;
+		}
+
+		if (HasNearlyIdenticalBoundingBox(ChildObj, SiblingObj))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
 static FString NormalizeWindingRule(const FString& InRule)
 {
 	if (InRule.Equals(TEXT("EVENODD"), ESearchCase::IgnoreCase))
@@ -304,7 +425,7 @@ EDesignNodeType MapNodeType(const FString& FigmaType);
 bool HasAutoLayout(const TSharedPtr<FJsonObject>& NodeObj);
 FString ColorToHex(const TSharedPtr<FJsonObject>& ColorObj, float Opacity = 1.0f);
 void ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode);
-void ParseSize(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode, bool bParentHasAutoLayout);
+void ParseSize(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj, FDesignNode& OutNode, bool bParentHasAutoLayout);
 FDesignFill ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj);
 TArray<FDesignFill> ParseFills(const TArray<TSharedPtr<FJsonValue>>& Fills);
 FDesignFill ParseFill(const TArray<TSharedPtr<FJsonValue>>& Fills);
@@ -499,23 +620,256 @@ static void GetStrokeExpansion(const TSharedPtr<FJsonObject>& NodeObj, float& Ou
 	}
 }
 
-static bool TryGetVisualBounds(const TSharedPtr<FJsonObject>& NodeObj, FNodeBounds& OutBounds)
+static bool HasImageCropFill(const TSharedPtr<FJsonObject>& NodeObj)
+{
+	const TArray<TSharedPtr<FJsonValue>>* Fills = GetArr(NodeObj, TEXT("fills"));
+	if (!Fills)
+	{
+		return false;
+	}
+
+	for (const TSharedPtr<FJsonValue>& FillValue : *Fills)
+	{
+		const TSharedPtr<FJsonObject> FillObj = FillValue.IsValid() ? FillValue->AsObject() : nullptr;
+		if (!FillObj.IsValid() || !GetBool(FillObj, TEXT("visible"), true))
+		{
+			continue;
+		}
+
+		if (GetStr(FillObj, TEXT("type")) != TEXT("IMAGE") || GetStr(FillObj, TEXT("scaleMode")) != TEXT("CROP"))
+		{
+			continue;
+		}
+
+		return true;
+	}
+
+	return false;
+}
+
+static bool IsIdentityImageTransformMatrix(const TArray<TSharedPtr<FJsonValue>>* Transform)
+{
+	if (!Transform || Transform->Num() != 2)
+	{
+		return true;
+	}
+
+	const TArray<TSharedPtr<FJsonValue>> Row0 = (*Transform)[0]->AsArray();
+	const TArray<TSharedPtr<FJsonValue>> Row1 = (*Transform)[1]->AsArray();
+	if (Row0.Num() != 3 || Row1.Num() != 3)
+	{
+		return false;
+	}
+
+	return FMath::IsNearlyEqual(static_cast<float>(Row0[0]->AsNumber()), 1.0f, KINDA_SMALL_NUMBER)
+		&& FMath::IsNearlyEqual(static_cast<float>(Row0[1]->AsNumber()), 0.0f, KINDA_SMALL_NUMBER)
+		&& FMath::IsNearlyEqual(static_cast<float>(Row0[2]->AsNumber()), 0.0f, KINDA_SMALL_NUMBER)
+		&& FMath::IsNearlyEqual(static_cast<float>(Row1[0]->AsNumber()), 0.0f, KINDA_SMALL_NUMBER)
+		&& FMath::IsNearlyEqual(static_cast<float>(Row1[1]->AsNumber()), 1.0f, KINDA_SMALL_NUMBER)
+		&& FMath::IsNearlyEqual(static_cast<float>(Row1[2]->AsNumber()), 0.0f, KINDA_SMALL_NUMBER);
+}
+
+static bool HasFillImageUsingShrunkenRenderBounds(
+	const TSharedPtr<FJsonObject>& NodeObj,
+	const FNodeBounds& RenderBounds,
+	const FNodeBounds& LayoutBounds)
+{
+	if (!NodeObj.IsValid() || GetStr(NodeObj, TEXT("type")) != TEXT("RECTANGLE"))
+	{
+		return false;
+	}
+
+	const bool bWidthShrunk = RenderBounds.W + 0.5f < LayoutBounds.W * 0.85f;
+	const bool bHeightShrunk = RenderBounds.H + 0.5f < LayoutBounds.H * 0.85f;
+	if (!bWidthShrunk && !bHeightShrunk)
+	{
+		return false;
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* Fills = GetArr(NodeObj, TEXT("fills"));
+	if (!Fills)
+	{
+		return false;
+	}
+
+	for (const TSharedPtr<FJsonValue>& FillValue : *Fills)
+	{
+		const TSharedPtr<FJsonObject> FillObj = FillValue.IsValid() ? FillValue->AsObject() : nullptr;
+		if (!FillObj.IsValid() || !GetBool(FillObj, TEXT("visible"), true))
+		{
+			continue;
+		}
+
+		if (GetStr(FillObj, TEXT("type")) != TEXT("IMAGE") || GetStr(FillObj, TEXT("scaleMode")) != TEXT("FILL"))
+		{
+			continue;
+		}
+
+		if (IsIdentityImageTransformMatrix(GetArr(FillObj, TEXT("imageTransform"))))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+static bool ShouldPreferLayoutBounds(
+	const TSharedPtr<FJsonObject>& NodeObj,
+	const TSharedPtr<FJsonObject>& ParentObj,
+	const FNodeBounds& RenderBounds,
+	const FNodeBounds& LayoutBounds)
+{
+	if (HasImageCropFill(NodeObj))
+	{
+		return true;
+	}
+
+	if (HasFillImageUsingShrunkenRenderBounds(NodeObj, RenderBounds, LayoutBounds))
+	{
+		return true;
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* Children = GetArr(NodeObj, TEXT("children"));
+	const bool bHasChildren = Children && Children->Num() > 0;
+	if (bHasChildren)
+	{
+		const bool bRenderBoundsExpandLayoutBounds =
+			RenderBounds.X + 0.5f < LayoutBounds.X
+			|| RenderBounds.Y + 0.5f < LayoutBounds.Y
+			|| RenderBounds.X + RenderBounds.W > LayoutBounds.X + LayoutBounds.W + 0.5f
+			|| RenderBounds.Y + RenderBounds.H > LayoutBounds.Y + LayoutBounds.H + 0.5f;
+		if (bRenderBoundsExpandLayoutBounds)
+		{
+			// Child coordinates are defined in layout space; effect/stroke expansion must not shift the container origin.
+			return true;
+		}
+	}
+
+	const bool bHasLayoutContainer = HasAutoLayout(NodeObj);
+	if (bHasLayoutContainer)
+	{
+		const bool bHasVisibleFill = [&]()
+		{
+			const TArray<TSharedPtr<FJsonValue>>* Fills = GetArr(NodeObj, TEXT("fills"));
+			if (!Fills)
+			{
+				return false;
+			}
+
+			for (const TSharedPtr<FJsonValue>& FillVal : *Fills)
+			{
+				const TSharedPtr<FJsonObject> FillObj = FillVal->AsObject();
+				if (FillObj.IsValid() && GetBool(FillObj, TEXT("visible"), true))
+				{
+					return true;
+				}
+			}
+			return false;
+		}();
+
+		const bool bHasVisibleStroke = [&]()
+		{
+			const TArray<TSharedPtr<FJsonValue>>* Strokes = GetArr(NodeObj, TEXT("strokes"));
+			if (!Strokes)
+			{
+				return false;
+			}
+
+			for (const TSharedPtr<FJsonValue>& StrokeVal : *Strokes)
+			{
+				const TSharedPtr<FJsonObject> StrokeObj = StrokeVal->AsObject();
+				if (StrokeObj.IsValid() && GetBool(StrokeObj, TEXT("visible"), true))
+				{
+					return true;
+				}
+			}
+			return false;
+		}();
+
+		const bool bHasVisibleEffect = [&]()
+		{
+			const TArray<TSharedPtr<FJsonValue>>* Effects = GetArr(NodeObj, TEXT("effects"));
+			if (!Effects)
+			{
+				return false;
+			}
+
+			for (const TSharedPtr<FJsonValue>& EffectVal : *Effects)
+			{
+				const TSharedPtr<FJsonObject> EffectObj = EffectVal->AsObject();
+				if (EffectObj.IsValid() && GetBool(EffectObj, TEXT("visible"), true))
+				{
+					return true;
+				}
+			}
+			return false;
+		}();
+
+		const bool bIsLayoutOnlyContainer = !bHasVisibleFill && !bHasVisibleStroke && !bHasVisibleEffect;
+		const bool bRenderBoundsShrinkLayoutBounds =
+			RenderBounds.W + 0.5f < LayoutBounds.W || RenderBounds.H + 0.5f < LayoutBounds.H;
+		if (bIsLayoutOnlyContainer && bRenderBoundsShrinkLayoutBounds)
+		{
+			if (ParentObj && !HasAutoLayout(ParentObj))
+			{
+				FNodeBounds ParentLayoutBounds;
+				if (TryReadBounds(GetObj(ParentObj, TEXT("absoluteBoundingBox")), ParentLayoutBounds))
+				{
+					const auto FitsWithin = [](const FNodeBounds& Inner, const FNodeBounds& Outer)
+					{
+						return Inner.X >= Outer.X - 0.5f
+							&& Inner.Y >= Outer.Y - 0.5f
+							&& Inner.X + Inner.W <= Outer.X + Outer.W + 0.5f
+							&& Inner.Y + Inner.H <= Outer.Y + Outer.H + 0.5f;
+					};
+
+					const bool bLayoutEscapesParent = !FitsWithin(LayoutBounds, ParentLayoutBounds);
+					const bool bRenderFitsParent = FitsWithin(RenderBounds, ParentLayoutBounds);
+					if (bLayoutEscapesParent && bRenderFitsParent)
+					{
+						return false;
+					}
+				}
+			}
+
+			return true;
+		}
+	}
+
+	return false;
+}
+
+static bool TryGetVisualBounds(
+	const TSharedPtr<FJsonObject>& NodeObj,
+	const TSharedPtr<FJsonObject>& ParentObj,
+	FNodeBounds& OutBounds)
 {
 	if (!NodeObj.IsValid())
 	{
 		return false;
 	}
 
-	// Prefer Figma visual bounds when present (includes stroke/effects).
-	if (TryReadBounds(GetObj(NodeObj, TEXT("absoluteRenderBounds")), OutBounds))
+	FNodeBounds RenderBounds;
+	const bool bHasRenderBounds = TryReadBounds(GetObj(NodeObj, TEXT("absoluteRenderBounds")), RenderBounds);
+	FNodeBounds LayoutBounds;
+	const bool bHasLayoutBounds = TryReadBounds(GetObj(NodeObj, TEXT("absoluteBoundingBox")), LayoutBounds);
+
+	if (bHasRenderBounds)
 	{
-		return true;
+		if (!bHasLayoutBounds || !ShouldPreferLayoutBounds(NodeObj, ParentObj, RenderBounds, LayoutBounds))
+		{
+			OutBounds = RenderBounds;
+			return true;
+		}
 	}
 
-	if (!TryReadBounds(GetObj(NodeObj, TEXT("absoluteBoundingBox")), OutBounds))
+	if (!bHasLayoutBounds)
 	{
 		return false;
 	}
+
+	OutBounds = LayoutBounds;
 
 	// Local export may omit absoluteRenderBounds; expand bbox by stroke align as fallback.
 	float ExpandLeft = 0.0f;
@@ -690,17 +1044,44 @@ void ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 
 	OutNode.bHasClip = true;
 	OutNode.bClip = GetBool(NodeObj, TEXT("clipsContent"), false);
+
+	SetStringFieldIfPresent(NodeObj, TEXT("layoutWrap"), OutNode.FigmaLayout.LayoutWrap);
+	SetStringFieldIfPresent(NodeObj, TEXT("counterAxisAlignContent"), OutNode.FigmaLayout.CounterAxisAlignContent);
+	SetStringFieldIfPresent(NodeObj, TEXT("layoutPositioning"), OutNode.FigmaLayout.LayoutPositioning);
+	SetStringFieldIfPresent(NodeObj, TEXT("layoutAlign"), OutNode.FigmaLayout.LayoutAlign);
+	SetStringFieldIfPresent(NodeObj, TEXT("primaryAxisSizingMode"), OutNode.FigmaLayout.PrimaryAxisSizingMode);
+	SetStringFieldIfPresent(NodeObj, TEXT("counterAxisSizingMode"), OutNode.FigmaLayout.CounterAxisSizingMode);
+	SetStringFieldIfPresent(NodeObj, TEXT("gridRowsSizing"), OutNode.FigmaLayout.GridRowsSizing);
+	SetStringFieldIfPresent(NodeObj, TEXT("gridColumnsSizing"), OutNode.FigmaLayout.GridColumnsSizing);
+	SetStringFieldIfPresent(NodeObj, TEXT("gridChildHorizontalAlign"), OutNode.FigmaLayout.GridChildHorizontalAlign);
+	SetStringFieldIfPresent(NodeObj, TEXT("gridChildVerticalAlign"), OutNode.FigmaLayout.GridChildVerticalAlign);
+	SetFloatFieldIfPresent(NodeObj, TEXT("counterAxisSpacing"), OutNode.FigmaLayout.CounterAxisSpacing, OutNode.FigmaLayout.bHasCounterAxisSpacing);
+	SetFloatFieldIfPresent(NodeObj, TEXT("minWidth"), OutNode.FigmaLayout.MinWidth, OutNode.FigmaLayout.bHasMinWidth);
+	SetFloatFieldIfPresent(NodeObj, TEXT("maxWidth"), OutNode.FigmaLayout.MaxWidth, OutNode.FigmaLayout.bHasMaxWidth);
+	SetFloatFieldIfPresent(NodeObj, TEXT("minHeight"), OutNode.FigmaLayout.MinHeight, OutNode.FigmaLayout.bHasMinHeight);
+	SetFloatFieldIfPresent(NodeObj, TEXT("maxHeight"), OutNode.FigmaLayout.MaxHeight, OutNode.FigmaLayout.bHasMaxHeight);
+	SetIntFieldIfPresent(NodeObj, TEXT("gridRowCount"), OutNode.FigmaLayout.GridRowCount, OutNode.FigmaLayout.bHasGridRowCount);
+	SetIntFieldIfPresent(NodeObj, TEXT("gridColumnCount"), OutNode.FigmaLayout.GridColumnCount, OutNode.FigmaLayout.bHasGridColumnCount);
+	SetFloatFieldIfPresent(NodeObj, TEXT("gridRowGap"), OutNode.FigmaLayout.GridRowGap, OutNode.FigmaLayout.bHasGridRowGap);
+	SetFloatFieldIfPresent(NodeObj, TEXT("gridColumnGap"), OutNode.FigmaLayout.GridColumnGap, OutNode.FigmaLayout.bHasGridColumnGap);
+	SetIntFieldIfPresent(NodeObj, TEXT("gridRowSpan"), OutNode.FigmaLayout.GridRowSpan, OutNode.FigmaLayout.bHasGridRowSpan);
+	SetIntFieldIfPresent(NodeObj, TEXT("gridColumnSpan"), OutNode.FigmaLayout.GridColumnSpan, OutNode.FigmaLayout.bHasGridColumnSpan);
+	SetIntFieldIfPresent(NodeObj, TEXT("gridColumnAnchorIndex"), OutNode.FigmaLayout.GridColumnAnchorIndex, OutNode.FigmaLayout.bHasGridColumnAnchorIndex);
+	SetIntFieldIfPresent(NodeObj, TEXT("gridRowAnchorIndex"), OutNode.FigmaLayout.GridRowAnchorIndex, OutNode.FigmaLayout.bHasGridRowAnchorIndex);
+	SetBoolFieldIfPresent(NodeObj, TEXT("itemReverseZIndex"), OutNode.FigmaLayout.bItemReverseZIndex, OutNode.FigmaLayout.bHasItemReverseZIndex);
+	SetBoolFieldIfPresent(NodeObj, TEXT("strokesIncludedInLayout"), OutNode.FigmaLayout.bStrokesIncludedInLayout, OutNode.FigmaLayout.bHasStrokesIncludedInLayout);
+	SetJsonFieldIfPresent(NodeObj, TEXT("boundVariables"), OutNode.FigmaLayout.BoundVariablesJson);
 }
 
 // ---------------------------------------------------------------------------
 // ParseSize
 // ---------------------------------------------------------------------------
 
-void ParseSize(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode, bool bParentHasAutoLayout)
+void ParseSize(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj, FDesignNode& OutNode, bool bParentHasAutoLayout)
 {
 	FNodeBounds VisualBounds;
 	FNodeBounds LayoutBounds;
-	const bool bHasVisualBounds = TryGetVisualBounds(NodeObj, VisualBounds);
+	const bool bHasVisualBounds = TryGetVisualBounds(NodeObj, ParentObj, VisualBounds);
 	const bool bHasLayoutBounds = TryReadBounds(GetObj(NodeObj, TEXT("absoluteBoundingBox")), LayoutBounds);
 
 	// Auto layout should remain in layout space; absolute layout uses visual bounds.
@@ -744,394 +1125,7 @@ void ParseSize(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode, boo
 	OutNode.bHasHeight = true;
 }
 
-// ---------------------------------------------------------------------------
-// ParseSingleFill - 解析单个 Figma fill 对象
-// ---------------------------------------------------------------------------
-
-FDesignFill ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)
-{
-	FDesignFill Result;
-	if (!FillObj || !GetBool(FillObj, TEXT("visible"), true))
-		return Result;
-
-	FString FillType = GetStr(FillObj, TEXT("type"));
-	float FillOpacity = GetNum(FillObj, TEXT("opacity"), 1.0);
-	Result.Opacity = FillOpacity;
-	FillObj->TryGetStringField(TEXT("blendMode"), Result.BlendMode);
-
-	if (FillType == TEXT("SOLID"))
-	{
-		auto ColorObj = GetObj(FillObj, TEXT("color"));
-		Result.Type = EDesignFillType::Color;
-		Result.SolidColor = ColorToHex(ColorObj, FillOpacity);
-		return Result;
-	}
-
-	if (FillType == TEXT("GRADIENT_LINEAR") || FillType == TEXT("GRADIENT_RADIAL") || FillType == TEXT("GRADIENT_ANGULAR") || FillType == TEXT("GRADIENT_DIAMOND"))
-	{
-		Result.Type = EDesignFillType::Gradient;
-
-		if (FillType == TEXT("GRADIENT_LINEAR"))
-			Result.Gradient.GradientType = EDesignGradientType::Linear;
-		else if (FillType == TEXT("GRADIENT_RADIAL") || FillType == TEXT("GRADIENT_DIAMOND"))
-			Result.Gradient.GradientType = EDesignGradientType::Radial;
-		else
-			Result.Gradient.GradientType = EDesignGradientType::Angular;
-
-		const auto* Handles = GetArr(FillObj, TEXT("gradientHandlePositions"));
-		if (Handles && Handles->Num() >= 2)
-		{
-			auto P0 = (*Handles)[0]->AsObject();
-			auto P1 = (*Handles)[1]->AsObject();
-			if (P0 && P1)
-			{
-				float DX = GetNum(P1, TEXT("x")) - GetNum(P0, TEXT("x"));
-				float DY = GetNum(P1, TEXT("y")) - GetNum(P0, TEXT("y"));
-				Result.Gradient.Rotation = FMath::RadiansToDegrees(FMath::Atan2(DY, DX));
-			}
-		}
-
-		const auto* Stops = GetArr(FillObj, TEXT("gradientStops"));
-		if (Stops)
-		{
-			for (const auto& StopVal : *Stops)
-			{
-				auto StopObj = StopVal->AsObject();
-				if (!StopObj) continue;
-
-				FDesignGradientStop Stop;
-				Stop.Color = ColorToHex(GetObj(StopObj, TEXT("color")), FillOpacity);
-				Stop.Position = GetNum(StopObj, TEXT("position"));
-				Result.Gradient.Colors.Add(Stop);
-			}
-		}
-		return Result;
-	}
-
-	if (FillType == TEXT("IMAGE"))
-	{
-		Result.Type = EDesignFillType::Image;
-		Result.Image.Url = GetStr(FillObj, TEXT("imageRef"));
-		Result.Image.Opacity = FillOpacity;
-
-		FString ScaleMode = GetStr(FillObj, TEXT("scaleMode"));
-		if (ScaleMode == TEXT("FILL"))
-			Result.Image.Mode = EDesignImageMode::Fill;
-		else if (ScaleMode == TEXT("FIT"))
-			Result.Image.Mode = EDesignImageMode::Fit;
-		else if (ScaleMode == TEXT("CROP"))
-			Result.Image.Mode = EDesignImageMode::Crop;
-		else
-			Result.Image.Mode = EDesignImageMode::Stretch;
-
-		// 解析 imageTransform（2x3 仿射矩阵 [[a,b,tx],[c,d,ty]]）
-		const auto* TransformArr = GetArr(FillObj, TEXT("imageTransform"));
-		if (TransformArr && TransformArr->Num() == 2)
-		{
-			auto Row0 = (*TransformArr)[0]->AsArray();
-			auto Row1 = (*TransformArr)[1]->AsArray();
-			if (Row0.Num() == 3 && Row1.Num() == 3)
-			{
-				Result.Image.Transform.A  = Row0[0]->AsNumber();
-				Result.Image.Transform.B  = Row0[1]->AsNumber();
-				Result.Image.Transform.TX = Row0[2]->AsNumber();
-				Result.Image.Transform.C  = Row1[0]->AsNumber();
-				Result.Image.Transform.D  = Row1[1]->AsNumber();
-				Result.Image.Transform.TY = Row1[2]->AsNumber();
-			}
-		}
-
-		return Result;
-	}
-
-	return Result;
-}
-
-// ---------------------------------------------------------------------------
-// ParseFills - 收集所有可见填充层（底→顶顺序）
-// ---------------------------------------------------------------------------
-
-TArray<FDesignFill> ParseFills(const TArray<TSharedPtr<FJsonValue>>& Fills)
-{
-	TArray<FDesignFill> Result;
-	for (int32 i = 0; i < Fills.Num(); ++i)
-	{
-		auto FillObj = Fills[i]->AsObject();
-		if (!FillObj || !GetBool(FillObj, TEXT("visible"), true))
-			continue;
-
-		FDesignFill Fill = ParseSingleFill(FillObj);
-		if (Fill.Type != EDesignFillType::None)
-			Result.Add(MoveTemp(Fill));
-	}
-	return Result;
-}
-
-// ---------------------------------------------------------------------------
-// ParseFill - 返回最顶层可见填充（向后兼容）
-// ---------------------------------------------------------------------------
-
-FDesignFill ParseFill(const TArray<TSharedPtr<FJsonValue>>& Fills)
-{
-	// Take the last visible fill (Figma renders last on top)
-	for (int32 i = Fills.Num() - 1; i >= 0; --i)
-	{
-		auto FillObj = Fills[i]->AsObject();
-		if (!FillObj || !GetBool(FillObj, TEXT("visible"), true))
-			continue;
-
-		FDesignFill Fill = ParseSingleFill(FillObj);
-		if (Fill.Type != EDesignFillType::None)
-			return Fill;
-	}
-	return FDesignFill();
-}
-
-// ---------------------------------------------------------------------------
-// ParseStroke
-// ---------------------------------------------------------------------------
-
-FDesignStroke ParseStroke(const TSharedPtr<FJsonObject>& NodeObj)
-{
-	FDesignStroke Result;
-	bool bHasVisibleStroke = false;
-
-	const auto* Strokes = GetArr(NodeObj, TEXT("strokes"));
-	if (Strokes)
-	{
-		for (const auto& StrokeVal : *Strokes)
-		{
-			auto StrokeObj = StrokeVal->AsObject();
-			if (!StrokeObj || !GetBool(StrokeObj, TEXT("visible"), true))
-				continue;
-
-			bHasVisibleStroke = true;
-			auto ColorObj = GetObj(StrokeObj, TEXT("color"));
-			float StrokeOpacity = GetNum(StrokeObj, TEXT("opacity"), 1.0);
-			Result.Fill = FDesignFill::FromColor(ColorToHex(ColorObj, StrokeOpacity));
-			break;
-		}
-	}
-
-	// Figma nodes often carry default strokeWeight fields even when no stroke is enabled.
-	// Only map thickness/alignment when at least one visible stroke exists.
-	if (!bHasVisibleStroke)
-	{
-		// Explicitly clear thickness to avoid confusion from default strokeWeight fields
-		Result.Thickness = FDesignStrokeThickness();
-		return Result;
-	}
-
-	// Stroke align
-	FString Align = GetStr(NodeObj, TEXT("strokeAlign"), TEXT("INSIDE"));
-	if (Align == TEXT("OUTSIDE"))
-		Result.Align = EDesignStrokeAlign::Outside;
-	else if (Align == TEXT("CENTER"))
-		Result.Align = EDesignStrokeAlign::Center;
-	else
-		Result.Align = EDesignStrokeAlign::Inside;
-
-	// Individual stroke weights
-	auto IndividualWeights = GetObj(NodeObj, TEXT("individualStrokeWeights"));
-	if (IndividualWeights)
-	{
-		Result.Thickness.bUniform = false;
-		Result.Thickness.Top = GetNum(IndividualWeights, TEXT("top"));
-		Result.Thickness.Right = GetNum(IndividualWeights, TEXT("right"));
-		Result.Thickness.Bottom = GetNum(IndividualWeights, TEXT("bottom"));
-		Result.Thickness.Left = GetNum(IndividualWeights, TEXT("left"));
-	}
-	else
-	{
-		Result.Thickness.bUniform = true;
-		Result.Thickness.Uniform = GetNum(NodeObj, TEXT("strokeWeight"));
-	}
-
-	return Result;
-}
-
-// ---------------------------------------------------------------------------
-// ParseCornerRadius
-// ---------------------------------------------------------------------------
-
-FDesignCornerRadius ParseCornerRadius(const TSharedPtr<FJsonObject>& NodeObj)
-{
-	FDesignCornerRadius Result;
-
-	const auto* Radii = GetArr(NodeObj, TEXT("rectangleCornerRadii"));
-	if (Radii && Radii->Num() == 4)
-	{
-		const float TopLeft = (*Radii)[0]->AsNumber();
-		const float TopRight = (*Radii)[1]->AsNumber();
-		const float BottomRight = (*Radii)[2]->AsNumber();
-		const float BottomLeft = (*Radii)[3]->AsNumber();
-		const bool bAllEqual =
-			FMath::IsNearlyEqual(TopLeft, TopRight, KINDA_SMALL_NUMBER) &&
-			FMath::IsNearlyEqual(TopLeft, BottomRight, KINDA_SMALL_NUMBER) &&
-			FMath::IsNearlyEqual(TopLeft, BottomLeft, KINDA_SMALL_NUMBER);
-
-		if (bAllEqual)
-		{
-			Result.bUniform = true;
-			Result.Uniform = TopLeft;
-		}
-		else
-		{
-			Result.bUniform = false;
-			Result.TopLeft = TopLeft;
-			Result.TopRight = TopRight;
-			Result.BottomRight = BottomRight;
-			Result.BottomLeft = BottomLeft;
-		}
-	}
-	else
-	{
-		Result.bUniform = true;
-		Result.Uniform = GetNum(NodeObj, TEXT("cornerRadius"));
-	}
-
-	return Result;
-}
-
-// ---------------------------------------------------------------------------
-// ParseEffects
-// ---------------------------------------------------------------------------
-
-TArray<FDesignEffect> ParseEffects(const TArray<TSharedPtr<FJsonValue>>& Effects)
-{
-	TArray<FDesignEffect> Result;
-
-	for (const auto& EffVal : Effects)
-	{
-		auto EffObj = EffVal->AsObject();
-		if (!EffObj || !GetBool(EffObj, TEXT("visible"), true))
-			continue;
-
-		FString EffType = GetStr(EffObj, TEXT("type"));
-		FDesignEffect Eff;
-		EffObj->TryGetStringField(TEXT("blendMode"), Eff.BlendMode);
-
-		if (EffType == TEXT("DROP_SHADOW") || EffType == TEXT("INNER_SHADOW"))
-		{
-			Eff.Type = EDesignEffectType::Shadow;
-			Eff.Shadow.bInner = (EffType == TEXT("INNER_SHADOW"));
-			Eff.Shadow.BlendMode = Eff.BlendMode;
-
-			auto Offset = GetObj(EffObj, TEXT("offset"));
-			Eff.Shadow.OffsetX = Offset ? GetNum(Offset, TEXT("x")) : 0.0f;
-			Eff.Shadow.OffsetY = Offset ? GetNum(Offset, TEXT("y")) : 0.0f;
-			Eff.Shadow.Blur = GetNum(EffObj, TEXT("radius"));
-			Eff.Shadow.Spread = GetNum(EffObj, TEXT("spread"));
-			float ShadowOpacity = GetNum(EffObj, TEXT("opacity"), 1.0);
-			Eff.Shadow.Color = ColorToHex(GetObj(EffObj, TEXT("color")), ShadowOpacity);
-		}
-		else if (EffType == TEXT("LAYER_BLUR"))
-		{
-			Eff.Type = EDesignEffectType::Blur;
-			Eff.Radius = GetNum(EffObj, TEXT("radius"));
-		}
-		else if (EffType == TEXT("BACKGROUND_BLUR"))
-		{
-			Eff.Type = EDesignEffectType::BackgroundBlur;
-			Eff.Radius = GetNum(EffObj, TEXT("radius"));
-		}
-		else
-		{
-			continue;
-		}
-
-		Result.Add(Eff);
-	}
-
-	return Result;
-}
-
-// ---------------------------------------------------------------------------
-// ParseTextProperties
-// ---------------------------------------------------------------------------
-
-void ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
-{
-	OutNode.Content = GetStr(NodeObj, TEXT("characters"));
-
-	auto Style = GetObj(NodeObj, TEXT("style"));
-	if (!Style) return;
-
-	OutNode.FontFamily = GetStr(Style, TEXT("fontFamily"));
-	OutNode.FontSize = GetNum(Style, TEXT("fontSize"), 16.0);
-	OutNode.FontStyle = GetStr(Style, TEXT("fontStyle"), TEXT("normal"));
-
-	int32 Weight = FMath::RoundToInt(GetNum(Style, TEXT("fontWeight"), 400.0));
-	// Snap to nearest standard weight (100-900)
-	Weight = FMath::Clamp(FMath::RoundToInt(Weight / 100.0f) * 100, 100, 900);
-	OutNode.FontWeight = FString::FromInt(Weight);
-
-	FString LineHeightUnit = GetStr(Style, TEXT("lineHeightUnit"));
-	if (LineHeightUnit != TEXT("AUTO"))
-	{
-		// UMG TextBlock::LineHeightPercentage expects a ratio (e.g. 1.2),
-		// while Figma provides px or percent-based values.
-		if (LineHeightUnit == TEXT("PIXELS"))
-		{
-			const float LineHeightPx = GetNum(Style, TEXT("lineHeightPx"));
-			if (LineHeightPx > 0.0f && OutNode.FontSize > 0.0f)
-				OutNode.LineHeight = LineHeightPx / OutNode.FontSize;
-		}
-		else if (LineHeightUnit == TEXT("FONT_SIZE_%"))
-		{
-			const float Percent = GetNum(Style, TEXT("lineHeightPercentFontSize"));
-			if (Percent > 0.0f)
-				OutNode.LineHeight = Percent / 100.0f;
-		}
-		else
-		{
-			// Fallback for less common payloads.
-			const float Percent = GetNum(Style, TEXT("lineHeightPercentFontSize"));
-			if (Percent > 0.0f)
-				OutNode.LineHeight = Percent / 100.0f;
-		}
-	}
-
-	OutNode.LetterSpacing = GetNum(Style, TEXT("letterSpacing"));
-	FString TextDecoration = GetStr(Style, TEXT("textDecoration"));
-	OutNode.bUnderline = (TextDecoration == TEXT("UNDERLINE"));
-	OutNode.bStrikethrough = (TextDecoration == TEXT("STRIKETHROUGH"));
-	if (const TSharedPtr<FJsonObject> HyperlinkObj = GetObj(NodeObj, TEXT("hyperlink")))
-	{
-		OutNode.Href = GetStr(HyperlinkObj, TEXT("url"));
-	}
-
-	FString HAlign = GetStr(Style, TEXT("textAlignHorizontal"), TEXT("LEFT"));
-	if (HAlign == TEXT("CENTER"))
-		OutNode.TextAlign = EDesignTextAlign::Center;
-	else if (HAlign == TEXT("RIGHT"))
-		OutNode.TextAlign = EDesignTextAlign::Right;
-	else if (HAlign == TEXT("JUSTIFIED"))
-		OutNode.TextAlign = EDesignTextAlign::Justify;
-	else
-		OutNode.TextAlign = EDesignTextAlign::Left;
-
-	FString VAlign = GetStr(Style, TEXT("textAlignVertical"), TEXT("TOP"));
-	if (VAlign == TEXT("CENTER"))
-		OutNode.TextAlignVertical = EDesignTextAlignVertical::Middle;
-	else if (VAlign == TEXT("BOTTOM"))
-		OutNode.TextAlignVertical = EDesignTextAlignVertical::Bottom;
-	else
-		OutNode.TextAlignVertical = EDesignTextAlignVertical::Top;
-
-	// textAutoResize can appear on node root or inside style (nodes API payload).
-	FString AutoResize = GetStr(NodeObj, TEXT("textAutoResize"));
-	if (AutoResize.IsEmpty())
-	{
-		AutoResize = GetStr(Style, TEXT("textAutoResize"), TEXT("NONE"));
-	}
-	if (AutoResize == TEXT("WIDTH_AND_HEIGHT"))
-		OutNode.TextGrowth = EDesignTextGrowth::Auto;
-	else if (AutoResize == TEXT("HEIGHT"))
-		OutNode.TextGrowth = EDesignTextGrowth::FixedWidth;
-	else
-		OutNode.TextGrowth = EDesignTextGrowth::FixedWidthHeight;
-}
+#include "FigmaParserStyling.h"
 
 // ---------------------------------------------------------------------------
 // ParsePosition
@@ -1147,10 +1141,10 @@ void ParsePosition(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJso
 	}
 
 	FNodeBounds ChildBounds;
-	const bool bHasChildBounds = TryGetVisualBounds(NodeObj, ChildBounds);
+	const bool bHasChildBounds = TryGetVisualBounds(NodeObj, ParentObj, ChildBounds);
 
 	FNodeBounds ParentBounds;
-	const bool bHasParentBounds = ParentObj && TryGetVisualBounds(ParentObj, ParentBounds);
+	const bool bHasParentBounds = ParentObj && TryGetVisualBounds(ParentObj, nullptr, ParentBounds);
 
 	if (bHasChildBounds && bHasParentBounds)
 	{
@@ -1180,7 +1174,7 @@ TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const 
 	if (FigmaType.IsEmpty()) return nullptr;
 
 	// Figma mask 节点是裁剪几何，不应直接生成可视控件。
-	const bool bIsMaskNode = GetBool(NodeObj, TEXT("isMask"), false) || !GetStr(NodeObj, TEXT("maskType")).IsEmpty();
+	const bool bIsMaskNode = GetBool(NodeObj, TEXT("isMask"), false);
 	if (bIsMaskNode)
 	{
 		return nullptr;
@@ -1251,11 +1245,19 @@ TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const 
 	// INSTANCE: 保留组件实例追踪信息（不走 Ref 展开，Figma API 已展开 children）
 	if (FigmaType == TEXT("INSTANCE"))
 	{
+		Node->FigmaInstance.bIsInstance = true;
 		const FString ComponentId = GetStr(NodeObj, TEXT("componentId"));
 		if (!ComponentId.IsEmpty())
 		{
+			Node->FigmaInstance.ComponentId = ComponentId;
 			Node->Metadata.Add(TEXT("instanceComponentId"), ComponentId);
 		}
+		SetStringFieldIfPresent(NodeObj, TEXT("componentSetId"), Node->FigmaInstance.ComponentSetId);
+		SetStringFieldIfPresent(NodeObj, TEXT("mainComponentKey"), Node->FigmaInstance.MainComponentKey);
+		SetJsonFieldIfPresent(NodeObj, TEXT("componentProperties"), Node->FigmaInstance.ComponentPropertiesJson);
+		SetJsonFieldIfPresent(NodeObj, TEXT("variantProperties"), Node->FigmaInstance.VariantPropertiesJson);
+		SetJsonFieldIfPresent(NodeObj, TEXT("overrides"), Node->FigmaInstance.OverridesJson);
+		SetBoolFieldIfPresent(NodeObj, TEXT("isExposedInstance"), Node->FigmaInstance.bIsExposedInstance, Node->FigmaInstance.bHasIsExposedInstance);
 	}
 
 	bool bParentAutoLayout = ParentObj ? HasAutoLayout(ParentObj) : false;
@@ -1264,7 +1266,7 @@ TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const 
 	ParsePosition(NodeObj, ParentObj, *Node, bParentAutoLayout);
 
 	// Size
-	ParseSize(NodeObj, *Node, bParentAutoLayout);
+	ParseSize(NodeObj, ParentObj, *Node, bParentAutoLayout);
 
 	// Layout (for containers)
 	ParseLayout(NodeObj, *Node);
@@ -1275,6 +1277,11 @@ TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const 
 	{
 		Node->Fills = ParseFills(*FillsArr);
 		Node->Fill = ParseFill(*FillsArr);
+		const FString VectorRasterFallback = ExtractSyntheticVectorRasterImageRef(*FillsArr);
+		if (!VectorRasterFallback.IsEmpty())
+		{
+			Node->Metadata.Add(TEXT("figma.vectorRasterFallback"), VectorRasterFallback);
+		}
 	}
 
 	// Stroke
@@ -1310,6 +1317,10 @@ TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const 
 			for (const auto& ChildVal : *ChildrenArr)
 			{
 				auto ChildObj = ChildVal->AsObject();
+				if (bParentAutoLayout && ShouldSkipAutoLayoutGhostChild(ChildObj, ChildrenArr))
+				{
+					continue;
+				}
 				if (auto ChildNode = ParseNode(ChildObj, NodeObj))
 					Node->Children.Add(ChildNode);
 			}
@@ -1369,6 +1380,10 @@ bool FFigmaParser::ParseDocument(const FString& FigmaJson, FDesignDocument& OutD
 	};
 	CaptureDocumentMetadata(DocObj);
 	CaptureDocumentMetadata(Root);
+	AddJsonExtensionIfPresent(Root, OutDocument.Metadata, TEXT("components"), TEXT("components"));
+	AddJsonExtensionIfPresent(Root, OutDocument.Metadata, TEXT("componentSets"), TEXT("componentSets"));
+	SetJsonFieldIfPresent(Root, TEXT("components"), OutDocument.FigmaDocument.ComponentsJson);
+	SetJsonFieldIfPresent(Root, TEXT("componentSets"), OutDocument.FigmaDocument.ComponentSetsJson);
 
 	// Standard file payload: DOCUMENT -> pages -> frames.
 	if (DocType == TEXT("DOCUMENT"))
@@ -1470,6 +1485,11 @@ void CollectImageRefsRecursive(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSe
 			if (F.IsImage() && !F.Image.Url.IsEmpty())
 				OutRefs.Add(F.Image.Url);
 		}
+		if (const FString* VectorRasterFallback = Node->Metadata.Find(TEXT("figma.vectorRasterFallback")))
+		{
+			if (!VectorRasterFallback->IsEmpty())
+				OutRefs.Add(*VectorRasterFallback);
+		}
 		CollectImageRefsRecursive(Node->Children, OutRefs);
 	}
 }
@@ -1498,6 +1518,11 @@ void ApplyImageUrlsRecursive(TArray<TSharedPtr<FDesignNode>>& Nodes, const TMap<
 				if (const FString* Url = Map.Find(F.Image.Url))
 					F.Image.Url = *Url;
 			}
+		}
+		if (FString* VectorRasterFallback = Node->Metadata.Find(TEXT("figma.vectorRasterFallback")))
+		{
+			if (const FString* Url = Map.Find(*VectorRasterFallback))
+				*VectorRasterFallback = *Url;
 		}
 		ApplyImageUrlsRecursive(Node->Children, Map);
 	}

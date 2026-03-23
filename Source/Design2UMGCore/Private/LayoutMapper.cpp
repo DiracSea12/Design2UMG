@@ -39,6 +39,23 @@ namespace
 		}
 		return !UsesWrappingText(Node);
 	}
+
+	bool ShouldPreserveMeasuredFillSize(const TSharedPtr<FDesignNode>& Node, EDesignLayout ParentLayout)
+	{
+		if (!Node.IsValid())
+		{
+			return false;
+		}
+
+		if (ParentLayout == EDesignLayout::Wrap || ParentLayout == EDesignLayout::Grid)
+		{
+			return true;
+		}
+
+		return ParentLayout != EDesignLayout::None
+			&& Node->Type == EDesignNodeType::Text
+			&& (Node->TextAlign == EDesignTextAlign::Center || Node->TextAlign == EDesignTextAlign::Right);
+	}
 }
 
 void FLayoutMapper::ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node, EDesignLayout ParentLayout)
@@ -244,13 +261,14 @@ bool FLayoutMapper::HasPadding(const TSharedPtr<FDesignNode>& Node)
 		 Node->Padding.Bottom > 0 || Node->Padding.Left > 0);
 }
 
-FUMGWidgetNode FLayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, const TSharedPtr<FDesignNode>& ChildNode)
+FUMGWidgetNode FLayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, const TSharedPtr<FDesignNode>& ChildNode, EDesignLayout ParentLayout)
 {
 	FUMGWidgetNode SizeBox;
 	SizeBox.Type = TEXT("SizeBox");
 	SizeBox.Id = ChildWidget.Id + TEXT("_sz");
 	SizeBox.Name = ChildWidget.Name + TEXT("_sz");
 	const bool bUseFitOverride = ShouldUseFitOverride(ChildNode);
+	const bool bPreserveMeasuredFillSize = ShouldPreserveMeasuredFillSize(ChildNode, ParentLayout);
 
 	if (ChildNode->Width.IsFixed())
 		SizeBox.Properties.Add(TEXT("WidthOverride"), FString::SanitizeFloat(ChildNode->Width.Value));
@@ -258,6 +276,8 @@ FUMGWidgetNode FLayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, cons
 		SizeBox.Properties.Add(
 			bUseFitOverride ? TEXT("WidthOverride") : TEXT("MinDesiredWidth"),
 			FString::SanitizeFloat(ChildNode->Width.Value));
+	else if (bPreserveMeasuredFillSize && ChildNode->Width.IsFill() && ChildNode->Width.Value > 0.0f)
+		SizeBox.Properties.Add(TEXT("WidthOverride"), FString::SanitizeFloat(ChildNode->Width.Value));
 
 	if (ChildNode->Height.IsFixed())
 		SizeBox.Properties.Add(TEXT("HeightOverride"), FString::SanitizeFloat(ChildNode->Height.Value));
@@ -265,6 +285,8 @@ FUMGWidgetNode FLayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, cons
 		SizeBox.Properties.Add(
 			bUseFitOverride ? TEXT("HeightOverride") : TEXT("MinDesiredHeight"),
 			FString::SanitizeFloat(ChildNode->Height.Value));
+	else if (bPreserveMeasuredFillSize && ChildNode->Height.IsFill() && ChildNode->Height.Value > 0.0f)
+		SizeBox.Properties.Add(TEXT("HeightOverride"), FString::SanitizeFloat(ChildNode->Height.Value));
 
 	SizeBox.Bounds = ChildWidget.Bounds;
 	SizeBox.Slot = MoveTemp(ChildWidget.Slot);

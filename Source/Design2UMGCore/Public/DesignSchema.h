@@ -286,6 +286,12 @@ struct FDesignImageFill
 	float Opacity = 1.0f;
 
 	UPROPERTY()
+	float ScalingFactor = 1.0f;
+
+	UPROPERTY()
+	bool bHasScalingFactor = false;
+
+	UPROPERTY()
 	FDesignImageTransform Transform;
 };
 
@@ -668,6 +674,64 @@ struct FDesignEffect
 	FDesignShadow Shadow;
 };
 
+USTRUCT()
+struct FDesignFigmaLayoutExtensions
+{
+	GENERATED_BODY()
+
+	UPROPERTY() FString LayoutWrap;
+	UPROPERTY() FString CounterAxisAlignContent;
+	UPROPERTY() FString LayoutPositioning;
+	UPROPERTY() FString LayoutAlign;
+	UPROPERTY() FString PrimaryAxisSizingMode;
+	UPROPERTY() FString CounterAxisSizingMode;
+	UPROPERTY() FString GridRowsSizing;
+	UPROPERTY() FString GridColumnsSizing;
+	UPROPERTY() FString GridChildHorizontalAlign;
+	UPROPERTY() FString GridChildVerticalAlign;
+	UPROPERTY() FString BoundVariablesJson;
+
+	UPROPERTY() float CounterAxisSpacing = 0.0f; bool bHasCounterAxisSpacing = false;
+	UPROPERTY() float MinWidth = 0.0f; bool bHasMinWidth = false;
+	UPROPERTY() float MaxWidth = 0.0f; bool bHasMaxWidth = false;
+	UPROPERTY() float MinHeight = 0.0f; bool bHasMinHeight = false;
+	UPROPERTY() float MaxHeight = 0.0f; bool bHasMaxHeight = false;
+	UPROPERTY() int32 GridRowCount = 0; bool bHasGridRowCount = false;
+	UPROPERTY() int32 GridColumnCount = 0; bool bHasGridColumnCount = false;
+	UPROPERTY() float GridRowGap = 0.0f; bool bHasGridRowGap = false;
+	UPROPERTY() float GridColumnGap = 0.0f; bool bHasGridColumnGap = false;
+	UPROPERTY() int32 GridRowSpan = 0; bool bHasGridRowSpan = false;
+	UPROPERTY() int32 GridColumnSpan = 0; bool bHasGridColumnSpan = false;
+	UPROPERTY() int32 GridColumnAnchorIndex = 0; bool bHasGridColumnAnchorIndex = false;
+	UPROPERTY() int32 GridRowAnchorIndex = 0; bool bHasGridRowAnchorIndex = false;
+	UPROPERTY() bool bItemReverseZIndex = false; bool bHasItemReverseZIndex = false;
+	UPROPERTY() bool bStrokesIncludedInLayout = false; bool bHasStrokesIncludedInLayout = false;
+};
+
+USTRUCT()
+struct FDesignFigmaInstanceData
+{
+	GENERATED_BODY()
+
+	UPROPERTY() bool bIsInstance = false;
+	UPROPERTY() FString ComponentId;
+	UPROPERTY() FString ComponentSetId;
+	UPROPERTY() FString MainComponentKey;
+	UPROPERTY() FString ComponentPropertiesJson;
+	UPROPERTY() FString VariantPropertiesJson;
+	UPROPERTY() FString OverridesJson;
+	UPROPERTY() bool bIsExposedInstance = false; bool bHasIsExposedInstance = false;
+};
+
+USTRUCT()
+struct FDesignFigmaDocumentData
+{
+	GENERATED_BODY()
+
+	UPROPERTY() FString ComponentsJson;
+	UPROPERTY() FString ComponentSetsJson;
+};
+
 struct FDesignNode
 {
 	FString Id;
@@ -704,6 +768,8 @@ struct FDesignNode
 	bool bSemanticPlaceholderSurface = false;
 	TMap<FString, FString> Metadata;
 	float LayoutGrow = -1.0f;
+	FDesignFigmaLayoutExtensions FigmaLayout;
+	FDesignFigmaInstanceData FigmaInstance;
 
 	FDesignFill Fill;
 	TArray<FDesignFill> Fills;
@@ -785,6 +851,7 @@ struct FDesignDocument
 	TMap<FString, TArray<FString>> Themes;
 	TMap<FString, FDesignVariable> Variables;
 	TMap<FString, FString> Metadata;
+	FDesignFigmaDocumentData FigmaDocument;
 	TArray<TSharedPtr<FDesignNode>> Children;
 
 	TSharedPtr<FDesignNode> FindReusableNode(const FString& Id) const

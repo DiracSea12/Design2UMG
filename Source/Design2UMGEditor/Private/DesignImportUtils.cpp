@@ -3,6 +3,7 @@
 #include "DesignImportUtils.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGNotification.h"
+#include "Automation/Design2UMGAutomationRender.h"
 #include "UMGGenerator.h"
 #include "UMGWidgetUtils.h"
 #include "Design2UMGSettings.h"
@@ -19,11 +20,11 @@
 
 namespace
 {
-	const TCHAR* FallbackOutputPath = TEXT("/Game/Design2UMG/PenConvert_Output");
+	const TCHAR* ImportUtilsFallbackOutputPath = TEXT("/Game/Design2UMG/PenConvert_Output");
 
-	FString ResolveOutputPath(const FString& OutputPath)
+	FString ResolveImportOutputPath(const FString& OutputPath)
 	{
-		return OutputPath.IsEmpty() ? FString(FallbackOutputPath) : OutputPath;
+		return OutputPath.IsEmpty() ? FString(ImportUtilsFallbackOutputPath) : OutputPath;
 	}
 
 	FIntPoint ResolveCompiledRenderSize(UWidgetBlueprint* WidgetBlueprint, const FIntPoint& RequestedRenderSize)
@@ -150,10 +151,70 @@ namespace
 
 // Blueprint 生成
 
+void DesignImportUtils::ApplyPendingIconFontMappingChanges(const FUMGWidgetData& Data)
+{
+	if (!Data.IconFontMappingChanges.HasChanges())
+	{
+		return;
+	}
+
+	UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+	if (!Settings)
+	{
+		return;
+	}
+
+	bool bModified = false;
+	for (const FString& Family : Data.IconFontMappingChanges.Removals)
+	{
+		if (Family.IsEmpty())
+		{
+			continue;
+		}
+
+		if (Settings->IconFontAssetMap.Remove(Family) > 0)
+		{
+			bModified = true;
+			UE_LOG(LogDesign2UMG, Display, TEXT("Removed stale icon font mapping for '%s'"), *Family);
+		}
+	}
+
+	for (const TPair<FString, FString>& Pair : Data.IconFontMappingChanges.Upserts)
+	{
+		if (Pair.Key.IsEmpty() || Pair.Value.IsEmpty())
+		{
+			continue;
+		}
+
+		const TSoftObjectPtr<UFont>* Existing = Settings->IconFontAssetMap.Find(Pair.Key);
+		if (Existing && Existing->ToString() == Pair.Value)
+		{
+			continue;
+		}
+
+		Settings->IconFontAssetMap.Add(Pair.Key, TSoftObjectPtr<UFont>(FSoftObjectPath(Pair.Value)));
+		bModified = true;
+		UE_LOG(LogDesign2UMG, Display, TEXT("Persisted icon font mapping '%s' -> '%s'"), *Pair.Key, *Pair.Value);
+	}
+
+	if (bModified)
+	{
+		if (Design2UMGAutomationRender::IsAutomationRenderActive())
+		{
+			UE_LOG(LogDesign2UMG, Display, TEXT("Skip persisting icon font mapping changes during automation render"));
+		}
+		else
+		{
+			Settings->SaveConfig();
+		}
+	}
+}
+
 UWidgetBlueprint* DesignImportUtils::GenerateBlueprint(const FUMGWidgetData& Data, const FString& OutputPath)
 {
+	ApplyPendingIconFontMappingChanges(Data);
 	const double StartTime = FPlatformTime::Seconds();
-	const FString FinalPath = ResolveOutputPath(OutputPath);
+	const FString FinalPath = ResolveImportOutputPath(OutputPath);
 
 	UWidgetBlueprint* WBP = FUMGGenerator::GenerateWidgetBlueprint(Data, FinalPath);
 	if (!WBP)
@@ -170,7 +231,8 @@ UWidgetBlueprint* DesignImportUtils::GenerateBlueprint(const FUMGWidgetData& Dat
 
 bool DesignImportUtils::GenerateBlueprintAndPng(const FUMGWidgetData& Data, const FString& OutputPath)
 {
-	const FString FinalPath = ResolveOutputPath(OutputPath);
+	ApplyPendingIconFontMappingChanges(Data);
+	const FString FinalPath = ResolveImportOutputPath(OutputPath);
 
 	// 先构建（不立即落盘），再用瞬态实例渲染 PNG，最后统一保存 Blueprint。
 	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(Data, FinalPath);
@@ -257,6 +319,7 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 	FString* OutGeneratedAssetPath,
 	FIntPoint* OutRenderedSize)
 {
+	ApplyPendingIconFontMappingChanges(Data);
 	UWidgetBlueprint* WidgetBlueprint = GenerateBlueprint(Data, OutputPath);
 	if (!WidgetBlueprint)
 	{

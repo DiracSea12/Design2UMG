@@ -8,6 +8,7 @@ class UWidgetBlueprint;
 
 namespace DesignImportUtils
 {
+	void ApplyPendingIconFontMappingChanges(const FUMGWidgetData& Data);
 	UWidgetBlueprint* GenerateBlueprint(const FUMGWidgetData& Data, const FString& OutputPath);
 	bool GenerateBlueprintAndPng(const FUMGWidgetData& Data, const FString& OutputPath);
 	bool GenerateBlueprintAndCompiledPng(

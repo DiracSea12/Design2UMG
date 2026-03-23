@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignImportDialogs.h"
 
@@ -16,11 +16,11 @@
 
 namespace
 {
-	const TCHAR* FallbackOutputPath = TEXT("/Game/Design2UMG/PenConvert_Output");
+	const TCHAR* DialogFallbackOutputPath = TEXT("/Game/Design2UMG/PenConvert_Output");
 
-	FString ResolveOutputPath(const FString& OutputPath)
+	FString ResolveDialogOutputPath(const FString& OutputPath)
 	{
-		return OutputPath.IsEmpty() ? FString(FallbackOutputPath) : OutputPath;
+		return OutputPath.IsEmpty() ? FString(DialogFallbackOutputPath) : OutputPath;
 	}
 }
 
@@ -47,7 +47,7 @@ namespace DesignImportDialogs
 		Window->SetContent(
 			SNew(SDesign2UMGPreviewWindow)
 			.OriginalJson(FUMGJsonSerializer::Serialize(Data))
-			.OutputPath(ResolveOutputPath(OutputPath))
+			.OutputPath(ResolveDialogOutputPath(OutputPath))
 			.Warnings(Data.Warnings)
 			.OnConfirmed(MoveTemp(OnConfirmed))
 			.OnCancelled(MoveTemp(OnCancelled)));

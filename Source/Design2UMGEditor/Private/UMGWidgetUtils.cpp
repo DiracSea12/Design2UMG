@@ -512,7 +512,13 @@ static void HandleNamedSlotChildren(UWidgetTree* WidgetTree, INamedSlotInterface
 
 		// 查找目标槽位：优先显式指定，其次按序分配，最后回退到末尾槽位
 		FName TargetSlot = NAME_None;
-		const FString RequestedSlotName = ChildNode.Properties.GetValueOr(UMGPropertyKeys::SlotName, ChildNode.Properties.FindRef(UMGPropertyKeys::NamedSlot));
+		FString FallbackSlotName;
+		ChildNode.Properties.TryGetString(UMGPropertyKeys::NamedSlot, FallbackSlotName);
+		FString RequestedSlotName;
+		if (!ChildNode.Properties.TryGetString(UMGPropertyKeys::SlotName, RequestedSlotName) || RequestedSlotName.IsEmpty())
+		{
+			RequestedSlotName = FallbackSlotName;
+		}
 		if (!RequestedSlotName.IsEmpty())
 		{
 			for (const FName& SlotName : SlotNames)
@@ -744,8 +750,10 @@ namespace
 	 */
 	bool HandleImageMaterialRef(UImage* ImageWidget, const FUMGWidgetNode& Node)
 	{
+		FString MaterialRefProperty;
+		Node.Properties.TryGetString(UMGPropertyKeys::MaterialRef, MaterialRefProperty);
 		const FString MatRef = Node.Brush.MaterialRef.IsEmpty()
-			? Node.Properties.FindRef(UMGPropertyKeys::MaterialRef)
+			? MaterialRefProperty
 			: Node.Brush.MaterialRef;
 		if (MatRef.IsEmpty())
 		{
@@ -771,8 +779,10 @@ namespace
 
 	bool HandleImageTextureRef(UImage* ImageWidget, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap)
 	{
+		FString TexturePathProperty;
+		Node.Properties.TryGetString(UMGPropertyKeys::TexturePath, TexturePathProperty);
 		const FString TexPath = Node.Brush.TexturePath.IsEmpty()
-			? Node.Properties.FindRef(UMGPropertyKeys::TexturePath)
+			? TexturePathProperty
 			: Node.Brush.TexturePath;
 		const FString TrimmedPath = TexPath.TrimStartAndEnd();
 		if (TrimmedPath.IsEmpty())

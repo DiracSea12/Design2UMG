@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "TextMeasurement.h"
 
@@ -15,7 +15,7 @@ namespace
 {
 	TMap<FString, float> GResolvedTextFontScaleCache;
 
-	float ResolveWidthHint(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth)
+	float ResolveTextWidthHint(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth)
 	{
 		if (!Node.IsValid())
 		{
@@ -83,7 +83,7 @@ namespace
 		}
 	}
 
-	FString NormalizeFontFamilyKey(const FString& FontFamily)
+	FString NormalizeTextMeasurementFontFamilyKey(const FString& FontFamily)
 	{
 		FString Normalized = FontFamily.ToLower();
 		Normalized.ReplaceInline(TEXT(" "), TEXT(""));
@@ -107,6 +107,17 @@ namespace
 		return Typeface;
 	}
 
+	bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid())
+		{
+			return false;
+		}
+
+		const FString* Value = Node->Metadata.Find(TEXT("figma.text.truncate"));
+		return Value && Value->Equals(TEXT("true"), ESearchCase::IgnoreCase);
+	}
+
 	float ResolveTextFontSizeFallback(const TSharedPtr<FDesignNode>& Node)
 	{
 		if (!Node.IsValid())
@@ -114,7 +125,7 @@ namespace
 			return 0.0f;
 		}
 
-		const FString NormalizedFamily = NormalizeFontFamilyKey(Node->FontFamily);
+		const FString NormalizedFamily = NormalizeTextMeasurementFontFamilyKey(Node->FontFamily);
 		if (NormalizedFamily == TEXT("funneldisplay"))
 		{
 			return Node->FontSize * 0.75f;
@@ -141,12 +152,9 @@ namespace
 		const FString LineHeightKey = Node->LineHeight > 0.0f
 			? FString::Printf(TEXT("%.4f"), Node->LineHeight)
 			: TEXT("default");
-		return FString::Printf(
-			TEXT("%s|%s|%s|%.1f"),
-			*NormalizeFontFamilyKey(Node->FontFamily),
-			*ResolveTypefaceName(Node),
-			*LineHeightKey,
-			Node->FontSize);
+		const FString NormalizedFamily = NormalizeTextMeasurementFontFamilyKey(Node->FontFamily);
+		const FString TypefaceName = ResolveTypefaceName(Node);
+		return NormalizedFamily + TEXT("|") + TypefaceName + TEXT("|") + LineHeightKey + FString::Printf(TEXT("|%.1f"), Node->FontSize);
 	}
 
 	FSlateFontInfo BuildSlateFontInfoForSize(const TSharedPtr<FDesignNode>& Node, float FontSize)
@@ -269,7 +277,7 @@ namespace
 			return true;
 		}
 
-		const float WidthLimit = ResolveWidthHint(Node, ParentContentWidth);
+		const float WidthLimit = ResolveTextWidthHint(Node, ParentContentWidth);
 		if (WidthLimit <= 0.0f)
 		{
 			return false;
@@ -290,6 +298,11 @@ void TextMeasurement::ResetCache()
 
 bool TextMeasurement::IsWrappingTextMode(const TSharedPtr<FDesignNode>& Node)
 {
+	if (IsFigmaTruncateTextNode(Node))
+	{
+		return false;
+	}
+
 	return Node.IsValid()
 		&& (Node->TextGrowth == EDesignTextGrowth::FixedWidth
 			|| Node->TextGrowth == EDesignTextGrowth::FixedWidthHeight
@@ -318,7 +331,7 @@ bool TextMeasurement::ShouldApplyExplicitLineHeight(const TSharedPtr<FDesignNode
 		return false;
 	}
 
-	const float WidthLimit = ResolveWidthHint(Node, ParentContentWidth);
+	const float WidthLimit = ResolveTextWidthHint(Node, ParentContentWidth);
 	if (WidthLimit <= 0.0f)
 	{
 		return false;
@@ -423,7 +436,12 @@ float TextMeasurement::ResolveTextWrapAt(const TSharedPtr<FDesignNode>& Node, fl
 		return 0.0f;
 	}
 
-	const float WidthLimit = ResolveWidthHint(Node, ParentContentWidth);
+	if (IsFigmaTruncateTextNode(Node))
+	{
+		return 0.0f;
+	}
+
+	const float WidthLimit = ResolveTextWidthHint(Node, ParentContentWidth);
 	if (WidthLimit <= 0.0f)
 	{
 		return 0.0f;

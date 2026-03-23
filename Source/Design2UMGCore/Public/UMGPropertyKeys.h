@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 namespace UMGPropertyKeys
 {
@@ -80,6 +80,7 @@ namespace UMGPropertyKeys
 	inline constexpr const TCHAR* RenderAngle = TEXT("RenderAngle");
 	inline constexpr const TCHAR* RenderOpacity = TEXT("RenderOpacity");
 	inline constexpr const TCHAR* RenderScale = TEXT("RenderScale");
+	inline constexpr const TCHAR* RenderTransformPivot = TEXT("RenderTransformPivot");
 	inline constexpr const TCHAR* RenderTransformScale = TEXT("RenderTransformScale");
 	inline constexpr const TCHAR* RenderTranslation = TEXT("RenderTranslation");
 	inline constexpr const TCHAR* RetainRendering = TEXT("RetainRendering");

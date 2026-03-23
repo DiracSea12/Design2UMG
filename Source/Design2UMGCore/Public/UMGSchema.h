@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Templates/Function.h"
 #include "Styling/SlateBrush.h"
 #include "UMGSchema.generated.h"
 
@@ -159,6 +160,17 @@ struct FUMGVisualBrushData
 	bool HasCornerRadii() const { return CornerRadii.X >= 0; }
 };
 
+struct FUMGIconFontMappingChanges
+{
+	TMap<FString, FString> Upserts;
+	TSet<FString> Removals;
+
+	bool HasChanges() const
+	{
+		return Upserts.Num() > 0 || Removals.Num() > 0;
+	}
+};
+
 struct FUMGTypedProperty
 {
 	FString SerializedValue;
@@ -178,26 +190,12 @@ struct DESIGN2UMGCORE_API FUMGPropertyBag
 	void Add(const TCHAR* Key, const FString& Value);
 	void Add(const TCHAR* Key, const TCHAR* Value);
 
-	bool Contains(const FString& Key) const;
-	bool Contains(const TCHAR* Key) const;
-
-	const FString* Find(const FString& Key) const;
-	const FString* Find(const TCHAR* Key) const;
-
-	FString FindRef(const FString& Key) const;
-	FString FindRef(const TCHAR* Key) const;
-	FString GetValueOr(const FString& Key, const FString& DefaultValue) const;
-	FString GetValueOr(const TCHAR* Key, const FString& DefaultValue) const;
-
 	int32 Remove(const FString& Key);
 	int32 Remove(const TCHAR* Key);
 	int32 Num() const;
 	void Empty();
 
-	const FString& operator[](const FString& Key) const;
-	const FString& operator[](const TCHAR* Key) const;
-	operator TMap<FString, FString>() const { return ToMap(); }
-
+	// Typed property accessors used by production code.
 	bool TryGetBool(const FString& Key, bool& OutValue) const;
 	bool TryGetBool(const TCHAR* Key, bool& OutValue) const { return TryGetBool(FString(Key), OutValue); }
 	bool TryGetInt(const FString& Key, int32& OutValue) const;
@@ -215,16 +213,10 @@ struct DESIGN2UMGCORE_API FUMGPropertyBag
 	bool TryGetMargin(const FString& Key, FMargin& OutValue) const;
 	bool TryGetMargin(const TCHAR* Key, FMargin& OutValue) const { return TryGetMargin(FString(Key), OutValue); }
 
-	const TMap<FString, FString>& AsMap() const;
-	TMap<FString, FString> ToMap() const;
-
-	auto begin() const { return AsMap().begin(); }
-	auto end() const { return AsMap().end(); }
+	void ForEachSerialized(TFunctionRef<void(const FString&, const FString&)> Visitor) const;
 
 private:
 	TMap<FString, FUMGTypedProperty> Values;
-	mutable TMap<FString, FString> CachedMap;
-	mutable bool bCacheDirty = true;
 };
 
 /**
@@ -286,5 +278,8 @@ struct FUMGWidgetData
 
 	/** 转换过程中的降级警告（如 Ellipse→Border）*/
 	TArray<FString> Warnings;
+
+	/** 转换阶段产生的图标字体映射建议，由 Editor 导入链决定是否持久化。 */
+	FUMGIconFontMappingChanges IconFontMappingChanges;
 };
 

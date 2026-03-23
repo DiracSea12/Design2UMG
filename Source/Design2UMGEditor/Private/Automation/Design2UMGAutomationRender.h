@@ -4,5 +4,6 @@
 
 namespace Design2UMGAutomationRender
 {
+	bool IsAutomationRenderActive();
 	void HandleConsoleCommand(const TArray<FString>& Args);
 }

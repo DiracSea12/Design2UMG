@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Templates/Function.h"
 
 struct FDesignDocument;
 struct FDesignNode;
@@ -13,12 +14,6 @@ struct DESIGN2UMGCORE_API FFontResolver
 {
 	/** Scan document for all used font families, compare with project assets, return missing list */
 	static TArray<FString> FindMissingFonts(const FDesignDocument& Document);
-
-	/** Download font from URL and import as UFont asset. Returns asset path or empty on failure. */
-	static FString ResolveFont(const FString& FontName, const FString& Url);
-
-	/** Auto-import all fonts from document if bAutoImportFonts is enabled */
-	static void AutoImportFonts(const FDesignDocument& Document);
 
 	/** Look up cached asset path for a font family name. Returns empty if not found. */
 	static FString FindFontAssetPath(const FString& FontFamily);
@@ -38,17 +33,27 @@ struct DESIGN2UMGCORE_API FFontResolver
 	/** Clear the font asset path cache */
 	static void ClearCache();
 
+	/** Register glyph/name lookups for a known icon family. */
+	static void RegisterKnownIconGlyphs(
+		const FString& FontFamily,
+		const TMap<FString, FString>& Glyphs,
+		const TMap<FString, FString>& IconNames);
+
+	/** Register an editor-side callback that can attempt to import/resolve a missing font family. */
+	static void RegisterMissingFontResolver(TFunction<FString(const FString&)> InResolver);
+
+	/** Register an editor-side callback that can lazily prime icon glyph/name lookups for a family. */
+	static void RegisterKnownIconGlyphPrimer(TFunction<void(const FString&)> InPrimer);
+
+	/** Remove any editor-side resolver callbacks. */
+	static void ResetExternalResolvers();
+
 private:
 	static int32 WeightFromTypefaceName(const FString& Name);
 	static FString WeightNameFromNumeric(int32 Weight);
-	static FString WeightNameFromFile(const FString& FilePath, const FString& FamilyName);
-	static TArray<FString> FindSiblingFontFiles(const FString& FilePath, const FString& FamilyName);
-	static bool QueryKnownWebFontTypefaces(const FString& FontFamily, TMap<FString, FString>& OutTypefaceUrls);
-	static bool EnsureKnownWebFontTypefaces(const FString& FontFamily, UFont* Font, const FString& FontObjectPath);
 	static TMap<FString, FString> FontAssetCache;
 	static void CollectFontFamilies(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSet<FString>& OutFamilies);
 	static TSet<FString> ScanProjectFontAssets();
-	static bool DownloadToFile(const FString& Url, const FString& LocalPath);
 };
 
 
