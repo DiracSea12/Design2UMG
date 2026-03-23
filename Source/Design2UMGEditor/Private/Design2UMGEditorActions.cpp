@@ -9,6 +9,7 @@
 #include "Design2UMGSettings.h"
 #include "DesignImportDialogs.h"
 #include "DesignImportPipeline.h"
+#include "DesignImportUtils.h"
 #include "DesignPathRasterizer.h"
 #include "FigmaHttpClient.h"
 #include "FigmaImageExporter.h"
@@ -500,7 +501,8 @@ namespace
 									FFigmaImageExporter::ApplyExportedImages(Doc->Children, IdToUrl);
 								}
 
-								FUMGWidgetData Data = FDesign2UMGConverter::Convert(*Doc);
+								FUMGWidgetData Data;
+								DesignImportPipeline::ConvertDocument(*Doc, Data);
 								if (Data.RootWidget.Children.Num() == 0)
 								{
 									ShowNotification(LOCTEXT("FigmaNoFrames", "Design2UMG: No frames found in Figma file"), SNotificationItem::CS_Fail);
@@ -530,9 +532,9 @@ namespace
 
 	void ImportLocalFigmaExport(const FString& JsonFilePath, const FString& OutputPath, const bool bUsePreview)
 	{
-		FUMGWidgetData Data;
+		FDesignDocument Document;
 		FString ErrorMessage;
-		if (!Design2UMGLocalFigmaImport::BuildLocalFigmaWidgetData(JsonFilePath, Data, ErrorMessage))
+		if (!Design2UMGLocalFigmaImport::LoadLocalFigmaDocument(JsonFilePath, Document, ErrorMessage))
 		{
 			ShowNotification(LOCTEXT("LocalFigmaImportFailed", "Design2UMG: Failed to import local Figma export"), SNotificationItem::CS_Fail);
 			UE_LOG(LogDesign2UMG, Error, TEXT("%s"), *ErrorMessage);
@@ -544,7 +546,7 @@ namespace
 			: OutputPath;
 
 		DesignImportPipeline::Execute(
-			Data,
+			Document,
 			MakeImportRequest(
 				FinalOutputPath,
 				LOCTEXT("LocalFigmaPreviewTitle", "Design2UMG Local Figma Preview"),
@@ -750,7 +752,7 @@ namespace Design2UMGEditorActions
 				return false;
 			}
 
-			OutData = FDesign2UMGConverter::Convert(Doc);
+			DesignImportPipeline::ConvertDocument(Doc, OutData);
 			return true;
 		});
 	}

@@ -3,11 +3,14 @@
 #include "Design2UMGLocalFigmaImport.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGNotification.h"
+#include "DesignFontImportService.h"
 #include "DesignImportPipeline.h"
 #include "DesignImportUtils.h"
 #include "DesignPathRasterizer.h"
 #include "DesignSchema.h"
+#include "FigmaParser.h"
 #include "FontResolver.h"
+#include "PenMCPBridge.h"
 #include "ProceduralShapeGenerator.h"
 #include "RefExpander.h"
 #include "UMGSchema.h"
@@ -39,6 +42,8 @@
 
 namespace
 {
+	bool GDesign2UMGAutomationRenderActive = false;
+
 	struct FStructureSnapshotStats
 	{
 		int32 TotalNodes = 0;
@@ -673,6 +678,79 @@ namespace
 		return true;
 	}
 
+	bool BuildPenMcpPayloadFromPenFile(const FString& PenFilePath, FString& OutNodesJson, FString& OutVariablesJson, FString& OutError)
+	{
+		FString PenJson;
+		if (!FFileHelper::LoadFileToString(PenJson, *PenFilePath))
+		{
+			OutError = FString::Printf(TEXT("Failed to read .pen file: %s"), *PenFilePath);
+			return false;
+		}
+
+		TSharedPtr<FJsonObject> RootObject;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(PenJson);
+		if (!FJsonSerializer::Deserialize(Reader, RootObject) || !RootObject.IsValid())
+		{
+			OutError = FString::Printf(TEXT("Failed to parse .pen JSON: %s"), *PenFilePath);
+			return false;
+		}
+
+		const TArray<TSharedPtr<FJsonValue>>* Children = nullptr;
+		if (!RootObject->TryGetArrayField(TEXT("children"), Children) || Children == nullptr)
+		{
+			OutError = FString::Printf(TEXT(".pen file missing children array: %s"), *PenFilePath);
+			return false;
+		}
+
+		const TSharedPtr<FJsonObject>* VariablesObjectPtr = nullptr;
+		TSharedPtr<FJsonObject> VariablesObject;
+		if (RootObject->TryGetObjectField(TEXT("variables"), VariablesObjectPtr) && VariablesObjectPtr != nullptr)
+		{
+			VariablesObject = *VariablesObjectPtr;
+		}
+		if (!VariablesObject.IsValid())
+		{
+			VariablesObject = MakeShared<FJsonObject>();
+		}
+
+		{
+			TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutNodesJson);
+			if (!FJsonSerializer::Serialize(*Children, Writer))
+			{
+				OutError = FString::Printf(TEXT("Failed to serialize .pen children payload: %s"), *PenFilePath);
+				return false;
+			}
+		}
+
+		{
+			TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutVariablesJson);
+			if (!FJsonSerializer::Serialize(VariablesObject.ToSharedRef(), Writer))
+			{
+				OutError = FString::Printf(TEXT("Failed to serialize .pen variables payload: %s"), *PenFilePath);
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	bool LoadFigmaSourceData(
+		const FString& SourcePath,
+		const FString& TargetNodeId,
+		FDesignDocument& OutDocument,
+		FUMGWidgetData& OutData,
+		FString& OutError)
+	{
+		if (!Design2UMGLocalFigmaImport::LoadLocalFigmaDocument(SourcePath, OutDocument, OutError, TargetNodeId))
+		{
+			return false;
+		}
+
+		DesignFontImportService::PrepareDocumentFonts(OutDocument);
+		DesignImportPipeline::ConvertDocument(OutDocument, OutData);
+		return true;
+	}
+
 	bool ResolveAutomationRenderSpecRuntimeFields(FAutomationRenderSpec& InOutSpec, FString& OutError)
 	{
 		FString ResolvedSourcePath;
@@ -820,15 +898,66 @@ namespace
 		}
 
 		FUMGWidgetData Data;
-		if (Spec.Mode.Equals(TEXT("local_figma"), ESearchCase::IgnoreCase))
+		FDesignDocument SourceDocument;
+		if (Spec.Mode.Equals(TEXT("pen_mcp"), ESearchCase::IgnoreCase))
 		{
-			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: importing local figma export"));
+			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: importing pen source via MCP payload"));
 			FString ErrorMessage;
-			if (!Design2UMGLocalFigmaImport::BuildLocalFigmaWidgetData(Spec.SourcePath, Data, ErrorMessage))
+			if (!DesignImportPipeline::LoadPenDocument(Spec.SourcePath, Spec.NodeId, SourceDocument, &ErrorMessage))
 			{
 				OutResult.ErrorMessage = ErrorMessage;
 				return false;
 			}
+
+			FString NodesJson;
+			FString VariablesJson;
+			if (!BuildPenMcpPayloadFromPenFile(Spec.SourcePath, NodesJson, VariablesJson, ErrorMessage))
+			{
+				OutResult.ErrorMessage = ErrorMessage;
+				return false;
+			}
+
+			if (!FPenMCPBridge::ConvertFromMCP(NodesJson, VariablesJson, Data, Spec.NodeId))
+			{
+				OutResult.ErrorMessage = FString::Printf(TEXT("Failed to convert MCP payload for %s"), *Spec.SourcePath);
+				return false;
+			}
+
+			OutResult.SourceStructure = BuildDesignStructureSnapshot(SourceDocument, Spec.NodeId);
+		}
+		else if (Spec.Mode.Equals(TEXT("local_figma"), ESearchCase::IgnoreCase))
+		{
+			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: importing local figma export"));
+			FString ErrorMessage;
+			if (!Design2UMGLocalFigmaImport::LoadLocalFigmaDocument(Spec.SourcePath, SourceDocument, ErrorMessage, Spec.NodeId))
+			{
+				OutResult.ErrorMessage = ErrorMessage;
+				return false;
+			}
+
+			OutResult.SourceStructure = BuildDesignStructureSnapshot(SourceDocument, Spec.NodeId);
+			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: generating blueprint and compiled png"));
+			if (!DesignImportPipeline::Execute(SourceDocument, MakeAutomationImportRequest(true)).bSucceeded)
+			{
+				OutResult.ErrorMessage = FString::Printf(TEXT("Failed to generate compiled PNG for %s"), *Spec.SourcePath);
+				return false;
+			}
+
+			CaptureGeneratedAssetStructure();
+			OutResult.bSuccess = true;
+			return true;
+		}
+		else if (Spec.Mode.Equals(TEXT("figma_source"), ESearchCase::IgnoreCase))
+		{
+			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: importing raw figma source json"));
+			FString ErrorMessage;
+			if (!LoadFigmaSourceData(Spec.SourcePath, Spec.NodeId, SourceDocument, Data, ErrorMessage))
+			{
+				OutResult.ErrorMessage = ErrorMessage;
+				return false;
+			}
+
+			OutResult.SourceStructure = BuildDesignStructureSnapshot(SourceDocument, Spec.NodeId);
 		}
 		else
 		{
@@ -837,7 +966,7 @@ namespace
 		}
 
 		UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: generating blueprint and compiled png"));
-		if (!DesignImportPipeline::Execute(Data, MakeAutomationImportRequest(false)).bSucceeded)
+		if (!DesignImportPipeline::Execute(Data, MakeAutomationImportRequest(true)).bSucceeded)
 		{
 			OutResult.ErrorMessage = FString::Printf(TEXT("Failed to generate compiled PNG for %s"), *Spec.SourcePath);
 			return false;
@@ -852,8 +981,14 @@ namespace
 
 namespace Design2UMGAutomationRender
 {
+	bool IsAutomationRenderActive()
+	{
+		return GDesign2UMGAutomationRenderActive;
+	}
+
 	void HandleConsoleCommand(const TArray<FString>& Args)
 	{
+		TGuardValue<bool> AutomationGuard(GDesign2UMGAutomationRenderActive, true);
 		FAutomationRenderResult Result;
 		Result.Mode = TEXT("unknown");
 
