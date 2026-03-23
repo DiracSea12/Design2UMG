@@ -13,11 +13,13 @@ import design2umg_auto_verify as verify
 
 ROOT_MIN_SIZE = 8
 ROOT_CONTAINER_TYPES = {"frame", "group", "component", "ref"}
+NO_REGRESSION_EPSILON = 1.25e-4
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Batch Design2UMG verification from a design directory")
     parser.add_argument("--design-root", required=True, help="Directory containing .pen design files")
+    parser.add_argument("--figma-export-root", action="append", default=[], help="Optional local Figma export directory containing design.json and a top-level reference PNG. Can be repeated.")
     parser.add_argument("--output-root", default="", help="Directory for batch outputs")
     parser.add_argument("--reference-root", default="", help="Optional directory containing per-case reference PNGs at <reference-root>/<case-name>/reference.png")
     parser.add_argument("--project", default="", help="Project path. Leave empty to auto-build a temporary HostProject from the engine plugin source.")
@@ -106,13 +108,58 @@ def discover_pen_cases(design_root: Path, include_pattern: str, exclude_pattern:
     return discovered
 
 
+def discover_figma_export_cases(export_roots: list[str], include_pattern: str, exclude_pattern: str) -> list[dict]:
+    include_regex = re.compile(include_pattern) if include_pattern else None
+    exclude_regex = re.compile(exclude_pattern) if exclude_pattern else None
+    discovered = []
+
+    for raw_root in export_roots:
+        if not raw_root:
+            continue
+
+        export_root = Path(raw_root).resolve()
+        design_json = export_root / "design.json"
+        if not design_json.is_file():
+            continue
+
+        top_level_pngs = sorted(
+            [path for path in export_root.glob("*.png") if path.is_file()],
+            key=lambda path: (-path.stat().st_size, path.name.lower()),
+        )
+        if not top_level_pngs:
+            continue
+
+        reference_png = top_level_pngs[0]
+        base_name = f"figma_{sanitize_case_name(export_root.name)}"
+        for mode, suffix in (("local-figma", "local"), ("figma-source", "source")):
+            case_name = f"{base_name}_{suffix}"
+            if include_regex and not include_regex.search(case_name):
+                continue
+            if exclude_regex and exclude_regex.search(case_name):
+                continue
+
+            discovered.append(
+                {
+                    "name": case_name,
+                    "mode": mode,
+                    "source": str(design_json),
+                    "node": "",
+                    "node_name": export_root.name,
+                    "reference_path": str(reference_png),
+                    "export_root": str(export_root),
+                }
+            )
+
+    return discovered
+
+
 def build_case_args(batch_args, case: dict) -> SimpleNamespace:
     return SimpleNamespace(
         mode=case["mode"],
         source=case["source"],
         node=case.get("node", ""),
-        reference_provider="png" if batch_args.reference_root else batch_args.reference_provider,
-        reference="",
+        reference_provider="png" if (batch_args.reference_root or case.get("reference_path")) else batch_args.reference_provider,
+        reference=case.get("reference_path", ""),
         figma_file="",
         figma_node="",
         figma_token="",
@@ -159,6 +206,29 @@ def prepare_external_reference(case_args, case: dict, reference_root: Path, outp
     return reference_path, reference_context
 
 
+def prepare_specific_reference(case_args, case: dict, reference_path: Path, output_dir: Path) -> tuple[Path, dict]:
+    if not reference_path.is_file():
+        raise RuntimeError(f"Missing reference PNG for case {case['name']}: {reference_path}")
+
+    output_reference_path = output_dir / "reference.png"
+    verify.shutil.copyfile(reference_path, output_reference_path)
+    return output_reference_path, {
+        "canonical_source": "figma_export_external_png",
+        "provided_reference_path": str(reference_path),
+        "reference_authority": {
+            "available": True,
+            "valid": True,
+            "reason": "",
+            "canonical_source": "figma_export_external_png",
+            "canonical_path": str(reference_path),
+            "export_nodes_path": str(reference_path),
+            "get_screenshot_path": "",
+            "verification_level": "external_export_nodes",
+        },
+        "provided_vs_canonical": None,
+    }
+
+
 def prepare_case_state(case_args, case: dict, output_root: Path) -> dict:
     output_dir = output_root / case["name"]
     if output_dir.exists():
@@ -167,7 +237,9 @@ def prepare_case_state(case_args, case: dict, output_root: Path) -> dict:
 
     expected_design_size = verify.get_expected_design_size(case_args.mode, case_args.source, case_args.node)
     declared_design_size = verify.get_declared_design_size(case_args.mode, case_args.source, case_args.node)
-    if case_args.reference:
+    if case.get("reference_path"):
+        reference_path, reference_context = prepare_specific_reference(case_args, case, Path(case["reference_path"]), output_dir)
+    elif case_args.reference:
         reference_path, reference_context = prepare_external_reference(case_args, case, Path(case_args.reference), output_dir)
     else:
         reference_path, reference_context = verify.prepare_reference(case_args, output_dir, expected_design_size)
@@ -275,6 +347,7 @@ def build_case_specs(state: dict):
     mode_map = {
         "pen": "pen",
         "local-figma": "local_figma",
+        "figma-source": "figma_source",
         "asset": "asset",
     }
 
@@ -531,28 +604,25 @@ def load_step_result(step: dict, batch_exit_code: int, batch_log_path: Path):
     }
 
 
-def execute_missing_steps_sequentially(runtime_args, states: list[dict]):
+def ensure_driver_completed_all_steps(states: list[dict], batch_log_path: Path):
     missing_steps = []
     for state in states:
         for key, step in state["steps"].items():
             if not step["result_json_path"].is_file():
-                missing_steps.append((state, key, step))
+                missing_steps.append(f"{state['case']['name']}:{key}")
 
     if not missing_steps:
         return
 
-    print(f"[FALLBACK] driver mode missed {len(missing_steps)} step results, switching to sequential execution")
-    for state, key, step in missing_steps:
-        spec = verify.load_json_document(step["spec_path"])
-        log_path = state["output_dir"] / f"{key}.log"
-        step["log_path"] = log_path
-        try:
-            result = verify.execute_automation_render(runtime_args, step["spec_path"], log_path, spec)
-            step["editor_exit_code"] = result.get("editor_exit_code")
-            step["result"] = result
-        except Exception as exc:
-            step["fallback_error"] = str(exc)
-            print(f"[FALLBACK-FAIL] {state['case']['name']} step={key} error={exc}")
+    missing_preview = ", ".join(missing_steps[:8])
+    if len(missing_steps) > 8:
+        missing_preview += f", ... total={len(missing_steps)}"
+
+    raise RuntimeError(
+        "Editor driver did not finish all verification steps in a single session. "
+        f"Missing results: {missing_preview}. "
+        f"Batch log: {batch_log_path}"
+    )
 
 
 def write_render_failure_report(state: dict, ue_result: dict | None, render_chain: dict, verdict: str, message: str) -> Path:
@@ -573,11 +643,14 @@ def write_render_failure_report(state: dict, ue_result: dict | None, render_chai
         "changed_ratio_threshold": state["args"].changed_ratio_threshold,
         "mae_threshold": state["args"].mae_threshold,
         "changed_ratio": None,
+        "stable_changed_ratio": None,
         "mean_abs_error": None,
+        "stable_mean_abs_error": None,
         "size_match": False,
         "reference_size": list(verify.read_image_size(state["reference_path"])),
         "candidate_size": list(verify.read_image_size(candidate_path)) if candidate_path.is_file() else None,
         "diff_bbox": None,
+        "stable_diff_bbox": None,
         "ue_result": ue_result,
         "reference_context": state["reference_context"],
         "reference_validation": state["reference_validation"],
@@ -585,6 +658,105 @@ def write_render_failure_report(state: dict, ue_result: dict | None, render_chai
     }
     verify.write_json(report_path, report)
     return report_path
+
+
+def load_baseline_case_metrics(case_dir: Path | None, pixel_tolerance: int) -> dict:
+    if not case_dir or not case_dir.is_dir():
+        return {
+            "available": False,
+            "reason": "baseline_case_dir_missing",
+        }
+
+    report_path = case_dir / "compare_report.json"
+    report = verify.load_json_document(report_path) if report_path.is_file() else {}
+    reference_png_path = Path(report.get("reference_png_path") or (case_dir / "reference.png"))
+    candidate_png_path = Path(report.get("candidate_png_path") or (case_dir / "candidate.png"))
+    image_metrics = verify.compare_image_paths(reference_png_path, candidate_png_path, pixel_tolerance)
+
+    if image_metrics:
+        changed_ratio = image_metrics.get("changed_ratio")
+        stable_changed_ratio = image_metrics.get("stable_changed_ratio")
+        mean_abs_error = image_metrics.get("mean_abs_error")
+        stable_mean_abs_error = image_metrics.get("stable_mean_abs_error")
+    else:
+        changed_ratio = report.get("changed_ratio")
+        stable_changed_ratio = report.get("stable_changed_ratio")
+        mean_abs_error = report.get("mean_abs_error")
+        stable_mean_abs_error = report.get("stable_mean_abs_error")
+
+    available = any(
+        value is not None
+        for value in (
+            changed_ratio,
+            stable_changed_ratio,
+            mean_abs_error,
+            stable_mean_abs_error,
+        )
+    )
+    return {
+        "available": available,
+        "reason": "" if available else "baseline_metrics_unavailable",
+        "case_dir": str(case_dir),
+        "report_path": str(report_path) if report_path.is_file() else "",
+        "reference_png_path": str(reference_png_path) if reference_png_path.is_file() else "",
+        "candidate_png_path": str(candidate_png_path) if candidate_png_path.is_file() else "",
+        "changed_ratio": changed_ratio,
+        "stable_changed_ratio": stable_changed_ratio,
+        "mean_abs_error": mean_abs_error,
+        "stable_mean_abs_error": stable_mean_abs_error,
+    }
+
+
+def evaluate_no_regression(report: dict, case_dir: Path | None, pixel_tolerance: int) -> dict:
+    baseline = load_baseline_case_metrics(case_dir, pixel_tolerance)
+    result = {
+        "available": baseline.get("available", False),
+        "passed": False,
+        "baseline": baseline,
+        "current": {
+            "changed_ratio": report.get("changed_ratio"),
+            "stable_changed_ratio": report.get("stable_changed_ratio"),
+            "mean_abs_error": report.get("mean_abs_error"),
+            "stable_mean_abs_error": report.get("stable_mean_abs_error"),
+        },
+        "decisive_metric": "",
+        "decisive_delta": None,
+        "visual_regressed": False,
+        "structure_guard_passed": True,
+        "reasons": [],
+    }
+    if not baseline.get("available"):
+        result["reasons"].append(baseline.get("reason", "baseline_unavailable"))
+        return result
+
+    decisive_metric = "unavailable"
+    decisive_delta = None
+    visual_passed = False
+    for metric_name in ("stable_changed_ratio", "changed_ratio", "stable_mean_abs_error", "mean_abs_error"):
+        current_value = result["current"].get(metric_name)
+        baseline_value = baseline.get(metric_name)
+        if current_value is None or baseline_value is None:
+            continue
+        decisive_metric = metric_name
+        decisive_delta = current_value - baseline_value
+        visual_passed = decisive_delta <= NO_REGRESSION_EPSILON
+        break
+    if decisive_metric == "unavailable":
+        result["reasons"].append("comparison_metric_unavailable")
+        return result
+
+    structure_validation = report.get("structure_validation") or {}
+    structure_guard_passed = structure_validation.get("passed") if structure_validation.get("required") else True
+    result["passed"] = visual_passed and structure_guard_passed
+    result["decisive_metric"] = decisive_metric
+    result["decisive_delta"] = decisive_delta
+    result["visual_regressed"] = not visual_passed
+    result["structure_guard_passed"] = structure_guard_passed
+    if not visual_passed:
+        result["reasons"].append(f"visual_regressed:{decisive_metric}")
+    if not structure_guard_passed:
+        result["reasons"].append("structure_guard_failed")
+    return result
 
 
 def finalize_native_plan(state: dict, batch_exit_code: int, batch_log_path: Path):
@@ -720,18 +892,52 @@ def process_case_result(state: dict, batch_exit_code: int, batch_log_path: Path)
         render_chain,
     )
     report = verify.load_json_document(report_path)
+    no_regression = evaluate_no_regression(report, state.get("baseline_case_dir"), args.pixel_tolerance)
+    report["no_regression"] = no_regression
+    verify.write_json(Path(report_path), report)
     return {
         "name": state["case"]["name"],
         "passed": passed,
         "report_path": str(report_path),
         "changed_ratio": report.get("changed_ratio"),
+        "stable_changed_ratio": report.get("stable_changed_ratio"),
         "mae": report.get("mean_abs_error"),
+        "stable_mae": report.get("stable_mean_abs_error"),
         "verification_level": (reference_context.get("reference_authority") or {}).get("verification_level"),
         "generation_vs_asset_changed_ratio": (render_chain.get("generation_vs_asset") or {}).get("changed_ratio"),
         "structure_passed": (report.get("structure_validation") or {}).get("passed"),
         "structure_required": (report.get("structure_validation") or {}).get("required"),
         "structure_available": (report.get("structure_validation") or {}).get("available"),
         "structure_reasons": (report.get("structure_validation") or {}).get("reasons"),
+        "no_regression_available": no_regression.get("available"),
+        "no_regression_passed": no_regression.get("passed"),
+        "no_regression_reasons": no_regression.get("reasons"),
+        "baseline_changed_ratio": (no_regression.get("baseline") or {}).get("changed_ratio"),
+        "baseline_stable_changed_ratio": (no_regression.get("baseline") or {}).get("stable_changed_ratio"),
+        "baseline_mae": (no_regression.get("baseline") or {}).get("mean_abs_error"),
+        "baseline_stable_mae": (no_regression.get("baseline") or {}).get("stable_mean_abs_error"),
+        "changed_ratio_delta": (
+            None
+            if report.get("changed_ratio") is None or (no_regression.get("baseline") or {}).get("changed_ratio") is None
+            else report.get("changed_ratio") - (no_regression.get("baseline") or {}).get("changed_ratio")
+        ),
+        "stable_changed_ratio_delta": (
+            None
+            if report.get("stable_changed_ratio") is None or (no_regression.get("baseline") or {}).get("stable_changed_ratio") is None
+            else report.get("stable_changed_ratio") - (no_regression.get("baseline") or {}).get("stable_changed_ratio")
+        ),
+        "mae_delta": (
+            None
+            if report.get("mean_abs_error") is None or (no_regression.get("baseline") or {}).get("mean_abs_error") is None
+            else report.get("mean_abs_error") - (no_regression.get("baseline") or {}).get("mean_abs_error")
+        ),
+        "stable_mae_delta": (
+            None
+            if report.get("stable_mean_abs_error") is None or (no_regression.get("baseline") or {}).get("stable_mean_abs_error") is None
+            else report.get("stable_mean_abs_error") - (no_regression.get("baseline") or {}).get("stable_mean_abs_error")
+        ),
+        "no_regression_decisive_metric": no_regression.get("decisive_metric"),
+        "no_regression_decisive_delta": no_regression.get("decisive_delta"),
     }
 
 
@@ -759,8 +965,9 @@ def main():
         verify.sync_project_plugin_build_id(args.editor, project_plugin_root)
 
         cases = discover_pen_cases(design_root, args.include, args.exclude)
+        cases.extend(discover_figma_export_cases(args.figma_export_root, args.include, args.exclude))
         if not cases:
-            raise RuntimeError(f"No eligible .pen root nodes discovered under: {design_root}")
+            raise RuntimeError(f"No eligible pen or figma export cases discovered under: {design_root}")
         verify.seed_runtime_font_assets(runtime_args.project, [case["source"] for case in cases])
 
         states = []
@@ -771,6 +978,7 @@ def main():
             if args.reference_root:
                 case_args.reference = str(Path(args.reference_root).resolve())
             state = prepare_case_state(case_args, case, output_root)
+            state["baseline_case_dir"] = (Path(args.reference_root).resolve() / case["name"]) if args.reference_root else None
             states.append(state)
             all_spec_paths.extend(state["spec_paths"])
             all_result_paths.extend(step["result_json_path"] for step in state["steps"].values())
@@ -790,7 +998,7 @@ def main():
         for state in states:
             for step in state["steps"].values():
                 step["editor_exit_code"] = editor_exit_code
-        execute_missing_steps_sequentially(runtime_args, states)
+        ensure_driver_completed_all_steps(states, batch_log_path)
 
         case_results = []
         for state in states:
@@ -800,6 +1008,8 @@ def main():
             print(f"[{status}] {result['name']} report={result['report_path']}")
 
         passed = sum(1 for item in case_results if item["passed"])
+        no_regression_cases = [item for item in case_results if item.get("no_regression_available")]
+        no_regression_passed = sum(1 for item in no_regression_cases if item.get("no_regression_passed"))
         summary = {
             "total": len(case_results),
             "passed": passed,
@@ -807,6 +1017,11 @@ def main():
             "editor_exit_code": editor_exit_code,
             "design_root": str(design_root),
             "output_root": str(output_root),
+            "no_regression": {
+                "available": len(no_regression_cases),
+                "passed": no_regression_passed,
+                "failed": len(no_regression_cases) - no_regression_passed,
+            },
             "cases": case_results,
         }
         summary_path = output_root / "summary.json"

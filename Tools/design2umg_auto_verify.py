@@ -15,7 +15,10 @@ import urllib.request
 from collections import Counter
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageStat
+from PIL import Image, ImageChops, ImageFilter, ImageStat
+
+
+STABLE_VISUAL_FILTER = "closing_max3_min3"
 
 
 def parse_numeric_dimension(value):
@@ -125,7 +128,7 @@ def get_expected_design_size(mode: str, source_path: str, node_id: str) -> tuple
         target_node = find_node_by_id(document.get("children", []), node_id)
         return extract_node_size(target_node)
 
-    if mode == "local-figma" and source.suffix.lower() == ".json":
+    if mode in {"local-figma", "figma-source"} and source.suffix.lower() == ".json":
         normalized_node_id = parse_figma_node_id(node_id)
         root = document.get("document", {})
         target_node = find_node_by_id(root.get("children", []), normalized_node_id)
@@ -147,7 +150,7 @@ def get_declared_design_size(mode: str, source_path: str, node_id: str) -> tuple
         target_node = find_node_by_id(document.get("children", []), node_id)
         return extract_node_numeric_size(target_node)
 
-    if mode == "local-figma" and source.suffix.lower() == ".json":
+    if mode in {"local-figma", "figma-source"} and source.suffix.lower() == ".json":
         normalized_node_id = parse_figma_node_id(node_id)
         root = document.get("document", {})
         target_node = find_node_by_id(root.get("children", []), normalized_node_id)
@@ -204,7 +207,7 @@ def validate_reference_against_design(reference_size: tuple[int, int], expected_
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Design2UMG full automation visual verification")
-    parser.add_argument("mode", choices=["pen", "local-figma", "asset"], help="Verification mode")
+    parser.add_argument("mode", choices=["pen", "local-figma", "figma-source", "asset"], help="Verification mode")
     parser.add_argument("--source", required=True, help="Source file path or Widget Blueprint asset path")
     parser.add_argument("--node", default="", help="Target frame/node id")
     parser.add_argument("--reference-provider", choices=["png", "figma", "pencil", "pen-sim"], required=True)
@@ -680,8 +683,11 @@ def compare_image_paths(left_path: Path, right_path: Path, pixel_tolerance: int)
         "left_size": comparison["reference_size"],
         "right_size": comparison["candidate_size"],
         "changed_ratio": comparison["changed_ratio"],
+        "stable_changed_ratio": comparison["stable_changed_ratio"],
         "mean_abs_error": comparison["mean_abs_error"],
+        "stable_mean_abs_error": comparison["stable_mean_abs_error"],
         "diff_bbox": comparison["diff_bbox"],
+        "stable_diff_bbox": comparison["stable_diff_bbox"],
     }
 
 
@@ -697,8 +703,11 @@ def compare_scaled_image_paths(source_path: Path, witness_path: Path, pixel_tole
         "scaled_source_size": comparison["reference_size"],
         "witness_size": comparison["candidate_size"],
         "changed_ratio": comparison["changed_ratio"],
+        "stable_changed_ratio": comparison["stable_changed_ratio"],
         "mean_abs_error": comparison["mean_abs_error"],
+        "stable_mean_abs_error": comparison["stable_mean_abs_error"],
         "diff_bbox": comparison["diff_bbox"],
+        "stable_diff_bbox": comparison["stable_diff_bbox"],
     }
 
 
@@ -1176,14 +1185,11 @@ def load_rgba(path: Path) -> Image.Image:
     return image
 
 
-def build_diff(reference: Image.Image, candidate: Image.Image, pixel_tolerance: int):
-    canvas_width = max(reference.width, candidate.width)
-    canvas_height = max(reference.height, candidate.height)
-    reference_canvas = Image.new("RGBA", (canvas_width, canvas_height), (0, 0, 0, 0))
-    candidate_canvas = Image.new("RGBA", (canvas_width, canvas_height), (0, 0, 0, 0))
-    reference_canvas.paste(reference, (0, 0))
-    candidate_canvas.paste(candidate, (0, 0))
+def apply_stable_visual_tolerance(image: Image.Image) -> Image.Image:
+    return image.filter(ImageFilter.MaxFilter(3)).filter(ImageFilter.MinFilter(3))
 
+
+def measure_canvas_diff(reference_canvas: Image.Image, candidate_canvas: Image.Image, pixel_tolerance: int):
     diff = ImageChops.difference(reference_canvas, candidate_canvas)
     stat = ImageStat.Stat(diff)
     channel_means = stat.mean
@@ -1193,11 +1199,33 @@ def build_diff(reference: Image.Image, candidate: Image.Image, pixel_tolerance: 
     max_rgb = ImageChops.lighter(ImageChops.lighter(r, g), ImageChops.lighter(b, a))
     hist = max_rgb.histogram()
     changed_pixels = sum(hist[pixel_tolerance + 1 :])
-    total_pixels = canvas_width * canvas_height
+    total_pixels = reference_canvas.width * reference_canvas.height
     changed_ratio = 0.0 if total_pixels == 0 else changed_pixels / total_pixels
     bbox = max_rgb.getbbox()
+    return {
+        "mean_abs_error": mean_abs_error,
+        "changed_ratio": changed_ratio,
+        "diff_bbox": list(bbox) if bbox else None,
+        "max_rgb": max_rgb,
+    }
 
-    amplified = max_rgb.point(lambda value: min(255, value * 4))
+
+def build_diff(reference: Image.Image, candidate: Image.Image, pixel_tolerance: int):
+    canvas_width = max(reference.width, candidate.width)
+    canvas_height = max(reference.height, candidate.height)
+    reference_canvas = Image.new("RGBA", (canvas_width, canvas_height), (0, 0, 0, 0))
+    candidate_canvas = Image.new("RGBA", (canvas_width, canvas_height), (0, 0, 0, 0))
+    reference_canvas.paste(reference, (0, 0))
+    candidate_canvas.paste(candidate, (0, 0))
+
+    raw_metrics = measure_canvas_diff(reference_canvas, candidate_canvas, pixel_tolerance)
+    stable_metrics = measure_canvas_diff(
+        apply_stable_visual_tolerance(reference_canvas),
+        apply_stable_visual_tolerance(candidate_canvas),
+        pixel_tolerance,
+    )
+
+    amplified = raw_metrics["max_rgb"].point(lambda value: min(255, value * 4))
     diff_overlay = Image.merge(
         "RGBA",
         (
@@ -1213,9 +1241,13 @@ def build_diff(reference: Image.Image, candidate: Image.Image, pixel_tolerance: 
         "reference_canvas": reference_canvas,
         "candidate_canvas": candidate_canvas,
         "preview": preview,
-        "mean_abs_error": mean_abs_error,
-        "changed_ratio": changed_ratio,
-        "diff_bbox": list(bbox) if bbox else None,
+        "mean_abs_error": raw_metrics["mean_abs_error"],
+        "changed_ratio": raw_metrics["changed_ratio"],
+        "diff_bbox": raw_metrics["diff_bbox"],
+        "stable_visual_filter": STABLE_VISUAL_FILTER,
+        "stable_mean_abs_error": stable_metrics["mean_abs_error"],
+        "stable_changed_ratio": stable_metrics["changed_ratio"],
+        "stable_diff_bbox": stable_metrics["diff_bbox"],
         "size_match": reference.size == candidate.size,
         "reference_size": list(reference.size),
         "candidate_size": list(candidate.size),
@@ -1538,12 +1570,16 @@ def compare_and_report(
         "pixel_tolerance": args.pixel_tolerance,
         "changed_ratio_threshold": args.changed_ratio_threshold,
         "mae_threshold": args.mae_threshold,
+        "stable_visual_filter": comparison["stable_visual_filter"],
         "changed_ratio": comparison["changed_ratio"],
+        "stable_changed_ratio": comparison["stable_changed_ratio"],
         "mean_abs_error": comparison["mean_abs_error"],
+        "stable_mean_abs_error": comparison["stable_mean_abs_error"],
         "size_match": comparison["size_match"],
         "reference_size": comparison["reference_size"],
         "candidate_size": comparison["candidate_size"],
         "diff_bbox": comparison["diff_bbox"],
+        "stable_diff_bbox": comparison["stable_diff_bbox"],
         "ue_result": ue_result,
         "reference_context": reference_context,
         "render_chain": render_chain,
@@ -1579,12 +1615,16 @@ def write_invalid_reference_report(
         "pixel_tolerance": args.pixel_tolerance,
         "changed_ratio_threshold": args.changed_ratio_threshold,
         "mae_threshold": args.mae_threshold,
+        "stable_visual_filter": STABLE_VISUAL_FILTER,
         "changed_ratio": None,
+        "stable_changed_ratio": None,
         "mean_abs_error": None,
+        "stable_mean_abs_error": None,
         "size_match": False,
         "reference_size": reference_validation.get("reference_size"),
         "candidate_size": list(read_image_size(candidate_path)) if candidate_path.is_file() else None,
         "diff_bbox": None,
+        "stable_diff_bbox": None,
         "ue_result": ue_result,
         "reference_validation": reference_validation,
         "reference_context": reference_context,
@@ -1641,6 +1681,7 @@ def main():
         mode_map = {
             "pen": "pen",
             "local-figma": "local_figma",
+            "figma-source": "figma_source",
             "asset": "asset",
         }
         render_chain = {}
