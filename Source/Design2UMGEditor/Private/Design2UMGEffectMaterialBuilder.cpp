@@ -3,6 +3,7 @@
 #include "Design2UMGEffectMaterialBuilder.h"
 
 #include "Factories/MaterialFactoryNew.h"
+#include "MaterialDomain.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionComponentMask.h"
 #include "Materials/MaterialExpressionCustom.h"
@@ -10,6 +11,7 @@
 #include "Materials/MaterialExpressionTextureObjectParameter.h"
 #include "Materials/MaterialExpressionVectorParameter.h"
 #include "Misc/FeedbackContext.h"
+#include "UObject/UObjectGlobals.h"
 #include "UObject/StrongObjectPtr.h"
 
 namespace
@@ -82,7 +84,7 @@ UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateForegroundBlurRe
 
 	UMaterial* Material = Cast<UMaterial>(MaterialFactory->FactoryCreateNew(
 		UMaterial::StaticClass(),
-		GetTransientPackage(),
+		GetTransientPackageAsObject(),
 		TEXT("D2U_ForegroundBlurRetainer"),
 		RF_Transient,
 		nullptr,
@@ -144,7 +146,7 @@ UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateInnerShadowRetai
 
 	UMaterial* Material = Cast<UMaterial>(MaterialFactory->FactoryCreateNew(
 		UMaterial::StaticClass(),
-		GetTransientPackage(),
+		GetTransientPackageAsObject(),
 		TEXT("D2U_InnerShadowRetainer"),
 		RF_Transient,
 		nullptr,

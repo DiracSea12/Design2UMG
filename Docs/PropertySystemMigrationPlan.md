@@ -8,13 +8,20 @@
 
 - 已完成 typed 区域：
   - `TextStyle`
+  - `WidgetStyle`
+  - `TextData`
   - `Brush`
+  - `Brush.Image`
+  - `Brush.Gradient`
   - `Effect`
+  - `Path`
+  - `Shadow`
+  - `Render`
   - `WidgetState`
 - 当前仍大量依赖 legacy `Properties` 的区域：
-  - 通用 widget 公共属性
-  - Image / Material 参数
-  - 一部分 text / layout / wrapper glue 属性
+  - 若干 applier / generator 消费端仍通过 `BuildEffectivePropertyBag` 走兼容壳
+  - 非 typed widget-specific 字段（如部分 Button / ScrollBox / ProgressBar 参数）
+  - Button / SizeBox / ScaleBox 等 widget-specific 公共属性
 
 ## Strategy
 
@@ -25,11 +32,16 @@
 ## Why Not Full Rewrite Now
 
 - 当前项目验证门槛是 baseline 不能退。
-- `Image / Material / Layout` 仍广泛依赖 legacy key，强拔会放大回归面。
+- `widget-specific` 长尾字段仍分散在各个 applier，强拔会放大回归面。
 - 因此本轮只把 audit 要求里可独立落地且可自动验证的部分继续推进，不把属性系统重构硬塞成一次性工程。
 
 ## Verification
 
+- `Design2UMG.UMGJson.LegacyBrushAndTextStyleNormalization`
+- `Design2UMG.UMGJson.TypedBrushImageGradientRoundTrip`
+- `Design2UMG.VisualMapper.WrapWithBorderDirect`
+- `Design2UMG.VisualMapper.WrapWithBorderTyped`
 - `Design2UMG.UMGJson.InnerShadowEffectRoundTrip`
+- `Design2UMG.FigmaParser.EffectsConvertToTypedWrappers`
 - `Design2UMG.Converter.FigmaPrototypeNavigation`
 - `Design2UMG.WidgetBlueprint.FigmaPrototypeNavigationRuntime`

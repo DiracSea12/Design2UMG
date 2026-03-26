@@ -2,6 +2,7 @@
 
 #include "UMGGenerator.h"
 #include "Design2UMGPrototypeNavigationExtensions.h"
+#include "UMGWidgetNodeAccess.h"
 #include "UMGWidgetUtils.h"
 #include "UMGPropertyKeys.h"
 #include "UMGValueParser.h"
@@ -250,8 +251,10 @@ namespace
 		SizeBoxNode.Bounds.Y = 0.0f;
 		SizeBoxNode.Bounds.W = static_cast<float>(ContentSize.X);
 		SizeBoxNode.Bounds.H = static_cast<float>(ContentSize.Y);
-		SizeBoxNode.Properties.Add(TEXT("WidthOverride"), FString::FromInt(ContentSize.X));
-		SizeBoxNode.Properties.Add(TEXT("HeightOverride"), FString::FromInt(ContentSize.Y));
+		SizeBoxNode.WidgetStyle.WidthOverride = ContentSize.X;
+		SizeBoxNode.WidgetStyle.bHasWidthOverride = true;
+		SizeBoxNode.WidgetStyle.HeightOverride = ContentSize.Y;
+		SizeBoxNode.WidgetStyle.bHasHeightOverride = true;
 		SizeBoxNode.Children.Add(MoveTemp(InRoot));
 
 		FUMGWidgetNode ScaleBoxNode;
@@ -263,8 +266,10 @@ namespace
 		ScaleBoxNode.Bounds.W = static_cast<float>(ViewportSize.X);
 		ScaleBoxNode.Bounds.H = static_cast<float>(ViewportSize.Y);
 		ScaleBoxNode.Slot = MakeCanvasFillSlot();
-		ScaleBoxNode.Properties.Add(TEXT("Stretch"), TEXT("ScaleToFit"));
-		ScaleBoxNode.Properties.Add(TEXT("StretchDirection"), bDownOnly ? TEXT("DownOnly") : TEXT("Both"));
+		ScaleBoxNode.WidgetStyle.Stretch = TEXT("ScaleToFit");
+		ScaleBoxNode.WidgetStyle.bHasStretch = true;
+		ScaleBoxNode.WidgetStyle.StretchDirection = bDownOnly ? TEXT("DownOnly") : TEXT("Both");
+		ScaleBoxNode.WidgetStyle.bHasStretchDirection = true;
 		ScaleBoxNode.Children.Add(MoveTemp(SizeBoxNode));
 
 		FUMGWidgetNode CanvasRoot;
@@ -282,22 +287,22 @@ namespace
 	FString FindNodeProperty(const FUMGWidgetNode& Node, const TCHAR* Key)
 	{
 		FString Value;
-		Node.Properties.TryGetString(Key, Value);
+		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, Key, Value);
 		return Value;
 	}
 
 	FString FindNodePropertyOr(const FUMGWidgetNode& Node, const TCHAR* Key, const FString& DefaultValue)
 	{
 		FString Value;
-		return (Node.Properties.TryGetString(Key, Value) && !Value.IsEmpty()) ? Value : DefaultValue;
+		return Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, Key, Value) ? Value : DefaultValue;
 	}
 
 	int32 GetNodeRoundedIntProperty(const FUMGWidgetNode& Node, const TCHAR* Key, int32 DefaultValue)
 	{
-		float Value = 0.0f;
-		if (Node.Properties.TryGetFloat(Key, Value))
+		FString SerializedValue;
+		if (Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, Key, SerializedValue))
 		{
-			return FMath::RoundToInt(Value);
+			return FMath::RoundToInt(FCString::Atof(*SerializedValue));
 		}
 		return DefaultValue;
 	}
@@ -313,10 +318,15 @@ namespace
 		Node.Properties.Remove(UMGPropertyKeys::PathStrokeThickness);
 		Node.Properties.Remove(UMGPropertyKeys::MaterialRef);
 		Node.Properties.Remove(UMGPropertyKeys::MaterialParams);
-		Node.Properties.Add(UMGPropertyKeys::TexturePath, TexturePath);
+		Node.Path = FUMGPathData();
 		Node.Brush.MaterialRef.Reset();
+		Node.Brush.bHasMaterialRef = false;
 		Node.Brush.MaterialParams.Reset();
+		Node.Brush.bHasMaterialParams = false;
 		Node.Brush.TexturePath = TexturePath;
+		Node.Brush.Image.TexturePath = TexturePath;
+		Node.Brush.Image.bHasTexturePath = true;
+		Node.Brush.Gradient = FUMGVisualBrushData::FGradientData();
 	}
 
 	uint32 MakePathTextureKey(const FUMGWidgetNode& Node)
@@ -330,15 +340,15 @@ namespace
 		FString StrokeJoin;
 		FString WidthOverride;
 		FString HeightOverride;
-		Node.Properties.TryGetString(UMGPropertyKeys::PathGeometry, Geometry);
-		Node.Properties.TryGetString(UMGPropertyKeys::PathFillRule, FillRule);
-		Node.Properties.TryGetString(UMGPropertyKeys::PathFillColor, FillColor);
-		Node.Properties.TryGetString(UMGPropertyKeys::PathStrokeColor, StrokeColor);
-		Node.Properties.TryGetString(UMGPropertyKeys::PathStrokeThickness, StrokeThickness);
-		Node.Properties.TryGetString(UMGPropertyKeys::PathStrokeCap, StrokeCap);
-		Node.Properties.TryGetString(UMGPropertyKeys::PathStrokeJoin, StrokeJoin);
-		Node.Properties.TryGetString(UMGPropertyKeys::WidthOverride, WidthOverride);
-		Node.Properties.TryGetString(UMGPropertyKeys::HeightOverride, HeightOverride);
+		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::PathGeometry, Geometry);
+		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::PathFillRule, FillRule);
+		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::PathFillColor, FillColor);
+		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::PathStrokeColor, StrokeColor);
+		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::PathStrokeThickness, StrokeThickness);
+		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::PathStrokeCap, StrokeCap);
+		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::PathStrokeJoin, StrokeJoin);
+		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::WidthOverride, WidthOverride);
+		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::HeightOverride, HeightOverride);
 
 		uint32 Key = Geometry.IsEmpty() ? 0u : GetTypeHash(Geometry);
 		Key = HashCombine(Key, FillRule.IsEmpty() ? 0u : GetTypeHash(FillRule));
@@ -489,7 +499,7 @@ namespace
 		TMap<uint32, FString>& PathTextureCache)
 	{
 		FString Geometry;
-		if (Node.Type == TEXT("Image") && Node.Properties.TryGetString(UMGPropertyKeys::PathGeometry, Geometry) && !Geometry.IsEmpty())
+		if (Node.Type == TEXT("Image") && Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::PathGeometry, Geometry) && !Geometry.IsEmpty())
 		{
 			const uint32 TextureKey = MakePathTextureKey(Node);
 			if (const FString* CachedPath = PathTextureCache.Find(TextureKey))
@@ -504,7 +514,7 @@ namespace
 				const FString StrokeCap = FindNodePropertyOr(Node, UMGPropertyKeys::PathStrokeCap, TEXT("butt"));
 				const FString StrokeJoin = FindNodePropertyOr(Node, UMGPropertyKeys::PathStrokeJoin, TEXT("miter"));
 				float StrokeThickness = 0.0f;
-				Node.Properties.TryGetFloat(UMGPropertyKeys::PathStrokeThickness, StrokeThickness);
+				StrokeThickness = FCString::Atof(*FindNodePropertyOr(Node, UMGPropertyKeys::PathStrokeThickness, TEXT("0")));
 				const int32 Width = FMath::Max(1, GetNodeRoundedIntProperty(Node, UMGPropertyKeys::WidthOverride, 64));
 				const int32 Height = FMath::Max(1, GetNodeRoundedIntProperty(Node, UMGPropertyKeys::HeightOverride, 64));
 
@@ -572,14 +582,7 @@ namespace
 			}
 			else
 			{
-				FUMGPropertyBag GenerationProps = Node.Properties;
-				GenerationProps.Add(UMGPropertyKeys::MaterialRef, MaterialRef);
-				FString ExistingMaterialParams;
-				if (!Node.Brush.MaterialParams.IsEmpty()
-					&& !(GenerationProps.TryGetString(UMGPropertyKeys::MaterialParams, ExistingMaterialParams) && !ExistingMaterialParams.IsEmpty()))
-				{
-					GenerationProps.Add(UMGPropertyKeys::MaterialParams, Node.Brush.MaterialParams);
-				}
+				FUMGPropertyBag GenerationProps = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
 
 				if (UTexture2D* Generated = FProceduralShapeGenerator::GenerateFromMaterialRef(MaterialRef, GenerationProps, nullptr))
 				{

@@ -2,6 +2,7 @@
 
 #include "UMGWidgetUtils.h"
 #include "UMGPropertyKeys.h"
+#include "UMGWidgetNodeAccess.h"
 #include "UMGValueParser.h"
 #include "TextStyleUtils.h"
 #include "Design2UMGLog.h"
@@ -44,6 +45,7 @@
 #include "Components/SafeZone.h"
 #include "Fonts/FontCache.h"
 #include "Styling/SlateBrush.h"
+#include "Engine/Texture2D.h"
 #include "Engine/UserInterfaceSettings.h"
 #include "Materials/MaterialInstanceDynamic.h"
 
@@ -822,6 +824,18 @@ namespace
 			{
 				DynamicEffect->SetVectorParameterValue(TEXT("BlurUVStep"), FLinearColor(BlurUVStep.X, BlurUVStep.Y, 0.0f, 0.0f));
 			}
+			FLinearColor InnerShadowColor = FLinearColor::Transparent;
+			if (P.TryGetColor(TEXT("EffectColor"), InnerShadowColor))
+			{
+				DynamicEffect->SetVectorParameterValue(TEXT("InnerShadowColor"), InnerShadowColor);
+			}
+			FVector2D InnerShadowOffset = FVector2D::ZeroVector;
+			if (P.TryGetVector2D(TEXT("EffectOffset"), InnerShadowOffset))
+			{
+				DynamicEffect->SetVectorParameterValue(
+					TEXT("InnerShadowOffset"),
+					FLinearColor(InnerShadowOffset.X, InnerShadowOffset.Y, 0.0f, 0.0f));
+			}
 		}
 	}
 
@@ -837,17 +851,14 @@ namespace
 			RB->SetRetainRendering(Effect.bRetainRendering);
 		}
 
-		if (!Effect.TextureParameter.IsEmpty())
+		if (Effect.bHasTextureParameter || !Effect.TextureParameter.IsEmpty())
 		{
 			RB->SetTextureParameter(FName(*Effect.TextureParameter));
 		}
 
-		if (!Effect.EffectMaterial.IsEmpty())
+		if (Effect.bHasEffectMaterial || !Effect.EffectMaterial.IsEmpty())
 		{
-			if (UMaterialInterface* EffectMaterial = ResolveRetainerEffectMaterial(Effect.EffectMaterial))
-			{
-				RB->SetEffectMaterial(EffectMaterial);
-			}
+			RB->SetEffectMaterial(ResolveRetainerEffectMaterial(Effect.EffectMaterial));
 		}
 
 		if (Effect.bHasRenderingPhase)
@@ -1106,9 +1117,9 @@ namespace
 			bChanged = true;
 		}
 
-		if (B.OutlineThickness > 0)
+		if (B.bHasOutlineThickness)
 		{
-			Brush.OutlineSettings.Width = B.OutlineThickness;
+			Brush.OutlineSettings.Width = FMath::Max(0.0f, B.OutlineThickness);
 			bChanged = true;
 		}
 
@@ -1234,8 +1245,36 @@ void FUMGWidgetUtils::ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNod
 		ApplyTypedWidgetSwitcherProps(WidgetSwitcher, Node.WidgetState);
 	}
 
-	// legacy 流程处理剩余属性
-	ApplyWidgetProperties(Widget, Node.Properties);
+	const FUMGPropertyBag TypedProperties = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
+	const FUMGPropertyBag LegacyProperties = Design2UMGWidgetNodeAccess::BuildLegacyFallbackPropertyBag(Node);
+	if (TypedProperties.Num() > 0)
+	{
+		ApplyWidgetProperties(Widget, TypedProperties);
+	}
+	if (LegacyProperties.Num() > 0)
+	{
+		// legacy bag 只处理尚未迁移的剩余字段，不再作为 typed 字段执行真值。
+		ApplyWidgetProperties(Widget, LegacyProperties);
+	}
+
+	// Typed 数据是主真值，legacy bag 只做兼容兜底。
+	// 对会被中途重建/覆写的运行时对象（Border Brush / Retainer MID / WidgetSwitcher 状态）再应用一次，确保最终值来自 typed schema。
+	if (UBorder* BorderAfterLegacy = Cast<UBorder>(Widget))
+	{
+		ApplyTypedBorderBrush(BorderAfterLegacy, Node.Brush);
+	}
+	if (UBackgroundBlur* BackgroundBlurAfterLegacy = Cast<UBackgroundBlur>(Widget))
+	{
+		ApplyTypedBackgroundBlurProps(BackgroundBlurAfterLegacy, Node.Effect);
+	}
+	if (URetainerBox* RetainerBoxAfterLegacy = Cast<URetainerBox>(Widget))
+	{
+		ApplyTypedRetainerBoxProps(RetainerBoxAfterLegacy, Node.Effect);
+	}
+	if (UWidgetSwitcher* WidgetSwitcherAfterLegacy = Cast<UWidgetSwitcher>(Widget))
+	{
+		ApplyTypedWidgetSwitcherProps(WidgetSwitcherAfterLegacy, Node.WidgetState);
+	}
 }
 
 

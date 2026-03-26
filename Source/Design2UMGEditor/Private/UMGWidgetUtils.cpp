@@ -6,11 +6,13 @@
 #include "LayoutCalculator.h"
 #include "LayoutFixer.h"
 #include "UMGPropertyKeys.h"
+#include "UMGWidgetNodeAccess.h"
 #include "UMGValueParser.h"
 
 #include "WidgetBlueprint.h"
 #include "Blueprint/UserWidget.h"
 #include "Editor.h"
+#include "Engine/Texture2D.h"
 #include "Framework/Application/SlateApplication.h"
 
 #include "Components/Widget.h"
@@ -513,9 +515,9 @@ static void HandleNamedSlotChildren(UWidgetTree* WidgetTree, INamedSlotInterface
 		// 查找目标槽位：优先显式指定，其次按序分配，最后回退到末尾槽位
 		FName TargetSlot = NAME_None;
 		FString FallbackSlotName;
-		ChildNode.Properties.TryGetString(UMGPropertyKeys::NamedSlot, FallbackSlotName);
+		Design2UMGWidgetNodeAccess::TryGetWidgetString(ChildNode, UMGPropertyKeys::NamedSlot, FallbackSlotName);
 		FString RequestedSlotName;
-		if (!ChildNode.Properties.TryGetString(UMGPropertyKeys::SlotName, RequestedSlotName) || RequestedSlotName.IsEmpty())
+		if (!Design2UMGWidgetNodeAccess::TryGetWidgetString(ChildNode, UMGPropertyKeys::SlotName, RequestedSlotName) || RequestedSlotName.IsEmpty())
 		{
 			RequestedSlotName = FallbackSlotName;
 		}
@@ -756,17 +758,15 @@ namespace
 	 */
 	bool HandleImageMaterialRef(UImage* ImageWidget, const FUMGWidgetNode& Node)
 	{
-		FString MaterialRefProperty;
-		Node.Properties.TryGetString(UMGPropertyKeys::MaterialRef, MaterialRefProperty);
-		const FString MatRef = Node.Brush.MaterialRef.IsEmpty()
-			? MaterialRefProperty
-			: Node.Brush.MaterialRef;
+		FString MatRef;
+		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::MaterialRef, MatRef);
 		if (MatRef.IsEmpty())
 		{
 			return false;
 		}
 
-		UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(MatRef, Node.Properties, ImageWidget);
+		FUMGPropertyBag GenerationProps = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
+		UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(MatRef, GenerationProps, ImageWidget);
 		if (!Texture)
 		{
 			UE_LOG(LogDesign2UMG, Warning, TEXT("Image '%s' 未知形状类型: %s"), *Node.Name, *MatRef);
@@ -785,11 +785,8 @@ namespace
 
 	bool HandleImageTextureRef(UImage* ImageWidget, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap)
 	{
-		FString TexturePathProperty;
-		Node.Properties.TryGetString(UMGPropertyKeys::TexturePath, TexturePathProperty);
-		const FString TexPath = Node.Brush.TexturePath.IsEmpty()
-			? TexturePathProperty
-			: Node.Brush.TexturePath;
+		FString TexPath;
+		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::TexturePath, TexPath);
 		const FString TrimmedPath = TexPath.TrimStartAndEnd();
 		if (TrimmedPath.IsEmpty())
 		{
@@ -825,10 +822,10 @@ namespace
 
 		// WidthOverride/HeightOverride 优先（设计稿指定尺寸），否则用纹理原始尺寸
 		// 注意：FSlateBrush 默认 ImageSize 是 32x32，不能用它判断是否有显式覆盖
-		float IgnoredSizeOverride = 0.0f;
+		float SizeOverride = 0.0f;
 		const bool bHadSizeOverride =
-			Node.Properties.TryGetFloat(UMGPropertyKeys::WidthOverride, IgnoredSizeOverride) ||
-			Node.Properties.TryGetFloat(UMGPropertyKeys::HeightOverride, IgnoredSizeOverride);
+			Design2UMGWidgetNodeAccess::TryGetWidgetFloat(Node, UMGPropertyKeys::WidthOverride, SizeOverride) ||
+			Design2UMGWidgetNodeAccess::TryGetWidgetFloat(Node, UMGPropertyKeys::HeightOverride, SizeOverride);
 		Brush.ImageSize = bHadSizeOverride ? OldImageSize : FVector2D(Texture->GetSizeX(), Texture->GetSizeY());
 
 		// 恢复 UVRegion（非默认值说明 Crop 已设置）
@@ -864,8 +861,8 @@ namespace
 			float Height = Slot.Offsets.Bottom;
 
 			// 如果有 WidthOverride/HeightOverride，使用它们
-			Node.Properties.TryGetFloat(UMGPropertyKeys::WidthOverride, Width);
-			Node.Properties.TryGetFloat(UMGPropertyKeys::HeightOverride, Height);
+			Design2UMGWidgetNodeAccess::TryGetWidgetFloat(Node, UMGPropertyKeys::WidthOverride, Width);
+			Design2UMGWidgetNodeAccess::TryGetWidgetFloat(Node, UMGPropertyKeys::HeightOverride, Height);
 
 			// 计算右下角边界 = 位置 + 尺寸
 			MaxBounds.X = FMath::Max(MaxBounds.X, FMath::Abs(PosX) + Width);

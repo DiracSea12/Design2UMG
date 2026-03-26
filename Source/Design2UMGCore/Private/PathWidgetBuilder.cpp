@@ -1,17 +1,20 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "PathWidgetBuilder.h"
 
 #include "Design2UMGLog.h"
 #include "DesignTypeMapper.h"
 #include "ImageFillUtils.h"
+#include "UMGValueParser.h"
 
 namespace
 {
 	void ApplyPathSizeOverrides(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
 	{
-		Widget.Properties.Add(TEXT("WidthOverride"), FString::FromInt(FMath::Max(1, FMath::RoundToInt(Node->Width.Value))));
-		Widget.Properties.Add(TEXT("HeightOverride"), FString::FromInt(FMath::Max(1, FMath::RoundToInt(Node->Height.Value))));
+		Widget.WidgetStyle.WidthOverride = FMath::Max(1, FMath::RoundToInt(Node->Width.Value));
+		Widget.WidgetStyle.bHasWidthOverride = true;
+		Widget.WidgetStyle.HeightOverride = FMath::Max(1, FMath::RoundToInt(Node->Height.Value));
+		Widget.WidgetStyle.bHasHeightOverride = true;
 	}
 
 	bool HasGradientPathFill(const TSharedPtr<FDesignNode>& Node)
@@ -127,7 +130,9 @@ FUMGWidgetNode PathWidgetBuilder::CreatePathWidget(const TSharedPtr<FDesignNode>
 	if (const FString VectorRasterFallback = GetVectorRasterFallbackTexturePath(Node); !VectorRasterFallback.IsEmpty())
 	{
 		Widget.Type = TEXT("Image");
-		Widget.Properties.Add(TEXT("TexturePath"), VectorRasterFallback);
+		Widget.Brush.TexturePath = VectorRasterFallback;
+		Widget.Brush.Image.TexturePath = VectorRasterFallback;
+		Widget.Brush.Image.bHasTexturePath = true;
 		ApplyPathSizeOverrides(Widget, Node);
 		return Widget;
 	}
@@ -135,7 +140,9 @@ FUMGWidgetNode PathWidgetBuilder::CreatePathWidget(const TSharedPtr<FDesignNode>
 	if (Node->Fill.Type == EDesignFillType::Image && !Node->Fill.Image.Url.IsEmpty())
 	{
 		Widget.Type = TEXT("Image");
-		Widget.Properties.Add(TEXT("TexturePath"), Node->Fill.Image.Url);
+		Widget.Brush.TexturePath = Node->Fill.Image.Url;
+		Widget.Brush.Image.TexturePath = Node->Fill.Image.Url;
+		Widget.Brush.Image.bHasTexturePath = true;
 		ImageFillUtils::ApplyImageFillProperties(Widget, Node->Fill.Image);
 		ApplyPathSizeOverrides(Widget, Node);
 		return Widget;
@@ -157,18 +164,25 @@ FUMGWidgetNode PathWidgetBuilder::CreatePathWidget(const TSharedPtr<FDesignNode>
 				StrokeThickness);
 
 			Widget.Type = TEXT("Image");
-			Widget.Properties.Add(TEXT("PathGeometry"), Node->Geometry);
-			Widget.Properties.Add(TEXT("PathFillRule"), Node->FillRule);
+			Widget.Path.Geometry = Node->Geometry;
+			Widget.Path.bHasGeometry = true;
+			Widget.Path.FillRule = Node->FillRule;
+			Widget.Path.bHasFillRule = true;
 			if (!FillColor.IsEmpty())
 			{
-				Widget.Properties.Add(TEXT("PathFillColor"), FillColor);
+				Widget.Path.FillColor = FUMGValueParser::ParseColor(FillColor);
+				Widget.Path.bHasFillColor = true;
 			}
 			if (!StrokeColor.IsEmpty() && StrokeThickness > 0.0f)
 			{
-				Widget.Properties.Add(TEXT("PathStrokeColor"), StrokeColor);
-				Widget.Properties.Add(TEXT("PathStrokeThickness"), FString::SanitizeFloat(StrokeThickness));
-				Widget.Properties.Add(TEXT("PathStrokeCap"), ResolvePathStrokeMetadata(Node, TEXT("stroke.cap"), TEXT("butt")));
-				Widget.Properties.Add(TEXT("PathStrokeJoin"), ResolvePathStrokeMetadata(Node, TEXT("stroke.join"), TEXT("miter")));
+				Widget.Path.StrokeColor = FUMGValueParser::ParseColor(StrokeColor);
+				Widget.Path.bHasStrokeColor = true;
+				Widget.Path.StrokeThickness = StrokeThickness;
+				Widget.Path.bHasStrokeThickness = true;
+				Widget.Path.StrokeCap = ResolvePathStrokeMetadata(Node, TEXT("stroke.cap"), TEXT("butt"));
+				Widget.Path.bHasStrokeCap = true;
+				Widget.Path.StrokeJoin = ResolvePathStrokeMetadata(Node, TEXT("stroke.join"), TEXT("miter"));
+				Widget.Path.bHasStrokeJoin = true;
 			}
 			ApplyPathSizeOverrides(Widget, Node);
 			return Widget;

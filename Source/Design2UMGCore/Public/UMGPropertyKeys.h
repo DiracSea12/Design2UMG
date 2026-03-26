@@ -22,7 +22,9 @@ namespace UMGPropertyKeys
 	inline constexpr const TCHAR* DesignFontSize = TEXT("DesignFontSize");
 	inline constexpr const TCHAR* DrawAs = TEXT("DrawAs");
 	inline constexpr const TCHAR* EffectBlurUVStep = TEXT("EffectBlurUVStep");
+	inline constexpr const TCHAR* EffectColor = TEXT("EffectColor");
 	inline constexpr const TCHAR* EffectMaterial = TEXT("EffectMaterial");
+	inline constexpr const TCHAR* EffectOffset = TEXT("EffectOffset");
 	inline constexpr const TCHAR* EntryHeight = TEXT("EntryHeight");
 	inline constexpr const TCHAR* EntryWidth = TEXT("EntryWidth");
 	inline constexpr const TCHAR* FillColor = TEXT("FillColor");

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Design2UMGConverter.h"
+#include "UMGWidgetNodeAccess.h"
 
 #include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
@@ -12,7 +13,7 @@ namespace Design2UMGTestUtils
 {
 	inline bool TryGetWidgetProperty(const FUMGWidgetNode& Node, const TCHAR* Key, FString& OutValue)
 	{
-		return Node.Properties.TryGetString(Key, OutValue) && !OutValue.IsEmpty();
+		return Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, Key, OutValue);
 	}
 
 	inline FString GetWidgetProperty(const FUMGWidgetNode& Node, const TCHAR* Key)
@@ -26,6 +27,17 @@ namespace Design2UMGTestUtils
 	{
 		FString Value;
 		return TryGetWidgetProperty(Node, Key, Value);
+	}
+
+	inline bool TryGetLegacyWidgetProperty(const FUMGWidgetNode& Node, const TCHAR* Key, FString& OutValue)
+	{
+		return Node.Properties.TryGetString(Key, OutValue) && !OutValue.IsEmpty();
+	}
+
+	inline bool HasLegacyWidgetProperty(const FUMGWidgetNode& Node, const TCHAR* Key)
+	{
+		FString Value;
+		return TryGetLegacyWidgetProperty(Node, Key, Value);
 	}
 
 	inline const FUMGWidgetNode* FindWidgetById(const FUMGWidgetNode& Node, const FString& TargetId)
@@ -50,7 +62,7 @@ namespace Design2UMGTestUtils
 		const FString* OptionalValue = nullptr)
 	{
 		FString Current;
-		if (Node.Properties.TryGetString(Key, Current) && !Current.IsEmpty())
+		if (Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, *Key, Current))
 		{
 			if (!OptionalValue || Current == *OptionalValue)
 			{

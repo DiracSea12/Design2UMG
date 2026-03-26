@@ -14,6 +14,10 @@
 #include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
+#include "RenderingThread.h"
+#include "UObject/Linker.h"
+#include "UObject/Package.h"
+#include "UObject/PackageReload.h"
 #include "UObject/UObjectGlobals.h"
 
 #define LOCTEXT_NAMESPACE "DesignImportUtils"
@@ -106,7 +110,7 @@ namespace
 		}
 
 		FlushAsyncLoading();
-		ResetLoaders(Package);
+		ResetLoaders(static_cast<UObject*>(Package));
 		if (!ReloadPackage(Package, LOAD_None))
 		{
 			return WidgetBlueprint;

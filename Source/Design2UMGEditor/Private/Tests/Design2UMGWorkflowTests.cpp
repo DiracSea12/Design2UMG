@@ -15,6 +15,7 @@
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetBlueprintGeneratedClass.h"
 #include "Blueprint/WidgetTree.h"
+#include "Editor.h"
 #include "Components/Button.h"
 #include "Components/WidgetSwitcher.h"
 #include "Containers/Ticker.h"
@@ -296,19 +297,19 @@ bool FPenWelcomeWrapFontRegressionTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	FString WelcomeBodyFontSize;
-	FString ProTipsFontSize;
-	TestTrue(TEXT("Welcome body exports font size"), WelcomeBody->Properties.TryGetString(TEXT("FontSize"), WelcomeBodyFontSize));
-	TestTrue(TEXT("Pro tips exports font size"), ProTips->Properties.TryGetString(TEXT("FontSize"), ProTipsFontSize));
-	if (WelcomeBodyFontSize.IsEmpty() || ProTipsFontSize.IsEmpty())
+	TestTrue(TEXT("Welcome body exports typed font size"), WelcomeBody->TextStyle.FontSize > 0.0f);
+	TestTrue(TEXT("Pro tips exports typed font size"), ProTips->TextStyle.FontSize > 0.0f);
+	if (WelcomeBody->TextStyle.FontSize <= 0.0f || ProTips->TextStyle.FontSize <= 0.0f)
 	{
 		return false;
 	}
 
 	TestTrue(TEXT("Welcome body keeps the 27px wrap-safe font size"),
-		FMath::IsNearlyEqual(FCString::Atof(*WelcomeBodyFontSize), 27.0f, 0.01f));
+		FMath::IsNearlyEqual(WelcomeBody->TextStyle.FontSize, 27.0f, 0.01f));
 	TestTrue(TEXT("Pro tips keeps the same calibrated Rubik size"),
-		FMath::IsNearlyEqual(FCString::Atof(*ProTipsFontSize), 27.0f, 0.01f));
+		FMath::IsNearlyEqual(ProTips->TextStyle.FontSize, 27.0f, 0.01f));
+	TestFalse(TEXT("Welcome body no longer writes legacy font size"), HasLegacyWidgetProperty(*WelcomeBody, TEXT("FontSize")));
+	TestFalse(TEXT("Pro tips no longer writes legacy font size"), HasLegacyWidgetProperty(*ProTips, TEXT("FontSize")));
 	return true;
 }
 
@@ -1190,10 +1191,10 @@ bool FFitContentMinimumExpandsToContentTest::RunTest(const FString& Parameters)
 	}
 	TestTrue(TEXT("Root fit-content height should grow beyond the minimum fallback"),
 		RootWidget->Bounds.H >= 56.0f - 0.5f);
-	FString HeightOverride;
-	const bool bHasHeightOverride = RowSizeBox->Properties.TryGetString(TEXT("HeightOverride"), HeightOverride) && !HeightOverride.IsEmpty();
-	FString MinDesiredHeight;
-	const bool bHasMinDesiredHeight = RowSizeBox->Properties.TryGetString(TEXT("MinDesiredHeight"), MinDesiredHeight) && !MinDesiredHeight.IsEmpty();
+	const FString HeightOverride = GetWidgetProperty(*RowSizeBox, TEXT("HeightOverride"));
+	const bool bHasHeightOverride = !HeightOverride.IsEmpty();
+	const FString MinDesiredHeight = GetWidgetProperty(*RowSizeBox, TEXT("MinDesiredHeight"));
+	const bool bHasMinDesiredHeight = !MinDesiredHeight.IsEmpty();
 	TestTrue(TEXT("Flow fit-content(min) row should export a concrete height constraint"),
 		bHasHeightOverride || bHasMinDesiredHeight);
 	if (bHasHeightOverride)
@@ -1261,10 +1262,10 @@ bool FFillWidthSingleLineTextDoesNotInflateFitHeightTest::RunTest(const FString&
 	{
 		return false;
 	}
-	FString HeightOverride;
-	const bool bHasHeightOverride = HeaderCellSizeBox->Properties.TryGetString(TEXT("HeightOverride"), HeightOverride) && !HeightOverride.IsEmpty();
-	FString MinDesiredHeight;
-	const bool bHasMinDesiredHeight = HeaderCellSizeBox->Properties.TryGetString(TEXT("MinDesiredHeight"), MinDesiredHeight) && !MinDesiredHeight.IsEmpty();
+	const FString HeightOverride = GetWidgetProperty(*HeaderCellSizeBox, TEXT("HeightOverride"));
+	const bool bHasHeightOverride = !HeightOverride.IsEmpty();
+	const FString MinDesiredHeight = GetWidgetProperty(*HeaderCellSizeBox, TEXT("MinDesiredHeight"));
+	const bool bHasMinDesiredHeight = !MinDesiredHeight.IsEmpty();
 	TestTrue(TEXT("Header cell should export a height constraint"),
 		bHasHeightOverride || bHasMinDesiredHeight);
 	const float ExportedHeight = bHasHeightOverride

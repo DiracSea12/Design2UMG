@@ -4,6 +4,7 @@
 
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
+#include "UMGWidgetNodeAccess.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/AssetData.h"
@@ -22,6 +23,7 @@
 #include "Misc/SecureHash.h"
 #include "Modules/ModuleManager.h"
 #include "RenderingThread.h"
+#include "TextureCompiler.h"
 #include "TextureResource.h"
 #include "UObject/SavePackage.h"
 
@@ -371,6 +373,10 @@ namespace
 		Texture->ConditionalPostLoad();
 		ApplyTextureUiSettings(Texture);
 
+#if WITH_EDITOR
+		FTextureCompilingManager::Get().FinishCompilation({ Texture });
+#endif
+
 		// Always force resource update + flush. After RewriteTextureAsset the
 		// old GPU resource still exists (GetResource() != null) but contains
 		// stale 32x32 data. Unconditional update ensures the GPU has the
@@ -588,6 +594,11 @@ namespace
 				return false;
 			}
 
+			if (UTexture2D* ImportedTexture = LoadObject<UTexture2D>(nullptr, *ImportedObjectPath))
+			{
+				EnsureUiTextureReady(ImportedTexture);
+			}
+
 			InOutTexturePath = ImportedObjectPath;
 			++Context.ImportedCount;
 			Context.UrlToAssetPath.Add(LocalKey, ImportedObjectPath);
@@ -676,6 +687,11 @@ namespace
 			return false;
 		}
 
+		if (UTexture2D* ImportedTexture = LoadObject<UTexture2D>(nullptr, *ImportedObjectPath))
+		{
+			EnsureUiTextureReady(ImportedTexture);
+		}
+
 		InOutTexturePath = ImportedObjectPath;
 		++Context.ImportedCount;
 		Context.UrlToAssetPath.Add(NormalizedUrl, ImportedObjectPath);
@@ -687,7 +703,7 @@ namespace
 	void ResolveNodeRecursive(FUMGWidgetNode& Node, FResolveContext& Context)
 	{
 		FString TexturePath;
-		Node.Properties.TryGetString(TEXT("TexturePath"), TexturePath);
+		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, TEXT("TexturePath"), TexturePath);
 		if (!TexturePath.IsEmpty())
 		{
 			const FString DebugName = Node.Name.IsEmpty() ? Node.Id : Node.Name;
@@ -697,9 +713,11 @@ namespace
 				DebugName.IsEmpty() ? TEXT("UnnamedWidget") : DebugName,
 				Node.Id,
 				Context);
-			Node.Properties.Add(TEXT("TexturePath"), ResolvedTexturePath);
+			Node.Properties.Remove(TEXT("TexturePath"));
 			// 同步 typed 字段，避免 typed-first 读到未 resolve 的原始 URL
 			Node.Brush.TexturePath = ResolvedTexturePath;
+			Node.Brush.Image.TexturePath = ResolvedTexturePath;
+			Node.Brush.Image.bHasTexturePath = true;
 		}
 
 		for (FUMGWidgetNode& Child : Node.Children)
@@ -776,7 +794,7 @@ namespace
 	void CollectRemoteUrls(const FUMGWidgetNode& Node, TSet<FString>& OutUrls)
 	{
 		FString TexturePath;
-		if (Node.Properties.TryGetString(TEXT("TexturePath"), TexturePath))
+		if (Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, TEXT("TexturePath"), TexturePath))
 		{
 			const FString Trimmed = TexturePath.TrimStartAndEnd();
 			if (IsRemoteUrl(Trimmed))

@@ -170,8 +170,8 @@ void FLayoutMapper::ApplyGap(TArray<FUMGWidgetNode>& Children, float Gap, EDesig
 
 void FLayoutMapper::ApplyPadding(FUMGWidgetNode& Widget, const FDesignPadding& Padding)
 {
-	Widget.Properties.Add(TEXT("Padding"), FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"),
-		Padding.Left, Padding.Top, Padding.Right, Padding.Bottom));
+	Widget.WidgetStyle.Padding = FMargin(Padding.Left, Padding.Top, Padding.Right, Padding.Bottom);
+	Widget.WidgetStyle.bHasPadding = true;
 }
 
 void FLayoutMapper::ApplyJustifyContent(TArray<FUMGWidgetNode>& Children, EDesignJustifyContent Justify, EDesignSizeMode MainAxisMode, EDesignLayout ParentLayout)
@@ -271,22 +271,52 @@ FUMGWidgetNode FLayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, cons
 	const bool bPreserveMeasuredFillSize = ShouldPreserveMeasuredFillSize(ChildNode, ParentLayout);
 
 	if (ChildNode->Width.IsFixed())
-		SizeBox.Properties.Add(TEXT("WidthOverride"), FString::SanitizeFloat(ChildNode->Width.Value));
+	{
+		SizeBox.WidgetStyle.WidthOverride = ChildNode->Width.Value;
+		SizeBox.WidgetStyle.bHasWidthOverride = true;
+	}
 	else if (ChildNode->Width.IsFit() && ChildNode->Width.Value > 0)
-		SizeBox.Properties.Add(
-			bUseFitOverride ? TEXT("WidthOverride") : TEXT("MinDesiredWidth"),
-			FString::SanitizeFloat(ChildNode->Width.Value));
+	{
+		if (bUseFitOverride)
+		{
+			SizeBox.WidgetStyle.WidthOverride = ChildNode->Width.Value;
+			SizeBox.WidgetStyle.bHasWidthOverride = true;
+		}
+		else
+		{
+			SizeBox.WidgetStyle.MinDesiredWidth = ChildNode->Width.Value;
+			SizeBox.WidgetStyle.bHasMinDesiredWidth = true;
+		}
+	}
 	else if (bPreserveMeasuredFillSize && ChildNode->Width.IsFill() && ChildNode->Width.Value > 0.0f)
-		SizeBox.Properties.Add(TEXT("WidthOverride"), FString::SanitizeFloat(ChildNode->Width.Value));
+	{
+		SizeBox.WidgetStyle.WidthOverride = ChildNode->Width.Value;
+		SizeBox.WidgetStyle.bHasWidthOverride = true;
+	}
 
 	if (ChildNode->Height.IsFixed())
-		SizeBox.Properties.Add(TEXT("HeightOverride"), FString::SanitizeFloat(ChildNode->Height.Value));
+	{
+		SizeBox.WidgetStyle.HeightOverride = ChildNode->Height.Value;
+		SizeBox.WidgetStyle.bHasHeightOverride = true;
+	}
 	else if (ChildNode->Height.IsFit() && ChildNode->Height.Value > 0)
-		SizeBox.Properties.Add(
-			bUseFitOverride ? TEXT("HeightOverride") : TEXT("MinDesiredHeight"),
-			FString::SanitizeFloat(ChildNode->Height.Value));
+	{
+		if (bUseFitOverride)
+		{
+			SizeBox.WidgetStyle.HeightOverride = ChildNode->Height.Value;
+			SizeBox.WidgetStyle.bHasHeightOverride = true;
+		}
+		else
+		{
+			SizeBox.WidgetStyle.MinDesiredHeight = ChildNode->Height.Value;
+			SizeBox.WidgetStyle.bHasMinDesiredHeight = true;
+		}
+	}
 	else if (bPreserveMeasuredFillSize && ChildNode->Height.IsFill() && ChildNode->Height.Value > 0.0f)
-		SizeBox.Properties.Add(TEXT("HeightOverride"), FString::SanitizeFloat(ChildNode->Height.Value));
+	{
+		SizeBox.WidgetStyle.HeightOverride = ChildNode->Height.Value;
+		SizeBox.WidgetStyle.bHasHeightOverride = true;
+	}
 
 	SizeBox.Bounds = ChildWidget.Bounds;
 	SizeBox.Slot = MoveTemp(ChildWidget.Slot);

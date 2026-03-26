@@ -12,6 +12,8 @@
 #include "TextMeasurement.h"
 #include "VisualMapper.h"
 #include "RefExpander.h"
+#include "UMGValueParser.h"
+#include "UMGWidgetNodeAccess.h"
 #include "Misc/PackageName.h"
 
 namespace
@@ -377,8 +379,9 @@ namespace
 		Widget.Type = TEXT("Image");
 
 		const FString TexturePath = GetSourceExtension(Node, TEXT("figma.renderFallbackImageRef"));
-		Widget.Properties.Add(TEXT("TexturePath"), TexturePath);
 		Widget.Brush.TexturePath = TexturePath;
+		Widget.Brush.Image.TexturePath = TexturePath;
+		Widget.Brush.Image.bHasTexturePath = true;
 
 		float WidthOverride = Node->Width.Value;
 		const FString FallbackWidth = GetSourceExtension(Node, TEXT("figma.renderFallbackWidth"));
@@ -396,11 +399,13 @@ namespace
 
 		if (WidthOverride > 0.0f)
 		{
-			Widget.Properties.Add(TEXT("WidthOverride"), FString::SanitizeFloat(WidthOverride));
+			Widget.WidgetStyle.WidthOverride = WidthOverride;
+			Widget.WidgetStyle.bHasWidthOverride = true;
 		}
 		if (HeightOverride > 0.0f)
 		{
-			Widget.Properties.Add(TEXT("HeightOverride"), FString::SanitizeFloat(HeightOverride));
+			Widget.WidgetStyle.HeightOverride = HeightOverride;
+			Widget.WidgetStyle.bHasHeightOverride = true;
 		}
 
 		return Widget;
@@ -408,8 +413,7 @@ namespace
 
 	bool HasWidgetStringProperty(const FUMGWidgetNode& Widget, const TCHAR* Key)
 	{
-		FString Value;
-		return Widget.Properties.TryGetString(Key, Value) && !Value.IsEmpty();
+		return Design2UMGWidgetNodeAccess::HasWidgetString(Widget, Key);
 	}
 
 	bool ShouldLockExplicitFitDimensionForFlow(const TSharedPtr<FDesignNode>& Node)
@@ -466,14 +470,26 @@ namespace
 		Widget.Brush = FUMGVisualBrushData();
 		for (const TCHAR* Key : {TEXT("BrushColor"), TEXT("TexturePath"), TEXT("DrawAs"), TEXT("OutlineThickness"), TEXT("OutlineColor"), TEXT("StrokePadding"), TEXT("StrokeMargin")})
 			Widget.Properties.Remove(Key);
-		Widget.Properties.Add(TEXT("MaterialRef"), TEXT("placeholdersurface"));
-		Widget.Properties.Add(TEXT("MaterialParams"),
-			FString::Printf(TEXT("{\"Color\":\"%s\",\"StripeColor\":\"%s\",\"StripeWidth\":%d,\"StripeGap\":%d,\"Inset\":%d}"),
-				*PlaceholderFillColor, *PlaceholderOutlineColor, Style.StripeWidthPx, Style.StripeGapPx, InsetPx));
+		Widget.Brush.MaterialRef = TEXT("placeholdersurface");
+		Widget.Brush.bHasMaterialRef = true;
+		Widget.Brush.MaterialParams = FString::Printf(
+			TEXT("{\"Color\":\"%s\",\"StripeColor\":\"%s\",\"StripeWidth\":%d,\"StripeGap\":%d,\"Inset\":%d}"),
+			*PlaceholderFillColor,
+			*PlaceholderOutlineColor,
+			Style.StripeWidthPx,
+			Style.StripeGapPx,
+			InsetPx);
+		Widget.Brush.bHasMaterialParams = true;
 		if (Node->Width.Value > 0.0f)
-			Widget.Properties.Add(TEXT("WidthOverride"), FString::SanitizeFloat(Node->Width.Value));
+		{
+			Widget.WidgetStyle.WidthOverride = Node->Width.Value;
+			Widget.WidgetStyle.bHasWidthOverride = true;
+		}
 		if (Node->Height.Value > 0.0f)
-			Widget.Properties.Add(TEXT("HeightOverride"), FString::SanitizeFloat(Node->Height.Value));
+		{
+			Widget.WidgetStyle.HeightOverride = Node->Height.Value;
+			Widget.WidgetStyle.bHasHeightOverride = true;
+		}
 		return true;
 	}
 
@@ -552,11 +568,15 @@ namespace
 		}
 
 		int32 ShadowCount = 0;
-		if (Widget.Properties.TryGetInt(TEXT("BoxShadowCount"), ShadowCount) && ShadowCount > 0)
+		ShadowCount = Widget.Shadow.BoxShadows.Num();
+		if (ShadowCount > 0)
 		{
-			Widget.Properties.Remove(TEXT("BoxShadowCount"));
+			const TArray<FUMGBoxShadowLayerData> BoxShadows = Widget.Shadow.BoxShadows;
+			Widget.Shadow.BoxShadows.Reset();
 			for (int32 Index = 0; Index < ShadowCount; ++Index)
-				Widget = FVisualMapper::WrapWithBoxShadow(MoveTemp(Widget), Node, Index);
+			{
+				Widget = FVisualMapper::WrapWithBoxShadow(MoveTemp(Widget), Node, BoxShadows[Index], Index);
+			}
 		}
 
 		float MaxForegroundBlur = 0.0f;
@@ -930,9 +950,12 @@ namespace
 		Button.Name = Node->Id.IsEmpty() ? TEXT("PrototypeButton") : Node->Id;
 		Button.Bounds = Widget.Bounds;
 		Button.Slot = Widget.Slot;
-		Button.Properties.Add(TEXT("BackgroundColor"), TEXT("#00000000"));
-		Button.Properties.Add(TEXT("HoveredColor"), TEXT("#00000000"));
-		Button.Properties.Add(TEXT("PressedColor"), TEXT("#00000000"));
+		Button.WidgetStyle.BackgroundColor = FLinearColor::Transparent;
+		Button.WidgetStyle.bHasBackgroundColor = true;
+		Button.WidgetStyle.HoveredColor = FLinearColor::Transparent;
+		Button.WidgetStyle.bHasHoveredColor = true;
+		Button.WidgetStyle.PressedColor = FLinearColor::Transparent;
+		Button.WidgetStyle.bHasPressedColor = true;
 
 		Widget.Id = Node->Id + TEXT("_content");
 		Widget.Name = (Node->Name.IsEmpty() ? Node->Id : Node->Name) + TEXT("_content");
@@ -1265,12 +1288,14 @@ FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FConversio
 	{
 		// Stroke-only / no-fill Border should keep transparent interior.
 		// UBorder default brush is opaque white, which can cover siblings.
-		Widget.Properties.Add(TEXT("BrushColor"), TEXT("#00000000"));
+		Widget.Brush.BrushColor = FLinearColor::Transparent;
+		Widget.Brush.bHasBrushColor = true;
 		if (HasWidgetStringProperty(Widget, TEXT("OutlineThickness")))
 		{
 			// Box + WhiteSquareTexture can still flash an opaque interior in UBorder.
 			// RoundedBox with zero radii keeps the interior transparent while preserving the outline.
-			Widget.Properties.Add(TEXT("DrawAs"), TEXT("RoundedBox"));
+			Widget.Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
+			Widget.Brush.bHasDrawAs = true;
 		}
 	}
 
@@ -1286,8 +1311,8 @@ FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FConversio
 			const float CrossAxisGap = Node->FigmaLayout.bHasCounterAxisSpacing
 				? Node->FigmaLayout.CounterAxisSpacing
 				: Node->Gap;
-			Widget.Properties.Add(TEXT("InnerSlotPadding"),
-				FString::Printf(TEXT("%.1f,%.1f"), Node->Gap, CrossAxisGap));
+			Widget.WidgetStyle.InnerSlotPadding = FVector2D(Node->Gap, CrossAxisGap);
+			Widget.WidgetStyle.bHasInnerSlotPadding = true;
 		}
 		else
 		{
@@ -1296,8 +1321,8 @@ FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FConversio
 
 		if (Node->Layout == EDesignLayout::Grid)
 		{
-			Widget.Properties.Add(TEXT("SlotPadding"),
-				FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"), Node->Gap, Node->Gap, Node->Gap, Node->Gap));
+			Widget.WidgetStyle.SlotPadding = FMargin(Node->Gap, Node->Gap, Node->Gap, Node->Gap);
+			Widget.WidgetStyle.bHasSlotPadding = true;
 		}
 	}
 
@@ -1342,7 +1367,8 @@ FUMGWidgetNode CreateTextWidget(const TSharedPtr<FDesignNode>& Node)
 {
 	FUMGWidgetNode Widget;
 	Widget.Type = TEXT("TextBlock");
-	Widget.Properties.Add(TEXT("Text"), Node->Content);
+	Widget.Text.Text = Node->Content;
+	Widget.Text.bHasText = true;
 	ApplyTextProperties(Widget, Node);
 	return Widget;
 }
@@ -1352,8 +1378,6 @@ void ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& 
 	const float ResolvedFontSize = TextMeasurement::ResolveTextFontSizeForUMG(Node);
 	if (ResolvedFontSize > 0)
 	{
-		Widget.Properties.Add(TEXT("FontSize"), FString::SanitizeFloat(ResolvedFontSize));
-		Widget.Properties.Add(TEXT("DesignFontSize"), FString::SanitizeFloat(Node->FontSize));
 		Widget.TextStyle.FontSize = ResolvedFontSize;
 		Widget.TextStyle.SourceFontSize = Node->FontSize;
 	}
@@ -1361,7 +1385,8 @@ void ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& 
 	if (!Node->FontFamily.IsEmpty())
 	{
 		FString AssetPath = FFontResolver::FindFontAssetPath(Node->FontFamily);
-		Widget.Properties.Add(TEXT("FontFamily"), AssetPath.IsEmpty() ? Node->FontFamily : AssetPath);
+		Widget.Text.FontFamily = AssetPath.IsEmpty() ? Node->FontFamily : AssetPath;
+		Widget.Text.bHasFontFamily = true;
 	}
 
 	if (!Node->FontWeight.IsEmpty())
@@ -1369,17 +1394,20 @@ void ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& 
 		FString Typeface = FFontResolver::FindBestTypeface(Node->FontFamily, Node->FontWeight);
 		if (Typeface.IsEmpty())
 			Typeface = FDesignTypeMapper::MapFontWeight(Node->FontWeight).ToString();
-		Widget.Properties.Add(TEXT("TypefaceFontName"), Typeface);
+		Widget.Text.TypefaceFontName = Typeface;
+		Widget.Text.bHasTypefaceFontName = true;
 	}
 
 	if (!Node->FontStyle.IsEmpty())
 	{
-		Widget.Properties.Add(TEXT("FontStyle"), Node->FontStyle);
+		Widget.Text.FontStyle = Node->FontStyle;
+		Widget.Text.bHasFontStyle = true;
 	}
 
-	Widget.Properties.Add(TEXT("Justification"),
+	Widget.Text.Justification =
 		Node->TextAlign == EDesignTextAlign::Center ? TEXT("Center") :
-		Node->TextAlign == EDesignTextAlign::Right ? TEXT("Right") : TEXT("Left"));
+		Node->TextAlign == EDesignTextAlign::Right ? TEXT("Right") : TEXT("Left");
+	Widget.Text.bHasJustification = true;
 
 	const float ResolvedWrapTextAt = TextMeasurement::ResolveTextWrapAt(Node, 0.0f);
 	const bool bNeedsKnownWidthRuntimeWrap =
@@ -1389,16 +1417,20 @@ void ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& 
 		&& !HasNodeMetadataFlag(Node, TEXT("figma.text.truncate"));
 	if (Node->TextAlign == EDesignTextAlign::Justify)
 	{
-		Widget.Properties.Add(TEXT("AutoWrapText"), TEXT("true"));
+		Widget.Text.bAutoWrapText = true;
+		Widget.Text.bHasAutoWrapText = true;
 		if (ResolvedWrapTextAt > 0.0f)
 		{
-			Widget.Properties.Add(TEXT("WrapTextAt"), FString::SanitizeFloat(ResolvedWrapTextAt));
+			Widget.Text.WrapTextAt = ResolvedWrapTextAt;
+			Widget.Text.bHasWrapTextAt = true;
 		}
 	}
 	else if (bNeedsKnownWidthRuntimeWrap && ResolvedWrapTextAt > 0.0f)
 	{
-		Widget.Properties.Add(TEXT("AutoWrapText"), TEXT("true"));
-		Widget.Properties.Add(TEXT("WrapTextAt"), FString::SanitizeFloat(ResolvedWrapTextAt));
+		Widget.Text.bAutoWrapText = true;
+		Widget.Text.bHasAutoWrapText = true;
+		Widget.Text.WrapTextAt = ResolvedWrapTextAt;
+		Widget.Text.bHasWrapTextAt = true;
 	}
 
 	// textAlignVertical is alignment inside the text box, not the parent layout slot.
@@ -1412,26 +1444,31 @@ void ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& 
 			&& !Node->Content.Contains(TEXT("\n"))
 			&& !TextMeasurement::IsWrappingTextMode(Node));
 	if (bApplyRuntimeLineHeight)
-		Widget.Properties.Add(TEXT("LineHeightPercentage"), FString::SanitizeFloat(Node->LineHeight));
+	{
+		Widget.Text.LineHeightPercentage = Node->LineHeight;
+		Widget.Text.bHasLineHeightPercentage = true;
+	}
 
 	if (Node->LetterSpacing != 0)
 	{
-		Widget.Properties.Add(TEXT("LetterSpacing"), FString::SanitizeFloat(Node->LetterSpacing));
 		Widget.TextStyle.LetterSpacing = Node->LetterSpacing;
 		Widget.TextStyle.bHasLetterSpacing = true;
 	}
 
 	if (Node->bUnderline)
 	{
-		Widget.Properties.Add(TEXT("Underline"), TEXT("true"));
+		Widget.Text.bUnderline = true;
+		Widget.Text.bHasUnderline = true;
 	}
 	if (Node->bStrikethrough)
 	{
-		Widget.Properties.Add(TEXT("Strikethrough"), TEXT("true"));
+		Widget.Text.bStrikethrough = true;
+		Widget.Text.bHasStrikethrough = true;
 	}
 	if (!Node->Href.IsEmpty())
 	{
-		Widget.Properties.Add(TEXT("Href"), Node->Href);
+		Widget.Text.Href = Node->Href;
+		Widget.Text.bHasHref = true;
 	}
 
 	switch (Node->TextGrowth)
@@ -1440,18 +1477,22 @@ void ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& 
 	case EDesignTextGrowth::FixedWidthHeight:
 		if (HasNodeMetadataFlag(Node, TEXT("figma.text.truncate")))
 		{
-			Widget.Properties.Add(TEXT("Clipping"), TEXT("ClipToBounds"));
+			Widget.Render.Clipping = TEXT("ClipToBounds");
+			Widget.Render.bHasClipping = true;
 			break;
 		}
 
-		Widget.Properties.Add(TEXT("AutoWrapText"), TEXT("true"));
+		Widget.Text.bAutoWrapText = true;
+		Widget.Text.bHasAutoWrapText = true;
 		if (ResolvedWrapTextAt > 0.0f)
 		{
-			Widget.Properties.Add(TEXT("WrapTextAt"), FString::SanitizeFloat(ResolvedWrapTextAt));
+			Widget.Text.WrapTextAt = ResolvedWrapTextAt;
+			Widget.Text.bHasWrapTextAt = true;
 		}
 		if (Node->TextGrowth == EDesignTextGrowth::FixedWidthHeight)
 		{
-			Widget.Properties.Add(TEXT("Clipping"), TEXT("ClipToBounds"));
+			Widget.Render.Clipping = TEXT("ClipToBounds");
+			Widget.Render.bHasClipping = true;
 		}
 		break;
 	default:
@@ -1460,8 +1501,9 @@ void ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& 
 
 	if (Node->TextAlignVertical != EDesignTextAlignVertical::Top)
 	{
-		Widget.Properties.Add(TEXT("TextAlignVertical"),
-			Node->TextAlignVertical == EDesignTextAlignVertical::Middle ? TEXT("Center") : TEXT("Bottom"));
+		Widget.Text.TextAlignVertical =
+			Node->TextAlignVertical == EDesignTextAlignVertical::Middle ? TEXT("Center") : TEXT("Bottom");
+		Widget.Text.bHasTextAlignVertical = true;
 	}
 }
 
@@ -1535,13 +1577,15 @@ FUMGWidgetNode CreateIconFontWidget(const TSharedPtr<FDesignNode>& Node, FConver
 
 	if (!AssetPath.IsEmpty())
 	{
-		Widget.Properties.Add(TEXT("FontFamily"), AssetPath);
+		Widget.Text.FontFamily = AssetPath;
+		Widget.Text.bHasFontFamily = true;
 		const FString Typeface = !Node->FontWeight.IsEmpty()
 			? FFontResolver::FindBestTypeface(Node->IconFontFamily, Node->FontWeight)
 			: TEXT("Regular");
 		if (!Typeface.IsEmpty())
 		{
-			Widget.Properties.Add(TEXT("TypefaceFontName"), Typeface);
+			Widget.Text.TypefaceFontName = Typeface;
+			Widget.Text.bHasTypefaceFontName = true;
 		}
 	}
 	else if (!Node->IconFontFamily.IsEmpty())
@@ -1559,7 +1603,8 @@ FUMGWidgetNode CreateIconFontWidget(const TSharedPtr<FDesignNode>& Node, FConver
 	}
 
 	// 图标名称即连字文本（如 "dashboard" 在 Material Symbols 中渲染为图标）
-	Widget.Properties.Add(TEXT("IconName"), Node->IconFontName);
+	Widget.Text.IconName = Node->IconFontName;
+	Widget.Text.bHasIconName = true;
 	FString IconText = FFontResolver::FindKnownIconGlyph(Node->IconFontFamily, Node->IconFontName);
 	if (IconText.IsEmpty())
 	{
@@ -1570,16 +1615,22 @@ FUMGWidgetNode CreateIconFontWidget(const TSharedPtr<FDesignNode>& Node, FConver
 		IconText = Settings->MissingIconFontPlaceholder;
 	}
 	if (!IconText.IsEmpty())
-		Widget.Properties.Add(TEXT("Text"), IconText);
+	{
+		Widget.Text.Text = IconText;
+		Widget.Text.bHasText = true;
+	}
 
 	if (Node->FontSize > 0)
 	{
-		Widget.Properties.Add(TEXT("FontSize"), FString::SanitizeFloat(Node->FontSize));
 		Widget.TextStyle.FontSize = Node->FontSize;
+		Widget.TextStyle.SourceFontSize = Node->FontSize;
 	}
 
 	if (Node->Fill.Type == EDesignFillType::Color)
-		Widget.Properties.Add(TEXT("Color"), Node->Fill.SolidColor);
+	{
+		Widget.Text.Color = FUMGValueParser::ParseColor(Node->Fill.SolidColor);
+		Widget.Text.bHasColor = true;
+	}
 
 	return Widget;
 }

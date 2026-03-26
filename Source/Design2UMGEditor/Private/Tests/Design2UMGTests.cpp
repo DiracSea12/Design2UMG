@@ -11,18 +11,24 @@
 #include "UMGJsonSerializer.h"
 #include "UMGPropertyKeys.h"
 #include "UMGValueParser.h"
+#include "UMGWidgetNodeAccess.h"
 #include "UMGWidgetUtils.h"
 #include "VisualMapper.h"
 #include "FigmaParser.h"
 #include "DesignPathRasterizer.h"
 #include "ProceduralShapeGenerator.h"
+#include "Dom/JsonObject.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Components/RetainerBox.h"
 #include "Components/EditableTextBox.h"
 #include "Components/TextBlock.h"
 #include "Components/WidgetSwitcher.h"
 #include "Engine/Texture2D.h"
+#include "TextureResource.h"
+#include "UObject/UObjectGlobals.h"
 #if WITH_AUTOMATION_WORKER
 using namespace Design2UMGTestUtils;
 namespace
@@ -172,7 +178,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPropertyBagEmptyStringStillAppliesTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FPropertyBagEmptyStringStillAppliesTest::RunTest(const FString& Parameters)
 {
-	UEditableTextBox* Widget = NewObject<UEditableTextBox>(GetTransientPackage());
+	UEditableTextBox* Widget = NewObject<UEditableTextBox>(GetTransientPackageAsObject());
 	TestTrue(TEXT("EditableTextBox created"), Widget != nullptr);
 	if (!Widget)
 	{
@@ -417,6 +423,10 @@ bool FVisualMapperWrapWithBorderDirectTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("RenderOpacity moved to outer border"), GetWidgetProperty(Wrapped, TEXT("RenderOpacity")), TEXT("0.6"));
 	TestEqual(TEXT("RenderAngle moved to outer border"), GetWidgetProperty(Wrapped, TEXT("RenderAngle")), TEXT("15.0"));
 	TestEqual(TEXT("Clipping moved to outer border"), GetWidgetProperty(Wrapped, TEXT("Clipping")), TEXT("ClipToBounds"));
+	TestFalse(TEXT("Outer border should not keep legacy BrushColor"), HasLegacyWidgetProperty(Wrapped, TEXT("BrushColor")));
+	TestFalse(TEXT("Outer border should not keep legacy RenderOpacity"), HasLegacyWidgetProperty(Wrapped, TEXT("RenderOpacity")));
+	TestFalse(TEXT("Outer border should not keep legacy RenderAngle"), HasLegacyWidgetProperty(Wrapped, TEXT("RenderAngle")));
+	TestFalse(TEXT("Outer border should not keep legacy Clipping"), HasLegacyWidgetProperty(Wrapped, TEXT("Clipping")));
 	TestEqual(TEXT("Wrapped child count"), Wrapped.Children.Num(), 1);
 	if (Wrapped.Children.Num() != 1)
 	{
@@ -430,6 +440,55 @@ bool FVisualMapperWrapWithBorderDirectTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Inner widget should not keep RenderOpacity"), HasWidgetProperty(Inner, TEXT("RenderOpacity")));
 	TestFalse(TEXT("Inner widget should not keep RenderAngle"), HasWidgetProperty(Inner, TEXT("RenderAngle")));
 	TestFalse(TEXT("Inner widget should not keep Clipping"), HasWidgetProperty(Inner, TEXT("Clipping")));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperWrapWithBorderTypedTest,
+	"Design2UMG.VisualMapper.WrapWithBorderTyped",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperWrapWithBorderTypedTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
+	Node->Type = EDesignNodeType::Frame;
+	Node->Opacity = 1.0f;
+
+	FUMGWidgetNode Widget;
+	Widget.Type = TEXT("Border");
+	Widget.Id = TEXT("typed_panel");
+	Widget.Name = TEXT("TypedPanel");
+	Widget.Bounds.W = 320.0f;
+	Widget.Bounds.H = 72.0f;
+	Widget.Brush.BrushColor = FLinearColor(0.25f, 0.5f, 0.75f, 1.0f);
+	Widget.Brush.bHasBrushColor = true;
+	Widget.Render.RenderOpacity = 0.55f;
+	Widget.Render.bHasRenderOpacity = true;
+	Widget.Render.RenderAngle = 12.0f;
+	Widget.Render.bHasRenderAngle = true;
+	Widget.Render.Clipping = TEXT("ClipToBounds");
+	Widget.Render.bHasClipping = true;
+
+	FUMGWidgetNode Wrapped = FVisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
+	TestEqual(TEXT("Typed wrapped node remains Border"), Wrapped.Type, TEXT("Border"));
+	TestEqual(TEXT("Typed brush color moved to outer border"), GetWidgetProperty(Wrapped, TEXT("BrushColor")), TEXT("#89BCE1FF"));
+	TestTrue(TEXT("Typed render opacity moved to outer border"),
+		FMath::IsNearlyEqual(FCString::Atof(*GetWidgetProperty(Wrapped, TEXT("RenderOpacity"))), 0.55f, 0.0001f));
+	TestTrue(TEXT("Typed render angle moved to outer border"),
+		FMath::IsNearlyEqual(FCString::Atof(*GetWidgetProperty(Wrapped, TEXT("RenderAngle"))), 12.0f, 0.0001f));
+	TestEqual(TEXT("Typed clipping moved to outer border"), GetWidgetProperty(Wrapped, TEXT("Clipping")), TEXT("ClipToBounds"));
+	TestFalse(TEXT("Typed outer border should not synthesize legacy BrushColor"), HasLegacyWidgetProperty(Wrapped, TEXT("BrushColor")));
+	TestFalse(TEXT("Typed outer border should not synthesize legacy RenderOpacity"), HasLegacyWidgetProperty(Wrapped, TEXT("RenderOpacity")));
+	TestFalse(TEXT("Typed outer border should not synthesize legacy RenderAngle"), HasLegacyWidgetProperty(Wrapped, TEXT("RenderAngle")));
+	TestFalse(TEXT("Typed outer border should not synthesize legacy Clipping"), HasLegacyWidgetProperty(Wrapped, TEXT("Clipping")));
+	TestEqual(TEXT("Typed wrapped child count"), Wrapped.Children.Num(), 1);
+	if (Wrapped.Children.Num() != 1)
+	{
+		return false;
+	}
+
+	const FUMGWidgetNode& Inner = Wrapped.Children[0];
+	TestFalse(TEXT("Typed inner widget should not keep BrushColor"), HasWidgetProperty(Inner, TEXT("BrushColor")));
+	TestFalse(TEXT("Typed inner widget should not keep RenderOpacity"), HasWidgetProperty(Inner, TEXT("RenderOpacity")));
+	TestFalse(TEXT("Typed inner widget should not keep RenderAngle"), HasWidgetProperty(Inner, TEXT("RenderAngle")));
+	TestFalse(TEXT("Typed inner widget should not keep Clipping"), HasWidgetProperty(Inner, TEXT("Clipping")));
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLayoutMapperDirectHelpersTest,
@@ -699,9 +758,9 @@ bool FRefFillClearSuppressesInheritedStrokeFillTest::RunTest(const FString& Para
 	TestTrue(TEXT("Outlined item exists"), OutlinedItem != nullptr);
 	if (OutlinedItem != nullptr)
 	{
-		TestEqual(TEXT("Explicit stroke fill should be preserved"),
-			GetWidgetProperty(*OutlinedItem, TEXT("OutlineColor")),
-			TEXT("#888888"));
+		const FLinearColor OutlineColor = FUMGValueParser::ParseColor(GetWidgetProperty(*OutlinedItem, TEXT("OutlineColor")));
+		TestTrue(TEXT("Explicit stroke fill should be preserved"),
+			OutlineColor.Equals(FUMGValueParser::ParseColor(TEXT("#888888")), 0.001f));
 	}
 	return true;
 }
@@ -2114,7 +2173,10 @@ bool FPathStrokeOnlyIconRasterizationTest::RunTest(const FString& Parameters)
 	}
 
 	TestEqual(TEXT("Stroke-only path converts to image widget"), Widget->Type, TEXT("Image"));
-	TestEqual(TEXT("Stroke color propagated"), GetWidgetProperty(*Widget, UMGPropertyKeys::PathStrokeColor), TEXT("#111111"));
+	TestTrue(
+		TEXT("Stroke color propagated"),
+		FUMGValueParser::ParseColor(GetWidgetProperty(*Widget, UMGPropertyKeys::PathStrokeColor))
+			.Equals(FUMGValueParser::ParseColor(TEXT("#111111")), 0.0001f));
 	TestEqual(TEXT("Stroke thickness propagated"), GetWidgetProperty(*Widget, UMGPropertyKeys::PathStrokeThickness), TEXT("1.5"));
 	TestEqual(TEXT("Stroke cap propagated"), GetWidgetProperty(*Widget, UMGPropertyKeys::PathStrokeCap), TEXT("round"));
 	TestEqual(TEXT("Stroke join propagated"), GetWidgetProperty(*Widget, UMGPropertyKeys::PathStrokeJoin), TEXT("round"));
@@ -2309,12 +2371,179 @@ bool FBackgroundBlurUsesTypedEffectDataTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaEffectsConvertToTypedWrappersTest,
+	"Design2UMG.FigmaParser.EffectsConvertToTypedWrappers",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaEffectsConvertToTypedWrappersTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page",
+				"type": "CANVAS",
+				"children": [{
+					"id": "1:1",
+					"name": "EffectCard",
+					"type": "FRAME",
+					"visible": true,
+					"absoluteBoundingBox": {"x":0,"y":0,"width":180,"height":96},
+					"absoluteRenderBounds": {"x":0,"y":0,"width":180,"height":96},
+					"effects": [
+						{
+							"type": "INNER_SHADOW",
+							"visible": true,
+							"blendMode": "NORMAL",
+							"offset": {"x":4,"y":-2},
+							"radius": 12,
+							"color": {"r":0,"g":0,"b":0,"a":0.3}
+						},
+						{
+							"type": "BACKGROUND_BLUR",
+							"visible": true,
+							"radius": 16
+						}
+					],
+					"children": [{
+						"id": "1:2",
+						"name": "Title",
+						"type": "TEXT",
+						"visible": true,
+						"absoluteBoundingBox": {"x":16,"y":20,"width":80,"height":24},
+						"characters": "Fx",
+						"style": {"fontFamily":"Inter","fontSize":20,"fontWeight":500,"textAlignHorizontal":"LEFT","textAlignVertical":"TOP","textDecoration":"NONE","letterSpacing":0,"lineHeightUnit":"AUTO","lineHeightPx":0}
+					}]
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Figma effect wrapper fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
+
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	TestEqual(TEXT("Figma background blur becomes outer wrapper"), Data.RootWidget.Type, TEXT("BackgroundBlur"));
+	TestTrue(TEXT("Figma background blur keeps typed strength"), Data.RootWidget.Effect.bHasBlurStrength && FMath::IsNearlyEqual(Data.RootWidget.Effect.BlurStrength, 16.0f, 0.001f));
+	TestTrue(TEXT("Figma background blur keeps one child"), Data.RootWidget.Children.Num() == 1);
+	if (Data.RootWidget.Children.Num() != 1)
+	{
+		return false;
+	}
+
+	const FUMGWidgetNode& InnerShadowWrapper = Data.RootWidget.Children[0];
+	TestEqual(TEXT("Figma inner shadow becomes retainer child"), InnerShadowWrapper.Type, TEXT("RetainerBox"));
+	TestTrue(TEXT("Figma inner shadow retain rendering typed"), InnerShadowWrapper.Effect.bHasRetainRendering && InnerShadowWrapper.Effect.bRetainRendering);
+	TestEqual(TEXT("Figma inner shadow effect material typed"), InnerShadowWrapper.Effect.EffectMaterial, TEXT("d2u.retainer.inner_shadow"));
+	TestTrue(TEXT("Figma inner shadow offset typed"), InnerShadowWrapper.Effect.bHasEffectOffset);
+	TestTrue(TEXT("Figma inner shadow blur typed"), InnerShadowWrapper.Effect.bHasEffectBlurUVStep);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLayerBlurConvertsToForegroundBlurWrapperTest,
+	"Design2UMG.FigmaParser.LayerBlurConvertsToForegroundBlurWrapper",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaLayerBlurConvertsToForegroundBlurWrapperTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page",
+				"type": "CANVAS",
+				"children": [{
+					"id": "1:1",
+					"name": "BlurCard",
+					"type": "FRAME",
+					"visible": true,
+					"absoluteBoundingBox": {"x":0,"y":0,"width":160,"height":80},
+					"absoluteRenderBounds": {"x":0,"y":0,"width":160,"height":80},
+					"effects": [{
+						"type": "LAYER_BLUR",
+						"visible": true,
+						"radius": 14
+					}],
+					"children": []
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Figma layer blur fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
+
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	TestEqual(TEXT("Figma layer blur becomes foreground retainer wrapper"), Data.RootWidget.Type, TEXT("RetainerBox"));
+	TestTrue(TEXT("Figma layer blur retain rendering typed"), Data.RootWidget.Effect.bHasRetainRendering && Data.RootWidget.Effect.bRetainRendering);
+	TestEqual(TEXT("Figma layer blur effect material typed"), Data.RootWidget.Effect.EffectMaterial, TEXT("d2u.retainer.foreground_blur"));
+	TestTrue(TEXT("Figma layer blur UV step typed"), Data.RootWidget.Effect.bHasEffectBlurUVStep);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaDropShadowConvertsToBoxShadowWrapperTest,
+	"Design2UMG.FigmaParser.DropShadowConvertsToBoxShadowWrapper",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaDropShadowConvertsToBoxShadowWrapperTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page",
+				"type": "CANVAS",
+				"children": [{
+					"id": "1:1",
+					"name": "ShadowCard",
+					"type": "RECTANGLE",
+					"visible": true,
+					"absoluteBoundingBox": {"x":0,"y":0,"width":160,"height":80},
+					"absoluteRenderBounds": {"x":0,"y":0,"width":160,"height":80},
+					"fills": [{"type":"SOLID","visible":true,"color":{"r":1,"g":1,"b":1,"a":1}}],
+					"effects": [{
+						"type": "DROP_SHADOW",
+						"visible": true,
+						"blendMode": "NORMAL",
+						"offset": {"x":6,"y":4},
+						"radius": 10,
+						"spread": 2,
+						"color": {"r":0,"g":0,"b":0,"a":0.2}
+					}],
+					"children": []
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Figma drop shadow fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
+
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	TestEqual(TEXT("Figma outer shadow becomes overlay wrapper"), Data.RootWidget.Type, TEXT("Overlay"));
+	TestTrue(TEXT("Figma outer shadow wrapper keeps shadow and content children"), Data.RootWidget.Children.Num() == 2);
+	if (Data.RootWidget.Children.Num() != 2)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Figma outer shadow synthetic shadow node is image"), Data.RootWidget.Children[0].Type, TEXT("Image"));
+	TestTrue(TEXT("Figma outer shadow synthetic blur typed"), Data.RootWidget.Children[0].Shadow.bHasShadowBlur && FMath::IsNearlyEqual(Data.RootWidget.Children[0].Shadow.ShadowBlur, 10.0f, 0.001f));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRetainerEffectMaterialApplicationTest,
 	"Design2UMG.PropertyApplier.RetainerEffectMaterialForegroundBlur",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FRetainerEffectMaterialApplicationTest::RunTest(const FString& Parameters)
 {
-	URetainerBox* Widget = NewObject<URetainerBox>(GetTransientPackage());
+	URetainerBox* Widget = NewObject<URetainerBox>(GetTransientPackageAsObject());
 	TestTrue(TEXT("RetainerBox created"), Widget != nullptr);
 	if (!Widget)
 	{
@@ -2349,7 +2578,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FInnerShadowRetainerMaterialApplicationTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FInnerShadowRetainerMaterialApplicationTest::RunTest(const FString& Parameters)
 {
-	URetainerBox* Widget = NewObject<URetainerBox>(GetTransientPackage());
+	URetainerBox* Widget = NewObject<URetainerBox>(GetTransientPackageAsObject());
 	TestTrue(TEXT("Inner shadow RetainerBox created"), Widget != nullptr);
 	if (!Widget)
 	{
@@ -2394,7 +2623,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWidgetSwitcherUsesTypedStateTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FWidgetSwitcherUsesTypedStateTest::RunTest(const FString& Parameters)
 {
-	UWidgetSwitcher* Widget = NewObject<UWidgetSwitcher>(GetTransientPackage());
+	UWidgetSwitcher* Widget = NewObject<UWidgetSwitcher>(GetTransientPackageAsObject());
 	TestTrue(TEXT("WidgetSwitcher created"), Widget != nullptr);
 	if (!Widget)
 	{
@@ -2464,6 +2693,428 @@ bool FWidgetStateJsonRoundTripTest::RunTest(const FString& Parameters)
 	int32 LegacyActiveWidgetIndex = 0;
 	TestFalse(TEXT("Widget state round-trip does not rehydrate legacy ActiveWidgetIndex"),
 		ParsedData.RootWidget.Properties.TryGetInt(UMGPropertyKeys::ActiveWidgetIndex, LegacyActiveWidgetIndex));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLegacyBrushAndTextStyleJsonNormalizationTest,
+	"Design2UMG.UMGJson.LegacyBrushAndTextStyleNormalization",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FLegacyBrushAndTextStyleJsonNormalizationTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"WidgetName": "WBP_LegacyTypedNormalization",
+		"RootWidget": {
+			"Type": "CanvasPanel",
+			"Id": "root",
+			"Name": "Root",
+			"Slot": {},
+			"Children": [
+				{
+					"Type": "TextBlock",
+					"Id": "text_legacy",
+					"Name": "LegacyText",
+					"Properties": {
+						"Text": "Hello",
+						"FontSize": "18.0",
+						"DesignFontSize": "24.0",
+						"LetterSpacing": "1.5"
+					},
+					"Slot": {}
+				},
+				{
+					"Type": "Border",
+					"Id": "border_legacy",
+					"Name": "LegacyBorder",
+					"Properties": {
+						"DrawAs": "RoundedBox",
+						"BrushColor": "#112233FF",
+						"OutlineColor": "#445566FF",
+						"OutlineThickness": "2.5",
+						"OutlineCornerRadius": "8.0"
+					},
+					"Slot": {}
+				},
+				{
+					"Type": "Image",
+					"Id": "image_legacy",
+					"Name": "LegacyImage",
+					"Properties": {
+						"MaterialRef": "gradientlinear",
+						"MaterialParams": "{\"Rotation\":0.0,\"ColorStart\":\"#FFFFFFFF\",\"ColorEnd\":\"#000000FF\"}",
+						"TexturePath": "/Game/UI/T_Test.T_Test"
+					},
+					"Slot": {}
+				},
+				{
+					"Type": "Border",
+					"Id": "render_legacy",
+					"Name": "LegacyRender",
+					"Properties": {
+						"Visibility": "SelfHitTestInvisible",
+						"ToolTipText": "legacy tooltip",
+						"IsEnabled": "false",
+						"Clipping": "ClipToBounds",
+						"RenderOpacity": "0.6",
+						"RenderAngle": "15.0",
+						"RenderTransformPivot": "0.25,0.75",
+						"RenderScale": "1.25,0.8",
+						"RenderTransformScale": "-1.0,1.0",
+						"RenderTranslation": "12.0,6.0"
+					},
+					"Slot": {}
+				}
+			]
+		}
+	})");
+
+	FUMGWidgetData ParsedData;
+	FString ParseError;
+	TestTrue(TEXT("Legacy typed normalization JSON parses"), FUMGJsonParser::ParseJson(Json, ParsedData, &ParseError));
+	if (!ParseError.IsEmpty())
+	{
+		AddInfo(ParseError);
+	}
+
+	const FUMGWidgetNode* TextNode = FindWidgetById(ParsedData.RootWidget, TEXT("text_legacy"));
+	const FUMGWidgetNode* BorderNode = FindWidgetById(ParsedData.RootWidget, TEXT("border_legacy"));
+	const FUMGWidgetNode* ImageNode = FindWidgetById(ParsedData.RootWidget, TEXT("image_legacy"));
+	const FUMGWidgetNode* RenderNode = FindWidgetById(ParsedData.RootWidget, TEXT("render_legacy"));
+	TestTrue(TEXT("Legacy text node found"), TextNode != nullptr);
+	TestTrue(TEXT("Legacy border node found"), BorderNode != nullptr);
+	TestTrue(TEXT("Legacy image node found"), ImageNode != nullptr);
+	TestTrue(TEXT("Legacy render node found"), RenderNode != nullptr);
+	if (!TextNode || !BorderNode || !ImageNode || !RenderNode)
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("Legacy text font size normalized to typed field"), FMath::IsNearlyEqual(TextNode->TextStyle.FontSize, 18.0f, 0.001f));
+	TestTrue(TEXT("Legacy text source font size normalized to typed field"), FMath::IsNearlyEqual(TextNode->TextStyle.SourceFontSize, 24.0f, 0.001f));
+	TestTrue(TEXT("Legacy text letter spacing normalized to typed field"), TextNode->TextStyle.bHasLetterSpacing && FMath::IsNearlyEqual(TextNode->TextStyle.LetterSpacing, 1.5f, 0.001f));
+	TestFalse(TEXT("Legacy text font size removed from property bag"), HasLegacyWidgetProperty(*TextNode, TEXT("FontSize")));
+	TestFalse(TEXT("Legacy text design font size removed from property bag"), HasLegacyWidgetProperty(*TextNode, TEXT("DesignFontSize")));
+	TestFalse(TEXT("Legacy text letter spacing removed from property bag"), HasLegacyWidgetProperty(*TextNode, TEXT("LetterSpacing")));
+
+	TestTrue(TEXT("Legacy border draw type normalized to typed brush"), BorderNode->Brush.bHasDrawAs && BorderNode->Brush.DrawAs == ESlateBrushDrawType::RoundedBox);
+	TestTrue(TEXT("Legacy border brush color normalized to typed brush"), BorderNode->Brush.bHasBrushColor);
+	TestTrue(TEXT("Legacy border outline color normalized to typed brush"), BorderNode->Brush.bHasOutlineColor);
+	TestTrue(TEXT("Legacy border outline thickness normalized to typed brush"), FMath::IsNearlyEqual(BorderNode->Brush.OutlineThickness, 2.5f, 0.001f));
+	TestTrue(TEXT("Legacy border corner radius normalized to typed brush"), FMath::IsNearlyEqual(BorderNode->Brush.OutlineCornerRadius, 8.0f, 0.001f));
+	TestFalse(TEXT("Legacy border draw type removed from property bag"), HasLegacyWidgetProperty(*BorderNode, TEXT("DrawAs")));
+	TestFalse(TEXT("Legacy border brush color removed from property bag"), HasLegacyWidgetProperty(*BorderNode, TEXT("BrushColor")));
+	TestFalse(TEXT("Legacy border outline color removed from property bag"), HasLegacyWidgetProperty(*BorderNode, TEXT("OutlineColor")));
+
+	TestEqual(TEXT("Legacy image material ref normalized to typed brush"), ImageNode->Brush.MaterialRef, TEXT("gradientlinear"));
+	TestTrue(TEXT("Legacy image material params normalized to typed brush"), ImageNode->Brush.MaterialParams.Contains(TEXT("\"Rotation\":0.0")));
+	TestEqual(TEXT("Legacy image texture path normalized to typed brush"), ImageNode->Brush.TexturePath, TEXT("/Game/UI/T_Test.T_Test"));
+	TestTrue(TEXT("Legacy image texture path normalized to typed image data"), ImageNode->Brush.Image.bHasTexturePath && ImageNode->Brush.Image.TexturePath == TEXT("/Game/UI/T_Test.T_Test"));
+	TestFalse(TEXT("Legacy image material ref removed from property bag"), HasLegacyWidgetProperty(*ImageNode, TEXT("MaterialRef")));
+	TestFalse(TEXT("Legacy image texture path removed from property bag"), HasLegacyWidgetProperty(*ImageNode, TEXT("TexturePath")));
+
+	TestTrue(TEXT("Legacy render visibility normalized to typed widget style"), RenderNode->WidgetStyle.bHasVisibility && RenderNode->WidgetStyle.Visibility == TEXT("SelfHitTestInvisible"));
+	TestTrue(TEXT("Legacy render tooltip normalized to typed widget style"), RenderNode->WidgetStyle.bHasToolTipText && RenderNode->WidgetStyle.ToolTipText == TEXT("legacy tooltip"));
+	TestTrue(TEXT("Legacy render enabled normalized to typed widget style"), RenderNode->WidgetStyle.bHasIsEnabled && !RenderNode->WidgetStyle.bIsEnabled);
+	TestTrue(TEXT("Legacy render clipping normalized to typed render"), RenderNode->Render.bHasClipping && RenderNode->Render.Clipping == TEXT("ClipToBounds"));
+	TestTrue(TEXT("Legacy render opacity normalized to typed render"), RenderNode->Render.bHasRenderOpacity && FMath::IsNearlyEqual(RenderNode->Render.RenderOpacity, 0.6f, 0.001f));
+	TestTrue(TEXT("Legacy render angle normalized to typed render"), RenderNode->Render.bHasRenderAngle && FMath::IsNearlyEqual(RenderNode->Render.RenderAngle, 15.0f, 0.001f));
+	TestTrue(TEXT("Legacy render pivot normalized to typed render"), RenderNode->Render.bHasRenderTransformPivot && RenderNode->Render.RenderTransformPivot.Equals(FVector2D(0.25f, 0.75f), 0.001f));
+	TestTrue(TEXT("Legacy render scale normalized to typed render"), RenderNode->Render.bHasRenderScale && RenderNode->Render.RenderScale.Equals(FVector2D(1.25f, 0.8f), 0.001f));
+	TestTrue(TEXT("Legacy render transform scale normalized to typed render"), RenderNode->Render.bHasRenderTransformScale && RenderNode->Render.RenderTransformScale.Equals(FVector2D(-1.0f, 1.0f), 0.001f));
+	TestTrue(TEXT("Legacy render translation normalized to typed render"), RenderNode->Render.bHasRenderTranslation && RenderNode->Render.RenderTranslation.Equals(FVector2D(12.0f, 6.0f), 0.001f));
+	TestFalse(TEXT("Legacy render visibility removed from property bag"), HasLegacyWidgetProperty(*RenderNode, TEXT("Visibility")));
+	TestFalse(TEXT("Legacy render tooltip removed from property bag"), HasLegacyWidgetProperty(*RenderNode, TEXT("ToolTipText")));
+	TestFalse(TEXT("Legacy render enabled removed from property bag"), HasLegacyWidgetProperty(*RenderNode, TEXT("IsEnabled")));
+	TestFalse(TEXT("Legacy render clipping removed from property bag"), HasLegacyWidgetProperty(*RenderNode, TEXT("Clipping")));
+	TestFalse(TEXT("Legacy render opacity removed from property bag"), HasLegacyWidgetProperty(*RenderNode, TEXT("RenderOpacity")));
+	TestFalse(TEXT("Legacy render angle removed from property bag"), HasLegacyWidgetProperty(*RenderNode, TEXT("RenderAngle")));
+	TestFalse(TEXT("Legacy render pivot removed from property bag"), HasLegacyWidgetProperty(*RenderNode, TEXT("RenderTransformPivot")));
+	TestFalse(TEXT("Legacy render scale removed from property bag"), HasLegacyWidgetProperty(*RenderNode, TEXT("RenderScale")));
+	TestFalse(TEXT("Legacy render transform scale removed from property bag"), HasLegacyWidgetProperty(*RenderNode, TEXT("RenderTransformScale")));
+	TestFalse(TEXT("Legacy render translation removed from property bag"), HasLegacyWidgetProperty(*RenderNode, TEXT("RenderTranslation")));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTypedEmptyStringSuppressesLegacyFallbackTest,
+	"Design2UMG.WidgetNodeAccess.TypedEmptyStringSuppressesLegacyFallback",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTypedEmptyStringSuppressesLegacyFallbackTest::RunTest(const FString& Parameters)
+{
+	FUMGWidgetNode Node;
+	Node.Type = TEXT("Border");
+	Node.Id = TEXT("typed_empty");
+	Node.Name = TEXT("TypedEmpty");
+	Node.WidgetStyle.Visibility = TEXT("");
+	Node.WidgetStyle.bHasVisibility = true;
+	Node.Properties.Add(UMGPropertyKeys::Visibility, TEXT("SelfHitTestInvisible"));
+	Node.Properties.Add(TEXT("CustomMeta"), TEXT("KeepMe"));
+
+	FString Value;
+	TestTrue(TEXT("Typed empty string is still readable"), Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::Visibility, Value));
+	TestTrue(TEXT("Typed empty string stays empty"), Value.IsEmpty());
+	TestFalse(TEXT("HasWidgetString keeps empty string as absent"), Design2UMGWidgetNodeAccess::HasWidgetString(Node, UMGPropertyKeys::Visibility));
+
+	const FUMGPropertyBag TypedProperties = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
+	TestTrue(TEXT("Typed property bag keeps empty-string override"), TypedProperties.TryGetString(UMGPropertyKeys::Visibility, Value));
+	TestTrue(TEXT("Typed property bag preserves empty-string payload"), Value.IsEmpty());
+
+	const FUMGPropertyBag LegacyFallback = Design2UMGWidgetNodeAccess::BuildLegacyFallbackPropertyBag(Node);
+	TestFalse(TEXT("Legacy fallback bag drops overridden typed key"), LegacyFallback.TryGetString(UMGPropertyKeys::Visibility, Value));
+	TestTrue(TEXT("Legacy fallback bag keeps unrelated properties"), LegacyFallback.TryGetString(TEXT("CustomMeta"), Value));
+	TestEqual(TEXT("Legacy fallback keeps unrelated property value"), Value, TEXT("KeepMe"));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTypedJsonEmptyStringOverrideNormalizationTest,
+	"Design2UMG.UMGJson.TypedEmptyStringOverrideNormalization",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTypedJsonEmptyStringOverrideNormalizationTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"WidgetName": "WBP_TypedEmptyStringOverride",
+		"RootWidget": {
+			"Type": "CanvasPanel",
+			"Id": "root",
+			"Name": "Root",
+			"Slot": {},
+			"Children": [
+				{
+					"Type": "Border",
+					"Id": "typed_empty",
+					"Name": "TypedEmpty",
+					"WidgetStyle": {
+						"Visibility": "",
+						"ToolTipText": ""
+					},
+					"Brush": {
+						"MaterialRef": "",
+						"MaterialParams": ""
+					},
+					"Effect": {
+						"EffectMaterial": "",
+						"TextureParameter": ""
+					},
+					"Render": {
+						"Clipping": ""
+					},
+					"Properties": {
+						"Visibility": "SelfHitTestInvisible",
+						"ToolTipText": "legacy tooltip",
+						"MaterialRef": "gradientlinear",
+						"MaterialParams": "{\"Rotation\":90.0}",
+						"EffectMaterial": "d2u.retainer.foreground_blur",
+						"TextureParameter": "Texture",
+						"Clipping": "ClipToBounds",
+						"CustomMeta": "KeepMe"
+					},
+					"Slot": {}
+				}
+			]
+		}
+	})");
+
+	FUMGWidgetData ParsedData;
+	FString ParseError;
+	TestTrue(TEXT("Typed empty-string override JSON parses"), FUMGJsonParser::ParseJson(Json, ParsedData, &ParseError));
+	if (!ParseError.IsEmpty())
+	{
+		AddInfo(ParseError);
+	}
+
+	const FUMGWidgetNode* Node = FindWidgetById(ParsedData.RootWidget, TEXT("typed_empty"));
+	TestTrue(TEXT("Typed empty override node found"), Node != nullptr);
+	if (!Node)
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("Typed empty visibility presence preserved"), Node->WidgetStyle.bHasVisibility);
+	TestTrue(TEXT("Typed empty tooltip presence preserved"), Node->WidgetStyle.bHasToolTipText);
+	TestTrue(TEXT("Typed empty brush material ref presence preserved"), Node->Brush.bHasMaterialRef);
+	TestTrue(TEXT("Typed empty brush material params presence preserved"), Node->Brush.bHasMaterialParams);
+	TestTrue(TEXT("Typed empty effect material presence preserved"), Node->Effect.bHasEffectMaterial);
+	TestTrue(TEXT("Typed empty texture parameter presence preserved"), Node->Effect.bHasTextureParameter);
+	TestTrue(TEXT("Typed empty clipping presence preserved"), Node->Render.bHasClipping);
+	TestTrue(TEXT("Typed empty visibility payload preserved"), Node->WidgetStyle.Visibility.IsEmpty());
+	TestTrue(TEXT("Typed empty tooltip payload preserved"), Node->WidgetStyle.ToolTipText.IsEmpty());
+	TestTrue(TEXT("Typed empty brush material ref payload preserved"), Node->Brush.MaterialRef.IsEmpty());
+	TestTrue(TEXT("Typed empty brush material params payload preserved"), Node->Brush.MaterialParams.IsEmpty());
+	TestTrue(TEXT("Typed empty effect material payload preserved"), Node->Effect.EffectMaterial.IsEmpty());
+	TestTrue(TEXT("Typed empty texture parameter payload preserved"), Node->Effect.TextureParameter.IsEmpty());
+	TestTrue(TEXT("Typed empty clipping payload preserved"), Node->Render.Clipping.IsEmpty());
+
+	TestTrue(TEXT("Helper returns typed empty visibility"), GetWidgetProperty(*Node, UMGPropertyKeys::Visibility).IsEmpty());
+	TestTrue(TEXT("Helper returns typed empty tooltip"), GetWidgetProperty(*Node, UMGPropertyKeys::ToolTipText).IsEmpty());
+	TestTrue(TEXT("Helper returns typed empty brush material ref"), GetWidgetProperty(*Node, UMGPropertyKeys::MaterialRef).IsEmpty());
+	TestTrue(TEXT("Helper returns typed empty brush material params"), GetWidgetProperty(*Node, UMGPropertyKeys::MaterialParams).IsEmpty());
+	TestTrue(TEXT("Helper returns typed empty effect material"), GetWidgetProperty(*Node, UMGPropertyKeys::EffectMaterial).IsEmpty());
+	TestTrue(TEXT("Helper returns typed empty texture parameter"), GetWidgetProperty(*Node, UMGPropertyKeys::TextureParameter).IsEmpty());
+	TestTrue(TEXT("Helper returns typed empty clipping"), GetWidgetProperty(*Node, UMGPropertyKeys::Clipping).IsEmpty());
+	TestFalse(TEXT("Legacy visibility stripped after typed override"), HasLegacyWidgetProperty(*Node, UMGPropertyKeys::Visibility));
+	TestFalse(TEXT("Legacy tooltip stripped after typed override"), HasLegacyWidgetProperty(*Node, UMGPropertyKeys::ToolTipText));
+	TestFalse(TEXT("Legacy brush material ref stripped after typed override"), HasLegacyWidgetProperty(*Node, UMGPropertyKeys::MaterialRef));
+	TestFalse(TEXT("Legacy brush material params stripped after typed override"), HasLegacyWidgetProperty(*Node, UMGPropertyKeys::MaterialParams));
+	TestFalse(TEXT("Legacy effect material stripped after typed override"), HasLegacyWidgetProperty(*Node, UMGPropertyKeys::EffectMaterial));
+	TestFalse(TEXT("Legacy texture parameter stripped after typed override"), HasLegacyWidgetProperty(*Node, UMGPropertyKeys::TextureParameter));
+	TestFalse(TEXT("Legacy clipping stripped after typed override"), HasLegacyWidgetProperty(*Node, UMGPropertyKeys::Clipping));
+	FString RemainingLegacyValue;
+	TestTrue(TEXT("Unrelated legacy property remains"), Node->Properties.TryGetString(TEXT("CustomMeta"), RemainingLegacyValue));
+	TestEqual(TEXT("Unrelated legacy property value preserved"), RemainingLegacyValue, TEXT("KeepMe"));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTypedEmptyStringMaterialEffectRoundTripTest,
+	"Design2UMG.UMGJson.TypedEmptyStringMaterialEffectRoundTrip",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTypedEmptyStringMaterialEffectRoundTripTest::RunTest(const FString& Parameters)
+{
+	FUMGWidgetData SourceData;
+	SourceData.WidgetName = TEXT("WBP_TypedEmptyStringMaterialEffect");
+	SourceData.RootWidget.Type = TEXT("Border");
+	SourceData.RootWidget.Id = TEXT("root");
+	SourceData.RootWidget.Name = TEXT("Root");
+	SourceData.RootWidget.Brush.MaterialRef = TEXT("");
+	SourceData.RootWidget.Brush.bHasMaterialRef = true;
+	SourceData.RootWidget.Brush.MaterialParams = TEXT("");
+	SourceData.RootWidget.Brush.bHasMaterialParams = true;
+	SourceData.RootWidget.Effect.EffectMaterial = TEXT("");
+	SourceData.RootWidget.Effect.bHasEffectMaterial = true;
+	SourceData.RootWidget.Effect.TextureParameter = TEXT("");
+	SourceData.RootWidget.Effect.bHasTextureParameter = true;
+
+	const FString Json = FUMGJsonSerializer::Serialize(SourceData);
+	TSharedPtr<FJsonObject> RootObject;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
+	TestTrue(TEXT("Serialized typed empty-string JSON is valid"), FJsonSerializer::Deserialize(Reader, RootObject) && RootObject.IsValid());
+	if (!RootObject.IsValid())
+	{
+		return false;
+	}
+
+	const TSharedPtr<FJsonObject>* RootWidgetObject = nullptr;
+	TestTrue(TEXT("Serialized RootWidget object is present"), RootObject->TryGetObjectField(TEXT("RootWidget"), RootWidgetObject));
+	if (!RootWidgetObject || !(*RootWidgetObject).IsValid())
+	{
+		return false;
+	}
+
+	const TSharedPtr<FJsonObject>* BrushObject = nullptr;
+	const TSharedPtr<FJsonObject>* EffectObject = nullptr;
+	TestTrue(TEXT("Serialized Brush object is present"), (*RootWidgetObject)->TryGetObjectField(TEXT("Brush"), BrushObject));
+	TestTrue(TEXT("Serialized Effect object is present"), (*RootWidgetObject)->TryGetObjectField(TEXT("Effect"), EffectObject));
+	if (!BrushObject || !(*BrushObject).IsValid() || !EffectObject || !(*EffectObject).IsValid())
+	{
+		return false;
+	}
+
+	FString SerializedValue;
+	TestTrue(TEXT("Serialized typed empty material ref field is present"), (*BrushObject)->TryGetStringField(TEXT("MaterialRef"), SerializedValue));
+	TestTrue(TEXT("Serialized typed empty material ref payload stays empty"), SerializedValue.IsEmpty());
+	TestTrue(TEXT("Serialized typed empty material params field is present"), (*BrushObject)->TryGetStringField(TEXT("MaterialParams"), SerializedValue));
+	TestTrue(TEXT("Serialized typed empty material params payload stays empty"), SerializedValue.IsEmpty());
+	TestTrue(TEXT("Serialized typed empty effect material field is present"), (*EffectObject)->TryGetStringField(TEXT("EffectMaterial"), SerializedValue));
+	TestTrue(TEXT("Serialized typed empty effect material payload stays empty"), SerializedValue.IsEmpty());
+	TestTrue(TEXT("Serialized typed empty texture parameter field is present"), (*EffectObject)->TryGetStringField(TEXT("TextureParameter"), SerializedValue));
+	TestTrue(TEXT("Serialized typed empty texture parameter payload stays empty"), SerializedValue.IsEmpty());
+
+	FUMGWidgetData ParsedData;
+	FString ParseError;
+	TestTrue(TEXT("Typed empty string material/effect round-trip parses"), FUMGJsonParser::ParseJson(Json, ParsedData, &ParseError));
+	if (!ParseError.IsEmpty())
+	{
+		AddInfo(ParseError);
+	}
+
+	TestTrue(TEXT("Round-trip keeps empty brush material ref presence"), ParsedData.RootWidget.Brush.bHasMaterialRef);
+	TestTrue(TEXT("Round-trip keeps empty brush material params presence"), ParsedData.RootWidget.Brush.bHasMaterialParams);
+	TestTrue(TEXT("Round-trip keeps empty effect material presence"), ParsedData.RootWidget.Effect.bHasEffectMaterial);
+	TestTrue(TEXT("Round-trip keeps empty texture parameter presence"), ParsedData.RootWidget.Effect.bHasTextureParameter);
+	TestTrue(TEXT("Round-trip helper keeps empty brush material ref"), GetWidgetProperty(ParsedData.RootWidget, UMGPropertyKeys::MaterialRef).IsEmpty());
+	TestTrue(TEXT("Round-trip helper keeps empty brush material params"), GetWidgetProperty(ParsedData.RootWidget, UMGPropertyKeys::MaterialParams).IsEmpty());
+	TestTrue(TEXT("Round-trip helper keeps empty effect material"), GetWidgetProperty(ParsedData.RootWidget, UMGPropertyKeys::EffectMaterial).IsEmpty());
+	TestTrue(TEXT("Round-trip helper keeps empty texture parameter"), GetWidgetProperty(ParsedData.RootWidget, UMGPropertyKeys::TextureParameter).IsEmpty());
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTypedBrushImageGradientJsonRoundTripTest,
+	"Design2UMG.UMGJson.TypedBrushImageGradientRoundTrip",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTypedBrushImageGradientJsonRoundTripTest::RunTest(const FString& Parameters)
+{
+	FUMGWidgetData SourceData;
+	SourceData.WidgetName = TEXT("WBP_TypedBrushRoundTrip");
+	SourceData.RootWidget.Type = TEXT("CanvasPanel");
+	SourceData.RootWidget.Id = TEXT("root");
+	SourceData.RootWidget.Name = TEXT("Root");
+
+	FUMGWidgetNode ImageNode;
+	ImageNode.Type = TEXT("Image");
+	ImageNode.Id = TEXT("typed_image");
+	ImageNode.Name = TEXT("TypedImage");
+	ImageNode.Brush.Image.TexturePath = TEXT("/Game/UI/T_TypedImage.T_TypedImage");
+	ImageNode.Brush.Image.bHasTexturePath = true;
+	ImageNode.Brush.Image.Mode = TEXT("Crop");
+	ImageNode.Brush.Image.bHasMode = true;
+	ImageNode.Brush.Image.Transform.A = 1.0f;
+	ImageNode.Brush.Image.Transform.B = 0.0f;
+	ImageNode.Brush.Image.Transform.TX = 0.125f;
+	ImageNode.Brush.Image.Transform.C = 0.0f;
+	ImageNode.Brush.Image.Transform.D = 1.0f;
+	ImageNode.Brush.Image.Transform.TY = -0.25f;
+	ImageNode.Brush.Image.bHasTransform = true;
+
+	FUMGWidgetNode GradientNode;
+	GradientNode.Type = TEXT("Image");
+	GradientNode.Id = TEXT("typed_gradient");
+	GradientNode.Name = TEXT("TypedGradient");
+	GradientNode.Brush.Gradient.Type = TEXT("Angular");
+	GradientNode.Brush.Gradient.bHasType = true;
+	GradientNode.Brush.Gradient.Rotation = 135.0f;
+	GradientNode.Brush.Gradient.bHasRotation = true;
+	GradientNode.Brush.Gradient.Center = FVector2D(0.45f, 0.55f);
+	GradientNode.Brush.Gradient.bHasCenter = true;
+	GradientNode.Brush.Gradient.Size = FVector2D(0.8f, 1.1f);
+	GradientNode.Brush.Gradient.bHasSize = true;
+	{
+		FUMGVisualBrushData::FGradientStopData& Stop0 = GradientNode.Brush.Gradient.Stops.AddDefaulted_GetRef();
+		Stop0.Color = FLinearColor::Red;
+		Stop0.Position = 0.0f;
+		FUMGVisualBrushData::FGradientStopData& Stop1 = GradientNode.Brush.Gradient.Stops.AddDefaulted_GetRef();
+		Stop1.Color = FLinearColor::Green;
+		Stop1.Position = 0.5f;
+		FUMGVisualBrushData::FGradientStopData& Stop2 = GradientNode.Brush.Gradient.Stops.AddDefaulted_GetRef();
+		Stop2.Color = FLinearColor::Blue;
+		Stop2.Position = 1.0f;
+	}
+
+	SourceData.RootWidget.Children.Add(MoveTemp(ImageNode));
+	SourceData.RootWidget.Children.Add(MoveTemp(GradientNode));
+
+	const FString Json = FUMGJsonSerializer::Serialize(SourceData);
+	TestTrue(TEXT("Typed brush round-trip emits nested image payload"), Json.Contains(TEXT("\"Image\"")));
+	TestTrue(TEXT("Typed brush round-trip emits nested gradient payload"), Json.Contains(TEXT("\"Gradient\"")));
+
+	FUMGWidgetData ParsedData;
+	FString ParseError;
+	TestTrue(TEXT("Typed brush round-trip parses"), FUMGJsonParser::ParseJson(Json, ParsedData, &ParseError));
+	if (!ParseError.IsEmpty())
+	{
+		AddInfo(ParseError);
+	}
+
+	const FUMGWidgetNode* ParsedImageNode = FindWidgetById(ParsedData.RootWidget, TEXT("typed_image"));
+	const FUMGWidgetNode* ParsedGradientNode = FindWidgetById(ParsedData.RootWidget, TEXT("typed_gradient"));
+	TestTrue(TEXT("Parsed typed image node found"), ParsedImageNode != nullptr);
+	TestTrue(TEXT("Parsed typed gradient node found"), ParsedGradientNode != nullptr);
+	if (!ParsedImageNode || !ParsedGradientNode)
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("Typed image texture path preserved"), ParsedImageNode->Brush.Image.bHasTexturePath && ParsedImageNode->Brush.Image.TexturePath == TEXT("/Game/UI/T_TypedImage.T_TypedImage"));
+	TestTrue(TEXT("Typed image mode preserved"), ParsedImageNode->Brush.Image.bHasMode && ParsedImageNode->Brush.Image.Mode == TEXT("Crop"));
+	TestTrue(TEXT("Typed image transform preserved"), ParsedImageNode->Brush.Image.bHasTransform && FMath::IsNearlyEqual(ParsedImageNode->Brush.Image.Transform.TX, 0.125f, 0.0001f));
+	TestEqual(TEXT("Typed image helper still exposes texture path"), GetWidgetProperty(*ParsedImageNode, TEXT("TexturePath")), TEXT("/Game/UI/T_TypedImage.T_TypedImage"));
+
+	TestTrue(TEXT("Typed gradient type preserved"), ParsedGradientNode->Brush.Gradient.bHasType && ParsedGradientNode->Brush.Gradient.Type == TEXT("Angular"));
+	TestTrue(TEXT("Typed gradient rotation preserved"), ParsedGradientNode->Brush.Gradient.bHasRotation && FMath::IsNearlyEqual(ParsedGradientNode->Brush.Gradient.Rotation, 135.0f, 0.001f));
+	TestTrue(TEXT("Typed gradient stop count preserved"), ParsedGradientNode->Brush.Gradient.Stops.Num() == 3);
+	TestEqual(TEXT("Typed gradient helper exposes material ref"), GetWidgetProperty(*ParsedGradientNode, TEXT("MaterialRef")), TEXT("angulargradient"));
+	TestTrue(TEXT("Typed gradient helper exposes material params"), GetWidgetProperty(*ParsedGradientNode, TEXT("MaterialParams")).Contains(TEXT("\"Stops\"")));
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FInnerShadowEffectJsonRoundTripTest,
@@ -2560,11 +3211,13 @@ bool FRadialGradientMultiStopFidelityTest::RunTest(const FString& Parameters)
 	const FString MaterialParams = GetWidgetProperty(*Widget, UMGPropertyKeys::MaterialParams);
 	TestTrue(TEXT("Radial gradient exports Stops array"), MaterialParams.Contains(TEXT("\"Stops\"")));
 	TestFalse(TEXT("Radial gradient no longer falls back to center/edge pair"), MaterialParams.Contains(TEXT("ColorCenter")));
+	TestFalse(TEXT("Radial gradient no longer writes material ref to legacy properties"), HasLegacyWidgetProperty(*Widget, UMGPropertyKeys::MaterialRef));
+	TestFalse(TEXT("Radial gradient no longer writes material params to legacy properties"), HasLegacyWidgetProperty(*Widget, UMGPropertyKeys::MaterialParams));
 
 	UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(
 		TEXT("radialgradient"),
-		Widget->Properties,
-		GetTransientPackage());
+		Design2UMGWidgetNodeAccess::BuildEffectivePropertyBag(*Widget),
+		GetTransientPackageAsObject());
 	TestTrue(TEXT("Radial gradient texture generated"), Texture != nullptr);
 	if (!Texture)
 	{
@@ -2641,8 +3294,8 @@ bool FRadialGradientTransformFidelityTest::RunTest(const FString& Parameters)
 
 	UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(
 		TEXT("radialgradient"),
-		Widget->Properties,
-		GetTransientPackage());
+		Design2UMGWidgetNodeAccess::BuildEffectivePropertyBag(*Widget),
+		GetTransientPackageAsObject());
 	TestTrue(TEXT("Radial transform texture generated"), Texture != nullptr);
 	if (!Texture)
 	{
@@ -2744,8 +3397,8 @@ bool FFigmaRadialGradientHandleFidelityTest::RunTest(const FString& Parameters)
 
 	UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(
 		TEXT("radialgradient"),
-		Widget->Properties,
-		GetTransientPackage());
+		Design2UMGWidgetNodeAccess::BuildEffectivePropertyBag(*Widget),
+		GetTransientPackageAsObject());
 	TestTrue(TEXT("Figma radial texture generated"), Texture != nullptr);
 	if (!Texture)
 	{
@@ -2805,13 +3458,15 @@ bool FBoxShadowBlurPaddingFidelityTest::RunTest(const FString& Parameters)
 
 	TestEqual(TEXT("Box shadow wraps widget with overlay"), Wrapper->Type, TEXT("Overlay"));
 	TestEqual(TEXT("Box shadow material ref preserved"), GetWidgetProperty(*ShadowWidget, UMGPropertyKeys::MaterialRef), TEXT("boxshadow"));
-	TestEqual(TEXT("Box shadow width includes blur padding"), GetWidgetProperty(*ShadowWidget, TEXT("WidthOverride")), TEXT("56"));
-	TestEqual(TEXT("Box shadow height includes blur padding"), GetWidgetProperty(*ShadowWidget, TEXT("HeightOverride")), TEXT("40"));
+	TestTrue(TEXT("Box shadow width includes blur padding"),
+		FMath::IsNearlyEqual(FCString::Atof(*GetWidgetProperty(*ShadowWidget, TEXT("WidthOverride"))), 56.0f, 0.001f));
+	TestTrue(TEXT("Box shadow height includes blur padding"),
+		FMath::IsNearlyEqual(FCString::Atof(*GetWidgetProperty(*ShadowWidget, TEXT("HeightOverride"))), 40.0f, 0.001f));
 
 	UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(
 		TEXT("boxshadow"),
-		ShadowWidget->Properties,
-		GetTransientPackage());
+		Design2UMGWidgetNodeAccess::BuildEffectivePropertyBag(*ShadowWidget),
+		GetTransientPackageAsObject());
 	TestTrue(TEXT("Box shadow texture generated"), Texture != nullptr);
 	if (!Texture)
 	{
@@ -2847,11 +3502,11 @@ bool FBoxShadowExplicitBlurPaddingMaterialParamTest::RunTest(const FString& Para
 	UTexture2D* LegacyTexture = FProceduralShapeGenerator::GenerateFromMaterialRef(
 		TEXT("boxshadow"),
 		LegacyShadow.Properties,
-		GetTransientPackage());
+		GetTransientPackageAsObject());
 	UTexture2D* ExplicitPaddingTexture = FProceduralShapeGenerator::GenerateFromMaterialRef(
 		TEXT("boxshadow"),
 		ExplicitPaddingShadow.Properties,
-		GetTransientPackage());
+		GetTransientPackageAsObject());
 	TestTrue(TEXT("Legacy box shadow texture generated"), LegacyTexture != nullptr);
 	TestTrue(TEXT("Explicit blur-padding texture generated"), ExplicitPaddingTexture != nullptr);
 	if (!LegacyTexture || !ExplicitPaddingTexture)
@@ -2908,14 +3563,19 @@ bool FBoxShadowNegativeSpreadFidelityTest::RunTest(const FString& Parameters)
 	}
 
 	TestEqual(TEXT("Negative spread keeps rounded rect path when blur is zero"), GetWidgetProperty(*ShadowWidget, UMGPropertyKeys::MaterialRef), TEXT("roundedrect"));
-	TestEqual(TEXT("Negative spread shrinks width"), GetWidgetProperty(*ShadowWidget, TEXT("WidthOverride")), TEXT("28"));
-	TestEqual(TEXT("Negative spread shrinks height"), GetWidgetProperty(*ShadowWidget, TEXT("HeightOverride")), TEXT("28"));
-	TestEqual(TEXT("Negative spread translates back inward"), GetWidgetProperty(*ShadowWidget, TEXT("RenderTranslation")), TEXT("6.0,6.0"));
+	TestTrue(TEXT("Negative spread shrinks width"),
+		FMath::IsNearlyEqual(FCString::Atof(*GetWidgetProperty(*ShadowWidget, TEXT("WidthOverride"))), 28.0f, 0.001f));
+	TestTrue(TEXT("Negative spread shrinks height"),
+		FMath::IsNearlyEqual(FCString::Atof(*GetWidgetProperty(*ShadowWidget, TEXT("HeightOverride"))), 28.0f, 0.001f));
+	FVector2D NegativeSpreadTranslation = FVector2D::ZeroVector;
+	TestTrue(TEXT("Negative spread exposes render translation"),
+		Design2UMGWidgetNodeAccess::BuildEffectivePropertyBag(*ShadowWidget).TryGetVector2D(TEXT("RenderTranslation"), NegativeSpreadTranslation));
+	TestTrue(TEXT("Negative spread translates back inward"), NegativeSpreadTranslation.Equals(FVector2D(6.0f, 6.0f), 0.001f));
 
 	UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(
 		TEXT("roundedrect"),
-		ShadowWidget->Properties,
-		GetTransientPackage());
+		Design2UMGWidgetNodeAccess::BuildEffectivePropertyBag(*ShadowWidget),
+		GetTransientPackageAsObject());
 	TestTrue(TEXT("Negative spread texture generated"), Texture != nullptr);
 	if (!Texture)
 	{
@@ -4313,7 +4973,8 @@ bool FFigmaLuminosityImageOverlayTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Luminosity fit layer should not pin synthetic pivot"), HasWidgetProperty(FitLayer, TEXT("RenderTransformPivot")));
 	TestFalse(TEXT("Luminosity fit layer should not inject synthetic scale"), HasWidgetProperty(FitLayer, TEXT("RenderTransformScale")));
 	TestFalse(TEXT("Luminosity fit layer should not inject synthetic translation"), HasWidgetProperty(FitLayer, TEXT("RenderTranslation")));
-	TestEqual(TEXT("Luminosity fit image applies opacity fallback"), GetWidgetProperty(ImageChild, TEXT("RenderOpacity")), TEXT("0.1500"));
+	TestTrue(TEXT("Luminosity fit image applies opacity fallback"),
+		FMath::IsNearlyEqual(FCString::Atof(*GetWidgetProperty(ImageChild, TEXT("RenderOpacity"))), 0.15f, 0.0001f));
 	TestFalse(TEXT("Non-square fit image child should not pin width override"), HasWidgetProperty(ImageChild, TEXT("WidthOverride")));
 	TestFalse(TEXT("Non-square fit image child should not pin height override"), HasWidgetProperty(ImageChild, TEXT("HeightOverride")));
 	return true;
@@ -4376,7 +5037,8 @@ bool FFigmaWideLuminosityImageOverlayTest::RunTest(const FString& Parameters)
 	const FUMGWidgetNode& ImageChild = FitLayer.Children[0];
 	TestFalse(TEXT("Wide luminosity fit layer should not inject synthetic scale"), HasWidgetProperty(FitLayer, TEXT("RenderTransformScale")));
 	TestFalse(TEXT("Wide luminosity fit layer should not inject synthetic translation"), HasWidgetProperty(FitLayer, TEXT("RenderTranslation")));
-	TestEqual(TEXT("Wide luminosity image applies opacity fallback"), GetWidgetProperty(ImageChild, TEXT("RenderOpacity")), TEXT("0.1500"));
+	TestTrue(TEXT("Wide luminosity image applies opacity fallback"),
+		FMath::IsNearlyEqual(FCString::Atof(*GetWidgetProperty(ImageChild, TEXT("RenderOpacity"))), 0.15f, 0.0001f));
 	TestFalse(TEXT("Wide luminosity image should not pin width override"), HasWidgetProperty(ImageChild, TEXT("WidthOverride")));
 	TestFalse(TEXT("Wide luminosity image should not pin height override"), HasWidgetProperty(ImageChild, TEXT("HeightOverride")));
 	return true;
@@ -4447,7 +5109,8 @@ bool FFigmaSquareLuminosityImageOverlayTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Square image child keeps texture"), GetWidgetProperty(ImageChild, TEXT("TexturePath")), TEXT("img_lum_square"));
 	TestEqual(TEXT("Square image child pins width"), GetWidgetProperty(ImageChild, TEXT("WidthOverride")), TEXT("120.0"));
 	TestEqual(TEXT("Square image child pins height"), GetWidgetProperty(ImageChild, TEXT("HeightOverride")), TEXT("120.0"));
-	TestEqual(TEXT("Square image child applies opacity fallback"), GetWidgetProperty(ImageChild, TEXT("RenderOpacity")), TEXT("0.1500"));
+	TestTrue(TEXT("Square image child applies opacity fallback"),
+		FMath::IsNearlyEqual(FCString::Atof(*GetWidgetProperty(ImageChild, TEXT("RenderOpacity"))), 0.15f, 0.0001f));
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLuminosityIdentityTransformOverlayTest,
@@ -4507,7 +5170,8 @@ bool FFigmaLuminosityIdentityTransformOverlayTest::RunTest(const FString& Parame
 	const FUMGWidgetNode& ImageChild = FitLayer.Children[0];
 	TestFalse(TEXT("Identity transform overlay should not inject synthetic scale"), HasWidgetProperty(FitLayer, TEXT("RenderTransformScale")));
 	TestFalse(TEXT("Identity transform overlay should not inject synthetic translation"), HasWidgetProperty(FitLayer, TEXT("RenderTranslation")));
-	TestEqual(TEXT("Identity transform overlay applies opacity fallback"), GetWidgetProperty(ImageChild, TEXT("RenderOpacity")), TEXT("0.1500"));
+	TestTrue(TEXT("Identity transform overlay applies opacity fallback"),
+		FMath::IsNearlyEqual(FCString::Atof(*GetWidgetProperty(ImageChild, TEXT("RenderOpacity"))), 0.15f, 0.0001f));
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaVectorRasterFallbackTest,
@@ -4711,10 +5375,14 @@ bool FFigmaLeafRenderFallbackWidgetTest::RunTest(const FString& Parameters)
 
 	TestEqual(TEXT("Leaf render fallback converts directly to image"), Widget->Type, TEXT("Image"));
 	TestEqual(TEXT("Leaf render fallback keeps texture path"), GetWidgetProperty(*Widget, TEXT("TexturePath")), TEXT("/Game/Transient/T_render_202_5356.T_render_202_5356"));
-	float WidthOverride = 0.0f;
-	float HeightOverride = 0.0f;
-	TestTrue(TEXT("Leaf render fallback exposes width override"), Widget->Properties.TryGetFloat(TEXT("WidthOverride"), WidthOverride));
-	TestTrue(TEXT("Leaf render fallback exposes height override"), Widget->Properties.TryGetFloat(TEXT("HeightOverride"), HeightOverride));
+	const FString WidthOverrideValue = GetWidgetProperty(*Widget, TEXT("WidthOverride"));
+	const FString HeightOverrideValue = GetWidgetProperty(*Widget, TEXT("HeightOverride"));
+	const float WidthOverride = FCString::Atof(*WidthOverrideValue);
+	const float HeightOverride = FCString::Atof(*HeightOverrideValue);
+	TestFalse(TEXT("Leaf render fallback width override should not stay in legacy properties"), HasLegacyWidgetProperty(*Widget, TEXT("WidthOverride")));
+	TestFalse(TEXT("Leaf render fallback height override should not stay in legacy properties"), HasLegacyWidgetProperty(*Widget, TEXT("HeightOverride")));
+	TestFalse(TEXT("Leaf render fallback exposes typed width override"), WidthOverrideValue.IsEmpty());
+	TestFalse(TEXT("Leaf render fallback exposes typed height override"), HeightOverrideValue.IsEmpty());
 	TestTrue(TEXT("Leaf render fallback keeps render-box width"), FMath::IsNearlyEqual(WidthOverride, 69.4925f, 0.001f));
 	TestTrue(TEXT("Leaf render fallback keeps render-box height"), FMath::IsNearlyEqual(HeightOverride, 69.4925f, 0.001f));
 	TestTrue(TEXT("Leaf render fallback shifts X by render offset"), FMath::IsNearlyEqual(Widget->Bounds.X, -11.7463f, 0.001f));

@@ -20,7 +20,7 @@ namespace
 		return bInvalidWidth || bInvalidHeight;
 	}
 
-	bool IsHexColorLiteral(const FString& InColor)
+	bool IsSettingsHexColorLiteral(const FString& InColor)
 	{
 		if (!InColor.StartsWith(TEXT("#")) || (InColor.Len() != 7 && InColor.Len() != 9))
 		{
@@ -159,19 +159,19 @@ UDesign2UMGSettings::FResolvedPlaceholderHatchStyle UDesign2UMGSettings::Resolve
 		return Style;
 	}
 
-	if (IsHexColorLiteral(PlaceholderHatchBackgroundColor))
+	if (IsSettingsHexColorLiteral(PlaceholderHatchBackgroundColor))
 	{
 		Style.BaseFillColor = PlaceholderHatchBackgroundColor;
 	}
-	if (IsHexColorLiteral(PlaceholderRefHatchBackgroundColor))
+	if (IsSettingsHexColorLiteral(PlaceholderRefHatchBackgroundColor))
 	{
 		Style.RefFillColor = PlaceholderRefHatchBackgroundColor;
 	}
-	if (IsHexColorLiteral(PlaceholderHatchStripeColor))
+	if (IsSettingsHexColorLiteral(PlaceholderHatchStripeColor))
 	{
 		Style.BaseStripeColor = PlaceholderHatchStripeColor;
 	}
-	if (IsHexColorLiteral(PlaceholderRefHatchStripeColor))
+	if (IsSettingsHexColorLiteral(PlaceholderRefHatchStripeColor))
 	{
 		Style.RefStripeColor = PlaceholderRefHatchStripeColor;
 	}

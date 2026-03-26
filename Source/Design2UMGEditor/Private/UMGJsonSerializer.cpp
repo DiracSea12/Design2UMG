@@ -1,10 +1,20 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGJsonSerializer.h"
+#include "UMGWidgetNodeAccess.h"
+#include "UMGPropertyKeys.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
+
+namespace
+{
+	bool ShouldSkipTypedLegacyPropertyInJson(const FString& Key)
+	{
+		return Design2UMGWidgetNodeAccess::IsTypedWidgetPropertyKey(Key);
+	}
+}
 
 TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeAnchor(const FUMGAnchorData& Anchor)
 {
@@ -104,7 +114,7 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeWidgetNode(const FUMGWidget
 		TSharedRef<FJsonObject> Props = MakeShared<FJsonObject>();
 		Node.Properties.ForEachSerialized([&Props](const FString& Key, const FString& Value)
 		{
-			if (Key == TEXT("ActiveWidgetIndex"))
+			if (ShouldSkipTypedLegacyPropertyInJson(Key))
 			{
 				return;
 			}
@@ -129,6 +139,92 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeWidgetNode(const FUMGWidget
 		J->SetObjectField(TEXT("TextStyle"), TS);
 	}
 
+	if (Node.WidgetStyle.HasAny())
+	{
+		const FUMGWidgetStyleData& Style = Node.WidgetStyle;
+		TSharedRef<FJsonObject> StyleObject = MakeShared<FJsonObject>();
+		if (Style.bHasWidthOverride)
+			StyleObject->SetNumberField(TEXT("WidthOverride"), Style.WidthOverride);
+		if (Style.bHasHeightOverride)
+			StyleObject->SetNumberField(TEXT("HeightOverride"), Style.HeightOverride);
+		if (Style.bHasMinDesiredWidth)
+			StyleObject->SetNumberField(TEXT("MinDesiredWidth"), Style.MinDesiredWidth);
+		if (Style.bHasMinDesiredHeight)
+			StyleObject->SetNumberField(TEXT("MinDesiredHeight"), Style.MinDesiredHeight);
+		if (Style.bHasPadding)
+			StyleObject->SetStringField(TEXT("Padding"), Design2UMGWidgetNodeAccess::SerializeWidgetMargin(Style.Padding));
+		if (Style.bHasInnerSlotPadding)
+			StyleObject->SetStringField(TEXT("InnerSlotPadding"), Design2UMGWidgetNodeAccess::SerializeWidgetCompactVector2D(Style.InnerSlotPadding));
+		if (Style.bHasSlotPadding)
+			StyleObject->SetStringField(TEXT("SlotPadding"), Design2UMGWidgetNodeAccess::SerializeWidgetMargin(Style.SlotPadding));
+		if (Style.bHasStrokePadding)
+			StyleObject->SetStringField(TEXT("StrokePadding"), Design2UMGWidgetNodeAccess::SerializeWidgetMargin(Style.StrokePadding));
+		if (Style.bHasStrokeMargin)
+			StyleObject->SetStringField(TEXT("StrokeMargin"), Design2UMGWidgetNodeAccess::SerializeWidgetMargin(Style.StrokeMargin));
+		if (Style.bHasImageMode)
+			StyleObject->SetStringField(TEXT("ImageMode"), Style.ImageMode);
+		if (Style.bHasImageTransform)
+			StyleObject->SetStringField(TEXT("ImageTransform"), Style.ImageTransform);
+		if (Style.bHasStretch)
+			StyleObject->SetStringField(TEXT("Stretch"), Style.Stretch);
+		if (Style.bHasStretchDirection)
+			StyleObject->SetStringField(TEXT("StretchDirection"), Style.StretchDirection);
+		if (Style.bHasBackgroundColor)
+			StyleObject->SetStringField(TEXT("BackgroundColor"), Design2UMGWidgetNodeAccess::SerializeWidgetColor(Style.BackgroundColor));
+		if (Style.bHasHoveredColor)
+			StyleObject->SetStringField(TEXT("HoveredColor"), Design2UMGWidgetNodeAccess::SerializeWidgetColor(Style.HoveredColor));
+		if (Style.bHasPressedColor)
+			StyleObject->SetStringField(TEXT("PressedColor"), Design2UMGWidgetNodeAccess::SerializeWidgetColor(Style.PressedColor));
+		if (Style.bHasNamedSlot)
+			StyleObject->SetStringField(TEXT("NamedSlot"), Style.NamedSlot);
+		if (Style.bHasSlotName)
+			StyleObject->SetStringField(TEXT("SlotName"), Style.SlotName);
+		if (Style.bHasVisibility)
+			StyleObject->SetStringField(TEXT("Visibility"), Style.Visibility);
+		if (Style.bHasToolTipText)
+			StyleObject->SetStringField(TEXT("ToolTipText"), Style.ToolTipText);
+		if (Style.bHasIsEnabled)
+			StyleObject->SetBoolField(TEXT("IsEnabled"), Style.bIsEnabled);
+		J->SetObjectField(TEXT("WidgetStyle"), StyleObject);
+	}
+
+	if (Node.Text.HasAny())
+	{
+		const FUMGTextData& Text = Node.Text;
+		TSharedRef<FJsonObject> TextObject = MakeShared<FJsonObject>();
+		if (Text.bHasText)
+			TextObject->SetStringField(TEXT("Text"), Text.Text);
+		if (Text.bHasHintText)
+			TextObject->SetStringField(TEXT("HintText"), Text.HintText);
+		if (Text.bHasFontFamily)
+			TextObject->SetStringField(TEXT("FontFamily"), Text.FontFamily);
+		if (Text.bHasTypefaceFontName)
+			TextObject->SetStringField(TEXT("TypefaceFontName"), Text.TypefaceFontName);
+		if (Text.bHasFontStyle)
+			TextObject->SetStringField(TEXT("FontStyle"), Text.FontStyle);
+		if (Text.bHasJustification)
+			TextObject->SetStringField(TEXT("Justification"), Text.Justification);
+		if (Text.bHasAutoWrapText)
+			TextObject->SetBoolField(TEXT("AutoWrapText"), Text.bAutoWrapText);
+		if (Text.bHasWrapTextAt)
+			TextObject->SetNumberField(TEXT("WrapTextAt"), Text.WrapTextAt);
+		if (Text.bHasLineHeightPercentage)
+			TextObject->SetNumberField(TEXT("LineHeightPercentage"), Text.LineHeightPercentage);
+		if (Text.bHasUnderline)
+			TextObject->SetBoolField(TEXT("Underline"), Text.bUnderline);
+		if (Text.bHasStrikethrough)
+			TextObject->SetBoolField(TEXT("Strikethrough"), Text.bStrikethrough);
+		if (Text.bHasHref)
+			TextObject->SetStringField(TEXT("Href"), Text.Href);
+		if (Text.bHasTextAlignVertical)
+			TextObject->SetStringField(TEXT("TextAlignVertical"), Text.TextAlignVertical);
+		if (Text.bHasIconName)
+			TextObject->SetStringField(TEXT("IconName"), Text.IconName);
+		if (Text.bHasColor)
+			TextObject->SetStringField(TEXT("Color"), Design2UMGWidgetNodeAccess::SerializeWidgetColor(Text.Color));
+		J->SetObjectField(TEXT("TextData"), TextObject);
+	}
+
 	// Brush (v2.4)
 	{
 		const FUMGVisualBrushData& B = Node.Brush;
@@ -136,13 +232,52 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeWidgetNode(const FUMGWidget
 		bool bHasAny = false;
 		if (B.OutlineCornerRadius >= 0)    { BJ->SetNumberField(TEXT("OutlineCornerRadius"), B.OutlineCornerRadius); bHasAny = true; }
 		if (B.HasCornerRadii())            { BJ->SetStringField(TEXT("CornerRadii"), FString::Printf(TEXT("%.2f,%.2f,%.2f,%.2f"), B.CornerRadii.X, B.CornerRadii.Y, B.CornerRadii.Z, B.CornerRadii.W)); bHasAny = true; }
-		if (B.OutlineThickness > 0)        { BJ->SetNumberField(TEXT("OutlineThickness"), B.OutlineThickness); bHasAny = true; }
-		if (B.bHasDrawAs)                  { BJ->SetNumberField(TEXT("DrawAs"), (int32)B.DrawAs); bHasAny = true; }
-		if (B.bHasBrushColor)              { BJ->SetStringField(TEXT("BrushColor"), B.BrushColor.ToString()); bHasAny = true; }
-		if (B.bHasOutlineColor)            { BJ->SetStringField(TEXT("OutlineColor"), B.OutlineColor.ToString()); bHasAny = true; }
-		if (!B.MaterialRef.IsEmpty())      { BJ->SetStringField(TEXT("MaterialRef"), B.MaterialRef); bHasAny = true; }
-		if (!B.MaterialParams.IsEmpty())   { BJ->SetStringField(TEXT("MaterialParams"), B.MaterialParams); bHasAny = true; }
+		if (B.bHasOutlineThickness)        { BJ->SetNumberField(TEXT("OutlineThickness"), B.OutlineThickness); bHasAny = true; }
+		if (B.bHasDrawAs)                  { BJ->SetStringField(TEXT("DrawAs"), Design2UMGWidgetNodeAccess::SerializeDrawAs(B.DrawAs)); bHasAny = true; }
+		if (B.bHasBrushColor)              { BJ->SetStringField(TEXT("BrushColor"), Design2UMGWidgetNodeAccess::SerializeWidgetColor(B.BrushColor)); bHasAny = true; }
+		if (B.bHasOutlineColor)            { BJ->SetStringField(TEXT("OutlineColor"), Design2UMGWidgetNodeAccess::SerializeWidgetColor(B.OutlineColor)); bHasAny = true; }
+		if (B.bHasMaterialRef || !B.MaterialRef.IsEmpty())        { BJ->SetStringField(TEXT("MaterialRef"), B.MaterialRef); bHasAny = true; }
+		if (B.bHasMaterialParams || !B.MaterialParams.IsEmpty())  { BJ->SetStringField(TEXT("MaterialParams"), B.MaterialParams); bHasAny = true; }
 		if (!B.TexturePath.IsEmpty())      { BJ->SetStringField(TEXT("TexturePath"), B.TexturePath); bHasAny = true; }
+		if (B.Image.HasAny())
+		{
+			TSharedRef<FJsonObject> ImageObject = MakeShared<FJsonObject>();
+			if (B.Image.bHasTexturePath)
+				ImageObject->SetStringField(TEXT("TexturePath"), B.Image.TexturePath);
+			if (B.Image.bHasMode)
+				ImageObject->SetStringField(TEXT("Mode"), B.Image.Mode);
+			if (B.Image.bHasTransform)
+				ImageObject->SetStringField(TEXT("Transform"), Design2UMGWidgetNodeAccess::SerializeImageTransform(B.Image.Transform));
+			BJ->SetObjectField(TEXT("Image"), ImageObject);
+			bHasAny = true;
+		}
+		if (B.Gradient.HasAny())
+		{
+			TSharedRef<FJsonObject> GradientObject = MakeShared<FJsonObject>();
+			if (B.Gradient.bHasType)
+				GradientObject->SetStringField(TEXT("Type"), B.Gradient.Type);
+			if (B.Gradient.bHasRotation)
+				GradientObject->SetNumberField(TEXT("Rotation"), B.Gradient.Rotation);
+			if (B.Gradient.bHasCenter)
+				GradientObject->SetStringField(TEXT("Center"), Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(B.Gradient.Center));
+			if (B.Gradient.bHasSize)
+				GradientObject->SetStringField(TEXT("Size"), Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(B.Gradient.Size));
+			if (B.Gradient.Stops.Num() > 0)
+			{
+				TArray<TSharedPtr<FJsonValue>> StopArray;
+				StopArray.Reserve(B.Gradient.Stops.Num());
+				for (const FUMGVisualBrushData::FGradientStopData& Stop : B.Gradient.Stops)
+				{
+					TSharedRef<FJsonObject> StopObject = MakeShared<FJsonObject>();
+					StopObject->SetStringField(TEXT("Color"), Design2UMGWidgetNodeAccess::SerializeWidgetColor(Stop.Color));
+					StopObject->SetNumberField(TEXT("Position"), Stop.Position);
+					StopArray.Add(MakeShared<FJsonValueObject>(StopObject));
+				}
+				GradientObject->SetArrayField(TEXT("Stops"), StopArray);
+			}
+			BJ->SetObjectField(TEXT("Gradient"), GradientObject);
+			bHasAny = true;
+		}
 		if (bHasAny)
 			J->SetObjectField(TEXT("Brush"), BJ);
 	}
@@ -156,9 +291,9 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeWidgetNode(const FUMGWidget
 			EJ->SetNumberField(TEXT("BlurStrength"), E.BlurStrength);
 		if (E.bHasRetainRendering)
 			EJ->SetBoolField(TEXT("RetainRendering"), E.bRetainRendering);
-		if (!E.EffectMaterial.IsEmpty())
+		if (E.bHasEffectMaterial || !E.EffectMaterial.IsEmpty())
 			EJ->SetStringField(TEXT("EffectMaterial"), E.EffectMaterial);
-		if (!E.TextureParameter.IsEmpty())
+		if (E.bHasTextureParameter || !E.TextureParameter.IsEmpty())
 			EJ->SetStringField(TEXT("TextureParameter"), E.TextureParameter);
 		if (E.bHasEffectBlurUVStep)
 		{
@@ -167,7 +302,7 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeWidgetNode(const FUMGWidget
 				FString::Printf(TEXT("%.6f,%.6f"), E.EffectBlurUVStep.X, E.EffectBlurUVStep.Y));
 		}
 		if (E.bHasEffectColor)
-			EJ->SetStringField(TEXT("EffectColor"), E.EffectColor.ToString());
+			EJ->SetStringField(TEXT("EffectColor"), Design2UMGWidgetNodeAccess::SerializeWidgetColor(E.EffectColor));
 		if (E.bHasEffectOffset)
 		{
 			EJ->SetStringField(
@@ -180,6 +315,99 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeWidgetNode(const FUMGWidget
 			EJ->SetNumberField(TEXT("PhaseCount"), E.PhaseCount);
 		}
 		J->SetObjectField(TEXT("Effect"), EJ);
+	}
+
+	if (Node.Path.HasAny())
+	{
+		const FUMGPathData& Path = Node.Path;
+		TSharedRef<FJsonObject> PathObject = MakeShared<FJsonObject>();
+		if (Path.bHasGeometry)
+			PathObject->SetStringField(TEXT("Geometry"), Path.Geometry);
+		if (Path.bHasFillRule)
+			PathObject->SetStringField(TEXT("FillRule"), Path.FillRule);
+		if (Path.bHasFillColor)
+			PathObject->SetStringField(TEXT("FillColor"), Design2UMGWidgetNodeAccess::SerializeWidgetColor(Path.FillColor));
+		if (Path.bHasStrokeColor)
+			PathObject->SetStringField(TEXT("StrokeColor"), Design2UMGWidgetNodeAccess::SerializeWidgetColor(Path.StrokeColor));
+		if (Path.bHasStrokeThickness)
+			PathObject->SetNumberField(TEXT("StrokeThickness"), Path.StrokeThickness);
+		if (Path.bHasStrokeCap)
+			PathObject->SetStringField(TEXT("StrokeCap"), Path.StrokeCap);
+		if (Path.bHasStrokeJoin)
+			PathObject->SetStringField(TEXT("StrokeJoin"), Path.StrokeJoin);
+		J->SetObjectField(TEXT("PathData"), PathObject);
+	}
+
+	if (Node.Shadow.HasAny())
+	{
+		const FUMGShadowData& Shadow = Node.Shadow;
+		TSharedRef<FJsonObject> ShadowObject = MakeShared<FJsonObject>();
+		if (Shadow.bHasShadowOffset)
+			ShadowObject->SetStringField(TEXT("ShadowOffset"), FString::Printf(TEXT("%.1f,%.1f"), Shadow.ShadowOffset.X, Shadow.ShadowOffset.Y));
+		if (Shadow.bHasShadowColorAndOpacity)
+			ShadowObject->SetStringField(TEXT("ShadowColorAndOpacity"), Design2UMGWidgetNodeAccess::SerializeWidgetColor(Shadow.ShadowColorAndOpacity));
+		if (Shadow.bHasShadowBlur)
+			ShadowObject->SetNumberField(TEXT("ShadowBlur"), Shadow.ShadowBlur);
+		if (Shadow.BoxShadows.Num() > 0)
+		{
+			TArray<TSharedPtr<FJsonValue>> BoxShadowArray;
+			BoxShadowArray.Reserve(Shadow.BoxShadows.Num());
+			for (const FUMGBoxShadowLayerData& Layer : Shadow.BoxShadows)
+			{
+				TSharedRef<FJsonObject> LayerObject = MakeShared<FJsonObject>();
+				LayerObject->SetStringField(TEXT("Offset"), FString::Printf(TEXT("%.6f,%.6f"), Layer.Offset.X, Layer.Offset.Y));
+				LayerObject->SetNumberField(TEXT("Blur"), Layer.Blur);
+				LayerObject->SetNumberField(TEXT("Spread"), Layer.Spread);
+				LayerObject->SetStringField(TEXT("Color"), Design2UMGWidgetNodeAccess::SerializeWidgetColor(Layer.Color));
+				BoxShadowArray.Add(MakeShared<FJsonValueObject>(LayerObject));
+			}
+			ShadowObject->SetArrayField(TEXT("BoxShadows"), BoxShadowArray);
+		}
+		J->SetObjectField(TEXT("ShadowData"), ShadowObject);
+	}
+
+	// Render (v2.7)
+	if (Node.Render.HasAny())
+	{
+		const FUMGRenderStyleData& Render = Node.Render;
+		TSharedRef<FJsonObject> RenderObject = MakeShared<FJsonObject>();
+		if (Render.bHasClipping && !Render.Clipping.IsEmpty())
+		{
+			RenderObject->SetStringField(TEXT("Clipping"), Render.Clipping);
+		}
+		if (Render.bHasRenderOpacity)
+		{
+			RenderObject->SetNumberField(TEXT("RenderOpacity"), Render.RenderOpacity);
+		}
+		if (Render.bHasRenderAngle)
+		{
+			RenderObject->SetNumberField(TEXT("RenderAngle"), Render.RenderAngle);
+		}
+		if (Render.bHasRenderTransformPivot)
+		{
+			RenderObject->SetStringField(
+				TEXT("RenderTransformPivot"),
+				FString::Printf(TEXT("%.6f,%.6f"), Render.RenderTransformPivot.X, Render.RenderTransformPivot.Y));
+		}
+		if (Render.bHasRenderScale)
+		{
+			RenderObject->SetStringField(
+				TEXT("RenderScale"),
+				FString::Printf(TEXT("%.6f,%.6f"), Render.RenderScale.X, Render.RenderScale.Y));
+		}
+		if (Render.bHasRenderTransformScale)
+		{
+			RenderObject->SetStringField(
+				TEXT("RenderTransformScale"),
+				FString::Printf(TEXT("%.6f,%.6f"), Render.RenderTransformScale.X, Render.RenderTransformScale.Y));
+		}
+		if (Render.bHasRenderTranslation)
+		{
+			RenderObject->SetStringField(
+				TEXT("RenderTranslation"),
+				FString::Printf(TEXT("%.6f,%.6f"), Render.RenderTranslation.X, Render.RenderTranslation.Y));
+		}
+		J->SetObjectField(TEXT("Render"), RenderObject);
 	}
 
 	// WidgetState (v2.6)
