@@ -2,6 +2,7 @@
 
 #include "VisualMapper.h"
 #include "ImageFillUtils.h"
+#include "Design2UMGSettings.h"
 #include "LayoutMapper.h"
 #include "Design2UMGLog.h"
 #include "UMGPropertyKeys.h"
@@ -10,12 +11,47 @@
 namespace
 {
 	// 材质引用标识符（ProceduralShapeGenerator 内部 key，非资产路径）
+	const TCHAR* RetainerForegroundBlurEffectRef = TEXT("d2u.retainer.foreground_blur");
+	const TCHAR* RetainerInnerShadowEffectRef = TEXT("d2u.retainer.inner_shadow");
 	const TCHAR* MatRef_GradientH = TEXT("gradienth");
 	const TCHAR* MatRef_GradientV = TEXT("gradientv");
 	const TCHAR* MatRef_GradientLinear = TEXT("gradientlinear");
 	const TCHAR* MatRef_Radial    = TEXT("radialgradient");
 	const TCHAR* MatRef_Angular   = TEXT("angulargradient");
 	const TCHAR* MatRef_RoundedRect = TEXT("roundedrect");
+
+	FVector2D ComputeForegroundBlurUVStep(const TSharedPtr<FDesignNode>& Node, float BlurStrength)
+	{
+		if (!Node.IsValid())
+		{
+			return FVector2D(1.0f / 512.0f, 1.0f / 512.0f);
+		}
+
+		const float Width = FMath::Max(1.0f, Node->Width.Value);
+		const float Height = FMath::Max(1.0f, Node->Height.Value);
+		const float EffectiveBlur = FMath::Max(0.5f, BlurStrength) * 0.35f;
+		return FVector2D(EffectiveBlur / Width, EffectiveBlur / Height);
+	}
+
+	FVector2D ComputeEffectUVOffset(const TSharedPtr<FDesignNode>& Node, float OffsetX, float OffsetY)
+	{
+		if (!Node.IsValid())
+		{
+			return FVector2D::ZeroVector;
+		}
+
+		const float Width = FMath::Max(1.0f, Node->Width.Value);
+		const float Height = FMath::Max(1.0f, Node->Height.Value);
+		return FVector2D(OffsetX / Width, OffsetY / Height);
+	}
+
+	float GetLuminosityFitOpacityCap()
+	{
+		const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+		return Settings
+			? Settings->ResolveLuminosityFitOpacityCap()
+			: UDesign2UMGSettings::CanonicalLuminosityFitOpacityCap;
+	}
 
 	float GetStrokeSideThickness(const FDesignStrokeThickness& Thickness, TCHAR Side)
 	{
@@ -274,6 +310,12 @@ namespace
 			}
 		}
 
+		FString StrokePadding;
+		if (Border.Properties.TryGetString(TEXT("StrokePadding"), StrokePadding) && !StrokePadding.IsEmpty())
+		{
+			Overlay.Properties.Add(TEXT("StrokePadding"), StrokePadding);
+		}
+
 		Border.Id += TEXT("_surface");
 		Border.Name += TEXT("_surface");
 		StripExplicitStrokeFromSurface(Border);
@@ -366,17 +408,32 @@ namespace
 		const FString& StartColor = Gradient.Colors[0].Color;
 		const FString& EndColor = Gradient.Colors.Last().Color;
 
-		// Radial: center/edge pair
-		if (Gradient.GradientType == EDesignGradientType::Radial)
-			return FString::Printf(TEXT("{\"ColorCenter\":\"%s\",\"ColorEdge\":\"%s\"}"), *StartColor, *EndColor);
-
-		// Linear: always include Rotation for angled rendering
+		// Linear / Angular: include Rotation for angled rendering.
 		const float Rotation = Gradient.Rotation;
+		const float CenterX = Gradient.bHasCenter ? Gradient.CenterX : 0.5f;
+		const float CenterY = Gradient.bHasCenter ? Gradient.CenterY : 0.5f;
+		const float SizeWidth = Gradient.bHasSize ? Gradient.SizeWidth : 1.0f;
+		const float SizeHeight = Gradient.bHasSize ? Gradient.SizeHeight : 1.0f;
+		const FString RadialParams = FString::Printf(
+			TEXT("\"CenterX\":%.4f,\"CenterY\":%.4f,\"SizeWidth\":%.4f,\"SizeHeight\":%.4f,\"Rotation\":%.4f"),
+			CenterX,
+			CenterY,
+			SizeWidth,
+			SizeHeight,
+			Rotation);
 
-		// Multi-stop linear: output Stops array + Rotation
+		// Multi-stop gradients: output Stops array, and include Rotation for shapes that use it.
 		if (Gradient.Colors.Num() > 2)
 		{
-			FString Stops = FString::Printf(TEXT("{\"Rotation\":%.4f,\"Stops\":["), Rotation);
+			FString Stops;
+			if (Gradient.GradientType == EDesignGradientType::Radial)
+			{
+				Stops = FString::Printf(TEXT("{%s,\"Stops\":["), *RadialParams);
+			}
+			else
+			{
+				Stops = FString::Printf(TEXT("{\"Rotation\":%.4f,\"Stops\":["), Rotation);
+			}
 			for (int32 i = 0; i < Gradient.Colors.Num(); ++i)
 			{
 				if (i > 0) Stops += TEXT(",");
@@ -386,6 +443,10 @@ namespace
 			Stops += TEXT("]}");
 			return Stops;
 		}
+
+		// Radial: 2-stop center/edge pair
+		if (Gradient.GradientType == EDesignGradientType::Radial)
+			return FString::Printf(TEXT("{%s,\"ColorCenter\":\"%s\",\"ColorEdge\":\"%s\"}"), *RadialParams, *StartColor, *EndColor);
 
 		// 2-stop: include Rotation
 		return FString::Printf(TEXT("{\"Rotation\":%.4f,\"ColorStart\":\"%s\",\"ColorEnd\":\"%s\"}"), Rotation, *StartColor, *EndColor);
@@ -673,16 +734,10 @@ void FVisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedP
 		switch (Effect.Type)
 		{
 		case EDesignEffectType::Blur:
-			UE_LOG(LogDesign2UMG, Warning,
-				TEXT("Design2UMG: Blur effect on '%s' ignored (UMG has no foreground blur widget)"),
-				*Node->Name);
 			break;
 		case EDesignEffectType::Shadow:
 			if (Effect.Shadow.bInner)
 			{
-				UE_LOG(LogDesign2UMG, Warning,
-					TEXT("Design2UMG: Inner shadow on '%s' ignored (UMG has no inner shadow support)"),
-					*Node->Name);
 				break;
 			}
 			if (Node->Type == EDesignNodeType::Text)
@@ -856,7 +911,8 @@ FUMGWidgetNode FVisualMapper::WrapWithBackgroundBlur(FUMGWidgetNode&& Widget, fl
 	Blur.Name = Widget.Name + TEXT("_blur");
 	Blur.Bounds = Widget.Bounds;
 	Blur.Slot = Widget.Slot;
-	Blur.Properties.Add(TEXT("BlurStrength"), FString::SanitizeFloat(BlurStrength));
+	Blur.Effect.BlurStrength = BlurStrength;
+	Blur.Effect.bHasBlurStrength = true;
 
 	Widget.Bounds = FBounds();
 	Widget.Slot = FUMGSlotData();
@@ -865,6 +921,55 @@ FUMGWidgetNode FVisualMapper::WrapWithBackgroundBlur(FUMGWidgetNode&& Widget, fl
 
 	Blur.Children.Add(MoveTemp(Widget));
 	return Blur;
+}
+
+FUMGWidgetNode FVisualMapper::WrapWithForegroundBlur(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, float BlurStrength)
+{
+	FUMGWidgetNode Retainer;
+	Retainer.Type = TEXT("RetainerBox");
+	Retainer.Id = Widget.Id + TEXT("_fxblur");
+	Retainer.Name = Widget.Name + TEXT("_fxblur");
+	Retainer.Bounds = Widget.Bounds;
+	Retainer.Slot = Widget.Slot;
+	Retainer.Effect.bRetainRendering = true;
+	Retainer.Effect.bHasRetainRendering = true;
+	Retainer.Effect.EffectMaterial = RetainerForegroundBlurEffectRef;
+	Retainer.Effect.TextureParameter = TEXT("Texture");
+
+	const FVector2D BlurUVStep = ComputeForegroundBlurUVStep(Node, BlurStrength);
+	Retainer.Effect.EffectBlurUVStep = BlurUVStep;
+	Retainer.Effect.bHasEffectBlurUVStep = true;
+
+	Widget.Bounds = FBounds();
+	Widget.Slot = FUMGSlotData();
+	Retainer.Children.Add(MoveTemp(Widget));
+	return Retainer;
+}
+
+FUMGWidgetNode FVisualMapper::WrapWithInnerShadow(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, const FDesignShadow& Shadow)
+{
+	FUMGWidgetNode Retainer;
+	Retainer.Type = TEXT("RetainerBox");
+	Retainer.Id = Widget.Id + TEXT("_innershadow");
+	Retainer.Name = Widget.Name + TEXT("_innershadow");
+	Retainer.Bounds = Widget.Bounds;
+	Retainer.Slot = Widget.Slot;
+	Retainer.Effect.bRetainRendering = true;
+	Retainer.Effect.bHasRetainRendering = true;
+	Retainer.Effect.EffectMaterial = RetainerInnerShadowEffectRef;
+	Retainer.Effect.TextureParameter = TEXT("Texture");
+	Retainer.Effect.EffectColor = FUMGValueParser::ParseColor(
+		Shadow.Color.IsEmpty() ? TEXT("#00000040") : Shadow.Color);
+	Retainer.Effect.bHasEffectColor = true;
+	Retainer.Effect.EffectOffset = ComputeEffectUVOffset(Node, Shadow.OffsetX, Shadow.OffsetY);
+	Retainer.Effect.bHasEffectOffset = true;
+	Retainer.Effect.EffectBlurUVStep = ComputeForegroundBlurUVStep(Node, Shadow.Blur);
+	Retainer.Effect.bHasEffectBlurUVStep = true;
+
+	Widget.Bounds = FBounds();
+	Widget.Slot = FUMGSlotData();
+	Retainer.Children.Add(MoveTemp(Widget));
+	return Retainer;
 }
 
 FUMGWidgetNode FVisualMapper::WrapWithBoxShadow(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, int32 ShadowIndex)
@@ -904,7 +1009,11 @@ FUMGWidgetNode FVisualMapper::WrapWithBoxShadow(FUMGWidgetNode&& Widget, const T
 	Wrapper.Slot = Widget.Slot;
 
 	// 阴影 Image 节点
-	float Extent = Blur + FMath::Max(0.0f, Spread);
+	const float PositiveSpread = FMath::Max(0.0f, Spread);
+	const float NegativeSpreadInset = FMath::Max(0.0f, -Spread);
+	const float Extent = Blur + PositiveSpread;
+	const float ShapeWidth = FMath::Max(1.0f, Node->Width.Value - NegativeSpreadInset * 2.0f);
+	const float ShapeHeight = FMath::Max(1.0f, Node->Height.Value - NegativeSpreadInset * 2.0f);
 	FUMGWidgetNode Shadow;
 	Shadow.Type = TEXT("Image");
 	FString ShadowSuffix = FString::Printf(TEXT("_shadow%d"), ShadowIndex);
@@ -913,8 +1022,8 @@ FUMGWidgetNode FVisualMapper::WrapWithBoxShadow(FUMGWidgetNode&& Widget, const T
 	Shadow.Properties.Add(TEXT("BrushColor"), ShadowColor);
 
 	// 阴影纹理参数
-	int32 TexW = FMath::Max(1, FMath::RoundToInt(Node->Width.Value + Extent * 2));
-	int32 TexH = FMath::Max(1, FMath::RoundToInt(Node->Height.Value + Extent * 2));
+	const int32 TexW = FMath::Max(1, FMath::RoundToInt(ShapeWidth + Extent * 2.0f));
+	const int32 TexH = FMath::Max(1, FMath::RoundToInt(ShapeHeight + Extent * 2.0f));
 	Shadow.Properties.Add(TEXT("WidthOverride"), FString::FromInt(TexW));
 	Shadow.Properties.Add(TEXT("HeightOverride"), FString::FromInt(TexH));
 	Shadow.Properties.Add(TEXT("MaterialRef"), (Blur > 0.0f) ? TEXT("boxshadow") : MatRef_RoundedRect);
@@ -923,13 +1032,16 @@ FUMGWidgetNode FVisualMapper::WrapWithBoxShadow(FUMGWidgetNode&& Widget, const T
 	const float HalfMin = FMath::Min(TexW, TexH) * 0.5f;
 	if (Node->CornerRadius.bUniform)
 	{
-		float NR = (HalfMin > 0.f) ? (Node->CornerRadius.Uniform + Extent) / HalfMin : 0.f;
+		const float NormalizedRadius = (HalfMin > 0.0f) ? (Node->CornerRadius.Uniform + Extent) / HalfMin : 0.0f;
 		Shadow.Properties.Add(TEXT("MaterialParams"),
-			FString::Printf(TEXT("{\"Color\":\"%s\",\"CornerRadius\":%.3f}"), *ShadowColor, NR));
+			FString::Printf(TEXT("{\"Color\":\"%s\",\"CornerRadius\":%.3f}"), *ShadowColor, NormalizedRadius));
 	}
 	else
 	{
-		auto Norm = [&](float R) { return (HalfMin > 0.f) ? (R + Extent) / HalfMin : 0.f; };
+		auto Norm = [&](float RadiusPx)
+		{
+			return (HalfMin > 0.0f) ? (RadiusPx + Extent) / HalfMin : 0.0f;
+		};
 		Shadow.Properties.Add(TEXT("MaterialParams"),
 			FString::Printf(TEXT("{\"Color\":\"%s\",\"CornerRadii\":[%.3f,%.3f,%.3f,%.3f]}"),
 				*ShadowColor,
@@ -940,8 +1052,8 @@ FUMGWidgetNode FVisualMapper::WrapWithBoxShadow(FUMGWidgetNode&& Widget, const T
 	// 阴影偏移定位
 	Shadow.Slot.HorizontalAlignment = TEXT("Fill");
 	Shadow.Slot.VerticalAlignment = TEXT("Fill");
-	float ShadowMarginLeft = OffX - Extent;
-	float ShadowMarginTop = OffY - Extent;
+	const float ShadowMarginLeft = OffX - Extent + NegativeSpreadInset;
+	const float ShadowMarginTop = OffY - Extent + NegativeSpreadInset;
 	Shadow.Properties.Add(TEXT("RenderTranslation"),
 		FString::Printf(TEXT("%.1f,%.1f"), ShadowMarginLeft, ShadowMarginTop));
 
@@ -1040,10 +1152,10 @@ FUMGWidgetNode FVisualMapper::WrapWithMultiFill(FUMGWidgetNode&& Widget, const T
 				ImageChild.Brush.TexturePath = Fill.Image.Url;
 				if (bLuminosityFit)
 				{
-					// Figma exports FIT+LUMINOSITY without a reliable geometric scale we can
-					// reproduce in UMG. Keep the normal fit sizing and approximate the subtle
-					// luminance wash via a low-opacity overlay instead of synthetic transforms.
-					const float EffectiveOpacity = FMath::Min(Fill.Image.Opacity, 0.15f);
+					// Keep FIT sizing intact and approximate the luminance wash via a capped
+					// overlay opacity. The cap is configurable because it is an approximation,
+					// not a source-authored geometric transform.
+					const float EffectiveOpacity = FMath::Min(Fill.Image.Opacity, GetLuminosityFitOpacityCap());
 					ImageChild.Properties.Add(TEXT("RenderOpacity"), FString::Printf(TEXT("%.4f"), EffectiveOpacity));
 				}
 				else if (Fill.Image.Opacity < 1.0f)

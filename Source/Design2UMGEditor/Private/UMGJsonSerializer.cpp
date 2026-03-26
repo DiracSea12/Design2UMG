@@ -104,9 +104,16 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeWidgetNode(const FUMGWidget
 		TSharedRef<FJsonObject> Props = MakeShared<FJsonObject>();
 		Node.Properties.ForEachSerialized([&Props](const FString& Key, const FString& Value)
 		{
+			if (Key == TEXT("ActiveWidgetIndex"))
+			{
+				return;
+			}
 			Props->SetStringField(Key, Value);
 		});
-		J->SetObjectField(TEXT("Properties"), Props);
+		if (Props->Values.Num() > 0)
+		{
+			J->SetObjectField(TEXT("Properties"), Props);
+		}
 	}
 
 	// TextStyle (v2.4)
@@ -138,6 +145,53 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeWidgetNode(const FUMGWidget
 		if (!B.TexturePath.IsEmpty())      { BJ->SetStringField(TEXT("TexturePath"), B.TexturePath); bHasAny = true; }
 		if (bHasAny)
 			J->SetObjectField(TEXT("Brush"), BJ);
+	}
+
+	// Effect (v2.5)
+	if (Node.Effect.HasAny())
+	{
+		const FUMGEffectData& E = Node.Effect;
+		TSharedRef<FJsonObject> EJ = MakeShared<FJsonObject>();
+		if (E.bHasBlurStrength)
+			EJ->SetNumberField(TEXT("BlurStrength"), E.BlurStrength);
+		if (E.bHasRetainRendering)
+			EJ->SetBoolField(TEXT("RetainRendering"), E.bRetainRendering);
+		if (!E.EffectMaterial.IsEmpty())
+			EJ->SetStringField(TEXT("EffectMaterial"), E.EffectMaterial);
+		if (!E.TextureParameter.IsEmpty())
+			EJ->SetStringField(TEXT("TextureParameter"), E.TextureParameter);
+		if (E.bHasEffectBlurUVStep)
+		{
+			EJ->SetStringField(
+				TEXT("EffectBlurUVStep"),
+				FString::Printf(TEXT("%.6f,%.6f"), E.EffectBlurUVStep.X, E.EffectBlurUVStep.Y));
+		}
+		if (E.bHasEffectColor)
+			EJ->SetStringField(TEXT("EffectColor"), E.EffectColor.ToString());
+		if (E.bHasEffectOffset)
+		{
+			EJ->SetStringField(
+				TEXT("EffectOffset"),
+				FString::Printf(TEXT("%.6f,%.6f"), E.EffectOffset.X, E.EffectOffset.Y));
+		}
+		if (E.bHasRenderingPhase)
+		{
+			EJ->SetNumberField(TEXT("Phase"), E.Phase);
+			EJ->SetNumberField(TEXT("PhaseCount"), E.PhaseCount);
+		}
+		J->SetObjectField(TEXT("Effect"), EJ);
+	}
+
+	// WidgetState (v2.6)
+	if (Node.WidgetState.HasAny())
+	{
+		const FUMGWidgetStateData& State = Node.WidgetState;
+		TSharedRef<FJsonObject> StateObject = MakeShared<FJsonObject>();
+		if (State.bHasActiveWidgetIndex)
+		{
+			StateObject->SetNumberField(TEXT("ActiveWidgetIndex"), State.ActiveWidgetIndex);
+		}
+		J->SetObjectField(TEXT("WidgetState"), StateObject);
 	}
 
 	if (Node.Children.Num() > 0)

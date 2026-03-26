@@ -5,6 +5,7 @@
 #include "UMGValueParser.h"
 #include "TextStyleUtils.h"
 #include "Design2UMGLog.h"
+#include "Design2UMGEffectMaterialBuilder.h"
 #include "ProceduralShapeGenerator.h"
 #include "DesignPathRasterizer.h"
 
@@ -44,6 +45,7 @@
 #include "Fonts/FontCache.h"
 #include "Styling/SlateBrush.h"
 #include "Engine/UserInterfaceSettings.h"
+#include "Materials/MaterialInstanceDynamic.h"
 
 // ============================================================================
 // Widget 属性应用（函数指针映射表模式）
@@ -51,6 +53,33 @@
 
 namespace
 {
+	const TCHAR* RetainerForegroundBlurEffectRef = TEXT("d2u.retainer.foreground_blur");
+	const TCHAR* RetainerInnerShadowEffectRef = TEXT("d2u.retainer.inner_shadow");
+
+	UMaterialInterface* ResolveRetainerEffectMaterial(const FString& EffectMaterialRef)
+	{
+		if (EffectMaterialRef.IsEmpty())
+		{
+			return nullptr;
+		}
+
+		if (EffectMaterialRef.Equals(RetainerForegroundBlurEffectRef, ESearchCase::CaseSensitive))
+		{
+			return Design2UMGEffectMaterialBuilder::GetOrCreateForegroundBlurRetainerMaterial();
+		}
+		if (EffectMaterialRef.Equals(RetainerInnerShadowEffectRef, ESearchCase::CaseSensitive))
+		{
+			return Design2UMGEffectMaterialBuilder::GetOrCreateInnerShadowRetainerMaterial();
+		}
+
+		if (UMaterialInterface* Loaded = LoadObject<UMaterialInterface>(nullptr, *EffectMaterialRef))
+		{
+			return Loaded;
+		}
+
+		return FindObject<UMaterialInterface>(nullptr, *EffectMaterialRef);
+	}
+
 	bool TryGetProp(const FUMGPropertyBag& P, const TCHAR* Key, FString& OutValue)
 	{
 		return P.TryGetString(Key, OutValue) && !OutValue.IsEmpty();
@@ -333,8 +362,28 @@ namespace
 			{
 				FillRuleStr = TEXT("nonzero");
 			}
-			FLinearColor PathColor = FLinearColor::White;
-			P.TryGetColor(TEXT("PathFillColor"), PathColor);
+			TOptional<FLinearColor> FillColor;
+			FLinearColor ParsedFillColor;
+			if (P.TryGetColor(TEXT("PathFillColor"), ParsedFillColor))
+			{
+				FillColor = ParsedFillColor;
+			}
+
+			TOptional<FLinearColor> StrokeColor;
+			FLinearColor ParsedStrokeColor;
+			if (P.TryGetColor(TEXT("PathStrokeColor"), ParsedStrokeColor))
+			{
+				StrokeColor = ParsedStrokeColor;
+			}
+
+			float StrokeThickness = 0.0f;
+			P.TryGetFloat(TEXT("PathStrokeThickness"), StrokeThickness);
+
+			FString StrokeCap = TEXT("butt");
+			TryGetProp(P, TEXT("PathStrokeCap"), StrokeCap);
+
+			FString StrokeJoin = TEXT("miter");
+			TryGetProp(P, TEXT("PathStrokeJoin"), StrokeJoin);
 
 			float PathWidth = 64.0f;
 			float PathHeight = 64.0f;
@@ -346,7 +395,16 @@ namespace
 			const int32 RasterW = PW * PathSupersample;
 			const int32 RasterH = PH * PathSupersample;
 
-			if (UTexture2D* Tex = FDesignPathRasterizer::Rasterize(Geom, RasterW, RasterH, PathColor, FillRuleStr))
+			if (UTexture2D* Tex = FDesignPathRasterizer::Rasterize(
+				Geom,
+				RasterW,
+				RasterH,
+				FillColor,
+				FillRuleStr,
+				StrokeColor,
+				StrokeThickness,
+				StrokeCap,
+				StrokeJoin))
 			{
 				I->SetBrushFromTexture(Tex);
 				FSlateBrush PathBrush = I->GetBrush();
@@ -717,11 +775,32 @@ namespace
 		if (P.TryGetFloat(TEXT("BlurStrength"), BlurStrength)) CastChecked<UBackgroundBlur>(W)->SetBlurStrength(BlurStrength);
 	}
 
+	void ApplyTypedBackgroundBlurProps(UBackgroundBlur* Blur, const FUMGEffectData& Effect)
+	{
+		if (Blur && Effect.bHasBlurStrength)
+		{
+			Blur->SetBlurStrength(Effect.BlurStrength);
+		}
+	}
+
 	void ApplyRetainerBoxProps(UWidget* W, const FUMGPropertyBag& P)
 	{
 		URetainerBox* RB = CastChecked<URetainerBox>(W);
 		bool bRetainRendering = false;
 		if (P.TryGetBool(TEXT("RetainRendering"), bRetainRendering)) RB->SetRetainRendering(bRetainRendering);
+		FString TextureParameterValue;
+		if (TryGetProp(P, TEXT("TextureParameter"), TextureParameterValue))
+		{
+			RB->SetTextureParameter(FName(*TextureParameterValue));
+		}
+		FString EffectMaterialRef;
+		if (TryGetProp(P, TEXT("EffectMaterial"), EffectMaterialRef))
+		{
+			if (UMaterialInterface* EffectMaterial = ResolveRetainerEffectMaterial(EffectMaterialRef))
+			{
+				RB->SetEffectMaterial(EffectMaterial);
+			}
+		}
 		int32 Phase = RB->GetPhase();
 		int32 PhaseCount = RB->GetPhaseCount();
 		bool bHasPhase = false;
@@ -735,6 +814,67 @@ namespace
 			bHasPhase = true;
 		}
 		if (bHasPhase) RB->SetRenderingPhase(Phase, PhaseCount);
+		RB->TakeWidget();
+		if (UMaterialInstanceDynamic* DynamicEffect = RB->GetEffectMaterial())
+		{
+			FVector2D BlurUVStep = FVector2D::ZeroVector;
+			if (P.TryGetVector2D(TEXT("EffectBlurUVStep"), BlurUVStep))
+			{
+				DynamicEffect->SetVectorParameterValue(TEXT("BlurUVStep"), FLinearColor(BlurUVStep.X, BlurUVStep.Y, 0.0f, 0.0f));
+			}
+		}
+	}
+
+	void ApplyTypedRetainerBoxProps(URetainerBox* RB, const FUMGEffectData& Effect)
+	{
+		if (!RB)
+		{
+			return;
+		}
+
+		if (Effect.bHasRetainRendering)
+		{
+			RB->SetRetainRendering(Effect.bRetainRendering);
+		}
+
+		if (!Effect.TextureParameter.IsEmpty())
+		{
+			RB->SetTextureParameter(FName(*Effect.TextureParameter));
+		}
+
+		if (!Effect.EffectMaterial.IsEmpty())
+		{
+			if (UMaterialInterface* EffectMaterial = ResolveRetainerEffectMaterial(Effect.EffectMaterial))
+			{
+				RB->SetEffectMaterial(EffectMaterial);
+			}
+		}
+
+		if (Effect.bHasRenderingPhase)
+		{
+			RB->SetRenderingPhase(Effect.Phase, FMath::Max(1, Effect.PhaseCount));
+		}
+
+		RB->TakeWidget();
+		if (UMaterialInstanceDynamic* DynamicEffect = RB->GetEffectMaterial())
+		{
+			if (Effect.bHasEffectBlurUVStep)
+			{
+				DynamicEffect->SetVectorParameterValue(
+					TEXT("BlurUVStep"),
+					FLinearColor(Effect.EffectBlurUVStep.X, Effect.EffectBlurUVStep.Y, 0.0f, 0.0f));
+			}
+			if (Effect.bHasEffectColor)
+			{
+				DynamicEffect->SetVectorParameterValue(TEXT("InnerShadowColor"), Effect.EffectColor);
+			}
+			if (Effect.bHasEffectOffset)
+			{
+				DynamicEffect->SetVectorParameterValue(
+					TEXT("InnerShadowOffset"),
+					FLinearColor(Effect.EffectOffset.X, Effect.EffectOffset.Y, 0.0f, 0.0f));
+			}
+		}
 	}
 
 	void ApplyInvalidationBoxProps(UWidget* W, const FUMGPropertyBag& P)
@@ -820,6 +960,14 @@ namespace
 		UWidgetSwitcher* WS = CastChecked<UWidgetSwitcher>(W);
 		int32 ActiveWidgetIndex = 0;
 		if (P.TryGetInt(TEXT("ActiveWidgetIndex"), ActiveWidgetIndex)) WS->SetActiveWidgetIndex(ActiveWidgetIndex);
+	}
+
+	void ApplyTypedWidgetSwitcherProps(UWidgetSwitcher* WS, const FUMGWidgetStateData& State)
+	{
+		if (WS && State.bHasActiveWidgetIndex)
+		{
+			WS->SetActiveWidgetIndex(State.ActiveWidgetIndex);
+		}
 	}
 
 	void ApplyExpandableAreaProps(UWidget* W, const FUMGPropertyBag& P)
@@ -1070,6 +1218,20 @@ void FUMGWidgetUtils::ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNod
 	if (UBorder* Bd = Cast<UBorder>(Widget))
 	{
 		ApplyTypedBorderBrush(Bd, Node.Brush);
+	}
+
+	// Effect: typed subtree/runtime effect 属性优先
+	if (UBackgroundBlur* BackgroundBlur = Cast<UBackgroundBlur>(Widget))
+	{
+		ApplyTypedBackgroundBlurProps(BackgroundBlur, Node.Effect);
+	}
+	if (URetainerBox* RetainerBox = Cast<URetainerBox>(Widget))
+	{
+		ApplyTypedRetainerBoxProps(RetainerBox, Node.Effect);
+	}
+	if (UWidgetSwitcher* WidgetSwitcher = Cast<UWidgetSwitcher>(Widget))
+	{
+		ApplyTypedWidgetSwitcherProps(WidgetSwitcher, Node.WidgetState);
 	}
 
 	// legacy 流程处理剩余属性

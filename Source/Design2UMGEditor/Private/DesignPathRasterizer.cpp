@@ -35,16 +35,40 @@ void ScanlineFill(
 
 namespace
 {
-	uint32 MakeCacheKey(const FString& Geometry, int32 W, int32 H, FLinearColor C, const FString& Rule)
+	uint32 MakeCacheKey(
+		const FString& Geometry,
+		int32 W,
+		int32 H,
+		const TOptional<FLinearColor>& FillColor,
+		const FString& Rule,
+		const TOptional<FLinearColor>& StrokeColor,
+		float StrokeWidth,
+		const FString& StrokeCap,
+		const FString& StrokeJoin)
 	{
 		uint32 K = GetTypeHash(Geometry);
 		K = HashCombine(K, GetTypeHash(W));
 		K = HashCombine(K, GetTypeHash(H));
-		K = HashCombine(K, GetTypeHash(C.R));
-		K = HashCombine(K, GetTypeHash(C.G));
-		K = HashCombine(K, GetTypeHash(C.B));
-		K = HashCombine(K, GetTypeHash(C.A));
+		K = HashCombine(K, GetTypeHash(FillColor.IsSet()));
+		if (FillColor.IsSet())
+		{
+			K = HashCombine(K, GetTypeHash(FillColor->R));
+			K = HashCombine(K, GetTypeHash(FillColor->G));
+			K = HashCombine(K, GetTypeHash(FillColor->B));
+			K = HashCombine(K, GetTypeHash(FillColor->A));
+		}
 		K = HashCombine(K, GetTypeHash(Rule));
+		K = HashCombine(K, GetTypeHash(StrokeColor.IsSet()));
+		if (StrokeColor.IsSet())
+		{
+			K = HashCombine(K, GetTypeHash(StrokeColor->R));
+			K = HashCombine(K, GetTypeHash(StrokeColor->G));
+			K = HashCombine(K, GetTypeHash(StrokeColor->B));
+			K = HashCombine(K, GetTypeHash(StrokeColor->A));
+		}
+		K = HashCombine(K, GetTypeHash(StrokeWidth));
+		K = HashCombine(K, GetTypeHash(StrokeCap));
+		K = HashCombine(K, GetTypeHash(StrokeJoin));
 		return K;
 	}
 
@@ -65,6 +89,168 @@ namespace
 			}
 		}
 		return Count;
+	}
+
+	bool HasVisibleColor(const TOptional<FLinearColor>& Color)
+	{
+		return Color.IsSet() && Color->A > KINDA_SMALL_NUMBER;
+	}
+
+	bool IsClosedPath(const TArray<FPathPoint>& Path)
+	{
+		if (Path.Num() < 3)
+		{
+			return false;
+		}
+
+		const FPathPoint& First = Path[0];
+		const FPathPoint& Last = Path.Last();
+		return FMath::Abs(First.X - Last.X) <= KINDA_SMALL_NUMBER
+			&& FMath::Abs(First.Y - Last.Y) <= KINDA_SMALL_NUMBER;
+	}
+
+	void DrawFilledCircle(
+		TArray<FColor>& InOutPixels,
+		int32 Width,
+		int32 Height,
+		const FVector2D& Center,
+		float Radius,
+		const FColor& Color)
+	{
+		if (Radius <= 0.0f || Color.A == 0)
+		{
+			return;
+		}
+
+		const float RadiusSq = Radius * Radius;
+		const int32 MinX = FMath::Max(0, FMath::FloorToInt(Center.X - Radius - 1.0f));
+		const int32 MaxX = FMath::Min(Width - 1, FMath::CeilToInt(Center.X + Radius + 1.0f));
+		const int32 MinY = FMath::Max(0, FMath::FloorToInt(Center.Y - Radius - 1.0f));
+		const int32 MaxY = FMath::Min(Height - 1, FMath::CeilToInt(Center.Y + Radius + 1.0f));
+
+		for (int32 Y = MinY; Y <= MaxY; ++Y)
+		{
+			for (int32 X = MinX; X <= MaxX; ++X)
+			{
+				const FVector2D Sample(X + 0.5f, Y + 0.5f);
+				if ((Sample - Center).SizeSquared() <= RadiusSq)
+				{
+					InOutPixels[Y * Width + X] = Color;
+				}
+			}
+		}
+	}
+
+	bool IsPointInsideStrokeSegment(
+		const FVector2D& Point,
+		const FVector2D& Start,
+		const FVector2D& End,
+		float Radius,
+		bool bRoundCap,
+		bool bSquareCap)
+	{
+		const FVector2D Segment = End - Start;
+		const float SegmentLengthSq = Segment.SizeSquared();
+		if (SegmentLengthSq <= KINDA_SMALL_NUMBER)
+		{
+			return (Point - Start).SizeSquared() <= Radius * Radius;
+		}
+
+		if (bSquareCap)
+		{
+			const FVector2D Direction = Segment.GetSafeNormal();
+			const FVector2D ExtendedStart = Start - Direction * Radius;
+			const FVector2D ExtendedEnd = End + Direction * Radius;
+			const FVector2D ExtendedSegment = ExtendedEnd - ExtendedStart;
+			const float ExtendedLengthSq = ExtendedSegment.SizeSquared();
+			const float T = FMath::Clamp(FVector2D::DotProduct(Point - ExtendedStart, ExtendedSegment) / ExtendedLengthSq, 0.0f, 1.0f);
+			const FVector2D ClosestPoint = ExtendedStart + ExtendedSegment * T;
+			return (Point - ClosestPoint).SizeSquared() <= Radius * Radius;
+		}
+
+		const float RawT = FVector2D::DotProduct(Point - Start, Segment) / SegmentLengthSq;
+		if (!bRoundCap && (RawT < 0.0f || RawT > 1.0f))
+		{
+			return false;
+		}
+
+		const float T = bRoundCap ? FMath::Clamp(RawT, 0.0f, 1.0f) : RawT;
+		const FVector2D ClosestPoint = Start + Segment * T;
+		return (Point - ClosestPoint).SizeSquared() <= Radius * Radius;
+	}
+
+	void RasterizeStroke(
+		const TArray<TArray<FPathPoint>>& SubPaths,
+		TArray<FColor>& InOutPixels,
+		int32 Width,
+		int32 Height,
+		const FColor& StrokeColor,
+		float StrokeWidth,
+		const FString& StrokeCap,
+		const FString& StrokeJoin)
+	{
+		if (StrokeColor.A == 0 || StrokeWidth <= KINDA_SMALL_NUMBER)
+		{
+			return;
+		}
+
+		const float Radius = StrokeWidth * 0.5f;
+		const bool bRoundCap = StrokeCap.Equals(TEXT("round"), ESearchCase::IgnoreCase);
+		const bool bSquareCap = StrokeCap.Equals(TEXT("square"), ESearchCase::IgnoreCase);
+		const bool bRoundJoin = StrokeJoin.Equals(TEXT("round"), ESearchCase::IgnoreCase);
+
+		for (const TArray<FPathPoint>& Path : SubPaths)
+		{
+			if (Path.Num() < 2)
+			{
+				continue;
+			}
+
+			const bool bClosed = IsClosedPath(Path);
+			const int32 LastPointIndex = Path.Num() - 1;
+			for (int32 Index = 0; Index < LastPointIndex; ++Index)
+			{
+				const FVector2D Start(Path[Index].X, Path[Index].Y);
+				const FVector2D End(Path[Index + 1].X, Path[Index + 1].Y);
+				if ((End - Start).SizeSquared() <= KINDA_SMALL_NUMBER)
+				{
+					continue;
+				}
+
+				const int32 MinX = FMath::Max(0, FMath::FloorToInt(FMath::Min(Start.X, End.X) - Radius - 1.0f));
+				const int32 MaxX = FMath::Min(Width - 1, FMath::CeilToInt(FMath::Max(Start.X, End.X) + Radius + 1.0f));
+				const int32 MinY = FMath::Max(0, FMath::FloorToInt(FMath::Min(Start.Y, End.Y) - Radius - 1.0f));
+				const int32 MaxY = FMath::Min(Height - 1, FMath::CeilToInt(FMath::Max(Start.Y, End.Y) + Radius + 1.0f));
+
+				for (int32 Y = MinY; Y <= MaxY; ++Y)
+				{
+					for (int32 X = MinX; X <= MaxX; ++X)
+					{
+						const FVector2D Sample(X + 0.5f, Y + 0.5f);
+						if (IsPointInsideStrokeSegment(Sample, Start, End, Radius, bRoundCap, bSquareCap))
+						{
+							InOutPixels[Y * Width + X] = StrokeColor;
+						}
+					}
+				}
+			}
+
+			if (bRoundJoin)
+			{
+				const int32 JoinStartIndex = bClosed ? 0 : 1;
+				const int32 JoinEndIndex = bClosed ? LastPointIndex - 1 : LastPointIndex - 1;
+				for (int32 Index = JoinStartIndex; Index <= JoinEndIndex; ++Index)
+				{
+					DrawFilledCircle(
+						InOutPixels,
+						Width,
+						Height,
+						FVector2D(Path[Index].X, Path[Index].Y),
+						Radius,
+						StrokeColor);
+				}
+			}
+		}
 	}
 
 	void EvictStale()
@@ -590,16 +776,28 @@ void ScanlineFill(
 
 UTexture2D* FDesignPathRasterizer::Rasterize(
 	const FString& Geometry,
-	int32 Width, int32 Height,
-	FLinearColor FillColor,
-	const FString& FillRule)
+	int32 Width,
+	int32 Height,
+	const TOptional<FLinearColor>& FillColor,
+	const FString& FillRule,
+	const TOptional<FLinearColor>& StrokeColor,
+	float StrokeWidth,
+	const FString& StrokeCap,
+	const FString& StrokeJoin)
 {
 	check(IsInGameThread());
 	if (Geometry.IsEmpty() || Width <= 0 || Height <= 0)
 		return nullptr;
 
+	const bool bHasVisibleFill = HasVisibleColor(FillColor);
+	const bool bHasVisibleStroke = HasVisibleColor(StrokeColor) && StrokeWidth > KINDA_SMALL_NUMBER;
+	if (!bHasVisibleFill && !bHasVisibleStroke)
+	{
+		return nullptr;
+	}
+
 	// --- Cache lookup ---
-	uint32 CacheKey = MakeCacheKey(Geometry, Width, Height, FillColor, FillRule);
+	uint32 CacheKey = MakeCacheKey(Geometry, Width, Height, FillColor, FillRule, StrokeColor, StrokeWidth, StrokeCap, StrokeJoin);
 	if (TWeakObjectPtr<UTexture2D>* Found = GPathCache.Find(CacheKey))
 	{
 		if (Found->IsValid())
@@ -647,16 +845,21 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 	}
 
 	TArray<FColor> Pixels;
+	Pixels.SetNumZeroed(Width * Height);
+
 	const bool bEvenOdd = FillRule.Equals(TEXT("evenodd"), ESearchCase::IgnoreCase);
-	ScanlineFill(SubPaths, Pixels, Width, Height, FillColor.ToFColor(true), bEvenOdd);
+	if (bHasVisibleFill)
+	{
+		ScanlineFill(SubPaths, Pixels, Width, Height, FillColor->ToFColor(true), bEvenOdd);
+	}
 
 	// Complex glyph-style paths sometimes arrive with contour winding that our flattened
 	// nonzero scanline fill interprets too aggressively, collapsing the logo into a solid bar.
 	// For multi-subpath vectors, compare nonzero vs evenodd coverage and keep the more plausible one.
-	if (!bEvenOdd)
+	if (bHasVisibleFill && !bEvenOdd)
 	{
 		TArray<FColor> EvenOddPixels;
-		ScanlineFill(SubPaths, EvenOddPixels, Width, Height, FillColor.ToFColor(true), true);
+		ScanlineFill(SubPaths, EvenOddPixels, Width, Height, FillColor->ToFColor(true), true);
 
 		const int64 NonZeroCoverage = CountFilledPixels(Pixels);
 		const int64 EvenOddCoverage = CountFilledPixels(EvenOddPixels);
@@ -667,6 +870,20 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 				SubPaths.Num(), NonZeroCoverage, EvenOddCoverage);
 			Pixels = MoveTemp(EvenOddPixels);
 		}
+	}
+
+	if (bHasVisibleStroke)
+	{
+		const float ScaledStrokeWidth = FMath::Max(1.0f, StrokeWidth * Scale);
+		RasterizeStroke(
+			SubPaths,
+			Pixels,
+			Width,
+			Height,
+			StrokeColor->ToFColor(true),
+			ScaledStrokeWidth,
+			StrokeCap,
+			StrokeJoin);
 	}
 
 	UTexture2D* Texture = UTexture2D::CreateTransient(Width, Height, PF_B8G8R8A8, NAME_None);

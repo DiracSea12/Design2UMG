@@ -768,6 +768,8 @@ namespace
 		FlushRenderingCommands();
 		FlushAsyncLoading();
 		FFontResolver::ClearCache();
+		FFontResolver::ResetExternalResolvers();
+		DesignFontImportService::ResetTransientState();
 		FDesignPathRasterizer::ClearCache();
 		FProceduralShapeGenerator::ReleaseTransientTextures();
 		FUMGWidgetUtils::EffectiveDesignSize = FIntPoint(1920, 1080);

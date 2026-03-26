@@ -42,7 +42,7 @@ namespace
 			|| Key == MaxDesiredWidth || Key == MaxValue || Key == MinDesiredHeight
 			|| Key == MinDesiredSlotHeight || Key == MinDesiredSlotWidth || Key == MinDesiredWidth
 			|| Key == MinValue || Key == MinimumDesiredWidth || Key == OutlineCornerRadius
-			|| Key == OutlineThickness || Key == Percent || Key == Period || Key == Radius
+			|| Key == OutlineThickness || Key == PathStrokeThickness || Key == Percent || Key == Period || Key == Radius
 			|| Key == RenderAngle || Key == RenderOpacity || Key == ShadowBlur || Key == UserSpecifiedScale
 			|| Key == Value || Key == Width || Key == WidthOverride || Key == WrapTextAt)
 		{
@@ -51,12 +51,12 @@ namespace
 
 		if (Key == BackgroundColor || Key == BrushColor || Key == Color || Key == ColorAndOpacity
 			|| Key == ContentColor || Key == FillColor || Key == HoveredColor || Key == OutlineColor
-			|| Key == PathFillColor || Key == PressedColor || Key == ShadowColorAndOpacity)
+			|| Key == PathFillColor || Key == PathStrokeColor || Key == PressedColor || Key == ShadowColorAndOpacity)
 		{
 			return EKnownPropertyValueType::Color;
 		}
 
-		if (Key == InnerSlotPadding || Key == RenderScale || Key == RenderTransformPivot
+		if (Key == EffectBlurUVStep || Key == InnerSlotPadding || Key == RenderScale || Key == RenderTransformPivot
 			|| Key == RenderTransformScale || Key == RenderTranslation || Key == ShadowOffset)
 		{
 			return EKnownPropertyValueType::Vector2D;

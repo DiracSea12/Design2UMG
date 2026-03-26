@@ -80,6 +80,44 @@ namespace
 
 		return FString();
 	}
+
+	FString ResolvePathRasterStrokeColor(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (Node->Stroke.HasStroke() && Node->Stroke.Fill.Type == EDesignFillType::Color)
+		{
+			return Node->Stroke.Fill.SolidColor;
+		}
+
+		return FString();
+	}
+
+	float ResolvePathRasterStrokeThickness(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node->Stroke.HasStroke())
+		{
+			return 0.0f;
+		}
+
+		if (Node->Stroke.Thickness.bUniform)
+		{
+			return Node->Stroke.Thickness.Uniform;
+		}
+
+		return FMath::Max(
+			FMath::Max(Node->Stroke.Thickness.Top, Node->Stroke.Thickness.Right),
+			FMath::Max(Node->Stroke.Thickness.Bottom, Node->Stroke.Thickness.Left));
+	}
+
+	FString ResolvePathStrokeMetadata(const TSharedPtr<FDesignNode>& Node, const TCHAR* Key, const TCHAR* DefaultValue)
+	{
+		if (!Node.IsValid())
+		{
+			return FString(DefaultValue);
+		}
+
+		const FString* Value = Node->Metadata.Find(Key);
+		return (Value && !Value->IsEmpty()) ? *Value : FString(DefaultValue);
+	}
 }
 
 FUMGWidgetNode PathWidgetBuilder::CreatePathWidget(const TSharedPtr<FDesignNode>& Node)
@@ -105,19 +143,33 @@ FUMGWidgetNode PathWidgetBuilder::CreatePathWidget(const TSharedPtr<FDesignNode>
 
 	if (!Node->Geometry.IsEmpty())
 	{
-		const FString RasterColor = ResolvePathRasterFillColor(Node);
-		if (!RasterColor.IsEmpty())
+		const FString FillColor = ResolvePathRasterFillColor(Node);
+		const FString StrokeColor = ResolvePathRasterStrokeColor(Node);
+		const float StrokeThickness = ResolvePathRasterStrokeThickness(Node);
+		if (!FillColor.IsEmpty() || (!StrokeColor.IsEmpty() && StrokeThickness > 0.0f))
 		{
-			UE_LOG(LogDesign2UMG, Log, TEXT("CreatePathWidget: '%s' rasterize %dx%d (raw=%.1fx%.1f) geometry=%d chars"),
+			UE_LOG(LogDesign2UMG, Log, TEXT("CreatePathWidget: '%s' rasterize %dx%d (raw=%.1fx%.1f) geometry=%d chars fill=%d stroke=%.2f"),
 				*Node->Name,
 				FMath::Max(1, FMath::RoundToInt(Node->Width.Value)),
 				FMath::Max(1, FMath::RoundToInt(Node->Height.Value)),
-				Node->Width.Value, Node->Height.Value, Node->Geometry.Len());
+				Node->Width.Value, Node->Height.Value, Node->Geometry.Len(),
+				FillColor.IsEmpty() ? 0 : 1,
+				StrokeThickness);
 
 			Widget.Type = TEXT("Image");
 			Widget.Properties.Add(TEXT("PathGeometry"), Node->Geometry);
 			Widget.Properties.Add(TEXT("PathFillRule"), Node->FillRule);
-			Widget.Properties.Add(TEXT("PathFillColor"), RasterColor);
+			if (!FillColor.IsEmpty())
+			{
+				Widget.Properties.Add(TEXT("PathFillColor"), FillColor);
+			}
+			if (!StrokeColor.IsEmpty() && StrokeThickness > 0.0f)
+			{
+				Widget.Properties.Add(TEXT("PathStrokeColor"), StrokeColor);
+				Widget.Properties.Add(TEXT("PathStrokeThickness"), FString::SanitizeFloat(StrokeThickness));
+				Widget.Properties.Add(TEXT("PathStrokeCap"), ResolvePathStrokeMetadata(Node, TEXT("stroke.cap"), TEXT("butt")));
+				Widget.Properties.Add(TEXT("PathStrokeJoin"), ResolvePathStrokeMetadata(Node, TEXT("stroke.join"), TEXT("miter")));
+			}
 			ApplyPathSizeOverrides(Widget, Node);
 			return Widget;
 		}

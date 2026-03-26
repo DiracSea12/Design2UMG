@@ -1,6 +1,7 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGGenerator.h"
+#include "Design2UMGPrototypeNavigationExtensions.h"
 #include "UMGWidgetUtils.h"
 #include "UMGPropertyKeys.h"
 #include "UMGValueParser.h"
@@ -23,9 +24,32 @@
 #include "Misc/PackageName.h"
 #include "TextureResource.h"
 #include "UObject/SavePackage.h"
+#include "UObject/UObjectHash.h"
 
 namespace
 {
+	void ConfigurePrototypeNavigationExtension(UWidgetBlueprint* WidgetBlueprint, const FUMGPrototypeNavigationData& NavigationData)
+	{
+		if (!WidgetBlueprint)
+		{
+			return;
+		}
+
+		if (NavigationData.IsValid())
+		{
+			UDesign2UMGPrototypeNavigationBlueprintExtension* Extension =
+				UWidgetBlueprintExtension::RequestExtension<UDesign2UMGPrototypeNavigationBlueprintExtension>(WidgetBlueprint);
+			Extension->SetNavigationData(NavigationData);
+			return;
+		}
+
+		if (UDesign2UMGPrototypeNavigationBlueprintExtension* ExistingExtension =
+			UWidgetBlueprintExtension::GetExtension<UDesign2UMGPrototypeNavigationBlueprintExtension>(WidgetBlueprint))
+		{
+			WidgetBlueprint->RemoveExtension(ExistingExtension);
+		}
+	}
+
 	void DumpTemplateTextBlockFontState(const TCHAR* Stage, UWidgetBlueprint* WidgetBlueprint)
 	{
 		if (!UE_LOG_ACTIVE(LogDesign2UMG, Verbose) || !WidgetBlueprint || !WidgetBlueprint->WidgetTree)
@@ -56,6 +80,95 @@ namespace
 				TextBlock->GetWrapTextAt(),
 				TextBlock->GetAutoWrapText() ? 1 : 0);
 		});
+	}
+
+	void ClearGeneratedWidgetNavigationState(UWidgetBlueprint* WidgetBlueprint)
+	{
+		if (!WidgetBlueprint)
+		{
+			return;
+		}
+
+		int32 ClearedWidgetCount = 0;
+		TSet<UWidgetNavigation*> SanitizedNavigationObjects;
+		auto ResetNavigationObject = [&SanitizedNavigationObjects](UWidgetNavigation* Navigation)
+		{
+			if (!Navigation || SanitizedNavigationObjects.Contains(Navigation))
+			{
+				return;
+			}
+
+			Navigation->Up = FWidgetNavigationData();
+			Navigation->Down = FWidgetNavigationData();
+			Navigation->Left = FWidgetNavigationData();
+			Navigation->Right = FWidgetNavigationData();
+			Navigation->Next = FWidgetNavigationData();
+			Navigation->Previous = FWidgetNavigationData();
+			Navigation->RoutingPolicy = EWidgetNavigationRoutingPolicy::Default;
+			Navigation->NavigationMethod.Reset();
+			SanitizedNavigationObjects.Add(Navigation);
+		};
+
+		auto ClearNavigation = [&ClearedWidgetCount, &ResetNavigationObject](UWidget* Widget)
+		{
+			if (!Widget || !Widget->Navigation)
+			{
+				return;
+			}
+
+			// Clear stale directional navigation payloads so UMG compile/validation
+			// cannot resurrect old NavigationMethod state from previous template trees.
+			ResetNavigationObject(Widget->Navigation);
+			Widget->Navigation = nullptr;
+			++ClearedWidgetCount;
+		};
+
+		auto ClearGeneratedClassNavigation = [&ClearNavigation](UClass* ClassObject)
+		{
+			if (UUserWidget* GeneratedCDO = ClassObject ? Cast<UUserWidget>(ClassObject->GetDefaultObject()) : nullptr)
+			{
+				ClearNavigation(GeneratedCDO);
+				if (GeneratedCDO->WidgetTree)
+				{
+					GeneratedCDO->WidgetTree->ForEachWidget(ClearNavigation);
+				}
+			}
+		};
+
+		ClearGeneratedClassNavigation(WidgetBlueprint->GeneratedClass);
+		ClearGeneratedClassNavigation(WidgetBlueprint->SkeletonGeneratedClass);
+
+		if (WidgetBlueprint->WidgetTree)
+		{
+			WidgetBlueprint->WidgetTree->ForEachWidget(ClearNavigation);
+		}
+
+		if (UPackage* Package = WidgetBlueprint->GetOutermost())
+		{
+			ForEachObjectWithPackage(Package, [&ClearNavigation, &ResetNavigationObject](UObject* Object)
+			{
+				if (UWidget* Widget = Cast<UWidget>(Object))
+				{
+					ClearNavigation(Widget);
+					return true;
+				}
+
+				if (UWidgetNavigation* Navigation = Cast<UWidgetNavigation>(Object))
+				{
+					ResetNavigationObject(Navigation);
+				}
+
+				return true;
+			}, true, RF_Transient, EInternalObjectFlags::Garbage);
+		}
+
+		if (ClearedWidgetCount > 0 || SanitizedNavigationObjects.Num() > 0)
+		{
+			UE_LOG(LogDesign2UMG, Warning,
+				TEXT("Cleared stale widget navigation refs on %d widgets and sanitized %d navigation objects before compile"),
+				ClearedWidgetCount,
+				SanitizedNavigationObjects.Num());
+		}
 	}
 
 	void ApplyDesignPreviewSize(UWidgetBlueprint* WBP, const FIntPoint& DesignSize, const TCHAR* Phase)
@@ -194,6 +307,10 @@ namespace
 		Node.Properties.Remove(UMGPropertyKeys::PathGeometry);
 		Node.Properties.Remove(UMGPropertyKeys::PathFillRule);
 		Node.Properties.Remove(UMGPropertyKeys::PathFillColor);
+		Node.Properties.Remove(UMGPropertyKeys::PathStrokeCap);
+		Node.Properties.Remove(UMGPropertyKeys::PathStrokeColor);
+		Node.Properties.Remove(UMGPropertyKeys::PathStrokeJoin);
+		Node.Properties.Remove(UMGPropertyKeys::PathStrokeThickness);
 		Node.Properties.Remove(UMGPropertyKeys::MaterialRef);
 		Node.Properties.Remove(UMGPropertyKeys::MaterialParams);
 		Node.Properties.Add(UMGPropertyKeys::TexturePath, TexturePath);
@@ -207,17 +324,29 @@ namespace
 		FString Geometry;
 		FString FillRule;
 		FString FillColor;
+		FString StrokeColor;
+		FString StrokeThickness;
+		FString StrokeCap;
+		FString StrokeJoin;
 		FString WidthOverride;
 		FString HeightOverride;
 		Node.Properties.TryGetString(UMGPropertyKeys::PathGeometry, Geometry);
 		Node.Properties.TryGetString(UMGPropertyKeys::PathFillRule, FillRule);
 		Node.Properties.TryGetString(UMGPropertyKeys::PathFillColor, FillColor);
+		Node.Properties.TryGetString(UMGPropertyKeys::PathStrokeColor, StrokeColor);
+		Node.Properties.TryGetString(UMGPropertyKeys::PathStrokeThickness, StrokeThickness);
+		Node.Properties.TryGetString(UMGPropertyKeys::PathStrokeCap, StrokeCap);
+		Node.Properties.TryGetString(UMGPropertyKeys::PathStrokeJoin, StrokeJoin);
 		Node.Properties.TryGetString(UMGPropertyKeys::WidthOverride, WidthOverride);
 		Node.Properties.TryGetString(UMGPropertyKeys::HeightOverride, HeightOverride);
 
 		uint32 Key = Geometry.IsEmpty() ? 0u : GetTypeHash(Geometry);
 		Key = HashCombine(Key, FillRule.IsEmpty() ? 0u : GetTypeHash(FillRule));
 		Key = HashCombine(Key, FillColor.IsEmpty() ? 0u : GetTypeHash(FillColor));
+		Key = HashCombine(Key, StrokeColor.IsEmpty() ? 0u : GetTypeHash(StrokeColor));
+		Key = HashCombine(Key, StrokeThickness.IsEmpty() ? 0u : GetTypeHash(StrokeThickness));
+		Key = HashCombine(Key, StrokeCap.IsEmpty() ? 0u : GetTypeHash(StrokeCap));
+		Key = HashCombine(Key, StrokeJoin.IsEmpty() ? 0u : GetTypeHash(StrokeJoin));
 		Key = HashCombine(Key, WidthOverride.IsEmpty() ? 0u : GetTypeHash(WidthOverride));
 		Key = HashCombine(Key, HeightOverride.IsEmpty() ? 0u : GetTypeHash(HeightOverride));
 		return Key;
@@ -370,7 +499,12 @@ namespace
 			else
 			{
 				const FString FillRule = FindNodePropertyOr(Node, UMGPropertyKeys::PathFillRule, TEXT("nonzero"));
-				const FString FillColor = FindNodePropertyOr(Node, UMGPropertyKeys::PathFillColor, TEXT("#ffffffff"));
+				const FString FillColor = FindNodeProperty(Node, UMGPropertyKeys::PathFillColor);
+				const FString StrokeColor = FindNodeProperty(Node, UMGPropertyKeys::PathStrokeColor);
+				const FString StrokeCap = FindNodePropertyOr(Node, UMGPropertyKeys::PathStrokeCap, TEXT("butt"));
+				const FString StrokeJoin = FindNodePropertyOr(Node, UMGPropertyKeys::PathStrokeJoin, TEXT("miter"));
+				float StrokeThickness = 0.0f;
+				Node.Properties.TryGetFloat(UMGPropertyKeys::PathStrokeThickness, StrokeThickness);
 				const int32 Width = FMath::Max(1, GetNodeRoundedIntProperty(Node, UMGPropertyKeys::WidthOverride, 64));
 				const int32 Height = FMath::Max(1, GetNodeRoundedIntProperty(Node, UMGPropertyKeys::HeightOverride, 64));
 
@@ -379,7 +513,20 @@ namespace
 					constexpr int32 PathSupersample = 2;
 					const int32 RasterWidth = Width * PathSupersample;
 					const int32 RasterHeight = Height * PathSupersample;
-					if (UTexture2D* Rasterized = FDesignPathRasterizer::Rasterize(*Geometry, RasterWidth, RasterHeight, FUMGValueParser::ParseColor(FillColor), FillRule))
+					const TOptional<FLinearColor> OptionalFillColor =
+						FillColor.IsEmpty() ? TOptional<FLinearColor>() : TOptional<FLinearColor>(FUMGValueParser::ParseColor(FillColor));
+					const TOptional<FLinearColor> OptionalStrokeColor =
+						StrokeColor.IsEmpty() ? TOptional<FLinearColor>() : TOptional<FLinearColor>(FUMGValueParser::ParseColor(StrokeColor));
+					if (UTexture2D* Rasterized = FDesignPathRasterizer::Rasterize(
+						*Geometry,
+						RasterWidth,
+						RasterHeight,
+						OptionalFillColor,
+						FillRule,
+						OptionalStrokeColor,
+						StrokeThickness,
+						StrokeCap,
+						StrokeJoin))
 					{
 						TArray64<uint8> RawData;
 						int32 RawWidth = 0;
@@ -533,6 +680,8 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 		return nullptr;
 	}
 
+	ConfigurePrototypeNavigationExtension(WBP, WidgetData.PrototypeNavigation);
+
 	// v2.2: 应用Fixer修正Bounds（创建可修改副本）
 	FUMGWidgetNode FixedRoot = WidgetData.RootWidget;
 	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
@@ -639,6 +788,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 		return nullptr;
 	}
 	WBP->WidgetTree->RootWidget = Root;
+	ClearGeneratedWidgetNavigationState(WBP);
 	DumpTemplateTextBlockFontState(TEXT("template-precompile"), WBP);
 
 	// 设置编辑器显示尺寸到 CDO；保存时会在编译后再次回写，避免编译重置默认值。
@@ -667,7 +817,11 @@ void FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP)
 	// MarkBlueprintAsStructurallyModified 可能触发中间编译填充 GUID map，
 	// 清除后让 CompileBlueprint 走 IsEmpty() 分支从 widget tree 重建，避免 stale entry
 	WBP->WidgetVariableNameToGuidMap.Empty();
-	FKismetEditorUtilities::CompileBlueprint(WBP);
+	ClearGeneratedWidgetNavigationState(WBP);
+	const EBlueprintCompileOptions CompileOptions =
+		EBlueprintCompileOptions::SkipDefaultObjectValidation |
+		EBlueprintCompileOptions::SkipFiBSearchMetaUpdate;
+	FKismetEditorUtilities::CompileBlueprint(WBP, CompileOptions);
 	DumpTemplateTextBlockFontState(TEXT("template-postcompile"), WBP);
 	ApplyDesignPreviewSize(WBP, DesiredDesignSize, TEXT("post-compile"));
 

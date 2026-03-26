@@ -61,6 +61,16 @@ namespace
 		return BestError == TNumericLimits<float>::Max() ? INDEX_NONE : BestFontSize;
 	}
 
+	int32 EstimateWrappedLineCount(float SingleLineHeight, const FVector2D& WrappedSize)
+	{
+		if (SingleLineHeight <= 0.0f || WrappedSize.Y <= 0.0f)
+		{
+			return 0;
+		}
+
+		return FMath::Max(1, FMath::RoundToInt(WrappedSize.Y / FMath::Max(1.0f, SingleLineHeight)));
+	}
+
 	float EstimateSingleLineTextHeight(const TSharedPtr<FDesignNode>& Node)
 	{
 		if (!Node.IsValid() || Node->FontSize <= 0.0f)
@@ -90,6 +100,23 @@ namespace
 		Normalized.ReplaceInline(TEXT("-"), TEXT(""));
 		Normalized.ReplaceInline(TEXT("_"), TEXT(""));
 		return Normalized;
+	}
+
+	bool ShouldUseDeclaredFontSizeDirectly(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid() || Node->FontSize <= 0.0f)
+		{
+			return false;
+		}
+
+		const FString NormalizedFamily = NormalizeTextMeasurementFontFamilyKey(Node->FontFamily);
+		if (NormalizedFamily != TEXT("roboto"))
+		{
+			return false;
+		}
+
+		const FString AssetPath = FFontResolver::FindFontAssetPath(Node->FontFamily);
+		return AssetPath.StartsWith(TEXT("/Engine/EngineFonts/Roboto"), ESearchCase::IgnoreCase);
 	}
 
 	FString ResolveTypefaceName(const TSharedPtr<FDesignNode>& Node)
@@ -289,6 +316,80 @@ namespace
 		const float EffectiveWidth = UnwrappedWidth > 0.0f ? UnwrappedWidth : HeuristicWidth;
 		return EffectiveWidth <= WidthLimit + 0.5f;
 	}
+
+	int32 ResolveVerticalAlignedWrappingFontSize(
+		const TSharedPtr<FDesignNode>& Node,
+		float FallbackFontSize,
+		float TargetLineBoxHeight)
+	{
+		if (!Node.IsValid()
+			|| Node->Content.Contains(TEXT("\n"))
+			|| Node->TextAlignVertical == EDesignTextAlignVertical::Top)
+		{
+			return INDEX_NONE;
+		}
+
+		const float WidthLimit = ResolveTextWidthHint(Node, 0.0f);
+		if (WidthLimit <= 0.0f)
+		{
+			return INDEX_NONE;
+		}
+
+		const int32 MaxProbeFontSize = FMath::Max(1, FMath::CeilToInt(FallbackFontSize));
+		const int32 MinProbeFontSize = FMath::Min(
+			MaxProbeFontSize,
+			FMath::Max(1, FMath::FloorToInt(FallbackFontSize * 0.70f)));
+		const bool bAutoWrapText = TextMeasurement::ShouldAutoWrapText(Node);
+
+		int32 BestFontSize = INDEX_NONE;
+		int32 BestLineCount = MAX_int32;
+		float BestWidthSlack = TNumericLimits<float>::Max();
+		float BestHeightError = TNumericLimits<float>::Max();
+		float BestDistanceToFallback = TNumericLimits<float>::Max();
+
+		for (int32 CandidateFontSize = MinProbeFontSize; CandidateFontSize <= MaxProbeFontSize; ++CandidateFontSize)
+		{
+			const float CandidateSingleLineHeight = MeasureSingleLineTextBlockHeight(Node, static_cast<float>(CandidateFontSize));
+			const FVector2D CandidateWrappedSize = MeasureUMGTextBlockDesiredSize(
+				Node,
+				static_cast<float>(CandidateFontSize),
+				Node->Content,
+				WidthLimit,
+				bAutoWrapText);
+			if (CandidateSingleLineHeight <= 0.0f
+				|| CandidateWrappedSize.X <= 0.0f
+				|| CandidateWrappedSize.Y <= 0.0f
+				|| CandidateWrappedSize.X > WidthLimit + 0.5f)
+			{
+				continue;
+			}
+
+			const int32 CandidateLineCount = EstimateWrappedLineCount(CandidateSingleLineHeight, CandidateWrappedSize);
+			const float CandidateWidthSlack = FMath::Max(0.0f, WidthLimit - CandidateWrappedSize.X);
+			const float CandidateHeightError = FMath::Abs(CandidateSingleLineHeight - TargetLineBoxHeight);
+			const float CandidateDistanceToFallback = FMath::Abs(static_cast<float>(CandidateFontSize) - FallbackFontSize);
+
+			if (BestFontSize == INDEX_NONE
+				|| CandidateLineCount < BestLineCount
+				|| (CandidateLineCount == BestLineCount && CandidateWidthSlack + 0.5f < BestWidthSlack)
+				|| (CandidateLineCount == BestLineCount
+					&& FMath::IsNearlyEqual(CandidateWidthSlack, BestWidthSlack, 0.5f)
+					&& CandidateHeightError + 0.5f < BestHeightError)
+				|| (CandidateLineCount == BestLineCount
+					&& FMath::IsNearlyEqual(CandidateWidthSlack, BestWidthSlack, 0.5f)
+					&& FMath::IsNearlyEqual(CandidateHeightError, BestHeightError, 0.5f)
+					&& CandidateDistanceToFallback < BestDistanceToFallback))
+			{
+				BestFontSize = CandidateFontSize;
+				BestLineCount = CandidateLineCount;
+				BestWidthSlack = CandidateWidthSlack;
+				BestHeightError = CandidateHeightError;
+				BestDistanceToFallback = CandidateDistanceToFallback;
+			}
+		}
+
+		return BestFontSize;
+	}
 }
 
 void TextMeasurement::ResetCache()
@@ -356,6 +457,10 @@ float TextMeasurement::ResolveTextFontSizeForUMG(const TSharedPtr<FDesignNode>& 
 	{
 		return 0.0f;
 	}
+	if (ShouldUseDeclaredFontSizeDirectly(Node))
+	{
+		return Node->FontSize;
+	}
 
 	const float FallbackFontSize = ResolveTextFontSizeFallback(Node);
 	if (Node->FontSize <= 0.0f || !FSlateApplication::IsInitialized())
@@ -406,6 +511,14 @@ float TextMeasurement::ResolveTextFontSizeForUMG(const TSharedPtr<FDesignNode>& 
 		return FMath::Max(1.0f, Node->FontSize * (*CachedScale));
 	}
 
+	if (const int32 PreferredWrappedFontSize = ResolveVerticalAlignedWrappingFontSize(Node, FallbackFontSize, TargetLineBoxHeight);
+		PreferredWrappedFontSize != INDEX_NONE)
+	{
+		const float ResolvedScale = static_cast<float>(PreferredWrappedFontSize) / Node->FontSize;
+		GResolvedTextFontScaleCache.Add(CalibrationKey, ResolvedScale);
+		return static_cast<float>(PreferredWrappedFontSize);
+	}
+
 	auto MeasureHeight = [&](float CandidateFontSize) -> float
 	{
 		return MeasureSingleLineTextBlockHeight(Node, CandidateFontSize);
@@ -450,6 +563,9 @@ float TextMeasurement::ResolveTextWrapAt(const TSharedPtr<FDesignNode>& Node, fl
 	const bool bNeedsExplicitWrap =
 		Node->TextGrowth == EDesignTextGrowth::FixedWidth
 		|| Node->TextGrowth == EDesignTextGrowth::FixedWidthHeight
+		|| (Node->TextGrowth == EDesignTextGrowth::Auto
+			&& Node->Width.IsFill()
+			&& Node->Width.Value > 0.0f)
 		|| Node->TextAlign == EDesignTextAlign::Justify
 		|| Node->Content.Contains(TEXT("\n"));
 	return bNeedsExplicitWrap ? WidthLimit : 0.0f;

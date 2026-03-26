@@ -590,7 +590,13 @@ static void HandleContentWidgetChild(UWidgetTree* WidgetTree, UContentWidget* Co
 	{
 		if (UPanelSlot* ContentSlot = Content->SetContent(ChildWidget))
 		{
-			FUMGWidgetUtils::ApplySlotProperties(ContentSlot, ChildNode.Slot);
+			// SizeBox is a runtime wrapper used to preserve measured size.
+			// Re-applying the wrapped child's original panel slot to USizeBoxSlot
+			// shifts/stretchs the content and regresses visual parity.
+			if (!Content->IsA<USizeBox>())
+			{
+				FUMGWidgetUtils::ApplySlotProperties(ContentSlot, ChildNode.Slot);
+			}
 		}
 
 		// ContentWidget 通过自身属性控制子控件对齐

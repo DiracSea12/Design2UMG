@@ -160,6 +160,58 @@ struct FUMGVisualBrushData
 	bool HasCornerRadii() const { return CornerRadii.X >= 0; }
 };
 
+/**
+ * 类型化特效属性（BackgroundBlur / Retainer effect 等）
+ * 新接入的 effect contract 应优先落到这里，而不是继续写入 legacy Properties。
+ */
+struct FUMGEffectData
+{
+	float BlurStrength = 0.0f;
+	bool bHasBlurStrength = false;
+
+	bool bRetainRendering = false;
+	bool bHasRetainRendering = false;
+
+	FString EffectMaterial;
+	FString TextureParameter;
+
+	FVector2D EffectBlurUVStep = FVector2D::ZeroVector;
+	bool bHasEffectBlurUVStep = false;
+
+	FLinearColor EffectColor = FLinearColor::Transparent;
+	bool bHasEffectColor = false;
+
+	FVector2D EffectOffset = FVector2D::ZeroVector;
+	bool bHasEffectOffset = false;
+
+	int32 Phase = 0;
+	int32 PhaseCount = 1;
+	bool bHasRenderingPhase = false;
+
+	bool HasAny() const
+	{
+		return bHasBlurStrength
+			|| bHasRetainRendering
+			|| !EffectMaterial.IsEmpty()
+			|| !TextureParameter.IsEmpty()
+			|| bHasEffectBlurUVStep
+			|| bHasEffectColor
+			|| bHasEffectOffset
+			|| bHasRenderingPhase;
+	}
+};
+
+struct FUMGWidgetStateData
+{
+	int32 ActiveWidgetIndex = 0;
+	bool bHasActiveWidgetIndex = false;
+
+	bool HasAny() const
+	{
+		return bHasActiveWidgetIndex;
+	}
+};
+
 struct FUMGIconFontMappingChanges
 {
 	TMap<FString, FString> Upserts;
@@ -219,6 +271,123 @@ private:
 	TMap<FString, FUMGTypedProperty> Values;
 };
 
+USTRUCT()
+struct FUMGPrototypeTransitionData
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	FString Type;
+
+	UPROPERTY()
+	FString Direction;
+
+	UPROPERTY()
+	float DurationSeconds = 0.0f;
+
+	UPROPERTY()
+	FString EasingType;
+
+	UPROPERTY()
+	bool bMatchLayers = false;
+
+	UPROPERTY()
+	bool bHasMatchLayers = false;
+
+	bool IsAnimated() const
+	{
+		return DurationSeconds > KINDA_SMALL_NUMBER;
+	}
+
+	bool UsesFadeOnly() const
+	{
+		return Type.IsEmpty()
+			|| Type.Equals(TEXT("DISSOLVE"), ESearchCase::IgnoreCase)
+			|| Type.Equals(TEXT("SMART_ANIMATE"), ESearchCase::IgnoreCase)
+			|| Type.Equals(TEXT("SCROLL_ANIMATE"), ESearchCase::IgnoreCase);
+	}
+
+	bool UsesIncomingSlideOnly() const
+	{
+		return Type.Equals(TEXT("MOVE_IN"), ESearchCase::IgnoreCase)
+			|| Type.Equals(TEXT("SLIDE_IN"), ESearchCase::IgnoreCase);
+	}
+
+	bool UsesOutgoingSlideOnly() const
+	{
+		return Type.Equals(TEXT("MOVE_OUT"), ESearchCase::IgnoreCase)
+			|| Type.Equals(TEXT("SLIDE_OUT"), ESearchCase::IgnoreCase);
+	}
+
+	bool UsesBidirectionalSlide() const
+	{
+		return Type.Equals(TEXT("PUSH"), ESearchCase::IgnoreCase);
+	}
+
+	bool UsesSlide() const
+	{
+		return UsesIncomingSlideOnly() || UsesOutgoingSlideOnly() || UsesBidirectionalSlide();
+	}
+};
+
+USTRUCT()
+struct FUMGPrototypeNavigationBinding
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	FString TriggerWidgetId;
+
+	UPROPERTY()
+	FString TriggerWidgetName;
+
+	UPROPERTY()
+	FString TargetPageId;
+
+	UPROPERTY()
+	int32 TargetPageIndex = INDEX_NONE;
+
+	UPROPERTY()
+	FUMGPrototypeTransitionData Transition;
+
+	bool IsValid() const
+	{
+		return !TriggerWidgetId.IsEmpty()
+			&& !TriggerWidgetName.IsEmpty()
+			&& !TargetPageId.IsEmpty()
+			&& TargetPageIndex >= 0;
+	}
+};
+
+USTRUCT()
+struct FUMGPrototypeNavigationData
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	FString SwitcherWidgetId;
+
+	UPROPERTY()
+	FString SwitcherWidgetName;
+
+	UPROPERTY()
+	int32 InitialPageIndex = 0;
+
+	UPROPERTY()
+	TArray<FString> PageIds;
+
+	UPROPERTY()
+	TArray<FUMGPrototypeNavigationBinding> ClickBindings;
+
+	bool IsValid() const
+	{
+		return !SwitcherWidgetId.IsEmpty()
+			&& !SwitcherWidgetName.IsEmpty()
+			&& PageIds.Num() > 1
+			&& ClickBindings.Num() > 0;
+	}
+};
+
 /**
  * Widget 节点数据结构 - 描述单个控件（v2.4更新） */
 USTRUCT()
@@ -256,6 +425,12 @@ struct FUMGWidgetNode
 	/** 类型化视觉画刷（v2.4 拆分自Brush，WrapWithBorder 时转移） */
 	FUMGVisualBrushData Brush;
 
+	/** 类型化特效属性（v2.5 拆分自 Properties） */
+	FUMGEffectData Effect;
+
+	/** 类型化控件状态（v2.6 继续迁移自 Properties） */
+	FUMGWidgetStateData WidgetState;
+
 	/** 子控件(不可序列化，UHT 不支持递归 USTRUCT) */
 	TArray<FUMGWidgetNode> Children;
 };
@@ -281,5 +456,8 @@ struct FUMGWidgetData
 
 	/** 转换阶段产生的图标字体映射建议，由 Editor 导入链决定是否持久化。 */
 	FUMGIconFontMappingChanges IconFontMappingChanges;
+
+	/** Figma prototype 最小导航闭环计划。 */
+	FUMGPrototypeNavigationData PrototypeNavigation;
 };
 

@@ -11,11 +11,11 @@
 | Frame | CanvasPanel | Layout == None |
 | Rectangle | Border | |
 | Ellipse | Image (SVG) / Border | 有尺寸+纯色填充+无描边 → SVG 光栅化；否则 → 圆角 Border |
-| Polygon | Border | ⚠️ 降级为矩形 |
+| Polygon | Image / Border | 有 PathGeometry → 路径光栅化；否则 → Border 警告降级 |
 | Path | Image | ✅ SVG 路径光栅化（有 geometry+颜色时）；Image fill → 直接纹理 |
 | Text | TextBlock | |
 | IconFont | TextBlock | 连字文本渲染图标 |
-| Line | Border | ⚠️ 降级为矩形 |
+| Line | Image | 有 geometry → 路径光栅化；否则自动补水平线 geometry 后光栅化 |
 | Group | CanvasPanel | |
 | Ref | (展开为引用节点) | 组件实例展开，支持主题覆盖 |
 
@@ -31,9 +31,9 @@
 | LineHeight | LineHeightPercentage | 百分比乘数 |
 | TextAlign | Justification | Left / Center / Right |
 | TextAlignVertical | TextAlignVertical | Top / Center / Bottom ⚠️ 写入属性但运行时未应用 |
-| TextGrowth (Auto) | (默认) | 不换行 |
-| TextGrowth (FixedWidth) | AutoWrapText=true | 固定宽度换行 |
-| TextGrowth (FixedWidthHeight) | AutoWrapText=true + Clipping=ClipToBounds | 换行+裁剪溢出 |
+| TextGrowth (Auto) | 默认单行；`justify` 或 `fill_container(N)` 时导出 `AutoWrapText + WrapTextAt` | 保持测量链与运行时换行一致 |
+| TextGrowth (FixedWidth) | AutoWrapText=true + WrapTextAt=ResolvedWidth | 固定宽度换行 |
+| TextGrowth (FixedWidthHeight) | AutoWrapText=true + WrapTextAt=ResolvedWidth + Clipping=ClipToBounds | 换行+裁剪溢出 |
 | Color (from Fill) | ColorAndOpacity | FSlateColor |
 
 ### Font Weight Mapping
@@ -55,12 +55,12 @@
 | .pen Fill Type | UMG | Notes |
 |---------------|-----|-------|
 | Color | BrushColor / ColorAndOpacity | Text 用 ColorAndOpacity，其他用 BrushColor |
-| Gradient (Linear H) | MaterialRef = "gradienth" | 角度 [0°,45°] ∪ [135°,225°] ∪ [315°,360°)（含边界） |
-| Gradient (Linear V) | MaterialRef = "gradientv" | 角度 (45°,135°) ∪ (225°,315°)（不含边界） |
-| Gradient (Radial/Angular) | MaterialRef = "radialgradient" | |
+| Gradient (Linear 任意角度) | MaterialRef = "gradientlinear" | 通过 Rotation + 程序纹理生成 |
+| Gradient (Radial) | MaterialRef = "radialgradient" | 支持双色与多色 `Stops`，并透传 `center/size/rotation` |
+| Gradient (Angular) | MaterialRef = "angulargradient" | 独立 angular 分支，不再降级为 radial |
 | Image | TexturePath | URL 远程下载或本地路径 |
 
-⚠️ **部分支持**: 渐变仅支持双色（ColorStart/ColorEnd），不支持多色停靠点。
+⚠️ **部分支持**: Linear / Radial / Angular 已支持多色停靠点（`Stops`）；Radial 已支持 `center/size/rotation`；`mesh_gradient` 仍不支持。
 
 ### Image Mode
 
@@ -134,9 +134,20 @@
 | .pen Effect | UMG | Support |
 |------------|-----|---------|
 | Shadow (outer) | BoxShadow 包裹 | ✅ Offset, Blur, Spread, Color |
-| Shadow (inner) | BoxShadow 包裹 | ⚠️ bInner 已解析但未区分渲染，与 outer 走同一逻辑 |
+| Shadow (inner) | RetainerBox + EffectMaterial | ✅ 运行时近似支持（typed inner shadow） |
 | BackgroundBlur | BackgroundBlur 包裹 | ✅ BlurStrength |
-| Blur | — | ❌ 不支持（需自定义 Material） |
+| Blur | RetainerBox + EffectMaterial | ✅ 运行时近似支持（foreground subtree blur） |
+
+## Prototype (Figma)
+
+| Figma Prototype | UMG | Notes |
+|-----------------|-----|-------|
+| Top-level multi-page flow | WidgetSwitcher | 顶层 Frame 页面自动收口为 `WidgetSwitcher` |
+| `ON_CLICK + NAVIGATE/SWAP` | Button wrapper + runtime binding | 触发节点包装为透明 `Button`，运行时切页 |
+| `DISSOLVE` / `SMART_ANIMATE` / `SCROLL_ANIMATE` | Switcher fade | 映射基础透明度过渡，保留时长 / easing |
+| `MOVE_IN` / `MOVE_OUT` / `SLIDE_IN` / `SLIDE_OUT` / `PUSH` | Switcher translation | 映射基础位移过渡，保留方向 / 时长 / easing |
+
+⚠️ **当前边界**: 不生成完整 `UWidgetAnimation` 资产，不做 overlay/back stack，也不复刻完整 Smart Animate 图层配对语义。
 
 ## Alignment Mapping
 
@@ -169,11 +180,9 @@
 
 | Property | Reason |
 |----------|--------|
-| Blur effect (前景) | UMG 无前景模糊控件 |
-| Multi-stop gradient | 仅支持双色渐变（ColorStart/ColorEnd） |
-| Gradient Angular | ⚠️ 部分支持：降级为径向渐变 |
-| Polygon shapes | 降级为 Border（UMG 无多边形控件） |
-| Line shapes | 降级为 Border（UMG 无线条控件） |
+| Foreground blur full semantic parity | 当前走 `RetainerBox + EffectMaterial` 近似，不是完整设计器语义还原 |
+| Inner shadow full semantic parity | 当前为单层 `RetainerBox + EffectMaterial` 近似，不是完整设计器/浏览器语义 |
+| Polygon without PathGeometry | 会降级为 Border，并记录 warning |
 | Stroke per-side thickness | ⚠️ 部分支持：取四边最大值 |
 | Stroke alignment | UMG 始终居中对齐 |
 | Icon font weight | 存储但未应用到 UMG |
@@ -187,6 +196,7 @@
 |------|---------|------|
 | 有填充/内边距/圆角/描边 | Border | 合并视觉属性 |
 | 多层填充 (Fills > 1) | Overlay | 自底向上叠加填充层 |
-| 有阴影效果 | Overlay + Image | 阴影层渲染在内容下方 |
+| 有外阴影效果 | Overlay + Image | 外阴影层渲染在内容下方 |
+| 有前景模糊/内阴影 | RetainerBox | 子树后处理效果 |
 | 有背景模糊效果 | BackgroundBlur | 模糊背景 |
 | 需要固定/最小尺寸 | SizeBox | 强制尺寸约束 |

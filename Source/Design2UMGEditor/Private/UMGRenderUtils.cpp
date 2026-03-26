@@ -279,6 +279,42 @@ namespace
 		Window->SlatePrepass(1.0f);
 		return FallbackSize;
 	}
+
+	void ClearRenderInstanceNavigation(UUserWidget* Widget)
+	{
+		if (!Widget)
+		{
+			return;
+		}
+
+		int32 ClearedCount = 0;
+		auto ClearNavigation = [&ClearedCount](UWidget* CurrentWidget)
+		{
+			if (!CurrentWidget || !CurrentWidget->Navigation)
+			{
+				return;
+			}
+
+			// Rendering does not rely on navigation metadata. Some compiled
+			// preview instances can materialize a corrupted instanced navigation
+			// payload, so do not dereference it here; just sever the pointer.
+			CurrentWidget->Navigation = nullptr;
+			++ClearedCount;
+		};
+
+		ClearNavigation(Widget);
+		if (Widget->WidgetTree)
+		{
+			Widget->WidgetTree->ForEachWidget(ClearNavigation);
+		}
+
+		if (ClearedCount > 0)
+		{
+			UE_LOG(LogDesign2UMG, Warning,
+				TEXT("RenderWidgetToPng: cleared stale navigation on %d widget instances before TakeWidget"),
+				ClearedCount);
+		}
+	}
 }
 
 bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, const FIntPoint& RenderSize, TArray<uint8>& OutPngData, FIntPoint& OutSize)
@@ -304,6 +340,7 @@ bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, const FIntPo
 		FlushRenderingCommands();
 	}
 	DumpTextBlockFontState(TEXT("compiled-instance"), Widget->WidgetTree, WidgetBP->GetPathName());
+	ClearRenderInstanceNavigation(Widget);
 	Widget->ForceLayoutPrepass();
 	DumpWidgetVisualState(TEXT("compiled-instance"), Widget->WidgetTree, WidgetBP->GetPathName());
 	Widget->SetFlags(RF_Transient);

@@ -724,12 +724,102 @@ struct FDesignFigmaInstanceData
 };
 
 USTRUCT()
+struct FDesignFigmaPrototypeTransitionData
+{
+	GENERATED_BODY()
+
+	UPROPERTY() FString Type;
+	UPROPERTY() FString Direction;
+	UPROPERTY() float Duration = 0.0f; bool bHasDuration = false;
+	UPROPERTY() FString EasingType;
+	UPROPERTY() FString EasingJson;
+	UPROPERTY() bool bMatchLayers = false; bool bHasMatchLayers = false;
+
+	bool HasAny() const
+	{
+		return !Type.IsEmpty()
+			|| !Direction.IsEmpty()
+			|| bHasDuration
+			|| !EasingType.IsEmpty()
+			|| !EasingJson.IsEmpty()
+			|| bHasMatchLayers;
+	}
+};
+
+USTRUCT()
+struct FDesignFigmaPrototypeAction
+{
+	GENERATED_BODY()
+
+	UPROPERTY() FString Type;
+	UPROPERTY() FString DestinationId;
+	UPROPERTY() FString Navigation;
+	UPROPERTY() FString TransitionNodeId;
+	UPROPERTY() FString TransitionJson;
+	UPROPERTY() FDesignFigmaPrototypeTransitionData Transition;
+};
+
+USTRUCT()
+struct FDesignFigmaPrototypeInteraction
+{
+	GENERATED_BODY()
+
+	UPROPERTY() FString TriggerType;
+	UPROPERTY() FString TriggerJson;
+	UPROPERTY() FString RawJson;
+	UPROPERTY() TArray<FDesignFigmaPrototypeAction> Actions;
+};
+
+USTRUCT()
+struct FDesignFigmaFlowStartingPoint
+{
+	GENERATED_BODY()
+
+	UPROPERTY() FString NodeId;
+	UPROPERTY() FString Name;
+};
+
+USTRUCT()
+struct FDesignFigmaPrototypeNodeData
+{
+	GENERATED_BODY()
+
+	UPROPERTY() FString OverflowDirection;
+	UPROPERTY() FString TransitionNodeId;
+	UPROPERTY() FDesignFigmaPrototypeTransitionData Transition;
+	UPROPERTY() TArray<FDesignFigmaPrototypeInteraction> Interactions;
+	UPROPERTY() TArray<FDesignFigmaFlowStartingPoint> FlowStartingPoints;
+};
+
+USTRUCT()
 struct FDesignFigmaDocumentData
 {
 	GENERATED_BODY()
 
 	UPROPERTY() FString ComponentsJson;
 	UPROPERTY() FString ComponentSetsJson;
+	UPROPERTY() FString PrototypeStartNodeId;
+	UPROPERTY() FString PrototypeDeviceJson;
+	UPROPERTY() TArray<FDesignFigmaFlowStartingPoint> FlowStartingPoints;
+};
+
+USTRUCT()
+struct FDesignFigmaSkippedNodeReport
+{
+	GENERATED_BODY()
+
+	UPROPERTY() FString NodeId;
+	UPROPERTY() FString NodeName;
+	UPROPERTY() FString NodeType;
+	UPROPERTY() FString Reason;
+};
+
+USTRUCT()
+struct FDesignFigmaParseDiagnostics
+{
+	GENERATED_BODY()
+
+	UPROPERTY() TArray<FDesignFigmaSkippedNodeReport> SkippedDesignerNodes;
 };
 
 struct FDesignNode
@@ -770,6 +860,7 @@ struct FDesignNode
 	float LayoutGrow = -1.0f;
 	FDesignFigmaLayoutExtensions FigmaLayout;
 	FDesignFigmaInstanceData FigmaInstance;
+	FDesignFigmaPrototypeNodeData FigmaPrototype;
 
 	FDesignFill Fill;
 	TArray<FDesignFill> Fills;
@@ -852,6 +943,7 @@ struct FDesignDocument
 	TMap<FString, FDesignVariable> Variables;
 	TMap<FString, FString> Metadata;
 	FDesignFigmaDocumentData FigmaDocument;
+	FDesignFigmaParseDiagnostics FigmaDiagnostics;
 	TArray<TSharedPtr<FDesignNode>> Children;
 
 	TSharedPtr<FDesignNode> FindReusableNode(const FString& Id) const

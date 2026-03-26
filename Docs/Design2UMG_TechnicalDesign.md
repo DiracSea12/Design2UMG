@@ -313,11 +313,11 @@ bool IsCollapsed(const FDesignNode& Node)
 
 **textGrowth 模式说明**：
 
-> **重要约束**：`width`/`height` 属性仅在设置了 `textGrowth` 时生效。未设置 `textGrowth` 时，文本尺寸由内容自动决定，`width`/`height` 属性会被忽略。
+> **重要约束**：文本默认仍以 `textGrowth` 为主语义；但当文本需要和运行时换行保持一致时，`justify` 与 `fill_container(N)` 这类“已知宽度”的 `auto` 文本也会参与 wrap 宽度解析与导出。
 
 | textGrowth 值 | 说明 | 宽度行为 | 高度行为 |
 |--------------|------|---------|---------|
-| `"auto"` | 自动模式 | 适应内容 | 适应内容 |
+| `"auto"` | 自动模式 | 默认适应内容；`justify` / `fill_container(N)` 时按已知宽度参与 wrap | 适应内容 |
 | `"fixed-width"` | 固定宽度 | 固定值 | 自动换行后适应 |
 | `"fixed-width-height"` | 固定宽高 | 固定值 | 固定值（可能裁剪） |
 | 缺省 | 默认自动 | 适应内容 | 适应内容 |
@@ -783,8 +783,9 @@ UCanvasPanelSlot 的 `AutoSize` 是单一布尔开关，无法独立控制宽高
 |------------|---------|--------------|------------|------|
 | `"fixed-width"` | 固定值 | **true** | Node.Width | 固定宽度自动换行 |
 | `"fixed-width-height"` | 固定值 | **true** | Node.Width | 固定宽高，超出裁剪（需设置 Clipping） |
-| `"auto"` | fit_content | false | 0 | 单行文本 |
-| 缺省 + fill_container | fill_container | **true** | 0 | 引擎自动用容器宽度换行 |
+| `"auto"` | fit_content | false | 0 | 默认单行文本 |
+| `"auto"` + `justify` | 已知宽度 | **true** | **ResolvedWidth** | 运行时必须复用源换行宽度 |
+| `"auto"` + `fill_container(N)` | fill_container | **true** | **N** | 已知 fallback 宽度时显式导出 wrap 宽度 |
 | 缺省 + fit_content | fit_content | false | 0 | 单行文本 |
 | **混合语义** | 宽度已知 + 高度fit | **true** | **KnownWidth** | 必须显式指定换行宽度 |
 
@@ -838,34 +839,32 @@ void ApplyTextProperties(UTextBlock* TextBlock, const FDesignNode& Node,
         TextBlock->SetColorAndOpacity(FPenTypeMapper::ParseColor(Node.Fill.SolidColor));
     }
 
-    // 根据 textGrowth 设置换行
-    if (Node.TextGrowth == TEXT("auto"))
-    {
-        TextBlock->SetAutoWrapText(false);
-    }
-    else if (Node.TextGrowth == TEXT("fixed-width"))
-    {
-        TextBlock->SetAutoWrapText(true);
-        if (Node.Width.Mode == EPenSizeMode::Fixed && Node.Width.Value > 0)
-            TextBlock->SetWrapTextAt(Node.Width.Value);
-    }
-    else if (Node.TextGrowth == TEXT("fixed-width-height"))
+    const float WrapTextAt = ResolveTextWrapAt(Node, 0.0f);
+    const bool bNeedsKnownWidthRuntimeWrap =
+        Node.TextGrowth == EDesignTextGrowth::Auto &&
+        Node.Width.IsFill() &&
+        Node.Width.Value > 0.0f &&
+        !Node.Metadata.Contains(TEXT("figma.text.truncate"));
+
+    if (Node.TextAlign == TEXT("justify"))
     {
         TextBlock->SetAutoWrapText(true);
-        if (Node.Width.Mode == EPenSizeMode::Fixed && Node.Width.Value > 0)
-            TextBlock->SetWrapTextAt(Node.Width.Value);
-        // 固定高度时启用裁剪，防止文本溢出
-        TextBlock->SetClipping(EWidgetClipping::ClipToBounds);
+        if (WrapTextAt > 0.0f)
+            TextBlock->SetWrapTextAt(WrapTextAt);
     }
-    else if (Node.Width.Mode == EPenSizeMode::FillContainer)
-    {
-        // fill_container：启用自动换行，引擎自动用容器宽度
-        TextBlock->SetAutoWrapText(true);
-    }
-    else if (Node.Width.Mode == EPenSizeMode::Fixed && Node.Width.Value > 0)
+    else if (bNeedsKnownWidthRuntimeWrap && WrapTextAt > 0.0f)
     {
         TextBlock->SetAutoWrapText(true);
-        TextBlock->SetWrapTextAt(Node.Width.Value);
+        TextBlock->SetWrapTextAt(WrapTextAt);
+    }
+
+    if (Node.TextGrowth == TEXT("fixed-width") || Node.TextGrowth == TEXT("fixed-width-height"))
+    {
+        TextBlock->SetAutoWrapText(true);
+        if (WrapTextAt > 0.0f)
+            TextBlock->SetWrapTextAt(WrapTextAt);
+        if (Node.TextGrowth == TEXT("fixed-width-height"))
+            TextBlock->SetClipping(EWidgetClipping::ClipToBounds);
     }
 }
 
@@ -887,17 +886,15 @@ FName MapFontWeight(const FString& Weight)
 
 **textAlignVertical 处理**：
 
-UMG 的 TextBlock 不支持垂直对齐。需要通过容器实现：
+UMG 的 TextBlock 不支持垂直对齐。当前实现不会在运行时直接还原，而是把该信息保留为 Widget 属性元数据，供后续验证/扩展使用：
 
 | textAlignVertical | 实现方式 |
 |-------------------|---------|
-| `top` | 默认行为，无需处理 |
-| `middle` | 外层包装 VerticalBox，Slot 设置 VAlign_Center |
-| `bottom` | 外层包装 VerticalBox，Slot 设置 VAlign_Bottom |
+| `top` | 默认行为；不额外写入 |
+| `middle` | 写入 `TextAlignVertical=Center` 元数据，当前不改运行时布局 |
+| `bottom` | 写入 `TextAlignVertical=Bottom` 元数据，当前不改运行时布局 |
 
-> **Review 修复**：垂直对齐是 Slot 属性，不是 Widget 属性。需通过 `Cast<UVerticalBoxSlot>(TextBlock->Slot)->SetVerticalAlignment(...)` 设置。
-
-> **重要**：垂直对齐生效需要 VerticalBox 的 Slot 设置 `Size=Fill` 或容器有固定高度。若父容器为 fit_content 高度，垂直对齐无效果。
+> **当前取舍**：直接把 `textAlignVertical` 映射到父 Slot 会引入按钮、标签页等复合组件整体漂移，因此目前只保留元数据，不做容器级自动包裹。
 
 **textAlign（水平对齐）处理**：
 
@@ -1369,11 +1366,11 @@ UTexture2D* GenerateEllipseTexture(const FDesignNode& Node)
 
 | effect 类型 | UMG 支持 | 说明 |
 |-------------|----------|------|
-| `blur` | **不支持** | 需要材质实现 |
+| `blur` | `RetainerBox + EffectMaterial` | 前景 blur 走 typed subtree effect |
 | `background_blur` | `UBackgroundBlur` | 原生支持 |
-| `shadow` | **不支持** | UMG 无原生阴影，需材质或预烘焙 |
+| `shadow` | **部分支持** | 文本走 `TextBlock` 原生阴影；其他节点走 `Overlay + Image` 近似 outer shadow；`inner shadow` 走 typed `RetainerBox + EffectMaterial` |
 
-> **设计决策**：v1.0 仅支持 `background_blur`，其他特效标记为不支持。
+> **当前取舍**：outer shadow、foreground blur、inner shadow 都已进入运行时主链，但 blur / inset 类效果仍属于可维护近似，不等于完整设计器语义复刻。
 
 > **Schema 额外属性**：所有 effect 类型支持 `enabled`；`blur`/`background_blur` 有 `radius`；`shadow` 支持 `blendMode`
 
@@ -1391,7 +1388,7 @@ UTexture2D* GenerateEllipseTexture(const FDesignNode& Node)
 }
 ```
 
-**UMG 映射**：运行时生成渐变纹理
+**UMG 映射**：运行时生成程序纹理
 
 ```cpp
 UTexture2D* GenerateGradientTexture(const FPenGradient& Gradient, int32 Width, int32 Height)
@@ -1402,4 +1399,30 @@ UTexture2D* GenerateGradientTexture(const FPenGradient& Gradient, int32 Width, i
 }
 ```
 
-> **限制**：`mesh_gradient` 类型过于复杂，v1.0 不支持。
+当前实现说明：
+
+- Linear 使用 `gradientlinear`，支持 Rotation
+- Angular 使用独立 `angulargradient` 分支，不再降级为 Radial
+- Linear / Radial / Angular 已支持多 stop `Stops`
+- Radial 已支持 `center` / `size` / `rotation`
+- `mesh_gradient` 仍不支持
+
+### 3.15 Prototype Navigation And Transition
+
+当前 Figma prototype 主链已经覆盖最小可交付闭环：
+
+- 顶层多页面 Frame 会收敛为 `WidgetSwitcher`
+- `ON_CLICK + NAVIGATE/SWAP` 会把触发节点包装为透明 `Button`
+- 运行时通过 Blueprint extension 绑定点击事件，而不是把平台逻辑塞回共享转换主流程
+
+基础过渡当前采用“可维护近似”策略：
+
+- `DISSOLVE` / `SMART_ANIMATE` / `SCROLL_ANIMATE`：映射为 switcher 淡出切页再淡入
+- `MOVE_IN` / `MOVE_OUT` / `SLIDE_IN` / `SLIDE_OUT` / `PUSH`：映射为 switcher 基础位移过渡
+- `duration` 与 `easing` 会进入 typed navigation binding，并驱动运行时过渡节奏
+
+当前边界：
+
+- 不生成完整 `UWidgetAnimation` 资产
+- 不做 overlay、back stack、hover/drag 手势或条件跳转
+- `SMART_ANIMATE` 仅落到基础 fade 近似，不做图层级 match/layer morph

@@ -18,7 +18,17 @@ struct FGradientStop
 	FLinearColor Color = FLinearColor::Transparent;
 };
 
-UTexture2D* GenerateBoxShadow(int32 Width, int32 Height, FLinearColor ShadowColor, float RTL, float RTR, float RBR, float RBL, float BlurRadius, UObject* Outer);
+UTexture2D* GenerateBoxShadow(
+	int32 Width,
+	int32 Height,
+	FLinearColor ShadowColor,
+	float RTL,
+	float RTR,
+	float RBR,
+	float RBL,
+	float BlurRadius,
+	float BlurPadding,
+	UObject* Outer);
 
 namespace
 {
@@ -272,6 +282,69 @@ UTexture2D* GenerateRoundedRect(int32 Width, int32 Height, FLinearColor Color, f
 	return Texture;
 }
 
+FLinearColor SampleGradientStops(const TArray<FGradientStop>& Stops, float T)
+{
+	if (Stops.Num() == 0)
+	{
+		return FLinearColor::Transparent;
+	}
+
+	if (Stops.Num() == 1)
+	{
+		return Stops[0].Color;
+	}
+
+	if (T <= Stops[0].Position)
+	{
+		return Stops[0].Color;
+	}
+
+	for (int32 i = 1; i < Stops.Num(); ++i)
+	{
+		if (T <= Stops[i].Position || i == Stops.Num() - 1)
+		{
+			const float Span = Stops[i].Position - Stops[i - 1].Position;
+			float LocalT = (Span > KINDA_SMALL_NUMBER) ? (T - Stops[i - 1].Position) / Span : 0.0f;
+			LocalT = FMath::Clamp(LocalT, 0.0f, 1.0f);
+			return FMath::Lerp(Stops[i - 1].Color, Stops[i].Color, LocalT);
+		}
+	}
+
+	return Stops.Last().Color;
+}
+
+float ComputeRadialGradientDistance(
+	int32 X,
+	int32 Y,
+	int32 Width,
+	int32 Height,
+	const FVector2D& CenterNormalized,
+	const FVector2D& SizeScale,
+	float RotationDeg)
+{
+	const float CenterX = FMath::Clamp(CenterNormalized.X, 0.0f, 1.0f) * (Width - 1);
+	const float CenterY = FMath::Clamp(CenterNormalized.Y, 0.0f, 1.0f) * (Height - 1);
+	const float RadiusX = FMath::Max(0.5f, ((Width - 1) * 0.5f) * FMath::Max(SizeScale.X, KINDA_SMALL_NUMBER));
+	const float RadiusY = FMath::Max(0.5f, ((Height - 1) * 0.5f) * FMath::Max(SizeScale.Y, KINDA_SMALL_NUMBER));
+
+	float LocalX = X - CenterX;
+	float LocalY = Y - CenterY;
+	if (!FMath::IsNearlyZero(RotationDeg))
+	{
+		const float RotationRad = FMath::DegreesToRadians(RotationDeg);
+		const float CosTheta = FMath::Cos(-RotationRad);
+		const float SinTheta = FMath::Sin(-RotationRad);
+		const float RotatedX = LocalX * CosTheta - LocalY * SinTheta;
+		const float RotatedY = LocalX * SinTheta + LocalY * CosTheta;
+		LocalX = RotatedX;
+		LocalY = RotatedY;
+	}
+
+	const float NX = LocalX / RadiusX;
+	const float NY = LocalY / RadiusY;
+	return FMath::Clamp(FMath::Sqrt(NX * NX + NY * NY), 0.0f, 1.0f);
+}
+
 UTexture2D* GenerateGradientH(int32 Width, int32 Height, FLinearColor ColorStart, FLinearColor ColorEnd, UObject* Outer)
 {
 	UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer);
@@ -310,22 +383,7 @@ UTexture2D* GenerateGradientHMultiStop(int32 Width, int32 Height, const TArray<F
 		for (int32 X = 0; X < Width; ++X)
 		{
 			float T = (Width > 1) ? static_cast<float>(X) / (Width - 1) : 0.0f;
-
-			// Find enclosing stop pair
-			FLinearColor Blended = Stops[0].Color;
-			for (int32 i = 1; i < Stops.Num(); ++i)
-			{
-				if (T <= Stops[i].Position || i == Stops.Num() - 1)
-				{
-					float Span = Stops[i].Position - Stops[i - 1].Position;
-					float LocalT = (Span > KINDA_SMALL_NUMBER) ? (T - Stops[i - 1].Position) / Span : 0.0f;
-					LocalT = FMath::Clamp(LocalT, 0.0f, 1.0f);
-					Blended = FMath::Lerp(Stops[i - 1].Color, Stops[i].Color, LocalT);
-					break;
-				}
-			}
-
-			Pixels[Y * Width + X] = Blended.ToFColor(true);
+			Pixels[Y * Width + X] = SampleGradientStops(Stops, T).ToFColor(true);
 		}
 	}
 
@@ -371,21 +429,7 @@ UTexture2D* GenerateGradientVMultiStop(int32 Width, int32 Height, const TArray<F
 	for (int32 Y = 0; Y < Height; ++Y)
 	{
 		float T = (Height > 1) ? static_cast<float>(Y) / (Height - 1) : 0.0f;
-
-		FLinearColor Blended = Stops[0].Color;
-		for (int32 i = 1; i < Stops.Num(); ++i)
-		{
-			if (T <= Stops[i].Position || i == Stops.Num() - 1)
-			{
-				float Span = Stops[i].Position - Stops[i - 1].Position;
-				float LocalT = (Span > KINDA_SMALL_NUMBER) ? (T - Stops[i - 1].Position) / Span : 0.0f;
-				LocalT = FMath::Clamp(LocalT, 0.0f, 1.0f);
-				Blended = FMath::Lerp(Stops[i - 1].Color, Stops[i].Color, LocalT);
-				break;
-			}
-		}
-
-		FColor RowColor = Blended.ToFColor(true);
+		const FColor RowColor = SampleGradientStops(Stops, T).ToFColor(true);
 		for (int32 X = 0; X < Width; ++X)
 			Pixels[Y * Width + X] = RowColor;
 	}
@@ -429,22 +473,7 @@ UTexture2D* GenerateGradientAngled(int32 Width, int32 Height, float RotationDeg,
 			// Project normalized pixel position onto gradient axis
 			float T = (NX * DirX + NY * DirY - TMin);
 			T = (TRange > KINDA_SMALL_NUMBER) ? FMath::Clamp(T / TRange, 0.0f, 1.0f) : 0.0f;
-
-			// Piecewise lerp across stops
-			FLinearColor Blended = Stops[0].Color;
-			for (int32 i = 1; i < Stops.Num(); ++i)
-			{
-				if (T <= Stops[i].Position || i == Stops.Num() - 1)
-				{
-					float Span = Stops[i].Position - Stops[i - 1].Position;
-					float LocalT = (Span > KINDA_SMALL_NUMBER) ? (T - Stops[i - 1].Position) / Span : 0.0f;
-					LocalT = FMath::Clamp(LocalT, 0.0f, 1.0f);
-					Blended = FMath::Lerp(Stops[i - 1].Color, Stops[i].Color, LocalT);
-					break;
-				}
-			}
-
-			Pixels[Y * Width + X] = Blended.ToFColor(true);
+			Pixels[Y * Width + X] = SampleGradientStops(Stops, T).ToFColor(true);
 		}
 	}
 
@@ -475,21 +504,36 @@ UTexture2D* GenerateAngularGradient(int32 Width, int32 Height, float StartAngleD
 			// Normalize to [0, 1)
 			float T = Angle / (2.0f * PI);
 			T = T - FMath::FloorToFloat(T); // wrap to [0, 1)
+			Pixels[Y * Width + X] = SampleGradientStops(Stops, T).ToFColor(true);
+		}
+	}
 
-			// Piecewise lerp across stops
-			FLinearColor Blended = Stops[0].Color;
-			for (int32 i = 1; i < Stops.Num(); ++i)
-			{
-				if (T <= Stops[i].Position || i == Stops.Num() - 1)
-				{
-					float Span = Stops[i].Position - Stops[i - 1].Position;
-					float LocalT = (Span > KINDA_SMALL_NUMBER) ? (T - Stops[i - 1].Position) / Span : 0.0f;
-					LocalT = FMath::Clamp(LocalT, 0.0f, 1.0f);
-					Blended = FMath::Lerp(Stops[i - 1].Color, Stops[i].Color, LocalT);
-					break;
-				}
-			}
+	FillTextureData(Texture, Pixels);
+	return Texture;
+}
 
+UTexture2D* GenerateRadialGradient(
+	int32 Width,
+	int32 Height,
+	FLinearColor ColorCenter,
+	FLinearColor ColorEdge,
+	const FVector2D& CenterNormalized,
+	const FVector2D& SizeScale,
+	float RotationDeg,
+	UObject* Outer)
+{
+	UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer);
+	if (!Texture) return nullptr;
+
+	TArray<FColor> Pixels;
+	Pixels.SetNumUninitialized(Width * Height);
+
+	for (int32 Y = 0; Y < Height; ++Y)
+	{
+		for (int32 X = 0; X < Width; ++X)
+		{
+			const float T = ComputeRadialGradientDistance(X, Y, Width, Height, CenterNormalized, SizeScale, RotationDeg);
+			FLinearColor Blended = FMath::Lerp(ColorCenter, ColorEdge, T);
 			Pixels[Y * Width + X] = Blended.ToFColor(true);
 		}
 	}
@@ -498,27 +542,32 @@ UTexture2D* GenerateAngularGradient(int32 Width, int32 Height, float StartAngleD
 	return Texture;
 }
 
-UTexture2D* GenerateRadialGradient(int32 Width, int32 Height, FLinearColor ColorCenter, FLinearColor ColorEdge, UObject* Outer)
+UTexture2D* GenerateRadialGradientMultiStop(
+	int32 Width,
+	int32 Height,
+	const TArray<FGradientStop>& Stops,
+	const FVector2D& CenterNormalized,
+	const FVector2D& SizeScale,
+	float RotationDeg,
+	UObject* Outer)
 {
+	if (Stops.Num() < 2)
+	{
+		return nullptr;
+	}
+
 	UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer);
 	if (!Texture) return nullptr;
 
 	TArray<FColor> Pixels;
 	Pixels.SetNumUninitialized(Width * Height);
 
-	const float CX = (Width - 1) / 2.0f;
-	const float CY = (Height - 1) / 2.0f;
-
 	for (int32 Y = 0; Y < Height; ++Y)
 	{
 		for (int32 X = 0; X < Width; ++X)
 		{
-			// Elliptical distance: normalize dx/dy by half-extents
-			float NX = (CX > 0.0f) ? (X - CX) / CX : 0.0f;
-			float NY = (CY > 0.0f) ? (Y - CY) / CY : 0.0f;
-			float T = FMath::Clamp(FMath::Sqrt(NX * NX + NY * NY), 0.0f, 1.0f);
-			FLinearColor Blended = FMath::Lerp(ColorCenter, ColorEdge, T);
-			Pixels[Y * Width + X] = Blended.ToFColor(true);
+			const float T = ComputeRadialGradientDistance(X, Y, Width, Height, CenterNormalized, SizeScale, RotationDeg);
+			Pixels[Y * Width + X] = SampleGradientStops(Stops, T).ToFColor(true);
 		}
 	}
 
@@ -529,7 +578,14 @@ UTexture2D* GenerateRadialGradient(int32 Width, int32 Height, FLinearColor Color
 // --- Box Shadow with Gaussian Blur ---
 
 // Helper: generate rounded rect alpha mask into float buffer
-static void GenerateRoundedRectMask(TArray<float>& OutAlpha, int32 W, int32 H, float RTL, float RTR, float RBR, float RBL)
+static void GenerateRoundedRectMask(
+	TArray<float>& OutAlpha,
+	int32 W,
+	int32 H,
+	float RTL,
+	float RTR,
+	float RBR,
+	float RBL)
 {
 	OutAlpha.SetNumUninitialized(W * H);
 	for (int32 Y = 0; Y < H; ++Y)
@@ -541,14 +597,34 @@ static void GenerateRoundedRectMask(TArray<float>& OutAlpha, int32 W, int32 H, f
 			FVector2D Center = FVector2D::Zero();
 			bool bCorner = false;
 
-			if (X < RTL && Y < RTL)      { R = RTL; Center = FVector2D(RTL, RTL); bCorner = true; }
-			else if (X >= W - RTR && Y < RTR) { R = RTR; Center = FVector2D(W - RTR - 1, RTR); bCorner = true; }
-			else if (X >= W - RBR && Y >= H - RBR) { R = RBR; Center = FVector2D(W - RBR - 1, H - RBR - 1); bCorner = true; }
-			else if (X < RBL && Y >= H - RBL) { R = RBL; Center = FVector2D(RBL, H - RBL - 1); bCorner = true; }
+			if (X < RTL && Y < RTL)
+			{
+				R = RTL;
+				Center = FVector2D(RTL, RTL);
+				bCorner = true;
+			}
+			else if (X >= W - RTR && Y < RTR)
+			{
+				R = RTR;
+				Center = FVector2D(W - RTR - 1, RTR);
+				bCorner = true;
+			}
+			else if (X >= W - RBR && Y >= H - RBR)
+			{
+				R = RBR;
+				Center = FVector2D(W - RBR - 1, H - RBR - 1);
+				bCorner = true;
+			}
+			else if (X < RBL && Y >= H - RBL)
+			{
+				R = RBL;
+				Center = FVector2D(RBL, H - RBL - 1);
+				bCorner = true;
+			}
 
 			if (bCorner)
 			{
-				float Dist = FMath::Sqrt(FMath::Square(X - Center.X) + FMath::Square(Y - Center.Y));
+				const float Dist = FMath::Sqrt(FMath::Square(X - Center.X) + FMath::Square(Y - Center.Y));
 				A = FMath::Clamp(R - Dist + 0.5f, 0.0f, 1.0f);
 			}
 			OutAlpha[Y * W + X] = A;
@@ -606,26 +682,76 @@ static void GaussianBlurAlpha(TArray<float>& Alpha, int32 W, int32 H, float Sigm
 	}
 }
 
-UTexture2D* GenerateBoxShadow(int32 Width, int32 Height, FLinearColor ShadowColor, float CornerRadius, float BlurRadius, UObject* Outer)
+UTexture2D* GenerateBoxShadow(int32 Width, int32 Height, FLinearColor ShadowColor, float CornerRadius, float BlurRadius, float BlurPadding, UObject* Outer)
 {
-	return GenerateBoxShadow(Width, Height, ShadowColor, CornerRadius, CornerRadius, CornerRadius, CornerRadius, BlurRadius, Outer);
+	return GenerateBoxShadow(Width, Height, ShadowColor, CornerRadius, CornerRadius, CornerRadius, CornerRadius, BlurRadius, BlurPadding, Outer);
 }
 
-UTexture2D* GenerateBoxShadow(int32 Width, int32 Height, FLinearColor ShadowColor, float RTL, float RTR, float RBR, float RBL, float BlurRadius, UObject* Outer)
+UTexture2D* GenerateBoxShadow(
+	int32 Width,
+	int32 Height,
+	FLinearColor ShadowColor,
+	float RTL,
+	float RTR,
+	float RBR,
+	float RBL,
+	float BlurRadius,
+	float BlurPadding,
+	UObject* Outer)
 {
 	UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer);
 	if (!Texture) return nullptr;
 
-	// Convert normalized radii (0-1) to pixel values, same as GenerateRoundedRect
-	const float HalfMin = FMath::Min(Width, Height) * 0.5f;
-	const float PxTL = HalfMin * RTL;
-	const float PxTR = HalfMin * RTR;
-	const float PxBR = HalfMin * RBR;
-	const float PxBL = HalfMin * RBL;
-
-	// Generate rounded rect alpha mask
 	TArray<float> Alpha;
-	GenerateRoundedRectMask(Alpha, Width, Height, PxTL, PxTR, PxBR, PxBL);
+	const bool bHasExplicitBlurPadding = BlurPadding >= 0.0f;
+	if (!bHasExplicitBlurPadding)
+	{
+		// Keep the historical mask semantics for persisted procedural textures.
+		const float HalfMin = FMath::Min(Width, Height) * 0.5f;
+		const float PxTL = HalfMin * RTL;
+		const float PxTR = HalfMin * RTR;
+		const float PxBR = HalfMin * RBR;
+		const float PxBL = HalfMin * RBL;
+		GenerateRoundedRectMask(Alpha, Width, Height, PxTL, PxTR, PxBR, PxBL);
+	}
+	else
+	{
+		Alpha.Init(0.0f, Width * Height);
+
+		const int32 PaddingPx = FMath::Clamp(
+			FMath::RoundToInt(FMath::Max(0.0f, BlurPadding)),
+			0,
+			FMath::Max(0, FMath::Min(Width, Height) / 2 - 1));
+		const int32 ShapeWidth = FMath::Max(1, Width - PaddingPx * 2);
+		const int32 ShapeHeight = FMath::Max(1, Height - PaddingPx * 2);
+		const float ShapeHalfMin = FMath::Min(ShapeWidth, ShapeHeight) * 0.5f;
+		const float PxTL = ShapeHalfMin * RTL;
+		const float PxTR = ShapeHalfMin * RTR;
+		const float PxBR = ShapeHalfMin * RBR;
+		const float PxBL = ShapeHalfMin * RBL;
+
+		TArray<float> InnerAlpha;
+		GenerateRoundedRectMask(InnerAlpha, ShapeWidth, ShapeHeight, PxTL, PxTR, PxBR, PxBL);
+		for (int32 Y = 0; Y < ShapeHeight; ++Y)
+		{
+			const int32 DestY = PaddingPx + Y;
+			if (DestY < 0 || DestY >= Height)
+			{
+				continue;
+			}
+
+			for (int32 X = 0; X < ShapeWidth; ++X)
+			{
+				const int32 DestX = PaddingPx + X;
+				if (DestX < 0 || DestX >= Width)
+				{
+					continue;
+				}
+
+				Alpha[DestY * Width + DestX] = InnerAlpha[Y * ShapeWidth + X];
+			}
+		}
+	}
 
 	// Apply gaussian blur (sigma = BlurRadius / 2)
 	GaussianBlurAlpha(Alpha, Width, Height, BlurRadius * 0.5f);
@@ -752,7 +878,10 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 	int32 StripeWidthPx = 2;
 	int32 StripeGapPx = 6;
 	int32 InsetPx = 10;
+	float BoxShadowBlurPadding = -1.0f;
 	TArray<FGradientStop> MultiStops;
+	FVector2D RadialCenter(0.5f, 0.5f);
+	FVector2D RadialSize(1.0f, 1.0f);
 
 	FString ParamsStr;
 	if (Properties.TryGetString(UMGPropertyKeys::MaterialParams, ParamsStr))
@@ -772,6 +901,16 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 				ColorEnd = FUMGValueParser::ParseColor(ColorStr);
 
 			double NumVal;
+			if (Params->TryGetNumberField(TEXT("CenterX"), NumVal))
+				RadialCenter.X = static_cast<float>(NumVal);
+			if (Params->TryGetNumberField(TEXT("CenterY"), NumVal))
+				RadialCenter.Y = static_cast<float>(NumVal);
+			if (Params->TryGetNumberField(TEXT("SizeWidth"), NumVal))
+				RadialSize.X = FMath::Max(KINDA_SMALL_NUMBER, static_cast<float>(NumVal));
+			if (Params->TryGetNumberField(TEXT("SizeHeight"), NumVal))
+				RadialSize.Y = FMath::Max(KINDA_SMALL_NUMBER, static_cast<float>(NumVal));
+			if (Params->TryGetNumberField(TEXT("BlurPadding"), NumVal))
+				BoxShadowBlurPadding = FMath::Max(0.0f, static_cast<float>(NumVal));
 			if (Params->TryGetNumberField(TEXT("Thickness"), NumVal))
 				Thickness = NumVal > 1.0 ? static_cast<float>(NumVal) / 100.0f : static_cast<float>(NumVal);
 			if (Params->TryGetNumberField(TEXT("CornerRadius"), NumVal))
@@ -818,6 +957,11 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 
 					MultiStops.Add(Stop);
 				}
+
+				MultiStops.Sort([](const FGradientStop& A, const FGradientStop& B)
+				{
+					return A.Position < B.Position;
+				});
 			}
 		}
 	}
@@ -864,7 +1008,11 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 		return GenerateGradientV(Width, Height, ColorStart, ColorEnd, Outer);
 	}
 	if (Shape == TEXT("radialgradient"))
-		return GenerateRadialGradient(Width, Height, ColorStart, ColorEnd, Outer);
+	{
+		if (MultiStops.Num() >= 2)
+			return GenerateRadialGradientMultiStop(Width, Height, MultiStops, RadialCenter, RadialSize, RotationDeg, Outer);
+		return GenerateRadialGradient(Width, Height, ColorStart, ColorEnd, RadialCenter, RadialSize, RotationDeg, Outer);
+	}
 	if (Shape == TEXT("angulargradient"))
 	{
 		if (MultiStops.Num() < 2)
@@ -879,10 +1027,11 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 	{
 		float BlurPx = 0.0f;
 		Properties.TryGetFloat(UMGPropertyKeys::ShadowBlur, BlurPx);
+		const float BlurPadding = BoxShadowBlurPadding;
 
 		if (CornerRadii[0] >= 0.f)
-			return GenerateBoxShadow(Width, Height, Color, CornerRadii[0], CornerRadii[1], CornerRadii[2], CornerRadii[3], BlurPx, Outer);
-		return GenerateBoxShadow(Width, Height, Color, CornerRadius, BlurPx, Outer);
+			return GenerateBoxShadow(Width, Height, Color, CornerRadii[0], CornerRadii[1], CornerRadii[2], CornerRadii[3], BlurPx, BlurPadding, Outer);
+		return GenerateBoxShadow(Width, Height, Color, CornerRadius, BlurPx, BlurPadding, Outer);
 	}
 	if (Shape == TEXT("placeholderhatch"))
 	{

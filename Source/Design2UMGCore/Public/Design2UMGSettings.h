@@ -37,6 +37,26 @@ class DESIGN2UMGCORE_API UDesign2UMGSettings : public UDeveloperSettings
 public:
 	/** 获取设置单例 */
 	static UDesign2UMGSettings* Get();
+	static constexpr const TCHAR* CanonicalPlaceholderHatchBackgroundColor = TEXT("#D282FF33");
+	static constexpr const TCHAR* CanonicalPlaceholderRefHatchBackgroundColor = TEXT("#9682FF33");
+	static constexpr const TCHAR* CanonicalPlaceholderHatchStripeColor = TEXT("#D480FF");
+	static constexpr const TCHAR* CanonicalPlaceholderRefHatchStripeColor = TEXT("#9580FF");
+	static constexpr int32 CanonicalPlaceholderHatchStripeWidth = 1;
+	static constexpr int32 CanonicalPlaceholderHatchStripeGap = 4;
+	static constexpr float CanonicalLuminosityFitOpacityCap = 0.15f;
+
+	struct FResolvedPlaceholderHatchStyle
+	{
+		FString BaseFillColor;
+		FString RefFillColor;
+		FString BaseStripeColor;
+		FString RefStripeColor;
+		int32 StripeWidthPx = CanonicalPlaceholderHatchStripeWidth;
+		int32 StripeGapPx = CanonicalPlaceholderHatchStripeGap;
+	};
+
+	FResolvedPlaceholderHatchStyle ResolvePlaceholderHatchStyle() const;
+	float ResolveLuminosityFitOpacityCap() const;
 
 	virtual FName GetCategoryName() const override { return TEXT("Plugins"); }
 	virtual FName GetSectionName() const override { return TEXT("Design2UMG"); }
@@ -119,13 +139,25 @@ public:
 
 	// ========== Placeholder Hatch ==========
 
+	/** 显式启用 placeholderhatch 样式覆盖；关闭时始终使用插件规范默认值，避免本机用户配置污染基线输出。 */
+	UPROPERTY(Config, EditAnywhere, Category = "Placeholder Hatch", meta = (DisplayName = "Use Custom Hatch Style", ToolTip = "When disabled, placeholder hatch visuals always use the plugin's canonical defaults instead of user overrides."))
+	bool bUseCustomPlaceholderHatchStyle = false;
+
 	/** placeholderhatch 占位纹理背景色（当节点自身无可用纯色填充时使用） */
 	UPROPERTY(Config, EditAnywhere, Category = "Placeholder Hatch", meta = (DisplayName = "Fallback Background Color", ToolTip = "Fallback hatch background color when node has no explicit solid fill color."))
 	FString PlaceholderHatchBackgroundColor = TEXT("#D282FF33");
 
+	/** expanded ref instance placeholder 的默认背景色 */
+	UPROPERTY(Config, EditAnywhere, Category = "Placeholder Hatch", meta = (DisplayName = "Expanded Ref Background Color", ToolTip = "Fallback hatch background color for expanded reference placeholders when node has no explicit solid fill color."))
+	FString PlaceholderRefHatchBackgroundColor = TEXT("#9682FF33");
+
 	/** placeholderhatch 占位纹理斜线色（当节点自身无可用描边色时使用） */
 	UPROPERTY(Config, EditAnywhere, Category = "Placeholder Hatch", meta = (DisplayName = "Fallback Stripe Color", ToolTip = "Fallback hatch stripe color when node has no explicit stroke color."))
 	FString PlaceholderHatchStripeColor = TEXT("#D480FF");
+
+	/** expanded ref instance placeholder 的默认描边色 */
+	UPROPERTY(Config, EditAnywhere, Category = "Placeholder Hatch", meta = (DisplayName = "Expanded Ref Stripe Color", ToolTip = "Fallback hatch stripe color for expanded reference placeholders when node has no explicit stroke color."))
+	FString PlaceholderRefHatchStripeColor = TEXT("#9580FF");
 
 	/** placeholderhatch 斜线宽度（像素） */
 	UPROPERTY(Config, EditAnywhere, Category = "Placeholder Hatch", meta = (DisplayName = "Stripe Width", ClampMin = "1", ClampMax = "32"))
@@ -134,6 +166,14 @@ public:
 	/** placeholderhatch 斜线间距（像素） */
 	UPROPERTY(Config, EditAnywhere, Category = "Placeholder Hatch", meta = (DisplayName = "Stripe Gap", ClampMin = "1", ClampMax = "64"))
 	int32 PlaceholderHatchStripeGap = 4;
+
+	/** 显式启用 FIT + LUMINOSITY 运行时近似透明度上限覆盖；关闭时始终使用插件规范默认值。 */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Blend Approximation", meta = (DisplayName = "Use Custom FIT Luminosity Opacity Cap", ToolTip = "When disabled, runtime approximation uses the plugin's canonical opacity cap instead of user overrides."))
+	bool bUseCustomLuminosityFitOpacityCap = false;
+
+	/** FIT + LUMINOSITY 运行时近似时允许使用的最大覆盖透明度 */
+	UPROPERTY(Config, EditAnywhere, Category = "Image Blend Approximation", meta = (DisplayName = "FIT Luminosity Opacity Cap", ClampMin = "0.0", ClampMax = "1.0", ToolTip = "Upper bound used when approximating FIT + LUMINOSITY image overlays without a baked texture."))
+	float LuminosityFitOpacityCap = 0.15f;
 
 	// ========== Widget Class Overrides ==========
 

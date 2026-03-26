@@ -133,7 +133,7 @@ namespace DesignImportPipeline
 	FDesignImportExecutionResult Execute(FDesignDocument& Document, const FDesignImportRequest& Request)
 	{
 		FUMGWidgetData Data;
-		ConvertDocument(Document, Data);
+		PrepareDocumentForGeneration(Document, Data);
 		if (Request.bResolveImages)
 		{
 			ResolveImages(Data);
@@ -161,7 +161,6 @@ namespace DesignImportPipeline
 			return Result;
 		}
 
-		ApplyDocumentImportSideEffectsToData(Document, Data);
 		FDesignImportRequest FinalRequest = Request;
 		FinalRequest.bResolveImages = false;
 		return Execute(Data, FinalRequest);

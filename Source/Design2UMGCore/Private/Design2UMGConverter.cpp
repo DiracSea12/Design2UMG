@@ -30,8 +30,16 @@ namespace
 		TArray<FString>& Warnings;
 		TSet<FString> WarnedFamilies;
 		TSet<FString> PrunedInvalidMappings;
+		TSet<FString> PrototypeTriggerNodeIds;
 		TMap<FString, FString> PendingIconFontMappings;
+		FUMGPrototypeNavigationData PrototypeNavigation;
 		int32 RecursionDepth = 0;
+	};
+
+	struct FPrototypeNavigationAnalysis
+	{
+		FUMGPrototypeNavigationData Data;
+		TSet<FString> TriggerNodeIds;
 	};
 
 	struct FConversionContext
@@ -151,6 +159,11 @@ namespace
 		if (const FString* Value = Node->Metadata.Find(Key))
 			return *Value;
 		return FString();
+	}
+
+	bool IsSourceNodeType(const TSharedPtr<FDesignNode>& Node, const TCHAR* ExpectedType)
+	{
+		return GetSourceExtension(Node, TEXT("sourceNodeType")).Equals(ExpectedType, ESearchCase::IgnoreCase);
 	}
 
 	bool TryNormalizeValidFontAssetPath(const FString& InPath, FString& OutPath)
@@ -312,7 +325,14 @@ namespace
 
 	bool ShouldUseFigmaRenderFallback(const TSharedPtr<FDesignNode>& Node)
 	{
-		if (!Node.IsValid() || Node->Children.Num() != 0)
+		if (!Node.IsValid())
+		{
+			return false;
+		}
+
+		const FString Scope = GetSourceExtension(Node, TEXT("figma.renderFallbackScope"));
+		const bool bReplaceSubtree = Scope.Equals(TEXT("subtree"), ESearchCase::IgnoreCase);
+		if (Node->Children.Num() != 0 && !bReplaceSubtree)
 		{
 			return false;
 		}
@@ -330,8 +350,9 @@ namespace
 			return false;
 		}
 
-		const FString Scope = GetSourceExtension(Node, TEXT("figma.renderFallbackScope"));
-		if (!Scope.IsEmpty() && !Scope.Equals(TEXT("full"), ESearchCase::IgnoreCase))
+		if (!Scope.IsEmpty()
+			&& !Scope.Equals(TEXT("full"), ESearchCase::IgnoreCase)
+			&& !bReplaceSubtree)
 		{
 			return false;
 		}
@@ -342,7 +363,7 @@ namespace
 			return false;
 		}
 
-		if (HasMeaningfulNodeMetadata(Node, TEXT("interactions")))
+		if (Node->FigmaPrototype.Interactions.Num() > 0 || HasMeaningfulNodeMetadata(Node, TEXT("interactions")))
 		{
 			return false;
 		}
@@ -359,13 +380,27 @@ namespace
 		Widget.Properties.Add(TEXT("TexturePath"), TexturePath);
 		Widget.Brush.TexturePath = TexturePath;
 
-		if (Node->Width.IsFixed() && Node->Width.Value > 0.0f)
+		float WidthOverride = Node->Width.Value;
+		const FString FallbackWidth = GetSourceExtension(Node, TEXT("figma.renderFallbackWidth"));
+		if (!FallbackWidth.IsEmpty())
 		{
-			Widget.Properties.Add(TEXT("WidthOverride"), FString::SanitizeFloat(Node->Width.Value));
+			WidthOverride = FCString::Atof(*FallbackWidth);
 		}
-		if (Node->Height.IsFixed() && Node->Height.Value > 0.0f)
+
+		float HeightOverride = Node->Height.Value;
+		const FString FallbackHeight = GetSourceExtension(Node, TEXT("figma.renderFallbackHeight"));
+		if (!FallbackHeight.IsEmpty())
 		{
-			Widget.Properties.Add(TEXT("HeightOverride"), FString::SanitizeFloat(Node->Height.Value));
+			HeightOverride = FCString::Atof(*FallbackHeight);
+		}
+
+		if (WidthOverride > 0.0f)
+		{
+			Widget.Properties.Add(TEXT("WidthOverride"), FString::SanitizeFloat(WidthOverride));
+		}
+		if (HeightOverride > 0.0f)
+		{
+			Widget.Properties.Add(TEXT("HeightOverride"), FString::SanitizeFloat(HeightOverride));
 		}
 
 		return Widget;
@@ -377,11 +412,24 @@ namespace
 		return Widget.Properties.TryGetString(Key, Value) && !Value.IsEmpty();
 	}
 
+	bool ShouldLockExplicitFitDimensionForFlow(const TSharedPtr<FDesignNode>& Node)
+	{
+		return Node.IsValid()
+			&& Node->Children.Num() == 0
+			&& (Node->Type == EDesignNodeType::Text || Node->Type == EDesignNodeType::IconFont)
+			&& !Node->Content.IsEmpty();
+	}
+
 	bool TryApplyPlaceholderSurfaceTint(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
 	{
+		const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+		const UDesign2UMGSettings::FResolvedPlaceholderHatchStyle Style =
+			Settings ? Settings->ResolvePlaceholderHatchStyle() : UDesign2UMGSettings::FResolvedPlaceholderHatchStyle();
 		const bool bExpandedRefInstancePlaceholder = HasNodeMetadataFlag(Node, TEXT("design2umg.expanded_ref_instance"));
-		const FString DefaultPlaceholderFillColor = bExpandedRefInstancePlaceholder ? TEXT("#9682FF33") : TEXT("#D282FF33");
-		const FString DefaultPlaceholderOutlineColor = bExpandedRefInstancePlaceholder ? TEXT("#9580FF") : TEXT("#D480FF");
+		const FString& DefaultPlaceholderFillColor =
+			bExpandedRefInstancePlaceholder ? Style.RefFillColor : Style.BaseFillColor;
+		const FString& DefaultPlaceholderOutlineColor =
+			bExpandedRefInstancePlaceholder ? Style.RefStripeColor : Style.BaseStripeColor;
 		const bool bIsLeafContainer =
 			(Node->Type == EDesignNodeType::Frame
 				|| Node->Type == EDesignNodeType::Group
@@ -420,8 +468,8 @@ namespace
 			Widget.Properties.Remove(Key);
 		Widget.Properties.Add(TEXT("MaterialRef"), TEXT("placeholdersurface"));
 		Widget.Properties.Add(TEXT("MaterialParams"),
-			FString::Printf(TEXT("{\"Color\":\"%s\",\"StripeColor\":\"%s\",\"StripeWidth\":1,\"Inset\":%d}"),
-				*PlaceholderFillColor, *PlaceholderOutlineColor, InsetPx));
+			FString::Printf(TEXT("{\"Color\":\"%s\",\"StripeColor\":\"%s\",\"StripeWidth\":%d,\"StripeGap\":%d,\"Inset\":%d}"),
+				*PlaceholderFillColor, *PlaceholderOutlineColor, Style.StripeWidthPx, Style.StripeGapPx, InsetPx));
 		if (Node->Width.Value > 0.0f)
 			Widget.Properties.Add(TEXT("WidthOverride"), FString::SanitizeFloat(Node->Width.Value));
 		if (Node->Height.Value > 0.0f)
@@ -431,21 +479,77 @@ namespace
 
 	bool ShouldWrapNodeWithBorder(const TSharedPtr<FDesignNode>& Node, bool bPlaceholderUsesDirectImage)
 	{
+		const bool bNeedsPaddingWrapper =
+			FLayoutMapper::HasPadding(Node)
+			&& ((Node->Layout == EDesignLayout::None)
+				|| ((Node->Layout == EDesignLayout::Wrap || Node->Layout == EDesignLayout::Grid)
+					&& Node->Children.Num() > 0));
+
 		return (Node->Type == EDesignNodeType::Frame || Node->Type == EDesignNodeType::Group)
 			&& (HasVisualFill(Node)
-				|| (((Node->Layout == EDesignLayout::None)
-					|| (Node->Layout == EDesignLayout::Wrap)
-					|| (Node->Layout == EDesignLayout::Grid))
-					&& FLayoutMapper::HasPadding(Node))
+				|| bNeedsPaddingWrapper
 				|| Node->CornerRadius.HasRadius()
 				|| Node->Stroke.HasStroke())
 			&& !bPlaceholderUsesDirectImage;
+	}
+
+	bool ShouldKeepStructuralLeafInFlow(const TSharedPtr<FDesignNode>& Node, EDesignLayout ParentLayout)
+	{
+		if (!Node.IsValid()
+			|| (ParentLayout != EDesignLayout::Wrap && ParentLayout != EDesignLayout::Grid))
+		{
+			return false;
+		}
+
+		if (Node->Children.Num() > 0 || HasRenderableVisual(Node))
+		{
+			return false;
+		}
+
+		return (Node->Type == EDesignNodeType::Frame || Node->Type == EDesignNodeType::Group)
+			&& Node->Width.Value > 0.0f
+			&& Node->Height.Value > 0.0f;
+	}
+
+	void GatherVisibleChildrenForConversion(const TSharedPtr<FDesignNode>& Node, TArray<TSharedPtr<FDesignNode>>& OutVisibleChildren)
+	{
+		if (!Node.IsValid())
+		{
+			return;
+		}
+
+		for (const TSharedPtr<FDesignNode>& Child : Node->Children)
+		{
+			if (!ShouldSkipNode(Child) || ShouldKeepStructuralLeafInFlow(Child, Node->Layout))
+			{
+				OutVisibleChildren.Add(Child);
+			}
+		}
 	}
 
 	FUMGWidgetNode ApplyVisualEffectWrappers(FUMGWidgetNode Widget, const TSharedPtr<FDesignNode>& Node)
 	{
 		if (Node->HasMultiFill())
 			Widget = FVisualMapper::WrapWithMultiFill(MoveTemp(Widget), Node);
+
+		const FDesignShadow* InnerShadow = nullptr;
+		for (const FDesignEffect& Effect : Node->Effects)
+		{
+			if (!Effect.bEnabled || Effect.Type != EDesignEffectType::Shadow || !Effect.Shadow.bInner)
+			{
+				continue;
+			}
+
+			if (!InnerShadow || Effect.Shadow.Blur > InnerShadow->Blur)
+			{
+				InnerShadow = &Effect.Shadow;
+			}
+		}
+
+		if (InnerShadow && Node.IsValid() && Node->Width.Value > 0.0f && Node->Height.Value > 0.0f)
+		{
+			Widget = FVisualMapper::WrapWithInnerShadow(MoveTemp(Widget), Node, *InnerShadow);
+		}
 
 		int32 ShadowCount = 0;
 		if (Widget.Properties.TryGetInt(TEXT("BoxShadowCount"), ShadowCount) && ShadowCount > 0)
@@ -455,13 +559,416 @@ namespace
 				Widget = FVisualMapper::WrapWithBoxShadow(MoveTemp(Widget), Node, Index);
 		}
 
+		float MaxForegroundBlur = 0.0f;
+		float MaxBackgroundBlur = 0.0f;
 		for (const FDesignEffect& Effect : Node->Effects)
 		{
-			if (Effect.bEnabled && Effect.Type == EDesignEffectType::BackgroundBlur && Effect.Radius > 0)
-				return FVisualMapper::WrapWithBackgroundBlur(MoveTemp(Widget), Effect.Radius);
+			if (!Effect.bEnabled || Effect.Radius <= 0.0f)
+			{
+				continue;
+			}
+
+			if (Effect.Type == EDesignEffectType::Blur)
+			{
+				MaxForegroundBlur = FMath::Max(MaxForegroundBlur, Effect.Radius);
+			}
+			else if (Effect.Type == EDesignEffectType::BackgroundBlur)
+			{
+				MaxBackgroundBlur = FMath::Max(MaxBackgroundBlur, Effect.Radius);
+			}
+		}
+
+		if (MaxForegroundBlur > 0.0f && Node.IsValid() && Node->Width.Value > 0.0f && Node->Height.Value > 0.0f)
+		{
+			Widget = FVisualMapper::WrapWithForegroundBlur(MoveTemp(Widget), Node, MaxForegroundBlur);
+		}
+
+		if (MaxBackgroundBlur > 0.0f)
+		{
+			Widget = FVisualMapper::WrapWithBackgroundBlur(MoveTemp(Widget), MaxBackgroundBlur);
 		}
 
 		return Widget;
+	}
+
+	FString ResolvePrototypeNavigateDestinationId(
+		const TSharedPtr<FDesignNode>& Node,
+		const FDesignFigmaPrototypeAction& Action)
+	{
+		if (!Action.DestinationId.IsEmpty())
+		{
+			return Action.DestinationId;
+		}
+		if (!Action.TransitionNodeId.IsEmpty())
+		{
+			return Action.TransitionNodeId;
+		}
+		return Node.IsValid() ? Node->FigmaPrototype.TransitionNodeId : FString();
+	}
+
+	FDesignFigmaPrototypeTransitionData ResolvePrototypeTransitionSource(
+		const TSharedPtr<FDesignNode>& Node,
+		const FDesignFigmaPrototypeAction& Action)
+	{
+		FDesignFigmaPrototypeTransitionData Resolved;
+		if (Node.IsValid() && Node->FigmaPrototype.Transition.HasAny())
+		{
+			Resolved = Node->FigmaPrototype.Transition;
+		}
+
+		if (!Action.Transition.HasAny())
+		{
+			return Resolved;
+		}
+
+		if (!Action.Transition.Type.IsEmpty())
+		{
+			Resolved.Type = Action.Transition.Type;
+		}
+		if (!Action.Transition.Direction.IsEmpty())
+		{
+			Resolved.Direction = Action.Transition.Direction;
+		}
+		if (Action.Transition.bHasDuration)
+		{
+			Resolved.Duration = Action.Transition.Duration;
+			Resolved.bHasDuration = true;
+		}
+		if (!Action.Transition.EasingType.IsEmpty())
+		{
+			Resolved.EasingType = Action.Transition.EasingType;
+		}
+		if (!Action.Transition.EasingJson.IsEmpty())
+		{
+			Resolved.EasingJson = Action.Transition.EasingJson;
+		}
+		if (Action.Transition.bHasMatchLayers)
+		{
+			Resolved.bMatchLayers = Action.Transition.bMatchLayers;
+			Resolved.bHasMatchLayers = true;
+		}
+
+		return Resolved;
+	}
+
+	FUMGPrototypeTransitionData BuildPrototypeTransition(
+		const TSharedPtr<FDesignNode>& Node,
+		const FDesignFigmaPrototypeAction& Action)
+	{
+		const FDesignFigmaPrototypeTransitionData Source = ResolvePrototypeTransitionSource(Node, Action);
+
+		FUMGPrototypeTransitionData Transition;
+		Transition.Type = Source.Type.ToUpper();
+		Transition.Direction = Source.Direction.ToUpper();
+		Transition.EasingType = Source.EasingType.ToUpper();
+		Transition.bMatchLayers = Source.bMatchLayers;
+		Transition.bHasMatchLayers = Source.bHasMatchLayers;
+
+		if (Source.bHasDuration)
+		{
+			Transition.DurationSeconds = FMath::Max(0.0f, Source.Duration / 1000.0f);
+		}
+		else if (!Transition.Type.IsEmpty())
+		{
+			Transition.DurationSeconds = 0.2f;
+		}
+
+		if (Transition.Type.IsEmpty() && Transition.DurationSeconds > KINDA_SMALL_NUMBER)
+		{
+			Transition.Type = TEXT("DISSOLVE");
+		}
+
+		return Transition;
+	}
+
+	bool IsSupportedPrototypeNavigateInteraction(
+		const TSharedPtr<FDesignNode>& Node,
+		const FDesignFigmaPrototypeInteraction& Interaction,
+		FString& OutDestinationId,
+		FUMGPrototypeTransitionData& OutTransition)
+	{
+		if (!Node.IsValid() || !Interaction.TriggerType.Equals(TEXT("ON_CLICK"), ESearchCase::IgnoreCase))
+		{
+			return false;
+		}
+
+		for (const FDesignFigmaPrototypeAction& Action : Interaction.Actions)
+		{
+			if (!Action.Type.Equals(TEXT("NODE"), ESearchCase::IgnoreCase))
+			{
+				continue;
+			}
+
+			if (!Action.Navigation.IsEmpty()
+				&& !Action.Navigation.Equals(TEXT("NAVIGATE"), ESearchCase::IgnoreCase)
+				&& !Action.Navigation.Equals(TEXT("SWAP"), ESearchCase::IgnoreCase))
+			{
+				continue;
+			}
+
+			const FString DestinationId = ResolvePrototypeNavigateDestinationId(Node, Action);
+			if (!DestinationId.IsEmpty())
+			{
+				OutDestinationId = DestinationId;
+				OutTransition = BuildPrototypeTransition(Node, Action);
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	void MapNodeIdsToTopLevelPage(
+		const TSharedPtr<FDesignNode>& Node,
+		const FString& PageId,
+		TMap<FString, FString>& OutNodeToPageId)
+	{
+		if (!Node.IsValid() || PageId.IsEmpty())
+		{
+			return;
+		}
+
+		if (!Node->Id.IsEmpty())
+		{
+			OutNodeToPageId.Add(Node->Id, PageId);
+		}
+
+		for (const TSharedPtr<FDesignNode>& Child : Node->Children)
+		{
+			MapNodeIdsToTopLevelPage(Child, PageId, OutNodeToPageId);
+		}
+	}
+
+	void GatherPrototypeNavigationBindings(
+		const TSharedPtr<FDesignNode>& Node,
+		const TMap<FString, FString>& NodeToPageId,
+		const TMap<FString, int32>& PageIdToIndex,
+		TArray<FUMGPrototypeNavigationBinding>& OutBindings,
+		TSet<FString>& OutTriggerIds,
+		TSet<FString>& InOutSeenBindingKeys,
+		TArray<FString>& Warnings)
+	{
+		if (!Node.IsValid())
+		{
+			return;
+		}
+
+		for (const FDesignFigmaPrototypeInteraction& Interaction : Node->FigmaPrototype.Interactions)
+		{
+			FString DestinationId;
+			FUMGPrototypeTransitionData Transition;
+			if (!IsSupportedPrototypeNavigateInteraction(Node, Interaction, DestinationId, Transition))
+			{
+				continue;
+			}
+
+			const FString* TargetPageId = NodeToPageId.Find(DestinationId);
+			if (!TargetPageId)
+			{
+				Warnings.AddUnique(FString::Printf(
+					TEXT("Prototype navigation skipped on '%s': unresolved destination '%s'"),
+					*Node->Id,
+					*DestinationId));
+				continue;
+			}
+
+			const int32* TargetPageIndex = PageIdToIndex.Find(*TargetPageId);
+			if (!TargetPageIndex || *TargetPageIndex < 0)
+			{
+				continue;
+			}
+
+			const FString BindingKey = Node->Id + TEXT("->") + *TargetPageId;
+			if (InOutSeenBindingKeys.Contains(BindingKey))
+			{
+				continue;
+			}
+
+			FUMGPrototypeNavigationBinding Binding;
+			Binding.TriggerWidgetId = Node->Id;
+			Binding.TriggerWidgetName = Node->Id;
+			Binding.TargetPageId = *TargetPageId;
+			Binding.TargetPageIndex = *TargetPageIndex;
+			Binding.Transition = Transition;
+			if (!Binding.IsValid())
+			{
+				continue;
+			}
+
+			OutBindings.Add(Binding);
+			OutTriggerIds.Add(Node->Id);
+			InOutSeenBindingKeys.Add(BindingKey);
+		}
+
+		for (const TSharedPtr<FDesignNode>& Child : Node->Children)
+		{
+			GatherPrototypeNavigationBindings(
+				Child,
+				NodeToPageId,
+				PageIdToIndex,
+				OutBindings,
+				OutTriggerIds,
+				InOutSeenBindingKeys,
+				Warnings);
+		}
+	}
+
+	int32 ResolvePrototypeInitialPageIndex(
+		const FDesignDocument& Document,
+		const TMap<FString, FString>& NodeToPageId,
+		const TMap<FString, int32>& PageIdToIndex)
+	{
+		auto ResolvePageIndexForNodeId = [&](const FString& NodeId) -> int32
+		{
+			if (NodeId.IsEmpty())
+			{
+				return INDEX_NONE;
+			}
+
+			const FString* PageId = NodeToPageId.Find(NodeId);
+			if (!PageId)
+			{
+				return INDEX_NONE;
+			}
+
+			const int32* PageIndex = PageIdToIndex.Find(*PageId);
+			return PageIndex ? *PageIndex : INDEX_NONE;
+		};
+
+		if (const int32 StartPageIndex = ResolvePageIndexForNodeId(Document.FigmaDocument.PrototypeStartNodeId);
+			StartPageIndex != INDEX_NONE)
+		{
+			return StartPageIndex;
+		}
+
+		for (const FDesignFigmaFlowStartingPoint& Flow : Document.FigmaDocument.FlowStartingPoints)
+		{
+			if (const int32 FlowPageIndex = ResolvePageIndexForNodeId(Flow.NodeId);
+				FlowPageIndex != INDEX_NONE)
+			{
+				return FlowPageIndex;
+			}
+		}
+
+		return 0;
+	}
+
+	FPrototypeNavigationAnalysis BuildPrototypeNavigationAnalysis(
+		const FDesignDocument& Document,
+		const TArray<TSharedPtr<FDesignNode>>& VisibleChildren,
+		TArray<FString>& Warnings)
+	{
+		FPrototypeNavigationAnalysis Analysis;
+
+		TArray<TSharedPtr<FDesignNode>> PrototypePages;
+		for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
+		{
+			if (Child.IsValid() && !Child->bReusable)
+			{
+				PrototypePages.Add(Child);
+			}
+		}
+
+		if (PrototypePages.Num() < 2)
+		{
+			return Analysis;
+		}
+
+		TMap<FString, FString> NodeToPageId;
+		TMap<FString, int32> PageIdToIndex;
+		Analysis.Data.SwitcherWidgetId = TEXT("__d2u_prototype_switcher");
+		Analysis.Data.SwitcherWidgetName = TEXT("__d2u_prototype_switcher");
+		for (int32 PageIndex = 0; PageIndex < PrototypePages.Num(); ++PageIndex)
+		{
+			const TSharedPtr<FDesignNode>& PageNode = PrototypePages[PageIndex];
+			if (!PageNode.IsValid() || PageNode->Id.IsEmpty())
+			{
+				continue;
+			}
+
+			Analysis.Data.PageIds.Add(PageNode->Id);
+			PageIdToIndex.Add(PageNode->Id, PageIndex);
+			MapNodeIdsToTopLevelPage(PageNode, PageNode->Id, NodeToPageId);
+		}
+
+		TSet<FString> SeenBindingKeys;
+		for (const TSharedPtr<FDesignNode>& PageNode : PrototypePages)
+		{
+			GatherPrototypeNavigationBindings(
+				PageNode,
+				NodeToPageId,
+				PageIdToIndex,
+				Analysis.Data.ClickBindings,
+				Analysis.TriggerNodeIds,
+				SeenBindingKeys,
+				Warnings);
+		}
+
+		if (Analysis.Data.ClickBindings.Num() == 0)
+		{
+			Analysis.Data = FUMGPrototypeNavigationData();
+			Analysis.TriggerNodeIds.Reset();
+			return Analysis;
+		}
+
+		Analysis.Data.InitialPageIndex = ResolvePrototypeInitialPageIndex(Document, NodeToPageId, PageIdToIndex);
+		return Analysis;
+	}
+
+	bool ShouldWrapNodeWithPrototypeButton(const TSharedPtr<FDesignNode>& Node, const FConversionState& State)
+	{
+		return Node.IsValid()
+			&& State.PrototypeNavigation.IsValid()
+			&& State.PrototypeTriggerNodeIds.Contains(Node->Id);
+	}
+
+	FUMGWidgetNode WrapWithPrototypeButton(FUMGWidgetNode Widget, const TSharedPtr<FDesignNode>& Node)
+	{
+		FUMGWidgetNode Button;
+		Button.Type = TEXT("Button");
+		Button.Id = Node->Id;
+		Button.Name = Node->Id.IsEmpty() ? TEXT("PrototypeButton") : Node->Id;
+		Button.Bounds = Widget.Bounds;
+		Button.Slot = Widget.Slot;
+		Button.Properties.Add(TEXT("BackgroundColor"), TEXT("#00000000"));
+		Button.Properties.Add(TEXT("HoveredColor"), TEXT("#00000000"));
+		Button.Properties.Add(TEXT("PressedColor"), TEXT("#00000000"));
+
+		Widget.Id = Node->Id + TEXT("_content");
+		Widget.Name = (Node->Name.IsEmpty() ? Node->Id : Node->Name) + TEXT("_content");
+		Widget.Bounds.X = 0.0f;
+		Widget.Bounds.Y = 0.0f;
+		Widget.Slot = FUMGSlotData();
+		Button.Children.Add(MoveTemp(Widget));
+		return Button;
+	}
+
+	FUMGWidgetNode BuildPrototypeSwitcherRoot(
+		TArray<FUMGWidgetNode>&& PageWidgets,
+		const FUMGPrototypeNavigationData& NavigationData)
+	{
+		FUMGWidgetNode Switcher;
+		Switcher.Type = TEXT("WidgetSwitcher");
+		Switcher.Id = NavigationData.SwitcherWidgetId;
+		Switcher.Name = NavigationData.SwitcherWidgetName;
+		Switcher.WidgetState.ActiveWidgetIndex = NavigationData.InitialPageIndex;
+		Switcher.WidgetState.bHasActiveWidgetIndex = true;
+
+		float MaxWidth = 0.0f;
+		float MaxHeight = 0.0f;
+		for (FUMGWidgetNode& PageWidget : PageWidgets)
+		{
+			PageWidget.Bounds.X = 0.0f;
+			PageWidget.Bounds.Y = 0.0f;
+			PageWidget.Slot = FUMGSlotData();
+			MaxWidth = FMath::Max(MaxWidth, PageWidget.Bounds.W);
+			MaxHeight = FMath::Max(MaxHeight, PageWidget.Bounds.H);
+			Switcher.Children.Add(MoveTemp(PageWidget));
+		}
+
+		Switcher.Bounds.W = MaxWidth;
+		Switcher.Bounds.H = MaxHeight;
+		return Switcher;
 	}
 
 }
@@ -479,6 +986,17 @@ void AppendConvertedChildren(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNod
 FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document)
 {
 	FUMGWidgetData Result;
+
+	for (const FDesignFigmaSkippedNodeReport& Report : Document.FigmaDiagnostics.SkippedDesignerNodes)
+	{
+		Result.Warnings.AddUnique(FString::Printf(
+			TEXT("Figma %s '%s' (%s) skipped from runtime widget tree [%s]"),
+			*Report.NodeType,
+			Report.NodeName.IsEmpty() ? TEXT("<unnamed>") : *Report.NodeName,
+			Report.NodeId.IsEmpty() ? TEXT("<no-id>") : *Report.NodeId,
+			Report.Reason.IsEmpty() ? TEXT("designer_only") : *Report.Reason));
+	}
+
 	FConversionState State(Document, Result.Warnings);
 	FConversionContext RootContext(State);
 
@@ -498,6 +1016,14 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document)
 		{
 			VisibleChildren.Add(Child);
 		}
+	}
+
+	{
+		const FPrototypeNavigationAnalysis PrototypeAnalysis =
+			BuildPrototypeNavigationAnalysis(Document, VisibleChildren, Result.Warnings);
+		State.PrototypeNavigation = PrototypeAnalysis.Data;
+		State.PrototypeTriggerNodeIds = PrototypeAnalysis.TriggerNodeIds;
+		Result.PrototypeNavigation = PrototypeAnalysis.Data;
 	}
 
 	// WidgetName 使用第一个非跳过 frame 的名称，fallback 到 WBP_FromPen
@@ -532,6 +1058,18 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document)
 			RenderWidgets.Add(MoveTemp(ChildWidget));
 	}
 
+	if (State.PrototypeNavigation.IsValid())
+	{
+		UE_LOG(LogDesign2UMG, Log,
+			TEXT("Convert: %d top-level widgets → WidgetSwitcher root with %d navigation bindings"),
+			RenderWidgets.Num(),
+			State.PrototypeNavigation.ClickBindings.Num());
+		Result.RootWidget = BuildPrototypeSwitcherRoot(MoveTemp(RenderWidgets), State.PrototypeNavigation);
+		Result.IconFontMappingChanges.Upserts = MoveTemp(State.PendingIconFontMappings);
+		Result.IconFontMappingChanges.Removals = MoveTemp(State.PrunedInvalidMappings);
+		return Result;
+	}
+
 	if (RenderWidgets.Num() == 1)
 	{
 		UE_LOG(LogDesign2UMG, Log, TEXT("Convert: single root '%s' type=%s"), *RenderWidgets[0].Name, *RenderWidgets[0].Type);
@@ -559,7 +1097,7 @@ FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FConversio
 	if (!Guard.bValid)
 		return FUMGWidgetNode();
 
-	if (ShouldSkipNode(Node))
+	if (ShouldSkipNode(Node) && !ShouldKeepStructuralLeafInFlow(Node, ParentLayout))
 		return FUMGWidgetNode();
 
 	const FConversionContext ActiveContext = Context.WithNodeTheme(Node);
@@ -584,6 +1122,27 @@ FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FConversio
 		Widget.Bounds.W = Node->Width.Value;
 		Widget.Bounds.H = Node->Height.Value;
 
+		const FString FallbackOffsetX = GetSourceExtension(Node, TEXT("figma.renderFallbackOffsetX"));
+		const FString FallbackOffsetY = GetSourceExtension(Node, TEXT("figma.renderFallbackOffsetY"));
+		const FString FallbackWidth = GetSourceExtension(Node, TEXT("figma.renderFallbackWidth"));
+		const FString FallbackHeight = GetSourceExtension(Node, TEXT("figma.renderFallbackHeight"));
+		if (!FallbackOffsetX.IsEmpty())
+		{
+			Widget.Bounds.X += FCString::Atof(*FallbackOffsetX);
+		}
+		if (!FallbackOffsetY.IsEmpty())
+		{
+			Widget.Bounds.Y += FCString::Atof(*FallbackOffsetY);
+		}
+		if (!FallbackWidth.IsEmpty())
+		{
+			Widget.Bounds.W = FCString::Atof(*FallbackWidth);
+		}
+		if (!FallbackHeight.IsEmpty())
+		{
+			Widget.Bounds.H = FCString::Atof(*FallbackHeight);
+		}
+
 		UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: '%s' -> Figma render fallback image"), *Widget.Name);
 		return Widget;
 	}
@@ -592,6 +1151,13 @@ FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FConversio
 	{
 	case EDesignNodeType::Text:
 		Widget = CreateTextWidget(Node);
+		if (IsSourceNodeType(Node, TEXT("TEXT_PATH")))
+		{
+			const FString NodeLabel = Node->Name.IsEmpty() ? Node->Id : Node->Name;
+			Context.State.Warnings.Add(FString::Printf(
+				TEXT("Figma TEXT_PATH '%s' → TextBlock (text-on-path 降级为普通文本)"),
+				*NodeLabel));
+		}
 		break;
 	case EDesignNodeType::IconFont:
 		Widget = CreateIconFontWidget(Node, Context.State);
@@ -709,7 +1275,7 @@ FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FConversio
 	}
 
 	TArray<TSharedPtr<FDesignNode>> VisibleChildren;
-	SizeEstimator::GatherVisibleChildren(Node, VisibleChildren);
+	GatherVisibleChildrenForConversion(Node, VisibleChildren);
 	PreResolveFlowChildren(Node, Widget, VisibleChildren, ActiveContext);
 	AppendConvertedChildren(Widget, Node, VisibleChildren, ActiveContext);
 
@@ -756,7 +1322,13 @@ FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FConversio
 		FLayoutMapper::ApplyPadding(Widget, Node->Padding);
 	}
 
-	return ApplyVisualEffectWrappers(MoveTemp(Widget), Node);
+	Widget = ApplyVisualEffectWrappers(MoveTemp(Widget), Node);
+	if (ShouldWrapNodeWithPrototypeButton(Node, Context.State))
+	{
+		Widget = WrapWithPrototypeButton(MoveTemp(Widget), Node);
+	}
+
+	return Widget;
 }
 
 FUMGWidgetNode CreateContainerWidget(const TSharedPtr<FDesignNode>& Node)
@@ -809,8 +1381,25 @@ void ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& 
 		Node->TextAlign == EDesignTextAlign::Center ? TEXT("Center") :
 		Node->TextAlign == EDesignTextAlign::Right ? TEXT("Right") : TEXT("Left"));
 
+	const float ResolvedWrapTextAt = TextMeasurement::ResolveTextWrapAt(Node, 0.0f);
+	const bool bNeedsKnownWidthRuntimeWrap =
+		Node->TextGrowth == EDesignTextGrowth::Auto
+		&& Node->Width.IsFill()
+		&& Node->Width.Value > 0.0f
+		&& !HasNodeMetadataFlag(Node, TEXT("figma.text.truncate"));
 	if (Node->TextAlign == EDesignTextAlign::Justify)
+	{
 		Widget.Properties.Add(TEXT("AutoWrapText"), TEXT("true"));
+		if (ResolvedWrapTextAt > 0.0f)
+		{
+			Widget.Properties.Add(TEXT("WrapTextAt"), FString::SanitizeFloat(ResolvedWrapTextAt));
+		}
+	}
+	else if (bNeedsKnownWidthRuntimeWrap && ResolvedWrapTextAt > 0.0f)
+	{
+		Widget.Properties.Add(TEXT("AutoWrapText"), TEXT("true"));
+		Widget.Properties.Add(TEXT("WrapTextAt"), FString::SanitizeFloat(ResolvedWrapTextAt));
+	}
 
 	// textAlignVertical is alignment inside the text box, not the parent layout slot.
 	// Mapping it onto the parent slot shifts text widgets inside buttons/tabs/tables and
@@ -856,9 +1445,9 @@ void ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& 
 		}
 
 		Widget.Properties.Add(TEXT("AutoWrapText"), TEXT("true"));
-		if (const float WrapTextAt = TextMeasurement::ResolveTextWrapAt(Node, 0.0f); WrapTextAt > 0.0f)
+		if (ResolvedWrapTextAt > 0.0f)
 		{
-			Widget.Properties.Add(TEXT("WrapTextAt"), FString::SanitizeFloat(WrapTextAt));
+			Widget.Properties.Add(TEXT("WrapTextAt"), FString::SanitizeFloat(ResolvedWrapTextAt));
 		}
 		if (Node->TextGrowth == EDesignTextGrowth::FixedWidthHeight)
 		{
@@ -1080,11 +1669,23 @@ void PreResolveFlowChildren(
 	{
 		if (Child->Width.IsFit() || Child->Height.IsFit())
 		{
+			const auto HasExplicitFitDimension = [](const FDesignSize& Size)
+			{
+				return Size.IsFit() && Size.Value > 0.0f;
+			};
+			const bool bLockExplicitFit = ShouldLockExplicitFitDimensionForFlow(Child);
+
 			const float ChildContentWidth = SizeEstimator::ComputeChildContentWidthHint(Node, Child, 0.0f);
 			const TSharedPtr<FDesignNode> EstimateChild = ResolveExpandedChildForConversion(Child, Context, false);
 			const FVector2D Estimate = SizeEstimator::EstimateNodeSize(EstimateChild, ChildContentWidth);
-			SizeEstimator::PromoteFitNodeDimension(Child, true, Estimate.X);
-			SizeEstimator::PromoteFitNodeDimension(Child, false, Estimate.Y);
+			if (!(bLockExplicitFit && HasExplicitFitDimension(Child->Width)))
+			{
+				SizeEstimator::PromoteFitNodeDimension(Child, true, Estimate.X);
+			}
+			if (!(bLockExplicitFit && HasExplicitFitDimension(Child->Height)))
+			{
+				SizeEstimator::PromoteFitNodeDimension(Child, false, Estimate.Y);
+			}
 			if (Estimate.X > 0 || Estimate.Y > 0)
 			{
 				UE_LOG(LogDesign2UMG, Log, TEXT("PreResolveFitContent: '%s' estimated=(%.0f,%.0f)"),

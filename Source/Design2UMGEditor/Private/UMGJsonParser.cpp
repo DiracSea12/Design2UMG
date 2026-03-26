@@ -198,12 +198,86 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 		}
 	}
 
+	// Parse Effect (v2.5)
+	const TSharedPtr<FJsonObject>* EffectObject;
+	if (JsonObject->TryGetObjectField(TEXT("Effect"), EffectObject))
+	{
+		double Val;
+		FString Str;
+		bool BoolValue = false;
+		if ((*EffectObject)->TryGetNumberField(TEXT("BlurStrength"), Val))
+		{
+			OutNode.Effect.BlurStrength = (float)Val;
+			OutNode.Effect.bHasBlurStrength = true;
+		}
+		if ((*EffectObject)->TryGetBoolField(TEXT("RetainRendering"), BoolValue))
+		{
+			OutNode.Effect.bRetainRendering = BoolValue;
+			OutNode.Effect.bHasRetainRendering = true;
+		}
+		if ((*EffectObject)->TryGetStringField(TEXT("EffectMaterial"), Str))
+			OutNode.Effect.EffectMaterial = Str;
+		if ((*EffectObject)->TryGetStringField(TEXT("TextureParameter"), Str))
+			OutNode.Effect.TextureParameter = Str;
+		if ((*EffectObject)->TryGetStringField(TEXT("EffectBlurUVStep"), Str))
+		{
+			TArray<FString> Parts;
+			Str.ParseIntoArray(Parts, TEXT(","));
+			if (Parts.Num() == 2)
+			{
+				OutNode.Effect.EffectBlurUVStep = FVector2D(
+					FCString::Atof(*Parts[0].TrimStartAndEnd()),
+					FCString::Atof(*Parts[1].TrimStartAndEnd()));
+				OutNode.Effect.bHasEffectBlurUVStep = true;
+			}
+		}
+		if ((*EffectObject)->TryGetStringField(TEXT("EffectColor"), Str))
+		{
+			OutNode.Effect.EffectColor.InitFromString(Str);
+			OutNode.Effect.bHasEffectColor = true;
+		}
+		if ((*EffectObject)->TryGetStringField(TEXT("EffectOffset"), Str))
+		{
+			TArray<FString> Parts;
+			Str.ParseIntoArray(Parts, TEXT(","));
+			if (Parts.Num() == 2)
+			{
+				OutNode.Effect.EffectOffset = FVector2D(
+					FCString::Atof(*Parts[0].TrimStartAndEnd()),
+					FCString::Atof(*Parts[1].TrimStartAndEnd()));
+				OutNode.Effect.bHasEffectOffset = true;
+			}
+		}
+		if ((*EffectObject)->TryGetNumberField(TEXT("Phase"), Val))
+		{
+			OutNode.Effect.Phase = (int32)Val;
+			OutNode.Effect.bHasRenderingPhase = true;
+		}
+		if ((*EffectObject)->TryGetNumberField(TEXT("PhaseCount"), Val))
+		{
+			OutNode.Effect.PhaseCount = FMath::Max(1, (int32)Val);
+			OutNode.Effect.bHasRenderingPhase = true;
+		}
+	}
+
+	// Parse WidgetState (v2.6)
+	const TSharedPtr<FJsonObject>* WidgetStateObject;
+	if (JsonObject->TryGetObjectField(TEXT("WidgetState"), WidgetStateObject))
+	{
+		double Val;
+		if ((*WidgetStateObject)->TryGetNumberField(TEXT("ActiveWidgetIndex"), Val))
+		{
+			OutNode.WidgetState.ActiveWidgetIndex = (int32)Val;
+			OutNode.WidgetState.bHasActiveWidgetIndex = true;
+		}
+	}
+
 	// Also capture flat properties placed directly on the node.
 	static const TSet<FString> StructuralFields = {
 		TEXT("Type"), TEXT("Name"), TEXT("Children"), TEXT("Slots"),
 		TEXT("Slot"), TEXT("CanvasSlot"), TEXT("Properties"),
 		TEXT("Id"), TEXT("Bounds"), TEXT("_meta"),  // v2.2鏂板
-		TEXT("TextStyle"), TEXT("Brush")            // v2.4鏂板
+		TEXT("TextStyle"), TEXT("Brush"), TEXT("Effect"), TEXT("WidgetState") // v2.4/v2.5/v2.6
 	};
 	for (const auto& Pair : JsonObject->Values)
 	{
@@ -230,6 +304,18 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 			FJsonSerializer::Serialize(Pair.Value->AsObject().ToSharedRef(), Writer);
 			OutNode.Properties.Add(Pair.Key, JsonStr);
 		}
+	}
+
+	int32 LegacyActiveWidgetIndex = 0;
+	if (!OutNode.WidgetState.bHasActiveWidgetIndex
+		&& OutNode.Properties.TryGetInt(TEXT("ActiveWidgetIndex"), LegacyActiveWidgetIndex))
+	{
+		OutNode.WidgetState.ActiveWidgetIndex = LegacyActiveWidgetIndex;
+		OutNode.WidgetState.bHasActiveWidgetIndex = true;
+	}
+	if (OutNode.WidgetState.bHasActiveWidgetIndex)
+	{
+		OutNode.Properties.Remove(TEXT("ActiveWidgetIndex"));
 	}
 
 	// 瑙ｆ瀽 Children锛堟爣鍑嗘牸寮忥級

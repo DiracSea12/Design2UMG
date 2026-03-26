@@ -97,9 +97,34 @@ FDesignFill ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)
 			auto P1 = (*Handles)[1]->AsObject();
 			if (P0 && P1)
 			{
-				float DX = GetNum(P1, TEXT("x")) - GetNum(P0, TEXT("x"));
-				float DY = GetNum(P1, TEXT("y")) - GetNum(P0, TEXT("y"));
+				const float CenterX = GetNum(P0, TEXT("x"));
+				const float CenterY = GetNum(P0, TEXT("y"));
+				const float DX = GetNum(P1, TEXT("x")) - CenterX;
+				const float DY = GetNum(P1, TEXT("y")) - CenterY;
 				Result.Gradient.Rotation = FMath::RadiansToDegrees(FMath::Atan2(DY, DX));
+
+				if (Result.Gradient.GradientType == EDesignGradientType::Radial)
+				{
+					Result.Gradient.CenterX = CenterX;
+					Result.Gradient.CenterY = CenterY;
+					Result.Gradient.bHasCenter = true;
+					Result.Gradient.SizeWidth = FMath::Max(KINDA_SMALL_NUMBER, 2.0f * FMath::Sqrt(DX * DX + DY * DY));
+					Result.Gradient.SizeHeight = Result.Gradient.SizeWidth;
+					Result.Gradient.bHasSize = true;
+
+					if (Handles->Num() >= 3)
+					{
+						auto P2 = (*Handles)[2]->AsObject();
+						if (P2)
+						{
+							const float DYHandleX = GetNum(P2, TEXT("x")) - CenterX;
+							const float DYHandleY = GetNum(P2, TEXT("y")) - CenterY;
+							Result.Gradient.SizeHeight = FMath::Max(
+								KINDA_SMALL_NUMBER,
+								2.0f * FMath::Sqrt(DYHandleX * DYHandleX + DYHandleY * DYHandleY));
+						}
+					}
+				}
 			}
 		}
 

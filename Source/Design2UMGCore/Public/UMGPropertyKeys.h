@@ -21,6 +21,8 @@ namespace UMGPropertyKeys
 	inline constexpr const TCHAR* CornerRadii = TEXT("CornerRadii");
 	inline constexpr const TCHAR* DesignFontSize = TEXT("DesignFontSize");
 	inline constexpr const TCHAR* DrawAs = TEXT("DrawAs");
+	inline constexpr const TCHAR* EffectBlurUVStep = TEXT("EffectBlurUVStep");
+	inline constexpr const TCHAR* EffectMaterial = TEXT("EffectMaterial");
 	inline constexpr const TCHAR* EntryHeight = TEXT("EntryHeight");
 	inline constexpr const TCHAR* EntryWidth = TEXT("EntryWidth");
 	inline constexpr const TCHAR* FillColor = TEXT("FillColor");
@@ -70,6 +72,10 @@ namespace UMGPropertyKeys
 	inline constexpr const TCHAR* PathFillColor = TEXT("PathFillColor");
 	inline constexpr const TCHAR* PathFillRule = TEXT("PathFillRule");
 	inline constexpr const TCHAR* PathGeometry = TEXT("PathGeometry");
+	inline constexpr const TCHAR* PathStrokeCap = TEXT("PathStrokeCap");
+	inline constexpr const TCHAR* PathStrokeColor = TEXT("PathStrokeColor");
+	inline constexpr const TCHAR* PathStrokeJoin = TEXT("PathStrokeJoin");
+	inline constexpr const TCHAR* PathStrokeThickness = TEXT("PathStrokeThickness");
 	inline constexpr const TCHAR* Percent = TEXT("Percent");
 	inline constexpr const TCHAR* Period = TEXT("Period");
 	inline constexpr const TCHAR* Phase = TEXT("Phase");
@@ -101,6 +107,7 @@ namespace UMGPropertyKeys
 	inline constexpr const TCHAR* TextAlignVertical = TEXT("TextAlignVertical");
 	inline constexpr const TCHAR* TexturePath = TEXT("TexturePath");
 	inline constexpr const TCHAR* ToolTipText = TEXT("ToolTipText");
+	inline constexpr const TCHAR* TextureParameter = TEXT("TextureParameter");
 	inline constexpr const TCHAR* TypefaceFontName = TEXT("TypefaceFontName");
 	inline constexpr const TCHAR* Underline = TEXT("Underline");
 	inline constexpr const TCHAR* UserSpecifiedScale = TEXT("UserSpecifiedScale");

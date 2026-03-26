@@ -20,6 +20,24 @@ namespace
 		return bInvalidWidth || bInvalidHeight;
 	}
 
+	bool IsHexColorLiteral(const FString& InColor)
+	{
+		if (!InColor.StartsWith(TEXT("#")) || (InColor.Len() != 7 && InColor.Len() != 9))
+		{
+			return false;
+		}
+
+		for (int32 Index = 1; Index < InColor.Len(); ++Index)
+		{
+			if (!FChar::IsHexDigit(InColor[Index]))
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
 	void EnsureValidDesignSize(UDesign2UMGSettings* Settings)
 	{
 		if (!Settings)
@@ -126,6 +144,48 @@ UDesign2UMGSettings* UDesign2UMGSettings::Get()
 	MigrateLegacySettingsSection(Settings);
 	EnsureValidDesignSize(Settings);
 	return Settings;
+}
+
+UDesign2UMGSettings::FResolvedPlaceholderHatchStyle UDesign2UMGSettings::ResolvePlaceholderHatchStyle() const
+{
+	FResolvedPlaceholderHatchStyle Style;
+	Style.BaseFillColor = CanonicalPlaceholderHatchBackgroundColor;
+	Style.RefFillColor = CanonicalPlaceholderRefHatchBackgroundColor;
+	Style.BaseStripeColor = CanonicalPlaceholderHatchStripeColor;
+	Style.RefStripeColor = CanonicalPlaceholderRefHatchStripeColor;
+
+	if (!bUseCustomPlaceholderHatchStyle)
+	{
+		return Style;
+	}
+
+	if (IsHexColorLiteral(PlaceholderHatchBackgroundColor))
+	{
+		Style.BaseFillColor = PlaceholderHatchBackgroundColor;
+	}
+	if (IsHexColorLiteral(PlaceholderRefHatchBackgroundColor))
+	{
+		Style.RefFillColor = PlaceholderRefHatchBackgroundColor;
+	}
+	if (IsHexColorLiteral(PlaceholderHatchStripeColor))
+	{
+		Style.BaseStripeColor = PlaceholderHatchStripeColor;
+	}
+	if (IsHexColorLiteral(PlaceholderRefHatchStripeColor))
+	{
+		Style.RefStripeColor = PlaceholderRefHatchStripeColor;
+	}
+
+	Style.StripeWidthPx = FMath::Clamp(PlaceholderHatchStripeWidth, 1, 32);
+	Style.StripeGapPx = FMath::Clamp(PlaceholderHatchStripeGap, 1, 64);
+	return Style;
+}
+
+float UDesign2UMGSettings::ResolveLuminosityFitOpacityCap() const
+{
+	return bUseCustomLuminosityFitOpacityCap
+		? FMath::Clamp(LuminosityFitOpacityCap, 0.0f, 1.0f)
+		: CanonicalLuminosityFitOpacityCap;
 }
 
 FIntPoint UDesign2UMGSettings::GetDesignSize() const

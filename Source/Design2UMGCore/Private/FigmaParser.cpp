@@ -147,6 +147,10 @@ static void CaptureRenderFallbackMetadata(const TSharedPtr<FJsonObject>& Obj, TM
 		{ TEXT("design2umgRenderFallbackScope"), TEXT("figma.renderFallbackScope") },
 		{ TEXT("design2umgRenderFallbackSource"), TEXT("figma.renderFallbackSource") },
 		{ TEXT("design2umgRenderFallbackReason"), TEXT("figma.renderFallbackReason") },
+		{ TEXT("design2umgRenderFallbackOffsetX"), TEXT("figma.renderFallbackOffsetX") },
+		{ TEXT("design2umgRenderFallbackOffsetY"), TEXT("figma.renderFallbackOffsetY") },
+		{ TEXT("design2umgRenderFallbackWidth"), TEXT("figma.renderFallbackWidth") },
+		{ TEXT("design2umgRenderFallbackHeight"), TEXT("figma.renderFallbackHeight") },
 	};
 
 	for (const auto& KeyPair : RenderFallbackKeys)
@@ -203,6 +207,160 @@ static void CaptureLayoutMetadataExtensions(const TSharedPtr<FJsonObject>& Obj, 
 	CaptureSharedMetadataExtensions(Obj, Extensions);
 }
 
+static void AppendUniqueFlowStartingPoint(TArray<FDesignFigmaFlowStartingPoint>& Points, const FDesignFigmaFlowStartingPoint& Candidate)
+{
+	if (Candidate.NodeId.IsEmpty() && Candidate.Name.IsEmpty())
+	{
+		return;
+	}
+
+	for (const FDesignFigmaFlowStartingPoint& Existing : Points)
+	{
+		if (Existing.NodeId == Candidate.NodeId && Existing.Name == Candidate.Name)
+		{
+			return;
+		}
+	}
+
+	Points.Add(Candidate);
+}
+
+static void AppendUniqueSkippedDesignerNode(
+	TArray<FDesignFigmaSkippedNodeReport>& Reports,
+	const FString& NodeId,
+	const FString& NodeName,
+	const FString& NodeType,
+	const FString& Reason)
+{
+	for (const FDesignFigmaSkippedNodeReport& Existing : Reports)
+	{
+		if (Existing.NodeId == NodeId
+			&& Existing.NodeType == NodeType
+			&& Existing.Reason == Reason)
+		{
+			return;
+		}
+	}
+
+	FDesignFigmaSkippedNodeReport Report;
+	Report.NodeId = NodeId;
+	Report.NodeName = NodeName;
+	Report.NodeType = NodeType;
+	Report.Reason = Reason;
+	Reports.Add(MoveTemp(Report));
+}
+
+static void ParsePrototypeTransitionData(
+	const TSharedPtr<FJsonObject>& TransitionObj,
+	FDesignFigmaPrototypeTransitionData& OutData)
+{
+	if (!TransitionObj.IsValid())
+	{
+		return;
+	}
+
+	SetStringFieldIfPresent(TransitionObj, TEXT("type"), OutData.Type);
+	SetStringFieldIfPresent(TransitionObj, TEXT("direction"), OutData.Direction);
+	SetFloatFieldIfPresent(TransitionObj, TEXT("duration"), OutData.Duration, OutData.bHasDuration);
+	SetJsonFieldIfPresent(TransitionObj, TEXT("easing"), OutData.EasingJson);
+	SetStringFieldIfPresent(GetObj(TransitionObj, TEXT("easing")), TEXT("type"), OutData.EasingType);
+	SetBoolFieldIfPresent(TransitionObj, TEXT("matchLayers"), OutData.bMatchLayers, OutData.bHasMatchLayers);
+}
+
+static void ParsePrototypeActions(const TSharedPtr<FJsonObject>& InteractionObj, TArray<FDesignFigmaPrototypeAction>& OutActions)
+{
+	const TArray<TSharedPtr<FJsonValue>>* Actions = GetArr(InteractionObj, TEXT("actions"));
+	if (!Actions)
+	{
+		return;
+	}
+
+	for (const TSharedPtr<FJsonValue>& ActionValue : *Actions)
+	{
+		const TSharedPtr<FJsonObject> ActionObj = ActionValue->AsObject();
+		if (!ActionObj.IsValid())
+		{
+			continue;
+		}
+
+		FDesignFigmaPrototypeAction Action;
+		SetStringFieldIfPresent(ActionObj, TEXT("type"), Action.Type);
+		SetStringFieldIfPresent(ActionObj, TEXT("destinationId"), Action.DestinationId);
+		SetStringFieldIfPresent(ActionObj, TEXT("navigation"), Action.Navigation);
+		SetStringFieldIfPresent(ActionObj, TEXT("transitionNodeID"), Action.TransitionNodeId);
+		SetJsonFieldIfPresent(ActionObj, TEXT("transition"), Action.TransitionJson);
+		ParsePrototypeTransitionData(GetObj(ActionObj, TEXT("transition")), Action.Transition);
+		OutActions.Add(MoveTemp(Action));
+	}
+}
+
+static void ParsePrototypeInteractions(const TSharedPtr<FJsonObject>& Obj, TArray<FDesignFigmaPrototypeInteraction>& OutInteractions)
+{
+	const TArray<TSharedPtr<FJsonValue>>* Interactions = GetArr(Obj, TEXT("interactions"));
+	if (!Interactions)
+	{
+		return;
+	}
+
+	for (const TSharedPtr<FJsonValue>& InteractionValue : *Interactions)
+	{
+		const TSharedPtr<FJsonObject> InteractionObj = InteractionValue->AsObject();
+		if (!InteractionObj.IsValid())
+		{
+			continue;
+		}
+
+		FDesignFigmaPrototypeInteraction Interaction;
+		Interaction.RawJson = JsonValueToCompactString(InteractionValue);
+		SetJsonFieldIfPresent(InteractionObj, TEXT("trigger"), Interaction.TriggerJson);
+		SetStringFieldIfPresent(GetObj(InteractionObj, TEXT("trigger")), TEXT("type"), Interaction.TriggerType);
+		ParsePrototypeActions(InteractionObj, Interaction.Actions);
+		OutInteractions.Add(MoveTemp(Interaction));
+	}
+}
+
+static void ParseFlowStartingPoints(const TSharedPtr<FJsonObject>& Obj, TArray<FDesignFigmaFlowStartingPoint>& OutPoints)
+{
+	const TArray<TSharedPtr<FJsonValue>>* FlowStartingPoints = GetArr(Obj, TEXT("flowStartingPoints"));
+	if (!FlowStartingPoints)
+	{
+		return;
+	}
+
+	for (const TSharedPtr<FJsonValue>& FlowValue : *FlowStartingPoints)
+	{
+		const TSharedPtr<FJsonObject> FlowObj = FlowValue->AsObject();
+		if (!FlowObj.IsValid())
+		{
+			continue;
+		}
+
+		FDesignFigmaFlowStartingPoint Flow;
+		SetStringFieldIfPresent(FlowObj, TEXT("nodeId"), Flow.NodeId);
+		SetStringFieldIfPresent(FlowObj, TEXT("name"), Flow.Name);
+		AppendUniqueFlowStartingPoint(OutPoints, Flow);
+	}
+}
+
+static void ParsePrototypeNodeData(const TSharedPtr<FJsonObject>& NodeObj, FDesignFigmaPrototypeNodeData& OutData)
+{
+	SetStringFieldIfPresent(NodeObj, TEXT("overflowDirection"), OutData.OverflowDirection);
+	SetStringFieldIfPresent(NodeObj, TEXT("transitionNodeID"), OutData.TransitionNodeId);
+	ParsePrototypeTransitionData(GetObj(NodeObj, TEXT("transition")), OutData.Transition);
+	SetFloatFieldIfPresent(NodeObj, TEXT("transitionDuration"), OutData.Transition.Duration, OutData.Transition.bHasDuration);
+	SetJsonFieldIfPresent(NodeObj, TEXT("transitionEasing"), OutData.Transition.EasingJson);
+	SetStringFieldIfPresent(GetObj(NodeObj, TEXT("transitionEasing")), TEXT("type"), OutData.Transition.EasingType);
+	ParsePrototypeInteractions(NodeObj, OutData.Interactions);
+	ParseFlowStartingPoints(NodeObj, OutData.FlowStartingPoints);
+}
+
+static void MergePrototypeDocumentData(const TSharedPtr<FJsonObject>& SourceObj, FDesignFigmaDocumentData& OutData)
+{
+	SetStringFieldIfPresent(SourceObj, TEXT("prototypeStartNodeID"), OutData.PrototypeStartNodeId);
+	SetJsonFieldIfPresent(SourceObj, TEXT("prototypeDevice"), OutData.PrototypeDeviceJson);
+	ParseFlowStartingPoints(SourceObj, OutData.FlowStartingPoints);
+}
+
 static TSharedPtr<FJsonObject> ParseJsonString(const FString& Json)
 {
 	TSharedPtr<FJsonObject> Root;
@@ -211,27 +369,42 @@ static TSharedPtr<FJsonObject> ParseJsonString(const FString& Json)
 	return Root;
 }
 
-static bool IsVisibleSolidBlackFill(const TSharedPtr<FJsonObject>& NodeObj)
+static bool HasOpaqueVisibleSolidFill(const TSharedPtr<FJsonObject>& NodeObj)
 {
 	const auto* Fills = GetArr(NodeObj, TEXT("fills"));
 	if (!Fills || Fills->Num() == 0)
 		return false;
 
-	const TSharedPtr<FJsonObject> FillObj = (*Fills)[0]->AsObject();
-	if (!FillObj.IsValid() || !GetBool(FillObj, TEXT("visible"), true))
-		return false;
-	if (GetStr(FillObj, TEXT("type")) != TEXT("SOLID"))
-		return false;
+	int32 VisibleFillCount = 0;
+	TSharedPtr<FJsonObject> VisibleSolidFill;
+	for (const TSharedPtr<FJsonValue>& FillValue : *Fills)
+	{
+		const TSharedPtr<FJsonObject> FillObj = FillValue->AsObject();
+		if (!FillObj.IsValid() || !GetBool(FillObj, TEXT("visible"), true))
+		{
+			continue;
+		}
 
-	const TSharedPtr<FJsonObject> ColorObj = GetObj(FillObj, TEXT("color"));
+		++VisibleFillCount;
+		if (VisibleFillCount > 1)
+		{
+			return false;
+		}
+
+		VisibleSolidFill = FillObj;
+	}
+
+	if (!VisibleSolidFill.IsValid() || GetStr(VisibleSolidFill, TEXT("type")) != TEXT("SOLID"))
+	{
+		return false;
+	}
+
+	const TSharedPtr<FJsonObject> ColorObj = GetObj(VisibleSolidFill, TEXT("color"));
 	if (!ColorObj.IsValid())
 		return false;
 
-	const double R = GetNum(ColorObj, TEXT("r"), 1.0);
-	const double G = GetNum(ColorObj, TEXT("g"), 1.0);
-	const double B = GetNum(ColorObj, TEXT("b"), 1.0);
 	const double A = GetNum(ColorObj, TEXT("a"), 1.0);
-	return R <= 0.01 && G <= 0.01 && B <= 0.01 && A >= 0.99;
+	return A >= 0.99;
 }
 
 static bool IsWrapLayout(const TSharedPtr<FJsonObject>& NodeObj)
@@ -306,6 +479,117 @@ static bool HasSameBoundsAsParent(const TSharedPtr<FJsonObject>& NodeObj, const 
 		FMath::IsNearlyEqual(CY, PY, 0.5) &&
 		FMath::IsNearlyEqual(CW, PW, 0.5) &&
 		FMath::IsNearlyEqual(CH, PH, 0.5);
+}
+
+static bool HasRenderableGeometryWithoutChildren(const TSharedPtr<FJsonObject>& NodeObj)
+{
+	const TArray<TSharedPtr<FJsonValue>>* Children = GetArr(NodeObj, TEXT("children"));
+	if (Children && Children->Num() > 0)
+	{
+		return false;
+	}
+
+	const FString FigmaType = GetStr(NodeObj, TEXT("type"));
+	return FigmaType == TEXT("RECTANGLE")
+		|| FigmaType == TEXT("ELLIPSE")
+		|| FigmaType == TEXT("POLYGON")
+		|| FigmaType == TEXT("STAR")
+		|| FigmaType == TEXT("VECTOR")
+		|| FigmaType == TEXT("BOOLEAN_OPERATION");
+}
+
+static bool HasVisibleStroke(const TSharedPtr<FJsonObject>& NodeObj)
+{
+	const TArray<TSharedPtr<FJsonValue>>* Strokes = GetArr(NodeObj, TEXT("strokes"));
+	if (!Strokes || Strokes->Num() == 0)
+	{
+		return false;
+	}
+
+	for (const TSharedPtr<FJsonValue>& StrokeValue : *Strokes)
+	{
+		const TSharedPtr<FJsonObject> StrokeObj = StrokeValue->AsObject();
+		if (StrokeObj.IsValid() && GetBool(StrokeObj, TEXT("visible"), true))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+static bool HasVisibleEffect(const TSharedPtr<FJsonObject>& NodeObj)
+{
+	const TArray<TSharedPtr<FJsonValue>>* Effects = GetArr(NodeObj, TEXT("effects"));
+	if (!Effects || Effects->Num() == 0)
+	{
+		return false;
+	}
+
+	for (const TSharedPtr<FJsonValue>& EffectValue : *Effects)
+	{
+		const TSharedPtr<FJsonObject> EffectObj = EffectValue->AsObject();
+		if (EffectObj.IsValid() && GetBool(EffectObj, TEXT("visible"), true))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+static bool HasVisibleStrokesOrEffects(const TSharedPtr<FJsonObject>& NodeObj)
+{
+	return HasVisibleStroke(NodeObj) || HasVisibleEffect(NodeObj);
+}
+
+static int32 FindChildIndexById(const TSharedPtr<FJsonObject>& ParentObj, const FString& ChildId)
+{
+	const TArray<TSharedPtr<FJsonValue>>* Children = GetArr(ParentObj, TEXT("children"));
+	if (!Children)
+	{
+		return INDEX_NONE;
+	}
+
+	for (int32 Index = 0; Index < Children->Num(); ++Index)
+	{
+		const TSharedPtr<FJsonObject> ChildObj = (*Children)[Index]->AsObject();
+		if (ChildObj.IsValid() && GetStr(ChildObj, TEXT("id")) == ChildId)
+		{
+			return Index;
+		}
+	}
+
+	return INDEX_NONE;
+}
+
+static bool IsLikelyImplicitMaskLeaf(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj)
+{
+	if (!NodeObj.IsValid() || !ParentObj.IsValid())
+	{
+		return false;
+	}
+
+	if (GetStr(ParentObj, TEXT("type")) != TEXT("GROUP"))
+	{
+		return false;
+	}
+
+	if (!HasRenderableGeometryWithoutChildren(NodeObj)
+		|| HasVisibleStrokesOrEffects(NodeObj)
+		|| !HasOpaqueVisibleSolidFill(NodeObj)
+		|| !HasSameBoundsAsParent(NodeObj, ParentObj))
+	{
+		return false;
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* Children = GetArr(ParentObj, TEXT("children"));
+	if (!Children || Children->Num() <= 1)
+	{
+		return false;
+	}
+
+	return FindChildIndexById(ParentObj, GetStr(NodeObj, TEXT("id"))) == 0;
 }
 
 static bool HasNearlyIdenticalBoundingBox(const TSharedPtr<FJsonObject>& A, const TSharedPtr<FJsonObject>& B)
@@ -462,6 +746,7 @@ TArray<FDesignEffect> ParseEffects(const TArray<TSharedPtr<FJsonValue>>& Effects
 void ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode);
 void ParsePosition(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj, FDesignNode& OutNode, bool bParentHasAutoLayout);
 TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj);
+TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj, TArray<FDesignFigmaSkippedNodeReport>* SkippedDesignerNodes);
 void CollectImageRefsRecursive(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSet<FString>& OutRefs);
 void ApplyImageUrlsRecursive(TArray<TSharedPtr<FDesignNode>>& Nodes, const TMap<FString, FString>& Map);
 
@@ -577,18 +862,47 @@ static bool TryReadBounds(const TSharedPtr<FJsonObject>& BoundsObj, FNodeBounds&
 	return OutBounds.W > 0.0f && OutBounds.H > 0.0f;
 }
 
-static bool HasVisibleStroke(const TSharedPtr<FJsonObject>& NodeObj)
+static void CaptureBoundsDeltaMetadata(const TSharedPtr<FJsonObject>& Obj, TMap<FString, FString>& Extensions)
 {
-	const TArray<TSharedPtr<FJsonValue>>* Strokes = GetArr(NodeObj, TEXT("strokes"));
-	if (!Strokes || Strokes->Num() == 0)
+	FNodeBounds LayoutBounds;
+	FNodeBounds RenderBounds;
+	if (!TryReadBounds(GetObj(Obj, TEXT("absoluteBoundingBox")), LayoutBounds)
+		|| !TryReadBounds(GetObj(Obj, TEXT("absoluteRenderBounds")), RenderBounds))
+	{
+		return;
+	}
+
+	const auto AddDeltaIfNonZero = [&Extensions](const TCHAR* Key, const float Delta)
+	{
+		if (!FMath::IsNearlyZero(Delta, 0.001f))
+		{
+			Extensions.Add(Key, FString::SanitizeFloat(Delta));
+		}
+	};
+
+	AddDeltaIfNonZero(TEXT("figma.renderBoundsDeltaX"), RenderBounds.X - LayoutBounds.X);
+	AddDeltaIfNonZero(TEXT("figma.renderBoundsDeltaY"), RenderBounds.Y - LayoutBounds.Y);
+	AddDeltaIfNonZero(TEXT("figma.renderBoundsDeltaW"), RenderBounds.W - LayoutBounds.W);
+	AddDeltaIfNonZero(TEXT("figma.renderBoundsDeltaH"), RenderBounds.H - LayoutBounds.H);
+}
+
+static bool HasVisibleForegroundBlurEffect(const TSharedPtr<FJsonObject>& NodeObj)
+{
+	const TArray<TSharedPtr<FJsonValue>>* Effects = GetArr(NodeObj, TEXT("effects"));
+	if (!Effects)
 	{
 		return false;
 	}
 
-	for (const TSharedPtr<FJsonValue>& StrokeVal : *Strokes)
+	for (const TSharedPtr<FJsonValue>& EffectValue : *Effects)
 	{
-		const TSharedPtr<FJsonObject> StrokeObj = StrokeVal->AsObject();
-		if (StrokeObj.IsValid() && GetBool(StrokeObj, TEXT("visible"), true))
+		const TSharedPtr<FJsonObject> EffectObj = EffectValue.IsValid() ? EffectValue->AsObject() : nullptr;
+		if (!EffectObj.IsValid() || !GetBool(EffectObj, TEXT("visible"), true))
+		{
+			continue;
+		}
+
+		if (GetStr(EffectObj, TEXT("type")) == TEXT("LAYER_BLUR") && GetNum(EffectObj, TEXT("radius")) > 0.0)
 		{
 			return true;
 		}
@@ -741,12 +1055,46 @@ static bool HasFillImageUsingShrunkenRenderBounds(
 	return false;
 }
 
+static bool IsContainerLikeNodeTypeForLayoutBounds(const TSharedPtr<FJsonObject>& NodeObj)
+{
+	if (!NodeObj.IsValid())
+	{
+		return false;
+	}
+
+	const FString NodeType = GetStr(NodeObj, TEXT("type"));
+	return NodeType == TEXT("FRAME")
+		|| NodeType == TEXT("GROUP")
+		|| NodeType == TEXT("TRANSFORM_GROUP")
+		|| NodeType == TEXT("INSTANCE")
+		|| NodeType == TEXT("COMPONENT")
+		|| NodeType == TEXT("COMPONENT_SET")
+		|| NodeType == TEXT("SECTION");
+}
+
+static bool ShouldSkipFigmaNodeType(const FString& FigmaType)
+{
+	return FigmaType == TEXT("SLICE")
+		|| FigmaType == TEXT("TABLE")
+		|| FigmaType == TEXT("TABLE_CELL")
+		|| FigmaType == TEXT("STICKY")
+		|| FigmaType == TEXT("SHAPE_WITH_TEXT")
+		|| FigmaType == TEXT("CONNECTOR")
+		|| FigmaType == TEXT("WASHI_TAPE");
+}
+
 static bool ShouldPreferLayoutBounds(
 	const TSharedPtr<FJsonObject>& NodeObj,
 	const TSharedPtr<FJsonObject>& ParentObj,
 	const FNodeBounds& RenderBounds,
 	const FNodeBounds& LayoutBounds)
 {
+	const bool bRenderBoundsExpandLayoutBounds =
+		RenderBounds.X + 0.5f < LayoutBounds.X
+		|| RenderBounds.Y + 0.5f < LayoutBounds.Y
+		|| RenderBounds.X + RenderBounds.W > LayoutBounds.X + LayoutBounds.W + 0.5f
+		|| RenderBounds.Y + RenderBounds.H > LayoutBounds.Y + LayoutBounds.H + 0.5f;
+
 	if (HasImageCropFill(NodeObj))
 	{
 		return true;
@@ -757,20 +1105,55 @@ static bool ShouldPreferLayoutBounds(
 		return true;
 	}
 
+	if (bRenderBoundsExpandLayoutBounds && HasVisibleForegroundBlurEffect(NodeObj))
+	{
+		// Foreground blur is not faithfully reproduced by the shared UMG path yet.
+		// Keep geometry in layout space so the ignored blur does not inflate the node.
+		return true;
+	}
+
 	const TArray<TSharedPtr<FJsonValue>>* Children = GetArr(NodeObj, TEXT("children"));
 	const bool bHasChildren = Children && Children->Num() > 0;
 	if (bHasChildren)
 	{
-		const bool bRenderBoundsExpandLayoutBounds =
-			RenderBounds.X + 0.5f < LayoutBounds.X
-			|| RenderBounds.Y + 0.5f < LayoutBounds.Y
-			|| RenderBounds.X + RenderBounds.W > LayoutBounds.X + LayoutBounds.W + 0.5f
-			|| RenderBounds.Y + RenderBounds.H > LayoutBounds.Y + LayoutBounds.H + 0.5f;
 		if (bRenderBoundsExpandLayoutBounds)
 		{
 			// Child coordinates are defined in layout space; effect/stroke expansion must not shift the container origin.
 			return true;
 		}
+	}
+
+	const bool bRenderBoundsShrinkLayoutBounds =
+		RenderBounds.W + 0.5f < LayoutBounds.W || RenderBounds.H + 0.5f < LayoutBounds.H;
+	const auto ShouldKeepShrunkenRenderBounds = [&]() -> bool
+	{
+		if (!ParentObj || HasAutoLayout(ParentObj))
+		{
+			return false;
+		}
+
+		FNodeBounds ParentLayoutBounds;
+		if (!TryReadBounds(GetObj(ParentObj, TEXT("absoluteBoundingBox")), ParentLayoutBounds))
+		{
+			return false;
+		}
+
+		const auto FitsWithin = [](const FNodeBounds& Inner, const FNodeBounds& Outer)
+		{
+			return Inner.X >= Outer.X - 0.5f
+				&& Inner.Y >= Outer.Y - 0.5f
+				&& Inner.X + Inner.W <= Outer.X + Outer.W + 0.5f
+				&& Inner.Y + Inner.H <= Outer.Y + Outer.H + 0.5f;
+		};
+
+		const bool bLayoutEscapesParent = !FitsWithin(LayoutBounds, ParentLayoutBounds);
+		const bool bRenderFitsParent = FitsWithin(RenderBounds, ParentLayoutBounds);
+		return bLayoutEscapesParent && bRenderFitsParent;
+	};
+
+	if (IsContainerLikeNodeTypeForLayoutBounds(NodeObj) && bRenderBoundsShrinkLayoutBounds)
+	{
+		return !ShouldKeepShrunkenRenderBounds();
 	}
 
 	const bool bHasLayoutContainer = HasAutoLayout(NodeObj);
@@ -795,72 +1178,13 @@ static bool ShouldPreferLayoutBounds(
 			return false;
 		}();
 
-		const bool bHasVisibleStroke = [&]()
-		{
-			const TArray<TSharedPtr<FJsonValue>>* Strokes = GetArr(NodeObj, TEXT("strokes"));
-			if (!Strokes)
-			{
-				return false;
-			}
-
-			for (const TSharedPtr<FJsonValue>& StrokeVal : *Strokes)
-			{
-				const TSharedPtr<FJsonObject> StrokeObj = StrokeVal->AsObject();
-				if (StrokeObj.IsValid() && GetBool(StrokeObj, TEXT("visible"), true))
-				{
-					return true;
-				}
-			}
-			return false;
-		}();
-
-		const bool bHasVisibleEffect = [&]()
-		{
-			const TArray<TSharedPtr<FJsonValue>>* Effects = GetArr(NodeObj, TEXT("effects"));
-			if (!Effects)
-			{
-				return false;
-			}
-
-			for (const TSharedPtr<FJsonValue>& EffectVal : *Effects)
-			{
-				const TSharedPtr<FJsonObject> EffectObj = EffectVal->AsObject();
-				if (EffectObj.IsValid() && GetBool(EffectObj, TEXT("visible"), true))
-				{
-					return true;
-				}
-			}
-			return false;
-		}();
+		const bool bHasVisibleStroke = HasVisibleStroke(NodeObj);
+		const bool bHasVisibleEffect = HasVisibleEffect(NodeObj);
 
 		const bool bIsLayoutOnlyContainer = !bHasVisibleFill && !bHasVisibleStroke && !bHasVisibleEffect;
-		const bool bRenderBoundsShrinkLayoutBounds =
-			RenderBounds.W + 0.5f < LayoutBounds.W || RenderBounds.H + 0.5f < LayoutBounds.H;
 		if (bIsLayoutOnlyContainer && bRenderBoundsShrinkLayoutBounds)
 		{
-			if (ParentObj && !HasAutoLayout(ParentObj))
-			{
-				FNodeBounds ParentLayoutBounds;
-				if (TryReadBounds(GetObj(ParentObj, TEXT("absoluteBoundingBox")), ParentLayoutBounds))
-				{
-					const auto FitsWithin = [](const FNodeBounds& Inner, const FNodeBounds& Outer)
-					{
-						return Inner.X >= Outer.X - 0.5f
-							&& Inner.Y >= Outer.Y - 0.5f
-							&& Inner.X + Inner.W <= Outer.X + Outer.W + 0.5f
-							&& Inner.Y + Inner.H <= Outer.Y + Outer.H + 0.5f;
-					};
-
-					const bool bLayoutEscapesParent = !FitsWithin(LayoutBounds, ParentLayoutBounds);
-					const bool bRenderFitsParent = FitsWithin(RenderBounds, ParentLayoutBounds);
-					if (bLayoutEscapesParent && bRenderFitsParent)
-					{
-						return false;
-					}
-				}
-			}
-
-			return true;
+			return !ShouldKeepShrunkenRenderBounds();
 		}
 	}
 
@@ -898,7 +1222,7 @@ static bool TryGetVisualBounds(
 
 	OutBounds = LayoutBounds;
 
-	// Local export may omit absoluteRenderBounds; expand bbox by stroke align as fallback.
+	// If render bounds are unavailable, expand layout bounds by stroke alignment.
 	float ExpandLeft = 0.0f;
 	float ExpandRight = 0.0f;
 	float ExpandTop = 0.0f;
@@ -945,7 +1269,7 @@ EDesignNodeType MapNodeType(const FString& FigmaType)
 		return EDesignNodeType::Frame;
 	if (FigmaType == TEXT("INSTANCE"))
 		return EDesignNodeType::Frame;  // Figma API已展开INSTANCE children，直接当Frame处理
-	if (FigmaType == TEXT("GROUP"))
+	if (FigmaType == TEXT("GROUP") || FigmaType == TEXT("TRANSFORM_GROUP"))
 		return EDesignNodeType::Group;
 	if (FigmaType == TEXT("RECTANGLE"))
 		return EDesignNodeType::Rectangle;
@@ -957,7 +1281,7 @@ EDesignNodeType MapNodeType(const FString& FigmaType)
 		return EDesignNodeType::Polygon;
 	if (FigmaType == TEXT("VECTOR") || FigmaType == TEXT("BOOLEAN_OPERATION"))
 		return EDesignNodeType::Path;
-	if (FigmaType == TEXT("TEXT"))
+	if (FigmaType == TEXT("TEXT") || FigmaType == TEXT("TEXT_PATH"))
 		return EDesignNodeType::Text;
 	return EDesignNodeType::Unknown;
 }
@@ -1193,12 +1517,36 @@ void ParsePosition(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJso
 // ParseNode (recursive)
 // ---------------------------------------------------------------------------
 
-TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj)
+TSharedPtr<FDesignNode> ParseNode(
+	const TSharedPtr<FJsonObject>& NodeObj,
+	const TSharedPtr<FJsonObject>& ParentObj,
+	TArray<FDesignFigmaSkippedNodeReport>* SkippedDesignerNodes)
 {
 	if (!NodeObj) return nullptr;
 
 	FString FigmaType = GetStr(NodeObj, TEXT("type"));
 	if (FigmaType.IsEmpty()) return nullptr;
+
+	if (ShouldSkipFigmaNodeType(FigmaType))
+	{
+		if (SkippedDesignerNodes)
+		{
+			const FString Reason =
+				(FigmaType == TEXT("SLICE"))
+				? TEXT("design_export_only")
+				: TEXT("figjam_only");
+			AppendUniqueSkippedDesignerNode(
+				*SkippedDesignerNodes,
+				GetStr(NodeObj, TEXT("id")),
+				GetStr(NodeObj, TEXT("name")),
+				FigmaType,
+				Reason);
+		}
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("FigmaParser: skip non-runtime node type '%s' (%s)"),
+			*FigmaType,
+			*GetStr(NodeObj, TEXT("name")));
+		return nullptr;
+	}
 
 	// Figma mask 节点是裁剪几何，不应直接生成可视控件。
 	const bool bIsMaskNode = GetBool(NodeObj, TEXT("isMask"), false);
@@ -1207,19 +1555,11 @@ TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const 
 		return nullptr;
 	}
 
-	// 本地导出数据可能丢失 isMask 字段：对典型“黑色同尺寸遮罩矩形”做保守兜底。
-	if (ParentObj &&
-		FigmaType == TEXT("RECTANGLE") &&
-		GetStr(NodeObj, TEXT("name")) == TEXT("Rectangle") &&
-		IsVisibleSolidBlackFill(NodeObj) &&
-		HasSameBoundsAsParent(NodeObj, ParentObj))
+	// Infer only the narrow, source-agnostic case: the first full-bounds leaf
+	// shape inside a GROUP, with no strokes/effects and a single opaque solid fill.
+	if (IsLikelyImplicitMaskLeaf(NodeObj, ParentObj))
 	{
-		const bool bParentClips = GetBool(ParentObj, TEXT("clipsContent"), false);
-		const bool bParentGroup = (GetStr(ParentObj, TEXT("type")) == TEXT("GROUP"));
-		if (bParentClips || bParentGroup)
-		{
-			return nullptr;
-		}
+		return nullptr;
 	}
 
 	auto Node = MakeShared<FDesignNode>();
@@ -1276,6 +1616,7 @@ TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const 
 		const FString ComponentId = GetStr(NodeObj, TEXT("componentId"));
 		if (!ComponentId.IsEmpty())
 		{
+			Node->Ref = ComponentId;
 			Node->FigmaInstance.ComponentId = ComponentId;
 			Node->Metadata.Add(TEXT("instanceComponentId"), ComponentId);
 		}
@@ -1297,6 +1638,7 @@ TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const 
 
 	// Layout (for containers)
 	ParseLayout(NodeObj, *Node);
+	ParsePrototypeNodeData(NodeObj, Node->FigmaPrototype);
 
 	// Fills
 	const auto* FillsArr = GetArr(NodeObj, TEXT("fills"));
@@ -1311,6 +1653,7 @@ TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const 
 		}
 	}
 	CaptureRenderFallbackMetadata(NodeObj, Node->Metadata);
+	CaptureBoundsDeltaMetadata(NodeObj, Node->Metadata);
 
 	// Stroke
 	Node->Stroke = ParseStroke(NodeObj);
@@ -1349,7 +1692,7 @@ TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const 
 				{
 					continue;
 				}
-				if (auto ChildNode = ParseNode(ChildObj, NodeObj))
+				if (auto ChildNode = ParseNode(ChildObj, NodeObj, SkippedDesignerNodes))
 					Node->Children.Add(ChildNode);
 			}
 		}
@@ -1358,6 +1701,43 @@ TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const 
 	ApplyFigmaSemanticHints(NodeObj, *Node);
 
 	return Node;
+}
+
+TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj)
+{
+	return ParseNode(NodeObj, ParentObj, nullptr);
+}
+
+static FString SerializeSkippedDesignerNodes(const TArray<FDesignFigmaSkippedNodeReport>& Reports)
+{
+	TArray<TSharedPtr<FJsonValue>> Entries;
+	Entries.Reserve(Reports.Num());
+	for (const FDesignFigmaSkippedNodeReport& Report : Reports)
+	{
+		TSharedRef<FJsonObject> Entry = MakeShared<FJsonObject>();
+		if (!Report.NodeId.IsEmpty())
+		{
+			Entry->SetStringField(TEXT("id"), Report.NodeId);
+		}
+		if (!Report.NodeName.IsEmpty())
+		{
+			Entry->SetStringField(TEXT("name"), Report.NodeName);
+		}
+		if (!Report.NodeType.IsEmpty())
+		{
+			Entry->SetStringField(TEXT("type"), Report.NodeType);
+		}
+		if (!Report.Reason.IsEmpty())
+		{
+			Entry->SetStringField(TEXT("reason"), Report.Reason);
+		}
+		Entries.Add(MakeShared<FJsonValueObject>(Entry));
+	}
+
+	FString Json;
+	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Json);
+	FJsonSerializer::Serialize(Entries, Writer);
+	return Json;
 }
 
 // ---------------------------------------------------------------------------
@@ -1412,6 +1792,8 @@ bool FFigmaParser::ParseDocument(const FString& FigmaJson, FDesignDocument& OutD
 	AddJsonExtensionIfPresent(Root, OutDocument.Metadata, TEXT("componentSets"), TEXT("componentSets"));
 	SetJsonFieldIfPresent(Root, TEXT("components"), OutDocument.FigmaDocument.ComponentsJson);
 	SetJsonFieldIfPresent(Root, TEXT("componentSets"), OutDocument.FigmaDocument.ComponentSetsJson);
+	MergePrototypeDocumentData(DocObj, OutDocument.FigmaDocument);
+	MergePrototypeDocumentData(Root, OutDocument.FigmaDocument);
 
 	// Standard file payload: DOCUMENT -> pages -> frames.
 	if (DocType == TEXT("DOCUMENT"))
@@ -1423,7 +1805,7 @@ bool FFigmaParser::ParseDocument(const FString& FigmaJson, FDesignDocument& OutD
 			return true;
 		}
 
-		for (const auto& PageVal : *Pages)
+	for (const auto& PageVal : *Pages)
 		{
 			auto PageObj = PageVal->AsObject();
 			if (!PageObj) continue;
@@ -1434,7 +1816,7 @@ bool FFigmaParser::ParseDocument(const FString& FigmaJson, FDesignDocument& OutD
 			for (const auto& FrameVal : *Frames)
 			{
 				auto FrameObj = FrameVal->AsObject();
-				if (auto Node = ParseNode(FrameObj, nullptr))
+				if (auto Node = ParseNode(FrameObj, nullptr, &OutDocument.FigmaDiagnostics.SkippedDesignerNodes))
 					OutDocument.Children.Add(Node);
 			}
 		}
@@ -1448,15 +1830,25 @@ bool FFigmaParser::ParseDocument(const FString& FigmaJson, FDesignDocument& OutD
 			for (const auto& FrameVal : *Frames)
 			{
 				auto FrameObj = FrameVal->AsObject();
-				if (auto Node = ParseNode(FrameObj, nullptr))
+				if (auto Node = ParseNode(FrameObj, nullptr, &OutDocument.FigmaDiagnostics.SkippedDesignerNodes))
 					OutDocument.Children.Add(Node);
 			}
 		}
 	}
 	else
 	{
-		if (auto Node = ParseNode(DocObj, nullptr))
+		if (auto Node = ParseNode(DocObj, nullptr, &OutDocument.FigmaDiagnostics.SkippedDesignerNodes))
 			OutDocument.Children.Add(Node);
+	}
+
+	if (OutDocument.FigmaDiagnostics.SkippedDesignerNodes.Num() > 0)
+	{
+		OutDocument.Metadata.Add(
+			TEXT("figma.skippedDesignerNodeCount"),
+			FString::FromInt(OutDocument.FigmaDiagnostics.SkippedDesignerNodes.Num()));
+		OutDocument.Metadata.Add(
+			TEXT("figma.skippedDesignerNodes"),
+			SerializeSkippedDesignerNodes(OutDocument.FigmaDiagnostics.SkippedDesignerNodes));
 	}
 
 	UE_LOG(LogDesign2UMG, Log, TEXT("FigmaParser: Parsed %d top-level frames"), OutDocument.Children.Num());
