@@ -8,7 +8,6 @@ import shutil
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.parse
 import urllib.request
@@ -19,6 +18,7 @@ from PIL import Image, ImageChops, ImageFilter, ImageStat
 
 
 STABLE_VISUAL_FILTER = "closing_max3_min3"
+RUNTIME_PROJECT_ENV_VAR = "DESIGN2UMG_RUNTIME_PROJECT"
 
 
 def parse_numeric_dimension(value):
@@ -210,18 +210,16 @@ def parse_args():
     parser.add_argument("mode", choices=["pen", "local-figma", "figma-source", "asset"], help="Verification mode")
     parser.add_argument("--source", required=True, help="Source file path or Widget Blueprint asset path")
     parser.add_argument("--node", default="", help="Target frame/node id")
-    parser.add_argument("--reference-provider", choices=["png", "figma", "pencil", "pen-sim"], required=True)
+    parser.add_argument("--reference-provider", choices=["png", "figma", "pencil"], required=True)
     parser.add_argument("--reference", default="", help="Existing reference png path when provider=png")
     parser.add_argument("--figma-file", default="", help="Figma file key or URL")
     parser.add_argument("--figma-node", default="", help="Figma node id")
-    parser.add_argument("--figma-token", default="", help="Figma personal access token")
+    parser.add_argument("--figma-token", default="", help="Figma personal access token from a secure source")
     parser.add_argument("--mcp-server", default="", help="Override Pencil MCP server binary path")
-    parser.add_argument("--pencil-app", default="", help="Override Pencil app name (default: vscode)")
+    parser.add_argument("--pencil-app", default="", help="Override Pencil app name. Leave empty for auto-detect from ~/.pencil/apps and running IDE processes.")
     parser.add_argument("--output-dir", default="", help="Directory for render, diff and reports")
     parser.add_argument("--game-output", default="", help="UE asset output path, default is a unique automation path")
-    parser.add_argument("--project", default="", help="Project path. Leave empty to auto-build a temporary HostProject from the engine plugin source.")
-    parser.add_argument("--build-root", default="", help="Temporary BuildPlugin output directory. Leave empty to use the system temp directory.")
-    parser.add_argument("--keep-build-root", action="store_true", help="Keep the generated BuildPlugin workspace for debugging.")
+    parser.add_argument("--project", default="", help="Runtime project path. HostProject fallback has been removed. If omitted, the script tries DESIGN2UMG_RUNTIME_PROJECT and then infers a .uproject from the source path.")
     parser.add_argument("--editor", default=r"G:\UE5\UnrealEngine\Engine\Binaries\Win64\UnrealEditor.exe", help="UnrealEditor.exe path")
     parser.add_argument("--pixel-tolerance", type=int, default=6, help="Per-pixel max-channel tolerance")
     parser.add_argument("--changed-ratio-threshold", type=float, default=0.01, help="Max changed pixel ratio to pass")
@@ -239,69 +237,105 @@ def default_output_dir() -> Path:
     return plugin_root() / "Saved" / "Design2UMG" / "Automation" / f"{stamp}_{os.getpid()}"
 
 
-def default_build_root() -> Path:
-    return Path(tempfile.gettempdir()) / f"Design2UMG_VerifyBuild_{os.getpid()}"
-
-
-def resolve_engine_root(editor_path: str) -> Path:
-    return Path(editor_path).resolve().parents[2]
-
-
-def resolve_uat_path(editor_path: str) -> Path:
-    return resolve_engine_root(editor_path) / "Build" / "BatchFiles" / "RunUAT.bat"
-
-
 def contains_pluginbuild_segment(path: Path) -> bool:
     normalized_parts = {part.lower() for part in path.parts}
     return "_pluginbuild" in normalized_parts
 
 
-def build_temporary_host_project(editor_path: str, build_root: Path) -> tuple[Path, Path]:
-    ensure_clean_editor()
-    if build_root.exists():
-        shutil.rmtree(build_root, ignore_errors=True)
-    build_root.mkdir(parents=True, exist_ok=True)
-
-    plugin_file = plugin_root() / "Design2UMG.uplugin"
-    uat_path = resolve_uat_path(editor_path)
-    command = [
-        str(uat_path),
-        "BuildPlugin",
-        f"-Plugin={plugin_file}",
-        f"-Package={build_root}",
-        "-TargetPlatforms=Win64",
-        "-Rocket",
-        "-StrictIncludes",
-        "-NoDeleteHostProject",
-    ]
-    subprocess.run(command, check=True, cwd=resolve_engine_root(editor_path))
-
-    project_path = build_root / "HostProject" / "HostProject.uproject"
-    project_plugin_root = build_root / "HostProject" / "Plugins" / "Design2UMG"
-    if not project_path.is_file():
-        raise RuntimeError(f"BuildPlugin did not produce HostProject: {project_path}")
-    if not project_plugin_root.is_dir():
-        raise RuntimeError(f"BuildPlugin did not produce project plugin root: {project_plugin_root}")
-    return project_path, project_plugin_root
+def is_host_project_path(path: Path) -> bool:
+    normalized_parts = {part.lower() for part in path.parts}
+    return "hostproject" in normalized_parts or path.name.lower() == "hostproject.uproject"
 
 
-def prepare_runtime_project(args) -> tuple[str, Path, Path | None]:
-    requested_project = Path(args.project).resolve() if args.project else None
-    if requested_project:
-        if contains_pluginbuild_segment(requested_project):
-            raise RuntimeError(
-                "Refusing to run verification against a repository-local _PluginBuild project. "
-                "Use the engine plugin as the single source of truth and let this script auto-build a temporary HostProject."
-            )
-        requested_plugin_root = requested_project.parent / "Plugins" / "Design2UMG"
-        project_plugin_root = requested_plugin_root if requested_plugin_root.is_dir() else plugin_root()
-        return str(requested_project), project_plugin_root, None
+def validate_runtime_project_path(project_path: Path, source_label: str) -> Path:
+    resolved_project = project_path.resolve()
+    if resolved_project.suffix.lower() != ".uproject":
+        raise RuntimeError(f"Runtime project from {source_label} is not a .uproject: {resolved_project}")
+    if contains_pluginbuild_segment(resolved_project):
+        raise RuntimeError(
+            "Refusing to run verification against a repository-local _PluginBuild project. "
+            f"Use a real runtime project instead: {resolved_project}"
+        )
+    if is_host_project_path(resolved_project):
+        raise RuntimeError(
+            "HostProject fallback has been removed. "
+            f"Refusing temporary verification project: {resolved_project}"
+        )
+    if not resolved_project.is_file():
+        raise RuntimeError(f"Runtime project from {source_label} does not exist: {resolved_project}")
+    return resolved_project
 
-    build_root = Path(args.build_root).resolve() if args.build_root else default_build_root()
-    if contains_pluginbuild_segment(build_root):
-        raise RuntimeError(f"Refusing to create verification workspace under _PluginBuild: {build_root}")
-    project_path, project_plugin_root = build_temporary_host_project(args.editor, build_root)
-    return str(project_path), project_plugin_root, build_root
+
+def discover_runtime_projects_from_hint(raw_hint: str) -> list[Path]:
+    if not raw_hint:
+        return []
+
+    hint_path = Path(raw_hint).expanduser()
+    if not hint_path.exists():
+        return []
+
+    resolved_hint = hint_path.resolve()
+    search_dirs = [resolved_hint.parent, *resolved_hint.parent.parents] if resolved_hint.is_file() else [resolved_hint, *resolved_hint.parents]
+    candidates: list[Path] = []
+    seen: set[Path] = set()
+    for search_dir in search_dirs:
+        for project_file in sorted(search_dir.glob("*.uproject")):
+            try:
+                candidate = validate_runtime_project_path(project_file, str(search_dir))
+            except RuntimeError:
+                continue
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            candidates.append(candidate)
+    return candidates
+
+
+def discover_runtime_project(source_hints: list[str] | None = None) -> Path:
+    environment_project = os.environ.get(RUNTIME_PROJECT_ENV_VAR, "").strip()
+    if environment_project:
+        return validate_runtime_project_path(Path(environment_project), f"{RUNTIME_PROJECT_ENV_VAR} environment variable")
+
+    candidates: list[Path] = []
+    seen: set[Path] = set()
+    for raw_hint in source_hints or []:
+        for candidate in discover_runtime_projects_from_hint(raw_hint):
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            candidates.append(candidate)
+
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        formatted_candidates = "\n".join(f"  - {candidate}" for candidate in candidates)
+        raise RuntimeError(
+            "Runtime project path is ambiguous. Pass --project explicitly.\n"
+            f"Discovered candidates:\n{formatted_candidates}"
+        )
+
+    raise RuntimeError(
+        "Runtime project path not provided and could not be inferred. "
+        f"Pass --project explicitly or set {RUNTIME_PROJECT_ENV_VAR}. "
+        "HostProject fallback has been removed."
+    )
+
+
+def prepare_runtime_project(args, source_hints: list[str] | None = None) -> tuple[str, Path]:
+    if getattr(args, "build_root", "") or getattr(args, "keep_build_root", False):
+        print(
+            "[WARN] --build-root/--keep-build-root are ignored because HostProject fallback has been removed.",
+            file=sys.stderr,
+        )
+
+    requested_project = (
+        validate_runtime_project_path(Path(args.project).expanduser(), "--project")
+        if getattr(args, "project", "")
+        else discover_runtime_project(source_hints)
+    )
+    requested_plugin_root = requested_project.parent / "Plugins" / "Design2UMG"
+    project_plugin_root = requested_plugin_root if requested_plugin_root.is_dir() else plugin_root()
+    return str(requested_project), project_plugin_root
 
 
 def sync_project_plugin_build_id(editor_path: str, project_plugin_root: Path):
@@ -344,9 +378,6 @@ def discover_local_font_seed_dirs(source_paths: list[str], destination_dir: Path
                 if parent.name.lower() == "designs":
                     project_root = parent.parent
                     candidate_dirs.append(project_root / "Content" / "Design2UMG" / "Fonts")
-                    workspace_root = project_root.parent
-                    for host_fonts_dir in workspace_root.glob("*/HostProject/Content/Design2UMG/Fonts"):
-                        candidate_dirs.append(host_fonts_dir)
                     break
         else:
             candidate_dirs.append(source_path / "Content" / "Design2UMG" / "Fonts")
@@ -476,8 +507,77 @@ def discover_mcp_server(override_path: str) -> str:
         pattern = str(base_dir / "highagency.pencildev-*" / "out" / "mcp-server-windows-x64.exe")
         all_matches.extend(glob.glob(pattern))
     if all_matches:
-        return sorted(all_matches, reverse=True)[0]
+        def version_key(path_str: str):
+            version_text = Path(path_str).parents[1].name.removeprefix("highagency.pencildev-")
+            parts = []
+            for token in version_text.split("."):
+                try:
+                    parts.append(int(token))
+                except ValueError:
+                    parts.append(-1)
+            return tuple(parts)
+
+        return max(all_matches, key=version_key)
     raise FileNotFoundError("Pencil MCP server binary not found; use --mcp-server to override")
+
+
+def sync_pencil_vscode_app_alias(app_name: str):
+    normalized_app = (app_name or "").strip().lower()
+    if normalized_app not in {"", "vscode", "visual studio code", "code", "visual_studio_code"}:
+        return
+
+    user_home = Path(os.environ.get("USERPROFILE", ""))
+    apps_dir = user_home / ".pencil" / "apps"
+    canonical_path = apps_dir / "visual_studio_code"
+    legacy_path = apps_dir / "vscode"
+
+    source_port = ""
+    for candidate in (canonical_path, legacy_path):
+        if candidate.is_file():
+            source_port = candidate.read_text(encoding="utf-8-sig").lstrip("\ufeff").strip()
+            if source_port:
+                break
+
+    if not source_port:
+        return
+
+    apps_dir.mkdir(parents=True, exist_ok=True)
+    desired_bytes = source_port.encode("utf-8")
+    for target in (canonical_path, legacy_path):
+        existing = target.read_text(encoding="utf-8-sig").lstrip("\ufeff").strip() if target.is_file() else ""
+        existing_bytes = target.read_bytes() if target.is_file() else b""
+        if existing != source_port or existing_bytes != desired_bytes:
+            target.write_bytes(desired_bytes)
+
+
+def discover_pencil_app_name(override_app_name: str) -> str:
+    if override_app_name:
+        return override_app_name
+
+    user_home = Path(os.environ.get("USERPROFILE", ""))
+    apps_dir = user_home / ".pencil" / "apps"
+    if apps_dir.is_dir():
+        available_apps = {path.name.lower(): path for path in apps_dir.iterdir() if path.is_file()}
+        for preferred_name in ("visual_studio_code", "vscode", "antigravity"):
+            if preferred_name in available_apps:
+                return preferred_name
+
+    for process_name in ("Code.exe", "code", "Cursor.exe", "cursor", "VSCodium.exe", "codium"):
+        try:
+            result = subprocess.run(
+                ["tasklist", "/FI", f"IMAGENAME eq {process_name}"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except OSError:
+            continue
+        if process_name.lower().startswith("code") and process_name.lower() in result.stdout.lower():
+            return "visual_studio_code"
+        if "cursor" in process_name.lower() and process_name.lower() in result.stdout.lower():
+            return "cursor"
+
+    return "visual_studio_code"
 
 
 def find_available_port(start_port: int = 18900) -> int:
@@ -503,13 +603,14 @@ def request_json(url: str, payload: dict, headers: dict[str, str]) -> tuple[str,
 class PencilMcpClient:
     def __init__(self, server_path: str, app_name: str):
         self.server_path = server_path
-        self.app_name = app_name or "vscode"
+        self.app_name = discover_pencil_app_name(app_name)
         self.port = find_available_port()
         self.endpoint = f"http://127.0.0.1:{self.port}/mcp"
         self.session_id = ""
         self.process: subprocess.Popen | None = None
 
     def __enter__(self):
+        sync_pencil_vscode_app_alias(self.app_name)
         args = [self.server_path, "-app", self.app_name, "-http", "-http-port", str(self.port)]
         self.process = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         deadline = time.time() + 10.0
@@ -1164,20 +1265,6 @@ def prepare_pencil_reference(source_path: str, node_id: str, output_dir: Path, o
     return output_path
 
 
-def prepare_pen_sim_reference(source_path: str, node_id: str, output_path: Path) -> Path:
-    script_path = plugin_root() / "Tools" / "pen2umg_sim.py"
-    command = [sys.executable, str(script_path), source_path, "--frame", node_id, "--render"]
-    subprocess.run(command, check=True)
-    expected = Path(source_path).parent / f"sim_layout_{node_id.replace(' ', '_')}.png"
-    if not expected.is_file():
-        pngs = sorted(Path(source_path).parent.glob("sim_layout_*.png"), key=lambda item: item.stat().st_mtime, reverse=True)
-        if not pngs:
-            raise RuntimeError("pen2umg_sim.py did not produce a simulated layout image")
-        expected = pngs[0]
-    shutil.copyfile(expected, output_path)
-    return output_path
-
-
 def load_rgba(path: Path) -> Image.Image:
     image = Image.open(path)
     if image.mode != "RGBA":
@@ -1294,6 +1381,31 @@ def add_name_suffix(path: Path, suffix: str) -> Path:
     return path.with_name(f"{path.stem}{suffix}{path.suffix}")
 
 
+def log_indicates_clean_editor_shutdown(log_path: Path) -> bool:
+    if not log_path.is_file():
+        return False
+
+    try:
+        with open(log_path, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            tail_size = min(handle.tell(), 128 * 1024)
+            handle.seek(-tail_size, os.SEEK_END)
+            tail_text = handle.read().decode("utf-8-sig", errors="ignore")
+    except OSError:
+        return False
+
+    fatal_markers = (
+        "Fatal error",
+        "Unhandled Exception",
+        "Access violation",
+        "Assertion failed",
+    )
+    if any(marker in tail_text for marker in fatal_markers):
+        return False
+
+    return "LogExit: Exiting." in tail_text or "LogExit: Editor shut down" in tail_text
+
+
 def execute_automation_render(args, spec_path: Path, log_path: Path, spec: dict):
     result_path = Path(spec["result_json_path"])
     write_json(spec_path, spec)
@@ -1311,6 +1423,8 @@ def execute_automation_render(args, spec_path: Path, log_path: Path, spec: dict)
     if not result_path.is_file():
         raise RuntimeError(f"UE result json not found: {result_path}")
     ue_result = load_ue_result(result_path)
+    if editor_exit_code != 0 and log_indicates_clean_editor_shutdown(log_path):
+        editor_exit_code = 0
     return {
         "editor_exit_code": editor_exit_code,
         "log_path": str(log_path),
@@ -1477,10 +1591,6 @@ def prepare_reference(args, output_dir: Path, expected_design_size: tuple[int, i
         shutil.copyfile(canonical_path, reference_png)
         context["canonical_source"] = authority.get("canonical_source")
         return reference_png, context
-    if args.reference_provider == "pen-sim":
-        prepare_pen_sim_reference(args.source, args.node, reference_png)
-        context["canonical_source"] = "pen_sim"
-        return reference_png, context
     raise ValueError(f"Unsupported reference provider: {args.reference_provider}")
 
 
@@ -1639,166 +1749,145 @@ def main():
     args = parse_args()
     output_dir = Path(args.output_dir) if args.output_dir else default_output_dir()
     output_dir.mkdir(parents=True, exist_ok=True)
-    runtime_build_root = None
 
-    try:
-        args.project, project_plugin_root, runtime_build_root = prepare_runtime_project(args)
-        args.project_plugin_root = str(project_plugin_root)
-        seed_runtime_font_assets(args.project, [args.source])
-        expected_design_size = get_expected_design_size(args.mode, args.source, args.node)
-        declared_design_size = get_declared_design_size(args.mode, args.source, args.node)
-        reference_path, reference_context = prepare_reference(args, output_dir, expected_design_size)
-        finalize_reference_context(args, reference_path, reference_context)
-        if args.mode == "pen":
-            live_node_name = try_get_pen_node_name(args.source, args.node)
-            live_source_structure = try_fetch_pencil_source_structure_snapshot(
-                args.source,
-                args.node,
-                live_node_name,
-                args.mcp_server,
-                args.pencil_app,
-            )
-            if live_source_structure:
-                reference_context["source_structure_live"] = live_source_structure
-        reference_size = read_image_size(reference_path)
-        if not expected_design_size:
-            inferred_expected_size = infer_expected_design_size_from_reference(declared_design_size, reference_size)
-            if inferred_expected_size:
-                expected_design_size = inferred_expected_size
-                reference_context["inferred_expected_design_size"] = list(inferred_expected_size)
-        reference_validation = validate_reference_against_design(reference_size, expected_design_size)
-        reference_context["reference_validation"] = reference_validation
-        if reference_validation["valid"]:
-            render_width, render_height = reference_size
-        elif expected_design_size:
-            render_width, render_height = expected_design_size
-        else:
-            render_width, render_height = reference_size
-
-        candidate_filename = "candidate.png" if reference_validation["valid"] else "candidate.native.png"
-        candidate_path = output_dir / candidate_filename
-        game_output = args.game_output or f"/Game/Design2UMG/Automation/{output_dir.name}"
-        mode_map = {
-            "pen": "pen",
-            "local-figma": "local_figma",
-            "figma-source": "figma_source",
-            "asset": "asset",
-        }
-        render_chain = {}
-        generated_asset_path = None
-        if args.mode == "asset":
-            spec = {
-                "mode": mode_map[args.mode],
-                "source_path": args.source,
-                "node_id": args.node,
-                "output_path": game_output,
-                "render_png_path": str(candidate_path),
-                "result_json_path": str(output_dir / "ue_render_result.json"),
-                "render_width": render_width,
-                "render_height": render_height,
-            }
-            render_result = execute_automation_render(
-                args,
-                output_dir / "automation_spec.json",
-                output_dir / "unreal_automation.log",
-                spec,
-            )
-            ue_result = render_result["ue_result"]
-            editor_exit_code = render_result["editor_exit_code"]
-            ue_log_path = Path(render_result["log_path"])
-            render_chain = {
-                "final_render_mode": "asset",
-                "asset_render": render_result,
-            }
-        else:
-            bootstrap_candidate_path = add_name_suffix(candidate_path, ".bootstrap")
-            generate_spec = {
-                "mode": mode_map[args.mode],
-                "source_path": args.source,
-                "node_id": args.node,
-                "output_path": game_output,
-                "render_png_path": str(bootstrap_candidate_path),
-                "result_json_path": str(output_dir / "ue_generate_result.json"),
-                "render_width": render_width,
-                "render_height": render_height,
-            }
-            generate_result = execute_automation_render(
-                args,
-                output_dir / "automation_generate_spec.json",
-                output_dir / "unreal_generate.log",
-                generate_spec,
-            )
-            generated_asset_path = generate_result["ue_result"].get("generated_asset_path", "")
-            if not generated_asset_path:
-                raise RuntimeError("Generation pass did not produce a generated_asset_path")
-
-            asset_spec = {
-                "mode": "asset",
-                "source_path": generated_asset_path,
-                "node_id": "",
-                "output_path": game_output,
-                "render_png_path": str(candidate_path),
-                "result_json_path": str(output_dir / "ue_render_result.json"),
-                "render_width": render_width,
-                "render_height": render_height,
-            }
-            asset_result = execute_automation_render(
-                args,
-                output_dir / "automation_asset_spec.json",
-                output_dir / "unreal_asset_render.log",
-                asset_spec,
-            )
-            ue_result = asset_result["ue_result"]
-            editor_exit_code = asset_result["editor_exit_code"]
-            ue_log_path = Path(asset_result["log_path"])
-            render_chain = {
-                "final_render_mode": "asset_reload",
-                "generation": generate_result,
-                "asset_render": asset_result,
-            }
-
-        if not candidate_path.is_file():
-            raise RuntimeError(f"Candidate render png not found: {candidate_path}")
-        bootstrap_candidate_path = add_name_suffix(candidate_path, ".bootstrap")
-        render_chain["generation_vs_asset"] = compare_image_paths(bootstrap_candidate_path, candidate_path, args.pixel_tolerance)
-        render_chain["generation_vs_asset_structure"] = compare_structure_snapshots(
-            get_result_structure(render_chain.get("generation"), "asset_structure"),
-            get_result_structure(render_chain.get("asset_render"), "asset_structure"),
-        )
-        render_chain["native_self_check"] = run_native_self_check(
-            args,
-            output_dir,
-            mode_map,
-            game_output,
-            expected_design_size,
-            (render_width, render_height),
+    args.project, project_plugin_root = prepare_runtime_project(args, [args.source])
+    args.project_plugin_root = str(project_plugin_root)
+    seed_runtime_font_assets(args.project, [args.source])
+    expected_design_size = get_expected_design_size(args.mode, args.source, args.node)
+    declared_design_size = get_declared_design_size(args.mode, args.source, args.node)
+    reference_path, reference_context = prepare_reference(args, output_dir, expected_design_size)
+    finalize_reference_context(args, reference_path, reference_context)
+    if args.mode == "pen":
+        live_node_name = try_get_pen_node_name(args.source, args.node)
+        live_source_structure = try_fetch_pencil_source_structure_snapshot(
             args.source,
             args.node,
-            generated_asset_path,
+            live_node_name,
+            args.mcp_server,
+            args.pencil_app,
         )
+        if live_source_structure:
+            reference_context["source_structure_live"] = live_source_structure
+    reference_size = read_image_size(reference_path)
+    if not expected_design_size:
+        inferred_expected_size = infer_expected_design_size_from_reference(declared_design_size, reference_size)
+        if inferred_expected_size:
+            expected_design_size = inferred_expected_size
+            reference_context["inferred_expected_design_size"] = list(inferred_expected_size)
+    reference_validation = validate_reference_against_design(reference_size, expected_design_size)
+    reference_context["reference_validation"] = reference_validation
+    if reference_validation["valid"]:
+        render_width, render_height = reference_size
+    elif expected_design_size:
+        render_width, render_height = expected_design_size
+    else:
+        render_width, render_height = reference_size
 
-        reference_authority = reference_context.get("reference_authority") or {}
-        if args.mode == "pen" and reference_validation["valid"] and reference_authority.get("available"):
-            if reference_authority.get("verification_level") != "strong":
-                report_path = write_invalid_reference_report(
-                    output_dir,
-                    args,
-                    reference_path,
-                    candidate_path,
-                    ue_result,
-                    editor_exit_code,
-                    reference_validation,
-                    reference_context,
-                    render_chain,
-                    verdict="unverified_reference",
-                )
-                print(f"[UNVERIFIED_REFERENCE] report={report_path}")
-                print(f"reference={reference_path}")
-                print(f"candidate={candidate_path}")
-                print(f"log={ue_log_path}")
-                sys.exit(2)
+    candidate_filename = "candidate.png" if reference_validation["valid"] else "candidate.native.png"
+    candidate_path = output_dir / candidate_filename
+    game_output = args.game_output or f"/Game/Design2UMG/Automation/{output_dir.name}"
+    mode_map = {
+        "pen": "pen",
+        "local-figma": "local_figma",
+        "figma-source": "figma_source",
+        "asset": "asset",
+    }
+    render_chain = {}
+    generated_asset_path = None
+    if args.mode == "asset":
+        spec = {
+            "mode": mode_map[args.mode],
+            "source_path": args.source,
+            "node_id": args.node,
+            "output_path": game_output,
+            "render_png_path": str(candidate_path),
+            "result_json_path": str(output_dir / "ue_render_result.json"),
+            "render_width": render_width,
+            "render_height": render_height,
+        }
+        render_result = execute_automation_render(
+            args,
+            output_dir / "automation_spec.json",
+            output_dir / "unreal_automation.log",
+            spec,
+        )
+        ue_result = render_result["ue_result"]
+        editor_exit_code = render_result["editor_exit_code"]
+        ue_log_path = Path(render_result["log_path"])
+        render_chain = {
+            "final_render_mode": "asset",
+            "asset_render": render_result,
+        }
+    else:
+        bootstrap_candidate_path = add_name_suffix(candidate_path, ".bootstrap")
+        generate_spec = {
+            "mode": mode_map[args.mode],
+            "source_path": args.source,
+            "node_id": args.node,
+            "output_path": game_output,
+            "render_png_path": str(bootstrap_candidate_path),
+            "result_json_path": str(output_dir / "ue_generate_result.json"),
+            "render_width": render_width,
+            "render_height": render_height,
+        }
+        generate_result = execute_automation_render(
+            args,
+            output_dir / "automation_generate_spec.json",
+            output_dir / "unreal_generate.log",
+            generate_spec,
+        )
+        generated_asset_path = generate_result["ue_result"].get("generated_asset_path", "")
+        if not generated_asset_path:
+            raise RuntimeError("Generation pass did not produce a generated_asset_path")
 
-        if not reference_validation["valid"]:
+        asset_spec = {
+            "mode": "asset",
+            "source_path": generated_asset_path,
+            "node_id": "",
+            "output_path": game_output,
+            "render_png_path": str(candidate_path),
+            "result_json_path": str(output_dir / "ue_render_result.json"),
+            "render_width": render_width,
+            "render_height": render_height,
+        }
+        asset_result = execute_automation_render(
+            args,
+            output_dir / "automation_asset_spec.json",
+            output_dir / "unreal_asset_render.log",
+            asset_spec,
+        )
+        ue_result = asset_result["ue_result"]
+        editor_exit_code = asset_result["editor_exit_code"]
+        ue_log_path = Path(asset_result["log_path"])
+        render_chain = {
+            "final_render_mode": "asset_reload",
+            "generation": generate_result,
+            "asset_render": asset_result,
+        }
+
+    if not candidate_path.is_file():
+        raise RuntimeError(f"Candidate render png not found: {candidate_path}")
+    bootstrap_candidate_path = add_name_suffix(candidate_path, ".bootstrap")
+    render_chain["generation_vs_asset"] = compare_image_paths(bootstrap_candidate_path, candidate_path, args.pixel_tolerance)
+    render_chain["generation_vs_asset_structure"] = compare_structure_snapshots(
+        get_result_structure(render_chain.get("generation"), "asset_structure"),
+        get_result_structure(render_chain.get("asset_render"), "asset_structure"),
+    )
+    render_chain["native_self_check"] = run_native_self_check(
+        args,
+        output_dir,
+        mode_map,
+        game_output,
+        expected_design_size,
+        (render_width, render_height),
+        args.source,
+        args.node,
+        generated_asset_path,
+    )
+
+    reference_authority = reference_context.get("reference_authority") or {}
+    if args.mode == "pen" and reference_validation["valid"] and reference_authority.get("available"):
+        if reference_authority.get("verification_level") != "strong":
             report_path = write_invalid_reference_report(
                 output_dir,
                 args,
@@ -1809,33 +1898,49 @@ def main():
                 reference_validation,
                 reference_context,
                 render_chain,
+                verdict="unverified_reference",
             )
-            print(f"[INVALID_REFERENCE] report={report_path}")
+            print(f"[UNVERIFIED_REFERENCE] report={report_path}")
             print(f"reference={reference_path}")
             print(f"candidate={candidate_path}")
             print(f"log={ue_log_path}")
             sys.exit(2)
 
-        passed, report_path = compare_and_report(
-            args,
+    if not reference_validation["valid"]:
+        report_path = write_invalid_reference_report(
             output_dir,
+            args,
             reference_path,
             candidate_path,
             ue_result,
             editor_exit_code,
+            reference_validation,
             reference_context,
             render_chain,
         )
-
-        status = "PASS" if passed else "FAIL"
-        print(f"[{status}] report={report_path}")
+        print(f"[INVALID_REFERENCE] report={report_path}")
         print(f"reference={reference_path}")
         print(f"candidate={candidate_path}")
         print(f"log={ue_log_path}")
-        sys.exit(0 if passed else 1)
-    finally:
-        if runtime_build_root and not args.keep_build_root:
-            shutil.rmtree(runtime_build_root, ignore_errors=True)
+        sys.exit(2)
+
+    passed, report_path = compare_and_report(
+        args,
+        output_dir,
+        reference_path,
+        candidate_path,
+        ue_result,
+        editor_exit_code,
+        reference_context,
+        render_chain,
+    )
+
+    status = "PASS" if passed else "FAIL"
+    print(f"[{status}] report={report_path}")
+    print(f"reference={reference_path}")
+    print(f"candidate={candidate_path}")
+    print(f"log={ue_log_path}")
+    sys.exit(0 if passed else 1)
 
 
 if __name__ == "__main__":

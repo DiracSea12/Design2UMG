@@ -14,7 +14,11 @@
 #include "RefExpander.h"
 #include "UMGValueParser.h"
 #include "UMGWidgetNodeAccess.h"
+#include "Dom/JsonObject.h"
+#include "Misc/Crc.h"
 #include "Misc/PackageName.h"
+#include "Policies/CondensedJsonPrintPolicy.h"
+#include "Serialization/JsonSerializer.h"
 
 namespace
 {
@@ -42,6 +46,20 @@ namespace
 	{
 		FUMGPrototypeNavigationData Data;
 		TSet<FString> TriggerNodeIds;
+	};
+
+	struct FResolvedPrototypeAction
+	{
+		EUMGPrototypeNavigationAction Kind = EUMGPrototypeNavigationAction::Navigate;
+		FString Payload;
+		FUMGPrototypeTransitionData Transition;
+		bool bResolved = false;
+
+		bool IsValid() const
+		{
+			return bResolved
+				&& (Kind == EUMGPrototypeNavigationAction::Back || !Payload.IsEmpty());
+		}
 	};
 
 	struct FConversionContext
@@ -154,13 +172,452 @@ namespace
 		return false;
 	}
 
+	struct FGridPlacementState
+	{
+		int32 ColumnCount = 1;
+		int32 RowCount = 0;
+		int32 CursorRow = 0;
+		int32 CursorColumn = 0;
+		TSet<uint64> OccupiedCells;
+	};
+
+	bool HasExplicitGridAnchor(const TSharedPtr<FDesignNode>& Node)
+	{
+		return Node.IsValid() && (Node->bHasLayoutRow || Node->bHasLayoutColumn);
+	}
+
+	bool HasExplicitGridSpan(const TSharedPtr<FDesignNode>& Node)
+	{
+		return Node.IsValid()
+			&& ((Node->bHasLayoutRowSpan && Node->LayoutRowSpan > 1)
+				|| (Node->bHasLayoutColumnSpan && Node->LayoutColumnSpan > 1));
+	}
+
+	int32 ResolveGridRowSpan(const TSharedPtr<FDesignNode>& Node)
+	{
+		return (Node.IsValid() && Node->bHasLayoutRowSpan) ? FMath::Max(1, Node->LayoutRowSpan) : 1;
+	}
+
+	int32 ResolveGridColumnSpan(const TSharedPtr<FDesignNode>& Node)
+	{
+		return (Node.IsValid() && Node->bHasLayoutColumnSpan) ? FMath::Max(1, Node->LayoutColumnSpan) : 1;
+	}
+
+	bool NeedsGridPanel(const TArray<TSharedPtr<FDesignNode>>& VisibleChildren)
+	{
+		for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
+		{
+			if (HasExplicitGridSpan(Child))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	float ResolveGridColumnGap(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid())
+		{
+			return 0.0f;
+		}
+		if (Node->bHasLayoutColumnGap)
+		{
+			return FMath::Max(0.0f, Node->LayoutColumnGap);
+		}
+		return FMath::Max(0.0f, Node->Gap);
+	}
+
+	float ResolveGridRowGap(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid())
+		{
+			return 0.0f;
+		}
+		if (Node->bHasLayoutRowGap)
+		{
+			return FMath::Max(0.0f, Node->LayoutRowGap);
+		}
+		return FMath::Max(0.0f, Node->Gap);
+	}
+
+	bool TryMapGridHorizontalAlignment(const FString& Value, FString& OutAlignment)
+	{
+		if (Value.Equals(TEXT("MIN"), ESearchCase::IgnoreCase)
+			|| Value.Equals(TEXT("LEFT"), ESearchCase::IgnoreCase))
+		{
+			OutAlignment = TEXT("Left");
+			return true;
+		}
+		if (Value.Equals(TEXT("CENTER"), ESearchCase::IgnoreCase))
+		{
+			OutAlignment = TEXT("Center");
+			return true;
+		}
+		if (Value.Equals(TEXT("MAX"), ESearchCase::IgnoreCase)
+			|| Value.Equals(TEXT("RIGHT"), ESearchCase::IgnoreCase))
+		{
+			OutAlignment = TEXT("Right");
+			return true;
+		}
+		if (Value.Equals(TEXT("STRETCH"), ESearchCase::IgnoreCase)
+			|| Value.Equals(TEXT("FILL"), ESearchCase::IgnoreCase))
+		{
+			OutAlignment = TEXT("Fill");
+			return true;
+		}
+		return false;
+	}
+
+	bool TryMapGridVerticalAlignment(const FString& Value, FString& OutAlignment)
+	{
+		if (Value.Equals(TEXT("MIN"), ESearchCase::IgnoreCase)
+			|| Value.Equals(TEXT("TOP"), ESearchCase::IgnoreCase))
+		{
+			OutAlignment = TEXT("Top");
+			return true;
+		}
+		if (Value.Equals(TEXT("CENTER"), ESearchCase::IgnoreCase))
+		{
+			OutAlignment = TEXT("Center");
+			return true;
+		}
+		if (Value.Equals(TEXT("MAX"), ESearchCase::IgnoreCase)
+			|| Value.Equals(TEXT("BOTTOM"), ESearchCase::IgnoreCase))
+		{
+			OutAlignment = TEXT("Bottom");
+			return true;
+		}
+		if (Value.Equals(TEXT("STRETCH"), ESearchCase::IgnoreCase)
+			|| Value.Equals(TEXT("FILL"), ESearchCase::IgnoreCase))
+		{
+			OutAlignment = TEXT("Fill");
+			return true;
+		}
+		return false;
+	}
+
+	void ApplyGridChildAlignmentOverrides(
+		FUMGWidgetNode& ChildWidget,
+		const TSharedPtr<FDesignNode>& ParentNode,
+		const TSharedPtr<FDesignNode>& ChildNode)
+	{
+		if (!ParentNode.IsValid() || !ChildNode.IsValid())
+		{
+			return;
+		}
+
+		FString AlignmentValue;
+		const FString HorizontalAlignSource = ChildNode->bHasLayoutChildHorizontalAlign
+			? ChildNode->LayoutChildHorizontalAlign
+			: ParentNode->LayoutChildHorizontalAlign;
+		if (TryMapGridHorizontalAlignment(HorizontalAlignSource, AlignmentValue))
+		{
+			ChildWidget.Slot.HorizontalAlignment = AlignmentValue;
+		}
+
+		const FString VerticalAlignSource = ChildNode->bHasLayoutChildVerticalAlign
+			? ChildNode->LayoutChildVerticalAlign
+			: ParentNode->LayoutChildVerticalAlign;
+		if (TryMapGridVerticalAlignment(VerticalAlignSource, AlignmentValue))
+		{
+			ChildWidget.Slot.VerticalAlignment = AlignmentValue;
+		}
+	}
+
+	int32 ResolveGridColumnCount(
+		const TSharedPtr<FDesignNode>& Node,
+		const TArray<TSharedPtr<FDesignNode>>& VisibleChildren)
+	{
+		int32 ColumnCount = (Node.IsValid() && Node->bHasLayoutColumnCount)
+			? FMath::Max(1, Node->LayoutColumnCount)
+			: 0;
+		int32 ExplicitRequiredColumns = 0;
+		for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
+		{
+			if (!Child.IsValid())
+			{
+				continue;
+			}
+
+			const int32 AnchorColumn = (Child->bHasLayoutColumn && Child->LayoutColumn >= 0)
+				? Child->LayoutColumn
+				: 0;
+			ExplicitRequiredColumns = FMath::Max(
+				ExplicitRequiredColumns,
+				AnchorColumn + ResolveGridColumnSpan(Child));
+		}
+
+		ColumnCount = FMath::Max(ColumnCount, ExplicitRequiredColumns);
+		if (ColumnCount <= 0 && Node.IsValid() && Node->bHasLayoutRowCount && Node->LayoutRowCount > 0)
+		{
+			ColumnCount = FMath::CeilToInt(static_cast<float>(VisibleChildren.Num()) / Node->LayoutRowCount);
+		}
+
+		return FMath::Max(1, ColumnCount > 0 ? ColumnCount : VisibleChildren.Num());
+	}
+
+	int32 ResolveGridRowCount(
+		const TSharedPtr<FDesignNode>& Node,
+		const TArray<TSharedPtr<FDesignNode>>& VisibleChildren,
+		int32 ColumnCount)
+	{
+		int32 RowCount = (Node.IsValid() && Node->bHasLayoutRowCount)
+			? FMath::Max(1, Node->LayoutRowCount)
+			: 0;
+		int32 ExplicitRequiredRows = 0;
+		for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
+		{
+			if (!Child.IsValid())
+			{
+				continue;
+			}
+
+			const int32 AnchorRow = (Child->bHasLayoutRow && Child->LayoutRow >= 0)
+				? Child->LayoutRow
+				: 0;
+			ExplicitRequiredRows = FMath::Max(
+				ExplicitRequiredRows,
+				AnchorRow + ResolveGridRowSpan(Child));
+		}
+
+		RowCount = FMath::Max(RowCount, ExplicitRequiredRows);
+		if (RowCount <= 0 && ColumnCount > 0)
+		{
+			RowCount = FMath::CeilToInt(static_cast<float>(VisibleChildren.Num()) / ColumnCount);
+		}
+		return FMath::Max(1, RowCount > 0 ? RowCount : VisibleChildren.Num());
+	}
+
+	uint64 MakeGridCellKey(int32 Row, int32 Column)
+	{
+		return (static_cast<uint64>(static_cast<uint32>(Row)) << 32)
+			| static_cast<uint32>(Column);
+	}
+
+	bool CanPlaceGridItem(
+		const FGridPlacementState& State,
+		int32 Row,
+		int32 Column,
+		int32 RowSpan,
+		int32 ColumnSpan)
+	{
+		if (Row < 0 || Column < 0)
+		{
+			return false;
+		}
+		if (State.ColumnCount > 0 && (Column + ColumnSpan) > State.ColumnCount)
+		{
+			return false;
+		}
+
+		for (int32 RowOffset = 0; RowOffset < RowSpan; ++RowOffset)
+		{
+			for (int32 ColumnOffset = 0; ColumnOffset < ColumnSpan; ++ColumnOffset)
+			{
+				if (State.OccupiedCells.Contains(MakeGridCellKey(Row + RowOffset, Column + ColumnOffset)))
+				{
+					return false;
+				}
+			}
+		}
+		return true;
+	}
+
+	void MarkGridItemPlaced(
+		FGridPlacementState& State,
+		int32 Row,
+		int32 Column,
+		int32 RowSpan,
+		int32 ColumnSpan)
+	{
+		for (int32 RowOffset = 0; RowOffset < RowSpan; ++RowOffset)
+		{
+			for (int32 ColumnOffset = 0; ColumnOffset < ColumnSpan; ++ColumnOffset)
+			{
+				State.OccupiedCells.Add(MakeGridCellKey(Row + RowOffset, Column + ColumnOffset));
+			}
+		}
+
+		State.CursorRow = Row;
+		State.CursorColumn = Column + ColumnSpan;
+		while (State.CursorColumn >= State.ColumnCount)
+		{
+			State.CursorColumn -= State.ColumnCount;
+			++State.CursorRow;
+		}
+	}
+
+	bool TryFindGridPlacement(
+		FGridPlacementState& State,
+		int32 RowSpan,
+		int32 ColumnSpan,
+		const TOptional<int32>& FixedRow,
+		const TOptional<int32>& FixedColumn,
+		int32& OutRow,
+		int32& OutColumn)
+	{
+		const int32 StartRow = FixedRow.IsSet() ? FixedRow.GetValue() : State.CursorRow;
+		const int32 EndRow = FixedRow.IsSet()
+			? FixedRow.GetValue()
+			: FMath::Max(State.RowCount + 8, State.CursorRow + State.OccupiedCells.Num() + 8);
+
+		for (int32 Row = StartRow; Row <= EndRow; ++Row)
+		{
+			const int32 StartColumn = FixedColumn.IsSet()
+				? FixedColumn.GetValue()
+				: ((Row == State.CursorRow) ? State.CursorColumn : 0);
+			const int32 EndColumn = FixedColumn.IsSet()
+				? FixedColumn.GetValue()
+				: FMath::Max(0, State.ColumnCount - ColumnSpan);
+
+			for (int32 Column = StartColumn; Column <= EndColumn; ++Column)
+			{
+				if (!CanPlaceGridItem(State, Row, Column, RowSpan, ColumnSpan))
+				{
+					continue;
+				}
+
+				OutRow = Row;
+				OutColumn = Column;
+				MarkGridItemPlaced(State, Row, Column, RowSpan, ColumnSpan);
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	void ApplyGridPanelChildSlotData(
+		FUMGWidgetNode& ChildWidget,
+		const TSharedPtr<FDesignNode>& ParentNode,
+		const TSharedPtr<FDesignNode>& ChildNode,
+		FGridPlacementState& State)
+	{
+		if (!ParentNode.IsValid() || !ChildNode.IsValid())
+		{
+			return;
+		}
+
+		const int32 RowSpan = ResolveGridRowSpan(ChildNode);
+		const int32 ColumnSpan = ResolveGridColumnSpan(ChildNode);
+		const TOptional<int32> FixedRow = (ChildNode->bHasLayoutRow && ChildNode->LayoutRow >= 0)
+			? TOptional<int32>(ChildNode->LayoutRow)
+			: TOptional<int32>();
+		const TOptional<int32> FixedColumn = (ChildNode->bHasLayoutColumn && ChildNode->LayoutColumn >= 0)
+			? TOptional<int32>(ChildNode->LayoutColumn)
+			: TOptional<int32>();
+
+		int32 Row = FixedRow.Get(FMath::Max(0, State.CursorRow));
+		int32 Column = FixedColumn.Get(0);
+		if (!TryFindGridPlacement(State, RowSpan, ColumnSpan, FixedRow, FixedColumn, Row, Column))
+		{
+			MarkGridItemPlaced(State, Row, Column, RowSpan, ColumnSpan);
+		}
+
+		ChildWidget.Slot.Row = Row;
+		ChildWidget.Slot.Column = Column;
+		ChildWidget.Slot.RowSpan = RowSpan;
+		ChildWidget.Slot.ColumnSpan = ColumnSpan;
+		ApplyGridChildAlignmentOverrides(ChildWidget, ParentNode, ChildNode);
+
+		const float ColumnGap = ResolveGridColumnGap(ParentNode);
+		const float RowGap = ResolveGridRowGap(ParentNode);
+		if (ColumnGap <= KINDA_SMALL_NUMBER && RowGap <= KINDA_SMALL_NUMBER)
+		{
+			return;
+		}
+
+		const float HalfColumnGap = ColumnGap * 0.5f;
+		const float HalfRowGap = RowGap * 0.5f;
+		const bool bTouchesLeftEdge = Column <= 0;
+		const bool bTouchesTopEdge = Row <= 0;
+		const bool bTouchesRightEdge = ParentNode->bHasLayoutColumnCount
+			&& ParentNode->LayoutColumnCount > 0
+			&& (Column + ColumnSpan) >= ParentNode->LayoutColumnCount;
+		const bool bTouchesBottomEdge = ParentNode->bHasLayoutRowCount
+			&& ParentNode->LayoutRowCount > 0
+			&& (Row + RowSpan) >= ParentNode->LayoutRowCount;
+		ChildWidget.Slot.Padding = FMargin(
+			bTouchesLeftEdge ? 0.0f : HalfColumnGap,
+			bTouchesTopEdge ? 0.0f : HalfRowGap,
+			bTouchesRightEdge ? 0.0f : HalfColumnGap,
+			bTouchesBottomEdge ? 0.0f : HalfRowGap);
+	}
+
 	FString GetSourceExtension(const TSharedPtr<FDesignNode>& Node, const FString& Key)
 	{
 		if (!Node.IsValid())
 			return FString();
+		if (Key == TEXT("sourceNodeType"))
+			return Node->FigmaSourceNodeType;
+		if (Key == TEXT("figma.renderFallbackImageRef"))
+			return !Node->FigmaRenderFallback.ImageRef.IsEmpty()
+				? Node->FigmaRenderFallback.ImageRef
+				: Node->Metadata.FindRef(Key);
+		if (Key == TEXT("figma.renderFallbackScope"))
+			return !Node->FigmaRenderFallback.Scope.IsEmpty()
+				? Node->FigmaRenderFallback.Scope
+				: Node->Metadata.FindRef(Key);
+		if (Key == TEXT("figma.renderFallbackSource"))
+			return !Node->FigmaRenderFallback.Source.IsEmpty()
+				? Node->FigmaRenderFallback.Source
+				: Node->Metadata.FindRef(Key);
+		if (Key == TEXT("figma.renderFallbackReason"))
+			return !Node->FigmaRenderFallback.Reason.IsEmpty()
+				? Node->FigmaRenderFallback.Reason
+				: Node->Metadata.FindRef(Key);
+		if (Key == TEXT("figma.renderFallbackOffsetX"))
+			return !Node->FigmaRenderFallback.OffsetX.IsEmpty()
+				? Node->FigmaRenderFallback.OffsetX
+				: Node->Metadata.FindRef(Key);
+		if (Key == TEXT("figma.renderFallbackOffsetY"))
+			return !Node->FigmaRenderFallback.OffsetY.IsEmpty()
+				? Node->FigmaRenderFallback.OffsetY
+				: Node->Metadata.FindRef(Key);
+		if (Key == TEXT("figma.renderFallbackWidth"))
+			return !Node->FigmaRenderFallback.Width.IsEmpty()
+				? Node->FigmaRenderFallback.Width
+				: Node->Metadata.FindRef(Key);
+		if (Key == TEXT("figma.renderFallbackHeight"))
+			return !Node->FigmaRenderFallback.Height.IsEmpty()
+				? Node->FigmaRenderFallback.Height
+				: Node->Metadata.FindRef(Key);
 		if (const FString* Value = Node->Metadata.Find(Key))
 			return *Value;
 		return FString();
+	}
+
+	FUMGFigmaNodeData BuildFigmaNodeData(const TSharedPtr<FDesignNode>& Node)
+	{
+		FUMGFigmaNodeData Result;
+		if (!Node.IsValid())
+		{
+			return Result;
+		}
+
+		Result.SourceNodeId = Node->Id;
+		Result.SourceNodeName = Node->Name;
+		Result.SourceNodeType = GetSourceExtension(Node, TEXT("sourceNodeType"));
+		Result.ComponentId = Node->FigmaInstance.ComponentId;
+		Result.ComponentSetId = Node->FigmaInstance.ComponentSetId;
+		Result.MainComponentKey = Node->FigmaInstance.MainComponentKey;
+		Result.ComponentPropertiesJson = Node->FigmaInstance.ComponentPropertiesJson;
+		Result.VariantPropertiesJson = Node->FigmaInstance.VariantPropertiesJson;
+		Result.OverridesJson = Node->FigmaInstance.OverridesJson;
+		Result.bIsExposedInstance = Node->FigmaInstance.bIsExposedInstance;
+		Result.bHasIsExposedInstance = Node->FigmaInstance.bHasIsExposedInstance;
+
+		if (Result.IsComponentDefinition() && Result.ComponentId.IsEmpty())
+		{
+			Result.ComponentId = Node->Id;
+		}
+		if (Result.IsComponentSet() && Result.ComponentSetId.IsEmpty())
+		{
+			Result.ComponentSetId = Node->Id;
+		}
+
+		return Result;
 	}
 
 	bool IsSourceNodeType(const TSharedPtr<FDesignNode>& Node, const TCHAR* ExpectedType)
@@ -497,9 +954,11 @@ namespace
 	{
 		const bool bNeedsPaddingWrapper =
 			FLayoutMapper::HasPadding(Node)
-			&& ((Node->Layout == EDesignLayout::None)
-				|| ((Node->Layout == EDesignLayout::Wrap || Node->Layout == EDesignLayout::Grid)
-					&& Node->Children.Num() > 0));
+			&& (Node->bHasPaddingRuntimeWrapDecision
+				? Node->bPaddingRequiresRuntimeWrap
+				: ((Node->Layout == EDesignLayout::None)
+					|| ((Node->Layout == EDesignLayout::Wrap || Node->Layout == EDesignLayout::Grid)
+						&& Node->Children.Num() > 0)));
 
 		return (Node->Type == EDesignNodeType::Frame || Node->Type == EDesignNodeType::Group)
 			&& (HasVisualFill(Node)
@@ -611,7 +1070,7 @@ namespace
 		return Widget;
 	}
 
-	FString ResolvePrototypeNavigateDestinationId(
+	FString ResolvePrototypeActionDestinationId(
 		const TSharedPtr<FDesignNode>& Node,
 		const FDesignFigmaPrototypeAction& Action)
 	{
@@ -624,6 +1083,89 @@ namespace
 			return Action.TransitionNodeId;
 		}
 		return Node.IsValid() ? Node->FigmaPrototype.TransitionNodeId : FString();
+	}
+
+	bool IsPrototypeNavigateNavigation(const FString& Value)
+	{
+		return Value.IsEmpty()
+			|| Value.Equals(TEXT("NAVIGATE"), ESearchCase::IgnoreCase)
+			|| Value.Equals(TEXT("SWAP"), ESearchCase::IgnoreCase);
+	}
+
+	bool IsPrototypeOverlayKeyword(const FString& Value)
+	{
+		return Value.Equals(TEXT("OVERLAY"), ESearchCase::IgnoreCase)
+			|| Value.Equals(TEXT("OPEN_OVERLAY"), ESearchCase::IgnoreCase)
+			|| Value.Equals(TEXT("SWAP_OVERLAY"), ESearchCase::IgnoreCase);
+	}
+
+	bool IsPrototypeBackKeyword(const FString& Value)
+	{
+		return Value.Equals(TEXT("BACK"), ESearchCase::IgnoreCase);
+	}
+
+	bool IsPrototypeOpenLinkKeyword(const FString& Value)
+	{
+		return Value.Equals(TEXT("URL"), ESearchCase::IgnoreCase)
+			|| Value.Equals(TEXT("OPEN_URL"), ESearchCase::IgnoreCase)
+			|| Value.Equals(TEXT("OPEN_LINK"), ESearchCase::IgnoreCase)
+			|| Value.Equals(TEXT("LINK"), ESearchCase::IgnoreCase);
+	}
+
+	bool LooksLikeExternalPrototypeLink(const FString& Value)
+	{
+		return Value.Contains(TEXT("://"))
+			|| Value.StartsWith(TEXT("mailto:"), ESearchCase::IgnoreCase)
+			|| Value.StartsWith(TEXT("tel:"), ESearchCase::IgnoreCase)
+			|| Value.StartsWith(TEXT("www."), ESearchCase::IgnoreCase);
+	}
+
+	bool IsPrototypeNavigateAction(const FDesignFigmaPrototypeAction& Action)
+	{
+		return Action.Type.Equals(TEXT("NODE"), ESearchCase::IgnoreCase)
+			&& IsPrototypeNavigateNavigation(Action.Navigation);
+	}
+
+	bool IsPrototypeOverlayAction(const FDesignFigmaPrototypeAction& Action)
+	{
+		const bool bOverlayKeyword =
+			IsPrototypeOverlayKeyword(Action.Navigation) || IsPrototypeOverlayKeyword(Action.Type);
+		const bool bNodeLike =
+			Action.Type.IsEmpty()
+			|| Action.Type.Equals(TEXT("NODE"), ESearchCase::IgnoreCase)
+			|| IsPrototypeOverlayKeyword(Action.Type);
+		return bOverlayKeyword && bNodeLike;
+	}
+
+	bool IsPrototypeBackAction(const FDesignFigmaPrototypeAction& Action)
+	{
+		return IsPrototypeBackKeyword(Action.Type) || IsPrototypeBackKeyword(Action.Navigation);
+	}
+
+	bool IsPrototypeOpenLinkAction(
+		const FDesignFigmaPrototypeAction& Action,
+		const FString& DestinationId)
+	{
+		return IsPrototypeOpenLinkKeyword(Action.Type)
+			|| IsPrototypeOpenLinkKeyword(Action.Navigation)
+			|| LooksLikeExternalPrototypeLink(DestinationId);
+	}
+
+	const TCHAR* DescribePrototypeActionKind(const EUMGPrototypeNavigationAction Kind)
+	{
+		switch (Kind)
+		{
+		case EUMGPrototypeNavigationAction::Navigate:
+			return TEXT("navigation");
+		case EUMGPrototypeNavigationAction::Overlay:
+			return TEXT("overlay");
+		case EUMGPrototypeNavigationAction::Back:
+			return TEXT("back");
+		case EUMGPrototypeNavigationAction::OpenLink:
+			return TEXT("open link");
+		default:
+			return TEXT("prototype action");
+		}
 	}
 
 	FDesignFigmaPrototypeTransitionData ResolvePrototypeTransitionSource(
@@ -701,41 +1243,570 @@ namespace
 		return Transition;
 	}
 
-	bool IsSupportedPrototypeNavigateInteraction(
-		const TSharedPtr<FDesignNode>& Node,
-		const FDesignFigmaPrototypeInteraction& Interaction,
-		FString& OutDestinationId,
-		FUMGPrototypeTransitionData& OutTransition)
+	FString SerializePrototypeJsonValue(const TSharedPtr<FJsonValue>& Value)
 	{
-		if (!Node.IsValid() || !Interaction.TriggerType.Equals(TEXT("ON_CLICK"), ESearchCase::IgnoreCase))
+		if (!Value.IsValid())
+		{
+			return FString();
+		}
+
+		FString Json;
+		TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
+			TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Json);
+		if (FJsonSerializer::Serialize(Value.ToSharedRef(), FString(), Writer))
+		{
+			return Json;
+		}
+		return FString();
+	}
+
+	FString SerializePrototypeJsonObject(const TSharedPtr<FJsonObject>& Object)
+	{
+		if (!Object.IsValid())
+		{
+			return FString();
+		}
+
+		FString Json;
+		TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
+			TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Json);
+		if (FJsonSerializer::Serialize(Object.ToSharedRef(), Writer))
+		{
+			return Json;
+		}
+		return FString();
+	}
+
+	bool TryParsePrototypeJsonObject(const FString& Json, TSharedPtr<FJsonObject>& OutObject)
+	{
+		OutObject.Reset();
+		if (Json.IsEmpty())
 		{
 			return false;
 		}
 
-		for (const FDesignFigmaPrototypeAction& Action : Interaction.Actions)
+		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
+		return FJsonSerializer::Deserialize(Reader, OutObject) && OutObject.IsValid();
+	}
+
+	FString GetPrototypeJsonString(const TSharedPtr<FJsonObject>& Object, const TCHAR* FieldName)
+	{
+		if (!Object.IsValid())
 		{
-			if (!Action.Type.Equals(TEXT("NODE"), ESearchCase::IgnoreCase))
+			return FString();
+		}
+
+		FString Value;
+		if (Object->TryGetStringField(FieldName, Value))
+		{
+			return Value;
+		}
+		return FString();
+	}
+
+	bool TryGetPrototypeJsonNumber(const TSharedPtr<FJsonObject>& Object, const TCHAR* FieldName, double& OutValue)
+	{
+		return Object.IsValid() && Object->TryGetNumberField(FieldName, OutValue);
+	}
+
+	TSharedPtr<FJsonObject> GetPrototypeJsonObject(
+		const TSharedPtr<FJsonObject>& Object,
+		const TCHAR* FieldName)
+	{
+		if (!Object.IsValid())
+		{
+			return nullptr;
+		}
+
+		const TSharedPtr<FJsonObject>* ObjectPtr = nullptr;
+		if (Object->TryGetObjectField(FieldName, ObjectPtr) && ObjectPtr != nullptr)
+		{
+			return *ObjectPtr;
+		}
+		return nullptr;
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* GetPrototypeJsonArray(
+		const TSharedPtr<FJsonObject>& Object,
+		const TCHAR* FieldName)
+	{
+		if (!Object.IsValid())
+		{
+			return nullptr;
+		}
+
+		const TArray<TSharedPtr<FJsonValue>>* ArrayPtr = nullptr;
+		if (Object->TryGetArrayField(FieldName, ArrayPtr) && ArrayPtr != nullptr)
+		{
+			return ArrayPtr;
+		}
+		return nullptr;
+	}
+
+	void ParsePrototypeTransitionFromJsonObject(
+		const TSharedPtr<FJsonObject>& TransitionObject,
+		FDesignFigmaPrototypeTransitionData& OutTransition)
+	{
+		if (!TransitionObject.IsValid())
+		{
+			return;
+		}
+
+		OutTransition.Type = GetPrototypeJsonString(TransitionObject, TEXT("type"));
+		OutTransition.Direction = GetPrototypeJsonString(TransitionObject, TEXT("direction"));
+		double DurationValue = 0.0;
+		if (TryGetPrototypeJsonNumber(TransitionObject, TEXT("duration"), DurationValue))
+		{
+			OutTransition.Duration = static_cast<float>(DurationValue);
+			OutTransition.bHasDuration = true;
+		}
+
+		if (const TSharedPtr<FJsonObject> EasingObject = GetPrototypeJsonObject(TransitionObject, TEXT("easing")))
+		{
+			OutTransition.EasingJson = SerializePrototypeJsonObject(EasingObject);
+			OutTransition.EasingType = GetPrototypeJsonString(EasingObject, TEXT("type"));
+		}
+
+		bool bMatchLayers = false;
+		if (TransitionObject->TryGetBoolField(TEXT("matchLayers"), bMatchLayers))
+		{
+			OutTransition.bMatchLayers = bMatchLayers;
+			OutTransition.bHasMatchLayers = true;
+		}
+	}
+
+	FDesignFigmaPrototypeAction ParsePrototypeActionFromJsonObject(const TSharedPtr<FJsonObject>& ActionObject)
+	{
+		FDesignFigmaPrototypeAction Action;
+		if (!ActionObject.IsValid())
+		{
+			return Action;
+		}
+
+		Action.RawJson = SerializePrototypeJsonObject(ActionObject);
+		Action.Type = GetPrototypeJsonString(ActionObject, TEXT("type"));
+		Action.DestinationId = GetPrototypeJsonString(ActionObject, TEXT("destinationId"));
+		if (Action.DestinationId.IsEmpty())
+		{
+			Action.DestinationId = GetPrototypeJsonString(ActionObject, TEXT("url"));
+		}
+		if (Action.DestinationId.IsEmpty())
+		{
+			Action.DestinationId = GetPrototypeJsonString(ActionObject, TEXT("uri"));
+		}
+		Action.Navigation = GetPrototypeJsonString(ActionObject, TEXT("navigation"));
+		Action.TransitionNodeId = GetPrototypeJsonString(ActionObject, TEXT("transitionNodeID"));
+		if (const TSharedPtr<FJsonObject> TransitionObject = GetPrototypeJsonObject(ActionObject, TEXT("transition")))
+		{
+			Action.TransitionJson = SerializePrototypeJsonObject(TransitionObject);
+			ParsePrototypeTransitionFromJsonObject(TransitionObject, Action.Transition);
+		}
+		return Action;
+	}
+
+	EUMGPrototypeNavigationAction MapPrototypeStepKindToLegacyAction(const EUMGPrototypeNavigationStepKind Kind)
+	{
+		switch (Kind)
+		{
+		case EUMGPrototypeNavigationStepKind::Navigate:
+			return EUMGPrototypeNavigationAction::Navigate;
+		case EUMGPrototypeNavigationStepKind::Overlay:
+			return EUMGPrototypeNavigationAction::Overlay;
+		case EUMGPrototypeNavigationStepKind::Back:
+			return EUMGPrototypeNavigationAction::Back;
+		case EUMGPrototypeNavigationStepKind::OpenLink:
+			return EUMGPrototypeNavigationAction::OpenLink;
+		case EUMGPrototypeNavigationStepKind::SetVariable:
+			return EUMGPrototypeNavigationAction::SetVariable;
+		case EUMGPrototypeNavigationStepKind::SetVariableMode:
+			return EUMGPrototypeNavigationAction::SetVariableMode;
+		case EUMGPrototypeNavigationStepKind::ConditionJump:
+		case EUMGPrototypeNavigationStepKind::Jump:
+			return EUMGPrototypeNavigationAction::Conditional;
+		default:
+			return EUMGPrototypeNavigationAction::Navigate;
+		}
+	}
+
+	bool ResolvePrototypePageTarget(
+		const TSharedPtr<FDesignNode>& Node,
+		const EUMGPrototypeNavigationAction ActionKind,
+		const FString& TargetNodeId,
+		const TMap<FString, FString>& NodeToPageId,
+		const TMap<FString, int32>& PageIdToIndex,
+		FUMGPrototypeNavigationStep& InOutStep,
+		TArray<FString>& Warnings)
+	{
+		const FString* ResolvedPageId = NodeToPageId.Find(TargetNodeId);
+		if (!ResolvedPageId)
+		{
+			Warnings.AddUnique(FString::Printf(
+				TEXT("Prototype %s skipped on '%s': unresolved destination '%s'"),
+				DescribePrototypeActionKind(ActionKind),
+				Node.IsValid() ? *Node->Id : TEXT("<unknown>"),
+				*TargetNodeId));
+			return false;
+		}
+
+		const int32* ResolvedPageIndex = PageIdToIndex.Find(*ResolvedPageId);
+		if (!ResolvedPageIndex || *ResolvedPageIndex < 0)
+		{
+			return false;
+		}
+
+		InOutStep.TargetPageId = *ResolvedPageId;
+		InOutStep.TargetPageIndex = *ResolvedPageIndex;
+		return true;
+	}
+
+	bool AppendPrototypeActionStepFromTypedAction(
+		const TSharedPtr<FDesignNode>& Node,
+		const FDesignFigmaPrototypeAction& Action,
+		const TMap<FString, FString>& NodeToPageId,
+		const TMap<FString, int32>& PageIdToIndex,
+		TArray<FUMGPrototypeNavigationStep>& OutSteps,
+		TArray<FString>& Warnings)
+	{
+		const FString DirectDestinationId = Action.DestinationId;
+		const FString ResolvedNodeDestinationId = ResolvePrototypeActionDestinationId(Node, Action);
+		FUMGPrototypeNavigationStep Step;
+		Step.Transition = BuildPrototypeTransition(Node, Action);
+
+		if (IsPrototypeBackAction(Action))
+		{
+			Step.Kind = EUMGPrototypeNavigationStepKind::Back;
+		}
+		else if (IsPrototypeOpenLinkAction(Action, DirectDestinationId) && !DirectDestinationId.IsEmpty())
+		{
+			Step.Kind = EUMGPrototypeNavigationStepKind::OpenLink;
+			Step.ExternalUrl = DirectDestinationId;
+		}
+		else if (IsPrototypeOverlayAction(Action) && !ResolvedNodeDestinationId.IsEmpty())
+		{
+			Step.Kind = EUMGPrototypeNavigationStepKind::Overlay;
+			if (!ResolvePrototypePageTarget(
+				Node,
+				EUMGPrototypeNavigationAction::Overlay,
+				ResolvedNodeDestinationId,
+				NodeToPageId,
+				PageIdToIndex,
+				Step,
+				Warnings))
 			{
-				continue;
+				return false;
+			}
+		}
+		else if (IsPrototypeNavigateAction(Action) && !ResolvedNodeDestinationId.IsEmpty())
+		{
+			Step.Kind = EUMGPrototypeNavigationStepKind::Navigate;
+			if (!ResolvePrototypePageTarget(
+				Node,
+				EUMGPrototypeNavigationAction::Navigate,
+				ResolvedNodeDestinationId,
+				NodeToPageId,
+				PageIdToIndex,
+				Step,
+				Warnings))
+			{
+				return false;
+			}
+		}
+		else
+		{
+			return false;
+		}
+
+		if (!Step.IsValid())
+		{
+			return false;
+		}
+
+		OutSteps.Add(MoveTemp(Step));
+		return true;
+	}
+
+	bool AppendPrototypeActionStepsFromJsonObject(
+		const TSharedPtr<FDesignNode>& Node,
+		const TSharedPtr<FJsonObject>& ActionObject,
+		const TMap<FString, FString>& NodeToPageId,
+		const TMap<FString, int32>& PageIdToIndex,
+		TArray<FUMGPrototypeNavigationStep>& OutSteps,
+		TArray<FString>& Warnings)
+	{
+		if (!ActionObject.IsValid())
+		{
+			return false;
+		}
+
+		const FDesignFigmaPrototypeAction ParsedAction = ParsePrototypeActionFromJsonObject(ActionObject);
+		const FString ActionTypeUpper = ParsedAction.Type.ToUpper();
+
+		if (ActionTypeUpper.Equals(TEXT("SET_VARIABLE"), ESearchCase::CaseSensitive))
+		{
+			FUMGPrototypeNavigationStep Step;
+			Step.Kind = EUMGPrototypeNavigationStepKind::SetVariable;
+			Step.VariableId = GetPrototypeJsonString(ActionObject, TEXT("variableId"));
+			const TSharedPtr<FJsonValue> VariableValueField = ActionObject->TryGetField(TEXT("variableValue"));
+			const TSharedPtr<FJsonValue> LegacyValueField = ActionObject->TryGetField(TEXT("value"));
+			Step.VariableValueJson = SerializePrototypeJsonValue(
+				VariableValueField.IsValid() ? VariableValueField : LegacyValueField);
+			if (!Step.IsValid())
+			{
+				Warnings.AddUnique(FString::Printf(
+					TEXT("Prototype set variable skipped on '%s': missing variable payload"),
+					Node.IsValid() ? *Node->Id : TEXT("<unknown>")));
+				return false;
+			}
+			OutSteps.Add(MoveTemp(Step));
+			return true;
+		}
+
+		if (ActionTypeUpper.Equals(TEXT("SET_VARIABLE_MODE"), ESearchCase::CaseSensitive))
+		{
+			FUMGPrototypeNavigationStep Step;
+			Step.Kind = EUMGPrototypeNavigationStepKind::SetVariableMode;
+			Step.VariableCollectionId = GetPrototypeJsonString(ActionObject, TEXT("variableCollectionId"));
+			Step.VariableModeId = GetPrototypeJsonString(ActionObject, TEXT("variableModeId"));
+			if (!Step.IsValid())
+			{
+				Warnings.AddUnique(FString::Printf(
+					TEXT("Prototype set variable mode skipped on '%s': missing mode payload"),
+					Node.IsValid() ? *Node->Id : TEXT("<unknown>")));
+				return false;
+			}
+			OutSteps.Add(MoveTemp(Step));
+			return true;
+		}
+
+		const bool bLooksConditional =
+			ActionTypeUpper.Equals(TEXT("CONDITIONAL"), ESearchCase::CaseSensitive)
+			|| GetPrototypeJsonArray(ActionObject, TEXT("conditionalBlocks")) != nullptr;
+		if (bLooksConditional)
+		{
+			const TArray<TSharedPtr<FJsonValue>>* ConditionalBlocks = GetPrototypeJsonArray(ActionObject, TEXT("conditionalBlocks"));
+			if (!ConditionalBlocks || ConditionalBlocks->Num() == 0)
+			{
+				Warnings.AddUnique(FString::Printf(
+					TEXT("Prototype conditional skipped on '%s': no conditional blocks"),
+					Node.IsValid() ? *Node->Id : TEXT("<unknown>")));
+				return false;
 			}
 
-			if (!Action.Navigation.IsEmpty()
-				&& !Action.Navigation.Equals(TEXT("NAVIGATE"), ESearchCase::IgnoreCase)
-				&& !Action.Navigation.Equals(TEXT("SWAP"), ESearchCase::IgnoreCase))
+			const int32 StartIndex = OutSteps.Num();
+			int32 PendingFalseJumpIndex = INDEX_NONE;
+			TArray<int32> ExitJumpIndices;
+			for (const TSharedPtr<FJsonValue>& BlockValue : *ConditionalBlocks)
 			{
-				continue;
+				const TSharedPtr<FJsonObject> BlockObject = BlockValue->AsObject();
+				if (!BlockObject.IsValid())
+				{
+					continue;
+				}
+
+				const int32 BlockStartIndex = OutSteps.Num();
+				if (PendingFalseJumpIndex != INDEX_NONE)
+				{
+					OutSteps[PendingFalseJumpIndex].JumpTargetIndex = BlockStartIndex;
+				}
+
+				FUMGPrototypeNavigationStep ConditionStep;
+				ConditionStep.Kind = EUMGPrototypeNavigationStepKind::ConditionJump;
+				ConditionStep.ConditionJson = SerializePrototypeJsonValue(BlockObject->TryGetField(TEXT("condition")));
+				const int32 ConditionStepIndex = OutSteps.Add(MoveTemp(ConditionStep));
+				PendingFalseJumpIndex = ConditionStepIndex;
+
+				if (const TArray<TSharedPtr<FJsonValue>>* NestedActions = GetPrototypeJsonArray(BlockObject, TEXT("actions")))
+				{
+					for (const TSharedPtr<FJsonValue>& NestedActionValue : *NestedActions)
+					{
+						const TSharedPtr<FJsonObject> NestedActionObject = NestedActionValue->AsObject();
+						if (!NestedActionObject.IsValid())
+						{
+							continue;
+						}
+
+						AppendPrototypeActionStepsFromJsonObject(
+							Node,
+							NestedActionObject,
+							NodeToPageId,
+							PageIdToIndex,
+							OutSteps,
+							Warnings);
+					}
+				}
+
+				FUMGPrototypeNavigationStep ExitJumpStep;
+				ExitJumpStep.Kind = EUMGPrototypeNavigationStepKind::Jump;
+				const int32 ExitJumpIndex = OutSteps.Add(MoveTemp(ExitJumpStep));
+				ExitJumpIndices.Add(ExitJumpIndex);
 			}
 
-			const FString DestinationId = ResolvePrototypeNavigateDestinationId(Node, Action);
-			if (!DestinationId.IsEmpty())
+			if (OutSteps.Num() == StartIndex)
 			{
-				OutDestinationId = DestinationId;
-				OutTransition = BuildPrototypeTransition(Node, Action);
-				return true;
+				return false;
+			}
+
+			const int32 AfterConditionalIndex = OutSteps.Num();
+			if (PendingFalseJumpIndex != INDEX_NONE)
+			{
+				OutSteps[PendingFalseJumpIndex].JumpTargetIndex = AfterConditionalIndex;
+			}
+			for (const int32 ExitJumpIndex : ExitJumpIndices)
+			{
+				OutSteps[ExitJumpIndex].JumpTargetIndex = AfterConditionalIndex;
+			}
+
+			return true;
+		}
+
+		if (AppendPrototypeActionStepFromTypedAction(
+			Node,
+			ParsedAction,
+			NodeToPageId,
+			PageIdToIndex,
+			OutSteps,
+			Warnings))
+		{
+			return true;
+		}
+
+		if (!ParsedAction.Type.IsEmpty())
+		{
+			Warnings.AddUnique(FString::Printf(
+				TEXT("Prototype action '%s' on node '%s' not supported yet"),
+				*ParsedAction.Type,
+				Node.IsValid() ? *Node->Id : TEXT("<unknown>")));
+		}
+		return false;
+	}
+
+	FString NormalizePrototypeTriggerType(const FString& TriggerType)
+	{
+		if (FUMGPrototypeNavigationBinding::IsClickTriggerType(TriggerType))
+		{
+			return TEXT("ON_CLICK");
+		}
+		if (FUMGPrototypeNavigationBinding::IsHoverTriggerType(TriggerType))
+		{
+			return TEXT("ON_HOVER");
+		}
+		if (FUMGPrototypeNavigationBinding::IsPressTriggerType(TriggerType))
+		{
+			return TEXT("ON_PRESS");
+		}
+		if (FUMGPrototypeNavigationBinding::IsDragTriggerType(TriggerType))
+		{
+			return TEXT("ON_DRAG");
+		}
+		if (FUMGPrototypeNavigationBinding::IsKeyDownTriggerType(TriggerType))
+		{
+			return TEXT("ON_KEY_DOWN");
+		}
+		if (FUMGPrototypeNavigationBinding::IsKeyUpTriggerType(TriggerType))
+		{
+			return TEXT("ON_KEY_UP");
+		}
+
+		return TriggerType;
+	}
+
+	TArray<FString> ParsePrototypeTriggerKeyCodes(const FString& TriggerJson)
+	{
+		TArray<FString> KeyCodes;
+		TSharedPtr<FJsonObject> TriggerObject;
+		if (!TryParsePrototypeJsonObject(TriggerJson, TriggerObject))
+		{
+			return KeyCodes;
+		}
+
+		if (const TArray<TSharedPtr<FJsonValue>>* KeyCodeArray = GetPrototypeJsonArray(TriggerObject, TEXT("keyCodes")))
+		{
+			for (const TSharedPtr<FJsonValue>& KeyCodeValue : *KeyCodeArray)
+			{
+				FString KeyCodeString;
+				if (KeyCodeValue.IsValid() && KeyCodeValue->TryGetString(KeyCodeString) && !KeyCodeString.IsEmpty())
+				{
+					KeyCodes.AddUnique(KeyCodeString.ToUpper());
+				}
 			}
 		}
 
-		return false;
+		const FString SingleKeyCode = GetPrototypeJsonString(TriggerObject, TEXT("keyCode"));
+		if (!SingleKeyCode.IsEmpty())
+		{
+			KeyCodes.AddUnique(SingleKeyCode.ToUpper());
+		}
+
+		return KeyCodes;
+	}
+
+	bool BuildPrototypeBindingSummary(
+		const TArray<FUMGPrototypeNavigationStep>& Steps,
+		FResolvedPrototypeAction& OutSummary)
+	{
+		if (Steps.Num() == 0)
+		{
+			return false;
+		}
+
+		OutSummary = FResolvedPrototypeAction();
+		for (const FUMGPrototypeNavigationStep& Step : Steps)
+		{
+			switch (Step.Kind)
+			{
+			case EUMGPrototypeNavigationStepKind::Navigate:
+				OutSummary.Kind = EUMGPrototypeNavigationAction::Navigate;
+				OutSummary.Payload = Step.TargetPageId;
+				OutSummary.Transition = Step.Transition;
+				OutSummary.bResolved = true;
+				return true;
+			case EUMGPrototypeNavigationStepKind::Overlay:
+				OutSummary.Kind = EUMGPrototypeNavigationAction::Overlay;
+				OutSummary.Payload = Step.TargetPageId;
+				OutSummary.Transition = Step.Transition;
+				OutSummary.bResolved = true;
+				return true;
+			case EUMGPrototypeNavigationStepKind::Back:
+				OutSummary.Kind = EUMGPrototypeNavigationAction::Back;
+				OutSummary.Payload.Reset();
+				OutSummary.Transition = Step.Transition;
+				OutSummary.bResolved = true;
+				return true;
+			case EUMGPrototypeNavigationStepKind::OpenLink:
+				OutSummary.Kind = EUMGPrototypeNavigationAction::OpenLink;
+				OutSummary.Payload = Step.ExternalUrl;
+				OutSummary.Transition = Step.Transition;
+				OutSummary.bResolved = true;
+				return true;
+			default:
+				break;
+			}
+		}
+
+		const FUMGPrototypeNavigationStep& FirstStep = Steps[0];
+		OutSummary.Kind = MapPrototypeStepKindToLegacyAction(FirstStep.Kind);
+		OutSummary.Transition = FirstStep.Transition;
+		OutSummary.bResolved = true;
+		return true;
+	}
+
+	FString BuildPrototypeStepSignature(const FUMGPrototypeNavigationStep& Step)
+	{
+		return FString::Printf(
+			TEXT("%d|%s|%d|%s|%s|%s|%s|%s|%s|%d|%s|%s|%f"),
+			static_cast<int32>(Step.Kind),
+			*Step.TargetPageId,
+			Step.TargetPageIndex,
+			*Step.ExternalUrl,
+			*Step.VariableId,
+			*Step.VariableValueJson,
+			*Step.VariableCollectionId,
+			*Step.VariableModeId,
+			*Step.ConditionJson,
+			Step.JumpTargetIndex,
+			*Step.Transition.Type,
+			*Step.Transition.Direction,
+			Step.Transition.DurationSeconds);
 	}
 
 	void MapNodeIdsToTopLevelPage(
@@ -759,6 +1830,74 @@ namespace
 		}
 	}
 
+	void CollectPrototypeReservedTokens(
+		const TSharedPtr<FDesignNode>& Node,
+		TSet<FString>& OutReservedTokens)
+	{
+		if (!Node.IsValid())
+		{
+			return;
+		}
+
+		if (!Node->Id.IsEmpty())
+		{
+			OutReservedTokens.Add(Node->Id);
+		}
+		if (!Node->Name.IsEmpty())
+		{
+			OutReservedTokens.Add(Node->Name);
+		}
+
+		for (const TSharedPtr<FDesignNode>& Child : Node->Children)
+		{
+			CollectPrototypeReservedTokens(Child, OutReservedTokens);
+		}
+	}
+
+	uint32 BuildPrototypeInternalTokenHash(const TArray<TSharedPtr<FDesignNode>>& PrototypePages)
+	{
+		FString Seed;
+		for (const TSharedPtr<FDesignNode>& PageNode : PrototypePages)
+		{
+			if (!PageNode.IsValid())
+			{
+				continue;
+			}
+
+			if (!Seed.IsEmpty())
+			{
+				Seed += TEXT("|");
+			}
+			Seed += PageNode->Id.IsEmpty() ? PageNode->Name : PageNode->Id;
+		}
+
+		if (Seed.IsEmpty())
+		{
+			Seed = TEXT("prototype");
+		}
+
+		return FCrc::StrCrc32(*Seed);
+	}
+
+	FString MakeUniquePrototypeInternalToken(
+		TSet<FString>& InOutReservedTokens,
+		const uint32 TokenHash,
+		const TCHAR* Suffix)
+	{
+		const FString BaseToken = FString::Printf(
+			TEXT("__d2u_prototype_%08x_%s"),
+			TokenHash,
+			Suffix);
+		FString Candidate = BaseToken;
+		for (int32 CollisionIndex = 1; InOutReservedTokens.Contains(Candidate); ++CollisionIndex)
+		{
+			Candidate = FString::Printf(TEXT("%s_%d"), *BaseToken, CollisionIndex);
+		}
+
+		InOutReservedTokens.Add(Candidate);
+		return Candidate;
+	}
+
 	void GatherPrototypeNavigationBindings(
 		const TSharedPtr<FDesignNode>& Node,
 		const TMap<FString, FString>& NodeToPageId,
@@ -775,41 +1914,118 @@ namespace
 
 		for (const FDesignFigmaPrototypeInteraction& Interaction : Node->FigmaPrototype.Interactions)
 		{
-			FString DestinationId;
-			FUMGPrototypeTransitionData Transition;
-			if (!IsSupportedPrototypeNavigateInteraction(Node, Interaction, DestinationId, Transition))
-			{
-				continue;
-			}
-
-			const FString* TargetPageId = NodeToPageId.Find(DestinationId);
-			if (!TargetPageId)
+			const FString NormalizedTriggerType = NormalizePrototypeTriggerType(Interaction.TriggerType);
+			const bool bUsesSupportedTrigger =
+				FUMGPrototypeNavigationBinding::IsClickTriggerType(NormalizedTriggerType)
+				|| FUMGPrototypeNavigationBinding::IsHoverTriggerType(NormalizedTriggerType)
+				|| FUMGPrototypeNavigationBinding::IsPressTriggerType(NormalizedTriggerType)
+				|| FUMGPrototypeNavigationBinding::IsDragTriggerType(NormalizedTriggerType)
+				|| FUMGPrototypeNavigationBinding::IsKeyDownTriggerType(NormalizedTriggerType)
+				|| FUMGPrototypeNavigationBinding::IsKeyUpTriggerType(NormalizedTriggerType);
+			if (!bUsesSupportedTrigger && Interaction.Actions.Num() > 0)
 			{
 				Warnings.AddUnique(FString::Printf(
-					TEXT("Prototype navigation skipped on '%s': unresolved destination '%s'"),
-					*Node->Id,
-					*DestinationId));
-				continue;
-			}
-
-			const int32* TargetPageIndex = PageIdToIndex.Find(*TargetPageId);
-			if (!TargetPageIndex || *TargetPageIndex < 0)
-			{
-				continue;
-			}
-
-			const FString BindingKey = Node->Id + TEXT("->") + *TargetPageId;
-			if (InOutSeenBindingKeys.Contains(BindingKey))
-			{
+					TEXT("Prototype trigger '%s' on node '%s' not supported yet"),
+					*Interaction.TriggerType,
+					*Node->Id));
 				continue;
 			}
 
 			FUMGPrototypeNavigationBinding Binding;
 			Binding.TriggerWidgetId = Node->Id;
 			Binding.TriggerWidgetName = Node->Id;
-			Binding.TargetPageId = *TargetPageId;
-			Binding.TargetPageIndex = *TargetPageIndex;
-			Binding.Transition = Transition;
+			Binding.TriggerType = NormalizedTriggerType;
+			Binding.TriggerJson = Interaction.TriggerJson;
+			Binding.TriggerKeyCodes = ParsePrototypeTriggerKeyCodes(Interaction.TriggerJson);
+			if (Binding.UsesKeyboardTrigger() && Binding.TriggerKeyCodes.Num() == 0)
+			{
+				Warnings.AddUnique(FString::Printf(
+					TEXT("Prototype keyboard trigger '%s' on node '%s' skipped: missing keyCodes"),
+					*Interaction.TriggerType,
+					*Node->Id));
+				continue;
+			}
+
+			TSharedPtr<FJsonObject> InteractionObject;
+			if (TryParsePrototypeJsonObject(Interaction.RawJson, InteractionObject))
+			{
+				if (const TArray<TSharedPtr<FJsonValue>>* RawActions = GetPrototypeJsonArray(InteractionObject, TEXT("actions")))
+				{
+					for (const TSharedPtr<FJsonValue>& RawActionValue : *RawActions)
+					{
+						const TSharedPtr<FJsonObject> RawActionObject = RawActionValue->AsObject();
+						if (!RawActionObject.IsValid())
+						{
+							continue;
+						}
+
+						AppendPrototypeActionStepsFromJsonObject(
+							Node,
+							RawActionObject,
+							NodeToPageId,
+							PageIdToIndex,
+							Binding.Steps,
+							Warnings);
+					}
+				}
+			}
+			else
+			{
+				for (const FDesignFigmaPrototypeAction& Action : Interaction.Actions)
+				{
+					AppendPrototypeActionStepFromTypedAction(
+						Node,
+						Action,
+						NodeToPageId,
+						PageIdToIndex,
+						Binding.Steps,
+						Warnings);
+				}
+			}
+
+			if (Binding.Steps.Num() == 0)
+			{
+				continue;
+			}
+
+			FResolvedPrototypeAction Summary;
+			if (BuildPrototypeBindingSummary(Binding.Steps, Summary))
+			{
+				Binding.Action = Summary.Kind;
+				Binding.Transition = Summary.Transition;
+				if (Summary.Kind == EUMGPrototypeNavigationAction::Navigate
+					|| Summary.Kind == EUMGPrototypeNavigationAction::Overlay)
+				{
+					Binding.TargetPageId = Summary.Payload;
+					if (const int32* PageIndex = PageIdToIndex.Find(Summary.Payload))
+					{
+						Binding.TargetPageIndex = *PageIndex;
+					}
+				}
+				else if (Summary.Kind == EUMGPrototypeNavigationAction::OpenLink)
+				{
+					Binding.ExternalUrl = Summary.Payload;
+				}
+			}
+
+			const FString StepSignature = FString::JoinBy(
+				Binding.Steps,
+				TEXT(";"),
+				[](const FUMGPrototypeNavigationStep& Step)
+				{
+					return BuildPrototypeStepSignature(Step);
+				});
+			const FString BindingKey = FString::Printf(
+				TEXT("%s::%s::%s::%s"),
+				*Node->Id,
+				*Binding.TriggerType,
+				*FString::Join(Binding.TriggerKeyCodes, TEXT(",")),
+				*StepSignature);
+			if (InOutSeenBindingKeys.Contains(BindingKey))
+			{
+				continue;
+			}
+
 			if (!Binding.IsValid())
 			{
 				continue;
@@ -889,26 +2105,39 @@ namespace
 			}
 		}
 
-		if (PrototypePages.Num() < 2)
+		if (PrototypePages.Num() == 0)
 		{
 			return Analysis;
 		}
 
+		TSet<FString> PrototypeReservedTokens;
+		for (const TSharedPtr<FDesignNode>& PageNode : PrototypePages)
+		{
+			CollectPrototypeReservedTokens(PageNode, PrototypeReservedTokens);
+		}
+		const uint32 PrototypeInternalTokenHash = BuildPrototypeInternalTokenHash(PrototypePages);
+
 		TMap<FString, FString> NodeToPageId;
 		TMap<FString, int32> PageIdToIndex;
-		Analysis.Data.SwitcherWidgetId = TEXT("__d2u_prototype_switcher");
-		Analysis.Data.SwitcherWidgetName = TEXT("__d2u_prototype_switcher");
-		for (int32 PageIndex = 0; PageIndex < PrototypePages.Num(); ++PageIndex)
+		if (PrototypePages.Num() > 1)
 		{
-			const TSharedPtr<FDesignNode>& PageNode = PrototypePages[PageIndex];
-			if (!PageNode.IsValid() || PageNode->Id.IsEmpty())
+			Analysis.Data.SwitcherWidgetId = MakeUniquePrototypeInternalToken(
+				PrototypeReservedTokens,
+				PrototypeInternalTokenHash,
+				TEXT("switcher"));
+			Analysis.Data.SwitcherWidgetName = Analysis.Data.SwitcherWidgetId;
+			for (int32 PageIndex = 0; PageIndex < PrototypePages.Num(); ++PageIndex)
 			{
-				continue;
-			}
+				const TSharedPtr<FDesignNode>& PageNode = PrototypePages[PageIndex];
+				if (!PageNode.IsValid() || PageNode->Id.IsEmpty())
+				{
+					continue;
+				}
 
-			Analysis.Data.PageIds.Add(PageNode->Id);
-			PageIdToIndex.Add(PageNode->Id, PageIndex);
-			MapNodeIdsToTopLevelPage(PageNode, PageNode->Id, NodeToPageId);
+				Analysis.Data.PageIds.Add(PageNode->Id);
+				PageIdToIndex.Add(PageNode->Id, PageIndex);
+				MapNodeIdsToTopLevelPage(PageNode, PageNode->Id, NodeToPageId);
+			}
 		}
 
 		TSet<FString> SeenBindingKeys;
@@ -924,6 +2153,15 @@ namespace
 				Warnings);
 		}
 
+		if (Analysis.Data.HasOverlayBindings())
+		{
+			Analysis.Data.OverlayHostWidgetId = MakeUniquePrototypeInternalToken(
+				PrototypeReservedTokens,
+				PrototypeInternalTokenHash,
+				TEXT("overlay_host"));
+			Analysis.Data.OverlayHostWidgetName = Analysis.Data.OverlayHostWidgetId;
+		}
+
 		if (Analysis.Data.ClickBindings.Num() == 0)
 		{
 			Analysis.Data = FUMGPrototypeNavigationData();
@@ -931,7 +2169,17 @@ namespace
 			return Analysis;
 		}
 
-		Analysis.Data.InitialPageIndex = ResolvePrototypeInitialPageIndex(Document, NodeToPageId, PageIdToIndex);
+		if (Analysis.Data.RequiresSwitcher() && Analysis.Data.PageIds.Num() < 2)
+		{
+			Analysis.Data = FUMGPrototypeNavigationData();
+			Analysis.TriggerNodeIds.Reset();
+			return Analysis;
+		}
+
+		if (Analysis.Data.RequiresSwitcher())
+		{
+			Analysis.Data.InitialPageIndex = ResolvePrototypeInitialPageIndex(Document, NodeToPageId, PageIdToIndex);
+		}
 		return Analysis;
 	}
 
@@ -966,6 +2214,14 @@ namespace
 		return Button;
 	}
 
+	void ResetPrototypePageForSwitcher(FUMGWidgetNode& PageWidget)
+	{
+		PageWidget.Name = PageWidget.Id.IsEmpty() ? PageWidget.Name : PageWidget.Id;
+		PageWidget.Bounds.X = 0.0f;
+		PageWidget.Bounds.Y = 0.0f;
+		PageWidget.Slot = FUMGSlotData();
+	}
+
 	FUMGWidgetNode BuildPrototypeSwitcherRoot(
 		TArray<FUMGWidgetNode>&& PageWidgets,
 		const FUMGPrototypeNavigationData& NavigationData)
@@ -981,9 +2237,7 @@ namespace
 		float MaxHeight = 0.0f;
 		for (FUMGWidgetNode& PageWidget : PageWidgets)
 		{
-			PageWidget.Bounds.X = 0.0f;
-			PageWidget.Bounds.Y = 0.0f;
-			PageWidget.Slot = FUMGSlotData();
+			ResetPrototypePageForSwitcher(PageWidget);
 			MaxWidth = FMath::Max(MaxWidth, PageWidget.Bounds.W);
 			MaxHeight = FMath::Max(MaxHeight, PageWidget.Bounds.H);
 			Switcher.Children.Add(MoveTemp(PageWidget));
@@ -992,6 +2246,107 @@ namespace
 		Switcher.Bounds.W = MaxWidth;
 		Switcher.Bounds.H = MaxHeight;
 		return Switcher;
+	}
+
+	FUMGWidgetNode BuildPrototypeRoot(
+		TArray<FUMGWidgetNode>&& PageWidgets,
+		const FUMGPrototypeNavigationData& NavigationData)
+	{
+		FUMGWidgetNode BaseSwitcher = BuildPrototypeSwitcherRoot(MoveTemp(PageWidgets), NavigationData);
+		if (!NavigationData.HasOverlayBindings())
+		{
+			return BaseSwitcher;
+		}
+
+		FUMGWidgetNode OverlayHost;
+		OverlayHost.Type = TEXT("Overlay");
+		OverlayHost.Id = NavigationData.OverlayHostWidgetId;
+		OverlayHost.Name = NavigationData.OverlayHostWidgetName;
+		OverlayHost.Bounds = BaseSwitcher.Bounds;
+		OverlayHost.Slot = FUMGSlotData();
+		OverlayHost.WidgetStyle.Visibility = TEXT("Collapsed");
+		OverlayHost.WidgetStyle.bHasVisibility = true;
+
+		BaseSwitcher.Bounds.X = 0.0f;
+		BaseSwitcher.Bounds.Y = 0.0f;
+		BaseSwitcher.Slot = FUMGSlotData();
+		BaseSwitcher.Slot.HorizontalAlignment = TEXT("Fill");
+		BaseSwitcher.Slot.VerticalAlignment = TEXT("Fill");
+
+		FUMGWidgetNode Root;
+		Root.Type = TEXT("Overlay");
+		Root.Id = NavigationData.SwitcherWidgetId.IsEmpty()
+			? TEXT("__d2u_prototype_root")
+			: NavigationData.SwitcherWidgetId + TEXT("_root");
+		Root.Name = NavigationData.SwitcherWidgetName.IsEmpty()
+			? Root.Id
+			: NavigationData.SwitcherWidgetName + TEXT("_root");
+		Root.Bounds = BaseSwitcher.Bounds;
+		Root.Children.Add(MoveTemp(BaseSwitcher));
+		Root.Children.Add(MoveTemp(OverlayHost));
+		return Root;
+	}
+
+	void WarmSharedTextCalibrationResolvedNode(
+		const TSharedPtr<FDesignNode>& Node,
+		const FConversionContext& Context);
+
+	void WarmSharedTextCalibrationRecursive(
+		const TSharedPtr<FDesignNode>& Node,
+		const FConversionContext& Context)
+	{
+		if (!Node.IsValid() || ShouldSkipNode(Node))
+		{
+			return;
+		}
+
+		const FConversionContext ActiveContext = Context.WithNodeTheme(Node);
+		if (Node->Type == EDesignNodeType::Ref)
+		{
+			const TSharedPtr<FDesignNode> ActiveNode = ExpandRefForConversion(Node, ActiveContext);
+			if (!ActiveNode.IsValid() || ShouldSkipNode(ActiveNode))
+			{
+				return;
+			}
+
+			WarmSharedTextCalibrationResolvedNode(ActiveNode, ActiveContext.WithNodeTheme(ActiveNode));
+			return;
+		}
+
+		WarmSharedTextCalibrationResolvedNode(Node, ActiveContext);
+	}
+
+	void WarmSharedTextCalibrationResolvedNode(
+		const TSharedPtr<FDesignNode>& Node,
+		const FConversionContext& Context)
+	{
+		if (!Node.IsValid() || ShouldSkipNode(Node))
+		{
+			return;
+		}
+
+		if (Node->Type == EDesignNodeType::Text
+			&& Node->TextAlignVertical != EDesignTextAlignVertical::Top
+			&& !Node->Content.Contains(TEXT("\n"))
+			&& TextMeasurement::IsWrappingTextMode(Node))
+		{
+			(void)TextMeasurement::ResolveTextFontSizeForUMG(Node);
+		}
+
+		for (const TSharedPtr<FDesignNode>& Child : Node->Children)
+		{
+			WarmSharedTextCalibrationRecursive(Child, Context);
+		}
+	}
+
+	void WarmSharedTextCalibration(
+		const TArray<TSharedPtr<FDesignNode>>& Nodes,
+		const FConversionContext& Context)
+	{
+		for (const TSharedPtr<FDesignNode>& Node : Nodes)
+		{
+			WarmSharedTextCalibrationRecursive(Node, Context);
+		}
 	}
 
 }
@@ -1022,6 +2377,9 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document)
 
 	FConversionState State(Document, Result.Warnings);
 	FConversionContext RootContext(State);
+
+	Result.FigmaDocument.ComponentsJson = Document.FigmaDocument.ComponentsJson;
+	Result.FigmaDocument.ComponentSetsJson = Document.FigmaDocument.ComponentSetsJson;
 
 	TextMeasurement::ResetCache();
 
@@ -1084,10 +2442,10 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document)
 	if (State.PrototypeNavigation.IsValid())
 	{
 		UE_LOG(LogDesign2UMG, Log,
-			TEXT("Convert: %d top-level widgets → WidgetSwitcher root with %d navigation bindings"),
+			TEXT("Convert: %d top-level widgets → prototype root with %d navigation bindings"),
 			RenderWidgets.Num(),
 			State.PrototypeNavigation.ClickBindings.Num());
-		Result.RootWidget = BuildPrototypeSwitcherRoot(MoveTemp(RenderWidgets), State.PrototypeNavigation);
+		Result.RootWidget = BuildPrototypeRoot(MoveTemp(RenderWidgets), State.PrototypeNavigation);
 		Result.IconFontMappingChanges.Upserts = MoveTemp(State.PendingIconFontMappings);
 		Result.IconFontMappingChanges.Removals = MoveTemp(State.PrunedInvalidMappings);
 		return Result;
@@ -1165,6 +2523,8 @@ FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FConversio
 		{
 			Widget.Bounds.H = FCString::Atof(*FallbackHeight);
 		}
+
+		Widget.Figma = BuildFigmaNodeData(Node);
 
 		UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: '%s' -> Figma render fallback image"), *Widget.Name);
 		return Widget;
@@ -1301,10 +2661,17 @@ FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FConversio
 
 	TArray<TSharedPtr<FDesignNode>> VisibleChildren;
 	GatherVisibleChildrenForConversion(Node, VisibleChildren);
+	if (Node->Layout == EDesignLayout::Grid && NeedsGridPanel(VisibleChildren))
+	{
+		Widget.Type = TEXT("GridPanel");
+	}
 	PreResolveFlowChildren(Node, Widget, VisibleChildren, ActiveContext);
 	AppendConvertedChildren(Widget, Node, VisibleChildren, ActiveContext);
 
-	if (Node->Gap > 0)
+	const bool bHasResolvedGridGap = Node->Layout == EDesignLayout::Grid
+		&& (ResolveGridColumnGap(Node) > KINDA_SMALL_NUMBER
+			|| ResolveGridRowGap(Node) > KINDA_SMALL_NUMBER);
+	if (Node->Gap > 0 || bHasResolvedGridGap)
 	{
 		if (Node->Layout == EDesignLayout::Wrap)
 		{
@@ -1314,12 +2681,26 @@ FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FConversio
 			Widget.WidgetStyle.InnerSlotPadding = FVector2D(Node->Gap, CrossAxisGap);
 			Widget.WidgetStyle.bHasInnerSlotPadding = true;
 		}
+		else if (Node->Layout == EDesignLayout::Grid)
+		{
+			if (Widget.Type == TEXT("UniformGridPanel"))
+			{
+				const float ColumnGap = ResolveGridColumnGap(Node);
+				const float RowGap = ResolveGridRowGap(Node);
+				Widget.WidgetStyle.SlotPadding =
+					FMargin(ColumnGap * 0.5f, RowGap * 0.5f, ColumnGap * 0.5f, RowGap * 0.5f);
+				Widget.WidgetStyle.bHasSlotPadding =
+					ColumnGap > KINDA_SMALL_NUMBER || RowGap > KINDA_SMALL_NUMBER;
+			}
+		}
 		else
 		{
 			FLayoutMapper::ApplyGap(Widget.Children, Node->Gap, Node->Layout);
 		}
 
-		if (Node->Layout == EDesignLayout::Grid)
+		if (Node->Layout == EDesignLayout::Grid
+			&& Widget.Type == TEXT("UniformGridPanel")
+			&& !Widget.WidgetStyle.bHasSlotPadding)
 		{
 			Widget.WidgetStyle.SlotPadding = FMargin(Node->Gap, Node->Gap, Node->Gap, Node->Gap);
 			Widget.WidgetStyle.bHasSlotPadding = true;
@@ -1352,6 +2733,7 @@ FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FConversio
 	{
 		Widget = WrapWithPrototypeButton(MoveTemp(Widget), Node);
 	}
+	Widget.Figma = BuildFigmaNodeData(Node);
 
 	return Widget;
 }
@@ -1360,16 +2742,285 @@ FUMGWidgetNode CreateContainerWidget(const TSharedPtr<FDesignNode>& Node)
 {
 	FUMGWidgetNode Widget;
 	Widget.Type = FDesignTypeMapper::MapNodeTypeToWidget(Node->Type, Node->Layout);
+	if (Node.IsValid())
+	{
+		const FString& OverflowDirection = Node->FigmaPrototype.OverflowDirection;
+		if (OverflowDirection.Equals(TEXT("VERTICAL_SCROLLING"), ESearchCase::IgnoreCase))
+		{
+			Widget.Type = TEXT("ScrollBox");
+			Widget.Properties.Add(TEXT("Orientation"), TEXT("Vertical"));
+			Widget.Properties.Add(TEXT("ScrollBarVisibility"), TEXT("Hidden"));
+		}
+		else if (OverflowDirection.Equals(TEXT("HORIZONTAL_SCROLLING"), ESearchCase::IgnoreCase))
+		{
+			Widget.Type = TEXT("ScrollBox");
+			Widget.Properties.Add(TEXT("Orientation"), TEXT("Horizontal"));
+			Widget.Properties.Add(TEXT("ScrollBarVisibility"), TEXT("Hidden"));
+		}
+	}
 	return Widget;
 }
 
 FUMGWidgetNode CreateTextWidget(const TSharedPtr<FDesignNode>& Node)
 {
 	FUMGWidgetNode Widget;
-	Widget.Type = TEXT("TextBlock");
-	Widget.Text.Text = Node->Content;
+	constexpr TCHAR RichTextStyleRowsPropertyKey[] = TEXT("Design2UMG.RichTextStyleRows");
+
+	struct FResolvedRichTextRun
+	{
+		FString RowName;
+		FString Content;
+		FString FontFamily;
+		FString TypefaceFontName;
+		float FontSize = 0.0f;
+		float DesignFontSize = 0.0f;
+		float LetterSpacing = 0.0f;
+		bool bHasFontSize = false;
+		bool bHasLetterSpacing = false;
+		bool bUnderline = false;
+		bool bStrikethrough = false;
+		bool bHasColor = false;
+		FString Color;
+		FString Href;
+	};
+
+	struct FGeneratedRichTextContent
+	{
+		FString Markup;
+		FString StyleRowsJson;
+		FString SingleHref;
+		bool bHasStyleRows = false;
+	};
+
+	const auto EscapeRichTextText = [](const FString& Value)
+	{
+		FString Escaped = Value;
+		Escaped.ReplaceInline(TEXT("&"), TEXT("&amp;"));
+		Escaped.ReplaceInline(TEXT("<"), TEXT("&lt;"));
+		Escaped.ReplaceInline(TEXT(">"), TEXT("&gt;"));
+		return Escaped;
+	};
+
+	const auto EscapeRichTextAttribute = [&EscapeRichTextText](const FString& Value)
+	{
+		FString Escaped = EscapeRichTextText(Value);
+		Escaped.ReplaceInline(TEXT("\""), TEXT("&quot;"));
+		Escaped.ReplaceInline(TEXT("'"), TEXT("&apos;"));
+		return Escaped;
+	};
+
+	const auto ResolveFontAssetPath = [](const FString& FontFamily)
+	{
+		if (FontFamily.IsEmpty())
+		{
+			return FString();
+		}
+
+		const FString AssetPath = FFontResolver::FindFontAssetPath(FontFamily);
+		return AssetPath.IsEmpty() ? FontFamily : AssetPath;
+	};
+
+	const auto ResolveTypefaceName = [](const FString& FontFamily, const FString& FontWeight)
+	{
+		const FString EffectiveWeight = FontWeight.IsEmpty() ? TEXT("normal") : FontWeight;
+		FString Typeface = FFontResolver::FindBestTypeface(FontFamily, EffectiveWeight);
+		if (Typeface.IsEmpty())
+		{
+			Typeface = FDesignTypeMapper::MapFontWeight(EffectiveWeight).ToString();
+		}
+		return Typeface;
+	};
+
+	const auto TextRunNeedsRichText = [](const FDesignTextRun& Run)
+	{
+		return !Run.FontFamily.IsEmpty()
+			|| Run.bHasFontSize
+			|| !Run.FontWeight.IsEmpty()
+			|| !Run.FontStyle.IsEmpty()
+			|| Run.bHasLineHeight
+			|| Run.bHasLetterSpacing
+			|| Run.bHasUnderline
+			|| Run.bHasStrikethrough
+			|| !Run.Href.IsEmpty();
+	};
+
+	const auto ShouldUseRichTextBlock = [&TextRunNeedsRichText](const TSharedPtr<FDesignNode>& InNode)
+	{
+		if (!InNode.IsValid())
+		{
+			return false;
+		}
+
+		if (!InNode->Href.IsEmpty())
+		{
+			return true;
+		}
+
+		for (const FDesignTextRun& Run : InNode->TextRuns)
+		{
+			if (TextRunNeedsRichText(Run))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	};
+
+	const auto BuildResolvedRichTextRun =
+		[&ResolveFontAssetPath, &ResolveTypefaceName](const TSharedPtr<FDesignNode>& InNode, const FDesignTextRun* Run, int32 RunIndex, const float ResolvedNodeFontSize)
+	{
+		FResolvedRichTextRun Result;
+		Result.RowName = FString::Printf(TEXT("d2u_run_%d"), RunIndex);
+		Result.Content = Run ? Run->Content : InNode->Content;
+
+		const FString EffectiveFontFamily = (Run && !Run->FontFamily.IsEmpty()) ? Run->FontFamily : InNode->FontFamily;
+		Result.FontFamily = ResolveFontAssetPath(EffectiveFontFamily);
+		Result.TypefaceFontName = ResolveTypefaceName(
+			EffectiveFontFamily,
+			(Run && !Run->FontWeight.IsEmpty()) ? Run->FontWeight : InNode->FontWeight);
+
+		const float EffectiveDesignFontSize = (Run && Run->bHasFontSize) ? Run->FontSize : InNode->FontSize;
+		if (EffectiveDesignFontSize > 0.0f)
+		{
+			Result.DesignFontSize = EffectiveDesignFontSize;
+			Result.FontSize = (Run && Run->bHasFontSize && InNode->FontSize > KINDA_SMALL_NUMBER && ResolvedNodeFontSize > KINDA_SMALL_NUMBER)
+				? (Run->FontSize * (ResolvedNodeFontSize / InNode->FontSize))
+				: ((Run && Run->bHasFontSize) ? Run->FontSize : ResolvedNodeFontSize);
+			Result.bHasFontSize = Result.FontSize > 0.0f;
+		}
+
+		const bool bHasNodeColor = InNode->Fill.Type == EDesignFillType::Color;
+		if (bHasNodeColor)
+		{
+			Result.Color = Design2UMGWidgetNodeAccess::SerializeWidgetColor(FUMGValueParser::ParseColor(InNode->Fill.SolidColor));
+			Result.bHasColor = !Result.Color.IsEmpty();
+		}
+
+		const bool bRunUnderline = Run ? (Run->bHasUnderline ? Run->bUnderline : InNode->bUnderline) : InNode->bUnderline;
+		Result.bStrikethrough = Run ? (Run->bHasStrikethrough ? Run->bStrikethrough : InNode->bStrikethrough) : InNode->bStrikethrough;
+		Result.Href = (Run && !Run->Href.IsEmpty()) ? Run->Href : InNode->Href;
+		Result.bUnderline = bRunUnderline || !Result.Href.IsEmpty();
+
+		const float EffectiveLetterSpacing = (Run && Run->bHasLetterSpacing) ? Run->LetterSpacing : InNode->LetterSpacing;
+		const bool bHasLetterSpacing = (Run && Run->bHasLetterSpacing) || InNode->LetterSpacing != 0.0f;
+		if (bHasLetterSpacing)
+		{
+			Result.LetterSpacing = EffectiveLetterSpacing;
+			Result.bHasLetterSpacing = true;
+		}
+
+		return Result;
+	};
+
+	const auto BuildRichTextContent =
+		[&BuildResolvedRichTextRun, &EscapeRichTextAttribute, &EscapeRichTextText](const TSharedPtr<FDesignNode>& InNode)
+	{
+		FGeneratedRichTextContent Result;
+		if (!InNode.IsValid())
+		{
+			return Result;
+		}
+
+		const float ResolvedNodeFontSize = TextMeasurement::ResolveTextFontSizeForUMG(InNode);
+		TArray<FResolvedRichTextRun> Runs;
+		if (InNode->TextRuns.Num() > 0)
+		{
+			for (int32 RunIndex = 0; RunIndex < InNode->TextRuns.Num(); ++RunIndex)
+			{
+				Runs.Add(BuildResolvedRichTextRun(InNode, &InNode->TextRuns[RunIndex], RunIndex, ResolvedNodeFontSize));
+			}
+		}
+		else
+		{
+			Runs.Add(BuildResolvedRichTextRun(InNode, nullptr, 0, ResolvedNodeFontSize));
+		}
+
+		TSharedRef<FJsonObject> StyleRowsObject = MakeShared<FJsonObject>();
+		TSet<FString> UniqueHrefs;
+		for (const FResolvedRichTextRun& Run : Runs)
+		{
+			Result.Markup += FString::Printf(TEXT("<%s"), *Run.RowName);
+			if (!Run.Href.IsEmpty())
+			{
+				Result.Markup += FString::Printf(TEXT(" href=\"%s\""), *EscapeRichTextAttribute(Run.Href));
+				UniqueHrefs.Add(Run.Href);
+			}
+			Result.Markup += TEXT(">");
+			Result.Markup += EscapeRichTextText(Run.Content);
+			Result.Markup += TEXT("</>");
+
+			TSharedRef<FJsonObject> RowObject = MakeShared<FJsonObject>();
+			if (!Run.FontFamily.IsEmpty())
+			{
+				RowObject->SetStringField(TEXT("FontFamily"), Run.FontFamily);
+			}
+			if (!Run.TypefaceFontName.IsEmpty())
+			{
+				RowObject->SetStringField(TEXT("TypefaceFontName"), Run.TypefaceFontName);
+			}
+			if (Run.bHasFontSize)
+			{
+				RowObject->SetNumberField(TEXT("FontSize"), Run.FontSize);
+				RowObject->SetNumberField(TEXT("DesignFontSize"), Run.DesignFontSize > 0.0f ? Run.DesignFontSize : Run.FontSize);
+			}
+			if (Run.bHasLetterSpacing)
+			{
+				RowObject->SetNumberField(TEXT("LetterSpacing"), Run.LetterSpacing);
+			}
+			if (Run.bHasColor)
+			{
+				RowObject->SetStringField(TEXT("Color"), Run.Color);
+			}
+			if (Run.bUnderline)
+			{
+				RowObject->SetBoolField(TEXT("Underline"), true);
+			}
+			if (Run.bStrikethrough)
+			{
+				RowObject->SetBoolField(TEXT("Strikethrough"), true);
+			}
+			if (!Run.Href.IsEmpty())
+			{
+				RowObject->SetStringField(TEXT("Href"), Run.Href);
+			}
+			StyleRowsObject->SetObjectField(Run.RowName, RowObject);
+		}
+
+		if (UniqueHrefs.Num() == 1)
+		{
+			for (const FString& UniqueHref : UniqueHrefs)
+			{
+				Result.SingleHref = UniqueHref;
+				break;
+			}
+		}
+
+		TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
+			TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Result.StyleRowsJson);
+		Result.bHasStyleRows = FJsonSerializer::Serialize(StyleRowsObject, Writer);
+		if (!Result.bHasStyleRows)
+		{
+			Result.StyleRowsJson.Empty();
+		}
+		return Result;
+	};
+
+	const bool bUseRichTextBlock = ShouldUseRichTextBlock(Node);
+	const FGeneratedRichTextContent RichTextContent = bUseRichTextBlock ? BuildRichTextContent(Node) : FGeneratedRichTextContent();
+	Widget.Type = bUseRichTextBlock ? TEXT("RichTextBlock") : TEXT("TextBlock");
+	Widget.Text.Text = bUseRichTextBlock ? RichTextContent.Markup : TextMeasurement::PrepareRuntimeTextContent(Node->Content);
 	Widget.Text.bHasText = true;
 	ApplyTextProperties(Widget, Node);
+	if (bUseRichTextBlock && RichTextContent.bHasStyleRows)
+	{
+		Widget.Properties.Add(RichTextStyleRowsPropertyKey, RichTextContent.StyleRowsJson);
+	}
+	if (!RichTextContent.SingleHref.IsEmpty())
+	{
+		Widget.WidgetStyle.ToolTipText = RichTextContent.SingleHref;
+		Widget.WidgetStyle.bHasToolTipText = true;
+	}
 	return Widget;
 }
 
@@ -1432,10 +3083,6 @@ void ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& 
 		Widget.Text.WrapTextAt = ResolvedWrapTextAt;
 		Widget.Text.bHasWrapTextAt = true;
 	}
-
-	// textAlignVertical is alignment inside the text box, not the parent layout slot.
-	// Mapping it onto the parent slot shifts text widgets inside buttons/tabs/tables and
-	// causes widespread component drift. Keep it as text metadata only.
 
 	const bool bApplyRuntimeLineHeight =
 		TextMeasurement::ShouldApplyExplicitLineHeight(Node, ResolvedFontSize)
@@ -1504,7 +3151,36 @@ void ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& 
 		Widget.Text.TextAlignVertical =
 			Node->TextAlignVertical == EDesignTextAlignVertical::Middle ? TEXT("Center") : TEXT("Bottom");
 		Widget.Text.bHasTextAlignVertical = true;
+
+		// textAlignVertical is an internal text-box alignment hint. It must not
+		// move the outer layout slot, but fixed-height text still needs internal
+		// padding so the runtime TextBlock approximates the authored vertical
+		// centering/bottom alignment.
+		if (Node->Height.Value > 0.0f)
+		{
+			const FVector2D MeasuredTextSize = TextMeasurement::MeasureTextNodeSize(Node, 0.0f);
+			const float ContentHeight = MeasuredTextSize.Y;
+			const float SlackHeight = Node->Height.Value - ContentHeight;
+			if (ContentHeight > 0.0f && SlackHeight > 0.5f)
+			{
+				FMargin InternalPadding = Widget.WidgetStyle.Padding;
+				if (Node->TextAlignVertical == EDesignTextAlignVertical::Middle)
+				{
+					const float SplitPadding = SlackHeight * 0.5f;
+					InternalPadding.Top += SplitPadding;
+					InternalPadding.Bottom += SplitPadding;
+				}
+				else
+				{
+					InternalPadding.Top += SlackHeight;
+				}
+
+				Widget.WidgetStyle.Padding = InternalPadding;
+				Widget.WidgetStyle.bHasPadding = true;
+			}
+		}
 	}
+
 }
 
 FUMGWidgetNode CreateIconFontWidget(const TSharedPtr<FDesignNode>& Node, FConversionState& State)
@@ -1512,8 +3188,35 @@ FUMGWidgetNode CreateIconFontWidget(const TSharedPtr<FDesignNode>& Node, FConver
 	FUMGWidgetNode Widget;
 	Widget.Type = TEXT("TextBlock");
 
+	const auto ResolveIconTypefaceWeightToken = [](const TSharedPtr<FDesignNode>& InNode, const bool bUsingFallbackFontAsset)
+	{
+		if (!InNode.IsValid())
+		{
+			return FString(TEXT("Regular"));
+		}
+
+		const FString NormalizedFontWeight = InNode->FontWeight.TrimStartAndEnd();
+		const bool bHasExplicitNodeFontWeight =
+			!NormalizedFontWeight.IsEmpty()
+			&& !NormalizedFontWeight.Equals(TEXT("normal"), ESearchCase::IgnoreCase)
+			&& !NormalizedFontWeight.Equals(TEXT("regular"), ESearchCase::IgnoreCase)
+			&& !NormalizedFontWeight.Equals(TEXT("400"), ESearchCase::IgnoreCase);
+		if (bHasExplicitNodeFontWeight)
+		{
+			return NormalizedFontWeight;
+		}
+
+		// Fallback non-icon fonts (for example the default Roboto asset used when an
+		// icon family is missing) should not inherit Material Symbols weight tokens.
+		// Real icon font assets still honor the authored icon weight.
+		return bUsingFallbackFontAsset
+			? FString(TEXT("Regular"))
+			: FString::FromInt(FMath::Clamp(InNode->IconWeight, 100, 900));
+	};
+
 	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
 	FString AssetPath;
+	FString ResolvedIconGlyph;
 	bool bUsedDefaultIconPath = false;
 	bool bUsedResolverPath = false;
 	if (Settings && !Node->IconFontFamily.IsEmpty())
@@ -1579,9 +3282,14 @@ FUMGWidgetNode CreateIconFontWidget(const TSharedPtr<FDesignNode>& Node, FConver
 	{
 		Widget.Text.FontFamily = AssetPath;
 		Widget.Text.bHasFontFamily = true;
-		const FString Typeface = !Node->FontWeight.IsEmpty()
-			? FFontResolver::FindBestTypeface(Node->IconFontFamily, Node->FontWeight)
-			: TEXT("Regular");
+		ResolvedIconGlyph = FFontResolver::FindKnownIconGlyph(Node->IconFontFamily, Node->IconFontName);
+		const bool bUsingFallbackFontAsset = bUsedDefaultIconPath;
+		FString WeightToken = ResolveIconTypefaceWeightToken(Node, bUsingFallbackFontAsset);
+		FString Typeface = FFontResolver::FindBestTypeface(Node->IconFontFamily, WeightToken);
+		if (Typeface.IsEmpty())
+		{
+			Typeface = FDesignTypeMapper::MapFontWeight(WeightToken).ToString();
+		}
 		if (!Typeface.IsEmpty())
 		{
 			Widget.Text.TypefaceFontName = Typeface;
@@ -1605,7 +3313,9 @@ FUMGWidgetNode CreateIconFontWidget(const TSharedPtr<FDesignNode>& Node, FConver
 	// 图标名称即连字文本（如 "dashboard" 在 Material Symbols 中渲染为图标）
 	Widget.Text.IconName = Node->IconFontName;
 	Widget.Text.bHasIconName = true;
-	FString IconText = FFontResolver::FindKnownIconGlyph(Node->IconFontFamily, Node->IconFontName);
+	FString IconText = !ResolvedIconGlyph.IsEmpty()
+		? ResolvedIconGlyph
+		: FFontResolver::FindKnownIconGlyph(Node->IconFontFamily, Node->IconFontName);
 	if (IconText.IsEmpty())
 	{
 		IconText = Node->IconFontName;
@@ -1780,6 +3490,17 @@ void AppendConvertedChildren(
 	const TArray<TSharedPtr<FDesignNode>>& VisibleChildren,
 	const FConversionContext& Context)
 {
+	const bool bGridPanelParent =
+		Node.IsValid()
+		&& Node->Layout == EDesignLayout::Grid
+		&& Widget.Type.Equals(TEXT("GridPanel"), ESearchCase::CaseSensitive);
+	FGridPlacementState GridPlacementState;
+	if (bGridPanelParent)
+	{
+		GridPlacementState.ColumnCount = ResolveGridColumnCount(Node, VisibleChildren);
+		GridPlacementState.RowCount = ResolveGridRowCount(Node, VisibleChildren, GridPlacementState.ColumnCount);
+	}
+
 	for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
 	{
 		TSharedPtr<FDesignNode> EffectiveChild = ResolveExpandedChildForConversion(Child, Context, true);
@@ -1789,6 +3510,25 @@ void AppendConvertedChildren(
 
 		FLayoutMapper::ApplySlotProperties(ChildWidget, EffectiveChild, Node->Layout);
 		FLayoutMapper::ApplyAlignItems(ChildWidget, Node->AlignItems, Node->Layout);
+		if (Node->Layout == EDesignLayout::Grid)
+		{
+			if (bGridPanelParent)
+			{
+				ApplyGridPanelChildSlotData(ChildWidget, Node, EffectiveChild, GridPlacementState);
+			}
+			else
+			{
+				if (EffectiveChild->bHasLayoutRow)
+				{
+					ChildWidget.Slot.Row = FMath::Max(0, EffectiveChild->LayoutRow);
+				}
+				if (EffectiveChild->bHasLayoutColumn)
+				{
+					ChildWidget.Slot.Column = FMath::Max(0, EffectiveChild->LayoutColumn);
+				}
+				ApplyGridChildAlignmentOverrides(ChildWidget, Node, EffectiveChild);
+			}
+		}
 		if (Node->Layout != EDesignLayout::None && !EffectiveChild->bAbsoluteLayoutPositioning)
 		{
 			ChildWidget.Bounds.X = 0.0f;

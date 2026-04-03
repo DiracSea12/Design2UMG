@@ -817,7 +817,9 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 		return nullptr;
 	}
 
-	// 浠庢墍鏈夐噰鏍风偣閲嶆柊璁＄畻绮剧‘ bounds锛圥arsePathData 鐨?bounds 鍙惈绔偣锛屾洸绾垮嚫鍑洪儴鍒嗕細閬楁紡锛?	Bounds.Init();
+	// 用所有采样点重新计算精确 bounds。
+	// ParsePathData 给出的 bounds 只覆盖控制点，曲线凸出部分可能漏掉。
+	Bounds.Init();
 	for (const auto& Path : SubPaths)
 	{
 		for (const auto& Pt : Path)
@@ -890,7 +892,12 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 	if (!Texture)
 		return nullptr;
 
-	// 涓嶈 Rename 鍒?widget 涓嬮潰锛丆reateBlueprint 浼氳嚜鍔ㄧ紪璇戝苟娣辨嫹璐?WidgetTree锛?	// RF_Transient 绾圭悊鐨?PlatformData/Mips 鍦ㄦ嫹璐濅腑浼氫涪澶憋紙"contains no miplevels"锛夈€?	// 绾圭悊鐣欏湪 GetTransientPackage() 涓紝閫氳繃 AddToRoot 闃叉 GC銆?	// RF_DuplicateTransient 浣?FDuplicateDataWriter 鍐?nullptr 鑰岄潪澶嶅埗锛岄伩鍏嶇┖ mip 鍓湰銆?	Texture->AddToRoot();
+	// 不要把纹理 Rename 到 widget 下面。
+	// CreateBlueprint 会自动编译并深拷贝 WidgetTree；RF_Transient 纹理的 PlatformData/Mips
+	// 在这条链路里可能丢失，最终出现 "contains no miplevels"。
+	// 纹理保持在 GetTransientPackage() 下，并通过 AddToRoot 防止 GC。
+	// 同时使用 RF_DuplicateTransient，避免复制出空 mip 副本。
+	Texture->AddToRoot();
 	Texture->SetFlags(RF_DuplicateTransient);
 
 	Texture->SRGB = true;

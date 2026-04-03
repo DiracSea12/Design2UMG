@@ -108,7 +108,7 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Pencil Connection", meta = (DisplayName = "MCP Server Path (Optional)", ToolTip = "Override path to mcp-server binary. Leave empty for auto-discovery."))
 	FString MCPServerPath;
 
-	UPROPERTY(Config, EditAnywhere, Category = "Pencil Connection", meta = (DisplayName = "App Name (Optional)", ToolTip = "Override -app parameter. Leave empty for auto-detection (vscode/antigravity)."))
+	UPROPERTY(Config, EditAnywhere, Category = "Pencil Connection", meta = (DisplayName = "App Name (Optional)", ToolTip = "Override -app parameter. Leave empty to auto-detect from ~/.pencil/apps and running IDE processes (for example visual_studio_code / antigravity)."))
 	FString PencilAppName;
 
 	// ========== Font Import ==========
@@ -118,7 +118,7 @@ public:
 
 	/** Whether to auto-import known web fonts (Inter/Geist/JetBrainsMono/Material Symbols, etc.) when family is used but not found locally. */
 	UPROPERTY(Config, EditAnywhere, Category = "Font Import", meta = (DisplayName = "Auto Import Known Web Fonts", ToolTip = "When a known font family is referenced but no local asset exists, try one-time auto import from curated public URLs."))
-	bool bAutoImportKnownWebFonts = true;
+	bool bAutoImportKnownWebFonts = false;
 
 	// ========== Icon Font ==========
 

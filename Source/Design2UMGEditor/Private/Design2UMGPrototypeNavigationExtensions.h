@@ -13,10 +13,36 @@
 class UUserWidget;
 class UWidgetBlueprintGeneratedClass;
 class UWidgetTree;
+class UWidgetAnimation;
 class FWidgetBlueprintCompilerContext;
+struct FGeometry;
+struct FPointerEvent;
+
+UENUM()
+enum class EDesign2UMGPrototypeGeneratedTransitionStage : uint8
+{
+	None,
+	Outgoing,
+	Incoming
+};
+
+USTRUCT()
+struct FDesign2UMGPrototypeOverlayEntry
+{
+	GENERATED_BODY()
+
+	UPROPERTY(Transient)
+	FString PageId;
+
+	UPROPERTY(Transient)
+	int32 OriginalIndex = INDEX_NONE;
+
+	UPROPERTY(Transient)
+	TObjectPtr<class UWidget> PageWidget = nullptr;
+};
 
 UCLASS()
-class DESIGN2UMGEDITOR_API UDesign2UMGPrototypeNavigationClickProxy : public UObject
+class DESIGN2UMGEDITOR_API UDesign2UMGPrototypeNavigationTriggerProxy : public UObject
 {
 	GENERATED_BODY()
 
@@ -27,6 +53,14 @@ public:
 
 	UFUNCTION()
 	void HandleClicked();
+
+	UFUNCTION()
+	void HandleHovered();
+
+	UFUNCTION()
+	void HandlePressed();
+
+	FReply HandleDragDetected(const FGeometry& Geometry, const FPointerEvent& PointerEvent);
 
 private:
 	UPROPERTY(Transient)
@@ -46,14 +80,34 @@ public:
 	bool IsBound() const { return bBindingsInitialized; }
 	void BindNavigation(UUserWidget* UserWidget);
 	void HandleNavigationRequest(const FUMGPrototypeNavigationBinding& Binding);
+	bool ShouldCaptureKeyboardInput() const;
+	bool HandleKeyboardInput(const FKey& Key, bool bIsKeyDown);
+	virtual void BeginDestroy() override;
 
 #if WITH_EDITOR
 	bool VerifyBindings(const UWidgetTree* WidgetTree) const;
 #endif
 
 private:
+	bool HasKeyboardBindings() const;
+	bool HasKeyboardFocusForPrototypeInput() const;
+	bool ExecutePrototypeProgram(const FUMGPrototypeNavigationBinding& Binding);
+	bool ExecutePrototypeStepBinding(
+		const FUMGPrototypeNavigationBinding& SourceBinding,
+		const FUMGPrototypeNavigationStep& Step);
+	bool PushOverlayPage(const FUMGPrototypeNavigationBinding& Binding);
+	bool PopOverlayPage();
+	void RestoreOverlayPage(const FDesign2UMGPrototypeOverlayEntry& Entry);
+	void RestoreAllOverlayPages();
+	class UWidget* ResolvePrototypePageWidget(const FString& PageId) const;
 	bool TickActiveTransition(float DeltaTime);
 	void StopActiveTransition(bool bSnapToFinalState);
+	bool TryPlayGeneratedTransition(const FUMGPrototypeNavigationBinding& Binding);
+	UWidgetAnimation* ResolveGeneratedTransitionAnimation(const FString& AnimationName) const;
+	void StartGeneratedTransitionStage(UWidgetAnimation* Animation, EDesign2UMGPrototypeGeneratedTransitionStage Stage);
+	void ClearGeneratedTransitionPlayback(bool bResetVisualState);
+	UFUNCTION()
+	void HandleGeneratedTransitionAnimationFinished();
 	static float EvaluateEasingAlpha(float Alpha, const FString& EasingType);
 	static FVector2D ResolveTransitionOffset(const class UWidgetSwitcher* Switcher, const FString& Direction);
 
@@ -61,7 +115,7 @@ private:
 	FUMGPrototypeNavigationData NavigationData;
 
 	UPROPERTY(Transient)
-	TArray<TObjectPtr<UDesign2UMGPrototypeNavigationClickProxy>> ClickProxies;
+	TArray<TObjectPtr<UDesign2UMGPrototypeNavigationTriggerProxy>> TriggerProxies;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UUserWidget> BoundUserWidget;
@@ -70,13 +124,33 @@ private:
 	TObjectPtr<class UWidgetSwitcher> BoundSwitcher;
 
 	UPROPERTY(Transient)
+	TObjectPtr<class UOverlay> BoundOverlayHost;
+
+	UPROPERTY(Transient)
+	TMap<FString, TObjectPtr<class UWidget>> PrototypePageWidgets;
+
+	UPROPERTY(Transient)
+	TArray<FDesign2UMGPrototypeOverlayEntry> OverlayStack;
+
+	UPROPERTY(Transient)
 	FUMGPrototypeNavigationBinding ActiveBinding;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UWidgetAnimation> ActiveGeneratedTransitionAnimation;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UWidgetAnimation> PendingIncomingAnimation;
+
+	TMap<FString, FString> PrototypeVariableValues;
+	TMap<FString, FString> PrototypeVariableModes;
 
 	FTSTicker::FDelegateHandle TransitionTickerHandle;
 	FVector2D TransitionBaseTranslation = FVector2D::ZeroVector;
 	float TransitionBaseOpacity = 1.0f;
 	float TransitionElapsedSeconds = 0.0f;
 	bool bTransitionSwitchedTarget = false;
+	EDesign2UMGPrototypeGeneratedTransitionStage GeneratedTransitionStage =
+		EDesign2UMGPrototypeGeneratedTransitionStage::None;
 
 	bool bBindingsInitialized = false;
 };

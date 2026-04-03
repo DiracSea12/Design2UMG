@@ -14,24 +14,70 @@
 #include "Framework/Application/SlateApplication.h"
 #include "Misc/ScopedSlowTask.h"
 
+namespace
+{
+	TSharedPtr<FJsonObject> BuildInitializeParams()
+	{
+		TSharedPtr<FJsonObject> Params = MakeShared<FJsonObject>();
+		TSharedPtr<FJsonObject> ClientInfo = MakeShared<FJsonObject>();
+		ClientInfo->SetStringField(TEXT("name"), TEXT("Design2UMG"));
+		ClientInfo->SetStringField(TEXT("version"), TEXT("1.0.0"));
+		Params->SetObjectField(TEXT("clientInfo"), ClientInfo);
+		Params->SetStringField(TEXT("protocolVersion"), TEXT("2024-11-05"));
+		Params->SetObjectField(TEXT("capabilities"), MakeShared<FJsonObject>());
+		return Params;
+	}
+
+	FString BuildRpcRequestBody(const FString& Method, const TSharedPtr<FJsonObject>& Params, int32* InOutRequestId)
+	{
+		TSharedRef<FJsonObject> RequestObj = MakeShared<FJsonObject>();
+		RequestObj->SetStringField(TEXT("jsonrpc"), TEXT("2.0"));
+		RequestObj->SetStringField(TEXT("method"), Method);
+
+		if (Params.IsValid())
+		{
+			RequestObj->SetObjectField(TEXT("params"), Params);
+		}
+
+		if (!Method.StartsWith(TEXT("notifications/")) && InOutRequestId)
+		{
+			RequestObj->SetNumberField(TEXT("id"), (*InOutRequestId)++);
+		}
+
+		FString RequestBody;
+		TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&RequestBody);
+		FJsonSerializer::Serialize(RequestObj, Writer);
+		return RequestBody;
+	}
+
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> CreatePostRequest(
+		const FString& Endpoint,
+		const FString& SessionId,
+		const FString& RequestBody)
+	{
+		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = FHttpModule::Get().CreateRequest();
+		HttpRequest->SetURL(Endpoint);
+		HttpRequest->SetVerb(TEXT("POST"));
+		HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+		HttpRequest->SetHeader(TEXT("Accept"), TEXT("text/event-stream"));
+		if (!SessionId.IsEmpty())
+		{
+			HttpRequest->SetHeader(TEXT("Mcp-Session-Id"), SessionId);
+		}
+		HttpRequest->SetContentAsString(RequestBody);
+		HttpRequest->SetTimeout(30.0f);
+		return HttpRequest;
+	}
+}
+
 bool FMCPHttpClient::Connect(const FString& Endpoint)
 {
 	Disconnect();
 	ServerEndpoint = Endpoint;
 
 	// Step 1: POST initialize
-	TSharedPtr<FJsonObject> InitParams = MakeShared<FJsonObject>();
-	TSharedPtr<FJsonObject> ClientInfo = MakeShared<FJsonObject>();
-	ClientInfo->SetStringField(TEXT("name"), TEXT("Design2UMG"));
-	ClientInfo->SetStringField(TEXT("version"), TEXT("1.0.0"));
-	InitParams->SetObjectField(TEXT("clientInfo"), ClientInfo);
-	InitParams->SetStringField(TEXT("protocolVersion"), TEXT("2024-11-05"));
-
-	TSharedPtr<FJsonObject> Capabilities = MakeShared<FJsonObject>();
-	InitParams->SetObjectField(TEXT("capabilities"), Capabilities);
-
 	FString ResponseBody;
-	if (!SendRequest(TEXT("initialize"), InitParams, ResponseBody))
+	if (!SendRequest(TEXT("initialize"), BuildInitializeParams(), ResponseBody))
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: initialize handshake failed"));
 		return false;
@@ -56,17 +102,7 @@ void FMCPHttpClient::ConnectAsync(const FString& Endpoint, TFunction<void(bool b
 	Disconnect();
 	ServerEndpoint = Endpoint;
 
-	TSharedPtr<FJsonObject> InitParams = MakeShared<FJsonObject>();
-	TSharedPtr<FJsonObject> ClientInfo = MakeShared<FJsonObject>();
-	ClientInfo->SetStringField(TEXT("name"), TEXT("Design2UMG"));
-	ClientInfo->SetStringField(TEXT("version"), TEXT("1.0.0"));
-	InitParams->SetObjectField(TEXT("clientInfo"), ClientInfo);
-	InitParams->SetStringField(TEXT("protocolVersion"), TEXT("2024-11-05"));
-
-	TSharedPtr<FJsonObject> Capabilities = MakeShared<FJsonObject>();
-	InitParams->SetObjectField(TEXT("capabilities"), Capabilities);
-
-	SendRequestAsync(TEXT("initialize"), InitParams, true,
+	SendRequestAsync(TEXT("initialize"), BuildInitializeParams(), true,
 		[this, OnComplete](bool bInitOk, const FString&, const FString& NewSessionId)
 	{
 		if (!bInitOk)
@@ -113,31 +149,8 @@ void FMCPHttpClient::SendRequestAsync(
 	bool bExpectResponse,
 	TFunction<void(bool bSuccess, const FString& ResponseBody, const FString& NewSessionId)> OnComplete)
 {
-	TSharedRef<FJsonObject> RequestObj = MakeShared<FJsonObject>();
-	RequestObj->SetStringField(TEXT("jsonrpc"), TEXT("2.0"));
-	RequestObj->SetStringField(TEXT("method"), Method);
-
-	if (Params.IsValid())
-		RequestObj->SetObjectField(TEXT("params"), Params);
-
-	const bool bIsNotification = Method.StartsWith(TEXT("notifications/"));
-	if (!bIsNotification)
-		RequestObj->SetNumberField(TEXT("id"), NextRequestId++);
-
-	FString RequestBody;
-	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&RequestBody);
-	FJsonSerializer::Serialize(RequestObj, Writer);
-
-	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = FHttpModule::Get().CreateRequest();
-	HttpRequest->SetURL(ServerEndpoint);
-	HttpRequest->SetVerb(TEXT("POST"));
-	HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
-	HttpRequest->SetHeader(TEXT("Accept"), TEXT("text/event-stream"));
-	HttpRequest->SetContentAsString(RequestBody);
-	HttpRequest->SetTimeout(30.0f);
-
-	if (!SessionId.IsEmpty())
-		HttpRequest->SetHeader(TEXT("Mcp-Session-Id"), SessionId);
+	const FString RequestBody = BuildRpcRequestBody(Method, Params, &NextRequestId);
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = CreatePostRequest(ServerEndpoint, SessionId, RequestBody);
 
 	HttpRequest->OnProcessRequestComplete().BindLambda(
 		[OnComplete, Method, bExpectResponse](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnectedSuccessfully)
@@ -178,34 +191,8 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 								 FString& OutResponseBody,
 								 bool bExpectResponse)
 {
-	// 构建 JSON-RPC 2.0 请求
-	TSharedRef<FJsonObject> RequestObj = MakeShared<FJsonObject>();
-	RequestObj->SetStringField(TEXT("jsonrpc"), TEXT("2.0"));
-	RequestObj->SetStringField(TEXT("method"), Method);
-
-	if (Params.IsValid())
-		RequestObj->SetObjectField(TEXT("params"), Params);
-
-	// notifications 不需要id
-	const bool bIsNotification = Method.StartsWith(TEXT("notifications/"));
-	if (!bIsNotification)
-		RequestObj->SetNumberField(TEXT("id"), NextRequestId++);
-
-	FString RequestBody;
-	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&RequestBody);
-	FJsonSerializer::Serialize(RequestObj, Writer);
-
-	// 创建 HTTP 请求
-	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = FHttpModule::Get().CreateRequest();
-	HttpRequest->SetURL(ServerEndpoint);
-	HttpRequest->SetVerb(TEXT("POST"));
-	HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
-	HttpRequest->SetHeader(TEXT("Accept"), TEXT("text/event-stream"));
-	HttpRequest->SetContentAsString(RequestBody);
-	HttpRequest->SetTimeout(30.0f);
-
-	if (!SessionId.IsEmpty())
-		HttpRequest->SetHeader(TEXT("Mcp-Session-Id"), SessionId);
+	const FString RequestBody = BuildRpcRequestBody(Method, Params, &NextRequestId);
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = CreatePostRequest(ServerEndpoint, SessionId, RequestBody);
 
 	// Keep request state on the heap so timeout/cancel cannot leave a dangling stack capture.
 	struct FRequestState
@@ -385,30 +372,13 @@ void FMCPHttpClient::CallToolAsync(const FString& ToolName,
 		return;
 	}
 
-	// 构建 JSON-RPC 请求
-	TSharedRef<FJsonObject> RequestObj = MakeShared<FJsonObject>();
-	RequestObj->SetStringField(TEXT("jsonrpc"), TEXT("2.0"));
-	RequestObj->SetStringField(TEXT("method"), TEXT("tools/call"));
-	RequestObj->SetNumberField(TEXT("id"), NextRequestId++);
-
 	TSharedPtr<FJsonObject> Params = MakeShared<FJsonObject>();
 	Params->SetStringField(TEXT("name"), ToolName);
 	if (Arguments.IsValid())
 		Params->SetObjectField(TEXT("arguments"), Arguments);
-	RequestObj->SetObjectField(TEXT("params"), Params);
 
-	FString RequestBody;
-	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&RequestBody);
-	FJsonSerializer::Serialize(RequestObj, Writer);
-
-	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = FHttpModule::Get().CreateRequest();
-	HttpRequest->SetURL(ServerEndpoint);
-	HttpRequest->SetVerb(TEXT("POST"));
-	HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
-	HttpRequest->SetHeader(TEXT("Accept"), TEXT("text/event-stream"));
-	HttpRequest->SetHeader(TEXT("Mcp-Session-Id"), SessionId);
-	HttpRequest->SetContentAsString(RequestBody);
-	HttpRequest->SetTimeout(30.0f);
+	const FString RequestBody = BuildRpcRequestBody(TEXT("tools/call"), Params, &NextRequestId);
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = CreatePostRequest(ServerEndpoint, SessionId, RequestBody);
 
 	HttpRequest->OnProcessRequestComplete().BindLambda(
 		[OnComplete, ToolName](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnected)
@@ -447,4 +417,3 @@ void FMCPHttpClient::CallToolAsync(const FString& ToolName,
 			OnComplete(false, TEXT(""));
 	}
 }
-

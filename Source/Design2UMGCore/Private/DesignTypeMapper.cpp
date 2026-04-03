@@ -2,20 +2,33 @@
 
 #include "DesignTypeMapper.h"
 
+namespace
+{
+	FString MapLayoutToContainer(EDesignLayout Layout)
+	{
+		switch (Layout)
+		{
+		case EDesignLayout::Vertical:
+			return TEXT("VerticalBox");
+		case EDesignLayout::Horizontal:
+			return TEXT("HorizontalBox");
+		case EDesignLayout::Wrap:
+			return TEXT("WrapBox");
+		case EDesignLayout::Grid:
+			return TEXT("UniformGridPanel");
+		default:
+			return TEXT("CanvasPanel");
+		}
+	}
+}
+
 FString FDesignTypeMapper::MapNodeTypeToWidget(EDesignNodeType Type, EDesignLayout Layout)
 {
 	switch (Type)
 	{
 	case EDesignNodeType::Frame:
-		if (Layout == EDesignLayout::Vertical)
-			return TEXT("VerticalBox");
-		if (Layout == EDesignLayout::Horizontal)
-			return TEXT("HorizontalBox");
-		if (Layout == EDesignLayout::Wrap)
-			return TEXT("WrapBox");
-		if (Layout == EDesignLayout::Grid)
-			return TEXT("UniformGridPanel");
-		return TEXT("CanvasPanel");
+	case EDesignNodeType::Ref:
+		return MapLayoutToContainer(Layout);
 
 	case EDesignNodeType::Rectangle:
 	case EDesignNodeType::Ellipse:
@@ -24,8 +37,6 @@ FString FDesignTypeMapper::MapNodeTypeToWidget(EDesignNodeType Type, EDesignLayo
 		return TEXT("Border");
 
 	case EDesignNodeType::Text:
-		return TEXT("TextBlock");
-
 	case EDesignNodeType::IconFont:
 		return TEXT("TextBlock");
 
@@ -33,17 +44,6 @@ FString FDesignTypeMapper::MapNodeTypeToWidget(EDesignNodeType Type, EDesignLayo
 		return TEXT("Image");
 
 	case EDesignNodeType::Group:
-		return TEXT("CanvasPanel");
-
-	case EDesignNodeType::Ref:
-		if (Layout == EDesignLayout::Vertical)
-			return TEXT("VerticalBox");
-		if (Layout == EDesignLayout::Horizontal)
-			return TEXT("HorizontalBox");
-		if (Layout == EDesignLayout::Wrap)
-			return TEXT("WrapBox");
-		if (Layout == EDesignLayout::Grid)
-			return TEXT("UniformGridPanel");
 		return TEXT("CanvasPanel");
 
 	default:

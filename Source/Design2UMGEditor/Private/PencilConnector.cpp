@@ -6,6 +6,7 @@
 
 #include "HAL/PlatformProcess.h"
 #include "HAL/FileManager.h"
+#include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Containers/Ticker.h"
 #include "Sockets.h"
@@ -13,6 +14,133 @@
 
 namespace
 {
+	TArray<int32> ParseExtensionVersionParts(const FString& VersionText)
+	{
+		TArray<int32> Parts;
+		TArray<FString> Tokens;
+		VersionText.ParseIntoArray(Tokens, TEXT("."));
+		for (const FString& Token : Tokens)
+		{
+			Parts.Add(FCString::Atoi(*Token));
+		}
+		return Parts;
+	}
+
+	bool IsHigherExtensionVersion(const FString& CandidateVersion, const FString& CurrentBestVersion)
+	{
+		if (CurrentBestVersion.IsEmpty())
+		{
+			return true;
+		}
+
+		const TArray<int32> CandidateParts = ParseExtensionVersionParts(CandidateVersion);
+		const TArray<int32> CurrentParts = ParseExtensionVersionParts(CurrentBestVersion);
+		const int32 MaxParts = FMath::Max(CandidateParts.Num(), CurrentParts.Num());
+		for (int32 Index = 0; Index < MaxParts; ++Index)
+		{
+			const int32 CandidatePart = CandidateParts.IsValidIndex(Index) ? CandidateParts[Index] : 0;
+			const int32 CurrentPart = CurrentParts.IsValidIndex(Index) ? CurrentParts[Index] : 0;
+			if (CandidatePart != CurrentPart)
+			{
+				return CandidatePart > CurrentPart;
+			}
+		}
+
+		return false;
+	}
+
+	FString GetPencilAppsDir()
+	{
+#if PLATFORM_WINDOWS
+		const FString UserHome = FPlatformMisc::GetEnvironmentVariable(TEXT("USERPROFILE"));
+#else
+		const FString UserHome = FPlatformMisc::GetEnvironmentVariable(TEXT("HOME"));
+#endif
+		return UserHome / TEXT(".pencil/apps");
+	}
+
+	FString DetectRegisteredPencilAppName()
+	{
+		const FString AppsDir = GetPencilAppsDir();
+		if (AppsDir.IsEmpty())
+		{
+			return FString();
+		}
+
+		for (const FString& PreferredName : { TEXT("visual_studio_code"), TEXT("vscode"), TEXT("antigravity") })
+		{
+			if (FPaths::FileExists(AppsDir / PreferredName))
+			{
+				return PreferredName;
+			}
+		}
+
+		return FString();
+	}
+
+	void SyncVSCodePencilAppAlias()
+	{
+		const FString AppsDir = GetPencilAppsDir();
+		if (AppsDir.IsEmpty())
+		{
+			return;
+		}
+
+		const FString CanonicalPath = AppsDir / TEXT("visual_studio_code");
+		const FString LegacyPath = AppsDir / TEXT("vscode");
+		FString PortValue;
+		for (const FString& CandidatePath : { CanonicalPath, LegacyPath })
+		{
+			if (!FPaths::FileExists(CandidatePath))
+			{
+				continue;
+			}
+
+			if (FFileHelper::LoadFileToString(PortValue, *CandidatePath))
+			{
+				PortValue.TrimStartAndEndInline();
+				if (!PortValue.IsEmpty())
+				{
+					break;
+				}
+			}
+		}
+
+		if (PortValue.IsEmpty())
+		{
+			return;
+		}
+
+		IFileManager::Get().MakeDirectory(*AppsDir, true);
+		for (const FString& TargetPath : { CanonicalPath, LegacyPath })
+		{
+			FString Existing;
+			bool bHasUtf8Bom = false;
+			if (FPaths::FileExists(TargetPath) && FFileHelper::LoadFileToString(Existing, *TargetPath))
+			{
+				Existing.TrimStartAndEndInline();
+			}
+			if (FPaths::FileExists(TargetPath))
+			{
+				TArray<uint8> ExistingBytes;
+				if (FFileHelper::LoadFileToArray(ExistingBytes, *TargetPath) && ExistingBytes.Num() >= 3)
+				{
+					bHasUtf8Bom =
+						ExistingBytes[0] == 0xEF &&
+						ExistingBytes[1] == 0xBB &&
+						ExistingBytes[2] == 0xBF;
+				}
+			}
+			if (Existing != PortValue || bHasUtf8Bom)
+			{
+				FFileHelper::SaveStringToFile(
+					PortValue,
+					*TargetPath,
+					FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+			}
+		}
+	}
+
 	void CompleteLaunchOnce(const TSharedRef<TFunction<void(bool bSuccess)>>& OnComplete, bool bSuccess)
 	{
 		if (*OnComplete)
@@ -30,7 +158,7 @@ FPencilConnector::~FPencilConnector()
 
 FString FPencilConnector::DiscoverMCPServerPath()
 {
-	// 1. 鐢ㄦ埛鎵嬪姩鎸囧畾
+	// 1. 用户手动指定
 	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
 	if (Settings && !Settings->MCPServerPath.IsEmpty())
 	{
@@ -65,14 +193,26 @@ FString FPencilConnector::DiscoverMCPServerPath()
 		TArray<FString> ExtDirs;
 		IFileManager::Get().FindFiles(ExtDirs, *(Dir / TEXT("highagency.pencildev-*")), false, true);
 
+		FString BestPath;
+		FString BestVersion;
 		for (const FString& ExtDir : ExtDirs)
 		{
 			const FString FullPath = Dir / ExtDir / TEXT("out") / BinaryName;
 			if (FPaths::FileExists(FullPath))
 			{
-				UE_LOG(LogDesign2UMG, Log, TEXT("PencilConnector: Found MCP Server at %s"), *FullPath);
-				return FullPath;
+				const FString VersionText = ExtDir.RightChop(FString(TEXT("highagency.pencildev-")).Len());
+				if (IsHigherExtensionVersion(VersionText, BestVersion))
+				{
+					BestVersion = VersionText;
+					BestPath = FullPath;
+				}
 			}
+		}
+
+		if (!BestPath.IsEmpty())
+		{
+			UE_LOG(LogDesign2UMG, Log, TEXT("PencilConnector: Found MCP Server at %s (version %s)"), *BestPath, *BestVersion);
+			return BestPath;
 		}
 	}
 
@@ -81,29 +221,35 @@ FString FPencilConnector::DiscoverMCPServerPath()
 
 FString FPencilConnector::DetectAppName()
 {
-	// 1. 鐢ㄦ埛鎵嬪姩鎸囧畾
+	// 1. 用户手动指定
 	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
 	if (Settings && !Settings->PencilAppName.IsEmpty())
 		return Settings->PencilAppName;
 
-	// 2. Detect a running Pencil-compatible process.
+	// 2. 优先使用 Pencil 已注册过的 app id，避免继续假设固定别名。
+	if (const FString RegisteredAppName = DetectRegisteredPencilAppName(); !RegisteredAppName.IsEmpty())
+	{
+		return RegisteredAppName;
+	}
+
+	// 3. Detect a running Pencil-compatible process.
 	FPlatformProcess::FProcEnumerator ProcEnum;
 	while (ProcEnum.MoveNext())
 	{
 		const FString Name = ProcEnum.GetCurrent().GetName();
 #if PLATFORM_WINDOWS
 		if (Name.Equals(TEXT("Code.exe"), ESearchCase::IgnoreCase))
-			return TEXT("vscode");
+			return TEXT("visual_studio_code");
 #else
 		if (Name.Equals(TEXT("code"), ESearchCase::IgnoreCase))
-			return TEXT("vscode");
+			return TEXT("visual_studio_code");
 #endif
 		if (Name.Contains(TEXT("antigravity")))
 			return TEXT("antigravity");
 	}
 
-	// 3. 默认回退到 VS Code。
-	return TEXT("vscode");
+	// 4. 默认回退到 VS Code 的 Pencil app id。
+	return TEXT("visual_studio_code");
 }
 
 int32 FPencilConnector::FindAvailablePort(int32 StartPort)
@@ -135,6 +281,7 @@ int32 FPencilConnector::FindAvailablePort(int32 StartPort)
 bool FPencilConnector::Launch(int32 Port)
 {
 	Shutdown();
+	SyncVSCodePencilAppAlias();
 
 	const FString ServerPath = DiscoverMCPServerPath();
 	if (ServerPath.IsEmpty())
@@ -204,6 +351,7 @@ bool FPencilConnector::Launch(int32 Port)
 void FPencilConnector::LaunchAsync(int32 Port, TFunction<void(bool bSuccess)> OnComplete)
 {
 	Shutdown();
+	SyncVSCodePencilAppAlias();
 	const int32 LaunchToken = ++ActiveLaunchToken;
 	const TSharedRef<TFunction<void(bool bSuccess)>> SharedComplete =
 		MakeShared<TFunction<void(bool bSuccess)>>(MoveTemp(OnComplete));

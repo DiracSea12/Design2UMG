@@ -7,6 +7,7 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionComponentMask.h"
 #include "Materials/MaterialExpressionCustom.h"
+#include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 #include "Materials/MaterialExpressionTextureObjectParameter.h"
 #include "Materials/MaterialExpressionVectorParameter.h"
@@ -34,6 +35,12 @@ namespace
 
 	void SetupExpression(UMaterialExpressionTextureCoordinate* Expression, const FName& Name)
 	{
+	}
+
+	void SetupExpression(UMaterialExpressionScalarParameter* Expression, const FName& Name)
+	{
+		Expression->ParameterName = Name;
+		Expression->DefaultValue = 0.5f;
 	}
 
 	template<typename TExpression>
@@ -172,7 +179,7 @@ ShiftedAlpha += Texture.SampleLevel(TextureSampler, UV - Offset + float2(Step.x,
 ShiftedAlpha += Texture.SampleLevel(TextureSampler, UV - Offset - float2(Step.x, 0.0), 0).a * 0.17647059;
 ShiftedAlpha += Texture.SampleLevel(TextureSampler, UV - Offset + float2(0.0, Step.y), 0).a * 0.17647059;
 ShiftedAlpha += Texture.SampleLevel(TextureSampler, UV - Offset - float2(0.0, Step.y), 0).a * 0.17647059;
-float ShadowMask = saturate((Base.a - ShiftedAlpha) * 4.0) * InnerShadowColor.a;
+float ShadowMask = saturate((Base.a - ShiftedAlpha) * 4.0) * saturate(InnerShadowStrength);
 float3 OutRgb = lerp(Base.rgb, InnerShadowColor.rgb, ShadowMask);
 return float4(OutRgb, Base.a);
 )");
@@ -189,6 +196,9 @@ return float4(OutRgb, Base.a);
 	UMaterialExpressionVectorParameter* ShadowOffsetParam =
 		AddCustomInput<UMaterialExpressionVectorParameter>(Material, InnerShadowNode, TEXT("InnerShadowOffset"));
 	ShadowOffsetParam->DefaultValue = FLinearColor(0.0f, 0.0f, 0.0f, 0.0f);
+	UMaterialExpressionScalarParameter* ShadowStrengthParam =
+		AddCustomInput<UMaterialExpressionScalarParameter>(Material, InnerShadowNode, TEXT("InnerShadowStrength"));
+	ShadowStrengthParam->DefaultValue = 0.5f;
 
 	UMaterialExpressionComponentMask* EmissiveMask = AddComponentMask(Material, InnerShadowNode, true, true, true, false);
 	UMaterialExpressionComponentMask* OpacityMask = AddComponentMask(Material, InnerShadowNode, false, false, false, true);

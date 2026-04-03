@@ -63,10 +63,53 @@
 #include "Components/ContentWidget.h"
 #include "Blueprint/WidgetTree.h"
 
-FIntPoint FUMGWidgetUtils::EffectiveDesignSize = FIntPoint(1920, 1080);
-
 namespace
 {
+	thread_local int32 GWidgetBuildDepth = 0;
+	thread_local FIntPoint GWidgetBuildDesignSizeSnapshot = FIntPoint(1920, 1080);
+
+	FIntPoint SanitizeEffectiveDesignSize(const FIntPoint& InSize)
+	{
+		return FIntPoint(
+			FMath::Max(1, InSize.X),
+			FMath::Max(1, InSize.Y));
+	}
+
+	class FScopedWidgetBuildDesignSize
+	{
+	public:
+		explicit FScopedWidgetBuildDesignSize(const FIntPoint* ExplicitDesignSize)
+		{
+			if (GWidgetBuildDepth == 0)
+			{
+				GWidgetBuildDesignSizeSnapshot = SanitizeEffectiveDesignSize(
+					ExplicitDesignSize ? *ExplicitDesignSize : FIntPoint(1920, 1080));
+				bOwnsSnapshot = true;
+			}
+			++GWidgetBuildDepth;
+		}
+
+		~FScopedWidgetBuildDesignSize()
+		{
+			GWidgetBuildDepth = FMath::Max(0, GWidgetBuildDepth - 1);
+			if (bOwnsSnapshot && GWidgetBuildDepth == 0)
+			{
+				GWidgetBuildDesignSizeSnapshot = FIntPoint(1920, 1080);
+			}
+		}
+
+		static FIntPoint Current()
+		{
+			return SanitizeEffectiveDesignSize(
+				GWidgetBuildDepth > 0
+					? GWidgetBuildDesignSizeSnapshot
+					: FIntPoint(1920, 1080));
+		}
+
+	private:
+		bool bOwnsSnapshot = false;
+	};
+
 	// Widget 类型映射表
 	const TMap<FString, UClass*>& GetWidgetClassMap()
 	{
@@ -276,17 +319,38 @@ namespace
 	// 前向声明 Image 控件辅助函数（定义在后面）
 	bool HandleImageMaterialRef(UImage* ImageWidget, const FUMGWidgetNode& Node);
 	bool HandleImageTextureRef(UImage* ImageWidget, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap);
+
+	void TryAppendFigmaMetadataRecord(
+		UWidget* Widget,
+		const FUMGWidgetNode& Node,
+		TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords)
+	{
+		if (!Widget || !FigmaMetadataRecords || !Node.Figma.HasAnyComponentSemantics())
+		{
+			return;
+		}
+
+		FDesign2UMGFigmaWidgetMetadataRecord Record;
+		Record.WidgetName = Widget->GetFName();
+		Record.WidgetId = Node.Id;
+		Record.FigmaNode = Node.Figma;
+		if (Record.IsValid())
+		{
+			FigmaMetadataRecords->Add(Record);
+		}
+	}
 }
 
 // 前向声明：从 CreateWidgetRecursive 拆分出的子控件处理函数
-static void HandleNamedSlotChildren(UWidgetTree* WidgetTree, INamedSlotInterface* NamedSlotHost, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap);
-static void HandleContentWidgetChild(UWidgetTree* WidgetTree, UContentWidget* Content, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap);
+static void HandleNamedSlotChildren(UWidgetTree* WidgetTree, INamedSlotInterface* NamedSlotHost, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords);
+static void HandleContentWidgetChild(UWidgetTree* WidgetTree, UContentWidget* Content, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords);
 
 // Slot 历史数据有效性判断
 static bool HasValidSlotHistory(const FUMGSlotData& Slot);
 
-UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget, const TMap<FString, UTexture2D*>* TextureMap)
+UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords, const FIntPoint* ExplicitDesignSize)
 {
+	const FScopedWidgetBuildDesignSize DesignSizeScope(ExplicitDesignSize);
 	UClass* WidgetClass = ResolveWidgetClass(Node.Type);
 
 	// Widget 类覆盖：按节点名称匹配用户配置的替换规则
@@ -358,7 +422,7 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 				&& Node.Bounds.H > 0.0f)
 			{
 				FLayoutContext Context;
-				Context.DesignSize = FUMGWidgetUtils::EffectiveDesignSize;
+				Context.DesignSize = FScopedWidgetBuildDesignSize::Current();
 				Context.Preset = FLayoutPreset::GetStandardHUDPreset();
 				// v2.2: Hysteresis - 只有当Slot有有效历史数据时才设置OldAnchor
 				if (HasValidSlotHistory(Node.Slot))
@@ -395,6 +459,7 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 	}
 
 	ApplyWidgetProperties(NewWidget, Node);
+	TryAppendFigmaMetadataRecord(NewWidget, Node, FigmaMetadataRecords);
 
 	// Image 控件：优先 MaterialRef 程序化生成，回退 TexturePath 纹理绑定
 	if (UImage* ImageWidget = Cast<UImage>(NewWidget))
@@ -422,21 +487,21 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 				FUMGWidgetNode ChildCopy = Child;
 				ChildCopy.Slot.Row = SlotIndex->X;
 				ChildCopy.Slot.Column = SlotIndex->Y;
-				CreateWidgetRecursive(WidgetTree, ChildCopy, AsPanel, TextureMap);
+				CreateWidgetRecursive(WidgetTree, ChildCopy, AsPanel, TextureMap, FigmaMetadataRecords, ExplicitDesignSize);
 			}
 			else
 			{
-				CreateWidgetRecursive(WidgetTree, Child, AsPanel, TextureMap);
+				CreateWidgetRecursive(WidgetTree, Child, AsPanel, TextureMap, FigmaMetadataRecords, ExplicitDesignSize);
 			}
 		}
 	}
 	else if (INamedSlotInterface* NamedSlotHost = Cast<INamedSlotInterface>(NewWidget))
 	{
-		HandleNamedSlotChildren(WidgetTree, NamedSlotHost, Node, TextureMap);
+		HandleNamedSlotChildren(WidgetTree, NamedSlotHost, Node, TextureMap, FigmaMetadataRecords);
 	}
 	else if (UContentWidget* Content = Cast<UContentWidget>(NewWidget))
 	{
-		HandleContentWidgetChild(WidgetTree, Content, Node, TextureMap);
+		HandleContentWidgetChild(WidgetTree, Content, Node, TextureMap, FigmaMetadataRecords);
 	}
 
 	return NewWidget;
@@ -456,7 +521,7 @@ static bool HasValidSlotHistory(const FUMGSlotData& Slot)
 		!FMath::IsNearlyEqual(Slot.Alignment.Y, 0.0f);
 }
 
-static void HandleNamedSlotChildren(UWidgetTree* WidgetTree, INamedSlotInterface* NamedSlotHost, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap)
+static void HandleNamedSlotChildren(UWidgetTree* WidgetTree, INamedSlotInterface* NamedSlotHost, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords)
 {
 	TArray<FName> SlotNames;
 	NamedSlotHost->GetSlotNames(SlotNames);
@@ -509,7 +574,7 @@ static void HandleNamedSlotChildren(UWidgetTree* WidgetTree, INamedSlotInterface
 
 	for (const FUMGWidgetNode& ChildNode : Node.Children)
 	{
-		UWidget* ChildWidget = FUMGWidgetUtils::CreateWidgetRecursive(WidgetTree, ChildNode, nullptr, TextureMap);
+		UWidget* ChildWidget = FUMGWidgetUtils::CreateWidgetRecursive(WidgetTree, ChildNode, nullptr, TextureMap, FigmaMetadataRecords);
 		if (!ChildWidget) continue;
 
 		// 查找目标槽位：优先显式指定，其次按序分配，最后回退到末尾槽位
@@ -582,12 +647,12 @@ static void HandleNamedSlotChildren(UWidgetTree* WidgetTree, INamedSlotInterface
 	}
 }
 
-static void HandleContentWidgetChild(UWidgetTree* WidgetTree, UContentWidget* Content, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap)
+static void HandleContentWidgetChild(UWidgetTree* WidgetTree, UContentWidget* Content, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords)
 {
 	if (Node.Children.Num() == 0) return;
 
 	const FUMGWidgetNode& ChildNode = Node.Children[0];
-	UWidget* ChildWidget = FUMGWidgetUtils::CreateWidgetRecursive(WidgetTree, ChildNode, nullptr, TextureMap);
+	UWidget* ChildWidget = FUMGWidgetUtils::CreateWidgetRecursive(WidgetTree, ChildNode, nullptr, TextureMap, FigmaMetadataRecords);
 	if (ChildWidget)
 	{
 		if (UPanelSlot* ContentSlot = Content->SetContent(ChildWidget))
@@ -765,7 +830,7 @@ namespace
 			return false;
 		}
 
-		FUMGPropertyBag GenerationProps = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
+		FUMGPropertyBag GenerationProps = Design2UMGWidgetNodeAccess::BuildEffectivePropertyBag(Node);
 		UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(MatRef, GenerationProps, ImageWidget);
 		if (!Texture)
 		{

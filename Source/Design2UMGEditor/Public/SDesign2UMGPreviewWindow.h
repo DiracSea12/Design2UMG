@@ -40,7 +40,7 @@ private:
 	FOnPreviewConfirmed OnConfirmed;
 	FOnPreviewCancelled OnCancelled;
 
-	/** 棰勮鐢ㄤ复鏃剁汗鐞嗭紝閿€姣佹椂闇€閲婃斁 Root 寮曠敤 */
+	/** 预览阶段使用的临时纹理，销毁时需要释放 Root 引用。 */
 	TMap<FString, UTexture2D*> PreviewTextureMap;
 
 	FReply OnGenerateClicked();

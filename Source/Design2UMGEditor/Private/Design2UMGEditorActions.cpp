@@ -912,12 +912,12 @@ namespace Design2UMGEditorActions
 
 		IConsoleManager::Get().RegisterConsoleCommand(
 			TEXT("Design2UMG.FigmaImport"),
-			TEXT("Import from Figma: Design2UMG.FigmaImport <file_url_or_key> <token>"),
+			TEXT("Import from Figma: Design2UMG.FigmaImport <file_url_or_key> <token_from_secure_source>"),
 			FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
 			{
 				if (Args.Num() < 2)
 				{
-					UE_LOG(LogDesign2UMG, Warning, TEXT("Usage: Design2UMG.FigmaImport <file_url_or_key> <token>"));
+					UE_LOG(LogDesign2UMG, Warning, TEXT("Usage: Design2UMG.FigmaImport <file_url_or_key> <token_from_secure_source>"));
 					return;
 				}
 
@@ -1071,7 +1071,6 @@ namespace Design2UMGEditorActions
 		FFontResolver::ClearCache();
 		FDesignPathRasterizer::ClearCache();
 		FProceduralShapeGenerator::ReleaseTransientTextures();
-		FUMGWidgetUtils::EffectiveDesignSize = FIntPoint(1920, 1080);
 	}
 }
 

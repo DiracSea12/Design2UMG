@@ -157,16 +157,53 @@ namespace
 
 	void ApplyPenSemanticHints(FDesignNode& Node, const bool bPenPlaceholder, const bool bPenHasSlot, const int32 PenSlotNodeCount)
 	{
-		const bool bNameLooksLikePlaceholder = Node.Name.Contains(TEXT("placeholder"), ESearchCase::IgnoreCase);
-		const bool bNameLooksLikeSlot = Node.Name.Contains(TEXT("slot"), ESearchCase::IgnoreCase);
-		const bool bNameLooksLikeContentSlot = bPenHasSlot && Node.Name.Contains(TEXT("content"), ESearchCase::IgnoreCase);
+		const bool bTextLikeNode =
+			Node.Type == EDesignNodeType::Text
+			|| Node.Type == EDesignNodeType::IconFont
+			|| !Node.Content.IsEmpty()
+			|| !Node.FontFamily.IsEmpty()
+			|| !Node.IconFontName.IsEmpty();
+		const bool bNameLooksLikePlaceholder =
+			!bTextLikeNode && Node.Name.Contains(TEXT("placeholder"), ESearchCase::IgnoreCase);
+		const bool bNameLooksLikeSlot =
+			!bTextLikeNode && Node.Name.Contains(TEXT("slot"), ESearchCase::IgnoreCase);
+		const bool bNameLooksLikeContentSlot =
+			!bTextLikeNode && bPenHasSlot && Node.Name.Contains(TEXT("content"), ESearchCase::IgnoreCase);
 		Node.bSemanticPlaceholderSurface =
-			bPenPlaceholder
-			|| bPenHasSlot
-			|| PenSlotNodeCount > 0
-			|| bNameLooksLikePlaceholder
-			|| bNameLooksLikeContentSlot
-			|| bNameLooksLikeSlot;
+			!bTextLikeNode
+			&& (bPenPlaceholder
+				|| bPenHasSlot
+				|| PenSlotNodeCount > 0
+				|| bNameLooksLikePlaceholder
+				|| bNameLooksLikeContentSlot
+				|| bNameLooksLikeSlot);
+	}
+
+	void FinalizePenPaddingRuntimeWrapPolicy(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid()
+			|| Node->Layout != EDesignLayout::Horizontal
+			&& Node->Layout != EDesignLayout::Vertical)
+		{
+			return;
+		}
+
+		bool bHasExplicitChildPosition = false;
+		for (const TSharedPtr<FDesignNode>& Child : Node->Children)
+		{
+			if (!Child.IsValid() || Child->bAbsoluteLayoutPositioning)
+			{
+				continue;
+			}
+
+			if (Child->bHasX || Child->bHasY)
+			{
+				bHasExplicitChildPosition = true;
+				break;
+			}
+		}
+
+		Node->bPaddingRequiresRuntimeWrap = !bHasExplicitChildPosition;
 	}
 
 	void ParsePenSemanticMetadata(
@@ -683,6 +720,7 @@ TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const 
 	ParseNodeExtended(JsonObj, Node, *ActiveResolver);
 
 	AppendParsedChildren(JsonObj->TryGetField(TEXT("children")), *ActiveResolver, Node->Children);
+	FinalizePenPaddingRuntimeWrapPolicy(Node);
 
 	ParsePenSemanticMetadata(JsonObj, *Node, *ActiveResolver);
 
@@ -725,6 +763,7 @@ TSharedPtr<FDesignNode> ParseDescendantOverrideNode(const TSharedPtr<FJsonObject
 	ApplyNodeLayoutProperties(JsonObj, *Node, Resolver, true);
 	JsonObj->TryGetStringField(TEXT("name"), Node->Name);
 	AppendParsedChildren(JsonObj->TryGetField(TEXT("children")), Resolver, Node->Children);
+	FinalizePenPaddingRuntimeWrapPolicy(Node);
 	ParsePenSemanticMetadata(JsonObj, *Node, Resolver);
 	return Node;
 }

@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
+#include "Design2UMGFigmaMetadataExtensions.h"
 #include "UMGSchema.h"
 
 class UPanelSlot;
@@ -13,10 +14,8 @@ class UWidgetTree;
 class FUMGWidgetUtils
 {
 public:
-	static UWidget* CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget = nullptr, const TMap<FString, UTexture2D*>* TextureMap = nullptr);
+	static UWidget* CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget = nullptr, const TMap<FString, UTexture2D*>* TextureMap = nullptr, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords = nullptr, const FIntPoint* ExplicitDesignSize = nullptr);
 	static void ApplyFixer(FUMGWidgetNode& RootNode, const FIntPoint& DesignSize);
-
-	static FIntPoint EffectiveDesignSize;
 
 	static FVector2D CalculateDesignSize(const FUMGWidgetNode& RootNode, FVector2D DefaultSize = FVector2D(1920, 1080));
 	static UClass* ResolveWidgetClass(const FString& TypeName);

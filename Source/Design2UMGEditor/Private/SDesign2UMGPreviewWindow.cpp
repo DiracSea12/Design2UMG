@@ -604,7 +604,17 @@ UUserWidget* SDesign2UMGPreviewWindow::CreatePreviewWidgetFromJson(const FUMGWid
 	}
 
 	// Build preview widget tree with transient texture map.
-	UWidget* RootWidget = FUMGWidgetUtils::CreateWidgetRecursive(TempWidget->WidgetTree, FixedRoot, nullptr, &PreviewTextureMap);
+	const FVector2D PreviewDesignSize = FUMGWidgetUtils::CalculateDesignSize(FixedRoot);
+	const FIntPoint PreviewDesignSizeInt(
+		FMath::Max(1, FMath::RoundToInt(PreviewDesignSize.X)),
+		FMath::Max(1, FMath::RoundToInt(PreviewDesignSize.Y)));
+	UWidget* RootWidget = FUMGWidgetUtils::CreateWidgetRecursive(
+		TempWidget->WidgetTree,
+		FixedRoot,
+		nullptr,
+		&PreviewTextureMap,
+		nullptr,
+		&PreviewDesignSizeInt);
 	if (!RootWidget)
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create root widget of type: %s"), *WidgetData.RootWidget.Type);

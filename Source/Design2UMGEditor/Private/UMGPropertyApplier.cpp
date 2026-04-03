@@ -10,6 +10,7 @@
 #include "ProceduralShapeGenerator.h"
 #include "DesignPathRasterizer.h"
 
+#include "Brushes/SlateColorBrush.h"
 #include "Components/Widget.h"
 #include "Components/TextBlock.h"
 #include "Components/TextWidgetTypes.h"
@@ -43,11 +44,15 @@
 #include "Components/TileView.h"
 #include "Components/MenuAnchor.h"
 #include "Components/SafeZone.h"
+#include "Dom/JsonObject.h"
+#include "Engine/DataTable.h"
 #include "Fonts/FontCache.h"
 #include "Styling/SlateBrush.h"
 #include "Engine/Texture2D.h"
 #include "Engine/UserInterfaceSettings.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 
 // ============================================================================
 // Widget 属性应用（函数指针映射表模式）
@@ -57,6 +62,7 @@ namespace
 {
 	const TCHAR* RetainerForegroundBlurEffectRef = TEXT("d2u.retainer.foreground_blur");
 	const TCHAR* RetainerInnerShadowEffectRef = TEXT("d2u.retainer.inner_shadow");
+	constexpr TCHAR RichTextStyleRowsPropertyKey[] = TEXT("Design2UMG.RichTextStyleRows");
 
 	UMaterialInterface* ResolveRetainerEffectMaterial(const FString& EffectMaterialRef)
 	{
@@ -149,6 +155,269 @@ namespace
 			return true;
 		}
 		return false;
+	}
+
+	void ApplyFontFamilyToSlateFontInfo(FSlateFontInfo& FontInfo, const FString& Value, const bool bIsIconFontWidget)
+	{
+		if (Value.StartsWith(TEXT("/")))
+		{
+			if (UObject* FontObject = LoadObject<UObject>(nullptr, *Value))
+			{
+				FontInfo.FontObject = FontObject;
+			}
+			return;
+		}
+
+		if (!Value.IsEmpty() && !bIsIconFontWidget)
+		{
+			FontInfo.TypefaceFontName = FName(*Value);
+		}
+	}
+
+	FSlateBrush MakeTextDecorationBrush(const FLinearColor& Color)
+	{
+		FSlateColorBrush Brush(Color);
+		Brush.DrawAs = ESlateBrushDrawType::Box;
+		Brush.ImageSize = FVector2D(1.0f, 1.0f);
+		Brush.Margin = FMargin(0.0f);
+		return Brush;
+	}
+
+	FTextBlockStyle ResolveRichTextBaseStyle(const URichTextBlock* RichTextBlock)
+	{
+		FTextBlockStyle BaseStyle = FTextBlockStyle::GetDefault();
+		if (!RichTextBlock)
+		{
+			return BaseStyle;
+		}
+
+		const FBoolProperty* OverrideFlagProperty =
+			FindFProperty<FBoolProperty>(URichTextBlock::StaticClass(), TEXT("bOverrideDefaultStyle"));
+		const FStructProperty* OverrideStyleProperty =
+			FindFProperty<FStructProperty>(URichTextBlock::StaticClass(), TEXT("DefaultTextStyleOverride"));
+		const FStructProperty* DefaultStyleProperty =
+			FindFProperty<FStructProperty>(URichTextBlock::StaticClass(), TEXT("DefaultTextStyle"));
+
+		if (OverrideFlagProperty && OverrideStyleProperty
+			&& OverrideFlagProperty->GetPropertyValue_InContainer(RichTextBlock))
+		{
+			if (const FTextBlockStyle* OverrideStyle =
+				OverrideStyleProperty->ContainerPtrToValuePtr<FTextBlockStyle>(RichTextBlock))
+			{
+				return *OverrideStyle;
+			}
+		}
+
+		if (DefaultStyleProperty)
+		{
+			if (const FTextBlockStyle* DefaultStyle =
+				DefaultStyleProperty->ContainerPtrToValuePtr<FTextBlockStyle>(RichTextBlock))
+			{
+				return *DefaultStyle;
+			}
+		}
+
+		return BaseStyle;
+	}
+
+	void ApplyRichTextDefaultStyle(URichTextBlock* RichTextBlock, const FUMGPropertyBag& P)
+	{
+		if (!RichTextBlock)
+		{
+			return;
+		}
+
+		FLinearColor IgnoredColor;
+		float IgnoredFloat = 0.0f;
+		bool IgnoredBool = false;
+		FString IgnoredString;
+		const bool bHasAnyDefaultStyleInput =
+			P.TryGetColor(TEXT("Color"), IgnoredColor)
+			|| P.TryGetFloat(TEXT("FontSize"), IgnoredFloat)
+			|| TryGetProp(P, TEXT("FontFamily"), IgnoredString)
+			|| TryGetProp(P, TEXT("TypefaceFontName"), IgnoredString)
+			|| P.TryGetFloat(TEXT("LetterSpacing"), IgnoredFloat)
+			|| P.TryGetBool(TEXT("Underline"), IgnoredBool)
+			|| P.TryGetBool(TEXT("Strikethrough"), IgnoredBool)
+			|| TryGetProp(P, TEXT("Href"), IgnoredString);
+		if (!bHasAnyDefaultStyleInput)
+		{
+			return;
+		}
+
+		FTextBlockStyle DefaultStyle = ResolveRichTextBaseStyle(RichTextBlock);
+		FLinearColor TextColor;
+		if (P.TryGetColor(TEXT("Color"), TextColor))
+		{
+			DefaultStyle.ColorAndOpacity = FSlateColor(TextColor);
+		}
+
+		FSlateFontInfo FontInfo = DefaultStyle.Font;
+		bool bFontChanged = false;
+		const bool bIsIconFontWidget = HasProp(P, TEXT("IconName"));
+		float FontSize = 0.0f;
+		if (P.TryGetFloat(TEXT("FontSize"), FontSize))
+		{
+			FontInfo.Size = FMath::Max(1, FMath::RoundToInt(FontSize));
+			bFontChanged = true;
+		}
+
+		FString Value;
+		if (TryGetProp(P, TEXT("FontFamily"), Value))
+		{
+			ApplyFontFamilyToSlateFontInfo(FontInfo, Value, bIsIconFontWidget);
+			bFontChanged = true;
+		}
+		if (TryGetProp(P, TEXT("TypefaceFontName"), Value))
+		{
+			FontInfo.TypefaceFontName = FName(*Value);
+			bFontChanged = true;
+		}
+
+		float PixelSpacing = 0.0f;
+		if (P.TryGetFloat(TEXT("LetterSpacing"), PixelSpacing))
+		{
+			float DesignFontSize = 0.0f;
+			P.TryGetFloat(TEXT("DesignFontSize"), DesignFontSize);
+			if (FontInfo.Size > 0 || DesignFontSize > 0.0f)
+			{
+				FontInfo.LetterSpacing = TextStyleUtils::ConvertLetterSpacingPxToTracking(PixelSpacing, DesignFontSize, FontInfo.Size);
+			}
+			bFontChanged = true;
+		}
+
+		if (bFontChanged)
+		{
+			DefaultStyle.Font = FontInfo;
+		}
+
+		bool bUnderline = false;
+		const bool bHasUnderlineValue = P.TryGetBool(TEXT("Underline"), bUnderline);
+		bool bStrikethrough = false;
+		const bool bHasStrikethroughValue = P.TryGetBool(TEXT("Strikethrough"), bStrikethrough);
+		FString HrefValue;
+		const bool bHasHrefValue = TryGetProp(P, TEXT("Href"), HrefValue);
+		const FLinearColor DecorationColor = DefaultStyle.ColorAndOpacity.GetSpecifiedColor();
+		if ((bHasUnderlineValue && bUnderline) || bHasHrefValue)
+		{
+			DefaultStyle.UnderlineBrush = MakeTextDecorationBrush(DecorationColor);
+		}
+		if (bHasStrikethroughValue && bStrikethrough)
+		{
+			DefaultStyle.StrikeBrush = MakeTextDecorationBrush(DecorationColor);
+		}
+
+		RichTextBlock->SetDefaultTextStyle(DefaultStyle);
+	}
+
+	void ApplyRichTextStyleRows(URichTextBlock* RichTextBlock, const FString& StyleRowsJson)
+	{
+		if (!RichTextBlock || StyleRowsJson.IsEmpty())
+		{
+			return;
+		}
+
+		TSharedPtr<FJsonObject> RootObject;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(StyleRowsJson);
+		if (!FJsonSerializer::Deserialize(Reader, RootObject) || !RootObject.IsValid())
+		{
+			return;
+		}
+
+		const FName GeneratedStyleSetName(*FString::Printf(TEXT("%s_D2UStyleSet"), *RichTextBlock->GetName()));
+		UDataTable* StyleSet = RichTextBlock->GetTextStyleSet();
+		if (!StyleSet || StyleSet->GetOuter() != RichTextBlock)
+		{
+			StyleSet = NewObject<UDataTable>(RichTextBlock, GeneratedStyleSetName, RF_Public | RF_Transactional);
+		}
+		if (!StyleSet)
+		{
+			return;
+		}
+		StyleSet->EmptyTable();
+		StyleSet->RowStruct = FRichTextStyleRow::StaticStruct();
+
+		const FTextBlockStyle BaseStyle = ResolveRichTextBaseStyle(RichTextBlock);
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : RootObject->Values)
+		{
+			if (!Pair.Value.IsValid() || Pair.Value->Type != EJson::Object)
+			{
+				continue;
+			}
+
+			const TSharedPtr<FJsonObject> RowObject = Pair.Value->AsObject();
+			if (!RowObject.IsValid())
+			{
+				continue;
+			}
+
+			FRichTextStyleRow Row;
+			Row.TextStyle = BaseStyle;
+
+			FSlateFontInfo FontInfo = Row.TextStyle.Font;
+			bool bFontChanged = false;
+			FString StringValue;
+			if (RowObject->TryGetStringField(TEXT("FontFamily"), StringValue) && !StringValue.IsEmpty())
+			{
+				ApplyFontFamilyToSlateFontInfo(FontInfo, StringValue, false);
+				bFontChanged = true;
+			}
+			if (RowObject->TryGetStringField(TEXT("TypefaceFontName"), StringValue) && !StringValue.IsEmpty())
+			{
+				FontInfo.TypefaceFontName = FName(*StringValue);
+				bFontChanged = true;
+			}
+
+			double NumberValue = 0.0;
+			if (RowObject->TryGetNumberField(TEXT("FontSize"), NumberValue))
+			{
+				FontInfo.Size = FMath::Max(1, FMath::RoundToInt(static_cast<float>(NumberValue)));
+				bFontChanged = true;
+			}
+			double DesignFontSize = 0.0;
+			if (RowObject->TryGetNumberField(TEXT("LetterSpacing"), NumberValue))
+			{
+				RowObject->TryGetNumberField(TEXT("DesignFontSize"), DesignFontSize);
+				if (FontInfo.Size > 0 || DesignFontSize > 0.0)
+				{
+					FontInfo.LetterSpacing = TextStyleUtils::ConvertLetterSpacingPxToTracking(
+						static_cast<float>(NumberValue),
+						static_cast<float>(DesignFontSize),
+						FontInfo.Size);
+				}
+				bFontChanged = true;
+			}
+
+			if (bFontChanged)
+			{
+				Row.TextStyle.Font = FontInfo;
+			}
+
+			if (RowObject->TryGetStringField(TEXT("Color"), StringValue) && !StringValue.IsEmpty())
+			{
+				Row.TextStyle.ColorAndOpacity = FSlateColor(FUMGValueParser::ParseColor(StringValue));
+			}
+
+			bool bUnderline = false;
+			RowObject->TryGetBoolField(TEXT("Underline"), bUnderline);
+			bool bStrikethrough = false;
+			RowObject->TryGetBoolField(TEXT("Strikethrough"), bStrikethrough);
+			FString HrefValue;
+			const bool bHasHref = RowObject->TryGetStringField(TEXT("Href"), HrefValue) && !HrefValue.IsEmpty();
+			const FLinearColor DecorationColor = Row.TextStyle.ColorAndOpacity.GetSpecifiedColor();
+			if (bUnderline || bHasHref)
+			{
+				Row.TextStyle.UnderlineBrush = MakeTextDecorationBrush(DecorationColor);
+			}
+			if (bStrikethrough)
+			{
+				Row.TextStyle.StrikeBrush = MakeTextDecorationBrush(DecorationColor);
+			}
+
+			StyleSet->AddRow(FName(*Pair.Key), Row);
+		}
+
+		RichTextBlock->SetTextStyleSet(StyleSet);
 	}
 
 	bool ApplyImageModeToSlateBrush(
@@ -297,6 +566,11 @@ namespace
 		FLinearColor ShadowColor;
 		if (P.TryGetColor(TEXT("ShadowColorAndOpacity"), ShadowColor))
 			T->SetShadowColorAndOpacity(ShadowColor);
+		FMargin TextMargin;
+		if (P.TryGetMargin(TEXT("Padding"), TextMargin))
+		{
+			T->SetMargin(TextMargin);
+		}
 		if (bIsIconFontWidget)
 		{
 			FShapedTextOptions IconShaping;
@@ -743,8 +1017,56 @@ namespace
 
 	void ApplyRichTextBlockProps(UWidget* W, const FUMGPropertyBag& P)
 	{
+		URichTextBlock* RichTextBlock = CastChecked<URichTextBlock>(W);
 		FString Value;
-		if (TryGetPropAllowEmpty(P, TEXT("Text"), Value)) CastChecked<URichTextBlock>(W)->SetText(FText::FromString(Value));
+		if (TryGetPropAllowEmpty(P, TEXT("Text"), Value))
+		{
+			RichTextBlock->SetText(FText::FromString(Value));
+		}
+
+		ApplyRichTextDefaultStyle(RichTextBlock, P);
+
+		if (TryGetPropAllowEmpty(P, RichTextStyleRowsPropertyKey, Value))
+		{
+			ApplyRichTextStyleRows(RichTextBlock, Value);
+		}
+
+		if (TryGetProp(P, TEXT("Justification"), Value))
+		{
+			static const TMap<FString, ETextJustify::Type> JustifyMap = {
+				{TEXT("Left"), ETextJustify::Left}, {TEXT("Center"), ETextJustify::Center}, {TEXT("Right"), ETextJustify::Right}
+			};
+			if (const ETextJustify::Type* Justification = JustifyMap.Find(Value))
+			{
+				RichTextBlock->SetJustification(*Justification);
+			}
+		}
+
+		float LineHeightPercentage = 0.0f;
+		if (P.TryGetFloat(TEXT("LineHeightPercentage"), LineHeightPercentage))
+		{
+			RichTextBlock->SetLineHeightPercentage(LineHeightPercentage);
+			RichTextBlock->SetApplyLineHeightToBottomLine(true);
+		}
+
+		bool bAutoWrapText = false;
+		if (P.TryGetBool(TEXT("AutoWrapText"), bAutoWrapText))
+		{
+			RichTextBlock->SetAutoWrapText(bAutoWrapText);
+		}
+
+		float WrapTextAt = 0.0f;
+		if (P.TryGetFloat(TEXT("WrapTextAt"), WrapTextAt))
+		{
+			RichTextBlock->SetWrapTextAt(WrapTextAt);
+		}
+
+		FMargin TextMargin;
+		if (P.TryGetMargin(TEXT("Padding"), TextMargin))
+		{
+			RichTextBlock->SetMargin(TextMargin);
+		}
+
 	}
 
 	void ApplyComboBoxStringProps(UWidget* W, const FUMGPropertyBag& P)
@@ -828,6 +1150,7 @@ namespace
 			if (P.TryGetColor(TEXT("EffectColor"), InnerShadowColor))
 			{
 				DynamicEffect->SetVectorParameterValue(TEXT("InnerShadowColor"), InnerShadowColor);
+				DynamicEffect->SetScalarParameterValue(TEXT("InnerShadowStrength"), InnerShadowColor.A);
 			}
 			FVector2D InnerShadowOffset = FVector2D::ZeroVector;
 			if (P.TryGetVector2D(TEXT("EffectOffset"), InnerShadowOffset))
@@ -878,6 +1201,7 @@ namespace
 			if (Effect.bHasEffectColor)
 			{
 				DynamicEffect->SetVectorParameterValue(TEXT("InnerShadowColor"), Effect.EffectColor);
+				DynamicEffect->SetScalarParameterValue(TEXT("InnerShadowStrength"), Effect.EffectColor.A);
 			}
 			if (Effect.bHasEffectOffset)
 			{
@@ -1197,83 +1521,32 @@ void FUMGWidgetUtils::ApplyWidgetProperties(UWidget* Widget, const FUMGPropertyB
 
 void FUMGWidgetUtils::ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNode& Node)
 {
-	if (!Widget) return;
-
-	// TextBlock: typed FontSize / LetterSpacing 优先
-	if (UTextBlock* T = Cast<UTextBlock>(Widget))
+	if (!Widget)
 	{
-		const FUMGTextStyleData& TS = Node.TextStyle;
-		if (TS.FontSize > 0 || TS.bHasLetterSpacing)
-		{
-			FSlateFontInfo FontInfo = T->GetFont();
-			bool bFontChanged = false;
-
-			if (TS.FontSize > 0)
-			{
-				FontInfo.Size = FMath::Max(1, FMath::RoundToInt(TS.FontSize));
-				bFontChanged = true;
-			}
-
-			if (TS.bHasLetterSpacing && (FontInfo.Size > 0 || TS.SourceFontSize > 0))
-			{
-				FontInfo.LetterSpacing = TextStyleUtils::ConvertLetterSpacingPxToTracking(TS.LetterSpacing, TS.SourceFontSize, FontInfo.Size);
-				bFontChanged = true;
-			}
-
-			if (bFontChanged)
-				T->SetFont(FontInfo);
-		}
+		return;
 	}
 
-	// Border: typed Brush 属性优先
-	if (UBorder* Bd = Cast<UBorder>(Widget))
-	{
-		ApplyTypedBorderBrush(Bd, Node.Brush);
-	}
+	// 运行时属性应用统一走 merged effective bag：
+	// typed 字段先覆盖 legacy 同名键，剩余 legacy 字段再无歧义补入。
+	const FUMGPropertyBag EffectiveProperties = Design2UMGWidgetNodeAccess::BuildEffectivePropertyBag(Node);
+	ApplyWidgetProperties(Widget, EffectiveProperties);
 
-	// Effect: typed subtree/runtime effect 属性优先
-	if (UBackgroundBlur* BackgroundBlur = Cast<UBackgroundBlur>(Widget))
+	// 仅对少数会受字符串量化或运行时对象重建影响的 typed 字段做精度补写。
+	if (UBorder* BorderWidget = Cast<UBorder>(Widget))
 	{
-		ApplyTypedBackgroundBlurProps(BackgroundBlur, Node.Effect);
+		ApplyTypedBorderBrush(BorderWidget, Node.Brush);
 	}
-	if (URetainerBox* RetainerBox = Cast<URetainerBox>(Widget))
+	if (UBackgroundBlur* BackgroundBlurWidget = Cast<UBackgroundBlur>(Widget))
 	{
-		ApplyTypedRetainerBoxProps(RetainerBox, Node.Effect);
+		ApplyTypedBackgroundBlurProps(BackgroundBlurWidget, Node.Effect);
 	}
-	if (UWidgetSwitcher* WidgetSwitcher = Cast<UWidgetSwitcher>(Widget))
+	if (URetainerBox* RetainerBoxWidget = Cast<URetainerBox>(Widget))
 	{
-		ApplyTypedWidgetSwitcherProps(WidgetSwitcher, Node.WidgetState);
+		ApplyTypedRetainerBoxProps(RetainerBoxWidget, Node.Effect);
 	}
-
-	const FUMGPropertyBag TypedProperties = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
-	const FUMGPropertyBag LegacyProperties = Design2UMGWidgetNodeAccess::BuildLegacyFallbackPropertyBag(Node);
-	if (TypedProperties.Num() > 0)
+	if (UWidgetSwitcher* WidgetSwitcherWidget = Cast<UWidgetSwitcher>(Widget))
 	{
-		ApplyWidgetProperties(Widget, TypedProperties);
-	}
-	if (LegacyProperties.Num() > 0)
-	{
-		// legacy bag 只处理尚未迁移的剩余字段，不再作为 typed 字段执行真值。
-		ApplyWidgetProperties(Widget, LegacyProperties);
-	}
-
-	// Typed 数据是主真值，legacy bag 只做兼容兜底。
-	// 对会被中途重建/覆写的运行时对象（Border Brush / Retainer MID / WidgetSwitcher 状态）再应用一次，确保最终值来自 typed schema。
-	if (UBorder* BorderAfterLegacy = Cast<UBorder>(Widget))
-	{
-		ApplyTypedBorderBrush(BorderAfterLegacy, Node.Brush);
-	}
-	if (UBackgroundBlur* BackgroundBlurAfterLegacy = Cast<UBackgroundBlur>(Widget))
-	{
-		ApplyTypedBackgroundBlurProps(BackgroundBlurAfterLegacy, Node.Effect);
-	}
-	if (URetainerBox* RetainerBoxAfterLegacy = Cast<URetainerBox>(Widget))
-	{
-		ApplyTypedRetainerBoxProps(RetainerBoxAfterLegacy, Node.Effect);
-	}
-	if (UWidgetSwitcher* WidgetSwitcherAfterLegacy = Cast<UWidgetSwitcher>(Widget))
-	{
-		ApplyTypedWidgetSwitcherProps(WidgetSwitcherAfterLegacy, Node.WidgetState);
+		ApplyTypedWidgetSwitcherProps(WidgetSwitcherWidget, Node.WidgetState);
 	}
 }
 

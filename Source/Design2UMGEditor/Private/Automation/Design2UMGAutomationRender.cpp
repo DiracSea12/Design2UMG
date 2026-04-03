@@ -57,11 +57,22 @@ namespace
 		int32 RootChildCount = 0;
 		FString RootKind = TEXT("unknown");
 		TArray<FString> VisibleTexts;
+		TArray<FString> BorderWidgets;
 		TMap<FString, int32> KindHistogram;
+		TMap<FString, int32> ClassHistogram;
 
 		void AddKind(const FString& Kind)
 		{
 			KindHistogram.FindOrAdd(Kind)++;
+		}
+
+		void AddClass(const UWidget* Widget)
+		{
+			if (!Widget)
+			{
+				return;
+			}
+			ClassHistogram.FindOrAdd(Widget->GetClass()->GetName())++;
 		}
 
 		TSharedPtr<FJsonObject> ToJson(const FString& SnapshotType) const
@@ -88,12 +99,28 @@ namespace
 			}
 			Root->SetArrayField(TEXT("visible_texts"), TextValues);
 
+			TArray<FString> SortedBorders = BorderWidgets;
+			SortedBorders.Sort();
+			TArray<TSharedPtr<FJsonValue>> BorderValues;
+			for (const FString& BorderName : SortedBorders)
+			{
+				BorderValues.Add(MakeShared<FJsonValueString>(BorderName));
+			}
+			Root->SetArrayField(TEXT("border_widgets"), BorderValues);
+
 			TSharedPtr<FJsonObject> HistogramObject = MakeShared<FJsonObject>();
 			for (const TPair<FString, int32>& Pair : KindHistogram)
 			{
 				HistogramObject->SetNumberField(Pair.Key, Pair.Value);
 			}
 			Root->SetObjectField(TEXT("kind_histogram"), HistogramObject);
+
+			TSharedPtr<FJsonObject> ClassHistogramObject = MakeShared<FJsonObject>();
+			for (const TPair<FString, int32>& Pair : ClassHistogram)
+			{
+				ClassHistogramObject->SetNumberField(Pair.Key, Pair.Value);
+			}
+			Root->SetObjectField(TEXT("class_histogram"), ClassHistogramObject);
 			return Root;
 		}
 	};
@@ -135,6 +162,23 @@ namespace
 		TArray<FString> Parts;
 		Normalized.ParseIntoArrayWS(Parts);
 		return FString::Join(Parts, TEXT(" "));
+	}
+
+	FString NormalizeCompactStructureKey(const FString& InValue)
+	{
+		FString Key = InValue.ToLower().TrimStartAndEnd();
+		Key.ReplaceInline(TEXT(" "), TEXT(""));
+		Key.ReplaceInline(TEXT("-"), TEXT(""));
+		Key.ReplaceInline(TEXT("_"), TEXT(""));
+		return Key;
+	}
+
+	bool IsIconLikeFontFamily(const FString& FontFamily)
+	{
+		const FString NormalizedFamily = NormalizeCompactStructureKey(FontFamily);
+		return NormalizedFamily.Contains(TEXT("lucide"))
+			|| NormalizedFamily.Contains(TEXT("materialsymbol"))
+			|| NormalizedFamily.Contains(TEXT("materialicon"));
 	}
 
 	bool ShouldSkipDesignNodeForStructure(const TSharedPtr<FDesignNode>& Node)
@@ -249,8 +293,11 @@ namespace
 		else if (Kind == TEXT("text"))
 		{
 			Stats.TextNodes++;
-			const FString Text = NormalizeStructureText(
-				!EffectiveNode->Content.IsEmpty() ? EffectiveNode->Content : EffectiveNode->IconFontName);
+			const FString Text = (EffectiveNode->Type == EDesignNodeType::IconFont
+				|| IsIconLikeFontFamily(EffectiveNode->FontFamily)
+				|| IsIconLikeFontFamily(EffectiveNode->IconFontFamily))
+				? FString()
+				: NormalizeStructureText(EffectiveNode->Content);
 			if (!Text.IsEmpty())
 			{
 				Stats.VisibleTexts.Add(Text);
@@ -460,12 +507,19 @@ namespace
 		const FSlateFontInfo& FontInfo = TextBlock->GetFont();
 		if (FontInfo.FontObject)
 		{
+			const FString FontObjectName = FontInfo.FontObject->GetName();
+			const FString FontObjectPath = FontInfo.FontObject->GetPathName();
+			if (IsIconLikeFontFamily(FontObjectName) || IsIconLikeFontFamily(FontObjectPath))
+			{
+				return FString();
+			}
+
 			const FString SemanticIconName = FFontResolver::FindKnownIconNameByGlyph(
-				FontInfo.FontObject->GetName(),
+				FontObjectName,
 				RawText);
 			if (!SemanticIconName.IsEmpty())
 			{
-				return SemanticIconName;
+				return FString();
 			}
 		}
 
@@ -481,6 +535,11 @@ namespace
 
 		Stats.TotalNodes++;
 		Stats.MaxDepth = FMath::Max(Stats.MaxDepth, Depth);
+		Stats.AddClass(Widget);
+		if (Cast<UBorder>(Widget))
+		{
+			Stats.BorderWidgets.Add(Widget->GetName());
+		}
 
 		const FString Kind = ClassifyWidgetKindForStructure(Widget);
 		Stats.AddKind(Kind);
@@ -748,6 +807,7 @@ namespace
 
 		DesignFontImportService::PrepareDocumentFonts(OutDocument);
 		DesignImportPipeline::ConvertDocument(OutDocument, OutData);
+		DesignImportPipeline::WriteImportDiagnosticReport(OutDocument, OutData);
 		return true;
 	}
 
@@ -772,7 +832,6 @@ namespace
 		DesignFontImportService::ResetTransientState();
 		FDesignPathRasterizer::ClearCache();
 		FProceduralShapeGenerator::ReleaseTransientTextures();
-		FUMGWidgetUtils::EffectiveDesignSize = FIntPoint(1920, 1080);
 		CollectGarbage(RF_NoFlags, true);
 	}
 
@@ -901,6 +960,7 @@ namespace
 
 		FUMGWidgetData Data;
 		FDesignDocument SourceDocument;
+		FString DeferredImageImportReport;
 		if (Spec.Mode.Equals(TEXT("pen_mcp"), ESearchCase::IgnoreCase))
 		{
 			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: importing pen source via MCP payload"));
@@ -926,6 +986,10 @@ namespace
 			}
 
 			OutResult.SourceStructure = BuildDesignStructureSnapshot(SourceDocument, Spec.NodeId);
+
+			FString ImageReport;
+			DesignImportPipeline::ResolveImages(Data, &ImageReport);
+			DeferredImageImportReport = MoveTemp(ImageReport);
 		}
 		else if (Spec.Mode.Equals(TEXT("local_figma"), ESearchCase::IgnoreCase))
 		{
@@ -960,6 +1024,9 @@ namespace
 			}
 
 			OutResult.SourceStructure = BuildDesignStructureSnapshot(SourceDocument, Spec.NodeId);
+			FString ImageReport;
+			DesignImportPipeline::ResolveImages(Data, &ImageReport);
+			DeferredImageImportReport = MoveTemp(ImageReport);
 		}
 		else
 		{
@@ -968,10 +1035,21 @@ namespace
 		}
 
 		UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: generating blueprint and compiled png"));
-		if (!DesignImportPipeline::Execute(Data, MakeAutomationImportRequest(true)).bSucceeded)
+		if (!DesignImportPipeline::Execute(Data, MakeAutomationImportRequest(false)).bSucceeded)
 		{
 			OutResult.ErrorMessage = FString::Printf(TEXT("Failed to generate compiled PNG for %s"), *Spec.SourcePath);
 			return false;
+		}
+
+		if (!SourceDocument.Children.IsEmpty())
+		{
+			DesignImportPipeline::WriteImportDiagnosticReport(
+				SourceDocument,
+				Data,
+				DeferredImageImportReport,
+				Spec.OutputPath,
+				Spec.RenderPngPath,
+				OutResult.GeneratedAssetPath);
 		}
 
 		CaptureGeneratedAssetStructure();

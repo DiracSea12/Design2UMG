@@ -47,8 +47,7 @@ namespace
 			return FString();
 		}
 
-		const FString* TexturePath = Node->Metadata.Find(TEXT("figma.vectorRasterFallback"));
-		return TexturePath ? *TexturePath : FString();
+		return Node->FigmaVectorRasterFallbackImageRef;
 	}
 
 	FString ResolvePathRasterFillColor(const TSharedPtr<FDesignNode>& Node)

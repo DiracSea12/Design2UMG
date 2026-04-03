@@ -132,7 +132,150 @@ static void SetJsonFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHA
 	}
 }
 
-static void CaptureRenderFallbackMetadata(const TSharedPtr<FJsonObject>& Obj, TMap<FString, FString>& Extensions)
+static void PromoteFigmaGridLayoutToGeneric(FDesignNode& OutNode)
+{
+	if (OutNode.FigmaLayout.bHasGridRowCount)
+	{
+		OutNode.LayoutRowCount = FMath::Max(0, OutNode.FigmaLayout.GridRowCount);
+		OutNode.bHasLayoutRowCount = true;
+	}
+	if (OutNode.FigmaLayout.bHasGridColumnCount)
+	{
+		OutNode.LayoutColumnCount = FMath::Max(0, OutNode.FigmaLayout.GridColumnCount);
+		OutNode.bHasLayoutColumnCount = true;
+	}
+	if (OutNode.FigmaLayout.bHasGridRowGap)
+	{
+		OutNode.LayoutRowGap = FMath::Max(0.0f, OutNode.FigmaLayout.GridRowGap);
+		OutNode.bHasLayoutRowGap = true;
+	}
+	else if (OutNode.FigmaLayout.bHasCounterAxisSpacing)
+	{
+		OutNode.LayoutRowGap = FMath::Max(0.0f, OutNode.FigmaLayout.CounterAxisSpacing);
+		OutNode.bHasLayoutRowGap = true;
+	}
+	if (OutNode.FigmaLayout.bHasGridColumnGap)
+	{
+		OutNode.LayoutColumnGap = FMath::Max(0.0f, OutNode.FigmaLayout.GridColumnGap);
+		OutNode.bHasLayoutColumnGap = true;
+	}
+	if (!OutNode.FigmaLayout.GridChildHorizontalAlign.IsEmpty())
+	{
+		OutNode.LayoutChildHorizontalAlign = OutNode.FigmaLayout.GridChildHorizontalAlign;
+		OutNode.bHasLayoutChildHorizontalAlign = true;
+	}
+	if (!OutNode.FigmaLayout.GridChildVerticalAlign.IsEmpty())
+	{
+		OutNode.LayoutChildVerticalAlign = OutNode.FigmaLayout.GridChildVerticalAlign;
+		OutNode.bHasLayoutChildVerticalAlign = true;
+	}
+	if (OutNode.FigmaLayout.bHasGridRowSpan)
+	{
+		OutNode.LayoutRowSpan = FMath::Max(1, OutNode.FigmaLayout.GridRowSpan);
+		OutNode.bHasLayoutRowSpan = true;
+	}
+	if (OutNode.FigmaLayout.bHasGridColumnSpan)
+	{
+		OutNode.LayoutColumnSpan = FMath::Max(1, OutNode.FigmaLayout.GridColumnSpan);
+		OutNode.bHasLayoutColumnSpan = true;
+	}
+	if (OutNode.FigmaLayout.bHasGridRowAnchorIndex)
+	{
+		OutNode.LayoutRow = FMath::Max(0, OutNode.FigmaLayout.GridRowAnchorIndex);
+		OutNode.bHasLayoutRow = true;
+	}
+	if (OutNode.FigmaLayout.bHasGridColumnAnchorIndex)
+	{
+		OutNode.LayoutColumn = FMath::Max(0, OutNode.FigmaLayout.GridColumnAnchorIndex);
+		OutNode.bHasLayoutColumn = true;
+	}
+}
+
+static bool IsStretchAutoLayoutChild(const FDesignNode& ParentNode, const TSharedPtr<FDesignNode>& Child)
+{
+	if (!Child.IsValid() || Child->bAbsoluteLayoutPositioning)
+	{
+		return false;
+	}
+
+	if (Child->FigmaLayout.LayoutAlign.Equals(TEXT("STRETCH"), ESearchCase::IgnoreCase))
+	{
+		return true;
+	}
+
+	if (ParentNode.Layout == EDesignLayout::Vertical)
+	{
+		return Child->Width.IsFill();
+	}
+
+	if (ParentNode.Layout == EDesignLayout::Horizontal)
+	{
+		return Child->Height.IsFill();
+	}
+
+	return false;
+}
+
+static bool ShouldTopLevelFigmaInstancePaddingWrapAtRuntime(const FDesignNode& Node)
+{
+	bool bHasStretchAutoChild = false;
+	bool bHasNonStretchAutoChild = false;
+	for (const TSharedPtr<FDesignNode>& Child : Node.Children)
+	{
+		if (!Child.IsValid() || Child->bAbsoluteLayoutPositioning)
+		{
+			continue;
+		}
+
+		if (IsStretchAutoLayoutChild(Node, Child))
+		{
+			bHasStretchAutoChild = true;
+		}
+		else
+		{
+			bHasNonStretchAutoChild = true;
+		}
+
+		if (bHasStretchAutoChild && bHasNonStretchAutoChild)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+static bool ShouldFigmaAutoLayoutPaddingWrapAtRuntime(const FDesignNode& Node, const bool bHasInstanceAncestor)
+{
+	if (Node.Layout != EDesignLayout::Horizontal && Node.Layout != EDesignLayout::Vertical)
+	{
+		return false;
+	}
+
+	if (bHasInstanceAncestor)
+	{
+		return false;
+	}
+
+	if (Node.FigmaInstance.bIsInstance)
+	{
+		return ShouldTopLevelFigmaInstancePaddingWrapAtRuntime(Node);
+	}
+
+	for (const TSharedPtr<FDesignNode>& Child : Node.Children)
+	{
+		if (!Child.IsValid() || Child->bAbsoluteLayoutPositioning)
+		{
+			continue;
+		}
+
+		return true;
+	}
+
+	return false;
+}
+
+static void CaptureRenderFallbackMetadata(const TSharedPtr<FJsonObject>& Obj, FDesignNode& OutNode)
 {
 	if (!Obj.IsValid())
 		return;
@@ -158,7 +301,23 @@ static void CaptureRenderFallbackMetadata(const TSharedPtr<FJsonObject>& Obj, TM
 		const FString Value = GetStr(Obj, KeyPair.SourceKey);
 		if (!Value.IsEmpty())
 		{
-			Extensions.Add(KeyPair.TargetKey, Value);
+			OutNode.Metadata.Add(KeyPair.TargetKey, Value);
+			if (FCString::Strcmp(KeyPair.TargetKey, TEXT("figma.renderFallbackImageRef")) == 0)
+				OutNode.FigmaRenderFallback.ImageRef = Value;
+			else if (FCString::Strcmp(KeyPair.TargetKey, TEXT("figma.renderFallbackScope")) == 0)
+				OutNode.FigmaRenderFallback.Scope = Value;
+			else if (FCString::Strcmp(KeyPair.TargetKey, TEXT("figma.renderFallbackSource")) == 0)
+				OutNode.FigmaRenderFallback.Source = Value;
+			else if (FCString::Strcmp(KeyPair.TargetKey, TEXT("figma.renderFallbackReason")) == 0)
+				OutNode.FigmaRenderFallback.Reason = Value;
+			else if (FCString::Strcmp(KeyPair.TargetKey, TEXT("figma.renderFallbackOffsetX")) == 0)
+				OutNode.FigmaRenderFallback.OffsetX = Value;
+			else if (FCString::Strcmp(KeyPair.TargetKey, TEXT("figma.renderFallbackOffsetY")) == 0)
+				OutNode.FigmaRenderFallback.OffsetY = Value;
+			else if (FCString::Strcmp(KeyPair.TargetKey, TEXT("figma.renderFallbackWidth")) == 0)
+				OutNode.FigmaRenderFallback.Width = Value;
+			else if (FCString::Strcmp(KeyPair.TargetKey, TEXT("figma.renderFallbackHeight")) == 0)
+				OutNode.FigmaRenderFallback.Height = Value;
 		}
 	}
 }
@@ -284,8 +443,17 @@ static void ParsePrototypeActions(const TSharedPtr<FJsonObject>& InteractionObj,
 		}
 
 		FDesignFigmaPrototypeAction Action;
+		Action.RawJson = JsonValueToCompactString(ActionValue);
 		SetStringFieldIfPresent(ActionObj, TEXT("type"), Action.Type);
 		SetStringFieldIfPresent(ActionObj, TEXT("destinationId"), Action.DestinationId);
+		if (Action.DestinationId.IsEmpty())
+		{
+			SetStringFieldIfPresent(ActionObj, TEXT("url"), Action.DestinationId);
+		}
+		if (Action.DestinationId.IsEmpty())
+		{
+			SetStringFieldIfPresent(ActionObj, TEXT("uri"), Action.DestinationId);
+		}
 		SetStringFieldIfPresent(ActionObj, TEXT("navigation"), Action.Navigation);
 		SetStringFieldIfPresent(ActionObj, TEXT("transitionNodeID"), Action.TransitionNodeId);
 		SetJsonFieldIfPresent(ActionObj, TEXT("transition"), Action.TransitionJson);
@@ -746,7 +914,11 @@ TArray<FDesignEffect> ParseEffects(const TArray<TSharedPtr<FJsonValue>>& Effects
 void ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode);
 void ParsePosition(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj, FDesignNode& OutNode, bool bParentHasAutoLayout);
 TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj);
-TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj, TArray<FDesignFigmaSkippedNodeReport>* SkippedDesignerNodes);
+TSharedPtr<FDesignNode> ParseNode(
+	const TSharedPtr<FJsonObject>& NodeObj,
+	const TSharedPtr<FJsonObject>& ParentObj,
+	TArray<FDesignFigmaSkippedNodeReport>* SkippedDesignerNodes,
+	bool bInsideInstanceSubtree);
 void CollectImageRefsRecursive(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSet<FString>& OutRefs);
 void ApplyImageUrlsRecursive(TArray<TSharedPtr<FDesignNode>>& Nodes, const TMap<FString, FString>& Map);
 
@@ -1422,6 +1594,20 @@ void ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 	SetBoolFieldIfPresent(NodeObj, TEXT("itemReverseZIndex"), OutNode.FigmaLayout.bItemReverseZIndex, OutNode.FigmaLayout.bHasItemReverseZIndex);
 	SetBoolFieldIfPresent(NodeObj, TEXT("strokesIncludedInLayout"), OutNode.FigmaLayout.bStrokesIncludedInLayout, OutNode.FigmaLayout.bHasStrokesIncludedInLayout);
 	SetJsonFieldIfPresent(NodeObj, TEXT("boundVariables"), OutNode.FigmaLayout.BoundVariablesJson);
+	PromoteFigmaGridLayoutToGeneric(OutNode);
+
+	OutNode.bHasPaddingRuntimeWrapDecision = true;
+	if (OutNode.Layout == EDesignLayout::Horizontal || OutNode.Layout == EDesignLayout::Vertical)
+	{
+		OutNode.bPaddingRequiresRuntimeWrap = false;
+	}
+	else
+	{
+		OutNode.bPaddingRequiresRuntimeWrap =
+			OutNode.Layout == EDesignLayout::None
+			|| OutNode.Layout == EDesignLayout::Wrap
+			|| OutNode.Layout == EDesignLayout::Grid;
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1520,7 +1706,8 @@ void ParsePosition(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJso
 TSharedPtr<FDesignNode> ParseNode(
 	const TSharedPtr<FJsonObject>& NodeObj,
 	const TSharedPtr<FJsonObject>& ParentObj,
-	TArray<FDesignFigmaSkippedNodeReport>* SkippedDesignerNodes)
+	TArray<FDesignFigmaSkippedNodeReport>* SkippedDesignerNodes,
+	bool bInsideInstanceSubtree)
 {
 	if (!NodeObj) return nullptr;
 
@@ -1568,6 +1755,7 @@ TSharedPtr<FDesignNode> ParseNode(
 	Node->bEnabled = GetBool(NodeObj, TEXT("visible"), true);
 	Node->Opacity = GetNum(NodeObj, TEXT("opacity"), 1.0);
 	Node->Rotation = GetNum(NodeObj, TEXT("rotation"));
+	Node->FigmaInstance.bInInstanceSubtree = bInsideInstanceSubtree;
 
 	// relativeTransform → flipX/flipY
 	// 矩阵 [[a, b, tx], [c, d, ty]]，用行列式(ad-bc)判断是否有镜像翻转
@@ -1604,6 +1792,7 @@ TSharedPtr<FDesignNode> ParseNode(
 	}
 
 	Node->Type = MapNodeType(FigmaType);
+	Node->FigmaSourceNodeType = FigmaType;
 	Node->Metadata.Add(TEXT("sourceNodeType"), FigmaType);
 
 	if (FigmaType == TEXT("COMPONENT"))
@@ -1613,6 +1802,7 @@ TSharedPtr<FDesignNode> ParseNode(
 	if (FigmaType == TEXT("INSTANCE"))
 	{
 		Node->FigmaInstance.bIsInstance = true;
+		Node->FigmaInstance.bInInstanceSubtree = true;
 		const FString ComponentId = GetStr(NodeObj, TEXT("componentId"));
 		if (!ComponentId.IsEmpty())
 		{
@@ -1649,10 +1839,11 @@ TSharedPtr<FDesignNode> ParseNode(
 		const FString VectorRasterFallback = ExtractSyntheticVectorRasterImageRef(*FillsArr);
 		if (!VectorRasterFallback.IsEmpty())
 		{
+			Node->FigmaVectorRasterFallbackImageRef = VectorRasterFallback;
 			Node->Metadata.Add(TEXT("figma.vectorRasterFallback"), VectorRasterFallback);
 		}
 	}
-	CaptureRenderFallbackMetadata(NodeObj, Node->Metadata);
+	CaptureRenderFallbackMetadata(NodeObj, *Node);
 	CaptureBoundsDeltaMetadata(NodeObj, Node->Metadata);
 
 	// Stroke
@@ -1692,20 +1883,32 @@ TSharedPtr<FDesignNode> ParseNode(
 				{
 					continue;
 				}
-				if (auto ChildNode = ParseNode(ChildObj, NodeObj, SkippedDesignerNodes))
+				if (auto ChildNode = ParseNode(
+					ChildObj,
+					NodeObj,
+					SkippedDesignerNodes,
+					Node->FigmaInstance.bIsInstance || Node->FigmaInstance.bInInstanceSubtree))
 					Node->Children.Add(ChildNode);
 			}
 		}
 	}
 
 	ApplyFigmaSemanticHints(NodeObj, *Node);
+	if (Node->Layout == EDesignLayout::Horizontal || Node->Layout == EDesignLayout::Vertical)
+	{
+		Node->bPaddingRequiresRuntimeWrap = ShouldFigmaAutoLayoutPaddingWrapAtRuntime(*Node, bInsideInstanceSubtree);
+	}
+	else if (Node->Layout == EDesignLayout::Wrap || Node->Layout == EDesignLayout::Grid)
+	{
+		Node->bPaddingRequiresRuntimeWrap = Node->Children.Num() > 0;
+	}
 
 	return Node;
 }
 
 TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj)
 {
-	return ParseNode(NodeObj, ParentObj, nullptr);
+	return ParseNode(NodeObj, ParentObj, nullptr, false);
 }
 
 static FString SerializeSkippedDesignerNodes(const TArray<FDesignFigmaSkippedNodeReport>& Reports)
@@ -1816,7 +2019,7 @@ bool FFigmaParser::ParseDocument(const FString& FigmaJson, FDesignDocument& OutD
 			for (const auto& FrameVal : *Frames)
 			{
 				auto FrameObj = FrameVal->AsObject();
-				if (auto Node = ParseNode(FrameObj, nullptr, &OutDocument.FigmaDiagnostics.SkippedDesignerNodes))
+				if (auto Node = ParseNode(FrameObj, nullptr, &OutDocument.FigmaDiagnostics.SkippedDesignerNodes, false))
 					OutDocument.Children.Add(Node);
 			}
 		}
@@ -1830,14 +2033,14 @@ bool FFigmaParser::ParseDocument(const FString& FigmaJson, FDesignDocument& OutD
 			for (const auto& FrameVal : *Frames)
 			{
 				auto FrameObj = FrameVal->AsObject();
-				if (auto Node = ParseNode(FrameObj, nullptr, &OutDocument.FigmaDiagnostics.SkippedDesignerNodes))
+				if (auto Node = ParseNode(FrameObj, nullptr, &OutDocument.FigmaDiagnostics.SkippedDesignerNodes, false))
 					OutDocument.Children.Add(Node);
 			}
 		}
 	}
 	else
 	{
-		if (auto Node = ParseNode(DocObj, nullptr, &OutDocument.FigmaDiagnostics.SkippedDesignerNodes))
+		if (auto Node = ParseNode(DocObj, nullptr, &OutDocument.FigmaDiagnostics.SkippedDesignerNodes, false))
 			OutDocument.Children.Add(Node);
 	}
 
@@ -1905,16 +2108,10 @@ void CollectImageRefsRecursive(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSe
 			if (F.IsImage() && !F.Image.Url.IsEmpty())
 				OutRefs.Add(F.Image.Url);
 		}
-		if (const FString* VectorRasterFallback = Node->Metadata.Find(TEXT("figma.vectorRasterFallback")))
-		{
-			if (!VectorRasterFallback->IsEmpty())
-				OutRefs.Add(*VectorRasterFallback);
-		}
-		if (const FString* RenderFallback = Node->Metadata.Find(TEXT("figma.renderFallbackImageRef")))
-		{
-			if (!RenderFallback->IsEmpty())
-				OutRefs.Add(*RenderFallback);
-		}
+		if (!Node->FigmaVectorRasterFallbackImageRef.IsEmpty())
+			OutRefs.Add(Node->FigmaVectorRasterFallbackImageRef);
+		if (!Node->FigmaRenderFallback.ImageRef.IsEmpty())
+			OutRefs.Add(Node->FigmaRenderFallback.ImageRef);
 		CollectImageRefsRecursive(Node->Children, OutRefs);
 	}
 }
@@ -1944,15 +2141,23 @@ void ApplyImageUrlsRecursive(TArray<TSharedPtr<FDesignNode>>& Nodes, const TMap<
 					F.Image.Url = *Url;
 			}
 		}
-		if (FString* VectorRasterFallback = Node->Metadata.Find(TEXT("figma.vectorRasterFallback")))
+		if (!Node->FigmaVectorRasterFallbackImageRef.IsEmpty())
 		{
-			if (const FString* Url = Map.Find(*VectorRasterFallback))
-				*VectorRasterFallback = *Url;
+			if (const FString* Url = Map.Find(Node->FigmaVectorRasterFallbackImageRef))
+			{
+				Node->FigmaVectorRasterFallbackImageRef = *Url;
+				if (FString* VectorRasterFallback = Node->Metadata.Find(TEXT("figma.vectorRasterFallback")))
+					*VectorRasterFallback = *Url;
+			}
 		}
-		if (FString* RenderFallback = Node->Metadata.Find(TEXT("figma.renderFallbackImageRef")))
+		if (!Node->FigmaRenderFallback.ImageRef.IsEmpty())
 		{
-			if (const FString* Url = Map.Find(*RenderFallback))
-				*RenderFallback = *Url;
+			if (const FString* Url = Map.Find(Node->FigmaRenderFallback.ImageRef))
+			{
+				Node->FigmaRenderFallback.ImageRef = *Url;
+				if (FString* RenderFallback = Node->Metadata.Find(TEXT("figma.renderFallbackImageRef")))
+					*RenderFallback = *Url;
+			}
 		}
 		ApplyImageUrlsRecursive(Node->Children, Map);
 	}

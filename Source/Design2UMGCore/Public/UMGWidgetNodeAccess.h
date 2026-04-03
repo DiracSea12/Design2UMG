@@ -690,6 +690,7 @@ namespace Design2UMGWidgetNodeAccess
 
 	inline bool TryGetWidgetString(const FUMGWidgetNode& Node, const TCHAR* Key, FString& OutValue)
 	{
+		// Typed empty strings are valid payloads and must block fallback to legacy Properties.
 		if (TryGetTypedWidgetString(Node, Key, OutValue))
 		{
 			return true;
@@ -921,12 +922,6 @@ namespace Design2UMGWidgetNodeAccess
 		{
 			LegacyProperties.Remove(Key);
 		});
-	}
-
-	inline void StripLegacyPropertiesOverriddenByTypedState(FUMGWidgetNode& Node)
-	{
-		const FUMGPropertyBag TypedProperties = BuildTypedPropertyBag(Node);
-		RemoveLegacyPropertiesShadowedByTypedProperties(Node.Properties, TypedProperties);
 	}
 
 	inline FUMGPropertyBag BuildLegacyFallbackPropertyBag(const FUMGWidgetNode& Node)

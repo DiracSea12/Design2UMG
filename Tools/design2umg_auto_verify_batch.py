@@ -22,13 +22,11 @@ def parse_args():
     parser.add_argument("--figma-export-root", action="append", default=[], help="Optional local Figma export directory containing design.json and a top-level reference PNG. Can be repeated.")
     parser.add_argument("--output-root", default="", help="Directory for batch outputs")
     parser.add_argument("--reference-root", default="", help="Optional directory containing per-case reference PNGs at <reference-root>/<case-name>/reference.png")
-    parser.add_argument("--project", default="", help="Project path. Leave empty to auto-build a temporary HostProject from the engine plugin source.")
-    parser.add_argument("--build-root", default="", help="Temporary BuildPlugin output directory. Leave empty to use the system temp directory.")
-    parser.add_argument("--keep-build-root", action="store_true", help="Keep the generated BuildPlugin workspace for debugging.")
+    parser.add_argument("--project", default="", help="Runtime project path. HostProject fallback has been removed. If omitted, the script tries DESIGN2UMG_RUNTIME_PROJECT and then infers a .uproject from the design roots.")
     parser.add_argument("--editor", default=r"G:\UE5\UnrealEngine\Engine\Binaries\Win64\UnrealEditor.exe", help="UnrealEditor.exe path")
-    parser.add_argument("--reference-provider", choices=["pencil", "pen-sim"], default="pencil", help="Reference source for discovered pen cases")
+    parser.add_argument("--reference-provider", choices=["pencil"], default="pencil", help="Reference source for discovered pen cases")
     parser.add_argument("--mcp-server", default="", help="Override Pencil MCP server binary path")
-    parser.add_argument("--pencil-app", default="", help="Override Pencil app name (default: vscode)")
+    parser.add_argument("--pencil-app", default="", help="Override Pencil app name. Leave empty for auto-detect from ~/.pencil/apps and running IDE processes.")
     parser.add_argument("--pixel-tolerance", type=int, default=6, help="Per-pixel max-channel tolerance")
     parser.add_argument("--changed-ratio-threshold", type=float, default=0.01, help="Max changed pixel ratio to pass")
     parser.add_argument("--mae-threshold", type=float, default=0.02, help="Max mean absolute error to pass")
@@ -48,6 +46,58 @@ def sanitize_case_name(value: str) -> str:
     normalized = (value or "").strip().lower()
     normalized = re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")
     return normalized or "unnamed"
+
+
+def classify_run_scope(include_pattern: str, exclude_pattern: str) -> str:
+    if include_pattern:
+        return "focus"
+    if exclude_pattern:
+        return "full_with_exclusions"
+    return "full"
+
+
+def write_run_scope(output_root: Path, args, cases: list[dict]) -> Path:
+    run_scope = {
+        "scope": classify_run_scope(args.include, args.exclude),
+        "include_pattern": args.include,
+        "exclude_pattern": args.exclude,
+        "discovered_total": len(cases),
+        "formal_admissible_candidate": not bool(args.include),
+        "case_names": [case["name"] for case in cases],
+    }
+    run_scope_path = output_root / "run_scope.json"
+    verify.write_json(run_scope_path, run_scope)
+    return run_scope_path
+
+
+def collect_batch_completeness(states: list[dict], case_results: list[dict]) -> dict:
+    missing_compare_reports = []
+    missing_case_results = []
+    for state in states:
+        compare_report_path = state["output_dir"] / "compare_report.json"
+        if not compare_report_path.is_file():
+            missing_compare_reports.append(state["case"]["name"])
+
+    reported_names = {item["name"] for item in case_results}
+    for state in states:
+        case_name = state["case"]["name"]
+        if case_name not in reported_names:
+            missing_case_results.append(case_name)
+
+    blocked_reasons = []
+    if missing_compare_reports:
+        blocked_reasons.append("missing_compare_report")
+    if missing_case_results:
+        blocked_reasons.append("missing_case_summary_entry")
+
+    return {
+        "blocked": bool(blocked_reasons),
+        "blocked_reasons": blocked_reasons,
+        "discovered_total": len(states),
+        "reported_total": len(case_results),
+        "missing_compare_reports": missing_compare_reports,
+        "missing_case_results": missing_case_results,
+    }
 
 
 def discover_pen_cases(design_root: Path, include_pattern: str, exclude_pattern: str) -> list[dict]:
@@ -261,6 +311,20 @@ def prepare_case_state(case_args, case: dict, output_root: Path) -> dict:
         if inferred_expected_size:
             expected_design_size = inferred_expected_size
             reference_context["inferred_expected_design_size"] = list(inferred_expected_size)
+
+    preliminary_reference_validation = verify.validate_reference_against_design(reference_size, expected_design_size)
+    declared_width, declared_height = declared_design_size
+    has_partial_declared_size = (
+        (declared_width and declared_width > 1 and not (declared_height and declared_height > 1))
+        or (declared_height and declared_height > 1 and not (declared_width and declared_width > 1))
+    )
+    if not preliminary_reference_validation["valid"] and has_partial_declared_size:
+        inferred_expected_size = verify.infer_expected_design_size_from_reference(declared_design_size, reference_size)
+        if inferred_expected_size and inferred_expected_size != expected_design_size:
+            inferred_validation = verify.validate_reference_against_design(reference_size, inferred_expected_size)
+            if inferred_validation["valid"]:
+                expected_design_size = inferred_expected_size
+                reference_context["inferred_expected_design_size"] = list(inferred_expected_size)
 
     reference_validation = verify.validate_reference_against_design(reference_size, expected_design_size)
     reference_context["reference_validation"] = reference_validation
@@ -586,6 +650,10 @@ def run_editor_driver(
             last_result_count = current_result_count
             exit_deadline = time.time() + 30.0
         time.sleep(1)
+
+    if exit_code != 0 and all(path.is_file() for path in result_paths):
+        if verify.log_indicates_clean_editor_shutdown(log_path):
+            return 0
 
     return exit_code
 
@@ -950,87 +1018,89 @@ def main():
     output_root = Path(args.output_root).resolve() if args.output_root else default_output_root()
     output_root.mkdir(parents=True, exist_ok=True)
 
-    runtime_build_root = None
     runtime_args = SimpleNamespace(
         project=args.project,
-        build_root=args.build_root,
-        keep_build_root=args.keep_build_root,
         editor=args.editor,
     )
 
-    try:
-        runtime_args.project, project_plugin_root, runtime_build_root = verify.prepare_runtime_project(runtime_args)
-        runtime_args.project_plugin_root = project_plugin_root
-        runtime_args.log_cmds = args.log_cmds
-        verify.sync_project_plugin_build_id(args.editor, project_plugin_root)
+    runtime_args.project, project_plugin_root = verify.prepare_runtime_project(
+        runtime_args,
+        [str(design_root), *args.figma_export_root],
+    )
+    runtime_args.project_plugin_root = project_plugin_root
+    runtime_args.log_cmds = args.log_cmds
+    verify.sync_project_plugin_build_id(args.editor, project_plugin_root)
 
-        cases = discover_pen_cases(design_root, args.include, args.exclude)
-        cases.extend(discover_figma_export_cases(args.figma_export_root, args.include, args.exclude))
-        if not cases:
-            raise RuntimeError(f"No eligible pen or figma export cases discovered under: {design_root}")
-        verify.seed_runtime_font_assets(runtime_args.project, [case["source"] for case in cases])
+    cases = discover_pen_cases(design_root, args.include, args.exclude)
+    cases.extend(discover_figma_export_cases(args.figma_export_root, args.include, args.exclude))
+    if not cases:
+        raise RuntimeError(f"No eligible pen or figma export cases discovered under: {design_root}")
+    verify.seed_runtime_font_assets(runtime_args.project, [case["source"] for case in cases])
+    run_scope_path = write_run_scope(output_root, args, cases)
 
-        states = []
-        all_spec_paths = []
-        all_result_paths = []
-        for case in cases:
-            case_args = build_case_args(args, case)
-            if args.reference_root:
-                case_args.reference = str(Path(args.reference_root).resolve())
-            state = prepare_case_state(case_args, case, output_root)
-            state["baseline_case_dir"] = (Path(args.reference_root).resolve() / case["name"]) if args.reference_root else None
-            states.append(state)
-            all_spec_paths.extend(state["spec_paths"])
-            all_result_paths.extend(step["result_json_path"] for step in state["steps"].values())
+    states = []
+    all_spec_paths = []
+    all_result_paths = []
+    for case in cases:
+        case_args = build_case_args(args, case)
+        if args.reference_root:
+            case_args.reference = str(Path(args.reference_root).resolve())
+        state = prepare_case_state(case_args, case, output_root)
+        state["baseline_case_dir"] = (Path(args.reference_root).resolve() / case["name"]) if args.reference_root else None
+        states.append(state)
+        all_spec_paths.extend(state["spec_paths"])
+        all_result_paths.extend(step["result_json_path"] for step in state["steps"].values())
 
-        verify.ensure_clean_editor()
-        batch_log_path = output_root / "unreal_batch.log"
-        driver_script_path = write_editor_driver_script(output_root, all_spec_paths)
-        editor_exit_code = run_editor_driver(
-            args.editor,
-            runtime_args.project,
-            driver_script_path,
-            all_result_paths,
-            batch_log_path,
-            args.idle_timeout_sec,
-            args.log_cmds,
-        )
-        for state in states:
-            for step in state["steps"].values():
-                step["editor_exit_code"] = editor_exit_code
-        ensure_driver_completed_all_steps(states, batch_log_path)
+    verify.ensure_clean_editor()
+    batch_log_path = output_root / "unreal_batch.log"
+    driver_script_path = write_editor_driver_script(output_root, all_spec_paths)
+    editor_exit_code = run_editor_driver(
+        args.editor,
+        runtime_args.project,
+        driver_script_path,
+        all_result_paths,
+        batch_log_path,
+        args.idle_timeout_sec,
+        args.log_cmds,
+    )
+    for state in states:
+        for step in state["steps"].values():
+            step["editor_exit_code"] = editor_exit_code
+    ensure_driver_completed_all_steps(states, batch_log_path)
 
-        case_results = []
-        for state in states:
-            result = process_case_result(state, editor_exit_code, batch_log_path)
-            case_results.append(result)
-            status = "PASS" if result["passed"] else "FAIL"
-            print(f"[{status}] {result['name']} report={result['report_path']}")
+    case_results = []
+    for state in states:
+        result = process_case_result(state, editor_exit_code, batch_log_path)
+        case_results.append(result)
+        status = "PASS" if result["passed"] else "FAIL"
+        print(f"[{status}] {result['name']} report={result['report_path']}")
 
-        passed = sum(1 for item in case_results if item["passed"])
-        no_regression_cases = [item for item in case_results if item.get("no_regression_available")]
-        no_regression_passed = sum(1 for item in no_regression_cases if item.get("no_regression_passed"))
-        summary = {
-            "total": len(case_results),
-            "passed": passed,
-            "failed": len(case_results) - passed,
-            "editor_exit_code": editor_exit_code,
-            "design_root": str(design_root),
-            "output_root": str(output_root),
-            "no_regression": {
-                "available": len(no_regression_cases),
-                "passed": no_regression_passed,
-                "failed": len(no_regression_cases) - no_regression_passed,
-            },
-            "cases": case_results,
-        }
-        summary_path = output_root / "summary.json"
-        verify.write_json(summary_path, summary)
-        print(f"[SUMMARY] report={summary_path}")
-        sys.exit(0 if passed == len(case_results) else 1)
-    finally:
-        if runtime_build_root and not args.keep_build_root:
-            shutil.rmtree(runtime_build_root, ignore_errors=True)
+    passed = sum(1 for item in case_results if item["passed"])
+    no_regression_cases = [item for item in case_results if item.get("no_regression_available")]
+    no_regression_passed = sum(1 for item in no_regression_cases if item.get("no_regression_passed"))
+    completeness = collect_batch_completeness(states, case_results)
+    summary = {
+        "total": len(case_results),
+        "passed": passed,
+        "failed": len(case_results) - passed,
+        "editor_exit_code": editor_exit_code,
+        "design_root": str(design_root),
+        "output_root": str(output_root),
+        "run_scope_path": str(run_scope_path),
+        "completeness": completeness,
+        "no_regression": {
+            "available": len(no_regression_cases),
+            "passed": no_regression_passed,
+            "failed": len(no_regression_cases) - no_regression_passed,
+        },
+        "cases": case_results,
+    }
+    summary_path = output_root / "summary.json"
+    verify.write_json(summary_path, summary)
+    print(f"[SUMMARY] report={summary_path}")
+    if completeness["blocked"]:
+        sys.exit(2)
+    sys.exit(0 if passed == len(case_results) else 1)
 
 
 if __name__ == "__main__":

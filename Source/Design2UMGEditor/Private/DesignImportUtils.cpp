@@ -85,6 +85,41 @@ namespace
 		return FFileHelper::SaveArrayToFile(PngData, *OutputPngFilePath);
 	}
 
+	bool RenderWidgetTreeToPngFile(
+		UWidgetBlueprint* WidgetBlueprint,
+		const FIntPoint& RequestedRenderSize,
+		const FString& OutputPngFilePath,
+		FIntPoint* OutRenderedSize = nullptr)
+	{
+		if (!WidgetBlueprint)
+		{
+			return false;
+		}
+
+		const FIntPoint RenderSize = ResolveCompiledRenderSize(WidgetBlueprint, RequestedRenderSize);
+		TArray<uint8> PngData;
+		FIntPoint ActualSize = RenderSize;
+		if (!FUMGWidgetUtils::RenderWidgetTreeToPng(WidgetBlueprint, RenderSize, PngData, ActualSize))
+		{
+			return false;
+		}
+
+		if (!SavePngBytesToFile(PngData, OutputPngFilePath))
+		{
+			return false;
+		}
+
+		if (OutRenderedSize)
+		{
+			*OutRenderedSize = ActualSize;
+		}
+
+		UE_LOG(LogDesign2UMG, Log,
+			TEXT("DesignImportUtils: WidgetTree PNG saved: %s (%dx%d)"),
+			*OutputPngFilePath, ActualSize.X, ActualSize.Y);
+		return true;
+	}
+
 	UWidgetBlueprint* ReloadWidgetBlueprintForRender(UWidgetBlueprint* WidgetBlueprint)
 	{
 		if (!WidgetBlueprint)
@@ -233,7 +268,11 @@ UWidgetBlueprint* DesignImportUtils::GenerateBlueprint(const FUMGWidgetData& Dat
 	return WBP;
 }
 
-bool DesignImportUtils::GenerateBlueprintAndPng(const FUMGWidgetData& Data, const FString& OutputPath)
+bool DesignImportUtils::GenerateBlueprintAndPng(
+	const FUMGWidgetData& Data,
+	const FString& OutputPath,
+	FString* OutGeneratedAssetPath,
+	FString* OutRenderPngPath)
 {
 	ApplyPendingIconFontMappingChanges(Data);
 	const FString FinalPath = ResolveImportOutputPath(OutputPath);
@@ -245,14 +284,22 @@ bool DesignImportUtils::GenerateBlueprintAndPng(const FUMGWidgetData& Data, cons
 		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint build failed"));
 		return false;
 	}
+	if (OutGeneratedAssetPath)
+	{
+		*OutGeneratedAssetPath = WBP->GetPathName();
+	}
 
 	// 渲染尺寸优先使用根节点 Bounds；合成根（如多 frame 的 CanvasPanel）Bounds 为 0，
 	// 退化到 1x1 会导致 PNG 无意义，此时使用 1920x1080 默认尺寸。
 	const FIntPoint FallbackSize = ResolveWidgetTreeRenderSize(Data);
-
-	TArray<uint8> PngData;
 	FIntPoint Size = FallbackSize;
-	if (!FUMGWidgetUtils::RenderWidgetTreeToPng(WBP, FallbackSize, PngData, Size))
+	const FString PngName = WBP ? WBP->GetName() : FPaths::GetBaseFilename(FinalPath);
+	const FString OutPng = FPaths::ProjectSavedDir() / TEXT("Design2UMG") / (PngName + TEXT(".png"));
+	if (OutRenderPngPath)
+	{
+		*OutRenderPngPath = OutPng;
+	}
+	if (!RenderWidgetTreeToPngFile(WBP, FallbackSize, OutPng, &Size))
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget PNG render failed"));
 		// 渲染失败时也保存 Blueprint，方便定位问题。
@@ -262,14 +309,13 @@ bool DesignImportUtils::GenerateBlueprintAndPng(const FUMGWidgetData& Data, cons
 
 	// 成功渲染后保存 Blueprint
 	FUMGGenerator::SaveWidgetBlueprint(WBP);
-
-	// 保存 PNG 到 Saved/Design2UMG（使用最终生成的资产名，避免同输出目录下多次导入互相覆盖）
-	const FString PngName = WBP ? WBP->GetName() : FPaths::GetBaseFilename(FinalPath);
-	const FString OutPng = FPaths::ProjectSavedDir() / TEXT("Design2UMG") / (PngName + TEXT(".png"));
-	if (!FFileHelper::SaveArrayToFile(PngData, *OutPng))
+	if (OutGeneratedAssetPath)
 	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Failed to save PNG: %s"), *OutPng);
-		return false;
+		*OutGeneratedAssetPath = WBP->GetPathName();
+	}
+	if (OutRenderPngPath)
+	{
+		*OutRenderPngPath = OutPng;
 	}
 	UE_LOG(LogDesign2UMG, Log, TEXT("DesignImportUtils: Rendered PNG saved: %s (%dx%d)"), *OutPng, Size.X, Size.Y);
 	return true;
@@ -336,21 +382,10 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 	}
 
 	{
-		const FIntPoint TreeRenderSize = ResolveCompiledRenderSize(WidgetBlueprint, RequestedRenderSize);
-		TArray<uint8> TreePngData;
-		FIntPoint TreeRenderedSize = TreeRenderSize;
-		if (FUMGWidgetUtils::RenderWidgetTreeToPng(WidgetBlueprint, TreeRenderSize, TreePngData, TreeRenderedSize))
-		{
-			const FString TreeRenderPath = FPaths::Combine(
-				FPaths::GetPath(OutputPngFilePath),
-				FPaths::GetBaseFilename(OutputPngFilePath) + TEXT(".widgettree.png"));
-			if (SavePngBytesToFile(TreePngData, TreeRenderPath))
-			{
-				UE_LOG(LogDesign2UMG, Log,
-					TEXT("DesignImportUtils: WidgetTree PNG saved: %s (%dx%d)"),
-					*TreeRenderPath, TreeRenderedSize.X, TreeRenderedSize.Y);
-			}
-		}
+		const FString TreeRenderPath = FPaths::Combine(
+			FPaths::GetPath(OutputPngFilePath),
+			FPaths::GetBaseFilename(OutputPngFilePath) + TEXT(".widgettree.png"));
+		RenderWidgetTreeToPngFile(WidgetBlueprint, RequestedRenderSize, TreeRenderPath);
 	}
 
 	WidgetBlueprint = ReloadWidgetBlueprintForRender(WidgetBlueprint);

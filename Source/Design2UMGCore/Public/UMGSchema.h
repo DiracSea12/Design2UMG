@@ -617,14 +617,28 @@ struct FUMGPrototypeTransitionData
 	FString EasingType;
 
 	UPROPERTY()
+	FString EasingJson;
+
+	UPROPERTY()
 	bool bMatchLayers = false;
 
 	UPROPERTY()
 	bool bHasMatchLayers = false;
 
+	UPROPERTY()
+	FString OutgoingAnimationName;
+
+	UPROPERTY()
+	FString IncomingAnimationName;
+
 	bool IsAnimated() const
 	{
 		return DurationSeconds > KINDA_SMALL_NUMBER;
+	}
+
+	bool HasGeneratedAnimations() const
+	{
+		return !OutgoingAnimationName.IsEmpty() || !IncomingAnimationName.IsEmpty();
 	}
 
 	bool UsesFadeOnly() const
@@ -659,6 +673,199 @@ struct FUMGPrototypeTransitionData
 };
 
 USTRUCT()
+struct FUMGFigmaNodeData
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	FString SourceNodeId;
+
+	UPROPERTY()
+	FString SourceNodeName;
+
+	UPROPERTY()
+	FString SourceNodeType;
+
+	UPROPERTY()
+	FString ComponentId;
+
+	UPROPERTY()
+	FString ComponentSetId;
+
+	UPROPERTY()
+	FString MainComponentKey;
+
+	UPROPERTY()
+	FString ComponentPropertiesJson;
+
+	UPROPERTY()
+	FString VariantPropertiesJson;
+
+	UPROPERTY()
+	FString OverridesJson;
+
+	UPROPERTY()
+	bool bIsExposedInstance = false;
+
+	UPROPERTY()
+	bool bHasIsExposedInstance = false;
+
+	bool IsInstance() const
+	{
+		return SourceNodeType.Equals(TEXT("INSTANCE"), ESearchCase::IgnoreCase)
+			|| !ComponentId.IsEmpty()
+			|| !ComponentPropertiesJson.IsEmpty()
+			|| !VariantPropertiesJson.IsEmpty()
+			|| !OverridesJson.IsEmpty();
+	}
+
+	bool IsComponentDefinition() const
+	{
+		return SourceNodeType.Equals(TEXT("COMPONENT"), ESearchCase::IgnoreCase);
+	}
+
+	bool IsComponentSet() const
+	{
+		return SourceNodeType.Equals(TEXT("COMPONENT_SET"), ESearchCase::IgnoreCase);
+	}
+
+	bool HasAnyComponentSemantics() const
+	{
+		return IsInstance() || IsComponentDefinition() || IsComponentSet();
+	}
+};
+
+USTRUCT()
+struct FUMGFigmaDocumentData
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	FString ComponentsJson;
+
+	UPROPERTY()
+	FString ComponentSetsJson;
+
+	bool HasAnyComponentCatalog() const
+	{
+		return !ComponentsJson.IsEmpty() || !ComponentSetsJson.IsEmpty();
+	}
+};
+
+UENUM()
+enum class EUMGPrototypeNavigationAction : uint8
+{
+	Navigate,
+	Overlay,
+	Back,
+	OpenLink,
+	SetVariable,
+	SetVariableMode,
+	Conditional
+};
+
+UENUM()
+enum class EUMGPrototypeNavigationStepKind : uint8
+{
+	Navigate,
+	Overlay,
+	Back,
+	OpenLink,
+	SetVariable,
+	SetVariableMode,
+	ConditionJump,
+	Jump
+};
+
+USTRUCT()
+struct FUMGPrototypeNavigationStep
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	EUMGPrototypeNavigationStepKind Kind = EUMGPrototypeNavigationStepKind::Navigate;
+
+	UPROPERTY()
+	FString TargetPageId;
+
+	UPROPERTY()
+	int32 TargetPageIndex = INDEX_NONE;
+
+	UPROPERTY()
+	FString ExternalUrl;
+
+	UPROPERTY()
+	FUMGPrototypeTransitionData Transition;
+
+	UPROPERTY()
+	FString VariableId;
+
+	UPROPERTY()
+	FString VariableValueJson;
+
+	UPROPERTY()
+	FString VariableCollectionId;
+
+	UPROPERTY()
+	FString VariableModeId;
+
+	UPROPERTY()
+	FString ConditionJson;
+
+	UPROPERTY()
+	int32 JumpTargetIndex = INDEX_NONE;
+
+	bool RequiresPageTarget() const
+	{
+		return Kind == EUMGPrototypeNavigationStepKind::Navigate
+			|| Kind == EUMGPrototypeNavigationStepKind::Overlay;
+	}
+
+	bool RequiresSwitcher() const
+	{
+		return Kind == EUMGPrototypeNavigationStepKind::Navigate
+			|| Kind == EUMGPrototypeNavigationStepKind::Overlay
+			|| Kind == EUMGPrototypeNavigationStepKind::Back;
+	}
+
+	bool IsOverlayAction() const
+	{
+		return Kind == EUMGPrototypeNavigationStepKind::Overlay;
+	}
+
+	bool IsTerminalAction() const
+	{
+		return Kind == EUMGPrototypeNavigationStepKind::Navigate
+			|| Kind == EUMGPrototypeNavigationStepKind::Overlay
+			|| Kind == EUMGPrototypeNavigationStepKind::Back
+			|| Kind == EUMGPrototypeNavigationStepKind::OpenLink;
+	}
+
+	bool IsValid() const
+	{
+		switch (Kind)
+		{
+		case EUMGPrototypeNavigationStepKind::Navigate:
+		case EUMGPrototypeNavigationStepKind::Overlay:
+			return !TargetPageId.IsEmpty() && TargetPageIndex >= 0;
+		case EUMGPrototypeNavigationStepKind::Back:
+			return true;
+		case EUMGPrototypeNavigationStepKind::OpenLink:
+			return !ExternalUrl.IsEmpty();
+		case EUMGPrototypeNavigationStepKind::SetVariable:
+			return !VariableId.IsEmpty() && !VariableValueJson.IsEmpty();
+		case EUMGPrototypeNavigationStepKind::SetVariableMode:
+			return !VariableCollectionId.IsEmpty() && !VariableModeId.IsEmpty();
+		case EUMGPrototypeNavigationStepKind::ConditionJump:
+		case EUMGPrototypeNavigationStepKind::Jump:
+			return JumpTargetIndex >= 0;
+		default:
+			return false;
+		}
+	}
+};
+
+USTRUCT()
 struct FUMGPrototypeNavigationBinding
 {
 	GENERATED_BODY()
@@ -670,20 +877,200 @@ struct FUMGPrototypeNavigationBinding
 	FString TriggerWidgetName;
 
 	UPROPERTY()
+	FString TriggerType;
+
+	UPROPERTY()
+	FString TriggerJson;
+
+	UPROPERTY()
+	TArray<FString> TriggerKeyCodes;
+
+	UPROPERTY()
 	FString TargetPageId;
 
 	UPROPERTY()
 	int32 TargetPageIndex = INDEX_NONE;
 
 	UPROPERTY()
+	EUMGPrototypeNavigationAction Action = EUMGPrototypeNavigationAction::Navigate;
+
+	UPROPERTY()
+	FString ExternalUrl;
+
+	UPROPERTY()
 	FUMGPrototypeTransitionData Transition;
+
+	UPROPERTY()
+	TArray<FUMGPrototypeNavigationStep> Steps;
+
+	static bool IsClickTriggerType(const FString& InTriggerType)
+	{
+		return InTriggerType.IsEmpty()
+			|| InTriggerType.Equals(TEXT("ON_CLICK"), ESearchCase::IgnoreCase);
+	}
+
+	static bool IsHoverTriggerType(const FString& InTriggerType)
+	{
+		return InTriggerType.Equals(TEXT("ON_HOVER"), ESearchCase::IgnoreCase);
+	}
+
+	static bool IsPressTriggerType(const FString& InTriggerType)
+	{
+		return InTriggerType.Equals(TEXT("ON_PRESS"), ESearchCase::IgnoreCase);
+	}
+
+	static bool IsDragTriggerType(const FString& InTriggerType)
+	{
+		return InTriggerType.Equals(TEXT("ON_DRAG"), ESearchCase::IgnoreCase);
+	}
+
+	static bool IsKeyDownTriggerType(const FString& InTriggerType)
+	{
+		return InTriggerType.Equals(TEXT("ON_KEY_DOWN"), ESearchCase::IgnoreCase);
+	}
+
+	static bool IsKeyUpTriggerType(const FString& InTriggerType)
+	{
+		return InTriggerType.Equals(TEXT("ON_KEY_UP"), ESearchCase::IgnoreCase);
+	}
+
+	bool UsesClickTrigger() const
+	{
+		return IsClickTriggerType(TriggerType);
+	}
+
+	bool UsesHoverTrigger() const
+	{
+		return IsHoverTriggerType(TriggerType);
+	}
+
+	bool UsesPressTrigger() const
+	{
+		return IsPressTriggerType(TriggerType);
+	}
+
+	bool UsesDragTrigger() const
+	{
+		return IsDragTriggerType(TriggerType);
+	}
+
+	bool UsesKeyDownTrigger() const
+	{
+		return IsKeyDownTriggerType(TriggerType);
+	}
+
+	bool UsesKeyUpTrigger() const
+	{
+		return IsKeyUpTriggerType(TriggerType);
+	}
+
+	bool UsesKeyboardTrigger() const
+	{
+		return UsesKeyDownTrigger() || UsesKeyUpTrigger();
+	}
+
+	bool RequiresPageTarget() const
+	{
+		if (Steps.Num() > 0)
+		{
+			for (const FUMGPrototypeNavigationStep& Step : Steps)
+			{
+				if (Step.RequiresPageTarget())
+				{
+					return true;
+				}
+			}
+			return false;
+		}
+
+		return Action == EUMGPrototypeNavigationAction::Navigate
+			|| Action == EUMGPrototypeNavigationAction::Overlay;
+	}
+
+	bool RequiresSwitcher() const
+	{
+		if (Steps.Num() > 0)
+		{
+			for (const FUMGPrototypeNavigationStep& Step : Steps)
+			{
+				if (Step.RequiresSwitcher())
+				{
+					return true;
+				}
+			}
+			return false;
+		}
+
+		return Action != EUMGPrototypeNavigationAction::OpenLink;
+	}
+
+	bool HasOverlayAction() const
+	{
+		if (Steps.Num() > 0)
+		{
+			for (const FUMGPrototypeNavigationStep& Step : Steps)
+			{
+				if (Step.IsOverlayAction())
+				{
+					return true;
+				}
+			}
+			return false;
+		}
+
+		return Action == EUMGPrototypeNavigationAction::Overlay;
+	}
 
 	bool IsValid() const
 	{
-		return !TriggerWidgetId.IsEmpty()
-			&& !TriggerWidgetName.IsEmpty()
-			&& !TargetPageId.IsEmpty()
-			&& TargetPageIndex >= 0;
+		if (TriggerWidgetId.IsEmpty() || TriggerWidgetName.IsEmpty())
+		{
+			return false;
+		}
+
+		if (!UsesClickTrigger()
+			&& !UsesHoverTrigger()
+			&& !UsesPressTrigger()
+			&& !UsesDragTrigger()
+			&& !UsesKeyDownTrigger()
+			&& !UsesKeyUpTrigger())
+		{
+			return false;
+		}
+
+		if (UsesKeyboardTrigger() && TriggerKeyCodes.Num() == 0)
+		{
+			return false;
+		}
+
+		if (Steps.Num() > 0)
+		{
+			for (const FUMGPrototypeNavigationStep& Step : Steps)
+			{
+				if (!Step.IsValid())
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+
+		switch (Action)
+		{
+		case EUMGPrototypeNavigationAction::Navigate:
+		case EUMGPrototypeNavigationAction::Overlay:
+			return !TargetPageId.IsEmpty() && TargetPageIndex >= 0;
+		case EUMGPrototypeNavigationAction::Back:
+			return true;
+		case EUMGPrototypeNavigationAction::OpenLink:
+			return !ExternalUrl.IsEmpty();
+		case EUMGPrototypeNavigationAction::SetVariable:
+		case EUMGPrototypeNavigationAction::SetVariableMode:
+		case EUMGPrototypeNavigationAction::Conditional:
+			return false;
+		default:
+			return false;
+		}
 	}
 };
 
@@ -699,6 +1086,12 @@ struct FUMGPrototypeNavigationData
 	FString SwitcherWidgetName;
 
 	UPROPERTY()
+	FString OverlayHostWidgetId;
+
+	UPROPERTY()
+	FString OverlayHostWidgetName;
+
+	UPROPERTY()
 	int32 InitialPageIndex = 0;
 
 	UPROPERTY()
@@ -707,12 +1100,66 @@ struct FUMGPrototypeNavigationData
 	UPROPERTY()
 	TArray<FUMGPrototypeNavigationBinding> ClickBindings;
 
+	bool HasOverlayBindings() const
+	{
+		for (const FUMGPrototypeNavigationBinding& Binding : ClickBindings)
+		{
+			if (Binding.HasOverlayAction())
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	bool RequiresSwitcher() const
+	{
+		for (const FUMGPrototypeNavigationBinding& Binding : ClickBindings)
+		{
+			if (Binding.RequiresSwitcher())
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	bool HasOverlayLayer() const
+	{
+		return !OverlayHostWidgetId.IsEmpty() && !OverlayHostWidgetName.IsEmpty();
+	}
+
 	bool IsValid() const
 	{
-		return !SwitcherWidgetId.IsEmpty()
+		if (ClickBindings.Num() == 0)
+		{
+			return false;
+		}
+
+		for (const FUMGPrototypeNavigationBinding& Binding : ClickBindings)
+		{
+			if (!Binding.IsValid())
+			{
+				return false;
+			}
+		}
+
+		if (!RequiresSwitcher())
+		{
+			return true;
+		}
+
+		const bool bHasValidSwitcher = !SwitcherWidgetId.IsEmpty()
 			&& !SwitcherWidgetName.IsEmpty()
-			&& PageIds.Num() > 1
-			&& ClickBindings.Num() > 0;
+			&& PageIds.Num() > 1;
+		if (!bHasValidSwitcher)
+		{
+			return false;
+		}
+
+		return !HasOverlayBindings() || HasOverlayLayer();
 	}
 };
 
@@ -774,6 +1221,10 @@ struct FUMGWidgetNode
 	/** 类型化控件状态（v2.6 继续迁移自 Properties） */
 	FUMGWidgetStateData WidgetState;
 
+	/** Figma 组件/变体/实例语义（只在相关节点写入） */
+	UPROPERTY()
+	FUMGFigmaNodeData Figma;
+
 	/** 子控件(不可序列化，UHT 不支持递归 USTRUCT) */
 	TArray<FUMGWidgetNode> Children;
 };
@@ -799,6 +1250,10 @@ struct FUMGWidgetData
 
 	/** 转换阶段产生的图标字体映射建议，由 Editor 导入链决定是否持久化。 */
 	FUMGIconFontMappingChanges IconFontMappingChanges;
+
+	/** Figma 组件目录/变体目录，用于生成产物继续消费。 */
+	UPROPERTY()
+	FUMGFigmaDocumentData FigmaDocument;
 
 	/** Figma prototype 最小导航闭环计划。 */
 	FUMGPrototypeNavigationData PrototypeNavigation;

@@ -8,14 +8,6 @@
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 
-namespace
-{
-	bool ShouldSkipTypedLegacyPropertyInJson(const FString& Key)
-	{
-		return Design2UMGWidgetNodeAccess::IsTypedWidgetPropertyKey(Key);
-	}
-}
-
 TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeAnchor(const FUMGAnchorData& Anchor)
 {
 	TSharedRef<FJsonObject> J = MakeShared<FJsonObject>();
@@ -109,15 +101,12 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeWidgetNode(const FUMGWidget
 
 	J->SetObjectField(TEXT("Slot"), SerializeSlot(Node.Slot));
 
-	if (Node.Properties.Num() > 0)
+	const FUMGPropertyBag LegacyFallbackProperties = Design2UMGWidgetNodeAccess::BuildLegacyFallbackPropertyBag(Node);
+	if (LegacyFallbackProperties.Num() > 0)
 	{
 		TSharedRef<FJsonObject> Props = MakeShared<FJsonObject>();
-		Node.Properties.ForEachSerialized([&Props](const FString& Key, const FString& Value)
+		LegacyFallbackProperties.ForEachSerialized([&Props](const FString& Key, const FString& Value)
 		{
-			if (ShouldSkipTypedLegacyPropertyInJson(Key))
-			{
-				return;
-			}
 			Props->SetStringField(Key, Value);
 		});
 		if (Props->Values.Num() > 0)

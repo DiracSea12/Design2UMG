@@ -1,30 +1,346 @@
 ﻿#include "DesignImportPipeline.h"
 
 #include "Design2UMGConverter.h"
+#include "DesignImageBakeUtils.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGNotification.h"
 #include "DesignFontImportService.h"
 #include "DesignImportDialogs.h"
 #include "DesignImportUtils.h"
 #include "DesignRemoteImageImporter.h"
+#include "FontResolver.h"
 #include "PenMCPBridge.h"
 #include "PenParser.h"
+#include "FigmaParser.h"
 #include "UMGJsonParser.h"
 #include "UMGSchema.h"
 
+#include "WidgetBlueprint.h"
 #include "Dom/JsonObject.h"
 #include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 #include "Misc/ScopedSlowTask.h"
 #include "Serialization/JsonSerializer.h"
+#include "Interfaces/IPluginManager.h"
 
 namespace DesignImportPipeline
 {
 	namespace
 	{
+		void WriteImportDiagnosticReportImpl(
+			const FDesignDocument& Document,
+			const FUMGWidgetData& Data,
+			const FString& ImageReport,
+			const FString& RequestedOutputPath,
+			const FString& RequestedRenderPngPath,
+			const FString& GeneratedAssetPath,
+			const FString& RenderPngPath);
+
+		void AddUniqueRecommendation(TArray<FString>& InOutRecommendations, const FString& Recommendation)
+		{
+			if (!Recommendation.IsEmpty())
+			{
+				InOutRecommendations.AddUnique(Recommendation);
+			}
+		}
+
+		FString InferSourceOrigin(const FDesignDocument& Document)
+		{
+			if (const FString* SourceFilePath = Document.Metadata.Find(TEXT("design.sourceFilePath")))
+			{
+				const FString Extension = FPaths::GetExtension(*SourceFilePath, false).ToLower();
+				if (Extension == TEXT("pen"))
+				{
+					return TEXT("pen_file");
+				}
+				if (Extension == TEXT("json"))
+				{
+					return TEXT("local_json");
+				}
+				return Extension.IsEmpty() ? TEXT("file") : FString::Printf(TEXT("file_%s"), *Extension);
+			}
+
+			return TEXT("inline");
+		}
+
+		TSharedRef<FJsonObject> MakeNodeDiagnosticEntry(
+			const FString& Kind,
+			const FString& NodeId,
+			const FString& NodeName,
+			const FString& SourceType,
+			const FString& Reason,
+			const FString& Impact)
+		{
+			TSharedRef<FJsonObject> Entry = MakeShared<FJsonObject>();
+			Entry->SetStringField(TEXT("kind"), Kind);
+			if (!NodeId.IsEmpty())
+			{
+				Entry->SetStringField(TEXT("nodeId"), NodeId);
+			}
+			if (!NodeName.IsEmpty())
+			{
+				Entry->SetStringField(TEXT("nodeName"), NodeName);
+			}
+			if (!SourceType.IsEmpty())
+			{
+				Entry->SetStringField(TEXT("sourceType"), SourceType);
+			}
+			if (!Reason.IsEmpty())
+			{
+				Entry->SetStringField(TEXT("reason"), Reason);
+			}
+			if (!Impact.IsEmpty())
+			{
+				Entry->SetStringField(TEXT("impact"), Impact);
+			}
+			return Entry;
+		}
+
+		void CollectSkippedDesignerNodes(
+			const FDesignDocument& Document,
+			TArray<TSharedPtr<FJsonValue>>& OutValues,
+			TArray<FString>& InOutRecommendations)
+		{
+			if (Document.FigmaDiagnostics.SkippedDesignerNodes.Num() > 0)
+			{
+				for (const FDesignFigmaSkippedNodeReport& Report : Document.FigmaDiagnostics.SkippedDesignerNodes)
+				{
+					TSharedRef<FJsonObject> Entry = MakeNodeDiagnosticEntry(
+						TEXT("skipped_designer_node"),
+						Report.NodeId,
+						Report.NodeName,
+						Report.NodeType,
+						Report.Reason,
+						TEXT("node skipped from runtime widget tree"));
+					OutValues.Add(MakeShared<FJsonValueObject>(Entry));
+				}
+				if (OutValues.Num() > 0)
+				{
+					AddUniqueRecommendation(
+						InOutRecommendations,
+						TEXT("Design-only nodes are skipped by contract; replace them with supported runtime nodes if output is required."));
+				}
+				return;
+			}
+
+			if (const FString* SkippedNodesJson = Document.Metadata.Find(TEXT("figma.skippedDesignerNodes")))
+			{
+				TSharedPtr<FJsonValue> SkippedNodesValue;
+				TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(*SkippedNodesJson);
+				if (FJsonSerializer::Deserialize(Reader, SkippedNodesValue) && SkippedNodesValue.IsValid())
+				{
+					if (SkippedNodesValue->Type == EJson::Array)
+					{
+						OutValues = SkippedNodesValue->AsArray();
+						if (OutValues.Num() > 0)
+						{
+							AddUniqueRecommendation(
+								InOutRecommendations,
+								TEXT("Design-only nodes are skipped by contract; replace them with supported runtime nodes if output is required."));
+						}
+					}
+				}
+			}
+		}
+
+		void CollectNodeDegradationsRecursive(
+			const TSharedPtr<FDesignNode>& Node,
+			TArray<TSharedPtr<FJsonValue>>& OutValues,
+			TSet<FString>& InOutSeenKeys,
+			TArray<FString>& InOutRecommendations)
+		{
+			if (!Node.IsValid())
+			{
+				return;
+			}
+
+			auto AddEntryIfNew = [&](const FString& Kind, const FString& Reason, const FString& Impact)
+			{
+				const FString Key = FString::Printf(TEXT("%s|%s|%s"), *Node->Id, *Kind, *Reason);
+				if (InOutSeenKeys.Contains(Key))
+				{
+					return;
+				}
+
+				InOutSeenKeys.Add(Key);
+				OutValues.Add(MakeShared<FJsonValueObject>(
+					MakeNodeDiagnosticEntry(
+						Kind,
+						Node->Id,
+						Node->Name,
+						Node->FigmaSourceNodeType,
+						Reason,
+						Impact)));
+			};
+
+			if (Node->FigmaSourceNodeType.Equals(TEXT("TEXT_PATH"), ESearchCase::IgnoreCase))
+			{
+				AddEntryIfNew(
+					TEXT("text_path_fallback"),
+					TEXT("text-on-path is downgraded to plain text"),
+					TEXT("runtime output uses TextBlock instead of path-shaped text"));
+				AddUniqueRecommendation(
+					InOutRecommendations,
+					TEXT("TEXT_PATH is not formally supported; convert path text to regular text if path geometry is required at runtime."));
+			}
+
+			if (!Node->FigmaVectorRasterFallbackImageRef.IsEmpty())
+			{
+				TSharedRef<FJsonObject> Entry = MakeNodeDiagnosticEntry(
+					TEXT("vector_raster_fallback"),
+					Node->Id,
+					Node->Name,
+					Node->FigmaSourceNodeType,
+					TEXT("complex vector was rasterized"),
+					TEXT("runtime output uses baked image content for the vector node"));
+				Entry->SetStringField(TEXT("imageRef"), Node->FigmaVectorRasterFallbackImageRef);
+				OutValues.Add(MakeShared<FJsonValueObject>(Entry));
+				AddUniqueRecommendation(
+					InOutRecommendations,
+					TEXT("Vector raster fallback is an explicit degradation path; prefer exporter/parser-side simplification before treating it as semantic support."));
+			}
+
+			if (Node->FigmaRenderFallback.HasAny())
+			{
+				TSharedRef<FJsonObject> Entry = MakeNodeDiagnosticEntry(
+					TEXT("render_fallback"),
+					Node->Id,
+					Node->Name,
+					Node->FigmaSourceNodeType,
+					Node->FigmaRenderFallback.Reason,
+					TEXT("runtime output uses a baked render fallback image"));
+				if (!Node->FigmaRenderFallback.ImageRef.IsEmpty())
+				{
+					Entry->SetStringField(TEXT("imageRef"), Node->FigmaRenderFallback.ImageRef);
+				}
+				if (!Node->FigmaRenderFallback.Scope.IsEmpty())
+				{
+					Entry->SetStringField(TEXT("scope"), Node->FigmaRenderFallback.Scope);
+				}
+				if (!Node->FigmaRenderFallback.Source.IsEmpty())
+				{
+					Entry->SetStringField(TEXT("source"), Node->FigmaRenderFallback.Source);
+				}
+				OutValues.Add(MakeShared<FJsonValueObject>(Entry));
+				AddUniqueRecommendation(
+					InOutRecommendations,
+					TEXT("Render fallback is a last-resort approximation; fix source/exporter/parser coverage before treating the node as fully supported."));
+			}
+
+			for (const TSharedPtr<FDesignNode>& Child : Node->Children)
+			{
+				CollectNodeDegradationsRecursive(Child, OutValues, InOutSeenKeys, InOutRecommendations);
+			}
+		}
+
+		FString InferEffectWrapperReason(const FUMGWidgetNode& Widget)
+		{
+			if (Widget.Type.Equals(TEXT("BackgroundBlur"), ESearchCase::IgnoreCase))
+			{
+				return TEXT("background_blur");
+			}
+
+			if (Widget.Type.Equals(TEXT("RetainerBox"), ESearchCase::IgnoreCase))
+			{
+				if (Widget.Effect.EffectMaterial.Contains(TEXT("inner_shadow"), ESearchCase::IgnoreCase))
+				{
+					return TEXT("inner_shadow");
+				}
+				if (Widget.Effect.EffectMaterial.Contains(TEXT("blur"), ESearchCase::IgnoreCase))
+				{
+					return TEXT("foreground_blur");
+				}
+				return Widget.Effect.EffectMaterial.IsEmpty() ? TEXT("retainer_effect") : Widget.Effect.EffectMaterial;
+			}
+
+			return FString();
+		}
+
+		void CollectEffectWrappersRecursive(
+			const FUMGWidgetNode& Widget,
+			TArray<TSharedPtr<FJsonValue>>& OutValues,
+			TArray<FString>& InOutRecommendations)
+		{
+			const bool bIsBackgroundBlur = Widget.Type.Equals(TEXT("BackgroundBlur"), ESearchCase::IgnoreCase);
+			const bool bIsRetainerBox = Widget.Type.Equals(TEXT("RetainerBox"), ESearchCase::IgnoreCase);
+			if (bIsBackgroundBlur || bIsRetainerBox)
+			{
+				TSharedRef<FJsonObject> Entry = MakeShared<FJsonObject>();
+				Entry->SetStringField(TEXT("widgetId"), Widget.Id);
+				Entry->SetStringField(TEXT("widgetName"), Widget.Name);
+				Entry->SetStringField(TEXT("wrapperType"), Widget.Type);
+				Entry->SetStringField(TEXT("reason"), InferEffectWrapperReason(Widget));
+				Entry->SetNumberField(TEXT("childCount"), Widget.Children.Num());
+				if (Widget.Effect.bHasEffectMaterial || !Widget.Effect.EffectMaterial.IsEmpty())
+				{
+					Entry->SetStringField(TEXT("effectMaterial"), Widget.Effect.EffectMaterial);
+				}
+				if (Widget.Effect.bHasBlurStrength)
+				{
+					Entry->SetNumberField(TEXT("blurStrength"), Widget.Effect.BlurStrength);
+				}
+				OutValues.Add(MakeShared<FJsonValueObject>(Entry));
+				AddUniqueRecommendation(
+					InOutRecommendations,
+					TEXT("Effect wrappers are approximation paths; verify visual cost and trigger reason before widening their use."));
+			}
+
+			for (const FUMGWidgetNode& Child : Widget.Children)
+			{
+				CollectEffectWrappersRecursive(Child, OutValues, InOutRecommendations);
+			}
+		}
+
+		void CollectImageFailureEntries(
+			const FString& ImageReport,
+			TArray<TSharedPtr<FJsonValue>>& OutValues,
+			TArray<FString>& InOutRecommendations)
+		{
+			TArray<FString> Lines;
+			ImageReport.ParseIntoArrayLines(Lines, true);
+			for (const FString& Line : Lines)
+			{
+				if (!Line.Contains(TEXT("失败")) || Line.StartsWith(TEXT("远程图片导入:"), ESearchCase::CaseSensitive))
+				{
+					continue;
+				}
+
+				TSharedRef<FJsonObject> Entry = MakeShared<FJsonObject>();
+				Entry->SetStringField(TEXT("message"), Line);
+				if (Line.Contains(TEXT("下载失败")))
+				{
+					Entry->SetStringField(TEXT("kind"), TEXT("download_failure"));
+				}
+				else if (Line.Contains(TEXT("解码失败")))
+				{
+					Entry->SetStringField(TEXT("kind"), TEXT("decode_failure"));
+				}
+				else if (Line.Contains(TEXT("导入失败")))
+				{
+					Entry->SetStringField(TEXT("kind"), TEXT("import_failure"));
+				}
+				else
+				{
+					Entry->SetStringField(TEXT("kind"), TEXT("resource_failure"));
+				}
+				OutValues.Add(MakeShared<FJsonValueObject>(Entry));
+			}
+
+			if (OutValues.Num() > 0)
+			{
+				AddUniqueRecommendation(
+					InOutRecommendations,
+					TEXT("Remote resource failures should be fixed at the asset source or replaced with local assets before final release verification."));
+			}
+		}
+
 		bool ParseResolveAndGenerate(
 			const FString& EditedJson,
 			const FString& OutputPath,
-			const FUMGIconFontMappingChanges* MappingChanges = nullptr)
+			const FUMGIconFontMappingChanges* MappingChanges = nullptr,
+			const FDesignDocument* DiagnosticDocument = nullptr,
+			const FBlueprintGenerationOptions* GenerationOptions = nullptr,
+			bool bResolveImages = true)
 		{
 			FUMGWidgetData Data;
 			FString ParseError;
@@ -40,13 +356,67 @@ namespace DesignImportPipeline
 				Data.IconFontMappingChanges = *MappingChanges;
 			}
 
-			ResolveImages(Data);
-			return DesignImportUtils::GenerateBlueprint(Data, OutputPath) != nullptr;
+			FString ImageReport;
+			if (bResolveImages)
+			{
+				ResolveImages(Data, &ImageReport);
+			}
+			FString GeneratedAssetPath;
+			FString RenderPngPath;
+			UWidgetBlueprint* GeneratedBlueprint = nullptr;
+			bool bSucceeded = false;
+			switch (GenerationOptions ? GenerationOptions->Mode : EDesignBlueprintGenerationMode::BlueprintOnly)
+			{
+			case EDesignBlueprintGenerationMode::BlueprintOnly:
+				GeneratedBlueprint = DesignImportUtils::GenerateBlueprint(Data, OutputPath);
+				bSucceeded = GeneratedBlueprint != nullptr;
+				if (GeneratedBlueprint)
+				{
+					GeneratedAssetPath = GeneratedBlueprint->GetPathName();
+				}
+				break;
+
+			case EDesignBlueprintGenerationMode::BlueprintAndPng:
+				bSucceeded = DesignImportUtils::GenerateBlueprintAndPng(
+					Data,
+					OutputPath,
+					&GeneratedAssetPath,
+					&RenderPngPath);
+				break;
+
+			case EDesignBlueprintGenerationMode::BlueprintAndCompiledPng:
+				bSucceeded = DesignImportUtils::GenerateBlueprintAndCompiledPng(
+					Data,
+					OutputPath,
+					GenerationOptions->CompiledPngFilePath,
+					GenerationOptions->CompiledRenderSize,
+					&GeneratedAssetPath,
+					nullptr);
+				RenderPngPath = GenerationOptions->CompiledPngFilePath;
+				break;
+			}
+
+			if ((bSucceeded || !GeneratedAssetPath.IsEmpty()) && DiagnosticDocument)
+			{
+				WriteImportDiagnosticReportImpl(
+					*DiagnosticDocument,
+					Data,
+					ImageReport,
+					OutputPath,
+					RenderPngPath,
+					GeneratedAssetPath,
+					RenderPngPath);
+			}
+			return bSucceeded;
 		}
 
 		void PrepareDocumentForGeneration(FDesignDocument& Document, FUMGWidgetData& OutPreparedData)
 		{
 			DesignFontImportService::PrepareDocumentFonts(Document);
+			DesignImageBakeUtils::BakeDocumentLocalImageBlendOverlays(
+				Document,
+				FString(),
+				TEXT("DesignImportPipeline"));
 			OutPreparedData = FDesign2UMGConverter::Convert(Document);
 		}
 
@@ -57,7 +427,169 @@ namespace DesignImportPipeline
 			Data.IconFontMappingChanges = PreparedData.IconFontMappingChanges;
 		}
 
-		void GenerateFromEditedJsonWithDocument(const FString& EditedJson, const FString& OutputPath, FDesignDocument Document)
+		FString BuildImportReportPath(const FDesignDocument& Document)
+		{
+			const FString* SourceFilePath = Document.Metadata.Find(TEXT("design.sourceFilePath"));
+			const FString SourceLabel = SourceFilePath
+				? FPaths::GetBaseFilename(*SourceFilePath)
+				: TEXT("inline");
+			const FString Timestamp = FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S"));
+			const FString UniqueSuffix = FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8);
+			return FPaths::Combine(
+				FPaths::ProjectSavedDir(),
+				TEXT("Design2UMG"),
+				TEXT("ImportReports"),
+				FString::Printf(TEXT("%s_%s_%s.import_report.json"), *Timestamp, *SourceLabel, *UniqueSuffix));
+		}
+
+		FString ResolvePluginVersionName()
+		{
+			if (const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG")))
+			{
+				return Plugin->GetDescriptor().VersionName;
+			}
+			return TEXT("unknown");
+		}
+
+		void WriteImportDiagnosticReportImpl(
+			const FDesignDocument& Document,
+			const FUMGWidgetData& Data,
+			const FString& ImageReport,
+			const FString& RequestedOutputPath,
+			const FString& RequestedRenderPngPath,
+			const FString& GeneratedAssetPath,
+			const FString& RenderPngPath)
+		{
+			TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+			Root->SetStringField(TEXT("pluginVersion"), ResolvePluginVersionName());
+			Root->SetStringField(TEXT("documentVersion"), Document.Version);
+
+			TSharedRef<FJsonObject> Source = MakeShared<FJsonObject>();
+			Source->SetStringField(TEXT("origin"), InferSourceOrigin(Document));
+			if (!Document.Version.IsEmpty())
+			{
+				Source->SetStringField(TEXT("documentVersion"), Document.Version);
+			}
+
+			if (const FString* SourceFilePath = Document.Metadata.Find(TEXT("design.sourceFilePath")))
+			{
+				Root->SetStringField(TEXT("sourceFilePath"), *SourceFilePath);
+				const FString SourceIdentity = DesignImageBakeUtils::BuildSourceDocumentIdentity(*SourceFilePath);
+				Root->SetStringField(TEXT("sourceIdentity"), SourceIdentity);
+				Source->SetStringField(TEXT("filePath"), *SourceFilePath);
+				Source->SetStringField(TEXT("identity"), SourceIdentity);
+			}
+
+			TSharedRef<FJsonObject> Output = MakeShared<FJsonObject>();
+			if (!RequestedOutputPath.IsEmpty())
+			{
+				Root->SetStringField(TEXT("requestedOutputPath"), RequestedOutputPath);
+				Output->SetStringField(TEXT("requestedOutputPath"), RequestedOutputPath);
+			}
+			if (!RequestedRenderPngPath.IsEmpty())
+			{
+				Root->SetStringField(TEXT("requestedRenderPngPath"), RequestedRenderPngPath);
+				Output->SetStringField(TEXT("requestedRenderPngPath"), RequestedRenderPngPath);
+			}
+			if (!GeneratedAssetPath.IsEmpty())
+			{
+				Root->SetStringField(TEXT("generatedAssetPath"), GeneratedAssetPath);
+				Output->SetStringField(TEXT("generatedAssetPath"), GeneratedAssetPath);
+			}
+			if (!RenderPngPath.IsEmpty())
+			{
+				Root->SetStringField(TEXT("renderPngPath"), RenderPngPath);
+				Output->SetStringField(TEXT("renderPngPath"), RenderPngPath);
+			}
+
+			TArray<FString> Recommendations;
+			TArray<TSharedPtr<FJsonValue>> SkippedNodeValues;
+			CollectSkippedDesignerNodes(Document, SkippedNodeValues, Recommendations);
+			Root->SetArrayField(TEXT("skippedDesignerNodes"), SkippedNodeValues);
+
+			TArray<TSharedPtr<FJsonValue>> WarningValues;
+			for (const FString& Warning : Data.Warnings)
+			{
+				WarningValues.Add(MakeShared<FJsonValueString>(Warning));
+			}
+			Root->SetArrayField(TEXT("warnings"), WarningValues);
+
+			TArray<TSharedPtr<FJsonValue>> MissingFontValues;
+			for (const FString& FontFamily : FFontResolver::FindMissingFonts(Document))
+			{
+				MissingFontValues.Add(MakeShared<FJsonValueString>(FontFamily));
+			}
+			Root->SetArrayField(TEXT("missingFonts"), MissingFontValues);
+			if (MissingFontValues.Num() > 0)
+			{
+				AddUniqueRecommendation(
+					Recommendations,
+					TEXT("Map required fonts locally or keep font auto-import optional; missing fonts should not be treated as an online-only runtime dependency."));
+			}
+
+			if (!ImageReport.IsEmpty())
+			{
+				Root->SetStringField(TEXT("imageImportReport"), ImageReport);
+			}
+
+			TArray<TSharedPtr<FJsonValue>> DegradationValues;
+			TSet<FString> SeenDegradationKeys;
+			for (const TSharedPtr<FDesignNode>& RootNode : Document.Children)
+			{
+				CollectNodeDegradationsRecursive(RootNode, DegradationValues, SeenDegradationKeys, Recommendations);
+			}
+
+			TArray<TSharedPtr<FJsonValue>> EffectWrapperValues;
+			CollectEffectWrappersRecursive(Data.RootWidget, EffectWrapperValues, Recommendations);
+
+			TArray<TSharedPtr<FJsonValue>> ImageFailureValues;
+			CollectImageFailureEntries(ImageReport, ImageFailureValues, Recommendations);
+
+			TSharedRef<FJsonObject> Diagnostics = MakeShared<FJsonObject>();
+			Diagnostics->SetArrayField(TEXT("warnings"), WarningValues);
+			Diagnostics->SetArrayField(TEXT("skippedDesignerNodes"), SkippedNodeValues);
+			Diagnostics->SetArrayField(TEXT("degradations"), DegradationValues);
+
+			TSharedRef<FJsonObject> Resources = MakeShared<FJsonObject>();
+			Resources->SetArrayField(TEXT("missingFonts"), MissingFontValues);
+			Resources->SetArrayField(TEXT("imageFailures"), ImageFailureValues);
+			if (!ImageReport.IsEmpty())
+			{
+				Resources->SetStringField(TEXT("imageImportSummary"), ImageReport);
+			}
+
+			TSharedRef<FJsonObject> Effects = MakeShared<FJsonObject>();
+			Effects->SetNumberField(TEXT("wrapperCount"), EffectWrapperValues.Num());
+			Effects->SetArrayField(TEXT("wrappers"), EffectWrapperValues);
+
+			TArray<TSharedPtr<FJsonValue>> RecommendationValues;
+			for (const FString& Recommendation : Recommendations)
+			{
+				RecommendationValues.Add(MakeShared<FJsonValueString>(Recommendation));
+			}
+
+			Root->SetObjectField(TEXT("source"), Source);
+			Root->SetObjectField(TEXT("output"), Output);
+			Root->SetObjectField(TEXT("diagnostics"), Diagnostics);
+			Root->SetObjectField(TEXT("resources"), Resources);
+			Root->SetObjectField(TEXT("effects"), Effects);
+			Root->SetArrayField(TEXT("recommendations"), RecommendationValues);
+
+			const FString ReportPath = BuildImportReportPath(Document);
+			IFileManager::Get().MakeDirectory(*FPaths::GetPath(ReportPath), true);
+			FString Payload;
+			TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Payload);
+			FJsonSerializer::Serialize(Root, Writer);
+			FFileHelper::SaveStringToFile(Payload, *ReportPath, FFileHelper::EEncodingOptions::ForceUTF8);
+			UE_LOG(LogDesign2UMG, Log, TEXT("DesignImportPipeline: wrote import diagnostic report %s"), *ReportPath);
+		}
+
+		void GenerateFromEditedJsonWithDocument(
+			const FString& EditedJson,
+			const FString& OutputPath,
+			FDesignDocument Document,
+			FBlueprintGenerationOptions GenerationOptions,
+			bool bResolveImages)
 		{
 			FScopedSlowTask SlowTask(3.0f, NSLOCTEXT("DesignImportPipeline", "Generating", "Generating Widget Blueprint..."));
 			SlowTask.MakeDialog(true);
@@ -71,17 +603,45 @@ namespace DesignImportPipeline
 			}
 
 			SlowTask.EnterProgressFrame(2.0f, NSLOCTEXT("DesignImportPipeline", "GenApply", "Applying edited design..."));
-			ParseResolveAndGenerate(EditedJson, OutputPath, &PreparedData.IconFontMappingChanges);
+			ParseResolveAndGenerate(
+				EditedJson,
+				OutputPath,
+				&PreparedData.IconFontMappingChanges,
+				&Document,
+				&GenerationOptions,
+				bResolveImages);
+		}
+
+		void MaybeWriteImportDiagnosticReport(
+			const FDesignImportRequest& Request,
+			const FUMGWidgetData& Data,
+			const FString& RuntimeImageReport,
+			const FDesignImportExecutionResult& Result)
+		{
+			if (!Request.DiagnosticDocument || (!Result.bSucceeded && Result.GeneratedAssetPath.IsEmpty()))
+			{
+				return;
+			}
+
+			WriteImportDiagnosticReportImpl(
+				*Request.DiagnosticDocument,
+				Data,
+				Request.DiagnosticImageReport.IsEmpty() ? RuntimeImageReport : Request.DiagnosticImageReport,
+				Request.OutputPath,
+				Result.RenderPngPath.IsEmpty() ? Request.Generation.CompiledPngFilePath : Result.RenderPngPath,
+				Result.GeneratedAssetPath,
+				Result.RenderPngPath);
 		}
 	}
 
 	FDesignImportExecutionResult Execute(FUMGWidgetData& Data, const FDesignImportRequest& Request)
 	{
 		FDesignImportExecutionResult Result;
+		FString ImageReport;
 
 		if (Request.bResolveImages)
 		{
-			ResolveImages(Data);
+			ResolveImages(Data, &ImageReport);
 		}
 
 		if (Request.bUsePreview
@@ -90,9 +650,20 @@ namespace DesignImportPipeline
 				Request.OutputPath,
 				Request.PreviewWindowTitle,
 				FOnPreviewConfirmed::CreateLambda(
-					[CapturedChanges = Data.IconFontMappingChanges](const FString& EditedJson, const FString& OutputPath)
+					[CapturedChanges = Data.IconFontMappingChanges,
+					 bCapturedResolveImages = Request.bResolveImages,
+					 CapturedGeneration = Request.Generation,
+					 CapturedDiagnosticDocument = Request.DiagnosticDocument
+						? MakeShared<FDesignDocument>(*Request.DiagnosticDocument)
+						: TSharedPtr<FDesignDocument>()](const FString& EditedJson, const FString& OutputPath)
 					{
-						ParseResolveAndGenerate(EditedJson, OutputPath, &CapturedChanges);
+						ParseResolveAndGenerate(
+							EditedJson,
+							OutputPath,
+							&CapturedChanges,
+							CapturedDiagnosticDocument.Get(),
+							&CapturedGeneration,
+							bCapturedResolveImages);
 					}),
 				FOnPreviewCancelled::CreateLambda(
 					[]()
@@ -110,23 +681,39 @@ namespace DesignImportPipeline
 		case EDesignBlueprintGenerationMode::BlueprintOnly:
 			Result.GeneratedBlueprint = DesignImportUtils::GenerateBlueprint(Data, Request.OutputPath);
 			Result.bSucceeded = (Result.GeneratedBlueprint != nullptr);
+			if (Result.GeneratedBlueprint)
+			{
+				Result.GeneratedAssetPath = Result.GeneratedBlueprint->GetPathName();
+			}
 			break;
 
 		case EDesignBlueprintGenerationMode::BlueprintAndPng:
-			Result.bSucceeded = DesignImportUtils::GenerateBlueprintAndPng(Data, Request.OutputPath);
+			Result.bSucceeded = DesignImportUtils::GenerateBlueprintAndPng(
+				Data,
+				Request.OutputPath,
+				&Result.GeneratedAssetPath,
+				&Result.RenderPngPath);
 			break;
 
 		case EDesignBlueprintGenerationMode::BlueprintAndCompiledPng:
+		{
+			FString GeneratedAssetPath;
 			Result.bSucceeded = DesignImportUtils::GenerateBlueprintAndCompiledPng(
 				Data,
 				Request.OutputPath,
 				Request.Generation.CompiledPngFilePath,
 				Request.Generation.CompiledRenderSize,
-				Request.Generation.OutGeneratedAssetPath,
+				Request.Generation.OutGeneratedAssetPath ? Request.Generation.OutGeneratedAssetPath : &GeneratedAssetPath,
 				Request.Generation.OutRenderedSize);
+			Result.GeneratedAssetPath = Request.Generation.OutGeneratedAssetPath
+				? *Request.Generation.OutGeneratedAssetPath
+				: GeneratedAssetPath;
+			Result.RenderPngPath = Request.Generation.CompiledPngFilePath;
 			break;
 		}
+		}
 
+		MaybeWriteImportDiagnosticReport(Request, Data, ImageReport, Result);
 		return Result;
 	}
 
@@ -134,20 +721,20 @@ namespace DesignImportPipeline
 	{
 		FUMGWidgetData Data;
 		PrepareDocumentForGeneration(Document, Data);
+		FString ImageReport;
 		if (Request.bResolveImages)
 		{
-			ResolveImages(Data);
+			ResolveImages(Data, &ImageReport);
 		}
-
 		if (Request.bUsePreview
 			&& DesignImportDialogs::OpenPreviewWindow(
 				Data,
 				Request.OutputPath,
 				Request.PreviewWindowTitle,
 				FOnPreviewConfirmed::CreateLambda(
-					[CapturedDocument = Document](const FString& EditedJson, const FString& OutputPath)
+					[CapturedDocument = Document, CapturedGeneration = Request.Generation, bCapturedResolveImages = Request.bResolveImages](const FString& EditedJson, const FString& OutputPath)
 					{
-						GenerateFromEditedJsonWithDocument(EditedJson, OutputPath, CapturedDocument);
+						GenerateFromEditedJsonWithDocument(EditedJson, OutputPath, CapturedDocument, CapturedGeneration, bCapturedResolveImages);
 					}),
 				FOnPreviewCancelled::CreateLambda(
 					[]()
@@ -163,12 +750,37 @@ namespace DesignImportPipeline
 
 		FDesignImportRequest FinalRequest = Request;
 		FinalRequest.bResolveImages = false;
+		FinalRequest.DiagnosticDocument = &Document;
+		FinalRequest.DiagnosticImageReport = ImageReport;
 		return Execute(Data, FinalRequest);
 	}
 
 	void ConvertDocument(FDesignDocument& Document, FUMGWidgetData& OutData)
 	{
+		DesignImageBakeUtils::BakeDocumentLocalImageBlendOverlays(
+			Document,
+			FString(),
+			TEXT("DesignImportPipeline"));
 		OutData = FDesign2UMGConverter::Convert(Document);
+	}
+
+	void WriteImportDiagnosticReport(
+		const FDesignDocument& Document,
+		const FUMGWidgetData& Data,
+		const FString& ImageReport,
+		const FString& RequestedOutputPath,
+		const FString& RequestedRenderPngPath,
+		const FString& GeneratedAssetPath,
+		const FString& RenderPngPath)
+	{
+		WriteImportDiagnosticReportImpl(
+			Document,
+			Data,
+			ImageReport,
+			RequestedOutputPath,
+			RequestedRenderPngPath,
+			GeneratedAssetPath,
+			RenderPngPath);
 	}
 
 	bool ParseWidgetJson(const FString& JsonString, FUMGWidgetData& OutData, FString* OutError)
@@ -186,10 +798,14 @@ namespace DesignImportPipeline
 		return false;
 	}
 
-	void ResolveImages(FUMGWidgetData& Data)
+	void ResolveImages(FUMGWidgetData& Data, FString* OutReport)
 	{
 		FString Report;
 		const bool bOk = FDesignRemoteImageImporter::ResolveRemoteImages(Data, &Report);
+		if (OutReport)
+		{
+			*OutReport = Report;
+		}
 		if (!Report.IsEmpty())
 		{
 			UE_LOG(LogDesign2UMG, Log, TEXT("%s"), *Report);
@@ -241,6 +857,7 @@ namespace DesignImportPipeline
 		{
 			if (FPenParser::ParseFromFile(FilePath, OutDocument))
 			{
+				OutDocument.Metadata.Add(TEXT("design.sourceFilePath"), FPaths::ConvertRelativePathToFull(FilePath));
 				return true;
 			}
 
@@ -271,6 +888,7 @@ namespace DesignImportPipeline
 			return Fail(FString::Printf(TEXT("Failed to parse filtered pen source: %s"), *FilePath));
 		}
 
+		OutDocument.Metadata.Add(TEXT("design.sourceFilePath"), FPaths::ConvertRelativePathToFull(FilePath));
 		return true;
 	}
 

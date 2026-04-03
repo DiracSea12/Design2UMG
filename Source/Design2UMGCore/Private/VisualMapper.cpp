@@ -904,24 +904,6 @@ namespace
 		{
 			Border.Shadow.BoxShadows = Widget.Shadow.BoxShadows;
 			Widget.Shadow.BoxShadows.Reset();
-			return;
-		}
-
-		int32 Count = 0;
-		if (!Design2UMGWidgetNodeAccess::TryGetWidgetInt(Widget, UMGPropertyKeys::BoxShadowCount, Count) || Count <= 0)
-		{
-			return;
-		}
-
-		Border.Properties.Add(UMGPropertyKeys::BoxShadowCount, FString::FromInt(Count));
-		Widget.Properties.Remove(UMGPropertyKeys::BoxShadowCount);
-		for (int32 Index = 0; Index < Count; ++Index)
-		{
-			const FString Prefix = FString::Printf(TEXT("BoxShadow_%d_"), Index);
-			for (const TCHAR* Suffix : {TEXT("OffsetX"), TEXT("OffsetY"), TEXT("Blur"), TEXT("Spread"), TEXT("Color")})
-			{
-				MovePropertyIfPresent(Widget.Properties, Border.Properties, *(Prefix + Suffix));
-			}
 		}
 	}
 

@@ -1,4 +1,4 @@
-void ApplyNodeBoxProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, EDesignNodeType SizeNodeType, const FDesignVariableResolver& Resolver)
+﻿void ApplyNodeBoxProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, EDesignNodeType SizeNodeType, const FDesignVariableResolver& Resolver)
 {
 	if (JsonObj->HasField(TEXT("width")))
 	{
@@ -27,6 +27,11 @@ void ApplyNodeLayoutProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNo
 		OutNode.Padding = ParsePadding(JsonObj->TryGetField(TEXT("padding")), Resolver);
 		OutNode.bHasPadding = true;
 	}
+	OutNode.bHasPaddingRuntimeWrapDecision = true;
+	OutNode.bPaddingRequiresRuntimeWrap =
+		OutNode.Layout == EDesignLayout::None
+		|| OutNode.Layout == EDesignLayout::Wrap
+		|| OutNode.Layout == EDesignLayout::Grid;
 	FString JustifyContent;
 	if (JsonObj->TryGetStringField(TEXT("justifyContent"), JustifyContent))
 		OutNode.JustifyContent = ParseJustifyContent(JustifyContent);

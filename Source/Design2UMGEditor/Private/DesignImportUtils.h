@@ -6,11 +6,15 @@
 struct FUMGWidgetData;
 class UWidgetBlueprint;
 
-namespace DesignImportUtils
-{
-	void ApplyPendingIconFontMappingChanges(const FUMGWidgetData& Data);
-	UWidgetBlueprint* GenerateBlueprint(const FUMGWidgetData& Data, const FString& OutputPath);
-	bool GenerateBlueprintAndPng(const FUMGWidgetData& Data, const FString& OutputPath);
+	namespace DesignImportUtils
+	{
+		void ApplyPendingIconFontMappingChanges(const FUMGWidgetData& Data);
+		UWidgetBlueprint* GenerateBlueprint(const FUMGWidgetData& Data, const FString& OutputPath);
+		bool GenerateBlueprintAndPng(
+			const FUMGWidgetData& Data,
+			const FString& OutputPath,
+			FString* OutGeneratedAssetPath = nullptr,
+			FString* OutRenderPngPath = nullptr);
 	bool GenerateBlueprintAndCompiledPng(
 		const FUMGWidgetData& Data,
 		const FString& OutputPath,

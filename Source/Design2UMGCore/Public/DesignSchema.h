@@ -714,6 +714,7 @@ struct FDesignFigmaInstanceData
 	GENERATED_BODY()
 
 	UPROPERTY() bool bIsInstance = false;
+	UPROPERTY() bool bInInstanceSubtree = false;
 	UPROPERTY() FString ComponentId;
 	UPROPERTY() FString ComponentSetId;
 	UPROPERTY() FString MainComponentKey;
@@ -756,6 +757,7 @@ struct FDesignFigmaPrototypeAction
 	UPROPERTY() FString Navigation;
 	UPROPERTY() FString TransitionNodeId;
 	UPROPERTY() FString TransitionJson;
+	UPROPERTY() FString RawJson;
 	UPROPERTY() FDesignFigmaPrototypeTransitionData Transition;
 };
 
@@ -801,6 +803,33 @@ struct FDesignFigmaDocumentData
 	UPROPERTY() FString PrototypeStartNodeId;
 	UPROPERTY() FString PrototypeDeviceJson;
 	UPROPERTY() TArray<FDesignFigmaFlowStartingPoint> FlowStartingPoints;
+};
+
+USTRUCT()
+struct FDesignFigmaRenderFallbackData
+{
+	GENERATED_BODY()
+
+	UPROPERTY() FString ImageRef;
+	UPROPERTY() FString Scope;
+	UPROPERTY() FString Source;
+	UPROPERTY() FString Reason;
+	UPROPERTY() FString OffsetX;
+	UPROPERTY() FString OffsetY;
+	UPROPERTY() FString Width;
+	UPROPERTY() FString Height;
+
+	bool HasAny() const
+	{
+		return !ImageRef.IsEmpty()
+			|| !Scope.IsEmpty()
+			|| !Source.IsEmpty()
+			|| !Reason.IsEmpty()
+			|| !OffsetX.IsEmpty()
+			|| !OffsetY.IsEmpty()
+			|| !Width.IsEmpty()
+			|| !Height.IsEmpty();
+	}
 };
 
 USTRUCT()
@@ -850,6 +879,8 @@ struct FDesignNode
 	bool bHasGap = false;
 	FDesignPadding Padding;
 	bool bHasPadding = false;
+	bool bHasPaddingRuntimeWrapDecision = false;
+	bool bPaddingRequiresRuntimeWrap = false;
 	EDesignJustifyContent JustifyContent = EDesignJustifyContent::Start;
 	EDesignAlignItems AlignItems = EDesignAlignItems::Start;
 	bool bAbsoluteLayoutPositioning = false;
@@ -858,9 +889,32 @@ struct FDesignNode
 	bool bSemanticPlaceholderSurface = false;
 	TMap<FString, FString> Metadata;
 	float LayoutGrow = -1.0f;
+	int32 LayoutRow = 0;
+	int32 LayoutColumn = 0;
+	int32 LayoutRowSpan = 1;
+	int32 LayoutColumnSpan = 1;
+	int32 LayoutRowCount = 0;
+	int32 LayoutColumnCount = 0;
+	float LayoutRowGap = 0.0f;
+	float LayoutColumnGap = 0.0f;
+	FString LayoutChildHorizontalAlign;
+	FString LayoutChildVerticalAlign;
+	bool bHasLayoutRow = false;
+	bool bHasLayoutColumn = false;
+	bool bHasLayoutRowSpan = false;
+	bool bHasLayoutColumnSpan = false;
+	bool bHasLayoutRowCount = false;
+	bool bHasLayoutColumnCount = false;
+	bool bHasLayoutRowGap = false;
+	bool bHasLayoutColumnGap = false;
+	bool bHasLayoutChildHorizontalAlign = false;
+	bool bHasLayoutChildVerticalAlign = false;
 	FDesignFigmaLayoutExtensions FigmaLayout;
 	FDesignFigmaInstanceData FigmaInstance;
 	FDesignFigmaPrototypeNodeData FigmaPrototype;
+	FString FigmaSourceNodeType;
+	FString FigmaVectorRasterFallbackImageRef;
+	FDesignFigmaRenderFallbackData FigmaRenderFallback;
 
 	FDesignFill Fill;
 	TArray<FDesignFill> Fills;

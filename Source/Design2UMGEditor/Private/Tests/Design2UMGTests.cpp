@@ -5,6 +5,7 @@
 #include "Design2UMGSettings.h"
 #include "DesignVariableResolver.h"
 #include "Design2UMGTestUtils.h"
+#include "FontResolver.h"
 #include "LayoutCalculator.h"
 #include "LayoutMapper.h"
 #include "UMGJsonParser.h"
@@ -17,6 +18,7 @@
 #include "FigmaParser.h"
 #include "DesignPathRasterizer.h"
 #include "ProceduralShapeGenerator.h"
+#include "TextMeasurement.h"
 #include "Dom/JsonObject.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Serialization/JsonReader.h"
@@ -24,8 +26,10 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Components/RetainerBox.h"
 #include "Components/EditableTextBox.h"
+#include "Components/RichTextBlock.h"
 #include "Components/TextBlock.h"
 #include "Components/WidgetSwitcher.h"
+#include "Engine/DataTable.h"
 #include "Engine/Texture2D.h"
 #include "TextureResource.h"
 #include "UObject/UObjectGlobals.h"
@@ -33,6 +37,8 @@
 using namespace Design2UMGTestUtils;
 namespace
 {
+	constexpr TCHAR RichTextStyleRowsPropertyKey[] = TEXT("Design2UMG.RichTextStyleRows");
+
 	struct FScopedLuminosityFitOpacityCap
 	{
 		explicit FScopedLuminosityFitOpacityCap(const float NewValue, const bool bEnableOverride = true)
@@ -170,6 +176,122 @@ namespace
 		const FColor* Pixels = static_cast<const FColor*>(LockedData);
 		OutPixel = Pixels[Y * Mip.SizeX + X];
 		Mip.BulkData.Unlock();
+		return true;
+	}
+
+	TSharedPtr<FDesignNode> MakeSharedCalibrationTextNode(const FString& Id, const FString& Content)
+	{
+		TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
+		Node->Id = Id;
+		Node->Name = Id;
+		Node->Type = EDesignNodeType::Text;
+		Node->Content = Content;
+		Node->FontFamily = TEXT("Geist");
+		Node->FontWeight = TEXT("Regular");
+		Node->FontSize = 36.0f;
+		Node->LineHeight = 1.35f;
+		Node->LetterSpacing = 0.0f;
+		Node->TextAlign = EDesignTextAlign::Left;
+		Node->TextAlignVertical = EDesignTextAlignVertical::Middle;
+		Node->TextGrowth = EDesignTextGrowth::FixedWidth;
+		Node->Width = FDesignSize::Fixed(80.0f);
+		Node->Height = FDesignSize::Fit(0.0f);
+		Node->bHasWidth = true;
+		Node->bHasHeight = true;
+		return Node;
+	}
+
+	TSharedPtr<FDesignNode> MakeSharedCalibrationContainer(const FString& Id)
+	{
+		TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
+		Node->Id = Id;
+		Node->Name = Id;
+		Node->Type = EDesignNodeType::Frame;
+		Node->Layout = EDesignLayout::Vertical;
+		Node->Width = FDesignSize::Fixed(80.0f);
+		Node->Height = FDesignSize::Fit(0.0f);
+		Node->bHasWidth = true;
+		Node->bHasHeight = true;
+		return Node;
+	}
+
+	FDesignDocument BuildSharedCalibrationFitContentDocument(const bool bExplicitFirst, const bool bUseRef)
+	{
+		const FString AutoContent = TEXT("Design2UMG text calibration should stay stable across different wrap widths and never depend on evaluation order.");
+		const FString ExplicitContent = TEXT("Design2UMG text calibration should stay stable across\ndifferent wrap widths and never depend on evaluation order.");
+		TSharedPtr<FDesignNode> AutoNode = MakeSharedCalibrationTextNode(TEXT("shared_auto"), AutoContent);
+		TSharedPtr<FDesignNode> ExplicitNode = MakeSharedCalibrationTextNode(TEXT("shared_explicit"), ExplicitContent);
+
+		auto AppendChildren = [&](const TSharedPtr<FDesignNode>& Parent)
+		{
+			if (bExplicitFirst)
+			{
+				Parent->Children.Add(ExplicitNode);
+				Parent->Children.Add(AutoNode);
+			}
+			else
+			{
+				Parent->Children.Add(AutoNode);
+				Parent->Children.Add(ExplicitNode);
+			}
+		};
+
+		FDesignDocument Doc;
+		if (bUseRef)
+		{
+			TSharedPtr<FDesignNode> Component = MakeSharedCalibrationContainer(TEXT("shared_component"));
+			Component->bReusable = true;
+			AppendChildren(Component);
+			Doc.Children.Add(Component);
+
+			TSharedPtr<FDesignNode> Screen = MakeSharedCalibrationContainer(TEXT("screen"));
+			TSharedPtr<FDesignNode> Instance = MakeShared<FDesignNode>();
+			Instance->Id = TEXT("shared_component_instance");
+			Instance->Name = TEXT("shared_component_instance");
+			Instance->Type = EDesignNodeType::Ref;
+			Instance->Ref = TEXT("shared_component");
+			Screen->Children.Add(Instance);
+			Doc.Children.Add(Screen);
+			return Doc;
+		}
+
+		TSharedPtr<FDesignNode> Screen = MakeSharedCalibrationContainer(TEXT("screen"));
+		AppendChildren(Screen);
+		Doc.Children.Add(Screen);
+		return Doc;
+	}
+
+	bool ExtractSharedCalibrationHeights(
+		const FUMGWidgetData& Data,
+		FAutomationTestBase& Test,
+		float& OutRootHeight,
+		float& OutExplicitHeight,
+		float& OutAutoHeight)
+	{
+		const FUMGWidgetNode* RootWidget = FindWidgetById(Data.RootWidget, TEXT("screen"));
+		Test.TestTrue(TEXT("Find fit-content root"), RootWidget != nullptr);
+		if (!RootWidget)
+		{
+			return false;
+		}
+
+		const FUMGWidgetNode* ExplicitWidget = FindWidgetById(Data.RootWidget, TEXT("shared_explicit"));
+		Test.TestTrue(TEXT("Find explicit multiline text"), ExplicitWidget != nullptr);
+		if (!ExplicitWidget)
+		{
+			return false;
+		}
+
+		const FUMGWidgetNode* AutoWidget = FindWidgetById(Data.RootWidget, TEXT("shared_auto"));
+		Test.TestTrue(TEXT("Find auto-wrap text"), AutoWidget != nullptr);
+		if (!AutoWidget)
+		{
+			return false;
+		}
+
+		OutRootHeight = RootWidget->Bounds.H;
+		OutExplicitHeight = ExplicitWidget->Bounds.H;
+		OutAutoHeight = AutoWidget->Bounds.H;
 		return true;
 	}
 }
@@ -979,6 +1101,55 @@ bool FIconFontNoMappingKeepIconNameTest::RunTest(const FString& Parameters)
 			GetWidgetProperty(*IconNode, TEXT("Text")),
 			ExpectedIconName);
 	}
+	Settings->IconFontAssetMap = SavedMap;
+	Settings->DefaultIconFontAssetPath = SavedDefaultPath;
+	Settings->MissingIconFontPlaceholder = SavedPlaceholder;
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIconFontLigatureFallbackUsesRegularWeightTest,
+	"Design2UMG.IconFont.LigatureFallbackUsesRegularWeight",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FIconFontLigatureFallbackUsesRegularWeightTest::RunTest(const FString& Parameters)
+{
+	UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+	const TMap<FString, TSoftObjectPtr<UFont>> SavedMap = Settings->IconFontAssetMap;
+	const FString SavedDefaultPath = Settings->DefaultIconFontAssetPath;
+	const FString SavedPlaceholder = Settings->MissingIconFontPlaceholder;
+	Settings->IconFontAssetMap.Empty();
+	Settings->DefaultIconFontAssetPath = TEXT("/Engine/EngineFonts/Roboto.Roboto");
+	Settings->MissingIconFontPlaceholder.Empty();
+
+	const FString Json = TEXT(R"({
+		"children": [{
+			"id": "root",
+			"type": "frame",
+			"children": [{
+				"id": "icon1",
+				"type": "icon_font",
+				"iconFontFamily": "MissingIconFamily_UnitTest",
+				"iconFontName": "dashboard",
+				"fontSize": 20,
+				"weight": 100
+			}]
+		}]
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Icon weight fixture parse succeeds"), FPenParser::ParseDocument(Json, Doc));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FString ExpectedIconName = TEXT("dashboard");
+	const FUMGWidgetNode* IconNode = FindWidgetByProperty(Data.RootWidget, TEXT("IconName"), &ExpectedIconName);
+	TestTrue(TEXT("Icon widget exists"), IconNode != nullptr);
+	if (IconNode)
+	{
+		TestEqual(TEXT("Icon widget uses configured default font asset"),
+			GetWidgetProperty(*IconNode, TEXT("FontFamily")),
+			TEXT("/Engine/EngineFonts/Roboto.Roboto"));
+		TestEqual(TEXT("Ligature fallback icon keeps regular typeface without explicit fontWeight"),
+			GetWidgetProperty(*IconNode, TEXT("TypefaceFontName")),
+			TEXT("Regular"));
+	}
+
 	Settings->IconFontAssetMap = SavedMap;
 	Settings->DefaultIconFontAssetPath = SavedDefaultPath;
 	Settings->MissingIconFontPlaceholder = SavedPlaceholder;
@@ -1952,6 +2123,187 @@ bool FFigmaTextFitPreserveSizeTest::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJustifyAutoTextWrapParityTest,
 	"Design2UMG.Text.JustifyAutoWrapParity",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextMeasurementCalibrationCacheUsesNodeContextTest,
+	"Design2UMG.Text.CalibrationCacheUsesNodeContext",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTextMeasurementCalibrationCacheUsesNodeContextTest::RunTest(const FString& Parameters)
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		AddWarning(TEXT("Slate is not initialized, skipping text calibration cache test."));
+		return true;
+	}
+
+	auto MakeNode = [](const float InWidth, const float InLetterSpacing, const FString& InContent)
+	{
+		TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
+		Node->Type = EDesignNodeType::Text;
+		Node->Content = InContent;
+		Node->FontFamily = TEXT("Geist");
+		Node->FontWeight = TEXT("Regular");
+		Node->FontSize = 36.0f;
+		Node->LineHeight = 1.35f;
+		Node->LetterSpacing = InLetterSpacing;
+		Node->TextAlign = EDesignTextAlign::Left;
+		Node->TextAlignVertical = EDesignTextAlignVertical::Middle;
+		Node->TextGrowth = EDesignTextGrowth::FixedWidth;
+		Node->Width = FDesignSize::Fixed(InWidth);
+		Node->bHasWidth = true;
+		return Node;
+	};
+
+	const FString LongContent = TEXT("Design2UMG text calibration should stay stable across different wrap widths and never depend on evaluation order.");
+	const TSharedPtr<FDesignNode> NarrowNode = MakeNode(80.0f, 0.0f, LongContent);
+	const TSharedPtr<FDesignNode> WideNode = MakeNode(320.0f, 0.0f, LongContent);
+
+	TextMeasurement::ResetCache();
+	const float NarrowFirst = TextMeasurement::ResolveTextFontSizeForUMG(NarrowNode);
+	const float WideSecond = TextMeasurement::ResolveTextFontSizeForUMG(WideNode);
+
+	TextMeasurement::ResetCache();
+	const float WideFirst = TextMeasurement::ResolveTextFontSizeForUMG(WideNode);
+	const float NarrowSecond = TextMeasurement::ResolveTextFontSizeForUMG(NarrowNode);
+
+	TestTrue(TEXT("Narrow calibration resolved"), NarrowFirst > 0.0f && NarrowSecond > 0.0f);
+	TestTrue(TEXT("Wide calibration resolved"), WideFirst > 0.0f && WideSecond > 0.0f);
+	TestFalse(TEXT("Different wrap widths should not collapse to one cached size"),
+		FMath::IsNearlyEqual(NarrowFirst, WideFirst, 0.01f));
+	TestTrue(TEXT("Narrow calibration is order independent"),
+		FMath::IsNearlyEqual(NarrowFirst, NarrowSecond, 0.01f));
+	TestTrue(TEXT("Wide calibration is order independent"),
+		FMath::IsNearlyEqual(WideFirst, WideSecond, 0.01f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFontResolverDefaultFontAliasLookupTest,
+	"Design2UMG.Text.FontResolverDefaultFontAliasLookup",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFontResolverDefaultFontAliasLookupTest::RunTest(const FString& Parameters)
+{
+	const UObject* DefaultFontObject = FTextBlockStyle::GetDefault().Font.FontObject;
+	if (!DefaultFontObject)
+	{
+		AddWarning(TEXT("Default Slate text font is unavailable, skipping font alias lookup test."));
+		return true;
+	}
+
+	const FString DefaultFontPath = DefaultFontObject->GetPathName();
+	const FString DefaultFontName = DefaultFontObject->GetName();
+	const FString StyleQualifiedAlias = DefaultFontName + TEXT(" Regular");
+
+	TestEqual(TEXT("Default font family resolves through FontResolver"),
+		FFontResolver::FindFontAssetPath(DefaultFontName),
+		DefaultFontPath);
+	TestEqual(TEXT("Style-qualified alias resolves to the same font asset"),
+		FFontResolver::FindFontAssetPath(StyleQualifiedAlias),
+		DefaultFontPath);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSharedCalibrationFitContentOrderIndependenceTest,
+	"Design2UMG.Text.SharedCalibrationFitContentOrderIndependent",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FSharedCalibrationFitContentOrderIndependenceTest::RunTest(const FString& Parameters)
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		AddWarning(TEXT("Slate is not initialized, skipping shared calibration fit-content test."));
+		return true;
+	}
+
+	float ExplicitFirstRootHeight = 0.0f;
+	float ExplicitFirstExplicitHeight = 0.0f;
+	float ExplicitFirstAutoHeight = 0.0f;
+	{
+		const FUMGWidgetData Data = FDesign2UMGConverter::Convert(BuildSharedCalibrationFitContentDocument(true, false));
+		if (!ExtractSharedCalibrationHeights(
+			Data,
+			*this,
+			ExplicitFirstRootHeight,
+			ExplicitFirstExplicitHeight,
+			ExplicitFirstAutoHeight))
+		{
+			return false;
+		}
+	}
+
+	float AutoFirstRootHeight = 0.0f;
+	float AutoFirstExplicitHeight = 0.0f;
+	float AutoFirstAutoHeight = 0.0f;
+	{
+		const FUMGWidgetData Data = FDesign2UMGConverter::Convert(BuildSharedCalibrationFitContentDocument(false, false));
+		if (!ExtractSharedCalibrationHeights(
+			Data,
+			*this,
+			AutoFirstRootHeight,
+			AutoFirstExplicitHeight,
+			AutoFirstAutoHeight))
+		{
+			return false;
+		}
+	}
+
+	TestTrue(TEXT("Fit-content parent height should be order independent"),
+		FMath::IsNearlyEqual(ExplicitFirstRootHeight, AutoFirstRootHeight, 0.5f));
+	TestTrue(TEXT("Fit-content parent height should collapse to child sum"),
+		FMath::IsNearlyEqual(ExplicitFirstRootHeight, ExplicitFirstExplicitHeight + ExplicitFirstAutoHeight, 0.5f));
+	TestTrue(TEXT("Auto-first fit-content parent height should collapse to child sum"),
+		FMath::IsNearlyEqual(AutoFirstRootHeight, AutoFirstExplicitHeight + AutoFirstAutoHeight, 0.5f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSharedCalibrationRefFitContentOrderIndependenceTest,
+	"Design2UMG.Text.SharedCalibrationRefFitContentOrderIndependent",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FSharedCalibrationRefFitContentOrderIndependenceTest::RunTest(const FString& Parameters)
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		AddWarning(TEXT("Slate is not initialized, skipping shared calibration ref fit-content test."));
+		return true;
+	}
+
+	float ExplicitFirstRootHeight = 0.0f;
+	float ExplicitFirstExplicitHeight = 0.0f;
+	float ExplicitFirstAutoHeight = 0.0f;
+	{
+		const FUMGWidgetData Data = FDesign2UMGConverter::Convert(BuildSharedCalibrationFitContentDocument(true, true));
+		if (!ExtractSharedCalibrationHeights(
+			Data,
+			*this,
+			ExplicitFirstRootHeight,
+			ExplicitFirstExplicitHeight,
+			ExplicitFirstAutoHeight))
+		{
+			return false;
+		}
+	}
+
+	float AutoFirstRootHeight = 0.0f;
+	float AutoFirstExplicitHeight = 0.0f;
+	float AutoFirstAutoHeight = 0.0f;
+	{
+		const FUMGWidgetData Data = FDesign2UMGConverter::Convert(BuildSharedCalibrationFitContentDocument(false, true));
+		if (!ExtractSharedCalibrationHeights(
+			Data,
+			*this,
+			AutoFirstRootHeight,
+			AutoFirstExplicitHeight,
+			AutoFirstAutoHeight))
+		{
+			return false;
+		}
+	}
+
+	TestTrue(TEXT("Ref fit-content parent height should be order independent"),
+		FMath::IsNearlyEqual(ExplicitFirstRootHeight, AutoFirstRootHeight, 0.5f));
+	TestTrue(TEXT("Ref fit-content parent height should collapse to child sum"),
+		FMath::IsNearlyEqual(ExplicitFirstRootHeight, ExplicitFirstExplicitHeight + ExplicitFirstAutoHeight, 0.5f));
+	TestTrue(TEXT("Auto-first ref fit-content parent height should collapse to child sum"),
+		FMath::IsNearlyEqual(AutoFirstRootHeight, AutoFirstExplicitHeight + AutoFirstAutoHeight, 0.5f));
+	return true;
+}
+
 bool FJustifyAutoTextWrapParityTest::RunTest(const FString& Parameters)
 {
 	const FString Json = TEXT(R"({
@@ -2029,6 +2381,81 @@ bool FKnownWidthFillTextWrapParityTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Known-width fill text enables runtime wrapping"), GetWidgetProperty(*TextWidget, TEXT("AutoWrapText")), TEXT("true"));
 	TestEqual(TEXT("Known-width fill text keeps fallback wrap width"), GetWidgetProperty(*TextWidget, TEXT("WrapTextAt")), TEXT("300.0"));
 	TestTrue(TEXT("Known-width fill text should not clip"), GetWidgetProperty(*TextWidget, TEXT("Clipping")).IsEmpty());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRuntimeTextContentPreservesParagraphBreaksTest,
+	"Design2UMG.Text.RuntimeContentPreservesParagraphBreaks",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FRuntimeTextContentPreservesParagraphBreaksTest::RunTest(const FString& Parameters)
+{
+	const FString SourceText = TEXT("Line one\r\n\r\nLine two");
+	const FString RuntimeText = TextMeasurement::PrepareRuntimeTextContent(SourceText);
+	TestEqual(TEXT("CRLF normalized to LF"), RuntimeText, FString(TEXT("Line one\n\nLine two")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMultiParagraphFixedWidthTextKeepsDeclaredFontSizeTest,
+	"Design2UMG.Text.MultiParagraphFixedWidthKeepsDeclaredFontSize",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FMultiParagraphFixedWidthTextKeepsDeclaredFontSizeTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"JSON({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page 1",
+				"type": "CANVAS",
+				"children": [{
+					"id": "0:2",
+					"name": "Root",
+					"type": "FRAME",
+					"visible": true,
+					"absoluteBoundingBox": {"x":0,"y":0,"width":1400,"height":200},
+					"children": [{
+						"id": "body",
+						"name": "Supporting text",
+						"type": "TEXT",
+						"visible": true,
+						"absoluteBoundingBox": {"x":0,"y":0,"width":1325,"height":80},
+						"style": {
+							"fontFamily": "Roboto",
+							"fontWeight": 400,
+							"fontSize": 14,
+							"textAlignHorizontal": "LEFT",
+							"textAlignVertical": "TOP",
+							"letterSpacing": 0.25,
+							"lineHeightUnit": "PIXELS",
+							"lineHeightPx": 20
+						},
+						"layoutSizingHorizontal": "FILL",
+						"layoutSizingVertical": "HUG",
+						"layoutPositioning": "AUTO",
+						"textAutoResize": "HEIGHT",
+						"characters": "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.\n\nDuis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum."
+					}]
+				}]
+			}]
+		}
+	})JSON");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Figma multi-paragraph fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* TextWidget = FindWidgetById(Data.RootWidget, TEXT("body"));
+	TestNotNull(TEXT("Converted body text exists"), TextWidget);
+	if (!TextWidget)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Body text keeps declared runtime content"), TextWidget->Text.Text, FString(TEXT("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.\n\nDuis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.")));
+	TestEqual(TEXT("Body text enables runtime wrap"), GetWidgetProperty(*TextWidget, TEXT("AutoWrapText")), TEXT("true"));
+	TestEqual(TEXT("Body text keeps authored wrap width"), GetWidgetProperty(*TextWidget, TEXT("WrapTextAt")), TEXT("1325.0"));
+	TestTrue(TEXT("Body text should not clip after conversion"), GetWidgetProperty(*TextWidget, TEXT("Clipping")).IsEmpty());
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenExtendedFieldsAndMeshGradientTest,
@@ -2116,14 +2543,72 @@ bool FPenExtendedFieldsAndMeshGradientTest::RunTest(const FString& Parameters)
 	const FString* StrokeDashPattern = ComponentNode->Metadata.Find(TEXT("stroke.dashPattern"));
 	TestTrue(TEXT("stroke dashPattern preserved"), StrokeDashPattern && StrokeDashPattern->Contains(TEXT("2")) && StrokeDashPattern->Contains(TEXT("4")));
 	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
-	const FString OverrideText = TEXT("Go");
-	const FUMGWidgetNode* OverrideLabel = FindWidgetByProperty(Data.RootWidget, TEXT("Text"), &OverrideText);
+	const FUMGWidgetNode* OverrideLabel = FindWidgetById(Data.RootWidget, TEXT("label"));
 	TestTrue(TEXT("Find override text widget"), OverrideLabel != nullptr);
 	if (!OverrideLabel)
 		return false;
+	TestEqual(TEXT("Override text with href upgrades to rich text"), OverrideLabel->Type, TEXT("RichTextBlock"));
+	const FString OverrideMarkup = GetWidgetProperty(*OverrideLabel, TEXT("Text"));
+	TestTrue(TEXT("Override text content propagated"), OverrideMarkup.Contains(TEXT("Go")));
+	TestTrue(TEXT("Override href serialized into markup"), OverrideMarkup.Contains(TEXT("href=\"https://override.example\"")));
 	TestEqual(TEXT("Override fontStyle propagated"), GetWidgetProperty(*OverrideLabel, TEXT("FontStyle")), TEXT("italic"));
 	TestEqual(TEXT("Override underline propagated"), GetWidgetProperty(*OverrideLabel, TEXT("Underline")), TEXT("true"));
 	TestEqual(TEXT("Override href propagated"), GetWidgetProperty(*OverrideLabel, TEXT("Href")), TEXT("https://override.example"));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenRichTextConverterUsesRichTextBlockTest,
+	"Design2UMG.Converter.PenRichTextUsesRichTextBlock",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPenRichTextConverterUsesRichTextBlockTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"children": [
+			{
+				"id": "root",
+				"type": "frame",
+				"width": 320,
+				"height": 120,
+				"children": [
+					{
+						"id": "rich_label",
+						"type": "text",
+						"width": 220,
+						"height": "fit_content",
+						"fontFamily": "Geist",
+						"fontSize": 18,
+						"fill": "#112233",
+						"content": [
+							{ "content": "Open " },
+							{ "content": "Docs", "fontWeight": "700", "underline": true, "href": "https://docs.example.com" }
+						]
+					}
+				]
+			}
+		]
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Pen rich text fixture parses"), FPenParser::ParseDocument(Json, Doc));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* RichLabel = FindWidgetById(Data.RootWidget, TEXT("rich_label"));
+	TestNotNull(TEXT("Rich text widget exists"), RichLabel);
+	if (!RichLabel)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Rich text converts to RichTextBlock"), RichLabel->Type, TEXT("RichTextBlock"));
+
+	const FString Markup = GetWidgetProperty(*RichLabel, TEXT("Text"));
+	TestTrue(TEXT("Rich text markup contains first run tag"), Markup.Contains(TEXT("<d2u_run_0>")));
+	TestTrue(TEXT("Rich text markup contains href attribute"), Markup.Contains(TEXT("href=\"https://docs.example.com\"")));
+	TestTrue(TEXT("Rich text markup keeps link text"), Markup.Contains(TEXT("Docs")));
+	TestEqual(TEXT("Single rich hyperlink becomes tooltip"), GetWidgetProperty(*RichLabel, TEXT("ToolTipText")), TEXT("https://docs.example.com"));
+
+	FString StyleRowsJson;
+	TestTrue(TEXT("Rich text style rows metadata exported"), RichLabel->Properties.TryGetString(RichTextStyleRowsPropertyKey, StyleRowsJson));
+	TestTrue(TEXT("Rich text style rows include second run"), StyleRowsJson.Contains(TEXT("d2u_run_1")));
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPathStrokeOnlyIconRasterizationTest,
@@ -2609,12 +3094,130 @@ bool FInnerShadowRetainerMaterialApplicationTest::RunTest(const FString& Paramet
 	const FLinearColor BlurUVStep = DynamicEffect->K2_GetVectorParameterValue(TEXT("BlurUVStep"));
 	const FLinearColor InnerShadowColor = DynamicEffect->K2_GetVectorParameterValue(TEXT("InnerShadowColor"));
 	const FLinearColor InnerShadowOffset = DynamicEffect->K2_GetVectorParameterValue(TEXT("InnerShadowOffset"));
+	const float InnerShadowStrength = DynamicEffect->K2_GetScalarParameterValue(TEXT("InnerShadowStrength"));
 	TestTrue(TEXT("Inner shadow blur UV step X applied"), FMath::IsNearlyEqual(BlurUVStep.R, 0.01f, 0.0001f));
 	TestTrue(TEXT("Inner shadow blur UV step Y applied"), FMath::IsNearlyEqual(BlurUVStep.G, 0.02f, 0.0001f));
 	TestTrue(TEXT("Inner shadow color R applied"), FMath::IsNearlyEqual(InnerShadowColor.R, 0.1f, 0.0001f));
 	TestTrue(TEXT("Inner shadow color A applied"), FMath::IsNearlyEqual(InnerShadowColor.A, 0.4f, 0.0001f));
+	TestTrue(TEXT("Inner shadow strength applied"), FMath::IsNearlyEqual(InnerShadowStrength, 0.4f, 0.0001f));
 	TestTrue(TEXT("Inner shadow offset X applied"), FMath::IsNearlyEqual(InnerShadowOffset.R, 0.05f, 0.0001f));
 	TestTrue(TEXT("Inner shadow offset Y applied"), FMath::IsNearlyEqual(InnerShadowOffset.G, -0.03f, 0.0001f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRichTextBlockStyleRowsApplicationTest,
+	"Design2UMG.PropertyApplier.RichTextBlockStyleRows",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FRichTextBlockStyleRowsApplicationTest::RunTest(const FString& Parameters)
+{
+	URichTextBlock* Widget = NewObject<URichTextBlock>(GetTransientPackageAsObject());
+	TestTrue(TEXT("RichTextBlock created"), Widget != nullptr);
+	if (!Widget)
+	{
+		return false;
+	}
+
+	FTextBlockStyle PreconfiguredStyle = FTextBlockStyle::GetDefault();
+	PreconfiguredStyle.ShadowColorAndOpacity = FLinearColor(0.8f, 0.1f, 0.2f, 0.5f);
+	PreconfiguredStyle.ShadowOffset = FVector2D(2.0f, 3.0f);
+	Widget->SetDefaultTextStyle(PreconfiguredStyle);
+
+	FUMGWidgetNode Node;
+	Node.Type = TEXT("RichTextBlock");
+	Node.Text.Text = TEXT("<d2u_run_0>Hello </><d2u_run_1 href=\"https://docs.example.com\">Docs</>");
+	Node.Text.bHasText = true;
+	Node.Text.FontFamily = TEXT("Geist");
+	Node.Text.bHasFontFamily = true;
+	Node.Text.TypefaceFontName = TEXT("Regular");
+	Node.Text.bHasTypefaceFontName = true;
+	Node.Text.Justification = TEXT("Center");
+	Node.Text.bHasJustification = true;
+	Node.Text.bAutoWrapText = true;
+	Node.Text.bHasAutoWrapText = true;
+	Node.Text.WrapTextAt = 180.0f;
+	Node.Text.bHasWrapTextAt = true;
+	Node.Text.LineHeightPercentage = 1.25f;
+	Node.Text.bHasLineHeightPercentage = true;
+	Node.Text.Color = FLinearColor(0.1f, 0.2f, 0.3f, 1.0f);
+	Node.Text.bHasColor = true;
+	Node.TextStyle.FontSize = 18.0f;
+	Node.TextStyle.SourceFontSize = 18.0f;
+	Node.TextStyle.LetterSpacing = 1.5f;
+	Node.TextStyle.bHasLetterSpacing = true;
+	Node.WidgetStyle.Padding = FMargin(3.0f, 4.0f, 5.0f, 6.0f);
+	Node.WidgetStyle.bHasPadding = true;
+	Node.WidgetStyle.ToolTipText = TEXT("https://docs.example.com");
+	Node.WidgetStyle.bHasToolTipText = true;
+	Node.Properties.Add(
+		RichTextStyleRowsPropertyKey,
+		TEXT("{\"d2u_run_0\":{\"Color\":\"#112233FF\"},\"d2u_run_1\":{\"FontSize\":22.0,\"DesignFontSize\":22.0,\"Color\":\"#224466FF\",\"Underline\":true,\"Href\":\"https://docs.example.com\"}}"));
+
+	FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node);
+
+	TestEqual(TEXT("Rich text source text applied"), Widget->GetText().ToString(), TEXT("<d2u_run_0>Hello </><d2u_run_1 href=\"https://docs.example.com\">Docs</>"));
+	TestEqual(TEXT("Rich text tooltip applied"), Widget->GetToolTipText().ToString(), TEXT("https://docs.example.com"));
+	TestTrue(TEXT("Rich text auto wrap applied"), Widget->GetAutoWrapText());
+	TestTrue(TEXT("Rich text wrap width applied"), FMath::IsNearlyEqual(Widget->GetWrapTextAt(), 180.0f, 0.001f));
+	const FStructProperty* MarginProperty = FindFProperty<FStructProperty>(UTextLayoutWidget::StaticClass(), TEXT("Margin"));
+	TestTrue(TEXT("Rich text margin property found"), MarginProperty != nullptr);
+	if (MarginProperty)
+	{
+		const FMargin* MarginValue = MarginProperty->ContainerPtrToValuePtr<FMargin>(Widget);
+		TestTrue(TEXT("Rich text padding applied as internal margin"),
+			MarginValue
+			&& FMath::IsNearlyEqual(MarginValue->Left, 3.0f, 0.001f)
+			&& FMath::IsNearlyEqual(MarginValue->Top, 4.0f, 0.001f)
+			&& FMath::IsNearlyEqual(MarginValue->Right, 5.0f, 0.001f)
+			&& FMath::IsNearlyEqual(MarginValue->Bottom, 6.0f, 0.001f));
+	}
+
+	const FTextBlockStyle& DefaultStyle = Widget->GetCurrentDefaultTextStyle();
+	TestEqual(TEXT("Rich text default font size applied"), DefaultStyle.Font.Size, 18.0f);
+	const FLinearColor ExpectedDefaultColor = FUMGValueParser::ParseColor(
+		Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Text.Color));
+	TestTrue(TEXT("Rich text default color applied"),
+		DefaultStyle.ColorAndOpacity.GetSpecifiedColor().Equals(ExpectedDefaultColor, 0.0001f));
+	TestTrue(TEXT("Rich text default style preserves preconfigured shadow color"),
+		DefaultStyle.ShadowColorAndOpacity.Equals(PreconfiguredStyle.ShadowColorAndOpacity, 0.0001f));
+	TestTrue(TEXT("Rich text default style preserves preconfigured shadow offset"),
+		DefaultStyle.ShadowOffset == PreconfiguredStyle.ShadowOffset);
+
+	UDataTable* StyleSet = Widget->GetTextStyleSet();
+	TestTrue(TEXT("Rich text style set created"), StyleSet != nullptr);
+	if (!StyleSet)
+	{
+		return false;
+	}
+	TestTrue(TEXT("Rich text generated style set is widget-owned"), StyleSet->GetOuter() == Widget);
+	TestFalse(TEXT("Rich text generated style set is not transient"), StyleSet->HasAnyFlags(RF_Transient));
+
+	const FRichTextStyleRow* BaseRow = StyleSet->FindRow<FRichTextStyleRow>(TEXT("d2u_run_0"), TEXT("RichTextBlockStyleRowsApplication"));
+	TestNotNull(TEXT("Base row exists"), BaseRow);
+	if (!BaseRow)
+	{
+		return false;
+	}
+	TestEqual(TEXT("Sparse base row inherits default font size"), BaseRow->TextStyle.Font.Size, 18.0f);
+	TestTrue(TEXT("Sparse base row preserves base shadow color"),
+		BaseRow->TextStyle.ShadowColorAndOpacity.Equals(PreconfiguredStyle.ShadowColorAndOpacity, 0.0001f));
+
+	const FRichTextStyleRow* LinkRow = StyleSet->FindRow<FRichTextStyleRow>(TEXT("d2u_run_1"), TEXT("RichTextBlockStyleRowsApplication"));
+	TestNotNull(TEXT("Link row exists"), LinkRow);
+	if (!LinkRow)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Link row font size applied"), LinkRow->TextStyle.Font.Size, 22.0f);
+	TestTrue(TEXT("Link row underline brush created"), LinkRow->TextStyle.UnderlineBrush.DrawAs != ESlateBrushDrawType::NoDrawType);
+	TestTrue(TEXT("Link row color applied"),
+		LinkRow->TextStyle.ColorAndOpacity.GetSpecifiedColor().Equals(
+			FUMGValueParser::ParseColor(TEXT("#224466FF")),
+			0.0001f));
+	TestTrue(TEXT("Link row preserves base shadow color"),
+		LinkRow->TextStyle.ShadowColorAndOpacity.Equals(PreconfiguredStyle.ShadowColorAndOpacity, 0.0001f));
+	TestTrue(TEXT("Link row preserves base shadow offset"),
+		LinkRow->TextStyle.ShadowOffset == PreconfiguredStyle.ShadowOffset);
 	return true;
 }
 
@@ -2693,341 +3296,6 @@ bool FWidgetStateJsonRoundTripTest::RunTest(const FString& Parameters)
 	int32 LegacyActiveWidgetIndex = 0;
 	TestFalse(TEXT("Widget state round-trip does not rehydrate legacy ActiveWidgetIndex"),
 		ParsedData.RootWidget.Properties.TryGetInt(UMGPropertyKeys::ActiveWidgetIndex, LegacyActiveWidgetIndex));
-	return true;
-}
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLegacyBrushAndTextStyleJsonNormalizationTest,
-	"Design2UMG.UMGJson.LegacyBrushAndTextStyleNormalization",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FLegacyBrushAndTextStyleJsonNormalizationTest::RunTest(const FString& Parameters)
-{
-	const FString Json = TEXT(R"({
-		"WidgetName": "WBP_LegacyTypedNormalization",
-		"RootWidget": {
-			"Type": "CanvasPanel",
-			"Id": "root",
-			"Name": "Root",
-			"Slot": {},
-			"Children": [
-				{
-					"Type": "TextBlock",
-					"Id": "text_legacy",
-					"Name": "LegacyText",
-					"Properties": {
-						"Text": "Hello",
-						"FontSize": "18.0",
-						"DesignFontSize": "24.0",
-						"LetterSpacing": "1.5"
-					},
-					"Slot": {}
-				},
-				{
-					"Type": "Border",
-					"Id": "border_legacy",
-					"Name": "LegacyBorder",
-					"Properties": {
-						"DrawAs": "RoundedBox",
-						"BrushColor": "#112233FF",
-						"OutlineColor": "#445566FF",
-						"OutlineThickness": "2.5",
-						"OutlineCornerRadius": "8.0"
-					},
-					"Slot": {}
-				},
-				{
-					"Type": "Image",
-					"Id": "image_legacy",
-					"Name": "LegacyImage",
-					"Properties": {
-						"MaterialRef": "gradientlinear",
-						"MaterialParams": "{\"Rotation\":0.0,\"ColorStart\":\"#FFFFFFFF\",\"ColorEnd\":\"#000000FF\"}",
-						"TexturePath": "/Game/UI/T_Test.T_Test"
-					},
-					"Slot": {}
-				},
-				{
-					"Type": "Border",
-					"Id": "render_legacy",
-					"Name": "LegacyRender",
-					"Properties": {
-						"Visibility": "SelfHitTestInvisible",
-						"ToolTipText": "legacy tooltip",
-						"IsEnabled": "false",
-						"Clipping": "ClipToBounds",
-						"RenderOpacity": "0.6",
-						"RenderAngle": "15.0",
-						"RenderTransformPivot": "0.25,0.75",
-						"RenderScale": "1.25,0.8",
-						"RenderTransformScale": "-1.0,1.0",
-						"RenderTranslation": "12.0,6.0"
-					},
-					"Slot": {}
-				}
-			]
-		}
-	})");
-
-	FUMGWidgetData ParsedData;
-	FString ParseError;
-	TestTrue(TEXT("Legacy typed normalization JSON parses"), FUMGJsonParser::ParseJson(Json, ParsedData, &ParseError));
-	if (!ParseError.IsEmpty())
-	{
-		AddInfo(ParseError);
-	}
-
-	const FUMGWidgetNode* TextNode = FindWidgetById(ParsedData.RootWidget, TEXT("text_legacy"));
-	const FUMGWidgetNode* BorderNode = FindWidgetById(ParsedData.RootWidget, TEXT("border_legacy"));
-	const FUMGWidgetNode* ImageNode = FindWidgetById(ParsedData.RootWidget, TEXT("image_legacy"));
-	const FUMGWidgetNode* RenderNode = FindWidgetById(ParsedData.RootWidget, TEXT("render_legacy"));
-	TestTrue(TEXT("Legacy text node found"), TextNode != nullptr);
-	TestTrue(TEXT("Legacy border node found"), BorderNode != nullptr);
-	TestTrue(TEXT("Legacy image node found"), ImageNode != nullptr);
-	TestTrue(TEXT("Legacy render node found"), RenderNode != nullptr);
-	if (!TextNode || !BorderNode || !ImageNode || !RenderNode)
-	{
-		return false;
-	}
-
-	TestTrue(TEXT("Legacy text font size normalized to typed field"), FMath::IsNearlyEqual(TextNode->TextStyle.FontSize, 18.0f, 0.001f));
-	TestTrue(TEXT("Legacy text source font size normalized to typed field"), FMath::IsNearlyEqual(TextNode->TextStyle.SourceFontSize, 24.0f, 0.001f));
-	TestTrue(TEXT("Legacy text letter spacing normalized to typed field"), TextNode->TextStyle.bHasLetterSpacing && FMath::IsNearlyEqual(TextNode->TextStyle.LetterSpacing, 1.5f, 0.001f));
-	TestFalse(TEXT("Legacy text font size removed from property bag"), HasLegacyWidgetProperty(*TextNode, TEXT("FontSize")));
-	TestFalse(TEXT("Legacy text design font size removed from property bag"), HasLegacyWidgetProperty(*TextNode, TEXT("DesignFontSize")));
-	TestFalse(TEXT("Legacy text letter spacing removed from property bag"), HasLegacyWidgetProperty(*TextNode, TEXT("LetterSpacing")));
-
-	TestTrue(TEXT("Legacy border draw type normalized to typed brush"), BorderNode->Brush.bHasDrawAs && BorderNode->Brush.DrawAs == ESlateBrushDrawType::RoundedBox);
-	TestTrue(TEXT("Legacy border brush color normalized to typed brush"), BorderNode->Brush.bHasBrushColor);
-	TestTrue(TEXT("Legacy border outline color normalized to typed brush"), BorderNode->Brush.bHasOutlineColor);
-	TestTrue(TEXT("Legacy border outline thickness normalized to typed brush"), FMath::IsNearlyEqual(BorderNode->Brush.OutlineThickness, 2.5f, 0.001f));
-	TestTrue(TEXT("Legacy border corner radius normalized to typed brush"), FMath::IsNearlyEqual(BorderNode->Brush.OutlineCornerRadius, 8.0f, 0.001f));
-	TestFalse(TEXT("Legacy border draw type removed from property bag"), HasLegacyWidgetProperty(*BorderNode, TEXT("DrawAs")));
-	TestFalse(TEXT("Legacy border brush color removed from property bag"), HasLegacyWidgetProperty(*BorderNode, TEXT("BrushColor")));
-	TestFalse(TEXT("Legacy border outline color removed from property bag"), HasLegacyWidgetProperty(*BorderNode, TEXT("OutlineColor")));
-
-	TestEqual(TEXT("Legacy image material ref normalized to typed brush"), ImageNode->Brush.MaterialRef, TEXT("gradientlinear"));
-	TestTrue(TEXT("Legacy image material params normalized to typed brush"), ImageNode->Brush.MaterialParams.Contains(TEXT("\"Rotation\":0.0")));
-	TestEqual(TEXT("Legacy image texture path normalized to typed brush"), ImageNode->Brush.TexturePath, TEXT("/Game/UI/T_Test.T_Test"));
-	TestTrue(TEXT("Legacy image texture path normalized to typed image data"), ImageNode->Brush.Image.bHasTexturePath && ImageNode->Brush.Image.TexturePath == TEXT("/Game/UI/T_Test.T_Test"));
-	TestFalse(TEXT("Legacy image material ref removed from property bag"), HasLegacyWidgetProperty(*ImageNode, TEXT("MaterialRef")));
-	TestFalse(TEXT("Legacy image texture path removed from property bag"), HasLegacyWidgetProperty(*ImageNode, TEXT("TexturePath")));
-
-	TestTrue(TEXT("Legacy render visibility normalized to typed widget style"), RenderNode->WidgetStyle.bHasVisibility && RenderNode->WidgetStyle.Visibility == TEXT("SelfHitTestInvisible"));
-	TestTrue(TEXT("Legacy render tooltip normalized to typed widget style"), RenderNode->WidgetStyle.bHasToolTipText && RenderNode->WidgetStyle.ToolTipText == TEXT("legacy tooltip"));
-	TestTrue(TEXT("Legacy render enabled normalized to typed widget style"), RenderNode->WidgetStyle.bHasIsEnabled && !RenderNode->WidgetStyle.bIsEnabled);
-	TestTrue(TEXT("Legacy render clipping normalized to typed render"), RenderNode->Render.bHasClipping && RenderNode->Render.Clipping == TEXT("ClipToBounds"));
-	TestTrue(TEXT("Legacy render opacity normalized to typed render"), RenderNode->Render.bHasRenderOpacity && FMath::IsNearlyEqual(RenderNode->Render.RenderOpacity, 0.6f, 0.001f));
-	TestTrue(TEXT("Legacy render angle normalized to typed render"), RenderNode->Render.bHasRenderAngle && FMath::IsNearlyEqual(RenderNode->Render.RenderAngle, 15.0f, 0.001f));
-	TestTrue(TEXT("Legacy render pivot normalized to typed render"), RenderNode->Render.bHasRenderTransformPivot && RenderNode->Render.RenderTransformPivot.Equals(FVector2D(0.25f, 0.75f), 0.001f));
-	TestTrue(TEXT("Legacy render scale normalized to typed render"), RenderNode->Render.bHasRenderScale && RenderNode->Render.RenderScale.Equals(FVector2D(1.25f, 0.8f), 0.001f));
-	TestTrue(TEXT("Legacy render transform scale normalized to typed render"), RenderNode->Render.bHasRenderTransformScale && RenderNode->Render.RenderTransformScale.Equals(FVector2D(-1.0f, 1.0f), 0.001f));
-	TestTrue(TEXT("Legacy render translation normalized to typed render"), RenderNode->Render.bHasRenderTranslation && RenderNode->Render.RenderTranslation.Equals(FVector2D(12.0f, 6.0f), 0.001f));
-	TestFalse(TEXT("Legacy render visibility removed from property bag"), HasLegacyWidgetProperty(*RenderNode, TEXT("Visibility")));
-	TestFalse(TEXT("Legacy render tooltip removed from property bag"), HasLegacyWidgetProperty(*RenderNode, TEXT("ToolTipText")));
-	TestFalse(TEXT("Legacy render enabled removed from property bag"), HasLegacyWidgetProperty(*RenderNode, TEXT("IsEnabled")));
-	TestFalse(TEXT("Legacy render clipping removed from property bag"), HasLegacyWidgetProperty(*RenderNode, TEXT("Clipping")));
-	TestFalse(TEXT("Legacy render opacity removed from property bag"), HasLegacyWidgetProperty(*RenderNode, TEXT("RenderOpacity")));
-	TestFalse(TEXT("Legacy render angle removed from property bag"), HasLegacyWidgetProperty(*RenderNode, TEXT("RenderAngle")));
-	TestFalse(TEXT("Legacy render pivot removed from property bag"), HasLegacyWidgetProperty(*RenderNode, TEXT("RenderTransformPivot")));
-	TestFalse(TEXT("Legacy render scale removed from property bag"), HasLegacyWidgetProperty(*RenderNode, TEXT("RenderScale")));
-	TestFalse(TEXT("Legacy render transform scale removed from property bag"), HasLegacyWidgetProperty(*RenderNode, TEXT("RenderTransformScale")));
-	TestFalse(TEXT("Legacy render translation removed from property bag"), HasLegacyWidgetProperty(*RenderNode, TEXT("RenderTranslation")));
-	return true;
-}
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTypedEmptyStringSuppressesLegacyFallbackTest,
-	"Design2UMG.WidgetNodeAccess.TypedEmptyStringSuppressesLegacyFallback",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FTypedEmptyStringSuppressesLegacyFallbackTest::RunTest(const FString& Parameters)
-{
-	FUMGWidgetNode Node;
-	Node.Type = TEXT("Border");
-	Node.Id = TEXT("typed_empty");
-	Node.Name = TEXT("TypedEmpty");
-	Node.WidgetStyle.Visibility = TEXT("");
-	Node.WidgetStyle.bHasVisibility = true;
-	Node.Properties.Add(UMGPropertyKeys::Visibility, TEXT("SelfHitTestInvisible"));
-	Node.Properties.Add(TEXT("CustomMeta"), TEXT("KeepMe"));
-
-	FString Value;
-	TestTrue(TEXT("Typed empty string is still readable"), Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::Visibility, Value));
-	TestTrue(TEXT("Typed empty string stays empty"), Value.IsEmpty());
-	TestFalse(TEXT("HasWidgetString keeps empty string as absent"), Design2UMGWidgetNodeAccess::HasWidgetString(Node, UMGPropertyKeys::Visibility));
-
-	const FUMGPropertyBag TypedProperties = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
-	TestTrue(TEXT("Typed property bag keeps empty-string override"), TypedProperties.TryGetString(UMGPropertyKeys::Visibility, Value));
-	TestTrue(TEXT("Typed property bag preserves empty-string payload"), Value.IsEmpty());
-
-	const FUMGPropertyBag LegacyFallback = Design2UMGWidgetNodeAccess::BuildLegacyFallbackPropertyBag(Node);
-	TestFalse(TEXT("Legacy fallback bag drops overridden typed key"), LegacyFallback.TryGetString(UMGPropertyKeys::Visibility, Value));
-	TestTrue(TEXT("Legacy fallback bag keeps unrelated properties"), LegacyFallback.TryGetString(TEXT("CustomMeta"), Value));
-	TestEqual(TEXT("Legacy fallback keeps unrelated property value"), Value, TEXT("KeepMe"));
-	return true;
-}
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTypedJsonEmptyStringOverrideNormalizationTest,
-	"Design2UMG.UMGJson.TypedEmptyStringOverrideNormalization",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FTypedJsonEmptyStringOverrideNormalizationTest::RunTest(const FString& Parameters)
-{
-	const FString Json = TEXT(R"({
-		"WidgetName": "WBP_TypedEmptyStringOverride",
-		"RootWidget": {
-			"Type": "CanvasPanel",
-			"Id": "root",
-			"Name": "Root",
-			"Slot": {},
-			"Children": [
-				{
-					"Type": "Border",
-					"Id": "typed_empty",
-					"Name": "TypedEmpty",
-					"WidgetStyle": {
-						"Visibility": "",
-						"ToolTipText": ""
-					},
-					"Brush": {
-						"MaterialRef": "",
-						"MaterialParams": ""
-					},
-					"Effect": {
-						"EffectMaterial": "",
-						"TextureParameter": ""
-					},
-					"Render": {
-						"Clipping": ""
-					},
-					"Properties": {
-						"Visibility": "SelfHitTestInvisible",
-						"ToolTipText": "legacy tooltip",
-						"MaterialRef": "gradientlinear",
-						"MaterialParams": "{\"Rotation\":90.0}",
-						"EffectMaterial": "d2u.retainer.foreground_blur",
-						"TextureParameter": "Texture",
-						"Clipping": "ClipToBounds",
-						"CustomMeta": "KeepMe"
-					},
-					"Slot": {}
-				}
-			]
-		}
-	})");
-
-	FUMGWidgetData ParsedData;
-	FString ParseError;
-	TestTrue(TEXT("Typed empty-string override JSON parses"), FUMGJsonParser::ParseJson(Json, ParsedData, &ParseError));
-	if (!ParseError.IsEmpty())
-	{
-		AddInfo(ParseError);
-	}
-
-	const FUMGWidgetNode* Node = FindWidgetById(ParsedData.RootWidget, TEXT("typed_empty"));
-	TestTrue(TEXT("Typed empty override node found"), Node != nullptr);
-	if (!Node)
-	{
-		return false;
-	}
-
-	TestTrue(TEXT("Typed empty visibility presence preserved"), Node->WidgetStyle.bHasVisibility);
-	TestTrue(TEXT("Typed empty tooltip presence preserved"), Node->WidgetStyle.bHasToolTipText);
-	TestTrue(TEXT("Typed empty brush material ref presence preserved"), Node->Brush.bHasMaterialRef);
-	TestTrue(TEXT("Typed empty brush material params presence preserved"), Node->Brush.bHasMaterialParams);
-	TestTrue(TEXT("Typed empty effect material presence preserved"), Node->Effect.bHasEffectMaterial);
-	TestTrue(TEXT("Typed empty texture parameter presence preserved"), Node->Effect.bHasTextureParameter);
-	TestTrue(TEXT("Typed empty clipping presence preserved"), Node->Render.bHasClipping);
-	TestTrue(TEXT("Typed empty visibility payload preserved"), Node->WidgetStyle.Visibility.IsEmpty());
-	TestTrue(TEXT("Typed empty tooltip payload preserved"), Node->WidgetStyle.ToolTipText.IsEmpty());
-	TestTrue(TEXT("Typed empty brush material ref payload preserved"), Node->Brush.MaterialRef.IsEmpty());
-	TestTrue(TEXT("Typed empty brush material params payload preserved"), Node->Brush.MaterialParams.IsEmpty());
-	TestTrue(TEXT("Typed empty effect material payload preserved"), Node->Effect.EffectMaterial.IsEmpty());
-	TestTrue(TEXT("Typed empty texture parameter payload preserved"), Node->Effect.TextureParameter.IsEmpty());
-	TestTrue(TEXT("Typed empty clipping payload preserved"), Node->Render.Clipping.IsEmpty());
-
-	TestTrue(TEXT("Helper returns typed empty visibility"), GetWidgetProperty(*Node, UMGPropertyKeys::Visibility).IsEmpty());
-	TestTrue(TEXT("Helper returns typed empty tooltip"), GetWidgetProperty(*Node, UMGPropertyKeys::ToolTipText).IsEmpty());
-	TestTrue(TEXT("Helper returns typed empty brush material ref"), GetWidgetProperty(*Node, UMGPropertyKeys::MaterialRef).IsEmpty());
-	TestTrue(TEXT("Helper returns typed empty brush material params"), GetWidgetProperty(*Node, UMGPropertyKeys::MaterialParams).IsEmpty());
-	TestTrue(TEXT("Helper returns typed empty effect material"), GetWidgetProperty(*Node, UMGPropertyKeys::EffectMaterial).IsEmpty());
-	TestTrue(TEXT("Helper returns typed empty texture parameter"), GetWidgetProperty(*Node, UMGPropertyKeys::TextureParameter).IsEmpty());
-	TestTrue(TEXT("Helper returns typed empty clipping"), GetWidgetProperty(*Node, UMGPropertyKeys::Clipping).IsEmpty());
-	TestFalse(TEXT("Legacy visibility stripped after typed override"), HasLegacyWidgetProperty(*Node, UMGPropertyKeys::Visibility));
-	TestFalse(TEXT("Legacy tooltip stripped after typed override"), HasLegacyWidgetProperty(*Node, UMGPropertyKeys::ToolTipText));
-	TestFalse(TEXT("Legacy brush material ref stripped after typed override"), HasLegacyWidgetProperty(*Node, UMGPropertyKeys::MaterialRef));
-	TestFalse(TEXT("Legacy brush material params stripped after typed override"), HasLegacyWidgetProperty(*Node, UMGPropertyKeys::MaterialParams));
-	TestFalse(TEXT("Legacy effect material stripped after typed override"), HasLegacyWidgetProperty(*Node, UMGPropertyKeys::EffectMaterial));
-	TestFalse(TEXT("Legacy texture parameter stripped after typed override"), HasLegacyWidgetProperty(*Node, UMGPropertyKeys::TextureParameter));
-	TestFalse(TEXT("Legacy clipping stripped after typed override"), HasLegacyWidgetProperty(*Node, UMGPropertyKeys::Clipping));
-	FString RemainingLegacyValue;
-	TestTrue(TEXT("Unrelated legacy property remains"), Node->Properties.TryGetString(TEXT("CustomMeta"), RemainingLegacyValue));
-	TestEqual(TEXT("Unrelated legacy property value preserved"), RemainingLegacyValue, TEXT("KeepMe"));
-	return true;
-}
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTypedEmptyStringMaterialEffectRoundTripTest,
-	"Design2UMG.UMGJson.TypedEmptyStringMaterialEffectRoundTrip",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FTypedEmptyStringMaterialEffectRoundTripTest::RunTest(const FString& Parameters)
-{
-	FUMGWidgetData SourceData;
-	SourceData.WidgetName = TEXT("WBP_TypedEmptyStringMaterialEffect");
-	SourceData.RootWidget.Type = TEXT("Border");
-	SourceData.RootWidget.Id = TEXT("root");
-	SourceData.RootWidget.Name = TEXT("Root");
-	SourceData.RootWidget.Brush.MaterialRef = TEXT("");
-	SourceData.RootWidget.Brush.bHasMaterialRef = true;
-	SourceData.RootWidget.Brush.MaterialParams = TEXT("");
-	SourceData.RootWidget.Brush.bHasMaterialParams = true;
-	SourceData.RootWidget.Effect.EffectMaterial = TEXT("");
-	SourceData.RootWidget.Effect.bHasEffectMaterial = true;
-	SourceData.RootWidget.Effect.TextureParameter = TEXT("");
-	SourceData.RootWidget.Effect.bHasTextureParameter = true;
-
-	const FString Json = FUMGJsonSerializer::Serialize(SourceData);
-	TSharedPtr<FJsonObject> RootObject;
-	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
-	TestTrue(TEXT("Serialized typed empty-string JSON is valid"), FJsonSerializer::Deserialize(Reader, RootObject) && RootObject.IsValid());
-	if (!RootObject.IsValid())
-	{
-		return false;
-	}
-
-	const TSharedPtr<FJsonObject>* RootWidgetObject = nullptr;
-	TestTrue(TEXT("Serialized RootWidget object is present"), RootObject->TryGetObjectField(TEXT("RootWidget"), RootWidgetObject));
-	if (!RootWidgetObject || !(*RootWidgetObject).IsValid())
-	{
-		return false;
-	}
-
-	const TSharedPtr<FJsonObject>* BrushObject = nullptr;
-	const TSharedPtr<FJsonObject>* EffectObject = nullptr;
-	TestTrue(TEXT("Serialized Brush object is present"), (*RootWidgetObject)->TryGetObjectField(TEXT("Brush"), BrushObject));
-	TestTrue(TEXT("Serialized Effect object is present"), (*RootWidgetObject)->TryGetObjectField(TEXT("Effect"), EffectObject));
-	if (!BrushObject || !(*BrushObject).IsValid() || !EffectObject || !(*EffectObject).IsValid())
-	{
-		return false;
-	}
-
-	FString SerializedValue;
-	TestTrue(TEXT("Serialized typed empty material ref field is present"), (*BrushObject)->TryGetStringField(TEXT("MaterialRef"), SerializedValue));
-	TestTrue(TEXT("Serialized typed empty material ref payload stays empty"), SerializedValue.IsEmpty());
-	TestTrue(TEXT("Serialized typed empty material params field is present"), (*BrushObject)->TryGetStringField(TEXT("MaterialParams"), SerializedValue));
-	TestTrue(TEXT("Serialized typed empty material params payload stays empty"), SerializedValue.IsEmpty());
-	TestTrue(TEXT("Serialized typed empty effect material field is present"), (*EffectObject)->TryGetStringField(TEXT("EffectMaterial"), SerializedValue));
-	TestTrue(TEXT("Serialized typed empty effect material payload stays empty"), SerializedValue.IsEmpty());
-	TestTrue(TEXT("Serialized typed empty texture parameter field is present"), (*EffectObject)->TryGetStringField(TEXT("TextureParameter"), SerializedValue));
-	TestTrue(TEXT("Serialized typed empty texture parameter payload stays empty"), SerializedValue.IsEmpty());
-
-	FUMGWidgetData ParsedData;
-	FString ParseError;
-	TestTrue(TEXT("Typed empty string material/effect round-trip parses"), FUMGJsonParser::ParseJson(Json, ParsedData, &ParseError));
-	if (!ParseError.IsEmpty())
-	{
-		AddInfo(ParseError);
-	}
-
-	TestTrue(TEXT("Round-trip keeps empty brush material ref presence"), ParsedData.RootWidget.Brush.bHasMaterialRef);
-	TestTrue(TEXT("Round-trip keeps empty brush material params presence"), ParsedData.RootWidget.Brush.bHasMaterialParams);
-	TestTrue(TEXT("Round-trip keeps empty effect material presence"), ParsedData.RootWidget.Effect.bHasEffectMaterial);
-	TestTrue(TEXT("Round-trip keeps empty texture parameter presence"), ParsedData.RootWidget.Effect.bHasTextureParameter);
-	TestTrue(TEXT("Round-trip helper keeps empty brush material ref"), GetWidgetProperty(ParsedData.RootWidget, UMGPropertyKeys::MaterialRef).IsEmpty());
-	TestTrue(TEXT("Round-trip helper keeps empty brush material params"), GetWidgetProperty(ParsedData.RootWidget, UMGPropertyKeys::MaterialParams).IsEmpty());
-	TestTrue(TEXT("Round-trip helper keeps empty effect material"), GetWidgetProperty(ParsedData.RootWidget, UMGPropertyKeys::EffectMaterial).IsEmpty());
-	TestTrue(TEXT("Round-trip helper keeps empty texture parameter"), GetWidgetProperty(ParsedData.RootWidget, UMGPropertyKeys::TextureParameter).IsEmpty());
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTypedBrushImageGradientJsonRoundTripTest,
@@ -4002,6 +4270,307 @@ bool FFigmaWrapPaddingUsesBorderWrapperTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Border wrapper keeps inner wrap child"), WrapWidget->Children.Num() == 1 && WrapWidget->Children[0].Type == TEXT("WrapBox"));
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaFlowPaddingUsesBorderWrapperTest,
+	"Design2UMG.FigmaParser.FlowPaddingUsesBorderWrapper",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaFlowPaddingUsesBorderWrapperTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page 1",
+				"type": "CANVAS",
+				"children": [{
+					"id": "0:2",
+					"name": "Root",
+					"type": "FRAME",
+					"visible": true,
+					"absoluteBoundingBox": {"x":0,"y":0,"width":400,"height":300},
+					"children": [{
+						"id": "flow_pad",
+						"name": "FlowPad",
+						"type": "FRAME",
+						"visible": true,
+						"layoutMode": "HORIZONTAL",
+						"itemSpacing": 24,
+						"paddingLeft": 24,
+						"paddingRight": 12,
+						"paddingTop": 8,
+						"paddingBottom": 16,
+						"absoluteBoundingBox": {"x":0,"y":0,"width":300,"height":120},
+						"children": [
+							{"id":"c1","name":"Card1","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":24,"y":8,"width":100,"height":50}},
+							{"id":"c2","name":"Card2","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":148,"y":8,"width":100,"height":50}}
+						]
+					}]
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Flow padding parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* FlowWidget = FindWidgetById(Data.RootWidget, TEXT("flow_pad"));
+	TestTrue(TEXT("Flow padding widget exists"), FlowWidget != nullptr);
+	if (!FlowWidget)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Flow padding container is promoted to border"), FlowWidget->Type, TEXT("Border"));
+	TestEqual(TEXT("Flow padding serialized on border wrapper"), GetWidgetProperty(*FlowWidget, TEXT("Padding")), TEXT("24.0,8.0,12.0,16.0"));
+	TestTrue(TEXT("Border wrapper keeps inner horizontal child"), FlowWidget->Children.Num() == 1 && FlowWidget->Children[0].Type == TEXT("HorizontalBox"));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaInstanceSubtreePaddingSkipsBorderWrapperTest,
+	"Design2UMG.FigmaParser.InstanceSubtreePaddingSkipsBorderWrapper",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaInstanceSubtreePaddingSkipsBorderWrapperTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page 1",
+				"type": "CANVAS",
+				"children": [{
+					"id": "0:2",
+					"name": "Root",
+					"type": "FRAME",
+					"visible": true,
+					"absoluteBoundingBox": {"x":0,"y":0,"width":400,"height":300},
+					"children": [{
+						"id": "inst_root",
+						"name": "Card Instance",
+						"type": "INSTANCE",
+						"visible": true,
+						"componentId": "card_component",
+						"absoluteBoundingBox": {"x":0,"y":0,"width":300,"height":120},
+						"children": [{
+							"id": "flow_in_instance",
+							"name": "Flow In Instance",
+							"type": "FRAME",
+							"visible": true,
+							"layoutMode": "HORIZONTAL",
+							"itemSpacing": 24,
+							"paddingLeft": 24,
+							"paddingRight": 12,
+							"paddingTop": 8,
+							"paddingBottom": 16,
+							"absoluteBoundingBox": {"x":0,"y":0,"width":300,"height":120},
+							"children": [
+								{"id":"c1","name":"Card1","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":24,"y":8,"width":100,"height":50}},
+								{"id":"c2","name":"Card2","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":148,"y":8,"width":100,"height":50}}
+							]
+						}]
+					}]
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Instance subtree parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* FlowWidget = FindWidgetById(Data.RootWidget, TEXT("flow_in_instance"));
+	TestTrue(TEXT("Flow widget inside instance subtree exists"), FlowWidget != nullptr);
+	if (!FlowWidget)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Instance subtree flow keeps direct horizontal container"), FlowWidget->Type, TEXT("HorizontalBox"));
+	TestEqual(TEXT("Instance subtree flow keeps direct padding on the container"), GetWidgetProperty(*FlowWidget, TEXT("Padding")), TEXT("24.0,8.0,12.0,16.0"));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaTopLevelInstanceMixedStretchPaddingUsesBorderWrapperTest,
+	"Design2UMG.FigmaParser.TopLevelInstanceMixedStretchPaddingUsesBorderWrapper",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaTopLevelInstanceMixedStretchPaddingUsesBorderWrapperTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page 1",
+				"type": "CANVAS",
+				"children": [{
+					"id": "0:2",
+					"name": "Root",
+					"type": "FRAME",
+					"visible": true,
+					"absoluteBoundingBox": {"x":0,"y":0,"width":400,"height":320},
+					"children": [{
+						"id": "inst_nav_root",
+						"name": "Navigation Rail",
+						"type": "INSTANCE",
+						"visible": true,
+						"componentId": "nav_component",
+						"layoutMode": "VERTICAL",
+						"itemSpacing": 40,
+						"paddingLeft": 0,
+						"paddingTop": 44,
+						"paddingRight": 0,
+						"paddingBottom": 56,
+						"absoluteBoundingBox": {"x":0,"y":0,"width":72,"height":300},
+						"children": [
+							{
+								"id": "menu_block",
+								"name": "Menu & Fab",
+								"type": "FRAME",
+								"visible": true,
+								"layoutMode": "VERTICAL",
+								"layoutAlign": "INHERIT",
+								"layoutSizingHorizontal": "HUG",
+								"layoutSizingVertical": "HUG",
+								"absoluteBoundingBox": {"x":8,"y":44,"width":56,"height":116},
+								"children": [
+									{"id":"fab","name":"Fab","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":8,"y":44,"width":56,"height":56}},
+									{"id":"menu","name":"Menu","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":8,"y":104,"width":56,"height":56}}
+								]
+							},
+							{
+								"id": "segments_block",
+								"name": "Segments",
+								"type": "FRAME",
+								"visible": true,
+								"layoutMode": "VERTICAL",
+								"layoutAlign": "STRETCH",
+								"layoutSizingHorizontal": "FILL",
+								"layoutSizingVertical": "HUG",
+								"absoluteBoundingBox": {"x":0,"y":200,"width":72,"height":100},
+								"children": [
+									{"id":"seg1","name":"Seg1","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":200,"width":72,"height":24}},
+									{"id":"seg2","name":"Seg2","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":228,"width":72,"height":24}},
+									{"id":"seg3","name":"Seg3","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":256,"width":72,"height":24}}
+								]
+							}
+						]
+					}]
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Top-level instance mixed stretch parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* RootInstance = FindWidgetById(Data.RootWidget, TEXT("inst_nav_root"));
+	TestTrue(TEXT("Top-level mixed-stretch instance exists"), RootInstance != nullptr);
+	if (!RootInstance)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Mixed-stretch top-level instance promotes to border"), RootInstance->Type, TEXT("Border"));
+	TestEqual(TEXT("Mixed-stretch top-level instance keeps runtime padding on border"), GetWidgetProperty(*RootInstance, TEXT("Padding")), TEXT("0.0,44.0,0.0,56.0"));
+	TestTrue(TEXT("Mixed-stretch top-level instance keeps inner vertical child"),
+		RootInstance->Children.Num() == 1 && RootInstance->Children[0].Type == TEXT("VerticalBox"));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaTopLevelInstanceUniformStretchPaddingSkipsBorderWrapperTest,
+	"Design2UMG.FigmaParser.TopLevelInstanceUniformStretchPaddingSkipsBorderWrapper",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaTopLevelInstanceUniformStretchPaddingSkipsBorderWrapperTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page 1",
+				"type": "CANVAS",
+				"children": [{
+					"id": "0:2",
+					"name": "Root",
+					"type": "FRAME",
+					"visible": true,
+					"absoluteBoundingBox": {"x":0,"y":0,"width":400,"height":320},
+					"children": [{
+						"id": "inst_app_root",
+						"name": "App bar",
+						"type": "INSTANCE",
+						"visible": true,
+						"componentId": "app_component",
+						"layoutMode": "VERTICAL",
+						"itemSpacing": 8,
+						"primaryAxisSizingMode": "AUTO",
+						"counterAxisSizingMode": "FIXED",
+						"paddingLeft": 0,
+						"paddingTop": 0,
+						"paddingRight": 0,
+						"paddingBottom": 12,
+						"absoluteBoundingBox": {"x":0,"y":0,"width":320,"height":112},
+						"children": [
+							{
+								"id": "icons_row",
+								"name": "Leading & Trailing icons",
+								"type": "FRAME",
+								"visible": true,
+								"layoutMode": "HORIZONTAL",
+								"layoutAlign": "STRETCH",
+								"layoutSizingHorizontal": "FILL",
+								"layoutSizingVertical": "FIXED",
+								"absoluteBoundingBox": {"x":0,"y":0,"width":320,"height":56},
+								"children": [
+									{"id":"left_icon","name":"LeftIcon","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":24,"height":24}},
+									{"id":"right_icon","name":"RightIcon","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":296,"y":0,"width":24,"height":24}}
+								]
+							},
+							{
+								"id": "title_block",
+								"name": "Text content",
+								"type": "INSTANCE",
+								"visible": true,
+								"componentId": "title_component",
+								"layoutMode": "VERTICAL",
+								"layoutAlign": "STRETCH",
+								"layoutSizingHorizontal": "FILL",
+								"layoutSizingVertical": "HUG",
+								"absoluteBoundingBox": {"x":0,"y":64,"width":320,"height":36},
+								"children": [
+									{"id":"title_line","name":"TitleLine","type":"TEXT","visible":true,"characters":"Title","style":{"fontSize":16},"absoluteBoundingBox":{"x":0,"y":64,"width":64,"height":20}}
+								]
+							}
+						]
+					}]
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Top-level instance uniform stretch parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* RootInstance = FindWidgetById(Data.RootWidget, TEXT("inst_app_root"));
+	TestTrue(TEXT("Top-level uniform-stretch instance exists"), RootInstance != nullptr);
+	if (!RootInstance)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Uniform-stretch top-level instance keeps direct vertical container"), RootInstance->Type, TEXT("VerticalBox"));
+	TestEqual(TEXT("Uniform-stretch top-level instance keeps direct padding"), GetWidgetProperty(*RootInstance, TEXT("Padding")), TEXT("0.0,0.0,0.0,12.0"));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenEmptySlotSemanticHintTest,
 	"Design2UMG.PenParser.EmptySlotSemanticHint",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -4271,6 +4840,63 @@ bool FConverterTextAlignVerticalDoesNotMoveSlotTest::RunTest(const FString& Para
 	}
 	TestEqual(TEXT("textAlignVertical kept as metadata"), GetWidgetProperty(*Label, TEXT("TextAlignVertical")), TEXT("Center"));
 	TestEqual(TEXT("Outer SizeBox slot stays top-aligned"), LabelSizeBox->Slot.VerticalAlignment, TEXT("Top"));
+	FMargin Padding = FMargin(0.0f);
+	TestFalse(TEXT("Auto-height text does not synthesize internal padding"),
+		Design2UMGWidgetNodeAccess::BuildEffectivePropertyBag(*Label).TryGetMargin(TEXT("Padding"), Padding));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConverterTextAlignVerticalUsesInternalPaddingWhenHeightFixedTest,
+	"Design2UMG.Converter.TextAlignVerticalUsesInternalPaddingWhenHeightFixed",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FConverterTextAlignVerticalUsesInternalPaddingWhenHeightFixedTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"children": [
+			{
+				"id": "root",
+				"type": "frame",
+				"width": 240,
+				"height": 80,
+				"layout": "horizontal",
+				"alignItems": "start",
+				"children": [
+					{
+						"id": "label",
+						"type": "text",
+						"content": "Button",
+						"width": 140,
+						"height": 40,
+						"fill": "#FFFFFF",
+						"fontFamily": "Geist",
+						"fontSize": 14,
+						"textAlignVertical": "middle"
+					}
+				]
+			}
+		]
+	})");
+	FDesignDocument Doc;
+	TestTrue(TEXT("ParseDocument succeeds"), FPenParser::ParseDocument(Json, Doc));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* Label = FindWidgetById(Data.RootWidget, TEXT("label"));
+	const FUMGWidgetNode* LabelSizeBox = FindWidgetById(Data.RootWidget, TEXT("label_sz"));
+	TestNotNull(TEXT("Converted fixed-height label exists"), Label);
+	TestNotNull(TEXT("Wrapped fixed-height label SizeBox exists"), LabelSizeBox);
+	if (!Label || !LabelSizeBox)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Fixed-height textAlignVertical kept as metadata"), GetWidgetProperty(*Label, TEXT("TextAlignVertical")), TEXT("Center"));
+	TestEqual(TEXT("Fixed-height label outer slot stays top-aligned"), LabelSizeBox->Slot.VerticalAlignment, TEXT("Top"));
+	FMargin Padding = FMargin(0.0f);
+	TestTrue(TEXT("Fixed-height text synthesizes internal padding"),
+		Design2UMGWidgetNodeAccess::BuildEffectivePropertyBag(*Label).TryGetMargin(TEXT("Padding"), Padding));
+	TestTrue(TEXT("Fixed-height text gets positive top padding"), Padding.Top > 0.5f);
+	TestTrue(TEXT("Fixed-height text gets positive bottom padding"), Padding.Bottom > 0.5f);
+	TestTrue(TEXT("Center alignment splits slack symmetrically"),
+		FMath::IsNearlyEqual(Padding.Top, Padding.Bottom, 0.75f));
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConverterNonUniformStrokePaddingTest,
@@ -4591,6 +5217,28 @@ TestTrue(TEXT("figma instance componentProperties preserved"), InstanceNode->Met
 TestTrue(TEXT("figma instance variantProperties preserved"), InstanceNode->Metadata.Contains(TEXT("variantProperties")));
 TestTrue(TEXT("figma instance overrides preserved"), InstanceNode->Metadata.Contains(TEXT("overrides")));
 TestTrue(TEXT("figma instance isExposedInstance preserved"), InstanceNode->Metadata.FindRef(TEXT("isExposedInstance")) == TEXT("true"));
+
+	const FUMGWidgetData ConvertedData = FDesign2UMGConverter::Convert(Doc);
+	TestTrue(TEXT("figma document components catalog exported"), ConvertedData.FigmaDocument.ComponentsJson.Contains(TEXT("component-key-1")));
+	TestTrue(TEXT("figma document componentSets catalog exported"), ConvertedData.FigmaDocument.ComponentSetsJson.Contains(TEXT("component-set-key-1")));
+
+	const FUMGWidgetNode* ConvertedInstanceWidget = FindWidgetById(ConvertedData.RootWidget, TEXT("inst1"));
+	TestNotNull(TEXT("figma instance widget exported to UMG tree"), ConvertedInstanceWidget);
+	if (!ConvertedInstanceWidget)
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("figma instance typed node data exported"), ConvertedInstanceWidget->Figma.IsInstance());
+	TestEqual(TEXT("figma instance source node type exported"), ConvertedInstanceWidget->Figma.SourceNodeType, TEXT("INSTANCE"));
+	TestEqual(TEXT("figma instance componentId exported"), ConvertedInstanceWidget->Figma.ComponentId, TEXT("12:34"));
+	TestEqual(TEXT("figma instance componentSetId exported"), ConvertedInstanceWidget->Figma.ComponentSetId, TEXT("56:78"));
+	TestEqual(TEXT("figma instance mainComponentKey exported"), ConvertedInstanceWidget->Figma.MainComponentKey, TEXT("component-key-1"));
+	TestTrue(TEXT("figma instance componentProperties exported"), !ConvertedInstanceWidget->Figma.ComponentPropertiesJson.IsEmpty());
+	TestTrue(TEXT("figma instance variantProperties exported"), !ConvertedInstanceWidget->Figma.VariantPropertiesJson.IsEmpty());
+	TestTrue(TEXT("figma instance overrides exported"), !ConvertedInstanceWidget->Figma.OverridesJson.IsEmpty());
+	TestTrue(TEXT("figma instance exposed flag exported"),
+		ConvertedInstanceWidget->Figma.bHasIsExposedInstance && ConvertedInstanceWidget->Figma.bIsExposedInstance);
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeNavigationConverterTest,
@@ -4641,6 +5289,9 @@ bool FFigmaPrototypeNavigationConverterTest::RunTest(const FString& Parameters)
 	const FUMGPrototypeNavigationBinding& Binding = Data.PrototypeNavigation.ClickBindings[0];
 	TestEqual(TEXT("Prototype trigger widget id"), Binding.TriggerWidgetId, TEXT("cta_button"));
 	TestEqual(TEXT("Prototype trigger widget runtime name"), Binding.TriggerWidgetName, TEXT("cta_button"));
+	TestTrue(TEXT("Prototype switcher widget name is no longer fixed hardcode"),
+		Data.PrototypeNavigation.SwitcherWidgetName != TEXT("__d2u_prototype_switcher"));
+	TestEqual(TEXT("Prototype trigger type recorded"), Binding.TriggerType, TEXT("ON_CLICK"));
 	TestEqual(TEXT("Prototype target page id"), Binding.TargetPageId, TEXT("2:1"));
 	TestEqual(TEXT("Prototype target page index"), Binding.TargetPageIndex, 1);
 	TestEqual(TEXT("Prototype transition type preserved"), Binding.Transition.Type, TEXT("DISSOLVE"));
@@ -4663,6 +5314,430 @@ bool FFigmaPrototypeNavigationConverterTest::RunTest(const FString& Parameters)
 		Data.RootWidget.Properties.TryGetInt(UMGPropertyKeys::ActiveWidgetIndex, LegacyActiveWidgetIndex));
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeSpecialActionsConverterTest,
+	"Design2UMG.Converter.FigmaPrototypeSpecialActions",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaPrototypeSpecialActionsConverterTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id":"0:0",
+			"name":"Doc",
+			"type":"DOCUMENT",
+			"prototypeStartNodeID":"1:1",
+			"children":[
+				{"id":"0:1","name":"Page","type":"CANVAS","children":[
+					{"id":"1:1","name":"PageOne","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
+						{"id":"overlay_button","name":"Overlay","type":"RECTANGLE","visible":true,
+						 "absoluteBoundingBox":{"x":40,"y":60,"width":120,"height":44},
+						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.1,"g":0.4,"b":0.9,"a":1}}],
+						 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"OPEN_OVERLAY","transition":{"type":"DISSOLVE","duration":150}}]}],
+						 "children":[]},
+						{"id":"link_button","name":"Link","type":"RECTANGLE","visible":true,
+						 "absoluteBoundingBox":{"x":40,"y":120,"width":120,"height":44},
+						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.2,"g":0.7,"b":0.5,"a":1}}],
+						 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"OPEN_URL","url":"https://example.com/help"}]}],
+						 "children":[]}
+					]},
+					{"id":"2:1","name":"OverlayPage","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
+						{"id":"back_button","name":"Back","type":"RECTANGLE","visible":true,
+						 "absoluteBoundingBox":{"x":40,"y":60,"width":120,"height":44},
+						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.8,"g":0.3,"b":0.2,"a":1}}],
+						 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"BACK","transition":{"type":"DISSOLVE","duration":90}}]}],
+						 "children":[]}
+					]}
+				]}
+			]
+		}
+	})");
+
+	FDesignDocument Document;
+	TestTrue(TEXT("Figma prototype special actions parse succeeds"), FFigmaParser::ParseDocument(Json, Document));
+
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	TestTrue(TEXT("Prototype special action plan exists"), Data.PrototypeNavigation.IsValid());
+	TestEqual(TEXT("Prototype special action binding count"), Data.PrototypeNavigation.ClickBindings.Num(), 3);
+	if (!Data.PrototypeNavigation.IsValid() || Data.PrototypeNavigation.ClickBindings.Num() != 3)
+	{
+		return false;
+	}
+
+	auto FindBindingByTrigger = [&](const TCHAR* TriggerId) -> const FUMGPrototypeNavigationBinding*
+	{
+		return Data.PrototypeNavigation.ClickBindings.FindByPredicate(
+			[&](const FUMGPrototypeNavigationBinding& Binding)
+			{
+				return Binding.TriggerWidgetId == TriggerId;
+			});
+	};
+
+	const FUMGPrototypeNavigationBinding* OverlayBinding = FindBindingByTrigger(TEXT("overlay_button"));
+	const FUMGPrototypeNavigationBinding* BackBinding = FindBindingByTrigger(TEXT("back_button"));
+	const FUMGPrototypeNavigationBinding* OpenLinkBinding = FindBindingByTrigger(TEXT("link_button"));
+	TestNotNull(TEXT("Overlay binding exported"), OverlayBinding);
+	TestNotNull(TEXT("Back binding exported"), BackBinding);
+	TestNotNull(TEXT("Open link binding exported"), OpenLinkBinding);
+	if (!OverlayBinding || !BackBinding || !OpenLinkBinding)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Overlay action typed"), OverlayBinding->Action, EUMGPrototypeNavigationAction::Overlay);
+	TestEqual(TEXT("Overlay trigger type preserved"), OverlayBinding->TriggerType, TEXT("ON_CLICK"));
+	TestEqual(TEXT("Overlay target page id preserved"), OverlayBinding->TargetPageId, TEXT("2:1"));
+	TestEqual(TEXT("Overlay target page index preserved"), OverlayBinding->TargetPageIndex, 1);
+	TestEqual(TEXT("Overlay transition preserved"), OverlayBinding->Transition.Type, TEXT("DISSOLVE"));
+	TestTrue(TEXT("Overlay duration preserved"), FMath::IsNearlyEqual(OverlayBinding->Transition.DurationSeconds, 0.15f, 0.0001f));
+	TestTrue(TEXT("Prototype overlay host widget name is no longer fixed hardcode"),
+		Data.PrototypeNavigation.OverlayHostWidgetName != TEXT("__d2u_prototype_overlay_host"));
+
+	TestEqual(TEXT("Back action typed"), BackBinding->Action, EUMGPrototypeNavigationAction::Back);
+	TestEqual(TEXT("Back trigger type preserved"), BackBinding->TriggerType, TEXT("ON_CLICK"));
+	TestTrue(TEXT("Back no longer abuses target page id"), BackBinding->TargetPageId.IsEmpty());
+	TestEqual(TEXT("Back no longer abuses placeholder target page index"), BackBinding->TargetPageIndex, INDEX_NONE);
+	TestEqual(TEXT("Back transition preserved"), BackBinding->Transition.Type, TEXT("DISSOLVE"));
+
+	TestEqual(TEXT("Open link action typed"), OpenLinkBinding->Action, EUMGPrototypeNavigationAction::OpenLink);
+	TestEqual(TEXT("Open link trigger type preserved"), OpenLinkBinding->TriggerType, TEXT("ON_CLICK"));
+	TestTrue(TEXT("Open link target page id stays empty"), OpenLinkBinding->TargetPageId.IsEmpty());
+	TestEqual(TEXT("Open link target page index stays empty"), OpenLinkBinding->TargetPageIndex, INDEX_NONE);
+	TestEqual(TEXT("Open link URL preserved"), OpenLinkBinding->ExternalUrl, TEXT("https://example.com/help"));
+
+	const FUMGWidgetNode* OverlayTriggerWidget = FindWidgetById(Data.RootWidget, TEXT("overlay_button"));
+	const FUMGWidgetNode* BackTriggerWidget = FindWidgetById(Data.RootWidget, TEXT("back_button"));
+	const FUMGWidgetNode* OpenLinkTriggerWidget = FindWidgetById(Data.RootWidget, TEXT("link_button"));
+	TestEqual(TEXT("Overlay trigger wraps into button"), OverlayTriggerWidget ? OverlayTriggerWidget->Type : FString(), TEXT("Button"));
+	TestEqual(TEXT("Back trigger wraps into button"), BackTriggerWidget ? BackTriggerWidget->Type : FString(), TEXT("Button"));
+	TestEqual(TEXT("Open link trigger wraps into button"), OpenLinkTriggerWidget ? OpenLinkTriggerWidget->Type : FString(), TEXT("Button"));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeHoverAndPressConverterTest,
+	"Design2UMG.Converter.FigmaPrototypeHoverAndPress",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaPrototypeHoverAndPressConverterTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id":"0:0",
+			"name":"Doc",
+			"type":"DOCUMENT",
+			"prototypeStartNodeID":"1:1",
+			"children":[
+				{"id":"0:1","name":"Page","type":"CANVAS","children":[
+					{"id":"1:1","name":"PageOne","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
+						{"id":"hover_button","name":"HoverCTA","type":"RECTANGLE","visible":true,
+						 "absoluteBoundingBox":{"x":40,"y":60,"width":120,"height":44},
+						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.1,"g":0.4,"b":0.9,"a":1}}],
+						 "interactions":[{"trigger":{"type":"ON_HOVER"},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"NAVIGATE"}]}],
+						 "children":[]},
+						{"id":"drag_button","name":"DragCTA","type":"RECTANGLE","visible":true,
+						 "absoluteBoundingBox":{"x":40,"y":120,"width":120,"height":44},
+						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.2,"g":0.7,"b":0.5,"a":1}}],
+						 "interactions":[{"trigger":{"type":"ON_DRAG"},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"NAVIGATE"}]}],
+						 "children":[]}
+					]},
+					{"id":"2:1","name":"PageTwo","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
+						{"id":"press_button","name":"PressBack","type":"RECTANGLE","visible":true,
+						 "absoluteBoundingBox":{"x":40,"y":60,"width":120,"height":44},
+						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.8,"g":0.3,"b":0.2,"a":1}}],
+						 "interactions":[{"trigger":{"type":"ON_PRESS"},"actions":[{"type":"BACK"}]}],
+						 "children":[]}
+					]}
+				]}
+			]
+		}
+	})");
+
+	FDesignDocument Document;
+	TestTrue(TEXT("Figma prototype hover/press parse succeeds"), FFigmaParser::ParseDocument(Json, Document));
+
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	TestTrue(TEXT("Prototype hover/press plan exists"), Data.PrototypeNavigation.IsValid());
+	TestEqual(TEXT("Prototype hover/press binding count"), Data.PrototypeNavigation.ClickBindings.Num(), 3);
+	if (!Data.PrototypeNavigation.IsValid() || Data.PrototypeNavigation.ClickBindings.Num() != 3)
+	{
+		return false;
+	}
+
+	auto FindBindingByTrigger = [&](const TCHAR* TriggerId) -> const FUMGPrototypeNavigationBinding*
+	{
+		return Data.PrototypeNavigation.ClickBindings.FindByPredicate(
+			[&](const FUMGPrototypeNavigationBinding& Binding)
+			{
+				return Binding.TriggerWidgetId == TriggerId;
+			});
+	};
+
+	const FUMGPrototypeNavigationBinding* HoverBinding = FindBindingByTrigger(TEXT("hover_button"));
+	const FUMGPrototypeNavigationBinding* DragBinding = FindBindingByTrigger(TEXT("drag_button"));
+	const FUMGPrototypeNavigationBinding* PressBinding = FindBindingByTrigger(TEXT("press_button"));
+	TestNotNull(TEXT("Hover binding exported"), HoverBinding);
+	TestNotNull(TEXT("Drag binding exported"), DragBinding);
+	TestNotNull(TEXT("Press binding exported"), PressBinding);
+	if (!HoverBinding || !DragBinding || !PressBinding)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Hover trigger type preserved"), HoverBinding->TriggerType, TEXT("ON_HOVER"));
+	TestEqual(TEXT("Hover action typed"), HoverBinding->Action, EUMGPrototypeNavigationAction::Navigate);
+	TestEqual(TEXT("Hover target page id preserved"), HoverBinding->TargetPageId, TEXT("2:1"));
+	TestEqual(TEXT("Hover target page index preserved"), HoverBinding->TargetPageIndex, 1);
+
+	TestEqual(TEXT("Drag trigger type preserved"), DragBinding->TriggerType, TEXT("ON_DRAG"));
+	TestEqual(TEXT("Drag action typed"), DragBinding->Action, EUMGPrototypeNavigationAction::Navigate);
+	TestEqual(TEXT("Drag target page id preserved"), DragBinding->TargetPageId, TEXT("2:1"));
+	TestEqual(TEXT("Drag target page index preserved"), DragBinding->TargetPageIndex, 1);
+	TestTrue(TEXT("Drag binding exports executable steps"), DragBinding->Steps.Num() > 0);
+
+	TestEqual(TEXT("Press trigger type preserved"), PressBinding->TriggerType, TEXT("ON_PRESS"));
+	TestEqual(TEXT("Press action typed"), PressBinding->Action, EUMGPrototypeNavigationAction::Back);
+	TestTrue(TEXT("Press back keeps target page empty"), PressBinding->TargetPageId.IsEmpty());
+	TestEqual(TEXT("Press back keeps target page index empty"), PressBinding->TargetPageIndex, INDEX_NONE);
+
+	TestFalse(TEXT("Drag trigger no longer warns as unsupported"),
+		Data.Warnings.ContainsByPredicate(
+			[](const FString& Warning)
+			{
+				return Warning.Contains(TEXT("ON_DRAG")) && Warning.Contains(TEXT("drag_button"));
+			}));
+
+	const FUMGWidgetNode* HoverTriggerWidget = FindWidgetById(Data.RootWidget, TEXT("hover_button"));
+	const FUMGWidgetNode* PressTriggerWidget = FindWidgetById(Data.RootWidget, TEXT("press_button"));
+	const FUMGWidgetNode* DragTriggerWidget = FindWidgetById(Data.RootWidget, TEXT("drag_button"));
+	TestEqual(TEXT("Hover trigger wraps into button"), HoverTriggerWidget ? HoverTriggerWidget->Type : FString(), TEXT("Button"));
+	TestEqual(TEXT("Press trigger wraps into button"), PressTriggerWidget ? PressTriggerWidget->Type : FString(), TEXT("Button"));
+	TestEqual(TEXT("Drag trigger now wraps into button"), DragTriggerWidget ? DragTriggerWidget->Type : FString(), TEXT("Button"));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeKeyboardAndConditionalConverterTest,
+	"Design2UMG.Converter.FigmaPrototypeKeyboardAndConditional",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaPrototypeKeyboardAndConditionalConverterTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id":"0:0",
+			"name":"Doc",
+			"type":"DOCUMENT",
+			"prototypeStartNodeID":"1:1",
+			"children":[
+				{"id":"0:1","name":"Page","type":"CANVAS","children":[
+					{"id":"1:1","name":"PageOne","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
+						{"id":"key_down_hotspot","name":"KeyDownHotspot","type":"RECTANGLE","visible":true,
+						 "absoluteBoundingBox":{"x":32,"y":40,"width":100,"height":40},
+						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.3,"g":0.3,"b":0.8,"a":1}}],
+						 "interactions":[{"trigger":{"type":"ON_KEY_DOWN","keyCodes":["ENTER"]},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"NAVIGATE"}]}],
+						 "children":[]},
+						{"id":"conditional_button","name":"ConditionalCTA","type":"RECTANGLE","visible":true,
+						 "absoluteBoundingBox":{"x":32,"y":104,"width":120,"height":44},
+						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.8,"g":0.4,"b":0.1,"a":1}}],
+						 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[
+							{"type":"SET_VARIABLE","variableId":"var:isPrimary","variableValue":{"resolvedType":"BOOLEAN","value":true}},
+							{"type":"CONDITIONAL","conditionalBlocks":[
+								{"condition":{"type":"VARIABLE_ALIAS","id":"var:isPrimary"},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"NAVIGATE"}]},
+								{"condition":{"resolvedType":"BOOLEAN","value":true},"actions":[{"type":"NODE","destinationId":"3:1","navigation":"NAVIGATE"}]}
+							]}
+						 ]}],
+						 "children":[]}
+					]},
+					{"id":"2:1","name":"PageTwo","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
+						{"id":"key_up_hotspot","name":"KeyUpHotspot","type":"RECTANGLE","visible":true,
+						 "absoluteBoundingBox":{"x":32,"y":40,"width":100,"height":40},
+						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.2,"g":0.7,"b":0.4,"a":1}}],
+						 "interactions":[{"trigger":{"type":"ON_KEY_UP","keyCodes":["ESCAPE"]},"actions":[{"type":"BACK"}]}],
+						 "children":[]}
+					]},
+					{"id":"3:1","name":"PageThree","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
+						{"id":"page_three_title","name":"Fallback","type":"TEXT","visible":true,
+						 "absoluteBoundingBox":{"x":24,"y":32,"width":120,"height":28},
+						 "characters":"Fallback","style":{"fontSize":20}}
+					]}
+				]}
+			]
+		}
+	})");
+
+	FDesignDocument Document;
+	TestTrue(TEXT("Figma prototype keyboard/conditional parse succeeds"), FFigmaParser::ParseDocument(Json, Document));
+
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	TestTrue(TEXT("Prototype keyboard/conditional plan exists"), Data.PrototypeNavigation.IsValid());
+	TestEqual(TEXT("Prototype keyboard/conditional binding count"), Data.PrototypeNavigation.ClickBindings.Num(), 3);
+	if (!Data.PrototypeNavigation.IsValid() || Data.PrototypeNavigation.ClickBindings.Num() != 3)
+	{
+		return false;
+	}
+
+	auto FindBindingByTrigger = [&](const TCHAR* TriggerId) -> const FUMGPrototypeNavigationBinding*
+	{
+		return Data.PrototypeNavigation.ClickBindings.FindByPredicate(
+			[&](const FUMGPrototypeNavigationBinding& Binding)
+			{
+				return Binding.TriggerWidgetId == TriggerId;
+			});
+	};
+
+	const FUMGPrototypeNavigationBinding* KeyDownBinding = FindBindingByTrigger(TEXT("key_down_hotspot"));
+	const FUMGPrototypeNavigationBinding* ConditionalBinding = FindBindingByTrigger(TEXT("conditional_button"));
+	const FUMGPrototypeNavigationBinding* KeyUpBinding = FindBindingByTrigger(TEXT("key_up_hotspot"));
+	TestNotNull(TEXT("Key-down binding exported"), KeyDownBinding);
+	TestNotNull(TEXT("Conditional binding exported"), ConditionalBinding);
+	TestNotNull(TEXT("Key-up binding exported"), KeyUpBinding);
+	if (!KeyDownBinding || !ConditionalBinding || !KeyUpBinding)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Key-down trigger type preserved"), KeyDownBinding->TriggerType, TEXT("ON_KEY_DOWN"));
+	TestTrue(TEXT("Key-down trigger exports key code"), KeyDownBinding->TriggerKeyCodes.Num() == 1 && KeyDownBinding->TriggerKeyCodes[0] == TEXT("ENTER"));
+	TestEqual(TEXT("Key-down action summary preserved"), KeyDownBinding->Action, EUMGPrototypeNavigationAction::Navigate);
+	TestEqual(TEXT("Key-down target page id preserved"), KeyDownBinding->TargetPageId, TEXT("2:1"));
+
+	TestEqual(TEXT("Key-up trigger type preserved"), KeyUpBinding->TriggerType, TEXT("ON_KEY_UP"));
+	TestTrue(TEXT("Key-up trigger exports key code"), KeyUpBinding->TriggerKeyCodes.Num() == 1 && KeyUpBinding->TriggerKeyCodes[0] == TEXT("ESCAPE"));
+	TestEqual(TEXT("Key-up action summary preserved"), KeyUpBinding->Action, EUMGPrototypeNavigationAction::Back);
+
+	TestEqual(TEXT("Conditional trigger keeps click type"), ConditionalBinding->TriggerType, TEXT("ON_CLICK"));
+	TestEqual(TEXT("Conditional summary resolves to first terminal navigation"), ConditionalBinding->Action, EUMGPrototypeNavigationAction::Navigate);
+	TestEqual(TEXT("Conditional summary target page id resolves first true branch"), ConditionalBinding->TargetPageId, TEXT("2:1"));
+	TestTrue(TEXT("Conditional binding exports step program"), ConditionalBinding->Steps.Num() >= 6);
+	if (ConditionalBinding->Steps.Num() < 6)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Conditional first step is set-variable"), ConditionalBinding->Steps[0].Kind, EUMGPrototypeNavigationStepKind::SetVariable);
+	TestEqual(TEXT("Conditional second step is condition jump"), ConditionalBinding->Steps[1].Kind, EUMGPrototypeNavigationStepKind::ConditionJump);
+	TestEqual(TEXT("Conditional first branch navigates to page two"), ConditionalBinding->Steps[2].TargetPageId, TEXT("2:1"));
+	TestEqual(TEXT("Conditional final branch navigates to page three"), ConditionalBinding->Steps[5].TargetPageId, TEXT("3:1"));
+	TestTrue(TEXT("Conditional step graph has no unsupported warnings"),
+		!Data.Warnings.ContainsByPredicate(
+			[](const FString& Warning)
+			{
+				return Warning.Contains(TEXT("conditional_button"))
+					&& (Warning.Contains(TEXT("CONDITIONAL")) || Warning.Contains(TEXT("SET_VARIABLE")));
+			}));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaOverflowDirectionMapsToScrollBoxTest,
+	"Design2UMG.Converter.FigmaOverflowDirectionMapsToScrollBox",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaOverflowDirectionMapsToScrollBoxTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id":"0:0",
+			"name":"Doc",
+			"type":"DOCUMENT",
+			"children":[
+				{"id":"0:1","name":"Page","type":"CANVAS","children":[
+					{"id":"scroll_frame","name":"ScrollFrame","type":"FRAME","visible":true,
+					 "layoutMode":"VERTICAL","itemSpacing":12,"overflowDirection":"VERTICAL_SCROLLING",
+					 "absoluteBoundingBox":{"x":0,"y":0,"width":320,"height":240},
+					 "children":[
+						{"id":"row1","name":"Row1","type":"RECTANGLE","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":320,"height":80},"fills":[{"type":"SOLID","visible":true,"color":{"r":0.2,"g":0.3,"b":0.4,"a":1}}]},
+						{"id":"row2","name":"Row2","type":"RECTANGLE","visible":true,"absoluteBoundingBox":{"x":0,"y":92,"width":320,"height":80},"fills":[{"type":"SOLID","visible":true,"color":{"r":0.4,"g":0.3,"b":0.2,"a":1}}]}
+					 ]}
+				]}
+			]
+		}
+	})");
+
+	FDesignDocument Document;
+	TestTrue(TEXT("Parse scrollable figma fixture"), FFigmaParser::ParseDocument(Json, Document));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	const FUMGWidgetNode* ScrollFrame = FindWidgetById(Data.RootWidget, TEXT("scroll_frame"));
+	TestNotNull(TEXT("Scrollable frame converts"), ScrollFrame);
+	if (!ScrollFrame)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("overflowDirection frame maps to ScrollBox"), ScrollFrame->Type, TEXT("ScrollBox"));
+	TestEqual(TEXT("ScrollBox orientation exported"), GetWidgetProperty(*ScrollFrame, TEXT("Orientation")), TEXT("Vertical"));
+	TestEqual(TEXT("ScrollBox scrollbar visibility exported"), GetWidgetProperty(*ScrollFrame, TEXT("ScrollBarVisibility")), TEXT("Hidden"));
+	TestTrue(TEXT("ScrollBox keeps both children"), ScrollFrame->Children.Num() == 2);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaGridSlotSemanticsConverterTest,
+	"Design2UMG.Converter.FigmaGridSlotSemantics",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaGridSlotSemanticsConverterTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id":"0:0",
+			"name":"Doc",
+			"type":"DOCUMENT",
+			"children":[
+				{"id":"0:1","name":"Page","type":"CANVAS","children":[
+					{"id":"grid_frame","name":"grid_frame","type":"FRAME","visible":true,
+					 "layoutMode":"GRID","gridRowCount":2,"gridColumnCount":2,"gridRowGap":24,"gridColumnGap":12,
+					 "gridChildHorizontalAlign":"CENTER","gridChildVerticalAlign":"MAX",
+					 "absoluteBoundingBox":{"x":0,"y":0,"width":320,"height":240},
+					 "children":[
+						{"id":"head_card","name":"head_card","type":"RECTANGLE","visible":true,
+						 "gridRowAnchorIndex":0,"gridColumnAnchorIndex":0,
+						 "absoluteBoundingBox":{"x":0,"y":0,"width":100,"height":40},
+						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.2,"g":0.3,"b":0.4,"a":1}}]},
+						{"id":"tail_card","name":"tail_card","type":"RECTANGLE","visible":true,
+						 "gridRowAnchorIndex":0,"gridColumnAnchorIndex":1,
+						 "absoluteBoundingBox":{"x":116,"y":0,"width":100,"height":40},
+						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.4,"g":0.3,"b":0.2,"a":1}}]},
+						{"id":"hero_card","name":"hero_card","type":"RECTANGLE","visible":true,
+						 "gridRowAnchorIndex":1,"gridColumnAnchorIndex":0,"gridColumnSpan":2,
+						 "absoluteBoundingBox":{"x":0,"y":64,"width":216,"height":40},
+						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.1,"g":0.6,"b":0.5,"a":1}}]}
+					 ]}
+				]}
+			]
+		}
+	})");
+
+	FDesignDocument Document;
+	TestTrue(TEXT("Parse figma grid slot semantics fixture"), FFigmaParser::ParseDocument(Json, Document));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+
+	const FUMGWidgetNode* GridFrame = FindWidgetById(Data.RootWidget, TEXT("grid_frame"));
+	const FUMGWidgetNode* TailCard = FindWidgetById(Data.RootWidget, TEXT("tail_card_sz"));
+	const FUMGWidgetNode* HeroCard = FindWidgetById(Data.RootWidget, TEXT("hero_card_sz"));
+	TestNotNull(TEXT("Grid frame converts"), GridFrame);
+	TestNotNull(TEXT("Tail card wrapper converts"), TailCard);
+	TestNotNull(TEXT("Hero card wrapper converts"), HeroCard);
+	if (!GridFrame || !TailCard || !HeroCard)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Grid frame upgrades to GridPanel when span is present"), GridFrame->Type, TEXT("GridPanel"));
+
+	TestEqual(TEXT("Tail card row exported"), TailCard->Slot.Row, 0);
+	TestEqual(TEXT("Tail card column exported"), TailCard->Slot.Column, 1);
+	TestEqual(TEXT("Tail card horizontal align exported"), TailCard->Slot.HorizontalAlignment, TEXT("Center"));
+	TestEqual(TEXT("Tail card vertical align exported"), TailCard->Slot.VerticalAlignment, TEXT("Bottom"));
+	TestTrue(TEXT("Tail card gets half horizontal gap on the inner edge"), FMath::IsNearlyEqual(TailCard->Slot.Padding.Left, 6.0f, 0.01f));
+	TestTrue(TEXT("Tail card keeps zero right padding on the outer edge"), FMath::IsNearlyEqual(TailCard->Slot.Padding.Right, 0.0f, 0.01f));
+	TestTrue(TEXT("Tail card gets half row gap before the next row"), FMath::IsNearlyEqual(TailCard->Slot.Padding.Bottom, 12.0f, 0.01f));
+
+	TestEqual(TEXT("Hero card row exported"), HeroCard->Slot.Row, 1);
+	TestEqual(TEXT("Hero card column exported"), HeroCard->Slot.Column, 0);
+	TestEqual(TEXT("Hero card column span exported"), HeroCard->Slot.ColumnSpan, 2);
+	TestEqual(TEXT("Hero card horizontal align exported"), HeroCard->Slot.HorizontalAlignment, TEXT("Center"));
+	TestEqual(TEXT("Hero card vertical align exported"), HeroCard->Slot.VerticalAlignment, TEXT("Bottom"));
+	TestTrue(TEXT("Hero card gets zero left padding on the outer edge"), FMath::IsNearlyEqual(HeroCard->Slot.Padding.Left, 0.0f, 0.01f));
+	TestTrue(TEXT("Hero card gets half row gap above the second row"), FMath::IsNearlyEqual(HeroCard->Slot.Padding.Top, 12.0f, 0.01f));
+	TestTrue(TEXT("Hero card keeps zero right padding when spanning to the edge"), FMath::IsNearlyEqual(HeroCard->Slot.Padding.Right, 0.0f, 0.01f));
+	TestTrue(TEXT("Hero card keeps zero bottom padding on the outer edge"), FMath::IsNearlyEqual(HeroCard->Slot.Padding.Bottom, 0.0f, 0.01f));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaTransformGroupPreservedTest,
 	"Design2UMG.FigmaParser.TransformGroupPreserved",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)

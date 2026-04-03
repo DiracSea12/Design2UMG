@@ -17,7 +17,7 @@ public:
 	/** Discover the local MCP server executable path. */
 	static FString DiscoverMCPServerPath();
 
-	/** Detect the Pencil application name such as vscode or antigravity. */
+	/** Detect the Pencil application name from settings, ~/.pencil/apps, and running IDE processes. */
 	static FString DetectAppName();
 
 	/** Launch the MCP server and connect to it. Port 0 chooses automatically. */
