@@ -1,0 +1,136 @@
+﻿{
+  "manifest_version": 1,
+  "as_of": "2026-03-31",
+  "selection_basis": {
+    "focus_manifest": "Saved/Design2UMG/Automation/_historical_best_focus_20260331/manifest.json",
+    "removed_nonreproducible": "Saved/Design2UMG/Automation/_removed_nonreproducible_cases_20260331.json",
+    "rule": "Retain only cases that remain in the historical-best focus set after removing cases explicitly marked non-reproducible."
+  },
+  "active_reproducible_blockers": [
+    {
+      "case_name": "figma_figma-export_local",
+      "best_run": "_full47_compare_20260330_revalidated",
+      "best_report_path": "Saved/Design2UMG/Automation/_full47_compare_20260330_revalidated/figma_figma-export_local/compare_report.json"
+    },
+    {
+      "case_name": "figma_figma-export1_local",
+      "best_run": "_probe_paddingwrapper_hv_noninstance",
+      "best_report_path": "Saved/Design2UMG/Automation/_probe_paddingwrapper_hv_noninstance/figma_figma-export1_local/compare_report.json"
+    },
+    {
+      "case_name": "figma_figma-export1_source",
+      "best_run": "_probe_paddingwrapper_hv_noninstance",
+      "best_report_path": "Saved/Design2UMG/Automation/_probe_paddingwrapper_hv_noninstance/figma_figma-export1_source/compare_report.json"
+    },
+    {
+      "case_name": "figma_figma-export3_local",
+      "best_run": "_full47_compare_20260330_release_blockers_v2",
+      "best_report_path": "Saved/Design2UMG/Automation/_full47_compare_20260330_release_blockers_v2/figma_figma-export3_local/compare_report.json"
+    },
+    {
+      "case_name": "figma_figma-export3_source",
+      "best_run": "_full47_compare_20260330_release_blockers_v2",
+      "best_report_path": "Saved/Design2UMG/Automation/_full47_compare_20260330_release_blockers_v2/figma_figma-export3_source/compare_report.json"
+    },
+    {
+      "case_name": "pen_pencil-welcome_step-1-frame",
+      "best_run": "_full47_compare_20260328_live",
+      "best_report_path": "Saved/Design2UMG/Automation/_full47_compare_20260328_live/pen_pencil-welcome_step-1-frame/compare_report.json"
+    }
+  ],
+  "removed_nonreproducible_cases": [
+    "figma_figma-export_source",
+    "pen_pencil-welcome_step-2-frame"
+  ],
+  "explicit_admission_without_old_asset_rule": {
+    "status": "allowed_only_by_explicit_maintainer_decision",
+    "required_fields": [
+      "case_name",
+      "admitted_by",
+      "decision_date",
+      "supported_scope_reason",
+      "repeatable_symptom",
+      "guard_set_id",
+      "evidence_paths"
+    ],
+    "rule": "A supported-scope fidelity problem without a reproducible old asset may only enter the active queue after these fields are recorded in this manifest or its dated successor."
+  },
+  "guard_set_schema": {
+    "required_fields": [
+      "guard_set_id",
+      "target_cases",
+      "guard_cases",
+      "candidate_run",
+      "no_regression_available",
+      "no_regression_failed",
+      "result"
+    ],
+    "current_examples": [
+      {
+        "guard_set_id": "figma-export1-local-paddingwrapper-20260331",
+        "target_cases": [
+          "figma_figma-export1_local"
+        ],
+        "guard_cases": [
+          "pen_pencil-welcome_step-1-frame",
+          "figma_figma-export_local",
+          "figma_figma-export1_local",
+          "figma_figma-export3_local"
+        ],
+        "candidate_run": "Saved/Design2UMG/Automation/_probe_fix4_guard_20260331/summary.json",
+        "no_regression_available": 4,
+        "no_regression_failed": 0,
+        "result": "candidate_accept"
+      },
+      {
+        "guard_set_id": "figma-export1-local-paddingwrapper-20260331",
+        "target_cases": [
+          "figma_figma-export1_local"
+        ],
+        "guard_cases": [
+          "pen_pencil-welcome_step-1-frame",
+          "figma_figma-export_local",
+          "figma_figma-export1_local",
+          "figma_figma-export3_local"
+        ],
+        "candidate_run": "Saved/Design2UMG/Automation/_probe_fix1_guard_20260331/summary.json",
+        "no_regression_available": 4,
+        "no_regression_failed": 1,
+        "result": "candidate_reject"
+      },
+      {
+        "guard_set_id": "figma-export1-local-paddingwrapper-20260331",
+        "target_cases": [
+          "figma_figma-export1_local"
+        ],
+        "guard_cases": [
+          "pen_pencil-welcome_step-1-frame",
+          "figma_figma-export_local",
+          "figma_figma-export1_local",
+          "figma_figma-export3_local"
+        ],
+        "candidate_run": "Saved/Design2UMG/Automation/_probe_fix2_guard_20260331/summary.json",
+        "no_regression_available": 4,
+        "no_regression_failed": 1,
+        "result": "candidate_reject"
+      },
+      {
+        "guard_set_id": "figma-export1-local-paddingwrapper-20260331",
+        "target_cases": [
+          "figma_figma-export1_local"
+        ],
+        "guard_cases": [
+          "pen_pencil-welcome_step-1-frame",
+          "figma_figma-export_local",
+          "figma_figma-export1_local",
+          "figma_figma-export3_local"
+        ],
+        "candidate_run": "Saved/Design2UMG/Automation/_probe_fix3_guard_20260331/summary.json",
+        "no_regression_available": 4,
+        "no_regression_failed": 1,
+        "result": "candidate_reject"
+      }
+    ],
+    "note": "As of 2026-03-31 this manifest lands the guard-set format and accepted/rejected candidate evidence. It does not yet claim that the corresponding code-level blocker has been shipped in the current release snapshot."
+  }
+}

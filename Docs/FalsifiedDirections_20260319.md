@@ -20,7 +20,7 @@
 
 来源文档：
 
-- `Docs/FullPipelineReview.md`
+- `Docs/archive/legacy-plans/FullPipelineReview.md`
 - `Docs/LessonsLearned.md`
 
 ### H-1. “ParsePadding 的 2 元素数组应该按 CSS 语义解释”
@@ -30,7 +30,7 @@
 - `[0]=左右 [1]=上下` 是 pen 格式约定，不是 CSS 语义
 - 因此这不是解析 bug
 - 原始记录：
-- `Docs/FullPipelineReview.md`
+- `Docs/archive/legacy-plans/FullPipelineReview.md`
 
 ### H-2. “Ref 展开不递归，所以嵌套 Ref 本身就是 bug”
 
@@ -39,7 +39,7 @@
 - `ConvertNode` 递归调用时每层都会展开 Ref
 - 真正的问题是某一轮里“展开后的结果没被调用方正确使用”，不是“Ref 天然不递归”
 - 原始记录：
-- `Docs/FullPipelineReview.md`
+- `Docs/archive/legacy-plans/FullPipelineReview.md`
 
 ### H-3. “元数据节点会错误生成 CanvasPanel，是核心问题”
 
@@ -48,7 +48,7 @@
 - 元数据/设计器专用节点已经由 `ShouldSkipNode` / `IsDesignerOnlyNodeType` 过滤
 - 不会真正走到 `MapNodeTypeToWidget`
 - 原始记录：
-- `Docs/FullPipelineReview.md`
+- `Docs/archive/legacy-plans/FullPipelineReview.md`
 
 ### H-4. “LayoutFixer 使用 [0,1] 边界检查是错的”
 
@@ -57,7 +57,7 @@
 - `LayoutFixer` 使用的是全局归一化 Bounds
 - `[0,1]` 正是画布范围，不是魔法常量误用
 - 原始记录：
-- `Docs/FullPipelineReview.md`
+- `Docs/archive/legacy-plans/FullPipelineReview.md`
 
 ### H-5. “Stretch 模式下 OffsetEnd 的符号反了”
 
@@ -65,7 +65,7 @@
 - 旧文档结论：
 - `(1.0f - End) * CanvasSize` 是右边距像素值，公式本身正确
 - 原始记录：
-- `Docs/FullPipelineReview.md`
+- `Docs/archive/legacy-plans/FullPipelineReview.md`
 
 ### H-6. “WrapWithMultiFill 与 ApplyFillProperties 对单层 fill 的处理不一致”
 
@@ -74,7 +74,7 @@
 - 两处都按 `Fills.Num() > 1` 处理，多层/单层判断是一致的
 - 不是当时的主根因
 - 原始记录：
-- `Docs/FullPipelineReview.md`
+- `Docs/archive/legacy-plans/FullPipelineReview.md`
 
 ### H-7. “Gap 和 JustifyContent 共存本身就是语义冲突”
 
@@ -84,7 +84,7 @@
 - `JustifyContent` 体现在插入新的 `Spacer`
 - 两者职责不同，不构成逻辑冲突
 - 原始记录：
-- `Docs/FullPipelineReview.md`
+- `Docs/archive/legacy-plans/FullPipelineReview.md`
 
 ### H-8. “当前最佳修法是继续围绕早期 Canvas FitContent 五连修打补丁”
 

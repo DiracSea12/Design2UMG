@@ -1,4 +1,4 @@
-# Contributing to Design2UMG
+﻿# Contributing to Design2UMG
 
 Thanks for contributing.
 
@@ -26,6 +26,7 @@ Build with UE 5.4+.
 2. Run relevant automation tests.
 3. Update docs for any user-facing behavior change.
 4. Keep commits focused and reviewable.
+5. Treat public `validate` steps as smoke/public validation unless you are explicitly reproducing the maintainer full admissible gate.
 
 ## Pull Request Checklist
 
@@ -33,6 +34,7 @@ Build with UE 5.4+.
 - Why it changed
 - How to verify
 - Any known impact or limitations
+- Whether the change was checked only with public/smoke validation or also against the maintainer full admissible gate
 
 ## Reporting Issues
 

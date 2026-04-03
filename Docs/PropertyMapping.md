@@ -2,6 +2,13 @@
 
 .pen 节点属性到 UMG Widget 属性的完整映射关系。
 
+## Typed Property Status
+
+- 当前常用的 `WidgetStyle / TextData / Brush / Effect / PathData / Render / WidgetState` 字段已进入 typed schema。
+- `UMGJson` 解析后会清理同名 legacy `Properties`；运行时统一走 typed-first 的 merged effective bag，并只对少数量化敏感 typed 字段做精度补写。
+- `Properties` 仍保留给尚未 typed 化的 widget-specific 参数；新公共字段不应再继续落回 legacy key。
+- 编辑器侧贴图导入缓存已按源身份隔离：本地/远程图片资产使用 `source + content-version` 复合键，本地 Figma 派生图按 `源文档 + 源文件身份` 隔离，避免跨来源串用和共享资产污染。
+
 ## Node Type → Widget Type
 
 | .pen Type | UMG Widget | Condition |
@@ -30,7 +37,7 @@
 | LetterSpacing | Font.LetterSpacing | 像素间距 |
 | LineHeight | LineHeightPercentage | 百分比乘数 |
 | TextAlign | Justification | Left / Center / Right |
-| TextAlignVertical | TextAlignVertical | Top / Center / Bottom ⚠️ 写入属性但运行时未应用 |
+| TextAlignVertical | TextAlignVertical + TextBlock Margin | Top / Center / Bottom；固定高文本会转成内部 margin，父 Slot 不动 |
 | TextGrowth (Auto) | 默认单行；`justify` 或 `fill_container(N)` 时导出 `AutoWrapText + WrapTextAt` | 保持测量链与运行时换行一致 |
 | TextGrowth (FixedWidth) | AutoWrapText=true + WrapTextAt=ResolvedWidth | 固定宽度换行 |
 | TextGrowth (FixedWidthHeight) | AutoWrapText=true + WrapTextAt=ResolvedWidth + Clipping=ClipToBounds | 换行+裁剪溢出 |
@@ -78,6 +85,13 @@
 | Padding | Widget.Padding | Left, Top, Right, Bottom |
 | JustifyContent | Spacer 插入 | Center / End / SpaceBetween / SpaceAround |
 | AlignItems | Slot HAlign/VAlign | Start / Center / End |
+
+**Figma 扩展布局补充：**
+
+| Figma | UMG | Notes |
+|------|-----|-------|
+| overflowDirection = `VERTICAL_SCROLLING` | ScrollBox + Vertical | 单轴可滚动 Frame 会映射为 `ScrollBox` |
+| overflowDirection = `HORIZONTAL_SCROLLING` | ScrollBox + Horizontal | 默认隐藏滚动条，保留内容流布局 |
 
 ### Size Mode Mapping
 
@@ -134,20 +148,28 @@
 | .pen Effect | UMG | Support |
 |------------|-----|---------|
 | Shadow (outer) | BoxShadow 包裹 | ✅ Offset, Blur, Spread, Color |
-| Shadow (inner) | RetainerBox + EffectMaterial | ✅ 运行时近似支持（typed inner shadow） |
+| Shadow (inner) | RetainerBox + EffectMaterial | ✅ 运行时近似支持（typed `EffectMaterial / TextureParameter / EffectColor / EffectOffset / EffectBlurUVStep`） |
 | BackgroundBlur | BackgroundBlur 包裹 | ✅ BlurStrength |
-| Blur | RetainerBox + EffectMaterial | ✅ 运行时近似支持（foreground subtree blur） |
+| Blur | RetainerBox + EffectMaterial | ✅ 运行时近似支持（typed `EffectMaterial / TextureParameter / EffectBlurUVStep`） |
 
 ## Prototype (Figma)
+
+`Prototype Basic` 是当前正式支持范围，但它的正式口径只覆盖页面切换型交互和基础过渡近似，不覆盖完整设计器原型语义复刻。
 
 | Figma Prototype | UMG | Notes |
 |-----------------|-----|-------|
 | Top-level multi-page flow | WidgetSwitcher | 顶层 Frame 页面自动收口为 `WidgetSwitcher` |
 | `ON_CLICK + NAVIGATE/SWAP` | Button wrapper + runtime binding | 触发节点包装为透明 `Button`，运行时切页 |
+| `ON_HOVER / ON_PRESS / ON_DRAG` | Button wrapper + runtime binding | 继续复用透明 `Button` 包裹；hover/press 走原生委托，drag 走原生 drag detect 委托 |
+| `ON_KEY_DOWN / ON_KEY_UP` | Typed keyboard binding | 保留触发节点语义，并通过 prototype runtime 的焦点约束输入路由触发 |
+| `SET_VARIABLE / SET_VARIABLE_MODE / CONDITIONAL` | Typed step program | 运行时按顺序执行变量写入、条件分支与终端导航动作 |
+| `ON_CLICK + OVERLAY` | Button wrapper + typed overlay binding | 运行时把目标页挂到独立 overlay host，并维护 overlay stack；不是 switcher page push 伪切页 |
+| `ON_CLICK + BACK` | Button wrapper + typed back binding | 运行时从 prototype history stack 回退上一页 |
+| `ON_CLICK + OPEN_LINK` | Button wrapper + typed open-link binding | 运行时直接打开 URL；自动化测试通过 URL capture hook 验证 |
 | `DISSOLVE` / `SMART_ANIMATE` / `SCROLL_ANIMATE` | Switcher fade | 映射基础透明度过渡，保留时长 / easing |
 | `MOVE_IN` / `MOVE_OUT` / `SLIDE_IN` / `SLIDE_OUT` / `PUSH` | Switcher translation | 映射基础位移过渡，保留方向 / 时长 / easing |
 
-⚠️ **当前边界**: 不生成完整 `UWidgetAnimation` 资产，不做 overlay/back stack，也不复刻完整 Smart Animate 图层配对语义。
+⚠️ **当前边界**: 当前会为切页 fade / slide 生成最小两段式 `UWidgetAnimation` 资产；运行时对 fade 类过渡优先播放资产动画，slide 类过渡继续走 ticker 近似以匹配 live switcher 尺寸。但它仍不生成完整通用动画 authoring 链；overlay 目前虽已进入独立 overlay host contract，但还不是完整浮层系统；也不复刻完整 Smart Animate 图层配对语义。
 
 ## Alignment Mapping
 
@@ -173,19 +195,27 @@
 |------|--------------|-------|
 | IconFontName | Text (连字文本) | 如 "dashboard" 在 Material Symbols 中渲染为图标 |
 | IconFontFamily | FontFamily | 通过 Settings.IconFontAssetMap 解析为资产路径 |
+| Weight / FontWeight | TypefaceFontName | 优先用 `fontWeight`，否则回退到 `icon_font.weight` 推断字重 |
 | FontSize | FontSize | 图标像素大小 |
 | Fill (Color) | Color | 图标颜色 |
+
+说明：Pencil 的 `icon_font.weight` 现在已进入主链，不再只是 parser 保留字段；真实导出会把它映射到 `TypefaceFontName`。
 
 ## Unsupported Properties
 
 | Property | Reason |
 |----------|--------|
+| Legacy `Properties` 全量删除 | 当前仍有若干 widget-specific 运行时参数通过 class-specific `FUMGPropertyBag` applier 消费，直接删除会破坏当前未迁移字段与运行时链路 |
 | Foreground blur full semantic parity | 当前走 `RetainerBox + EffectMaterial` 近似，不是完整设计器语义还原 |
 | Inner shadow full semantic parity | 当前为单层 `RetainerBox + EffectMaterial` 近似，不是完整设计器/浏览器语义 |
+| Prototype overlay full layer semantics / generalized history graph | 当前 overlay/back 已进入 typed runtime contract，但仍以 `WidgetSwitcher` 页面切换为中心，没有独立浮层系统或通用状态机/事件图生成链 |
+| Full `UWidgetAnimation` asset generation | 当前仅为切页 fade / slide 生成最小两段式动画资产；未进入通用动画 authoring / 蓝图图表生成 |
+| Font metric full semantic parity | 当前字体解析与文本测量已做缓存隔离和同步，但仍是基于 UE 字体资产/Slate 的启发式近似，不是设计器排版引擎逐像素复刻 |
 | Polygon without PathGeometry | 会降级为 Border，并记录 warning |
+| `TEXT_PATH` | 当前只保留普通文本 fallback；没有 text-on-path 的 geometry/shaping 渲染链 |
+| `mesh_gradient` | 当前渐变 contract 与程序纹理生成器仅覆盖 linear / radial / angular |
 | Stroke per-side thickness | ⚠️ 部分支持：取四边最大值 |
 | Stroke alignment | UMG 始终居中对齐 |
-| Icon font weight | 存储但未应用到 UMG |
 | Line dash patterns | 不支持 |
 
 ## Container Wrapping Strategy

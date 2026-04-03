@@ -1,6 +1,6 @@
-# Design2UMG Validation Protocol
+﻿# Design2UMG Validation Protocol
 
-Last verified: 2026-03-07
+Last verified: 2026-04-04
 
 ## Purpose
 
@@ -10,6 +10,10 @@ Goal:
 - keep validation repeatable
 - avoid mixing incompatible evidence
 - prevent false positives caused by stale PNGs or mismatched render paths
+
+Public-note:
+- Public-facing copies of this document should use logical placeholders such as `<UE5_Root>`, `<PluginRoot>`, and `<MaintainerRuntimeProject.uproject>`.
+- The maintainer-owned canonical runtime boundary is an implementation role, not a public machine-path requirement.
 
 ## Core Rule
 
@@ -28,7 +32,7 @@ A Design2UMG visual fix is only considered verified when all of the following ag
 ### 1. Build first
 
 ```text
-G:\UE5\UnrealEngine\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.exe FPSRoguelikeEditor Win64 Development "-Project=G:\UE5\FPSRoguelike\FPSRoguelike.uproject" -WaitMutex -FromMsBuild
+<UE5_Root>\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.exe FPSRoguelikeEditor Win64 Development "-Project=<MaintainerRuntimeProject.uproject>" -WaitMutex -FromMsBuild
 ```
 
 ### 2. Run focused automation tests
@@ -38,7 +42,7 @@ Use the smallest relevant test set first, then broaden if needed.
 Example:
 
 ```text
-G:\UE5\UnrealEngine\Engine\Binaries\Win64\UnrealEditor-Cmd.exe G:\UE5\FPSRoguelike\FPSRoguelike.uproject -unattended -nop4 -nosplash -NullRHI "-ExecCmds=Automation RunTests Design2UMG.WidgetTree.BorderSpacerStrokePadding+Design2UMG.Rasterizer.PersistentPathTexture+Design2UMG.WidgetTree.DesignSizeExpansion; Quit" "-TestExit=Automation Test Queue Empty" -log
+<UE5_Root>\Engine\Binaries\Win64\UnrealEditor-Cmd.exe <MaintainerRuntimeProject.uproject> -unattended -nop4 -nosplash -NullRHI "-ExecCmds=Automation RunTests Design2UMG.WidgetTree.BorderSpacerStrokePadding+Design2UMG.Rasterizer.PersistentPathTexture+Design2UMG.WidgetTree.DesignSizeExpansion; Quit" "-TestExit=Automation Test Queue Empty" -log
 ```
 
 ### 3. Regenerate the real asset
@@ -48,7 +52,7 @@ For visual verification, import the target frame into the final output path.
 Example:
 
 ```text
-G:\UE5\UnrealEngine\Engine\Binaries\Win64\UnrealEditor-Cmd.exe G:\UE5\FPSRoguelike\FPSRoguelike.uproject -unattended -nop4 -nosplash "-ExecCmds=Design2UMG.Import G:/UE5/FPSRoguelike/Designs/pencil-welcome.pen --node=frame-1761929672442 --out=/Game/Design2UMG/PenConvert_Output --no-preview; Quit" -log
+<UE5_Root>\Engine\Binaries\Win64\UnrealEditor-Cmd.exe <MaintainerRuntimeProject.uproject> -unattended -nop4 -nosplash "-ExecCmds=Design2UMG.Import <MaintainerDesignRoot>\pencil-welcome.pen --node=frame-1761929672442 --out=/Game/Design2UMG/PenConvert_Output --no-preview; Quit" -log
 ```
 
 ### 4. Confirm the asset and PNG were both regenerated

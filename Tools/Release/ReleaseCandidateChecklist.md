@@ -8,6 +8,7 @@ Use this checklist before cutting a GitHub release branch or tag.
 - [ ] Scope summary prepared (feature/fix/docs/chore)
 - [ ] Included file list reviewed
 - [ ] Excluded local-only files confirmed
+- [ ] Export plan reviewed against `Tools/Release/PublicRepoExportWorkflow.md`
 
 ## 2. Workspace Hygiene
 
@@ -26,11 +27,13 @@ Use this checklist before cutting a GitHub release branch or tag.
 - [ ] Figma token flow docs prioritize env var / secure input
 - [ ] CLI plaintext token path is marked as compatibility only
 - [ ] Runtime logs do not print token values
+- [ ] Known web font auto import is documented as experimental / optional, not as the primary offline-safe workflow
 
 ## 5. Quality Gates
 
 - [ ] BuildPlugin passed (`RunUAT BuildPlugin -StrictIncludes`)
 - [ ] Automation tests passed (`Automation RunTests Design2UMG.*`)
+- [ ] Full admissible validation passed and wrapped in the current `Docs/ValidationGovernance/AdmissibleBaselineManifest_<date>.json`
 - [ ] CI artifacts uploaded and downloadable
 
 ## 6. Public Consistency
@@ -38,3 +41,4 @@ Use this checklist before cutting a GitHub release branch or tag.
 - [ ] Public name uses `Design2UMG` (README, issue/pr templates, plugin metadata)
 - [ ] `Design2UMG.uplugin` `VersionName` matches `CHANGELOG.md`
 - [ ] Version follows semantic versioning (`MAJOR.MINOR.PATCH`)
+- [ ] Public docs describe the maintainer validation boundary without exposing maintainer absolute paths

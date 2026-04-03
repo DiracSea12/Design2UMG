@@ -24,7 +24,7 @@
 
 ## P0：导入体验（已有 PRD，补充细节）
 
-> 参考 `Docs/PRD_EasyImport.md`，此处仅补充竞品对标后的额外要求。
+> 参考 `Docs/archive/legacy-plans/PRD_EasyImport.md`，此处仅补充竞品对标后的额外要求。
 
 ### 0.1 首次使用引导
 

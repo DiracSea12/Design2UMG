@@ -43,6 +43,13 @@ Screenshot → AI猜测 → 不精确的坐标/类型 → 需要修复 → UMG
 >
 > 预期偏差：文本元素 ±2-4px，其他元素 ±1px
 
+### 1.4 当前实现边界补记
+
+- 编辑器侧导入图片资产按“源身份 + 内容版本”隔离；不会再把 URL-only 或 content-only 视作可跨来源共享的持久资产键。
+- 本地 Figma 派生图按“源文档身份 + 源文件身份 + 派生参数”建立缓存，并写入文档级派生目录，避免不同导出任务之间串缓存。
+- `CreateWidgetRecursive` 在单次递归构建开始时会快照 `EffectiveDesignSize`，同一棵构建树内不再反复读取进程级全局值。
+- 字体解析与文本测量缓存已做最小同步，但文本尺寸仍然是基于 UE/Slate 的启发式近似，不承诺与设计器/Web 排版逐像素一致。
+
 ---
 
 ## 2. .pen 文件格式规范
@@ -531,6 +538,7 @@ UMG 的 CanvasPanel/VerticalBox/HorizontalBox 本身不渲染背景。当 frame 
 | `padding` | `UBorder` 包装 | 用无画刷 UBorder 包装容器，设置 ContentPadding |
 | `alignItems` | `HAlign` / `VAlign` | 交叉轴对齐，见 3.3 |
 | `justifyContent` | Spacer 控件 | 主轴对齐，见 3.3 |
+| `overflowDirection` (Figma) | `ScrollBox.Orientation` | `VERTICAL_SCROLLING` / `HORIZONTAL_SCROLLING` 的单轴滚动 Frame 会映射为 `ScrollBox` |
 
 > **Slot 类型说明**：`Position` 和 `Size` 属性仅存在于 `UCanvasPanelSlot`。`UVerticalBoxSlot`/`UHorizontalBoxSlot` 使用 `FSlateChildSize` 控制尺寸，无 Position 属性。
 
@@ -886,15 +894,15 @@ FName MapFontWeight(const FString& Weight)
 
 **textAlignVertical 处理**：
 
-UMG 的 TextBlock 不支持垂直对齐。当前实现不会在运行时直接还原，而是把该信息保留为 Widget 属性元数据，供后续验证/扩展使用：
+UMG 的 TextBlock 不支持独立的垂直对齐属性。当前实现采用“父 Slot 不动，文本内部消化”的策略：
 
 | textAlignVertical | 实现方式 |
 |-------------------|---------|
 | `top` | 默认行为；不额外写入 |
-| `middle` | 写入 `TextAlignVertical=Center` 元数据，当前不改运行时布局 |
-| `bottom` | 写入 `TextAlignVertical=Bottom` 元数据，当前不改运行时布局 |
+| `middle` | 写入 `TextAlignVertical=Center` 元数据；若文本节点自身有固定高度且存在剩余空间，则写入对称内部 `Padding/Margin` |
+| `bottom` | 写入 `TextAlignVertical=Bottom` 元数据；若文本节点自身有固定高度且存在剩余空间，则把剩余空间压到顶部 `Padding/Margin` |
 
-> **当前取舍**：直接把 `textAlignVertical` 映射到父 Slot 会引入按钮、标签页等复合组件整体漂移，因此目前只保留元数据，不做容器级自动包裹。
+> **当前取舍**：不把 `textAlignVertical` 映射到父 Slot。这样不会引入按钮、标签页等复合组件整体漂移；只有文本节点自己拥有固定高度、且确实存在内部空白时，才转换为 TextBlock 内边距。
 
 **textAlign（水平对齐）处理**：
 
@@ -1124,7 +1132,7 @@ FDesignNode FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonObj,
 
 ### 3.9 图标字体 (icon_font)
 
-.pen 的 `icon_font` 类型表示图标字体字符，通过 TextBlock 渲染单个 Unicode 字符实现。
+.pen 的 `icon_font` 类型表示图标字体节点，当前主链通过 `TextBlock` 导出，并保留图标字体的 family / weight 语义。
 
 #### 3.9.1 icon_font 节点格式
 
@@ -1142,42 +1150,23 @@ FDesignNode FPenParser::ParseNode(const TSharedPtr<FJsonObject>& JsonObj,
 
 **iconFontFamily 可选值**：`lucide` | `feather` | `Material Symbols Outlined` | `Material Symbols Rounded` | `Material Symbols Sharp`
 
-> **注意**：.pen 文件通过 `iconFontName` 标识图标，不提供 Unicode 码点。需要在 UE5 侧维护图标名称到码点的映射表。
+当前实现要点：
+
+- `iconFontName` 作为图标语义名保留，并优先走已知 icon glyph / ligature 解析；解析不到时保留原始 `iconFontName` 文本作为回退。
+- `iconFontFamily` 通过 `Settings.IconFontAssetMap`、默认 icon font asset 或通用 `FontResolver` 解析到字体资产路径。
+- 字重优先使用显式 `fontWeight`；若未提供，则回退到 `.pen` 的 `icon_font.weight`，并映射到 `TypefaceFontName`。
+- 这意味着 Pencil 里的 `icon_font.weight` 已进入主链，不再只是 parser 保留字段。
 
 #### 3.9.2 实现方案
 
 ```cpp
 UWidget* CreateIconFontWidget(const FDesignNode& Node, const FPenConversionSettings& Settings)
 {
-    UTextBlock* TextBlock = WidgetTree->ConstructWidget<UTextBlock>();
-
-    // 通过 iconFontName 查找 Unicode 码点
-    FString IconChar;
-    if (Settings.IconNameToCodepoint.Contains(Node.IconFontName))
-    {
-        int32 Codepoint = Settings.IconNameToCodepoint[Node.IconFontName];
-        IconChar = FString::Chr(static_cast<TCHAR>(Codepoint));
-    }
-    TextBlock->SetText(FText::FromString(IconChar));
-
-    // 设置图标字体
-    FSlateFontInfo FontInfo = TextBlock->GetFont();
-    FontInfo.Size = FMath::Min(Node.Width.Value, Node.Height.Value);
-
-    // 查找图标字体资产
-    if (Settings.IconFontMapping.Contains(Node.IconFontFamily))
-    {
-        FontInfo.FontObject = Settings.IconFontMapping[Node.IconFontFamily].LoadSynchronous();
-    }
-    TextBlock->SetFont(FontInfo);
-
-    // 设置颜色
-    if (!Node.Fill.SolidColor.IsEmpty())
-    {
-        TextBlock->SetColorAndOpacity(FPenTypeMapper::ParseColor(Node.Fill.SolidColor));
-    }
-
-    return TextBlock;
+    // 1. 解析 iconFontFamily -> 具体字体资产路径
+    // 2. 字重优先使用 fontWeight；缺失时回退 icon_font.weight
+    // 3. TypeFaceFontName 使用映射后的字重名（Thin / Light / Regular / Medium / Bold ...）
+    // 4. 文本优先写入已知 glyph / ligature，失败时回退原始 iconFontName
+    // 5. 最终仍导出为 TextBlock，但不是把图标 family 当作普通文本 Typeface 乱塞
 }
 ```
 
@@ -1409,20 +1398,69 @@ UTexture2D* GenerateGradientTexture(const FPenGradient& Gradient, int32 Width, i
 
 ### 3.15 Prototype Navigation And Transition
 
+当前产品口径：`Prototype Basic` 已作为插件正式支持能力收口，但正式承诺范围只覆盖“页面切换 + typed trigger/action runtime contract + 基础过渡近似”。
+
+同时，本轮 release candidate 的导入与验证边界也已经锁定：
+
+- 正式承诺只覆盖 `Pencil .pen` 与 `Figma Design` 导入到 `UE5 UMG Widget Blueprint`
+- MCP / live sync 仍可作为本地桥接与调试工具存在，但不是本轮 release promise
+- reimport 当前只承诺“生成新资产”，不承诺 patch 现有 Blueprint
+- 封版验证以 maintainer-owned canonical runtime boundary 为准，不允许 HostProject fallback
+
+这意味着：
+
+- 正式支持的是：多页面导出后的切页交互、基础 hover / press / drag / keyboard trigger、`OVERLAY/BACK/OPEN_LINK` 轻量 contract、基础 fade / slide 过渡。
+- 不正式承诺的是：完整 Figma Prototype 复刻、通用状态机 / 事件图编译、完整 overlay layer system、完整 Smart Animate 图层级匹配、通用动画 authoring。
+
 当前 Figma prototype 主链已经覆盖最小可交付闭环：
 
 - 顶层多页面 Frame 会收敛为 `WidgetSwitcher`
-- `ON_CLICK + NAVIGATE/SWAP` 会把触发节点包装为透明 `Button`
+- `ON_CLICK/ON_HOVER/ON_PRESS/ON_DRAG + NAVIGATE/SWAP/OVERLAY/BACK/OPEN_LINK` 会把触发节点包装为透明 `Button`
+- `ON_KEY_DOWN / ON_KEY_UP` 会进入 typed trigger contract，并通过焦点约束下的输入路由触发
+- `SET_VARIABLE / SET_VARIABLE_MODE / CONDITIONAL` 会进入 typed step program，并在运行时顺序执行
 - 运行时通过 Blueprint extension 绑定点击事件，而不是把平台逻辑塞回共享转换主流程
+- `OVERLAY/BACK` 当前以 `base WidgetSwitcher + overlay host + runtime history stack` 的轻量 contract 落地，不引入独立浮层状态机
 
 基础过渡当前采用“可维护近似”策略：
 
 - `DISSOLVE` / `SMART_ANIMATE` / `SCROLL_ANIMATE`：映射为 switcher 淡出切页再淡入
 - `MOVE_IN` / `MOVE_OUT` / `SLIDE_IN` / `SLIDE_OUT` / `PUSH`：映射为 switcher 基础位移过渡
 - `duration` 与 `easing` 会进入 typed navigation binding，并驱动运行时过渡节奏
+- 当前生成器会为切页过渡补一对最小 `UWidgetAnimation` 资产（`out` / `in`）；运行时对 fade 类过渡优先播放资产动画，slide 类过渡继续走 ticker 近似以匹配 live switcher 尺寸
 
 当前边界：
 
-- 不生成完整 `UWidgetAnimation` 资产
-- 不做 overlay、back stack、hover/drag 手势或条件跳转
+- 不生成完整通用 `UWidgetAnimation` authoring 链；当前只覆盖切页 fade / slide 的两段式资产生成
+- keyboard trigger 仍依赖 prototype widget 获得 Slate focus；当前没有做脱离焦点系统的全局输入图编排
+- conditional flow 当前使用轻量 session-local variable store，只服务于生成 prototype runtime contract，不扩展为完整跨格式状态系统
 - `SMART_ANIMATE` 仅落到基础 fade 近似，不做图层级 match/layer morph
+- 当前没有完整 overlay layer semantics；`OVERLAY` 已脱离 switcher 直接切页，改为独立 overlay host，但仍没有通用锚定 / dismiss / placement 系统
+
+### 3.15A Widget Class Override
+
+当前生成链还支持一个刻意保持简单的正式能力：自定义 `Widget class override`。
+
+- 规则来源：`Editor Preferences > Plugins > Design2UMG > Widget Class Overrides`
+- 命中方式：对节点名称做 case-insensitive `Name Contains`
+- 冲突策略：首条命中规则生效
+- 当前定位：这是生成阶段的类替换能力，不是通用规则引擎，也不扩展为新的 widget mapping DSL
+- 验证方式：生成 Blueprint 后，在 Widget Tree 中检查目标节点的构造类是否被替换为配置类
+
+### 3.16 Typed Property Migration Status
+
+当前强类型收口已经进入“typed-first + shrinking legacy bag”阶段：
+
+- `WidgetStyle / TextData / Brush / Effect / PathData / Render / WidgetState` 已有 typed schema
+- `UMGJsonParser` 解析后只保留当前 typed schema；旧 UMG JSON 兼容不再作为持续扩张目标
+- `UMGJsonParser` 已移除 `CanvasSlot` / `Slots` / 节点平铺 property 入口等纯旧 UMG JSON 旁路，只保留当前 typed 主链
+- 运行时 `ApplyWidgetProperties(UWidget*, FUMGWidgetNode)` 统一走 merged effective bag，并仅对少数会受量化或运行时对象重建影响的 typed 字段做精度补写
+- typed 空字符串 override 现在是合法 payload，可阻止回退到同名 legacy key
+
+当前仍保留 `Properties`，但它的角色已经收缩为：
+
+- 尚未 typed 化的 widget-specific 参数承载层
+
+本轮不继续做“删除整个 legacy bag”有两个原因：
+
+- 仍有一批 class-specific runtime 参数通过 `FUMGPropertyBag` applier 消费，直接删除会破坏当前运行时链路
+- 这轮目标是收缩 legacy 表面面积，而不是扩张到新的 widget-specific schema 改造

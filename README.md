@@ -2,17 +2,20 @@
 
 Convert design files into Unreal Engine 5 UMG Widget Blueprints.
 
-Supported inputs:
+Formal release scope:
 - Pencil `.pen` files
-- Figma REST API
-- Live Pencil MCP connection
+- Figma Design import through REST API or local export JSON
+
+Bridge / debug utilities that remain available but are not formal release promises:
+- MCP JSON bridge import
+- Live Pencil MCP connection for local tooling/debug workflows
 
 ![Light Theme](Docs/Images/step1_light_theme.png)
 ![Dark Theme](Docs/Images/step2_dark_theme.png)
 
 ## Features
 
-- Multi-source import pipeline (`.pen`, Figma, MCP)
+- Multi-source import pipeline (`.pen`, Figma, MCP bridge utilities)
 - Layout conversion (flex-like design layout to UMG slots/anchors)
 - Visual mapping (fill, stroke, radius, shadow, gradients)
 - SVG path rasterization
@@ -24,7 +27,7 @@ Supported inputs:
 ## Requirements
 
 - Unreal Engine 5.4+
-- Pencil desktop app (optional, for MCP live sync)
+- Pencil desktop app (optional, for MCP bridge/debug tooling)
 - Figma Personal Access Token (optional, for Figma import)
 
 ## Installation
@@ -57,8 +60,11 @@ Design2UMG.Import <file.pen> [--node=<id>] [--out=/Game/Path] [--no-preview] [--
 ### 2. Import from Figma
 
 ```text
-Design2UMG.FigmaImport <file_url_or_key> <personal_access_token>
+Design2UMG.FigmaImport <file_url_or_key> <token_from_secure_source>
 ```
+
+Use a token from a secure source such as local user settings or environment provisioning.
+Do not treat command-line token literals as a recommended team workflow.
 
 ### 3. Import local Figma export JSON
 
@@ -72,6 +78,8 @@ Design2UMG.LocalFigmaImport <design.json> [--out=/Game/Path] [--no-preview]
 Design2UMG.PenConvert <nodes.json> <vars.json> [TargetNodeId] [--preview|--no-preview] [--out=/Game/Path]
 ```
 
+This MCP JSON path is a bridge/debug utility. The release candidate does not treat live sync itself as a formal support promise.
+
 ## Automation
 
 Full automation visual verification now has two layers:
@@ -80,6 +88,14 @@ Full automation visual verification now has two layers:
    Renders the final compiled Widget Blueprint to a PNG from a manifest file.
 2. `Tools/design2umg_auto_verify.py`
    Prepares a design reference image, launches Unreal Editor unattended, renders the candidate PNG, then writes diff and JSON reports.
+
+Imports and automation runs now also emit a structured import diagnostic report under:
+
+```text
+<Project>/Saved/Design2UMG/ImportReports/*.import_report.json
+```
+
+The report is the single authority artifact for import troubleshooting and includes source/output binding, degradations, resource diagnostics, effect wrappers, and operator recommendations.
 
 Example:
 
@@ -90,7 +106,7 @@ python Tools/design2umg_auto_verify.py pen --source G:\path\screen.pen --node sb
 Figma reference export is also supported:
 
 ```text
-python Tools/design2umg_auto_verify.py local-figma --source G:\path\design.json --reference-provider figma --figma-file <fileKeyOrUrl> --figma-node 123:456 --figma-token <token>
+python Tools/design2umg_auto_verify.py local-figma --source G:\path\design.json --reference-provider figma --figma-file <fileKeyOrUrl> --figma-node 123:456 --figma-token <token_from_secure_source>
 ```
 
 ## Settings
@@ -101,8 +117,33 @@ Key options:
 - Design Width / Height
 - Remote Image Import
 - Icon Font mapping
+- Widget Class override rules
 - MCP Server Path override
-- Incremental update
+- Pencil App Name override
+- Known web font auto import is experimental, defaults off, and should not be treated as a required production workflow
+
+## Import Semantics
+
+- Re-import currently generates a new asset when the target name already exists.
+- The plugin does **not** currently promise in-place patch/reimport of an existing Widget Blueprint.
+
+## Verification Boundary
+
+- Formal full-fidelity release validation is performed against a maintainer-owned canonical runtime boundary.
+- The public repository must not treat that maintainer boundary as a portable user setup recipe.
+- HostProject fallback is not part of the supported verification workflow.
+
+## Public Validation
+
+- Public `validate` documentation should be treated as smoke/public validation unless it explicitly says it reproduces the maintainer full admissible gate.
+- The current authoritative release gate remains the full admissible run wrapped by `Docs/ValidationGovernance/`.
+
+## Widget Class Overrides
+
+- `Edit > Editor Preferences > Plugins > Design2UMG` exposes class override rules that replace the default generated widget class when the node name matches a configured pattern.
+- Matching is case-insensitive `Name Contains`.
+- The first matching rule wins.
+- Verification path: generate a Blueprint, inspect the target widget in the Widget Tree, and confirm the constructed widget class matches the override rule.
 
 ## Architecture
 

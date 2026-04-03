@@ -25,10 +25,10 @@ Target rule:
 - Converted remaining non-BOM tracked text files discovered by audit to UTF-8 BOM:
   - `.github/pull_request_template.md`
   - `Docs/Design2UMG_TechnicalDesign.md`
-  - `Docs/DevelopmentProgress.md`
-  - `Docs/FullPipelineReview.md`
-  - `Docs/PRD_EasyImport.md`
-  - `Docs/PRD_PenMCPBridge.md`
+  - `Docs/archive/legacy-plans/DevelopmentProgress.md`
+  - `Docs/archive/legacy-plans/FullPipelineReview.md`
+  - `Docs/archive/legacy-plans/PRD_EasyImport.md`
+  - `Docs/archive/legacy-plans/PRD_PenMCPBridge.md`
   - `Docs/PropertyMapping.md`
   - `Docs/PropertyTyping.md`
   - `Docs/ROADMAP.md`

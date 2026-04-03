@@ -30,13 +30,13 @@
 | 布局转换 | ✅ Flexbox→Anchors，9宫格+Hysteresis | ✅ 基础布局 | 领先 |
 | 视觉属性 | ✅ 填充/描边/圆角/阴影/模糊 | ⚠️ 基础填充 | 领先 |
 | 组件系统 | ✅ Ref展开+变量解析+主题 | ✅ Components/Variants | 持平 |
-| Prototype Flow | ❌ 无 | ✅ 交互解析+蓝图图表生成 | **落后** |
+| Prototype Flow | ⚠️ 最小闭环已落地（仍待扩容） | ✅ 交互解析+蓝图图表生成 | 仍有差距 |
 | 渐变 | ⚠️ 双色H/V/Radial | ❌ 无 | 领先 |
 | SVG Path | ✅ 完整指令集栅格化 | ❌ 无 | 领先 |
 | 多输入源 | ✅ .pen + Figma + MCP | Figma only | 领先 |
-| 蓝图逻辑生成 | ❌ 仅Widget树 | ✅ UEdGraph节点 | **落后** |
+| 蓝图逻辑生成 | ⚠️ 以 runtime extension 为主，未走完整 UEdGraph authoring | ✅ UEdGraph节点 | 仍有差距 |
 
-**结论**：核心短板是 Prototype Flow 和蓝图逻辑生成。Figma2UMG 的 `WidgetBlueprintHelper`（MIT）可作为参考实现。
+**结论**：核心短板已从“有无”转为“覆盖度与语义完整性”；Prototype Flow 和通用动画/图表 authoring 仍是主要差距。Figma2UMG 的 `WidgetBlueprintHelper`（MIT）可作为参考实现。
 
 ---
 
@@ -131,6 +131,25 @@
 > - `Source/Figma2UMG/Public/Parser/Nodes/FigmaNode.h` — `FFigmaInteraction`、`EFigmaTriggerType`、`EFigmaActionType`、`EFigmaActionNodeNavigation`、`GetInteractionFromTrigger()`
 > - `Source/Figma2UMG/Public/Builder/Widget/WidgetSwitcherBuilder.h` — UWidgetSwitcher 构建与 Patch
 
+### 2.0 当前状态（2026-03-27）
+
+| 能力 | 当前状态 |
+|------|------|
+| Figma prototype typed parse（interaction / transition / start node） | [x] |
+| 多页面 `WidgetSwitcher` 导航 | [x] |
+| `ON_CLICK + NAVIGATE/SWAP/OVERLAY/BACK/OPEN_LINK` 最小闭环 | [x] |
+| `ON_HOVER / ON_PRESS` 触发器进入 prototype runtime contract | [x] |
+| 运行时淡入淡出 / 位移近似过渡 | [x] |
+| 切页最小 `UWidgetAnimation` 资产生成（fade / slide） | [x] |
+| drag / keyboard / conditional flow | [ ] |
+| 独立 overlay layer semantics | [ ] |
+| 完整 `UWidgetAnimation` 资产生成 | [ ] |
+| 完整 Smart Animate 图层匹配 | [ ] |
+
+> 验证：自动化测试 `Design2UMG.Converter.FigmaPrototypeNavigation`、`Design2UMG.Converter.FigmaPrototypeSpecialActions`、`Design2UMG.Converter.FigmaPrototypeHoverAndPress`、`Design2UMG.WidgetBlueprint.FigmaPrototypeNavigationRuntime`、`Design2UMG.WidgetBlueprint.FigmaPrototypeSpecialActionsRuntime`、`Design2UMG.WidgetBlueprint.FigmaPrototypeHoverAndPressRuntime`、`Design2UMG.WidgetBlueprint.FigmaPrototypeSinglePageOpenLinkRuntime` 与 `Design2UMG.WidgetBlueprint.FigmaPrototypeSlideTransitionRuntime` 都覆盖了当前 prototype typed/runtime contract，因此表中显示 `[x]` 的能力已由测试链路验证。
+>
+> 注：Phase 2 下面的原始分解是历史方案，当前已经不再走 `BlueprintGraphHelper + K2 图表拼接` 这条实现路线，而是以 typed navigation contract + Blueprint extension 为主。
+
 ### 2.1 交互数据解析 🔴
 
 | 任务 | 文件 | 状态 |
@@ -214,10 +233,10 @@
 - Pencil MCP 实时连接
 - 自动化测试
 
-### v1.1 发布内容（Phase 2 完成后）
+### v1.1 发布内容（Phase 2 扩容后）
 
-- Prototype Flow（页面导航逻辑生成）
-- 蓝图图表自动生成（OnClicked → SetActiveWidgetIndex）
+- Prototype Flow 扩容（hover/drag/keyboard/conditional 与 overlay semantics 收口）
+- 评估是否补充蓝图图表自动生成（OnClicked → SetActiveWidgetIndex）
 - Tag 方案替代选项
 - 渐变多色站点 + 任意角度
 

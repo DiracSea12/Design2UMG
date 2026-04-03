@@ -1,0 +1,20 @@
+﻿{
+  "manifest_version": 1,
+  "as_of": "2026-03-31",
+  "blocked_runs": [
+    {
+      "run_id": "_full47_official_20260324_g3",
+      "status": "blocked",
+      "promotion_status": "never_promoted_to_official",
+      "blocked_output_root": "Saved/Design2UMG/Automation/_full47_official_20260324_g3",
+      "crash_signature": "UWidgetNavigation::UpdateMetaData()",
+      "reason": "Editor crash before complete official-baseline promotion artifacts could be trusted.",
+      "replacement_official_baseline": "_full47_official_20260325_h2",
+      "followup_confirmation": "_full47_compare_20260325_k8",
+      "evidence_sources": [
+        "openspec/changes/track-20260324-optimization-baseline-and-roadmap/proposal.md",
+        "openspec/changes/track-20260324-optimization-baseline-and-roadmap/design.md"
+      ]
+    }
+  ]
+}
