@@ -118,7 +118,7 @@ Last verified: 2026-04-04
 固定使用：
 
 ```text
-G:\UE5\FPSRoguelike\FPSRoguelike.uproject
+<MaintainerRuntimeProject.uproject>
 ```
 
 不允许 HostProject fallback。
@@ -128,7 +128,7 @@ G:\UE5\FPSRoguelike\FPSRoguelike.uproject
 ### 第 0 步：先构建
 
 ```text
-G:\UE5\UnrealEngine\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.exe FPSRoguelikeEditor Win64 Development "-Project=G:\UE5\FPSRoguelike\FPSRoguelike.uproject" -WaitMutex -FromMsBuild
+<UE5_Root>\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.exe FPSRoguelikeEditor Win64 Development "-Project=<MaintainerRuntimeProject.uproject>" -WaitMutex -FromMsBuild
 ```
 
 ### 第 1 步：扫描全部历史结果
@@ -247,7 +247,7 @@ Saved/Design2UMG/Automation
 如果某个更优历史结果对应的旧资产今天仍然存在，必须先直接重渲染那次 run 留下的旧资产：
 
 ```text
-python Tools/design2umg_auto_verify.py asset --source "<old_widget_blueprint_object_path>" --reference-provider png --reference "<reference.png>" --project "G:\UE5\FPSRoguelike\FPSRoguelike.uproject" --output-dir "<probe_dir>"
+python Tools/design2umg_auto_verify.py asset --source "<old_widget_blueprint_object_path>" --reference-provider png --reference "<reference.png>" --project "<MaintainerRuntimeProject.uproject>" --output-dir "<probe_dir>"
 ```
 
 注意：
@@ -433,7 +433,7 @@ python Tools/design2umg_auto_verify.py asset --source "<old_widget_blueprint_obj
 ### 1. 焦点 admissible case 定向跑测
 
 ```text
-python Tools/design2umg_auto_verify_batch.py --design-root "G:\UE5\FPSRoguelike\Designs" --figma-export-root "G:\UE5\figma_export" --figma-export-root "G:\UE5\figma_export1" --project "G:\UE5\FPSRoguelike\FPSRoguelike.uproject" --reference-root "<admissible_reference_root>" --output-root "G:\UE5\UnrealEngine\Engine\Plugins\Marketplace\Design2UMG\Saved\Design2UMG\Automation\<probe_output_root>" --pixel-tolerance 6 --changed-ratio-threshold 0.01 --mae-threshold 0.02 --include "^(case_a|case_b|case_c)$"
+python Tools/design2umg_auto_verify_batch.py --design-root "<MaintainerDesignRoot>" --figma-export-root "<MaintainerFigmaExportRootA>" --figma-export-root "<MaintainerFigmaExportRootB>" --project "<MaintainerRuntimeProject.uproject>" --reference-root "<admissible_reference_root>" --output-root "<MaintainerAutomationRoot>\\<probe_output_root>" --pixel-tolerance 6 --changed-ratio-threshold 0.01 --mae-threshold 0.02 --include "^(case_a|case_b|case_c)$"
 ```
 
 同时必须额外落一份 provenance 记录，至少写清：
@@ -449,7 +449,7 @@ python Tools/design2umg_auto_verify_batch.py --design-root "G:\UE5\FPSRoguelike\
 ### 2. 单旧资产复现
 
 ```text
-python Tools/design2umg_auto_verify.py asset --source "<old_widget_blueprint_object_path>" --reference-provider png --reference "<reference_png>" --project "G:\UE5\FPSRoguelike\FPSRoguelike.uproject" --output-dir "G:\UE5\UnrealEngine\Engine\Plugins\Marketplace\Design2UMG\Saved\Design2UMG\Automation\<probe_dir>"
+python Tools/design2umg_auto_verify.py asset --source "<old_widget_blueprint_object_path>" --reference-provider png --reference "<reference_png>" --project "<MaintainerRuntimeProject.uproject>" --output-dir "<MaintainerAutomationRoot>\\<probe_dir>"
 ```
 
 注意：
@@ -466,7 +466,7 @@ python Tools/design2umg_auto_verify_batch.py ... --log-cmds "LogDesign2UMG Verbo
 ### 4. 正式全量 admissible 回归
 
 ```text
-python Tools/design2umg_auto_verify_batch.py --design-root "G:\UE5\FPSRoguelike\Designs" --figma-export-root "G:\UE5\figma_export" --figma-export-root "G:\UE5\figma_export1" --figma-export-root "G:\UE5\figma_export2" --figma-export-root "G:\UE5\figma_export3" --project "G:\UE5\FPSRoguelike\FPSRoguelike.uproject" --reference-root "<admissible_full_reference_root>" --output-root "G:\UE5\UnrealEngine\Engine\Plugins\Marketplace\Design2UMG\Saved\Design2UMG\Automation\<final_admissible_full_output_root>" --pixel-tolerance 6 --changed-ratio-threshold 0.01 --mae-threshold 0.02 --exclude "^(case_removed_a|case_removed_b)$"
+python Tools/design2umg_auto_verify_batch.py --design-root "<MaintainerDesignRoot>" --figma-export-root "<MaintainerFigmaExportRootA>" --figma-export-root "<MaintainerFigmaExportRootB>" --figma-export-root "<MaintainerFigmaExportRootC>" --figma-export-root "<MaintainerFigmaExportRootD>" --project "<MaintainerRuntimeProject.uproject>" --reference-root "<admissible_full_reference_root>" --output-root "<MaintainerAutomationRoot>\\<final_admissible_full_output_root>" --pixel-tolerance 6 --changed-ratio-threshold 0.01 --mae-threshold 0.02 --exclude "^(case_removed_a|case_removed_b)$"
 ```
 
 要求：

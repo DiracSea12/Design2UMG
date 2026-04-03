@@ -58,8 +58,8 @@ Example:
 ### 4. Confirm the asset and PNG were both regenerated
 
 Both timestamps must be newer than the current validation start time:
-- `G:\UE5\FPSRoguelike\Content\Design2UMG\PenConvert_Output\WBP_lunaris__design_system_components.uasset`
-- `G:\UE5\FPSRoguelike\Saved\Design2UMG\WBP_lunaris__design_system_components.png`
+- `<MaintainerRuntimeProjectRoot>\Content\Design2UMG\PenConvert_Output\WBP_lunaris__design_system_components.uasset`
+- `<MaintainerRuntimeProjectRoot>\Saved\Design2UMG\WBP_lunaris__design_system_components.png`
 
 If the asset updated but the PNG did not, that validation run is incomplete.
 
@@ -81,7 +81,7 @@ Use the real editor process, not `UnrealEditor-Cmd.exe`, and do not use `-NullRH
 Preferred command:
 
 ```text
-pwsh -NoProfile -File G:\UE5\UnrealEngine\Engine\Plugins\Marketplace\Design2UMG\Tools\Run-DesignerSnapshotValidation.ps1
+pwsh -NoProfile -File <MaintainerPluginRoot>\Tools\Run-DesignerSnapshotValidation.ps1
 ```
 
 The wrapper now kills any existing `UnrealEditor.exe` / `UnrealEditor-Cmd.exe` process by default before launching the validation editor.
@@ -90,12 +90,12 @@ Use `-KeepExistingEditor` only when you are intentionally debugging against an a
 Example:
 
 ```text
-G:\UE5\UnrealEngine\Engine\Binaries\Win64\UnrealEditor.exe G:\UE5\FPSRoguelike\FPSRoguelike.uproject -NoSplash -NoSound -nop4 "-ExecCmds=Automation RunTests Design2UMG.Editor.DesignerSnapshot.LunarisSavedAsset; Quit" "-TestExit=Automation Test Queue Empty" -log
+<UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe <MaintainerRuntimeProject.uproject> -NoSplash -NoSound -nop4 "-ExecCmds=Automation RunTests Design2UMG.Editor.DesignerSnapshot.LunarisSavedAsset; Quit" "-TestExit=Automation Test Queue Empty" -log
 ```
 
 Expected output file:
 
-- `G:\UE5\FPSRoguelike\Saved\Design2UMG\WBP_lunaris__design_system_components.designer.png`
+- `<MaintainerRuntimeProjectRoot>\Saved\Design2UMG\WBP_lunaris__design_system_components.designer.png`
 
 This file is editor evidence, not asset-render evidence.
 
@@ -114,19 +114,19 @@ Use this to compare:
 Example:
 
 ```text
-G:\UE5\UnrealEngine\Engine\Binaries\Win64\UnrealEditor-Cmd.exe G:\UE5\FPSRoguelike\FPSRoguelike.uproject -unattended -nop4 -nosplash -NullRHI "-ExecCmds=Automation RunTests Design2UMG.Editor.StructureSnapshot.LunarisSavedAsset; Quit" "-TestExit=Automation Test Queue Empty" -log
+<UE5_Root>\Engine\Binaries\Win64\UnrealEditor-Cmd.exe <MaintainerRuntimeProject.uproject> -unattended -nop4 -nosplash -NullRHI "-ExecCmds=Automation RunTests Design2UMG.Editor.StructureSnapshot.LunarisSavedAsset; Quit" "-TestExit=Automation Test Queue Empty" -log
 ```
 
 Preferred wrapper:
 
 ```text
-pwsh -NoProfile -File G:\UE5\UnrealEngine\Engine\Plugins\Marketplace\Design2UMG\Tools\Run-LunarisStructureSnapshotValidation.ps1
+pwsh -NoProfile -File <MaintainerPluginRoot>\Tools\Run-LunarisStructureSnapshotValidation.ps1
 ```
 
 Expected output files:
 
-- `G:\UE5\FPSRoguelike\Saved\Design2UMG\WBP_lunaris__design_system_components.source-tree.json`
-- `G:\UE5\FPSRoguelike\Saved\Design2UMG\WBP_lunaris__design_system_components.saved-tree.json`
+- `<MaintainerRuntimeProjectRoot>\Saved\Design2UMG\WBP_lunaris__design_system_components.source-tree.json`
+- `<MaintainerRuntimeProjectRoot>\Saved\Design2UMG\WBP_lunaris__design_system_components.saved-tree.json`
 
 These files are structure evidence, not visual evidence.
 
