@@ -7,7 +7,7 @@
 #include "UMGSchema.h"
 
 /**
- * 布局映射：Slot 属性、Gap、Padding、JustifyContent、AlignItems、SizeBox 包裹
+ * Layout mapping helpers for slot data, gap, padding, alignment, and SizeBox wrapping.
  */
 class DESIGN2UMGCORE_API FLayoutMapper
 {

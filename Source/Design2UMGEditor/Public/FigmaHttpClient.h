@@ -5,10 +5,10 @@
 #include "CoreMinimal.h"
 
 /**
- * Figma REST API HTTP 客户端
+ * Figma REST API HTTP client.
  *
- * 封装 Personal Access Token 认证和常用端点调用。
- * 所有请求均为异步，通过回调返回结果。
+ * Wraps Personal Access Token authentication and the common endpoints used by
+ * the plugin. All requests are asynchronous and report through callbacks.
  */
 class FFigmaHttpClient
 {
@@ -20,13 +20,13 @@ public:
 
 	using FOnComplete = TFunction<void(bool bSuccess, const FString& ResponseBody)>;
 
-	/** GET /v1/files/:key — 获取完整文件 */
+	/** GET /v1/files/:key - Fetch the full file payload. */
 	void GetFile(const FString& FileKey, FOnComplete OnComplete);
 
 	/** GET /v1/files/:key/images - Official "get file image fills" endpoint (imageRef -> URL map). */
 	void GetFileImages(const FString& FileKey, FOnComplete OnComplete);
 
-	/** GET /v1/images/:key?ids=...&format=png&scale=2 — 导出节点为图片 */
+	/** GET /v1/images/:key?ids=...&format=png&scale=2 - Export nodes as images. */
 	void ExportImages(const FString& FileKey, const TArray<FString>& NodeIds, FOnComplete OnComplete);
 
 private:

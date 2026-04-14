@@ -1,4 +1,6 @@
-﻿#pragma once
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+
+#pragma once
 
 namespace UMGPropertyKeys
 {
@@ -92,6 +94,7 @@ namespace UMGPropertyKeys
 	inline constexpr const TCHAR* RenderTransformScale = TEXT("RenderTransformScale");
 	inline constexpr const TCHAR* RenderTranslation = TEXT("RenderTranslation");
 	inline constexpr const TCHAR* RetainRendering = TEXT("RetainRendering");
+	inline constexpr const TCHAR* RichTextStyleRows = TEXT("Design2UMG.RichTextStyleRows");
 	inline constexpr const TCHAR* RowFill = TEXT("RowFill");
 	inline constexpr const TCHAR* ScrollBarVisibility = TEXT("ScrollBarVisibility");
 	inline constexpr const TCHAR* SelectedOption = TEXT("SelectedOption");

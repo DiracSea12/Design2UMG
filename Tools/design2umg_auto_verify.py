@@ -1,6 +1,7 @@
 ﻿import argparse
 import base64
 import glob
+import hashlib
 import json
 import os
 import re
@@ -14,6 +15,8 @@ import urllib.request
 from collections import Counter
 from pathlib import Path
 
+import design2umg_rebuild_admissible_best as rebuild_best
+import design2umg_validate_run as validate_run_tool
 from PIL import Image, ImageChops, ImageFilter, ImageStat
 
 
@@ -29,6 +32,64 @@ def parse_numeric_dimension(value):
 
 def load_json_document(path: Path):
     return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
+_COMPARE_IMAGE_CACHE: dict[tuple, dict] = {}
+
+
+def _path_signature(path: Path) -> tuple[str, int, int] | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return (str(path.resolve()), stat.st_mtime_ns, stat.st_size)
+
+
+def extract_compare_metrics(report: dict | None) -> dict | None:
+    if not isinstance(report, dict):
+        return None
+
+    metrics = {
+        "size_match": report.get("size_match"),
+        "reference_size": report.get("reference_size"),
+        "candidate_size": report.get("candidate_size"),
+        "changed_ratio": report.get("changed_ratio"),
+        "stable_changed_ratio": report.get("stable_changed_ratio"),
+        "mean_abs_error": report.get("mean_abs_error"),
+        "stable_mean_abs_error": report.get("stable_mean_abs_error"),
+        "diff_bbox": report.get("diff_bbox"),
+        "stable_diff_bbox": report.get("stable_diff_bbox"),
+    }
+    if all(metrics.get(metric_name) is None for metric_name in ("changed_ratio", "stable_changed_ratio", "mean_abs_error", "stable_mean_abs_error")):
+        return None
+    return metrics
+
+
+def sanitize_case_name(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    normalized = re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")
+    return normalized or "unnamed"
+
+
+def build_automation_asset_root(output_dir: Path, game_output_base: str = "") -> str:
+    normalized_base = (game_output_base or "").strip().rstrip("/")
+    if normalized_base:
+        return normalized_base
+
+    resolved_output_dir = output_dir.resolve()
+    output_key = hashlib.sha1(str(resolved_output_dir).encode("utf-8")).hexdigest()[:10]
+    case_segment = sanitize_case_name(output_dir.name)
+    return f"/Game/Design2UMG/Automation/{case_segment}-{output_key}"
+
+
+def build_automation_phase_output(game_output_root: str, phase_name: str) -> str:
+    normalized_root = (game_output_root or "").strip().rstrip("/")
+    phase_segment = sanitize_case_name(phase_name)
+    if not normalized_root:
+        raise ValueError("game_output_root must not be empty")
+    if not phase_segment:
+        return normalized_root
+    return f"{normalized_root}/{phase_segment}"
 
 
 def find_node_by_id(nodes, target_id):
@@ -218,9 +279,9 @@ def parse_args():
     parser.add_argument("--mcp-server", default="", help="Override Pencil MCP server binary path")
     parser.add_argument("--pencil-app", default="", help="Override Pencil app name. Leave empty for auto-detect from ~/.pencil/apps and running IDE processes.")
     parser.add_argument("--output-dir", default="", help="Directory for render, diff and reports")
-    parser.add_argument("--game-output", default="", help="UE asset output path, default is a unique automation path")
+    parser.add_argument("--game-output", default="", help="UE asset output base path, default is a unique automation path")
     parser.add_argument("--project", default="", help="Runtime project path. HostProject fallback has been removed. If omitted, the script tries DESIGN2UMG_RUNTIME_PROJECT and then infers a .uproject from the source path.")
-    parser.add_argument("--editor", default=r"G:\UE5\UnrealEngine\Engine\Binaries\Win64\UnrealEditor.exe", help="UnrealEditor.exe path")
+    parser.add_argument("--editor", default=r"G:\UE5\UnrealEngine\Engine\Binaries\Win64\UnrealEditor.exe", help="UnrealEditor executable path")
     parser.add_argument("--pixel-tolerance", type=int, default=6, help="Per-pixel max-channel tolerance")
     parser.add_argument("--changed-ratio-threshold", type=float, default=0.01, help="Max changed pixel ratio to pass")
     parser.add_argument("--mae-threshold", type=float, default=0.02, help="Max mean absolute error to pass")
@@ -713,9 +774,16 @@ def get_active_pencil_document(client: PencilMcpClient) -> str:
     return match.group(1) if match else ""
 
 
+def normalize_local_document_path(value: str) -> str:
+    normalized = (value or "").strip().replace("/", "\\")
+    if re.match(r"^\\+[A-Za-z]:\\", normalized):
+        normalized = normalized.lstrip("\\")
+    return os.path.normcase(os.path.normpath(normalized))
+
+
 def ensure_pencil_document_open(client: PencilMcpClient, source_path: str):
-    normalized_target = str(Path(source_path).resolve()).lower().replace("/", "\\")
-    active_document = get_active_pencil_document(client).lower().replace("/", "\\")
+    normalized_target = normalize_local_document_path(str(Path(source_path).resolve()))
+    active_document = normalize_local_document_path(get_active_pencil_document(client))
     if active_document == normalized_target:
         return
 
@@ -727,7 +795,7 @@ def ensure_pencil_document_open(client: PencilMcpClient, source_path: str):
 
     deadline = time.time() + 15.0
     while time.time() < deadline:
-        active_document = get_active_pencil_document(client).lower().replace("/", "\\")
+        active_document = normalize_local_document_path(get_active_pencil_document(client))
         if active_document == normalized_target:
             return
         time.sleep(0.5)
@@ -778,8 +846,16 @@ def screenshot_pencil_reference_png(client: PencilMcpClient, source_path: str, n
 def compare_image_paths(left_path: Path, right_path: Path, pixel_tolerance: int) -> dict | None:
     if not left_path.is_file() or not right_path.is_file():
         return None
+    left_signature = _path_signature(left_path)
+    right_signature = _path_signature(right_path)
+    if left_signature is None or right_signature is None:
+        return None
+    cache_key = (left_signature, right_signature, pixel_tolerance)
+    cached = _COMPARE_IMAGE_CACHE.get(cache_key)
+    if cached is not None:
+        return dict(cached)
     comparison = build_diff(load_rgba(left_path), load_rgba(right_path), pixel_tolerance)
-    return {
+    result = {
         "size_match": comparison["size_match"],
         "left_size": comparison["reference_size"],
         "right_size": comparison["candidate_size"],
@@ -790,6 +866,8 @@ def compare_image_paths(left_path: Path, right_path: Path, pixel_tolerance: int)
         "diff_bbox": comparison["diff_bbox"],
         "stable_diff_bbox": comparison["stable_diff_bbox"],
     }
+    _COMPARE_IMAGE_CACHE[cache_key] = result
+    return dict(result)
 
 
 def compare_scaled_image_paths(source_path: Path, witness_path: Path, pixel_tolerance: int) -> dict | None:
@@ -937,25 +1015,32 @@ def try_fetch_pencil_source_structure_snapshot(
     try:
         with PencilMcpClient(mcp_server, app_name) as client:
             ensure_pencil_document_open(client, source_path)
-            parts = client.call_tool_content(
-                "batch_get",
-                {
-                    "filePath": source_path,
-                    "patterns": [{"name": f"^{re.escape(search_name)}$"}],
-                    "searchDepth": 6,
-                    "readDepth": 12,
-                    "resolveInstances": True,
-                    "resolveVariables": False,
-                },
-            )
+            def fetch_parts(patterns: list[dict]) -> list[dict]:
+                return client.call_tool_content(
+                    "batch_get",
+                    {
+                        "filePath": source_path,
+                        "patterns": patterns,
+                        "searchDepth": 6,
+                        "readDepth": 12,
+                        "resolveInstances": True,
+                        "resolveVariables": False,
+                    },
+                )
+
+            parts = fetch_parts([{"name": f"^{re.escape(search_name)}$"}])
+            parsed = _parse_tool_text_json(parts)
+            target_node = _find_pencil_node_by_id(parsed, node_id) if isinstance(parsed, list) else None
+            if not target_node:
+                parts = fetch_parts([])
+                parsed = _parse_tool_text_json(parts)
+                target_node = _find_pencil_node_by_id(parsed, node_id) if isinstance(parsed, list) else None
     except Exception:
         return None
 
-    parsed = _parse_tool_text_json(parts)
     if not isinstance(parsed, list):
         return None
 
-    target_node = _find_pencil_node_by_id(parsed, node_id)
     if not target_node and len(parsed) == 1 and isinstance(parsed[0], dict):
         target_node = parsed[0]
     snapshot = _build_pencil_structure_snapshot(target_node)
@@ -1372,6 +1457,106 @@ def write_json(path: Path, payload: dict):
         json.dump(payload, handle, ensure_ascii=False, indent=2)
 
 
+def infer_single_case_name(args, output_dir: Path) -> str:
+    if args.mode == "pen":
+        node_name = try_get_pen_node_name(args.source, args.node) or args.node or Path(args.source).stem
+        return f"pen_{sanitize_case_name(Path(args.source).stem)}_{sanitize_case_name(node_name)}"
+    if args.mode in {"local-figma", "figma-source"}:
+        export_root = Path(args.source).resolve().parent
+        suffix = "local" if args.mode == "local-figma" else "source"
+        return f"figma_{sanitize_case_name(export_root.name)}_{suffix}"
+    if args.mode == "asset":
+        return f"asset_{sanitize_case_name(Path(args.source).stem)}"
+    return sanitize_case_name(output_dir.name)
+
+
+def build_single_case_summary_entry(case_name: str, report_path: Path) -> dict:
+    report = load_json_document(report_path)
+    structure_validation = report.get("structure_validation") or {}
+    generation_vs_asset = ((report.get("render_chain") or {}).get("generation_vs_asset") or {})
+    reference_authority = ((report.get("reference_context") or {}).get("reference_authority") or {})
+    return {
+        "name": case_name,
+        "passed": bool(report.get("passed")),
+        "report_path": str(report_path),
+        "changed_ratio": report.get("changed_ratio"),
+        "stable_changed_ratio": report.get("stable_changed_ratio"),
+        "mae": report.get("mean_abs_error"),
+        "stable_mae": report.get("stable_mean_abs_error"),
+        "verification_level": reference_authority.get("verification_level", ""),
+        "generation_vs_asset_changed_ratio": generation_vs_asset.get("changed_ratio"),
+        "structure_passed": structure_validation.get("passed", True) if structure_validation else True,
+        "structure_required": bool(structure_validation.get("required")) if structure_validation else False,
+        "structure_available": bool(structure_validation),
+        "structure_reasons": structure_validation.get("reasons", []) if structure_validation else [],
+        "no_regression_available": False,
+        "no_regression_passed": True,
+        "no_regression_reasons": [],
+        "baseline_changed_ratio": None,
+        "baseline_stable_changed_ratio": None,
+        "baseline_mae": None,
+        "baseline_stable_mae": None,
+        "changed_ratio_delta": None,
+        "stable_changed_ratio_delta": None,
+        "mae_delta": None,
+        "stable_mae_delta": None,
+        "no_regression_decisive_metric": "",
+        "no_regression_decisive_delta": None,
+    }
+
+
+def finalize_single_run_history(output_dir: Path, args, report_path: Path) -> None:
+    case_name = infer_single_case_name(args, output_dir)
+    run_scope = {
+        "scope": "focus",
+        "include_pattern": case_name,
+        "exclude_pattern": "",
+        "discovered_total": 1,
+        "formal_admissible_candidate": False,
+        "case_names": [case_name],
+    }
+    run_scope_path = output_dir / "run_scope.json"
+    write_json(run_scope_path, run_scope)
+
+    summary_case = build_single_case_summary_entry(case_name, report_path)
+    summary = {
+        "total": 1,
+        "passed": 1 if summary_case["passed"] else 0,
+        "failed": 0 if summary_case["passed"] else 1,
+        "editor_exit_code": load_json_document(report_path).get("editor_exit_code"),
+        "design_root": str(Path(args.source).resolve().parent),
+        "output_root": str(output_dir.resolve()),
+        "run_scope_path": str(run_scope_path),
+        "completeness": {
+            "blocked": False,
+            "blocked_reasons": [],
+            "discovered_total": 1,
+            "reported_total": 1,
+            "missing_compare_reports": [],
+            "missing_case_results": [],
+        },
+        "no_regression": {
+            "available": 0,
+            "passed": 0,
+            "failed": 0,
+        },
+        "cases": [summary_case],
+    }
+    write_json(output_dir / "summary.json", summary)
+
+    automation_root = output_dir.parent
+    historical_best_manifest = rebuild_best.rebuild_historical_best_manifest(automation_root)
+    historical_best_manifest_path = automation_root / "_admissible_best_latest.json"
+    rebuild_best.write_json(historical_best_manifest_path, historical_best_manifest)
+    rebuild_best.write_json(output_dir / "historical_best_manifest.json", historical_best_manifest)
+
+    historical_validation = validate_run_tool.validate_run(
+        output_dir,
+        admissible_best_path=historical_best_manifest_path,
+    )
+    write_json(output_dir / "validation_against_historical_best.json", historical_validation)
+
+
 def load_ue_result(path: Path) -> dict:
     with open(path, "r", encoding="utf-8-sig") as handle:
         return json.load(handle)
@@ -1437,7 +1622,7 @@ def run_native_self_check(
     args,
     output_dir: Path,
     mode_map: dict,
-    game_output: str,
+    game_output_root: str,
     expected_design_size: tuple[int, int] | None,
     primary_render_size: tuple[int, int],
     source_path: str,
@@ -1468,6 +1653,8 @@ def run_native_self_check(
 
     native_path = output_dir / "candidate.native.png"
     native_bootstrap_path = add_name_suffix(native_path, ".bootstrap")
+    native_generate_output = build_automation_phase_output(game_output_root, "native")
+    native_asset_output = build_automation_phase_output(game_output_root, "native-asset")
     result = {
         "available": True,
         "reason": "",
@@ -1480,7 +1667,7 @@ def run_native_self_check(
             "mode": "asset",
             "source_path": source_path,
             "node_id": "",
-            "output_path": game_output,
+            "output_path": native_asset_output,
             "render_png_path": str(native_path),
             "result_json_path": str(output_dir / "ue_native_render_result.json"),
             "render_width": native_width,
@@ -1501,7 +1688,7 @@ def run_native_self_check(
         "mode": mode_map[args.mode],
         "source_path": source_path,
         "node_id": node_id,
-        "output_path": game_output,
+        "output_path": native_generate_output,
         "render_png_path": str(native_bootstrap_path),
         "result_json_path": str(output_dir / "ue_native_generate_result.json"),
         "render_width": native_width,
@@ -1521,7 +1708,7 @@ def run_native_self_check(
         "mode": "asset",
         "source_path": native_generated_asset_path,
         "node_id": "",
-        "output_path": game_output,
+        "output_path": native_asset_output,
         "render_png_path": str(native_path),
         "result_json_path": str(output_dir / "ue_native_render_result.json"),
         "render_width": native_width,
@@ -1757,7 +1944,10 @@ def main():
     declared_design_size = get_declared_design_size(args.mode, args.source, args.node)
     reference_path, reference_context = prepare_reference(args, output_dir, expected_design_size)
     finalize_reference_context(args, reference_path, reference_context)
-    if args.mode == "pen":
+    # When an external reference PNG is already provided, structure validation will
+    # fall back to the generated local design snapshot if no live Pencil snapshot is
+    # present. Avoid a redundant MCP round-trip on that path.
+    if args.mode == "pen" and not args.reference:
         live_node_name = try_get_pen_node_name(args.source, args.node)
         live_source_structure = try_fetch_pencil_source_structure_snapshot(
             args.source,
@@ -1785,7 +1975,10 @@ def main():
 
     candidate_filename = "candidate.png" if reference_validation["valid"] else "candidate.native.png"
     candidate_path = output_dir / candidate_filename
-    game_output = args.game_output or f"/Game/Design2UMG/Automation/{output_dir.name}"
+    game_output_root = build_automation_asset_root(output_dir, args.game_output)
+    primary_game_output = build_automation_phase_output(game_output_root, "primary")
+    primary_asset_output = build_automation_phase_output(game_output_root, "primary-asset")
+    asset_only_output = build_automation_phase_output(game_output_root, "asset")
     mode_map = {
         "pen": "pen",
         "local-figma": "local_figma",
@@ -1799,7 +1992,7 @@ def main():
             "mode": mode_map[args.mode],
             "source_path": args.source,
             "node_id": args.node,
-            "output_path": game_output,
+            "output_path": asset_only_output,
             "render_png_path": str(candidate_path),
             "result_json_path": str(output_dir / "ue_render_result.json"),
             "render_width": render_width,
@@ -1824,7 +2017,7 @@ def main():
             "mode": mode_map[args.mode],
             "source_path": args.source,
             "node_id": args.node,
-            "output_path": game_output,
+            "output_path": primary_game_output,
             "render_png_path": str(bootstrap_candidate_path),
             "result_json_path": str(output_dir / "ue_generate_result.json"),
             "render_width": render_width,
@@ -1844,7 +2037,7 @@ def main():
             "mode": "asset",
             "source_path": generated_asset_path,
             "node_id": "",
-            "output_path": game_output,
+            "output_path": primary_asset_output,
             "render_png_path": str(candidate_path),
             "result_json_path": str(output_dir / "ue_render_result.json"),
             "render_width": render_width,
@@ -1877,7 +2070,7 @@ def main():
         args,
         output_dir,
         mode_map,
-        game_output,
+        game_output_root,
         expected_design_size,
         (render_width, render_height),
         args.source,
@@ -1900,6 +2093,7 @@ def main():
                 render_chain,
                 verdict="unverified_reference",
             )
+            finalize_single_run_history(output_dir, args, report_path)
             print(f"[UNVERIFIED_REFERENCE] report={report_path}")
             print(f"reference={reference_path}")
             print(f"candidate={candidate_path}")
@@ -1918,6 +2112,7 @@ def main():
             reference_context,
             render_chain,
         )
+        finalize_single_run_history(output_dir, args, report_path)
         print(f"[INVALID_REFERENCE] report={report_path}")
         print(f"reference={reference_path}")
         print(f"candidate={candidate_path}")
@@ -1934,6 +2129,7 @@ def main():
         reference_context,
         render_chain,
     )
+    finalize_single_run_history(output_dir, args, report_path)
 
     status = "PASS" if passed else "FAIL"
     print(f"[{status}] report={report_path}")

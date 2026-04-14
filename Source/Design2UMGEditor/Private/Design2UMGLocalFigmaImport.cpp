@@ -85,22 +85,22 @@ namespace
 			return false;
 		}
 
-		if (!Node->FigmaVectorRasterFallbackImageRef.IsEmpty())
+		if (!Node->Source.VectorRasterFallbackImageRef.IsEmpty())
 		{
 			return true;
 		}
 
-		if (Node->Geometry.IsEmpty())
+		if (Node->Shape.Geometry.IsEmpty())
 		{
 			return true;
 		}
 
-		if (Node->Fill.Type == EDesignFillType::Gradient || Node->Fill.Type == EDesignFillType::Image)
+		if (Node->Visual.Fill.Type == EDesignFillType::Gradient || Node->Visual.Fill.Type == EDesignFillType::Image)
 		{
 			return true;
 		}
 
-		for (const FDesignFill& Fill : Node->Fills)
+		for (const FDesignFill& Fill : Node->Visual.Fills)
 		{
 			if (!Fill.bEnabled)
 			{
@@ -179,7 +179,7 @@ namespace
 
 	int32 ResolveBlurKernelRadius(const TSharedPtr<FDesignNode>& Node, int32 SourceWidth, int32 SourceHeight, float BlurRadius)
 	{
-		const float NodeExtent = FMath::Max(1.0f, FMath::Max(Node.IsValid() ? Node->Width.Value : 0.0f, Node.IsValid() ? Node->Height.Value : 0.0f));
+		const float NodeExtent = FMath::Max(1.0f, FMath::Max(Node.IsValid() ? Node->Transform.Width.Value : 0.0f, Node.IsValid() ? Node->Transform.Height.Value : 0.0f));
 		const float SourceExtent = static_cast<float>(FMath::Max(SourceWidth, SourceHeight));
 		const float SourceScale = SourceExtent / NodeExtent;
 		return FMath::Clamp(FMath::RoundToInt(BlurRadius * SourceScale * 0.35f), 1, 24);
@@ -220,7 +220,7 @@ namespace
 			return false;
 		}
 
-		for (const FDesignEffect& Effect : Node->Effects)
+		for (const FDesignEffect& Effect : Node->Visual.Effects)
 		{
 			if (Effect.bEnabled && Effect.Type == EDesignEffectType::Blur && Effect.Radius > 0.0f)
 			{
@@ -239,7 +239,7 @@ namespace
 		}
 
 		bool bHasEnabledImageFill = false;
-		for (const FDesignFill& Fill : Node->Fills)
+		for (const FDesignFill& Fill : Node->Visual.Fills)
 		{
 			if (!Fill.bEnabled)
 			{
@@ -256,7 +256,7 @@ namespace
 
 		if (!bHasEnabledImageFill)
 		{
-			return Node->Fill.IsImage() && !Node->Fill.Image.Url.IsEmpty();
+			return Node->Visual.Fill.IsImage() && !Node->Visual.Fill.Image.Url.IsEmpty();
 		}
 
 		return true;
@@ -289,9 +289,9 @@ namespace
 
 				TArray<FPendingBake> PendingBakes;
 				bool bBakeSupported = true;
-				for (int32 FillIndex = 0; FillIndex < Node->Fills.Num(); ++FillIndex)
+				for (int32 FillIndex = 0; FillIndex < Node->Visual.Fills.Num(); ++FillIndex)
 				{
-					FDesignFill& Fill = Node->Fills[FillIndex];
+					FDesignFill& Fill = Node->Visual.Fills[FillIndex];
 					if (!Fill.bEnabled)
 					{
 						continue;
@@ -343,13 +343,13 @@ namespace
 					{
 						PendingBake.Fill->Image.Url = PendingBake.DerivedKey;
 					}
-					Node->Effects.RemoveAll([](const FDesignEffect& Effect)
+					Node->Visual.Effects.RemoveAll([](const FDesignEffect& Effect)
 					{
 						return Effect.Type == EDesignEffectType::Blur;
 					});
-					if (Node->Fills.Num() > 0)
+					if (Node->Visual.Fills.Num() > 0)
 					{
-						Node->Fill = Node->Fills.Last();
+						Node->Visual.Fill = Node->Visual.Fills.Last();
 					}
 					BakedCount += PendingBakes.Num();
 				}
@@ -378,13 +378,13 @@ namespace
 				(Node->Type == EDesignNodeType::Ellipse) ||
 				(Node->Type == EDesignNodeType::Polygon);
 
-			if (bIsVector && !Node->Fill.IsImage() && NeedsVectorRasterFallback(Node))
+			if (bIsVector && !Node->Visual.Fill.IsImage() && NeedsVectorRasterFallback(Node))
 			{
 				FString VecKey;
 				FString PngPath;
 				if (TryResolveVectorPngPath(Node->Id, ImagesDir, VecKey, PngPath))
 				{
-					if (ShouldSkipTinyVectorPng(PngPath, Node->Width.Value, Node->Height.Value))
+					if (ShouldSkipTinyVectorPng(PngPath, Node->Transform.Width.Value, Node->Transform.Height.Value))
 					{
 						continue;
 					}
@@ -393,9 +393,9 @@ namespace
 					ImgFill.Type = EDesignFillType::Image;
 					ImgFill.Image.Url = VecKey;
 					ImgFill.Image.Mode = EDesignImageMode::Fill;
-					Node->Fill = ImgFill;
-					Node->Fills.Empty();
-					Node->Fills.Add(ImgFill);
+					Node->Visual.Fill = ImgFill;
+					Node->Visual.Fills.Empty();
+					Node->Visual.Fills.Add(ImgFill);
 					if (!OutMapping.Contains(VecKey))
 					{
 						OutMapping.Add(VecKey, PngPath);
@@ -464,10 +464,10 @@ namespace
 			return;
 		}
 
-		Document.Children[0]->X = 0.0f;
-		Document.Children[0]->Y = 0.0f;
-		Document.Children[0]->bHasX = true;
-		Document.Children[0]->bHasY = true;
+		Document.Children[0]->Transform.X = 0.0f;
+		Document.Children[0]->Transform.Y = 0.0f;
+		Document.Children[0]->Transform.ExplicitX = 0.0f;
+		Document.Children[0]->Transform.ExplicitY = 0.0f;
 	}
 }
 

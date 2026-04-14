@@ -292,15 +292,15 @@ namespace
 				continue;
 			}
 
-			if (Node->Fill.IsImage() && !Node->Fill.Image.Url.IsEmpty())
+			if (Node->Visual.Fill.IsImage() && !Node->Visual.Fill.Image.Url.IsEmpty())
 			{
-				if (const FString* ResolvedPath = ImageKeyToPath.Find(Node->Fill.Image.Url))
+				if (const FString* ResolvedPath = ImageKeyToPath.Find(Node->Visual.Fill.Image.Url))
 				{
-					Node->Fill.Image.Url = *ResolvedPath;
+					Node->Visual.Fill.Image.Url = *ResolvedPath;
 				}
 			}
 
-			for (FDesignFill& Fill : Node->Fills)
+			for (FDesignFill& Fill : Node->Visual.Fills)
 			{
 				if (Fill.IsImage() && !Fill.Image.Url.IsEmpty())
 				{
@@ -334,8 +334,8 @@ namespace
 				}
 			};
 
-			TryAddImagePath(Node->Fill);
-			for (const FDesignFill& Fill : Node->Fills)
+			TryAddImagePath(Node->Visual.Fill);
+			for (const FDesignFill& Fill : Node->Visual.Fills)
 			{
 				TryAddImagePath(Fill);
 			}
@@ -523,16 +523,16 @@ int32 DesignImageBakeUtils::BakeMappedImageBlendOverlays(
 		}
 
 		bool bNodeChanged = false;
-		for (int32 FillIndex = 0; FillIndex < Node->Fills.Num(); ++FillIndex)
+		for (int32 FillIndex = 0; FillIndex < Node->Visual.Fills.Num(); ++FillIndex)
 		{
-			FDesignFill& Fill = Node->Fills[FillIndex];
+			FDesignFill& Fill = Node->Visual.Fills[FillIndex];
 			if (!ShouldBakeImageBlendOverlay(Fill))
 			{
 				continue;
 			}
 
 			FString BackdropColor;
-			if (!TryFindBackdropSolidColor(Node->Fills, FillIndex, BackdropColor))
+			if (!TryFindBackdropSolidColor(Node->Visual.Fills, FillIndex, BackdropColor))
 			{
 				continue;
 			}
@@ -598,9 +598,9 @@ int32 DesignImageBakeUtils::BakeMappedImageBlendOverlays(
 			++BakedCount;
 		}
 
-		if (bNodeChanged && Node->Fills.Num() > 0)
+		if (bNodeChanged && Node->Visual.Fills.Num() > 0)
 		{
-			Node->Fill = Node->Fills.Last();
+			Node->Visual.Fill = Node->Visual.Fills.Last();
 		}
 
 		for (const TSharedPtr<FDesignNode>& Child : Node->Children)

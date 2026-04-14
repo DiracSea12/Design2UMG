@@ -24,11 +24,11 @@ struct FDesign2UMGFigmaWidgetMetadataRecord
 	FString WidgetId;
 
 	UPROPERTY()
-	FUMGFigmaNodeData FigmaNode;
+	FUMGSourceNodeData SourceNode;
 
 	bool IsValid() const
 	{
-		return WidgetName != NAME_None && FigmaNode.HasAnyComponentSemantics();
+		return WidgetName != NAME_None && SourceNode.HasAnyComponentSemantics();
 	}
 };
 
@@ -40,10 +40,10 @@ class DESIGN2UMGEDITOR_API UDesign2UMGFigmaMetadataClassExtension
 
 public:
 	void SetMetadata(
-		const FUMGFigmaDocumentData& InDocumentData,
+		const FUMGSourceDocumentData& InDocumentData,
 		const TArray<FDesign2UMGFigmaWidgetMetadataRecord>& InWidgetRecords);
 
-	const FUMGFigmaDocumentData& GetDocumentData() const { return DocumentData; }
+	const FUMGSourceDocumentData& GetDocumentData() const { return DocumentData; }
 	const TArray<FDesign2UMGFigmaWidgetMetadataRecord>& GetWidgetRecords() const { return WidgetRecords; }
 
 	const FDesign2UMGFigmaWidgetMetadataRecord* FindRecordBySourceNodeId(const FString& SourceNodeId) const;
@@ -55,7 +55,7 @@ public:
 
 private:
 	UPROPERTY()
-	FUMGFigmaDocumentData DocumentData;
+	FUMGSourceDocumentData DocumentData;
 
 	UPROPERTY()
 	TArray<FDesign2UMGFigmaWidgetMetadataRecord> WidgetRecords;
@@ -69,7 +69,7 @@ class DESIGN2UMGEDITOR_API UDesign2UMGFigmaMetadataBlueprintExtension
 
 public:
 	void SetMetadata(
-		const FUMGFigmaDocumentData& InDocumentData,
+		const FUMGSourceDocumentData& InDocumentData,
 		const TArray<FDesign2UMGFigmaWidgetMetadataRecord>& InWidgetRecords);
 
 protected:
@@ -84,7 +84,7 @@ private:
 	FWidgetBlueprintCompilerContext* CompilerContext = nullptr;
 
 	UPROPERTY()
-	FUMGFigmaDocumentData DocumentData;
+	FUMGSourceDocumentData DocumentData;
 
 	UPROPERTY()
 	TArray<FDesign2UMGFigmaWidgetMetadataRecord> WidgetRecords;

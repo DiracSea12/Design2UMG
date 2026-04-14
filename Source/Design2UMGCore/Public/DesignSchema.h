@@ -7,7 +7,7 @@
 #include "DesignSchema.generated.h"
 
 /**
- * .pen 节点类型枚举
+ * Supported design node types parsed from source documents.
  */
 UENUM()
 enum class EDesignNodeType : uint8
@@ -30,7 +30,7 @@ enum class EDesignNodeType : uint8
 };
 
 /**
- * 尺寸模式枚举
+ * Size mode for layout sizing semantics.
  */
 UENUM()
 enum class EDesignSizeMode : uint8
@@ -41,7 +41,8 @@ enum class EDesignSizeMode : uint8
 };
 
 /**
- * 尺寸值结构 */
+ * Size value with mode-aware helpers.
+ */
 USTRUCT()
 struct FDesignSize
 {
@@ -63,20 +64,20 @@ struct FDesignSize
 };
 
 /**
- * 布局模式枚举
+ * Layout mode used by the shared design IR.
  */
 UENUM()
 enum class EDesignLayout : uint8
 {
-	None,       // 绝对定位
-	Vertical,   // 垂直布局
-	Horizontal, // 水平布局
-	Wrap,       // 换行自动布局
-	Grid        // 网格布局
+	None,       // Absolute positioning
+	Vertical,   // Vertical auto layout
+	Horizontal, // Horizontal auto layout
+	Wrap,       // Wrapping auto layout
+	Grid        // Grid layout
 };
 
 /**
- * 主轴对齐枚举
+ * Main-axis alignment options.
  */
 UENUM()
 enum class EDesignJustifyContent : uint8
@@ -89,7 +90,8 @@ enum class EDesignJustifyContent : uint8
 };
 
 /**
- * 交叉轴对齐枚举 */
+ * Cross-axis alignment options.
+ */
 UENUM()
 enum class EDesignAlignItems : uint8
 {
@@ -99,7 +101,7 @@ enum class EDesignAlignItems : uint8
 };
 
 /**
- * 渐变类型枚举
+ * Gradient type enumeration.
  */
 UENUM()
 enum class EDesignGradientType : uint8
@@ -110,7 +112,7 @@ enum class EDesignGradientType : uint8
 };
 
 /**
- * 渐变色标
+ * Gradient color stop.
  */
 USTRUCT()
 struct FDesignGradientStop
@@ -120,7 +122,7 @@ struct FDesignGradientStop
 	UPROPERTY()
 	FString Color;
 
-	/** 原始变量引用名，用于主题切换时重新解析*/
+	/** Original variable reference name, resolved again during theme switching. */
 	FString SourceVar;
 
 	UPROPERTY()
@@ -128,7 +130,7 @@ struct FDesignGradientStop
 };
 
 /**
- * 渐变填充
+ * Gradient fill payload.
  */
 USTRUCT()
 struct FDesignGradient
@@ -229,7 +231,7 @@ struct FDesignMeshGradient
 };
 
 /**
- * 图片填充模式
+ * Image fill mode.
  */
 UENUM()
 enum class EDesignImageMode : uint8
@@ -241,8 +243,10 @@ enum class EDesignImageMode : uint8
 };
 
 /**
- * 图片裁剪变换x3 仿射矩阵） * Source imageTransform: [[a, b, tx], [c, d, ty]]
- * 将图UV 空间 [0,1]x[0,1] 映射到节点空间 */
+ * 2x3 affine transform for image cropping.
+ * Source imageTransform: [[a, b, tx], [c, d, ty]]
+ * Maps source UV space [0,1]x[0,1] into node space.
+ */
 USTRUCT()
 struct FDesignImageTransform
 {
@@ -269,7 +273,7 @@ struct FDesignImageTransform
 };
 
 /**
- * 图片填充
+ * Image fill payload.
  */
 USTRUCT()
 struct FDesignImageFill
@@ -296,7 +300,7 @@ struct FDesignImageFill
 };
 
 /**
- * 填充类型枚举
+ * Fill type enumeration.
  */
 UENUM()
 enum class EDesignFillType : uint8
@@ -308,7 +312,7 @@ enum class EDesignFillType : uint8
 };
 
 /**
- * 填充结构（支持纯色、渐变、图片）
+ * Fill payload supporting solid colors, gradients, and images.
  */
 USTRUCT()
 struct FDesignFill
@@ -321,7 +325,7 @@ struct FDesignFill
 	UPROPERTY()
 	FString SolidColor;
 
-	/** 原始变量引用名（如"$--background"），用于主题切换时重新解析*/
+	/** Original variable reference name (for example "$--background"), resolved again during theme switching. */
 	FString SourceVar;
 
 	UPROPERTY()
@@ -339,7 +343,7 @@ struct FDesignFill
 	float Opacity = 1.0f;
 	UPROPERTY()
 	FString BlendMode;
-	bool bExplicitClear = false;  // fill:[] 显式清除
+	bool bExplicitClear = false;  // Explicit clear via fill:[]
 	bool bFromMeshGradient = false;
 	FString MeshGradientRaw;
 
@@ -358,7 +362,7 @@ struct FDesignFill
 };
 
 /**
- * 描边对齐枚举
+ * Stroke alignment enumeration.
  */
 UENUM()
 enum class EDesignStrokeAlign : uint8
@@ -369,7 +373,8 @@ enum class EDesignStrokeAlign : uint8
 };
 
 /**
- * 描边厚度（支持单值或四边） */
+ * Stroke thickness supporting either a uniform value or per-edge values.
+ */
 USTRUCT()
 struct FDesignStrokeThickness
 {
@@ -397,7 +402,7 @@ struct FDesignStrokeThickness
 };
 
 /**
- * 描边结构
+ * Stroke payload.
  */
 USTRUCT()
 struct FDesignStroke
@@ -420,7 +425,8 @@ struct FDesignStroke
 };
 
 /**
- * 内边距结构 */
+ * Padding payload.
+ */
 USTRUCT()
 struct FDesignPadding
 {
@@ -443,7 +449,8 @@ struct FDesignPadding
 };
 
 /**
- * 圆角结构（支持单值或四角） */
+ * Corner-radius payload supporting either a uniform value or per-corner values.
+ */
 USTRUCT()
 struct FDesignCornerRadius
 {
@@ -455,7 +462,7 @@ struct FDesignCornerRadius
 	UPROPERTY()
 	float Uniform = 0.0f;
 
-	// [左上, 右上, 右下, 左下]
+	// [top-left, top-right, bottom-right, bottom-left]
 	UPROPERTY()
 	float TopLeft = 0.0f;
 
@@ -483,7 +490,7 @@ struct FDesignCornerRadius
 };
 
 /**
- * 文本增长模式
+ * Text growth mode.
  */
 UENUM()
 enum class EDesignTextGrowth : uint8
@@ -494,7 +501,7 @@ enum class EDesignTextGrowth : uint8
 };
 
 /**
- * 文本水平对齐
+ * Horizontal text alignment.
  */
 UENUM()
 enum class EDesignTextAlign : uint8
@@ -506,7 +513,7 @@ enum class EDesignTextAlign : uint8
 };
 
 /**
- * 文本垂直对齐
+ * Vertical text alignment.
  */
 UENUM()
 enum class EDesignTextAlignVertical : uint8
@@ -571,7 +578,7 @@ struct FDesignTextRun
 };
 
 /**
- * 变量类型枚举
+ * Variable type enumeration.
  */
 UENUM()
 enum class EDesignVariableType : uint8
@@ -583,7 +590,7 @@ enum class EDesignVariableType : uint8
 };
 
 /**
- * 主题值条目（变量在某个主题下的值）
+ * Theme-specific variable value entry.
  */
 USTRUCT()
 struct FDesignThemeValue
@@ -674,42 +681,127 @@ struct FDesignEffect
 	FDesignShadow Shadow;
 };
 
+/**
+ * Source-specific layout metadata that stays attached to parser-owned node state.
+ * Non-UPROPERTY `bHas*` fields are intentional transient presence markers and are
+ * not meant to participate in reflected serialization.
+ */
 USTRUCT()
-struct FDesignFigmaLayoutExtensions
+struct FDesignLayoutExtensions
 {
 	GENERATED_BODY()
 
-	UPROPERTY() FString LayoutWrap;
-	UPROPERTY() FString CounterAxisAlignContent;
-	UPROPERTY() FString LayoutPositioning;
-	UPROPERTY() FString LayoutAlign;
-	UPROPERTY() FString PrimaryAxisSizingMode;
-	UPROPERTY() FString CounterAxisSizingMode;
-	UPROPERTY() FString GridRowsSizing;
-	UPROPERTY() FString GridColumnsSizing;
-	UPROPERTY() FString GridChildHorizontalAlign;
-	UPROPERTY() FString GridChildVerticalAlign;
-	UPROPERTY() FString BoundVariablesJson;
+	UPROPERTY()
+	FString LayoutWrap;
 
-	UPROPERTY() float CounterAxisSpacing = 0.0f; bool bHasCounterAxisSpacing = false;
-	UPROPERTY() float MinWidth = 0.0f; bool bHasMinWidth = false;
-	UPROPERTY() float MaxWidth = 0.0f; bool bHasMaxWidth = false;
-	UPROPERTY() float MinHeight = 0.0f; bool bHasMinHeight = false;
-	UPROPERTY() float MaxHeight = 0.0f; bool bHasMaxHeight = false;
-	UPROPERTY() int32 GridRowCount = 0; bool bHasGridRowCount = false;
-	UPROPERTY() int32 GridColumnCount = 0; bool bHasGridColumnCount = false;
-	UPROPERTY() float GridRowGap = 0.0f; bool bHasGridRowGap = false;
-	UPROPERTY() float GridColumnGap = 0.0f; bool bHasGridColumnGap = false;
-	UPROPERTY() int32 GridRowSpan = 0; bool bHasGridRowSpan = false;
-	UPROPERTY() int32 GridColumnSpan = 0; bool bHasGridColumnSpan = false;
-	UPROPERTY() int32 GridColumnAnchorIndex = 0; bool bHasGridColumnAnchorIndex = false;
-	UPROPERTY() int32 GridRowAnchorIndex = 0; bool bHasGridRowAnchorIndex = false;
-	UPROPERTY() bool bItemReverseZIndex = false; bool bHasItemReverseZIndex = false;
-	UPROPERTY() bool bStrokesIncludedInLayout = false; bool bHasStrokesIncludedInLayout = false;
+	UPROPERTY()
+	FString CounterAxisAlignContent;
+
+	UPROPERTY()
+	FString LayoutPositioning;
+
+	UPROPERTY()
+	FString LayoutAlign;
+
+	UPROPERTY()
+	FString PrimaryAxisSizingMode;
+
+	UPROPERTY()
+	FString CounterAxisSizingMode;
+
+	UPROPERTY()
+	FString GridRowsSizing;
+
+	UPROPERTY()
+	FString GridColumnsSizing;
+
+	UPROPERTY()
+	FString GridChildHorizontalAlign;
+
+	UPROPERTY()
+	FString GridChildVerticalAlign;
+
+	UPROPERTY()
+	FString BoundVariablesJson;
+
+	UPROPERTY()
+	float CounterAxisSpacing = 0.0f;
+
+	bool bHasCounterAxisSpacing = false;
+
+	UPROPERTY()
+	float MinWidth = 0.0f;
+
+	bool bHasMinWidth = false;
+
+	UPROPERTY()
+	float MaxWidth = 0.0f;
+
+	bool bHasMaxWidth = false;
+
+	UPROPERTY()
+	float MinHeight = 0.0f;
+
+	bool bHasMinHeight = false;
+
+	UPROPERTY()
+	float MaxHeight = 0.0f;
+
+	bool bHasMaxHeight = false;
+
+	UPROPERTY()
+	int32 GridRowCount = 0;
+
+	bool bHasGridRowCount = false;
+
+	UPROPERTY()
+	int32 GridColumnCount = 0;
+
+	bool bHasGridColumnCount = false;
+
+	UPROPERTY()
+	float GridRowGap = 0.0f;
+
+	bool bHasGridRowGap = false;
+
+	UPROPERTY()
+	float GridColumnGap = 0.0f;
+
+	bool bHasGridColumnGap = false;
+
+	UPROPERTY()
+	int32 GridRowSpan = 0;
+
+	bool bHasGridRowSpan = false;
+
+	UPROPERTY()
+	int32 GridColumnSpan = 0;
+
+	bool bHasGridColumnSpan = false;
+
+	UPROPERTY()
+	int32 GridColumnAnchorIndex = 0;
+
+	bool bHasGridColumnAnchorIndex = false;
+
+	UPROPERTY()
+	int32 GridRowAnchorIndex = 0;
+
+	bool bHasGridRowAnchorIndex = false;
+
+	UPROPERTY()
+	bool bItemReverseZIndex = false;
+
+	bool bHasItemReverseZIndex = false;
+
+	UPROPERTY()
+	bool bStrokesIncludedInLayout = false;
+
+	bool bHasStrokesIncludedInLayout = false;
 };
 
 USTRUCT()
-struct FDesignFigmaInstanceData
+struct FDesignComponentInstanceData
 {
 	GENERATED_BODY()
 
@@ -721,20 +813,28 @@ struct FDesignFigmaInstanceData
 	UPROPERTY() FString ComponentPropertiesJson;
 	UPROPERTY() FString VariantPropertiesJson;
 	UPROPERTY() FString OverridesJson;
-	UPROPERTY() bool bIsExposedInstance = false; bool bHasIsExposedInstance = false;
+	UPROPERTY()
+	bool bIsExposedInstance = false;
+
+	bool bHasIsExposedInstance = false;
 };
 
+/**
+ * Prototype transition payload parsed from source design tools.
+ */
 USTRUCT()
-struct FDesignFigmaPrototypeTransitionData
+struct FDesignPrototypeTransitionData
 {
 	GENERATED_BODY()
 
 	UPROPERTY() FString Type;
 	UPROPERTY() FString Direction;
-	UPROPERTY() float Duration = 0.0f; bool bHasDuration = false;
+	UPROPERTY() float Duration = 0.0f;
+	bool bHasDuration = false;
 	UPROPERTY() FString EasingType;
 	UPROPERTY() FString EasingJson;
-	UPROPERTY() bool bMatchLayers = false; bool bHasMatchLayers = false;
+	UPROPERTY() bool bMatchLayers = false;
+	bool bHasMatchLayers = false;
 
 	bool HasAny() const
 	{
@@ -748,7 +848,7 @@ struct FDesignFigmaPrototypeTransitionData
 };
 
 USTRUCT()
-struct FDesignFigmaPrototypeAction
+struct FDesignPrototypeAction
 {
 	GENERATED_BODY()
 
@@ -758,22 +858,22 @@ struct FDesignFigmaPrototypeAction
 	UPROPERTY() FString TransitionNodeId;
 	UPROPERTY() FString TransitionJson;
 	UPROPERTY() FString RawJson;
-	UPROPERTY() FDesignFigmaPrototypeTransitionData Transition;
+	UPROPERTY() FDesignPrototypeTransitionData Transition;
 };
 
 USTRUCT()
-struct FDesignFigmaPrototypeInteraction
+struct FDesignPrototypeInteraction
 {
 	GENERATED_BODY()
 
 	UPROPERTY() FString TriggerType;
 	UPROPERTY() FString TriggerJson;
 	UPROPERTY() FString RawJson;
-	UPROPERTY() TArray<FDesignFigmaPrototypeAction> Actions;
+	UPROPERTY() TArray<FDesignPrototypeAction> Actions;
 };
 
 USTRUCT()
-struct FDesignFigmaFlowStartingPoint
+struct FDesignFlowStartingPoint
 {
 	GENERATED_BODY()
 
@@ -782,19 +882,19 @@ struct FDesignFigmaFlowStartingPoint
 };
 
 USTRUCT()
-struct FDesignFigmaPrototypeNodeData
+struct FDesignPrototypeNodeData
 {
 	GENERATED_BODY()
 
 	UPROPERTY() FString OverflowDirection;
 	UPROPERTY() FString TransitionNodeId;
-	UPROPERTY() FDesignFigmaPrototypeTransitionData Transition;
-	UPROPERTY() TArray<FDesignFigmaPrototypeInteraction> Interactions;
-	UPROPERTY() TArray<FDesignFigmaFlowStartingPoint> FlowStartingPoints;
+	UPROPERTY() FDesignPrototypeTransitionData Transition;
+	UPROPERTY() TArray<FDesignPrototypeInteraction> Interactions;
+	UPROPERTY() TArray<FDesignFlowStartingPoint> FlowStartingPoints;
 };
 
 USTRUCT()
-struct FDesignFigmaDocumentData
+struct FDesignSourceDocumentData
 {
 	GENERATED_BODY()
 
@@ -802,11 +902,11 @@ struct FDesignFigmaDocumentData
 	UPROPERTY() FString ComponentSetsJson;
 	UPROPERTY() FString PrototypeStartNodeId;
 	UPROPERTY() FString PrototypeDeviceJson;
-	UPROPERTY() TArray<FDesignFigmaFlowStartingPoint> FlowStartingPoints;
+	UPROPERTY() TArray<FDesignFlowStartingPoint> FlowStartingPoints;
 };
 
 USTRUCT()
-struct FDesignFigmaRenderFallbackData
+struct FDesignRenderFallbackData
 {
 	GENERATED_BODY()
 
@@ -833,7 +933,7 @@ struct FDesignFigmaRenderFallbackData
 };
 
 USTRUCT()
-struct FDesignFigmaSkippedNodeReport
+struct FDesignSkippedNodeReport
 {
 	GENERATED_BODY()
 
@@ -844,50 +944,69 @@ struct FDesignFigmaSkippedNodeReport
 };
 
 USTRUCT()
-struct FDesignFigmaParseDiagnostics
+struct FDesignParseDiagnostics
 {
 	GENERATED_BODY()
 
-	UPROPERTY() TArray<FDesignFigmaSkippedNodeReport> SkippedDesignerNodes;
+	UPROPERTY() TArray<FDesignSkippedNodeReport> SkippedDesignerNodes;
 };
 
-struct FDesignNode
+/**
+ * Source-only metadata carried alongside the shared design node.
+ */
+struct FDesignSourceNodeData
 {
-	FString Id;
-	FString Name;
-	EDesignNodeType Type = EDesignNodeType::Unknown;
-	TMap<FString, FString> Theme;
+	FDesignLayoutExtensions LayoutExtensions;
+	FDesignComponentInstanceData ComponentInstance;
+	FDesignPrototypeNodeData Prototype;
+	FString SourceNodeType;
+	bool bExpandedRefInstance = false;
+	FString VectorRasterFallbackImageRef;
+	FDesignRenderFallbackData RenderFallback;
+};
 
-	float X = 0.0f;
-	float Y = 0.0f;
-	bool bHasX = false;
-	bool bHasY = false;
-	FDesignSize Width;
-	FDesignSize Height;
-	bool bHasWidth = false;
-	bool bHasHeight = false;
-	float Rotation = 0.0f;
+/**
+ * Typed text payload for a design node, independent from source format.
+ */
+struct FDesignTextNodeData
+{
+	FString Content;
+	FString FontFamily;
+	float FontSize = 16.0f;
+	FString FontWeight = TEXT("normal");
+	FString FontStyle = TEXT("normal");
+	float LineHeight = 0.0f;
+	float LetterSpacing = 0.0f;
+	EDesignTextAlign TextAlign = EDesignTextAlign::Left;
+	EDesignTextAlignVertical TextAlignVertical = EDesignTextAlignVertical::Top;
+	EDesignTextGrowth TextGrowth = EDesignTextGrowth::Auto;
+	bool bUnderline = false;
+	bool bStrikethrough = false;
+	FString Href;
+	TArray<FDesignTextRun> TextRuns;
+	FString IconFontName;
+	FString IconFontFamily;
+	int32 IconWeight = 400;
+};
 
-	bool bEnabled = true;
-	float Opacity = 1.0f;
-	bool bHasOpacity = false;
-	bool bFlipX = false;
-	bool bFlipY = false;
-
+/**
+ * Shared layout semantics consumed by the converter and layout mapper.
+ */
+struct FDesignLayoutNodeData
+{
 	EDesignLayout Layout = EDesignLayout::Horizontal;
 	float Gap = 0.0f;
-	bool bHasGap = false;
+	TOptional<float> ExplicitGap;
 	FDesignPadding Padding;
-	bool bHasPadding = false;
+	TOptional<FDesignPadding> ExplicitPadding;
 	bool bHasPaddingRuntimeWrapDecision = false;
 	bool bPaddingRequiresRuntimeWrap = false;
 	EDesignJustifyContent JustifyContent = EDesignJustifyContent::Start;
 	EDesignAlignItems AlignItems = EDesignAlignItems::Start;
 	bool bAbsoluteLayoutPositioning = false;
 	bool bClip = false;
-	bool bHasClip = false;
+	TOptional<bool> ExplicitClip;
 	bool bSemanticPlaceholderSurface = false;
-	TMap<FString, FString> Metadata;
 	float LayoutGrow = -1.0f;
 	int32 LayoutRow = 0;
 	int32 LayoutColumn = 0;
@@ -909,47 +1028,176 @@ struct FDesignNode
 	bool bHasLayoutColumnGap = false;
 	bool bHasLayoutChildHorizontalAlign = false;
 	bool bHasLayoutChildVerticalAlign = false;
-	FDesignFigmaLayoutExtensions FigmaLayout;
-	FDesignFigmaInstanceData FigmaInstance;
-	FDesignFigmaPrototypeNodeData FigmaPrototype;
-	FString FigmaSourceNodeType;
-	FString FigmaVectorRasterFallbackImageRef;
-	FDesignFigmaRenderFallbackData FigmaRenderFallback;
 
+	void SetGap(const float InGap)
+	{
+		Gap = InGap;
+		ExplicitGap = InGap;
+	}
+
+	void SetPadding(const FDesignPadding& InPadding)
+	{
+		Padding = InPadding;
+		ExplicitPadding = InPadding;
+	}
+
+	void SetClipValue(const bool bInClip)
+	{
+		bClip = bInClip;
+		ExplicitClip = bInClip;
+	}
+
+	bool HasExplicitGap() const
+	{
+		return ExplicitGap.IsSet();
+	}
+
+	bool HasExplicitPadding() const
+	{
+		return ExplicitPadding.IsSet();
+	}
+
+	bool HasExplicitClip() const
+	{
+		return ExplicitClip.IsSet();
+	}
+
+	bool HasExplicitGridPosition() const
+	{
+		return bHasLayoutRow || bHasLayoutColumn;
+	}
+};
+
+/**
+ * Shared visual payload for fills, strokes, corners, and effects.
+ */
+struct FDesignVisualNodeData
+{
 	FDesignFill Fill;
 	TArray<FDesignFill> Fills;
 	FDesignStroke Stroke;
 	FDesignCornerRadius CornerRadius;
 	TArray<FDesignEffect> Effects;
 	bool bEffectsExplicitClear = false;
+};
 
-	FString Content;
-	FString FontFamily;
-	float FontSize = 16.0f;
-	FString FontWeight = TEXT("normal");
-	FString FontStyle = TEXT("normal");
-	float LineHeight = 0.0f;
-	float LetterSpacing = 0.0f;
-	EDesignTextAlign TextAlign = EDesignTextAlign::Left;
-	EDesignTextAlignVertical TextAlignVertical = EDesignTextAlignVertical::Top;
-	EDesignTextGrowth TextGrowth = EDesignTextGrowth::Auto;
-	bool bUnderline = false;
-	bool bStrikethrough = false;
-	FString Href;
-	TArray<FDesignTextRun> TextRuns;
-
-	FString IconFontName;
-	FString IconFontFamily;
-	int32 IconWeight = 400;
-
+struct FDesignShapeNodeData
+{
 	float InnerRadius = 0.0f;
 	float StartAngle = 0.0f;
 	float SweepAngle = 360.0f;
-
 	int32 PolygonCount = 6;
-
 	FString Geometry;
 	FString FillRule = TEXT("nonzero");
+};
+
+/**
+ * Shared transform and sizing payload for design-space positioning.
+ */
+struct FDesignTransformNodeData
+{
+	float X = 0.0f;
+	float Y = 0.0f;
+	TOptional<float> ExplicitX;
+	TOptional<float> ExplicitY;
+	FDesignSize Width;
+	FDesignSize Height;
+	bool bHasWidth = false;
+	bool bHasHeight = false;
+	bool bSourceHasWidth = false;
+	bool bSourceHasHeight = false;
+	float Rotation = 0.0f;
+	bool bEnabled = true;
+	float Opacity = 1.0f;
+	TOptional<float> ExplicitOpacity;
+	bool bFlipX = false;
+	bool bFlipY = false;
+
+	void SetPosition(const float InX, const float InY)
+	{
+		X = InX;
+		Y = InY;
+		ExplicitX = InX;
+		ExplicitY = InY;
+	}
+
+	void ClearPosition()
+	{
+		X = 0.0f;
+		Y = 0.0f;
+		ExplicitX.Reset();
+		ExplicitY.Reset();
+	}
+
+	void SetWidthValue(const FDesignSize& InWidth)
+	{
+		Width = InWidth;
+		bHasWidth = true;
+		bSourceHasWidth = true;
+	}
+
+	void SetHeightValue(const FDesignSize& InHeight)
+	{
+		Height = InHeight;
+		bHasHeight = true;
+		bSourceHasHeight = true;
+	}
+
+	void SetOpacityValue(const float InOpacity)
+	{
+		Opacity = InOpacity;
+		ExplicitOpacity = InOpacity;
+	}
+
+	bool HasExplicitX() const
+	{
+		return ExplicitX.IsSet();
+	}
+
+	bool HasExplicitY() const
+	{
+		return ExplicitY.IsSet();
+	}
+
+	bool HasExplicitOpacity() const
+	{
+		return ExplicitOpacity.IsSet();
+	}
+
+	bool HasExplicitPosition() const
+	{
+		return HasExplicitX() || HasExplicitY();
+	}
+
+	bool HasExplicitSize() const
+	{
+		return bHasWidth || bHasHeight;
+	}
+
+	bool HasSourceExplicitSize() const
+	{
+		return bSourceHasWidth || bSourceHasHeight;
+	}
+};
+
+/**
+ * Shared source-agnostic design IR node used by the whole conversion pipeline.
+ * This intentionally remains a plain C++ struct instead of a reflected USTRUCT so
+ * the transient IR stays lightweight and independent from editor-facing reflection.
+ */
+struct FDesignNode
+{
+	FString Id;
+	FString Name;
+	EDesignNodeType Type = EDesignNodeType::Unknown;
+	TMap<FString, FString> Theme;
+	FDesignTransformNodeData Transform;
+	TMap<FString, FString> Metadata;
+	FDesignLayoutNodeData LayoutData;
+	FDesignSourceNodeData Source;
+	FDesignVisualNodeData Visual;
+	FDesignTextNodeData Text;
+	FDesignShapeNodeData Shape;
 
 	FString Ref;
 	bool bReusable = false;
@@ -963,17 +1211,17 @@ struct FDesignNode
 
 	bool HasVisualProperties() const
 	{
-		return !Fill.IsNone() || Fills.Num() > 0 || Stroke.HasStroke() || CornerRadius.HasRadius();
+		return !Visual.Fill.IsNone() || Visual.Fills.Num() > 0 || Visual.Stroke.HasStroke() || Visual.CornerRadius.HasRadius();
 	}
 
 	bool HasMultiFill() const
 	{
-		return Fills.Num() > 1;
+		return Visual.Fills.Num() > 1;
 	}
 
 	bool IsCollapsed() const
 	{
-		return !bEnabled;
+		return !Transform.bEnabled;
 	}
 };
 
@@ -989,6 +1237,10 @@ struct FDesignFont
 	FString Url;
 };
 
+/**
+ * Root parsed document for a source design export.
+ * This is also intentionally non-reflected for the same lightweight transient-IR reasons.
+ */
 struct FDesignDocument
 {
 	FString Version;
@@ -996,8 +1248,8 @@ struct FDesignDocument
 	TMap<FString, TArray<FString>> Themes;
 	TMap<FString, FDesignVariable> Variables;
 	TMap<FString, FString> Metadata;
-	FDesignFigmaDocumentData FigmaDocument;
-	FDesignFigmaParseDiagnostics FigmaDiagnostics;
+	FDesignSourceDocumentData SourceDocument;
+	FDesignParseDiagnostics ParseDiagnostics;
 	TArray<TSharedPtr<FDesignNode>> Children;
 
 	TSharedPtr<FDesignNode> FindReusableNode(const FString& Id) const

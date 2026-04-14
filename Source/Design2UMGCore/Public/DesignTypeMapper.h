@@ -6,21 +6,21 @@
 #include "DesignSchema.h"
 
 /**
- * .pen 属性到 UMG 属性的映射
+ * Mapping helpers from design-side semantics to UMG-side types and enums.
  */
 class DESIGN2UMGCORE_API FDesignTypeMapper
 {
 public:
-	/** 节点类型到Widget 类型 */
+	/** Map a design node type to the target UMG widget type. */
 	static FString MapNodeTypeToWidget(EDesignNodeType Type, EDesignLayout Layout);
 
 	/** fontWeight TypefaceFontName */
 	static FName MapFontWeight(const FString& Weight);
 
-	/** alignItems HAlign (Vertical布局) */
+	/** Map alignItems to horizontal alignment for vertical layouts. */
 	static EHorizontalAlignment MapAlignItemsH(EDesignAlignItems Align);
 
-	/** alignItems VAlign (Horizontal布局) */
+	/** Map alignItems to vertical alignment for horizontal layouts. */
 	static EVerticalAlignment MapAlignItemsV(EDesignAlignItems Align);
 };
 

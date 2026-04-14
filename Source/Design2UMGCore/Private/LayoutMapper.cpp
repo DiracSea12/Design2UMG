@@ -14,10 +14,10 @@ namespace
 
 		if (Node->Type == EDesignNodeType::Text)
 		{
-			return Node->TextGrowth == EDesignTextGrowth::FixedWidth
-				|| Node->TextGrowth == EDesignTextGrowth::FixedWidthHeight
-				|| Node->TextAlign == EDesignTextAlign::Justify
-				|| Node->Content.Contains(TEXT("\n"));
+			return Node->Text.TextGrowth == EDesignTextGrowth::FixedWidth
+				|| Node->Text.TextGrowth == EDesignTextGrowth::FixedWidthHeight
+				|| Node->Text.TextAlign == EDesignTextAlign::Justify
+				|| Node->Text.Content.Contains(TEXT("\n"));
 		}
 
 		for (const TSharedPtr<FDesignNode>& Child : Node->Children)
@@ -54,7 +54,7 @@ namespace
 
 		return ParentLayout != EDesignLayout::None
 			&& Node->Type == EDesignNodeType::Text
-			&& (Node->TextAlign == EDesignTextAlign::Center || Node->TextAlign == EDesignTextAlign::Right);
+			&& (Node->Text.TextAlign == EDesignTextAlign::Center || Node->Text.TextAlign == EDesignTextAlign::Right);
 	}
 }
 
@@ -62,26 +62,26 @@ void FLayoutMapper::ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr
 {
 	if (ParentLayout == EDesignLayout::Vertical)
 	{
-		Widget.Slot.HorizontalAlignment = Node->Width.Mode == EDesignSizeMode::FillContainer ? TEXT("Fill") : TEXT("Left");
-		Widget.Slot.SizeRule = Node->Height.Mode == EDesignSizeMode::FillContainer ? TEXT("Fill") : TEXT("Auto");
-		if (Widget.Slot.SizeRule == TEXT("Fill") && Node->LayoutGrow >= 0.0f)
+		Widget.Slot.HorizontalAlignment = Node->Transform.Width.Mode == EDesignSizeMode::FillContainer ? TEXT("Fill") : TEXT("Left");
+		Widget.Slot.SizeRule = Node->Transform.Height.Mode == EDesignSizeMode::FillContainer ? TEXT("Fill") : TEXT("Auto");
+		if (Widget.Slot.SizeRule == TEXT("Fill") && Node->LayoutData.LayoutGrow >= 0.0f)
 		{
-			if (FMath::IsNearlyZero(Node->LayoutGrow))
+			if (FMath::IsNearlyZero(Node->LayoutData.LayoutGrow))
 				Widget.Slot.SizeRule = TEXT("Auto");
 			else
-				Widget.Slot.FillWeight = Node->LayoutGrow;
+				Widget.Slot.FillWeight = Node->LayoutData.LayoutGrow;
 		}
 	}
 	else if (ParentLayout == EDesignLayout::Horizontal)
 	{
-		Widget.Slot.VerticalAlignment = Node->Height.Mode == EDesignSizeMode::FillContainer ? TEXT("Fill") : TEXT("Top");
-		Widget.Slot.SizeRule = Node->Width.Mode == EDesignSizeMode::FillContainer ? TEXT("Fill") : TEXT("Auto");
-		if (Widget.Slot.SizeRule == TEXT("Fill") && Node->LayoutGrow >= 0.0f)
+		Widget.Slot.VerticalAlignment = Node->Transform.Height.Mode == EDesignSizeMode::FillContainer ? TEXT("Fill") : TEXT("Top");
+		Widget.Slot.SizeRule = Node->Transform.Width.Mode == EDesignSizeMode::FillContainer ? TEXT("Fill") : TEXT("Auto");
+		if (Widget.Slot.SizeRule == TEXT("Fill") && Node->LayoutData.LayoutGrow >= 0.0f)
 		{
-			if (FMath::IsNearlyZero(Node->LayoutGrow))
+			if (FMath::IsNearlyZero(Node->LayoutData.LayoutGrow))
 				Widget.Slot.SizeRule = TEXT("Auto");
 			else
-				Widget.Slot.FillWeight = Node->LayoutGrow;
+				Widget.Slot.FillWeight = Node->LayoutData.LayoutGrow;
 		}
 	}
 	else if (ParentLayout == EDesignLayout::Wrap || ParentLayout == EDesignLayout::Grid)
@@ -91,10 +91,10 @@ void FLayoutMapper::ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr
 	}
 	else
 	{
-		const bool bFillWidth = Node->Width.Mode == EDesignSizeMode::FillContainer;
-		const bool bFillHeight = Node->Height.Mode == EDesignSizeMode::FillContainer;
-		const bool bFillWidthHasFallback = bFillWidth && Node->Width.Value > 0.0f;
-		const bool bFillHeightHasFallback = bFillHeight && Node->Height.Value > 0.0f;
+		const bool bFillWidth = Node->Transform.Width.Mode == EDesignSizeMode::FillContainer;
+		const bool bFillHeight = Node->Transform.Height.Mode == EDesignSizeMode::FillContainer;
+		const bool bFillWidthHasFallback = bFillWidth && Node->Transform.Width.Value > 0.0f;
+		const bool bFillHeightHasFallback = bFillHeight && Node->Transform.Height.Value > 0.0f;
 		const bool bStretchWidth = bFillWidth && !bFillWidthHasFallback;
 		const bool bStretchHeight = bFillHeight && !bFillHeightHasFallback;
 
@@ -106,24 +106,24 @@ void FLayoutMapper::ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr
 			Widget.Slot.Anchors.Max.Y = bStretchHeight ? 1.0f : 0.0f;
 			Widget.Slot.Alignment.X = 0.0f;
 			Widget.Slot.Alignment.Y = 0.0f;
-			Widget.Slot.Offsets.Left = Node->X;
-			Widget.Slot.Offsets.Top = Node->Y;
-			Widget.Slot.Offsets.Right = bStretchWidth ? 0.0f : Node->Width.Value;
-			Widget.Slot.Offsets.Bottom = bStretchHeight ? 0.0f : Node->Height.Value;
+			Widget.Slot.Offsets.Left = Node->Transform.X;
+			Widget.Slot.Offsets.Top = Node->Transform.Y;
+			Widget.Slot.Offsets.Right = bStretchWidth ? 0.0f : Node->Transform.Width.Value;
+			Widget.Slot.Offsets.Bottom = bStretchHeight ? 0.0f : Node->Transform.Height.Value;
 			return;
 		}
 
-		Widget.Slot.Offsets.Left = Node->X;
-		Widget.Slot.Offsets.Top = Node->Y;
-		Widget.Slot.Offsets.Right = Node->Width.Value;
-		Widget.Slot.Offsets.Bottom = Node->Height.Value;
+		Widget.Slot.Offsets.Left = Node->Transform.X;
+		Widget.Slot.Offsets.Top = Node->Transform.Y;
+		Widget.Slot.Offsets.Right = Node->Transform.Width.Value;
+		Widget.Slot.Offsets.Bottom = Node->Transform.Height.Value;
 
-		const bool bFitWidth = Node->Width.Mode == EDesignSizeMode::FitContent;
-		const bool bFitHeight = Node->Height.Mode == EDesignSizeMode::FitContent;
-		const bool bFixedWidth = Node->Width.Mode == EDesignSizeMode::Fixed;
-		const bool bFixedHeight = Node->Height.Mode == EDesignSizeMode::Fixed;
-		const bool bFitWidthNeedsAuto = bFitWidth && Node->Width.Value <= 0.0f;
-		const bool bFitHeightNeedsAuto = bFitHeight && Node->Height.Value <= 0.0f;
+		const bool bFitWidth = Node->Transform.Width.Mode == EDesignSizeMode::FitContent;
+		const bool bFitHeight = Node->Transform.Height.Mode == EDesignSizeMode::FitContent;
+		const bool bFixedWidth = Node->Transform.Width.Mode == EDesignSizeMode::Fixed;
+		const bool bFixedHeight = Node->Transform.Height.Mode == EDesignSizeMode::Fixed;
+		const bool bFitWidthNeedsAuto = bFitWidth && Node->Transform.Width.Value <= 0.0f;
+		const bool bFitHeightNeedsAuto = bFitHeight && Node->Transform.Height.Value <= 0.0f;
 
 		// CanvasPanel fidelity rule:
 		// FitContent 只有在该轴没有显式像素值时才走 AutoSize。
@@ -137,9 +137,9 @@ void FLayoutMapper::ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr
 			// preserve the Fixed axis value in Offsets for the SizeBox wrapper
 			// to pick up via WidthOverride / HeightOverride.
 			if (bFitWidth && bFixedHeight)
-				Widget.Slot.Offsets.Bottom = Node->Height.Value;
+				Widget.Slot.Offsets.Bottom = Node->Transform.Height.Value;
 			else if (bFitHeight && bFixedWidth)
-				Widget.Slot.Offsets.Right = Node->Width.Value;
+				Widget.Slot.Offsets.Right = Node->Transform.Width.Value;
 		}
 	}
 }
@@ -171,7 +171,6 @@ void FLayoutMapper::ApplyGap(TArray<FUMGWidgetNode>& Children, float Gap, EDesig
 void FLayoutMapper::ApplyPadding(FUMGWidgetNode& Widget, const FDesignPadding& Padding)
 {
 	Widget.WidgetStyle.Padding = FMargin(Padding.Left, Padding.Top, Padding.Right, Padding.Bottom);
-	Widget.WidgetStyle.bHasPadding = true;
 }
 
 void FLayoutMapper::ApplyJustifyContent(TArray<FUMGWidgetNode>& Children, EDesignJustifyContent Justify, EDesignSizeMode MainAxisMode, EDesignLayout ParentLayout)
@@ -257,8 +256,8 @@ void FLayoutMapper::ApplyAlignItems(FUMGWidgetNode& Widget, EDesignAlignItems Al
 bool FLayoutMapper::HasPadding(const TSharedPtr<FDesignNode>& Node)
 {
 	return Node.IsValid() &&
-		(Node->Padding.Top > 0 || Node->Padding.Right > 0 ||
-		 Node->Padding.Bottom > 0 || Node->Padding.Left > 0);
+		(Node->LayoutData.Padding.Top > 0 || Node->LayoutData.Padding.Right > 0 ||
+		 Node->LayoutData.Padding.Bottom > 0 || Node->LayoutData.Padding.Left > 0);
 }
 
 FUMGWidgetNode FLayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, const TSharedPtr<FDesignNode>& ChildNode, EDesignLayout ParentLayout)
@@ -270,52 +269,44 @@ FUMGWidgetNode FLayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, cons
 	const bool bUseFitOverride = ShouldUseFitOverride(ChildNode);
 	const bool bPreserveMeasuredFillSize = ShouldPreserveMeasuredFillSize(ChildNode, ParentLayout);
 
-	if (ChildNode->Width.IsFixed())
+	if (ChildNode->Transform.Width.IsFixed())
 	{
-		SizeBox.WidgetStyle.WidthOverride = ChildNode->Width.Value;
-		SizeBox.WidgetStyle.bHasWidthOverride = true;
+		SizeBox.WidgetStyle.WidthOverride = ChildNode->Transform.Width.Value;
 	}
-	else if (ChildNode->Width.IsFit() && ChildNode->Width.Value > 0)
+	else if (ChildNode->Transform.Width.IsFit() && ChildNode->Transform.Width.Value > 0)
 	{
 		if (bUseFitOverride)
 		{
-			SizeBox.WidgetStyle.WidthOverride = ChildNode->Width.Value;
-			SizeBox.WidgetStyle.bHasWidthOverride = true;
+			SizeBox.WidgetStyle.WidthOverride = ChildNode->Transform.Width.Value;
 		}
 		else
 		{
-			SizeBox.WidgetStyle.MinDesiredWidth = ChildNode->Width.Value;
-			SizeBox.WidgetStyle.bHasMinDesiredWidth = true;
+			SizeBox.WidgetStyle.MinDesiredWidth = ChildNode->Transform.Width.Value;
 		}
 	}
-	else if (bPreserveMeasuredFillSize && ChildNode->Width.IsFill() && ChildNode->Width.Value > 0.0f)
+	else if (bPreserveMeasuredFillSize && ChildNode->Transform.Width.IsFill() && ChildNode->Transform.Width.Value > 0.0f)
 	{
-		SizeBox.WidgetStyle.WidthOverride = ChildNode->Width.Value;
-		SizeBox.WidgetStyle.bHasWidthOverride = true;
+		SizeBox.WidgetStyle.WidthOverride = ChildNode->Transform.Width.Value;
 	}
 
-	if (ChildNode->Height.IsFixed())
+	if (ChildNode->Transform.Height.IsFixed())
 	{
-		SizeBox.WidgetStyle.HeightOverride = ChildNode->Height.Value;
-		SizeBox.WidgetStyle.bHasHeightOverride = true;
+		SizeBox.WidgetStyle.HeightOverride = ChildNode->Transform.Height.Value;
 	}
-	else if (ChildNode->Height.IsFit() && ChildNode->Height.Value > 0)
+	else if (ChildNode->Transform.Height.IsFit() && ChildNode->Transform.Height.Value > 0)
 	{
 		if (bUseFitOverride)
 		{
-			SizeBox.WidgetStyle.HeightOverride = ChildNode->Height.Value;
-			SizeBox.WidgetStyle.bHasHeightOverride = true;
+			SizeBox.WidgetStyle.HeightOverride = ChildNode->Transform.Height.Value;
 		}
 		else
 		{
-			SizeBox.WidgetStyle.MinDesiredHeight = ChildNode->Height.Value;
-			SizeBox.WidgetStyle.bHasMinDesiredHeight = true;
+			SizeBox.WidgetStyle.MinDesiredHeight = ChildNode->Transform.Height.Value;
 		}
 	}
-	else if (bPreserveMeasuredFillSize && ChildNode->Height.IsFill() && ChildNode->Height.Value > 0.0f)
+	else if (bPreserveMeasuredFillSize && ChildNode->Transform.Height.IsFill() && ChildNode->Transform.Height.Value > 0.0f)
 	{
-		SizeBox.WidgetStyle.HeightOverride = ChildNode->Height.Value;
-		SizeBox.WidgetStyle.bHasHeightOverride = true;
+		SizeBox.WidgetStyle.HeightOverride = ChildNode->Transform.Height.Value;
 	}
 
 	SizeBox.Bounds = ChildWidget.Bounds;

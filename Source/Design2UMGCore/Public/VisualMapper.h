@@ -14,6 +14,7 @@ class DESIGN2UMGCORE_API FVisualMapper
 {
 public:
 	static void ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node);
+	static void ApplyRenderTransformProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node);
 	static void ApplyRoundedCorner(FUMGWidgetNode& Widget, const FDesignCornerRadius& Radius, float Width = -1.0f, float Height = -1.0f);
 	static void ApplyStroke(FUMGWidgetNode& Widget, const FDesignStroke& Stroke);
 	static FUMGWidgetNode WrapWithBorder(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node);

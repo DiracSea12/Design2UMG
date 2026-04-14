@@ -7,8 +7,9 @@
 #include "PenFileImportFactory.generated.h"
 
 /**
- * .pen 鏂囦欢瀵煎叆宸ュ巶
- * 鏀寔 Content Browser 鎷栨嫿鍜屽彸閿鍏? */
+ * Factory for importing `.pen` design files.
+ * Supports drag-and-drop and context-menu import from the Content Browser.
+ */
 UCLASS()
 class UPenFileImportFactory : public UFactory
 {

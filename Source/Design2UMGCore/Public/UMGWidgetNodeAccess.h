@@ -38,6 +38,11 @@ namespace Design2UMGWidgetNodeAccess
 		return FString::Printf(TEXT("#%s"), *Value.ToFColor(true).ToHex());
 	}
 
+	inline FString SerializeWidgetVector4(const FVector4& Value)
+	{
+		return FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"), Value.X, Value.Y, Value.Z, Value.W);
+	}
+
 	inline FString SerializeImageTransform(const FUMGVisualBrushData::FImageTransformData& Value)
 	{
 		return FString::Printf(
@@ -144,465 +149,322 @@ namespace Design2UMGWidgetNodeAccess
 			*EndColor);
 	}
 
+	struct FTypedWidgetStringDescriptor
+	{
+		const TCHAR* Key = nullptr;
+		bool (*TryGetValue)(const FUMGWidgetNode& Node, FString& OutValue) = nullptr;
+	};
+
+	struct FTypedWidgetDescriptorRange
+	{
+		const FTypedWidgetStringDescriptor* Data = nullptr;
+		int32 Count = 0;
+	};
+
+	template <typename VisitorType>
+	inline void ForEachTypedWidgetPropertyKeyInDescriptors(
+		const FTypedWidgetDescriptorRange Range,
+		VisitorType&& Visitor,
+		TSet<FString>& SeenKeys)
+	{
+		for (int32 Index = 0; Index < Range.Count; ++Index)
+		{
+			const FString KeyString(Range.Data[Index].Key);
+			if (SeenKeys.Contains(KeyString))
+			{
+				continue;
+			}
+
+			SeenKeys.Add(KeyString);
+			Visitor(Range.Data[Index].Key);
+		}
+	}
+
+	inline bool TryGetTypedWidgetStringFromDescriptors(
+		const FUMGWidgetNode& Node,
+		const FString& KeyString,
+		FString& OutValue,
+		const FTypedWidgetDescriptorRange Range)
+	{
+		for (int32 Index = 0; Index < Range.Count; ++Index)
+		{
+			const FTypedWidgetStringDescriptor& Descriptor = Range.Data[Index];
+			if (KeyString == Descriptor.Key && Descriptor.TryGetValue != nullptr && Descriptor.TryGetValue(Node, OutValue))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+#define DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(KeyLiteral, ConditionExpr, ValueExpr) \
+	{ \
+		KeyLiteral, \
+		[](const FUMGWidgetNode& Node, FString& OutValue) -> bool \
+		{ \
+			if (!(ConditionExpr)) \
+			{ \
+				return false; \
+			} \
+			OutValue = (ValueExpr); \
+			return true; \
+		} \
+	}
+
+#define DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR_CUSTOM(KeyLiteral, Body) \
+	{ \
+		KeyLiteral, \
+		[](const FUMGWidgetNode& Node, FString& OutValue) -> bool Body \
+	}
+
+	inline FTypedWidgetDescriptorRange GetTextStyleTypedWidgetDescriptors()
+	{
+		static const FTypedWidgetStringDescriptor Descriptors[] = {
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::FontSize, Node.TextStyle.FontSize > 0.0f, SerializeWidgetFloat(Node.TextStyle.FontSize)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::DesignFontSize, Node.TextStyle.SourceFontSize > 0.0f, SerializeWidgetFloat(Node.TextStyle.SourceFontSize)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::LetterSpacing, Node.TextStyle.bHasLetterSpacing, SerializeWidgetFloat(Node.TextStyle.LetterSpacing)),
+		};
+		return { Descriptors, UE_ARRAY_COUNT(Descriptors) };
+	}
+
+	inline FTypedWidgetDescriptorRange GetWidgetStyleTypedWidgetDescriptors()
+	{
+		static const FTypedWidgetStringDescriptor Descriptors[] = {
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::WidthOverride, Node.WidgetStyle.WidthOverride.IsSet(), SerializeWidgetFloat(Node.WidgetStyle.WidthOverride.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::HeightOverride, Node.WidgetStyle.HeightOverride.IsSet(), SerializeWidgetFloat(Node.WidgetStyle.HeightOverride.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::MinDesiredWidth, Node.WidgetStyle.MinDesiredWidth.IsSet(), SerializeWidgetFloat(Node.WidgetStyle.MinDesiredWidth.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::MinDesiredHeight, Node.WidgetStyle.MinDesiredHeight.IsSet(), SerializeWidgetFloat(Node.WidgetStyle.MinDesiredHeight.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Padding, Node.WidgetStyle.Padding.IsSet(), SerializeWidgetMargin(Node.WidgetStyle.Padding.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::InnerSlotPadding, Node.WidgetStyle.InnerSlotPadding.IsSet(), SerializeWidgetCompactVector2D(Node.WidgetStyle.InnerSlotPadding.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::SlotPadding, Node.WidgetStyle.SlotPadding.IsSet(), SerializeWidgetMargin(Node.WidgetStyle.SlotPadding.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::StrokePadding, Node.WidgetStyle.StrokePadding.IsSet(), SerializeWidgetMargin(Node.WidgetStyle.StrokePadding.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::StrokeMargin, Node.WidgetStyle.StrokeMargin.IsSet(), SerializeWidgetMargin(Node.WidgetStyle.StrokeMargin.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::ImageMode, Node.WidgetStyle.ImageMode.IsSet(), Node.WidgetStyle.ImageMode.GetValue()),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::ImageTransform, Node.WidgetStyle.ImageTransform.IsSet(), Node.WidgetStyle.ImageTransform.GetValue()),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Stretch, Node.WidgetStyle.Stretch.IsSet(), Node.WidgetStyle.Stretch.GetValue()),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::StretchDirection, Node.WidgetStyle.StretchDirection.IsSet(), Node.WidgetStyle.StretchDirection.GetValue()),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::BackgroundColor, Node.WidgetStyle.BackgroundColor.IsSet(), SerializeWidgetColor(Node.WidgetStyle.BackgroundColor.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::HoveredColor, Node.WidgetStyle.HoveredColor.IsSet(), SerializeWidgetColor(Node.WidgetStyle.HoveredColor.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::PressedColor, Node.WidgetStyle.PressedColor.IsSet(), SerializeWidgetColor(Node.WidgetStyle.PressedColor.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::NamedSlot, Node.WidgetStyle.NamedSlot.IsSet(), Node.WidgetStyle.NamedSlot.GetValue()),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::SlotName, Node.WidgetStyle.SlotName.IsSet(), Node.WidgetStyle.SlotName.GetValue()),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Visibility, Node.WidgetStyle.Visibility.IsSet(), Node.WidgetStyle.Visibility.GetValue()),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::ToolTipText, Node.WidgetStyle.ToolTipText.IsSet(), Node.WidgetStyle.ToolTipText.GetValue()),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::IsEnabled, Node.WidgetStyle.IsEnabled.IsSet(), SerializeWidgetBool(Node.WidgetStyle.IsEnabled.GetValue())),
+		};
+		return { Descriptors, UE_ARRAY_COUNT(Descriptors) };
+	}
+
+	inline FTypedWidgetDescriptorRange GetTextTypedWidgetDescriptors()
+	{
+		static const FTypedWidgetStringDescriptor Descriptors[] = {
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Text, Node.Text.bHasText, Node.Text.Text),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RichTextStyleRows, Node.Text.bHasRichTextStyleRows, Node.Text.RichTextStyleRowsJson),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::HintText, Node.Text.bHasHintText, Node.Text.HintText),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::FontFamily, Node.Text.bHasFontFamily, Node.Text.FontFamily),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::TypefaceFontName, Node.Text.bHasTypefaceFontName, Node.Text.TypefaceFontName),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::FontStyle, Node.Text.bHasFontStyle, Node.Text.FontStyle),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Justification, Node.Text.bHasJustification, Node.Text.Justification),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::AutoWrapText, Node.Text.bHasAutoWrapText, SerializeWidgetBool(Node.Text.bAutoWrapText)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::WrapTextAt, Node.Text.bHasWrapTextAt, SerializeWidgetFloat(Node.Text.WrapTextAt)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::LineHeightPercentage, Node.Text.bHasLineHeightPercentage, SerializeWidgetFloat(Node.Text.LineHeightPercentage)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Underline, Node.Text.bHasUnderline, SerializeWidgetBool(Node.Text.bUnderline)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Strikethrough, Node.Text.bHasStrikethrough, SerializeWidgetBool(Node.Text.bStrikethrough)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Href, Node.Text.bHasHref, Node.Text.Href),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::TextAlignVertical, Node.Text.bHasTextAlignVertical, Node.Text.TextAlignVertical),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::IconName, Node.Text.bHasIconName, Node.Text.IconName),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Color, Node.Text.bHasColor, SerializeWidgetColor(Node.Text.Color)),
+		};
+		return { Descriptors, UE_ARRAY_COUNT(Descriptors) };
+	}
+
+	inline FTypedWidgetDescriptorRange GetBrushTypedWidgetDescriptors()
+	{
+		static const FTypedWidgetStringDescriptor Descriptors[] = {
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::BrushColor, Node.Brush.bHasBrushColor, SerializeWidgetColor(Node.Brush.BrushColor)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::OutlineColor, Node.Brush.bHasOutlineColor, SerializeWidgetColor(Node.Brush.OutlineColor)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR_CUSTOM(UMGPropertyKeys::DrawAs, {
+				if (!Node.Brush.bHasDrawAs)
+				{
+					return false;
+				}
+				OutValue = SerializeDrawAs(Node.Brush.DrawAs);
+				return !OutValue.IsEmpty();
+			}),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::OutlineCornerRadius, Node.Brush.OutlineCornerRadius >= 0.0f, SerializeWidgetFloat(Node.Brush.OutlineCornerRadius)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::CornerRadii, Node.Brush.HasCornerRadii(), SerializeWidgetVector4(Node.Brush.CornerRadii)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::OutlineThickness, Node.Brush.bHasOutlineThickness, SerializeWidgetFloat(Node.Brush.OutlineThickness)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR_CUSTOM(UMGPropertyKeys::MaterialRef, {
+				if (!Node.Brush.Gradient.HasAny())
+				{
+					return false;
+				}
+				OutValue = GetGradientMaterialRef(Node.Brush.Gradient);
+				return !OutValue.IsEmpty();
+			}),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::MaterialRef,
+				Node.Brush.bHasMaterialRef || !Node.Brush.MaterialRef.IsEmpty(),
+				Node.Brush.MaterialRef),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR_CUSTOM(UMGPropertyKeys::MaterialParams, {
+				if (!Node.Brush.Gradient.HasAny())
+				{
+					return false;
+				}
+				OutValue = SerializeGradientMaterialParams(Node.Brush.Gradient);
+				return !OutValue.IsEmpty();
+			}),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::MaterialParams,
+				Node.Brush.bHasMaterialParams || !Node.Brush.MaterialParams.IsEmpty(),
+				Node.Brush.MaterialParams),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::TexturePath, Node.Brush.Image.bHasTexturePath, Node.Brush.Image.TexturePath),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::TexturePath, !Node.Brush.TexturePath.IsEmpty(), Node.Brush.TexturePath),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::ImageMode, Node.Brush.Image.bHasMode, Node.Brush.Image.Mode),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::ImageTransform, Node.Brush.Image.bHasTransform, SerializeImageTransform(Node.Brush.Image.Transform)),
+		};
+		return { Descriptors, UE_ARRAY_COUNT(Descriptors) };
+	}
+
+	inline FTypedWidgetDescriptorRange GetEffectTypedWidgetDescriptors()
+	{
+		static const FTypedWidgetStringDescriptor Descriptors[] = {
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::BlurStrength, Node.Effect.bHasBlurStrength, SerializeWidgetFloat(Node.Effect.BlurStrength)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RetainRendering, Node.Effect.bHasRetainRendering, SerializeWidgetBool(Node.Effect.bRetainRendering)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::EffectMaterial,
+				Node.Effect.bHasEffectMaterial || !Node.Effect.EffectMaterial.IsEmpty(),
+				Node.Effect.EffectMaterial),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::TextureParameter,
+				Node.Effect.bHasTextureParameter || !Node.Effect.TextureParameter.IsEmpty(),
+				Node.Effect.TextureParameter),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::EffectBlurUVStep, Node.Effect.bHasEffectBlurUVStep, SerializeWidgetVector2D(Node.Effect.EffectBlurUVStep)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::EffectColor, Node.Effect.bHasEffectColor, SerializeWidgetColor(Node.Effect.EffectColor)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::EffectOffset, Node.Effect.bHasEffectOffset, SerializeWidgetVector2D(Node.Effect.EffectOffset)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Phase, Node.Effect.bHasRenderingPhase, FString::FromInt(Node.Effect.Phase)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::PhaseCount, Node.Effect.bHasRenderingPhase, FString::FromInt(Node.Effect.PhaseCount)),
+		};
+		return { Descriptors, UE_ARRAY_COUNT(Descriptors) };
+	}
+
+	inline FTypedWidgetDescriptorRange GetPathTypedWidgetDescriptors()
+	{
+		static const FTypedWidgetStringDescriptor Descriptors[] = {
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::PathGeometry, Node.Path.bHasGeometry, Node.Path.Geometry),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::PathFillRule, Node.Path.bHasFillRule, Node.Path.FillRule),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::PathFillColor, Node.Path.bHasFillColor, SerializeWidgetColor(Node.Path.FillColor)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::PathStrokeColor, Node.Path.bHasStrokeColor, SerializeWidgetColor(Node.Path.StrokeColor)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::PathStrokeThickness, Node.Path.bHasStrokeThickness, SerializeWidgetFloat(Node.Path.StrokeThickness)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::PathStrokeCap, Node.Path.bHasStrokeCap, Node.Path.StrokeCap),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::PathStrokeJoin, Node.Path.bHasStrokeJoin, Node.Path.StrokeJoin),
+		};
+		return { Descriptors, UE_ARRAY_COUNT(Descriptors) };
+	}
+
+	inline FTypedWidgetDescriptorRange GetShadowTypedWidgetDescriptors()
+	{
+		static const FTypedWidgetStringDescriptor Descriptors[] = {
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::ShadowOffset, Node.Shadow.bHasShadowOffset, SerializeWidgetCompactVector2D(Node.Shadow.ShadowOffset)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::ShadowColorAndOpacity, Node.Shadow.bHasShadowColorAndOpacity, SerializeWidgetColor(Node.Shadow.ShadowColorAndOpacity)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::ShadowBlur, Node.Shadow.bHasShadowBlur, SerializeWidgetFloat(Node.Shadow.ShadowBlur)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::BoxShadowCount, Node.Shadow.BoxShadows.Num() > 0, FString::FromInt(Node.Shadow.BoxShadows.Num())),
+		};
+		return { Descriptors, UE_ARRAY_COUNT(Descriptors) };
+	}
+
+	inline FTypedWidgetDescriptorRange GetRenderTypedWidgetDescriptors()
+	{
+		static const FTypedWidgetStringDescriptor Descriptors[] = {
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Clipping, Node.Render.bHasClipping, Node.Render.Clipping),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RenderOpacity, Node.Render.bHasRenderOpacity, SerializeWidgetFloat(Node.Render.RenderOpacity)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RenderAngle, Node.Render.bHasRenderAngle, SerializeWidgetFloat(Node.Render.RenderAngle)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RenderTransformScale, Node.Render.bHasRenderTransformScale, SerializeWidgetVector2D(Node.Render.RenderTransformScale)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RenderTransformPivot, Node.Render.bHasRenderTransformPivot, SerializeWidgetVector2D(Node.Render.RenderTransformPivot)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RenderScale, Node.Render.bHasRenderScale, SerializeWidgetVector2D(Node.Render.RenderScale)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RenderTranslation, Node.Render.bHasRenderTranslation, SerializeWidgetVector2D(Node.Render.RenderTranslation)),
+		};
+		return { Descriptors, UE_ARRAY_COUNT(Descriptors) };
+	}
+
+	inline FTypedWidgetDescriptorRange GetWidgetStateTypedWidgetDescriptors()
+	{
+		static const FTypedWidgetStringDescriptor Descriptors[] = {
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::ActiveWidgetIndex, Node.WidgetState.bHasActiveWidgetIndex, FString::FromInt(Node.WidgetState.ActiveWidgetIndex)),
+		};
+		return { Descriptors, UE_ARRAY_COUNT(Descriptors) };
+	}
+
+	inline FTypedWidgetDescriptorRange GetScrollBoxTypedWidgetDescriptors()
+	{
+		static const FTypedWidgetStringDescriptor Descriptors[] = {
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Orientation, Node.ScrollBox.bHasOrientation, Node.ScrollBox.Orientation),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::ScrollBarVisibility, Node.ScrollBox.bHasScrollBarVisibility, Node.ScrollBox.ScrollBarVisibility),
+		};
+		return { Descriptors, UE_ARRAY_COUNT(Descriptors) };
+	}
+
+	template <typename VisitorType>
+	inline void ForEachStaticTypedWidgetPropertyKey(VisitorType&& Visitor)
+	{
+		TSet<FString> SeenKeys;
+		ForEachTypedWidgetPropertyKeyInDescriptors(GetTextStyleTypedWidgetDescriptors(), Visitor, SeenKeys);
+		ForEachTypedWidgetPropertyKeyInDescriptors(GetWidgetStyleTypedWidgetDescriptors(), Visitor, SeenKeys);
+		ForEachTypedWidgetPropertyKeyInDescriptors(GetTextTypedWidgetDescriptors(), Visitor, SeenKeys);
+		ForEachTypedWidgetPropertyKeyInDescriptors(GetBrushTypedWidgetDescriptors(), Visitor, SeenKeys);
+		ForEachTypedWidgetPropertyKeyInDescriptors(GetEffectTypedWidgetDescriptors(), Visitor, SeenKeys);
+		ForEachTypedWidgetPropertyKeyInDescriptors(GetPathTypedWidgetDescriptors(), Visitor, SeenKeys);
+		ForEachTypedWidgetPropertyKeyInDescriptors(GetShadowTypedWidgetDescriptors(), Visitor, SeenKeys);
+		ForEachTypedWidgetPropertyKeyInDescriptors(GetRenderTypedWidgetDescriptors(), Visitor, SeenKeys);
+		ForEachTypedWidgetPropertyKeyInDescriptors(GetWidgetStateTypedWidgetDescriptors(), Visitor, SeenKeys);
+		ForEachTypedWidgetPropertyKeyInDescriptors(GetScrollBoxTypedWidgetDescriptors(), Visitor, SeenKeys);
+	}
+
 	inline bool IsTypedWidgetPropertyKey(const FString& Key)
 	{
-		static const TSet<FString> TypedKeys = {
-			UMGPropertyKeys::FontSize,
-			UMGPropertyKeys::DesignFontSize,
-			UMGPropertyKeys::LetterSpacing,
-			UMGPropertyKeys::WidthOverride,
-			UMGPropertyKeys::HeightOverride,
-			UMGPropertyKeys::MinDesiredWidth,
-			UMGPropertyKeys::MinDesiredHeight,
-			UMGPropertyKeys::Padding,
-			UMGPropertyKeys::InnerSlotPadding,
-			UMGPropertyKeys::SlotPadding,
-			UMGPropertyKeys::StrokePadding,
-			UMGPropertyKeys::StrokeMargin,
-			UMGPropertyKeys::ImageMode,
-			UMGPropertyKeys::ImageTransform,
-			UMGPropertyKeys::Stretch,
-			UMGPropertyKeys::StretchDirection,
-			UMGPropertyKeys::BackgroundColor,
-			UMGPropertyKeys::HoveredColor,
-			UMGPropertyKeys::PressedColor,
-			UMGPropertyKeys::NamedSlot,
-			UMGPropertyKeys::SlotName,
-			UMGPropertyKeys::Visibility,
-			UMGPropertyKeys::ToolTipText,
-			UMGPropertyKeys::IsEnabled,
-			UMGPropertyKeys::Text,
-			UMGPropertyKeys::HintText,
-			UMGPropertyKeys::FontFamily,
-			UMGPropertyKeys::TypefaceFontName,
-			UMGPropertyKeys::FontStyle,
-			UMGPropertyKeys::Justification,
-			UMGPropertyKeys::AutoWrapText,
-			UMGPropertyKeys::WrapTextAt,
-			UMGPropertyKeys::LineHeightPercentage,
-			UMGPropertyKeys::Underline,
-			UMGPropertyKeys::Strikethrough,
-			UMGPropertyKeys::Href,
-			UMGPropertyKeys::TextAlignVertical,
-			UMGPropertyKeys::IconName,
-			UMGPropertyKeys::Color,
-			UMGPropertyKeys::BrushColor,
-			UMGPropertyKeys::OutlineColor,
-			UMGPropertyKeys::DrawAs,
-			UMGPropertyKeys::OutlineCornerRadius,
-			UMGPropertyKeys::CornerRadii,
-			UMGPropertyKeys::OutlineThickness,
-			UMGPropertyKeys::MaterialRef,
-			UMGPropertyKeys::MaterialParams,
-			UMGPropertyKeys::TexturePath,
-			UMGPropertyKeys::BlurStrength,
-			UMGPropertyKeys::RetainRendering,
-			UMGPropertyKeys::EffectMaterial,
-			UMGPropertyKeys::TextureParameter,
-			UMGPropertyKeys::EffectBlurUVStep,
-			UMGPropertyKeys::EffectColor,
-			UMGPropertyKeys::EffectOffset,
-			UMGPropertyKeys::Phase,
-			UMGPropertyKeys::PhaseCount,
-			UMGPropertyKeys::PathGeometry,
-			UMGPropertyKeys::PathFillRule,
-			UMGPropertyKeys::PathFillColor,
-			UMGPropertyKeys::PathStrokeColor,
-			UMGPropertyKeys::PathStrokeThickness,
-			UMGPropertyKeys::PathStrokeCap,
-			UMGPropertyKeys::PathStrokeJoin,
-			UMGPropertyKeys::ShadowOffset,
-			UMGPropertyKeys::ShadowColorAndOpacity,
-			UMGPropertyKeys::ShadowBlur,
-			UMGPropertyKeys::Clipping,
-			UMGPropertyKeys::RenderOpacity,
-			UMGPropertyKeys::RenderAngle,
-			UMGPropertyKeys::RenderTransformPivot,
-			UMGPropertyKeys::RenderScale,
-			UMGPropertyKeys::RenderTransformScale,
-			UMGPropertyKeys::RenderTranslation,
-			UMGPropertyKeys::ActiveWidgetIndex,
-			UMGPropertyKeys::BoxShadowCount,
-		};
-
+		static const TSet<FString> TypedKeys = []()
+		{
+			TSet<FString> Result;
+			ForEachStaticTypedWidgetPropertyKey([&Result](const TCHAR* TypedKey)
+			{
+				Result.Add(TypedKey);
+			});
+			return Result;
+		}();
 		return TypedKeys.Contains(Key) || Key.StartsWith(TEXT("BoxShadow_"));
 	}
 
-	inline bool TryGetTypedWidgetString(const FUMGWidgetNode& Node, const TCHAR* Key, FString& OutValue)
+	inline bool TryGetTextStyleTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue)
 	{
-		const FString KeyString(Key);
+		return TryGetTypedWidgetStringFromDescriptors(Node, KeyString, OutValue, GetTextStyleTypedWidgetDescriptors());
+	}
 
-		if (KeyString == UMGPropertyKeys::FontSize && Node.TextStyle.FontSize > 0.0f)
+	inline bool TryGetWidgetStyleTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue)
+	{
+		return TryGetTypedWidgetStringFromDescriptors(Node, KeyString, OutValue, GetWidgetStyleTypedWidgetDescriptors());
+	}
+
+	inline bool TryGetTextTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue)
+	{
+		return TryGetTypedWidgetStringFromDescriptors(Node, KeyString, OutValue, GetTextTypedWidgetDescriptors());
+	}
+
+	inline bool TryGetBrushTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue)
+	{
+		return TryGetTypedWidgetStringFromDescriptors(Node, KeyString, OutValue, GetBrushTypedWidgetDescriptors());
+	}
+
+	inline bool TryGetEffectTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue)
+	{
+		return TryGetTypedWidgetStringFromDescriptors(Node, KeyString, OutValue, GetEffectTypedWidgetDescriptors());
+	}
+
+	inline bool TryGetPathTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue)
+	{
+		return TryGetTypedWidgetStringFromDescriptors(Node, KeyString, OutValue, GetPathTypedWidgetDescriptors());
+	}
+
+	inline bool TryGetShadowTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue)
+	{
+		if (TryGetTypedWidgetStringFromDescriptors(Node, KeyString, OutValue, GetShadowTypedWidgetDescriptors()))
 		{
-			OutValue = FString::SanitizeFloat(Node.TextStyle.FontSize);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::DesignFontSize && Node.TextStyle.SourceFontSize > 0.0f)
-		{
-			OutValue = FString::SanitizeFloat(Node.TextStyle.SourceFontSize);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::LetterSpacing && Node.TextStyle.bHasLetterSpacing)
-		{
-			OutValue = FString::SanitizeFloat(Node.TextStyle.LetterSpacing);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::WidthOverride && Node.WidgetStyle.bHasWidthOverride)
-		{
-			OutValue = SerializeWidgetFloat(Node.WidgetStyle.WidthOverride);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::HeightOverride && Node.WidgetStyle.bHasHeightOverride)
-		{
-			OutValue = SerializeWidgetFloat(Node.WidgetStyle.HeightOverride);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::MinDesiredWidth && Node.WidgetStyle.bHasMinDesiredWidth)
-		{
-			OutValue = SerializeWidgetFloat(Node.WidgetStyle.MinDesiredWidth);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::MinDesiredHeight && Node.WidgetStyle.bHasMinDesiredHeight)
-		{
-			OutValue = SerializeWidgetFloat(Node.WidgetStyle.MinDesiredHeight);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::Padding && Node.WidgetStyle.bHasPadding)
-		{
-			OutValue = SerializeWidgetMargin(Node.WidgetStyle.Padding);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::InnerSlotPadding && Node.WidgetStyle.bHasInnerSlotPadding)
-		{
-			OutValue = SerializeWidgetCompactVector2D(Node.WidgetStyle.InnerSlotPadding);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::SlotPadding && Node.WidgetStyle.bHasSlotPadding)
-		{
-			OutValue = SerializeWidgetMargin(Node.WidgetStyle.SlotPadding);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::StrokePadding && Node.WidgetStyle.bHasStrokePadding)
-		{
-			OutValue = SerializeWidgetMargin(Node.WidgetStyle.StrokePadding);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::StrokeMargin && Node.WidgetStyle.bHasStrokeMargin)
-		{
-			OutValue = SerializeWidgetMargin(Node.WidgetStyle.StrokeMargin);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::ImageMode && Node.WidgetStyle.bHasImageMode)
-		{
-			OutValue = Node.WidgetStyle.ImageMode;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::ImageTransform && Node.WidgetStyle.bHasImageTransform)
-		{
-			OutValue = Node.WidgetStyle.ImageTransform;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::Stretch && Node.WidgetStyle.bHasStretch)
-		{
-			OutValue = Node.WidgetStyle.Stretch;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::StretchDirection && Node.WidgetStyle.bHasStretchDirection)
-		{
-			OutValue = Node.WidgetStyle.StretchDirection;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::BackgroundColor && Node.WidgetStyle.bHasBackgroundColor)
-		{
-			OutValue = SerializeWidgetColor(Node.WidgetStyle.BackgroundColor);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::HoveredColor && Node.WidgetStyle.bHasHoveredColor)
-		{
-			OutValue = SerializeWidgetColor(Node.WidgetStyle.HoveredColor);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::PressedColor && Node.WidgetStyle.bHasPressedColor)
-		{
-			OutValue = SerializeWidgetColor(Node.WidgetStyle.PressedColor);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::NamedSlot && Node.WidgetStyle.bHasNamedSlot)
-		{
-			OutValue = Node.WidgetStyle.NamedSlot;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::SlotName && Node.WidgetStyle.bHasSlotName)
-		{
-			OutValue = Node.WidgetStyle.SlotName;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::Visibility && Node.WidgetStyle.bHasVisibility)
-		{
-			OutValue = Node.WidgetStyle.Visibility;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::ToolTipText && Node.WidgetStyle.bHasToolTipText)
-		{
-			OutValue = Node.WidgetStyle.ToolTipText;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::IsEnabled && Node.WidgetStyle.bHasIsEnabled)
-		{
-			OutValue = SerializeWidgetBool(Node.WidgetStyle.bIsEnabled);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::Text && Node.Text.bHasText)
-		{
-			OutValue = Node.Text.Text;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::HintText && Node.Text.bHasHintText)
-		{
-			OutValue = Node.Text.HintText;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::FontFamily && Node.Text.bHasFontFamily)
-		{
-			OutValue = Node.Text.FontFamily;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::TypefaceFontName && Node.Text.bHasTypefaceFontName)
-		{
-			OutValue = Node.Text.TypefaceFontName;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::FontStyle && Node.Text.bHasFontStyle)
-		{
-			OutValue = Node.Text.FontStyle;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::Justification && Node.Text.bHasJustification)
-		{
-			OutValue = Node.Text.Justification;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::AutoWrapText && Node.Text.bHasAutoWrapText)
-		{
-			OutValue = SerializeWidgetBool(Node.Text.bAutoWrapText);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::WrapTextAt && Node.Text.bHasWrapTextAt)
-		{
-			OutValue = SerializeWidgetFloat(Node.Text.WrapTextAt);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::LineHeightPercentage && Node.Text.bHasLineHeightPercentage)
-		{
-			OutValue = SerializeWidgetFloat(Node.Text.LineHeightPercentage);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::Underline && Node.Text.bHasUnderline)
-		{
-			OutValue = SerializeWidgetBool(Node.Text.bUnderline);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::Strikethrough && Node.Text.bHasStrikethrough)
-		{
-			OutValue = SerializeWidgetBool(Node.Text.bStrikethrough);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::Href && Node.Text.bHasHref)
-		{
-			OutValue = Node.Text.Href;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::TextAlignVertical && Node.Text.bHasTextAlignVertical)
-		{
-			OutValue = Node.Text.TextAlignVertical;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::IconName && Node.Text.bHasIconName)
-		{
-			OutValue = Node.Text.IconName;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::Color && Node.Text.bHasColor)
-		{
-			OutValue = SerializeWidgetColor(Node.Text.Color);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::BrushColor && Node.Brush.bHasBrushColor)
-		{
-			OutValue = SerializeWidgetColor(Node.Brush.BrushColor);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::OutlineColor && Node.Brush.bHasOutlineColor)
-		{
-			OutValue = SerializeWidgetColor(Node.Brush.OutlineColor);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::DrawAs && Node.Brush.bHasDrawAs)
-		{
-			OutValue = SerializeDrawAs(Node.Brush.DrawAs);
-			return !OutValue.IsEmpty();
-		}
-		if (KeyString == UMGPropertyKeys::OutlineCornerRadius && Node.Brush.OutlineCornerRadius >= 0.0f)
-		{
-			OutValue = FString::SanitizeFloat(Node.Brush.OutlineCornerRadius);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::CornerRadii && Node.Brush.HasCornerRadii())
-		{
-			OutValue = FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"),
-				Node.Brush.CornerRadii.X,
-				Node.Brush.CornerRadii.Y,
-				Node.Brush.CornerRadii.Z,
-				Node.Brush.CornerRadii.W);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::OutlineThickness && Node.Brush.bHasOutlineThickness)
-		{
-			OutValue = FString::SanitizeFloat(Node.Brush.OutlineThickness);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::MaterialRef && Node.Brush.Gradient.HasAny())
-		{
-			OutValue = GetGradientMaterialRef(Node.Brush.Gradient);
-			return !OutValue.IsEmpty();
-		}
-		if (KeyString == UMGPropertyKeys::MaterialRef
-			&& (Node.Brush.bHasMaterialRef || !Node.Brush.MaterialRef.IsEmpty()))
-		{
-			OutValue = Node.Brush.MaterialRef;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::MaterialParams && Node.Brush.Gradient.HasAny())
-		{
-			OutValue = SerializeGradientMaterialParams(Node.Brush.Gradient);
-			return !OutValue.IsEmpty();
-		}
-		if (KeyString == UMGPropertyKeys::MaterialParams
-			&& (Node.Brush.bHasMaterialParams || !Node.Brush.MaterialParams.IsEmpty()))
-		{
-			OutValue = Node.Brush.MaterialParams;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::TexturePath && Node.Brush.Image.bHasTexturePath)
-		{
-			OutValue = Node.Brush.Image.TexturePath;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::TexturePath && !Node.Brush.TexturePath.IsEmpty())
-		{
-			OutValue = Node.Brush.TexturePath;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::ImageMode && Node.Brush.Image.bHasMode)
-		{
-			OutValue = Node.Brush.Image.Mode;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::ImageTransform && Node.Brush.Image.bHasTransform)
-		{
-			OutValue = SerializeImageTransform(Node.Brush.Image.Transform);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::BlurStrength && Node.Effect.bHasBlurStrength)
-		{
-			OutValue = SerializeWidgetFloat(Node.Effect.BlurStrength);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::RetainRendering && Node.Effect.bHasRetainRendering)
-		{
-			OutValue = SerializeWidgetBool(Node.Effect.bRetainRendering);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::EffectMaterial
-			&& (Node.Effect.bHasEffectMaterial || !Node.Effect.EffectMaterial.IsEmpty()))
-		{
-			OutValue = Node.Effect.EffectMaterial;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::TextureParameter
-			&& (Node.Effect.bHasTextureParameter || !Node.Effect.TextureParameter.IsEmpty()))
-		{
-			OutValue = Node.Effect.TextureParameter;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::EffectBlurUVStep && Node.Effect.bHasEffectBlurUVStep)
-		{
-			OutValue = SerializeWidgetVector2D(Node.Effect.EffectBlurUVStep);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::EffectColor && Node.Effect.bHasEffectColor)
-		{
-			OutValue = SerializeWidgetColor(Node.Effect.EffectColor);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::EffectOffset && Node.Effect.bHasEffectOffset)
-		{
-			OutValue = SerializeWidgetVector2D(Node.Effect.EffectOffset);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::Phase && Node.Effect.bHasRenderingPhase)
-		{
-			OutValue = FString::FromInt(Node.Effect.Phase);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::PhaseCount && Node.Effect.bHasRenderingPhase)
-		{
-			OutValue = FString::FromInt(Node.Effect.PhaseCount);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::PathGeometry && Node.Path.bHasGeometry)
-		{
-			OutValue = Node.Path.Geometry;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::PathFillRule && Node.Path.bHasFillRule)
-		{
-			OutValue = Node.Path.FillRule;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::PathFillColor && Node.Path.bHasFillColor)
-		{
-			OutValue = SerializeWidgetColor(Node.Path.FillColor);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::PathStrokeColor && Node.Path.bHasStrokeColor)
-		{
-			OutValue = SerializeWidgetColor(Node.Path.StrokeColor);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::PathStrokeThickness && Node.Path.bHasStrokeThickness)
-		{
-			OutValue = SerializeWidgetFloat(Node.Path.StrokeThickness);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::PathStrokeCap && Node.Path.bHasStrokeCap)
-		{
-			OutValue = Node.Path.StrokeCap;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::PathStrokeJoin && Node.Path.bHasStrokeJoin)
-		{
-			OutValue = Node.Path.StrokeJoin;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::ShadowOffset && Node.Shadow.bHasShadowOffset)
-		{
-			OutValue = FString::Printf(TEXT("%.1f,%.1f"), Node.Shadow.ShadowOffset.X, Node.Shadow.ShadowOffset.Y);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::ShadowColorAndOpacity && Node.Shadow.bHasShadowColorAndOpacity)
-		{
-			OutValue = SerializeWidgetColor(Node.Shadow.ShadowColorAndOpacity);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::ShadowBlur && Node.Shadow.bHasShadowBlur)
-		{
-			OutValue = SerializeWidgetFloat(Node.Shadow.ShadowBlur);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::BoxShadowCount && Node.Shadow.BoxShadows.Num() > 0)
-		{
-			OutValue = FString::FromInt(Node.Shadow.BoxShadows.Num());
 			return true;
 		}
 		if (KeyString.StartsWith(TEXT("BoxShadow_")))
@@ -644,59 +506,46 @@ namespace Design2UMGWidgetNodeAccess
 				}
 			}
 		}
-		if (KeyString == UMGPropertyKeys::Clipping && Node.Render.bHasClipping)
-		{
-			OutValue = Node.Render.Clipping;
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::RenderOpacity && Node.Render.bHasRenderOpacity)
-		{
-			OutValue = SerializeWidgetFloat(Node.Render.RenderOpacity);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::RenderAngle && Node.Render.bHasRenderAngle)
-		{
-			OutValue = SerializeWidgetFloat(Node.Render.RenderAngle);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::RenderTransformScale && Node.Render.bHasRenderTransformScale)
-		{
-			OutValue = SerializeWidgetVector2D(Node.Render.RenderTransformScale);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::RenderTransformPivot && Node.Render.bHasRenderTransformPivot)
-		{
-			OutValue = SerializeWidgetVector2D(Node.Render.RenderTransformPivot);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::RenderScale && Node.Render.bHasRenderScale)
-		{
-			OutValue = SerializeWidgetVector2D(Node.Render.RenderScale);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::RenderTranslation && Node.Render.bHasRenderTranslation)
-		{
-			OutValue = SerializeWidgetVector2D(Node.Render.RenderTranslation);
-			return true;
-		}
-		if (KeyString == UMGPropertyKeys::ActiveWidgetIndex && Node.WidgetState.bHasActiveWidgetIndex)
-		{
-			OutValue = FString::FromInt(Node.WidgetState.ActiveWidgetIndex);
-			return true;
-		}
-
 		return false;
 	}
+
+	inline bool TryGetRenderTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue)
+	{
+		return TryGetTypedWidgetStringFromDescriptors(Node, KeyString, OutValue, GetRenderTypedWidgetDescriptors());
+	}
+
+	inline bool TryGetWidgetStateTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue)
+	{
+		return TryGetTypedWidgetStringFromDescriptors(Node, KeyString, OutValue, GetWidgetStateTypedWidgetDescriptors());
+	}
+
+	inline bool TryGetScrollBoxTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue)
+	{
+		return TryGetTypedWidgetStringFromDescriptors(Node, KeyString, OutValue, GetScrollBoxTypedWidgetDescriptors());
+	}
+
+	inline bool TryGetTypedWidgetString(const FUMGWidgetNode& Node, const TCHAR* Key, FString& OutValue)
+	{
+		const FString KeyString(Key);
+		return TryGetTextStyleTypedWidgetString(Node, KeyString, OutValue)
+			|| TryGetWidgetStyleTypedWidgetString(Node, KeyString, OutValue)
+			|| TryGetTextTypedWidgetString(Node, KeyString, OutValue)
+			|| TryGetBrushTypedWidgetString(Node, KeyString, OutValue)
+			|| TryGetEffectTypedWidgetString(Node, KeyString, OutValue)
+			|| TryGetPathTypedWidgetString(Node, KeyString, OutValue)
+			|| TryGetShadowTypedWidgetString(Node, KeyString, OutValue)
+			|| TryGetRenderTypedWidgetString(Node, KeyString, OutValue)
+			|| TryGetWidgetStateTypedWidgetString(Node, KeyString, OutValue)
+			|| TryGetScrollBoxTypedWidgetString(Node, KeyString, OutValue);
+	}
+
+#undef DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR
+#undef DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR_CUSTOM
 
 	inline bool TryGetWidgetString(const FUMGWidgetNode& Node, const TCHAR* Key, FString& OutValue)
 	{
 		// Typed empty strings are valid payloads and must block fallback to legacy Properties.
-		if (TryGetTypedWidgetString(Node, Key, OutValue))
-		{
-			return true;
-		}
-
-		return Node.Properties.TryGetString(Key, OutValue);
+		return TryGetTypedWidgetString(Node, Key, OutValue);
 	}
 
 	inline bool TryParseWidgetVector4String(const FString& Value, FVector4& OutValue)
@@ -733,7 +582,7 @@ namespace Design2UMGWidgetNodeAccess
 			return true;
 		}
 
-		return Node.Properties.TryGetBool(Key, OutValue);
+		return false;
 	}
 
 	inline bool TryGetWidgetInt(const FUMGWidgetNode& Node, const TCHAR* Key, int32& OutValue)
@@ -744,7 +593,7 @@ namespace Design2UMGWidgetNodeAccess
 			return LexTryParseString(OutValue, *TypedValue);
 		}
 
-		return Node.Properties.TryGetInt(Key, OutValue);
+		return false;
 	}
 
 	inline bool TryGetWidgetFloat(const FUMGWidgetNode& Node, const TCHAR* Key, float& OutValue)
@@ -755,7 +604,7 @@ namespace Design2UMGWidgetNodeAccess
 			return LexTryParseString(OutValue, *TypedValue);
 		}
 
-		return Node.Properties.TryGetFloat(Key, OutValue);
+		return false;
 	}
 
 	inline bool TryGetWidgetVector2D(const FUMGWidgetNode& Node, const TCHAR* Key, FVector2D& OutValue)
@@ -767,7 +616,7 @@ namespace Design2UMGWidgetNodeAccess
 			return true;
 		}
 
-		return Node.Properties.TryGetVector2D(Key, OutValue);
+		return false;
 	}
 
 	inline bool TryGetWidgetVector4(const FUMGWidgetNode& Node, const TCHAR* Key, FVector4& OutValue)
@@ -778,7 +627,7 @@ namespace Design2UMGWidgetNodeAccess
 			return TryParseWidgetVector4String(TypedValue, OutValue);
 		}
 
-		return Node.Properties.TryGetVector4(Key, OutValue);
+		return false;
 	}
 
 	inline bool TryGetWidgetMargin(const FUMGWidgetNode& Node, const TCHAR* Key, FMargin& OutValue)
@@ -790,7 +639,7 @@ namespace Design2UMGWidgetNodeAccess
 			return true;
 		}
 
-		return Node.Properties.TryGetMargin(Key, OutValue);
+		return false;
 	}
 
 	inline bool TryGetWidgetColor(const FUMGWidgetNode& Node, const TCHAR* Key, FLinearColor& OutValue)
@@ -802,7 +651,7 @@ namespace Design2UMGWidgetNodeAccess
 			return true;
 		}
 
-		return Node.Properties.TryGetColor(Key, OutValue);
+		return false;
 	}
 
 	inline bool HasWidgetString(const FUMGWidgetNode& Node, const TCHAR* Key)
@@ -824,87 +673,10 @@ namespace Design2UMGWidgetNodeAccess
 	inline FUMGPropertyBag BuildTypedPropertyBag(const FUMGWidgetNode& Node)
 	{
 		FUMGPropertyBag Result;
-		for (const TCHAR* Key : {
-			UMGPropertyKeys::FontSize,
-			UMGPropertyKeys::DesignFontSize,
-			UMGPropertyKeys::LetterSpacing,
-			UMGPropertyKeys::WidthOverride,
-			UMGPropertyKeys::HeightOverride,
-			UMGPropertyKeys::MinDesiredWidth,
-			UMGPropertyKeys::MinDesiredHeight,
-			UMGPropertyKeys::Padding,
-			UMGPropertyKeys::InnerSlotPadding,
-			UMGPropertyKeys::SlotPadding,
-			UMGPropertyKeys::StrokePadding,
-			UMGPropertyKeys::StrokeMargin,
-			UMGPropertyKeys::ImageMode,
-			UMGPropertyKeys::ImageTransform,
-			UMGPropertyKeys::Stretch,
-			UMGPropertyKeys::StretchDirection,
-			UMGPropertyKeys::BackgroundColor,
-			UMGPropertyKeys::HoveredColor,
-			UMGPropertyKeys::PressedColor,
-			UMGPropertyKeys::NamedSlot,
-			UMGPropertyKeys::SlotName,
-			UMGPropertyKeys::Visibility,
-			UMGPropertyKeys::ToolTipText,
-			UMGPropertyKeys::IsEnabled,
-			UMGPropertyKeys::Text,
-			UMGPropertyKeys::HintText,
-			UMGPropertyKeys::FontFamily,
-			UMGPropertyKeys::TypefaceFontName,
-			UMGPropertyKeys::FontStyle,
-			UMGPropertyKeys::Justification,
-			UMGPropertyKeys::AutoWrapText,
-			UMGPropertyKeys::WrapTextAt,
-			UMGPropertyKeys::LineHeightPercentage,
-			UMGPropertyKeys::Underline,
-			UMGPropertyKeys::Strikethrough,
-			UMGPropertyKeys::Href,
-			UMGPropertyKeys::TextAlignVertical,
-			UMGPropertyKeys::IconName,
-			UMGPropertyKeys::Color,
-			UMGPropertyKeys::BrushColor,
-			UMGPropertyKeys::OutlineColor,
-			UMGPropertyKeys::DrawAs,
-			UMGPropertyKeys::OutlineCornerRadius,
-			UMGPropertyKeys::CornerRadii,
-			UMGPropertyKeys::OutlineThickness,
-			UMGPropertyKeys::MaterialRef,
-			UMGPropertyKeys::MaterialParams,
-			UMGPropertyKeys::TexturePath,
-			UMGPropertyKeys::BlurStrength,
-			UMGPropertyKeys::RetainRendering,
-			UMGPropertyKeys::EffectMaterial,
-			UMGPropertyKeys::TextureParameter,
-			UMGPropertyKeys::EffectBlurUVStep,
-			UMGPropertyKeys::EffectColor,
-			UMGPropertyKeys::EffectOffset,
-			UMGPropertyKeys::Phase,
-			UMGPropertyKeys::PhaseCount,
-			UMGPropertyKeys::PathGeometry,
-			UMGPropertyKeys::PathFillRule,
-			UMGPropertyKeys::PathFillColor,
-			UMGPropertyKeys::PathStrokeColor,
-			UMGPropertyKeys::PathStrokeThickness,
-			UMGPropertyKeys::PathStrokeCap,
-			UMGPropertyKeys::PathStrokeJoin,
-			UMGPropertyKeys::ShadowOffset,
-			UMGPropertyKeys::ShadowColorAndOpacity,
-			UMGPropertyKeys::ShadowBlur,
-			UMGPropertyKeys::BoxShadowCount,
-			UMGPropertyKeys::Clipping,
-			UMGPropertyKeys::RenderOpacity,
-			UMGPropertyKeys::RenderAngle,
-			UMGPropertyKeys::RenderTransformPivot,
-			UMGPropertyKeys::RenderScale,
-			UMGPropertyKeys::RenderTransformScale,
-			UMGPropertyKeys::RenderTranslation,
-			UMGPropertyKeys::ActiveWidgetIndex,
-		})
+		ForEachStaticTypedWidgetPropertyKey([&Result, &Node](const TCHAR* Key)
 		{
 			AddTypedWidgetPropertyIfPresent(Result, Node, Key);
-		}
+		});
 		for (int32 Index = 0; Index < Node.Shadow.BoxShadows.Num(); ++Index)
 		{
 			AddTypedWidgetPropertyIfPresent(Result, Node, *FString::Printf(TEXT("BoxShadow_%d_OffsetX"), Index));
@@ -913,33 +685,6 @@ namespace Design2UMGWidgetNodeAccess
 			AddTypedWidgetPropertyIfPresent(Result, Node, *FString::Printf(TEXT("BoxShadow_%d_Spread"), Index));
 			AddTypedWidgetPropertyIfPresent(Result, Node, *FString::Printf(TEXT("BoxShadow_%d_Color"), Index));
 		}
-		return Result;
-	}
-
-	inline void RemoveLegacyPropertiesShadowedByTypedProperties(FUMGPropertyBag& LegacyProperties, const FUMGPropertyBag& TypedProperties)
-	{
-		TypedProperties.ForEachSerialized([&LegacyProperties](const FString& Key, const FString&)
-		{
-			LegacyProperties.Remove(Key);
-		});
-	}
-
-	inline FUMGPropertyBag BuildLegacyFallbackPropertyBag(const FUMGWidgetNode& Node)
-	{
-		FUMGPropertyBag Result = Node.Properties;
-		const FUMGPropertyBag TypedProperties = BuildTypedPropertyBag(Node);
-		RemoveLegacyPropertiesShadowedByTypedProperties(Result, TypedProperties);
-		return Result;
-	}
-
-	inline FUMGPropertyBag BuildEffectivePropertyBag(const FUMGWidgetNode& Node)
-	{
-		FUMGPropertyBag Result = BuildTypedPropertyBag(Node);
-		const FUMGPropertyBag LegacyProperties = BuildLegacyFallbackPropertyBag(Node);
-		LegacyProperties.ForEachSerialized([&Result](const FString& Key, const FString& Value)
-		{
-			Result.Add(Key, Value);
-		});
 		return Result;
 	}
 }

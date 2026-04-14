@@ -3,7 +3,6 @@
 #include "Design2UMGConverter.h"
 #include "Design2UMGFigmaMetadataExtensions.h"
 #include "Design2UMGLocalFigmaImport.h"
-#include "Design2UMGPrototypeNavigationExtensions.h"
 #include "DesignFontImportService.h"
 #include "Design2UMGTestUtils.h"
 #include "DesignImportPipeline.h"
@@ -16,7 +15,6 @@
 #include "PenMCPBridge.h"
 #include "SDesign2UMGPreviewWindow.h"
 #include "AssetRegistry/AssetRegistryModule.h"
-#include "Animation/WidgetAnimation.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetBlueprintGeneratedClass.h"
 #include "Blueprint/WidgetTree.h"
@@ -24,11 +22,8 @@
 #include "Components/Button.h"
 #include "Components/GridPanel.h"
 #include "Components/GridSlot.h"
-#include "Components/Overlay.h"
 #include "Components/ScrollBox.h"
 #include "Components/TextBlock.h"
-#include "Components/WidgetSwitcher.h"
-#include "Containers/Ticker.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Interfaces/IPluginManager.h"
 #include "IImageWrapper.h"
@@ -43,9 +38,6 @@
 #include "RHI.h"
 #if WITH_AUTOMATION_WORKER
 using namespace Design2UMGTestUtils;
-
-extern bool GDesign2UMGPrototypeNavigationCaptureOpenUrl;
-extern FString GDesign2UMGPrototypeNavigationLastOpenedUrl;
 
 namespace
 {
@@ -70,26 +62,6 @@ namespace
 		return FMargin();
 	}
 
-	struct FScopedPrototypeOpenUrlCapture
-	{
-		FScopedPrototypeOpenUrlCapture()
-		{
-			bSavedCapture = GDesign2UMGPrototypeNavigationCaptureOpenUrl;
-			SavedLastOpenedUrl = GDesign2UMGPrototypeNavigationLastOpenedUrl;
-			GDesign2UMGPrototypeNavigationCaptureOpenUrl = true;
-			GDesign2UMGPrototypeNavigationLastOpenedUrl.Reset();
-		}
-
-		~FScopedPrototypeOpenUrlCapture()
-		{
-			GDesign2UMGPrototypeNavigationCaptureOpenUrl = bSavedCapture;
-			GDesign2UMGPrototypeNavigationLastOpenedUrl = SavedLastOpenedUrl;
-		}
-
-		bool bSavedCapture = false;
-		FString SavedLastOpenedUrl;
-	};
-
 	FString GetFixturePath(const FString& FixtureFileName)
 	{
 		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
@@ -102,26 +74,6 @@ namespace
 			Plugin->GetBaseDir(),
 			TEXT("Source/Design2UMGEditor/Private/Tests/Fixtures"),
 			FixtureFileName);
-	}
-
-	UWidgetSwitcher* FindPrototypeSwitcherWidget(UUserWidget* WidgetInstance, const FUMGWidgetData& Data)
-	{
-		if (!WidgetInstance || !WidgetInstance->WidgetTree || Data.PrototypeNavigation.SwitcherWidgetName.IsEmpty())
-		{
-			return nullptr;
-		}
-
-		return Cast<UWidgetSwitcher>(WidgetInstance->WidgetTree->FindWidget(FName(*Data.PrototypeNavigation.SwitcherWidgetName)));
-	}
-
-	UOverlay* FindPrototypeOverlayHostWidget(UUserWidget* WidgetInstance, const FUMGWidgetData& Data)
-	{
-		if (!WidgetInstance || !WidgetInstance->WidgetTree || Data.PrototypeNavigation.OverlayHostWidgetName.IsEmpty())
-		{
-			return nullptr;
-		}
-
-		return Cast<UOverlay>(WidgetInstance->WidgetTree->FindWidget(FName(*Data.PrototypeNavigation.OverlayHostWidgetName)));
 	}
 
 	void DeleteGeneratedAssetsAtPath(const FString& AssetDir)
@@ -249,43 +201,6 @@ namespace
 		return true;
 	}
 
-	void TickCoreTickerFor(const float TotalSeconds, const float StepSeconds = 1.0f / 60.0f)
-	{
-		float Elapsed = 0.0f;
-		while (Elapsed < TotalSeconds)
-		{
-			const float CurrentStep = FMath::Min(StepSeconds, TotalSeconds - Elapsed);
-			FTSTicker::GetCoreTicker().Tick(CurrentStep);
-			Elapsed += CurrentStep;
-		}
-	}
-
-	UWidgetAnimation* FindGeneratedAnimation(
-		const UWidgetBlueprintGeneratedClass* GeneratedClass,
-		const TCHAR* AnimationName)
-	{
-		if (!GeneratedClass || !AnimationName)
-		{
-			return nullptr;
-		}
-
-		const FName TargetName(AnimationName);
-		for (UWidgetAnimation* Animation : GeneratedClass->Animations)
-		{
-			if (!Animation)
-			{
-				continue;
-			}
-
-			if (Animation->GetFName() == TargetName
-				|| Animation->GetDisplayLabel().Equals(AnimationName, ESearchCase::IgnoreCase))
-			{
-				return Animation;
-			}
-		}
-
-		return nullptr;
-	}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenWelcomeBatchImportTest,
@@ -409,8 +324,6 @@ bool FPenWelcomeWrapFontRegressionTest::RunTest(const FString& Parameters)
 		FMath::IsNearlyEqual(WelcomeBody->TextStyle.FontSize, 27.0f, 0.01f));
 	TestTrue(TEXT("Pro tips keeps the same calibrated Rubik size"),
 		FMath::IsNearlyEqual(ProTips->TextStyle.FontSize, 27.0f, 0.01f));
-	TestFalse(TEXT("Welcome body no longer writes legacy font size"), HasLegacyWidgetProperty(*WelcomeBody, TEXT("FontSize")));
-	TestFalse(TEXT("Pro tips no longer writes legacy font size"), HasLegacyWidgetProperty(*ProTips, TEXT("FontSize")));
 	return true;
 }
 
@@ -573,29 +486,29 @@ bool FImportDiagnosticReportStructureTest::RunTest(const FString& Parameters)
 		TEXT("design.sourceFilePath"),
 		FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Design2UMG"), FString::Printf(TEXT("fixture_%s.json"), *FGuid::NewGuid().ToString(EGuidFormats::Digits))));
 
-	FDesignFigmaSkippedNodeReport SkippedNode;
+	FDesignSkippedNodeReport SkippedNode;
 	SkippedNode.NodeId = TEXT("slice1");
 	SkippedNode.NodeName = TEXT("Slice Overlay");
 	SkippedNode.NodeType = TEXT("SLICE");
 	SkippedNode.Reason = TEXT("design_only");
-	Document.FigmaDiagnostics.SkippedDesignerNodes.Add(SkippedNode);
+	Document.ParseDiagnostics.SkippedDesignerNodes.Add(SkippedNode);
 
 	TSharedPtr<FDesignNode> TextPathNode = MakeShared<FDesignNode>();
 	TextPathNode->Id = TEXT("text_path_1");
 	TextPathNode->Name = TEXT("Curved Label");
 	TextPathNode->Type = EDesignNodeType::Text;
-	TextPathNode->FigmaSourceNodeType = TEXT("TEXT_PATH");
-	TextPathNode->FontFamily = TEXT("DefinitelyMissingReportFont");
+	TextPathNode->Source.SourceNodeType = TEXT("TEXT_PATH");
+	TextPathNode->Text.FontFamily = TEXT("DefinitelyMissingReportFont");
 
 	TSharedPtr<FDesignNode> RenderFallbackNode = MakeShared<FDesignNode>();
 	RenderFallbackNode->Id = TEXT("render_1");
 	RenderFallbackNode->Name = TEXT("Blurred Hero");
 	RenderFallbackNode->Type = EDesignNodeType::Rectangle;
-	RenderFallbackNode->FigmaSourceNodeType = TEXT("RECTANGLE");
-	RenderFallbackNode->FigmaRenderFallback.ImageRef = TEXT("render_hero");
-	RenderFallbackNode->FigmaRenderFallback.Scope = TEXT("full");
-	RenderFallbackNode->FigmaRenderFallback.Source = TEXT("figma_render_png");
-	RenderFallbackNode->FigmaRenderFallback.Reason = TEXT("foreground_blur");
+	RenderFallbackNode->Source.SourceNodeType = TEXT("RECTANGLE");
+	RenderFallbackNode->Source.RenderFallback.ImageRef = TEXT("render_hero");
+	RenderFallbackNode->Source.RenderFallback.Scope = TEXT("full");
+	RenderFallbackNode->Source.RenderFallback.Source = TEXT("figma_render_png");
+	RenderFallbackNode->Source.RenderFallback.Reason = TEXT("foreground_blur");
 
 	Document.Children.Add(TextPathNode);
 	Document.Children.Add(RenderFallbackNode);
@@ -749,8 +662,8 @@ bool FImportDiagnosticReportExecutePathTest::RunTest(const FString& Parameters)
 	RootNode->Id = TEXT("root");
 	RootNode->Name = TEXT("Root");
 	RootNode->Type = EDesignNodeType::Frame;
-	RootNode->Width = FDesignSize::Fixed(120.0f);
-	RootNode->Height = FDesignSize::Fixed(60.0f);
+	RootNode->Transform.Width = FDesignSize::Fixed(120.0f);
+	RootNode->Transform.Height = FDesignSize::Fixed(60.0f);
 	Document.Children.Add(RootNode);
 
 	FUMGWidgetData Data;
@@ -967,7 +880,7 @@ bool FFigmaInstanceMetadataWorkflowTest::RunTest(const FString& Parameters)
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse figma instance metadata fixture"), FFigmaParser::ParseDocument(Json, Document));
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
-	TestTrue(TEXT("Converted widget data preserves Figma component catalog"), Data.FigmaDocument.HasAnyComponentCatalog());
+	TestTrue(TEXT("Converted widget data preserves Figma component catalog"), Data.SourceDocument.HasAnyComponentCatalog());
 
 	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/FigmaInstanceMetadata");
 	DeleteGeneratedAssetsAtPath(OutputPath);
@@ -1012,10 +925,10 @@ bool FFigmaInstanceMetadataWorkflowTest::RunTest(const FString& Parameters)
 	}
 
 	TestEqual(TEXT("Instance record widget id preserved"), InstanceRecord->WidgetId, TEXT("inst1"));
-	TestEqual(TEXT("Instance record source node type preserved"), InstanceRecord->FigmaNode.SourceNodeType, TEXT("INSTANCE"));
-	TestEqual(TEXT("Instance record componentId preserved"), InstanceRecord->FigmaNode.ComponentId, TEXT("12:34"));
-	TestEqual(TEXT("Instance record componentSetId preserved"), InstanceRecord->FigmaNode.ComponentSetId, TEXT("56:78"));
-	TestTrue(TEXT("Instance record variant properties preserved"), !InstanceRecord->FigmaNode.VariantPropertiesJson.IsEmpty());
+	TestEqual(TEXT("Instance record source node type preserved"), InstanceRecord->SourceNode.SourceNodeType, TEXT("INSTANCE"));
+	TestEqual(TEXT("Instance record componentId preserved"), InstanceRecord->SourceNode.ComponentId, TEXT("12:34"));
+	TestEqual(TEXT("Instance record componentSetId preserved"), InstanceRecord->SourceNode.ComponentSetId, TEXT("56:78"));
+	TestTrue(TEXT("Instance record variant properties preserved"), !InstanceRecord->SourceNode.VariantPropertiesJson.IsEmpty());
 	TestTrue(TEXT("Template widget exists for exported record"),
 		GeneratedClass->GetWidgetTreeArchetype() && GeneratedClass->GetWidgetTreeArchetype()->FindWidget(InstanceRecord->WidgetName) != nullptr);
 
@@ -1031,705 +944,6 @@ bool FFigmaInstanceMetadataWorkflowTest::RunTest(const FString& Parameters)
 
 	TestTrue(TEXT("Runtime widget tree can resolve exported widget name"),
 		WidgetInstance->WidgetTree->FindWidget(InstanceRecord->WidgetName) != nullptr);
-	DeleteGeneratedAssetsAtPath(OutputPath);
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeNavigationRuntimeWorkflowTest,
-	"Design2UMG.WidgetBlueprint.FigmaPrototypeNavigationRuntime",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaPrototypeNavigationRuntimeWorkflowTest::RunTest(const FString& Parameters)
-{
-	const FString Json = TEXT(R"({
-		"document": {
-			"id":"0:0",
-			"name":"Doc",
-			"type":"DOCUMENT",
-			"prototypeStartNodeID":"1:1",
-			"children":[
-				{"id":"0:1","name":"Page","type":"CANVAS","children":[
-					{"id":"1:1","name":"PageOne","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"cta_button","name":"CTA","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":40,"y":60,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.1,"g":0.4,"b":0.9,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"NAVIGATE","transition":{"type":"DISSOLVE","duration":120,"easing":{"type":"EASE_IN_AND_OUT"}}}]}],
-						 "children":[]}
-					]},
-					{"id":"2:1","name":"PageTwo","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"page2_title","name":"Done","type":"TEXT","visible":true,
-						 "absoluteBoundingBox":{"x":32,"y":48,"width":120,"height":32},
-						 "characters":"Done",
-						 "style":{"fontFamily":"Inter","fontSize":24,"fontWeight":600,"textAlignHorizontal":"LEFT","textAlignVertical":"TOP","textDecoration":"NONE","letterSpacing":0,"lineHeightUnit":"AUTO","lineHeightPx":0}}
-					]}
-				]}
-			]
-		}
-	})");
-
-	FDesignDocument Document;
-	TestTrue(TEXT("Parse prototype navigation fixture"), FFigmaParser::ParseDocument(Json, Document));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
-	TestTrue(TEXT("Prototype navigation data available"), Data.PrototypeNavigation.IsValid());
-	if (!Data.PrototypeNavigation.IsValid())
-	{
-		return false;
-	}
-
-	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/FigmaPrototypeNavigation");
-	DeleteGeneratedAssetsAtPath(OutputPath);
-
-	UWidgetBlueprint* Blueprint = FUMGGenerator::BuildWidgetBlueprint(Data, OutputPath);
-	TestTrue(TEXT("Build prototype navigation widget blueprint"), Blueprint != nullptr);
-	if (!Blueprint)
-	{
-		return false;
-	}
-
-	FUMGGenerator::SaveWidgetBlueprint(Blueprint);
-	UWidgetBlueprintGeneratedClass* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(Blueprint->GeneratedClass);
-	TestTrue(TEXT("Generated class exists"), GeneratedClass != nullptr);
-	const UDesign2UMGPrototypeNavigationClassExtension* RuntimeExtension =
-		GeneratedClass ? GeneratedClass->GetExtension<UDesign2UMGPrototypeNavigationClassExtension>() : nullptr;
-	TestTrue(TEXT("Prototype runtime class extension attached"), RuntimeExtension != nullptr);
-	if (!GeneratedClass || !RuntimeExtension)
-	{
-		DeleteGeneratedAssetsAtPath(OutputPath);
-		return false;
-	}
-
-	UWidgetAnimation* DissolveOutgoingAnimation =
-		FindGeneratedAnimation(GeneratedClass, TEXT("__d2u_nav_anim_000_out"));
-	UWidgetAnimation* DissolveIncomingAnimation =
-		FindGeneratedAnimation(GeneratedClass, TEXT("__d2u_nav_anim_000_in"));
-	TestTrue(TEXT("Prototype dissolve outgoing animation generated"), DissolveOutgoingAnimation != nullptr);
-	TestTrue(TEXT("Prototype dissolve incoming animation generated"), DissolveIncomingAnimation != nullptr);
-
-	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-	TestTrue(TEXT("Editor world exists"), World != nullptr);
-	UUserWidget* WidgetInstance = World ? CreateWidget<UUserWidget>(World, GeneratedClass) : nullptr;
-	TestTrue(TEXT("Prototype widget instance created"), WidgetInstance != nullptr);
-	if (!WidgetInstance || !WidgetInstance->WidgetTree)
-	{
-		DeleteGeneratedAssetsAtPath(OutputPath);
-		return false;
-	}
-
-	WidgetInstance->TakeWidget();
-	WidgetInstance->AddToViewport();
-	WidgetInstance->SetKeyboardFocus();
-
-	UWidgetSwitcher* Switcher = FindPrototypeSwitcherWidget(WidgetInstance, Data);
-	UButton* TriggerButton = Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("cta_button")));
-	TestTrue(TEXT("Prototype switcher exists on widget instance"), Switcher != nullptr);
-	TestTrue(TEXT("Prototype trigger button exists on widget instance"), TriggerButton != nullptr);
-	if (!Switcher || !TriggerButton)
-	{
-		DeleteGeneratedAssetsAtPath(OutputPath);
-		return false;
-	}
-
-	TestEqual(TEXT("Prototype initial page index"), Switcher->GetActiveWidgetIndex(), 0);
-	const float InitialOpacity = Switcher->GetRenderOpacity();
-	TriggerButton->OnClicked.Broadcast();
-	TickCoreTickerFor(0.03f);
-	TestEqual(TEXT("Prototype dissolve keeps old page before halfway"), Switcher->GetActiveWidgetIndex(), 0);
-	TestTrue(TEXT("Prototype dissolve lowers opacity during transition"), Switcher->GetRenderOpacity() < InitialOpacity - 0.01f);
-	TickCoreTickerFor(0.04f);
-	TestEqual(TEXT("Prototype dissolve switches page after halfway"), Switcher->GetActiveWidgetIndex(), 1);
-	TickCoreTickerFor(0.08f);
-	TestEqual(TEXT("Prototype dissolve finishes on target page"), Switcher->GetActiveWidgetIndex(), 1);
-	TestTrue(TEXT("Prototype dissolve restores opacity"), FMath::IsNearlyEqual(Switcher->GetRenderOpacity(), InitialOpacity, 0.001f));
-	TestTrue(TEXT("Prototype dissolve restores translation"), Switcher->GetRenderTransform().Translation.IsNearlyZero());
-
-	WidgetInstance->RemoveFromParent();
-	DeleteGeneratedAssetsAtPath(OutputPath);
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeSpecialActionsRuntimeWorkflowTest,
-	"Design2UMG.WidgetBlueprint.FigmaPrototypeSpecialActionsRuntime",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaPrototypeSpecialActionsRuntimeWorkflowTest::RunTest(const FString& Parameters)
-{
-	FScopedPrototypeOpenUrlCapture OpenUrlCapture;
-
-	const FString Json = TEXT(R"({
-		"document": {
-			"id":"0:0",
-			"name":"Doc",
-			"type":"DOCUMENT",
-			"prototypeStartNodeID":"1:1",
-			"children":[
-				{"id":"0:1","name":"Page","type":"CANVAS","children":[
-					{"id":"1:1","name":"PageOne","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"overlay_button","name":"Overlay","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":40,"y":60,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.1,"g":0.4,"b":0.9,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"OVERLAY","transition":{"type":"DISSOLVE","duration":120,"easing":{"type":"EASE_IN_AND_OUT"}}}]}],
-						 "children":[]},
-						{"id":"link_button","name":"Link","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":40,"y":120,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.2,"g":0.7,"b":0.5,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"URL","url":"https://example.com/help"}]}],
-						 "children":[]}
-					]},
-					{"id":"2:1","name":"OverlayPage","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"back_button","name":"Back","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":40,"y":60,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.8,"g":0.3,"b":0.2,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"BACK"}]}],
-						 "children":[]}
-					]}
-				]}
-			]
-		}
-	})");
-
-	FDesignDocument Document;
-	TestTrue(TEXT("Parse prototype special actions fixture"), FFigmaParser::ParseDocument(Json, Document));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
-	TestTrue(TEXT("Prototype special action data available"), Data.PrototypeNavigation.IsValid());
-	if (!Data.PrototypeNavigation.IsValid())
-	{
-		return false;
-	}
-
-	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/FigmaPrototypeSpecialActions");
-	DeleteGeneratedAssetsAtPath(OutputPath);
-
-	UWidgetBlueprint* Blueprint = FUMGGenerator::BuildWidgetBlueprint(Data, OutputPath);
-	TestTrue(TEXT("Build prototype special action widget blueprint"), Blueprint != nullptr);
-	if (!Blueprint)
-	{
-		return false;
-	}
-
-	FUMGGenerator::SaveWidgetBlueprint(Blueprint);
-	UWidgetBlueprintGeneratedClass* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(Blueprint->GeneratedClass);
-	TestTrue(TEXT("Generated class exists"), GeneratedClass != nullptr);
-	if (!GeneratedClass)
-	{
-		DeleteGeneratedAssetsAtPath(OutputPath);
-		return false;
-	}
-
-	UWidgetAnimation* OverlayOutgoingAnimation =
-		FindGeneratedAnimation(GeneratedClass, TEXT("__d2u_nav_anim_000_out"));
-	UWidgetAnimation* OverlayIncomingAnimation =
-		FindGeneratedAnimation(GeneratedClass, TEXT("__d2u_nav_anim_000_in"));
-	TestTrue(TEXT("Overlay outgoing animation generated"), OverlayOutgoingAnimation != nullptr);
-	TestTrue(TEXT("Overlay incoming animation generated"), OverlayIncomingAnimation != nullptr);
-	TestTrue(TEXT("Prototype special action generated class exports transition animations"),
-		GeneratedClass->Animations.Num() >= 2);
-
-	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-	TestTrue(TEXT("Editor world exists"), World != nullptr);
-	UUserWidget* WidgetInstance = World ? CreateWidget<UUserWidget>(World, GeneratedClass) : nullptr;
-	TestTrue(TEXT("Prototype special action widget instance created"), WidgetInstance != nullptr);
-	if (!WidgetInstance || !WidgetInstance->WidgetTree)
-	{
-		DeleteGeneratedAssetsAtPath(OutputPath);
-		return false;
-	}
-
-	WidgetInstance->TakeWidget();
-	WidgetInstance->AddToViewport();
-
-	UWidgetSwitcher* Switcher = FindPrototypeSwitcherWidget(WidgetInstance, Data);
-	UOverlay* OverlayHost = FindPrototypeOverlayHostWidget(WidgetInstance, Data);
-	UButton* OverlayButton = Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("overlay_button")));
-	UButton* BackButton = Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("back_button")));
-	UButton* LinkButton = Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("link_button")));
-	TestTrue(TEXT("Prototype special action switcher exists"), Switcher != nullptr);
-	TestTrue(TEXT("Prototype overlay host exists"), OverlayHost != nullptr);
-	TestTrue(TEXT("Prototype overlay trigger exists"), OverlayButton != nullptr);
-	TestTrue(TEXT("Prototype back trigger exists"), BackButton != nullptr);
-	TestTrue(TEXT("Prototype open link trigger exists"), LinkButton != nullptr);
-	if (!Switcher || !OverlayHost || !OverlayButton || !BackButton || !LinkButton)
-	{
-		DeleteGeneratedAssetsAtPath(OutputPath);
-		return false;
-	}
-
-	TestEqual(TEXT("Prototype special action initial page index"), Switcher->GetActiveWidgetIndex(), 0);
-	TestTrue(TEXT("Overlay host starts collapsed"), OverlayHost->GetVisibility() == ESlateVisibility::Collapsed);
-	OverlayButton->OnClicked.Broadcast();
-	TestEqual(TEXT("Overlay keeps base page active"), Switcher->GetActiveWidgetIndex(), 0);
-	TestTrue(TEXT("Overlay host becomes visible"), OverlayHost->GetVisibility() == ESlateVisibility::SelfHitTestInvisible);
-	TestTrue(TEXT("Overlay host receives overlay page"), OverlayHost->GetChildrenCount() == 1);
-	const auto IsDescendantOf = [](const UWidget* Widget, const UPanelWidget* ExpectedParent)
-	{
-		const UWidget* Current = Widget;
-		while (Current)
-		{
-			const UPanelWidget* Parent = Current->GetParent();
-			if (!Parent)
-			{
-				return false;
-			}
-			if (Parent == ExpectedParent)
-			{
-				return true;
-			}
-			Current = Parent;
-		}
-		return false;
-	};
-	TestTrue(TEXT("Back button now lives under overlay host subtree"), IsDescendantOf(BackButton, OverlayHost));
-
-	BackButton->OnClicked.Broadcast();
-	TestEqual(TEXT("Back keeps base page active after closing overlay"), Switcher->GetActiveWidgetIndex(), 0);
-	TestTrue(TEXT("Overlay host collapses after back"), OverlayHost->GetVisibility() == ESlateVisibility::Collapsed);
-	TestTrue(TEXT("Overlay page removed from overlay host"), OverlayHost->GetChildrenCount() == 0);
-	BackButton->OnClicked.Broadcast();
-	TestEqual(TEXT("Back with empty history is a no-op"), Switcher->GetActiveWidgetIndex(), 0);
-
-	LinkButton->OnClicked.Broadcast();
-	TestEqual(TEXT("Open link keeps current page"), Switcher->GetActiveWidgetIndex(), 0);
-	TestEqual(TEXT("Open link captures URL through runtime hook"),
-		GDesign2UMGPrototypeNavigationLastOpenedUrl,
-		TEXT("https://example.com/help"));
-
-	WidgetInstance->RemoveFromParent();
-	DeleteGeneratedAssetsAtPath(OutputPath);
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeHoverAndPressRuntimeWorkflowTest,
-	"Design2UMG.WidgetBlueprint.FigmaPrototypeHoverAndPressRuntime",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaPrototypeHoverAndPressRuntimeWorkflowTest::RunTest(const FString& Parameters)
-{
-	const FString Json = TEXT(R"({
-		"document": {
-			"id":"0:0",
-			"name":"Doc",
-			"type":"DOCUMENT",
-			"prototypeStartNodeID":"1:1",
-			"children":[
-				{"id":"0:1","name":"Page","type":"CANVAS","children":[
-					{"id":"1:1","name":"PageOne","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"hover_button","name":"HoverCTA","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":40,"y":60,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.1,"g":0.4,"b":0.9,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_HOVER"},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"NAVIGATE"}]}],
-						 "children":[]}
-					]},
-					{"id":"2:1","name":"PageTwo","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"press_button","name":"PressBack","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":40,"y":60,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.8,"g":0.3,"b":0.2,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_PRESS"},"actions":[{"type":"BACK"}]}],
-						 "children":[]}
-					]}
-				]}
-			]
-		}
-	})");
-
-	FDesignDocument Document;
-	TestTrue(TEXT("Parse prototype hover/press fixture"), FFigmaParser::ParseDocument(Json, Document));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
-	TestTrue(TEXT("Prototype hover/press data available"), Data.PrototypeNavigation.IsValid());
-	if (!Data.PrototypeNavigation.IsValid())
-	{
-		return false;
-	}
-
-	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/FigmaPrototypeHoverAndPress");
-	DeleteGeneratedAssetsAtPath(OutputPath);
-
-	UWidgetBlueprint* Blueprint = FUMGGenerator::BuildWidgetBlueprint(Data, OutputPath);
-	TestTrue(TEXT("Build prototype hover/press widget blueprint"), Blueprint != nullptr);
-	if (!Blueprint)
-	{
-		return false;
-	}
-
-	FUMGGenerator::SaveWidgetBlueprint(Blueprint);
-	UWidgetBlueprintGeneratedClass* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(Blueprint->GeneratedClass);
-	TestTrue(TEXT("Generated hover/press class exists"), GeneratedClass != nullptr);
-	if (!GeneratedClass)
-	{
-		DeleteGeneratedAssetsAtPath(OutputPath);
-		return false;
-	}
-
-	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-	TestTrue(TEXT("Editor world exists"), World != nullptr);
-	UUserWidget* WidgetInstance = World ? CreateWidget<UUserWidget>(World, GeneratedClass) : nullptr;
-	TestTrue(TEXT("Prototype hover/press widget instance created"), WidgetInstance != nullptr);
-	if (!WidgetInstance || !WidgetInstance->WidgetTree)
-	{
-		DeleteGeneratedAssetsAtPath(OutputPath);
-		return false;
-	}
-
-	WidgetInstance->TakeWidget();
-	WidgetInstance->AddToViewport();
-
-	UWidgetSwitcher* Switcher = FindPrototypeSwitcherWidget(WidgetInstance, Data);
-	UButton* HoverButton = Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("hover_button")));
-	UButton* PressButton = Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("press_button")));
-	TestTrue(TEXT("Prototype hover/press switcher exists"), Switcher != nullptr);
-	TestTrue(TEXT("Prototype hover trigger exists"), HoverButton != nullptr);
-	TestTrue(TEXT("Prototype press trigger exists"), PressButton != nullptr);
-	if (!Switcher || !HoverButton || !PressButton)
-	{
-		DeleteGeneratedAssetsAtPath(OutputPath);
-		return false;
-	}
-
-	TestEqual(TEXT("Prototype hover/press initial page index"), Switcher->GetActiveWidgetIndex(), 0);
-	HoverButton->OnHovered.Broadcast();
-	TestEqual(TEXT("Hover trigger switches to target page"), Switcher->GetActiveWidgetIndex(), 1);
-	PressButton->OnPressed.Broadcast();
-	TestEqual(TEXT("Press trigger walks back to previous page"), Switcher->GetActiveWidgetIndex(), 0);
-
-	WidgetInstance->RemoveFromParent();
-	DeleteGeneratedAssetsAtPath(OutputPath);
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeAdvancedTriggersRuntimeWorkflowTest,
-	"Design2UMG.WidgetBlueprint.FigmaPrototypeAdvancedTriggersRuntime",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaPrototypeAdvancedTriggersRuntimeWorkflowTest::RunTest(const FString& Parameters)
-{
-	const FString Json = TEXT(R"({
-		"document": {
-			"id":"0:0",
-			"name":"Doc",
-			"type":"DOCUMENT",
-			"prototypeStartNodeID":"1:1",
-			"children":[
-				{"id":"0:1","name":"Page","type":"CANVAS","children":[
-					{"id":"1:1","name":"PageOne","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"drag_button","name":"DragCTA","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":32,"y":40,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.2,"g":0.7,"b":0.5,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_DRAG"},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"NAVIGATE"}]}],
-						 "children":[]},
-						{"id":"key_down_hotspot","name":"KeyDownHotspot","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":32,"y":104,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.3,"g":0.3,"b":0.8,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_KEY_DOWN","keyCodes":["ENTER"]},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"NAVIGATE"}]}],
-						 "children":[]},
-						{"id":"conditional_false_button","name":"ConditionalFalse","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":32,"y":168,"width":140,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.8,"g":0.4,"b":0.1,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[
-							{"type":"SET_VARIABLE","variableId":"var:isPrimary","variableValue":{"resolvedType":"BOOLEAN","value":false}},
-							{"type":"CONDITIONAL","conditionalBlocks":[
-								{"condition":{"type":"VARIABLE_ALIAS","id":"var:isPrimary"},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"NAVIGATE"}]},
-								{"condition":{"resolvedType":"BOOLEAN","value":true},"actions":[{"type":"NODE","destinationId":"3:1","navigation":"NAVIGATE"}]}
-							]}
-						 ]}],
-						 "children":[]}
-					]},
-					{"id":"2:1","name":"PageTwo","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"key_up_hotspot","name":"KeyUpHotspot","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":32,"y":40,"width":100,"height":40},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.2,"g":0.7,"b":0.4,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_KEY_UP","keyCodes":["ESCAPE"]},"actions":[{"type":"BACK"}]}],
-						 "children":[]}
-					]},
-					{"id":"3:1","name":"PageThree","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"page_three_title","name":"PageThreeTitle","type":"TEXT","visible":true,
-						 "absoluteBoundingBox":{"x":24,"y":32,"width":140,"height":28},
-						 "characters":"Fallback","style":{"fontSize":20}}
-					]}
-				]}
-			]
-		}
-	})");
-
-	FDesignDocument Document;
-	TestTrue(TEXT("Parse prototype advanced trigger fixture"), FFigmaParser::ParseDocument(Json, Document));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
-	TestTrue(TEXT("Prototype advanced trigger data available"), Data.PrototypeNavigation.IsValid());
-	if (!Data.PrototypeNavigation.IsValid())
-	{
-		return false;
-	}
-
-	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/FigmaPrototypeAdvancedTriggers");
-	DeleteGeneratedAssetsAtPath(OutputPath);
-
-	UWidgetBlueprint* Blueprint = FUMGGenerator::BuildWidgetBlueprint(Data, OutputPath);
-	TestTrue(TEXT("Build prototype advanced trigger widget blueprint"), Blueprint != nullptr);
-	if (!Blueprint)
-	{
-		return false;
-	}
-
-	FUMGGenerator::SaveWidgetBlueprint(Blueprint);
-	UWidgetBlueprintGeneratedClass* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(Blueprint->GeneratedClass);
-	TestTrue(TEXT("Generated advanced trigger class exists"), GeneratedClass != nullptr);
-	if (!GeneratedClass)
-	{
-		DeleteGeneratedAssetsAtPath(OutputPath);
-		return false;
-	}
-
-	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-	TestTrue(TEXT("Editor world exists"), World != nullptr);
-	UUserWidget* WidgetInstance = World ? CreateWidget<UUserWidget>(World, GeneratedClass) : nullptr;
-	TestTrue(TEXT("Prototype advanced trigger widget instance created"), WidgetInstance != nullptr);
-	if (!WidgetInstance || !WidgetInstance->WidgetTree)
-	{
-		DeleteGeneratedAssetsAtPath(OutputPath);
-		return false;
-	}
-
-	WidgetInstance->TakeWidget();
-	WidgetInstance->AddToViewport();
-
-	UDesign2UMGPrototypeNavigationUserWidgetExtension* UserExtension =
-		WidgetInstance->GetExtension<UDesign2UMGPrototypeNavigationUserWidgetExtension>();
-	UWidgetSwitcher* Switcher = FindPrototypeSwitcherWidget(WidgetInstance, Data);
-	UButton* DragButton = Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("drag_button")));
-	UButton* ConditionalFalseButton = Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("conditional_false_button")));
-	TestNotNull(TEXT("Prototype user extension exists"), UserExtension);
-	TestTrue(TEXT("Prototype switcher exists"), Switcher != nullptr);
-	TestTrue(TEXT("Prototype drag trigger exists"), DragButton != nullptr);
-	TestTrue(TEXT("Prototype conditional trigger exists"), ConditionalFalseButton != nullptr);
-	if (!UserExtension || !Switcher || !DragButton || !ConditionalFalseButton)
-	{
-		DeleteGeneratedAssetsAtPath(OutputPath);
-		return false;
-	}
-
-	auto FindBindingByTrigger = [&](const TCHAR* TriggerId) -> const FUMGPrototypeNavigationBinding*
-	{
-		return Data.PrototypeNavigation.ClickBindings.FindByPredicate(
-			[&](const FUMGPrototypeNavigationBinding& Binding)
-			{
-				return Binding.TriggerWidgetId == TriggerId;
-			});
-	};
-
-	const FUMGPrototypeNavigationBinding* DragBinding = FindBindingByTrigger(TEXT("drag_button"));
-	TestNotNull(TEXT("Drag binding available for runtime test"), DragBinding);
-	if (!DragBinding)
-	{
-		DeleteGeneratedAssetsAtPath(OutputPath);
-		return false;
-	}
-
-	TestEqual(TEXT("Advanced trigger initial page index"), Switcher->GetActiveWidgetIndex(), 0);
-	TestTrue(TEXT("Drag trigger binds native drag delegate"), DragButton->OnButtonDragDetected.IsBound());
-	UserExtension->HandleNavigationRequest(*DragBinding);
-	TestEqual(TEXT("Drag trigger navigates to second page"), Switcher->GetActiveWidgetIndex(), 1);
-
-	TestTrue(TEXT("Keyboard key-up trigger handles Escape"), UserExtension->HandleKeyboardInput(EKeys::Escape, false));
-	TestEqual(TEXT("Keyboard key-up trigger walks back to page one"), Switcher->GetActiveWidgetIndex(), 0);
-
-	TestTrue(TEXT("Keyboard key-down trigger handles Enter"), UserExtension->HandleKeyboardInput(EKeys::Enter, true));
-	TestEqual(TEXT("Keyboard key-down trigger navigates to page two"), Switcher->GetActiveWidgetIndex(), 1);
-	TestTrue(TEXT("Keyboard key-up trigger handles Escape again"), UserExtension->HandleKeyboardInput(EKeys::Escape, false));
-	TestEqual(TEXT("Keyboard key-up trigger returns to page one again"), Switcher->GetActiveWidgetIndex(), 0);
-
-	ConditionalFalseButton->OnClicked.Broadcast();
-	TestEqual(TEXT("Conditional false branch navigates to third page"), Switcher->GetActiveWidgetIndex(), 2);
-
-	WidgetInstance->RemoveFromParent();
-	DeleteGeneratedAssetsAtPath(OutputPath);
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeSinglePageOpenLinkRuntimeWorkflowTest,
-	"Design2UMG.WidgetBlueprint.FigmaPrototypeSinglePageOpenLinkRuntime",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaPrototypeSinglePageOpenLinkRuntimeWorkflowTest::RunTest(const FString& Parameters)
-{
-	FScopedPrototypeOpenUrlCapture OpenUrlCapture;
-
-	const FString Json = TEXT(R"({
-		"document": {
-			"id":"0:0",
-			"name":"Doc",
-			"type":"DOCUMENT",
-			"children":[
-				{"id":"0:1","name":"Page","type":"CANVAS","children":[
-					{"id":"1:1","name":"PageOne","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"link_button","name":"Link","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":40,"y":120,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.2,"g":0.7,"b":0.5,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"URL","url":"https://example.com/single"}]}],
-						 "children":[]}
-					]}
-				]}
-			]
-		}
-	})");
-
-	FDesignDocument Document;
-	TestTrue(TEXT("Parse single-page open-link fixture"), FFigmaParser::ParseDocument(Json, Document));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
-	TestTrue(TEXT("Single-page open-link navigation data available"), Data.PrototypeNavigation.IsValid());
-	TestFalse(TEXT("Single-page open-link does not require switcher"), Data.PrototypeNavigation.RequiresSwitcher());
-	if (!Data.PrototypeNavigation.IsValid())
-	{
-		return false;
-	}
-
-	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/FigmaPrototypeSinglePageOpenLink");
-	DeleteGeneratedAssetsAtPath(OutputPath);
-
-	UWidgetBlueprint* Blueprint = FUMGGenerator::BuildWidgetBlueprint(Data, OutputPath);
-	TestTrue(TEXT("Build single-page open-link widget blueprint"), Blueprint != nullptr);
-	if (!Blueprint)
-	{
-		return false;
-	}
-
-	FUMGGenerator::SaveWidgetBlueprint(Blueprint);
-	UWidgetBlueprintGeneratedClass* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(Blueprint->GeneratedClass);
-	TestTrue(TEXT("Generated class exists"), GeneratedClass != nullptr);
-	if (!GeneratedClass)
-	{
-		DeleteGeneratedAssetsAtPath(OutputPath);
-		return false;
-	}
-
-	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-	TestTrue(TEXT("Editor world exists"), World != nullptr);
-	UUserWidget* WidgetInstance = World ? CreateWidget<UUserWidget>(World, GeneratedClass) : nullptr;
-	TestTrue(TEXT("Single-page open-link widget instance created"), WidgetInstance != nullptr);
-	if (!WidgetInstance || !WidgetInstance->WidgetTree)
-	{
-		DeleteGeneratedAssetsAtPath(OutputPath);
-		return false;
-	}
-
-	WidgetInstance->TakeWidget();
-	WidgetInstance->AddToViewport();
-
-	UWidgetSwitcher* Switcher = FindPrototypeSwitcherWidget(WidgetInstance, Data);
-	UButton* LinkButton = Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("link_button")));
-	TestTrue(TEXT("Single-page open-link trigger exists"), LinkButton != nullptr);
-	TestTrue(TEXT("Single-page open-link does not synthesize switcher"), Switcher == nullptr);
-	if (!LinkButton)
-	{
-		DeleteGeneratedAssetsAtPath(OutputPath);
-		return false;
-	}
-
-	LinkButton->OnClicked.Broadcast();
-	TestEqual(TEXT("Single-page open-link captures URL through runtime hook"),
-		GDesign2UMGPrototypeNavigationLastOpenedUrl,
-		TEXT("https://example.com/single"));
-
-	WidgetInstance->RemoveFromParent();
-	DeleteGeneratedAssetsAtPath(OutputPath);
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeSlideTransitionRuntimeWorkflowTest,
-	"Design2UMG.WidgetBlueprint.FigmaPrototypeSlideTransitionRuntime",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaPrototypeSlideTransitionRuntimeWorkflowTest::RunTest(const FString& Parameters)
-{
-	const FString Json = TEXT(R"({
-		"document": {
-			"id":"0:0",
-			"name":"Doc",
-			"type":"DOCUMENT",
-			"prototypeStartNodeID":"1:1",
-			"children":[
-				{"id":"0:1","name":"Page","type":"CANVAS","children":[
-					{"id":"1:1","name":"PageOne","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"cta_button","name":"CTA","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":40,"y":60,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.1,"g":0.4,"b":0.9,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"NAVIGATE","transition":{"type":"PUSH","direction":"LEFT","duration":160,"easing":{"type":"EASE_OUT"}}}]}],
-						 "children":[]}
-					]},
-					{"id":"2:1","name":"PageTwo","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"page2_title","name":"Done","type":"TEXT","visible":true,
-						 "absoluteBoundingBox":{"x":32,"y":48,"width":120,"height":32},
-						 "characters":"Done",
-						 "style":{"fontFamily":"Inter","fontSize":24,"fontWeight":600,"textAlignHorizontal":"LEFT","textAlignVertical":"TOP","textDecoration":"NONE","letterSpacing":0,"lineHeightUnit":"AUTO","lineHeightPx":0}}
-					]}
-				]}
-			]
-		}
-	})");
-
-	FDesignDocument Document;
-	TestTrue(TEXT("Parse prototype slide fixture"), FFigmaParser::ParseDocument(Json, Document));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
-	TestTrue(TEXT("Prototype slide data available"), Data.PrototypeNavigation.IsValid());
-	if (!Data.PrototypeNavigation.IsValid())
-	{
-		return false;
-	}
-
-	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/FigmaPrototypeSlideTransition");
-	DeleteGeneratedAssetsAtPath(OutputPath);
-
-	UWidgetBlueprint* Blueprint = FUMGGenerator::BuildWidgetBlueprint(Data, OutputPath);
-	TestTrue(TEXT("Build prototype slide widget blueprint"), Blueprint != nullptr);
-	if (!Blueprint)
-	{
-		return false;
-	}
-
-	FUMGGenerator::SaveWidgetBlueprint(Blueprint);
-	UWidgetBlueprintGeneratedClass* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(Blueprint->GeneratedClass);
-	TestTrue(TEXT("Generated slide class exists"), GeneratedClass != nullptr);
-	if (!GeneratedClass)
-	{
-		DeleteGeneratedAssetsAtPath(OutputPath);
-		return false;
-	}
-
-	UWidgetAnimation* SlideOutgoingAnimation =
-		FindGeneratedAnimation(GeneratedClass, TEXT("__d2u_nav_anim_000_out"));
-	UWidgetAnimation* SlideIncomingAnimation =
-		FindGeneratedAnimation(GeneratedClass, TEXT("__d2u_nav_anim_000_in"));
-	TestTrue(TEXT("Slide outgoing animation generated"), SlideOutgoingAnimation != nullptr);
-	TestTrue(TEXT("Slide incoming animation generated"), SlideIncomingAnimation != nullptr);
-	TestTrue(TEXT("Generated slide class exports transition animations"),
-		GeneratedClass->Animations.Num() >= 2);
-
-	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-	TestTrue(TEXT("Editor world exists"), World != nullptr);
-	UUserWidget* WidgetInstance = World ? CreateWidget<UUserWidget>(World, GeneratedClass) : nullptr;
-	TestTrue(TEXT("Prototype slide widget instance created"), WidgetInstance != nullptr);
-	if (!WidgetInstance || !WidgetInstance->WidgetTree)
-	{
-		DeleteGeneratedAssetsAtPath(OutputPath);
-		return false;
-	}
-
-	WidgetInstance->TakeWidget();
-	WidgetInstance->AddToViewport();
-
-	UWidgetSwitcher* Switcher = FindPrototypeSwitcherWidget(WidgetInstance, Data);
-	UButton* TriggerButton = Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("cta_button")));
-	TestTrue(TEXT("Prototype slide switcher exists"), Switcher != nullptr);
-	TestTrue(TEXT("Prototype slide trigger button exists"), TriggerButton != nullptr);
-	if (!Switcher || !TriggerButton)
-	{
-		DeleteGeneratedAssetsAtPath(OutputPath);
-		return false;
-	}
-
-	TriggerButton->OnClicked.Broadcast();
-	TickCoreTickerFor(0.04f);
-	TestEqual(TEXT("Prototype slide keeps old page before halfway"), Switcher->GetActiveWidgetIndex(), 0);
-	TestTrue(TEXT("Prototype slide updates translation during transition"),
-		!FMath::IsNearlyZero(Switcher->GetRenderTransform().Translation.X, 0.5f));
-	TickCoreTickerFor(0.06f);
-	TestEqual(TEXT("Prototype slide switches to target page"), Switcher->GetActiveWidgetIndex(), 1);
-	TickCoreTickerFor(0.10f);
-	TestEqual(TEXT("Prototype slide finishes on target page"), Switcher->GetActiveWidgetIndex(), 1);
-	TestTrue(TEXT("Prototype slide restores translation"), Switcher->GetRenderTransform().Translation.IsNearlyZero());
-	TestTrue(TEXT("Prototype slide restores opacity"), FMath::IsNearlyEqual(Switcher->GetRenderOpacity(), 1.0f, 0.001f));
-
-	WidgetInstance->RemoveFromParent();
 	DeleteGeneratedAssetsAtPath(OutputPath);
 	return true;
 }
@@ -2006,607 +1220,8 @@ bool FFigmaGridSlotSemanticsRuntimeWorkflowTest::RunTest(const FString& Paramete
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaTargetNodeAndImageMappingWorkflowTest,
-	"Design2UMG.BatchImport.FigmaTargetNodeAndImageMapping",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaTargetNodeAndImageMappingWorkflowTest::RunTest(const FString& Parameters)
-{
-	const FString FixtureJsonPath = GetFixturePath(TEXT("FigmaComplex.json"));
-	if (FixtureJsonPath.IsEmpty() || !FPaths::FileExists(FixtureJsonPath))
-	{
-		AddWarning(FString::Printf(TEXT("Figma fixture not found, skipping: %s"), *FixtureJsonPath));
-		return true;
-	}
+#include "Design2UMGWorkflowTests.ImportBake.inl"
 
-	const FString TempRoot = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Design2UMG"), TEXT("WorkflowTemp"), TEXT("FigmaTargetNode"));
-	const FString TempImagesDir = FPaths::Combine(TempRoot, TEXT("images"));
-	IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
-	IFileManager::Get().MakeDirectory(*TempImagesDir, true);
-
-	const FString TempJsonPath = FPaths::Combine(TempRoot, TEXT("design.json"));
-	TestTrue(TEXT("Copy figma fixture to temp location"), IFileManager::Get().Copy(*TempJsonPath, *FixtureJsonPath, true, true) == COPY_OK);
-	TestTrue(TEXT("Write local avatar image"), WriteTinyPng(FPaths::Combine(TempImagesDir, TEXT("img_avatar_001.png"))));
-	TestTrue(TEXT("Write local card image"), WriteTinyPng(FPaths::Combine(TempImagesDir, TEXT("img_card_bg_002.png"))));
-
-	FDesignDocument Document;
-	FString ErrorMessage;
-	TestTrue(TEXT("Load targeted local Figma document"), Design2UMGLocalFigmaImport::LoadLocalFigmaDocument(TempJsonPath, Document, ErrorMessage, TEXT("50:7")));
-	if (!ErrorMessage.IsEmpty())
-	{
-		AddInfo(ErrorMessage);
-	}
-
-	TestEqual(TEXT("Targeted document should keep one root child"), Document.Children.Num(), 1);
-	if (Document.Children.Num() != 1 || !Document.Children[0].IsValid())
-	{
-		IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
-		return false;
-	}
-
-	TestEqual(TEXT("Targeted root id preserved"), Document.Children[0]->Id, TEXT("50:7"));
-
-	TSet<FString> ImageRefs;
-	FFigmaParser::CollectImageRefs(Document, ImageRefs);
-	TestEqual(TEXT("Filtered node keeps one mapped image ref"), ImageRefs.Num(), 1);
-	TestTrue(TEXT("Mapped image ref should become local png path"),
-		ImageRefs.Contains(FPaths::Combine(TempImagesDir, TEXT("img_card_bg_002.png"))));
-
-	FUMGWidgetData Data;
-	DesignImportPipeline::ConvertDocument(Document, Data);
-	TestFalse(TEXT("Filtered figma target yields widget name"), Data.WidgetName.IsEmpty());
-
-	IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLocalLuminosityBakeWorkflowTest,
-	"Design2UMG.BatchImport.FigmaLocalLuminosityBake",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaLocalLuminosityBakeWorkflowTest::RunTest(const FString& Parameters)
-{
-	const FString TempRoot = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Design2UMG"), TEXT("WorkflowTemp"), TEXT("FigmaLuminosityBake"));
-	const FString TempImagesDir = FPaths::Combine(TempRoot, TEXT("images"));
-	IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
-	IFileManager::Get().MakeDirectory(*TempImagesDir, true);
-
-	const FString TempJsonPath = FPaths::Combine(TempRoot, TEXT("design.json"));
-	const FString SourcePngPath = FPaths::Combine(TempImagesDir, TEXT("img_lum.png"));
-	const TArray<FColor> Pixels = {
-		FColor(192, 192, 192, 255),
-		FColor(224, 224, 224, 255),
-		FColor(128, 128, 128, 128),
-		FColor(255, 255, 255, 0),
-	};
-	TestTrue(TEXT("Write test png"), WriteTestPng(SourcePngPath, Pixels, 2, 2));
-
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [{
-					"id": "lum_node",
-					"name": "LumNode",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 80},
-					"absoluteRenderBounds": {"x": 0, "y": 0, "width": 120, "height": 80},
-					"fills": [
-						{"type": "SOLID", "visible": true, "blendMode": "NORMAL", "color": {"r": 0.9254902, "g": 0.9019608, "b": 0.94117647, "a": 1}},
-						{"type": "IMAGE", "visible": true, "blendMode": "LUMINOSITY", "imageRef": "img_lum", "scaleMode": "FIT", "scalingFactor": 0.5}
-					],
-					"children": []
-				}]
-			}]
-		}
-	})");
-	TestTrue(TEXT("Write local figma json"), FFileHelper::SaveStringToFile(Json, *TempJsonPath));
-
-	FDesignDocument Document;
-	FString ErrorMessage;
-	const bool bLoaded = Design2UMGLocalFigmaImport::LoadLocalFigmaDocument(TempJsonPath, Document, ErrorMessage);
-	TestTrue(TEXT("Load local figma luminosity fixture"), bLoaded);
-	if (!ErrorMessage.IsEmpty())
-	{
-		AddInfo(ErrorMessage);
-	}
-	if (!bLoaded || Document.Children.Num() == 0)
-	{
-		IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
-		return false;
-	}
-
-	const TSharedPtr<FDesignNode>& Node = Document.Children[0];
-	TestTrue(TEXT("Local document keeps both fills"), Node->Fills.Num() >= 2);
-	if (Node->Fills.Num() < 2)
-	{
-		IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
-		return false;
-	}
-
-	const FDesignFill& ImageFill = Node->Fills[1];
-	TestTrue(TEXT("Luminosity fill is rewritten to local png path"), FPaths::FileExists(ImageFill.Image.Url));
-	TestTrue(TEXT("Luminosity fill now points at derived png"), !FPaths::IsSamePath(FPaths::ConvertRelativePathToFull(ImageFill.Image.Url), FPaths::ConvertRelativePathToFull(SourcePngPath)));
-	TestTrue(TEXT("Luminosity fill blend mode baked to normal"), ImageFill.BlendMode == TEXT("NORMAL"));
-	TestTrue(TEXT("Luminosity fill opacity baked into derived png"), FMath::IsNearlyEqual(ImageFill.Image.Opacity, 1.0f));
-	TestTrue(TEXT("Luminosity fill scaling factor cleared"), !ImageFill.Image.bHasScalingFactor);
-
-	IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLocalLuminosityBakeScalingFactorWorkflowTest,
-	"Design2UMG.BatchImport.FigmaLocalLuminosityBakeScalingFactor",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaLocalLuminosityBakeScalingFactorWorkflowTest::RunTest(const FString& Parameters)
-{
-	const FString TempRoot = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Design2UMG"), TEXT("WorkflowTemp"), TEXT("FigmaLuminosityBakeScaling"));
-	const FString TempImagesDir = FPaths::Combine(TempRoot, TEXT("images"));
-	IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
-	IFileManager::Get().MakeDirectory(*TempImagesDir, true);
-
-	const FString TempJsonPath = FPaths::Combine(TempRoot, TEXT("design.json"));
-	const FString SourcePngPath = FPaths::Combine(TempImagesDir, TEXT("img_lum.png"));
-	const TArray<FColor> Pixels = {
-		FColor(0, 0, 0, 0),
-		FColor(255, 255, 255, 255),
-		FColor(64, 128, 255, 255),
-		FColor(255, 64, 128, 128),
-	};
-	TestTrue(TEXT("Write scaling test png"), WriteTestPng(SourcePngPath, Pixels, 2, 2));
-
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [
-					{
-						"id": "lum_half",
-						"name": "LumHalf",
-						"type": "FRAME",
-						"visible": true,
-						"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 80},
-						"absoluteRenderBounds": {"x": 0, "y": 0, "width": 120, "height": 80},
-						"fills": [
-							{"type": "SOLID", "visible": true, "blendMode": "NORMAL", "color": {"r": 0.9254902, "g": 0.9019608, "b": 0.94117647, "a": 1}},
-							{"type": "IMAGE", "visible": true, "blendMode": "LUMINOSITY", "imageRef": "img_lum", "scaleMode": "FIT", "scalingFactor": 0.5}
-						],
-						"children": []
-					},
-					{
-						"id": "lum_full",
-						"name": "LumFull",
-						"type": "FRAME",
-						"visible": true,
-						"absoluteBoundingBox": {"x": 140, "y": 0, "width": 120, "height": 80},
-						"absoluteRenderBounds": {"x": 140, "y": 0, "width": 120, "height": 80},
-						"fills": [
-							{"type": "SOLID", "visible": true, "blendMode": "NORMAL", "color": {"r": 0.9254902, "g": 0.9019608, "b": 0.94117647, "a": 1}},
-							{"type": "IMAGE", "visible": true, "blendMode": "LUMINOSITY", "imageRef": "img_lum", "scaleMode": "FIT", "scalingFactor": 1.0}
-						],
-						"children": []
-					}
-				]
-			}]
-		}
-	})");
-	TestTrue(TEXT("Write scaling local figma json"), FFileHelper::SaveStringToFile(Json, *TempJsonPath));
-
-	FDesignDocument Document;
-	FString ErrorMessage;
-	const bool bLoaded = Design2UMGLocalFigmaImport::LoadLocalFigmaDocument(TempJsonPath, Document, ErrorMessage);
-	TestTrue(TEXT("Load local figma scaling fixture"), bLoaded);
-	if (!ErrorMessage.IsEmpty())
-	{
-		AddInfo(ErrorMessage);
-	}
-	if (!bLoaded || Document.Children.Num() < 2)
-	{
-		IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
-		return false;
-	}
-
-	const FString HalfPath = Document.Children[0]->Fills.Num() > 1 ? Document.Children[0]->Fills[1].Image.Url : FString();
-	const FString FullPath = Document.Children[1]->Fills.Num() > 1 ? Document.Children[1]->Fills[1].Image.Url : FString();
-	TestTrue(TEXT("Half-scale derived png exists"), !HalfPath.IsEmpty() && FPaths::FileExists(HalfPath));
-	TestTrue(TEXT("Full-scale derived png exists"), !FullPath.IsEmpty() && FPaths::FileExists(FullPath));
-	TestTrue(TEXT("FIT luminosity bake should reuse the same derived path"), !HalfPath.IsEmpty() && !FullPath.IsEmpty() && FPaths::IsSamePath(HalfPath, FullPath));
-	if (HalfPath.IsEmpty() || FullPath.IsEmpty() || !FPaths::IsSamePath(HalfPath, FullPath))
-	{
-		IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
-		return false;
-	}
-
-	TArray<uint8> HalfBytes;
-	TArray<uint8> FullBytes;
-	TestTrue(TEXT("Load half-scale derived png"), FFileHelper::LoadFileToArray(HalfBytes, *HalfPath));
-	TestTrue(TEXT("Load full-scale derived png"), FFileHelper::LoadFileToArray(FullBytes, *FullPath));
-	TestTrue(TEXT("FIT luminosity bake should keep identical baked image content"), HalfBytes == FullBytes);
-
-	IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLocalBlendModeBakeWorkflowTest,
-	"Design2UMG.BatchImport.FigmaLocalBlendModeBake",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaLocalBlendModeBakeWorkflowTest::RunTest(const FString& Parameters)
-{
-	const FString TempRoot = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Design2UMG"), TEXT("WorkflowTemp"), TEXT("FigmaBlendModeBake"));
-	const FString TempImagesDir = FPaths::Combine(TempRoot, TEXT("images"));
-	IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
-	IFileManager::Get().MakeDirectory(*TempImagesDir, true);
-
-	const FString TempJsonPath = FPaths::Combine(TempRoot, TEXT("design.json"));
-	const FString SourcePngPath = FPaths::Combine(TempImagesDir, TEXT("img_blend.png"));
-	const TArray<FColor> Pixels = {
-		FColor(128, 128, 128, 255)
-	};
-	TestTrue(TEXT("Write blend test png"), WriteTestPng(SourcePngPath, Pixels, 1, 1));
-
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [
-					{
-						"id": "mul_node",
-						"name": "Multiply",
-						"type": "FRAME",
-						"visible": true,
-						"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 80},
-						"absoluteRenderBounds": {"x": 0, "y": 0, "width": 120, "height": 80},
-						"fills": [
-							{"type": "SOLID", "visible": true, "blendMode": "NORMAL", "color": {"r": 0.2509804, "g": 0.2509804, "b": 0.2509804, "a": 1}},
-							{"type": "IMAGE", "visible": true, "blendMode": "MULTIPLY", "imageRef": "img_blend", "scaleMode": "FIT"}
-						],
-						"children": []
-					},
-					{
-						"id": "screen_node",
-						"name": "Screen",
-						"type": "FRAME",
-						"visible": true,
-						"absoluteBoundingBox": {"x": 140, "y": 0, "width": 120, "height": 80},
-						"absoluteRenderBounds": {"x": 140, "y": 0, "width": 120, "height": 80},
-						"fills": [
-							{"type": "SOLID", "visible": true, "blendMode": "NORMAL", "color": {"r": 0.2509804, "g": 0.2509804, "b": 0.2509804, "a": 1}},
-							{"type": "IMAGE", "visible": true, "blendMode": "SCREEN", "imageRef": "img_blend", "scaleMode": "FIT"}
-						],
-						"children": []
-					},
-					{
-						"id": "overlay_node",
-						"name": "Overlay",
-						"type": "FRAME",
-						"visible": true,
-						"absoluteBoundingBox": {"x": 280, "y": 0, "width": 120, "height": 80},
-						"absoluteRenderBounds": {"x": 280, "y": 0, "width": 120, "height": 80},
-						"fills": [
-							{"type": "SOLID", "visible": true, "blendMode": "NORMAL", "color": {"r": 0.2509804, "g": 0.2509804, "b": 0.2509804, "a": 1}},
-							{"type": "IMAGE", "visible": true, "blendMode": "OVERLAY", "imageRef": "img_blend", "scaleMode": "FIT"}
-						],
-						"children": []
-					}
-				]
-			}]
-		}
-	})");
-	TestTrue(TEXT("Write blend local figma json"), FFileHelper::SaveStringToFile(Json, *TempJsonPath));
-
-	FDesignDocument Document;
-	FString ErrorMessage;
-	const bool bLoaded = Design2UMGLocalFigmaImport::LoadLocalFigmaDocument(TempJsonPath, Document, ErrorMessage);
-	TestTrue(TEXT("Load local figma blend fixture"), bLoaded);
-	if (!ErrorMessage.IsEmpty())
-	{
-		AddInfo(ErrorMessage);
-	}
-	if (!bLoaded || Document.Children.Num() < 3)
-	{
-		IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
-		return false;
-	}
-
-	auto ValidateBlendNode = [this](const TSharedPtr<FDesignNode>& Node, uint8 ExpectedGray, const TCHAR* Label)
-	{
-		const FString KeepsFillsLabel = FString::Printf(TEXT("%s keeps both fills"), Label);
-		TestTrue(*KeepsFillsLabel, Node->Fills.Num() >= 2);
-		if (Node->Fills.Num() < 2)
-		{
-			return false;
-		}
-
-		const FDesignFill& ImageFill = Node->Fills[1];
-		const FString DerivedExistsLabel = FString::Printf(TEXT("%s derived png exists"), Label);
-		const FString BlendNormalLabel = FString::Printf(TEXT("%s blend mode baked to normal"), Label);
-		TestTrue(*DerivedExistsLabel, FPaths::FileExists(ImageFill.Image.Url));
-		TestTrue(*BlendNormalLabel, ImageFill.BlendMode == TEXT("NORMAL"));
-
-		TArray<FColor> DecodedPixels;
-		int32 Width = 0;
-		int32 Height = 0;
-		const FString DecodeLabel = FString::Printf(TEXT("%s derived png decodes"), Label);
-		TestTrue(*DecodeLabel, ReadTestPng(ImageFill.Image.Url, DecodedPixels, Width, Height));
-		if (DecodedPixels.Num() == 0)
-		{
-			return false;
-		}
-
-		const FColor Pixel = DecodedPixels[0];
-		const FString PixelLabel = FString::Printf(TEXT("%s blended pixel matches expected gray"), Label);
-		return TestTrue(*PixelLabel,
-			FMath::Abs(Pixel.R - ExpectedGray) <= 2
-			&& FMath::Abs(Pixel.G - ExpectedGray) <= 2
-			&& FMath::Abs(Pixel.B - ExpectedGray) <= 2);
-	};
-
-	const bool bMultiplyOk = ValidateBlendNode(Document.Children[0], 32, TEXT("Multiply"));
-	const bool bScreenOk = ValidateBlendNode(Document.Children[1], 160, TEXT("Screen"));
-	const bool bOverlayOk = ValidateBlendNode(Document.Children[2], 64, TEXT("Overlay"));
-
-	IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
-	return bMultiplyOk && bScreenOk && bOverlayOk;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenLocalBlendModeBakeWorkflowTest,
-	"Design2UMG.BatchImport.PenLocalBlendModeBake",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FPenLocalBlendModeBakeWorkflowTest::RunTest(const FString& Parameters)
-{
-	const FString TempRoot = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Design2UMG"), TEXT("WorkflowTemp"), TEXT("PenBlendModeBake"));
-	IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
-	IFileManager::Get().MakeDirectory(*TempRoot, true);
-
-	const FString TempPenPath = FPaths::Combine(TempRoot, TEXT("design.pen"));
-	const FString SourcePngPath = FPaths::Combine(TempRoot, TEXT("img_blend.png"));
-	const TArray<FColor> Pixels = {
-		FColor(128, 128, 128, 255)
-	};
-	TestTrue(TEXT("Write pen blend test png"), WriteTestPng(SourcePngPath, Pixels, 1, 1));
-
-	FString EscapedImagePath = FPaths::ConvertRelativePathToFull(SourcePngPath);
-	EscapedImagePath.ReplaceInline(TEXT("\\"), TEXT("\\\\"));
-	const FString Json = FString::Printf(TEXT(R"({
-		"children": [
-			{
-				"id": "mul_node",
-				"type": "frame",
-				"width": 120,
-				"height": 80,
-				"fill": [
-					{"type": "color", "blendMode": "NORMAL", "color": "#404040"},
-					{"type": "image", "blendMode": "MULTIPLY", "url": "%s", "mode": "fit"}
-				]
-			},
-			{
-				"id": "screen_node",
-				"type": "frame",
-				"x": 140,
-				"width": 120,
-				"height": 80,
-				"fill": [
-					{"type": "color", "blendMode": "NORMAL", "color": "#404040"},
-					{"type": "image", "blendMode": "SCREEN", "url": "%s", "mode": "fit"}
-				]
-			},
-			{
-				"id": "overlay_node",
-				"type": "frame",
-				"x": 280,
-				"width": 120,
-				"height": 80,
-				"fill": [
-					{"type": "color", "blendMode": "NORMAL", "color": "#404040"},
-					{"type": "image", "blendMode": "OVERLAY", "url": "%s", "mode": "fit"}
-				]
-			}
-		]
-	})"), *EscapedImagePath, *EscapedImagePath, *EscapedImagePath);
-	TestTrue(TEXT("Write pen blend fixture"), FFileHelper::SaveStringToFile(Json, *TempPenPath));
-
-	FDesignDocument Document;
-	FString ErrorMessage;
-	const bool bLoaded = DesignImportPipeline::LoadPenDocument(TempPenPath, FString(), Document, &ErrorMessage);
-	TestTrue(TEXT("Load pen blend fixture"), bLoaded);
-	if (!ErrorMessage.IsEmpty())
-	{
-		AddInfo(ErrorMessage);
-	}
-	if (!bLoaded)
-	{
-		IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
-		return false;
-	}
-
-	FUMGWidgetData Data;
-	DesignImportPipeline::ConvertDocument(Document, Data);
-	TestTrue(TEXT("Pen blend conversion keeps all top-level nodes"), Document.Children.Num() == 3 && Data.RootWidget.Children.Num() == 3);
-	if (Document.Children.Num() < 3)
-	{
-		IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
-		return false;
-	}
-
-	const FString FullSourcePath = FPaths::ConvertRelativePathToFull(SourcePngPath);
-	auto ValidateBlendNode = [this, &FullSourcePath](const TSharedPtr<FDesignNode>& Node, const uint8 ExpectedGray, const TCHAR* Label)
-	{
-		const FString KeepsFillsLabel = FString::Printf(TEXT("%s keeps both fills"), Label);
-		TestTrue(*KeepsFillsLabel, Node.IsValid() && Node->Fills.Num() >= 2);
-		if (!Node.IsValid() || Node->Fills.Num() < 2)
-		{
-			return false;
-		}
-
-		const FDesignFill& ImageFill = Node->Fills[1];
-		const FString DerivedExistsLabel = FString::Printf(TEXT("%s derived png exists"), Label);
-		const FString DerivedPathLabel = FString::Printf(TEXT("%s derived png differs from source"), Label);
-		const FString BlendNormalLabel = FString::Printf(TEXT("%s blend mode baked to normal"), Label);
-		const FString OpacityLabel = FString::Printf(TEXT("%s image opacity baked into texture"), Label);
-		const FString ScalingFactorLabel = FString::Printf(TEXT("%s scaling factor cleared"), Label);
-		TestTrue(*DerivedExistsLabel, FPaths::FileExists(ImageFill.Image.Url));
-		TestTrue(*DerivedPathLabel, !FPaths::IsSamePath(FPaths::ConvertRelativePathToFull(ImageFill.Image.Url), FullSourcePath));
-		TestTrue(*BlendNormalLabel, ImageFill.BlendMode == TEXT("NORMAL"));
-		TestTrue(*OpacityLabel, FMath::IsNearlyEqual(ImageFill.Image.Opacity, 1.0f));
-		TestTrue(*ScalingFactorLabel, !ImageFill.Image.bHasScalingFactor);
-
-		TArray<FColor> DecodedPixels;
-		int32 Width = 0;
-		int32 Height = 0;
-		const FString DecodeLabel = FString::Printf(TEXT("%s derived png decodes"), Label);
-		TestTrue(*DecodeLabel, ReadTestPng(ImageFill.Image.Url, DecodedPixels, Width, Height));
-		if (DecodedPixels.Num() == 0)
-		{
-			return false;
-		}
-
-		const FColor Pixel = DecodedPixels[0];
-		const FString PixelLabel = FString::Printf(TEXT("%s blended pixel matches expected gray"), Label);
-		return TestTrue(*PixelLabel,
-			FMath::Abs(Pixel.R - ExpectedGray) <= 2
-			&& FMath::Abs(Pixel.G - ExpectedGray) <= 2
-			&& FMath::Abs(Pixel.B - ExpectedGray) <= 2);
-	};
-
-	const bool bMultiplyOk = ValidateBlendNode(Document.Children[0], 32, TEXT("Pen Multiply"));
-	const bool bScreenOk = ValidateBlendNode(Document.Children[1], 160, TEXT("Pen Screen"));
-	const bool bOverlayOk = ValidateBlendNode(Document.Children[2], 64, TEXT("Pen Overlay"));
-
-	IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
-	return bMultiplyOk && bScreenOk && bOverlayOk;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLocalLayerBlurBakeWorkflowTest,
-	"Design2UMG.BatchImport.FigmaLocalLayerBlurBake",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaLocalLayerBlurBakeWorkflowTest::RunTest(const FString& Parameters)
-{
-	const FString TempRoot = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Design2UMG"), TEXT("WorkflowTemp"), TEXT("FigmaLayerBlurBake"));
-	const FString TempImagesDir = FPaths::Combine(TempRoot, TEXT("images"));
-	IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
-	IFileManager::Get().MakeDirectory(*TempImagesDir, true);
-
-	const FString TempJsonPath = FPaths::Combine(TempRoot, TEXT("design.json"));
-	const FString SourcePngPath = FPaths::Combine(TempImagesDir, TEXT("avatar.png"));
-	const TArray<FColor> Pixels = {
-		FColor(32, 64, 160, 255),
-		FColor(64, 128, 224, 255),
-		FColor(160, 96, 32, 255),
-		FColor(224, 192, 160, 255),
-	};
-	TestTrue(TEXT("Write blur test png"), WriteTestPng(SourcePngPath, Pixels, 2, 2));
-
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [{
-					"id": "root_frame",
-					"name": "RootFrame",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 160, "height": 120},
-					"absoluteRenderBounds": {"x": 0, "y": 0, "width": 160, "height": 120},
-					"children": [{
-						"id": "blur_avatar",
-						"name": "BlurAvatar",
-						"type": "ELLIPSE",
-						"visible": true,
-						"absoluteBoundingBox": {"x": 24, "y": 20, "width": 26, "height": 26},
-						"absoluteRenderBounds": {"x": 2.25, "y": -1.75, "width": 69.5, "height": 69.5},
-						"fills": [
-							{"type": "IMAGE", "visible": true, "blendMode": "NORMAL", "imageRef": "avatar", "scaleMode": "FIT"},
-							{"type": "IMAGE", "visible": true, "blendMode": "NORMAL", "imageRef": "avatar", "scaleMode": "FILL"}
-						],
-						"effects": [{
-							"type": "LAYER_BLUR",
-							"visible": true,
-							"blendMode": "NORMAL",
-							"radius": 21.75
-						}],
-						"children": []
-					}]
-				}]
-			}]
-		}
-	})");
-	TestTrue(TEXT("Write blur local figma json"), FFileHelper::SaveStringToFile(Json, *TempJsonPath));
-
-	FDesignDocument Document;
-	FString ErrorMessage;
-	const bool bLoaded = Design2UMGLocalFigmaImport::LoadLocalFigmaDocument(TempJsonPath, Document, ErrorMessage);
-	TestTrue(TEXT("Load local figma blur fixture"), bLoaded);
-	if (!ErrorMessage.IsEmpty())
-	{
-		AddInfo(ErrorMessage);
-	}
-	if (!bLoaded || Document.Children.Num() == 0)
-	{
-		IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
-		return false;
-	}
-
-	TFunction<TSharedPtr<FDesignNode>(const TArray<TSharedPtr<FDesignNode>>&)> FindBlurAvatar =
-		[&FindBlurAvatar](const TArray<TSharedPtr<FDesignNode>>& Nodes) -> TSharedPtr<FDesignNode>
-	{
-		for (const TSharedPtr<FDesignNode>& Node : Nodes)
-		{
-			if (!Node.IsValid())
-			{
-				continue;
-			}
-			if (Node->Id == TEXT("blur_avatar"))
-			{
-				return Node;
-			}
-			if (TSharedPtr<FDesignNode> Found = FindBlurAvatar(Node->Children))
-			{
-				return Found;
-			}
-		}
-		return nullptr;
-	};
-
-	const TSharedPtr<FDesignNode> Avatar = FindBlurAvatar(Document.Children);
-	TestTrue(TEXT("Find blur avatar node"), Avatar.IsValid());
-	if (!Avatar.IsValid())
-	{
-		IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
-		return false;
-	}
-
-	TestTrue(TEXT("Blur avatar keeps both fills"), Avatar->Fills.Num() == 2);
-	TestTrue(TEXT("Blur avatar width stays in layout space"), FMath::IsNearlyEqual(Avatar->Width.Value, 26.0f, 0.01f));
-	TestTrue(TEXT("Blur avatar height stays in layout space"), FMath::IsNearlyEqual(Avatar->Height.Value, 26.0f, 0.01f));
-	TestTrue(TEXT("Blur avatar X stays in layout space"), FMath::IsNearlyEqual(Avatar->X, 24.0f, 0.01f));
-	TestTrue(TEXT("Blur avatar Y stays in layout space"), FMath::IsNearlyEqual(Avatar->Y, 20.0f, 0.01f));
-	TestTrue(TEXT("Blur effect should be baked out"), Avatar->Effects.Num() == 0);
-	TestTrue(TEXT("First blurred fill rewrites to derived png"), !Avatar->Fills[0].Image.Url.IsEmpty() && FPaths::FileExists(Avatar->Fills[0].Image.Url));
-	TestTrue(TEXT("Second blurred fill rewrites to derived png"), !Avatar->Fills[1].Image.Url.IsEmpty() && FPaths::FileExists(Avatar->Fills[1].Image.Url));
-	TestTrue(TEXT("Blur bake should not reuse original source path"), !FPaths::IsSamePath(FPaths::ConvertRelativePathToFull(Avatar->Fills[0].Image.Url), FPaths::ConvertRelativePathToFull(SourcePngPath)));
-
-	IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
-	return true;
-}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLayoutFixerConservatismTest,
 	"Design2UMG.LayoutFixer.ConservatismCheck",
@@ -2659,28 +1274,28 @@ bool FFitContentMinimumExpandsToContentTest::RunTest(const FString& Parameters)
 	Root->Id = TEXT("fit-min-root");
 	Root->Name = TEXT("FitMinRoot");
 	Root->Type = EDesignNodeType::Frame;
-	Root->Layout = EDesignLayout::Vertical;
-	Root->Width = FDesignSize::Fixed(320.0f);
-	Root->Height = FDesignSize::Fit();
-	Root->bHasWidth = true;
+	Root->LayoutData.Layout = EDesignLayout::Vertical;
+	Root->Transform.Width = FDesignSize::Fixed(320.0f);
+	Root->Transform.Height = FDesignSize::Fit();
+	Root->Transform.bHasWidth = true;
 	const TSharedPtr<FDesignNode> Row = MakeShared<FDesignNode>();
 	Row->Id = TEXT("fit-min-row");
 	Row->Name = TEXT("FitMinRow");
 	Row->Type = EDesignNodeType::Frame;
-	Row->Layout = EDesignLayout::Vertical;
-	Row->Width = FDesignSize::Fixed(320.0f);
-	Row->Height = FDesignSize::Fit(44.0f);
-	Row->bHasWidth = true;
-	Row->bHasHeight = true;
+	Row->LayoutData.Layout = EDesignLayout::Vertical;
+	Row->Transform.Width = FDesignSize::Fixed(320.0f);
+	Row->Transform.Height = FDesignSize::Fit(44.0f);
+	Row->Transform.bHasWidth = true;
+	Row->Transform.bHasHeight = true;
 	const TSharedPtr<FDesignNode> Content = MakeShared<FDesignNode>();
 	Content->Id = TEXT("fit-min-content");
 	Content->Name = TEXT("FitMinContent");
 	Content->Type = EDesignNodeType::Frame;
-	Content->Layout = EDesignLayout::Vertical;
-	Content->Width = FDesignSize::Fixed(320.0f);
-	Content->Height = FDesignSize::Fixed(56.0f);
-	Content->bHasWidth = true;
-	Content->bHasHeight = true;
+	Content->LayoutData.Layout = EDesignLayout::Vertical;
+	Content->Transform.Width = FDesignSize::Fixed(320.0f);
+	Content->Transform.Height = FDesignSize::Fixed(56.0f);
+	Content->Transform.bHasWidth = true;
+	Content->Transform.bHasHeight = true;
 	Row->Children.Add(Content);
 	Root->Children.Add(Row);
 	Doc.Children.Add(Root);
@@ -2723,37 +1338,37 @@ bool FFillWidthSingleLineTextDoesNotInflateFitHeightTest::RunTest(const FString&
 	Root->Id = TEXT("text-fit-root");
 	Root->Name = TEXT("TextFitRoot");
 	Root->Type = EDesignNodeType::Frame;
-	Root->Layout = EDesignLayout::Vertical;
-	Root->Width = FDesignSize::Fixed(160.0f);
-	Root->Height = FDesignSize::Fit();
-	Root->bHasWidth = true;
+	Root->LayoutData.Layout = EDesignLayout::Vertical;
+	Root->Transform.Width = FDesignSize::Fixed(160.0f);
+	Root->Transform.Height = FDesignSize::Fit();
+	Root->Transform.bHasWidth = true;
 	const TSharedPtr<FDesignNode> HeaderCell = MakeShared<FDesignNode>();
 	HeaderCell->Id = TEXT("header-cell");
 	HeaderCell->Name = TEXT("HeaderCell");
 	HeaderCell->Type = EDesignNodeType::Frame;
-	HeaderCell->Layout = EDesignLayout::Horizontal;
-	HeaderCell->Width = FDesignSize::Fixed(160.0f);
-	HeaderCell->Height = FDesignSize::Fit(44.0f);
-	HeaderCell->bHasWidth = true;
-	HeaderCell->bHasHeight = true;
-	HeaderCell->Padding.Top = 12.0f;
-	HeaderCell->Padding.Right = 12.0f;
-	HeaderCell->Padding.Bottom = 12.0f;
-	HeaderCell->Padding.Left = 12.0f;
-	HeaderCell->bHasPadding = true;
-	HeaderCell->AlignItems = EDesignAlignItems::Center;
+	HeaderCell->LayoutData.Layout = EDesignLayout::Horizontal;
+	HeaderCell->Transform.Width = FDesignSize::Fixed(160.0f);
+	HeaderCell->Transform.Height = FDesignSize::Fit(44.0f);
+	HeaderCell->Transform.bHasWidth = true;
+	HeaderCell->Transform.bHasHeight = true;
+	HeaderCell->LayoutData.Padding.Top = 12.0f;
+	HeaderCell->LayoutData.Padding.Right = 12.0f;
+	HeaderCell->LayoutData.Padding.Bottom = 12.0f;
+	HeaderCell->LayoutData.Padding.Left = 12.0f;
+	HeaderCell->LayoutData.ExplicitPadding = HeaderCell->LayoutData.Padding;
+	HeaderCell->LayoutData.AlignItems = EDesignAlignItems::Center;
 	const TSharedPtr<FDesignNode> HeaderText = MakeShared<FDesignNode>();
 	HeaderText->Id = TEXT("header-text");
 	HeaderText->Name = TEXT("HeaderText");
 	HeaderText->Type = EDesignNodeType::Text;
-	HeaderText->Width = FDesignSize::Fill();
-	HeaderText->Height = FDesignSize::Fit();
-	HeaderText->Content = TEXT("Status");
-	HeaderText->FontFamily = TEXT("Inter");
-	HeaderText->FontSize = 14.0f;
-	HeaderText->FontWeight = TEXT("normal");
-	HeaderText->LineHeight = 1.4285714285714286f;
-	HeaderText->TextGrowth = EDesignTextGrowth::FixedWidth;
+	HeaderText->Transform.Width = FDesignSize::Fill();
+	HeaderText->Transform.Height = FDesignSize::Fit();
+	HeaderText->Text.Content = TEXT("Status");
+	HeaderText->Text.FontFamily = TEXT("Inter");
+	HeaderText->Text.FontSize = 14.0f;
+	HeaderText->Text.FontWeight = TEXT("normal");
+	HeaderText->Text.LineHeight = 1.4285714285714286f;
+	HeaderText->Text.TextGrowth = EDesignTextGrowth::FixedWidth;
 	HeaderCell->Children.Add(HeaderText);
 	Root->Children.Add(HeaderCell);
 	Doc.Children.Add(Root);

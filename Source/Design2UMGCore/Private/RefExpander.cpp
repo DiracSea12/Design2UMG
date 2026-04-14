@@ -23,85 +23,85 @@ namespace
 
 	void ApplyOverrideProperties(FDesignNode& Target, const FDesignNode& Override)
 	{
-		const bool bFillExplicitClear = Override.Fill.bExplicitClear;
-		const bool bKeepExplicitStrokeFill = Override.Stroke.bHasExplicitFill;
+		const bool bFillExplicitClear = Override.Visual.Fill.bExplicitClear;
+		const bool bKeepExplicitStrokeFill = Override.Visual.Stroke.bHasExplicitFill;
 
-		if (!Override.Content.IsEmpty())
-			Target.Content = Override.Content;
-		if (Override.FontSize > 0)
-			Target.FontSize = Override.FontSize;
-		if (!Override.FontWeight.IsEmpty())
-			Target.FontWeight = Override.FontWeight;
-		if (!Override.FontStyle.IsEmpty())
-			Target.FontStyle = Override.FontStyle;
-		if (!Override.FontFamily.IsEmpty())
-			Target.FontFamily = Override.FontFamily;
-		if (Override.Fill.Type != EDesignFillType::None || Override.Fill.bExplicitClear)
+		if (!Override.Text.Content.IsEmpty())
+			Target.Text.Content = Override.Text.Content;
+		if (Override.Text.FontSize > 0)
+			Target.Text.FontSize = Override.Text.FontSize;
+		if (!Override.Text.FontWeight.IsEmpty())
+			Target.Text.FontWeight = Override.Text.FontWeight;
+		if (!Override.Text.FontStyle.IsEmpty())
+			Target.Text.FontStyle = Override.Text.FontStyle;
+		if (!Override.Text.FontFamily.IsEmpty())
+			Target.Text.FontFamily = Override.Text.FontFamily;
+		if (Override.Visual.Fill.Type != EDesignFillType::None || Override.Visual.Fill.bExplicitClear)
 		{
-			Target.Fill = Override.Fill;
-			Target.Fills = Override.Fills;
+			Target.Visual.Fill = Override.Visual.Fill;
+			Target.Visual.Fills = Override.Visual.Fills;
 		}
-		if (Override.Stroke.HasStroke())
-			Target.Stroke = Override.Stroke;
+		if (Override.Visual.Stroke.HasStroke())
+			Target.Visual.Stroke = Override.Visual.Stroke;
 		if (bFillExplicitClear && !bKeepExplicitStrokeFill)
-			Target.Stroke.Fill = FDesignFill();
-		if (Override.bEffectsExplicitClear || Override.Effects.Num() > 0)
+			Target.Visual.Stroke.Fill = FDesignFill();
+		if (Override.Visual.bEffectsExplicitClear || Override.Visual.Effects.Num() > 0)
 		{
-			Target.Effects = Override.Effects;
-			Target.bEffectsExplicitClear = Override.bEffectsExplicitClear;
+			Target.Visual.Effects = Override.Visual.Effects;
+			Target.Visual.bEffectsExplicitClear = Override.Visual.bEffectsExplicitClear;
 		}
-		if (Override.bHasWidth)
-			Target.Width = Override.Width;
-		if (Override.bHasHeight)
-			Target.Height = Override.Height;
-		if (Override.bHasX)
+		if (Override.Transform.bHasWidth)
+			Target.Transform.Width = Override.Transform.Width;
+		if (Override.Transform.bHasHeight)
+			Target.Transform.Height = Override.Transform.Height;
+		if (Override.Transform.HasExplicitX())
 		{
-			Target.X = Override.X;
-			Target.bHasX = true;
+			Target.Transform.X = Override.Transform.X;
+			Target.Transform.ExplicitX = Override.Transform.X;
 		}
-		if (Override.bHasY)
+		if (Override.Transform.HasExplicitY())
 		{
-			Target.Y = Override.Y;
-			Target.bHasY = true;
+			Target.Transform.Y = Override.Transform.Y;
+			Target.Transform.ExplicitY = Override.Transform.Y;
 		}
-		if (!Override.bEnabled)
-			Target.bEnabled = false;
-		if (Override.bHasPadding)
+		if (!Override.Transform.bEnabled)
+			Target.Transform.bEnabled = false;
+		if (Override.LayoutData.HasExplicitPadding())
 		{
-			Target.Padding = Override.Padding;
-			Target.bHasPadding = true;
+			Target.LayoutData.Padding = Override.LayoutData.Padding;
+			Target.LayoutData.ExplicitPadding = Override.LayoutData.Padding;
 		}
-		if (Override.bHasGap)
+		if (Override.LayoutData.HasExplicitGap())
 		{
-			Target.Gap = Override.Gap;
-			Target.bHasGap = true;
+			Target.LayoutData.Gap = Override.LayoutData.Gap;
+			Target.LayoutData.ExplicitGap = Override.LayoutData.Gap;
 		}
-		if (Override.bHasClip)
+		if (Override.LayoutData.HasExplicitClip())
 		{
-			Target.bClip = Override.bClip;
-			Target.bHasClip = true;
+			Target.LayoutData.bClip = Override.LayoutData.bClip;
+			Target.LayoutData.ExplicitClip = Override.LayoutData.bClip;
 		}
-		if (Override.bHasOpacity)
+		if (Override.Transform.HasExplicitOpacity())
 		{
-			Target.Opacity = Override.Opacity;
-			Target.bHasOpacity = true;
+			Target.Transform.Opacity = Override.Transform.Opacity;
+			Target.Transform.ExplicitOpacity = Override.Transform.Opacity;
 		}
-		if (Override.JustifyContent != EDesignJustifyContent::Start)
-			Target.JustifyContent = Override.JustifyContent;
-		if (Override.AlignItems != EDesignAlignItems::Start)
-			Target.AlignItems = Override.AlignItems;
-		if (Override.TextAlign != EDesignTextAlign::Left)
-			Target.TextAlign = Override.TextAlign;
-		if (Override.LineHeight > 0)
-			Target.LineHeight = Override.LineHeight;
-		if (Override.TextGrowth != EDesignTextGrowth::Auto)
-			Target.TextGrowth = Override.TextGrowth;
-		if (Override.bUnderline)
-			Target.bUnderline = true;
-		if (Override.bStrikethrough)
-			Target.bStrikethrough = true;
-		if (!Override.Href.IsEmpty())
-			Target.Href = Override.Href;
+		if (Override.LayoutData.JustifyContent != EDesignJustifyContent::Start)
+			Target.LayoutData.JustifyContent = Override.LayoutData.JustifyContent;
+		if (Override.LayoutData.AlignItems != EDesignAlignItems::Start)
+			Target.LayoutData.AlignItems = Override.LayoutData.AlignItems;
+		if (Override.Text.TextAlign != EDesignTextAlign::Left)
+			Target.Text.TextAlign = Override.Text.TextAlign;
+		if (Override.Text.LineHeight > 0)
+			Target.Text.LineHeight = Override.Text.LineHeight;
+		if (Override.Text.TextGrowth != EDesignTextGrowth::Auto)
+			Target.Text.TextGrowth = Override.Text.TextGrowth;
+		if (Override.Text.bUnderline)
+			Target.Text.bUnderline = true;
+		if (Override.Text.bStrikethrough)
+			Target.Text.bStrikethrough = true;
+		if (!Override.Text.Href.IsEmpty())
+			Target.Text.Href = Override.Text.Href;
 		if (Override.Children.Num() > 0)
 			Target.Children = Override.Children;
 	}
@@ -199,6 +199,7 @@ namespace
 			return;
 		}
 
+		Node->Source.bExpandedRefInstance = true;
 		Node->Metadata.Add(ExpandedRefInstanceMetadataKey, TEXT("true"));
 		for (TSharedPtr<FDesignNode>& Child : Node->Children)
 		{
@@ -211,88 +212,88 @@ namespace
 		if (!Expanded.IsValid() || !RefNode.IsValid())
 			return;
 
-		const bool bFillExplicitClear = RefNode->Fill.bExplicitClear;
-		const bool bKeepExplicitStrokeFill = RefNode->Stroke.bHasExplicitFill;
+		const bool bFillExplicitClear = RefNode->Visual.Fill.bExplicitClear;
+		const bool bKeepExplicitStrokeFill = RefNode->Visual.Stroke.bHasExplicitFill;
 
 		Expanded->Id = RefNode->Id;
 		if (!RefNode->Name.IsEmpty())
 			Expanded->Name = RefNode->Name;
 
-		if (RefNode->bHasX)
+		if (RefNode->Transform.HasExplicitX())
 		{
-			Expanded->X = RefNode->X;
-			Expanded->bHasX = true;
+			Expanded->Transform.X = RefNode->Transform.X;
+			Expanded->Transform.ExplicitX = RefNode->Transform.X;
 		}
 		else
 		{
 			// Instance with no explicit x should use local origin, not component definition canvas coordinate.
-			Expanded->X = 0.0f;
-			Expanded->bHasX = false;
+			Expanded->Transform.X = 0.0f;
+			Expanded->Transform.ExplicitX.Reset();
 		}
-		if (RefNode->bHasY)
+		if (RefNode->Transform.HasExplicitY())
 		{
-			Expanded->Y = RefNode->Y;
-			Expanded->bHasY = true;
+			Expanded->Transform.Y = RefNode->Transform.Y;
+			Expanded->Transform.ExplicitY = RefNode->Transform.Y;
 		}
 		else
 		{
 			// Instance with no explicit y should use local origin, not component definition canvas coordinate.
-			Expanded->Y = 0.0f;
-			Expanded->bHasY = false;
+			Expanded->Transform.Y = 0.0f;
+			Expanded->Transform.ExplicitY.Reset();
 		}
-		if (ShouldApplySizeOverride(RefNode->Width, RefNode->bHasWidth))
+		if (ShouldApplySizeOverride(RefNode->Transform.Width, RefNode->Transform.bHasWidth))
 		{
-			Expanded->Width = RefNode->Width;
-			Expanded->bHasWidth = true;
+			Expanded->Transform.Width = RefNode->Transform.Width;
+			Expanded->Transform.bHasWidth = true;
 		}
-		if (ShouldApplySizeOverride(RefNode->Height, RefNode->bHasHeight))
+		if (ShouldApplySizeOverride(RefNode->Transform.Height, RefNode->Transform.bHasHeight))
 		{
-			Expanded->Height = RefNode->Height;
-			Expanded->bHasHeight = true;
+			Expanded->Transform.Height = RefNode->Transform.Height;
+			Expanded->Transform.bHasHeight = true;
 		}
 
-		if (RefNode->Fill.Type != EDesignFillType::None || RefNode->Fill.bExplicitClear)
+		if (RefNode->Visual.Fill.Type != EDesignFillType::None || RefNode->Visual.Fill.bExplicitClear)
 		{
-			Expanded->Fill = RefNode->Fill;
-			Expanded->Fills = RefNode->Fills;
+			Expanded->Visual.Fill = RefNode->Visual.Fill;
+			Expanded->Visual.Fills = RefNode->Visual.Fills;
 		}
-		if (RefNode->Stroke.HasStroke())
-			Expanded->Stroke = RefNode->Stroke;
+		if (RefNode->Visual.Stroke.HasStroke())
+			Expanded->Visual.Stroke = RefNode->Visual.Stroke;
 		if (bFillExplicitClear && !bKeepExplicitStrokeFill)
-			Expanded->Stroke.Fill = FDesignFill();
-		if (RefNode->bEffectsExplicitClear || RefNode->Effects.Num() > 0)
+			Expanded->Visual.Stroke.Fill = FDesignFill();
+		if (RefNode->Visual.bEffectsExplicitClear || RefNode->Visual.Effects.Num() > 0)
 		{
-			Expanded->Effects = RefNode->Effects;
-			Expanded->bEffectsExplicitClear = RefNode->bEffectsExplicitClear;
+			Expanded->Visual.Effects = RefNode->Visual.Effects;
+			Expanded->Visual.bEffectsExplicitClear = RefNode->Visual.bEffectsExplicitClear;
 		}
-		if (RefNode->bHasPadding)
+		if (RefNode->LayoutData.HasExplicitPadding())
 		{
-			Expanded->Padding = RefNode->Padding;
-			Expanded->bHasPadding = true;
+			Expanded->LayoutData.Padding = RefNode->LayoutData.Padding;
+			Expanded->LayoutData.ExplicitPadding = RefNode->LayoutData.Padding;
 		}
-		if (RefNode->bHasGap)
+		if (RefNode->LayoutData.HasExplicitGap())
 		{
-			Expanded->Gap = RefNode->Gap;
-			Expanded->bHasGap = true;
+			Expanded->LayoutData.Gap = RefNode->LayoutData.Gap;
+			Expanded->LayoutData.ExplicitGap = RefNode->LayoutData.Gap;
 		}
-		if (RefNode->bHasClip)
+		if (RefNode->LayoutData.HasExplicitClip())
 		{
-			Expanded->bClip = RefNode->bClip;
-			Expanded->bHasClip = true;
+			Expanded->LayoutData.bClip = RefNode->LayoutData.bClip;
+			Expanded->LayoutData.ExplicitClip = RefNode->LayoutData.bClip;
 		}
-		if (!RefNode->bEnabled)
-			Expanded->bEnabled = false;
-		if (RefNode->bHasOpacity)
+		if (!RefNode->Transform.bEnabled)
+			Expanded->Transform.bEnabled = false;
+		if (RefNode->Transform.HasExplicitOpacity())
 		{
-			Expanded->Opacity = RefNode->Opacity;
-			Expanded->bHasOpacity = true;
+			Expanded->Transform.Opacity = RefNode->Transform.Opacity;
+			Expanded->Transform.ExplicitOpacity = RefNode->Transform.Opacity;
 		}
-		if (!FMath::IsNearlyZero(RefNode->Rotation))
-			Expanded->Rotation = RefNode->Rotation;
-		if (RefNode->bFlipX)
-			Expanded->bFlipX = RefNode->bFlipX;
-		if (RefNode->bFlipY)
-			Expanded->bFlipY = RefNode->bFlipY;
+		if (!FMath::IsNearlyZero(RefNode->Transform.Rotation))
+			Expanded->Transform.Rotation = RefNode->Transform.Rotation;
+		if (RefNode->Transform.bFlipX)
+			Expanded->Transform.bFlipX = RefNode->Transform.bFlipX;
+		if (RefNode->Transform.bFlipY)
+			Expanded->Transform.bFlipY = RefNode->Transform.bFlipY;
 
 		// Slot override has the highest priority.
 		if (RefNode->Children.Num() > 0)
@@ -410,22 +411,22 @@ void FRefExpander::ReThemeNode(TSharedPtr<FDesignNode>& Node, const FDesignVaria
 		return;
 
 	// Primary fill
-	if (!Node->Fill.SourceVar.IsEmpty())
+	if (!Node->Visual.Fill.SourceVar.IsEmpty())
 	{
-		FString OldColor = Node->Fill.SolidColor;
-		Node->Fill.SolidColor = Resolver.ResolveColor(Node->Fill.SourceVar);
+		FString OldColor = Node->Visual.Fill.SolidColor;
+		Node->Visual.Fill.SolidColor = Resolver.ResolveColor(Node->Visual.Fill.SourceVar);
 		UE_LOG(LogDesign2UMG, Verbose, TEXT("ReThemeNode '%s': Fill %s -> %s (var=%s)"),
-			*Node->Id, *OldColor, *Node->Fill.SolidColor, *Node->Fill.SourceVar);
+			*Node->Id, *OldColor, *Node->Visual.Fill.SolidColor, *Node->Visual.Fill.SourceVar);
 	}
 
-	for (auto& Stop : Node->Fill.Gradient.Colors)
+	for (auto& Stop : Node->Visual.Fill.Gradient.Colors)
 	{
 		if (!Stop.SourceVar.IsEmpty())
 			Stop.Color = Resolver.ResolveColor(Stop.SourceVar);
 	}
 
 	// Multi-layer fills
-	for (FDesignFill& F : Node->Fills)
+	for (FDesignFill& F : Node->Visual.Fills)
 	{
 		if (!F.SourceVar.IsEmpty())
 			F.SolidColor = Resolver.ResolveColor(F.SourceVar);
@@ -436,10 +437,10 @@ void FRefExpander::ReThemeNode(TSharedPtr<FDesignNode>& Node, const FDesignVaria
 		}
 	}
 
-	if (!Node->Stroke.Fill.SourceVar.IsEmpty())
-		Node->Stroke.Fill.SolidColor = Resolver.ResolveColor(Node->Stroke.Fill.SourceVar);
+	if (!Node->Visual.Stroke.Fill.SourceVar.IsEmpty())
+		Node->Visual.Stroke.Fill.SolidColor = Resolver.ResolveColor(Node->Visual.Stroke.Fill.SourceVar);
 
-	for (auto& Effect : Node->Effects)
+	for (auto& Effect : Node->Visual.Effects)
 	{
 		if (!Effect.Shadow.ColorSourceVar.IsEmpty())
 			Effect.Shadow.Color = Resolver.ResolveColor(Effect.Shadow.ColorSourceVar);

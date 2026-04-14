@@ -366,7 +366,7 @@ namespace
 
 	void ConfigureFigmaMetadataExtension(
 		UWidgetBlueprint* WidgetBlueprint,
-		const FUMGFigmaDocumentData& DocumentData,
+		const FUMGSourceDocumentData& DocumentData,
 		const TArray<FDesign2UMGFigmaWidgetMetadataRecord>& WidgetRecords)
 	{
 		if (!WidgetBlueprint)
@@ -590,9 +590,7 @@ namespace
 		SizeBoxNode.Bounds.W = static_cast<float>(ContentSize.X);
 		SizeBoxNode.Bounds.H = static_cast<float>(ContentSize.Y);
 		SizeBoxNode.WidgetStyle.WidthOverride = ContentSize.X;
-		SizeBoxNode.WidgetStyle.bHasWidthOverride = true;
 		SizeBoxNode.WidgetStyle.HeightOverride = ContentSize.Y;
-		SizeBoxNode.WidgetStyle.bHasHeightOverride = true;
 		SizeBoxNode.Children.Add(MoveTemp(InRoot));
 
 		FUMGWidgetNode ScaleBoxNode;
@@ -605,9 +603,7 @@ namespace
 		ScaleBoxNode.Bounds.H = static_cast<float>(ViewportSize.Y);
 		ScaleBoxNode.Slot = MakeCanvasFillSlot();
 		ScaleBoxNode.WidgetStyle.Stretch = TEXT("ScaleToFit");
-		ScaleBoxNode.WidgetStyle.bHasStretch = true;
 		ScaleBoxNode.WidgetStyle.StretchDirection = bDownOnly ? TEXT("DownOnly") : TEXT("Both");
-		ScaleBoxNode.WidgetStyle.bHasStretchDirection = true;
 		ScaleBoxNode.Children.Add(MoveTemp(SizeBoxNode));
 
 		FUMGWidgetNode CanvasRoot;
@@ -647,15 +643,6 @@ namespace
 
 	void ReplaceNodeFillWithTexturePath(FUMGWidgetNode& Node, const FString& TexturePath)
 	{
-		Node.Properties.Remove(UMGPropertyKeys::PathGeometry);
-		Node.Properties.Remove(UMGPropertyKeys::PathFillRule);
-		Node.Properties.Remove(UMGPropertyKeys::PathFillColor);
-		Node.Properties.Remove(UMGPropertyKeys::PathStrokeCap);
-		Node.Properties.Remove(UMGPropertyKeys::PathStrokeColor);
-		Node.Properties.Remove(UMGPropertyKeys::PathStrokeJoin);
-		Node.Properties.Remove(UMGPropertyKeys::PathStrokeThickness);
-		Node.Properties.Remove(UMGPropertyKeys::MaterialRef);
-		Node.Properties.Remove(UMGPropertyKeys::MaterialParams);
 		Node.Path = FUMGPathData();
 		Node.Brush.MaterialRef.Reset();
 		Node.Brush.bHasMaterialRef = false;
@@ -718,7 +705,7 @@ namespace
 		return Key;
 	}
 
-	bool ApplyPathTextureUiSettings(UTexture2D* Texture)
+	bool ApplyPathTextureUiSettings(UTexture2D* Texture, const TextureFilter Filter = TF_Bilinear)
 	{
 		if (!Texture)
 		{
@@ -730,7 +717,7 @@ namespace
 		Texture->LODGroup = TEXTUREGROUP_UI;
 		Texture->CompressionSettings = TC_EditorIcon;
 		Texture->MipGenSettings = TMGS_NoMipmaps;
-		Texture->Filter = TF_Bilinear;
+		Texture->Filter = Filter;
 		Texture->AddressX = TA_Clamp;
 		Texture->AddressY = TA_Clamp;
 		return true;
@@ -771,6 +758,7 @@ namespace
 		const TArray64<uint8>& RawData,
 		int32 Width,
 		int32 Height,
+		const TextureFilter Filter,
 		FString& OutObjectPath)
 	{
 		const FString LongPackageName = ImportPath / AssetName;
@@ -805,7 +793,7 @@ namespace
 
 		Texture->PreEditChange(nullptr);
 		Texture->Source.Init(Width, Height, 1, 1, TSF_BGRA8, RawData.GetData());
-		ApplyPathTextureUiSettings(Texture);
+		ApplyPathTextureUiSettings(Texture, Filter);
 		Texture->PostEditChange();
 		Texture->UpdateResource();
 		Texture->MarkPackageDirty();
@@ -886,7 +874,7 @@ namespace
 								FString::Printf(TEXT("%s_%s_%08X"), *AssetPrefix, *SanitizedNodeName, TextureKey));
 
 							FString ObjectPath;
-							if (CreateOrUpdatePathTextureAsset(TextureImportPath, AssetName, RawData, RawWidth, RawHeight, ObjectPath))
+							if (CreateOrUpdatePathTextureAsset(TextureImportPath, AssetName, RawData, RawWidth, RawHeight, TF_Nearest, ObjectPath))
 							{
 								ReplaceNodeFillWithTexturePath(Node, ObjectPath);
 								PathTextureCache.Add(TextureKey, ObjectPath);
@@ -920,7 +908,7 @@ namespace
 			}
 			else
 			{
-				FUMGPropertyBag GenerationProps = Design2UMGWidgetNodeAccess::BuildEffectivePropertyBag(Node);
+				FUMGPropertyBag GenerationProps = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
 
 				if (UTexture2D* Generated = FProceduralShapeGenerator::GenerateFromMaterialRef(MaterialRef, GenerationProps, nullptr))
 				{
@@ -935,7 +923,7 @@ namespace
 							FString::Printf(TEXT("%s_%s_%s_%08X"), *AssetPrefix, *SanitizedNodeName, *SanitizedMaterialRef, TextureKey));
 
 						FString ObjectPath;
-						if (CreateOrUpdatePathTextureAsset(TextureImportPath, AssetName, RawData, RawWidth, RawHeight, ObjectPath))
+						if (CreateOrUpdatePathTextureAsset(TextureImportPath, AssetName, RawData, RawWidth, RawHeight, TF_Bilinear, ObjectPath))
 						{
 							ReplaceNodeFillWithTexturePath(Node, ObjectPath);
 							ProceduralTextureCache.Add(TextureKey, ObjectPath);
@@ -966,7 +954,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 	FString AssetName = ObjectTools::SanitizeObjectName(WidgetData.WidgetName);
 	FString FullPath = PackagePath / AssetName;
 
-	// 检查资产冲突
+	// Check for asset name collisions.
 	FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 	IAssetRegistry& AR = ARM.Get();
 
@@ -986,21 +974,21 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 		if (Suffix > MaxAttempts && AR.GetAssetByObjectPath(FSoftObjectPath(TestPath)).IsValid())
 		{
 			UE_LOG(LogDesign2UMG, Verbose, TEXT("Failed to find unique name for asset '%s'"), *WidgetData.WidgetName);
-			UE_LOG(LogDesign2UMG, Error, TEXT("无法为资产 '%s' 生成唯一名称。请清理输出目录后重试。"), *WidgetData.WidgetName);
+			UE_LOG(LogDesign2UMG, Error, TEXT("Failed to generate a unique asset name for '%s'. Clean the output directory and retry."), *WidgetData.WidgetName);
 			return nullptr;
 		}
 
 		AssetName = NewName;
 		FullPath = PackagePath / AssetName;
 		UE_LOG(LogDesign2UMG, Verbose, TEXT("Asset renamed to %s"), *AssetName);
-		UE_LOG(LogDesign2UMG, Warning, TEXT("输出路径已存在同名资产，自动重命名为 %s"), *AssetName);
+		UE_LOG(LogDesign2UMG, Warning, TEXT("Output path already contained an asset with this name; auto-renamed to %s."), *AssetName);
 	}
 
 	UPackage* Package = CreatePackage(*FullPath);
 	if (!Package)
 	{
 		UE_LOG(LogDesign2UMG, Verbose, TEXT("Failed to create package at %s"), *FullPath);
-		UE_LOG(LogDesign2UMG, Error, TEXT("无法创建资产包。请检查输出路径是否有效: %s"), *FullPath);
+		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create the asset package. Check that the output path is valid: %s"), *FullPath);
 		return nullptr;
 	}
 
@@ -1015,7 +1003,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 	if (!WBP || !WBP->WidgetTree)
 	{
 		UE_LOG(LogDesign2UMG, Verbose, TEXT("Failed to create Widget Blueprint"));
-		UE_LOG(LogDesign2UMG, Error, TEXT("无法创建 Widget Blueprint。请检查引擎版本兼容性。"));
+		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create the Widget Blueprint. Check engine-version compatibility."));
 		Package->ClearDirtyFlag();
 		Package->SetFlags(RF_Transient);
 		return nullptr;
@@ -1023,15 +1011,15 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 
 	FUMGPrototypeNavigationData NavigationData = WidgetData.PrototypeNavigation;
 
-	// v2.2: 应用Fixer修正Bounds（创建可修改副本）
+	// v2.2: apply the fixer to a writable copy so bounds can be corrected in place.
 	FUMGWidgetNode FixedRoot = WidgetData.RootWidget;
 	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
 	const FIntPoint ConfigDesignSize = Settings->GetDesignSize();
 	const int32 RootWidth = FMath::CeilToInt(FixedRoot.Bounds.W);
 	const int32 RootHeight = FMath::CeilToInt(FixedRoot.Bounds.H);
 	const bool bHasValidRootSize = RootWidth >= 2 && RootHeight >= 2;
-	// Fidelity-first: Fixer/LayoutCalc 使用设计稿根节点的真实像素尺寸，
-	// 避免被用户配置尺寸放大/压缩而产生系统性偏移。
+	// Fidelity-first: drive Fixer/LayoutCalc from the design root's real pixel size
+	// to avoid systematic drift from user-configured preview scaling.
 	FIntPoint DesignSize = bHasValidRootSize
 		? FIntPoint(RootWidth, RootHeight)
 		: ConfigDesignSize;
@@ -1098,7 +1086,8 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 				Node.Slot.bAutoSize ? 1 : 0);
 
 			FString PropsInfo;
-			Node.Properties.ForEachSerialized([&PropsInfo](const FString& Key, const FString& Value)
+			const FUMGPropertyBag TypedProperties = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
+			TypedProperties.ForEachSerialized([&PropsInfo](const FString& Key, const FString& Value)
 			{
 				if (Key == TEXT("PathGeometry") || Key == TEXT("MaterialParams")) return;
 				PropsInfo += FString::Printf(TEXT(" %s=%s"), *Key, *Value.Left(40));
@@ -1117,13 +1106,13 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 		UE_LOG(LogDesign2UMG, Verbose, TEXT("=== End Widget Tree Dump ==="));
 	}
 
-	// 使用统一的 Widget 创建函数
+	// Use the shared widget creation path.
 	TArray<FDesign2UMGFigmaWidgetMetadataRecord> FigmaMetadataRecords;
 	UWidget* Root = FUMGWidgetUtils::CreateWidgetRecursive(WBP->WidgetTree, FixedRoot, nullptr, nullptr, &FigmaMetadataRecords, &DesignSize);
 	if (!Root)
 	{
 		UE_LOG(LogDesign2UMG, Verbose, TEXT("Failed to create root widget for '%s'"), *WidgetData.WidgetName);
-		UE_LOG(LogDesign2UMG, Error, TEXT("无法创建根控件 '%s'。设计文件可能包含不支持的节点类型。"), *WidgetData.WidgetName);
+		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create root widget '%s'. The design may contain unsupported node types."), *WidgetData.WidgetName);
 		Package->ClearDirtyFlag();
 		Package->SetFlags(RF_Transient);
 		return nullptr;
@@ -1131,11 +1120,12 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 	WBP->WidgetTree->RootWidget = Root;
 	GeneratePrototypeNavigationAnimations(WBP, FixedRoot, NavigationData);
 	ConfigurePrototypeNavigationExtension(WBP, NavigationData);
-	ConfigureFigmaMetadataExtension(WBP, WidgetData.FigmaDocument, FigmaMetadataRecords);
+	ConfigureFigmaMetadataExtension(WBP, WidgetData.SourceDocument, FigmaMetadataRecords);
 	ClearGeneratedWidgetNavigationState(WBP);
 	DumpTemplateTextBlockFontState(TEXT("template-precompile"), WBP);
 
-	// 设置编辑器显示尺寸到 CDO；保存时会在编译后再次回写，避免编译重置默认值。
+	// Push the editor preview size into the CDO. SaveWidgetBlueprint writes it back
+	// after compilation so the compile step cannot reset the default value.
 	ApplyDesignPreviewSize(WBP, DesignSize, TEXT("pre-compile"));
 
 	Package->MarkPackageDirty();
@@ -1155,11 +1145,12 @@ void FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP)
 		DesiredDesignSize = UDesign2UMGSettings::Get()->GetDesignSize();
 	}
 
-	// 编译（此时 transient 纹理数据可能丢失，但渲染已完成）
+	// Compile after rendering; transient texture data may already be gone at this point.
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WBP);
 
-	// MarkBlueprintAsStructurallyModified 可能触发中间编译填充 GUID map，
-	// 清除后让 CompileBlueprint 走 IsEmpty() 分支从 widget tree 重建，避免 stale entry
+	// MarkBlueprintAsStructurallyModified can populate the GUID map during an
+	// intermediate compile. Clear it so CompileBlueprint rebuilds from the widget tree
+	// instead of carrying stale entries forward.
 	WBP->WidgetVariableNameToGuidMap.Empty();
 	ClearGeneratedWidgetNavigationState(WBP);
 	const EBlueprintCompileOptions CompileOptions =

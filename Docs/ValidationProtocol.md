@@ -1,6 +1,6 @@
 ﻿# Design2UMG Validation Protocol
 
-Last verified: 2026-04-04
+Last verified: 2026-04-08
 
 ## Purpose
 
@@ -77,6 +77,7 @@ then do not use that run for visual conclusions.
 ### 6. Run the Designer screenshot validation when Designer parity matters
 
 Use the real editor process, not `UnrealEditor-Cmd.exe`, and do not use `-NullRHI`.
+The current wrapper goes through `Design2UMG.AutomationRender` in `asset` mode and renders the saved Widget Blueprint with designer flags enabled.
 
 Preferred command:
 
@@ -90,7 +91,7 @@ Use `-KeepExistingEditor` only when you are intentionally debugging against an a
 Example:
 
 ```text
-<UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe <MaintainerRuntimeProject.uproject> -NoSplash -NoSound -nop4 "-ExecCmds=Automation RunTests Design2UMG.Editor.DesignerSnapshot.LunarisSavedAsset; Quit" "-TestExit=Automation Test Queue Empty" -log
+<UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe <MaintainerRuntimeProject.uproject> -NoSplash -NoSound -nop4 "-ExecCmds=Design2UMG.AutomationRender <designer-spec.json>; Quit" -log
 ```
 
 Expected output file:
@@ -109,12 +110,12 @@ Important:
 
 Use this to compare:
 - the source design conversion tree for the target frame
-- the saved `UWidgetBlueprint` widget tree
+- the generated saved `UWidgetBlueprint` widget tree from the same automation run
 
 Example:
 
 ```text
-<UE5_Root>\Engine\Binaries\Win64\UnrealEditor-Cmd.exe <MaintainerRuntimeProject.uproject> -unattended -nop4 -nosplash -NullRHI "-ExecCmds=Automation RunTests Design2UMG.Editor.StructureSnapshot.LunarisSavedAsset; Quit" "-TestExit=Automation Test Queue Empty" -log
+<UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe <MaintainerRuntimeProject.uproject> -NoSplash -NoSound -nop4 "-ExecCmds=Design2UMG.AutomationRender <structure-spec.json>; Quit" -log
 ```
 
 Preferred wrapper:
@@ -128,6 +129,8 @@ Expected output files:
 - `<MaintainerRuntimeProjectRoot>\Saved\Design2UMG\WBP_lunaris__design_system_components.source-tree.json`
 - `<MaintainerRuntimeProjectRoot>\Saved\Design2UMG\WBP_lunaris__design_system_components.saved-tree.json`
 
+The wrapper also writes a companion result json and reports the generated asset path because import semantics may suffix the asset name when the target already exists.
+
 These files are structure evidence, not visual evidence.
 
 The current snapshot test intentionally compares only stable semantics:
@@ -138,6 +141,43 @@ The current snapshot test intentionally compares only stable semantics:
 - total node count staying within a bounded drift window
 
 Do not tighten this into exact full-tree equality unless the generator guarantees zero wrapper normalization drift after save.
+
+## Current Formal Gate
+
+The current formal admissible gate is the full discovered 47-case set.
+
+That means:
+- do not run the formal full gate with an exclude pattern
+- `figma_figma-export_source` and `pen_pencil-welcome_step-2-frame` are part of the release gate again
+- formal historical-best parity should be checked with:
+  `python Tools/design2umg_validate_run.py --output-root <run_root> --admissible-best-json Saved/Design2UMG/Automation/_admissible_best_20260407_47.json`
+
+Reference sourcing for the formal gate:
+- `pen_*` cases may use Pencil MCP / export-nodes capture as the authoritative source reference when no checked-in external reference root is provided
+- `figma_*` cases use the top-level export PNG found under each local Figma export root as the authoritative source reference
+- if you package a checked-in external reference root for a formal full run, every formal case directory must contain both `reference.png` and `compare_report.json`
+
+If `reference.png` exists but the baseline `compare_report.json` is missing, the run can still render and compare, but the run root's own `summary.no_regression` becomes unavailable. That is not acceptable for the formal archived gate.
+
+## Regression-Sensitive Areas
+
+These areas have already produced real score regressions and should be treated as high-risk:
+
+- Text heuristics:
+  do not assume design `fontSize` should be copied directly into UMG runtime font size.
+  Pixel fidelity is judged against rendered output, not source JSON numbers.
+
+- Fixed single-line text:
+  do not add a blanket heuristic that preserves the declared source font size for narrow single-line text boxes.
+  This regressed `pen_pencil-welcome_fyi` / `pen_pencil-welcome_fyi-2`.
+
+- Dynamic measured text fallback scale:
+  do not enable runtime-measured fallback scaling by default unless a full formal run proves zero regression.
+  This changed compiled text sizes across multiple fonts and regressed several previously matched cases.
+
+- Figma text bounds:
+  do not blindly force `TEXT` / `TEXT_PATH` nodes to prefer layout bounds over render bounds.
+  That changes the text box fed into downstream fitting and regressed Figma export cases.
 
 ## PNG vs UMG Designer Parity
 

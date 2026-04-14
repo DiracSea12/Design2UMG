@@ -34,6 +34,26 @@ namespace
 {
 	TArray<TWeakObjectPtr<UTexture2D>> GRootedTextures;
 	bool GbHasPendingTextureUpdates = false;
+	constexpr TCHAR MaterialParamColorKey[] = TEXT("Color");
+	constexpr TCHAR MaterialParamColorStartKey[] = TEXT("ColorStart");
+	constexpr TCHAR MaterialParamColorCenterKey[] = TEXT("ColorCenter");
+	constexpr TCHAR MaterialParamColorEndKey[] = TEXT("ColorEnd");
+	constexpr TCHAR MaterialParamColorEdgeKey[] = TEXT("ColorEdge");
+	constexpr TCHAR MaterialParamCornerRadiiKey[] = TEXT("CornerRadii");
+	constexpr TCHAR MaterialParamCenterXKey[] = TEXT("CenterX");
+	constexpr TCHAR MaterialParamCenterYKey[] = TEXT("CenterY");
+	constexpr TCHAR MaterialParamSizeWidthKey[] = TEXT("SizeWidth");
+	constexpr TCHAR MaterialParamSizeHeightKey[] = TEXT("SizeHeight");
+	constexpr TCHAR MaterialParamBlurPaddingKey[] = TEXT("BlurPadding");
+	constexpr TCHAR MaterialParamThicknessKey[] = TEXT("Thickness");
+	constexpr TCHAR MaterialParamCornerRadiusKey[] = TEXT("CornerRadius");
+	constexpr TCHAR MaterialParamRotationKey[] = TEXT("Rotation");
+	constexpr TCHAR MaterialParamStripeColorKey[] = TEXT("StripeColor");
+	constexpr TCHAR MaterialParamStripeWidthKey[] = TEXT("StripeWidth");
+	constexpr TCHAR MaterialParamStripeGapKey[] = TEXT("StripeGap");
+	constexpr TCHAR MaterialParamInsetKey[] = TEXT("Inset");
+	constexpr TCHAR MaterialParamStopsKey[] = TEXT("Stops");
+	constexpr TCHAR MaterialParamStopPosKey[] = TEXT("Pos");
 }
 
 void FProceduralShapeGenerator::ReleaseTransientTextures()
@@ -891,33 +911,33 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 		if (FJsonSerializer::Deserialize(Reader, Params) && Params.IsValid())
 		{
 			FString ColorStr;
-			if (Params->TryGetStringField(TEXT("Color"), ColorStr))
+			if (Params->TryGetStringField(MaterialParamColorKey, ColorStr))
 				Color = FUMGValueParser::ParseColor(ColorStr);
-			if (Params->TryGetStringField(TEXT("ColorStart"), ColorStr) ||
-				Params->TryGetStringField(TEXT("ColorCenter"), ColorStr))
+			if (Params->TryGetStringField(MaterialParamColorStartKey, ColorStr) ||
+				Params->TryGetStringField(MaterialParamColorCenterKey, ColorStr))
 				ColorStart = FUMGValueParser::ParseColor(ColorStr);
-			if (Params->TryGetStringField(TEXT("ColorEnd"), ColorStr) ||
-				Params->TryGetStringField(TEXT("ColorEdge"), ColorStr))
+			if (Params->TryGetStringField(MaterialParamColorEndKey, ColorStr) ||
+				Params->TryGetStringField(MaterialParamColorEdgeKey, ColorStr))
 				ColorEnd = FUMGValueParser::ParseColor(ColorStr);
 
 			double NumVal;
-			if (Params->TryGetNumberField(TEXT("CenterX"), NumVal))
+			if (Params->TryGetNumberField(MaterialParamCenterXKey, NumVal))
 				RadialCenter.X = static_cast<float>(NumVal);
-			if (Params->TryGetNumberField(TEXT("CenterY"), NumVal))
+			if (Params->TryGetNumberField(MaterialParamCenterYKey, NumVal))
 				RadialCenter.Y = static_cast<float>(NumVal);
-			if (Params->TryGetNumberField(TEXT("SizeWidth"), NumVal))
+			if (Params->TryGetNumberField(MaterialParamSizeWidthKey, NumVal))
 				RadialSize.X = FMath::Max(KINDA_SMALL_NUMBER, static_cast<float>(NumVal));
-			if (Params->TryGetNumberField(TEXT("SizeHeight"), NumVal))
+			if (Params->TryGetNumberField(MaterialParamSizeHeightKey, NumVal))
 				RadialSize.Y = FMath::Max(KINDA_SMALL_NUMBER, static_cast<float>(NumVal));
-			if (Params->TryGetNumberField(TEXT("BlurPadding"), NumVal))
+			if (Params->TryGetNumberField(MaterialParamBlurPaddingKey, NumVal))
 				BoxShadowBlurPadding = FMath::Max(0.0f, static_cast<float>(NumVal));
-			if (Params->TryGetNumberField(TEXT("Thickness"), NumVal))
+			if (Params->TryGetNumberField(MaterialParamThicknessKey, NumVal))
 				Thickness = NumVal > 1.0 ? static_cast<float>(NumVal) / 100.0f : static_cast<float>(NumVal);
-			if (Params->TryGetNumberField(TEXT("CornerRadius"), NumVal))
+			if (Params->TryGetNumberField(MaterialParamCornerRadiusKey, NumVal))
 				CornerRadius = NumVal > 1.0 ? static_cast<float>(NumVal) / 100.0f : static_cast<float>(NumVal);
 
 			const TArray<TSharedPtr<FJsonValue>>* RadiiArr = nullptr;
-			if (Params->TryGetArrayField(TEXT("CornerRadii"), RadiiArr) && RadiiArr && RadiiArr->Num() == 4)
+			if (Params->TryGetArrayField(MaterialParamCornerRadiiKey, RadiiArr) && RadiiArr && RadiiArr->Num() == 4)
 			{
 				for (int32 i = 0; i < 4; ++i)
 				{
@@ -926,20 +946,20 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 				}
 			}
 
-			if (Params->TryGetNumberField(TEXT("Rotation"), NumVal))
+			if (Params->TryGetNumberField(MaterialParamRotationKey, NumVal))
 				RotationDeg = static_cast<float>(NumVal);
-			if (Params->TryGetStringField(TEXT("StripeColor"), ColorStr))
+			if (Params->TryGetStringField(MaterialParamStripeColorKey, ColorStr))
 				StripeColor = FUMGValueParser::ParseColor(ColorStr);
-			if (Params->TryGetNumberField(TEXT("StripeWidth"), NumVal))
+			if (Params->TryGetNumberField(MaterialParamStripeWidthKey, NumVal))
 				StripeWidthPx = FMath::Max(1, FMath::RoundToInt(static_cast<float>(NumVal)));
-			if (Params->TryGetNumberField(TEXT("StripeGap"), NumVal))
+			if (Params->TryGetNumberField(MaterialParamStripeGapKey, NumVal))
 				StripeGapPx = FMath::Max(1, FMath::RoundToInt(static_cast<float>(NumVal)));
-			if (Params->TryGetNumberField(TEXT("Inset"), NumVal))
+			if (Params->TryGetNumberField(MaterialParamInsetKey, NumVal))
 				InsetPx = FMath::Max(0, FMath::RoundToInt(static_cast<float>(NumVal)));
 
 			// 多色标渐变 Stops 数组
 			const TArray<TSharedPtr<FJsonValue>>* StopsArr = nullptr;
-			if (Params->TryGetArrayField(TEXT("Stops"), StopsArr) && StopsArr)
+			if (Params->TryGetArrayField(MaterialParamStopsKey, StopsArr) && StopsArr)
 			{
 				for (const TSharedPtr<FJsonValue>& StopVal : *StopsArr)
 				{
@@ -948,11 +968,11 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 
 					FGradientStop Stop;
 					double Pos = 0.0;
-					StopObj->TryGetNumberField(TEXT("Pos"), Pos);
+					StopObj->TryGetNumberField(MaterialParamStopPosKey, Pos);
 					Stop.Position = static_cast<float>(Pos);
 
 					FString StopColor;
-					if (StopObj->TryGetStringField(TEXT("Color"), StopColor))
+					if (StopObj->TryGetStringField(MaterialParamColorKey, StopColor))
 						Stop.Color = FUMGValueParser::ParseColor(StopColor);
 
 					MultiStops.Add(Stop);

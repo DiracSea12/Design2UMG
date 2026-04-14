@@ -11,10 +11,8 @@ namespace
 {
 	void ApplyPathSizeOverrides(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
 	{
-		Widget.WidgetStyle.WidthOverride = FMath::Max(1, FMath::RoundToInt(Node->Width.Value));
-		Widget.WidgetStyle.bHasWidthOverride = true;
-		Widget.WidgetStyle.HeightOverride = FMath::Max(1, FMath::RoundToInt(Node->Height.Value));
-		Widget.WidgetStyle.bHasHeightOverride = true;
+		Widget.WidgetStyle.WidthOverride = FMath::Max(1, FMath::RoundToInt(Node->Transform.Width.Value));
+		Widget.WidgetStyle.HeightOverride = FMath::Max(1, FMath::RoundToInt(Node->Transform.Height.Value));
 	}
 
 	bool HasGradientPathFill(const TSharedPtr<FDesignNode>& Node)
@@ -24,12 +22,12 @@ namespace
 			return false;
 		}
 
-		if (Node->Fill.Type == EDesignFillType::Gradient)
+		if (Node->Visual.Fill.Type == EDesignFillType::Gradient)
 		{
 			return true;
 		}
 
-		for (const FDesignFill& Fill : Node->Fills)
+		for (const FDesignFill& Fill : Node->Visual.Fills)
 		{
 			if (Fill.Type == EDesignFillType::Gradient)
 			{
@@ -47,27 +45,27 @@ namespace
 			return FString();
 		}
 
-		return Node->FigmaVectorRasterFallbackImageRef;
+		return Node->Source.VectorRasterFallbackImageRef;
 	}
 
 	FString ResolvePathRasterFillColor(const TSharedPtr<FDesignNode>& Node)
 	{
-		if (Node->Fill.Type == EDesignFillType::Color)
+		if (Node->Visual.Fill.Type == EDesignFillType::Color)
 		{
-			return Node->Fill.SolidColor;
+			return Node->Visual.Fill.SolidColor;
 		}
 
-		if (Node->Fill.Type == EDesignFillType::Gradient && Node->Fill.Gradient.Colors.Num() > 0)
+		if (Node->Visual.Fill.Type == EDesignFillType::Gradient && Node->Visual.Fill.Gradient.Colors.Num() > 0)
 		{
-			return Node->Fill.Gradient.Colors[0].Color;
+			return Node->Visual.Fill.Gradient.Colors[0].Color;
 		}
 
-		if (Node->Stroke.HasStroke() && Node->Stroke.Fill.Type == EDesignFillType::Color)
+		if (Node->Visual.Stroke.HasStroke() && Node->Visual.Stroke.Fill.Type == EDesignFillType::Color)
 		{
-			return Node->Stroke.Fill.SolidColor;
+			return Node->Visual.Stroke.Fill.SolidColor;
 		}
 
-		for (const FDesignFill& Fill : Node->Fills)
+		for (const FDesignFill& Fill : Node->Visual.Fills)
 		{
 			if (Fill.Type == EDesignFillType::Color)
 			{
@@ -85,9 +83,9 @@ namespace
 
 	FString ResolvePathRasterStrokeColor(const TSharedPtr<FDesignNode>& Node)
 	{
-		if (Node->Stroke.HasStroke() && Node->Stroke.Fill.Type == EDesignFillType::Color)
+		if (Node->Visual.Stroke.HasStroke() && Node->Visual.Stroke.Fill.Type == EDesignFillType::Color)
 		{
-			return Node->Stroke.Fill.SolidColor;
+			return Node->Visual.Stroke.Fill.SolidColor;
 		}
 
 		return FString();
@@ -95,19 +93,19 @@ namespace
 
 	float ResolvePathRasterStrokeThickness(const TSharedPtr<FDesignNode>& Node)
 	{
-		if (!Node->Stroke.HasStroke())
+		if (!Node->Visual.Stroke.HasStroke())
 		{
 			return 0.0f;
 		}
 
-		if (Node->Stroke.Thickness.bUniform)
+		if (Node->Visual.Stroke.Thickness.bUniform)
 		{
-			return Node->Stroke.Thickness.Uniform;
+			return Node->Visual.Stroke.Thickness.Uniform;
 		}
 
 		return FMath::Max(
-			FMath::Max(Node->Stroke.Thickness.Top, Node->Stroke.Thickness.Right),
-			FMath::Max(Node->Stroke.Thickness.Bottom, Node->Stroke.Thickness.Left));
+			FMath::Max(Node->Visual.Stroke.Thickness.Top, Node->Visual.Stroke.Thickness.Right),
+			FMath::Max(Node->Visual.Stroke.Thickness.Bottom, Node->Visual.Stroke.Thickness.Left));
 	}
 
 	FString ResolvePathStrokeMetadata(const TSharedPtr<FDesignNode>& Node, const TCHAR* Key, const TCHAR* DefaultValue)
@@ -136,18 +134,18 @@ FUMGWidgetNode PathWidgetBuilder::CreatePathWidget(const TSharedPtr<FDesignNode>
 		return Widget;
 	}
 
-	if (Node->Fill.Type == EDesignFillType::Image && !Node->Fill.Image.Url.IsEmpty())
+	if (Node->Visual.Fill.Type == EDesignFillType::Image && !Node->Visual.Fill.Image.Url.IsEmpty())
 	{
 		Widget.Type = TEXT("Image");
-		Widget.Brush.TexturePath = Node->Fill.Image.Url;
-		Widget.Brush.Image.TexturePath = Node->Fill.Image.Url;
+		Widget.Brush.TexturePath = Node->Visual.Fill.Image.Url;
+		Widget.Brush.Image.TexturePath = Node->Visual.Fill.Image.Url;
 		Widget.Brush.Image.bHasTexturePath = true;
-		ImageFillUtils::ApplyImageFillProperties(Widget, Node->Fill.Image);
+		ImageFillUtils::ApplyImageFillProperties(Widget, Node->Visual.Fill.Image);
 		ApplyPathSizeOverrides(Widget, Node);
 		return Widget;
 	}
 
-	if (!Node->Geometry.IsEmpty())
+	if (!Node->Shape.Geometry.IsEmpty())
 	{
 		const FString FillColor = ResolvePathRasterFillColor(Node);
 		const FString StrokeColor = ResolvePathRasterStrokeColor(Node);
@@ -156,16 +154,16 @@ FUMGWidgetNode PathWidgetBuilder::CreatePathWidget(const TSharedPtr<FDesignNode>
 		{
 			UE_LOG(LogDesign2UMG, Log, TEXT("CreatePathWidget: '%s' rasterize %dx%d (raw=%.1fx%.1f) geometry=%d chars fill=%d stroke=%.2f"),
 				*Node->Name,
-				FMath::Max(1, FMath::RoundToInt(Node->Width.Value)),
-				FMath::Max(1, FMath::RoundToInt(Node->Height.Value)),
-				Node->Width.Value, Node->Height.Value, Node->Geometry.Len(),
+				FMath::Max(1, FMath::RoundToInt(Node->Transform.Width.Value)),
+				FMath::Max(1, FMath::RoundToInt(Node->Transform.Height.Value)),
+				Node->Transform.Width.Value, Node->Transform.Height.Value, Node->Shape.Geometry.Len(),
 				FillColor.IsEmpty() ? 0 : 1,
 				StrokeThickness);
 
 			Widget.Type = TEXT("Image");
-			Widget.Path.Geometry = Node->Geometry;
+			Widget.Path.Geometry = Node->Shape.Geometry;
 			Widget.Path.bHasGeometry = true;
-			Widget.Path.FillRule = Node->FillRule;
+			Widget.Path.FillRule = Node->Shape.FillRule;
 			Widget.Path.bHasFillRule = true;
 			if (!FillColor.IsEmpty())
 			{
@@ -188,6 +186,6 @@ FUMGWidgetNode PathWidgetBuilder::CreatePathWidget(const TSharedPtr<FDesignNode>
 		}
 	}
 
-	Widget.Type = FDesignTypeMapper::MapNodeTypeToWidget(Node->Type, Node->Layout);
+	Widget.Type = FDesignTypeMapper::MapNodeTypeToWidget(Node->Type, Node->LayoutData.Layout);
 	return Widget;
 }

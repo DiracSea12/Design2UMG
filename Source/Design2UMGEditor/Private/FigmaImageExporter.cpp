@@ -105,10 +105,10 @@ void FFigmaImageExporter::ApplyExportedImages(TArray<TSharedPtr<FDesignNode>>& N
 			if (const FString* Url = IdToUrl.Find(Node->Id))
 			{
 				Node->Type = EDesignNodeType::Rectangle;
-				Node->Fill.Type = EDesignFillType::Image;
-				Node->Fill.Image.Url = *Url;
-				Node->Fills.Empty();
-				Node->Fills.Add(Node->Fill);
+				Node->Visual.Fill.Type = EDesignFillType::Image;
+				Node->Visual.Fill.Image.Url = *Url;
+				Node->Visual.Fills.Empty();
+				Node->Visual.Fills.Add(Node->Visual.Fill);
 			}
 		}
 		ApplyExportedImages(Node->Children, IdToUrl);

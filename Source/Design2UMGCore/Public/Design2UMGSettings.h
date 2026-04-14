@@ -9,25 +9,26 @@
 #include "Design2UMGSettings.generated.h"
 
 /**
- * Widget 类覆盖规则：节点名称包含指定字符串时，替换为指定 Widget 类
+ * Widget class override rule. When the node name contains the given pattern,
+ * the generated widget class is replaced with the configured class.
  */
 USTRUCT()
 struct FWidgetClassOverride
 {
 	GENERATED_BODY()
 
-	/** 节点名称匹配模式（包含匹配） */
+	/** Node name match pattern using a contains-style check. */
 	UPROPERTY(Config, EditAnywhere, Category = "Widget Class Overrides", meta = (DisplayName = "Name Contains"))
 	FString NamePattern;
 
-	/** 替换为的 Widget 类（必须继承自 UWidget） */
+	/** Replacement widget class. Must derive from UWidget. */
 	UPROPERTY(Config, EditAnywhere, Category = "Widget Class Overrides", meta = (DisplayName = "Widget Class", AllowAbstract = "false"))
 	TSoftClassPtr<UWidget> WidgetClass;
 };
 
 /**
- * Design To UMG 插件设置
- * 保存于 Editor Preferences（用户级，不提交版本库）
+ * Design2UMG plugin settings.
+ * Stored in Editor Preferences as user-scoped settings rather than source-controlled config.
  */
 UCLASS(config=EditorPerProjectUserSettings, meta=(DisplayName="Design2UMG"))
 class DESIGN2UMGCORE_API UDesign2UMGSettings : public UDeveloperSettings
@@ -35,7 +36,7 @@ class DESIGN2UMGCORE_API UDesign2UMGSettings : public UDeveloperSettings
 	GENERATED_BODY()
 
 public:
-	/** 获取设置单例 */
+	/** Return the settings singleton. */
 	static UDesign2UMGSettings* Get();
 	static constexpr const TCHAR* CanonicalPlaceholderHatchBackgroundColor = TEXT("#D282FF33");
 	static constexpr const TCHAR* CanonicalPlaceholderRefHatchBackgroundColor = TEXT("#9682FF33");
@@ -66,7 +67,7 @@ public:
 	UPROPERTY(Config)
 	bool bFirstRunCompleted = false;
 
-	// ========== UMG 设计分辨率 ==========
+	// ========== UMG Design Resolution ==========
 
 	UPROPERTY(Config, EditAnywhere, Category = "Generation Settings", meta = (DisplayName = "Design Width", ClampMin = "320", ClampMax = "7680"))
 	int32 DesignWidth = 1920;
@@ -76,19 +77,19 @@ public:
 
 	FIntPoint GetDesignSize() const;
 
-	/** 是否启用导入后的自动布局修正(Fixer)。关闭可最大化还原设计稿原始坐标。 */
+	/** Enable post-import layout fixing. Disable to preserve source coordinates as directly as possible. */
 	UPROPERTY(Config, EditAnywhere, Category = "Generation Settings", meta = (DisplayName = "Enable Layout Fixer"))
 	bool bEnableLayoutFixer = false;
 
-	/** 是否启用根 Canvas 子节点的自适应锚点重算。关闭可保留转换器输出的 Slot。 */
+	/** Enable adaptive anchor recalculation for root Canvas children. Disable to keep converter-produced slots. */
 	UPROPERTY(Config, EditAnywhere, Category = "Generation Settings", meta = (DisplayName = "Enable Adaptive Root Canvas Anchors"))
 	bool bEnableAdaptiveRootCanvasAnchors = false;
 
-	/** 当设计稿尺寸显著大于 DesignWidth/DesignHeight 时，自动用 ScaleBox 包装根节点以适配运行时视口。默认关闭以优先保证设计稿还原一致性。 */
+	/** Auto-wrap oversized roots in a ScaleBox when the source design is much larger than the configured design size. */
 	UPROPERTY(Config, EditAnywhere, Category = "Generation Settings", meta = (DisplayName = "Auto Wrap Oversized Root For Viewport"))
 	bool bAutoWrapOversizedRootForViewport = false;
 
-	/** 根 ScaleBox 的缩放方向：仅缩小可避免小稿在大屏被放大失真。 */
+	/** Root ScaleBox direction. Down-only avoids enlarging small source designs on large viewports. */
 	UPROPERTY(Config, EditAnywhere, Category = "Generation Settings", meta = (DisplayName = "Viewport Scale Down Only"))
 	bool bViewportScaleDownOnly = true;
 
@@ -122,56 +123,56 @@ public:
 
 	// ========== Icon Font ==========
 
-	/** 图标字体族名 → UE5 字体资产映射（如 "Material Symbols Sharp" → 对应的 UFont 资产） */
+	/** Icon font family -> UE font asset mapping (for example "Material Symbols Sharp" -> UFont asset). */
 	UPROPERTY(Config, EditAnywhere, Category = "Icon Font", meta = (DisplayName = "Font Family → Font Asset", ToolTip = "Map icon font family names to UE5 font assets."))
 	TMap<FString, TSoftObjectPtr<UFont>> IconFontAssetMap;
 
-	/** 当字体族未命中 IconFontAssetMap 时，使用该默认字体资产路径（可选） */
+	/** Optional fallback font asset path when the family is not present in IconFontAssetMap. */
 	UPROPERTY(Config, EditAnywhere, Category = "Icon Font", meta = (DisplayName = "Default Icon Font Asset Path", ToolTip = "Optional fallback font asset path for icon fonts when no explicit family mapping is found."))
 	FString DefaultIconFontAssetPath;
 
-	/** 无可用字体资产时的占位文本；留空则回退为 IconName 原文 */
+	/** Placeholder text to use when no font asset is available. Leave empty to keep IconName. */
 	UPROPERTY(Config, EditAnywhere, Category = "Icon Font", meta = (DisplayName = "Missing Icon Placeholder", ToolTip = "When icon font asset is missing, use this placeholder text instead of IconName. Leave empty to keep IconName."))
 	FString MissingIconFontPlaceholder;
 
-	/** 查找图标字体的资产路径，无匹配返回空字符串 */
+	/** Find the font asset path for an icon font family, or return an empty string when not found. */
 	FString FindIconFontAssetPath(const FString& FontFamily) const;
 
 	// ========== Placeholder Hatch ==========
 
-	/** 显式启用 placeholderhatch 样式覆盖；关闭时始终使用插件规范默认值，避免本机用户配置污染基线输出。 */
+	/** Enable custom placeholder hatch overrides. Disable to force canonical plugin defaults for reproducible output. */
 	UPROPERTY(Config, EditAnywhere, Category = "Placeholder Hatch", meta = (DisplayName = "Use Custom Hatch Style", ToolTip = "When disabled, placeholder hatch visuals always use the plugin's canonical defaults instead of user overrides."))
 	bool bUseCustomPlaceholderHatchStyle = false;
 
-	/** placeholderhatch 占位纹理背景色（当节点自身无可用纯色填充时使用） */
+	/** Fallback hatch background color when the node does not provide a usable solid fill. */
 	UPROPERTY(Config, EditAnywhere, Category = "Placeholder Hatch", meta = (DisplayName = "Fallback Background Color", ToolTip = "Fallback hatch background color when node has no explicit solid fill color."))
 	FString PlaceholderHatchBackgroundColor = TEXT("#D282FF33");
 
-	/** expanded ref instance placeholder 的默认背景色 */
+	/** Default background color for expanded reference-instance placeholders. */
 	UPROPERTY(Config, EditAnywhere, Category = "Placeholder Hatch", meta = (DisplayName = "Expanded Ref Background Color", ToolTip = "Fallback hatch background color for expanded reference placeholders when node has no explicit solid fill color."))
 	FString PlaceholderRefHatchBackgroundColor = TEXT("#9682FF33");
 
-	/** placeholderhatch 占位纹理斜线色（当节点自身无可用描边色时使用） */
+	/** Fallback hatch stripe color when the node does not provide a usable stroke color. */
 	UPROPERTY(Config, EditAnywhere, Category = "Placeholder Hatch", meta = (DisplayName = "Fallback Stripe Color", ToolTip = "Fallback hatch stripe color when node has no explicit stroke color."))
 	FString PlaceholderHatchStripeColor = TEXT("#D480FF");
 
-	/** expanded ref instance placeholder 的默认描边色 */
+	/** Default stripe color for expanded reference-instance placeholders. */
 	UPROPERTY(Config, EditAnywhere, Category = "Placeholder Hatch", meta = (DisplayName = "Expanded Ref Stripe Color", ToolTip = "Fallback hatch stripe color for expanded reference placeholders when node has no explicit stroke color."))
 	FString PlaceholderRefHatchStripeColor = TEXT("#9580FF");
 
-	/** placeholderhatch 斜线宽度（像素） */
+	/** Placeholder hatch stripe width in pixels. */
 	UPROPERTY(Config, EditAnywhere, Category = "Placeholder Hatch", meta = (DisplayName = "Stripe Width", ClampMin = "1", ClampMax = "32"))
 	int32 PlaceholderHatchStripeWidth = 1;
 
-	/** placeholderhatch 斜线间距（像素） */
+	/** Placeholder hatch stripe gap in pixels. */
 	UPROPERTY(Config, EditAnywhere, Category = "Placeholder Hatch", meta = (DisplayName = "Stripe Gap", ClampMin = "1", ClampMax = "64"))
 	int32 PlaceholderHatchStripeGap = 4;
 
-	/** 显式启用 FIT + LUMINOSITY 运行时近似透明度上限覆盖；关闭时始终使用插件规范默认值。 */
+	/** Enable custom opacity-cap overrides for the FIT + LUMINOSITY runtime approximation. */
 	UPROPERTY(Config, EditAnywhere, Category = "Image Blend Approximation", meta = (DisplayName = "Use Custom FIT Luminosity Opacity Cap", ToolTip = "When disabled, runtime approximation uses the plugin's canonical opacity cap instead of user overrides."))
 	bool bUseCustomLuminosityFitOpacityCap = false;
 
-	/** FIT + LUMINOSITY 运行时近似时允许使用的最大覆盖透明度 */
+	/** Maximum overlay opacity allowed by the FIT + LUMINOSITY runtime approximation. */
 	UPROPERTY(Config, EditAnywhere, Category = "Image Blend Approximation", meta = (DisplayName = "FIT Luminosity Opacity Cap", ClampMin = "0.0", ClampMax = "1.0", ToolTip = "Upper bound used when approximating FIT + LUMINOSITY image overlays without a baked texture."))
 	float LuminosityFitOpacityCap = 0.15f;
 
@@ -180,7 +181,7 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Widget Class Overrides", meta = (DisplayName = "Class Override Rules", ToolTip = "When a node name contains the pattern, use the specified Widget class instead of the default."))
 	TArray<FWidgetClassOverride> ClassOverrides;
 
-	/** 根据节点名称查找覆盖类，无匹配返回 nullptr */
+	/** Resolve the class override for a node name, or return nullptr when no rule matches. */
 	UClass* FindClassOverride(const FString& NodeName) const;
 };
 

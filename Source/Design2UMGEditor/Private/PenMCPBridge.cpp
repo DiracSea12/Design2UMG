@@ -55,7 +55,7 @@ namespace
 				return Node;
 
 			const TArray<TSharedPtr<FJsonValue>>* Children = nullptr;
-			if (Obj->TryGetArrayField(TEXT("children"), Children) && Children != nullptr)
+			if (Obj->TryGetArrayField(TEXT("children"), Children))
 			{
 				TSharedPtr<FJsonValue> FoundInChildren = FindNodeById(*Children, TargetId);
 				if (FoundInChildren.IsValid())
@@ -81,7 +81,7 @@ namespace
 			}
 
 			const TArray<TSharedPtr<FJsonValue>>* Children = nullptr;
-			if (Obj->TryGetArrayField(TEXT("children"), Children) && Children != nullptr)
+			if (Obj->TryGetArrayField(TEXT("children"), Children))
 			{
 				CollectReusableNodes(*Children, OutReusable);
 			}
@@ -235,7 +235,7 @@ bool FPenMCPBridge::BuildFilteredDocumentObject(
 	// Extract top-level children from the source document.
 	TArray<TSharedPtr<FJsonValue>> Children;
 	const TArray<TSharedPtr<FJsonValue>>* ChildrenPtr = nullptr;
-	if (DocObj->TryGetArrayField(TEXT("children"), ChildrenPtr) && ChildrenPtr)
+	if (DocObj->TryGetArrayField(TEXT("children"), ChildrenPtr))
 	{
 		Children = *ChildrenPtr;
 	}

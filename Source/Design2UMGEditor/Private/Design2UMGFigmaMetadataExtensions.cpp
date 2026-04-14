@@ -8,7 +8,7 @@
 #include UE_INLINE_GENERATED_CPP_BY_NAME(Design2UMGFigmaMetadataExtensions)
 
 void UDesign2UMGFigmaMetadataClassExtension::SetMetadata(
-	const FUMGFigmaDocumentData& InDocumentData,
+	const FUMGSourceDocumentData& InDocumentData,
 	const TArray<FDesign2UMGFigmaWidgetMetadataRecord>& InWidgetRecords)
 {
 	DocumentData = InDocumentData;
@@ -28,7 +28,7 @@ const FDesign2UMGFigmaWidgetMetadataRecord* UDesign2UMGFigmaMetadataClassExtensi
 	return WidgetRecords.FindByPredicate(
 		[&SourceNodeId](const FDesign2UMGFigmaWidgetMetadataRecord& Record)
 		{
-			return Record.FigmaNode.SourceNodeId == SourceNodeId;
+			return Record.SourceNode.SourceNodeId == SourceNodeId;
 		});
 }
 
@@ -68,7 +68,7 @@ bool UDesign2UMGFigmaMetadataClassExtension::VerifyBindings(const UWidgetTree* W
 #endif
 
 void UDesign2UMGFigmaMetadataBlueprintExtension::SetMetadata(
-	const FUMGFigmaDocumentData& InDocumentData,
+	const FUMGSourceDocumentData& InDocumentData,
 	const TArray<FDesign2UMGFigmaWidgetMetadataRecord>& InWidgetRecords)
 {
 	DocumentData = InDocumentData;

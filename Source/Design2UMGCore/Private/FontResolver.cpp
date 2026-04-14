@@ -616,10 +616,10 @@ void FFontResolver::CollectFontFamilies(const TArray<TSharedPtr<FDesignNode>>& N
 	{
 		if (!Node.IsValid()) continue;
 
-		if (!Node->FontFamily.IsEmpty())
-			OutFamilies.Add(Node->FontFamily);
-		if (!Node->IconFontFamily.IsEmpty())
-			OutFamilies.Add(Node->IconFontFamily);
+		if (!Node->Text.FontFamily.IsEmpty())
+			OutFamilies.Add(Node->Text.FontFamily);
+		if (!Node->Text.IconFontFamily.IsEmpty())
+			OutFamilies.Add(Node->Text.IconFontFamily);
 
 		CollectFontFamilies(Node->Children, OutFamilies);
 	}

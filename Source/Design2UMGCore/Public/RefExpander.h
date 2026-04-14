@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -7,7 +7,7 @@
 #include "DesignVariableResolver.h"
 
 /**
- * 组件引用展开：ExpandRef、DeepCopy、Descendants 覆盖、ReTheme
+ * Component reference expansion: ExpandRef, deep copy, descendant overrides, and retheming.
  */
 class DESIGN2UMGCORE_API FRefExpander
 {

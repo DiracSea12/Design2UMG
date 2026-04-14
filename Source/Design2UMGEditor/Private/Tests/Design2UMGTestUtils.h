@@ -29,17 +29,6 @@ namespace Design2UMGTestUtils
 		return TryGetWidgetProperty(Node, Key, Value);
 	}
 
-	inline bool TryGetLegacyWidgetProperty(const FUMGWidgetNode& Node, const TCHAR* Key, FString& OutValue)
-	{
-		return Node.Properties.TryGetString(Key, OutValue) && !OutValue.IsEmpty();
-	}
-
-	inline bool HasLegacyWidgetProperty(const FUMGWidgetNode& Node, const TCHAR* Key)
-	{
-		FString Value;
-		return TryGetLegacyWidgetProperty(Node, Key, Value);
-	}
-
 	inline const FUMGWidgetNode* FindWidgetById(const FUMGWidgetNode& Node, const FString& TargetId)
 	{
 		if (Node.Id == TargetId)

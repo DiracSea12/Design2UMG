@@ -13,6 +13,8 @@ Put the plugin in one of the following:
 
 Build with UE 5.4+.
 
+For pipeline extension points and verification expectations, see [Docs/CONTRIBUTING_INTERNALS.md](Docs/CONTRIBUTING_INTERNALS.md).
+
 ## Code Style
 
 - Follow Unreal Engine C++ style conventions.

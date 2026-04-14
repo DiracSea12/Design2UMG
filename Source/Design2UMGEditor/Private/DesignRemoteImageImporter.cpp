@@ -849,7 +849,6 @@ namespace
 				DebugName.IsEmpty() ? TEXT("UnnamedWidget") : DebugName,
 				Node.Id,
 				Context);
-			Node.Properties.Remove(TEXT("TexturePath"));
 			// 同步 typed 字段，避免 typed-first 读到未 resolve 的原始 URL
 			Node.Brush.TexturePath = ResolvedTexturePath;
 			Node.Brush.Image.TexturePath = ResolvedTexturePath;

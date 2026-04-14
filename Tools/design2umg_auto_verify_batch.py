@@ -1,5 +1,8 @@
 ﻿import argparse
+import concurrent.futures
+import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -9,11 +12,14 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import design2umg_auto_verify as verify
+import design2umg_rebuild_admissible_best as rebuild_best
+import design2umg_validate_run as validate_run_tool
 
 
 ROOT_MIN_SIZE = 8
 ROOT_CONTAINER_TYPES = {"frame", "group", "component", "ref"}
 NO_REGRESSION_EPSILON = 1.25e-4
+REFERENCE_CACHE_SCHEMA_VERSION = 1
 
 
 def parse_args():
@@ -23,14 +29,21 @@ def parse_args():
     parser.add_argument("--output-root", default="", help="Directory for batch outputs")
     parser.add_argument("--reference-root", default="", help="Optional directory containing per-case reference PNGs at <reference-root>/<case-name>/reference.png")
     parser.add_argument("--project", default="", help="Runtime project path. HostProject fallback has been removed. If omitted, the script tries DESIGN2UMG_RUNTIME_PROJECT and then infers a .uproject from the design roots.")
-    parser.add_argument("--editor", default=r"G:\UE5\UnrealEngine\Engine\Binaries\Win64\UnrealEditor.exe", help="UnrealEditor.exe path")
+    parser.add_argument("--editor", default=r"G:\UE5\UnrealEngine\Engine\Binaries\Win64\UnrealEditor.exe", help="UnrealEditor executable path")
     parser.add_argument("--reference-provider", choices=["pencil"], default="pencil", help="Reference source for discovered pen cases")
     parser.add_argument("--mcp-server", default="", help="Override Pencil MCP server binary path")
     parser.add_argument("--pencil-app", default="", help="Override Pencil app name. Leave empty for auto-detect from ~/.pencil/apps and running IDE processes.")
     parser.add_argument("--pixel-tolerance", type=int, default=6, help="Per-pixel max-channel tolerance")
     parser.add_argument("--changed-ratio-threshold", type=float, default=0.01, help="Max changed pixel ratio to pass")
     parser.add_argument("--mae-threshold", type=float, default=0.02, help="Max mean absolute error to pass")
+    parser.add_argument("--game-output", default="", help="Optional UE asset output base path override passed through to all cases")
     parser.add_argument("--idle-timeout-sec", type=int, default=180, help="Kill the editor if no log or result progress is observed for this many seconds")
+    parser.add_argument("--startup-timeout-sec", type=int, default=60, help="Kill a shard early if UnrealEditor shows zero progress right after launch for this many seconds")
+    parser.add_argument("--parallel-editors", type=int, default=0, help="How many UnrealEditor shards to run in parallel. 0 means auto.")
+    parser.add_argument("--post-workers", type=int, default=0, help="How many parallel workers to use for post-render compare/report. 0 means auto.")
+    parser.add_argument("--native-self-check", choices=["auto", "off"], default="off", help="Whether to run optional native-size self-check passes. 'off' is faster and does not affect formal scoring metrics.")
+    parser.add_argument("--reference-cache", choices=["off", "read", "read-write", "refresh"], default="read-write", help="Reference cache policy for pen+pencil cases without --reference-root. read-write is recommended for faster reruns.")
+    parser.add_argument("--reference-cache-root", default="", help="Optional cache root for exported references. Default: <output-root-parent>/_reference_cache")
     parser.add_argument("--include", default="", help="Only run discovered case names matching this regex")
     parser.add_argument("--exclude", default="", help="Skip discovered case names matching this regex")
     parser.add_argument("--log-cmds", default="", help="Optional Unreal -LogCmds payload, for example 'LogDesign2UMG Verbose'")
@@ -203,6 +216,142 @@ def discover_figma_export_cases(export_roots: list[str], include_pattern: str, e
     return discovered
 
 
+def resolve_reference_cache_root(args, output_root: Path) -> Path | None:
+    if args.reference_cache == "off":
+        return None
+    if args.reference_cache_root:
+        return Path(args.reference_cache_root).resolve()
+    return output_root.parent / "_reference_cache"
+
+
+def build_source_signature(source_path: Path) -> dict:
+    resolved = source_path.resolve()
+    stat = resolved.stat()
+    digest = hashlib.sha1(resolved.read_bytes()).hexdigest()
+    return {
+        "path": str(resolved),
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+        "sha1": digest,
+    }
+
+
+def build_reference_cache_key(case_args) -> str:
+    payload = {
+        "schema": REFERENCE_CACHE_SCHEMA_VERSION,
+        "mode": case_args.mode,
+        "source": str(Path(case_args.source).resolve()),
+        "node": case_args.node or "",
+        "reference_provider": case_args.reference_provider,
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
+def can_use_reference_cache(case_args, case: dict) -> bool:
+    if case_args.mode != "pen":
+        return False
+    if case.get("reference_path"):
+        return False
+    if case_args.reference:
+        return False
+    return case_args.reference_provider == "pencil"
+
+
+def restore_reference_from_cache(
+    case_args,
+    case: dict,
+    output_dir: Path,
+    cache_root: Path | None,
+) -> tuple[Path, dict] | None:
+    if not cache_root or not can_use_reference_cache(case_args, case):
+        return None
+
+    source_path = Path(case_args.source)
+    if not source_path.is_file():
+        return None
+
+    cache_key = build_reference_cache_key(case_args)
+    cache_dir = cache_root / cache_key
+    meta_path = cache_dir / "meta.json"
+    cached_reference_path = cache_dir / "reference.png"
+    if not meta_path.is_file() or not cached_reference_path.is_file():
+        return None
+
+    metadata = verify.load_json_document(meta_path)
+    if metadata.get("schema") != REFERENCE_CACHE_SCHEMA_VERSION:
+        return None
+    if metadata.get("mode") != case_args.mode:
+        return None
+    if metadata.get("node") != (case_args.node or ""):
+        return None
+    if metadata.get("reference_provider") != case_args.reference_provider:
+        return None
+
+    expected_signature = metadata.get("source_signature") or {}
+    current_signature = build_source_signature(source_path)
+    if expected_signature != current_signature:
+        return None
+
+    output_reference_path = output_dir / "reference.png"
+    verify.shutil.copyfile(cached_reference_path, output_reference_path)
+
+    reference_context = metadata.get("reference_context") or {}
+    cached_structure_path = cache_dir / "source_structure_live.json"
+    if cached_structure_path.is_file():
+        try:
+            reference_context["source_structure_live"] = verify.load_json_document(cached_structure_path)
+            reference_context["source_structure_live_path"] = str(cached_structure_path)
+        except Exception:
+            pass
+
+    cache_meta = {
+        "hit": True,
+        "cache_dir": str(cache_dir),
+        "cache_key": cache_key,
+    }
+    reference_context["reference_cache"] = cache_meta
+    reference_context.setdefault("reference_authority", {})
+    return output_reference_path, reference_context
+
+
+def save_reference_to_cache(
+    case_args,
+    case: dict,
+    cache_root: Path | None,
+    reference_path: Path,
+    reference_context: dict,
+) -> None:
+    if not cache_root or not can_use_reference_cache(case_args, case):
+        return
+
+    source_path = Path(case_args.source)
+    if not source_path.is_file():
+        return
+
+    cache_key = build_reference_cache_key(case_args)
+    cache_dir = cache_root / cache_key
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    verify.shutil.copyfile(reference_path, cache_dir / "reference.png")
+
+    cached_context = dict(reference_context or {})
+    source_structure_live = cached_context.pop("source_structure_live", None)
+    cached_context.pop("source_structure_live_path", None)
+    if source_structure_live is not None:
+        verify.write_json(cache_dir / "source_structure_live.json", source_structure_live)
+
+    metadata = {
+        "schema": REFERENCE_CACHE_SCHEMA_VERSION,
+        "mode": case_args.mode,
+        "source": str(source_path.resolve()),
+        "node": case_args.node or "",
+        "reference_provider": case_args.reference_provider,
+        "source_signature": build_source_signature(source_path),
+        "reference_context": cached_context,
+    }
+    verify.write_json(cache_dir / "meta.json", metadata)
+
+
 def build_case_args(batch_args, case: dict) -> SimpleNamespace:
     return SimpleNamespace(
         mode=case["mode"],
@@ -218,7 +367,8 @@ def build_case_args(batch_args, case: dict) -> SimpleNamespace:
         pixel_tolerance=batch_args.pixel_tolerance,
         changed_ratio_threshold=batch_args.changed_ratio_threshold,
         mae_threshold=batch_args.mae_threshold,
-        game_output="",
+        game_output=batch_args.game_output,
+        native_self_check=batch_args.native_self_check,
     )
 
 
@@ -279,7 +429,13 @@ def prepare_specific_reference(case_args, case: dict, reference_path: Path, outp
     }
 
 
-def prepare_case_state(case_args, case: dict, output_root: Path) -> dict:
+def prepare_case_state(
+    case_args,
+    case: dict,
+    output_root: Path,
+    reference_cache_root: Path | None,
+    reference_cache_mode: str,
+) -> dict:
     output_dir = output_root / case["name"]
     if output_dir.exists():
         shutil.rmtree(output_dir, ignore_errors=True)
@@ -287,14 +443,33 @@ def prepare_case_state(case_args, case: dict, output_root: Path) -> dict:
 
     expected_design_size = verify.get_expected_design_size(case_args.mode, case_args.source, case_args.node)
     declared_design_size = verify.get_declared_design_size(case_args.mode, case_args.source, case_args.node)
-    if case.get("reference_path"):
+    restored_from_cache = None
+    if reference_cache_mode in {"read", "read-write"}:
+        try:
+            restored_from_cache = restore_reference_from_cache(case_args, case, output_dir, reference_cache_root)
+        except Exception:
+            restored_from_cache = None
+
+    if restored_from_cache is not None:
+        reference_path, reference_context = restored_from_cache
+    elif case.get("reference_path"):
         reference_path, reference_context = prepare_specific_reference(case_args, case, Path(case["reference_path"]), output_dir)
     elif case_args.reference:
         reference_path, reference_context = prepare_external_reference(case_args, case, Path(case_args.reference), output_dir)
     else:
         reference_path, reference_context = verify.prepare_reference(case_args, output_dir, expected_design_size)
+
+    if restored_from_cache is None and reference_cache_mode in {"read-write", "refresh"}:
+        try:
+            save_reference_to_cache(case_args, case, reference_cache_root, reference_path, reference_context)
+        except Exception:
+            pass
+
     verify.finalize_reference_context(case_args, reference_path, reference_context)
-    if case_args.mode == "pen":
+    # Formal full-runs with an external reference root already carry the authoritative
+    # reference image. In that mode, per-case live Pencil MCP structure fetches add a
+    # large serial latency and routinely fall back to the local design snapshot anyway.
+    if case_args.mode == "pen" and not case_args.reference and "source_structure_live" not in reference_context:
         live_source_structure = verify.try_fetch_pencil_source_structure_snapshot(
             case_args.source,
             case_args.node,
@@ -337,7 +512,7 @@ def prepare_case_state(case_args, case: dict, output_root: Path) -> dict:
 
     candidate_filename = "candidate.png" if reference_validation["valid"] else "candidate.native.png"
     candidate_path = output_dir / candidate_filename
-    game_output = f"/Game/Design2UMG/Automation/{output_dir.name}"
+    game_output_root = verify.build_automation_asset_root(output_dir, case_args.game_output)
 
     state = {
         "case": case,
@@ -349,7 +524,7 @@ def prepare_case_state(case_args, case: dict, output_root: Path) -> dict:
         "expected_design_size": expected_design_size,
         "render_size": (render_width, render_height),
         "candidate_path": candidate_path,
-        "game_output": game_output,
+        "game_output_root": game_output_root,
         "spec_paths": [],
         "steps": {},
         "ue_log_path": output_root / "unreal_batch.log",
@@ -407,7 +582,12 @@ def build_case_specs(state: dict):
     render_width, render_height = state["render_size"]
     candidate_path = state["candidate_path"]
     output_dir = state["output_dir"]
-    game_output = state["game_output"]
+    game_output_root = state["game_output_root"]
+    primary_game_output = verify.build_automation_phase_output(game_output_root, "primary")
+    primary_asset_output = verify.build_automation_phase_output(game_output_root, "primary-asset")
+    native_game_output = verify.build_automation_phase_output(game_output_root, "native")
+    native_asset_output = verify.build_automation_phase_output(game_output_root, "native-asset")
+    asset_only_output = verify.build_automation_phase_output(game_output_root, "asset")
     mode_map = {
         "pen": "pen",
         "local-figma": "local_figma",
@@ -424,7 +604,7 @@ def build_case_specs(state: dict):
                 "mode": "asset",
                 "source_path": case_args.source,
                 "node_id": case_args.node,
-                "output_path": game_output,
+                "output_path": asset_only_output,
                 "render_png_path": str(candidate_path),
                 "result_json_path": str(output_dir / "ue_render_result.json"),
                 "render_width": render_width,
@@ -443,7 +623,7 @@ def build_case_specs(state: dict):
                 "mode": mode_map[case_args.mode],
                 "source_path": case_args.source,
                 "node_id": case_args.node,
-                "output_path": game_output,
+                "output_path": primary_game_output,
                 "render_png_path": str(bootstrap_candidate_path),
                 "result_json_path": str(generate_result_path),
                 "render_width": render_width,
@@ -458,7 +638,7 @@ def build_case_specs(state: dict):
                 "mode": "asset",
                 "source_path": f"@generated_asset_from:{generate_result_path}",
                 "node_id": "",
-                "output_path": game_output,
+                "output_path": primary_asset_output,
                 "render_png_path": str(candidate_path),
                 "result_json_path": str(output_dir / "ue_render_result.json"),
                 "render_width": render_width,
@@ -466,6 +646,13 @@ def build_case_specs(state: dict):
                 "force_reload_package": True,
             },
         )
+
+    if case_args.native_self_check == "off":
+        state["native_plan"] = {
+            "available": False,
+            "reason": "disabled_by_batch_option",
+        }
+        return
 
     native_plan = build_native_plan(state)
     state["native_plan"] = native_plan
@@ -483,7 +670,7 @@ def build_case_specs(state: dict):
                 "mode": "asset",
                 "source_path": case_args.source,
                 "node_id": "",
-                "output_path": game_output,
+                "output_path": native_asset_output,
                 "render_png_path": str(native_path),
                 "result_json_path": str(output_dir / "ue_native_render_result.json"),
                 "render_width": native_width,
@@ -503,7 +690,7 @@ def build_case_specs(state: dict):
             "mode": mode_map[case_args.mode],
             "source_path": case_args.source,
             "node_id": case_args.node,
-            "output_path": game_output,
+            "output_path": native_game_output,
             "render_png_path": str(native_bootstrap_path),
             "result_json_path": str(native_generate_result_path),
             "render_width": native_width,
@@ -518,7 +705,7 @@ def build_case_specs(state: dict):
             "mode": "asset",
             "source_path": f"@generated_asset_from:{native_generate_result_path}",
             "node_id": "",
-            "output_path": game_output,
+            "output_path": native_asset_output,
             "render_png_path": str(native_path),
             "result_json_path": str(output_dir / "ue_native_render_result.json"),
             "render_width": native_width,
@@ -528,9 +715,10 @@ def build_case_specs(state: dict):
     )
 
 
-def write_editor_driver_script(output_root: Path, spec_paths: list[Path]) -> Path:
-    manifest_path = output_root / "editor_driver_manifest.json"
-    driver_log_path = output_root / "editor_driver.log"
+def write_editor_driver_script(output_root: Path, spec_paths: list[Path], tag: str = "batch") -> Path:
+    normalized_tag = sanitize_case_name(tag)
+    manifest_path = output_root / f"editor_driver_manifest_{normalized_tag}.json"
+    driver_log_path = output_root / f"editor_driver_{normalized_tag}.log"
     verify.write_json(
         manifest_path,
         {
@@ -539,17 +727,19 @@ def write_editor_driver_script(output_root: Path, spec_paths: list[Path]) -> Pat
         },
     )
 
-    script_path = output_root / "editor_driver.py"
+    script_path = output_root / f"editor_driver_{normalized_tag}.py"
     script_content = f"""import json
 import traceback
+from datetime import datetime
 import unreal
 
 MANIFEST_PATH = r\"{manifest_path}\"
 
 
 def _write_line(path, message):
+    timestamp = datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
     with open(path, "a", encoding="utf-8") as handle:
-        handle.write(message + "\\n")
+        handle.write(f"{{timestamp}} {{message}}\\n")
 
 
 def _get_world():
@@ -594,6 +784,7 @@ def run_editor_driver(
     result_paths: list[Path],
     log_path: Path,
     idle_timeout_sec: int,
+    startup_timeout_sec: int,
     log_cmds: str = "",
 ) -> int:
     command = [
@@ -601,6 +792,7 @@ def run_editor_driver(
         project_path,
         "-nop4",
         "-nosplash",
+        "-NoMutex",
         "-stdout",
         "-FullStdOutLogOutput",
         f"-ExecutePythonScript={driver_script_path}",
@@ -610,9 +802,11 @@ def run_editor_driver(
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with open(log_path, "w", encoding="utf-8-sig") as handle:
         process = subprocess.Popen(command, stdout=handle, stderr=subprocess.STDOUT)
+        process_started_at = time.time()
         last_progress_time = time.time()
         last_result_count = 0
         last_log_size = 0
+        observed_progress = False
 
         while True:
             exit_code = process.poll()
@@ -623,6 +817,7 @@ def run_editor_driver(
             if current_result_count > last_result_count:
                 last_result_count = current_result_count
                 last_progress_time = time.time()
+                observed_progress = True
 
             try:
                 current_log_size = log_path.stat().st_size
@@ -631,6 +826,14 @@ def run_editor_driver(
             if current_log_size > last_log_size:
                 last_log_size = current_log_size
                 last_progress_time = time.time()
+                observed_progress = True
+
+            if not observed_progress and (time.time() - process_started_at > startup_timeout_sec):
+                process.kill()
+                raise TimeoutError(
+                    f"Editor startup made no progress for {startup_timeout_sec}s. "
+                    f"result_files={last_result_count}/{len(result_paths)} log={log_path}"
+                )
 
             if time.time() - last_progress_time > idle_timeout_sec:
                 process.kill()
@@ -656,6 +859,197 @@ def run_editor_driver(
             return 0
 
     return exit_code
+
+
+def resolve_parallel_editor_count(requested: int, case_count: int) -> int:
+    if case_count <= 1:
+        return 1
+    if requested > 0:
+        return max(1, requested)
+
+    cpu_count = os.cpu_count() or 1
+    if case_count < 8:
+        return 1
+    # Keep auto-sharding conservative on shared projects; users can still force
+    # higher values with --parallel-editors when the machine is stable.
+    if cpu_count >= 12 and case_count >= 8:
+        return 2
+    return 1
+
+
+def resolve_post_worker_count(requested: int, case_count: int) -> int:
+    if case_count <= 1:
+        return 1
+    if requested > 0:
+        return max(1, requested)
+
+    cpu_count = os.cpu_count() or 1
+    baseline = max(1, cpu_count // 2)
+    return max(1, min(8, baseline, case_count))
+
+
+def build_execution_shards(states: list[dict], shard_count: int) -> list[dict]:
+    normalized_shard_count = max(1, min(shard_count, len(states)))
+    shards = [
+        {
+            "id": index,
+            "states": [],
+            "spec_paths": [],
+            "result_paths": [],
+        }
+        for index in range(normalized_shard_count)
+    ]
+
+    sorted_states = sorted(states, key=lambda item: len(item["spec_paths"]), reverse=True)
+    for state in sorted_states:
+        shard = min(shards, key=lambda item: len(item["spec_paths"]))
+        shard["states"].append(state)
+        shard["spec_paths"].extend(state["spec_paths"])
+        shard["result_paths"].extend(step["result_json_path"] for step in state["steps"].values())
+
+    return [shard for shard in shards if shard["states"]]
+
+
+def run_execution_shard(
+    shard: dict,
+    output_root: Path,
+    editor_path: str,
+    project_path: str,
+    idle_timeout_sec: int,
+    startup_timeout_sec: int,
+    log_cmds: str,
+) -> dict:
+    shard_tag = f"shard-{shard['id'] + 1:02d}"
+    batch_log_path = output_root / f"unreal_batch_{shard_tag}.log"
+    driver_script_path = write_editor_driver_script(output_root, shard["spec_paths"], shard_tag)
+
+    for state in shard["states"]:
+        state["ue_log_path"] = batch_log_path
+        for step in state["steps"].values():
+            step["log_path"] = batch_log_path
+
+    exit_code = run_editor_driver(
+        editor_path,
+        project_path,
+        driver_script_path,
+        shard["result_paths"],
+        batch_log_path,
+        idle_timeout_sec,
+        startup_timeout_sec,
+        log_cmds,
+    )
+
+    for state in shard["states"]:
+        for step in state["steps"].values():
+            step["editor_exit_code"] = exit_code
+
+    return {
+        "shard_id": shard["id"],
+        "exit_code": exit_code,
+        "log_path": str(batch_log_path),
+        "spec_count": len(shard["spec_paths"]),
+    }
+
+
+def run_execution_shards(
+    shards: list[dict],
+    output_root: Path,
+    editor_path: str,
+    project_path: str,
+    idle_timeout_sec: int,
+    startup_timeout_sec: int,
+    log_cmds: str,
+) -> list[dict]:
+    if len(shards) == 1:
+        return [
+            run_execution_shard(
+                shards[0],
+                output_root,
+                editor_path,
+                project_path,
+                idle_timeout_sec,
+                startup_timeout_sec,
+                log_cmds,
+            )
+        ]
+
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(shards)) as executor:
+        future_to_shard = {
+            executor.submit(
+                run_execution_shard,
+                shard,
+                output_root,
+                editor_path,
+                project_path,
+                idle_timeout_sec,
+                startup_timeout_sec,
+                log_cmds,
+            ): shard
+            for shard in shards
+        }
+        for future in concurrent.futures.as_completed(future_to_shard):
+            shard = future_to_shard[future]
+            try:
+                results.append(future.result())
+            except Exception as exc:
+                results.append(
+                    {
+                        "shard_id": shard["id"],
+                        "exit_code": 1,
+                        "log_path": "",
+                        "spec_count": len(shard["spec_paths"]),
+                        "error": str(exc),
+                    }
+                )
+    return sorted(results, key=lambda item: item["shard_id"])
+
+
+def rerun_missing_steps(
+    states: list[dict],
+    output_root: Path,
+    editor_path: str,
+    project_path: str,
+    idle_timeout_sec: int,
+    startup_timeout_sec: int,
+    log_cmds: str,
+) -> dict | None:
+    missing_steps = []
+    for state in states:
+        for step in state["steps"].values():
+            if not step["result_json_path"].is_file():
+                missing_steps.append(step)
+
+    if not missing_steps:
+        return None
+
+    spec_paths = [step["spec_path"] for step in missing_steps]
+    result_paths = [step["result_json_path"] for step in missing_steps]
+    retry_tag = "retry-missing"
+    batch_log_path = output_root / "unreal_batch_retry_missing.log"
+    driver_script_path = write_editor_driver_script(output_root, spec_paths, retry_tag)
+    verify.ensure_clean_editor()
+    exit_code = run_editor_driver(
+        editor_path,
+        project_path,
+        driver_script_path,
+        result_paths,
+        batch_log_path,
+        idle_timeout_sec,
+        startup_timeout_sec,
+        log_cmds,
+    )
+    for step in missing_steps:
+        step["editor_exit_code"] = exit_code
+        step["log_path"] = batch_log_path
+
+    return {
+        "shard_id": -1,
+        "exit_code": exit_code,
+        "log_path": str(batch_log_path),
+        "spec_count": len(spec_paths),
+        "retry": True,
+    }
 
 
 def load_step_result(step: dict, batch_exit_code: int, batch_log_path: Path):
@@ -739,18 +1133,24 @@ def load_baseline_case_metrics(case_dir: Path | None, pixel_tolerance: int) -> d
     report = verify.load_json_document(report_path) if report_path.is_file() else {}
     reference_png_path = Path(report.get("reference_png_path") or (case_dir / "reference.png"))
     candidate_png_path = Path(report.get("candidate_png_path") or (case_dir / "candidate.png"))
-    image_metrics = verify.compare_image_paths(reference_png_path, candidate_png_path, pixel_tolerance)
-
-    if image_metrics:
-        changed_ratio = image_metrics.get("changed_ratio")
-        stable_changed_ratio = image_metrics.get("stable_changed_ratio")
-        mean_abs_error = image_metrics.get("mean_abs_error")
-        stable_mean_abs_error = image_metrics.get("stable_mean_abs_error")
+    report_metrics = verify.extract_compare_metrics(report)
+    if report_metrics:
+        changed_ratio = report_metrics.get("changed_ratio")
+        stable_changed_ratio = report_metrics.get("stable_changed_ratio")
+        mean_abs_error = report_metrics.get("mean_abs_error")
+        stable_mean_abs_error = report_metrics.get("stable_mean_abs_error")
     else:
-        changed_ratio = report.get("changed_ratio")
-        stable_changed_ratio = report.get("stable_changed_ratio")
-        mean_abs_error = report.get("mean_abs_error")
-        stable_mean_abs_error = report.get("stable_mean_abs_error")
+        image_metrics = verify.compare_image_paths(reference_png_path, candidate_png_path, pixel_tolerance)
+        if image_metrics:
+            changed_ratio = image_metrics.get("changed_ratio")
+            stable_changed_ratio = image_metrics.get("stable_changed_ratio")
+            mean_abs_error = image_metrics.get("mean_abs_error")
+            stable_mean_abs_error = image_metrics.get("stable_mean_abs_error")
+        else:
+            changed_ratio = report.get("changed_ratio")
+            stable_changed_ratio = report.get("stable_changed_ratio")
+            mean_abs_error = report.get("mean_abs_error")
+            stable_mean_abs_error = report.get("stable_mean_abs_error")
 
     available = any(
         value is not None
@@ -1009,7 +1409,32 @@ def process_case_result(state: dict, batch_exit_code: int, batch_log_path: Path)
     }
 
 
+def process_case_results(
+    states: list[dict],
+    batch_exit_code: int,
+    batch_log_path: Path,
+    worker_count: int,
+) -> list[dict]:
+    if not states:
+        return []
+    if worker_count <= 1:
+        return [process_case_result(state, batch_exit_code, batch_log_path) for state in states]
+
+    ordered_results = [None] * len(states)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
+        future_to_index = {
+            executor.submit(process_case_result, state, batch_exit_code, batch_log_path): index
+            for index, state in enumerate(states)
+        }
+        for future in concurrent.futures.as_completed(future_to_index):
+            index = future_to_index[future]
+            ordered_results[index] = future.result()
+
+    return [item for item in ordered_results if item is not None]
+
+
 def main():
+    batch_start_time = time.time()
     args = parse_args()
     design_root = Path(args.design_root).resolve()
     if not design_root.is_dir():
@@ -1037,43 +1462,61 @@ def main():
         raise RuntimeError(f"No eligible pen or figma export cases discovered under: {design_root}")
     verify.seed_runtime_font_assets(runtime_args.project, [case["source"] for case in cases])
     run_scope_path = write_run_scope(output_root, args, cases)
+    reference_cache_root = resolve_reference_cache_root(args, output_root)
+    if reference_cache_root:
+        reference_cache_root.mkdir(parents=True, exist_ok=True)
 
     states = []
-    all_spec_paths = []
-    all_result_paths = []
     for case in cases:
         case_args = build_case_args(args, case)
         if args.reference_root:
             case_args.reference = str(Path(args.reference_root).resolve())
-        state = prepare_case_state(case_args, case, output_root)
+        state = prepare_case_state(
+            case_args,
+            case,
+            output_root,
+            reference_cache_root,
+            args.reference_cache,
+        )
         state["baseline_case_dir"] = (Path(args.reference_root).resolve() / case["name"]) if args.reference_root else None
         states.append(state)
-        all_spec_paths.extend(state["spec_paths"])
-        all_result_paths.extend(step["result_json_path"] for step in state["steps"].values())
+    prep_completed_at = time.time()
 
+    parallel_editors = resolve_parallel_editor_count(args.parallel_editors, len(states))
+    shards = build_execution_shards(states, parallel_editors)
     verify.ensure_clean_editor()
-    batch_log_path = output_root / "unreal_batch.log"
-    driver_script_path = write_editor_driver_script(output_root, all_spec_paths)
-    editor_exit_code = run_editor_driver(
+    shard_results = run_execution_shards(
+        shards,
+        output_root,
         args.editor,
         runtime_args.project,
-        driver_script_path,
-        all_result_paths,
-        batch_log_path,
         args.idle_timeout_sec,
+        args.startup_timeout_sec,
         args.log_cmds,
     )
-    for state in states:
-        for step in state["steps"].values():
-            step["editor_exit_code"] = editor_exit_code
-    ensure_driver_completed_all_steps(states, batch_log_path)
+    retry_result = rerun_missing_steps(
+        states,
+        output_root,
+        args.editor,
+        runtime_args.project,
+        args.idle_timeout_sec,
+        args.startup_timeout_sec,
+        args.log_cmds,
+    )
+    if retry_result is not None:
+        shard_results.append(retry_result)
+    ensure_driver_completed_all_steps(states, output_root / "unreal_batch_incomplete.log")
+    editor_exit_codes = [item["exit_code"] for item in shard_results]
+    editor_exit_code = next((code for code in editor_exit_codes if code != 0), 0)
+    batch_log_path = output_root / "unreal_batch.log"
+    editor_completed_at = time.time()
 
-    case_results = []
-    for state in states:
-        result = process_case_result(state, editor_exit_code, batch_log_path)
-        case_results.append(result)
+    post_workers = resolve_post_worker_count(args.post_workers, len(states))
+    case_results = process_case_results(states, editor_exit_code, batch_log_path, post_workers)
+    for result in case_results:
         status = "PASS" if result["passed"] else "FAIL"
         print(f"[{status}] {result['name']} report={result['report_path']}")
+    postprocess_completed_at = time.time()
 
     passed = sum(1 for item in case_results if item["passed"])
     no_regression_cases = [item for item in case_results if item.get("no_regression_available")]
@@ -1084,9 +1527,28 @@ def main():
         "passed": passed,
         "failed": len(case_results) - passed,
         "editor_exit_code": editor_exit_code,
+        "editor_exit_codes": editor_exit_codes,
+        "parallel_editors_requested": args.parallel_editors,
+        "parallel_editors_used": len(shards),
+        "idle_timeout_sec": args.idle_timeout_sec,
+        "startup_timeout_sec": args.startup_timeout_sec,
+        "execution_shards": shard_results,
+        "post_workers_requested": args.post_workers,
+        "post_workers_used": post_workers,
         "design_root": str(design_root),
         "output_root": str(output_root),
         "run_scope_path": str(run_scope_path),
+        "reference_cache": {
+            "mode": args.reference_cache,
+            "root": str(reference_cache_root) if reference_cache_root else "",
+        },
+        "native_self_check_mode": args.native_self_check,
+        "phase_durations_sec": {
+            "total_until_summary": max(0.0, postprocess_completed_at - batch_start_time),
+            "prepare_cases": max(0.0, prep_completed_at - batch_start_time),
+            "editor_execution": max(0.0, editor_completed_at - prep_completed_at),
+            "postprocess_reports": max(0.0, postprocess_completed_at - editor_completed_at),
+        },
         "completeness": completeness,
         "no_regression": {
             "available": len(no_regression_cases),
@@ -1098,7 +1560,35 @@ def main():
     summary_path = output_root / "summary.json"
     verify.write_json(summary_path, summary)
     print(f"[SUMMARY] report={summary_path}")
-    if completeness["blocked"]:
+    automation_root = output_root.parent
+    historical_best_manifest = rebuild_best.rebuild_historical_best_manifest(automation_root)
+    historical_best_manifest_path = automation_root / "_admissible_best_latest.json"
+    rebuild_best.write_json(historical_best_manifest_path, historical_best_manifest)
+    run_manifest_path = output_root / "historical_best_manifest.json"
+    rebuild_best.write_json(run_manifest_path, historical_best_manifest)
+
+    historical_validation = validate_run_tool.validate_run(
+        output_root,
+        admissible_best_path=historical_best_manifest_path,
+    )
+    historical_validation_path = output_root / "validation_against_historical_best.json"
+    verify.write_json(historical_validation_path, historical_validation)
+    historical_completed_at = time.time()
+    print(f"[HISTORICAL_BEST] manifest={historical_best_manifest_path}")
+    print(f"[HISTORICAL_BEST] validation={historical_validation_path}")
+
+    summary["phase_durations_sec"]["historical_manifest_and_validation"] = max(
+        0.0,
+        historical_completed_at - postprocess_completed_at,
+    )
+    summary["phase_durations_sec"]["total_with_historical_validation"] = max(
+        0.0,
+        historical_completed_at - batch_start_time,
+    )
+    verify.write_json(summary_path, summary)
+
+    formal_gate_candidate = not bool(args.include or args.exclude)
+    if completeness["blocked"] or (formal_gate_candidate and historical_validation["blocked"]):
         sys.exit(2)
     sys.exit(0 if passed == len(case_results) else 1)
 

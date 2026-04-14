@@ -40,7 +40,7 @@ private:
 	FOnPreviewConfirmed OnConfirmed;
 	FOnPreviewCancelled OnCancelled;
 
-	/** 预览阶段使用的临时纹理，销毁时需要释放 Root 引用。 */
+	/** Preview-only transient textures that must release their Root references on teardown. */
 	TMap<FString, UTexture2D*> PreviewTextureMap;
 
 	FReply OnGenerateClicked();

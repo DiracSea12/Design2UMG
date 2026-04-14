@@ -29,7 +29,7 @@ namespace
 			else
 			{
 				UE_LOG(LogDesign2UMG, Verbose, TEXT("%s: recursion depth exceeded (%d)"), InName, SizeEstimatorMaxTreeRecursionDepth);
-				UE_LOG(LogDesign2UMG, Error, TEXT("设计文件节点嵌套层级过深（超过 %d 层），可能存在循环引用。"), SizeEstimatorMaxTreeRecursionDepth);
+				UE_LOG(LogDesign2UMG, Error, TEXT("Design node nesting exceeded %d levels; a cyclic reference is likely present."), SizeEstimatorMaxTreeRecursionDepth);
 			}
 		}
 
@@ -65,12 +65,12 @@ namespace
 			return true;
 		}
 
-		if (!Node->Fill.IsNone() && Node->Fill.bEnabled)
+		if (!Node->Visual.Fill.IsNone() && Node->Visual.Fill.bEnabled)
 		{
 			return true;
 		}
 
-		for (const FDesignFill& Fill : Node->Fills)
+		for (const FDesignFill& Fill : Node->Visual.Fills)
 		{
 			if (!Fill.IsNone() && Fill.bEnabled)
 			{
@@ -78,12 +78,12 @@ namespace
 			}
 		}
 
-		if (Node->Stroke.HasStroke())
+		if (Node->Visual.Stroke.HasStroke())
 		{
 			return true;
 		}
 
-		for (const FDesignEffect& Effect : Node->Effects)
+		for (const FDesignEffect& Effect : Node->Visual.Effects)
 		{
 			if (Effect.bEnabled)
 			{
@@ -96,7 +96,7 @@ namespace
 
 	bool ShouldSkipNodeForSizing(const TSharedPtr<FDesignNode>& Node)
 	{
-		if (!Node.IsValid() || !Node->bEnabled || IsDesignerOnlyNodeTypeForSizing(Node->Type))
+		if (!Node.IsValid() || !Node->Transform.bEnabled || IsDesignerOnlyNodeTypeForSizing(Node->Type))
 		{
 			return true;
 		}
@@ -110,7 +110,7 @@ namespace
 		{
 			const bool bIsExplicitFlowContainer =
 				(Node->Type == EDesignNodeType::Frame || Node->Type == EDesignNodeType::Group)
-				&& Node->Layout != EDesignLayout::None;
+				&& Node->LayoutData.Layout != EDesignLayout::None;
 			if (!bIsExplicitFlowContainer)
 			{
 				return true;
@@ -127,12 +127,12 @@ namespace
 			return 0.0f;
 		}
 
-		if (Node->Width.IsFill())
+		if (Node->Transform.Width.IsFill())
 		{
-			return Node->Width.Value > 0.0f ? Node->Width.Value : ParentContentWidth;
+			return Node->Transform.Width.Value > 0.0f ? Node->Transform.Width.Value : ParentContentWidth;
 		}
 
-		return Node->Width.Value > 0.0f ? Node->Width.Value : 0.0f;
+		return Node->Transform.Width.Value > 0.0f ? Node->Transform.Width.Value : 0.0f;
 	}
 
 	bool HasExplicitFitDimension(const FDesignSize& Size)
@@ -145,7 +145,7 @@ namespace
 		return Node.IsValid()
 			&& Node->Children.Num() == 0
 			&& (Node->Type == EDesignNodeType::Text || Node->Type == EDesignNodeType::IconFont)
-			&& !Node->Content.IsEmpty();
+			&& !Node->Text.Content.IsEmpty();
 	}
 
 	void MergeEstimatedDimension(float& CurrentValue, const FDesignSize& Size, float Estimate, bool bForceEstimate = false)
@@ -183,7 +183,7 @@ namespace
 			return FVector2D::ZeroVector;
 		}
 
-		if (!Node.IsValid() || !Node->bEnabled)
+		if (!Node.IsValid() || !Node->Transform.bEnabled)
 		{
 			return FVector2D::ZeroVector;
 		}
@@ -194,13 +194,13 @@ namespace
 			{
 				const FVector2D RefSize = PreComputeFitContentSizesImpl(Expanded, Doc, ParentContentWidth, State);
 				const bool bLockExplicitFit = ShouldLockExplicitFitDimensionForSizing(Node);
-				if (Node->Width.IsFit() && !(bLockExplicitFit && HasExplicitFitDimension(Node->Width)) && RefSize.X > Node->Width.Value && !Expanded->Width.IsFill())
+				if (Node->Transform.Width.IsFit() && !(bLockExplicitFit && HasExplicitFitDimension(Node->Transform.Width)) && RefSize.X > Node->Transform.Width.Value && !Expanded->Transform.Width.IsFill())
 				{
-					Node->Width.Value = static_cast<float>(RefSize.X);
+					Node->Transform.Width.Value = static_cast<float>(RefSize.X);
 				}
-				if (Node->Height.IsFit() && !(bLockExplicitFit && HasExplicitFitDimension(Node->Height)) && RefSize.Y > Node->Height.Value && !Expanded->Height.IsFill())
+				if (Node->Transform.Height.IsFit() && !(bLockExplicitFit && HasExplicitFitDimension(Node->Transform.Height)) && RefSize.Y > Node->Transform.Height.Value && !Expanded->Transform.Height.IsFill())
 				{
-					Node->Height.Value = static_cast<float>(RefSize.Y);
+					Node->Transform.Height.Value = static_cast<float>(RefSize.Y);
 				}
 				return RefSize;
 			}
@@ -209,12 +209,12 @@ namespace
 
 		if (Node->Type == EDesignNodeType::Text)
 		{
-			float W = Node->Width.Value;
-			float H = Node->Height.Value;
+			float W = Node->Transform.Width.Value;
+			float H = Node->Transform.Height.Value;
 			const bool bLockExplicitFit = ShouldLockExplicitFitDimensionForSizing(Node);
-			const bool bHasExplicitFitWidth = bLockExplicitFit && HasExplicitFitDimension(Node->Width);
-			const bool bHasExplicitFitHeight = bLockExplicitFit && HasExplicitFitDimension(Node->Height);
-			if (Node->Width.IsFill())
+			const bool bHasExplicitFitWidth = bLockExplicitFit && HasExplicitFitDimension(Node->Transform.Width);
+			const bool bHasExplicitFitHeight = bLockExplicitFit && HasExplicitFitDimension(Node->Transform.Height);
+			if (Node->Transform.Width.IsFill())
 			{
 				const float FillWidth = ResolveSizingWidthHint(Node, ParentContentWidth);
 				if (FillWidth > 0.0f)
@@ -223,25 +223,25 @@ namespace
 				}
 			}
 
-			const bool bNeedWidthEstimate = !Node->Width.IsFixed() && W <= 0.0f;
-			const bool bNeedHeightEstimate = !Node->Height.IsFixed() && H <= 0.0f;
-			if ((bNeedWidthEstimate || bNeedHeightEstimate || Node->Width.IsFit() || Node->Height.IsFit())
-				&& Node->FontSize > 0
-				&& !Node->Content.IsEmpty())
+			const bool bNeedWidthEstimate = !Node->Transform.Width.IsFixed() && W <= 0.0f;
+			const bool bNeedHeightEstimate = !Node->Transform.Height.IsFixed() && H <= 0.0f;
+			if ((bNeedWidthEstimate || bNeedHeightEstimate || Node->Transform.Width.IsFit() || Node->Transform.Height.IsFit())
+				&& Node->Text.FontSize > 0
+				&& !Node->Text.Content.IsEmpty())
 			{
 				const FVector2D Measured = TextMeasurement::MeasureTextNodeSize(Node, ParentContentWidth);
 				if (!bHasExplicitFitWidth)
 				{
-					MergeEstimatedDimension(W, Node->Width, Measured.X, bNeedWidthEstimate);
+					MergeEstimatedDimension(W, Node->Transform.Width, Measured.X, bNeedWidthEstimate);
 				}
 				if (!bHasExplicitFitHeight)
 				{
-					MergeEstimatedDimension(H, Node->Height, Measured.Y, bNeedHeightEstimate);
+					MergeEstimatedDimension(H, Node->Transform.Height, Measured.Y, bNeedHeightEstimate);
 				}
 			}
-			else if (bNeedHeightEstimate && Node->FontSize > 0)
+			else if (bNeedHeightEstimate && Node->Text.FontSize > 0)
 			{
-				H = Node->FontSize * 1.5f;
+				H = Node->Text.FontSize * 1.5f;
 			}
 
 			if (!bHasExplicitFitWidth)
@@ -257,20 +257,20 @@ namespace
 
 		if (Node->Type == EDesignNodeType::IconFont)
 		{
-			const float S = Node->FontSize > 0 ? Node->FontSize : 16.0f;
-			float W = Node->Width.Value;
-			float H = Node->Height.Value;
+			const float S = Node->Text.FontSize > 0 ? Node->Text.FontSize : 16.0f;
+			float W = Node->Transform.Width.Value;
+			float H = Node->Transform.Height.Value;
 			const bool bLockExplicitFit = ShouldLockExplicitFitDimensionForSizing(Node);
-			const bool bHasExplicitFitWidth = bLockExplicitFit && HasExplicitFitDimension(Node->Width);
-			const bool bHasExplicitFitHeight = bLockExplicitFit && HasExplicitFitDimension(Node->Height);
+			const bool bHasExplicitFitWidth = bLockExplicitFit && HasExplicitFitDimension(Node->Transform.Width);
+			const bool bHasExplicitFitHeight = bLockExplicitFit && HasExplicitFitDimension(Node->Transform.Height);
 			if (!bHasExplicitFitWidth)
 			{
-				MergeEstimatedDimension(W, Node->Width, S, !Node->Width.IsFixed() && W <= 0.0f);
+				MergeEstimatedDimension(W, Node->Transform.Width, S, !Node->Transform.Width.IsFixed() && W <= 0.0f);
 				SizeEstimator::PromoteFitNodeDimension(Node, true, W);
 			}
 			if (!bHasExplicitFitHeight)
 			{
-				MergeEstimatedDimension(H, Node->Height, S, !Node->Height.IsFixed() && H <= 0.0f);
+				MergeEstimatedDimension(H, Node->Transform.Height, S, !Node->Transform.Height.IsFixed() && H <= 0.0f);
 				SizeEstimator::PromoteFitNodeDimension(Node, false, H);
 			}
 			return FVector2D(W, H);
@@ -278,13 +278,13 @@ namespace
 
 		if (IsVectorLeaf(Node))
 		{
-			const float W = FMath::Max(1.0f, FMath::RoundToFloat(Node->Width.Value));
-			const float H = FMath::Max(1.0f, FMath::RoundToFloat(Node->Height.Value));
-			if (!Node->Width.IsFixed() || Node->Width.Value < 1.0f)
+			const float W = FMath::Max(1.0f, FMath::RoundToFloat(Node->Transform.Width.Value));
+			const float H = FMath::Max(1.0f, FMath::RoundToFloat(Node->Transform.Height.Value));
+			if (!Node->Transform.Width.IsFixed() || Node->Transform.Width.Value < 1.0f)
 			{
 				SizeEstimator::SetResolvedNodeDimension(Node, true, W);
 			}
-			if (!Node->Height.IsFixed() || Node->Height.Value < 1.0f)
+			if (!Node->Transform.Height.IsFixed() || Node->Transform.Height.Value < 1.0f)
 			{
 				SizeEstimator::SetResolvedNodeDimension(Node, false, H);
 			}
@@ -294,8 +294,8 @@ namespace
 		if (!Node->IsContainer() && Node->Type != EDesignNodeType::Rectangle)
 		{
 			return FVector2D(
-				Node->Width.IsFixed() ? Node->Width.Value : 0.0f,
-				Node->Height.IsFixed() ? Node->Height.Value : 0.0f);
+				Node->Transform.Width.IsFixed() ? Node->Transform.Width.Value : 0.0f,
+				Node->Transform.Height.IsFixed() ? Node->Transform.Height.Value : 0.0f);
 		}
 
 		for (const TSharedPtr<FDesignNode>& Child : Node->Children)
@@ -304,22 +304,22 @@ namespace
 			(void)PreComputeFitContentSizesImpl(Child, Doc, ChildContentWidth, State);
 		}
 
-		float FinalW = Node->Width.Value;
-		float FinalH = Node->Height.Value;
-		if (Node->Width.IsFit() || Node->Height.IsFit())
+		float FinalW = Node->Transform.Width.Value;
+		float FinalH = Node->Transform.Height.Value;
+		if (Node->Transform.Width.IsFit() || Node->Transform.Height.IsFit())
 		{
 			const FVector2D Estimated = EstimateContentSizeImpl(Node, ParentContentWidth, State);
 			const bool bLockExplicitFit = ShouldLockExplicitFitDimensionForSizing(Node);
-			if (Node->Width.IsFit() && !(bLockExplicitFit && HasExplicitFitDimension(Node->Width)) && Estimated.X > Node->Width.Value)
+			if (Node->Transform.Width.IsFit() && !(bLockExplicitFit && HasExplicitFitDimension(Node->Transform.Width)) && Estimated.X > Node->Transform.Width.Value)
 			{
 				SizeEstimator::PromoteFitNodeDimension(Node, true, Estimated.X);
-				FinalW = Node->Width.Value;
+				FinalW = Node->Transform.Width.Value;
 				UE_LOG(LogDesign2UMG, Log, TEXT("PreCompute: '%s' width fit→%.0f"), *Node->Name, Estimated.X);
 			}
-			if (Node->Height.IsFit() && !(bLockExplicitFit && HasExplicitFitDimension(Node->Height)) && Estimated.Y > Node->Height.Value)
+			if (Node->Transform.Height.IsFit() && !(bLockExplicitFit && HasExplicitFitDimension(Node->Transform.Height)) && Estimated.Y > Node->Transform.Height.Value)
 			{
 				SizeEstimator::PromoteFitNodeDimension(Node, false, Estimated.Y);
-				FinalH = Node->Height.Value;
+				FinalH = Node->Transform.Height.Value;
 				UE_LOG(LogDesign2UMG, Log, TEXT("PreCompute: '%s' height fit→%.0f"), *Node->Name, Estimated.Y);
 			}
 		}
@@ -351,7 +351,7 @@ float SizeEstimator::ComputeChildContentWidthHint(const TSharedPtr<FDesignNode>&
 		return 0.0f;
 	}
 
-	if (Node->Layout == EDesignLayout::Wrap || Node->Layout == EDesignLayout::Grid)
+	if (Node->LayoutData.Layout == EDesignLayout::Wrap || Node->LayoutData.Layout == EDesignLayout::Grid)
 	{
 		return 0.0f;
 	}
@@ -369,22 +369,22 @@ float SizeEstimator::ComputeChildContentWidthHint(const TSharedPtr<FDesignNode>&
 		return 0.0f;
 	}
 
-	const float InnerWidth = FMath::Max(0.0f, ResolvedWidth - Node->Padding.Left - Node->Padding.Right);
+	const float InnerWidth = FMath::Max(0.0f, ResolvedWidth - Node->LayoutData.Padding.Left - Node->LayoutData.Padding.Right);
 	if (InnerWidth <= 0.0f)
 	{
 		return 0.0f;
 	}
 
-	if (Node->Layout != EDesignLayout::Horizontal || VisibleChildren.Num() == 1)
+	if (Node->LayoutData.Layout != EDesignLayout::Horizontal || VisibleChildren.Num() == 1)
 	{
 		return InnerWidth;
 	}
 
-	float RemainingWidth = InnerWidth - Node->Gap * (VisibleChildren.Num() - 1);
+	float RemainingWidth = InnerWidth - Node->LayoutData.Gap * (VisibleChildren.Num() - 1);
 	int32 FillChildCount = 0;
 	for (const TSharedPtr<FDesignNode>& VisibleChild : VisibleChildren)
 	{
-		if (VisibleChild->Width.IsFill())
+		if (VisibleChild->Transform.Width.IsFill())
 		{
 			++FillChildCount;
 			continue;
@@ -393,7 +393,7 @@ float SizeEstimator::ComputeChildContentWidthHint(const TSharedPtr<FDesignNode>&
 		RemainingWidth -= ResolveSizingWidthHint(VisibleChild, 0.0f);
 	}
 
-	if (!Child->Width.IsFill() || FillChildCount <= 0 || RemainingWidth <= 0.0f)
+	if (!Child->Transform.Width.IsFill() || FillChildCount <= 0 || RemainingWidth <= 0.0f)
 	{
 		return InnerWidth;
 	}
@@ -403,21 +403,21 @@ float SizeEstimator::ComputeChildContentWidthHint(const TSharedPtr<FDesignNode>&
 
 void SizeEstimator::SetResolvedNodeDimension(const TSharedPtr<FDesignNode>& Node, bool bWidth, float Pixels)
 {
-	FDesignSize& Size = bWidth ? Node->Width : Node->Height;
+	FDesignSize& Size = bWidth ? Node->Transform.Width : Node->Transform.Height;
 	Size.Value = FMath::Max(0.0f, Pixels);
 	if (bWidth)
 	{
-		Node->bHasWidth = true;
+		Node->Transform.bHasWidth = true;
 	}
 	else
 	{
-		Node->bHasHeight = true;
+		Node->Transform.bHasHeight = true;
 	}
 }
 
 void SizeEstimator::PromoteFitNodeDimension(const TSharedPtr<FDesignNode>& Node, bool bWidth, float Pixels)
 {
-	FDesignSize& Size = bWidth ? Node->Width : Node->Height;
+	FDesignSize& Size = bWidth ? Node->Transform.Width : Node->Transform.Height;
 	if (!Size.IsFit() || Pixels <= Size.Value)
 	{
 		return;
@@ -426,11 +426,11 @@ void SizeEstimator::PromoteFitNodeDimension(const TSharedPtr<FDesignNode>& Node,
 	Size.Value = Pixels;
 	if (bWidth)
 	{
-		Node->bHasWidth = true;
+		Node->Transform.bHasWidth = true;
 	}
 	else
 	{
-		Node->bHasHeight = true;
+		Node->Transform.bHasHeight = true;
 	}
 }
 
@@ -444,9 +444,9 @@ namespace
 			return FVector2D::ZeroVector;
 		}
 
-		float W = Node->Width.Value;
-		float H = Node->Height.Value;
-		if (Node->Width.IsFill())
+		float W = Node->Transform.Width.Value;
+		float H = Node->Transform.Height.Value;
+		if (Node->Transform.Width.IsFill())
 		{
 			const float FillWidth = ResolveSizingWidthHint(Node, ParentContentWidth);
 			if (FillWidth > 0.0f)
@@ -457,34 +457,34 @@ namespace
 
 		if (Node->Type == EDesignNodeType::Text)
 		{
-			if ((W == 0 || H == 0 || Node->Width.IsFit() || Node->Height.IsFit())
-				&& Node->FontSize > 0
-				&& !Node->Content.IsEmpty())
+			if ((W == 0 || H == 0 || Node->Transform.Width.IsFit() || Node->Transform.Height.IsFit())
+				&& Node->Text.FontSize > 0
+				&& !Node->Text.Content.IsEmpty())
 			{
 				const FVector2D Measured = TextMeasurement::MeasureTextNodeSize(Node, ParentContentWidth);
-				MergeEstimatedDimension(W, Node->Width, Measured.X);
-				MergeEstimatedDimension(H, Node->Height, Measured.Y);
+				MergeEstimatedDimension(W, Node->Transform.Width, Measured.X);
+				MergeEstimatedDimension(H, Node->Transform.Height, Measured.Y);
 			}
-			else if (H == 0 && Node->FontSize > 0)
+			else if (H == 0 && Node->Text.FontSize > 0)
 			{
-				H = Node->FontSize * 1.5f;
+				H = Node->Text.FontSize * 1.5f;
 			}
 			return FVector2D(W, H);
 		}
 
 		if (Node->Type == EDesignNodeType::IconFont)
 		{
-			const float S = Node->FontSize > 0 ? Node->FontSize : 16.0f;
-			MergeEstimatedDimension(W, Node->Width, S);
-			MergeEstimatedDimension(H, Node->Height, S);
+			const float S = Node->Text.FontSize > 0 ? Node->Text.FontSize : 16.0f;
+			MergeEstimatedDimension(W, Node->Transform.Width, S);
+			MergeEstimatedDimension(H, Node->Transform.Height, S);
 			return FVector2D(W, H);
 		}
 
 		if (Node->Children.Num() > 0)
 		{
 			const FVector2D Sub = EstimateContentSizeImpl(Node, ParentContentWidth, State);
-			MergeEstimatedDimension(W, Node->Width, Sub.X);
-			MergeEstimatedDimension(H, Node->Height, Sub.Y);
+			MergeEstimatedDimension(W, Node->Transform.Width, Sub.X);
+			MergeEstimatedDimension(H, Node->Transform.Height, Sub.Y);
 		}
 
 		return FVector2D(W, H);
@@ -500,8 +500,8 @@ namespace
 
 		float W = 0.0f;
 		float H = 0.0f;
-		const float PadH = Node->Padding.Left + Node->Padding.Right;
-		const float PadV = Node->Padding.Top + Node->Padding.Bottom;
+		const float PadH = Node->LayoutData.Padding.Left + Node->LayoutData.Padding.Right;
+		const float PadV = Node->LayoutData.Padding.Top + Node->LayoutData.Padding.Bottom;
 
 		TArray<TSharedPtr<FDesignNode>> Visible;
 		SizeEstimator::GatherVisibleChildren(Node, Visible);
@@ -510,8 +510,8 @@ namespace
 			return FVector2D(PadH, PadV);
 		}
 
-		const float TotalGap = Visible.Num() > 1 ? Node->Gap * (Visible.Num() - 1) : 0.0f;
-		if (Node->Layout == EDesignLayout::Horizontal)
+		const float TotalGap = Visible.Num() > 1 ? Node->LayoutData.Gap * (Visible.Num() - 1) : 0.0f;
+		if (Node->LayoutData.Layout == EDesignLayout::Horizontal)
 		{
 			for (const TSharedPtr<FDesignNode>& Child : Visible)
 			{
@@ -522,7 +522,7 @@ namespace
 			}
 			W += TotalGap;
 		}
-		else if (Node->Layout == EDesignLayout::Vertical)
+		else if (Node->LayoutData.Layout == EDesignLayout::Vertical)
 		{
 			for (const TSharedPtr<FDesignNode>& Child : Visible)
 			{
@@ -539,8 +539,8 @@ namespace
 			{
 				const float ChildContentWidth = SizeEstimator::ComputeChildContentWidthHint(Node, Child, ParentContentWidth);
 				const FVector2D ChildSize = EstimateNodeSizeImpl(Child, ChildContentWidth, State);
-				W = FMath::Max(W, Child->X + ChildSize.X);
-				H = FMath::Max(H, Child->Y + ChildSize.Y);
+				W = FMath::Max(W, Child->Transform.X + ChildSize.X);
+				H = FMath::Max(H, Child->Transform.Y + ChildSize.Y);
 			}
 		}
 

@@ -22,7 +22,7 @@ jobs:
 
       - name: Fail on local-only tracked files
         run: |
-          if git ls-files | grep -E '^\.cowork-temp/|^\.claude/|^\.codex/|^openspec/|^progress\.txt$|^ocr_result\.txt$|^CLAUDE\.md$|^Design2UMG图片/|^capture_editor_screenshot\.py$|^capture_umg_screenshot\.py$|^compare_coordinates\.py$|^screenshot\.ps1$|^screenshot\.py$|^show_expected_coords\.py$|^test_import\.py$|^verify_coords\.py$|^verify_design_size\.py$|^editor_screenshot\.png$'; then
+          if git ls-files | grep -E '^\.cowork-temp/|^\.claude/|^\.codex/|^openspec/|^progress\.txt$|^ocr_result\.txt$|^AGENTS\.md$|^CLAUDE\.md$|^code_review_report\.md$|^code_review_report 2\.md$|^Design2UMG图片/|^capture_editor_screenshot\.py$|^capture_umg_screenshot\.py$|^compare_coordinates\.py$|^screenshot\.ps1$|^screenshot\.py$|^show_expected_coords\.py$|^test_import\.py$|^verify_coords\.py$|^verify_design_size\.py$|^editor_screenshot\.png$'; then
             echo "Local-only files are tracked. Remove them before release."
             exit 1
           fi
@@ -52,3 +52,45 @@ jobs:
             -Package="$pwd\dist\Design2UMG" `
             -Rocket `
             -StrictIncludes
+
+      - name: Strip maintainer-only files from packaged plugin
+        run: |
+          $packageRoot = Join-Path $pwd "dist\Design2UMG"
+          if (-not (Test-Path $packageRoot)) {
+            throw "BuildPlugin package output not found: $packageRoot"
+          }
+
+          $maintainerOnlyPaths = @(
+            "AGENTS.md",
+            "CLAUDE.md",
+            ".cowork-temp",
+            ".claude",
+            ".codex",
+            "openspec"
+          )
+
+          foreach ($relativePath in $maintainerOnlyPaths) {
+            $targetPath = Join-Path $packageRoot $relativePath
+            if (Test-Path $targetPath) {
+              Remove-Item -LiteralPath $targetPath -Recurse -Force
+            }
+          }
+
+      - name: Verify packaged plugin excludes maintainer-only files
+        run: |
+          $packageRoot = Join-Path $pwd "dist\Design2UMG"
+          $maintainerOnlyPaths = @(
+            "AGENTS.md",
+            "CLAUDE.md",
+            ".cowork-temp",
+            ".claude",
+            ".codex",
+            "openspec"
+          )
+
+          foreach ($relativePath in $maintainerOnlyPaths) {
+            $targetPath = Join-Path $packageRoot $relativePath
+            if (Test-Path $targetPath) {
+              throw "Packaged plugin still contains maintainer-only path: $relativePath"
+            }
+          }

@@ -1,0 +1,24 @@
+# Normalize Windows-facing text files in the repository.
+* text=auto
+*.h text eol=crlf
+*.hpp text eol=crlf
+*.cpp text eol=crlf
+*.cs text eol=crlf
+*.py text eol=crlf
+*.md text eol=crlf
+*.json text eol=crlf
+*.yml text eol=crlf
+*.yaml text eol=crlf
+
+# Exclude maintainer-only workflow files from generated source archives.
+AGENTS.md export-ignore
+CLAUDE.md export-ignore
+code_review.md export-ignore
+code_review_report.md export-ignore
+code_review_report 2.md export-ignore
+
+# Exclude local workflow directories from generated source archives.
+.cowork-temp/ export-ignore
+.claude/ export-ignore
+.codex/ export-ignore
+openspec/ export-ignore

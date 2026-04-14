@@ -3,8 +3,18 @@ import json
 import sys
 from pathlib import Path
 
+import design2umg_auto_verify as verify
+
 
 BLOCKED_EXIT_CODE = 2
+DEFAULT_METRIC_EPSILON = 1e-9
+DEFAULT_PIXEL_TOLERANCE = 6
+METRIC_PAIRS = [
+    ("stable_changed_ratio", "stable_changed_ratio"),
+    ("changed_ratio", "changed_ratio"),
+    ("stable_mae", "stable_mean_abs_error"),
+    ("mae", "mean_abs_error"),
+]
 
 
 def load_json(path: Path) -> dict:
@@ -18,11 +28,85 @@ def collect_case_dirs(output_root: Path) -> set[str]:
             continue
         if child.name.startswith("_"):
             continue
+        if not (child / "compare_report.json").is_file():
+            continue
         names.add(child.name)
     return names
 
 
-def validate_run(output_root: Path) -> dict:
+def resolve_report_path(output_root: Path, case_name: str, summary_case: dict | None) -> Path:
+    summary_case = summary_case or {}
+    summary_report_path = summary_case.get("report_path", "")
+    if summary_report_path:
+        candidate = Path(summary_report_path)
+        if candidate.is_file():
+            return candidate.resolve()
+
+    direct_case_report_path = output_root / case_name / "compare_report.json"
+    if direct_case_report_path.is_file():
+        return direct_case_report_path.resolve()
+
+    root_compare_report_path = output_root / "compare_report.json"
+    if root_compare_report_path.is_file():
+        return root_compare_report_path.resolve()
+
+    return direct_case_report_path.resolve()
+
+
+def resolve_case_metrics(output_root: Path, case_name: str, summary_case: dict | None) -> dict:
+    summary_case = summary_case or {}
+    report_path = resolve_report_path(output_root, case_name, summary_case)
+    summary_metrics = {
+        "stable_changed_ratio": summary_case.get("stable_changed_ratio"),
+        "changed_ratio": summary_case.get("changed_ratio"),
+        "stable_mae": summary_case.get("stable_mae"),
+        "mae": summary_case.get("mae"),
+    }
+    if any(value is not None for value in summary_metrics.values()):
+        return {
+            "report_path": str(report_path),
+            **summary_metrics,
+        }
+
+    report = load_json(report_path) if report_path.is_file() else {}
+    pixel_tolerance = report.get("pixel_tolerance", DEFAULT_PIXEL_TOLERANCE)
+    try:
+        pixel_tolerance = int(pixel_tolerance)
+    except (TypeError, ValueError):
+        pixel_tolerance = DEFAULT_PIXEL_TOLERANCE
+
+    reference_png_path = Path(report.get("reference_png_path") or (report_path.parent / "reference.png"))
+    candidate_png_path = Path(report.get("candidate_png_path") or (report_path.parent / "candidate.png"))
+    report_metrics = verify.extract_compare_metrics(report)
+    if report_metrics:
+        return {
+            "report_path": str(report_path),
+            "stable_changed_ratio": report_metrics.get("stable_changed_ratio"),
+            "changed_ratio": report_metrics.get("changed_ratio"),
+            "stable_mae": report_metrics.get("stable_mean_abs_error"),
+            "mae": report_metrics.get("mean_abs_error"),
+        }
+
+    image_metrics = verify.compare_image_paths(reference_png_path, candidate_png_path, pixel_tolerance)
+    if image_metrics:
+        return {
+            "report_path": str(report_path),
+            "stable_changed_ratio": image_metrics.get("stable_changed_ratio"),
+            "changed_ratio": image_metrics.get("changed_ratio"),
+            "stable_mae": image_metrics.get("stable_mean_abs_error"),
+            "mae": image_metrics.get("mean_abs_error"),
+        }
+
+    return {
+        "report_path": str(report_path),
+        "stable_changed_ratio": summary_case.get("stable_changed_ratio"),
+        "changed_ratio": summary_case.get("changed_ratio"),
+        "stable_mae": summary_case.get("stable_mae"),
+        "mae": summary_case.get("mae"),
+    }
+
+
+def validate_run(output_root: Path, admissible_best_path: Path | None = None, metric_epsilon: float = DEFAULT_METRIC_EPSILON) -> dict:
     result = {
         "output_root": str(output_root),
         "blocked": False,
@@ -38,6 +122,11 @@ def validate_run(output_root: Path) -> dict:
         "missing_case_summary_entries": [],
         "unexpected_summary_cases": [],
         "unexpected_case_dirs": [],
+        "admissible_best_path": str(admissible_best_path) if admissible_best_path else "",
+        "metric_epsilon": metric_epsilon,
+        "historical_best_checked": False,
+        "historical_best_missing_cases": [],
+        "historical_best_regressions": [],
     }
 
     run_scope_path = output_root / "run_scope.json"
@@ -62,6 +151,11 @@ def validate_run(output_root: Path) -> dict:
 
     summary_case_names = [item.get("name", "") for item in ((summary or {}).get("cases") or []) if item.get("name")]
     result["summary_case_names"] = summary_case_names
+    summary_cases_by_name = {
+        item.get("name"): item
+        for item in ((summary or {}).get("cases") or [])
+        if item.get("name")
+    }
 
     expected_case_set = set(expected_case_names)
     case_dir_set = set(case_dir_names)
@@ -69,7 +163,8 @@ def validate_run(output_root: Path) -> dict:
 
     if expected_case_names:
         for case_name in sorted(expected_case_set):
-            compare_report_path = output_root / case_name / "compare_report.json"
+            summary_case = summary_cases_by_name.get(case_name) or {}
+            compare_report_path = resolve_report_path(output_root, case_name, summary_case)
             if not compare_report_path.is_file():
                 result["missing_compare_reports"].append(case_name)
             if case_name not in summary_case_set:
@@ -82,7 +177,7 @@ def validate_run(output_root: Path) -> dict:
             case_name = item.get("name")
             if not case_name:
                 continue
-            compare_report_path = output_root / case_name / "compare_report.json"
+            compare_report_path = resolve_report_path(output_root, case_name, item)
             if not compare_report_path.is_file():
                 result["missing_compare_reports"].append(case_name)
 
@@ -90,6 +185,52 @@ def validate_run(output_root: Path) -> dict:
         result["blocked_reasons"].append("missing_compare_report")
     if result["missing_case_summary_entries"]:
         result["blocked_reasons"].append("missing_case_summary_entry")
+
+    if admissible_best_path is not None:
+        admissible_best = load_json(admissible_best_path) if admissible_best_path.is_file() else None
+        if admissible_best is None:
+            result["blocked_reasons"].append("missing_admissible_best")
+        else:
+            result["historical_best_checked"] = True
+            best_cases = (admissible_best or {}).get("cases") or {}
+            case_names_to_check = expected_case_names or list(summary_cases_by_name.keys())
+            for case_name in case_names_to_check:
+                best_case = best_cases.get(case_name)
+                current_case = summary_cases_by_name.get(case_name)
+                if best_case is None or current_case is None:
+                    result["historical_best_missing_cases"].append(case_name)
+                    continue
+
+                resolved_current_metrics = resolve_case_metrics(output_root, case_name, current_case)
+                regressions = []
+                for current_metric, best_metric in METRIC_PAIRS:
+                    current_value = resolved_current_metrics.get(current_metric)
+                    best_value = best_case.get(best_metric)
+                    if current_value is None or best_value is None:
+                        continue
+                    delta = current_value - best_value
+                    if delta > metric_epsilon:
+                        regressions.append(
+                            {
+                                "metric": current_metric,
+                                "current": current_value,
+                                "historical_best": best_value,
+                                "delta": delta,
+                            }
+                        )
+
+                if regressions:
+                    result["historical_best_regressions"].append(
+                        {
+                            "case": case_name,
+                            "regressions": regressions,
+                        }
+                    )
+
+            if result["historical_best_missing_cases"]:
+                result["blocked_reasons"].append("historical_best_missing_case")
+            if result["historical_best_regressions"]:
+                result["blocked_reasons"].append("historical_best_regression")
 
     result["blocked"] = bool(result["blocked_reasons"])
     return result
@@ -109,6 +250,17 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Optional path to write the validation result JSON",
     )
+    parser.add_argument(
+        "--admissible-best-json",
+        default="",
+        help="Optional admissible-best JSON used to enforce per-case historical-best parity",
+    )
+    parser.add_argument(
+        "--metric-epsilon",
+        type=float,
+        default=DEFAULT_METRIC_EPSILON,
+        help="Tolerance used when comparing current metrics against admissible-best metrics",
+    )
     return parser.parse_args()
 
 
@@ -118,7 +270,8 @@ def main() -> None:
     if not output_root.is_dir():
         raise RuntimeError(f"Automation output root not found: {output_root}")
 
-    result = validate_run(output_root)
+    admissible_best_path = Path(args.admissible_best_json).resolve() if args.admissible_best_json else None
+    result = validate_run(output_root, admissible_best_path=admissible_best_path, metric_epsilon=args.metric_epsilon)
     payload = json.dumps(result, ensure_ascii=False, indent=2)
     print(payload)
 

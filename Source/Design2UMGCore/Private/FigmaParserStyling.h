@@ -4,12 +4,12 @@
 
 bool IsSyntheticVectorRasterFill(const TSharedPtr<FJsonObject>& FillObj)
 {
-	if (!FillObj || GetStr(FillObj, TEXT("type")) != TEXT("IMAGE"))
+	if (!FillObj || GetString(FillObj, TEXT("type")) != TEXT("IMAGE"))
 	{
 		return false;
 	}
 
-	const FString ImageRef = GetStr(FillObj, TEXT("imageRef"));
+	const FString ImageRef = GetString(FillObj, TEXT("imageRef"));
 	return ImageRef.StartsWith(TEXT("vec_"));
 }
 
@@ -18,12 +18,12 @@ FString ExtractSyntheticVectorRasterImageRef(const TArray<TSharedPtr<FJsonValue>
 	for (const TSharedPtr<FJsonValue>& FillVal : Fills)
 	{
 		const TSharedPtr<FJsonObject> FillObj = FillVal->AsObject();
-		if (!IsSyntheticVectorRasterFill(FillObj) || !GetBool(FillObj, TEXT("visible"), true))
+		if (!IsSyntheticVectorRasterFill(FillObj) || !GetBoolean(FillObj, TEXT("visible"), true))
 		{
 			continue;
 		}
 
-		const FString ImageRef = GetStr(FillObj, TEXT("imageRef"));
+		const FString ImageRef = GetString(FillObj, TEXT("imageRef"));
 		if (!ImageRef.IsEmpty())
 		{
 			return ImageRef;
@@ -63,17 +63,17 @@ bool IsIdentityImageTransform(const TArray<TSharedPtr<FJsonValue>>* TransformArr
 FDesignFill ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)
 {
 	FDesignFill Result;
-	if (!FillObj || !GetBool(FillObj, TEXT("visible"), true))
+	if (!FillObj || !GetBoolean(FillObj, TEXT("visible"), true))
 		return Result;
 
-	FString FillType = GetStr(FillObj, TEXT("type"));
-	float FillOpacity = GetNum(FillObj, TEXT("opacity"), 1.0);
+	FString FillType = GetString(FillObj, TEXT("type"));
+	float FillOpacity = GetNumber(FillObj, TEXT("opacity"), 1.0);
 	Result.Opacity = FillOpacity;
 	FillObj->TryGetStringField(TEXT("blendMode"), Result.BlendMode);
 
 	if (FillType == TEXT("SOLID"))
 	{
-		auto ColorObj = GetObj(FillObj, TEXT("color"));
+		auto ColorObj = GetObject(FillObj, TEXT("color"));
 		Result.Type = EDesignFillType::Color;
 		Result.SolidColor = ColorToHex(ColorObj, FillOpacity);
 		return Result;
@@ -90,17 +90,17 @@ FDesignFill ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)
 		else
 			Result.Gradient.GradientType = EDesignGradientType::Angular;
 
-		const auto* Handles = GetArr(FillObj, TEXT("gradientHandlePositions"));
+		const auto* Handles = GetArray(FillObj, TEXT("gradientHandlePositions"));
 		if (Handles && Handles->Num() >= 2)
 		{
 			auto P0 = (*Handles)[0]->AsObject();
 			auto P1 = (*Handles)[1]->AsObject();
 			if (P0 && P1)
 			{
-				const float CenterX = GetNum(P0, TEXT("x"));
-				const float CenterY = GetNum(P0, TEXT("y"));
-				const float DX = GetNum(P1, TEXT("x")) - CenterX;
-				const float DY = GetNum(P1, TEXT("y")) - CenterY;
+				const float CenterX = GetNumber(P0, TEXT("x"));
+				const float CenterY = GetNumber(P0, TEXT("y"));
+				const float DX = GetNumber(P1, TEXT("x")) - CenterX;
+				const float DY = GetNumber(P1, TEXT("y")) - CenterY;
 				Result.Gradient.Rotation = FMath::RadiansToDegrees(FMath::Atan2(DY, DX));
 
 				if (Result.Gradient.GradientType == EDesignGradientType::Radial)
@@ -117,8 +117,8 @@ FDesignFill ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)
 						auto P2 = (*Handles)[2]->AsObject();
 						if (P2)
 						{
-							const float DYHandleX = GetNum(P2, TEXT("x")) - CenterX;
-							const float DYHandleY = GetNum(P2, TEXT("y")) - CenterY;
+							const float DYHandleX = GetNumber(P2, TEXT("x")) - CenterX;
+							const float DYHandleY = GetNumber(P2, TEXT("y")) - CenterY;
 							Result.Gradient.SizeHeight = FMath::Max(
 								KINDA_SMALL_NUMBER,
 								2.0f * FMath::Sqrt(DYHandleX * DYHandleX + DYHandleY * DYHandleY));
@@ -128,7 +128,7 @@ FDesignFill ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)
 			}
 		}
 
-		const auto* Stops = GetArr(FillObj, TEXT("gradientStops"));
+		const auto* Stops = GetArray(FillObj, TEXT("gradientStops"));
 		if (Stops)
 		{
 			for (const auto& StopVal : *Stops)
@@ -137,8 +137,8 @@ FDesignFill ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)
 				if (!StopObj) continue;
 
 				FDesignGradientStop Stop;
-				Stop.Color = ColorToHex(GetObj(StopObj, TEXT("color")), FillOpacity);
-				Stop.Position = GetNum(StopObj, TEXT("position"));
+				Stop.Color = ColorToHex(GetObject(StopObj, TEXT("color")), FillOpacity);
+				Stop.Position = GetNumber(StopObj, TEXT("position"));
 				Result.Gradient.Colors.Add(Stop);
 			}
 		}
@@ -148,10 +148,10 @@ FDesignFill ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)
 	if (FillType == TEXT("IMAGE"))
 	{
 		Result.Type = EDesignFillType::Image;
-		Result.Image.Url = GetStr(FillObj, TEXT("imageRef"));
+		Result.Image.Url = GetString(FillObj, TEXT("imageRef"));
 		Result.Image.Opacity = FillOpacity;
 
-		FString ScaleMode = GetStr(FillObj, TEXT("scaleMode"));
+		FString ScaleMode = GetString(FillObj, TEXT("scaleMode"));
 		if (ScaleMode == TEXT("FILL"))
 			Result.Image.Mode = EDesignImageMode::Fill;
 		else if (ScaleMode == TEXT("FIT"))
@@ -168,7 +168,7 @@ FDesignFill ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)
 			Result.Image.bHasScalingFactor = true;
 		}
 
-		const auto* TransformArr = GetArr(FillObj, TEXT("imageTransform"));
+		const auto* TransformArr = GetArray(FillObj, TEXT("imageTransform"));
 		if (TransformArr && TransformArr->Num() == 2)
 		{
 			auto Row0 = (*TransformArr)[0]->AsArray();
@@ -192,27 +192,27 @@ FDesignFill ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)
 
 bool IsLuminosityPlaceholderImageFill(const TSharedPtr<FJsonObject>& FillObj)
 {
-	if (!FillObj || !GetBool(FillObj, TEXT("visible"), true))
+	if (!FillObj || !GetBoolean(FillObj, TEXT("visible"), true))
 	{
 		return false;
 	}
 
-	if (GetStr(FillObj, TEXT("type")) != TEXT("IMAGE"))
+	if (GetString(FillObj, TEXT("type")) != TEXT("IMAGE"))
 	{
 		return false;
 	}
 
-	if (GetStr(FillObj, TEXT("blendMode")) != TEXT("LUMINOSITY"))
+	if (GetString(FillObj, TEXT("blendMode")) != TEXT("LUMINOSITY"))
 	{
 		return false;
 	}
 
-	if (GetStr(FillObj, TEXT("scaleMode")) != TEXT("FIT"))
+	if (GetString(FillObj, TEXT("scaleMode")) != TEXT("FIT"))
 	{
 		return false;
 	}
 
-	const TArray<TSharedPtr<FJsonValue>>* TransformArr = GetArr(FillObj, TEXT("imageTransform"));
+	const TArray<TSharedPtr<FJsonValue>>* TransformArr = GetArray(FillObj, TEXT("imageTransform"));
 	return IsIdentityImageTransform(TransformArr);
 }
 
@@ -222,7 +222,7 @@ TArray<FDesignFill> ParseFills(const TArray<TSharedPtr<FJsonValue>>& Fills)
 	for (int32 Index = 0; Index < Fills.Num(); ++Index)
 	{
 		auto FillObj = Fills[Index]->AsObject();
-		if (!FillObj || !GetBool(FillObj, TEXT("visible"), true))
+		if (!FillObj || !GetBoolean(FillObj, TEXT("visible"), true))
 			continue;
 		if (IsSyntheticVectorRasterFill(FillObj))
 			continue;
@@ -239,7 +239,7 @@ FDesignFill ParseFill(const TArray<TSharedPtr<FJsonValue>>& Fills)
 	for (int32 Index = Fills.Num() - 1; Index >= 0; --Index)
 	{
 		auto FillObj = Fills[Index]->AsObject();
-		if (!FillObj || !GetBool(FillObj, TEXT("visible"), true))
+		if (!FillObj || !GetBoolean(FillObj, TEXT("visible"), true))
 			continue;
 		if (IsSyntheticVectorRasterFill(FillObj))
 			continue;
@@ -256,18 +256,18 @@ FDesignStroke ParseStroke(const TSharedPtr<FJsonObject>& NodeObj)
 	FDesignStroke Result;
 	bool bHasVisibleStroke = false;
 
-	const auto* Strokes = GetArr(NodeObj, TEXT("strokes"));
+	const auto* Strokes = GetArray(NodeObj, TEXT("strokes"));
 	if (Strokes)
 	{
 		for (const auto& StrokeVal : *Strokes)
 		{
 			auto StrokeObj = StrokeVal->AsObject();
-			if (!StrokeObj || !GetBool(StrokeObj, TEXT("visible"), true))
+			if (!StrokeObj || !GetBoolean(StrokeObj, TEXT("visible"), true))
 				continue;
 
 			bHasVisibleStroke = true;
-			auto ColorObj = GetObj(StrokeObj, TEXT("color"));
-			float StrokeOpacity = GetNum(StrokeObj, TEXT("opacity"), 1.0);
+			auto ColorObj = GetObject(StrokeObj, TEXT("color"));
+			float StrokeOpacity = GetNumber(StrokeObj, TEXT("opacity"), 1.0);
 			Result.Fill = FDesignFill::FromColor(ColorToHex(ColorObj, StrokeOpacity));
 			break;
 		}
@@ -279,7 +279,7 @@ FDesignStroke ParseStroke(const TSharedPtr<FJsonObject>& NodeObj)
 		return Result;
 	}
 
-	FString Align = GetStr(NodeObj, TEXT("strokeAlign"), TEXT("INSIDE"));
+	FString Align = GetString(NodeObj, TEXT("strokeAlign"), TEXT("INSIDE"));
 	if (Align == TEXT("OUTSIDE"))
 		Result.Align = EDesignStrokeAlign::Outside;
 	else if (Align == TEXT("CENTER"))
@@ -287,19 +287,19 @@ FDesignStroke ParseStroke(const TSharedPtr<FJsonObject>& NodeObj)
 	else
 		Result.Align = EDesignStrokeAlign::Inside;
 
-	auto IndividualWeights = GetObj(NodeObj, TEXT("individualStrokeWeights"));
+	auto IndividualWeights = GetObject(NodeObj, TEXT("individualStrokeWeights"));
 	if (IndividualWeights)
 	{
 		Result.Thickness.bUniform = false;
-		Result.Thickness.Top = GetNum(IndividualWeights, TEXT("top"));
-		Result.Thickness.Right = GetNum(IndividualWeights, TEXT("right"));
-		Result.Thickness.Bottom = GetNum(IndividualWeights, TEXT("bottom"));
-		Result.Thickness.Left = GetNum(IndividualWeights, TEXT("left"));
+		Result.Thickness.Top = GetNumber(IndividualWeights, TEXT("top"));
+		Result.Thickness.Right = GetNumber(IndividualWeights, TEXT("right"));
+		Result.Thickness.Bottom = GetNumber(IndividualWeights, TEXT("bottom"));
+		Result.Thickness.Left = GetNumber(IndividualWeights, TEXT("left"));
 	}
 	else
 	{
 		Result.Thickness.bUniform = true;
-		Result.Thickness.Uniform = GetNum(NodeObj, TEXT("strokeWeight"));
+		Result.Thickness.Uniform = GetNumber(NodeObj, TEXT("strokeWeight"));
 	}
 
 	return Result;
@@ -309,7 +309,7 @@ FDesignCornerRadius ParseCornerRadius(const TSharedPtr<FJsonObject>& NodeObj)
 {
 	FDesignCornerRadius Result;
 
-	const auto* Radii = GetArr(NodeObj, TEXT("rectangleCornerRadii"));
+	const auto* Radii = GetArray(NodeObj, TEXT("rectangleCornerRadii"));
 	if (Radii && Radii->Num() == 4)
 	{
 		const float TopLeft = (*Radii)[0]->AsNumber();
@@ -338,7 +338,7 @@ FDesignCornerRadius ParseCornerRadius(const TSharedPtr<FJsonObject>& NodeObj)
 	else
 	{
 		Result.bUniform = true;
-		Result.Uniform = GetNum(NodeObj, TEXT("cornerRadius"));
+		Result.Uniform = GetNumber(NodeObj, TEXT("cornerRadius"));
 	}
 
 	return Result;
@@ -351,10 +351,10 @@ TArray<FDesignEffect> ParseEffects(const TArray<TSharedPtr<FJsonValue>>& Effects
 	for (const auto& EffVal : Effects)
 	{
 		auto EffObj = EffVal->AsObject();
-		if (!EffObj || !GetBool(EffObj, TEXT("visible"), true))
+		if (!EffObj || !GetBoolean(EffObj, TEXT("visible"), true))
 			continue;
 
-		FString EffType = GetStr(EffObj, TEXT("type"));
+		FString EffType = GetString(EffObj, TEXT("type"));
 		FDesignEffect Eff;
 		EffObj->TryGetStringField(TEXT("blendMode"), Eff.BlendMode);
 
@@ -364,23 +364,23 @@ TArray<FDesignEffect> ParseEffects(const TArray<TSharedPtr<FJsonValue>>& Effects
 			Eff.Shadow.bInner = (EffType == TEXT("INNER_SHADOW"));
 			Eff.Shadow.BlendMode = Eff.BlendMode;
 
-			auto Offset = GetObj(EffObj, TEXT("offset"));
-			Eff.Shadow.OffsetX = Offset ? GetNum(Offset, TEXT("x")) : 0.0f;
-			Eff.Shadow.OffsetY = Offset ? GetNum(Offset, TEXT("y")) : 0.0f;
-			Eff.Shadow.Blur = GetNum(EffObj, TEXT("radius"));
-			Eff.Shadow.Spread = GetNum(EffObj, TEXT("spread"));
-			float ShadowOpacity = GetNum(EffObj, TEXT("opacity"), 1.0);
-			Eff.Shadow.Color = ColorToHex(GetObj(EffObj, TEXT("color")), ShadowOpacity);
+			auto Offset = GetObject(EffObj, TEXT("offset"));
+			Eff.Shadow.OffsetX = Offset ? GetNumber(Offset, TEXT("x")) : 0.0f;
+			Eff.Shadow.OffsetY = Offset ? GetNumber(Offset, TEXT("y")) : 0.0f;
+			Eff.Shadow.Blur = GetNumber(EffObj, TEXT("radius"));
+			Eff.Shadow.Spread = GetNumber(EffObj, TEXT("spread"));
+			float ShadowOpacity = GetNumber(EffObj, TEXT("opacity"), 1.0);
+			Eff.Shadow.Color = ColorToHex(GetObject(EffObj, TEXT("color")), ShadowOpacity);
 		}
 		else if (EffType == TEXT("LAYER_BLUR"))
 		{
 			Eff.Type = EDesignEffectType::Blur;
-			Eff.Radius = GetNum(EffObj, TEXT("radius"));
+			Eff.Radius = GetNumber(EffObj, TEXT("radius"));
 		}
 		else if (EffType == TEXT("BACKGROUND_BLUR"))
 		{
 			Eff.Type = EDesignEffectType::BackgroundBlur;
-			Eff.Radius = GetNum(EffObj, TEXT("radius"));
+			Eff.Radius = GetNumber(EffObj, TEXT("radius"));
 		}
 		else
 		{
@@ -395,83 +395,83 @@ TArray<FDesignEffect> ParseEffects(const TArray<TSharedPtr<FJsonValue>>& Effects
 
 void ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 {
-	OutNode.Content = GetStr(NodeObj, TEXT("characters"));
+	OutNode.Text.Content = GetString(NodeObj, TEXT("characters"));
 
-	auto Style = GetObj(NodeObj, TEXT("style"));
+	auto Style = GetObject(NodeObj, TEXT("style"));
 	if (!Style) return;
 
-	OutNode.FontFamily = GetStr(Style, TEXT("fontFamily"));
-	OutNode.FontSize = GetNum(Style, TEXT("fontSize"), 16.0);
-	OutNode.FontStyle = GetStr(Style, TEXT("fontStyle"), TEXT("normal"));
+	OutNode.Text.FontFamily = GetString(Style, TEXT("fontFamily"));
+	OutNode.Text.FontSize = GetNumber(Style, TEXT("fontSize"), 16.0);
+	OutNode.Text.FontStyle = GetString(Style, TEXT("fontStyle"), TEXT("normal"));
 
-	int32 Weight = FMath::RoundToInt(GetNum(Style, TEXT("fontWeight"), 400.0));
+	int32 Weight = FMath::RoundToInt(GetNumber(Style, TEXT("fontWeight"), 400.0));
 	Weight = FMath::Clamp(FMath::RoundToInt(Weight / 100.0f) * 100, 100, 900);
-	OutNode.FontWeight = FString::FromInt(Weight);
+	OutNode.Text.FontWeight = FString::FromInt(Weight);
 
-	FString LineHeightUnit = GetStr(Style, TEXT("lineHeightUnit"));
+	FString LineHeightUnit = GetString(Style, TEXT("lineHeightUnit"));
 	if (LineHeightUnit != TEXT("AUTO"))
 	{
 		if (LineHeightUnit == TEXT("PIXELS"))
 		{
-			const float LineHeightPx = GetNum(Style, TEXT("lineHeightPx"));
-			if (LineHeightPx > 0.0f && OutNode.FontSize > 0.0f)
-				OutNode.LineHeight = LineHeightPx / OutNode.FontSize;
+			const float LineHeightPx = GetNumber(Style, TEXT("lineHeightPx"));
+			if (LineHeightPx > 0.0f && OutNode.Text.FontSize > 0.0f)
+				OutNode.Text.LineHeight = LineHeightPx / OutNode.Text.FontSize;
 		}
 		else if (LineHeightUnit == TEXT("FONT_SIZE_%"))
 		{
-			const float Percent = GetNum(Style, TEXT("lineHeightPercentFontSize"));
+			const float Percent = GetNumber(Style, TEXT("lineHeightPercentFontSize"));
 			if (Percent > 0.0f)
-				OutNode.LineHeight = Percent / 100.0f;
+				OutNode.Text.LineHeight = Percent / 100.0f;
 		}
 		else
 		{
-			const float Percent = GetNum(Style, TEXT("lineHeightPercentFontSize"));
+			const float Percent = GetNumber(Style, TEXT("lineHeightPercentFontSize"));
 			if (Percent > 0.0f)
-				OutNode.LineHeight = Percent / 100.0f;
+				OutNode.Text.LineHeight = Percent / 100.0f;
 		}
 	}
 
-	OutNode.LetterSpacing = GetNum(Style, TEXT("letterSpacing"));
-	FString TextDecoration = GetStr(Style, TEXT("textDecoration"));
-	OutNode.bUnderline = (TextDecoration == TEXT("UNDERLINE"));
-	OutNode.bStrikethrough = (TextDecoration == TEXT("STRIKETHROUGH"));
-	if (const TSharedPtr<FJsonObject> HyperlinkObj = GetObj(NodeObj, TEXT("hyperlink")))
+	OutNode.Text.LetterSpacing = GetNumber(Style, TEXT("letterSpacing"));
+	FString TextDecoration = GetString(Style, TEXT("textDecoration"));
+	OutNode.Text.bUnderline = (TextDecoration == TEXT("UNDERLINE"));
+	OutNode.Text.bStrikethrough = (TextDecoration == TEXT("STRIKETHROUGH"));
+	if (const TSharedPtr<FJsonObject> HyperlinkObj = GetObject(NodeObj, TEXT("hyperlink")))
 	{
-		OutNode.Href = GetStr(HyperlinkObj, TEXT("url"));
+		OutNode.Text.Href = GetString(HyperlinkObj, TEXT("url"));
 	}
 
-	FString HAlign = GetStr(Style, TEXT("textAlignHorizontal"), TEXT("LEFT"));
+	FString HAlign = GetString(Style, TEXT("textAlignHorizontal"), TEXT("LEFT"));
 	if (HAlign == TEXT("CENTER"))
-		OutNode.TextAlign = EDesignTextAlign::Center;
+		OutNode.Text.TextAlign = EDesignTextAlign::Center;
 	else if (HAlign == TEXT("RIGHT"))
-		OutNode.TextAlign = EDesignTextAlign::Right;
+		OutNode.Text.TextAlign = EDesignTextAlign::Right;
 	else if (HAlign == TEXT("JUSTIFIED"))
-		OutNode.TextAlign = EDesignTextAlign::Justify;
+		OutNode.Text.TextAlign = EDesignTextAlign::Justify;
 	else
-		OutNode.TextAlign = EDesignTextAlign::Left;
+		OutNode.Text.TextAlign = EDesignTextAlign::Left;
 
-	FString VAlign = GetStr(Style, TEXT("textAlignVertical"), TEXT("TOP"));
+	FString VAlign = GetString(Style, TEXT("textAlignVertical"), TEXT("TOP"));
 	if (VAlign == TEXT("CENTER"))
-		OutNode.TextAlignVertical = EDesignTextAlignVertical::Middle;
+		OutNode.Text.TextAlignVertical = EDesignTextAlignVertical::Middle;
 	else if (VAlign == TEXT("BOTTOM"))
-		OutNode.TextAlignVertical = EDesignTextAlignVertical::Bottom;
+		OutNode.Text.TextAlignVertical = EDesignTextAlignVertical::Bottom;
 	else
-		OutNode.TextAlignVertical = EDesignTextAlignVertical::Top;
+		OutNode.Text.TextAlignVertical = EDesignTextAlignVertical::Top;
 
-	FString AutoResize = GetStr(NodeObj, TEXT("textAutoResize"));
+	FString AutoResize = GetString(NodeObj, TEXT("textAutoResize"));
 	if (AutoResize.IsEmpty())
 	{
-		AutoResize = GetStr(Style, TEXT("textAutoResize"), TEXT("NONE"));
+		AutoResize = GetString(Style, TEXT("textAutoResize"), TEXT("NONE"));
 	}
 	if (AutoResize == TEXT("WIDTH_AND_HEIGHT"))
-		OutNode.TextGrowth = EDesignTextGrowth::Auto;
+		OutNode.Text.TextGrowth = EDesignTextGrowth::Auto;
 	else if (AutoResize == TEXT("HEIGHT"))
-		OutNode.TextGrowth = EDesignTextGrowth::FixedWidth;
+		OutNode.Text.TextGrowth = EDesignTextGrowth::FixedWidth;
 	else if (AutoResize == TEXT("TRUNCATE"))
 	{
-		OutNode.TextGrowth = EDesignTextGrowth::FixedWidthHeight;
-		OutNode.Metadata.Add(TEXT("figma.text.truncate"), TEXT("true"));
+		OutNode.Text.TextGrowth = EDesignTextGrowth::FixedWidthHeight;
+		OutNode.Metadata.Add(TEXT("source.text.truncate"), TEXT("true"));
 	}
 	else
-		OutNode.TextGrowth = EDesignTextGrowth::FixedWidthHeight;
+		OutNode.Text.TextGrowth = EDesignTextGrowth::FixedWidthHeight;
 }

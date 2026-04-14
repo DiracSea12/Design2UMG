@@ -9,10 +9,11 @@ struct FDesignNode;
 class FFigmaHttpClient;
 
 /**
- * Figma 图片导出器
+ * Figma image export helper.
  *
- * 收集 FDesignDocument 中的 imageRef，调用 Figma images API 获取实际 URL，
- * 然后回填到节点树中。后续由 FDesignRemoteImageImporter 下载并导入 UE 资产。
+ * Collects imageRef values from an FDesignDocument, resolves them to concrete
+ * URLs via the Figma images API, and writes the results back into the node tree.
+ * The URLs can then be downloaded and imported by FDesignRemoteImageImporter.
  */
 class FFigmaImageExporter
 {
@@ -21,11 +22,11 @@ public:
 	using FOnVectorExportComplete = TFunction<void(bool bSuccess, const TMap<FString, FString>& IdToUrl)>;
 
 	/**
-	 * 异步解析文档中所有 imageRef 为实际 URL
-	 * @param Client 已配置 Token 的 HTTP 客户端
-	 * @param FileKey Figma 文件 key
-	 * @param Document 待处理的文档（共享所有权，异步安全）
-	 * @param OnComplete 完成回调
+	 * Resolve all imageRef entries in the document to concrete URLs asynchronously.
+	 * @param Client Preconfigured HTTP client with a valid token.
+	 * @param FileKey Figma file key.
+	 * @param Document Target document. Shared ownership keeps async usage safe.
+	 * @param OnComplete Completion callback.
 	 */
 	static void ResolveImageRefs(
 		FFigmaHttpClient& Client,
@@ -34,10 +35,10 @@ public:
 		FOnComplete OnComplete);
 
 	/**
-	 * 将无法原生渲染的向量节点（VECTOR/BOOLEAN_OPERATION）导出为 PNG
+	 * Export vector nodes that cannot be rendered natively (VECTOR / BOOLEAN_OPERATION) as PNGs.
 	 *
-	 * 调用 Figma GET /v1/images/:key?ids=...&format=png 获取渲染图，
-	 * 回调返回 NodeId→ImageUrl 映射，由调用方通过 ApplyExportedImages 应用。
+	 * Uses Figma GET /v1/images/:key?ids=...&format=png and returns a NodeId -> ImageUrl
+	 * map to the caller, which can then apply the results via ApplyExportedImages.
 	 */
 	static void ExportVectorNodes(
 		FFigmaHttpClient& Client,
@@ -46,8 +47,8 @@ public:
 		FOnVectorExportComplete OnComplete);
 
 	/**
-	 * 将导出的向量图片 URL 应用到文档节点树：Path → Rectangle + Image Fill。
-	 * 调用方显式调用，避免在 async 回调中隐式变异共享文档。
+	 * Apply exported vector image URLs to the node tree (Path -> Rectangle + Image Fill).
+	 * This is an explicit step to avoid mutating shared documents implicitly inside async callbacks.
 	 */
 	static void ApplyExportedImages(TArray<TSharedPtr<FDesignNode>>& Nodes, const TMap<FString, FString>& IdToUrl);
 };

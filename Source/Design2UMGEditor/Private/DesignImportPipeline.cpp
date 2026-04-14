@@ -101,9 +101,9 @@ namespace DesignImportPipeline
 			TArray<TSharedPtr<FJsonValue>>& OutValues,
 			TArray<FString>& InOutRecommendations)
 		{
-			if (Document.FigmaDiagnostics.SkippedDesignerNodes.Num() > 0)
+			if (Document.ParseDiagnostics.SkippedDesignerNodes.Num() > 0)
 			{
-				for (const FDesignFigmaSkippedNodeReport& Report : Document.FigmaDiagnostics.SkippedDesignerNodes)
+				for (const FDesignSkippedNodeReport& Report : Document.ParseDiagnostics.SkippedDesignerNodes)
 				{
 					TSharedRef<FJsonObject> Entry = MakeNodeDiagnosticEntry(
 						TEXT("skipped_designer_node"),
@@ -123,24 +123,6 @@ namespace DesignImportPipeline
 				return;
 			}
 
-			if (const FString* SkippedNodesJson = Document.Metadata.Find(TEXT("figma.skippedDesignerNodes")))
-			{
-				TSharedPtr<FJsonValue> SkippedNodesValue;
-				TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(*SkippedNodesJson);
-				if (FJsonSerializer::Deserialize(Reader, SkippedNodesValue) && SkippedNodesValue.IsValid())
-				{
-					if (SkippedNodesValue->Type == EJson::Array)
-					{
-						OutValues = SkippedNodesValue->AsArray();
-						if (OutValues.Num() > 0)
-						{
-							AddUniqueRecommendation(
-								InOutRecommendations,
-								TEXT("Design-only nodes are skipped by contract; replace them with supported runtime nodes if output is required."));
-						}
-					}
-				}
-			}
 		}
 
 		void CollectNodeDegradationsRecursive(
@@ -168,12 +150,12 @@ namespace DesignImportPipeline
 						Kind,
 						Node->Id,
 						Node->Name,
-						Node->FigmaSourceNodeType,
+						Node->Source.SourceNodeType,
 						Reason,
 						Impact)));
 			};
 
-			if (Node->FigmaSourceNodeType.Equals(TEXT("TEXT_PATH"), ESearchCase::IgnoreCase))
+			if (Node->Source.SourceNodeType.Equals(TEXT("TEXT_PATH"), ESearchCase::IgnoreCase))
 			{
 				AddEntryIfNew(
 					TEXT("text_path_fallback"),
@@ -184,42 +166,42 @@ namespace DesignImportPipeline
 					TEXT("TEXT_PATH is not formally supported; convert path text to regular text if path geometry is required at runtime."));
 			}
 
-			if (!Node->FigmaVectorRasterFallbackImageRef.IsEmpty())
+			if (!Node->Source.VectorRasterFallbackImageRef.IsEmpty())
 			{
 				TSharedRef<FJsonObject> Entry = MakeNodeDiagnosticEntry(
 					TEXT("vector_raster_fallback"),
 					Node->Id,
 					Node->Name,
-					Node->FigmaSourceNodeType,
+					Node->Source.SourceNodeType,
 					TEXT("complex vector was rasterized"),
 					TEXT("runtime output uses baked image content for the vector node"));
-				Entry->SetStringField(TEXT("imageRef"), Node->FigmaVectorRasterFallbackImageRef);
+				Entry->SetStringField(TEXT("imageRef"), Node->Source.VectorRasterFallbackImageRef);
 				OutValues.Add(MakeShared<FJsonValueObject>(Entry));
 				AddUniqueRecommendation(
 					InOutRecommendations,
 					TEXT("Vector raster fallback is an explicit degradation path; prefer exporter/parser-side simplification before treating it as semantic support."));
 			}
 
-			if (Node->FigmaRenderFallback.HasAny())
+			if (Node->Source.RenderFallback.HasAny())
 			{
 				TSharedRef<FJsonObject> Entry = MakeNodeDiagnosticEntry(
 					TEXT("render_fallback"),
 					Node->Id,
 					Node->Name,
-					Node->FigmaSourceNodeType,
-					Node->FigmaRenderFallback.Reason,
+					Node->Source.SourceNodeType,
+					Node->Source.RenderFallback.Reason,
 					TEXT("runtime output uses a baked render fallback image"));
-				if (!Node->FigmaRenderFallback.ImageRef.IsEmpty())
+				if (!Node->Source.RenderFallback.ImageRef.IsEmpty())
 				{
-					Entry->SetStringField(TEXT("imageRef"), Node->FigmaRenderFallback.ImageRef);
+					Entry->SetStringField(TEXT("imageRef"), Node->Source.RenderFallback.ImageRef);
 				}
-				if (!Node->FigmaRenderFallback.Scope.IsEmpty())
+				if (!Node->Source.RenderFallback.Scope.IsEmpty())
 				{
-					Entry->SetStringField(TEXT("scope"), Node->FigmaRenderFallback.Scope);
+					Entry->SetStringField(TEXT("scope"), Node->Source.RenderFallback.Scope);
 				}
-				if (!Node->FigmaRenderFallback.Source.IsEmpty())
+				if (!Node->Source.RenderFallback.Source.IsEmpty())
 				{
-					Entry->SetStringField(TEXT("source"), Node->FigmaRenderFallback.Source);
+					Entry->SetStringField(TEXT("source"), Node->Source.RenderFallback.Source);
 				}
 				OutValues.Add(MakeShared<FJsonValueObject>(Entry));
 				AddUniqueRecommendation(

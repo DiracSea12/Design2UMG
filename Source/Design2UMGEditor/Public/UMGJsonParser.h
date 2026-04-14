@@ -26,5 +26,4 @@ private:
 	static void ParseAnchorsData(const TSharedPtr<class FJsonObject>& JsonObject, FUMGAnchorsData& OutAnchors);
 	static void ParseAnchorData(const TSharedPtr<class FJsonObject>& JsonObject, FUMGAnchorData& OutAnchor);
 	static void ParseOffsetsData(const TSharedPtr<class FJsonObject>& JsonObject, FUMGOffsetsData& OutOffsets);
-	static void ParseProperties(const TSharedPtr<class FJsonObject>& JsonObject, FUMGPropertyBag& OutProperties);
 };

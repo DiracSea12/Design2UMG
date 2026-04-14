@@ -2,6 +2,7 @@
 
 #include "Design2UMGPrototypeNavigationExtensions.h"
 
+#include "Design2UMGPrototypeNavigationInput.h"
 #include "Design2UMGLog.h"
 #include "UMGWidgetUtils.h"
 #include "Animation/WidgetAnimation.h"
@@ -15,10 +16,7 @@
 #include "Components/WidgetSwitcher.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
-#include "Framework/Application/IInputProcessor.h"
-#include "Framework/Application/SlateApplication.h"
 #include "HAL/PlatformProcess.h"
-#include "InputCoreTypes.h"
 #include "Layout/Geometry.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -30,120 +28,9 @@ FString GDesign2UMGPrototypeNavigationLastOpenedUrl;
 
 namespace
 {
-	TMap<TWeakObjectPtr<UDesign2UMGPrototypeNavigationUserWidgetExtension>, TArray<int32>>
-		GPrototypeNavigationHistoryByExtension;
-	TArray<TWeakObjectPtr<UDesign2UMGPrototypeNavigationUserWidgetExtension>>
-		GPrototypeKeyboardExtensions;
-
-	class FDesign2UMGPrototypeKeyboardInputProcessor final : public IInputProcessor
-	{
-	public:
-		virtual void Tick(const float, FSlateApplication&, TSharedRef<ICursor>) override
-		{
-		}
-
-		virtual bool HandleKeyDownEvent(FSlateApplication&, const FKeyEvent& InKeyEvent) override
-		{
-			return RouteKeyEvent(InKeyEvent.GetKey(), true);
-		}
-
-		virtual bool HandleKeyUpEvent(FSlateApplication&, const FKeyEvent& InKeyEvent) override
-		{
-			return RouteKeyEvent(InKeyEvent.GetKey(), false);
-		}
-
-		virtual const TCHAR* GetDebugName() const override
-		{
-			return TEXT("Design2UMGPrototypeKeyboardInputProcessor");
-		}
-
-	private:
-		static bool RouteKeyEvent(const FKey& Key, const bool bIsKeyDown)
-		{
-			bool bHandled = false;
-			for (int32 Index = GPrototypeKeyboardExtensions.Num() - 1; Index >= 0; --Index)
-			{
-				TWeakObjectPtr<UDesign2UMGPrototypeNavigationUserWidgetExtension>& ExtensionPtr =
-					GPrototypeKeyboardExtensions[Index];
-				UDesign2UMGPrototypeNavigationUserWidgetExtension* Extension = ExtensionPtr.Get();
-				if (!Extension)
-				{
-					GPrototypeKeyboardExtensions.RemoveAtSwap(Index, 1, EAllowShrinking::No);
-					continue;
-				}
-
-				if (Extension->ShouldCaptureKeyboardInput())
-				{
-					bHandled = Extension->HandleKeyboardInput(Key, bIsKeyDown) || bHandled;
-				}
-			}
-
-			return bHandled;
-		}
-	};
-
-	TSharedPtr<FDesign2UMGPrototypeKeyboardInputProcessor> GPrototypeKeyboardInputProcessor;
-
 	FName MakePrototypeRuntimeWidgetName(const FString& RawName, const FString& FallbackPrefix)
 	{
 		return FUMGWidgetUtils::SanitizeWidgetName(RawName, FallbackPrefix);
-	}
-
-	void CompactPrototypeNavigationHistory()
-	{
-		for (auto It = GPrototypeNavigationHistoryByExtension.CreateIterator(); It; ++It)
-		{
-			if (!It.Key().IsValid())
-			{
-				It.RemoveCurrent();
-			}
-		}
-	}
-
-	TArray<int32>& GetPrototypeNavigationHistory(UDesign2UMGPrototypeNavigationUserWidgetExtension* Extension)
-	{
-		CompactPrototypeNavigationHistory();
-		return GPrototypeNavigationHistoryByExtension.FindOrAdd(Extension);
-	}
-
-	void ResetPrototypeNavigationHistory(UDesign2UMGPrototypeNavigationUserWidgetExtension* Extension)
-	{
-		GetPrototypeNavigationHistory(Extension).Reset();
-	}
-
-	void PushPrototypeNavigationHistory(
-		UDesign2UMGPrototypeNavigationUserWidgetExtension* Extension,
-		const int32 PageIndex)
-	{
-		if (PageIndex < 0)
-		{
-			return;
-		}
-
-		TArray<int32>& History = GetPrototypeNavigationHistory(Extension);
-		if (History.Num() == 0 || History.Last() != PageIndex)
-		{
-			History.Add(PageIndex);
-		}
-	}
-
-	bool TryPopPrototypeNavigationHistory(
-		UDesign2UMGPrototypeNavigationUserWidgetExtension* Extension,
-		const int32 CurrentPageIndex,
-		int32& OutPageIndex)
-	{
-		TArray<int32>& History = GetPrototypeNavigationHistory(Extension);
-		while (History.Num() > 0)
-		{
-			const int32 Candidate = History.Pop(EAllowShrinking::No);
-			if (Candidate >= 0 && Candidate != CurrentPageIndex)
-			{
-				OutPageIndex = Candidate;
-				return true;
-			}
-		}
-
-		return false;
 	}
 
 	UWidgetSwitcher* FindPrototypeSwitcher(UWidgetTree* WidgetTree, const FUMGPrototypeNavigationData& NavigationData)
@@ -179,96 +66,6 @@ namespace
 			MakePrototypeRuntimeWidgetName(Binding.TriggerWidgetName, TEXT("PrototypeTrigger"))));
 	}
 
-	FString NormalizePrototypeKeyToken(const FString& RawToken)
-	{
-		FString Normalized = RawToken.ToUpper();
-		Normalized.ReplaceInline(TEXT("_"), TEXT(""));
-		Normalized.ReplaceInline(TEXT("-"), TEXT(""));
-		Normalized.ReplaceInline(TEXT(" "), TEXT(""));
-		return Normalized;
-	}
-
-	bool MatchesPrototypeKeyCode(const FKey& Key, const FString& PrototypeKeyCode)
-	{
-		const FString Desired = NormalizePrototypeKeyToken(PrototypeKeyCode);
-		const FString KeyName = NormalizePrototypeKeyToken(Key.GetFName().ToString());
-		const FString DisplayName = NormalizePrototypeKeyToken(Key.GetDisplayName().ToString());
-		if (Desired == KeyName || Desired == DisplayName)
-		{
-			return true;
-		}
-
-		if (Desired == TEXT("SPACE"))
-		{
-			return Key == EKeys::SpaceBar;
-		}
-		if (Desired == TEXT("ENTER") || Desired == TEXT("RETURN"))
-		{
-			return Key == EKeys::Enter;
-		}
-		if (Desired == TEXT("ESC") || Desired == TEXT("ESCAPE"))
-		{
-			return Key == EKeys::Escape;
-		}
-		if (Desired == TEXT("ARROWLEFT"))
-		{
-			return Key == EKeys::Left;
-		}
-		if (Desired == TEXT("ARROWRIGHT"))
-		{
-			return Key == EKeys::Right;
-		}
-		if (Desired == TEXT("ARROWUP"))
-		{
-			return Key == EKeys::Up;
-		}
-		if (Desired == TEXT("ARROWDOWN"))
-		{
-			return Key == EKeys::Down;
-		}
-		if (Desired == TEXT("CTRL") || Desired == TEXT("CONTROL"))
-		{
-			return Key == EKeys::LeftControl || Key == EKeys::RightControl;
-		}
-		if (Desired == TEXT("SHIFT"))
-		{
-			return Key == EKeys::LeftShift || Key == EKeys::RightShift;
-		}
-		if (Desired == TEXT("ALT") || Desired == TEXT("OPTION"))
-		{
-			return Key == EKeys::LeftAlt || Key == EKeys::RightAlt;
-		}
-		if (Desired == TEXT("CMD") || Desired == TEXT("COMMAND") || Desired == TEXT("META"))
-		{
-			return Key == EKeys::LeftCommand || Key == EKeys::RightCommand;
-		}
-		if (Desired == TEXT("BACKSPACE"))
-		{
-			return Key == EKeys::BackSpace;
-		}
-		if (Desired == TEXT("DELETE"))
-		{
-			return Key == EKeys::Delete;
-		}
-		if (Desired == TEXT("TAB"))
-		{
-			return Key == EKeys::Tab;
-		}
-
-		if (Desired.StartsWith(TEXT("DIGIT")) && Desired.Len() == 6)
-		{
-			static const FKey DigitKeys[] = {
-				EKeys::Zero, EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four,
-				EKeys::Five, EKeys::Six, EKeys::Seven, EKeys::Eight, EKeys::Nine };
-			const TCHAR DigitChar = Desired[5];
-			if (DigitChar >= TEXT('0') && DigitChar <= TEXT('9'))
-			{
-				return Key == DigitKeys[DigitChar - TEXT('0')];
-			}
-		}
-
-		return false;
-	}
 
 	bool TryParsePrototypeJsonObject(const FString& Json, TSharedPtr<FJsonObject>& OutObject)
 	{
@@ -319,7 +116,7 @@ namespace
 		}
 
 		const TSharedPtr<FJsonObject>* ObjectPtr = nullptr;
-		if (Object->TryGetObjectField(FieldName, ObjectPtr) && ObjectPtr != nullptr)
+		if (Object->TryGetObjectField(FieldName, ObjectPtr))
 		{
 			return *ObjectPtr;
 		}
@@ -336,7 +133,7 @@ namespace
 		}
 
 		const TArray<TSharedPtr<FJsonValue>>* ArrayPtr = nullptr;
-		if (Object->TryGetArrayField(FieldName, ArrayPtr) && ArrayPtr != nullptr)
+		if (Object->TryGetArrayField(FieldName, ArrayPtr))
 		{
 			return ArrayPtr;
 		}
@@ -735,54 +532,6 @@ namespace
 		}
 	}
 
-	void EnsurePrototypeKeyboardInputProcessorRegistered()
-	{
-		if (!FSlateApplication::IsInitialized())
-		{
-			return;
-		}
-
-		if (!GPrototypeKeyboardInputProcessor.IsValid())
-		{
-			GPrototypeKeyboardInputProcessor = MakeShared<FDesign2UMGPrototypeKeyboardInputProcessor>();
-			FSlateApplication::Get().RegisterInputPreProcessor(GPrototypeKeyboardInputProcessor);
-		}
-	}
-
-	void RegisterPrototypeKeyboardExtension(UDesign2UMGPrototypeNavigationUserWidgetExtension* Extension)
-	{
-		if (!Extension)
-		{
-			return;
-		}
-
-		EnsurePrototypeKeyboardInputProcessorRegistered();
-		GPrototypeKeyboardExtensions.RemoveAllSwap(
-			[](const TWeakObjectPtr<UDesign2UMGPrototypeNavigationUserWidgetExtension>& ExtensionPtr)
-			{
-				return !ExtensionPtr.IsValid();
-			},
-			EAllowShrinking::No);
-		GPrototypeKeyboardExtensions.AddUnique(Extension);
-	}
-
-	void UnregisterPrototypeKeyboardExtension(UDesign2UMGPrototypeNavigationUserWidgetExtension* Extension)
-	{
-		GPrototypeKeyboardExtensions.RemoveAllSwap(
-			[Extension](const TWeakObjectPtr<UDesign2UMGPrototypeNavigationUserWidgetExtension>& ExtensionPtr)
-			{
-				return !ExtensionPtr.IsValid() || ExtensionPtr.Get() == Extension;
-			},
-			EAllowShrinking::No);
-
-		if (GPrototypeKeyboardExtensions.Num() == 0
-			&& GPrototypeKeyboardInputProcessor.IsValid()
-			&& FSlateApplication::IsInitialized())
-		{
-			FSlateApplication::Get().UnregisterInputPreProcessor(GPrototypeKeyboardInputProcessor);
-			GPrototypeKeyboardInputProcessor.Reset();
-		}
-	}
 }
 
 void UDesign2UMGPrototypeNavigationTriggerProxy::Initialize(
@@ -834,8 +583,8 @@ void UDesign2UMGPrototypeNavigationUserWidgetExtension::Configure(const FUMGProt
 {
 	ClearGeneratedTransitionPlayback(true);
 	StopActiveTransition(false);
-	UnregisterPrototypeKeyboardExtension(this);
-	ResetPrototypeNavigationHistory(this);
+	Design2UMGPrototypeNavigationInput::UnregisterKeyboardExtension(this);
+	Design2UMGPrototypeNavigationInput::ResetHistory(this);
 	NavigationData = InNavigationData;
 	TriggerProxies.Reset();
 	BoundUserWidget = nullptr;
@@ -977,7 +726,7 @@ void UDesign2UMGPrototypeNavigationUserWidgetExtension::BindNavigation(UUserWidg
 	if (HasKeyboardBindings())
 	{
 		BoundUserWidget->SetIsFocusable(true);
-		RegisterPrototypeKeyboardExtension(this);
+		Design2UMGPrototypeNavigationInput::RegisterKeyboardExtension(this);
 	}
 
 	bBindingsInitialized = true;
@@ -1035,7 +784,7 @@ bool UDesign2UMGPrototypeNavigationUserWidgetExtension::HandleKeyboardInput(
 		bool bMatchesKey = false;
 		for (const FString& KeyCode : Binding.TriggerKeyCodes)
 		{
-			if (MatchesPrototypeKeyCode(Key, KeyCode))
+			if (Design2UMGPrototypeNavigationInput::MatchesKeyCode(Key, KeyCode))
 			{
 				bMatchesKey = true;
 				break;
@@ -1055,7 +804,7 @@ bool UDesign2UMGPrototypeNavigationUserWidgetExtension::HandleKeyboardInput(
 
 void UDesign2UMGPrototypeNavigationUserWidgetExtension::BeginDestroy()
 {
-	UnregisterPrototypeKeyboardExtension(this);
+	Design2UMGPrototypeNavigationInput::UnregisterKeyboardExtension(this);
 	Super::BeginDestroy();
 }
 
@@ -1311,7 +1060,7 @@ void UDesign2UMGPrototypeNavigationUserWidgetExtension::HandleNavigationRequest(
 		}
 
 		int32 PreviousPageIndex = INDEX_NONE;
-		if (!TryPopPrototypeNavigationHistory(this, CurrentPageIndex, PreviousPageIndex))
+		if (!Design2UMGPrototypeNavigationInput::TryPopHistory(this, CurrentPageIndex, PreviousPageIndex))
 		{
 			return;
 		}
@@ -1338,7 +1087,7 @@ void UDesign2UMGPrototypeNavigationUserWidgetExtension::HandleNavigationRequest(
 			return;
 		}
 
-		PushPrototypeNavigationHistory(this, CurrentPageIndex);
+		Design2UMGPrototypeNavigationInput::PushHistory(this, CurrentPageIndex);
 	}
 
 	if (ResolvedBinding.TargetPageIndex < 0 || ResolvedBinding.TargetPageIndex >= BoundSwitcher->GetNumWidgets())

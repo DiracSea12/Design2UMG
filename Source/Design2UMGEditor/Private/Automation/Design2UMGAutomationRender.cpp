@@ -224,7 +224,7 @@ namespace
 		{
 			return TEXT("unknown");
 		}
-		if (Node->bSemanticPlaceholderSurface)
+		if (Node->LayoutData.bSemanticPlaceholderSurface)
 		{
 			return TEXT("placeholder");
 		}
@@ -294,10 +294,10 @@ namespace
 		{
 			Stats.TextNodes++;
 			const FString Text = (EffectiveNode->Type == EDesignNodeType::IconFont
-				|| IsIconLikeFontFamily(EffectiveNode->FontFamily)
-				|| IsIconLikeFontFamily(EffectiveNode->IconFontFamily))
+				|| IsIconLikeFontFamily(EffectiveNode->Text.FontFamily)
+				|| IsIconLikeFontFamily(EffectiveNode->Text.IconFontFamily))
 				? FString()
-				: NormalizeStructureText(EffectiveNode->Content);
+				: NormalizeStructureText(EffectiveNode->Text.Content);
 			if (!Text.IsEmpty())
 			{
 				Stats.VisibleTexts.Add(Text);
@@ -755,7 +755,7 @@ namespace
 		}
 
 		const TArray<TSharedPtr<FJsonValue>>* Children = nullptr;
-		if (!RootObject->TryGetArrayField(TEXT("children"), Children) || Children == nullptr)
+		if (!RootObject->TryGetArrayField(TEXT("children"), Children))
 		{
 			OutError = FString::Printf(TEXT(".pen file missing children array: %s"), *PenFilePath);
 			return false;
@@ -763,7 +763,7 @@ namespace
 
 		const TSharedPtr<FJsonObject>* VariablesObjectPtr = nullptr;
 		TSharedPtr<FJsonObject> VariablesObject;
-		if (RootObject->TryGetObjectField(TEXT("variables"), VariablesObjectPtr) && VariablesObjectPtr != nullptr)
+		if (RootObject->TryGetObjectField(TEXT("variables"), VariablesObjectPtr))
 		{
 			VariablesObject = *VariablesObjectPtr;
 		}
@@ -932,7 +932,6 @@ namespace
 			OutResult.bSuccess = true;
 			return true;
 		}
-
 		if (Spec.Mode.Equals(TEXT("pen"), ESearchCase::IgnoreCase))
 		{
 			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: importing pen source"));
@@ -1071,18 +1070,26 @@ namespace Design2UMGAutomationRender
 		TGuardValue<bool> AutomationGuard(GDesign2UMGAutomationRenderActive, true);
 		FAutomationRenderResult Result;
 		Result.Mode = TEXT("unknown");
+		const bool bRequestExitAfterCompletion = Args.ContainsByPredicate([](const FString& Arg)
+		{
+			return Arg.Equals(TEXT("--quit"), ESearchCase::IgnoreCase)
+				|| Arg.Equals(TEXT("quit"), ESearchCase::IgnoreCase);
+		});
 
 		if (Args.Num() < 1)
 		{
 			UE_LOG(LogDesign2UMG, Error, TEXT("Usage: Design2UMG.AutomationRender <spec.json>"));
-			if (FApp::IsUnattended())
+			if (bRequestExitAfterCompletion || FApp::IsUnattended())
 			{
 				FPlatformMisc::RequestExitWithStatus(false, 1);
 			}
 			return;
 		}
 
-		const FString SpecPath = Args[0];
+		FString SpecPath = Args[0].TrimStartAndEnd();
+		SpecPath.TrimQuotesInline();
+		SpecPath.RemoveFromEnd(TEXT(";"));
+		SpecPath = SpecPath.TrimStartAndEnd();
 		UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender command invoked: spec=%s unattended=%d"), *SpecPath, FApp::IsUnattended() ? 1 : 0);
 		FAutomationRenderSpec Spec;
 		FString LoadError;
@@ -1091,7 +1098,7 @@ namespace Design2UMGAutomationRender
 			UE_LOG(LogDesign2UMG, Error, TEXT("%s"), *LoadError);
 			Result.ErrorMessage = LoadError;
 			WriteAutomationRenderResult(Spec, Result);
-			if (FApp::IsUnattended())
+			if (bRequestExitAfterCompletion || FApp::IsUnattended())
 			{
 				FPlatformMisc::RequestExitWithStatus(false, 1);
 			}
@@ -1107,7 +1114,7 @@ namespace Design2UMGAutomationRender
 			Result.RenderPngPath = Spec.RenderPngPath;
 			Result.ErrorMessage = ResolveError;
 			WriteAutomationRenderResult(Spec, Result);
-			if (FApp::IsUnattended())
+			if (bRequestExitAfterCompletion || FApp::IsUnattended())
 			{
 				FPlatformMisc::RequestExitWithStatus(false, 1);
 			}
@@ -1133,7 +1140,7 @@ namespace Design2UMGAutomationRender
 				Result.RenderSize.Y);
 		}
 
-		if (FApp::IsUnattended())
+		if (bRequestExitAfterCompletion || FApp::IsUnattended())
 		{
 			FPlatformMisc::RequestExitWithStatus(false, bOk ? 0 : 1);
 		}

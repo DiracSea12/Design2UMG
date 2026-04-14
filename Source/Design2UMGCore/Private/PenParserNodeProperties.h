@@ -2,64 +2,86 @@
 {
 	if (JsonObj->HasField(TEXT("width")))
 	{
-		OutNode.Width = ParseSize(JsonObj->TryGetField(TEXT("width")), SizeNodeType, Resolver);
-		OutNode.bHasWidth = true;
+		OutNode.Transform.SetWidthValue(ParseSize(JsonObj->TryGetField(TEXT("width")), SizeNodeType, Resolver));
 	}
 	if (JsonObj->HasField(TEXT("height")))
 	{
-		OutNode.Height = ParseSize(JsonObj->TryGetField(TEXT("height")), SizeNodeType, Resolver);
-		OutNode.bHasHeight = true;
+		OutNode.Transform.SetHeightValue(ParseSize(JsonObj->TryGetField(TEXT("height")), SizeNodeType, Resolver));
 	}
 	if (JsonObj->HasField(TEXT("x")))
-		OutNode.bHasX = TryGetResolvedNumberField(JsonObj, TEXT("x"), Resolver, OutNode.X);
+	{
+		if (TryGetResolvedNumberField(JsonObj, TEXT("x"), Resolver, OutNode.Transform.X))
+			OutNode.Transform.ExplicitX = OutNode.Transform.X;
+		else
+			OutNode.Transform.ExplicitX.Reset();
+	}
 	if (JsonObj->HasField(TEXT("y")))
-		OutNode.bHasY = TryGetResolvedNumberField(JsonObj, TEXT("y"), Resolver, OutNode.Y);
+	{
+		if (TryGetResolvedNumberField(JsonObj, TEXT("y"), Resolver, OutNode.Transform.Y))
+			OutNode.Transform.ExplicitY = OutNode.Transform.Y;
+		else
+			OutNode.Transform.ExplicitY.Reset();
+	}
 }
 
 void ApplyNodeLayoutProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver, bool bIncludeTextProperties)
 {
 	if (JsonObj->HasField(TEXT("opacity")))
-		OutNode.bHasOpacity = TryGetResolvedNumberField(JsonObj, TEXT("opacity"), Resolver, OutNode.Opacity);
+	{
+		if (TryGetResolvedNumberField(JsonObj, TEXT("opacity"), Resolver, OutNode.Transform.Opacity))
+			OutNode.Transform.ExplicitOpacity = OutNode.Transform.Opacity;
+		else
+			OutNode.Transform.ExplicitOpacity.Reset();
+	}
 	if (JsonObj->HasField(TEXT("gap")))
-		OutNode.bHasGap = TryGetResolvedNumberField(JsonObj, TEXT("gap"), Resolver, OutNode.Gap);
+	{
+		float ResolvedGap = OutNode.LayoutData.Gap;
+		if (TryGetResolvedNumberField(JsonObj, TEXT("gap"), Resolver, ResolvedGap))
+			OutNode.LayoutData.SetGap(ResolvedGap);
+	}
 	if (JsonObj->HasField(TEXT("padding")))
 	{
-		OutNode.Padding = ParsePadding(JsonObj->TryGetField(TEXT("padding")), Resolver);
-		OutNode.bHasPadding = true;
+		OutNode.LayoutData.SetPadding(ParsePadding(JsonObj->TryGetField(TEXT("padding")), Resolver));
 	}
-	OutNode.bHasPaddingRuntimeWrapDecision = true;
-	OutNode.bPaddingRequiresRuntimeWrap =
-		OutNode.Layout == EDesignLayout::None
-		|| OutNode.Layout == EDesignLayout::Wrap
-		|| OutNode.Layout == EDesignLayout::Grid;
+	OutNode.LayoutData.bHasPaddingRuntimeWrapDecision = true;
+	OutNode.LayoutData.bPaddingRequiresRuntimeWrap =
+		OutNode.LayoutData.Layout == EDesignLayout::None
+		|| OutNode.LayoutData.Layout == EDesignLayout::Wrap
+		|| OutNode.LayoutData.Layout == EDesignLayout::Grid;
 	FString JustifyContent;
 	if (JsonObj->TryGetStringField(TEXT("justifyContent"), JustifyContent))
-		OutNode.JustifyContent = ParseJustifyContent(JustifyContent);
+		OutNode.LayoutData.JustifyContent = ParseJustifyContent(JustifyContent);
 	FString AlignItems;
 	if (JsonObj->TryGetStringField(TEXT("alignItems"), AlignItems))
-		OutNode.AlignItems = ParseAlignItems(AlignItems);
+		OutNode.LayoutData.AlignItems = ParseAlignItems(AlignItems);
 	if (JsonObj->HasField(TEXT("clip")))
-		OutNode.bHasClip = TryGetResolvedBoolField(JsonObj, TEXT("clip"), Resolver, OutNode.bClip);
+	{
+		bool bClipValue = false;
+		if (TryGetResolvedBoolField(JsonObj, TEXT("clip"), Resolver, bClipValue))
+			OutNode.LayoutData.SetClipValue(bClipValue);
+		else
+			OutNode.LayoutData.ExplicitClip.Reset();
+	}
 	if (!bIncludeTextProperties)
 		return;
 	FString TextAlign;
 	if (JsonObj->TryGetStringField(TEXT("textAlign"), TextAlign))
-		OutNode.TextAlign = ParseTextAlign(TextAlign);
-	TryGetResolvedNumberField(JsonObj, TEXT("lineHeight"), Resolver, OutNode.LineHeight);
+		OutNode.Text.TextAlign = ParseTextAlign(TextAlign);
+	TryGetResolvedNumberField(JsonObj, TEXT("lineHeight"), Resolver, OutNode.Text.LineHeight);
 	FString TextGrowth;
 	if (JsonObj->TryGetStringField(TEXT("textGrowth"), TextGrowth))
-		OutNode.TextGrowth = ParseTextGrowth(TextGrowth);
+		OutNode.Text.TextGrowth = ParseTextGrowth(TextGrowth);
 }
 
 void ApplyNodeTextStyleProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver)
 {
 	FString FontFamily;
 	if (JsonObj->TryGetStringField(TEXT("fontFamily"), FontFamily))
-		OutNode.FontFamily = Resolver.ResolveString(FontFamily);
-	TryGetResolvedNumberField(JsonObj, TEXT("fontSize"), Resolver, OutNode.FontSize);
-	JsonObj->TryGetStringField(TEXT("fontWeight"), OutNode.FontWeight);
-	JsonObj->TryGetStringField(TEXT("fontStyle"), OutNode.FontStyle);
-	TryGetResolvedBoolField(JsonObj, TEXT("underline"), Resolver, OutNode.bUnderline);
-	TryGetResolvedBoolField(JsonObj, TEXT("strikethrough"), Resolver, OutNode.bStrikethrough);
-	JsonObj->TryGetStringField(TEXT("href"), OutNode.Href);
+		OutNode.Text.FontFamily = Resolver.ResolveString(FontFamily);
+	TryGetResolvedNumberField(JsonObj, TEXT("fontSize"), Resolver, OutNode.Text.FontSize);
+	JsonObj->TryGetStringField(TEXT("fontWeight"), OutNode.Text.FontWeight);
+	JsonObj->TryGetStringField(TEXT("fontStyle"), OutNode.Text.FontStyle);
+	TryGetResolvedBoolField(JsonObj, TEXT("underline"), Resolver, OutNode.Text.bUnderline);
+	TryGetResolvedBoolField(JsonObj, TEXT("strikethrough"), Resolver, OutNode.Text.bStrikethrough);
+	JsonObj->TryGetStringField(TEXT("href"), OutNode.Text.Href);
 }

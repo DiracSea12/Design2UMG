@@ -141,15 +141,15 @@ namespace
 
 		if (Node->Type == EDesignNodeType::IconFont)
 		{
-			if (HasExplicitNonDefaultFontWeight(Node->FontWeight))
+			if (HasExplicitNonDefaultFontWeight(Node->Text.FontWeight))
 			{
-				return Node->FontWeight;
+				return Node->Text.FontWeight;
 			}
 
-			return FString::FromInt(FMath::Clamp(Node->IconWeight, 100, 900));
+			return FString::FromInt(FMath::Clamp(Node->Text.IconWeight, 100, 900));
 		}
 
-		return Node->FontWeight;
+		return Node->Text.FontWeight;
 	}
 
 	void AddRequestedCssWeight(TMap<FString, TSet<int32>>& OutRequestedWeights, const FString& FontFamily, const FString& WeightToken)
@@ -813,16 +813,16 @@ namespace
 				continue;
 			}
 
-			if (!Node->FontFamily.IsEmpty())
+			if (!Node->Text.FontFamily.IsEmpty())
 			{
-				OutFamilies.Add(Node->FontFamily);
-				AddRequestedCssWeight(OutRequestedWeights, Node->FontFamily, Node->FontWeight);
+				OutFamilies.Add(Node->Text.FontFamily);
+				AddRequestedCssWeight(OutRequestedWeights, Node->Text.FontFamily, Node->Text.FontWeight);
 			}
-			if (!Node->IconFontFamily.IsEmpty())
+			if (!Node->Text.IconFontFamily.IsEmpty())
 			{
-				OutFamilies.Add(Node->IconFontFamily);
-				OutIconFamilies.Add(Node->IconFontFamily);
-				AddRequestedCssWeight(OutRequestedWeights, Node->IconFontFamily, ResolveNodeRequestedWeightToken(Node));
+				OutFamilies.Add(Node->Text.IconFontFamily);
+				OutIconFamilies.Add(Node->Text.IconFontFamily);
+				AddRequestedCssWeight(OutRequestedWeights, Node->Text.IconFontFamily, ResolveNodeRequestedWeightToken(Node));
 			}
 
 			CollectUsedFontFamilies(Node->Children, OutFamilies, OutIconFamilies, OutRequestedWeights);
@@ -894,6 +894,7 @@ namespace
 			}
 		}
 	}
+
 }
 
 void DesignFontImportService::PrepareDocumentFonts(const FDesignDocument& Document)
@@ -975,13 +976,13 @@ void DesignFontImportService::PrepareDocumentFonts(const FDesignDocument& Docume
 			}
 
 			FString ImportedPath;
-			if (const FString* KnownUrl = GetKnownWebFontUrls().Find(NormalizedFamily))
-			{
-				ImportedPath = ResolveFont(Family, *KnownUrl);
-			}
-			else if (bKnownCssFamily)
+			if (bKnownCssFamily)
 			{
 				ImportedPath = ImportKnownCssFontFamily(Family, RequestedWeights);
+			}
+			else if (const FString* KnownUrl = GetKnownWebFontUrls().Find(NormalizedFamily))
+			{
+				ImportedPath = ResolveFont(Family, *KnownUrl);
 			}
 			if (ImportedPath.IsEmpty())
 			{
@@ -1032,16 +1033,15 @@ FString DesignFontImportService::EnsureFontFamilyAvailable(const FString& FontFa
 		return FString();
 	}
 
-	const FString* KnownUrl = GetKnownWebFontUrls().Find(NormalizedFamily);
 	const TArray<int32> RequestedWeights = ResolveKnownCssFontWeights(FontFamily, TMap<FString, TSet<int32>>());
 	FString ImportedPath;
-	if (KnownUrl)
-	{
-		ImportedPath = ResolveFont(FontFamily, *KnownUrl);
-	}
-	else if (GetKnownCssFontFamilies().Contains(NormalizedFamily))
+	if (GetKnownCssFontFamilies().Contains(NormalizedFamily))
 	{
 		ImportedPath = ImportKnownCssFontFamily(FontFamily, RequestedWeights);
+	}
+	else if (const FString* KnownUrl = GetKnownWebFontUrls().Find(NormalizedFamily))
+	{
+		ImportedPath = ResolveFont(FontFamily, *KnownUrl);
 	}
 	else
 	{

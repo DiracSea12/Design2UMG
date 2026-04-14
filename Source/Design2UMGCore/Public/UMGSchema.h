@@ -8,13 +8,14 @@
 #include "UMGSchema.generated.h"
 
 /**
- * 像素坐标Bounds（定义在UMGSchema避免循环依赖） */
+ * Pixel-space bounds kept in UMGSchema to avoid cyclic dependencies.
+ */
 struct FBounds
 {
-	float X = 0.0f;  // 左上角X（像素）
-	float Y = 0.0f;  // 左上角Y（像素）
-	float W = 0.0f;  // 宽度（像素）
-	float H = 0.0f;  // 高度（像素）
+	float X = 0.0f;  // Top-left X in pixels
+	float Y = 0.0f;  // Top-left Y in pixels
+	float W = 0.0f;  // Width in pixels
+	float H = 0.0f;  // Height in pixels
 
 	float GetRight() const { return X + W; }
 	float GetBottom() const { return Y + H; }
@@ -23,7 +24,7 @@ struct FBounds
 };
 
 /**
- * Anchor 数据结构
+ * Single anchor point.
  */
 USTRUCT()
 struct FUMGAnchorData
@@ -38,7 +39,7 @@ struct FUMGAnchorData
 };
 
 /**
- * Anchors 数据结构 (Min/Max)
+ * Anchor range (Min/Max).
  */
 USTRUCT()
 struct FUMGAnchorsData
@@ -53,7 +54,7 @@ struct FUMGAnchorsData
 };
 
 /**
- * Offsets 数据结构
+ * Offsets data.
  */
 USTRUCT()
 struct FUMGOffsetsData
@@ -74,14 +75,14 @@ struct FUMGOffsetsData
 };
 
 /**
- * Slot 数据结构 - 描述控件在父容器中的布局信息
+ * Slot layout data describing placement inside the parent container.
  */
 USTRUCT()
 struct FUMGSlotData
 {
 	GENERATED_BODY()
 
-	// CanvasPanel 专用
+	// CanvasPanel-only data
 	UPROPERTY()
 	FUMGAnchorsData Anchors;
 
@@ -91,11 +92,11 @@ struct FUMGSlotData
 	UPROPERTY()
 	FUMGOffsetsData Offsets;
 
-	// 通用
+	// Shared slot fields
 	UPROPERTY()
 	FMargin Padding = FMargin(0.0f);
 
-	// VerticalBox/HorizontalBox/Overlay 专用
+	// VerticalBox / HorizontalBox / Overlay
 	UPROPERTY()
 	FString HorizontalAlignment = TEXT("Fill"); // Left, Center, Right, Fill
 
@@ -112,7 +113,7 @@ struct FUMGSlotData
 	UPROPERTY()
 	bool bAutoSize = false;
 
-	// GridPanel 专用
+	// GridPanel-only data
 	UPROPERTY()
 	int32 Row = 0;
 
@@ -127,104 +128,87 @@ struct FUMGSlotData
 };
 
 /**
- * 类型化文本样式属性（FontSize, LetterSpacing 等文本专属字段）
- * WrapWithBorder 时不随视觉属性转移，留在的 Widget  */
+ * Typed text style fields such as font size and letter spacing.
+ * These stay on the text widget when WrapWithBorder transfers visual fields.
+ */
 struct FUMGTextStyleData
 {
 	float FontSize = 0;              // 0 = unset
 	float SourceFontSize = 0;        // Original design font size before px->UMG scaling
 	float LetterSpacing = 0;
-	bool bHasLetterSpacing = false;  // 区分"显式设置为"未设
+	bool bHasLetterSpacing = false;  // Distinguishes explicit zero from unset
 };
 
+/**
+ * Typed widget-level style overrides applied during UMG generation.
+ */
 struct FUMGWidgetStyleData
 {
-	float WidthOverride = 0.0f;
-	bool bHasWidthOverride = false;
+	TOptional<float> WidthOverride;
 
-	float HeightOverride = 0.0f;
-	bool bHasHeightOverride = false;
+	TOptional<float> HeightOverride;
 
-	float MinDesiredWidth = 0.0f;
-	bool bHasMinDesiredWidth = false;
+	TOptional<float> MinDesiredWidth;
 
-	float MinDesiredHeight = 0.0f;
-	bool bHasMinDesiredHeight = false;
+	TOptional<float> MinDesiredHeight;
 
-	FMargin Padding = FMargin(0.0f);
-	bool bHasPadding = false;
+	TOptional<FMargin> Padding;
 
-	FVector2D InnerSlotPadding = FVector2D::ZeroVector;
-	bool bHasInnerSlotPadding = false;
+	TOptional<FVector2D> InnerSlotPadding;
 
-	FMargin SlotPadding = FMargin(0.0f);
-	bool bHasSlotPadding = false;
+	TOptional<FMargin> SlotPadding;
 
-	FMargin StrokePadding = FMargin(0.0f);
-	bool bHasStrokePadding = false;
+	TOptional<FMargin> StrokePadding;
 
-	FMargin StrokeMargin = FMargin(0.0f);
-	bool bHasStrokeMargin = false;
+	TOptional<FMargin> StrokeMargin;
 
-	FString ImageMode;
-	bool bHasImageMode = false;
+	TOptional<FString> ImageMode;
 
-	FString ImageTransform;
-	bool bHasImageTransform = false;
+	TOptional<FString> ImageTransform;
 
-	FString Stretch;
-	bool bHasStretch = false;
+	TOptional<FString> Stretch;
 
-	FString StretchDirection;
-	bool bHasStretchDirection = false;
+	TOptional<FString> StretchDirection;
 
-	FLinearColor BackgroundColor = FLinearColor::Transparent;
-	bool bHasBackgroundColor = false;
+	TOptional<FLinearColor> BackgroundColor;
 
-	FLinearColor HoveredColor = FLinearColor::Transparent;
-	bool bHasHoveredColor = false;
+	TOptional<FLinearColor> HoveredColor;
 
-	FLinearColor PressedColor = FLinearColor::Transparent;
-	bool bHasPressedColor = false;
+	TOptional<FLinearColor> PressedColor;
 
-	FString NamedSlot;
-	bool bHasNamedSlot = false;
+	TOptional<FString> NamedSlot;
 
-	FString SlotName;
-	bool bHasSlotName = false;
+	TOptional<FString> SlotName;
 
-	FString Visibility;
-	bool bHasVisibility = false;
+	TOptional<FString> Visibility;
 
-	FString ToolTipText;
-	bool bHasToolTipText = false;
+	TOptional<FString> ToolTipText;
 
-	bool bIsEnabled = true;
-	bool bHasIsEnabled = false;
+	TOptional<bool> IsEnabled;
 
 	bool HasAny() const
 	{
-		return bHasWidthOverride
-			|| bHasHeightOverride
-			|| bHasMinDesiredWidth
-			|| bHasMinDesiredHeight
-			|| bHasPadding
-			|| bHasInnerSlotPadding
-			|| bHasSlotPadding
-			|| bHasStrokePadding
-			|| bHasStrokeMargin
-			|| bHasImageMode
-			|| bHasImageTransform
-			|| bHasStretch
-			|| bHasStretchDirection
-			|| bHasBackgroundColor
-			|| bHasHoveredColor
-			|| bHasPressedColor
-			|| bHasNamedSlot
-			|| bHasSlotName
-			|| bHasVisibility
-			|| bHasToolTipText
-			|| bHasIsEnabled;
+		return WidthOverride.IsSet()
+			|| HeightOverride.IsSet()
+			|| MinDesiredWidth.IsSet()
+			|| MinDesiredHeight.IsSet()
+			|| Padding.IsSet()
+			|| InnerSlotPadding.IsSet()
+			|| SlotPadding.IsSet()
+			|| StrokePadding.IsSet()
+			|| StrokeMargin.IsSet()
+			|| ImageMode.IsSet()
+			|| ImageTransform.IsSet()
+			|| Stretch.IsSet()
+			|| StretchDirection.IsSet()
+			|| BackgroundColor.IsSet()
+			|| HoveredColor.IsSet()
+			|| PressedColor.IsSet()
+			|| NamedSlot.IsSet()
+			|| SlotName.IsSet()
+			|| Visibility.IsSet()
+			|| ToolTipText.IsSet()
+			|| IsEnabled.IsSet();
 	}
 };
 
@@ -232,6 +216,9 @@ struct FUMGTextData
 {
 	FString Text;
 	bool bHasText = false;
+
+	FString RichTextStyleRowsJson;
+	bool bHasRichTextStyleRows = false;
 
 	FString HintText;
 	bool bHasHintText = false;
@@ -278,6 +265,7 @@ struct FUMGTextData
 	bool HasAny() const
 	{
 		return bHasText
+			|| bHasRichTextStyleRows
 			|| bHasHintText
 			|| bHasFontFamily
 			|| bHasTypefaceFontName
@@ -296,7 +284,8 @@ struct FUMGTextData
 };
 
 /**
- * 类型化视觉画刷属性（渐进式替代Properties 中的视觉相关 key * WrapWithBorder 时整体转移到 Border 节点
+ * Typed visual brush fields that progressively replace visual keys from the legacy property bag.
+ * They are transferred to the Border node as a whole when WrapWithBorder is used.
  */
 struct FUMGVisualBrushData
 {
@@ -367,7 +356,7 @@ struct FUMGVisualBrushData
 	bool bHasOutlineThickness = false;
 
 	ESlateBrushDrawType::Type DrawAs = ESlateBrushDrawType::NoDrawType;
-	bool bHasDrawAs = false;         // 区分"显式NoDrawType"未设
+	bool bHasDrawAs = false;         // Distinguishes an explicit NoDrawType from "unset"
 	FLinearColor BrushColor = FLinearColor::Transparent;
 	bool bHasBrushColor = false;
 	FLinearColor OutlineColor = FLinearColor::Transparent;
@@ -385,8 +374,8 @@ struct FUMGVisualBrushData
 };
 
 /**
- * 类型化特效属性（BackgroundBlur / Retainer effect 等）
- * 新接入的 effect contract 应优先落到这里，而不是继续写入 legacy Properties。
+ * Typed effect fields such as BackgroundBlur and Retainer effects.
+ * New effect contracts should land here instead of extending the legacy property bag.
  */
 struct FUMGEffectData
 {
@@ -494,6 +483,9 @@ struct FUMGShadowData
 	}
 };
 
+/**
+ * Typed render transform and clipping fields for the generated widget node.
+ */
 struct FUMGRenderStyleData
 {
 	float RenderOpacity = 0.0f;
@@ -672,8 +664,22 @@ struct FUMGPrototypeTransitionData
 	}
 };
 
+struct FUMGScrollBoxData
+{
+	FString Orientation;
+	bool bHasOrientation = false;
+
+	FString ScrollBarVisibility;
+	bool bHasScrollBarVisibility = false;
+
+	bool HasAny() const
+	{
+		return bHasOrientation || bHasScrollBarVisibility;
+	}
+};
+
 USTRUCT()
-struct FUMGFigmaNodeData
+struct FUMGSourceNodeData
 {
 	GENERATED_BODY()
 
@@ -736,7 +742,7 @@ struct FUMGFigmaNodeData
 };
 
 USTRUCT()
-struct FUMGFigmaDocumentData
+struct FUMGSourceDocumentData
 {
 	GENERATED_BODY()
 
@@ -1164,98 +1170,97 @@ struct FUMGPrototypeNavigationData
 };
 
 /**
- * Widget 节点数据结构 - 描述单个控件（v2.4更新） */
+ * Generated widget node data for a single widget.
+ */
 USTRUCT()
 struct FUMGWidgetNode
 {
 	GENERATED_BODY()
 
-	/** 控件类型: CanvasPanel, VerticalBox, HorizontalBox, Button, TextBlock, Image, etc. */
+	/** Widget type: CanvasPanel, VerticalBox, HorizontalBox, Button, TextBlock, Image, etc. */
 	UPROPERTY()
 	FString Type;
 
-	/** 稳定唯一标识，路径式：{ParentId}/{Type}_{Index}（v2.2新增）*/
+	/** Stable path-like identifier: {ParentId}/{Type}_{Index}. */
 	UPROPERTY()
 	FString Id;
 
-	/** 控件名称 */
+	/** Widget display name. */
 	UPROPERTY()
 	FString Name;
 
-	/** 像素坐标Bounds（由LayoutCalculator从Slot计算）*/
+	/** Pixel-space bounds, projected by LayoutCalculator from slot data. */
 	FBounds Bounds;
 
-	/** 布局槽数据（由LayoutCalculator从Bounds计算）*/
+	/** Slot layout data, derived by LayoutCalculator from bounds. */
 	UPROPERTY()
 	FUMGSlotData Slot;
 
-	/** 
-	 * 属性键值对（legacy，逐步Brush 替代
-	 * @note [TODO] 完全重构为强类型数据，消除字符串 Map 带来的类型安全和维护风险。	 *       为向后兼容当前版本保留，但新属性系统不应再添加到此 Map 中。	 */
-	FUMGPropertyBag Properties;
-
-	/** 类型化文本样式（v2.4 拆分自Brush）*/
+	/** Typed text style data. */
 	FUMGTextStyleData TextStyle;
 
-	/** 类型化控件公共样式/包装层属性（v2.8 继续迁移自 Properties） */
+	/** Typed widget-level style and wrapper properties. */
 	FUMGWidgetStyleData WidgetStyle;
 
-	/** 类型化文本内容与行为（v2.8 继续迁移自 Properties） */
+	/** Typed text content and behavior. */
 	FUMGTextData Text;
 
-	/** 类型化视觉画刷（v2.4 拆分自Brush，WrapWithBorder 时转移） */
+	/** Typed visual brush data. */
 	FUMGVisualBrushData Brush;
 
-	/** 类型化特效属性（v2.5 拆分自 Properties） */
+	/** Typed effect data. */
 	FUMGEffectData Effect;
 
-	/** 类型化路径/向量数据（v2.8 继续迁移自 Properties） */
+	/** Typed path and vector payload. */
 	FUMGPathData Path;
 
-	/** 类型化阴影数据（v2.8 继续迁移自 Properties） */
+	/** Typed shadow payload. */
 	FUMGShadowData Shadow;
 
-	/** 类型化渲染属性（v2.7 继续迁移自 Properties） */
+	/** Typed render style payload. */
 	FUMGRenderStyleData Render;
 
-	/** 类型化控件状态（v2.6 继续迁移自 Properties） */
+	/** Typed widget state payload. */
 	FUMGWidgetStateData WidgetState;
 
-	/** Figma 组件/变体/实例语义（只在相关节点写入） */
-	UPROPERTY()
-	FUMGFigmaNodeData Figma;
+	/** Typed ScrollBox configuration. */
+	FUMGScrollBoxData ScrollBox;
 
-	/** 子控件(不可序列化，UHT 不支持递归 USTRUCT) */
+	/** Source component / variant / instance metadata when applicable. */
+	UPROPERTY()
+	FUMGSourceNodeData Source;
+
+	/** Child widgets. Not serialized because recursive USTRUCT trees are unsupported by UHT. */
 	TArray<FUMGWidgetNode> Children;
 };
 
 /**
- * Widget 蓝图数据结构 - 描述整个 Widget Blueprint
+ * Generated Widget Blueprint data.
  */
 USTRUCT()
 struct FUMGWidgetData
 {
 	GENERATED_BODY()
 
-	/** 生成的 Widget Blueprint 名称 */
+	/** Generated Widget Blueprint asset name. */
 	UPROPERTY()
 	FString WidgetName = TEXT("WBP_Generated");
 
-	/** 根控件*/
+	/** Root widget node. */
 	UPROPERTY()
 	FUMGWidgetNode RootWidget;
 
-	/** 转换过程中的降级警告（如 Ellipse→Border）*/
+	/** Degradation warnings produced during conversion, e.g. Ellipse -> Border. */
 	TArray<FString> Warnings;
 
-	/** 转换阶段产生的图标字体映射建议，由 Editor 导入链决定是否持久化。 */
+	/** Icon-font mapping suggestions emitted during conversion. */
 	FUMGIconFontMappingChanges IconFontMappingChanges;
 
-	/** Figma 组件目录/变体目录，用于生成产物继续消费。 */
+	/** Source-side component and variant metadata carried into generated output. */
 	UPROPERTY()
-	FUMGFigmaDocumentData FigmaDocument;
+	FUMGSourceDocumentData SourceDocument;
 
-	/** Figma prototype 最小导航闭环计划。 */
+	/** Minimal prototype navigation plan derived from source data. */
 	FUMGPrototypeNavigationData PrototypeNavigation;
 };
 

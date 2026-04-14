@@ -325,7 +325,7 @@ namespace
 		const FUMGWidgetNode& Node,
 		TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords)
 	{
-		if (!Widget || !FigmaMetadataRecords || !Node.Figma.HasAnyComponentSemantics())
+		if (!Widget || !FigmaMetadataRecords || !Node.Source.HasAnyComponentSemantics())
 		{
 			return;
 		}
@@ -333,7 +333,7 @@ namespace
 		FDesign2UMGFigmaWidgetMetadataRecord Record;
 		Record.WidgetName = Widget->GetFName();
 		Record.WidgetId = Node.Id;
-		Record.FigmaNode = Node.Figma;
+		Record.SourceNode = Node.Source;
 		if (Record.IsValid())
 		{
 			FigmaMetadataRecords->Add(Record);
@@ -830,7 +830,7 @@ namespace
 			return false;
 		}
 
-		FUMGPropertyBag GenerationProps = Design2UMGWidgetNodeAccess::BuildEffectivePropertyBag(Node);
+		FUMGPropertyBag GenerationProps = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
 		UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(MatRef, GenerationProps, ImageWidget);
 		if (!Texture)
 		{

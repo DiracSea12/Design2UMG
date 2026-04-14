@@ -136,7 +136,7 @@ Key options:
 ## Public Validation
 
 - Public `validate` documentation should be treated as smoke/public validation unless it explicitly says it reproduces the maintainer full admissible gate.
-- The current authoritative release gate remains the full admissible run wrapped by `Docs/ValidationGovernance/`.
+- The current authoritative release gate remains the maintainer-owned full admissible run documented in `Docs/ValidationProtocol.md`.
 
 ## Widget Class Overrides
 
@@ -146,6 +146,8 @@ Key options:
 - Verification path: generate a Blueprint, inspect the target widget in the Widget Tree, and confirm the constructed widget class matches the override rule.
 
 ## Architecture
+
+See [Docs/Architecture.md](Docs/Architecture.md) for the full pipeline, module boundaries, and release-facing architecture rules.
 
 ```text
 .pen / Figma / MCP
