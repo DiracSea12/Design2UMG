@@ -1,11 +1,8 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "SDesign2UMGPreviewWindow.h"
-#include "UMGWidgetUtils.h"
-#include "UMGJsonParser.h"
-#include "DesignRemoteImageImporter.h"
-#include "Design2UMGLog.h"
-#include "Design2UMGSettings.h"
+#include "DesignImportPipeline.h"
+#include "DesignPreviewMaterializationService.h"
 
 #include "TimerManager.h"
 #include "Engine/World.h"
@@ -24,36 +21,39 @@
 #include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
 #include "Framework/Application/SlateApplication.h"
-#include "Blueprint/WidgetTree.h"
 #include "Blueprint/UserWidget.h"
-#include "PreviewUserWidget.h"
 
 namespace
 {
 	constexpr float JsonEditDebounceSeconds = 0.5f;
+
+	class FDesignImportPipelinePreviewRefreshAnalyzer final : public IDesignPreviewRefreshAnalyzer
+	{
+	public:
+		virtual bool AnalyzePreviewJson(
+			const FString& JsonString,
+			FUMGWidgetData& OutWidgetData,
+			FString& OutImageReport,
+			FString& OutError) override
+		{
+			FPreviewRefreshInput RefreshInput;
+			RefreshInput.EditedJson = JsonString;
+			RefreshInput.bResolveImages = false;
+
+			const FPreviewRefreshResult RefreshResult = DesignImportPipeline::AnalyzePreviewRefresh(RefreshInput);
+			if (!RefreshResult.bSucceeded)
+			{
+				OutError = RefreshResult.ParseError;
+				return false;
+			}
+
+			OutWidgetData = RefreshResult.Data;
+			OutImageReport = RefreshResult.ImageReport;
+			return true;
+		}
+	};
 }
 #define LOCTEXT_NAMESPACE "SDesign2UMGPreviewWindow"
-
-namespace
-{
-	FVector2D ResolvePreviewDesignSize(const FUMGWidgetData& WidgetData)
-	{
-		const FBounds& RootBounds = WidgetData.RootWidget.Bounds;
-		if (RootBounds.W > 0.0f && RootBounds.H > 0.0f)
-		{
-			return FVector2D(RootBounds.W, RootBounds.H);
-		}
-
-		const FVector2D CalculatedSize = FUMGWidgetUtils::CalculateDesignSize(WidgetData.RootWidget, FVector2D::ZeroVector);
-		if (CalculatedSize.X > 0.0f && CalculatedSize.Y > 0.0f)
-		{
-			return CalculatedSize;
-		}
-
-		const FIntPoint FallbackSize = UDesign2UMGSettings::Get()->GetDesignSize();
-		return FVector2D((float)FallbackSize.X, (float)FallbackSize.Y);
-	}
-}
 
 void SDesign2UMGPreviewWindow::Construct(const FArguments& InArgs)
 {
@@ -62,6 +62,17 @@ void SDesign2UMGPreviewWindow::Construct(const FArguments& InArgs)
 	ConversionWarnings = InArgs._Warnings;
 	OnConfirmed = InArgs._OnConfirmed;
 	OnCancelled = InArgs._OnCancelled;
+	PreviewRefreshAnalyzer = InArgs._PreviewRefreshAnalyzer;
+	PreviewMaterializationService = InArgs._PreviewMaterializationService;
+
+	if (!PreviewRefreshAnalyzer.IsValid())
+	{
+		PreviewRefreshAnalyzer = MakeShared<FDesignImportPipelinePreviewRefreshAnalyzer>();
+	}
+	if (!PreviewMaterializationService.IsValid())
+	{
+		PreviewMaterializationService = MakeShared<FDesignPreviewMaterializationService>();
+	}
 
 	CurrentJson = FormatJson(CurrentJson);
 
@@ -423,21 +434,9 @@ FString SDesign2UMGPreviewWindow::FormatJson(const FString& JsonString)
 
 void SDesign2UMGPreviewWindow::CleanupPreviewWidget()
 {
-	// 释放预览用临时纹理的 Root 引用，允许 GC 回收
-	if (PreviewTextureMap.Num() > 0)
+	if (PreviewMaterializationService)
 	{
-		FDesignRemoteImageImporter::ReleaseTransientTextures(PreviewTextureMap);
-	}
-
-	if (PreviewWidget.Get())
-	{
-		PreviewWidget->RemoveFromParent();
-		// Explicitly clear WidgetTree to avoid stale references.
-		if (PreviewWidget->WidgetTree)
-		{
-			PreviewWidget->WidgetTree->RootWidget = nullptr;
-		}
-		PreviewWidget.Reset();
+		PreviewMaterializationService->Reset();
 	}
 }
 
@@ -504,8 +503,14 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(const FString& JsonString)
 	}
 
 	FUMGWidgetData TempWidgetData;
+	FString ImageReport;
 	FString ParseError;
-	if (!FUMGJsonParser::ParseJson(JsonString, TempWidgetData, &ParseError))
+	if (!PreviewRefreshAnalyzer.IsValid())
+	{
+		PreviewRefreshAnalyzer = MakeShared<FDesignImportPipelinePreviewRefreshAnalyzer>();
+	}
+
+	if (!PreviewRefreshAnalyzer->AnalyzePreviewJson(JsonString, TempWidgetData, ImageReport, ParseError))
 	{
 		UMGPreviewContainer->SetContent(
 			SNew(SBorder)
@@ -522,15 +527,33 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(const FString& JsonString)
 		return;
 	}
 
-	const FVector2D DesignSize = ResolvePreviewDesignSize(TempWidgetData);
-
-	CleanupPreviewWidget();
-
-	UUserWidget* NewWidget = CreatePreviewWidgetFromJson(TempWidgetData);
-	if (NewWidget)
+	if (!PreviewMaterializationService)
 	{
-		PreviewWidget.Reset(NewWidget);
-		TSharedRef<SWidget> SlateWidget = NewWidget->TakeWidget();
+		PreviewMaterializationService = MakeShared<FDesignPreviewMaterializationService>();
+	}
+
+	FDesignPreviewMaterializationResult MaterializationResult;
+	if (PreviewMaterializationService->MaterializePreview(TempWidgetData, MaterializationResult))
+	{
+		UUserWidget* MaterializedPreviewWidget = PreviewMaterializationService->GetMaterializedPreviewWidget();
+		if (!MaterializedPreviewWidget)
+		{
+			UMGPreviewContainer->SetContent(
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+				.BorderBackgroundColor(FLinearColor(0.1f, 0.05f, 0.02f, 1.0f))
+				.Padding(8)
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("PreviewWidgetMissing", "Preview materialization completed without a widget.\nCheck the Output Log for details."))
+					.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.6f, 0.3f)))
+					.AutoWrapText(true)
+				]
+			);
+			return;
+		}
+
+		TSharedRef<SWidget> SlateWidget = MaterializedPreviewWidget->TakeWidget();
 
 		UMGPreviewContainer->SetContent(
 			SNew(SBorder)
@@ -546,9 +569,9 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(const FString& JsonString)
 					.Orientation(Orient_Horizontal)
 					+ SScrollBox::Slot()
 					[
-						SNew(SBox)
-						.WidthOverride(DesignSize.X)
-						.HeightOverride(DesignSize.Y)
+					SNew(SBox)
+						.WidthOverride(MaterializationResult.PreviewDesignSize.X)
+						.HeightOverride(MaterializationResult.PreviewDesignSize.Y)
 						[
 							SlateWidget
 						]
@@ -572,59 +595,6 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(const FString& JsonString)
 			]
 		);
 	}
-}
-UUserWidget* SDesign2UMGPreviewWindow::CreatePreviewWidgetFromJson(const FUMGWidgetData& WidgetData)
-{
-	// Download remote images as transient textures.
-	PreviewTextureMap.Empty();
-	FDesignRemoteImageImporter::ResolveTransientTextures(WidgetData.RootWidget, PreviewTextureMap);
-
-	// Keep the same fixer path as final generation.
-	FUMGWidgetNode FixedRoot = WidgetData.RootWidget;
-	const FVector2D PreviewSize = ResolvePreviewDesignSize(WidgetData);
-	const FIntPoint DesignSize(FMath::Max(1, FMath::RoundToInt(PreviewSize.X)), FMath::Max(1, FMath::RoundToInt(PreviewSize.Y)));
-	if (UDesign2UMGSettings::Get()->bEnableLayoutFixer)
-	{
-		FUMGWidgetUtils::ApplyFixer(FixedRoot, DesignSize);
-	}
-
-	// Mark transient so GC treats it as preview-only object.
-	UUserWidget* TempWidget = NewObject<UPreviewUserWidget>(GetTransientPackage(), UPreviewUserWidget::StaticClass(), NAME_None, RF_Transient);
-	if (!TempWidget)
-	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create UUserWidget"));
-		return nullptr;
-	}
-
-	TempWidget->WidgetTree = NewObject<UWidgetTree>(TempWidget, UWidgetTree::StaticClass(), NAME_None, RF_Transient);
-	if (!TempWidget->WidgetTree)
-	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create WidgetTree"));
-		return nullptr;
-	}
-
-	// Build preview widget tree with transient texture map.
-	const FVector2D PreviewDesignSize = FUMGWidgetUtils::CalculateDesignSize(FixedRoot);
-	const FIntPoint PreviewDesignSizeInt(
-		FMath::Max(1, FMath::RoundToInt(PreviewDesignSize.X)),
-		FMath::Max(1, FMath::RoundToInt(PreviewDesignSize.Y)));
-	UWidget* RootWidget = FUMGWidgetUtils::CreateWidgetRecursive(
-		TempWidget->WidgetTree,
-		FixedRoot,
-		nullptr,
-		&PreviewTextureMap,
-		nullptr,
-		&PreviewDesignSizeInt);
-	if (!RootWidget)
-	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create root widget of type: %s"), *WidgetData.RootWidget.Type);
-		return nullptr;
-	}
-
-	TempWidget->WidgetTree->RootWidget = RootWidget;
-
-	// Do not call Initialize() in editor preview; runtime objects are unavailable.
-	return TempWidget;
 }
 
 #undef LOCTEXT_NAMESPACE

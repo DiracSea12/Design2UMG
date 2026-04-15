@@ -881,9 +881,17 @@ namespace
 			Request.Generation.Mode = EDesignBlueprintGenerationMode::BlueprintAndCompiledPng;
 			Request.Generation.CompiledPngFilePath = Spec.RenderPngPath;
 			Request.Generation.CompiledRenderSize = Spec.RenderSize;
-			Request.Generation.OutGeneratedAssetPath = &OutResult.GeneratedAssetPath;
-			Request.Generation.OutRenderedSize = &OutResult.RenderSize;
 			return Request;
+		};
+
+		auto ApplyExecutionResult = [&](const FDesignImportExecutionResult& ExecutionResult)
+		{
+			OutResult.GeneratedAssetPath = ExecutionResult.GeneratedAssetPath;
+			OutResult.RenderPngPath = ExecutionResult.RenderPngPath.IsEmpty()
+				? Spec.RenderPngPath
+				: ExecutionResult.RenderPngPath;
+			OutResult.RenderSize = ExecutionResult.RenderedSize;
+			return ExecutionResult.bSucceeded;
 		};
 
 		auto CaptureGeneratedAssetStructure = [&]()
@@ -946,7 +954,7 @@ namespace
 			OutResult.SourceStructure = BuildDesignStructureSnapshot(Document, Spec.NodeId);
 
 			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: generating blueprint and compiled png"));
-			if (!DesignImportPipeline::Execute(Document, MakeAutomationImportRequest(true)).bSucceeded)
+			if (!ApplyExecutionResult(DesignImportPipeline::Execute(Document, MakeAutomationImportRequest(true))))
 			{
 				OutResult.ErrorMessage = FString::Printf(TEXT("Failed to generate compiled PNG for %s"), *Spec.SourcePath);
 				return false;
@@ -1002,7 +1010,7 @@ namespace
 
 			OutResult.SourceStructure = BuildDesignStructureSnapshot(SourceDocument, Spec.NodeId);
 			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: generating blueprint and compiled png"));
-			if (!DesignImportPipeline::Execute(SourceDocument, MakeAutomationImportRequest(true)).bSucceeded)
+			if (!ApplyExecutionResult(DesignImportPipeline::Execute(SourceDocument, MakeAutomationImportRequest(true))))
 			{
 				OutResult.ErrorMessage = FString::Printf(TEXT("Failed to generate compiled PNG for %s"), *Spec.SourcePath);
 				return false;
@@ -1034,7 +1042,7 @@ namespace
 		}
 
 		UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: generating blueprint and compiled png"));
-		if (!DesignImportPipeline::Execute(Data, MakeAutomationImportRequest(false)).bSucceeded)
+		if (!ApplyExecutionResult(DesignImportPipeline::Execute(Data, MakeAutomationImportRequest(false))))
 		{
 			OutResult.ErrorMessage = FString::Printf(TEXT("Failed to generate compiled PNG for %s"), *Spec.SourcePath);
 			return false;

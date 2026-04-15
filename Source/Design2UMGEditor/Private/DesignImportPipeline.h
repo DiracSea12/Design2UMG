@@ -2,10 +2,9 @@
 
 #include "CoreMinimal.h"
 #include "DesignImportTypes.h"
+#include "UMGSchema.h"
 
 class UWidgetBlueprint;
-struct FDesignDocument;
-struct FUMGWidgetData;
 
 enum class EDesignBlueprintGenerationMode : uint8
 {
@@ -19,8 +18,50 @@ struct FBlueprintGenerationOptions
 	EDesignBlueprintGenerationMode Mode = EDesignBlueprintGenerationMode::BlueprintAndPng;
 	FString CompiledPngFilePath;
 	FIntPoint CompiledRenderSize = FIntPoint::ZeroValue;
-	FString* OutGeneratedAssetPath = nullptr;
-	FIntPoint* OutRenderedSize = nullptr;
+};
+
+// Transitional import-core seams: analysis and generation are routed through
+// explicit payloads before preview/orchestration is split in later tasks.
+struct FImportAnalysisInput
+{
+	bool bResolveImages = true;
+};
+
+struct FImportAnalysisResult
+{
+	FUMGWidgetData Data;
+	FString ImageReport;
+};
+
+struct FPreviewRefreshInput
+{
+	FString EditedJson;
+	bool bResolveImages = true;
+};
+
+struct FPreviewRefreshResult
+{
+	bool bSucceeded = false;
+	FUMGWidgetData Data;
+	FString ImageReport;
+	FString ParseError;
+};
+
+struct FArtifactGenerationRequest
+{
+	FString OutputPath;
+	FBlueprintGenerationOptions Generation;
+	TOptional<FDesignDocument> DiagnosticDocument;
+	FString RuntimeImageReport;
+	FString DiagnosticImageReportOverride;
+};
+
+struct FArtifactGenerationResult
+{
+	bool bSucceeded = false;
+	FString GeneratedAssetPath;
+	FString RenderPngPath;
+	FIntPoint RenderedSize = FIntPoint::ZeroValue;
 };
 
 struct FDesignImportRequest
@@ -30,7 +71,7 @@ struct FDesignImportRequest
 	bool bUsePreview = true;
 	bool bResolveImages = true;
 	FBlueprintGenerationOptions Generation;
-	const FDesignDocument* DiagnosticDocument = nullptr;
+	TOptional<FDesignDocument> DiagnosticDocument;
 	FString DiagnosticImageReport;
 };
 
@@ -41,10 +82,17 @@ struct FDesignImportExecutionResult
 	UWidgetBlueprint* GeneratedBlueprint = nullptr;
 	FString GeneratedAssetPath;
 	FString RenderPngPath;
+	FIntPoint RenderedSize = FIntPoint::ZeroValue;
 };
 
 namespace DesignImportPipeline
 {
+	FImportAnalysisResult AnalyzeImport(FUMGWidgetData& Data, const FImportAnalysisInput& Input = FImportAnalysisInput());
+	FImportAnalysisResult AnalyzeImport(FDesignDocument& Document, const FImportAnalysisInput& Input = FImportAnalysisInput());
+	FPreviewRefreshResult AnalyzePreviewRefresh(
+		const FPreviewRefreshInput& Input,
+		const FUMGIconFontMappingChanges* MappingChanges = nullptr);
+	FArtifactGenerationResult GenerateArtifacts(FUMGWidgetData& Data, const FArtifactGenerationRequest& Request);
 	FDesignImportExecutionResult Execute(FUMGWidgetData& Data, const FDesignImportRequest& Request);
 	FDesignImportExecutionResult Execute(FDesignDocument& Document, const FDesignImportRequest& Request);
 	void ConvertDocument(FDesignDocument& Document, FUMGWidgetData& OutData);

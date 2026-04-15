@@ -13,7 +13,12 @@
 #include "PenParser.h"
 #include "UMGGenerator.h"
 #include "PenMCPBridge.h"
+#include "DesignPreviewMaterializationService.h"
+#define private public
 #include "SDesign2UMGPreviewWindow.h"
+#undef private
+#include "PreviewUserWidget.h"
+#include "UMGJsonSerializer.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetBlueprintGeneratedClass.h"
@@ -28,9 +33,14 @@
 #include "Interfaces/IPluginManager.h"
 #include "IImageWrapper.h"
 #include "IImageWrapperModule.h"
+#include "Layout/Children.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "Widgets/SWindow.h"
+#include "Widgets/Input/SButton.h"
+#include "Widgets/Text/STextBlock.h"
+#include "Async/TaskGraphInterfaces.h"
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
@@ -200,6 +210,572 @@ namespace
 		FMemory::Memcpy(OutPixels.GetData(), RawData.GetData(), OutPixels.Num() * sizeof(FColor));
 		return true;
 	}
+
+	constexpr TCHAR PreviewHarnessAnalyzerWidgetName[] = TEXT("WBP_SpyPreviewHarness");
+	constexpr TCHAR PreviewHarnessAnalyzerRootName[] = TEXT("SpyPreviewHarnessRoot");
+
+	FString ExtractFirstWidgetText(const FUMGWidgetNode& WidgetNode)
+	{
+		if (WidgetNode.Text.bHasText && !WidgetNode.Text.Text.IsEmpty())
+		{
+			return WidgetNode.Text.Text;
+		}
+
+		for (const FUMGWidgetNode& Child : WidgetNode.Children)
+		{
+			const FString ChildText = ExtractFirstWidgetText(Child);
+			if (!ChildText.IsEmpty())
+			{
+				return ChildText;
+			}
+		}
+
+		return FString();
+	}
+
+	FString ReadPreviewUserWidgetText(const UUserWidget* PreviewWidget)
+	{
+		if (!PreviewWidget || !PreviewWidget->WidgetTree)
+		{
+			return FString();
+		}
+
+		const UTextBlock* RootTextBlock = Cast<UTextBlock>(PreviewWidget->WidgetTree->RootWidget);
+		return RootTextBlock ? RootTextBlock->GetText().ToString() : FString();
+	}
+
+	bool WidgetTreeContainsText(const TSharedRef<SWidget>& Widget, const FString& ExpectedText)
+	{
+		if (Widget->GetType() == STextBlock::StaticWidgetClass().GetWidgetType())
+		{
+			const TSharedRef<STextBlock> TextBlock = StaticCastSharedRef<STextBlock>(Widget);
+			if (TextBlock->GetText().ToString() == ExpectedText)
+			{
+				return true;
+			}
+		}
+
+		if (FChildren* Children = Widget->GetChildren())
+		{
+			for (int32 ChildIndex = 0; ChildIndex < Children->Num(); ++ChildIndex)
+			{
+				if (WidgetTreeContainsText(Children->GetChildAt(ChildIndex), ExpectedText))
+				{
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	TSharedPtr<SButton> FindButtonByLabel(const TSharedRef<SWidget>& Widget, const FString& ExpectedText)
+	{
+		if (Widget->GetType() == SButton::StaticWidgetClass().GetWidgetType()
+			&& WidgetTreeContainsText(Widget, ExpectedText))
+		{
+			return StaticCastSharedRef<SButton>(Widget);
+		}
+
+		if (FChildren* Children = Widget->GetChildren())
+		{
+			for (int32 ChildIndex = 0; ChildIndex < Children->Num(); ++ChildIndex)
+			{
+				if (TSharedPtr<SButton> FoundButton = FindButtonByLabel(Children->GetChildAt(ChildIndex), ExpectedText))
+				{
+					return FoundButton;
+				}
+			}
+		}
+
+		return nullptr;
+	}
+
+	struct FPreviewHarnessTelemetry
+	{
+		FString ImportMode = TEXT("preview_harness");
+		bool bPreviewUiOpened = false;
+		bool bPreviewWindowClosed = false;
+	};
+
+	FString MakePreviewHarnessJson(const FString& LabelText)
+	{
+		FUMGWidgetData Data;
+		Data.WidgetName = TEXT("WBP_PreviewHarnessFixture");
+		Data.RootWidget.Type = TEXT("CanvasPanel");
+		Data.RootWidget.Id = TEXT("preview_root");
+		Data.RootWidget.Name = TEXT("PreviewRoot");
+		Data.RootWidget.Bounds = { 0.0f, 0.0f, 320.0f, 180.0f };
+
+		FUMGWidgetNode LabelWidget;
+		LabelWidget.Type = TEXT("TextBlock");
+		LabelWidget.Id = TEXT("preview_label");
+		LabelWidget.Name = TEXT("PreviewLabel");
+		LabelWidget.Bounds = { 24.0f, 24.0f, 160.0f, 32.0f };
+		LabelWidget.Text.Text = LabelText;
+		LabelWidget.Text.bHasText = true;
+		LabelWidget.TextStyle.FontSize = 18.0f;
+		Data.RootWidget.Children.Add(LabelWidget);
+
+		return FUMGJsonSerializer::Serialize(Data);
+	}
+
+	FUMGWidgetData MakeInjectedPreviewAnalysisData(const FString& LabelText)
+	{
+		FUMGWidgetData Data;
+		Data.WidgetName = PreviewHarnessAnalyzerWidgetName;
+		Data.RootWidget.Type = TEXT("CanvasPanel");
+		Data.RootWidget.Id = TEXT("spy_preview_root");
+		Data.RootWidget.Name = PreviewHarnessAnalyzerRootName;
+		Data.RootWidget.Bounds = { 0.0f, 0.0f, 420.0f, 220.0f };
+
+		FUMGWidgetNode LabelWidget;
+		LabelWidget.Type = TEXT("TextBlock");
+		LabelWidget.Id = TEXT("spy_preview_label");
+		LabelWidget.Name = TEXT("SpyPreviewLabel");
+		LabelWidget.Bounds = { 16.0f, 16.0f, 220.0f, 32.0f };
+		LabelWidget.Text.Text = LabelText;
+		LabelWidget.Text.bHasText = true;
+		LabelWidget.TextStyle.FontSize = 20.0f;
+		Data.RootWidget.Children.Add(LabelWidget);
+		return Data;
+	}
+
+	class FSpyPreviewRefreshAnalyzer final : public IDesignPreviewRefreshAnalyzer
+	{
+	public:
+		virtual bool AnalyzePreviewJson(
+			const FString& JsonString,
+			FUMGWidgetData& OutWidgetData,
+			FString& OutImageReport,
+			FString& OutError) override
+		{
+			++InvocationSerial;
+			++InvocationCount;
+			LastAnalyzedJson = JsonString;
+
+			OutWidgetData = MakeInjectedPreviewAnalysisData(FString::Printf(TEXT("SpyAnalyzed-%d"), InvocationSerial));
+			OutImageReport = FString::Printf(TEXT("spy-image-report-%d"), InvocationSerial);
+			OutError.Reset();
+
+			LastAnalyzedWidgetName = OutWidgetData.WidgetName;
+			bInjectedSeamObserved = (OutWidgetData.WidgetName == PreviewHarnessAnalyzerWidgetName);
+			return true;
+		}
+
+		void ResetObservation()
+		{
+			InvocationCount = 0;
+			InvocationSerial = 0;
+			bInjectedSeamObserved = false;
+			LastAnalyzedJson.Reset();
+			LastAnalyzedWidgetName.Reset();
+		}
+
+		int32 GetInvocationCount() const
+		{
+			return InvocationCount;
+		}
+
+		bool DidObserveInjectedSeam() const
+		{
+			return bInjectedSeamObserved;
+		}
+
+		const FString& GetLastAnalyzedJson() const
+		{
+			return LastAnalyzedJson;
+		}
+
+		const FString& GetLastAnalyzedWidgetName() const
+		{
+			return LastAnalyzedWidgetName;
+		}
+
+	private:
+		int32 InvocationCount = 0;
+		int32 InvocationSerial = 0;
+		bool bInjectedSeamObserved = false;
+		FString LastAnalyzedJson;
+		FString LastAnalyzedWidgetName;
+	};
+
+	class FSpyPreviewMaterializationService final : public IDesignPreviewMaterializationService
+	{
+	public:
+		virtual bool MaterializePreview(const FUMGWidgetData& WidgetData, FDesignPreviewMaterializationResult& OutResult) override
+		{
+			++InvocationCount;
+			LastMaterializedWidgetName = WidgetData.WidgetName;
+
+			const bool bSawInjectedAnalyzerPayload =
+				WidgetData.WidgetName == PreviewHarnessAnalyzerWidgetName
+				&& WidgetData.RootWidget.Name == PreviewHarnessAnalyzerRootName;
+			bInjectedSeamObserved = bSawInjectedAnalyzerPayload;
+
+			UPreviewUserWidget* NewPreviewWidget = NewObject<UPreviewUserWidget>(
+				GetTransientPackage(),
+				UPreviewUserWidget::StaticClass(),
+				NAME_None,
+				RF_Transient);
+			if (!NewPreviewWidget)
+			{
+				return false;
+			}
+
+			NewPreviewWidget->WidgetTree = NewObject<UWidgetTree>(NewPreviewWidget, UWidgetTree::StaticClass(), NAME_None, RF_Transient);
+			if (!NewPreviewWidget->WidgetTree)
+			{
+				return false;
+			}
+
+			UTextBlock* RootText = NewPreviewWidget->WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("SpyPreviewWidget"));
+			if (!RootText)
+			{
+				return false;
+			}
+
+			const FString DisplayText = bSawInjectedAnalyzerPayload
+				? FString::Printf(TEXT("SpyMaterialized:%s"), *ExtractFirstWidgetText(WidgetData.RootWidget))
+				: TEXT("UnexpectedBypass");
+			LastPreviewWidgetText = DisplayText;
+			RootText->SetText(FText::FromString(DisplayText));
+			NewPreviewWidget->WidgetTree->RootWidget = RootText;
+
+			MaterializedPreviewWidget.Reset(NewPreviewWidget);
+			OutResult = FDesignPreviewMaterializationResult();
+			OutResult.PreviewDesignSize = FVector2D(
+				FMath::Max(1.0f, WidgetData.RootWidget.Bounds.W),
+				FMath::Max(1.0f, WidgetData.RootWidget.Bounds.H));
+			return true;
+		}
+
+		virtual UUserWidget* GetMaterializedPreviewWidget() const override
+		{
+			return MaterializedPreviewWidget.Get();
+		}
+
+		virtual void Reset() override
+		{
+			if (MaterializedPreviewWidget.Get())
+			{
+				if (MaterializedPreviewWidget->WidgetTree)
+				{
+					MaterializedPreviewWidget->WidgetTree->RootWidget = nullptr;
+				}
+				MaterializedPreviewWidget.Reset();
+			}
+		}
+
+		UUserWidget* GetLastPreviewWidget() const
+		{
+			return MaterializedPreviewWidget.Get();
+		}
+
+		void ResetObservation()
+		{
+			InvocationCount = 0;
+			bInjectedSeamObserved = false;
+			LastMaterializedWidgetName.Reset();
+			LastPreviewWidgetText.Reset();
+		}
+
+		int32 GetInvocationCount() const
+		{
+			return InvocationCount;
+		}
+
+		bool DidObserveInjectedSeam() const
+		{
+			return bInjectedSeamObserved;
+		}
+
+		const FString& GetLastMaterializedWidgetName() const
+		{
+			return LastMaterializedWidgetName;
+		}
+
+		const FString& GetLastPreviewWidgetText() const
+		{
+			return LastPreviewWidgetText;
+		}
+
+	private:
+		int32 InvocationCount = 0;
+		bool bInjectedSeamObserved = false;
+		FString LastMaterializedWidgetName;
+		FString LastPreviewWidgetText;
+		TStrongObjectPtr<UUserWidget> MaterializedPreviewWidget;
+	};
+
+	class FPreviewConfirmDelegateSpy final
+	{
+	public:
+		void HandleConfirmed(const FString& EditedJson, const FString& ConfirmedOutputPath)
+		{
+			++InvocationCount;
+			LastConfirmedJson = EditedJson;
+			LastConfirmedOutputPath = ConfirmedOutputPath;
+		}
+
+		void ResetObservation()
+		{
+			InvocationCount = 0;
+			LastConfirmedJson.Reset();
+			LastConfirmedOutputPath.Reset();
+		}
+
+		int32 GetInvocationCount() const
+		{
+			return InvocationCount;
+		}
+
+		const FString& GetLastConfirmedJson() const
+		{
+			return LastConfirmedJson;
+		}
+
+		const FString& GetLastConfirmedOutputPath() const
+		{
+			return LastConfirmedOutputPath;
+		}
+
+	private:
+		int32 InvocationCount = 0;
+		FString LastConfirmedJson;
+		FString LastConfirmedOutputPath;
+	};
+
+	class FPreviewCancelDelegateSpy final
+	{
+	public:
+		void HandleCancelled()
+		{
+			++InvocationCount;
+		}
+
+		void ResetObservation()
+		{
+			InvocationCount = 0;
+		}
+
+		int32 GetInvocationCount() const
+		{
+			return InvocationCount;
+		}
+
+	private:
+		int32 InvocationCount = 0;
+	};
+
+	struct FPreviewWindowHarness
+	{
+		TSharedPtr<FPreviewHarnessTelemetry> Telemetry = MakeShared<FPreviewHarnessTelemetry>();
+		TSharedPtr<FSpyPreviewRefreshAnalyzer> AnalyzerSpy = MakeShared<FSpyPreviewRefreshAnalyzer>();
+		TSharedPtr<FSpyPreviewMaterializationService> MaterializationSpy = MakeShared<FSpyPreviewMaterializationService>();
+		TSharedPtr<FPreviewConfirmDelegateSpy> ConfirmDelegateSpy = MakeShared<FPreviewConfirmDelegateSpy>();
+		TSharedPtr<FPreviewCancelDelegateSpy> CancelDelegateSpy = MakeShared<FPreviewCancelDelegateSpy>();
+		TSharedPtr<SWindow> Window;
+		TSharedPtr<SDesign2UMGPreviewWindow> PreviewWindow;
+
+		~FPreviewWindowHarness()
+		{
+			Close();
+		}
+
+		void PumpSlate(int32 TickCount = 2)
+		{
+			if (!FSlateApplication::IsInitialized())
+			{
+				return;
+			}
+
+			for (int32 TickIndex = 0; TickIndex < TickCount; ++TickIndex)
+			{
+				FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
+				FSlateApplication::Get().PumpMessages();
+				FSlateApplication::Get().Tick(ESlateTickType::All);
+				FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
+			}
+		}
+
+		bool Open(const FString& OriginalJson, const FString& OutputPath, const TArray<FString>& Warnings = TArray<FString>())
+		{
+			if (!FSlateApplication::IsInitialized())
+			{
+				return false;
+			}
+
+			Window = SNew(SWindow)
+				.Title(FText::FromString(TEXT("Design2UMG Preview Harness")))
+				.ClientSize(FVector2D(1200.0f, 720.0f))
+				.SupportsMinimize(false)
+				.SupportsMaximize(true);
+			Window->GetOnWindowClosedEvent().AddLambda(
+				[Telemetry = Telemetry](const TSharedRef<SWindow>&)
+				{
+					Telemetry->bPreviewWindowClosed = true;
+				});
+
+			Window->SetContent(
+				SAssignNew(PreviewWindow, SDesign2UMGPreviewWindow)
+				.OriginalJson(OriginalJson)
+				.OutputPath(OutputPath)
+				.Warnings(Warnings)
+				.PreviewRefreshAnalyzer(AnalyzerSpy)
+				.PreviewMaterializationService(MaterializationSpy)
+				.OnConfirmed(FOnPreviewConfirmed::CreateLambda(
+					[ConfirmDelegateSpy = ConfirmDelegateSpy](const FString& EditedJson, const FString& ConfirmedOutputPath)
+					{
+						ConfirmDelegateSpy->HandleConfirmed(EditedJson, ConfirmedOutputPath);
+					}))
+				.OnCancelled(FOnPreviewCancelled::CreateLambda(
+					[CancelDelegateSpy = CancelDelegateSpy]()
+					{
+						CancelDelegateSpy->HandleCancelled();
+					})));
+
+			FSlateApplication::Get().AddWindow(Window.ToSharedRef());
+			PumpSlate();
+			Telemetry->bPreviewUiOpened = IsWindowAttached();
+			return PreviewWindow.IsValid();
+		}
+
+		void ResetObservedTelemetry()
+		{
+			Telemetry->bPreviewWindowClosed = false;
+			AnalyzerSpy->ResetObservation();
+			MaterializationSpy->ResetObservation();
+			ConfirmDelegateSpy->ResetObservation();
+			CancelDelegateSpy->ResetObservation();
+		}
+
+		bool RequestRefresh(const FString& EditedJson)
+		{
+			if (!PreviewWindow.IsValid() || !PreviewWindow->JsonEditor.IsValid())
+			{
+				return false;
+			}
+
+			PreviewWindow->CurrentJson = EditedJson;
+			PreviewWindow->JsonEditor->SetText(FText::FromString(EditedJson));
+			const TSharedPtr<SButton> FormatButton = FindButtonByLabel(PreviewWindow.ToSharedRef(), TEXT("Format JSON"));
+			if (!FormatButton.IsValid())
+			{
+				return false;
+			}
+
+			FormatButton->SimulateClick();
+			PumpSlate(4);
+			return DidObserveInjectedPreviewRefresh();
+		}
+
+		void SetOutputPath(const FString& OutputPath)
+		{
+			if (!PreviewWindow.IsValid() || !PreviewWindow->OutputPathBox.IsValid())
+			{
+				return;
+			}
+
+			PreviewWindow->OutputPathBox->SetText(FText::FromString(OutputPath));
+			PumpSlate(1);
+		}
+
+		bool Confirm()
+		{
+			if (!PreviewWindow.IsValid())
+			{
+				return false;
+			}
+
+			const int32 PreviousInvocationCount = ConfirmDelegateSpy->GetInvocationCount();
+			const TSharedPtr<SButton> GenerateButton = FindButtonByLabel(PreviewWindow.ToSharedRef(), TEXT("Generate Widget Blueprint"));
+			if (!GenerateButton.IsValid())
+			{
+				return false;
+			}
+
+			GenerateButton->SimulateClick();
+			PumpSlate(6);
+			return ConfirmDelegateSpy->GetInvocationCount() == PreviousInvocationCount + 1;
+		}
+
+		bool Cancel()
+		{
+			if (!PreviewWindow.IsValid())
+			{
+				return false;
+			}
+
+			const int32 PreviousInvocationCount = CancelDelegateSpy->GetInvocationCount();
+			const TSharedPtr<SButton> CancelButton = FindButtonByLabel(PreviewWindow.ToSharedRef(), TEXT("Cancel"));
+			if (!CancelButton.IsValid())
+			{
+				return false;
+			}
+
+			CancelButton->SimulateClick();
+			PumpSlate(6);
+			return CancelDelegateSpy->GetInvocationCount() == PreviousInvocationCount + 1;
+		}
+
+		bool HasPreviewWidget() const
+		{
+			return MaterializationSpy->GetLastPreviewWidget() != nullptr;
+		}
+
+		bool IsWindowAttached() const
+		{
+			if (Telemetry->bPreviewWindowClosed)
+			{
+				return false;
+			}
+
+			return FSlateApplication::IsInitialized()
+				&& PreviewWindow.IsValid()
+				&& FSlateApplication::Get().FindWidgetWindow(PreviewWindow.ToSharedRef()).IsValid();
+		}
+
+		bool PreviewWidgetMatchesSpyMaterialization() const
+		{
+			return PreviewWindow.IsValid()
+				&& PreviewWindow->UMGPreviewContainer.IsValid()
+				&& MaterializationSpy->GetLastPreviewWidget() != nullptr
+				&& WidgetTreeContainsText(
+					PreviewWindow->UMGPreviewContainer.ToSharedRef(),
+					MaterializationSpy->GetLastPreviewWidgetText());
+		}
+
+		FString GetPreviewWidgetText() const
+		{
+			return ReadPreviewUserWidgetText(MaterializationSpy->GetLastPreviewWidget());
+		}
+
+		bool DidObserveInjectedPreviewRefresh() const
+		{
+			const FString PreviewText = GetPreviewWidgetText();
+			return HasPreviewWidget()
+				&& AnalyzerSpy->GetInvocationCount() > 0
+				&& MaterializationSpy->GetInvocationCount() > 0
+				&& AnalyzerSpy->DidObserveInjectedSeam()
+				&& MaterializationSpy->DidObserveInjectedSeam()
+				&& PreviewWidgetMatchesSpyMaterialization()
+				&& PreviewText == MaterializationSpy->GetLastPreviewWidgetText()
+				&& PreviewText.StartsWith(TEXT("SpyMaterialized:SpyAnalyzed-"));
+		}
+
+		void Close()
+		{
+			if (Window.IsValid())
+			{
+				Window->RequestDestroyWindow();
+				PumpSlate();
+			}
+
+			PreviewWindow.Reset();
+			Window.Reset();
+		}
+	};
 
 }
 
@@ -677,7 +1253,7 @@ bool FImportDiagnosticReportExecutePathTest::RunTest(const FString& Parameters)
 	Request.bUsePreview = false;
 	Request.bResolveImages = false;
 	Request.Generation.Mode = EDesignBlueprintGenerationMode::BlueprintOnly;
-	Request.DiagnosticDocument = &Document;
+	Request.DiagnosticDocument = Document;
 
 	DeleteGeneratedAssetsAtPath(Request.OutputPath);
 	const FDesignImportExecutionResult Result = DesignImportPipeline::Execute(Data, Request);
@@ -766,7 +1342,7 @@ bool FImportDiagnosticReportFailurePathTest::RunTest(const FString& Parameters)
 	Request.bUsePreview = false;
 	Request.bResolveImages = false;
 	Request.Generation.Mode = EDesignBlueprintGenerationMode::BlueprintAndPng;
-	Request.DiagnosticDocument = &Document;
+	Request.DiagnosticDocument = Document;
 
 	DeleteGeneratedAssetsAtPath(Request.OutputPath);
 	const FDesignImportExecutionResult Result = DesignImportPipeline::Execute(Data, Request);
@@ -1254,14 +1830,107 @@ bool FPreviewWindowTest::RunTest(const FString& Parameters)
 	{
 		return true;
 	}
-	const FString DummyJson = TEXT("{}");
-	TArray<FString> Warnings;
-	TSharedPtr<SDesign2UMGPreviewWindow> PreviewWindow = SNew(SDesign2UMGPreviewWindow)
-		.OriginalJson(DummyJson)
-		.OutputPath(TEXT("/Game/Test"))
-		.Warnings(Warnings);
-	TestTrue(TEXT("Preview window instantiated"), PreviewWindow.IsValid());
-	PreviewWindow.Reset();
+
+	FPreviewWindowHarness Harness;
+	TestTrue(TEXT("Preview harness opens window"),
+		Harness.Open(MakePreviewHarnessJson(TEXT("Initial Preview")), TEXT("/Game/Test")));
+	TestTrue(TEXT("Preview window instantiated"), Harness.PreviewWindow.IsValid());
+	TestTrue(TEXT("Preview UI is marked open"), Harness.Telemetry->bPreviewUiOpened);
+	TestEqual(TEXT("Initial open runs analyzer once"), Harness.AnalyzerSpy->GetInvocationCount(), 1);
+	TestEqual(TEXT("Initial open runs materialization once"), Harness.MaterializationSpy->GetInvocationCount(), 1);
+	TestTrue(TEXT("Initial open uses injected analyzer seam"), Harness.AnalyzerSpy->DidObserveInjectedSeam());
+	TestTrue(TEXT("Initial open uses injected materialization seam"), Harness.MaterializationSpy->DidObserveInjectedSeam());
+	TestTrue(TEXT("Preview widget is materialized on initial open"), Harness.HasPreviewWidget());
+	TestTrue(TEXT("Initial open adopts spy materialized widget"), Harness.PreviewWidgetMatchesSpyMaterialization());
+	TestTrue(TEXT("Initial open proves preview refresh used injected seam"), Harness.DidObserveInjectedPreviewRefresh());
+	TestEqual(TEXT("Initial open preview text comes from injected seam"), Harness.GetPreviewWidgetText(), TEXT("SpyMaterialized:SpyAnalyzed-1"));
+	TestTrue(TEXT("Preview window is attached to Slate"), Harness.IsWindowAttached());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreviewWindowHarnessRefreshConfirmTest,
+	"Design2UMG.PreviewWindow.HarnessRefreshConfirm",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPreviewWindowHarnessRefreshConfirmTest::RunTest(const FString& Parameters)
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		return true;
+	}
+
+	FPreviewWindowHarness Harness;
+	TestTrue(TEXT("Preview harness opens window"),
+		Harness.Open(MakePreviewHarnessJson(TEXT("Original Label")), TEXT("/Game/Design2UMG/_TestOutput/PreviewHarness")));
+	if (!Harness.PreviewWindow.IsValid())
+	{
+		return false;
+	}
+
+	Harness.ResetObservedTelemetry();
+	const FString EditedJson = MakePreviewHarnessJson(TEXT("Edited Label"));
+	TestTrue(TEXT("Refresh request rebuilds preview"), Harness.RequestRefresh(EditedJson));
+	Harness.SetOutputPath(TEXT("/Game/Design2UMG/_TestOutput/PreviewHarnessConfirmed"));
+
+	TestTrue(TEXT("Confirm request dispatches preview callback"), Harness.Confirm());
+	TestEqual(TEXT("Analysis invocation count"), Harness.AnalyzerSpy->GetInvocationCount(), 1);
+	TestEqual(TEXT("Preview materialization invocation count"), Harness.MaterializationSpy->GetInvocationCount(), 1);
+	TestEqual(TEXT("Confirm delegate invocation count"), Harness.ConfirmDelegateSpy->GetInvocationCount(), 1);
+	TestEqual(TEXT("Cancel delegate invocation count stays zero"), Harness.CancelDelegateSpy->GetInvocationCount(), 0);
+	TestTrue(TEXT("Refresh uses injected analyzer seam"), Harness.AnalyzerSpy->DidObserveInjectedSeam());
+	TestTrue(TEXT("Refresh uses injected materialization seam"), Harness.MaterializationSpy->DidObserveInjectedSeam());
+	TestTrue(TEXT("Refresh adopts spy materialized widget"), Harness.PreviewWidgetMatchesSpyMaterialization());
+	TestTrue(TEXT("Refresh proves preview refresh used injected seam"), Harness.DidObserveInjectedPreviewRefresh());
+	TestEqual(TEXT("Refresh preview text comes from injected seam"), Harness.GetPreviewWidgetText(), TEXT("SpyMaterialized:SpyAnalyzed-1"));
+	TestEqual(TEXT("Analyzer sees the edited json"), Harness.AnalyzerSpy->GetLastAnalyzedJson(), EditedJson);
+	TestEqual(TEXT("Analyzer reports the injected widget payload"),
+		Harness.AnalyzerSpy->GetLastAnalyzedWidgetName(),
+		FString(PreviewHarnessAnalyzerWidgetName));
+	TestEqual(TEXT("Materialization receives the injected widget payload"),
+		Harness.MaterializationSpy->GetLastMaterializedWidgetName(),
+		FString(PreviewHarnessAnalyzerWidgetName));
+	TestEqual(TEXT("Confirm forwards edited json"), Harness.ConfirmDelegateSpy->GetLastConfirmedJson(), EditedJson);
+	TestEqual(TEXT("Confirm forwards edited output path"),
+		Harness.ConfirmDelegateSpy->GetLastConfirmedOutputPath(),
+		TEXT("/Game/Design2UMG/_TestOutput/PreviewHarnessConfirmed"));
+	TestTrue(TEXT("Preview window close is observed after confirm"), Harness.Telemetry->bPreviewWindowClosed);
+	TestFalse(TEXT("Preview window detaches after confirm"), Harness.IsWindowAttached());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreviewWindowHarnessCancelTest,
+	"Design2UMG.PreviewWindow.HarnessCancel",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPreviewWindowHarnessCancelTest::RunTest(const FString& Parameters)
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		return true;
+	}
+
+	FPreviewWindowHarness Harness;
+	TestTrue(TEXT("Preview harness opens window"),
+		Harness.Open(MakePreviewHarnessJson(TEXT("Cancel Original")), TEXT("/Game/Design2UMG/_TestOutput/PreviewHarnessCancel")));
+	if (!Harness.PreviewWindow.IsValid())
+	{
+		return false;
+	}
+
+	Harness.ResetObservedTelemetry();
+	TestTrue(TEXT("Cancel flow can refresh before cancellation"),
+		Harness.RequestRefresh(MakePreviewHarnessJson(TEXT("Cancel Edited"))));
+	TestTrue(TEXT("Cancel request dispatches preview cancel callback"), Harness.Cancel());
+	TestEqual(TEXT("Analysis invocation count"), Harness.AnalyzerSpy->GetInvocationCount(), 1);
+	TestEqual(TEXT("Preview materialization invocation count"), Harness.MaterializationSpy->GetInvocationCount(), 1);
+	TestEqual(TEXT("Confirm delegate invocation count stays zero"), Harness.ConfirmDelegateSpy->GetInvocationCount(), 0);
+	TestEqual(TEXT("Cancel delegate invocation count"), Harness.CancelDelegateSpy->GetInvocationCount(), 1);
+	TestTrue(TEXT("Cancel path still used injected analyzer seam"), Harness.AnalyzerSpy->DidObserveInjectedSeam());
+	TestTrue(TEXT("Cancel path still used injected materialization seam"), Harness.MaterializationSpy->DidObserveInjectedSeam());
+	TestTrue(TEXT("Cancel path adopts spy materialized widget"), Harness.PreviewWidgetMatchesSpyMaterialization());
+	TestTrue(TEXT("Cancel refresh proves preview refresh used injected seam"), Harness.DidObserveInjectedPreviewRefresh());
+	TestEqual(TEXT("Cancel refresh preview text comes from injected seam"), Harness.GetPreviewWidgetText(), TEXT("SpyMaterialized:SpyAnalyzed-1"));
+	TestTrue(TEXT("Preview UI remained open for interactive flow"), Harness.Telemetry->bPreviewUiOpened);
+	TestTrue(TEXT("Preview window close is observed after cancel"), Harness.Telemetry->bPreviewWindowClosed);
+	TestFalse(TEXT("Preview window detaches after cancel"), Harness.IsWindowAttached());
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFitContentMinimumExpandsToContentTest,

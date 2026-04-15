@@ -27,6 +27,11 @@ namespace DesignImportPipeline
 {
 	namespace
 	{
+		struct FArtifactGenerationRuntimeResult
+		{
+			UWidgetBlueprint* GeneratedBlueprint = nullptr;
+		};
+
 		void WriteImportDiagnosticReportImpl(
 			const FDesignDocument& Document,
 			const FUMGWidgetData& Data,
@@ -320,76 +325,40 @@ namespace DesignImportPipeline
 			const FString& EditedJson,
 			const FString& OutputPath,
 			const FUMGIconFontMappingChanges* MappingChanges = nullptr,
-			const FDesignDocument* DiagnosticDocument = nullptr,
-			const FBlueprintGenerationOptions* GenerationOptions = nullptr,
+			const TOptional<FDesignDocument>& DiagnosticDocument = TOptional<FDesignDocument>(),
+			const TOptional<FBlueprintGenerationOptions>& GenerationOptions = TOptional<FBlueprintGenerationOptions>(),
 			bool bResolveImages = true)
 		{
-			FUMGWidgetData Data;
-			FString ParseError;
-			if (!ParseWidgetJson(EditedJson, Data, &ParseError))
+			FPreviewRefreshInput RefreshInput;
+			RefreshInput.EditedJson = EditedJson;
+			RefreshInput.bResolveImages = bResolveImages;
+
+			const FPreviewRefreshResult RefreshResult = AnalyzePreviewRefresh(RefreshInput, MappingChanges);
+			if (!RefreshResult.bSucceeded)
 			{
-				UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportPipeline: Edited JSON parse failed: %s"), *ParseError);
+				UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportPipeline: Edited JSON parse failed: %s"), *RefreshResult.ParseError);
 				FDesign2UMGNotification::Error(NSLOCTEXT("DesignImportPipeline", "EditedJsonParseFailed", "Design2UMG: Failed to parse edited design data"));
 				return false;
 			}
 
-			if (MappingChanges)
+			FArtifactGenerationRequest GenerationRequest;
+			GenerationRequest.OutputPath = OutputPath;
+			if (DiagnosticDocument.IsSet())
 			{
-				Data.IconFontMappingChanges = *MappingChanges;
+				GenerationRequest.DiagnosticDocument = DiagnosticDocument;
+			}
+			GenerationRequest.RuntimeImageReport = RefreshResult.ImageReport;
+			if (GenerationOptions.IsSet())
+			{
+				GenerationRequest.Generation = GenerationOptions.GetValue();
+			}
+			else
+			{
+				GenerationRequest.Generation.Mode = EDesignBlueprintGenerationMode::BlueprintOnly;
 			}
 
-			FString ImageReport;
-			if (bResolveImages)
-			{
-				ResolveImages(Data, &ImageReport);
-			}
-			FString GeneratedAssetPath;
-			FString RenderPngPath;
-			UWidgetBlueprint* GeneratedBlueprint = nullptr;
-			bool bSucceeded = false;
-			switch (GenerationOptions ? GenerationOptions->Mode : EDesignBlueprintGenerationMode::BlueprintOnly)
-			{
-			case EDesignBlueprintGenerationMode::BlueprintOnly:
-				GeneratedBlueprint = DesignImportUtils::GenerateBlueprint(Data, OutputPath);
-				bSucceeded = GeneratedBlueprint != nullptr;
-				if (GeneratedBlueprint)
-				{
-					GeneratedAssetPath = GeneratedBlueprint->GetPathName();
-				}
-				break;
-
-			case EDesignBlueprintGenerationMode::BlueprintAndPng:
-				bSucceeded = DesignImportUtils::GenerateBlueprintAndPng(
-					Data,
-					OutputPath,
-					&GeneratedAssetPath,
-					&RenderPngPath);
-				break;
-
-			case EDesignBlueprintGenerationMode::BlueprintAndCompiledPng:
-				bSucceeded = DesignImportUtils::GenerateBlueprintAndCompiledPng(
-					Data,
-					OutputPath,
-					GenerationOptions->CompiledPngFilePath,
-					GenerationOptions->CompiledRenderSize,
-					&GeneratedAssetPath,
-					nullptr);
-				RenderPngPath = GenerationOptions->CompiledPngFilePath;
-				break;
-			}
-
-			if ((bSucceeded || !GeneratedAssetPath.IsEmpty()) && DiagnosticDocument)
-			{
-				WriteImportDiagnosticReportImpl(
-					*DiagnosticDocument,
-					Data,
-					ImageReport,
-					OutputPath,
-					RenderPngPath,
-					GeneratedAssetPath,
-					RenderPngPath);
-			}
-			return bSucceeded;
+			FUMGWidgetData GeneratedData = RefreshResult.Data;
+			return GenerateArtifacts(GeneratedData, GenerationRequest).bSucceeded;
 		}
 
 		void PrepareDocumentForGeneration(FDesignDocument& Document, FUMGWidgetData& OutPreparedData)
@@ -577,8 +546,7 @@ namespace DesignImportPipeline
 			SlowTask.MakeDialog(true);
 
 			SlowTask.EnterProgressFrame(1.0f, NSLOCTEXT("DesignImportPipeline", "GenParse", "Parsing edited design..."));
-			FUMGWidgetData PreparedData;
-			PrepareDocumentForGeneration(Document, PreparedData);
+			const FImportAnalysisResult AnalysisResult = AnalyzeImport(Document, FImportAnalysisInput{false});
 			if (SlowTask.ShouldCancel())
 			{
 				return;
@@ -588,43 +556,135 @@ namespace DesignImportPipeline
 			ParseResolveAndGenerate(
 				EditedJson,
 				OutputPath,
-				&PreparedData.IconFontMappingChanges,
-				&Document,
-				&GenerationOptions,
+				&AnalysisResult.Data.IconFontMappingChanges,
+				Document,
+				GenerationOptions,
 				bResolveImages);
 		}
 
 		void MaybeWriteImportDiagnosticReport(
-			const FDesignImportRequest& Request,
+			const FArtifactGenerationRequest& Request,
 			const FUMGWidgetData& Data,
-			const FString& RuntimeImageReport,
-			const FDesignImportExecutionResult& Result)
+			const FArtifactGenerationResult& Result)
 		{
-			if (!Request.DiagnosticDocument || (!Result.bSucceeded && Result.GeneratedAssetPath.IsEmpty()))
+			if (!Request.DiagnosticDocument.IsSet() || (!Result.bSucceeded && Result.GeneratedAssetPath.IsEmpty()))
 			{
 				return;
 			}
 
 			WriteImportDiagnosticReportImpl(
-				*Request.DiagnosticDocument,
+				Request.DiagnosticDocument.GetValue(),
 				Data,
-				Request.DiagnosticImageReport.IsEmpty() ? RuntimeImageReport : Request.DiagnosticImageReport,
+				Request.DiagnosticImageReportOverride.IsEmpty() ? Request.RuntimeImageReport : Request.DiagnosticImageReportOverride,
 				Request.OutputPath,
 				Result.RenderPngPath.IsEmpty() ? Request.Generation.CompiledPngFilePath : Result.RenderPngPath,
 				Result.GeneratedAssetPath,
 				Result.RenderPngPath);
 		}
+
+		FArtifactGenerationResult GenerateArtifactsInternal(
+			FUMGWidgetData& Data,
+			const FArtifactGenerationRequest& Request,
+			FArtifactGenerationRuntimeResult* OutRuntimeResult = nullptr)
+		{
+			FArtifactGenerationResult Result;
+			switch (Request.Generation.Mode)
+			{
+			case EDesignBlueprintGenerationMode::BlueprintOnly:
+			{
+				UWidgetBlueprint* GeneratedBlueprint = DesignImportUtils::GenerateBlueprint(Data, Request.OutputPath);
+				Result.bSucceeded = (GeneratedBlueprint != nullptr);
+				if (GeneratedBlueprint)
+				{
+					Result.GeneratedAssetPath = GeneratedBlueprint->GetPathName();
+				}
+				if (OutRuntimeResult)
+				{
+					OutRuntimeResult->GeneratedBlueprint = GeneratedBlueprint;
+				}
+				break;
+			}
+
+			case EDesignBlueprintGenerationMode::BlueprintAndPng:
+				Result.bSucceeded = DesignImportUtils::GenerateBlueprintAndPng(
+					Data,
+					Request.OutputPath,
+					&Result.GeneratedAssetPath,
+					&Result.RenderPngPath);
+				break;
+
+			case EDesignBlueprintGenerationMode::BlueprintAndCompiledPng:
+				Result.bSucceeded = DesignImportUtils::GenerateBlueprintAndCompiledPng(
+					Data,
+					Request.OutputPath,
+					Request.Generation.CompiledPngFilePath,
+					Request.Generation.CompiledRenderSize,
+					&Result.GeneratedAssetPath,
+					&Result.RenderedSize);
+				Result.RenderPngPath = Request.Generation.CompiledPngFilePath;
+				break;
+			}
+
+			MaybeWriteImportDiagnosticReport(Request, Data, Result);
+			return Result;
+		}
+	}
+
+	FImportAnalysisResult AnalyzeImport(FUMGWidgetData& Data, const FImportAnalysisInput& Input)
+	{
+		FImportAnalysisResult Result;
+		if (Input.bResolveImages)
+		{
+			ResolveImages(Data, &Result.ImageReport);
+		}
+		Result.Data = Data;
+		return Result;
+	}
+
+	FImportAnalysisResult AnalyzeImport(FDesignDocument& Document, const FImportAnalysisInput& Input)
+	{
+		FImportAnalysisResult Result;
+		PrepareDocumentForGeneration(Document, Result.Data);
+		if (Input.bResolveImages)
+		{
+			ResolveImages(Result.Data, &Result.ImageReport);
+		}
+		return Result;
+	}
+
+	FPreviewRefreshResult AnalyzePreviewRefresh(
+		const FPreviewRefreshInput& Input,
+		const FUMGIconFontMappingChanges* MappingChanges)
+	{
+		FPreviewRefreshResult Result;
+		if (!ParseWidgetJson(Input.EditedJson, Result.Data, &Result.ParseError))
+		{
+			return Result;
+		}
+
+		if (MappingChanges)
+		{
+			Result.Data.IconFontMappingChanges = *MappingChanges;
+		}
+
+		if (Input.bResolveImages)
+		{
+			ResolveImages(Result.Data, &Result.ImageReport);
+		}
+
+		Result.bSucceeded = true;
+		return Result;
+	}
+
+	FArtifactGenerationResult GenerateArtifacts(FUMGWidgetData& Data, const FArtifactGenerationRequest& Request)
+	{
+		return GenerateArtifactsInternal(Data, Request);
 	}
 
 	FDesignImportExecutionResult Execute(FUMGWidgetData& Data, const FDesignImportRequest& Request)
 	{
+		const FImportAnalysisResult AnalysisResult = AnalyzeImport(Data, FImportAnalysisInput{Request.bResolveImages});
 		FDesignImportExecutionResult Result;
-		FString ImageReport;
-
-		if (Request.bResolveImages)
-		{
-			ResolveImages(Data, &ImageReport);
-		}
 
 		if (Request.bUsePreview
 			&& DesignImportDialogs::OpenPreviewWindow(
@@ -635,16 +695,14 @@ namespace DesignImportPipeline
 					[CapturedChanges = Data.IconFontMappingChanges,
 					 bCapturedResolveImages = Request.bResolveImages,
 					 CapturedGeneration = Request.Generation,
-					 CapturedDiagnosticDocument = Request.DiagnosticDocument
-						? MakeShared<FDesignDocument>(*Request.DiagnosticDocument)
-						: TSharedPtr<FDesignDocument>()](const FString& EditedJson, const FString& OutputPath)
+					 CapturedDiagnosticDocument = Request.DiagnosticDocument](const FString& EditedJson, const FString& OutputPath)
 					{
 						ParseResolveAndGenerate(
 							EditedJson,
 							OutputPath,
 							&CapturedChanges,
-							CapturedDiagnosticDocument.Get(),
-							&CapturedGeneration,
+							CapturedDiagnosticDocument,
+							CapturedGeneration,
 							bCapturedResolveImages);
 					}),
 				FOnPreviewCancelled::CreateLambda(
@@ -658,56 +716,27 @@ namespace DesignImportPipeline
 			return Result;
 		}
 
-		switch (Request.Generation.Mode)
-		{
-		case EDesignBlueprintGenerationMode::BlueprintOnly:
-			Result.GeneratedBlueprint = DesignImportUtils::GenerateBlueprint(Data, Request.OutputPath);
-			Result.bSucceeded = (Result.GeneratedBlueprint != nullptr);
-			if (Result.GeneratedBlueprint)
-			{
-				Result.GeneratedAssetPath = Result.GeneratedBlueprint->GetPathName();
-			}
-			break;
+		FArtifactGenerationRequest GenerationRequest;
+		GenerationRequest.OutputPath = Request.OutputPath;
+		GenerationRequest.Generation = Request.Generation;
+		GenerationRequest.DiagnosticDocument = Request.DiagnosticDocument;
+		GenerationRequest.RuntimeImageReport = AnalysisResult.ImageReport;
+		GenerationRequest.DiagnosticImageReportOverride = Request.DiagnosticImageReport;
 
-		case EDesignBlueprintGenerationMode::BlueprintAndPng:
-			Result.bSucceeded = DesignImportUtils::GenerateBlueprintAndPng(
-				Data,
-				Request.OutputPath,
-				&Result.GeneratedAssetPath,
-				&Result.RenderPngPath);
-			break;
-
-		case EDesignBlueprintGenerationMode::BlueprintAndCompiledPng:
-		{
-			FString GeneratedAssetPath;
-			Result.bSucceeded = DesignImportUtils::GenerateBlueprintAndCompiledPng(
-				Data,
-				Request.OutputPath,
-				Request.Generation.CompiledPngFilePath,
-				Request.Generation.CompiledRenderSize,
-				Request.Generation.OutGeneratedAssetPath ? Request.Generation.OutGeneratedAssetPath : &GeneratedAssetPath,
-				Request.Generation.OutRenderedSize);
-			Result.GeneratedAssetPath = Request.Generation.OutGeneratedAssetPath
-				? *Request.Generation.OutGeneratedAssetPath
-				: GeneratedAssetPath;
-			Result.RenderPngPath = Request.Generation.CompiledPngFilePath;
-			break;
-		}
-		}
-
-		MaybeWriteImportDiagnosticReport(Request, Data, ImageReport, Result);
+		FArtifactGenerationRuntimeResult RuntimeResult;
+		const FArtifactGenerationResult GenerationResult = GenerateArtifactsInternal(Data, GenerationRequest, &RuntimeResult);
+		Result.bSucceeded = GenerationResult.bSucceeded;
+		Result.GeneratedBlueprint = RuntimeResult.GeneratedBlueprint;
+		Result.GeneratedAssetPath = GenerationResult.GeneratedAssetPath;
+		Result.RenderPngPath = GenerationResult.RenderPngPath;
+		Result.RenderedSize = GenerationResult.RenderedSize;
 		return Result;
 	}
 
 	FDesignImportExecutionResult Execute(FDesignDocument& Document, const FDesignImportRequest& Request)
 	{
-		FUMGWidgetData Data;
-		PrepareDocumentForGeneration(Document, Data);
-		FString ImageReport;
-		if (Request.bResolveImages)
-		{
-			ResolveImages(Data, &ImageReport);
-		}
+		const FImportAnalysisResult AnalysisResult = AnalyzeImport(Document, FImportAnalysisInput{Request.bResolveImages});
+		FUMGWidgetData Data = AnalysisResult.Data;
 		if (Request.bUsePreview
 			&& DesignImportDialogs::OpenPreviewWindow(
 				Data,
@@ -732,8 +761,8 @@ namespace DesignImportPipeline
 
 		FDesignImportRequest FinalRequest = Request;
 		FinalRequest.bResolveImages = false;
-		FinalRequest.DiagnosticDocument = &Document;
-		FinalRequest.DiagnosticImageReport = ImageReport;
+		FinalRequest.DiagnosticDocument = Document;
+		FinalRequest.DiagnosticImageReport = AnalysisResult.ImageReport;
 		return Execute(Data, FinalRequest);
 	}
 

@@ -3,12 +3,15 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "TimerManager.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "Widgets/Input/SEditableTextBox.h"
-#include "Blueprint/UserWidget.h"
 
 struct FUMGWidgetData;
+class IDesignPreviewRefreshAnalyzer;
+class IDesignPreviewMaterializationService;
+class SBox;
 
 DECLARE_DELEGATE_TwoParams(FOnPreviewConfirmed, const FString& /*EditedJson*/, const FString& /*OutputPath*/);
 DECLARE_DELEGATE(FOnPreviewCancelled);
@@ -20,6 +23,8 @@ public:
 		SLATE_ARGUMENT(FString, OriginalJson)
 		SLATE_ARGUMENT(FString, OutputPath)
 		SLATE_ARGUMENT(TArray<FString>, Warnings)
+		SLATE_ARGUMENT(TSharedPtr<IDesignPreviewRefreshAnalyzer>, PreviewRefreshAnalyzer)
+		SLATE_ARGUMENT(TSharedPtr<IDesignPreviewMaterializationService>, PreviewMaterializationService)
 		SLATE_EVENT(FOnPreviewConfirmed, OnConfirmed)
 		SLATE_EVENT(FOnPreviewCancelled, OnCancelled)
 	SLATE_END_ARGS()
@@ -31,7 +36,8 @@ private:
 	TSharedPtr<SMultiLineEditableTextBox> JsonEditor;
 	TSharedPtr<SEditableTextBox> OutputPathBox;
 	TSharedPtr<SBox> UMGPreviewContainer;
-	TStrongObjectPtr<UUserWidget> PreviewWidget;
+	TSharedPtr<IDesignPreviewRefreshAnalyzer> PreviewRefreshAnalyzer;
+	TSharedPtr<IDesignPreviewMaterializationService> PreviewMaterializationService;
 
 	FString CurrentJson;
 	FString CurrentOutputPath;
@@ -39,9 +45,6 @@ private:
 
 	FOnPreviewConfirmed OnConfirmed;
 	FOnPreviewCancelled OnCancelled;
-
-	/** Preview-only transient textures that must release their Root references on teardown. */
-	TMap<FString, UTexture2D*> PreviewTextureMap;
 
 	FReply OnGenerateClicked();
 	FReply OnCancelClicked();
@@ -55,7 +58,6 @@ private:
 
 	bool ValidateJson(const FString& JsonString, FString& OutError);
 	FString FormatJson(const FString& JsonString);
-	UUserWidget* CreatePreviewWidgetFromJson(const FUMGWidgetData& WidgetData);
 
 	TSharedRef<SWidget> BuildUMGPreviewPanel();
 	TSharedRef<SWidget> BuildJsonEditorPanel();
@@ -63,5 +65,17 @@ private:
 
 	void SchedulePreviewRefresh();
 	FTimerHandle PreviewRefreshTimerHandle;
+};
+
+class IDesignPreviewRefreshAnalyzer
+{
+public:
+	virtual ~IDesignPreviewRefreshAnalyzer() = default;
+
+	virtual bool AnalyzePreviewJson(
+		const FString& JsonString,
+		FUMGWidgetData& OutWidgetData,
+		FString& OutImageReport,
+		FString& OutError) = 0;
 };
 
