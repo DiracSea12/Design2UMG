@@ -10,6 +10,7 @@
 #include "ImageFillUtils.h"
 #include "LayoutMapper.h"
 #include "SizeEstimator.h"
+#include "SharedCoreSemantics.h"
 #include "TextMeasurement.h"
 #include "VisualMapper.h"
 #include "RefExpander.h"
@@ -110,14 +111,6 @@ namespace
 		}
 	}
 
-	bool IsDesignerOnlyNodeType(EDesignNodeType Type)
-	{
-		return Type == EDesignNodeType::Connection
-			|| Type == EDesignNodeType::Note
-			|| Type == EDesignNodeType::Prompt
-			|| Type == EDesignNodeType::Context;
-	}
-
 	bool HasVisibleFill(const FDesignFill& Fill)
 	{
 		return Fill.bEnabled && Fill.Type != EDesignFillType::None;
@@ -130,31 +123,7 @@ namespace
 
 	bool HasRenderableVisual(const TSharedPtr<FDesignNode>& Node)
 	{
-		if (!Node.IsValid())
-			return false;
-
-		if (Node->Type == EDesignNodeType::Text || Node->Type == EDesignNodeType::IconFont)
-			return true;
-
-		if (HasVisibleFill(Node->Visual.Fill))
-			return true;
-
-		for (const FDesignFill& Fill : Node->Visual.Fills)
-		{
-			if (HasVisibleFill(Fill))
-				return true;
-		}
-
-		if (Node->Visual.Stroke.HasStroke())
-			return true;
-
-		for (const FDesignEffect& Effect : Node->Visual.Effects)
-		{
-			if (Effect.bEnabled)
-				return true;
-		}
-
-		return false;
+		return Design2UMGCore::SharedSemantics::HasRenderableVisual(Node);
 	}
 
 	struct FChildSizeSnapshot
@@ -220,24 +189,7 @@ namespace
 
 	bool ShouldSkipNode(const TSharedPtr<FDesignNode>& Node)
 	{
-		if (!Node.IsValid() || !Node->Transform.bEnabled || IsDesignerOnlyNodeType(Node->Type))
-			return true;
-
-		// Ref nodes must stay in the tree until expansion resolves their real content.
-		if (Node->Type == EDesignNodeType::Ref)
-			return false;
-
-		// Keep explicit flow containers (including empty GRID/WRAP/H/V frames) so layout semantics are not dropped.
-		if (Node->Children.Num() == 0 && !HasRenderableVisual(Node))
-		{
-			const bool bIsExplicitFlowContainer =
-				(Node->Type == EDesignNodeType::Frame || Node->Type == EDesignNodeType::Group)
-				&& Node->LayoutData.Layout != EDesignLayout::None;
-			if (!bIsExplicitFlowContainer)
-				return true;
-		}
-
-		return false;
+		return Design2UMGCore::SharedSemantics::ShouldSkipNode(Node);
 	}
 
 	bool IsHexColorLiteral(const FString& ColorValue)

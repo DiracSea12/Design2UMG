@@ -20,6 +20,7 @@ OUTPUT_COLLISION_WARNINGS = (
 DEFAULT_PIXEL_TOLERANCE = 6
 CACHE_FILENAME = "_admissible_best_cache.json"
 CACHE_VERSION = 2
+PINNED_BASELINE_FILENAME = "design2umg_pinned_baseline.json"
 
 
 def load_json(path: Path) -> dict:
@@ -29,6 +30,23 @@ def load_json(path: Path) -> dict:
 def write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8-sig")
+
+
+def default_pinned_baseline_path() -> Path:
+    return Path(__file__).resolve().with_name(PINNED_BASELINE_FILENAME)
+
+
+def resolve_admissible_best_manifest(automation_root: Path) -> tuple[Path, dict, str]:
+    output_path = automation_root / "_admissible_best_latest.json"
+    pinned_path = default_pinned_baseline_path()
+    if pinned_path.is_file():
+        manifest = load_json(pinned_path)
+        write_json(output_path, manifest)
+        return output_path, manifest, str(pinned_path)
+
+    manifest = rebuild_historical_best_manifest(automation_root)
+    write_json(output_path, manifest)
+    return output_path, manifest, str(output_path)
 
 
 def load_cache(path: Path) -> dict:

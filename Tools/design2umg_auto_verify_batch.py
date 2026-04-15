@@ -77,6 +77,16 @@ def write_run_scope(output_root: Path, args, cases: list[dict]) -> Path:
         "discovered_total": len(cases),
         "formal_admissible_candidate": not bool(args.include),
         "case_names": [case["name"] for case in cases],
+        "case_inputs": [
+            {
+                "name": case["name"],
+                "mode": case["mode"],
+                "source": str(Path(case["source"]).resolve()),
+                "source_signature": verify.build_file_signature(case["source"]),
+                "provided_reference_signature": verify.build_file_signature(case.get("reference_path")),
+            }
+            for case in cases
+        ],
     }
     run_scope_path = output_root / "run_scope.json"
     verify.write_json(run_scope_path, run_scope)
@@ -518,6 +528,8 @@ def prepare_case_state(
         "case": case,
         "args": case_args,
         "output_dir": output_dir,
+        "source_signature": verify.build_file_signature(case_args.source),
+        "provided_reference_signature": verify.build_file_signature(case.get("reference_path")),
         "reference_path": reference_path,
         "reference_context": reference_context,
         "reference_validation": reference_validation,
@@ -1113,6 +1125,9 @@ def write_render_failure_report(state: dict, ue_result: dict | None, render_chai
         "candidate_size": list(verify.read_image_size(candidate_path)) if candidate_path.is_file() else None,
         "diff_bbox": None,
         "stable_diff_bbox": None,
+        "source_signature": state.get("source_signature"),
+        "provided_reference_signature": reference_context.get("provided_reference_signature") or state.get("provided_reference_signature"),
+        "effective_reference_signature": reference_context.get("effective_reference_signature"),
         "ue_result": ue_result,
         "reference_context": state["reference_context"],
         "reference_validation": state["reference_validation"],
@@ -1406,6 +1421,9 @@ def process_case_result(state: dict, batch_exit_code: int, batch_log_path: Path)
         ),
         "no_regression_decisive_metric": no_regression.get("decisive_metric"),
         "no_regression_decisive_delta": no_regression.get("decisive_delta"),
+        "source_signature": report.get("source_signature"),
+        "provided_reference_signature": report.get("provided_reference_signature"),
+        "effective_reference_signature": report.get("effective_reference_signature"),
     }
 
 
@@ -1561,9 +1579,7 @@ def main():
     verify.write_json(summary_path, summary)
     print(f"[SUMMARY] report={summary_path}")
     automation_root = output_root.parent
-    historical_best_manifest = rebuild_best.rebuild_historical_best_manifest(automation_root)
-    historical_best_manifest_path = automation_root / "_admissible_best_latest.json"
-    rebuild_best.write_json(historical_best_manifest_path, historical_best_manifest)
+    historical_best_manifest_path, historical_best_manifest, historical_best_manifest_source = rebuild_best.resolve_admissible_best_manifest(automation_root)
     run_manifest_path = output_root / "historical_best_manifest.json"
     rebuild_best.write_json(run_manifest_path, historical_best_manifest)
 
@@ -1574,6 +1590,7 @@ def main():
     historical_validation_path = output_root / "validation_against_historical_best.json"
     verify.write_json(historical_validation_path, historical_validation)
     historical_completed_at = time.time()
+    print(f"[HISTORICAL_BEST] source={historical_best_manifest_source}")
     print(f"[HISTORICAL_BEST] manifest={historical_best_manifest_path}")
     print(f"[HISTORICAL_BEST] validation={historical_validation_path}")
 

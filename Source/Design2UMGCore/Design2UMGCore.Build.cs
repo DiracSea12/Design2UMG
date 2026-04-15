@@ -24,6 +24,7 @@ public class Design2UMGCore : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"AssetRegistry",
+			"Projects",
 		});
 	}
 }

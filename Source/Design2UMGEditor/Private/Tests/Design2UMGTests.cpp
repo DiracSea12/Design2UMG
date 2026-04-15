@@ -292,6 +292,7 @@ namespace
 		OutAutoHeight = AutoWidget->Bounds.H;
 		return true;
 	}
+
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPropertyBagEmptyStringStillAppliesTest,
 	"Design2UMG.PropertyBag.EmptyStringApplies",

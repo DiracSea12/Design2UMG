@@ -4,6 +4,7 @@
 
 #include "Design2UMGLog.h"
 #include "RefExpander.h"
+#include "SharedCoreSemantics.h"
 #include "TextMeasurement.h"
 
 namespace
@@ -45,79 +46,9 @@ namespace
 		bool bValid = false;
 	};
 
-	bool IsDesignerOnlyNodeTypeForSizing(EDesignNodeType Type)
-	{
-		return Type == EDesignNodeType::Connection
-			|| Type == EDesignNodeType::Note
-			|| Type == EDesignNodeType::Prompt
-			|| Type == EDesignNodeType::Context;
-	}
-
-	bool HasRenderableVisualForSizing(const TSharedPtr<FDesignNode>& Node)
-	{
-		if (!Node.IsValid())
-		{
-			return false;
-		}
-
-		if (Node->Type == EDesignNodeType::Text || Node->Type == EDesignNodeType::IconFont)
-		{
-			return true;
-		}
-
-		if (!Node->Visual.Fill.IsNone() && Node->Visual.Fill.bEnabled)
-		{
-			return true;
-		}
-
-		for (const FDesignFill& Fill : Node->Visual.Fills)
-		{
-			if (!Fill.IsNone() && Fill.bEnabled)
-			{
-				return true;
-			}
-		}
-
-		if (Node->Visual.Stroke.HasStroke())
-		{
-			return true;
-		}
-
-		for (const FDesignEffect& Effect : Node->Visual.Effects)
-		{
-			if (Effect.bEnabled)
-			{
-				return true;
-			}
-		}
-
-		return false;
-	}
-
 	bool ShouldSkipNodeForSizing(const TSharedPtr<FDesignNode>& Node)
 	{
-		if (!Node.IsValid() || !Node->Transform.bEnabled || IsDesignerOnlyNodeTypeForSizing(Node->Type))
-		{
-			return true;
-		}
-
-		if (Node->Type == EDesignNodeType::Ref)
-		{
-			return false;
-		}
-
-		if (Node->Children.Num() == 0 && !HasRenderableVisualForSizing(Node))
-		{
-			const bool bIsExplicitFlowContainer =
-				(Node->Type == EDesignNodeType::Frame || Node->Type == EDesignNodeType::Group)
-				&& Node->LayoutData.Layout != EDesignLayout::None;
-			if (!bIsExplicitFlowContainer)
-			{
-				return true;
-			}
-		}
-
-		return false;
+		return Design2UMGCore::SharedSemantics::ShouldSkipNode(Node);
 	}
 
 	float ResolveSizingWidthHint(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth)

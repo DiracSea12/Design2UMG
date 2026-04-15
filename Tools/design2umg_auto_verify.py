@@ -1457,6 +1457,25 @@ def write_json(path: Path, payload: dict):
         json.dump(payload, handle, ensure_ascii=False, indent=2)
 
 
+def build_file_signature(path_like: str | Path) -> dict | None:
+    try:
+        resolved = Path(path_like).resolve()
+    except (OSError, RuntimeError, ValueError, TypeError):
+        return None
+
+    if not resolved.is_file():
+        return None
+
+    stat = resolved.stat()
+    digest = hashlib.sha1(resolved.read_bytes()).hexdigest()
+    return {
+        "path": str(resolved),
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+        "sha1": digest,
+    }
+
+
 def infer_single_case_name(args, output_dir: Path) -> str:
     if args.mode == "pen":
         node_name = try_get_pen_node_name(args.source, args.node) or args.node or Path(args.source).stem
@@ -1502,11 +1521,15 @@ def build_single_case_summary_entry(case_name: str, report_path: Path) -> dict:
         "stable_mae_delta": None,
         "no_regression_decisive_metric": "",
         "no_regression_decisive_delta": None,
+        "source_signature": report.get("source_signature"),
+        "provided_reference_signature": report.get("provided_reference_signature"),
+        "effective_reference_signature": report.get("effective_reference_signature"),
     }
 
 
 def finalize_single_run_history(output_dir: Path, args, report_path: Path) -> None:
     case_name = infer_single_case_name(args, output_dir)
+    source_signature = build_file_signature(args.source)
     run_scope = {
         "scope": "focus",
         "include_pattern": case_name,
@@ -1514,6 +1537,14 @@ def finalize_single_run_history(output_dir: Path, args, report_path: Path) -> No
         "discovered_total": 1,
         "formal_admissible_candidate": False,
         "case_names": [case_name],
+        "case_inputs": [
+            {
+                "name": case_name,
+                "mode": args.mode,
+                "source": str(Path(args.source).resolve()),
+                "source_signature": source_signature,
+            }
+        ],
     }
     run_scope_path = output_dir / "run_scope.json"
     write_json(run_scope_path, run_scope)
@@ -1527,6 +1558,7 @@ def finalize_single_run_history(output_dir: Path, args, report_path: Path) -> No
         "design_root": str(Path(args.source).resolve().parent),
         "output_root": str(output_dir.resolve()),
         "run_scope_path": str(run_scope_path),
+        "source_signature": source_signature,
         "completeness": {
             "blocked": False,
             "blocked_reasons": [],
@@ -1545,9 +1577,7 @@ def finalize_single_run_history(output_dir: Path, args, report_path: Path) -> No
     write_json(output_dir / "summary.json", summary)
 
     automation_root = output_dir.parent
-    historical_best_manifest = rebuild_best.rebuild_historical_best_manifest(automation_root)
-    historical_best_manifest_path = automation_root / "_admissible_best_latest.json"
-    rebuild_best.write_json(historical_best_manifest_path, historical_best_manifest)
+    historical_best_manifest_path, historical_best_manifest, historical_best_manifest_source = rebuild_best.resolve_admissible_best_manifest(automation_root)
     rebuild_best.write_json(output_dir / "historical_best_manifest.json", historical_best_manifest)
 
     historical_validation = validate_run_tool.validate_run(
@@ -1555,6 +1585,7 @@ def finalize_single_run_history(output_dir: Path, args, report_path: Path) -> No
         admissible_best_path=historical_best_manifest_path,
     )
     write_json(output_dir / "validation_against_historical_best.json", historical_validation)
+    print(f"[HISTORICAL_BEST] source={historical_best_manifest_source}")
 
 
 def load_ue_result(path: Path) -> dict:
@@ -1786,6 +1817,9 @@ def finalize_reference_context(args, reference_path: Path, reference_context: di
     reference_context["requested_reference_provider"] = args.reference_provider
     reference_context["effective_reference_provider"] = effective_provider
     reference_context["effective_reference_path"] = str(reference_path)
+    reference_context["source_signature"] = build_file_signature(args.source)
+    reference_context["provided_reference_signature"] = build_file_signature(reference_context.get("provided_reference_path"))
+    reference_context["effective_reference_signature"] = build_file_signature(reference_path)
     reference_context["provided_reference_dirty"] = assess_provided_reference_dirty(
         reference_context.get("provided_vs_canonical")
     )
@@ -1877,6 +1911,9 @@ def compare_and_report(
         "candidate_size": comparison["candidate_size"],
         "diff_bbox": comparison["diff_bbox"],
         "stable_diff_bbox": comparison["stable_diff_bbox"],
+        "source_signature": reference_context.get("source_signature"),
+        "provided_reference_signature": reference_context.get("provided_reference_signature"),
+        "effective_reference_signature": reference_context.get("effective_reference_signature"),
         "ue_result": ue_result,
         "reference_context": reference_context,
         "render_chain": render_chain,
@@ -1922,6 +1959,9 @@ def write_invalid_reference_report(
         "candidate_size": list(read_image_size(candidate_path)) if candidate_path.is_file() else None,
         "diff_bbox": None,
         "stable_diff_bbox": None,
+        "source_signature": reference_context.get("source_signature"),
+        "provided_reference_signature": reference_context.get("provided_reference_signature"),
+        "effective_reference_signature": reference_context.get("effective_reference_signature"),
         "ue_result": ue_result,
         "reference_validation": reference_validation,
         "reference_context": reference_context,
