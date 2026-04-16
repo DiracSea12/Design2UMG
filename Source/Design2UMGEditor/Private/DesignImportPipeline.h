@@ -109,7 +109,6 @@ namespace DesignImportPipeline
 	FArtifactGenerationResult GenerateArtifacts(const FPreviewApprovedSnapshot& ApprovedSnapshot, const FArtifactGenerationRequest& Request);
 	FDesignImportExecutionResult Execute(FUMGWidgetData& Data, const FDesignImportRequest& Request);
 	FDesignImportExecutionResult Execute(FDesignDocument& Document, const FDesignImportRequest& Request);
-	void ConvertDocument(FDesignDocument& Document, FUMGWidgetData& OutData);
 	void WriteImportDiagnosticReport(
 		const FDesignDocument& Document,
 		const FUMGWidgetData& Data,
@@ -118,8 +117,6 @@ namespace DesignImportPipeline
 		const FString& RequestedRenderPngPath = FString(),
 		const FString& GeneratedAssetPath = FString(),
 		const FString& RenderPngPath = FString());
-	void ResolveImages(FUMGWidgetData& Data, FString* OutReport = nullptr);
-	bool ImportPenJson(const FString& JsonString, FUMGWidgetData& OutData);
 	bool LoadPenDocument(const FString& FilePath, const FString& TargetNodeId, FDesignDocument& OutDocument, FString* OutError = nullptr);
 	FDesignImportExecutionResult ExecutePenFile(const FString& FilePath, const FString& TargetNodeId, const FDesignImportRequest& Request);
 	bool LoadPenFrames(const FString& FilePath, TArray<FDesignFrameInfo>& OutFrames);
