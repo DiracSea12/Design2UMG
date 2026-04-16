@@ -118,9 +118,7 @@ namespace DesignImportPipeline
 		const FString& RequestedRenderPngPath = FString(),
 		const FString& GeneratedAssetPath = FString(),
 		const FString& RenderPngPath = FString());
-	bool ParseWidgetJson(const FString& JsonString, FUMGWidgetData& OutData, FString* OutError = nullptr);
 	void ResolveImages(FUMGWidgetData& Data, FString* OutReport = nullptr);
-	void GenerateFromEditedJson(const FString& EditedJson, const FString& OutputPath);
 	bool ImportPenJson(const FString& JsonString, FUMGWidgetData& OutData);
 	bool LoadPenDocument(const FString& FilePath, const FString& TargetNodeId, FDesignDocument& OutDocument, FString* OutError = nullptr);
 	FDesignImportExecutionResult ExecutePenFile(const FString& FilePath, const FString& TargetNodeId, const FDesignImportRequest& Request);

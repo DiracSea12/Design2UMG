@@ -16,6 +16,7 @@
 #include "FigmaParser.h"
 #include "FontResolver.h"
 #include "PenMCPBridge.h"
+#include "PenParser.h"
 #include "PencilConnector.h"
 #include "ProceduralShapeGenerator.h"
 #include "UMGWidgetUtils.h"
@@ -502,7 +503,8 @@ namespace
 								}
 
 								FUMGWidgetData Data;
-								DesignImportPipeline::ConvertDocument(*Doc, Data);
+								const FImportAnalysisResult AnalysisResult = DesignImportPipeline::AnalyzeImport(*Doc, FImportAnalysisInput{ false });
+								Data = AnalysisResult.Data;
 								if (Data.RootWidget.Children.Num() == 0)
 								{
 									ShowNotification(LOCTEXT("FigmaNoFrames", "Design2UMG: No frames found in Figma file"), SNotificationItem::CS_Fail);
@@ -517,7 +519,7 @@ namespace
 									SNotificationItem::CS_Success);
 
 								DesignImportPipeline::Execute(
-									Data,
+									*Doc,
 									MakeImportRequest(
 										DefaultFigmaOutputPath,
 										LOCTEXT("FigmaPreviewTitle", "Design2UMG Figma Preview"),
@@ -741,7 +743,14 @@ namespace Design2UMGEditorActions
 	{
 		RegisterDesignSource(TEXT("Pen"), [](const FString& RawJson, FUMGWidgetData& OutData)
 		{
-			return DesignImportPipeline::ImportPenJson(RawJson, OutData);
+			FDesignDocument Document;
+			if (!FPenParser::ParseDocument(RawJson, Document))
+			{
+				return false;
+			}
+
+			OutData = DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{ false }).Data;
+			return true;
 		});
 
 		RegisterDesignSource(TEXT("Figma"), [](const FString& RawJson, FUMGWidgetData& OutData)
@@ -752,7 +761,7 @@ namespace Design2UMGEditorActions
 				return false;
 			}
 
-			DesignImportPipeline::ConvertDocument(Doc, OutData);
+			OutData = DesignImportPipeline::AnalyzeImport(Doc, FImportAnalysisInput{ false }).Data;
 			return true;
 		});
 	}

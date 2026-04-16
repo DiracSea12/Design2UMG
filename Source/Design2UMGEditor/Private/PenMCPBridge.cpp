@@ -219,7 +219,7 @@ bool FPenMCPBridge::ConvertFromMCP(
 		return false;
 	}
 
-	DesignImportPipeline::ConvertDocument(Document, OutData);
+	OutData = DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{ false }).Data;
 	return true;
 }
 

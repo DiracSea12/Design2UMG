@@ -19,7 +19,6 @@
 #include "Dom/JsonObject.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
-#include "Misc/ScopedSlowTask.h"
 #include "Serialization/JsonSerializer.h"
 #include "Interfaces/IPluginManager.h"
 
@@ -40,6 +39,18 @@ namespace DesignImportPipeline
 			const FString& RequestedRenderPngPath,
 			const FString& GeneratedAssetPath,
 			const FString& RenderPngPath);
+		bool ParseWidgetJsonInternal(const FString& JsonString, FUMGWidgetData& OutData, FString* OutError = nullptr);
+		void ResolveImagesInternal(FUMGWidgetData& Data, FString* OutReport = nullptr);
+		bool ImportPenJsonInternal(const FString& JsonString, FUMGWidgetData& OutData);
+		FOnPreviewConfirmed CreatePreviewConfirmedHandler(
+			const FDesignImportRequest& Request,
+			const TOptional<FDesignDocument>& DiagnosticDocument,
+			const FUMGIconFontMappingChanges& IconFontMappingChanges);
+		FDesignImportExecutionResult ExecuteWithAnalysis(
+			FUMGWidgetData& Data,
+			const FImportAnalysisResult& AnalysisResult,
+			const FDesignImportRequest& Request,
+			const TOptional<FDesignDocument>& DiagnosticDocument);
 
 		void AddUniqueRecommendation(TArray<FString>& InOutRecommendations, const FString& Recommendation)
 		{
@@ -321,47 +332,6 @@ namespace DesignImportPipeline
 			}
 		}
 
-		bool ParseResolveAndGenerate(
-			const FString& EditedJson,
-			const FString& OutputPath,
-			const FUMGIconFontMappingChanges* MappingChanges = nullptr,
-			const TOptional<FDesignDocument>& DiagnosticDocument = TOptional<FDesignDocument>(),
-			const TOptional<FBlueprintGenerationOptions>& GenerationOptions = TOptional<FBlueprintGenerationOptions>(),
-			bool bResolveImages = true)
-		{
-			FPreviewRefreshInput RefreshInput;
-			RefreshInput.EditedJson = EditedJson;
-			RefreshInput.bResolveImages = bResolveImages;
-
-			const FPreviewRefreshResult RefreshResult = AnalyzePreviewRefresh(RefreshInput, MappingChanges);
-			if (!RefreshResult.bSucceeded)
-			{
-				UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportPipeline: Edited JSON parse failed: %s"), *RefreshResult.ParseError);
-				FDesign2UMGNotification::Error(NSLOCTEXT("DesignImportPipeline", "EditedJsonParseFailed", "Design2UMG: Failed to parse edited design data"));
-				return false;
-			}
-
-			FArtifactGenerationRequest GenerationRequest;
-			GenerationRequest.SourceRequestId = RefreshResult.RequestId;
-			GenerationRequest.OutputPath = OutputPath;
-			if (DiagnosticDocument.IsSet())
-			{
-				GenerationRequest.DiagnosticDocument = DiagnosticDocument;
-			}
-			GenerationRequest.RuntimeImageReport = RefreshResult.ImageReport;
-			if (GenerationOptions.IsSet())
-			{
-				GenerationRequest.Generation = GenerationOptions.GetValue();
-			}
-			else
-			{
-				GenerationRequest.Generation.Mode = EDesignBlueprintGenerationMode::BlueprintOnly;
-			}
-
-			FUMGWidgetData GeneratedData = RefreshResult.Data;
-			return GenerateArtifacts(GeneratedData, GenerationRequest).bSucceeded;
-		}
-
 		void PrepareDocumentForGeneration(FDesignDocument& Document, FUMGWidgetData& OutPreparedData)
 		{
 			DesignFontImportService::PrepareDocumentFonts(Document);
@@ -370,13 +340,6 @@ namespace DesignImportPipeline
 				FString(),
 				TEXT("DesignImportPipeline"));
 			OutPreparedData = FDesign2UMGConverter::Convert(Document);
-		}
-
-		void ApplyDocumentImportSideEffectsToData(FDesignDocument& Document, FUMGWidgetData& Data)
-		{
-			FUMGWidgetData PreparedData;
-			PrepareDocumentForGeneration(Document, PreparedData);
-			Data.IconFontMappingChanges = PreparedData.IconFontMappingChanges;
 		}
 
 		FString BuildImportReportPath(const FDesignDocument& Document)
@@ -602,6 +565,126 @@ namespace DesignImportPipeline
 			MaybeWriteImportDiagnosticReport(Request, Data, Result);
 			return Result;
 		}
+
+		bool ParseWidgetJsonInternal(const FString& JsonString, FUMGWidgetData& OutData, FString* OutError)
+		{
+			FString ParseError;
+			if (FUMGJsonParser::ParseJson(JsonString, OutData, &ParseError))
+			{
+				return true;
+			}
+
+			if (OutError)
+			{
+				*OutError = MoveTemp(ParseError);
+			}
+			return false;
+		}
+
+		void ResolveImagesInternal(FUMGWidgetData& Data, FString* OutReport)
+		{
+			FString Report;
+			const bool bOk = FDesignRemoteImageImporter::ResolveRemoteImages(Data, &Report);
+			if (OutReport)
+			{
+				*OutReport = Report;
+			}
+			if (!Report.IsEmpty())
+			{
+				UE_LOG(LogDesign2UMG, Log, TEXT("%s"), *Report);
+			}
+			if (!bOk)
+			{
+				UE_LOG(LogDesign2UMG, Warning, TEXT("DesignImportPipeline: Unresolved remote images; generation will continue"));
+				FDesign2UMGNotification::Warning(NSLOCTEXT("DesignImportPipeline", "ImageWarning", "Design2UMG: Some images failed to download"));
+			}
+		}
+
+		bool ImportPenJsonInternal(const FString& JsonString, FUMGWidgetData& OutData)
+		{
+			FDesignDocument Document;
+			if (!FPenParser::ParseDocument(JsonString, Document))
+			{
+				return false;
+			}
+
+			OutData = AnalyzeImport(Document, FImportAnalysisInput{false}).Data;
+			return true;
+		}
+
+		FOnPreviewConfirmed CreatePreviewConfirmedHandler(
+			const FDesignImportRequest& Request,
+			const TOptional<FDesignDocument>& DiagnosticDocument,
+			const FUMGIconFontMappingChanges& IconFontMappingChanges)
+		{
+			return FOnPreviewConfirmed::CreateLambda(
+				[CapturedIconFontMappingChanges = IconFontMappingChanges,
+				 CapturedGeneration = Request.Generation,
+				 bCapturedResolveImages = Request.bResolveImages,
+				 CapturedDiagnosticDocument = DiagnosticDocument](const FPreviewGenerationRequest& PreviewGenerationRequest)
+				{
+					FPreviewApprovedSnapshot ApprovedSnapshot = PreviewGenerationRequest.ApprovedSnapshot;
+					ApprovedSnapshot.Data.IconFontMappingChanges = CapturedIconFontMappingChanges;
+
+					FArtifactGenerationRequest GenerationRequest = PreviewGenerationRequest.GenerationRequest;
+					GenerationRequest.Generation = CapturedGeneration;
+					GenerationRequest.bResolveImages = bCapturedResolveImages;
+					if (CapturedDiagnosticDocument.IsSet())
+					{
+						GenerationRequest.DiagnosticDocument = CapturedDiagnosticDocument;
+					}
+
+					GenerateArtifacts(ApprovedSnapshot, GenerationRequest);
+				});
+		}
+
+		FDesignImportExecutionResult ExecuteWithAnalysis(
+			FUMGWidgetData& Data,
+			const FImportAnalysisResult& AnalysisResult,
+			const FDesignImportRequest& Request,
+			const TOptional<FDesignDocument>& DiagnosticDocument)
+		{
+			FDesignImportExecutionResult Result;
+			if (Request.bUsePreview
+				&& DesignImportDialogs::OpenPreviewWindow(
+					Data,
+					Request.OutputPath,
+					Request.PreviewWindowTitle,
+					CreatePreviewConfirmedHandler(Request, DiagnosticDocument, AnalysisResult.Data.IconFontMappingChanges),
+					FOnPreviewCancelled::CreateLambda(
+						[]()
+						{
+							UE_LOG(LogDesign2UMG, Log, TEXT("DesignImportPipeline: Preview cancelled"));
+						})))
+			{
+				Result.bSucceeded = true;
+				Result.bPreviewOpened = true;
+				return Result;
+			}
+
+			FArtifactGenerationRequest GenerationRequest;
+			GenerationRequest.OutputPath = Request.OutputPath;
+			GenerationRequest.Generation = Request.Generation;
+			GenerationRequest.RuntimeImageReport = AnalysisResult.ImageReport;
+			GenerationRequest.DiagnosticImageReportOverride = Request.DiagnosticImageReport;
+			if (DiagnosticDocument.IsSet())
+			{
+				GenerationRequest.DiagnosticDocument = DiagnosticDocument;
+			}
+			else if (Request.DiagnosticDocument.IsSet())
+			{
+				GenerationRequest.DiagnosticDocument = Request.DiagnosticDocument;
+			}
+
+			FArtifactGenerationRuntimeResult RuntimeResult;
+			const FArtifactGenerationResult GenerationResult = GenerateArtifactsInternal(Data, GenerationRequest, &RuntimeResult);
+			Result.bSucceeded = GenerationResult.bSucceeded;
+			Result.GeneratedBlueprint = RuntimeResult.GeneratedBlueprint;
+			Result.GeneratedAssetPath = GenerationResult.GeneratedAssetPath;
+			Result.RenderPngPath = GenerationResult.RenderPngPath;
+			Result.RenderedSize = GenerationResult.RenderedSize;
+			return Result;
+		}
 	}
 
 	FImportAnalysisResult AnalyzeImport(FUMGWidgetData& Data, const FImportAnalysisInput& Input)
@@ -609,7 +692,7 @@ namespace DesignImportPipeline
 		FImportAnalysisResult Result;
 		if (Input.bResolveImages)
 		{
-			ResolveImages(Data, &Result.ImageReport);
+			ResolveImagesInternal(Data, &Result.ImageReport);
 		}
 		Result.Data = Data;
 		return Result;
@@ -621,7 +704,7 @@ namespace DesignImportPipeline
 		PrepareDocumentForGeneration(Document, Result.Data);
 		if (Input.bResolveImages)
 		{
-			ResolveImages(Result.Data, &Result.ImageReport);
+			ResolveImagesInternal(Result.Data, &Result.ImageReport);
 		}
 		return Result;
 	}
@@ -633,7 +716,7 @@ namespace DesignImportPipeline
 		FPreviewRefreshResult Result;
 		Result.RequestId = Input.RequestId;
 		Result.EditedJson = Input.EditedJson;
-		if (!ParseWidgetJson(Input.EditedJson, Result.Data, &Result.ParseError))
+		if (!ParseWidgetJsonInternal(Input.EditedJson, Result.Data, &Result.ParseError))
 		{
 			return Result;
 		}
@@ -645,7 +728,7 @@ namespace DesignImportPipeline
 
 		if (Input.bResolveImages)
 		{
-			ResolveImages(Result.Data, &Result.ImageReport);
+			ResolveImagesInternal(Result.Data, &Result.ImageReport);
 		}
 
 		Result.bSucceeded = true;
@@ -673,7 +756,7 @@ namespace DesignImportPipeline
 		if (GenerationRequest.bResolveImages)
 		{
 			FString ResolvedImageReport;
-			ResolveImages(GenerationData, &ResolvedImageReport);
+			ResolveImagesInternal(GenerationData, &ResolvedImageReport);
 			GenerationRequest.RuntimeImageReport = ResolvedImageReport;
 		}
 		return GenerateArtifactsInternal(GenerationData, GenerationRequest);
@@ -682,110 +765,21 @@ namespace DesignImportPipeline
 	FDesignImportExecutionResult Execute(FUMGWidgetData& Data, const FDesignImportRequest& Request)
 	{
 		const FImportAnalysisResult AnalysisResult = AnalyzeImport(Data, FImportAnalysisInput{Request.bResolveImages});
-		FDesignImportExecutionResult Result;
-
-		if (Request.bUsePreview
-			&& DesignImportDialogs::OpenPreviewWindow(
-				Data,
-				Request.OutputPath,
-				Request.PreviewWindowTitle,
-				FOnPreviewConfirmed::CreateLambda(
-					[CapturedChanges = Data.IconFontMappingChanges,
-					 CapturedGeneration = Request.Generation,
-					 bCapturedResolveImages = Request.bResolveImages,
-					 CapturedDiagnosticDocument = Request.DiagnosticDocument](const FPreviewGenerationRequest& PreviewGenerationRequest)
-					{
-						FPreviewApprovedSnapshot ApprovedSnapshot = PreviewGenerationRequest.ApprovedSnapshot;
-						ApprovedSnapshot.Data.IconFontMappingChanges = CapturedChanges;
-
-						FArtifactGenerationRequest GenerationRequest = PreviewGenerationRequest.GenerationRequest;
-						GenerationRequest.Generation = CapturedGeneration;
-						GenerationRequest.bResolveImages = bCapturedResolveImages;
-						if (CapturedDiagnosticDocument.IsSet())
-						{
-							GenerationRequest.DiagnosticDocument = CapturedDiagnosticDocument;
-						}
-
-						GenerateArtifacts(ApprovedSnapshot, GenerationRequest);
-					}),
-				FOnPreviewCancelled::CreateLambda(
-					[]()
-					{
-						UE_LOG(LogDesign2UMG, Log, TEXT("DesignImportPipeline: Preview cancelled"));
-					})))
-		{
-			Result.bSucceeded = true;
-			Result.bPreviewOpened = true;
-			return Result;
-		}
-
-		FArtifactGenerationRequest GenerationRequest;
-		GenerationRequest.OutputPath = Request.OutputPath;
-		GenerationRequest.Generation = Request.Generation;
-		GenerationRequest.DiagnosticDocument = Request.DiagnosticDocument;
-		GenerationRequest.RuntimeImageReport = AnalysisResult.ImageReport;
-		GenerationRequest.DiagnosticImageReportOverride = Request.DiagnosticImageReport;
-
-		FArtifactGenerationRuntimeResult RuntimeResult;
-		const FArtifactGenerationResult GenerationResult = GenerateArtifactsInternal(Data, GenerationRequest, &RuntimeResult);
-		Result.bSucceeded = GenerationResult.bSucceeded;
-		Result.GeneratedBlueprint = RuntimeResult.GeneratedBlueprint;
-		Result.GeneratedAssetPath = GenerationResult.GeneratedAssetPath;
-		Result.RenderPngPath = GenerationResult.RenderPngPath;
-		Result.RenderedSize = GenerationResult.RenderedSize;
-		return Result;
+		return ExecuteWithAnalysis(Data, AnalysisResult, Request, Request.DiagnosticDocument);
 	}
 
 	FDesignImportExecutionResult Execute(FDesignDocument& Document, const FDesignImportRequest& Request)
 	{
 		const FImportAnalysisResult AnalysisResult = AnalyzeImport(Document, FImportAnalysisInput{Request.bResolveImages});
 		FUMGWidgetData Data = AnalysisResult.Data;
-		if (Request.bUsePreview
-			&& DesignImportDialogs::OpenPreviewWindow(
-				Data,
-				Request.OutputPath,
-				Request.PreviewWindowTitle,
-				FOnPreviewConfirmed::CreateLambda(
-					[CapturedIconFontMappingChanges = AnalysisResult.Data.IconFontMappingChanges,
-					 CapturedDocument = Document,
-					 CapturedGeneration = Request.Generation,
-					 bCapturedResolveImages = Request.bResolveImages](const FPreviewGenerationRequest& PreviewGenerationRequest)
-					{
-						FPreviewApprovedSnapshot ApprovedSnapshot = PreviewGenerationRequest.ApprovedSnapshot;
-						ApprovedSnapshot.Data.IconFontMappingChanges = CapturedIconFontMappingChanges;
-
-						FArtifactGenerationRequest GenerationRequest = PreviewGenerationRequest.GenerationRequest;
-						GenerationRequest.Generation = CapturedGeneration;
-						GenerationRequest.bResolveImages = bCapturedResolveImages;
-						GenerationRequest.DiagnosticDocument = CapturedDocument;
-						GenerateArtifacts(ApprovedSnapshot, GenerationRequest);
-					}),
-				FOnPreviewCancelled::CreateLambda(
-					[]()
-					{
-						UE_LOG(LogDesign2UMG, Log, TEXT("DesignImportPipeline: Preview cancelled"));
-					})))
-		{
-			FDesignImportExecutionResult Result;
-			Result.bSucceeded = true;
-			Result.bPreviewOpened = true;
-			return Result;
-		}
-
 		FDesignImportRequest FinalRequest = Request;
-		FinalRequest.bResolveImages = false;
-		FinalRequest.DiagnosticDocument = Document;
 		FinalRequest.DiagnosticImageReport = AnalysisResult.ImageReport;
-		return Execute(Data, FinalRequest);
+		return ExecuteWithAnalysis(Data, AnalysisResult, FinalRequest, TOptional<FDesignDocument>(Document));
 	}
 
 	void ConvertDocument(FDesignDocument& Document, FUMGWidgetData& OutData)
 	{
-		DesignImageBakeUtils::BakeDocumentLocalImageBlendOverlays(
-			Document,
-			FString(),
-			TEXT("DesignImportPipeline"));
-		OutData = FDesign2UMGConverter::Convert(Document);
+		OutData = AnalyzeImport(Document, FImportAnalysisInput{false}).Data;
 	}
 
 	void WriteImportDiagnosticReport(
@@ -807,59 +801,19 @@ namespace DesignImportPipeline
 			RenderPngPath);
 	}
 
-	bool ParseWidgetJson(const FString& JsonString, FUMGWidgetData& OutData, FString* OutError)
-	{
-		FString ParseError;
-		if (FUMGJsonParser::ParseJson(JsonString, OutData, &ParseError))
-		{
-			return true;
-		}
-
-		if (OutError)
-		{
-			*OutError = MoveTemp(ParseError);
-		}
-		return false;
-	}
-
 	void ResolveImages(FUMGWidgetData& Data, FString* OutReport)
 	{
-		FString Report;
-		const bool bOk = FDesignRemoteImageImporter::ResolveRemoteImages(Data, &Report);
+		const FImportAnalysisResult AnalysisResult = AnalyzeImport(Data, FImportAnalysisInput{true});
+		Data = AnalysisResult.Data;
 		if (OutReport)
 		{
-			*OutReport = Report;
+			*OutReport = AnalysisResult.ImageReport;
 		}
-		if (!Report.IsEmpty())
-		{
-			UE_LOG(LogDesign2UMG, Log, TEXT("%s"), *Report);
-		}
-		if (!bOk)
-		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("DesignImportPipeline: Unresolved remote images; generation will continue"));
-			FDesign2UMGNotification::Warning(NSLOCTEXT("DesignImportPipeline", "ImageWarning", "Design2UMG: Some images failed to download"));
-		}
-	}
-
-	void GenerateFromEditedJson(const FString& EditedJson, const FString& OutputPath)
-	{
-		FScopedSlowTask SlowTask(3.0f, NSLOCTEXT("DesignImportPipeline", "Generating", "Generating Widget Blueprint..."));
-		SlowTask.MakeDialog(true);
-
-		SlowTask.EnterProgressFrame(3.0f, NSLOCTEXT("DesignImportPipeline", "GenApply", "Applying edited design..."));
-		ParseResolveAndGenerate(EditedJson, OutputPath);
 	}
 
 	bool ImportPenJson(const FString& JsonString, FUMGWidgetData& OutData)
 	{
-		FDesignDocument Document;
-		if (!FPenParser::ParseDocument(JsonString, Document))
-		{
-			return false;
-		}
-
-		ConvertDocument(Document, OutData);
-		return true;
+		return ImportPenJsonInternal(JsonString, OutData);
 	}
 
 	bool LoadPenDocument(

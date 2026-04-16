@@ -546,8 +546,7 @@ namespace Design2UMGLocalFigmaImport
 			return false;
 		}
 
-		DesignImportPipeline::ConvertDocument(ParsedDoc, OutData);
-		DesignImportPipeline::ResolveImages(OutData);
+		OutData = DesignImportPipeline::AnalyzeImport(ParsedDoc, FImportAnalysisInput{ true }).Data;
 
 		if (OutData.RootWidget.Children.Num() == 0)
 		{

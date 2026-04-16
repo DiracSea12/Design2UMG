@@ -797,7 +797,7 @@ namespace
 		const FString& SourcePath,
 		const FString& TargetNodeId,
 		FDesignDocument& OutDocument,
-		FUMGWidgetData& OutData,
+		FImportAnalysisResult& OutAnalysis,
 		FString& OutError)
 	{
 		if (!Design2UMGLocalFigmaImport::LoadLocalFigmaDocument(SourcePath, OutDocument, OutError, TargetNodeId))
@@ -806,8 +806,7 @@ namespace
 		}
 
 		DesignFontImportService::PrepareDocumentFonts(OutDocument);
-		DesignImportPipeline::ConvertDocument(OutDocument, OutData);
-		DesignImportPipeline::WriteImportDiagnosticReport(OutDocument, OutData);
+		OutAnalysis = DesignImportPipeline::AnalyzeImport(OutDocument, FImportAnalysisInput{ true });
 		return true;
 	}
 
@@ -894,6 +893,16 @@ namespace
 			return ExecutionResult.bSucceeded;
 		};
 
+		auto ApplyGenerationResult = [&](const FArtifactGenerationResult& GenerationResult)
+		{
+			OutResult.GeneratedAssetPath = GenerationResult.GeneratedAssetPath;
+			OutResult.RenderPngPath = GenerationResult.RenderPngPath.IsEmpty()
+				? Spec.RenderPngPath
+				: GenerationResult.RenderPngPath;
+			OutResult.RenderSize = GenerationResult.RenderedSize;
+			return GenerationResult.bSucceeded;
+		};
+
 		auto CaptureGeneratedAssetStructure = [&]()
 		{
 			if (!OutResult.GeneratedAssetPath.IsEmpty())
@@ -967,7 +976,8 @@ namespace
 
 		FUMGWidgetData Data;
 		FDesignDocument SourceDocument;
-		FString DeferredImageImportReport;
+		TOptional<FDesignDocument> DiagnosticDocument;
+		TOptional<FImportAnalysisResult> DeferredAnalysisResult;
 		if (Spec.Mode.Equals(TEXT("pen_mcp"), ESearchCase::IgnoreCase))
 		{
 			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: importing pen source via MCP payload"));
@@ -993,10 +1003,10 @@ namespace
 			}
 
 			OutResult.SourceStructure = BuildDesignStructureSnapshot(SourceDocument, Spec.NodeId);
-
-			FString ImageReport;
-			DesignImportPipeline::ResolveImages(Data, &ImageReport);
-			DeferredImageImportReport = MoveTemp(ImageReport);
+			const FImportAnalysisResult AnalysisResult = DesignImportPipeline::AnalyzeImport(Data, FImportAnalysisInput{ true });
+			Data = AnalysisResult.Data;
+			DeferredAnalysisResult = AnalysisResult;
+			DiagnosticDocument = SourceDocument;
 		}
 		else if (Spec.Mode.Equals(TEXT("local_figma"), ESearchCase::IgnoreCase))
 		{
@@ -1024,16 +1034,17 @@ namespace
 		{
 			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: importing raw figma source json"));
 			FString ErrorMessage;
-			if (!LoadFigmaSourceData(Spec.SourcePath, Spec.NodeId, SourceDocument, Data, ErrorMessage))
+			FImportAnalysisResult AnalysisResult;
+			if (!LoadFigmaSourceData(Spec.SourcePath, Spec.NodeId, SourceDocument, AnalysisResult, ErrorMessage))
 			{
 				OutResult.ErrorMessage = ErrorMessage;
 				return false;
 			}
 
 			OutResult.SourceStructure = BuildDesignStructureSnapshot(SourceDocument, Spec.NodeId);
-			FString ImageReport;
-			DesignImportPipeline::ResolveImages(Data, &ImageReport);
-			DeferredImageImportReport = MoveTemp(ImageReport);
+			Data = AnalysisResult.Data;
+			DeferredAnalysisResult = AnalysisResult;
+			DiagnosticDocument = SourceDocument;
 		}
 		else
 		{
@@ -1042,21 +1053,22 @@ namespace
 		}
 
 		UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: generating blueprint and compiled png"));
-		if (!ApplyExecutionResult(DesignImportPipeline::Execute(Data, MakeAutomationImportRequest(false))))
+		FArtifactGenerationRequest GenerationRequest;
+		GenerationRequest.OutputPath = Spec.OutputPath;
+		GenerationRequest.Generation = MakeAutomationImportRequest(false).Generation;
+		if (DiagnosticDocument.IsSet())
+		{
+			GenerationRequest.DiagnosticDocument = DiagnosticDocument;
+		}
+		if (DeferredAnalysisResult.IsSet())
+		{
+			GenerationRequest.RuntimeImageReport = DeferredAnalysisResult->ImageReport;
+		}
+
+		if (!ApplyGenerationResult(DesignImportPipeline::GenerateArtifacts(Data, GenerationRequest)))
 		{
 			OutResult.ErrorMessage = FString::Printf(TEXT("Failed to generate compiled PNG for %s"), *Spec.SourcePath);
 			return false;
-		}
-
-		if (!SourceDocument.Children.IsEmpty())
-		{
-			DesignImportPipeline::WriteImportDiagnosticReport(
-				SourceDocument,
-				Data,
-				DeferredImageImportReport,
-				Spec.OutputPath,
-				Spec.RenderPngPath,
-				OutResult.GeneratedAssetPath);
 		}
 
 		CaptureGeneratedAssetStructure();
