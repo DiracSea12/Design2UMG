@@ -35,13 +35,24 @@ struct FImportAnalysisResult
 
 struct FPreviewRefreshInput
 {
+	uint64 RequestId = 0;
 	FString EditedJson;
 	bool bResolveImages = true;
+};
+
+struct FPreviewApprovedSnapshot
+{
+	uint64 RequestId = 0;
+	FString EditedJson;
+	FUMGWidgetData Data;
+	FString ImageReport;
 };
 
 struct FPreviewRefreshResult
 {
 	bool bSucceeded = false;
+	uint64 RequestId = 0;
+	FString EditedJson;
 	FUMGWidgetData Data;
 	FString ImageReport;
 	FString ParseError;
@@ -49,8 +60,10 @@ struct FPreviewRefreshResult
 
 struct FArtifactGenerationRequest
 {
+	uint64 SourceRequestId = 0;
 	FString OutputPath;
 	FBlueprintGenerationOptions Generation;
+	bool bResolveImages = false;
 	TOptional<FDesignDocument> DiagnosticDocument;
 	FString RuntimeImageReport;
 	FString DiagnosticImageReportOverride;
@@ -93,6 +106,7 @@ namespace DesignImportPipeline
 		const FPreviewRefreshInput& Input,
 		const FUMGIconFontMappingChanges* MappingChanges = nullptr);
 	FArtifactGenerationResult GenerateArtifacts(FUMGWidgetData& Data, const FArtifactGenerationRequest& Request);
+	FArtifactGenerationResult GenerateArtifacts(const FPreviewApprovedSnapshot& ApprovedSnapshot, const FArtifactGenerationRequest& Request);
 	FDesignImportExecutionResult Execute(FUMGWidgetData& Data, const FDesignImportRequest& Request);
 	FDesignImportExecutionResult Execute(FDesignDocument& Document, const FDesignImportRequest& Request);
 	void ConvertDocument(FDesignDocument& Document, FUMGWidgetData& OutData);

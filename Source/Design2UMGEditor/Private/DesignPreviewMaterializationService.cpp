@@ -13,15 +13,15 @@
 
 namespace
 {
-	FVector2D ResolvePreviewDesignSize(const FUMGWidgetData& WidgetData)
+	FVector2D ResolvePreviewDesignSize(const FPreviewApprovedSnapshot& ApprovedSnapshot)
 	{
-		const FBounds& RootBounds = WidgetData.RootWidget.Bounds;
+		const FBounds& RootBounds = ApprovedSnapshot.Data.RootWidget.Bounds;
 		if (RootBounds.W > 0.0f && RootBounds.H > 0.0f)
 		{
 			return FVector2D(RootBounds.W, RootBounds.H);
 		}
 
-		const FVector2D CalculatedSize = FUMGWidgetUtils::CalculateDesignSize(WidgetData.RootWidget, FVector2D::ZeroVector);
+		const FVector2D CalculatedSize = FUMGWidgetUtils::CalculateDesignSize(ApprovedSnapshot.Data.RootWidget, FVector2D::ZeroVector);
 		if (CalculatedSize.X > 0.0f && CalculatedSize.Y > 0.0f)
 		{
 			return CalculatedSize;
@@ -37,21 +37,24 @@ FDesignPreviewMaterializationService::~FDesignPreviewMaterializationService()
 	Reset();
 }
 
-bool FDesignPreviewMaterializationService::MaterializePreview(const FUMGWidgetData& WidgetData, FDesignPreviewMaterializationResult& OutResult)
+bool FDesignPreviewMaterializationService::MaterializePreview(const FDesignPreviewMaterializationRequest& Request, FDesignPreviewMaterializationResult& OutResult)
 {
 	OutResult = FDesignPreviewMaterializationResult();
-	const FVector2D PreviewDesignSize = ResolvePreviewDesignSize(WidgetData);
+	OutResult.RequestId = Request.RequestId;
+	const FVector2D PreviewDesignSize = ResolvePreviewDesignSize(Request.ApprovedSnapshot);
 
 	CleanupMaterializedPreview();
 
-	UUserWidget* NewPreviewWidget = CreatePreviewWidget(WidgetData);
+	UUserWidget* NewPreviewWidget = CreatePreviewWidget(Request.ApprovedSnapshot);
 	if (!NewPreviewWidget)
 	{
 		return false;
 	}
 
 	MaterializedPreviewWidget.Reset(NewPreviewWidget);
+	OutResult.bSucceeded = true;
 	OutResult.PreviewDesignSize = PreviewDesignSize;
+	OutResult.MaterializedWidgetName = Request.ApprovedSnapshot.Data.WidgetName;
 	return true;
 }
 
@@ -83,13 +86,13 @@ void FDesignPreviewMaterializationService::CleanupMaterializedPreview()
 	}
 }
 
-UUserWidget* FDesignPreviewMaterializationService::CreatePreviewWidget(const FUMGWidgetData& WidgetData)
+UUserWidget* FDesignPreviewMaterializationService::CreatePreviewWidget(const FPreviewApprovedSnapshot& ApprovedSnapshot)
 {
 	TransientTextureMap.Empty();
-	FDesignRemoteImageImporter::ResolveTransientTextures(WidgetData.RootWidget, TransientTextureMap);
+	FDesignRemoteImageImporter::ResolveTransientTextures(ApprovedSnapshot.Data.RootWidget, TransientTextureMap);
 
-	FUMGWidgetNode FixedRoot = WidgetData.RootWidget;
-	const FVector2D PreviewSize = ResolvePreviewDesignSize(WidgetData);
+	FUMGWidgetNode FixedRoot = ApprovedSnapshot.Data.RootWidget;
+	const FVector2D PreviewSize = ResolvePreviewDesignSize(ApprovedSnapshot);
 	const FIntPoint DesignSize(FMath::Max(1, FMath::RoundToInt(PreviewSize.X)), FMath::Max(1, FMath::RoundToInt(PreviewSize.Y)));
 	if (UDesign2UMGSettings::Get()->bEnableLayoutFixer)
 	{
@@ -123,7 +126,7 @@ UUserWidget* FDesignPreviewMaterializationService::CreatePreviewWidget(const FUM
 		&MaterializedDesignSizeInt);
 	if (!RootWidget)
 	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create root widget of type: %s"), *WidgetData.RootWidget.Type);
+		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create root widget of type: %s"), *ApprovedSnapshot.Data.RootWidget.Type);
 		return nullptr;
 	}
 

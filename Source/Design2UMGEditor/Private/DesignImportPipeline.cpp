@@ -342,6 +342,7 @@ namespace DesignImportPipeline
 			}
 
 			FArtifactGenerationRequest GenerationRequest;
+			GenerationRequest.SourceRequestId = RefreshResult.RequestId;
 			GenerationRequest.OutputPath = OutputPath;
 			if (DiagnosticDocument.IsSet())
 			{
@@ -535,33 +536,6 @@ namespace DesignImportPipeline
 			UE_LOG(LogDesign2UMG, Log, TEXT("DesignImportPipeline: wrote import diagnostic report %s"), *ReportPath);
 		}
 
-		void GenerateFromEditedJsonWithDocument(
-			const FString& EditedJson,
-			const FString& OutputPath,
-			FDesignDocument Document,
-			FBlueprintGenerationOptions GenerationOptions,
-			bool bResolveImages)
-		{
-			FScopedSlowTask SlowTask(3.0f, NSLOCTEXT("DesignImportPipeline", "Generating", "Generating Widget Blueprint..."));
-			SlowTask.MakeDialog(true);
-
-			SlowTask.EnterProgressFrame(1.0f, NSLOCTEXT("DesignImportPipeline", "GenParse", "Parsing edited design..."));
-			const FImportAnalysisResult AnalysisResult = AnalyzeImport(Document, FImportAnalysisInput{false});
-			if (SlowTask.ShouldCancel())
-			{
-				return;
-			}
-
-			SlowTask.EnterProgressFrame(2.0f, NSLOCTEXT("DesignImportPipeline", "GenApply", "Applying edited design..."));
-			ParseResolveAndGenerate(
-				EditedJson,
-				OutputPath,
-				&AnalysisResult.Data.IconFontMappingChanges,
-				Document,
-				GenerationOptions,
-				bResolveImages);
-		}
-
 		void MaybeWriteImportDiagnosticReport(
 			const FArtifactGenerationRequest& Request,
 			const FUMGWidgetData& Data,
@@ -657,6 +631,8 @@ namespace DesignImportPipeline
 		const FUMGIconFontMappingChanges* MappingChanges)
 	{
 		FPreviewRefreshResult Result;
+		Result.RequestId = Input.RequestId;
+		Result.EditedJson = Input.EditedJson;
 		if (!ParseWidgetJson(Input.EditedJson, Result.Data, &Result.ParseError))
 		{
 			return Result;
@@ -681,6 +657,28 @@ namespace DesignImportPipeline
 		return GenerateArtifactsInternal(Data, Request);
 	}
 
+	FArtifactGenerationResult GenerateArtifacts(const FPreviewApprovedSnapshot& ApprovedSnapshot, const FArtifactGenerationRequest& Request)
+	{
+		FArtifactGenerationRequest GenerationRequest = Request;
+		if (GenerationRequest.SourceRequestId == 0)
+		{
+			GenerationRequest.SourceRequestId = ApprovedSnapshot.RequestId;
+		}
+		if (GenerationRequest.RuntimeImageReport.IsEmpty())
+		{
+			GenerationRequest.RuntimeImageReport = ApprovedSnapshot.ImageReport;
+		}
+
+		FUMGWidgetData GenerationData = ApprovedSnapshot.Data;
+		if (GenerationRequest.bResolveImages)
+		{
+			FString ResolvedImageReport;
+			ResolveImages(GenerationData, &ResolvedImageReport);
+			GenerationRequest.RuntimeImageReport = ResolvedImageReport;
+		}
+		return GenerateArtifactsInternal(GenerationData, GenerationRequest);
+	}
+
 	FDesignImportExecutionResult Execute(FUMGWidgetData& Data, const FDesignImportRequest& Request)
 	{
 		const FImportAnalysisResult AnalysisResult = AnalyzeImport(Data, FImportAnalysisInput{Request.bResolveImages});
@@ -693,17 +691,22 @@ namespace DesignImportPipeline
 				Request.PreviewWindowTitle,
 				FOnPreviewConfirmed::CreateLambda(
 					[CapturedChanges = Data.IconFontMappingChanges,
-					 bCapturedResolveImages = Request.bResolveImages,
 					 CapturedGeneration = Request.Generation,
-					 CapturedDiagnosticDocument = Request.DiagnosticDocument](const FString& EditedJson, const FString& OutputPath)
+					 bCapturedResolveImages = Request.bResolveImages,
+					 CapturedDiagnosticDocument = Request.DiagnosticDocument](const FPreviewGenerationRequest& PreviewGenerationRequest)
 					{
-						ParseResolveAndGenerate(
-							EditedJson,
-							OutputPath,
-							&CapturedChanges,
-							CapturedDiagnosticDocument,
-							CapturedGeneration,
-							bCapturedResolveImages);
+						FPreviewApprovedSnapshot ApprovedSnapshot = PreviewGenerationRequest.ApprovedSnapshot;
+						ApprovedSnapshot.Data.IconFontMappingChanges = CapturedChanges;
+
+						FArtifactGenerationRequest GenerationRequest = PreviewGenerationRequest.GenerationRequest;
+						GenerationRequest.Generation = CapturedGeneration;
+						GenerationRequest.bResolveImages = bCapturedResolveImages;
+						if (CapturedDiagnosticDocument.IsSet())
+						{
+							GenerationRequest.DiagnosticDocument = CapturedDiagnosticDocument;
+						}
+
+						GenerateArtifacts(ApprovedSnapshot, GenerationRequest);
 					}),
 				FOnPreviewCancelled::CreateLambda(
 					[]()
@@ -743,9 +746,19 @@ namespace DesignImportPipeline
 				Request.OutputPath,
 				Request.PreviewWindowTitle,
 				FOnPreviewConfirmed::CreateLambda(
-					[CapturedDocument = Document, CapturedGeneration = Request.Generation, bCapturedResolveImages = Request.bResolveImages](const FString& EditedJson, const FString& OutputPath)
+					[CapturedIconFontMappingChanges = AnalysisResult.Data.IconFontMappingChanges,
+					 CapturedDocument = Document,
+					 CapturedGeneration = Request.Generation,
+					 bCapturedResolveImages = Request.bResolveImages](const FPreviewGenerationRequest& PreviewGenerationRequest)
 					{
-						GenerateFromEditedJsonWithDocument(EditedJson, OutputPath, CapturedDocument, CapturedGeneration, bCapturedResolveImages);
+						FPreviewApprovedSnapshot ApprovedSnapshot = PreviewGenerationRequest.ApprovedSnapshot;
+						ApprovedSnapshot.Data.IconFontMappingChanges = CapturedIconFontMappingChanges;
+
+						FArtifactGenerationRequest GenerationRequest = PreviewGenerationRequest.GenerationRequest;
+						GenerationRequest.Generation = CapturedGeneration;
+						GenerationRequest.bResolveImages = bCapturedResolveImages;
+						GenerationRequest.DiagnosticDocument = CapturedDocument;
+						GenerateArtifacts(ApprovedSnapshot, GenerationRequest);
 					}),
 				FOnPreviewCancelled::CreateLambda(
 					[]()

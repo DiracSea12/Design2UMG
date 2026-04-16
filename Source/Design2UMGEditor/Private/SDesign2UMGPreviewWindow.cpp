@@ -30,26 +30,11 @@ namespace
 	class FDesignImportPipelinePreviewRefreshAnalyzer final : public IDesignPreviewRefreshAnalyzer
 	{
 	public:
-		virtual bool AnalyzePreviewJson(
-			const FString& JsonString,
-			FUMGWidgetData& OutWidgetData,
-			FString& OutImageReport,
-			FString& OutError) override
+		virtual FPreviewRefreshResult AnalyzePreview(const FPreviewRefreshInput& Input) override
 		{
-			FPreviewRefreshInput RefreshInput;
-			RefreshInput.EditedJson = JsonString;
+			FPreviewRefreshInput RefreshInput = Input;
 			RefreshInput.bResolveImages = false;
-
-			const FPreviewRefreshResult RefreshResult = DesignImportPipeline::AnalyzePreviewRefresh(RefreshInput);
-			if (!RefreshResult.bSucceeded)
-			{
-				OutError = RefreshResult.ParseError;
-				return false;
-			}
-
-			OutWidgetData = RefreshResult.Data;
-			OutImageReport = RefreshResult.ImageReport;
-			return true;
+			return DesignImportPipeline::AnalyzePreviewRefresh(RefreshInput);
 		}
 	};
 }
@@ -301,21 +286,25 @@ SDesign2UMGPreviewWindow::~SDesign2UMGPreviewWindow()
 
 FReply SDesign2UMGPreviewWindow::OnGenerateClicked()
 {
-	FString Error;
-	if (!ValidateJson(CurrentJson, Error))
-	{
-		FMessageDialog::Open(EAppMsgType::Ok,
-			FText::Format(LOCTEXT("InvalidJsonFormat", "Invalid JSON format:\n{0}"), FText::FromString(Error)));
-		return FReply::Handled();
-	}
-
 	if (CurrentOutputPath.IsEmpty())
 	{
 		FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("EmptyOutputPath", "Please specify an output path."));
 		return FReply::Handled();
 	}
 
-	OnConfirmed.ExecuteIfBound(CurrentJson, CurrentOutputPath);
+	if (!CanConfirmLatestSnapshot())
+	{
+		FMessageDialog::Open(EAppMsgType::Ok,
+			LOCTEXT("RefreshRequiredBeforeGenerate", "Preview is stale or failed to refresh. Refresh must succeed before generating."));
+		return FReply::Handled();
+	}
+
+	FPreviewGenerationRequest GenerationRequest;
+	GenerationRequest.ApprovedSnapshot = LatestApprovedSnapshot.GetValue();
+	GenerationRequest.GenerationRequest.SourceRequestId = GenerationRequest.ApprovedSnapshot.RequestId;
+	GenerationRequest.GenerationRequest.OutputPath = CurrentOutputPath;
+	GenerationRequest.GenerationRequest.RuntimeImageReport = GenerationRequest.ApprovedSnapshot.ImageReport;
+	OnConfirmed.ExecuteIfBound(GenerationRequest);
 
 	TSharedPtr<SWindow> Window = FSlateApplication::Get().FindWidgetWindow(AsShared());
 	if (Window.IsValid())
@@ -354,6 +343,7 @@ FReply SDesign2UMGPreviewWindow::OnFormatJsonClicked()
 void SDesign2UMGPreviewWindow::OnJsonTextChanged(const FText& NewText)
 {
 	CurrentJson = NewText.ToString();
+	InvalidateApprovedSnapshot();
 
 	// Keep preview refresh debounced while editing.
 	SchedulePreviewRefresh();
@@ -440,6 +430,12 @@ void SDesign2UMGPreviewWindow::CleanupPreviewWidget()
 	}
 }
 
+void SDesign2UMGPreviewWindow::InvalidateApprovedSnapshot()
+{
+	LatestApprovedSnapshot.Reset();
+	bLatestApprovedSnapshotStale = true;
+}
+
 void SDesign2UMGPreviewWindow::RefreshUMGPreview()
 {
 	if (!UMGPreviewContainer.IsValid())
@@ -450,6 +446,8 @@ void SDesign2UMGPreviewWindow::RefreshUMGPreview()
 	FString Error;
 	if (!ValidateJson(CurrentJson, Error))
 	{
+		InvalidateApprovedSnapshot();
+		CleanupPreviewWidget();
 		UMGPreviewContainer->SetContent(
 			SNew(SBorder)
 			.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
@@ -464,6 +462,10 @@ void SDesign2UMGPreviewWindow::RefreshUMGPreview()
 		);
 		return;
 	}
+
+	InvalidateApprovedSnapshot();
+	const uint64 RequestId = NextRefreshRequestId++;
+	LatestRequestedRefreshId = RequestId;
 
 	// Show loading state first.
 	UMGPreviewContainer->SetContent(
@@ -485,33 +487,42 @@ void SDesign2UMGPreviewWindow::RefreshUMGPreview()
 	FString JsonToParse = CurrentJson;
 
 	// Run on next frame.
-	AsyncTask(ENamedThreads::GameThread, [WeakSelf, JsonToParse]()
+	AsyncTask(ENamedThreads::GameThread, [WeakSelf, RequestId, JsonToParse]()
 	{
 		TSharedPtr<SDesign2UMGPreviewWindow> Self = WeakSelf.Pin();
 		if (Self.IsValid())
 		{
-			Self->DoRefreshPreview(JsonToParse);
+			Self->DoRefreshPreview(RequestId, JsonToParse);
 		}
 	});
 }
 
-void SDesign2UMGPreviewWindow::DoRefreshPreview(const FString& JsonString)
+void SDesign2UMGPreviewWindow::DoRefreshPreview(uint64 RequestId, const FString& JsonString)
 {
-	if (!UMGPreviewContainer.IsValid())
+	if (!UMGPreviewContainer.IsValid() || RequestId != LatestRequestedRefreshId)
 	{
 		return;
 	}
 
-	FUMGWidgetData TempWidgetData;
-	FString ImageReport;
-	FString ParseError;
 	if (!PreviewRefreshAnalyzer.IsValid())
 	{
 		PreviewRefreshAnalyzer = MakeShared<FDesignImportPipelinePreviewRefreshAnalyzer>();
 	}
 
-	if (!PreviewRefreshAnalyzer->AnalyzePreviewJson(JsonString, TempWidgetData, ImageReport, ParseError))
+	FPreviewRefreshInput RefreshInput;
+	RefreshInput.RequestId = RequestId;
+	RefreshInput.EditedJson = JsonString;
+	RefreshInput.bResolveImages = false;
+	const FPreviewRefreshResult RefreshResult = PreviewRefreshAnalyzer->AnalyzePreview(RefreshInput);
+	if (RequestId != LatestRequestedRefreshId)
 	{
+		return;
+	}
+
+	if (!RefreshResult.bSucceeded)
+	{
+		InvalidateApprovedSnapshot();
+		CleanupPreviewWidget();
 		UMGPreviewContainer->SetContent(
 			SNew(SBorder)
 			.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
@@ -519,7 +530,7 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(const FString& JsonString)
 			.Padding(8)
 			[
 				SNew(STextBlock)
-				.Text(FText::Format(LOCTEXT("PreviewParseError", "Preview parse failed:\n{0}"), FText::FromString(ParseError)))
+				.Text(FText::Format(LOCTEXT("PreviewParseError", "Preview parse failed:\n{0}"), FText::FromString(RefreshResult.ParseError)))
 				.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.3f, 0.3f)))
 				.AutoWrapText(true)
 			]
@@ -532,12 +543,30 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(const FString& JsonString)
 		PreviewMaterializationService = MakeShared<FDesignPreviewMaterializationService>();
 	}
 
+	FPreviewApprovedSnapshot ApprovedSnapshot;
+	ApprovedSnapshot.RequestId = RefreshResult.RequestId;
+	ApprovedSnapshot.EditedJson = RefreshResult.EditedJson;
+	ApprovedSnapshot.Data = RefreshResult.Data;
+	ApprovedSnapshot.ImageReport = RefreshResult.ImageReport;
+
+	FDesignPreviewMaterializationRequest MaterializationRequest;
+	MaterializationRequest.RequestId = RequestId;
+	MaterializationRequest.ApprovedSnapshot = ApprovedSnapshot;
+
 	FDesignPreviewMaterializationResult MaterializationResult;
-	if (PreviewMaterializationService->MaterializePreview(TempWidgetData, MaterializationResult))
+	if (PreviewMaterializationService->MaterializePreview(MaterializationRequest, MaterializationResult)
+		&& MaterializationResult.bSucceeded)
 	{
+		if (RequestId != LatestRequestedRefreshId)
+		{
+			return;
+		}
+
 		UUserWidget* MaterializedPreviewWidget = PreviewMaterializationService->GetMaterializedPreviewWidget();
 		if (!MaterializedPreviewWidget)
 		{
+			InvalidateApprovedSnapshot();
+			CleanupPreviewWidget();
 			UMGPreviewContainer->SetContent(
 				SNew(SBorder)
 				.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
@@ -552,6 +581,9 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(const FString& JsonString)
 			);
 			return;
 		}
+
+		LatestApprovedSnapshot = ApprovedSnapshot;
+		bLatestApprovedSnapshotStale = false;
 
 		TSharedRef<SWidget> SlateWidget = MaterializedPreviewWidget->TakeWidget();
 
@@ -582,6 +614,8 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(const FString& JsonString)
 	}
 	else
 	{
+		InvalidateApprovedSnapshot();
+		CleanupPreviewWidget();
 		UMGPreviewContainer->SetContent(
 			SNew(SBorder)
 			.BorderImage(FAppStyle::GetBrush("WhiteBrush"))

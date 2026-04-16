@@ -3,17 +3,23 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DesignImportPipeline.h"
 #include "TimerManager.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "Widgets/Input/SEditableTextBox.h"
 
-struct FUMGWidgetData;
 class IDesignPreviewRefreshAnalyzer;
 class IDesignPreviewMaterializationService;
 class SBox;
 
-DECLARE_DELEGATE_TwoParams(FOnPreviewConfirmed, const FString& /*EditedJson*/, const FString& /*OutputPath*/);
+struct FPreviewGenerationRequest
+{
+	FPreviewApprovedSnapshot ApprovedSnapshot;
+	FArtifactGenerationRequest GenerationRequest;
+};
+
+DECLARE_DELEGATE_OneParam(FOnPreviewConfirmed, const FPreviewGenerationRequest& /*GenerationRequest*/);
 DECLARE_DELEGATE(FOnPreviewCancelled);
 
 class SDesign2UMGPreviewWindow : public SCompoundWidget
@@ -42,6 +48,10 @@ private:
 	FString CurrentJson;
 	FString CurrentOutputPath;
 	TArray<FString> ConversionWarnings;
+	uint64 NextRefreshRequestId = 1;
+	uint64 LatestRequestedRefreshId = 0;
+	TOptional<FPreviewApprovedSnapshot> LatestApprovedSnapshot;
+	bool bLatestApprovedSnapshotStale = true;
 
 	FOnPreviewConfirmed OnConfirmed;
 	FOnPreviewCancelled OnCancelled;
@@ -51,10 +61,17 @@ private:
 	FReply OnFormatJsonClicked();
 
 	void RefreshUMGPreview();
-	void DoRefreshPreview(const FString& JsonString);
+	void DoRefreshPreview(uint64 RequestId, const FString& JsonString);
 	void CleanupPreviewWidget();
 	void OnJsonTextChanged(const FText& NewText);
 	void OnOutputPathChanged(const FText& NewText);
+	void InvalidateApprovedSnapshot();
+	bool CanConfirmLatestSnapshot() const
+	{
+		return !bLatestApprovedSnapshotStale
+			&& LatestApprovedSnapshot.IsSet()
+			&& LatestApprovedSnapshot->RequestId == LatestRequestedRefreshId;
+	}
 
 	bool ValidateJson(const FString& JsonString, FString& OutError);
 	FString FormatJson(const FString& JsonString);
@@ -72,10 +89,6 @@ class IDesignPreviewRefreshAnalyzer
 public:
 	virtual ~IDesignPreviewRefreshAnalyzer() = default;
 
-	virtual bool AnalyzePreviewJson(
-		const FString& JsonString,
-		FUMGWidgetData& OutWidgetData,
-		FString& OutImageReport,
-		FString& OutError) = 0;
+	virtual FPreviewRefreshResult AnalyzePreview(const FPreviewRefreshInput& Input) = 0;
 };
 
