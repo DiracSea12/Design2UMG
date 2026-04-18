@@ -881,8 +881,7 @@ bool FPenWelcomeBatchImportTest::RunTest(const FString& Parameters)
 			continue;
 		}
 
-		FUMGWidgetData Data;
-		DesignImportPipeline::ConvertDocument(Document, Data);
+		FUMGWidgetData Data = DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{false}).Data;
 		if (GUsingNullRHI)
 		{
 			continue;
@@ -989,8 +988,7 @@ bool FPenWelcomeLigatureIconWeightWorkflowTest::RunTest(const FString& Parameter
 	FFontResolver::ClearCache();
 	DesignFontImportService::PrepareDocumentFonts(Document);
 
-	FUMGWidgetData Data;
-	DesignImportPipeline::ConvertDocument(Document, Data);
+	FUMGWidgetData Data = DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{false}).Data;
 
 	const FUMGWidgetNode* DashboardIcon = FindWidgetById(Data.RootWidget, TEXT("xGT5g"));
 	TestTrue(TEXT("Find dashboard icon widget"), DashboardIcon != nullptr);
@@ -1464,8 +1462,7 @@ bool FFigmaSourceImportWorkflowTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Parse raw Figma json"), FFigmaParser::ParseDocument(RawJson, Document));
 	TestTrue(TEXT("Parsed Figma source should contain children"), Document.Children.Num() > 0);
 
-	FUMGWidgetData Data;
-	DesignImportPipeline::ConvertDocument(Document, Data);
+	FUMGWidgetData Data = DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{false}).Data;
 	TestFalse(TEXT("Figma source import should yield a widget name"), Data.WidgetName.IsEmpty());
 	TestTrue(TEXT("Figma source import should yield root widget children"), Data.RootWidget.Children.Num() > 0);
 
