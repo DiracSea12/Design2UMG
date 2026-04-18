@@ -2848,6 +2848,90 @@ bool FPathStrokeOnlyIconRasterizationTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Stroke-only path produces visible pixels"), CountOpaqueTexturePixels(Texture) >= 24);
 	return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCompactSingleLineLabelNoFontFamilyDependencyTest,
+	"Design2UMG.TextMeasurement.CompactSingleLineLabelNoFontFamilyDependency",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FCompactSingleLineLabelNoFontFamilyDependencyTest::RunTest(const FString& Parameters)
+{
+	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
+	TestTrue(TEXT("Design2UMG plugin found"), Plugin.IsValid());
+	if (!Plugin.IsValid())
+		return false;
+
+	FString Source;
+	TestTrue(TEXT("Load TextMeasurement.cpp"), FFileHelper::LoadFileToString(Source,
+		*(FPaths::Combine(Plugin->GetBaseDir(), TEXT("Source/Design2UMGCore/Private/TextMeasurement.cpp")))));
+	if (Source.IsEmpty())
+		return false;
+
+	const int32 PredicatePos = Source.Find(TEXT("bIsCompactSingleLineLabel ="), ESearchCase::CaseSensitive);
+	TestTrue(TEXT("bIsCompactSingleLineLabel predicate exists"), PredicatePos != INDEX_NONE);
+	if (PredicatePos == INDEX_NONE)
+		return false;
+
+	// Find the closing semicolon of the predicate expression
+	const int32 SemicolonPos = Source.Find(TEXT(";"), ESearchCase::CaseSensitive, ESearchDir::FromStart, PredicatePos);
+	TestTrue(TEXT("Predicate semicolon found"), SemicolonPos != INDEX_NONE);
+	if (SemicolonPos == INDEX_NONE)
+		return false;
+
+	const FString Predicate = Source.Mid(PredicatePos, SemicolonPos - PredicatePos);
+	TestFalse(TEXT("bIsCompactSingleLineLabel must not reference IsMonospaceLikeFontFamily"),
+		Predicate.Contains(TEXT("IsMonospaceLikeFontFamily"), ESearchCase::CaseSensitive));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCompactSingleLineLabelFontFamilyNameDoesNotAffectSizeTest,
+	"Design2UMG.TextMeasurement.CompactSingleLineLabelFontFamilyNameDoesNotAffectSize",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FCompactSingleLineLabelFontFamilyNameDoesNotAffectSizeTest::RunTest(const FString& Parameters)
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		AddWarning(TEXT("Slate is not initialized, skipping compact label font family name test."));
+		return true;
+	}
+
+	auto MakeCompactFigmaNode = [](const FString& InFontFamily) -> TSharedPtr<FDesignNode>
+	{
+		TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
+		Node->Type = EDesignNodeType::Text;
+		Node->Text.Content = TEXT("OK");
+		Node->Text.FontFamily = InFontFamily;
+		Node->Text.FontWeight = TEXT("Regular");
+		Node->Text.FontSize = 14.0f;
+		Node->Text.LineHeight = 1.2f;
+		Node->Text.LetterSpacing = 0.0f;
+		Node->Text.TextAlign = EDesignTextAlign::Left;
+		Node->Text.TextAlignVertical = EDesignTextAlignVertical::Top;
+		Node->Text.TextGrowth = EDesignTextGrowth::FixedWidth;
+		Node->Transform.Width = FDesignSize::Fixed(60.0f);
+		Node->Transform.Height = FDesignSize::Fixed(20.0f);
+		Node->Transform.bHasWidth = true;
+		Node->Transform.bHasHeight = true;
+		Node->Transform.bSourceHasWidth = true;
+		// Mark as Figma source so bShouldApplyWidthInset path is reachable
+		Node->Metadata.Add(TEXT("source.provider"), TEXT("figma"));
+		return Node;
+	};
+
+	// "FakeMonoXYZ" contains "mono" — previously would have been excluded from compact path
+	// "FakeSansXYZ" contains neither "mono" nor "code" — always on compact path
+	// Both are unresolved (not installed), so font metrics are identical
+	const TSharedPtr<FDesignNode> MonoNode = MakeCompactFigmaNode(TEXT("FakeMonoXYZ_UnitTest"));
+	const TSharedPtr<FDesignNode> SansNode = MakeCompactFigmaNode(TEXT("FakeSansXYZ_UnitTest"));
+
+	TextMeasurement::ResetCache();
+	const float MonoSize = TextMeasurement::ResolveTextFontSizeForUMG(MonoNode);
+	const float SansSize = TextMeasurement::ResolveTextFontSizeForUMG(SansNode);
+
+	TestTrue(TEXT("Mono-named font resolves a size"), MonoSize > 0.0f);
+	TestTrue(TEXT("Sans-named font resolves a size"), SansSize > 0.0f);
+	TestTrue(TEXT("Compact label size must not depend on font family name containing 'mono'"),
+		FMath::IsNearlyEqual(MonoSize, SansSize, 0.01f));
+	return true;
+}
+
 #include "Design2UMGTests.EffectsAndShadow.inl"
 
 #include "Design2UMGTests.FigmaCoverage.inl"

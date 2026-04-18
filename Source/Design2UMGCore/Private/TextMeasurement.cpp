@@ -1347,7 +1347,6 @@ float TextMeasurement::ResolveTextFontSizeForUMG(const TSharedPtr<FDesignNode>& 
 
 		const bool bIsCompactSingleLineLabel =
 			!IsHeavyFontWeight(Node->Text.FontWeight)
-			&& !IsMonospaceLikeFontFamily(Node->Text.FontFamily)
 			&& CountSingleLineTextWords(Node) <= 2
 			&& TargetTextWidth <= 80.0f;
 
