@@ -1,6 +1,7 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "WidgetResourceBinder.h"
+#include "DesignResourceResolver.h"
 #include "Design2UMGLog.h"
 #include "ProceduralShapeGenerator.h"
 #include "UMGPropertyKeys.h"
@@ -17,7 +18,7 @@ bool FWidgetResourceBinder::BindImageResource(UImage* ImageWidget, const FUMGWid
 	if (!MatRef.IsEmpty())
 	{
 		FUMGPropertyBag GenerationProps = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
-		UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(MatRef, GenerationProps, ImageWidget);
+		UTexture2D* Texture = DesignResourceResolver::ResolveTextureFromMaterialRef(MatRef, GenerationProps, ImageWidget);
 		if (Texture)
 		{
 			ImageWidget->SetBrushFromTexture(Texture);
@@ -51,7 +52,7 @@ bool FWidgetResourceBinder::BindImageResource(UImage* ImageWidget, const FUMGWid
 	}
 	if (!Texture)
 	{
-		Texture = LoadObject<UTexture2D>(nullptr, *TrimmedPath);
+		Texture = DesignResourceResolver::LoadTextureFromPath(TrimmedPath, DesignResourceResolver::ELoadMode::LoadOnly);
 	}
 	if (!Texture)
 	{

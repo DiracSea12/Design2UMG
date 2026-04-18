@@ -1,6 +1,7 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGPropertyApplierInternal.h"
+#include "DesignResourceResolver.h"
 #include "UMGWidgetUtils.h"
 #include "UMGPropertyKeys.h"
 #include "UMGWidgetNodeAccess.h"
@@ -161,19 +162,7 @@ namespace
 
 	void ApplyFontFamilyToSlateFontInfo(FSlateFontInfo& FontInfo, const FString& Value, const bool bIsIconFontWidget)
 	{
-		if (Value.StartsWith(TEXT("/")))
-		{
-			if (UObject* FontObject = LoadObject<UObject>(nullptr, *Value))
-			{
-				FontInfo.FontObject = FontObject;
-			}
-			return;
-		}
-
-		if (!Value.IsEmpty() && !bIsIconFontWidget)
-		{
-			FontInfo.TypefaceFontName = FName(*Value);
-		}
+		DesignResourceResolver::ApplyFontFamily(FontInfo, Value, bIsIconFontWidget);
 	}
 
 	FSlateBrush MakeTextDecorationBrush(const FLinearColor& Color)
@@ -510,17 +499,7 @@ namespace
 		}
 		if (TryGetProp(P, UMGPropertyKeys::FontFamily, Value))
 		{
-			if (Value.StartsWith(TEXT("/")))
-			{
-				if (UObject* FontObject = LoadObject<UObject>(nullptr, *Value))
-				{
-					FontInfo.FontObject = FontObject;
-				}
-			}
-			else if (!Value.IsEmpty() && !bIsIconFontWidget)
-			{
-				FontInfo.TypefaceFontName = FName(*Value);
-			}
+			DesignResourceResolver::ApplyFontFamily(FontInfo, Value, bIsIconFontWidget);
 			bFontChanged = true;
 		}
 		if (TryGetProp(P, UMGPropertyKeys::TypefaceFontName, Value))
@@ -617,7 +596,7 @@ namespace
 		}
 		if (TryGetProp(P, UMGPropertyKeys::MaterialRef, Value))
 		{
-			if (UTexture2D* GeneratedTex = FProceduralShapeGenerator::GenerateFromMaterialRef(Value, P, I))
+			if (UTexture2D* GeneratedTex = DesignResourceResolver::ResolveTextureFromMaterialRef(Value, P, I))
 			{
 				I->SetBrushFromTexture(GeneratedTex);
 				FSlateBrush GeneratedBrush = I->GetBrush();
@@ -700,9 +679,10 @@ namespace
 
 		if (TryGetProp(P, UMGPropertyKeys::TexturePath, Value))
 		{
-			UTexture2D* Tex = LoadObject<UTexture2D>(nullptr, *Value);
-			if (!Tex) Tex = FindObject<UTexture2D>(nullptr, *Value);
-			if (Tex) I->SetBrushFromTexture(Tex);
+			if (UTexture2D* Tex = DesignResourceResolver::LoadTextureFromPath(Value, DesignResourceResolver::ELoadMode::LoadThenFind))
+			{
+				I->SetBrushFromTexture(Tex);
+			}
 		}
 
 		FSlateBrush Brush = I->GetBrush();
@@ -840,9 +820,7 @@ namespace
 		FString Value;
 		if (TryGetProp(P, UMGPropertyKeys::TexturePath, Value))
 		{
-			UTexture2D* Tex = LoadObject<UTexture2D>(nullptr, *Value);
-			if (!Tex) Tex = FindObject<UTexture2D>(nullptr, *Value);
-			if (Tex)
+			if (UTexture2D* Tex = DesignResourceResolver::LoadTextureFromPath(Value, DesignResourceResolver::ELoadMode::LoadThenFind))
 			{
 				Brush.SetResourceObject(Tex);
 				Brush.DrawAs = ESlateBrushDrawType::Image;
@@ -853,7 +831,7 @@ namespace
 
 		if (TryGetProp(P, UMGPropertyKeys::MaterialRef, Value))
 		{
-			if (UTexture2D* GeneratedTex = FProceduralShapeGenerator::GenerateFromMaterialRef(Value, P, Bd))
+			if (UTexture2D* GeneratedTex = DesignResourceResolver::ResolveTextureFromMaterialRef(Value, P, Bd))
 			{
 				Brush.SetResourceObject(GeneratedTex);
 				Brush.DrawAs = ESlateBrushDrawType::Image;

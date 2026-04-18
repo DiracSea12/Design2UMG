@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "PreBuildResourceNormalizer.h"
+#include "DesignResourceResolver.h"
 #include "UMGWidgetNodeAccess.h"
 #include "UMGPropertyKeys.h"
 #include "UMGValueParser.h"
@@ -151,7 +152,7 @@ namespace
 		if (!FPackageName::IsValidLongPackageName(LongPackageName)) return false;
 
 		const FString ObjectPath = LongPackageName + TEXT(".") + AssetName;
-		UTexture2D* Texture = LoadObject<UTexture2D>(nullptr, *ObjectPath);
+		UTexture2D* Texture = DesignResourceResolver::LoadTextureFromPath(ObjectPath, DesignResourceResolver::ELoadMode::LoadOnly);
 		const bool bNewAsset = (Texture == nullptr);
 		if (!Texture)
 		{
@@ -260,7 +261,7 @@ namespace
 			else
 			{
 				FUMGPropertyBag GenerationProps = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
-				if (UTexture2D* Generated = FProceduralShapeGenerator::GenerateFromMaterialRef(MaterialRef, GenerationProps, nullptr))
+				if (UTexture2D* Generated = DesignResourceResolver::ResolveTextureFromMaterialRef(MaterialRef, GenerationProps, nullptr))
 				{
 					TArray64<uint8> RawData;
 					int32 RawW = 0, RawH = 0;
