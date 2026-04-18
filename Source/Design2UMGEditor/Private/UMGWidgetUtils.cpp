@@ -5,6 +5,7 @@
 #include "Design2UMGSettings.h"
 #include "LayoutCalculator.h"
 #include "LayoutFixer.h"
+#include "WidgetLayoutAdapter.h"
 #include "UMGPropertyKeys.h"
 #include "UMGWidgetNodeAccess.h"
 #include "UMGValueParser.h"
@@ -345,8 +346,6 @@ namespace
 static void HandleNamedSlotChildren(UWidgetTree* WidgetTree, INamedSlotInterface* NamedSlotHost, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords);
 static void HandleContentWidgetChild(UWidgetTree* WidgetTree, UContentWidget* Content, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords);
 
-// Slot 历史数据有效性判断
-static bool HasValidSlotHistory(const FUMGSlotData& Slot);
 
 UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords, const FIntPoint* ExplicitDesignSize)
 {
@@ -439,49 +438,14 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 		return nullptr;
 	}
 
-	// 添加到父容器并应用 Slot 属性（含 adaptive anchor / LayoutCalculator）
+	// 添加到父容器并应用 Slot 属性
 	if (ParentWidget)
 	{
 		if (UPanelSlot* Slot = ParentWidget->AddChild(NewWidget))
 		{
-			FUMGSlotData SlotData = Node.Slot;
-			UCanvasPanel* CanvasParent = Cast<UCanvasPanel>(ParentWidget);
-			const bool bIsRootCanvasParent = CanvasParent && (WidgetTree && WidgetTree->RootWidget == ParentWidget);
-			const bool bHasMeaningfulSlotData = HasMeaningfulSlotData(SlotData);
 			const bool bEnableAdaptiveAnchors = UDesign2UMGSettings::Get()->bEnableAdaptiveRootCanvasAnchors;
-			UE_LOG(LogDesign2UMG, Verbose, TEXT("CreateWidget: '%s' parent=%s slot_path=%s bounds=(%.1f,%.1f,%.1f,%.1f)"),
-				*Node.Name, *ParentWidget->GetClass()->GetName(),
-				(bIsRootCanvasParent && bEnableAdaptiveAnchors && !bHasMeaningfulSlotData) ? TEXT("LayoutCalc") : TEXT("Direct"),
-				Node.Bounds.X, Node.Bounds.Y, Node.Bounds.W, Node.Bounds.H);
-			if (bIsRootCanvasParent
-				&& bEnableAdaptiveAnchors
-				&& !bHasMeaningfulSlotData
-				&& Node.Bounds.W > 0.0f
-				&& Node.Bounds.H > 0.0f)
-			{
-				FLayoutContext Context;
-				Context.DesignSize = FScopedWidgetBuildDesignSize::Current();
-				Context.Preset = FLayoutPreset::GetStandardHUDPreset();
-				if (HasValidSlotHistory(Node.Slot))
-				{
-					if (Node.Slot.Anchors.Min.X == Node.Slot.Anchors.Max.X)
-					{
-						Context.OldAnchorX = Node.Slot.Anchors.Min.X;
-					}
-					if (Node.Slot.Anchors.Min.Y == Node.Slot.Anchors.Max.Y)
-					{
-						Context.OldAnchorY = Node.Slot.Anchors.Min.Y;
-					}
-				}
-				FBounds NormalizedBounds;
-				NormalizedBounds.X = Node.Bounds.X / Context.DesignSize.X;
-				NormalizedBounds.Y = Node.Bounds.Y / Context.DesignSize.Y;
-				NormalizedBounds.W = Node.Bounds.W / Context.DesignSize.X;
-				NormalizedBounds.H = Node.Bounds.H / Context.DesignSize.Y;
-				const bool bOrigAutoSize = SlotData.bAutoSize;
-				SlotData = FLayoutCalculator::CalculateSlot(NormalizedBounds, Context);
-				SlotData.bAutoSize = bOrigAutoSize;
-			}
+			const FUMGSlotData SlotData = FWidgetLayoutAdapter::Resolve(
+				Node, ParentWidget, WidgetTree, FScopedWidgetBuildDesignSize::Current(), bEnableAdaptiveAnchors);
 			UE_LOG(LogDesign2UMG, Verbose,
 				TEXT("CreateWidgetSlot: '%s' anc=(%.2f,%.2f)-(%.2f,%.2f) off=(%.1f,%.1f,%.1f,%.1f) align=(%.2f,%.2f) auto=%d"),
 				*Node.Name,
@@ -506,20 +470,6 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 	}
 
 	return NewWidget;
-}
-
-static bool HasValidSlotHistory(const FUMGSlotData& Slot)
-{
-	return !FMath::IsNearlyEqual(Slot.Offsets.Left, 0.0f) ||
-		!FMath::IsNearlyEqual(Slot.Offsets.Top, 0.0f) ||
-		!FMath::IsNearlyEqual(Slot.Offsets.Right, 100.0f) ||
-		!FMath::IsNearlyEqual(Slot.Offsets.Bottom, 100.0f) ||
-		!FMath::IsNearlyEqual(Slot.Anchors.Min.X, 0.0f) ||
-		!FMath::IsNearlyEqual(Slot.Anchors.Min.Y, 0.0f) ||
-		!FMath::IsNearlyEqual(Slot.Anchors.Max.X, 0.0f) ||
-		!FMath::IsNearlyEqual(Slot.Anchors.Max.Y, 0.0f) ||
-		!FMath::IsNearlyEqual(Slot.Alignment.X, 0.0f) ||
-		!FMath::IsNearlyEqual(Slot.Alignment.Y, 0.0f);
 }
 
 static void HandleNamedSlotChildren(UWidgetTree* WidgetTree, INamedSlotInterface* NamedSlotHost, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords)
