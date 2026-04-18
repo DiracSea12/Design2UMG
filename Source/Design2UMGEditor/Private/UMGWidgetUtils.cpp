@@ -348,12 +348,9 @@ static void HandleContentWidgetChild(UWidgetTree* WidgetTree, UContentWidget* Co
 // Slot 历史数据有效性判断
 static bool HasValidSlotHistory(const FUMGSlotData& Slot);
 
-UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords, const FIntPoint* ExplicitDesignSize)
+UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords, const FIntPoint* ExplicitDesignSize)
 {
-	const FScopedWidgetBuildDesignSize DesignSizeScope(ExplicitDesignSize);
 	UClass* WidgetClass = ResolveWidgetClass(Node.Type);
-
-	// Widget 类覆盖：按节点名称匹配用户配置的替换规则
 	if (UClass* Override = UDesign2UMGSettings::Get()->FindClassOverride(Node.Name))
 	{
 		WidgetClass = Override;
@@ -361,7 +358,6 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 
 	if (!WidgetClass)
 	{
-		// v2.2: 增强警告，明确说明子树丢失
 		int32 ChildCount = Node.Children.Num();
 		if (ChildCount > 0)
 		{
@@ -377,8 +373,6 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 	}
 
 	FName WidgetName = SanitizeWidgetName(Node.Name, Node.Type);
-
-	// 去重：WidgetTree 中同名对象已存在时追加数字后缀
 	if (FindObject<UObject>(WidgetTree, *WidgetName.ToString()))
 	{
 		for (int32 Suffix = 1; Suffix < 1000; ++Suffix)
@@ -399,78 +393,6 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 		return nullptr;
 	}
 
-	// 添加到父容器并应用 Slot 属性
-	if (ParentWidget)
-	{
-		if (UPanelSlot* Slot = ParentWidget->AddChild(NewWidget))
-		{
-			// v2.2: 只对CanvasPanel使用LayoutCalculator计算Slot
-			// 其他容器（VerticalBox/HorizontalBox/Overlay）使用原始Slot数据
-			FUMGSlotData SlotData = Node.Slot;
-			UCanvasPanel* CanvasParent = Cast<UCanvasPanel>(ParentWidget);
-			const bool bIsRootCanvasParent = CanvasParent && (WidgetTree && WidgetTree->RootWidget == ParentWidget);
-			const bool bHasMeaningfulSlotData = HasMeaningfulSlotData(SlotData);
-			const bool bEnableAdaptiveAnchors = UDesign2UMGSettings::Get()->bEnableAdaptiveRootCanvasAnchors;
-			UE_LOG(LogDesign2UMG, Verbose, TEXT("CreateWidget: '%s' parent=%s slot_path=%s bounds=(%.1f,%.1f,%.1f,%.1f)"),
-				*Node.Name, *ParentWidget->GetClass()->GetName(),
-				(bIsRootCanvasParent && bEnableAdaptiveAnchors && !bHasMeaningfulSlotData) ? TEXT("LayoutCalc") : TEXT("Direct"),
-				Node.Bounds.X, Node.Bounds.Y, Node.Bounds.W, Node.Bounds.H);
-			if (bIsRootCanvasParent
-				&& bEnableAdaptiveAnchors
-				&& !bHasMeaningfulSlotData
-				&& Node.Bounds.W > 0.0f
-				&& Node.Bounds.H > 0.0f)
-			{
-				FLayoutContext Context;
-				Context.DesignSize = FScopedWidgetBuildDesignSize::Current();
-				Context.Preset = FLayoutPreset::GetStandardHUDPreset();
-				// v2.2: Hysteresis - 只有当Slot有有效历史数据时才设置OldAnchor
-				if (HasValidSlotHistory(Node.Slot))
-				{
-					if (Node.Slot.Anchors.Min.X == Node.Slot.Anchors.Max.X)
-					{
-						Context.OldAnchorX = Node.Slot.Anchors.Min.X;
-					}
-					if (Node.Slot.Anchors.Min.Y == Node.Slot.Anchors.Max.Y)
-					{
-						Context.OldAnchorY = Node.Slot.Anchors.Min.Y;
-					}
-				}
-				// 像素Bounds归一化为0-1（Design2UMGConverter输出像素坐标，LayoutCalculator期望归一化）
-				FBounds NormalizedBounds;
-				NormalizedBounds.X = Node.Bounds.X / Context.DesignSize.X;
-				NormalizedBounds.Y = Node.Bounds.Y / Context.DesignSize.Y;
-				NormalizedBounds.W = Node.Bounds.W / Context.DesignSize.X;
-				NormalizedBounds.H = Node.Bounds.H / Context.DesignSize.Y;
-				const bool bOrigAutoSize = SlotData.bAutoSize;
-				SlotData = FLayoutCalculator::CalculateSlot(NormalizedBounds, Context);
-				SlotData.bAutoSize = bOrigAutoSize;
-			}
-			UE_LOG(LogDesign2UMG, Verbose,
-				TEXT("CreateWidgetSlot: '%s' anc=(%.2f,%.2f)-(%.2f,%.2f) off=(%.1f,%.1f,%.1f,%.1f) align=(%.2f,%.2f) auto=%d"),
-				*Node.Name,
-				SlotData.Anchors.Min.X, SlotData.Anchors.Min.Y,
-				SlotData.Anchors.Max.X, SlotData.Anchors.Max.Y,
-				SlotData.Offsets.Left, SlotData.Offsets.Top, SlotData.Offsets.Right, SlotData.Offsets.Bottom,
-				SlotData.Alignment.X, SlotData.Alignment.Y,
-				SlotData.bAutoSize ? 1 : 0);
-			ApplySlotProperties(Slot, SlotData);
-		}
-	}
-
-	ApplyWidgetProperties(NewWidget, Node);
-	TryAppendFigmaMetadataRecord(NewWidget, Node, FigmaMetadataRecords);
-
-	// Image 控件：优先 MaterialRef 程序化生成，回退 TexturePath 纹理绑定
-	if (UImage* ImageWidget = Cast<UImage>(NewWidget))
-	{
-		if (!HandleImageMaterialRef(ImageWidget, Node))
-		{
-			HandleImageTextureRef(ImageWidget, Node, TextureMap);
-		}
-	}
-
-	// 递归处理子控件
 	if (UPanelWidget* AsPanel = Cast<UPanelWidget>(NewWidget))
 	{
 		TMap<int32, FIntPoint> AutoGridSlots;
@@ -502,6 +424,85 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 	else if (UContentWidget* Content = Cast<UContentWidget>(NewWidget))
 	{
 		HandleContentWidgetChild(WidgetTree, Content, Node, TextureMap, FigmaMetadataRecords);
+	}
+
+	return NewWidget;
+}
+
+UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords, const FIntPoint* ExplicitDesignSize)
+{
+	const FScopedWidgetBuildDesignSize DesignSizeScope(ExplicitDesignSize);
+
+	UWidget* NewWidget = BuildWidgetTree(WidgetTree, Node, TextureMap, FigmaMetadataRecords, ExplicitDesignSize);
+	if (!NewWidget)
+	{
+		return nullptr;
+	}
+
+	// 添加到父容器并应用 Slot 属性（含 adaptive anchor / LayoutCalculator）
+	if (ParentWidget)
+	{
+		if (UPanelSlot* Slot = ParentWidget->AddChild(NewWidget))
+		{
+			FUMGSlotData SlotData = Node.Slot;
+			UCanvasPanel* CanvasParent = Cast<UCanvasPanel>(ParentWidget);
+			const bool bIsRootCanvasParent = CanvasParent && (WidgetTree && WidgetTree->RootWidget == ParentWidget);
+			const bool bHasMeaningfulSlotData = HasMeaningfulSlotData(SlotData);
+			const bool bEnableAdaptiveAnchors = UDesign2UMGSettings::Get()->bEnableAdaptiveRootCanvasAnchors;
+			UE_LOG(LogDesign2UMG, Verbose, TEXT("CreateWidget: '%s' parent=%s slot_path=%s bounds=(%.1f,%.1f,%.1f,%.1f)"),
+				*Node.Name, *ParentWidget->GetClass()->GetName(),
+				(bIsRootCanvasParent && bEnableAdaptiveAnchors && !bHasMeaningfulSlotData) ? TEXT("LayoutCalc") : TEXT("Direct"),
+				Node.Bounds.X, Node.Bounds.Y, Node.Bounds.W, Node.Bounds.H);
+			if (bIsRootCanvasParent
+				&& bEnableAdaptiveAnchors
+				&& !bHasMeaningfulSlotData
+				&& Node.Bounds.W > 0.0f
+				&& Node.Bounds.H > 0.0f)
+			{
+				FLayoutContext Context;
+				Context.DesignSize = FScopedWidgetBuildDesignSize::Current();
+				Context.Preset = FLayoutPreset::GetStandardHUDPreset();
+				if (HasValidSlotHistory(Node.Slot))
+				{
+					if (Node.Slot.Anchors.Min.X == Node.Slot.Anchors.Max.X)
+					{
+						Context.OldAnchorX = Node.Slot.Anchors.Min.X;
+					}
+					if (Node.Slot.Anchors.Min.Y == Node.Slot.Anchors.Max.Y)
+					{
+						Context.OldAnchorY = Node.Slot.Anchors.Min.Y;
+					}
+				}
+				FBounds NormalizedBounds;
+				NormalizedBounds.X = Node.Bounds.X / Context.DesignSize.X;
+				NormalizedBounds.Y = Node.Bounds.Y / Context.DesignSize.Y;
+				NormalizedBounds.W = Node.Bounds.W / Context.DesignSize.X;
+				NormalizedBounds.H = Node.Bounds.H / Context.DesignSize.Y;
+				const bool bOrigAutoSize = SlotData.bAutoSize;
+				SlotData = FLayoutCalculator::CalculateSlot(NormalizedBounds, Context);
+				SlotData.bAutoSize = bOrigAutoSize;
+			}
+			UE_LOG(LogDesign2UMG, Verbose,
+				TEXT("CreateWidgetSlot: '%s' anc=(%.2f,%.2f)-(%.2f,%.2f) off=(%.1f,%.1f,%.1f,%.1f) align=(%.2f,%.2f) auto=%d"),
+				*Node.Name,
+				SlotData.Anchors.Min.X, SlotData.Anchors.Min.Y,
+				SlotData.Anchors.Max.X, SlotData.Anchors.Max.Y,
+				SlotData.Offsets.Left, SlotData.Offsets.Top, SlotData.Offsets.Right, SlotData.Offsets.Bottom,
+				SlotData.Alignment.X, SlotData.Alignment.Y,
+				SlotData.bAutoSize ? 1 : 0);
+			ApplySlotProperties(Slot, SlotData);
+		}
+	}
+
+	ApplyWidgetProperties(NewWidget, Node);
+	TryAppendFigmaMetadataRecord(NewWidget, Node, FigmaMetadataRecords);
+
+	if (UImage* ImageWidget = Cast<UImage>(NewWidget))
+	{
+		if (!HandleImageMaterialRef(ImageWidget, Node))
+		{
+			HandleImageTextureRef(ImageWidget, Node, TextureMap);
+		}
 	}
 
 	return NewWidget;
