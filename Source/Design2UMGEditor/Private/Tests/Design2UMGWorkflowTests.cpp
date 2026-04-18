@@ -26,6 +26,9 @@
 #include "Editor.h"
 #include "Components/Button.h"
 #include "Components/GridPanel.h"
+#include "Components/PanelWidget.h"
+#include "Components/Image.h"
+#include "Components/Border.h"
 #include "Components/GridSlot.h"
 #include "Components/ScrollBox.h"
 #include "Components/TextBlock.h"
@@ -1852,6 +1855,133 @@ bool FFigmaGridSlotSemanticsRuntimeWorkflowTest::RunTest(const FString& Paramete
 }
 
 #include "Design2UMGWorkflowTests.ImportBake.inl"
+
+namespace
+{
+	FString SerializeWidgetTree(const UWidget* Widget, int32 Depth = 0)
+	{
+		if (!Widget)
+		{
+			return FString();
+		}
+
+		const FString Indent = FString::ChrN(Depth * 2, TEXT(' '));
+		const FString SlotClass = Widget->Slot ? Widget->Slot->GetClass()->GetName() : TEXT("none");
+		FString Result = FString::Printf(TEXT("%s%s:%s[%s]\n"),
+			*Indent,
+			*Widget->GetClass()->GetName(),
+			*Widget->GetName(),
+			*SlotClass);
+
+		if (const UPanelWidget* Panel = Cast<UPanelWidget>(Widget))
+		{
+			for (int32 i = 0; i < Panel->GetChildrenCount(); ++i)
+			{
+				Result += SerializeWidgetTree(Panel->GetChildAt(i), Depth + 1);
+			}
+		}
+
+		return Result;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTreeBuilderStructureSnapshotStableTest,
+	"Design2UMG.TreeBuilder.StructureSnapshotStable",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTreeBuilderStructureSnapshotStableTest::RunTest(const FString& Parameters)
+{
+	FUMGWidgetData Data;
+	Data.WidgetName = TEXT("WBP_SnapFixture");
+
+	Data.RootWidget.Type = TEXT("CanvasPanel");
+	Data.RootWidget.Id = TEXT("snap_root");
+	Data.RootWidget.Name = TEXT("snap_root");
+	Data.RootWidget.Bounds = {0.0f, 0.0f, 400.0f, 300.0f};
+
+	FUMGWidgetNode BorderNode;
+	BorderNode.Type = TEXT("Border");
+	BorderNode.Id = TEXT("snap_border");
+	BorderNode.Name = TEXT("snap_border");
+	BorderNode.Bounds = {0.0f, 0.0f, 200.0f, 100.0f};
+
+	FUMGWidgetNode TextNode;
+	TextNode.Type = TEXT("TextBlock");
+	TextNode.Id = TEXT("snap_text");
+	TextNode.Name = TEXT("snap_text");
+	TextNode.Bounds = {0.0f, 0.0f, 100.0f, 30.0f};
+	TextNode.Text.Text = TEXT("snap");
+	TextNode.Text.bHasText = true;
+	BorderNode.Children.Add(TextNode);
+
+	FUMGWidgetNode GridNode;
+	GridNode.Type = TEXT("GridPanel");
+	GridNode.Id = TEXT("snap_grid");
+	GridNode.Name = TEXT("snap_grid");
+	GridNode.Bounds = {0.0f, 110.0f, 200.0f, 100.0f};
+
+	FUMGWidgetNode Img0;
+	Img0.Type = TEXT("Image");
+	Img0.Id = TEXT("snap_img0");
+	Img0.Name = TEXT("snap_img0");
+	Img0.Bounds = {0.0f, 0.0f, 80.0f, 80.0f};
+
+	FUMGWidgetNode Img1;
+	Img1.Type = TEXT("Image");
+	Img1.Id = TEXT("snap_img1");
+	Img1.Name = TEXT("snap_img1");
+	Img1.Bounds = {90.0f, 0.0f, 80.0f, 80.0f};
+
+	GridNode.Children.Add(Img0);
+	GridNode.Children.Add(Img1);
+
+	Data.RootWidget.Children.Add(BorderNode);
+	Data.RootWidget.Children.Add(GridNode);
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/SnapFixture");
+	DeleteGeneratedAssetsAtPath(OutputPath);
+
+	UWidgetBlueprint* Blueprint = FUMGGenerator::BuildWidgetBlueprint(Data, OutputPath);
+	TestTrue(TEXT("Snapshot fixture blueprint built"), Blueprint != nullptr);
+	if (!Blueprint)
+	{
+		return false;
+	}
+
+	FUMGGenerator::SaveWidgetBlueprint(Blueprint);
+	UWidgetBlueprintGeneratedClass* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(Blueprint->GeneratedClass);
+	TestTrue(TEXT("Snapshot fixture generated class exists"), GeneratedClass != nullptr);
+	if (!GeneratedClass)
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	TestTrue(TEXT("Editor world exists for snapshot test"), World != nullptr);
+	UUserWidget* WidgetInstance = World ? CreateWidget<UUserWidget>(World, GeneratedClass) : nullptr;
+	TestTrue(TEXT("Snapshot fixture widget instance created"), WidgetInstance != nullptr);
+	if (!WidgetInstance || !WidgetInstance->WidgetTree || !WidgetInstance->WidgetTree->RootWidget)
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	const FString Actual = SerializeWidgetTree(WidgetInstance->WidgetTree->RootWidget).TrimEnd();
+
+	const FString Expected = TEXT(
+		"CanvasPanel:snap_root[none]\n"
+		"  Border:snap_border[CanvasPanelSlot]\n"
+		"    TextBlock:snap_text[BorderSlot]\n"
+		"  GridPanel:snap_grid[CanvasPanelSlot]\n"
+		"    Image:snap_img0[GridSlot]\n"
+		"    Image:snap_img1[GridSlot]"
+	);
+
+	TestEqual(TEXT("Widget tree structure snapshot matches"), Actual, Expected);
+
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
 
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLayoutFixerConservatismTest,
