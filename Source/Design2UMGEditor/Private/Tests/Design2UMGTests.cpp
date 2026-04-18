@@ -3109,4 +3109,24 @@ bool FShouldPreferIntrinsicSingleLineFontFamilyNameDoesNotAffectSizeTest::RunTes
 
 #include "Design2UMGTests.FigmaCoverage.inl"
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextMeasurementNoSubstringFontDispatchTest,
+	"Design2UMG.TextMeasurement.NoSubstringFontDispatch",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTextMeasurementNoSubstringFontDispatchTest::RunTest(const FString& Parameters)
+{
+	const FString SourcePath = FPaths::ConvertRelativePathToFull(
+		FPaths::ProjectPluginsDir() / TEXT("Design2UMG/Source/Design2UMGCore/Private/TextMeasurement.cpp"));
+	FString Source;
+	if (!FFileHelper::LoadFileToString(Source, *SourcePath))
+	{
+		AddWarning(TEXT("Could not load TextMeasurement.cpp, skipping substring font dispatch guard."));
+		return true;
+	}
+	TestFalse(TEXT("TextMeasurement.cpp must not contain Contains(TEXT(\"mono\")) font-name dispatch"),
+		Source.Contains(TEXT("Contains(TEXT(\"mono\"))"), ESearchCase::CaseSensitive));
+	TestFalse(TEXT("TextMeasurement.cpp must not contain Contains(TEXT(\"code\")) font-name dispatch"),
+		Source.Contains(TEXT("Contains(TEXT(\"code\"))"), ESearchCase::CaseSensitive));
+	return true;
+}
+
 #endif // WITH_AUTOMATION_WORKER

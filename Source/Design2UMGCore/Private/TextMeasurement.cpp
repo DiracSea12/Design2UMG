@@ -350,13 +350,6 @@ namespace
 			|| Normalized == TEXT("900");
 	}
 
-	bool IsMonospaceLikeFontFamily(const FString& FontFamily)
-	{
-		const FString Normalized = NormalizeTextMeasurementFontFamilyKey(FontFamily);
-		return Normalized.Contains(TEXT("mono"))
-			|| Normalized.Contains(TEXT("code"));
-	}
-
 	FString SummarizeTextForLog(const FString& Text)
 	{
 		FString Summary = TextMeasurement::PrepareRuntimeTextContent(Text);
