@@ -3020,6 +3020,91 @@ bool FIsCompactBoldTokenTextFontFamilyNameDoesNotAffectSizeTest::RunTest(const F
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FShouldPreferIntrinsicSingleLineNoFontFamilyDependencyTest,
+	"Design2UMG.TextMeasurement.ShouldPreferIntrinsicSingleLineNoFontFamilyDependency",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FShouldPreferIntrinsicSingleLineNoFontFamilyDependencyTest::RunTest(const FString& Parameters)
+{
+	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
+	TestTrue(TEXT("Design2UMG plugin found"), Plugin.IsValid());
+	if (!Plugin.IsValid())
+		return false;
+
+	FString Source;
+	TestTrue(TEXT("Load TextMeasurement.cpp"), FFileHelper::LoadFileToString(Source,
+		*(FPaths::Combine(Plugin->GetBaseDir(), TEXT("Source/Design2UMGCore/Private/TextMeasurement.cpp")))));
+	if (Source.IsEmpty())
+		return false;
+
+	const int32 FuncPos = Source.Find(TEXT("bool ShouldPreferIntrinsicSingleLineFallbackFontSize("), ESearchCase::CaseSensitive);
+	TestTrue(TEXT("ShouldPreferIntrinsicSingleLineFallbackFontSize function found"), FuncPos != INDEX_NONE);
+	if (FuncPos == INDEX_NONE)
+		return false;
+
+	int32 FuncEnd = INDEX_NONE;
+	int32 BraceDepth = 0;
+	for (int32 i = FuncPos; i < Source.Len(); ++i)
+	{
+		if (Source[i] == TEXT('{')) ++BraceDepth;
+		else if (Source[i] == TEXT('}')) { --BraceDepth; if (BraceDepth == 0) { FuncEnd = i; break; } }
+	}
+	TestTrue(TEXT("ShouldPreferIntrinsicSingleLineFallbackFontSize function body found"), FuncEnd != INDEX_NONE);
+	if (FuncEnd == INDEX_NONE)
+		return false;
+
+	const FString FuncBody = Source.Mid(FuncPos, FuncEnd - FuncPos + 1);
+	TestFalse(TEXT("ShouldPreferIntrinsicSingleLineFallbackFontSize must not reference IsMonospaceLikeFontFamily"),
+		FuncBody.Contains(TEXT("IsMonospaceLikeFontFamily"), ESearchCase::CaseSensitive));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FShouldPreferIntrinsicSingleLineFontFamilyNameDoesNotAffectSizeTest,
+	"Design2UMG.TextMeasurement.ShouldPreferIntrinsicSingleLineFontFamilyNameDoesNotAffectSize",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FShouldPreferIntrinsicSingleLineFontFamilyNameDoesNotAffectSizeTest::RunTest(const FString& Parameters)
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		AddWarning(TEXT("Slate is not initialized, skipping intrinsic single-line font family name test."));
+		return true;
+	}
+
+	// Two nodes identical except FontFamily: one contains "mono", one does not.
+	// Conditions match ShouldPreferIntrinsicSingleLineFallbackFontSize:
+	//   bExpandedRefInstance=true, top-aligned, single-line, non-heavy, bSourceHasWidth=false, FontSize>=12
+	auto MakeNode = [](const FString& InFontFamily) -> TSharedPtr<FDesignNode>
+	{
+		TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
+		Node->Type = EDesignNodeType::Text;
+		Node->Text.Content = TEXT("Hello World Example");
+		Node->Text.FontFamily = InFontFamily;
+		Node->Text.FontWeight = TEXT("Regular");
+		Node->Text.FontSize = 16.0f;
+		Node->Text.LineHeight = 0.0f;
+		Node->Text.LetterSpacing = 0.0f;
+		Node->Text.TextAlign = EDesignTextAlign::Left;
+		Node->Text.TextAlignVertical = EDesignTextAlignVertical::Top;
+		Node->Text.TextGrowth = EDesignTextGrowth::Auto;
+		Node->Transform.bSourceHasWidth = false;
+		Node->Source.bExpandedRefInstance = true;
+		return Node;
+	};
+
+	const TSharedPtr<FDesignNode> MonoNode = MakeNode(TEXT("FakeMonoFont_UnitTest"));  // contains "mono"
+	const TSharedPtr<FDesignNode> SansNode = MakeNode(TEXT("FakeSansFont_UnitTest"));  // no "mono"/"code"
+
+	TextMeasurement::ResetCache();
+	const float MonoSize = TextMeasurement::ResolveTextFontSizeForUMG(MonoNode);
+	TextMeasurement::ResetCache();
+	const float SansSize = TextMeasurement::ResolveTextFontSizeForUMG(SansNode);
+
+	TestTrue(TEXT("Mono-named node resolves a size"), MonoSize > 0.0f);
+	TestTrue(TEXT("Sans-named node resolves a size"), SansSize > 0.0f);
+	TestTrue(TEXT("ResolveTextFontSizeForUMG must not depend on font family name containing 'mono'"),
+		FMath::IsNearlyEqual(MonoSize, SansSize, 0.01f));
+	return true;
+}
+
 #include "Design2UMGTests.EffectsAndShadow.inl"
 
 #include "Design2UMGTests.FigmaCoverage.inl"

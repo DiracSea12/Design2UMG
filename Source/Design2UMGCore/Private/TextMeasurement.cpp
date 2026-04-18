@@ -808,8 +808,7 @@ bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
 			|| Node->Transform.bSourceHasWidth
 			|| !Node->Source.bExpandedRefInstance
 			|| Node->Text.FontSize < 12.0f
-			|| IsHeavyFontWeight(Node->Text.FontWeight)
-			|| IsMonospaceLikeFontFamily(Node->Text.FontFamily))
+			|| IsHeavyFontWeight(Node->Text.FontWeight))
 		{
 			return false;
 		}
