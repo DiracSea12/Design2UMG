@@ -1,6 +1,7 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGWidgetUtils.h"
+#include "WidgetMetadataCollector.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
 #include "LayoutCalculator.h"
@@ -320,26 +321,6 @@ namespace
 	// 前向声明 Image 控件辅助函数（定义在后面）
 	bool HandleImageMaterialRef(UImage* ImageWidget, const FUMGWidgetNode& Node);
 	bool HandleImageTextureRef(UImage* ImageWidget, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap);
-
-	void TryAppendFigmaMetadataRecord(
-		UWidget* Widget,
-		const FUMGWidgetNode& Node,
-		TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords)
-	{
-		if (!Widget || !FigmaMetadataRecords || !Node.Source.HasAnyComponentSemantics())
-		{
-			return;
-		}
-
-		FDesign2UMGFigmaWidgetMetadataRecord Record;
-		Record.WidgetName = Widget->GetFName();
-		Record.WidgetId = Node.Id;
-		Record.SourceNode = Node.Source;
-		if (Record.IsValid())
-		{
-			FigmaMetadataRecords->Add(Record);
-		}
-	}
 }
 
 // 前向声明：从 CreateWidgetRecursive 拆分出的子控件处理函数
@@ -459,7 +440,7 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 	}
 
 	ApplyWidgetProperties(NewWidget, Node);
-	TryAppendFigmaMetadataRecord(NewWidget, Node, FigmaMetadataRecords);
+	FWidgetMetadataCollector::TryAppend(NewWidget, Node, FigmaMetadataRecords);
 
 	if (UImage* ImageWidget = Cast<UImage>(NewWidget))
 	{
