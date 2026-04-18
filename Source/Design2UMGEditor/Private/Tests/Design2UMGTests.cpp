@@ -2701,10 +2701,73 @@ bool FPenRichTextConverterUsesRichTextBlockTest::RunTest(const FString& Paramete
 	TestTrue(TEXT("Rich text markup keeps link text"), Markup.Contains(TEXT("Docs")));
 	TestEqual(TEXT("Single rich hyperlink becomes tooltip"), GetWidgetProperty(*RichLabel, TEXT("ToolTipText")), TEXT("https://docs.example.com"));
 
-	FString StyleRowsJson;
 	TestTrue(TEXT("Rich text style rows exported via typed text payload"), RichLabel->Text.bHasRichTextStyleRows);
-	StyleRowsJson = RichLabel->Text.RichTextStyleRowsJson;
-	TestTrue(TEXT("Rich text style rows include second run"), StyleRowsJson.Contains(TEXT("d2u_run_1")));
+	if (!RichLabel->Text.bHasRichTextStyleRows)
+	{
+		return false;
+	}
+
+	// Parse JSON → stable snapshot: rowName{key=value;...}|... (rows sorted by name, keys in fixed order)
+	TSharedPtr<FJsonObject> StyleRows;
+	{
+		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(RichLabel->Text.RichTextStyleRowsJson);
+		TestTrue(TEXT("Style rows JSON is valid"), FJsonSerializer::Deserialize(Reader, StyleRows) && StyleRows.IsValid());
+		if (!StyleRows.IsValid())
+		{
+			return false;
+		}
+	}
+
+	// Fixed key order matching the serializer's runtime-property set
+	static const TCHAR* const KeyOrder[] = {
+		TEXT("Color"), TEXT("DesignFontSize"), TEXT("FontFamily"), TEXT("FontSize"),
+		TEXT("Href"), TEXT("LetterSpacing"), TEXT("Strikethrough"), TEXT("TypefaceFontName"), TEXT("Underline")
+	};
+
+	TArray<FString> RowNames;
+	for (const auto& Pair : StyleRows->Values)
+	{
+		RowNames.Add(Pair.Key);
+	}
+	RowNames.Sort();
+
+	FString Snapshot;
+	for (const FString& RowName : RowNames)
+	{
+		if (!Snapshot.IsEmpty()) Snapshot += TEXT("|");
+		Snapshot += RowName + TEXT("{");
+		const TSharedPtr<FJsonObject>* RowObj = nullptr;
+		StyleRows->TryGetObjectField(RowName, RowObj);
+		bool bFirstKey = true;
+		for (const TCHAR* Key : KeyOrder)
+		{
+			if (!RowObj || !(*RowObj)->HasField(Key)) continue;
+			if (!bFirstKey) Snapshot += TEXT(";");
+			bFirstKey = false;
+			const TSharedPtr<FJsonValue>& Val = (*RowObj)->Values[Key];
+			FString ValStr;
+			if (Val->Type == EJson::String)
+			{
+				ValStr = Val->AsString();
+			}
+			else if (Val->Type == EJson::Number)
+			{
+				ValStr = FString::Printf(TEXT("%.1f"), Val->AsNumber());
+			}
+			else if (Val->Type == EJson::Boolean)
+			{
+				ValStr = Val->AsBool() ? TEXT("true") : TEXT("false");
+			}
+			Snapshot += FString(Key) + TEXT("=") + ValStr;
+		}
+		Snapshot += TEXT("}");
+	}
+
+	const FString ExpectedSnapshot =
+		TEXT("d2u_run_0{Color=#112233FF;DesignFontSize=18.0;FontFamily=/Game/Design2UMG/Fonts/Geist.Geist;FontSize=27.0;TypefaceFontName=Regular}")
+		TEXT("|d2u_run_1{Color=#112233FF;DesignFontSize=18.0;FontFamily=/Game/Design2UMG/Fonts/Geist.Geist;FontSize=27.0;Href=https://docs.example.com;TypefaceFontName=Bold;Underline=true}");
+
+	TestEqual(TEXT("Rich text style rows snapshot matches"), Snapshot, ExpectedSnapshot);
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPathStrokeOnlyIconRasterizationTest,
