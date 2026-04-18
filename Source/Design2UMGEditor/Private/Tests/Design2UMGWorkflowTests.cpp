@@ -12,6 +12,7 @@
 #include "LayoutFixer.h"
 #include "PenParser.h"
 #include "UMGGenerator.h"
+#include "PreBuildResourceNormalizer.h"
 #include "PenMCPBridge.h"
 #include "DesignPreviewMaterializationService.h"
 #define private public
@@ -2291,4 +2292,165 @@ bool FFillWidthSingleLineTextDoesNotInflateFitHeightTest::RunTest(const FString&
 		FMath::IsNearlyEqual(RootWidget->Bounds.H, 44.0f, 0.5f));
 	return true;
 }
+namespace
+{
+	struct FNormalizerSnapshot
+	{
+		FString Type;
+		FString Id;
+		FString Name;
+		FString PathGeometry;
+		bool bHasGeometry = false;
+		FString MaterialRef;
+		bool bHasMaterialRef = false;
+		FString TexturePath;
+		bool bHasTexturePath = false;
+	};
+
+	FNormalizerSnapshot SnapNode(const FUMGWidgetNode& Node)
+	{
+		FNormalizerSnapshot S;
+		S.Type = Node.Type;
+		S.Id = Node.Id;
+		S.Name = Node.Name;
+		S.PathGeometry = Node.Path.Geometry;
+		S.bHasGeometry = Node.Path.bHasGeometry;
+		S.MaterialRef = Node.Brush.MaterialRef;
+		S.bHasMaterialRef = Node.Brush.bHasMaterialRef;
+		S.TexturePath = Node.Brush.Image.TexturePath;
+		S.bHasTexturePath = Node.Brush.Image.bHasTexturePath;
+		return S;
+	}
+
+	FUMGWidgetNode MakePathImageNode(const FString& Id, const FString& Geometry)
+	{
+		FUMGWidgetNode Node;
+		Node.Type = TEXT("Image");
+		Node.Id = Id;
+		Node.Name = Id;
+		Node.Path.Geometry = Geometry;
+		Node.Path.bHasGeometry = !Geometry.IsEmpty();
+		Node.Path.FillRule = TEXT("nonzero");
+		Node.Path.bHasFillRule = true;
+		Node.Path.FillColor = FLinearColor::White;
+		Node.Path.bHasFillColor = true;
+		Node.WidgetStyle.WidthOverride = 32.0f;
+		Node.WidgetStyle.HeightOverride = 32.0f;
+		return Node;
+	}
+
+	FUMGWidgetNode MakeProceduralNode(const FString& Id, const FString& MaterialRef)
+	{
+		FUMGWidgetNode Node;
+		Node.Type = TEXT("Image");
+		Node.Id = Id;
+		Node.Name = Id;
+		Node.Brush.MaterialRef = MaterialRef;
+		Node.Brush.bHasMaterialRef = !MaterialRef.IsEmpty();
+		Node.WidgetStyle.WidthOverride = 32.0f;
+		Node.WidgetStyle.HeightOverride = 32.0f;
+		return Node;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreBuildNormalizerPathTextureBeforeAfterDiffTest,
+	"Design2UMG.PreBuildResourceNormalizer.PathTexture.BeforeAfterDiff",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPreBuildNormalizerPathTextureBeforeAfterDiffTest::RunTest(const FString& Parameters)
+{
+	if (GUsingNullRHI) return true;
+
+	FUMGWidgetNode Root;
+	Root.Type = TEXT("CanvasPanel");
+	Root.Id = TEXT("norm_path_root");
+	Root.Name = TEXT("norm_path_root");
+	Root.Bounds = {0, 0, 64, 64};
+	Root.Children.Add(MakePathImageNode(TEXT("path_node"), TEXT("M 0 0 L 32 0 L 32 32 Z")));
+
+	const FNormalizerSnapshot Before = SnapNode(Root.Children[0]);
+	TestTrue(TEXT("Before: bHasGeometry"), Before.bHasGeometry);
+	TestFalse(TEXT("Before: bHasTexturePath"), Before.bHasTexturePath);
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/NormPathTexture");
+	FPreBuildResourceNormalizer::NormalizePathTextures(Root, OutputPath / TEXT("D2U_PathTextures"), TEXT("norm_path"));
+
+	const FNormalizerSnapshot After = SnapNode(Root.Children[0]);
+	TestEqual(TEXT("After: type unchanged"), After.Type, Before.Type);
+	TestEqual(TEXT("After: id unchanged"), After.Id, Before.Id);
+	TestEqual(TEXT("After: name unchanged"), After.Name, Before.Name);
+	TestFalse(TEXT("After: bHasGeometry cleared"), After.bHasGeometry);
+	TestTrue(TEXT("After: bHasTexturePath set"), After.bHasTexturePath);
+	TestFalse(TEXT("After: TexturePath non-empty"), After.TexturePath.IsEmpty());
+	TestFalse(TEXT("After: MaterialRef not set"), After.bHasMaterialRef);
+
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreBuildNormalizerProceduralTextureBeforeAfterDiffTest,
+	"Design2UMG.PreBuildResourceNormalizer.ProceduralTexture.BeforeAfterDiff",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPreBuildNormalizerProceduralTextureBeforeAfterDiffTest::RunTest(const FString& Parameters)
+{
+	if (GUsingNullRHI) return true;
+
+	FUMGWidgetNode Root;
+	Root.Type = TEXT("CanvasPanel");
+	Root.Id = TEXT("norm_proc_root");
+	Root.Name = TEXT("norm_proc_root");
+	Root.Bounds = {0, 0, 64, 64};
+	Root.Children.Add(MakeProceduralNode(TEXT("proc_node"), TEXT("RoundedRect")));
+
+	const FNormalizerSnapshot Before = SnapNode(Root.Children[0]);
+	TestTrue(TEXT("Before: bHasMaterialRef"), Before.bHasMaterialRef);
+	TestFalse(TEXT("Before: bHasTexturePath"), Before.bHasTexturePath);
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/NormProcTexture");
+	FPreBuildResourceNormalizer::NormalizeProceduralTextures(Root, OutputPath / TEXT("D2U_ProceduralTextures"), TEXT("norm_proc"));
+
+	const FNormalizerSnapshot After = SnapNode(Root.Children[0]);
+	TestEqual(TEXT("After: type unchanged"), After.Type, Before.Type);
+	TestEqual(TEXT("After: id unchanged"), After.Id, Before.Id);
+	TestEqual(TEXT("After: name unchanged"), After.Name, Before.Name);
+	TestFalse(TEXT("After: bHasMaterialRef cleared"), After.bHasMaterialRef);
+	TestTrue(TEXT("After: bHasTexturePath set"), After.bHasTexturePath);
+	TestFalse(TEXT("After: TexturePath non-empty"), After.TexturePath.IsEmpty());
+
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreBuildNormalizerPathTextureCacheDedupTest,
+	"Design2UMG.PreBuildResourceNormalizer.PathTexture.CacheDedup",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPreBuildNormalizerPathTextureCacheDedupTest::RunTest(const FString& Parameters)
+{
+	if (GUsingNullRHI) return true;
+
+	const FString SharedGeometry = TEXT("M 0 0 L 32 0 L 32 32 Z");
+
+	FUMGWidgetNode Root;
+	Root.Type = TEXT("CanvasPanel");
+	Root.Id = TEXT("norm_dedup_root");
+	Root.Name = TEXT("norm_dedup_root");
+	Root.Bounds = {0, 0, 64, 64};
+	Root.Children.Add(MakePathImageNode(TEXT("dedup_a"), SharedGeometry));
+	Root.Children.Add(MakePathImageNode(TEXT("dedup_b"), SharedGeometry));
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/NormPathDedup");
+	FPreBuildResourceNormalizer::NormalizePathTextures(Root, OutputPath / TEXT("D2U_PathTextures"), TEXT("norm_dedup"));
+
+	const FNormalizerSnapshot AfterA = SnapNode(Root.Children[0]);
+	const FNormalizerSnapshot AfterB = SnapNode(Root.Children[1]);
+
+	TestTrue(TEXT("A: bHasTexturePath set"), AfterA.bHasTexturePath);
+	TestTrue(TEXT("B: bHasTexturePath set"), AfterB.bHasTexturePath);
+	TestFalse(TEXT("A: geometry cleared"), AfterA.bHasGeometry);
+	TestFalse(TEXT("B: geometry cleared"), AfterB.bHasGeometry);
+	TestEqual(TEXT("Dedup: same geometry yields same asset path"), AfterA.TexturePath, AfterB.TexturePath);
+
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
 #endif // WITH_AUTOMATION_WORKER

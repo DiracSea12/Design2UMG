@@ -1,16 +1,14 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGGenerator.h"
+#include "PreBuildResourceNormalizer.h"
+#include "UMGWidgetNodeAccess.h"
+#include "UObject/SavePackage.h"
 #include "Design2UMGFigmaMetadataExtensions.h"
 #include "Design2UMGPrototypeNavigationExtensions.h"
-#include "UMGWidgetNodeAccess.h"
 #include "UMGWidgetUtils.h"
-#include "UMGPropertyKeys.h"
-#include "UMGValueParser.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
-#include "DesignPathRasterizer.h"
-#include "ProceduralShapeGenerator.h"
 #include "ObjectTools.h"
 
 #include "WidgetBlueprint.h"
@@ -18,7 +16,6 @@
 #include "Blueprint/UserWidget.h"
 #include "Components/TextBlock.h"
 #include "Components/WidgetSwitcher.h"
-#include "Engine/Texture2D.h"
 
 #include "Animation/MovieScene2DTransformSection.h"
 #include "Animation/MovieScene2DTransformTrack.h"
@@ -30,10 +27,6 @@
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "AssetRegistry/AssetRegistryModule.h"
-#include "HAL/FileManager.h"
-#include "Misc/PackageName.h"
-#include "TextureResource.h"
-#include "UObject/SavePackage.h"
 #include "UObject/UObjectHash.h"
 
 namespace
@@ -618,327 +611,6 @@ namespace
 		return CanvasRoot;
 	}
 
-	FString FindNodeProperty(const FUMGWidgetNode& Node, const TCHAR* Key)
-	{
-		FString Value;
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, Key, Value);
-		return Value;
-	}
-
-	FString FindNodePropertyOr(const FUMGWidgetNode& Node, const TCHAR* Key, const FString& DefaultValue)
-	{
-		FString Value;
-		return Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, Key, Value) ? Value : DefaultValue;
-	}
-
-	int32 GetNodeRoundedIntProperty(const FUMGWidgetNode& Node, const TCHAR* Key, int32 DefaultValue)
-	{
-		FString SerializedValue;
-		if (Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, Key, SerializedValue))
-		{
-			return FMath::RoundToInt(FCString::Atof(*SerializedValue));
-		}
-		return DefaultValue;
-	}
-
-	void ReplaceNodeFillWithTexturePath(FUMGWidgetNode& Node, const FString& TexturePath)
-	{
-		Node.Path = FUMGPathData();
-		Node.Brush.MaterialRef.Reset();
-		Node.Brush.bHasMaterialRef = false;
-		Node.Brush.MaterialParams.Reset();
-		Node.Brush.bHasMaterialParams = false;
-		Node.Brush.TexturePath = TexturePath;
-		Node.Brush.Image.TexturePath = TexturePath;
-		Node.Brush.Image.bHasTexturePath = true;
-		Node.Brush.Gradient = FUMGVisualBrushData::FGradientData();
-	}
-
-	uint32 MakePathTextureKey(const FUMGWidgetNode& Node)
-	{
-		FString Geometry;
-		FString FillRule;
-		FString FillColor;
-		FString StrokeColor;
-		FString StrokeThickness;
-		FString StrokeCap;
-		FString StrokeJoin;
-		FString WidthOverride;
-		FString HeightOverride;
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::PathGeometry, Geometry);
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::PathFillRule, FillRule);
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::PathFillColor, FillColor);
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::PathStrokeColor, StrokeColor);
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::PathStrokeThickness, StrokeThickness);
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::PathStrokeCap, StrokeCap);
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::PathStrokeJoin, StrokeJoin);
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::WidthOverride, WidthOverride);
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::HeightOverride, HeightOverride);
-
-		uint32 Key = Geometry.IsEmpty() ? 0u : GetTypeHash(Geometry);
-		Key = HashCombine(Key, FillRule.IsEmpty() ? 0u : GetTypeHash(FillRule));
-		Key = HashCombine(Key, FillColor.IsEmpty() ? 0u : GetTypeHash(FillColor));
-		Key = HashCombine(Key, StrokeColor.IsEmpty() ? 0u : GetTypeHash(StrokeColor));
-		Key = HashCombine(Key, StrokeThickness.IsEmpty() ? 0u : GetTypeHash(StrokeThickness));
-		Key = HashCombine(Key, StrokeCap.IsEmpty() ? 0u : GetTypeHash(StrokeCap));
-		Key = HashCombine(Key, StrokeJoin.IsEmpty() ? 0u : GetTypeHash(StrokeJoin));
-		Key = HashCombine(Key, WidthOverride.IsEmpty() ? 0u : GetTypeHash(WidthOverride));
-		Key = HashCombine(Key, HeightOverride.IsEmpty() ? 0u : GetTypeHash(HeightOverride));
-		return Key;
-	}
-
-	uint32 MakeProceduralTextureKey(const FUMGWidgetNode& Node)
-	{
-		const FString MaterialRef = FindNodePropertyOr(Node, UMGPropertyKeys::MaterialRef, Node.Brush.MaterialRef);
-		const FString MaterialParams = FindNodePropertyOr(Node, UMGPropertyKeys::MaterialParams, Node.Brush.MaterialParams);
-		const FString TextureWidth = FindNodeProperty(Node, UMGPropertyKeys::WidthOverride);
-		const FString TextureHeight = FindNodeProperty(Node, UMGPropertyKeys::HeightOverride);
-		const FString ShadowBlur = FindNodeProperty(Node, UMGPropertyKeys::ShadowBlur);
-		const FString BrushColor = FindNodeProperty(Node, UMGPropertyKeys::BrushColor);
-
-		uint32 Key = GetTypeHash(MaterialRef);
-		Key = HashCombine(Key, GetTypeHash(MaterialParams));
-		Key = HashCombine(Key, GetTypeHash(TextureWidth));
-		Key = HashCombine(Key, GetTypeHash(TextureHeight));
-		Key = HashCombine(Key, GetTypeHash(ShadowBlur));
-		Key = HashCombine(Key, GetTypeHash(BrushColor));
-		return Key;
-	}
-
-	bool ApplyPathTextureUiSettings(UTexture2D* Texture, const TextureFilter Filter = TF_Bilinear)
-	{
-		if (!Texture)
-		{
-			return false;
-		}
-
-		Texture->SRGB = true;
-		Texture->NeverStream = true;
-		Texture->LODGroup = TEXTUREGROUP_UI;
-		Texture->CompressionSettings = TC_EditorIcon;
-		Texture->MipGenSettings = TMGS_NoMipmaps;
-		Texture->Filter = Filter;
-		Texture->AddressX = TA_Clamp;
-		Texture->AddressY = TA_Clamp;
-		return true;
-	}
-
-	bool ExtractTextureRawData(UTexture2D* Texture, TArray64<uint8>& OutRawData, int32& OutWidth, int32& OutHeight)
-	{
-		if (!Texture || !Texture->GetPlatformData() || Texture->GetPlatformData()->Mips.Num() <= 0)
-		{
-			return false;
-		}
-
-		FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
-		OutWidth = Mip.SizeX;
-		OutHeight = Mip.SizeY;
-		if (OutWidth <= 0 || OutHeight <= 0)
-		{
-			return false;
-		}
-
-		const int64 ExpectedBytes = static_cast<int64>(OutWidth) * static_cast<int64>(OutHeight) * 4;
-		const void* LockedData = Mip.BulkData.LockReadOnly();
-		if (!LockedData)
-		{
-			Mip.BulkData.Unlock();
-			return false;
-		}
-
-		OutRawData.SetNumUninitialized(ExpectedBytes);
-		FMemory::Memcpy(OutRawData.GetData(), LockedData, ExpectedBytes);
-		Mip.BulkData.Unlock();
-		return true;
-	}
-
-	bool CreateOrUpdatePathTextureAsset(
-		const FString& ImportPath,
-		const FString& AssetName,
-		const TArray64<uint8>& RawData,
-		int32 Width,
-		int32 Height,
-		const TextureFilter Filter,
-		FString& OutObjectPath)
-	{
-		const FString LongPackageName = ImportPath / AssetName;
-		if (!FPackageName::IsValidLongPackageName(LongPackageName))
-		{
-			return false;
-		}
-
-		const FString ObjectPath = LongPackageName + TEXT(".") + AssetName;
-		UTexture2D* Texture = LoadObject<UTexture2D>(nullptr, *ObjectPath);
-		const bool bNewAsset = (Texture == nullptr);
-		if (!Texture)
-		{
-			UPackage* Package = CreatePackage(*LongPackageName);
-			if (!Package)
-			{
-				return false;
-			}
-
-			Texture = NewObject<UTexture2D>(Package, *AssetName, RF_Public | RF_Standalone);
-			if (!Texture)
-			{
-				return false;
-			}
-		}
-
-		UPackage* Package = Texture->GetOutermost();
-		if (!Package)
-		{
-			return false;
-		}
-
-		Texture->PreEditChange(nullptr);
-		Texture->Source.Init(Width, Height, 1, 1, TSF_BGRA8, RawData.GetData());
-		ApplyPathTextureUiSettings(Texture, Filter);
-		Texture->PostEditChange();
-		Texture->UpdateResource();
-		Texture->MarkPackageDirty();
-		Package->MarkPackageDirty();
-
-		if (bNewAsset)
-		{
-			FAssetRegistryModule::AssetCreated(Texture);
-		}
-
-		const FString PackageFilename = FPackageName::LongPackageNameToFilename(LongPackageName, FPackageName::GetAssetPackageExtension());
-		IFileManager::Get().MakeDirectory(*FPaths::GetPath(PackageFilename), true);
-
-		FSavePackageArgs SaveArgs;
-		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
-		if (!UPackage::SavePackage(Package, Texture, *PackageFilename, SaveArgs))
-		{
-			return false;
-		}
-
-		OutObjectPath = ObjectPath;
-		return true;
-	}
-
-	void PersistPathTexturesInNodeTree(
-		FUMGWidgetNode& Node,
-		const FString& TextureImportPath,
-		const FString& AssetPrefix,
-		TMap<uint32, FString>& PathTextureCache)
-	{
-		FString Geometry;
-		if (Node.Type == TEXT("Image") && Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::PathGeometry, Geometry) && !Geometry.IsEmpty())
-		{
-			const uint32 TextureKey = MakePathTextureKey(Node);
-			if (const FString* CachedPath = PathTextureCache.Find(TextureKey))
-			{
-				ReplaceNodeFillWithTexturePath(Node, *CachedPath);
-			}
-			else
-			{
-				const FString FillRule = FindNodePropertyOr(Node, UMGPropertyKeys::PathFillRule, TEXT("nonzero"));
-				const FString FillColor = FindNodeProperty(Node, UMGPropertyKeys::PathFillColor);
-				const FString StrokeColor = FindNodeProperty(Node, UMGPropertyKeys::PathStrokeColor);
-				const FString StrokeCap = FindNodePropertyOr(Node, UMGPropertyKeys::PathStrokeCap, TEXT("butt"));
-				const FString StrokeJoin = FindNodePropertyOr(Node, UMGPropertyKeys::PathStrokeJoin, TEXT("miter"));
-				float StrokeThickness = 0.0f;
-				StrokeThickness = FCString::Atof(*FindNodePropertyOr(Node, UMGPropertyKeys::PathStrokeThickness, TEXT("0")));
-				const int32 Width = FMath::Max(1, GetNodeRoundedIntProperty(Node, UMGPropertyKeys::WidthOverride, 64));
-				const int32 Height = FMath::Max(1, GetNodeRoundedIntProperty(Node, UMGPropertyKeys::HeightOverride, 64));
-
-				if (!Geometry.IsEmpty())
-				{
-					constexpr int32 PathSupersample = 2;
-					const int32 RasterWidth = Width * PathSupersample;
-					const int32 RasterHeight = Height * PathSupersample;
-					const TOptional<FLinearColor> OptionalFillColor =
-						FillColor.IsEmpty() ? TOptional<FLinearColor>() : TOptional<FLinearColor>(FUMGValueParser::ParseColor(FillColor));
-					const TOptional<FLinearColor> OptionalStrokeColor =
-						StrokeColor.IsEmpty() ? TOptional<FLinearColor>() : TOptional<FLinearColor>(FUMGValueParser::ParseColor(StrokeColor));
-					if (UTexture2D* Rasterized = FDesignPathRasterizer::Rasterize(
-						*Geometry,
-						RasterWidth,
-						RasterHeight,
-						OptionalFillColor,
-						FillRule,
-						OptionalStrokeColor,
-						StrokeThickness,
-						StrokeCap,
-						StrokeJoin))
-					{
-						TArray64<uint8> RawData;
-						int32 RawWidth = 0;
-						int32 RawHeight = 0;
-						if (ExtractTextureRawData(Rasterized, RawData, RawWidth, RawHeight))
-						{
-							const FString SanitizedNodeName = ObjectTools::SanitizeObjectName(Node.Name.IsEmpty() ? Node.Id : Node.Name);
-							const FString AssetName = ObjectTools::SanitizeObjectName(
-								FString::Printf(TEXT("%s_%s_%08X"), *AssetPrefix, *SanitizedNodeName, TextureKey));
-
-							FString ObjectPath;
-							if (CreateOrUpdatePathTextureAsset(TextureImportPath, AssetName, RawData, RawWidth, RawHeight, TF_Nearest, ObjectPath))
-							{
-								ReplaceNodeFillWithTexturePath(Node, ObjectPath);
-								PathTextureCache.Add(TextureKey, ObjectPath);
-								UE_LOG(LogDesign2UMG, Log, TEXT("Persisted path texture '%s' -> %s"), *Node.Name, *ObjectPath);
-							}
-						}
-					}
-				}
-			}
-		}
-
-		for (FUMGWidgetNode& Child : Node.Children)
-		{
-			PersistPathTexturesInNodeTree(Child, TextureImportPath, AssetPrefix, PathTextureCache);
-		}
-	}
-
-	void PersistProceduralTexturesInNodeTree(
-		FUMGWidgetNode& Node,
-		const FString& TextureImportPath,
-		const FString& AssetPrefix,
-		TMap<uint32, FString>& ProceduralTextureCache)
-	{
-		const FString MaterialRef = FindNodePropertyOr(Node, UMGPropertyKeys::MaterialRef, Node.Brush.MaterialRef);
-		if (!MaterialRef.IsEmpty())
-		{
-			const uint32 TextureKey = MakeProceduralTextureKey(Node);
-			if (const FString* CachedPath = ProceduralTextureCache.Find(TextureKey))
-			{
-				ReplaceNodeFillWithTexturePath(Node, *CachedPath);
-			}
-			else
-			{
-				FUMGPropertyBag GenerationProps = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
-
-				if (UTexture2D* Generated = FProceduralShapeGenerator::GenerateFromMaterialRef(MaterialRef, GenerationProps, nullptr))
-				{
-					TArray64<uint8> RawData;
-					int32 RawWidth = 0;
-					int32 RawHeight = 0;
-					if (ExtractTextureRawData(Generated, RawData, RawWidth, RawHeight))
-					{
-						const FString SanitizedNodeName = ObjectTools::SanitizeObjectName(Node.Name.IsEmpty() ? Node.Id : Node.Name);
-						const FString SanitizedMaterialRef = ObjectTools::SanitizeObjectName(MaterialRef);
-						const FString AssetName = ObjectTools::SanitizeObjectName(
-							FString::Printf(TEXT("%s_%s_%s_%08X"), *AssetPrefix, *SanitizedNodeName, *SanitizedMaterialRef, TextureKey));
-
-						FString ObjectPath;
-						if (CreateOrUpdatePathTextureAsset(TextureImportPath, AssetName, RawData, RawWidth, RawHeight, TF_Bilinear, ObjectPath))
-						{
-							ReplaceNodeFillWithTexturePath(Node, ObjectPath);
-							ProceduralTextureCache.Add(TextureKey, ObjectPath);
-							UE_LOG(LogDesign2UMG, Log, TEXT("Persisted procedural texture '%s' (%s) -> %s"), *Node.Name, *MaterialRef, *ObjectPath);
-						}
-					}
-				}
-			}
-		}
-
-		for (FUMGWidgetNode& Child : Node.Children)
-		{
-			PersistProceduralTexturesInNodeTree(Child, TextureImportPath, AssetPrefix, ProceduralTextureCache);
-		}
-	}
 }
 
 UWidgetBlueprint* FUMGGenerator::GenerateWidgetBlueprint(const FUMGWidgetData& WidgetData, const FString& PackagePath)
@@ -1059,15 +731,8 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 			Settings->bViewportScaleDownOnly);
 	}
 
-	{
-		TMap<uint32, FString> PathTextureCache;
-		const FString PathTextureImportPath = PackagePath / TEXT("D2U_PathTextures");
-		PersistPathTexturesInNodeTree(FixedRoot, PathTextureImportPath, AssetName, PathTextureCache);
-
-		TMap<uint32, FString> ProceduralTextureCache;
-		const FString ProceduralTextureImportPath = PackagePath / TEXT("D2U_ProceduralTextures");
-		PersistProceduralTexturesInNodeTree(FixedRoot, ProceduralTextureImportPath, AssetName, ProceduralTextureCache);
-	}
+	FPreBuildResourceNormalizer::NormalizePathTextures(FixedRoot, PackagePath / TEXT("D2U_PathTextures"), AssetName);
+	FPreBuildResourceNormalizer::NormalizeProceduralTextures(FixedRoot, PackagePath / TEXT("D2U_ProceduralTextures"), AssetName);
 
 	// Dump widget tree only in verbose mode.
 	if (UE_LOG_ACTIVE(LogDesign2UMG, Verbose))
