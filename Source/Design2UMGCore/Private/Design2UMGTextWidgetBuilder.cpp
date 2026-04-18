@@ -8,34 +8,13 @@
 #include "DesignTypeMapper.h"
 #include "FontResolver.h"
 #include "TextMeasurement.h"
-#include "UMGPropertyKeys.h"
 #include "UMGValueParser.h"
 #include "UMGWidgetNodeAccess.h"
-#include "Dom/JsonObject.h"
 #include "Misc/PackageName.h"
-#include "Policies/CondensedJsonPrintPolicy.h"
-#include "Serialization/JsonSerializer.h"
+#include "RichTextStyleRowSerializer.h"
 
 namespace
 {
-	struct FResolvedRichTextRun
-	{
-		FString RowName;
-		FString Content;
-		FString FontFamily;
-		FString TypefaceFontName;
-		float FontSize = 0.0f;
-		float DesignFontSize = 0.0f;
-		float LetterSpacing = 0.0f;
-		bool bHasFontSize = false;
-		bool bHasLetterSpacing = false;
-		bool bUnderline = false;
-		bool bStrikethrough = false;
-		bool bHasColor = false;
-		FString Color;
-		FString Href;
-	};
-
 	struct FGeneratedRichTextContent
 	{
 		FString Markup;
@@ -382,7 +361,6 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 			Runs.Add(BuildResolvedRichTextRun(InNode, nullptr, 0, ResolvedNodeFontSize));
 		}
 
-		TSharedRef<FJsonObject> StyleRowsObject = MakeShared<FJsonObject>();
 		TSet<FString> UniqueHrefs;
 		for (const FResolvedRichTextRun& Run : Runs)
 		{
@@ -395,42 +373,6 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 			Result.Markup += TEXT(">");
 			Result.Markup += EscapeRichTextText(Run.Content);
 			Result.Markup += TEXT("</>");
-
-			TSharedRef<FJsonObject> RowObject = MakeShared<FJsonObject>();
-			if (!Run.FontFamily.IsEmpty())
-			{
-				RowObject->SetStringField(UMGPropertyKeys::FontFamily, Run.FontFamily);
-			}
-			if (!Run.TypefaceFontName.IsEmpty())
-			{
-				RowObject->SetStringField(UMGPropertyKeys::TypefaceFontName, Run.TypefaceFontName);
-			}
-			if (Run.bHasFontSize)
-			{
-				RowObject->SetNumberField(UMGPropertyKeys::FontSize, Run.FontSize);
-				RowObject->SetNumberField(UMGPropertyKeys::DesignFontSize, Run.DesignFontSize > 0.0f ? Run.DesignFontSize : Run.FontSize);
-			}
-			if (Run.bHasLetterSpacing)
-			{
-				RowObject->SetNumberField(UMGPropertyKeys::LetterSpacing, Run.LetterSpacing);
-			}
-			if (Run.bHasColor)
-			{
-				RowObject->SetStringField(UMGPropertyKeys::Color, Run.Color);
-			}
-			if (Run.bUnderline)
-			{
-				RowObject->SetBoolField(UMGPropertyKeys::Underline, true);
-			}
-			if (Run.bStrikethrough)
-			{
-				RowObject->SetBoolField(UMGPropertyKeys::Strikethrough, true);
-			}
-			if (!Run.Href.IsEmpty())
-			{
-				RowObject->SetStringField(UMGPropertyKeys::Href, Run.Href);
-			}
-			StyleRowsObject->SetObjectField(Run.RowName, RowObject);
 		}
 
 		if (UniqueHrefs.Num() == 1)
@@ -442,13 +384,7 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 			}
 		}
 
-		TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
-			TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Result.StyleRowsJson);
-		Result.bHasStyleRows = FJsonSerializer::Serialize(StyleRowsObject, Writer);
-		if (!Result.bHasStyleRows)
-		{
-			Result.StyleRowsJson.Empty();
-		}
+		Result.bHasStyleRows = RichTextStyleRowSerializer::Serialize(Runs, Result.StyleRowsJson);
 		return Result;
 	};
 
