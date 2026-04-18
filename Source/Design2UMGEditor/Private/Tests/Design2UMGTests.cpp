@@ -2932,6 +2932,94 @@ bool FCompactSingleLineLabelFontFamilyNameDoesNotAffectSizeTest::RunTest(const F
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIsCompactBoldTokenTextNoMonospaceDependencyStaticTest,
+	"Design2UMG.TextMeasurement.IsCompactBoldTokenTextNoMonospaceDependencyStatic",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FIsCompactBoldTokenTextNoMonospaceDependencyStaticTest::RunTest(const FString& Parameters)
+{
+	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
+	TestTrue(TEXT("Design2UMG plugin found"), Plugin.IsValid());
+	if (!Plugin.IsValid())
+		return false;
+
+	FString Source;
+	TestTrue(TEXT("Load TextMeasurement.cpp"), FFileHelper::LoadFileToString(Source,
+		*(FPaths::Combine(Plugin->GetBaseDir(), TEXT("Source/Design2UMGCore/Private/TextMeasurement.cpp")))));
+	if (Source.IsEmpty())
+		return false;
+
+	const int32 FuncPos = Source.Find(TEXT("bool IsCompactBoldTokenText("), ESearchCase::CaseSensitive);
+	TestTrue(TEXT("IsCompactBoldTokenText function found"), FuncPos != INDEX_NONE);
+	if (FuncPos == INDEX_NONE)
+		return false;
+
+	// Find the closing brace of the function body
+	int32 BraceDepth = 0;
+	int32 FuncEnd = INDEX_NONE;
+	for (int32 i = FuncPos; i < Source.Len(); ++i)
+	{
+		if (Source[i] == TEXT('{')) ++BraceDepth;
+		else if (Source[i] == TEXT('}')) { --BraceDepth; if (BraceDepth == 0) { FuncEnd = i; break; } }
+	}
+	TestTrue(TEXT("IsCompactBoldTokenText function body found"), FuncEnd != INDEX_NONE);
+	if (FuncEnd == INDEX_NONE)
+		return false;
+
+	const FString FuncBody = Source.Mid(FuncPos, FuncEnd - FuncPos + 1);
+	TestFalse(TEXT("IsCompactBoldTokenText must not reference IsMonospaceLikeFontFamily"),
+		FuncBody.Contains(TEXT("IsMonospaceLikeFontFamily"), ESearchCase::CaseSensitive));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIsCompactBoldTokenTextFontFamilyNameDoesNotAffectSizeTest,
+	"Design2UMG.TextMeasurement.IsCompactBoldTokenTextFontFamilyNameDoesNotAffectSize",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FIsCompactBoldTokenTextFontFamilyNameDoesNotAffectSizeTest::RunTest(const FString& Parameters)
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		AddWarning(TEXT("Slate is not initialized, skipping compact bold token font family name test."));
+		return true;
+	}
+
+	// Both nodes are identical except FontFamily: one contains "mono", one does not.
+	// Bold 22px single-word token "LVL" (len=3, no space) — hits IsCompactBoldTokenText path.
+	auto MakeNode = [](const FString& InFontFamily) -> TSharedPtr<FDesignNode>
+	{
+		TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
+		Node->Type = EDesignNodeType::Text;
+		Node->Text.Content = TEXT("LVL");
+		Node->Text.FontFamily = InFontFamily;
+		Node->Text.FontWeight = TEXT("Bold");
+		Node->Text.FontSize = 22.0f;
+		Node->Text.LineHeight = 0.0f;
+		Node->Text.LetterSpacing = 0.0f;
+		Node->Text.TextAlign = EDesignTextAlign::Left;
+		Node->Text.TextAlignVertical = EDesignTextAlignVertical::Top;
+		Node->Text.TextGrowth = EDesignTextGrowth::Auto;
+		Node->Transform.Width = FDesignSize::Fixed(40.0f);
+		Node->Transform.Height = FDesignSize::Fixed(28.0f);
+		Node->Transform.bHasWidth = true;
+		Node->Transform.bHasHeight = true;
+		Node->Transform.bSourceHasWidth = false;
+		return Node;
+	};
+
+	const TSharedPtr<FDesignNode> MonoNode = MakeNode(TEXT("FakeCodeFont_UnitTest"));  // contains "code"
+	const TSharedPtr<FDesignNode> SansNode = MakeNode(TEXT("FakeSansFont_UnitTest"));  // no "mono"/"code"
+
+	TextMeasurement::ResetCache();
+	const float MonoSize = TextMeasurement::ResolveTextFontSizeForUMG(MonoNode);
+	TextMeasurement::ResetCache();
+	const float SansSize = TextMeasurement::ResolveTextFontSizeForUMG(SansNode);
+
+	TestTrue(TEXT("Mono-named bold token resolves a size"), MonoSize > 0.0f);
+	TestTrue(TEXT("Sans-named bold token resolves a size"), SansSize > 0.0f);
+	TestTrue(TEXT("Bold compact token size must not depend on font family name containing 'mono'/'code'"),
+		FMath::IsNearlyEqual(MonoSize, SansSize, 0.01f));
+	return true;
+}
+
 #include "Design2UMGTests.EffectsAndShadow.inl"
 
 #include "Design2UMGTests.FigmaCoverage.inl"

@@ -731,13 +731,11 @@ bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
 
 		const FString RuntimeText = TextMeasurement::PrepareRuntimeTextContent(Node->Text.Content).TrimStartAndEnd();
 		return IsBoldDisplayFontWeight(Node->Text.FontWeight)
-			&& !IsMonospaceLikeFontFamily(Node->Text.FontFamily)
-			&& Node->Text.FontSize > 12.0f
+			&& Node->Text.FontSize >= 20.0f
 			&& Node->Text.FontSize <= 24.0f
 			&& !RuntimeText.IsEmpty()
 			&& !RuntimeText.Contains(TEXT(" "))
-			&& RuntimeText.Len() <= 3
-			&& Node->Text.FontSize >= 20.0f;
+			&& RuntimeText.Len() <= 3;
 	}
 
 	bool IsExpandedRefIntrinsicWidthClampCandidate(const TSharedPtr<FDesignNode>& Node)
