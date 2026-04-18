@@ -2,6 +2,7 @@
 
 #include "UMGWidgetUtils.h"
 #include "WidgetMetadataCollector.h"
+#include "WidgetResourceBinder.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
 #include "LayoutCalculator.h"
@@ -318,9 +319,6 @@ namespace
 		}
 	}
 
-	// 前向声明 Image 控件辅助函数（定义在后面）
-	bool HandleImageMaterialRef(UImage* ImageWidget, const FUMGWidgetNode& Node);
-	bool HandleImageTextureRef(UImage* ImageWidget, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap);
 }
 
 // 前向声明：从 CreateWidgetRecursive 拆分出的子控件处理函数
@@ -444,10 +442,7 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 
 	if (UImage* ImageWidget = Cast<UImage>(NewWidget))
 	{
-		if (!HandleImageMaterialRef(ImageWidget, Node))
-		{
-			HandleImageTextureRef(ImageWidget, Node, TextureMap);
-		}
+		FWidgetResourceBinder::BindImageResource(ImageWidget, Node, TextureMap);
 	}
 
 	return NewWidget;
@@ -744,96 +739,6 @@ FName FUMGWidgetUtils::SanitizeWidgetName(const FString& InName, const FString& 
 	}
 
 	return FName(*Sanitized);
-}
-
-namespace
-{
-
-	/**
-	 * 处理 Image 控件的 MaterialRef（程序化形状生成）
-	 * @return true 如果成功生成并绑定纹理
-	 */
-	bool HandleImageMaterialRef(UImage* ImageWidget, const FUMGWidgetNode& Node)
-	{
-		FString MatRef;
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::MaterialRef, MatRef);
-		if (MatRef.IsEmpty())
-		{
-			return false;
-		}
-
-		FUMGPropertyBag GenerationProps = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
-		UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(MatRef, GenerationProps, ImageWidget);
-		if (!Texture)
-		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("Image '%s' 未知形状类型: %s"), *Node.Name, *MatRef);
-			return false;
-		}
-
-		ImageWidget->SetBrushFromTexture(Texture);
-		FSlateBrush Brush = ImageWidget->GetBrush();
-		Brush.ImageSize = FVector2D(Texture->GetSizeX(), Texture->GetSizeY());
-		Brush.Tiling = ESlateBrushTileType::NoTile;
-		ImageWidget->SetBrush(Brush);
-		ImageWidget->SetDesiredSizeOverride(Brush.ImageSize);
-		ImageWidget->SynchronizeProperties();
-		return true;
-	}
-
-	bool HandleImageTextureRef(UImage* ImageWidget, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap)
-	{
-		FString TexPath;
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::TexturePath, TexPath);
-		const FString TrimmedPath = TexPath.TrimStartAndEnd();
-		if (TrimmedPath.IsEmpty())
-		{
-			return false;
-		}
-		UTexture2D* Texture = nullptr;
-
-		// 优先从 TextureMap 查找（预览场景使用内存纹理）
-		if (TextureMap)
-		{
-			if (UTexture2D* const* Found = TextureMap->Find(TrimmedPath))
-			{
-				Texture = *Found;
-			}
-		}
-
-		// 回退：从资产路径加载
-		if (!Texture)
-		{
-			Texture = LoadObject<UTexture2D>(nullptr, *TrimmedPath);
-		}
-
-		if (!Texture) return false;
-
-		// 保留 ApplyWidgetProperties 已设置的 ImageSize 和 UVRegion
-		const FSlateBrush OldBrush = ImageWidget->GetBrush();
-		const FVector2D OldImageSize = OldBrush.ImageSize;
-		const FBox2f OldUVRegion = OldBrush.GetUVRegion();
-
-		ImageWidget->SetBrushFromTexture(Texture);
-		FSlateBrush Brush = ImageWidget->GetBrush();
-		Brush.Tiling = ESlateBrushTileType::NoTile;
-
-		// WidthOverride/HeightOverride 优先（设计稿指定尺寸），否则用纹理原始尺寸
-		// 注意：FSlateBrush 默认 ImageSize 是 32x32，不能用它判断是否有显式覆盖
-		float SizeOverride = 0.0f;
-		const bool bHadSizeOverride =
-			Design2UMGWidgetNodeAccess::TryGetWidgetFloat(Node, UMGPropertyKeys::WidthOverride, SizeOverride) ||
-			Design2UMGWidgetNodeAccess::TryGetWidgetFloat(Node, UMGPropertyKeys::HeightOverride, SizeOverride);
-		Brush.ImageSize = bHadSizeOverride ? OldImageSize : FVector2D(Texture->GetSizeX(), Texture->GetSizeY());
-
-		// 恢复 UVRegion（非默认值说明 Crop 已设置）
-		if (OldUVRegion.GetSize().GetMax() > KINDA_SMALL_NUMBER)
-			Brush.SetUVRegion(OldUVRegion);
-
-		ImageWidget->SetBrush(Brush);
-		ImageWidget->SetDesiredSizeOverride(Brush.ImageSize);
-		ImageWidget->SynchronizeProperties();
-		return true;
-	}
 }
 
 namespace
