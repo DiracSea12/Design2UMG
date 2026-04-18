@@ -777,6 +777,11 @@ namespace DesignImportPipeline
 		return ExecuteWithAnalysis(Data, AnalysisResult, FinalRequest, TOptional<FDesignDocument>(Document));
 	}
 
+	void ConvertDocument(FDesignDocument& Document, FUMGWidgetData& OutData)
+	{
+		OutData = AnalyzeImport(Document, FImportAnalysisInput{false}).Data;
+	}
+
 	void WriteImportDiagnosticReport(
 		const FDesignDocument& Document,
 		const FUMGWidgetData& Data,
@@ -794,6 +799,21 @@ namespace DesignImportPipeline
 			RequestedRenderPngPath,
 			GeneratedAssetPath,
 			RenderPngPath);
+	}
+
+	void ResolveImages(FUMGWidgetData& Data, FString* OutReport)
+	{
+		const FImportAnalysisResult AnalysisResult = AnalyzeImport(Data, FImportAnalysisInput{true});
+		Data = AnalysisResult.Data;
+		if (OutReport)
+		{
+			*OutReport = AnalysisResult.ImageReport;
+		}
+	}
+
+	bool ImportPenJson(const FString& JsonString, FUMGWidgetData& OutData)
+	{
+		return ImportPenJsonInternal(JsonString, OutData);
 	}
 
 	bool LoadPenDocument(

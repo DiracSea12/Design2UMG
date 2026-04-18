@@ -1,9 +1,74 @@
-该文件不可被git追踪，但更不可被删除！！
+﻿该文件不可被git追踪，但更不可被删除！！
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## 重要指示 (Critical Instructions)
 
 **交流说中文 - 请始终用中文回复用户的所有问题和交流**
+**无论是日常交流，还是写文档（如openspec）必须通俗易懂！必须说人话！！必须通俗易懂！必须说人话！！必须通俗易懂！必须说人话！！重要的事情说三遍！！**
+
+Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
+
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+
+## 1. Think Before Coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+## 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+## 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+## 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+- "Add validation" -> "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" -> "Write a test that reproduces it, then make it pass"
+- "Refactor X" -> "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+```text
+1. [Step] -> verify: [check]
+2. [Step] -> verify: [check]
+3. [Step] -> verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+---
+
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
 
 ## 编码与乱码防护（强制）
 
@@ -34,6 +99,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   必须优先选择通用规则，不能写成平台特判、样例特判、过拟合分支。
   如果只是为旧行为、旧字段、旧路径兜底，仍然归类为“兼容性”，必须先经用户同意。
 
+- **红线**：当用户已明确要求代码实现由子代理完成时，主代理**绝对禁止**自己改代码。
+- **红线**：如需启动或重启子代理，**只允许**使用 `gpt-5.4`，禁止使用其他旧型号。
+- **红线**：如果当前任务存在 OpenSpec，开发必须**严格按照** OpenSpec 文档执行，不得擅自偏离。
+- **红线**：未经用户明确要求，**绝对禁止**干涉或催促子代理工作。
+- 允许探测子代理进度和工作情况，但**不可擅自干涉**子代理。
+
 - **绝对禁止**修改引擎源码来修插件问题。插件问题只能改插件、脚本、导出链、parser、运行时逻辑。
 - **绝对禁止**触碰任何设计稿基准图、参考图、对比图。它们只用于 compare reference；不能裁、不能派生、不能当运行时输入、注释里也不要把它当主流程方案。
 - 回归验证不能只看 `passed/failed`。真正的封板标准先看 `no_regression`，要求“和历史基线比一个都不能更差”；视觉阈值没过但 `no_regression` 通过，和“发生回退”不是一回事，不能混为一谈。
@@ -55,6 +126,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   Pencil / Figma 参考图和 UE/Slate 的字体度量不同；`source fontSize` 与 `compiled-instance size` 不是一一对应关系。
   不能因为源设计里写了 `fontSize=36`，就新增“固定宽单行文本直接保留声明字号”的 heuristic；这会把 `welcome_fyi` 一类 case 从历史最佳拉坏。
   不能默认启用“按运行时测量动态重算 text fallback scale”的 heuristic；这会成批改变 `Geist / Oxygen / JetBrains Mono / Inter` 等字体的 compiled size，必须先跑完整 formal gate 证明零退步。
+  不能按具体字体名做专门适配，不能写成 `if (FontFamily == ...)` 这类按字体名分支；字体千千万万，这种写法本质上就是过拟合和刷分。
+  如果确实需要保留字体相关规则，必须能抽象成可泛化、可解释、可验证的共享度量/校准规则，而不是只让某几个字体或某几个 case 看起来更好。
 - Figma 文本 bounds 问题，**不能对 `TEXT / TEXT_PATH` 一刀切强制偏向 layout bounds**。这轮已经踩实：
   文本框选用 `absoluteBoundingBox` 还是 `absoluteRenderBounds` 会直接改变下游 font fitting。
   对 Figma 文本盲目强制 layout bounds，会把 `figma-export_local/source` 一类 case 拉离历史最佳。

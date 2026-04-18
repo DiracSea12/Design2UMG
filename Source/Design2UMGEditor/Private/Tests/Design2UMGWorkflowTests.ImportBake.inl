@@ -43,7 +43,8 @@ bool FFigmaTargetNodeAndImageMappingWorkflowTest::RunTest(const FString& Paramet
 	TestTrue(TEXT("Mapped image ref should become local png path"),
 		ImageRefs.Contains(FPaths::Combine(TempImagesDir, TEXT("img_card_bg_002.png"))));
 
-	FUMGWidgetData Data = DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{ false }).Data;
+	FUMGWidgetData Data;
+	DesignImportPipeline::ConvertDocument(Document, Data);
 	TestFalse(TEXT("Filtered figma target yields widget name"), Data.WidgetName.IsEmpty());
 
 	IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
@@ -424,7 +425,8 @@ bool FPenLocalBlendModeBakeWorkflowTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	FUMGWidgetData Data = DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{ false }).Data;
+	FUMGWidgetData Data;
+	DesignImportPipeline::ConvertDocument(Document, Data);
 	TestTrue(TEXT("Pen blend conversion keeps all top-level nodes"), Document.Children.Num() == 3 && Data.RootWidget.Children.Num() == 3);
 	if (Document.Children.Num() < 3)
 	{
