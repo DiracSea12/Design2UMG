@@ -51,21 +51,6 @@ namespace
 		return Design2UMGCore::SharedSemantics::ShouldSkipNode(Node);
 	}
 
-	float ResolveSizingWidthHint(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth)
-	{
-		if (!Node.IsValid())
-		{
-			return 0.0f;
-		}
-
-		if (Node->Transform.Width.IsFill())
-		{
-			return Node->Transform.Width.Value > 0.0f ? Node->Transform.Width.Value : ParentContentWidth;
-		}
-
-		return Node->Transform.Width.Value > 0.0f ? Node->Transform.Width.Value : 0.0f;
-	}
-
 	bool HasExplicitFitDimension(const FDesignSize& Size)
 	{
 		return Size.IsFit() && Size.Value > 0.0f;
@@ -147,7 +132,7 @@ namespace
 			const bool bHasExplicitFitHeight = bLockExplicitFit && HasExplicitFitDimension(Node->Transform.Height);
 			if (Node->Transform.Width.IsFill())
 			{
-				const float FillWidth = ResolveSizingWidthHint(Node, ParentContentWidth);
+				const float FillWidth = Design2UMGCore::SharedSemantics::ResolveWidthHint(Node, ParentContentWidth);
 				if (FillWidth > 0.0f)
 				{
 					W = FMath::Max(W, FillWidth);
@@ -294,7 +279,7 @@ float SizeEstimator::ComputeChildContentWidthHint(const TSharedPtr<FDesignNode>&
 		return 0.0f;
 	}
 
-	const float ResolvedWidth = ResolveSizingWidthHint(Node, ParentContentWidth);
+	const float ResolvedWidth = Design2UMGCore::SharedSemantics::ResolveWidthHint(Node, ParentContentWidth);
 	if (ResolvedWidth <= 0.0f)
 	{
 		return 0.0f;
@@ -321,7 +306,7 @@ float SizeEstimator::ComputeChildContentWidthHint(const TSharedPtr<FDesignNode>&
 			continue;
 		}
 
-		RemainingWidth -= ResolveSizingWidthHint(VisibleChild, 0.0f);
+		RemainingWidth -= Design2UMGCore::SharedSemantics::ResolveWidthHint(VisibleChild, 0.0f);
 	}
 
 	if (!Child->Transform.Width.IsFill() || FillChildCount <= 0 || RemainingWidth <= 0.0f)
@@ -379,7 +364,7 @@ namespace
 		float H = Node->Transform.Height.Value;
 		if (Node->Transform.Width.IsFill())
 		{
-			const float FillWidth = ResolveSizingWidthHint(Node, ParentContentWidth);
+			const float FillWidth = Design2UMGCore::SharedSemantics::ResolveWidthHint(Node, ParentContentWidth);
 			if (FillWidth > 0.0f)
 			{
 				W = FMath::Max(W, FillWidth);

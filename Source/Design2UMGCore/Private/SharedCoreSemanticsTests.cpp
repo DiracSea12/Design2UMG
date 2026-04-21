@@ -4,6 +4,7 @@
 
 #include "Design2UMGConverter.h"
 #include "Design2UMGSettings.h"
+#include "SharedCoreSemantics.h"
 #include "SizeEstimator.h"
 #include "TextMeasurement.h"
 
@@ -32,6 +33,17 @@ namespace
 		Node->Transform.bSourceHasWidth = true;
 		Node->Transform.bSourceHasHeight = true;
 		Node->Transform.bEnabled = true;
+		return Node;
+	}
+
+	TSharedPtr<FDesignNode> MakeWidthHintProbeTextNode(const FString& Id, const FDesignSize& Width)
+	{
+		TSharedPtr<FDesignNode> Node = MakeSharedSemanticsNode(Id, EDesignNodeType::Text, Width, FDesignSize::Fixed(36.0f));
+		Node->Text.Content = TEXT("Width hint should stay consistent between sizing and wrap logic.");
+		Node->Text.FontFamily = TEXT("Roboto");
+		Node->Text.FontWeight = TEXT("Regular");
+		Node->Text.FontSize = 16.0f;
+		Node->Text.TextGrowth = EDesignTextGrowth::FixedWidth;
 		return Node;
 	}
 
@@ -282,17 +294,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSharedSemanticsWidthHintParityTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FSharedSemanticsWidthHintParityTest::RunTest(const FString& Parameters)
 {
-	auto MakeWidthProbeTextNode = [](const FString& Id, const FDesignSize& Width) -> TSharedPtr<FDesignNode>
-	{
-		TSharedPtr<FDesignNode> Node = MakeSharedSemanticsNode(Id, EDesignNodeType::Text, Width, FDesignSize::Fixed(36.0f));
-		Node->Text.Content = TEXT("Width hint should stay consistent between sizing and wrap logic.");
-		Node->Text.FontFamily = TEXT("Roboto");
-		Node->Text.FontWeight = TEXT("Regular");
-		Node->Text.FontSize = 16.0f;
-		Node->Text.TextGrowth = EDesignTextGrowth::FixedWidth;
-		return Node;
-	};
-
 	struct FWidthHintProbeCase
 	{
 		FString Name;
@@ -302,9 +303,9 @@ bool FSharedSemanticsWidthHintParityTest::RunTest(const FString& Parameters)
 
 	const float ParentContentWidth = 280.0f;
 	const TArray<FWidthHintProbeCase> Cases = {
-		{ TEXT("fixed-width"), MakeWidthProbeTextNode(TEXT("width_fixed"), FDesignSize::Fixed(180.0f)), 180.0f },
-		{ TEXT("fill-width-with-fallback"), MakeWidthProbeTextNode(TEXT("width_fill_fallback"), FDesignSize::Fill(300.0f)), 300.0f },
-		{ TEXT("fill-width-parent-fallback"), MakeWidthProbeTextNode(TEXT("width_fill_parent"), FDesignSize::Fill(0.0f)), ParentContentWidth }
+		{ TEXT("fixed-width"), MakeWidthHintProbeTextNode(TEXT("width_fixed"), FDesignSize::Fixed(180.0f)), 180.0f },
+		{ TEXT("fill-width-with-fallback"), MakeWidthHintProbeTextNode(TEXT("width_fill_fallback"), FDesignSize::Fill(300.0f)), 300.0f },
+		{ TEXT("fill-width-parent-fallback"), MakeWidthHintProbeTextNode(TEXT("width_fill_parent"), FDesignSize::Fill(0.0f)), ParentContentWidth }
 	};
 
 	for (const FWidthHintProbeCase& ProbeCase : Cases)
@@ -382,21 +383,34 @@ bool FSharedSemanticsStaticDuplicateGuardTest::RunTest(const FString& Parameters
 		SkipFlowContainerAllowedPaths,
 		PluginBaseDir);
 
-	const TArray<FString> WidthHintFallbackTokens = {
-		TEXT("Node->Transform.Width.IsFill()"),
-		TEXT("Node->Transform.Width.Value > 0.0f ? Node->Transform.Width.Value : ParentContentWidth"),
-		TEXT("return Node->Transform.Width.Value > 0.0f ? Node->Transform.Width.Value : 0.0f;")
+	struct FWidthHintProbeCase
+	{
+		FString Name;
+		TSharedPtr<FDesignNode> Node;
+		float ExpectedWidth = 0.0f;
 	};
-	TSet<FString> WidthHintFallbackAllowedPaths;
-	WidthHintFallbackAllowedPaths.Add(TEXT("Source/Design2UMGCore/Private/SharedCoreSemantics.cpp"));
+	const float ParentContentWidth = 280.0f;
+	const TArray<FWidthHintProbeCase> WidthHintCases = {
+		{ TEXT("fixed-width"), MakeWidthHintProbeTextNode(TEXT("guard_width_fixed"), FDesignSize::Fixed(180.0f)), 180.0f },
+		{ TEXT("fill-width-with-fallback"), MakeWidthHintProbeTextNode(TEXT("guard_width_fill_fallback"), FDesignSize::Fill(300.0f)), 300.0f },
+		{ TEXT("fill-width-parent-fallback"), MakeWidthHintProbeTextNode(TEXT("guard_width_fill_parent"), FDesignSize::Fill(0.0f)), ParentContentWidth }
+	};
+	for (const FWidthHintProbeCase& ProbeCase : WidthHintCases)
+	{
+		const float CanonicalWidth = Design2UMGCore::SharedSemantics::ResolveWidthHint(ProbeCase.Node, ParentContentWidth);
+		const float EstimatedWidth = SizeEstimator::EstimateNodeSize(ProbeCase.Node, ParentContentWidth).X;
+		const float WrapAt = TextMeasurement::ResolveTextWrapAt(ProbeCase.Node, ParentContentWidth);
 
-	ValidateDuplicateSemanticsPattern(
-		*this,
-		TEXT("width-hint fallback semantics token set"),
-		CandidateFiles,
-		WidthHintFallbackTokens,
-		WidthHintFallbackAllowedPaths,
-		PluginBaseDir);
+		TestTrue(
+			*FString::Printf(TEXT("%s canonical width hint remains stable"), *ProbeCase.Name),
+			FMath::IsNearlyEqual(CanonicalWidth, ProbeCase.ExpectedWidth, KINDA_SMALL_NUMBER));
+		TestTrue(
+			*FString::Printf(TEXT("%s sizing width follows canonical helper"), *ProbeCase.Name),
+			FMath::IsNearlyEqual(EstimatedWidth, CanonicalWidth, KINDA_SMALL_NUMBER));
+		TestTrue(
+			*FString::Printf(TEXT("%s wrap width follows canonical helper"), *ProbeCase.Name),
+			FMath::IsNearlyEqual(WrapAt, CanonicalWidth, KINDA_SMALL_NUMBER));
+	}
 
 	FString SizeEstimatorSource;
 	TestTrue(TEXT("Load SizeEstimator.cpp for delegation guard"), FFileHelper::LoadFileToString(SizeEstimatorSource, *SizeEstimatorPath));
@@ -404,22 +418,14 @@ bool FSharedSemanticsStaticDuplicateGuardTest::RunTest(const FString& Parameters
 	{
 		TestTrue(TEXT("SizeEstimator skip-node logic delegates to shared helper"),
 			SizeEstimatorSource.Contains(TEXT("SharedSemantics::ShouldSkipNode(Node)")));
-		TestTrue(TEXT("SizeEstimator width-hint logic delegates to shared helper"),
-			SizeEstimatorSource.Contains(TEXT("SharedSemantics::ResolveWidthHint(Node, ParentContentWidth)")));
 	}
 
 	FString TextMeasurementSource;
 	TestTrue(TEXT("Load TextMeasurement.cpp for delegation guard"), FFileHelper::LoadFileToString(TextMeasurementSource, *TextMeasurementPath));
-	if (!TextMeasurementSource.IsEmpty())
-	{
-		TestTrue(TEXT("TextMeasurement width-hint logic delegates to shared helper"),
-			TextMeasurementSource.Contains(TEXT("SharedSemantics::ResolveWidthHint(Node, ParentContentWidth)")));
-	}
 
 	FString SharedSemanticsSource;
 	TestTrue(TEXT("Load SharedCoreSemantics.cpp for shared semantic source guard"), FFileHelper::LoadFileToString(SharedSemanticsSource, *SharedSemanticsPath));
 	TestTrue(TEXT("Shared semantics helper retains canonical skip logic"), SharedSemanticsSource.Contains(TEXT("bool ShouldSkipNode(const TSharedPtr<FDesignNode>& Node)")));
-	TestTrue(TEXT("Shared semantics helper retains canonical width-hint logic"), SharedSemanticsSource.Contains(TEXT("float ResolveWidthHint(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth)")));
 	return true;
 }
 

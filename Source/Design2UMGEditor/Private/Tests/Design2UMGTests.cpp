@@ -27,8 +27,11 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Components/EditableText.h"
 #include "Components/RetainerBox.h"
 #include "Components/EditableTextBox.h"
+#include "Components/MultiLineEditableText.h"
+#include "Components/MultiLineEditableTextBox.h"
 #include "Components/RichTextBlock.h"
 #include "Components/TextBlock.h"
 #include "Components/WidgetSwitcher.h"
@@ -2161,7 +2164,7 @@ bool FFigmaTextFitPreserveSizeTest::RunTest(const FString& Parameters)
 					"children": [
 						{
 							"id": "0:3",
-							"name": "ButtonLabel",
+							"name": "ButtonLabelInter",
 							"type": "TEXT",
 							"visible": true,
 							"layoutSizingHorizontal": "HUG",
@@ -2174,6 +2177,22 @@ bool FFigmaTextFitPreserveSizeTest::RunTest(const FString& Parameters)
 								"fontWeight": 600
 							},
 							"characters": "Download"
+						},
+						{
+							"id": "0:4",
+							"name": "ButtonLabelRoboto",
+							"type": "TEXT",
+							"visible": true,
+							"layoutSizingHorizontal": "HUG",
+							"layoutSizingVertical": "HUG",
+							"absoluteBoundingBox": {"x":20,"y":56,"width":35,"height":20},
+							"fills": [{"type":"SOLID","visible":true,"color":{"r":1,"g":1,"b":1,"a":1}}],
+							"style": {
+								"fontFamily": "Roboto",
+								"fontSize": 14,
+								"fontWeight": 400
+							},
+							"characters": "Label"
 						}
 					]
 				}]
@@ -2184,17 +2203,81 @@ bool FFigmaTextFitPreserveSizeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Figma parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
 	if (Doc.Children.Num() == 0)
 		return false;
+
+	TFunction<TSharedPtr<FDesignNode>(const TArray<TSharedPtr<FDesignNode>>&, const FString&)> FindTextNodeByContent;
+	FindTextNodeByContent = [&](const TArray<TSharedPtr<FDesignNode>>& Nodes, const FString& ExpectedContent) -> TSharedPtr<FDesignNode>
+	{
+		for (const TSharedPtr<FDesignNode>& Node : Nodes)
+		{
+			if (!Node.IsValid())
+			{
+				continue;
+			}
+
+			if (Node->Type == EDesignNodeType::Text && Node->Text.Content == ExpectedContent)
+			{
+				return Node;
+			}
+
+			if (TSharedPtr<FDesignNode> FoundChild = FindTextNodeByContent(Node->Children, ExpectedContent))
+			{
+				return FoundChild;
+			}
+		}
+
+		return nullptr;
+	};
+
 	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
-	const FString ExpectedText = TEXT("Download");
-	const FUMGWidgetNode* Label = FindWidgetByProperty(Data.RootWidget, TEXT("Text"), &ExpectedText);
-	TestTrue(TEXT("Find text widget"), Label != nullptr);
-	if (!Label)
+
+	const auto VerifySingleLineFitLabel = [&](const FString& ExpectedText, const float ExpectedWidth, const float ExpectedHeight, const float SourceFontSize)
+	{
+		const FUMGWidgetNode* Label = FindWidgetByProperty(Data.RootWidget, TEXT("Text"), &ExpectedText);
+		TestTrue(*FString::Printf(TEXT("Find text widget '%s'"), *ExpectedText), Label != nullptr);
+		if (!Label)
+		{
+			return false;
+		}
+
+		TSharedPtr<FDesignNode> SourceNode = FindTextNodeByContent(Doc.Children, ExpectedText);
+		TestTrue(*FString::Printf(TEXT("Find source text node '%s'"), *ExpectedText), SourceNode.IsValid());
+		if (!SourceNode.IsValid())
+		{
+			return false;
+		}
+
+		TextMeasurement::ResetCache();
+		const FTextResolutionTrace Trace = TextMeasurementTestTrace::DumpTextResolutionTrace(SourceNode);
+
+		TestTrue(*FString::Printf(TEXT("Provided fit width should be preserved for '%s'"), *ExpectedText),
+			FMath::IsNearlyEqual(Label->Bounds.W, ExpectedWidth, 0.5f));
+		TestTrue(*FString::Printf(TEXT("Provided fit height should be preserved for '%s'"), *ExpectedText),
+			FMath::IsNearlyEqual(Label->Bounds.H, ExpectedHeight, 0.5f));
+		TestTrue(*FString::Printf(TEXT("Source font size metadata should be preserved for '%s'"), *ExpectedText),
+			FMath::IsNearlyEqual(Label->TextStyle.SourceFontSize, SourceFontSize, 0.01f));
+		TestTrue(*FString::Printf(TEXT("Compiled font size should stay positive and bounded for '%s'"), *ExpectedText),
+			Label->TextStyle.FontSize > 0.0f
+			&& Label->TextStyle.FontSize <= SourceFontSize + 0.01f);
+		TestTrue(*FString::Printf(TEXT("Single-line fit text '%s' should still shrink below the authored size after runtime fitting"), *ExpectedText),
+			Trace.CompiledFontSize > 0.0f
+			&& Trace.CompiledFontSize + 0.5f < SourceFontSize);
+		TestFalse(*FString::Printf(TEXT("Single-line fit text '%s' must not bypass runtime measurement with authored-single-line-fit"), *ExpectedText),
+			Trace.ResolutionPath.Equals(TEXT("authored-single-line-fit"), ESearchCase::CaseSensitive));
+		TestTrue(*FString::Printf(TEXT("Single-line fit text '%s' should stay within authored width"), *ExpectedText),
+			Trace.CompiledBounds.X <= ExpectedWidth + 4.0f);
+		return true;
+	};
+
+	if (!VerifySingleLineFitLabel(TEXT("Download"), 63.0f, 20.0f, 18.0f))
+	{
 		return false;
-	TestTrue(TEXT("Provided fit width should be preserved"), FMath::IsNearlyEqual(Label->Bounds.W, 63.0f, 0.5f));
-	TestTrue(TEXT("Provided fit height should be preserved"), FMath::IsNearlyEqual(Label->Bounds.H, 20.0f, 0.5f));
-	TestTrue(TEXT("Single-line fixed-width Figma text should preserve declared source font size"),
-		FMath::IsNearlyEqual(Label->TextStyle.SourceFontSize, 18.0f, 0.01f)
-		&& FMath::IsNearlyEqual(Label->TextStyle.FontSize, 18.0f, 0.01f));
+	}
+
+	if (!VerifySingleLineFitLabel(TEXT("Label"), 35.0f, 20.0f, 14.0f))
+	{
+		return false;
+	}
+
 	return true;
 }
 

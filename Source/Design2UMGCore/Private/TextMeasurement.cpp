@@ -1296,7 +1296,6 @@ bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
 			LogResolvedTextDecision(Node, TEXT("declared-direct"), Node->Text.FontSize, Node->Text.FontSize, OutResolutionPath);
 			return Node->Text.FontSize;
 		}
-
 		const float FallbackFontSize = ResolveTextFontSizeFallback(Node);
 		if (Node->Text.FontSize <= 0.0f || !TextMeasurementRuntimeProbe::IsAvailable())
 		{

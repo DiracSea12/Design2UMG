@@ -6,6 +6,7 @@
 #include "UMGTextPropertyApplier.h"
 #include "UMGPropertyKeys.h"
 #include "UMGValueParser.h"
+#include "UMGWidgetNodeAccess.h"
 #include "Design2UMGLog.h"
 
 #include "Components/Widget.h"
@@ -123,42 +124,22 @@ namespace
 
 	void ApplyEditableTextBoxProps(UWidget* W, const FUMGPropertyBag& P)
 	{
-		UEditableTextBox* E = CastChecked<UEditableTextBox>(W);
-		FString Value;
-		if (TryGetPropAllowEmpty(P, UMGPropertyKeys::Text, Value)) E->SetText(FText::FromString(Value));
-		if (TryGetPropAllowEmpty(P, UMGPropertyKeys::HintText, Value)) E->SetHintText(FText::FromString(Value));
+		UMGTextPropertyApplier::ApplyEditableTextBoxProps(W, P);
 	}
 
 	void ApplyMultiLineEditableTextBoxProps(UWidget* W, const FUMGPropertyBag& P)
 	{
-		UMultiLineEditableTextBox* M = CastChecked<UMultiLineEditableTextBox>(W);
-		FString Value;
-		if (TryGetPropAllowEmpty(P, UMGPropertyKeys::Text, Value)) M->SetText(FText::FromString(Value));
-		if (TryGetPropAllowEmpty(P, UMGPropertyKeys::HintText, Value)) M->SetHintText(FText::FromString(Value));
+		UMGTextPropertyApplier::ApplyMultiLineEditableTextBoxProps(W, P);
 	}
 
 	void ApplyEditableTextProps(UWidget* W, const FUMGPropertyBag& P)
 	{
-		UEditableText* E = CastChecked<UEditableText>(W);
-		FString Value;
-		if (TryGetPropAllowEmpty(P, UMGPropertyKeys::Text, Value)) E->SetText(FText::FromString(Value));
-		if (TryGetPropAllowEmpty(P, UMGPropertyKeys::HintText, Value)) E->SetHintText(FText::FromString(Value));
-		bool bIsReadOnly = false;
-		if (P.TryGetBool(UMGPropertyKeys::IsReadOnly, bIsReadOnly)) E->SetIsReadOnly(bIsReadOnly);
-		bool bIsPassword = false;
-		if (P.TryGetBool(UMGPropertyKeys::IsPassword, bIsPassword)) E->SetIsPassword(bIsPassword);
-		float MinimumDesiredWidth = 0.0f;
-		if (P.TryGetFloat(UMGPropertyKeys::MinimumDesiredWidth, MinimumDesiredWidth)) E->SetMinimumDesiredWidth(MinimumDesiredWidth);
+		UMGTextPropertyApplier::ApplyEditableTextProps(W, P);
 	}
 
 	void ApplyMultiLineEditableTextProps(UWidget* W, const FUMGPropertyBag& P)
 	{
-		UMultiLineEditableText* M = CastChecked<UMultiLineEditableText>(W);
-		FString Value;
-		if (TryGetPropAllowEmpty(P, UMGPropertyKeys::Text, Value)) M->SetText(FText::FromString(Value));
-		if (TryGetPropAllowEmpty(P, UMGPropertyKeys::HintText, Value)) M->SetHintText(FText::FromString(Value));
-		bool bIsReadOnly = false;
-		if (P.TryGetBool(UMGPropertyKeys::IsReadOnly, bIsReadOnly)) M->SetIsReadOnly(bIsReadOnly);
+		UMGTextPropertyApplier::ApplyMultiLineEditableTextProps(W, P);
 	}
 
 	void ApplySizeBoxProps(UWidget* W, const FUMGPropertyBag& P)
@@ -503,6 +484,59 @@ namespace
 		}
 
 		ApplyCommonProperties(Widget, Properties);
+	}
+
+	void ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNode& Node)
+	{
+		if (!Widget)
+		{
+			return;
+		}
+
+		const FUMGPropertyBag TypedProperties = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
+		if (Widget->IsA(UTextBlock::StaticClass()))
+		{
+			UMGTextPropertyApplier::ApplyTextBlockProps(Widget, Node, TypedProperties);
+			ApplyCommonProperties(Widget, TypedProperties);
+			return;
+		}
+
+		if (Widget->IsA(URichTextBlock::StaticClass()))
+		{
+			UMGTextPropertyApplier::ApplyRichTextBlockProps(Widget, Node);
+			ApplyCommonProperties(Widget, TypedProperties);
+			return;
+		}
+
+		if (Widget->IsA(UEditableTextBox::StaticClass()))
+		{
+			UMGTextPropertyApplier::ApplyEditableTextBoxProps(Widget, Node, TypedProperties);
+			ApplyCommonProperties(Widget, TypedProperties);
+			return;
+		}
+
+		if (Widget->IsA(UMultiLineEditableTextBox::StaticClass()))
+		{
+			UMGTextPropertyApplier::ApplyMultiLineEditableTextBoxProps(Widget, Node, TypedProperties);
+			ApplyCommonProperties(Widget, TypedProperties);
+			return;
+		}
+
+		if (Widget->IsA(UEditableText::StaticClass()))
+		{
+			UMGTextPropertyApplier::ApplyEditableTextProps(Widget, Node, TypedProperties);
+			ApplyCommonProperties(Widget, TypedProperties);
+			return;
+		}
+
+		if (Widget->IsA(UMultiLineEditableText::StaticClass()))
+		{
+			UMGTextPropertyApplier::ApplyMultiLineEditableTextProps(Widget, Node, TypedProperties);
+			ApplyCommonProperties(Widget, TypedProperties);
+			return;
+		}
+
+		ApplyWidgetProperties(Widget, TypedProperties);
 	}
 
 	void ApplyTypedOverrides(UWidget* Widget, const FUMGWidgetNode& Node)

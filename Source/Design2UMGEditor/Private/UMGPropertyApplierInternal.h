@@ -10,5 +10,6 @@ namespace UMGPropertyApplierInternal
 {
 	void ApplyCommonProperties(UWidget* Widget, const FUMGPropertyBag& Properties);
 	void ApplyWidgetProperties(UWidget* Widget, const FUMGPropertyBag& Properties);
+	void ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNode& Node);
 	void ApplyTypedOverrides(UWidget* Widget, const FUMGWidgetNode& Node);
 }
