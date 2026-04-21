@@ -1,4 +1,5 @@
 ﻿#include "DesignImportPipeline.h"
+#include "DesignSchemaSourceExtensions.h"
 
 #include "Design2UMGConverter.h"
 #include "DesignImageBakeUtils.h"
@@ -117,9 +118,9 @@ namespace DesignImportPipeline
 			TArray<TSharedPtr<FJsonValue>>& OutValues,
 			TArray<FString>& InOutRecommendations)
 		{
-			if (Document.ParseDiagnostics.SkippedDesignerNodes.Num() > 0)
+			if (Document.ParseDiagnostics().SkippedDesignerNodes.Num() > 0)
 			{
-				for (const FDesignSkippedNodeReport& Report : Document.ParseDiagnostics.SkippedDesignerNodes)
+				for (const FDesignSkippedNodeReport& Report : Document.ParseDiagnostics().SkippedDesignerNodes)
 				{
 					TSharedRef<FJsonObject> Entry = MakeNodeDiagnosticEntry(
 						TEXT("skipped_designer_node"),
@@ -166,12 +167,12 @@ namespace DesignImportPipeline
 						Kind,
 						Node->Id,
 						Node->Name,
-						Node->Source.SourceNodeType,
+						Node->Source().SourceNodeType,
 						Reason,
 						Impact)));
 			};
 
-			if (Node->Source.SourceNodeType.Equals(TEXT("TEXT_PATH"), ESearchCase::IgnoreCase))
+			if (Node->Source().SourceNodeType.Equals(TEXT("TEXT_PATH"), ESearchCase::IgnoreCase))
 			{
 				AddEntryIfNew(
 					TEXT("text_path_fallback"),
@@ -182,42 +183,42 @@ namespace DesignImportPipeline
 					TEXT("TEXT_PATH is not formally supported; convert path text to regular text if path geometry is required at runtime."));
 			}
 
-			if (!Node->Source.VectorRasterFallbackImageRef.IsEmpty())
+			if (!Node->Source().VectorRasterFallbackImageRef.IsEmpty())
 			{
 				TSharedRef<FJsonObject> Entry = MakeNodeDiagnosticEntry(
 					TEXT("vector_raster_fallback"),
 					Node->Id,
 					Node->Name,
-					Node->Source.SourceNodeType,
+					Node->Source().SourceNodeType,
 					TEXT("complex vector was rasterized"),
 					TEXT("runtime output uses baked image content for the vector node"));
-				Entry->SetStringField(TEXT("imageRef"), Node->Source.VectorRasterFallbackImageRef);
+				Entry->SetStringField(TEXT("imageRef"), Node->Source().VectorRasterFallbackImageRef);
 				OutValues.Add(MakeShared<FJsonValueObject>(Entry));
 				AddUniqueRecommendation(
 					InOutRecommendations,
 					TEXT("Vector raster fallback is an explicit degradation path; prefer exporter/parser-side simplification before treating it as semantic support."));
 			}
 
-			if (Node->Source.RenderFallback.HasAny())
+			if (Node->Source().RenderFallback.HasAny())
 			{
 				TSharedRef<FJsonObject> Entry = MakeNodeDiagnosticEntry(
 					TEXT("render_fallback"),
 					Node->Id,
 					Node->Name,
-					Node->Source.SourceNodeType,
-					Node->Source.RenderFallback.Reason,
+					Node->Source().SourceNodeType,
+					Node->Source().RenderFallback.Reason,
 					TEXT("runtime output uses a baked render fallback image"));
-				if (!Node->Source.RenderFallback.ImageRef.IsEmpty())
+				if (!Node->Source().RenderFallback.ImageRef.IsEmpty())
 				{
-					Entry->SetStringField(TEXT("imageRef"), Node->Source.RenderFallback.ImageRef);
+					Entry->SetStringField(TEXT("imageRef"), Node->Source().RenderFallback.ImageRef);
 				}
-				if (!Node->Source.RenderFallback.Scope.IsEmpty())
+				if (!Node->Source().RenderFallback.Scope.IsEmpty())
 				{
-					Entry->SetStringField(TEXT("scope"), Node->Source.RenderFallback.Scope);
+					Entry->SetStringField(TEXT("scope"), Node->Source().RenderFallback.Scope);
 				}
-				if (!Node->Source.RenderFallback.Source.IsEmpty())
+				if (!Node->Source().RenderFallback.Source.IsEmpty())
 				{
-					Entry->SetStringField(TEXT("source"), Node->Source.RenderFallback.Source);
+					Entry->SetStringField(TEXT("source"), Node->Source().RenderFallback.Source);
 				}
 				OutValues.Add(MakeShared<FJsonValueObject>(Entry));
 				AddUniqueRecommendation(

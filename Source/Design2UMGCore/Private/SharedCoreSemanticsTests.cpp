@@ -3,6 +3,7 @@
 #include "Misc/AutomationTest.h"
 
 #include "Design2UMGConverter.h"
+#include "Design2UMGSettings.h"
 #include "SizeEstimator.h"
 #include "TextMeasurement.h"
 
@@ -141,6 +142,79 @@ namespace
 				*FString::Join(UnauthorizedMatches, TEXT(", "))));
 		}
 	}
+
+	struct FLuminosityOpacityCapOverrideScope
+	{
+		explicit FLuminosityOpacityCapOverrideScope(const float InOpacityCap)
+		{
+			Settings = UDesign2UMGSettings::Get();
+			if (Settings)
+			{
+				bSavedUseCustomOverride = Settings->bUseCustomLuminosityFitOpacityCap;
+				SavedOpacityCap = Settings->LuminosityFitOpacityCap;
+				Settings->bUseCustomLuminosityFitOpacityCap = true;
+				Settings->LuminosityFitOpacityCap = InOpacityCap;
+			}
+		}
+
+		~FLuminosityOpacityCapOverrideScope()
+		{
+			if (Settings)
+			{
+				Settings->bUseCustomLuminosityFitOpacityCap = bSavedUseCustomOverride;
+				Settings->LuminosityFitOpacityCap = SavedOpacityCap;
+			}
+		}
+
+		UDesign2UMGSettings* Settings = nullptr;
+		bool bSavedUseCustomOverride = false;
+		float SavedOpacityCap = UDesign2UMGSettings::CanonicalLuminosityFitOpacityCap;
+	};
+
+	struct FPlaceholderHatchOverrideScope
+	{
+		FPlaceholderHatchOverrideScope(
+			const FString& InBaseFillColor,
+			const FString& InBaseStripeColor,
+			const int32 InStripeWidth,
+			const int32 InStripeGap)
+		{
+			Settings = UDesign2UMGSettings::Get();
+			if (Settings)
+			{
+				bSavedUseCustomOverride = Settings->bUseCustomPlaceholderHatchStyle;
+				SavedBaseFillColor = Settings->PlaceholderHatchBackgroundColor;
+				SavedBaseStripeColor = Settings->PlaceholderHatchStripeColor;
+				SavedStripeWidth = Settings->PlaceholderHatchStripeWidth;
+				SavedStripeGap = Settings->PlaceholderHatchStripeGap;
+
+				Settings->bUseCustomPlaceholderHatchStyle = true;
+				Settings->PlaceholderHatchBackgroundColor = InBaseFillColor;
+				Settings->PlaceholderHatchStripeColor = InBaseStripeColor;
+				Settings->PlaceholderHatchStripeWidth = InStripeWidth;
+				Settings->PlaceholderHatchStripeGap = InStripeGap;
+			}
+		}
+
+		~FPlaceholderHatchOverrideScope()
+		{
+			if (Settings)
+			{
+				Settings->bUseCustomPlaceholderHatchStyle = bSavedUseCustomOverride;
+				Settings->PlaceholderHatchBackgroundColor = SavedBaseFillColor;
+				Settings->PlaceholderHatchStripeColor = SavedBaseStripeColor;
+				Settings->PlaceholderHatchStripeWidth = SavedStripeWidth;
+				Settings->PlaceholderHatchStripeGap = SavedStripeGap;
+			}
+		}
+
+		UDesign2UMGSettings* Settings = nullptr;
+		bool bSavedUseCustomOverride = false;
+		FString SavedBaseFillColor;
+		FString SavedBaseStripeColor;
+		int32 SavedStripeWidth = 0;
+		int32 SavedStripeGap = 0;
+	};
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSharedSemanticsSkipRenderableParityTest,
@@ -346,6 +420,121 @@ bool FSharedSemanticsStaticDuplicateGuardTest::RunTest(const FString& Parameters
 	TestTrue(TEXT("Load SharedCoreSemantics.cpp for shared semantic source guard"), FFileHelper::LoadFileToString(SharedSemanticsSource, *SharedSemanticsPath));
 	TestTrue(TEXT("Shared semantics helper retains canonical skip logic"), SharedSemanticsSource.Contains(TEXT("bool ShouldSkipNode(const TSharedPtr<FDesignNode>& Node)")));
 	TestTrue(TEXT("Shared semantics helper retains canonical width-hint logic"), SharedSemanticsSource.Contains(TEXT("float ResolveWidthHint(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth)")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConversionPlaceholderTintSettingsPayloadTest,
+	"Design2UMG.Converter.PlaceholderTintSettingsPayload",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FConversionPlaceholderTintSettingsPayloadTest::RunTest(const FString& Parameters)
+{
+	FPlaceholderHatchOverrideScope PlaceholderScope(TEXT("#123456"), TEXT("#ABCDEF"), 7, 11);
+	if (!TestNotNull(TEXT("Settings available for placeholder payload test"), PlaceholderScope.Settings))
+	{
+		return false;
+	}
+
+	FDesignDocument Doc;
+	TSharedPtr<FDesignNode> PlaceholderNode = MakeSharedSemanticsNode(
+		TEXT("placeholder_payload_root"),
+		EDesignNodeType::Frame,
+		FDesignSize::Fixed(120.0f),
+		FDesignSize::Fixed(48.0f));
+	PlaceholderNode->LayoutData.bSemanticPlaceholderSurface = true;
+	Doc.Children.Add(PlaceholderNode);
+
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* PlaceholderWidget = FindWidgetByIdRecursive(Data.RootWidget, TEXT("placeholder_payload_root"));
+	if (!TestNotNull(TEXT("Converted placeholder widget exists"), PlaceholderWidget))
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Placeholder widget uses direct image material"), PlaceholderWidget->Type, FString(TEXT("Image")));
+	TestEqual(TEXT("Placeholder widget uses placeholder surface material ref"), PlaceholderWidget->Brush.MaterialRef, FString(TEXT("placeholdersurface")));
+	TestTrue(TEXT("Placeholder material params use injected base fill color"), PlaceholderWidget->Brush.MaterialParams.Contains(TEXT("\"Color\":\"#123456\"")));
+	TestTrue(TEXT("Placeholder material params use injected base stripe color"), PlaceholderWidget->Brush.MaterialParams.Contains(TEXT("\"StripeColor\":\"#ABCDEF\"")));
+	TestTrue(TEXT("Placeholder material params use injected stripe width"), PlaceholderWidget->Brush.MaterialParams.Contains(TEXT("\"StripeWidth\":7")));
+	TestTrue(TEXT("Placeholder material params use injected stripe gap"), PlaceholderWidget->Brush.MaterialParams.Contains(TEXT("\"StripeGap\":11")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConversionLuminosityOpacitySettingsPayloadTest,
+	"Design2UMG.Converter.LuminosityOpacitySettingsPayload",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FConversionLuminosityOpacitySettingsPayloadTest::RunTest(const FString& Parameters)
+{
+	FLuminosityOpacityCapOverrideScope OpacityScope(0.2f);
+	if (!TestNotNull(TEXT("Settings available for luminosity payload test"), OpacityScope.Settings))
+	{
+		return false;
+	}
+
+	FDesignFill SolidFill = FDesignFill::FromColor(TEXT("#F5F5F5"));
+
+	FDesignFill ImageFill;
+	ImageFill.bEnabled = true;
+	ImageFill.Type = EDesignFillType::Image;
+	ImageFill.BlendMode = TEXT("LUMINOSITY");
+	ImageFill.Image.Url = TEXT("/Game/Design2UMG/Tests/T_LuminosityPayload");
+	ImageFill.Image.Mode = EDesignImageMode::Fit;
+	ImageFill.Image.Opacity = 0.6f;
+
+	FDesignDocument Doc;
+	TSharedPtr<FDesignNode> CardNode = MakeSharedSemanticsNode(
+		TEXT("luminosity_payload_root"),
+		EDesignNodeType::Frame,
+		FDesignSize::Fixed(160.0f),
+		FDesignSize::Fixed(96.0f));
+	CardNode->Visual.Fill = SolidFill;
+	CardNode->Visual.Fills = { SolidFill, ImageFill };
+	Doc.Children.Add(CardNode);
+
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* OverlayImage = FindWidgetByIdRecursive(Data.RootWidget, TEXT("luminosity_payload_root_fill1_img"));
+	if (!TestNotNull(TEXT("Multi-fill luminosity image child exists"), OverlayImage))
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("Luminosity image child exported render opacity"), OverlayImage->Render.bHasRenderOpacity);
+	TestTrue(TEXT("Luminosity image child clamps opacity using injected cap"), FMath::IsNearlyEqual(OverlayImage->Render.RenderOpacity, 0.2f, KINDA_SMALL_NUMBER));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConverterPrivateOwnerStructureGuardTest,
+	"Design2UMG.Converter.PrivateOwnerStructureGuard",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FConverterPrivateOwnerStructureGuardTest::RunTest(const FString& Parameters)
+{
+	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
+	TestTrue(TEXT("Design2UMG plugin exists for converter owner guard"), Plugin.IsValid());
+	if (!Plugin.IsValid())
+	{
+		return false;
+	}
+
+	const FString ConverterSourcePath = FPaths::Combine(
+		Plugin->GetBaseDir(),
+		TEXT("Source/Design2UMGCore/Private/Design2UMGConverter.cpp"));
+	FString ConverterSource;
+	TestTrue(TEXT("Load Design2UMGConverter.cpp for owner guard"), FFileHelper::LoadFileToString(ConverterSource, *ConverterSourcePath));
+	if (ConverterSource.IsEmpty())
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("Converter defines node orchestration owner"), ConverterSource.Contains(TEXT("struct FNodeConversionOrchestrator")));
+	TestTrue(TEXT("Converter defines child preparation owner"), ConverterSource.Contains(TEXT("struct FNodeChildPreparation")));
+	TestTrue(TEXT("Converter defines child append owner"), ConverterSource.Contains(TEXT("struct FNodeChildAppender")));
+	TestTrue(TEXT("Convert entry uses node orchestration owner"), ConverterSource.Contains(TEXT("const FNodeConversionOrchestrator NodeOrchestrator(RootContext);")));
+
+	TestFalse(TEXT("Legacy free ConvertNode forward declaration removed"),
+		ConverterSource.Contains(TEXT("FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FConversionContext& Context, EDesignLayout ParentLayout = EDesignLayout::None);")));
+	TestFalse(TEXT("Legacy free child preparation declaration removed"),
+		ConverterSource.Contains(TEXT("void PreResolveFlowChildren(const TSharedPtr<FDesignNode>& Node, const FUMGWidgetNode& Widget, const TArray<TSharedPtr<FDesignNode>>& VisibleChildren, const FConversionContext& Context);")));
+	TestFalse(TEXT("Legacy free child append declaration removed"),
+		ConverterSource.Contains(TEXT("void AppendConvertedChildren(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node, const TArray<TSharedPtr<FDesignNode>>& VisibleChildren, const FConversionContext& Context);")));
 	return true;
 }
 #endif

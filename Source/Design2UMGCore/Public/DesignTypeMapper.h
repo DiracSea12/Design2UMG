@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "DesignSchema.h"
+#include "DesignSchemaFoundation.h"
 
 /**
  * Mapping helpers from design-side semantics to UMG-side types and enums.

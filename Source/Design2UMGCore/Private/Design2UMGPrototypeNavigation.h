@@ -4,7 +4,9 @@
 
 #include "CoreMinimal.h"
 #include "DesignSchema.h"
-#include "UMGSchema.h"
+#include "UMGSchemaSourceExtensions.h"
+
+struct FUMGWidgetNode;
 
 namespace Design2UMGPrototypeNavigation
 {

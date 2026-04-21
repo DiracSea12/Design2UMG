@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Containers/Ticker.h"
-#include "UMGSchema.h"
+#include "UMGSchemaSourceExtensions.h"
 #include "Extensions/UserWidgetExtension.h"
 #include "Extensions/WidgetBlueprintGeneratedClassExtension.h"
 #include "WidgetBlueprintExtension.h"

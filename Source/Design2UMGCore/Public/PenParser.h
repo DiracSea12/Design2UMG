@@ -1,10 +1,9 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
-
+#include "DesignSchema.h"
+#include "DesignSchemaSourceExtensions.h"
 #include "Dom/JsonObject.h"
-
-struct FDesignDocument;
 
 /**
  * Parses Pencil `.pen` payloads into the shared design IR.

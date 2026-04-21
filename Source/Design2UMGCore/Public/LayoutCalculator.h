@@ -1,7 +1,7 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
-#include "UMGSchema.h"
+#include "UMGSchemaFoundation.h"
 
 /**
  * Tunable thresholds used when projecting bounds to anchors and offsets.

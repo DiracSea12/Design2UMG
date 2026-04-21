@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "UMGSchema.h"
+#include "UMGSchemaSourceExtensions.h"
 #include "Extensions/WidgetBlueprintGeneratedClassExtension.h"
 #include "WidgetBlueprintExtension.h"
 #include "Design2UMGFigmaMetadataExtensions.generated.h"

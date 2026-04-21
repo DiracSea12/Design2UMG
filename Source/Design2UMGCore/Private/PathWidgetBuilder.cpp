@@ -1,6 +1,7 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "PathWidgetBuilder.h"
+#include "DesignSchemaSourceExtensions.h"
 
 #include "Design2UMGLog.h"
 #include "DesignTypeMapper.h"
@@ -45,7 +46,7 @@ namespace
 			return FString();
 		}
 
-		return Node->Source.VectorRasterFallbackImageRef;
+		return Node->Source().VectorRasterFallbackImageRef;
 	}
 
 	FString ResolvePathRasterFillColor(const TSharedPtr<FDesignNode>& Node)

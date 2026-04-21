@@ -1302,60 +1302,60 @@ bool FFigmaOfficialFieldParityTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("figma branchData"), Node->Metadata.Contains(TEXT("branchData")));
 	TestTrue(TEXT("figma components dictionary"), Doc.Metadata.Contains(TEXT("components")));
 	TestTrue(TEXT("figma componentSets dictionary"), Doc.Metadata.Contains(TEXT("componentSets")));
-	TestTrue(TEXT("figma components json field"), !Doc.SourceDocument.ComponentsJson.IsEmpty());
-	TestTrue(TEXT("figma componentSets json field"), !Doc.SourceDocument.ComponentSetsJson.IsEmpty());
-	TestTrue(TEXT("figma components json carries component defs"), Doc.SourceDocument.ComponentsJson.Contains(TEXT("componentPropertyDefinitions")));
-	TestTrue(TEXT("figma componentSets json carries variant groups"), Doc.SourceDocument.ComponentSetsJson.Contains(TEXT("variantGroupProperties")));
+	TestTrue(TEXT("figma components json field"), !Doc.SourceDocument().ComponentsJson.IsEmpty());
+	TestTrue(TEXT("figma componentSets json field"), !Doc.SourceDocument().ComponentSetsJson.IsEmpty());
+	TestTrue(TEXT("figma components json carries component defs"), Doc.SourceDocument().ComponentsJson.Contains(TEXT("componentPropertyDefinitions")));
+	TestTrue(TEXT("figma componentSets json carries variant groups"), Doc.SourceDocument().ComponentSetsJson.Contains(TEXT("variantGroupProperties")));
 	TestTrue(TEXT("figma doc prototypeStartNodeID"), Doc.Metadata.FindRef(TEXT("prototypeStartNodeID")) == TEXT("0:2"));
 	TestTrue(TEXT("figma doc prototypeDevice"), Doc.Metadata.Contains(TEXT("prototypeDevice")));
 	TestTrue(TEXT("figma absolute positioning semantic"), Node->LayoutData.bAbsoluteLayoutPositioning);
-	TestTrue(TEXT("figma layout ext layoutPositioning"), Node->Source.LayoutExtensions.LayoutPositioning == TEXT("ABSOLUTE"));
-	TestTrue(TEXT("figma layout ext counterAxisSpacing"), Node->Source.LayoutExtensions.bHasCounterAxisSpacing && FMath::IsNearlyEqual(Node->Source.LayoutExtensions.CounterAxisSpacing, 6.0f, 0.001f));
-	TestTrue(TEXT("figma layout ext layoutWrap"), Node->Source.LayoutExtensions.LayoutWrap == TEXT("WRAP"));
-	TestTrue(TEXT("figma layout ext strokesIncludedInLayout"), Node->Source.LayoutExtensions.bHasStrokesIncludedInLayout && Node->Source.LayoutExtensions.bStrokesIncludedInLayout == false);
-	TestTrue(TEXT("figma layout ext itemReverseZIndex"), Node->Source.LayoutExtensions.bHasItemReverseZIndex && Node->Source.LayoutExtensions.bItemReverseZIndex);
-	TestTrue(TEXT("figma layout ext boundVariables"), !Node->Source.LayoutExtensions.BoundVariablesJson.IsEmpty());
-	TestTrue(TEXT("figma prototype overflowDirection typed"), Node->Source.Prototype.OverflowDirection == TEXT("HORIZONTAL_SCROLLING"));
-	TestTrue(TEXT("figma prototype transitionNodeID typed"), Node->Source.Prototype.TransitionNodeId == TEXT("1:3"));
-	TestTrue(TEXT("figma prototype legacy transition typed"), Node->Source.Prototype.Transition.bHasDuration
-		&& FMath::IsNearlyEqual(Node->Source.Prototype.Transition.Duration, 420.0f, 0.001f)
-		&& Node->Source.Prototype.Transition.EasingType == TEXT("EASE_OUT"));
-	TestTrue(TEXT("figma prototype interactions typed"), Node->Source.Prototype.Interactions.Num() == 1
-		&& Node->Source.Prototype.Interactions[0].TriggerType == TEXT("ON_CLICK")
-		&& Node->Source.Prototype.Interactions[0].Actions.Num() == 1
-		&& Node->Source.Prototype.Interactions[0].Actions[0].Type == TEXT("NODE")
-		&& Node->Source.Prototype.Interactions[0].Actions[0].DestinationId == TEXT("1:2")
-		&& Node->Source.Prototype.Interactions[0].Actions[0].Navigation == TEXT("NAVIGATE")
-		&& Node->Source.Prototype.Interactions[0].Actions[0].Transition.Type == TEXT("SMART_ANIMATE")
-		&& Node->Source.Prototype.Interactions[0].Actions[0].Transition.Direction == TEXT("LEFT")
-		&& Node->Source.Prototype.Interactions[0].Actions[0].Transition.bHasDuration
-		&& FMath::IsNearlyEqual(Node->Source.Prototype.Interactions[0].Actions[0].Transition.Duration, 180.0f, 0.001f)
-		&& Node->Source.Prototype.Interactions[0].Actions[0].Transition.EasingType == TEXT("EASE_IN_AND_OUT")
-		&& Node->Source.Prototype.Interactions[0].Actions[0].Transition.bHasMatchLayers
-		&& Node->Source.Prototype.Interactions[0].Actions[0].Transition.bMatchLayers);
-	TestTrue(TEXT("figma prototype flowStartingPoints typed"), Node->Source.Prototype.FlowStartingPoints.Num() == 1
-		&& Node->Source.Prototype.FlowStartingPoints[0].NodeId == TEXT("0:2")
-		&& Node->Source.Prototype.FlowStartingPoints[0].Name == TEXT("Flow 1"));
-	TestTrue(TEXT("figma doc prototypeStartNodeID typed"), Doc.SourceDocument.PrototypeStartNodeId == TEXT("0:2"));
-	TestTrue(TEXT("figma doc prototypeDevice typed"), Doc.SourceDocument.PrototypeDeviceJson.Contains(TEXT("DESKTOP")));
-	TestTrue(TEXT("figma doc flowStartingPoints typed"), Doc.SourceDocument.FlowStartingPoints.Num() == 1
-		&& Doc.SourceDocument.FlowStartingPoints[0].NodeId == TEXT("0:2")
-		&& Doc.SourceDocument.FlowStartingPoints[0].Name == TEXT("Doc Flow"));
+	TestTrue(TEXT("figma layout ext layoutPositioning"), Node->Source().LayoutExtensions.LayoutPositioning == TEXT("ABSOLUTE"));
+	TestTrue(TEXT("figma layout ext counterAxisSpacing"), Node->Source().LayoutExtensions.bHasCounterAxisSpacing && FMath::IsNearlyEqual(Node->Source().LayoutExtensions.CounterAxisSpacing, 6.0f, 0.001f));
+	TestTrue(TEXT("figma layout ext layoutWrap"), Node->Source().LayoutExtensions.LayoutWrap == TEXT("WRAP"));
+	TestTrue(TEXT("figma layout ext strokesIncludedInLayout"), Node->Source().LayoutExtensions.bHasStrokesIncludedInLayout && Node->Source().LayoutExtensions.bStrokesIncludedInLayout == false);
+	TestTrue(TEXT("figma layout ext itemReverseZIndex"), Node->Source().LayoutExtensions.bHasItemReverseZIndex && Node->Source().LayoutExtensions.bItemReverseZIndex);
+	TestTrue(TEXT("figma layout ext boundVariables"), !Node->Source().LayoutExtensions.BoundVariablesJson.IsEmpty());
+	TestTrue(TEXT("figma prototype overflowDirection typed"), Node->Source().Prototype.OverflowDirection == TEXT("HORIZONTAL_SCROLLING"));
+	TestTrue(TEXT("figma prototype transitionNodeID typed"), Node->Source().Prototype.TransitionNodeId == TEXT("1:3"));
+	TestTrue(TEXT("figma prototype legacy transition typed"), Node->Source().Prototype.Transition.bHasDuration
+		&& FMath::IsNearlyEqual(Node->Source().Prototype.Transition.Duration, 420.0f, 0.001f)
+		&& Node->Source().Prototype.Transition.EasingType == TEXT("EASE_OUT"));
+	TestTrue(TEXT("figma prototype interactions typed"), Node->Source().Prototype.Interactions.Num() == 1
+		&& Node->Source().Prototype.Interactions[0].TriggerType == TEXT("ON_CLICK")
+		&& Node->Source().Prototype.Interactions[0].Actions.Num() == 1
+		&& Node->Source().Prototype.Interactions[0].Actions[0].Type == TEXT("NODE")
+		&& Node->Source().Prototype.Interactions[0].Actions[0].DestinationId == TEXT("1:2")
+		&& Node->Source().Prototype.Interactions[0].Actions[0].Navigation == TEXT("NAVIGATE")
+		&& Node->Source().Prototype.Interactions[0].Actions[0].Transition.Type == TEXT("SMART_ANIMATE")
+		&& Node->Source().Prototype.Interactions[0].Actions[0].Transition.Direction == TEXT("LEFT")
+		&& Node->Source().Prototype.Interactions[0].Actions[0].Transition.bHasDuration
+		&& FMath::IsNearlyEqual(Node->Source().Prototype.Interactions[0].Actions[0].Transition.Duration, 180.0f, 0.001f)
+		&& Node->Source().Prototype.Interactions[0].Actions[0].Transition.EasingType == TEXT("EASE_IN_AND_OUT")
+		&& Node->Source().Prototype.Interactions[0].Actions[0].Transition.bHasMatchLayers
+		&& Node->Source().Prototype.Interactions[0].Actions[0].Transition.bMatchLayers);
+	TestTrue(TEXT("figma prototype flowStartingPoints typed"), Node->Source().Prototype.FlowStartingPoints.Num() == 1
+		&& Node->Source().Prototype.FlowStartingPoints[0].NodeId == TEXT("0:2")
+		&& Node->Source().Prototype.FlowStartingPoints[0].Name == TEXT("Flow 1"));
+	TestTrue(TEXT("figma doc prototypeStartNodeID typed"), Doc.SourceDocument().PrototypeStartNodeId == TEXT("0:2"));
+	TestTrue(TEXT("figma doc prototypeDevice typed"), Doc.SourceDocument().PrototypeDeviceJson.Contains(TEXT("DESKTOP")));
+	TestTrue(TEXT("figma doc flowStartingPoints typed"), Doc.SourceDocument().FlowStartingPoints.Num() == 1
+		&& Doc.SourceDocument().FlowStartingPoints[0].NodeId == TEXT("0:2")
+		&& Doc.SourceDocument().FlowStartingPoints[0].Name == TEXT("Doc Flow"));
 	TestTrue(TEXT("figma fill blendMode preserved"), PaintNode->Visual.Fill.BlendMode == TEXT("MULTIPLY"));
 	TestTrue(TEXT("figma fill opacity preserved"), FMath::IsNearlyEqual(PaintNode->Visual.Fill.Opacity, 0.5f, 0.001f));
 	TestTrue(TEXT("figma effect blendMode preserved"), PaintNode->Visual.Effects.Num() > 0
 		&& PaintNode->Visual.Effects[0].BlendMode == TEXT("SCREEN")
 		&& PaintNode->Visual.Effects[0].Shadow.BlendMode == TEXT("SCREEN"));
-	TestTrue(TEXT("figma source node type preserved"), InstanceNode->Source.SourceNodeType == TEXT("INSTANCE"));
+	TestTrue(TEXT("figma source node type preserved"), InstanceNode->Source().SourceNodeType == TEXT("INSTANCE"));
 	TestTrue(TEXT("figma instance componentId preserved"), InstanceNode->Metadata.FindRef(TEXT("instanceComponentId")) == TEXT("12:34"));
-	TestTrue(TEXT("figma instance ext flag"), InstanceNode->Source.ComponentInstance.bIsInstance);
-	TestTrue(TEXT("figma instance ext componentId"), InstanceNode->Source.ComponentInstance.ComponentId == TEXT("12:34"));
-	TestTrue(TEXT("figma instance ext componentSetId"), InstanceNode->Source.ComponentInstance.ComponentSetId == TEXT("56:78"));
-	TestTrue(TEXT("figma instance ext mainComponentKey"), InstanceNode->Source.ComponentInstance.MainComponentKey == TEXT("component-key-1"));
-	TestTrue(TEXT("figma instance ext componentProperties"), !InstanceNode->Source.ComponentInstance.ComponentPropertiesJson.IsEmpty());
-	TestTrue(TEXT("figma instance ext variantProperties"), !InstanceNode->Source.ComponentInstance.VariantPropertiesJson.IsEmpty());
-	TestTrue(TEXT("figma instance ext overrides"), !InstanceNode->Source.ComponentInstance.OverridesJson.IsEmpty());
-	TestTrue(TEXT("figma instance ext isExposedInstance"), InstanceNode->Source.ComponentInstance.bHasIsExposedInstance && InstanceNode->Source.ComponentInstance.bIsExposedInstance);
+	TestTrue(TEXT("figma instance ext flag"), InstanceNode->Source().ComponentInstance.bIsInstance);
+	TestTrue(TEXT("figma instance ext componentId"), InstanceNode->Source().ComponentInstance.ComponentId == TEXT("12:34"));
+	TestTrue(TEXT("figma instance ext componentSetId"), InstanceNode->Source().ComponentInstance.ComponentSetId == TEXT("56:78"));
+	TestTrue(TEXT("figma instance ext mainComponentKey"), InstanceNode->Source().ComponentInstance.MainComponentKey == TEXT("component-key-1"));
+	TestTrue(TEXT("figma instance ext componentProperties"), !InstanceNode->Source().ComponentInstance.ComponentPropertiesJson.IsEmpty());
+	TestTrue(TEXT("figma instance ext variantProperties"), !InstanceNode->Source().ComponentInstance.VariantPropertiesJson.IsEmpty());
+	TestTrue(TEXT("figma instance ext overrides"), !InstanceNode->Source().ComponentInstance.OverridesJson.IsEmpty());
+	TestTrue(TEXT("figma instance ext isExposedInstance"), InstanceNode->Source().ComponentInstance.bHasIsExposedInstance && InstanceNode->Source().ComponentInstance.bIsExposedInstance);
 	TestTrue(TEXT("figma instance componentSetId preserved"), InstanceNode->Metadata.FindRef(TEXT("componentSetId")) == TEXT("56:78"));
 	TestTrue(TEXT("figma instance mainComponentKey preserved"), InstanceNode->Metadata.FindRef(TEXT("mainComponentKey")) == TEXT("component-key-1"));
 TestTrue(TEXT("figma instance componentProperties preserved"), InstanceNode->Metadata.Contains(TEXT("componentProperties")));
@@ -1364,8 +1364,8 @@ TestTrue(TEXT("figma instance overrides preserved"), InstanceNode->Metadata.Cont
 TestTrue(TEXT("figma instance isExposedInstance preserved"), InstanceNode->Metadata.FindRef(TEXT("isExposedInstance")) == TEXT("true"));
 
 	const FUMGWidgetData ConvertedData = FDesign2UMGConverter::Convert(Doc);
-	TestTrue(TEXT("figma document components catalog exported"), ConvertedData.SourceDocument.ComponentsJson.Contains(TEXT("component-key-1")));
-	TestTrue(TEXT("figma document componentSets catalog exported"), ConvertedData.SourceDocument.ComponentSetsJson.Contains(TEXT("component-set-key-1")));
+	TestTrue(TEXT("figma document components catalog exported"), ConvertedData.SourceDocument().ComponentsJson.Contains(TEXT("component-key-1")));
+	TestTrue(TEXT("figma document componentSets catalog exported"), ConvertedData.SourceDocument().ComponentSetsJson.Contains(TEXT("component-set-key-1")));
 
 	const FUMGWidgetNode* ConvertedInstanceWidget = FindWidgetById(ConvertedData.RootWidget, TEXT("inst1"));
 	TestNotNull(TEXT("figma instance widget exported to UMG tree"), ConvertedInstanceWidget);
@@ -1374,16 +1374,16 @@ TestTrue(TEXT("figma instance isExposedInstance preserved"), InstanceNode->Metad
 		return false;
 	}
 
-	TestTrue(TEXT("figma instance typed node data exported"), ConvertedInstanceWidget->Source.IsInstance());
-	TestEqual(TEXT("figma instance source node type exported"), ConvertedInstanceWidget->Source.SourceNodeType, TEXT("INSTANCE"));
-	TestEqual(TEXT("figma instance componentId exported"), ConvertedInstanceWidget->Source.ComponentId, TEXT("12:34"));
-	TestEqual(TEXT("figma instance componentSetId exported"), ConvertedInstanceWidget->Source.ComponentSetId, TEXT("56:78"));
-	TestEqual(TEXT("figma instance mainComponentKey exported"), ConvertedInstanceWidget->Source.MainComponentKey, TEXT("component-key-1"));
-	TestTrue(TEXT("figma instance componentProperties exported"), !ConvertedInstanceWidget->Source.ComponentPropertiesJson.IsEmpty());
-	TestTrue(TEXT("figma instance variantProperties exported"), !ConvertedInstanceWidget->Source.VariantPropertiesJson.IsEmpty());
-	TestTrue(TEXT("figma instance overrides exported"), !ConvertedInstanceWidget->Source.OverridesJson.IsEmpty());
+	TestTrue(TEXT("figma instance typed node data exported"), ConvertedInstanceWidget->Source().IsInstance());
+	TestEqual(TEXT("figma instance source node type exported"), ConvertedInstanceWidget->Source().SourceNodeType, TEXT("INSTANCE"));
+	TestEqual(TEXT("figma instance componentId exported"), ConvertedInstanceWidget->Source().ComponentId, TEXT("12:34"));
+	TestEqual(TEXT("figma instance componentSetId exported"), ConvertedInstanceWidget->Source().ComponentSetId, TEXT("56:78"));
+	TestEqual(TEXT("figma instance mainComponentKey exported"), ConvertedInstanceWidget->Source().MainComponentKey, TEXT("component-key-1"));
+	TestTrue(TEXT("figma instance componentProperties exported"), !ConvertedInstanceWidget->Source().ComponentPropertiesJson.IsEmpty());
+	TestTrue(TEXT("figma instance variantProperties exported"), !ConvertedInstanceWidget->Source().VariantPropertiesJson.IsEmpty());
+	TestTrue(TEXT("figma instance overrides exported"), !ConvertedInstanceWidget->Source().OverridesJson.IsEmpty());
 	TestTrue(TEXT("figma instance exposed flag exported"),
-		ConvertedInstanceWidget->Source.bHasIsExposedInstance && ConvertedInstanceWidget->Source.bIsExposedInstance);
+		ConvertedInstanceWidget->Source().bHasIsExposedInstance && ConvertedInstanceWidget->Source().bIsExposedInstance);
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaTransformGroupPreservedTest,
@@ -1439,7 +1439,7 @@ bool FFigmaTransformGroupPreservedTest::RunTest(const FString& Parameters)
 
 	const TSharedPtr<FDesignNode>& TransformGroup = Doc.Children[0]->Children[0];
 	TestEqual(TEXT("TRANSFORM_GROUP maps to Group"), TransformGroup->Type, EDesignNodeType::Group);
-	TestEqual(TEXT("TRANSFORM_GROUP source type preserved"), TransformGroup->Source.SourceNodeType, TEXT("TRANSFORM_GROUP"));
+	TestEqual(TEXT("TRANSFORM_GROUP source type preserved"), TransformGroup->Source().SourceNodeType, TEXT("TRANSFORM_GROUP"));
 	TestEqual(TEXT("TRANSFORM_GROUP keeps child hierarchy"), TransformGroup->Children.Num(), 1);
 
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
@@ -1510,7 +1510,7 @@ bool FFigmaTextPathFallbackTest::RunTest(const FString& Parameters)
 
 	const TSharedPtr<FDesignNode>& TextPathNode = Doc.Children[0]->Children[0];
 	TestEqual(TEXT("TEXT_PATH maps to Text"), TextPathNode->Type, EDesignNodeType::Text);
-	TestEqual(TEXT("TEXT_PATH source type preserved"), TextPathNode->Source.SourceNodeType, TEXT("TEXT_PATH"));
+	TestEqual(TEXT("TEXT_PATH source type preserved"), TextPathNode->Source().SourceNodeType, TEXT("TEXT_PATH"));
 	TestEqual(TEXT("TEXT_PATH keeps text content"), TextPathNode->Text.Content, TEXT("Curved Title"));
 
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
@@ -1599,9 +1599,9 @@ bool FFigmaSkipDesignOnlyNodesTest::RunTest(const FString& Parameters)
 
 	const TSharedPtr<FDesignNode>& KeptNode = Doc.Children[0]->Children[0];
 	TestEqual(TEXT("Only runtime text child remains"), KeptNode->Id, TEXT("keep_text"));
-	TestEqual(TEXT("Skipped designer node count recorded"), Doc.ParseDiagnostics.SkippedDesignerNodes.Num(), 2);
-	TestEqual(TEXT("First skipped node id recorded"), Doc.ParseDiagnostics.SkippedDesignerNodes[0].NodeId, TEXT("slice1"));
-	TestEqual(TEXT("Second skipped node reason recorded"), Doc.ParseDiagnostics.SkippedDesignerNodes[1].Reason, TEXT("figjam_only"));
+	TestEqual(TEXT("Skipped designer node count recorded"), Doc.ParseDiagnostics().SkippedDesignerNodes.Num(), 2);
+	TestEqual(TEXT("First skipped node id recorded"), Doc.ParseDiagnostics().SkippedDesignerNodes[0].NodeId, TEXT("slice1"));
+	TestEqual(TEXT("Second skipped node reason recorded"), Doc.ParseDiagnostics().SkippedDesignerNodes[1].Reason, TEXT("figjam_only"));
 
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
 	TestNull(TEXT("SLICE node should be skipped"), FindWidgetById(Data.RootWidget, TEXT("slice1")));
@@ -1945,7 +1945,7 @@ bool FFigmaVectorRasterFallbackTest::RunTest(const FString& Parameters)
 	}
 
 	const TSharedPtr<FDesignNode>& EllipseNode = Doc.Children[0]->Children[0];
-	TestTrue(TEXT("Vector raster fallback captured"), EllipseNode->Source.VectorRasterFallbackImageRef == TEXT("vec_grad_1"));
+	TestTrue(TEXT("Vector raster fallback captured"), EllipseNode->Source().VectorRasterFallbackImageRef == TEXT("vec_grad_1"));
 
 	TSet<FString> ImageRefs;
 	FFigmaParser::CollectImageRefs(Doc, ImageRefs);
@@ -1954,7 +1954,7 @@ bool FFigmaVectorRasterFallbackTest::RunTest(const FString& Parameters)
 	TMap<FString, FString> ImageMap;
 	ImageMap.Add(TEXT("vec_grad_1"), TEXT("/Game/Transient/T_vec_grad_1.T_vec_grad_1"));
 	FFigmaParser::ApplyImageUrls(Doc, ImageMap);
-	TestTrue(TEXT("ApplyImageUrls remaps vector fallback"), EllipseNode->Source.VectorRasterFallbackImageRef == TEXT("/Game/Transient/T_vec_grad_1.T_vec_grad_1"));
+	TestTrue(TEXT("ApplyImageUrls remaps vector fallback"), EllipseNode->Source().VectorRasterFallbackImageRef == TEXT("/Game/Transient/T_vec_grad_1.T_vec_grad_1"));
 
 	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
 	const FUMGWidgetNode* Widget = FindWidgetById(Data.RootWidget, TEXT("ellipse_grad"));
@@ -2022,14 +2022,14 @@ bool FFigmaRenderFallbackMetadataRoundTripTest::RunTest(const FString& Parameter
 	}
 
 	const TSharedPtr<FDesignNode>& RenderNode = Doc.Children[0]->Children[0];
-	TestEqual(TEXT("Render fallback image ref preserved"), RenderNode->Source.RenderFallback.ImageRef, TEXT("render_202_5356"));
-	TestEqual(TEXT("Render fallback scope preserved"), RenderNode->Source.RenderFallback.Scope, TEXT("full"));
-	TestEqual(TEXT("Render fallback source preserved"), RenderNode->Source.RenderFallback.Source, TEXT("figma_render_png"));
-	TestEqual(TEXT("Render fallback reason preserved"), RenderNode->Source.RenderFallback.Reason, TEXT("image_filters+image_blend_luminosity"));
-	TestEqual(TEXT("Render fallback offsetX preserved"), RenderNode->Source.RenderFallback.OffsetX, TEXT("-8.5"));
-	TestEqual(TEXT("Render fallback offsetY preserved"), RenderNode->Source.RenderFallback.OffsetY, TEXT("3.25"));
-	TestEqual(TEXT("Render fallback width preserved"), RenderNode->Source.RenderFallback.Width, TEXT("176"));
-	TestEqual(TEXT("Render fallback height preserved"), RenderNode->Source.RenderFallback.Height, TEXT("104"));
+	TestEqual(TEXT("Render fallback image ref preserved"), RenderNode->Source().RenderFallback.ImageRef, TEXT("render_202_5356"));
+	TestEqual(TEXT("Render fallback scope preserved"), RenderNode->Source().RenderFallback.Scope, TEXT("full"));
+	TestEqual(TEXT("Render fallback source preserved"), RenderNode->Source().RenderFallback.Source, TEXT("figma_render_png"));
+	TestEqual(TEXT("Render fallback reason preserved"), RenderNode->Source().RenderFallback.Reason, TEXT("image_filters+image_blend_luminosity"));
+	TestEqual(TEXT("Render fallback offsetX preserved"), RenderNode->Source().RenderFallback.OffsetX, TEXT("-8.5"));
+	TestEqual(TEXT("Render fallback offsetY preserved"), RenderNode->Source().RenderFallback.OffsetY, TEXT("3.25"));
+	TestEqual(TEXT("Render fallback width preserved"), RenderNode->Source().RenderFallback.Width, TEXT("176"));
+	TestEqual(TEXT("Render fallback height preserved"), RenderNode->Source().RenderFallback.Height, TEXT("104"));
 
 	TSet<FString> ImageRefs;
 	FFigmaParser::CollectImageRefs(Doc, ImageRefs);
@@ -2040,7 +2040,7 @@ bool FFigmaRenderFallbackMetadataRoundTripTest::RunTest(const FString& Parameter
 	ImageMap.Add(TEXT("img_orig"), TEXT("/Game/Transient/T_img_orig.T_img_orig"));
 	ImageMap.Add(TEXT("render_202_5356"), TEXT("/Game/Transient/T_render_202_5356.T_render_202_5356"));
 	FFigmaParser::ApplyImageUrls(Doc, ImageMap);
-	TestEqual(TEXT("ApplyImageUrls remaps render fallback image"), RenderNode->Source.RenderFallback.ImageRef, TEXT("/Game/Transient/T_render_202_5356.T_render_202_5356"));
+	TestEqual(TEXT("ApplyImageUrls remaps render fallback image"), RenderNode->Source().RenderFallback.ImageRef, TEXT("/Game/Transient/T_render_202_5356.T_render_202_5356"));
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaStructuredLeafRenderFallbackWidgetTest,
@@ -2072,19 +2072,19 @@ bool FFigmaStructuredLeafRenderFallbackWidgetTest::RunTest(const FString& Parame
 	Leaf->Transform.Y = 12.0f;
 	Leaf->Transform.Width = FDesignSize::Fixed(26.0f);
 	Leaf->Transform.Height = FDesignSize::Fixed(26.0f);
-	Leaf->Source.SourceNodeType = TEXT("FRAME");
+	Leaf->MutableSource().SourceNodeType = TEXT("FRAME");
 	Leaf->Visual.Fill.Type = EDesignFillType::Image;
 	Leaf->Visual.Fill.bEnabled = true;
 	Leaf->Visual.Fill.Image.Url = TEXT("img_avatar");
 	Leaf->Visual.Fill.Image.Mode = EDesignImageMode::Fit;
-	Leaf->Source.RenderFallback.ImageRef = TEXT("/Game/Transient/T_render_202_5356.T_render_202_5356");
-	Leaf->Source.RenderFallback.Scope = TEXT("full");
-	Leaf->Source.RenderFallback.Source = TEXT("figma_render_png");
-	Leaf->Source.RenderFallback.Reason = TEXT("foreground_blur");
-	Leaf->Source.RenderFallback.OffsetX = TEXT("-21.7463");
-	Leaf->Source.RenderFallback.OffsetY = TEXT("-21.7463");
-	Leaf->Source.RenderFallback.Width = TEXT("69.4925");
-	Leaf->Source.RenderFallback.Height = TEXT("69.4925");
+	Leaf->MutableSource().RenderFallback.ImageRef = TEXT("/Game/Transient/T_render_202_5356.T_render_202_5356");
+	Leaf->MutableSource().RenderFallback.Scope = TEXT("full");
+	Leaf->MutableSource().RenderFallback.Source = TEXT("figma_render_png");
+	Leaf->MutableSource().RenderFallback.Reason = TEXT("foreground_blur");
+	Leaf->MutableSource().RenderFallback.OffsetX = TEXT("-21.7463");
+	Leaf->MutableSource().RenderFallback.OffsetY = TEXT("-21.7463");
+	Leaf->MutableSource().RenderFallback.Width = TEXT("69.4925");
+	Leaf->MutableSource().RenderFallback.Height = TEXT("69.4925");
 	Root->Children.Add(Leaf);
 	Doc.Children.Add(Root);
 
@@ -2135,14 +2135,14 @@ bool FFigmaLeafRenderFallbackWidgetTest::RunTest(const FString& Parameters)
 	Leaf->Visual.Fill.bEnabled = true;
 	Leaf->Visual.Fill.Image.Url = TEXT("img_avatar");
 	Leaf->Visual.Fill.Image.Mode = EDesignImageMode::Fit;
-	Leaf->Source.RenderFallback.ImageRef = TEXT("/Game/Transient/T_render_202_5356.T_render_202_5356");
-	Leaf->Source.RenderFallback.Scope = TEXT("full");
-	Leaf->Source.RenderFallback.Source = TEXT("figma_render_png");
-	Leaf->Source.RenderFallback.Reason = TEXT("foreground_blur");
-	Leaf->Source.RenderFallback.OffsetX = TEXT("-21.7463");
-	Leaf->Source.RenderFallback.OffsetY = TEXT("-21.7463");
-	Leaf->Source.RenderFallback.Width = TEXT("69.4925");
-	Leaf->Source.RenderFallback.Height = TEXT("69.4925");
+	Leaf->MutableSource().RenderFallback.ImageRef = TEXT("/Game/Transient/T_render_202_5356.T_render_202_5356");
+	Leaf->MutableSource().RenderFallback.Scope = TEXT("full");
+	Leaf->MutableSource().RenderFallback.Source = TEXT("figma_render_png");
+	Leaf->MutableSource().RenderFallback.Reason = TEXT("foreground_blur");
+	Leaf->MutableSource().RenderFallback.OffsetX = TEXT("-21.7463");
+	Leaf->MutableSource().RenderFallback.OffsetY = TEXT("-21.7463");
+	Leaf->MutableSource().RenderFallback.Width = TEXT("69.4925");
+	Leaf->MutableSource().RenderFallback.Height = TEXT("69.4925");
 	Root->Children.Add(Leaf);
 	Doc.Children.Add(Root);
 

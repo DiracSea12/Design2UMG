@@ -32,7 +32,6 @@ public class Design2UMGEditor : ModuleRules
 			"Kismet",
 			"InputCore",
 			"Projects",
-			"DeveloperSettings",
 			"MovieScene",
 			"MovieSceneTracks",
 			"ImageWrapper",

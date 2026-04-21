@@ -3,8 +3,15 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "DesignSchema.h"
+#include "DesignSchemaFoundation.h"
 #include "UMGSchema.h"
+
+struct FDesignNode;
+
+struct FVisualMapperOptions
+{
+	float LuminosityFitOpacityCap = 0.0f;
+};
 
 /**
  * Maps visual properties such as fill, rounded corners, stroke, border,
@@ -22,5 +29,5 @@ public:
 	static FUMGWidgetNode WrapWithForegroundBlur(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, float BlurStrength);
 	static FUMGWidgetNode WrapWithInnerShadow(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, const FDesignShadow& Shadow);
 	static FUMGWidgetNode WrapWithBoxShadow(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, const FUMGBoxShadowLayerData& ShadowLayer, int32 ShadowIndex);
-	static FUMGWidgetNode WrapWithMultiFill(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node);
+	static FUMGWidgetNode WrapWithMultiFill(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, const FVisualMapperOptions& Options);
 };

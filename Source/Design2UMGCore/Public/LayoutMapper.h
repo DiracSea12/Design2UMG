@@ -3,8 +3,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "DesignSchema.h"
+#include "DesignSchemaFoundation.h"
 #include "UMGSchema.h"
+
+struct FDesignNode;
 
 /**
  * Layout mapping helpers for slot data, gap, padding, alignment, and SizeBox wrapping.

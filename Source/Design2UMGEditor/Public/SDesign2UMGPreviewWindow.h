@@ -3,21 +3,13 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "DesignImportPipeline.h"
+#include "DesignPreviewContracts.h"
 #include "TimerManager.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "Widgets/Input/SEditableTextBox.h"
 
-class IDesignPreviewRefreshAnalyzer;
-class IDesignPreviewMaterializationService;
 class SBox;
-
-struct FPreviewGenerationRequest
-{
-	FPreviewApprovedSnapshot ApprovedSnapshot;
-	FArtifactGenerationRequest GenerationRequest;
-};
 
 DECLARE_DELEGATE_OneParam(FOnPreviewConfirmed, const FPreviewGenerationRequest& /*GenerationRequest*/);
 DECLARE_DELEGATE(FOnPreviewCancelled);
@@ -82,13 +74,5 @@ private:
 
 	void SchedulePreviewRefresh();
 	FTimerHandle PreviewRefreshTimerHandle;
-};
-
-class IDesignPreviewRefreshAnalyzer
-{
-public:
-	virtual ~IDesignPreviewRefreshAnalyzer() = default;
-
-	virtual FPreviewRefreshResult AnalyzePreview(const FPreviewRefreshInput& Input) = 0;
 };
 

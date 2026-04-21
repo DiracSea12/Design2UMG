@@ -1,6 +1,7 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "LayoutMapper.h"
+#include "DesignSchema.h"
 #include "DesignTypeMapper.h"
 
 namespace

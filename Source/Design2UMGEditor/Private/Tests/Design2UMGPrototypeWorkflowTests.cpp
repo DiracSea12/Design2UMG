@@ -6,6 +6,7 @@
 #include "Design2UMGTestUtils.h"
 #include "FigmaParser.h"
 #include "UMGGenerator.h"
+#include "UMGSchemaSourceExtensions.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Animation/WidgetAnimation.h"
 #include "Blueprint/UserWidget.h"
@@ -52,22 +53,24 @@ namespace
 
 	UWidgetSwitcher* FindPrototypeSwitcherWidget(UUserWidget* WidgetInstance, const FUMGWidgetData& Data)
 	{
-		if (!WidgetInstance || !WidgetInstance->WidgetTree || Data.PrototypeNavigation.SwitcherWidgetName.IsEmpty())
+		const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
+		if (!WidgetInstance || !WidgetInstance->WidgetTree || NavigationData.SwitcherWidgetName.IsEmpty())
 		{
 			return nullptr;
 		}
 
-		return Cast<UWidgetSwitcher>(WidgetInstance->WidgetTree->FindWidget(FName(*Data.PrototypeNavigation.SwitcherWidgetName)));
+		return Cast<UWidgetSwitcher>(WidgetInstance->WidgetTree->FindWidget(FName(*NavigationData.SwitcherWidgetName)));
 	}
 
 	UOverlay* FindPrototypeOverlayHostWidget(UUserWidget* WidgetInstance, const FUMGWidgetData& Data)
 	{
-		if (!WidgetInstance || !WidgetInstance->WidgetTree || Data.PrototypeNavigation.OverlayHostWidgetName.IsEmpty())
+		const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
+		if (!WidgetInstance || !WidgetInstance->WidgetTree || NavigationData.OverlayHostWidgetName.IsEmpty())
 		{
 			return nullptr;
 		}
 
-		return Cast<UOverlay>(WidgetInstance->WidgetTree->FindWidget(FName(*Data.PrototypeNavigation.OverlayHostWidgetName)));
+		return Cast<UOverlay>(WidgetInstance->WidgetTree->FindWidget(FName(*NavigationData.OverlayHostWidgetName)));
 	}
 
 	void DeleteGeneratedAssetsAtPath(const FString& AssetDir)
@@ -169,8 +172,9 @@ bool FFigmaPrototypeNavigationRuntimeWorkflowTest::RunTest(const FString& Parame
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse prototype navigation fixture"), FFigmaParser::ParseDocument(Json, Document));
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
-	TestTrue(TEXT("Prototype navigation data available"), Data.PrototypeNavigation.IsValid());
-	if (!Data.PrototypeNavigation.IsValid())
+	const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
+	TestTrue(TEXT("Prototype navigation data available"), NavigationData.IsValid());
+	if (!NavigationData.IsValid())
 	{
 		return false;
 	}
@@ -288,8 +292,9 @@ bool FFigmaPrototypeSpecialActionsRuntimeWorkflowTest::RunTest(const FString& Pa
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse prototype special actions fixture"), FFigmaParser::ParseDocument(Json, Document));
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
-	TestTrue(TEXT("Prototype special action data available"), Data.PrototypeNavigation.IsValid());
-	if (!Data.PrototypeNavigation.IsValid())
+	const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
+	TestTrue(TEXT("Prototype special action data available"), NavigationData.IsValid());
+	if (!NavigationData.IsValid())
 	{
 		return false;
 	}
@@ -430,8 +435,9 @@ bool FFigmaPrototypeHoverAndPressRuntimeWorkflowTest::RunTest(const FString& Par
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse prototype hover/press fixture"), FFigmaParser::ParseDocument(Json, Document));
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
-	TestTrue(TEXT("Prototype hover/press data available"), Data.PrototypeNavigation.IsValid());
-	if (!Data.PrototypeNavigation.IsValid())
+	const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
+	TestTrue(TEXT("Prototype hover/press data available"), NavigationData.IsValid());
+	if (!NavigationData.IsValid())
 	{
 		return false;
 	}
@@ -547,8 +553,9 @@ bool FFigmaPrototypeAdvancedTriggersRuntimeWorkflowTest::RunTest(const FString& 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse prototype advanced trigger fixture"), FFigmaParser::ParseDocument(Json, Document));
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
-	TestTrue(TEXT("Prototype advanced trigger data available"), Data.PrototypeNavigation.IsValid());
-	if (!Data.PrototypeNavigation.IsValid())
+	const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
+	TestTrue(TEXT("Prototype advanced trigger data available"), NavigationData.IsValid());
+	if (!NavigationData.IsValid())
 	{
 		return false;
 	}
@@ -602,7 +609,7 @@ bool FFigmaPrototypeAdvancedTriggersRuntimeWorkflowTest::RunTest(const FString& 
 
 	auto FindBindingByTrigger = [&](const TCHAR* TriggerId) -> const FUMGPrototypeNavigationBinding*
 	{
-		return Data.PrototypeNavigation.ClickBindings.FindByPredicate(
+		return NavigationData.ClickBindings.FindByPredicate(
 			[&](const FUMGPrototypeNavigationBinding& Binding)
 			{
 				return Binding.TriggerWidgetId == TriggerId;
@@ -667,9 +674,10 @@ bool FFigmaPrototypeSinglePageOpenLinkRuntimeWorkflowTest::RunTest(const FString
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse single-page open-link fixture"), FFigmaParser::ParseDocument(Json, Document));
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
-	TestTrue(TEXT("Single-page open-link navigation data available"), Data.PrototypeNavigation.IsValid());
-	TestFalse(TEXT("Single-page open-link does not require switcher"), Data.PrototypeNavigation.RequiresSwitcher());
-	if (!Data.PrototypeNavigation.IsValid())
+	const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
+	TestTrue(TEXT("Single-page open-link navigation data available"), NavigationData.IsValid());
+	TestFalse(TEXT("Single-page open-link does not require switcher"), NavigationData.RequiresSwitcher());
+	if (!NavigationData.IsValid())
 	{
 		return false;
 	}
@@ -760,8 +768,9 @@ bool FFigmaPrototypeSlideTransitionRuntimeWorkflowTest::RunTest(const FString& P
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse prototype slide fixture"), FFigmaParser::ParseDocument(Json, Document));
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
-	TestTrue(TEXT("Prototype slide data available"), Data.PrototypeNavigation.IsValid());
-	if (!Data.PrototypeNavigation.IsValid())
+	const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
+	TestTrue(TEXT("Prototype slide data available"), NavigationData.IsValid());
+	if (!NavigationData.IsValid())
 	{
 		return false;
 	}

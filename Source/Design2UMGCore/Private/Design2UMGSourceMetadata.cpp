@@ -1,6 +1,8 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGSourceMetadata.h"
+#include "DesignSchemaSourceExtensions.h"
+#include "UMGSchema.h"
 
 namespace
 {
@@ -13,7 +15,7 @@ namespace
 
 		if (Key == TEXT("sourceNodeType"))
 		{
-			return &Node->Source.SourceNodeType;
+			return &Node->Source().SourceNodeType;
 		}
 
 		return nullptr;
@@ -71,14 +73,14 @@ namespace Design2UMGSourceMetadata
 		Result.SourceNodeId = Node->Id;
 		Result.SourceNodeName = Node->Name;
 		Result.SourceNodeType = GetSourceExtension(Node, TEXT("sourceNodeType"));
-		Result.ComponentId = Node->Source.ComponentInstance.ComponentId;
-		Result.ComponentSetId = Node->Source.ComponentInstance.ComponentSetId;
-		Result.MainComponentKey = Node->Source.ComponentInstance.MainComponentKey;
-		Result.ComponentPropertiesJson = Node->Source.ComponentInstance.ComponentPropertiesJson;
-		Result.VariantPropertiesJson = Node->Source.ComponentInstance.VariantPropertiesJson;
-		Result.OverridesJson = Node->Source.ComponentInstance.OverridesJson;
-		Result.bIsExposedInstance = Node->Source.ComponentInstance.bIsExposedInstance;
-		Result.bHasIsExposedInstance = Node->Source.ComponentInstance.bHasIsExposedInstance;
+		Result.ComponentId = Node->Source().ComponentInstance.ComponentId;
+		Result.ComponentSetId = Node->Source().ComponentInstance.ComponentSetId;
+		Result.MainComponentKey = Node->Source().ComponentInstance.MainComponentKey;
+		Result.ComponentPropertiesJson = Node->Source().ComponentInstance.ComponentPropertiesJson;
+		Result.VariantPropertiesJson = Node->Source().ComponentInstance.VariantPropertiesJson;
+		Result.OverridesJson = Node->Source().ComponentInstance.OverridesJson;
+		Result.bIsExposedInstance = Node->Source().ComponentInstance.bIsExposedInstance;
+		Result.bHasIsExposedInstance = Node->Source().ComponentInstance.bHasIsExposedInstance;
 
 		if (Result.IsComponentDefinition() && Result.ComponentId.IsEmpty())
 		{
@@ -104,7 +106,7 @@ namespace Design2UMGSourceMetadata
 			return false;
 		}
 
-		const FString Scope = Node->Source.RenderFallback.Scope;
+		const FString Scope = Node->Source().RenderFallback.Scope;
 		const bool bReplaceSubtree = Scope.Equals(TEXT("subtree"), ESearchCase::IgnoreCase);
 		if (Node->Children.Num() != 0 && !bReplaceSubtree)
 		{
@@ -118,7 +120,7 @@ namespace Design2UMGSourceMetadata
 			return false;
 		}
 
-		const FString& TexturePath = Node->Source.RenderFallback.ImageRef;
+		const FString& TexturePath = Node->Source().RenderFallback.ImageRef;
 		if (TexturePath.IsEmpty())
 		{
 			return false;
@@ -137,7 +139,7 @@ namespace Design2UMGSourceMetadata
 			return false;
 		}
 
-		if (Node->Source.Prototype.Interactions.Num() > 0 || HasMeaningfulSourceMetadata(Node, TEXT("interactions")))
+		if (Node->Source().Prototype.Interactions.Num() > 0 || HasMeaningfulSourceMetadata(Node, TEXT("interactions")))
 		{
 			return false;
 		}
@@ -150,20 +152,20 @@ namespace Design2UMGSourceMetadata
 		FUMGWidgetNode Widget;
 		Widget.Type = TEXT("Image");
 
-		const FString& TexturePath = Node->Source.RenderFallback.ImageRef;
+		const FString& TexturePath = Node->Source().RenderFallback.ImageRef;
 		Widget.Brush.TexturePath = TexturePath;
 		Widget.Brush.Image.TexturePath = TexturePath;
 		Widget.Brush.Image.bHasTexturePath = true;
 
 		float WidthOverride = Node->Transform.Width.Value;
-		const FString& FallbackWidth = Node->Source.RenderFallback.Width;
+		const FString& FallbackWidth = Node->Source().RenderFallback.Width;
 		if (!FallbackWidth.IsEmpty())
 		{
 			WidthOverride = FCString::Atof(*FallbackWidth);
 		}
 
 		float HeightOverride = Node->Transform.Height.Value;
-		const FString& FallbackHeight = Node->Source.RenderFallback.Height;
+		const FString& FallbackHeight = Node->Source().RenderFallback.Height;
 		if (!FallbackHeight.IsEmpty())
 		{
 			HeightOverride = FCString::Atof(*FallbackHeight);
@@ -188,8 +190,8 @@ namespace Design2UMGSourceMetadata
 			return 0.0f;
 		}
 
-		return Node->Source.LayoutExtensions.bHasCounterAxisSpacing
-			? Node->Source.LayoutExtensions.CounterAxisSpacing
+		return Node->Source().LayoutExtensions.bHasCounterAxisSpacing
+			? Node->Source().LayoutExtensions.CounterAxisSpacing
 			: Node->LayoutData.Gap;
 	}
 }

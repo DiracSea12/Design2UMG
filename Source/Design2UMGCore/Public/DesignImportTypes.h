@@ -3,9 +3,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "DesignSchema.h"
 
 struct FUMGWidgetData;
+struct FDesignDocument;
 
 struct DESIGN2UMGCORE_API FDesignFrameInfo
 {

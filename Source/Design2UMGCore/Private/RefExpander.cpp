@@ -1,6 +1,8 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "RefExpander.h"
+#include "DesignSchema.h"
+#include "DesignSchemaSourceExtensions.h"
 #include "Design2UMGLog.h"
 
 namespace
@@ -199,7 +201,7 @@ namespace
 			return;
 		}
 
-		Node->Source.bExpandedRefInstance = true;
+		Node->MutableSource().bExpandedRefInstance = true;
 		Node->Metadata.Add(ExpandedRefInstanceMetadataKey, TEXT("true"));
 		for (TSharedPtr<FDesignNode>& Child : Node->Children)
 		{

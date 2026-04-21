@@ -3,35 +3,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "DesignImportPipeline.h"
+#include "DesignPreviewContracts.h"
 #include "UObject/StrongObjectPtr.h"
 
 class UTexture2D;
-class UUserWidget;
-
-struct FDesignPreviewMaterializationRequest
-{
-	uint64 RequestId = 0;
-	FPreviewApprovedSnapshot ApprovedSnapshot;
-};
-
-struct FDesignPreviewMaterializationResult
-{
-	bool bSucceeded = false;
-	uint64 RequestId = 0;
-	FVector2D PreviewDesignSize = FVector2D::ZeroVector;
-	FString MaterializedWidgetName;
-};
-
-class IDesignPreviewMaterializationService
-{
-public:
-	virtual ~IDesignPreviewMaterializationService() = default;
-
-	virtual bool MaterializePreview(const FDesignPreviewMaterializationRequest& Request, FDesignPreviewMaterializationResult& OutResult) = 0;
-	virtual UUserWidget* GetMaterializedPreviewWidget() const = 0;
-	virtual void Reset() = 0;
-};
 
 class FDesignPreviewMaterializationService final : public IDesignPreviewMaterializationService
 {

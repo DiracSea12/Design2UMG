@@ -1,6 +1,7 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGNodeWidgetFactory.h"
+#include "DesignSchemaSourceExtensions.h"
 
 #include "Design2UMGLog.h"
 #include "Design2UMGSourceMetadata.h"
@@ -40,7 +41,7 @@ namespace
 		Widget.Type = FDesignTypeMapper::MapNodeTypeToWidget(Node->Type, Node->LayoutData.Layout);
 		if (Node.IsValid())
 		{
-			const FString& OverflowDirection = Node->Source.Prototype.OverflowDirection;
+			const FString& OverflowDirection = Node->Source().Prototype.OverflowDirection;
 			if (OverflowDirection.Equals(TEXT("VERTICAL_SCROLLING"), ESearchCase::IgnoreCase))
 			{
 				Widget.Type = TEXT("ScrollBox");
@@ -67,7 +68,7 @@ namespace
 		const float Height = Node->Transform.Height.IsFixed() ? Node->Transform.Height.Value : 0.0f;
 		const bool bHasGradientFill = HasGradientVisualFill(Node);
 		const bool bHasVectorRasterFallback =
-			bHasGradientFill && !Node->Source.VectorRasterFallbackImageRef.IsEmpty();
+			bHasGradientFill && !Node->Source().VectorRasterFallbackImageRef.IsEmpty();
 		const bool bHasStroke = Node->Visual.Stroke.HasStroke();
 
 		if (Width > 0.0f

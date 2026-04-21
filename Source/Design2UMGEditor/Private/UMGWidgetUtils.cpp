@@ -1,6 +1,7 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGWidgetUtils.h"
+#include "WidgetTreeChildBuilder.h"
 #include "WidgetMetadataCollector.h"
 #include "WidgetResourceBinder.h"
 #include "Design2UMGLog.h"
@@ -50,10 +51,9 @@
 #include "Components/MultiLineEditableTextBox.h"
 #include "Components/BackgroundBlur.h"
 #include "Components/InvalidationBox.h"
+#include "Components/NamedSlot.h"
 #include "Components/RetainerBox.h"
 #include "Components/WidgetSwitcher.h"
-#include "Components/NamedSlot.h"
-#include "Components/NamedSlotInterface.h"
 #include "Components/SafeZone.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "ProceduralShapeGenerator.h"
@@ -63,7 +63,6 @@
 #include "Components/MenuAnchor.h"
 #include "Components/EditableText.h"
 #include "Components/MultiLineEditableText.h"
-#include "Components/ContentWidget.h"
 #include "Blueprint/WidgetTree.h"
 
 namespace
@@ -145,186 +144,7 @@ namespace
 		return Map;
 	}
 
-	bool HasMeaningfulSlotData(const FUMGSlotData& Slot)
-	{
-		const FUMGSlotData Default;
-		const bool bAnchors =
-			!FMath::IsNearlyEqual(Slot.Anchors.Min.X, Default.Anchors.Min.X) ||
-			!FMath::IsNearlyEqual(Slot.Anchors.Min.Y, Default.Anchors.Min.Y) ||
-			!FMath::IsNearlyEqual(Slot.Anchors.Max.X, Default.Anchors.Max.X) ||
-			!FMath::IsNearlyEqual(Slot.Anchors.Max.Y, Default.Anchors.Max.Y);
-		const bool bAlignment =
-			!FMath::IsNearlyEqual(Slot.Alignment.X, Default.Alignment.X) ||
-			!FMath::IsNearlyEqual(Slot.Alignment.Y, Default.Alignment.Y);
-		const bool bOffsets =
-			!FMath::IsNearlyEqual(Slot.Offsets.Left, Default.Offsets.Left) ||
-			!FMath::IsNearlyEqual(Slot.Offsets.Top, Default.Offsets.Top) ||
-			!FMath::IsNearlyEqual(Slot.Offsets.Right, Default.Offsets.Right) ||
-			!FMath::IsNearlyEqual(Slot.Offsets.Bottom, Default.Offsets.Bottom);
-		const bool bPadding = !FUMGValueParser::IsNearlyEqualMargin(Slot.Padding, Default.Padding);
-		const bool bBox =
-			Slot.HorizontalAlignment != Default.HorizontalAlignment ||
-			Slot.VerticalAlignment != Default.VerticalAlignment ||
-			Slot.SizeRule != Default.SizeRule ||
-			!FMath::IsNearlyEqual(Slot.FillWeight, Default.FillWeight);
-		const bool bGrid =
-			Slot.Row != Default.Row ||
-			Slot.Column != Default.Column ||
-			Slot.RowSpan != Default.RowSpan ||
-			Slot.ColumnSpan != Default.ColumnSpan;
-		return bAnchors || bAlignment || bOffsets || bPadding || bBox || bGrid;
-	}
-
-	bool HasExplicitGridData(const FUMGSlotData& Slot)
-	{
-		const FUMGSlotData Default;
-		return Slot.Row != Default.Row ||
-			Slot.Column != Default.Column ||
-			Slot.RowSpan != Default.RowSpan ||
-			Slot.ColumnSpan != Default.ColumnSpan;
-	}
-
-	bool HasValidBounds(const FBounds& Bounds)
-	{
-		return Bounds.W > 0.0f && Bounds.H > 0.0f;
-	}
-
-	struct FAutoGridItem
-	{
-		int32 Index = INDEX_NONE;
-		float CenterX = 0.0f;
-		float CenterY = 0.0f;
-		float Height = 0.0f;
-	};
-
-	bool ShouldAutoAssignGridSlots(const TArray<FUMGWidgetNode>& Children)
-	{
-		for (const FUMGWidgetNode& Child : Children)
-		{
-			if (!HasExplicitGridData(Child.Slot) && HasValidBounds(Child.Bounds))
-			{
-				return true;
-			}
-		}
-		return false;
-	}
-
-	void BuildAutoGridSlots(const TArray<FUMGWidgetNode>& Children, TMap<int32, FIntPoint>& OutSlots)
-	{
-		OutSlots.Reset();
-
-		TSet<int32> ExplicitIndices;
-		TSet<FIntPoint> OccupiedCells;
-		for (int32 Index = 0; Index < Children.Num(); ++Index)
-		{
-			const FUMGWidgetNode& Child = Children[Index];
-			if (HasExplicitGridData(Child.Slot))
-			{
-				const FIntPoint Cell(Child.Slot.Row, Child.Slot.Column);
-				OutSlots.Add(Index, Cell);
-				OccupiedCells.Add(Cell);
-				ExplicitIndices.Add(Index);
-			}
-		}
-
-		TArray<FAutoGridItem> Items;
-		Items.Reserve(Children.Num());
-
-		float HeightSum = 0.0f;
-		for (int32 Index = 0; Index < Children.Num(); ++Index)
-		{
-			const FUMGWidgetNode& Child = Children[Index];
-			if (!HasValidBounds(Child.Bounds))
-			{
-				continue;
-			}
-
-			FAutoGridItem Item;
-			Item.Index = Index;
-			Item.CenterX = Child.Bounds.GetCenterX();
-			Item.CenterY = Child.Bounds.GetCenterY();
-			Item.Height = Child.Bounds.H;
-			Items.Add(Item);
-			HeightSum += Child.Bounds.H;
-		}
-
-		if (Items.Num() == 0)
-		{
-			return;
-		}
-
-		const float AvgHeight = HeightSum / Items.Num();
-		const float RowThreshold = FMath::Max(AvgHeight * 0.5f, 0.01f);
-
-		Items.Sort([](const FAutoGridItem& A, const FAutoGridItem& B)
-		{
-			if (FMath::IsNearlyEqual(A.CenterY, B.CenterY))
-			{
-				return A.CenterX < B.CenterX;
-			}
-			return A.CenterY < B.CenterY;
-		});
-
-		TArray<TArray<FAutoGridItem>> Rows;
-		float CurrentRowCenter = 0.0f;
-		int32 CurrentRowCount = 0;
-
-		for (const FAutoGridItem& Item : Items)
-		{
-			if (Rows.Num() == 0)
-			{
-				Rows.Add({ Item });
-				CurrentRowCenter = Item.CenterY;
-				CurrentRowCount = 1;
-				continue;
-			}
-
-			if (FMath::Abs(Item.CenterY - CurrentRowCenter) <= RowThreshold)
-			{
-				Rows.Last().Add(Item);
-				CurrentRowCenter = (CurrentRowCenter * CurrentRowCount + Item.CenterY) / (CurrentRowCount + 1);
-				++CurrentRowCount;
-				continue;
-			}
-
-			Rows.Add({ Item });
-			CurrentRowCenter = Item.CenterY;
-			CurrentRowCount = 1;
-		}
-
-		for (int32 RowIndex = 0; RowIndex < Rows.Num(); ++RowIndex)
-		{
-			TArray<FAutoGridItem>& RowItems = Rows[RowIndex];
-			RowItems.Sort([](const FAutoGridItem& A, const FAutoGridItem& B)
-			{
-				return A.CenterX < B.CenterX;
-			});
-
-			for (int32 ColIndex = 0; ColIndex < RowItems.Num(); ++ColIndex)
-			{
-				const FAutoGridItem& Item = RowItems[ColIndex];
-				if (ExplicitIndices.Contains(Item.Index))
-				{
-					continue;
-				}
-
-				FIntPoint Cell(RowIndex, ColIndex);
-				while (OccupiedCells.Contains(Cell))
-				{
-					Cell.Y++;
-				}
-				OutSlots.Add(Item.Index, Cell);
-				OccupiedCells.Add(Cell);
-			}
-		}
-	}
-
 }
-
-// 前向声明：从 CreateWidgetRecursive 拆分出的子控件处理函数
-static void HandleNamedSlotChildren(UWidgetTree* WidgetTree, INamedSlotInterface* NamedSlotHost, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords);
-static void HandleContentWidgetChild(UWidgetTree* WidgetTree, UContentWidget* Content, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords);
-
 
 UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords, const FIntPoint* ExplicitDesignSize)
 {
@@ -371,38 +191,12 @@ UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWid
 		return nullptr;
 	}
 
-	if (UPanelWidget* AsPanel = Cast<UPanelWidget>(NewWidget))
-	{
-		TMap<int32, FIntPoint> AutoGridSlots;
-		if ((AsPanel->IsA<UGridPanel>() || AsPanel->IsA<UUniformGridPanel>()) && ShouldAutoAssignGridSlots(Node.Children))
-		{
-			BuildAutoGridSlots(Node.Children, AutoGridSlots);
-		}
-
-		for (int32 ChildIndex = 0; ChildIndex < Node.Children.Num(); ++ChildIndex)
-		{
-			const FUMGWidgetNode& Child = Node.Children[ChildIndex];
-			if (const FIntPoint* SlotIndex = AutoGridSlots.Find(ChildIndex))
-			{
-				FUMGWidgetNode ChildCopy = Child;
-				ChildCopy.Slot.Row = SlotIndex->X;
-				ChildCopy.Slot.Column = SlotIndex->Y;
-				CreateWidgetRecursive(WidgetTree, ChildCopy, AsPanel, TextureMap, FigmaMetadataRecords, ExplicitDesignSize);
-			}
-			else
-			{
-				CreateWidgetRecursive(WidgetTree, Child, AsPanel, TextureMap, FigmaMetadataRecords, ExplicitDesignSize);
-			}
-		}
-	}
-	else if (INamedSlotInterface* NamedSlotHost = Cast<INamedSlotInterface>(NewWidget))
-	{
-		HandleNamedSlotChildren(WidgetTree, NamedSlotHost, Node, TextureMap, FigmaMetadataRecords);
-	}
-	else if (UContentWidget* Content = Cast<UContentWidget>(NewWidget))
-	{
-		HandleContentWidgetChild(WidgetTree, Content, Node, TextureMap, FigmaMetadataRecords);
-	}
+	const FWidgetTreeChildBuildContext Context{
+		TextureMap,
+		FigmaMetadataRecords,
+		ExplicitDesignSize
+	};
+	FWidgetTreeChildBuilder::BuildChildren(WidgetTree, NewWidget, Node, Context);
 
 	return NewWidget;
 }
@@ -446,167 +240,6 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 	}
 
 	return NewWidget;
-}
-
-static void HandleNamedSlotChildren(UWidgetTree* WidgetTree, INamedSlotInterface* NamedSlotHost, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords)
-{
-	TArray<FName> SlotNames;
-	NamedSlotHost->GetSlotNames(SlotNames);
-
-	if (SlotNames.Num() == 0)
-	{
-		if (Node.Children.Num() > 0)
-		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("NamedSlot 宿主 '%s' 没有槽位名称但有 %d 个子控件"),
-				*Node.Name, Node.Children.Num());
-		}
-		return;
-	}
-
-	TSet<FName> UsedSlots;
-	TMap<FName, UWidget*> SlotContent;
-	int32 NextSlotIndex = 0;
-
-	// 槽位追加：已有内容时自动包裹 VerticalBox
-	auto AppendToSlot = [&](const FName& SlotName, UWidget* ChildWidget, const FUMGWidgetNode& ChildNode)
-	{
-		if (UWidget** ExistingPtr = SlotContent.Find(SlotName))
-		{
-			if (UPanelWidget* Panel = Cast<UPanelWidget>(*ExistingPtr))
-			{
-				if (UPanelSlot* NewSlot = Panel->AddChild(ChildWidget))
-				{
-					FUMGWidgetUtils::ApplySlotProperties(NewSlot, ChildNode.Slot);
-				}
-				return;
-			}
-
-			FName WrapName = FUMGWidgetUtils::SanitizeWidgetName(Node.Name + TEXT("_SlotWrap_") + SlotName.ToString(), TEXT("SlotWrap"));
-			if (UVerticalBox* WrapBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), WrapName))
-			{
-				WrapBox->AddChild(*ExistingPtr);
-				if (UPanelSlot* NewSlot = WrapBox->AddChild(ChildWidget))
-				{
-					FUMGWidgetUtils::ApplySlotProperties(NewSlot, ChildNode.Slot);
-				}
-				NamedSlotHost->SetContentForSlot(SlotName, WrapBox);
-				SlotContent[SlotName] = WrapBox;
-			}
-			return;
-		}
-
-		NamedSlotHost->SetContentForSlot(SlotName, ChildWidget);
-		SlotContent.Add(SlotName, ChildWidget);
-	};
-
-	for (const FUMGWidgetNode& ChildNode : Node.Children)
-	{
-		UWidget* ChildWidget = FUMGWidgetUtils::CreateWidgetRecursive(WidgetTree, ChildNode, nullptr, TextureMap, FigmaMetadataRecords);
-		if (!ChildWidget) continue;
-
-		// 查找目标槽位：优先显式指定，其次按序分配，最后回退到末尾槽位
-		FName TargetSlot = NAME_None;
-		FString FallbackSlotName;
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(ChildNode, UMGPropertyKeys::NamedSlot, FallbackSlotName);
-		FString RequestedSlotName;
-		if (!Design2UMGWidgetNodeAccess::TryGetWidgetString(ChildNode, UMGPropertyKeys::SlotName, RequestedSlotName) || RequestedSlotName.IsEmpty())
-		{
-			RequestedSlotName = FallbackSlotName;
-		}
-		if (!RequestedSlotName.IsEmpty())
-		{
-			for (const FName& SlotName : SlotNames)
-			{
-				if (SlotName.ToString().Equals(RequestedSlotName, ESearchCase::IgnoreCase))
-				{
-					TargetSlot = SlotName;
-					break;
-				}
-			}
-		}
-
-		if (TargetSlot.IsNone())
-		{
-			while (NextSlotIndex < SlotNames.Num() && UsedSlots.Contains(SlotNames[NextSlotIndex]))
-			{
-				++NextSlotIndex;
-			}
-			if (NextSlotIndex < SlotNames.Num())
-			{
-				TargetSlot = SlotNames[NextSlotIndex];
-				++NextSlotIndex;
-			}
-		}
-
-		bool bFallbackAppend = false;
-		if (TargetSlot.IsNone() && SlotNames.Num() > 0)
-		{
-			TargetSlot = SlotNames.Last();
-			bFallbackAppend = true;
-		}
-
-		if (TargetSlot.IsNone())
-		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("NamedSlot 宿主 '%s' 没有可用槽位，子控件 '%s' 已跳过"),
-				*Node.Name, *ChildNode.Name);
-			continue;
-		}
-
-		if (HasMeaningfulSlotData(ChildNode.Slot))
-		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("NamedSlot 子控件 '%s' 的 Slot 不生效，已忽略（宿主 '%s'）"),
-				*ChildNode.Name, *Node.Name);
-		}
-
-		if (bFallbackAppend)
-		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("NamedSlot 宿主 '%s' 槽位已满，子控件 '%s' 追加到 '%s'"),
-				*Node.Name, *ChildNode.Name, *TargetSlot.ToString());
-		}
-		else if (SlotContent.Contains(TargetSlot))
-		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("NamedSlot '%s' 在 '%s' 已存在内容，合并子控件 '%s'"),
-				*TargetSlot.ToString(), *Node.Name, *ChildNode.Name);
-		}
-
-		AppendToSlot(TargetSlot, ChildWidget, ChildNode);
-		UsedSlots.Add(TargetSlot);
-	}
-}
-
-static void HandleContentWidgetChild(UWidgetTree* WidgetTree, UContentWidget* Content, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords)
-{
-	if (Node.Children.Num() == 0) return;
-
-	const FUMGWidgetNode& ChildNode = Node.Children[0];
-	UWidget* ChildWidget = FUMGWidgetUtils::CreateWidgetRecursive(WidgetTree, ChildNode, nullptr, TextureMap, FigmaMetadataRecords);
-	if (ChildWidget)
-	{
-		if (UPanelSlot* ContentSlot = Content->SetContent(ChildWidget))
-		{
-			// SizeBox is a runtime wrapper used to preserve measured size.
-			// Re-applying the wrapped child's original panel slot to USizeBoxSlot
-			// shifts/stretchs the content and regresses visual parity.
-			if (!Content->IsA<USizeBox>())
-			{
-				FUMGWidgetUtils::ApplySlotProperties(ContentSlot, ChildNode.Slot);
-			}
-		}
-
-		// ContentWidget 通过自身属性控制子控件对齐
-		if (UBorder* Border = Cast<UBorder>(Content))
-		{
-			// Keep Fill semantics for Border content. Mapping Fill+Alignment(0,0) to Left/Top
-			// causes root canvases to collapse to desired size and drift to top-left.
-			Border->SetHorizontalAlignment(FUMGValueParser::ParseHAlign(ChildNode.Slot.HorizontalAlignment));
-			Border->SetVerticalAlignment(FUMGValueParser::ParseVAlign(ChildNode.Slot.VerticalAlignment));
-		}
-	}
-
-	if (Node.Children.Num() > 1)
-	{
-		UE_LOG(LogDesign2UMG, Warning, TEXT("ContentWidget '%s' ignoring %d extra children"), *Node.Name, Node.Children.Num() - 1);
-	}
 }
 
 namespace

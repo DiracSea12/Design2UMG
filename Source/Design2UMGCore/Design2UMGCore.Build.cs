@@ -14,10 +14,8 @@ public class Design2UMGCore : ModuleRules
 			"CoreUObject",
 			"Engine",
 			"UMG",
-			"Slate",
 			"SlateCore",
 			"Json",
-			"JsonUtilities",
 			"DeveloperSettings",
 		});
 
@@ -25,6 +23,7 @@ public class Design2UMGCore : ModuleRules
 		{
 			"AssetRegistry",
 			"Projects",
+			"Slate",
 		});
 	}
 }

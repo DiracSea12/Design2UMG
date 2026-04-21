@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "DesignSchema.h"
+#include "DesignSchemaSourceExtensions.h"
 
 /**
  * Parses Figma export JSON into the shared design IR and related asset metadata.

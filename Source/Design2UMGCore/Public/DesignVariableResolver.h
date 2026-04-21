@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "DesignSchema.h"
+#include "DesignSchemaFoundation.h"
 
 class FJsonValue;
 

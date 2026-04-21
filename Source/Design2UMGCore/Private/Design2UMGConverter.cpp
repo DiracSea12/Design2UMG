@@ -1,6 +1,7 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGConverter.h"
+#include "DesignSchemaSourceExtensions.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
 #include "Design2UMGGridLayout.h"
@@ -22,16 +23,43 @@ namespace
 {
 	constexpr int32 MaxTreeRecursionDepth = 512;
 
+	struct FConversionVisualSettingsPayload
+	{
+		UDesign2UMGSettings::FResolvedPlaceholderHatchStyle PlaceholderHatchStyle;
+		FVisualMapperOptions VisualMapperOptions;
+	};
+
+	FConversionVisualSettingsPayload BuildConversionVisualSettingsPayload()
+	{
+		FConversionVisualSettingsPayload Payload;
+		if (const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get())
+		{
+			Payload.PlaceholderHatchStyle = Settings->ResolvePlaceholderHatchStyle();
+			Payload.VisualMapperOptions.LuminosityFitOpacityCap = Settings->ResolveLuminosityFitOpacityCap();
+		}
+		else
+		{
+			Payload.PlaceholderHatchStyle = UDesign2UMGSettings::FResolvedPlaceholderHatchStyle();
+			Payload.VisualMapperOptions.LuminosityFitOpacityCap = UDesign2UMGSettings::CanonicalLuminosityFitOpacityCap;
+		}
+		return Payload;
+	}
+
 	struct FConversionState
 	{
-		explicit FConversionState(const FDesignDocument& InDocument, TArray<FString>& InWarnings)
+		explicit FConversionState(
+			const FDesignDocument& InDocument,
+			TArray<FString>& InWarnings,
+			const FConversionVisualSettingsPayload& InVisualSettings)
 			: Document(InDocument)
 			, Warnings(InWarnings)
+			, VisualSettings(InVisualSettings)
 		{
 		}
 
 		const FDesignDocument& Document;
 		TArray<FString>& Warnings;
+		const FConversionVisualSettingsPayload& VisualSettings;
 		TSet<FString> WarnedFamilies;
 		TSet<FString> PrunedInvalidMappings;
 		TSet<FString> PrototypeTriggerNodeIds;
@@ -136,57 +164,6 @@ namespace
 		bool bUsedExpandedRef = false;
 	};
 
-	TSharedPtr<FDesignNode> ExpandRefForConversion(
-		const TSharedPtr<FDesignNode>& Node,
-		const FConversionContext& Context)
-	{
-		if (!Node.IsValid() || Node->Type != EDesignNodeType::Ref)
-		{
-			return Node;
-		}
-
-		TSharedPtr<FDesignNode> Expanded = FRefExpander::ExpandRef(Node, Context.State.Document);
-		if (!Expanded.IsValid())
-		{
-			return nullptr;
-		}
-
-		if (Context.ThemeContext.Num() > 0)
-		{
-			FDesignVariableResolver Resolver(Context.State.Document.Variables);
-			Resolver.SetThemeContext(Context.ThemeContext);
-			FRefExpander::ReThemeNode(Expanded, Resolver);
-		}
-
-		return Expanded;
-	}
-
-	FChildSizeSnapshot BuildChildSizeSnapshot(const TSharedPtr<FDesignNode>& Child, const FDesignDocument& Doc)
-	{
-		FChildSizeSnapshot Snapshot;
-		Snapshot.Child = Child;
-		if (!Child.IsValid())
-			return Snapshot;
-
-		Snapshot.RawWidth = Child->Transform.Width;
-		Snapshot.RawHeight = Child->Transform.Height;
-		Snapshot.EffectiveWidth = Child->Transform.Width;
-		Snapshot.EffectiveHeight = Child->Transform.Height;
-
-		if (Child->Type == EDesignNodeType::Ref)
-		{
-			if (auto Expanded = FRefExpander::ExpandRef(Child, Doc))
-			{
-				Snapshot.bUsedExpandedRef = true;
-				if (!Child->Transform.bHasWidth)
-					Snapshot.EffectiveWidth = Expanded->Transform.Width;
-				if (!Child->Transform.bHasHeight)
-					Snapshot.EffectiveHeight = Expanded->Transform.Height;
-			}
-		}
-		return Snapshot;
-	}
-
 	bool ShouldSkipNode(const TSharedPtr<FDesignNode>& Node)
 	{
 		return Design2UMGCore::SharedSemantics::ShouldSkipNode(Node);
@@ -234,11 +211,12 @@ namespace
 			&& !Node->Text.Content.IsEmpty();
 	}
 
-	bool TryApplyPlaceholderSurfaceTint(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
+	bool TryApplyPlaceholderSurfaceTint(
+		FUMGWidgetNode& Widget,
+		const TSharedPtr<FDesignNode>& Node,
+		const FConversionVisualSettingsPayload& VisualSettings)
 	{
-		const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
-		const UDesign2UMGSettings::FResolvedPlaceholderHatchStyle Style =
-			Settings ? Settings->ResolvePlaceholderHatchStyle() : UDesign2UMGSettings::FResolvedPlaceholderHatchStyle();
+		const UDesign2UMGSettings::FResolvedPlaceholderHatchStyle& Style = VisualSettings.PlaceholderHatchStyle;
 		const bool bExpandedRefInstancePlaceholder = Design2UMGSourceMetadata::HasNodeMetadataFlag(Node, TEXT("design2umg.expanded_ref_instance"));
 		const FString& DefaultPlaceholderFillColor =
 			bExpandedRefInstancePlaceholder ? Style.RefFillColor : Style.BaseFillColor;
@@ -352,10 +330,13 @@ namespace
 		}
 	}
 
-	FUMGWidgetNode ApplyVisualEffectWrappers(FUMGWidgetNode Widget, const TSharedPtr<FDesignNode>& Node)
+	FUMGWidgetNode ApplyVisualEffectWrappers(
+		FUMGWidgetNode Widget,
+		const TSharedPtr<FDesignNode>& Node,
+		const FVisualMapperOptions& VisualMapperOptions)
 	{
 		if (Node->HasMultiFill())
-			Widget = FVisualMapper::WrapWithMultiFill(MoveTemp(Widget), Node);
+			Widget = FVisualMapper::WrapWithMultiFill(MoveTemp(Widget), Node, VisualMapperOptions);
 
 		const FDesignShadow* InnerShadow = nullptr;
 		for (const FDesignEffect& Effect : Node->Visual.Effects)
@@ -424,6 +405,475 @@ namespace
 		const TSharedPtr<FDesignNode>& Node,
 		const FConversionContext& Context);
 
+	struct FNodeChildPreparation
+	{
+		explicit FNodeChildPreparation(const FConversionContext& InContext)
+			: Context(InContext)
+		{
+		}
+
+		TSharedPtr<FDesignNode> ExpandRef(const TSharedPtr<FDesignNode>& Node) const
+		{
+			if (!Node.IsValid() || Node->Type != EDesignNodeType::Ref)
+			{
+				return Node;
+			}
+
+			TSharedPtr<FDesignNode> Expanded = FRefExpander::ExpandRef(Node, Context.State.Document);
+			if (!Expanded.IsValid())
+			{
+				return nullptr;
+			}
+
+			if (Context.ThemeContext.Num() > 0)
+			{
+				FDesignVariableResolver Resolver(Context.State.Document.Variables);
+				Resolver.SetThemeContext(Context.ThemeContext);
+				FRefExpander::ReThemeNode(Expanded, Resolver);
+			}
+
+			return Expanded;
+		}
+
+		TSharedPtr<FDesignNode> ResolveExpandedChild(const TSharedPtr<FDesignNode>& Child, const bool bPreComputeFitContent) const
+		{
+			TSharedPtr<FDesignNode> ExpandedChild = ExpandRef(Child);
+			if (!ExpandedChild.IsValid())
+			{
+				return Child;
+			}
+
+			if (bPreComputeFitContent && ExpandedChild != Child)
+			{
+				SizeEstimator::PreComputeFitContentSizes(ExpandedChild, Context.State.Document);
+			}
+
+			return ExpandedChild;
+		}
+
+		void PreResolveFlowChildren(
+			const TSharedPtr<FDesignNode>& Node,
+			const FUMGWidgetNode& Widget,
+			const TArray<TSharedPtr<FDesignNode>>& VisibleChildren) const
+		{
+			if (Widget.Bounds.W > 0 && Widget.Bounds.H > 0
+				&& (Node->LayoutData.Layout == EDesignLayout::Horizontal || Node->LayoutData.Layout == EDesignLayout::Vertical))
+			{
+				const float InnerW = Widget.Bounds.W - Node->LayoutData.Padding.Left - Node->LayoutData.Padding.Right;
+				const float InnerH = Widget.Bounds.H - Node->LayoutData.Padding.Top - Node->LayoutData.Padding.Bottom;
+				const bool bHorizontal = Node->LayoutData.Layout == EDesignLayout::Horizontal;
+				TArray<FChildSizeSnapshot> EffectiveChildren;
+				for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
+				{
+					EffectiveChildren.Add(BuildChildSizeSnapshot(Child));
+				}
+
+				float FixedMainSum = 0.0f;
+				int32 FillCount = 0;
+				const float TotalGap = EffectiveChildren.Num() > 1 ? Node->LayoutData.Gap * (EffectiveChildren.Num() - 1) : 0.0f;
+				for (const FChildSizeSnapshot& ChildSnapshot : EffectiveChildren)
+				{
+					const FDesignSize& MainSize = bHorizontal ? ChildSnapshot.EffectiveWidth : ChildSnapshot.EffectiveHeight;
+					if (MainSize.IsFill())
+					{
+						++FillCount;
+					}
+					else
+					{
+						FixedMainSum += MainSize.Value;
+					}
+
+					const FDesignSize& RawMain = bHorizontal ? ChildSnapshot.RawWidth : ChildSnapshot.RawHeight;
+					const FDesignSize& RawCross = bHorizontal ? ChildSnapshot.RawHeight : ChildSnapshot.RawWidth;
+					const FDesignSize& EffectiveCross = bHorizontal ? ChildSnapshot.EffectiveHeight : ChildSnapshot.EffectiveWidth;
+					UE_LOG(LogDesign2UMG, Verbose, TEXT("PreResolveFill Child '%s': ref=%d rawMain=%s(%.0f) effMain=%s(%.0f) rawCross=%s(%.0f) effCross=%s(%.0f)"),
+						ChildSnapshot.Child.IsValid() ? *ChildSnapshot.Child->Id : TEXT("<invalid>"),
+						ChildSnapshot.bUsedExpandedRef ? 1 : 0,
+						ToSizeModeLogString(RawMain.Mode), RawMain.Value,
+						ToSizeModeLogString(MainSize.Mode), MainSize.Value,
+						ToSizeModeLogString(RawCross.Mode), RawCross.Value,
+						ToSizeModeLogString(EffectiveCross.Mode), EffectiveCross.Value);
+				}
+
+				if (FillCount > 0)
+				{
+					const float AvailableMain = (bHorizontal ? InnerW : InnerH) - FixedMainSum - TotalGap;
+					const float FillMain = FMath::Max(0.0f, AvailableMain / FillCount);
+					for (FChildSizeSnapshot& ChildSnapshot : EffectiveChildren)
+					{
+						const FDesignSize& MainSize = bHorizontal ? ChildSnapshot.EffectiveWidth : ChildSnapshot.EffectiveHeight;
+						if (MainSize.IsFill())
+						{
+							SizeEstimator::SetResolvedNodeDimension(ChildSnapshot.Child, bHorizontal, FillMain);
+						}
+
+						const FDesignSize& CrossSize = bHorizontal ? ChildSnapshot.EffectiveHeight : ChildSnapshot.EffectiveWidth;
+						if (CrossSize.IsFill())
+						{
+							SizeEstimator::SetResolvedNodeDimension(ChildSnapshot.Child, !bHorizontal, bHorizontal ? InnerH : InnerW);
+						}
+					}
+
+					UE_LOG(LogDesign2UMG, Log, TEXT("PreResolveFill: '%s' layout=%s inner=(%.0f,%.0f) fixed=%.0f fill=%d each=%.0f"),
+						*Widget.Name, bHorizontal ? TEXT("H") : TEXT("V"),
+						InnerW, InnerH, FixedMainSum, FillCount, FillMain);
+				}
+				else
+				{
+					for (FChildSizeSnapshot& ChildSnapshot : EffectiveChildren)
+					{
+						const FDesignSize& CrossSize = bHorizontal ? ChildSnapshot.EffectiveHeight : ChildSnapshot.EffectiveWidth;
+						if (CrossSize.IsFill())
+						{
+							SizeEstimator::SetResolvedNodeDimension(ChildSnapshot.Child, !bHorizontal, bHorizontal ? InnerH : InnerW);
+						}
+					}
+				}
+			}
+
+			for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
+			{
+				if (Child->Transform.Width.IsFit() || Child->Transform.Height.IsFit())
+				{
+					const auto HasExplicitFitDimension = [](const FDesignSize& Size)
+					{
+						return Size.IsFit() && Size.Value > 0.0f;
+					};
+					const bool bLockExplicitFit = ShouldLockExplicitFitDimensionForFlow(Child);
+
+					const float ChildContentWidth = SizeEstimator::ComputeChildContentWidthHint(Node, Child, 0.0f);
+					const TSharedPtr<FDesignNode> EstimateChild = ResolveExpandedChild(Child, false);
+					const FVector2D Estimate = SizeEstimator::EstimateNodeSize(EstimateChild, ChildContentWidth);
+					if (!(bLockExplicitFit && HasExplicitFitDimension(Child->Transform.Width)))
+					{
+						SizeEstimator::PromoteFitNodeDimension(Child, true, Estimate.X);
+					}
+					if (!(bLockExplicitFit && HasExplicitFitDimension(Child->Transform.Height)))
+					{
+						SizeEstimator::PromoteFitNodeDimension(Child, false, Estimate.Y);
+					}
+					if (Estimate.X > 0 || Estimate.Y > 0)
+					{
+						UE_LOG(LogDesign2UMG, Log, TEXT("PreResolveFitContent: '%s' estimated=(%.0f,%.0f)"),
+							*Child->Name, Estimate.X, Estimate.Y);
+					}
+				}
+			}
+		}
+
+	private:
+		FChildSizeSnapshot BuildChildSizeSnapshot(const TSharedPtr<FDesignNode>& Child) const
+		{
+			FChildSizeSnapshot Snapshot;
+			Snapshot.Child = Child;
+			if (!Child.IsValid())
+			{
+				return Snapshot;
+			}
+
+			Snapshot.RawWidth = Child->Transform.Width;
+			Snapshot.RawHeight = Child->Transform.Height;
+			Snapshot.EffectiveWidth = Child->Transform.Width;
+			Snapshot.EffectiveHeight = Child->Transform.Height;
+
+			if (Child->Type == EDesignNodeType::Ref)
+			{
+				if (TSharedPtr<FDesignNode> Expanded = FRefExpander::ExpandRef(Child, Context.State.Document))
+				{
+					Snapshot.bUsedExpandedRef = true;
+					if (!Child->Transform.bHasWidth)
+					{
+						Snapshot.EffectiveWidth = Expanded->Transform.Width;
+					}
+					if (!Child->Transform.bHasHeight)
+					{
+						Snapshot.EffectiveHeight = Expanded->Transform.Height;
+					}
+				}
+			}
+
+			return Snapshot;
+		}
+
+		const FConversionContext& Context;
+	};
+
+	struct FNodeConversionOrchestrator;
+
+	struct FNodeChildAppender
+	{
+		FNodeChildAppender(
+			FUMGWidgetNode& InWidget,
+			const TSharedPtr<FDesignNode>& InNode,
+			const TArray<TSharedPtr<FDesignNode>>& InVisibleChildren,
+			const FConversionContext& InContext,
+			const FNodeChildPreparation& InChildPreparation,
+			const FNodeConversionOrchestrator& InOrchestrator)
+			: Widget(InWidget)
+			, Node(InNode)
+			, VisibleChildren(InVisibleChildren)
+			, Context(InContext)
+			, ChildPreparation(InChildPreparation)
+			, Orchestrator(InOrchestrator)
+		{
+		}
+
+		void AppendChildren() const;
+
+	private:
+		bool ShouldWrapChildWithSizeBox(
+			const TSharedPtr<FDesignNode>& ChildNode,
+			const FUMGWidgetNode& ChildWidget) const
+		{
+			const bool bHasFixedSize = ChildNode->Transform.Width.IsFixed() || ChildNode->Transform.Height.IsFixed();
+			const bool bHasMinSize = (ChildNode->Transform.Width.IsFit() && ChildNode->Transform.Width.Value > 0)
+				|| (ChildNode->Transform.Height.IsFit() && ChildNode->Transform.Height.Value > 0);
+			const bool bCanvasMixedAxis = Node->LayoutData.Layout == EDesignLayout::None
+				&& ((ChildNode->Transform.Width.IsFit() && ChildNode->Transform.Height.IsFixed())
+					|| (ChildNode->Transform.Height.IsFit() && ChildNode->Transform.Width.IsFixed()));
+			const bool bWrapOrGridMeasuredFill =
+				(Node->LayoutData.Layout == EDesignLayout::Wrap || Node->LayoutData.Layout == EDesignLayout::Grid)
+				&& ((ChildNode->Transform.Width.IsFill() && ChildNode->Transform.Width.Value > 0.0f)
+					|| (ChildNode->Transform.Height.IsFill() && ChildNode->Transform.Height.Value > 0.0f));
+			const bool bWidgetOwnsDesiredSize =
+				Node->LayoutData.Layout != EDesignLayout::None
+				&& ChildWidget.Type == TEXT("Image")
+				&& ChildNode->Children.Num() == 0
+				&& (HasWidgetStringProperty(ChildWidget, UMGPropertyKeys::WidthOverride)
+					|| HasWidgetStringProperty(ChildWidget, UMGPropertyKeys::HeightOverride))
+				&& (HasWidgetStringProperty(ChildWidget, UMGPropertyKeys::MaterialRef)
+					|| HasWidgetStringProperty(ChildWidget, UMGPropertyKeys::TexturePath)
+					|| HasWidgetStringProperty(ChildWidget, UMGPropertyKeys::PathGeometry));
+			return Node->LayoutData.Layout == EDesignLayout::None
+				? bCanvasMixedAxis
+				: (bHasFixedSize || bHasMinSize || bWrapOrGridMeasuredFill) && !bWidgetOwnsDesiredSize;
+		}
+
+		FUMGWidgetNode& Widget;
+		const TSharedPtr<FDesignNode>& Node;
+		const TArray<TSharedPtr<FDesignNode>>& VisibleChildren;
+		const FConversionContext& Context;
+		const FNodeChildPreparation& ChildPreparation;
+		const FNodeConversionOrchestrator& Orchestrator;
+	};
+
+	struct FNodeConversionOrchestrator
+	{
+		explicit FNodeConversionOrchestrator(const FConversionContext& InRootContext)
+			: RootContext(InRootContext)
+		{
+		}
+
+		FUMGWidgetNode Convert(const TSharedPtr<FDesignNode>& Node, const EDesignLayout ParentLayout = EDesignLayout::None) const
+		{
+			return ConvertNode(Node, RootContext, ParentLayout);
+		}
+
+		FUMGWidgetNode ConvertChild(
+			const TSharedPtr<FDesignNode>& Node,
+			const FConversionContext& Context,
+			const EDesignLayout ParentLayout) const
+		{
+			return ConvertNode(Node, Context, ParentLayout);
+		}
+
+	private:
+		FUMGWidgetNode ConvertNode(
+			const TSharedPtr<FDesignNode>& Node,
+			const FConversionContext& Context,
+			const EDesignLayout ParentLayout) const
+		{
+			FRecursionGuard Guard(Context.State.RecursionDepth, TEXT("ConvertNode"));
+			if (!Guard.bValid)
+			{
+				return FUMGWidgetNode();
+			}
+
+			if (ShouldSkipNode(Node) && !ShouldKeepStructuralLeafInFlow(Node, ParentLayout))
+			{
+				return FUMGWidgetNode();
+			}
+
+			const FConversionContext ActiveContext = Context.WithNodeTheme(Node);
+			const FNodeChildPreparation ChildPreparation(ActiveContext);
+
+			if (Node->Type == EDesignNodeType::Ref)
+			{
+				TSharedPtr<FDesignNode> Expanded = ChildPreparation.ExpandRef(Node);
+				if (!Expanded.IsValid())
+				{
+					return FUMGWidgetNode();
+				}
+
+				SizeEstimator::PreComputeFitContentSizes(Expanded, Context.State.Document);
+				return ConvertNode(Expanded, ActiveContext, ParentLayout);
+			}
+
+			const bool bUsingRenderFallback = Design2UMGSourceMetadata::ShouldUseRenderFallback(Node);
+			FUMGWidgetNode Widget = CreateBaseWidgetForNode(Node, Context.State);
+
+			UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: '%s' id=%s type=%s bounds=(%.1f,%.1f,%.1f,%.1f) layout=%d children=%d"),
+				*Widget.Name, *Widget.Id, *Widget.Type,
+				Widget.Bounds.X, Widget.Bounds.Y, Widget.Bounds.W, Widget.Bounds.H,
+				(int32)Node->LayoutData.Layout, Node->Children.Num());
+
+			if (!bUsingRenderFallback)
+			{
+				FVisualMapper::ApplyVisualProperties(Widget, Node);
+				if (Widget.Type == TEXT("Border")
+					&& !HasWidgetStringProperty(Widget, UMGPropertyKeys::BrushColor)
+					&& !HasWidgetStringProperty(Widget, UMGPropertyKeys::TexturePath)
+					&& !HasWidgetStringProperty(Widget, UMGPropertyKeys::MaterialRef))
+				{
+					Widget.Brush.BrushColor = FLinearColor::Transparent;
+					Widget.Brush.bHasBrushColor = true;
+					if (HasWidgetStringProperty(Widget, UMGPropertyKeys::OutlineThickness))
+					{
+						Widget.Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
+						Widget.Brush.bHasDrawAs = true;
+					}
+				}
+
+				TArray<TSharedPtr<FDesignNode>> VisibleChildren;
+				GatherVisibleChildrenForConversion(Node, VisibleChildren);
+				if (Node->LayoutData.Layout == EDesignLayout::Grid && Design2UMGGridLayout::NeedsGridPanel(VisibleChildren))
+				{
+					Widget.Type = TEXT("GridPanel");
+				}
+				ChildPreparation.PreResolveFlowChildren(Node, Widget, VisibleChildren);
+				FNodeChildAppender(Widget, Node, VisibleChildren, ActiveContext, ChildPreparation, *this).AppendChildren();
+
+				const bool bHasResolvedGridGap = Node->LayoutData.Layout == EDesignLayout::Grid
+					&& (Design2UMGGridLayout::ResolveGridColumnGap(Node) > KINDA_SMALL_NUMBER
+						|| Design2UMGGridLayout::ResolveGridRowGap(Node) > KINDA_SMALL_NUMBER);
+				if (Node->LayoutData.Gap > 0 || bHasResolvedGridGap)
+				{
+					if (Node->LayoutData.Layout == EDesignLayout::Wrap)
+					{
+						const float CrossAxisGap = Design2UMGSourceMetadata::ResolveWrapCrossAxisGap(Node);
+						Widget.WidgetStyle.InnerSlotPadding = FVector2D(Node->LayoutData.Gap, CrossAxisGap);
+					}
+					else if (Node->LayoutData.Layout == EDesignLayout::Grid)
+					{
+						if (Widget.Type == TEXT("UniformGridPanel"))
+						{
+							const float ColumnGap = Design2UMGGridLayout::ResolveGridColumnGap(Node);
+							const float RowGap = Design2UMGGridLayout::ResolveGridRowGap(Node);
+							if (ColumnGap > KINDA_SMALL_NUMBER || RowGap > KINDA_SMALL_NUMBER)
+							{
+								Widget.WidgetStyle.SlotPadding =
+									FMargin(ColumnGap * 0.5f, RowGap * 0.5f, ColumnGap * 0.5f, RowGap * 0.5f);
+							}
+							else
+							{
+								Widget.WidgetStyle.SlotPadding.Reset();
+							}
+						}
+					}
+					else
+					{
+						FLayoutMapper::ApplyGap(Widget.Children, Node->LayoutData.Gap, Node->LayoutData.Layout);
+					}
+
+					if (Node->LayoutData.Layout == EDesignLayout::Grid
+						&& Widget.Type == TEXT("UniformGridPanel")
+						&& !Widget.WidgetStyle.SlotPadding.IsSet())
+					{
+						Widget.WidgetStyle.SlotPadding = FMargin(Node->LayoutData.Gap, Node->LayoutData.Gap, Node->LayoutData.Gap, Node->LayoutData.Gap);
+					}
+				}
+
+				if (Node->LayoutData.JustifyContent != EDesignJustifyContent::Start)
+				{
+					const EDesignSizeMode MainAxisMode = (Node->LayoutData.Layout == EDesignLayout::Horizontal)
+						? Node->Transform.Width.Mode : Node->Transform.Height.Mode;
+					FLayoutMapper::ApplyJustifyContent(Widget.Children, Node->LayoutData.JustifyContent, MainAxisMode, ParentLayout);
+				}
+
+				const bool bPlaceholderUsesDirectImage = TryApplyPlaceholderSurfaceTint(Widget, Node, Context.State.VisualSettings);
+				if (ShouldWrapNodeWithBorder(Node, bPlaceholderUsesDirectImage))
+				{
+					UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: '%s' → WrapWithBorder (fill=%d corner=%d stroke=%d)"),
+						*Widget.Name, HasVisualFill(Node), Node->Visual.CornerRadius.HasRadius(), Node->Visual.Stroke.HasStroke());
+					Widget = FVisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
+				}
+				else if (FLayoutMapper::HasPadding(Node) && !bPlaceholderUsesDirectImage)
+				{
+					FLayoutMapper::ApplyPadding(Widget, Node->LayoutData.Padding);
+				}
+
+				Widget = ApplyVisualEffectWrappers(MoveTemp(Widget), Node, Context.State.VisualSettings.VisualMapperOptions);
+				if (Design2UMGPrototypeNavigation::ShouldWrapNodeWithButton(
+					Node,
+					Context.State.PrototypeNavigation,
+					Context.State.PrototypeTriggerNodeIds))
+				{
+					Widget = Design2UMGPrototypeNavigation::WrapWithButton(MoveTemp(Widget), Node);
+				}
+			}
+			else
+			{
+				FVisualMapper::ApplyRenderTransformProperties(Widget, Node);
+			}
+			Widget.MutableSource() = Design2UMGSourceMetadata::BuildSourceNodeData(Node);
+
+			return Widget;
+		}
+
+		void ApplyRenderFallbackBounds(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node) const
+		{
+			if (!Node.IsValid())
+			{
+				return;
+			}
+
+			const FString& FallbackOffsetX = Node->Source().RenderFallback.OffsetX;
+			const FString& FallbackOffsetY = Node->Source().RenderFallback.OffsetY;
+			const FString& FallbackWidth = Node->Source().RenderFallback.Width;
+			const FString& FallbackHeight = Node->Source().RenderFallback.Height;
+			if (!FallbackOffsetX.IsEmpty())
+			{
+				Widget.Bounds.X += FCString::Atof(*FallbackOffsetX);
+			}
+			if (!FallbackOffsetY.IsEmpty())
+			{
+				Widget.Bounds.Y += FCString::Atof(*FallbackOffsetY);
+			}
+			if (!FallbackWidth.IsEmpty())
+			{
+				Widget.Bounds.W = FCString::Atof(*FallbackWidth);
+			}
+			if (!FallbackHeight.IsEmpty())
+			{
+				Widget.Bounds.H = FCString::Atof(*FallbackHeight);
+			}
+		}
+
+		FUMGWidgetNode CreateBaseWidgetForNode(const TSharedPtr<FDesignNode>& Node, FConversionState& State) const
+		{
+			if (Design2UMGSourceMetadata::ShouldUseRenderFallback(Node))
+			{
+				FUMGWidgetNode Widget = Design2UMGSourceMetadata::CreateRenderFallbackWidget(Node);
+				Design2UMGNodeWidgetFactory::PopulateWidgetIdentityAndBounds(Widget, Node);
+				ApplyRenderFallbackBounds(Widget, Node);
+				Widget.MutableSource() = Design2UMGSourceMetadata::BuildSourceNodeData(Node);
+				UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: '%s' -> Figma render fallback image"), *Widget.Name);
+				return Widget;
+			}
+
+			Design2UMGNodeWidgetFactory::FBuildContext BuildContext(
+				State.Warnings,
+				State.WarnedFamilies,
+				State.PrunedInvalidMappings,
+				State.PendingIconFontMappings);
+			FUMGWidgetNode Widget = Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(Node, BuildContext);
+			Design2UMGNodeWidgetFactory::PopulateWidgetIdentityAndBounds(Widget, Node);
+			return Widget;
+		}
+
+		const FConversionContext& RootContext;
+	};
+
 	void WarmSharedTextCalibrationRecursive(
 		const TSharedPtr<FDesignNode>& Node,
 		const FConversionContext& Context)
@@ -436,7 +886,8 @@ namespace
 		const FConversionContext ActiveContext = Context.WithNodeTheme(Node);
 		if (Node->Type == EDesignNodeType::Ref)
 		{
-			const TSharedPtr<FDesignNode> ActiveNode = ExpandRefForConversion(Node, ActiveContext);
+			const FNodeChildPreparation ChildPreparation(ActiveContext);
+			const TSharedPtr<FDesignNode> ActiveNode = ChildPreparation.ExpandRef(Node);
 			if (!ActiveNode.IsValid() || ShouldSkipNode(ActiveNode))
 			{
 				return;
@@ -482,21 +933,77 @@ namespace
 		}
 	}
 
-}
+	void FNodeChildAppender::AppendChildren() const
+	{
+		const bool bGridPanelParent =
+			Node.IsValid()
+			&& Node->LayoutData.Layout == EDesignLayout::Grid
+			&& Widget.Type.Equals(TEXT("GridPanel"), ESearchCase::CaseSensitive);
+		Design2UMGGridLayout::FGridPlacementState GridPlacementState;
+		if (bGridPanelParent)
+		{
+			GridPlacementState.ColumnCount = Design2UMGGridLayout::ResolveGridColumnCount(Node, VisibleChildren);
+			GridPlacementState.RowCount = Design2UMGGridLayout::ResolveGridRowCount(Node, VisibleChildren, GridPlacementState.ColumnCount);
+		}
 
-FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FConversionContext& Context, EDesignLayout ParentLayout = EDesignLayout::None);
-TSharedPtr<FDesignNode> ResolveExpandedChildForConversion(const TSharedPtr<FDesignNode>& Child, const FConversionContext& Context, bool bPreComputeFitContent);
-void PreResolveFlowChildren(const TSharedPtr<FDesignNode>& Node, const FUMGWidgetNode& Widget, const TArray<TSharedPtr<FDesignNode>>& VisibleChildren, const FConversionContext& Context);
-bool ShouldWrapChildWithSizeBox(const TSharedPtr<FDesignNode>& ParentNode, const TSharedPtr<FDesignNode>& ChildNode, const FUMGWidgetNode& ChildWidget);
-void AppendConvertedChildren(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node, const TArray<TSharedPtr<FDesignNode>>& VisibleChildren, const FConversionContext& Context);
-void ApplyRenderFallbackBounds(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node);
-FUMGWidgetNode CreateBaseWidgetForNode(const TSharedPtr<FDesignNode>& Node, FConversionState& State);
+		for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
+		{
+			TSharedPtr<FDesignNode> EffectiveChild = ChildPreparation.ResolveExpandedChild(Child, true);
+			FUMGWidgetNode ChildWidget = Orchestrator.ConvertChild(EffectiveChild, Context, Node->LayoutData.Layout);
+			if (ChildWidget.Type.IsEmpty())
+			{
+				continue;
+			}
+
+			FLayoutMapper::ApplySlotProperties(ChildWidget, EffectiveChild, Node->LayoutData.Layout);
+			FLayoutMapper::ApplyAlignItems(ChildWidget, Node->LayoutData.AlignItems, Node->LayoutData.Layout);
+			if (Node->LayoutData.Layout == EDesignLayout::Grid)
+			{
+				if (bGridPanelParent)
+				{
+					Design2UMGGridLayout::ApplyGridPanelChildSlotData(ChildWidget, Node, EffectiveChild, GridPlacementState);
+				}
+				else
+				{
+					if (EffectiveChild->LayoutData.bHasLayoutRow)
+					{
+						ChildWidget.Slot.Row = FMath::Max(0, EffectiveChild->LayoutData.LayoutRow);
+					}
+					if (EffectiveChild->LayoutData.bHasLayoutColumn)
+					{
+						ChildWidget.Slot.Column = FMath::Max(0, EffectiveChild->LayoutData.LayoutColumn);
+					}
+					Design2UMGGridLayout::ApplyGridChildAlignmentOverrides(ChildWidget, Node, EffectiveChild);
+				}
+			}
+			if (Node->LayoutData.Layout != EDesignLayout::None && !EffectiveChild->LayoutData.bAbsoluteLayoutPositioning)
+			{
+				ChildWidget.Bounds.X = 0.0f;
+				ChildWidget.Bounds.Y = 0.0f;
+			}
+
+			if (ShouldWrapChildWithSizeBox(EffectiveChild, ChildWidget))
+			{
+				const bool bHasFixedSize = EffectiveChild->Transform.Width.IsFixed() || EffectiveChild->Transform.Height.IsFixed();
+				const bool bHasMinSize = (EffectiveChild->Transform.Width.IsFit() && EffectiveChild->Transform.Width.Value > 0)
+					|| (EffectiveChild->Transform.Height.IsFit() && EffectiveChild->Transform.Height.Value > 0);
+				UE_LOG(LogDesign2UMG, Verbose, TEXT("  child '%s' → SizeBox wrap (fixed=%d min=%d w=%.1f h=%.1f)"),
+					*ChildWidget.Name, bHasFixedSize, bHasMinSize,
+					EffectiveChild->Transform.Width.Value, EffectiveChild->Transform.Height.Value);
+				Widget.Children.Add(FLayoutMapper::WrapWithSizeBox(MoveTemp(ChildWidget), EffectiveChild, Node->LayoutData.Layout));
+				continue;
+			}
+
+			Widget.Children.Add(MoveTemp(ChildWidget));
+		}
+	}
+}
 
 FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document)
 {
 	FUMGWidgetData Result;
 
-	for (const FDesignSkippedNodeReport& Report : Document.ParseDiagnostics.SkippedDesignerNodes)
+	for (const FDesignSkippedNodeReport& Report : Document.ParseDiagnostics().SkippedDesignerNodes)
 	{
 		Result.Warnings.AddUnique(FString::Printf(
 			TEXT("Figma %s '%s' (%s) skipped from runtime widget tree [%s]"),
@@ -506,11 +1013,17 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document)
 			Report.Reason.IsEmpty() ? TEXT("designer_only") : *Report.Reason));
 	}
 
-	FConversionState State(Document, Result.Warnings);
+	const FConversionVisualSettingsPayload VisualSettings = BuildConversionVisualSettingsPayload();
+	FConversionState State(Document, Result.Warnings, VisualSettings);
 	FConversionContext RootContext(State);
+	const FNodeConversionOrchestrator NodeOrchestrator(RootContext);
 
-	Result.SourceDocument.ComponentsJson = Document.SourceDocument.ComponentsJson;
-	Result.SourceDocument.ComponentSetsJson = Document.SourceDocument.ComponentSetsJson;
+	if (!Document.SourceDocument().ComponentsJson.IsEmpty() || !Document.SourceDocument().ComponentSetsJson.IsEmpty())
+	{
+		FUMGSourceDocumentData& SourceDocument = Result.MutableSourceDocument();
+		SourceDocument.ComponentsJson = Document.SourceDocument().ComponentsJson;
+		SourceDocument.ComponentSetsJson = Document.SourceDocument().ComponentSetsJson;
+	}
 
 	TextMeasurement::ResetCache();
 
@@ -535,7 +1048,10 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document)
 			Design2UMGPrototypeNavigation::BuildAnalysis(Document, VisibleChildren, Result.Warnings);
 		State.PrototypeNavigation = PrototypeAnalysis.Data;
 		State.PrototypeTriggerNodeIds = PrototypeAnalysis.TriggerNodeIds;
-		Result.PrototypeNavigation = PrototypeAnalysis.Data;
+		if (PrototypeAnalysis.Data.IsValid())
+		{
+			Result.MutablePrototypeNavigation() = PrototypeAnalysis.Data;
+		}
 	}
 
 	// Use the first non-skipped frame name for WidgetName, then fall back to WBP_FromPen.
@@ -565,7 +1081,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document)
 		Child->Transform.X = 0.0f;
 		Child->Transform.Y = 0.0f;
 
-		FUMGWidgetNode ChildWidget = ConvertNode(Child, RootContext);
+		FUMGWidgetNode ChildWidget = NodeOrchestrator.Convert(Child);
 		if (!ChildWidget.Type.IsEmpty())
 			RenderWidgets.Add(MoveTemp(ChildWidget));
 	}
@@ -601,397 +1117,5 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document)
 	Result.IconFontMappingChanges.Upserts = MoveTemp(State.PendingIconFontMappings);
 	Result.IconFontMappingChanges.Removals = MoveTemp(State.PrunedInvalidMappings);
 	return Result;
-}
-
-FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FConversionContext& Context, EDesignLayout ParentLayout)
-{
-	FRecursionGuard Guard(Context.State.RecursionDepth, TEXT("ConvertNode"));
-	if (!Guard.bValid)
-		return FUMGWidgetNode();
-
-	if (ShouldSkipNode(Node) && !ShouldKeepStructuralLeafInFlow(Node, ParentLayout))
-		return FUMGWidgetNode();
-
-	const FConversionContext ActiveContext = Context.WithNodeTheme(Node);
-
-	if (Node->Type == EDesignNodeType::Ref)
-	{
-		auto Expanded = ExpandRefForConversion(Node, ActiveContext);
-		if (!Expanded.IsValid())
-			return FUMGWidgetNode();
-		SizeEstimator::PreComputeFitContentSizes(Expanded, Context.State.Document);
-		return ConvertNode(Expanded, ActiveContext, ParentLayout);
-	}
-
-	const bool bUsingRenderFallback = Design2UMGSourceMetadata::ShouldUseRenderFallback(Node);
-	FUMGWidgetNode Widget = CreateBaseWidgetForNode(Node, Context.State);
-
-	UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: '%s' id=%s type=%s bounds=(%.1f,%.1f,%.1f,%.1f) layout=%d children=%d"),
-		*Widget.Name, *Widget.Id, *Widget.Type,
-		Widget.Bounds.X, Widget.Bounds.Y, Widget.Bounds.W, Widget.Bounds.H,
-		(int32)Node->LayoutData.Layout, Node->Children.Num());
-
-	if (!bUsingRenderFallback)
-	{
-		FVisualMapper::ApplyVisualProperties(Widget, Node);
-		if (Widget.Type == TEXT("Border")
-			&& !HasWidgetStringProperty(Widget, UMGPropertyKeys::BrushColor)
-			&& !HasWidgetStringProperty(Widget, UMGPropertyKeys::TexturePath)
-			&& !HasWidgetStringProperty(Widget, UMGPropertyKeys::MaterialRef))
-		{
-			// Stroke-only / no-fill Border should keep transparent interior.
-			// UBorder default brush is opaque white, which can cover siblings.
-			Widget.Brush.BrushColor = FLinearColor::Transparent;
-			Widget.Brush.bHasBrushColor = true;
-			if (HasWidgetStringProperty(Widget, UMGPropertyKeys::OutlineThickness))
-			{
-				// Box + WhiteSquareTexture can still flash an opaque interior in UBorder.
-				// RoundedBox with zero radii keeps the interior transparent while preserving the outline.
-				Widget.Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
-				Widget.Brush.bHasDrawAs = true;
-			}
-		}
-
-		TArray<TSharedPtr<FDesignNode>> VisibleChildren;
-		GatherVisibleChildrenForConversion(Node, VisibleChildren);
-		if (Node->LayoutData.Layout == EDesignLayout::Grid && Design2UMGGridLayout::NeedsGridPanel(VisibleChildren))
-		{
-			Widget.Type = TEXT("GridPanel");
-		}
-		PreResolveFlowChildren(Node, Widget, VisibleChildren, ActiveContext);
-		AppendConvertedChildren(Widget, Node, VisibleChildren, ActiveContext);
-
-		const bool bHasResolvedGridGap = Node->LayoutData.Layout == EDesignLayout::Grid
-			&& (Design2UMGGridLayout::ResolveGridColumnGap(Node) > KINDA_SMALL_NUMBER
-				|| Design2UMGGridLayout::ResolveGridRowGap(Node) > KINDA_SMALL_NUMBER);
-		if (Node->LayoutData.Gap > 0 || bHasResolvedGridGap)
-		{
-			if (Node->LayoutData.Layout == EDesignLayout::Wrap)
-			{
-				const float CrossAxisGap = Design2UMGSourceMetadata::ResolveWrapCrossAxisGap(Node);
-				Widget.WidgetStyle.InnerSlotPadding = FVector2D(Node->LayoutData.Gap, CrossAxisGap);
-			}
-			else if (Node->LayoutData.Layout == EDesignLayout::Grid)
-			{
-				if (Widget.Type == TEXT("UniformGridPanel"))
-				{
-					const float ColumnGap = Design2UMGGridLayout::ResolveGridColumnGap(Node);
-					const float RowGap = Design2UMGGridLayout::ResolveGridRowGap(Node);
-					if (ColumnGap > KINDA_SMALL_NUMBER || RowGap > KINDA_SMALL_NUMBER)
-					{
-						Widget.WidgetStyle.SlotPadding =
-							FMargin(ColumnGap * 0.5f, RowGap * 0.5f, ColumnGap * 0.5f, RowGap * 0.5f);
-					}
-					else
-					{
-						Widget.WidgetStyle.SlotPadding.Reset();
-					}
-				}
-			}
-			else
-			{
-				FLayoutMapper::ApplyGap(Widget.Children, Node->LayoutData.Gap, Node->LayoutData.Layout);
-			}
-
-			if (Node->LayoutData.Layout == EDesignLayout::Grid
-				&& Widget.Type == TEXT("UniformGridPanel")
-				&& !Widget.WidgetStyle.SlotPadding.IsSet())
-			{
-				Widget.WidgetStyle.SlotPadding = FMargin(Node->LayoutData.Gap, Node->LayoutData.Gap, Node->LayoutData.Gap, Node->LayoutData.Gap);
-			}
-		}
-
-		if (Node->LayoutData.JustifyContent != EDesignJustifyContent::Start)
-		{
-			const EDesignSizeMode MainAxisMode = (Node->LayoutData.Layout == EDesignLayout::Horizontal)
-				? Node->Transform.Width.Mode : Node->Transform.Height.Mode;
-			FLayoutMapper::ApplyJustifyContent(Widget.Children, Node->LayoutData.JustifyContent, MainAxisMode, ParentLayout);
-		}
-
-		const bool bPlaceholderUsesDirectImage = TryApplyPlaceholderSurfaceTint(Widget, Node);
-		if (ShouldWrapNodeWithBorder(Node, bPlaceholderUsesDirectImage))
-		{
-			UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: '%s' → WrapWithBorder (fill=%d corner=%d stroke=%d)"),
-				*Widget.Name, HasVisualFill(Node), Node->Visual.CornerRadius.HasRadius(), Node->Visual.Stroke.HasStroke());
-			Widget = FVisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
-		}
-		else if (FLayoutMapper::HasPadding(Node) && !bPlaceholderUsesDirectImage)
-		{
-			FLayoutMapper::ApplyPadding(Widget, Node->LayoutData.Padding);
-		}
-
-		Widget = ApplyVisualEffectWrappers(MoveTemp(Widget), Node);
-		if (Design2UMGPrototypeNavigation::ShouldWrapNodeWithButton(
-			Node,
-			Context.State.PrototypeNavigation,
-			Context.State.PrototypeTriggerNodeIds))
-		{
-			Widget = Design2UMGPrototypeNavigation::WrapWithButton(MoveTemp(Widget), Node);
-		}
-	}
-	else
-	{
-		FVisualMapper::ApplyRenderTransformProperties(Widget, Node);
-	}
-	Widget.Source = Design2UMGSourceMetadata::BuildSourceNodeData(Node);
-
-	return Widget;
-}
-
-void ApplyRenderFallbackBounds(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
-{
-	if (!Node.IsValid())
-	{
-		return;
-	}
-
-	const FString& FallbackOffsetX = Node->Source.RenderFallback.OffsetX;
-	const FString& FallbackOffsetY = Node->Source.RenderFallback.OffsetY;
-	const FString& FallbackWidth = Node->Source.RenderFallback.Width;
-	const FString& FallbackHeight = Node->Source.RenderFallback.Height;
-	if (!FallbackOffsetX.IsEmpty())
-	{
-		Widget.Bounds.X += FCString::Atof(*FallbackOffsetX);
-	}
-	if (!FallbackOffsetY.IsEmpty())
-	{
-		Widget.Bounds.Y += FCString::Atof(*FallbackOffsetY);
-	}
-	if (!FallbackWidth.IsEmpty())
-	{
-		Widget.Bounds.W = FCString::Atof(*FallbackWidth);
-	}
-	if (!FallbackHeight.IsEmpty())
-	{
-		Widget.Bounds.H = FCString::Atof(*FallbackHeight);
-	}
-}
-
-FUMGWidgetNode CreateBaseWidgetForNode(const TSharedPtr<FDesignNode>& Node, FConversionState& State)
-{
-	if (Design2UMGSourceMetadata::ShouldUseRenderFallback(Node))
-	{
-		FUMGWidgetNode Widget = Design2UMGSourceMetadata::CreateRenderFallbackWidget(Node);
-		Design2UMGNodeWidgetFactory::PopulateWidgetIdentityAndBounds(Widget, Node);
-		ApplyRenderFallbackBounds(Widget, Node);
-		Widget.Source = Design2UMGSourceMetadata::BuildSourceNodeData(Node);
-		UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: '%s' -> Figma render fallback image"), *Widget.Name);
-		return Widget;
-	}
-
-	Design2UMGNodeWidgetFactory::FBuildContext BuildContext(
-		State.Warnings,
-		State.WarnedFamilies,
-		State.PrunedInvalidMappings,
-		State.PendingIconFontMappings);
-	FUMGWidgetNode Widget = Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(Node, BuildContext);
-	Design2UMGNodeWidgetFactory::PopulateWidgetIdentityAndBounds(Widget, Node);
-	return Widget;
-}
-
-TSharedPtr<FDesignNode> ResolveExpandedChildForConversion(
-	const TSharedPtr<FDesignNode>& Child,
-	const FConversionContext& Context,
-	bool bPreComputeFitContent)
-{
-	TSharedPtr<FDesignNode> ExpandedChild = ExpandRefForConversion(Child, Context);
-	if (!ExpandedChild.IsValid())
-		return Child;
-	if (bPreComputeFitContent && ExpandedChild != Child)
-		SizeEstimator::PreComputeFitContentSizes(ExpandedChild, Context.State.Document);
-	return ExpandedChild;
-}
-
-void PreResolveFlowChildren(
-	const TSharedPtr<FDesignNode>& Node,
-	const FUMGWidgetNode& Widget,
-	const TArray<TSharedPtr<FDesignNode>>& VisibleChildren,
-	const FConversionContext& Context)
-{
-	if (Widget.Bounds.W > 0 && Widget.Bounds.H > 0
-		&& (Node->LayoutData.Layout == EDesignLayout::Horizontal || Node->LayoutData.Layout == EDesignLayout::Vertical))
-	{
-		const float InnerW = Widget.Bounds.W - Node->LayoutData.Padding.Left - Node->LayoutData.Padding.Right;
-		const float InnerH = Widget.Bounds.H - Node->LayoutData.Padding.Top - Node->LayoutData.Padding.Bottom;
-		const bool bHorizontal = Node->LayoutData.Layout == EDesignLayout::Horizontal;
-		TArray<FChildSizeSnapshot> EffectiveChildren;
-		for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
-			EffectiveChildren.Add(BuildChildSizeSnapshot(Child, Context.State.Document));
-
-		float FixedMainSum = 0.0f;
-		int32 FillCount = 0;
-		const float TotalGap = EffectiveChildren.Num() > 1 ? Node->LayoutData.Gap * (EffectiveChildren.Num() - 1) : 0.0f;
-		for (const FChildSizeSnapshot& ChildSnapshot : EffectiveChildren)
-		{
-			const FDesignSize& MainSize = bHorizontal ? ChildSnapshot.EffectiveWidth : ChildSnapshot.EffectiveHeight;
-			if (MainSize.IsFill())
-				++FillCount;
-			else
-				FixedMainSum += MainSize.Value;
-
-			const FDesignSize& RawMain = bHorizontal ? ChildSnapshot.RawWidth : ChildSnapshot.RawHeight;
-			const FDesignSize& RawCross = bHorizontal ? ChildSnapshot.RawHeight : ChildSnapshot.RawWidth;
-			const FDesignSize& EffectiveCross = bHorizontal ? ChildSnapshot.EffectiveHeight : ChildSnapshot.EffectiveWidth;
-			UE_LOG(LogDesign2UMG, Verbose, TEXT("PreResolveFill Child '%s': ref=%d rawMain=%s(%.0f) effMain=%s(%.0f) rawCross=%s(%.0f) effCross=%s(%.0f)"),
-				ChildSnapshot.Child.IsValid() ? *ChildSnapshot.Child->Id : TEXT("<invalid>"),
-				ChildSnapshot.bUsedExpandedRef ? 1 : 0,
-				ToSizeModeLogString(RawMain.Mode), RawMain.Value,
-				ToSizeModeLogString(MainSize.Mode), MainSize.Value,
-				ToSizeModeLogString(RawCross.Mode), RawCross.Value,
-				ToSizeModeLogString(EffectiveCross.Mode), EffectiveCross.Value);
-		}
-
-		if (FillCount > 0)
-		{
-			const float AvailableMain = (bHorizontal ? InnerW : InnerH) - FixedMainSum - TotalGap;
-			const float FillMain = FMath::Max(0.0f, AvailableMain / FillCount);
-			for (FChildSizeSnapshot& ChildSnapshot : EffectiveChildren)
-			{
-				const FDesignSize& MainSize = bHorizontal ? ChildSnapshot.EffectiveWidth : ChildSnapshot.EffectiveHeight;
-				if (MainSize.IsFill())
-					SizeEstimator::SetResolvedNodeDimension(ChildSnapshot.Child, bHorizontal, FillMain);
-				const FDesignSize& CrossSize = bHorizontal ? ChildSnapshot.EffectiveHeight : ChildSnapshot.EffectiveWidth;
-				if (CrossSize.IsFill())
-					SizeEstimator::SetResolvedNodeDimension(ChildSnapshot.Child, !bHorizontal, bHorizontal ? InnerH : InnerW);
-			}
-
-			UE_LOG(LogDesign2UMG, Log, TEXT("PreResolveFill: '%s' layout=%s inner=(%.0f,%.0f) fixed=%.0f fill=%d each=%.0f"),
-				*Widget.Name, bHorizontal ? TEXT("H") : TEXT("V"),
-				InnerW, InnerH, FixedMainSum, FillCount, FillMain);
-		}
-		else
-		{
-			for (FChildSizeSnapshot& ChildSnapshot : EffectiveChildren)
-			{
-				const FDesignSize& CrossSize = bHorizontal ? ChildSnapshot.EffectiveHeight : ChildSnapshot.EffectiveWidth;
-				if (CrossSize.IsFill())
-					SizeEstimator::SetResolvedNodeDimension(ChildSnapshot.Child, !bHorizontal, bHorizontal ? InnerH : InnerW);
-			}
-		}
-	}
-
-	for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
-	{
-		if (Child->Transform.Width.IsFit() || Child->Transform.Height.IsFit())
-		{
-			const auto HasExplicitFitDimension = [](const FDesignSize& Size)
-			{
-				return Size.IsFit() && Size.Value > 0.0f;
-			};
-			const bool bLockExplicitFit = ShouldLockExplicitFitDimensionForFlow(Child);
-
-			const float ChildContentWidth = SizeEstimator::ComputeChildContentWidthHint(Node, Child, 0.0f);
-			const TSharedPtr<FDesignNode> EstimateChild = ResolveExpandedChildForConversion(Child, Context, false);
-			const FVector2D Estimate = SizeEstimator::EstimateNodeSize(EstimateChild, ChildContentWidth);
-			if (!(bLockExplicitFit && HasExplicitFitDimension(Child->Transform.Width)))
-			{
-				SizeEstimator::PromoteFitNodeDimension(Child, true, Estimate.X);
-			}
-			if (!(bLockExplicitFit && HasExplicitFitDimension(Child->Transform.Height)))
-			{
-				SizeEstimator::PromoteFitNodeDimension(Child, false, Estimate.Y);
-			}
-			if (Estimate.X > 0 || Estimate.Y > 0)
-			{
-				UE_LOG(LogDesign2UMG, Log, TEXT("PreResolveFitContent: '%s' estimated=(%.0f,%.0f)"),
-					*Child->Name, Estimate.X, Estimate.Y);
-			}
-		}
-	}
-}
-
-bool ShouldWrapChildWithSizeBox(
-	const TSharedPtr<FDesignNode>& ParentNode,
-	const TSharedPtr<FDesignNode>& ChildNode,
-	const FUMGWidgetNode& ChildWidget)
-{
-	const bool bHasFixedSize = ChildNode->Transform.Width.IsFixed() || ChildNode->Transform.Height.IsFixed();
-	const bool bHasMinSize = (ChildNode->Transform.Width.IsFit() && ChildNode->Transform.Width.Value > 0)
-		|| (ChildNode->Transform.Height.IsFit() && ChildNode->Transform.Height.Value > 0);
-	const bool bCanvasMixedAxis = ParentNode->LayoutData.Layout == EDesignLayout::None
-		&& ((ChildNode->Transform.Width.IsFit() && ChildNode->Transform.Height.IsFixed())
-			|| (ChildNode->Transform.Height.IsFit() && ChildNode->Transform.Width.IsFixed()));
-	const bool bWrapOrGridMeasuredFill =
-		(ParentNode->LayoutData.Layout == EDesignLayout::Wrap || ParentNode->LayoutData.Layout == EDesignLayout::Grid)
-		&& ((ChildNode->Transform.Width.IsFill() && ChildNode->Transform.Width.Value > 0.0f)
-			|| (ChildNode->Transform.Height.IsFill() && ChildNode->Transform.Height.Value > 0.0f));
-	const bool bWidgetOwnsDesiredSize =
-		ParentNode->LayoutData.Layout != EDesignLayout::None
-		&& ChildWidget.Type == TEXT("Image")
-		&& ChildNode->Children.Num() == 0
-		&& (HasWidgetStringProperty(ChildWidget, UMGPropertyKeys::WidthOverride) || HasWidgetStringProperty(ChildWidget, UMGPropertyKeys::HeightOverride))
-		&& (HasWidgetStringProperty(ChildWidget, UMGPropertyKeys::MaterialRef)
-			|| HasWidgetStringProperty(ChildWidget, UMGPropertyKeys::TexturePath)
-			|| HasWidgetStringProperty(ChildWidget, UMGPropertyKeys::PathGeometry));
-	return ParentNode->LayoutData.Layout == EDesignLayout::None
-		? bCanvasMixedAxis
-		: (bHasFixedSize || bHasMinSize || bWrapOrGridMeasuredFill) && !bWidgetOwnsDesiredSize;
-}
-
-void AppendConvertedChildren(
-	FUMGWidgetNode& Widget,
-	const TSharedPtr<FDesignNode>& Node,
-	const TArray<TSharedPtr<FDesignNode>>& VisibleChildren,
-	const FConversionContext& Context)
-{
-	const bool bGridPanelParent =
-		Node.IsValid()
-		&& Node->LayoutData.Layout == EDesignLayout::Grid
-		&& Widget.Type.Equals(TEXT("GridPanel"), ESearchCase::CaseSensitive);
-	Design2UMGGridLayout::FGridPlacementState GridPlacementState;
-	if (bGridPanelParent)
-	{
-		GridPlacementState.ColumnCount = Design2UMGGridLayout::ResolveGridColumnCount(Node, VisibleChildren);
-		GridPlacementState.RowCount = Design2UMGGridLayout::ResolveGridRowCount(Node, VisibleChildren, GridPlacementState.ColumnCount);
-	}
-
-	for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
-	{
-		TSharedPtr<FDesignNode> EffectiveChild = ResolveExpandedChildForConversion(Child, Context, true);
-		FUMGWidgetNode ChildWidget = ConvertNode(EffectiveChild, Context, Node->LayoutData.Layout);
-		if (ChildWidget.Type.IsEmpty())
-			continue;
-
-		FLayoutMapper::ApplySlotProperties(ChildWidget, EffectiveChild, Node->LayoutData.Layout);
-		FLayoutMapper::ApplyAlignItems(ChildWidget, Node->LayoutData.AlignItems, Node->LayoutData.Layout);
-		if (Node->LayoutData.Layout == EDesignLayout::Grid)
-		{
-			if (bGridPanelParent)
-			{
-				Design2UMGGridLayout::ApplyGridPanelChildSlotData(ChildWidget, Node, EffectiveChild, GridPlacementState);
-			}
-			else
-			{
-				if (EffectiveChild->LayoutData.bHasLayoutRow)
-				{
-					ChildWidget.Slot.Row = FMath::Max(0, EffectiveChild->LayoutData.LayoutRow);
-				}
-				if (EffectiveChild->LayoutData.bHasLayoutColumn)
-				{
-					ChildWidget.Slot.Column = FMath::Max(0, EffectiveChild->LayoutData.LayoutColumn);
-				}
-				Design2UMGGridLayout::ApplyGridChildAlignmentOverrides(ChildWidget, Node, EffectiveChild);
-			}
-		}
-		if (Node->LayoutData.Layout != EDesignLayout::None && !EffectiveChild->LayoutData.bAbsoluteLayoutPositioning)
-		{
-			ChildWidget.Bounds.X = 0.0f;
-			ChildWidget.Bounds.Y = 0.0f;
-		}
-
-		if (ShouldWrapChildWithSizeBox(Node, EffectiveChild, ChildWidget))
-		{
-			const bool bHasFixedSize = EffectiveChild->Transform.Width.IsFixed() || EffectiveChild->Transform.Height.IsFixed();
-			const bool bHasMinSize = (EffectiveChild->Transform.Width.IsFit() && EffectiveChild->Transform.Width.Value > 0)
-				|| (EffectiveChild->Transform.Height.IsFit() && EffectiveChild->Transform.Height.Value > 0);
-			UE_LOG(LogDesign2UMG, Verbose, TEXT("  child '%s' → SizeBox wrap (fixed=%d min=%d w=%.1f h=%.1f)"),
-				*ChildWidget.Name, bHasFixedSize, bHasMinSize,
-				EffectiveChild->Transform.Width.Value, EffectiveChild->Transform.Height.Value);
-			Widget.Children.Add(FLayoutMapper::WrapWithSizeBox(MoveTemp(ChildWidget), EffectiveChild, Node->LayoutData.Layout));
-			continue;
-		}
-
-		Widget.Children.Add(MoveTemp(ChildWidget));
-	}
 }
 

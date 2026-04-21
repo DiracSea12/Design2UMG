@@ -13,6 +13,7 @@
 #include "LayoutFixer.h"
 #include "PenParser.h"
 #include "UMGGenerator.h"
+#include "UMGWidgetUtils.h"
 #include "PreBuildResourceNormalizer.h"
 #include "PenMCPBridge.h"
 #include "DesignPreviewMaterializationService.h"
@@ -31,9 +32,12 @@
 #include "Components/PanelWidget.h"
 #include "Components/Image.h"
 #include "Components/Border.h"
+#include "Components/ExpandableArea.h"
 #include "Components/GridSlot.h"
+#include "Components/NamedSlotInterface.h"
 #include "Components/ScrollBox.h"
 #include "Components/TextBlock.h"
+#include "Components/VerticalBoxSlot.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Interfaces/IPluginManager.h"
 #include "IImageWrapper.h"
@@ -962,10 +966,50 @@ bool FPenWelcomeWrapFontRegressionTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	TestTrue(TEXT("Welcome body keeps the 27px wrap-safe font size"),
-		FMath::IsNearlyEqual(WelcomeBody->TextStyle.FontSize, 27.0f, 0.01f));
-	TestTrue(TEXT("Pro tips keeps the same calibrated Rubik size"),
-		FMath::IsNearlyEqual(ProTips->TextStyle.FontSize, 27.0f, 0.01f));
+	const FMargin WelcomeBodyPadding = WelcomeBody->WidgetStyle.Padding.Get(FMargin());
+	const FMargin ProTipsPadding = ProTips->WidgetStyle.Padding.Get(FMargin());
+	AddInfo(FString::Printf(
+		TEXT("Welcome body summary: font=%.1f source=%.1f bounds=(%.1f,%.1f,%.1f,%.1f) wrap=%d wrapAt=%.1f lineHeight=%.3f fontFamily=%s typeface=%s padding=(%.1f,%.1f,%.1f,%.1f)"),
+		WelcomeBody->TextStyle.FontSize,
+		WelcomeBody->TextStyle.SourceFontSize,
+		WelcomeBody->Bounds.X,
+		WelcomeBody->Bounds.Y,
+		WelcomeBody->Bounds.W,
+		WelcomeBody->Bounds.H,
+		WelcomeBody->Text.bAutoWrapText ? 1 : 0,
+		WelcomeBody->Text.WrapTextAt,
+		WelcomeBody->Text.LineHeightPercentage,
+		*WelcomeBody->Text.FontFamily,
+		*WelcomeBody->Text.TypefaceFontName,
+		WelcomeBodyPadding.Left,
+		WelcomeBodyPadding.Top,
+		WelcomeBodyPadding.Right,
+		WelcomeBodyPadding.Bottom));
+	AddInfo(FString::Printf(
+		TEXT("Pro tips summary: font=%.1f source=%.1f bounds=(%.1f,%.1f,%.1f,%.1f) wrap=%d wrapAt=%.1f lineHeight=%.3f fontFamily=%s typeface=%s padding=(%.1f,%.1f,%.1f,%.1f)"),
+		ProTips->TextStyle.FontSize,
+		ProTips->TextStyle.SourceFontSize,
+		ProTips->Bounds.X,
+		ProTips->Bounds.Y,
+		ProTips->Bounds.W,
+		ProTips->Bounds.H,
+		ProTips->Text.bAutoWrapText ? 1 : 0,
+		ProTips->Text.WrapTextAt,
+		ProTips->Text.LineHeightPercentage,
+		*ProTips->Text.FontFamily,
+		*ProTips->Text.TypefaceFontName,
+		ProTipsPadding.Left,
+		ProTipsPadding.Top,
+		ProTipsPadding.Right,
+		ProTipsPadding.Bottom));
+
+	constexpr float ExpectedCompiledRubikFontSize = 20.0f;
+	TestTrue(TEXT("Welcome body keeps the authoritative 20px compiled Rubik size"),
+		FMath::IsNearlyEqual(WelcomeBody->TextStyle.FontSize, ExpectedCompiledRubikFontSize, 0.01f));
+	TestTrue(TEXT("Pro tips keeps the authoritative 20px compiled Rubik size"),
+		FMath::IsNearlyEqual(ProTips->TextStyle.FontSize, ExpectedCompiledRubikFontSize, 0.01f));
+	TestTrue(TEXT("Welcome body and Pro tips stay on the same authoritative Rubik size"),
+		FMath::IsNearlyEqual(WelcomeBody->TextStyle.FontSize, ProTips->TextStyle.FontSize, 0.01f));
 	return true;
 }
 
@@ -1132,24 +1176,24 @@ bool FImportDiagnosticReportStructureTest::RunTest(const FString& Parameters)
 	SkippedNode.NodeName = TEXT("Slice Overlay");
 	SkippedNode.NodeType = TEXT("SLICE");
 	SkippedNode.Reason = TEXT("design_only");
-	Document.ParseDiagnostics.SkippedDesignerNodes.Add(SkippedNode);
+	Document.MutableParseDiagnostics().SkippedDesignerNodes.Add(SkippedNode);
 
 	TSharedPtr<FDesignNode> TextPathNode = MakeShared<FDesignNode>();
 	TextPathNode->Id = TEXT("text_path_1");
 	TextPathNode->Name = TEXT("Curved Label");
 	TextPathNode->Type = EDesignNodeType::Text;
-	TextPathNode->Source.SourceNodeType = TEXT("TEXT_PATH");
+	TextPathNode->MutableSource().SourceNodeType = TEXT("TEXT_PATH");
 	TextPathNode->Text.FontFamily = TEXT("DefinitelyMissingReportFont");
 
 	TSharedPtr<FDesignNode> RenderFallbackNode = MakeShared<FDesignNode>();
 	RenderFallbackNode->Id = TEXT("render_1");
 	RenderFallbackNode->Name = TEXT("Blurred Hero");
 	RenderFallbackNode->Type = EDesignNodeType::Rectangle;
-	RenderFallbackNode->Source.SourceNodeType = TEXT("RECTANGLE");
-	RenderFallbackNode->Source.RenderFallback.ImageRef = TEXT("render_hero");
-	RenderFallbackNode->Source.RenderFallback.Scope = TEXT("full");
-	RenderFallbackNode->Source.RenderFallback.Source = TEXT("figma_render_png");
-	RenderFallbackNode->Source.RenderFallback.Reason = TEXT("foreground_blur");
+	RenderFallbackNode->MutableSource().SourceNodeType = TEXT("RECTANGLE");
+	RenderFallbackNode->MutableSource().RenderFallback.ImageRef = TEXT("render_hero");
+	RenderFallbackNode->MutableSource().RenderFallback.Scope = TEXT("full");
+	RenderFallbackNode->MutableSource().RenderFallback.Source = TEXT("figma_render_png");
+	RenderFallbackNode->MutableSource().RenderFallback.Reason = TEXT("foreground_blur");
 
 	Document.Children.Add(TextPathNode);
 	Document.Children.Add(RenderFallbackNode);
@@ -1520,7 +1564,7 @@ bool FFigmaInstanceMetadataWorkflowTest::RunTest(const FString& Parameters)
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse figma instance metadata fixture"), FFigmaParser::ParseDocument(Json, Document));
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
-	TestTrue(TEXT("Converted widget data preserves Figma component catalog"), Data.SourceDocument.HasAnyComponentCatalog());
+	TestTrue(TEXT("Converted widget data preserves Figma component catalog"), Data.SourceDocument().HasAnyComponentCatalog());
 
 	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/FigmaInstanceMetadata");
 	DeleteGeneratedAssetsAtPath(OutputPath);
@@ -1597,10 +1641,10 @@ bool FMetadataCollectorExactSnapshotTest::RunTest(const FString& Parameters)
 	Node.Id = TEXT("inst1");
 	Node.Name = TEXT("NavItem");
 	Node.Type = TEXT("INSTANCE");
-	Node.Source.SourceNodeType = TEXT("INSTANCE");
-	Node.Source.ComponentId = TEXT("12:34");
-	Node.Source.ComponentSetId = TEXT("56:78");
-	Node.Source.VariantPropertiesJson = TEXT("{\"Active\":\"True\"}");
+	Node.MutableSource().SourceNodeType = TEXT("INSTANCE");
+	Node.MutableSource().ComponentId = TEXT("12:34");
+	Node.MutableSource().ComponentSetId = TEXT("56:78");
+	Node.MutableSource().VariantPropertiesJson = TEXT("{\"Active\":\"True\"}");
 
 	UTextBlock* Widget = NewObject<UTextBlock>(GetTransientPackage(), NAME_None, RF_Transient);
 	Widget->Rename(TEXT("NavItem_0"));
@@ -1981,6 +2025,48 @@ namespace
 
 		return Result;
 	}
+
+	FString SerializeWidgetTreeWithNamedSlots(const UWidget* Widget, int32 Depth = 0)
+	{
+		if (!Widget)
+		{
+			return FString();
+		}
+
+		const FString Indent = FString::ChrN(Depth * 2, TEXT(' '));
+		const FString SlotClass = Widget->Slot ? Widget->Slot->GetClass()->GetName() : TEXT("none");
+		FString Result = FString::Printf(TEXT("%s%s:%s[%s]\n"),
+			*Indent,
+			*Widget->GetClass()->GetName(),
+			*Widget->GetName(),
+			*SlotClass);
+
+		if (const UPanelWidget* Panel = Cast<UPanelWidget>(Widget))
+		{
+			for (int32 ChildIndex = 0; ChildIndex < Panel->GetChildrenCount(); ++ChildIndex)
+			{
+				Result += SerializeWidgetTreeWithNamedSlots(Panel->GetChildAt(ChildIndex), Depth + 1);
+			}
+		}
+
+		if (const INamedSlotInterface* NamedSlotHost = Cast<INamedSlotInterface>(const_cast<UWidget*>(Widget)))
+		{
+			TArray<FName> SlotNames;
+			NamedSlotHost->GetSlotNames(SlotNames);
+			for (const FName& SlotName : SlotNames)
+			{
+				if (const UWidget* SlotContent = NamedSlotHost->GetContentForSlot(SlotName))
+				{
+					Result += FString::Printf(TEXT("%s<NamedSlot:%s>\n"),
+						*FString::ChrN((Depth + 1) * 2, TEXT(' ')),
+						*SlotName.ToString());
+					Result += SerializeWidgetTreeWithNamedSlots(SlotContent, Depth + 2);
+				}
+			}
+		}
+
+		return Result;
+	}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTreeBuilderStructureSnapshotStableTest,
@@ -2078,6 +2164,138 @@ bool FTreeBuilderStructureSnapshotStableTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Widget tree structure snapshot matches"), Actual, Expected);
 
 	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNamedSlotOverflowWrapStructureStableTest,
+	"Design2UMG.TreeBuilder.NamedSlotOverflowWrapStable",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FNamedSlotOverflowWrapStructureStableTest::RunTest(const FString& Parameters)
+{
+	UWidgetBlueprint* Blueprint = NewObject<UWidgetBlueprint>(GetTransientPackage(), NAME_None, RF_Transient);
+	TestNotNull(TEXT("Transient blueprint exists"), Blueprint);
+	if (!Blueprint)
+	{
+		return false;
+	}
+
+	Blueprint->WidgetTree = NewObject<UWidgetTree>(Blueprint, UWidgetTree::StaticClass(), NAME_None, RF_Transient);
+	TestNotNull(TEXT("Transient widget tree exists"), Blueprint->WidgetTree.Get());
+	if (!Blueprint->WidgetTree)
+	{
+		return false;
+	}
+
+	FUMGWidgetNode RootNode;
+	RootNode.Type = TEXT("CanvasPanel");
+	RootNode.Id = TEXT("slot_root");
+	RootNode.Name = TEXT("slot_root");
+	RootNode.Bounds = {0.0f, 0.0f, 400.0f, 240.0f};
+
+	FUMGWidgetNode HostNode;
+	HostNode.Type = TEXT("ExpandableArea");
+	HostNode.Id = TEXT("slot_host");
+	HostNode.Name = TEXT("slot_host");
+	HostNode.Bounds = {0.0f, 0.0f, 320.0f, 180.0f};
+
+	FUMGWidgetNode HeaderNode;
+	HeaderNode.Type = TEXT("TextBlock");
+	HeaderNode.Id = TEXT("slot_header");
+	HeaderNode.Name = TEXT("slot_header");
+	HeaderNode.Bounds = {0.0f, 0.0f, 120.0f, 24.0f};
+	HeaderNode.Text.Text = TEXT("Header");
+	HeaderNode.Text.bHasText = true;
+	HeaderNode.WidgetStyle.SlotName = TEXT("Header");
+
+	FUMGWidgetNode BodyPrimaryNode;
+	BodyPrimaryNode.Type = TEXT("TextBlock");
+	BodyPrimaryNode.Id = TEXT("slot_body_primary");
+	BodyPrimaryNode.Name = TEXT("slot_body_primary");
+	BodyPrimaryNode.Bounds = {0.0f, 28.0f, 180.0f, 24.0f};
+	BodyPrimaryNode.Text.Text = TEXT("BodyPrimary");
+	BodyPrimaryNode.Text.bHasText = true;
+	BodyPrimaryNode.WidgetStyle.SlotName = TEXT("Body");
+
+	FUMGWidgetNode BodySecondaryNode;
+	BodySecondaryNode.Type = TEXT("TextBlock");
+	BodySecondaryNode.Id = TEXT("slot_body_secondary");
+	BodySecondaryNode.Name = TEXT("slot_body_secondary");
+	BodySecondaryNode.Bounds = {0.0f, 56.0f, 180.0f, 24.0f};
+	BodySecondaryNode.Text.Text = TEXT("BodySecondary");
+	BodySecondaryNode.Text.bHasText = true;
+	BodySecondaryNode.WidgetStyle.SlotName = TEXT("Body");
+	BodySecondaryNode.Slot.Padding = FMargin(3.0f, 0.0f, 0.0f, 7.0f);
+
+	HostNode.Children.Add(HeaderNode);
+	HostNode.Children.Add(BodyPrimaryNode);
+	HostNode.Children.Add(BodySecondaryNode);
+	RootNode.Children.Add(HostNode);
+
+	UWidget* RootWidget = FUMGWidgetUtils::CreateWidgetRecursive(Blueprint->WidgetTree, RootNode);
+	TestNotNull(TEXT("Root widget created"), RootWidget);
+	if (!RootWidget)
+	{
+		return false;
+	}
+	Blueprint->WidgetTree->RootWidget = RootWidget;
+
+	const UPanelWidget* RootPanel = Cast<UPanelWidget>(RootWidget);
+	TestNotNull(TEXT("Root panel exists"), RootPanel);
+	if (!RootPanel || RootPanel->GetChildrenCount() == 0)
+	{
+		return false;
+	}
+
+	UExpandableArea* HostWidget = Cast<UExpandableArea>(RootPanel->GetChildAt(0));
+	TestNotNull(TEXT("ExpandableArea host created"), HostWidget);
+	if (!HostWidget)
+	{
+		return false;
+	}
+
+	UWidget* HeaderContent = HostWidget->GetContentForSlot(TEXT("Header"));
+	UWidget* BodyContent = HostWidget->GetContentForSlot(TEXT("Body"));
+	TestNotNull(TEXT("Header slot received content"), HeaderContent);
+	TestNotNull(TEXT("Body slot received content"), BodyContent);
+
+	const UVerticalBox* BodyWrap = Cast<UVerticalBox>(BodyContent);
+	TestNotNull(TEXT("Overflow body slot wrapped in VerticalBox"), BodyWrap);
+	if (!HeaderContent || !BodyWrap)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Header slot keeps explicit target"), HeaderContent->GetName(), FString(TEXT("slot_header")));
+	TestEqual(TEXT("Wrap box keeps stable generated name"), BodyWrap->GetName(), FString(TEXT("slot_host_SlotWrap_Body")));
+	TestEqual(TEXT("Body wrap child count"), BodyWrap->GetChildrenCount(), 2);
+	TestEqual(TEXT("First wrapped child order"), BodyWrap->GetChildAt(0)->GetName(), FString(TEXT("slot_body_primary")));
+	TestEqual(TEXT("Second wrapped child order"), BodyWrap->GetChildAt(1)->GetName(), FString(TEXT("slot_body_secondary")));
+
+	const UPanelSlot* WrappedSecondSlot = BodyWrap->GetChildAt(1)->Slot;
+	TestNotNull(TEXT("Wrapped second child has panel slot"), WrappedSecondSlot);
+	if (const UVerticalBoxSlot* WrappedVBoxSlot = Cast<UVerticalBoxSlot>(WrappedSecondSlot))
+	{
+		const FMargin Padding = WrappedVBoxSlot->GetPadding();
+		TestTrue(TEXT("Wrapped second child padding is preserved"), FMath::IsNearlyEqual(Padding.Left, 3.0f, 0.01f) && FMath::IsNearlyEqual(Padding.Bottom, 7.0f, 0.01f));
+	}
+	else
+	{
+		AddError(TEXT("Wrapped second child should use VerticalBoxSlot"));
+		return false;
+	}
+
+	const FString Actual = SerializeWidgetTreeWithNamedSlots(RootWidget).TrimEnd();
+	const FString Expected = TEXT(
+		"CanvasPanel:slot_root[none]\n"
+		"  ExpandableArea:slot_host[CanvasPanelSlot]\n"
+		"    <NamedSlot:Header>\n"
+		"      TextBlock:slot_header[none]\n"
+		"    <NamedSlot:Body>\n"
+		"      VerticalBox:slot_host_SlotWrap_Body[none]\n"
+		"        TextBlock:slot_body_primary[VerticalBoxSlot]\n"
+		"        TextBlock:slot_body_secondary[VerticalBoxSlot]");
+	TestEqual(TEXT("Named-slot overflow structure snapshot matches"), Actual, Expected);
+
 	return true;
 }
 

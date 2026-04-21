@@ -3,9 +3,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "UMGSchema.h"
+#include "UMGSchemaFoundation.h"
 
 class FJsonObject;
+struct FUMGWidgetData;
+struct FUMGWidgetNode;
 
 /**
  * Serializes normalized UMG widget data into JSON.

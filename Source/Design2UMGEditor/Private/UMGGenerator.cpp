@@ -681,7 +681,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 		return nullptr;
 	}
 
-	FUMGPrototypeNavigationData NavigationData = WidgetData.PrototypeNavigation;
+	FUMGPrototypeNavigationData NavigationData = WidgetData.PrototypeNavigation();
 
 	// v2.2: apply the fixer to a writable copy so bounds can be corrected in place.
 	FUMGWidgetNode FixedRoot = WidgetData.RootWidget;
@@ -785,7 +785,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 	WBP->WidgetTree->RootWidget = Root;
 	GeneratePrototypeNavigationAnimations(WBP, FixedRoot, NavigationData);
 	ConfigurePrototypeNavigationExtension(WBP, NavigationData);
-	ConfigureFigmaMetadataExtension(WBP, WidgetData.SourceDocument, FigmaMetadataRecords);
+	ConfigureFigmaMetadataExtension(WBP, WidgetData.SourceDocument(), FigmaMetadataRecords);
 	ClearGeneratedWidgetNavigationState(WBP);
 	DumpTemplateTextBlockFontState(TEXT("template-precompile"), WBP);
 

@@ -11,6 +11,7 @@
 #include "UMGJsonParser.h"
 #include "UMGJsonSerializer.h"
 #include "UMGPropertyKeys.h"
+#include "UMGSchemaSourceExtensions.h"
 #include "UMGValueParser.h"
 #include "UMGWidgetNodeAccess.h"
 #include "UMGWidgetUtils.h"
@@ -19,6 +20,8 @@
 #include "DesignPathRasterizer.h"
 #include "ProceduralShapeGenerator.h"
 #include "TextMeasurement.h"
+#include "TextMeasurementTestTrace.h"
+#include "Design2UMGLog.h"
 #include "Dom/JsonObject.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Serialization/JsonReader.h"
@@ -1230,6 +1233,82 @@ bool FVariableResolverLiteralDollarTextTest::RunTest(const FString& Parameters)
 		Resolver.ResolveString(TEXT("$45.00")),
 		FString(TEXT("$45.00")));
 	TestTrue(TEXT("$--font-primary remains a variable ref"), Resolver.IsVariableRef(TEXT("$--font-primary")));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDesignSchemaSourceExtensionsRemainOptInTest,
+	"Design2UMG.Schema.SourceExtensionsRemainOptIn",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FDesignSchemaSourceExtensionsRemainOptInTest::RunTest(const FString& Parameters)
+{
+	FDesignNode Node;
+	TestFalse(TEXT("Fresh node has no source extension"), Node.HasSourceData());
+	const FDesignSourceNodeData& EmptyNodeSource = Node.Source();
+	TestFalse(TEXT("Read-only node source access stays opt-in"), Node.HasSourceData());
+	TestTrue(TEXT("Read-only node source returns empty source type"), EmptyNodeSource.SourceNodeType.IsEmpty());
+
+	Node.MutableSource().SourceNodeType = TEXT("FRAME");
+	TestTrue(TEXT("Explicit node source mutation materializes extension"), Node.HasSourceData());
+	TestEqual(TEXT("Explicit node source mutation persists"), Node.Source().SourceNodeType, FString(TEXT("FRAME")));
+
+	FDesignDocument Document;
+	TestFalse(TEXT("Fresh document has no source document extension"), Document.HasSourceDocumentData());
+	TestFalse(TEXT("Fresh document has no parse diagnostics extension"), Document.HasParseDiagnostics());
+
+	const FDesignSourceDocumentData& EmptyDocumentSource = Document.SourceDocument();
+	const FDesignParseDiagnostics& EmptyDiagnostics = Document.ParseDiagnostics();
+	TestFalse(TEXT("Read-only document source access stays opt-in"), Document.HasSourceDocumentData());
+	TestFalse(TEXT("Read-only diagnostics access stays opt-in"), Document.HasParseDiagnostics());
+	TestTrue(TEXT("Read-only document source returns empty prototype start id"), EmptyDocumentSource.PrototypeStartNodeId.IsEmpty());
+	TestEqual(TEXT("Read-only diagnostics returns empty skipped-node list"), EmptyDiagnostics.SkippedDesignerNodes.Num(), 0);
+
+	Document.MutableSourceDocument().PrototypeStartNodeId = TEXT("root");
+	FDesignSkippedNodeReport& AddedReport = Document.MutableParseDiagnostics().SkippedDesignerNodes.AddDefaulted_GetRef();
+	AddedReport.NodeId = TEXT("skip-1");
+
+	TestTrue(TEXT("Explicit document source mutation materializes source document"), Document.HasSourceDocumentData());
+	TestTrue(TEXT("Explicit diagnostics mutation materializes diagnostics"), Document.HasParseDiagnostics());
+	TestEqual(TEXT("Explicit document source mutation persists"), Document.SourceDocument().PrototypeStartNodeId, FString(TEXT("root")));
+	TestEqual(TEXT("Explicit diagnostics mutation persists"), Document.ParseDiagnostics().SkippedDesignerNodes.Num(), 1);
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUMGSchemaSourceExtensionsRemainOptInTest,
+	"Design2UMG.Schema.UMGSourceExtensionsRemainOptIn",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FUMGSchemaSourceExtensionsRemainOptInTest::RunTest(const FString& Parameters)
+{
+	FUMGWidgetNode Node;
+	TestFalse(TEXT("Fresh UMG node has no source extension"), Node.HasSourceData());
+	const FUMGSourceNodeData& EmptyNodeSource = Node.Source();
+	TestFalse(TEXT("Read-only UMG node source access stays opt-in"), Node.HasSourceData());
+	TestTrue(TEXT("Read-only UMG node source starts empty"), EmptyNodeSource.SourceNodeType.IsEmpty());
+
+	Node.MutableSource().SourceNodeType = TEXT("INSTANCE");
+	Node.MutableSource().ComponentId = TEXT("12:34");
+	TestTrue(TEXT("Explicit UMG node source mutation materializes extension"), Node.HasSourceData());
+	TestEqual(TEXT("Explicit UMG node source mutation persists"), Node.Source().SourceNodeType, FString(TEXT("INSTANCE")));
+	TestEqual(TEXT("Explicit UMG node component id persists"), Node.Source().ComponentId, FString(TEXT("12:34")));
+
+	FUMGWidgetData Data;
+	TestFalse(TEXT("Fresh UMG widget data has no source document extension"), Data.HasSourceDocumentData());
+	TestFalse(TEXT("Fresh UMG widget data has no prototype navigation extension"), Data.HasPrototypeNavigationData());
+
+	const FUMGSourceDocumentData& EmptySourceDocument = Data.SourceDocument();
+	const FUMGPrototypeNavigationData& EmptyPrototypeNavigation = Data.PrototypeNavigation();
+	TestFalse(TEXT("Read-only UMG source document access stays opt-in"), Data.HasSourceDocumentData());
+	TestFalse(TEXT("Read-only UMG prototype access stays opt-in"), Data.HasPrototypeNavigationData());
+	TestTrue(TEXT("Read-only UMG source document starts empty"), EmptySourceDocument.ComponentsJson.IsEmpty());
+	TestEqual(TEXT("Read-only UMG prototype starts empty"), EmptyPrototypeNavigation.ClickBindings.Num(), 0);
+
+	Data.MutableSourceDocument().ComponentsJson = TEXT("{\"12:34\":{\"key\":\"button\"}}");
+	FUMGPrototypeNavigationBinding& Binding = Data.MutablePrototypeNavigation().ClickBindings.AddDefaulted_GetRef();
+	Binding.TriggerWidgetId = TEXT("cta_button");
+	Binding.TriggerWidgetName = TEXT("cta_button");
+	Binding.Action = EUMGPrototypeNavigationAction::Back;
+
+	TestTrue(TEXT("Explicit UMG source document mutation materializes extension"), Data.HasSourceDocumentData());
+	TestTrue(TEXT("Explicit UMG prototype mutation materializes extension"), Data.HasPrototypeNavigationData());
+	TestTrue(TEXT("Explicit UMG source document mutation persists"), Data.SourceDocument().ComponentsJson.Contains(TEXT("button")));
+	TestEqual(TEXT("Explicit UMG prototype mutation persists"), Data.PrototypeNavigation().ClickBindings.Num(), 1);
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaComplexParserTest,
@@ -3086,7 +3165,7 @@ bool FShouldPreferIntrinsicSingleLineFontFamilyNameDoesNotAffectSizeTest::RunTes
 		Node->Text.TextAlignVertical = EDesignTextAlignVertical::Top;
 		Node->Text.TextGrowth = EDesignTextGrowth::Auto;
 		Node->Transform.bSourceHasWidth = false;
-		Node->Source.bExpandedRefInstance = true;
+		Node->MutableSource().bExpandedRefInstance = true;
 		return Node;
 	};
 
@@ -3114,8 +3193,14 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextMeasurementNoSubstringFontDispatchTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FTextMeasurementNoSubstringFontDispatchTest::RunTest(const FString& Parameters)
 {
-	const FString SourcePath = FPaths::ConvertRelativePathToFull(
-		FPaths::ProjectPluginsDir() / TEXT("Design2UMG/Source/Design2UMGCore/Private/TextMeasurement.cpp"));
+	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
+	TestTrue(TEXT("Design2UMG plugin found"), Plugin.IsValid());
+	if (!Plugin.IsValid())
+	{
+		return false;
+	}
+
+	const FString SourcePath = FPaths::Combine(Plugin->GetBaseDir(), TEXT("Source/Design2UMGCore/Private/TextMeasurement.cpp"));
 	FString Source;
 	if (!FFileHelper::LoadFileToString(Source, *SourcePath))
 	{
@@ -3126,6 +3211,293 @@ bool FTextMeasurementNoSubstringFontDispatchTest::RunTest(const FString& Paramet
 		Source.Contains(TEXT("Contains(TEXT(\"mono\"))"), ESearchCase::CaseSensitive));
 	TestFalse(TEXT("TextMeasurement.cpp must not contain Contains(TEXT(\"code\")) font-name dispatch"),
 		Source.Contains(TEXT("Contains(TEXT(\"code\"))"), ESearchCase::CaseSensitive));
+	return true;
+}
+
+// 5.4.1 evidence: node-level decision-chain trace for the 3 proven-failing cases.
+// Attempts actual source parse first; falls back to synthetic probe if source unavailable.
+
+namespace
+{
+	// Recursively find the first Text node whose FontFamily contains the given substring (case-insensitive).
+	TSharedPtr<FDesignNode> FindFirstTextNodeByFamily(
+		const TArray<TSharedPtr<FDesignNode>>& Nodes,
+		const FString& FamilySubstring)
+	{
+		for (const TSharedPtr<FDesignNode>& Node : Nodes)
+		{
+			if (!Node.IsValid())
+			{
+				continue;
+			}
+			if (Node->Type == EDesignNodeType::Text
+				&& Node->Text.FontSize > 0.0f
+				&& Node->Text.FontFamily.Contains(FamilySubstring, ESearchCase::IgnoreCase))
+			{
+				return Node;
+			}
+			if (TSharedPtr<FDesignNode> Found = FindFirstTextNodeByFamily(Node->Children, FamilySubstring))
+			{
+				return Found;
+			}
+		}
+		return nullptr;
+	}
+
+	TSharedPtr<FDesignNode> FindFirstTextNodeByContent(
+		const TArray<TSharedPtr<FDesignNode>>& Nodes,
+		const FString& ExactContent)
+	{
+		for (const TSharedPtr<FDesignNode>& Node : Nodes)
+		{
+			if (!Node.IsValid())
+			{
+				continue;
+			}
+			if (Node->Type == EDesignNodeType::Text
+				&& Node->Text.Content.Equals(ExactContent, ESearchCase::CaseSensitive))
+			{
+				return Node;
+			}
+			if (TSharedPtr<FDesignNode> Found = FindFirstTextNodeByContent(Node->Children, ExactContent))
+			{
+				return Found;
+			}
+		}
+		return nullptr;
+	}
+
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTrace541FigmaExport1Local,
+	"Design2UMG.TextMeasurement.Trace541.FigmaExport1Local",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTrace541FigmaExport1Local::RunTest(const FString& Parameters)
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		AddWarning(TEXT("Slate not initialized, skipping trace."));
+		return true;
+	}
+
+	// Attempt actual source parse from G:\UE5\figma_export1\design.json.
+	// Selection rule: first Text node with FontFamily containing "Roboto" — confirmed
+	// present in design.json (Inter is not used; Roboto is the actual font family).
+	const FString SourcePath = TEXT("G:\\UE5\\figma_export1\\design.json");
+	TSharedPtr<FDesignNode> Node;
+	bool bFromActualSource = false;
+
+	FString JsonString;
+	if (FFileHelper::LoadFileToString(JsonString, *SourcePath))
+	{
+		FDesignDocument Document;
+		if (FFigmaParser::ParseDocument(JsonString, Document))
+		{
+			Node = FindFirstTextNodeByFamily(Document.Children, TEXT("Roboto"));
+			if (Node.IsValid())
+			{
+				bFromActualSource = true;
+				UE_LOG(LogDesign2UMG, Log,
+					TEXT("5.4.1 [figma-export1-local] actual-source node: name='%s' family='%s' size=%.1f"),
+					*Node->Name, *Node->Text.FontFamily, Node->Text.FontSize);
+			}
+			else
+			{
+				AddWarning(TEXT("5.4.1 [figma-export1-local] parse succeeded but no Roboto text node found; falling back to synthetic probe."));
+			}
+		}
+		else
+		{
+			AddWarning(TEXT("5.4.1 [figma-export1-local] FFigmaParser::ParseDocument failed; falling back to synthetic probe."));
+		}
+	}
+	else
+	{
+		AddWarning(TEXT("5.4.1 [figma-export1-local] source file not found at G:\\UE5\\figma_export1\\design.json; falling back to synthetic probe."));
+	}
+
+	if (!Node.IsValid())
+	{
+		// Synthetic probe: parameters aligned to figma-export1 typical label node.
+		Node = MakeShared<FDesignNode>();
+		Node->Name = TEXT("figma-export1-local-probe");
+		Node->Type = EDesignNodeType::Text;
+		Node->Text.Content = TEXT("Export Label");
+		Node->Text.FontFamily = TEXT("Roboto");
+		Node->Text.FontWeight = TEXT("Regular");
+		Node->Text.FontSize = 14.0f;
+		Node->Text.TextAlign = EDesignTextAlign::Left;
+		Node->Text.TextAlignVertical = EDesignTextAlignVertical::Top;
+		Node->Text.TextGrowth = EDesignTextGrowth::Auto;
+		Node->Transform.bSourceHasWidth = true;
+		Node->Transform.SetWidthValue(FDesignSize::Fixed(120.0f));
+		Node->Transform.SetHeightValue(FDesignSize::Fixed(20.0f));
+		Node->Metadata.Add(TEXT("source.provider"), TEXT("figma"));
+	}
+
+	TextMeasurement::ResetCache();
+	const FTextResolutionTrace Trace = TextMeasurementTestTrace::DumpTextResolutionTrace(Node);
+
+	TestFalse(TEXT("ResolutionPath must be non-empty"), Trace.ResolutionPath.IsEmpty());
+	TestTrue(TEXT("CompiledFontSize must be positive"), Trace.CompiledFontSize > 0.0f);
+	TestTrue(TEXT("FallbackScale must be in valid range when trace fallback evidence is available"),
+		(Trace.FallbackScale >= 0.5f && Trace.FallbackScale <= 1.0f)
+		|| Trace.ResolutionPath == TEXT("trace-log-unavailable"));
+	TestFalse(TEXT("CalibrationKey must be non-empty"), Trace.CalibrationKey.IsEmpty());
+
+	UE_LOG(LogDesign2UMG, Log,
+		TEXT("5.4.1 Trace [figma-export1-local] source=%s node='%s' path=%s fallbackScale=%.3f fallback=%.1f compiled=%.1f bounds=(%.1f,%.1f) key=%s"),
+		bFromActualSource ? TEXT("actual") : TEXT("synthetic"),
+		*Trace.NodeName, *Trace.ResolutionPath, Trace.FallbackScale, Trace.FallbackFontSize,
+		Trace.CompiledFontSize, Trace.CompiledBounds.X, Trace.CompiledBounds.Y, *Trace.CalibrationKey);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTrace541PenHabitTracker,
+	"Design2UMG.TextMeasurement.Trace541.PenHabitTrackerIndustrialTechnical",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTrace541PenHabitTracker::RunTest(const FString& Parameters)
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		AddWarning(TEXT("Slate not initialized, skipping trace."));
+		return true;
+	}
+
+	// Attempt actual source parse from pencil-demo.pen.
+	// Selection rule: first Text node with FontFamily containing "Inter" — the
+	// "Habit Tracker - Industrial Technical" frame uses Inter exclusively.
+	const FString SourcePath = TEXT("G:\\UE5\\FPSRoguelike\\Designs\\pencil-demo.pen");
+	TSharedPtr<FDesignNode> Node;
+	bool bFromActualSource = false;
+
+	FDesignDocument Document;
+	if (FPenParser::ParseFromFile(SourcePath, Document))
+	{
+		Node = FindFirstTextNodeByFamily(Document.Children, TEXT("Inter"));
+		if (Node.IsValid())
+		{
+			bFromActualSource = true;
+			UE_LOG(LogDesign2UMG, Log,
+				TEXT("5.4.1 [habit-tracker] actual-source node: name='%s' family='%s' size=%.1f"),
+				*Node->Name, *Node->Text.FontFamily, Node->Text.FontSize);
+		}
+		else
+		{
+			AddWarning(TEXT("5.4.1 [habit-tracker] parse succeeded but no Inter text node found; falling back to synthetic probe."));
+		}
+	}
+	else
+	{
+		AddWarning(TEXT("5.4.1 [habit-tracker] FPenParser::ParseFromFile failed or file not found; falling back to synthetic probe."));
+	}
+
+	if (!Node.IsValid())
+	{
+		Node = MakeShared<FDesignNode>();
+		Node->Name = TEXT("habit-tracker-label-probe");
+		Node->Type = EDesignNodeType::Text;
+		Node->Text.Content = TEXT("Habit Tracker");
+		Node->Text.FontFamily = TEXT("Inter");
+		Node->Text.FontWeight = TEXT("Regular");
+		Node->Text.FontSize = 16.0f;
+		Node->Text.TextAlign = EDesignTextAlign::Left;
+		Node->Text.TextAlignVertical = EDesignTextAlignVertical::Middle;
+		Node->Text.TextGrowth = EDesignTextGrowth::FixedWidthHeight;
+		Node->Transform.bSourceHasWidth = false;
+		Node->Transform.SetWidthValue(FDesignSize::Fixed(200.0f));
+		Node->Transform.SetHeightValue(FDesignSize::Fixed(24.0f));
+	}
+
+	TextMeasurement::ResetCache();
+	const FTextResolutionTrace Trace = TextMeasurementTestTrace::DumpTextResolutionTrace(Node);
+
+	TestFalse(TEXT("ResolutionPath must be non-empty"), Trace.ResolutionPath.IsEmpty());
+	TestTrue(TEXT("CompiledFontSize must be positive"), Trace.CompiledFontSize > 0.0f);
+	TestTrue(TEXT("FallbackScale must be in valid range [0.5, 1.0] when trace fallback evidence is available"),
+		(Trace.FallbackScale >= 0.5f && Trace.FallbackScale <= 1.0f)
+		|| Trace.ResolutionPath == TEXT("trace-log-unavailable"));
+	TestFalse(TEXT("CalibrationKey must be non-empty"), Trace.CalibrationKey.IsEmpty());
+
+	UE_LOG(LogDesign2UMG, Log,
+		TEXT("5.4.1 Trace [habit-tracker-industrial] source=%s node='%s' path=%s fallbackScale=%.3f fallback=%.1f compiled=%.1f bounds=(%.1f,%.1f) key=%s"),
+		bFromActualSource ? TEXT("actual") : TEXT("synthetic"),
+		*Trace.NodeName, *Trace.ResolutionPath, Trace.FallbackScale, Trace.FallbackFontSize,
+		Trace.CompiledFontSize, Trace.CompiledBounds.X, Trace.CompiledBounds.Y, *Trace.CalibrationKey);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTrace541PenNitroDesignSystem,
+	"Design2UMG.TextMeasurement.Trace541.PenNitroDesignSystemComponents",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTrace541PenNitroDesignSystem::RunTest(const FString& Parameters)
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		AddWarning(TEXT("Slate not initialized, skipping trace."));
+		return true;
+	}
+
+	// Attempt actual source parse from pencil-nitro.pen.
+	// Selection rule: first Text node with FontFamily containing "Roboto" — confirmed
+	// present in pencil-nitro.pen (Rubik is NOT in this file; CSS vars resolve to Roboto).
+	const FString SourcePath = TEXT("G:\\UE5\\FPSRoguelike\\Designs\\pencil-nitro.pen");
+	TSharedPtr<FDesignNode> Node;
+	bool bFromActualSource = false;
+
+	FDesignDocument Document;
+	if (FPenParser::ParseFromFile(SourcePath, Document))
+	{
+		Node = FindFirstTextNodeByFamily(Document.Children, TEXT("Roboto"));
+		if (Node.IsValid())
+		{
+			bFromActualSource = true;
+			UE_LOG(LogDesign2UMG, Log,
+				TEXT("5.4.1 [nitro-design-system] actual-source node: name='%s' family='%s' size=%.1f"),
+				*Node->Name, *Node->Text.FontFamily, Node->Text.FontSize);
+		}
+		else
+		{
+			AddWarning(TEXT("5.4.1 [nitro-design-system] parse succeeded but no Roboto text node found; falling back to synthetic probe."));
+		}
+	}
+	else
+	{
+		AddWarning(TEXT("5.4.1 [nitro-design-system] FPenParser::ParseFromFile failed or file not found; falling back to synthetic probe."));
+	}
+
+	if (!Node.IsValid())
+	{
+		Node = MakeShared<FDesignNode>();
+		Node->Name = TEXT("nitro-design-system-probe");
+		Node->Type = EDesignNodeType::Text;
+		Node->Text.Content = TEXT("Button Label");
+		Node->Text.FontFamily = TEXT("Roboto");
+		Node->Text.FontWeight = TEXT("Medium");
+		Node->Text.FontSize = 14.0f;
+		Node->Text.TextAlign = EDesignTextAlign::Center;
+		Node->Text.TextAlignVertical = EDesignTextAlignVertical::Top;
+		Node->Text.TextGrowth = EDesignTextGrowth::FixedWidth;
+		Node->Transform.bSourceHasWidth = false;
+		Node->Transform.SetWidthValue(FDesignSize::Fixed(160.0f));
+		Node->Transform.SetHeightValue(FDesignSize::Fixed(40.0f));
+	}
+
+	TextMeasurement::ResetCache();
+	const FTextResolutionTrace Trace = TextMeasurementTestTrace::DumpTextResolutionTrace(Node);
+
+	TestFalse(TEXT("ResolutionPath must be non-empty"), Trace.ResolutionPath.IsEmpty());
+	TestTrue(TEXT("CompiledFontSize must be positive"), Trace.CompiledFontSize > 0.0f);
+	TestTrue(TEXT("FallbackScale must be in valid range [0.5, 1.0] when trace fallback evidence is available"),
+		(Trace.FallbackScale >= 0.5f && Trace.FallbackScale <= 1.0f)
+		|| Trace.ResolutionPath == TEXT("trace-log-unavailable"));
+	TestFalse(TEXT("CalibrationKey must be non-empty"), Trace.CalibrationKey.IsEmpty());
+
+	UE_LOG(LogDesign2UMG, Log,
+		TEXT("5.4.1 Trace [nitro-design-system] source=%s node='%s' path=%s fallbackScale=%.3f fallback=%.1f compiled=%.1f bounds=(%.1f,%.1f) key=%s"),
+		bFromActualSource ? TEXT("actual") : TEXT("synthetic"),
+		*Trace.NodeName, *Trace.ResolutionPath, Trace.FallbackScale, Trace.FallbackFontSize,
+		Trace.CompiledFontSize, Trace.CompiledBounds.X, Trace.CompiledBounds.Y, *Trace.CalibrationKey);
 	return true;
 }
 

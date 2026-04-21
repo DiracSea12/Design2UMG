@@ -1590,7 +1590,38 @@ def finalize_single_run_history(output_dir: Path, args, report_path: Path) -> No
 
 def load_ue_result(path: Path) -> dict:
     with open(path, "r", encoding="utf-8-sig") as handle:
-        return json.load(handle)
+        result = json.load(handle)
+
+    render_png_path = Path(result.get("render_png_path", "")).resolve() if result.get("render_png_path") else None
+    if render_png_path:
+        wait_for_file_stable(render_png_path)
+    return result
+
+
+def wait_for_file_stable(path: Path, timeout_sec: float = 30.0, stable_window_sec: float = 2.0, poll_interval_sec: float = 0.25):
+    deadline = time.time() + timeout_sec
+    last_signature = None
+    stable_since = None
+
+    while time.time() < deadline:
+        signature = _path_signature(path)
+        if signature is None:
+            stable_since = None
+            time.sleep(poll_interval_sec)
+            continue
+
+        if signature == last_signature:
+            if stable_since is None:
+                stable_since = time.time()
+            elif time.time() - stable_since >= stable_window_sec:
+                return
+        else:
+            last_signature = signature
+            stable_since = time.time()
+
+        time.sleep(poll_interval_sec)
+
+    raise RuntimeError(f"Timed out waiting for stable file output: {path}")
 
 
 def add_name_suffix(path: Path, suffix: str) -> Path:

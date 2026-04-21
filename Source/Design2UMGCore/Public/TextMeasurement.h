@@ -1,7 +1,9 @@
 ﻿#pragma once
 
-#include "DesignSchema.h"
+#include "CoreMinimal.h"
 #include "Fonts/SlateFontInfo.h"
+
+struct FDesignNode;
 
 namespace TextMeasurement
 {

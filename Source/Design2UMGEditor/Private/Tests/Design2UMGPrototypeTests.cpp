@@ -5,6 +5,7 @@
 #include "Design2UMGTestUtils.h"
 #include "FigmaParser.h"
 #include "UMGPropertyKeys.h"
+#include "UMGSchemaSourceExtensions.h"
 #include "UMGWidgetNodeAccess.h"
 
 #if WITH_AUTOMATION_WORKER
@@ -46,21 +47,22 @@ bool FFigmaPrototypeNavigationConverterTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Figma prototype navigation parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
 
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
-	TestTrue(TEXT("Prototype navigation plan exists"), Data.PrototypeNavigation.IsValid());
+	const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
+	TestTrue(TEXT("Prototype navigation plan exists"), NavigationData.IsValid());
 	TestEqual(TEXT("Prototype root uses WidgetSwitcher"), Data.RootWidget.Type, TEXT("WidgetSwitcher"));
-	TestEqual(TEXT("Prototype start page resolves to second page"), Data.PrototypeNavigation.InitialPageIndex, 1);
-	TestEqual(TEXT("Prototype page count"), Data.PrototypeNavigation.PageIds.Num(), 2);
-	TestEqual(TEXT("Prototype click binding count"), Data.PrototypeNavigation.ClickBindings.Num(), 1);
-	if (!Data.PrototypeNavigation.IsValid() || Data.PrototypeNavigation.ClickBindings.Num() != 1)
+	TestEqual(TEXT("Prototype start page resolves to second page"), NavigationData.InitialPageIndex, 1);
+	TestEqual(TEXT("Prototype page count"), NavigationData.PageIds.Num(), 2);
+	TestEqual(TEXT("Prototype click binding count"), NavigationData.ClickBindings.Num(), 1);
+	if (!NavigationData.IsValid() || NavigationData.ClickBindings.Num() != 1)
 	{
 		return false;
 	}
 
-	const FUMGPrototypeNavigationBinding& Binding = Data.PrototypeNavigation.ClickBindings[0];
+	const FUMGPrototypeNavigationBinding& Binding = NavigationData.ClickBindings[0];
 	TestEqual(TEXT("Prototype trigger widget id"), Binding.TriggerWidgetId, TEXT("cta_button"));
 	TestEqual(TEXT("Prototype trigger widget runtime name"), Binding.TriggerWidgetName, TEXT("cta_button"));
 	TestTrue(TEXT("Prototype switcher widget name is no longer fixed hardcode"),
-		Data.PrototypeNavigation.SwitcherWidgetName != TEXT("__d2u_prototype_switcher"));
+		NavigationData.SwitcherWidgetName != TEXT("__d2u_prototype_switcher"));
 	TestEqual(TEXT("Prototype trigger type recorded"), Binding.TriggerType, TEXT("ON_CLICK"));
 	TestEqual(TEXT("Prototype target page id"), Binding.TargetPageId, TEXT("2:1"));
 	TestEqual(TEXT("Prototype target page index"), Binding.TargetPageIndex, 1);
@@ -123,16 +125,17 @@ bool FFigmaPrototypeSpecialActionsConverterTest::RunTest(const FString& Paramete
 	TestTrue(TEXT("Figma prototype special actions parse succeeds"), FFigmaParser::ParseDocument(Json, Document));
 
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
-	TestTrue(TEXT("Prototype special action plan exists"), Data.PrototypeNavigation.IsValid());
-	TestEqual(TEXT("Prototype special action binding count"), Data.PrototypeNavigation.ClickBindings.Num(), 3);
-	if (!Data.PrototypeNavigation.IsValid() || Data.PrototypeNavigation.ClickBindings.Num() != 3)
+	const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
+	TestTrue(TEXT("Prototype special action plan exists"), NavigationData.IsValid());
+	TestEqual(TEXT("Prototype special action binding count"), NavigationData.ClickBindings.Num(), 3);
+	if (!NavigationData.IsValid() || NavigationData.ClickBindings.Num() != 3)
 	{
 		return false;
 	}
 
 	auto FindBindingByTrigger = [&](const TCHAR* TriggerId) -> const FUMGPrototypeNavigationBinding*
 	{
-		return Data.PrototypeNavigation.ClickBindings.FindByPredicate(
+		return NavigationData.ClickBindings.FindByPredicate(
 			[&](const FUMGPrototypeNavigationBinding& Binding)
 			{
 				return Binding.TriggerWidgetId == TriggerId;
@@ -157,7 +160,7 @@ bool FFigmaPrototypeSpecialActionsConverterTest::RunTest(const FString& Paramete
 	TestEqual(TEXT("Overlay transition preserved"), OverlayBinding->Transition.Type, TEXT("DISSOLVE"));
 	TestTrue(TEXT("Overlay duration preserved"), FMath::IsNearlyEqual(OverlayBinding->Transition.DurationSeconds, 0.15f, 0.0001f));
 	TestTrue(TEXT("Prototype overlay host widget name is no longer fixed hardcode"),
-		Data.PrototypeNavigation.OverlayHostWidgetName != TEXT("__d2u_prototype_overlay_host"));
+		NavigationData.OverlayHostWidgetName != TEXT("__d2u_prototype_overlay_host"));
 
 	TestEqual(TEXT("Back action typed"), BackBinding->Action, EUMGPrototypeNavigationAction::Back);
 	TestEqual(TEXT("Back trigger type preserved"), BackBinding->TriggerType, TEXT("ON_CLICK"));
@@ -221,16 +224,17 @@ bool FFigmaPrototypeHoverAndPressConverterTest::RunTest(const FString& Parameter
 	TestTrue(TEXT("Figma prototype hover/press parse succeeds"), FFigmaParser::ParseDocument(Json, Document));
 
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
-	TestTrue(TEXT("Prototype hover/press plan exists"), Data.PrototypeNavigation.IsValid());
-	TestEqual(TEXT("Prototype hover/press binding count"), Data.PrototypeNavigation.ClickBindings.Num(), 3);
-	if (!Data.PrototypeNavigation.IsValid() || Data.PrototypeNavigation.ClickBindings.Num() != 3)
+	const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
+	TestTrue(TEXT("Prototype hover/press plan exists"), NavigationData.IsValid());
+	TestEqual(TEXT("Prototype hover/press binding count"), NavigationData.ClickBindings.Num(), 3);
+	if (!NavigationData.IsValid() || NavigationData.ClickBindings.Num() != 3)
 	{
 		return false;
 	}
 
 	auto FindBindingByTrigger = [&](const TCHAR* TriggerId) -> const FUMGPrototypeNavigationBinding*
 	{
-		return Data.PrototypeNavigation.ClickBindings.FindByPredicate(
+		return NavigationData.ClickBindings.FindByPredicate(
 			[&](const FUMGPrototypeNavigationBinding& Binding)
 			{
 				return Binding.TriggerWidgetId == TriggerId;
@@ -332,16 +336,17 @@ bool FFigmaPrototypeKeyboardAndConditionalConverterTest::RunTest(const FString& 
 	TestTrue(TEXT("Figma prototype keyboard/conditional parse succeeds"), FFigmaParser::ParseDocument(Json, Document));
 
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
-	TestTrue(TEXT("Prototype keyboard/conditional plan exists"), Data.PrototypeNavigation.IsValid());
-	TestEqual(TEXT("Prototype keyboard/conditional binding count"), Data.PrototypeNavigation.ClickBindings.Num(), 3);
-	if (!Data.PrototypeNavigation.IsValid() || Data.PrototypeNavigation.ClickBindings.Num() != 3)
+	const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
+	TestTrue(TEXT("Prototype keyboard/conditional plan exists"), NavigationData.IsValid());
+	TestEqual(TEXT("Prototype keyboard/conditional binding count"), NavigationData.ClickBindings.Num(), 3);
+	if (!NavigationData.IsValid() || NavigationData.ClickBindings.Num() != 3)
 	{
 		return false;
 	}
 
 	auto FindBindingByTrigger = [&](const TCHAR* TriggerId) -> const FUMGPrototypeNavigationBinding*
 	{
-		return Data.PrototypeNavigation.ClickBindings.FindByPredicate(
+		return NavigationData.ClickBindings.FindByPredicate(
 			[&](const FUMGPrototypeNavigationBinding& Binding)
 			{
 				return Binding.TriggerWidgetId == TriggerId;

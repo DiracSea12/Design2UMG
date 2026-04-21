@@ -3,7 +3,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "UMGSchema.h"
+#include "UMGSchemaFoundation.h"
+
+struct FUMGWidgetData;
+struct FUMGWidgetNode;
 
 /**
  * Parses JSON payloads into normalized UMG widget data.

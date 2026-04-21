@@ -1,8 +1,9 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
-#include "DesignSchema.h"
 #include "UMGSchema.h"
+
+struct FDesignDocument;
 
 /**
  * Converts shared design IR into normalized UMG generation IR.

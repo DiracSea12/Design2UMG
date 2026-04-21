@@ -1,4 +1,5 @@
 ﻿#include "Design2UMGLocalFigmaImport.h"
+#include "DesignSchemaSourceExtensions.h"
 
 #include "Design2UMGConverter.h"
 #include "DesignImageBakeUtils.h"
@@ -85,7 +86,7 @@ namespace
 			return false;
 		}
 
-		if (!Node->Source.VectorRasterFallbackImageRef.IsEmpty())
+		if (!Node->Source().VectorRasterFallbackImageRef.IsEmpty())
 		{
 			return true;
 		}

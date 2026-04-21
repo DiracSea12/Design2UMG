@@ -3,8 +3,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "DesignSchema.h"
 #include "DesignVariableResolver.h"
+
+struct FDesignDocument;
+struct FDesignNode;
 
 /**
  * Component reference expansion: ExpandRef, deep copy, descendant overrides, and retheming.

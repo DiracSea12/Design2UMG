@@ -1,24 +1,11 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
+#include "DesignPreviewContracts.h"
 #include "DesignImportTypes.h"
 #include "UMGSchema.h"
 
 class UWidgetBlueprint;
-
-enum class EDesignBlueprintGenerationMode : uint8
-{
-	BlueprintOnly,
-	BlueprintAndPng,
-	BlueprintAndCompiledPng
-};
-
-struct FBlueprintGenerationOptions
-{
-	EDesignBlueprintGenerationMode Mode = EDesignBlueprintGenerationMode::BlueprintAndPng;
-	FString CompiledPngFilePath;
-	FIntPoint CompiledRenderSize = FIntPoint::ZeroValue;
-};
 
 // Transitional import-core seams: analysis and generation are routed through
 // explicit payloads before preview/orchestration is split in later tasks.
@@ -31,42 +18,6 @@ struct FImportAnalysisResult
 {
 	FUMGWidgetData Data;
 	FString ImageReport;
-};
-
-struct FPreviewRefreshInput
-{
-	uint64 RequestId = 0;
-	FString EditedJson;
-	bool bResolveImages = true;
-};
-
-struct FPreviewApprovedSnapshot
-{
-	uint64 RequestId = 0;
-	FString EditedJson;
-	FUMGWidgetData Data;
-	FString ImageReport;
-};
-
-struct FPreviewRefreshResult
-{
-	bool bSucceeded = false;
-	uint64 RequestId = 0;
-	FString EditedJson;
-	FUMGWidgetData Data;
-	FString ImageReport;
-	FString ParseError;
-};
-
-struct FArtifactGenerationRequest
-{
-	uint64 SourceRequestId = 0;
-	FString OutputPath;
-	FBlueprintGenerationOptions Generation;
-	bool bResolveImages = false;
-	TOptional<FDesignDocument> DiagnosticDocument;
-	FString RuntimeImageReport;
-	FString DiagnosticImageReportOverride;
 };
 
 struct FArtifactGenerationResult

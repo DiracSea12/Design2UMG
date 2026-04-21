@@ -1,6 +1,8 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "FigmaParserInternal.h"
+#include "DesignSchemaSourceExtensions.h"
+#include "FigmaParserPrototype.h"
 #include "Design2UMGLog.h"
 #include "DesignJsonUtils.h"
 #include "Dom/JsonObject.h"
@@ -136,59 +138,60 @@ static void SetJsonFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHA
 
 static void PromoteFigmaGridLayout(FDesignNode& OutNode)
 {
-	if (OutNode.Source.LayoutExtensions.bHasGridRowCount)
+	const FDesignSourceNodeData& SourceData = OutNode.Source();
+	if (SourceData.LayoutExtensions.bHasGridRowCount)
 	{
-		OutNode.LayoutData.LayoutRowCount = FMath::Max(0, OutNode.Source.LayoutExtensions.GridRowCount);
+		OutNode.LayoutData.LayoutRowCount = FMath::Max(0, SourceData.LayoutExtensions.GridRowCount);
 		OutNode.LayoutData.bHasLayoutRowCount = true;
 	}
-	if (OutNode.Source.LayoutExtensions.bHasGridColumnCount)
+	if (SourceData.LayoutExtensions.bHasGridColumnCount)
 	{
-		OutNode.LayoutData.LayoutColumnCount = FMath::Max(0, OutNode.Source.LayoutExtensions.GridColumnCount);
+		OutNode.LayoutData.LayoutColumnCount = FMath::Max(0, SourceData.LayoutExtensions.GridColumnCount);
 		OutNode.LayoutData.bHasLayoutColumnCount = true;
 	}
-	if (OutNode.Source.LayoutExtensions.bHasGridRowGap)
+	if (SourceData.LayoutExtensions.bHasGridRowGap)
 	{
-		OutNode.LayoutData.LayoutRowGap = FMath::Max(0.0f, OutNode.Source.LayoutExtensions.GridRowGap);
+		OutNode.LayoutData.LayoutRowGap = FMath::Max(0.0f, SourceData.LayoutExtensions.GridRowGap);
 		OutNode.LayoutData.bHasLayoutRowGap = true;
 	}
-	else if (OutNode.Source.LayoutExtensions.bHasCounterAxisSpacing)
+	else if (SourceData.LayoutExtensions.bHasCounterAxisSpacing)
 	{
-		OutNode.LayoutData.LayoutRowGap = FMath::Max(0.0f, OutNode.Source.LayoutExtensions.CounterAxisSpacing);
+		OutNode.LayoutData.LayoutRowGap = FMath::Max(0.0f, SourceData.LayoutExtensions.CounterAxisSpacing);
 		OutNode.LayoutData.bHasLayoutRowGap = true;
 	}
-	if (OutNode.Source.LayoutExtensions.bHasGridColumnGap)
+	if (SourceData.LayoutExtensions.bHasGridColumnGap)
 	{
-		OutNode.LayoutData.LayoutColumnGap = FMath::Max(0.0f, OutNode.Source.LayoutExtensions.GridColumnGap);
+		OutNode.LayoutData.LayoutColumnGap = FMath::Max(0.0f, SourceData.LayoutExtensions.GridColumnGap);
 		OutNode.LayoutData.bHasLayoutColumnGap = true;
 	}
-	if (!OutNode.Source.LayoutExtensions.GridChildHorizontalAlign.IsEmpty())
+	if (!SourceData.LayoutExtensions.GridChildHorizontalAlign.IsEmpty())
 	{
-		OutNode.LayoutData.LayoutChildHorizontalAlign = OutNode.Source.LayoutExtensions.GridChildHorizontalAlign;
+		OutNode.LayoutData.LayoutChildHorizontalAlign = SourceData.LayoutExtensions.GridChildHorizontalAlign;
 		OutNode.LayoutData.bHasLayoutChildHorizontalAlign = true;
 	}
-	if (!OutNode.Source.LayoutExtensions.GridChildVerticalAlign.IsEmpty())
+	if (!SourceData.LayoutExtensions.GridChildVerticalAlign.IsEmpty())
 	{
-		OutNode.LayoutData.LayoutChildVerticalAlign = OutNode.Source.LayoutExtensions.GridChildVerticalAlign;
+		OutNode.LayoutData.LayoutChildVerticalAlign = SourceData.LayoutExtensions.GridChildVerticalAlign;
 		OutNode.LayoutData.bHasLayoutChildVerticalAlign = true;
 	}
-	if (OutNode.Source.LayoutExtensions.bHasGridRowSpan)
+	if (SourceData.LayoutExtensions.bHasGridRowSpan)
 	{
-		OutNode.LayoutData.LayoutRowSpan = FMath::Max(1, OutNode.Source.LayoutExtensions.GridRowSpan);
+		OutNode.LayoutData.LayoutRowSpan = FMath::Max(1, SourceData.LayoutExtensions.GridRowSpan);
 		OutNode.LayoutData.bHasLayoutRowSpan = true;
 	}
-	if (OutNode.Source.LayoutExtensions.bHasGridColumnSpan)
+	if (SourceData.LayoutExtensions.bHasGridColumnSpan)
 	{
-		OutNode.LayoutData.LayoutColumnSpan = FMath::Max(1, OutNode.Source.LayoutExtensions.GridColumnSpan);
+		OutNode.LayoutData.LayoutColumnSpan = FMath::Max(1, SourceData.LayoutExtensions.GridColumnSpan);
 		OutNode.LayoutData.bHasLayoutColumnSpan = true;
 	}
-	if (OutNode.Source.LayoutExtensions.bHasGridRowAnchorIndex)
+	if (SourceData.LayoutExtensions.bHasGridRowAnchorIndex)
 	{
-		OutNode.LayoutData.LayoutRow = FMath::Max(0, OutNode.Source.LayoutExtensions.GridRowAnchorIndex);
+		OutNode.LayoutData.LayoutRow = FMath::Max(0, SourceData.LayoutExtensions.GridRowAnchorIndex);
 		OutNode.LayoutData.bHasLayoutRow = true;
 	}
-	if (OutNode.Source.LayoutExtensions.bHasGridColumnAnchorIndex)
+	if (SourceData.LayoutExtensions.bHasGridColumnAnchorIndex)
 	{
-		OutNode.LayoutData.LayoutColumn = FMath::Max(0, OutNode.Source.LayoutExtensions.GridColumnAnchorIndex);
+		OutNode.LayoutData.LayoutColumn = FMath::Max(0, SourceData.LayoutExtensions.GridColumnAnchorIndex);
 		OutNode.LayoutData.bHasLayoutColumn = true;
 	}
 }
@@ -200,7 +203,7 @@ static bool IsStretchAutoLayoutChild(const FDesignNode& ParentNode, const TShare
 		return false;
 	}
 
-	if (Child->Source.LayoutExtensions.LayoutAlign.Equals(TEXT("STRETCH"), ESearchCase::IgnoreCase))
+	if (Child->Source().LayoutExtensions.LayoutAlign.Equals(TEXT("STRETCH"), ESearchCase::IgnoreCase))
 	{
 		return true;
 	}
@@ -259,7 +262,7 @@ static bool ShouldFigmaAutoLayoutPaddingWrapAtRuntime(const FDesignNode& Node, c
 		return false;
 	}
 
-	if (Node.Source.ComponentInstance.bIsInstance)
+	if (Node.Source().ComponentInstance.bIsInstance)
 	{
 		return ShouldTopLevelFigmaInstancePaddingWrapAtRuntime(Node);
 	}
@@ -303,7 +306,7 @@ static void CaptureRenderFallbackMetadata(const TSharedPtr<FJsonObject>& Obj, FD
 		const FString Value = GetString(Obj, KeyPair.SourceKey);
 		if (!Value.IsEmpty())
 		{
-			OutNode.Source.RenderFallback.*(KeyPair.TargetField) = Value;
+			OutNode.MutableSource().RenderFallback.*(KeyPair.TargetField) = Value;
 		}
 	}
 }
@@ -352,24 +355,6 @@ static void CaptureLayoutMetadataExtensions(const TSharedPtr<FJsonObject>& Obj, 
 	CaptureSharedMetadataExtensions(Obj, Extensions);
 }
 
-static void AppendUniqueFlowStartingPoint(TArray<FDesignFlowStartingPoint>& Points, const FDesignFlowStartingPoint& Candidate)
-{
-	if (Candidate.NodeId.IsEmpty() && Candidate.Name.IsEmpty())
-	{
-		return;
-	}
-
-	for (const FDesignFlowStartingPoint& Existing : Points)
-	{
-		if (Existing.NodeId == Candidate.NodeId && Existing.Name == Candidate.Name)
-		{
-			return;
-		}
-	}
-
-	Points.Add(Candidate);
-}
-
 static void AppendUniqueSkippedDesignerNode(
 	TArray<FDesignSkippedNodeReport>& Reports,
 	const FString& NodeId,
@@ -393,126 +378,6 @@ static void AppendUniqueSkippedDesignerNode(
 	Report.NodeType = NodeType;
 	Report.Reason = Reason;
 	Reports.Add(MoveTemp(Report));
-}
-
-static void ParsePrototypeTransitionData(
-	const TSharedPtr<FJsonObject>& TransitionObj,
-	FDesignPrototypeTransitionData& OutData)
-{
-	if (!TransitionObj.IsValid())
-	{
-		return;
-	}
-
-	SetStringFieldIfPresent(TransitionObj, TEXT("type"), OutData.Type);
-	SetStringFieldIfPresent(TransitionObj, TEXT("direction"), OutData.Direction);
-	SetFloatFieldIfPresent(TransitionObj, TEXT("duration"), OutData.Duration, OutData.bHasDuration);
-	SetJsonFieldIfPresent(TransitionObj, TEXT("easing"), OutData.EasingJson);
-	SetStringFieldIfPresent(GetObject(TransitionObj, TEXT("easing")), TEXT("type"), OutData.EasingType);
-	SetBoolFieldIfPresent(TransitionObj, TEXT("matchLayers"), OutData.bMatchLayers, OutData.bHasMatchLayers);
-}
-
-static void ParsePrototypeActions(const TSharedPtr<FJsonObject>& InteractionObj, TArray<FDesignPrototypeAction>& OutActions)
-{
-	const TArray<TSharedPtr<FJsonValue>>* Actions = GetArray(InteractionObj, TEXT("actions"));
-	if (!Actions)
-	{
-		return;
-	}
-
-	for (const TSharedPtr<FJsonValue>& ActionValue : *Actions)
-	{
-		const TSharedPtr<FJsonObject> ActionObj = ActionValue->AsObject();
-		if (!ActionObj.IsValid())
-		{
-			continue;
-		}
-
-		FDesignPrototypeAction Action;
-		Action.RawJson = JsonValueToCompactString(ActionValue);
-		SetStringFieldIfPresent(ActionObj, TEXT("type"), Action.Type);
-		SetStringFieldIfPresent(ActionObj, TEXT("destinationId"), Action.DestinationId);
-		if (Action.DestinationId.IsEmpty())
-		{
-			SetStringFieldIfPresent(ActionObj, TEXT("url"), Action.DestinationId);
-		}
-		if (Action.DestinationId.IsEmpty())
-		{
-			SetStringFieldIfPresent(ActionObj, TEXT("uri"), Action.DestinationId);
-		}
-		SetStringFieldIfPresent(ActionObj, TEXT("navigation"), Action.Navigation);
-		SetStringFieldIfPresent(ActionObj, TEXT("transitionNodeID"), Action.TransitionNodeId);
-		SetJsonFieldIfPresent(ActionObj, TEXT("transition"), Action.TransitionJson);
-		ParsePrototypeTransitionData(GetObject(ActionObj, TEXT("transition")), Action.Transition);
-		OutActions.Add(MoveTemp(Action));
-	}
-}
-
-static void ParsePrototypeInteractions(const TSharedPtr<FJsonObject>& Obj, TArray<FDesignPrototypeInteraction>& OutInteractions)
-{
-	const TArray<TSharedPtr<FJsonValue>>* Interactions = GetArray(Obj, TEXT("interactions"));
-	if (!Interactions)
-	{
-		return;
-	}
-
-	for (const TSharedPtr<FJsonValue>& InteractionValue : *Interactions)
-	{
-		const TSharedPtr<FJsonObject> InteractionObj = InteractionValue->AsObject();
-		if (!InteractionObj.IsValid())
-		{
-			continue;
-		}
-
-		FDesignPrototypeInteraction Interaction;
-		Interaction.RawJson = JsonValueToCompactString(InteractionValue);
-		SetJsonFieldIfPresent(InteractionObj, TEXT("trigger"), Interaction.TriggerJson);
-		SetStringFieldIfPresent(GetObject(InteractionObj, TEXT("trigger")), TEXT("type"), Interaction.TriggerType);
-		ParsePrototypeActions(InteractionObj, Interaction.Actions);
-		OutInteractions.Add(MoveTemp(Interaction));
-	}
-}
-
-static void ParseFlowStartingPoints(const TSharedPtr<FJsonObject>& Obj, TArray<FDesignFlowStartingPoint>& OutPoints)
-{
-	const TArray<TSharedPtr<FJsonValue>>* FlowStartingPoints = GetArray(Obj, TEXT("flowStartingPoints"));
-	if (!FlowStartingPoints)
-	{
-		return;
-	}
-
-	for (const TSharedPtr<FJsonValue>& FlowValue : *FlowStartingPoints)
-	{
-		const TSharedPtr<FJsonObject> FlowObj = FlowValue->AsObject();
-		if (!FlowObj.IsValid())
-		{
-			continue;
-		}
-
-		FDesignFlowStartingPoint Flow;
-		SetStringFieldIfPresent(FlowObj, TEXT("nodeId"), Flow.NodeId);
-		SetStringFieldIfPresent(FlowObj, TEXT("name"), Flow.Name);
-		AppendUniqueFlowStartingPoint(OutPoints, Flow);
-	}
-}
-
-static void ParsePrototypeNodeData(const TSharedPtr<FJsonObject>& NodeObj, FDesignPrototypeNodeData& OutData)
-{
-	SetStringFieldIfPresent(NodeObj, TEXT("overflowDirection"), OutData.OverflowDirection);
-	SetStringFieldIfPresent(NodeObj, TEXT("transitionNodeID"), OutData.TransitionNodeId);
-	ParsePrototypeTransitionData(GetObject(NodeObj, TEXT("transition")), OutData.Transition);
-	SetFloatFieldIfPresent(NodeObj, TEXT("transitionDuration"), OutData.Transition.Duration, OutData.Transition.bHasDuration);
-	SetJsonFieldIfPresent(NodeObj, TEXT("transitionEasing"), OutData.Transition.EasingJson);
-	SetStringFieldIfPresent(GetObject(NodeObj, TEXT("transitionEasing")), TEXT("type"), OutData.Transition.EasingType);
-	ParsePrototypeInteractions(NodeObj, OutData.Interactions);
-	ParseFlowStartingPoints(NodeObj, OutData.FlowStartingPoints);
-}
-
-static void MergePrototypeDocumentData(const TSharedPtr<FJsonObject>& SourceObj, FDesignSourceDocumentData& OutData)
-{
-	SetStringFieldIfPresent(SourceObj, TEXT("prototypeStartNodeID"), OutData.PrototypeStartNodeId);
-	SetJsonFieldIfPresent(SourceObj, TEXT("prototypeDevice"), OutData.PrototypeDeviceJson);
-	ParseFlowStartingPoints(SourceObj, OutData.FlowStartingPoints);
 }
 
 static TSharedPtr<FJsonObject> ParseJsonString(const FString& Json)
@@ -1555,32 +1420,33 @@ void ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 	OutNode.LayoutData.bClip = GetBoolean(NodeObj, TEXT("clipsContent"), false);
 	OutNode.LayoutData.ExplicitClip = OutNode.LayoutData.bClip;
 
-	SetStringFieldIfPresent(NodeObj, TEXT("layoutWrap"), OutNode.Source.LayoutExtensions.LayoutWrap);
-	SetStringFieldIfPresent(NodeObj, TEXT("counterAxisAlignContent"), OutNode.Source.LayoutExtensions.CounterAxisAlignContent);
-	SetStringFieldIfPresent(NodeObj, TEXT("layoutPositioning"), OutNode.Source.LayoutExtensions.LayoutPositioning);
-	SetStringFieldIfPresent(NodeObj, TEXT("layoutAlign"), OutNode.Source.LayoutExtensions.LayoutAlign);
-	SetStringFieldIfPresent(NodeObj, TEXT("primaryAxisSizingMode"), OutNode.Source.LayoutExtensions.PrimaryAxisSizingMode);
-	SetStringFieldIfPresent(NodeObj, TEXT("counterAxisSizingMode"), OutNode.Source.LayoutExtensions.CounterAxisSizingMode);
-	SetStringFieldIfPresent(NodeObj, TEXT("gridRowsSizing"), OutNode.Source.LayoutExtensions.GridRowsSizing);
-	SetStringFieldIfPresent(NodeObj, TEXT("gridColumnsSizing"), OutNode.Source.LayoutExtensions.GridColumnsSizing);
-	SetStringFieldIfPresent(NodeObj, TEXT("gridChildHorizontalAlign"), OutNode.Source.LayoutExtensions.GridChildHorizontalAlign);
-	SetStringFieldIfPresent(NodeObj, TEXT("gridChildVerticalAlign"), OutNode.Source.LayoutExtensions.GridChildVerticalAlign);
-	SetFloatFieldIfPresent(NodeObj, TEXT("counterAxisSpacing"), OutNode.Source.LayoutExtensions.CounterAxisSpacing, OutNode.Source.LayoutExtensions.bHasCounterAxisSpacing);
-	SetFloatFieldIfPresent(NodeObj, TEXT("minWidth"), OutNode.Source.LayoutExtensions.MinWidth, OutNode.Source.LayoutExtensions.bHasMinWidth);
-	SetFloatFieldIfPresent(NodeObj, TEXT("maxWidth"), OutNode.Source.LayoutExtensions.MaxWidth, OutNode.Source.LayoutExtensions.bHasMaxWidth);
-	SetFloatFieldIfPresent(NodeObj, TEXT("minHeight"), OutNode.Source.LayoutExtensions.MinHeight, OutNode.Source.LayoutExtensions.bHasMinHeight);
-	SetFloatFieldIfPresent(NodeObj, TEXT("maxHeight"), OutNode.Source.LayoutExtensions.MaxHeight, OutNode.Source.LayoutExtensions.bHasMaxHeight);
-	SetIntFieldIfPresent(NodeObj, TEXT("gridRowCount"), OutNode.Source.LayoutExtensions.GridRowCount, OutNode.Source.LayoutExtensions.bHasGridRowCount);
-	SetIntFieldIfPresent(NodeObj, TEXT("gridColumnCount"), OutNode.Source.LayoutExtensions.GridColumnCount, OutNode.Source.LayoutExtensions.bHasGridColumnCount);
-	SetFloatFieldIfPresent(NodeObj, TEXT("gridRowGap"), OutNode.Source.LayoutExtensions.GridRowGap, OutNode.Source.LayoutExtensions.bHasGridRowGap);
-	SetFloatFieldIfPresent(NodeObj, TEXT("gridColumnGap"), OutNode.Source.LayoutExtensions.GridColumnGap, OutNode.Source.LayoutExtensions.bHasGridColumnGap);
-	SetIntFieldIfPresent(NodeObj, TEXT("gridRowSpan"), OutNode.Source.LayoutExtensions.GridRowSpan, OutNode.Source.LayoutExtensions.bHasGridRowSpan);
-	SetIntFieldIfPresent(NodeObj, TEXT("gridColumnSpan"), OutNode.Source.LayoutExtensions.GridColumnSpan, OutNode.Source.LayoutExtensions.bHasGridColumnSpan);
-	SetIntFieldIfPresent(NodeObj, TEXT("gridColumnAnchorIndex"), OutNode.Source.LayoutExtensions.GridColumnAnchorIndex, OutNode.Source.LayoutExtensions.bHasGridColumnAnchorIndex);
-	SetIntFieldIfPresent(NodeObj, TEXT("gridRowAnchorIndex"), OutNode.Source.LayoutExtensions.GridRowAnchorIndex, OutNode.Source.LayoutExtensions.bHasGridRowAnchorIndex);
-	SetBoolFieldIfPresent(NodeObj, TEXT("itemReverseZIndex"), OutNode.Source.LayoutExtensions.bItemReverseZIndex, OutNode.Source.LayoutExtensions.bHasItemReverseZIndex);
-	SetBoolFieldIfPresent(NodeObj, TEXT("strokesIncludedInLayout"), OutNode.Source.LayoutExtensions.bStrokesIncludedInLayout, OutNode.Source.LayoutExtensions.bHasStrokesIncludedInLayout);
-	SetJsonFieldIfPresent(NodeObj, TEXT("boundVariables"), OutNode.Source.LayoutExtensions.BoundVariablesJson);
+	FDesignLayoutExtensions& LayoutExtensions = OutNode.MutableSource().LayoutExtensions;
+	SetStringFieldIfPresent(NodeObj, TEXT("layoutWrap"), LayoutExtensions.LayoutWrap);
+	SetStringFieldIfPresent(NodeObj, TEXT("counterAxisAlignContent"), LayoutExtensions.CounterAxisAlignContent);
+	SetStringFieldIfPresent(NodeObj, TEXT("layoutPositioning"), LayoutExtensions.LayoutPositioning);
+	SetStringFieldIfPresent(NodeObj, TEXT("layoutAlign"), LayoutExtensions.LayoutAlign);
+	SetStringFieldIfPresent(NodeObj, TEXT("primaryAxisSizingMode"), LayoutExtensions.PrimaryAxisSizingMode);
+	SetStringFieldIfPresent(NodeObj, TEXT("counterAxisSizingMode"), LayoutExtensions.CounterAxisSizingMode);
+	SetStringFieldIfPresent(NodeObj, TEXT("gridRowsSizing"), LayoutExtensions.GridRowsSizing);
+	SetStringFieldIfPresent(NodeObj, TEXT("gridColumnsSizing"), LayoutExtensions.GridColumnsSizing);
+	SetStringFieldIfPresent(NodeObj, TEXT("gridChildHorizontalAlign"), LayoutExtensions.GridChildHorizontalAlign);
+	SetStringFieldIfPresent(NodeObj, TEXT("gridChildVerticalAlign"), LayoutExtensions.GridChildVerticalAlign);
+	SetFloatFieldIfPresent(NodeObj, TEXT("counterAxisSpacing"), LayoutExtensions.CounterAxisSpacing, LayoutExtensions.bHasCounterAxisSpacing);
+	SetFloatFieldIfPresent(NodeObj, TEXT("minWidth"), LayoutExtensions.MinWidth, LayoutExtensions.bHasMinWidth);
+	SetFloatFieldIfPresent(NodeObj, TEXT("maxWidth"), LayoutExtensions.MaxWidth, LayoutExtensions.bHasMaxWidth);
+	SetFloatFieldIfPresent(NodeObj, TEXT("minHeight"), LayoutExtensions.MinHeight, LayoutExtensions.bHasMinHeight);
+	SetFloatFieldIfPresent(NodeObj, TEXT("maxHeight"), LayoutExtensions.MaxHeight, LayoutExtensions.bHasMaxHeight);
+	SetIntFieldIfPresent(NodeObj, TEXT("gridRowCount"), LayoutExtensions.GridRowCount, LayoutExtensions.bHasGridRowCount);
+	SetIntFieldIfPresent(NodeObj, TEXT("gridColumnCount"), LayoutExtensions.GridColumnCount, LayoutExtensions.bHasGridColumnCount);
+	SetFloatFieldIfPresent(NodeObj, TEXT("gridRowGap"), LayoutExtensions.GridRowGap, LayoutExtensions.bHasGridRowGap);
+	SetFloatFieldIfPresent(NodeObj, TEXT("gridColumnGap"), LayoutExtensions.GridColumnGap, LayoutExtensions.bHasGridColumnGap);
+	SetIntFieldIfPresent(NodeObj, TEXT("gridRowSpan"), LayoutExtensions.GridRowSpan, LayoutExtensions.bHasGridRowSpan);
+	SetIntFieldIfPresent(NodeObj, TEXT("gridColumnSpan"), LayoutExtensions.GridColumnSpan, LayoutExtensions.bHasGridColumnSpan);
+	SetIntFieldIfPresent(NodeObj, TEXT("gridColumnAnchorIndex"), LayoutExtensions.GridColumnAnchorIndex, LayoutExtensions.bHasGridColumnAnchorIndex);
+	SetIntFieldIfPresent(NodeObj, TEXT("gridRowAnchorIndex"), LayoutExtensions.GridRowAnchorIndex, LayoutExtensions.bHasGridRowAnchorIndex);
+	SetBoolFieldIfPresent(NodeObj, TEXT("itemReverseZIndex"), LayoutExtensions.bItemReverseZIndex, LayoutExtensions.bHasItemReverseZIndex);
+	SetBoolFieldIfPresent(NodeObj, TEXT("strokesIncludedInLayout"), LayoutExtensions.bStrokesIncludedInLayout, LayoutExtensions.bHasStrokesIncludedInLayout);
+	SetJsonFieldIfPresent(NodeObj, TEXT("boundVariables"), LayoutExtensions.BoundVariablesJson);
 	PromoteFigmaGridLayout(OutNode);
 
 	OutNode.LayoutData.bHasPaddingRuntimeWrapDecision = true;
@@ -1772,9 +1638,9 @@ static void InitializeNodeFromFigma(
 	OutNode.Transform.bEnabled = GetBoolean(NodeObj, TEXT("visible"), true);
 	OutNode.Transform.SetOpacityValue(GetNumber(NodeObj, TEXT("opacity"), 1.0));
 	OutNode.Transform.Rotation = GetNumber(NodeObj, TEXT("rotation"));
-	OutNode.Source.ComponentInstance.bInInstanceSubtree = bInsideInstanceSubtree;
+	OutNode.MutableSource().ComponentInstance.bInInstanceSubtree = bInsideInstanceSubtree;
 	OutNode.Type = MapNodeType(FigmaType);
-	OutNode.Source.SourceNodeType = FigmaType;
+	OutNode.MutableSource().SourceNodeType = FigmaType;
 	OutNode.bReusable = (FigmaType == TEXT("COMPONENT"));
 	OutNode.Metadata.Add(TEXT("source.provider"), TEXT("figma"));
 	ApplyRelativeTransformFlipData(NodeObj, OutNode);
@@ -1790,21 +1656,22 @@ static void ApplyInstanceTrackingData(
 		return;
 	}
 
-	OutNode.Source.ComponentInstance.bIsInstance = true;
-	OutNode.Source.ComponentInstance.bInInstanceSubtree = true;
+	FDesignComponentInstanceData& ComponentInstance = OutNode.MutableSource().ComponentInstance;
+	ComponentInstance.bIsInstance = true;
+	ComponentInstance.bInInstanceSubtree = true;
 	const FString ComponentId = GetString(NodeObj, TEXT("componentId"));
 	if (!ComponentId.IsEmpty())
 	{
 		OutNode.Ref = ComponentId;
-		OutNode.Source.ComponentInstance.ComponentId = ComponentId;
+		ComponentInstance.ComponentId = ComponentId;
 		OutNode.Metadata.Add(TEXT("instanceComponentId"), ComponentId);
 	}
-	SetStringFieldIfPresent(NodeObj, TEXT("componentSetId"), OutNode.Source.ComponentInstance.ComponentSetId);
-	SetStringFieldIfPresent(NodeObj, TEXT("mainComponentKey"), OutNode.Source.ComponentInstance.MainComponentKey);
-	SetJsonFieldIfPresent(NodeObj, TEXT("componentProperties"), OutNode.Source.ComponentInstance.ComponentPropertiesJson);
-	SetJsonFieldIfPresent(NodeObj, TEXT("variantProperties"), OutNode.Source.ComponentInstance.VariantPropertiesJson);
-	SetJsonFieldIfPresent(NodeObj, TEXT("overrides"), OutNode.Source.ComponentInstance.OverridesJson);
-	SetBoolFieldIfPresent(NodeObj, TEXT("isExposedInstance"), OutNode.Source.ComponentInstance.bIsExposedInstance, OutNode.Source.ComponentInstance.bHasIsExposedInstance);
+	SetStringFieldIfPresent(NodeObj, TEXT("componentSetId"), ComponentInstance.ComponentSetId);
+	SetStringFieldIfPresent(NodeObj, TEXT("mainComponentKey"), ComponentInstance.MainComponentKey);
+	SetJsonFieldIfPresent(NodeObj, TEXT("componentProperties"), ComponentInstance.ComponentPropertiesJson);
+	SetJsonFieldIfPresent(NodeObj, TEXT("variantProperties"), ComponentInstance.VariantPropertiesJson);
+	SetJsonFieldIfPresent(NodeObj, TEXT("overrides"), ComponentInstance.OverridesJson);
+	SetBoolFieldIfPresent(NodeObj, TEXT("isExposedInstance"), ComponentInstance.bIsExposedInstance, ComponentInstance.bHasIsExposedInstance);
 }
 
 static void ParseNodeVisualData(
@@ -1819,7 +1686,7 @@ static void ParseNodeVisualData(
 		const FString VectorRasterFallback = ExtractSyntheticVectorRasterImageRef(*FillsArr);
 		if (!VectorRasterFallback.IsEmpty())
 		{
-			OutNode.Source.VectorRasterFallbackImageRef = VectorRasterFallback;
+			OutNode.MutableSource().VectorRasterFallbackImageRef = VectorRasterFallback;
 		}
 	}
 	CaptureRenderFallbackMetadata(NodeObj, OutNode);
@@ -1875,7 +1742,7 @@ static void ParseNodeChildren(
 			ChildObj,
 			NodeObj,
 			SkippedDesignerNodes,
-			OutNode.Source.ComponentInstance.bIsInstance || OutNode.Source.ComponentInstance.bInInstanceSubtree))
+			OutNode.Source().ComponentInstance.bIsInstance || OutNode.Source().ComponentInstance.bInInstanceSubtree))
 		{
 			OutNode.Children.Add(ChildNode);
 		}
@@ -1920,7 +1787,7 @@ TSharedPtr<FDesignNode> ParseNode(
 
 	// Layout (for containers)
 	ParseLayout(NodeObj, *Node);
-	ParsePrototypeNodeData(NodeObj, Node->Source.Prototype);
+	ParsePrototypeNodeData(NodeObj, Node->MutableSource().Prototype);
 	ParseNodeVisualData(NodeObj, *Node);
 	ParseNodeChildren(NodeObj, FigmaType, bParentAutoLayout, SkippedDesignerNodes, *Node);
 
@@ -2017,10 +1884,10 @@ bool ParseDocument(const FString& FigmaJson, FDesignDocument& OutDocument)
 	CaptureDocumentMetadata(Root);
 	AddJsonExtensionIfPresent(Root, OutDocument.Metadata, TEXT("components"), TEXT("components"));
 	AddJsonExtensionIfPresent(Root, OutDocument.Metadata, TEXT("componentSets"), TEXT("componentSets"));
-	SetJsonFieldIfPresent(Root, TEXT("components"), OutDocument.SourceDocument.ComponentsJson);
-	SetJsonFieldIfPresent(Root, TEXT("componentSets"), OutDocument.SourceDocument.ComponentSetsJson);
-	MergePrototypeDocumentData(DocObj, OutDocument.SourceDocument);
-	MergePrototypeDocumentData(Root, OutDocument.SourceDocument);
+	SetJsonFieldIfPresent(Root, TEXT("components"), OutDocument.MutableSourceDocument().ComponentsJson);
+	SetJsonFieldIfPresent(Root, TEXT("componentSets"), OutDocument.MutableSourceDocument().ComponentSetsJson);
+	MergePrototypeDocumentData(DocObj, OutDocument.MutableSourceDocument());
+	MergePrototypeDocumentData(Root, OutDocument.MutableSourceDocument());
 
 	// Standard file payload: DOCUMENT -> pages -> frames.
 	if (DocType == TEXT("DOCUMENT"))
@@ -2043,7 +1910,7 @@ bool ParseDocument(const FString& FigmaJson, FDesignDocument& OutDocument)
 			for (const auto& FrameVal : *Frames)
 			{
 				auto FrameObj = FrameVal->AsObject();
-				if (auto Node = ParseNode(FrameObj, nullptr, &OutDocument.ParseDiagnostics.SkippedDesignerNodes, false))
+				if (auto Node = ParseNode(FrameObj, nullptr, &OutDocument.MutableParseDiagnostics().SkippedDesignerNodes, false))
 					OutDocument.Children.Add(Node);
 			}
 		}
@@ -2057,14 +1924,14 @@ bool ParseDocument(const FString& FigmaJson, FDesignDocument& OutDocument)
 			for (const auto& FrameVal : *Frames)
 			{
 				auto FrameObj = FrameVal->AsObject();
-				if (auto Node = ParseNode(FrameObj, nullptr, &OutDocument.ParseDiagnostics.SkippedDesignerNodes, false))
+				if (auto Node = ParseNode(FrameObj, nullptr, &OutDocument.MutableParseDiagnostics().SkippedDesignerNodes, false))
 					OutDocument.Children.Add(Node);
 			}
 		}
 	}
 	else
 	{
-		if (auto Node = ParseNode(DocObj, nullptr, &OutDocument.ParseDiagnostics.SkippedDesignerNodes, false))
+		if (auto Node = ParseNode(DocObj, nullptr, &OutDocument.MutableParseDiagnostics().SkippedDesignerNodes, false))
 			OutDocument.Children.Add(Node);
 	}
 
@@ -2122,10 +1989,10 @@ void CollectImageRefsRecursive(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSe
 			if (F.IsImage() && !F.Image.Url.IsEmpty())
 				OutRefs.Add(F.Image.Url);
 		}
-		if (!Node->Source.VectorRasterFallbackImageRef.IsEmpty())
-			OutRefs.Add(Node->Source.VectorRasterFallbackImageRef);
-		if (!Node->Source.RenderFallback.ImageRef.IsEmpty())
-			OutRefs.Add(Node->Source.RenderFallback.ImageRef);
+		if (!Node->Source().VectorRasterFallbackImageRef.IsEmpty())
+			OutRefs.Add(Node->Source().VectorRasterFallbackImageRef);
+		if (!Node->Source().RenderFallback.ImageRef.IsEmpty())
+			OutRefs.Add(Node->Source().RenderFallback.ImageRef);
 		CollectImageRefsRecursive(Node->Children, OutRefs);
 	}
 }
@@ -2155,18 +2022,18 @@ void ApplyImageUrlsRecursive(TArray<TSharedPtr<FDesignNode>>& Nodes, const TMap<
 					F.Image.Url = *Url;
 			}
 		}
-		if (!Node->Source.VectorRasterFallbackImageRef.IsEmpty())
+		if (!Node->Source().VectorRasterFallbackImageRef.IsEmpty())
 		{
-			if (const FString* Url = Map.Find(Node->Source.VectorRasterFallbackImageRef))
+			if (const FString* Url = Map.Find(Node->Source().VectorRasterFallbackImageRef))
 			{
-				Node->Source.VectorRasterFallbackImageRef = *Url;
+				Node->MutableSource().VectorRasterFallbackImageRef = *Url;
 			}
 		}
-		if (!Node->Source.RenderFallback.ImageRef.IsEmpty())
+		if (!Node->Source().RenderFallback.ImageRef.IsEmpty())
 		{
-			if (const FString* Url = Map.Find(Node->Source.RenderFallback.ImageRef))
+			if (const FString* Url = Map.Find(Node->Source().RenderFallback.ImageRef))
 			{
-				Node->Source.RenderFallback.ImageRef = *Url;
+				Node->MutableSource().RenderFallback.ImageRef = *Url;
 			}
 		}
 		ApplyImageUrlsRecursive(Node->Children, Map);

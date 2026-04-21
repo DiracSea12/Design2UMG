@@ -5,7 +5,8 @@
 
 void FWidgetMetadataCollector::TryAppend(UWidget* Widget, const FUMGWidgetNode& Node, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* Records)
 {
-	if (!Widget || !Records || !Node.Source.HasAnyComponentSemantics())
+	const FUMGSourceNodeData& SourceNode = Node.Source();
+	if (!Widget || !Records || !SourceNode.HasAnyComponentSemantics())
 	{
 		return;
 	}
@@ -13,7 +14,7 @@ void FWidgetMetadataCollector::TryAppend(UWidget* Widget, const FUMGWidgetNode& 
 	FDesign2UMGFigmaWidgetMetadataRecord Record;
 	Record.WidgetName = Widget->GetFName();
 	Record.WidgetId = Node.Id;
-	Record.SourceNode = Node.Source;
+	Record.SourceNode = SourceNode;
 	if (Record.IsValid())
 	{
 		Records->Add(Record);

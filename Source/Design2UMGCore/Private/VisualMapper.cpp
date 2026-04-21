@@ -2,7 +2,6 @@
 
 #include "VisualMapper.h"
 #include "ImageFillUtils.h"
-#include "Design2UMGSettings.h"
 #include "LayoutMapper.h"
 #include "Design2UMGLog.h"
 #include "UMGPropertyKeys.h"
@@ -44,14 +43,6 @@ namespace
 		const float Width = FMath::Max(1.0f, Node->Transform.Width.Value);
 		const float Height = FMath::Max(1.0f, Node->Transform.Height.Value);
 		return FVector2D(OffsetX / Width, OffsetY / Height);
-	}
-
-	float GetLuminosityFitOpacityCap()
-	{
-		const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
-		return Settings
-			? Settings->ResolveLuminosityFitOpacityCap()
-			: UDesign2UMGSettings::CanonicalLuminosityFitOpacityCap;
 	}
 
 	float GetStrokeSideThickness(const FDesignStrokeThickness& Thickness, TCHAR Side)
@@ -537,12 +528,15 @@ namespace
 		}
 	}
 
-	void ApplyMultiFillImageChildOpacity(FUMGWidgetNode& ImageChild, const FDesignFill& Fill)
+	void ApplyMultiFillImageChildOpacity(
+		FUMGWidgetNode& ImageChild,
+		const FDesignFill& Fill,
+		const FVisualMapperOptions& Options)
 	{
 		const bool bLuminosityFit = Fill.BlendMode.Equals(TEXT("LUMINOSITY"), ESearchCase::IgnoreCase);
 		if (bLuminosityFit)
 		{
-			const float EffectiveOpacity = FMath::Min(Fill.Image.Opacity, GetLuminosityFitOpacityCap());
+			const float EffectiveOpacity = FMath::Min(Fill.Image.Opacity, Options.LuminosityFitOpacityCap);
 			ImageChild.Render.RenderOpacity = EffectiveOpacity;
 			ImageChild.Render.bHasRenderOpacity = true;
 		}
@@ -558,7 +552,8 @@ namespace
 		const FUMGWidgetNode& Widget,
 		const TSharedPtr<FDesignNode>& Node,
 		const FDesignFill& Fill,
-		int32 FillIndex)
+		int32 FillIndex,
+		const FVisualMapperOptions& Options)
 	{
 		if (!Fill.bEnabled || Fill.Type == EDesignFillType::None)
 		{
@@ -610,7 +605,7 @@ namespace
 			ImageChild.Brush.TexturePath = Fill.Image.Url;
 			ImageChild.Brush.Image.TexturePath = Fill.Image.Url;
 			ImageChild.Brush.Image.bHasTexturePath = true;
-			ApplyMultiFillImageChildOpacity(ImageChild, Fill);
+			ApplyMultiFillImageChildOpacity(ImageChild, Fill, Options);
 			if (bSquareNode)
 			{
 				AddTextureSizeHints(ImageChild, Node);
@@ -1328,7 +1323,10 @@ FUMGWidgetNode FVisualMapper::WrapWithBoxShadow(
 	return Wrapper;
 }
 
-FUMGWidgetNode FVisualMapper::WrapWithMultiFill(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node)
+FUMGWidgetNode FVisualMapper::WrapWithMultiFill(
+	FUMGWidgetNode&& Widget,
+	const TSharedPtr<FDesignNode>& Node,
+	const FVisualMapperOptions& Options)
 {
 	if (!Node.IsValid() || Node->Visual.Fills.Num() <= 1)
 		return MoveTemp(Widget);
@@ -1338,7 +1336,7 @@ FUMGWidgetNode FVisualMapper::WrapWithMultiFill(FUMGWidgetNode&& Widget, const T
 	{
 		const FDesignFill& Fill = Node->Visual.Fills[i];
 		FUMGWidgetNode Layer = MakeMultiFillLayerShell(Widget, i);
-		if (!TryBuildMultiFillLayer(Layer, Widget, Node, Fill, i))
+		if (!TryBuildMultiFillLayer(Layer, Widget, Node, Fill, i, Options))
 		{
 			continue;
 		}
