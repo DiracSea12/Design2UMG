@@ -13,10 +13,6 @@
 #include "UMGSchema.h"
 #include "UMGWidgetNodeAccess.h"
 
-#include "Interfaces/IPluginManager.h"
-#include "Misc/FileHelper.h"
-#include "Misc/Paths.h"
-
 #if WITH_AUTOMATION_WORKER
 namespace
 {
@@ -232,6 +228,77 @@ namespace
 		bool bAllPassed = true;
 		bAllPassed &= RunSharedSemanticsSkipParityChecks(Test);
 		bAllPassed &= RunSharedSemanticsWidthHintChecks(Test);
+		return bAllPassed;
+	}
+
+	bool RunConverterOwnerBoundaryChecks(FAutomationTestBase& Test)
+	{
+		FDesignDocument Doc;
+
+		TSharedPtr<FDesignNode> ReusableCard = MakeSharedSemanticsNode(
+			TEXT("reusable_card"),
+			EDesignNodeType::Rectangle,
+			FDesignSize::Fixed(60.0f),
+			FDesignSize::Fixed(20.0f));
+		ReusableCard->bReusable = true;
+		ReusableCard->Visual.Fill = FDesignFill::FromColor(TEXT("#AA3344"));
+		Doc.Children.Add(ReusableCard);
+
+		TSharedPtr<FDesignNode> Screen = MakeSharedSemanticsNode(
+			TEXT("child_preparation_screen"),
+			EDesignNodeType::Frame,
+			FDesignSize::Fixed(200.0f),
+			FDesignSize::Fixed(40.0f));
+		Screen->LayoutData.Layout = EDesignLayout::Horizontal;
+		Screen->LayoutData.Gap = 10.0f;
+
+		TSharedPtr<FDesignNode> RefChild = MakeShared<FDesignNode>();
+		RefChild->Id = TEXT("reusable_card_instance");
+		RefChild->Name = TEXT("reusable_card_instance");
+		RefChild->Type = EDesignNodeType::Ref;
+		RefChild->Ref = TEXT("reusable_card");
+
+		TSharedPtr<FDesignNode> FillChild = MakeSharedSemanticsNode(
+			TEXT("fill_sibling"),
+			EDesignNodeType::Rectangle,
+			FDesignSize::Fill(0.0f),
+			FDesignSize::Fill(0.0f));
+		FillChild->Visual.Fill = FDesignFill::FromColor(TEXT("#33AA44"));
+
+		Screen->Children.Add(RefChild);
+		Screen->Children.Add(FillChild);
+		Doc.Children.Add(Screen);
+
+		const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+		const FUMGWidgetNode* ScreenWidget = FindWidgetByIdRecursive(Data.RootWidget, TEXT("child_preparation_screen"));
+		if (!Test.TestNotNull(TEXT("Converted screen widget exists"), ScreenWidget))
+		{
+			return false;
+		}
+
+		const FUMGWidgetNode* RefWidget = FindWidgetByIdRecursive(Data.RootWidget, TEXT("reusable_card_instance"));
+		if (!Test.TestNotNull(TEXT("Expanded ref child widget exists"), RefWidget))
+		{
+			return false;
+		}
+
+		const FUMGWidgetNode* FillWidget = FindWidgetByIdRecursive(Data.RootWidget, TEXT("fill_sibling"));
+		if (!Test.TestNotNull(TEXT("Fill sibling widget exists"), FillWidget))
+		{
+			return false;
+		}
+
+		bool bAllPassed = true;
+		bAllPassed &= Test.TestTrue(TEXT("Reusable definition stays out of render tree"), FindWidgetByIdRecursive(Data.RootWidget, TEXT("reusable_card")) == nullptr);
+		bAllPassed &= Test.TestTrue(TEXT("Expanded ref child keeps authored width"),
+			FMath::IsNearlyEqual(RefWidget->Bounds.W, 60.0f, KINDA_SMALL_NUMBER));
+		bAllPassed &= Test.TestTrue(TEXT("Expanded ref child keeps authored height"),
+			FMath::IsNearlyEqual(RefWidget->Bounds.H, 20.0f, KINDA_SMALL_NUMBER));
+		bAllPassed &= Test.TestEqual(TEXT("Screen still appends both visible children"), ScreenWidget->Children.Num(), 2);
+		bAllPassed &= Test.TestTrue(TEXT("Expanded ref width should be consumed before resolving fill sibling width"),
+			FMath::IsNearlyEqual(FillWidget->Bounds.W, 130.0f, KINDA_SMALL_NUMBER));
+		bAllPassed &= Test.TestTrue(TEXT("Cross-axis fill sizing should still respect parent height"),
+			FMath::IsNearlyEqual(FillWidget->Bounds.H, 40.0f, KINDA_SMALL_NUMBER));
 		return bAllPassed;
 	}
 
@@ -628,6 +695,14 @@ bool FTextWidgetBuilderSharedPathSettingsBoundaryTest::RunTest(const FString& Pa
 		FString(TEXT("[snapshot-placeholder]")));
 	TestFalse(TEXT("Injected snapshot should not silently fall back to the global placeholder"),
 		Result.Widget.Text.Text.Equals(TEXT("[global-placeholder]"), ESearchCase::CaseSensitive));
+
+	const Design2UMGTextWidgetBuilder::FIconFontBuildResult MissingSnapshotResult =
+		Design2UMGTextWidgetBuilder::CreateIconFontWidget(Node);
+	TestTrue(TEXT("Missing snapshot should now fail explicitly"), MissingSnapshotResult.bMissingSettingsSnapshot);
+	TestTrue(TEXT("Missing snapshot path should not silently build a text widget"), MissingSnapshotResult.Widget.Type.IsEmpty());
+	TestTrue(TEXT("Missing snapshot path should emit a boundary warning"),
+		MissingSnapshotResult.Warnings.Num() == 1
+		&& MissingSnapshotResult.Warnings[0].Contains(TEXT("requires an explicit settings snapshot")));
 	return true;
 }
 
@@ -636,90 +711,15 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConverterChildPreparationOwnerBoundaryTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FConverterChildPreparationOwnerBoundaryTest::RunTest(const FString& Parameters)
 {
-	FDesignDocument Doc;
-
-	TSharedPtr<FDesignNode> ReusableCard = MakeSharedSemanticsNode(
-		TEXT("reusable_card"),
-		EDesignNodeType::Rectangle,
-		FDesignSize::Fixed(60.0f),
-		FDesignSize::Fixed(20.0f));
-	ReusableCard->bReusable = true;
-	ReusableCard->Visual.Fill = FDesignFill::FromColor(TEXT("#AA3344"));
-	Doc.Children.Add(ReusableCard);
-
-	TSharedPtr<FDesignNode> Screen = MakeSharedSemanticsNode(
-		TEXT("child_preparation_screen"),
-		EDesignNodeType::Frame,
-		FDesignSize::Fixed(200.0f),
-		FDesignSize::Fixed(40.0f));
-	Screen->LayoutData.Layout = EDesignLayout::Horizontal;
-	Screen->LayoutData.Gap = 10.0f;
-
-	TSharedPtr<FDesignNode> RefChild = MakeShared<FDesignNode>();
-	RefChild->Id = TEXT("reusable_card_instance");
-	RefChild->Name = TEXT("reusable_card_instance");
-	RefChild->Type = EDesignNodeType::Ref;
-	RefChild->Ref = TEXT("reusable_card");
-
-	TSharedPtr<FDesignNode> FillChild = MakeSharedSemanticsNode(
-		TEXT("fill_sibling"),
-		EDesignNodeType::Rectangle,
-		FDesignSize::Fill(0.0f),
-		FDesignSize::Fill(0.0f));
-	FillChild->Visual.Fill = FDesignFill::FromColor(TEXT("#33AA44"));
-
-	Screen->Children.Add(RefChild);
-	Screen->Children.Add(FillChild);
-	Doc.Children.Add(Screen);
-
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
-	const FUMGWidgetNode* FillWidget = FindWidgetByIdRecursive(Data.RootWidget, TEXT("fill_sibling"));
-	if (!TestNotNull(TEXT("Fill sibling widget exists"), FillWidget))
-	{
-		return false;
-	}
-
-	TestTrue(TEXT("Expanded ref width should be consumed before resolving fill sibling width"),
-		FMath::IsNearlyEqual(FillWidget->Bounds.W, 130.0f, KINDA_SMALL_NUMBER));
-	TestTrue(TEXT("Cross-axis fill sizing should still respect parent height"),
-		FMath::IsNearlyEqual(FillWidget->Bounds.H, 40.0f, KINDA_SMALL_NUMBER));
-	return true;
+	return RunConverterOwnerBoundaryChecks(*this);
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConverterPrivateOwnerStructureGuardTest,
-	"Design2UMG.Converter.PrivateOwnerStructureGuard",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConverterOwnerBoundaryExecutableGuardTest,
+	"Design2UMG.Converter.OwnerBoundaryExecutableGuard",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FConverterPrivateOwnerStructureGuardTest::RunTest(const FString& Parameters)
+bool FConverterOwnerBoundaryExecutableGuardTest::RunTest(const FString& Parameters)
 {
-	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
-	TestTrue(TEXT("Design2UMG plugin exists for converter owner guard"), Plugin.IsValid());
-	if (!Plugin.IsValid())
-	{
-		return false;
-	}
-
-	const FString ConverterSourcePath = FPaths::Combine(
-		Plugin->GetBaseDir(),
-		TEXT("Source/Design2UMGCore/Private/Design2UMGConverter.cpp"));
-	FString ConverterSource;
-	TestTrue(TEXT("Load Design2UMGConverter.cpp for owner guard"), FFileHelper::LoadFileToString(ConverterSource, *ConverterSourcePath));
-	if (ConverterSource.IsEmpty())
-	{
-		return false;
-	}
-
-	TestTrue(TEXT("Converter defines node orchestration owner"), ConverterSource.Contains(TEXT("struct FNodeConversionOrchestrator")));
-	TestTrue(TEXT("Converter defines expanded-node resolver owner"), ConverterSource.Contains(TEXT("struct FExpandedNodeResolver")));
-	TestTrue(TEXT("Converter defines flow child preparation owner"), ConverterSource.Contains(TEXT("struct FFlowChildPreparation")));
-	TestTrue(TEXT("Converter defines child append owner"), ConverterSource.Contains(TEXT("struct FNodeChildAppender")));
-	TestTrue(TEXT("Convert entry uses node orchestration owner"), ConverterSource.Contains(TEXT("const FNodeConversionOrchestrator NodeOrchestrator(RootContext);")));
-
-	TestFalse(TEXT("Legacy free ConvertNode forward declaration removed"),
-		ConverterSource.Contains(TEXT("FUMGWidgetNode ConvertNode(const TSharedPtr<FDesignNode>& Node, const FConversionContext& Context, EDesignLayout ParentLayout = EDesignLayout::None);")));
-	TestFalse(TEXT("Legacy free child preparation declaration removed"),
-		ConverterSource.Contains(TEXT("void PreResolveFlowChildren(const TSharedPtr<FDesignNode>& Node, const FUMGWidgetNode& Widget, const TArray<TSharedPtr<FDesignNode>>& VisibleChildren, const FConversionContext& Context);")));
-	TestFalse(TEXT("Legacy free child append declaration removed"),
-		ConverterSource.Contains(TEXT("void AppendConvertedChildren(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node, const TArray<TSharedPtr<FDesignNode>>& VisibleChildren, const FConversionContext& Context);")));
-	return true;
+	AddInfo(TEXT("This executable guard replaces the retired converter source-text structure guard."));
+	return RunConverterOwnerBoundaryChecks(*this);
 }
 #endif

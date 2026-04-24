@@ -169,6 +169,7 @@ Design2UMGNodeWidgetFactory::FBuildResult Design2UMGNodeWidgetFactory::CreateWid
 			Design2UMGTextWidgetBuilder::FIconFontBuildResult IconFontResult =
 				Design2UMGTextWidgetBuilder::CreateIconFontWidget(Node, IconFontArgs);
 			Result.Widget = MoveTemp(IconFontResult.Widget);
+			Result.Warnings.Append(IconFontResult.Warnings);
 			Result.NewlyWarnedFamilies = MoveTemp(IconFontResult.NewlyWarnedFamilies);
 			Result.PrunedInvalidMappings = MoveTemp(IconFontResult.PrunedInvalidMappings);
 			Result.PendingIconFontMappings = MoveTemp(IconFontResult.PendingIconFontMappings);

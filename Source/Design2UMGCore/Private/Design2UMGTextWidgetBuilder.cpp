@@ -452,11 +452,24 @@ Design2UMGTextWidgetBuilder::FIconFontBuildResult Design2UMGTextWidgetBuilder::C
 	const FIconFontBuildArgs& Args)
 {
 	FIconFontBuildResult Result;
+	if (Args.SettingsSnapshot == nullptr)
+	{
+		const FString NodeLabel =
+			Node.IsValid()
+				? (Node->Name.IsEmpty() ? Node->Id : Node->Name)
+				: FString(TEXT("<invalid>"));
+		const FString Warning = FString::Printf(
+			TEXT("Icon-font node '%s' requires an explicit settings snapshot; silent EmptySettingsSnapshot fallback is retired."),
+			*NodeLabel);
+		Result.Warnings.Add(Warning);
+		Result.bMissingSettingsSnapshot = true;
+		UE_LOG(LogDesign2UMG, Warning, TEXT("%s"), *Warning);
+		return Result;
+	}
+
 	FUMGWidgetNode& Widget = Result.Widget;
 	Widget.Type = TEXT("TextBlock");
-	const FIconFontSettingsSnapshot EmptySettingsSnapshot;
-	const FIconFontSettingsSnapshot& SettingsSnapshot =
-		Args.SettingsSnapshot != nullptr ? *Args.SettingsSnapshot : EmptySettingsSnapshot;
+	const FIconFontSettingsSnapshot& SettingsSnapshot = *Args.SettingsSnapshot;
 
 	const auto ResolveIconTypefaceWeightToken = [](const TSharedPtr<FDesignNode>& InNode, bool bUsingFallbackFontAsset)
 	{

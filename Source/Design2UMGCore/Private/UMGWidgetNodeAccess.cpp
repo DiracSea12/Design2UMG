@@ -521,39 +521,6 @@ namespace
 			|| TryGetScrollBoxTypedWidgetString(Node, KeyString, OutValue);
 	}
 
-	bool TryGetLegacyOwnedBrushWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue)
-	{
-		if (KeyString == UMGPropertyKeys::MaterialRef)
-		{
-			if (Node.Brush.bHasMaterialRef || !Node.Brush.MaterialRef.IsEmpty())
-			{
-				OutValue = Node.Brush.MaterialRef;
-				return true;
-			}
-
-			return false;
-		}
-
-		if (KeyString == UMGPropertyKeys::TexturePath)
-		{
-			if (!Node.Brush.TexturePath.IsEmpty())
-			{
-				OutValue = Node.Brush.TexturePath;
-				return true;
-			}
-
-			if (Node.Brush.Image.bHasTexturePath && !Node.Brush.Image.TexturePath.IsEmpty())
-			{
-				OutValue = Node.Brush.Image.TexturePath;
-				return true;
-			}
-
-			return false;
-		}
-
-		return false;
-	}
-
 	bool TryParseWidgetVector4String(const FString& Value, FVector4& OutValue)
 	{
 		TArray<FString> Parts;
@@ -746,9 +713,7 @@ bool Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(const FUMGWidgetNode& N
 
 bool Design2UMGWidgetNodeAccess::TryGetWidgetString(const FUMGWidgetNode& Node, const TCHAR* Key, FString& OutValue)
 {
-	const FString KeyString(Key);
-	return ::TryGetLegacyOwnedBrushWidgetString(Node, KeyString, OutValue)
-		|| ::TryGetTypedWidgetString(Node, Key, OutValue);
+	return ::TryGetTypedWidgetString(Node, Key, OutValue);
 }
 
 bool Design2UMGWidgetNodeAccess::HasWidgetString(const FUMGWidgetNode& Node, const TCHAR* Key)

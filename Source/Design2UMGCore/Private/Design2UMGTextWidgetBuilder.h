@@ -30,9 +30,11 @@ namespace Design2UMGTextWidgetBuilder
 	struct FIconFontBuildResult
 	{
 		FUMGWidgetNode Widget;
+		TArray<FString> Warnings;
 		TSet<FString> NewlyWarnedFamilies;
 		TSet<FString> PrunedInvalidMappings;
 		TMap<FString, FString> PendingIconFontMappings;
+		bool bMissingSettingsSnapshot = false;
 	};
 
 	FUMGWidgetNode CreateTextWidget(const TSharedPtr<FDesignNode>& Node);

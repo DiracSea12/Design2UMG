@@ -1501,24 +1501,43 @@ bool FBrushDescriptorPrecedenceContractTest::RunTest(const FString& Parameters)
 	FString MaterialRef;
 	TestTrue(TEXT("Brush typed string resolves material ref"), Design2UMGWidgetNodeAccess::TryGetBrushTypedWidgetString(Node, UMGPropertyKeys::MaterialRef, MaterialRef));
 	TestEqual(TEXT("Gradient-derived material ref takes precedence"), MaterialRef, FString(TEXT("angulargradient")));
+	FString PublicMaterialRef;
+	TestTrue(TEXT("Public getter resolves material ref through the same precedence"), Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::MaterialRef, PublicMaterialRef));
+	TestEqual(TEXT("Public getter material ref matches typed precedence"), PublicMaterialRef, MaterialRef);
 
 	FString TexturePath;
 	TestTrue(TEXT("Brush typed string resolves texture path"), Design2UMGWidgetNodeAccess::TryGetBrushTypedWidgetString(Node, UMGPropertyKeys::TexturePath, TexturePath));
 	TestEqual(TEXT("Descriptor-backed image texture path takes precedence"), TexturePath, FString(TEXT("/Game/UI/T_DescriptorBrush.T_DescriptorBrush")));
+	FString PublicTexturePath;
+	TestTrue(TEXT("Public getter resolves texture path through the same precedence"), Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::TexturePath, PublicTexturePath));
+	TestEqual(TEXT("Public getter texture path matches typed precedence"), PublicTexturePath, TexturePath);
 
 	FUMGPropertyBag TypedProperties = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
 	FString BagMaterialRef;
 	TestTrue(TEXT("Typed property bag keeps precedence-selected material ref"), TypedProperties.TryGetString(UMGPropertyKeys::MaterialRef, BagMaterialRef));
 	TestEqual(TEXT("Typed property bag material ref matches precedence contract"), BagMaterialRef, MaterialRef);
+	FString BagTexturePath;
+	TestTrue(TEXT("Typed property bag keeps precedence-selected texture path"), TypedProperties.TryGetString(UMGPropertyKeys::TexturePath, BagTexturePath));
+	TestEqual(TEXT("Typed property bag texture path matches precedence contract"), BagTexturePath, TexturePath);
 
 	Node.Brush.Gradient = FUMGVisualBrushData::FGradientData();
 	TestTrue(TEXT("Explicit material ref remains after removing gradient"), Design2UMGWidgetNodeAccess::TryGetBrushTypedWidgetString(Node, UMGPropertyKeys::MaterialRef, MaterialRef));
 	TestEqual(TEXT("Explicit material ref becomes fallback owner"), MaterialRef, FString(TEXT("roundedrect")));
+	TestTrue(TEXT("Public getter falls back to explicit material ref once gradient is removed"), Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::MaterialRef, PublicMaterialRef));
+	TestEqual(TEXT("Public getter explicit material ref matches typed fallback"), PublicMaterialRef, MaterialRef);
 
 	Node.Brush.Image.TexturePath.Empty();
 	Node.Brush.Image.bHasTexturePath = false;
 	TestTrue(TEXT("Legacy texture path remains after removing descriptor texture"), Design2UMGWidgetNodeAccess::TryGetBrushTypedWidgetString(Node, UMGPropertyKeys::TexturePath, TexturePath));
 	TestEqual(TEXT("Legacy texture path becomes fallback owner"), TexturePath, FString(TEXT("/Game/UI/T_LegacyBrush.T_LegacyBrush")));
+	TestTrue(TEXT("Public getter falls back to legacy texture path once descriptor texture is removed"), Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::TexturePath, PublicTexturePath));
+	TestEqual(TEXT("Public getter legacy texture path matches typed fallback"), PublicTexturePath, TexturePath);
+
+	TypedProperties = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
+	TestTrue(TEXT("Typed property bag keeps explicit material ref after gradient removal"), TypedProperties.TryGetString(UMGPropertyKeys::MaterialRef, BagMaterialRef));
+	TestEqual(TEXT("Typed property bag explicit material ref matches typed fallback"), BagMaterialRef, MaterialRef);
+	TestTrue(TEXT("Typed property bag keeps legacy texture path after descriptor removal"), TypedProperties.TryGetString(UMGPropertyKeys::TexturePath, BagTexturePath));
+	TestEqual(TEXT("Typed property bag legacy texture path matches typed fallback"), BagTexturePath, TexturePath);
 	return true;
 }
 
