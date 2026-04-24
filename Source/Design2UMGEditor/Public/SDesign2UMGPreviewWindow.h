@@ -31,6 +31,8 @@ public:
 	virtual ~SDesign2UMGPreviewWindow();
 
 private:
+	friend struct FDesign2UMGPreviewWindowTestAccess;
+
 	TSharedPtr<SMultiLineEditableTextBox> JsonEditor;
 	TSharedPtr<SEditableTextBox> OutputPathBox;
 	TSharedPtr<SBox> UMGPreviewContainer;

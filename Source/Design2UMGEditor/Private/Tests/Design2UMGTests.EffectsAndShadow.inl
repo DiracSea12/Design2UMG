@@ -382,6 +382,34 @@ bool FInnerShadowRetainerMaterialApplicationTest::RunTest(const FString& Paramet
 	Node.Effect.bHasEffectOffset = true;
 	Node.Effect.EffectBlurUVStep = FVector2D(0.01f, 0.02f);
 	Node.Effect.bHasEffectBlurUVStep = true;
+
+	FUMGPropertyBag TypedProperties = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
+	FLinearColor TypedEffectColor = FLinearColor::Transparent;
+	const FLinearColor SerializedEffectColor =
+		FUMGValueParser::ParseColor(Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Effect.EffectColor));
+	TestTrue(TEXT("Typed retainer payload keeps EffectColor without serialization drift"),
+		TypedProperties.TryGetColor(UMGPropertyKeys::EffectColor, TypedEffectColor)
+		&& TypedEffectColor.Equals(SerializedEffectColor, 0.0001f));
+
+	URetainerBox* PayloadWidget = NewObject<URetainerBox>(GetTransientPackageAsObject());
+	TestTrue(TEXT("Typed payload RetainerBox created"), PayloadWidget != nullptr);
+	if (!PayloadWidget)
+	{
+		return false;
+	}
+
+	FUMGWidgetUtils::ApplyWidgetProperties(PayloadWidget, TypedProperties);
+	UMaterialInstanceDynamic* PayloadEffect = PayloadWidget->GetEffectMaterial();
+	TestTrue(TEXT("Typed payload dynamic effect material created"), PayloadEffect != nullptr);
+	if (!PayloadEffect)
+	{
+		return false;
+	}
+
+	const FLinearColor PayloadInnerShadowColor = PayloadEffect->K2_GetVectorParameterValue(TEXT("InnerShadowColor"));
+	TestTrue(TEXT("Typed payload inner shadow color follows serialized payload color"),
+		PayloadInnerShadowColor.Equals(SerializedEffectColor, 0.0001f));
+
 	FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node);
 
 	UMaterialInstanceDynamic* DynamicEffect = Widget->GetEffectMaterial();
@@ -451,6 +479,8 @@ bool FTextBlockUsesTypedTextPayloadParityTest::RunTest(const FString& Parameters
 	Node.Shadow.bHasShadowColorAndOpacity = true;
 
 	const FUMGPropertyBag TypedProperties = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
+	const FLinearColor SerializedNodeColor =
+		FUMGValueParser::ParseColor(Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Text.Color));
 	FUMGWidgetUtils::ApplyWidgetProperties(TypedWidget, Node);
 	FUMGWidgetUtils::ApplyWidgetProperties(LegacyWidget, TypedProperties);
 
@@ -480,10 +510,10 @@ bool FTextBlockUsesTypedTextPayloadParityTest::RunTest(const FString& Parameters
 
 	TestEqual(TEXT("Typed node path keeps tooltip"), TypedWidget->GetToolTipText().ToString(), TEXT("Typed tooltip"));
 	TestEqual(TEXT("Typed and legacy text match"), TypedWidget->GetText().ToString(), LegacyWidget->GetText().ToString());
-	TestTrue(TEXT("Typed and legacy color match"),
-		TypedWidget->GetColorAndOpacity().GetSpecifiedColor().Equals(
-			LegacyWidget->GetColorAndOpacity().GetSpecifiedColor(),
-			0.0001f));
+	TestTrue(TEXT("Typed text block color follows typed node color directly"),
+		TypedWidget->GetColorAndOpacity().GetSpecifiedColor().Equals(Node.Text.Color, 0.0001f));
+	TestTrue(TEXT("Legacy text block color follows serialized payload color"),
+		LegacyWidget->GetColorAndOpacity().GetSpecifiedColor().Equals(SerializedNodeColor, 0.0001f));
 	TestEqual(TEXT("Typed and legacy font size match"), TypedWidget->GetFont().Size, LegacyWidget->GetFont().Size);
 	TestEqual(TEXT("Typed and legacy typeface match"), TypedWidget->GetFont().TypefaceFontName, LegacyWidget->GetFont().TypefaceFontName);
 	TestEqual(TEXT("Typed and legacy letter spacing match"), TypedWidget->GetFont().LetterSpacing, LegacyWidget->GetFont().LetterSpacing);
@@ -517,6 +547,24 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEditableTextFamilyUsesTypedTextPayloadParityTe
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const FString& Parameters)
 {
+	const FBoolProperty* EditableTextBoxReadOnlyProperty = FindFProperty<FBoolProperty>(UEditableTextBox::StaticClass(), TEXT("IsReadOnly"));
+	const FBoolProperty* EditableTextBoxPasswordProperty = FindFProperty<FBoolProperty>(UEditableTextBox::StaticClass(), TEXT("IsPassword"));
+	const FFloatProperty* EditableTextBoxMinimumDesiredWidthProperty = FindFProperty<FFloatProperty>(UEditableTextBox::StaticClass(), TEXT("MinimumDesiredWidth"));
+	const FBoolProperty* EditableTextReadOnlyProperty = FindFProperty<FBoolProperty>(UEditableText::StaticClass(), TEXT("IsReadOnly"));
+	const FBoolProperty* EditableTextPasswordProperty = FindFProperty<FBoolProperty>(UEditableText::StaticClass(), TEXT("IsPassword"));
+	const FFloatProperty* EditableTextMinimumDesiredWidthProperty = FindFProperty<FFloatProperty>(UEditableText::StaticClass(), TEXT("MinimumDesiredWidth"));
+	TestNotNull(TEXT("EditableTextBox IsReadOnly property exists"), EditableTextBoxReadOnlyProperty);
+	TestNotNull(TEXT("EditableTextBox IsPassword property exists"), EditableTextBoxPasswordProperty);
+	TestNotNull(TEXT("EditableTextBox MinimumDesiredWidth property exists"), EditableTextBoxMinimumDesiredWidthProperty);
+	TestNotNull(TEXT("EditableText IsReadOnly property exists"), EditableTextReadOnlyProperty);
+	TestNotNull(TEXT("EditableText IsPassword property exists"), EditableTextPasswordProperty);
+	TestNotNull(TEXT("EditableText MinimumDesiredWidth property exists"), EditableTextMinimumDesiredWidthProperty);
+	if (!EditableTextBoxReadOnlyProperty || !EditableTextBoxPasswordProperty || !EditableTextBoxMinimumDesiredWidthProperty
+		|| !EditableTextReadOnlyProperty || !EditableTextPasswordProperty || !EditableTextMinimumDesiredWidthProperty)
+	{
+		return false;
+	}
+
 	FUMGWidgetNode Node;
 	Node.Text.Text = TEXT("Editable text");
 	Node.Text.bHasText = true;
@@ -538,6 +586,8 @@ bool FEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const FString& P
 	Node.TextStyle.bHasLetterSpacing = true;
 
 	const FUMGPropertyBag TypedProperties = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
+	const FLinearColor SerializedNodeColor =
+		FUMGValueParser::ParseColor(Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Text.Color));
 
 	UEditableTextBox* TypedTextBox = NewObject<UEditableTextBox>(GetTransientPackageAsObject());
 	UEditableTextBox* LegacyTextBox = NewObject<UEditableTextBox>(GetTransientPackageAsObject());
@@ -561,14 +611,14 @@ bool FEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const FString& P
 	TestEqual(TEXT("EditableTextBox typed and legacy font object path match"),
 		TypedTextBoxStyle.TextStyle.Font.FontObject ? TypedTextBoxStyle.TextStyle.Font.FontObject->GetPathName() : FString(),
 		LegacyTextBoxStyle.TextStyle.Font.FontObject ? LegacyTextBoxStyle.TextStyle.Font.FontObject->GetPathName() : FString());
-	TestTrue(TEXT("EditableTextBox typed and legacy text color match"),
-		TypedTextBoxStyle.TextStyle.ColorAndOpacity.GetSpecifiedColor().Equals(
-			LegacyTextBoxStyle.TextStyle.ColorAndOpacity.GetSpecifiedColor(),
-			0.0001f));
-	TestTrue(TEXT("EditableTextBox typed and legacy foreground color match"),
-		TypedTextBoxStyle.ForegroundColor.GetSpecifiedColor().Equals(
-			LegacyTextBoxStyle.ForegroundColor.GetSpecifiedColor(),
-			0.0001f));
+	TestTrue(TEXT("EditableTextBox typed text color follows typed node color directly"),
+		TypedTextBoxStyle.TextStyle.ColorAndOpacity.GetSpecifiedColor().Equals(Node.Text.Color, 0.0001f));
+	TestTrue(TEXT("EditableTextBox typed foreground color follows typed node color directly"),
+		TypedTextBoxStyle.ForegroundColor.GetSpecifiedColor().Equals(Node.Text.Color, 0.0001f));
+	TestTrue(TEXT("EditableTextBox legacy text color follows serialized payload color"),
+		LegacyTextBoxStyle.TextStyle.ColorAndOpacity.GetSpecifiedColor().Equals(SerializedNodeColor, 0.0001f));
+	TestTrue(TEXT("EditableTextBox legacy foreground color follows serialized payload color"),
+		LegacyTextBoxStyle.ForegroundColor.GetSpecifiedColor().Equals(SerializedNodeColor, 0.0001f));
 	TestEqual(TEXT("EditableTextBox typed and legacy justification match"), TypedTextBox->GetJustification(), LegacyTextBox->GetJustification());
 	TestTrue(TEXT("EditableTextBox typed and legacy icon shaping match"),
 		TypedTextBox->ShapedTextOptions == LegacyTextBox->ShapedTextOptions);
@@ -593,13 +643,94 @@ bool FEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const FString& P
 	TestEqual(TEXT("EditableText typed and legacy font object path match"),
 		TypedEditableText->GetFont().FontObject ? TypedEditableText->GetFont().FontObject->GetPathName() : FString(),
 		LegacyEditableText->GetFont().FontObject ? LegacyEditableText->GetFont().FontObject->GetPathName() : FString());
-	TestTrue(TEXT("EditableText typed and legacy color match"),
-		TypedEditableText->WidgetStyle.ColorAndOpacity.GetSpecifiedColor().Equals(
-			LegacyEditableText->WidgetStyle.ColorAndOpacity.GetSpecifiedColor(),
-			0.0001f));
+	TestTrue(TEXT("EditableText typed color follows typed node color directly"),
+		TypedEditableText->WidgetStyle.ColorAndOpacity.GetSpecifiedColor().Equals(Node.Text.Color, 0.0001f));
+	TestTrue(TEXT("EditableText legacy color follows serialized payload color"),
+		LegacyEditableText->WidgetStyle.ColorAndOpacity.GetSpecifiedColor().Equals(SerializedNodeColor, 0.0001f));
 	TestEqual(TEXT("EditableText typed and legacy justification match"), TypedEditableText->GetJustification(), LegacyEditableText->GetJustification());
 	TestTrue(TEXT("EditableText typed and legacy icon shaping match"),
 		TypedEditableText->ShapedTextOptions == LegacyEditableText->ShapedTextOptions);
+
+	FUMGPropertyBag TypedBehaviorProperties = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
+	TypedBehaviorProperties.Add(UMGPropertyKeys::IsReadOnly, TEXT("true"));
+	TypedBehaviorProperties.Add(UMGPropertyKeys::IsPassword, TEXT("true"));
+	TypedBehaviorProperties.Add(UMGPropertyKeys::MinimumDesiredWidth, TEXT("123.5"));
+
+	bool bTypedPayloadReadOnly = false;
+	bool bTypedPayloadPassword = false;
+	float TypedPayloadMinimumDesiredWidth = 0.0f;
+	TestTrue(TEXT("Typed editable payload keeps IsReadOnly"), TypedBehaviorProperties.TryGetBool(UMGPropertyKeys::IsReadOnly, bTypedPayloadReadOnly) && bTypedPayloadReadOnly);
+	TestTrue(TEXT("Typed editable payload keeps IsPassword"), TypedBehaviorProperties.TryGetBool(UMGPropertyKeys::IsPassword, bTypedPayloadPassword) && bTypedPayloadPassword);
+	TestTrue(TEXT("Typed editable payload keeps MinimumDesiredWidth"),
+		TypedBehaviorProperties.TryGetFloat(UMGPropertyKeys::MinimumDesiredWidth, TypedPayloadMinimumDesiredWidth)
+		&& FMath::IsNearlyEqual(TypedPayloadMinimumDesiredWidth, 123.5f, 0.001f));
+
+	UEditableTextBox* TypedBehaviorTextBox = NewObject<UEditableTextBox>(GetTransientPackageAsObject());
+	UEditableText* TypedBehaviorEditableText = NewObject<UEditableText>(GetTransientPackageAsObject());
+	TestNotNull(TEXT("Typed behavior editable text box created"), TypedBehaviorTextBox);
+	TestNotNull(TEXT("Typed behavior editable text created"), TypedBehaviorEditableText);
+	if (!TypedBehaviorTextBox || !TypedBehaviorEditableText)
+	{
+		return false;
+	}
+
+	FUMGWidgetUtils::ApplyWidgetProperties(TypedBehaviorTextBox, TypedBehaviorProperties);
+	FUMGWidgetUtils::ApplyWidgetProperties(TypedBehaviorEditableText, TypedBehaviorProperties);
+
+	TestTrue(TEXT("Typed editable text box applies IsReadOnly"),
+		EditableTextBoxReadOnlyProperty->GetPropertyValue_InContainer(TypedBehaviorTextBox));
+	TestTrue(TEXT("Typed editable text box applies IsPassword"),
+		EditableTextBoxPasswordProperty->GetPropertyValue_InContainer(TypedBehaviorTextBox));
+	TestTrue(TEXT("Typed editable text box applies MinimumDesiredWidth"),
+		FMath::IsNearlyEqual(
+			EditableTextBoxMinimumDesiredWidthProperty->GetPropertyValue_InContainer(TypedBehaviorTextBox),
+			123.5f,
+			0.001f));
+	TestTrue(TEXT("Typed editable text applies IsReadOnly"),
+		EditableTextReadOnlyProperty->GetPropertyValue_InContainer(TypedBehaviorEditableText));
+	TestTrue(TEXT("Typed editable text applies IsPassword"),
+		EditableTextPasswordProperty->GetPropertyValue_InContainer(TypedBehaviorEditableText));
+	TestTrue(TEXT("Typed editable text applies MinimumDesiredWidth"),
+		FMath::IsNearlyEqual(
+			EditableTextMinimumDesiredWidthProperty->GetPropertyValue_InContainer(TypedBehaviorEditableText),
+			123.5f,
+			0.001f));
+
+	FUMGWidgetNode EmptyTypedNode;
+	EmptyTypedNode.Text.Text = TEXT("");
+	EmptyTypedNode.Text.bHasText = true;
+	EmptyTypedNode.Text.HintText = TEXT("");
+	EmptyTypedNode.Text.bHasHintText = true;
+
+	FUMGPropertyBag EmptyTypedProperties = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(EmptyTypedNode);
+	FString EmptyTypedTextValue;
+	FString EmptyTypedHintValue;
+	TestTrue(TEXT("Typed empty text is serialized instead of dropped"),
+		EmptyTypedProperties.TryGetString(UMGPropertyKeys::Text, EmptyTypedTextValue) && EmptyTypedTextValue.IsEmpty());
+	TestTrue(TEXT("Typed empty hint is serialized instead of dropped"),
+		EmptyTypedProperties.TryGetString(UMGPropertyKeys::HintText, EmptyTypedHintValue) && EmptyTypedHintValue.IsEmpty());
+
+	UEditableTextBox* EmptyTypedTextBox = NewObject<UEditableTextBox>(GetTransientPackageAsObject());
+	UEditableText* EmptyTypedEditableText = NewObject<UEditableText>(GetTransientPackageAsObject());
+	TestNotNull(TEXT("Typed empty editable text box created"), EmptyTypedTextBox);
+	TestNotNull(TEXT("Typed empty editable text created"), EmptyTypedEditableText);
+	if (!EmptyTypedTextBox || !EmptyTypedEditableText)
+	{
+		return false;
+	}
+
+	EmptyTypedTextBox->SetText(FText::FromString(TEXT("Existing Text")));
+	EmptyTypedTextBox->SetHintText(FText::FromString(TEXT("Existing Hint")));
+	EmptyTypedEditableText->SetText(FText::FromString(TEXT("Existing Text")));
+	EmptyTypedEditableText->SetHintText(FText::FromString(TEXT("Existing Hint")));
+
+	FUMGWidgetUtils::ApplyWidgetProperties(EmptyTypedTextBox, EmptyTypedProperties);
+	FUMGWidgetUtils::ApplyWidgetProperties(EmptyTypedEditableText, EmptyTypedProperties);
+
+	TestTrue(TEXT("Typed empty text clears EditableTextBox text"), EmptyTypedTextBox->GetText().ToString().IsEmpty());
+	TestTrue(TEXT("Typed empty hint clears EditableTextBox hint"), EmptyTypedTextBox->GetHintText().ToString().IsEmpty());
+	TestTrue(TEXT("Typed empty text clears EditableText text"), EmptyTypedEditableText->GetText().ToString().IsEmpty());
+	TestTrue(TEXT("Typed empty hint clears EditableText hint"), EmptyTypedEditableText->GetHintText().ToString().IsEmpty());
 	return true;
 }
 
@@ -649,6 +780,8 @@ bool FMultiLineEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const F
 	Node.WidgetStyle.Padding = FMargin(4.0f, 5.0f, 6.0f, 7.0f);
 
 	const FUMGPropertyBag TypedProperties = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
+	const FLinearColor SerializedNodeColor =
+		FUMGValueParser::ParseColor(Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Text.Color));
 
 	auto ReadLayoutState = [&](UTextLayoutWidget* Widget, FMargin& OutMargin, float& OutLineHeight, ETextJustify::Type& OutJustification, FShapedTextOptions& OutShaping)
 	{
@@ -692,14 +825,14 @@ bool FMultiLineEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const F
 	TestEqual(TEXT("MultiLineEditableTextBox typed and legacy font object path match"),
 		TypedTextBox->WidgetStyle.TextStyle.Font.FontObject ? TypedTextBox->WidgetStyle.TextStyle.Font.FontObject->GetPathName() : FString(),
 		LegacyTextBox->WidgetStyle.TextStyle.Font.FontObject ? LegacyTextBox->WidgetStyle.TextStyle.Font.FontObject->GetPathName() : FString());
-	TestTrue(TEXT("MultiLineEditableTextBox typed and legacy text color match"),
-		TypedTextBox->WidgetStyle.TextStyle.ColorAndOpacity.GetSpecifiedColor().Equals(
-			LegacyTextBox->WidgetStyle.TextStyle.ColorAndOpacity.GetSpecifiedColor(),
-			0.0001f));
-	TestTrue(TEXT("MultiLineEditableTextBox typed and legacy foreground color match"),
-		TypedTextBox->WidgetStyle.ForegroundColor.GetSpecifiedColor().Equals(
-			LegacyTextBox->WidgetStyle.ForegroundColor.GetSpecifiedColor(),
-			0.0001f));
+	TestTrue(TEXT("MultiLineEditableTextBox typed text color follows typed node color directly"),
+		TypedTextBox->WidgetStyle.TextStyle.ColorAndOpacity.GetSpecifiedColor().Equals(Node.Text.Color, 0.0001f));
+	TestTrue(TEXT("MultiLineEditableTextBox typed foreground color follows typed node color directly"),
+		TypedTextBox->WidgetStyle.ForegroundColor.GetSpecifiedColor().Equals(Node.Text.Color, 0.0001f));
+	TestTrue(TEXT("MultiLineEditableTextBox legacy text color follows serialized payload color"),
+		LegacyTextBox->WidgetStyle.TextStyle.ColorAndOpacity.GetSpecifiedColor().Equals(SerializedNodeColor, 0.0001f));
+	TestTrue(TEXT("MultiLineEditableTextBox legacy foreground color follows serialized payload color"),
+		LegacyTextBox->WidgetStyle.ForegroundColor.GetSpecifiedColor().Equals(SerializedNodeColor, 0.0001f));
 	TestTrue(TEXT("MultiLineEditableTextBox typed and legacy auto-wrap match"), TypedTextBox->GetAutoWrapText() == LegacyTextBox->GetAutoWrapText());
 	TestTrue(TEXT("MultiLineEditableTextBox typed and legacy wrap width match"), FMath::IsNearlyEqual(TypedTextBox->GetWrapTextAt(), LegacyTextBox->GetWrapTextAt(), 0.001f));
 	TestTrue(TEXT("MultiLineEditableTextBox typed and legacy line height match"), FMath::IsNearlyEqual(TypedTextBoxLineHeight, LegacyTextBoxLineHeight, 0.001f));
@@ -742,10 +875,10 @@ bool FMultiLineEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const F
 	TestEqual(TEXT("MultiLineEditableText typed and legacy font object path match"),
 		TypedEditableText->GetFont().FontObject ? TypedEditableText->GetFont().FontObject->GetPathName() : FString(),
 		LegacyEditableText->GetFont().FontObject ? LegacyEditableText->GetFont().FontObject->GetPathName() : FString());
-	TestTrue(TEXT("MultiLineEditableText typed and legacy color match"),
-		TypedEditableText->WidgetStyle.ColorAndOpacity.GetSpecifiedColor().Equals(
-			LegacyEditableText->WidgetStyle.ColorAndOpacity.GetSpecifiedColor(),
-			0.0001f));
+	TestTrue(TEXT("MultiLineEditableText typed color follows typed node color directly"),
+		TypedEditableText->WidgetStyle.ColorAndOpacity.GetSpecifiedColor().Equals(Node.Text.Color, 0.0001f));
+	TestTrue(TEXT("MultiLineEditableText legacy color follows serialized payload color"),
+		LegacyEditableText->WidgetStyle.ColorAndOpacity.GetSpecifiedColor().Equals(SerializedNodeColor, 0.0001f));
 	TestTrue(TEXT("MultiLineEditableText typed and legacy auto-wrap match"), TypedEditableText->GetAutoWrapText() == LegacyEditableText->GetAutoWrapText());
 	TestTrue(TEXT("MultiLineEditableText typed and legacy wrap width match"), FMath::IsNearlyEqual(TypedEditableText->GetWrapTextAt(), LegacyEditableText->GetWrapTextAt(), 0.001f));
 	TestTrue(TEXT("MultiLineEditableText typed and legacy line height match"), FMath::IsNearlyEqual(TypedEditableTextLineHeight, LegacyEditableTextLineHeight, 0.001f));
@@ -824,8 +957,7 @@ bool FRichTextBlockStyleRowsApplicationTest::RunTest(const FString& Parameters)
 
 	const FTextBlockStyle& DefaultStyle = Widget->GetCurrentDefaultTextStyle();
 	TestEqual(TEXT("Rich text default font size applied"), DefaultStyle.Font.Size, 18.0f);
-	const FLinearColor ExpectedDefaultColor = FUMGValueParser::ParseColor(
-		Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Text.Color));
+	const FLinearColor ExpectedDefaultColor = Node.Text.Color;
 	TestTrue(TEXT("Rich text default color applied"),
 		DefaultStyle.ColorAndOpacity.GetSpecifiedColor().Equals(ExpectedDefaultColor, 0.0001f));
 	TestTrue(TEXT("Rich text default style preserves preconfigured shadow color"),
@@ -878,6 +1010,8 @@ bool FRichTextBlockStyleRowsApplicationTest::RunTest(const FString& Parameters)
 	}
 	LegacyWidget->SetDefaultTextStyle(PreconfiguredStyle);
 	FUMGWidgetUtils::ApplyWidgetProperties(LegacyWidget, Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node));
+	const FLinearColor SerializedDefaultColor =
+		FUMGValueParser::ParseColor(Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Text.Color));
 
 	TestEqual(TEXT("Typed and legacy rich text markup match"),
 		Widget->GetText().ToString(),
@@ -892,10 +1026,10 @@ bool FRichTextBlockStyleRowsApplicationTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Typed and legacy rich text default font size match"),
 		DefaultStyle.Font.Size,
 		LegacyDefaultStyle.Font.Size);
-	TestTrue(TEXT("Typed and legacy rich text default color match"),
-		DefaultStyle.ColorAndOpacity.GetSpecifiedColor().Equals(
-			LegacyDefaultStyle.ColorAndOpacity.GetSpecifiedColor(),
-			0.0001f));
+	TestTrue(TEXT("Typed rich text default color follows typed node color directly"),
+		DefaultStyle.ColorAndOpacity.GetSpecifiedColor().Equals(Node.Text.Color, 0.0001f));
+	TestTrue(TEXT("Legacy rich text default color follows serialized payload color"),
+		LegacyDefaultStyle.ColorAndOpacity.GetSpecifiedColor().Equals(SerializedDefaultColor, 0.0001f));
 	TestTrue(TEXT("Typed and legacy rich text default shadow color match"),
 		DefaultStyle.ShadowColorAndOpacity.Equals(LegacyDefaultStyle.ShadowColorAndOpacity, 0.0001f));
 	TestTrue(TEXT("Typed and legacy rich text default shadow offset match"),
@@ -1090,14 +1224,14 @@ bool FTextFamilyTypedJsonRoundTripTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Round-trip widget font object path matches"),
 		ParsedWidget->WidgetStyle.TextStyle.Font.FontObject ? ParsedWidget->WidgetStyle.TextStyle.Font.FontObject->GetPathName() : FString(),
 		SourceWidget->WidgetStyle.TextStyle.Font.FontObject ? SourceWidget->WidgetStyle.TextStyle.Font.FontObject->GetPathName() : FString());
-	TestTrue(TEXT("Round-trip widget text color matches"),
-		ParsedWidget->WidgetStyle.TextStyle.ColorAndOpacity.GetSpecifiedColor().Equals(
-			SourceWidget->WidgetStyle.TextStyle.ColorAndOpacity.GetSpecifiedColor(),
-			0.0001f));
-	TestTrue(TEXT("Round-trip widget foreground color matches"),
-		ParsedWidget->WidgetStyle.ForegroundColor.GetSpecifiedColor().Equals(
-			SourceWidget->WidgetStyle.ForegroundColor.GetSpecifiedColor(),
-			0.0001f));
+	TestTrue(TEXT("Source widget text color follows source node color directly"),
+		SourceWidget->WidgetStyle.TextStyle.ColorAndOpacity.GetSpecifiedColor().Equals(SourceNode.Text.Color, 0.0001f));
+	TestTrue(TEXT("Parsed widget text color follows parsed node color directly"),
+		ParsedWidget->WidgetStyle.TextStyle.ColorAndOpacity.GetSpecifiedColor().Equals(ParsedNode->Text.Color, 0.0001f));
+	TestTrue(TEXT("Source widget foreground color follows source node color directly"),
+		SourceWidget->WidgetStyle.ForegroundColor.GetSpecifiedColor().Equals(SourceNode.Text.Color, 0.0001f));
+	TestTrue(TEXT("Parsed widget foreground color follows parsed node color directly"),
+		ParsedWidget->WidgetStyle.ForegroundColor.GetSpecifiedColor().Equals(ParsedNode->Text.Color, 0.0001f));
 	TestTrue(TEXT("Round-trip widget auto wrap matches"), ParsedWidget->GetAutoWrapText() == SourceWidget->GetAutoWrapText());
 	TestTrue(TEXT("Round-trip widget wrap width matches"), FMath::IsNearlyEqual(ParsedWidget->GetWrapTextAt(), SourceWidget->GetWrapTextAt(), 0.001f));
 	TestTrue(TEXT("Round-trip widget line height matches"), FMath::IsNearlyEqual(ParsedLineHeight, SourceLineHeight, 0.001f));
@@ -1341,6 +1475,50 @@ bool FTypedPropertyBagEnumeratesDescriptorBackedBrushKeysTest::RunTest(const FSt
 	FString MaterialParams;
 	TestTrue(TEXT("Typed property bag keeps gradient material params"), TypedProperties.TryGetString(UMGPropertyKeys::MaterialParams, MaterialParams));
 	TestTrue(TEXT("Typed property bag gradient material params carry rotation"), MaterialParams.Contains(TEXT("\"Rotation\":45.0000")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBrushDescriptorPrecedenceContractTest,
+	"Design2UMG.WidgetNodeAccess.BrushDescriptorPrecedenceContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FBrushDescriptorPrecedenceContractTest::RunTest(const FString& Parameters)
+{
+	FUMGWidgetNode Node;
+	Node.Brush.MaterialRef = TEXT("roundedrect");
+	Node.Brush.bHasMaterialRef = true;
+	Node.Brush.TexturePath = TEXT("/Game/UI/T_LegacyBrush.T_LegacyBrush");
+	Node.Brush.Image.TexturePath = TEXT("/Game/UI/T_DescriptorBrush.T_DescriptorBrush");
+	Node.Brush.Image.bHasTexturePath = true;
+	Node.Brush.Gradient.Type = TEXT("Angular");
+	Node.Brush.Gradient.bHasType = true;
+	Node.Brush.Gradient.Rotation = 15.0f;
+	Node.Brush.Gradient.bHasRotation = true;
+	Node.Brush.Gradient.Stops = {
+		{ FLinearColor::Red, 0.0f },
+		{ FLinearColor::Blue, 1.0f },
+	};
+
+	FString MaterialRef;
+	TestTrue(TEXT("Brush typed string resolves material ref"), Design2UMGWidgetNodeAccess::TryGetBrushTypedWidgetString(Node, UMGPropertyKeys::MaterialRef, MaterialRef));
+	TestEqual(TEXT("Gradient-derived material ref takes precedence"), MaterialRef, FString(TEXT("angulargradient")));
+
+	FString TexturePath;
+	TestTrue(TEXT("Brush typed string resolves texture path"), Design2UMGWidgetNodeAccess::TryGetBrushTypedWidgetString(Node, UMGPropertyKeys::TexturePath, TexturePath));
+	TestEqual(TEXT("Descriptor-backed image texture path takes precedence"), TexturePath, FString(TEXT("/Game/UI/T_DescriptorBrush.T_DescriptorBrush")));
+
+	FUMGPropertyBag TypedProperties = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
+	FString BagMaterialRef;
+	TestTrue(TEXT("Typed property bag keeps precedence-selected material ref"), TypedProperties.TryGetString(UMGPropertyKeys::MaterialRef, BagMaterialRef));
+	TestEqual(TEXT("Typed property bag material ref matches precedence contract"), BagMaterialRef, MaterialRef);
+
+	Node.Brush.Gradient = FUMGVisualBrushData::FGradientData();
+	TestTrue(TEXT("Explicit material ref remains after removing gradient"), Design2UMGWidgetNodeAccess::TryGetBrushTypedWidgetString(Node, UMGPropertyKeys::MaterialRef, MaterialRef));
+	TestEqual(TEXT("Explicit material ref becomes fallback owner"), MaterialRef, FString(TEXT("roundedrect")));
+
+	Node.Brush.Image.TexturePath.Empty();
+	Node.Brush.Image.bHasTexturePath = false;
+	TestTrue(TEXT("Legacy texture path remains after removing descriptor texture"), Design2UMGWidgetNodeAccess::TryGetBrushTypedWidgetString(Node, UMGPropertyKeys::TexturePath, TexturePath));
+	TestEqual(TEXT("Legacy texture path becomes fallback owner"), TexturePath, FString(TEXT("/Game/UI/T_LegacyBrush.T_LegacyBrush")));
 	return true;
 }
 

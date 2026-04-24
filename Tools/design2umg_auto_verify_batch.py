@@ -728,6 +728,7 @@ def build_case_specs(state: dict):
 
 
 def write_editor_driver_script(output_root: Path, spec_paths: list[Path], tag: str = "batch") -> Path:
+    output_root = output_root.resolve()
     normalized_tag = sanitize_case_name(tag)
     manifest_path = output_root / f"editor_driver_manifest_{normalized_tag}.json"
     driver_log_path = output_root / f"editor_driver_{normalized_tag}.log"
@@ -799,6 +800,7 @@ def run_editor_driver(
     startup_timeout_sec: int,
     log_cmds: str = "",
 ) -> int:
+    driver_script_path = driver_script_path.resolve()
     command = [
         editor_path,
         project_path,
@@ -807,6 +809,7 @@ def run_editor_driver(
         "-NoMutex",
         "-stdout",
         "-FullStdOutLogOutput",
+        "-unattended",
         f"-ExecutePythonScript={driver_script_path}",
     ]
     if log_cmds:

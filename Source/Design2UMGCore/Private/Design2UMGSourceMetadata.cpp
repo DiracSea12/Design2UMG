@@ -6,19 +6,147 @@
 
 namespace
 {
-	const FString* FindStructuredSourceExtension(const TSharedPtr<FDesignNode>& Node, const FString& Key)
+	namespace SourceMetadataKeys
 	{
-		if (!Node.IsValid())
+		const TCHAR* SourceNodeType = TEXT("sourceNodeType");
+		const TCHAR* Interactions = TEXT("interactions");
+		const TCHAR* RenderFallbackScopeFull = TEXT("full");
+		const TCHAR* RenderFallbackScopeSubtree = TEXT("subtree");
+		const TCHAR* SourceNodeTypeInstance = TEXT("INSTANCE");
+	}
+
+	namespace MetadataAccess
+	{
+		const FString* FindStructuredSourceExtension(const TSharedPtr<FDesignNode>& Node, const FString& Key)
 		{
+			if (!Node.IsValid())
+			{
+				return nullptr;
+			}
+
+			if (Key == SourceMetadataKeys::SourceNodeType)
+			{
+				return &Node->Source().SourceNodeType;
+			}
+
 			return nullptr;
 		}
 
-		if (Key == TEXT("sourceNodeType"))
+		FString GetSourceExtensionValue(const TSharedPtr<FDesignNode>& Node, const FString& Key)
 		{
-			return &Node->Source().SourceNodeType;
+			if (!Node.IsValid())
+			{
+				return FString();
+			}
+
+			if (const FString* StructuredValue = FindStructuredSourceExtension(Node, Key))
+			{
+				return *StructuredValue;
+			}
+			if (const FString* Value = Node->Metadata.Find(Key))
+			{
+				return *Value;
+			}
+			return FString();
 		}
 
-		return nullptr;
+		bool HasMeaningfulSourceMetadataValue(const TSharedPtr<FDesignNode>& Node, const TCHAR* Key)
+		{
+			const FString Value = GetSourceExtensionValue(Node, Key).TrimStartAndEnd();
+			return !Value.IsEmpty()
+				&& !Value.Equals(TEXT("[]"), ESearchCase::CaseSensitive)
+				&& !Value.Equals(TEXT("{}"), ESearchCase::CaseSensitive)
+				&& !Value.Equals(TEXT("null"), ESearchCase::IgnoreCase);
+		}
+	}
+
+	namespace SourceNodeDataBuilder
+	{
+		void CopyComponentInstanceData(FUMGSourceNodeData& Target, const FDesignComponentInstanceData& Source)
+		{
+			Target.ComponentId = Source.ComponentId;
+			Target.ComponentSetId = Source.ComponentSetId;
+			Target.MainComponentKey = Source.MainComponentKey;
+			Target.ComponentPropertiesJson = Source.ComponentPropertiesJson;
+			Target.VariantPropertiesJson = Source.VariantPropertiesJson;
+			Target.OverridesJson = Source.OverridesJson;
+			Target.bIsExposedInstance = Source.bIsExposedInstance;
+			Target.bHasIsExposedInstance = Source.bHasIsExposedInstance;
+		}
+
+		void BackfillDefinitionIds(FUMGSourceNodeData& SourceData, const TSharedPtr<FDesignNode>& Node)
+		{
+			if (SourceData.IsComponentDefinition() && SourceData.ComponentId.IsEmpty())
+			{
+				SourceData.ComponentId = Node->Id;
+			}
+			if (SourceData.IsComponentSet() && SourceData.ComponentSetId.IsEmpty())
+			{
+				SourceData.ComponentSetId = Node->Id;
+			}
+		}
+	}
+
+	namespace RenderFallback
+	{
+		bool ReplacesSubtree(const TSharedPtr<FDesignNode>& Node)
+		{
+			return Node.IsValid()
+				&& Node->Source().RenderFallback.Scope.Equals(SourceMetadataKeys::RenderFallbackScopeSubtree, ESearchCase::IgnoreCase);
+		}
+
+		bool HasSupportedScope(const TSharedPtr<FDesignNode>& Node)
+		{
+			const FString& Scope = Node->Source().RenderFallback.Scope;
+			return Scope.IsEmpty()
+				|| Scope.Equals(SourceMetadataKeys::RenderFallbackScopeFull, ESearchCase::IgnoreCase)
+				|| ReplacesSubtree(Node);
+		}
+
+		bool SupportsLeafReplacement(const TSharedPtr<FDesignNode>& Node)
+		{
+			return Node->Children.Num() == 0 || ReplacesSubtree(Node);
+		}
+
+		bool IsUnsupportedNodeType(const TSharedPtr<FDesignNode>& Node)
+		{
+			return Node->Type == EDesignNodeType::Text
+				|| Node->Type == EDesignNodeType::IconFont
+				|| Node->Type == EDesignNodeType::Ref;
+		}
+
+		bool HasImageRef(const TSharedPtr<FDesignNode>& Node)
+		{
+			return Node.IsValid() && !Node->Source().RenderFallback.ImageRef.IsEmpty();
+		}
+
+		bool IsSourceInstanceNode(const TSharedPtr<FDesignNode>& Node)
+		{
+			return MetadataAccess::GetSourceExtensionValue(Node, SourceMetadataKeys::SourceNodeType)
+				.Equals(SourceMetadataKeys::SourceNodeTypeInstance, ESearchCase::IgnoreCase);
+		}
+
+		bool HasPrototypeInteractions(const TSharedPtr<FDesignNode>& Node)
+		{
+			return Node.IsValid()
+				&& (Node->Source().Prototype.Interactions.Num() > 0
+					|| MetadataAccess::HasMeaningfulSourceMetadataValue(Node, SourceMetadataKeys::Interactions));
+		}
+
+		float ResolveDimensionOverride(const FString& OverrideValue, float DefaultValue)
+		{
+			return OverrideValue.IsEmpty() ? DefaultValue : FCString::Atof(*OverrideValue);
+		}
+	}
+
+	namespace LayoutMetadata
+	{
+		float ResolveWrapCrossAxisGapValue(const TSharedPtr<FDesignNode>& Node)
+		{
+			return Node->Source().LayoutExtensions.bHasCounterAxisSpacing
+				? Node->Source().LayoutExtensions.CounterAxisSpacing
+				: Node->LayoutData.Gap;
+		}
 	}
 }
 
@@ -37,29 +165,12 @@ namespace Design2UMGSourceMetadata
 
 	FString GetSourceExtension(const TSharedPtr<FDesignNode>& Node, const FString& Key)
 	{
-		if (!Node.IsValid())
-		{
-			return FString();
-		}
-
-		if (const FString* StructuredValue = FindStructuredSourceExtension(Node, Key))
-		{
-			return *StructuredValue;
-		}
-		if (const FString* Value = Node->Metadata.Find(Key))
-		{
-			return *Value;
-		}
-		return FString();
+		return MetadataAccess::GetSourceExtensionValue(Node, Key);
 	}
 
 	bool HasMeaningfulSourceMetadata(const TSharedPtr<FDesignNode>& Node, const TCHAR* Key)
 	{
-		const FString Value = GetSourceExtension(Node, Key).TrimStartAndEnd();
-		return !Value.IsEmpty()
-			&& !Value.Equals(TEXT("[]"), ESearchCase::CaseSensitive)
-			&& !Value.Equals(TEXT("{}"), ESearchCase::CaseSensitive)
-			&& !Value.Equals(TEXT("null"), ESearchCase::IgnoreCase);
+		return MetadataAccess::HasMeaningfulSourceMetadataValue(Node, Key);
 	}
 
 	FUMGSourceNodeData BuildSourceNodeData(const TSharedPtr<FDesignNode>& Node)
@@ -72,31 +183,17 @@ namespace Design2UMGSourceMetadata
 
 		Result.SourceNodeId = Node->Id;
 		Result.SourceNodeName = Node->Name;
-		Result.SourceNodeType = GetSourceExtension(Node, TEXT("sourceNodeType"));
-		Result.ComponentId = Node->Source().ComponentInstance.ComponentId;
-		Result.ComponentSetId = Node->Source().ComponentInstance.ComponentSetId;
-		Result.MainComponentKey = Node->Source().ComponentInstance.MainComponentKey;
-		Result.ComponentPropertiesJson = Node->Source().ComponentInstance.ComponentPropertiesJson;
-		Result.VariantPropertiesJson = Node->Source().ComponentInstance.VariantPropertiesJson;
-		Result.OverridesJson = Node->Source().ComponentInstance.OverridesJson;
-		Result.bIsExposedInstance = Node->Source().ComponentInstance.bIsExposedInstance;
-		Result.bHasIsExposedInstance = Node->Source().ComponentInstance.bHasIsExposedInstance;
-
-		if (Result.IsComponentDefinition() && Result.ComponentId.IsEmpty())
-		{
-			Result.ComponentId = Node->Id;
-		}
-		if (Result.IsComponentSet() && Result.ComponentSetId.IsEmpty())
-		{
-			Result.ComponentSetId = Node->Id;
-		}
+		Result.SourceNodeType = MetadataAccess::GetSourceExtensionValue(Node, SourceMetadataKeys::SourceNodeType);
+		SourceNodeDataBuilder::CopyComponentInstanceData(Result, Node->Source().ComponentInstance);
+		SourceNodeDataBuilder::BackfillDefinitionIds(Result, Node);
 
 		return Result;
 	}
 
 	bool IsSourceNodeType(const TSharedPtr<FDesignNode>& Node, const TCHAR* ExpectedType)
 	{
-		return GetSourceExtension(Node, TEXT("sourceNodeType")).Equals(ExpectedType, ESearchCase::IgnoreCase);
+		return MetadataAccess::GetSourceExtensionValue(Node, SourceMetadataKeys::SourceNodeType)
+			.Equals(ExpectedType, ESearchCase::IgnoreCase);
 	}
 
 	bool ShouldUseRenderFallback(const TSharedPtr<FDesignNode>& Node)
@@ -106,40 +203,32 @@ namespace Design2UMGSourceMetadata
 			return false;
 		}
 
-		const FString Scope = Node->Source().RenderFallback.Scope;
-		const bool bReplaceSubtree = Scope.Equals(TEXT("subtree"), ESearchCase::IgnoreCase);
-		if (Node->Children.Num() != 0 && !bReplaceSubtree)
+		if (!RenderFallback::SupportsLeafReplacement(Node))
 		{
 			return false;
 		}
 
-		if (Node->Type == EDesignNodeType::Text
-			|| Node->Type == EDesignNodeType::IconFont
-			|| Node->Type == EDesignNodeType::Ref)
+		if (RenderFallback::IsUnsupportedNodeType(Node))
 		{
 			return false;
 		}
 
-		const FString& TexturePath = Node->Source().RenderFallback.ImageRef;
-		if (TexturePath.IsEmpty())
+		if (!RenderFallback::HasImageRef(Node))
 		{
 			return false;
 		}
 
-		if (!Scope.IsEmpty()
-			&& !Scope.Equals(TEXT("full"), ESearchCase::IgnoreCase)
-			&& !bReplaceSubtree)
+		if (!RenderFallback::HasSupportedScope(Node))
 		{
 			return false;
 		}
 
-		const FString SourceNodeType = GetSourceExtension(Node, TEXT("sourceNodeType"));
-		if (SourceNodeType.Equals(TEXT("INSTANCE"), ESearchCase::IgnoreCase))
+		if (RenderFallback::IsSourceInstanceNode(Node))
 		{
 			return false;
 		}
 
-		if (Node->Source().Prototype.Interactions.Num() > 0 || HasMeaningfulSourceMetadata(Node, TEXT("interactions")))
+		if (RenderFallback::HasPrototypeInteractions(Node))
 		{
 			return false;
 		}
@@ -157,19 +246,12 @@ namespace Design2UMGSourceMetadata
 		Widget.Brush.Image.TexturePath = TexturePath;
 		Widget.Brush.Image.bHasTexturePath = true;
 
-		float WidthOverride = Node->Transform.Width.Value;
-		const FString& FallbackWidth = Node->Source().RenderFallback.Width;
-		if (!FallbackWidth.IsEmpty())
-		{
-			WidthOverride = FCString::Atof(*FallbackWidth);
-		}
-
-		float HeightOverride = Node->Transform.Height.Value;
-		const FString& FallbackHeight = Node->Source().RenderFallback.Height;
-		if (!FallbackHeight.IsEmpty())
-		{
-			HeightOverride = FCString::Atof(*FallbackHeight);
-		}
+		const float WidthOverride = RenderFallback::ResolveDimensionOverride(
+			Node->Source().RenderFallback.Width,
+			Node->Transform.Width.Value);
+		const float HeightOverride = RenderFallback::ResolveDimensionOverride(
+			Node->Source().RenderFallback.Height,
+			Node->Transform.Height.Value);
 
 		if (WidthOverride > 0.0f)
 		{
@@ -190,8 +272,6 @@ namespace Design2UMGSourceMetadata
 			return 0.0f;
 		}
 
-		return Node->Source().LayoutExtensions.bHasCounterAxisSpacing
-			? Node->Source().LayoutExtensions.CounterAxisSpacing
-			: Node->LayoutData.Gap;
+		return LayoutMetadata::ResolveWrapCrossAxisGapValue(Node);
 	}
 }

@@ -28,6 +28,8 @@ struct FUMGPrototypeTransitionData
 	UPROPERTY()
 	bool bMatchLayers = false;
 
+	// Keep the presence bit: this still tells us whether the field was authored,
+	// which the transition parser needs right now.
 	UPROPERTY()
 	bool bHasMatchLayers = false;
 
@@ -47,34 +49,35 @@ struct FUMGPrototypeTransitionData
 		return !OutgoingAnimationName.IsEmpty() || !IncomingAnimationName.IsEmpty();
 	}
 
+	bool UsesSlide() const
+	{
+		return Type.Equals(TEXT("SMART_ANIMATE"), ESearchCase::IgnoreCase)
+			|| Type.Equals(TEXT("PUSH"), ESearchCase::IgnoreCase)
+			|| Type.Equals(TEXT("MOVE_IN"), ESearchCase::IgnoreCase)
+			|| Type.Equals(TEXT("MOVE_OUT"), ESearchCase::IgnoreCase)
+			|| Type.Equals(TEXT("SLIDE"), ESearchCase::IgnoreCase);
+	}
+
 	bool UsesFadeOnly() const
 	{
-		return Type.IsEmpty()
-			|| Type.Equals(TEXT("DISSOLVE"), ESearchCase::IgnoreCase)
-			|| Type.Equals(TEXT("SMART_ANIMATE"), ESearchCase::IgnoreCase)
-			|| Type.Equals(TEXT("SCROLL_ANIMATE"), ESearchCase::IgnoreCase);
-	}
-
-	bool UsesIncomingSlideOnly() const
-	{
-		return Type.Equals(TEXT("MOVE_IN"), ESearchCase::IgnoreCase)
-			|| Type.Equals(TEXT("SLIDE_IN"), ESearchCase::IgnoreCase);
-	}
-
-	bool UsesOutgoingSlideOnly() const
-	{
-		return Type.Equals(TEXT("MOVE_OUT"), ESearchCase::IgnoreCase)
-			|| Type.Equals(TEXT("SLIDE_OUT"), ESearchCase::IgnoreCase);
+		return !Type.IsEmpty() && !UsesSlide();
 	}
 
 	bool UsesBidirectionalSlide() const
 	{
-		return Type.Equals(TEXT("PUSH"), ESearchCase::IgnoreCase);
+		return Type.Equals(TEXT("SMART_ANIMATE"), ESearchCase::IgnoreCase)
+			|| Type.Equals(TEXT("PUSH"), ESearchCase::IgnoreCase)
+			|| Type.Equals(TEXT("SLIDE"), ESearchCase::IgnoreCase);
 	}
 
-	bool UsesSlide() const
+	bool UsesOutgoingSlideOnly() const
 	{
-		return UsesIncomingSlideOnly() || UsesOutgoingSlideOnly() || UsesBidirectionalSlide();
+		return Type.Equals(TEXT("MOVE_OUT"), ESearchCase::IgnoreCase);
+	}
+
+	bool UsesIncomingSlideOnly() const
+	{
+		return Type.Equals(TEXT("MOVE_IN"), ESearchCase::IgnoreCase);
 	}
 };
 
@@ -113,6 +116,8 @@ struct FUMGSourceNodeData
 	UPROPERTY()
 	bool bIsExposedInstance = false;
 
+	// Keep the presence bit explicit: source extensions still need authored vs
+	// inferred exposure to stay distinct.
 	UPROPERTY()
 	bool bHasIsExposedInstance = false;
 

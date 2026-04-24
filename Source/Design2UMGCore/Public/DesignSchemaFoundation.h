@@ -53,9 +53,9 @@ struct FDesignSize
 	UPROPERTY()
 	float Value = 0.0f;
 
-	static FDesignSize Fixed(float InValue) { return {EDesignSizeMode::Fixed, InValue}; }
-	static FDesignSize Fill(float Fallback = 0.0f) { return {EDesignSizeMode::FillContainer, Fallback}; }
-	static FDesignSize Fit(float Min = 0.0f) { return {EDesignSizeMode::FitContent, Min}; }
+	[[nodiscard]] static FDesignSize Fixed(float InValue) { return {EDesignSizeMode::Fixed, InValue}; }
+	[[nodiscard]] static FDesignSize Fill(float Fallback = 0.0f) { return {EDesignSizeMode::FillContainer, Fallback}; }
+	[[nodiscard]] static FDesignSize Fit(float Min = 0.0f) { return {EDesignSizeMode::FitContent, Min}; }
 
 	bool IsFixed() const { return Mode == EDesignSizeMode::Fixed; }
 	bool IsFill() const { return Mode == EDesignSizeMode::FillContainer; }
@@ -351,7 +351,7 @@ struct FDesignFill
 	bool IsGradient() const { return Type == EDesignFillType::Gradient; }
 	bool IsImage() const { return Type == EDesignFillType::Image; }
 
-	static FDesignFill FromColor(const FString& Color)
+	[[nodiscard]] static FDesignFill FromColor(const FString& Color)
 	{
 		FDesignFill Fill;
 		Fill.Type = EDesignFillType::Color;

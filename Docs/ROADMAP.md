@@ -15,9 +15,9 @@
 - Design2UMG 的架构完成度远超现有竞品，开源可快速建立生态位
 - AI 设计转代码浪潮尚未进入游戏引擎领域，时间窗口有限
 
-### 商业增值方向（开源后探索）
+### 商业增值方向（开源后探索，不代表当前公开发布承诺）
 
-- Pencil MCP 实时同步作为 Pro 功能
+- Pencil MCP / live sync 是否产品化仍待验证；当前仓库只公开 bridge / debug utility 形态
 - 企业级支持/咨询
 - 高级功能插件（动画状态导出、设计系统同步）
 
@@ -33,7 +33,7 @@
 | Prototype Flow | ⚠️ 最小闭环已落地（仍待扩容） | ✅ 交互解析+蓝图图表生成 | 仍有差距 |
 | 渐变 | ⚠️ 双色H/V/Radial | ❌ 无 | 领先 |
 | SVG Path | ✅ 完整指令集栅格化 | ❌ 无 | 领先 |
-| 多输入源 | ✅ .pen + Figma + MCP | Figma only | 领先 |
+| 多输入源 | ✅ .pen + Figma + MCP bridge/debug utility | Figma only | 领先 |
 | 蓝图逻辑生成 | ⚠️ 以 runtime extension 为主，未走完整 UEdGraph authoring | ✅ UEdGraph节点 | 仍有差距 |
 
 **结论**：核心短板已从“有无”转为“覆盖度与语义完整性”；Prototype Flow 和通用动画/图表 authoring 仍是主要差距。Figma2UMG 的 `WidgetBlueprintHelper`（MIT）可作为参考实现。
@@ -51,8 +51,8 @@
 | 补充 LICENSE 文件 | LICENSE | [x] | MIT |
 | 完善 README（英文为主，中文可选） | README.md | [x] | 多输入源/架构图/Quick Start/Known Limitations |
 | 补充 CONTRIBUTING.md | CONTRIBUTING.md | [x] | 贡献指南、代码规范、架构概览 |
-| 创建 GitHub Actions CI | .github/workflows/ | [x] | 编译检查模板（UE 5.4 / 5.5 / 5.6 / 5.7），需配置 self-hosted runner |
-| 创建 GitHub Release 模板 | .github/ | [x] | PR 模板 + Bug Report Issue 模板 |
+| 创建 GitHub Actions CI | .github/workflows/ | [~] | 已有公开 `repository-hygiene` 检查和手动触发的 self-hosted BuildPlugin 工作流；当前不是完整公开 CI matrix |
+| 创建 GitHub Release 模板 | .github/ | [~] | 当前已有 PR 模板和 Bug Report Issue 模板；尚未单独提供 release notes template，也不能把现状写成已具备完整 release 模板 |
 | 整理 CHANGELOG | CHANGELOG.md | [x] | Keep a Changelog 格式，v1.0.0 + Unreleased |
 | 更新 .uplugin 元信息 | Design2UMG.uplugin | [x] | CreatedBy / DocsURL / SupportURL |
 
@@ -77,11 +77,11 @@
 | 缓存淘汰策略（WeakPtr 自动失效 + LRU 上限 256） | PenPathRasterizer.cpp | [x] |
 | Hit/Miss 计数 + `FAutoConsoleCommand` 自注册 `Design2UMG.CacheStats` / `Design2UMG.CacheClear` | PenPathRasterizer.cpp | [x] |
 
-### 1.2 BoxShadow SDF 材质替换 ⏸️ 推迟
+### 1.2 BoxShadow SDF 材质替换 ⏸️ 推迟，且当前不是公开发布承诺
 
 **现状**：Overlay + 高斯模糊 Image 方案，ClipToBounds 下阴影被裁剪，只支持单层外阴影+均匀圆角。CPU 方案无法根治。
 
-**推迟原因**：性价比低。阴影裁剪只在紧凑布局+父级 ClipToBounds 时出现，属于边缘 case。引入材质资产会丢失"纯代码零资产"卖点，9 个子任务工程量大。推迟到社区有需求时再做。
+**推迟原因**：性价比低。阴影裁剪只在紧凑布局+父级 ClipToBounds 时出现，属于边缘 case。引入材质资产会丢失"纯代码零资产"卖点，9 个子任务工程量大。推迟到社区有需求时再做；在此之前，不能把它写成当前 release 方案。
 
 | 任务 | 文件 | 状态 |
 |------|------|------|
@@ -222,16 +222,17 @@
 
 ## 开源发布计划
 
-### v1.0 发布内容（Phase 0 + Phase 1 完成后）
+### v1.0 发布内容（按当前仓库公开口径收口）
 
-- 核心转换管线（.pen / Figma / MCP → UMG Widget Blueprint）
+- 核心转换管线（.pen / Figma / 本地 Figma export JSON → UMG Widget Blueprint）
 - 布局引擎（Flexbox → Anchors/Offsets，Fixer 规则修复）
-- 视觉属性（填充/描边/圆角/阴影/模糊，SDF 材质方案）
+- 当前公开主线视觉属性（填充/描边/圆角/阴影/模糊），不宣称已发布 SDF 材质方案
 - SVG Path 栅格化（带缓存）
 - 组件引用展开 + 变量/主题解析
-- Content Browser 拖拽导入 + Commandlet 批量导入
-- Pencil MCP 实时连接
-- 自动化测试
+- Content Browser 拖拽导入 + 命令行导入
+- 公开 smoke/public validate 文档
+- Bridge / debug utilities 继续保留：MCP JSON bridge import、live Pencil MCP 本地调试链路；这不是当前 release support promise
+- 维护者 formal admissible gate 作为 release gate
 
 ### v1.1 发布内容（Phase 2 扩容后）
 
@@ -248,18 +249,18 @@
 
 ## 关键技术决策记录
 
-### 决策 1：CanContainContent 从 false 改为 true
+### 决策 1：CanContainContent 从 false 改为 true（历史探索，当前未采纳为 release 路线）
 
-- **原因**：BoxShadow 的 ClipToBounds 裁剪问题用 CPU 方案无法解决，必须用 SDF 材质
-- **代价**：丢失"纯代码零资产"特性，用户卸载插件后生成的 Widget 会有 broken reference
-- **缓解 A**：材质资产最小化（仅 BoxShadow + RoundedRect + Gradient），文档中说明依赖关系
-- **缓解 B**：生成时将 MID 渲染结果烘焙为独立 UTexture2D 序列化进 Widget 资产（MID → RenderTarget → ReadBack → UTexture2D → SavePackage），已生成的 Widget 脱离插件依赖，卸载后不 broken
+- **背景**：这是为 BoxShadow 裁剪问题探索过的一条材质化方向，不是当前仓库已经采纳的 release 决策
+- **为什么没落地**：会丢失"纯代码零资产"特性，用户卸载插件后生成的 Widget 还会面临依赖管理问题，整体投入也偏高
+- **当前结论**：保留为候选方案记录，不对外宣称已进入当前 release 主线
 
-### 决策 2：蓝图图表生成采用双轨方案
+### 决策 2：Prototype Flow 主路线收口到 typed contract + Blueprint extension
 
-- **原因**：UEdGraph API 无官方文档，维护成本高，UE 版本升级可能 break
-- **方案**：同时提供蓝图图表生成（功能完整）和 Tag 方案（轻量稳定），用户可选
-- **参考**：Figma2UMG 的 WidgetBlueprintHelper（MIT）已验证可行性
+- **背景**：早期确实评估过 `BlueprintGraphHelper + K2 图表拼接` 和 Tag 方案并行推进，但这已经不是当前主路线
+- **原因**：UEdGraph authoring 维护成本高、跨版本稳定性差，继续把它写成主路线会和当前仓库现状冲突
+- **当前结论**：公开主线以 typed navigation contract + Blueprint extension 为准；蓝图图表自动生成只保留为后续评估项，不再作为既定双轨结论写入 roadmap
+- **参考**：Figma2UMG 的 WidgetBlueprintHelper（MIT）仍可作为后续评估实现时的参考
 
 ### 决策 3：椭圆走 Path 栅格化而非 SDF 材质
 
@@ -272,7 +273,7 @@
 
 | 里程碑 | 完成标准 |
 |--------|----------|
-| **M0: 开源就绪** | CI 通过、LICENSE/README/CONTRIBUTING 完善、版权头全部替换、无敏感信息 |
-| **M1: v1.0 发布** | Phase 1 全部完成，Path 缓存命中率 > 90%（通过 `Design2UMG.CacheStats` 验证），BoxShadow 不再被裁剪 |
+| **M0: 开源就绪** | `repository-hygiene` 公开检查通过、self-hosted build 可用、LICENSE/README/CONTRIBUTING 完善、版权头全部替换、无敏感信息 |
+| **M1: v1.0 发布** | M0 达成，且当前公开 v1.0 内容收口完成；Path 缓存命中率 > 90%（通过 `Design2UMG.CacheStats` 验证）；不把已推迟的 BoxShadow/SDF、渐变材质路线写成 v1.0 完成条件 |
 | **M2: v1.1 发布** | Phase 2 全部完成，Prototype Flow 端到端可用，蓝图编译无错误 |
 | **M3: 社区健康度** | 3+ 外部 contributor、Issues 中位响应时间 < 48h |

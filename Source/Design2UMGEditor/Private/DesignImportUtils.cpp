@@ -11,6 +11,7 @@
 #include "WidgetBlueprint.h"
 #include "Blueprint/UserWidget.h"
 #include "HAL/FileManager.h"
+#include "Misc/App.h"
 #include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
@@ -382,10 +383,13 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 	}
 
 	{
-		const FString TreeRenderPath = FPaths::Combine(
-			FPaths::GetPath(OutputPngFilePath),
-			FPaths::GetBaseFilename(OutputPngFilePath) + TEXT(".widgettree.png"));
-		RenderWidgetTreeToPngFile(WidgetBlueprint, RequestedRenderSize, TreeRenderPath);
+		if (!FApp::IsUnattended())
+		{
+			const FString TreeRenderPath = FPaths::Combine(
+				FPaths::GetPath(OutputPngFilePath),
+				FPaths::GetBaseFilename(OutputPngFilePath) + TEXT(".widgettree.png"));
+			RenderWidgetTreeToPngFile(WidgetBlueprint, RequestedRenderSize, TreeRenderPath);
+		}
 	}
 
 	WidgetBlueprint = ReloadWidgetBlueprintForRender(WidgetBlueprint);

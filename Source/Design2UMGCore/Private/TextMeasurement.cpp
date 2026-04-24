@@ -16,30 +16,73 @@
 
 namespace
 {
-	TMap<FString, float> GResolvedTextFontScaleCache;
-	TMap<FString, float> GResolvedSharedTextFontScaleMinCache;
-	FCriticalSection GResolvedTextFontScaleCacheMutex;
+	namespace SharedThresholds
+	{
+		constexpr float LargeNonWrappingFontThreshold = 24.0f;
+		constexpr int32 CompactSingleLineLabelWordLimit = 2;
+		constexpr float CompactSingleLineLabelWidthThreshold = 80.0f;
+		constexpr float CompactSingleLineLabelWidthInset = 5.0f;
+		constexpr float DefaultFigmaWidthInset = 4.0f;
+	}
 
-	constexpr float DefaultLineHeightMultiplier = 1.285714f;
-	constexpr float DefaultFontFallbackScale = 0.75f;
-	constexpr float MinMeasuredFontFallbackScale = 0.5f;
-	constexpr float MaxMeasuredFontFallbackScale = DefaultFontFallbackScale;
-	constexpr float FallbackMeasureWidthScale = 0.60f;
-	constexpr float IntrinsicSingleLineSlackThreshold = 1.08f;
-	constexpr float SingleLineWidthHeuristicScale = 0.55f;
-	constexpr float FallbackMeasureHeightScale = 1.5f;
-	constexpr float MinWrapProbeScale = 0.70f;
-	constexpr float DeclaredFontProbeScale = 1.5f;
-	constexpr float FallbackFontProbeScale = 2.0f;
-	constexpr float LargeNonWrappingFontThreshold = 24.0f;
+	namespace LineBox
+	{
+		constexpr float DefaultLineHeightMultiplier = 1.285714f;
+	}
 
-	FVector2D MeasureTextSize(const FString& Text, float FontSize, const FString& FontFamily, const FString& FontWeight, int32 LetterSpacing = 0);
-	float MeasureSingleLineTextBlockHeight(const TSharedPtr<FDesignNode>& Node, float FontSize);
+	namespace FallbackCalibration
+	{
+		constexpr float DefaultFontFallbackScale = 0.75f;
+		constexpr float MinMeasuredFontFallbackScale = 0.5f;
+		constexpr float MaxMeasuredFontFallbackScale = DefaultFontFallbackScale;
+		constexpr float IntrinsicSingleLineSlackThreshold = 1.08f;
+	}
+
+	namespace RuntimeProbe
+	{
+		constexpr float FallbackMeasureWidthScale = 0.60f;
+		constexpr float FallbackMeasureHeightScale = 1.5f;
+		constexpr float DeclaredFontProbeScale = 1.5f;
+		constexpr float FallbackFontProbeScale = 2.0f;
+
+		FVector2D MeasureTextSize(const FString& Text, float FontSize, const FString& FontFamily, const FString& FontWeight, int32 LetterSpacing = 0);
+		float MeasureSingleLineTextBlockHeight(const TSharedPtr<FDesignNode>& Node, float FontSize);
+		FVector2D MeasureUMGTextBlockDesiredSize(
+			const TSharedPtr<FDesignNode>& Node,
+			float FontSize,
+			const FString& Text,
+			float WrapTextAt,
+			bool bAutoWrapText);
+		int32 ResolveMaxProbeFontSize(float DeclaredFontSize, float FallbackFontSize);
+	}
+
+	namespace SingleLineHeuristics
+	{
+		constexpr float WidthHeuristicScale = 0.55f;
+		bool IsHeavyFontWeight(const FString& FontWeight);
+		int32 CountSingleLineTextWords(const TSharedPtr<FDesignNode>& Node);
+		bool ShouldAllowClosestOvershootSingleLineWidthFit(const TSharedPtr<FDesignNode>& Node);
+	}
+
+	namespace SourceMetadata
+	{
+		bool IsFigmaSourceNode(const TSharedPtr<FDesignNode>& Node);
+	}
+
+	namespace WrapHeight
+	{
+		constexpr float MinWrapProbeScale = 0.70f;
+	}
 
 	float ResolveTextWidthHint(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth)
 	{
 		return Design2UMGCore::SharedSemantics::ResolveWidthHint(Node, ParentContentWidth);
 	}
+
+	namespace RuntimeProbe
+	{
+	constexpr float WidthFitTolerance = 0.5f;
+	constexpr float WidthFitOvershootTolerance = 2.0f;
 
 	int32 ResolveBestProbeFontSize(
 		float FallbackFontSize,
@@ -79,9 +122,6 @@ namespace
 		bool bAllowClosestOvershoot,
 		TFunctionRef<float(float)> MeasureWidth)
 	{
-		constexpr float WidthFitTolerance = 0.5f;
-		constexpr float WidthFitOvershootTolerance = 2.0f;
-
 		int32 BestFittingFontSize = INDEX_NONE;
 		float BestRemainingWidth = TNumericLimits<float>::Max();
 		int32 BestOvershootFontSize = INDEX_NONE;
@@ -163,7 +203,10 @@ namespace
 
 		return ClosestError == TNumericLimits<float>::Max() ? INDEX_NONE : ClosestFontSize;
 	}
+	}
 
+	namespace WrapHeight
+	{
 	int32 EstimateWrappedLineCount(float SingleLineHeight, const FVector2D& WrappedSize)
 	{
 		if (SingleLineHeight <= 0.0f || WrappedSize.Y <= 0.0f)
@@ -173,7 +216,133 @@ namespace
 
 		return FMath::Max(1, FMath::RoundToInt(WrappedSize.Y / FMath::Max(1.0f, SingleLineHeight)));
 	}
+	}
 
+	namespace SharedThresholdOwners
+	{
+	bool ShouldApplyLargeNonWrappingExplicitLineHeight(const TSharedPtr<FDesignNode>& Node)
+	{
+		return Node.IsValid()
+			&& Node->Text.LineHeight > 0.0f
+			&& !Node->Text.Content.Contains(TEXT("\n"))
+			&& Node->Text.FontSize >= SharedThresholds::LargeNonWrappingFontThreshold
+			&& !TextMeasurement::IsWrappingTextMode(Node);
+	}
+	}
+
+	namespace SingleLineWidthFit
+	{
+	struct FProbePlan
+	{
+		float TargetTextWidth = 0.0f;
+		float WidthFitTarget = 0.0f;
+		int32 MaxProbeFontSize = 0;
+		bool bAllowClosestOvershoot = false;
+		bool bConstrainWrappedHeight = false;
+	};
+
+	bool IsCompactSingleLineLabel(const TSharedPtr<FDesignNode>& Node, const float TargetTextWidth)
+	{
+		return Node.IsValid()
+			&& !SingleLineHeuristics::IsHeavyFontWeight(Node->Text.FontWeight)
+			&& SingleLineHeuristics::CountSingleLineTextWords(Node) <= SharedThresholds::CompactSingleLineLabelWordLimit
+			&& TargetTextWidth <= SharedThresholds::CompactSingleLineLabelWidthThreshold;
+	}
+
+	bool TryBuildProbePlan(
+		const TSharedPtr<FDesignNode>& Node,
+		const float FallbackFontSize,
+		FProbePlan& OutPlan)
+	{
+		if (!Node.IsValid())
+		{
+			return false;
+		}
+
+		OutPlan.TargetTextWidth = (!Node->Transform.Width.IsFill()
+			&& Node->Transform.Width.Value > 0.0f
+			&& !Node->Text.Content.Contains(TEXT("\n")))
+			? Node->Transform.Width.Value
+			: 0.0f;
+		if (OutPlan.TargetTextWidth <= 0.0f || !TextMeasurementRuntimeProbe::IsAvailable())
+		{
+			return false;
+		}
+
+		const bool bShouldApplyWidthInset =
+			Node->Transform.bSourceHasWidth
+			&& !TextMeasurement::ShouldAutoWrapText(Node)
+			&& Node->Text.TextAlignVertical == EDesignTextAlignVertical::Top
+			&& SourceMetadata::IsFigmaSourceNode(Node);
+		const float WidthInset = IsCompactSingleLineLabel(Node, OutPlan.TargetTextWidth)
+			? SharedThresholds::CompactSingleLineLabelWidthInset
+			: SharedThresholds::DefaultFigmaWidthInset;
+		OutPlan.WidthFitTarget = bShouldApplyWidthInset
+			? FMath::Max(0.0f, OutPlan.TargetTextWidth - WidthInset)
+			: OutPlan.TargetTextWidth;
+		OutPlan.MaxProbeFontSize = RuntimeProbe::ResolveMaxProbeFontSize(Node->Text.FontSize, FallbackFontSize);
+		OutPlan.bConstrainWrappedHeight =
+			TextMeasurement::ShouldAutoWrapText(Node)
+			&& Node->Transform.Height.Value > 0.0f;
+		OutPlan.bAllowClosestOvershoot =
+			!Node->Transform.bSourceHasWidth
+			&& SingleLineHeuristics::ShouldAllowClosestOvershootSingleLineWidthFit(Node);
+		return true;
+	}
+
+	int32 ResolveWrappedHeightConstrainedFontSize(
+		const TSharedPtr<FDesignNode>& Node,
+		const FProbePlan& Plan,
+		TFunctionRef<float(float)> MeasureWidth)
+	{
+		if (!Plan.bConstrainWrappedHeight)
+		{
+			return INDEX_NONE;
+		}
+
+		int32 BestWrappedFitFontSize = INDEX_NONE;
+		float BestWrappedFitError = TNumericLimits<float>::Max();
+		constexpr float WrappedHeightTolerance = 1.0f;
+		for (int32 CandidateFontSize = 1; CandidateFontSize <= Plan.MaxProbeFontSize; ++CandidateFontSize)
+		{
+			const float CandidateWidth = MeasureWidth(static_cast<float>(CandidateFontSize));
+			if (CandidateWidth <= 0.0f)
+			{
+				continue;
+			}
+
+			const FVector2D CandidateWrappedSize = RuntimeProbe::MeasureUMGTextBlockDesiredSize(
+				Node,
+				static_cast<float>(CandidateFontSize),
+				Node->Text.Content,
+				Plan.TargetTextWidth,
+				true);
+			if (CandidateWrappedSize.X <= 0.0f || CandidateWrappedSize.Y <= 0.0f)
+			{
+				continue;
+			}
+
+			if (CandidateWrappedSize.Y > Node->Transform.Height.Value + WrappedHeightTolerance)
+			{
+				continue;
+			}
+
+			const float Error = FMath::Abs(CandidateWidth - Plan.TargetTextWidth);
+			if (BestWrappedFitFontSize == INDEX_NONE
+				|| Error + KINDA_SMALL_NUMBER < BestWrappedFitError
+				|| (FMath::IsNearlyEqual(Error, BestWrappedFitError, 0.01f) && CandidateFontSize > BestWrappedFitFontSize))
+			{
+				BestWrappedFitFontSize = CandidateFontSize;
+				BestWrappedFitError = Error;
+			}
+		}
+
+		return BestWrappedFitFontSize;
+	}
+	}
+
+	namespace FallbackCalibration
+	{
 	bool TryGetDefaultSlateTextFontAssetPath(FString& OutAssetPath)
 	{
 		const UObject* DefaultFontObject = FTextBlockStyle::GetDefault().Font.FontObject;
@@ -193,13 +362,23 @@ namespace
 			&& TryGetDefaultSlateTextFontAssetPath(DefaultFontAssetPath)
 			&& AssetPath.Equals(DefaultFontAssetPath, ESearchCase::IgnoreCase);
 	}
+	}
 
+	namespace RuntimeProbe
+	{
 	int32 ResolveMaxProbeFontSize(float DeclaredFontSize, float FallbackFontSize)
 	{
 		return FMath::Max(
 			1,
 			FMath::CeilToInt(FMath::Max(DeclaredFontSize * DeclaredFontProbeScale, FallbackFontSize * FallbackFontProbeScale)));
 	}
+	}
+
+	namespace CacheTrace
+	{
+	TMap<FString, float> GResolvedTextFontScaleCache;
+	TMap<FString, float> GResolvedSharedTextFontScaleMinCache;
+	FCriticalSection GResolvedTextFontScaleCacheMutex;
 
 	bool TryGetResolvedTextFontScale(const FString& CalibrationKey, float& OutScale)
 	{
@@ -235,7 +414,10 @@ namespace
 		float& CachedScale = GResolvedSharedTextFontScaleMinCache.FindOrAdd(SharedKey, Scale);
 		CachedScale = FMath::Min(CachedScale, Scale);
 	}
+	}
 
+	namespace LineBox
+	{
 	float EstimateSingleLineTextHeight(const TSharedPtr<FDesignNode>& Node)
 	{
 		if (!Node.IsValid() || Node->Text.FontSize <= 0.0f)
@@ -247,7 +429,10 @@ namespace
 		const float LineHeightMultiplier = Node->Text.LineHeight > 0.0f ? Node->Text.LineHeight : DefaultLineHeightMultiplier;
 		return FMath::Max(BaseFontSize, BaseFontSize * LineHeightMultiplier);
 	}
+	}
 
+	namespace FallbackCalibration
+	{
 	FString NormalizeTextMeasurementFontFamilyKey(const FString& FontFamily)
 	{
 		FString Normalized = FontFamily.ToLower();
@@ -287,7 +472,10 @@ namespace
 		const FString AssetPath = FFontResolver::FindFontAssetPath(Node->Text.FontFamily);
 		return IsDefaultSlateTextFontAssetPath(AssetPath);
 	}
+	}
 
+	namespace FontCalibration
+	{
 	FString ResolveTypefaceName(const FString& FontFamily, const FString& FontWeight)
 	{
 		FString Typeface = FFontResolver::FindBestTypeface(FontFamily, FontWeight);
@@ -307,7 +495,10 @@ namespace
 
 		return ResolveTypefaceName(Node->Text.FontFamily, Node->Text.FontWeight);
 	}
+	}
 
+	namespace RuntimeProbe
+	{
 	TextMeasurementRuntimeProbe::FTextMeasureRequest BuildTextMeasureRequest(
 		const FString& Text,
 		const float FontSize,
@@ -319,7 +510,7 @@ namespace
 		Request.Text = Text;
 		Request.FontSize = FontSize;
 		Request.FontAssetPath = FFontResolver::FindFontAssetPath(FontFamily);
-		Request.TypefaceName = ResolveTypefaceName(FontFamily, FontWeight);
+		Request.TypefaceName = FontCalibration::ResolveTypefaceName(FontFamily, FontWeight);
 		Request.LetterSpacing = LetterSpacing;
 		return Request;
 	}
@@ -340,7 +531,7 @@ namespace
 		Request.Text = Text;
 		Request.FontSize = FontSize;
 		Request.FontAssetPath = FFontResolver::FindFontAssetPath(Node->Text.FontFamily);
-		Request.TypefaceName = ResolveTypefaceName(Node);
+		Request.TypefaceName = FontCalibration::ResolveTypefaceName(Node);
 		Request.LetterSpacing = (Node->Text.LetterSpacing != 0.0f && FontSize > 0.0f)
 			? TextStyleUtils::ConvertLetterSpacingPxToTracking(Node->Text.LetterSpacing, Node->Text.FontSize, FontSize)
 			: 0;
@@ -351,7 +542,10 @@ namespace
 		Request.WrapTextAt = WrapTextAt;
 		return Request;
 	}
+	}
 
+	namespace SingleLineHeuristics
+	{
 	bool IsHeavyFontWeight(const FString& FontWeight)
 	{
 		const FString Normalized = FontWeight.ToLower().TrimStartAndEnd();
@@ -388,7 +582,10 @@ namespace
 			|| Normalized == TEXT("800")
 			|| Normalized == TEXT("900");
 	}
+	}
 
+	namespace CacheTrace
+	{
 	FString SummarizeTextForLog(const FString& Text)
 	{
 		FString Summary = TextMeasurement::PrepareRuntimeTextContent(Text);
@@ -436,17 +633,20 @@ namespace
 			*OutResolutionPath = Reason;
 		}
 	}
-
-bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
-{
-	if (!Node.IsValid())
-	{
-		return false;
 	}
 
-	const FString* Value = Node->Metadata.Find(TEXT("source.text.truncate"));
-	return Value && Value->Equals(TEXT("true"), ESearchCase::IgnoreCase);
-}
+	namespace SourceMetadata
+	{
+	bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid())
+		{
+			return false;
+		}
+
+		const FString* Value = Node->Metadata.Find(TEXT("source.text.truncate"));
+		return Value && Value->Equals(TEXT("true"), ESearchCase::IgnoreCase);
+	}
 
 	bool IsFigmaSourceNode(const TSharedPtr<FDesignNode>& Node)
 	{
@@ -462,7 +662,10 @@ bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
 
 		return false;
 	}
+	}
 
+	namespace TextContentRules
+	{
 	bool HasExplicitParagraphBreaks(const FString& Text)
 	{
 		return Text.Contains(TEXT("\n\n"))
@@ -474,7 +677,10 @@ bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
 	{
 		return Node.IsValid() && HasExplicitParagraphBreaks(Node->Text.Content);
 	}
+	}
 
+	namespace SingleLineHeuristics
+	{
 	bool IsLongSentenceLikeSingleLineText(const TSharedPtr<FDesignNode>& Node)
 	{
 		if (!Node.IsValid())
@@ -857,8 +1063,8 @@ bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
 		}
 
 		const float FamilyFallbackFontSize =
-			Node->Text.FontSize * FindFamilySpecificTextFallbackScale(
-				NormalizeTextMeasurementFontFamilyKey(Node->Text.FontFamily));
+			Node->Text.FontSize * FallbackCalibration::FindFamilySpecificTextFallbackScale(
+				FallbackCalibration::NormalizeTextMeasurementFontFamilyKey(Node->Text.FontFamily));
 		if (FamilyFallbackFontSize <= 0.0f)
 		{
 			return false;
@@ -870,7 +1076,7 @@ bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
 				Node->Text.FontSize,
 				FamilyFallbackFontSize)
 			: 0;
-		const FVector2D UnwrappedSize = MeasureTextSize(
+		const FVector2D UnwrappedSize = RuntimeProbe::MeasureTextSize(
 			Node->Text.Content,
 			FamilyFallbackFontSize,
 			Node->Text.FontFamily,
@@ -881,9 +1087,12 @@ bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
 			return false;
 		}
 
-		return WidthHint >= UnwrappedSize.X * IntrinsicSingleLineSlackThreshold;
+		return WidthHint >= UnwrappedSize.X * FallbackCalibration::IntrinsicSingleLineSlackThreshold;
+	}
 	}
 
+	namespace FallbackCalibration
+	{
 	TOptional<float> TryResolveMeasuredTextFontFallbackScale(const TSharedPtr<FDesignNode>& Node)
 	{
 		if (!Node.IsValid()
@@ -896,10 +1105,10 @@ bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
 		float BestScale = 1.0f;
 		bool bHasScale = false;
 
-		const float TargetLineBoxHeight = EstimateSingleLineTextHeight(Node);
+		const float TargetLineBoxHeight = LineBox::EstimateSingleLineTextHeight(Node);
 		if (TargetLineBoxHeight > 0.0f)
 		{
-			const float MeasuredLineHeight = MeasureSingleLineTextBlockHeight(Node, Node->Text.FontSize);
+			const float MeasuredLineHeight = RuntimeProbe::MeasureSingleLineTextBlockHeight(Node, Node->Text.FontSize);
 			if (MeasuredLineHeight > KINDA_SMALL_NUMBER)
 			{
 				BestScale = TargetLineBoxHeight / MeasuredLineHeight;
@@ -913,7 +1122,7 @@ bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
 			const int32 LetterSpacingTracking = Node->Text.LetterSpacing != 0.0f
 				? TextStyleUtils::ConvertLetterSpacingPxToTracking(Node->Text.LetterSpacing, Node->Text.FontSize, Node->Text.FontSize)
 				: 0;
-			const FVector2D UnwrappedSize = MeasureTextSize(
+			const FVector2D UnwrappedSize = RuntimeProbe::MeasureTextSize(
 				Node->Text.Content,
 				Node->Text.FontSize,
 				Node->Text.FontFamily,
@@ -951,7 +1160,8 @@ bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
 
 		float FallbackScale = FindFamilySpecificTextFallbackScale(
 			NormalizeTextMeasurementFontFamilyKey(Node->Text.FontFamily));
-		if (ShouldUseMeasuredTextFontFallbackScale(Node) && !ShouldPreferIntrinsicSingleLineFallbackFontSize(Node))
+		if (SingleLineHeuristics::ShouldUseMeasuredTextFontFallbackScale(Node)
+			&& !SingleLineHeuristics::ShouldPreferIntrinsicSingleLineFallbackFontSize(Node))
 		{
 			if (const TOptional<float> MeasuredScale = TryResolveMeasuredTextFontFallbackScale(Node))
 			{
@@ -961,7 +1171,10 @@ bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
 
 		return Node->Text.FontSize * FallbackScale;
 	}
+	}
 
+	namespace CacheTrace
+	{
 	FString BuildTextFontCalibrationKey(const TSharedPtr<FDesignNode>& Node)
 	{
 		if (!Node.IsValid())
@@ -972,8 +1185,8 @@ bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
 		const FString LineHeightKey = Node->Text.LineHeight > 0.0f
 			? FString::Printf(TEXT("%.4f"), Node->Text.LineHeight)
 			: TEXT("default");
-		const FString NormalizedFamily = NormalizeTextMeasurementFontFamilyKey(Node->Text.FontFamily);
-		const FString TypefaceName = ResolveTypefaceName(Node);
+		const FString NormalizedFamily = FallbackCalibration::NormalizeTextMeasurementFontFamilyKey(Node->Text.FontFamily);
+		const FString TypefaceName = FontCalibration::ResolveTypefaceName(Node);
 		const FString LetterSpacingKey = FString::Printf(TEXT("%.4f"), Node->Text.LetterSpacing);
 		const FString WidthKey = FString::Printf(
 			TEXT("%d:%.2f"),
@@ -996,7 +1209,7 @@ bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
 			static_cast<int32>(Node->Text.TextAlign),
 			static_cast<int32>(Node->Text.TextAlignVertical),
 			TextMeasurement::ShouldAutoWrapText(Node) ? 1 : 0,
-			IsFigmaTruncateTextNode(Node) ? 1 : 0);
+			SourceMetadata::IsFigmaTruncateTextNode(Node) ? 1 : 0);
 	}
 
 	FString BuildTextFontSharedStyleKey(const TSharedPtr<FDesignNode>& Node)
@@ -1009,8 +1222,8 @@ bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
 		const FString LineHeightKey = Node->Text.LineHeight > 0.0f
 			? FString::Printf(TEXT("%.4f"), Node->Text.LineHeight)
 			: TEXT("default");
-		const FString NormalizedFamily = NormalizeTextMeasurementFontFamilyKey(Node->Text.FontFamily);
-		const FString TypefaceName = ResolveTypefaceName(Node);
+		const FString NormalizedFamily = FallbackCalibration::NormalizeTextMeasurementFontFamilyKey(Node->Text.FontFamily);
+		const FString TypefaceName = FontCalibration::ResolveTypefaceName(Node);
 		const FString LetterSpacingKey = FString::Printf(TEXT("%.4f"), Node->Text.LetterSpacing);
 		return FString::Printf(
 			TEXT("%s|%s|%s|%.1f|ls=%s|grow=%d|align=%d|valign=%d|wrap=%d|truncate=%d"),
@@ -1023,12 +1236,15 @@ bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
 			static_cast<int32>(Node->Text.TextAlign),
 			static_cast<int32>(Node->Text.TextAlignVertical),
 			TextMeasurement::ShouldAutoWrapText(Node) ? 1 : 0,
-			IsFigmaTruncateTextNode(Node) ? 1 : 0);
+			SourceMetadata::IsFigmaTruncateTextNode(Node) ? 1 : 0);
+	}
 	}
 
+	namespace SharedCalibration
+	{
 	bool ShouldParticipateInSharedTextStyleCalibration(const TSharedPtr<FDesignNode>& Node)
 	{
-		if (!Node.IsValid() || IsFigmaTruncateTextNode(Node))
+		if (!Node.IsValid() || SourceMetadata::IsFigmaTruncateTextNode(Node))
 		{
 			return false;
 		}
@@ -1048,7 +1264,10 @@ bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
 		return ShouldParticipateInSharedTextStyleCalibration(Node)
 			&& Node->Text.Content.Contains(TEXT("\n"));
 	}
+	}
 
+	namespace RuntimeProbe
+	{
 	FSlateFontInfo BuildSlateFontInfoForSize(const TSharedPtr<FDesignNode>& Node, float FontSize)
 	{
 		FSlateFontInfo FontInfo = FTextBlockStyle::GetDefault().Font;
@@ -1074,7 +1293,7 @@ bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
 			}
 		}
 
-		const FString Typeface = ResolveTypefaceName(Node);
+		const FString Typeface = FontCalibration::ResolveTypefaceName(Node);
 		if (!Typeface.IsEmpty())
 		{
 			FontInfo.TypefaceFontName = FName(*Typeface);
@@ -1148,7 +1367,7 @@ bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
 
 		const float AppliedFontSize = TextMeasurement::ResolveTextFontSizeForUMG(Node);
 		const float HeuristicFontSize = AppliedFontSize > 0.0f ? AppliedFontSize : Node->Text.FontSize;
-		const float HeuristicWidth = Node->Text.Content.Len() * HeuristicFontSize * SingleLineWidthHeuristicScale;
+		const float HeuristicWidth = Node->Text.Content.Len() * HeuristicFontSize * SingleLineHeuristics::WidthHeuristicScale;
 		const float EffectiveWidth = UnwrappedWidth > 0.0f ? UnwrappedWidth : HeuristicWidth;
 		return EffectiveWidth <= WidthLimit + 0.5f;
 	}
@@ -1178,7 +1397,7 @@ bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
 			FMath::CeilToInt(FMath::Max(FallbackFontSize, Node->Text.FontSize)));
 		const int32 MinProbeFontSize = FMath::Min(
 			MaxProbeFontSize,
-			FMath::Max(1, FMath::FloorToInt(FallbackFontSize * MinWrapProbeScale)));
+			FMath::Max(1, FMath::FloorToInt(FallbackFontSize * WrapHeight::MinWrapProbeScale)));
 		const bool bAutoWrapText = TextMeasurement::ShouldAutoWrapText(Node);
 		const float AvailableHeight = Node->Transform.Height.Value;
 		const bool bHasFixedHeight = AvailableHeight > 0.0f;
@@ -1213,7 +1432,7 @@ bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
 				continue;
 			}
 
-			const int32 CandidateLineCount = EstimateWrappedLineCount(CandidateSingleLineHeight, CandidateWrappedSize);
+			const int32 CandidateLineCount = WrapHeight::EstimateWrappedLineCount(CandidateSingleLineHeight, CandidateWrappedSize);
 			const float CandidateWidthSlack = FMath::Max(0.0f, WidthLimit - CandidateWrappedSize.X);
 			const float CandidateHeightError = FMath::Abs(CandidateSingleLineHeight - TargetLineBoxHeight);
 			const float CandidateDistanceToFallback = FMath::Abs(static_cast<float>(CandidateFontSize) - FallbackFontSize);
@@ -1291,129 +1510,69 @@ bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
 		{
 			return 0.0f;
 		}
-		if (ShouldUseDeclaredFontSizeDirectly(Node))
+		if (FallbackCalibration::ShouldUseDeclaredFontSizeDirectly(Node))
 		{
-			LogResolvedTextDecision(Node, TEXT("declared-direct"), Node->Text.FontSize, Node->Text.FontSize, OutResolutionPath);
+			CacheTrace::LogResolvedTextDecision(Node, TEXT("declared-direct"), Node->Text.FontSize, Node->Text.FontSize, OutResolutionPath);
 			return Node->Text.FontSize;
 		}
-		const float FallbackFontSize = ResolveTextFontSizeFallback(Node);
+		const float FallbackFontSize = FallbackCalibration::ResolveTextFontSizeFallback(Node);
 		if (Node->Text.FontSize <= 0.0f || !TextMeasurementRuntimeProbe::IsAvailable())
 		{
-			LogResolvedTextDecision(Node, TEXT("fallback-no-slate"), FallbackFontSize, FallbackFontSize, OutResolutionPath);
+			CacheTrace::LogResolvedTextDecision(Node, TEXT("fallback-no-slate"), FallbackFontSize, FallbackFontSize, OutResolutionPath);
 			return FallbackFontSize;
 		}
 
-		const float TargetLineBoxHeight = EstimateSingleLineTextHeight(Node);
+		const float TargetLineBoxHeight = LineBox::EstimateSingleLineTextHeight(Node);
 		if (TargetLineBoxHeight <= 0.0f)
 		{
-			LogResolvedTextDecision(Node, TEXT("fallback-no-linebox"), FallbackFontSize, FallbackFontSize, OutResolutionPath);
+			CacheTrace::LogResolvedTextDecision(Node, TEXT("fallback-no-linebox"), FallbackFontSize, FallbackFontSize, OutResolutionPath);
 			return FallbackFontSize;
 		}
 
 		const bool bApplyExplicitLineHeight = TextMeasurement::ShouldApplyExplicitLineHeight(Node, FallbackFontSize);
-		if (ShouldPreferIntrinsicSingleLineFallbackFontSize(Node))
+		if (SingleLineHeuristics::ShouldPreferIntrinsicSingleLineFallbackFontSize(Node))
 		{
-			LogResolvedTextDecision(Node, TEXT("fallback-intrinsic-single-line"), FallbackFontSize, FallbackFontSize, OutResolutionPath);
+			CacheTrace::LogResolvedTextDecision(Node, TEXT("fallback-intrinsic-single-line"), FallbackFontSize, FallbackFontSize, OutResolutionPath);
 			return FallbackFontSize;
 		}
 
 		if (!bApplyExplicitLineHeight)
 		{
-			const float TargetTextWidth = (!Node->Transform.Width.IsFill() && Node->Transform.Width.Value > 0.0f && !Node->Text.Content.Contains(TEXT("\n")))
-				? Node->Transform.Width.Value
-				: 0.0f;
-			if (TargetTextWidth <= 0.0f || !TextMeasurementRuntimeProbe::IsAvailable())
+			SingleLineWidthFit::FProbePlan ProbePlan;
+			if (!SingleLineWidthFit::TryBuildProbePlan(Node, FallbackFontSize, ProbePlan))
 			{
-				LogResolvedTextDecision(Node, TEXT("fallback-no-width-probe"), FallbackFontSize, FallbackFontSize, OutResolutionPath);
+				CacheTrace::LogResolvedTextDecision(Node, TEXT("fallback-no-width-probe"), FallbackFontSize, FallbackFontSize, OutResolutionPath);
 				return FallbackFontSize;
 			}
-			const bool bShouldApplyWidthInset =
-				Node->Transform.bSourceHasWidth
-				&& !TextMeasurement::ShouldAutoWrapText(Node)
-				&& Node->Text.TextAlignVertical == EDesignTextAlignVertical::Top
-				&& IsFigmaSourceNode(Node);
-
-			const bool bIsCompactSingleLineLabel =
-				!IsHeavyFontWeight(Node->Text.FontWeight)
-				&& CountSingleLineTextWords(Node) <= 2
-				&& TargetTextWidth <= 80.0f;
-
-			const float WidthInset = bIsCompactSingleLineLabel ? 5.0f : 4.0f;
-			const float WidthFitTarget = bShouldApplyWidthInset
-				? FMath::Max(0.0f, TargetTextWidth - WidthInset)
-				: TargetTextWidth;
 
 			auto MeasureWidth = [&](float CandidateFontSize) -> float
 			{
-				return MeasureUMGTextBlockDesiredSize(Node, CandidateFontSize, Node->Text.Content, 0.0f, false).X;
+				return RuntimeProbe::MeasureUMGTextBlockDesiredSize(Node, CandidateFontSize, Node->Text.Content, 0.0f, false).X;
 			};
 
-			const int32 MaxProbeFontSize = ResolveMaxProbeFontSize(Node->Text.FontSize, FallbackFontSize);
-			const bool bConstrainWrappedHeight =
-				TextMeasurement::ShouldAutoWrapText(Node)
-				&& Node->Transform.Height.Value > 0.0f;
-			int32 BestWrappedFitFontSize = INDEX_NONE;
-			float BestWrappedFitError = TNumericLimits<float>::Max();
-			constexpr float WrappedHeightTolerance = 1.0f;
-
-			if (bConstrainWrappedHeight)
-			{
-				for (int32 CandidateFontSize = 1; CandidateFontSize <= MaxProbeFontSize; ++CandidateFontSize)
-				{
-					const float CandidateWidth = MeasureWidth(static_cast<float>(CandidateFontSize));
-					if (CandidateWidth <= 0.0f)
-					{
-						continue;
-					}
-
-					const FVector2D CandidateWrappedSize = MeasureUMGTextBlockDesiredSize(
-						Node,
-						static_cast<float>(CandidateFontSize),
-						Node->Text.Content,
-						TargetTextWidth,
-						true);
-					if (CandidateWrappedSize.X <= 0.0f || CandidateWrappedSize.Y <= 0.0f)
-					{
-						continue;
-					}
-
-					if (CandidateWrappedSize.Y > Node->Transform.Height.Value + WrappedHeightTolerance)
-					{
-						continue;
-					}
-
-					const float Error = FMath::Abs(CandidateWidth - TargetTextWidth);
-					if (BestWrappedFitFontSize == INDEX_NONE
-						|| Error + KINDA_SMALL_NUMBER < BestWrappedFitError
-						|| (FMath::IsNearlyEqual(Error, BestWrappedFitError, 0.01f) && CandidateFontSize > BestWrappedFitFontSize))
-					{
-						BestWrappedFitFontSize = CandidateFontSize;
-						BestWrappedFitError = Error;
-					}
-				}
-			}
-
+			const int32 BestWrappedFitFontSize =
+				SingleLineWidthFit::ResolveWrappedHeightConstrainedFontSize(Node, ProbePlan, MeasureWidth);
 			if (BestWrappedFitFontSize != INDEX_NONE)
 			{
-				LogResolvedTextDecision(Node, TEXT("wrapped-width-fit"), static_cast<float>(BestWrappedFitFontSize), FallbackFontSize, OutResolutionPath);
+				CacheTrace::LogResolvedTextDecision(Node, TEXT("wrapped-width-fit"), static_cast<float>(BestWrappedFitFontSize), FallbackFontSize, OutResolutionPath);
 				return static_cast<float>(BestWrappedFitFontSize);
 			}
 			const int32 BestFontSize = !Node->Transform.bSourceHasWidth
-				? ResolveBestWidthFitFontSize(
+				? RuntimeProbe::ResolveBestWidthFitFontSize(
 					FallbackFontSize,
-					MaxProbeFontSize,
-					TargetTextWidth,
-					ShouldAllowClosestOvershootSingleLineWidthFit(Node),
+					ProbePlan.MaxProbeFontSize,
+					ProbePlan.TargetTextWidth,
+					ProbePlan.bAllowClosestOvershoot,
 					MeasureWidth)
-				: ResolveBestWidthFitFontSize(
+				: RuntimeProbe::ResolveBestWidthFitFontSize(
 					FallbackFontSize,
-					MaxProbeFontSize,
-					WidthFitTarget,
+					ProbePlan.MaxProbeFontSize,
+					ProbePlan.WidthFitTarget,
 					false,
 					MeasureWidth);
 			if (BestFontSize == INDEX_NONE)
 			{
-				LogResolvedTextDecision(Node, TEXT("fallback-width-probe-miss"), FallbackFontSize, FallbackFontSize, OutResolutionPath);
+				CacheTrace::LogResolvedTextDecision(Node, TEXT("fallback-width-probe-miss"), FallbackFontSize, FallbackFontSize, OutResolutionPath);
 				return FallbackFontSize;
 			}
 			if (UE_LOG_ACTIVE(LogDesign2UMG, Verbose)
@@ -1423,40 +1582,40 @@ bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
 			{
 				const int32 FallbackFloor = FMath::Max(1, FMath::FloorToInt(FallbackFontSize));
 				const int32 FallbackCeil = FMath::Max(1, FMath::CeilToInt(FallbackFontSize));
-				const int32 ProbePlusOne = FMath::Min(MaxProbeFontSize, FallbackCeil + 1);
+				const int32 ProbePlusOne = FMath::Min(ProbePlan.MaxProbeFontSize, FallbackCeil + 1);
 				UE_LOG(
 					LogDesign2UMG,
 					Verbose,
 					TEXT("WidthProbe: node='%s' text='%s' target=%.1f fallback=%.2f chosen=%d w_floor=%.2f w_ceil=%.2f w_plus1=%.2f"),
 					*Node->Name,
-					*SummarizeTextForLog(Node->Text.Content),
-					TargetTextWidth,
+					*CacheTrace::SummarizeTextForLog(Node->Text.Content),
+					ProbePlan.TargetTextWidth,
 					FallbackFontSize,
 					BestFontSize,
 					MeasureWidth(static_cast<float>(FallbackFloor)),
 					MeasureWidth(static_cast<float>(FallbackCeil)),
 					MeasureWidth(static_cast<float>(ProbePlusOne)));
 			}
-			if (ShouldClampSingleLineWidthFitToFallback(Node, FallbackFontSize, BestFontSize))
+			if (SingleLineHeuristics::ShouldClampSingleLineWidthFitToFallback(Node, FallbackFontSize, BestFontSize))
 			{
 				const float ClampedFontSize = static_cast<float>(FMath::CeilToInt(FMath::Max(1.0f, FallbackFontSize - 0.05f)));
-				LogResolvedTextDecision(Node, TEXT("width-fit-clamped-to-fallback"), ClampedFontSize, FallbackFontSize, OutResolutionPath);
+				CacheTrace::LogResolvedTextDecision(Node, TEXT("width-fit-clamped-to-fallback"), ClampedFontSize, FallbackFontSize, OutResolutionPath);
 				return ClampedFontSize;
 			}
-			LogResolvedTextDecision(Node, TEXT("width-fit"), static_cast<float>(BestFontSize), FallbackFontSize, OutResolutionPath);
+			CacheTrace::LogResolvedTextDecision(Node, TEXT("width-fit"), static_cast<float>(BestFontSize), FallbackFontSize, OutResolutionPath);
 			return static_cast<float>(BestFontSize);
 		}
 
-		const FString CalibrationKey = BuildTextFontCalibrationKey(Node);
-		const FString SharedStyleKey = ShouldParticipateInSharedTextStyleCalibration(Node)
-			? BuildTextFontSharedStyleKey(Node)
+		const FString CalibrationKey = CacheTrace::BuildTextFontCalibrationKey(Node);
+		const FString SharedStyleKey = SharedCalibration::ShouldParticipateInSharedTextStyleCalibration(Node)
+			? CacheTrace::BuildTextFontSharedStyleKey(Node)
 			: FString();
-		const bool bConsumesSharedStyleScale = ShouldConsumeSharedTextStyleCalibration(Node);
+		const bool bConsumesSharedStyleScale = SharedCalibration::ShouldConsumeSharedTextStyleCalibration(Node);
 		float SharedStyleScale = 0.0f;
 		const bool bHasSharedStyleScale =
-			!SharedStyleKey.IsEmpty() && TryGetResolvedSharedTextFontScaleMin(SharedStyleKey, SharedStyleScale);
+			!SharedStyleKey.IsEmpty() && CacheTrace::TryGetResolvedSharedTextFontScaleMin(SharedStyleKey, SharedStyleScale);
 		float CachedScale = 0.0f;
-		if (TryGetResolvedTextFontScale(CalibrationKey, CachedScale))
+		if (CacheTrace::TryGetResolvedTextFontScale(CalibrationKey, CachedScale))
 		{
 			float ResolvedScale = CachedScale;
 			if (bConsumesSharedStyleScale && bHasSharedStyleScale)
@@ -1464,70 +1623,71 @@ bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
 				ResolvedScale = FMath::Min(ResolvedScale, SharedStyleScale);
 			}
 			const float ResolvedFontSize = FMath::Max(1.0f, Node->Text.FontSize * ResolvedScale);
-			LogResolvedTextDecision(Node, TEXT("cached-scale"), ResolvedFontSize, FallbackFontSize, OutResolutionPath);
+			CacheTrace::LogResolvedTextDecision(Node, TEXT("cached-scale"), ResolvedFontSize, FallbackFontSize, OutResolutionPath);
 			return ResolvedFontSize;
 		}
 
 		if (bConsumesSharedStyleScale && bHasSharedStyleScale)
 		{
 			const float ResolvedFontSize = FMath::Max(1.0f, Node->Text.FontSize * SharedStyleScale);
-			LogResolvedTextDecision(Node, TEXT("shared-style-scale"), ResolvedFontSize, FallbackFontSize, OutResolutionPath);
+			CacheTrace::LogResolvedTextDecision(Node, TEXT("shared-style-scale"), ResolvedFontSize, FallbackFontSize, OutResolutionPath);
 			return ResolvedFontSize;
 		}
 
-		if (const int32 PreferredWrappedFontSize = ResolveVerticalAlignedWrappingFontSize(Node, FallbackFontSize, TargetLineBoxHeight);
+		if (const int32 PreferredWrappedFontSize = RuntimeProbe::ResolveVerticalAlignedWrappingFontSize(Node, FallbackFontSize, TargetLineBoxHeight);
 			PreferredWrappedFontSize != INDEX_NONE)
 		{
 			const float ResolvedScale = static_cast<float>(PreferredWrappedFontSize) / Node->Text.FontSize;
-			StoreResolvedTextFontScale(CalibrationKey, ResolvedScale);
+			CacheTrace::StoreResolvedTextFontScale(CalibrationKey, ResolvedScale);
 			if (!SharedStyleKey.IsEmpty())
 			{
-				StoreResolvedSharedTextFontScaleMin(SharedStyleKey, ResolvedScale);
+				CacheTrace::StoreResolvedSharedTextFontScaleMin(SharedStyleKey, ResolvedScale);
 			}
-			LogResolvedTextDecision(Node, TEXT("vertical-wrap-fit"), static_cast<float>(PreferredWrappedFontSize), FallbackFontSize, OutResolutionPath);
+			CacheTrace::LogResolvedTextDecision(Node, TEXT("vertical-wrap-fit"), static_cast<float>(PreferredWrappedFontSize), FallbackFontSize, OutResolutionPath);
 			return static_cast<float>(PreferredWrappedFontSize);
 		}
 
 		auto MeasureHeight = [&](float CandidateFontSize) -> float
 		{
-			return MeasureSingleLineTextBlockHeight(Node, CandidateFontSize);
+			return RuntimeProbe::MeasureSingleLineTextBlockHeight(Node, CandidateFontSize);
 		};
 
-		const int32 MaxProbeFontSize = ResolveMaxProbeFontSize(Node->Text.FontSize, FallbackFontSize);
-		const int32 BestFontSize = ResolveBestProbeFontSize(
+		const int32 MaxProbeFontSize = RuntimeProbe::ResolveMaxProbeFontSize(Node->Text.FontSize, FallbackFontSize);
+		const int32 BestFontSize = RuntimeProbe::ResolveBestProbeFontSize(
 			FallbackFontSize,
 			MaxProbeFontSize,
 			TargetLineBoxHeight,
 			MeasureHeight);
 		if (BestFontSize == INDEX_NONE)
 		{
-			LogResolvedTextDecision(Node, TEXT("fallback-height-probe-miss"), FallbackFontSize, FallbackFontSize, OutResolutionPath);
+			CacheTrace::LogResolvedTextDecision(Node, TEXT("fallback-height-probe-miss"), FallbackFontSize, FallbackFontSize, OutResolutionPath);
 			return FallbackFontSize;
 		}
 
-		if (HasExplicitParagraphBreaks(Node) && TextMeasurement::IsWrappingTextMode(Node))
+		if (TextContentRules::HasExplicitParagraphBreaks(Node) && TextMeasurement::IsWrappingTextMode(Node))
 		{
 			const float ResolvedFontSize = static_cast<float>(FMath::Max(1, BestFontSize - 1));
-			LogResolvedTextDecision(Node, TEXT("paragraph-wrap-adjust"), ResolvedFontSize, FallbackFontSize, OutResolutionPath);
+			CacheTrace::LogResolvedTextDecision(Node, TEXT("paragraph-wrap-adjust"), ResolvedFontSize, FallbackFontSize, OutResolutionPath);
 			return ResolvedFontSize;
 		}
 
 		const float ResolvedScale = static_cast<float>(BestFontSize) / Node->Text.FontSize;
-		StoreResolvedTextFontScale(CalibrationKey, ResolvedScale);
+		CacheTrace::StoreResolvedTextFontScale(CalibrationKey, ResolvedScale);
 		if (!SharedStyleKey.IsEmpty())
 		{
-			StoreResolvedSharedTextFontScaleMin(SharedStyleKey, ResolvedScale);
+			CacheTrace::StoreResolvedSharedTextFontScaleMin(SharedStyleKey, ResolvedScale);
 		}
-		LogResolvedTextDecision(Node, TEXT("height-fit"), static_cast<float>(BestFontSize), FallbackFontSize, OutResolutionPath);
+		CacheTrace::LogResolvedTextDecision(Node, TEXT("height-fit"), static_cast<float>(BestFontSize), FallbackFontSize, OutResolutionPath);
 		return static_cast<float>(BestFontSize);
 	}
+}
 }
 
 void TextMeasurement::ResetCache()
 {
-	FScopeLock Lock(&GResolvedTextFontScaleCacheMutex);
-	GResolvedTextFontScaleCache.Reset();
-	GResolvedSharedTextFontScaleMinCache.Reset();
+	FScopeLock Lock(&CacheTrace::GResolvedTextFontScaleCacheMutex);
+	CacheTrace::GResolvedTextFontScaleCache.Reset();
+	CacheTrace::GResolvedSharedTextFontScaleMinCache.Reset();
 }
 
 FString TextMeasurement::PrepareRuntimeTextContent(const FString& Text)
@@ -1540,7 +1700,7 @@ FString TextMeasurement::PrepareRuntimeTextContent(const FString& Text)
 
 bool TextMeasurement::IsWrappingTextMode(const TSharedPtr<FDesignNode>& Node)
 {
-	if (IsFigmaTruncateTextNode(Node))
+	if (SourceMetadata::IsFigmaTruncateTextNode(Node))
 	{
 		return false;
 	}
@@ -1563,7 +1723,7 @@ bool TextMeasurement::ShouldApplyExplicitLineHeight(const TSharedPtr<FDesignNode
 		return true;
 	}
 
-	if (Node->Text.FontSize >= LargeNonWrappingFontThreshold && !IsWrappingTextMode(Node))
+	if (SharedThresholdOwners::ShouldApplyLargeNonWrappingExplicitLineHeight(Node))
 	{
 		return true;
 	}
@@ -1583,7 +1743,7 @@ bool TextMeasurement::ShouldApplyExplicitLineHeight(const TSharedPtr<FDesignNode
 	const int32 LetterSpacingTracking = (EffectiveProbeFontSize > 0.0f && Node->Text.LetterSpacing != 0.0f)
 		? TextStyleUtils::ConvertLetterSpacingPxToTracking(Node->Text.LetterSpacing, Node->Text.FontSize, EffectiveProbeFontSize)
 		: 0;
-	const FVector2D UnwrappedSize = MeasureTextSize(
+	const FVector2D UnwrappedSize = RuntimeProbe::MeasureTextSize(
 		Node->Text.Content,
 		EffectiveProbeFontSize,
 		Node->Text.FontFamily,
@@ -1594,7 +1754,7 @@ bool TextMeasurement::ShouldApplyExplicitLineHeight(const TSharedPtr<FDesignNode
 
 float TextMeasurement::ResolveTextFontSizeForUMG(const TSharedPtr<FDesignNode>& Node)
 {
-	return ResolveTextFontSizeForUMGInternal(Node, nullptr);
+	return RuntimeProbe::ResolveTextFontSizeForUMGInternal(Node, nullptr);
 }
 
 float TextMeasurement::ResolveTextWrapAt(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth)
@@ -1604,7 +1764,7 @@ float TextMeasurement::ResolveTextWrapAt(const TSharedPtr<FDesignNode>& Node, fl
 		return 0.0f;
 	}
 
-	if (IsFigmaTruncateTextNode(Node))
+	if (SourceMetadata::IsFigmaTruncateTextNode(Node))
 	{
 		return 0.0f;
 	}
@@ -1631,11 +1791,6 @@ bool TextMeasurement::ShouldAutoWrapText(const TSharedPtr<FDesignNode>& Node)
 	return IsWrappingTextMode(Node);
 }
 
-FSlateFontInfo TextMeasurement::BuildSlateFontInfo(const TSharedPtr<FDesignNode>& Node)
-{
-	return BuildSlateFontInfoForSize(Node, ResolveTextFontSizeForUMG(Node));
-}
-
 FVector2D TextMeasurement::MeasureTextNodeSize(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth)
 {
 	if (!Node.IsValid())
@@ -1647,16 +1802,16 @@ FVector2D TextMeasurement::MeasureTextNodeSize(const TSharedPtr<FDesignNode>& No
 	const int32 LetterSpacingTracking = (AppliedFontSize > 0.0f && Node->Text.LetterSpacing != 0.0f)
 		? TextStyleUtils::ConvertLetterSpacingPxToTracking(Node->Text.LetterSpacing, Node->Text.FontSize, AppliedFontSize)
 		: 0;
-	FVector2D FallbackSize = MeasureTextSize(
+	FVector2D FallbackSize = RuntimeProbe::MeasureTextSize(
 		PrepareRuntimeTextContent(Node->Text.Content),
 		AppliedFontSize > 0.0f ? AppliedFontSize : Node->Text.FontSize,
 		Node->Text.FontFamily,
 		Node->Text.FontWeight,
 		LetterSpacingTracking);
 
-	if (ShouldUseSingleLineTextHeight(Node, FallbackSize.X, ParentContentWidth))
+	if (RuntimeProbe::ShouldUseSingleLineTextHeight(Node, FallbackSize.X, ParentContentWidth))
 	{
-		FallbackSize.Y = EstimateSingleLineTextHeight(Node);
+		FallbackSize.Y = LineBox::EstimateSingleLineTextHeight(Node);
 		return FallbackSize;
 	}
 
@@ -1666,7 +1821,7 @@ FVector2D TextMeasurement::MeasureTextNodeSize(const TSharedPtr<FDesignNode>& No
 		return FallbackSize;
 	}
 
-	const FVector2D WrappedSize = MeasureUMGTextBlockDesiredSize(
+	const FVector2D WrappedSize = RuntimeProbe::MeasureUMGTextBlockDesiredSize(
 		Node,
 		AppliedFontSize > 0.0f ? AppliedFontSize : Node->Text.FontSize,
 		PrepareRuntimeTextContent(Node->Text.Content),
@@ -1679,7 +1834,7 @@ FVector2D TextMeasurement::MeasureTextNodeSize(const TSharedPtr<FDesignNode>& No
 
 	if (WrapTextAt > 0.0f && FallbackSize.X > WrapTextAt + 0.5f)
 	{
-		const float LineHeight = EstimateSingleLineTextHeight(Node);
+		const float LineHeight = LineBox::EstimateSingleLineTextHeight(Node);
 		const int32 EstimatedLineCount = FMath::Max(1, FMath::CeilToInt(FallbackSize.X / FMath::Max(1.0f, WrapTextAt)));
 		FallbackSize.X = WrapTextAt;
 		FallbackSize.Y = LineHeight * EstimatedLineCount;

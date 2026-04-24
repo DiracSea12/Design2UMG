@@ -3,6 +3,7 @@
 #include "UMGJsonSerializer.h"
 #include "UMGWidgetNodeAccess.h"
 #include "UMGPropertyKeys.h"
+#include "UMGSchema.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "Dom/JsonObject.h"

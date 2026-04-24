@@ -18,7 +18,7 @@ FString ExtractSyntheticVectorRasterImageRef(const TArray<TSharedPtr<FJsonValue>
 	for (const TSharedPtr<FJsonValue>& FillVal : Fills)
 	{
 		const TSharedPtr<FJsonObject> FillObj = FillVal->AsObject();
-		if (!IsSyntheticVectorRasterFill(FillObj) || !GetBoolean(FillObj, TEXT("visible"), true))
+		if (!IsSyntheticVectorRasterFill(FillObj) || !GetBool(FillObj, TEXT("visible"), true))
 		{
 			continue;
 		}
@@ -63,7 +63,7 @@ bool IsIdentityImageTransform(const TArray<TSharedPtr<FJsonValue>>* TransformArr
 FDesignFill ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)
 {
 	FDesignFill Result;
-	if (!FillObj || !GetBoolean(FillObj, TEXT("visible"), true))
+	if (!FillObj || !GetBool(FillObj, TEXT("visible"), true))
 		return Result;
 
 	FString FillType = GetString(FillObj, TEXT("type"));
@@ -192,7 +192,7 @@ FDesignFill ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)
 
 bool IsLuminosityPlaceholderImageFill(const TSharedPtr<FJsonObject>& FillObj)
 {
-	if (!FillObj || !GetBoolean(FillObj, TEXT("visible"), true))
+	if (!FillObj || !GetBool(FillObj, TEXT("visible"), true))
 	{
 		return false;
 	}
@@ -222,7 +222,7 @@ TArray<FDesignFill> ParseFills(const TArray<TSharedPtr<FJsonValue>>& Fills)
 	for (int32 Index = 0; Index < Fills.Num(); ++Index)
 	{
 		auto FillObj = Fills[Index]->AsObject();
-		if (!FillObj || !GetBoolean(FillObj, TEXT("visible"), true))
+		if (!FillObj || !GetBool(FillObj, TEXT("visible"), true))
 			continue;
 		if (IsSyntheticVectorRasterFill(FillObj))
 			continue;
@@ -239,7 +239,7 @@ FDesignFill ParseFill(const TArray<TSharedPtr<FJsonValue>>& Fills)
 	for (int32 Index = Fills.Num() - 1; Index >= 0; --Index)
 	{
 		auto FillObj = Fills[Index]->AsObject();
-		if (!FillObj || !GetBoolean(FillObj, TEXT("visible"), true))
+		if (!FillObj || !GetBool(FillObj, TEXT("visible"), true))
 			continue;
 		if (IsSyntheticVectorRasterFill(FillObj))
 			continue;
@@ -262,7 +262,7 @@ FDesignStroke ParseStroke(const TSharedPtr<FJsonObject>& NodeObj)
 		for (const auto& StrokeVal : *Strokes)
 		{
 			auto StrokeObj = StrokeVal->AsObject();
-			if (!StrokeObj || !GetBoolean(StrokeObj, TEXT("visible"), true))
+			if (!StrokeObj || !GetBool(StrokeObj, TEXT("visible"), true))
 				continue;
 
 			bHasVisibleStroke = true;
@@ -351,7 +351,7 @@ TArray<FDesignEffect> ParseEffects(const TArray<TSharedPtr<FJsonValue>>& Effects
 	for (const auto& EffVal : Effects)
 	{
 		auto EffObj = EffVal->AsObject();
-		if (!EffObj || !GetBoolean(EffObj, TEXT("visible"), true))
+		if (!EffObj || !GetBool(EffObj, TEXT("visible"), true))
 			continue;
 
 		FString EffType = GetString(EffObj, TEXT("type"));

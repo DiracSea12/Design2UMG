@@ -72,6 +72,8 @@ struct FUMGWidgetStyleData
 
 struct FUMGTextData
 {
+	// These presence bits still feed parser/serializer and typed access paths,
+	// so this batch only documents the retained owner instead of rewriting it.
 	FString Text;
 	bool bHasText = false;
 
@@ -147,6 +149,8 @@ struct FUMGTextData
  */
 struct FUMGVisualBrushData
 {
+	// Keep this owner intact for now: parser, serializer, and typed descriptors
+	// all depend on the same presence-bit shape.
 	struct FImageTransformData
 	{
 		float A = 1.0f;
@@ -237,6 +241,8 @@ struct FUMGVisualBrushData
  */
 struct FUMGEffectData
 {
+	// Keep the effect payload presence bits as-is: unset vs explicit value still
+	// matters to the typed effect contract.
 	float BlurStrength = 0.0f;
 	bool bHasBlurStrength = false;
 
@@ -278,6 +284,8 @@ struct FUMGEffectData
 
 struct FUMGPathData
 {
+	// Keep the path / shadow / widget-state / scroll-box presence bits together:
+	// they are still read as retained payload ownership, not optional cleanup.
 	FString Geometry;
 	bool bHasGeometry = false;
 
@@ -346,6 +354,8 @@ struct FUMGShadowData
  */
 struct FUMGRenderStyleData
 {
+	// Keep the render payload presence bits as-is: the generated widget still
+	// distinguishes unset from explicit value here.
 	float RenderOpacity = 0.0f;
 	bool bHasRenderOpacity = false;
 
@@ -381,6 +391,8 @@ struct FUMGRenderStyleData
 
 struct FUMGWidgetStateData
 {
+	// Keep this retained owner explicit: the active-widget index still carries
+	// presence semantics, so it is not a safe TOptional rewrite here.
 	int32 ActiveWidgetIndex = 0;
 	bool bHasActiveWidgetIndex = false;
 
@@ -392,6 +404,8 @@ struct FUMGWidgetStateData
 
 struct FUMGScrollBoxData
 {
+	// Keep the scroll-box payload shape stable for now; the current contract
+	// still relies on explicit presence markers.
 	FString Orientation;
 	bool bHasOrientation = false;
 

@@ -18,6 +18,28 @@ namespace
 		Margin,
 	};
 
+	bool IsKnownColorKey(const FString& Key)
+	{
+		using namespace UMGPropertyKeys;
+
+		if (Key == BackgroundColor || Key == BrushColor || Key == Color || Key == ColorAndOpacity
+			|| Key == ContentColor || Key == EffectColor || Key == FillColor || Key == HoveredColor
+			|| Key == OutlineColor || Key == PathFillColor || Key == PathStrokeColor
+			|| Key == PressedColor || Key == ShadowColorAndOpacity)
+		{
+			return true;
+		}
+
+		if (Key.StartsWith(TEXT("BoxShadow_")))
+		{
+			TArray<FString> Parts;
+			Key.ParseIntoArray(Parts, TEXT("_"));
+			return Parts.Num() == 3 && Parts[2] == TEXT("Color");
+		}
+
+		return false;
+	}
+
 	TOptional<EKnownPropertyValueType> GetKnownPropertyValueType(const FString& Key)
 	{
 		using namespace UMGPropertyKeys;
@@ -49,9 +71,7 @@ namespace
 			return EKnownPropertyValueType::Float;
 		}
 
-		if (Key == BackgroundColor || Key == BrushColor || Key == Color || Key == ColorAndOpacity
-			|| Key == ContentColor || Key == FillColor || Key == HoveredColor || Key == OutlineColor
-			|| Key == PathFillColor || Key == PathStrokeColor || Key == PressedColor || Key == ShadowColorAndOpacity)
+		if (IsKnownColorKey(Key))
 		{
 			return EKnownPropertyValueType::Color;
 		}
@@ -124,6 +144,7 @@ namespace
 			break;
 		}
 	}
+
 }
 
 void FUMGPropertyBag::Add(const FString& Key, const FString& Value)
@@ -206,6 +227,12 @@ bool FUMGPropertyBag::TryGetColor(const FString& Key, FLinearColor& OutValue) co
 {
 	if (const FUMGTypedProperty* Property = Values.Find(Key))
 	{
+		if (IsKnownColorKey(Key))
+		{
+			OutValue = Property->ColorValue;
+			return Property->bHasValue;
+		}
+
 		OutValue = FUMGValueParser::ParseColor(Property->SerializedValue);
 		return Property->bHasValue;
 	}

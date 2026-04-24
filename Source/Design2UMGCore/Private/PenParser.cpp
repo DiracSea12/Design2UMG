@@ -14,212 +14,177 @@
 
 namespace
 {
-	bool TryParseNumericString(const FString& InValue, double& OutValue)
+	namespace FlexibleFieldParsing
 	{
-		const FString Trimmed = InValue.TrimStartAndEnd();
-		if (Trimmed.IsEmpty())
-			return false;
-
-		double Parsed = 0.0;
-		if (!FDefaultValueHelper::ParseDouble(Trimmed, Parsed))
-			return false;
-
-		OutValue = Parsed;
-		return true;
-	}
-
-	bool TryParseBooleanString(const FString& InValue, bool& OutValue)
-	{
-		const FString Normalized = InValue.TrimStartAndEnd().ToLower();
-		if (Normalized == TEXT("true") || Normalized == TEXT("1") || Normalized == TEXT("yes") || Normalized == TEXT("on"))
+		bool TryParseNumericString(const FString& InValue, double& OutValue)
 		{
-			OutValue = true;
-			return true;
-		}
-		if (Normalized == TEXT("false") || Normalized == TEXT("0") || Normalized == TEXT("no") || Normalized == TEXT("off"))
-		{
-			OutValue = false;
-			return true;
-		}
-		return false;
-	}
+			const FString Trimmed = InValue.TrimStartAndEnd();
+			if (Trimmed.IsEmpty())
+				return false;
 
-	bool TryGetNumberValueFlexible(const TSharedPtr<FJsonValue>& Value, double& OutValue)
-	{
-		if (!Value.IsValid())
-			return false;
+			double Parsed = 0.0;
+			if (!FDefaultValueHelper::ParseDouble(Trimmed, Parsed))
+				return false;
 
-		if (Value->Type == EJson::Number)
-		{
-			OutValue = Value->AsNumber();
+			OutValue = Parsed;
 			return true;
 		}
 
-		if (Value->Type == EJson::String)
+		bool TryParseBooleanString(const FString& InValue, bool& OutValue)
 		{
-			return TryParseNumericString(Value->AsString(), OutValue);
-		}
-
-		return false;
-	}
-
-	template <typename NumberType>
-	bool TryGetNumberValueFlexible(const TSharedPtr<FJsonValue>& Value, NumberType& OutValue)
-	{
-		double Parsed = 0.0;
-		if (!TryGetNumberValueFlexible(Value, Parsed))
-			return false;
-
-		OutValue = static_cast<NumberType>(Parsed);
-		return true;
-	}
-
-	template <typename NumberType>
-	bool TryGetNumberFieldFlexible(
-		const TSharedPtr<FJsonObject>& Obj,
-		const FString& FieldName,
-		NumberType& OutValue)
-	{
-		if (!Obj.IsValid() || !Obj->HasField(FieldName))
-			return false;
-
-		const TSharedPtr<FJsonValue> FieldValue = Obj->TryGetField(FieldName);
-		if (!FieldValue.IsValid())
-			return false;
-
-		double Parsed = 0.0;
-		if (!TryGetNumberValueFlexible(FieldValue, Parsed))
-			return false;
-
-		OutValue = static_cast<NumberType>(Parsed);
-		return true;
-	}
-
-	template <typename NumberType>
-	bool TryGetResolvedNumberField(
-		const TSharedPtr<FJsonObject>& Obj,
-		const FString& FieldName,
-		const FDesignVariableResolver& Resolver,
-		NumberType& OutValue)
-	{
-		if (!Obj.IsValid() || !Obj->HasField(FieldName))
-			return false;
-
-		const TSharedPtr<FJsonValue> FieldValue = Obj->TryGetField(FieldName);
-		if (!FieldValue.IsValid())
-			return false;
-
-		if (TryGetNumberValueFlexible(FieldValue, OutValue))
-			return true;
-
-		if (FieldValue->Type != EJson::String)
-			return false;
-
-		const FString RawValue = FieldValue->AsString();
-		if (!FDesignVariableResolver::IsVariableRef(RawValue))
-			return false;
-
-		OutValue = static_cast<NumberType>(Resolver.ResolveNumber(RawValue));
-		return true;
-	}
-
-	bool TryGetResolvedBoolField(
-		const TSharedPtr<FJsonObject>& Obj,
-		const FString& FieldName,
-		const FDesignVariableResolver& Resolver,
-		bool& OutValue)
-	{
-		if (!Obj.IsValid() || !Obj->HasField(FieldName))
-			return false;
-
-		const TSharedPtr<FJsonValue> FieldValue = Obj->TryGetField(FieldName);
-		if (!FieldValue.IsValid())
-			return false;
-
-		if (FieldValue->Type == EJson::Boolean)
-		{
-			OutValue = FieldValue->AsBool();
-			return true;
-		}
-
-		if (FieldValue->Type != EJson::String)
-			return false;
-
-		const FString RawValue = FieldValue->AsString();
-		if (TryParseBooleanString(RawValue, OutValue))
-			return true;
-
-		if (!FDesignVariableResolver::IsVariableRef(RawValue))
-			return false;
-
-		return TryParseBooleanString(Resolver.ResolveString(RawValue), OutValue);
-	}
-
-	void ApplyPenSemanticHints(FDesignNode& Node, const bool bPenPlaceholder, const bool bPenHasSlot, const int32 PenSlotNodeCount)
-	{
-		const bool bTextLikeNode =
-			Node.Type == EDesignNodeType::Text
-			|| Node.Type == EDesignNodeType::IconFont
-			|| !Node.Text.Content.IsEmpty()
-			|| !Node.Text.FontFamily.IsEmpty()
-			|| !Node.Text.IconFontName.IsEmpty();
-		const bool bNameLooksLikePlaceholder =
-			!bTextLikeNode && Node.Name.Contains(TEXT("placeholder"), ESearchCase::IgnoreCase);
-		const bool bNameLooksLikeSlot =
-			!bTextLikeNode && Node.Name.Contains(TEXT("slot"), ESearchCase::IgnoreCase);
-		const bool bNameLooksLikeContentSlot =
-			!bTextLikeNode && bPenHasSlot && Node.Name.Contains(TEXT("content"), ESearchCase::IgnoreCase);
-		Node.LayoutData.bSemanticPlaceholderSurface =
-			!bTextLikeNode
-			&& (bPenPlaceholder
-				|| bPenHasSlot
-				|| PenSlotNodeCount > 0
-				|| bNameLooksLikePlaceholder
-				|| bNameLooksLikeContentSlot
-				|| bNameLooksLikeSlot);
-	}
-
-	void FinalizePenPaddingRuntimeWrapPolicy(const TSharedPtr<FDesignNode>& Node)
-	{
-		if (!Node.IsValid()
-			|| Node->LayoutData.Layout != EDesignLayout::Horizontal
-			&& Node->LayoutData.Layout != EDesignLayout::Vertical)
-		{
-			return;
-		}
-
-		bool bHasExplicitChildPosition = false;
-		for (const TSharedPtr<FDesignNode>& Child : Node->Children)
-		{
-			if (!Child.IsValid() || Child->LayoutData.bAbsoluteLayoutPositioning)
+			const FString Normalized = InValue.TrimStartAndEnd().ToLower();
+			if (Normalized == TEXT("true") || Normalized == TEXT("1") || Normalized == TEXT("yes") || Normalized == TEXT("on"))
 			{
-				continue;
+				OutValue = true;
+				return true;
+			}
+			if (Normalized == TEXT("false") || Normalized == TEXT("0") || Normalized == TEXT("no") || Normalized == TEXT("off"))
+			{
+				OutValue = false;
+				return true;
+			}
+			return false;
+		}
+
+		bool TryGetNumberValueFlexible(const TSharedPtr<FJsonValue>& Value, double& OutValue)
+		{
+			if (!Value.IsValid())
+				return false;
+
+			if (Value->Type == EJson::Number)
+			{
+				OutValue = Value->AsNumber();
+				return true;
 			}
 
-			if (Child->Transform.HasExplicitPosition())
+			if (Value->Type == EJson::String)
 			{
-				bHasExplicitChildPosition = true;
-				break;
+				return TryParseNumericString(Value->AsString(), OutValue);
 			}
+
+			return false;
 		}
 
-		Node->LayoutData.bPaddingRequiresRuntimeWrap = !bHasExplicitChildPosition;
+		template <typename NumberType>
+		bool TryGetNumberValueFlexible(const TSharedPtr<FJsonValue>& Value, NumberType& OutValue)
+		{
+			double Parsed = 0.0;
+			if (!TryGetNumberValueFlexible(Value, Parsed))
+				return false;
+
+			OutValue = static_cast<NumberType>(Parsed);
+			return true;
+		}
+
+		template <typename NumberType>
+		bool TryGetNumberFieldFlexible(
+			const TSharedPtr<FJsonObject>& Obj,
+			const FString& FieldName,
+			NumberType& OutValue)
+		{
+			if (!Obj.IsValid() || !Obj->HasField(FieldName))
+				return false;
+
+			const TSharedPtr<FJsonValue> FieldValue = Obj->TryGetField(FieldName);
+			if (!FieldValue.IsValid())
+				return false;
+
+			double Parsed = 0.0;
+			if (!TryGetNumberValueFlexible(FieldValue, Parsed))
+				return false;
+
+			OutValue = static_cast<NumberType>(Parsed);
+			return true;
+		}
+
+		template <typename NumberType>
+		bool TryGetResolvedNumberField(
+			const TSharedPtr<FJsonObject>& Obj,
+			const FString& FieldName,
+			const FDesignVariableResolver& Resolver,
+			NumberType& OutValue)
+		{
+			if (!Obj.IsValid() || !Obj->HasField(FieldName))
+				return false;
+
+			const TSharedPtr<FJsonValue> FieldValue = Obj->TryGetField(FieldName);
+			if (!FieldValue.IsValid())
+				return false;
+
+			if (TryGetNumberValueFlexible(FieldValue, OutValue))
+				return true;
+
+			if (FieldValue->Type != EJson::String)
+				return false;
+
+			const FString RawValue = FieldValue->AsString();
+			if (!FDesignVariableResolver::IsVariableRef(RawValue))
+				return false;
+
+			OutValue = static_cast<NumberType>(Resolver.ResolveNumber(RawValue));
+			return true;
+		}
+
+		bool TryGetResolvedBoolField(
+			const TSharedPtr<FJsonObject>& Obj,
+			const FString& FieldName,
+			const FDesignVariableResolver& Resolver,
+			bool& OutValue)
+		{
+			if (!Obj.IsValid() || !Obj->HasField(FieldName))
+				return false;
+
+			const TSharedPtr<FJsonValue> FieldValue = Obj->TryGetField(FieldName);
+			if (!FieldValue.IsValid())
+				return false;
+
+			if (FieldValue->Type == EJson::Boolean)
+			{
+				OutValue = FieldValue->AsBool();
+				return true;
+			}
+
+			if (FieldValue->Type != EJson::String)
+				return false;
+
+			const FString RawValue = FieldValue->AsString();
+			if (TryParseBooleanString(RawValue, OutValue))
+				return true;
+
+			if (!FDesignVariableResolver::IsVariableRef(RawValue))
+				return false;
+
+			return TryParseBooleanString(Resolver.ResolveString(RawValue), OutValue);
+		}
 	}
 
-	void ParsePenSemanticMetadata(
-		const TSharedPtr<FJsonObject>& JsonObj,
-		FDesignNode& Node,
-		const FDesignVariableResolver& Resolver)
+	namespace PenSemanticMetadata
 	{
-		bool bPenPlaceholder = false;
-		TryGetResolvedBoolField(JsonObj, TEXT("placeholder"), Resolver, bPenPlaceholder);
-
-		bool bPenHasSlot = false;
-		int32 PenSlotNodeCount = 0;
-		const TSharedPtr<FJsonValue> SlotField = JsonObj->TryGetField(TEXT("slot"));
-		if (SlotField.IsValid() && SlotField->Type == EJson::Array)
+		struct FPenSlotMetadata
 		{
-			bPenHasSlot = true;
+			bool bHasSlot = false;
+			int32 SlotNodeCount = 0;
+		};
+
+		bool IsTextLikeNode(const FDesignNode& Node)
+		{
+			return Node.Type == EDesignNodeType::Text
+				|| Node.Type == EDesignNodeType::IconFont
+				|| !Node.Text.Content.IsEmpty()
+				|| !Node.Text.FontFamily.IsEmpty()
+				|| !Node.Text.IconFontName.IsEmpty();
+		}
+
+		FPenSlotMetadata ParseSlotMetadata(const TSharedPtr<FJsonObject>& JsonObj)
+		{
+			FPenSlotMetadata Result;
+			const TSharedPtr<FJsonValue> SlotField = JsonObj->TryGetField(TEXT("slot"));
+			if (!SlotField.IsValid() || SlotField->Type != EJson::Array)
+			{
+				return Result;
+			}
+
+			Result.bHasSlot = true;
 			for (const TSharedPtr<FJsonValue>& SlotVal : SlotField->AsArray())
 			{
 				if (!SlotVal.IsValid())
@@ -227,20 +192,94 @@ namespace
 
 				FString SlotId;
 				if (SlotVal->TryGetString(SlotId))
-					++PenSlotNodeCount;
+					++Result.SlotNodeCount;
 			}
+
+			return Result;
 		}
 
-		if (bPenHasSlot)
+		void ApplySlotMetadata(FDesignNode& Node, const FPenSlotMetadata& SlotMetadata)
 		{
+			if (!SlotMetadata.bHasSlot)
+			{
+				return;
+			}
+
 			Node.Metadata.Add(TEXT("pen.slot.present"), TEXT("true"));
-			Node.Metadata.Add(TEXT("pen.slot.count"), FString::FromInt(PenSlotNodeCount));
-			if (PenSlotNodeCount == 0)
+			Node.Metadata.Add(TEXT("pen.slot.count"), FString::FromInt(SlotMetadata.SlotNodeCount));
+			if (SlotMetadata.SlotNodeCount == 0)
 				Node.Metadata.Add(TEXT("pen.slot.empty"), TEXT("true"));
 		}
 
-		ApplyPenSemanticHints(Node, bPenPlaceholder, bPenHasSlot, PenSlotNodeCount);
+		void ApplySemanticHints(
+			FDesignNode& Node,
+			const bool bPenPlaceholder,
+			const FPenSlotMetadata& SlotMetadata)
+		{
+			const bool bTextLikeNode = IsTextLikeNode(Node);
+			const bool bNameLooksLikePlaceholder =
+				!bTextLikeNode && Node.Name.Contains(TEXT("placeholder"), ESearchCase::IgnoreCase);
+			const bool bNameLooksLikeSlot =
+				!bTextLikeNode && Node.Name.Contains(TEXT("slot"), ESearchCase::IgnoreCase);
+			const bool bNameLooksLikeContentSlot =
+				!bTextLikeNode && SlotMetadata.bHasSlot && Node.Name.Contains(TEXT("content"), ESearchCase::IgnoreCase);
+			Node.LayoutData.bSemanticPlaceholderSurface =
+				!bTextLikeNode
+				&& (bPenPlaceholder
+					|| SlotMetadata.bHasSlot
+					|| SlotMetadata.SlotNodeCount > 0
+					|| bNameLooksLikePlaceholder
+					|| bNameLooksLikeContentSlot
+					|| bNameLooksLikeSlot);
+		}
+
+		void FinalizePenPaddingRuntimeWrapPolicy(const TSharedPtr<FDesignNode>& Node)
+		{
+			if (!Node.IsValid()
+				|| Node->LayoutData.Layout != EDesignLayout::Horizontal
+				&& Node->LayoutData.Layout != EDesignLayout::Vertical)
+			{
+				return;
+			}
+
+			bool bHasExplicitChildPosition = false;
+			for (const TSharedPtr<FDesignNode>& Child : Node->Children)
+			{
+				if (!Child.IsValid() || Child->LayoutData.bAbsoluteLayoutPositioning)
+				{
+					continue;
+				}
+
+				if (Child->Transform.HasExplicitPosition())
+				{
+					bHasExplicitChildPosition = true;
+					break;
+				}
+			}
+
+			Node->LayoutData.bPaddingRequiresRuntimeWrap = !bHasExplicitChildPosition;
+		}
+
+		void ParsePenSemanticMetadata(
+			const TSharedPtr<FJsonObject>& JsonObj,
+			FDesignNode& Node,
+			const FDesignVariableResolver& Resolver)
+		{
+			bool bPenPlaceholder = false;
+			FlexibleFieldParsing::TryGetResolvedBoolField(JsonObj, TEXT("placeholder"), Resolver, bPenPlaceholder);
+
+			const FPenSlotMetadata SlotMetadata = ParseSlotMetadata(JsonObj);
+			ApplySlotMetadata(Node, SlotMetadata);
+			ApplySemanticHints(Node, bPenPlaceholder, SlotMetadata);
+		}
 	}
+
+	using FlexibleFieldParsing::TryGetNumberFieldFlexible;
+	using FlexibleFieldParsing::TryGetNumberValueFlexible;
+	using FlexibleFieldParsing::TryGetResolvedBoolField;
+	using FlexibleFieldParsing::TryGetResolvedNumberField;
+	using PenSemanticMetadata::FinalizePenPaddingRuntimeWrapPolicy;
+	using PenSemanticMetadata::ParsePenSemanticMetadata;
 
 	void ApplyPenStrokeExtensions(
 		const TSharedPtr<FJsonObject>& StrokeObj,

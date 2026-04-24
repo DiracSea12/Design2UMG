@@ -37,6 +37,8 @@ struct FDesignTextNodeData
  */
 struct FDesignLayoutNodeData
 {
+	// Keep these presence markers for now: direct field writes and accessors both
+	// still rely on explicit ownership here, so this batch only adds rationale.
 	EDesignLayout Layout = EDesignLayout::Horizontal;
 	float Gap = 0.0f;
 	TOptional<float> ExplicitGap;
@@ -61,6 +63,8 @@ struct FDesignLayoutNodeData
 	float LayoutColumnGap = 0.0f;
 	FString LayoutChildHorizontalAlign;
 	FString LayoutChildVerticalAlign;
+	// Keep these grid/alignment presence bits explicit for now: source parsing and
+	// downstream layout consumers still distinguish "authored" from default value.
 	bool bHasLayoutRow = false;
 	bool bHasLayoutColumn = false;
 	bool bHasLayoutRowSpan = false;
@@ -90,6 +94,78 @@ struct FDesignLayoutNodeData
 		ExplicitClip = bInClip;
 	}
 
+	void SetLayoutRowValue(const int32 InLayoutRow)
+	{
+		LayoutRow = InLayoutRow;
+		bHasLayoutRow = true;
+	}
+
+	void ClearLayoutRowValue()
+	{
+		LayoutRow = 0;
+		bHasLayoutRow = false;
+	}
+
+	void SetLayoutColumnValue(const int32 InLayoutColumn)
+	{
+		LayoutColumn = InLayoutColumn;
+		bHasLayoutColumn = true;
+	}
+
+	void ClearLayoutColumnValue()
+	{
+		LayoutColumn = 0;
+		bHasLayoutColumn = false;
+	}
+
+	void SetLayoutRowSpanValue(const int32 InLayoutRowSpan)
+	{
+		LayoutRowSpan = InLayoutRowSpan;
+		bHasLayoutRowSpan = true;
+	}
+
+	void SetLayoutColumnSpanValue(const int32 InLayoutColumnSpan)
+	{
+		LayoutColumnSpan = InLayoutColumnSpan;
+		bHasLayoutColumnSpan = true;
+	}
+
+	void SetLayoutRowCountValue(const int32 InLayoutRowCount)
+	{
+		LayoutRowCount = InLayoutRowCount;
+		bHasLayoutRowCount = true;
+	}
+
+	void SetLayoutColumnCountValue(const int32 InLayoutColumnCount)
+	{
+		LayoutColumnCount = InLayoutColumnCount;
+		bHasLayoutColumnCount = true;
+	}
+
+	void SetLayoutRowGapValue(const float InLayoutRowGap)
+	{
+		LayoutRowGap = InLayoutRowGap;
+		bHasLayoutRowGap = true;
+	}
+
+	void SetLayoutColumnGapValue(const float InLayoutColumnGap)
+	{
+		LayoutColumnGap = InLayoutColumnGap;
+		bHasLayoutColumnGap = true;
+	}
+
+	void SetLayoutChildHorizontalAlignValue(const FString& InLayoutChildHorizontalAlign)
+	{
+		LayoutChildHorizontalAlign = InLayoutChildHorizontalAlign;
+		bHasLayoutChildHorizontalAlign = true;
+	}
+
+	void SetLayoutChildVerticalAlignValue(const FString& InLayoutChildVerticalAlign)
+	{
+		LayoutChildVerticalAlign = InLayoutChildVerticalAlign;
+		bHasLayoutChildVerticalAlign = true;
+	}
+
 	bool HasExplicitGap() const
 	{
 		return ExplicitGap.IsSet();
@@ -108,6 +184,91 @@ struct FDesignLayoutNodeData
 	bool HasExplicitGridPosition() const
 	{
 		return bHasLayoutRow || bHasLayoutColumn;
+	}
+
+	bool HasLayoutRowValue() const
+	{
+		return bHasLayoutRow;
+	}
+
+	bool HasLayoutColumnValue() const
+	{
+		return bHasLayoutColumn;
+	}
+
+	bool HasLayoutRowSpanValue() const
+	{
+		return bHasLayoutRowSpan;
+	}
+
+	bool HasLayoutColumnSpanValue() const
+	{
+		return bHasLayoutColumnSpan;
+	}
+
+	bool HasLayoutRowCountValue() const
+	{
+		return bHasLayoutRowCount;
+	}
+
+	bool HasLayoutColumnCountValue() const
+	{
+		return bHasLayoutColumnCount;
+	}
+
+	bool HasLayoutRowGapValue() const
+	{
+		return bHasLayoutRowGap;
+	}
+
+	bool HasLayoutColumnGapValue() const
+	{
+		return bHasLayoutColumnGap;
+	}
+
+	TOptional<int32> GetLayoutRowValue() const
+	{
+		return bHasLayoutRow ? TOptional<int32>(LayoutRow) : TOptional<int32>();
+	}
+
+	int32 GetLayoutRowOr(const int32 DefaultValue) const
+	{
+		return bHasLayoutRow ? LayoutRow : DefaultValue;
+	}
+
+	int32 GetLayoutColumnOr(const int32 DefaultValue) const
+	{
+		return bHasLayoutColumn ? LayoutColumn : DefaultValue;
+	}
+
+	int32 GetLayoutRowSpanOr(const int32 DefaultValue) const
+	{
+		return bHasLayoutRowSpan ? LayoutRowSpan : DefaultValue;
+	}
+
+	int32 GetLayoutColumnSpanOr(const int32 DefaultValue) const
+	{
+		return bHasLayoutColumnSpan ? LayoutColumnSpan : DefaultValue;
+	}
+
+	float GetLayoutRowGapOr(const float DefaultValue) const
+	{
+		return bHasLayoutRowGap ? LayoutRowGap : DefaultValue;
+	}
+
+	float GetLayoutColumnGapOr(const float DefaultValue) const
+	{
+		return bHasLayoutColumnGap ? LayoutColumnGap : DefaultValue;
+	}
+
+	FString GetLayoutChildHorizontalAlignOr(const FString& DefaultValue) const
+	{
+		return bHasLayoutChildHorizontalAlign ? LayoutChildHorizontalAlign : DefaultValue;
+	}
+
+	FString GetLayoutChildVerticalAlignOr(const FString& DefaultValue) const
+	{
+		return bHasLayoutChildVerticalAlign ? LayoutChildVerticalAlign : DefaultValue;
 	}
 };
 
@@ -139,6 +300,8 @@ struct FDesignShapeNodeData
  */
 struct FDesignTransformNodeData
 {
+	// Keep source-presence separate from explicit size: source width/height
+	// being present is not the same as a runtime explicit size contract.
 	float X = 0.0f;
 	float Y = 0.0f;
 	TOptional<float> ExplicitX;

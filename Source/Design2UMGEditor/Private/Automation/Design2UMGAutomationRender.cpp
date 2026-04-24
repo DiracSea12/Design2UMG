@@ -1,5 +1,6 @@
 ﻿#include "Automation/Design2UMGAutomationRender.h"
 
+#include "Automation/Design2UMGAutomationStructureSnapshot.h"
 #include "Design2UMGLocalFigmaImport.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGNotification.h"
@@ -12,19 +13,11 @@
 #include "FontResolver.h"
 #include "PenMCPBridge.h"
 #include "ProceduralShapeGenerator.h"
-#include "RefExpander.h"
 #include "UMGSchema.h"
 #include "UMGWidgetUtils.h"
 
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"
-#include "Components/Border.h"
-#include "Components/Button.h"
-#include "Components/ContentWidget.h"
-#include "Components/Image.h"
-#include "Components/PanelWidget.h"
-#include "Components/Spacer.h"
-#include "Components/TextBlock.h"
 #include "Components/Widget.h"
 #include "WidgetBlueprint.h"
 #include "Dom/JsonObject.h"
@@ -43,87 +36,6 @@
 namespace
 {
 	bool GDesign2UMGAutomationRenderActive = false;
-
-	struct FStructureSnapshotStats
-	{
-		int32 TotalNodes = 0;
-		int32 LeafNodes = 0;
-		int32 ContainerNodes = 0;
-		int32 TextNodes = 0;
-		int32 VisualNodes = 0;
-		int32 ButtonNodes = 0;
-		int32 PlaceholderNodes = 0;
-		int32 MaxDepth = 0;
-		int32 RootChildCount = 0;
-		FString RootKind = TEXT("unknown");
-		TArray<FString> VisibleTexts;
-		TArray<FString> BorderWidgets;
-		TMap<FString, int32> KindHistogram;
-		TMap<FString, int32> ClassHistogram;
-
-		void AddKind(const FString& Kind)
-		{
-			KindHistogram.FindOrAdd(Kind)++;
-		}
-
-		void AddClass(const UWidget* Widget)
-		{
-			if (!Widget)
-			{
-				return;
-			}
-			ClassHistogram.FindOrAdd(Widget->GetClass()->GetName())++;
-		}
-
-		TSharedPtr<FJsonObject> ToJson(const FString& SnapshotType) const
-		{
-			TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
-			Root->SetStringField(TEXT("snapshot_type"), SnapshotType);
-			Root->SetStringField(TEXT("root_kind"), RootKind);
-			Root->SetNumberField(TEXT("root_child_count"), RootChildCount);
-			Root->SetNumberField(TEXT("total_nodes"), TotalNodes);
-			Root->SetNumberField(TEXT("leaf_nodes"), LeafNodes);
-			Root->SetNumberField(TEXT("container_nodes"), ContainerNodes);
-			Root->SetNumberField(TEXT("text_nodes"), TextNodes);
-			Root->SetNumberField(TEXT("visual_nodes"), VisualNodes);
-			Root->SetNumberField(TEXT("button_nodes"), ButtonNodes);
-			Root->SetNumberField(TEXT("placeholder_nodes"), PlaceholderNodes);
-			Root->SetNumberField(TEXT("max_depth"), MaxDepth);
-
-			TArray<FString> SortedTexts = VisibleTexts;
-			SortedTexts.Sort();
-			TArray<TSharedPtr<FJsonValue>> TextValues;
-			for (const FString& Text : SortedTexts)
-			{
-				TextValues.Add(MakeShared<FJsonValueString>(Text));
-			}
-			Root->SetArrayField(TEXT("visible_texts"), TextValues);
-
-			TArray<FString> SortedBorders = BorderWidgets;
-			SortedBorders.Sort();
-			TArray<TSharedPtr<FJsonValue>> BorderValues;
-			for (const FString& BorderName : SortedBorders)
-			{
-				BorderValues.Add(MakeShared<FJsonValueString>(BorderName));
-			}
-			Root->SetArrayField(TEXT("border_widgets"), BorderValues);
-
-			TSharedPtr<FJsonObject> HistogramObject = MakeShared<FJsonObject>();
-			for (const TPair<FString, int32>& Pair : KindHistogram)
-			{
-				HistogramObject->SetNumberField(Pair.Key, Pair.Value);
-			}
-			Root->SetObjectField(TEXT("kind_histogram"), HistogramObject);
-
-			TSharedPtr<FJsonObject> ClassHistogramObject = MakeShared<FJsonObject>();
-			for (const TPair<FString, int32>& Pair : ClassHistogram)
-			{
-				ClassHistogramObject->SetNumberField(Pair.Key, Pair.Value);
-			}
-			Root->SetObjectField(TEXT("class_histogram"), ClassHistogramObject);
-			return Root;
-		}
-	};
 
 	struct FAutomationRenderSpec
 	{
@@ -152,40 +64,11 @@ namespace
 
 	const TCHAR* GeneratedAssetFromResultPrefix = TEXT("@generated_asset_from:");
 
-	FString NormalizeStructureText(const FString& InText)
+	bool ShouldSkipDesignerOnlyNodeForAutomationSnapshot(const TSharedPtr<FDesignNode>& Node)
 	{
-		FString Normalized = InText;
-		Normalized.ReplaceInline(TEXT("\r"), TEXT(" "));
-		Normalized.ReplaceInline(TEXT("\n"), TEXT(" "));
-		Normalized.ReplaceInline(TEXT("\t"), TEXT(" "));
-
-		TArray<FString> Parts;
-		Normalized.ParseIntoArrayWS(Parts);
-		return FString::Join(Parts, TEXT(" "));
-	}
-
-	FString NormalizeCompactStructureKey(const FString& InValue)
-	{
-		FString Key = InValue.ToLower().TrimStartAndEnd();
-		Key.ReplaceInline(TEXT(" "), TEXT(""));
-		Key.ReplaceInline(TEXT("-"), TEXT(""));
-		Key.ReplaceInline(TEXT("_"), TEXT(""));
-		return Key;
-	}
-
-	bool IsIconLikeFontFamily(const FString& FontFamily)
-	{
-		const FString NormalizedFamily = NormalizeCompactStructureKey(FontFamily);
-		return NormalizedFamily.Contains(TEXT("lucide"))
-			|| NormalizedFamily.Contains(TEXT("materialsymbol"))
-			|| NormalizedFamily.Contains(TEXT("materialicon"));
-	}
-
-	bool ShouldSkipDesignNodeForStructure(const TSharedPtr<FDesignNode>& Node)
-	{
-		if (!Node.IsValid() || Node->IsCollapsed())
+		if (!Node.IsValid())
 		{
-			return true;
+			return false;
 		}
 
 		switch (Node->Type)
@@ -198,405 +81,6 @@ namespace
 		default:
 			return false;
 		}
-	}
-
-	TSharedPtr<FDesignNode> ResolveEffectiveDesignNodeForStructure(const TSharedPtr<FDesignNode>& Node, const FDesignDocument& Doc)
-	{
-		if (!Node.IsValid())
-		{
-			return nullptr;
-		}
-
-		if (Node->Type == EDesignNodeType::Ref)
-		{
-			if (TSharedPtr<FDesignNode> Expanded = FRefExpander::ExpandRef(Node, Doc))
-			{
-				return Expanded;
-			}
-		}
-
-		return Node;
-	}
-
-	FString ClassifyDesignNodeKindForStructure(const TSharedPtr<FDesignNode>& Node)
-	{
-		if (!Node.IsValid())
-		{
-			return TEXT("unknown");
-		}
-		if (Node->LayoutData.bSemanticPlaceholderSurface)
-		{
-			return TEXT("placeholder");
-		}
-
-		switch (Node->Type)
-		{
-		case EDesignNodeType::Frame:
-		case EDesignNodeType::Group:
-			return TEXT("container");
-		case EDesignNodeType::Text:
-		case EDesignNodeType::IconFont:
-			return TEXT("text");
-		case EDesignNodeType::Rectangle:
-		case EDesignNodeType::Ellipse:
-		case EDesignNodeType::Line:
-		case EDesignNodeType::Polygon:
-		case EDesignNodeType::Path:
-			return TEXT("visual");
-		default:
-			return TEXT("other");
-		}
-	}
-
-	void GatherDesignStructureChildren(
-		const TSharedPtr<FDesignNode>& Node,
-		const FDesignDocument& Doc,
-		TArray<TSharedPtr<FDesignNode>>& OutChildren)
-	{
-		OutChildren.Reset();
-		if (!Node.IsValid())
-		{
-			return;
-		}
-
-		for (const TSharedPtr<FDesignNode>& Child : Node->Children)
-		{
-			TSharedPtr<FDesignNode> EffectiveChild = ResolveEffectiveDesignNodeForStructure(Child, Doc);
-			if (!ShouldSkipDesignNodeForStructure(EffectiveChild))
-			{
-				OutChildren.Add(EffectiveChild);
-			}
-		}
-	}
-
-	void AccumulateDesignStructureSnapshot(
-		const TSharedPtr<FDesignNode>& Node,
-		const FDesignDocument& Doc,
-		const int32 Depth,
-		FStructureSnapshotStats& Stats)
-	{
-		TSharedPtr<FDesignNode> EffectiveNode = ResolveEffectiveDesignNodeForStructure(Node, Doc);
-		if (ShouldSkipDesignNodeForStructure(EffectiveNode))
-		{
-			return;
-		}
-
-		Stats.TotalNodes++;
-		Stats.MaxDepth = FMath::Max(Stats.MaxDepth, Depth);
-
-		const FString Kind = ClassifyDesignNodeKindForStructure(EffectiveNode);
-		Stats.AddKind(Kind);
-		if (Kind == TEXT("container"))
-		{
-			Stats.ContainerNodes++;
-		}
-		else if (Kind == TEXT("text"))
-		{
-			Stats.TextNodes++;
-			const FString Text = (EffectiveNode->Type == EDesignNodeType::IconFont
-				|| IsIconLikeFontFamily(EffectiveNode->Text.FontFamily)
-				|| IsIconLikeFontFamily(EffectiveNode->Text.IconFontFamily))
-				? FString()
-				: NormalizeStructureText(EffectiveNode->Text.Content);
-			if (!Text.IsEmpty())
-			{
-				Stats.VisibleTexts.Add(Text);
-			}
-		}
-		else if (Kind == TEXT("visual"))
-		{
-			Stats.VisualNodes++;
-		}
-		else if (Kind == TEXT("placeholder"))
-		{
-			Stats.PlaceholderNodes++;
-			Stats.VisualNodes++;
-		}
-
-		TArray<TSharedPtr<FDesignNode>> Children;
-		GatherDesignStructureChildren(EffectiveNode, Doc, Children);
-		if (Depth == 0)
-		{
-			Stats.RootChildCount = Children.Num();
-		}
-		if (Children.Num() == 0)
-		{
-			Stats.LeafNodes++;
-			return;
-		}
-
-		for (const TSharedPtr<FDesignNode>& Child : Children)
-		{
-			AccumulateDesignStructureSnapshot(Child, Doc, Depth + 1, Stats);
-		}
-	}
-
-	TSharedPtr<FDesignNode> FindDesignNodeByIdRecursive(const TSharedPtr<FDesignNode>& Node, const FString& TargetId)
-	{
-		if (!Node.IsValid())
-		{
-			return nullptr;
-		}
-		if (Node->Id == TargetId)
-		{
-			return Node;
-		}
-
-		for (const TSharedPtr<FDesignNode>& Child : Node->Children)
-		{
-			if (TSharedPtr<FDesignNode> Match = FindDesignNodeByIdRecursive(Child, TargetId))
-			{
-				return Match;
-			}
-		}
-		return nullptr;
-	}
-
-	TSharedPtr<FJsonObject> BuildDesignStructureSnapshot(const FDesignDocument& Doc, const FString& PreferredRootId = FString())
-	{
-		FStructureSnapshotStats Stats;
-
-		if (!PreferredRootId.IsEmpty())
-		{
-			for (const TSharedPtr<FDesignNode>& Child : Doc.Children)
-			{
-				if (TSharedPtr<FDesignNode> Match = FindDesignNodeByIdRecursive(Child, PreferredRootId))
-				{
-					TSharedPtr<FDesignNode> RootNode = ResolveEffectiveDesignNodeForStructure(Match, Doc);
-					if (ShouldSkipDesignNodeForStructure(RootNode))
-					{
-						return nullptr;
-					}
-
-					Stats.RootKind = ClassifyDesignNodeKindForStructure(RootNode);
-					AccumulateDesignStructureSnapshot(RootNode, Doc, 0, Stats);
-					return Stats.ToJson(TEXT("design_semantic"));
-				}
-			}
-		}
-
-		if (Doc.Children.Num() == 1)
-		{
-			TSharedPtr<FDesignNode> RootNode = ResolveEffectiveDesignNodeForStructure(Doc.Children[0], Doc);
-			if (ShouldSkipDesignNodeForStructure(RootNode))
-			{
-				return nullptr;
-			}
-
-			Stats.RootKind = ClassifyDesignNodeKindForStructure(RootNode);
-			AccumulateDesignStructureSnapshot(RootNode, Doc, 0, Stats);
-			return Stats.ToJson(TEXT("design_semantic"));
-		}
-
-		Stats.RootKind = TEXT("document");
-		for (const TSharedPtr<FDesignNode>& Child : Doc.Children)
-		{
-			TSharedPtr<FDesignNode> EffectiveChild = ResolveEffectiveDesignNodeForStructure(Child, Doc);
-			if (ShouldSkipDesignNodeForStructure(EffectiveChild))
-			{
-				continue;
-			}
-
-			Stats.RootChildCount++;
-			AccumulateDesignStructureSnapshot(EffectiveChild, Doc, 1, Stats);
-		}
-		return Stats.ToJson(TEXT("design_semantic"));
-	}
-
-	bool IsWidgetVisibleForStructure(const UWidget* Widget)
-	{
-		if (!Widget)
-		{
-			return false;
-		}
-
-		const ESlateVisibility Visibility = Widget->GetVisibility();
-		return Visibility != ESlateVisibility::Collapsed && Visibility != ESlateVisibility::Hidden;
-	}
-
-	void GatherWidgetStructureChildren(UWidget* Widget, TArray<UWidget*>& OutChildren)
-	{
-		OutChildren.Reset();
-		if (!Widget)
-		{
-			return;
-		}
-
-		TSet<UWidget*> Seen;
-		auto TryAddChild = [&OutChildren, &Seen](UWidget* Child)
-		{
-			if (!IsWidgetVisibleForStructure(Child) || Seen.Contains(Child))
-			{
-				return;
-			}
-			Seen.Add(Child);
-			OutChildren.Add(Child);
-		};
-
-		if (UUserWidget* UserWidget = Cast<UUserWidget>(Widget))
-		{
-			if (UserWidget->WidgetTree && UserWidget->WidgetTree->RootWidget)
-			{
-				TryAddChild(UserWidget->WidgetTree->RootWidget);
-			}
-		}
-
-		if (UPanelWidget* PanelWidget = Cast<UPanelWidget>(Widget))
-		{
-			for (int32 ChildIndex = 0; ChildIndex < PanelWidget->GetChildrenCount(); ++ChildIndex)
-			{
-				TryAddChild(PanelWidget->GetChildAt(ChildIndex));
-			}
-			return;
-		}
-
-		if (UContentWidget* ContentWidget = Cast<UContentWidget>(Widget))
-		{
-			TryAddChild(ContentWidget->GetContent());
-		}
-	}
-
-	FString ClassifyWidgetKindForStructure(UWidget* Widget)
-	{
-		if (!Widget)
-		{
-			return TEXT("unknown");
-		}
-		if (Cast<UTextBlock>(Widget))
-		{
-			return TEXT("text");
-		}
-		if (Cast<UButton>(Widget))
-		{
-			return TEXT("button");
-		}
-		if (Cast<UImage>(Widget))
-		{
-			return TEXT("visual");
-		}
-		if (Cast<USpacer>(Widget))
-		{
-			return TEXT("spacer");
-		}
-		if (UBorder* Border = Cast<UBorder>(Widget))
-		{
-			TArray<UWidget*> Children;
-			GatherWidgetStructureChildren(Border, Children);
-			return Children.Num() > 0 ? TEXT("container") : TEXT("visual");
-		}
-		if (Cast<UPanelWidget>(Widget) || Cast<UContentWidget>(Widget))
-		{
-			return TEXT("container");
-		}
-		return TEXT("other");
-	}
-
-	FString ResolveWidgetStructureText(const UTextBlock* TextBlock)
-	{
-		if (!TextBlock)
-		{
-			return FString();
-		}
-
-		const FString RawText = NormalizeStructureText(TextBlock->GetText().ToString());
-		if (RawText.IsEmpty())
-		{
-			return FString();
-		}
-
-		const FSlateFontInfo& FontInfo = TextBlock->GetFont();
-		if (FontInfo.FontObject)
-		{
-			const FString FontObjectName = FontInfo.FontObject->GetName();
-			const FString FontObjectPath = FontInfo.FontObject->GetPathName();
-			if (IsIconLikeFontFamily(FontObjectName) || IsIconLikeFontFamily(FontObjectPath))
-			{
-				return FString();
-			}
-
-			const FString SemanticIconName = FFontResolver::FindKnownIconNameByGlyph(
-				FontObjectName,
-				RawText);
-			if (!SemanticIconName.IsEmpty())
-			{
-				return FString();
-			}
-		}
-
-		return RawText;
-	}
-
-	void AccumulateWidgetStructureSnapshot(UWidget* Widget, const int32 Depth, FStructureSnapshotStats& Stats)
-	{
-		if (!IsWidgetVisibleForStructure(Widget))
-		{
-			return;
-		}
-
-		Stats.TotalNodes++;
-		Stats.MaxDepth = FMath::Max(Stats.MaxDepth, Depth);
-		Stats.AddClass(Widget);
-		if (Cast<UBorder>(Widget))
-		{
-			Stats.BorderWidgets.Add(Widget->GetName());
-		}
-
-		const FString Kind = ClassifyWidgetKindForStructure(Widget);
-		Stats.AddKind(Kind);
-		if (Kind == TEXT("container"))
-		{
-			Stats.ContainerNodes++;
-		}
-		else if (Kind == TEXT("text"))
-		{
-			Stats.TextNodes++;
-			if (const UTextBlock* TextBlock = Cast<UTextBlock>(Widget))
-			{
-				const FString Text = ResolveWidgetStructureText(TextBlock);
-				if (!Text.IsEmpty())
-				{
-					Stats.VisibleTexts.Add(Text);
-				}
-			}
-		}
-		else if (Kind == TEXT("visual"))
-		{
-			Stats.VisualNodes++;
-		}
-		else if (Kind == TEXT("button"))
-		{
-			Stats.ButtonNodes++;
-		}
-
-		TArray<UWidget*> Children;
-		GatherWidgetStructureChildren(Widget, Children);
-		if (Depth == 0)
-		{
-			Stats.RootChildCount = Children.Num();
-		}
-		if (Children.Num() == 0)
-		{
-			Stats.LeafNodes++;
-			return;
-		}
-
-		for (UWidget* Child : Children)
-		{
-			AccumulateWidgetStructureSnapshot(Child, Depth + 1, Stats);
-		}
-	}
-
-	TSharedPtr<FJsonObject> BuildWidgetTreeStructureSnapshot(UWidgetTree* WidgetTree)
-	{
-		if (!WidgetTree || !WidgetTree->RootWidget)
-		{
-			return nullptr;
-		}
-
-		FStructureSnapshotStats Stats;
-		Stats.RootKind = ClassifyWidgetKindForStructure(WidgetTree->RootWidget);
-		AccumulateWidgetStructureSnapshot(WidgetTree->RootWidget, 0, Stats);
-		return Stats.ToJson(TEXT("widget_tree_semantic"));
 	}
 
 	bool LoadAutomationRenderSpec(const FString& SpecPath, FAutomationRenderSpec& OutSpec, FString& OutError)
@@ -909,7 +393,7 @@ namespace
 			{
 				if (UWidgetBlueprint* GeneratedBlueprint = LoadObject<UWidgetBlueprint>(nullptr, *OutResult.GeneratedAssetPath))
 				{
-					OutResult.AssetStructure = BuildWidgetTreeStructureSnapshot(GeneratedBlueprint->WidgetTree);
+					OutResult.AssetStructure = Design2UMGAutomationStructureSnapshot::BuildWidgetTreeStructureSnapshot(GeneratedBlueprint->WidgetTree);
 				}
 			}
 		};
@@ -935,7 +419,7 @@ namespace
 			}
 
 			OutResult.GeneratedAssetPath = WidgetBlueprint->GetPathName();
-			OutResult.AssetStructure = BuildWidgetTreeStructureSnapshot(WidgetBlueprint->WidgetTree);
+			OutResult.AssetStructure = Design2UMGAutomationStructureSnapshot::BuildWidgetTreeStructureSnapshot(WidgetBlueprint->WidgetTree);
 			if (!DesignImportUtils::RenderCompiledBlueprintToPngFile(
 				WidgetBlueprint,
 				Spec.RenderPngPath,
@@ -960,7 +444,10 @@ namespace
 				return false;
 			}
 
-			OutResult.SourceStructure = BuildDesignStructureSnapshot(Document, Spec.NodeId);
+			OutResult.SourceStructure = Design2UMGAutomationStructureSnapshot::BuildDesignStructureSnapshot(
+				Document,
+				Spec.NodeId,
+				ShouldSkipDesignerOnlyNodeForAutomationSnapshot);
 
 			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: generating blueprint and compiled png"));
 			if (!ApplyExecutionResult(DesignImportPipeline::Execute(Document, MakeAutomationImportRequest(true))))
@@ -1002,7 +489,10 @@ namespace
 				return false;
 			}
 
-			OutResult.SourceStructure = BuildDesignStructureSnapshot(SourceDocument, Spec.NodeId);
+			OutResult.SourceStructure = Design2UMGAutomationStructureSnapshot::BuildDesignStructureSnapshot(
+				SourceDocument,
+				Spec.NodeId,
+				ShouldSkipDesignerOnlyNodeForAutomationSnapshot);
 			const FImportAnalysisResult AnalysisResult = DesignImportPipeline::AnalyzeImport(Data, FImportAnalysisInput{ true });
 			Data = AnalysisResult.Data;
 			DeferredAnalysisResult = AnalysisResult;
@@ -1018,7 +508,10 @@ namespace
 				return false;
 			}
 
-			OutResult.SourceStructure = BuildDesignStructureSnapshot(SourceDocument, Spec.NodeId);
+			OutResult.SourceStructure = Design2UMGAutomationStructureSnapshot::BuildDesignStructureSnapshot(
+				SourceDocument,
+				Spec.NodeId,
+				ShouldSkipDesignerOnlyNodeForAutomationSnapshot);
 			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: generating blueprint and compiled png"));
 			if (!ApplyExecutionResult(DesignImportPipeline::Execute(SourceDocument, MakeAutomationImportRequest(true))))
 			{
@@ -1041,10 +534,20 @@ namespace
 				return false;
 			}
 
-			OutResult.SourceStructure = BuildDesignStructureSnapshot(SourceDocument, Spec.NodeId);
-			Data = AnalysisResult.Data;
-			DeferredAnalysisResult = AnalysisResult;
-			DiagnosticDocument = SourceDocument;
+			OutResult.SourceStructure = Design2UMGAutomationStructureSnapshot::BuildDesignStructureSnapshot(
+				SourceDocument,
+				Spec.NodeId,
+				ShouldSkipDesignerOnlyNodeForAutomationSnapshot);
+			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: generating blueprint and compiled png"));
+			if (!ApplyExecutionResult(DesignImportPipeline::Execute(SourceDocument, MakeAutomationImportRequest(true))))
+			{
+				OutResult.ErrorMessage = FString::Printf(TEXT("Failed to generate compiled PNG for %s"), *Spec.SourcePath);
+				return false;
+			}
+
+			CaptureGeneratedAssetStructure();
+			OutResult.bSuccess = true;
+			return true;
 		}
 		else
 		{

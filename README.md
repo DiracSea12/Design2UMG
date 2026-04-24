@@ -133,10 +133,13 @@ Key options:
 - The public repository must not treat that maintainer boundary as a portable user setup recipe.
 - HostProject fallback is not part of the supported verification workflow.
 
-## Public Validation
+## Repository And Release Checks
 
-- Public `validate` documentation should be treated as smoke/public validation unless it explicitly says it reproduces the maintainer full admissible gate.
-- The current authoritative release gate remains the maintainer-owned full admissible run documented in `Docs/ValidationProtocol.md`.
+- `repository-hygiene`: the public GitHub Actions check that verifies required repo files and blocks tracked maintainer-local paths.
+- `self-hosted build`: the manual `workflow_dispatch` packaging job in `.github/workflows/build.yml`; it requires a maintainer-provided self-hosted Windows runner with `UE_ROOT`.
+- `public smoke/public validate`: contributor-facing build and validation steps used for smoke checks and local repro; do not present them as the release gate.
+- `maintainer formal admissible gate`: the maintainer-owned full discovered 47-case release gate documented in `Docs/ValidationProtocol.md`.
+- No public hosted CI matrix, coverage badge, or release asset pipeline is published in this repo today.
 
 ## Widget Class Overrides
 

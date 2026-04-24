@@ -14,45 +14,18 @@
 
 namespace FigmaParserInternal
 {
+using DesignJsonUtils::GetArray;
+using DesignJsonUtils::GetBool;
+using DesignJsonUtils::GetNumber;
+using DesignJsonUtils::GetObject;
+using DesignJsonUtils::GetString;
+using DesignJsonUtils::ToCompactString;
+using DesignJsonUtils::TryGetNumber;
+
 static void AddExtensionIfNonEmpty(TMap<FString, FString>& Extensions, const FString& Key, const FString& Value)
 {
 	if (!Value.IsEmpty())
 		Extensions.Add(Key, Value);
-}
-
-static FString GetString(const TSharedPtr<FJsonObject>& Obj, const FString& Key, const FString& Default = FString())
-{
-	return DesignJsonUtils::GetString(Obj, Key, Default);
-}
-
-static double GetNumber(const TSharedPtr<FJsonObject>& Obj, const FString& Key, double Default = 0.0)
-{
-	return DesignJsonUtils::GetNumber(Obj, Key, Default);
-}
-
-static bool TryGetNumber(const TSharedPtr<FJsonObject>& Obj, const FString& Key, double& OutVal)
-{
-	return DesignJsonUtils::TryGetNumber(Obj, Key, OutVal);
-}
-
-static bool GetBoolean(const TSharedPtr<FJsonObject>& Obj, const FString& Key, bool Default = true)
-{
-	return DesignJsonUtils::GetBool(Obj, Key, Default);
-}
-
-static TSharedPtr<FJsonObject> GetObject(const TSharedPtr<FJsonObject>& Obj, const FString& Key)
-{
-	return DesignJsonUtils::GetObject(Obj, Key);
-}
-
-static const TArray<TSharedPtr<FJsonValue>>* GetArray(const TSharedPtr<FJsonObject>& Obj, const FString& Key)
-{
-	return DesignJsonUtils::GetArray(Obj, Key);
-}
-
-static FString JsonValueToCompactString(const TSharedPtr<FJsonValue>& Value)
-{
-	return DesignJsonUtils::ToCompactString(Value);
 }
 
 static void AddNumericExtensionIfPresent(const TSharedPtr<FJsonObject>& Obj, TMap<FString, FString>& Extensions, const FString& SourceKey, const FString& ExtKey)
@@ -141,58 +114,47 @@ static void PromoteFigmaGridLayout(FDesignNode& OutNode)
 	const FDesignSourceNodeData& SourceData = OutNode.Source();
 	if (SourceData.LayoutExtensions.bHasGridRowCount)
 	{
-		OutNode.LayoutData.LayoutRowCount = FMath::Max(0, SourceData.LayoutExtensions.GridRowCount);
-		OutNode.LayoutData.bHasLayoutRowCount = true;
+		OutNode.LayoutData.SetLayoutRowCountValue(FMath::Max(0, SourceData.LayoutExtensions.GridRowCount));
 	}
 	if (SourceData.LayoutExtensions.bHasGridColumnCount)
 	{
-		OutNode.LayoutData.LayoutColumnCount = FMath::Max(0, SourceData.LayoutExtensions.GridColumnCount);
-		OutNode.LayoutData.bHasLayoutColumnCount = true;
+		OutNode.LayoutData.SetLayoutColumnCountValue(FMath::Max(0, SourceData.LayoutExtensions.GridColumnCount));
 	}
 	if (SourceData.LayoutExtensions.bHasGridRowGap)
 	{
-		OutNode.LayoutData.LayoutRowGap = FMath::Max(0.0f, SourceData.LayoutExtensions.GridRowGap);
-		OutNode.LayoutData.bHasLayoutRowGap = true;
+		OutNode.LayoutData.SetLayoutRowGapValue(FMath::Max(0.0f, SourceData.LayoutExtensions.GridRowGap));
 	}
 	else if (SourceData.LayoutExtensions.bHasCounterAxisSpacing)
 	{
-		OutNode.LayoutData.LayoutRowGap = FMath::Max(0.0f, SourceData.LayoutExtensions.CounterAxisSpacing);
-		OutNode.LayoutData.bHasLayoutRowGap = true;
+		OutNode.LayoutData.SetLayoutRowGapValue(FMath::Max(0.0f, SourceData.LayoutExtensions.CounterAxisSpacing));
 	}
 	if (SourceData.LayoutExtensions.bHasGridColumnGap)
 	{
-		OutNode.LayoutData.LayoutColumnGap = FMath::Max(0.0f, SourceData.LayoutExtensions.GridColumnGap);
-		OutNode.LayoutData.bHasLayoutColumnGap = true;
+		OutNode.LayoutData.SetLayoutColumnGapValue(FMath::Max(0.0f, SourceData.LayoutExtensions.GridColumnGap));
 	}
 	if (!SourceData.LayoutExtensions.GridChildHorizontalAlign.IsEmpty())
 	{
-		OutNode.LayoutData.LayoutChildHorizontalAlign = SourceData.LayoutExtensions.GridChildHorizontalAlign;
-		OutNode.LayoutData.bHasLayoutChildHorizontalAlign = true;
+		OutNode.LayoutData.SetLayoutChildHorizontalAlignValue(SourceData.LayoutExtensions.GridChildHorizontalAlign);
 	}
 	if (!SourceData.LayoutExtensions.GridChildVerticalAlign.IsEmpty())
 	{
-		OutNode.LayoutData.LayoutChildVerticalAlign = SourceData.LayoutExtensions.GridChildVerticalAlign;
-		OutNode.LayoutData.bHasLayoutChildVerticalAlign = true;
+		OutNode.LayoutData.SetLayoutChildVerticalAlignValue(SourceData.LayoutExtensions.GridChildVerticalAlign);
 	}
 	if (SourceData.LayoutExtensions.bHasGridRowSpan)
 	{
-		OutNode.LayoutData.LayoutRowSpan = FMath::Max(1, SourceData.LayoutExtensions.GridRowSpan);
-		OutNode.LayoutData.bHasLayoutRowSpan = true;
+		OutNode.LayoutData.SetLayoutRowSpanValue(FMath::Max(1, SourceData.LayoutExtensions.GridRowSpan));
 	}
 	if (SourceData.LayoutExtensions.bHasGridColumnSpan)
 	{
-		OutNode.LayoutData.LayoutColumnSpan = FMath::Max(1, SourceData.LayoutExtensions.GridColumnSpan);
-		OutNode.LayoutData.bHasLayoutColumnSpan = true;
+		OutNode.LayoutData.SetLayoutColumnSpanValue(FMath::Max(1, SourceData.LayoutExtensions.GridColumnSpan));
 	}
 	if (SourceData.LayoutExtensions.bHasGridRowAnchorIndex)
 	{
-		OutNode.LayoutData.LayoutRow = FMath::Max(0, SourceData.LayoutExtensions.GridRowAnchorIndex);
-		OutNode.LayoutData.bHasLayoutRow = true;
+		OutNode.LayoutData.SetLayoutRowValue(FMath::Max(0, SourceData.LayoutExtensions.GridRowAnchorIndex));
 	}
 	if (SourceData.LayoutExtensions.bHasGridColumnAnchorIndex)
 	{
-		OutNode.LayoutData.LayoutColumn = FMath::Max(0, SourceData.LayoutExtensions.GridColumnAnchorIndex);
-		OutNode.LayoutData.bHasLayoutColumn = true;
+		OutNode.LayoutData.SetLayoutColumnValue(FMath::Max(0, SourceData.LayoutExtensions.GridColumnAnchorIndex));
 	}
 }
 
@@ -399,7 +361,7 @@ static bool HasOpaqueVisibleSolidFill(const TSharedPtr<FJsonObject>& NodeObj)
 	for (const TSharedPtr<FJsonValue>& FillValue : *Fills)
 	{
 		const TSharedPtr<FJsonObject> FillObj = FillValue->AsObject();
-		if (!FillObj.IsValid() || !GetBoolean(FillObj, TEXT("visible"), true))
+		if (!FillObj.IsValid() || !GetBool(FillObj, TEXT("visible"), true))
 		{
 			continue;
 		}
@@ -528,7 +490,7 @@ static bool HasVisibleStroke(const TSharedPtr<FJsonObject>& NodeObj)
 	for (const TSharedPtr<FJsonValue>& StrokeValue : *Strokes)
 	{
 		const TSharedPtr<FJsonObject> StrokeObj = StrokeValue->AsObject();
-		if (StrokeObj.IsValid() && GetBoolean(StrokeObj, TEXT("visible"), true))
+		if (StrokeObj.IsValid() && GetBool(StrokeObj, TEXT("visible"), true))
 		{
 			return true;
 		}
@@ -548,7 +510,7 @@ static bool HasVisibleEffect(const TSharedPtr<FJsonObject>& NodeObj)
 	for (const TSharedPtr<FJsonValue>& EffectValue : *Effects)
 	{
 		const TSharedPtr<FJsonObject> EffectObj = EffectValue->AsObject();
-		if (EffectObj.IsValid() && GetBoolean(EffectObj, TEXT("visible"), true))
+		if (EffectObj.IsValid() && GetBool(EffectObj, TEXT("visible"), true))
 		{
 			return true;
 		}
@@ -650,7 +612,7 @@ static bool ShouldSkipAutoLayoutGhostChild(
 			continue;
 		}
 
-		if (!GetBoolean(SiblingObj, TEXT("visible"), true) || GetNumber(SiblingObj, TEXT("opacity"), 1.0) <= KINDA_SMALL_NUMBER)
+		if (!GetBool(SiblingObj, TEXT("visible"), true) || GetNumber(SiblingObj, TEXT("opacity"), 1.0) <= KINDA_SMALL_NUMBER)
 		{
 			continue;
 		}
@@ -920,7 +882,7 @@ static bool HasVisibleForegroundBlurEffect(const TSharedPtr<FJsonObject>& NodeOb
 	for (const TSharedPtr<FJsonValue>& EffectValue : *Effects)
 	{
 		const TSharedPtr<FJsonObject> EffectObj = EffectValue.IsValid() ? EffectValue->AsObject() : nullptr;
-		if (!EffectObj.IsValid() || !GetBoolean(EffectObj, TEXT("visible"), true))
+		if (!EffectObj.IsValid() || !GetBool(EffectObj, TEXT("visible"), true))
 		{
 			continue;
 		}
@@ -995,7 +957,7 @@ static bool HasImageCropFill(const TSharedPtr<FJsonObject>& NodeObj)
 	for (const TSharedPtr<FJsonValue>& FillValue : *Fills)
 	{
 		const TSharedPtr<FJsonObject> FillObj = FillValue.IsValid() ? FillValue->AsObject() : nullptr;
-		if (!FillObj.IsValid() || !GetBoolean(FillObj, TEXT("visible"), true))
+		if (!FillObj.IsValid() || !GetBool(FillObj, TEXT("visible"), true))
 		{
 			continue;
 		}
@@ -1059,7 +1021,7 @@ static bool HasFillImageUsingShrunkenRenderBounds(
 	for (const TSharedPtr<FJsonValue>& FillValue : *Fills)
 	{
 		const TSharedPtr<FJsonObject> FillObj = FillValue.IsValid() ? FillValue->AsObject() : nullptr;
-		if (!FillObj.IsValid() || !GetBoolean(FillObj, TEXT("visible"), true))
+		if (!FillObj.IsValid() || !GetBool(FillObj, TEXT("visible"), true))
 		{
 			continue;
 		}
@@ -1194,7 +1156,7 @@ static bool ShouldPreferLayoutBounds(
 			for (const TSharedPtr<FJsonValue>& FillVal : *Fills)
 			{
 				const TSharedPtr<FJsonObject> FillObj = FillVal->AsObject();
-				if (FillObj.IsValid() && GetBoolean(FillObj, TEXT("visible"), true))
+				if (FillObj.IsValid() && GetBool(FillObj, TEXT("visible"), true))
 				{
 					return true;
 				}
@@ -1388,11 +1350,11 @@ void ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 		const TSharedPtr<FJsonValue> BoundVarsField = NodeObj->TryGetField(TEXT("boundVariables"));
 		if (BoundVarsField.IsValid() && BoundVarsField->Type == EJson::Object)
 		{
-			OutNode.Metadata.Add(TEXT("boundVariables"), JsonValueToCompactString(BoundVarsField));
+			OutNode.Metadata.Add(TEXT("boundVariables"), ToCompactString(BoundVarsField));
 			const TSharedPtr<FJsonObject> BoundVarsObj = BoundVarsField->AsObject();
 			for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : BoundVarsObj->Values)
 			{
-				OutNode.Metadata.Add(FString::Printf(TEXT("boundVariables.%s"), *Pair.Key), JsonValueToCompactString(Pair.Value));
+				OutNode.Metadata.Add(FString::Printf(TEXT("boundVariables.%s"), *Pair.Key), ToCompactString(Pair.Value));
 			}
 		}
 	}
@@ -1417,8 +1379,7 @@ void ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 			OutNode.LayoutData.AlignItems = EDesignAlignItems::Start;
 	}
 
-	OutNode.LayoutData.bClip = GetBoolean(NodeObj, TEXT("clipsContent"), false);
-	OutNode.LayoutData.ExplicitClip = OutNode.LayoutData.bClip;
+	OutNode.LayoutData.SetClipValue(GetBool(NodeObj, TEXT("clipsContent"), false));
 
 	FDesignLayoutExtensions& LayoutExtensions = OutNode.MutableSource().LayoutExtensions;
 	SetStringFieldIfPresent(NodeObj, TEXT("layoutWrap"), LayoutExtensions.LayoutWrap);
@@ -1584,7 +1545,7 @@ static bool ShouldSkipParsedFigmaNode(
 		return true;
 	}
 
-	if (GetBoolean(NodeObj, TEXT("isMask"), false))
+	if (GetBool(NodeObj, TEXT("isMask"), false))
 	{
 		return true;
 	}
@@ -1635,7 +1596,7 @@ static void InitializeNodeFromFigma(
 {
 	OutNode.Id = GetString(NodeObj, TEXT("id"));
 	OutNode.Name = GetString(NodeObj, TEXT("name"));
-	OutNode.Transform.bEnabled = GetBoolean(NodeObj, TEXT("visible"), true);
+	OutNode.Transform.bEnabled = GetBool(NodeObj, TEXT("visible"), true);
 	OutNode.Transform.SetOpacityValue(GetNumber(NodeObj, TEXT("opacity"), 1.0));
 	OutNode.Transform.Rotation = GetNumber(NodeObj, TEXT("rotation"));
 	OutNode.MutableSource().ComponentInstance.bInInstanceSubtree = bInsideInstanceSubtree;

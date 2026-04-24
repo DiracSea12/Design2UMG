@@ -3,6 +3,7 @@
 #include "UMGJsonParser.h"
 #include "Design2UMGLog.h"
 #include "UMGPropertyKeys.h"
+#include "UMGSchema.h"
 #include "UMGWidgetNodeAccess.h"
 #include "UMGValueParser.h"
 #include "Dom/JsonObject.h"
@@ -112,7 +113,7 @@ bool FUMGJsonParser::ParseJson(const FString& JsonString, FUMGWidgetData& OutWid
 		return false;
 	}
 
-	// 瑙ｆ瀽 RootWidget
+	// 解析 RootWidget
 	const TSharedPtr<FJsonObject>* RootWidget;
 	if (!Root->TryGetObjectField(TEXT("RootWidget"), RootWidget) || !ParseWidgetNode(*RootWidget, OutWidgetData.RootWidget))
 	{
@@ -182,7 +183,7 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 		ParseSlotData(*SlotObject, OutNode.Slot);
 	}
 
-	// 瑙ｆ瀽 TextStyle (v2.4)
+	// 解析 TextStyle (v2.4)
 	const TSharedPtr<FJsonObject>* TSObject;
 	if (JsonObject->TryGetObjectField(TEXT("TextStyle"), TSObject))
 	{
@@ -381,7 +382,7 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 		}
 	}
 
-	// 瑙ｆ瀽 Brush (v2.4)
+	// 解析 Brush (v2.4)
 	const TSharedPtr<FJsonObject>* BrushObject;
 	if (JsonObject->TryGetObjectField(TEXT("Brush"), BrushObject))
 	{
@@ -771,20 +772,20 @@ void FUMGJsonParser::ParseSlotData(const TSharedPtr<FJsonObject>& JsonObject, FU
 		}
 	}
 
-	// 瑙ｆ瀽 Offsets (CanvasPanel)
+	// 解析 Offsets (CanvasPanel)
 	const TSharedPtr<FJsonObject>* OffsetsObject;
 	if (JsonObject->TryGetObjectField(TEXT("Offsets"), OffsetsObject))
 	{
 		ParseOffsetsData(*OffsetsObject, OutSlot.Offsets);
 	}
 
-	// 瑙ｆ瀽 Padding
+	// 解析 Padding
 	if (JsonObject->HasField(UMGPropertyKeys::Padding))
 	{
 		OutSlot.Padding = ParsePaddingValue(JsonObject->Values.FindRef(UMGPropertyKeys::Padding));
 	}
 
-	// 瑙ｆ瀽 HorizontalAlignment (VerticalBox/HorizontalBox/Overlay)
+	// 解析 HorizontalAlignment (VerticalBox/HorizontalBox/Overlay)
 	FString HAlign;
 	if (JsonObject->TryGetStringField(TEXT("HAlign"), HAlign) ||
 		JsonObject->TryGetStringField(TEXT("HorizontalAlignment"), HAlign))
@@ -792,7 +793,7 @@ void FUMGJsonParser::ParseSlotData(const TSharedPtr<FJsonObject>& JsonObject, FU
 		OutSlot.HorizontalAlignment = HAlign;
 	}
 
-	// 瑙ｆ瀽 VerticalAlignment
+	// 解析 VerticalAlignment
 	FString VAlign;
 	if (JsonObject->TryGetStringField(TEXT("VAlign"), VAlign) ||
 		JsonObject->TryGetStringField(TEXT("VerticalAlignment"), VAlign))
@@ -800,28 +801,28 @@ void FUMGJsonParser::ParseSlotData(const TSharedPtr<FJsonObject>& JsonObject, FU
 		OutSlot.VerticalAlignment = VAlign;
 	}
 
-	// 瑙ｆ瀽 SizeRule (Auto/Fill)
+	// 解析 SizeRule (Auto/Fill)
 	FString SizeRule;
 	if (JsonObject->TryGetStringField(TEXT("SizeRule"), SizeRule))
 	{
 		OutSlot.SizeRule = SizeRule;
 	}
 
-	// 瑙ｆ瀽 FillWeight
+	// 解析 FillWeight
 	double FillWeight;
 	if (JsonObject->TryGetNumberField(TEXT("FillWeight"), FillWeight))
 	{
 		OutSlot.FillWeight = static_cast<float>(FillWeight);
 	}
 
-	// 瑙ｆ瀽 Grid 鐩稿叧瀛楁
+	// 解析 Grid 相关字段
 	int32 IntValue;
 	if (JsonObject->TryGetNumberField(TEXT("Row"), IntValue)) OutSlot.Row = IntValue;
 	if (JsonObject->TryGetNumberField(TEXT("Column"), IntValue)) OutSlot.Column = IntValue;
 	if (JsonObject->TryGetNumberField(TEXT("RowSpan"), IntValue)) OutSlot.RowSpan = IntValue;
 	if (JsonObject->TryGetNumberField(TEXT("ColumnSpan"), IntValue)) OutSlot.ColumnSpan = IntValue;
 
-	// 瑙ｆ瀽 bAutoSize (Size To Content)
+	// 解析 bAutoSize (Size To Content)
 	bool bAutoSize = false;
 	if (JsonObject->TryGetBoolField(TEXT("bAutoSize"), bAutoSize))
 	{

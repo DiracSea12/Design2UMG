@@ -12,6 +12,51 @@
 
 namespace
 {
+	TSharedPtr<FDesignNode> BuildPathFallbackNode(const TSharedPtr<FDesignNode>& Node, const FString& Geometry)
+	{
+		if (!Node.IsValid() || Geometry.IsEmpty())
+		{
+			return nullptr;
+		}
+
+		// Geometry fallback must stay side-effect-free for the caller-owned design node.
+		TSharedPtr<FDesignNode> FallbackNode = MakeShared<FDesignNode>(*Node);
+		FallbackNode->Shape.Geometry = Geometry;
+		return FallbackNode;
+	}
+
+	TSharedPtr<FDesignNode> BuildEllipseFallbackPathNode(const TSharedPtr<FDesignNode>& Node, const float Width, const float Height)
+	{
+		const float RadiusX = Width / 2.0f;
+		const float RadiusY = Height / 2.0f;
+		return BuildPathFallbackNode(
+			Node,
+			FString::Printf(
+				TEXT("M 0,%.2f A %.2f,%.2f 0 1,1 %.2f,%.2f A %.2f,%.2f 0 1,1 0,%.2f Z"),
+				RadiusY,
+				RadiusX,
+				RadiusY,
+				Width,
+				RadiusY,
+				RadiusX,
+				RadiusY,
+				RadiusY));
+	}
+
+	TSharedPtr<FDesignNode> BuildLineFallbackPathNode(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid())
+		{
+			return nullptr;
+		}
+
+		const float Width = FMath::Max(1.0f, Node->Transform.Width.Value);
+		const float Height = FMath::Max(1.0f, Node->Transform.Height.Value);
+		return BuildPathFallbackNode(
+			Node,
+			FString::Printf(TEXT("M 0,%.1f L %.1f,%.1f"), Height * 0.5f, Width, Height * 0.5f));
+	}
+
 	bool HasGradientVisualFill(const TSharedPtr<FDesignNode>& Node)
 	{
 		if (!Node.IsValid())
@@ -76,19 +121,10 @@ namespace
 			&& ((Node->Visual.Fill.IsColor() && Node->Visual.Fill.bEnabled && !bHasStroke)
 				|| bHasVectorRasterFallback))
 		{
-			const float RadiusX = Width / 2.0f;
-			const float RadiusY = Height / 2.0f;
-			Node->Shape.Geometry = FString::Printf(
-				TEXT("M 0,%.2f A %.2f,%.2f 0 1,1 %.2f,%.2f A %.2f,%.2f 0 1,1 0,%.2f Z"),
-				RadiusY,
-				RadiusX,
-				RadiusY,
-				Width,
-				RadiusY,
-				RadiusX,
-				RadiusY,
-				RadiusY);
-			return PathWidgetBuilder::CreatePathWidget(Node);
+			if (TSharedPtr<FDesignNode> PathNode = BuildEllipseFallbackPathNode(Node, Width, Height))
+			{
+				return PathWidgetBuilder::CreatePathWidget(PathNode);
+			}
 		}
 
 		FUMGWidgetNode Widget = CreateContainerWidget(Node);
@@ -103,66 +139,83 @@ namespace
 	}
 }
 
-FUMGWidgetNode Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(
+Design2UMGNodeWidgetFactory::FBuildResult Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(
 	const TSharedPtr<FDesignNode>& Node,
-	FBuildContext& Context)
+	const FBuildArgs& Args)
 {
+	FBuildResult Result;
+
 	switch (Node->Type)
 	{
 	case EDesignNodeType::Text:
 		{
-			FUMGWidgetNode Widget = Design2UMGTextWidgetBuilder::CreateTextWidget(Node);
+			Result.Widget = Design2UMGTextWidgetBuilder::CreateTextWidget(Node);
 			if (Design2UMGSourceMetadata::IsSourceNodeType(Node, TEXT("TEXT_PATH")))
 			{
 				const FString NodeLabel = Node->Name.IsEmpty() ? Node->Id : Node->Name;
-				Context.Warnings.Add(FString::Printf(
+				Result.Warnings.Add(FString::Printf(
 					TEXT("Figma TEXT_PATH '%s' → TextBlock (text-on-path 降级为普通文本)"),
 					*NodeLabel));
 			}
-			return Widget;
+			return Result;
 		}
 
 	case EDesignNodeType::IconFont:
 		{
-			Design2UMGTextWidgetBuilder::FIconFontBuildContext IconFontContext(
-				Context.WarnedFamilies,
-				Context.PrunedInvalidMappings,
-				Context.PendingIconFontMappings);
-			return Design2UMGTextWidgetBuilder::CreateIconFontWidget(Node, IconFontContext);
+			Design2UMGTextWidgetBuilder::FIconFontBuildArgs IconFontArgs;
+			IconFontArgs.ExistingWarnedFamilies = Args.ExistingWarnedFamilies;
+			IconFontArgs.SettingsSnapshot = Args.IconFontSettingsSnapshot;
+
+			Design2UMGTextWidgetBuilder::FIconFontBuildResult IconFontResult =
+				Design2UMGTextWidgetBuilder::CreateIconFontWidget(Node, IconFontArgs);
+			Result.Widget = MoveTemp(IconFontResult.Widget);
+			Result.NewlyWarnedFamilies = MoveTemp(IconFontResult.NewlyWarnedFamilies);
+			Result.PrunedInvalidMappings = MoveTemp(IconFontResult.PrunedInvalidMappings);
+			Result.PendingIconFontMappings = MoveTemp(IconFontResult.PendingIconFontMappings);
+			return Result;
 		}
 
 	case EDesignNodeType::Frame:
 	case EDesignNodeType::Group:
 	case EDesignNodeType::Rectangle:
-		return CreateContainerWidget(Node);
+		Result.Widget = CreateContainerWidget(Node);
+		return Result;
 
 	case EDesignNodeType::Ellipse:
-		return CreateEllipseWidget(Node);
+		Result.Widget = CreateEllipseWidget(Node);
+		return Result;
 
 	case EDesignNodeType::Polygon:
 		if (!Node->Shape.Geometry.IsEmpty())
 		{
-			return PathWidgetBuilder::CreatePathWidget(Node);
+			Result.Widget = PathWidgetBuilder::CreatePathWidget(Node);
+			return Result;
 		}
 
 		UE_LOG(LogDesign2UMG, Warning, TEXT("多边形 '%s' 无 PathGeometry，降级为 Border"), *Node->Name);
-		Context.Warnings.Add(FString::Printf(TEXT("Polygon '%s' → Border (无 PathGeometry)"), *Node->Name));
-		return CreateContainerWidget(Node);
+		Result.Warnings.Add(FString::Printf(TEXT("Polygon '%s' → Border (无 PathGeometry)"), *Node->Name));
+		Result.Widget = CreateContainerWidget(Node);
+		return Result;
 
 	case EDesignNodeType::Path:
-		return PathWidgetBuilder::CreatePathWidget(Node);
+		Result.Widget = PathWidgetBuilder::CreatePathWidget(Node);
+		return Result;
 
 	case EDesignNodeType::Line:
 		if (Node->Shape.Geometry.IsEmpty())
 		{
-			const float Width = FMath::Max(1.0f, Node->Transform.Width.Value);
-			const float Height = FMath::Max(1.0f, Node->Transform.Height.Value);
-			Node->Shape.Geometry = FString::Printf(TEXT("M 0,%.1f L %.1f,%.1f"), Height * 0.5f, Width, Height * 0.5f);
+			if (TSharedPtr<FDesignNode> PathNode = BuildLineFallbackPathNode(Node))
+			{
+				Result.Widget = PathWidgetBuilder::CreatePathWidget(PathNode);
+				return Result;
+			}
 		}
-		return PathWidgetBuilder::CreatePathWidget(Node);
+		Result.Widget = PathWidgetBuilder::CreatePathWidget(Node);
+		return Result;
 
 	default:
-		return CreateContainerWidget(Node);
+		Result.Widget = CreateContainerWidget(Node);
+		return Result;
 	}
 }
 

@@ -3,12 +3,16 @@
 #include "Misc/AutomationTest.h"
 
 #include "Design2UMGConverter.h"
+#include "Design2UMGNodeWidgetFactory.h"
 #include "Design2UMGSettings.h"
+#include "Design2UMGTextWidgetBuilder.h"
 #include "SharedCoreSemantics.h"
 #include "SizeEstimator.h"
 #include "TextMeasurement.h"
+#include "UMGPropertyKeys.h"
+#include "UMGSchema.h"
+#include "UMGWidgetNodeAccess.h"
 
-#include "HAL/FileManager.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -78,81 +82,157 @@ namespace
 		return Ids;
 	}
 
-	FString NormalizeRelativePath(const FString& PluginBaseDir, const FString& AbsoluteFilePath)
+	struct FSharedSemanticsVisibilityFixture
 	{
-		FString RelativePath = AbsoluteFilePath;
-		FPaths::MakePathRelativeTo(RelativePath, *PluginBaseDir);
-		RelativePath.ReplaceInline(TEXT("\\"), TEXT("/"));
-		const FString PluginNamePrefix = FPaths::GetCleanFilename(PluginBaseDir) + TEXT("/");
-		if (RelativePath.StartsWith(PluginNamePrefix))
-		{
-			RelativePath.RightChopInline(PluginNamePrefix.Len(), EAllowShrinking::No);
-		}
-		return RelativePath;
+		TSharedPtr<FDesignNode> Root;
+		TSharedPtr<FDesignNode> DisabledLeaf;
+		TSharedPtr<FDesignNode> DesignerOnlyLeaf;
+		TSharedPtr<FDesignNode> NonRenderableLeaf;
+		TSharedPtr<FDesignNode> FlowContainerLeaf;
+		TSharedPtr<FDesignNode> RenderableLeaf;
+		TSharedPtr<FDesignNode> TextLeaf;
+	};
+
+	FSharedSemanticsVisibilityFixture MakeSharedSemanticsVisibilityFixture()
+	{
+		FSharedSemanticsVisibilityFixture Fixture;
+		Fixture.Root = MakeSharedSemanticsNode(TEXT("shared_semantics_root"), EDesignNodeType::Frame, FDesignSize::Fixed(640.0f), FDesignSize::Fixed(360.0f));
+		Fixture.Root->LayoutData.Layout = EDesignLayout::Vertical;
+
+		Fixture.DisabledLeaf = MakeSharedSemanticsNode(TEXT("skip_disabled"), EDesignNodeType::Rectangle);
+		Fixture.DisabledLeaf->Transform.bEnabled = false;
+
+		Fixture.DesignerOnlyLeaf = MakeSharedSemanticsNode(TEXT("skip_designer_only"), EDesignNodeType::Connection);
+		Fixture.NonRenderableLeaf = MakeSharedSemanticsNode(TEXT("skip_non_renderable"), EDesignNodeType::Rectangle);
+
+		Fixture.FlowContainerLeaf = MakeSharedSemanticsNode(TEXT("keep_flow_container"), EDesignNodeType::Frame);
+		Fixture.FlowContainerLeaf->LayoutData.Layout = EDesignLayout::Horizontal;
+
+		Fixture.RenderableLeaf = MakeSharedSemanticsNode(TEXT("keep_renderable"), EDesignNodeType::Rectangle);
+		Fixture.RenderableLeaf->Visual.Fill = FDesignFill::FromColor(TEXT("#2288CC"));
+
+		Fixture.TextLeaf = MakeSharedSemanticsNode(TEXT("keep_text"), EDesignNodeType::Text, FDesignSize::Fixed(220.0f), FDesignSize::Fixed(36.0f));
+		Fixture.TextLeaf->Text.Content = TEXT("Shared semantics consistency check");
+		Fixture.TextLeaf->Text.FontFamily = TEXT("Roboto");
+		Fixture.TextLeaf->Text.FontWeight = TEXT("Regular");
+		Fixture.TextLeaf->Text.FontSize = 16.0f;
+		Fixture.TextLeaf->Text.TextGrowth = EDesignTextGrowth::FixedWidth;
+
+		Fixture.Root->Children = {
+			Fixture.DisabledLeaf,
+			Fixture.DesignerOnlyLeaf,
+			Fixture.NonRenderableLeaf,
+			Fixture.FlowContainerLeaf,
+			Fixture.RenderableLeaf,
+			Fixture.TextLeaf
+		};
+
+		return Fixture;
 	}
 
-	bool ContainsAllTokens(const FString& Content, const TArray<FString>& Tokens)
+	bool RunSharedSemanticsSkipParityChecks(FAutomationTestBase& Test)
 	{
-		for (const FString& Token : Tokens)
+		bool bAllPassed = true;
+		const FSharedSemanticsVisibilityFixture Fixture = MakeSharedSemanticsVisibilityFixture();
+
+		struct FSkipExpectation
 		{
-			if (!Content.Contains(Token))
-			{
-				return false;
-			}
+			const TCHAR* Label;
+			TSharedPtr<FDesignNode> Node;
+			bool bShouldSkip = false;
+			bool bShouldRemainVisible = false;
+			bool bShouldRemainConverted = false;
+		};
+
+		const TArray<FSkipExpectation> Expectations = {
+			{ TEXT("Disabled leaf"), Fixture.DisabledLeaf, true, false, false },
+			{ TEXT("Designer-only leaf"), Fixture.DesignerOnlyLeaf, true, false, false },
+			{ TEXT("Non-renderable leaf"), Fixture.NonRenderableLeaf, true, false, false },
+			{ TEXT("Flow container leaf"), Fixture.FlowContainerLeaf, false, true, true },
+			{ TEXT("Renderable leaf"), Fixture.RenderableLeaf, false, true, true },
+			{ TEXT("Text leaf"), Fixture.TextLeaf, false, true, true },
+		};
+
+		for (const FSkipExpectation& Expectation : Expectations)
+		{
+			bAllPassed &= Test.TestEqual(
+				*FString::Printf(TEXT("%s shared helper skip contract"), Expectation.Label),
+				Design2UMGCore::SharedSemantics::ShouldSkipNode(Expectation.Node),
+				Expectation.bShouldSkip);
 		}
-		return true;
+
+		TArray<TSharedPtr<FDesignNode>> VisibleChildren;
+		SizeEstimator::GatherVisibleChildren(Fixture.Root, VisibleChildren);
+		const TSet<FString> VisibleIds = CollectNodeIds(VisibleChildren);
+
+		for (const FSkipExpectation& Expectation : Expectations)
+		{
+			bAllPassed &= Test.TestEqual(
+				*FString::Printf(TEXT("%s sizing visibility stays in parity"), Expectation.Label),
+				VisibleIds.Contains(Expectation.Node->Id),
+				Expectation.bShouldRemainVisible);
+		}
+
+		FDesignDocument Doc;
+		Doc.Children.Add(Fixture.Root);
+		const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+
+		for (const FSkipExpectation& Expectation : Expectations)
+		{
+			const bool bFoundInConvertedTree = FindWidgetByIdRecursive(Data.RootWidget, Expectation.Node->Id) != nullptr;
+			bAllPassed &= Test.TestEqual(
+				*FString::Printf(TEXT("%s converted-tree visibility stays in parity"), Expectation.Label),
+				bFoundInConvertedTree,
+				Expectation.bShouldRemainConverted);
+		}
+
+		return bAllPassed;
 	}
 
-	void ValidateDuplicateSemanticsPattern(
-		FAutomationTestBase& Test,
-		const FString& RuleName,
-		const TArray<FString>& CandidateFiles,
-		const TArray<FString>& Tokens,
-		const TSet<FString>& AllowedRelativePaths,
-		const FString& PluginBaseDir)
+	bool RunSharedSemanticsWidthHintChecks(FAutomationTestBase& Test)
 	{
-		TArray<FString> UnauthorizedMatches;
-		int32 MatchedFiles = 0;
+		bool bAllPassed = true;
 
-		for (const FString& AbsoluteFilePath : CandidateFiles)
+		struct FWidthHintProbeCase
 		{
-			if (FPaths::GetCleanFilename(AbsoluteFilePath).Contains(TEXT("Tests")))
-			{
-				continue;
-			}
+			FString Name;
+			TSharedPtr<FDesignNode> Node;
+			float ExpectedWidth = 0.0f;
+		};
 
-			FString Content;
-			if (!FFileHelper::LoadFileToString(Content, *AbsoluteFilePath))
-			{
-				continue;
-			}
+		const float ParentContentWidth = 280.0f;
+		const TArray<FWidthHintProbeCase> Cases = {
+			{ TEXT("fixed-width"), MakeWidthHintProbeTextNode(TEXT("width_fixed"), FDesignSize::Fixed(180.0f)), 180.0f },
+			{ TEXT("fill-width-with-fallback"), MakeWidthHintProbeTextNode(TEXT("width_fill_fallback"), FDesignSize::Fill(300.0f)), 300.0f },
+			{ TEXT("fill-width-parent-fallback"), MakeWidthHintProbeTextNode(TEXT("width_fill_parent"), FDesignSize::Fill(0.0f)), ParentContentWidth }
+		};
 
-			if (!ContainsAllTokens(Content, Tokens))
-			{
-				continue;
-			}
+		for (const FWidthHintProbeCase& ProbeCase : Cases)
+		{
+			const float CanonicalWidth = Design2UMGCore::SharedSemantics::ResolveWidthHint(ProbeCase.Node, ParentContentWidth);
+			const float EstimatedWidth = SizeEstimator::EstimateNodeSize(ProbeCase.Node, ParentContentWidth).X;
+			const float WrapAt = TextMeasurement::ResolveTextWrapAt(ProbeCase.Node, ParentContentWidth);
 
-			++MatchedFiles;
-			const FString RelativePath = NormalizeRelativePath(PluginBaseDir, AbsoluteFilePath);
-			if (!AllowedRelativePaths.Contains(RelativePath))
-			{
-				UnauthorizedMatches.Add(RelativePath);
-			}
+			bAllPassed &= Test.TestTrue(
+				*FString::Printf(TEXT("%s canonical width hint remains stable"), *ProbeCase.Name),
+				FMath::IsNearlyEqual(CanonicalWidth, ProbeCase.ExpectedWidth, KINDA_SMALL_NUMBER));
+			bAllPassed &= Test.TestTrue(
+				*FString::Printf(TEXT("%s sizing width follows canonical helper"), *ProbeCase.Name),
+				FMath::IsNearlyEqual(EstimatedWidth, CanonicalWidth, KINDA_SMALL_NUMBER));
+			bAllPassed &= Test.TestTrue(
+				*FString::Printf(TEXT("%s wrap width follows canonical helper"), *ProbeCase.Name),
+				FMath::IsNearlyEqual(WrapAt, CanonicalWidth, KINDA_SMALL_NUMBER));
 		}
 
-		Test.TestTrue(
-			*FString::Printf(TEXT("%s has at least one known semantic source"), *RuleName),
-			MatchedFiles > 0);
-		Test.TestTrue(
-			*FString::Printf(TEXT("%s has no unauthorized duplicate files"), *RuleName),
-			UnauthorizedMatches.Num() == 0);
-		if (UnauthorizedMatches.Num() > 0)
-		{
-			Test.AddError(FString::Printf(
-				TEXT("%s duplicated in unsupported files: %s"),
-				*RuleName,
-				*FString::Join(UnauthorizedMatches, TEXT(", "))));
-		}
+		return bAllPassed;
+	}
+
+	bool RunSharedSemanticsExecutableReplacementChecks(FAutomationTestBase& Test)
+	{
+		bool bAllPassed = true;
+		bAllPassed &= RunSharedSemanticsSkipParityChecks(Test);
+		bAllPassed &= RunSharedSemanticsWidthHintChecks(Test);
+		return bAllPassed;
 	}
 
 	struct FLuminosityOpacityCapOverrideScope
@@ -227,6 +307,42 @@ namespace
 		int32 SavedStripeWidth = 0;
 		int32 SavedStripeGap = 0;
 	};
+
+	struct FIconFontSettingsOverrideScope
+	{
+		FIconFontSettingsOverrideScope(
+			const FString& InDefaultIconFontAssetPath,
+			const FString& InMissingIconFontPlaceholder)
+		{
+			Settings = UDesign2UMGSettings::Get();
+			if (Settings)
+			{
+				SavedIconFontAssetMap = Settings->IconFontAssetMap;
+				SavedDefaultIconFontAssetPath = Settings->DefaultIconFontAssetPath;
+				SavedMissingIconFontPlaceholder = Settings->MissingIconFontPlaceholder;
+
+				Settings->IconFontAssetMap.Empty();
+				Settings->DefaultIconFontAssetPath = InDefaultIconFontAssetPath;
+				Settings->MissingIconFontPlaceholder = InMissingIconFontPlaceholder;
+			}
+		}
+
+		~FIconFontSettingsOverrideScope()
+		{
+			if (Settings)
+			{
+				Settings->IconFontAssetMap = SavedIconFontAssetMap;
+				Settings->DefaultIconFontAssetPath = SavedDefaultIconFontAssetPath;
+				Settings->MissingIconFontPlaceholder = SavedMissingIconFontPlaceholder;
+			}
+		}
+
+		UDesign2UMGSettings* Settings = nullptr;
+		TMap<FString, TSoftObjectPtr<UFont>> SavedIconFontAssetMap;
+		FString SavedDefaultIconFontAssetPath;
+		FString SavedMissingIconFontPlaceholder;
+	};
+
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSharedSemanticsSkipRenderableParityTest,
@@ -234,59 +350,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSharedSemanticsSkipRenderableParityTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FSharedSemanticsSkipRenderableParityTest::RunTest(const FString& Parameters)
 {
-	TSharedPtr<FDesignNode> Root = MakeSharedSemanticsNode(TEXT("shared_semantics_root"), EDesignNodeType::Frame, FDesignSize::Fixed(640.0f), FDesignSize::Fixed(360.0f));
-	Root->LayoutData.Layout = EDesignLayout::Vertical;
-
-	TSharedPtr<FDesignNode> DisabledLeaf = MakeSharedSemanticsNode(TEXT("skip_disabled"), EDesignNodeType::Rectangle);
-	DisabledLeaf->Transform.bEnabled = false;
-
-	TSharedPtr<FDesignNode> DesignerOnlyLeaf = MakeSharedSemanticsNode(TEXT("skip_designer_only"), EDesignNodeType::Connection);
-	TSharedPtr<FDesignNode> NonRenderableLeaf = MakeSharedSemanticsNode(TEXT("skip_non_renderable"), EDesignNodeType::Rectangle);
-
-	TSharedPtr<FDesignNode> FlowContainerLeaf = MakeSharedSemanticsNode(TEXT("keep_flow_container"), EDesignNodeType::Frame);
-	FlowContainerLeaf->LayoutData.Layout = EDesignLayout::Horizontal;
-
-	TSharedPtr<FDesignNode> RenderableLeaf = MakeSharedSemanticsNode(TEXT("keep_renderable"), EDesignNodeType::Rectangle);
-	RenderableLeaf->Visual.Fill = FDesignFill::FromColor(TEXT("#2288CC"));
-
-	TSharedPtr<FDesignNode> TextLeaf = MakeSharedSemanticsNode(TEXT("keep_text"), EDesignNodeType::Text, FDesignSize::Fixed(220.0f), FDesignSize::Fixed(36.0f));
-	TextLeaf->Text.Content = TEXT("Shared semantics consistency check");
-	TextLeaf->Text.FontFamily = TEXT("Roboto");
-	TextLeaf->Text.FontWeight = TEXT("Regular");
-	TextLeaf->Text.FontSize = 16.0f;
-	TextLeaf->Text.TextGrowth = EDesignTextGrowth::FixedWidth;
-
-	Root->Children = {
-		DisabledLeaf,
-		DesignerOnlyLeaf,
-		NonRenderableLeaf,
-		FlowContainerLeaf,
-		RenderableLeaf,
-		TextLeaf
-	};
-
-	TArray<TSharedPtr<FDesignNode>> VisibleChildren;
-	SizeEstimator::GatherVisibleChildren(Root, VisibleChildren);
-	const TSet<FString> VisibleIds = CollectNodeIds(VisibleChildren);
-
-	TestTrue(TEXT("Flow container leaf remains visible for sizing"), VisibleIds.Contains(TEXT("keep_flow_container")));
-	TestTrue(TEXT("Renderable leaf remains visible for sizing"), VisibleIds.Contains(TEXT("keep_renderable")));
-	TestTrue(TEXT("Text leaf remains visible for sizing"), VisibleIds.Contains(TEXT("keep_text")));
-	TestFalse(TEXT("Disabled leaf is skipped for sizing"), VisibleIds.Contains(TEXT("skip_disabled")));
-	TestFalse(TEXT("Designer-only leaf is skipped for sizing"), VisibleIds.Contains(TEXT("skip_designer_only")));
-	TestFalse(TEXT("Non-renderable leaf is skipped for sizing"), VisibleIds.Contains(TEXT("skip_non_renderable")));
-
-	FDesignDocument Doc;
-	Doc.Children.Add(Root);
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
-
-	TestTrue(TEXT("Flow container leaf remains in converted tree"), FindWidgetByIdRecursive(Data.RootWidget, TEXT("keep_flow_container")) != nullptr);
-	TestTrue(TEXT("Renderable leaf remains in converted tree"), FindWidgetByIdRecursive(Data.RootWidget, TEXT("keep_renderable")) != nullptr);
-	TestTrue(TEXT("Text leaf remains in converted tree"), FindWidgetByIdRecursive(Data.RootWidget, TEXT("keep_text")) != nullptr);
-	TestNull(TEXT("Disabled leaf is skipped in converted tree"), FindWidgetByIdRecursive(Data.RootWidget, TEXT("skip_disabled")));
-	TestNull(TEXT("Designer-only leaf is skipped in converted tree"), FindWidgetByIdRecursive(Data.RootWidget, TEXT("skip_designer_only")));
-	TestNull(TEXT("Non-renderable leaf is skipped in converted tree"), FindWidgetByIdRecursive(Data.RootWidget, TEXT("skip_non_renderable")));
-	return true;
+	return RunSharedSemanticsSkipParityChecks(*this);
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSharedSemanticsWidthHintParityTest,
@@ -294,36 +358,45 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSharedSemanticsWidthHintParityTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FSharedSemanticsWidthHintParityTest::RunTest(const FString& Parameters)
 {
-	struct FWidthHintProbeCase
-	{
-		FString Name;
-		TSharedPtr<FDesignNode> Node;
-		float ExpectedWidth = 0.0f;
-	};
+	return RunSharedSemanticsWidthHintChecks(*this);
+}
 
-	const float ParentContentWidth = 280.0f;
-	const TArray<FWidthHintProbeCase> Cases = {
-		{ TEXT("fixed-width"), MakeWidthHintProbeTextNode(TEXT("width_fixed"), FDesignSize::Fixed(180.0f)), 180.0f },
-		{ TEXT("fill-width-with-fallback"), MakeWidthHintProbeTextNode(TEXT("width_fill_fallback"), FDesignSize::Fill(300.0f)), 300.0f },
-		{ TEXT("fill-width-parent-fallback"), MakeWidthHintProbeTextNode(TEXT("width_fill_parent"), FDesignSize::Fill(0.0f)), ParentContentWidth }
-	};
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNodeWidgetFactoryGeometryFallbackDoesNotMutateInputTest,
+	"Design2UMG.NodeWidgetFactory.GeometryFallbackDoesNotMutateInput",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FNodeWidgetFactoryGeometryFallbackDoesNotMutateInputTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FDesignNode> EllipseNode = MakeSharedSemanticsNode(TEXT("ellipse_fallback"), EDesignNodeType::Ellipse, FDesignSize::Fixed(96.0f), FDesignSize::Fixed(48.0f));
+	EllipseNode->Transform.SetPosition(12.0f, 34.0f);
+	EllipseNode->Visual.Fill = FDesignFill::FromColor(TEXT("#FFAA44"));
+	const FDesignTransformNodeData EllipseTransformBefore = EllipseNode->Transform;
 
-	for (const FWidthHintProbeCase& ProbeCase : Cases)
-	{
-		const float EstimatedWidth = SizeEstimator::EstimateNodeSize(ProbeCase.Node, ParentContentWidth).X;
-		const float WrapAt = TextMeasurement::ResolveTextWrapAt(ProbeCase.Node, ParentContentWidth);
-		TestTrue(
-			*FString::Printf(TEXT("%s sizing width follows shared width hint"), *ProbeCase.Name),
-			FMath::IsNearlyEqual(EstimatedWidth, ProbeCase.ExpectedWidth, KINDA_SMALL_NUMBER));
-		TestTrue(
-			*FString::Printf(TEXT("%s wrap width follows shared width hint"), *ProbeCase.Name),
-			FMath::IsNearlyEqual(WrapAt, ProbeCase.ExpectedWidth, KINDA_SMALL_NUMBER));
-		TestTrue(
-			*FString::Printf(TEXT("%s sizing and text wrap stay in parity"), *ProbeCase.Name),
-			FMath::IsNearlyEqual(EstimatedWidth, WrapAt, KINDA_SMALL_NUMBER));
-	}
+	const Design2UMGNodeWidgetFactory::FBuildResult EllipseResult = Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(EllipseNode);
+	TestEqual(TEXT("Ellipse input geometry remains untouched"), EllipseNode->Shape.Geometry, FString());
+	TestEqual(TEXT("Ellipse input X remains untouched"), EllipseNode->Transform.X, EllipseTransformBefore.X);
+	TestEqual(TEXT("Ellipse input Y remains untouched"), EllipseNode->Transform.Y, EllipseTransformBefore.Y);
+	TestTrue(TEXT("Ellipse fallback still builds widget geometry"), !EllipseResult.Widget.Path.Geometry.IsEmpty());
 
+	TSharedPtr<FDesignNode> LineNode = MakeSharedSemanticsNode(TEXT("line_fallback"), EDesignNodeType::Line, FDesignSize::Fixed(120.0f), FDesignSize::Fixed(6.0f));
+	LineNode->Transform.SetPosition(6.0f, 18.0f);
+	LineNode->Visual.Stroke.Thickness.Uniform = 2.0f;
+	LineNode->Visual.Stroke.Fill = FDesignFill::FromColor(TEXT("#FFFFFFFF"));
+	const FDesignTransformNodeData LineTransformBefore = LineNode->Transform;
+
+	const Design2UMGNodeWidgetFactory::FBuildResult LineResult = Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(LineNode);
+	TestEqual(TEXT("Line input geometry remains untouched"), LineNode->Shape.Geometry, FString());
+	TestEqual(TEXT("Line input X remains untouched"), LineNode->Transform.X, LineTransformBefore.X);
+	TestEqual(TEXT("Line input Y remains untouched"), LineNode->Transform.Y, LineTransformBefore.Y);
+	TestTrue(TEXT("Line fallback still builds widget geometry"), !LineResult.Widget.Path.Geometry.IsEmpty());
 	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSharedSemanticsExecutableGuardReplacementTest,
+	"Design2UMG.SharedSemantics.ExecutableGuardReplacement",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FSharedSemanticsExecutableGuardReplacementTest::RunTest(const FString& Parameters)
+{
+	return RunSharedSemanticsExecutableReplacementChecks(*this);
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSharedSemanticsStaticDuplicateGuardTest,
@@ -331,101 +404,83 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSharedSemanticsStaticDuplicateGuardTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FSharedSemanticsStaticDuplicateGuardTest::RunTest(const FString& Parameters)
 {
-	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
-	TestTrue(TEXT("Design2UMG plugin exists for static guard"), Plugin.IsValid());
-	if (!Plugin.IsValid())
+	AddInfo(TEXT("Legacy alias retained temporarily; executable guard now owns the proof responsibility."));
+	return RunSharedSemanticsExecutableReplacementChecks(*this);
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPublicSurfacePostReviewFixesGuardTest,
+	"Design2UMG.PublicSurface.PostReviewFixesGuard",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPublicSurfacePostReviewFixesGuardTest::RunTest(const FString& Parameters)
+{
+	FDesignLayoutNodeData LayoutData;
+	LayoutData.LayoutRow = 3;
+	LayoutData.bHasLayoutRow = true;
+	LayoutData.LayoutColumn = 1;
+	LayoutData.bHasLayoutColumn = true;
+	LayoutData.SetLayoutRowSpanValue(2);
+	LayoutData.SetLayoutColumnGapValue(16.0f);
+	LayoutData.LayoutChildHorizontalAlign = TEXT("CENTER");
+	LayoutData.bHasLayoutChildHorizontalAlign = true;
+
+	TestTrue(TEXT("Public grid row flag still drives explicit grid position"), LayoutData.HasExplicitGridPosition());
+	TestTrue(TEXT("Accessor sees public row storage"), LayoutData.GetLayoutRowValue().IsSet());
+	TestEqual(TEXT("Accessor returns public row value"), LayoutData.GetLayoutRowOr(-1), 3);
+	TestEqual(TEXT("Accessor returns public column value"), LayoutData.GetLayoutColumnOr(-1), 1);
+	TestEqual(TEXT("Accessor returns row span"), LayoutData.GetLayoutRowSpanOr(1), 2);
+	TestEqual(TEXT("Accessor returns column gap"), LayoutData.GetLayoutColumnGapOr(0.0f), 16.0f);
+	TestEqual(
+		TEXT("Accessor returns child horizontal alignment"),
+		LayoutData.GetLayoutChildHorizontalAlignOr(TEXT("Left")),
+		FString(TEXT("CENTER")));
+
+	LayoutData.ClearLayoutRowValue();
+	TestFalse(TEXT("Clear helper resets public row presence"), LayoutData.HasLayoutRowValue());
+
+	FUMGWidgetNode Widget;
+	Widget.Text.bHasText = true;
+	Widget.Text.Text = TEXT("");
+	Widget.Text.bHasAutoWrapText = true;
+	Widget.Text.bAutoWrapText = true;
+	Widget.Text.bHasColor = true;
+	Widget.Text.Color = FLinearColor(0.2f, 0.4f, 0.6f, 1.0f);
+	Widget.WidgetState.bHasActiveWidgetIndex = true;
+	Widget.WidgetState.ActiveWidgetIndex = 3;
+
+	bool bSawColorKey = false;
+	Design2UMGWidgetNodeAccess::ForEachStaticTypedWidgetPropertyKey([&bSawColorKey](const TCHAR* Key)
 	{
-		return false;
-	}
+		if (FCString::Strcmp(Key, UMGPropertyKeys::Color) == 0)
+		{
+			bSawColorKey = true;
+		}
+	});
+	TestTrue(TEXT("Typed key enumeration still exposes public color key"), bSawColorKey);
+	TestTrue(TEXT("Typed key helper recognizes color"), Design2UMGWidgetNodeAccess::IsTypedWidgetPropertyKey(UMGPropertyKeys::Color));
 
-	const FString PluginBaseDir = Plugin->GetBaseDir();
-	const FString CorePrivateDir = FPaths::Combine(PluginBaseDir, TEXT("Source/Design2UMGCore/Private"));
-	const FString AutomationPrivateDir = FPaths::Combine(PluginBaseDir, TEXT("Source/Design2UMGEditor/Private/Automation"));
-	const FString SizeEstimatorPath = FPaths::Combine(CorePrivateDir, TEXT("SizeEstimator.cpp"));
-	const FString TextMeasurementPath = FPaths::Combine(CorePrivateDir, TEXT("TextMeasurement.cpp"));
-	const FString SharedSemanticsPath = FPaths::Combine(CorePrivateDir, TEXT("SharedCoreSemantics.cpp"));
+	FString SerializedText;
+	TestTrue(TEXT("Typed text helper still returns explicit empty string"), Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Widget, UMGPropertyKeys::Text, SerializedText));
+	TestEqual(TEXT("Typed text helper preserves empty payload"), SerializedText, FString());
 
-	TArray<FString> CandidateFiles;
-	IFileManager::Get().FindFilesRecursive(CandidateFiles, *CorePrivateDir, TEXT("*.cpp"), true, false, false);
-	IFileManager::Get().FindFilesRecursive(CandidateFiles, *AutomationPrivateDir, TEXT("*.cpp"), true, false, false);
+	bool bAutoWrap = false;
+	TestTrue(TEXT("Bool helper still parses typed bool"), Design2UMGWidgetNodeAccess::TryGetWidgetBool(Widget, UMGPropertyKeys::AutoWrapText, bAutoWrap));
+	TestTrue(TEXT("Typed bool payload remains true"), bAutoWrap);
 
-	const TArray<FString> DesignerOnlyTokens = {
-		TEXT("EDesignNodeType::Connection"),
-		TEXT("EDesignNodeType::Note"),
-		TEXT("EDesignNodeType::Prompt"),
-		TEXT("EDesignNodeType::Context")
-	};
-	TSet<FString> DesignerOnlyAllowedPaths;
-	DesignerOnlyAllowedPaths.Add(TEXT("Source/Design2UMGCore/Private/SharedCoreSemantics.cpp"));
-	DesignerOnlyAllowedPaths.Add(TEXT("Source/Design2UMGEditor/Private/Automation/Design2UMGAutomationRender.cpp"));
+	int32 ActiveWidgetIndex = INDEX_NONE;
+	TestTrue(TEXT("Int helper still parses typed int"), Design2UMGWidgetNodeAccess::TryGetWidgetInt(Widget, UMGPropertyKeys::ActiveWidgetIndex, ActiveWidgetIndex));
+	TestEqual(TEXT("Typed int payload remains unchanged"), ActiveWidgetIndex, 3);
 
-	ValidateDuplicateSemanticsPattern(
-		*this,
-		TEXT("designer-only-type semantics token set"),
-		CandidateFiles,
-		DesignerOnlyTokens,
-		DesignerOnlyAllowedPaths,
-		PluginBaseDir);
+	FLinearColor ParsedColor;
+	TestTrue(TEXT("Color helper still parses typed color"), Design2UMGWidgetNodeAccess::TryGetWidgetColor(Widget, UMGPropertyKeys::Color, ParsedColor));
+	TestEqual(TEXT("Typed color payload remains unchanged"), ParsedColor.ToFColor(true), Widget.Text.Color.ToFColor(true));
 
-	const TArray<FString> SkipFlowContainerTokens = {
-		TEXT("Node->Type == EDesignNodeType::Ref"),
-		TEXT("Node->Children.Num() == 0 && !HasRenderableVisual(Node)"),
-		TEXT("Node->LayoutData.Layout != EDesignLayout::None")
-	};
-	TSet<FString> SkipFlowContainerAllowedPaths;
-	SkipFlowContainerAllowedPaths.Add(TEXT("Source/Design2UMGCore/Private/SharedCoreSemantics.cpp"));
+	FUMGPropertyBag TypedBag;
+	Design2UMGWidgetNodeAccess::AddTypedWidgetPropertyIfPresent(TypedBag, Widget, UMGPropertyKeys::Text);
 
-	ValidateDuplicateSemanticsPattern(
-		*this,
-		TEXT("skip-node flow-container semantics token set"),
-		CandidateFiles,
-		SkipFlowContainerTokens,
-		SkipFlowContainerAllowedPaths,
-		PluginBaseDir);
+	FString BagText;
+	TestTrue(TEXT("Public bag helper still writes explicit empty text"), TypedBag.TryGetString(UMGPropertyKeys::Text, BagText));
+	TestEqual(TEXT("Bag helper preserves explicit empty string"), BagText, FString());
 
-	struct FWidthHintProbeCase
-	{
-		FString Name;
-		TSharedPtr<FDesignNode> Node;
-		float ExpectedWidth = 0.0f;
-	};
-	const float ParentContentWidth = 280.0f;
-	const TArray<FWidthHintProbeCase> WidthHintCases = {
-		{ TEXT("fixed-width"), MakeWidthHintProbeTextNode(TEXT("guard_width_fixed"), FDesignSize::Fixed(180.0f)), 180.0f },
-		{ TEXT("fill-width-with-fallback"), MakeWidthHintProbeTextNode(TEXT("guard_width_fill_fallback"), FDesignSize::Fill(300.0f)), 300.0f },
-		{ TEXT("fill-width-parent-fallback"), MakeWidthHintProbeTextNode(TEXT("guard_width_fill_parent"), FDesignSize::Fill(0.0f)), ParentContentWidth }
-	};
-	for (const FWidthHintProbeCase& ProbeCase : WidthHintCases)
-	{
-		const float CanonicalWidth = Design2UMGCore::SharedSemantics::ResolveWidthHint(ProbeCase.Node, ParentContentWidth);
-		const float EstimatedWidth = SizeEstimator::EstimateNodeSize(ProbeCase.Node, ParentContentWidth).X;
-		const float WrapAt = TextMeasurement::ResolveTextWrapAt(ProbeCase.Node, ParentContentWidth);
-
-		TestTrue(
-			*FString::Printf(TEXT("%s canonical width hint remains stable"), *ProbeCase.Name),
-			FMath::IsNearlyEqual(CanonicalWidth, ProbeCase.ExpectedWidth, KINDA_SMALL_NUMBER));
-		TestTrue(
-			*FString::Printf(TEXT("%s sizing width follows canonical helper"), *ProbeCase.Name),
-			FMath::IsNearlyEqual(EstimatedWidth, CanonicalWidth, KINDA_SMALL_NUMBER));
-		TestTrue(
-			*FString::Printf(TEXT("%s wrap width follows canonical helper"), *ProbeCase.Name),
-			FMath::IsNearlyEqual(WrapAt, CanonicalWidth, KINDA_SMALL_NUMBER));
-	}
-
-	FString SizeEstimatorSource;
-	TestTrue(TEXT("Load SizeEstimator.cpp for delegation guard"), FFileHelper::LoadFileToString(SizeEstimatorSource, *SizeEstimatorPath));
-	if (!SizeEstimatorSource.IsEmpty())
-	{
-		TestTrue(TEXT("SizeEstimator skip-node logic delegates to shared helper"),
-			SizeEstimatorSource.Contains(TEXT("SharedSemantics::ShouldSkipNode(Node)")));
-	}
-
-	FString TextMeasurementSource;
-	TestTrue(TEXT("Load TextMeasurement.cpp for delegation guard"), FFileHelper::LoadFileToString(TextMeasurementSource, *TextMeasurementPath));
-
-	FString SharedSemanticsSource;
-	TestTrue(TEXT("Load SharedCoreSemantics.cpp for shared semantic source guard"), FFileHelper::LoadFileToString(SharedSemanticsSource, *SharedSemanticsPath));
-	TestTrue(TEXT("Shared semantics helper retains canonical skip logic"), SharedSemanticsSource.Contains(TEXT("bool ShouldSkipNode(const TSharedPtr<FDesignNode>& Node)")));
 	return true;
 }
 
@@ -508,6 +563,129 @@ bool FConversionLuminosityOpacitySettingsPayloadTest::RunTest(const FString& Par
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextSharedThresholdOwnerBoundaryTest,
+	"Design2UMG.Text.SharedThresholdOwnerBoundary",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTextSharedThresholdOwnerBoundaryTest::RunTest(const FString& Parameters)
+{
+	auto MakeSingleLineNode = [](const FString& Id, const float FontSize)
+	{
+		TSharedPtr<FDesignNode> Node = MakeSharedSemanticsNode(Id, EDesignNodeType::Text, FDesignSize::Fixed(160.0f), FDesignSize::Fixed(36.0f));
+		Node->Text.Content = TEXT("Shared owner boundary");
+		Node->Text.FontFamily = TEXT("Roboto");
+		Node->Text.FontWeight = TEXT("Regular");
+		Node->Text.FontSize = FontSize;
+		Node->Text.LineHeight = 1.4f;
+		Node->Text.TextGrowth = EDesignTextGrowth::Auto;
+		Node->Text.TextAlign = EDesignTextAlign::Left;
+		Node->Text.TextAlignVertical = EDesignTextAlignVertical::Top;
+		Node->Transform.bSourceHasWidth = false;
+		return Node;
+	};
+
+	const TSharedPtr<FDesignNode> ThresholdNode = MakeSingleLineNode(TEXT("threshold_line_height"), 24.0f);
+	const TSharedPtr<FDesignNode> BelowThresholdNode = MakeSingleLineNode(TEXT("below_threshold_line_height"), 23.0f);
+
+	const bool bThresholdApplies = TextMeasurement::ShouldApplyExplicitLineHeight(ThresholdNode, ThresholdNode->Text.FontSize);
+	const bool bBelowThresholdApplies = TextMeasurement::ShouldApplyExplicitLineHeight(BelowThresholdNode, BelowThresholdNode->Text.FontSize);
+	TestTrue(TEXT("Large non-wrapping threshold should apply explicit line height"), bThresholdApplies);
+	TestFalse(TEXT("Below-threshold single line should not apply explicit line height"), bBelowThresholdApplies);
+
+	const FUMGWidgetNode ThresholdWidget = Design2UMGTextWidgetBuilder::CreateTextWidget(ThresholdNode);
+	const FUMGWidgetNode BelowThresholdWidget = Design2UMGTextWidgetBuilder::CreateTextWidget(BelowThresholdNode);
+	TestTrue(TEXT("Builder keeps shared threshold owner's line-height decision"), ThresholdWidget.Text.bHasLineHeightPercentage);
+	TestEqual(TEXT("Builder writes the authored line height when threshold applies"), ThresholdWidget.Text.LineHeightPercentage, ThresholdNode->Text.LineHeight);
+	TestFalse(TEXT("Builder should not emit line height below the shared threshold"), BelowThresholdWidget.Text.bHasLineHeightPercentage);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextWidgetBuilderSharedPathSettingsBoundaryTest,
+	"Design2UMG.TextWidgetBuilder.SharedPathSettingsBoundary",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTextWidgetBuilderSharedPathSettingsBoundaryTest::RunTest(const FString& Parameters)
+{
+	FIconFontSettingsOverrideScope SettingsScope(TEXT(""), TEXT("[global-placeholder]"));
+	if (!TestNotNull(TEXT("Settings available for icon-font boundary test"), SettingsScope.Settings))
+	{
+		return false;
+	}
+
+	Design2UMGTextWidgetBuilder::FIconFontSettingsSnapshot Snapshot;
+	Snapshot.MissingIconFontPlaceholder = TEXT("[snapshot-placeholder]");
+
+	TSharedPtr<FDesignNode> Node = MakeSharedSemanticsNode(TEXT("icon_font_boundary"), EDesignNodeType::IconFont, FDesignSize::Fixed(24.0f), FDesignSize::Fixed(24.0f));
+	Node->Text.IconFontFamily = TEXT("MissingFamily_BatchA");
+	Node->Text.IconFontName = TEXT("dashboard");
+	Node->Text.FontSize = 20.0f;
+
+	Design2UMGTextWidgetBuilder::FIconFontBuildArgs Args;
+	Args.SettingsSnapshot = &Snapshot;
+
+	const Design2UMGTextWidgetBuilder::FIconFontBuildResult Result =
+		Design2UMGTextWidgetBuilder::CreateIconFontWidget(Node, Args);
+	TestEqual(TEXT("Shared-path icon builder should consume the injected snapshot placeholder"),
+		Result.Widget.Text.Text,
+		FString(TEXT("[snapshot-placeholder]")));
+	TestFalse(TEXT("Injected snapshot should not silently fall back to the global placeholder"),
+		Result.Widget.Text.Text.Equals(TEXT("[global-placeholder]"), ESearchCase::CaseSensitive));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConverterChildPreparationOwnerBoundaryTest,
+	"Design2UMG.Converter.ChildPreparationOwnerBoundary",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FConverterChildPreparationOwnerBoundaryTest::RunTest(const FString& Parameters)
+{
+	FDesignDocument Doc;
+
+	TSharedPtr<FDesignNode> ReusableCard = MakeSharedSemanticsNode(
+		TEXT("reusable_card"),
+		EDesignNodeType::Rectangle,
+		FDesignSize::Fixed(60.0f),
+		FDesignSize::Fixed(20.0f));
+	ReusableCard->bReusable = true;
+	ReusableCard->Visual.Fill = FDesignFill::FromColor(TEXT("#AA3344"));
+	Doc.Children.Add(ReusableCard);
+
+	TSharedPtr<FDesignNode> Screen = MakeSharedSemanticsNode(
+		TEXT("child_preparation_screen"),
+		EDesignNodeType::Frame,
+		FDesignSize::Fixed(200.0f),
+		FDesignSize::Fixed(40.0f));
+	Screen->LayoutData.Layout = EDesignLayout::Horizontal;
+	Screen->LayoutData.Gap = 10.0f;
+
+	TSharedPtr<FDesignNode> RefChild = MakeShared<FDesignNode>();
+	RefChild->Id = TEXT("reusable_card_instance");
+	RefChild->Name = TEXT("reusable_card_instance");
+	RefChild->Type = EDesignNodeType::Ref;
+	RefChild->Ref = TEXT("reusable_card");
+
+	TSharedPtr<FDesignNode> FillChild = MakeSharedSemanticsNode(
+		TEXT("fill_sibling"),
+		EDesignNodeType::Rectangle,
+		FDesignSize::Fill(0.0f),
+		FDesignSize::Fill(0.0f));
+	FillChild->Visual.Fill = FDesignFill::FromColor(TEXT("#33AA44"));
+
+	Screen->Children.Add(RefChild);
+	Screen->Children.Add(FillChild);
+	Doc.Children.Add(Screen);
+
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetNode* FillWidget = FindWidgetByIdRecursive(Data.RootWidget, TEXT("fill_sibling"));
+	if (!TestNotNull(TEXT("Fill sibling widget exists"), FillWidget))
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("Expanded ref width should be consumed before resolving fill sibling width"),
+		FMath::IsNearlyEqual(FillWidget->Bounds.W, 130.0f, KINDA_SMALL_NUMBER));
+	TestTrue(TEXT("Cross-axis fill sizing should still respect parent height"),
+		FMath::IsNearlyEqual(FillWidget->Bounds.H, 40.0f, KINDA_SMALL_NUMBER));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConverterPrivateOwnerStructureGuardTest,
 	"Design2UMG.Converter.PrivateOwnerStructureGuard",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -531,7 +709,8 @@ bool FConverterPrivateOwnerStructureGuardTest::RunTest(const FString& Parameters
 	}
 
 	TestTrue(TEXT("Converter defines node orchestration owner"), ConverterSource.Contains(TEXT("struct FNodeConversionOrchestrator")));
-	TestTrue(TEXT("Converter defines child preparation owner"), ConverterSource.Contains(TEXT("struct FNodeChildPreparation")));
+	TestTrue(TEXT("Converter defines expanded-node resolver owner"), ConverterSource.Contains(TEXT("struct FExpandedNodeResolver")));
+	TestTrue(TEXT("Converter defines flow child preparation owner"), ConverterSource.Contains(TEXT("struct FFlowChildPreparation")));
 	TestTrue(TEXT("Converter defines child append owner"), ConverterSource.Contains(TEXT("struct FNodeChildAppender")));
 	TestTrue(TEXT("Convert entry uses node orchestration owner"), ConverterSource.Contains(TEXT("const FNodeConversionOrchestrator NodeOrchestrator(RootContext);")));
 

@@ -6,26 +6,38 @@
 #include "DesignSchema.h"
 #include "UMGSchema.h"
 
+class UDesign2UMGSettings;
+
 namespace Design2UMGTextWidgetBuilder
 {
-	struct FIconFontBuildContext
+	struct FIconFontSettingsSnapshot
 	{
-		FIconFontBuildContext(
-			TSet<FString>& InWarnedFamilies,
-			TSet<FString>& InPrunedInvalidMappings,
-			TMap<FString, FString>& InPendingIconFontMappings)
-			: WarnedFamilies(InWarnedFamilies)
-			, PrunedInvalidMappings(InPrunedInvalidMappings)
-			, PendingIconFontMappings(InPendingIconFontMappings)
-		{
-		}
+		TMap<FString, FString> IconFontAssetPaths;
+		FString DefaultIconFontAssetPath;
+		FString MissingIconFontPlaceholder;
 
-		TSet<FString>& WarnedFamilies;
-		TSet<FString>& PrunedInvalidMappings;
-		TMap<FString, FString>& PendingIconFontMappings;
+		FString FindIconFontAssetPath(const FString& FontFamily) const;
+	};
+
+	FIconFontSettingsSnapshot BuildIconFontSettingsSnapshot(const UDesign2UMGSettings* Settings = nullptr);
+
+	struct FIconFontBuildArgs
+	{
+		const TSet<FString>* ExistingWarnedFamilies = nullptr;
+		const FIconFontSettingsSnapshot* SettingsSnapshot = nullptr;
+	};
+
+	struct FIconFontBuildResult
+	{
+		FUMGWidgetNode Widget;
+		TSet<FString> NewlyWarnedFamilies;
+		TSet<FString> PrunedInvalidMappings;
+		TMap<FString, FString> PendingIconFontMappings;
 	};
 
 	FUMGWidgetNode CreateTextWidget(const TSharedPtr<FDesignNode>& Node);
-	FUMGWidgetNode CreateIconFontWidget(const TSharedPtr<FDesignNode>& Node, FIconFontBuildContext& Context);
+	FIconFontBuildResult CreateIconFontWidget(
+		const TSharedPtr<FDesignNode>& Node,
+		const FIconFontBuildArgs& Args = FIconFontBuildArgs());
 }
 

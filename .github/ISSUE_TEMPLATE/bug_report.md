@@ -1,4 +1,4 @@
----
+﻿---
 name: Bug Report
 about: Report a conversion or rendering issue
 labels: bug
@@ -8,8 +8,8 @@ labels: bug
 
 - UE Version:
 - OS:
-- PenToUMG Version:
-- Input Source: `.pen` / Figma / MCP
+- Design2UMG Version or Commit:
+- Input Source: `.pen` / Figma API / local Figma export JSON / MCP JSON bridge
 
 ## Description
 

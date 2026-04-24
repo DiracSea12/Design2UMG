@@ -116,11 +116,7 @@ namespace
 		}
 
 		const bool bApplyRuntimeLineHeight =
-			TextMeasurement::ShouldApplyExplicitLineHeight(Node, ResolvedFontSize)
-			|| (Node->Text.LineHeight > 0.0f
-				&& Node->Text.FontSize >= 24.0f
-				&& !Node->Text.Content.Contains(TEXT("\n"))
-				&& !TextMeasurement::IsWrappingTextMode(Node));
+			TextMeasurement::ShouldApplyExplicitLineHeight(Node, ResolvedFontSize);
 		if (bApplyRuntimeLineHeight)
 		{
 			Widget.Text.LineHeightPercentage = Node->Text.LineHeight;
@@ -211,6 +207,51 @@ namespace
 			}
 		}
 	}
+}
+
+FString Design2UMGTextWidgetBuilder::FIconFontSettingsSnapshot::FindIconFontAssetPath(const FString& FontFamily) const
+{
+	if (FontFamily.IsEmpty())
+	{
+		return FString();
+	}
+
+	if (const FString* ExactMatch = IconFontAssetPaths.Find(FontFamily))
+	{
+		return *ExactMatch;
+	}
+
+	for (const TPair<FString, FString>& Pair : IconFontAssetPaths)
+	{
+		if (Pair.Key.Equals(FontFamily, ESearchCase::IgnoreCase))
+		{
+			return Pair.Value;
+		}
+	}
+
+	return FString();
+}
+
+Design2UMGTextWidgetBuilder::FIconFontSettingsSnapshot Design2UMGTextWidgetBuilder::BuildIconFontSettingsSnapshot(const UDesign2UMGSettings* Settings)
+{
+	FIconFontSettingsSnapshot Snapshot;
+	if (!Settings)
+	{
+		return Snapshot;
+	}
+
+	Snapshot.DefaultIconFontAssetPath = Settings->DefaultIconFontAssetPath;
+	Snapshot.MissingIconFontPlaceholder = Settings->MissingIconFontPlaceholder;
+	for (const TPair<FString, TSoftObjectPtr<UFont>>& Pair : Settings->IconFontAssetMap)
+	{
+		const FSoftObjectPath AssetPath = Pair.Value.ToSoftObjectPath();
+		if (!AssetPath.IsNull())
+		{
+			Snapshot.IconFontAssetPaths.Add(Pair.Key, AssetPath.ToString());
+		}
+	}
+
+	return Snapshot;
 }
 
 FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FDesignNode>& Node)
@@ -406,12 +447,16 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 	return Widget;
 }
 
-FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateIconFontWidget(
+Design2UMGTextWidgetBuilder::FIconFontBuildResult Design2UMGTextWidgetBuilder::CreateIconFontWidget(
 	const TSharedPtr<FDesignNode>& Node,
-	FIconFontBuildContext& Context)
+	const FIconFontBuildArgs& Args)
 {
-	FUMGWidgetNode Widget;
+	FIconFontBuildResult Result;
+	FUMGWidgetNode& Widget = Result.Widget;
 	Widget.Type = TEXT("TextBlock");
+	const FIconFontSettingsSnapshot EmptySettingsSnapshot;
+	const FIconFontSettingsSnapshot& SettingsSnapshot =
+		Args.SettingsSnapshot != nullptr ? *Args.SettingsSnapshot : EmptySettingsSnapshot;
 
 	const auto ResolveIconTypefaceWeightToken = [](const TSharedPtr<FDesignNode>& InNode, bool bUsingFallbackFontAsset)
 	{
@@ -439,17 +484,16 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateIconFontWidget(
 			: FString::FromInt(FMath::Clamp(InNode->Text.IconWeight, 100, 900));
 	};
 
-	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
 	FString AssetPath;
 	FString ResolvedIconGlyph;
 	bool bUsedDefaultIconPath = false;
 	bool bUsedResolverPath = false;
-	if (Settings && !Node->Text.IconFontFamily.IsEmpty())
+	if (!Node->Text.IconFontFamily.IsEmpty())
 	{
-		AssetPath = Settings->FindIconFontAssetPath(Node->Text.IconFontFamily);
+		AssetPath = SettingsSnapshot.FindIconFontAssetPath(Node->Text.IconFontFamily);
 		if (AssetPath.IsEmpty())
 		{
-			AssetPath = Settings->DefaultIconFontAssetPath;
+			AssetPath = SettingsSnapshot.DefaultIconFontAssetPath;
 			bUsedDefaultIconPath = !AssetPath.IsEmpty();
 		}
 	}
@@ -469,7 +513,7 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateIconFontWidget(
 				*AssetPath);
 			if (!Node->Text.IconFontFamily.IsEmpty())
 			{
-				Context.PrunedInvalidMappings.Add(Node->Text.IconFontFamily);
+				Result.PrunedInvalidMappings.Add(Node->Text.IconFontFamily);
 			}
 			AssetPath.Empty();
 			bUsedDefaultIconPath = false;
@@ -495,7 +539,7 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateIconFontWidget(
 		&& !Node->Text.IconFontFamily.IsEmpty();
 	if (bNeedsPersistMapping)
 	{
-		Context.PendingIconFontMappings.Add(Node->Text.IconFontFamily, AssetPath);
+		Result.PendingIconFontMappings.Add(Node->Text.IconFontFamily, AssetPath);
 		UE_LOG(LogDesign2UMG, Display,
 			TEXT("Queued icon font family mapping '%s' -> '%s'%s"),
 			*Node->Text.IconFontFamily,
@@ -523,7 +567,10 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateIconFontWidget(
 	}
 	else if (!Node->Text.IconFontFamily.IsEmpty())
 	{
-		if (!Context.WarnedFamilies.Contains(Node->Text.IconFontFamily))
+		const bool bAlreadyWarnedFamily =
+			Args.ExistingWarnedFamilies != nullptr
+			&& Args.ExistingWarnedFamilies->Contains(Node->Text.IconFontFamily);
+		if (!bAlreadyWarnedFamily)
 		{
 			UE_LOG(LogDesign2UMG, Verbose,
 				TEXT("IconFont '%s': font family '%s' has no asset mapping"),
@@ -531,7 +578,7 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateIconFontWidget(
 			UE_LOG(LogDesign2UMG, Warning,
 				TEXT("Icon font '%s' (family '%s') has no configured asset mapping. Configure it in Editor Preferences > Plugins > Design2UMG."),
 				*Node->Text.IconFontName, *Node->Text.IconFontFamily);
-			Context.WarnedFamilies.Add(Node->Text.IconFontFamily);
+			Result.NewlyWarnedFamilies.Add(Node->Text.IconFontFamily);
 		}
 	}
 
@@ -545,9 +592,9 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateIconFontWidget(
 	{
 		IconText = Node->Text.IconFontName;
 	}
-	if (AssetPath.IsEmpty() && Settings && !Settings->MissingIconFontPlaceholder.IsEmpty())
+	if (AssetPath.IsEmpty() && !SettingsSnapshot.MissingIconFontPlaceholder.IsEmpty())
 	{
-		IconText = Settings->MissingIconFontPlaceholder;
+		IconText = SettingsSnapshot.MissingIconFontPlaceholder;
 	}
 	if (!IconText.IsEmpty())
 	{
@@ -567,6 +614,6 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateIconFontWidget(
 		Widget.Text.bHasColor = true;
 	}
 
-	return Widget;
+	return Result;
 }
 

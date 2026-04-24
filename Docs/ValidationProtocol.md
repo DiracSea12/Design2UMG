@@ -1,6 +1,6 @@
 ﻿# Design2UMG Validation Protocol
 
-Last verified: 2026-04-08
+Last verified: 2026-04-19
 
 ## Purpose
 
@@ -14,6 +14,17 @@ Goal:
 Public-note:
 - Public-facing copies of this document should use logical placeholders such as `<UE5_Root>`, `<PluginRoot>`, and `<MaintainerRuntimeProject.uproject>`.
 - The maintainer-owned canonical runtime boundary is an implementation role, not a public machine-path requirement.
+
+## Validation Layers
+
+This repository has four different validation layers. Do not collapse them into one label:
+
+- `repository-hygiene`: public repo checks such as required-file presence and tracked maintainer-local path detection.
+- `self-hosted build`: the manual BuildPlugin packaging workflow that runs on a maintainer-provided self-hosted Windows UE runner.
+- `public smoke/public validate`: contributor-reproducible local build plus focused validation. This is the public validation boundary.
+- `maintainer formal admissible gate`: the maintainer-owned full discovered 47-case release gate.
+
+Unless a section explicitly says `maintainer formal admissible gate`, treat the step-by-step commands below as public smoke/public validate guidance, not as the release gate on their own.
 
 ## Core Rule
 
@@ -150,7 +161,9 @@ That means:
 - do not run the formal full gate with an exclude pattern
 - `figma_figma-export_source` and `pen_pencil-welcome_step-2-frame` are part of the release gate again
 - formal historical-best parity should be checked with:
-  `python Tools/design2umg_validate_run.py --output-root <run_root> --admissible-best-json Saved/Design2UMG/Automation/_admissible_best_20260407_47.json`
+  `python Tools/design2umg_validate_run.py --output-root <run_root> --admissible-best-json Tools/design2umg_pinned_baseline.json`
+
+The older `_admissible_best_20260407_47.json` example is obsolete and must not be used for current formal gate validation.
 
 Reference sourcing for the formal gate:
 - `pen_*` cases may use Pencil MCP / export-nodes capture as the authoritative source reference when no checked-in external reference root is provided

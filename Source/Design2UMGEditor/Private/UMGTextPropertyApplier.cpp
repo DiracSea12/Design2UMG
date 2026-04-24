@@ -100,7 +100,7 @@ namespace
 
 	FLinearColor NormalizeTypedTextColor(const FLinearColor& Color)
 	{
-		return FUMGValueParser::ParseColor(Design2UMGWidgetNodeAccess::SerializeWidgetColor(Color));
+		return Color;
 	}
 
 	void ApplyTypedFontInfo(FSlateFontInfo& FontInfo, const FUMGWidgetNode& Node, bool& bFontChanged)

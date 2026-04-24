@@ -13,11 +13,6 @@ namespace
 	// 材质引用标识符（ProceduralShapeGenerator 内部 key，非资产路径）
 	const TCHAR* RetainerForegroundBlurEffectRef = TEXT("d2u.retainer.foreground_blur");
 	const TCHAR* RetainerInnerShadowEffectRef = TEXT("d2u.retainer.inner_shadow");
-	const TCHAR* MatRef_GradientH = TEXT("gradienth");
-	const TCHAR* MatRef_GradientV = TEXT("gradientv");
-	const TCHAR* MatRef_GradientLinear = TEXT("gradientlinear");
-	const TCHAR* MatRef_Radial    = TEXT("radialgradient");
-	const TCHAR* MatRef_Angular   = TEXT("angulargradient");
 	const TCHAR* MatRef_RoundedRect = TEXT("roundedrect");
 
 	FVector2D ComputeForegroundBlurUVStep(const TSharedPtr<FDesignNode>& Node, float BlurStrength)
@@ -45,58 +40,69 @@ namespace
 		return FVector2D(OffsetX / Width, OffsetY / Height);
 	}
 
-	float GetStrokeSideThickness(const FDesignStrokeThickness& Thickness, TCHAR Side)
+	namespace StrokeHelpers
 	{
-		if (Thickness.bUniform)
+		enum class EStrokeSide : uint8
 		{
-			return Thickness.Uniform;
+			Top,
+			Right,
+			Bottom,
+			Left
+		};
+
+		float GetStrokeSideThickness(const FDesignStrokeThickness& Thickness, const EStrokeSide Side)
+		{
+			if (Thickness.bUniform)
+			{
+				return Thickness.Uniform;
+			}
+
+			switch (Side)
+			{
+			case EStrokeSide::Top:
+				return Thickness.Top;
+			case EStrokeSide::Right:
+				return Thickness.Right;
+			case EStrokeSide::Bottom:
+				return Thickness.Bottom;
+			case EStrokeSide::Left:
+				return Thickness.Left;
+			default:
+				return 0.0f;
+			}
 		}
 
-		switch (Side)
+		FMargin GetStrokeHalfInsets(const FDesignStrokeThickness& Thickness)
 		{
-		case 'T':
-			return Thickness.Top;
-		case 'R':
-			return Thickness.Right;
-		case 'B':
-			return Thickness.Bottom;
-		case 'L':
-			return Thickness.Left;
-		default:
-			return 0.0f;
+			return FMargin(
+				GetStrokeSideThickness(Thickness, EStrokeSide::Left) * 0.5f,
+				GetStrokeSideThickness(Thickness, EStrokeSide::Top) * 0.5f,
+				GetStrokeSideThickness(Thickness, EStrokeSide::Right) * 0.5f,
+				GetStrokeSideThickness(Thickness, EStrokeSide::Bottom) * 0.5f);
 		}
-	}
 
-	FMargin GetStrokeHalfInsets(const FDesignStrokeThickness& Thickness)
-	{
-		return FMargin(
-			GetStrokeSideThickness(Thickness, 'L') * 0.5f,
-			GetStrokeSideThickness(Thickness, 'T') * 0.5f,
-			GetStrokeSideThickness(Thickness, 'R') * 0.5f,
-			GetStrokeSideThickness(Thickness, 'B') * 0.5f);
-	}
+		bool HasUniformRectStroke(const FDesignStroke& Stroke)
+		{
+			const float Top = GetStrokeSideThickness(Stroke.Thickness, EStrokeSide::Top);
+			const float Right = GetStrokeSideThickness(Stroke.Thickness, EStrokeSide::Right);
+			const float Bottom = GetStrokeSideThickness(Stroke.Thickness, EStrokeSide::Bottom);
+			const float Left = GetStrokeSideThickness(Stroke.Thickness, EStrokeSide::Left);
+			return Top > KINDA_SMALL_NUMBER
+				&& Right > KINDA_SMALL_NUMBER
+				&& Bottom > KINDA_SMALL_NUMBER
+				&& Left > KINDA_SMALL_NUMBER
+				&& FMath::IsNearlyEqual(Top, Right)
+				&& FMath::IsNearlyEqual(Top, Bottom)
+				&& FMath::IsNearlyEqual(Top, Left);
+		}
 
-	bool HasUniformRectStroke(const FDesignStroke& Stroke)
-	{
-		const float Top = GetStrokeSideThickness(Stroke.Thickness, 'T');
-		const float Right = GetStrokeSideThickness(Stroke.Thickness, 'R');
-		const float Bottom = GetStrokeSideThickness(Stroke.Thickness, 'B');
-		const float Left = GetStrokeSideThickness(Stroke.Thickness, 'L');
-		return Top > KINDA_SMALL_NUMBER
-			&& Right > KINDA_SMALL_NUMBER
-			&& Bottom > KINDA_SMALL_NUMBER
-			&& Left > KINDA_SMALL_NUMBER
-			&& FMath::IsNearlyEqual(Top, Right)
-			&& FMath::IsNearlyEqual(Top, Bottom)
-			&& FMath::IsNearlyEqual(Top, Left);
-	}
-
-	bool NeedsExplicitSideStroke(const TSharedPtr<FDesignNode>& Node)
-	{
-		return Node.IsValid()
-			&& Node->Visual.Stroke.HasStroke()
-			&& !Node->Visual.CornerRadius.HasRadius()
-			&& !HasUniformRectStroke(Node->Visual.Stroke);
+		bool NeedsExplicitSideStroke(const TSharedPtr<FDesignNode>& Node)
+		{
+			return Node.IsValid()
+				&& Node->Visual.Stroke.HasStroke()
+				&& !Node->Visual.CornerRadius.HasRadius()
+				&& !HasUniformRectStroke(Node->Visual.Stroke);
+		}
 	}
 
 	bool HasOpaqueSolidFill(const TSharedPtr<FDesignNode>& Node)
@@ -127,113 +133,6 @@ namespace
 		return false;
 	}
 
-	bool TryResolveStrokeColor(const FDesignStroke& Stroke, FLinearColor& OutColor)
-	{
-		if (Stroke.Fill.Type != EDesignFillType::Color || Stroke.Fill.SolidColor.IsEmpty())
-		{
-			return false;
-		}
-
-		OutColor = FUMGValueParser::ParseColor(Stroke.Fill.SolidColor);
-		return true;
-	}
-
-	bool ContainsExplicitStrokeSuffixRecursive(const FUMGWidgetNode& Widget, const TCHAR* Suffix)
-	{
-		if (Widget.Name.EndsWith(Suffix))
-		{
-			return true;
-		}
-
-		for (const FUMGWidgetNode& Child : Widget.Children)
-		{
-			if (ContainsExplicitStrokeSuffixRecursive(Child, Suffix))
-			{
-				return true;
-			}
-		}
-
-		return false;
-	}
-
-	bool HasConvertedChildStrokeCoverage(const FUMGWidgetNode& Border, const TCHAR* Suffix)
-	{
-		if (Border.Children.Num() == 0)
-		{
-			return false;
-		}
-
-		const FUMGWidgetNode& Content = Border.Children[0];
-		if (Content.Children.Num() == 0)
-		{
-			return false;
-		}
-
-		for (const FUMGWidgetNode& Child : Content.Children)
-		{
-			if (!ContainsExplicitStrokeSuffixRecursive(Child, Suffix))
-			{
-				return false;
-			}
-		}
-
-		return true;
-	}
-
-	bool HasAnyConvertedChildStrokeCoverage(const FUMGWidgetNode& Border)
-	{
-		return HasConvertedChildStrokeCoverage(Border, TEXT("_stroke_top"))
-			|| HasConvertedChildStrokeCoverage(Border, TEXT("_stroke_right"))
-			|| HasConvertedChildStrokeCoverage(Border, TEXT("_stroke_bottom"))
-			|| HasConvertedChildStrokeCoverage(Border, TEXT("_stroke_left"));
-	}
-
-	void RemoveExplicitStrokeSuffixRecursive(FUMGWidgetNode& Widget, const TCHAR* Suffix)
-	{
-		for (int32 Index = Widget.Children.Num() - 1; Index >= 0; --Index)
-		{
-			if (Widget.Children[Index].Name.EndsWith(Suffix))
-			{
-				Widget.Children.RemoveAt(Index);
-				continue;
-			}
-
-			RemoveExplicitStrokeSuffixRecursive(Widget.Children[Index], Suffix);
-		}
-	}
-
-	void PruneConvertedChildStrokeCoverage(FUMGWidgetNode& Border, const TCHAR* Suffix)
-	{
-		if (Border.Children.Num() == 0)
-		{
-			return;
-		}
-
-		FUMGWidgetNode& Content = Border.Children[0];
-		for (FUMGWidgetNode& Child : Content.Children)
-		{
-			RemoveExplicitStrokeSuffixRecursive(Child, Suffix);
-		}
-	}
-
-	void ResetChildToFill(FUMGWidgetNode& Widget)
-	{
-		Widget.Bounds = FBounds();
-		Widget.Slot = FUMGSlotData();
-		Widget.Slot.HorizontalAlignment = TEXT("Fill");
-		Widget.Slot.VerticalAlignment = TEXT("Fill");
-	}
-
-	void StripExplicitStrokeFromSurface(FUMGWidgetNode& BorderSurface)
-	{
-		BorderSurface.Brush.OutlineThickness = 0.0f;
-		BorderSurface.Brush.bHasOutlineThickness = false;
-		BorderSurface.Brush.bHasOutlineColor = false;
-		BorderSurface.Brush.OutlineColor = FLinearColor::Transparent;
-		BorderSurface.WidgetStyle.StrokePadding.Reset();
-		BorderSurface.WidgetStyle.StrokeMargin.Reset();
-	}
-
 	bool HasVisualMapperWidgetStringProperty(const FUMGWidgetNode& Widget, const TCHAR* Key)
 	{
 		return Design2UMGWidgetNodeAccess::HasWidgetString(Widget, Key);
@@ -258,183 +157,261 @@ namespace
 		return false;
 	}
 
-	FUMGWidgetNode MakeStrokeLineNode(
-		const FString& Id,
-		const FString& Name,
-		const FLinearColor& Color,
-		float Width,
-		float Height,
-		const FString& HorizontalAlignment,
-		const FString& VerticalAlignment)
+	namespace ExplicitSideStrokeHelpers
 	{
-		FUMGWidgetNode Line;
-		Line.Type = TEXT("Image");
-		Line.Id = Id;
-		Line.Name = Name;
-		Line.Brush.TexturePath = TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture");
-		Line.Brush.Image.TexturePath = Line.Brush.TexturePath;
-		Line.Brush.Image.bHasTexturePath = true;
-		Line.Brush.BrushColor = Color;
-		Line.Brush.bHasBrushColor = true;
-		Line.WidgetStyle.WidthOverride = FMath::Max(1.0f, Width);
-		Line.WidgetStyle.HeightOverride = FMath::Max(1.0f, Height);
-		Line.Slot.HorizontalAlignment = HorizontalAlignment;
-		Line.Slot.VerticalAlignment = VerticalAlignment;
-		return Line;
-	}
-
-	void AddExplicitStrokeLine(
-		FUMGWidgetNode& Overlay,
-		const FLinearColor& StrokeColor,
-		float Width,
-		float Height,
-		const TCHAR* Suffix,
-		const TCHAR* HorizontalAlignment,
-		const TCHAR* VerticalAlignment)
-	{
-		if (Width <= KINDA_SMALL_NUMBER || Height <= KINDA_SMALL_NUMBER)
+		struct FExplicitStrokeSideSpec
 		{
-			return;
-		}
+			StrokeHelpers::EStrokeSide Side = StrokeHelpers::EStrokeSide::Top;
+			const TCHAR* Suffix = TEXT("");
+			const TCHAR* HorizontalAlignment = TEXT("Fill");
+			const TCHAR* VerticalAlignment = TEXT("Fill");
+			bool bHorizontalLine = false;
+		};
 
-		Overlay.Children.Add(MakeStrokeLineNode(
-			Overlay.Id + Suffix,
-			Overlay.Name + Suffix,
-			StrokeColor,
-			Width,
-			Height,
-			HorizontalAlignment,
-			VerticalAlignment));
-	}
+		const FExplicitStrokeSideSpec ExplicitStrokeSideSpecs[] = {
+			{ StrokeHelpers::EStrokeSide::Top, TEXT("_stroke_top"), TEXT("Fill"), TEXT("Top"), true },
+			{ StrokeHelpers::EStrokeSide::Right, TEXT("_stroke_right"), TEXT("Right"), TEXT("Fill"), false },
+			{ StrokeHelpers::EStrokeSide::Bottom, TEXT("_stroke_bottom"), TEXT("Fill"), TEXT("Bottom"), true },
+			{ StrokeHelpers::EStrokeSide::Left, TEXT("_stroke_left"), TEXT("Left"), TEXT("Fill"), false },
+		};
 
-	FUMGWidgetNode WrapWithExplicitSideStroke(FUMGWidgetNode&& Border, const TSharedPtr<FDesignNode>& Node)
-	{
-		FLinearColor StrokeColor;
-		if (!TryResolveStrokeColor(Node->Visual.Stroke, StrokeColor))
+		bool TryResolveStrokeColor(const FDesignStroke& Stroke, FLinearColor& OutColor)
 		{
-			return MoveTemp(Border);
-		}
-
-		FUMGWidgetNode Overlay;
-		Overlay.Type = TEXT("Overlay");
-		Overlay.Id = Border.Id;
-		Overlay.Name = Border.Name;
-		Overlay.Bounds = Border.Bounds;
-		Overlay.Slot = Border.Slot;
-		Overlay.Render = Border.Render;
-		Border.Render = FUMGRenderStyleData();
-
-		if (Border.WidgetStyle.StrokePadding.IsSet())
-		{
-			Overlay.WidgetStyle.StrokePadding = Border.WidgetStyle.StrokePadding;
-		}
-		else
-		{
-			FMargin StrokePadding = FMargin(0.0f);
-			if (Design2UMGWidgetNodeAccess::TryGetWidgetMargin(Border, UMGPropertyKeys::StrokePadding, StrokePadding))
+			if (Stroke.Fill.Type != EDesignFillType::Color || Stroke.Fill.SolidColor.IsEmpty())
 			{
-				Overlay.WidgetStyle.StrokePadding = StrokePadding;
+				return false;
+			}
+
+			OutColor = FUMGValueParser::ParseColor(Stroke.Fill.SolidColor);
+			return true;
+		}
+
+		bool ContainsExplicitStrokeSuffixRecursive(const FUMGWidgetNode& Widget, const TCHAR* Suffix)
+		{
+			if (Widget.Name.EndsWith(Suffix))
+			{
+				return true;
+			}
+
+			for (const FUMGWidgetNode& Child : Widget.Children)
+			{
+				if (ContainsExplicitStrokeSuffixRecursive(Child, Suffix))
+				{
+					return true;
+				}
+			}
+
+			return false;
+		}
+
+		bool HasConvertedChildStrokeCoverage(const FUMGWidgetNode& Border, const TCHAR* Suffix)
+		{
+			if (Border.Children.Num() == 0)
+			{
+				return false;
+			}
+
+			const FUMGWidgetNode& Content = Border.Children[0];
+			if (Content.Children.Num() == 0)
+			{
+				return false;
+			}
+
+			for (const FUMGWidgetNode& Child : Content.Children)
+			{
+				if (!ContainsExplicitStrokeSuffixRecursive(Child, Suffix))
+				{
+					return false;
+				}
+			}
+
+			return true;
+		}
+
+		bool HasAnyConvertedChildStrokeCoverage(const FUMGWidgetNode& Border)
+		{
+			for (const FExplicitStrokeSideSpec& SideSpec : ExplicitStrokeSideSpecs)
+			{
+				if (HasConvertedChildStrokeCoverage(Border, SideSpec.Suffix))
+				{
+					return true;
+				}
+			}
+
+			return false;
+		}
+
+		void RemoveExplicitStrokeSuffixRecursive(FUMGWidgetNode& Widget, const TCHAR* Suffix)
+		{
+			for (int32 Index = Widget.Children.Num() - 1; Index >= 0; --Index)
+			{
+				if (Widget.Children[Index].Name.EndsWith(Suffix))
+				{
+					Widget.Children.RemoveAt(Index);
+					continue;
+				}
+
+				RemoveExplicitStrokeSuffixRecursive(Widget.Children[Index], Suffix);
 			}
 		}
 
-		Border.Id += TEXT("_surface");
-		Border.Name += TEXT("_surface");
-		StripExplicitStrokeFromSurface(Border);
-
-		if (!HasUniformRectStroke(Node->Visual.Stroke))
+		void PruneConvertedChildStrokeCoverage(FUMGWidgetNode& Border, const TCHAR* Suffix)
 		{
-			const bool bRedundantTop = HasConvertedChildStrokeCoverage(Border, TEXT("_stroke_top"));
-			const bool bRedundantRight = HasConvertedChildStrokeCoverage(Border, TEXT("_stroke_right"));
-			const bool bRedundantBottom = HasConvertedChildStrokeCoverage(Border, TEXT("_stroke_bottom"));
-			const bool bRedundantLeft = HasConvertedChildStrokeCoverage(Border, TEXT("_stroke_left"));
-			if (bRedundantTop)
+			if (Border.Children.Num() == 0)
 			{
-				PruneConvertedChildStrokeCoverage(Border, TEXT("_stroke_top"));
+				return;
 			}
-			if (bRedundantRight)
+
+			FUMGWidgetNode& Content = Border.Children[0];
+			for (FUMGWidgetNode& Child : Content.Children)
 			{
-				PruneConvertedChildStrokeCoverage(Border, TEXT("_stroke_right"));
-			}
-			if (bRedundantBottom)
-			{
-				PruneConvertedChildStrokeCoverage(Border, TEXT("_stroke_bottom"));
-			}
-			if (bRedundantLeft)
-			{
-				PruneConvertedChildStrokeCoverage(Border, TEXT("_stroke_left"));
+				RemoveExplicitStrokeSuffixRecursive(Child, Suffix);
 			}
 		}
 
-		ResetChildToFill(Border);
-		Overlay.Children.Add(MoveTemp(Border));
-
-		const float Top = GetStrokeSideThickness(Node->Visual.Stroke.Thickness, 'T');
-		const float Right = GetStrokeSideThickness(Node->Visual.Stroke.Thickness, 'R');
-		const float Bottom = GetStrokeSideThickness(Node->Visual.Stroke.Thickness, 'B');
-		const float Left = GetStrokeSideThickness(Node->Visual.Stroke.Thickness, 'L');
-		AddExplicitStrokeLine(Overlay, StrokeColor, 1.0f, Top, TEXT("_stroke_top"), TEXT("Fill"), TEXT("Top"));
-		AddExplicitStrokeLine(Overlay, StrokeColor, Right, 1.0f, TEXT("_stroke_right"), TEXT("Right"), TEXT("Fill"));
-		AddExplicitStrokeLine(Overlay, StrokeColor, 1.0f, Bottom, TEXT("_stroke_bottom"), TEXT("Fill"), TEXT("Bottom"));
-		AddExplicitStrokeLine(Overlay, StrokeColor, Left, 1.0f, TEXT("_stroke_left"), TEXT("Left"), TEXT("Fill"));
-
-		return Overlay;
-	}
-
-	FString BuildGradientMaterialParams(const FDesignGradient& Gradient)
-	{
-		if (Gradient.Colors.Num() == 0)
-			return FString();
-
-		const FString& StartColor = Gradient.Colors[0].Color;
-		const FString& EndColor = Gradient.Colors.Last().Color;
-
-		// Linear / Angular: include Rotation for angled rendering.
-		const float Rotation = Gradient.Rotation;
-		const float CenterX = Gradient.bHasCenter ? Gradient.CenterX : 0.5f;
-		const float CenterY = Gradient.bHasCenter ? Gradient.CenterY : 0.5f;
-		const float SizeWidth = Gradient.bHasSize ? Gradient.SizeWidth : 1.0f;
-		const float SizeHeight = Gradient.bHasSize ? Gradient.SizeHeight : 1.0f;
-		const FString RadialParams = FString::Printf(
-			TEXT("\"CenterX\":%.4f,\"CenterY\":%.4f,\"SizeWidth\":%.4f,\"SizeHeight\":%.4f,\"Rotation\":%.4f"),
-			CenterX,
-			CenterY,
-			SizeWidth,
-			SizeHeight,
-			Rotation);
-
-		// Multi-stop gradients: output Stops array, and include Rotation for shapes that use it.
-		if (Gradient.Colors.Num() > 2)
+		void ResetChildToFill(FUMGWidgetNode& Widget)
 		{
-			FString Stops;
-			if (Gradient.GradientType == EDesignGradientType::Radial)
+			Widget.Bounds = FBounds();
+			Widget.Slot = FUMGSlotData();
+			Widget.Slot.HorizontalAlignment = TEXT("Fill");
+			Widget.Slot.VerticalAlignment = TEXT("Fill");
+		}
+
+		void StripExplicitStrokeFromSurface(FUMGWidgetNode& BorderSurface)
+		{
+			BorderSurface.Brush.OutlineThickness = 0.0f;
+			BorderSurface.Brush.bHasOutlineThickness = false;
+			BorderSurface.Brush.bHasOutlineColor = false;
+			BorderSurface.Brush.OutlineColor = FLinearColor::Transparent;
+			BorderSurface.WidgetStyle.StrokePadding.Reset();
+			BorderSurface.WidgetStyle.StrokeMargin.Reset();
+		}
+
+		FUMGWidgetNode MakeStrokeLineNode(
+			const FString& Id,
+			const FString& Name,
+			const FLinearColor& Color,
+			float Width,
+			float Height,
+			const FString& HorizontalAlignment,
+			const FString& VerticalAlignment)
+		{
+			FUMGWidgetNode Line;
+			Line.Type = TEXT("Image");
+			Line.Id = Id;
+			Line.Name = Name;
+			Line.Brush.TexturePath = TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture");
+			Line.Brush.Image.TexturePath = Line.Brush.TexturePath;
+			Line.Brush.Image.bHasTexturePath = true;
+			Line.Brush.BrushColor = Color;
+			Line.Brush.bHasBrushColor = true;
+			Line.WidgetStyle.WidthOverride = FMath::Max(1.0f, Width);
+			Line.WidgetStyle.HeightOverride = FMath::Max(1.0f, Height);
+			Line.Slot.HorizontalAlignment = HorizontalAlignment;
+			Line.Slot.VerticalAlignment = VerticalAlignment;
+			return Line;
+		}
+
+		void AddExplicitStrokeLine(
+			FUMGWidgetNode& Overlay,
+			const FLinearColor& StrokeColor,
+			float Width,
+			float Height,
+			const TCHAR* Suffix,
+			const TCHAR* HorizontalAlignment,
+			const TCHAR* VerticalAlignment)
+		{
+			if (Width <= KINDA_SMALL_NUMBER || Height <= KINDA_SMALL_NUMBER)
 			{
-				Stops = FString::Printf(TEXT("{%s,\"Stops\":["), *RadialParams);
+				return;
+			}
+
+			Overlay.Children.Add(MakeStrokeLineNode(
+				Overlay.Id + Suffix,
+				Overlay.Name + Suffix,
+				StrokeColor,
+				Width,
+				Height,
+				HorizontalAlignment,
+				VerticalAlignment));
+		}
+
+		FUMGWidgetNode WrapWithExplicitSideStroke(FUMGWidgetNode&& Border, const TSharedPtr<FDesignNode>& Node)
+		{
+			FLinearColor StrokeColor;
+			if (!TryResolveStrokeColor(Node->Visual.Stroke, StrokeColor))
+			{
+				return MoveTemp(Border);
+			}
+
+			FUMGWidgetNode Overlay;
+			Overlay.Type = TEXT("Overlay");
+			Overlay.Id = Border.Id;
+			Overlay.Name = Border.Name;
+			Overlay.Bounds = Border.Bounds;
+			Overlay.Slot = Border.Slot;
+			Overlay.Render = Border.Render;
+			Border.Render = FUMGRenderStyleData();
+
+			if (Border.WidgetStyle.StrokePadding.IsSet())
+			{
+				Overlay.WidgetStyle.StrokePadding = Border.WidgetStyle.StrokePadding;
 			}
 			else
 			{
-				Stops = FString::Printf(TEXT("{\"Rotation\":%.4f,\"Stops\":["), Rotation);
+				FMargin StrokePadding = FMargin(0.0f);
+				if (Design2UMGWidgetNodeAccess::TryGetWidgetMargin(Border, UMGPropertyKeys::StrokePadding, StrokePadding))
+				{
+					Overlay.WidgetStyle.StrokePadding = StrokePadding;
+				}
 			}
-			for (int32 i = 0; i < Gradient.Colors.Num(); ++i)
+
+			Border.Id += TEXT("_surface");
+			Border.Name += TEXT("_surface");
+			StripExplicitStrokeFromSurface(Border);
+
+			if (!StrokeHelpers::HasUniformRectStroke(Node->Visual.Stroke))
 			{
-				if (i > 0) Stops += TEXT(",");
-				Stops += FString::Printf(TEXT("{\"Pos\":%.4f,\"Color\":\"%s\"}"),
-					Gradient.Colors[i].Position, *Gradient.Colors[i].Color);
+				for (const FExplicitStrokeSideSpec& SideSpec : ExplicitStrokeSideSpecs)
+				{
+					if (HasConvertedChildStrokeCoverage(Border, SideSpec.Suffix))
+					{
+						PruneConvertedChildStrokeCoverage(Border, SideSpec.Suffix);
+					}
+				}
 			}
-			Stops += TEXT("]}");
-			return Stops;
+
+			ResetChildToFill(Border);
+			Overlay.Children.Add(MoveTemp(Border));
+
+			for (const FExplicitStrokeSideSpec& SideSpec : ExplicitStrokeSideSpecs)
+			{
+				const float Thickness = StrokeHelpers::GetStrokeSideThickness(Node->Visual.Stroke.Thickness, SideSpec.Side);
+				const float Width = SideSpec.bHorizontalLine ? 1.0f : Thickness;
+				const float Height = SideSpec.bHorizontalLine ? Thickness : 1.0f;
+				AddExplicitStrokeLine(
+					Overlay,
+					StrokeColor,
+					Width,
+					Height,
+					SideSpec.Suffix,
+					SideSpec.HorizontalAlignment,
+					SideSpec.VerticalAlignment);
+			}
+
+			return Overlay;
 		}
-
-		// Radial: 2-stop center/edge pair
-		if (Gradient.GradientType == EDesignGradientType::Radial)
-			return FString::Printf(TEXT("{%s,\"ColorCenter\":\"%s\",\"ColorEdge\":\"%s\"}"), *RadialParams, *StartColor, *EndColor);
-
-		// 2-stop: include Rotation
-		return FString::Printf(TEXT("{\"Rotation\":%.4f,\"ColorStart\":\"%s\",\"ColorEnd\":\"%s\"}"), Rotation, *StartColor, *EndColor);
 	}
 
-	void ApplyTypedGradientBrushData(FUMGVisualBrushData& Brush, const FDesignGradient& Gradient)
+	namespace GradientHelpers
 	{
-		auto GradientTypeToString = [](const EDesignGradientType Type)
+		const TCHAR* MatRef_GradientH = TEXT("gradienth");
+		const TCHAR* MatRef_GradientV = TEXT("gradientv");
+		const TCHAR* MatRef_GradientLinear = TEXT("gradientlinear");
+		const TCHAR* MatRef_Radial = TEXT("radialgradient");
+		const TCHAR* MatRef_Angular = TEXT("angulargradient");
+
+		const TCHAR* ToTypedGradientTypeString(const EDesignGradientType Type)
 		{
 			switch (Type)
 			{
@@ -446,28 +423,97 @@ namespace
 			default:
 				return TEXT("Linear");
 			}
-		};
+		}
 
-		Brush.Gradient.Type = GradientTypeToString(Gradient.GradientType);
-		Brush.Gradient.bHasType = true;
-		Brush.Gradient.Rotation = Gradient.Rotation;
-		Brush.Gradient.bHasRotation = true;
-		if (Gradient.bHasCenter)
+		FString BuildGradientMaterialParams(const FDesignGradient& Gradient)
 		{
-			Brush.Gradient.Center = FVector2D(Gradient.CenterX, Gradient.CenterY);
-			Brush.Gradient.bHasCenter = true;
+			if (Gradient.Colors.Num() == 0)
+				return FString();
+
+			const FString& StartColor = Gradient.Colors[0].Color;
+			const FString& EndColor = Gradient.Colors.Last().Color;
+
+			// Linear / Angular: include Rotation for angled rendering.
+			const float Rotation = Gradient.Rotation;
+			const float CenterX = Gradient.bHasCenter ? Gradient.CenterX : 0.5f;
+			const float CenterY = Gradient.bHasCenter ? Gradient.CenterY : 0.5f;
+			const float SizeWidth = Gradient.bHasSize ? Gradient.SizeWidth : 1.0f;
+			const float SizeHeight = Gradient.bHasSize ? Gradient.SizeHeight : 1.0f;
+			const FString RadialParams = FString::Printf(
+				TEXT("\"CenterX\":%.4f,\"CenterY\":%.4f,\"SizeWidth\":%.4f,\"SizeHeight\":%.4f,\"Rotation\":%.4f"),
+				CenterX,
+				CenterY,
+				SizeWidth,
+				SizeHeight,
+				Rotation);
+
+			// Multi-stop gradients: output Stops array, and include Rotation for shapes that use it.
+			if (Gradient.Colors.Num() > 2)
+			{
+				FString Stops;
+				if (Gradient.GradientType == EDesignGradientType::Radial)
+				{
+					Stops = FString::Printf(TEXT("{%s,\"Stops\":["), *RadialParams);
+				}
+				else
+				{
+					Stops = FString::Printf(TEXT("{\"Rotation\":%.4f,\"Stops\":["), Rotation);
+				}
+				for (int32 i = 0; i < Gradient.Colors.Num(); ++i)
+				{
+					if (i > 0) Stops += TEXT(",");
+					Stops += FString::Printf(TEXT("{\"Pos\":%.4f,\"Color\":\"%s\"}"),
+						Gradient.Colors[i].Position, *Gradient.Colors[i].Color);
+				}
+				Stops += TEXT("]}");
+				return Stops;
+			}
+
+			// Radial: 2-stop center/edge pair
+			if (Gradient.GradientType == EDesignGradientType::Radial)
+				return FString::Printf(TEXT("{%s,\"ColorCenter\":\"%s\",\"ColorEdge\":\"%s\"}"), *RadialParams, *StartColor, *EndColor);
+
+			// 2-stop: include Rotation
+			return FString::Printf(TEXT("{\"Rotation\":%.4f,\"ColorStart\":\"%s\",\"ColorEnd\":\"%s\"}"), Rotation, *StartColor, *EndColor);
 		}
-		if (Gradient.bHasSize)
+
+		void ApplyTypedGradientBrushData(FUMGVisualBrushData& Brush, const FDesignGradient& Gradient)
 		{
-			Brush.Gradient.Size = FVector2D(Gradient.SizeWidth, Gradient.SizeHeight);
-			Brush.Gradient.bHasSize = true;
+			Brush.Gradient.Type = ToTypedGradientTypeString(Gradient.GradientType);
+			Brush.Gradient.bHasType = true;
+			Brush.Gradient.Rotation = Gradient.Rotation;
+			Brush.Gradient.bHasRotation = true;
+			if (Gradient.bHasCenter)
+			{
+				Brush.Gradient.Center = FVector2D(Gradient.CenterX, Gradient.CenterY);
+				Brush.Gradient.bHasCenter = true;
+			}
+			if (Gradient.bHasSize)
+			{
+				Brush.Gradient.Size = FVector2D(Gradient.SizeWidth, Gradient.SizeHeight);
+				Brush.Gradient.bHasSize = true;
+			}
+			Brush.Gradient.Stops.Reset();
+			for (const FDesignGradientStop& Stop : Gradient.Colors)
+			{
+				FUMGVisualBrushData::FGradientStopData& TypedStop = Brush.Gradient.Stops.AddDefaulted_GetRef();
+				TypedStop.Color = FUMGValueParser::ParseColor(Stop.Color);
+				TypedStop.Position = Stop.Position;
+			}
 		}
-		Brush.Gradient.Stops.Reset();
-		for (const FDesignGradientStop& Stop : Gradient.Colors)
+
+		FString ResolveGradientMaterialRef(const FDesignGradient& Gradient)
 		{
-			FUMGVisualBrushData::FGradientStopData& TypedStop = Brush.Gradient.Stops.AddDefaulted_GetRef();
-			TypedStop.Color = FUMGValueParser::ParseColor(Stop.Color);
-			TypedStop.Position = Stop.Position;
+			switch (Gradient.GradientType)
+			{
+			case EDesignGradientType::Radial:
+				return MatRef_Radial;
+			case EDesignGradientType::Angular:
+				return MatRef_Angular;
+			case EDesignGradientType::Linear:
+			default:
+				return MatRef_GradientLinear;
+			}
 		}
 	}
 
@@ -514,20 +560,6 @@ namespace
 		Widget.Slot.VerticalAlignment = TEXT("Fill");
 	}
 
-	FString ResolveGradientMaterialRef(const FDesignGradient& Gradient)
-	{
-		switch (Gradient.GradientType)
-		{
-		case EDesignGradientType::Radial:
-			return MatRef_Radial;
-		case EDesignGradientType::Angular:
-			return MatRef_Angular;
-		case EDesignGradientType::Linear:
-		default:
-			return MatRef_GradientLinear;
-		}
-	}
-
 	void ApplyMultiFillImageChildOpacity(
 		FUMGWidgetNode& ImageChild,
 		const FDesignFill& Fill,
@@ -571,10 +603,10 @@ namespace
 		if (Fill.Type == EDesignFillType::Gradient && Fill.Gradient.Colors.Num() > 0)
 		{
 			Layer.Type = TEXT("Image");
-			Layer.Brush.MaterialRef = ResolveGradientMaterialRef(Fill.Gradient);
+			Layer.Brush.MaterialRef = GradientHelpers::ResolveGradientMaterialRef(Fill.Gradient);
 			Layer.Brush.bHasMaterialRef = true;
-			ApplyTypedGradientBrushData(Layer.Brush, Fill.Gradient);
-			const FString MaterialParams = BuildGradientMaterialParams(Fill.Gradient);
+			GradientHelpers::ApplyTypedGradientBrushData(Layer.Brush, Fill.Gradient);
+			const FString MaterialParams = GradientHelpers::BuildGradientMaterialParams(Fill.Gradient);
 			if (!MaterialParams.IsEmpty())
 			{
 				Layer.Brush.MaterialParams = MaterialParams;
@@ -662,25 +694,25 @@ namespace
 
 		if (Node->Visual.Fill.Type == EDesignFillType::Gradient && Node->Visual.Fill.Gradient.Colors.Num() > 0)
 		{
-			FString MaterialRef = MatRef_GradientH;
+			FString MaterialRef = GradientHelpers::MatRef_GradientH;
 			switch (Node->Visual.Fill.Gradient.GradientType)
 			{
 			case EDesignGradientType::Radial:
-				MaterialRef = MatRef_Radial;
+				MaterialRef = GradientHelpers::MatRef_Radial;
 				break;
 			case EDesignGradientType::Angular:
-				MaterialRef = MatRef_Angular;
+				MaterialRef = GradientHelpers::MatRef_Angular;
 				break;
 			case EDesignGradientType::Linear:
 			default:
-				MaterialRef = MatRef_GradientLinear;
+				MaterialRef = GradientHelpers::MatRef_GradientLinear;
 				break;
 			}
 
 			Widget.Brush.MaterialRef = MaterialRef;
 			Widget.Brush.bHasMaterialRef = true;
-			ApplyTypedGradientBrushData(Widget.Brush, Node->Visual.Fill.Gradient);
-			const FString MaterialParams = BuildGradientMaterialParams(Node->Visual.Fill.Gradient);
+			GradientHelpers::ApplyTypedGradientBrushData(Widget.Brush, Node->Visual.Fill.Gradient);
+			const FString MaterialParams = GradientHelpers::BuildGradientMaterialParams(Node->Visual.Fill.Gradient);
 			if (!MaterialParams.IsEmpty())
 			{
 				Widget.Brush.MaterialParams = MaterialParams;
@@ -1071,7 +1103,7 @@ void FVisualMapper::ApplyRoundedCorner(FUMGWidgetNode& Widget, const FDesignCorn
 
 void FVisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FDesignStroke& Stroke)
 {
-	const FMargin HalfInsets = GetStrokeHalfInsets(Stroke.Thickness);
+	const FMargin HalfInsets = StrokeHelpers::GetStrokeHalfInsets(Stroke.Thickness);
 	float Thickness = Stroke.Thickness.bUniform ? Stroke.Thickness.Uniform
 		: FMath::Max(FMath::Max(Stroke.Thickness.Top, Stroke.Thickness.Bottom),
 			FMath::Max(Stroke.Thickness.Left, Stroke.Thickness.Right));
@@ -1142,19 +1174,19 @@ FUMGWidgetNode FVisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TSha
 	Border.Children.Add(MoveTemp(Widget));
 
 	const bool bNeedsExplicitStroke =
-		(NeedsExplicitSideStroke(Node)
+		(StrokeHelpers::NeedsExplicitSideStroke(Node)
 			&& !HasPlaceholderSurfaceChildren(Node)
 			&& !HasOpaqueSolidFill(Node))
 		|| (Node.IsValid()
 			&& Node->Visual.Stroke.HasStroke()
 			&& !Node->Visual.CornerRadius.HasRadius()
-			&& HasUniformRectStroke(Node->Visual.Stroke)
+			&& StrokeHelpers::HasUniformRectStroke(Node->Visual.Stroke)
 			&& !HasPlaceholderSurfaceChildren(Node)
-			&& HasAnyConvertedChildStrokeCoverage(Border));
+			&& ExplicitSideStrokeHelpers::HasAnyConvertedChildStrokeCoverage(Border));
 
 	if (bNeedsExplicitStroke)
 	{
-		return WrapWithExplicitSideStroke(MoveTemp(Border), Node);
+		return ExplicitSideStrokeHelpers::WrapWithExplicitSideStroke(MoveTemp(Border), Node);
 	}
 
 	return Border;

@@ -6,28 +6,30 @@
 #include "DesignSchema.h"
 #include "UMGSchema.h"
 
+namespace Design2UMGTextWidgetBuilder
+{
+	struct FIconFontSettingsSnapshot;
+}
+
 namespace Design2UMGNodeWidgetFactory
 {
-	struct FBuildContext
+	struct FBuildArgs
 	{
-		FBuildContext(
-			TArray<FString>& InWarnings,
-			TSet<FString>& InWarnedFamilies,
-			TSet<FString>& InPrunedInvalidMappings,
-			TMap<FString, FString>& InPendingIconFontMappings)
-			: Warnings(InWarnings)
-			, WarnedFamilies(InWarnedFamilies)
-			, PrunedInvalidMappings(InPrunedInvalidMappings)
-			, PendingIconFontMappings(InPendingIconFontMappings)
-		{
-		}
-
-		TArray<FString>& Warnings;
-		TSet<FString>& WarnedFamilies;
-		TSet<FString>& PrunedInvalidMappings;
-		TMap<FString, FString>& PendingIconFontMappings;
+		const TSet<FString>* ExistingWarnedFamilies = nullptr;
+		const Design2UMGTextWidgetBuilder::FIconFontSettingsSnapshot* IconFontSettingsSnapshot = nullptr;
 	};
 
-	FUMGWidgetNode CreateWidgetForNodeType(const TSharedPtr<FDesignNode>& Node, FBuildContext& Context);
+	struct FBuildResult
+	{
+		FUMGWidgetNode Widget;
+		TArray<FString> Warnings;
+		TSet<FString> NewlyWarnedFamilies;
+		TSet<FString> PrunedInvalidMappings;
+		TMap<FString, FString> PendingIconFontMappings;
+	};
+
+	FBuildResult CreateWidgetForNodeType(
+		const TSharedPtr<FDesignNode>& Node,
+		const FBuildArgs& Args = FBuildArgs());
 	void PopulateWidgetIdentityAndBounds(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node);
 }
