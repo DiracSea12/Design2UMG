@@ -41,7 +41,7 @@ struct DESIGN2UMGCORE_API FUMGWidgetNode
 	FString Name;
 
 	/** Pixel-space bounds, projected by LayoutCalculator from slot data. */
-	FBounds Bounds;
+	FDesignPixelBounds Bounds;
 
 	/** Slot layout data, derived by LayoutCalculator from bounds. */
 	UPROPERTY()

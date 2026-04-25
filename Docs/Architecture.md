@@ -51,7 +51,7 @@ The formal release gate is not just "does it render" but "does no admissible cas
 
 | Module | Responsibility |
 | --- | --- |
-| `Design2UMGCore` | Parsing, IR definitions, conversion, layout logic, fidelity-related shared helpers |
+| `Design2UMGCore` | Editor module for parsing, IR definitions, conversion, layout logic, and fidelity-related shared helpers. It is not a runtime module; the Core name means shared editor/importer ownership, not runtime availability. |
 | `Design2UMGEditor` | Import pipeline, Blueprint generation, preview/editor UI, automation rendering, editor-only asset workflows |
 | `Tools/` | Batch verification, historical-best validation, snapshot wrappers, release governance helpers |
 

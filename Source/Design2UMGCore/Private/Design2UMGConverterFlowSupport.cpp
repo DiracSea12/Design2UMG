@@ -1,0 +1,318 @@
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+
+#include "Design2UMGConverterFlowSupport.h"
+
+#include "Design2UMGLog.h"
+#include "DesignVariableResolver.h"
+#include "RefExpander.h"
+#include "SizeEstimator.h"
+
+namespace
+{
+	struct FChildSizeSnapshot
+	{
+		TSharedPtr<FDesignNode> Child;
+		FDesignSize RawWidth;
+		FDesignSize RawHeight;
+		FDesignSize EffectiveWidth;
+		FDesignSize EffectiveHeight;
+		bool bUsedExpandedRef = false;
+	};
+
+	const TCHAR* ToSizeModeLogString(const EDesignSizeMode Mode)
+	{
+		switch (Mode)
+		{
+		case EDesignSizeMode::Fixed: return TEXT("fixed");
+		case EDesignSizeMode::FillContainer: return TEXT("fill");
+		case EDesignSizeMode::FitContent: return TEXT("fit");
+		default: return TEXT("unknown");
+		}
+	}
+
+	bool ShouldLockExplicitFitDimensionForFlow(const TSharedPtr<FDesignNode>& Node)
+	{
+		return Node.IsValid()
+			&& Node->Children.Num() == 0
+			&& (Node->Type == EDesignNodeType::Text || Node->Type == EDesignNodeType::IconFont)
+			&& !Node->Text.Content.IsEmpty();
+	}
+
+	bool HasExplicitFitDimension(const FDesignSize& Size)
+	{
+		return Size.IsFit() && Size.Value > 0.0f;
+	}
+
+	bool ShouldPreResolveLinearFlow(const TSharedPtr<FDesignNode>& Node, const FUMGWidgetNode& Widget)
+	{
+		return Node.IsValid()
+			&& Widget.Bounds.W > 0.0f
+			&& Widget.Bounds.H > 0.0f
+			&& (Node->LayoutData.Layout == EDesignLayout::Horizontal || Node->LayoutData.Layout == EDesignLayout::Vertical);
+	}
+
+	struct FFlowLayoutSizingContext
+	{
+		float InnerW = 0.0f;
+		float InnerH = 0.0f;
+		float TotalGap = 0.0f;
+		bool bHorizontal = false;
+	};
+
+	struct FFlowChildSizingSummary
+	{
+		float FixedMainSum = 0.0f;
+		int32 FillCount = 0;
+	};
+
+	FFlowLayoutSizingContext BuildFlowLayoutSizingContext(
+		const TSharedPtr<FDesignNode>& Node,
+		const FUMGWidgetNode& Widget,
+		const int32 ChildCount)
+	{
+		FFlowLayoutSizingContext SizingContext;
+		SizingContext.InnerW = Widget.Bounds.W - Node->LayoutData.Padding.Left - Node->LayoutData.Padding.Right;
+		SizingContext.InnerH = Widget.Bounds.H - Node->LayoutData.Padding.Top - Node->LayoutData.Padding.Bottom;
+		SizingContext.bHorizontal = Node->LayoutData.Layout == EDesignLayout::Horizontal;
+		SizingContext.TotalGap = ChildCount > 1 ? Node->LayoutData.Gap * (ChildCount - 1) : 0.0f;
+		return SizingContext;
+	}
+
+	TArray<FChildSizeSnapshot> BuildFlowChildSnapshots(
+		const TArray<TSharedPtr<FDesignNode>>& VisibleChildren,
+		const Design2UMGConverterInternal::FExpandedNodeResolver& ExpandedNodeResolver)
+	{
+		TArray<FChildSizeSnapshot> Snapshots;
+		Snapshots.Reserve(VisibleChildren.Num());
+		for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
+		{
+			FChildSizeSnapshot& Snapshot = Snapshots.AddDefaulted_GetRef();
+			Snapshot.Child = Child;
+			if (!Child.IsValid())
+			{
+				continue;
+			}
+
+			Snapshot.RawWidth = Child->Transform.Width;
+			Snapshot.RawHeight = Child->Transform.Height;
+			Snapshot.EffectiveWidth = Child->Transform.Width;
+			Snapshot.EffectiveHeight = Child->Transform.Height;
+
+			const TSharedPtr<FDesignNode> ExpandedChild = ExpandedNodeResolver.ExpandRef(Child);
+			if (ExpandedChild != Child && ExpandedChild.IsValid())
+			{
+				Snapshot.bUsedExpandedRef = true;
+				if (!Child->Transform.bHasWidth)
+				{
+					Snapshot.EffectiveWidth = ExpandedChild->Transform.Width;
+				}
+				if (!Child->Transform.bHasHeight)
+				{
+					Snapshot.EffectiveHeight = ExpandedChild->Transform.Height;
+				}
+			}
+		}
+		return Snapshots;
+	}
+
+	FFlowChildSizingSummary CollectFlowChildSizingSummary(
+		const TArray<FChildSizeSnapshot>& ChildSnapshots,
+		const bool bHorizontal)
+	{
+		FFlowChildSizingSummary Summary;
+		for (const FChildSizeSnapshot& ChildSnapshot : ChildSnapshots)
+		{
+			const FDesignSize& MainSize = bHorizontal ? ChildSnapshot.EffectiveWidth : ChildSnapshot.EffectiveHeight;
+			if (MainSize.IsFill())
+			{
+				++Summary.FillCount;
+			}
+			else
+			{
+				Summary.FixedMainSum += MainSize.Value;
+			}
+
+			const FDesignSize& RawMain = bHorizontal ? ChildSnapshot.RawWidth : ChildSnapshot.RawHeight;
+			const FDesignSize& RawCross = bHorizontal ? ChildSnapshot.RawHeight : ChildSnapshot.RawWidth;
+			const FDesignSize& EffectiveCross = bHorizontal ? ChildSnapshot.EffectiveHeight : ChildSnapshot.EffectiveWidth;
+			UE_LOG(LogDesign2UMG, Verbose, TEXT("PreResolveFill Child '%s': ref=%d rawMain=%s(%.0f) effMain=%s(%.0f) rawCross=%s(%.0f) effCross=%s(%.0f)"),
+				ChildSnapshot.Child.IsValid() ? *ChildSnapshot.Child->Id : TEXT("<invalid>"),
+				ChildSnapshot.bUsedExpandedRef ? 1 : 0,
+				ToSizeModeLogString(RawMain.Mode), RawMain.Value,
+				ToSizeModeLogString(MainSize.Mode), MainSize.Value,
+				ToSizeModeLogString(RawCross.Mode), RawCross.Value,
+				ToSizeModeLogString(EffectiveCross.Mode), EffectiveCross.Value);
+		}
+		return Summary;
+	}
+
+	void ApplyFlowCrossFillSizing(FChildSizeSnapshot& ChildSnapshot, const FFlowLayoutSizingContext& SizingContext)
+	{
+		const FDesignSize& CrossSize = SizingContext.bHorizontal ? ChildSnapshot.EffectiveHeight : ChildSnapshot.EffectiveWidth;
+		if (CrossSize.IsFill())
+		{
+			SizeEstimator::SetResolvedNodeDimension(
+				ChildSnapshot.Child,
+				!SizingContext.bHorizontal,
+				SizingContext.bHorizontal ? SizingContext.InnerH : SizingContext.InnerW);
+		}
+	}
+
+	void ApplyFlowFillSizing(
+		const FUMGWidgetNode& Widget,
+		TArray<FChildSizeSnapshot>& ChildSnapshots,
+		const FFlowLayoutSizingContext& SizingContext,
+		const FFlowChildSizingSummary& Summary)
+	{
+		if (Summary.FillCount <= 0)
+		{
+			for (FChildSizeSnapshot& ChildSnapshot : ChildSnapshots)
+			{
+				ApplyFlowCrossFillSizing(ChildSnapshot, SizingContext);
+			}
+			return;
+		}
+
+		const float AvailableMain =
+			(SizingContext.bHorizontal ? SizingContext.InnerW : SizingContext.InnerH)
+			- Summary.FixedMainSum
+			- SizingContext.TotalGap;
+		const float FillMain = FMath::Max(0.0f, AvailableMain / Summary.FillCount);
+		for (FChildSizeSnapshot& ChildSnapshot : ChildSnapshots)
+		{
+			const FDesignSize& MainSize = SizingContext.bHorizontal ? ChildSnapshot.EffectiveWidth : ChildSnapshot.EffectiveHeight;
+			if (MainSize.IsFill())
+			{
+				SizeEstimator::SetResolvedNodeDimension(ChildSnapshot.Child, SizingContext.bHorizontal, FillMain);
+			}
+
+			ApplyFlowCrossFillSizing(ChildSnapshot, SizingContext);
+		}
+
+		UE_LOG(LogDesign2UMG, Log, TEXT("PreResolveFill: '%s' layout=%s inner=(%.0f,%.0f) fixed=%.0f fill=%d each=%.0f"),
+			*Widget.Name,
+			SizingContext.bHorizontal ? TEXT("H") : TEXT("V"),
+			SizingContext.InnerW,
+			SizingContext.InnerH,
+			Summary.FixedMainSum,
+			Summary.FillCount,
+			FillMain);
+	}
+
+	void PreResolveLinearFlowFillChildren(
+		const TSharedPtr<FDesignNode>& Node,
+		const FUMGWidgetNode& Widget,
+		const TArray<TSharedPtr<FDesignNode>>& VisibleChildren,
+		const Design2UMGConverterInternal::FExpandedNodeResolver& ExpandedNodeResolver)
+	{
+		if (!ShouldPreResolveLinearFlow(Node, Widget))
+		{
+			return;
+		}
+
+		TArray<FChildSizeSnapshot> ChildSnapshots = BuildFlowChildSnapshots(VisibleChildren, ExpandedNodeResolver);
+		const FFlowLayoutSizingContext SizingContext =
+			BuildFlowLayoutSizingContext(Node, Widget, ChildSnapshots.Num());
+		const FFlowChildSizingSummary Summary =
+			CollectFlowChildSizingSummary(ChildSnapshots, SizingContext.bHorizontal);
+		ApplyFlowFillSizing(Widget, ChildSnapshots, SizingContext, Summary);
+	}
+
+	void PreResolveFlowFitChild(
+		const TSharedPtr<FDesignNode>& ParentNode,
+		const TSharedPtr<FDesignNode>& Child,
+		const Design2UMGConverterInternal::FExpandedNodeResolver& ExpandedNodeResolver)
+	{
+		if (!Child.IsValid() || (!Child->Transform.Width.IsFit() && !Child->Transform.Height.IsFit()))
+		{
+			return;
+		}
+
+		const bool bLockExplicitFit = ShouldLockExplicitFitDimensionForFlow(Child);
+		const float ChildContentWidth = SizeEstimator::ComputeChildContentWidthHint(ParentNode, Child, 0.0f);
+		const TSharedPtr<FDesignNode> EstimateChild = ExpandedNodeResolver.ResolveExpandedChild(Child, false);
+		const FVector2D Estimate = SizeEstimator::EstimateNodeSize(EstimateChild, ChildContentWidth);
+		if (!(bLockExplicitFit && HasExplicitFitDimension(Child->Transform.Width)))
+		{
+			SizeEstimator::PromoteFitNodeDimension(Child, true, Estimate.X);
+		}
+		if (!(bLockExplicitFit && HasExplicitFitDimension(Child->Transform.Height)))
+		{
+			SizeEstimator::PromoteFitNodeDimension(Child, false, Estimate.Y);
+		}
+		if (Estimate.X > 0.0f || Estimate.Y > 0.0f)
+		{
+			UE_LOG(LogDesign2UMG, Log, TEXT("PreResolveFitContent: '%s' estimated=(%.0f,%.0f)"),
+				*Child->Name, Estimate.X, Estimate.Y);
+		}
+	}
+}
+
+namespace Design2UMGConverterInternal
+{
+	FExpandedNodeResolver::FExpandedNodeResolver(
+		const FDesignDocument& InDocument,
+		const TMap<FString, FString>& InThemeContext)
+		: Document(InDocument)
+		, ThemeContext(InThemeContext)
+	{
+	}
+
+	TSharedPtr<FDesignNode> FExpandedNodeResolver::ExpandRef(const TSharedPtr<FDesignNode>& Node) const
+	{
+		if (!Node.IsValid() || Node->Type != EDesignNodeType::Ref)
+		{
+			return Node;
+		}
+
+		TSharedPtr<FDesignNode> Expanded = FRefExpander::ExpandRef(Node, Document);
+		if (!Expanded.IsValid())
+		{
+			return nullptr;
+		}
+
+		if (ThemeContext.Num() > 0)
+		{
+			FDesignVariableResolver Resolver(Document.Variables);
+			Resolver.SetThemeContext(ThemeContext);
+			FRefExpander::ReThemeNode(Expanded, Resolver);
+		}
+
+		return Expanded;
+	}
+
+	TSharedPtr<FDesignNode> FExpandedNodeResolver::ResolveExpandedChild(
+		const TSharedPtr<FDesignNode>& Child,
+		const bool bPreComputeFitContent) const
+	{
+		TSharedPtr<FDesignNode> ExpandedChild = ExpandRef(Child);
+		if (!ExpandedChild.IsValid())
+		{
+			return Child;
+		}
+
+		if (bPreComputeFitContent && ExpandedChild != Child)
+		{
+			SizeEstimator::PreComputeFitContentSizes(ExpandedChild, Document);
+		}
+
+		return ExpandedChild;
+	}
+
+	FFlowChildPreparation::FFlowChildPreparation(const FExpandedNodeResolver& InExpandedNodeResolver)
+		: ExpandedNodeResolver(InExpandedNodeResolver)
+	{
+	}
+
+	void FFlowChildPreparation::PreResolveFlowChildren(
+		const TSharedPtr<FDesignNode>& Node,
+		const FUMGWidgetNode& Widget,
+		const TArray<TSharedPtr<FDesignNode>>& VisibleChildren) const
+	{
+		PreResolveLinearFlowFillChildren(Node, Widget, VisibleChildren, ExpandedNodeResolver);
+		for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
+		{
+			PreResolveFlowFitChild(Node, Child, ExpandedNodeResolver);
+		}
+	}
+}

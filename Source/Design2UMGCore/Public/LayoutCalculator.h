@@ -44,5 +44,5 @@ public:
 	 * @param Context Projection context including design size and thresholds.
 	 * @return Calculated slot data for UMG generation.
 	 */
-	static FUMGSlotData CalculateSlot(const FBounds& Bounds, const FLayoutContext& Context);
+	static FUMGSlotData CalculateSlot(const FDesignPixelBounds& Bounds, const FLayoutContext& Context);
 };

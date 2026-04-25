@@ -130,7 +130,7 @@ FAxisResult CalculateAxis(
 	return R;
 }
 
-FUMGSlotData FLayoutCalculator::CalculateSlot(const FBounds& Bounds, const FLayoutContext& Context)
+FUMGSlotData FLayoutCalculator::CalculateSlot(const FDesignPixelBounds& Bounds, const FLayoutContext& Context)
 {
 	// v2.2: DesignSize有效性检查
 	const int32 CanvasW = FMath::Max(1, Context.DesignSize.X);
@@ -140,7 +140,7 @@ FUMGSlotData FLayoutCalculator::CalculateSlot(const FBounds& Bounds, const FLayo
 	// 不要把超出设计尺寸的节点强行裁进 [0,1]。
 	// 设计稿里常有“部分超出画布”的节点（如滚动区域、阴影、分页），
 	// 若在这里裁剪，会把尺寸压扁并导致后续 UMG 严重错位。
-	FBounds SafeBounds;
+	FDesignPixelBounds SafeBounds;
 	SafeBounds.X = Bounds.X;
 	SafeBounds.Y = Bounds.Y;
 	SafeBounds.W = FMath::Max(0.0f, Bounds.W);

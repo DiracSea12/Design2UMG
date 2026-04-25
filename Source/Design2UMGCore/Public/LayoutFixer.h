@@ -26,8 +26,8 @@ struct FFixerLogEntry
 {
 	FString WidgetId;
 	FString FixType;
-	FBounds OldBounds;
-	FBounds NewBounds;
+	FDesignPixelBounds OldBounds;
+	FDesignPixelBounds NewBounds;
 	FString Description;
 };
 
@@ -51,7 +51,7 @@ struct FFixerWidgetNode
 {
 	FString Id;
 	FString Type;
-	FBounds Bounds;
+	FDesignPixelBounds Bounds;
 	bool bFixExempt = false;
 	TArray<FFixerWidgetNode> Children;
 };

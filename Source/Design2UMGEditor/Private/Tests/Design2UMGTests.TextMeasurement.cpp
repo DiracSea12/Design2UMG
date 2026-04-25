@@ -27,6 +27,22 @@ namespace
 			: FString();
 	}
 
+	FString GetTextMeasurementPublicHeaderPath()
+	{
+		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
+		return Plugin.IsValid()
+			? FPaths::Combine(Plugin->GetBaseDir(), TEXT("Source/Design2UMGCore/Public/TextMeasurement.h"))
+			: FString();
+	}
+
+	FString GetTextMeasurementPrivateHeaderPath()
+	{
+		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
+		return Plugin.IsValid()
+			? FPaths::Combine(Plugin->GetBaseDir(), TEXT("Source/Design2UMGCore/Private/TextMeasurement.h"))
+			: FString();
+	}
+
 	bool LoadTextMeasurementSource(FAutomationTestBase& Test, FString& OutSource)
 	{
 		const FString SourcePath = GetTextMeasurementSourcePath();
@@ -126,6 +142,50 @@ namespace
 		Node->Transform.Height = FDesignSize::Fit(0.0f);
 		Node->Transform.bHasWidth = true;
 		Node->Transform.bHasHeight = true;
+		return Node;
+	}
+
+	TSharedPtr<FDesignNode> MakeBaselineFallbackProbeNode(
+		const FString& Id,
+		const FString& Content,
+		const bool bExplicitParagraphBreak = false)
+	{
+		TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
+		Node->Id = Id;
+		Node->Name = Id;
+		Node->Type = EDesignNodeType::Text;
+		Node->Text.Content = bExplicitParagraphBreak ? FString::Printf(TEXT("%s\nsecond line"), *Content) : Content;
+		Node->Text.FontFamily = TEXT("Inter");
+		Node->Text.FontWeight = TEXT("Regular");
+		Node->Text.FontSize = 16.0f;
+		Node->Text.LineHeight = 1.25f;
+		Node->Text.LetterSpacing = 0.0f;
+		Node->Text.TextAlign = EDesignTextAlign::Left;
+		Node->Text.TextAlignVertical = EDesignTextAlignVertical::Top;
+		Node->Text.TextGrowth = EDesignTextGrowth::Auto;
+		Node->Transform.Width = FDesignSize::Fit(0.0f);
+		Node->Transform.Height = FDesignSize::Fit(0.0f);
+		Node->Transform.bHasWidth = false;
+		Node->Transform.bHasHeight = false;
+		Node->Transform.bSourceHasWidth = false;
+		return Node;
+	}
+
+	TSharedPtr<FDesignNode> MakeIntrinsicFallbackProbeNode(
+		const FString& Id,
+		const FString& Content,
+		const FString& FontFamily)
+	{
+		TSharedPtr<FDesignNode> Node = MakeBaselineFallbackProbeNode(Id, Content);
+		Node->Text.FontFamily = FontFamily;
+		Node->Text.LineHeight = 0.0f;
+		Node->Text.TextAlignVertical = EDesignTextAlignVertical::Top;
+		Node->Transform.Width = FDesignSize::Fit(0.0f);
+		Node->Transform.Height = FDesignSize::Fit(0.0f);
+		Node->Transform.bHasWidth = false;
+		Node->Transform.bHasHeight = false;
+		Node->Transform.bSourceHasWidth = false;
+		Node->MutableSource().bExpandedRefInstance = true;
 		return Node;
 	}
 
@@ -433,6 +493,217 @@ bool FRuntimeTextContentPreservesParagraphBreaksTest::RunTest(const FString& Par
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextMeasurementResetCacheClearsOwnedCachesTest,
+	"Design2UMG.TextMeasurement.ResetCacheClearsOwnedCaches",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTextMeasurementResetCacheClearsOwnedCachesTest::RunTest(const FString& Parameters)
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		AddWarning(TEXT("Slate is not initialized, skipping cache owner reset test."));
+		return true;
+	}
+
+	const TSharedPtr<FDesignNode> Node = MakeSharedCalibrationTextNode(
+		TEXT("cache_owner_probe"),
+		TEXT("Design2UMG cache owner reset regression proof text"));
+
+	TextMeasurement::ResetCache();
+	const TextMeasurement::Testing::FTextMeasurementCacheStats EmptyStats = TextMeasurement::Testing::GetCacheStats();
+	TestEqual(TEXT("Resolved cache starts empty"), EmptyStats.ResolvedScaleEntries, 0);
+	TestEqual(TEXT("Shared-style cache starts empty"), EmptyStats.SharedStyleScaleEntries, 0);
+	TestEqual(TEXT("Baseline cache starts empty"), EmptyStats.BaselineFallbackEntries, 0);
+
+	const float ResolvedFontSize = TextMeasurement::ResolveTextFontSizeForUMG(Node);
+	TestTrue(TEXT("Probe node resolves a font size"), ResolvedFontSize > 0.0f);
+
+	const TextMeasurement::Testing::FTextMeasurementCacheStats PopulatedStats = TextMeasurement::Testing::GetCacheStats();
+	TestTrue(TEXT("Resolved cache is populated"), PopulatedStats.ResolvedScaleEntries > 0);
+	TestTrue(TEXT("Shared-style cache is populated"), PopulatedStats.SharedStyleScaleEntries > 0);
+
+	const TSharedPtr<FDesignNode> BaselineNode = MakeBaselineFallbackProbeNode(
+		TEXT("cache_owner_baseline_probe"),
+		TEXT("Cache owner baseline proof text"));
+	const float BaselineScale = TextMeasurement::Testing::ResolveBaselineFallbackScale(BaselineNode);
+	TestTrue(TEXT("Baseline fallback probe resolves a scale"), BaselineScale > 0.0f);
+
+	const TextMeasurement::Testing::FTextMeasurementCacheStats BaselinePopulatedStats = TextMeasurement::Testing::GetCacheStats();
+	TestTrue(TEXT("Baseline fallback cache is populated"), BaselinePopulatedStats.BaselineFallbackEntries > 0);
+
+	TextMeasurement::ResetCache();
+	const TextMeasurement::Testing::FTextMeasurementCacheStats ClearedStats = TextMeasurement::Testing::GetCacheStats();
+	TestEqual(TEXT("Resolved cache clears with ResetCache"), ClearedStats.ResolvedScaleEntries, 0);
+	TestEqual(TEXT("Shared-style cache clears with ResetCache"), ClearedStats.SharedStyleScaleEntries, 0);
+	TestEqual(TEXT("Baseline cache clears with ResetCache"), ClearedStats.BaselineFallbackEntries, 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextMeasurementBaselineFallbackCacheIgnoresEquivalentSourceTextTest,
+	"Design2UMG.TextMeasurement.BaselineFallbackCacheIgnoresEquivalentSourceText",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTextMeasurementBaselineFallbackCacheIgnoresEquivalentSourceTextTest::RunTest(const FString& Parameters)
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		AddWarning(TEXT("Slate is not initialized, skipping baseline fallback cache text-sharing test."));
+		return true;
+	}
+
+	const TSharedPtr<FDesignNode> ShortNode = MakeBaselineFallbackProbeNode(TEXT("baseline_short"), TEXT("Status"));
+	const TSharedPtr<FDesignNode> LongNode = MakeBaselineFallbackProbeNode(
+		TEXT("baseline_long"),
+		TEXT("Status label that uses different source text but the same baseline style"));
+
+	TextMeasurement::ResetCache();
+	const float ShortScale = TextMeasurement::Testing::ResolveBaselineFallbackScale(ShortNode);
+	const TextMeasurement::Testing::FTextMeasurementCacheStats AfterShort = TextMeasurement::Testing::GetCacheStats();
+	const float LongScale = TextMeasurement::Testing::ResolveBaselineFallbackScale(LongNode);
+	const TextMeasurement::Testing::FTextMeasurementCacheStats AfterLong = TextMeasurement::Testing::GetCacheStats();
+
+	TestTrue(TEXT("Short baseline scale resolves"), ShortScale > 0.0f);
+	TestTrue(TEXT("Long baseline scale resolves"), LongScale > 0.0f);
+	TestEqual(TEXT("First baseline probe creates one cache entry"), AfterShort.BaselineFallbackEntries, 1);
+	TestEqual(TEXT("Equivalent source text should reuse the same baseline cache entry"), AfterLong.BaselineFallbackEntries, 1);
+	TestTrue(TEXT("Equivalent source text should resolve the same baseline scale"),
+		FMath::IsNearlyEqual(ShortScale, LongScale, 0.0001f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextMeasurementBaselineFallbackCacheKeepsExplicitLineHeightGuardTest,
+	"Design2UMG.TextMeasurement.BaselineFallbackCacheKeepsExplicitLineHeightGuard",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTextMeasurementBaselineFallbackCacheKeepsExplicitLineHeightGuardTest::RunTest(const FString& Parameters)
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		AddWarning(TEXT("Slate is not initialized, skipping baseline fallback explicit-line-height guard test."));
+		return true;
+	}
+
+	const TSharedPtr<FDesignNode> SingleLineNode = MakeBaselineFallbackProbeNode(TEXT("baseline_single"), TEXT("Status"));
+	const TSharedPtr<FDesignNode> ParagraphNode = MakeBaselineFallbackProbeNode(TEXT("baseline_para"), TEXT("Status"), true);
+
+	TextMeasurement::ResetCache();
+	const float SingleLineScale = TextMeasurement::Testing::ResolveBaselineFallbackScale(SingleLineNode);
+	const float ParagraphScale = TextMeasurement::Testing::ResolveBaselineFallbackScale(ParagraphNode);
+	const TextMeasurement::Testing::FTextMeasurementCacheStats Stats = TextMeasurement::Testing::GetCacheStats();
+
+	TestTrue(TEXT("Single-line baseline scale resolves"), SingleLineScale > 0.0f);
+	TestTrue(TEXT("Paragraph baseline scale resolves"), ParagraphScale > 0.0f);
+	TestEqual(TEXT("Explicit-line-height guard keeps separate baseline cache entries"), Stats.BaselineFallbackEntries, 2);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextMeasurementWidthFitOvershootPrecedenceLockedTest,
+	"Design2UMG.TextMeasurement.WidthFitOvershootPrecedenceLocked",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTextMeasurementWidthFitOvershootPrecedenceLockedTest::RunTest(const FString& Parameters)
+{
+	const TArray<float> CandidateWidths = {
+		0.0f,
+		4.0f,
+		8.0f,
+		12.0f,
+		16.0f,
+		20.0f,
+		24.0f,
+		28.0f,
+		32.0f,
+		38.2f,
+		39.8f
+	};
+
+	const int32 BestFontSize = TextMeasurement::Testing::ResolveBestWidthFitFontSizeFromWidths(
+		10.5f,
+		10,
+		39.1f,
+		true,
+		CandidateWidths);
+
+	TestEqual(TEXT("Width-fit keeps the existing closest overshoot precedence when it is explicitly allowed"), BestFontSize, 10);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextMeasurementFallbackConstantsLockedTest,
+	"Design2UMG.TextMeasurement.FallbackConstantsLocked",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTextMeasurementFallbackConstantsLockedTest::RunTest(const FString& Parameters)
+{
+	FString Source;
+	if (!LoadTextMeasurementSource(*this, Source))
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("Line-height multiplier comment keeps 18/14 provenance"),
+		Source.Contains(TEXT("18 / 14 = 1.285714"), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("Fallback scale comment keeps 3/4 provenance"),
+		Source.Contains(TEXT("3 / 4 of the"), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("Fallback width comment keeps 0.60em provenance"),
+		Source.Contains(TEXT("0.60em per visible character"), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("Fallback height comment keeps 1.5em provenance"),
+		Source.Contains(TEXT("1.5em tall"), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("Width heuristic comment keeps 0.55em provenance"),
+		Source.Contains(TEXT("0.55em only treats obviously single-line text as safe"), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("Line-height multiplier literal stays locked"),
+		Source.Contains(TEXT("constexpr float DefaultLineHeightMultiplier = 1.285714f;"), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("Fallback scale literal stays locked"),
+		Source.Contains(TEXT("constexpr float DefaultFontFallbackScale = 0.75f;"), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("Fallback width literal stays locked"),
+		Source.Contains(TEXT("constexpr float FallbackMeasureWidthScale = 0.60f;"), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("Fallback height literal stays locked"),
+		Source.Contains(TEXT("constexpr float FallbackMeasureHeightScale = 1.5f;"), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("Width heuristic literal stays locked"),
+		Source.Contains(TEXT("constexpr float WidthHeuristicScale = 0.55f;"), ESearchCase::CaseSensitive));
+
+	TSharedPtr<FDesignNode> DefaultLineHeightNode = MakeBaselineFallbackProbeNode(TEXT("default_line_height"), TEXT("Lock"));
+	DefaultLineHeightNode->Text.FontSize = 14.0f;
+	DefaultLineHeightNode->Text.LineHeight = 0.0f;
+
+	const float EstimatedSingleLineHeight = TextMeasurement::Testing::EstimateSingleLineHeight(DefaultLineHeightNode);
+	TestTrue(TEXT("Default line-height multiplier stays locked at 14 -> 18"),
+		FMath::IsNearlyEqual(EstimatedSingleLineHeight, 18.0f, 0.01f));
+
+	const FVector2D FallbackSize = TextMeasurement::Testing::MeasureFallbackTextSize(TEXT("ABCD"), 10.0f);
+	TestTrue(TEXT("Fallback width stays locked at 0.60em per character"),
+		FMath::IsNearlyEqual(FallbackSize.X, 24.0f, 0.01f));
+	TestTrue(TEXT("Fallback height stays locked at 1.5em"),
+		FMath::IsNearlyEqual(FallbackSize.Y, 15.0f, 0.01f));
+
+	const float HeuristicWidth = TextMeasurement::Testing::EstimateSingleLineHeuristicWidth(TEXT("ABCD"), 10.0f);
+	TestTrue(TEXT("Width heuristic stays locked at 0.55em per character"),
+		FMath::IsNearlyEqual(HeuristicWidth, 22.0f, 0.01f));
+	TestTrue(TEXT("Width heuristic remains narrower than fallback measurement"),
+		HeuristicWidth < FallbackSize.X);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextMeasurementPrivateShimHeaderRemovedTest,
+	"Design2UMG.TextMeasurement.PrivateShimHeaderRemoved",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTextMeasurementPrivateShimHeaderRemovedTest::RunTest(const FString& Parameters)
+{
+	const FString PublicHeaderPath = GetTextMeasurementPublicHeaderPath();
+	const FString PrivateHeaderPath = GetTextMeasurementPrivateHeaderPath();
+
+	TestFalse(TEXT("Public TextMeasurement.h path resolved"), PublicHeaderPath.IsEmpty());
+	TestFalse(TEXT("Private TextMeasurement.h path resolved"), PrivateHeaderPath.IsEmpty());
+	TestTrue(TEXT("Public TextMeasurement.h still exists"), IFileManager::Get().FileExists(*PublicHeaderPath));
+	TestFalse(TEXT("Private TextMeasurement.h shim is removed"), IFileManager::Get().FileExists(*PrivateHeaderPath));
+
+	FString Source;
+	if (!LoadTextMeasurementSource(*this, Source))
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("TextMeasurement.cpp now includes the unified TextMeasurement.h"),
+		Source.Contains(TEXT("#include \"TextMeasurement.h\""), ESearchCase::CaseSensitive));
+	TestFalse(TEXT("TextMeasurement.cpp no longer includes ../Public/TextMeasurement.h directly"),
+		Source.Contains(TEXT("#include \"../Public/TextMeasurement.h\""), ESearchCase::CaseSensitive));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCompactSingleLineLabelNoFontFamilyDependencyTest,
 	"Design2UMG.TextMeasurement.CompactSingleLineLabelNoFontFamilyDependency",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -662,6 +933,26 @@ bool FTextMeasurementNoSubstringFontDispatchTest::RunTest(const FString& Paramet
 		Source.Contains(TEXT("Contains(TEXT(\"mono\"))"), ESearchCase::CaseSensitive));
 	TestFalse(TEXT("TextMeasurement.cpp must not contain Contains(TEXT(\"code\")) font-name dispatch"),
 		Source.Contains(TEXT("Contains(TEXT(\"code\"))"), ESearchCase::CaseSensitive));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextMeasurementFamilySpecificFallbackTableLocalRollbackTest,
+	"Design2UMG.TextMeasurement.FamilySpecificFallbackTableLocalRollback",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTextMeasurementFamilySpecificFallbackTableLocalRollbackTest::RunTest(const FString& Parameters)
+{
+	FString Source;
+	if (!LoadTextMeasurementSource(*this, Source))
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("Local rollback documents why the family-specific scale table remains"),
+		Source.Contains(TEXT("Phase-8 local score rollback"), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("Local rollback keeps the family-specific scale table until a shared rule proves parity"),
+		Source.Contains(TEXT("FamilyFallbackScales"), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("Local rollback keeps the historical family-specific resolver"),
+		Source.Contains(TEXT("FindFamilySpecificTextFallbackScale"), ESearchCase::CaseSensitive));
 	return true;
 }
 

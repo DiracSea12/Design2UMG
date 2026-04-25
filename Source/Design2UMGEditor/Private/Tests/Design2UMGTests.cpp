@@ -386,7 +386,7 @@ bool FLayoutCalculatorTest::RunTest(const FString& Parameters)
 	Ctx.DesignSize = FIntPoint(1920, 1080);
 	// Case 1: top-left element -> anchor (0,0)
 	{
-		FBounds B;
+		FDesignPixelBounds B;
 		B.X = 50.0f / 1920.0f; B.Y = 30.0f / 1080.0f;
 		B.W = 200.0f / 1920.0f; B.H = 100.0f / 1080.0f;
 		FUMGSlotData Slot = FLayoutCalculator::CalculateSlot(B, Ctx);
@@ -395,7 +395,7 @@ bool FLayoutCalculatorTest::RunTest(const FString& Parameters)
 	}
 	// Case 2: centered element -> anchor (0.5, 0.5)
 	{
-		FBounds B;
+		FDesignPixelBounds B;
 		B.W = 300.0f / 1920.0f; B.H = 200.0f / 1080.0f;
 		B.X = (1.0f - B.W) / 2.0f;
 		B.Y = (1.0f - B.H) / 2.0f;
@@ -405,7 +405,7 @@ bool FLayoutCalculatorTest::RunTest(const FString& Parameters)
 	}
 	// Case 3: bottom-right element -> anchor (1,1)
 	{
-		FBounds B;
+		FDesignPixelBounds B;
 		B.W = 200.0f / 1920.0f; B.H = 100.0f / 1080.0f;
 		B.X = 1.0f - B.W - 30.0f / 1920.0f;
 		B.Y = 1.0f - B.H - 20.0f / 1080.0f;
@@ -415,7 +415,7 @@ bool FLayoutCalculatorTest::RunTest(const FString& Parameters)
 	}
 	// Case 4: width exceeds 60% of the canvas -> stretch anchor (0,0)-(1,0)
 	{
-		FBounds B;
+		FDesignPixelBounds B;
 		B.X = 50.0f / 1920.0f; B.Y = 50.0f / 1080.0f;
 		B.W = 1800.0f / 1920.0f; B.H = 100.0f / 1080.0f;  // ~93.75% width
 		FUMGSlotData Slot = FLayoutCalculator::CalculateSlot(B, Ctx);

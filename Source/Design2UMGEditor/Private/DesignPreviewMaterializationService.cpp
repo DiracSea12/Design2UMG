@@ -15,7 +15,7 @@ namespace
 {
 	FVector2D ResolvePreviewDesignSize(const FPreviewApprovedSnapshot& ApprovedSnapshot)
 	{
-		const FBounds& RootBounds = ApprovedSnapshot.Data.RootWidget.Bounds;
+		const FDesignPixelBounds& RootBounds = ApprovedSnapshot.Data.RootWidget.Bounds;
 		if (RootBounds.W > 0.0f && RootBounds.H > 0.0f)
 		{
 			return FVector2D(RootBounds.W, RootBounds.H);

@@ -27,20 +27,34 @@ namespace
 
 	namespace LineBox
 	{
+		// Historical fallback lock: a 14px default text run maps to an 18px single-line box,
+		// so the shared multiplier stays at 18 / 14 = 1.285714.
 		constexpr float DefaultLineHeightMultiplier = 1.285714f;
 	}
 
 	namespace FallbackCalibration
 	{
+		// Historical unresolved-font ceiling: fallback text should not grow past 3 / 4 of the
+		// declared size unless a tighter measured scale proves it.
 		constexpr float DefaultFontFallbackScale = 0.75f;
+		// Measured fallback should not collapse below half of the declared size.
 		constexpr float MinMeasuredFontFallbackScale = 0.5f;
 		constexpr float MaxMeasuredFontFallbackScale = DefaultFontFallbackScale;
 		constexpr float IntrinsicSingleLineSlackThreshold = 1.08f;
+
+		float ResolveBaselineTextFontFallbackScale(const TSharedPtr<FDesignNode>& Node);
+		float ResolveLineBoxFallbackScale(const TSharedPtr<FDesignNode>& Node);
+		TOptional<float> TryResolveSemanticSingleLineFallbackScale(const TSharedPtr<FDesignNode>& Node);
+		TOptional<float> TryResolveBaselineTextFontFallbackScale(const TSharedPtr<FDesignNode>& Node);
+		float FindFamilySpecificTextFallbackScale(const FString& NormalizedFamily);
+		FString NormalizeTextMeasurementFontFamilyKey(const FString& FontFamily);
 	}
 
 	namespace RuntimeProbe
 	{
+		// Legacy no-Slate placeholder width keeps a single line at 0.60em per visible character.
 		constexpr float FallbackMeasureWidthScale = 0.60f;
+		// Legacy no-Slate placeholder height keeps one line at 1.5em tall.
 		constexpr float FallbackMeasureHeightScale = 1.5f;
 		constexpr float DeclaredFontProbeScale = 1.5f;
 		constexpr float FallbackFontProbeScale = 2.0f;
@@ -58,15 +72,26 @@ namespace
 
 	namespace SingleLineHeuristics
 	{
+		// Single-line width heuristic intentionally stays below the 0.60em fallback measure:
+		// 0.55em only treats obviously single-line text as safe.
 		constexpr float WidthHeuristicScale = 0.55f;
 		bool IsHeavyFontWeight(const FString& FontWeight);
 		int32 CountSingleLineTextWords(const TSharedPtr<FDesignNode>& Node);
+		bool IsDenseTechnicalTokenText(const TSharedPtr<FDesignNode>& Node);
+		bool IsExpandedRefIntrinsicSingleLineText(const TSharedPtr<FDesignNode>& Node);
+		bool ShouldUseTightExpandedRefIntrinsicScale(const TSharedPtr<FDesignNode>& Node);
+		bool IsRoomyQuestionPromptText(const TSharedPtr<FDesignNode>& Node);
 		bool ShouldAllowClosestOvershootSingleLineWidthFit(const TSharedPtr<FDesignNode>& Node);
 	}
 
 	namespace SourceMetadata
 	{
 		bool IsFigmaSourceNode(const TSharedPtr<FDesignNode>& Node);
+	}
+
+	namespace FontCalibration
+	{
+		FString ResolveTypefaceName(const TSharedPtr<FDesignNode>& Node);
 	}
 
 	namespace WrapHeight
@@ -376,43 +401,146 @@ namespace
 
 	namespace CacheTrace
 	{
-	TMap<FString, float> GResolvedTextFontScaleCache;
-	TMap<FString, float> GResolvedSharedTextFontScaleMinCache;
-	FCriticalSection GResolvedTextFontScaleCacheMutex;
+	FString BuildBaselineFallbackScaleKey(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid())
+		{
+			return FString();
+		}
+
+		const FString FontAssetPath = FFontResolver::FindFontAssetPath(Node->Text.FontFamily).ToLower();
+		const FString FontIdentity = !FontAssetPath.IsEmpty()
+			? FontAssetPath
+			: FallbackCalibration::NormalizeTextMeasurementFontFamilyKey(Node->Text.FontFamily);
+		const FString TypefaceName = FontCalibration::ResolveTypefaceName(Node);
+		const FString LineHeightKey = Node->Text.LineHeight > 0.0f
+			? FString::Printf(TEXT("%.4f"), Node->Text.LineHeight)
+			: TEXT("default");
+		const FString LetterSpacingKey = FString::Printf(TEXT("%.4f"), Node->Text.LetterSpacing);
+		const bool bApplyExplicitLineHeight = TextMeasurement::ShouldApplyExplicitLineHeight(Node, Node->Text.FontSize);
+		return FString::Printf(
+			TEXT("%s|%s|%.1f|lh=%s|ls=%s|explicit=%d"),
+			*FontIdentity,
+			*TypefaceName,
+			Node->Text.FontSize,
+			*LineHeightKey,
+			*LetterSpacingKey,
+			bApplyExplicitLineHeight ? 1 : 0);
+	}
+
+	struct FResolvedScaleCacheOwner
+	{
+		// TextMeasurement owns these three caches as one lifecycle. ResetCache clears all of them
+		// together so per-node calibration, shared-style calibration, and shared fallback probing
+		// cannot drift out of sync.
+		TMap<FString, float> ResolvedTextScaleByCalibrationKey;
+		TMap<FString, float> SharedStyleMinScaleByStyleKey;
+		TMap<FString, float> BaselineFallbackScaleByProbeKey;
+		mutable FCriticalSection Mutex;
+
+		bool TryGetResolvedTextScale(const FString& CalibrationKey, float& OutScale) const
+		{
+			FScopeLock Lock(&Mutex);
+			if (const float* CachedScale = ResolvedTextScaleByCalibrationKey.Find(CalibrationKey))
+			{
+				OutScale = *CachedScale;
+				return true;
+			}
+			return false;
+		}
+
+		void StoreResolvedTextScale(const FString& CalibrationKey, float Scale)
+		{
+			FScopeLock Lock(&Mutex);
+			ResolvedTextScaleByCalibrationKey.Add(CalibrationKey, Scale);
+		}
+
+		bool TryGetSharedStyleMinScale(const FString& SharedKey, float& OutScale) const
+		{
+			FScopeLock Lock(&Mutex);
+			if (const float* CachedScale = SharedStyleMinScaleByStyleKey.Find(SharedKey))
+			{
+				OutScale = *CachedScale;
+				return true;
+			}
+			return false;
+		}
+
+		void StoreSharedStyleMinScale(const FString& SharedKey, float Scale)
+		{
+			FScopeLock Lock(&Mutex);
+			float& CachedScale = SharedStyleMinScaleByStyleKey.FindOrAdd(SharedKey, Scale);
+			CachedScale = FMath::Min(CachedScale, Scale);
+		}
+
+		bool TryGetBaselineFallbackScale(const FString& ProbeKey, float& OutScale) const
+		{
+			FScopeLock Lock(&Mutex);
+			if (const float* CachedScale = BaselineFallbackScaleByProbeKey.Find(ProbeKey))
+			{
+				OutScale = *CachedScale;
+				return true;
+			}
+			return false;
+		}
+
+		void StoreBaselineFallbackScale(const FString& ProbeKey, float Scale)
+		{
+			FScopeLock Lock(&Mutex);
+			BaselineFallbackScaleByProbeKey.Add(ProbeKey, Scale);
+		}
+
+		void Reset()
+		{
+			FScopeLock Lock(&Mutex);
+			ResolvedTextScaleByCalibrationKey.Reset();
+			SharedStyleMinScaleByStyleKey.Reset();
+			BaselineFallbackScaleByProbeKey.Reset();
+		}
+
+#if WITH_AUTOMATION_WORKER
+		TextMeasurement::Testing::FTextMeasurementCacheStats BuildStats() const
+		{
+			FScopeLock Lock(&Mutex);
+			TextMeasurement::Testing::FTextMeasurementCacheStats Stats;
+			Stats.ResolvedScaleEntries = ResolvedTextScaleByCalibrationKey.Num();
+			Stats.SharedStyleScaleEntries = SharedStyleMinScaleByStyleKey.Num();
+			Stats.BaselineFallbackEntries = BaselineFallbackScaleByProbeKey.Num();
+			return Stats;
+		}
+#endif
+	};
+
+	FResolvedScaleCacheOwner GResolvedScaleCache;
 
 	bool TryGetResolvedTextFontScale(const FString& CalibrationKey, float& OutScale)
 	{
-		FScopeLock Lock(&GResolvedTextFontScaleCacheMutex);
-		if (const float* CachedScale = GResolvedTextFontScaleCache.Find(CalibrationKey))
-		{
-			OutScale = *CachedScale;
-			return true;
-		}
-		return false;
+		return GResolvedScaleCache.TryGetResolvedTextScale(CalibrationKey, OutScale);
 	}
 
 	void StoreResolvedTextFontScale(const FString& CalibrationKey, float Scale)
 	{
-		FScopeLock Lock(&GResolvedTextFontScaleCacheMutex);
-		GResolvedTextFontScaleCache.Add(CalibrationKey, Scale);
+		GResolvedScaleCache.StoreResolvedTextScale(CalibrationKey, Scale);
 	}
 
 	bool TryGetResolvedSharedTextFontScaleMin(const FString& SharedKey, float& OutScale)
 	{
-		FScopeLock Lock(&GResolvedTextFontScaleCacheMutex);
-		if (const float* CachedScale = GResolvedSharedTextFontScaleMinCache.Find(SharedKey))
-		{
-			OutScale = *CachedScale;
-			return true;
-		}
-		return false;
+		return GResolvedScaleCache.TryGetSharedStyleMinScale(SharedKey, OutScale);
 	}
 
 	void StoreResolvedSharedTextFontScaleMin(const FString& SharedKey, float Scale)
 	{
-		FScopeLock Lock(&GResolvedTextFontScaleCacheMutex);
-		float& CachedScale = GResolvedSharedTextFontScaleMinCache.FindOrAdd(SharedKey, Scale);
-		CachedScale = FMath::Min(CachedScale, Scale);
+		GResolvedScaleCache.StoreSharedStyleMinScale(SharedKey, Scale);
+	}
+
+	bool TryGetBaselineFallbackScale(const FString& ProbeKey, float& OutScale)
+	{
+		return GResolvedScaleCache.TryGetBaselineFallbackScale(ProbeKey, OutScale);
+	}
+
+	void StoreBaselineFallbackScale(const FString& ProbeKey, float Scale)
+	{
+		GResolvedScaleCache.StoreBaselineFallbackScale(ProbeKey, Scale);
 	}
 	}
 
@@ -444,6 +572,9 @@ namespace
 
 	float FindFamilySpecificTextFallbackScale(const FString& NormalizedFamily)
 	{
+		// Phase-8 local score rollback: keep the last formal no-regression text sizing
+		// behavior until a shared, non-family-specific calibration proves parity across the
+		// full admissible gate.
 		static const TPair<const TCHAR*, float> FamilyFallbackScales[] = {
 			{ TEXT("rubik"), 0.70f },
 			{ TEXT("geist"), 0.71f },
@@ -911,6 +1042,97 @@ namespace
 			&& Node->Transform.Height.Value <= 24.0f;
 	}
 
+	bool IsExpandedRefIntrinsicSingleLineText(const TSharedPtr<FDesignNode>& Node)
+	{
+		return Node.IsValid()
+			&& Node->Source().bExpandedRefInstance
+			&& !Node->Text.Content.Contains(TEXT("\n"))
+			&& !TextMeasurement::IsWrappingTextMode(Node)
+			&& Node->Text.TextAlignVertical == EDesignTextAlignVertical::Top
+			&& !Node->Transform.bSourceHasWidth
+			&& Node->Text.FontSize >= 12.0f
+			&& !IsHeavyFontWeight(Node->Text.FontWeight);
+	}
+
+	bool IsDenseTechnicalTokenText(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid()
+			|| Node->Source().bExpandedRefInstance
+			|| Node->Text.Content.Contains(TEXT("\n"))
+			|| TextMeasurement::IsWrappingTextMode(Node)
+			|| Node->Text.TextAlignVertical != EDesignTextAlignVertical::Top
+			|| Node->Transform.bSourceHasWidth
+			|| IsHeavyFontWeight(Node->Text.FontWeight))
+		{
+			return false;
+		}
+
+		const FString RuntimeText = TextMeasurement::PrepareRuntimeTextContent(Node->Text.Content).TrimStartAndEnd();
+		if (RuntimeText.Len() < 8 || !ContainsLetter(RuntimeText) || ContainsLowercaseLetter(RuntimeText))
+		{
+			return false;
+		}
+
+		// `LATENCY:` / `VERSION:` 这类字段标签属于 key-value descriptor，不是需要收紧的
+		// compact token；它们继续走通用 ceiling，避免把终端式表单标签整体压小。
+		if (RuntimeText.EndsWith(TEXT(":")))
+		{
+			return false;
+		}
+
+		bool bHasWhitespace = false;
+		for (const TCHAR Char : RuntimeText)
+		{
+			if (FChar::IsWhitespace(Char))
+			{
+				bHasWhitespace = true;
+				break;
+			}
+		}
+
+		return !bHasWhitespace
+			&& (ContainsMetricMetaSymbol(RuntimeText) || ContainsAsciiDigit(RuntimeText));
+	}
+
+	bool IsRuntimeProportionalTypeface(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid()
+			|| Node->Text.FontSize <= 0.0f)
+		{
+			return false;
+		}
+
+		const FVector2D NarrowGlyphRun = RuntimeProbe::MeasureTextSize(
+			TEXT("iiii"),
+			Node->Text.FontSize,
+			Node->Text.FontFamily,
+			Node->Text.FontWeight);
+		const FVector2D WideGlyphRun = RuntimeProbe::MeasureTextSize(
+			TEXT("WWWW"),
+			Node->Text.FontSize,
+			Node->Text.FontFamily,
+			Node->Text.FontWeight);
+		if (NarrowGlyphRun.X <= KINDA_SMALL_NUMBER || WideGlyphRun.X <= KINDA_SMALL_NUMBER)
+		{
+			return false;
+		}
+
+		const float NarrowerWidth = FMath::Min(NarrowGlyphRun.X, WideGlyphRun.X);
+		const float WiderWidth = FMath::Max(NarrowGlyphRun.X, WideGlyphRun.X);
+		return WiderWidth >= NarrowerWidth * 1.25f;
+	}
+
+	bool ShouldUseTightExpandedRefIntrinsicScale(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!IsExpandedRefIntrinsicSingleLineText(Node)
+			|| Node->Transform.Height.Value < 17.5f)
+		{
+			return false;
+		}
+
+		return IsRuntimeProportionalTypeface(Node);
+	}
+
 	bool IsRoomyQuestionPromptText(const TSharedPtr<FDesignNode>& Node)
 	{
 		if (!Node.IsValid() || IsHeavyFontWeight(Node->Text.FontWeight))
@@ -1093,6 +1315,110 @@ namespace
 
 	namespace FallbackCalibration
 	{
+	float ResolveBaselineTextFontFallbackScale(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (const TOptional<float> SemanticScale = TryResolveSemanticSingleLineFallbackScale(Node))
+		{
+			return SemanticScale.GetValue();
+		}
+
+		float FallbackScale = DefaultFontFallbackScale;
+		if (const TOptional<float> BaselineScale = TryResolveBaselineTextFontFallbackScale(Node))
+		{
+			FallbackScale = FMath::Min(FallbackScale, BaselineScale.GetValue());
+		}
+
+		return FallbackScale;
+	}
+
+	float ResolveLineBoxFallbackScale(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (const TOptional<float> SemanticScale = TryResolveSemanticSingleLineFallbackScale(Node))
+		{
+			return SemanticScale.GetValue();
+		}
+
+		float FallbackScale = DefaultFontFallbackScale;
+		if (const TOptional<float> BaselineScale = TryResolveBaselineTextFontFallbackScale(Node))
+		{
+			FallbackScale = FMath::Min(FallbackScale, BaselineScale.GetValue());
+		}
+
+		return FallbackScale;
+	}
+
+	TOptional<float> TryResolveSemanticSingleLineFallbackScale(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid()
+			|| Node->Text.FontSize <= 0.0f
+			|| Node->Transform.bSourceHasWidth
+			|| Node->Transform.Width.IsFill()
+			|| Node->Text.Content.Contains(TEXT("\n"))
+			|| TextMeasurement::IsWrappingTextMode(Node))
+		{
+			return {};
+		}
+
+		if (SingleLineHeuristics::IsExpandedRefIntrinsicSingleLineText(Node))
+		{
+			// Expanded component text splits into two stable runtime shapes: proportional
+			// content rows need the tighter line-box scale, while mono/status chips keep the
+			// historical default ceiling. The split is glyph-metric based, not font-name based.
+			return SingleLineHeuristics::ShouldUseTightExpandedRefIntrinsicScale(Node)
+				? 0.71f
+				: DefaultFontFallbackScale;
+		}
+
+		// Dense all-caps metric tokens behave like compact UI identifiers rather than prose.
+		// Keep them below the broad 0.75 ceiling without routing on a specific font family.
+		if (SingleLineHeuristics::IsDenseTechnicalTokenText(Node))
+		{
+			return 0.73f;
+		}
+
+		return {};
+	}
+
+	TOptional<float> TryResolveBaselineTextFontFallbackScale(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid()
+			|| Node->Text.FontSize <= 0.0f
+			|| !TextMeasurementRuntimeProbe::IsAvailable())
+		{
+			return {};
+		}
+
+		const FString ProbeKey = CacheTrace::BuildBaselineFallbackScaleKey(Node);
+		float CachedScale = 0.0f;
+		if (!ProbeKey.IsEmpty() && CacheTrace::TryGetBaselineFallbackScale(ProbeKey, CachedScale))
+		{
+			return CachedScale;
+		}
+
+		const float TargetLineBoxHeight = LineBox::EstimateSingleLineTextHeight(Node);
+		if (TargetLineBoxHeight <= KINDA_SMALL_NUMBER)
+		{
+			return {};
+		}
+
+		const float MeasuredLineHeight = RuntimeProbe::MeasureSingleLineTextBlockHeight(Node, Node->Text.FontSize);
+		if (MeasuredLineHeight <= KINDA_SMALL_NUMBER)
+		{
+			return {};
+		}
+
+		const float BaselineScale = FMath::Clamp(
+			TargetLineBoxHeight / MeasuredLineHeight,
+			MinMeasuredFontFallbackScale,
+			MaxMeasuredFontFallbackScale);
+		if (!ProbeKey.IsEmpty())
+		{
+			CacheTrace::StoreBaselineFallbackScale(ProbeKey, BaselineScale);
+		}
+
+		return BaselineScale;
+	}
+
 	TOptional<float> TryResolveMeasuredTextFontFallbackScale(const TSharedPtr<FDesignNode>& Node)
 	{
 		if (!Node.IsValid()
@@ -1557,19 +1883,12 @@ namespace
 				CacheTrace::LogResolvedTextDecision(Node, TEXT("wrapped-width-fit"), static_cast<float>(BestWrappedFitFontSize), FallbackFontSize, OutResolutionPath);
 				return static_cast<float>(BestWrappedFitFontSize);
 			}
-			const int32 BestFontSize = !Node->Transform.bSourceHasWidth
-				? RuntimeProbe::ResolveBestWidthFitFontSize(
-					FallbackFontSize,
-					ProbePlan.MaxProbeFontSize,
-					ProbePlan.TargetTextWidth,
-					ProbePlan.bAllowClosestOvershoot,
-					MeasureWidth)
-				: RuntimeProbe::ResolveBestWidthFitFontSize(
-					FallbackFontSize,
-					ProbePlan.MaxProbeFontSize,
-					ProbePlan.WidthFitTarget,
-					false,
-					MeasureWidth);
+			const int32 BestFontSize = RuntimeProbe::ResolveBestWidthFitFontSize(
+				FallbackFontSize,
+				ProbePlan.MaxProbeFontSize,
+				ProbePlan.WidthFitTarget,
+				ProbePlan.bAllowClosestOvershoot,
+				MeasureWidth);
 			if (BestFontSize == INDEX_NONE)
 			{
 				CacheTrace::LogResolvedTextDecision(Node, TEXT("fallback-width-probe-miss"), FallbackFontSize, FallbackFontSize, OutResolutionPath);
@@ -1586,9 +1905,10 @@ namespace
 				UE_LOG(
 					LogDesign2UMG,
 					Verbose,
-					TEXT("WidthProbe: node='%s' text='%s' target=%.1f fallback=%.2f chosen=%d w_floor=%.2f w_ceil=%.2f w_plus1=%.2f"),
+					TEXT("WidthProbe: node='%s' text='%s' target=%.1f raw=%.1f fallback=%.2f chosen=%d w_floor=%.2f w_ceil=%.2f w_plus1=%.2f"),
 					*Node->Name,
 					*CacheTrace::SummarizeTextForLog(Node->Text.Content),
+					ProbePlan.WidthFitTarget,
 					ProbePlan.TargetTextWidth,
 					FallbackFontSize,
 					BestFontSize,
@@ -1685,9 +2005,7 @@ namespace
 
 void TextMeasurement::ResetCache()
 {
-	FScopeLock Lock(&CacheTrace::GResolvedTextFontScaleCacheMutex);
-	CacheTrace::GResolvedTextFontScaleCache.Reset();
-	CacheTrace::GResolvedSharedTextFontScaleMinCache.Reset();
+	CacheTrace::GResolvedScaleCache.Reset();
 }
 
 FString TextMeasurement::PrepareRuntimeTextContent(const FString& Text)
@@ -1842,3 +2160,92 @@ FVector2D TextMeasurement::MeasureTextNodeSize(const TSharedPtr<FDesignNode>& No
 
 	return FallbackSize;
 }
+
+#if WITH_AUTOMATION_WORKER
+TextMeasurement::Testing::FTextMeasurementCacheStats TextMeasurement::Testing::GetCacheStats()
+{
+	return CacheTrace::GResolvedScaleCache.BuildStats();
+}
+
+float TextMeasurement::Testing::EstimateSingleLineHeight(const TSharedPtr<FDesignNode>& Node)
+{
+	return LineBox::EstimateSingleLineTextHeight(Node);
+}
+
+float TextMeasurement::Testing::ResolveBaselineFallbackScale(const TSharedPtr<FDesignNode>& Node)
+{
+	return FallbackCalibration::ResolveBaselineTextFontFallbackScale(Node);
+}
+
+float TextMeasurement::Testing::ResolveLineBoxFallbackScale(const TSharedPtr<FDesignNode>& Node)
+{
+	return FallbackCalibration::ResolveLineBoxFallbackScale(Node);
+}
+
+float TextMeasurement::Testing::ResolveSingleLineWidthFitTarget(const TSharedPtr<FDesignNode>& Node)
+{
+	if (!Node.IsValid()
+		|| Node->Transform.Width.IsFill()
+		|| Node->Transform.Width.Value <= 0.0f
+		|| Node->Text.Content.Contains(TEXT("\n")))
+	{
+		return 0.0f;
+	}
+
+	const bool bShouldApplySourceWidthInset =
+		Node->Transform.bSourceHasWidth
+		&& !TextMeasurement::ShouldAutoWrapText(Node)
+		&& Node->Text.TextAlignVertical == EDesignTextAlignVertical::Top
+		&& SourceMetadata::IsFigmaSourceNode(Node);
+	const float WidthInset = bShouldApplySourceWidthInset
+		? (SingleLineWidthFit::IsCompactSingleLineLabel(Node, Node->Transform.Width.Value)
+			? SharedThresholds::CompactSingleLineLabelWidthInset
+			: SharedThresholds::DefaultFigmaWidthInset)
+		: 0.0f;
+	return bShouldApplySourceWidthInset
+		? FMath::Max(0.0f, Node->Transform.Width.Value - WidthInset)
+		: Node->Transform.Width.Value;
+}
+
+int32 TextMeasurement::Testing::ResolveBestWidthFitFontSizeFromWidths(
+	float FallbackFontSize,
+	int32 MaxProbeFontSize,
+	float TargetWidth,
+	bool bAllowClosestOvershoot,
+	const TArray<float>& CandidateWidths)
+{
+	return RuntimeProbe::ResolveBestWidthFitFontSize(
+		FallbackFontSize,
+		MaxProbeFontSize,
+		TargetWidth,
+		bAllowClosestOvershoot,
+		[&CandidateWidths](float CandidateFontSize) -> float
+		{
+			const int32 CandidateIndex = FMath::RoundToInt(CandidateFontSize);
+			return CandidateWidths.IsValidIndex(CandidateIndex) ? CandidateWidths[CandidateIndex] : 0.0f;
+		});
+}
+
+FVector2D TextMeasurement::Testing::MeasureFallbackTextSize(const FString& Text, float FontSize)
+{
+	if (FontSize <= 0.0f)
+	{
+		return FVector2D::ZeroVector;
+	}
+
+	const FString RuntimeText = TextMeasurement::PrepareRuntimeTextContent(Text);
+	return FVector2D(
+		RuntimeText.Len() * FontSize * RuntimeProbe::FallbackMeasureWidthScale,
+		FontSize * RuntimeProbe::FallbackMeasureHeightScale);
+}
+
+float TextMeasurement::Testing::EstimateSingleLineHeuristicWidth(const FString& Text, float FontSize)
+{
+	if (FontSize <= 0.0f)
+	{
+		return 0.0f;
+	}
+
+	return TextMeasurement::PrepareRuntimeTextContent(Text).Len() * FontSize * SingleLineHeuristics::WidthHeuristicScale;
+}
+#endif

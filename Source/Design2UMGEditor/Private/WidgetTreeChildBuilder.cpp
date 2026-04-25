@@ -59,7 +59,7 @@ namespace
 			Slot.ColumnSpan != Default.ColumnSpan;
 	}
 
-	bool HasValidBounds(const FBounds& Bounds)
+	bool HasValidBounds(const FDesignPixelBounds& Bounds)
 	{
 		return Bounds.W > 0.0f && Bounds.H > 0.0f;
 	}

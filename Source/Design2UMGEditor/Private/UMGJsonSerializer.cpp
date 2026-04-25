@@ -91,7 +91,7 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeSlot(const FUMGSlotData& Sl
 	return J;
 }
 
-TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeBounds(const FBounds& Bounds)
+TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeBounds(const FDesignPixelBounds& Bounds)
 {
 	TSharedRef<FJsonObject> J = MakeShared<FJsonObject>();
 	J->SetNumberField(TEXT("X"), Bounds.X);

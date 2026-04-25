@@ -1,12 +1,11 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGGenerator.h"
-#include "PreBuildResourceNormalizer.h"
+#include "UMGPrototypeAnimationBuilder.h"
+#include "UMGGeneratorRootHandoff.h"
 #include "UMGWidgetNodeAccess.h"
 #include "UObject/SavePackage.h"
 #include "Design2UMGFigmaMetadataExtensions.h"
-#include "Design2UMGPrototypeNavigationExtensions.h"
-#include "UMGWidgetUtils.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
 #include "ObjectTools.h"
@@ -15,15 +14,7 @@
 #include "Blueprint/WidgetTree.h"
 #include "Blueprint/UserWidget.h"
 #include "Components/TextBlock.h"
-#include "Components/WidgetSwitcher.h"
 
-#include "Animation/MovieScene2DTransformSection.h"
-#include "Animation/MovieScene2DTransformTrack.h"
-#include "Animation/WidgetAnimation.h"
-#include "Channels/MovieSceneFloatChannel.h"
-#include "MovieScene.h"
-#include "Sections/MovieSceneFloatSection.h"
-#include "Tracks/MovieSceneFloatTrack.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -31,392 +22,6 @@
 
 namespace
 {
-	constexpr TCHAR PrototypeAnimationPrefix[] = TEXT("__d2u_nav_anim_");
-	constexpr int32 PrototypeAnimationSampleCount = 5;
-	enum class EPrototypeAnimationEasing : uint8
-	{
-		Linear,
-		EaseIn,
-		EaseOut,
-		EaseInOut,
-		EaseInBack,
-		EaseOutBack
-	};
-
-	enum class EPrototypeAnimationDirection : uint8
-	{
-		Right,
-		Left,
-		Up,
-		Down
-	};
-
-	EPrototypeAnimationEasing ResolvePrototypeAnimationEasing(const FString& EasingType)
-	{
-		if (EasingType.IsEmpty())
-		{
-			return EPrototypeAnimationEasing::Linear;
-		}
-
-		static const TMap<FString, EPrototypeAnimationEasing> EasingTypeMap = {
-			{ TEXT("LINEAR"), EPrototypeAnimationEasing::Linear },
-			{ TEXT("EASE_IN"), EPrototypeAnimationEasing::EaseIn },
-			{ TEXT("EASE_OUT"), EPrototypeAnimationEasing::EaseOut },
-			{ TEXT("EASE_IN_AND_OUT"), EPrototypeAnimationEasing::EaseInOut },
-			{ TEXT("GENTLE"), EPrototypeAnimationEasing::EaseInOut },
-			{ TEXT("CUSTOM_CUBIC_BEZIER"), EPrototypeAnimationEasing::EaseInOut },
-			{ TEXT("CUSTOM_SPRING"), EPrototypeAnimationEasing::EaseInOut },
-			{ TEXT("EASE_IN_BACK"), EPrototypeAnimationEasing::EaseInBack },
-			{ TEXT("EASE_OUT_BACK"), EPrototypeAnimationEasing::EaseOutBack },
-		};
-
-		if (const EPrototypeAnimationEasing* Found = EasingTypeMap.Find(EasingType.ToUpper()))
-		{
-			return *Found;
-		}
-
-		return EPrototypeAnimationEasing::EaseInOut;
-	}
-
-	EPrototypeAnimationDirection ResolvePrototypeAnimationDirection(const FString& Direction)
-	{
-		if (Direction.IsEmpty())
-		{
-			return EPrototypeAnimationDirection::Right;
-		}
-
-		static const TMap<FString, EPrototypeAnimationDirection> DirectionMap = {
-			{ TEXT("LEFT"), EPrototypeAnimationDirection::Left },
-			{ TEXT("TOP"), EPrototypeAnimationDirection::Up },
-			{ TEXT("UP"), EPrototypeAnimationDirection::Up },
-			{ TEXT("BOTTOM"), EPrototypeAnimationDirection::Down },
-			{ TEXT("DOWN"), EPrototypeAnimationDirection::Down },
-			{ TEXT("RIGHT"), EPrototypeAnimationDirection::Right },
-		};
-
-		if (const EPrototypeAnimationDirection* Found = DirectionMap.Find(Direction.ToUpper()))
-		{
-			return *Found;
-		}
-
-		return EPrototypeAnimationDirection::Right;
-	}
-
-	const FUMGWidgetNode* FindWidgetNodeById(const FUMGWidgetNode& Node, const FString& TargetId)
-	{
-		if (Node.Id == TargetId)
-		{
-			return &Node;
-		}
-
-		for (const FUMGWidgetNode& Child : Node.Children)
-		{
-			if (const FUMGWidgetNode* Found = FindWidgetNodeById(Child, TargetId))
-			{
-				return Found;
-			}
-		}
-		return nullptr;
-	}
-
-	float EvaluatePrototypeAnimationAlpha(float Alpha, const FString& EasingType)
-	{
-		Alpha = FMath::Clamp(Alpha, 0.0f, 1.0f);
-		switch (ResolvePrototypeAnimationEasing(EasingType))
-		{
-		case EPrototypeAnimationEasing::Linear:
-			return Alpha;
-		case EPrototypeAnimationEasing::EaseIn:
-			return Alpha * Alpha;
-		case EPrototypeAnimationEasing::EaseOut:
-		{
-			const float InvAlpha = 1.0f - Alpha;
-			return 1.0f - (InvAlpha * InvAlpha);
-		}
-		case EPrototypeAnimationEasing::EaseInOut:
-			return FMath::InterpEaseInOut(0.0f, 1.0f, Alpha, 2.0f);
-		case EPrototypeAnimationEasing::EaseInBack:
-		{
-			constexpr float Overshoot = 1.70158f;
-			return Alpha * Alpha * ((Overshoot + 1.0f) * Alpha - Overshoot);
-		}
-		case EPrototypeAnimationEasing::EaseOutBack:
-		{
-			constexpr float Overshoot = 1.70158f;
-			const float Shifted = Alpha - 1.0f;
-			return 1.0f + (Shifted * Shifted * ((Overshoot + 1.0f) * Shifted + Overshoot));
-		}
-		default:
-			return FMath::InterpEaseInOut(0.0f, 1.0f, Alpha, 2.0f);
-		}
-	}
-
-	FVector2D ResolvePrototypeAnimationOffset(const FBounds& Bounds, const FString& Direction)
-	{
-		const float Width = Bounds.W > KINDA_SMALL_NUMBER ? Bounds.W : 120.0f;
-		const float Height = Bounds.H > KINDA_SMALL_NUMBER ? Bounds.H : 120.0f;
-		switch (ResolvePrototypeAnimationDirection(Direction))
-		{
-		case EPrototypeAnimationDirection::Left:
-			return FVector2D(-Width, 0.0f);
-		case EPrototypeAnimationDirection::Up:
-			return FVector2D(0.0f, -Height);
-		case EPrototypeAnimationDirection::Down:
-			return FVector2D(0.0f, Height);
-		case EPrototypeAnimationDirection::Right:
-		default:
-			return FVector2D(Width, 0.0f);
-		}
-	}
-
-	FName MakePrototypeAnimationName(const int32 BindingIndex, const TCHAR* Phase)
-	{
-		return FName(*FString::Printf(TEXT("%s%03d_%s"), PrototypeAnimationPrefix, BindingIndex, Phase));
-	}
-
-	FFrameNumber PrototypeSecondsToFrame(const UMovieScene* MovieScene, const float Seconds)
-	{
-		const FFrameRate TickResolution = MovieScene ? MovieScene->GetTickResolution() : FFrameRate(24000, 1);
-		return FFrameNumber(static_cast<int32>(FMath::RoundToInt64(Seconds * TickResolution.AsDecimal())));
-	}
-
-	void AddPrototypeFloatKeys(
-		FMovieSceneFloatChannel& Channel,
-		const UMovieScene* MovieScene,
-		const float DurationSeconds,
-		const float StartValue,
-		const float EndValue,
-		const FString& EasingType)
-	{
-		Channel.Reset();
-		const int32 SampleCount = FMath::Max(2, PrototypeAnimationSampleCount);
-		for (int32 SampleIndex = 0; SampleIndex < SampleCount; ++SampleIndex)
-		{
-			const float Alpha = SampleCount == 1 ? 1.0f : static_cast<float>(SampleIndex) / static_cast<float>(SampleCount - 1);
-			const float EasedAlpha = EvaluatePrototypeAnimationAlpha(Alpha, EasingType);
-			const float Value = FMath::Lerp(StartValue, EndValue, EasedAlpha);
-			const FFrameNumber Frame = PrototypeSecondsToFrame(MovieScene, DurationSeconds * Alpha);
-			AddKeyToChannel(&Channel, Frame, Value, EMovieSceneKeyInterpolation::Linear);
-		}
-	}
-
-	void AddPrototypeTransformKeys(
-		UMovieScene2DTransformSection* Section,
-		const UMovieScene* MovieScene,
-		const float DurationSeconds,
-		const FVector2D& StartTranslation,
-		const FVector2D& EndTranslation,
-		const FString& EasingType)
-	{
-		if (!Section)
-		{
-			return;
-		}
-
-		Section->SetMask(FMovieScene2DTransformMask(EMovieScene2DTransformChannel::Translation));
-		Section->Translation[0].Reset();
-		Section->Translation[1].Reset();
-		const int32 SampleCount = FMath::Max(2, PrototypeAnimationSampleCount);
-		for (int32 SampleIndex = 0; SampleIndex < SampleCount; ++SampleIndex)
-		{
-			const float Alpha = SampleCount == 1 ? 1.0f : static_cast<float>(SampleIndex) / static_cast<float>(SampleCount - 1);
-			const float EasedAlpha = EvaluatePrototypeAnimationAlpha(Alpha, EasingType);
-			const FVector2D Value = FMath::Lerp(StartTranslation, EndTranslation, EasedAlpha);
-			const FFrameNumber Frame = PrototypeSecondsToFrame(MovieScene, DurationSeconds * Alpha);
-			AddKeyToChannel(&Section->Translation[0], Frame, Value.X, EMovieSceneKeyInterpolation::Linear);
-			AddKeyToChannel(&Section->Translation[1], Frame, Value.Y, EMovieSceneKeyInterpolation::Linear);
-		}
-	}
-
-	UWidgetAnimation* CreatePrototypeTransitionAnimation(
-		UWidgetBlueprint* WidgetBlueprint,
-		UWidget* AnimatedWidget,
-		const FName AnimationName,
-		const float DurationSeconds,
-		const float StartOpacity,
-		const float EndOpacity,
-		const FVector2D& StartTranslation,
-		const FVector2D& EndTranslation,
-		const FString& EasingType)
-	{
-		if (!WidgetBlueprint || !AnimatedWidget || DurationSeconds <= KINDA_SMALL_NUMBER)
-		{
-			return nullptr;
-		}
-
-		UWidgetAnimation* Animation = NewObject<UWidgetAnimation>(WidgetBlueprint, AnimationName, RF_Transactional);
-		if (!Animation)
-		{
-			return nullptr;
-		}
-
-		Animation->SetDisplayLabel(AnimationName.ToString());
-		Animation->MovieScene = NewObject<UMovieScene>(Animation, AnimationName, RF_Transactional);
-		if (!Animation->MovieScene)
-		{
-			return nullptr;
-		}
-
-		Animation->MovieScene->SetDisplayRate(FFrameRate(60, 1));
-		const FFrameNumber EndFrame = PrototypeSecondsToFrame(Animation->MovieScene, DurationSeconds);
-		Animation->MovieScene->SetPlaybackRange(TRange<FFrameNumber>(0, EndFrame.Value + 1));
-		Animation->MovieScene->GetEditorData().WorkStart = 0.0;
-		Animation->MovieScene->GetEditorData().WorkEnd = DurationSeconds;
-		Animation->MovieScene->SetViewRange(0.0, DurationSeconds);
-		Animation->MovieScene->SetWorkingRange(0.0, DurationSeconds);
-
-		const FGuid BindingGuid = Animation->MovieScene->AddPossessable(AnimatedWidget->GetName(), AnimatedWidget->GetClass());
-		FWidgetAnimationBinding AnimationBinding;
-		AnimationBinding.AnimationGuid = BindingGuid;
-		AnimationBinding.WidgetName = AnimatedWidget->GetFName();
-		Animation->AnimationBindings.Add(AnimationBinding);
-
-		if (!FMath::IsNearlyEqual(StartOpacity, EndOpacity, KINDA_SMALL_NUMBER))
-		{
-			UMovieSceneFloatTrack* OpacityTrack = Animation->MovieScene->AddTrack<UMovieSceneFloatTrack>(BindingGuid);
-			OpacityTrack->SetPropertyNameAndPath(TEXT("RenderOpacity"), TEXT("RenderOpacity"));
-			OpacityTrack->SetDisplayName(FText::FromString(TEXT("Render Opacity")));
-			UMovieSceneFloatSection* OpacitySection = Cast<UMovieSceneFloatSection>(OpacityTrack->CreateNewSection());
-			OpacitySection->SetRange(TRange<FFrameNumber>(0, EndFrame.Value + 1));
-			AddPrototypeFloatKeys(OpacitySection->GetChannel(), Animation->MovieScene, DurationSeconds, StartOpacity, EndOpacity, EasingType);
-			OpacityTrack->AddSection(*OpacitySection);
-		}
-
-		if (!StartTranslation.Equals(EndTranslation, KINDA_SMALL_NUMBER))
-		{
-			UMovieScene2DTransformTrack* TransformTrack = Animation->MovieScene->AddTrack<UMovieScene2DTransformTrack>(BindingGuid);
-			TransformTrack->SetPropertyNameAndPath(TEXT("RenderTransform"), TEXT("RenderTransform"));
-			TransformTrack->SetDisplayName(FText::FromString(TEXT("Render Transform")));
-			UMovieScene2DTransformSection* TransformSection =
-				Cast<UMovieScene2DTransformSection>(TransformTrack->CreateNewSection());
-			TransformSection->SetRange(TRange<FFrameNumber>(0, EndFrame.Value + 1));
-			AddPrototypeTransformKeys(TransformSection, Animation->MovieScene, DurationSeconds, StartTranslation, EndTranslation, EasingType);
-			TransformTrack->AddSection(*TransformSection);
-		}
-
-		WidgetBlueprint->Animations.Add(Animation);
-		return Animation;
-	}
-
-	void GeneratePrototypeNavigationAnimations(
-		UWidgetBlueprint* WidgetBlueprint,
-		const FUMGWidgetNode& RootNode,
-		FUMGPrototypeNavigationData& NavigationData)
-	{
-		if (!WidgetBlueprint || !WidgetBlueprint->WidgetTree || !NavigationData.IsValid() || !NavigationData.RequiresSwitcher())
-		{
-			return;
-		}
-
-		const FUMGWidgetNode* SwitcherNode = FindWidgetNodeById(RootNode, NavigationData.SwitcherWidgetId);
-		UWidget* AnimatedWidget = WidgetBlueprint->WidgetTree->FindWidget(FName(*NavigationData.SwitcherWidgetName));
-		if (!SwitcherNode || !AnimatedWidget)
-		{
-			return;
-		}
-
-		for (int32 BindingIndex = 0; BindingIndex < NavigationData.ClickBindings.Num(); ++BindingIndex)
-		{
-			FUMGPrototypeNavigationBinding& Binding = NavigationData.ClickBindings[BindingIndex];
-			FUMGPrototypeTransitionData& Transition = Binding.Transition;
-			Transition.OutgoingAnimationName.Reset();
-			Transition.IncomingAnimationName.Reset();
-			if (!Transition.IsAnimated())
-			{
-				continue;
-			}
-
-			const float PhaseDuration = FMath::Max(Transition.DurationSeconds * 0.5f, 1.0f / 120.0f);
-			const FVector2D SlideOffset = ResolvePrototypeAnimationOffset(SwitcherNode->Bounds, Transition.Direction);
-
-			float OutStartOpacity = 1.0f;
-			float OutEndOpacity = 1.0f;
-			float InStartOpacity = 1.0f;
-			float InEndOpacity = 1.0f;
-			FVector2D OutStartTranslation = FVector2D::ZeroVector;
-			FVector2D OutEndTranslation = FVector2D::ZeroVector;
-			FVector2D InStartTranslation = FVector2D::ZeroVector;
-			FVector2D InEndTranslation = FVector2D::ZeroVector;
-
-			if (Transition.UsesFadeOnly())
-			{
-				OutEndOpacity = 0.0f;
-				InStartOpacity = 0.0f;
-			}
-			else if (Transition.UsesSlide())
-			{
-				if (Transition.UsesBidirectionalSlide() || Transition.UsesOutgoingSlideOnly())
-				{
-					OutEndTranslation = -SlideOffset;
-				}
-				if (Transition.UsesBidirectionalSlide() || Transition.UsesIncomingSlideOnly())
-				{
-					InStartTranslation = SlideOffset;
-				}
-			}
-
-			if (!FMath::IsNearlyEqual(OutStartOpacity, OutEndOpacity, KINDA_SMALL_NUMBER)
-				|| !OutStartTranslation.Equals(OutEndTranslation, KINDA_SMALL_NUMBER))
-			{
-				const FName OutgoingName = MakePrototypeAnimationName(BindingIndex, TEXT("out"));
-				if (CreatePrototypeTransitionAnimation(
-					WidgetBlueprint,
-					AnimatedWidget,
-					OutgoingName,
-					PhaseDuration,
-					OutStartOpacity,
-					OutEndOpacity,
-					OutStartTranslation,
-					OutEndTranslation,
-					Transition.EasingType))
-				{
-					Transition.OutgoingAnimationName = OutgoingName.ToString();
-				}
-			}
-
-			if (!FMath::IsNearlyEqual(InStartOpacity, InEndOpacity, KINDA_SMALL_NUMBER)
-				|| !InStartTranslation.Equals(InEndTranslation, KINDA_SMALL_NUMBER))
-			{
-				const FName IncomingName = MakePrototypeAnimationName(BindingIndex, TEXT("in"));
-				if (CreatePrototypeTransitionAnimation(
-					WidgetBlueprint,
-					AnimatedWidget,
-					IncomingName,
-					PhaseDuration,
-					InStartOpacity,
-					InEndOpacity,
-					InStartTranslation,
-					InEndTranslation,
-					Transition.EasingType))
-				{
-					Transition.IncomingAnimationName = IncomingName.ToString();
-				}
-			}
-		}
-	}
-
-	void ConfigurePrototypeNavigationExtension(UWidgetBlueprint* WidgetBlueprint, const FUMGPrototypeNavigationData& NavigationData)
-	{
-		if (!WidgetBlueprint)
-		{
-			return;
-		}
-
-		if (NavigationData.IsValid())
-		{
-			UDesign2UMGPrototypeNavigationBlueprintExtension* Extension =
-				UWidgetBlueprintExtension::RequestExtension<UDesign2UMGPrototypeNavigationBlueprintExtension>(WidgetBlueprint);
-			Extension->SetNavigationData(NavigationData);
-			return;
-		}
-
-		if (UDesign2UMGPrototypeNavigationBlueprintExtension* ExistingExtension =
-			UWidgetBlueprintExtension::GetExtension<UDesign2UMGPrototypeNavigationBlueprintExtension>(WidgetBlueprint))
-		{
-			WidgetBlueprint->RemoveExtension(ExistingExtension);
-		}
-	}
-
 	void ConfigureFigmaMetadataExtension(
 		UWidgetBlueprint* WidgetBlueprint,
 		const FUMGSourceDocumentData& DocumentData,
@@ -611,65 +216,6 @@ namespace
 		return FIntPoint::ZeroValue;
 	}
 
-	FUMGSlotData MakeCanvasFillSlot()
-	{
-		FUMGSlotData Slot;
-		Slot.Anchors.Min.X = 0.0f;
-		Slot.Anchors.Min.Y = 0.0f;
-		Slot.Anchors.Max.X = 1.0f;
-		Slot.Anchors.Max.Y = 1.0f;
-		Slot.Alignment.X = 0.0f;
-		Slot.Alignment.Y = 0.0f;
-		Slot.Offsets.Left = 0.0f;
-		Slot.Offsets.Top = 0.0f;
-		Slot.Offsets.Right = 0.0f;
-		Slot.Offsets.Bottom = 0.0f;
-		Slot.bAutoSize = false;
-		return Slot;
-	}
-
-	FUMGWidgetNode WrapRootForViewport(
-		FUMGWidgetNode&& InRoot,
-		const FIntPoint& ViewportSize,
-		const FIntPoint& ContentSize,
-		bool bDownOnly)
-	{
-		FUMGWidgetNode SizeBoxNode;
-		SizeBoxNode.Type = TEXT("SizeBox");
-		SizeBoxNode.Id = TEXT("__d2u_root_sizebox");
-		SizeBoxNode.Name = TEXT("D2U_RootSizeBox");
-		SizeBoxNode.Bounds.X = 0.0f;
-		SizeBoxNode.Bounds.Y = 0.0f;
-		SizeBoxNode.Bounds.W = static_cast<float>(ContentSize.X);
-		SizeBoxNode.Bounds.H = static_cast<float>(ContentSize.Y);
-		SizeBoxNode.WidgetStyle.WidthOverride = ContentSize.X;
-		SizeBoxNode.WidgetStyle.HeightOverride = ContentSize.Y;
-		SizeBoxNode.Children.Add(MoveTemp(InRoot));
-
-		FUMGWidgetNode ScaleBoxNode;
-		ScaleBoxNode.Type = TEXT("ScaleBox");
-		ScaleBoxNode.Id = TEXT("__d2u_root_scalebox");
-		ScaleBoxNode.Name = TEXT("D2U_RootScaleBox");
-		ScaleBoxNode.Bounds.X = 0.0f;
-		ScaleBoxNode.Bounds.Y = 0.0f;
-		ScaleBoxNode.Bounds.W = static_cast<float>(ViewportSize.X);
-		ScaleBoxNode.Bounds.H = static_cast<float>(ViewportSize.Y);
-		ScaleBoxNode.Slot = MakeCanvasFillSlot();
-		ScaleBoxNode.WidgetStyle.Stretch = TEXT("ScaleToFit");
-		ScaleBoxNode.WidgetStyle.StretchDirection = bDownOnly ? TEXT("DownOnly") : TEXT("Both");
-		ScaleBoxNode.Children.Add(MoveTemp(SizeBoxNode));
-
-		FUMGWidgetNode CanvasRoot;
-		CanvasRoot.Type = TEXT("CanvasPanel");
-		CanvasRoot.Id = TEXT("__d2u_viewport_root");
-		CanvasRoot.Name = TEXT("D2U_ViewportRoot");
-		CanvasRoot.Bounds.X = 0.0f;
-		CanvasRoot.Bounds.Y = 0.0f;
-		CanvasRoot.Bounds.W = static_cast<float>(ViewportSize.X);
-		CanvasRoot.Bounds.H = static_cast<float>(ViewportSize.Y);
-		CanvasRoot.Children.Add(MoveTemp(ScaleBoxNode));
-		return CanvasRoot;
-	}
 
 }
 
@@ -743,56 +289,10 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 
 	FUMGPrototypeNavigationData NavigationData = WidgetData.PrototypeNavigation();
 
-	// v2.2: apply the fixer to a writable copy so bounds can be corrected in place.
-	FUMGWidgetNode FixedRoot = WidgetData.RootWidget;
-	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
-	const FIntPoint ConfigDesignSize = Settings->GetDesignSize();
-	const int32 RootWidth = FMath::CeilToInt(FixedRoot.Bounds.W);
-	const int32 RootHeight = FMath::CeilToInt(FixedRoot.Bounds.H);
-	const bool bHasValidRootSize = RootWidth >= 2 && RootHeight >= 2;
-	// Fidelity-first: drive Fixer/LayoutCalc from the design root's real pixel size
-	// to avoid systematic drift from user-configured preview scaling.
-	FIntPoint DesignSize = bHasValidRootSize
-		? FIntPoint(RootWidth, RootHeight)
-		: ConfigDesignSize;
-	if (bHasValidRootSize && (DesignSize != ConfigDesignSize))
-	{
-		UE_LOG(LogDesign2UMG, Log,
-			TEXT("Using root design size %dx%d (config %dx%d, root bounds %.0fx%.0f)"),
-			DesignSize.X, DesignSize.Y,
-			ConfigDesignSize.X, ConfigDesignSize.Y,
-			FixedRoot.Bounds.W, FixedRoot.Bounds.H);
-	}
-	else if (!bHasValidRootSize)
-	{
-		UE_LOG(LogDesign2UMG, Warning,
-			TEXT("Root bounds invalid (%.2fx%.2f), fallback to config design size %dx%d"),
-			FixedRoot.Bounds.W, FixedRoot.Bounds.H,
-			ConfigDesignSize.X, ConfigDesignSize.Y);
-	}
-	if (Settings->bEnableLayoutFixer)
-	{
-		FUMGWidgetUtils::ApplyFixer(FixedRoot, DesignSize);
-	}
-
-	const bool bOversizedRoot =
-		(FixedRoot.Bounds.W > static_cast<float>(ConfigDesignSize.X)) ||
-		(FixedRoot.Bounds.H > static_cast<float>(ConfigDesignSize.Y));
-	if (Settings->bAutoWrapOversizedRootForViewport && bOversizedRoot)
-	{
-		UE_LOG(LogDesign2UMG, Log, TEXT("Wrapping oversized root for viewport fit: root=%.0fx%.0f config=%dx%d stretch=%s"),
-			FixedRoot.Bounds.W, FixedRoot.Bounds.H,
-			ConfigDesignSize.X, ConfigDesignSize.Y,
-			Settings->bViewportScaleDownOnly ? TEXT("DownOnly") : TEXT("Both"));
-		FixedRoot = WrapRootForViewport(
-			MoveTemp(FixedRoot),
-			ConfigDesignSize,
-			DesignSize,
-			Settings->bViewportScaleDownOnly);
-	}
-
-	FPreBuildResourceNormalizer::NormalizePathTextures(FixedRoot, PackagePath / TEXT("D2U_PathTextures"), AssetName);
-	FPreBuildResourceNormalizer::NormalizeProceduralTextures(FixedRoot, PackagePath / TEXT("D2U_ProceduralTextures"), AssetName);
+	const UMGGeneratorRootHandoff::FPreparedRoot PreparedRoot =
+		UMGGeneratorRootHandoff::PrepareRootForBuild(WidgetData, PackagePath, AssetName);
+	const FUMGWidgetNode& FixedRoot = PreparedRoot.Root;
+	const FIntPoint& DesignSize = PreparedRoot.DesignSize;
 
 	// Dump widget tree only in verbose mode.
 	if (UE_LOG_ACTIVE(LogDesign2UMG, Verbose))
@@ -833,7 +333,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 
 	// Use the shared widget creation path.
 	TArray<FDesign2UMGFigmaWidgetMetadataRecord> FigmaMetadataRecords;
-	UWidget* Root = FUMGWidgetUtils::CreateWidgetRecursive(WBP->WidgetTree, FixedRoot, nullptr, nullptr, &FigmaMetadataRecords, &DesignSize);
+	UWidget* Root = UMGGeneratorRootHandoff::CreateRootWidget(WBP, PreparedRoot, FigmaMetadataRecords);
 	if (!Root)
 	{
 		UE_LOG(LogDesign2UMG, Verbose, TEXT("Failed to create root widget for '%s'"), *WidgetData.WidgetName);
@@ -843,8 +343,8 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 		return nullptr;
 	}
 	WBP->WidgetTree->RootWidget = Root;
-	GeneratePrototypeNavigationAnimations(WBP, FixedRoot, NavigationData);
-	ConfigurePrototypeNavigationExtension(WBP, NavigationData);
+	UMGPrototypeAnimationBuilder::GenerateNavigationAnimations(WBP, FixedRoot, NavigationData);
+	UMGPrototypeAnimationBuilder::ConfigureNavigationExtension(WBP, NavigationData);
 	ConfigureFigmaMetadataExtension(WBP, WidgetData.SourceDocument(), FigmaMetadataRecords);
 	ClearGeneratedWidgetNavigationState(WBP);
 	DumpTemplateTextBlockFontState(TEXT("template-precompile"), WBP);
@@ -894,4 +394,3 @@ void FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP)
 
 	UE_LOG(LogDesign2UMG, Log, TEXT("Saved Widget Blueprint at %s"), *FullPath);
 }
-

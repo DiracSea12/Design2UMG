@@ -9,7 +9,7 @@
 /**
  * Pixel-space bounds kept in UMGSchema foundations to avoid cyclic dependencies.
  */
-struct FBounds
+struct FDesignPixelBounds
 {
 	float X = 0.0f;  // Top-left X in pixels
 	float Y = 0.0f;  // Top-left Y in pixels

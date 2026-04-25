@@ -36,15 +36,15 @@ namespace FixerConstants
 
 float GetAverage(const TArray<float>& Values);
 float GetMaxDeviation(const TArray<float>& Values, float Average);
-bool FixBoundsOverflow(FBounds& ChildBounds, const FBounds& ParentBounds, FFixerLogEntry* OutLog = nullptr);
-bool SnapToAlignment(FBounds& Bounds, const FBounds& ParentBounds, float SnapThresholdX, float SnapThresholdY, FFixerLogEntry* OutLog = nullptr);
-bool SnapToSiblings(FBounds& Bounds, const TArray<FBounds>& SiblingBounds, float SnapThresholdX, float SnapThresholdY, FFixerLogEntry* OutLog = nullptr);
-TArray<TArray<int32>> DetectRows(const TArray<FBounds>& Bounds, float OverlapThreshold);
-TArray<TArray<int32>> DetectColumns(const TArray<FBounds>& Bounds, float OverlapThreshold);
-bool FixEqualSpacing(TArray<FBounds>& Bounds, const TArray<int32>& Indices, bool bHorizontal, float Threshold, TArray<FFixerLogEntry>* OutLog = nullptr);
-bool PassesConservatismCheck(const TArray<FBounds>& OriginalBounds, const TArray<FBounds>& ProposedBounds, float SnapThresholdX, float SnapThresholdY);
-void FixChildrenSpacing(TArray<FBounds>& ProposedBounds, const TArray<FBounds>& OriginalBounds, const FFixerPreset& Preset, float SnapThresholdX, float SnapThresholdY, TArray<FFixerLogEntry>& OutLog, FFixerStats& Stats);
-void ProcessNode(FFixerWidgetNode& Node, const FBounds& ParentBounds, const FFixerPreset& Preset, float SnapThresholdX, float SnapThresholdY, TArray<FFixerLogEntry>& OutLog, FFixerStats& Stats);
+bool FixBoundsOverflow(FDesignPixelBounds& ChildBounds, const FDesignPixelBounds& ParentBounds, FFixerLogEntry* OutLog = nullptr);
+bool SnapToAlignment(FDesignPixelBounds& Bounds, const FDesignPixelBounds& ParentBounds, float SnapThresholdX, float SnapThresholdY, FFixerLogEntry* OutLog = nullptr);
+bool SnapToSiblings(FDesignPixelBounds& Bounds, const TArray<FDesignPixelBounds>& SiblingBounds, float SnapThresholdX, float SnapThresholdY, FFixerLogEntry* OutLog = nullptr);
+TArray<TArray<int32>> DetectRows(const TArray<FDesignPixelBounds>& Bounds, float OverlapThreshold);
+TArray<TArray<int32>> DetectColumns(const TArray<FDesignPixelBounds>& Bounds, float OverlapThreshold);
+bool FixEqualSpacing(TArray<FDesignPixelBounds>& Bounds, const TArray<int32>& Indices, bool bHorizontal, float Threshold, TArray<FFixerLogEntry>* OutLog = nullptr);
+bool PassesConservatismCheck(const TArray<FDesignPixelBounds>& OriginalBounds, const TArray<FDesignPixelBounds>& ProposedBounds, float SnapThresholdX, float SnapThresholdY);
+void FixChildrenSpacing(TArray<FDesignPixelBounds>& ProposedBounds, const TArray<FDesignPixelBounds>& OriginalBounds, const FFixerPreset& Preset, float SnapThresholdX, float SnapThresholdY, TArray<FFixerLogEntry>& OutLog, FFixerStats& Stats);
+void ProcessNode(FFixerWidgetNode& Node, const FDesignPixelBounds& ParentBounds, const FFixerPreset& Preset, float SnapThresholdX, float SnapThresholdY, TArray<FFixerLogEntry>& OutLog, FFixerStats& Stats);
 
 // ============================================================================
 // Helper Functions (v2.2 Fixer优化)
@@ -131,11 +131,11 @@ float GetMaxDeviation(const TArray<float>& Values, float Average)
 }
 
 bool FixBoundsOverflow(
-	FBounds& ChildBounds,
-	const FBounds& ParentBounds,
+	FDesignPixelBounds& ChildBounds,
+	const FDesignPixelBounds& ParentBounds,
 	FFixerLogEntry* OutLog)
 {
-	FBounds OldBounds = ChildBounds;
+	FDesignPixelBounds OldBounds = ChildBounds;
 	bool bFixed = false;
 
 	const float ParentRight = ParentBounds.X + ParentBounds.W;
@@ -209,13 +209,13 @@ bool FixBoundsOverflow(
 }
 
 bool SnapToAlignment(
-	FBounds& Bounds,
-	const FBounds& ParentBounds,
+	FDesignPixelBounds& Bounds,
+	const FDesignPixelBounds& ParentBounds,
 	float SnapThresholdX,
 	float SnapThresholdY,
 	FFixerLogEntry* OutLog)
 {
-	FBounds OldBounds = Bounds;
+	FDesignPixelBounds OldBounds = Bounds;
 	bool bFixed = false;
 	const float Eps = 1e-6f;
 
@@ -267,13 +267,13 @@ bool SnapToAlignment(
 }
 
 bool SnapToSiblings(
-	FBounds& Bounds,
-	const TArray<FBounds>& SiblingBounds,
+	FDesignPixelBounds& Bounds,
+	const TArray<FDesignPixelBounds>& SiblingBounds,
 	float SnapThresholdX,
 	float SnapThresholdY,
 	FFixerLogEntry* OutLog)
 {
-	FBounds OldBounds = Bounds;
+	FDesignPixelBounds OldBounds = Bounds;
 	bool bFixed = false;
 	const float Eps = 1e-6f;
 	const float MinOverlapRatio = 0.5f;  // v2.2: 正交方向需要0%重叠才吸附
@@ -284,7 +284,7 @@ bool SnapToSiblings(
 	const float Right = Bounds.X + Bounds.W;
 	const float Bottom = Bounds.Y + Bounds.H;
 
-	for (const FBounds& Sibling : SiblingBounds)
+	for (const FDesignPixelBounds& Sibling : SiblingBounds)
 	{
 		const float SibRight = Sibling.X + Sibling.W;
 		const float SibBottom = Sibling.Y + Sibling.H;
@@ -331,21 +331,21 @@ bool SnapToSiblings(
 }
 
 TArray<TArray<int32>> DetectRows(
-	const TArray<FBounds>& Bounds,
+	const TArray<FDesignPixelBounds>& Bounds,
 	float OverlapThreshold)
 {
 	TArray<TArray<int32>> Rows;
 
 	for (int32 i = 0; i < Bounds.Num(); ++i)
 	{
-		const FBounds& Node = Bounds[i];
+		const FDesignPixelBounds& Node = Bounds[i];
 		bool bFoundRow = false;
 
 		for (auto& Row : Rows)
 		{
 			if (Row.Num() == 0) continue;
 
-			const FBounds& First = Bounds[Row[0]];
+			const FDesignPixelBounds& First = Bounds[Row[0]];
 			float OverlapTop = FMath::Max(Node.Y, First.Y);
 			float OverlapBottom = FMath::Min(Node.Y + Node.H, First.Y + First.H);
 			float OverlapHeight = FMath::Max(0.0f, OverlapBottom - OverlapTop);
@@ -371,21 +371,21 @@ TArray<TArray<int32>> DetectRows(
 }
 
 TArray<TArray<int32>> DetectColumns(
-	const TArray<FBounds>& Bounds,
+	const TArray<FDesignPixelBounds>& Bounds,
 	float OverlapThreshold)
 {
 	TArray<TArray<int32>> Columns;
 
 	for (int32 i = 0; i < Bounds.Num(); ++i)
 	{
-		const FBounds& Node = Bounds[i];
+		const FDesignPixelBounds& Node = Bounds[i];
 		bool bFoundCol = false;
 
 		for (auto& Col : Columns)
 		{
 			if (Col.Num() == 0) continue;
 
-			const FBounds& First = Bounds[Col[0]];
+			const FDesignPixelBounds& First = Bounds[Col[0]];
 			float OverlapLeft = FMath::Max(Node.X, First.X);
 			float OverlapRight = FMath::Min(Node.X + Node.W, First.X + First.W);
 			float OverlapWidth = FMath::Max(0.0f, OverlapRight - OverlapLeft);
@@ -411,7 +411,7 @@ TArray<TArray<int32>> DetectColumns(
 }
 
 bool FixEqualSpacing(
-	TArray<FBounds>& Bounds,
+	TArray<FDesignPixelBounds>& Bounds,
 	const TArray<int32>& Indices,
 	bool bHorizontal,
 	float Threshold,
@@ -517,13 +517,13 @@ void FLayoutFixer::FixWidgetTree(
 	float SnapThresholdX = (Preset.DesignSize.X > 0) ? (float)Preset.SnapPx / (float)Preset.DesignSize.X : 0.0f;
 	float SnapThresholdY = (Preset.DesignSize.Y > 0) ? (float)Preset.SnapPx / (float)Preset.DesignSize.Y : 0.0f;
 
-	FBounds RootParent = {0.0f, 0.0f, 1.0f, 1.0f};
+	FDesignPixelBounds RootParent = {0.0f, 0.0f, 1.0f, 1.0f};
 	ProcessNode(Root, RootParent, Preset, SnapThresholdX, SnapThresholdY, OutLog, Stats);
 }
 
 bool PassesConservatismCheck(
-	const TArray<FBounds>& OriginalBounds,
-	const TArray<FBounds>& ProposedBounds,
+	const TArray<FDesignPixelBounds>& OriginalBounds,
+	const TArray<FDesignPixelBounds>& ProposedBounds,
 	float SnapThresholdX,
 	float SnapThresholdY)
 {
@@ -550,8 +550,8 @@ bool PassesConservatismCheck(
 }
 
 void FixChildrenSpacing(
-	TArray<FBounds>& ProposedBounds,
-	const TArray<FBounds>& OriginalBounds,
+	TArray<FDesignPixelBounds>& ProposedBounds,
+	const TArray<FDesignPixelBounds>& OriginalBounds,
 	const FFixerPreset& Preset,
 	float SnapThresholdX,
 	float SnapThresholdY,
@@ -563,7 +563,7 @@ void FixChildrenSpacing(
 	{
 		for (int32 i = 0; i < ProposedBounds.Num(); ++i)
 		{
-			TArray<FBounds> OtherBounds;
+			TArray<FDesignPixelBounds> OtherBounds;
 			for (int32 j = 0; j < OriginalBounds.Num(); ++j)
 			{
 				if (i != j) OtherBounds.Add(OriginalBounds[j]);
@@ -622,7 +622,7 @@ void FixChildrenSpacing(
 
 void ProcessNode(
 	FFixerWidgetNode& Node,
-	const FBounds& ParentBounds,
+	const FDesignPixelBounds& ParentBounds,
 	const FFixerPreset& Preset,
 	float SnapThresholdX,
 	float SnapThresholdY,
@@ -663,7 +663,7 @@ void ProcessNode(
 
 	// Collect children that are allowed to be adjusted.
 	TArray<int32> FixableIndices;
-	TArray<FBounds> OriginalBounds;
+	TArray<FDesignPixelBounds> OriginalBounds;
 	for (int32 i = 0; i < Node.Children.Num(); ++i)
 	{
 		if (!Node.Children[i].bFixExempt)
@@ -673,7 +673,7 @@ void ProcessNode(
 		}
 	}
 
-	TArray<FBounds> ProposedBounds = OriginalBounds;
+	TArray<FDesignPixelBounds> ProposedBounds = OriginalBounds;
 
 	// 同级吸附 + 等距修正
 	FixChildrenSpacing(ProposedBounds, OriginalBounds, Preset, SnapThresholdX, SnapThresholdY, OutLog, Stats);
@@ -691,7 +691,7 @@ void ProcessNode(
 	}
 
 	// Recurse into child nodes with the best available parent bounds.
-	FBounds ChildParent = (Node.Bounds.W > 0.0f && Node.Bounds.H > 0.0f) ? Node.Bounds : ParentBounds;
+	FDesignPixelBounds ChildParent = (Node.Bounds.W > 0.0f && Node.Bounds.H > 0.0f) ? Node.Bounds : ParentBounds;
 	for (auto& Child : Node.Children)
 		ProcessNode(Child, ChildParent, Preset, SnapThresholdX, SnapThresholdY, OutLog, Stats);
 }

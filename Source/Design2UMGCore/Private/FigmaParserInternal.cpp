@@ -3,6 +3,7 @@
 #include "FigmaParserInternal.h"
 #include "DesignSchemaSourceExtensions.h"
 #include "FigmaParserPrototype.h"
+#include "FigmaParserMetadata.h"
 #include "Design2UMGLog.h"
 #include "DesignJsonUtils.h"
 #include "Dom/JsonObject.h"
@@ -22,19 +23,6 @@ using DesignJsonUtils::GetString;
 using DesignJsonUtils::ToCompactString;
 using DesignJsonUtils::TryGetNumber;
 
-static void AddExtensionIfNonEmpty(TMap<FString, FString>& Extensions, const FString& Key, const FString& Value)
-{
-	if (!Value.IsEmpty())
-		Extensions.Add(Key, Value);
-}
-
-static void AddNumericExtensionIfPresent(const TSharedPtr<FJsonObject>& Obj, TMap<FString, FString>& Extensions, const FString& SourceKey, const FString& ExtKey)
-{
-	double Val = 0.0;
-	if (TryGetNumber(Obj, SourceKey, Val))
-		Extensions.Add(ExtKey, FString::SanitizeFloat(static_cast<float>(Val)));
-}
-
 static void AddBoolExtensionIfPresent(const TSharedPtr<FJsonObject>& Obj, TMap<FString, FString>& Extensions, const FString& Key)
 {
 	bool Value = false;
@@ -51,6 +39,7 @@ static void AddJsonExtensionIfPresent(const TSharedPtr<FJsonObject>& Obj, TMap<F
 		return;
 	Extensions.Add(ExtKey, DesignJsonUtils::ToCompactString(FieldValue));
 }
+
 
 static void SetStringFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key, FString& OutValue)
 {
@@ -242,80 +231,6 @@ static bool ShouldFigmaAutoLayoutPaddingWrapAtRuntime(const FDesignNode& Node, c
 	return false;
 }
 
-static void CaptureRenderFallbackMetadata(const TSharedPtr<FJsonObject>& Obj, FDesignNode& OutNode)
-{
-	if (!Obj.IsValid())
-		return;
-
-	const struct
-	{
-		const TCHAR* SourceKey;
-		FString FDesignRenderFallbackData::* TargetField;
-	}
-	RenderFallbackKeys[] = {
-		{ TEXT("design2umgRenderFallbackImageRef"), &FDesignRenderFallbackData::ImageRef },
-		{ TEXT("design2umgRenderFallbackScope"), &FDesignRenderFallbackData::Scope },
-		{ TEXT("design2umgRenderFallbackSource"), &FDesignRenderFallbackData::Source },
-		{ TEXT("design2umgRenderFallbackReason"), &FDesignRenderFallbackData::Reason },
-		{ TEXT("design2umgRenderFallbackOffsetX"), &FDesignRenderFallbackData::OffsetX },
-		{ TEXT("design2umgRenderFallbackOffsetY"), &FDesignRenderFallbackData::OffsetY },
-		{ TEXT("design2umgRenderFallbackWidth"), &FDesignRenderFallbackData::Width },
-		{ TEXT("design2umgRenderFallbackHeight"), &FDesignRenderFallbackData::Height },
-	};
-
-	for (const auto& KeyPair : RenderFallbackKeys)
-	{
-		const FString Value = GetString(Obj, KeyPair.SourceKey);
-		if (!Value.IsEmpty())
-		{
-			OutNode.MutableSource().RenderFallback.*(KeyPair.TargetField) = Value;
-		}
-	}
-}
-
-static void CaptureSharedMetadataExtensions(const TSharedPtr<FJsonObject>& Obj, TMap<FString, FString>& Extensions)
-{
-	if (!Obj.IsValid())
-		return;
-
-	for (const TCHAR* Key : { TEXT("overflowDirection"), TEXT("prototypeStartNodeID"), TEXT("transitionNodeID") })
-		AddExtensionIfNonEmpty(Extensions, Key, GetString(Obj, Key));
-
-	for (const TCHAR* Key : { TEXT("layoutGrids"), TEXT("interactions"), TEXT("flowStartingPoints"), TEXT("prototypeDevice"),
-		TEXT("componentPropertyReferences"), TEXT("explicitVariableModes"), TEXT("resolvedVariableModes"),
-		TEXT("componentPropertyDefinitions"), TEXT("variantGroupProperties"), TEXT("annotations"), TEXT("measurements"),
-		TEXT("exportSettings"), TEXT("devStatus"), TEXT("branchData") })
-	{
-		AddJsonExtensionIfPresent(Obj, Extensions, Key, Key);
-	}
-}
-
-static void CaptureLayoutMetadataExtensions(const TSharedPtr<FJsonObject>& Obj, TMap<FString, FString>& Extensions)
-{
-	if (!Obj.IsValid())
-		return;
-
-	for (const TCHAR* Key : { TEXT("counterAxisAlignContent"), TEXT("layoutPositioning"), TEXT("layoutWrap"), TEXT("layoutAlign"),
-		TEXT("primaryAxisSizingMode"), TEXT("counterAxisSizingMode"), TEXT("gridRowsSizing"), TEXT("gridColumnsSizing"),
-		TEXT("gridChildHorizontalAlign"), TEXT("gridChildVerticalAlign"), TEXT("mainComponentKey"), TEXT("componentSetId") })
-	{
-		AddExtensionIfNonEmpty(Extensions, Key, GetString(Obj, Key));
-	}
-
-	for (const TCHAR* Key : { TEXT("counterAxisSpacing"), TEXT("minWidth"), TEXT("maxWidth"), TEXT("minHeight"),
-		TEXT("maxHeight"), TEXT("gridRowCount"), TEXT("gridColumnCount"), TEXT("gridRowGap"), TEXT("gridColumnGap"),
-		TEXT("gridRowSpan"), TEXT("gridColumnSpan"), TEXT("gridColumnAnchorIndex"), TEXT("gridRowAnchorIndex") })
-	{
-		AddNumericExtensionIfPresent(Obj, Extensions, Key, Key);
-	}
-
-	for (const TCHAR* Key : { TEXT("componentProperties"), TEXT("variantProperties"), TEXT("overrides"), TEXT("exposedInstances") })
-	{
-		AddJsonExtensionIfPresent(Obj, Extensions, Key, Key);
-	}
-
-	CaptureSharedMetadataExtensions(Obj, Extensions);
-}
 
 static void AppendUniqueSkippedDesignerNode(
 	TArray<FDesignSkippedNodeReport>& Reports,
@@ -669,50 +584,6 @@ static bool ParseGeometryArray(
 	return false;
 }
 
-static bool IsSemanticFieldName(const FString& FieldName)
-{
-	return FieldName.Equals(TEXT("placeholder"), ESearchCase::IgnoreCase)
-		|| FieldName.Equals(TEXT("slot"), ESearchCase::IgnoreCase);
-}
-
-static bool IsExplicitFalseString(const FString& InValue)
-{
-	const FString V = InValue.TrimStartAndEnd().ToLower();
-	return V.IsEmpty()
-		|| V == TEXT("false")
-		|| V == TEXT("0")
-		|| V == TEXT("no")
-		|| V == TEXT("off")
-		|| V == TEXT("none")
-		|| V == TEXT("null");
-}
-
-static bool ReadSemanticSignalField(const TSharedPtr<FJsonValue>& Value)
-{
-	if (!Value.IsValid())
-	{
-		return false;
-	}
-
-	switch (Value->Type)
-	{
-	case EJson::Boolean:
-		return Value->AsBool();
-	case EJson::Number:
-		return !FMath::IsNearlyZero(static_cast<float>(Value->AsNumber()));
-	case EJson::String:
-		return !IsExplicitFalseString(Value->AsString());
-	case EJson::Array:
-		// Keep behavior aligned with PenParser: slot/placeholder arrays signal semantic intent,
-		// even if currently empty.
-		return true;
-	case EJson::Object:
-		return true;
-	default:
-		return false;
-	}
-}
-
 EDesignNodeType MapNodeType(const FString& FigmaType);
 bool HasAutoLayout(const TSharedPtr<FJsonObject>& NodeObj);
 FString ColorToHex(const TSharedPtr<FJsonObject>& ColorObj, float Opacity = 1.0f);
@@ -734,96 +605,6 @@ TSharedPtr<FDesignNode> ParseNode(
 	bool bInsideInstanceSubtree);
 void CollectImageRefsRecursive(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSet<FString>& OutRefs);
 void ApplyImageUrlsRecursive(TArray<TSharedPtr<FDesignNode>>& Nodes, const TMap<FString, FString>& Map);
-
-static bool TryReadSemanticHintFromJsonValue(const TSharedPtr<FJsonValue>& Value)
-{
-	if (!Value.IsValid())
-	{
-		return false;
-	}
-
-	if (Value->Type == EJson::Object)
-	{
-		const TSharedPtr<FJsonObject> Obj = Value->AsObject();
-		if (!Obj.IsValid())
-		{
-			return false;
-		}
-
-		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Obj->Values)
-		{
-			if (IsSemanticFieldName(Pair.Key) && ReadSemanticSignalField(Pair.Value))
-			{
-				return true;
-			}
-			if (TryReadSemanticHintFromJsonValue(Pair.Value))
-			{
-				return true;
-			}
-		}
-		return false;
-	}
-
-	if (Value->Type == EJson::Array)
-	{
-		for (const TSharedPtr<FJsonValue>& Child : Value->AsArray())
-		{
-			if (TryReadSemanticHintFromJsonValue(Child))
-			{
-				return true;
-			}
-		}
-		return false;
-	}
-
-	if (Value->Type == EJson::String)
-	{
-		const FString Str = Value->AsString().TrimStartAndEnd();
-		if (Str.IsEmpty())
-		{
-			return false;
-		}
-
-		// pluginData is usually stored as a JSON string. Parse it as JSON first.
-		TSharedPtr<FJsonObject> JsonObj;
-		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Str);
-		if (FJsonSerializer::Deserialize(Reader, JsonObj) && JsonObj.IsValid())
-		{
-			return TryReadSemanticHintFromJsonValue(MakeShared<FJsonValueObject>(JsonObj));
-		}
-
-		return IsSemanticFieldName(Str);
-	}
-
-	return false;
-}
-
-static void ApplyFigmaSemanticHints(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& Node)
-{
-	const TSharedPtr<FJsonValue> PlaceholderField = NodeObj->TryGetField(TEXT("placeholder"));
-	const TSharedPtr<FJsonValue> SlotField = NodeObj->TryGetField(TEXT("slot"));
-
-	if (SlotField.IsValid() && SlotField->Type == EJson::Array)
-	{
-		const int32 SlotCount = SlotField->AsArray().Num();
-		Node.Metadata.Add(TEXT("source.slot.present"), TEXT("true"));
-		Node.Metadata.Add(TEXT("source.slot.count"), FString::FromInt(SlotCount));
-		if (SlotCount == 0)
-			Node.Metadata.Add(TEXT("source.slot.empty"), TEXT("true"));
-	}
-
-	const bool bExplicitPlaceholder = ReadSemanticSignalField(PlaceholderField);
-	const bool bExplicitSlot = ReadSemanticSignalField(SlotField);
-
-	const bool bHasPluginSemanticMarker =
-		TryReadSemanticHintFromJsonValue(NodeObj->TryGetField(TEXT("pluginData")))
-		|| TryReadSemanticHintFromJsonValue(NodeObj->TryGetField(TEXT("sharedPluginData")));
-
-	Node.LayoutData.bSemanticPlaceholderSurface =
-		bExplicitPlaceholder
-		|| bExplicitSlot
-		|| bHasPluginSemanticMarker;
-}
 
 struct FNodeBounds
 {
@@ -1342,7 +1123,7 @@ void ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 	OutNode.LayoutData.bAbsoluteLayoutPositioning = GetString(NodeObj, TEXT("layoutPositioning")).Equals(TEXT("ABSOLUTE"), ESearchCase::IgnoreCase);
 
 	{
-		CaptureLayoutMetadataExtensions(NodeObj, OutNode.Metadata);
+		FigmaParserMetadata::CaptureLayoutMetadataExtensions(NodeObj, OutNode.Metadata);
 		AddBoolExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("itemReverseZIndex"));
 		AddBoolExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("isExposedInstance"));
 		AddBoolExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("strokesIncludedInLayout"));
@@ -1650,7 +1431,7 @@ static void ParseNodeVisualData(
 			OutNode.MutableSource().VectorRasterFallbackImageRef = VectorRasterFallback;
 		}
 	}
-	CaptureRenderFallbackMetadata(NodeObj, OutNode);
+	FigmaParserMetadata::CaptureRenderFallbackMetadata(NodeObj, OutNode);
 	CaptureBoundsDeltaMetadata(NodeObj, OutNode.Metadata);
 
 	OutNode.Visual.Stroke = ParseStroke(NodeObj);
@@ -1752,7 +1533,7 @@ TSharedPtr<FDesignNode> ParseNode(
 	ParseNodeVisualData(NodeObj, *Node);
 	ParseNodeChildren(NodeObj, FigmaType, bParentAutoLayout, SkippedDesignerNodes, *Node);
 
-	ApplyFigmaSemanticHints(NodeObj, *Node);
+	FigmaParserMetadata::ApplyFigmaSemanticHints(NodeObj, *Node);
 	FinalizeNodePaddingRuntimeWrap(*Node, bInsideInstanceSubtree);
 
 	return Node;
@@ -1839,7 +1620,7 @@ bool ParseDocument(const FString& FigmaJson, FDesignDocument& OutDocument)
 
 	auto CaptureDocumentMetadata = [&OutDocument](const TSharedPtr<FJsonObject>& SourceObj)
 	{
-		CaptureSharedMetadataExtensions(SourceObj, OutDocument.Metadata);
+		FigmaParserMetadata::CaptureSharedMetadataExtensions(SourceObj, OutDocument.Metadata);
 	};
 	CaptureDocumentMetadata(DocObj);
 	CaptureDocumentMetadata(Root);

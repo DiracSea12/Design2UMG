@@ -97,7 +97,7 @@ FUMGSlotData FWidgetLayoutAdapter::Resolve(
 		}
 	}
 
-	FBounds NormalizedBounds;
+	FDesignPixelBounds NormalizedBounds;
 	NormalizedBounds.X = Node.Bounds.X / DesignSize.X;
 	NormalizedBounds.Y = Node.Bounds.Y / DesignSize.Y;
 	NormalizedBounds.W = Node.Bounds.W / DesignSize.X;

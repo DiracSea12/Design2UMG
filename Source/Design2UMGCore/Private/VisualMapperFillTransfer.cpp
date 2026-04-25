@@ -1,0 +1,364 @@
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+
+#include "VisualMapperFillTransfer.h"
+
+#include "ImageFillUtils.h"
+#include "UMGPropertyKeys.h"
+#include "UMGValueParser.h"
+#include "UMGWidgetNodeAccess.h"
+
+namespace
+{
+	namespace GradientHelpers
+	{
+		const TCHAR* MatRef_GradientLinear = TEXT("gradientlinear");
+		const TCHAR* MatRef_Radial = TEXT("radialgradient");
+		const TCHAR* MatRef_Angular = TEXT("angulargradient");
+
+		const TCHAR* ToTypedGradientTypeString(const EDesignGradientType Type)
+		{
+			switch (Type)
+			{
+			case EDesignGradientType::Radial:
+				return TEXT("Radial");
+			case EDesignGradientType::Angular:
+				return TEXT("Angular");
+			case EDesignGradientType::Linear:
+			default:
+				return TEXT("Linear");
+			}
+		}
+
+		FString BuildGradientMaterialParams(const FDesignGradient& Gradient)
+		{
+			if (Gradient.Colors.Num() == 0)
+			{
+				return FString();
+			}
+
+			const FString& StartColor = Gradient.Colors[0].Color;
+			const FString& EndColor = Gradient.Colors.Last().Color;
+			const float Rotation = Gradient.Rotation;
+			const float CenterX = Gradient.bHasCenter ? Gradient.CenterX : 0.5f;
+			const float CenterY = Gradient.bHasCenter ? Gradient.CenterY : 0.5f;
+			const float SizeWidth = Gradient.bHasSize ? Gradient.SizeWidth : 1.0f;
+			const float SizeHeight = Gradient.bHasSize ? Gradient.SizeHeight : 1.0f;
+			const FString RadialParams = FString::Printf(
+				TEXT("\"CenterX\":%.4f,\"CenterY\":%.4f,\"SizeWidth\":%.4f,\"SizeHeight\":%.4f,\"Rotation\":%.4f"),
+				CenterX,
+				CenterY,
+				SizeWidth,
+				SizeHeight,
+				Rotation);
+
+			if (Gradient.Colors.Num() > 2)
+			{
+				FString Stops = Gradient.GradientType == EDesignGradientType::Radial
+					? FString::Printf(TEXT("{%s,\"Stops\":["), *RadialParams)
+					: FString::Printf(TEXT("{\"Rotation\":%.4f,\"Stops\":["), Rotation);
+				for (int32 Index = 0; Index < Gradient.Colors.Num(); ++Index)
+				{
+					if (Index > 0)
+					{
+						Stops += TEXT(",");
+					}
+					Stops += FString::Printf(TEXT("{\"Pos\":%.4f,\"Color\":\"%s\"}"),
+						Gradient.Colors[Index].Position, *Gradient.Colors[Index].Color);
+				}
+				Stops += TEXT("]}");
+				return Stops;
+			}
+
+			if (Gradient.GradientType == EDesignGradientType::Radial)
+			{
+				return FString::Printf(TEXT("{%s,\"ColorCenter\":\"%s\",\"ColorEdge\":\"%s\"}"), *RadialParams, *StartColor, *EndColor);
+			}
+
+			return FString::Printf(TEXT("{\"Rotation\":%.4f,\"ColorStart\":\"%s\",\"ColorEnd\":\"%s\"}"), Rotation, *StartColor, *EndColor);
+		}
+
+		void ApplyTypedGradientBrushData(FUMGVisualBrushData& Brush, const FDesignGradient& Gradient)
+		{
+			Brush.Gradient.Type = ToTypedGradientTypeString(Gradient.GradientType);
+			Brush.Gradient.bHasType = true;
+			Brush.Gradient.Rotation = Gradient.Rotation;
+			Brush.Gradient.bHasRotation = true;
+			if (Gradient.bHasCenter)
+			{
+				Brush.Gradient.Center = FVector2D(Gradient.CenterX, Gradient.CenterY);
+				Brush.Gradient.bHasCenter = true;
+			}
+			if (Gradient.bHasSize)
+			{
+				Brush.Gradient.Size = FVector2D(Gradient.SizeWidth, Gradient.SizeHeight);
+				Brush.Gradient.bHasSize = true;
+			}
+			Brush.Gradient.Stops.Reset();
+			for (const FDesignGradientStop& Stop : Gradient.Colors)
+			{
+				FUMGVisualBrushData::FGradientStopData& TypedStop = Brush.Gradient.Stops.AddDefaulted_GetRef();
+				TypedStop.Color = FUMGValueParser::ParseColor(Stop.Color);
+				TypedStop.Position = Stop.Position;
+			}
+		}
+
+		FString ResolveGradientMaterialRef(const FDesignGradient& Gradient)
+		{
+			switch (Gradient.GradientType)
+			{
+			case EDesignGradientType::Radial:
+				return MatRef_Radial;
+			case EDesignGradientType::Angular:
+				return MatRef_Angular;
+			case EDesignGradientType::Linear:
+			default:
+				return MatRef_GradientLinear;
+			}
+		}
+	}
+
+	bool HasVisualMapperWidgetStringProperty(const FUMGWidgetNode& Widget, const TCHAR* Key)
+	{
+		return Design2UMGWidgetNodeAccess::HasWidgetString(Widget, Key);
+	}
+
+	void AddTextureSizeHints(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
+	{
+		if (Node->Transform.Width.IsFixed() && Node->Transform.Width.Value > 0.0f)
+		{
+			Widget.WidgetStyle.WidthOverride = Node->Transform.Width.Value;
+		}
+		if (Node->Transform.Height.IsFixed() && Node->Transform.Height.Value > 0.0f)
+		{
+			Widget.WidgetStyle.HeightOverride = Node->Transform.Height.Value;
+		}
+	}
+
+	FUMGWidgetNode MakeMultiFillOverlayShell(const FUMGWidgetNode& Widget)
+	{
+		FUMGWidgetNode Overlay;
+		Overlay.Type = TEXT("Overlay");
+		Overlay.Id = Widget.Id;
+		Overlay.Name = Widget.Name;
+		Overlay.Bounds = Widget.Bounds;
+		Overlay.Slot = Widget.Slot;
+		return Overlay;
+	}
+
+	FUMGWidgetNode MakeMultiFillLayerShell(const FUMGWidgetNode& Widget, const int32 FillIndex)
+	{
+		FUMGWidgetNode Layer;
+		Layer.Id = FString::Printf(TEXT("%s_fill%d"), *Widget.Id, FillIndex);
+		Layer.Name = FString::Printf(TEXT("%s_fill%d"), *Widget.Name, FillIndex);
+		Layer.Slot.HorizontalAlignment = TEXT("Fill");
+		Layer.Slot.VerticalAlignment = TEXT("Fill");
+		return Layer;
+	}
+
+	void PrepareMultiFillContentWidget(FUMGWidgetNode& Widget)
+	{
+		Widget.Id += TEXT("_content");
+		Widget.Name += TEXT("_content");
+		Widget.Bounds = FDesignPixelBounds();
+		Widget.Slot = FUMGSlotData();
+		Widget.Slot.HorizontalAlignment = TEXT("Fill");
+		Widget.Slot.VerticalAlignment = TEXT("Fill");
+	}
+
+	void ApplyMultiFillImageChildOpacity(
+		FUMGWidgetNode& ImageChild,
+		const FDesignFill& Fill,
+		const FVisualMapperOptions& Options)
+	{
+		const bool bLuminosityFit = Fill.BlendMode.Equals(TEXT("LUMINOSITY"), ESearchCase::IgnoreCase);
+		if (bLuminosityFit)
+		{
+			const float EffectiveOpacity = FMath::Min(Fill.Image.Opacity, Options.LuminosityFitOpacityCap);
+			ImageChild.Render.RenderOpacity = EffectiveOpacity;
+			ImageChild.Render.bHasRenderOpacity = true;
+		}
+		else if (Fill.Image.Opacity < 1.0f)
+		{
+			ImageChild.Render.RenderOpacity = Fill.Image.Opacity;
+			ImageChild.Render.bHasRenderOpacity = true;
+		}
+	}
+
+	bool TryBuildMultiFillLayer(
+		FUMGWidgetNode& Layer,
+		const FUMGWidgetNode& Widget,
+		const TSharedPtr<FDesignNode>& Node,
+		const FDesignFill& Fill,
+		const int32 FillIndex,
+		const FVisualMapperOptions& Options)
+	{
+		if (!Fill.bEnabled || Fill.Type == EDesignFillType::None)
+		{
+			return false;
+		}
+
+		if (Fill.Type == EDesignFillType::Color)
+		{
+			Layer.Type = TEXT("Border");
+			Layer.Brush.BrushColor = FUMGValueParser::ParseColor(Fill.SolidColor);
+			Layer.Brush.bHasBrushColor = true;
+			return true;
+		}
+
+		if (Fill.Type == EDesignFillType::Gradient && Fill.Gradient.Colors.Num() > 0)
+		{
+			Layer.Type = TEXT("Image");
+			Layer.Brush.MaterialRef = GradientHelpers::ResolveGradientMaterialRef(Fill.Gradient);
+			Layer.Brush.bHasMaterialRef = true;
+			GradientHelpers::ApplyTypedGradientBrushData(Layer.Brush, Fill.Gradient);
+			const FString MaterialParams = GradientHelpers::BuildGradientMaterialParams(Fill.Gradient);
+			if (!MaterialParams.IsEmpty())
+			{
+				Layer.Brush.MaterialParams = MaterialParams;
+				Layer.Brush.bHasMaterialParams = true;
+			}
+			AddTextureSizeHints(Layer, Node);
+			return true;
+		}
+
+		if (Fill.Type != EDesignFillType::Image || Fill.Image.Url.IsEmpty())
+		{
+			return false;
+		}
+
+		const bool bSquareNode =
+			Node->Transform.Width.Value > 0.0f
+			&& Node->Transform.Height.Value > 0.0f
+			&& FMath::IsNearlyEqual(Node->Transform.Width.Value, Node->Transform.Height.Value, 1.0f);
+		if (Fill.Image.Mode == EDesignImageMode::Fit)
+		{
+			Layer.Type = TEXT("ScaleBox");
+			Layer.WidgetStyle.Stretch = TEXT("ScaleToFit");
+			Layer.WidgetStyle.StretchDirection = TEXT("Both");
+
+			FUMGWidgetNode ImageChild;
+			ImageChild.Type = TEXT("Image");
+			ImageChild.Id = FString::Printf(TEXT("%s_fill%d_img"), *Widget.Id, FillIndex);
+			ImageChild.Name = FString::Printf(TEXT("%s_fill%d_img"), *Widget.Name, FillIndex);
+			ImageChild.Brush.TexturePath = Fill.Image.Url;
+			ImageChild.Brush.Image.TexturePath = Fill.Image.Url;
+			ImageChild.Brush.Image.bHasTexturePath = true;
+			ApplyMultiFillImageChildOpacity(ImageChild, Fill, Options);
+			if (bSquareNode)
+			{
+				AddTextureSizeHints(ImageChild, Node);
+			}
+			Layer.Children.Add(MoveTemp(ImageChild));
+			return true;
+		}
+
+		Layer.Type = TEXT("Image");
+		Layer.Brush.TexturePath = Fill.Image.Url;
+		Layer.Brush.Image.TexturePath = Fill.Image.Url;
+		Layer.Brush.Image.bHasTexturePath = true;
+		ImageFillUtils::ApplyImageFillProperties(Layer, Fill.Image);
+		AddTextureSizeHints(Layer, Node);
+		return true;
+	}
+}
+
+namespace VisualMapperFillTransfer
+{
+	void ApplyFillProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid() || !Node->Visual.Fill.bEnabled)
+		{
+			return;
+		}
+
+		if (Node->HasMultiFill())
+		{
+			if ((Node->Type == EDesignNodeType::Text || Node->Type == EDesignNodeType::IconFont)
+				&& Node->Visual.Fill.Type == EDesignFillType::Color
+				&& !HasVisualMapperWidgetStringProperty(Widget, UMGPropertyKeys::Color))
+			{
+				Widget.Text.Color = FUMGValueParser::ParseColor(Node->Visual.Fill.SolidColor);
+				Widget.Text.bHasColor = true;
+			}
+			return;
+		}
+
+		if (Node->Visual.Fill.Type == EDesignFillType::Color)
+		{
+			if (Node->Type == EDesignNodeType::Text || Node->Type == EDesignNodeType::IconFont)
+			{
+				if (!HasVisualMapperWidgetStringProperty(Widget, UMGPropertyKeys::Color))
+				{
+					Widget.Text.Color = FUMGValueParser::ParseColor(Node->Visual.Fill.SolidColor);
+					Widget.Text.bHasColor = true;
+				}
+				return;
+			}
+
+			Widget.Brush.BrushColor = FUMGValueParser::ParseColor(Node->Visual.Fill.SolidColor);
+			Widget.Brush.bHasBrushColor = true;
+			return;
+		}
+
+		if (Node->Visual.Fill.Type == EDesignFillType::Gradient && Node->Visual.Fill.Gradient.Colors.Num() > 0)
+		{
+			Widget.Brush.MaterialRef = GradientHelpers::ResolveGradientMaterialRef(Node->Visual.Fill.Gradient);
+			Widget.Brush.bHasMaterialRef = true;
+			GradientHelpers::ApplyTypedGradientBrushData(Widget.Brush, Node->Visual.Fill.Gradient);
+			const FString MaterialParams = GradientHelpers::BuildGradientMaterialParams(Node->Visual.Fill.Gradient);
+			if (!MaterialParams.IsEmpty())
+			{
+				Widget.Brush.MaterialParams = MaterialParams;
+				Widget.Brush.bHasMaterialParams = true;
+			}
+			AddTextureSizeHints(Widget, Node);
+			return;
+		}
+
+		if (Node->Visual.Fill.Type == EDesignFillType::Image && !Node->Visual.Fill.Image.Url.IsEmpty())
+		{
+			Widget.Brush.TexturePath = Node->Visual.Fill.Image.Url;
+			ImageFillUtils::ApplyImageFillProperties(Widget, Node->Visual.Fill.Image);
+			AddTextureSizeHints(Widget, Node);
+		}
+	}
+
+	FUMGWidgetNode WrapWithMultiFill(
+		FUMGWidgetNode&& Widget,
+		const TSharedPtr<FDesignNode>& Node,
+		const FVisualMapperOptions& Options)
+	{
+		if (!Node.IsValid() || Node->Visual.Fills.Num() <= 1)
+		{
+			return MoveTemp(Widget);
+		}
+
+		FUMGWidgetNode Overlay = MakeMultiFillOverlayShell(Widget);
+		for (int32 FillIndex = 0; FillIndex < Node->Visual.Fills.Num(); ++FillIndex)
+		{
+			const FDesignFill& Fill = Node->Visual.Fills[FillIndex];
+			FUMGWidgetNode Layer = MakeMultiFillLayerShell(Widget, FillIndex);
+			if (!TryBuildMultiFillLayer(Layer, Widget, Node, Fill, FillIndex, Options))
+			{
+				continue;
+			}
+
+			if (Node->Visual.CornerRadius.HasRadius())
+			{
+				FVisualMapper::ApplyRoundedCorner(
+					Layer,
+					Node->Visual.CornerRadius,
+					Node->Transform.Width.Value,
+					Node->Transform.Height.Value);
+			}
+
+			Overlay.Children.Add(MoveTemp(Layer));
+		}
+
+		Overlay.Render = Widget.Render;
+		Widget.Render = FUMGRenderStyleData();
+		PrepareMultiFillContentWidget(Widget);
+		Overlay.Children.Add(MoveTemp(Widget));
+		return Overlay;
+	}
+}

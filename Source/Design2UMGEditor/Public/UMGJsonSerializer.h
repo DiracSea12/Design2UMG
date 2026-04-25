@@ -27,5 +27,5 @@ private:
 	static TSharedRef<FJsonObject> SerializeAnchors(const FUMGAnchorsData& Anchors);
 	static TSharedRef<FJsonObject> SerializeOffsets(const FUMGOffsetsData& Offsets);
 	static TSharedRef<FJsonObject> SerializeSlot(const FUMGSlotData& Slot);
-	static TSharedRef<FJsonObject> SerializeBounds(const FBounds& Bounds);
+	static TSharedRef<FJsonObject> SerializeBounds(const FDesignPixelBounds& Bounds);
 };

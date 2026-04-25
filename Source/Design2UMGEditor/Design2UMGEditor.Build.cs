@@ -8,6 +8,8 @@ public class Design2UMGEditor : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
+		// Public dependencies are limited to types exposed by Public/*.h:
+		// preview Slate widgets, UUserWidget surfaces, and Design2UMGCore data contracts.
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
 			"Core",

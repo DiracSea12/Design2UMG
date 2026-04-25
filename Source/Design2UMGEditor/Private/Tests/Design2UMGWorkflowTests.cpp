@@ -1999,7 +1999,7 @@ bool FLayoutAdapterSlotSnapshotParityTest::RunTest(const FString& Parameters)
 	FLayoutContext Ctx;
 	Ctx.DesignSize = DesignSize;
 	Ctx.Preset = FLayoutPreset::GetStandardHUDPreset();
-	FBounds NB;
+	FDesignPixelBounds NB;
 	NB.X = Node.Bounds.X / DesignSize.X;
 	NB.Y = Node.Bounds.Y / DesignSize.Y;
 	NB.W = Node.Bounds.W / DesignSize.X;
