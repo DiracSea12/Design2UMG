@@ -249,6 +249,10 @@ namespace FigmaParserMetadata
 
 	void ApplyFigmaSemanticHints(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& Node)
 	{
+		if (!NodeObj.IsValid())
+		{
+			return;
+		}
 		const TSharedPtr<FJsonValue> PlaceholderField = NodeObj->TryGetField(TEXT("placeholder"));
 		const TSharedPtr<FJsonValue> SlotField = NodeObj->TryGetField(TEXT("slot"));
 

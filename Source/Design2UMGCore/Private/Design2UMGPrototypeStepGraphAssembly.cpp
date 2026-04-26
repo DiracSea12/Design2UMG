@@ -218,20 +218,9 @@ namespace Design2UMGPrototypeStepGraphAssembly
 
 	FString SerializePrototypeJsonObject(const TSharedPtr<FJsonObject>& Object)
 	{
-		if (!Object.IsValid())
-		{
-			return FString();
-		}
-
-		FString Json;
-		TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
-			TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Json);
-		if (FJsonSerializer::Serialize(Object.ToSharedRef(), Writer))
-		{
-			return Json;
-		}
-
-		return FString();
+		return Object.IsValid()
+			? SerializePrototypeJsonValue(MakeShared<FJsonValueObject>(Object.ToSharedRef()))
+			: FString();
 	}
 
 	bool TryParsePrototypeJsonObject(const FString& Json, TSharedPtr<FJsonObject>& OutObject)
@@ -1003,7 +992,7 @@ namespace Design2UMGPrototypeStepGraphAssembly
 
 			FUMGPrototypeNavigationBinding Binding;
 			Binding.TriggerWidgetId = Node->Id;
-			Binding.TriggerWidgetName = Node->Id;
+			Binding.TriggerWidgetName = Node->Name;
 			Binding.TriggerType = NormalizedTriggerType;
 			Binding.TriggerJson = Interaction.TriggerJson;
 			Binding.TriggerKeyCodes = ParsePrototypeTriggerKeyCodes(Interaction.TriggerJson);

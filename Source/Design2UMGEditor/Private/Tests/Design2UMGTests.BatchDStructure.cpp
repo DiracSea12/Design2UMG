@@ -1,9 +1,11 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
+#include "DesignImportPlanning.h"
 #include "Misc/AutomationTest.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "UMGGeneratorRootHandoff.h"
 
 namespace
 {
@@ -178,7 +180,7 @@ bool FBatchDContributorFacingHonestyStructureTest::RunTest(const FString& Parame
 	}
 
 	FString ArchitectureDoc;
-	if (!LoadPluginFile(*this, TEXT("docs/Architecture.md"), ArchitectureDoc))
+	if (!LoadPluginFile(*this, TEXT("Docs/Architecture.md"), ArchitectureDoc))
 	{
 		return false;
 	}
@@ -206,5 +208,50 @@ bool FBatchDContributorFacingHonestyStructureTest::RunTest(const FString& Parame
 	TestTrue(TEXT("Architecture docs state Design2UMGCore is an editor module, not runtime"),
 		ArchitectureDoc.Contains(TEXT("editor module"), ESearchCase::IgnoreCase)
 		&& ArchitectureDoc.Contains(TEXT("not a runtime module"), ESearchCase::IgnoreCase));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDUMGGeneratorRootHandoffSmokeTest,
+	"Design2UMG.BatchD.UMGGeneratorRootHandoffSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FBatchDUMGGeneratorRootHandoffSmokeTest::RunTest(const FString& Parameters)
+{
+	FUMGWidgetData WidgetData;
+	WidgetData.RootWidget.Type = TEXT("CanvasPanel");
+	WidgetData.RootWidget.Id = TEXT("root");
+	WidgetData.RootWidget.Name = TEXT("Root");
+	WidgetData.RootWidget.Bounds.W = 320.0f;
+	WidgetData.RootWidget.Bounds.H = 180.0f;
+
+	const UMGGeneratorRootHandoff::FPreparedRoot Prepared =
+		UMGGeneratorRootHandoff::PrepareRootForBuild(WidgetData, TEXT("/Game/D2U_Test"), TEXT("WBP_D2U_Test"));
+
+	TestEqual(TEXT("Root handoff keeps the root widget type"), Prepared.Root.Type, FString(TEXT("CanvasPanel")));
+	TestEqual(TEXT("Root handoff derives design size from valid root bounds"), Prepared.DesignSize, FIntPoint(320, 180));
+	TestEqual(TEXT("Root handoff preserves root id"), Prepared.Root.Id, FString(TEXT("root")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDImportPlanningSmokeTest,
+	"Design2UMG.BatchD.ImportPlanningSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FBatchDImportPlanningSmokeTest::RunTest(const FString& Parameters)
+{
+	FUMGWidgetData WidgetData;
+	WidgetData.WidgetName = TEXT("WBP_ImportPlanningSmoke");
+	WidgetData.RootWidget.Type = TEXT("CanvasPanel");
+	WidgetData.RootWidget.Id = TEXT("planning_root");
+	WidgetData.RootWidget.Name = TEXT("PlanningRoot");
+	WidgetData.RootWidget.Bounds.W = 256.0f;
+	WidgetData.RootWidget.Bounds.H = 128.0f;
+
+	FImportAnalysisInput Input;
+	Input.bResolveImages = false;
+	const FImportAnalysisResult Result = DesignImportPlanning::AnalyzeWidgetData(WidgetData, Input);
+
+	TestEqual(TEXT("Import planning copies widget name"), Result.Data.WidgetName, WidgetData.WidgetName);
+	TestEqual(TEXT("Import planning copies root type"), Result.Data.RootWidget.Type, FString(TEXT("CanvasPanel")));
+	TestEqual(TEXT("Import planning copies root bounds width"), Result.Data.RootWidget.Bounds.W, 256.0f);
+	TestTrue(TEXT("Import planning without image resolution produces no image report"), Result.ImageReport.IsEmpty());
 	return true;
 }

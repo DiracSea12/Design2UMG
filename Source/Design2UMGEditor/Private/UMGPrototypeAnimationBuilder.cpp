@@ -164,6 +164,19 @@ namespace UMGPrototypeAnimationBuilder
 		return FFrameNumber(static_cast<int32>(FMath::RoundToInt64(Seconds * TickResolution.AsDecimal())));
 	}
 
+	template<typename FCallback>
+	void ForEachPrototypeSample(const UMovieScene* MovieScene, float DurationSeconds, const FString& EasingType, FCallback Callback)
+	{
+		const int32 SampleCount = FMath::Max(2, PrototypeAnimationSampleCount);
+		for (int32 SampleIndex = 0; SampleIndex < SampleCount; ++SampleIndex)
+		{
+			const float Alpha = SampleCount == 1 ? 1.0f : static_cast<float>(SampleIndex) / static_cast<float>(SampleCount - 1);
+			const float EasedAlpha = EvaluatePrototypeAnimationAlpha(Alpha, EasingType);
+			const FFrameNumber Frame = PrototypeSecondsToFrame(MovieScene, DurationSeconds * Alpha);
+			Callback(EasedAlpha, Frame);
+		}
+	}
+
 	void AddPrototypeFloatKeys(
 		FMovieSceneFloatChannel& Channel,
 		const UMovieScene* MovieScene,
@@ -173,15 +186,10 @@ namespace UMGPrototypeAnimationBuilder
 		const FString& EasingType)
 	{
 		Channel.Reset();
-		const int32 SampleCount = FMath::Max(2, PrototypeAnimationSampleCount);
-		for (int32 SampleIndex = 0; SampleIndex < SampleCount; ++SampleIndex)
+		ForEachPrototypeSample(MovieScene, DurationSeconds, EasingType, [&](float EasedAlpha, FFrameNumber Frame)
 		{
-			const float Alpha = SampleCount == 1 ? 1.0f : static_cast<float>(SampleIndex) / static_cast<float>(SampleCount - 1);
-			const float EasedAlpha = EvaluatePrototypeAnimationAlpha(Alpha, EasingType);
-			const float Value = FMath::Lerp(StartValue, EndValue, EasedAlpha);
-			const FFrameNumber Frame = PrototypeSecondsToFrame(MovieScene, DurationSeconds * Alpha);
-			AddKeyToChannel(&Channel, Frame, Value, EMovieSceneKeyInterpolation::Linear);
-		}
+			AddKeyToChannel(&Channel, Frame, FMath::Lerp(StartValue, EndValue, EasedAlpha), EMovieSceneKeyInterpolation::Linear);
+		});
 	}
 
 	void AddPrototypeTransformKeys(
@@ -200,16 +208,12 @@ namespace UMGPrototypeAnimationBuilder
 		Section->SetMask(FMovieScene2DTransformMask(EMovieScene2DTransformChannel::Translation));
 		Section->Translation[0].Reset();
 		Section->Translation[1].Reset();
-		const int32 SampleCount = FMath::Max(2, PrototypeAnimationSampleCount);
-		for (int32 SampleIndex = 0; SampleIndex < SampleCount; ++SampleIndex)
+		ForEachPrototypeSample(MovieScene, DurationSeconds, EasingType, [&](float EasedAlpha, FFrameNumber Frame)
 		{
-			const float Alpha = SampleCount == 1 ? 1.0f : static_cast<float>(SampleIndex) / static_cast<float>(SampleCount - 1);
-			const float EasedAlpha = EvaluatePrototypeAnimationAlpha(Alpha, EasingType);
 			const FVector2D Value = FMath::Lerp(StartTranslation, EndTranslation, EasedAlpha);
-			const FFrameNumber Frame = PrototypeSecondsToFrame(MovieScene, DurationSeconds * Alpha);
 			AddKeyToChannel(&Section->Translation[0], Frame, Value.X, EMovieSceneKeyInterpolation::Linear);
 			AddKeyToChannel(&Section->Translation[1], Frame, Value.Y, EMovieSceneKeyInterpolation::Linear);
-		}
+		});
 	}
 
 	UWidgetAnimation* CreatePrototypeTransitionAnimation(
