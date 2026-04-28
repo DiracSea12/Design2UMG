@@ -674,7 +674,7 @@ namespace
 			Widget.Render.bHasRenderTransformScale = true;
 		}
 
-		if (Node->LayoutData.HasExplicitClip() && Node->LayoutData.bClip)
+		if (Node->LayoutData.ExplicitClip.Get(false))
 		{
 			Widget.Render.Clipping = TEXT("ClipToBounds");
 			Widget.Render.bHasClipping = true;
@@ -831,7 +831,7 @@ FUMGWidgetNode FVisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TSha
 	TransferBorderBackgroundProperties(Border, Widget);
 
 	if (FLayoutMapper::HasPadding(Node))
-		FLayoutMapper::ApplyPadding(Border, Node->LayoutData.Padding);
+		FLayoutMapper::ApplyPadding(Border, Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}));
 
 	TransferBorderStrokeProperties(Border, Widget);
 

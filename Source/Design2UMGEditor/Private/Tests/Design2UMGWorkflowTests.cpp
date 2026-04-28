@@ -1776,11 +1776,10 @@ bool FFillWidthSingleLineTextDoesNotInflateFitHeightTest::RunTest(const FString&
 	HeaderCell->Transform.Height = FDesignSize::Fit(44.0f);
 	HeaderCell->Transform.bHasWidth = true;
 	HeaderCell->Transform.bHasHeight = true;
-	HeaderCell->LayoutData.Padding.Top = 12.0f;
-	HeaderCell->LayoutData.Padding.Right = 12.0f;
-	HeaderCell->LayoutData.Padding.Bottom = 12.0f;
-	HeaderCell->LayoutData.Padding.Left = 12.0f;
-	HeaderCell->LayoutData.ExplicitPadding = HeaderCell->LayoutData.Padding;
+	{
+		FDesignPadding P; P.Top = P.Right = P.Bottom = P.Left = 12.0f;
+		HeaderCell->LayoutData.SetPadding(P);
+	}
 	HeaderCell->LayoutData.AlignItems = EDesignAlignItems::Center;
 	const TSharedPtr<FDesignNode> HeaderText = MakeShared<FDesignNode>();
 	HeaderText->Id = TEXT("header-text");

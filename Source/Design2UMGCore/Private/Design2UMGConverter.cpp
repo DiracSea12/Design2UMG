@@ -537,12 +537,12 @@ namespace
 				const bool bHasResolvedGridGap = Node->LayoutData.Layout == EDesignLayout::Grid
 					&& (Design2UMGGridLayout::ResolveGridColumnGap(Node) > KINDA_SMALL_NUMBER
 						|| Design2UMGGridLayout::ResolveGridRowGap(Node) > KINDA_SMALL_NUMBER);
-				if (Node->LayoutData.Gap > 0 || bHasResolvedGridGap)
+				if (Node->LayoutData.ExplicitGap.Get(0.0f) > 0 || bHasResolvedGridGap)
 				{
 					if (Node->LayoutData.Layout == EDesignLayout::Wrap)
 					{
 						const float CrossAxisGap = Design2UMGSourceMetadata::ResolveWrapCrossAxisGap(Node);
-						Widget.WidgetStyle.InnerSlotPadding = FVector2D(Node->LayoutData.Gap, CrossAxisGap);
+						Widget.WidgetStyle.InnerSlotPadding = FVector2D(Node->LayoutData.ExplicitGap.Get(0.0f), CrossAxisGap);
 					}
 					else if (Node->LayoutData.Layout == EDesignLayout::Grid)
 					{
@@ -563,14 +563,14 @@ namespace
 					}
 					else
 					{
-						FLayoutMapper::ApplyGap(Widget.Children, Node->LayoutData.Gap, Node->LayoutData.Layout);
+						FLayoutMapper::ApplyGap(Widget.Children, Node->LayoutData.ExplicitGap.Get(0.0f), Node->LayoutData.Layout);
 					}
 
 					if (Node->LayoutData.Layout == EDesignLayout::Grid
 						&& Widget.Type == TEXT("UniformGridPanel")
 						&& !Widget.WidgetStyle.SlotPadding.IsSet())
 					{
-						Widget.WidgetStyle.SlotPadding = FMargin(Node->LayoutData.Gap, Node->LayoutData.Gap, Node->LayoutData.Gap, Node->LayoutData.Gap);
+						Widget.WidgetStyle.SlotPadding = FMargin(Node->LayoutData.ExplicitGap.Get(0.0f), Node->LayoutData.ExplicitGap.Get(0.0f), Node->LayoutData.ExplicitGap.Get(0.0f), Node->LayoutData.ExplicitGap.Get(0.0f));
 					}
 				}
 
@@ -590,7 +590,7 @@ namespace
 				}
 				else if (FLayoutMapper::HasPadding(Node) && !bPlaceholderUsesDirectImage)
 				{
-					FLayoutMapper::ApplyPadding(Widget, Node->LayoutData.Padding);
+					FLayoutMapper::ApplyPadding(Widget, Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}));
 				}
 
 				Widget = ApplyVisualEffectWrappers(MoveTemp(Widget), Node, Context.State.SettingsSnapshot.Visual.VisualMapperOptions);
@@ -775,11 +775,11 @@ namespace
 				{
 					if (EffectiveChild->LayoutData.HasLayoutRowValue())
 					{
-						ChildWidget.Slot.Row = FMath::Max(0, EffectiveChild->LayoutData.LayoutRow);
+						ChildWidget.Slot.Row = FMath::Max(0, EffectiveChild->LayoutData.GetLayoutRowOr(0));
 					}
 					if (EffectiveChild->LayoutData.HasLayoutColumnValue())
 					{
-						ChildWidget.Slot.Column = FMath::Max(0, EffectiveChild->LayoutData.LayoutColumn);
+						ChildWidget.Slot.Column = FMath::Max(0, EffectiveChild->LayoutData.GetLayoutColumnOr(0));
 					}
 					Design2UMGGridLayout::ApplyGridChildAlignmentOverrides(ChildWidget, Node, EffectiveChild);
 				}

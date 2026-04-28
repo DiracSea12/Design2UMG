@@ -11,9 +11,23 @@ Put the plugin in one of the following:
 <Project>/Plugins/Design2UMG/
 ```
 
-Build with UE 5.4+.
+Requirements:
+- Unreal Engine 5.4+
+- Visual Studio 2022 (17.8+ recommended)
 
-For pipeline extension points and verification expectations, see [Docs/CONTRIBUTING_INTERNALS.md](Docs/CONTRIBUTING_INTERNALS.md).
+Build the plugin via UnrealBuildTool:
+
+```bat
+"<UE5_Root>\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.exe" <ProjectName>Editor Win64 Development "-Project=<path\to\Project.uproject>" -WaitMutex
+```
+
+Run automation tests:
+
+```bat
+"<UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe" "<path\to\Project.uproject>" -ExecCmds="Automation RunTests Design2UMG" -unattended -nopause -nullrhi -log
+```
+
+For pipeline extension points and verification expectations, see [Docs/Architecture.md](Docs/Architecture.md) and [Docs/CONTRIBUTING_INTERNALS.md](Docs/CONTRIBUTING_INTERNALS.md).
 
 ## Validation Levels
 
@@ -36,6 +50,10 @@ For pipeline extension points and verification expectations, see [Docs/CONTRIBUT
 3. Update docs for any user-facing behavior change.
 4. Keep commits focused and reviewable.
 5. State the validation tier honestly: `repository-hygiene`, `self-hosted build`, `public smoke/public validate`, and `maintainer formal admissible gate` are not interchangeable.
+
+## Branch Naming
+
+Use `<type>/<short-description>` where type is one of: `fix`, `feat`, `refactor`, `docs`.
 
 ## Pull Request Checklist
 

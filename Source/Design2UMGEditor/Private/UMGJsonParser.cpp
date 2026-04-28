@@ -689,11 +689,6 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 			OutNode.Render.RenderTransformPivot = FUMGValueParser::ParseVector2D(Str, FVector2D(0.5f, 0.5f));
 			OutNode.Render.bHasRenderTransformPivot = true;
 		}
-		if ((*RenderObject)->TryGetStringField(UMGPropertyKeys::RenderScale, Str))
-		{
-			OutNode.Render.RenderScale = FUMGValueParser::ParseVector2D(Str, FVector2D(1.0f, 1.0f));
-			OutNode.Render.bHasRenderScale = true;
-		}
 		if ((*RenderObject)->TryGetStringField(UMGPropertyKeys::RenderTransformScale, Str))
 		{
 			OutNode.Render.RenderTransformScale = FUMGValueParser::ParseVector2D(Str);

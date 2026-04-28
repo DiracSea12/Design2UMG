@@ -285,7 +285,7 @@ float SizeEstimator::ComputeChildContentWidthHint(const TSharedPtr<FDesignNode>&
 		return 0.0f;
 	}
 
-	const float InnerWidth = FMath::Max(0.0f, ResolvedWidth - Node->LayoutData.Padding.Left - Node->LayoutData.Padding.Right);
+	const float InnerWidth = FMath::Max(0.0f, ResolvedWidth - Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Left - Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Right);
 	if (InnerWidth <= 0.0f)
 	{
 		return 0.0f;
@@ -296,7 +296,7 @@ float SizeEstimator::ComputeChildContentWidthHint(const TSharedPtr<FDesignNode>&
 		return InnerWidth;
 	}
 
-	float RemainingWidth = InnerWidth - Node->LayoutData.Gap * (VisibleChildren.Num() - 1);
+	float RemainingWidth = InnerWidth - Node->LayoutData.ExplicitGap.Get(0.0f) * (VisibleChildren.Num() - 1);
 	int32 FillChildCount = 0;
 	for (const TSharedPtr<FDesignNode>& VisibleChild : VisibleChildren)
 	{
@@ -416,8 +416,8 @@ namespace
 
 		float W = 0.0f;
 		float H = 0.0f;
-		const float PadH = Node->LayoutData.Padding.Left + Node->LayoutData.Padding.Right;
-		const float PadV = Node->LayoutData.Padding.Top + Node->LayoutData.Padding.Bottom;
+		const float PadH = Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Left + Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Right;
+		const float PadV = Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Top + Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Bottom;
 
 		TArray<TSharedPtr<FDesignNode>> Visible;
 		SizeEstimator::GatherVisibleChildren(Node, Visible);
@@ -426,7 +426,7 @@ namespace
 			return FVector2D(PadH, PadV);
 		}
 
-		const float TotalGap = Visible.Num() > 1 ? Node->LayoutData.Gap * (Visible.Num() - 1) : 0.0f;
+		const float TotalGap = Visible.Num() > 1 ? Node->LayoutData.ExplicitGap.Get(0.0f) * (Visible.Num() - 1) : 0.0f;
 		if (Node->LayoutData.Layout == EDesignLayout::Horizontal)
 		{
 			for (const TSharedPtr<FDesignNode>& Child : Visible)

@@ -23,7 +23,6 @@
 #include "Framework/Notifications/NotificationManager.h"
 #include "Widgets/Notifications/SNotificationList.h"
 
-#include <atomic>
 
 #define LOCTEXT_NAMESPACE "FDesign2UMGEditorModule"
 
@@ -241,23 +240,23 @@ namespace
 	public:
 		void RunImport(const FString& FileKey, const FString& Token)
 		{
-			const uint32 ImportGeneration = Generation.load();
+			const uint32 ImportGeneration = static_cast<uint32>(Generation.GetValue());
 			const TSharedRef<FFigmaImportSession> Session = MakeShared<FFigmaImportSession>(*this, FileKey, Token, ImportGeneration);
 			Session->Start();
 		}
 
 		void Invalidate()
 		{
-			++Generation;
+			Generation.Increment();
 		}
 
 		bool IsGenerationCurrent(const uint32 Token) const
 		{
-			return Generation.load() == Token;
+			return static_cast<uint32>(Generation.GetValue()) == Token;
 		}
 
 	private:
-		std::atomic<uint32> Generation{ 1 };
+		FThreadSafeCounter Generation{ 1 };
 	};
 
 	class FPencilImportService
@@ -265,13 +264,12 @@ namespace
 	public:
 		void ConnectAndImport()
 		{
-			bool bExpected = false;
-			if (!bFetchInProgress.compare_exchange_strong(bExpected, true))
+			if (FPlatformAtomics::InterlockedCompareExchange(&bFetchInProgress, 1, 0) != 0)
 			{
 				return;
 			}
 
-			const uint32 FetchGeneration = Generation.load();
+			const uint32 FetchGeneration = static_cast<uint32>(Generation.GetValue());
 			FPencilConnector& ActiveConnector = GetOrCreateConnector();
 			if (!ActiveConnector.IsRunning())
 			{
@@ -303,7 +301,7 @@ namespace
 
 		void Shutdown()
 		{
-			++Generation;
+			Generation.Increment();
 			ReleaseFetchSlot();
 
 			if (Connector)
@@ -398,17 +396,17 @@ namespace
 
 		bool IsGenerationCurrent(const uint32 Token) const
 		{
-			return Generation.load() == Token;
+			return static_cast<uint32>(Generation.GetValue()) == Token;
 		}
 
 		void ReleaseFetchSlot()
 		{
-			bFetchInProgress = false;
+			FPlatformAtomics::InterlockedExchange(&bFetchInProgress, 0);
 		}
 
 		TUniquePtr<FPencilConnector> Connector;
-		std::atomic<bool> bFetchInProgress{ false };
-		std::atomic<uint32> Generation{ 1 };
+		volatile int32 bFetchInProgress{ 0 };
+		FThreadSafeCounter Generation{ 1 };
 	};
 
 	class FImportOrchestratorTransientState

@@ -1,3 +1,7 @@
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+
+#include "DesignSchema.h"
+
 EDesignNodeType ParseNodeType(const FString& S)
 {
 	if (S == TEXT("frame")) return EDesignNodeType::Frame;

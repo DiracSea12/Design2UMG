@@ -374,7 +374,6 @@ namespace
 			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RenderAngle, Node.Render.bHasRenderAngle, SerializeWidgetFloat(Node.Render.RenderAngle)),
 			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RenderTransformScale, Node.Render.bHasRenderTransformScale, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Node.Render.RenderTransformScale)),
 			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RenderTransformPivot, Node.Render.bHasRenderTransformPivot, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Node.Render.RenderTransformPivot)),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RenderScale, Node.Render.bHasRenderScale, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Node.Render.RenderScale)),
 			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RenderTranslation, Node.Render.bHasRenderTranslation, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Node.Render.RenderTranslation)),
 		};
 		return { Descriptors, UE_ARRAY_COUNT(Descriptors) };

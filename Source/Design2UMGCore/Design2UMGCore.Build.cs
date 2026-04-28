@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 using UnrealBuildTool;
 
@@ -22,8 +22,12 @@ public class Design2UMGCore : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"AssetRegistry",
-			"Projects",
 			"Slate",
 		});
+
+		if (Target.bBuildDeveloperTools)
+		{
+			PrivateDependencyModuleNames.Add("Projects");
+		}
 	}
 }

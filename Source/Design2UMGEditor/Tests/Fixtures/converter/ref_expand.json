@@ -1,0 +1,31 @@
+﻿{
+  "version": "1.0",
+  "children": [
+    {
+      "id": "reusable-1",
+      "name": "ReusableComp",
+      "type": "frame",
+      "x": 0, "y": 0, "width": 100, "height": 100,
+      "reusable": true,
+      "children": [
+        { "id": "rc-child-1", "name": "RCChild", "type": "rectangle", "x": 0, "y": 0, "width": 100, "height": 100, "children": [] }
+      ]
+    },
+    {
+      "id": "host-1",
+      "name": "HostFrame",
+      "type": "frame",
+      "x": 200, "y": 0, "width": 400, "height": 300,
+      "children": [
+        {
+          "id": "ref-1",
+          "name": "RefNode",
+          "type": "ref",
+          "ref": "reusable-1",
+          "x": 10, "y": 10, "width": 100, "height": 100,
+          "children": []
+        }
+      ]
+    }
+  ]
+}

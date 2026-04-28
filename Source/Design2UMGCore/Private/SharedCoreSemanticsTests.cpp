@@ -250,7 +250,7 @@ namespace
 			FDesignSize::Fixed(200.0f),
 			FDesignSize::Fixed(40.0f));
 		Screen->LayoutData.Layout = EDesignLayout::Horizontal;
-		Screen->LayoutData.Gap = 10.0f;
+		Screen->LayoutData.SetGap(10.0f);
 
 		TSharedPtr<FDesignNode> RefChild = MakeShared<FDesignNode>();
 		RefChild->Id = TEXT("reusable_card_instance");
@@ -481,14 +481,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPublicSurfacePostReviewFixesGuardTest,
 bool FPublicSurfacePostReviewFixesGuardTest::RunTest(const FString& Parameters)
 {
 	FDesignLayoutNodeData LayoutData;
-	LayoutData.LayoutRow = 3;
-	LayoutData.bHasLayoutRow = true;
-	LayoutData.LayoutColumn = 1;
-	LayoutData.bHasLayoutColumn = true;
+	LayoutData.SetLayoutRowValue(3);
+	LayoutData.SetLayoutColumnValue(1);
 	LayoutData.SetLayoutRowSpanValue(2);
 	LayoutData.SetLayoutColumnGapValue(16.0f);
-	LayoutData.LayoutChildHorizontalAlign = TEXT("CENTER");
-	LayoutData.bHasLayoutChildHorizontalAlign = true;
+	LayoutData.SetLayoutChildHorizontalAlignValue(TEXT("CENTER"));
 
 	TestTrue(TEXT("Public grid row flag still drives explicit grid position"), LayoutData.HasExplicitGridPosition());
 	TestTrue(TEXT("Accessor sees public row storage"), LayoutData.GetLayoutRowValue().IsSet());

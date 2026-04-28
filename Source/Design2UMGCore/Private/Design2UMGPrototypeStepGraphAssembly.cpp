@@ -143,10 +143,9 @@ namespace Design2UMGPrototypeStepGraphAssembly
 			Resolved.Direction = Action.Transition.Direction;
 		}
 
-		if (Action.Transition.bHasDuration)
+		if (Action.Transition.Duration.IsSet())
 		{
 			Resolved.Duration = Action.Transition.Duration;
-			Resolved.bHasDuration = true;
 		}
 
 		if (!Action.Transition.EasingType.IsEmpty())
@@ -159,10 +158,9 @@ namespace Design2UMGPrototypeStepGraphAssembly
 			Resolved.EasingJson = Action.Transition.EasingJson;
 		}
 
-		if (Action.Transition.bHasMatchLayers)
+		if (Action.Transition.MatchLayers.IsSet())
 		{
-			Resolved.bMatchLayers = Action.Transition.bMatchLayers;
-			Resolved.bHasMatchLayers = true;
+			Resolved.MatchLayers = Action.Transition.MatchLayers;
 		}
 
 		return Resolved;
@@ -178,12 +176,12 @@ namespace Design2UMGPrototypeStepGraphAssembly
 		Transition.Type = Source.Type.ToUpper();
 		Transition.Direction = Source.Direction.ToUpper();
 		Transition.EasingType = Source.EasingType.ToUpper();
-		Transition.bMatchLayers = Source.bMatchLayers;
-		Transition.bHasMatchLayers = Source.bHasMatchLayers;
+		Transition.HasMatchLayers.bValue = Source.MatchLayers.Get(false);
+		Transition.HasMatchLayers.bIsSet = Source.MatchLayers.IsSet();
 
-		if (Source.bHasDuration)
+		if (Source.Duration.IsSet())
 		{
-			Transition.DurationSeconds = FMath::Max(0.0f, Source.Duration / 1000.0f);
+			Transition.DurationSeconds = FMath::Max(0.0f, Source.Duration.GetValue() / 1000.0f);
 		}
 		else if (!Transition.Type.IsEmpty())
 		{
@@ -310,8 +308,7 @@ namespace Design2UMGPrototypeStepGraphAssembly
 		double DurationValue = 0.0;
 		if (TryGetPrototypeJsonNumber(TransitionObject, TEXT("duration"), DurationValue))
 		{
-			OutTransition.Duration = static_cast<float>(DurationValue);
-			OutTransition.bHasDuration = true;
+			OutTransition.Duration.Emplace(static_cast<float>(DurationValue));
 		}
 
 		if (const TSharedPtr<FJsonObject> EasingObject =
@@ -324,8 +321,7 @@ namespace Design2UMGPrototypeStepGraphAssembly
 		bool bMatchLayers = false;
 		if (TransitionObject->TryGetBoolField(TEXT("matchLayers"), bMatchLayers))
 		{
-			OutTransition.bMatchLayers = bMatchLayers;
-			OutTransition.bHasMatchLayers = true;
+			OutTransition.MatchLayers.Emplace(bMatchLayers);
 		}
 	}
 
@@ -992,7 +988,7 @@ namespace Design2UMGPrototypeStepGraphAssembly
 
 			FUMGPrototypeNavigationBinding Binding;
 			Binding.TriggerWidgetId = Node->Id;
-			Binding.TriggerWidgetName = Node->Name;
+			Binding.TriggerWidgetName = Node->Id;
 			Binding.TriggerType = NormalizedTriggerType;
 			Binding.TriggerJson = Interaction.TriggerJson;
 			Binding.TriggerKeyCodes = ParsePrototypeTriggerKeyCodes(Interaction.TriggerJson);

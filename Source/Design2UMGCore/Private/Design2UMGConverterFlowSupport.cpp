@@ -71,10 +71,10 @@ namespace
 		const int32 ChildCount)
 	{
 		FFlowLayoutSizingContext SizingContext;
-		SizingContext.InnerW = Widget.Bounds.W - Node->LayoutData.Padding.Left - Node->LayoutData.Padding.Right;
-		SizingContext.InnerH = Widget.Bounds.H - Node->LayoutData.Padding.Top - Node->LayoutData.Padding.Bottom;
+		SizingContext.InnerW = Widget.Bounds.W - Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Left - Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Right;
+		SizingContext.InnerH = Widget.Bounds.H - Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Top - Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Bottom;
 		SizingContext.bHorizontal = Node->LayoutData.Layout == EDesignLayout::Horizontal;
-		SizingContext.TotalGap = ChildCount > 1 ? Node->LayoutData.Gap * (ChildCount - 1) : 0.0f;
+		SizingContext.TotalGap = ChildCount > 1 ? Node->LayoutData.ExplicitGap.Get(0.0f) * (ChildCount - 1) : 0.0f;
 		return SizingContext;
 	}
 

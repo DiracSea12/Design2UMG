@@ -11,153 +11,10 @@
 #include "Serialization/JsonWriter.h"
 #include "Misc/FileHelper.h"
 #include "Misc/DefaultValueHelper.h"
+#include "PenParserInternal.h"
 
 namespace
 {
-	namespace FlexibleFieldParsing
-	{
-		bool TryParseNumericString(const FString& InValue, double& OutValue)
-		{
-			const FString Trimmed = InValue.TrimStartAndEnd();
-			if (Trimmed.IsEmpty())
-				return false;
-
-			double Parsed = 0.0;
-			if (!FDefaultValueHelper::ParseDouble(Trimmed, Parsed))
-				return false;
-
-			OutValue = Parsed;
-			return true;
-		}
-
-		bool TryParseBooleanString(const FString& InValue, bool& OutValue)
-		{
-			const FString Normalized = InValue.TrimStartAndEnd().ToLower();
-			if (Normalized == TEXT("true") || Normalized == TEXT("1") || Normalized == TEXT("yes") || Normalized == TEXT("on"))
-			{
-				OutValue = true;
-				return true;
-			}
-			if (Normalized == TEXT("false") || Normalized == TEXT("0") || Normalized == TEXT("no") || Normalized == TEXT("off"))
-			{
-				OutValue = false;
-				return true;
-			}
-			return false;
-		}
-
-		bool TryGetNumberValueFlexible(const TSharedPtr<FJsonValue>& Value, double& OutValue)
-		{
-			if (!Value.IsValid())
-				return false;
-
-			if (Value->Type == EJson::Number)
-			{
-				OutValue = Value->AsNumber();
-				return true;
-			}
-
-			if (Value->Type == EJson::String)
-			{
-				return TryParseNumericString(Value->AsString(), OutValue);
-			}
-
-			return false;
-		}
-
-		template <typename NumberType>
-		bool TryGetNumberValueFlexible(const TSharedPtr<FJsonValue>& Value, NumberType& OutValue)
-		{
-			double Parsed = 0.0;
-			if (!TryGetNumberValueFlexible(Value, Parsed))
-				return false;
-
-			OutValue = static_cast<NumberType>(Parsed);
-			return true;
-		}
-
-		template <typename NumberType>
-		bool TryGetNumberFieldFlexible(
-			const TSharedPtr<FJsonObject>& Obj,
-			const FString& FieldName,
-			NumberType& OutValue)
-		{
-			if (!Obj.IsValid() || !Obj->HasField(FieldName))
-				return false;
-
-			const TSharedPtr<FJsonValue> FieldValue = Obj->TryGetField(FieldName);
-			if (!FieldValue.IsValid())
-				return false;
-
-			double Parsed = 0.0;
-			if (!TryGetNumberValueFlexible(FieldValue, Parsed))
-				return false;
-
-			OutValue = static_cast<NumberType>(Parsed);
-			return true;
-		}
-
-		template <typename NumberType>
-		bool TryGetResolvedNumberField(
-			const TSharedPtr<FJsonObject>& Obj,
-			const FString& FieldName,
-			const FDesignVariableResolver& Resolver,
-			NumberType& OutValue)
-		{
-			if (!Obj.IsValid() || !Obj->HasField(FieldName))
-				return false;
-
-			const TSharedPtr<FJsonValue> FieldValue = Obj->TryGetField(FieldName);
-			if (!FieldValue.IsValid())
-				return false;
-
-			if (TryGetNumberValueFlexible(FieldValue, OutValue))
-				return true;
-
-			if (FieldValue->Type != EJson::String)
-				return false;
-
-			const FString RawValue = FieldValue->AsString();
-			if (!FDesignVariableResolver::IsVariableRef(RawValue))
-				return false;
-
-			OutValue = static_cast<NumberType>(Resolver.ResolveNumber(RawValue));
-			return true;
-		}
-
-		bool TryGetResolvedBoolField(
-			const TSharedPtr<FJsonObject>& Obj,
-			const FString& FieldName,
-			const FDesignVariableResolver& Resolver,
-			bool& OutValue)
-		{
-			if (!Obj.IsValid() || !Obj->HasField(FieldName))
-				return false;
-
-			const TSharedPtr<FJsonValue> FieldValue = Obj->TryGetField(FieldName);
-			if (!FieldValue.IsValid())
-				return false;
-
-			if (FieldValue->Type == EJson::Boolean)
-			{
-				OutValue = FieldValue->AsBool();
-				return true;
-			}
-
-			if (FieldValue->Type != EJson::String)
-				return false;
-
-			const FString RawValue = FieldValue->AsString();
-			if (TryParseBooleanString(RawValue, OutValue))
-				return true;
-
-			if (!FDesignVariableResolver::IsVariableRef(RawValue))
-				return false;
-
-			return TryParseBooleanString(Resolver.ResolveString(RawValue), OutValue);
-		}
-	}
-
 	namespace PenSemanticMetadata
 	{
 		struct FPenSlotMetadata
@@ -274,10 +131,6 @@ namespace
 		}
 	}
 
-	using FlexibleFieldParsing::TryGetNumberFieldFlexible;
-	using FlexibleFieldParsing::TryGetNumberValueFlexible;
-	using FlexibleFieldParsing::TryGetResolvedBoolField;
-	using FlexibleFieldParsing::TryGetResolvedNumberField;
 	using PenSemanticMetadata::FinalizePenPaddingRuntimeWrapPolicy;
 	using PenSemanticMetadata::ParsePenSemanticMetadata;
 
@@ -486,7 +339,6 @@ bool FPenParser::ParseFromFile(const FString& FilePath, FDesignDocument& OutDocu
 	FString JsonString;
 	if (!FFileHelper::LoadFileToString(JsonString, *FilePath))
 	{
-		UE_LOG(LogDesign2UMG, Verbose, TEXT("PenParser: Failed to load file: %s"), *FilePath);
 		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to read design file. Verify the path is valid and not locked: %s"), *FilePath);
 		return false;
 	}
@@ -499,7 +351,6 @@ bool FPenParser::ParseDocument(const FString& JsonString, FDesignDocument& OutDo
 	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonString);
 	if (!FJsonSerializer::Deserialize(Reader, JsonObj) || !JsonObj.IsValid())
 	{
-		UE_LOG(LogDesign2UMG, Verbose, TEXT("PenParser: Failed to parse JSON"));
 		UE_LOG(LogDesign2UMG, Error, TEXT("Invalid design file format. Please verify this is a valid .pen file."));
 		return false;
 	}
@@ -515,7 +366,6 @@ bool ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FDesignDocume
 {
 	if (!JsonObj.IsValid())
 	{
-		UE_LOG(LogDesign2UMG, Verbose, TEXT("PenParser: Invalid root json object"));
 		UE_LOG(LogDesign2UMG, Error, TEXT("Design file content is empty or malformed."));
 		return false;
 	}
@@ -523,7 +373,6 @@ bool ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FDesignDocume
 	if (!JsonObj->TryGetStringField(TEXT("version"), OutDocument.Version) || OutDocument.Version.IsEmpty())
 	{
 		OutDocument.Version = TEXT("1.0");
-		UE_LOG(LogDesign2UMG, Verbose, TEXT("PenParser: missing 'version', fallback to %s"), *OutDocument.Version);
 		UE_LOG(LogDesign2UMG, Warning, TEXT("Design file is missing a version; defaulting to %s."), *OutDocument.Version);
 	}
 
@@ -672,7 +521,6 @@ TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const 
 	// Basic node fields.
 	if (!JsonObj->TryGetStringField(TEXT("id"), Node->Id))
 	{
-		UE_LOG(LogDesign2UMG, Verbose, TEXT("PenParser: Node missing 'id' field, skipping"));
 		UE_LOG(LogDesign2UMG, Warning, TEXT("Design file contains a node without id; skipped."));
 		return nullptr;
 	}
@@ -680,7 +528,6 @@ TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const 
 	FString TypeStr;
 	if (!JsonObj->TryGetStringField(TEXT("type"), TypeStr))
 	{
-		UE_LOG(LogDesign2UMG, Verbose, TEXT("PenParser: Node '%s' missing 'type' field, skipping"), *Node->Id);
 		UE_LOG(LogDesign2UMG, Warning, TEXT("Node '%s' is missing type metadata and was skipped."), *Node->Id);
 		return nullptr;
 	}
@@ -975,7 +822,6 @@ void ParseNodeStrokeProperties(const TSharedPtr<FJsonValue>& Value, FDesignNode&
 	ApplyPenStrokeExtensions(StrokeObj, OutNode, Resolver);
 }
 
-#include "PenParserNodeProperties.h"
 
 FDesignSize ParseSize(const TSharedPtr<FJsonValue>& Value, EDesignNodeType NodeType, const FDesignVariableResolver& Resolver)
 {
@@ -1050,9 +896,7 @@ FDesignSize ParseSize(const TSharedPtr<FJsonValue>& Value, EDesignNodeType NodeT
 	return FDesignSize::Fit();
 }
 
-#include "PenParserStyling.h"
 
-#include "PenParserEnums.h"
 
 TArray<FDesignFrameInfo> ExtractTopFrames(const FDesignDocument& Document)
 {

@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -37,238 +37,92 @@ struct FDesignTextNodeData
  */
 struct FDesignLayoutNodeData
 {
-	// Keep these presence markers for now: direct field writes and accessors both
-	// still rely on explicit ownership here, so this batch only adds rationale.
 	EDesignLayout Layout = EDesignLayout::Horizontal;
-	float Gap = 0.0f;
 	TOptional<float> ExplicitGap;
-	FDesignPadding Padding;
 	TOptional<FDesignPadding> ExplicitPadding;
 	bool bHasPaddingRuntimeWrapDecision = false;
 	bool bPaddingRequiresRuntimeWrap = false;
 	EDesignJustifyContent JustifyContent = EDesignJustifyContent::Start;
 	EDesignAlignItems AlignItems = EDesignAlignItems::Start;
 	bool bAbsoluteLayoutPositioning = false;
-	bool bClip = false;
 	TOptional<bool> ExplicitClip;
 	bool bSemanticPlaceholderSurface = false;
 	float LayoutGrow = -1.0f;
-	int32 LayoutRow = 0;
-	int32 LayoutColumn = 0;
-	int32 LayoutRowSpan = 1;
-	int32 LayoutColumnSpan = 1;
-	int32 LayoutRowCount = 0;
-	int32 LayoutColumnCount = 0;
-	float LayoutRowGap = 0.0f;
-	float LayoutColumnGap = 0.0f;
-	FString LayoutChildHorizontalAlign;
-	FString LayoutChildVerticalAlign;
-	// Keep these grid/alignment presence bits explicit for now: source parsing and
-	// downstream layout consumers still distinguish "authored" from default value.
-	bool bHasLayoutRow = false;
-	bool bHasLayoutColumn = false;
-	bool bHasLayoutRowSpan = false;
-	bool bHasLayoutColumnSpan = false;
-	bool bHasLayoutRowCount = false;
-	bool bHasLayoutColumnCount = false;
-	bool bHasLayoutRowGap = false;
-	bool bHasLayoutColumnGap = false;
-	bool bHasLayoutChildHorizontalAlign = false;
-	bool bHasLayoutChildVerticalAlign = false;
+	TOptional<int32> LayoutRow;
+	TOptional<int32> LayoutColumn;
+	TOptional<int32> LayoutRowSpan;
+	TOptional<int32> LayoutColumnSpan;
+	TOptional<int32> LayoutRowCount;
+	TOptional<int32> LayoutColumnCount;
+	TOptional<float> LayoutRowGap;
+	TOptional<float> LayoutColumnGap;
+	TOptional<FString> LayoutChildHorizontalAlign;
+	TOptional<FString> LayoutChildVerticalAlign;
 
 	void SetGap(const float InGap)
 	{
-		Gap = InGap;
 		ExplicitGap = InGap;
 	}
 
 	void SetPadding(const FDesignPadding& InPadding)
 	{
-		Padding = InPadding;
 		ExplicitPadding = InPadding;
 	}
 
 	void SetClipValue(const bool bInClip)
 	{
-		bClip = bInClip;
 		ExplicitClip = bInClip;
 	}
 
-	void SetLayoutRowValue(const int32 InLayoutRow)
-	{
-		LayoutRow = InLayoutRow;
-		bHasLayoutRow = true;
-	}
+	void SetLayoutRowValue(const int32 InLayoutRow)        { LayoutRow = InLayoutRow; }
+	void ClearLayoutRowValue()                             { LayoutRow.Reset(); }
+	void SetLayoutColumnValue(const int32 InLayoutColumn)  { LayoutColumn = InLayoutColumn; }
+	void ClearLayoutColumnValue()                          { LayoutColumn.Reset(); }
+	void SetLayoutRowSpanValue(const int32 InVal)          { LayoutRowSpan = InVal; }
+	void SetLayoutColumnSpanValue(const int32 InVal)       { LayoutColumnSpan = InVal; }
+	void SetLayoutRowCountValue(const int32 InVal)         { LayoutRowCount = InVal; }
+	void SetLayoutColumnCountValue(const int32 InVal)      { LayoutColumnCount = InVal; }
+	void SetLayoutRowGapValue(const float InVal)           { LayoutRowGap = InVal; }
+	void SetLayoutColumnGapValue(const float InVal)        { LayoutColumnGap = InVal; }
 
-	void ClearLayoutRowValue()
-	{
-		LayoutRow = 0;
-		bHasLayoutRow = false;
-	}
+	void SetLayoutChildHorizontalAlignValue(const FString& InVal) { LayoutChildHorizontalAlign = InVal; }
+	void SetLayoutChildVerticalAlignValue(const FString& InVal)   { LayoutChildVerticalAlign = InVal; }
 
-	void SetLayoutColumnValue(const int32 InLayoutColumn)
-	{
-		LayoutColumn = InLayoutColumn;
-		bHasLayoutColumn = true;
-	}
-
-	void ClearLayoutColumnValue()
-	{
-		LayoutColumn = 0;
-		bHasLayoutColumn = false;
-	}
-
-	void SetLayoutRowSpanValue(const int32 InLayoutRowSpan)
-	{
-		LayoutRowSpan = InLayoutRowSpan;
-		bHasLayoutRowSpan = true;
-	}
-
-	void SetLayoutColumnSpanValue(const int32 InLayoutColumnSpan)
-	{
-		LayoutColumnSpan = InLayoutColumnSpan;
-		bHasLayoutColumnSpan = true;
-	}
-
-	void SetLayoutRowCountValue(const int32 InLayoutRowCount)
-	{
-		LayoutRowCount = InLayoutRowCount;
-		bHasLayoutRowCount = true;
-	}
-
-	void SetLayoutColumnCountValue(const int32 InLayoutColumnCount)
-	{
-		LayoutColumnCount = InLayoutColumnCount;
-		bHasLayoutColumnCount = true;
-	}
-
-	void SetLayoutRowGapValue(const float InLayoutRowGap)
-	{
-		LayoutRowGap = InLayoutRowGap;
-		bHasLayoutRowGap = true;
-	}
-
-	void SetLayoutColumnGapValue(const float InLayoutColumnGap)
-	{
-		LayoutColumnGap = InLayoutColumnGap;
-		bHasLayoutColumnGap = true;
-	}
-
-	void SetLayoutChildHorizontalAlignValue(const FString& InLayoutChildHorizontalAlign)
-	{
-		LayoutChildHorizontalAlign = InLayoutChildHorizontalAlign;
-		bHasLayoutChildHorizontalAlign = true;
-	}
-
-	void SetLayoutChildVerticalAlignValue(const FString& InLayoutChildVerticalAlign)
-	{
-		LayoutChildVerticalAlign = InLayoutChildVerticalAlign;
-		bHasLayoutChildVerticalAlign = true;
-	}
-
-	bool HasExplicitGap() const
-	{
-		return ExplicitGap.IsSet();
-	}
-
-	bool HasExplicitPadding() const
-	{
-		return ExplicitPadding.IsSet();
-	}
-
-	bool HasExplicitClip() const
-	{
-		return ExplicitClip.IsSet();
-	}
+	bool HasExplicitGap() const      { return ExplicitGap.IsSet(); }
+	bool HasExplicitPadding() const  { return ExplicitPadding.IsSet(); }
+	bool HasExplicitClip() const     { return ExplicitClip.IsSet(); }
 
 	bool HasExplicitGridPosition() const
 	{
-		return bHasLayoutRow || bHasLayoutColumn;
+		return LayoutRow.IsSet() || LayoutColumn.IsSet();
 	}
 
-	bool HasLayoutRowValue() const
-	{
-		return bHasLayoutRow;
-	}
+	bool HasLayoutRowValue() const          { return LayoutRow.IsSet(); }
+	bool HasLayoutColumnValue() const       { return LayoutColumn.IsSet(); }
+	bool HasLayoutRowSpanValue() const      { return LayoutRowSpan.IsSet(); }
+	bool HasLayoutColumnSpanValue() const   { return LayoutColumnSpan.IsSet(); }
+	bool HasLayoutRowCountValue() const     { return LayoutRowCount.IsSet(); }
+	bool HasLayoutColumnCountValue() const  { return LayoutColumnCount.IsSet(); }
+	bool HasLayoutRowGapValue() const       { return LayoutRowGap.IsSet(); }
+	bool HasLayoutColumnGapValue() const    { return LayoutColumnGap.IsSet(); }
 
-	bool HasLayoutColumnValue() const
-	{
-		return bHasLayoutColumn;
-	}
+	TOptional<int32> GetLayoutRowValue() const    { return LayoutRow; }
 
-	bool HasLayoutRowSpanValue() const
-	{
-		return bHasLayoutRowSpan;
-	}
-
-	bool HasLayoutColumnSpanValue() const
-	{
-		return bHasLayoutColumnSpan;
-	}
-
-	bool HasLayoutRowCountValue() const
-	{
-		return bHasLayoutRowCount;
-	}
-
-	bool HasLayoutColumnCountValue() const
-	{
-		return bHasLayoutColumnCount;
-	}
-
-	bool HasLayoutRowGapValue() const
-	{
-		return bHasLayoutRowGap;
-	}
-
-	bool HasLayoutColumnGapValue() const
-	{
-		return bHasLayoutColumnGap;
-	}
-
-	TOptional<int32> GetLayoutRowValue() const
-	{
-		return bHasLayoutRow ? TOptional<int32>(LayoutRow) : TOptional<int32>();
-	}
-
-	int32 GetLayoutRowOr(const int32 DefaultValue) const
-	{
-		return bHasLayoutRow ? LayoutRow : DefaultValue;
-	}
-
-	int32 GetLayoutColumnOr(const int32 DefaultValue) const
-	{
-		return bHasLayoutColumn ? LayoutColumn : DefaultValue;
-	}
-
-	int32 GetLayoutRowSpanOr(const int32 DefaultValue) const
-	{
-		return bHasLayoutRowSpan ? LayoutRowSpan : DefaultValue;
-	}
-
-	int32 GetLayoutColumnSpanOr(const int32 DefaultValue) const
-	{
-		return bHasLayoutColumnSpan ? LayoutColumnSpan : DefaultValue;
-	}
-
-	float GetLayoutRowGapOr(const float DefaultValue) const
-	{
-		return bHasLayoutRowGap ? LayoutRowGap : DefaultValue;
-	}
-
-	float GetLayoutColumnGapOr(const float DefaultValue) const
-	{
-		return bHasLayoutColumnGap ? LayoutColumnGap : DefaultValue;
-	}
+	int32 GetLayoutRowOr(const int32 DefaultValue) const         { return LayoutRow.Get(DefaultValue); }
+	int32 GetLayoutColumnOr(const int32 DefaultValue) const      { return LayoutColumn.Get(DefaultValue); }
+	int32 GetLayoutRowSpanOr(const int32 DefaultValue) const     { return LayoutRowSpan.Get(DefaultValue); }
+	int32 GetLayoutColumnSpanOr(const int32 DefaultValue) const  { return LayoutColumnSpan.Get(DefaultValue); }
+	float GetLayoutRowGapOr(const float DefaultValue) const      { return LayoutRowGap.Get(DefaultValue); }
+	float GetLayoutColumnGapOr(const float DefaultValue) const   { return LayoutColumnGap.Get(DefaultValue); }
 
 	FString GetLayoutChildHorizontalAlignOr(const FString& DefaultValue) const
 	{
-		return bHasLayoutChildHorizontalAlign ? LayoutChildHorizontalAlign : DefaultValue;
+		return LayoutChildHorizontalAlign.Get(DefaultValue);
 	}
 
 	FString GetLayoutChildVerticalAlignOr(const FString& DefaultValue) const
 	{
-		return bHasLayoutChildVerticalAlign ? LayoutChildVerticalAlign : DefaultValue;
+		return LayoutChildVerticalAlign.Get(DefaultValue);
 	}
 };
 
@@ -355,20 +209,9 @@ struct FDesignTransformNodeData
 		ExplicitOpacity = InOpacity;
 	}
 
-	bool HasExplicitX() const
-	{
-		return ExplicitX.IsSet();
-	}
-
-	bool HasExplicitY() const
-	{
-		return ExplicitY.IsSet();
-	}
-
-	bool HasExplicitOpacity() const
-	{
-		return ExplicitOpacity.IsSet();
-	}
+	bool HasExplicitX() const       { return ExplicitX.IsSet(); }
+	bool HasExplicitY() const       { return ExplicitY.IsSet(); }
+	bool HasExplicitOpacity() const { return ExplicitOpacity.IsSet(); }
 
 	bool HasExplicitPosition() const
 	{
@@ -474,28 +317,13 @@ struct DESIGN2UMGCORE_API FDesignDocument
 	const FDesignParseDiagnostics& ParseDiagnostics() const;
 	FDesignParseDiagnostics& MutableParseDiagnostics();
 
-	TSharedPtr<FDesignNode> FindReusableNode(const FString& Id) const
-	{
-		return FindNodeRecursive(Children, Id, true);
-	}
+	TSharedPtr<FDesignNode> FindReusableNode(const FString& Id) const;
 
 private:
 	static TSharedPtr<FDesignNode> FindNodeRecursive(
 		const TArray<TSharedPtr<FDesignNode>>& Nodes,
 		const FString& Id,
-		bool bReusableOnly)
-	{
-		for (const TSharedPtr<FDesignNode>& Node : Nodes)
-		{
-			if (!Node.IsValid())
-				continue;
-			if (Node->Id == Id && (!bReusableOnly || Node->bReusable))
-				return Node;
-			if (const TSharedPtr<FDesignNode> Found = FindNodeRecursive(Node->Children, Id, bReusableOnly))
-				return Found;
-		}
-		return nullptr;
-	}
+		bool bReusableOnly);
 
 	TUniquePtr<FDesignSourceDocumentData> SourceDocumentData;
 	TUniquePtr<FDesignParseDiagnostics> ParseDiagnosticsData;

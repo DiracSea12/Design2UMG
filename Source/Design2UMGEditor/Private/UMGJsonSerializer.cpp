@@ -382,12 +382,6 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeWidgetNode(const FUMGWidget
 				UMGPropertyKeys::RenderTransformPivot,
 				FString::Printf(TEXT("%.6f,%.6f"), Render.RenderTransformPivot.X, Render.RenderTransformPivot.Y));
 		}
-		if (Render.bHasRenderScale)
-		{
-			RenderObject->SetStringField(
-				UMGPropertyKeys::RenderScale,
-				FString::Printf(TEXT("%.6f,%.6f"), Render.RenderScale.X, Render.RenderScale.Y));
-		}
 		if (Render.bHasRenderTransformScale)
 		{
 			RenderObject->SetStringField(

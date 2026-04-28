@@ -21,11 +21,15 @@ Desktop.ini
 .cowork-temp/
 .claude/
 .codex/
+.serena/
 openspec/
 tmpclaude-*
 nul
+image/
 AGENTS.md
 CLAUDE.md
+ENCODING_GUARD.md
+Tools/Invoke-ClaudeWorker.ps1
 code_review_report.md
 code_review_report 2.md
 Design2UMG图片/

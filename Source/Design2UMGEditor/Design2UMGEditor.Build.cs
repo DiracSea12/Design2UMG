@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 using UnrealBuildTool;
 
@@ -33,7 +33,6 @@ public class Design2UMGEditor : ModuleRules
 			"BlueprintGraph",
 			"Kismet",
 			"InputCore",
-			"Projects",
 			"MovieScene",
 			"MovieSceneTracks",
 			"ImageWrapper",
@@ -46,6 +45,10 @@ public class Design2UMGEditor : ModuleRules
 			"Networking",
 			"ContentBrowser",
 		});
+
+		if (Target.bBuildDeveloperTools)
+		{
+			PrivateDependencyModuleNames.Add("Projects");
+		}
 	}
 }
-

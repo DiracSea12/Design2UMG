@@ -76,7 +76,7 @@ namespace
 			return EKnownPropertyValueType::Color;
 		}
 
-		if (Key == EffectBlurUVStep || Key == InnerSlotPadding || Key == RenderScale || Key == RenderTransformPivot
+		if (Key == EffectBlurUVStep || Key == InnerSlotPadding || Key == RenderTransformPivot
 			|| Key == RenderTransformScale || Key == RenderTranslation || Key == ShadowOffset)
 		{
 			return EKnownPropertyValueType::Vector2D;

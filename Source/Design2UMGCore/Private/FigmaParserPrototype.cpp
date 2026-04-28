@@ -36,8 +36,7 @@ static void ParsePrototypeTransitionData(const TSharedPtr<FJsonObject>& Obj, FDe
 	double Duration = 0.0;
 	if (DesignJsonUtils::TryGetNumber(Obj, TEXT("duration"), Duration))
 	{
-		Out.Duration = static_cast<float>(Duration);
-		Out.bHasDuration = true;
+		Out.Duration.Emplace(static_cast<float>(Duration));
 	}
 
 	const TSharedPtr<FJsonValue> EasingField = DesignJsonUtils::TryGetField(Obj, TEXT("easing"));
@@ -51,8 +50,7 @@ static void ParsePrototypeTransitionData(const TSharedPtr<FJsonObject>& Obj, FDe
 	bool bMatchLayers = false;
 	if (Obj->TryGetBoolField(TEXT("matchLayers"), bMatchLayers))
 	{
-		Out.bMatchLayers = bMatchLayers;
-		Out.bHasMatchLayers = true;
+		Out.MatchLayers.Emplace(bMatchLayers);
 	}
 }
 
@@ -162,8 +160,7 @@ void ParsePrototypeNodeData(const TSharedPtr<FJsonObject>& NodeObj, FDesignProto
 	double TransitionDuration = 0.0;
 	if (DesignJsonUtils::TryGetNumber(NodeObj, TEXT("transitionDuration"), TransitionDuration))
 	{
-		OutData.Transition.Duration = static_cast<float>(TransitionDuration);
-		OutData.Transition.bHasDuration = true;
+		OutData.Transition.Duration.Emplace(static_cast<float>(TransitionDuration));
 	}
 
 	const TSharedPtr<FJsonValue> EasingField = DesignJsonUtils::TryGetField(NodeObj, TEXT("transitionEasing"));

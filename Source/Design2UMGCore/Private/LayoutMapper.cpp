@@ -257,8 +257,8 @@ void FLayoutMapper::ApplyAlignItems(FUMGWidgetNode& Widget, EDesignAlignItems Al
 bool FLayoutMapper::HasPadding(const TSharedPtr<FDesignNode>& Node)
 {
 	return Node.IsValid() &&
-		(Node->LayoutData.Padding.Top > 0 || Node->LayoutData.Padding.Right > 0 ||
-		 Node->LayoutData.Padding.Bottom > 0 || Node->LayoutData.Padding.Left > 0);
+		(Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Top > 0 || Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Right > 0 ||
+		 Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Bottom > 0 || Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Left > 0);
 }
 
 FUMGWidgetNode FLayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, const TSharedPtr<FDesignNode>& ChildNode, EDesignLayout ParentLayout)

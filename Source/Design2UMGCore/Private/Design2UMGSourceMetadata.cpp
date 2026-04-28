@@ -70,8 +70,8 @@ namespace
 			Target.ComponentPropertiesJson = Source.ComponentPropertiesJson;
 			Target.VariantPropertiesJson = Source.VariantPropertiesJson;
 			Target.OverridesJson = Source.OverridesJson;
-			Target.bIsExposedInstance = Source.bIsExposedInstance;
-			Target.bHasIsExposedInstance = Source.bHasIsExposedInstance;
+			Target.HasIsExposedInstance.bValue = Source.IsExposedInstance.Get(false);
+			Target.HasIsExposedInstance.bIsSet = Source.IsExposedInstance.IsSet();
 		}
 
 		void BackfillDefinitionIds(FUMGSourceNodeData& SourceData, const TSharedPtr<FDesignNode>& Node)
@@ -143,9 +143,9 @@ namespace
 	{
 		float ResolveWrapCrossAxisGapValue(const TSharedPtr<FDesignNode>& Node)
 		{
-			return Node->Source().LayoutExtensions.bHasCounterAxisSpacing
-				? Node->Source().LayoutExtensions.CounterAxisSpacing
-				: Node->LayoutData.Gap;
+			return Node->Source().LayoutExtensions.CounterAxisSpacing.IsSet()
+				? Node->Source().LayoutExtensions.CounterAxisSpacing.GetValue()
+				: Node->LayoutData.ExplicitGap.Get(0.0f);
 		}
 	}
 }

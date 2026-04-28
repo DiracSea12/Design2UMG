@@ -22,6 +22,20 @@ void UDesign2UMGFigmaMetadataClassExtension::SetMetadata(
 	}
 }
 
+void UDesign2UMGFigmaMetadataClassExtension::PostLoad()
+{
+	Super::PostLoad();
+	for (FDesign2UMGFigmaWidgetMetadataRecord& Record : WidgetRecords)
+	{
+		FUMGSourceNodeData& SN = Record.SourceNode;
+		if (!SN.HasIsExposedInstance.bIsSet)
+		{
+			SN.HasIsExposedInstance.bValue = SN.bIsExposedInstance;
+			SN.HasIsExposedInstance.bIsSet = true;
+		}
+	}
+}
+
 const FDesign2UMGFigmaWidgetMetadataRecord* UDesign2UMGFigmaMetadataClassExtension::FindRecordBySourceNodeId(
 	const FString& SourceNodeId) const
 {

@@ -70,18 +70,15 @@ namespace
 			Target.Transform.bEnabled = false;
 		if (Override.LayoutData.HasExplicitPadding())
 		{
-			Target.LayoutData.Padding = Override.LayoutData.Padding;
-			Target.LayoutData.ExplicitPadding = Override.LayoutData.Padding;
+			Target.LayoutData.ExplicitPadding = Override.LayoutData.ExplicitPadding;
 		}
 		if (Override.LayoutData.HasExplicitGap())
 		{
-			Target.LayoutData.Gap = Override.LayoutData.Gap;
-			Target.LayoutData.ExplicitGap = Override.LayoutData.Gap;
+			Target.LayoutData.ExplicitGap = Override.LayoutData.ExplicitGap;
 		}
 		if (Override.LayoutData.HasExplicitClip())
 		{
-			Target.LayoutData.bClip = Override.LayoutData.bClip;
-			Target.LayoutData.ExplicitClip = Override.LayoutData.bClip;
+			Target.LayoutData.ExplicitClip = Override.LayoutData.ExplicitClip;
 		}
 		if (Override.Transform.HasExplicitOpacity())
 		{
@@ -270,18 +267,15 @@ namespace
 		}
 		if (RefNode->LayoutData.HasExplicitPadding())
 		{
-			Expanded->LayoutData.Padding = RefNode->LayoutData.Padding;
-			Expanded->LayoutData.ExplicitPadding = RefNode->LayoutData.Padding;
+			Expanded->LayoutData.ExplicitPadding = RefNode->LayoutData.ExplicitPadding;
 		}
 		if (RefNode->LayoutData.HasExplicitGap())
 		{
-			Expanded->LayoutData.Gap = RefNode->LayoutData.Gap;
-			Expanded->LayoutData.ExplicitGap = RefNode->LayoutData.Gap;
+			Expanded->LayoutData.ExplicitGap = RefNode->LayoutData.ExplicitGap;
 		}
 		if (RefNode->LayoutData.HasExplicitClip())
 		{
-			Expanded->LayoutData.bClip = RefNode->LayoutData.bClip;
-			Expanded->LayoutData.ExplicitClip = RefNode->LayoutData.bClip;
+			Expanded->LayoutData.ExplicitClip = RefNode->LayoutData.ExplicitClip;
 		}
 		if (!RefNode->Transform.bEnabled)
 			Expanded->Transform.bEnabled = false;

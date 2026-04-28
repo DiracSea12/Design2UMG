@@ -1,0 +1,30 @@
+﻿{
+  "version": "1.0",
+  "children": [
+    {
+      "id": "frame-1",
+      "name": "TestFrame",
+      "type": "frame",
+      "x": 0, "y": 0, "width": 400, "height": 300,
+      "children": [
+        {
+          "id": "text-1",
+          "name": "TestText",
+          "type": "text",
+          "x": 10, "y": 10, "width": 200, "height": 40,
+          "content": "Hello World",
+          "fontFamily": "Roboto",
+          "fontSize": 16,
+          "textAlign": "left",
+          "textGrowth": "auto"
+        },
+        {
+          "id": "rect-1",
+          "name": "TestRect",
+          "type": "rectangle",
+          "x": 10, "y": 60, "width": 100, "height": 50
+        }
+      ]
+    }
+  ]
+}

@@ -162,6 +162,7 @@ class DESIGN2UMGEDITOR_API UDesign2UMGPrototypeNavigationClassExtension : public
 
 public:
 	void SetNavigationData(const FUMGPrototypeNavigationData& InNavigationData);
+	virtual void PostLoad() override;
 
 	virtual void Initialize(UUserWidget* UserWidget) override;
 	virtual void Construct(UUserWidget* UserWidget) override;

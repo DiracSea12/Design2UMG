@@ -247,6 +247,46 @@ bool FPropertyBagDynamicColorKeyTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRenderTransformScaleJsonContractTest,
+	"Design2UMG.Json.RenderTransformScaleContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FRenderTransformScaleJsonContractTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"RootWidget": {
+			"Type": "TextBlock",
+			"Name": "ScaledText",
+			"Bounds": { "X": 0, "Y": 0, "Width": 100, "Height": 20 },
+			"Render": {
+				"RenderTransformScale": "1.250000,0.750000"
+			}
+		}
+	})");
+
+	FUMGWidgetData Parsed;
+	FString ParseError;
+	TestTrue(TEXT("UMGJsonParser parses RenderTransformScale-only payload"), FUMGJsonParser::ParseJson(Json, Parsed, &ParseError));
+	if (!ParseError.IsEmpty())
+	{
+		AddError(ParseError);
+	}
+	TestFalse(TEXT("Root widget type parsed"), Parsed.RootWidget.Type.IsEmpty());
+	if (Parsed.RootWidget.Type.IsEmpty())
+	{
+		return false;
+	}
+
+	const FUMGWidgetNode& Root = Parsed.RootWidget;
+	TestTrue(TEXT("RenderTransformScale is marked present"), Root.Render.bHasRenderTransformScale);
+	TestTrue(TEXT("RenderTransformScale X preserved"), FMath::IsNearlyEqual(Root.Render.RenderTransformScale.X, 1.25, KINDA_SMALL_NUMBER));
+	TestTrue(TEXT("RenderTransformScale Y preserved"), FMath::IsNearlyEqual(Root.Render.RenderTransformScale.Y, 0.75, KINDA_SMALL_NUMBER));
+
+	const FString RoundTripJson = FUMGJsonSerializer::Serialize(Parsed);
+	TestTrue(TEXT("Serializer keeps RenderTransformScale"), RoundTripJson.Contains(TEXT("\"RenderTransformScale\"")));
+	TestFalse(TEXT("Serializer no longer emits RenderScale alias"), RoundTripJson.Contains(TEXT("\"RenderScale\"")));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenParserTest,
 	"Design2UMG.Parser.BasicDocument",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -307,7 +347,7 @@ bool FPenParserTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Screen width fixed"), Screen->Transform.Width.IsFixed());
 	TestEqual(TEXT("Screen width value"), Screen->Transform.Width.Value, 1920.0f);
 	TestEqual(TEXT("Screen layout"), Screen->LayoutData.Layout, EDesignLayout::Vertical);
-	TestEqual(TEXT("Screen gap"), Screen->LayoutData.Gap, 16.0f);
+	TestEqual(TEXT("Screen gap"), Screen->LayoutData.ExplicitGap.Get(0.0f), 16.0f);
 	TestEqual(TEXT("Screen children count"), Screen->Children.Num(), 3);
 	if (Screen->Children.Num() < 3)
 		return false;
@@ -1073,12 +1113,12 @@ bool FParserNumberStringFlexibleTest::RunTest(const FString& Parameters)
 	const TSharedPtr<FDesignNode>& Root = Doc.Children[0];
 	TestTrue(TEXT("Root has parsed X"), Root->Transform.HasExplicitX());
 	TestTrue(TEXT("Root has parsed Y"), Root->Transform.HasExplicitY());
-	TestEqual(TEXT("Root gap parsed from string"), Root->LayoutData.Gap, 8.0f);
+	TestEqual(TEXT("Root gap parsed from string"), Root->LayoutData.ExplicitGap.Get(0.0f), 8.0f);
 	TestEqual(TEXT("Root opacity parsed from string"), Root->Transform.Opacity, 0.75f);
-	TestEqual(TEXT("Root padding top parsed from string"), Root->LayoutData.Padding.Top, 1.0f);
-	TestEqual(TEXT("Root padding right parsed from string"), Root->LayoutData.Padding.Right, 2.0f);
-	TestEqual(TEXT("Root padding bottom parsed from string"), Root->LayoutData.Padding.Bottom, 3.0f);
-	TestEqual(TEXT("Root padding left parsed from string"), Root->LayoutData.Padding.Left, 4.0f);
+	TestEqual(TEXT("Root padding top parsed from string"), Root->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Top, 1.0f);
+	TestEqual(TEXT("Root padding right parsed from string"), Root->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Right, 2.0f);
+	TestEqual(TEXT("Root padding bottom parsed from string"), Root->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Bottom, 3.0f);
+	TestEqual(TEXT("Root padding left parsed from string"), Root->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Left, 4.0f);
 	TestTrue(TEXT("Root cornerRadius parsed as per-corner"), !Root->Visual.CornerRadius.bUniform);
 	TestEqual(TEXT("Root cornerRadius TL parsed from string"), Root->Visual.CornerRadius.TopLeft, 5.0f);
 	TestEqual(TEXT("Root cornerRadius TR parsed from string"), Root->Visual.CornerRadius.TopRight, 6.0f);
@@ -1117,10 +1157,10 @@ bool FPenPaddingTwoValueAxisOrderTest::RunTest(const FString& Parameters)
 		return false;
 	}
 	const TSharedPtr<FDesignNode>& Panel = Doc.Children[0];
-	TestEqual(TEXT("Two-value padding top"), Panel->LayoutData.Padding.Top, 6.0f);
-	TestEqual(TEXT("Two-value padding bottom"), Panel->LayoutData.Padding.Bottom, 6.0f);
-	TestEqual(TEXT("Two-value padding left"), Panel->LayoutData.Padding.Left, 12.0f);
-	TestEqual(TEXT("Two-value padding right"), Panel->LayoutData.Padding.Right, 12.0f);
+	TestEqual(TEXT("Two-value padding top"), Panel->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Top, 6.0f);
+	TestEqual(TEXT("Two-value padding bottom"), Panel->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Bottom, 6.0f);
+	TestEqual(TEXT("Two-value padding left"), Panel->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Left, 12.0f);
+	TestEqual(TEXT("Two-value padding right"), Panel->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Right, 12.0f);
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVariableResolverLiteralDollarTextTest,
@@ -1232,7 +1272,7 @@ bool FFigmaComplexParserTest::RunTest(const FString& Parameters)
 	const auto& Dashboard = Doc.Children[0];
 	TestEqual(TEXT("Dashboard type"), Dashboard->Type, EDesignNodeType::Frame);
 	TestEqual(TEXT("Dashboard layout"), Dashboard->LayoutData.Layout, EDesignLayout::Horizontal);
-	TestTrue(TEXT("Dashboard clip (Figma clipsContent mapped)"), Dashboard->LayoutData.bClip);
+	TestTrue(TEXT("Dashboard clip (Figma clipsContent mapped)"), Dashboard->LayoutData.ExplicitClip.Get(false));
 	TestEqual(TEXT("Dashboard children"), Dashboard->Children.Num(), 2);
 	if (Dashboard->Children.Num() < 2)
 		return false;
@@ -1241,8 +1281,8 @@ bool FFigmaComplexParserTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Sidebar layout"), Sidebar->LayoutData.Layout, EDesignLayout::Vertical);
 	TestTrue(TEXT("Sidebar height FILL"), Sidebar->Transform.Height.IsFill());
 	TestTrue(TEXT("Sidebar width FIXED"), Sidebar->Transform.Width.IsFixed());
-	TestEqual(TEXT("Sidebar gap"), Sidebar->LayoutData.Gap, 8.0f);
-	TestEqual(TEXT("Sidebar padding left"), Sidebar->LayoutData.Padding.Left, 16.0f);
+	TestEqual(TEXT("Sidebar gap"), Sidebar->LayoutData.ExplicitGap.Get(0.0f), 8.0f);
+	TestEqual(TEXT("Sidebar padding left"), Sidebar->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Left, 16.0f);
 	TestFalse(TEXT("Sidebar stroke non-uniform"), Sidebar->Visual.Stroke.Thickness.bUniform);
 	TestEqual(TEXT("Sidebar stroke right"), Sidebar->Visual.Stroke.Thickness.Right, 1.0f);
 	TestEqual(TEXT("Sidebar stroke top"), Sidebar->Visual.Stroke.Thickness.Top, 0.0f);
@@ -1274,7 +1314,7 @@ bool FFigmaComplexParserTest::RunTest(const FString& Parameters)
 	// MainContent
 	const auto& Main = Dashboard->Children[1];
 	TestTrue(TEXT("Main width FILL"), Main->Transform.Width.IsFill());
-	TestEqual(TEXT("Main padding"), Main->LayoutData.Padding.Top, 32.0f);
+	TestEqual(TEXT("Main padding"), Main->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Top, 32.0f);
 	TestEqual(TEXT("Main children"), Main->Children.Num(), 4);
 	if (Main->Children.Num() < 4)
 		return false;

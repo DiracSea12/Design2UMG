@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -70,10 +70,10 @@ struct FUMGWidgetStyleData
 	}
 };
 
+// Not migrated to TOptional: bHas* presence bits feed parser/serializer typed access
+// paths that depend on explicit set/unset distinction (e.g. bHasText vs empty string).
 struct FUMGTextData
 {
-	// These presence bits still feed parser/serializer and typed access paths,
-	// so this batch only documents the retained owner instead of rewriting it.
 	FString Text;
 	bool bHasText = false;
 
@@ -147,10 +147,10 @@ struct FUMGTextData
  * Typed visual brush fields that progressively replace visual keys from the legacy property bag.
  * They are transferred to the Border node as a whole when WrapWithBorder is used.
  */
+// Not migrated to TOptional: parser, serializer, and typed descriptors depend on the
+// same bHas* presence-bit shape for FUMGVisualBrushData.
 struct FUMGVisualBrushData
 {
-	// Keep this owner intact for now: parser, serializer, and typed descriptors
-	// all depend on the same presence-bit shape.
 	struct FImageTransformData
 	{
 		float A = 1.0f;
@@ -239,10 +239,10 @@ struct FUMGVisualBrushData
  * Typed effect fields such as BackgroundBlur and Retainer effects.
  * New effect contracts should land here instead of extending the legacy property bag.
  */
+// Not migrated to TOptional: unset vs explicit value distinction is required by the
+// typed effect contract (e.g. bHasBlurStrength distinguishes zero from absent).
 struct FUMGEffectData
 {
-	// Keep the effect payload presence bits as-is: unset vs explicit value still
-	// matters to the typed effect contract.
 	float BlurStrength = 0.0f;
 	bool bHasBlurStrength = false;
 
@@ -272,9 +272,7 @@ struct FUMGEffectData
 		return bHasBlurStrength
 			|| bHasRetainRendering
 			|| bHasEffectMaterial
-			|| !EffectMaterial.IsEmpty()
 			|| bHasTextureParameter
-			|| !TextureParameter.IsEmpty()
 			|| bHasEffectBlurUVStep
 			|| bHasEffectColor
 			|| bHasEffectOffset
@@ -282,10 +280,10 @@ struct FUMGEffectData
 	}
 };
 
+// Not migrated to TOptional: path/shadow/widget-state/scroll-box presence bits are
+// retained payload ownership, not optional cleanup candidates.
 struct FUMGPathData
 {
-	// Keep the path / shadow / widget-state / scroll-box presence bits together:
-	// they are still read as retained payload ownership, not optional cleanup.
 	FString Geometry;
 	bool bHasGeometry = false;
 
@@ -352,10 +350,10 @@ struct FUMGShadowData
 /**
  * Typed render transform and clipping fields for the generated widget node.
  */
+// Not migrated to TOptional: generated widget distinguishes unset from explicit value
+// for render transform fields.
 struct FUMGRenderStyleData
 {
-	// Keep the render payload presence bits as-is: the generated widget still
-	// distinguishes unset from explicit value here.
 	float RenderOpacity = 0.0f;
 	bool bHasRenderOpacity = false;
 
@@ -367,9 +365,6 @@ struct FUMGRenderStyleData
 
 	FVector2D RenderTransformPivot = FVector2D(0.5f, 0.5f);
 	bool bHasRenderTransformPivot = false;
-
-	FVector2D RenderScale = FVector2D(1.0f, 1.0f);
-	bool bHasRenderScale = false;
 
 	FVector2D RenderTranslation = FVector2D::ZeroVector;
 	bool bHasRenderTranslation = false;
@@ -383,16 +378,14 @@ struct FUMGRenderStyleData
 			|| bHasRenderAngle
 			|| bHasRenderTransformScale
 			|| bHasRenderTransformPivot
-			|| bHasRenderScale
 			|| bHasRenderTranslation
 			|| bHasClipping;
 	}
 };
 
+// Not migrated to TOptional: active-widget index carries presence semantics.
 struct FUMGWidgetStateData
 {
-	// Keep this retained owner explicit: the active-widget index still carries
-	// presence semantics, so it is not a safe TOptional rewrite here.
 	int32 ActiveWidgetIndex = 0;
 	bool bHasActiveWidgetIndex = false;
 
@@ -402,10 +395,9 @@ struct FUMGWidgetStateData
 	}
 };
 
+// Not migrated to TOptional: scroll-box contract relies on explicit presence markers.
 struct FUMGScrollBoxData
 {
-	// Keep the scroll-box payload shape stable for now; the current contract
-	// still relies on explicit presence markers.
 	FString Orientation;
 	bool bHasOrientation = false;
 

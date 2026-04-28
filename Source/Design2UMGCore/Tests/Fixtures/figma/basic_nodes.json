@@ -1,0 +1,46 @@
+﻿{
+  "document": {
+    "id": "0:0",
+    "name": "Document",
+    "type": "DOCUMENT",
+    "children": [
+      {
+        "id": "0:1",
+        "name": "Page 1",
+        "type": "CANVAS",
+        "children": [
+          {
+            "id": "1:1",
+            "name": "TestFrame",
+            "type": "FRAME",
+            "absoluteBoundingBox": { "x": 0, "y": 0, "width": 400, "height": 300 },
+            "fills": [{ "type": "SOLID", "color": { "r": 1, "g": 1, "b": 1, "a": 1 } }],
+            "children": [
+              {
+                "id": "1:2",
+                "name": "TestText",
+                "type": "TEXT",
+                "absoluteBoundingBox": { "x": 10, "y": 10, "width": 200, "height": 40 },
+                "characters": "Hello Figma",
+                "style": { "fontFamily": "Inter", "fontSize": 16, "textAlignHorizontal": "LEFT" },
+                "fills": [{ "type": "SOLID", "color": { "r": 0, "g": 0, "b": 0, "a": 1 } }],
+                "children": []
+              },
+              {
+                "id": "1:3",
+                "name": "TestRect",
+                "type": "RECTANGLE",
+                "absoluteBoundingBox": { "x": 10, "y": 60, "width": 100, "height": 50 },
+                "fills": [{ "type": "SOLID", "color": { "r": 0.8, "g": 0.2, "b": 0.2, "a": 1 } }],
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "components": {},
+  "componentSets": {},
+  "styles": {}
+}

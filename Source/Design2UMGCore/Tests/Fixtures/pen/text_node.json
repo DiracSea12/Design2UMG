@@ -1,0 +1,16 @@
+﻿{
+  "version": "1.0",
+  "children": [
+    {
+      "id": "text-node-1",
+      "name": "RichText",
+      "type": "text",
+      "x": 0, "y": 0, "width": 300, "height": 60,
+      "content": "Sample text",
+      "fontFamily": "Inter",
+      "fontSize": 24,
+      "textAlign": "center",
+      "textGrowth": "fixed-width-height"
+    }
+  ]
+}

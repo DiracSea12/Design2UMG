@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignSchema.h"
 #include "DesignSchemaSourceExtensions.h"
@@ -164,4 +164,26 @@ FDesignParseDiagnostics& FDesignDocument::MutableParseDiagnostics()
 	}
 
 	return *ParseDiagnosticsData;
+}
+
+TSharedPtr<FDesignNode> FDesignDocument::FindReusableNode(const FString& Id) const
+{
+	return FindNodeRecursive(Children, Id, true);
+}
+
+TSharedPtr<FDesignNode> FDesignDocument::FindNodeRecursive(
+	const TArray<TSharedPtr<FDesignNode>>& Nodes,
+	const FString& Id,
+	bool bReusableOnly)
+{
+	for (const TSharedPtr<FDesignNode>& Node : Nodes)
+	{
+		if (!Node.IsValid())
+			continue;
+		if (Node->Id == Id && (!bReusableOnly || Node->bReusable))
+			return Node;
+		if (const TSharedPtr<FDesignNode> Found = FindNodeRecursive(Node->Children, Id, bReusableOnly))
+			return Found;
+	}
+	return nullptr;
 }

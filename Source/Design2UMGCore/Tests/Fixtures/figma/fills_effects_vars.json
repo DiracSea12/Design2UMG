@@ -1,0 +1,85 @@
+﻿{
+  "document": {
+    "id": "0:0",
+    "name": "Document",
+    "type": "DOCUMENT",
+    "children": [
+      {
+        "id": "0:1",
+        "name": "Page 1",
+        "type": "CANVAS",
+        "children": [
+          {
+            "id": "2:1",
+            "name": "FillsFrame",
+            "type": "FRAME",
+            "absoluteBoundingBox": { "x": 0, "y": 0, "width": 300, "height": 300 },
+            "children": [
+              {
+                "id": "2:2",
+                "name": "SolidFill",
+                "type": "RECTANGLE",
+                "absoluteBoundingBox": { "x": 0, "y": 0, "width": 80, "height": 80 },
+                "fills": [{ "type": "SOLID", "color": { "r": 1, "g": 0, "b": 0, "a": 1 } }],
+                "children": []
+              },
+              {
+                "id": "2:3",
+                "name": "GradientFill",
+                "type": "RECTANGLE",
+                "absoluteBoundingBox": { "x": 0, "y": 90, "width": 80, "height": 80 },
+                "fills": [{
+                  "type": "GRADIENT_LINEAR",
+                  "gradientHandlePositions": [
+                    { "x": 0, "y": 0.5 },
+                    { "x": 1, "y": 0.5 },
+                    { "x": 0, "y": 0 }
+                  ],
+                  "gradientStops": [
+                    { "color": { "r": 1, "g": 0, "b": 0, "a": 1 }, "position": 0 },
+                    { "color": { "r": 0, "g": 0, "b": 1, "a": 1 }, "position": 1 }
+                  ]
+                }],
+                "children": []
+              },
+              {
+                "id": "2:4",
+                "name": "ImageFill",
+                "type": "RECTANGLE",
+                "absoluteBoundingBox": { "x": 0, "y": 180, "width": 80, "height": 80 },
+                "fills": [{ "type": "IMAGE", "imageRef": "abc123", "scaleMode": "FILL" }],
+                "children": []
+              }
+            ]
+          },
+          {
+            "id": "3:1",
+            "name": "EffectsFrame",
+            "type": "FRAME",
+            "absoluteBoundingBox": { "x": 400, "y": 0, "width": 200, "height": 200 },
+            "effects": [
+              { "type": "LAYER_BLUR", "radius": 4, "visible": true },
+              { "type": "DROP_SHADOW", "radius": 8, "color": { "r": 0, "g": 0, "b": 0, "a": 0.5 }, "offset": { "x": 2, "y": 4 }, "visible": true }
+            ],
+            "fills": [],
+            "children": []
+          },
+          {
+            "id": "4:1",
+            "name": "BoundVarsFrame",
+            "type": "FRAME",
+            "absoluteBoundingBox": { "x": 700, "y": 0, "width": 100, "height": 100 },
+            "fills": [{ "type": "SOLID", "color": { "r": 0, "g": 1, "b": 0, "a": 1 } }],
+            "boundVariables": {
+              "fills": { "type": "VARIABLE_ALIAS", "id": "VariableID:color/primary" }
+            },
+            "children": []
+          }
+        ]
+      }
+    ]
+  },
+  "components": {},
+  "componentSets": {},
+  "styles": {}
+}

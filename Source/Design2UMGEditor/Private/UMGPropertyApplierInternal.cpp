@@ -1,4 +1,9 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+//
+// Extension point: to add property handling for a new Widget type, register it in GetPropsApplierMap()
+// with signature void(UWidget*, const FUMGPropertyBag&). Text widgets that also need typed-node
+// data (FUMGWidgetNode) must additionally add a branch in ApplyWidgetProperties(UWidget*, const FUMGWidgetNode&)
+// and call ApplyCommonProperties after the branch chain.
 
 #include "UMGPropertyApplierInternal.h"
 #include "UMGBrushPropertyApplier.h"
@@ -463,8 +468,6 @@ namespace
 		{
 			W->SetRenderScale(TransformScale);
 		}
-		FVector2D RenderScale;
-		if (Properties.TryGetVector2D(UMGPropertyKeys::RenderScale, RenderScale)) W->SetRenderScale(RenderScale);
 		FVector2D RenderTranslation;
 		if (Properties.TryGetVector2D(UMGPropertyKeys::RenderTranslation, RenderTranslation)) W->SetRenderTranslation(RenderTranslation);
 	}
@@ -494,49 +497,41 @@ namespace
 		}
 
 		const FUMGPropertyBag TypedProperties = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
+
+		// Text widgets: apply typed-node props, then fall through to shared ApplyCommonProperties below.
 		if (Widget->IsA(UTextBlock::StaticClass()))
 		{
 			UMGTextPropertyApplier::ApplyTextBlockProps(Widget, Node, TypedProperties);
-			ApplyCommonProperties(Widget, TypedProperties);
-			return;
 		}
-
-		if (Widget->IsA(URichTextBlock::StaticClass()))
+		else if (Widget->IsA(URichTextBlock::StaticClass()))
 		{
 			UMGTextPropertyApplier::ApplyRichTextBlockProps(Widget, Node);
-			ApplyCommonProperties(Widget, TypedProperties);
-			return;
 		}
-
-		if (Widget->IsA(UEditableTextBox::StaticClass()))
+		else if (Widget->IsA(UEditableTextBox::StaticClass()))
 		{
 			UMGTextPropertyApplier::ApplyEditableTextBoxProps(Widget, Node, TypedProperties);
-			ApplyCommonProperties(Widget, TypedProperties);
-			return;
 		}
-
-		if (Widget->IsA(UMultiLineEditableTextBox::StaticClass()))
+		else if (Widget->IsA(UMultiLineEditableTextBox::StaticClass()))
 		{
 			UMGTextPropertyApplier::ApplyMultiLineEditableTextBoxProps(Widget, Node, TypedProperties);
-			ApplyCommonProperties(Widget, TypedProperties);
-			return;
 		}
-
-		if (Widget->IsA(UEditableText::StaticClass()))
+		else if (Widget->IsA(UEditableText::StaticClass()))
 		{
 			UMGTextPropertyApplier::ApplyEditableTextProps(Widget, Node, TypedProperties);
-			ApplyCommonProperties(Widget, TypedProperties);
-			return;
 		}
-
-		if (Widget->IsA(UMultiLineEditableText::StaticClass()))
+		else if (Widget->IsA(UMultiLineEditableText::StaticClass()))
 		{
 			UMGTextPropertyApplier::ApplyMultiLineEditableTextProps(Widget, Node, TypedProperties);
-			ApplyCommonProperties(Widget, TypedProperties);
+		}
+		else
+		{
+			// Non-text widgets: delegate to property-bag overload (which calls ApplyCommonProperties internally).
+			ApplyWidgetProperties(Widget, TypedProperties);
 			return;
 		}
 
-		ApplyWidgetProperties(Widget, TypedProperties);
+		// All text widget branches share a single ApplyCommonProperties call.
+		ApplyCommonProperties(Widget, TypedProperties);
 	}
 
 	void ApplyTypedOverrides(UWidget* Widget, const FUMGWidgetNode& Node)

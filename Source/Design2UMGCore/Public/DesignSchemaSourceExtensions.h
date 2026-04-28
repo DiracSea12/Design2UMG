@@ -7,8 +7,6 @@
 
 /**
  * Source-specific layout metadata that stays attached to parser-owned node state.
- * Non-UPROPERTY `bHas*` fields are intentional transient presence markers and are
- * not meant to participate in reflected serialization.
  */
 USTRUCT()
 struct FDesignLayoutExtensions
@@ -48,80 +46,21 @@ struct FDesignLayoutExtensions
 	UPROPERTY()
 	FString BoundVariablesJson;
 
-	UPROPERTY()
-	float CounterAxisSpacing = 0.0f;
-
-	bool bHasCounterAxisSpacing = false;
-
-	UPROPERTY()
-	float MinWidth = 0.0f;
-
-	bool bHasMinWidth = false;
-
-	UPROPERTY()
-	float MaxWidth = 0.0f;
-
-	bool bHasMaxWidth = false;
-
-	UPROPERTY()
-	float MinHeight = 0.0f;
-
-	bool bHasMinHeight = false;
-
-	UPROPERTY()
-	float MaxHeight = 0.0f;
-
-	bool bHasMaxHeight = false;
-
-	UPROPERTY()
-	int32 GridRowCount = 0;
-
-	bool bHasGridRowCount = false;
-
-	UPROPERTY()
-	int32 GridColumnCount = 0;
-
-	bool bHasGridColumnCount = false;
-
-	UPROPERTY()
-	float GridRowGap = 0.0f;
-
-	bool bHasGridRowGap = false;
-
-	UPROPERTY()
-	float GridColumnGap = 0.0f;
-
-	bool bHasGridColumnGap = false;
-
-	UPROPERTY()
-	int32 GridRowSpan = 0;
-
-	bool bHasGridRowSpan = false;
-
-	UPROPERTY()
-	int32 GridColumnSpan = 0;
-
-	bool bHasGridColumnSpan = false;
-
-	UPROPERTY()
-	int32 GridColumnAnchorIndex = 0;
-
-	bool bHasGridColumnAnchorIndex = false;
-
-	UPROPERTY()
-	int32 GridRowAnchorIndex = 0;
-
-	bool bHasGridRowAnchorIndex = false;
-
-	UPROPERTY()
-	bool bItemReverseZIndex = false;
-
-	bool bHasItemReverseZIndex = false;
-
-	UPROPERTY()
-	bool bStrokesIncludedInLayout = false;
-
-	bool bHasStrokesIncludedInLayout = false;
+	TOptional<float> CounterAxisSpacing;
+	TOptional<float> MinWidth;
+	TOptional<float> MaxWidth;
+	TOptional<float> MinHeight;
+	TOptional<float> MaxHeight;
+	TOptional<int32> GridRowCount;
+	TOptional<int32> GridColumnCount;
+	TOptional<float> GridRowGap;
+	TOptional<float> GridColumnGap;
+	TOptional<int32> GridRowSpan;
+	TOptional<int32> GridColumnSpan;
+	TOptional<int32> GridColumnAnchorIndex;
+	TOptional<int32> GridRowAnchorIndex;
+	TOptional<bool> ItemReverseZIndex;
+	TOptional<bool> StrokesIncludedInLayout;
 };
 
 USTRUCT()
@@ -137,10 +76,7 @@ struct FDesignComponentInstanceData
 	UPROPERTY() FString ComponentPropertiesJson;
 	UPROPERTY() FString VariantPropertiesJson;
 	UPROPERTY() FString OverridesJson;
-	UPROPERTY()
-	bool bIsExposedInstance = false;
-
-	bool bHasIsExposedInstance = false;
+	TOptional<bool> IsExposedInstance;
 };
 
 /**
@@ -153,21 +89,19 @@ struct FDesignPrototypeTransitionData
 
 	UPROPERTY() FString Type;
 	UPROPERTY() FString Direction;
-	UPROPERTY() float Duration = 0.0f;
-	bool bHasDuration = false;
+	TOptional<float> Duration;
 	UPROPERTY() FString EasingType;
 	UPROPERTY() FString EasingJson;
-	UPROPERTY() bool bMatchLayers = false;
-	bool bHasMatchLayers = false;
+	TOptional<bool> MatchLayers;
 
 	bool HasAny() const
 	{
 		return !Type.IsEmpty()
 			|| !Direction.IsEmpty()
-			|| bHasDuration
+			|| Duration.IsSet()
 			|| !EasingType.IsEmpty()
 			|| !EasingJson.IsEmpty()
-			|| bHasMatchLayers;
+			|| MatchLayers.IsSet();
 	}
 };
 

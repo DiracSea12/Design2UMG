@@ -3,7 +3,6 @@
 #include "MCPHttpClient.h"
 #include "Design2UMGLog.h"
 
-#include <atomic>
 #include "HttpModule.h"
 #include "HttpManager.h"
 #include "Interfaces/IHttpRequest.h"
@@ -197,7 +196,7 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 	// Keep request state on the heap so timeout/cancel cannot leave a dangling stack capture.
 	struct FRequestState
 	{
-		std::atomic<bool> bCompleted{false};
+		FThreadSafeBool bCompleted{false};
 		bool bSuccess = false;
 		FString ResponseBody;
 		FString NewSessionId;
@@ -225,7 +224,7 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 			{
 				UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: Connection failed for %s"), *Method);
 			}
-			State->bCompleted.store(true);
+			State->bCompleted = true;
 		});
 
 	if (!HttpRequest->ProcessRequest())
@@ -243,7 +242,7 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 		FText::FromString(FString::Printf(TEXT("Design2UMG: Waiting for MCP response (%s)..."), *Method)));
 	SlowTask.MakeDialog(true);
 
-	while (!State->bCompleted.load())
+	while (!State->bCompleted)
 	{
 		if (SlowTask.ShouldCancel())
 		{

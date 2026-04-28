@@ -88,10 +88,10 @@ bool FFigmaGridWrapMetadataTest::RunTest(const FString& Parameters)
 	const TSharedPtr<FDesignNode>& WrapNode = Doc.Children[0]->Children[1];
 	TestEqual(TEXT("GRID layout parsed"), GridNode->LayoutData.Layout, EDesignLayout::Grid);
 	TestEqual(TEXT("WRAP layout parsed"), WrapNode->LayoutData.Layout, EDesignLayout::Wrap);
-	TestTrue(TEXT("GRID gap preserved"), FMath::IsNearlyEqual(GridNode->LayoutData.Gap, 12.0f, 0.001f));
-	TestTrue(TEXT("WRAP gap preserved"), FMath::IsNearlyEqual(WrapNode->LayoutData.Gap, 8.0f, 0.001f));
-	TestTrue(TEXT("GRID padding left preserved"), FMath::IsNearlyEqual(GridNode->LayoutData.Padding.Left, 10.0f, 0.001f));
-	TestTrue(TEXT("WRAP padding top preserved"), FMath::IsNearlyEqual(WrapNode->LayoutData.Padding.Top, 7.0f, 0.001f));
+	TestTrue(TEXT("GRID gap preserved"), FMath::IsNearlyEqual(GridNode->LayoutData.ExplicitGap.Get(0.0f), 12.0f, 0.001f));
+	TestTrue(TEXT("WRAP gap preserved"), FMath::IsNearlyEqual(WrapNode->LayoutData.ExplicitGap.Get(0.0f), 8.0f, 0.001f));
+	TestTrue(TEXT("GRID padding left preserved"), FMath::IsNearlyEqual(GridNode->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Left, 10.0f, 0.001f));
+	TestTrue(TEXT("WRAP padding top preserved"), FMath::IsNearlyEqual(WrapNode->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Top, 7.0f, 0.001f));
 	const FString* CounterAxisAlignContent = GridNode->Metadata.Find(TEXT("counterAxisAlignContent"));
 	TestTrue(TEXT("counterAxisAlignContent preserved"), CounterAxisAlignContent && *CounterAxisAlignContent == TEXT("SPACE_BETWEEN"));
 	const FString* LayoutPositioning = GridNode->Metadata.Find(TEXT("layoutPositioning"));
@@ -1310,15 +1310,15 @@ bool FFigmaOfficialFieldParityTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("figma doc prototypeDevice"), Doc.Metadata.Contains(TEXT("prototypeDevice")));
 	TestTrue(TEXT("figma absolute positioning semantic"), Node->LayoutData.bAbsoluteLayoutPositioning);
 	TestTrue(TEXT("figma layout ext layoutPositioning"), Node->Source().LayoutExtensions.LayoutPositioning == TEXT("ABSOLUTE"));
-	TestTrue(TEXT("figma layout ext counterAxisSpacing"), Node->Source().LayoutExtensions.bHasCounterAxisSpacing && FMath::IsNearlyEqual(Node->Source().LayoutExtensions.CounterAxisSpacing, 6.0f, 0.001f));
+	TestTrue(TEXT("figma layout ext counterAxisSpacing"), Node->Source().LayoutExtensions.CounterAxisSpacing.IsSet() && FMath::IsNearlyEqual(Node->Source().LayoutExtensions.CounterAxisSpacing.GetValue(), 6.0f, 0.001f));
 	TestTrue(TEXT("figma layout ext layoutWrap"), Node->Source().LayoutExtensions.LayoutWrap == TEXT("WRAP"));
-	TestTrue(TEXT("figma layout ext strokesIncludedInLayout"), Node->Source().LayoutExtensions.bHasStrokesIncludedInLayout && Node->Source().LayoutExtensions.bStrokesIncludedInLayout == false);
-	TestTrue(TEXT("figma layout ext itemReverseZIndex"), Node->Source().LayoutExtensions.bHasItemReverseZIndex && Node->Source().LayoutExtensions.bItemReverseZIndex);
+	TestTrue(TEXT("figma layout ext strokesIncludedInLayout"), Node->Source().LayoutExtensions.StrokesIncludedInLayout.IsSet() && Node->Source().LayoutExtensions.StrokesIncludedInLayout.GetValue() == false);
+	TestTrue(TEXT("figma layout ext itemReverseZIndex"), Node->Source().LayoutExtensions.ItemReverseZIndex.IsSet() && Node->Source().LayoutExtensions.ItemReverseZIndex.GetValue() != 0);
 	TestTrue(TEXT("figma layout ext boundVariables"), !Node->Source().LayoutExtensions.BoundVariablesJson.IsEmpty());
 	TestTrue(TEXT("figma prototype overflowDirection typed"), Node->Source().Prototype.OverflowDirection == TEXT("HORIZONTAL_SCROLLING"));
 	TestTrue(TEXT("figma prototype transitionNodeID typed"), Node->Source().Prototype.TransitionNodeId == TEXT("1:3"));
-	TestTrue(TEXT("figma prototype legacy transition typed"), Node->Source().Prototype.Transition.bHasDuration
-		&& FMath::IsNearlyEqual(Node->Source().Prototype.Transition.Duration, 420.0f, 0.001f)
+	TestTrue(TEXT("figma prototype legacy transition typed"), Node->Source().Prototype.Transition.Duration.IsSet()
+		&& FMath::IsNearlyEqual(Node->Source().Prototype.Transition.Duration.GetValue(), 420.0f, 0.001f)
 		&& Node->Source().Prototype.Transition.EasingType == TEXT("EASE_OUT"));
 	TestTrue(TEXT("figma prototype interactions typed"), Node->Source().Prototype.Interactions.Num() == 1
 		&& Node->Source().Prototype.Interactions[0].TriggerType == TEXT("ON_CLICK")
@@ -1328,11 +1328,11 @@ bool FFigmaOfficialFieldParityTest::RunTest(const FString& Parameters)
 		&& Node->Source().Prototype.Interactions[0].Actions[0].Navigation == TEXT("NAVIGATE")
 		&& Node->Source().Prototype.Interactions[0].Actions[0].Transition.Type == TEXT("SMART_ANIMATE")
 		&& Node->Source().Prototype.Interactions[0].Actions[0].Transition.Direction == TEXT("LEFT")
-		&& Node->Source().Prototype.Interactions[0].Actions[0].Transition.bHasDuration
-		&& FMath::IsNearlyEqual(Node->Source().Prototype.Interactions[0].Actions[0].Transition.Duration, 180.0f, 0.001f)
+		&& Node->Source().Prototype.Interactions[0].Actions[0].Transition.Duration.IsSet()
+		&& FMath::IsNearlyEqual(Node->Source().Prototype.Interactions[0].Actions[0].Transition.Duration.GetValue(), 180.0f, 0.001f)
 		&& Node->Source().Prototype.Interactions[0].Actions[0].Transition.EasingType == TEXT("EASE_IN_AND_OUT")
-		&& Node->Source().Prototype.Interactions[0].Actions[0].Transition.bHasMatchLayers
-		&& Node->Source().Prototype.Interactions[0].Actions[0].Transition.bMatchLayers);
+		&& Node->Source().Prototype.Interactions[0].Actions[0].Transition.MatchLayers.IsSet()
+		&& Node->Source().Prototype.Interactions[0].Actions[0].Transition.MatchLayers.GetValue());
 	TestTrue(TEXT("figma prototype flowStartingPoints typed"), Node->Source().Prototype.FlowStartingPoints.Num() == 1
 		&& Node->Source().Prototype.FlowStartingPoints[0].NodeId == TEXT("0:2")
 		&& Node->Source().Prototype.FlowStartingPoints[0].Name == TEXT("Flow 1"));
@@ -1355,7 +1355,7 @@ bool FFigmaOfficialFieldParityTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("figma instance ext componentProperties"), !InstanceNode->Source().ComponentInstance.ComponentPropertiesJson.IsEmpty());
 	TestTrue(TEXT("figma instance ext variantProperties"), !InstanceNode->Source().ComponentInstance.VariantPropertiesJson.IsEmpty());
 	TestTrue(TEXT("figma instance ext overrides"), !InstanceNode->Source().ComponentInstance.OverridesJson.IsEmpty());
-	TestTrue(TEXT("figma instance ext isExposedInstance"), InstanceNode->Source().ComponentInstance.bHasIsExposedInstance && InstanceNode->Source().ComponentInstance.bIsExposedInstance);
+	TestTrue(TEXT("figma instance ext isExposedInstance"), InstanceNode->Source().ComponentInstance.IsExposedInstance.Get(false));
 	TestTrue(TEXT("figma instance componentSetId preserved"), InstanceNode->Metadata.FindRef(TEXT("componentSetId")) == TEXT("56:78"));
 	TestTrue(TEXT("figma instance mainComponentKey preserved"), InstanceNode->Metadata.FindRef(TEXT("mainComponentKey")) == TEXT("component-key-1"));
 TestTrue(TEXT("figma instance componentProperties preserved"), InstanceNode->Metadata.Contains(TEXT("componentProperties")));
@@ -1383,7 +1383,7 @@ TestTrue(TEXT("figma instance isExposedInstance preserved"), InstanceNode->Metad
 	TestTrue(TEXT("figma instance variantProperties exported"), !ConvertedInstanceWidget->Source().VariantPropertiesJson.IsEmpty());
 	TestTrue(TEXT("figma instance overrides exported"), !ConvertedInstanceWidget->Source().OverridesJson.IsEmpty());
 	TestTrue(TEXT("figma instance exposed flag exported"),
-		ConvertedInstanceWidget->Source().bHasIsExposedInstance && ConvertedInstanceWidget->Source().bIsExposedInstance);
+		ConvertedInstanceWidget->Source().HasIsExposedInstance.bIsSet && ConvertedInstanceWidget->Source().HasIsExposedInstance.bValue);
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaTransformGroupPreservedTest,

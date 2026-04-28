@@ -1,4 +1,20 @@
-﻿void ApplyNodeBoxProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, EDesignNodeType SizeNodeType, const FDesignVariableResolver& Resolver)
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+
+#include "PenParserInternal.h"
+#include "DesignSchema.h"
+#include "DesignVariableResolver.h"
+#include "Dom/JsonValue.h"
+#include "Dom/JsonObject.h"
+
+// Forward declarations of functions defined in other PenParser*.cpp files.
+FDesignSize ParseSize(const TSharedPtr<FJsonValue>& Value, EDesignNodeType NodeType, const FDesignVariableResolver& Resolver);
+FDesignPadding ParsePadding(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver);
+EDesignJustifyContent ParseJustifyContent(const FString& S);
+EDesignAlignItems ParseAlignItems(const FString& S);
+EDesignTextAlign ParseTextAlign(const FString& S);
+EDesignTextGrowth ParseTextGrowth(const FString& S);
+
+void ApplyNodeBoxProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, EDesignNodeType SizeNodeType, const FDesignVariableResolver& Resolver)
 {
 	if (JsonObj->HasField(TEXT("width")))
 	{
@@ -35,7 +51,7 @@ void ApplyNodeLayoutProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNo
 	}
 	if (JsonObj->HasField(TEXT("gap")))
 	{
-		float ResolvedGap = OutNode.LayoutData.Gap;
+		float ResolvedGap = OutNode.LayoutData.ExplicitGap.Get(0.0f);
 		if (TryGetResolvedNumberField(JsonObj, TEXT("gap"), Resolver, ResolvedGap))
 			OutNode.LayoutData.SetGap(ResolvedGap);
 	}

@@ -53,31 +53,33 @@ static void SetStringFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TC
 	}
 }
 
-static void SetFloatFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key, float& OutValue, bool& bOutHasValue)
+static void SetFloatFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key, TOptional<float>& Out)
 {
 	double Value = 0.0;
 	if (TryGetNumber(Obj, Key, Value))
-	{
-		OutValue = static_cast<float>(Value);
-		bOutHasValue = true;
-	}
+		Out.Emplace(static_cast<float>(Value));
 }
 
-static void SetIntFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key, int32& OutValue, bool& bOutHasValue)
+static void SetIntFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key, TOptional<int32>& Out)
 {
 	double Value = 0.0;
 	if (TryGetNumber(Obj, Key, Value))
-	{
-		OutValue = FMath::RoundToInt(Value);
-		bOutHasValue = true;
-	}
+		Out.Emplace(FMath::RoundToInt(Value));
+}
+
+static void SetBoolFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key, TOptional<bool>& Out)
+{
+	if (!Obj.IsValid())
+		return;
+	bool Value = false;
+	if (Obj->TryGetBoolField(Key, Value))
+		Out.Emplace(Value);
 }
 
 static void SetBoolFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key, bool& OutValue, bool& bOutHasValue)
 {
 	if (!Obj.IsValid())
 		return;
-
 	bool Value = false;
 	if (Obj->TryGetBoolField(Key, Value))
 	{
@@ -101,25 +103,25 @@ static void SetJsonFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHA
 static void PromoteFigmaGridLayout(FDesignNode& OutNode)
 {
 	const FDesignSourceNodeData& SourceData = OutNode.Source();
-	if (SourceData.LayoutExtensions.bHasGridRowCount)
+	if (SourceData.LayoutExtensions.GridRowCount.IsSet())
 	{
-		OutNode.LayoutData.SetLayoutRowCountValue(FMath::Max(0, SourceData.LayoutExtensions.GridRowCount));
+		OutNode.LayoutData.SetLayoutRowCountValue(FMath::Max(0, SourceData.LayoutExtensions.GridRowCount.GetValue()));
 	}
-	if (SourceData.LayoutExtensions.bHasGridColumnCount)
+	if (SourceData.LayoutExtensions.GridColumnCount.IsSet())
 	{
-		OutNode.LayoutData.SetLayoutColumnCountValue(FMath::Max(0, SourceData.LayoutExtensions.GridColumnCount));
+		OutNode.LayoutData.SetLayoutColumnCountValue(FMath::Max(0, SourceData.LayoutExtensions.GridColumnCount.GetValue()));
 	}
-	if (SourceData.LayoutExtensions.bHasGridRowGap)
+	if (SourceData.LayoutExtensions.GridRowGap.IsSet())
 	{
-		OutNode.LayoutData.SetLayoutRowGapValue(FMath::Max(0.0f, SourceData.LayoutExtensions.GridRowGap));
+		OutNode.LayoutData.SetLayoutRowGapValue(FMath::Max(0.0f, SourceData.LayoutExtensions.GridRowGap.GetValue()));
 	}
-	else if (SourceData.LayoutExtensions.bHasCounterAxisSpacing)
+	else if (SourceData.LayoutExtensions.CounterAxisSpacing.IsSet())
 	{
-		OutNode.LayoutData.SetLayoutRowGapValue(FMath::Max(0.0f, SourceData.LayoutExtensions.CounterAxisSpacing));
+		OutNode.LayoutData.SetLayoutRowGapValue(FMath::Max(0.0f, SourceData.LayoutExtensions.CounterAxisSpacing.GetValue()));
 	}
-	if (SourceData.LayoutExtensions.bHasGridColumnGap)
+	if (SourceData.LayoutExtensions.GridColumnGap.IsSet())
 	{
-		OutNode.LayoutData.SetLayoutColumnGapValue(FMath::Max(0.0f, SourceData.LayoutExtensions.GridColumnGap));
+		OutNode.LayoutData.SetLayoutColumnGapValue(FMath::Max(0.0f, SourceData.LayoutExtensions.GridColumnGap.GetValue()));
 	}
 	if (!SourceData.LayoutExtensions.GridChildHorizontalAlign.IsEmpty())
 	{
@@ -129,21 +131,21 @@ static void PromoteFigmaGridLayout(FDesignNode& OutNode)
 	{
 		OutNode.LayoutData.SetLayoutChildVerticalAlignValue(SourceData.LayoutExtensions.GridChildVerticalAlign);
 	}
-	if (SourceData.LayoutExtensions.bHasGridRowSpan)
+	if (SourceData.LayoutExtensions.GridRowSpan.IsSet())
 	{
-		OutNode.LayoutData.SetLayoutRowSpanValue(FMath::Max(1, SourceData.LayoutExtensions.GridRowSpan));
+		OutNode.LayoutData.SetLayoutRowSpanValue(FMath::Max(1, SourceData.LayoutExtensions.GridRowSpan.GetValue()));
 	}
-	if (SourceData.LayoutExtensions.bHasGridColumnSpan)
+	if (SourceData.LayoutExtensions.GridColumnSpan.IsSet())
 	{
-		OutNode.LayoutData.SetLayoutColumnSpanValue(FMath::Max(1, SourceData.LayoutExtensions.GridColumnSpan));
+		OutNode.LayoutData.SetLayoutColumnSpanValue(FMath::Max(1, SourceData.LayoutExtensions.GridColumnSpan.GetValue()));
 	}
-	if (SourceData.LayoutExtensions.bHasGridRowAnchorIndex)
+	if (SourceData.LayoutExtensions.GridRowAnchorIndex.IsSet())
 	{
-		OutNode.LayoutData.SetLayoutRowValue(FMath::Max(0, SourceData.LayoutExtensions.GridRowAnchorIndex));
+		OutNode.LayoutData.SetLayoutRowValue(FMath::Max(0, SourceData.LayoutExtensions.GridRowAnchorIndex.GetValue()));
 	}
-	if (SourceData.LayoutExtensions.bHasGridColumnAnchorIndex)
+	if (SourceData.LayoutExtensions.GridColumnAnchorIndex.IsSet())
 	{
-		OutNode.LayoutData.SetLayoutColumnValue(FMath::Max(0, SourceData.LayoutExtensions.GridColumnAnchorIndex));
+		OutNode.LayoutData.SetLayoutColumnValue(FMath::Max(0, SourceData.LayoutExtensions.GridColumnAnchorIndex.GetValue()));
 	}
 }
 
@@ -1114,12 +1116,16 @@ void ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 		OutNode.LayoutData.Layout = EDesignLayout::None;
 	}
 
-	OutNode.LayoutData.Gap = GetNumber(NodeObj, TEXT("itemSpacing"));
+	OutNode.LayoutData.SetGap(GetNumber(NodeObj, TEXT("itemSpacing")));
 
-	OutNode.LayoutData.Padding.Left = GetNumber(NodeObj, TEXT("paddingLeft"));
-	OutNode.LayoutData.Padding.Right = GetNumber(NodeObj, TEXT("paddingRight"));
-	OutNode.LayoutData.Padding.Top = GetNumber(NodeObj, TEXT("paddingTop"));
-	OutNode.LayoutData.Padding.Bottom = GetNumber(NodeObj, TEXT("paddingBottom"));
+	{
+		FDesignPadding P;
+		P.Left   = GetNumber(NodeObj, TEXT("paddingLeft"));
+		P.Right  = GetNumber(NodeObj, TEXT("paddingRight"));
+		P.Top    = GetNumber(NodeObj, TEXT("paddingTop"));
+		P.Bottom = GetNumber(NodeObj, TEXT("paddingBottom"));
+		OutNode.LayoutData.SetPadding(P);
+	}
 	OutNode.LayoutData.bAbsoluteLayoutPositioning = GetString(NodeObj, TEXT("layoutPositioning")).Equals(TEXT("ABSOLUTE"), ESearchCase::IgnoreCase);
 
 	{
@@ -1173,21 +1179,21 @@ void ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 	SetStringFieldIfPresent(NodeObj, TEXT("gridColumnsSizing"), LayoutExtensions.GridColumnsSizing);
 	SetStringFieldIfPresent(NodeObj, TEXT("gridChildHorizontalAlign"), LayoutExtensions.GridChildHorizontalAlign);
 	SetStringFieldIfPresent(NodeObj, TEXT("gridChildVerticalAlign"), LayoutExtensions.GridChildVerticalAlign);
-	SetFloatFieldIfPresent(NodeObj, TEXT("counterAxisSpacing"), LayoutExtensions.CounterAxisSpacing, LayoutExtensions.bHasCounterAxisSpacing);
-	SetFloatFieldIfPresent(NodeObj, TEXT("minWidth"), LayoutExtensions.MinWidth, LayoutExtensions.bHasMinWidth);
-	SetFloatFieldIfPresent(NodeObj, TEXT("maxWidth"), LayoutExtensions.MaxWidth, LayoutExtensions.bHasMaxWidth);
-	SetFloatFieldIfPresent(NodeObj, TEXT("minHeight"), LayoutExtensions.MinHeight, LayoutExtensions.bHasMinHeight);
-	SetFloatFieldIfPresent(NodeObj, TEXT("maxHeight"), LayoutExtensions.MaxHeight, LayoutExtensions.bHasMaxHeight);
-	SetIntFieldIfPresent(NodeObj, TEXT("gridRowCount"), LayoutExtensions.GridRowCount, LayoutExtensions.bHasGridRowCount);
-	SetIntFieldIfPresent(NodeObj, TEXT("gridColumnCount"), LayoutExtensions.GridColumnCount, LayoutExtensions.bHasGridColumnCount);
-	SetFloatFieldIfPresent(NodeObj, TEXT("gridRowGap"), LayoutExtensions.GridRowGap, LayoutExtensions.bHasGridRowGap);
-	SetFloatFieldIfPresent(NodeObj, TEXT("gridColumnGap"), LayoutExtensions.GridColumnGap, LayoutExtensions.bHasGridColumnGap);
-	SetIntFieldIfPresent(NodeObj, TEXT("gridRowSpan"), LayoutExtensions.GridRowSpan, LayoutExtensions.bHasGridRowSpan);
-	SetIntFieldIfPresent(NodeObj, TEXT("gridColumnSpan"), LayoutExtensions.GridColumnSpan, LayoutExtensions.bHasGridColumnSpan);
-	SetIntFieldIfPresent(NodeObj, TEXT("gridColumnAnchorIndex"), LayoutExtensions.GridColumnAnchorIndex, LayoutExtensions.bHasGridColumnAnchorIndex);
-	SetIntFieldIfPresent(NodeObj, TEXT("gridRowAnchorIndex"), LayoutExtensions.GridRowAnchorIndex, LayoutExtensions.bHasGridRowAnchorIndex);
-	SetBoolFieldIfPresent(NodeObj, TEXT("itemReverseZIndex"), LayoutExtensions.bItemReverseZIndex, LayoutExtensions.bHasItemReverseZIndex);
-	SetBoolFieldIfPresent(NodeObj, TEXT("strokesIncludedInLayout"), LayoutExtensions.bStrokesIncludedInLayout, LayoutExtensions.bHasStrokesIncludedInLayout);
+	SetFloatFieldIfPresent(NodeObj, TEXT("counterAxisSpacing"), LayoutExtensions.CounterAxisSpacing);
+	SetFloatFieldIfPresent(NodeObj, TEXT("minWidth"), LayoutExtensions.MinWidth);
+	SetFloatFieldIfPresent(NodeObj, TEXT("maxWidth"), LayoutExtensions.MaxWidth);
+	SetFloatFieldIfPresent(NodeObj, TEXT("minHeight"), LayoutExtensions.MinHeight);
+	SetFloatFieldIfPresent(NodeObj, TEXT("maxHeight"), LayoutExtensions.MaxHeight);
+	SetIntFieldIfPresent(NodeObj, TEXT("gridRowCount"), LayoutExtensions.GridRowCount);
+	SetIntFieldIfPresent(NodeObj, TEXT("gridColumnCount"), LayoutExtensions.GridColumnCount);
+	SetFloatFieldIfPresent(NodeObj, TEXT("gridRowGap"), LayoutExtensions.GridRowGap);
+	SetFloatFieldIfPresent(NodeObj, TEXT("gridColumnGap"), LayoutExtensions.GridColumnGap);
+	SetIntFieldIfPresent(NodeObj, TEXT("gridRowSpan"), LayoutExtensions.GridRowSpan);
+	SetIntFieldIfPresent(NodeObj, TEXT("gridColumnSpan"), LayoutExtensions.GridColumnSpan);
+	SetIntFieldIfPresent(NodeObj, TEXT("gridColumnAnchorIndex"), LayoutExtensions.GridColumnAnchorIndex);
+	SetIntFieldIfPresent(NodeObj, TEXT("gridRowAnchorIndex"), LayoutExtensions.GridRowAnchorIndex);
+	SetBoolFieldIfPresent(NodeObj, TEXT("itemReverseZIndex"), LayoutExtensions.ItemReverseZIndex);
+	SetBoolFieldIfPresent(NodeObj, TEXT("strokesIncludedInLayout"), LayoutExtensions.StrokesIncludedInLayout);
 	SetJsonFieldIfPresent(NodeObj, TEXT("boundVariables"), LayoutExtensions.BoundVariablesJson);
 	PromoteFigmaGridLayout(OutNode);
 
@@ -1413,7 +1419,7 @@ static void ApplyInstanceTrackingData(
 	SetJsonFieldIfPresent(NodeObj, TEXT("componentProperties"), ComponentInstance.ComponentPropertiesJson);
 	SetJsonFieldIfPresent(NodeObj, TEXT("variantProperties"), ComponentInstance.VariantPropertiesJson);
 	SetJsonFieldIfPresent(NodeObj, TEXT("overrides"), ComponentInstance.OverridesJson);
-	SetBoolFieldIfPresent(NodeObj, TEXT("isExposedInstance"), ComponentInstance.bIsExposedInstance, ComponentInstance.bHasIsExposedInstance);
+	SetBoolFieldIfPresent(NodeObj, TEXT("isExposedInstance"), ComponentInstance.IsExposedInstance);
 }
 
 static void ParseNodeVisualData(
