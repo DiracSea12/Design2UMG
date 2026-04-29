@@ -172,6 +172,10 @@ public:
 	bool VerifyBindings(const UWidgetTree* WidgetTree) const;
 #endif
 
+#if WITH_AUTOMATION_WORKER
+	const FUMGPrototypeNavigationData& GetNavigationDataForTest() const { return NavigationData; }
+#endif
+
 private:
 	void EnsureNavigationBound(UUserWidget* UserWidget);
 
