@@ -5,11 +5,11 @@
 #include "Design2UMGPrototypeNavigationExtensions.h"
 #include "UObject/UObjectGlobals.h"
 
-#if WITH_AUTOMATION_WORKER
+#if WITH_DEV_AUTOMATION_TESTS
 
 namespace
 {
-	FDesign2UMGFigmaWidgetMetadataRecord MakeFigmaRecord(const bool bLegacyValue)
+	FDesign2UMGFigmaWidgetMetadataRecord MakeFigmaRecord(const bool bLegacyValue, const bool bLegacyAuthored)
 	{
 		FDesign2UMGFigmaWidgetMetadataRecord Record;
 		Record.WidgetName = TEXT("CardTitle");
@@ -17,6 +17,7 @@ namespace
 		Record.SourceNode.SourceNodeId = TEXT("node-1");
 		Record.SourceNode.SourceNodeType = TEXT("INSTANCE");
 		Record.SourceNode.bIsExposedInstance = bLegacyValue;
+		Record.SourceNode.bHasIsExposedInstance = bLegacyAuthored;
 		return Record;
 	}
 
@@ -61,7 +62,7 @@ bool FFigmaMetadataPostLoadMigratesLegacyExposureFlagTest::RunTest(const FString
 	}
 
 	TArray<FDesign2UMGFigmaWidgetMetadataRecord> Records;
-	Records.Add(MakeFigmaRecord(true));
+	Records.Add(MakeFigmaRecord(true, true));
 	Extension->SetMetadata(FUMGSourceDocumentData(), Records);
 	Extension->PostLoad();
 
@@ -90,7 +91,7 @@ bool FFigmaMetadataPostLoadKeepsExistingExposureOverrideTest::RunTest(const FStr
 		return false;
 	}
 
-	FDesign2UMGFigmaWidgetMetadataRecord Record = MakeFigmaRecord(true);
+	FDesign2UMGFigmaWidgetMetadataRecord Record = MakeFigmaRecord(true, true);
 	Record.SourceNode.HasIsExposedInstance.bIsSet = true;
 	Record.SourceNode.HasIsExposedInstance.bValue = false;
 
@@ -102,6 +103,30 @@ bool FFigmaMetadataPostLoadKeepsExistingExposureOverrideTest::RunTest(const FStr
 	const FUMGSourceNodeData& SourceNode = Extension->GetWidgetRecords()[0].SourceNode;
 	TestTrue(TEXT("Existing optional wrapper stays marked as authored"), SourceNode.HasIsExposedInstance.bIsSet);
 	TestFalse(TEXT("Existing optional wrapper is not overwritten by legacy bool"), SourceNode.HasIsExposedInstance.bValue);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaMetadataPostLoadKeepsLegacyUnsetExposureStateTest,
+	"Design2UMG.Unit.SourceExtensions.FigmaMetadata.PostLoadKeepsLegacyUnsetExposureState",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaMetadataPostLoadKeepsLegacyUnsetExposureStateTest::RunTest(const FString& Parameters)
+{
+	UDesign2UMGFigmaMetadataClassExtension* Extension =
+		NewObject<UDesign2UMGFigmaMetadataClassExtension>(GetTransientPackageAsObject());
+	TestTrue(TEXT("Figma metadata extension created"), Extension != nullptr);
+	if (!Extension)
+	{
+		return false;
+	}
+
+	TArray<FDesign2UMGFigmaWidgetMetadataRecord> Records;
+	Records.Add(MakeFigmaRecord(true, false));
+	Extension->SetMetadata(FUMGSourceDocumentData(), Records);
+	Extension->PostLoad();
+
+	const FUMGSourceNodeData& SourceNode = Extension->GetWidgetRecords()[0].SourceNode;
+	TestFalse(TEXT("Legacy unset exposure state stays unset after migration"), SourceNode.HasIsExposedInstance.bIsSet);
+	TestFalse(TEXT("Legacy unset exposure state does not smuggle authored true"), SourceNode.HasIsExposedInstance.bValue);
 	return true;
 }
 
@@ -120,7 +145,9 @@ bool FPrototypeNavigationPostLoadMigratesLegacyMatchLayersTest::RunTest(const FS
 
 	FUMGPrototypeNavigationBinding Binding = MakeNavigationBinding();
 	Binding.Transition.bMatchLayers = true;
+	Binding.Transition.bHasMatchLayers = true;
 	Binding.Steps[0].Transition.bMatchLayers = false;
+	Binding.Steps[0].Transition.bHasMatchLayers = true;
 	Extension->SetNavigationData(MakeNavigationData(MoveTemp(Binding)));
 	Extension->PostLoad();
 
@@ -154,9 +181,11 @@ bool FPrototypeNavigationPostLoadKeepsExistingMatchLayersOverrideTest::RunTest(c
 
 	FUMGPrototypeNavigationBinding Binding = MakeNavigationBinding();
 	Binding.Transition.bMatchLayers = true;
+	Binding.Transition.bHasMatchLayers = true;
 	Binding.Transition.HasMatchLayers.bIsSet = true;
 	Binding.Transition.HasMatchLayers.bValue = false;
 	Binding.Steps[0].Transition.bMatchLayers = false;
+	Binding.Steps[0].Transition.bHasMatchLayers = true;
 	Binding.Steps[0].Transition.HasMatchLayers.bIsSet = true;
 	Binding.Steps[0].Transition.HasMatchLayers.bValue = true;
 	Extension->SetNavigationData(MakeNavigationData(MoveTemp(Binding)));
@@ -170,4 +199,33 @@ bool FPrototypeNavigationPostLoadKeepsExistingMatchLayersOverrideTest::RunTest(c
 	return true;
 }
 
-#endif // WITH_AUTOMATION_WORKER
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPrototypeNavigationPostLoadKeepsLegacyUnsetMatchLayersStateTest,
+	"Design2UMG.Unit.SourceExtensions.PrototypeNavigation.PostLoadKeepsLegacyUnsetMatchLayersState",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPrototypeNavigationPostLoadKeepsLegacyUnsetMatchLayersStateTest::RunTest(const FString& Parameters)
+{
+	UDesign2UMGPrototypeNavigationClassExtension* Extension =
+		NewObject<UDesign2UMGPrototypeNavigationClassExtension>(GetTransientPackageAsObject());
+	TestTrue(TEXT("Prototype navigation extension created"), Extension != nullptr);
+	if (!Extension)
+	{
+		return false;
+	}
+
+	FUMGPrototypeNavigationBinding Binding = MakeNavigationBinding();
+	Binding.Transition.bMatchLayers = true;
+	Binding.Transition.bHasMatchLayers = false;
+	Binding.Steps[0].Transition.bMatchLayers = true;
+	Binding.Steps[0].Transition.bHasMatchLayers = false;
+	Extension->SetNavigationData(MakeNavigationData(MoveTemp(Binding)));
+	Extension->PostLoad();
+
+	const FUMGPrototypeNavigationBinding& StoredBinding = Extension->GetNavigationDataForTest().ClickBindings[0];
+	TestFalse(TEXT("Binding legacy unset state stays unset after migration"), StoredBinding.Transition.HasMatchLayers.bIsSet);
+	TestFalse(TEXT("Binding legacy unset state does not smuggle authored true"), StoredBinding.Transition.HasMatchLayers.bValue);
+	TestFalse(TEXT("Step legacy unset state stays unset after migration"), StoredBinding.Steps[0].Transition.HasMatchLayers.bIsSet);
+	TestFalse(TEXT("Step legacy unset state does not smuggle authored true"), StoredBinding.Steps[0].Transition.HasMatchLayers.bValue);
+	return true;
+}
+
+#endif // WITH_DEV_AUTOMATION_TESTS

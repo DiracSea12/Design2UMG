@@ -172,7 +172,7 @@ public:
 	bool VerifyBindings(const UWidgetTree* WidgetTree) const;
 #endif
 
-#if WITH_AUTOMATION_WORKER
+#if WITH_DEV_AUTOMATION_TESTS
 	const FUMGPrototypeNavigationData& GetNavigationDataForTest() const { return NavigationData; }
 #endif
 

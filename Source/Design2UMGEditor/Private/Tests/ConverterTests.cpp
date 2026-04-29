@@ -4,34 +4,82 @@
 
 #include "Misc/AutomationTest.h"
 #include "Design2UMGConverter.h"
-#include "PenParser.h"
 #include "DesignSchema.h"
 #include "UMGSchema.h"
-#include "Interfaces/IPluginManager.h"
-#include "Misc/FileHelper.h"
-#include "Misc/Paths.h"
 
 namespace
 {
-	static const TCHAR* ConverterPluginName = TEXT("Design2UMG");
-	static const FString ConverterFixtureBase = TEXT("Source/Design2UMGEditor/Tests/Fixtures/converter");
-
-	bool LoadConverterFixture(FAutomationTestBase& Test, const FString& FileName, FDesignDocument& OutDoc)
+	TSharedPtr<FDesignNode> MakeNode(
+		const FString& Id,
+		const FString& Name,
+		const EDesignNodeType Type,
+		const float X,
+		const float Y,
+		const float Width,
+		const float Height)
 	{
-		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(ConverterPluginName);
-		if (!Plugin.IsValid())
-		{
-			Test.AddError(TEXT("Design2UMG plugin not found"));
-			return false;
-		}
-		const FString Path = FPaths::Combine(Plugin->GetBaseDir(), ConverterFixtureBase, FileName);
-		FString Json;
-		if (!FFileHelper::LoadFileToString(Json, *Path))
-		{
-			Test.AddError(FString::Printf(TEXT("Failed to load fixture: %s"), *Path));
-			return false;
-		}
-		return FPenParser::ParseDocument(Json, OutDoc);
+		const TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
+		Node->Id = Id;
+		Node->Name = Name;
+		Node->Type = Type;
+		Node->Transform.SetPosition(X, Y);
+		Node->Transform.SetWidthValue(FDesignSize::Fixed(Width));
+		Node->Transform.SetHeightValue(FDesignSize::Fixed(Height));
+		return Node;
+	}
+
+	FDesignDocument BuildSingleNodeDocument()
+	{
+		FDesignDocument Doc;
+		Doc.Version = TEXT("converter-single");
+		Doc.Children.Add(MakeNode(TEXT("single-1"), TEXT("SingleNode"), EDesignNodeType::Frame, 0.0f, 0.0f, 200.0f, 100.0f));
+		return Doc;
+	}
+
+	FDesignDocument BuildNestedNodesDocument()
+	{
+		FDesignDocument Doc;
+		Doc.Version = TEXT("converter-nested");
+
+		const TSharedPtr<FDesignNode> Parent =
+			MakeNode(TEXT("parent-1"), TEXT("ParentFrame"), EDesignNodeType::Frame, 0.0f, 0.0f, 400.0f, 300.0f);
+		const TSharedPtr<FDesignNode> Rect =
+			MakeNode(TEXT("child-1"), TEXT("ChildRect"), EDesignNodeType::Rectangle, 10.0f, 10.0f, 100.0f, 50.0f);
+		Rect->Visual.Fill = FDesignFill::FromColor(TEXT("#ff0000"));
+
+		const TSharedPtr<FDesignNode> Text =
+			MakeNode(TEXT("child-2"), TEXT("ChildText"), EDesignNodeType::Text, 10.0f, 70.0f, 200.0f, 30.0f);
+		Text->Text.Content = TEXT("Nested text");
+		Text->Text.FontFamily = TEXT("Roboto");
+		Text->Text.FontSize = 14.0f;
+
+		Parent->Children.Add(Rect);
+		Parent->Children.Add(Text);
+		Doc.Children.Add(Parent);
+		return Doc;
+	}
+
+	FDesignDocument BuildRefExpandDocument()
+	{
+		FDesignDocument Doc;
+		Doc.Version = TEXT("converter-ref");
+
+		const TSharedPtr<FDesignNode> Reusable =
+			MakeNode(TEXT("reusable-1"), TEXT("ReusableComp"), EDesignNodeType::Frame, 0.0f, 0.0f, 100.0f, 100.0f);
+		Reusable->bReusable = true;
+		Reusable->Children.Add(
+			MakeNode(TEXT("rc-child-1"), TEXT("RCChild"), EDesignNodeType::Rectangle, 0.0f, 0.0f, 100.0f, 100.0f));
+
+		const TSharedPtr<FDesignNode> Host =
+			MakeNode(TEXT("host-1"), TEXT("HostFrame"), EDesignNodeType::Frame, 200.0f, 0.0f, 400.0f, 300.0f);
+		const TSharedPtr<FDesignNode> Ref =
+			MakeNode(TEXT("ref-1"), TEXT("RefNode"), EDesignNodeType::Ref, 10.0f, 10.0f, 100.0f, 100.0f);
+		Ref->Ref = TEXT("reusable-1");
+		Host->Children.Add(Ref);
+
+		Doc.Children.Add(Reusable);
+		Doc.Children.Add(Host);
+		return Doc;
 	}
 }
 
@@ -45,11 +93,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FConverterSingleNodeTest::RunTest(const FString&)
 {
-	FDesignDocument Doc;
-	if (!LoadConverterFixture(*this, TEXT("single_node.json"), Doc))
-		return false;
-
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(BuildSingleNodeDocument());
 	TestFalse(TEXT("RootWidget type is set"), Data.RootWidget.Type.IsEmpty());
 	TestEqual(TEXT("RootWidget name"), Data.RootWidget.Name, FString(TEXT("SingleNode")));
 
@@ -66,11 +110,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FConverterNestedNodesTest::RunTest(const FString&)
 {
-	FDesignDocument Doc;
-	if (!LoadConverterFixture(*this, TEXT("nested_nodes.json"), Doc))
-		return false;
-
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(BuildNestedNodesDocument());
 	TestEqual(TEXT("Root widget name"), Data.RootWidget.Name, FString(TEXT("ParentFrame")));
 	TestEqual(TEXT("Parent has nested children"), Data.RootWidget.Children.Num(), 2);
 	TestEqual(TEXT("First child is wrapped in SizeBox"), Data.RootWidget.Children[0].Name, FString(TEXT("ChildRect_sz")));
@@ -109,11 +149,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FConverterRefExpandTest::RunTest(const FString&)
 {
-	FDesignDocument Doc;
-	if (!LoadConverterFixture(*this, TEXT("ref_expand.json"), Doc))
-		return false;
-
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(BuildRefExpandDocument());
 	TestEqual(TEXT("Reusable root is skipped from render tree"), Data.RootWidget.Name, FString(TEXT("HostFrame")));
 	TestEqual(TEXT("Host frame child count"), Data.RootWidget.Children.Num(), 1);
 	TestEqual(TEXT("Expanded child is wrapped in SizeBox"), Data.RootWidget.Children[0].Name, FString(TEXT("RefNode_sz")));

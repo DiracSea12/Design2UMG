@@ -30,8 +30,11 @@ void UDesign2UMGFigmaMetadataClassExtension::PostLoad()
 		FUMGSourceNodeData& SN = Record.SourceNode;
 		if (!SN.HasIsExposedInstance.bIsSet)
 		{
-			SN.HasIsExposedInstance.bValue = SN.bIsExposedInstance;
-			SN.HasIsExposedInstance.bIsSet = true;
+			SN.HasIsExposedInstance.bIsSet = SN.bHasIsExposedInstance;
+			if (SN.bHasIsExposedInstance)
+			{
+				SN.HasIsExposedInstance.bValue = SN.bIsExposedInstance;
+			}
 		}
 	}
 }

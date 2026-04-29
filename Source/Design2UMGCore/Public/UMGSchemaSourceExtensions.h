@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -8,7 +8,8 @@
 /**
  * UPROPERTY-compatible optional bool wrapper for serialized bHas* fields that cannot
  * use TOptional<bool> due to UE serialization constraints.
- * PostLoad migration writes the legacy bool into bValue and sets bIsSet = true.
+ * PostLoad migration copies the legacy authored state into bIsSet and only copies
+ * the legacy bool value when that authored state was true.
  */
 USTRUCT()
 struct FD2UMGOptionalBool
@@ -44,6 +45,11 @@ struct FUMGPrototypeTransitionData
 
 	UPROPERTY()
 	bool bMatchLayers = false;
+
+	// Legacy authored-presence bit kept only so previously serialized assets can
+	// migrate into HasMatchLayers without losing "unset" vs "authored false".
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use HasMatchLayers"))
+	bool bHasMatchLayers = false;
 
 	UPROPERTY()
 	FD2UMGOptionalBool HasMatchLayers;
@@ -97,6 +103,11 @@ struct FUMGSourceNodeData
 	UPROPERTY()
 	bool bIsExposedInstance = false;
 
+	// Legacy authored-presence bit kept only so previously serialized assets can
+	// migrate into HasIsExposedInstance without collapsing "unset" into false.
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use HasIsExposedInstance"))
+	bool bHasIsExposedInstance = false;
+
 	UPROPERTY()
 	FD2UMGOptionalBool HasIsExposedInstance;
 
@@ -124,7 +135,8 @@ struct FUMGSourceNodeData
 			|| !ComponentPropertiesJson.IsEmpty()
 			|| !VariantPropertiesJson.IsEmpty()
 			|| !OverridesJson.IsEmpty()
-			|| HasIsExposedInstance.bIsSet;
+			|| HasIsExposedInstance.bIsSet
+			|| bHasIsExposedInstance;
 	}
 };
 

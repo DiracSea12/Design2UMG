@@ -1088,16 +1088,22 @@ void UDesign2UMGPrototypeNavigationClassExtension::PostLoad()
 		FUMGPrototypeTransitionData& T = Binding.Transition;
 		if (!T.HasMatchLayers.bIsSet)
 		{
-			T.HasMatchLayers.bValue = T.bMatchLayers;
-			T.HasMatchLayers.bIsSet = true;
+			T.HasMatchLayers.bIsSet = T.bHasMatchLayers;
+			if (T.bHasMatchLayers)
+			{
+				T.HasMatchLayers.bValue = T.bMatchLayers;
+			}
 		}
 		for (FUMGPrototypeNavigationStep& Step : Binding.Steps)
 		{
 			FUMGPrototypeTransitionData& ST = Step.Transition;
 			if (!ST.HasMatchLayers.bIsSet)
 			{
-				ST.HasMatchLayers.bValue = ST.bMatchLayers;
-				ST.HasMatchLayers.bIsSet = true;
+				ST.HasMatchLayers.bIsSet = ST.bHasMatchLayers;
+				if (ST.bHasMatchLayers)
+				{
+					ST.HasMatchLayers.bValue = ST.bMatchLayers;
+				}
 			}
 		}
 	}
