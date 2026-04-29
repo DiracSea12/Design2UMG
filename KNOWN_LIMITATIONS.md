@@ -87,7 +87,7 @@ This document tracks current limitations that are known and accepted for now.
 
 - Maintainer-local helper files such as `AGENTS.md`, `CLAUDE.md`, `.codex/`, and `.serena/` remain workspace-local aids rather than release artifacts.
 - Repo-safe collaboration rules that future contributors still need must be duplicated into tracked documents like this file or `CONTRIBUTING.md`; hygiene passes must not rely on deleting tracked guidance without moving the durable parts first.
-- Historical change records under `openspec/changes/` are part of the audit trail. Routine repo-hygiene work should not delete tracked historical changes unless the task explicitly includes archive or migration of that history.
+- Historical change records under `openspec/changes/` remain maintainer-local workspace history rather than release artifacts. Repo-safe guidance that contributors still need must be copied into tracked docs instead of relying on `openspec/` to ship that context.
 
 ## Widget Class Overrides
 

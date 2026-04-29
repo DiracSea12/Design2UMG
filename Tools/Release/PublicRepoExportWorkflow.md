@@ -35,7 +35,6 @@ Required public set:
 - `CHANGELOG.md`
 - `Design2UMG.uplugin`
 - canonical governance manifests in `Docs/ValidationGovernance/`
-- canonical specs in `openspec/specs/` and `openspec/CANONICAL_SPECS.md`
 
 Excluded from public export unless they are first rewritten into generic reusable tooling:
 
@@ -47,6 +46,7 @@ Excluded from public export unless they are first rewritten into generic reusabl
 - raw automation output trees under `Saved/Design2UMG/Automation/`
 - local probe scripts and one-off diagnostics under `Saved/`
 - archive/history notes that are not part of the final public support story
+- maintainer-local OpenSpec working sets under `openspec/`
 - any script or doc whose default values expose maintainer-only absolute paths
 
 ## Boundary Rules
