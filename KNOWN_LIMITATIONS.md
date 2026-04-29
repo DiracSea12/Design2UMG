@@ -83,6 +83,12 @@ This document tracks current limitations that are known and accepted for now.
 - Release validation in this repository uses a maintainer-owned canonical runtime boundary; HostProject fallback is not part of the supported workflow.
 - Public documentation should describe that boundary by role, not by maintainer machine path.
 
+## Repository Workflow Boundary
+
+- Maintainer-local helper files such as `AGENTS.md`, `CLAUDE.md`, `.codex/`, and `.serena/` remain workspace-local aids rather than release artifacts.
+- Repo-safe collaboration rules that future contributors still need must be duplicated into tracked documents like this file or `CONTRIBUTING.md`; hygiene passes must not rely on deleting tracked guidance without moving the durable parts first.
+- Historical change records under `openspec/changes/` are part of the audit trail. Routine repo-hygiene work should not delete tracked historical changes unless the task explicitly includes archive or migration of that history.
+
 ## Widget Class Overrides
 
 - Widget class override is a supported release capability for generation-time class substitution.

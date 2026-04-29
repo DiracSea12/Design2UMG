@@ -71,8 +71,14 @@ bool FConverterNestedNodesTest::RunTest(const FString&)
 		return false;
 
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
-	TestTrue(TEXT("RootWidget has children"), Data.RootWidget.Children.Num() > 0);
-	TestTrue(TEXT("Parent has nested children"), Data.RootWidget.Children.Num() >= 2);
+	TestEqual(TEXT("Root widget name"), Data.RootWidget.Name, FString(TEXT("ParentFrame")));
+	TestEqual(TEXT("Parent has nested children"), Data.RootWidget.Children.Num(), 2);
+	TestEqual(TEXT("First child is wrapped in SizeBox"), Data.RootWidget.Children[0].Name, FString(TEXT("ChildRect_sz")));
+	TestEqual(TEXT("Second child is wrapped in SizeBox"), Data.RootWidget.Children[1].Name, FString(TEXT("ChildText_sz")));
+	TestEqual(TEXT("Text wrapper contains one child"), Data.RootWidget.Children[1].Children.Num(), 1);
+	TestEqual(TEXT("Inner text widget name"), Data.RootWidget.Children[1].Children[0].Name, FString(TEXT("ChildText")));
+	TestTrue(TEXT("Inner text widget keeps text payload"), Data.RootWidget.Children[1].Children[0].Text.bHasText);
+	TestEqual(TEXT("Inner text content"), Data.RootWidget.Children[1].Children[0].Text.Text, FString(TEXT("Nested text")));
 
 	return true;
 }
@@ -108,8 +114,15 @@ bool FConverterRefExpandTest::RunTest(const FString&)
 		return false;
 
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
-	// host-1 frame should appear in output (reusable-1 is not a top-level rendered frame)
-	TestTrue(TEXT("Output has children"), Data.RootWidget.Children.Num() > 0);
+	TestEqual(TEXT("Reusable root is skipped from render tree"), Data.RootWidget.Name, FString(TEXT("HostFrame")));
+	TestEqual(TEXT("Host frame child count"), Data.RootWidget.Children.Num(), 1);
+	TestEqual(TEXT("Expanded child is wrapped in SizeBox"), Data.RootWidget.Children[0].Name, FString(TEXT("RefNode_sz")));
+	TestEqual(TEXT("Expanded child wrapper id"), Data.RootWidget.Children[0].Id, FString(TEXT("ref-1_sz")));
+	TestEqual(TEXT("Expanded wrapper contains one child"), Data.RootWidget.Children[0].Children.Num(), 1);
+	TestEqual(TEXT("Expanded inner widget keeps instance name"), Data.RootWidget.Children[0].Children[0].Name, FString(TEXT("RefNode")));
+	TestEqual(TEXT("Expanded inner widget keeps instance id"), Data.RootWidget.Children[0].Children[0].Id, FString(TEXT("ref-1")));
+	TestFalse(TEXT("Expanded inner widget has concrete runtime type"), Data.RootWidget.Children[0].Children[0].Type.IsEmpty());
+	TestNotEqual(TEXT("Expanded inner widget is not a raw ref node"), Data.RootWidget.Children[0].Children[0].Type, FString(TEXT("Ref")));
 
 	return true;
 }

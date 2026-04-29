@@ -4,6 +4,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "PenParser.h"
+#include "RefExpander.h"
 #include "DesignSchema.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
@@ -162,6 +163,35 @@ bool FPenParserErrorInputTest::RunTest(const FString&)
 		const bool bResult = FPenParser::ParseDocument(TEXT("{\"version\":\"1.0\"}"), Doc);
 		TestTrue(TEXT("No-children JSON succeeds"), bResult);
 		TestEqual(TEXT("No children"), Doc.Children.Num(), 0);
+	}
+
+	// Missing required field on child node: parser keeps the document but drops the bad child.
+	{
+		AddExpectedError(TEXT("without id"), EAutomationExpectedErrorFlags::Contains, 1);
+		FDesignDocument Doc;
+		const bool bResult = FPenParser::ParseDocument(TEXT("{\"version\":\"1.0\",\"children\":[{\"type\":\"frame\",\"name\":\"MissingId\"}]}"), Doc);
+		TestTrue(TEXT("Missing-id child does not fail whole document"), bResult);
+		TestEqual(TEXT("Missing-id child skipped"), Doc.Children.Num(), 0);
+	}
+
+	// Circular ref is rejected by ref expansion instead of crashing conversion.
+	{
+		const FString CircularRefJson =
+			TEXT("{")
+			TEXT("\"version\":\"1.0\",")
+			TEXT("\"children\":[")
+			TEXT("{\"id\":\"comp-a\",\"name\":\"CompA\",\"type\":\"ref\",\"ref\":\"comp-b\",\"reusable\":true},")
+			TEXT("{\"id\":\"comp-b\",\"name\":\"CompB\",\"type\":\"ref\",\"ref\":\"comp-a\",\"reusable\":true},")
+			TEXT("{\"id\":\"entry\",\"name\":\"Entry\",\"type\":\"ref\",\"ref\":\"comp-a\"}")
+			TEXT("]}")
+			;
+
+		FDesignDocument Doc;
+		TestTrue(TEXT("Circular-ref document parses"), FPenParser::ParseDocument(CircularRefJson, Doc));
+		TestEqual(TEXT("Circular-ref roots parsed"), Doc.Children.Num(), 3);
+		AddExpectedError(TEXT("circular ref detected"), EAutomationExpectedErrorFlags::Contains, 1);
+		const TSharedPtr<FDesignNode> Expanded = FRefExpander::ExpandRef(Doc.Children[2], Doc);
+		TestFalse(TEXT("Circular ref expansion returns null"), Expanded.IsValid());
 	}
 
 	return true;

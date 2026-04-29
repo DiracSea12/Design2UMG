@@ -87,15 +87,25 @@ bool FFigmaParserFillTypesTest::RunTest(const FString&)
 	// Solid fill child
 	const TSharedPtr<FDesignNode>& SolidNode = FillsFrame->Children[0];
 	TestTrue(TEXT("SolidNode valid"), SolidNode.IsValid());
-	TestFalse(TEXT("SolidNode has fill"), SolidNode->Visual.Fills.IsEmpty() && SolidNode->Visual.Fill.IsNone());
+	TestEqual(TEXT("SolidNode fill type"), SolidNode->Visual.Fill.Type, EDesignFillType::Color);
+	TestEqual(TEXT("SolidNode fills count"), SolidNode->Visual.Fills.Num(), 1);
+	TestFalse(TEXT("SolidNode solid color present"), SolidNode->Visual.Fill.SolidColor.IsEmpty());
 
 	// Gradient fill child
 	const TSharedPtr<FDesignNode>& GradNode = FillsFrame->Children[1];
 	TestTrue(TEXT("GradNode valid"), GradNode.IsValid());
+	TestEqual(TEXT("GradNode fill type"), GradNode->Visual.Fill.Type, EDesignFillType::Gradient);
+	TestEqual(TEXT("GradNode gradient type"), GradNode->Visual.Fill.Gradient.GradientType, EDesignGradientType::Linear);
+	TestEqual(TEXT("GradNode gradient stops"), GradNode->Visual.Fill.Gradient.Colors.Num(), 2);
+	TestEqual(TEXT("GradNode first stop position"), GradNode->Visual.Fill.Gradient.Colors[0].Position, 0.0f);
+	TestEqual(TEXT("GradNode second stop position"), GradNode->Visual.Fill.Gradient.Colors[1].Position, 1.0f);
 
 	// Image fill child
 	const TSharedPtr<FDesignNode>& ImgNode = FillsFrame->Children[2];
 	TestTrue(TEXT("ImgNode valid"), ImgNode.IsValid());
+	TestEqual(TEXT("ImgNode fill type"), ImgNode->Visual.Fill.Type, EDesignFillType::Image);
+	TestEqual(TEXT("ImgNode image ref"), ImgNode->Visual.Fill.Image.Url, FString(TEXT("abc123")));
+	TestEqual(TEXT("ImgNode image mode"), ImgNode->Visual.Fill.Image.Mode, EDesignImageMode::Fill);
 
 	return true;
 }
@@ -118,8 +128,12 @@ bool FFigmaParserEffectsTest::RunTest(const FString&)
 	TestTrue(TEXT("Has effects frame"), Doc.Children.Num() >= 2);
 	const TSharedPtr<FDesignNode>& EffectsFrame = Doc.Children[1];
 	TestTrue(TEXT("EffectsFrame valid"), EffectsFrame.IsValid());
-	// Effects are parsed into Visual.Effects
-	TestTrue(TEXT("Has effects"), EffectsFrame->Visual.Effects.Num() > 0);
+	TestEqual(TEXT("Effects count"), EffectsFrame->Visual.Effects.Num(), 2);
+	TestEqual(TEXT("First effect type"), EffectsFrame->Visual.Effects[0].Type, EDesignEffectType::Blur);
+	TestEqual(TEXT("First effect radius"), EffectsFrame->Visual.Effects[0].Radius, 4.0f);
+	TestEqual(TEXT("Second effect type"), EffectsFrame->Visual.Effects[1].Type, EDesignEffectType::Shadow);
+	TestEqual(TEXT("Second effect offset x"), EffectsFrame->Visual.Effects[1].Shadow.OffsetX, 2.0f);
+	TestEqual(TEXT("Second effect offset y"), EffectsFrame->Visual.Effects[1].Shadow.OffsetY, 4.0f);
 
 	return true;
 }
@@ -142,9 +156,11 @@ bool FFigmaParserBoundVariablesTest::RunTest(const FString&)
 	TestTrue(TEXT("Has bound vars frame"), Doc.Children.Num() >= 3);
 	const TSharedPtr<FDesignNode>& VarsFrame = Doc.Children[2];
 	TestTrue(TEXT("VarsFrame valid"), VarsFrame.IsValid());
-	// boundVariables presence is captured in Metadata or Source
-	// We verify the node parsed successfully (non-null, correct type)
 	TestEqual(TEXT("VarsFrame type"), VarsFrame->Type, EDesignNodeType::Frame);
+	TestFalse(TEXT("BoundVariablesJson captured"), VarsFrame->Source().LayoutExtensions.BoundVariablesJson.IsEmpty());
+	TestTrue(
+		TEXT("BoundVariablesJson keeps variable alias id"),
+		VarsFrame->Source().LayoutExtensions.BoundVariablesJson.Contains(TEXT("VariableID:color/primary")));
 
 	return true;
 }
