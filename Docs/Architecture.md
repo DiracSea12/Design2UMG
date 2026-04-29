@@ -88,7 +88,7 @@ Some fields such as `bPaddingRequiresRuntimeWrap` are set by the parser and cons
 
 ### Adding a new design source format
 
-Implement a parser that produces a `FDesignDocument`. The required fields are `RootNodes` (the root node list) and `Fonts` (font metadata). Register the parser in `DesignSourceRegistry` (`Source/Design2UMGEditor/Private/Design2UMGEditorDesignSourceRegistry.cpp`).
+Implement a parser that produces a `FDesignDocument`. The required root payload is `Children` (the root node list), plus any document-level metadata the downstream pipeline depends on such as `Fonts`. Register the parser in `DesignSourceRegistry` (`Source/Design2UMGEditor/Private/Design2UMGEditorDesignSourceRegistry.cpp`).
 
 Reference signatures:
 
@@ -112,7 +112,7 @@ In practice, a new source format needs three edits:
 
 1. Add a parser entry point in `Source/Design2UMGCore/Public/*.h` and parser implementation in `Source/Design2UMGCore/Private/*.cpp`.
 2. Add a registry lambda in `Source/Design2UMGEditor/Private/Design2UMGEditorDesignSourceRegistry.cpp`.
-3. Make the lambda parse into `FDesignDocument`, then call `FDesign2UMGConverter::Convert(const FDesignDocument&)`.
+3. Make the lambda parse into `FDesignDocument`, then hand that document to `DesignImportPipeline::AnalyzeImport(...).Data` so the registry output still includes converter output plus import-analysis side data.
 
 ### Adding a new Widget type mapping
 
@@ -144,7 +144,7 @@ Contributor checklist by scenario:
 
 ### Extending the IR without breaking existing conversions
 
-New fields in `DesignSchema.h` or `UMGSchemaTypedPayloads.h` must use `TOptional<T>` with a default of `NullOpt`. Do not use `bHas*` bool flags (deprecated). Fields with `UPROPERTY()` cannot use `TOptional` (UE serialization does not support it); use `FD2UMGOptionalBool` wrapper instead. The converter checks `IsSet()` before processing optional fields, so unset fields are safely ignored by existing conversion paths.
+New fields in `DesignSchema.h` should prefer `TOptional<T>` with a default unset state. `UMGSchemaTypedPayloads.h` is different: several typed payload structs still intentionally keep `bHas*` presence bits because parser / serializer / typed access paths rely on explicit set-vs-unset semantics there. Fields with `UPROPERTY()` cannot use `TOptional` (UE serialization does not support it); use `FD2UMGOptionalBool` wrapper instead. The converter checks `IsSet()` before processing optional fields, so unset fields are safely ignored by existing conversion paths.
 
 Reference pattern:
 
@@ -165,7 +165,7 @@ struct FD2UMGOptionalBool
 };
 ```
 
-Do not introduce any new `bHas*` + value shadow pairs into transient IR. For serialized `USTRUCT` fields, the only allowed exception is the `FD2UMGOptionalBool` wrapper path already established in `UMGSchemaSourceExtensions.h`.
+Do not introduce new `bHas*` + value shadow pairs into `DesignSchema.h`-style transient IR unless there is a documented serializer / typed-contract reason to keep that shape. For serialized `USTRUCT` fields, the allowed exception is the `FD2UMGOptionalBool` wrapper path already established in `UMGSchemaSourceExtensions.h`. For existing typed payload structs in `UMGSchemaTypedPayloads.h`, follow the current local contract instead of forcing a blind `TOptional` rewrite.
 
 ## Known Issues
 

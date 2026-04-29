@@ -46,7 +46,7 @@ Excluded from public export unless they are first rewritten into generic reusabl
 - raw automation output trees under `Saved/Design2UMG/Automation/`
 - local probe scripts and one-off diagnostics under `Saved/`
 - archive/history notes that are not part of the final public support story
-- maintainer-local OpenSpec working sets under `openspec/`
+- maintainer-local planning / history working sets that are not part of the shipped support story
 - any script or doc whose default values expose maintainer-only absolute paths
 
 ## Boundary Rules
