@@ -83,7 +83,7 @@ namespace
 	FUMGWidgetNode CreateContainerWidget(const TSharedPtr<FDesignNode>& Node)
 	{
 		FUMGWidgetNode Widget;
-		Widget.Type = FDesignTypeMapper::MapNodeTypeToWidget(Node->Type, Node->LayoutData.Layout);
+		Widget.Type = DesignTypeMapper::MapNodeTypeToWidget(Node->Type, Node->LayoutData.Layout);
 		if (Node.IsValid())
 		{
 			const FString& OverflowDirection = Node->Source().Prototype.OverflowDirection;
@@ -133,7 +133,7 @@ namespace
 			FDesignCornerRadius EllipseRadius;
 			EllipseRadius.bUniform = true;
 			EllipseRadius.Uniform = FMath::Min(Width, Height) / 2.0f;
-			FVisualMapper::ApplyRoundedCorner(Widget, EllipseRadius);
+			VisualMapper::ApplyRoundedCorner(Widget, EllipseRadius);
 		}
 		return Widget;
 	}

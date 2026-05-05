@@ -23,7 +23,7 @@ float SelectAnchorWithHysteresis(
 	const float Threshold_R = Preset.AnchorThresholdR;
 	const float Buffer = Preset.HysteresisBuffer;
 
-	// 如果没有历史锚点，使用标准9宫格选择
+	// If there is no previous anchor, use the standard 9-grid selection.
 	if (!Preset.bEnableHysteresis || !OldAnchor.IsSet())
 	{
 		if (Center < Threshold_L) return 0.0f;
@@ -33,7 +33,7 @@ float SelectAnchorWithHysteresis(
 
 	float Old = OldAnchor.GetValue();
 
-	// Hysteresis逻辑：只有显著超过阈值+缓冲区才切换
+	// Hysteresis: switch only after crossing the threshold plus buffer by a clear margin.
 	if (FMath::IsNearlyEqual(Old, 0.0f))
 	{
 		return (Center > Threshold_L + Buffer) ? 0.5f : 0.0f;
@@ -130,16 +130,16 @@ FAxisResult CalculateAxis(
 	return R;
 }
 
-FUMGSlotData FLayoutCalculator::CalculateSlot(const FDesignPixelBounds& Bounds, const FLayoutContext& Context)
+FUMGSlotData LayoutCalculator::CalculateSlot(const FDesignPixelBounds& Bounds, const FLayoutContext& Context)
 {
-	// v2.2: DesignSize有效性检查
+	// v2.2: Validate DesignSize.
 	const int32 CanvasW = FMath::Max(1, Context.DesignSize.X);
 	const int32 CanvasH = FMath::Max(1, Context.DesignSize.Y);
 	const FLayoutPreset& Preset = Context.Preset;
 
-	// 不要把超出设计尺寸的节点强行裁进 [0,1]。
-	// 设计稿里常有“部分超出画布”的节点（如滚动区域、阴影、分页），
-	// 若在这里裁剪，会把尺寸压扁并导致后续 UMG 严重错位。
+	// Do not force nodes that exceed the design size into [0,1].
+	// Designs often contain nodes that partially extend outside the canvas, such as scroll regions, shadows, or pagination.
+	// Clamping here would squash their size and cause severe downstream UMG misalignment.
 	FDesignPixelBounds SafeBounds;
 	SafeBounds.X = Bounds.X;
 	SafeBounds.Y = Bounds.Y;
@@ -148,7 +148,7 @@ FUMGSlotData FLayoutCalculator::CalculateSlot(const FDesignPixelBounds& Bounds, 
 
 	FUMGSlotData Slot;
 
-	// 水平轴
+	// Horizontal axis.
 	FAxisResult H = CalculateAxis(SafeBounds.X, SafeBounds.W, CanvasW, Context.OldAnchorX, Preset);
 	Slot.Anchors.Min.X = H.AnchorMin;
 	Slot.Anchors.Max.X = H.AnchorMax;
@@ -156,7 +156,7 @@ FUMGSlotData FLayoutCalculator::CalculateSlot(const FDesignPixelBounds& Bounds, 
 	Slot.Offsets.Left = H.OffsetStart;
 	Slot.Offsets.Right = H.OffsetEnd;
 
-	// 垂直轴
+	// Vertical axis.
 	FAxisResult V = CalculateAxis(SafeBounds.Y, SafeBounds.H, CanvasH, Context.OldAnchorY, Preset);
 	Slot.Anchors.Min.Y = V.AnchorMin;
 	Slot.Anchors.Max.Y = V.AnchorMax;

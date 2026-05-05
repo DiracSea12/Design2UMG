@@ -8,21 +8,20 @@
 /**
  * Mapping helpers from design-side semantics to UMG-side types and enums.
  */
-class DESIGN2UMGCORE_API FDesignTypeMapper
+namespace DesignTypeMapper
 {
-public:
 	/** Map a design node type to the target UMG widget type. */
-	static FString MapNodeTypeToWidget(EDesignNodeType Type, EDesignLayout Layout);
+	DESIGN2UMGCORE_API FString MapNodeTypeToWidget(EDesignNodeType Type, EDesignLayout Layout);
 
 	/** fontWeight TypefaceFontName */
-	static FName MapFontWeight(const FString& Weight);
+	DESIGN2UMGCORE_API FName MapFontWeight(const FString& Weight);
 
 	/** Map alignItems to horizontal alignment for vertical layouts. */
-	static EHorizontalAlignment MapAlignItemsH(EDesignAlignItems Align);
+	DESIGN2UMGCORE_API EHorizontalAlignment MapAlignItemsH(EDesignAlignItems Align);
 
 	/** Map alignItems to vertical alignment for horizontal layouts. */
-	static EVerticalAlignment MapAlignItemsV(EDesignAlignItems Align);
-};
+	DESIGN2UMGCORE_API EVerticalAlignment MapAlignItemsV(EDesignAlignItems Align);
+}
 
 
 

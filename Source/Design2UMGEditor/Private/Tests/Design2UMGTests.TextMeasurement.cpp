@@ -27,6 +27,14 @@ namespace
 			: FString();
 	}
 
+	FString GetTextMeasurementPrivateSourcePath(const TCHAR* FileName)
+	{
+		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
+		return Plugin.IsValid()
+			? FPaths::Combine(Plugin->GetBaseDir(), TEXT("Source/Design2UMGCore/Private"), FileName)
+			: FString();
+	}
+
 	FString GetTextMeasurementPublicHeaderPath()
 	{
 		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
@@ -53,6 +61,44 @@ namespace
 		}
 
 		Test.TestTrue(TEXT("Load TextMeasurement.cpp"), FFileHelper::LoadFileToString(OutSource, *SourcePath));
+		return !OutSource.IsEmpty();
+	}
+
+	bool LoadTextMeasurementSplitSources(FAutomationTestBase& Test, FString& OutSource)
+	{
+		OutSource.Reset();
+
+		const TCHAR* SourceFiles[] = {
+			TEXT("TextMeasurement.cpp"),
+			TEXT("TextMeasurementCalibration.cpp"),
+			TEXT("TextMeasurementRuntimeProbe.cpp"),
+			TEXT("TextMeasurementRuntimeProbeSizing.cpp"),
+			TEXT("TextMeasurementSingleLineHeuristics.cpp"),
+			TEXT("TextMeasurementCache.cpp"),
+			TEXT("TextMeasurementInternal.h"),
+		};
+
+		for (const TCHAR* SourceFile : SourceFiles)
+		{
+			const FString SourcePath = GetTextMeasurementPrivateSourcePath(SourceFile);
+			Test.TestFalse(*FString::Printf(TEXT("%s path resolved"), SourceFile), SourcePath.IsEmpty());
+			if (SourcePath.IsEmpty())
+			{
+				return false;
+			}
+
+			FString FileSource;
+			Test.TestTrue(*FString::Printf(TEXT("Load %s"), SourceFile), FFileHelper::LoadFileToString(FileSource, *SourcePath));
+			if (FileSource.IsEmpty())
+			{
+				return false;
+			}
+
+			OutSource += FString::Printf(TEXT("\n// BEGIN %s\n"), SourceFile);
+			OutSource += FileSource;
+			OutSource += FString::Printf(TEXT("\n// END %s\n"), SourceFile);
+		}
+
 		return !OutSource.IsEmpty();
 	}
 
@@ -169,6 +215,21 @@ namespace
 		Node->Transform.bHasHeight = false;
 		Node->Transform.bSourceHasWidth = false;
 		return Node;
+	}
+
+	FDesignDocument BuildNonTextDocument(const FString& Id)
+	{
+		FDesignDocument Document;
+		TSharedPtr<FDesignNode> Root = MakeShared<FDesignNode>();
+		Root->Id = Id;
+		Root->Name = Id;
+		Root->Type = EDesignNodeType::Frame;
+		Root->Transform.Width = FDesignSize::Fixed(120.0f);
+		Root->Transform.Height = FDesignSize::Fixed(80.0f);
+		Root->Transform.bHasWidth = true;
+		Root->Transform.bHasHeight = true;
+		Document.Children.Add(Root);
+		return Document;
 	}
 
 	TSharedPtr<FDesignNode> MakeIntrinsicFallbackProbeNode(
@@ -538,6 +599,39 @@ bool FTextMeasurementResetCacheClearsOwnedCachesTest::RunTest(const FString& Par
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextMeasurementConverterResetsCachePerDocumentTest,
+	"Design2UMG.TextMeasurement.ConverterResetsCachePerDocument",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTextMeasurementConverterResetsCachePerDocumentTest::RunTest(const FString& Parameters)
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		AddWarning(TEXT("Slate is not initialized, skipping converter cache reset test."));
+		return true;
+	}
+
+	const TSharedPtr<FDesignNode> PoisonNode = MakeSharedCalibrationTextNode(
+		TEXT("cache_poison"),
+		TEXT("A previous document should not leave text measurement state behind."));
+
+	TextMeasurement::ResetCache();
+	const float PoisonFontSize = TextMeasurement::ResolveTextFontSizeForUMG(PoisonNode);
+	TestTrue(TEXT("Poison text node resolves a font size"), PoisonFontSize > 0.0f);
+
+	const TextMeasurement::Testing::FTextMeasurementCacheStats PoisonedStats = TextMeasurement::Testing::GetCacheStats();
+	TestTrue(TEXT("Direct text measurement populates transient cache"),
+		PoisonedStats.ResolvedScaleEntries > 0 || PoisonedStats.SharedStyleScaleEntries > 0);
+
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(BuildNonTextDocument(TEXT("cache_reset_root")));
+	TestEqual(TEXT("Non-text conversion still succeeds"), Data.RootWidget.Id, FString(TEXT("cache_reset_root")));
+
+	const TextMeasurement::Testing::FTextMeasurementCacheStats AfterConvertStats = TextMeasurement::Testing::GetCacheStats();
+	TestEqual(TEXT("Converter clears stale resolved-scale entries before a new document"), AfterConvertStats.ResolvedScaleEntries, 0);
+	TestEqual(TEXT("Converter clears stale shared-style entries before a new document"), AfterConvertStats.SharedStyleScaleEntries, 0);
+	TestEqual(TEXT("Converter clears stale baseline entries before a new document"), AfterConvertStats.BaselineFallbackEntries, 0);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextMeasurementBaselineFallbackCacheIgnoresEquivalentSourceTextTest,
 	"Design2UMG.TextMeasurement.BaselineFallbackCacheIgnoresEquivalentSourceText",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -630,7 +724,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextMeasurementFallbackConstantsLockedTest,
 bool FTextMeasurementFallbackConstantsLockedTest::RunTest(const FString& Parameters)
 {
 	FString Source;
-	if (!LoadTextMeasurementSource(*this, Source))
+	if (!LoadTextMeasurementSplitSources(*this, Source))
 	{
 		return false;
 	}
@@ -639,20 +733,20 @@ bool FTextMeasurementFallbackConstantsLockedTest::RunTest(const FString& Paramet
 		Source.Contains(TEXT("18 / 14 = 1.285714"), ESearchCase::CaseSensitive));
 	TestTrue(TEXT("Fallback scale comment keeps 3/4 provenance"),
 		Source.Contains(TEXT("3 / 4 of the"), ESearchCase::CaseSensitive));
-	TestTrue(TEXT("Fallback width comment keeps 0.60em provenance"),
-		Source.Contains(TEXT("0.60em per visible character"), ESearchCase::CaseSensitive));
-	TestTrue(TEXT("Fallback height comment keeps 1.5em provenance"),
-		Source.Contains(TEXT("1.5em tall"), ESearchCase::CaseSensitive));
-	TestTrue(TEXT("Width heuristic comment keeps 0.55em provenance"),
-		Source.Contains(TEXT("0.55em only treats obviously single-line text as safe"), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("Fallback width formula keeps runtime text length scaling"),
+		Source.Contains(TEXT("RuntimeText.Len() * FontSize * RuntimeProbe::FallbackMeasureWidthScale"), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("Fallback height formula keeps runtime fallback scale"),
+		Source.Contains(TEXT("FontSize * RuntimeProbe::FallbackMeasureHeightScale"), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("Width heuristic formula keeps prepared text length scaling"),
+		Source.Contains(TEXT("TextMeasurement::PrepareRuntimeTextContent(Text).Len() * FontSize * SingleLineHeuristics::WidthHeuristicScale"), ESearchCase::CaseSensitive));
 	TestTrue(TEXT("Line-height multiplier literal stays locked"),
 		Source.Contains(TEXT("constexpr float DefaultLineHeightMultiplier = 1.285714f;"), ESearchCase::CaseSensitive));
 	TestTrue(TEXT("Fallback scale literal stays locked"),
 		Source.Contains(TEXT("constexpr float DefaultFontFallbackScale = 0.75f;"), ESearchCase::CaseSensitive));
 	TestTrue(TEXT("Fallback width literal stays locked"),
-		Source.Contains(TEXT("constexpr float FallbackMeasureWidthScale = 0.60f;"), ESearchCase::CaseSensitive));
+		Source.Contains(TEXT("const float FallbackMeasureWidthScale = 0.60f;"), ESearchCase::CaseSensitive));
 	TestTrue(TEXT("Fallback height literal stays locked"),
-		Source.Contains(TEXT("constexpr float FallbackMeasureHeightScale = 1.5f;"), ESearchCase::CaseSensitive));
+		Source.Contains(TEXT("const float FallbackMeasureHeightScale = 1.5f;"), ESearchCase::CaseSensitive));
 	TestTrue(TEXT("Width heuristic literal stays locked"),
 		Source.Contains(TEXT("constexpr float WidthHeuristicScale = 0.55f;"), ESearchCase::CaseSensitive));
 
@@ -710,7 +804,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCompactSingleLineLabelNoFontFamilyDependencyTe
 bool FCompactSingleLineLabelNoFontFamilyDependencyTest::RunTest(const FString& Parameters)
 {
 	FString Source;
-	if (!LoadTextMeasurementSource(*this, Source))
+	if (!LoadTextMeasurementSplitSources(*this, Source))
 	{
 		return false;
 	}
@@ -784,7 +878,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIsCompactBoldTokenTextNoMonospaceDependencySta
 bool FIsCompactBoldTokenTextNoMonospaceDependencyStaticTest::RunTest(const FString& Parameters)
 {
 	FString Source;
-	if (!LoadTextMeasurementSource(*this, Source))
+	if (!LoadTextMeasurementSplitSources(*this, Source))
 	{
 		return false;
 	}
@@ -853,7 +947,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FShouldPreferIntrinsicSingleLineNoFontFamilyDep
 bool FShouldPreferIntrinsicSingleLineNoFontFamilyDependencyTest::RunTest(const FString& Parameters)
 {
 	FString Source;
-	if (!LoadTextMeasurementSource(*this, Source))
+	if (!LoadTextMeasurementSplitSources(*this, Source))
 	{
 		return false;
 	}
@@ -924,7 +1018,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextMeasurementNoSubstringFontDispatchTest,
 bool FTextMeasurementNoSubstringFontDispatchTest::RunTest(const FString& Parameters)
 {
 	FString Source;
-	if (!LoadTextMeasurementSource(*this, Source))
+	if (!LoadTextMeasurementSplitSources(*this, Source))
 	{
 		return false;
 	}
@@ -936,23 +1030,28 @@ bool FTextMeasurementNoSubstringFontDispatchTest::RunTest(const FString& Paramet
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextMeasurementFamilySpecificFallbackTableLocalRollbackTest,
-	"Design2UMG.TextMeasurement.FamilySpecificFallbackTableLocalRollback",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextMeasurementFallbackNoRuntimeImportedFontPathDispatchTest,
+	"Design2UMG.TextMeasurement.FallbackNoRuntimeImportedFontPathDispatch",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FTextMeasurementFamilySpecificFallbackTableLocalRollbackTest::RunTest(const FString& Parameters)
+bool FTextMeasurementFallbackNoRuntimeImportedFontPathDispatchTest::RunTest(const FString& Parameters)
 {
 	FString Source;
-	if (!LoadTextMeasurementSource(*this, Source))
+	if (!LoadTextMeasurementSplitSources(*this, Source))
 	{
 		return false;
 	}
 
-	TestTrue(TEXT("Local rollback documents why the family-specific scale table remains"),
-		Source.Contains(TEXT("Phase-8 local score rollback"), ESearchCase::CaseSensitive));
-	TestTrue(TEXT("Local rollback keeps the family-specific scale table until a shared rule proves parity"),
-		Source.Contains(TEXT("FamilyFallbackScales"), ESearchCase::CaseSensitive));
-	TestTrue(TEXT("Local rollback keeps the historical family-specific resolver"),
-		Source.Contains(TEXT("FindFamilySpecificTextFallbackScale"), ESearchCase::CaseSensitive));
+	if (Source.Contains(TEXT("FamilyFallbackScales"), ESearchCase::CaseSensitive))
+	{
+		TestTrue(TEXT("Temporary family fallback table must stay documented as a local rollback"),
+			Source.Contains(TEXT("Phase-10 local rollback"), ESearchCase::CaseSensitive));
+	}
+
+	TestFalse(TEXT("Font fallback must not introduce public font-family override settings"),
+		Source.Contains(TEXT("FontFallbackScaleOverrides"), ESearchCase::CaseSensitive));
+	TestFalse(TEXT("Font fallback no longer routes by runtime imported-font path"),
+		Source.Contains(TEXT("RuntimeImported"), ESearchCase::CaseSensitive)
+		|| Source.Contains(TEXT("/Design2UMG/Automation/ImportedFonts/"), ESearchCase::CaseSensitive));
 	return true;
 }
 

@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import shlex
 import subprocess
 import sys
 import time
@@ -13,6 +14,7 @@ from types import SimpleNamespace
 
 import design2umg_auto_verify as verify
 import design2umg_rebuild_admissible_best as rebuild_best
+import design2umg_render_rule as render_rule
 import design2umg_validate_run as validate_run_tool
 
 
@@ -452,7 +454,6 @@ def prepare_case_state(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     expected_design_size = verify.get_expected_design_size(case_args.mode, case_args.source, case_args.node)
-    declared_design_size = verify.get_declared_design_size(case_args.mode, case_args.source, case_args.node)
     restored_from_cache = None
     if reference_cache_mode in {"read", "read-write"}:
         try:
@@ -491,38 +492,11 @@ def prepare_case_state(
             reference_context["source_structure_live"] = live_source_structure
     reference_size = verify.read_image_size(reference_path)
 
-    if not expected_design_size:
-        inferred_expected_size = verify.infer_expected_design_size_from_reference(declared_design_size, reference_size)
-        if inferred_expected_size:
-            expected_design_size = inferred_expected_size
-            reference_context["inferred_expected_design_size"] = list(inferred_expected_size)
-
-    preliminary_reference_validation = verify.validate_reference_against_design(reference_size, expected_design_size)
-    declared_width, declared_height = declared_design_size
-    has_partial_declared_size = (
-        (declared_width and declared_width > 1 and not (declared_height and declared_height > 1))
-        or (declared_height and declared_height > 1 and not (declared_width and declared_width > 1))
-    )
-    if not preliminary_reference_validation["valid"] and has_partial_declared_size:
-        inferred_expected_size = verify.infer_expected_design_size_from_reference(declared_design_size, reference_size)
-        if inferred_expected_size and inferred_expected_size != expected_design_size:
-            inferred_validation = verify.validate_reference_against_design(reference_size, inferred_expected_size)
-            if inferred_validation["valid"]:
-                expected_design_size = inferred_expected_size
-                reference_context["inferred_expected_design_size"] = list(inferred_expected_size)
-
     reference_validation = verify.validate_reference_against_design(reference_size, expected_design_size)
     reference_context["reference_validation"] = reference_validation
-    if reference_validation["valid"]:
-        render_width, render_height = reference_size
-    elif expected_design_size:
-        render_width, render_height = expected_design_size
-    else:
-        render_width, render_height = reference_size
 
-    candidate_filename = "candidate.png" if reference_validation["valid"] else "candidate.native.png"
-    candidate_path = output_dir / candidate_filename
-    game_output_root = verify.build_automation_asset_root(output_dir, case_args.game_output)
+    candidate_path = output_dir / "candidate.png"
+    game_output_root = verify.build_automation_asset_root(output_dir, case_args.game_output, case.get("name", ""))
 
     state = {
         "case": case,
@@ -534,7 +508,7 @@ def prepare_case_state(
         "reference_context": reference_context,
         "reference_validation": reference_validation,
         "expected_design_size": expected_design_size,
-        "render_size": (render_width, render_height),
+        "render_size": expected_design_size,
         "candidate_path": candidate_path,
         "game_output_root": game_output_root,
         "spec_paths": [],
@@ -561,11 +535,11 @@ def append_spec(state: dict, key: str, filename: str, spec: dict):
 
 def build_native_plan(state: dict):
     expected_design_size = state["expected_design_size"]
-    render_width, render_height = state["render_size"]
 
     if not expected_design_size:
         return {"available": False, "reason": "expected_design_size_unavailable"}
 
+    primary_width, primary_height = state["render_size"]
     native_width, native_height = expected_design_size
     if native_width <= 0 or native_height <= 0:
         return {
@@ -574,24 +548,23 @@ def build_native_plan(state: dict):
             "expected_design_size": [native_width, native_height],
         }
 
-    if (native_width, native_height) == (render_width, render_height):
+    if (native_width, native_height) == (primary_width, primary_height):
         return {
             "available": False,
             "reason": "expected_design_size_matches_primary_render",
             "expected_design_size": [native_width, native_height],
-            "primary_render_size": [render_width, render_height],
+            "primary_render_size": [primary_width, primary_height],
         }
 
     return {
         "available": True,
         "expected_design_size": [native_width, native_height],
-        "primary_render_size": [render_width, render_height],
+        "primary_render_size": [primary_width, primary_height],
     }
 
 
 def build_case_specs(state: dict):
     case_args = state["args"]
-    render_width, render_height = state["render_size"]
     candidate_path = state["candidate_path"]
     output_dir = state["output_dir"]
     game_output_root = state["game_output_root"]
@@ -619,8 +592,6 @@ def build_case_specs(state: dict):
                 "output_path": asset_only_output,
                 "render_png_path": str(candidate_path),
                 "result_json_path": str(output_dir / "ue_render_result.json"),
-                "render_width": render_width,
-                "render_height": render_height,
                 "force_reload_package": True,
             },
         )
@@ -638,8 +609,6 @@ def build_case_specs(state: dict):
                 "output_path": primary_game_output,
                 "render_png_path": str(bootstrap_candidate_path),
                 "result_json_path": str(generate_result_path),
-                "render_width": render_width,
-                "render_height": render_height,
             },
         )
         append_spec(
@@ -653,8 +622,6 @@ def build_case_specs(state: dict):
                 "output_path": primary_asset_output,
                 "render_png_path": str(candidate_path),
                 "result_json_path": str(output_dir / "ue_render_result.json"),
-                "render_width": render_width,
-                "render_height": render_height,
                 "force_reload_package": True,
             },
         )
@@ -685,8 +652,6 @@ def build_case_specs(state: dict):
                 "output_path": native_asset_output,
                 "render_png_path": str(native_path),
                 "result_json_path": str(output_dir / "ue_native_render_result.json"),
-                "render_width": native_width,
-                "render_height": native_height,
                 "force_reload_package": True,
             },
         )
@@ -705,8 +670,6 @@ def build_case_specs(state: dict):
             "output_path": native_game_output,
             "render_png_path": str(native_bootstrap_path),
             "result_json_path": str(native_generate_result_path),
-            "render_width": native_width,
-            "render_height": native_height,
         },
     )
     append_spec(
@@ -720,8 +683,6 @@ def build_case_specs(state: dict):
             "output_path": native_asset_output,
             "render_png_path": str(native_path),
             "result_json_path": str(output_dir / "ue_native_render_result.json"),
-            "render_width": native_width,
-            "render_height": native_height,
             "force_reload_package": True,
         },
     )
@@ -812,6 +773,9 @@ def run_editor_driver(
         "-unattended",
         f"-ExecutePythonScript={driver_script_path}",
     ]
+    extra_editor_args = os.environ.get("DESIGN2UMG_EDITOR_EXTRA_ARGS", "").strip()
+    if extra_editor_args:
+        command.extend(shlex.split(extra_editor_args))
     if log_cmds:
         command.append(f"-LogCmds={log_cmds}")
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -851,6 +815,9 @@ def run_editor_driver(
                 )
 
             if time.time() - last_progress_time > idle_timeout_sec:
+                if current_result_count >= len(result_paths) and verify.log_indicates_clean_editor_shutdown(log_path):
+                    process.kill()
+                    return 0
                 process.kill()
                 raise TimeoutError(
                     f"Editor made no progress for {idle_timeout_sec}s. "
@@ -1129,8 +1096,8 @@ def write_render_failure_report(state: dict, ue_result: dict | None, render_chai
         "diff_bbox": None,
         "stable_diff_bbox": None,
         "source_signature": state.get("source_signature"),
-        "provided_reference_signature": reference_context.get("provided_reference_signature") or state.get("provided_reference_signature"),
-        "effective_reference_signature": reference_context.get("effective_reference_signature"),
+        "provided_reference_signature": state["reference_context"].get("provided_reference_signature") or state.get("provided_reference_signature"),
+        "effective_reference_signature": state["reference_context"].get("effective_reference_signature"),
         "ue_result": ue_result,
         "reference_context": state["reference_context"],
         "reference_validation": state["reference_validation"],
@@ -1149,6 +1116,16 @@ def load_baseline_case_metrics(case_dir: Path | None, pixel_tolerance: int) -> d
 
     report_path = case_dir / "compare_report.json"
     report = verify.load_json_document(report_path) if report_path.is_file() else {}
+    baseline_rule = render_rule.evaluate_report_render_size_rule(report_path)
+    if not baseline_rule.get("compatible"):
+        return {
+            "available": False,
+            "reason": "baseline_render_size_rule_incompatible",
+            "render_size_rule": baseline_rule,
+            "case_dir": str(case_dir),
+            "report_path": str(report_path) if report_path.is_file() else "",
+        }
+
     reference_png_path = Path(report.get("reference_png_path") or (case_dir / "reference.png"))
     candidate_png_path = Path(report.get("candidate_png_path") or (case_dir / "candidate.png"))
     report_metrics = verify.extract_compare_metrics(report)
@@ -1325,6 +1302,9 @@ def process_case_result(state: dict, batch_exit_code: int, batch_log_path: Path)
             "report_path": str(report_path),
             "verdict": "render_failed",
         }
+
+    reference_validation = verify.apply_render_size_authority(reference_context, state["reference_path"], ue_result, candidate_path)
+    state["reference_validation"] = reference_validation
 
     reference_authority = reference_context.get("reference_authority") or {}
     if args.mode == "pen" and reference_validation["valid"] and reference_authority.get("available"):
@@ -1608,7 +1588,10 @@ def main():
     verify.write_json(summary_path, summary)
 
     formal_gate_candidate = not bool(args.include or args.exclude)
-    if completeness["blocked"] or (formal_gate_candidate and historical_validation["blocked"]):
+    if (
+        completeness["blocked"]
+        or (formal_gate_candidate and historical_validation["blocked"])
+    ):
         sys.exit(2)
     sys.exit(0 if passed == len(case_results) else 1)
 

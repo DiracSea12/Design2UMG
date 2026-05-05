@@ -7,7 +7,6 @@
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
 #include "LayoutCalculator.h"
-#include "LayoutFixer.h"
 #include "WidgetLayoutAdapter.h"
 #include "UMGPropertyKeys.h"
 #include "UMGWidgetNodeAccess.h"
@@ -68,7 +67,12 @@
 namespace
 {
 	thread_local int32 GWidgetBuildDepth = 0;
-	thread_local FIntPoint GWidgetBuildDesignSizeSnapshot = FIntPoint(1920, 1080);
+	thread_local FIntPoint GWidgetBuildDesignSizeSnapshot = FIntPoint(1, 1);
+
+	bool IsValidEffectiveDesignSize(const FIntPoint& Size)
+	{
+		return Size.X > 1 && Size.Y > 1;
+	}
 
 	FIntPoint SanitizeEffectiveDesignSize(const FIntPoint& InSize)
 	{
@@ -77,15 +81,35 @@ namespace
 			FMath::Max(1, InSize.Y));
 	}
 
+	FIntPoint ResolveEffectiveDesignSize(const FUMGWidgetNode& SourceNode, const FIntPoint* ExplicitDesignSize)
+	{
+		if (ExplicitDesignSize && IsValidEffectiveDesignSize(*ExplicitDesignSize))
+		{
+			return SanitizeEffectiveDesignSize(*ExplicitDesignSize);
+		}
+
+		const FIntPoint RootBoundsSize(
+			FMath::CeilToInt(SourceNode.Bounds.W),
+			FMath::CeilToInt(SourceNode.Bounds.H));
+		if (IsValidEffectiveDesignSize(RootBoundsSize))
+		{
+			return RootBoundsSize;
+		}
+
+		UE_LOG(LogDesign2UMG, Error,
+			TEXT("Widget build design size is unavailable for '%s'; source data must define the layout size"),
+			*SourceNode.Name);
+		return FIntPoint(1, 1);
+	}
+
 	class FScopedWidgetBuildDesignSize
 	{
 	public:
-		explicit FScopedWidgetBuildDesignSize(const FIntPoint* ExplicitDesignSize)
+		FScopedWidgetBuildDesignSize(const FUMGWidgetNode& SourceNode, const FIntPoint* ExplicitDesignSize)
 		{
 			if (GWidgetBuildDepth == 0)
 			{
-				GWidgetBuildDesignSizeSnapshot = SanitizeEffectiveDesignSize(
-					ExplicitDesignSize ? *ExplicitDesignSize : FIntPoint(1920, 1080));
+				GWidgetBuildDesignSizeSnapshot = ResolveEffectiveDesignSize(SourceNode, ExplicitDesignSize);
 				bOwnsSnapshot = true;
 			}
 			++GWidgetBuildDepth;
@@ -96,7 +120,7 @@ namespace
 			GWidgetBuildDepth = FMath::Max(0, GWidgetBuildDepth - 1);
 			if (bOwnsSnapshot && GWidgetBuildDepth == 0)
 			{
-				GWidgetBuildDesignSizeSnapshot = FIntPoint(1920, 1080);
+				GWidgetBuildDesignSizeSnapshot = FIntPoint(1, 1);
 			}
 		}
 
@@ -105,38 +129,38 @@ namespace
 			return SanitizeEffectiveDesignSize(
 				GWidgetBuildDepth > 0
 					? GWidgetBuildDesignSizeSnapshot
-					: FIntPoint(1920, 1080));
+					: FIntPoint(1, 1));
 		}
 
 	private:
 		bool bOwnsSnapshot = false;
 	};
 
-	// Widget 类型映射表
+	// Widget type mapping table.
 	const TMap<FString, UClass*>& GetWidgetClassMap()
 	{
 		static const TMap<FString, UClass*> Map = []() {
 			TMap<FString, UClass*> M;
 			#define REG(Name) M.Add(TEXT(#Name), U##Name::StaticClass())
-			// 容器类
+			// Containers.
 			REG(CanvasPanel); REG(VerticalBox); REG(HorizontalBox); REG(Overlay);
 			REG(ScrollBox); REG(GridPanel); REG(UniformGridPanel); REG(WrapBox);
 			REG(WidgetSwitcher); REG(SafeZone);
-			// 包装类
+			// Wrappers.
 			REG(Border); REG(SizeBox); REG(ScaleBox); REG(BackgroundBlur);
 			REG(InvalidationBox); REG(RetainerBox); REG(ExpandableArea); REG(NamedSlot);
-			// 交互类
+			// Interactive widgets.
 			REG(Button); REG(CheckBox); REG(Slider); REG(SpinBox);
-			// 文本类
+			// Text widgets.
 			REG(TextBlock); REG(RichTextBlock); REG(EditableTextBox); REG(MultiLineEditableTextBox);
-			// 显示类
+			// Display widgets.
 			REG(Image); REG(ProgressBar); REG(Throbber); REG(CircularThrobber); REG(Spacer);
-			// 列表类
+			// List widgets.
 			REG(ListView); REG(TileView); REG(TreeView);
-			// 其他
+			// Other widgets.
 			REG(MenuAnchor); REG(EditableText); REG(MultiLineEditableText);
 			#undef REG
-			// 别名
+			// Aliases.
 			M.Add(TEXT("ComboBox"), UComboBoxString::StaticClass());
 			M.Add(TEXT("ComboBoxString"), UComboBoxString::StaticClass());
 			return M;
@@ -203,7 +227,7 @@ UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWid
 
 UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords, const FIntPoint* ExplicitDesignSize)
 {
-	const FScopedWidgetBuildDesignSize DesignSizeScope(ExplicitDesignSize);
+	const FScopedWidgetBuildDesignSize DesignSizeScope(Node, ExplicitDesignSize);
 
 	UWidget* NewWidget = BuildWidgetTree(WidgetTree, Node, TextureMap, FigmaMetadataRecords, ExplicitDesignSize);
 	if (!NewWidget)
@@ -211,14 +235,13 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 		return nullptr;
 	}
 
-	// 添加到父容器并应用 Slot 属性
+	// Add to the parent container and apply slot properties.
 	if (ParentWidget)
 	{
 		if (UPanelSlot* Slot = ParentWidget->AddChild(NewWidget))
 		{
-			const bool bEnableAdaptiveAnchors = UDesign2UMGSettings::Get()->bEnableAdaptiveRootCanvasAnchors;
 			const FUMGSlotData SlotData = FWidgetLayoutAdapter::Resolve(
-				Node, ParentWidget, WidgetTree, FScopedWidgetBuildDesignSize::Current(), bEnableAdaptiveAnchors);
+				Node, ParentWidget, WidgetTree, FScopedWidgetBuildDesignSize::Current(), false);
 			UE_LOG(LogDesign2UMG, Verbose,
 				TEXT("CreateWidgetSlot: '%s' anc=(%.2f,%.2f)-(%.2f,%.2f) off=(%.1f,%.1f,%.1f,%.1f) align=(%.2f,%.2f) auto=%d"),
 				*Node.Name,
@@ -240,95 +263,6 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 	}
 
 	return NewWidget;
-}
-
-namespace
-{
-	// 将FUMGWidgetNode转换为FFixerWidgetNode
-	void ConvertToFixerNode(const FUMGWidgetNode& Src, FFixerWidgetNode& Dst)
-	{
-		Dst.Id = Src.Id;
-		Dst.Type = Src.Type;
-		Dst.Bounds = Src.Bounds;
-		Dst.bFixExempt = false;
-
-		for (const FUMGWidgetNode& Child : Src.Children)
-		{
-			FFixerWidgetNode ChildDst;
-			ConvertToFixerNode(Child, ChildDst);
-			Dst.Children.Add(ChildDst);
-		}
-	}
-
-	// 将修正后的Bounds写回FUMGWidgetNode
-	void ApplyFixedBounds(FUMGWidgetNode& Dst, const FFixerWidgetNode& Src)
-	{
-		Dst.Bounds = Src.Bounds;
-
-		for (int32 i = 0; i < Dst.Children.Num() && i < Src.Children.Num(); ++i)
-		{
-			ApplyFixedBounds(Dst.Children[i], Src.Children[i]);
-		}
-	}
-
-	// 递归归一化Bounds（像素→0-1）
-	void NormalizeFixerBounds(FFixerWidgetNode& Node, float InvW, float InvH)
-	{
-		Node.Bounds.X *= InvW;
-		Node.Bounds.Y *= InvH;
-		Node.Bounds.W *= InvW;
-		Node.Bounds.H *= InvH;
-		for (auto& Child : Node.Children)
-			NormalizeFixerBounds(Child, InvW, InvH);
-	}
-
-	// 递归反归一化Bounds（0-1→像素）
-	void DenormalizeFixerBounds(FFixerWidgetNode& Node, float W, float H)
-	{
-		Node.Bounds.X *= W;
-		Node.Bounds.Y *= H;
-		Node.Bounds.W *= W;
-		Node.Bounds.H *= H;
-		for (auto& Child : Node.Children)
-			DenormalizeFixerBounds(Child, W, H);
-	}
-}
-
-void FUMGWidgetUtils::ApplyFixer(FUMGWidgetNode& RootNode, const FIntPoint& DesignSize)
-{
-	// 初始化Fixer预设
-	FFixerPreset Preset;
-	FLayoutFixer::Initialize(DesignSize, Preset);
-	// 设计稿导入强调“还原优先”，禁止自动越界裁剪，否则会把本应越界显示的区域压扁。
-	Preset.bEnableOverflowFix = false;
-
-	// 转换为Fixer节点
-	FFixerWidgetNode FixerRoot;
-	ConvertToFixerNode(RootNode, FixerRoot);
-
-	// 像素Bounds归一化为0-1（Fixer内部假设归一化坐标系）
-	const float InvW = 1.0f / FMath::Max(1.0f, (float)DesignSize.X);
-	const float InvH = 1.0f / FMath::Max(1.0f, (float)DesignSize.Y);
-	NormalizeFixerBounds(FixerRoot, InvW, InvH);
-
-	// 执行修正
-	TArray<FFixerLogEntry> Log;
-	FLayoutFixer::FixWidgetTree(FixerRoot, Preset, Log);
-
-	// 反归一化回像素坐标
-	DenormalizeFixerBounds(FixerRoot, (float)DesignSize.X, (float)DesignSize.Y);
-
-	// 写回修正后的Bounds
-	ApplyFixedBounds(RootNode, FixerRoot);
-
-	// 输出修正日志
-	for (const FFixerLogEntry& Entry : Log)
-	{
-		UE_LOG(LogDesign2UMG, Verbose, TEXT("Fixer [%s] %s: (%.4f,%.4f,%.4f,%.4f) -> (%.4f,%.4f,%.4f,%.4f)"),
-			*Entry.WidgetId, *Entry.FixType,
-			Entry.OldBounds.X, Entry.OldBounds.Y, Entry.OldBounds.W, Entry.OldBounds.H,
-			Entry.NewBounds.X, Entry.NewBounds.Y, Entry.NewBounds.W, Entry.NewBounds.H);
-	}
 }
 
 UClass* FUMGWidgetUtils::ResolveWidgetClass(const FString& TypeName)
@@ -372,50 +306,5 @@ FName FUMGWidgetUtils::SanitizeWidgetName(const FString& InName, const FString& 
 	}
 
 	return FName(*Sanitized);
-}
-
-namespace
-{
-	// 递归遍历节点计算最大边界
-	void TraverseNodeForDesignSize(const FUMGWidgetNode& Node, FVector2D& MaxBounds)
-	{
-		const FUMGSlotData& Slot = Node.Slot;
-
-		// 检查是否是点锚点（Min == Max）
-		bool bIsPointAnchor = FMath::IsNearlyEqual(Slot.Anchors.Min.X, Slot.Anchors.Max.X) &&
-		                      FMath::IsNearlyEqual(Slot.Anchors.Min.Y, Slot.Anchors.Max.Y);
-
-		if (bIsPointAnchor)
-		{
-			// 位置（Left/Top 是相对于锚点的偏移）
-			float PosX = Slot.Offsets.Left;
-			float PosY = Slot.Offsets.Top;
-
-			// Widget 尺寸（点锚点下 Right=Width, Bottom=Height）
-			float Width = Slot.Offsets.Right;
-			float Height = Slot.Offsets.Bottom;
-
-			// 如果有 WidthOverride/HeightOverride，使用它们
-			Design2UMGWidgetNodeAccess::TryGetWidgetFloat(Node, UMGPropertyKeys::WidthOverride, Width);
-			Design2UMGWidgetNodeAccess::TryGetWidgetFloat(Node, UMGPropertyKeys::HeightOverride, Height);
-
-			// 计算右下角边界 = 位置 + 尺寸
-			MaxBounds.X = FMath::Max(MaxBounds.X, FMath::Abs(PosX) + Width);
-			MaxBounds.Y = FMath::Max(MaxBounds.Y, FMath::Abs(PosY) + Height);
-		}
-
-		// 递归处理子节点
-		for (const FUMGWidgetNode& Child : Node.Children)
-		{
-			TraverseNodeForDesignSize(Child, MaxBounds);
-		}
-	}
-}
-
-FVector2D FUMGWidgetUtils::CalculateDesignSize(const FUMGWidgetNode& RootNode, FVector2D DefaultSize)
-{
-	FVector2D MaxBounds = DefaultSize;
-	TraverseNodeForDesignSize(RootNode, MaxBounds);
-	return MaxBounds;
 }
 

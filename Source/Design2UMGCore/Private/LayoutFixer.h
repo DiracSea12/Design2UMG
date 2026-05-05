@@ -8,7 +8,7 @@
  */
 struct FFixerPreset
 {
-	FIntPoint DesignSize = FIntPoint(1920, 1080);
+	FIntPoint DesignSize = FIntPoint::ZeroValue;
 	int32 SnapPx = 4;
 	float RowOverlapThreshold = 0.8f;
 	int32 MinElementsForEqualSpacing = 3;
@@ -59,15 +59,14 @@ struct FFixerWidgetNode
 /**
  * Applies rule-based bounds repairs before final anchor/offset projection.
  */
-class DESIGN2UMGCORE_API FLayoutFixer
+namespace LayoutFixer
 {
-public:
 	/**
 	 * Initialize a fixer preset from the current design size.
 	 * @param DesignSize Design canvas size in pixels.
 	 * @param OutPreset Output preset to initialize.
 	 */
-	static void Initialize(const FIntPoint& DesignSize, FFixerPreset& OutPreset);
+	DESIGN2UMGCORE_API void Initialize(const FIntPoint& DesignSize, FFixerPreset& OutPreset);
 
 	/**
 	 * Fix a widget tree in place and optionally emit logs and counters.
@@ -76,5 +75,5 @@ public:
 	 * @param OutLog Output repair log entries.
 	 * @param OutStats Optional aggregate counters.
 	 */
-	static void FixWidgetTree(FFixerWidgetNode& Root, const FFixerPreset& Preset, TArray<FFixerLogEntry>& OutLog, FFixerStats* OutStats = nullptr);
-};
+	DESIGN2UMGCORE_API void FixWidgetTree(FFixerWidgetNode& Root, const FFixerPreset& Preset, TArray<FFixerLogEntry>& OutLog, FFixerStats* OutStats = nullptr);
+}

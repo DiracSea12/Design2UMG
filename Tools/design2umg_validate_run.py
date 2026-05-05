@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import design2umg_auto_verify as verify
+import design2umg_render_rule as render_rule
 
 
 BLOCKED_EXIT_CODE = 2
@@ -126,7 +127,13 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
         "metric_epsilon": metric_epsilon,
         "historical_best_checked": False,
         "historical_best_missing_cases": [],
+        "historical_best_incompatible_cases": [],
         "historical_best_regressions": [],
+        "render_size_rule_checked": False,
+        "render_size_rule_incompatible_cases": [],
+        "pipeline_determinism_rule_checked": False,
+        "pipeline_determinism_rule_incompatible_cases": [],
+        "historical_best_pipeline_determinism_incompatible_cases": [],
     }
 
     run_scope_path = output_root / "run_scope.json"
@@ -186,6 +193,38 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
     if result["missing_case_summary_entries"]:
         result["blocked_reasons"].append("missing_case_summary_entry")
 
+    current_rule_case_names = expected_case_names or summary_case_names or case_dir_names
+    for case_name in current_rule_case_names:
+        summary_case = summary_cases_by_name.get(case_name) or {}
+        compare_report_path = resolve_report_path(output_root, case_name, summary_case)
+        if not compare_report_path.is_file():
+            continue
+
+        result["render_size_rule_checked"] = True
+        current_rule = render_rule.evaluate_report_render_size_rule(compare_report_path)
+        if not current_rule.get("compatible"):
+            result["render_size_rule_incompatible_cases"].append(
+                {
+                    "case": case_name,
+                    "current": current_rule,
+                }
+            )
+
+        result["pipeline_determinism_rule_checked"] = True
+        current_pipeline_rule = render_rule.evaluate_report_pipeline_determinism_rule(compare_report_path)
+        if not current_pipeline_rule.get("compatible"):
+            result["pipeline_determinism_rule_incompatible_cases"].append(
+                {
+                    "case": case_name,
+                    "current": current_pipeline_rule,
+                }
+            )
+
+    if result["render_size_rule_incompatible_cases"]:
+        result["blocked_reasons"].append("render_size_rule_incompatible")
+    if result["pipeline_determinism_rule_incompatible_cases"]:
+        result["blocked_reasons"].append("pipeline_determinism_rule_incompatible")
+
     if admissible_best_path is not None:
         admissible_best = load_json(admissible_best_path) if admissible_best_path.is_file() else None
         if admissible_best is None:
@@ -202,6 +241,32 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
                     continue
 
                 resolved_current_metrics = resolve_case_metrics(output_root, case_name, current_case)
+                current_rule = render_rule.evaluate_report_render_size_rule(Path(resolved_current_metrics.get("report_path", "")))
+                best_rule = render_rule.evaluate_report_render_size_rule(Path(best_case.get("report_path", "")))
+                if not current_rule.get("compatible") or not best_rule.get("compatible"):
+                    result["historical_best_incompatible_cases"].append(
+                        {
+                            "case": case_name,
+                            "current": current_rule,
+                            "historical_best": best_rule,
+                        }
+                    )
+                    continue
+
+                current_pipeline_rule = render_rule.evaluate_report_pipeline_determinism_rule(
+                    Path(resolved_current_metrics.get("report_path", ""))
+                )
+                best_pipeline_rule = render_rule.evaluate_report_pipeline_determinism_rule(Path(best_case.get("report_path", "")))
+                if not current_pipeline_rule.get("compatible") or not best_pipeline_rule.get("compatible"):
+                    result["historical_best_pipeline_determinism_incompatible_cases"].append(
+                        {
+                            "case": case_name,
+                            "current": current_pipeline_rule,
+                            "historical_best": best_pipeline_rule,
+                        }
+                    )
+                    continue
+
                 regressions = []
                 for current_metric, best_metric in METRIC_PAIRS:
                     current_value = resolved_current_metrics.get(current_metric)
@@ -229,6 +294,10 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
 
             if result["historical_best_missing_cases"]:
                 result["blocked_reasons"].append("historical_best_missing_case")
+            if result["historical_best_incompatible_cases"]:
+                result["blocked_reasons"].append("historical_best_render_size_rule_incompatible")
+            if result["historical_best_pipeline_determinism_incompatible_cases"]:
+                result["blocked_reasons"].append("historical_best_pipeline_determinism_rule_incompatible")
             if result["historical_best_regressions"]:
                 result["blocked_reasons"].append("historical_best_regression")
 

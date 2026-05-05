@@ -22,7 +22,7 @@
 #include "Components/SafeZoneSlot.h"
 
 // ============================================================================
-// Slot 属性应用（函数指针映射表模式）
+// Slot property application using a function-pointer mapping table.
 // ============================================================================
 
 namespace
@@ -41,7 +41,7 @@ namespace
 		CS->SetAutoSize(S.bAutoSize);
 	}
 
-	// VBox/HBox Slot 共用逻辑
+	// Shared logic for VBox/HBox slots.
 	template<typename TSlot>
 	void ApplyBoxSlotCommon(TSlot* BoxSlot, const FUMGSlotData& S)
 	{

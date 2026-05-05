@@ -8,6 +8,7 @@
 #include "Design2UMGNodeWidgetFactory.h"
 #include "Design2UMGPrototypeNavigation.h"
 #include "Design2UMGConverterFlowSupport.h"
+#include "Design2UMGConverterInternal.h"
 #include "Design2UMGSourceMetadata.h"
 #include "Design2UMGTextWidgetBuilder.h"
 #include "ImageFillUtils.h"
@@ -24,7 +25,7 @@
 
 namespace
 {
-	constexpr int32 MaxTreeRecursionDepth = 512;
+	using namespace Design2UMGConverterInternal;
 
 	struct FConversionVisualSettingsPayload
 	{
@@ -32,51 +33,22 @@ namespace
 		FVisualMapperOptions VisualMapperOptions;
 	};
 
-	struct FConversionSettingsSnapshot
-	{
-		FConversionVisualSettingsPayload Visual;
-		Design2UMGTextWidgetBuilder::FIconFontSettingsSnapshot IconFont;
-	};
-
 	FConversionSettingsSnapshot BuildConversionSettingsSnapshot()
 	{
 		FConversionSettingsSnapshot Snapshot;
 		if (const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get())
 		{
-			Snapshot.Visual.PlaceholderHatchStyle = Settings->ResolvePlaceholderHatchStyle();
-			Snapshot.Visual.VisualMapperOptions.LuminosityFitOpacityCap = Settings->ResolveLuminosityFitOpacityCap();
+			Snapshot.PlaceholderHatchStyle = Settings->ResolvePlaceholderHatchStyle();
+			Snapshot.VisualMapperOptions.LuminosityFitOpacityCap = Settings->ResolveLuminosityFitOpacityCap();
 			Snapshot.IconFont = Design2UMGTextWidgetBuilder::BuildIconFontSettingsSnapshot(Settings);
 		}
 		else
 		{
-			Snapshot.Visual.PlaceholderHatchStyle = UDesign2UMGSettings::FResolvedPlaceholderHatchStyle();
-			Snapshot.Visual.VisualMapperOptions.LuminosityFitOpacityCap = UDesign2UMGSettings::CanonicalLuminosityFitOpacityCap;
+			Snapshot.PlaceholderHatchStyle = UDesign2UMGSettings::FResolvedPlaceholderHatchStyle();
+			Snapshot.VisualMapperOptions.LuminosityFitOpacityCap = UDesign2UMGSettings::CanonicalLuminosityFitOpacityCap;
 		}
 		return Snapshot;
 	}
-
-	struct FConversionState
-	{
-		explicit FConversionState(
-			const FDesignDocument& InDocument,
-			TArray<FString>& InWarnings,
-			const FConversionSettingsSnapshot& InSettingsSnapshot)
-			: Document(InDocument)
-			, Warnings(InWarnings)
-			, SettingsSnapshot(InSettingsSnapshot)
-		{
-		}
-
-		const FDesignDocument& Document;
-		TArray<FString>& Warnings;
-		const FConversionSettingsSnapshot& SettingsSnapshot;
-		TSet<FString> WarnedFamilies;
-		TSet<FString> PrunedInvalidMappings;
-		TSet<FString> PrototypeTriggerNodeIds;
-		TMap<FString, FString> PendingIconFontMappings;
-		FUMGPrototypeNavigationData PrototypeNavigation;
-		int32 RecursionDepth = 0;
-	};
 
 	struct FResolvedPrototypeAction
 	{
@@ -84,58 +56,6 @@ namespace
 		FString Payload;
 		FUMGPrototypeTransitionData Transition;
 		bool bResolved = false;
-	};
-
-	struct FConversionContext
-	{
-		explicit FConversionContext(FConversionState& InState)
-			: State(InState)
-		{
-		}
-
-		FConversionContext WithNodeTheme(const TSharedPtr<FDesignNode>& Node) const
-		{
-			FConversionContext Next(State);
-			Next.ThemeContext = ThemeContext;
-			if (Node.IsValid())
-			{
-				for (const auto& Pair : Node->Theme)
-				{
-					Next.ThemeContext.Add(Pair.Key, Pair.Value);
-				}
-			}
-			return Next;
-		}
-
-		FConversionState& State;
-		TMap<FString, FString> ThemeContext;
-	};
-
-	struct FRecursionGuard
-	{
-		explicit FRecursionGuard(int32& InDepth, const TCHAR* InName = TEXT(""))
-			: Depth(InDepth)
-			, bValid(InDepth < MaxTreeRecursionDepth)
-		{
-			if (bValid)
-			{
-				++Depth;
-			}
-			else
-			{
-				UE_LOG(LogDesign2UMG, Verbose, TEXT("%s: recursion depth exceeded (%d)"), InName, MaxTreeRecursionDepth);
-				UE_LOG(LogDesign2UMG, Error, TEXT("Design tree nesting is too deep (over %d levels). A cyclic reference may exist."), MaxTreeRecursionDepth);
-			}
-		}
-
-		~FRecursionGuard()
-		{
-			if (bValid)
-				--Depth;
-		}
-
-		int32& Depth;
-		bool bValid = false;
 	};
 
 	bool HasVisibleFill(const FDesignFill& Fill)
@@ -262,7 +182,7 @@ namespace
 	bool ShouldWrapNodeWithBorder(const TSharedPtr<FDesignNode>& Node, bool bPlaceholderUsesDirectImage)
 	{
 		const bool bNeedsPaddingWrapper =
-			FLayoutMapper::HasPadding(Node)
+			LayoutMapper::HasPadding(Node)
 			&& (Node->LayoutData.bHasPaddingRuntimeWrapDecision
 				? Node->LayoutData.bPaddingRequiresRuntimeWrap
 				: ((Node->LayoutData.Layout == EDesignLayout::None)
@@ -317,7 +237,7 @@ namespace
 		const FVisualMapperOptions& VisualMapperOptions)
 	{
 		if (Node->HasMultiFill())
-			Widget = FVisualMapper::WrapWithMultiFill(MoveTemp(Widget), Node, VisualMapperOptions);
+			Widget = VisualMapper::WrapWithMultiFill(MoveTemp(Widget), Node, VisualMapperOptions);
 
 		const FDesignShadow* InnerShadow = nullptr;
 		for (const FDesignEffect& Effect : Node->Visual.Effects)
@@ -335,7 +255,7 @@ namespace
 
 		if (InnerShadow && Node.IsValid() && Node->Transform.Width.Value > 0.0f && Node->Transform.Height.Value > 0.0f)
 		{
-			Widget = FVisualMapper::WrapWithInnerShadow(MoveTemp(Widget), Node, *InnerShadow);
+			Widget = VisualMapper::WrapWithInnerShadow(MoveTemp(Widget), Node, *InnerShadow);
 		}
 
 		int32 ShadowCount = 0;
@@ -346,7 +266,7 @@ namespace
 			Widget.Shadow.BoxShadows.Reset();
 			for (int32 Index = 0; Index < ShadowCount; ++Index)
 			{
-				Widget = FVisualMapper::WrapWithBoxShadow(MoveTemp(Widget), Node, BoxShadows[Index], Index);
+				Widget = VisualMapper::WrapWithBoxShadow(MoveTemp(Widget), Node, BoxShadows[Index], Index);
 			}
 		}
 
@@ -371,12 +291,12 @@ namespace
 
 		if (MaxForegroundBlur > 0.0f && Node.IsValid() && Node->Transform.Width.Value > 0.0f && Node->Transform.Height.Value > 0.0f)
 		{
-			Widget = FVisualMapper::WrapWithForegroundBlur(MoveTemp(Widget), Node, MaxForegroundBlur);
+			Widget = VisualMapper::WrapWithForegroundBlur(MoveTemp(Widget), Node, MaxForegroundBlur);
 		}
 
 		if (MaxBackgroundBlur > 0.0f)
 		{
-			Widget = FVisualMapper::WrapWithBackgroundBlur(MoveTemp(Widget), MaxBackgroundBlur);
+			Widget = VisualMapper::WrapWithBackgroundBlur(MoveTemp(Widget), MaxBackgroundBlur);
 		}
 
 		return Widget;
@@ -472,172 +392,202 @@ namespace
 			const EDesignLayout ParentLayout) const
 		{
 			FRecursionGuard Guard(Context.State.RecursionDepth, TEXT("ConvertNode"));
-			if (!Guard.bValid)
-			{
-				return FUMGWidgetNode();
-			}
-
-			if (ShouldSkipNode(Node) && !ShouldKeepStructuralLeafInFlow(Node, ParentLayout))
+			if (!Guard.bValid || !ShouldConvertNode(Node, ParentLayout))
 			{
 				return FUMGWidgetNode();
 			}
 
 			const FConversionContext ActiveContext = Context.WithNodeTheme(Node);
-			const Design2UMGConverterInternal::FExpandedNodeResolver ExpandedNodeResolver(
-				ActiveContext.State.Document,
-				ActiveContext.ThemeContext);
-			const Design2UMGConverterInternal::FFlowChildPreparation FlowChildPreparation(ExpandedNodeResolver);
+			const Design2UMGConverterInternal::FExpandedNodeResolver ExpandedNodeResolver = BuildExpandedNodeResolver(ActiveContext);
 
 			if (Node->Type == EDesignNodeType::Ref)
 			{
-				TSharedPtr<FDesignNode> Expanded = ExpandedNodeResolver.ExpandRef(Node);
-				if (!Expanded.IsValid())
-				{
-					return FUMGWidgetNode();
-				}
-
-				SizeEstimator::PreComputeFitContentSizes(Expanded, Context.State.Document);
-				return ConvertNode(Expanded, ActiveContext, ParentLayout);
+				return ConvertExpandedRefNode(Node, ActiveContext, ParentLayout, ExpandedNodeResolver);
 			}
 
 			const bool bUsingRenderFallback = Design2UMGSourceMetadata::ShouldUseRenderFallback(Node);
 			FUMGWidgetNode Widget = CreateBaseWidgetForNode(Node, Context.State);
-
-			UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: '%s' id=%s type=%s bounds=(%.1f,%.1f,%.1f,%.1f) layout=%d children=%d"),
-				*Widget.Name, *Widget.Id, *Widget.Type,
-				Widget.Bounds.X, Widget.Bounds.Y, Widget.Bounds.W, Widget.Bounds.H,
-				(int32)Node->LayoutData.Layout, Node->Children.Num());
+			LogCreatedWidget(Widget, Node);
 
 			if (!bUsingRenderFallback)
 			{
-				FVisualMapper::ApplyVisualProperties(Widget, Node);
-				if (Widget.Type == TEXT("Border")
-					&& !HasWidgetStringProperty(Widget, UMGPropertyKeys::BrushColor)
-					&& !HasWidgetStringProperty(Widget, UMGPropertyKeys::TexturePath)
-					&& !HasWidgetStringProperty(Widget, UMGPropertyKeys::MaterialRef))
-				{
-					Widget.Brush.BrushColor = FLinearColor::Transparent;
-					Widget.Brush.bHasBrushColor = true;
-					if (HasWidgetStringProperty(Widget, UMGPropertyKeys::OutlineThickness))
-					{
-						Widget.Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
-						Widget.Brush.bHasDrawAs = true;
-					}
-				}
-
-				TArray<TSharedPtr<FDesignNode>> VisibleChildren;
-				GatherVisibleChildrenForConversion(Node, VisibleChildren);
-				if (Node->LayoutData.Layout == EDesignLayout::Grid && Design2UMGGridLayout::NeedsGridPanel(VisibleChildren))
-				{
-					Widget.Type = TEXT("GridPanel");
-				}
-				FlowChildPreparation.PreResolveFlowChildren(Node, Widget, VisibleChildren);
-				FNodeChildAppender(Widget, Node, VisibleChildren, ActiveContext, ExpandedNodeResolver, *this).AppendChildren();
-
-				const bool bHasResolvedGridGap = Node->LayoutData.Layout == EDesignLayout::Grid
-					&& (Design2UMGGridLayout::ResolveGridColumnGap(Node) > KINDA_SMALL_NUMBER
-						|| Design2UMGGridLayout::ResolveGridRowGap(Node) > KINDA_SMALL_NUMBER);
-				if (Node->LayoutData.ExplicitGap.Get(0.0f) > 0 || bHasResolvedGridGap)
-				{
-					if (Node->LayoutData.Layout == EDesignLayout::Wrap)
-					{
-						const float CrossAxisGap = Design2UMGSourceMetadata::ResolveWrapCrossAxisGap(Node);
-						Widget.WidgetStyle.InnerSlotPadding = FVector2D(Node->LayoutData.ExplicitGap.Get(0.0f), CrossAxisGap);
-					}
-					else if (Node->LayoutData.Layout == EDesignLayout::Grid)
-					{
-						if (Widget.Type == TEXT("UniformGridPanel"))
-						{
-							const float ColumnGap = Design2UMGGridLayout::ResolveGridColumnGap(Node);
-							const float RowGap = Design2UMGGridLayout::ResolveGridRowGap(Node);
-							if (ColumnGap > KINDA_SMALL_NUMBER || RowGap > KINDA_SMALL_NUMBER)
-							{
-								Widget.WidgetStyle.SlotPadding =
-									FMargin(ColumnGap * 0.5f, RowGap * 0.5f, ColumnGap * 0.5f, RowGap * 0.5f);
-							}
-							else
-							{
-								Widget.WidgetStyle.SlotPadding.Reset();
-							}
-						}
-					}
-					else
-					{
-						FLayoutMapper::ApplyGap(Widget.Children, Node->LayoutData.ExplicitGap.Get(0.0f), Node->LayoutData.Layout);
-					}
-
-					if (Node->LayoutData.Layout == EDesignLayout::Grid
-						&& Widget.Type == TEXT("UniformGridPanel")
-						&& !Widget.WidgetStyle.SlotPadding.IsSet())
-					{
-						Widget.WidgetStyle.SlotPadding = FMargin(Node->LayoutData.ExplicitGap.Get(0.0f), Node->LayoutData.ExplicitGap.Get(0.0f), Node->LayoutData.ExplicitGap.Get(0.0f), Node->LayoutData.ExplicitGap.Get(0.0f));
-					}
-				}
-
-				if (Node->LayoutData.JustifyContent != EDesignJustifyContent::Start)
-				{
-					const EDesignSizeMode MainAxisMode = (Node->LayoutData.Layout == EDesignLayout::Horizontal)
-						? Node->Transform.Width.Mode : Node->Transform.Height.Mode;
-					FLayoutMapper::ApplyJustifyContent(Widget.Children, Node->LayoutData.JustifyContent, MainAxisMode, ParentLayout);
-				}
-
-				const bool bPlaceholderUsesDirectImage = TryApplyPlaceholderSurfaceTint(Widget, Node, Context.State.SettingsSnapshot.Visual);
-				if (ShouldWrapNodeWithBorder(Node, bPlaceholderUsesDirectImage))
-				{
-					UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: '%s' → WrapWithBorder (fill=%d corner=%d stroke=%d)"),
-						*Widget.Name, HasVisualFill(Node), Node->Visual.CornerRadius.HasRadius(), Node->Visual.Stroke.HasStroke());
-					Widget = FVisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
-				}
-				else if (FLayoutMapper::HasPadding(Node) && !bPlaceholderUsesDirectImage)
-				{
-					FLayoutMapper::ApplyPadding(Widget, Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}));
-				}
-
-				Widget = ApplyVisualEffectWrappers(MoveTemp(Widget), Node, Context.State.SettingsSnapshot.Visual.VisualMapperOptions);
-				if (Design2UMGPrototypeNavigation::ShouldWrapNodeWithButton(
-					Node,
-					Context.State.PrototypeNavigation,
-					Context.State.PrototypeTriggerNodeIds))
-				{
-					Widget = Design2UMGPrototypeNavigation::WrapWithButton(MoveTemp(Widget), Node);
-				}
+				ApplyNodeVisuals(Widget, Node);
+				AppendChildWidgets(Widget, Node, ActiveContext, ExpandedNodeResolver);
+				ApplyLayoutFixup(Widget, Node, ActiveContext, ParentLayout);
+				Widget = WrapWithPrototypeNavigation(MoveTemp(Widget), Node, ActiveContext);
 			}
 			else
 			{
-				FVisualMapper::ApplyRenderTransformProperties(Widget, Node);
+				ApplyRenderFallbackVisuals(Widget, Node);
 			}
 			Widget.MutableSource() = Design2UMGSourceMetadata::BuildSourceNodeData(Node);
 
 			return Widget;
 		}
 
-		void ApplyRenderFallbackBounds(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node) const
+		bool ShouldConvertNode(const TSharedPtr<FDesignNode>& Node, const EDesignLayout ParentLayout) const
 		{
-			if (!Node.IsValid())
+			return !ShouldSkipNode(Node) || ShouldKeepStructuralLeafInFlow(Node, ParentLayout);
+		}
+
+		Design2UMGConverterInternal::FExpandedNodeResolver BuildExpandedNodeResolver(
+			const FConversionContext& Context) const
+		{
+			return Design2UMGConverterInternal::FExpandedNodeResolver(Context.State.Document, Context.ThemeContext);
+		}
+
+		FUMGWidgetNode ConvertExpandedRefNode(
+			const TSharedPtr<FDesignNode>& Node,
+			const FConversionContext& ActiveContext,
+			const EDesignLayout ParentLayout,
+			const Design2UMGConverterInternal::FExpandedNodeResolver& ExpandedNodeResolver) const
+		{
+			TSharedPtr<FDesignNode> Expanded = ExpandedNodeResolver.ExpandRef(Node);
+			if (!Expanded.IsValid())
 			{
-				return;
+				return FUMGWidgetNode();
 			}
 
-			const FString& FallbackOffsetX = Node->Source().RenderFallback.OffsetX;
-			const FString& FallbackOffsetY = Node->Source().RenderFallback.OffsetY;
-			const FString& FallbackWidth = Node->Source().RenderFallback.Width;
-			const FString& FallbackHeight = Node->Source().RenderFallback.Height;
-			if (!FallbackOffsetX.IsEmpty())
+			SizeEstimator::PreComputeFitContentSizes(Expanded, ActiveContext.State.Document);
+			return ConvertNode(Expanded, ActiveContext, ParentLayout);
+		}
+
+		void LogCreatedWidget(const FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node) const
+		{
+			UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: '%s' id=%s type=%s bounds=(%.1f,%.1f,%.1f,%.1f) layout=%d children=%d"),
+				*Widget.Name, *Widget.Id, *Widget.Type,
+				Widget.Bounds.X, Widget.Bounds.Y, Widget.Bounds.W, Widget.Bounds.H,
+				(int32)Node->LayoutData.Layout, Node->Children.Num());
+		}
+
+		void ApplyNodeVisuals(
+			FUMGWidgetNode& Widget,
+			const TSharedPtr<FDesignNode>& Node) const
+		{
+			VisualMapper::ApplyVisualProperties(Widget, Node);
+			if (Widget.Type == TEXT("Border")
+				&& !HasWidgetStringProperty(Widget, UMGPropertyKeys::BrushColor)
+				&& !HasWidgetStringProperty(Widget, UMGPropertyKeys::TexturePath)
+				&& !HasWidgetStringProperty(Widget, UMGPropertyKeys::MaterialRef))
 			{
-				Widget.Bounds.X += FCString::Atof(*FallbackOffsetX);
+				Widget.Brush.BrushColor = FLinearColor::Transparent;
+				Widget.Brush.bHasBrushColor = true;
+				if (HasWidgetStringProperty(Widget, UMGPropertyKeys::OutlineThickness))
+				{
+					Widget.Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
+					Widget.Brush.bHasDrawAs = true;
+				}
 			}
-			if (!FallbackOffsetY.IsEmpty())
+		}
+
+		void AppendChildWidgets(
+			FUMGWidgetNode& Widget,
+			const TSharedPtr<FDesignNode>& Node,
+			const FConversionContext& Context,
+			const Design2UMGConverterInternal::FExpandedNodeResolver& ExpandedNodeResolver) const
+		{
+			TArray<TSharedPtr<FDesignNode>> VisibleChildren;
+			GatherVisibleChildrenForConversion(Node, VisibleChildren);
+			if (Node->LayoutData.Layout == EDesignLayout::Grid && Design2UMGGridLayout::NeedsGridPanel(VisibleChildren))
 			{
-				Widget.Bounds.Y += FCString::Atof(*FallbackOffsetY);
+				Widget.Type = TEXT("GridPanel");
 			}
-			if (!FallbackWidth.IsEmpty())
+
+			const Design2UMGConverterInternal::FFlowChildPreparation FlowChildPreparation(ExpandedNodeResolver);
+			FlowChildPreparation.PreResolveFlowChildren(Node, Widget, VisibleChildren);
+			FNodeChildAppender(Widget, Node, VisibleChildren, Context, ExpandedNodeResolver, *this).AppendChildren();
+		}
+
+		void ApplyRenderFallbackVisuals(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node) const
+		{
+			VisualMapper::ApplyRenderTransformProperties(Widget, Node);
+		}
+
+		void ApplyLayoutFixup(
+			FUMGWidgetNode& Widget,
+			const TSharedPtr<FDesignNode>& Node,
+			const FConversionContext& Context,
+			const EDesignLayout ParentLayout) const
+		{
+			const bool bHasResolvedGridGap = Node->LayoutData.Layout == EDesignLayout::Grid
+				&& (Design2UMGGridLayout::ResolveGridColumnGap(Node) > KINDA_SMALL_NUMBER
+					|| Design2UMGGridLayout::ResolveGridRowGap(Node) > KINDA_SMALL_NUMBER);
+			if (Node->LayoutData.ExplicitGap.Get(0.0f) > 0 || bHasResolvedGridGap)
 			{
-				Widget.Bounds.W = FCString::Atof(*FallbackWidth);
+				if (Node->LayoutData.Layout == EDesignLayout::Wrap)
+				{
+					const float CrossAxisGap = Design2UMGSourceMetadata::ResolveWrapCrossAxisGap(Node);
+					Widget.WidgetStyle.InnerSlotPadding = FVector2D(Node->LayoutData.ExplicitGap.Get(0.0f), CrossAxisGap);
+				}
+				else if (Node->LayoutData.Layout == EDesignLayout::Grid)
+				{
+					if (Widget.Type == TEXT("UniformGridPanel"))
+					{
+						const float ColumnGap = Design2UMGGridLayout::ResolveGridColumnGap(Node);
+						const float RowGap = Design2UMGGridLayout::ResolveGridRowGap(Node);
+						if (ColumnGap > KINDA_SMALL_NUMBER || RowGap > KINDA_SMALL_NUMBER)
+						{
+							Widget.WidgetStyle.SlotPadding =
+								FMargin(ColumnGap * 0.5f, RowGap * 0.5f, ColumnGap * 0.5f, RowGap * 0.5f);
+						}
+						else
+						{
+							Widget.WidgetStyle.SlotPadding.Reset();
+						}
+					}
+				}
+				else
+				{
+					LayoutMapper::ApplyGap(Widget.Children, Node->LayoutData.ExplicitGap.Get(0.0f), Node->LayoutData.Layout);
+				}
+
+				if (Node->LayoutData.Layout == EDesignLayout::Grid
+					&& Widget.Type == TEXT("UniformGridPanel")
+					&& !Widget.WidgetStyle.SlotPadding.IsSet())
+				{
+					Widget.WidgetStyle.SlotPadding = FMargin(Node->LayoutData.ExplicitGap.Get(0.0f), Node->LayoutData.ExplicitGap.Get(0.0f), Node->LayoutData.ExplicitGap.Get(0.0f), Node->LayoutData.ExplicitGap.Get(0.0f));
+				}
 			}
-			if (!FallbackHeight.IsEmpty())
+
+			if (Node->LayoutData.JustifyContent != EDesignJustifyContent::Start)
 			{
-				Widget.Bounds.H = FCString::Atof(*FallbackHeight);
+				const EDesignSizeMode MainAxisMode = (Node->LayoutData.Layout == EDesignLayout::Horizontal)
+					? Node->Transform.Width.Mode : Node->Transform.Height.Mode;
+				LayoutMapper::ApplyJustifyContent(Widget.Children, Node->LayoutData.JustifyContent, MainAxisMode, ParentLayout);
 			}
+
+			FConversionVisualSettingsPayload VisualSettings;
+			VisualSettings.PlaceholderHatchStyle = Context.State.SettingsSnapshot.PlaceholderHatchStyle;
+			VisualSettings.VisualMapperOptions = Context.State.SettingsSnapshot.VisualMapperOptions;
+
+			const bool bPlaceholderUsesDirectImage = TryApplyPlaceholderSurfaceTint(Widget, Node, VisualSettings);
+			if (ShouldWrapNodeWithBorder(Node, bPlaceholderUsesDirectImage))
+			{
+				UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: '%s' → WrapWithBorder (fill=%d corner=%d stroke=%d)"),
+					*Widget.Name, HasVisualFill(Node), Node->Visual.CornerRadius.HasRadius(), Node->Visual.Stroke.HasStroke());
+				Widget = VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
+			}
+			else if (LayoutMapper::HasPadding(Node) && !bPlaceholderUsesDirectImage)
+			{
+				LayoutMapper::ApplyPadding(Widget, Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}));
+			}
+
+			Widget = ApplyVisualEffectWrappers(MoveTemp(Widget), Node, VisualSettings.VisualMapperOptions);
+		}
+
+		FUMGWidgetNode WrapWithPrototypeNavigation(
+			FUMGWidgetNode&& Widget,
+			const TSharedPtr<FDesignNode>& Node,
+			const FConversionContext& Context) const
+		{
+			if (Design2UMGPrototypeNavigation::ShouldWrapNodeWithButton(
+				Node,
+				Context.State.PrototypeNavigation,
+				Context.State.PrototypeTriggerNodeIds))
+			{
+				return Design2UMGPrototypeNavigation::WrapWithButton(MoveTemp(Widget), Node);
+			}
+			return MoveTemp(Widget);
 		}
 
 		FUMGWidgetNode CreateBaseWidgetForNode(const TSharedPtr<FDesignNode>& Node, FConversionState& State) const
@@ -646,7 +596,6 @@ namespace
 			{
 				FUMGWidgetNode Widget = Design2UMGSourceMetadata::CreateRenderFallbackWidget(Node);
 				Design2UMGNodeWidgetFactory::PopulateWidgetIdentityAndBounds(Widget, Node);
-				ApplyRenderFallbackBounds(Widget, Node);
 				Widget.MutableSource() = Design2UMGSourceMetadata::BuildSourceNodeData(Node);
 				UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: '%s' -> Figma render fallback image"), *Widget.Name);
 				return Widget;
@@ -763,8 +712,8 @@ namespace
 				continue;
 			}
 
-			FLayoutMapper::ApplySlotProperties(ChildWidget, EffectiveChild, Node->LayoutData.Layout);
-			FLayoutMapper::ApplyAlignItems(ChildWidget, Node->LayoutData.AlignItems, Node->LayoutData.Layout);
+			LayoutMapper::ApplySlotProperties(ChildWidget, EffectiveChild, Node->LayoutData.Layout);
+			LayoutMapper::ApplyAlignItems(ChildWidget, Node->LayoutData.AlignItems, Node->LayoutData.Layout);
 			if (Node->LayoutData.Layout == EDesignLayout::Grid)
 			{
 				if (bGridPanelParent)
@@ -798,7 +747,7 @@ namespace
 				UE_LOG(LogDesign2UMG, Verbose, TEXT("  child '%s' → SizeBox wrap (fixed=%d min=%d w=%.1f h=%.1f)"),
 					*ChildWidget.Name, bHasFixedSize, bHasMinSize,
 					EffectiveChild->Transform.Width.Value, EffectiveChild->Transform.Height.Value);
-				Widget.Children.Add(FLayoutMapper::WrapWithSizeBox(MoveTemp(ChildWidget), EffectiveChild, Node->LayoutData.Layout));
+				Widget.Children.Add(LayoutMapper::WrapWithSizeBox(MoveTemp(ChildWidget), EffectiveChild, Node->LayoutData.Layout));
 				continue;
 			}
 
@@ -839,7 +788,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document)
 	TArray<TSharedPtr<FDesignNode>> Children;
 	Children.Reserve(Document.Children.Num());
 	for (const auto& Child : Document.Children)
-		Children.Add(FRefExpander::DeepCopyNode(Child));
+		Children.Add(RefExpander::DeepCopyNode(Child));
 
 	TArray<TSharedPtr<FDesignNode>> VisibleChildren;
 	VisibleChildren.Reserve(Children.Num());

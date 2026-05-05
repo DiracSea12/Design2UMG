@@ -22,7 +22,7 @@ namespace
 	}
 }
 
-FString FDesignTypeMapper::MapNodeTypeToWidget(EDesignNodeType Type, EDesignLayout Layout)
+FString DesignTypeMapper::MapNodeTypeToWidget(EDesignNodeType Type, EDesignLayout Layout)
 {
 	switch (Type)
 	{
@@ -51,7 +51,7 @@ FString FDesignTypeMapper::MapNodeTypeToWidget(EDesignNodeType Type, EDesignLayo
 	}
 }
 
-FName FDesignTypeMapper::MapFontWeight(const FString& Weight)
+FName DesignTypeMapper::MapFontWeight(const FString& Weight)
 {
 	FString W = Weight.ToLower();
 	if (W == TEXT("100") || W == TEXT("thin"))
@@ -75,7 +75,7 @@ FName FDesignTypeMapper::MapFontWeight(const FString& Weight)
 	return TEXT("Regular");
 }
 
-EHorizontalAlignment FDesignTypeMapper::MapAlignItemsH(EDesignAlignItems Align)
+EHorizontalAlignment DesignTypeMapper::MapAlignItemsH(EDesignAlignItems Align)
 {
 	switch (Align)
 	{
@@ -88,7 +88,7 @@ EHorizontalAlignment FDesignTypeMapper::MapAlignItemsH(EDesignAlignItems Align)
 	}
 }
 
-EVerticalAlignment FDesignTypeMapper::MapAlignItemsV(EDesignAlignItems Align)
+EVerticalAlignment DesignTypeMapper::MapAlignItemsV(EDesignAlignItems Align)
 {
 	switch (Align)
 	{

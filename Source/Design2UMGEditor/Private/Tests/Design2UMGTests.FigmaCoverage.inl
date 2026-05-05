@@ -2003,10 +2003,6 @@ bool FFigmaRenderFallbackMetadataRoundTripTest::RunTest(const FString& Parameter
 						"design2umgRenderFallbackScope": "full",
 						"design2umgRenderFallbackSource": "figma_render_png",
 						"design2umgRenderFallbackReason": "image_filters+image_blend_luminosity",
-						"design2umgRenderFallbackOffsetX": "-8.5",
-						"design2umgRenderFallbackOffsetY": "3.25",
-						"design2umgRenderFallbackWidth": "176",
-						"design2umgRenderFallbackHeight": "104",
 						"children": []
 					}]
 				}]
@@ -2026,10 +2022,6 @@ bool FFigmaRenderFallbackMetadataRoundTripTest::RunTest(const FString& Parameter
 	TestEqual(TEXT("Render fallback scope preserved"), RenderNode->Source().RenderFallback.Scope, TEXT("full"));
 	TestEqual(TEXT("Render fallback source preserved"), RenderNode->Source().RenderFallback.Source, TEXT("figma_render_png"));
 	TestEqual(TEXT("Render fallback reason preserved"), RenderNode->Source().RenderFallback.Reason, TEXT("image_filters+image_blend_luminosity"));
-	TestEqual(TEXT("Render fallback offsetX preserved"), RenderNode->Source().RenderFallback.OffsetX, TEXT("-8.5"));
-	TestEqual(TEXT("Render fallback offsetY preserved"), RenderNode->Source().RenderFallback.OffsetY, TEXT("3.25"));
-	TestEqual(TEXT("Render fallback width preserved"), RenderNode->Source().RenderFallback.Width, TEXT("176"));
-	TestEqual(TEXT("Render fallback height preserved"), RenderNode->Source().RenderFallback.Height, TEXT("104"));
 
 	TSet<FString> ImageRefs;
 	FFigmaParser::CollectImageRefs(Doc, ImageRefs);
@@ -2081,10 +2073,6 @@ bool FFigmaStructuredLeafRenderFallbackWidgetTest::RunTest(const FString& Parame
 	Leaf->MutableSource().RenderFallback.Scope = TEXT("full");
 	Leaf->MutableSource().RenderFallback.Source = TEXT("figma_render_png");
 	Leaf->MutableSource().RenderFallback.Reason = TEXT("foreground_blur");
-	Leaf->MutableSource().RenderFallback.OffsetX = TEXT("-21.7463");
-	Leaf->MutableSource().RenderFallback.OffsetY = TEXT("-21.7463");
-	Leaf->MutableSource().RenderFallback.Width = TEXT("69.4925");
-	Leaf->MutableSource().RenderFallback.Height = TEXT("69.4925");
 	Root->Children.Add(Leaf);
 	Doc.Children.Add(Root);
 
@@ -2098,8 +2086,8 @@ bool FFigmaStructuredLeafRenderFallbackWidgetTest::RunTest(const FString& Parame
 
 	TestEqual(TEXT("Structured render fallback converts directly to image"), Widget->Type, TEXT("Image"));
 	TestEqual(TEXT("Structured render fallback keeps texture path"), GetWidgetProperty(*Widget, TEXT("TexturePath")), TEXT("/Game/Transient/T_render_202_5356.T_render_202_5356"));
-	TestTrue(TEXT("Structured render fallback shifts X by render offset"), FMath::IsNearlyEqual(Widget->Bounds.X, -11.7463f, 0.001f));
-	TestTrue(TEXT("Structured render fallback shifts Y by render offset"), FMath::IsNearlyEqual(Widget->Bounds.Y, -9.7463f, 0.001f));
+	TestTrue(TEXT("Structured render fallback keeps design X"), FMath::IsNearlyEqual(Widget->Bounds.X, 10.0f, 0.001f));
+	TestTrue(TEXT("Structured render fallback keeps design Y"), FMath::IsNearlyEqual(Widget->Bounds.Y, 12.0f, 0.001f));
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLeafRenderFallbackWidgetTest,
@@ -2139,10 +2127,6 @@ bool FFigmaLeafRenderFallbackWidgetTest::RunTest(const FString& Parameters)
 	Leaf->MutableSource().RenderFallback.Scope = TEXT("full");
 	Leaf->MutableSource().RenderFallback.Source = TEXT("figma_render_png");
 	Leaf->MutableSource().RenderFallback.Reason = TEXT("foreground_blur");
-	Leaf->MutableSource().RenderFallback.OffsetX = TEXT("-21.7463");
-	Leaf->MutableSource().RenderFallback.OffsetY = TEXT("-21.7463");
-	Leaf->MutableSource().RenderFallback.Width = TEXT("69.4925");
-	Leaf->MutableSource().RenderFallback.Height = TEXT("69.4925");
 	Root->Children.Add(Leaf);
 	Doc.Children.Add(Root);
 
@@ -2162,12 +2146,12 @@ bool FFigmaLeafRenderFallbackWidgetTest::RunTest(const FString& Parameters)
 	const float HeightOverride = FCString::Atof(*HeightOverrideValue);
 	TestFalse(TEXT("Leaf render fallback exposes typed width override"), WidthOverrideValue.IsEmpty());
 	TestFalse(TEXT("Leaf render fallback exposes typed height override"), HeightOverrideValue.IsEmpty());
-	TestTrue(TEXT("Leaf render fallback keeps render-box width"), FMath::IsNearlyEqual(WidthOverride, 69.4925f, 0.001f));
-	TestTrue(TEXT("Leaf render fallback keeps render-box height"), FMath::IsNearlyEqual(HeightOverride, 69.4925f, 0.001f));
-	TestTrue(TEXT("Leaf render fallback shifts X by render offset"), FMath::IsNearlyEqual(Widget->Bounds.X, -11.7463f, 0.001f));
-	TestTrue(TEXT("Leaf render fallback shifts Y by render offset"), FMath::IsNearlyEqual(Widget->Bounds.Y, -9.7463f, 0.001f));
-	TestTrue(TEXT("Leaf render fallback widget width uses render box"), FMath::IsNearlyEqual(Widget->Bounds.W, 69.4925f, 0.001f));
-	TestTrue(TEXT("Leaf render fallback widget height uses render box"), FMath::IsNearlyEqual(Widget->Bounds.H, 69.4925f, 0.001f));
+	TestTrue(TEXT("Leaf render fallback keeps design width override"), FMath::IsNearlyEqual(WidthOverride, 26.0f, 0.001f));
+	TestTrue(TEXT("Leaf render fallback keeps design height override"), FMath::IsNearlyEqual(HeightOverride, 26.0f, 0.001f));
+	TestTrue(TEXT("Leaf render fallback keeps design X"), FMath::IsNearlyEqual(Widget->Bounds.X, 10.0f, 0.001f));
+	TestTrue(TEXT("Leaf render fallback keeps design Y"), FMath::IsNearlyEqual(Widget->Bounds.Y, 12.0f, 0.001f));
+	TestTrue(TEXT("Leaf render fallback widget width uses design bounds"), FMath::IsNearlyEqual(Widget->Bounds.W, 26.0f, 0.001f));
+	TestTrue(TEXT("Leaf render fallback widget height uses design bounds"), FMath::IsNearlyEqual(Widget->Bounds.H, 26.0f, 0.001f));
 	TestTrue(TEXT("Leaf render fallback keeps no structural children"), Widget->Children.Num() == 0);
 	return true;
 }

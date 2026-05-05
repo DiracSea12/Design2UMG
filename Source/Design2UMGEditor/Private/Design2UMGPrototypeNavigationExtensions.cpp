@@ -741,8 +741,8 @@ bool UDesign2UMGPrototypeNavigationUserWidgetExtension::TryPlayGeneratedTransiti
 		return false;
 	}
 
-	// Slide 类过渡依赖运行时 Switcher 实际尺寸；继续走 ticker 可避免导入时 bounds
-	// 预烘焙后在 DPI / 容器约束变化下出现位移不足或过冲。
+	// Slide transitions depend on the runtime Switcher's actual size; keeping the ticker path avoids
+	// under-travel or overshoot when pre-baked import-time bounds meet DPI or container constraint changes.
 	if (Binding.Transition.UsesSlide())
 	{
 		return false;

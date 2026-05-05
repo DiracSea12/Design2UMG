@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$ProjectPath = "G:\UE5\FPSRoguelike\FPSRoguelike.uproject",
     [string]$EditorPath = "G:\UE5\UnrealEngine\Engine\Binaries\Win64\UnrealEditor.exe",
     [string]$LogPath = "G:\UE5\FPSRoguelike\Saved\Logs\FPSRoguelike.log",
@@ -9,29 +9,6 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-
-function Resolve-RenderSize {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$ImagePath
-    )
-
-    if (-not (Test-Path $ImagePath)) {
-        return @{ Width = 1920; Height = 1080 }
-    }
-
-    Add-Type -AssemblyName System.Drawing
-    $image = $null
-    try {
-        $image = [System.Drawing.Image]::FromFile($ImagePath)
-        return @{ Width = [int]$image.Width; Height = [int]$image.Height }
-    }
-    finally {
-        if ($null -ne $image) {
-            $image.Dispose()
-        }
-    }
-}
 
 if (-not $KeepExistingEditor) {
     Get-Process UnrealEditor, UnrealEditor-Cmd -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -50,14 +27,11 @@ if (-not [string]::IsNullOrWhiteSpace($resultDir)) {
 }
 
 $specPath = Join-Path $designerDir "lunaris-designer-validation.spec.json"
-$renderSize = Resolve-RenderSize -ImagePath $DesignerPngPath
 $spec = [ordered]@{
     mode = "asset"
     source_path = $AssetObjectPath
     render_png_path = $DesignerPngPath
     result_json_path = $ResultJsonPath
-    render_width = $renderSize.Width
-    render_height = $renderSize.Height
 }
 ($spec | ConvertTo-Json -Depth 8) | Set-Content -Path $specPath -Encoding utf8BOM
 

@@ -26,7 +26,7 @@ struct FLayoutPreset
  */
 struct FLayoutContext
 {
-	FIntPoint DesignSize = FIntPoint(1920, 1080);
+	FIntPoint DesignSize = FIntPoint::ZeroValue;
 	TOptional<float> OldAnchorX;
 	TOptional<float> OldAnchorY;
 	FLayoutPreset Preset;
@@ -35,14 +35,13 @@ struct FLayoutContext
 /**
  * Projects fixed design-space bounds to UMG slot anchors and offsets.
  */
-class DESIGN2UMGCORE_API FLayoutCalculator
+namespace LayoutCalculator
 {
-public:
 	/**
 	 * Calculate the best-fit slot representation for a widget bounds rectangle.
 	 * @param Bounds Design-space bounds.
 	 * @param Context Projection context including design size and thresholds.
 	 * @return Calculated slot data for UMG generation.
 	 */
-	static FUMGSlotData CalculateSlot(const FDesignPixelBounds& Bounds, const FLayoutContext& Context);
-};
+	DESIGN2UMGCORE_API FUMGSlotData CalculateSlot(const FDesignPixelBounds& Bounds, const FLayoutContext& Context);
+}

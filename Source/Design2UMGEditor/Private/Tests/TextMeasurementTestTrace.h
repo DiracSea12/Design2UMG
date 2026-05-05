@@ -120,7 +120,7 @@ namespace TextMeasurementTestTrace
 			FString TypefaceName = FFontResolver::FindBestTypeface(Node->Text.FontFamily, Node->Text.FontWeight);
 			if (TypefaceName.IsEmpty() && !Node->Text.FontWeight.IsEmpty())
 			{
-				TypefaceName = FDesignTypeMapper::MapFontWeight(Node->Text.FontWeight).ToString();
+				TypefaceName = DesignTypeMapper::MapFontWeight(Node->Text.FontWeight).ToString();
 			}
 			return TypefaceName;
 		}

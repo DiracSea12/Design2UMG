@@ -133,10 +133,6 @@ namespace
 					|| MetadataAccess::HasMeaningfulSourceMetadataValue(Node, SourceMetadataKeys::Interactions));
 		}
 
-		float ResolveDimensionOverride(const FString& OverrideValue, float DefaultValue)
-		{
-			return OverrideValue.IsEmpty() ? DefaultValue : FCString::Atof(*OverrideValue);
-		}
 	}
 
 	namespace LayoutMetadata
@@ -246,20 +242,13 @@ namespace Design2UMGSourceMetadata
 		Widget.Brush.Image.TexturePath = TexturePath;
 		Widget.Brush.Image.bHasTexturePath = true;
 
-		const float WidthOverride = RenderFallback::ResolveDimensionOverride(
-			Node->Source().RenderFallback.Width,
-			Node->Transform.Width.Value);
-		const float HeightOverride = RenderFallback::ResolveDimensionOverride(
-			Node->Source().RenderFallback.Height,
-			Node->Transform.Height.Value);
-
-		if (WidthOverride > 0.0f)
+		if (Node->Transform.Width.Value > 0.0f)
 		{
-			Widget.WidgetStyle.WidthOverride = WidthOverride;
+			Widget.WidgetStyle.WidthOverride = Node->Transform.Width.Value;
 		}
-		if (HeightOverride > 0.0f)
+		if (Node->Transform.Height.Value > 0.0f)
 		{
-			Widget.WidgetStyle.HeightOverride = HeightOverride;
+			Widget.WidgetStyle.HeightOverride = Node->Transform.Height.Value;
 		}
 
 		return Widget;

@@ -278,7 +278,7 @@ bool FBatchCVisualMapperMultiFillSmokeTest::RunTest(const FString& Parameters)
 	BaseWidget.Bounds.W = 96.0f;
 	BaseWidget.Bounds.H = 48.0f;
 
-	const FUMGWidgetNode Wrapped = FVisualMapper::WrapWithMultiFill(MoveTemp(BaseWidget), Node, FVisualMapperOptions());
+	const FUMGWidgetNode Wrapped = VisualMapper::WrapWithMultiFill(MoveTemp(BaseWidget), Node, FVisualMapperOptions());
 	TestEqual(TEXT("Multi-fill wrapper creates an overlay shell"), Wrapped.Type, FString(TEXT("Overlay")));
 	TestEqual(TEXT("Multi-fill wrapper keeps two paint layers plus content"), Wrapped.Children.Num(), 3);
 	if (Wrapped.Children.Num() != 3)

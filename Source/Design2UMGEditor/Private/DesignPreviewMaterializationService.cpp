@@ -5,7 +5,6 @@
 #include "UMGWidgetUtils.h"
 #include "DesignRemoteImageImporter.h"
 #include "Design2UMGLog.h"
-#include "Design2UMGSettings.h"
 #include "PreviewUserWidget.h"
 
 #include "Blueprint/WidgetTree.h"
@@ -13,22 +12,19 @@
 
 namespace
 {
-	FVector2D ResolvePreviewDesignSize(const FPreviewApprovedSnapshot& ApprovedSnapshot)
+	bool TryResolvePreviewDesignSize(const FPreviewApprovedSnapshot& ApprovedSnapshot, FVector2D& OutPreviewDesignSize)
 	{
 		const FDesignPixelBounds& RootBounds = ApprovedSnapshot.Data.RootWidget.Bounds;
-		if (RootBounds.W > 0.0f && RootBounds.H > 0.0f)
+		if (RootBounds.W > 1.0f && RootBounds.H > 1.0f)
 		{
-			return FVector2D(RootBounds.W, RootBounds.H);
+			OutPreviewDesignSize = FVector2D(RootBounds.W, RootBounds.H);
+			return true;
 		}
 
-		const FVector2D CalculatedSize = FUMGWidgetUtils::CalculateDesignSize(ApprovedSnapshot.Data.RootWidget, FVector2D::ZeroVector);
-		if (CalculatedSize.X > 0.0f && CalculatedSize.Y > 0.0f)
-		{
-			return CalculatedSize;
-		}
-
-		const FIntPoint FallbackSize = UDesign2UMGSettings::Get()->GetDesignSize();
-		return FVector2D((float)FallbackSize.X, (float)FallbackSize.Y);
+		UE_LOG(LogDesign2UMG, Error,
+			TEXT("Preview design size is unavailable; source data must define the layout size"));
+		OutPreviewDesignSize = FVector2D::ZeroVector;
+		return false;
 	}
 }
 
@@ -41,11 +37,16 @@ bool FDesignPreviewMaterializationService::MaterializePreview(const FDesignPrevi
 {
 	OutResult = FDesignPreviewMaterializationResult();
 	OutResult.RequestId = Request.RequestId;
-	const FVector2D PreviewDesignSize = ResolvePreviewDesignSize(Request.ApprovedSnapshot);
+	FVector2D PreviewDesignSize = FVector2D::ZeroVector;
+	if (!TryResolvePreviewDesignSize(Request.ApprovedSnapshot, PreviewDesignSize))
+	{
+		CleanupMaterializedPreview();
+		return false;
+	}
 
 	CleanupMaterializedPreview();
 
-	UUserWidget* NewPreviewWidget = CreatePreviewWidget(Request.ApprovedSnapshot);
+	UUserWidget* NewPreviewWidget = CreatePreviewWidget(Request.ApprovedSnapshot, PreviewDesignSize);
 	if (!NewPreviewWidget)
 	{
 		return false;
@@ -86,18 +87,17 @@ void FDesignPreviewMaterializationService::CleanupMaterializedPreview()
 	}
 }
 
-UUserWidget* FDesignPreviewMaterializationService::CreatePreviewWidget(const FPreviewApprovedSnapshot& ApprovedSnapshot)
+UUserWidget* FDesignPreviewMaterializationService::CreatePreviewWidget(
+	const FPreviewApprovedSnapshot& ApprovedSnapshot,
+	const FVector2D& PreviewDesignSize)
 {
 	TransientTextureMap.Empty();
 	FDesignRemoteImageImporter::ResolveTransientTextures(ApprovedSnapshot.Data.RootWidget, TransientTextureMap);
 
 	FUMGWidgetNode FixedRoot = ApprovedSnapshot.Data.RootWidget;
-	const FVector2D PreviewSize = ResolvePreviewDesignSize(ApprovedSnapshot);
-	const FIntPoint DesignSize(FMath::Max(1, FMath::RoundToInt(PreviewSize.X)), FMath::Max(1, FMath::RoundToInt(PreviewSize.Y)));
-	if (UDesign2UMGSettings::Get()->bEnableLayoutFixer)
-	{
-		FUMGWidgetUtils::ApplyFixer(FixedRoot, DesignSize);
-	}
+	const FIntPoint DesignSize(
+		FMath::Max(1, FMath::CeilToInt(PreviewDesignSize.X)),
+		FMath::Max(1, FMath::CeilToInt(PreviewDesignSize.Y)));
 
 	UUserWidget* TempWidget = NewObject<UPreviewUserWidget>(GetTransientPackage(), UPreviewUserWidget::StaticClass(), NAME_None, RF_Transient);
 	if (!TempWidget)
@@ -113,17 +113,13 @@ UUserWidget* FDesignPreviewMaterializationService::CreatePreviewWidget(const FPr
 		return nullptr;
 	}
 
-	const FVector2D MaterializedDesignSize = FUMGWidgetUtils::CalculateDesignSize(FixedRoot);
-	const FIntPoint MaterializedDesignSizeInt(
-		FMath::Max(1, FMath::RoundToInt(MaterializedDesignSize.X)),
-		FMath::Max(1, FMath::RoundToInt(MaterializedDesignSize.Y)));
 	UWidget* RootWidget = FUMGWidgetUtils::CreateWidgetRecursive(
 		TempWidget->WidgetTree,
 		FixedRoot,
 		nullptr,
 		&TransientTextureMap,
 		nullptr,
-		&MaterializedDesignSizeInt);
+		&DesignSize);
 	if (!RootWidget)
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create root widget of type: %s"), *ApprovedSnapshot.Data.RootWidget.Type);

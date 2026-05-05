@@ -233,7 +233,7 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 		return false;
 	}
 
-	// 阻塞等待，同时显示进度条tick Slate 保持编辑器UI 响应
+	// Wait synchronously while ticking Slate through the progress UI to keep the editor responsive.
 	const double StartTime = FPlatformTime::Seconds();
 	const double Timeout = 30.0;
 	const float TotalSteps = static_cast<float>(Timeout / 0.01);
@@ -274,7 +274,7 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 
 bool FMCPHttpClient::ParseSSEResponse(const FString& SSEBody, TSharedPtr<FJsonObject>& OutResult)
 {
-	// SSE 格式: "event: message\ndata: {json}\n\n"
+	// SSE format: "event: message\ndata: {json}\n\n"
 	// Extract the last "data:" line from the SSE payload.
 	FString JsonLine;
 	TArray<FString> Lines;
@@ -291,7 +291,7 @@ bool FMCPHttpClient::ParseSSEResponse(const FString& SSEBody, TSharedPtr<FJsonOb
 
 	if (JsonLine.IsEmpty())
 	{
-		// 可能不是 SSE 格式，直接尝试解析整个body
+		// This may not be SSE format, so try parsing the whole body directly.
 		JsonLine = SSEBody;
 	}
 

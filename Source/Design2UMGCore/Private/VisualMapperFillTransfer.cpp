@@ -345,7 +345,7 @@ namespace VisualMapperFillTransfer
 
 			if (Node->Visual.CornerRadius.HasRadius())
 			{
-				FVisualMapper::ApplyRoundedCorner(
+				VisualMapper::ApplyRoundedCorner(
 					Layer,
 					Node->Visual.CornerRadius,
 					Node->Transform.Width.Value,

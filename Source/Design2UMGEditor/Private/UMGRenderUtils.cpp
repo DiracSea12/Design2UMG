@@ -19,18 +19,14 @@
 #include "IImageWrapper.h"
 #include "IImageWrapperModule.h"
 #include "Input/HittestGrid.h"
-#include "Misc/ConfigCacheIni.h"
 #include "Slate/WidgetRenderer.h"
 #include "TextureResource.h"
-#include "WidgetBlueprintEditorUtils.h"
 #include "RenderingThread.h"
 #include "Styling/SlateBrush.h"
-#include "Widgets/Layout/SBox.h"
-#include "Widgets/Layout/SScaleBox.h"
 #include "Widgets/SVirtualWindow.h"
 
 // ============================================================================
-// Widget 渲染
+// Widget rendering
 // ============================================================================
 
 namespace
@@ -240,40 +236,21 @@ namespace
 		return FVector2D::ZeroVector;
 	}
 
-	bool ShouldScaleToRenderTarget(const FVector2D& DesignSize, const FIntPoint& RenderSize)
+	FIntPoint ResolveDesignLayoutPixelSize(const FVector2D& DesignSize)
 	{
-		if (DesignSize.X <= 1.0f || DesignSize.Y <= 1.0f || RenderSize.X <= 1 || RenderSize.Y <= 1)
-		{
-			return false;
-		}
-
-		const double DesignAspect = DesignSize.X / DesignSize.Y;
-		const double RenderAspect = static_cast<double>(RenderSize.X) / static_cast<double>(RenderSize.Y);
-		const double RelativeAspectDelta = FMath::Abs(DesignAspect - RenderAspect) / FMath::Max(DesignAspect, RenderAspect);
-		return RelativeAspectDelta <= 0.08;
+		return FIntPoint(
+			FMath::Max(1, FMath::CeilToInt(DesignSize.X)),
+			FMath::Max(1, FMath::CeilToInt(DesignSize.Y)));
 	}
 
-	FIntPoint GetDesignerPreviewWindowSize(const FIntPoint& FallbackSize)
+	bool IsValidRenderSize(const FIntPoint& Size)
 	{
-		int32 PreviewWidth = 0;
-		int32 PreviewHeight = 0;
-		if (GConfig)
-		{
-			GConfig->GetInt(TEXT("UMGEditor.Designer"), TEXT("PreviewWidth"), PreviewWidth, GEditorPerProjectIni);
-			GConfig->GetInt(TEXT("UMGEditor.Designer"), TEXT("PreviewHeight"), PreviewHeight, GEditorPerProjectIni);
-		}
-		if (PreviewWidth > 0 && PreviewHeight > 0)
-		{
-			return FIntPoint(PreviewWidth, PreviewHeight);
-		}
-		return FallbackSize;
+		return Size.X > 1 && Size.Y > 1;
 	}
 
-	FIntPoint ComputePreviewRenderSize(UUserWidget* Widget, const FIntPoint& FallbackSize, const TSharedRef<SVirtualWindow>& Window)
+	FIntPoint ComputePreviewRenderSize(const FIntPoint& FallbackSize, const TSharedRef<SVirtualWindow>& Window)
 	{
-		if (!Widget) return FallbackSize;
-
-		// 直接用调用方传入的尺寸，不读编辑器 Designer 配置（那是给 UMG 预览用的）
+		// Use the explicit layout size. Editor Designer preferences are preview-only.
 		Window->Resize(FVector2D(FallbackSize.X, FallbackSize.Y));
 		Window->SlatePrepass(1.0f);
 		Window->SlatePrepass(1.0f);
@@ -317,7 +294,7 @@ namespace
 	}
 }
 
-bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, const FIntPoint& RenderSize, TArray<uint8>& OutPngData, FIntPoint& OutSize)
+bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8>& OutPngData, FIntPoint& OutSize)
 {
 	if (!WidgetBP || !WidgetBP->GeneratedClass)
 	{
@@ -347,39 +324,31 @@ bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, const FIntPo
 	Widget->AddToRoot();
 
 	TSharedRef<SWidget> SlateWidget = Widget->TakeWidget();
-	TSharedRef<SWidget> WindowContent = SlateWidget;
 	const FVector2D DesignSize = GetBlueprintDesignSize(WidgetBP);
-	if (ShouldScaleToRenderTarget(DesignSize, RenderSize)
-		&& (!FMath::IsNearlyEqual(DesignSize.X, RenderSize.X)
-			|| !FMath::IsNearlyEqual(DesignSize.Y, RenderSize.Y)))
+	const FIntPoint LayoutPixelSize = ResolveDesignLayoutPixelSize(DesignSize);
+	const bool bHasValidDesignSize = DesignSize.X > 1.0f && DesignSize.Y > 1.0f && IsValidRenderSize(LayoutPixelSize);
+	if (!bHasValidDesignSize)
 	{
-		WindowContent =
-			SNew(SScaleBox)
-			.Stretch(EStretch::ScaleToFit)
-			.StretchDirection(EStretchDirection::Both)
-			[
-				SNew(SBox)
-				.WidthOverride(DesignSize.X)
-				.HeightOverride(DesignSize.Y)
-				[
-					SlateWidget
-				]
-			];
-		UE_LOG(LogDesign2UMG, Log,
-			TEXT("RenderWidgetToPng: scaling widget from design %.0fx%.0f into target %dx%d"),
-			DesignSize.X, DesignSize.Y, RenderSize.X, RenderSize.Y);
+		UE_LOG(LogDesign2UMG, Warning,
+			TEXT("RenderWidgetToPng: missing valid DesignTimeSize for %s; source design size is required"),
+			*WidgetBP->GetPathName());
+		Widget->RemoveFromRoot();
+		return false;
 	}
-	else if (DesignSize.X > 1.0f && DesignSize.Y > 1.0f)
+
+	const FIntPoint SlateRenderSize = LayoutPixelSize;
+	if (!IsValidRenderSize(SlateRenderSize))
 	{
-		const double DesignAspect = DesignSize.X / DesignSize.Y;
-		const double RenderAspect = static_cast<double>(RenderSize.X) / static_cast<double>(RenderSize.Y);
-		UE_LOG(LogDesign2UMG, Log,
-			TEXT("RenderWidgetToPng: skip scaling due to aspect mismatch design=%.4f target=%.4f (design %.0fx%.0f target %dx%d)"),
-			DesignAspect, RenderAspect, DesignSize.X, DesignSize.Y, RenderSize.X, RenderSize.Y);
+		UE_LOG(LogDesign2UMG, Warning,
+			TEXT("RenderWidgetToPng: invalid design/render size %dx%d"),
+			SlateRenderSize.X, SlateRenderSize.Y);
+		Widget->RemoveFromRoot();
+		return false;
 	}
+	TSharedRef<SWidget> WindowContent = SlateWidget;
 	TSharedRef<SVirtualWindow> Window = SNew(SVirtualWindow);
 	Window->SetContent(WindowContent);
-	const FIntPoint EffectiveSize = ComputePreviewRenderSize(Widget, RenderSize, Window);
+	FIntPoint EffectiveSize = ComputePreviewRenderSize(SlateRenderSize, Window);
 	Window->Resize(FVector2D(EffectiveSize.X, EffectiveSize.Y));
 	Window->SlatePrepass(1.0f);
 	Widget->ForceLayoutPrepass();
@@ -430,16 +399,24 @@ bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, const FIntPo
 }
 
 // ============================================================================
-// 直接从 WidgetTree 渲染（编译前，transient 纹理仍有效）
+// Direct WidgetTree rendering before compile, while transient textures are valid.
 // ============================================================================
 
 namespace
 {
-	bool RenderSlateWidgetToPngData(TSharedRef<SWidget> SlateWidget, const FIntPoint& RenderSize, TArray<uint8>& OutPngData, FIntPoint& OutSize)
+	bool RenderSlateWidgetToPngData(TSharedRef<SWidget> SlateWidget, const FIntPoint& LayoutSize, TArray<uint8>& OutPngData, FIntPoint& OutSize)
 	{
+		if (!IsValidRenderSize(LayoutSize))
+		{
+			return false;
+		}
+
+		const FIntPoint OutputSize = LayoutSize;
+		TSharedRef<SWidget> WindowContent = SlateWidget;
+
 		TSharedRef<SVirtualWindow> Window = SNew(SVirtualWindow);
-		Window->SetContent(SlateWidget);
-		Window->Resize(FVector2D(RenderSize.X, RenderSize.Y));
+		Window->SetContent(WindowContent);
+		Window->Resize(FVector2D(OutputSize.X, OutputSize.Y));
 		Window->SlatePrepass(1.0f);
 
 		UTextureRenderTarget2D* RT = NewObject<UTextureRenderTarget2D>();
@@ -447,14 +424,14 @@ namespace
 		RT->ClearColor = FLinearColor::Transparent;
 		RT->SRGB = true;
 		RT->RenderTargetFormat = RTF_RGBA8;
-		RT->InitCustomFormat(RenderSize.X, RenderSize.Y, PF_B8G8R8A8, true);
+		RT->InitCustomFormat(OutputSize.X, OutputSize.Y, PF_B8G8R8A8, true);
 
 		FWidgetRenderer Renderer(true);
 		Renderer.SetIsPrepassNeeded(false);
 		TUniquePtr<FHittestGrid> HitTestGrid = MakeUnique<FHittestGrid>();
 		FProceduralShapeGenerator::FlushPendingTextureUpdates();
 		FDesignPathRasterizer::FlushPendingTextureUpdates();
-		Renderer.DrawWindow(RT, *HitTestGrid, Window, 1.0f, FVector2D(RenderSize.X, RenderSize.Y), 0.1f);
+		Renderer.DrawWindow(RT, *HitTestGrid, Window, 1.0f, FVector2D(OutputSize.X, OutputSize.Y), 0.1f);
 		if (!GUsingNullRHI) { FlushRenderingCommands(); }
 
 		FTextureRenderTargetResource* Resource = RT->GameThread_GetRenderTargetResource();
@@ -476,14 +453,14 @@ namespace
 		TSharedPtr<IImageWrapper> Wrapper = WrapperModule.CreateImageWrapper(EImageFormat::PNG);
 		if (!Wrapper.IsValid()) return false;
 
-		Wrapper->SetRaw(Pixels.GetData(), Pixels.Num() * sizeof(FColor), RenderSize.X, RenderSize.Y, ERGBFormat::BGRA, 8);
+		Wrapper->SetRaw(Pixels.GetData(), Pixels.Num() * sizeof(FColor), OutputSize.X, OutputSize.Y, ERGBFormat::BGRA, 8);
 		OutPngData = Wrapper->GetCompressed();
-		OutSize = RenderSize;
+		OutSize = OutputSize;
 		return OutPngData.Num() > 0;
 	}
 }
 
-bool FUMGWidgetUtils::RenderWidgetTreeToPng(UWidgetBlueprint* WidgetBP, const FIntPoint& RenderSize, TArray<uint8>& OutPngData, FIntPoint& OutSize)
+bool FUMGWidgetUtils::RenderWidgetTreeToPng(UWidgetBlueprint* WidgetBP, TArray<uint8>& OutPngData, FIntPoint& OutSize)
 {
 	if (!WidgetBP || !WidgetBP->WidgetTree || !WidgetBP->WidgetTree->RootWidget)
 	{
@@ -493,7 +470,7 @@ bool FUMGWidgetUtils::RenderWidgetTreeToPng(UWidgetBlueprint* WidgetBP, const FI
 
 	if (!FSlateApplication::IsInitialized()) return false;
 
-	// 遍历 WidgetTree 所有 Widget，确保 SWidget 被创建并同步属性
+	// Materialize every SWidget in the WidgetTree and sync its properties.
 	WidgetBP->WidgetTree->ForEachWidget([](UWidget* W)
 	{
 		if (!W) return;
@@ -509,8 +486,20 @@ bool FUMGWidgetUtils::RenderWidgetTreeToPng(UWidgetBlueprint* WidgetBP, const FI
 		return false;
 	}
 
-	UE_LOG(LogDesign2UMG, Log, TEXT("RenderWidgetTreeToPng: rendering directly from WidgetTree (%dx%d)"), RenderSize.X, RenderSize.Y);
-	return RenderSlateWidgetToPngData(SlateWidget.ToSharedRef(), RenderSize, OutPngData, OutSize);
+	const FVector2D DesignSize = GetBlueprintDesignSize(WidgetBP);
+	const FIntPoint LayoutPixelSize = ResolveDesignLayoutPixelSize(DesignSize);
+	if (!(DesignSize.X > 1.0f && DesignSize.Y > 1.0f && IsValidRenderSize(LayoutPixelSize)))
+	{
+		UE_LOG(LogDesign2UMG, Warning,
+			TEXT("RenderWidgetTreeToPng: missing valid DesignTimeSize for %s; source design size is required"),
+			*WidgetBP->GetPathName());
+		return false;
+	}
+
+	UE_LOG(LogDesign2UMG, Log,
+		TEXT("RenderWidgetTreeToPng: render source design size %dx%d"),
+		LayoutPixelSize.X, LayoutPixelSize.Y);
+	return RenderSlateWidgetToPngData(SlateWidget.ToSharedRef(), LayoutPixelSize, OutPngData, OutSize);
 }
 
 

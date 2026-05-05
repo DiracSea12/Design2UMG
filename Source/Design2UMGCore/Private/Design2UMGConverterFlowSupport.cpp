@@ -265,7 +265,7 @@ namespace Design2UMGConverterInternal
 			return Node;
 		}
 
-		TSharedPtr<FDesignNode> Expanded = FRefExpander::ExpandRef(Node, Document);
+		TSharedPtr<FDesignNode> Expanded = RefExpander::ExpandRef(Node, Document);
 		if (!Expanded.IsValid())
 		{
 			return nullptr;
@@ -275,7 +275,7 @@ namespace Design2UMGConverterInternal
 		{
 			FDesignVariableResolver Resolver(Document.Variables);
 			Resolver.SetThemeContext(ThemeContext);
-			FRefExpander::ReThemeNode(Expanded, Resolver);
+			RefExpander::ReThemeNode(Expanded, Resolver);
 		}
 
 		return Expanded;

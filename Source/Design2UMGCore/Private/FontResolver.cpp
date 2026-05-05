@@ -124,7 +124,8 @@ namespace
 
 	bool IsAutomationImportedFontPath(const FString& ObjectPath)
 	{
-		return ObjectPath.Contains(TEXT("/Design2UMG/Automation/ImportedFonts/"), ESearchCase::IgnoreCase);
+		return ObjectPath.Contains(TEXT("/Design2UMG/Automation/"), ESearchCase::IgnoreCase)
+			&& ObjectPath.Contains(TEXT("/ImportedFonts/"), ESearchCase::IgnoreCase);
 	}
 
 	void IndexFontAssetName(const FString& AssetName, const FString& ObjectPath)
@@ -451,6 +452,25 @@ void FFontResolver::ClearCache()
 		GKnownIconNameCache.Reset();
 	}
 	InvalidateProjectFontAssetIndex();
+}
+
+void FFontResolver::RegisterFontAssetPath(const FString& FontFamily, const FString& ObjectPath)
+{
+	const FString NormalizedFamily = NormalizeFontFamilyKeyForResolver(FontFamily);
+	if (NormalizedFamily.IsEmpty() || ObjectPath.IsEmpty())
+	{
+		return;
+	}
+
+	{
+		FScopeLock Lock(&GFontResolverCacheMutex);
+		FontAssetCache.FindOrAdd(NormalizedFamily) = ObjectPath;
+	}
+
+	{
+		FScopeLock Lock(&GFontIndexMutex);
+		GNormalizedProjectFontAssetIndex.FindOrAdd(NormalizedFamily) = ObjectPath;
+	}
 }
 
 void FFontResolver::RegisterKnownIconGlyphs(

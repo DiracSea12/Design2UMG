@@ -172,21 +172,13 @@ struct FDesignRenderFallbackData
 	UPROPERTY() FString Scope;
 	UPROPERTY() FString Source;
 	UPROPERTY() FString Reason;
-	UPROPERTY() FString OffsetX;
-	UPROPERTY() FString OffsetY;
-	UPROPERTY() FString Width;
-	UPROPERTY() FString Height;
 
 	bool HasAny() const
 	{
 		return !ImageRef.IsEmpty()
 			|| !Scope.IsEmpty()
 			|| !Source.IsEmpty()
-			|| !Reason.IsEmpty()
-			|| !OffsetX.IsEmpty()
-			|| !OffsetY.IsEmpty()
-			|| !Width.IsEmpty()
-			|| !Height.IsEmpty();
+			|| !Reason.IsEmpty();
 	}
 };
 

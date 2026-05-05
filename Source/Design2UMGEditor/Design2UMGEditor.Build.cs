@@ -46,6 +46,8 @@ public class Design2UMGEditor : ModuleRules
 			"ContentBrowser",
 		});
 
+		PrivateIncludePaths.Add(System.IO.Path.Combine(ModuleDirectory, "../Design2UMGCore/Private"));
+
 		if (Target.bBuildDeveloperTools)
 		{
 			PrivateDependencyModuleNames.Add("Projects");

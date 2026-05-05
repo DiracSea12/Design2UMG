@@ -61,8 +61,8 @@ namespace
 		int32 RepairedCount = 0;
 		int32 FailedCount = 0;
 		TArray<FString> Messages;
-		TMap<FString, FString> UrlToAssetPath;      // 源标识去重缓存
-		TMap<FString, FString> ContentHashToAsset;  // 源内内容版本缓存
+		TMap<FString, FString> UrlToAssetPath;      // Source identifier deduplication cache.
+		TMap<FString, FString> ContentHashToAsset;  // Per-source content version cache.
 	};
 
 	void AddReportMessage(FResolveContext& Context, const FString& Message)
@@ -593,7 +593,7 @@ namespace
 			return true;
 		}
 
-		// 本地文件路径：直接读取并创建纹理资产
+		// Local file path: read directly and create a texture asset.
 		if (!IsRemoteUrl(InOutTexturePath) && FPaths::FileExists(InOutTexturePath))
 		{
 			const FString LocalPath = InOutTexturePath;
@@ -849,7 +849,7 @@ namespace
 				DebugName.IsEmpty() ? TEXT("UnnamedWidget") : DebugName,
 				Node.Id,
 				Context);
-			// 同步 typed 字段，避免 typed-first 读到未 resolve 的原始 URL
+			// Synchronize typed fields to prevent typed-first readers from seeing the unresolved raw URL.
 			Node.Brush.TexturePath = ResolvedTexturePath;
 			Node.Brush.Image.TexturePath = ResolvedTexturePath;
 			Node.Brush.Image.bHasTexturePath = true;
@@ -921,7 +921,7 @@ bool FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, 
 }
 
 // ============================================================================
-// ResolveTransientTextures - 预览用：下载远程图片为内存纹理
+// ResolveTransientTextures - preview path: download remote images as in-memory textures.
 // ============================================================================
 
 namespace
@@ -948,7 +948,7 @@ namespace
 		UTexture2D* Texture = UTexture2D::CreateTransient(Width, Height, PF_B8G8R8A8);
 		if (!Texture) return nullptr;
 
-		// RF_DuplicateTransient 使 FDuplicateDataWriter 写 nullptr 而非复制，避免空 mip 副本。
+		// RF_DuplicateTransient makes FDuplicateDataWriter write nullptr instead of copying, avoiding empty mip duplicates.
 		Texture->AddToRoot();
 		Texture->SetFlags(RF_DuplicateTransient);
 

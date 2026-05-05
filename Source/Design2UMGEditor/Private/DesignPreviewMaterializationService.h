@@ -19,7 +19,7 @@ public:
 
 private:
 	void CleanupMaterializedPreview();
-	UUserWidget* CreatePreviewWidget(const FPreviewApprovedSnapshot& ApprovedSnapshot);
+	UUserWidget* CreatePreviewWidget(const FPreviewApprovedSnapshot& ApprovedSnapshot, const FVector2D& PreviewDesignSize);
 
 	TStrongObjectPtr<UUserWidget> MaterializedPreviewWidget;
 	TMap<FString, UTexture2D*> TransientTextureMap;

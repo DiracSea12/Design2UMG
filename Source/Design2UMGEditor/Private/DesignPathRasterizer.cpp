@@ -372,7 +372,7 @@ bool ParsePathData(const FString& Data, TArray<TArray<FPathPoint>>& OutSubPaths,
 	const TCHAR* P = *Data;
 	FPathPoint Current = {0, 0};
 	FPathPoint Start = {0, 0};
-	FPathPoint LastControl = {0, 0}; // S/T 鎸囦护闇€瑕侀暅鍍忎笂涓€涓帶鍒剁偣
+	FPathPoint LastControl = {0, 0}; // S/T commands mirror the previous control point.
 	TCHAR LastCmd = 0;
 	TArray<FPathPoint>* ActivePath = nullptr;
 
@@ -404,7 +404,7 @@ bool ParsePathData(const FString& Data, TArray<TArray<FPathPoint>>& OutSubPaths,
 		TCHAR Cmd = *P;
 		if (!IsCommandChar(Cmd))
 		{
-			// implicit lineto 鈥?缁ф壙涓婁竴鏉″懡浠ょ殑鐩稿/缁濆妯″紡
+			// Implicit lineto inherits the previous command's relative/absolute mode.
 			if (ActivePath)
 			{
 				float X = ReadFloat(P);
@@ -709,7 +709,7 @@ void ScanlineFill(
 			else
 				Edges.Add({B.X, B.Y, A.X, A.Y, -1});
 		}
-		// Implicit close: last point 鈫?first point
+		// Implicit close connects the last point to the first point.
 		const FPathPoint& Last = Path.Last();
 		const FPathPoint& First = Path[0];
 		if (!FMath::IsNearlyEqual(Last.Y, First.Y))
@@ -817,8 +817,8 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 		return nullptr;
 	}
 
-	// 用所有采样点重新计算精确 bounds。
-	// ParsePathData 给出的 bounds 只覆盖控制点，曲线凸出部分可能漏掉。
+	// Recalculate precise bounds from all sampled points.
+	// Bounds from ParsePathData cover only control points and may miss curve bulges.
 	Bounds.Init();
 	for (const auto& Path : SubPaths)
 	{
@@ -892,11 +892,11 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 	if (!Texture)
 		return nullptr;
 
-	// 不要把纹理 Rename 到 widget 下面。
-	// CreateBlueprint 会自动编译并深拷贝 WidgetTree；RF_Transient 纹理的 PlatformData/Mips
-	// 在这条链路里可能丢失，最终出现 "contains no miplevels"。
-	// 纹理保持在 GetTransientPackage() 下，并通过 AddToRoot 防止 GC。
-	// 同时使用 RF_DuplicateTransient，避免复制出空 mip 副本。
+	// Do not rename the texture under the widget.
+	// CreateBlueprint automatically compiles and deep-copies WidgetTree; RF_Transient texture PlatformData/Mips
+	// can be lost on that path and eventually produce "contains no miplevels".
+	// Keep the texture under GetTransientPackage() and use AddToRoot to prevent GC.
+	// Also use RF_DuplicateTransient to avoid copying empty mip duplicates.
 	Texture->AddToRoot();
 	Texture->SetFlags(RF_DuplicateTransient);
 

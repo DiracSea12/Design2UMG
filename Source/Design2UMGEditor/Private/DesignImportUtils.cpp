@@ -32,13 +32,8 @@ namespace
 		return OutputPath.IsEmpty() ? FString(ImportUtilsFallbackOutputPath) : OutputPath;
 	}
 
-	FIntPoint ResolveCompiledRenderSize(UWidgetBlueprint* WidgetBlueprint, const FIntPoint& RequestedRenderSize)
+	FIntPoint ResolveOutputRenderSize(UWidgetBlueprint* WidgetBlueprint)
 	{
-		if (RequestedRenderSize.X > 1 && RequestedRenderSize.Y > 1)
-		{
-			return RequestedRenderSize;
-		}
-
 		if (WidgetBlueprint && WidgetBlueprint->GeneratedClass)
 		{
 			if (const UUserWidget* CDO = Cast<UUserWidget>(WidgetBlueprint->GeneratedClass->GetDefaultObject()))
@@ -46,28 +41,24 @@ namespace
 				const FVector2D DesignTimeSize = CDO->DesignTimeSize;
 				if (DesignTimeSize.X > 1.0f && DesignTimeSize.Y > 1.0f)
 				{
-					return FIntPoint(
-						FMath::RoundToInt(DesignTimeSize.X),
-						FMath::RoundToInt(DesignTimeSize.Y));
+					const FIntPoint DesignRenderSize(
+						FMath::CeilToInt(DesignTimeSize.X),
+						FMath::CeilToInt(DesignTimeSize.Y));
+					return DesignRenderSize;
 				}
 			}
 		}
 
-		const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
-		return Settings ? Settings->GetDesignSize() : FIntPoint(1920, 1080);
+		UE_LOG(LogDesign2UMG, Error,
+			TEXT("DesignImportUtils: missing Blueprint DesignTimeSize; source design size is required"));
+		return FIntPoint::ZeroValue;
 	}
 
-	FIntPoint ResolveWidgetTreeRenderSize(const FUMGWidgetData& Data)
+	FIntPoint ResolveSourceWidgetTreeRenderSize(const FUMGWidgetData& Data)
 	{
-		int32 RenderW = FMath::CeilToInt(Data.RootWidget.Bounds.W);
-		int32 RenderH = FMath::CeilToInt(Data.RootWidget.Bounds.H);
-		if (RenderW < 2 || RenderH < 2)
-		{
-			RenderW = 1920;
-			RenderH = 1080;
-		}
-
-		return FIntPoint(RenderW, RenderH);
+		return FIntPoint(
+			FMath::Max(0, FMath::CeilToInt(Data.RootWidget.Bounds.W)),
+			FMath::Max(0, FMath::CeilToInt(Data.RootWidget.Bounds.H)));
 	}
 
 	bool SavePngBytesToFile(const TArray<uint8>& PngData, const FString& OutputPngFilePath)
@@ -88,7 +79,6 @@ namespace
 
 	bool RenderWidgetTreeToPngFile(
 		UWidgetBlueprint* WidgetBlueprint,
-		const FIntPoint& RequestedRenderSize,
 		const FString& OutputPngFilePath,
 		FIntPoint* OutRenderedSize = nullptr)
 	{
@@ -97,10 +87,9 @@ namespace
 			return false;
 		}
 
-		const FIntPoint RenderSize = ResolveCompiledRenderSize(WidgetBlueprint, RequestedRenderSize);
 		TArray<uint8> PngData;
-		FIntPoint ActualSize = RenderSize;
-		if (!FUMGWidgetUtils::RenderWidgetTreeToPng(WidgetBlueprint, RenderSize, PngData, ActualSize))
+		FIntPoint ActualSize = ResolveOutputRenderSize(WidgetBlueprint);
+		if (!FUMGWidgetUtils::RenderWidgetTreeToPng(WidgetBlueprint, PngData, ActualSize))
 		{
 			return false;
 		}
@@ -189,7 +178,7 @@ namespace
 	}
 }
 
-// Blueprint 生成
+// Blueprint generation.
 
 void DesignImportUtils::ApplyPendingIconFontMappingChanges(const FUMGWidgetData& Data)
 {
@@ -278,7 +267,7 @@ bool DesignImportUtils::GenerateBlueprintAndPng(
 	ApplyPendingIconFontMappingChanges(Data);
 	const FString FinalPath = ResolveImportOutputPath(OutputPath);
 
-	// 先构建（不立即落盘），再用瞬态实例渲染 PNG，最后统一保存 Blueprint。
+	// Build first without saving immediately, then render PNG from a transient instance and save the Blueprint at the end.
 	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(Data, FinalPath);
 	if (!WBP)
 	{
@@ -290,25 +279,22 @@ bool DesignImportUtils::GenerateBlueprintAndPng(
 		*OutGeneratedAssetPath = WBP->GetPathName();
 	}
 
-	// 渲染尺寸优先使用根节点 Bounds；合成根（如多 frame 的 CanvasPanel）Bounds 为 0，
-	// 退化到 1x1 会导致 PNG 无意义，此时使用 1920x1080 默认尺寸。
-	const FIntPoint FallbackSize = ResolveWidgetTreeRenderSize(Data);
-	FIntPoint Size = FallbackSize;
+	FIntPoint Size = ResolveSourceWidgetTreeRenderSize(Data);
 	const FString PngName = WBP ? WBP->GetName() : FPaths::GetBaseFilename(FinalPath);
 	const FString OutPng = FPaths::ProjectSavedDir() / TEXT("Design2UMG") / (PngName + TEXT(".png"));
 	if (OutRenderPngPath)
 	{
 		*OutRenderPngPath = OutPng;
 	}
-	if (!RenderWidgetTreeToPngFile(WBP, FallbackSize, OutPng, &Size))
+	if (!RenderWidgetTreeToPngFile(WBP, OutPng, &Size))
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget PNG render failed"));
-		// 渲染失败时也保存 Blueprint，方便定位问题。
+		// Save the Blueprint even when rendering fails so the issue can be inspected.
 		FUMGGenerator::SaveWidgetBlueprint(WBP);
 		return false;
 	}
 
-	// 成功渲染后保存 Blueprint
+	// Save the Blueprint after successful rendering.
 	FUMGGenerator::SaveWidgetBlueprint(WBP);
 	if (OutGeneratedAssetPath)
 	{
@@ -325,7 +311,6 @@ bool DesignImportUtils::GenerateBlueprintAndPng(
 bool DesignImportUtils::RenderCompiledBlueprintToPngFile(
 	UWidgetBlueprint* WidgetBlueprint,
 	const FString& OutputPngFilePath,
-	const FIntPoint& RequestedRenderSize,
 	FIntPoint* OutRenderedSize)
 {
 	if (!WidgetBlueprint)
@@ -334,10 +319,9 @@ bool DesignImportUtils::RenderCompiledBlueprintToPngFile(
 		return false;
 	}
 
-	const FIntPoint RenderSize = ResolveCompiledRenderSize(WidgetBlueprint, RequestedRenderSize);
 	TArray<uint8> PngData;
-	FIntPoint ActualSize = RenderSize;
-	if (!FUMGWidgetUtils::RenderWidgetToPng(WidgetBlueprint, RenderSize, PngData, ActualSize))
+	FIntPoint ActualSize = ResolveOutputRenderSize(WidgetBlueprint);
+	if (!FUMGWidgetUtils::RenderWidgetToPng(WidgetBlueprint, PngData, ActualSize))
 	{
 		UE_LOG(LogDesign2UMG, Error,
 			TEXT("DesignImportUtils: RenderCompiledBlueprintToPngFile failed for %s"),
@@ -366,7 +350,6 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 	const FUMGWidgetData& Data,
 	const FString& OutputPath,
 	const FString& OutputPngFilePath,
-	const FIntPoint& RequestedRenderSize,
 	FString* OutGeneratedAssetPath,
 	FIntPoint* OutRenderedSize)
 {
@@ -388,7 +371,7 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 			const FString TreeRenderPath = FPaths::Combine(
 				FPaths::GetPath(OutputPngFilePath),
 				FPaths::GetBaseFilename(OutputPngFilePath) + TEXT(".widgettree.png"));
-			RenderWidgetTreeToPngFile(WidgetBlueprint, RequestedRenderSize, TreeRenderPath);
+			RenderWidgetTreeToPngFile(WidgetBlueprint, TreeRenderPath);
 		}
 	}
 
@@ -397,7 +380,6 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 	return RenderCompiledBlueprintToPngFile(
 		WidgetBlueprint,
 		OutputPngFilePath,
-		RequestedRenderSize,
 		OutRenderedSize);
 }
 

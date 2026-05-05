@@ -33,6 +33,9 @@ struct DESIGN2UMGCORE_API FFontResolver
 	/** Clear the font asset path cache */
 	static void ClearCache();
 
+	/** Seed a known font-family to asset-path mapping for the current deterministic import. */
+	static void RegisterFontAssetPath(const FString& FontFamily, const FString& ObjectPath);
+
 	/** Register glyph/name lookups for a known icon family. */
 	static void RegisterKnownIconGlyphs(
 		const FString& FontFamily,

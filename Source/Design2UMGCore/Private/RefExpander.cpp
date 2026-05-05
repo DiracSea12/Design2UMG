@@ -112,13 +112,13 @@ namespace
 		if (!OuterOverride.IsValid())
 			return BaseOverride;
 		if (!BaseOverride.IsValid())
-			return FRefExpander::DeepCopyNode(OuterOverride);
+			return RefExpander::DeepCopyNode(OuterOverride);
 		if (OuterOverride->Type != EDesignNodeType::Unknown)
-			return FRefExpander::DeepCopyNode(OuterOverride);
+			return RefExpander::DeepCopyNode(OuterOverride);
 
-		auto Merged = FRefExpander::DeepCopyNode(BaseOverride);
+		auto Merged = RefExpander::DeepCopyNode(BaseOverride);
 		if (!Merged.IsValid())
-			return FRefExpander::DeepCopyNode(OuterOverride);
+			return RefExpander::DeepCopyNode(OuterOverride);
 
 		ApplyOverrideProperties(*Merged, *OuterOverride);
 		return Merged;
@@ -151,7 +151,7 @@ namespace
 
 			if (Override->Type != EDesignNodeType::Unknown)
 			{
-				Parent->Children[i] = FRefExpander::DeepCopyNode(Override);
+				Parent->Children[i] = RefExpander::DeepCopyNode(Override);
 				return true;
 			}
 
@@ -322,7 +322,7 @@ namespace
 			return nullptr;
 		}
 
-		auto Expanded = FRefExpander::DeepCopyNode(SourceNode);
+		auto Expanded = RefExpander::DeepCopyNode(SourceNode);
 		if (!Expanded.IsValid())
 		{
 			RefChain.Remove(RefTargetId);
@@ -339,7 +339,7 @@ namespace
 		else
 		{
 			for (const auto& Pair : Expanded->Descendants)
-				FRefExpander::ApplyDescendantOverride(Result, Pair.Key, Pair.Value);
+				RefExpander::ApplyDescendantOverride(Result, Pair.Key, Pair.Value);
 		}
 
 		if (Result.IsValid() && !RefNode->bReusable)
@@ -352,7 +352,7 @@ namespace
 	}
 }
 
-TSharedPtr<FDesignNode> FRefExpander::DeepCopyNode(const TSharedPtr<FDesignNode>& Source)
+TSharedPtr<FDesignNode> RefExpander::DeepCopyNode(const TSharedPtr<FDesignNode>& Source)
 {
 	if (!Source.IsValid())
 		return nullptr;
@@ -372,13 +372,13 @@ TSharedPtr<FDesignNode> FRefExpander::DeepCopyNode(const TSharedPtr<FDesignNode>
 	return Copy;
 }
 
-TSharedPtr<FDesignNode> FRefExpander::ExpandRef(const TSharedPtr<FDesignNode>& RefNode, const FDesignDocument& Doc)
+TSharedPtr<FDesignNode> RefExpander::ExpandRef(const TSharedPtr<FDesignNode>& RefNode, const FDesignDocument& Doc)
 {
 	TSet<FString> RefChain;
 	return ExpandRefInternal(RefNode, Doc, RefChain);
 }
 
-void FRefExpander::ApplyDescendantOverride(TSharedPtr<FDesignNode>& Node, const FString& Path, const TSharedPtr<FDesignNode>& Override)
+void RefExpander::ApplyDescendantOverride(TSharedPtr<FDesignNode>& Node, const FString& Path, const TSharedPtr<FDesignNode>& Override)
 {
 	if (!Node.IsValid() || !Override.IsValid())
 		return;
@@ -401,7 +401,7 @@ void FRefExpander::ApplyDescendantOverride(TSharedPtr<FDesignNode>& Node, const 
 	}
 }
 
-void FRefExpander::ReThemeNode(TSharedPtr<FDesignNode>& Node, const FDesignVariableResolver& Resolver)
+void RefExpander::ReThemeNode(TSharedPtr<FDesignNode>& Node, const FDesignVariableResolver& Resolver)
 {
 	if (!Node.IsValid())
 		return;

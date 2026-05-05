@@ -19,13 +19,11 @@ class UWidgetBlueprint;
 		const FUMGWidgetData& Data,
 		const FString& OutputPath,
 		const FString& OutputPngFilePath,
-		const FIntPoint& RequestedRenderSize = FIntPoint::ZeroValue,
 		FString* OutGeneratedAssetPath = nullptr,
 		FIntPoint* OutRenderedSize = nullptr);
 	bool RenderCompiledBlueprintToPngFile(
 		UWidgetBlueprint* WidgetBlueprint,
 		const FString& OutputPngFilePath,
-		const FIntPoint& RequestedRenderSize = FIntPoint::ZeroValue,
 		FIntPoint* OutRenderedSize = nullptr);
 }
 

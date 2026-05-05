@@ -144,7 +144,7 @@ namespace Design2UMGAutomationStructureSnapshot
 			SnapshotDocument.Children.Reserve(SourceDocument.Children.Num());
 			for (const TSharedPtr<FDesignNode>& Child : SourceDocument.Children)
 			{
-				SnapshotDocument.Children.Add(FRefExpander::DeepCopyNode(Child));
+				SnapshotDocument.Children.Add(RefExpander::DeepCopyNode(Child));
 			}
 
 			return SnapshotDocument;
@@ -171,7 +171,7 @@ namespace Design2UMGAutomationStructureSnapshot
 
 			if (Node->Type == EDesignNodeType::Ref)
 			{
-				if (TSharedPtr<FDesignNode> Expanded = FRefExpander::ExpandRef(Node, Doc))
+				if (TSharedPtr<FDesignNode> Expanded = RefExpander::ExpandRef(Node, Doc))
 				{
 					return Expanded;
 				}

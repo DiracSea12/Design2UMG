@@ -64,7 +64,7 @@ namespace
 
 		if (!Node->Text.FontFamily.IsEmpty())
 		{
-			FString AssetPath = FFontResolver::FindFontAssetPath(Node->Text.FontFamily);
+			const FString AssetPath = FFontResolver::FindFontAssetPath(Node->Text.FontFamily);
 			Widget.Text.FontFamily = AssetPath.IsEmpty() ? Node->Text.FontFamily : AssetPath;
 			Widget.Text.bHasFontFamily = true;
 		}
@@ -74,7 +74,7 @@ namespace
 			FString Typeface = FFontResolver::FindBestTypeface(Node->Text.FontFamily, Node->Text.FontWeight);
 			if (Typeface.IsEmpty())
 			{
-				Typeface = FDesignTypeMapper::MapFontWeight(Node->Text.FontWeight).ToString();
+				Typeface = DesignTypeMapper::MapFontWeight(Node->Text.FontWeight).ToString();
 			}
 			Widget.Text.TypefaceFontName = Typeface;
 			Widget.Text.bHasTypefaceFontName = true;
@@ -292,7 +292,7 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 		FString Typeface = FFontResolver::FindBestTypeface(FontFamily, EffectiveWeight);
 		if (Typeface.IsEmpty())
 		{
-			Typeface = FDesignTypeMapper::MapFontWeight(EffectiveWeight).ToString();
+			Typeface = DesignTypeMapper::MapFontWeight(EffectiveWeight).ToString();
 		}
 		return Typeface;
 	};
@@ -570,7 +570,7 @@ Design2UMGTextWidgetBuilder::FIconFontBuildResult Design2UMGTextWidgetBuilder::C
 		FString Typeface = FFontResolver::FindBestTypeface(Node->Text.IconFontFamily, WeightToken);
 		if (Typeface.IsEmpty())
 		{
-			Typeface = FDesignTypeMapper::MapFontWeight(WeightToken).ToString();
+			Typeface = DesignTypeMapper::MapFontWeight(WeightToken).ToString();
 		}
 		if (!Typeface.IsEmpty())
 		{

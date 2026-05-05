@@ -7,7 +7,6 @@
 #include "UObject/SavePackage.h"
 #include "Design2UMGFigmaMetadataExtensions.h"
 #include "Design2UMGLog.h"
-#include "Design2UMGSettings.h"
 #include "ObjectTools.h"
 
 #include "WidgetBlueprint.h"
@@ -208,8 +207,8 @@ namespace
 			if (CurrentSize.X > 1.0f && CurrentSize.Y > 1.0f)
 			{
 				return FIntPoint(
-					FMath::RoundToInt(CurrentSize.X),
-					FMath::RoundToInt(CurrentSize.Y));
+					FMath::CeilToInt(CurrentSize.X),
+					FMath::CeilToInt(CurrentSize.Y));
 			}
 		}
 
@@ -293,6 +292,15 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 		UMGGeneratorRootHandoff::PrepareRootForBuild(WidgetData, PackagePath, AssetName);
 	const FUMGWidgetNode& FixedRoot = PreparedRoot.Root;
 	const FIntPoint& DesignSize = PreparedRoot.DesignSize;
+	if (DesignSize.X <= 1 || DesignSize.Y <= 1)
+	{
+		UE_LOG(LogDesign2UMG, Error,
+			TEXT("Failed to generate '%s': source data did not provide a valid root design size"),
+			*WidgetData.WidgetName);
+		Package->ClearDirtyFlag();
+		Package->SetFlags(RF_Transient);
+		return nullptr;
+	}
 
 	// Dump widget tree only in verbose mode.
 	if (UE_LOG_ACTIVE(LogDesign2UMG, Verbose))
@@ -367,7 +375,10 @@ void FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP)
 	FIntPoint DesiredDesignSize = ReadDesignPreviewSize(WBP);
 	if (DesiredDesignSize.X <= 1 || DesiredDesignSize.Y <= 1)
 	{
-		DesiredDesignSize = UDesign2UMGSettings::Get()->GetDesignSize();
+		UE_LOG(LogDesign2UMG, Error,
+			TEXT("SaveWidgetBlueprint: missing valid DesignTimeSize for %s; source design size is required"),
+			*WBP->GetPathName());
+		return;
 	}
 
 	// Compile after rendering; transient texture data may already be gone at this point.

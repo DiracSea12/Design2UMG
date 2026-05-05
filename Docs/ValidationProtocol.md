@@ -1,6 +1,6 @@
 ﻿# Design2UMG Validation Protocol
 
-Last verified: 2026-04-19
+Last verified: 2026-05-05
 
 ## Purpose
 
@@ -161,7 +161,12 @@ That means:
 - do not run the formal full gate with an exclude pattern
 - `figma_figma-export_source` and `pen_pencil-welcome_step-2-frame` are part of the release gate again
 - formal historical-best parity should be checked with:
-  `python Tools/design2umg_validate_run.py --output-root <run_root> --admissible-best-json Tools/design2umg_pinned_baseline.json`
+  `python Tools/design2umg_validate_run.py --output-root <run_root> --admissible-best-json <PluginRoot>\Saved\Design2UMG\Automation\_admissible_best_latest.json`
+
+If the active render-size or pipeline-determinism rules changed, rebuild the admissible best manifest first:
+`python Tools/design2umg_rebuild_admissible_best.py`
+
+`Tools/design2umg_pinned_baseline.json` is an old pinned baseline for the pre-Phase-10 evidence rule. It must not be used as the Phase 10 release gate. If the current validator reports `historical_best_render_size_rule_incompatible` against that file, treat it as incompatible evidence, not as proof that the new code regressed.
 
 The older `_admissible_best_20260407_47.json` example is obsolete and must not be used for current formal gate validation.
 

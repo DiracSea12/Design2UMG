@@ -34,7 +34,7 @@ bool FLayoutMapperHBoxSlotTest::RunTest(const FString&)
 	{
 		FUMGWidgetNode Widget;
 		TSharedPtr<FDesignNode> Node = MakeNode(EDesignSizeMode::Fixed, 100.f, EDesignSizeMode::Fixed, 50.f);
-		FLayoutMapper::ApplySlotProperties(Widget, Node, EDesignLayout::Horizontal);
+		LayoutMapper::ApplySlotProperties(Widget, Node, EDesignLayout::Horizontal);
 		TestEqual(TEXT("HBox fixed width -> Auto"), Widget.Slot.SizeRule, FString(TEXT("Auto")));
 	}
 
@@ -43,7 +43,7 @@ bool FLayoutMapperHBoxSlotTest::RunTest(const FString&)
 		FUMGWidgetNode Widget;
 		TSharedPtr<FDesignNode> Node = MakeNode(EDesignSizeMode::FillContainer, 0.f, EDesignSizeMode::Fixed, 50.f);
 		Node->LayoutData.LayoutGrow = 1.0f;
-		FLayoutMapper::ApplySlotProperties(Widget, Node, EDesignLayout::Horizontal);
+		LayoutMapper::ApplySlotProperties(Widget, Node, EDesignLayout::Horizontal);
 		TestEqual(TEXT("HBox fill width -> Fill"), Widget.Slot.SizeRule, FString(TEXT("Fill")));
 	}
 
@@ -51,7 +51,7 @@ bool FLayoutMapperHBoxSlotTest::RunTest(const FString&)
 	{
 		FUMGWidgetNode Widget;
 		TSharedPtr<FDesignNode> Node = MakeNode(EDesignSizeMode::Fixed, 100.f, EDesignSizeMode::FillContainer, 0.f);
-		FLayoutMapper::ApplySlotProperties(Widget, Node, EDesignLayout::Horizontal);
+		LayoutMapper::ApplySlotProperties(Widget, Node, EDesignLayout::Horizontal);
 		TestEqual(TEXT("HBox fill height -> VAlign Fill"), Widget.Slot.VerticalAlignment, FString(TEXT("Fill")));
 	}
 
@@ -72,7 +72,7 @@ bool FLayoutMapperVBoxSlotTest::RunTest(const FString&)
 	{
 		FUMGWidgetNode Widget;
 		TSharedPtr<FDesignNode> Node = MakeNode(EDesignSizeMode::Fixed, 100.f, EDesignSizeMode::Fixed, 50.f);
-		FLayoutMapper::ApplySlotProperties(Widget, Node, EDesignLayout::Vertical);
+		LayoutMapper::ApplySlotProperties(Widget, Node, EDesignLayout::Vertical);
 		TestEqual(TEXT("VBox fixed height -> Auto"), Widget.Slot.SizeRule, FString(TEXT("Auto")));
 	}
 
@@ -81,7 +81,7 @@ bool FLayoutMapperVBoxSlotTest::RunTest(const FString&)
 		FUMGWidgetNode Widget;
 		TSharedPtr<FDesignNode> Node = MakeNode(EDesignSizeMode::Fixed, 100.f, EDesignSizeMode::FillContainer, 0.f);
 		Node->LayoutData.LayoutGrow = 1.0f;
-		FLayoutMapper::ApplySlotProperties(Widget, Node, EDesignLayout::Vertical);
+		LayoutMapper::ApplySlotProperties(Widget, Node, EDesignLayout::Vertical);
 		TestEqual(TEXT("VBox fill height -> Fill"), Widget.Slot.SizeRule, FString(TEXT("Fill")));
 	}
 
@@ -89,7 +89,7 @@ bool FLayoutMapperVBoxSlotTest::RunTest(const FString&)
 	{
 		FUMGWidgetNode Widget;
 		TSharedPtr<FDesignNode> Node = MakeNode(EDesignSizeMode::FillContainer, 0.f, EDesignSizeMode::Fixed, 50.f);
-		FLayoutMapper::ApplySlotProperties(Widget, Node, EDesignLayout::Vertical);
+		LayoutMapper::ApplySlotProperties(Widget, Node, EDesignLayout::Vertical);
 		TestEqual(TEXT("VBox fill width -> HAlign Fill"), Widget.Slot.HorizontalAlignment, FString(TEXT("Fill")));
 	}
 
@@ -110,7 +110,7 @@ bool FLayoutMapperCanvasSlotTest::RunTest(const FString&)
 	{
 		FUMGWidgetNode Widget;
 		TSharedPtr<FDesignNode> Node = MakeNode(EDesignSizeMode::Fixed, 120.f, EDesignSizeMode::Fixed, 80.f, 30.f, 20.f);
-		FLayoutMapper::ApplySlotProperties(Widget, Node, EDesignLayout::None);
+		LayoutMapper::ApplySlotProperties(Widget, Node, EDesignLayout::None);
 		TestEqual(TEXT("Canvas Offsets.Left"), Widget.Slot.Offsets.Left, 30.f);
 		TestEqual(TEXT("Canvas Offsets.Top"), Widget.Slot.Offsets.Top, 20.f);
 		TestEqual(TEXT("Canvas Offsets.Right"), Widget.Slot.Offsets.Right, 120.f);
@@ -121,7 +121,7 @@ bool FLayoutMapperCanvasSlotTest::RunTest(const FString&)
 	{
 		FUMGWidgetNode Widget;
 		TSharedPtr<FDesignNode> Node = MakeNode(EDesignSizeMode::FillContainer, 0.f, EDesignSizeMode::Fixed, 80.f, 0.f, 0.f);
-		FLayoutMapper::ApplySlotProperties(Widget, Node, EDesignLayout::None);
+		LayoutMapper::ApplySlotProperties(Widget, Node, EDesignLayout::None);
 		TestEqual(TEXT("Stretch width Anchors.Max.X"), Widget.Slot.Anchors.Max.X, 1.f);
 		TestEqual(TEXT("Stretch width Anchors.Max.Y"), Widget.Slot.Anchors.Max.Y, 0.f);
 	}
@@ -144,7 +144,7 @@ bool FLayoutMapperPaddingTest::RunTest(const FString&)
 		FUMGWidgetNode Widget;
 		FDesignPadding Pad;
 		Pad.Top = 4.f; Pad.Right = 8.f; Pad.Bottom = 4.f; Pad.Left = 8.f;
-		FLayoutMapper::ApplyPadding(Widget, Pad);
+		LayoutMapper::ApplyPadding(Widget, Pad);
 		TestEqual(TEXT("Padding.Left"), Widget.WidgetStyle.Padding.GetValue().Left, 8.f);
 		TestEqual(TEXT("Padding.Top"), Widget.WidgetStyle.Padding.GetValue().Top, 4.f);
 		TestEqual(TEXT("Padding.Right"), Widget.WidgetStyle.Padding.GetValue().Right, 8.f);
@@ -157,13 +157,13 @@ bool FLayoutMapperPaddingTest::RunTest(const FString&)
 		FDesignPadding Pad;
 		Pad.Top = 10.f;
 		Node->LayoutData.SetPadding(Pad);
-		TestTrue(TEXT("HasPadding true"), FLayoutMapper::HasPadding(Node));
+		TestTrue(TEXT("HasPadding true"), LayoutMapper::HasPadding(Node));
 	}
 
 	// HasPadding: node with zero padding returns false
 	{
 		TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
-		TestFalse(TEXT("HasPadding false when no padding"), FLayoutMapper::HasPadding(Node));
+		TestFalse(TEXT("HasPadding false when no padding"), LayoutMapper::HasPadding(Node));
 	}
 
 	return true;

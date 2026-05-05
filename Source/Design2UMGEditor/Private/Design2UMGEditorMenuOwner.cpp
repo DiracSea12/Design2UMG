@@ -159,8 +159,6 @@ namespace
 			.SupportsMaximize(false);
 
 		TWeakPtr<SWindow> WeakWindow = Window;
-		TSharedPtr<SEditableTextBox> WidthBox;
-		TSharedPtr<SEditableTextBox> HeightBox;
 		TSharedPtr<SEditableTextBox> OutputPathBox;
 
 		Window->SetContent(
@@ -175,18 +173,6 @@ namespace
 			[
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 8, 0)
-				[ SNew(STextBlock).Text(LOCTEXT("DesignRes", "Design Resolution:")) ]
-				+ SHorizontalBox::Slot().FillWidth(1.0f)
-				[ SAssignNew(WidthBox, SEditableTextBox).Text(FText::AsNumber(Settings->DesignWidth)) ]
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4, 0)
-				[ SNew(STextBlock).Text(LOCTEXT("ResX", "x")) ]
-				+ SHorizontalBox::Slot().FillWidth(1.0f)
-				[ SAssignNew(HeightBox, SEditableTextBox).Text(FText::AsNumber(Settings->DesignHeight)) ]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 4.0f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 8, 0)
 				[ SNew(STextBlock).Text(LOCTEXT("WelcomeImagePath", "Image Import Path:")) ]
 				+ SHorizontalBox::Slot().FillWidth(1.0f)
 				[ SAssignNew(OutputPathBox, SEditableTextBox).Text(FText::FromString(Settings->RemoteImageImportPath)) ]
@@ -196,10 +182,8 @@ namespace
 			[
 				SNew(SButton).HAlign(HAlign_Center)
 				.Text(LOCTEXT("WelcomeOk", "Get Started"))
-				.OnClicked_Lambda([WeakWindow, Settings, WidthBox, HeightBox, OutputPathBox]()
+				.OnClicked_Lambda([WeakWindow, Settings, OutputPathBox]()
 				{
-					Settings->DesignWidth = FCString::Atoi(*WidthBox->GetText().ToString());
-					Settings->DesignHeight = FCString::Atoi(*HeightBox->GetText().ToString());
 					Settings->RemoteImageImportPath = OutputPathBox->GetText().ToString();
 					Settings->bFirstRunCompleted = true;
 					Settings->SaveConfig();

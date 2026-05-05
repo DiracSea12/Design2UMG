@@ -74,9 +74,9 @@ UTexture2D* CreateTransientTexture(int32 Width, int32 Height, UObject* Outer)
 	UTexture2D* Texture = UTexture2D::CreateTransient(Width, Height, PF_B8G8R8A8, NAME_None);
 	if (Texture)
 	{
-		// 不要 Rename 到 widget 下面！CreateBlueprint 自动编译时深拷贝 WidgetTree，
-		// RF_Transient 纹理的 PlatformData/Mips 在拷贝中丢失。
-		// RF_DuplicateTransient 使 FDuplicateDataWriter 写 nullptr 而非复制，避免空 mip 副本。
+		// Do not rename under the widget. CreateBlueprint deep-copies WidgetTree during automatic compilation,
+		// and RF_Transient texture PlatformData/Mips are lost during that copy.
+		// RF_DuplicateTransient makes FDuplicateDataWriter write nullptr instead of copying, avoiding empty mip duplicates.
 		Texture->AddToRoot();
 		GRootedTextures.Add(Texture);
 		Texture->SetFlags(RF_DuplicateTransient);
@@ -128,7 +128,7 @@ UTexture2D* GenerateCircle(int32 Size, FLinearColor Color, UObject* Outer)
 		for (int32 X = 0; X < Size; ++X)
 		{
 			float Dist = FMath::Sqrt(FMath::Square(X - Center) + FMath::Square(Y - Center));
-			float Alpha = FMath::Clamp(Radius - Dist + 0.5f, 0.0f, 1.0f); // 抗锯齿边缘
+			float Alpha = FMath::Clamp(Radius - Dist + 0.5f, 0.0f, 1.0f); // Anti-aliased edge.
 
 			FColor& Pixel = Pixels[Y * Size + X];
 			Pixel.R = FillColor.R;
@@ -161,9 +161,9 @@ UTexture2D* GenerateRing(int32 Size, FLinearColor Color, float Thickness, UObjec
 		{
 			float Dist = FMath::Sqrt(FMath::Square(X - Center) + FMath::Square(Y - Center));
 
-			// 外边缘抗锯齿
+			// Outer edge anti-aliasing.
 			float OuterAlpha = FMath::Clamp(OuterRadius - Dist + 0.5f, 0.0f, 1.0f);
-			// 内边缘抗锯齿
+			// Inner edge anti-aliasing.
 			float InnerAlpha = FMath::Clamp(Dist - InnerRadius + 0.5f, 0.0f, 1.0f);
 
 			float Alpha = OuterAlpha * InnerAlpha;
@@ -197,7 +197,7 @@ UTexture2D* GenerateRoundedRect(int32 Width, int32 Height, FLinearColor Color, f
 		{
 			float Alpha = 1.0f;
 
-			// 检查是否在圆角区域
+			// Check whether the point is inside a rounded corner region.
 			FVector2D CornerCenter = FVector2D::ZeroVector;
 			bool bInCorner = false;
 
@@ -957,7 +957,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 			if (Params->TryGetNumberField(MaterialParamInsetKey, NumVal))
 				InsetPx = FMath::Max(0, FMath::RoundToInt(static_cast<float>(NumVal)));
 
-			// 多色标渐变 Stops 数组
+			// Multi-stop gradient Stops array.
 			const TArray<TSharedPtr<FJsonValue>>* StopsArr = nullptr;
 			if (Params->TryGetArrayField(MaterialParamStopsKey, StopsArr) && StopsArr)
 			{

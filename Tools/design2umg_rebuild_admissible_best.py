@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 import design2umg_auto_verify as verify
+import design2umg_render_rule as render_rule
 
 
 METRIC_FIELDS = (
@@ -19,7 +20,7 @@ OUTPUT_COLLISION_WARNINGS = (
 )
 DEFAULT_PIXEL_TOLERANCE = 6
 CACHE_FILENAME = "_admissible_best_cache.json"
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 PINNED_BASELINE_FILENAME = "design2umg_pinned_baseline.json"
 
 
@@ -40,9 +41,32 @@ def resolve_admissible_best_manifest(automation_root: Path) -> tuple[Path, dict,
     output_path = automation_root / "_admissible_best_latest.json"
     pinned_path = default_pinned_baseline_path()
     if pinned_path.is_file():
-        manifest = load_json(pinned_path)
+        pinned_manifest = load_json(pinned_path)
+        pinned_cases = pinned_manifest.get("cases") or {}
+        skipped_by_reason: dict[str, int] = {}
+        for case in pinned_cases.values():
+            rule_status = render_rule.evaluate_report_render_size_rule(Path(case.get("report_path", "")))
+            if not rule_status.get("compatible"):
+                reason = rule_status.get("reason", "render_size_rule_incompatible")
+                skipped_by_reason[reason] = skipped_by_reason.get(reason, 0) + 1
+                continue
+
+            pipeline_rule_status = render_rule.evaluate_report_pipeline_determinism_rule(Path(case.get("report_path", "")))
+            if not pipeline_rule_status.get("compatible"):
+                reason = pipeline_rule_status.get("reason", "pipeline_determinism_rule_incompatible")
+                skipped_by_reason[reason] = skipped_by_reason.get(reason, 0) + 1
+
+        if not skipped_by_reason:
+            pinned_manifest["render_size_rule"] = render_rule.DESIGN_SIZE_RENDER_RULE
+            pinned_manifest["pipeline_determinism_rule"] = render_rule.PIPELINE_DETERMINISM_RULE
+            write_json(output_path, pinned_manifest)
+            return output_path, pinned_manifest, str(pinned_path)
+
+        manifest = rebuild_historical_best_manifest(automation_root)
+        manifest["pinned_baseline_source"] = str(pinned_path)
+        manifest["pinned_baseline_skipped_by_reason"] = skipped_by_reason
         write_json(output_path, manifest)
-        return output_path, manifest, str(pinned_path)
+        return output_path, manifest, f"{pinned_path} (skipped incompatible pinned entries)"
 
     manifest = rebuild_historical_best_manifest(automation_root)
     write_json(output_path, manifest)
@@ -447,7 +471,11 @@ def collect_best_cases(automation_root: Path, cache_payload: dict) -> tuple[
     included_runs_by_reason: dict[str, int] = {"run_scope": 0, "legacy_inferred": 0}
     skipped_runs_by_reason: dict[str, int] = {"run_scope_excluded": 0, "legacy_excluded": 0}
     skipped_case_results: list[str] = []
-    skipped_case_results_by_reason: dict[str, int] = {"output_collision": 0}
+    skipped_case_results_by_reason: dict[str, int] = {
+        "output_collision": 0,
+        "render_size_rule_incompatible": 0,
+        "pipeline_determinism_rule_incompatible": 0,
+    }
 
     for run_root in iter_run_roots(automation_root):
         summary_path = run_root / "summary.json"
@@ -489,8 +517,23 @@ def collect_best_cases(automation_root: Path, cache_payload: dict) -> tuple[
                 skipped_case_results_by_reason["output_collision"] = skipped_case_results_by_reason.get("output_collision", 0) + 1
                 continue
 
+            report_path = resolve_report_path(run_root, case_name, case)
+            rule_status = render_rule.evaluate_report_render_size_rule(report_path)
+            if not rule_status.get("compatible"):
+                skipped_case_results.append(f"{run_root.name}:{case_name}:render_size_rule_incompatible:{rule_status.get('reason', '')}")
+                skipped_case_results_by_reason["render_size_rule_incompatible"] = skipped_case_results_by_reason.get("render_size_rule_incompatible", 0) + 1
+                continue
+
+            pipeline_rule_status = render_rule.evaluate_report_pipeline_determinism_rule(report_path)
+            if not pipeline_rule_status.get("compatible"):
+                skipped_case_results.append(f"{run_root.name}:{case_name}:pipeline_determinism_rule_incompatible:{pipeline_rule_status.get('reason', '')}")
+                skipped_case_results_by_reason["pipeline_determinism_rule_incompatible"] = skipped_case_results_by_reason.get("pipeline_determinism_rule_incompatible", 0) + 1
+                continue
+
             resolved_metrics, report_path = resolve_case_metrics(run_root, case_name, case, metric_cache)
             entry = best_cases.setdefault(case_name, build_case_entry(case_name))
+            entry["render_size_rule"] = render_rule.DESIGN_SIZE_RENDER_RULE
+            entry["pipeline_determinism_rule"] = render_rule.PIPELINE_DETERMINISM_RULE
 
             for output_metric, _summary_metric in METRIC_FIELDS:
                 update_metric(
@@ -562,6 +605,8 @@ def rebuild_historical_best_manifest(automation_root: Path) -> dict:
         "skipped_runs_by_reason": skipped_runs_by_reason,
         "skipped_case_results": skipped_case_results,
         "skipped_case_results_by_reason": skipped_case_results_by_reason,
+        "render_size_rule": render_rule.DESIGN_SIZE_RENDER_RULE,
+        "pipeline_determinism_rule": render_rule.PIPELINE_DETERMINISM_RULE,
         "cases": best_cases,
     }
     cache_payload["generated_at"] = manifest["generated_at"]

@@ -3,8 +3,10 @@ import base64
 import glob
 import hashlib
 import json
+import math
 import os
 import re
+import shlex
 import shutil
 import socket
 import subprocess
@@ -21,6 +23,7 @@ from PIL import Image, ImageChops, ImageFilter, ImageStat
 
 
 STABLE_VISUAL_FILTER = "closing_max3_min3"
+REFERENCE_ASPECT_COMPATIBILITY_THRESHOLD = 0.08
 RUNTIME_PROJECT_ENV_VAR = "DESIGN2UMG_RUNTIME_PROJECT"
 
 
@@ -71,15 +74,13 @@ def sanitize_case_name(value: str) -> str:
     return normalized or "unnamed"
 
 
-def build_automation_asset_root(output_dir: Path, game_output_base: str = "") -> str:
+def build_automation_asset_root(output_dir: Path, game_output_base: str = "", case_name: str = "") -> str:
     normalized_base = (game_output_base or "").strip().rstrip("/")
     if normalized_base:
         return normalized_base
 
-    resolved_output_dir = output_dir.resolve()
-    output_key = hashlib.sha1(str(resolved_output_dir).encode("utf-8")).hexdigest()[:10]
-    case_segment = sanitize_case_name(output_dir.name)
-    return f"/Game/Design2UMG/Automation/{case_segment}-{output_key}"
+    case_segment = sanitize_case_name(case_name or output_dir.name)
+    return f"/Game/Design2UMG/Automation/{case_segment}"
 
 
 def build_automation_phase_output(game_output_root: str, phase_name: str) -> str:
@@ -104,65 +105,162 @@ def find_node_by_id(nodes, target_id):
     return None
 
 
-def extract_node_numeric_size(node: dict) -> tuple[float | None, float | None]:
-    if not isinstance(node, dict):
-        return None, None
+def parse_padding_box(value) -> tuple[float, float, float, float]:
+    def as_number(item) -> float:
+        parsed = parse_numeric_dimension(item)
+        return parsed if parsed is not None else 0.0
 
+    if isinstance(value, list):
+        items = [as_number(item) for item in value]
+        if len(items) == 1:
+            return items[0], items[0], items[0], items[0]
+        if len(items) == 2:
+            return items[0], items[1], items[0], items[1]
+        if len(items) == 3:
+            return items[0], items[1], items[2], items[1]
+        if len(items) >= 4:
+            return items[0], items[1], items[2], items[3]
+
+    padding = as_number(value)
+    return padding, padding, padding, padding
+
+
+def resolve_node_width(node: dict, available_width: float | None = None) -> float | None:
     width = parse_numeric_dimension(node.get("width"))
-    height = parse_numeric_dimension(node.get("height"))
-    if width and height and width > 1 and height > 1:
-        return width, height
+    if width and width > 1:
+        return width
+
+    if isinstance(node.get("width"), str) and node.get("width") == "fill_container" and available_width and available_width > 1:
+        return available_width
 
     size = node.get("size")
     if isinstance(size, dict):
-        width = width or parse_numeric_dimension(size.get("x"))
-        height = height or parse_numeric_dimension(size.get("y"))
-        if width and height and width > 1 and height > 1:
-            return width, height
+        width = parse_numeric_dimension(size.get("x"))
+        if width and width > 1:
+            return width
 
     bbox = node.get("absoluteBoundingBox")
     if isinstance(bbox, dict):
-        width = width or parse_numeric_dimension(bbox.get("width"))
-        height = height or parse_numeric_dimension(bbox.get("height"))
-        if width and height and width > 1 and height > 1:
-            return width, height
+        width = parse_numeric_dimension(bbox.get("width"))
+        if width and width > 1:
+            return width
+
+    return None
+
+
+def resolve_node_height(node: dict) -> float | None:
+    height = parse_numeric_dimension(node.get("height"))
+    if height and height > 1:
+        return height
+
+    size = node.get("size")
+    if isinstance(size, dict):
+        height = parse_numeric_dimension(size.get("y"))
+        if height and height > 1:
+            return height
+
+    bbox = node.get("absoluteBoundingBox")
+    if isinstance(bbox, dict):
+        height = parse_numeric_dimension(bbox.get("height"))
+        if height and height > 1:
+            return height
+
+    return None
+
+
+def estimate_text_node_size(node: dict, available_width: float | None = None) -> tuple[float, float] | None:
+    if node.get("type") not in {"text", "icon_font"}:
+        return None
+
+    width = resolve_node_width(node, available_width)
+    height = resolve_node_height(node)
+    if width and height:
+        return width, height
+
+    font_size = parse_numeric_dimension(node.get("fontSize")) or 12.0
+    line_height = parse_numeric_dimension(node.get("lineHeight"))
+    if line_height is None:
+        line_height = 1.5
+    if line_height <= 4.0:
+        estimated_height = font_size * line_height
+    else:
+        estimated_height = line_height
+
+    content = str(node.get("content") or node.get("iconFontName") or "")
+    estimated_width = max(font_size, len(content) * font_size * 0.56)
+
+    return width or estimated_width, height or estimated_height
+
+
+def extract_node_numeric_size(node: dict, available_width: float | None = None) -> tuple[float | None, float | None]:
+    if not isinstance(node, dict):
+        return None, None
+
+    width = resolve_node_width(node, available_width)
+    height = resolve_node_height(node)
+    if width and height and width > 1 and height > 1:
+        return width, height
 
     return width, height
 
 
-def infer_node_size_from_children(node: dict) -> tuple[int, int] | None:
+def infer_node_size_from_children(node: dict, available_width: float | None = None) -> tuple[int, int] | None:
     children = node.get("children", [])
     if not isinstance(children, list) or not children:
+        text_size = estimate_text_node_size(node, available_width)
+        if text_size:
+            return math.ceil(text_size[0]), math.ceil(text_size[1])
         return None
 
-    max_right = 0.0
-    max_bottom = 0.0
-    found_child_extent = False
+    width, _ = extract_node_numeric_size(node, available_width)
+    top, right, bottom, left = parse_padding_box(node.get("padding"))
+    inner_width = max(0.0, width - left - right) if width and width > 1 else available_width
+    gap = parse_numeric_dimension(node.get("gap")) or 0.0
+    layout = str(node.get("layout") or "").lower()
+
+    child_sizes: list[tuple[float, float, float, float]] = []
     for child in children:
         if not isinstance(child, dict):
             continue
-        child_size = extract_node_size(child)
+        child_size = extract_node_size(child, inner_width)
         if not child_size:
             continue
         child_x = parse_numeric_dimension(child.get("x")) or 0.0
         child_y = parse_numeric_dimension(child.get("y")) or 0.0
-        max_right = max(max_right, child_x + child_size[0])
-        max_bottom = max(max_bottom, child_y + child_size[1])
-        found_child_extent = True
+        child_sizes.append((child_x, child_y, float(child_size[0]), float(child_size[1])))
 
-    if not found_child_extent:
+    if not child_sizes:
         return None
-    if max_right <= 1 or max_bottom <= 1:
+
+    if layout in {"vertical", "v", "column"}:
+        content_width = max(child_width for _, _, child_width, _ in child_sizes)
+        content_height = sum(child_height for _, _, _, child_height in child_sizes)
+        content_height += gap * max(0, len(child_sizes) - 1)
+        inferred_width = left + content_width + right
+        inferred_height = top + content_height + bottom
+    elif layout in {"horizontal", "h", "row"}:
+        content_width = sum(child_width for _, _, child_width, _ in child_sizes)
+        content_width += gap * max(0, len(child_sizes) - 1)
+        content_height = max(child_height for _, _, _, child_height in child_sizes)
+        inferred_width = left + content_width + right
+        inferred_height = top + content_height + bottom
+    else:
+        max_right = max(child_x + child_width for child_x, _, child_width, _ in child_sizes)
+        max_bottom = max(child_y + child_height for _, child_y, _, child_height in child_sizes)
+        inferred_width = left + max_right + right
+        inferred_height = top + max_bottom + bottom
+
+    if inferred_width <= 1 or inferred_height <= 1:
         return None
-    return round(max_right), round(max_bottom)
+    return math.ceil(inferred_width), math.ceil(inferred_height)
 
 
-def extract_node_size(node: dict) -> tuple[int, int] | None:
+def extract_node_size(node: dict, available_width: float | None = None) -> tuple[int, int] | None:
     if not isinstance(node, dict):
         return None
 
-    width, height = extract_node_numeric_size(node)
-    inferred = infer_node_size_from_children(node)
+    width, height = extract_node_numeric_size(node, available_width)
+    inferred = infer_node_size_from_children(node, available_width)
     if inferred:
         inferred_width, inferred_height = inferred
         if not width or width <= 1:
@@ -171,8 +269,15 @@ def extract_node_size(node: dict) -> tuple[int, int] | None:
             height = inferred_height
 
     if width and height and width > 1 and height > 1:
-        return round(width), round(height)
+        return math.ceil(width), math.ceil(height)
 
+    return None
+
+
+def extract_declared_node_size(node: dict) -> tuple[int, int] | None:
+    width, height = extract_node_numeric_size(node)
+    if width and height and width > 1 and height > 1:
+        return math.ceil(width), math.ceil(height)
     return None
 
 
@@ -198,34 +303,12 @@ def get_expected_design_size(mode: str, source_path: str, node_id: str) -> tuple
     return None
 
 
-def get_declared_design_size(mode: str, source_path: str, node_id: str) -> tuple[float | None, float | None]:
-    source = Path(source_path)
-    if not source.is_file():
-        return None, None
-    try:
-        document = load_json_document(source)
-    except Exception:
-        return None, None
-
-    if mode == "pen" and source.suffix.lower() == ".pen":
-        target_node = find_node_by_id(document.get("children", []), node_id)
-        return extract_node_numeric_size(target_node)
-
-    if mode in {"local-figma", "figma-source"} and source.suffix.lower() == ".json":
-        normalized_node_id = parse_figma_node_id(node_id)
-        root = document.get("document", {})
-        target_node = find_node_by_id(root.get("children", []), normalized_node_id)
-        return extract_node_numeric_size(target_node)
-
-    return None, None
-
-
 def validate_reference_against_design(reference_size: tuple[int, int], expected_size: tuple[int, int] | None) -> dict:
     if not expected_size:
         return {
             "available": False,
-            "valid": True,
-            "reason": "",
+            "valid": False,
+            "reason": "expected_design_size_unavailable",
             "expected_size": None,
             "reference_size": list(reference_size),
             "scale_x": None,
@@ -252,7 +335,7 @@ def validate_reference_against_design(reference_size: tuple[int, int], expected_
     expected_aspect = expected_width / expected_height
     reference_aspect = reference_width / reference_height
     aspect_delta = abs(expected_aspect - reference_aspect) / max(expected_aspect, reference_aspect)
-    valid = aspect_delta <= 0.08
+    valid = aspect_delta <= REFERENCE_ASPECT_COMPATIBILITY_THRESHOLD
     reason = "" if valid else "reference_aspect_mismatch_design"
     return {
         "available": True,
@@ -264,6 +347,43 @@ def validate_reference_against_design(reference_size: tuple[int, int], expected_
         "scale_y": scale_y,
         "aspect_delta": aspect_delta,
     }
+
+
+def resolve_authoritative_design_size(ue_result: dict | None) -> tuple[int, int] | None:
+    ue_result = ue_result or {}
+    width = parse_numeric_dimension(ue_result.get("design_time_width"))
+    height = parse_numeric_dimension(ue_result.get("design_time_height"))
+    if width and height and width > 1 and height > 1:
+        return math.ceil(width), math.ceil(height)
+
+    return None
+
+
+def apply_render_size_authority(
+    reference_context: dict,
+    reference_path: Path,
+    ue_result: dict | None,
+    candidate_path: Path | None,
+) -> dict:
+    design_size = resolve_authoritative_design_size(ue_result)
+    reference_validation = validate_reference_against_design(read_image_size(reference_path), design_size)
+    candidate_size = read_image_size(candidate_path) if candidate_path and candidate_path.is_file() else None
+    candidate_size_valid = bool(design_size and candidate_size and tuple(candidate_size) == tuple(design_size))
+    if not candidate_size_valid:
+        reference_validation["valid"] = False
+        reference_validation["reason"] = "candidate_size_mismatch_design_time_size" if design_size else "design_time_size_unavailable"
+    reference_validation["candidate_size"] = list(candidate_size) if candidate_size else None
+    reference_validation["candidate_size_matches_design_time"] = candidate_size_valid
+    reference_context["reference_validation"] = reference_validation
+    reference_context["render_size_authority"] = {
+        "source": "ue_blueprint_design_time_size",
+        "reason": "source design size defines render output; reference PNG size is compare-only",
+        "design_size": list(design_size) if design_size else None,
+        "candidate_size": list(candidate_size) if candidate_size else None,
+        "candidate_size_matches_design_time": candidate_size_valid,
+        "requested_render_size": None,
+    }
+    return reference_validation
 
 
 def parse_args():
@@ -279,12 +399,14 @@ def parse_args():
     parser.add_argument("--mcp-server", default="", help="Override Pencil MCP server binary path")
     parser.add_argument("--pencil-app", default="", help="Override Pencil app name. Leave empty for auto-detect from ~/.pencil/apps and running IDE processes.")
     parser.add_argument("--output-dir", default="", help="Directory for render, diff and reports")
-    parser.add_argument("--game-output", default="", help="UE asset output base path, default is a unique automation path")
+    parser.add_argument("--game-output", default="", help="UE asset output base path, default is a stable per-case automation path")
     parser.add_argument("--project", default="", help="Runtime project path. HostProject fallback has been removed. If omitted, the script tries DESIGN2UMG_RUNTIME_PROJECT and then infers a .uproject from the source path.")
     parser.add_argument("--editor", default=r"G:\UE5\UnrealEngine\Engine\Binaries\Win64\UnrealEditor.exe", help="UnrealEditor executable path")
     parser.add_argument("--pixel-tolerance", type=int, default=6, help="Per-pixel max-channel tolerance")
     parser.add_argument("--changed-ratio-threshold", type=float, default=0.01, help="Max changed pixel ratio to pass")
     parser.add_argument("--mae-threshold", type=float, default=0.02, help="Max mean absolute error to pass")
+    parser.add_argument("--idle-timeout-sec", type=int, default=600, help="Kill the editor if no log or result progress is observed for this many seconds")
+    parser.add_argument("--startup-timeout-sec", type=int, default=90, help="Kill the editor if UnrealEditor shows zero progress right after launch for this many seconds")
     parser.add_argument("--log-cmds", default="", help="Optional Unreal -LogCmds payload, for example 'LogDesign2UMG Verbose'")
     return parser.parse_args()
 
@@ -1426,24 +1548,132 @@ def build_diff(reference: Image.Image, candidate: Image.Image, pixel_tolerance: 
     }
 
 
-def run_editor(editor_path: str, project_path: str, spec_path: Path, log_path: Path, log_cmds: str = "") -> int:
-    exec_cmd = f"Design2UMG.AutomationRender {spec_path.as_posix()}"
+def build_visual_comparison(reference: Image.Image, candidate: Image.Image, pixel_tolerance: int):
+    actual_reference_size = list(reference.size)
+    actual_candidate_size = list(candidate.size)
+    if reference.size == candidate.size:
+        comparison = build_diff(reference, candidate, pixel_tolerance)
+        comparison["comparison_mode"] = "native_size"
+        comparison["actual_reference_size"] = actual_reference_size
+        comparison["actual_candidate_size"] = actual_candidate_size
+        comparison["comparison_reference_size"] = actual_reference_size
+        comparison["comparison_candidate_size"] = actual_candidate_size
+        return comparison
+
+    reference_aspect = reference.width / reference.height if reference.height else 0.0
+    candidate_aspect = candidate.width / candidate.height if candidate.height else 0.0
+    aspect_denominator = max(reference_aspect, candidate_aspect)
+    aspect_delta = 1.0 if aspect_denominator <= 0.0 else abs(reference_aspect - candidate_aspect) / aspect_denominator
+    if aspect_delta > REFERENCE_ASPECT_COMPATIBILITY_THRESHOLD:
+        comparison = build_diff(reference, candidate, pixel_tolerance)
+        comparison["comparison_mode"] = "size_mismatch_no_scale"
+        comparison["actual_reference_size"] = actual_reference_size
+        comparison["actual_candidate_size"] = actual_candidate_size
+        comparison["comparison_reference_size"] = actual_reference_size
+        comparison["comparison_candidate_size"] = actual_candidate_size
+        comparison["aspect_delta"] = aspect_delta
+        return comparison
+
+    scaled_reference = reference.resize(candidate.size, Image.Resampling.BILINEAR)
+    comparison = build_diff(scaled_reference, candidate, pixel_tolerance)
+    comparison["comparison_mode"] = "reference_scaled_to_candidate_for_compare_only"
+    comparison["actual_reference_size"] = actual_reference_size
+    comparison["actual_candidate_size"] = actual_candidate_size
+    comparison["comparison_reference_size"] = list(scaled_reference.size)
+    comparison["comparison_candidate_size"] = actual_candidate_size
+    comparison["reference_size"] = actual_reference_size
+    comparison["candidate_size"] = actual_candidate_size
+    comparison["size_match"] = False
+    comparison["aspect_delta"] = aspect_delta
+    return comparison
+
+
+def terminate_editor_process(process: subprocess.Popen) -> None:
+    process.kill()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        subprocess.run(["taskkill", "/F", "/PID", str(process.pid)], check=False, capture_output=True, text=True)
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+
+
+def run_editor(
+    editor_path: str,
+    project_path: str,
+    driver_script_path: Path,
+    log_path: Path,
+    log_cmds: str = "",
+    result_path: Path | None = None,
+    idle_timeout_sec: int = 600,
+    startup_timeout_sec: int = 90,
+) -> int:
+    driver_script_path = driver_script_path.resolve()
     command = [
         editor_path,
         project_path,
-        "-unattended",
         "-nop4",
         "-nosplash",
+        "-NoMutex",
         "-stdout",
         "-FullStdOutLogOutput",
-        f"-ExecCmds={exec_cmd}",
+        "-unattended",
+        f"-ExecutePythonScript={driver_script_path}",
     ]
+    extra_editor_args = os.environ.get("DESIGN2UMG_EDITOR_EXTRA_ARGS", "").strip()
+    if extra_editor_args:
+        command.extend(shlex.split(extra_editor_args))
     if log_cmds:
         command.append(f"-LogCmds={log_cmds}")
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with open(log_path, "w", encoding="utf-8-sig") as handle:
-        process = subprocess.run(command, stdout=handle, stderr=subprocess.STDOUT, check=False)
-    return process.returncode
+        process = subprocess.Popen(command, stdout=handle, stderr=subprocess.STDOUT)
+        process_started_at = time.time()
+        last_progress_time = time.time()
+        last_log_size = 0
+        result_seen = False
+        observed_progress = False
+
+        while True:
+            exit_code = process.poll()
+            if exit_code is not None:
+                return exit_code
+
+            current_result_seen = bool(result_path and result_path.is_file())
+            if current_result_seen and not result_seen:
+                result_seen = True
+                last_progress_time = time.time()
+                observed_progress = True
+
+            try:
+                current_log_size = log_path.stat().st_size
+            except FileNotFoundError:
+                current_log_size = 0
+            if current_log_size > last_log_size:
+                last_log_size = current_log_size
+                last_progress_time = time.time()
+                observed_progress = True
+
+            if not observed_progress and (time.time() - process_started_at > startup_timeout_sec):
+                terminate_editor_process(process)
+                raise TimeoutError(
+                    f"Editor startup made no progress for {startup_timeout_sec}s. "
+                    f"result_file={'1/1' if result_seen else '0/1'} log={log_path}"
+                )
+
+            if time.time() - last_progress_time > idle_timeout_sec:
+                if result_seen and log_indicates_clean_editor_shutdown(log_path):
+                    terminate_editor_process(process)
+                    return 0
+                terminate_editor_process(process)
+                raise TimeoutError(
+                    f"Editor made no progress for {idle_timeout_sec}s. "
+                    f"result_file={'1/1' if result_seen else '0/1'} log={log_path}"
+                )
+
+            time.sleep(2)
 
 
 def read_image_size(path: Path) -> tuple[int, int]:
@@ -1455,6 +1685,66 @@ def write_json(path: Path, payload: dict):
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8-sig") as handle:
         json.dump(payload, handle, ensure_ascii=False, indent=2)
+
+
+def write_single_editor_driver_script(output_dir: Path, spec_path: Path) -> Path:
+    output_dir = output_dir.resolve()
+    manifest_path = output_dir / "editor_driver_manifest.json"
+    driver_log_path = output_dir / "editor_driver.log"
+    script_path = output_dir / "editor_driver.py"
+    write_json(
+        manifest_path,
+        {
+            "spec_path": spec_path.resolve().as_posix(),
+            "driver_log_path": str(driver_log_path),
+        },
+    )
+    script_content = f"""import json
+import traceback
+from datetime import datetime
+import unreal
+
+MANIFEST_PATH = r\"{manifest_path}\"
+
+
+def _write_line(path, message):
+    timestamp = datetime.utcnow().isoformat(timespec=\"milliseconds\") + \"Z\"
+    with open(path, \"a\", encoding=\"utf-8\") as handle:
+        handle.write(f\"{{timestamp}} {{message}}\\n\")
+
+
+def _get_world():
+    try:
+        return unreal.EditorLevelLibrary.get_editor_world()
+    except Exception:
+        return None
+
+
+def _run():
+    driver_log_path = \"\"
+    try:
+        with open(MANIFEST_PATH, \"r\", encoding=\"utf-8-sig\") as handle:
+            manifest = json.load(handle)
+        driver_log_path = manifest.get(\"driver_log_path\", \"\")
+        spec_path = manifest.get(\"spec_path\", \"\")
+        if driver_log_path:
+            _write_line(driver_log_path, \"driver:start\")
+            _write_line(driver_log_path, f\"driver:run:{{spec_path}}\")
+        world = _get_world()
+        unreal.SystemLibrary.execute_console_command(world, f\"Design2UMG.AutomationRender {{spec_path}}\")
+        if driver_log_path:
+            _write_line(driver_log_path, \"driver:quit\")
+        unreal.SystemLibrary.execute_console_command(world, \"QUIT_EDITOR\")
+    except Exception:
+        if driver_log_path:
+            _write_line(driver_log_path, traceback.format_exc())
+        raise
+
+
+_run()
+"""
+    script_path.write_text(script_content, encoding="utf-8-sig")
+    return script_path
 
 
 def build_file_signature(path_like: str | Path) -> dict | None:
@@ -1656,9 +1946,19 @@ def log_indicates_clean_editor_shutdown(log_path: Path) -> bool:
 def execute_automation_render(args, spec_path: Path, log_path: Path, spec: dict):
     result_path = Path(spec["result_json_path"])
     write_json(spec_path, spec)
+    driver_script_path = write_single_editor_driver_script(spec_path.parent, spec_path)
     sync_project_plugin_build_id(args.editor, Path(args.project_plugin_root))
     ensure_clean_editor()
-    editor_exit_code = run_editor(args.editor, args.project, spec_path, log_path, args.log_cmds)
+    editor_exit_code = run_editor(
+        args.editor,
+        args.project,
+        driver_script_path,
+        log_path,
+        args.log_cmds,
+        result_path,
+        args.idle_timeout_sec,
+        args.startup_timeout_sec,
+    )
     if editor_exit_code != 0:
         print(f"Unreal editor exited with code {editor_exit_code}", file=sys.stderr)
     if not result_path.is_file():
@@ -1732,8 +2032,7 @@ def run_native_self_check(
             "output_path": native_asset_output,
             "render_png_path": str(native_path),
             "result_json_path": str(output_dir / "ue_native_render_result.json"),
-            "render_width": native_width,
-            "render_height": native_height,
+            "force_reload_package": True,
         }
         native_asset_result = execute_automation_render(
             args,
@@ -1753,8 +2052,6 @@ def run_native_self_check(
         "output_path": native_generate_output,
         "render_png_path": str(native_bootstrap_path),
         "result_json_path": str(output_dir / "ue_native_generate_result.json"),
-        "render_width": native_width,
-        "render_height": native_height,
     }
     native_generate_result = execute_automation_render(
         args,
@@ -1773,8 +2070,7 @@ def run_native_self_check(
         "output_path": native_asset_output,
         "render_png_path": str(native_path),
         "result_json_path": str(output_dir / "ue_native_render_result.json"),
-        "render_width": native_width,
-        "render_height": native_height,
+        "force_reload_package": True,
     }
     native_asset_result = execute_automation_render(
         args,
@@ -1856,35 +2152,6 @@ def finalize_reference_context(args, reference_path: Path, reference_context: di
     )
 
 
-def infer_expected_design_size_from_reference(
-    declared_size: tuple[float | None, float | None],
-    reference_size: tuple[int, int],
-) -> tuple[int, int] | None:
-    declared_width, declared_height = declared_size
-    reference_width, reference_height = reference_size
-    if reference_width <= 0 or reference_height <= 0:
-        return None
-
-    if declared_width and declared_width > 1 and declared_height and declared_height > 1:
-        return round(declared_width), round(declared_height)
-
-    inferred_width = round(declared_width) if declared_width and declared_width > 1 else None
-    inferred_height = round(declared_height) if declared_height and declared_height > 1 else None
-
-    if inferred_width and not inferred_height:
-        scale = reference_width / inferred_width
-        if scale > 0:
-            inferred_height = round(reference_height / scale)
-    elif inferred_height and not inferred_width:
-        scale = reference_height / inferred_height
-        if scale > 0:
-            inferred_width = round(reference_width / scale)
-
-    if inferred_width and inferred_height and inferred_width > 1 and inferred_height > 1:
-        return inferred_width, inferred_height
-    return None
-
-
 def compare_and_report(
     args,
     output_dir: Path,
@@ -1897,14 +2164,18 @@ def compare_and_report(
 ):
     reference_image = load_rgba(reference_path)
     candidate_image = load_rgba(candidate_path)
-    comparison = build_diff(reference_image, candidate_image, args.pixel_tolerance)
+    comparison = build_visual_comparison(reference_image, candidate_image, args.pixel_tolerance)
     structure_validation = validate_structure_consistency(args, ue_result, render_chain, reference_context)
 
     diff_preview_path = output_dir / "diff_overlay.png"
     comparison["preview"].save(diff_preview_path)
 
+    comparison_size_compatible = comparison["comparison_mode"] in {
+        "native_size",
+        "reference_scaled_to_candidate_for_compare_only",
+    }
     visual_passed = (
-        comparison["size_match"]
+        comparison_size_compatible
         and comparison["changed_ratio"] <= args.changed_ratio_threshold
         and comparison["mean_abs_error"] <= args.mae_threshold
     )
@@ -1938,8 +2209,15 @@ def compare_and_report(
         "mean_abs_error": comparison["mean_abs_error"],
         "stable_mean_abs_error": comparison["stable_mean_abs_error"],
         "size_match": comparison["size_match"],
+        "comparison_size_compatible": comparison_size_compatible,
         "reference_size": comparison["reference_size"],
         "candidate_size": comparison["candidate_size"],
+        "comparison_mode": comparison["comparison_mode"],
+        "actual_reference_size": comparison["actual_reference_size"],
+        "actual_candidate_size": comparison["actual_candidate_size"],
+        "comparison_reference_size": comparison["comparison_reference_size"],
+        "comparison_candidate_size": comparison["comparison_candidate_size"],
+        "comparison_aspect_delta": comparison.get("aspect_delta"),
         "diff_bbox": comparison["diff_bbox"],
         "stable_diff_bbox": comparison["stable_diff_bbox"],
         "source_signature": reference_context.get("source_signature"),
@@ -2005,14 +2283,14 @@ def write_invalid_reference_report(
 
 def main():
     args = parse_args()
-    output_dir = Path(args.output_dir) if args.output_dir else default_output_dir()
+    output_dir = (Path(args.output_dir) if args.output_dir else default_output_dir()).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     args.project, project_plugin_root = prepare_runtime_project(args, [args.source])
     args.project_plugin_root = str(project_plugin_root)
     seed_runtime_font_assets(args.project, [args.source])
     expected_design_size = get_expected_design_size(args.mode, args.source, args.node)
-    declared_design_size = get_declared_design_size(args.mode, args.source, args.node)
+
     reference_path, reference_context = prepare_reference(args, output_dir, expected_design_size)
     finalize_reference_context(args, reference_path, reference_context)
     # When an external reference PNG is already provided, structure validation will
@@ -2030,23 +2308,11 @@ def main():
         if live_source_structure:
             reference_context["source_structure_live"] = live_source_structure
     reference_size = read_image_size(reference_path)
-    if not expected_design_size:
-        inferred_expected_size = infer_expected_design_size_from_reference(declared_design_size, reference_size)
-        if inferred_expected_size:
-            expected_design_size = inferred_expected_size
-            reference_context["inferred_expected_design_size"] = list(inferred_expected_size)
     reference_validation = validate_reference_against_design(reference_size, expected_design_size)
     reference_context["reference_validation"] = reference_validation
-    if reference_validation["valid"]:
-        render_width, render_height = reference_size
-    elif expected_design_size:
-        render_width, render_height = expected_design_size
-    else:
-        render_width, render_height = reference_size
 
-    candidate_filename = "candidate.png" if reference_validation["valid"] else "candidate.native.png"
-    candidate_path = output_dir / candidate_filename
-    game_output_root = build_automation_asset_root(output_dir, args.game_output)
+    candidate_path = output_dir / "candidate.png"
+    game_output_root = build_automation_asset_root(output_dir, args.game_output, infer_single_case_name(args, output_dir))
     primary_game_output = build_automation_phase_output(game_output_root, "primary")
     primary_asset_output = build_automation_phase_output(game_output_root, "primary-asset")
     asset_only_output = build_automation_phase_output(game_output_root, "asset")
@@ -2066,8 +2332,7 @@ def main():
             "output_path": asset_only_output,
             "render_png_path": str(candidate_path),
             "result_json_path": str(output_dir / "ue_render_result.json"),
-            "render_width": render_width,
-            "render_height": render_height,
+            "force_reload_package": True,
         }
         render_result = execute_automation_render(
             args,
@@ -2091,8 +2356,6 @@ def main():
             "output_path": primary_game_output,
             "render_png_path": str(bootstrap_candidate_path),
             "result_json_path": str(output_dir / "ue_generate_result.json"),
-            "render_width": render_width,
-            "render_height": render_height,
         }
         generate_result = execute_automation_render(
             args,
@@ -2111,8 +2374,7 @@ def main():
             "output_path": primary_asset_output,
             "render_png_path": str(candidate_path),
             "result_json_path": str(output_dir / "ue_render_result.json"),
-            "render_width": render_width,
-            "render_height": render_height,
+            "force_reload_package": True,
         }
         asset_result = execute_automation_render(
             args,
@@ -2143,15 +2405,16 @@ def main():
         mode_map,
         game_output_root,
         expected_design_size,
-        (render_width, render_height),
+        expected_design_size,
         args.source,
         args.node,
         generated_asset_path,
     )
 
+    reference_validation = apply_render_size_authority(reference_context, reference_path, ue_result, candidate_path)
     reference_authority = reference_context.get("reference_authority") or {}
     if args.mode == "pen" and reference_validation["valid"] and reference_authority.get("available"):
-        if reference_authority.get("verification_level") != "strong":
+        if reference_authority.get("verification_level") not in {"strong", "external_export_nodes"}:
             report_path = write_invalid_reference_report(
                 output_dir,
                 args,

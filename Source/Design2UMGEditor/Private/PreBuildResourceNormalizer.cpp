@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "PreBuildResourceNormalizer.h"
 #include "DesignResourceResolver.h"
 #include "UMGWidgetNodeAccess.h"
@@ -12,6 +12,8 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "HAL/FileManager.h"
 #include "Misc/PackageName.h"
+#include "RenderingThread.h"
+#include "TextureCompiler.h"
 #include "TextureResource.h"
 #include "UObject/SavePackage.h"
 
@@ -120,6 +122,25 @@ namespace
 		return true;
 	}
 
+	bool EnsurePersistedTextureReady(UTexture2D* Texture)
+	{
+		if (!Texture)
+		{
+			return false;
+		}
+
+		Texture->ConditionalPostLoad();
+#if WITH_EDITOR
+		FTextureCompilingManager::Get().FinishCompilation({ Texture });
+#endif
+		Texture->UpdateResource();
+		if (!GUsingNullRHI)
+		{
+			FlushRenderingCommands();
+		}
+		return true;
+	}
+
 	bool ExtractTextureRawData(UTexture2D* Texture, TArray64<uint8>& OutRawData, int32& OutWidth, int32& OutHeight)
 	{
 		if (!Texture || !Texture->GetPlatformData() || Texture->GetPlatformData()->Mips.Num() <= 0)
@@ -169,7 +190,10 @@ namespace
 		Texture->Source.Init(Width, Height, 1, 1, TSF_BGRA8, RawData.GetData());
 		ApplyPathTextureUiSettings(Texture, Filter);
 		Texture->PostEditChange();
-		Texture->UpdateResource();
+		if (!EnsurePersistedTextureReady(Texture))
+		{
+			return false;
+		}
 		Texture->MarkPackageDirty();
 		Package->MarkPackageDirty();
 
@@ -181,6 +205,10 @@ namespace
 		FSavePackageArgs SaveArgs;
 		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
 		if (!UPackage::SavePackage(Package, Texture, *PackageFilename, SaveArgs)) return false;
+		if (!EnsurePersistedTextureReady(Texture))
+		{
+			return false;
+		}
 
 		OutObjectPath = ObjectPath;
 		return true;

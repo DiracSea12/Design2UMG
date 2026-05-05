@@ -19,7 +19,6 @@ struct FBlueprintGenerationOptions
 {
 	EDesignBlueprintGenerationMode Mode = EDesignBlueprintGenerationMode::BlueprintAndPng;
 	FString CompiledPngFilePath;
-	FIntPoint CompiledRenderSize = FIntPoint::ZeroValue;
 };
 
 struct FPreviewRefreshInput

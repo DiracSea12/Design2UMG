@@ -158,7 +158,7 @@ FPencilConnector::~FPencilConnector()
 
 FString FPencilConnector::DiscoverMCPServerPath()
 {
-	// 1. 用户手动指定
+	// 1. User-specified path.
 	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
 	if (Settings && !Settings->MCPServerPath.IsEmpty())
 	{
@@ -178,7 +178,7 @@ FString FPencilConnector::DiscoverMCPServerPath()
 	const FString BinaryName = TEXT("mcp-server-linux-x64");
 #endif
 
-	// 2. 优先搜索 VS Code 扩展目录，其次再回退 antigravity。
+	// 2. Search VS Code extension directories first, then fall back to antigravity.
 #if PLATFORM_WINDOWS
 	const FString UserHome = FPlatformMisc::GetEnvironmentVariable(TEXT("USERPROFILE"));
 #else
@@ -221,12 +221,12 @@ FString FPencilConnector::DiscoverMCPServerPath()
 
 FString FPencilConnector::DetectAppName()
 {
-	// 1. 用户手动指定
+	// 1. User-specified app id.
 	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
 	if (Settings && !Settings->PencilAppName.IsEmpty())
 		return Settings->PencilAppName;
 
-	// 2. 优先使用 Pencil 已注册过的 app id，避免继续假设固定别名。
+	// 2. Prefer app ids already registered by Pencil instead of assuming a fixed alias.
 	if (const FString RegisteredAppName = DetectRegisteredPencilAppName(); !RegisteredAppName.IsEmpty())
 	{
 		return RegisteredAppName;
@@ -248,7 +248,7 @@ FString FPencilConnector::DetectAppName()
 			return TEXT("antigravity");
 	}
 
-	// 4. 默认回退到 VS Code 的 Pencil app id。
+	// 4. Fall back to VS Code's Pencil app id by default.
 	return TEXT("visual_studio_code");
 }
 

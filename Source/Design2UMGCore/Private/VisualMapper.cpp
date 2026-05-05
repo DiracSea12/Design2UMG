@@ -11,7 +11,7 @@
 
 namespace
 {
-	// 材质引用标识符（ProceduralShapeGenerator 内部 key，非资产路径）
+	// Material reference identifier used as an internal ProceduralShapeGenerator key, not an asset path.
 	const TCHAR* RetainerForegroundBlurEffectRef = TEXT("d2u.retainer.foreground_blur");
 	const TCHAR* RetainerInnerShadowEffectRef = TEXT("d2u.retainer.inner_shadow");
 	const TCHAR* MatRef_RoundedRect = TEXT("roundedrect");
@@ -650,7 +650,7 @@ namespace
 		{
 			if (Widget.Render.bHasRenderOpacity)
 			{
-				// 图片填充层 opacity 已写入，与节点级 opacity 合并（乘积）
+				// The image fill opacity has already been written; combine it with node-level opacity as a product.
 				Widget.Render.RenderOpacity = Node->Transform.Opacity * Widget.Render.RenderOpacity;
 			}
 			else
@@ -682,12 +682,12 @@ namespace
 	}
 }
 
-void FVisualMapper::ApplyRenderTransformProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
+void VisualMapper::ApplyRenderTransformProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
 {
 	ApplyRenderTransformPropertiesInternal(Widget, Node);
 }
 
-void FVisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
+void VisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
 {
 	VisualMapperFillTransfer::ApplyFillProperties(Widget, Node);
 	ApplyRenderTransformPropertiesInternal(Widget, Node);
@@ -712,7 +712,7 @@ void FVisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedP
 			}
 			if (Node->Type == EDesignNodeType::Text)
 			{
-				// TextBlock 只支持单阴影（UE5 限制），后者覆盖前者
+				// TextBlock supports only one shadow in UE5, so later shadows override earlier ones.
 				Widget.Shadow.ShadowOffset = FVector2D(Effect.Shadow.OffsetX, Effect.Shadow.OffsetY);
 				Widget.Shadow.bHasShadowOffset = true;
 				Widget.Shadow.ShadowColorAndOpacity = FUMGValueParser::ParseColor(
@@ -741,7 +741,7 @@ void FVisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedP
 	}
 }
 
-void FVisualMapper::ApplyRoundedCorner(FUMGWidgetNode& Widget, const FDesignCornerRadius& Radius, float Width, float Height)
+void VisualMapper::ApplyRoundedCorner(FUMGWidgetNode& Widget, const FDesignCornerRadius& Radius, float Width, float Height)
 {
 	if (Radius.bUniform)
 	{
@@ -773,7 +773,7 @@ void FVisualMapper::ApplyRoundedCorner(FUMGWidgetNode& Widget, const FDesignCorn
 	}
 }
 
-void FVisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FDesignStroke& Stroke)
+void VisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FDesignStroke& Stroke)
 {
 	const FMargin HalfInsets = StrokeHelpers::GetStrokeHalfInsets(Stroke.Thickness);
 	float Thickness = Stroke.Thickness.bUniform ? Stroke.Thickness.Uniform
@@ -816,7 +816,7 @@ void FVisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FDesignStroke& Str
 	// Center: default UMG behavior, no adjustment needed
 }
 
-FUMGWidgetNode FVisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node)
+FUMGWidgetNode VisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node)
 {
 	FUMGWidgetNode Border;
 	Border.Type = TEXT("Border");
@@ -824,14 +824,14 @@ FUMGWidgetNode FVisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TSha
 	Border.Name = Widget.Name;
 	Border.Bounds = Widget.Bounds;
 
-	// 转移视觉画刷到 Border（TextStyle 留在原 Widget 上）
+	// Transfer the visual brush to Border while keeping TextStyle on the original widget.
 	Border.Brush = Widget.Brush;
 	Widget.Brush = FUMGVisualBrushData();
 
 	TransferBorderBackgroundProperties(Border, Widget);
 
-	if (FLayoutMapper::HasPadding(Node))
-		FLayoutMapper::ApplyPadding(Border, Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}));
+	if (LayoutMapper::HasPadding(Node))
+		LayoutMapper::ApplyPadding(Border, Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}));
 
 	TransferBorderStrokeProperties(Border, Widget);
 
@@ -864,7 +864,7 @@ FUMGWidgetNode FVisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TSha
 	return Border;
 }
 
-FUMGWidgetNode FVisualMapper::WrapWithBackgroundBlur(FUMGWidgetNode&& Widget, float BlurStrength)
+FUMGWidgetNode VisualMapper::WrapWithBackgroundBlur(FUMGWidgetNode&& Widget, float BlurStrength)
 {
 	FUMGWidgetNode Blur;
 	Blur.Type = TEXT("BackgroundBlur");
@@ -884,7 +884,7 @@ FUMGWidgetNode FVisualMapper::WrapWithBackgroundBlur(FUMGWidgetNode&& Widget, fl
 	return Blur;
 }
 
-FUMGWidgetNode FVisualMapper::WrapWithForegroundBlur(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, float BlurStrength)
+FUMGWidgetNode VisualMapper::WrapWithForegroundBlur(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, float BlurStrength)
 {
 	FUMGWidgetNode Retainer;
 	Retainer.Type = TEXT("RetainerBox");
@@ -909,7 +909,7 @@ FUMGWidgetNode FVisualMapper::WrapWithForegroundBlur(FUMGWidgetNode&& Widget, co
 	return Retainer;
 }
 
-FUMGWidgetNode FVisualMapper::WrapWithInnerShadow(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, const FDesignShadow& Shadow)
+FUMGWidgetNode VisualMapper::WrapWithInnerShadow(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, const FDesignShadow& Shadow)
 {
 	FUMGWidgetNode Retainer;
 	Retainer.Type = TEXT("RetainerBox");
@@ -937,7 +937,7 @@ FUMGWidgetNode FVisualMapper::WrapWithInnerShadow(FUMGWidgetNode&& Widget, const
 	return Retainer;
 }
 
-FUMGWidgetNode FVisualMapper::WrapWithBoxShadow(
+FUMGWidgetNode VisualMapper::WrapWithBoxShadow(
 	FUMGWidgetNode&& Widget,
 	const TSharedPtr<FDesignNode>& Node,
 	const FUMGBoxShadowLayerData& ShadowLayer,
@@ -949,7 +949,7 @@ FUMGWidgetNode FVisualMapper::WrapWithBoxShadow(
 	const float Spread = ShadowLayer.Spread;
 	const FString ShadowColor = Design2UMGWidgetNodeAccess::SerializeWidgetColor(ShadowLayer.Color);
 
-	// Overlay 容纳阴影 Image + 原 Widget（Overlay 子节点的 Fill alignment 有效）
+	// Overlay contains the shadow Image and the original widget; Fill alignment works on Overlay children.
 	FUMGWidgetNode Wrapper;
 	Wrapper.Type = TEXT("Overlay");
 	Wrapper.Id = Widget.Id;
@@ -957,7 +957,7 @@ FUMGWidgetNode FVisualMapper::WrapWithBoxShadow(
 	Wrapper.Bounds = Widget.Bounds;
 	Wrapper.Slot = Widget.Slot;
 
-	// 阴影 Image 节点
+	// Shadow Image node.
 	const float PositiveSpread = FMath::Max(0.0f, Spread);
 	const float NegativeSpreadInset = FMath::Max(0.0f, -Spread);
 	const float Extent = Blur + PositiveSpread;
@@ -971,7 +971,7 @@ FUMGWidgetNode FVisualMapper::WrapWithBoxShadow(
 	Shadow.Brush.BrushColor = ShadowLayer.Color;
 	Shadow.Brush.bHasBrushColor = true;
 
-	// 阴影纹理参数
+	// Shadow texture parameters.
 	const int32 TexW = FMath::Max(1, FMath::RoundToInt(ShapeWidth + Extent * 2.0f));
 	const int32 TexH = FMath::Max(1, FMath::RoundToInt(ShapeHeight + Extent * 2.0f));
 	Shadow.WidgetStyle.WidthOverride = TexW;
@@ -1005,7 +1005,7 @@ FUMGWidgetNode FVisualMapper::WrapWithBoxShadow(
 		Shadow.Brush.bHasMaterialParams = true;
 	}
 
-	// 阴影偏移定位
+	// Shadow offset positioning.
 	Shadow.Slot.HorizontalAlignment = TEXT("Fill");
 	Shadow.Slot.VerticalAlignment = TEXT("Fill");
 	const float ShadowMarginLeft = OffX - Extent + NegativeSpreadInset;
@@ -1015,7 +1015,7 @@ FUMGWidgetNode FVisualMapper::WrapWithBoxShadow(
 
 	Wrapper.Children.Add(MoveTemp(Shadow));
 
-	// 原 Widget 叠在阴影上方
+	// Place the original widget above the shadow.
 	Widget.Id = Widget.Id + TEXT("_content");
 	Widget.Name = Widget.Name + TEXT("_content");
 	Widget.Bounds = FDesignPixelBounds();
@@ -1027,7 +1027,7 @@ FUMGWidgetNode FVisualMapper::WrapWithBoxShadow(
 	return Wrapper;
 }
 
-FUMGWidgetNode FVisualMapper::WrapWithMultiFill(
+FUMGWidgetNode VisualMapper::WrapWithMultiFill(
 	FUMGWidgetNode&& Widget,
 	const TSharedPtr<FDesignNode>& Node,
 	const FVisualMapperOptions& Options)

@@ -13,7 +13,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWidgetResourceBinderTexturePath,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FWidgetResourceBinderTexturePath::RunTest(const FString& Parameters)
 {
-	// 无效 MaterialRef + 有效 TexturePath：binder 应 fallback 到 texture 路径并成功绑定
+	// Invalid MaterialRef plus valid TexturePath: binder should fall back to the texture path and bind successfully.
 	FUMGWidgetNode Node;
 	Node.Type = TEXT("Image");
 	Node.Name = TEXT("TestImage");
@@ -26,7 +26,7 @@ bool FWidgetResourceBinderTexturePath::RunTest(const FString& Parameters)
 
 	const bool bBound = FWidgetResourceBinder::BindImageResource(ImageWidget, Node, &TextureMap);
 
-	// MaterialRef 生成失败后应 fallback 到 TexturePath，返回 true
+	// After MaterialRef generation fails, it should fall back to TexturePath and return true.
 	TestTrue(TEXT("Fallback to TexturePath when MaterialRef invalid"), bBound);
 
 	return true;
@@ -40,7 +40,7 @@ bool FWidgetResourceBinderMaterialRefSuccess::RunTest(const FString& Parameters)
 	FUMGWidgetNode Node;
 	Node.Type = TEXT("Image");
 	Node.Name = TEXT("TestImage");
-	// 使用已知的程序化形状类型
+	// Use a known procedural shape type.
 	Node.Brush.MaterialRef = TEXT("roundedrect");
 	Node.Brush.bHasMaterialRef = true;
 
@@ -48,7 +48,7 @@ bool FWidgetResourceBinderMaterialRefSuccess::RunTest(const FString& Parameters)
 
 	const bool bBound = FWidgetResourceBinder::BindImageResource(ImageWidget, Node, nullptr);
 
-	// roundedrect 是合法的 MaterialRef，应成功绑定并返回 true
+	// roundedrect is a valid MaterialRef and should bind successfully, returning true.
 	TestTrue(TEXT("MaterialRef 'roundedrect' binds successfully"), bBound);
 
 	return true;
@@ -62,7 +62,7 @@ bool FWidgetResourceBinderMaterialRefPriority::RunTest(const FString& Parameters
 	FUMGWidgetNode Node;
 	Node.Type = TEXT("Image");
 	Node.Name = TEXT("TestImage");
-	// 同时设置 MaterialRef 和 TexturePath
+	// Set both MaterialRef and TexturePath.
 	Node.Brush.MaterialRef = TEXT("roundedrect");
 	Node.Brush.bHasMaterialRef = true;
 	Node.Brush.TexturePath = TEXT("/Engine/EngineMaterials/DefaultDiffuse");
@@ -71,10 +71,10 @@ bool FWidgetResourceBinderMaterialRefPriority::RunTest(const FString& Parameters
 
 	const bool bBound = FWidgetResourceBinder::BindImageResource(ImageWidget, Node, nullptr);
 
-	// MaterialRef 优先：roundedrect 成功时应返回 true，且不走 texture 路径
+	// MaterialRef takes priority: when roundedrect succeeds, it should return true without using the texture path.
 	TestTrue(TEXT("MaterialRef takes priority over TexturePath"), bBound);
 
-	// 验证 brush 来自程序化纹理（ImageSize 非零）
+	// Verify the brush comes from a procedural texture with a nonzero ImageSize.
 	const FSlateBrush Brush = ImageWidget->GetBrush();
 	TestTrue(TEXT("Brush ImageSize set by material path"), Brush.ImageSize.X > 0.0f && Brush.ImageSize.Y > 0.0f);
 

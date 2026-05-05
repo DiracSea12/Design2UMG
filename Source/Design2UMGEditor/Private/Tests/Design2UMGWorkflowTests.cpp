@@ -1685,7 +1685,7 @@ bool FLayoutFixerConservatismTest::RunTest(const FString& Parameters)
 	Root.Children.Add(Child2);
 	TArray<FFixerLogEntry> Log;
 	FFixerStats Stats;
-	FLayoutFixer::FixWidgetTree(Root, Preset, Log, &Stats);
+	LayoutFixer::FixWidgetTree(Root, Preset, Log, &Stats);
 	TestEqual(TEXT("RolledBack should be non-negative"), Stats.RolledBack >= 0, true);
 	return true;
 }
@@ -2003,7 +2003,7 @@ bool FLayoutAdapterSlotSnapshotParityTest::RunTest(const FString& Parameters)
 	NB.Y = Node.Bounds.Y / DesignSize.Y;
 	NB.W = Node.Bounds.W / DesignSize.X;
 	NB.H = Node.Bounds.H / DesignSize.Y;
-	const FUMGSlotData Expected = FLayoutCalculator::CalculateSlot(NB, Ctx);
+	const FUMGSlotData Expected = LayoutCalculator::CalculateSlot(NB, Ctx);
 
 	// Adapter result (no parent needed for parity check — use nullptr canvas path via bEnableAdaptiveAnchors=true)
 	// Build a minimal transient WidgetTree + CanvasPanel to satisfy IsRootCanvasChild

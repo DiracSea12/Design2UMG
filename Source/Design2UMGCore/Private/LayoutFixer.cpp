@@ -3,34 +3,34 @@
 #include "LayoutFixer.h"
 
 // ============================================================================
-// Fixer算法常量
+// Fixer algorithm constants
 // ============================================================================
 
 namespace FixerConstants
 {
-	/** 动态SnapPx计算系数：MinDim * Factor */
+	/** Dynamic SnapPx factor: MinDim * Factor */
 	constexpr float SnapPxFactor = 0.002f;
-	/** SnapPx最小最大像素值*/
+	/** SnapPx minimum and maximum pixel values */
 	constexpr int32 SnapPxMin = 2;
 	constexpr int32 SnapPxMax = 6;
 
-	/** 越界修正：最小尺寸阈值，防止Bounds被裁剪为0 */
+	/** Out-of-bounds correction: minimum size threshold to prevent Bounds from being clipped to 0 */
 	constexpr float MinBoundsSize = 0.001f;
 
-	/** 等距修正：间距偏差比率阈值*/
+	/** Equal-spacing correction: spacing deviation ratio threshold */
 	constexpr float SpacingRatioThreshold = 0.15f;
-	/** 等距修正：绝对阈值乘数（相对于SnapThreshold）?*/
+	/** Equal-spacing correction: absolute threshold multiplier relative to SnapThreshold */
 	constexpr float SpacingAbsThresholdMultiplier = 2.0f;
-	/** 等距修正：单次最大移动距离乘数（相对于SnapThreshold）?*/
+	/** Equal-spacing correction: per-step maximum movement multiplier relative to SnapThreshold */
 	constexpr float SpacingMaxMoveMultiplier = 3.0f;
 
-	/** 保守性检查：总移动距离下限*/
+	/** Conservative check: total movement lower bound */
 	constexpr float ConservatismTotalMoveFloor = 0.03f;
-	/** 保守性检查：总移动距离乘数（每元素） */
+	/** Conservative check: total movement multiplier per element */
 	constexpr float ConservatismTotalMovePerElement = 2.0f;
-	/** 保守性检查：单次移动距离下限 */
+	/** Conservative check: per-step movement lower bound */
 	constexpr float ConservatismSingleMoveFloor = 0.02f;
-	/** 保守性检查：单次移动距离乘数 */
+	/** Conservative check: per-step movement multiplier */
 	constexpr float ConservatismSingleMoveMultiplier = 3.0f;
 }
 
@@ -47,14 +47,14 @@ void FixChildrenSpacing(TArray<FDesignPixelBounds>& ProposedBounds, const TArray
 void ProcessNode(FFixerWidgetNode& Node, const FDesignPixelBounds& ParentBounds, const FFixerPreset& Preset, float SnapThresholdX, float SnapThresholdY, TArray<FFixerLogEntry>& OutLog, FFixerStats& Stats);
 
 // ============================================================================
-// Helper Functions (v2.2 Fixer优化)
+// Helper functions (v2.2 Fixer optimization)
 // ============================================================================
 
 /**
- * 从多个候选位移中选择最小位移（绝对值最小）
- * @param Deltas 候选位移数组 * @param Threshold 阈值，只考虑小于阈值的位移
- * @param Eps 容差
- * @param OutDelta 输出最佳位移 * @return 是否找到有效位移
+ * Select the smallest displacement from multiple candidates by absolute value.
+ * @param Deltas Candidate displacement array * @param Threshold Only displacements below this threshold are considered
+ * @param Eps Tolerance
+ * @param OutDelta Output best displacement * @return Whether a valid displacement was found
  */
 static bool ChooseBestDelta(const TArray<float>& Deltas, float Threshold, float Eps, float& OutDelta)
 {
@@ -74,8 +74,8 @@ static bool ChooseBestDelta(const TArray<float>& Deltas, float Threshold, float 
 }
 
 /**
- * 计算1D区间重叠比例
- * @return 重叠长度 / 较短区间长度
+ * Calculate the overlap ratio between two 1D intervals.
+ * @return Overlap length / shorter interval length
  */
 static float OverlapRatio1D(float A0, float A1, float B0, float B1)
 {
@@ -87,7 +87,7 @@ static float OverlapRatio1D(float A0, float A1, float B0, float B1)
 }
 
 /**
- * 计算中位数（比平均值更稳健） */
+ * Calculate the median, which is more robust than the mean. */
 static float GetMedian(const TArray<float>& InValues)
 {
 	if (InValues.Num() == 0) return 0.0f;
@@ -99,10 +99,10 @@ static float GetMedian(const TArray<float>& InValues)
 }
 
 // ============================================================================
-// FLayoutFixer Implementation
+// LayoutFixer implementation
 // ============================================================================
 
-void FLayoutFixer::Initialize(const FIntPoint& DesignSize, FFixerPreset& OutPreset)
+void LayoutFixer::Initialize(const FIntPoint& DesignSize, FFixerPreset& OutPreset)
 {
 	OutPreset.DesignSize = DesignSize;
 	int32 MinDim = FMath::Min(DesignSize.X, DesignSize.Y);
@@ -165,7 +165,7 @@ bool FixBoundsOverflow(
 		if (ChildBounds.X >= ParentRight - MinSize)
 		{
 			ChildBounds.X = ParentRight - ChildBounds.W;
-			// 确保X不会变成负数
+			// Ensure X does not become negative.
 			if (ChildBounds.X < ParentBounds.X)
 			{
 				ChildBounds.X = ParentBounds.X;
@@ -184,7 +184,7 @@ bool FixBoundsOverflow(
 		if (ChildBounds.Y >= ParentBottom - MinSize)
 		{
 			ChildBounds.Y = ParentBottom - ChildBounds.H;
-			// 确保Y不会变成负数
+			// Ensure Y does not become negative.
 			if (ChildBounds.Y < ParentBounds.Y)
 			{
 				ChildBounds.Y = ParentBounds.Y;
@@ -229,7 +229,7 @@ bool SnapToAlignment(
 	const float Right = Bounds.X + Bounds.W;
 	const float Bottom = Bounds.Y + Bounds.H;
 
-	// v2.2: 收集所有候选位移，选择最小的
+	// v2.2: Collect all candidate displacements and choose the smallest.
 	// Candidate X offsets: left edge, right edge, center line.
 	TArray<float> DeltasX;
 	DeltasX.Add(ParentBounds.X - Bounds.X);           // snap left edge
@@ -276,8 +276,8 @@ bool SnapToSiblings(
 	FDesignPixelBounds OldBounds = Bounds;
 	bool bFixed = false;
 	const float Eps = 1e-6f;
-	const float MinOverlapRatio = 0.5f;  // v2.2: 正交方向需要0%重叠才吸附
-	// v2.2: 收集所有候选位移，选择最小的
+	const float MinOverlapRatio = 0.5f;  // v2.2: Require orthogonal overlap before snapping.
+	// v2.2: Collect all candidate displacements and choose the smallest.
 	TArray<float> DeltasX;
 	TArray<float> DeltasY;
 
@@ -426,7 +426,7 @@ bool FixEqualSpacing(
 		return bHorizontal ? Bounds[A].X < Bounds[B].X : Bounds[A].Y < Bounds[B].Y;
 	});
 
-	// 计算间距
+	// Calculate spacing.
 	TArray<float> Gaps;
 	for (int32 i = 1; i < Sorted.Num(); ++i)
 	{
@@ -442,7 +442,7 @@ bool FixEqualSpacing(
 		Gaps.Add(Gap);
 	}
 
-	// v2.2: 使用中位数而非平均值（更稳健）
+	// v2.2: Use the median instead of the mean for better robustness.
 	float MedianGap = GetMedian(Gaps);
 	float AvgGap = GetAverage(Gaps);
 	float MaxDiff = GetMaxDeviation(Gaps, AvgGap);
@@ -455,7 +455,7 @@ bool FixEqualSpacing(
 
 	float MaxMove = FixerConstants::SpacingMaxMoveMultiplier * Threshold;
 
-	// 应用等距修正
+	// Apply equal-spacing correction.
 	bool bApplied = false;
 	for (int32 i = 1; i < Sorted.Num(); ++i)
 	{
@@ -468,7 +468,7 @@ bool FixEqualSpacing(
 			float NewX = PrevRight + MedianGap;
 			float DeltaX = NewX - Bounds[Idx].X;
 
-			// v2.2: 限制移动幅度
+			// v2.2: Limit movement distance.
 			if (FMath::Abs(DeltaX) > MaxMove)
 			{
 				NewX = Bounds[Idx].X + FMath::Sign(DeltaX) * MaxMove;
@@ -487,7 +487,7 @@ bool FixEqualSpacing(
 			float NewY = PrevBottom + MedianGap;
 			float DeltaY = NewY - Bounds[Idx].Y;
 
-			// v2.2: 限制移动幅度
+			// v2.2: Limit movement distance.
 			if (FMath::Abs(DeltaY) > MaxMove)
 			{
 				NewY = Bounds[Idx].Y + FMath::Sign(DeltaY) * MaxMove;
@@ -505,7 +505,7 @@ bool FixEqualSpacing(
 	return bApplied;
 }
 
-void FLayoutFixer::FixWidgetTree(
+void LayoutFixer::FixWidgetTree(
 	FFixerWidgetNode& Root,
 	const FFixerPreset& Preset,
 	TArray<FFixerLogEntry>& OutLog,
@@ -558,7 +558,7 @@ void FixChildrenSpacing(
 	TArray<FFixerLogEntry>& OutLog,
 	FFixerStats& Stats)
 {
-	// 同级元素吸附
+	// Sibling element snapping.
 	if (Preset.bEnableSiblingSnap && ProposedBounds.Num() >= 2)
 	{
 		for (int32 i = 0; i < ProposedBounds.Num(); ++i)
@@ -575,7 +575,7 @@ void FixChildrenSpacing(
 		}
 	}
 
-	// 等距修正
+	// Equal-spacing correction.
 	if (!Preset.bEnableEqualSpacing || ProposedBounds.Num() < Preset.MinElementsForEqualSpacing)
 		return;
 
@@ -629,12 +629,12 @@ void ProcessNode(
 	TArray<FFixerLogEntry>& OutLog,
 	FFixerStats& Stats)
 {
-	// 豁免节点跳过修正
+	// Skip correction for exempt nodes.
 	bool bShouldFix = !Node.bFixExempt;
 	if (Node.bFixExempt)
 		Stats.SkippedExempt++;
 
-	// 越界修正
+	// Out-of-bounds correction.
 	if (bShouldFix && Preset.bEnableOverflowFix)
 	{
 		FFixerLogEntry Log;
@@ -646,7 +646,7 @@ void ProcessNode(
 		}
 	}
 
-	// 对齐吸附
+	// Alignment snapping.
 	if (bShouldFix && Preset.bEnableAlignSnap)
 	{
 		FFixerLogEntry Log;
@@ -675,7 +675,7 @@ void ProcessNode(
 
 	TArray<FDesignPixelBounds> ProposedBounds = OriginalBounds;
 
-	// 同级吸附 + 等距修正
+	// Sibling snapping and equal-spacing correction.
 	FixChildrenSpacing(ProposedBounds, OriginalBounds, Preset, SnapThresholdX, SnapThresholdY, OutLog, Stats);
 
 	// Roll back when the conservative check fails.
@@ -683,7 +683,7 @@ void ProcessNode(
 	if (!bPass)
 		Stats.RolledBack++;
 
-	// 应用修正
+	// Apply correction.
 	if (bPass)
 	{
 		for (int32 i = 0; i < FixableIndices.Num(); ++i)

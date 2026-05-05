@@ -190,7 +190,7 @@ bool FPenParserErrorInputTest::RunTest(const FString&)
 		TestTrue(TEXT("Circular-ref document parses"), FPenParser::ParseDocument(CircularRefJson, Doc));
 		TestEqual(TEXT("Circular-ref roots parsed"), Doc.Children.Num(), 3);
 		AddExpectedError(TEXT("circular ref detected"), EAutomationExpectedErrorFlags::Contains, 1);
-		const TSharedPtr<FDesignNode> Expanded = FRefExpander::ExpandRef(Doc.Children[2], Doc);
+		const TSharedPtr<FDesignNode> Expanded = RefExpander::ExpandRef(Doc.Children[2], Doc);
 		TestFalse(TEXT("Circular ref expansion returns null"), Expanded.IsValid());
 	}
 

@@ -59,7 +59,7 @@ namespace
 	}
 }
 
-void FLayoutMapper::ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node, EDesignLayout ParentLayout)
+void LayoutMapper::ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node, EDesignLayout ParentLayout)
 {
 	if (ParentLayout == EDesignLayout::Vertical)
 	{
@@ -127,8 +127,8 @@ void FLayoutMapper::ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr
 		const bool bFitHeightNeedsAuto = bFitHeight && Node->Transform.Height.Value <= 0.0f;
 
 		// CanvasPanel fidelity rule:
-		// FitContent 只有在该轴没有显式像素值时才走 AutoSize。
-		// 若已有设计稿像素值（常见于组件实例），优先保留 offsets 以贴近设计稿静态布局。
+		// FitContent uses AutoSize only when the axis has no explicit pixel value.
+		// If the design already provides pixel values, which is common for component instances, keep offsets to preserve the static layout.
 		if (bFitWidthNeedsAuto || bFitHeightNeedsAuto)
 		{
 			Widget.Slot.bAutoSize = true;
@@ -145,7 +145,7 @@ void FLayoutMapper::ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr
 	}
 }
 
-void FLayoutMapper::ApplyGap(TArray<FUMGWidgetNode>& Children, float Gap, EDesignLayout Layout)
+void LayoutMapper::ApplyGap(TArray<FUMGWidgetNode>& Children, float Gap, EDesignLayout Layout)
 {
 	if (Gap <= 0 || Children.Num() < 2)
 		return;
@@ -169,12 +169,12 @@ void FLayoutMapper::ApplyGap(TArray<FUMGWidgetNode>& Children, float Gap, EDesig
 	}
 }
 
-void FLayoutMapper::ApplyPadding(FUMGWidgetNode& Widget, const FDesignPadding& Padding)
+void LayoutMapper::ApplyPadding(FUMGWidgetNode& Widget, const FDesignPadding& Padding)
 {
 	Widget.WidgetStyle.Padding = FMargin(Padding.Left, Padding.Top, Padding.Right, Padding.Bottom);
 }
 
-void FLayoutMapper::ApplyJustifyContent(TArray<FUMGWidgetNode>& Children, EDesignJustifyContent Justify, EDesignSizeMode MainAxisMode, EDesignLayout ParentLayout)
+void LayoutMapper::ApplyJustifyContent(TArray<FUMGWidgetNode>& Children, EDesignJustifyContent Justify, EDesignSizeMode MainAxisMode, EDesignLayout ParentLayout)
 {
 	if (Justify == EDesignJustifyContent::Start || Children.Num() == 0)
 		return;
@@ -232,13 +232,13 @@ void FLayoutMapper::ApplyJustifyContent(TArray<FUMGWidgetNode>& Children, EDesig
 	}
 }
 
-void FLayoutMapper::ApplyAlignItems(FUMGWidgetNode& Widget, EDesignAlignItems Align, EDesignLayout ParentLayout)
+void LayoutMapper::ApplyAlignItems(FUMGWidgetNode& Widget, EDesignAlignItems Align, EDesignLayout ParentLayout)
 {
 	if (ParentLayout == EDesignLayout::Vertical)
 	{
 		if (Widget.Slot.HorizontalAlignment != TEXT("Fill"))
 		{
-			EHorizontalAlignment H = FDesignTypeMapper::MapAlignItemsH(Align);
+			EHorizontalAlignment H = DesignTypeMapper::MapAlignItemsH(Align);
 			Widget.Slot.HorizontalAlignment = H == HAlign_Center ? TEXT("Center") :
 				H == HAlign_Right ? TEXT("Right") : TEXT("Left");
 		}
@@ -247,21 +247,21 @@ void FLayoutMapper::ApplyAlignItems(FUMGWidgetNode& Widget, EDesignAlignItems Al
 	{
 		if (Widget.Slot.VerticalAlignment != TEXT("Fill"))
 		{
-			EVerticalAlignment V = FDesignTypeMapper::MapAlignItemsV(Align);
+			EVerticalAlignment V = DesignTypeMapper::MapAlignItemsV(Align);
 			Widget.Slot.VerticalAlignment = V == VAlign_Center ? TEXT("Center") :
 				V == VAlign_Bottom ? TEXT("Bottom") : TEXT("Top");
 		}
 	}
 }
 
-bool FLayoutMapper::HasPadding(const TSharedPtr<FDesignNode>& Node)
+bool LayoutMapper::HasPadding(const TSharedPtr<FDesignNode>& Node)
 {
 	return Node.IsValid() &&
 		(Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Top > 0 || Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Right > 0 ||
 		 Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Bottom > 0 || Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Left > 0);
 }
 
-FUMGWidgetNode FLayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, const TSharedPtr<FDesignNode>& ChildNode, EDesignLayout ParentLayout)
+FUMGWidgetNode LayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, const TSharedPtr<FDesignNode>& ChildNode, EDesignLayout ParentLayout)
 {
 	FUMGWidgetNode SizeBox;
 	SizeBox.Type = TEXT("SizeBox");

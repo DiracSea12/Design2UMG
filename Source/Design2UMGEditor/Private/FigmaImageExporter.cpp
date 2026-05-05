@@ -27,7 +27,7 @@ void FFigmaImageExporter::ResolveImageRefs(
 
 	UE_LOG(LogDesign2UMG, Log, TEXT("FigmaImageExporter: Resolving %d image refs"), ImageRefs.Num());
 
-	// Figma GET /v1/files/:key/images 返回 { "meta": { "images": { "imageRef": "url", ... } } }
+	// Figma GET /v1/files/:key/images returns { "meta": { "images": { "imageRef": "url", ... } } }.
 	Client.GetFileImages(FileKey,
 		[Document, OnComplete](bool bSuccess, const FString& Body)
 		{

@@ -67,32 +67,6 @@ public:
 	UPROPERTY(Config)
 	bool bFirstRunCompleted = false;
 
-	// ========== UMG Design Resolution ==========
-
-	UPROPERTY(Config, EditAnywhere, Category = "Generation Settings", meta = (DisplayName = "Design Width", ClampMin = "320", ClampMax = "7680"))
-	int32 DesignWidth = 1920;
-
-	UPROPERTY(Config, EditAnywhere, Category = "Generation Settings", meta = (DisplayName = "Design Height", ClampMin = "240", ClampMax = "4320"))
-	int32 DesignHeight = 1080;
-
-	FIntPoint GetDesignSize() const;
-
-	/** Enable post-import layout fixing. Disable to preserve source coordinates as directly as possible. */
-	UPROPERTY(Config, EditAnywhere, Category = "Generation Settings", meta = (DisplayName = "Enable Layout Fixer"))
-	bool bEnableLayoutFixer = false;
-
-	/** Enable adaptive anchor recalculation for root Canvas children. Disable to keep converter-produced slots. */
-	UPROPERTY(Config, EditAnywhere, Category = "Generation Settings", meta = (DisplayName = "Enable Adaptive Root Canvas Anchors"))
-	bool bEnableAdaptiveRootCanvasAnchors = false;
-
-	/** Auto-wrap oversized roots in a ScaleBox when the source design is much larger than the configured design size. */
-	UPROPERTY(Config, EditAnywhere, Category = "Generation Settings", meta = (DisplayName = "Auto Wrap Oversized Root For Viewport"))
-	bool bAutoWrapOversizedRootForViewport = false;
-
-	/** Root ScaleBox direction. Down-only avoids enlarging small source designs on large viewports. */
-	UPROPERTY(Config, EditAnywhere, Category = "Generation Settings", meta = (DisplayName = "Viewport Scale Down Only"))
-	bool bViewportScaleDownOnly = true;
-
 	// ========== Remote Image Import ==========
 
 	UPROPERTY(Config, EditAnywhere, Category = "Remote Image Import", meta = (DisplayName = "Enable Remote Image Import"))

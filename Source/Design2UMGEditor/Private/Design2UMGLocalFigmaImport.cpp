@@ -454,7 +454,7 @@ namespace
 		}
 
 		OutDocument.Children.Reset();
-		OutDocument.Children.Add(FRefExpander::DeepCopyNode(Match));
+		OutDocument.Children.Add(RefExpander::DeepCopyNode(Match));
 		return true;
 	}
 

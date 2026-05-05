@@ -66,7 +66,14 @@ namespace
 	{
 		return !ExistingFontPath.IsEmpty()
 			&& !IsEngineFallbackFontPath(ExistingFontPath)
-			&& !ExistingFontPath.Contains(TEXT("/Design2UMG/Automation/ImportedFonts/"), ESearchCase::IgnoreCase);
+			&& !(ExistingFontPath.Contains(TEXT("/Design2UMG/Automation/"), ESearchCase::IgnoreCase)
+				&& ExistingFontPath.Contains(TEXT("/ImportedFonts/"), ESearchCase::IgnoreCase));
+	}
+
+	bool IsAutomationImportedFontPath(const FString& ExistingFontPath)
+	{
+		return ExistingFontPath.Contains(TEXT("/Design2UMG/Automation/"), ESearchCase::IgnoreCase)
+			&& ExistingFontPath.Contains(TEXT("/ImportedFonts/"), ESearchCase::IgnoreCase);
 	}
 
 	const TMap<FString, FString>& GetKnownWebFontUrls()
@@ -346,12 +353,49 @@ namespace
 		return Result;
 	}
 
+	FString MakeSafeFontAssetName(const FString& FontName)
+	{
+		FString SafeName = FontName;
+		SafeName.ReplaceInline(TEXT(" "), TEXT("_"));
+		SafeName.ReplaceInline(TEXT("."), TEXT("_"));
+		return SafeName;
+	}
+
+	bool TryResolvePinnedAutomationFontAssetPath(const FString& FontName, FString& OutFontObjectPath)
+	{
+		OutFontObjectPath.Reset();
+		if (!Design2UMGAutomationRender::IsAutomationRenderActive())
+		{
+			return false;
+		}
+
+		const FString SafeName = MakeSafeFontAssetName(FontName);
+		if (SafeName.IsEmpty())
+		{
+			return false;
+		}
+
+		const FString PinnedFontPackageName = FString(TEXT("/Game/Design2UMG/Automation/ImportedFonts")) / SafeName;
+		const FString PinnedFontObjectPath = PinnedFontPackageName + TEXT(".") + SafeName;
+		if (!LoadObject<UFont>(nullptr, *PinnedFontObjectPath))
+		{
+			return false;
+		}
+
+		OutFontObjectPath = PinnedFontObjectPath;
+		return true;
+	}
+
 	FString ResolveFont(const FString& FontName, const FString& Url)
 	{
 		FString FontImportPath;
 		if (Design2UMGAutomationRender::IsAutomationRenderActive())
 		{
-			FontImportPath = TEXT("/Game/Design2UMG/Automation/ImportedFonts");
+			FontImportPath = Design2UMGAutomationRender::GetAutomationFontImportPath();
+			if (FontImportPath.IsEmpty())
+			{
+				FontImportPath = TEXT("/Game/Design2UMG/Automation/ImportedFonts");
+			}
 		}
 		else
 		{
@@ -364,13 +408,19 @@ namespace
 			FontImportPath = TEXT("/Game/Design2UMG/Fonts");
 		}
 
-		FString SafeName = FontName;
-		SafeName.ReplaceInline(TEXT(" "), TEXT("_"));
-		SafeName.ReplaceInline(TEXT("."), TEXT("_"));
+		const FString SafeName = MakeSafeFontAssetName(FontName);
 
+		const FString FaceAssetName = SafeName + TEXT("_Face");
 		const FString FacePkgName = FontImportPath / (SafeName + TEXT("_Face"));
 		const FString FontPkgName = FontImportPath / SafeName;
 		const FString FontObjPath = FontPkgName + TEXT(".") + SafeName;
+
+		FString PinnedFontObjectPath;
+		if (TryResolvePinnedAutomationFontAssetPath(FontName, PinnedFontObjectPath)
+			&& !PinnedFontObjectPath.Equals(FontObjPath, ESearchCase::IgnoreCase))
+		{
+			return PinnedFontObjectPath;
+		}
 
 		if (UFont* Existing = LoadObject<UFont>(nullptr, *FontObjPath))
 		{
@@ -396,7 +446,7 @@ namespace
 			FFileHelper::LoadFileToArray(FontData, *TempPath);
 			IFileManager::Get().Delete(*TempPath);
 		}
-		else if (!FFileHelper::LoadFileToArray(FontData, *Url))
+		else if (Url.IsEmpty() || !FFileHelper::LoadFileToArray(FontData, *Url))
 		{
 			return FString();
 		}
@@ -412,7 +462,6 @@ namespace
 			return FString();
 		}
 
-		const FString FaceAssetName = SafeName + TEXT("_Face");
 		UFontFace* FontFace = NewObject<UFontFace>(FacePkg, *FaceAssetName, RF_Public | RF_Standalone);
 		if (!FontFace)
 		{
@@ -648,11 +697,10 @@ namespace
 		FSavePackageArgs SaveArgs;
 		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
 
-		for (const TPair<FString, FString>& TypefacePair : TypefaceUrls)
+		for (const int32 Weight : RequestedWeights)
 		{
-			const FString& TypefaceName = TypefacePair.Key;
-			const FString& TypefaceUrl = TypefacePair.Value;
-			if (TypefaceName.IsEmpty() || TypefaceUrl.IsEmpty())
+			const FString TypefaceName = WeightNameFromNumeric(Weight);
+			if (TypefaceName.IsEmpty())
 			{
 				continue;
 			}
@@ -664,14 +712,20 @@ namespace
 			UFontFace* TypefaceFace = LoadObject<UFontFace>(nullptr, *FaceObjectPath);
 			if (!TypefaceFace)
 			{
-				FString Extension = FPaths::GetExtension(TypefaceUrl, false);
+				const FString* TypefaceUrl = TypefaceUrls.Find(TypefaceName);
+				if (!TypefaceUrl || TypefaceUrl->IsEmpty())
+				{
+					continue;
+				}
+
+				FString Extension = FPaths::GetExtension(*TypefaceUrl, false);
 				if (Extension.IsEmpty())
 				{
 					Extension = TEXT("ttf");
 				}
 
 				const FString TempFontPath = FPaths::ProjectSavedDir() / TEXT("Design2UMG") / (FaceAssetName + TEXT(".") + Extension);
-				if (!DownloadToFile(TypefaceUrl, TempFontPath))
+				if (!DownloadToFile(*TypefaceUrl, TempFontPath))
 				{
 					continue;
 				}
@@ -759,6 +813,16 @@ namespace
 			return FString();
 		}
 
+		FString ImportedPath = ResolveFont(FontFamily, FString());
+		if (!ImportedPath.IsEmpty())
+		{
+			if (UFont* Font = LoadObject<UFont>(nullptr, *ImportedPath))
+			{
+				EnsureKnownWebFontTypefaces(FontFamily, Font, ImportedPath, RequestedWeights);
+			}
+			return ImportedPath;
+		}
+
 		TMap<FString, FString> TypefaceUrls;
 		if (!QueryKnownWebFontTypefaces(FontFamily, RequestedWeights, TypefaceUrls) || TypefaceUrls.Num() == 0)
 		{
@@ -787,7 +851,7 @@ namespace
 			return FString();
 		}
 
-		const FString ImportedPath = ResolveFont(FontFamily, *PrimaryUrl);
+		ImportedPath = ResolveFont(FontFamily, *PrimaryUrl);
 		if (ImportedPath.IsEmpty())
 		{
 			return FString();
@@ -915,6 +979,7 @@ void DesignFontImportService::PrepareDocumentFonts(const FDesignDocument& Docume
 
 	int32 ImportedCount = 0;
 	bool bImportedAny = false;
+	TMap<FString, FString> ResolvedFontPathsByFamily;
 	if (Settings && Settings->bAutoImportFonts)
 	{
 		for (const FDesignFont& Font : Document.Fonts)
@@ -930,8 +995,10 @@ void DesignFontImportService::PrepareDocumentFonts(const FDesignDocument& Docume
 				continue;
 			}
 
-			if (!ResolveFont(Font.Name, Font.Url).IsEmpty())
+			const FString ImportedPath = ResolveFont(Font.Name, Font.Url);
+			if (!ImportedPath.IsEmpty())
 			{
+				ResolvedFontPathsByFamily.Add(Font.Name, ImportedPath);
 				++ImportedCount;
 				bImportedAny = true;
 			}
@@ -956,8 +1023,12 @@ void DesignFontImportService::PrepareDocumentFonts(const FDesignDocument& Docume
 			const bool bKnownCssFamily = GetKnownCssFontFamilies().Contains(NormalizedFamily);
 			const bool bKnownDirectFamily = GetKnownWebFontUrls().Contains(NormalizedFamily);
 			const FString ExistingFontPath = FFontResolver::FindFontAssetPath(Family);
+			const bool bExistingAutomationFont = IsAutomationImportedFontPath(ExistingFontPath);
 			const TArray<int32> RequestedWeights = ResolveKnownCssFontWeights(Family, RequestedWeightsByFamily);
-			if (bKnownCssFamily && !ExistingFontPath.IsEmpty())
+			if (bKnownCssFamily
+				&& !ExistingFontPath.IsEmpty()
+				&& !IsEngineFallbackFontPath(ExistingFontPath)
+				&& !bExistingAutomationFont)
 			{
 				if (UFont* ExistingFont = LoadObject<UFont>(nullptr, *ExistingFontPath))
 				{
@@ -970,7 +1041,7 @@ void DesignFontImportService::PrepareDocumentFonts(const FDesignDocument& Docume
 			}
 			const bool bAllowUpgradeFromEngineFallback =
 				(bKnownCssFamily || bKnownDirectFamily) && IsEngineFallbackFontPath(ExistingFontPath);
-			if (!ExistingFontPath.IsEmpty() && !bAllowUpgradeFromEngineFallback)
+			if (!ExistingFontPath.IsEmpty() && !bAllowUpgradeFromEngineFallback && !bExistingAutomationFont)
 			{
 				continue;
 			}
@@ -988,6 +1059,7 @@ void DesignFontImportService::PrepareDocumentFonts(const FDesignDocument& Docume
 			{
 				continue;
 			}
+			ResolvedFontPathsByFamily.Add(Family, ImportedPath);
 
 			if (bKnownCssFamily)
 			{
@@ -1005,6 +1077,10 @@ void DesignFontImportService::PrepareDocumentFonts(const FDesignDocument& Docume
 	if (bImportedAny)
 	{
 		FFontResolver::ClearCache();
+		for (const TPair<FString, FString>& Pair : ResolvedFontPathsByFamily)
+		{
+			FFontResolver::RegisterFontAssetPath(Pair.Key, Pair.Value);
+		}
 		FDesign2UMGNotification::Success(
 			FText::Format(LOCTEXT("FontsImported", "Design2UMG: Imported {0} font(s)"),
 				FText::AsNumber(ImportedCount)));
@@ -1051,6 +1127,7 @@ FString DesignFontImportService::EnsureFontFamilyAvailable(const FString& FontFa
 	{
 		return FString();
 	}
+	FFontResolver::RegisterFontAssetPath(FontFamily, ImportedPath);
 
 	if (GetKnownCssFontFamilies().Contains(NormalizedFamily))
 	{
@@ -1061,6 +1138,7 @@ FString DesignFontImportService::EnsureFontFamilyAvailable(const FString& FontFa
 	}
 
 	FFontResolver::ClearCache();
+	FFontResolver::RegisterFontAssetPath(FontFamily, ImportedPath);
 	return ImportedPath;
 }
 

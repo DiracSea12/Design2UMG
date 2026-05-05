@@ -178,10 +178,6 @@ namespace FigmaParserMetadata
 			{ TEXT("design2umgRenderFallbackScope"), &FDesignRenderFallbackData::Scope },
 			{ TEXT("design2umgRenderFallbackSource"), &FDesignRenderFallbackData::Source },
 			{ TEXT("design2umgRenderFallbackReason"), &FDesignRenderFallbackData::Reason },
-			{ TEXT("design2umgRenderFallbackOffsetX"), &FDesignRenderFallbackData::OffsetX },
-			{ TEXT("design2umgRenderFallbackOffsetY"), &FDesignRenderFallbackData::OffsetY },
-			{ TEXT("design2umgRenderFallbackWidth"), &FDesignRenderFallbackData::Width },
-			{ TEXT("design2umgRenderFallbackHeight"), &FDesignRenderFallbackData::Height },
 		};
 
 		for (const auto& KeyPair : RenderFallbackKeys)

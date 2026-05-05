@@ -8,17 +8,8 @@
 
 namespace
 {
-	constexpr int32 DefaultDesignWidth = 1920;
-	constexpr int32 DefaultDesignHeight = 1080;
 	const TCHAR* LegacySettingsSection = TEXT("/Script/Design2UMGEditor.Design2UMGSettings");
 	const TCHAR* CurrentSettingsSection = TEXT("/Script/Design2UMGCore.Design2UMGSettings");
-
-	bool IsInvalidDesignSize(const int32 Width, const int32 Height)
-	{
-		const bool bInvalidWidth = Width < 320 || Width > 7680;
-		const bool bInvalidHeight = Height < 240 || Height > 4320;
-		return bInvalidWidth || bInvalidHeight;
-	}
 
 	bool IsSettingsHexColorLiteral(const FString& InColor)
 	{
@@ -36,30 +27,6 @@ namespace
 		}
 
 		return true;
-	}
-
-	void EnsureValidDesignSize(UDesign2UMGSettings* Settings)
-	{
-		if (!Settings)
-		{
-			return;
-		}
-
-		if (!IsInvalidDesignSize(Settings->DesignWidth, Settings->DesignHeight))
-		{
-			return;
-		}
-
-		UE_LOG(LogDesign2UMG, Warning,
-			TEXT("Invalid DesignSize in config (%d x %d), auto-repair to %d x %d"),
-			Settings->DesignWidth,
-			Settings->DesignHeight,
-			DefaultDesignWidth,
-			DefaultDesignHeight);
-
-		Settings->DesignWidth = DefaultDesignWidth;
-		Settings->DesignHeight = DefaultDesignHeight;
-		Settings->SaveConfig();
 	}
 
 	FString NormalizeSettingsFontFamilyKey(const FString& InFamily)
@@ -142,7 +109,6 @@ UDesign2UMGSettings* UDesign2UMGSettings::Get()
 {
 	UDesign2UMGSettings* Settings = GetMutableDefault<UDesign2UMGSettings>();
 	MigrateLegacySettingsSection(Settings);
-	EnsureValidDesignSize(Settings);
 	return Settings;
 }
 
@@ -186,19 +152,6 @@ float UDesign2UMGSettings::ResolveLuminosityFitOpacityCap() const
 	return bUseCustomLuminosityFitOpacityCap
 		? FMath::Clamp(LuminosityFitOpacityCap, 0.0f, 1.0f)
 		: CanonicalLuminosityFitOpacityCap;
-}
-
-FIntPoint UDesign2UMGSettings::GetDesignSize() const
-{
-	if (IsInvalidDesignSize(DesignWidth, DesignHeight))
-	{
-		UE_LOG(LogDesign2UMG, Warning, TEXT("Invalid DesignSize in config (%d x %d), fallback to %d x %d"),
-			DesignWidth, DesignHeight,
-			DefaultDesignWidth, DefaultDesignHeight);
-		return FIntPoint(DefaultDesignWidth, DefaultDesignHeight);
-	}
-
-	return FIntPoint(DesignWidth, DesignHeight);
 }
 
 FString UDesign2UMGSettings::FindIconFontAssetPath(const FString& FontFamily) const

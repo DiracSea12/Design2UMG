@@ -541,7 +541,6 @@ namespace DesignImportPipeline
 					Data,
 					Request.OutputPath,
 					Request.Generation.CompiledPngFilePath,
-					Request.Generation.CompiledRenderSize,
 					&Result.GeneratedAssetPath,
 					&Result.RenderedSize);
 				Result.RenderPngPath = Request.Generation.CompiledPngFilePath;

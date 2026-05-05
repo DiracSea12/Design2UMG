@@ -11,6 +11,6 @@ class UTexture2D;
 class FWidgetResourceBinder
 {
 public:
-	// material 优先，失败后 texture fallback。返回是否成功绑定任意资源。
+	// Prefer material first, then fall back to texture; returns whether any resource was bound.
 	static bool BindImageResource(UImage* ImageWidget, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap);
 };

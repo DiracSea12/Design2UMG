@@ -104,7 +104,7 @@ FUMGSlotData FWidgetLayoutAdapter::Resolve(
 	NormalizedBounds.H = Node.Bounds.H / DesignSize.Y;
 
 	const bool bOrigAutoSize = SlotData.bAutoSize;
-	SlotData = FLayoutCalculator::CalculateSlot(NormalizedBounds, Context);
+	SlotData = LayoutCalculator::CalculateSlot(NormalizedBounds, Context);
 	SlotData.bAutoSize = bOrigAutoSize;
 
 	return SlotData;

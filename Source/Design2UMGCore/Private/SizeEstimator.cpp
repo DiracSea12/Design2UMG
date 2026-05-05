@@ -106,7 +106,7 @@ namespace
 
 		if (Node->Type == EDesignNodeType::Ref)
 		{
-			if (TSharedPtr<FDesignNode> Expanded = FRefExpander::ExpandRef(Node, Doc))
+			if (TSharedPtr<FDesignNode> Expanded = RefExpander::ExpandRef(Node, Doc))
 			{
 				const FVector2D RefSize = PreComputeFitContentSizesImpl(Expanded, Doc, ParentContentWidth, State);
 				const bool bLockExplicitFit = ShouldLockExplicitFitDimensionForSizing(Node);

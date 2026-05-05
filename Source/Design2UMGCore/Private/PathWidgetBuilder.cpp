@@ -187,6 +187,6 @@ FUMGWidgetNode PathWidgetBuilder::CreatePathWidget(const TSharedPtr<FDesignNode>
 		}
 	}
 
-	Widget.Type = FDesignTypeMapper::MapNodeTypeToWidget(Node->Type, Node->LayoutData.Layout);
+	Widget.Type = DesignTypeMapper::MapNodeTypeToWidget(Node->Type, Node->LayoutData.Layout);
 	return Widget;
 }

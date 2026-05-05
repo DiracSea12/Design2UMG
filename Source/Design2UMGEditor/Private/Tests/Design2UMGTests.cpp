@@ -429,7 +429,7 @@ bool FLayoutCalculatorTest::RunTest(const FString& Parameters)
 		FDesignPixelBounds B;
 		B.X = 50.0f / 1920.0f; B.Y = 30.0f / 1080.0f;
 		B.W = 200.0f / 1920.0f; B.H = 100.0f / 1080.0f;
-		FUMGSlotData Slot = FLayoutCalculator::CalculateSlot(B, Ctx);
+		FUMGSlotData Slot = LayoutCalculator::CalculateSlot(B, Ctx);
 		TestEqual(TEXT("TopLeft anchor MinX"), Slot.Anchors.Min.X, 0.0f);
 		TestEqual(TEXT("TopLeft anchor MinY"), Slot.Anchors.Min.Y, 0.0f);
 	}
@@ -439,7 +439,7 @@ bool FLayoutCalculatorTest::RunTest(const FString& Parameters)
 		B.W = 300.0f / 1920.0f; B.H = 200.0f / 1080.0f;
 		B.X = (1.0f - B.W) / 2.0f;
 		B.Y = (1.0f - B.H) / 2.0f;
-		FUMGSlotData Slot = FLayoutCalculator::CalculateSlot(B, Ctx);
+		FUMGSlotData Slot = LayoutCalculator::CalculateSlot(B, Ctx);
 		TestEqual(TEXT("Center anchor MinX"), Slot.Anchors.Min.X, 0.5f);
 		TestEqual(TEXT("Center anchor MinY"), Slot.Anchors.Min.Y, 0.5f);
 	}
@@ -449,7 +449,7 @@ bool FLayoutCalculatorTest::RunTest(const FString& Parameters)
 		B.W = 200.0f / 1920.0f; B.H = 100.0f / 1080.0f;
 		B.X = 1.0f - B.W - 30.0f / 1920.0f;
 		B.Y = 1.0f - B.H - 20.0f / 1080.0f;
-		FUMGSlotData Slot = FLayoutCalculator::CalculateSlot(B, Ctx);
+		FUMGSlotData Slot = LayoutCalculator::CalculateSlot(B, Ctx);
 		TestEqual(TEXT("BottomRight anchor MinX"), Slot.Anchors.Min.X, 1.0f);
 		TestEqual(TEXT("BottomRight anchor MinY"), Slot.Anchors.Min.Y, 1.0f);
 	}
@@ -458,7 +458,7 @@ bool FLayoutCalculatorTest::RunTest(const FString& Parameters)
 		FDesignPixelBounds B;
 		B.X = 50.0f / 1920.0f; B.Y = 50.0f / 1080.0f;
 		B.W = 1800.0f / 1920.0f; B.H = 100.0f / 1080.0f;  // ~93.75% width
-		FUMGSlotData Slot = FLayoutCalculator::CalculateSlot(B, Ctx);
+		FUMGSlotData Slot = LayoutCalculator::CalculateSlot(B, Ctx);
 		TestTrue(TEXT("Stretch anchor: MinX < MaxX"),
 			Slot.Anchors.Min.X < Slot.Anchors.Max.X);
 	}
@@ -488,7 +488,7 @@ bool FVisualMapperWrapWithBorderDirectTest::RunTest(const FString& Parameters)
 	Widget.Render.Clipping = TEXT("ClipToBounds");
 	Widget.Render.bHasClipping = true;
 
-	FUMGWidgetNode Wrapped = FVisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
+	FUMGWidgetNode Wrapped = VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
 	TestEqual(TEXT("Wrapped node remains Border"), Wrapped.Type, TEXT("Border"));
 	TestEqual(TEXT("BrushColor moved to outer border"), GetWidgetProperty(Wrapped, TEXT("BrushColor")), TEXT("#112233FF"));
 	TestEqual(TEXT("RenderOpacity moved to outer border"), GetWidgetProperty(Wrapped, TEXT("RenderOpacity")), TEXT("0.6"));
@@ -533,7 +533,7 @@ bool FVisualMapperWrapWithBorderTypedTest::RunTest(const FString& Parameters)
 	Widget.Render.Clipping = TEXT("ClipToBounds");
 	Widget.Render.bHasClipping = true;
 
-	FUMGWidgetNode Wrapped = FVisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
+	FUMGWidgetNode Wrapped = VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
 	TestEqual(TEXT("Typed wrapped node remains Border"), Wrapped.Type, TEXT("Border"));
 	TestEqual(TEXT("Typed brush color moved to outer border"), GetWidgetProperty(Wrapped, TEXT("BrushColor")), TEXT("#89BCE1FF"));
 	TestTrue(TEXT("Typed render opacity moved to outer border"),
@@ -561,7 +561,7 @@ bool FLayoutMapperDirectHelpersTest::RunTest(const FString& Parameters)
 {
 	TArray<FUMGWidgetNode> Children;
 	Children.SetNum(3);
-	FLayoutMapper::ApplyGap(Children, 12.0f, EDesignLayout::Horizontal);
+	LayoutMapper::ApplyGap(Children, 12.0f, EDesignLayout::Horizontal);
 	TestEqual(TEXT("First child horizontal gap stays zero"), Children[0].Slot.Padding.Left, 0.0f);
 	TestEqual(TEXT("Second child horizontal gap"), Children[1].Slot.Padding.Left, 12.0f);
 	TestEqual(TEXT("Third child horizontal gap"), Children[2].Slot.Padding.Left, 12.0f);
@@ -572,7 +572,7 @@ bool FLayoutMapperDirectHelpersTest::RunTest(const FString& Parameters)
 	Padding.Top = 2.0f;
 	Padding.Right = 3.0f;
 	Padding.Bottom = 4.0f;
-	FLayoutMapper::ApplyPadding(Widget, Padding);
+	LayoutMapper::ApplyPadding(Widget, Padding);
 	TestEqual(TEXT("Padding serialized directly"), GetWidgetProperty(Widget, TEXT("Padding")), TEXT("1.0,2.0,3.0,4.0"));
 	return true;
 }

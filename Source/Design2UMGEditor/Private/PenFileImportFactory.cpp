@@ -33,7 +33,7 @@ namespace
 	}
 }
 
-// --- UFactory 实现 ---
+// --- UFactory implementation ---
 
 UPenFileImportFactory::UPenFileImportFactory()
 {
@@ -79,7 +79,7 @@ UObject* UPenFileImportFactory::FactoryCreateFile(
 		return Result.GeneratedBlueprint;
 	}
 
-	// 多 frame：弹出选择器，异步生成
+	// Multiple frames: show a picker and generate asynchronously.
 	DesignImportDialogs::ShowFrameSelector(
 		Frames,
 		LOCTEXT("FrameSelectorTitle", "Select Frame to Import"),
