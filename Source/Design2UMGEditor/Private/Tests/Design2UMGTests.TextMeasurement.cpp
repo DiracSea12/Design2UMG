@@ -1049,6 +1049,45 @@ bool FTextMeasurementFallbackNoRuntimeImportedFontPathDispatchTest::RunTest(cons
 			Source.Contains(TEXT("TEXT(\"rubik\")"), ESearchCase::CaseSensitive));
 		TestFalse(TEXT("Funnel Display fallback entry must not be reintroduced after formal no-regression proof"),
 			Source.Contains(TEXT("TEXT(\"funneldisplay\")"), ESearchCase::CaseSensitive));
+
+		const int32 TableStart = Source.Find(TEXT("FamilyFallbackScales[] = {"), ESearchCase::CaseSensitive);
+		TestTrue(TEXT("Temporary family fallback table body must be discoverable"), TableStart != INDEX_NONE);
+		if (TableStart == INDEX_NONE)
+		{
+			return false;
+		}
+
+		const int32 TableEnd = Source.Find(TEXT("};"), ESearchCase::CaseSensitive, ESearchDir::FromStart, TableStart);
+		TestTrue(TEXT("Temporary family fallback table end must be discoverable"), TableEnd != INDEX_NONE);
+		if (TableEnd == INDEX_NONE)
+		{
+			return false;
+		}
+
+		const FString TableBody = Source.Mid(TableStart, TableEnd - TableStart);
+		TestTrue(TEXT("Geist rollback entry stays explicit while formal removal is blocked"),
+			TableBody.Contains(TEXT("TEXT(\"geist\")"), ESearchCase::CaseSensitive));
+		TestTrue(TEXT("Roboto Mono rollback entry stays explicit while formal removal is blocked"),
+			TableBody.Contains(TEXT("TEXT(\"robotomono\")"), ESearchCase::CaseSensitive));
+
+		int32 EntryCount = 0;
+		int32 SearchFrom = 0;
+		while (true)
+		{
+			const int32 EntryIndex = TableBody.Find(
+				TEXT("{ TEXT(\""),
+				ESearchCase::CaseSensitive,
+				ESearchDir::FromStart,
+				SearchFrom);
+			if (EntryIndex == INDEX_NONE)
+			{
+				break;
+			}
+
+			++EntryCount;
+			SearchFrom = EntryIndex + 1;
+		}
+		TestEqual(TEXT("Temporary family fallback table must not grow beyond the two blocked entries"), EntryCount, 2);
 	}
 
 	TestFalse(TEXT("Font fallback must not introduce public font-family override settings"),
@@ -1056,6 +1095,64 @@ bool FTextMeasurementFallbackNoRuntimeImportedFontPathDispatchTest::RunTest(cons
 	TestFalse(TEXT("Font fallback no longer routes by runtime imported-font path"),
 		Source.Contains(TEXT("RuntimeImported"), ESearchCase::CaseSensitive)
 		|| Source.Contains(TEXT("/Design2UMG/Automation/ImportedFonts/"), ESearchCase::CaseSensitive));
+
+	const TCHAR* FallbackFunctionSignatures[] = {
+		TEXT("FString NormalizeTextMeasurementFontFamilyKey("),
+		TEXT("float FindFamilySpecificTextFallbackScale(const FString&"),
+		TEXT("float ResolveInitialTextFallbackScale("),
+		TEXT("TOptional<float> TryResolveSemanticSingleLineFallbackScale("),
+		TEXT("TOptional<float> TryResolveBaselineTextFontFallbackScale("),
+		TEXT("TOptional<float> TryResolveMeasuredTextFontFallbackScale("),
+		TEXT("float ResolveTextFontSizeFallback("),
+	};
+
+	FString FallbackBodies;
+	for (const TCHAR* FunctionSignature : FallbackFunctionSignatures)
+	{
+		if (!Source.Contains(FunctionSignature, ESearchCase::CaseSensitive))
+		{
+			continue;
+		}
+
+		FString FuncBody;
+		if (!ExtractFunctionBody(*this, Source, FunctionSignature, FunctionSignature, FuncBody))
+		{
+			return false;
+		}
+		FallbackBodies += FuncBody;
+	}
+
+	const TCHAR* DisallowedIdentityTokens[] = {
+		TEXT("CaseName"),
+		TEXT("NodeId"),
+		TEXT("Node->Id"),
+		TEXT("Node->Name.Contains"),
+		TEXT("Node->Name.Equals"),
+		TEXT("Node->Name.Find"),
+		TEXT("Node->Name.StartsWith"),
+		TEXT("Node->Name.EndsWith"),
+		TEXT("Node->Text.FontFamily.Contains"),
+		TEXT("Node->Text.FontFamily.Equals"),
+		TEXT("Node->Text.FontFamily.Find"),
+		TEXT("Node->Text.FontFamily.StartsWith"),
+		TEXT("Node->Text.FontFamily.EndsWith"),
+		TEXT("NormalizedFamily.Contains"),
+		TEXT("NormalizedFamily.Find"),
+		TEXT("NormalizedFamily.StartsWith"),
+		TEXT("NormalizedFamily.EndsWith"),
+		TEXT("FileName"),
+		TEXT("SourcePath"),
+		TEXT("Directory"),
+		TEXT("ExportRoot"),
+		TEXT("ComponentName"),
+	};
+
+	for (const TCHAR* Token : DisallowedIdentityTokens)
+	{
+		TestFalse(
+			*FString::Printf(TEXT("Font fallback must not branch on sample identity token %s"), Token),
+			FallbackBodies.Contains(Token, ESearchCase::CaseSensitive));
+	}
 	return true;
 }
 
