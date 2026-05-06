@@ -1045,6 +1045,10 @@ bool FTextMeasurementFallbackNoRuntimeImportedFontPathDispatchTest::RunTest(cons
 	{
 		TestTrue(TEXT("Temporary family fallback table must stay documented as a local rollback"),
 			Source.Contains(TEXT("Phase-10 local rollback"), ESearchCase::CaseSensitive));
+		TestFalse(TEXT("Rubik fallback entry must not be reintroduced after formal no-regression proof"),
+			Source.Contains(TEXT("TEXT(\"rubik\")"), ESearchCase::CaseSensitive));
+		TestFalse(TEXT("Funnel Display fallback entry must not be reintroduced after formal no-regression proof"),
+			Source.Contains(TEXT("TEXT(\"funneldisplay\")"), ESearchCase::CaseSensitive));
 	}
 
 	TestFalse(TEXT("Font fallback must not introduce public font-family override settings"),

@@ -91,10 +91,8 @@ float FindFamilySpecificTextFallbackScale(const FString& NormalizedFamily)
 	// Phase-10 local rollback: keep the last known no-regression family table
 	// until a shared calibration rule proves parity across the full formal gate.
 	static const TPair<const TCHAR*, float> FamilyFallbackScales[] = {
-		{ TEXT("rubik"), 0.70f },
 		{ TEXT("geist"), 0.71f },
 		{ TEXT("robotomono"), 0.73f },
-		{ TEXT("funneldisplay"), 0.75f },
 	};
 
 	for (const TPair<const TCHAR*, float>& Entry : FamilyFallbackScales)
