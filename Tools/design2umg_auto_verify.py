@@ -1216,6 +1216,10 @@ def compare_structure_snapshots(left: dict | None, right: dict | None) -> dict |
         return None
     left_texts = normalize_structure_texts(left.get("visible_texts"))
     right_texts = normalize_structure_texts(right.get("visible_texts"))
+    left_kind_histogram = normalize_structure_histogram(left.get("kind_histogram"))
+    right_kind_histogram = normalize_structure_histogram(right.get("kind_histogram"))
+    left_class_histogram = normalize_structure_histogram(left.get("class_histogram"))
+    right_class_histogram = normalize_structure_histogram(right.get("class_histogram"))
     return {
         "available": True,
         "texts_match": left_texts == right_texts,
@@ -1227,7 +1231,46 @@ def compare_structure_snapshots(left: dict | None, right: dict | None) -> dict |
         "right_container_nodes": int(right.get("container_nodes") or 0),
         "left_text_nodes": int(left.get("text_nodes") or 0),
         "right_text_nodes": int(right.get("text_nodes") or 0),
+        "left_visual_nodes": int(left.get("visual_nodes") or 0),
+        "right_visual_nodes": int(right.get("visual_nodes") or 0),
+        "kind_histograms_match": left_kind_histogram == right_kind_histogram,
+        "class_histograms_match": left_class_histogram == right_class_histogram,
     }
+
+
+def normalize_structure_histogram(value) -> dict[str, int]:
+    if not isinstance(value, dict):
+        return {}
+    normalized = {}
+    for key, count in value.items():
+        normalized_key = str(key or "")
+        if not normalized_key:
+            continue
+        try:
+            normalized[normalized_key] = int(count or 0)
+        except (TypeError, ValueError):
+            normalized[normalized_key] = 0
+    return normalized
+
+
+def structure_count_floor(source_count: int, ratio: float, minimum: int) -> int:
+    if source_count <= 1:
+        return 1
+    return max(minimum, int(math.ceil(source_count * ratio)))
+
+
+def structure_comparison_counts_match(comparison: dict | None) -> bool:
+    if not isinstance(comparison, dict) or not comparison.get("available"):
+        return False
+    fields = ("total_nodes", "leaf_nodes", "container_nodes", "text_nodes", "visual_nodes")
+    for field in fields:
+        if comparison.get(f"left_{field}") != comparison.get(f"right_{field}"):
+            return False
+    return bool(
+        comparison.get("texts_match")
+        and comparison.get("kind_histograms_match")
+        and comparison.get("class_histograms_match")
+    )
 
 
 def validate_structure_consistency(args, ue_result: dict, render_chain: dict, reference_context: dict | None = None) -> dict:
@@ -1238,7 +1281,8 @@ def validate_structure_consistency(args, ue_result: dict, render_chain: dict, re
     generated_asset_snapshot = get_result_structure(generation_result, "asset_structure")
     asset_snapshot = get_result_structure(asset_result, "asset_structure") or get_result_structure(ue_result, "asset_structure")
 
-    required = args.mode == "pen"
+    required = args.mode != "asset"
+    generation_vs_asset = compare_structure_snapshots(generated_asset_snapshot, asset_snapshot)
     result = {
         "required": required,
         "available": False,
@@ -1249,7 +1293,7 @@ def validate_structure_consistency(args, ue_result: dict, render_chain: dict, re
         "reasons": [],
         "source": source_snapshot,
         "asset": asset_snapshot,
-        "generation_vs_asset": compare_structure_snapshots(generated_asset_snapshot, asset_snapshot),
+        "generation_vs_asset": generation_vs_asset,
     }
 
     if not isinstance(source_snapshot, dict) or not isinstance(asset_snapshot, dict):
@@ -1268,28 +1312,43 @@ def validate_structure_consistency(args, ue_result: dict, render_chain: dict, re
     asset_container = int(asset_snapshot.get("container_nodes") or 0)
     source_visual = int(source_snapshot.get("visual_nodes") or 0)
     asset_visual = int(asset_snapshot.get("visual_nodes") or 0)
+    source_text_nodes = int(source_snapshot.get("text_nodes") or 0)
+    asset_text_nodes = int(asset_snapshot.get("text_nodes") or 0)
     source_texts = normalize_structure_texts(source_snapshot.get("visible_texts"))
     asset_texts = normalize_structure_texts(asset_snapshot.get("visible_texts"))
     source_text_counter = Counter(source_texts)
     asset_text_counter = Counter(asset_texts)
 
-    min_total_required = 1 if source_total <= 1 else max(2, int((source_total * 0.05) + 0.9999))
-    min_leaf_required = 1 if source_leaf <= 1 else max(1, int((source_leaf * 0.05) + 0.9999))
+    min_total_required = structure_count_floor(source_total, 0.50, 2)
+    min_leaf_required = structure_count_floor(source_leaf, 0.50, 1)
+    min_visual_required = structure_count_floor(source_visual, 0.35, 1)
 
     if source_text_counter != asset_text_counter:
         result["reasons"].append("visible_text_mismatch")
+    if source_text_nodes > 0 and asset_text_nodes != source_text_nodes:
+        result["reasons"].append("text_node_count_mismatch")
     if source_total >= 2 and asset_total < min_total_required:
         result["reasons"].append("asset_total_nodes_collapsed")
     if source_leaf >= 2 and asset_leaf < min_leaf_required:
         result["reasons"].append("asset_leaf_nodes_collapsed")
     if source_container > 0 and asset_container == 0:
         result["reasons"].append("asset_container_missing")
-    if source_total >= 8 and asset_total <= 3:
+    if source_total >= 8 and asset_total < min_total_required:
         result["reasons"].append("asset_tree_too_small")
-    if source_total >= 8 and not asset_texts and asset_visual <= 1 and asset_total <= 3:
-        result["reasons"].append("single_visual_cheat_suspected")
-    if source_visual >= 12 and asset_visual <= 1:
+    if (
+        source_total >= 4
+        and (source_text_nodes > 0 or source_visual >= 3)
+        and asset_text_nodes == 0
+        and asset_visual <= 1
+        and asset_total <= 3
+    ):
+        result["reasons"].append("image_only_render_cheat_suspected")
+    if source_visual >= 12 and asset_visual < min_visual_required:
         result["reasons"].append("visual_structure_collapsed")
+    if required and not isinstance(generation_vs_asset, dict):
+        result["reasons"].append("generation_asset_structure_unavailable")
+    elif required and not structure_comparison_counts_match(generation_vs_asset):
+        result["reasons"].append("generated_asset_structure_changed_after_reload")
 
     result["metrics"] = {
         "source_total_nodes": source_total,
@@ -1300,8 +1359,11 @@ def validate_structure_consistency(args, ue_result: dict, render_chain: dict, re
         "asset_container_nodes": asset_container,
         "source_visual_nodes": source_visual,
         "asset_visual_nodes": asset_visual,
+        "source_text_nodes": source_text_nodes,
+        "asset_text_nodes": asset_text_nodes,
         "min_total_required": min_total_required,
         "min_leaf_required": min_leaf_required,
+        "min_visual_required": min_visual_required,
         "source_root_kind": source_snapshot.get("root_kind"),
         "asset_root_kind": asset_snapshot.get("root_kind"),
         "source_root_child_count": source_snapshot.get("root_child_count"),

@@ -1,6 +1,6 @@
 ﻿# Design2UMG Validation Protocol
 
-Last verified: 2026-05-05
+Last verified: 2026-05-06
 
 ## Purpose
 
@@ -144,12 +144,12 @@ The wrapper also writes a companion result json and reports the generated asset 
 
 These files are structure evidence, not visual evidence.
 
-The current snapshot test intentionally compares only stable semantics:
-- root widget type
-- root child count
-- visible text multiset
-- `TextBlock` count
-- total node count staying within a bounded drift window
+The snapshot test intentionally compares stable semantics rather than exact full-tree equality:
+- source and saved-asset structure must both be present for non-asset conversion runs
+- visible text multiset and text node count must match
+- total, leaf, container, and visual node counts must not collapse below the guarded floor
+- generated widget-tree structure must still match the saved/reloaded widget-tree structure
+- image-only render cheats are rejected when the source has real text/visual structure
 
 Do not tighten this into exact full-tree equality unless the generator guarantees zero wrapper normalization drift after save.
 
