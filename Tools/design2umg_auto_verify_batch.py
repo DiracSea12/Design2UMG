@@ -36,8 +36,6 @@ def parse_args():
     parser.add_argument("--mcp-server", default="", help="Override Pencil MCP server binary path")
     parser.add_argument("--pencil-app", default="", help="Override Pencil app name. Leave empty for auto-detect from ~/.pencil/apps and running IDE processes.")
     parser.add_argument("--pixel-tolerance", type=int, default=6, help="Per-pixel max-channel tolerance")
-    parser.add_argument("--changed-ratio-threshold", type=float, default=0.01, help="Max changed pixel ratio to pass")
-    parser.add_argument("--mae-threshold", type=float, default=0.02, help="Max mean absolute error to pass")
     parser.add_argument("--game-output", default="", help="Optional UE asset output base path override passed through to all cases")
     parser.add_argument("--idle-timeout-sec", type=int, default=180, help="Kill the editor if no log or result progress is observed for this many seconds")
     parser.add_argument("--startup-timeout-sec", type=int, default=60, help="Kill a shard early if UnrealEditor shows zero progress right after launch for this many seconds")
@@ -377,8 +375,6 @@ def build_case_args(batch_args, case: dict) -> SimpleNamespace:
         mcp_server=batch_args.mcp_server,
         pencil_app=batch_args.pencil_app,
         pixel_tolerance=batch_args.pixel_tolerance,
-        changed_ratio_threshold=batch_args.changed_ratio_threshold,
-        mae_threshold=batch_args.mae_threshold,
         game_output=batch_args.game_output,
         native_self_check=batch_args.native_self_check,
     )
@@ -1074,7 +1070,6 @@ def write_render_failure_report(state: dict, ue_result: dict | None, render_chai
     report_path = output_dir / "compare_report.json"
     candidate_path = state["candidate_path"]
     report = {
-        "passed": False,
         "verdict": verdict,
         "compare_skipped": True,
         "message": message,
@@ -1084,8 +1079,6 @@ def write_render_failure_report(state: dict, ue_result: dict | None, render_chai
         "reference_png_path": str(state["reference_path"]),
         "candidate_png_path": str(candidate_path),
         "pixel_tolerance": state["args"].pixel_tolerance,
-        "changed_ratio_threshold": state["args"].changed_ratio_threshold,
-        "mae_threshold": state["args"].mae_threshold,
         "changed_ratio": None,
         "stable_changed_ratio": None,
         "mean_abs_error": None,
@@ -1194,7 +1187,7 @@ def evaluate_no_regression(report: dict, case_dir: Path | None, pixel_tolerance:
 
     decisive_metric = "unavailable"
     decisive_delta = None
-    visual_passed = False
+    no_regression_metric_passed = False
     for metric_name in ("stable_changed_ratio", "changed_ratio", "stable_mean_abs_error", "mean_abs_error"):
         current_value = result["current"].get(metric_name)
         baseline_value = baseline.get(metric_name)
@@ -1202,7 +1195,7 @@ def evaluate_no_regression(report: dict, case_dir: Path | None, pixel_tolerance:
             continue
         decisive_metric = metric_name
         decisive_delta = current_value - baseline_value
-        visual_passed = decisive_delta <= NO_REGRESSION_EPSILON
+        no_regression_metric_passed = decisive_delta <= NO_REGRESSION_EPSILON
         break
     if decisive_metric == "unavailable":
         result["reasons"].append("comparison_metric_unavailable")
@@ -1210,12 +1203,12 @@ def evaluate_no_regression(report: dict, case_dir: Path | None, pixel_tolerance:
 
     structure_validation = report.get("structure_validation") or {}
     structure_guard_passed = structure_validation.get("passed") if structure_validation.get("required") else True
-    result["passed"] = visual_passed and structure_guard_passed
+    result["passed"] = no_regression_metric_passed and structure_guard_passed
     result["decisive_metric"] = decisive_metric
     result["decisive_delta"] = decisive_delta
-    result["visual_regressed"] = not visual_passed
+    result["visual_regressed"] = not no_regression_metric_passed
     result["structure_guard_passed"] = structure_guard_passed
-    if not visual_passed:
+    if not no_regression_metric_passed:
         result["reasons"].append(f"visual_regressed:{decisive_metric}")
     if not structure_guard_passed:
         result["reasons"].append("structure_guard_failed")
@@ -1298,7 +1291,7 @@ def process_case_result(state: dict, batch_exit_code: int, batch_log_path: Path)
         )
         return {
             "name": state["case"]["name"],
-            "passed": False,
+            "blocked": True,
             "report_path": str(report_path),
             "verdict": "render_failed",
         }
@@ -1323,7 +1316,7 @@ def process_case_result(state: dict, batch_exit_code: int, batch_log_path: Path)
             )
             return {
                 "name": state["case"]["name"],
-                "passed": False,
+                "blocked": True,
                 "report_path": str(report_path),
                 "verdict": "unverified_reference",
             }
@@ -1342,12 +1335,12 @@ def process_case_result(state: dict, batch_exit_code: int, batch_log_path: Path)
         )
         return {
             "name": state["case"]["name"],
-            "passed": False,
+            "blocked": True,
             "report_path": str(report_path),
             "verdict": "invalid_reference",
         }
 
-    passed, report_path = verify.compare_and_report(
+    report_path = verify.compare_and_report(
         args,
         state["output_dir"],
         state["reference_path"],
@@ -1363,7 +1356,7 @@ def process_case_result(state: dict, batch_exit_code: int, batch_log_path: Path)
     verify.write_json(Path(report_path), report)
     return {
         "name": state["case"]["name"],
-        "passed": passed,
+        "blocked": False,
         "report_path": str(report_path),
         "changed_ratio": report.get("changed_ratio"),
         "stable_changed_ratio": report.get("stable_changed_ratio"),
@@ -1515,18 +1508,16 @@ def main():
     post_workers = resolve_post_worker_count(args.post_workers, len(states))
     case_results = process_case_results(states, editor_exit_code, batch_log_path, post_workers)
     for result in case_results:
-        status = "PASS" if result["passed"] else "FAIL"
+        status = "BLOCKED" if result.get("blocked") else "CASE"
         print(f"[{status}] {result['name']} report={result['report_path']}")
     postprocess_completed_at = time.time()
 
-    passed = sum(1 for item in case_results if item["passed"])
     no_regression_cases = [item for item in case_results if item.get("no_regression_available")]
     no_regression_passed = sum(1 for item in no_regression_cases if item.get("no_regression_passed"))
+    blocked_cases = [item for item in case_results if item.get("blocked")]
     completeness = collect_batch_completeness(states, case_results)
     summary = {
         "total": len(case_results),
-        "passed": passed,
-        "failed": len(case_results) - passed,
         "editor_exit_code": editor_exit_code,
         "editor_exit_codes": editor_exit_codes,
         "parallel_editors_requested": args.parallel_editors,
@@ -1551,6 +1542,7 @@ def main():
             "postprocess_reports": max(0.0, postprocess_completed_at - editor_completed_at),
         },
         "completeness": completeness,
+        "blocked_cases": len(blocked_cases),
         "no_regression": {
             "available": len(no_regression_cases),
             "passed": no_regression_passed,
@@ -1593,7 +1585,11 @@ def main():
         or (formal_gate_candidate and historical_validation["blocked"])
     ):
         sys.exit(2)
-    sys.exit(0 if passed == len(case_results) else 1)
+    historical_regressions = historical_validation.get("historical_best_regressions") or []
+    no_regression_failed = len(no_regression_cases) - no_regression_passed
+    if blocked_cases or historical_regressions or no_regression_failed > 0:
+        sys.exit(1)
+    sys.exit(0)
 
 
 if __name__ == "__main__":

@@ -160,6 +160,7 @@ The current formal admissible gate is the full discovered 47-case set.
 That means:
 - do not run the formal full gate with an exclude pattern
 - `figma_figma-export_source` and `pen_pencil-welcome_step-2-frame` are part of the release gate again
+- formal batch reports do not use raw visual-threshold `passed/failed` totals as a score
 - formal historical-best parity should be checked with:
   `python Tools/design2umg_validate_run.py --output-root <run_root> --admissible-best-json <PluginRoot>\Saved\Design2UMG\Automation\_admissible_best_latest.json`
 

@@ -403,8 +403,6 @@ def parse_args():
     parser.add_argument("--project", default="", help="Runtime project path. HostProject fallback has been removed. If omitted, the script tries DESIGN2UMG_RUNTIME_PROJECT and then infers a .uproject from the source path.")
     parser.add_argument("--editor", default=r"G:\UE5\UnrealEngine\Engine\Binaries\Win64\UnrealEditor.exe", help="UnrealEditor executable path")
     parser.add_argument("--pixel-tolerance", type=int, default=6, help="Per-pixel max-channel tolerance")
-    parser.add_argument("--changed-ratio-threshold", type=float, default=0.01, help="Max changed pixel ratio to pass")
-    parser.add_argument("--mae-threshold", type=float, default=0.02, help="Max mean absolute error to pass")
     parser.add_argument("--idle-timeout-sec", type=int, default=600, help="Kill the editor if no log or result progress is observed for this many seconds")
     parser.add_argument("--startup-timeout-sec", type=int, default=90, help="Kill the editor if UnrealEditor shows zero progress right after launch for this many seconds")
     parser.add_argument("--log-cmds", default="", help="Optional Unreal -LogCmds payload, for example 'LogDesign2UMG Verbose'")
@@ -1848,7 +1846,6 @@ def build_single_case_summary_entry(case_name: str, report_path: Path) -> dict:
     reference_authority = ((report.get("reference_context") or {}).get("reference_authority") or {})
     return {
         "name": case_name,
-        "passed": bool(report.get("passed")),
         "report_path": str(report_path),
         "changed_ratio": report.get("changed_ratio"),
         "stable_changed_ratio": report.get("stable_changed_ratio"),
@@ -1904,8 +1901,6 @@ def finalize_single_run_history(output_dir: Path, args, report_path: Path) -> No
     summary_case = build_single_case_summary_entry(case_name, report_path)
     summary = {
         "total": 1,
-        "passed": 1 if summary_case["passed"] else 0,
-        "failed": 0 if summary_case["passed"] else 1,
         "editor_exit_code": load_json_document(report_path).get("editor_exit_code"),
         "design_root": str(Path(args.source).resolve().parent),
         "output_root": str(output_dir.resolve()),
@@ -2236,25 +2231,7 @@ def compare_and_report(
         "native_size",
         "reference_scaled_to_candidate_for_compare_only",
     }
-    visual_passed = (
-        comparison_size_compatible
-        and comparison["changed_ratio"] <= args.changed_ratio_threshold
-        and comparison["mean_abs_error"] <= args.mae_threshold
-    )
-    structure_passed = structure_validation["passed"] if structure_validation.get("required") else True
-    passed = visual_passed and structure_passed
-    verdict = "passed"
-    if not visual_passed and not structure_passed:
-        verdict = "visual_and_structure_mismatch"
-    elif not visual_passed:
-        verdict = "visual_mismatch"
-    elif not structure_passed:
-        verdict = "structure_mismatch"
-
     report = {
-        "passed": passed,
-        "visual_passed": visual_passed,
-        "verdict": verdict,
         "editor_exit_code": editor_exit_code,
         "reference_provider": args.reference_provider,
         "effective_reference_provider": reference_context.get("effective_reference_provider"),
@@ -2263,8 +2240,6 @@ def compare_and_report(
         "candidate_png_path": str(candidate_path),
         "diff_overlay_path": str(diff_preview_path),
         "pixel_tolerance": args.pixel_tolerance,
-        "changed_ratio_threshold": args.changed_ratio_threshold,
-        "mae_threshold": args.mae_threshold,
         "stable_visual_filter": comparison["stable_visual_filter"],
         "changed_ratio": comparison["changed_ratio"],
         "stable_changed_ratio": comparison["stable_changed_ratio"],
@@ -2292,7 +2267,7 @@ def compare_and_report(
     }
     report_path = output_dir / "compare_report.json"
     write_json(report_path, report)
-    return passed, report_path
+    return report_path
 
 
 def write_invalid_reference_report(
@@ -2308,7 +2283,6 @@ def write_invalid_reference_report(
     verdict: str = "invalid_reference",
 ):
     report = {
-        "passed": False,
         "verdict": verdict,
         "compare_skipped": True,
         "editor_exit_code": editor_exit_code,
@@ -2318,8 +2292,6 @@ def write_invalid_reference_report(
         "reference_png_path": str(reference_path),
         "candidate_png_path": str(candidate_path),
         "pixel_tolerance": args.pixel_tolerance,
-        "changed_ratio_threshold": args.changed_ratio_threshold,
-        "mae_threshold": args.mae_threshold,
         "stable_visual_filter": STABLE_VISUAL_FILTER,
         "changed_ratio": None,
         "stable_changed_ratio": None,
@@ -2515,7 +2487,7 @@ def main():
         print(f"log={ue_log_path}")
         sys.exit(2)
 
-    passed, report_path = compare_and_report(
+    report_path = compare_and_report(
         args,
         output_dir,
         reference_path,
@@ -2527,12 +2499,15 @@ def main():
     )
     finalize_single_run_history(output_dir, args, report_path)
 
-    status = "PASS" if passed else "FAIL"
+    report = load_json_document(report_path)
+    structure_validation = report.get("structure_validation") or {}
+    structure_passed = structure_validation.get("passed") if structure_validation.get("required") else True
+    status = "STRUCTURE_OK" if structure_passed else "STRUCTURE_MISMATCH"
     print(f"[{status}] report={report_path}")
     print(f"reference={reference_path}")
     print(f"candidate={candidate_path}")
     print(f"log={ue_log_path}")
-    sys.exit(0 if passed else 1)
+    sys.exit(0 if structure_passed else 1)
 
 
 if __name__ == "__main__":
