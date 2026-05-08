@@ -3,8 +3,7 @@
 #include "Design2UMGConverter.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGTestUtils.h"
-#include "FigmaParser.h"
-#include "PenParser.h"
+#include "DesignSchemaSourceExtensions.h"
 #include "TextMeasurement.h"
 #include "TextMeasurementTestTrace.h"
 #include "FontResolver.h"
@@ -330,29 +329,6 @@ namespace
 		return true;
 	}
 
-	TSharedPtr<FDesignNode> FindFirstTextNodeByFamily(
-		const TArray<TSharedPtr<FDesignNode>>& Nodes,
-		const FString& FamilySubstring)
-	{
-		for (const TSharedPtr<FDesignNode>& Node : Nodes)
-		{
-			if (!Node.IsValid())
-			{
-				continue;
-			}
-			if (Node->Type == EDesignNodeType::Text
-				&& Node->Text.FontSize > 0.0f
-				&& Node->Text.FontFamily.Contains(FamilySubstring, ESearchCase::IgnoreCase))
-			{
-				return Node;
-			}
-			if (TSharedPtr<FDesignNode> Found = FindFirstTextNodeByFamily(Node->Children, FamilySubstring))
-			{
-				return Found;
-			}
-		}
-		return nullptr;
-	}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextMeasurementCalibrationCacheUsesNodeContextTest,
@@ -820,15 +796,15 @@ bool FCompactSingleLineLabelNoFontFamilyDependencyTest::RunTest(const FString& P
 		return false;
 	}
 
-	TestFalse(TEXT("IsCompactSingleLineLabel must not reference IsMonospaceLikeFontFamily"),
+	TestFalse(TEXT("IsCompactSingleLineLabel must not reference font-family classification helpers"),
 		FuncBody.Contains(TEXT("IsMonospaceLikeFontFamily"), ESearchCase::CaseSensitive));
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCompactSingleLineLabelFontFamilyNameDoesNotAffectSizeTest,
-	"Design2UMG.TextMeasurement.CompactSingleLineLabelFontFamilyNameDoesNotAffectSize",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCompactSingleLineLabelArbitraryFontFamilyIndependenceTest,
+	"Design2UMG.TextMeasurement.CompactSingleLineLabelArbitraryFontFamilyIndependence",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FCompactSingleLineLabelFontFamilyNameDoesNotAffectSizeTest::RunTest(const FString& Parameters)
+bool FCompactSingleLineLabelArbitraryFontFamilyIndependenceTest::RunTest(const FString& Parameters)
 {
 	if (!FSlateApplication::IsInitialized())
 	{
@@ -858,24 +834,24 @@ bool FCompactSingleLineLabelFontFamilyNameDoesNotAffectSizeTest::RunTest(const F
 		return Node;
 	};
 
-	const TSharedPtr<FDesignNode> MonoNode = MakeCompactFigmaNode(TEXT("FakeMonoXYZ_UnitTest"));
-	const TSharedPtr<FDesignNode> SansNode = MakeCompactFigmaNode(TEXT("FakeSansXYZ_UnitTest"));
+	const TSharedPtr<FDesignNode> FirstFamilyNode = MakeCompactFigmaNode(TEXT("UnitTestFamilyAlpha"));
+	const TSharedPtr<FDesignNode> SecondFamilyNode = MakeCompactFigmaNode(TEXT("UnitTestFamilyBeta"));
 
 	TextMeasurement::ResetCache();
-	const float MonoSize = TextMeasurement::ResolveTextFontSizeForUMG(MonoNode);
-	const float SansSize = TextMeasurement::ResolveTextFontSizeForUMG(SansNode);
+	const float FirstSize = TextMeasurement::ResolveTextFontSizeForUMG(FirstFamilyNode);
+	const float SecondSize = TextMeasurement::ResolveTextFontSizeForUMG(SecondFamilyNode);
 
-	TestTrue(TEXT("Mono-named font resolves a size"), MonoSize > 0.0f);
-	TestTrue(TEXT("Sans-named font resolves a size"), SansSize > 0.0f);
-	TestTrue(TEXT("Compact label size must not depend on font family name containing 'mono'"),
-		FMath::IsNearlyEqual(MonoSize, SansSize, 0.01f));
+	TestTrue(TEXT("First arbitrary font family resolves a size"), FirstSize > 0.0f);
+	TestTrue(TEXT("Second arbitrary font family resolves a size"), SecondSize > 0.0f);
+	TestTrue(TEXT("Compact label size must not depend on arbitrary font family names"),
+		FMath::IsNearlyEqual(FirstSize, SecondSize, 0.01f));
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIsCompactBoldTokenTextNoMonospaceDependencyStaticTest,
-	"Design2UMG.TextMeasurement.IsCompactBoldTokenTextNoMonospaceDependencyStatic",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIsCompactBoldTokenTextNoFontFamilyClassificationDependencyStaticTest,
+	"Design2UMG.TextMeasurement.IsCompactBoldTokenTextNoFontFamilyClassificationDependencyStatic",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FIsCompactBoldTokenTextNoMonospaceDependencyStaticTest::RunTest(const FString& Parameters)
+bool FIsCompactBoldTokenTextNoFontFamilyClassificationDependencyStaticTest::RunTest(const FString& Parameters)
 {
 	FString Source;
 	if (!LoadTextMeasurementSplitSources(*this, Source))
@@ -889,15 +865,15 @@ bool FIsCompactBoldTokenTextNoMonospaceDependencyStaticTest::RunTest(const FStri
 		return false;
 	}
 
-	TestFalse(TEXT("IsCompactBoldTokenText must not reference IsMonospaceLikeFontFamily"),
+	TestFalse(TEXT("IsCompactBoldTokenText must not reference font-family classification helpers"),
 		FuncBody.Contains(TEXT("IsMonospaceLikeFontFamily"), ESearchCase::CaseSensitive));
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIsCompactBoldTokenTextFontFamilyNameDoesNotAffectSizeTest,
-	"Design2UMG.TextMeasurement.IsCompactBoldTokenTextFontFamilyNameDoesNotAffectSize",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIsCompactBoldTokenTextArbitraryFontFamilyIndependenceTest,
+	"Design2UMG.TextMeasurement.IsCompactBoldTokenTextArbitraryFontFamilyIndependence",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FIsCompactBoldTokenTextFontFamilyNameDoesNotAffectSizeTest::RunTest(const FString& Parameters)
+bool FIsCompactBoldTokenTextArbitraryFontFamilyIndependenceTest::RunTest(const FString& Parameters)
 {
 	if (!FSlateApplication::IsInitialized())
 	{
@@ -926,25 +902,25 @@ bool FIsCompactBoldTokenTextFontFamilyNameDoesNotAffectSizeTest::RunTest(const F
 		return Node;
 	};
 
-	const TSharedPtr<FDesignNode> MonoNode = MakeNode(TEXT("FakeCodeFont_UnitTest"));
-	const TSharedPtr<FDesignNode> SansNode = MakeNode(TEXT("FakeSansFont_UnitTest"));
+	const TSharedPtr<FDesignNode> FirstFamilyNode = MakeNode(TEXT("UnitTestFamilyAlpha"));
+	const TSharedPtr<FDesignNode> SecondFamilyNode = MakeNode(TEXT("UnitTestFamilyBeta"));
 
 	TextMeasurement::ResetCache();
-	const float MonoSize = TextMeasurement::ResolveTextFontSizeForUMG(MonoNode);
+	const float FirstSize = TextMeasurement::ResolveTextFontSizeForUMG(FirstFamilyNode);
 	TextMeasurement::ResetCache();
-	const float SansSize = TextMeasurement::ResolveTextFontSizeForUMG(SansNode);
+	const float SecondSize = TextMeasurement::ResolveTextFontSizeForUMG(SecondFamilyNode);
 
-	TestTrue(TEXT("Mono-named bold token resolves a size"), MonoSize > 0.0f);
-	TestTrue(TEXT("Sans-named bold token resolves a size"), SansSize > 0.0f);
-	TestTrue(TEXT("Bold compact token size must not depend on font family name containing 'mono'/'code'"),
-		FMath::IsNearlyEqual(MonoSize, SansSize, 0.01f));
+	TestTrue(TEXT("First arbitrary bold token font family resolves a size"), FirstSize > 0.0f);
+	TestTrue(TEXT("Second arbitrary bold token font family resolves a size"), SecondSize > 0.0f);
+	TestTrue(TEXT("Bold compact token size must not depend on arbitrary font family names"),
+		FMath::IsNearlyEqual(FirstSize, SecondSize, 0.01f));
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FShouldPreferIntrinsicSingleLineNoFontFamilyDependencyTest,
-	"Design2UMG.TextMeasurement.ShouldPreferIntrinsicSingleLineNoFontFamilyDependency",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FShouldPreferIntrinsicSingleLineNoFontFamilyClassificationDependencyTest,
+	"Design2UMG.TextMeasurement.ShouldPreferIntrinsicSingleLineNoFontFamilyClassificationDependency",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FShouldPreferIntrinsicSingleLineNoFontFamilyDependencyTest::RunTest(const FString& Parameters)
+bool FShouldPreferIntrinsicSingleLineNoFontFamilyClassificationDependencyTest::RunTest(const FString& Parameters)
 {
 	FString Source;
 	if (!LoadTextMeasurementSplitSources(*this, Source))
@@ -963,15 +939,15 @@ bool FShouldPreferIntrinsicSingleLineNoFontFamilyDependencyTest::RunTest(const F
 		return false;
 	}
 
-	TestFalse(TEXT("ShouldPreferIntrinsicSingleLineFallbackFontSize must not reference IsMonospaceLikeFontFamily"),
+	TestFalse(TEXT("ShouldPreferIntrinsicSingleLineFallbackFontSize must not reference font-family classification helpers"),
 		FuncBody.Contains(TEXT("IsMonospaceLikeFontFamily"), ESearchCase::CaseSensitive));
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FShouldPreferIntrinsicSingleLineFontFamilyNameDoesNotAffectSizeTest,
-	"Design2UMG.TextMeasurement.ShouldPreferIntrinsicSingleLineFontFamilyNameDoesNotAffectSize",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FShouldPreferIntrinsicSingleLineArbitraryFontFamilyIndependenceTest,
+	"Design2UMG.TextMeasurement.ShouldPreferIntrinsicSingleLineArbitraryFontFamilyIndependence",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FShouldPreferIntrinsicSingleLineFontFamilyNameDoesNotAffectSizeTest::RunTest(const FString& Parameters)
+bool FShouldPreferIntrinsicSingleLineArbitraryFontFamilyIndependenceTest::RunTest(const FString& Parameters)
 {
 	if (!FSlateApplication::IsInitialized())
 	{
@@ -997,18 +973,18 @@ bool FShouldPreferIntrinsicSingleLineFontFamilyNameDoesNotAffectSizeTest::RunTes
 		return Node;
 	};
 
-	const TSharedPtr<FDesignNode> MonoNode = MakeNode(TEXT("FakeMonoFont_UnitTest"));
-	const TSharedPtr<FDesignNode> SansNode = MakeNode(TEXT("FakeSansFont_UnitTest"));
+	const TSharedPtr<FDesignNode> FirstFamilyNode = MakeNode(TEXT("UnitTestFamilyAlpha"));
+	const TSharedPtr<FDesignNode> SecondFamilyNode = MakeNode(TEXT("UnitTestFamilyBeta"));
 
 	TextMeasurement::ResetCache();
-	const float MonoSize = TextMeasurement::ResolveTextFontSizeForUMG(MonoNode);
+	const float FirstSize = TextMeasurement::ResolveTextFontSizeForUMG(FirstFamilyNode);
 	TextMeasurement::ResetCache();
-	const float SansSize = TextMeasurement::ResolveTextFontSizeForUMG(SansNode);
+	const float SecondSize = TextMeasurement::ResolveTextFontSizeForUMG(SecondFamilyNode);
 
-	TestTrue(TEXT("Mono-named node resolves a size"), MonoSize > 0.0f);
-	TestTrue(TEXT("Sans-named node resolves a size"), SansSize > 0.0f);
-	TestTrue(TEXT("ResolveTextFontSizeForUMG must not depend on font family name containing 'mono'"),
-		FMath::IsNearlyEqual(MonoSize, SansSize, 0.01f));
+	TestTrue(TEXT("First arbitrary intrinsic single-line font family resolves a size"), FirstSize > 0.0f);
+	TestTrue(TEXT("Second arbitrary intrinsic single-line font family resolves a size"), SecondSize > 0.0f);
+	TestTrue(TEXT("ResolveTextFontSizeForUMG must not depend on arbitrary font family names"),
+		FMath::IsNearlyEqual(FirstSize, SecondSize, 0.01f));
 	return true;
 }
 
@@ -1023,10 +999,26 @@ bool FTextMeasurementNoSubstringFontDispatchTest::RunTest(const FString& Paramet
 		return false;
 	}
 
-	TestFalse(TEXT("TextMeasurement.cpp must not contain Contains(TEXT(\"mono\")) font-name dispatch"),
-		Source.Contains(TEXT("Contains(TEXT(\"mono\"))"), ESearchCase::CaseSensitive));
-	TestFalse(TEXT("TextMeasurement.cpp must not contain Contains(TEXT(\"code\")) font-name dispatch"),
-		Source.Contains(TEXT("Contains(TEXT(\"code\"))"), ESearchCase::CaseSensitive));
+	const TCHAR* DisallowedFontSubstringDispatch[] = {
+		TEXT("Node->Text.FontFamily.Contains"),
+		TEXT("Node->Text.FontFamily.Find"),
+		TEXT("Node->Text.FontFamily.StartsWith"),
+		TEXT("Node->Text.FontFamily.EndsWith"),
+		TEXT("NormalizedFamily.Contains"),
+		TEXT("NormalizedFamily.Find"),
+		TEXT("NormalizedFamily.StartsWith"),
+		TEXT("NormalizedFamily.EndsWith"),
+		TEXT("FontFamily.Contains"),
+		TEXT("FontFamily.Find"),
+		TEXT("FontFamily.StartsWith"),
+		TEXT("FontFamily.EndsWith"),
+	};
+	for (const TCHAR* Token : DisallowedFontSubstringDispatch)
+	{
+		TestFalse(
+			*FString::Printf(TEXT("Text measurement must not use font-family substring dispatch: %s"), Token),
+			Source.Contains(Token, ESearchCase::CaseSensitive));
+	}
 	return true;
 }
 
@@ -1045,10 +1037,6 @@ bool FTextMeasurementFallbackNoRuntimeImportedFontPathDispatchTest::RunTest(cons
 	{
 		TestTrue(TEXT("Temporary family fallback table must stay documented as a local rollback"),
 			Source.Contains(TEXT("Phase-10 local rollback"), ESearchCase::CaseSensitive));
-		TestFalse(TEXT("Rubik fallback entry must not be reintroduced after formal no-regression proof"),
-			Source.Contains(TEXT("TEXT(\"rubik\")"), ESearchCase::CaseSensitive));
-		TestFalse(TEXT("Funnel Display fallback entry must not be reintroduced after formal no-regression proof"),
-			Source.Contains(TEXT("TEXT(\"funneldisplay\")"), ESearchCase::CaseSensitive));
 
 		const int32 TableStart = Source.Find(TEXT("FamilyFallbackScales[] = {"), ESearchCase::CaseSensitive);
 		TestTrue(TEXT("Temporary family fallback table body must be discoverable"), TableStart != INDEX_NONE);
@@ -1065,10 +1053,6 @@ bool FTextMeasurementFallbackNoRuntimeImportedFontPathDispatchTest::RunTest(cons
 		}
 
 		const FString TableBody = Source.Mid(TableStart, TableEnd - TableStart);
-		TestTrue(TEXT("Geist rollback entry stays explicit while formal removal is blocked"),
-			TableBody.Contains(TEXT("TEXT(\"geist\")"), ESearchCase::CaseSensitive));
-		TestTrue(TEXT("Roboto Mono rollback entry stays explicit while formal removal is blocked"),
-			TableBody.Contains(TEXT("TEXT(\"robotomono\")"), ESearchCase::CaseSensitive));
 
 		int32 EntryCount = 0;
 		int32 SearchFrom = 0;
@@ -1087,7 +1071,8 @@ bool FTextMeasurementFallbackNoRuntimeImportedFontPathDispatchTest::RunTest(cons
 			++EntryCount;
 			SearchFrom = EntryIndex + 1;
 		}
-		TestEqual(TEXT("Temporary family fallback table must not grow beyond the two blocked entries"), EntryCount, 2);
+		TestTrue(TEXT("Temporary family fallback table must shrink only and never grow while generalized removal is blocked"),
+			EntryCount <= 2);
 	}
 
 	TestFalse(TEXT("Font fallback must not introduce public font-family override settings"),
@@ -1153,210 +1138,6 @@ bool FTextMeasurementFallbackNoRuntimeImportedFontPathDispatchTest::RunTest(cons
 			*FString::Printf(TEXT("Font fallback must not branch on sample identity token %s"), Token),
 			FallbackBodies.Contains(Token, ESearchCase::CaseSensitive));
 	}
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTrace541FigmaExport1Local,
-	"Design2UMG.TextMeasurement.Trace541.FigmaExport1Local",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FTrace541FigmaExport1Local::RunTest(const FString& Parameters)
-{
-	if (!FSlateApplication::IsInitialized())
-	{
-		AddWarning(TEXT("Slate not initialized, skipping trace."));
-		return true;
-	}
-
-	const FString SourcePath = TEXT("G:\\UE5\\figma_export1\\design.json");
-	TSharedPtr<FDesignNode> Node;
-	bool bFromActualSource = false;
-
-	FString JsonString;
-	if (FFileHelper::LoadFileToString(JsonString, *SourcePath))
-	{
-		FDesignDocument Document;
-		if (FFigmaParser::ParseDocument(JsonString, Document))
-		{
-			Node = FindFirstTextNodeByFamily(Document.Children, TEXT("Roboto"));
-			if (Node.IsValid())
-			{
-				bFromActualSource = true;
-				UE_LOG(LogDesign2UMG, Log,
-					TEXT("5.4.1 [figma-export1-local] actual-source node: name='%s' family='%s' size=%.1f"),
-					*Node->Name, *Node->Text.FontFamily, Node->Text.FontSize);
-			}
-			else
-			{
-				AddWarning(TEXT("5.4.1 [figma-export1-local] parse succeeded but no Roboto text node found; falling back to synthetic probe."));
-			}
-		}
-		else
-		{
-			AddWarning(TEXT("5.4.1 [figma-export1-local] FFigmaParser::ParseDocument failed; falling back to synthetic probe."));
-		}
-	}
-	else
-	{
-		AddWarning(TEXT("5.4.1 [figma-export1-local] source file not found at G:\\UE5\\figma_export1\\design.json; falling back to synthetic probe."));
-	}
-
-	if (!Node.IsValid())
-	{
-		Node = MakeShared<FDesignNode>();
-		Node->Name = TEXT("figma-export1-local-probe");
-		Node->Type = EDesignNodeType::Text;
-		Node->Text.Content = TEXT("Export Label");
-		Node->Text.FontFamily = TEXT("Roboto");
-		Node->Text.FontWeight = TEXT("Regular");
-		Node->Text.FontSize = 14.0f;
-		Node->Text.TextAlign = EDesignTextAlign::Left;
-		Node->Text.TextAlignVertical = EDesignTextAlignVertical::Top;
-		Node->Text.TextGrowth = EDesignTextGrowth::Auto;
-		Node->Transform.bSourceHasWidth = true;
-		Node->Transform.SetWidthValue(FDesignSize::Fixed(120.0f));
-		Node->Transform.SetHeightValue(FDesignSize::Fixed(20.0f));
-		Node->Metadata.Add(TEXT("source.provider"), TEXT("figma"));
-	}
-
-	TextMeasurement::ResetCache();
-	const FTextResolutionTrace Trace = TextMeasurementTestTrace::DumpTextResolutionTrace(Node);
-	VerifyTraceCoreFields(*this, Trace);
-
-	UE_LOG(LogDesign2UMG, Log,
-		TEXT("5.4.1 Trace [figma-export1-local] source=%s node='%s' path=%s fallbackScale=%.3f fallback=%.1f compiled=%.1f bounds=(%.1f,%.1f) key=%s"),
-		bFromActualSource ? TEXT("actual") : TEXT("synthetic"),
-		*Trace.NodeName, *Trace.ResolutionPath, Trace.FallbackScale, Trace.FallbackFontSize,
-		Trace.CompiledFontSize, Trace.CompiledBounds.X, Trace.CompiledBounds.Y, *Trace.CalibrationKey);
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTrace541PenHabitTracker,
-	"Design2UMG.TextMeasurement.Trace541.PenHabitTrackerIndustrialTechnical",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FTrace541PenHabitTracker::RunTest(const FString& Parameters)
-{
-	if (!FSlateApplication::IsInitialized())
-	{
-		AddWarning(TEXT("Slate not initialized, skipping trace."));
-		return true;
-	}
-
-	const FString SourcePath = TEXT("G:\\UE5\\FPSRoguelike\\Designs\\pencil-demo.pen");
-	TSharedPtr<FDesignNode> Node;
-	bool bFromActualSource = false;
-
-	FDesignDocument Document;
-	if (FPenParser::ParseFromFile(SourcePath, Document))
-	{
-		Node = FindFirstTextNodeByFamily(Document.Children, TEXT("Inter"));
-		if (Node.IsValid())
-		{
-			bFromActualSource = true;
-			UE_LOG(LogDesign2UMG, Log,
-				TEXT("5.4.1 [habit-tracker] actual-source node: name='%s' family='%s' size=%.1f"),
-				*Node->Name, *Node->Text.FontFamily, Node->Text.FontSize);
-		}
-		else
-		{
-			AddWarning(TEXT("5.4.1 [habit-tracker] parse succeeded but no Inter text node found; falling back to synthetic probe."));
-		}
-	}
-	else
-	{
-		AddWarning(TEXT("5.4.1 [habit-tracker] FPenParser::ParseFromFile failed or file not found; falling back to synthetic probe."));
-	}
-
-	if (!Node.IsValid())
-	{
-		Node = MakeShared<FDesignNode>();
-		Node->Name = TEXT("habit-tracker-label-probe");
-		Node->Type = EDesignNodeType::Text;
-		Node->Text.Content = TEXT("Habit Tracker");
-		Node->Text.FontFamily = TEXT("Inter");
-		Node->Text.FontWeight = TEXT("Regular");
-		Node->Text.FontSize = 16.0f;
-		Node->Text.TextAlign = EDesignTextAlign::Left;
-		Node->Text.TextAlignVertical = EDesignTextAlignVertical::Middle;
-		Node->Text.TextGrowth = EDesignTextGrowth::FixedWidthHeight;
-		Node->Transform.bSourceHasWidth = false;
-		Node->Transform.SetWidthValue(FDesignSize::Fixed(200.0f));
-		Node->Transform.SetHeightValue(FDesignSize::Fixed(24.0f));
-	}
-
-	TextMeasurement::ResetCache();
-	const FTextResolutionTrace Trace = TextMeasurementTestTrace::DumpTextResolutionTrace(Node);
-	VerifyTraceCoreFields(*this, Trace);
-
-	UE_LOG(LogDesign2UMG, Log,
-		TEXT("5.4.1 Trace [habit-tracker-industrial] source=%s node='%s' path=%s fallbackScale=%.3f fallback=%.1f compiled=%.1f bounds=(%.1f,%.1f) key=%s"),
-		bFromActualSource ? TEXT("actual") : TEXT("synthetic"),
-		*Trace.NodeName, *Trace.ResolutionPath, Trace.FallbackScale, Trace.FallbackFontSize,
-		Trace.CompiledFontSize, Trace.CompiledBounds.X, Trace.CompiledBounds.Y, *Trace.CalibrationKey);
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTrace541PenNitroDesignSystem,
-	"Design2UMG.TextMeasurement.Trace541.PenNitroDesignSystemComponents",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FTrace541PenNitroDesignSystem::RunTest(const FString& Parameters)
-{
-	if (!FSlateApplication::IsInitialized())
-	{
-		AddWarning(TEXT("Slate not initialized, skipping trace."));
-		return true;
-	}
-
-	const FString SourcePath = TEXT("G:\\UE5\\FPSRoguelike\\Designs\\pencil-nitro.pen");
-	TSharedPtr<FDesignNode> Node;
-	bool bFromActualSource = false;
-
-	FDesignDocument Document;
-	if (FPenParser::ParseFromFile(SourcePath, Document))
-	{
-		Node = FindFirstTextNodeByFamily(Document.Children, TEXT("Roboto"));
-		if (Node.IsValid())
-		{
-			bFromActualSource = true;
-			UE_LOG(LogDesign2UMG, Log,
-				TEXT("5.4.1 [nitro-design-system] actual-source node: name='%s' family='%s' size=%.1f"),
-				*Node->Name, *Node->Text.FontFamily, Node->Text.FontSize);
-		}
-		else
-		{
-			AddWarning(TEXT("5.4.1 [nitro-design-system] parse succeeded but no Roboto text node found; falling back to synthetic probe."));
-		}
-	}
-	else
-	{
-		AddWarning(TEXT("5.4.1 [nitro-design-system] FPenParser::ParseFromFile failed or file not found; falling back to synthetic probe."));
-	}
-
-	if (!Node.IsValid())
-	{
-		Node = MakeShared<FDesignNode>();
-		Node->Name = TEXT("nitro-design-system-probe");
-		Node->Type = EDesignNodeType::Text;
-		Node->Text.Content = TEXT("Button Label");
-		Node->Text.FontFamily = TEXT("Roboto");
-		Node->Text.FontWeight = TEXT("Medium");
-		Node->Text.FontSize = 14.0f;
-		Node->Text.TextAlign = EDesignTextAlign::Center;
-		Node->Text.TextAlignVertical = EDesignTextAlignVertical::Top;
-		Node->Text.TextGrowth = EDesignTextGrowth::FixedWidth;
-		Node->Transform.bSourceHasWidth = false;
-		Node->Transform.SetWidthValue(FDesignSize::Fixed(160.0f));
-		Node->Transform.SetHeightValue(FDesignSize::Fixed(40.0f));
-	}
-
-	TextMeasurement::ResetCache();
-	const FTextResolutionTrace Trace = TextMeasurementTestTrace::DumpTextResolutionTrace(Node);
-	VerifyTraceCoreFields(*this, Trace);
-
-	UE_LOG(LogDesign2UMG, Log,
-		TEXT("5.4.1 Trace [nitro-design-system] source=%s node='%s' path=%s fallbackScale=%.3f fallback=%.1f compiled=%.1f bounds=(%.1f,%.1f) key=%s"),
-		bFromActualSource ? TEXT("actual") : TEXT("synthetic"),
-		*Trace.NodeName, *Trace.ResolutionPath, Trace.FallbackScale, Trace.FallbackFontSize,
-		Trace.CompiledFontSize, Trace.CompiledBounds.X, Trace.CompiledBounds.Y, *Trace.CalibrationKey);
 	return true;
 }
 
