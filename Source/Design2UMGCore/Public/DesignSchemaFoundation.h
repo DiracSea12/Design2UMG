@@ -121,7 +121,7 @@ struct FDesignGradientStop
 	UPROPERTY()
 	FString Color;
 
-	/** Original variable reference name, resolved again during theme switching. */
+	/** Transient source-extension state: original variable reference resolved again during theme switching. */
 	FString SourceVar;
 
 	UPROPERTY()
@@ -196,6 +196,7 @@ struct FDesignMeshGradientPoint
 	UPROPERTY()
 	FString Color;
 
+	/** Transient source-extension state: original variable reference resolved again during theme switching. */
 	FString SourceVar;
 
 	UPROPERTY()
@@ -324,7 +325,7 @@ struct FDesignFill
 	UPROPERTY()
 	FString SolidColor;
 
-	/** Original variable reference name (for example "$--background"), resolved again during theme switching. */
+	/** Transient source-extension state: original variable reference resolved again during theme switching. */
 	FString SourceVar;
 
 	UPROPERTY()
@@ -342,8 +343,14 @@ struct FDesignFill
 	float Opacity = 1.0f;
 	UPROPERTY()
 	FString BlendMode;
-	bool bExplicitClear = false;  // Explicit clear via fill:[]
+
+	/** Transient parser/runtime state: source declared an explicit empty fill list. */
+	bool bExplicitClear = false;
+
+	/** Transient parser/runtime state: this fill came from source mesh-gradient data. */
 	bool bFromMeshGradient = false;
+
+	/** Transient source-extension state: compact original mesh-gradient payload for tooling/debug handoff. */
 	FString MeshGradientRaw;
 
 	bool IsNone() const { return Type == EDesignFillType::None; }

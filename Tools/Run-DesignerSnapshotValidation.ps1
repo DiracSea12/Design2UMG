@@ -1,14 +1,79 @@
 ﻿param(
-    [string]$ProjectPath = "G:\UE5\FPSRoguelike\FPSRoguelike.uproject",
-    [string]$EditorPath = "G:\UE5\UnrealEngine\Engine\Binaries\Win64\UnrealEditor.exe",
-    [string]$LogPath = "G:\UE5\FPSRoguelike\Saved\Logs\FPSRoguelike.log",
-    [string]$DesignerPngPath = "G:\UE5\FPSRoguelike\Saved\Design2UMG\WBP_lunaris__design_system_components.designer.png",
+    [string]$ProjectPath = "",
+    [string]$EditorPath = "",
+    [string]$LogPath = "",
+    [string]$DesignerPngPath = "",
     [string]$AssetObjectPath = "/Game/Design2UMG/PenConvert_Output/WBP_lunaris__design_system_components.WBP_lunaris__design_system_components",
-    [string]$ResultJsonPath = "G:\UE5\FPSRoguelike\Saved\Design2UMG\WBP_lunaris__design_system_components.designer.result.json",
-    [switch]$KeepExistingEditor
+    [string]$ResultJsonPath = "",
+    [switch]$KeepExistingEditor,
+    [switch]$ValidateOnly
 )
 
 $ErrorActionPreference = "Stop"
+
+function Resolve-RequiredProjectPath {
+    param([string]$Value)
+    $candidate = $Value
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+        $candidate = $env:DESIGN2UMG_RUNTIME_PROJECT
+    }
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+        throw "Runtime project path is required. Pass -ProjectPath or set DESIGN2UMG_RUNTIME_PROJECT. HostProject fallback is not supported."
+    }
+    $resolved = [System.IO.Path]::GetFullPath($candidate)
+    $lower = $resolved.ToLowerInvariant()
+    $hostProjectFileName = ("hostproject" + ".uproject")
+    $generatedProjectMarker = ("design2umg" + "_host_")
+    if ($lower.EndsWith($hostProjectFileName) -or $lower.Contains("hostproject") -or $lower.Contains($generatedProjectMarker)) {
+        throw "Refusing temporary or generated runtime project: $resolved"
+    }
+    if (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
+        throw "Runtime project not found: $resolved"
+    }
+    return $resolved
+}
+
+function Resolve-RequiredEditorPath {
+    param([string]$Value)
+    $candidate = $Value
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+        $candidate = $env:DESIGN2UMG_UNREAL_EDITOR
+    }
+    if ([string]::IsNullOrWhiteSpace($candidate) -and -not [string]::IsNullOrWhiteSpace($env:UE_ROOT)) {
+        $candidate = Join-Path $env:UE_ROOT "Engine\Binaries\Win64\UnrealEditor.exe"
+    }
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+        throw "UnrealEditor path is required. Pass -EditorPath, set DESIGN2UMG_UNREAL_EDITOR, or set UE_ROOT."
+    }
+    $resolved = [System.IO.Path]::GetFullPath($candidate)
+    if (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
+        throw "UnrealEditor not found: $resolved"
+    }
+    return $resolved
+}
+
+$ProjectPath = Resolve-RequiredProjectPath $ProjectPath
+$EditorPath = Resolve-RequiredEditorPath $EditorPath
+$ProjectRoot = Split-Path -Parent $ProjectPath
+if ([string]::IsNullOrWhiteSpace($LogPath)) {
+    $LogPath = Join-Path $ProjectRoot "Saved\Logs\$([System.IO.Path]::GetFileNameWithoutExtension($ProjectPath)).log"
+}
+if ([string]::IsNullOrWhiteSpace($DesignerPngPath)) {
+    $DesignerPngPath = Join-Path $ProjectRoot "Saved\Design2UMG\WBP_lunaris__design_system_components.designer.png"
+}
+if ([string]::IsNullOrWhiteSpace($ResultJsonPath)) {
+    $ResultJsonPath = Join-Path $ProjectRoot "Saved\Design2UMG\WBP_lunaris__design_system_components.designer.result.json"
+}
+
+if ($ValidateOnly) {
+    Write-Host "[OK] Designer snapshot validation paths resolved."
+    Write-Host "ProjectPath      : $ProjectPath"
+    Write-Host "EditorPath       : $EditorPath"
+    Write-Host "LogPath          : $LogPath"
+    Write-Host "DesignerPngPath  : $DesignerPngPath"
+    Write-Host "ResultJsonPath   : $ResultJsonPath"
+    exit 0
+}
 
 if (-not $KeepExistingEditor) {
     Get-Process UnrealEditor, UnrealEditor-Cmd -ErrorAction SilentlyContinue | Stop-Process -Force

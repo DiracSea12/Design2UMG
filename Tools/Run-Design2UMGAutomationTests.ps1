@@ -1,13 +1,69 @@
-param(
-    [string]$ProjectPath = "G:\UE5\FPSRoguelike\FPSRoguelike.uproject",
+﻿param(
+    [string]$ProjectPath = "",
     [string]$StartupMap = "",
-    [string]$EditorPath = "G:\UE5\UnrealEngine\Engine\Binaries\Win64\UnrealEditor.exe",
-    [string]$LogPath = "G:\UE5\UnrealEngine\Engine\Plugins\Marketplace\Design2UMG\Saved\Logs\Design2UMG-Automation.log",
+    [string]$EditorPath = "",
+    [string]$LogPath = "",
     [string]$Tests = "Design2UMG",
-    [switch]$KeepExistingEditor
+    [switch]$KeepExistingEditor,
+    [switch]$ValidateOnly
 )
 
 $ErrorActionPreference = "Stop"
+
+function Resolve-RequiredProjectPath {
+    param([string]$Value)
+    $candidate = $Value
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+        $candidate = $env:DESIGN2UMG_RUNTIME_PROJECT
+    }
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+        throw "Runtime project path is required. Pass -ProjectPath or set DESIGN2UMG_RUNTIME_PROJECT. HostProject fallback is not supported."
+    }
+    $resolved = [System.IO.Path]::GetFullPath($candidate)
+    $lower = $resolved.ToLowerInvariant()
+    $hostProjectFileName = ("hostproject" + ".uproject")
+    $generatedProjectMarker = ("design2umg" + "_host_")
+    if ($lower.EndsWith($hostProjectFileName) -or $lower.Contains("hostproject") -or $lower.Contains($generatedProjectMarker)) {
+        throw "Refusing temporary or generated runtime project: $resolved"
+    }
+    if (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
+        throw "Runtime project not found: $resolved"
+    }
+    return $resolved
+}
+
+function Resolve-RequiredEditorPath {
+    param([string]$Value)
+    $candidate = $Value
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+        $candidate = $env:DESIGN2UMG_UNREAL_EDITOR
+    }
+    if ([string]::IsNullOrWhiteSpace($candidate) -and -not [string]::IsNullOrWhiteSpace($env:UE_ROOT)) {
+        $candidate = Join-Path $env:UE_ROOT "Engine\Binaries\Win64\UnrealEditor.exe"
+    }
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+        throw "UnrealEditor path is required. Pass -EditorPath, set DESIGN2UMG_UNREAL_EDITOR, or set UE_ROOT."
+    }
+    $resolved = [System.IO.Path]::GetFullPath($candidate)
+    if (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
+        throw "UnrealEditor not found: $resolved"
+    }
+    return $resolved
+}
+
+$ProjectPath = Resolve-RequiredProjectPath $ProjectPath
+$EditorPath = Resolve-RequiredEditorPath $EditorPath
+if ([string]::IsNullOrWhiteSpace($LogPath)) {
+    $LogPath = Join-Path (Split-Path -Parent $PSScriptRoot) "Saved\Logs\Design2UMG-Automation.log"
+}
+
+if ($ValidateOnly) {
+    Write-Host "[OK] Design2UMG automation test paths resolved."
+    Write-Host "ProjectPath : $ProjectPath"
+    Write-Host "EditorPath  : $EditorPath"
+    Write-Host "LogPath     : $LogPath"
+    exit 0
+}
 
 if (-not $KeepExistingEditor) {
     Get-Process UnrealEditor, UnrealEditor-Cmd -ErrorAction SilentlyContinue | Stop-Process -Force

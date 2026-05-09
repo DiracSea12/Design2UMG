@@ -37,6 +37,44 @@ def default_pinned_baseline_path() -> Path:
     return Path(__file__).resolve().with_name(PINNED_BASELINE_FILENAME)
 
 
+def resolve_pinned_report_path(report_path: str, manifest_path: Path) -> Path:
+    candidate = Path(report_path)
+    if candidate.is_absolute():
+        return candidate
+
+    manifest_dir = manifest_path.resolve().parent
+    plugin_root = manifest_dir.parent
+    for base in (plugin_root, manifest_dir):
+        resolved = (base / candidate).resolve()
+        if resolved.is_file():
+            return resolved
+
+    return (plugin_root / candidate).resolve()
+
+
+def iter_pinned_case_report_paths(case: dict, manifest_path: Path) -> list[Path]:
+    report_paths: list[Path] = []
+    seen: set[str] = set()
+
+    def add_report_path(raw_path: str) -> None:
+        if not raw_path:
+            return
+        resolved = resolve_pinned_report_path(raw_path, manifest_path)
+        normalized = str(resolved)
+        if normalized not in seen:
+            seen.add(normalized)
+            report_paths.append(resolved)
+
+    add_report_path(case.get("report_path", ""))
+    metric_sources = case.get("metric_sources") or {}
+    if isinstance(metric_sources, dict):
+        for source in metric_sources.values():
+            if isinstance(source, dict):
+                add_report_path(source.get("report_path", ""))
+
+    return report_paths
+
+
 def resolve_admissible_best_manifest(automation_root: Path) -> tuple[Path, dict, str]:
     output_path = automation_root / "_admissible_best_latest.json"
     pinned_path = default_pinned_baseline_path()
@@ -45,15 +83,22 @@ def resolve_admissible_best_manifest(automation_root: Path) -> tuple[Path, dict,
         pinned_cases = pinned_manifest.get("cases") or {}
         skipped_by_reason: dict[str, int] = {}
         for case in pinned_cases.values():
-            rule_status = render_rule.evaluate_report_render_size_rule(Path(case.get("report_path", "")))
-            if not rule_status.get("compatible"):
-                reason = rule_status.get("reason", "render_size_rule_incompatible")
-                skipped_by_reason[reason] = skipped_by_reason.get(reason, 0) + 1
-                continue
+            case_skip_reasons: set[str] = set()
+            report_paths = iter_pinned_case_report_paths(case, pinned_path)
+            if not report_paths:
+                case_skip_reasons.add("report_missing")
 
-            pipeline_rule_status = render_rule.evaluate_report_pipeline_determinism_rule(Path(case.get("report_path", "")))
-            if not pipeline_rule_status.get("compatible"):
-                reason = pipeline_rule_status.get("reason", "pipeline_determinism_rule_incompatible")
+            for report_path in report_paths:
+                rule_status = render_rule.evaluate_report_render_size_rule(report_path)
+                if not rule_status.get("compatible"):
+                    case_skip_reasons.add(rule_status.get("reason", "render_size_rule_incompatible"))
+                    continue
+
+                pipeline_rule_status = render_rule.evaluate_report_pipeline_determinism_rule(report_path)
+                if not pipeline_rule_status.get("compatible"):
+                    case_skip_reasons.add(pipeline_rule_status.get("reason", "pipeline_determinism_rule_incompatible"))
+
+            for reason in case_skip_reasons:
                 skipped_by_reason[reason] = skipped_by_reason.get(reason, 0) + 1
 
         if not skipped_by_reason:

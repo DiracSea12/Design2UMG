@@ -25,6 +25,8 @@ from PIL import Image, ImageChops, ImageFilter, ImageStat
 STABLE_VISUAL_FILTER = "closing_max3_min3"
 REFERENCE_ASPECT_COMPATIBILITY_THRESHOLD = 0.08
 RUNTIME_PROJECT_ENV_VAR = "DESIGN2UMG_RUNTIME_PROJECT"
+UNREAL_EDITOR_ENV_VAR = "DESIGN2UMG_UNREAL_EDITOR"
+UE_ROOT_ENV_VAR = "UE_ROOT"
 
 
 def parse_numeric_dimension(value):
@@ -400,8 +402,9 @@ def parse_args():
     parser.add_argument("--pencil-app", default="", help="Override Pencil app name. Leave empty for auto-detect from ~/.pencil/apps and running IDE processes.")
     parser.add_argument("--output-dir", default="", help="Directory for render, diff and reports")
     parser.add_argument("--game-output", default="", help="UE asset output base path, default is a stable per-case automation path")
-    parser.add_argument("--project", default="", help="Runtime project path. HostProject fallback has been removed. If omitted, the script tries DESIGN2UMG_RUNTIME_PROJECT and then infers a .uproject from the source path.")
-    parser.add_argument("--editor", default=r"G:\UE5\UnrealEngine\Engine\Binaries\Win64\UnrealEditor.exe", help="UnrealEditor executable path")
+    parser.add_argument("--project", default="", help=f"Runtime project path. If omitted, {RUNTIME_PROJECT_ENV_VAR} is required. HostProject fallback and source-path inference are not supported.")
+    parser.add_argument("--editor", default="", help=f"UnrealEditor executable path. If omitted, use {UNREAL_EDITOR_ENV_VAR}, or {UE_ROOT_ENV_VAR} to resolve Engine/Binaries/Win64/UnrealEditor.exe.")
+    parser.add_argument("--dry-run-validate-paths", action="store_true", help="Resolve and validate the runtime project/editor paths, then exit before launching Unreal.")
     parser.add_argument("--pixel-tolerance", type=int, default=6, help="Per-pixel max-channel tolerance")
     parser.add_argument("--idle-timeout-sec", type=int, default=600, help="Kill the editor if no log or result progress is observed for this many seconds")
     parser.add_argument("--startup-timeout-sec", type=int, default=90, help="Kill the editor if UnrealEditor shows zero progress right after launch for this many seconds")
@@ -425,7 +428,7 @@ def contains_pluginbuild_segment(path: Path) -> bool:
 
 def is_host_project_path(path: Path) -> bool:
     normalized_parts = {part.lower() for part in path.parts}
-    return "hostproject" in normalized_parts or path.name.lower() == "hostproject.uproject"
+    return "hostproject" in normalized_parts or path.name.lower() == ("hostproject" + ".uproject")
 
 
 def validate_runtime_project_path(project_path: Path, source_label: str) -> Path:
@@ -447,58 +450,15 @@ def validate_runtime_project_path(project_path: Path, source_label: str) -> Path
     return resolved_project
 
 
-def discover_runtime_projects_from_hint(raw_hint: str) -> list[Path]:
-    if not raw_hint:
-        return []
-
-    hint_path = Path(raw_hint).expanduser()
-    if not hint_path.exists():
-        return []
-
-    resolved_hint = hint_path.resolve()
-    search_dirs = [resolved_hint.parent, *resolved_hint.parent.parents] if resolved_hint.is_file() else [resolved_hint, *resolved_hint.parents]
-    candidates: list[Path] = []
-    seen: set[Path] = set()
-    for search_dir in search_dirs:
-        for project_file in sorted(search_dir.glob("*.uproject")):
-            try:
-                candidate = validate_runtime_project_path(project_file, str(search_dir))
-            except RuntimeError:
-                continue
-            if candidate in seen:
-                continue
-            seen.add(candidate)
-            candidates.append(candidate)
-    return candidates
-
-
 def discover_runtime_project(source_hints: list[str] | None = None) -> Path:
     environment_project = os.environ.get(RUNTIME_PROJECT_ENV_VAR, "").strip()
     if environment_project:
         return validate_runtime_project_path(Path(environment_project), f"{RUNTIME_PROJECT_ENV_VAR} environment variable")
 
-    candidates: list[Path] = []
-    seen: set[Path] = set()
-    for raw_hint in source_hints or []:
-        for candidate in discover_runtime_projects_from_hint(raw_hint):
-            if candidate in seen:
-                continue
-            seen.add(candidate)
-            candidates.append(candidate)
-
-    if len(candidates) == 1:
-        return candidates[0]
-    if len(candidates) > 1:
-        formatted_candidates = "\n".join(f"  - {candidate}" for candidate in candidates)
-        raise RuntimeError(
-            "Runtime project path is ambiguous. Pass --project explicitly.\n"
-            f"Discovered candidates:\n{formatted_candidates}"
-        )
-
     raise RuntimeError(
-        "Runtime project path not provided and could not be inferred. "
+        "Runtime project path not provided. "
         f"Pass --project explicitly or set {RUNTIME_PROJECT_ENV_VAR}. "
-        "HostProject fallback has been removed."
+        "HostProject fallback and source-path inference are not supported."
     )
 
 
@@ -517,6 +477,31 @@ def prepare_runtime_project(args, source_hints: list[str] | None = None) -> tupl
     requested_plugin_root = requested_project.parent / "Plugins" / "Design2UMG"
     project_plugin_root = requested_plugin_root if requested_plugin_root.is_dir() else plugin_root()
     return str(requested_project), project_plugin_root
+
+
+def resolve_unreal_editor_path(raw_editor_path: str) -> str:
+    editor_source = "--editor"
+    candidate = (raw_editor_path or "").strip()
+    if not candidate:
+        candidate = os.environ.get(UNREAL_EDITOR_ENV_VAR, "").strip()
+        editor_source = f"{UNREAL_EDITOR_ENV_VAR} environment variable"
+
+    if not candidate:
+        ue_root = os.environ.get(UE_ROOT_ENV_VAR, "").strip()
+        if ue_root:
+            candidate = str(Path(ue_root) / "Engine" / "Binaries" / "Win64" / "UnrealEditor.exe")
+            editor_source = f"{UE_ROOT_ENV_VAR} environment variable"
+
+    if not candidate:
+        raise RuntimeError(
+            "UnrealEditor path not provided. "
+            f"Pass --editor explicitly, set {UNREAL_EDITOR_ENV_VAR}, or set {UE_ROOT_ENV_VAR}."
+        )
+
+    editor = Path(candidate).expanduser().resolve()
+    if not editor.is_file():
+        raise RuntimeError(f"UnrealEditor from {editor_source} does not exist: {editor}")
+    return str(editor)
 
 
 def sync_project_plugin_build_id(editor_path: str, project_plugin_root: Path):
@@ -2317,11 +2302,19 @@ def write_invalid_reference_report(
 
 def main():
     args = parse_args()
+    args.editor = resolve_unreal_editor_path(args.editor)
+    args.project, project_plugin_root = prepare_runtime_project(args, [args.source])
+    args.project_plugin_root = str(project_plugin_root)
+    if args.dry_run_validate_paths:
+        print("[OK] Design2UMG auto verify paths resolved.")
+        print(f"project={args.project}")
+        print(f"editor={args.editor}")
+        print(f"project_plugin_root={args.project_plugin_root}")
+        sys.exit(0)
+
     output_dir = (Path(args.output_dir) if args.output_dir else default_output_dir()).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    args.project, project_plugin_root = prepare_runtime_project(args, [args.source])
-    args.project_plugin_root = str(project_plugin_root)
     seed_runtime_font_assets(args.project, [args.source])
     expected_design_size = get_expected_design_size(args.mode, args.source, args.node)
 
@@ -2511,5 +2504,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except RuntimeError as error:
+        print(f"[ERROR] {error}", file=sys.stderr)
+        sys.exit(2)
 

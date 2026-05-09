@@ -1,18 +1,98 @@
 ﻿param(
-    [string]$ProjectPath = "G:\UE5\FPSRoguelike\FPSRoguelike.uproject",
-    [string]$EditorPath = "G:\UE5\UnrealEngine\Engine\Binaries\Win64\UnrealEditor.exe",
-    [string]$LogPath = "G:\UE5\FPSRoguelike\Saved\Logs\FPSRoguelike.log",
-    [string]$SourcePath = "G:\UE5\FPSRoguelike\Designs\pencil-lunaris.pen",
+    [string]$ProjectPath = "",
+    [string]$EditorPath = "",
+    [string]$LogPath = "",
+    [string]$SourcePath = "",
     [string]$TargetNodeId = "frame-1761929672442",
     [string]$OutputPath = "/Game/Design2UMG/Automation/validation_pencil-lunaris_lunaris-design-system-components",
-    [string]$SavedPngPath = "G:\UE5\FPSRoguelike\Saved\Design2UMG\WBP_lunaris__design_system_components.png",
-    [string]$SourceJsonPath = "G:\UE5\FPSRoguelike\Saved\Design2UMG\WBP_lunaris__design_system_components.source-tree.json",
-    [string]$SavedJsonPath = "G:\UE5\FPSRoguelike\Saved\Design2UMG\WBP_lunaris__design_system_components.saved-tree.json",
-    [string]$ResultJsonPath = "G:\UE5\FPSRoguelike\Saved\Design2UMG\WBP_lunaris__design_system_components.structure.result.json",
-    [switch]$KeepExistingEditor
+    [string]$SavedPngPath = "",
+    [string]$SourceJsonPath = "",
+    [string]$SavedJsonPath = "",
+    [string]$ResultJsonPath = "",
+    [switch]$KeepExistingEditor,
+    [switch]$ValidateOnly
 )
 
 $ErrorActionPreference = "Stop"
+
+function Resolve-RequiredProjectPath {
+    param([string]$Value)
+    $candidate = $Value
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+        $candidate = $env:DESIGN2UMG_RUNTIME_PROJECT
+    }
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+        throw "Runtime project path is required. Pass -ProjectPath or set DESIGN2UMG_RUNTIME_PROJECT. HostProject fallback is not supported."
+    }
+    $resolved = [System.IO.Path]::GetFullPath($candidate)
+    $lower = $resolved.ToLowerInvariant()
+    $hostProjectFileName = ("hostproject" + ".uproject")
+    $generatedProjectMarker = ("design2umg" + "_host_")
+    if ($lower.EndsWith($hostProjectFileName) -or $lower.Contains("hostproject") -or $lower.Contains($generatedProjectMarker)) {
+        throw "Refusing temporary or generated runtime project: $resolved"
+    }
+    if (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
+        throw "Runtime project not found: $resolved"
+    }
+    return $resolved
+}
+
+function Resolve-RequiredEditorPath {
+    param([string]$Value)
+    $candidate = $Value
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+        $candidate = $env:DESIGN2UMG_UNREAL_EDITOR
+    }
+    if ([string]::IsNullOrWhiteSpace($candidate) -and -not [string]::IsNullOrWhiteSpace($env:UE_ROOT)) {
+        $candidate = Join-Path $env:UE_ROOT "Engine\Binaries\Win64\UnrealEditor.exe"
+    }
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+        throw "UnrealEditor path is required. Pass -EditorPath, set DESIGN2UMG_UNREAL_EDITOR, or set UE_ROOT."
+    }
+    $resolved = [System.IO.Path]::GetFullPath($candidate)
+    if (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
+        throw "UnrealEditor not found: $resolved"
+    }
+    return $resolved
+}
+
+$ProjectPath = Resolve-RequiredProjectPath $ProjectPath
+$EditorPath = Resolve-RequiredEditorPath $EditorPath
+$ProjectRoot = Split-Path -Parent $ProjectPath
+if ([string]::IsNullOrWhiteSpace($SourcePath)) {
+    throw "SourcePath is required for Lunaris structure validation. Pass -SourcePath explicitly."
+}
+if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
+    throw "SourcePath not found: $SourcePath"
+}
+if ([string]::IsNullOrWhiteSpace($LogPath)) {
+    $LogPath = Join-Path $ProjectRoot "Saved\Logs\$([System.IO.Path]::GetFileNameWithoutExtension($ProjectPath)).log"
+}
+if ([string]::IsNullOrWhiteSpace($SavedPngPath)) {
+    $SavedPngPath = Join-Path $ProjectRoot "Saved\Design2UMG\WBP_lunaris__design_system_components.png"
+}
+if ([string]::IsNullOrWhiteSpace($SourceJsonPath)) {
+    $SourceJsonPath = Join-Path $ProjectRoot "Saved\Design2UMG\WBP_lunaris__design_system_components.source-tree.json"
+}
+if ([string]::IsNullOrWhiteSpace($SavedJsonPath)) {
+    $SavedJsonPath = Join-Path $ProjectRoot "Saved\Design2UMG\WBP_lunaris__design_system_components.saved-tree.json"
+}
+if ([string]::IsNullOrWhiteSpace($ResultJsonPath)) {
+    $ResultJsonPath = Join-Path $ProjectRoot "Saved\Design2UMG\WBP_lunaris__design_system_components.structure.result.json"
+}
+
+if ($ValidateOnly) {
+    Write-Host "[OK] Lunaris structure validation paths resolved."
+    Write-Host "ProjectPath    : $ProjectPath"
+    Write-Host "EditorPath     : $EditorPath"
+    Write-Host "SourcePath     : $SourcePath"
+    Write-Host "LogPath        : $LogPath"
+    Write-Host "SavedPngPath   : $SavedPngPath"
+    Write-Host "SourceJsonPath : $SourceJsonPath"
+    Write-Host "SavedJsonPath  : $SavedJsonPath"
+    Write-Host "ResultJsonPath : $ResultJsonPath"
+    exit 0
+}
 
 if (-not $KeepExistingEditor) {
     Get-Process UnrealEditor, UnrealEditor-Cmd -ErrorAction SilentlyContinue | Stop-Process -Force

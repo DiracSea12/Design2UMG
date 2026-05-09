@@ -93,7 +93,7 @@ The current wrapper goes through `Design2UMG.AutomationRender` in `asset` mode a
 Preferred command:
 
 ```text
-pwsh -NoProfile -File <MaintainerPluginRoot>\Tools\Run-DesignerSnapshotValidation.ps1
+pwsh -NoProfile -File <PluginRoot>\Tools\Run-DesignerSnapshotValidation.ps1 -ProjectPath <MaintainerRuntimeProject.uproject> -EditorPath <UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe
 ```
 
 The wrapper now kills any existing `UnrealEditor.exe` / `UnrealEditor-Cmd.exe` process by default before launching the validation editor.
@@ -132,7 +132,7 @@ Example:
 Preferred wrapper:
 
 ```text
-pwsh -NoProfile -File <MaintainerPluginRoot>\Tools\Run-LunarisStructureSnapshotValidation.ps1
+pwsh -NoProfile -File <PluginRoot>\Tools\Run-LunarisStructureSnapshotValidation.ps1 -ProjectPath <MaintainerRuntimeProject.uproject> -EditorPath <UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe -SourcePath <MaintainerDesignRoot>\pencil-lunaris.pen
 ```
 
 Expected output files:
@@ -177,6 +177,16 @@ Reference sourcing for the formal gate:
 - if you package a checked-in external reference root for a formal full run, every formal case directory must contain both `reference.png` and `compare_report.json`
 
 If `reference.png` exists but the baseline `compare_report.json` is missing, the run can still render and compare, but the run root's own `summary.no_regression` becomes unavailable. That is not acceptable for the formal archived gate.
+
+## Pencil MCP App Alias Compatibility
+
+The project currently keeps Pencil's `visual_studio_code` / `vscode` app alias compatibility because both startup paths need to work with Pencil extension registrations that differ by app id.
+
+Supported startup chains:
+- Python automation: `Tools/design2umg_auto_verify.py` calls `sync_pencil_vscode_app_alias()` before launching the Pencil MCP server. This keeps the two app-id files in the user's `.pencil/apps` directory aligned when the selected app is VS Code compatible.
+- Editor connector: `Source/Design2UMGEditor/Private/PencilConnector.cpp` calls `SyncVSCodePencilAppAlias()` before sync or async MCP launch. It then detects the registered app id or running editor process and launches the latest discovered Pencil MCP server.
+
+This compatibility writes only user-local Pencil app alias files. It must not create runtime projects, formal evidence roots, HostProject fallbacks, or maintainer-only paths.
 
 ## Regression-Sensitive Areas
 

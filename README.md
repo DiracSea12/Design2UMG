@@ -100,14 +100,17 @@ The report is the single authority artifact for import troubleshooting and inclu
 Example:
 
 ```text
-python Tools/design2umg_auto_verify.py pen --source G:\path\screen.pen --node sbChi --reference-provider png --reference G:\path\design.png
+python Tools/design2umg_auto_verify.py pen --source <DesignRoot>\screen.pen --node sbChi --reference-provider png --reference <DesignRoot>\screen.png --project <RuntimeProject.uproject> --editor <UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe
 ```
 
 Figma reference export is also supported:
 
 ```text
-python Tools/design2umg_auto_verify.py local-figma --source G:\path\design.json --reference-provider figma --figma-file <fileKeyOrUrl> --figma-node 123:456 --figma-token <token_from_secure_source>
+python Tools/design2umg_auto_verify.py local-figma --source <FigmaExportRoot>\design.json --reference-provider figma --figma-file <fileKeyOrUrl> --figma-node 123:456 --figma-token <token_from_secure_source> --project <RuntimeProject.uproject> --editor <UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe
 ```
+
+`DESIGN2UMG_RUNTIME_PROJECT` can replace `--project`. `DESIGN2UMG_UNREAL_EDITOR` or `UE_ROOT` can replace `--editor`.
+The script fails if neither the project nor editor path is provided; it does not create or infer a HostProject.
 
 ## Settings
 
@@ -137,7 +140,7 @@ Key options:
 
 - `repository-hygiene`: the public GitHub Actions check that verifies required repo files and blocks tracked maintainer-local paths.
 - `self-hosted build`: the manual `workflow_dispatch` packaging job in `.github/workflows/build.yml`; it requires a maintainer-provided self-hosted Windows runner with `UE_ROOT`.
-- `public smoke/public validate`: contributor-facing build and validation steps used for smoke checks and local repro; do not present them as the release gate.
+- `public smoke/public validate`: contributor-facing build and validation steps used for smoke checks and local repro, using explicit `--project` / `--editor` values or the matching environment variables; do not present them as the release gate.
 - `maintainer formal admissible gate`: the maintainer-owned full discovered 47-case release gate documented in `Docs/ValidationProtocol.md`.
 - No public hosted CI matrix, coverage badge, or release asset pipeline is published in this repo today.
 

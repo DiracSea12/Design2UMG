@@ -36,8 +36,11 @@ class DESIGN2UMGCORE_API UDesign2UMGSettings : public UDeveloperSettings
 	GENERATED_BODY()
 
 public:
-	/** Return the settings singleton. */
+	/** Return the settings singleton without migration or save/flush side effects. */
 	static UDesign2UMGSettings* Get();
+
+	/** Explicit one-time owner for moving pre-Core settings into the current section. */
+	static bool MigrateLegacySettingsSectionToCurrent();
 	static constexpr const TCHAR* CanonicalPlaceholderHatchBackgroundColor = TEXT("#D282FF33");
 	static constexpr const TCHAR* CanonicalPlaceholderRefHatchBackgroundColor = TEXT("#9682FF33");
 	static constexpr const TCHAR* CanonicalPlaceholderHatchStripeColor = TEXT("#D480FF");

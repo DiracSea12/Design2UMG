@@ -15,10 +15,10 @@
 
 1. 打开 Figma 桌面版
 2. 菜单 → **Plugins** → **Development** → **Import plugin from manifest...**
-3. 选择以下路径的 `manifest.json`：
+3. 选择本仓库里的 `manifest.json`：
 
 ```
-G:\UE5\UnrealEngine\Engine\Plugins\Marketplace\Design2UMG\Tools\FigmaExporter\manifest.json
+<PluginRoot>\Tools\FigmaExporter\manifest.json
 ```
 
 安装完成后，插件会出现在 Development 插件列表中。

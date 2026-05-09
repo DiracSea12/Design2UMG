@@ -10,6 +10,9 @@ struct FUMGWidgetNode;
 
 namespace Design2UMGWidgetNodeAccess
 {
+	// Cross-module typed-node read contract. Core owns typed payloads and
+	// serializers; Editor final consumers use this facade to read the current
+	// typed data shape without reaching into Core private implementation.
 	DESIGN2UMGCORE_API FString SerializeWidgetFloat(const float Value);
 	DESIGN2UMGCORE_API FString SerializeWidgetBool(const bool Value);
 	DESIGN2UMGCORE_API FString SerializeWidgetVector2D(const FVector2D& Value);
@@ -31,6 +34,8 @@ namespace Design2UMGWidgetNodeAccess
 
 	DESIGN2UMGCORE_API bool IsTypedWidgetPropertyKey(const FString& Key);
 
+	// Domain readers are retained as focused test-helper/cross-module contract
+	// seams. Production consumers should prefer TryGetWidget* or BuildTypedPropertyBag.
 	DESIGN2UMGCORE_API bool TryGetTextStyleTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue);
 	DESIGN2UMGCORE_API bool TryGetWidgetStyleTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue);
 	DESIGN2UMGCORE_API bool TryGetTextTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue);

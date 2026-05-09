@@ -4,6 +4,10 @@
 
 namespace UMGPropertyKeys
 {
+	// Public generation/serialization key contract shared by Core converters,
+	// Editor import/generation consumers, and tests. Keep keys here when they
+	// name current typed payload fields, serialized UMG JSON fields, or
+	// resource-binding contracts such as TexturePath.
 	inline constexpr const TCHAR* ActiveWidgetIndex = TEXT("ActiveWidgetIndex");
 	inline constexpr const TCHAR* Animate = TEXT("Animate");
 	inline constexpr const TCHAR* AnimateHorizontally = TEXT("AnimateHorizontally");

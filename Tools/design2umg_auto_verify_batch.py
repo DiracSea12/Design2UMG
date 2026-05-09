@@ -30,8 +30,9 @@ def parse_args():
     parser.add_argument("--figma-export-root", action="append", default=[], help="Optional local Figma export directory containing design.json and a top-level reference PNG. Can be repeated.")
     parser.add_argument("--output-root", default="", help="Directory for batch outputs")
     parser.add_argument("--reference-root", default="", help="Optional directory containing per-case reference PNGs at <reference-root>/<case-name>/reference.png")
-    parser.add_argument("--project", default="", help="Runtime project path. HostProject fallback has been removed. If omitted, the script tries DESIGN2UMG_RUNTIME_PROJECT and then infers a .uproject from the design roots.")
-    parser.add_argument("--editor", default=r"G:\UE5\UnrealEngine\Engine\Binaries\Win64\UnrealEditor.exe", help="UnrealEditor executable path")
+    parser.add_argument("--project", default="", help="Runtime project path. If omitted, DESIGN2UMG_RUNTIME_PROJECT is required. HostProject fallback and design-root inference are not supported.")
+    parser.add_argument("--editor", default="", help="UnrealEditor executable path. If omitted, use DESIGN2UMG_UNREAL_EDITOR, or UE_ROOT to resolve Engine/Binaries/Win64/UnrealEditor.exe.")
+    parser.add_argument("--dry-run-validate-paths", action="store_true", help="Resolve and validate the runtime project/editor paths, then exit before discovering cases or launching Unreal.")
     parser.add_argument("--reference-provider", choices=["pencil"], default="pencil", help="Reference source for discovered pen cases")
     parser.add_argument("--mcp-server", default="", help="Override Pencil MCP server binary path")
     parser.add_argument("--pencil-app", default="", help="Override Pencil app name. Leave empty for auto-detect from ~/.pencil/apps and running IDE processes.")
@@ -1430,12 +1431,10 @@ def process_case_results(
 def main():
     batch_start_time = time.time()
     args = parse_args()
+    args.editor = verify.resolve_unreal_editor_path(args.editor)
     design_root = Path(args.design_root).resolve()
     if not design_root.is_dir():
         raise RuntimeError(f"Design root not found: {design_root}")
-
-    output_root = Path(args.output_root).resolve() if args.output_root else default_output_root()
-    output_root.mkdir(parents=True, exist_ok=True)
 
     runtime_args = SimpleNamespace(
         project=args.project,
@@ -1448,6 +1447,16 @@ def main():
     )
     runtime_args.project_plugin_root = project_plugin_root
     runtime_args.log_cmds = args.log_cmds
+    if args.dry_run_validate_paths:
+        print("[OK] Design2UMG batch verify paths resolved.")
+        print(f"project={runtime_args.project}")
+        print(f"editor={args.editor}")
+        print(f"project_plugin_root={project_plugin_root}")
+        print(f"design_root={design_root}")
+        sys.exit(0)
+
+    output_root = Path(args.output_root).resolve() if args.output_root else default_output_root()
+    output_root.mkdir(parents=True, exist_ok=True)
     verify.sync_project_plugin_build_id(args.editor, project_plugin_root)
 
     cases = discover_pen_cases(design_root, args.include, args.exclude)
@@ -1593,5 +1602,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except RuntimeError as error:
+        print(f"[ERROR] {error}", file=sys.stderr)
+        sys.exit(2)
 

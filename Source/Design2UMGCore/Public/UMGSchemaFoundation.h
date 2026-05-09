@@ -128,6 +128,7 @@ struct FUMGSlotData
 
 struct FUMGTypedProperty
 {
+	/** SerializedValue is the final-consumer bridge value; typed fields are transient parse caches. */
 	FString SerializedValue;
 	bool bHasValue = false;
 	bool BoolValue = false;
@@ -141,6 +142,8 @@ struct FUMGTypedProperty
 
 struct DESIGN2UMGCORE_API FUMGPropertyBag
 {
+	// Runtime bridge for final UMG consumers. It is rebuilt from typed node data
+	// at generation time and is not legacy serialized FUMGWidgetNode state.
 	void Add(const FString& Key, const FString& Value);
 	void Add(const TCHAR* Key, const FString& Value);
 	void Add(const TCHAR* Key, const TCHAR* Value);

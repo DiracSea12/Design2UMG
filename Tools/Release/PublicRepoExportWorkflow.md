@@ -11,7 +11,7 @@ Use this workflow when freezing a validated plugin state into a standalone GitHu
 ## Inputs
 
 - candidate commit SHA in the maintainer workspace
-- successful plugin build
+- successful self-hosted plugin build (`RunUAT BuildPlugin -StrictIncludes`) on a maintainer-provided UE runner
 - successful `Automation RunTests Design2UMG`
 - successful full admissible summary:
   `Saved/Design2UMG/Automation/_final_admissible_full_<date>/summary.json`
@@ -62,13 +62,14 @@ Excluded from public export unless they are first rewritten into generic reusabl
 3. Apply the public include/exclude rules above.
 4. Re-check text encoding, secrets, and path leakage in the export workspace.
 5. Verify the exported tree still contains the same plugin version and release notes as the validated source tree.
-6. Run `pwsh -NoProfile -File Tools/Release/Assert-PublicRepoBoundary.ps1` inside the export workspace.
+6. Run `pwsh -NoProfile -File Tools/Release/Assert-PublicRepoBoundary.ps1 -CheckExportWorkspaceLayout` inside the export workspace.
 
 ## Publication Checks
 
 Before publishing the exported repository:
 
 - `RunUAT BuildPlugin -StrictIncludes` succeeds in the export workspace
+- public smoke validation commands use explicit `--project` / `--editor` values or documented environment variables
 - public docs are internally consistent
 - `Docs/ValidationGovernance/` points to the latest curated manifests
 - no raw automation tree is present

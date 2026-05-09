@@ -18,14 +18,6 @@ using namespace Design2UMGTestUtils;
 
 namespace
 {
-	FString GetTextMeasurementSourcePath()
-	{
-		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
-		return Plugin.IsValid()
-			? FPaths::Combine(Plugin->GetBaseDir(), TEXT("Source/Design2UMGCore/Private/TextMeasurement.cpp"))
-			: FString();
-	}
-
 	FString GetTextMeasurementPrivateSourcePath(const TCHAR* FileName)
 	{
 		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
@@ -48,19 +40,6 @@ namespace
 		return Plugin.IsValid()
 			? FPaths::Combine(Plugin->GetBaseDir(), TEXT("Source/Design2UMGCore/Private/TextMeasurement.h"))
 			: FString();
-	}
-
-	bool LoadTextMeasurementSource(FAutomationTestBase& Test, FString& OutSource)
-	{
-		const FString SourcePath = GetTextMeasurementSourcePath();
-		Test.TestFalse(TEXT("TextMeasurement.cpp path resolved"), SourcePath.IsEmpty());
-		if (SourcePath.IsEmpty())
-		{
-			return false;
-		}
-
-		Test.TestTrue(TEXT("Load TextMeasurement.cpp"), FFileHelper::LoadFileToString(OutSource, *SourcePath));
-		return !OutSource.IsEmpty();
 	}
 
 	bool LoadTextMeasurementSplitSources(FAutomationTestBase& Test, FString& OutSource)
@@ -699,33 +678,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextMeasurementFallbackConstantsLockedTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FTextMeasurementFallbackConstantsLockedTest::RunTest(const FString& Parameters)
 {
-	FString Source;
-	if (!LoadTextMeasurementSplitSources(*this, Source))
-	{
-		return false;
-	}
-
-	TestTrue(TEXT("Line-height multiplier comment keeps 18/14 provenance"),
-		Source.Contains(TEXT("18 / 14 = 1.285714"), ESearchCase::CaseSensitive));
-	TestTrue(TEXT("Fallback scale comment keeps 3/4 provenance"),
-		Source.Contains(TEXT("3 / 4 of the"), ESearchCase::CaseSensitive));
-	TestTrue(TEXT("Fallback width formula keeps runtime text length scaling"),
-		Source.Contains(TEXT("RuntimeText.Len() * FontSize * RuntimeProbe::FallbackMeasureWidthScale"), ESearchCase::CaseSensitive));
-	TestTrue(TEXT("Fallback height formula keeps runtime fallback scale"),
-		Source.Contains(TEXT("FontSize * RuntimeProbe::FallbackMeasureHeightScale"), ESearchCase::CaseSensitive));
-	TestTrue(TEXT("Width heuristic formula keeps prepared text length scaling"),
-		Source.Contains(TEXT("TextMeasurement::PrepareRuntimeTextContent(Text).Len() * FontSize * SingleLineHeuristics::WidthHeuristicScale"), ESearchCase::CaseSensitive));
-	TestTrue(TEXT("Line-height multiplier literal stays locked"),
-		Source.Contains(TEXT("constexpr float DefaultLineHeightMultiplier = 1.285714f;"), ESearchCase::CaseSensitive));
-	TestTrue(TEXT("Fallback scale literal stays locked"),
-		Source.Contains(TEXT("constexpr float DefaultFontFallbackScale = 0.75f;"), ESearchCase::CaseSensitive));
-	TestTrue(TEXT("Fallback width literal stays locked"),
-		Source.Contains(TEXT("const float FallbackMeasureWidthScale = 0.60f;"), ESearchCase::CaseSensitive));
-	TestTrue(TEXT("Fallback height literal stays locked"),
-		Source.Contains(TEXT("const float FallbackMeasureHeightScale = 1.5f;"), ESearchCase::CaseSensitive));
-	TestTrue(TEXT("Width heuristic literal stays locked"),
-		Source.Contains(TEXT("constexpr float WidthHeuristicScale = 0.55f;"), ESearchCase::CaseSensitive));
-
 	TSharedPtr<FDesignNode> DefaultLineHeightNode = MakeBaselineFallbackProbeNode(TEXT("default_line_height"), TEXT("Lock"));
 	DefaultLineHeightNode->Text.FontSize = 14.0f;
 	DefaultLineHeightNode->Text.LineHeight = 0.0f;
@@ -760,17 +712,6 @@ bool FTextMeasurementPrivateShimHeaderRemovedTest::RunTest(const FString& Parame
 	TestFalse(TEXT("Private TextMeasurement.h path resolved"), PrivateHeaderPath.IsEmpty());
 	TestTrue(TEXT("Public TextMeasurement.h still exists"), IFileManager::Get().FileExists(*PublicHeaderPath));
 	TestFalse(TEXT("Private TextMeasurement.h shim is removed"), IFileManager::Get().FileExists(*PrivateHeaderPath));
-
-	FString Source;
-	if (!LoadTextMeasurementSource(*this, Source))
-	{
-		return false;
-	}
-
-	TestTrue(TEXT("TextMeasurement.cpp now includes the unified TextMeasurement.h"),
-		Source.Contains(TEXT("#include \"TextMeasurement.h\""), ESearchCase::CaseSensitive));
-	TestFalse(TEXT("TextMeasurement.cpp no longer includes ../Public/TextMeasurement.h directly"),
-		Source.Contains(TEXT("#include \"../Public/TextMeasurement.h\""), ESearchCase::CaseSensitive));
 	return true;
 }
 

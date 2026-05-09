@@ -66,9 +66,6 @@
 
 namespace
 {
-	thread_local int32 GWidgetBuildDepth = 0;
-	thread_local FIntPoint GWidgetBuildDesignSizeSnapshot = FIntPoint(1, 1);
-
 	bool IsValidEffectiveDesignSize(const FIntPoint& Size)
 	{
 		return Size.X > 1 && Size.Y > 1;
@@ -101,40 +98,6 @@ namespace
 			*SourceNode.Name);
 		return FIntPoint(1, 1);
 	}
-
-	class FScopedWidgetBuildDesignSize
-	{
-	public:
-		FScopedWidgetBuildDesignSize(const FUMGWidgetNode& SourceNode, const FIntPoint* ExplicitDesignSize)
-		{
-			if (GWidgetBuildDepth == 0)
-			{
-				GWidgetBuildDesignSizeSnapshot = ResolveEffectiveDesignSize(SourceNode, ExplicitDesignSize);
-				bOwnsSnapshot = true;
-			}
-			++GWidgetBuildDepth;
-		}
-
-		~FScopedWidgetBuildDesignSize()
-		{
-			GWidgetBuildDepth = FMath::Max(0, GWidgetBuildDepth - 1);
-			if (bOwnsSnapshot && GWidgetBuildDepth == 0)
-			{
-				GWidgetBuildDesignSizeSnapshot = FIntPoint(1, 1);
-			}
-		}
-
-		static FIntPoint Current()
-		{
-			return SanitizeEffectiveDesignSize(
-				GWidgetBuildDepth > 0
-					? GWidgetBuildDesignSizeSnapshot
-					: FIntPoint(1, 1));
-		}
-
-	private:
-		bool bOwnsSnapshot = false;
-	};
 
 	// Widget type mapping table.
 	const TMap<FString, UClass*>& GetWidgetClassMap()
@@ -227,9 +190,9 @@ UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWid
 
 UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords, const FIntPoint* ExplicitDesignSize)
 {
-	const FScopedWidgetBuildDesignSize DesignSizeScope(Node, ExplicitDesignSize);
+	const FIntPoint EffectiveDesignSize = ResolveEffectiveDesignSize(Node, ExplicitDesignSize);
 
-	UWidget* NewWidget = BuildWidgetTree(WidgetTree, Node, TextureMap, FigmaMetadataRecords, ExplicitDesignSize);
+	UWidget* NewWidget = BuildWidgetTree(WidgetTree, Node, TextureMap, FigmaMetadataRecords, &EffectiveDesignSize);
 	if (!NewWidget)
 	{
 		return nullptr;
@@ -241,7 +204,7 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 		if (UPanelSlot* Slot = ParentWidget->AddChild(NewWidget))
 		{
 			const FUMGSlotData SlotData = FWidgetLayoutAdapter::Resolve(
-				Node, ParentWidget, WidgetTree, FScopedWidgetBuildDesignSize::Current(), false);
+				Node, ParentWidget, WidgetTree, EffectiveDesignSize, false);
 			UE_LOG(LogDesign2UMG, Verbose,
 				TEXT("CreateWidgetSlot: '%s' anc=(%.2f,%.2f)-(%.2f,%.2f) off=(%.1f,%.1f,%.1f,%.1f) align=(%.2f,%.2f) auto=%d"),
 				*Node.Name,

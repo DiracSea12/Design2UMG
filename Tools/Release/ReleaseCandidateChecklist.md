@@ -31,9 +31,10 @@ Use this checklist before cutting a GitHub release branch or tag.
 
 ## 5. Quality Gates
 
-- [ ] BuildPlugin passed (`RunUAT BuildPlugin -StrictIncludes`)
-- [ ] Automation tests passed (`Automation RunTests Design2UMG.*`)
-- [ ] Full admissible validation passed and wrapped in the current `Docs/ValidationGovernance/AdmissibleBaselineManifest_<date>.json`
+- [ ] Public smoke validation command is documented separately from the release gate
+- [ ] Self-hosted BuildPlugin passed (`RunUAT BuildPlugin -StrictIncludes`) on a maintainer-provided UE runner
+- [ ] Focused automation tests passed (`Automation RunTests Design2UMG`)
+- [ ] Maintainer formal full admissible validation passed and wrapped in the current `Docs/ValidationGovernance/AdmissibleBaselineManifest_<date>.json`
 - [ ] CI artifacts uploaded and downloadable
 
 ## 6. Public Consistency

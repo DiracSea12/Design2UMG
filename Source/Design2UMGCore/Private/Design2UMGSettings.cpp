@@ -50,17 +50,17 @@ namespace
 		return ExportedValue;
 	}
 
-	void MigrateLegacySettingsSection(UDesign2UMGSettings* Settings)
+	bool MigrateLegacySettingsSection(UDesign2UMGSettings* Settings)
 	{
 		if (!Settings || !GConfig)
 		{
-			return;
+			return false;
 		}
 
 		const FString ConfigPath = GEditorPerProjectIni;
 		if (!GConfig->DoesSectionExist(LegacySettingsSection, ConfigPath))
 		{
-			return;
+			return false;
 		}
 
 		UDesign2UMGSettings* RawDefaults = NewObject<UDesign2UMGSettings>(GetTransientPackage(), NAME_None, RF_Transient);
@@ -102,14 +102,19 @@ namespace
 			Settings->ReloadConfig();
 			UE_LOG(LogDesign2UMG, Log, TEXT("Migrated legacy Design2UMG settings section to Design2UMGCore"));
 		}
+
+		return bUpdated;
 	}
 }
 
 UDesign2UMGSettings* UDesign2UMGSettings::Get()
 {
-	UDesign2UMGSettings* Settings = GetMutableDefault<UDesign2UMGSettings>();
-	MigrateLegacySettingsSection(Settings);
-	return Settings;
+	return GetMutableDefault<UDesign2UMGSettings>();
+}
+
+bool UDesign2UMGSettings::MigrateLegacySettingsSectionToCurrent()
+{
+	return MigrateLegacySettingsSection(GetMutableDefault<UDesign2UMGSettings>());
 }
 
 UDesign2UMGSettings::FResolvedPlaceholderHatchStyle UDesign2UMGSettings::ResolvePlaceholderHatchStyle() const

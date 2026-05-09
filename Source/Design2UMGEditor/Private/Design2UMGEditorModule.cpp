@@ -8,6 +8,7 @@
 #include "Design2UMGEditorMenuOwner.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGNotifications.h"
+#include "Design2UMGSettings.h"
 #include "DesignFontImportService.h"
 #include "FontResolver.h"
 
@@ -80,6 +81,7 @@ namespace
 
 void FDesign2UMGEditorModule::StartupModule()
 {
+	UDesign2UMGSettings::MigrateLegacySettingsSectionToCurrent();
 	FDesign2UMGNotification::RegisterSuccessHandler(
 		FDesign2UMGSuccessNotificationHandler::CreateStatic(&ShowEditorSuccessNotification));
 	FDesign2UMGNotification::RegisterWarningHandler(
