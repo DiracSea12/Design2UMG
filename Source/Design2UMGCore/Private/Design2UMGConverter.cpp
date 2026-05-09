@@ -79,6 +79,7 @@ namespace
 			return false;
 		}
 
+		// Empty structural leaves can still reserve flow/grid cells, so keep their measured footprint.
 		return (Node->Type == EDesignNodeType::Frame || Node->Type == EDesignNodeType::Group)
 			&& Node->Transform.Width.Value > 0.0f
 			&& Node->Transform.Height.Value > 0.0f;
@@ -134,6 +135,7 @@ namespace
 			const bool bHasFixedSize = ChildNode->Transform.Width.IsFixed() || ChildNode->Transform.Height.IsFixed();
 			const bool bHasMinSize = (ChildNode->Transform.Width.IsFit() && ChildNode->Transform.Width.Value > 0)
 				|| (ChildNode->Transform.Height.IsFit() && ChildNode->Transform.Height.Value > 0);
+			// SizeBox carries source-side measured constraints that panel slots cannot express on their own.
 			const bool bCanvasMixedAxis = Node->LayoutData.Layout == EDesignLayout::None
 				&& ((ChildNode->Transform.Width.IsFit() && ChildNode->Transform.Height.IsFixed())
 					|| (ChildNode->Transform.Height.IsFit() && ChildNode->Transform.Width.IsFixed()));
@@ -150,6 +152,7 @@ namespace
 				&& (HasWidgetStringProperty(ChildWidget, UMGPropertyKeys::MaterialRef)
 					|| HasWidgetStringProperty(ChildWidget, UMGPropertyKeys::TexturePath)
 					|| HasWidgetStringProperty(ChildWidget, UMGPropertyKeys::PathGeometry));
+			// Images with their own brush size already produce the intended desired size; wrapping would double-apply it.
 			return Node->LayoutData.Layout == EDesignLayout::None
 				? bCanvasMixedAxis
 				: (bHasFixedSize || bHasMinSize || bWrapOrGridMeasuredFill) && !bWidgetOwnsDesiredSize;
@@ -198,6 +201,7 @@ namespace
 			const FConversionContext ActiveContext = Context.WithNodeTheme(Node);
 			const Design2UMGConverterInternal::FExpandedNodeResolver ExpandedNodeResolver = BuildExpandedNodeResolver(ActiveContext);
 
+			// Refs are expanded before visual/layout work so children inherit the active theme and measured sizes together.
 			if (Node->Type == EDesignNodeType::Ref)
 			{
 				return ConvertExpandedRefNode(Node, ActiveContext, ParentLayout, ExpandedNodeResolver);
@@ -273,12 +277,14 @@ namespace
 		{
 			TArray<TSharedPtr<FDesignNode>> VisibleChildren;
 			GatherVisibleChildrenForConversion(Node, VisibleChildren);
+			// Grid selection and flow prep must see the same filtered child list to avoid layout drift.
 			if (Node->LayoutData.Layout == EDesignLayout::Grid && Design2UMGGridLayout::NeedsGridPanel(VisibleChildren))
 			{
 				Widget.Type = TEXT("GridPanel");
 			}
 
 			const Design2UMGConverterInternal::FFlowChildPreparation FlowChildPreparation(ExpandedNodeResolver);
+			// Flow children are pre-resolved before appending so slot metrics are based on effective nodes, not raw refs.
 			FlowChildPreparation.PreResolveFlowChildren(Node, Widget, VisibleChildren);
 			FNodeChildAppender(Widget, Node, VisibleChildren, Context, ExpandedNodeResolver, *this).AppendChildren();
 		}

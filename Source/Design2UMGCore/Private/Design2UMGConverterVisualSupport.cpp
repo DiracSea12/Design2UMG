@@ -110,6 +110,7 @@ namespace Design2UMGConverterVisualSupport
 		const bool bIsExplicitEmptySlotSurface =
 			Design2UMGSourceMetadata::HasNodeMetadataFlag(Node, TEXT("pen.slot.empty"))
 			|| Design2UMGSourceMetadata::HasNodeMetadataFlag(Node, TEXT("source.slot.empty"));
+		// Tint only semantic empty surfaces; authored non-placeholder art should stay on the normal visual path.
 		const bool bUseSlotPlaceholderTint =
 			bIsLeafContainer
 			&& Node->Transform.Width.Value >= 24.0f
@@ -168,6 +169,7 @@ namespace Design2UMGConverterVisualSupport
 		const TSharedPtr<FDesignNode>& Node,
 		bool bPlaceholderUsesDirectImage)
 	{
+		// Parser-owned padding decisions win; the fallback only covers layouts where runtime still owns the inset.
 		const bool bNeedsPaddingWrapper =
 			LayoutMapper::HasPadding(Node)
 			&& (Node->LayoutData.bHasPaddingRuntimeWrapDecision
@@ -201,6 +203,7 @@ namespace Design2UMGConverterVisualSupport
 			Widget = VisualMapper::WrapWithMultiFill(MoveTemp(Widget), Node, VisualMapperOptions);
 		}
 
+		// UMG has one inner-shadow surface here, so choose the strongest blur as the visible representative.
 		const FDesignShadow* InnerShadow = nullptr;
 		for (const FDesignEffect& Effect : Node->Visual.Effects)
 		{
@@ -233,6 +236,7 @@ namespace Design2UMGConverterVisualSupport
 
 		float MaxForegroundBlur = 0.0f;
 		float MaxBackgroundBlur = 0.0f;
+		// Blur wrappers are ordered after shadows and use the maximum radius to avoid stacking duplicate blur passes.
 		for (const FDesignEffect& Effect : Node->Visual.Effects)
 		{
 			if (!Effect.bEnabled || Effect.Radius <= 0.0f)
