@@ -171,4 +171,6 @@ Do not introduce new `bHas*` + value shadow pairs into `DesignSchema.h`-style tr
 
 ### UMGPropertyApplierInternal module placement
 
-`UMGPropertyApplierInternal.cpp` is currently in `Design2UMGEditor` but its responsibility (writing UMG widget properties) is runtime logic, not editor logic. It was placed in the Editor module during early development when Blueprint generation code and property application were co-located. The correct home is `Design2UMGCore`. Migration requires resolving the UMG/SlateCore module dependencies in `Design2UMGCore.Build.cs` first (see § 6 audit: these modules must remain in `PublicDependencyModuleNames` due to type dependencies in public headers). This is tracked for a future phase.
+`UMGPropertyApplierInternal.cpp` stays in `Design2UMGEditor` for this release by design. The current supported product path is editor-side import and Widget Blueprint generation, so mutating `UWidget` instances belongs with the editor generation pipeline instead of becoming a Core public contract.
+
+Re-evaluate this placement only if the supported product scope explicitly adds a runtime module, or if the `UWidget` mutation pipeline is split from editor-side generation into a separately supported runtime path. Until then, keep Core responsible for typed schema, serializers, and property-bag construction, and keep final `UWidget` mutation in the Editor module.

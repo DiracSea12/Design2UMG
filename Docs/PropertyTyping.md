@@ -1,143 +1,115 @@
-﻿# Design2UMG 属性类型化改造方案
+﻿# Design2UMG 属性类型化契约与维护说明
 
-## 一、问题是什么
+本文记录当前代码里的属性类型化契约，不是改造 proposal。
 
-Design2UMG 的转换流水线分两步：
+## 当前主路径
 
-```
-.pen JSON → FUMGWidgetNode (中间表示) → UWidget (最终控件)
-```
+Design2UMG 的导入与生成链路现在按下面的职责分层：
 
-中间表示 `FUMGWidgetNode` 用一个 `TMap<FString, FString>` 传递所有属性：
-
-```cpp
-// 写入端 (PenVisualMapper.cpp) — 把强类型数据变成字符串
-Widget.Properties.Add("FontSize", "14.5");        // float → string
-Widget.Properties.Add("BrushColor", "#FF6B35");   // 颜色 → string
-Widget.Properties.Add("CornerRadii", "8.0,8.0,0.0,0.0"); // 四元组 → string
-Widget.Properties.Add("DrawAs", "RoundedBox");     // 枚举 → string
-
-// 消费端 (UMGPropertyApplier.cpp) — 再把字符串变回强类型
-float Size = FCString::Atof(*Props["FontSize"]);
-FLinearColor Color = ParseColor(*Props["BrushColor"]);
-FVector4 Radii = ParseVector4(*Props["CornerRadii"]);
+```text
+.pen / Figma export
+  -> parser / mapper
+  -> FUMGWidgetNode typed payloads
+  -> Design2UMGWidgetNodeAccess::BuildTypedPropertyBag
+  -> UMG property appliers / resource binders
 ```
 
-**问题**：强类型 → 字符串 → 强类型，中间多了一次无意义的序列化/反序列化。
+`FUMGWidgetNode` 的主属性不是通用字符串 map。节点上的属性按领域放在强类型 payload 中，例如：
 
-## 二、这造成了什么实际 bug
+| 领域 | 当前 payload |
+|------|--------------|
+| 文本样式 | `FUMGTextStyleData` |
+| 控件样式 | `FUMGWidgetStyleData` |
+| 文本内容与行为 | `FUMGTextData` |
+| 视觉画刷、图片、渐变 | `FUMGVisualBrushData` |
+| 效果 | `FUMGEffectData` |
+| 路径与向量 | `FUMGPathData` |
+| 阴影 | `FUMGShadowData` |
+| 渲染样式 | `FUMGRenderStyleData` |
+| 控件状态 | `FUMGWidgetStateData` |
+| ScrollBox 配置 | `FUMGScrollBoxData` |
 
-| Bug | 根因 | 后果 |
-|-----|------|------|
-| FontSize 截断 | `FString::FromInt((int32)14.5)` → `"14"` | 字号精度丢失 |
-| LetterSpacing 丢精度 | `FString::FromInt((int32)0.8)` → `"0"` | 字间距直接归零 |
+最终 UMG 侧仍需要一个按 key 读取的桥接对象，这个对象是 `FUMGPropertyBag`。它不是节点上的持久旧状态，而是在生成阶段由 typed node 数据重建出来。
 
-这两个 bug 已修复（改用 `SanitizeFloat`），但修复方式是"打补丁"而不是"治根因"。
-只要 string map 还在，下一个新属性还可能犯同样的错。
+## 关键边界
 
-## 三、竞品怎么做的
+### `FUMGWidgetNode`
 
-| 项目 | 中间表示 | 属性传递方式 |
-|------|---------|------------|
-| FigmaToCode | AltNode (TypeScript) | 强类型接口：`fills: Paint[]`, `cornerRadius: number` |
-| FairyGUI-unreal | GObject (C++) | 强类型成员：`FVector2D Position`, `float Alpha` |
-| DivKit | DivText/DivContainer | 每种控件独立强类型 struct |
-| **Design2UMG (当前)** | FUMGWidgetNode | `TMap<FString, FString>` — 全部字符串 |
+`FUMGWidgetNode` 是导入后的中间节点。它保留布局、slot、children、source/prototype 扩展数据，并聚合各类 typed payload。
 
-**没有一个成熟项目用 string map 做主通道。**
+维护规则：
 
-## 四、改造方案
+- 新的节点属性优先加入对应 typed payload。
+- 不要在 `FUMGWidgetNode` 上重新增加通用字符串属性表。
+- 不要为同一属性做 typed payload 与字符串属性表的双写。
+- source/prototype 相关数据继续走显式 opt-in 扩展，不放回默认聚合面。
 
-### 核心思路
+### `FUMGPropertyBag`
 
-在 `FUMGWidgetNode` 上新增一个 typed struct 字段，和现有 string map 并存。
-写入端双写，消费端 typed 优先、string 回退。逐批迁移，最终删除 string 写入。
+`FUMGPropertyBag` 是最终消费者桥。它负责把 typed 值以稳定 key 暴露给 UMG property applier、resource binder 和少量生成期工具。
 
-### 数据结构
+它的定位是“生成期消费接口”，不是 parser 的真实数据模型。维护时要保持这个方向：
 
-```cpp
-// 新增：类型化的视觉属性
-struct FUMGBrushData
-{
-    // 数值属性（第一批）
-    float FontSize = 0;           // 0 = 未设置
-    float LetterSpacing = 0;
-    float OutlineCornerRadius = -1; // -1 = 未设置
-    FVector4 CornerRadii = FVector4(-1); // -1 = 未设置
-    float OutlineThickness = 0;
+- parser / mapper 写 typed payload。
+- Core 中的 `Design2UMGWidgetNodeAccess` 负责把 typed payload 序列化成 property bag。
+- Editor 中的 UMG applier 从 `FUMGPropertyBag` 读取最终可应用值。
+- 如果新属性只服务某个 typed domain，先补 typed payload 和 `Design2UMGWidgetNodeAccess`，再让 applier 读取 bag。
 
-    // 枚举属性（第二批）
-    ESlateBrushDrawType::Type DrawAs = ESlateBrushDrawType::NoDrawType; // NoDrawType = 未设置
+### `Design2UMGWidgetNodeAccess`
 
-    // 颜色属性（第二批）
-    FLinearColor BrushColor = FLinearColor::Transparent;
-    bool bHasBrushColor = false;
-    FLinearColor OutlineColor = FLinearColor::Transparent;
-    bool bHasOutlineColor = false;
+`Design2UMGWidgetNodeAccess` 是跨模块读取 typed node 的稳定门面。Core 拥有 typed payload 与序列化规则，Editor 不应该绕过它去依赖 Core 私有实现。
 
-    // 材质属性（第三批）
-    FString MaterialRef;          // 保留 string（枚举值少，不值得单独 enum）
-    FString MaterialParams;       // JSON → 后续拆为 FUMGGradientData
-    FString TexturePath;          // 路径本身就是 string，不需要类型化
-};
+常用入口：
 
-// FUMGWidgetNode 新增字段
-struct FUMGWidgetNode
-{
-    // ... 现有字段 ...
-    TMap<FString, FString> Properties;  // legacy，逐步废弃
-    FUMGBrushData Brush;                // 新增：类型化属性
-};
-```
-
-### 迁移步骤
-
-```
-第一批：数值属性
-  FontSize, LetterSpacing, OutlineCornerRadius, CornerRadii, OutlineThickness
-  → 写入端双写 Brush.xxx + Properties["xxx"]
-  → 消费端改为读 Brush.xxx（有值时），回退读 Properties
-
-第二批：枚举 + 颜色
-  DrawAs, BrushColor, OutlineColor
-  → 同上双写 + 优先读 typed
-
-第三批：材质参数
-  MaterialParams → FUMGGradientData typed struct
-  MaterialRef, TexturePath 保留 string（本身就是字符串语义）
-
-最终：删除 legacy
-  所有消费端确认只读 typed 后，删除 Properties 中对应 key 的写入
-```
-
-### 消费端读取模式
-
-```cpp
-// 改造前
-if (const FString* V = GET_PROP("OutlineThickness"))
-    Brush.OutlineSettings.Width = FCString::Atof(**V);
-
-// 改造后
-if (Node.Brush.OutlineThickness > 0)
-    Brush.OutlineSettings.Width = Node.Brush.OutlineThickness;
-else if (const FString* V = GET_PROP("OutlineThickness"))  // legacy 回退
-    Brush.OutlineSettings.Width = FCString::Atof(**V);
-```
-
-## 五、不做什么
-
-| 方案 | 为什么不做 |
-|------|----------|
-| Property Bag 变体类型 | UE5 没有现成的 FInstancedPropertyBag，自造轮子成本高 |
-| 每种控件一个 struct | 过度设计，当前控件类型不多 |
-| 一次性全量重写 | 风险太大，渐进式更安全 |
-
-## 六、涉及文件
-
-| 文件 | 改动 |
+| 入口 | 用途 |
 |------|------|
-| `UMGSchema.h` | 新增 FUMGBrushData struct + FUMGWidgetNode.Brush 字段 |
-| `PenVisualMapper.cpp` | 写入端：双写 Brush.xxx + Properties["xxx"] |
-| `Design2UMGConverter.cpp` | 写入端：FontSize/LetterSpacing 双写 |
-| `UMGPropertyApplier.cpp` | 消费端：typed 优先读取 |
-| `UMGWidgetUtils.cpp` | 消费端：Image 控件 typed 优先读取 |
+| `BuildTypedPropertyBag(const FUMGWidgetNode&)` | 为最终 UMG 消费者构建完整属性包 |
+| `TryGetWidget*` | 以类型化方式读取单个 widget key |
+| `TryGet*TypedWidgetString` | 领域内字符串序列化读取，主要用于测试和跨模块契约 |
+| `SerializeWidget*` | 统一基础类型序列化 |
+
+## 渐变与材质参数
+
+渐变已经有当前 typed contract：
+
+- typed 数据结构：`FUMGVisualBrushData::FGradientData`
+- material ref 派生：`Design2UMGWidgetNodeAccess::GetGradientMaterialRef`
+- material params 序列化：`Design2UMGWidgetNodeAccess::SerializeGradientMaterialParams`
+
+因此维护渐变时不要再把 `MaterialParams` 当成待拆分的开放项。主路径是：parser / mapper 写入 `Brush.Gradient`，Core 序列化成最终 UMG 消费所需的 material ref 与 params。
+
+## 新增属性流程
+
+新增一个属性时，按这个顺序做：
+
+1. 判断它属于哪个 typed domain。
+2. 在对应 payload 里增加字段，并明确 unset 与显式值的语义。
+3. 在 parser / mapper 写入 typed 字段。
+4. 在 `Design2UMGWidgetNodeAccess` 中补读取和序列化。
+5. 在对应 UMG applier / binder 中通过 `FUMGPropertyBag` 消费。
+6. 增加覆盖 typed payload、property bag 和最终 UMG 应用结果的测试。
+
+如果属性语义只是最终 UMG 应用细节，且源数据没有独立领域含义，也可以只在 property bag 消费层处理；但不能因此把 parser 主数据模型退回通用字符串 map。
+
+## 不要做什么
+
+| 做法 | 原因 |
+|------|------|
+| 重新增加名为 `Properties` 的通用字符串属性表 | 会把主数据模型拉回弱类型通道 |
+| typed payload 和字符串 map 双写 | 会制造两个事实来源 |
+| 让 Editor 直接读取 Core 私有实现 | 会破坏跨模块边界 |
+| 用单个宽泛 bag 代替 typed payload | 会丢掉领域语义和 unset 语义 |
+| 为单个样例或单个设计稿定制 key / 分支 | 会变成过拟合，不符合正式 gate 要求 |
+
+## 相关代码入口
+
+| 文件 | 说明 |
+|------|------|
+| `Source/Design2UMGCore/Public/UMGSchema.h` | `FUMGWidgetNode` 聚合 typed payload |
+| `Source/Design2UMGCore/Public/UMGSchemaTypedPayloads.h` | typed payload 定义 |
+| `Source/Design2UMGCore/Public/UMGSchemaFoundation.h` | `FUMGTypedProperty` 与 `FUMGPropertyBag` |
+| `Source/Design2UMGCore/Public/UMGWidgetNodeAccess.h` | typed node 跨模块读取契约 |
+| `Source/Design2UMGCore/Private/UMGWidgetNodeAccess.cpp` | property bag 构建与序列化规则 |
+| `Source/Design2UMGEditor/Private/UMGPropertyApplierInternal.cpp` | widget property 应用注册表 |
+| `Source/Design2UMGEditor/Private/UMGBrushPropertyApplier.cpp` | brush / image / border 等视觉属性应用 |
+| `Source/Design2UMGEditor/Private/UMGTextPropertyApplier.cpp` | 文本属性应用 |

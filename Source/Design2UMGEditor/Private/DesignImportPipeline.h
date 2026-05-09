@@ -7,8 +7,8 @@
 
 class UWidgetBlueprint;
 
-// Transitional import-core seams: analysis and generation are routed through
-// explicit payloads before preview/orchestration is split in later tasks.
+// Import-core seams: analysis, preview, and artifact generation exchange
+// explicit request/result payloads so callers do not depend on UI state.
 struct FImportAnalysisInput
 {
 	bool bResolveImages = true;
