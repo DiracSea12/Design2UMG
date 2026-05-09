@@ -1,7 +1,7 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "WidgetLayoutAdapter.h"
-#include "LayoutCalculator.h"
-#include "UMGValueParser.h"
+#include "UMGLayoutProjection.h"
+#include "UMGValueParsing.h"
 #include "Components/CanvasPanel.h"
 #include "Components/PanelWidget.h"
 #include "Blueprint/WidgetTree.h"

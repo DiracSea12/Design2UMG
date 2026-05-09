@@ -3,7 +3,7 @@
 #include "DesignFontImportService.h"
 
 #include "Design2UMGLog.h"
-#include "Design2UMGNotification.h"
+#include "Design2UMGNotifications.h"
 #include "Design2UMGSettings.h"
 #include "Automation/Design2UMGAutomationRender.h"
 #include "DesignSchema.h"

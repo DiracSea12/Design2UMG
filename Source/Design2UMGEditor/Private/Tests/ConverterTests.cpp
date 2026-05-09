@@ -4,7 +4,6 @@
 
 #include "Misc/AutomationTest.h"
 #include "Design2UMGConverter.h"
-#include "Design2UMGConverterInternal.h"
 #include "DesignSchema.h"
 #include "UMGSchema.h"
 
@@ -85,44 +84,47 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// Internal conversion context
+// Conversion recursion guard behavior
 // ---------------------------------------------------------------------------
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FConverterInternalContextTest,
-	"Design2UMG.Unit.Converter.InternalContext",
+	FConverterDeepTreeDoesNotCrashTest,
+	"Design2UMG.Unit.Converter.DeepTreeDoesNotCrash",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 
-bool FConverterInternalContextTest::RunTest(const FString&)
+bool FConverterDeepTreeDoesNotCrashTest::RunTest(const FString&)
 {
-	using namespace Design2UMGConverterInternal;
-
 	FDesignDocument Doc;
-	TArray<FString> Warnings;
-	FConversionSettingsSnapshot Settings;
-	FConversionState State(Doc, Warnings, Settings);
-	FConversionContext Context(State);
-	Context.ThemeContext.Add(TEXT("mode"), TEXT("light"));
-	Context.ThemeContext.Add(TEXT("density"), TEXT("comfortable"));
+	Doc.Version = TEXT("converter-deep-tree");
 
-	const TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
-	Node->Theme.Add(TEXT("mode"), TEXT("dark"));
-	Node->Theme.Add(TEXT("brand"), TEXT("primary"));
-
-	const FConversionContext Next = Context.WithNodeTheme(Node);
-	TestEqual(TEXT("Original theme count is unchanged"), Context.ThemeContext.Num(), 2);
-	TestEqual(TEXT("Original overlapping theme is unchanged"), Context.ThemeContext.FindChecked(TEXT("mode")), FString(TEXT("light")));
-	TestEqual(TEXT("Copied theme remains present"), Next.ThemeContext.FindChecked(TEXT("density")), FString(TEXT("comfortable")));
-	TestEqual(TEXT("Node theme is appended"), Next.ThemeContext.FindChecked(TEXT("brand")), FString(TEXT("primary")));
-	TestEqual(TEXT("Node theme overrides duplicate key"), Next.ThemeContext.FindChecked(TEXT("mode")), FString(TEXT("dark")));
-	TestEqual(TEXT("Merged theme count"), Next.ThemeContext.Num(), 3);
-
-	TestEqual(TEXT("Initial recursion depth"), State.RecursionDepth, 0);
+	const TSharedPtr<FDesignNode> Root =
+		MakeNode(TEXT("deep-root"), TEXT("DeepRoot"), EDesignNodeType::Frame, 0.0f, 0.0f, 100.0f, 100.0f);
+	TSharedPtr<FDesignNode> Current = Root;
+	constexpr int32 ExpectedDepth = 64;
+	for (int32 Index = 0; Index < ExpectedDepth; ++Index)
 	{
-		FRecursionGuard Guard(State.RecursionDepth, TEXT("InternalContextTest"));
-		TestTrue(TEXT("Recursion guard is valid below max depth"), Guard.bValid);
-		TestEqual(TEXT("Recursion guard increments depth"), State.RecursionDepth, 1);
+		const TSharedPtr<FDesignNode> Child = MakeNode(
+			FString::Printf(TEXT("deep-%d"), Index),
+			FString::Printf(TEXT("Deep%d"), Index),
+			EDesignNodeType::Frame,
+			0.0f,
+			0.0f,
+			100.0f,
+			100.0f);
+		Current->Children.Add(Child);
+		Current = Child;
 	}
-	TestEqual(TEXT("Recursion guard restores depth"), State.RecursionDepth, 0);
+	Doc.Children.Add(Root);
+
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	TestEqual(TEXT("Root widget name"), Data.RootWidget.Name, FString(TEXT("DeepRoot")));
+	const FUMGWidgetNode* CurrentWidget = &Data.RootWidget;
+	int32 ConvertedDepth = 0;
+	while (CurrentWidget && CurrentWidget->Children.Num() > 0)
+	{
+		CurrentWidget = &CurrentWidget->Children[0];
+		++ConvertedDepth;
+	}
+	TestTrue(TEXT("Deep conversion completes for a nested tree below the recursion guard limit"), ConvertedDepth >= ExpectedDepth);
 
 	return true;
 }

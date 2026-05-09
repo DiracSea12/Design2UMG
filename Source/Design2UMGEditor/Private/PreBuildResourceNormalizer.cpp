@@ -3,7 +3,7 @@
 #include "DesignResourceResolver.h"
 #include "UMGWidgetNodeAccess.h"
 #include "UMGPropertyKeys.h"
-#include "UMGValueParser.h"
+#include "UMGValueParsing.h"
 #include "Design2UMGLog.h"
 #include "DesignPathRasterizer.h"
 #include "ProceduralShapeGenerator.h"

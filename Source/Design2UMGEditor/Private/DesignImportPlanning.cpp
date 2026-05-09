@@ -4,7 +4,7 @@
 
 #include "Design2UMGConverter.h"
 #include "Design2UMGLog.h"
-#include "Design2UMGNotification.h"
+#include "Design2UMGNotifications.h"
 #include "DesignFontImportService.h"
 #include "DesignImageBakeUtils.h"
 #include "DesignRemoteImageImporter.h"

@@ -2,7 +2,7 @@
 
 #include "PenFileImportFactory.h"
 #include "Design2UMGLog.h"
-#include "Design2UMGNotification.h"
+#include "Design2UMGNotifications.h"
 #include "DesignImportDialogs.h"
 #include "DesignImportPipeline.h"
 

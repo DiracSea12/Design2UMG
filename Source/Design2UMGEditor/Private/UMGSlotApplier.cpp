@@ -1,7 +1,7 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGWidgetUtils.h"
-#include "UMGValueParser.h"
+#include "UMGValueParsing.h"
 #include "Design2UMGLog.h"
 
 #include "Components/PanelSlot.h"

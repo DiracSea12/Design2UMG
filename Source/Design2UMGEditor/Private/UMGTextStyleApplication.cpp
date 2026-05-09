@@ -5,7 +5,7 @@
 #include "DesignResourceResolver.h"
 #include "UMGPropertyApplierSupport.h"
 #include "UMGPropertyKeys.h"
-#include "UMGValueParser.h"
+#include "UMGValueParsing.h"
 
 #include "Brushes/SlateColorBrush.h"
 #include "Components/EditableTextBox.h"

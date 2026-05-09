@@ -3,7 +3,7 @@
 #include "ProceduralShapeGenerator.h"
 #include "UMGPropertyKeys.h"
 #include "UMGWidgetUtils.h"
-#include "UMGValueParser.h"
+#include "UMGValueParsing.h"
 #include "Design2UMGLog.h"
 #include "Dom/JsonObject.h"
 #include "Engine/Texture2D.h"

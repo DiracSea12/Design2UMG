@@ -3,7 +3,6 @@
 #include "CoreMinimal.h"
 #include "Design2UMGLog.h"
 #include "DesignSchema.h"
-#include "DesignTypeMapper.h"
 #include "FontResolver.h"
 #include "GenericPlatform/GenericPlatformOutputDevices.h"
 #include "Misc/FileHelper.h"
@@ -117,12 +116,7 @@ namespace TextMeasurementTestTrace
 				return FString();
 			}
 
-			FString TypefaceName = FFontResolver::FindBestTypeface(Node->Text.FontFamily, Node->Text.FontWeight);
-			if (TypefaceName.IsEmpty() && !Node->Text.FontWeight.IsEmpty())
-			{
-				TypefaceName = DesignTypeMapper::MapFontWeight(Node->Text.FontWeight).ToString();
-			}
-			return TypefaceName;
+			return FFontResolver::FindBestTypeface(Node->Text.FontFamily, Node->Text.FontWeight);
 		}
 
 		inline FString BuildCalibrationKey(const TSharedPtr<FDesignNode>& Node)

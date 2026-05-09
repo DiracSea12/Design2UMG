@@ -4,7 +4,7 @@
 
 #include "DesignSchema.h"
 #include "FontResolver.h"
-#include "RefExpander.h"
+#include "DesignReferenceExpansion.h"
 
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"

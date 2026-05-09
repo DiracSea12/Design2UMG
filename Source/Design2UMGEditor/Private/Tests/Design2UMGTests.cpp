@@ -3,19 +3,16 @@
 #include "PenParser.h"
 #include "Design2UMGConverter.h"
 #include "Design2UMGSettings.h"
-#include "DesignVariableResolver.h"
 #include "Design2UMGTestUtils.h"
 #include "FontResolver.h"
-#include "LayoutCalculator.h"
-#include "LayoutMapper.h"
+#include "UMGLayoutProjection.h"
 #include "UMGJsonParser.h"
 #include "UMGJsonSerializer.h"
 #include "UMGPropertyKeys.h"
 #include "UMGSchemaSourceExtensions.h"
-#include "UMGValueParser.h"
+#include "UMGValueParsing.h"
 #include "UMGWidgetNodeAccess.h"
 #include "UMGWidgetUtils.h"
-#include "VisualMapper.h"
 #include "FigmaParser.h"
 #include "DesignPathRasterizer.h"
 #include "ProceduralShapeGenerator.h"
@@ -462,118 +459,6 @@ bool FLayoutCalculatorTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Stretch anchor: MinX < MaxX"),
 			Slot.Anchors.Min.X < Slot.Anchors.Max.X);
 	}
-	return true;
-}
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperWrapWithBorderDirectTest,
-	"Design2UMG.VisualMapper.WrapWithBorderDirect",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FVisualMapperWrapWithBorderDirectTest::RunTest(const FString& Parameters)
-{
-	TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
-	Node->Type = EDesignNodeType::Frame;
-	Node->Transform.Opacity = 1.0f;
-
-	FUMGWidgetNode Widget;
-	Widget.Type = TEXT("Border");
-	Widget.Id = TEXT("panel");
-	Widget.Name = TEXT("Panel");
-	Widget.Bounds.W = 240.0f;
-	Widget.Bounds.H = 60.0f;
-	Widget.Brush.BrushColor = FUMGValueParser::ParseColor(TEXT("#112233FF"));
-	Widget.Brush.bHasBrushColor = true;
-	Widget.Render.RenderOpacity = 0.6f;
-	Widget.Render.bHasRenderOpacity = true;
-	Widget.Render.RenderAngle = 15.0f;
-	Widget.Render.bHasRenderAngle = true;
-	Widget.Render.Clipping = TEXT("ClipToBounds");
-	Widget.Render.bHasClipping = true;
-
-	FUMGWidgetNode Wrapped = VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
-	TestEqual(TEXT("Wrapped node remains Border"), Wrapped.Type, TEXT("Border"));
-	TestEqual(TEXT("BrushColor moved to outer border"), GetWidgetProperty(Wrapped, TEXT("BrushColor")), TEXT("#112233FF"));
-	TestEqual(TEXT("RenderOpacity moved to outer border"), GetWidgetProperty(Wrapped, TEXT("RenderOpacity")), TEXT("0.6"));
-	TestEqual(TEXT("RenderAngle moved to outer border"), GetWidgetProperty(Wrapped, TEXT("RenderAngle")), TEXT("15.0"));
-	TestEqual(TEXT("Clipping moved to outer border"), GetWidgetProperty(Wrapped, TEXT("Clipping")), TEXT("ClipToBounds"));
-	TestEqual(TEXT("Wrapped child count"), Wrapped.Children.Num(), 1);
-	if (Wrapped.Children.Num() != 1)
-	{
-		return false;
-	}
-
-	const FUMGWidgetNode& Inner = Wrapped.Children[0];
-	TestEqual(TEXT("Inner widget id suffix"), Inner.Id, TEXT("panel_inner"));
-	TestEqual(TEXT("Inner widget name suffix"), Inner.Name, TEXT("Panel_inner"));
-	TestFalse(TEXT("Inner widget should not keep BrushColor"), HasWidgetProperty(Inner, TEXT("BrushColor")));
-	TestFalse(TEXT("Inner widget should not keep RenderOpacity"), HasWidgetProperty(Inner, TEXT("RenderOpacity")));
-	TestFalse(TEXT("Inner widget should not keep RenderAngle"), HasWidgetProperty(Inner, TEXT("RenderAngle")));
-	TestFalse(TEXT("Inner widget should not keep Clipping"), HasWidgetProperty(Inner, TEXT("Clipping")));
-	return true;
-}
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperWrapWithBorderTypedTest,
-	"Design2UMG.VisualMapper.WrapWithBorderTyped",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FVisualMapperWrapWithBorderTypedTest::RunTest(const FString& Parameters)
-{
-	TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
-	Node->Type = EDesignNodeType::Frame;
-	Node->Transform.Opacity = 1.0f;
-
-	FUMGWidgetNode Widget;
-	Widget.Type = TEXT("Border");
-	Widget.Id = TEXT("typed_panel");
-	Widget.Name = TEXT("TypedPanel");
-	Widget.Bounds.W = 320.0f;
-	Widget.Bounds.H = 72.0f;
-	Widget.Brush.BrushColor = FLinearColor(0.25f, 0.5f, 0.75f, 1.0f);
-	Widget.Brush.bHasBrushColor = true;
-	Widget.Render.RenderOpacity = 0.55f;
-	Widget.Render.bHasRenderOpacity = true;
-	Widget.Render.RenderAngle = 12.0f;
-	Widget.Render.bHasRenderAngle = true;
-	Widget.Render.Clipping = TEXT("ClipToBounds");
-	Widget.Render.bHasClipping = true;
-
-	FUMGWidgetNode Wrapped = VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
-	TestEqual(TEXT("Typed wrapped node remains Border"), Wrapped.Type, TEXT("Border"));
-	TestEqual(TEXT("Typed brush color moved to outer border"), GetWidgetProperty(Wrapped, TEXT("BrushColor")), TEXT("#89BCE1FF"));
-	TestTrue(TEXT("Typed render opacity moved to outer border"),
-		FMath::IsNearlyEqual(FCString::Atof(*GetWidgetProperty(Wrapped, TEXT("RenderOpacity"))), 0.55f, 0.0001f));
-	TestTrue(TEXT("Typed render angle moved to outer border"),
-		FMath::IsNearlyEqual(FCString::Atof(*GetWidgetProperty(Wrapped, TEXT("RenderAngle"))), 12.0f, 0.0001f));
-	TestEqual(TEXT("Typed clipping moved to outer border"), GetWidgetProperty(Wrapped, TEXT("Clipping")), TEXT("ClipToBounds"));
-	TestEqual(TEXT("Typed wrapped child count"), Wrapped.Children.Num(), 1);
-	if (Wrapped.Children.Num() != 1)
-	{
-		return false;
-	}
-
-	const FUMGWidgetNode& Inner = Wrapped.Children[0];
-	TestFalse(TEXT("Typed inner widget should not keep BrushColor"), HasWidgetProperty(Inner, TEXT("BrushColor")));
-	TestFalse(TEXT("Typed inner widget should not keep RenderOpacity"), HasWidgetProperty(Inner, TEXT("RenderOpacity")));
-	TestFalse(TEXT("Typed inner widget should not keep RenderAngle"), HasWidgetProperty(Inner, TEXT("RenderAngle")));
-	TestFalse(TEXT("Typed inner widget should not keep Clipping"), HasWidgetProperty(Inner, TEXT("Clipping")));
-	return true;
-}
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLayoutMapperDirectHelpersTest,
-	"Design2UMG.LayoutMapper.DirectHelpers",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FLayoutMapperDirectHelpersTest::RunTest(const FString& Parameters)
-{
-	TArray<FUMGWidgetNode> Children;
-	Children.SetNum(3);
-	LayoutMapper::ApplyGap(Children, 12.0f, EDesignLayout::Horizontal);
-	TestEqual(TEXT("First child horizontal gap stays zero"), Children[0].Slot.Padding.Left, 0.0f);
-	TestEqual(TEXT("Second child horizontal gap"), Children[1].Slot.Padding.Left, 12.0f);
-	TestEqual(TEXT("Third child horizontal gap"), Children[2].Slot.Padding.Left, 12.0f);
-
-	FUMGWidgetNode Widget;
-	FDesignPadding Padding;
-	Padding.Left = 1.0f;
-	Padding.Top = 2.0f;
-	Padding.Right = 3.0f;
-	Padding.Bottom = 4.0f;
-	LayoutMapper::ApplyPadding(Widget, Padding);
-	TestEqual(TEXT("Padding serialized directly"), GetWidgetProperty(Widget, TEXT("Padding")), TEXT("1.0,2.0,3.0,4.0"));
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRefOfRefDescendantsOverrideTest,
@@ -1161,21 +1046,6 @@ bool FPenPaddingTwoValueAxisOrderTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Two-value padding bottom"), Panel->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Bottom, 6.0f);
 	TestEqual(TEXT("Two-value padding left"), Panel->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Left, 12.0f);
 	TestEqual(TEXT("Two-value padding right"), Panel->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Right, 12.0f);
-	return true;
-}
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVariableResolverLiteralDollarTextTest,
-	"Design2UMG.Parser.LiteralDollarTextIsNotVariable",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FVariableResolverLiteralDollarTextTest::RunTest(const FString& Parameters)
-{
-	TMap<FString, FDesignVariable> Variables;
-	FDesignVariableResolver Resolver;
-	Resolver.SetVariables(Variables);
-	TestFalse(TEXT("$45.00 should not be treated as variable ref"), Resolver.IsVariableRef(TEXT("$45.00")));
-	TestEqual(TEXT("Literal dollar text should round-trip unchanged"),
-		Resolver.ResolveString(TEXT("$45.00")),
-		FString(TEXT("$45.00")));
-	TestTrue(TEXT("$--font-primary remains a variable ref"), Resolver.IsVariableRef(TEXT("$--font-primary")));
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDesignSchemaSourceExtensionsRemainOptInTest,

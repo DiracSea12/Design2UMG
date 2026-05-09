@@ -2,7 +2,7 @@
 
 #include "DesignImportUtils.h"
 #include "Design2UMGLog.h"
-#include "Design2UMGNotification.h"
+#include "Design2UMGNotifications.h"
 #include "Automation/Design2UMGAutomationRender.h"
 #include "UMGGenerator.h"
 #include "UMGWidgetUtils.h"

@@ -4,7 +4,7 @@
 #include "UMGWidgetUtils.h"
 #include "Design2UMGLog.h"
 #include "UMGPropertyKeys.h"
-#include "UMGValueParser.h"
+#include "UMGValueParsing.h"
 #include "UMGWidgetNodeAccess.h"
 
 #include "Blueprint/WidgetTree.h"

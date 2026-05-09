@@ -7,8 +7,8 @@
 #include "DesignImportPipeline.h"
 #include "DesignImportUtils.h"
 #include "FigmaParser.h"
-#include "RefExpander.h"
-#include "UMGValueParser.h"
+#include "DesignReferenceExpansion.h"
+#include "UMGValueParsing.h"
 #include "UMGSchema.h"
 
 #include "HAL/FileManager.h"

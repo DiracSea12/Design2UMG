@@ -6,11 +6,11 @@
 #include "WidgetResourceBinder.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
-#include "LayoutCalculator.h"
+#include "UMGLayoutProjection.h"
 #include "WidgetLayoutAdapter.h"
 #include "UMGPropertyKeys.h"
 #include "UMGWidgetNodeAccess.h"
-#include "UMGValueParser.h"
+#include "UMGValueParsing.h"
 
 #include "WidgetBlueprint.h"
 #include "Blueprint/UserWidget.h"

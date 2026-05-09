@@ -10,7 +10,7 @@
 #include "UMGPropertyApplierSupport.h"
 #include "UMGTextPropertyApplier.h"
 #include "UMGPropertyKeys.h"
-#include "UMGValueParser.h"
+#include "UMGValueParsing.h"
 #include "UMGWidgetNodeAccess.h"
 #include "Design2UMGLog.h"
 

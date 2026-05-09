@@ -5,7 +5,7 @@
 #include "UMGPropertyKeys.h"
 #include "UMGSchema.h"
 #include "UMGWidgetNodeAccess.h"
-#include "UMGValueParser.h"
+#include "UMGValueParsing.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"

@@ -7,7 +7,7 @@
 #include "Design2UMGEditorImportOrchestrator.h"
 #include "Design2UMGEditorMenuOwner.h"
 #include "Design2UMGLog.h"
-#include "Design2UMGNotification.h"
+#include "Design2UMGNotifications.h"
 #include "DesignFontImportService.h"
 #include "FontResolver.h"
 

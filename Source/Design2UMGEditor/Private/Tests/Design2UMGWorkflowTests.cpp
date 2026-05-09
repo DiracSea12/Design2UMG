@@ -10,7 +10,6 @@
 #include "DesignImportUtils.h"
 #include "FontResolver.h"
 #include "FigmaParser.h"
-#include "LayoutFixer.h"
 #include "PenParser.h"
 #include "UMGGenerator.h"
 #include "UMGWidgetUtils.h"
@@ -46,7 +45,7 @@
 #include "Modules/ModuleManager.h"
 #include "ObjectTools.h"
 #include "RHI.h"
-#include "LayoutCalculator.h"
+#include "UMGLayoutProjection.h"
 #include "WidgetLayoutAdapter.h"
 #include "Components/CanvasPanel.h"
 #include "Components/VerticalBox.h"
@@ -1326,28 +1325,6 @@ bool FNamedSlotOverflowWrapStructureStableTest::RunTest(const FString& Parameter
 }
 
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLayoutFixerConservatismTest,
-	"Design2UMG.LayoutFixer.ConservatismCheck",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FLayoutFixerConservatismTest::RunTest(const FString& Parameters)
-{
-	FFixerPreset Preset;
-	Preset.DesignSize = FIntPoint(1920, 1080);
-	Preset.SnapPx = 4;
-	FFixerWidgetNode Root;
-	Root.Bounds = {0, 0, 1, 1};
-	FFixerWidgetNode Child1;
-	Child1.Bounds = {0, 0, 0.1f, 0.1f};
-	FFixerWidgetNode Child2;
-	Child2.Bounds = {0.5f, 0, 0.1f, 0.1f};
-	Root.Children.Add(Child1);
-	Root.Children.Add(Child2);
-	TArray<FFixerLogEntry> Log;
-	FFixerStats Stats;
-	LayoutFixer::FixWidgetTree(Root, Preset, Log, &Stats);
-	TestEqual(TEXT("RolledBack should be non-negative"), Stats.RolledBack >= 0, true);
-	return true;
-}
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFitContentMinimumExpandsToContentTest,
 	"Design2UMG.Converter.FitContentMinimumExpandsToContent",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)

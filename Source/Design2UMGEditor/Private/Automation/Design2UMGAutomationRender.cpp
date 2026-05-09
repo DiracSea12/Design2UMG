@@ -3,7 +3,7 @@
 #include "Automation/Design2UMGAutomationStructureSnapshot.h"
 #include "Design2UMGLocalFigmaImport.h"
 #include "Design2UMGLog.h"
-#include "Design2UMGNotification.h"
+#include "Design2UMGNotifications.h"
 #include "DesignFontImportService.h"
 #include "DesignImportPipeline.h"
 #include "DesignImportUtils.h"
