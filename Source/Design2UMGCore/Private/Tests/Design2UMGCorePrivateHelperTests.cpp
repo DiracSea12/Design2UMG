@@ -8,6 +8,7 @@
 #include "LayoutFixer.h"
 #include "LayoutMapper.h"
 #include "UMGSchema.h"
+#include "UMGPropertyKeys.h"
 #include "UMGValueParser.h"
 #include "UMGWidgetNodeAccess.h"
 #include "VisualMapper.h"
@@ -41,6 +42,31 @@ namespace
 		FDesignGradientStop& EndStop = Fill.Gradient.Colors.AddDefaulted_GetRef();
 		EndStop.Color = TEXT("#00FF00FF");
 		EndStop.Position = 1.0f;
+		return Fill;
+	}
+
+	FDesignFill MakeRadialMultiStopGradientFill()
+	{
+		FDesignFill Fill;
+		Fill.Type = EDesignFillType::Gradient;
+		Fill.Gradient.GradientType = EDesignGradientType::Radial;
+		Fill.Gradient.Rotation = 37.5f;
+		Fill.Gradient.bHasCenter = true;
+		Fill.Gradient.CenterX = 0.2f;
+		Fill.Gradient.CenterY = 0.7f;
+		Fill.Gradient.bHasSize = true;
+		Fill.Gradient.SizeWidth = 0.8f;
+		Fill.Gradient.SizeHeight = 1.35f;
+
+		FDesignGradientStop& Stop0 = Fill.Gradient.Colors.AddDefaulted_GetRef();
+		Stop0.Color = TEXT("#FF0000FF");
+		Stop0.Position = 0.0f;
+		FDesignGradientStop& Stop1 = Fill.Gradient.Colors.AddDefaulted_GetRef();
+		Stop1.Color = TEXT("#00FF00FF");
+		Stop1.Position = 0.45f;
+		FDesignGradientStop& Stop2 = Fill.Gradient.Colors.AddDefaulted_GetRef();
+		Stop2.Color = TEXT("#0000FFFF");
+		Stop2.Position = 1.0f;
 		return Fill;
 	}
 }
@@ -213,6 +239,59 @@ bool FBatchCVisualMapperMultiFillSmokeTest::RunTest(const FString& Parameters)
 		FString(TEXT("radialgradient")));
 	TestTrue(TEXT("Gradient layer carries typed gradient stops"), GradientLayer.Brush.Gradient.Stops.Num() == 2);
 	TestTrue(TEXT("Original widget becomes content child"), Wrapped.Children[2].Id.EndsWith(TEXT("_content")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGradientTypedPayloadMaterialParamsTest,
+	"Design2UMG.Gradient.TypedPayloadMaterialParams",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FGradientTypedPayloadMaterialParamsTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
+	Node->Id = TEXT("gradient_payload_source");
+	Node->Name = TEXT("GradientPayloadSource");
+	Node->Type = EDesignNodeType::Rectangle;
+	Node->Transform.SetWidthValue(FDesignSize::Fixed(128.0f));
+	Node->Transform.SetHeightValue(FDesignSize::Fixed(64.0f));
+	Node->Visual.Fill = MakeRadialMultiStopGradientFill();
+
+	FUMGWidgetNode Widget;
+	Widget.Type = TEXT("Image");
+	Widget.Id = TEXT("gradient_payload_widget");
+	Widget.Name = TEXT("GradientPayloadWidget");
+	VisualMapper::ApplyVisualProperties(Widget, Node);
+
+	TestEqual(TEXT("Radial gradient uses procedural material ref"), GetWidgetProperty(Widget, UMGPropertyKeys::MaterialRef), FString(TEXT("radialgradient")));
+	TestEqual(TEXT("Typed gradient type"), Widget.Brush.Gradient.Type, FString(TEXT("Radial")));
+	TestTrue(TEXT("Typed gradient keeps center"), Widget.Brush.Gradient.bHasCenter);
+	TestTrue(TEXT("Typed gradient keeps size"), Widget.Brush.Gradient.bHasSize);
+	TestTrue(TEXT("Typed gradient keeps rotation"), Widget.Brush.Gradient.bHasRotation);
+	TestEqual(TEXT("Typed gradient stop count"), Widget.Brush.Gradient.Stops.Num(), 3);
+	TestTrue(TEXT("Typed gradient center X"),
+		FMath::IsNearlyEqual(Widget.Brush.Gradient.Center.X, 0.2f, 0.0001f));
+	TestTrue(TEXT("Typed gradient center Y"),
+		FMath::IsNearlyEqual(Widget.Brush.Gradient.Center.Y, 0.7f, 0.0001f));
+	TestTrue(TEXT("Typed gradient size width"),
+		FMath::IsNearlyEqual(Widget.Brush.Gradient.Size.X, 0.8f, 0.0001f));
+	TestTrue(TEXT("Typed gradient size height"),
+		FMath::IsNearlyEqual(Widget.Brush.Gradient.Size.Y, 1.35f, 0.0001f));
+
+	const FString MaterialParams = GetWidgetProperty(Widget, UMGPropertyKeys::MaterialParams);
+	TestTrue(TEXT("Material params include multi-stop array"), MaterialParams.Contains(TEXT("\"Stops\"")));
+	TestTrue(TEXT("Material params include middle stop position"), MaterialParams.Contains(TEXT("\"Pos\":0.4500")));
+	TestTrue(TEXT("Material params include radial center"), MaterialParams.Contains(TEXT("\"CenterX\":0.2000")));
+	TestTrue(TEXT("Material params include radial size"), MaterialParams.Contains(TEXT("\"SizeHeight\":1.3500")));
+	TestTrue(TEXT("Material params include rotation"), MaterialParams.Contains(TEXT("\"Rotation\":37.5000")));
+
+	const FUMGPropertyBag PropertyBag = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Widget);
+	FString BagMaterialRef;
+	FString BagMaterialParams;
+	TestTrue(TEXT("Typed property bag exposes gradient material ref"),
+		PropertyBag.TryGetString(UMGPropertyKeys::MaterialRef, BagMaterialRef));
+	TestTrue(TEXT("Typed property bag exposes gradient material params"),
+		PropertyBag.TryGetString(UMGPropertyKeys::MaterialParams, BagMaterialParams));
+	TestEqual(TEXT("Bag material ref"), BagMaterialRef, FString(TEXT("radialgradient")));
+	TestEqual(TEXT("Bag material params"), BagMaterialParams, MaterialParams);
 	return true;
 }
 

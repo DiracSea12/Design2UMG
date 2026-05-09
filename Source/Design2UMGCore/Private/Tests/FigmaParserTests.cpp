@@ -110,6 +110,82 @@ bool FFigmaParserFillTypesTest::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FFigmaParserGradientGeometryTest,
+	"Design2UMG.Gradient.FigmaParserGeometry",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFigmaParserGradientGeometryTest::RunTest(const FString&)
+{
+	const FString Json = TEXT(R"JSON(
+{
+  "document": {
+    "id": "0:0",
+    "name": "Document",
+    "type": "DOCUMENT",
+    "children": [
+      {
+        "id": "0:1",
+        "name": "Page 1",
+        "type": "CANVAS",
+        "children": [
+          {
+            "id": "2:1",
+            "name": "RadialGradientNode",
+            "type": "RECTANGLE",
+            "absoluteBoundingBox": { "x": 0, "y": 0, "width": 120, "height": 80 },
+            "fills": [{
+              "type": "GRADIENT_RADIAL",
+              "gradientHandlePositions": [
+                { "x": 0.25, "y": 0.75 },
+                { "x": 0.65, "y": 0.75 },
+                { "x": 0.25, "y": 1.15 }
+              ],
+              "gradientStops": [
+                { "color": { "r": 1, "g": 0, "b": 0, "a": 1 }, "position": 0 },
+                { "color": { "r": 0, "g": 1, "b": 0, "a": 1 }, "position": 0.4 },
+                { "color": { "r": 0, "g": 0, "b": 1, "a": 1 }, "position": 1 }
+              ]
+            }],
+            "children": []
+          }
+        ]
+      }
+    ]
+  },
+  "components": {},
+  "componentSets": {},
+  "styles": {}
+}
+)JSON");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Figma document parses"), FFigmaParser::ParseDocument(Json, Doc));
+	TestEqual(TEXT("One parsed root child"), Doc.Children.Num(), 1);
+	if (Doc.Children.Num() != 1 || !Doc.Children[0].IsValid())
+	{
+		return false;
+	}
+
+	const TSharedPtr<FDesignNode>& Node = Doc.Children[0];
+	TestEqual(TEXT("Parsed gradient fill type"), Node->Visual.Fill.Type, EDesignFillType::Gradient);
+	TestEqual(TEXT("Parsed gradient type"), Node->Visual.Fill.Gradient.GradientType, EDesignGradientType::Radial);
+	TestEqual(TEXT("Parsed gradient stops"), Node->Visual.Fill.Gradient.Colors.Num(), 3);
+	TestTrue(TEXT("Parsed radial center present"), Node->Visual.Fill.Gradient.bHasCenter);
+	TestTrue(TEXT("Parsed radial size present"), Node->Visual.Fill.Gradient.bHasSize);
+	TestTrue(TEXT("Parsed radial center X"),
+		FMath::IsNearlyEqual(Node->Visual.Fill.Gradient.CenterX, 0.25f, 0.0001f));
+	TestTrue(TEXT("Parsed radial center Y"),
+		FMath::IsNearlyEqual(Node->Visual.Fill.Gradient.CenterY, 0.75f, 0.0001f));
+	TestTrue(TEXT("Parsed radial size width"),
+		FMath::IsNearlyEqual(Node->Visual.Fill.Gradient.SizeWidth, 0.8f, 0.0001f));
+	TestTrue(TEXT("Parsed radial size height"),
+		FMath::IsNearlyEqual(Node->Visual.Fill.Gradient.SizeHeight, 0.8f, 0.0001f));
+	TestTrue(TEXT("Parsed middle stop position"),
+		FMath::IsNearlyEqual(Node->Visual.Fill.Gradient.Colors[1].Position, 0.4f, 0.0001f));
+	return true;
+}
+
 // ---------------------------------------------------------------------------
 // Effects: blur / shadow
 // ---------------------------------------------------------------------------

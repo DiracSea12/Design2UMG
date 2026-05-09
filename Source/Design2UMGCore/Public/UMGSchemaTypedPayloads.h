@@ -13,8 +13,7 @@ struct FUMGTextStyleData
 {
 	float FontSize = 0;              // 0 = unset
 	float SourceFontSize = 0;        // Original design font size before px->UMG scaling
-	float LetterSpacing = 0;
-	bool bHasLetterSpacing = false;  // Distinguishes explicit zero from unset
+	TOptional<float> LetterSpacing;  // Distinguishes explicit zero from unset
 };
 
 /**

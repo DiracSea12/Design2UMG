@@ -222,7 +222,7 @@ namespace
 		static const FTypedWidgetStringDescriptor Descriptors[] = {
 			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::FontSize, Node.TextStyle.FontSize > 0.0f, SerializeWidgetFloat(Node.TextStyle.FontSize)),
 			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::DesignFontSize, Node.TextStyle.SourceFontSize > 0.0f, SerializeWidgetFloat(Node.TextStyle.SourceFontSize)),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::LetterSpacing, Node.TextStyle.bHasLetterSpacing, SerializeWidgetFloat(Node.TextStyle.LetterSpacing)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::LetterSpacing, Node.TextStyle.LetterSpacing.IsSet(), SerializeWidgetFloat(Node.TextStyle.LetterSpacing.GetValue())),
 		};
 		return { Descriptors, UE_ARRAY_COUNT(Descriptors) };
 	}

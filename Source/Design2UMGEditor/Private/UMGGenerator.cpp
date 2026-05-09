@@ -4,9 +4,11 @@
 #include "UMGPrototypeAnimationBuilder.h"
 #include "UMGGeneratorRootHandoff.h"
 #include "UMGWidgetNodeAccess.h"
+#include "Design2UMGPrototypeNavigationTagHelper.h"
 #include "UObject/SavePackage.h"
 #include "Design2UMGFigmaMetadataExtensions.h"
 #include "Design2UMGLog.h"
+#include "Design2UMGSettings.h"
 #include "ObjectTools.h"
 
 #include "WidgetBlueprint.h"
@@ -351,8 +353,20 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 		return nullptr;
 	}
 	WBP->WidgetTree->RootWidget = Root;
-	UMGPrototypeAnimationBuilder::GenerateNavigationAnimations(WBP, FixedRoot, NavigationData);
-	UMGPrototypeAnimationBuilder::ConfigureNavigationExtension(WBP, NavigationData);
+	switch (UDesign2UMGSettings::Get()->PrototypeNavigationGenerationMode)
+	{
+	case EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension:
+		UMGPrototypeAnimationBuilder::GenerateNavigationAnimations(WBP, FixedRoot, NavigationData);
+		UMGPrototypeAnimationBuilder::ConfigureNavigationExtension(WBP, NavigationData);
+		break;
+	case EDesign2UMGPrototypeNavigationGenerationMode::TagHelper:
+		Design2UMGPrototypeNavigationTagHelper::ConfigureMetadata(WBP, NavigationData);
+		break;
+	case EDesign2UMGPrototypeNavigationGenerationMode::Disabled:
+		break;
+	default:
+		break;
+	}
 	ConfigureFigmaMetadataExtension(WBP, WidgetData.SourceDocument(), FigmaMetadataRecords);
 	ClearGeneratedWidgetNavigationState(WBP);
 	DumpTemplateTextBlockFontState(TEXT("template-precompile"), WBP);

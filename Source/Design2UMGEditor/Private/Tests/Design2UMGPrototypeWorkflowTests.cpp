@@ -3,6 +3,8 @@
 #include "Misc/AutomationTest.h"
 #include "Design2UMGConverter.h"
 #include "Design2UMGPrototypeNavigationExtensions.h"
+#include "Design2UMGPrototypeNavigationTagHelper.h"
+#include "Design2UMGSettings.h"
 #include "Design2UMGTestUtils.h"
 #include "FigmaParser.h"
 #include "UMGGenerator.h"
@@ -50,6 +52,61 @@ namespace
 		bool bSavedCapture = false;
 		FString SavedLastOpenedUrl;
 	};
+
+	struct FScopedPrototypeNavigationGenerationMode
+	{
+		explicit FScopedPrototypeNavigationGenerationMode(
+			EDesign2UMGPrototypeNavigationGenerationMode InMode)
+		{
+			Settings = UDesign2UMGSettings::Get();
+			if (Settings)
+			{
+				SavedMode = Settings->PrototypeNavigationGenerationMode;
+				Settings->PrototypeNavigationGenerationMode = InMode;
+			}
+		}
+
+		~FScopedPrototypeNavigationGenerationMode()
+		{
+			if (Settings)
+			{
+				Settings->PrototypeNavigationGenerationMode = SavedMode;
+			}
+		}
+
+		TObjectPtr<UDesign2UMGSettings> Settings;
+		EDesign2UMGPrototypeNavigationGenerationMode SavedMode =
+			EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension;
+	};
+
+	const TCHAR* BasicPrototypeNavigationJson()
+	{
+		return TEXT(R"({
+			"document": {
+				"id":"0:0",
+				"name":"Doc",
+				"type":"DOCUMENT",
+				"prototypeStartNodeID":"1:1",
+				"children":[
+					{"id":"0:1","name":"Page","type":"CANVAS","children":[
+						{"id":"1:1","name":"PageOne","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
+							{"id":"cta_button","name":"CTA","type":"RECTANGLE","visible":true,
+							 "absoluteBoundingBox":{"x":40,"y":60,"width":120,"height":44},
+							 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.1,"g":0.4,"b":0.9,"a":1}}],
+							 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"NAVIGATE","transition":{"type":"DISSOLVE","duration":120,"easing":{"type":"EASE_IN_AND_OUT"}}}]}],
+							 "children":[]}
+						]},
+						{"id":"2:1","name":"PageTwo","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
+							{"id":"page2_title","name":"Done","type":"TEXT","visible":true,
+							 "absoluteBoundingBox":{"x":32,"y":48,"width":120,"height":32},
+							 "characters":"Done",
+							 "style":{"fontFamily":"Inter","fontSize":24,"fontWeight":600,"textAlignHorizontal":"LEFT","textAlignVertical":"TOP","textDecoration":"NONE","letterSpacing":0,"lineHeightUnit":"AUTO","lineHeightPx":0}}
+						]}
+					]}
+				]
+			}
+		})");
+	}
 
 	UWidgetSwitcher* FindPrototypeSwitcherWidget(UUserWidget* WidgetInstance, const FUMGWidgetData& Data)
 	{
@@ -138,11 +195,28 @@ namespace
 	}
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPrototypeNavigationGenerationModeDefaultTest,
+	"Design2UMG.Unit.PrototypeNavigationGenerationMode.DefaultRuntimeExtension",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPrototypeNavigationGenerationModeDefaultTest::RunTest(const FString& Parameters)
+{
+	const UDesign2UMGSettings* FreshSettings =
+		NewObject<UDesign2UMGSettings>(GetTransientPackage());
+	TestEqual(
+		TEXT("Prototype navigation generation defaults to runtime extension"),
+		FreshSettings->PrototypeNavigationGenerationMode,
+		EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeNavigationRuntimeWorkflowTest,
 	"Design2UMG.WidgetBlueprint.FigmaPrototypeNavigationRuntime",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaPrototypeNavigationRuntimeWorkflowTest::RunTest(const FString& Parameters)
 {
+	FScopedPrototypeNavigationGenerationMode ScopedMode(
+		EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
+
 	const FString Json = TEXT(R"({
 		"document": {
 			"id":"0:0",
@@ -250,11 +324,226 @@ bool FFigmaPrototypeNavigationRuntimeWorkflowTest::RunTest(const FString& Parame
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeTagHelperRuntimeWorkflowTest,
+	"Design2UMG.WidgetBlueprint.FigmaPrototypeTagHelperRuntime",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaPrototypeTagHelperRuntimeWorkflowTest::RunTest(const FString& Parameters)
+{
+	FScopedPrototypeNavigationGenerationMode ScopedMode(
+		EDesign2UMGPrototypeNavigationGenerationMode::TagHelper);
+
+	FDesignDocument Document;
+	TestTrue(TEXT("Parse prototype tag helper fixture"),
+		FFigmaParser::ParseDocument(BasicPrototypeNavigationJson(), Document));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	TestTrue(TEXT("Prototype tag helper data available"), Data.PrototypeNavigation().IsValid());
+	if (!Data.PrototypeNavigation().IsValid())
+	{
+		return false;
+	}
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/FigmaPrototypeTagHelper");
+	DeleteGeneratedAssetsAtPath(OutputPath);
+
+	UWidgetBlueprint* Blueprint = FUMGGenerator::BuildWidgetBlueprint(Data, OutputPath);
+	TestTrue(TEXT("Build prototype tag helper widget blueprint"), Blueprint != nullptr);
+	if (!Blueprint)
+	{
+		return false;
+	}
+
+	FUMGGenerator::SaveWidgetBlueprint(Blueprint);
+	UWidgetBlueprintGeneratedClass* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(Blueprint->GeneratedClass);
+	const UDesign2UMGPrototypeNavigationClassExtension* RuntimeExtension =
+		GeneratedClass ? GeneratedClass->GetExtension<UDesign2UMGPrototypeNavigationClassExtension>() : nullptr;
+	const UDesign2UMGPrototypeNavigationTagHelperClassExtension* TagMetadata =
+		GeneratedClass ? GeneratedClass->GetExtension<UDesign2UMGPrototypeNavigationTagHelperClassExtension>() : nullptr;
+	TestTrue(TEXT("Generated class exists"), GeneratedClass != nullptr);
+	TestNull(TEXT("TagHelper mode does not attach prototype runtime class extension"), RuntimeExtension);
+	TestNotNull(TEXT("TagHelper mode attaches data-only helper metadata"), TagMetadata);
+	if (!GeneratedClass || !TagMetadata)
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	TestEqual(TEXT("TagHelper metadata switcher name"), TagMetadata->GetSwitcherWidgetName(), FName(*Data.PrototypeNavigation().SwitcherWidgetName));
+	TestEqual(TEXT("TagHelper metadata page count"), TagMetadata->GetPageIds().Num(), 2);
+	TestEqual(TEXT("TagHelper metadata binding count"), TagMetadata->GetBindings().Num(), 1);
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	UUserWidget* WidgetInstance = World ? CreateWidget<UUserWidget>(World, GeneratedClass) : nullptr;
+	TestTrue(TEXT("Prototype tag helper widget instance created"), WidgetInstance != nullptr);
+	if (!WidgetInstance || !WidgetInstance->WidgetTree)
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	WidgetInstance->TakeWidget();
+	UWidgetSwitcher* Switcher = FindPrototypeSwitcherWidget(WidgetInstance, Data);
+	UButton* TriggerButton = Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("cta_button")));
+	TestTrue(TEXT("TagHelper switcher exists"), Switcher != nullptr);
+	TestTrue(TEXT("TagHelper trigger exists"), TriggerButton != nullptr);
+	if (!Switcher || !TriggerButton)
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	TestTrue(TEXT("TagHelper setup binds click navigation"),
+		UDesign2UMGPrototypeNavigationTagHelper::SetupNavigation(Switcher, WidgetInstance));
+
+	TestEqual(TEXT("TagHelper initial page index"), Switcher->GetActiveWidgetIndex(), 0);
+	TriggerButton->OnClicked.Broadcast();
+	TestEqual(TEXT("TagHelper click switches to target page"), Switcher->GetActiveWidgetIndex(), 1);
+
+	WidgetInstance->RemoveFromParent();
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeDisabledRuntimeWorkflowTest,
+	"Design2UMG.WidgetBlueprint.FigmaPrototypeDisabledRuntime",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaPrototypeDisabledRuntimeWorkflowTest::RunTest(const FString& Parameters)
+{
+	FScopedPrototypeNavigationGenerationMode ScopedMode(
+		EDesign2UMGPrototypeNavigationGenerationMode::Disabled);
+
+	FDesignDocument Document;
+	TestTrue(TEXT("Parse prototype disabled fixture"),
+		FFigmaParser::ParseDocument(BasicPrototypeNavigationJson(), Document));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	TestTrue(TEXT("Prototype disabled mode still converts navigation data"), Data.PrototypeNavigation().IsValid());
+	if (!Data.PrototypeNavigation().IsValid())
+	{
+		return false;
+	}
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/FigmaPrototypeDisabled");
+	DeleteGeneratedAssetsAtPath(OutputPath);
+
+	UWidgetBlueprint* Blueprint = FUMGGenerator::BuildWidgetBlueprint(Data, OutputPath);
+	TestTrue(TEXT("Build prototype disabled widget blueprint"), Blueprint != nullptr);
+	if (!Blueprint)
+	{
+		return false;
+	}
+
+	FUMGGenerator::SaveWidgetBlueprint(Blueprint);
+	UWidgetBlueprintGeneratedClass* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(Blueprint->GeneratedClass);
+	const UDesign2UMGPrototypeNavigationClassExtension* RuntimeExtension =
+		GeneratedClass ? GeneratedClass->GetExtension<UDesign2UMGPrototypeNavigationClassExtension>() : nullptr;
+	const UDesign2UMGPrototypeNavigationTagHelperClassExtension* TagMetadata =
+		GeneratedClass ? GeneratedClass->GetExtension<UDesign2UMGPrototypeNavigationTagHelperClassExtension>() : nullptr;
+	TestTrue(TEXT("Generated class exists"), GeneratedClass != nullptr);
+	TestNull(TEXT("Disabled mode does not attach prototype runtime class extension"), RuntimeExtension);
+	TestNull(TEXT("Disabled mode does not attach tag helper metadata"), TagMetadata);
+	if (!GeneratedClass)
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	UUserWidget* WidgetInstance = World ? CreateWidget<UUserWidget>(World, GeneratedClass) : nullptr;
+	TestTrue(TEXT("Prototype disabled widget instance created"), WidgetInstance != nullptr);
+	if (!WidgetInstance || !WidgetInstance->WidgetTree)
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	WidgetInstance->TakeWidget();
+	UWidgetSwitcher* Switcher = FindPrototypeSwitcherWidget(WidgetInstance, Data);
+	UButton* TriggerButton = Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("cta_button")));
+	TestTrue(TEXT("Disabled switcher exists"), Switcher != nullptr);
+	TestTrue(TEXT("Disabled trigger button exists"), TriggerButton != nullptr);
+	if (!Switcher || !TriggerButton)
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	TestFalse(TEXT("Disabled tag helper setup does not bind"),
+		UDesign2UMGPrototypeNavigationTagHelper::SetupNavigation(Switcher, WidgetInstance));
+
+	TestEqual(TEXT("Disabled initial page index"), Switcher->GetActiveWidgetIndex(), 0);
+	TriggerButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Disabled click does not switch page"), Switcher->GetActiveWidgetIndex(), 0);
+
+	WidgetInstance->RemoveFromParent();
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeTagHelperOpenLinkNoMetadataWorkflowTest,
+	"Design2UMG.WidgetBlueprint.FigmaPrototypeTagHelperOpenLinkNoMetadata",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaPrototypeTagHelperOpenLinkNoMetadataWorkflowTest::RunTest(const FString& Parameters)
+{
+	FScopedPrototypeNavigationGenerationMode ScopedMode(
+		EDesign2UMGPrototypeNavigationGenerationMode::TagHelper);
+
+	const FString Json = TEXT(R"({
+		"document": {
+			"id":"0:0",
+			"name":"Doc",
+			"type":"DOCUMENT",
+			"children":[
+				{"id":"0:1","name":"Page","type":"CANVAS","children":[
+					{"id":"1:1","name":"PageOne","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
+						{"id":"link_button","name":"Link","type":"RECTANGLE","visible":true,
+						 "absoluteBoundingBox":{"x":40,"y":120,"width":120,"height":44},
+						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.2,"g":0.7,"b":0.5,"a":1}}],
+						 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"URL","url":"https://example.com/tag-helper"}]}],
+						 "children":[]}
+					]}
+				]}
+			]
+		}
+	})");
+
+	FDesignDocument Document;
+	TestTrue(TEXT("Parse TagHelper open-link fixture"), FFigmaParser::ParseDocument(Json, Document));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
+	TestTrue(TEXT("TagHelper open-link navigation data is valid"), NavigationData.IsValid());
+	TestFalse(TEXT("TagHelper open-link has no switcher requirement"), NavigationData.RequiresSwitcher());
+	if (!NavigationData.IsValid())
+	{
+		return false;
+	}
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/FigmaPrototypeTagHelperOpenLink");
+	DeleteGeneratedAssetsAtPath(OutputPath);
+
+	UWidgetBlueprint* Blueprint = FUMGGenerator::BuildWidgetBlueprint(Data, OutputPath);
+	TestTrue(TEXT("Build TagHelper open-link widget blueprint"), Blueprint != nullptr);
+	if (!Blueprint)
+	{
+		return false;
+	}
+
+	FUMGGenerator::SaveWidgetBlueprint(Blueprint);
+	UWidgetBlueprintGeneratedClass* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(Blueprint->GeneratedClass);
+	const UDesign2UMGPrototypeNavigationClassExtension* RuntimeExtension =
+		GeneratedClass ? GeneratedClass->GetExtension<UDesign2UMGPrototypeNavigationClassExtension>() : nullptr;
+	const UDesign2UMGPrototypeNavigationTagHelperClassExtension* TagMetadata =
+		GeneratedClass ? GeneratedClass->GetExtension<UDesign2UMGPrototypeNavigationTagHelperClassExtension>() : nullptr;
+	TestTrue(TEXT("TagHelper open-link generated class exists"), GeneratedClass != nullptr);
+	TestNull(TEXT("TagHelper open-link does not attach runtime navigation extension"), RuntimeExtension);
+	TestNull(TEXT("TagHelper open-link does not attach helper metadata"), TagMetadata);
+
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	return GeneratedClass != nullptr;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeSpecialActionsRuntimeWorkflowTest,
 	"Design2UMG.WidgetBlueprint.FigmaPrototypeSpecialActionsRuntime",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaPrototypeSpecialActionsRuntimeWorkflowTest::RunTest(const FString& Parameters)
 {
+	FScopedPrototypeNavigationGenerationMode ScopedMode(
+		EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
 	FScopedPrototypeOpenUrlCapture OpenUrlCapture;
 
 	const FString Json = TEXT(R"({
@@ -405,6 +694,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeHoverAndPressRuntimeWorkflowTest
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaPrototypeHoverAndPressRuntimeWorkflowTest::RunTest(const FString& Parameters)
 {
+	FScopedPrototypeNavigationGenerationMode ScopedMode(
+		EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
+
 	const FString Json = TEXT(R"({
 		"document": {
 			"id":"0:0",
@@ -502,6 +794,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeAdvancedTriggersRuntimeWorkflowT
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaPrototypeAdvancedTriggersRuntimeWorkflowTest::RunTest(const FString& Parameters)
 {
+	FScopedPrototypeNavigationGenerationMode ScopedMode(
+		EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
+
 	const FString Json = TEXT(R"({
 		"document": {
 			"id":"0:0",
@@ -650,6 +945,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeSinglePageOpenLinkRuntimeWorkflo
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaPrototypeSinglePageOpenLinkRuntimeWorkflowTest::RunTest(const FString& Parameters)
 {
+	FScopedPrototypeNavigationGenerationMode ScopedMode(
+		EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
 	FScopedPrototypeOpenUrlCapture OpenUrlCapture;
 
 	const FString Json = TEXT(R"({
@@ -739,6 +1036,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeSlideTransitionRuntimeWorkflowTe
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaPrototypeSlideTransitionRuntimeWorkflowTest::RunTest(const FString& Parameters)
 {
+	FScopedPrototypeNavigationGenerationMode ScopedMode(
+		EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
+
 	const FString Json = TEXT(R"({
 		"document": {
 			"id":"0:0",

@@ -195,7 +195,6 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 		if ((*TSObject)->TryGetNumberField(UMGPropertyKeys::LetterSpacing, Val))
 		{
 			OutNode.TextStyle.LetterSpacing = (float)Val;
-			OutNode.TextStyle.bHasLetterSpacing = true;
 		}
 	}
 

@@ -1,0 +1,40 @@
+﻿# GitHub generated release notes configuration for public Design2UMG releases.
+# This only classifies merged PRs. It does not imply a hosted full UE formal gate.
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+      - skip-changelog
+      - internal-only
+  categories:
+    - title: Breaking changes
+      labels:
+        - breaking-change
+        - breaking
+    - title: Features
+      labels:
+        - feature
+        - enhancement
+    - title: Fixes
+      labels:
+        - bug
+        - fix
+    - title: Validation and release
+      labels:
+        - validation
+        - release
+        - ci
+        - build
+    - title: Documentation
+      labels:
+        - documentation
+        - docs
+    - title: Maintenance
+      labels:
+        - refactor
+        - chore
+        - dependency
+        - dependencies
+    - title: Other changes
+      labels:
+        - "*"

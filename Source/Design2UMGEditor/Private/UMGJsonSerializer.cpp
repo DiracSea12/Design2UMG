@@ -118,15 +118,15 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeWidgetNode(const FUMGWidget
 	J->SetObjectField(TEXT("Slot"), SerializeSlot(Node.Slot));
 
 	// TextStyle (v2.4)
-	if (Node.TextStyle.FontSize > 0 || Node.TextStyle.SourceFontSize > 0 || Node.TextStyle.bHasLetterSpacing)
+	if (Node.TextStyle.FontSize > 0 || Node.TextStyle.SourceFontSize > 0 || Node.TextStyle.LetterSpacing.IsSet())
 	{
 		TSharedRef<FJsonObject> TS = MakeShared<FJsonObject>();
 		if (Node.TextStyle.FontSize > 0)
 			TS->SetNumberField(UMGPropertyKeys::FontSize, Node.TextStyle.FontSize);
 		if (Node.TextStyle.SourceFontSize > 0)
 			TS->SetNumberField(TEXT("SourceFontSize"), Node.TextStyle.SourceFontSize);
-		if (Node.TextStyle.bHasLetterSpacing)
-			TS->SetNumberField(UMGPropertyKeys::LetterSpacing, Node.TextStyle.LetterSpacing);
+		if (Node.TextStyle.LetterSpacing.IsSet())
+			TS->SetNumberField(UMGPropertyKeys::LetterSpacing, Node.TextStyle.LetterSpacing.GetValue());
 		J->SetObjectField(TEXT("TextStyle"), TS);
 	}
 

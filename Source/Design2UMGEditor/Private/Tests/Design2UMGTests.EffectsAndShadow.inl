@@ -470,7 +470,6 @@ bool FTextBlockUsesTypedTextPayloadParityTest::RunTest(const FString& Parameters
 	Node.TextStyle.FontSize = 18.0f;
 	Node.TextStyle.SourceFontSize = 18.0f;
 	Node.TextStyle.LetterSpacing = 1.5f;
-	Node.TextStyle.bHasLetterSpacing = true;
 	Node.WidgetStyle.Padding = FMargin(7.0f, 8.0f, 9.0f, 10.0f);
 	Node.WidgetStyle.ToolTipText = TEXT("Typed tooltip");
 	Node.Shadow.ShadowOffset = FVector2D(2.0f, 3.0f);
@@ -583,7 +582,6 @@ bool FEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const FString& P
 	Node.TextStyle.FontSize = 19.0f;
 	Node.TextStyle.SourceFontSize = 19.0f;
 	Node.TextStyle.LetterSpacing = 1.25f;
-	Node.TextStyle.bHasLetterSpacing = true;
 
 	const FUMGPropertyBag TypedProperties = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
 	const FLinearColor SerializedNodeColor =
@@ -776,7 +774,6 @@ bool FMultiLineEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const F
 	Node.TextStyle.FontSize = 17.0f;
 	Node.TextStyle.SourceFontSize = 17.0f;
 	Node.TextStyle.LetterSpacing = 0.75f;
-	Node.TextStyle.bHasLetterSpacing = true;
 	Node.WidgetStyle.Padding = FMargin(4.0f, 5.0f, 6.0f, 7.0f);
 
 	const FUMGPropertyBag TypedProperties = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
@@ -932,7 +929,6 @@ bool FRichTextBlockStyleRowsApplicationTest::RunTest(const FString& Parameters)
 	Node.TextStyle.FontSize = 18.0f;
 	Node.TextStyle.SourceFontSize = 18.0f;
 	Node.TextStyle.LetterSpacing = 1.5f;
-	Node.TextStyle.bHasLetterSpacing = true;
 	Node.WidgetStyle.Padding = FMargin(3.0f, 4.0f, 5.0f, 6.0f);
 	Node.WidgetStyle.ToolTipText = TEXT("https://docs.example.com");
 
@@ -1139,7 +1135,6 @@ bool FTextFamilyTypedJsonRoundTripTest::RunTest(const FString& Parameters)
 	SourceNode.TextStyle.FontSize = 18.0f;
 	SourceNode.TextStyle.SourceFontSize = 18.0f;
 	SourceNode.TextStyle.LetterSpacing = 1.25f;
-	SourceNode.TextStyle.bHasLetterSpacing = true;
 	SourceNode.WidgetStyle.Padding = FMargin(3.0f, 4.0f, 5.0f, 6.0f);
 	SourceData.RootWidget.Children.Add(SourceNode);
 
@@ -1174,7 +1169,9 @@ bool FTextFamilyTypedJsonRoundTripTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Parsed color preserved"), ParsedNode->Text.bHasColor && ParsedNode->Text.Color.Equals(SourceNode.Text.Color, 0.01f));
 	TestTrue(TEXT("Parsed font size preserved"), FMath::IsNearlyEqual(ParsedNode->TextStyle.FontSize, SourceNode.TextStyle.FontSize, 0.001f));
 	TestTrue(TEXT("Parsed source font size preserved"), FMath::IsNearlyEqual(ParsedNode->TextStyle.SourceFontSize, SourceNode.TextStyle.SourceFontSize, 0.001f));
-	TestTrue(TEXT("Parsed letter spacing preserved"), ParsedNode->TextStyle.bHasLetterSpacing && FMath::IsNearlyEqual(ParsedNode->TextStyle.LetterSpacing, SourceNode.TextStyle.LetterSpacing, 0.001f));
+	TestTrue(TEXT("Parsed letter spacing preserved"),
+		ParsedNode->TextStyle.LetterSpacing.IsSet()
+		&& FMath::IsNearlyEqual(ParsedNode->TextStyle.LetterSpacing.GetValue(), SourceNode.TextStyle.LetterSpacing.GetValue(), 0.001f));
 	TestTrue(TEXT("Parsed padding preserved"),
 		ParsedNode->WidgetStyle.Padding.IsSet()
 		&& FMath::IsNearlyEqual(ParsedNode->WidgetStyle.Padding->Left, SourceNode.WidgetStyle.Padding->Left, 0.001f)
@@ -1245,6 +1242,162 @@ bool FTextFamilyTypedJsonRoundTripTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextStyleLetterSpacingOptionalSemanticsTest,
+	"Design2UMG.UMGJson.TextStyleLetterSpacingOptionalSemantics",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTextStyleLetterSpacingOptionalSemanticsTest::RunTest(const FString& Parameters)
+{
+	auto SerializeSingleNode = [](const FUMGWidgetNode& Node)
+	{
+		FUMGWidgetData Data;
+		Data.WidgetName = TEXT("WBP_LetterSpacingOptionalSemantics");
+		Data.RootWidget.Type = TEXT("CanvasPanel");
+		Data.RootWidget.Name = TEXT("Root");
+		Data.RootWidget.Children.Add(Node);
+		return FUMGJsonSerializer::Serialize(Data);
+	};
+
+	auto TryReadSerializedLetterSpacing = [](const FString& Json, float& OutValue)
+	{
+		TSharedPtr<FJsonObject> RootObject;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
+		if (!FJsonSerializer::Deserialize(Reader, RootObject) || !RootObject.IsValid())
+		{
+			return false;
+		}
+
+		const TSharedPtr<FJsonObject>* RootWidgetObject = nullptr;
+		if (!RootObject->TryGetObjectField(TEXT("RootWidget"), RootWidgetObject))
+		{
+			return false;
+		}
+
+		const TArray<TSharedPtr<FJsonValue>>* Children = nullptr;
+		if (!(*RootWidgetObject)->TryGetArrayField(TEXT("Children"), Children) || Children->Num() != 1)
+		{
+			return false;
+		}
+
+		const TSharedPtr<FJsonObject> ChildObject = (*Children)[0]->AsObject();
+		if (!ChildObject.IsValid())
+		{
+			return false;
+		}
+
+		const TSharedPtr<FJsonObject>* TextStyleObject = nullptr;
+		if (!ChildObject->TryGetObjectField(TEXT("TextStyle"), TextStyleObject))
+		{
+			return false;
+		}
+
+		double NumberValue = 0.0;
+		if (!(*TextStyleObject)->TryGetNumberField(UMGPropertyKeys::LetterSpacing, NumberValue))
+		{
+			return false;
+		}
+
+		OutValue = static_cast<float>(NumberValue);
+		return true;
+	};
+
+	auto ParseSingleNode = [&](const FString& Json, const TCHAR* Id, FUMGWidgetData& OutParsedData)
+	{
+		FString ParseError;
+		TestTrue(TEXT("Letter spacing JSON parses"), FUMGJsonParser::ParseJson(Json, OutParsedData, &ParseError));
+		if (!ParseError.IsEmpty())
+		{
+			AddInfo(ParseError);
+		}
+		return FindWidgetById(OutParsedData.RootWidget, Id);
+	};
+
+	FUMGWidgetNode ExplicitZeroNode;
+	ExplicitZeroNode.Id = TEXT("explicit_zero_spacing");
+	ExplicitZeroNode.Type = TEXT("TextBlock");
+	ExplicitZeroNode.Name = TEXT("ExplicitZeroSpacing");
+	ExplicitZeroNode.TextStyle.FontSize = 20.0f;
+	ExplicitZeroNode.TextStyle.SourceFontSize = 20.0f;
+	ExplicitZeroNode.TextStyle.LetterSpacing = 0.0f;
+
+	FUMGWidgetNode NonZeroNode = ExplicitZeroNode;
+	NonZeroNode.Id = TEXT("non_zero_spacing");
+	NonZeroNode.Name = TEXT("NonZeroSpacing");
+	NonZeroNode.TextStyle.LetterSpacing = 1.25f;
+
+	FUMGWidgetNode UnsetNode = ExplicitZeroNode;
+	UnsetNode.Id = TEXT("unset_spacing");
+	UnsetNode.Name = TEXT("UnsetSpacing");
+	UnsetNode.TextStyle.LetterSpacing.Reset();
+
+	const FString ExplicitZeroJson = SerializeSingleNode(ExplicitZeroNode);
+	float SerializedLetterSpacing = -1.0f;
+	TestTrue(TEXT("Explicit zero letter spacing serializes"), TryReadSerializedLetterSpacing(ExplicitZeroJson, SerializedLetterSpacing));
+	TestTrue(TEXT("Explicit zero letter spacing value preserved in JSON"), FMath::IsNearlyZero(SerializedLetterSpacing));
+
+	FUMGWidgetData ParsedExplicitZeroData;
+	const FUMGWidgetNode* ParsedExplicitZeroNode = ParseSingleNode(ExplicitZeroJson, TEXT("explicit_zero_spacing"), ParsedExplicitZeroData);
+	TestNotNull(TEXT("Parsed explicit zero node exists"), ParsedExplicitZeroNode);
+	TestTrue(TEXT("Parsed explicit zero letter spacing remains set"),
+		ParsedExplicitZeroNode
+		&& ParsedExplicitZeroNode->TextStyle.LetterSpacing.IsSet()
+		&& FMath::IsNearlyZero(ParsedExplicitZeroNode->TextStyle.LetterSpacing.GetValue()));
+
+	const FUMGPropertyBag ExplicitZeroProperties = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(ExplicitZeroNode);
+	float TypedLetterSpacing = -1.0f;
+	TestTrue(TEXT("Typed property bag keeps explicit zero letter spacing"),
+		ExplicitZeroProperties.TryGetFloat(UMGPropertyKeys::LetterSpacing, TypedLetterSpacing)
+		&& FMath::IsNearlyZero(TypedLetterSpacing));
+
+	UTextBlock* ExplicitZeroWidget = NewObject<UTextBlock>(GetTransientPackageAsObject());
+	TestNotNull(TEXT("Explicit zero widget created"), ExplicitZeroWidget);
+	if (ExplicitZeroWidget)
+	{
+		FSlateFontInfo FontInfo = ExplicitZeroWidget->GetFont();
+		FontInfo.LetterSpacing = 321;
+		ExplicitZeroWidget->SetFont(FontInfo);
+		FUMGWidgetUtils::ApplyWidgetProperties(ExplicitZeroWidget, ExplicitZeroNode);
+		TestEqual(TEXT("Explicit zero letter spacing applies"), ExplicitZeroWidget->GetFont().LetterSpacing, 0);
+	}
+
+	const FString NonZeroJson = SerializeSingleNode(NonZeroNode);
+	TestTrue(TEXT("Non-zero letter spacing serializes"), TryReadSerializedLetterSpacing(NonZeroJson, SerializedLetterSpacing));
+	TestTrue(TEXT("Non-zero letter spacing value preserved in JSON"), FMath::IsNearlyEqual(SerializedLetterSpacing, 1.25f, 0.001f));
+
+	FUMGWidgetData ParsedNonZeroData;
+	const FUMGWidgetNode* ParsedNonZeroNode = ParseSingleNode(NonZeroJson, TEXT("non_zero_spacing"), ParsedNonZeroData);
+	TestNotNull(TEXT("Parsed non-zero node exists"), ParsedNonZeroNode);
+	TestTrue(TEXT("Parsed non-zero letter spacing remains set"),
+		ParsedNonZeroNode
+		&& ParsedNonZeroNode->TextStyle.LetterSpacing.IsSet()
+		&& FMath::IsNearlyEqual(ParsedNonZeroNode->TextStyle.LetterSpacing.GetValue(), 1.25f, 0.001f));
+
+	const FString UnsetJson = SerializeSingleNode(UnsetNode);
+	TestFalse(TEXT("Unset letter spacing does not serialize"), TryReadSerializedLetterSpacing(UnsetJson, SerializedLetterSpacing));
+
+	FUMGWidgetData ParsedUnsetData;
+	const FUMGWidgetNode* ParsedUnsetNode = ParseSingleNode(UnsetJson, TEXT("unset_spacing"), ParsedUnsetData);
+	TestNotNull(TEXT("Parsed unset node exists"), ParsedUnsetNode);
+	TestTrue(TEXT("Parsed unset letter spacing remains unset"),
+		ParsedUnsetNode
+		&& !ParsedUnsetNode->TextStyle.LetterSpacing.IsSet());
+
+	const FUMGPropertyBag UnsetProperties = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(UnsetNode);
+	TestFalse(TEXT("Typed property bag omits unset letter spacing"), UnsetProperties.TryGetFloat(UMGPropertyKeys::LetterSpacing, TypedLetterSpacing));
+
+	UTextBlock* UnsetWidget = NewObject<UTextBlock>(GetTransientPackageAsObject());
+	TestNotNull(TEXT("Unset widget created"), UnsetWidget);
+	if (UnsetWidget)
+	{
+		FSlateFontInfo FontInfo = UnsetWidget->GetFont();
+		FontInfo.LetterSpacing = 321;
+		UnsetWidget->SetFont(FontInfo);
+		FUMGWidgetUtils::ApplyWidgetProperties(UnsetWidget, UnsetNode);
+		TestEqual(TEXT("Unset letter spacing does not apply"), UnsetWidget->GetFont().LetterSpacing, 321);
+	}
+
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRichTextTypedJsonRoundTripTest,
 	"Design2UMG.UMGJson.RichTextTypedPayloadRoundTrip",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -1281,7 +1434,6 @@ bool FRichTextTypedJsonRoundTripTest::RunTest(const FString& Parameters)
 	SourceNode.TextStyle.FontSize = 18.0f;
 	SourceNode.TextStyle.SourceFontSize = 18.0f;
 	SourceNode.TextStyle.LetterSpacing = 1.5f;
-	SourceNode.TextStyle.bHasLetterSpacing = true;
 	SourceNode.WidgetStyle.Padding = FMargin(3.0f, 4.0f, 5.0f, 6.0f);
 	SourceData.RootWidget.Children.Add(SourceNode);
 
@@ -1312,7 +1464,9 @@ bool FRichTextTypedJsonRoundTripTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Parsed rich text line height preserved"), ParsedNode->Text.bHasLineHeightPercentage && FMath::IsNearlyEqual(ParsedNode->Text.LineHeightPercentage, SourceNode.Text.LineHeightPercentage, 0.001f));
 	TestTrue(TEXT("Parsed rich text font size preserved"), FMath::IsNearlyEqual(ParsedNode->TextStyle.FontSize, SourceNode.TextStyle.FontSize, 0.001f));
 	TestTrue(TEXT("Parsed rich text source font size preserved"), FMath::IsNearlyEqual(ParsedNode->TextStyle.SourceFontSize, SourceNode.TextStyle.SourceFontSize, 0.001f));
-	TestTrue(TEXT("Parsed rich text letter spacing preserved"), ParsedNode->TextStyle.bHasLetterSpacing && FMath::IsNearlyEqual(ParsedNode->TextStyle.LetterSpacing, SourceNode.TextStyle.LetterSpacing, 0.001f));
+	TestTrue(TEXT("Parsed rich text letter spacing preserved"),
+		ParsedNode->TextStyle.LetterSpacing.IsSet()
+		&& FMath::IsNearlyEqual(ParsedNode->TextStyle.LetterSpacing.GetValue(), SourceNode.TextStyle.LetterSpacing.GetValue(), 0.001f));
 
 	auto BuildStyleSnapshot = [&](URichTextBlock* Widget, const TCHAR* Context) -> FString
 	{

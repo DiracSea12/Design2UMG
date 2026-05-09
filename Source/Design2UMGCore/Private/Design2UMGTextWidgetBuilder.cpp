@@ -126,7 +126,6 @@ namespace
 		if (Node->Text.LetterSpacing != 0)
 		{
 			Widget.TextStyle.LetterSpacing = Node->Text.LetterSpacing;
-			Widget.TextStyle.bHasLetterSpacing = true;
 		}
 
 		if (Node->Text.bUnderline)

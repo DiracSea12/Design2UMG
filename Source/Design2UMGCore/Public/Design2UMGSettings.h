@@ -26,6 +26,14 @@ struct FWidgetClassOverride
 	TSoftClassPtr<UWidget> WidgetClass;
 };
 
+UENUM()
+enum class EDesign2UMGPrototypeNavigationGenerationMode : uint8
+{
+	RuntimeExtension,
+	TagHelper,
+	Disabled
+};
+
 /**
  * Design2UMG plugin settings.
  * Stored in Editor Preferences as user-scoped settings rather than source-controlled config.
@@ -152,6 +160,12 @@ public:
 	/** Maximum overlay opacity allowed by the FIT + LUMINOSITY runtime approximation. */
 	UPROPERTY(Config, EditAnywhere, Category = "Image Blend Approximation", meta = (DisplayName = "FIT Luminosity Opacity Cap", ClampMin = "0.0", ClampMax = "1.0", ToolTip = "Upper bound used when approximating FIT + LUMINOSITY image overlays without a baked texture."))
 	float LuminosityFitOpacityCap = 0.15f;
+
+	// ========== Prototype Navigation ==========
+
+	UPROPERTY(Config, EditAnywhere, Category = "Prototype Navigation", meta = (DisplayName = "Generation Mode", ToolTip = "RuntimeExtension keeps the current generated runtime binding. TagHelper writes stable helper metadata for an optional setup call. Disabled emits no prototype navigation runtime binding."))
+	EDesign2UMGPrototypeNavigationGenerationMode PrototypeNavigationGenerationMode =
+		EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension;
 
 	// ========== Widget Class Overrides ==========
 

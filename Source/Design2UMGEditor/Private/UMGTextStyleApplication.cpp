@@ -121,13 +121,13 @@ namespace UMGTextStyleApplication
 			bFontChanged = true;
 		}
 
-		if (Node.TextStyle.bHasLetterSpacing)
+		if (Node.TextStyle.LetterSpacing.IsSet())
 		{
 			const float DesignFontSize = Node.TextStyle.SourceFontSize;
 			if (FontInfo.Size > 0 || DesignFontSize > 0.0f)
 			{
 				FontInfo.LetterSpacing = ConvertLetterSpacingPxToTracking(
-					Node.TextStyle.LetterSpacing,
+					Node.TextStyle.LetterSpacing.GetValue(),
 					DesignFontSize,
 					FontInfo.Size);
 			}
@@ -353,7 +353,7 @@ namespace UMGTextStyleApplication
 			|| Node.TextStyle.FontSize > 0.0f
 			|| HasTypedTextValue(Node.Text.bHasFontFamily, Node.Text.FontFamily)
 			|| HasTypedTextValue(Node.Text.bHasTypefaceFontName, Node.Text.TypefaceFontName)
-			|| Node.TextStyle.bHasLetterSpacing
+			|| Node.TextStyle.LetterSpacing.IsSet()
 			|| Node.Text.bHasUnderline
 			|| Node.Text.bHasStrikethrough
 			|| HasTypedTextValue(Node.Text.bHasHref, Node.Text.Href);
