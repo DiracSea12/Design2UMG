@@ -143,16 +143,36 @@ bool FBatchDImportPipelineOwnerSliceStructureTest::RunTest(const FString& Parame
 		return false;
 	}
 
+	FString DiagnosticReportSource;
+	if (!LoadPluginFile(*this, TEXT("Source/Design2UMGEditor/Private/DesignImportDiagnosticReport.cpp"), DiagnosticReportSource))
+	{
+		return false;
+	}
+
 	TestTrue(TEXT("Import pipeline main file includes planning helper"),
 		MainSource.Contains(TEXT("#include \"DesignImportPlanning.h\""), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("Import pipeline main file includes diagnostic report helper"),
+		MainSource.Contains(TEXT("#include \"DesignImportDiagnosticReport.h\""), ESearchCase::CaseSensitive));
 	TestFalse(TEXT("Preview JSON parsing no longer lives in import pipeline main file"),
 		MainSource.Contains(TEXT("ParseWidgetJson"), ESearchCase::CaseSensitive));
 	TestFalse(TEXT("Document preparation no longer lives in import pipeline main file"),
 		MainSource.Contains(TEXT("PrepareDocumentForGeneration"), ESearchCase::CaseSensitive));
+	TestFalse(TEXT("Diagnostic degradation collection no longer lives in import pipeline main file"),
+		MainSource.Contains(TEXT("CollectNodeDegradationsRecursive"), ESearchCase::CaseSensitive));
+	TestFalse(TEXT("Diagnostic effect wrapper collection no longer lives in import pipeline main file"),
+		MainSource.Contains(TEXT("CollectEffectWrappersRecursive"), ESearchCase::CaseSensitive));
+	TestFalse(TEXT("Diagnostic image failure collection no longer lives in import pipeline main file"),
+		MainSource.Contains(TEXT("CollectImageFailureEntries"), ESearchCase::CaseSensitive));
 	TestTrue(TEXT("Planning helper owns preview JSON parsing"),
 		PlanningSource.Contains(TEXT("ParseWidgetJson"), ESearchCase::CaseSensitive));
 	TestTrue(TEXT("Planning helper owns import analysis"),
 		PlanningSource.Contains(TEXT("AnalyzeDocument"), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("Diagnostic report helper owns public write seam"),
+		DiagnosticReportSource.Contains(TEXT("void Write("), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("Diagnostic report helper owns degradation collection"),
+		DiagnosticReportSource.Contains(TEXT("CollectNodeDegradationsRecursive"), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("Diagnostic report helper owns recommendations"),
+		DiagnosticReportSource.Contains(TEXT("AddUniqueRecommendation"), ESearchCase::CaseSensitive));
 	return true;
 }
 

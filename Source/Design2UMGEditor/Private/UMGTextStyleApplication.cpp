@@ -3,7 +3,6 @@
 #include "UMGTextStyleApplication.h"
 
 #include "DesignResourceResolver.h"
-#include "TextStyleUtils.h"
 #include "UMGPropertyApplierSupport.h"
 #include "UMGPropertyKeys.h"
 #include "UMGValueParser.h"
@@ -20,6 +19,17 @@
 namespace UMGTextStyleApplication
 {
 	using namespace UMGPropertyApplierSupport;
+
+	static int32 ConvertLetterSpacingPxToTracking(const float PixelSpacing, const float DesignFontSize, const float AppliedFontSize)
+	{
+		const float BaseFontSize = DesignFontSize > 0.0f ? DesignFontSize : AppliedFontSize;
+		if (BaseFontSize <= 0.0f)
+		{
+			return 0;
+		}
+
+		return FMath::RoundToInt(PixelSpacing / BaseFontSize * 1000.0f);
+	}
 
 	bool TryResolveTextJustification(const FString& Value, ETextJustify::Type& OutJustification)
 	{
@@ -85,7 +95,7 @@ namespace UMGTextStyleApplication
 			Properties.TryGetFloat(UMGPropertyKeys::DesignFontSize, DesignFontSize);
 			if (FontInfo.Size > 0 || DesignFontSize > 0.0f)
 			{
-				FontInfo.LetterSpacing = TextStyleUtils::ConvertLetterSpacingPxToTracking(PixelSpacing, DesignFontSize, FontInfo.Size);
+				FontInfo.LetterSpacing = ConvertLetterSpacingPxToTracking(PixelSpacing, DesignFontSize, FontInfo.Size);
 			}
 			bFontChanged = true;
 		}
@@ -116,7 +126,7 @@ namespace UMGTextStyleApplication
 			const float DesignFontSize = Node.TextStyle.SourceFontSize;
 			if (FontInfo.Size > 0 || DesignFontSize > 0.0f)
 			{
-				FontInfo.LetterSpacing = TextStyleUtils::ConvertLetterSpacingPxToTracking(
+				FontInfo.LetterSpacing = ConvertLetterSpacingPxToTracking(
 					Node.TextStyle.LetterSpacing,
 					DesignFontSize,
 					FontInfo.Size);
@@ -450,7 +460,7 @@ namespace UMGTextStyleApplication
 				RowObject->TryGetNumberField(UMGPropertyKeys::DesignFontSize, DesignFontSize);
 				if (FontInfo.Size > 0 || DesignFontSize > 0.0)
 				{
-					FontInfo.LetterSpacing = TextStyleUtils::ConvertLetterSpacingPxToTracking(
+					FontInfo.LetterSpacing = ConvertLetterSpacingPxToTracking(
 						static_cast<float>(NumberValue),
 						static_cast<float>(DesignFontSize),
 						FontInfo.Size);
