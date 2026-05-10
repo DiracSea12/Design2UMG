@@ -42,10 +42,15 @@ Excluded from public export unless they are first rewritten into generic reusabl
 - `Saved/`
 - `Intermediate/`
 - `Binaries/`
+- cache folders such as `.cache`, `.pytest_cache`, `DerivedDataCache/`, and `DDC/`
 - `.vs/`
+- `.claude/`, `.codex/`, `.cowork-temp/`, `AGENTS.md`, and `CLAUDE.md`
+- `openspec/`, including `openspec/**/verification/`
+- root review reports such as `*REVIEW*.md`, `*Review*.md`, and `code_review_report*.md`
 - engine-workspace only helper files
 - raw automation output trees under `Saved/Design2UMG/Automation/`
 - local probe scripts and one-off diagnostics under `Saved/`
+- generated HostProject fallback artifacts, generated fallback host directories, and concrete fallback project paths
 - archive/history notes that are not part of the final public support story
 - maintainer-local planning / history working sets that are not part of the shipped support story
 - any script or doc whose default values expose maintainer-only absolute paths
@@ -55,18 +60,21 @@ Excluded from public export unless they are first rewritten into generic reusabl
 - Public docs must describe a `maintainer-owned canonical runtime boundary`, not a maintainer machine path.
 - Public `validate` commands must be labeled as smoke/public validation unless they truly reproduce the maintainer full admissible gate.
 - The maintainer full admissible gate may stay private as long as the public repo makes that boundary explicit.
+- Public docs may say that HostProject fallback is unsupported; generated fallback projects and concrete fallback paths must not ship.
+- Source workspace checks are intentionally separate from package/export workspace checks. Local ignored planning files may remain in the maintainer source workspace, but package and export workspaces must not contain them.
 
 ## Freeze Procedure
 
 1. Record the candidate commit SHA and the successful validation artifact paths.
 2. Create the release package with `RunUAT BuildPlugin -StrictIncludes` from that candidate, using a maintainer-provided UE runner and an explicit plugin path.
-3. Copy the plugin subtree into a clean export workspace.
-4. Apply the public include/exclude rules above, removing maintainer-only files before publication.
-5. Re-check text encoding, secrets, and path leakage in the export workspace.
-6. Verify the exported tree still contains the same plugin version and release notes as the validated source tree.
-7. Run `pwsh -NoProfile -File Tools/Release/Assert-PublicRepoBoundary.ps1 -CheckExportWorkspaceLayout` inside the export workspace.
-8. Review GitHub generated release notes from `.github/release.yml` and edit them for user-facing clarity.
-9. Upload the BuildPlugin package as the release artifact, not the raw maintainer workspace.
+3. Run `pwsh -NoProfile -File Tools/Release/Assert-PublicRepoBoundary.ps1 -RepoRoot <PackageRoot> -Mode Package` before uploading the package.
+4. Copy the plugin subtree into a clean export workspace.
+5. Apply the public include/exclude rules above, removing maintainer-only files before publication.
+6. Re-check text encoding, secrets, and path leakage in the export workspace.
+7. Verify the exported tree still contains the same plugin version and release notes as the validated source tree.
+8. Run `pwsh -NoProfile -File Tools/Release/Assert-PublicRepoBoundary.ps1 -Mode ExportWorkspace` inside the export workspace.
+9. Review GitHub generated release notes from `.github/release.yml` and edit them for user-facing clarity.
+10. Upload the BuildPlugin package as the release artifact, not the raw maintainer workspace.
 
 ## Publication Checks
 
@@ -77,6 +85,7 @@ Before publishing the exported repository:
 - public docs are internally consistent
 - `Docs/ValidationGovernance/` points to the latest curated manifests
 - no raw automation tree is present
+- no root review report, `openspec/`, AGENTS/CLAUDE local rule file, cache folder, generated HostProject fallback artifact, generated fallback host directory, or concrete fallback project path is present
 - no maintainer absolute path is present in public-facing docs
 - `Assert-PublicRepoBoundary.ps1` passes
 - release notes identify the evidence level for each gate: public smoke, self-hosted BuildPlugin, focused automation, and maintainer formal admissible validation

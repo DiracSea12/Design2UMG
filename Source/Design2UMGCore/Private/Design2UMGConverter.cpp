@@ -7,7 +7,7 @@
 #include "Design2UMGGridLayout.h"
 #include "Design2UMGNodeWidgetFactory.h"
 #include "Design2UMGPrototypeNavigation.h"
-#include "Design2UMGConverterFlowSupport.h"
+#include "Design2UMGConverterFlowChildPreResolution.h"
 #include "Design2UMGConverterInternal.h"
 #include "Design2UMGConverterVisualSupport.h"
 #include "Design2UMGSourceMetadata.h"
@@ -114,13 +114,13 @@ namespace
 			const TSharedPtr<FDesignNode>& InNode,
 			const TArray<TSharedPtr<FDesignNode>>& InVisibleChildren,
 			const FConversionContext& InContext,
-			const Design2UMGConverterInternal::FExpandedNodeResolver& InExpandedNodeResolver,
+			const Design2UMGConverterInternal::FFlowChildPreResolutionResolver& InPreResolutionResolver,
 			const FNodeConversionOrchestrator& InOrchestrator)
 			: Widget(InWidget)
 			, Node(InNode)
 			, VisibleChildren(InVisibleChildren)
 			, Context(InContext)
-			, ExpandedNodeResolver(InExpandedNodeResolver)
+			, PreResolutionResolver(InPreResolutionResolver)
 			, Orchestrator(InOrchestrator)
 		{
 		}
@@ -162,7 +162,7 @@ namespace
 		const TSharedPtr<FDesignNode>& Node;
 		const TArray<TSharedPtr<FDesignNode>>& VisibleChildren;
 		const FConversionContext& Context;
-		const Design2UMGConverterInternal::FExpandedNodeResolver& ExpandedNodeResolver;
+		const Design2UMGConverterInternal::FFlowChildPreResolutionResolver& PreResolutionResolver;
 		const FNodeConversionOrchestrator& Orchestrator;
 	};
 
@@ -199,12 +199,12 @@ namespace
 			}
 
 			const FConversionContext ActiveContext = Context.WithNodeTheme(Node);
-			const Design2UMGConverterInternal::FExpandedNodeResolver ExpandedNodeResolver = BuildExpandedNodeResolver(ActiveContext);
+			const Design2UMGConverterInternal::FFlowChildPreResolutionResolver PreResolutionResolver = BuildPreResolutionResolver(ActiveContext);
 
 			// Refs are expanded before visual/layout work so children inherit the active theme and measured sizes together.
 			if (Node->Type == EDesignNodeType::Ref)
 			{
-				return ConvertExpandedRefNode(Node, ActiveContext, ParentLayout, ExpandedNodeResolver);
+				return ConvertExpandedRefNode(Node, ActiveContext, ParentLayout, PreResolutionResolver);
 			}
 
 			const bool bUsingRenderFallback = Design2UMGSourceMetadata::ShouldUseRenderFallback(Node);
@@ -214,7 +214,7 @@ namespace
 			if (!bUsingRenderFallback)
 			{
 				ApplyNodeVisuals(Widget, Node);
-				AppendChildWidgets(Widget, Node, ActiveContext, ExpandedNodeResolver);
+				AppendChildWidgets(Widget, Node, ActiveContext, PreResolutionResolver);
 				ApplyLayoutFixup(Widget, Node, ActiveContext, ParentLayout);
 				Widget = WrapWithPrototypeNavigation(MoveTemp(Widget), Node, ActiveContext);
 			}
@@ -232,19 +232,19 @@ namespace
 			return !ShouldSkipNode(Node) || ShouldKeepStructuralLeafInFlow(Node, ParentLayout);
 		}
 
-		Design2UMGConverterInternal::FExpandedNodeResolver BuildExpandedNodeResolver(
+		Design2UMGConverterInternal::FFlowChildPreResolutionResolver BuildPreResolutionResolver(
 			const FConversionContext& Context) const
 		{
-			return Design2UMGConverterInternal::FExpandedNodeResolver(Context.State.Document, Context.ThemeContext);
+			return Design2UMGConverterInternal::FFlowChildPreResolutionResolver(Context.State.Document, Context.ThemeContext);
 		}
 
 		FUMGWidgetNode ConvertExpandedRefNode(
 			const TSharedPtr<FDesignNode>& Node,
 			const FConversionContext& ActiveContext,
 			const EDesignLayout ParentLayout,
-			const Design2UMGConverterInternal::FExpandedNodeResolver& ExpandedNodeResolver) const
+			const Design2UMGConverterInternal::FFlowChildPreResolutionResolver& PreResolutionResolver) const
 		{
-			TSharedPtr<FDesignNode> Expanded = ExpandedNodeResolver.ExpandRef(Node);
+			TSharedPtr<FDesignNode> Expanded = PreResolutionResolver.ExpandRef(Node);
 			if (!Expanded.IsValid())
 			{
 				return FUMGWidgetNode();
@@ -273,7 +273,7 @@ namespace
 			FUMGWidgetNode& Widget,
 			const TSharedPtr<FDesignNode>& Node,
 			const FConversionContext& Context,
-			const Design2UMGConverterInternal::FExpandedNodeResolver& ExpandedNodeResolver) const
+			const Design2UMGConverterInternal::FFlowChildPreResolutionResolver& PreResolutionResolver) const
 		{
 			TArray<TSharedPtr<FDesignNode>> VisibleChildren;
 			GatherVisibleChildrenForConversion(Node, VisibleChildren);
@@ -283,10 +283,10 @@ namespace
 				Widget.Type = TEXT("GridPanel");
 			}
 
-			const Design2UMGConverterInternal::FFlowChildPreparation FlowChildPreparation(ExpandedNodeResolver);
+			const Design2UMGConverterInternal::FFlowChildPreResolution FlowChildPreResolution(PreResolutionResolver);
 			// Flow children are pre-resolved before appending so slot metrics are based on effective nodes, not raw refs.
-			FlowChildPreparation.PreResolveFlowChildren(Node, Widget, VisibleChildren);
-			FNodeChildAppender(Widget, Node, VisibleChildren, Context, ExpandedNodeResolver, *this).AppendChildren();
+			FlowChildPreResolution.PreResolveFlowChildren(Node, Widget, VisibleChildren);
+			FNodeChildAppender(Widget, Node, VisibleChildren, Context, PreResolutionResolver, *this).AppendChildren();
 		}
 
 		void ApplyRenderFallbackVisuals(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node) const
@@ -432,10 +432,10 @@ namespace
 		const FConversionContext ActiveContext = Context.WithNodeTheme(Node);
 		if (Node->Type == EDesignNodeType::Ref)
 		{
-			const Design2UMGConverterInternal::FExpandedNodeResolver ExpandedNodeResolver(
+			const Design2UMGConverterInternal::FFlowChildPreResolutionResolver PreResolutionResolver(
 				ActiveContext.State.Document,
 				ActiveContext.ThemeContext);
-			const TSharedPtr<FDesignNode> ActiveNode = ExpandedNodeResolver.ExpandRef(Node);
+			const TSharedPtr<FDesignNode> ActiveNode = PreResolutionResolver.ExpandRef(Node);
 			if (!ActiveNode.IsValid() || ShouldSkipNode(ActiveNode))
 			{
 				return;
@@ -496,7 +496,7 @@ namespace
 
 		for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
 		{
-			TSharedPtr<FDesignNode> EffectiveChild = ExpandedNodeResolver.ResolveExpandedChild(Child, true);
+			TSharedPtr<FDesignNode> EffectiveChild = PreResolutionResolver.ResolveExpandedChild(Child, true);
 			FUMGWidgetNode ChildWidget = Orchestrator.ConvertChild(EffectiveChild, Context, Node->LayoutData.Layout);
 			if (ChildWidget.Type.IsEmpty())
 			{

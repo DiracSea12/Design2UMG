@@ -10,6 +10,7 @@
 #include "Components/TextBlock.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Layout/Children.h"
+#include "Widgets/Layout/SBox.h"
 #include "Widgets/SWindow.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Text/STextBlock.h"
@@ -646,7 +647,7 @@ namespace
 			return PreviewContainer.IsValid()
 				&& MaterializationSpy->GetLastPreviewWidget() != nullptr
 				&& WidgetTreeContainsText(
-					PreviewContainer.ToSharedRef(),
+					StaticCastSharedRef<SWidget>(PreviewContainer.ToSharedRef()),
 					MaterializationSpy->GetLastPreviewWidgetText());
 		}
 

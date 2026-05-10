@@ -1,6 +1,6 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
-#if WITH_AUTOMATION_WORKER
+#if defined(WITH_AUTOMATION_WORKER) && WITH_AUTOMATION_WORKER
 
 #include "Misc/AutomationTest.h"
 #include "ProceduralShapeGenerator.h"

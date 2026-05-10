@@ -3,6 +3,7 @@
 #pragma once
 
 #include "FigmaParser.h"
+#include "Dom/JsonObject.h"
 
 namespace FigmaParserInternal
 {

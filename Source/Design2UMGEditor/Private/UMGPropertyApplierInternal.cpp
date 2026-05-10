@@ -7,6 +7,7 @@
 
 #include "UMGPropertyApplierInternal.h"
 #include "UMGBrushPropertyApplier.h"
+#include "UMGEditorPropertyKeys.h"
 #include "UMGPropertyApplierSupport.h"
 #include "UMGTextPropertyApplier.h"
 #include "UMGPropertyKeys.h"

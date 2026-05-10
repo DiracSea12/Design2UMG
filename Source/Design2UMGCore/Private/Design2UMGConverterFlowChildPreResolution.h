@@ -8,10 +8,10 @@
 
 namespace Design2UMGConverterInternal
 {
-	class FExpandedNodeResolver
+	class FFlowChildPreResolutionResolver
 	{
 	public:
-		FExpandedNodeResolver(const FDesignDocument& InDocument, const TMap<FString, FString>& InThemeContext);
+		FFlowChildPreResolutionResolver(const FDesignDocument& InDocument, const TMap<FString, FString>& InThemeContext);
 
 		TSharedPtr<FDesignNode> ExpandRef(const TSharedPtr<FDesignNode>& Node) const;
 		TSharedPtr<FDesignNode> ResolveExpandedChild(const TSharedPtr<FDesignNode>& Child, bool bPreComputeFitContent) const;
@@ -21,10 +21,10 @@ namespace Design2UMGConverterInternal
 		const TMap<FString, FString>& ThemeContext;
 	};
 
-	class FFlowChildPreparation
+	class FFlowChildPreResolution
 	{
 	public:
-		explicit FFlowChildPreparation(const FExpandedNodeResolver& InExpandedNodeResolver);
+		explicit FFlowChildPreResolution(const FFlowChildPreResolutionResolver& InPreResolutionResolver);
 
 		void PreResolveFlowChildren(
 			const TSharedPtr<FDesignNode>& Node,
@@ -32,6 +32,6 @@ namespace Design2UMGConverterInternal
 			const TArray<TSharedPtr<FDesignNode>>& VisibleChildren) const;
 
 	private:
-		const FExpandedNodeResolver& ExpandedNodeResolver;
+		const FFlowChildPreResolutionResolver& PreResolutionResolver;
 	};
 }

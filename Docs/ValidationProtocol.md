@@ -20,11 +20,13 @@ Public-note:
 This repository has four different validation layers. Do not collapse them into one label:
 
 - `repository-hygiene`: public repo checks such as required-file presence and tracked maintainer-local path detection.
-- `self-hosted build`: the manual BuildPlugin packaging workflow that runs on a maintainer-provided self-hosted Windows UE runner.
+- `self-hosted build`: the manual BuildPlugin packaging workflow that runs on a maintainer-provided self-hosted Windows UE runner, validates the package boundary, and uploads the packaged plugin artifact.
 - `public smoke/public validate`: contributor-reproducible local build plus focused validation. This is the public validation boundary.
 - `maintainer formal admissible gate`: the maintainer-owned full discovered 47-case release gate.
 
 Unless a section explicitly says `maintainer formal admissible gate`, treat the step-by-step commands below as public smoke/public validate guidance, not as the release gate on their own.
+
+Package/export boundary validation is a release hygiene layer, not a substitute for UE behavior validation. Source workspace checks may ignore local planning files that are intentionally outside the public artifact, while package/export checks must reject root review reports, `openspec/` including verification evidence, AGENTS/CLAUDE local rules, raw automation trees, cache folders, generated HostProject fallback artifacts, generated fallback host directories, concrete fallback project paths, and maintainer absolute paths.
 
 ## Core Rule
 

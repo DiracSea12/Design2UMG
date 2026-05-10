@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "UMGBrushPropertyApplier.h"
 
 #include "Design2UMGEffectMaterialBuilder.h"
@@ -6,6 +6,7 @@
 #include "DesignPathRasterizer.h"
 #include "DesignResourceResolver.h"
 #include "ProceduralShapeGenerator.h"
+#include "UMGEditorPropertyKeys.h"
 #include "UMGPropertyApplierSupport.h"
 #include "UMGPropertyKeys.h"
 

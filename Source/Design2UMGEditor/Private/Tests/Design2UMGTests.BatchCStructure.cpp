@@ -76,10 +76,10 @@ namespace
 	}
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchCConverterFlowSupportSmokeTest,
-	"Design2UMG.BatchC.ConverterFlowSupportSmoke",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchCFlowChildPreResolutionSmokeTest,
+	"Design2UMG.BatchC.FlowChildPreResolutionSmoke",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FBatchCConverterFlowSupportSmokeTest::RunTest(const FString& Parameters)
+bool FBatchCFlowChildPreResolutionSmokeTest::RunTest(const FString& Parameters)
 {
 	FDesignDocument Document;
 	Document.Version = TEXT("batch-c-converter-flow-smoke");

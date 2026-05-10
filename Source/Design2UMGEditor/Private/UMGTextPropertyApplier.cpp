@@ -2,6 +2,7 @@
 #include "UMGTextPropertyApplier.h"
 
 #include "UMGTextStyleApplication.h"
+#include "UMGEditorPropertyKeys.h"
 #include "UMGPropertyApplierSupport.h"
 #include "UMGPropertyKeys.h"
 #include "UMGWidgetNodeAccess.h"

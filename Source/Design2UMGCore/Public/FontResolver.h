@@ -50,13 +50,6 @@ struct DESIGN2UMGCORE_API FFontResolver
 
 	/** Remove any editor-side resolver callbacks. */
 	static void ResetExternalResolvers();
-
-private:
-	static int32 WeightFromTypefaceName(const FString& Name);
-	static FString WeightNameFromNumeric(int32 Weight);
-	static TMap<FString, FString> FontAssetCache;
-	static void CollectFontFamilies(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSet<FString>& OutFamilies);
-	static TSet<FString> ScanProjectFontAssets();
 };
 
 

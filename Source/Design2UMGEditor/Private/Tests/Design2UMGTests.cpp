@@ -6,6 +6,7 @@
 #include "Design2UMGTestUtils.h"
 #include "FontResolver.h"
 #include "UMGLayoutProjection.h"
+#include "UMGEditorPropertyKeys.h"
 #include "UMGJsonParser.h"
 #include "UMGJsonSerializer.h"
 #include "UMGPropertyKeys.h"

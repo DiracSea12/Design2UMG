@@ -139,10 +139,11 @@ Key options:
 ## Repository And Release Checks
 
 - `repository-hygiene`: the public GitHub Actions check that verifies required repo files and blocks tracked maintainer-local paths.
-- `self-hosted build`: the manual `workflow_dispatch` packaging job in `.github/workflows/build.yml`; it requires a maintainer-provided self-hosted Windows runner with `UE_ROOT`.
+- `self-hosted build`: the manual `workflow_dispatch` packaging job in `.github/workflows/build.yml`; it requires a maintainer-provided self-hosted Windows runner with `UE_ROOT`, validates the package boundary, and uploads the packaged plugin as a GitHub Actions artifact.
 - `public smoke/public validate`: contributor-facing build and validation steps used for smoke checks and local repro, using explicit `--project` / `--editor` values or the matching environment variables; do not present them as the release gate.
 - `maintainer formal admissible gate`: the maintainer-owned full discovered 47-case release gate documented in `Docs/ValidationProtocol.md`.
-- No public hosted CI matrix, coverage badge, or release asset pipeline is published in this repo today.
+- Public packages and repo exports must exclude root review reports, `openspec/`, AGENTS/CLAUDE local rules, raw automation trees, cache folders, generated HostProject fallback artifacts, generated fallback host directories, concrete fallback project paths, and maintainer absolute paths.
+- No public hosted UE formal gate, public UE matrix, or coverage badge is published in this repo today.
 
 ## Widget Class Overrides
 

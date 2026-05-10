@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "DesignSchemaFoundation.h"
+#include "Types/SlateEnums.h"
 
 /**
  * Mapping helpers from design-side semantics to UMG-side types and enums.

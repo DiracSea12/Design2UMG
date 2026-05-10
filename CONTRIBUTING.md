@@ -32,9 +32,11 @@ For pipeline extension points and verification expectations, see [Docs/Architect
 ## Validation Levels
 
 - `repository-hygiene`: public repo checks such as required files and tracked local-only paths.
-- `self-hosted build`: maintainer-operated packaging/build workflow on a self-hosted Windows UE runner.
+- `self-hosted build`: maintainer-operated packaging/build workflow on a self-hosted Windows UE runner; package boundary validation and artifact upload happen there.
 - `public smoke/public validate`: contributor-reproducible build and focused validation steps; useful for smoke checks and local repro, but not the release gate.
 - `maintainer formal admissible gate`: the maintainer-owned full discovered 47-case release gate described in [Docs/ValidationProtocol.md](Docs/ValidationProtocol.md).
+
+Package and public export checks are stricter than source workspace checks. Local ignored planning files do not need to be deleted from a maintainer source workspace, but release packages and public exports must not contain root review reports, `openspec/`, AGENTS/CLAUDE local rules, raw automation trees, cache folders, generated HostProject fallback artifacts, generated fallback host directories, concrete fallback project paths, or maintainer absolute paths.
 
 ## Code Style
 

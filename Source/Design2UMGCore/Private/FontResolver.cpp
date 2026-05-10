@@ -14,10 +14,9 @@
 
 #define LOCTEXT_NAMESPACE "FontResolver"
 
-TMap<FString, FString> FFontResolver::FontAssetCache;
-
 namespace
 {
+	TMap<FString, FString> GFontAssetCache;
 	TMap<FString, FString> GNormalizedProjectFontAssetIndex;
 	TMap<FString, TMap<FString, FString>> GKnownIconGlyphCache;
 	TMap<FString, TMap<FString, FString>> GKnownIconNameCache;
@@ -28,6 +27,8 @@ namespace
 	thread_local bool bPrimingKnownIconExternally = false;
 	FCriticalSection GFontResolverCacheMutex;
 	FCriticalSection GFontIndexMutex;
+
+	void CollectFontFamilies(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSet<FString>& OutFamilies);
 
 	FString NormalizeCompactResolverKey(const FString& InValue)
 	{
@@ -294,7 +295,7 @@ FString FFontResolver::FindFontAssetPath(const FString& FontFamily)
 	bool bHasCachedPath = false;
 	{
 		FScopeLock Lock(&GFontResolverCacheMutex);
-		if (const FString* Path = FontAssetCache.Find(NormalizedFamily))
+		if (const FString* Path = GFontAssetCache.Find(NormalizedFamily))
 		{
 			CachedPath = *Path;
 			bHasCachedPath = true;
@@ -307,7 +308,7 @@ FString FFontResolver::FindFontAssetPath(const FString& FontFamily)
 			return CachedPath;
 		}
 		FScopeLock Lock(&GFontResolverCacheMutex);
-		FontAssetCache.Remove(NormalizedFamily);
+		GFontAssetCache.Remove(NormalizedFamily);
 	}
 
 	BuildProjectFontAssetIndexIfNeeded();
@@ -322,7 +323,7 @@ FString FFontResolver::FindFontAssetPath(const FString& FontFamily)
 		if (IsLoadableFontPath(IndexedPath))
 		{
 			FScopeLock Lock(&GFontResolverCacheMutex);
-			FontAssetCache.FindOrAdd(NormalizedFamily) = IndexedPath;
+			GFontAssetCache.FindOrAdd(NormalizedFamily) = IndexedPath;
 			return IndexedPath;
 		}
 
@@ -347,7 +348,7 @@ FString FFontResolver::FindFontAssetPath(const FString& FontFamily)
 			if (IsLoadableFontPath(CandidatePath))
 			{
 				FScopeLock Lock(&GFontResolverCacheMutex);
-				FontAssetCache.FindOrAdd(NormalizedFamily) = CandidatePath;
+				GFontAssetCache.FindOrAdd(NormalizedFamily) = CandidatePath;
 				return CandidatePath;
 			}
 		}
@@ -357,7 +358,7 @@ FString FFontResolver::FindFontAssetPath(const FString& FontFamily)
 	if (TryResolveEngineFontFallback(FontFamily, EngineFallbackPath))
 	{
 		FScopeLock Lock(&GFontResolverCacheMutex);
-		FontAssetCache.FindOrAdd(NormalizedFamily) = EngineFallbackPath;
+		GFontAssetCache.FindOrAdd(NormalizedFamily) = EngineFallbackPath;
 		return EngineFallbackPath;
 	}
 
@@ -369,14 +370,14 @@ FString FFontResolver::FindFontAssetPath(const FString& FontFamily)
 		if (IsLoadableFontPath(ImportedPath))
 		{
 			FScopeLock Lock(&GFontResolverCacheMutex);
-			FontAssetCache.FindOrAdd(NormalizedFamily) = ImportedPath;
+			GFontAssetCache.FindOrAdd(NormalizedFamily) = ImportedPath;
 			return ImportedPath;
 		}
 	}
 
 	{
 		FScopeLock Lock(&GFontResolverCacheMutex);
-		FontAssetCache.FindOrAdd(NormalizedFamily) = FString();
+		GFontAssetCache.FindOrAdd(NormalizedFamily) = FString();
 	}
 	return FString();
 }
@@ -447,7 +448,7 @@ void FFontResolver::ClearCache()
 {
 	{
 		FScopeLock Lock(&GFontResolverCacheMutex);
-		FontAssetCache.Empty();
+		GFontAssetCache.Empty();
 		GKnownIconGlyphCache.Reset();
 		GKnownIconNameCache.Reset();
 	}
@@ -464,7 +465,7 @@ void FFontResolver::RegisterFontAssetPath(const FString& FontFamily, const FStri
 
 	{
 		FScopeLock Lock(&GFontResolverCacheMutex);
-		FontAssetCache.FindOrAdd(NormalizedFamily) = ObjectPath;
+		GFontAssetCache.FindOrAdd(NormalizedFamily) = ObjectPath;
 	}
 
 	{
@@ -528,7 +529,9 @@ int32 FFontResolver::ParseWeightValue(const FString& Weight)
 	return 400;
 }
 
-int32 FFontResolver::WeightFromTypefaceName(const FString& Name)
+namespace
+{
+int32 WeightFromTypefaceName(const FString& Name)
 {
 	FString N = Name.ToLower();
 	if (N.Contains(TEXT("black")) || N.Contains(TEXT("heavy")))  return 900;
@@ -543,21 +546,6 @@ int32 FFontResolver::WeightFromTypefaceName(const FString& Name)
 	return 400;
 }
 
-FString FFontResolver::WeightNameFromNumeric(int32 Weight)
-{
-	switch (FMath::Clamp(FMath::RoundToInt(Weight / 100.0f) * 100, 100, 900))
-	{
-	case 100: return TEXT("Thin");
-	case 200: return TEXT("ExtraLight");
-	case 300: return TEXT("Light");
-	case 400: return TEXT("Regular");
-	case 500: return TEXT("Medium");
-	case 600: return TEXT("SemiBold");
-	case 700: return TEXT("Bold");
-	case 800: return TEXT("ExtraBold");
-	case 900: return TEXT("Black");
-	default: return TEXT("Regular");
-	}
 }
 
 FString FFontResolver::FindBestTypeface(const FString& FontFamily, const FString& RequestedWeight)
@@ -630,7 +618,9 @@ TArray<FString> FFontResolver::FindMissingFonts(const FDesignDocument& Document)
 	return Missing;
 }
 
-void FFontResolver::CollectFontFamilies(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSet<FString>& OutFamilies)
+namespace
+{
+void CollectFontFamilies(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSet<FString>& OutFamilies)
 {
 	for (const auto& Node : Nodes)
 	{
@@ -644,22 +634,6 @@ void FFontResolver::CollectFontFamilies(const TArray<TSharedPtr<FDesignNode>>& N
 		CollectFontFamilies(Node->Children, OutFamilies);
 	}
 }
-
-TSet<FString> FFontResolver::ScanProjectFontAssets()
-{
-	TSet<FString> Result;
-	FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
-	IAssetRegistry& AR = ARM.Get();
-
-	TArray<FAssetData> FontAssets;
-	AR.GetAssetsByClass(UFont::StaticClass()->GetClassPathName(), FontAssets, true);
-
-	for (const FAssetData& Asset : FontAssets)
-	{
-		Result.Add(Asset.AssetName.ToString());
-	}
-
-	return Result;
 }
 
 #undef LOCTEXT_NAMESPACE

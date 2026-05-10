@@ -1,6 +1,6 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
-#include "Design2UMGConverterFlowSupport.h"
+#include "Design2UMGConverterFlowChildPreResolution.h"
 
 #include "Design2UMGLog.h"
 #include "DesignVariableResolver.h"
@@ -80,7 +80,7 @@ namespace
 
 	TArray<FChildSizeSnapshot> BuildFlowChildSnapshots(
 		const TArray<TSharedPtr<FDesignNode>>& VisibleChildren,
-		const Design2UMGConverterInternal::FExpandedNodeResolver& ExpandedNodeResolver)
+		const Design2UMGConverterInternal::FFlowChildPreResolutionResolver& PreResolutionResolver)
 	{
 		TArray<FChildSizeSnapshot> Snapshots;
 		Snapshots.Reserve(VisibleChildren.Num());
@@ -98,7 +98,7 @@ namespace
 			Snapshot.EffectiveWidth = Child->Transform.Width;
 			Snapshot.EffectiveHeight = Child->Transform.Height;
 
-			const TSharedPtr<FDesignNode> ExpandedChild = ExpandedNodeResolver.ExpandRef(Child);
+			const TSharedPtr<FDesignNode> ExpandedChild = PreResolutionResolver.ExpandRef(Child);
 			if (ExpandedChild != Child && ExpandedChild.IsValid())
 			{
 				Snapshot.bUsedExpandedRef = true;
@@ -203,14 +203,14 @@ namespace
 		const TSharedPtr<FDesignNode>& Node,
 		const FUMGWidgetNode& Widget,
 		const TArray<TSharedPtr<FDesignNode>>& VisibleChildren,
-		const Design2UMGConverterInternal::FExpandedNodeResolver& ExpandedNodeResolver)
+		const Design2UMGConverterInternal::FFlowChildPreResolutionResolver& PreResolutionResolver)
 	{
 		if (!ShouldPreResolveLinearFlow(Node, Widget))
 		{
 			return;
 		}
 
-		TArray<FChildSizeSnapshot> ChildSnapshots = BuildFlowChildSnapshots(VisibleChildren, ExpandedNodeResolver);
+		TArray<FChildSizeSnapshot> ChildSnapshots = BuildFlowChildSnapshots(VisibleChildren, PreResolutionResolver);
 		const FFlowLayoutSizingContext SizingContext =
 			BuildFlowLayoutSizingContext(Node, Widget, ChildSnapshots.Num());
 		const FFlowChildSizingSummary Summary =
@@ -221,7 +221,7 @@ namespace
 	void PreResolveFlowFitChild(
 		const TSharedPtr<FDesignNode>& ParentNode,
 		const TSharedPtr<FDesignNode>& Child,
-		const Design2UMGConverterInternal::FExpandedNodeResolver& ExpandedNodeResolver)
+		const Design2UMGConverterInternal::FFlowChildPreResolutionResolver& PreResolutionResolver)
 	{
 		if (!Child.IsValid() || (!Child->Transform.Width.IsFit() && !Child->Transform.Height.IsFit()))
 		{
@@ -230,7 +230,7 @@ namespace
 
 		const bool bLockExplicitFit = ShouldLockExplicitFitDimensionForFlow(Child);
 		const float ChildContentWidth = SizeEstimator::ComputeChildContentWidthHint(ParentNode, Child, 0.0f);
-		const TSharedPtr<FDesignNode> EstimateChild = ExpandedNodeResolver.ResolveExpandedChild(Child, false);
+		const TSharedPtr<FDesignNode> EstimateChild = PreResolutionResolver.ResolveExpandedChild(Child, false);
 		const FVector2D Estimate = SizeEstimator::EstimateNodeSize(EstimateChild, ChildContentWidth);
 		if (!(bLockExplicitFit && HasExplicitFitDimension(Child->Transform.Width)))
 		{
@@ -250,7 +250,7 @@ namespace
 
 namespace Design2UMGConverterInternal
 {
-	FExpandedNodeResolver::FExpandedNodeResolver(
+	FFlowChildPreResolutionResolver::FFlowChildPreResolutionResolver(
 		const FDesignDocument& InDocument,
 		const TMap<FString, FString>& InThemeContext)
 		: Document(InDocument)
@@ -258,7 +258,7 @@ namespace Design2UMGConverterInternal
 	{
 	}
 
-	TSharedPtr<FDesignNode> FExpandedNodeResolver::ExpandRef(const TSharedPtr<FDesignNode>& Node) const
+	TSharedPtr<FDesignNode> FFlowChildPreResolutionResolver::ExpandRef(const TSharedPtr<FDesignNode>& Node) const
 	{
 		if (!Node.IsValid() || Node->Type != EDesignNodeType::Ref)
 		{
@@ -281,7 +281,7 @@ namespace Design2UMGConverterInternal
 		return Expanded;
 	}
 
-	TSharedPtr<FDesignNode> FExpandedNodeResolver::ResolveExpandedChild(
+	TSharedPtr<FDesignNode> FFlowChildPreResolutionResolver::ResolveExpandedChild(
 		const TSharedPtr<FDesignNode>& Child,
 		const bool bPreComputeFitContent) const
 	{
@@ -299,20 +299,20 @@ namespace Design2UMGConverterInternal
 		return ExpandedChild;
 	}
 
-	FFlowChildPreparation::FFlowChildPreparation(const FExpandedNodeResolver& InExpandedNodeResolver)
-		: ExpandedNodeResolver(InExpandedNodeResolver)
+	FFlowChildPreResolution::FFlowChildPreResolution(const FFlowChildPreResolutionResolver& InPreResolutionResolver)
+		: PreResolutionResolver(InPreResolutionResolver)
 	{
 	}
 
-	void FFlowChildPreparation::PreResolveFlowChildren(
+	void FFlowChildPreResolution::PreResolveFlowChildren(
 		const TSharedPtr<FDesignNode>& Node,
 		const FUMGWidgetNode& Widget,
 		const TArray<TSharedPtr<FDesignNode>>& VisibleChildren) const
 	{
-		PreResolveLinearFlowFillChildren(Node, Widget, VisibleChildren, ExpandedNodeResolver);
+		PreResolveLinearFlowFillChildren(Node, Widget, VisibleChildren, PreResolutionResolver);
 		for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
 		{
-			PreResolveFlowFitChild(Node, Child, ExpandedNodeResolver);
+			PreResolveFlowFitChild(Node, Child, PreResolutionResolver);
 		}
 	}
 }

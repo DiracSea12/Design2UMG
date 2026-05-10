@@ -12,6 +12,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "HAL/FileManager.h"
 #include "Misc/PackageName.h"
+#include "Misc/Paths.h"
 #include "RenderingThread.h"
 #include "TextureCompiler.h"
 #include "TextureResource.h"

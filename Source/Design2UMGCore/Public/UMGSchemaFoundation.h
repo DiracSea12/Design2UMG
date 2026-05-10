@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Layout/Margin.h"
 #include "Templates/Function.h"
 #include "UMGSchemaFoundation.generated.h"
 

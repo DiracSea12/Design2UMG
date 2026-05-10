@@ -22,7 +22,6 @@ namespace UMGPropertyKeys
 	inline constexpr const TCHAR* Clipping = TEXT("Clipping");
 	inline constexpr const TCHAR* Color = TEXT("Color");
 	inline constexpr const TCHAR* ColorAndOpacity = TEXT("ColorAndOpacity");
-	inline constexpr const TCHAR* ColumnFill = TEXT("ColumnFill");
 	inline constexpr const TCHAR* ContentColor = TEXT("ContentColor");
 	inline constexpr const TCHAR* CornerRadii = TEXT("CornerRadii");
 	inline constexpr const TCHAR* DesignFontSize = TEXT("DesignFontSize");
@@ -67,7 +66,6 @@ namespace UMGPropertyKeys
 	inline constexpr const TCHAR* MinimumDesiredWidth = TEXT("MinimumDesiredWidth");
 	inline constexpr const TCHAR* NamedSlot = TEXT("NamedSlot");
 	inline constexpr const TCHAR* NumberOfPieces = TEXT("NumberOfPieces");
-	inline constexpr const TCHAR* Options = TEXT("Options");
 	inline constexpr const TCHAR* Orientation = TEXT("Orientation");
 	inline constexpr const TCHAR* OutlineColor = TEXT("OutlineColor");
 	inline constexpr const TCHAR* OutlineCornerRadius = TEXT("OutlineCornerRadius");
@@ -88,7 +86,6 @@ namespace UMGPropertyKeys
 	inline constexpr const TCHAR* Period = TEXT("Period");
 	inline constexpr const TCHAR* Phase = TEXT("Phase");
 	inline constexpr const TCHAR* PhaseCount = TEXT("PhaseCount");
-	inline constexpr const TCHAR* Placement = TEXT("Placement");
 	inline constexpr const TCHAR* PressedColor = TEXT("PressedColor");
 	inline constexpr const TCHAR* Radius = TEXT("Radius");
 	inline constexpr const TCHAR* RenderAngle = TEXT("RenderAngle");
@@ -98,9 +95,7 @@ namespace UMGPropertyKeys
 	inline constexpr const TCHAR* RenderTranslation = TEXT("RenderTranslation");
 	inline constexpr const TCHAR* RetainRendering = TEXT("RetainRendering");
 	inline constexpr const TCHAR* RichTextStyleRows = TEXT("Design2UMG.RichTextStyleRows");
-	inline constexpr const TCHAR* RowFill = TEXT("RowFill");
 	inline constexpr const TCHAR* ScrollBarVisibility = TEXT("ScrollBarVisibility");
-	inline constexpr const TCHAR* SelectedOption = TEXT("SelectedOption");
 	inline constexpr const TCHAR* ShadowBlur = TEXT("ShadowBlur");
 	inline constexpr const TCHAR* ShadowColorAndOpacity = TEXT("ShadowColorAndOpacity");
 	inline constexpr const TCHAR* ShadowOffset = TEXT("ShadowOffset");
