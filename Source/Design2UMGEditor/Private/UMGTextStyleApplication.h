@@ -15,7 +15,7 @@ struct FSlateFontInfo;
 namespace UMGTextStyleApplication
 {
 	bool TryResolveTextJustification(const FString& Value, ETextJustify::Type& OutJustification);
-	bool HasTypedTextValue(bool bHasValue, const FString& Value);
+	bool HasTypedTextValue(const TOptional<FString>& Value);
 	bool IsTypedIconFontWidget(const FUMGWidgetNode& Node);
 	FLinearColor NormalizeTypedTextColor(const FLinearColor& Color);
 

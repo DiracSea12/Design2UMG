@@ -6,6 +6,7 @@
 #include "DesignPathRasterizer.h"
 #include "DesignResourceResolver.h"
 #include "ProceduralShapeGenerator.h"
+#include "UMGImageCropUtils.h"
 #include "UMGEditorPropertyKeys.h"
 #include "UMGPropertyApplierSupport.h"
 #include "UMGPropertyKeys.h"
@@ -34,49 +35,17 @@ namespace
 
 		if (Mode == TEXT("Crop"))
 		{
-			FString TransformStr;
-			if (!TryGetProp(Properties, UMGPropertyKeys::ImageTransform, TransformStr))
+			UMGImageCropUtils::FImageCropRequest CropRequest;
+			if (!UMGImageCropUtils::TryBuildCropRequest(Properties, CropRequest))
 			{
 				return false;
 			}
 
-			TArray<FString> Parts;
-			TransformStr.ParseIntoArray(Parts, TEXT(","));
-			if (Parts.Num() != 6)
-			{
-				return false;
-			}
-
-			const float A = FCString::Atof(*Parts[0]);
-			const float B = FCString::Atof(*Parts[1]);
-			const float TX = FCString::Atof(*Parts[2]);
-			const float C = FCString::Atof(*Parts[3]);
-			const float D = FCString::Atof(*Parts[4]);
-			const float TY = FCString::Atof(*Parts[5]);
-
-			if (FMath::IsNearlyZero(B) && FMath::IsNearlyZero(C) && A > KINDA_SMALL_NUMBER && D > KINDA_SMALL_NUMBER)
-			{
-				Brush.SetUVRegion(FBox2f(FVector2f(TX, TY), FVector2f(TX + A, TY + D)));
-				return true;
-			}
-
-			if (!FMath::IsNearlyZero(B) || !FMath::IsNearlyZero(C))
-			{
-				UTexture2D* SrcTex = Cast<UTexture2D>(Brush.GetResourceObject());
-				float CropWidth = 64.0f;
-				float CropHeight = 64.0f;
-				Properties.TryGetFloat(UMGPropertyKeys::WidthOverride, CropWidth);
-				Properties.TryGetFloat(UMGPropertyKeys::HeightOverride, CropHeight);
-				const int32 CropW = FMath::Max(1, FMath::RoundToInt(CropWidth));
-				const int32 CropH = FMath::Max(1, FMath::RoundToInt(CropHeight));
-				if (UTexture2D* Cropped = FProceduralShapeGenerator::ApplyAffineCrop(SrcTex, A, B, TX, C, D, TY, CropW, CropH))
-				{
-					ApplyCroppedTexture(Cropped);
-					return true;
-				}
-			}
-
-			return false;
+			return UMGImageCropUtils::TryApplyCropToBrush(
+				Brush,
+				Cast<UTexture2D>(Brush.GetResourceObject()),
+				CropRequest,
+				ApplyCroppedTexture);
 		}
 
 		if (Mode == TEXT("Fit"))
@@ -108,7 +77,9 @@ namespace UMGBrushPropertyApplier
 		{
 			Image->SetBrushTintColor(FSlateColor(BrushTint));
 		}
-		if (TryGetProp(Properties, UMGPropertyKeys::MaterialRef, Value))
+		const bool bHasMaterialRef = TryGetPropAllowEmpty(Properties, UMGPropertyKeys::MaterialRef, Value);
+		const bool bExplicitEmptyMaterialRef = bHasMaterialRef && Value.IsEmpty();
+		if (bHasMaterialRef && !Value.IsEmpty())
 		{
 			if (UTexture2D* GeneratedTex = DesignResourceResolver::ResolveTextureFromMaterialRef(Value, Properties, Image))
 			{
@@ -186,7 +157,7 @@ namespace UMGBrushPropertyApplier
 			}
 		}
 
-		if (TryGetProp(Properties, UMGPropertyKeys::TexturePath, Value))
+		if (!bExplicitEmptyMaterialRef && TryGetPropAllowEmpty(Properties, UMGPropertyKeys::TexturePath, Value) && !Value.IsEmpty())
 		{
 			if (UTexture2D* Texture = DesignResourceResolver::LoadTextureFromPath(Value, DesignResourceResolver::ELoadMode::LoadThenFind))
 			{
@@ -237,24 +208,28 @@ namespace UMGBrushPropertyApplier
 		FSlateBrush Brush = Border->Background;
 		bool bBrushChanged = false;
 		FString Value;
-		if (TryGetProp(Properties, UMGPropertyKeys::TexturePath, Value))
-		{
-			if (UTexture2D* Texture = DesignResourceResolver::LoadTextureFromPath(Value, DesignResourceResolver::ELoadMode::LoadThenFind))
-			{
-				Brush.SetResourceObject(Texture);
-				Brush.DrawAs = ESlateBrushDrawType::Image;
-				Brush.ImageSize = FVector2D(Texture->GetSizeX(), Texture->GetSizeY());
-				bBrushChanged = true;
-			}
-		}
-
-		if (TryGetProp(Properties, UMGPropertyKeys::MaterialRef, Value))
+		const bool bHasMaterialRef = TryGetPropAllowEmpty(Properties, UMGPropertyKeys::MaterialRef, Value);
+		const bool bExplicitEmptyMaterialRef = bHasMaterialRef && Value.IsEmpty();
+		bool bMaterialRefResolved = false;
+		if (bHasMaterialRef && !Value.IsEmpty())
 		{
 			if (UTexture2D* GeneratedTex = DesignResourceResolver::ResolveTextureFromMaterialRef(Value, Properties, Border))
 			{
 				Brush.SetResourceObject(GeneratedTex);
 				Brush.DrawAs = ESlateBrushDrawType::Image;
 				Brush.ImageSize = FVector2D(GeneratedTex->GetSizeX(), GeneratedTex->GetSizeY());
+				bBrushChanged = true;
+				bMaterialRefResolved = true;
+			}
+		}
+
+		if (!bMaterialRefResolved && !bExplicitEmptyMaterialRef && TryGetPropAllowEmpty(Properties, UMGPropertyKeys::TexturePath, Value) && !Value.IsEmpty())
+		{
+			if (UTexture2D* Texture = DesignResourceResolver::LoadTextureFromPath(Value, DesignResourceResolver::ELoadMode::LoadThenFind))
+			{
+				Brush.SetResourceObject(Texture);
+				Brush.DrawAs = ESlateBrushDrawType::Image;
+				Brush.ImageSize = FVector2D(Texture->GetSizeX(), Texture->GetSizeY());
 				bBrushChanged = true;
 			}
 		}
@@ -382,9 +357,9 @@ namespace UMGBrushPropertyApplier
 		FSlateBrush Brush = Border->Background;
 		bool bChanged = false;
 
-		if (BrushData.bHasDrawAs)
+		if (BrushData.DrawAs.IsSet())
 		{
-			Brush.DrawAs = BrushData.DrawAs;
+			Brush.DrawAs = BrushData.DrawAs.GetValue();
 			bChanged = true;
 		}
 
@@ -431,15 +406,15 @@ namespace UMGBrushPropertyApplier
 			bChanged = true;
 		}
 
-		if (BrushData.bHasOutlineThickness)
+		if (BrushData.OutlineThickness.IsSet())
 		{
-			Brush.OutlineSettings.Width = FMath::Max(0.0f, BrushData.OutlineThickness);
+			Brush.OutlineSettings.Width = FMath::Max(0.0f, BrushData.OutlineThickness.GetValue());
 			bChanged = true;
 		}
 
-		if (BrushData.bHasOutlineColor)
+		if (BrushData.OutlineColor.IsSet())
 		{
-			Brush.OutlineSettings.Color = FSlateColor(BrushData.OutlineColor);
+			Brush.OutlineSettings.Color = FSlateColor(BrushData.OutlineColor.GetValue());
 			bChanged = true;
 		}
 
@@ -448,9 +423,9 @@ namespace UMGBrushPropertyApplier
 			Border->Background = Brush;
 		}
 
-		if (BrushData.bHasBrushColor)
+		if (BrushData.BrushColor.IsSet())
 		{
-			Border->SetBrushColor(BrushData.BrushColor);
+			Border->SetBrushColor(BrushData.BrushColor.GetValue());
 		}
 	}
 
@@ -510,31 +485,41 @@ namespace UMGBrushPropertyApplier
 	void ApplyTypedRetainerBoxProps(URetainerBox* RB, const FUMGEffectData& Effect)
 	{
 		if (!RB) return;
-		if (Effect.bHasRetainRendering) RB->SetRetainRendering(Effect.bRetainRendering);
-		if (Effect.bHasTextureParameter || !Effect.TextureParameter.IsEmpty())
-			RB->SetTextureParameter(FName(*Effect.TextureParameter));
-		if (Effect.bHasEffectMaterial || !Effect.EffectMaterial.IsEmpty())
-			RB->SetEffectMaterial(ResolveRetainerEffectMaterial(Effect.EffectMaterial));
-		if (Effect.bHasRenderingPhase)
-			RB->SetRenderingPhase(Effect.Phase, FMath::Max(1, Effect.PhaseCount));
+		if (Effect.bRetainRendering.IsSet()) RB->SetRetainRendering(Effect.bRetainRendering.GetValue());
+		if (Effect.TextureParameter.IsSet())
+			RB->SetTextureParameter(FName(*Effect.TextureParameter.GetValue()));
+		if (Effect.EffectMaterial.IsSet())
+			RB->SetEffectMaterial(ResolveRetainerEffectMaterial(Effect.EffectMaterial.GetValue()));
+		if (Effect.RenderingPhase.IsSet())
+		{
+			const FUMGEffectData::FRenderingPhaseData& RenderingPhase = Effect.RenderingPhase.GetValue();
+			RB->SetRenderingPhase(RenderingPhase.Phase, FMath::Max(1, RenderingPhase.PhaseCount));
+		}
 		RB->TakeWidget();
 		if (UMaterialInstanceDynamic* DynamicEffect = RB->GetEffectMaterial())
 		{
-			if (Effect.bHasEffectBlurUVStep)
-				DynamicEffect->SetVectorParameterValue(TEXT("BlurUVStep"), FLinearColor(Effect.EffectBlurUVStep.X, Effect.EffectBlurUVStep.Y, 0.0f, 0.0f));
-			if (Effect.bHasEffectColor)
+			if (Effect.EffectBlurUVStep.IsSet())
 			{
-				DynamicEffect->SetVectorParameterValue(TEXT("InnerShadowColor"), Effect.EffectColor);
-				DynamicEffect->SetScalarParameterValue(TEXT("InnerShadowStrength"), Effect.EffectColor.A);
+				const FVector2D& BlurUVStep = Effect.EffectBlurUVStep.GetValue();
+				DynamicEffect->SetVectorParameterValue(TEXT("BlurUVStep"), FLinearColor(BlurUVStep.X, BlurUVStep.Y, 0.0f, 0.0f));
 			}
-			if (Effect.bHasEffectOffset)
-				DynamicEffect->SetVectorParameterValue(TEXT("InnerShadowOffset"), FLinearColor(Effect.EffectOffset.X, Effect.EffectOffset.Y, 0.0f, 0.0f));
+			if (Effect.EffectColor.IsSet())
+			{
+				const FLinearColor& EffectColor = Effect.EffectColor.GetValue();
+				DynamicEffect->SetVectorParameterValue(TEXT("InnerShadowColor"), EffectColor);
+				DynamicEffect->SetScalarParameterValue(TEXT("InnerShadowStrength"), EffectColor.A);
+			}
+			if (Effect.EffectOffset.IsSet())
+			{
+				const FVector2D& EffectOffset = Effect.EffectOffset.GetValue();
+				DynamicEffect->SetVectorParameterValue(TEXT("InnerShadowOffset"), FLinearColor(EffectOffset.X, EffectOffset.Y, 0.0f, 0.0f));
+			}
 		}
 	}
 
 	void ApplyTypedBackgroundBlurProps(UBackgroundBlur* Blur, const FUMGEffectData& Effect)
 	{
-		if (Blur && Effect.bHasBlurStrength)
-			Blur->SetBlurStrength(Effect.BlurStrength);
+		if (Blur && Effect.BlurStrength.IsSet())
+			Blur->SetBlurStrength(Effect.BlurStrength.GetValue());
 	}
 }

@@ -66,7 +66,6 @@ namespace
 		{
 			const FString AssetPath = FFontResolver::FindFontAssetPath(Node->Text.FontFamily);
 			Widget.Text.FontFamily = AssetPath.IsEmpty() ? Node->Text.FontFamily : AssetPath;
-			Widget.Text.bHasFontFamily = true;
 		}
 
 		if (!Node->Text.FontWeight.IsEmpty())
@@ -77,19 +76,16 @@ namespace
 				Typeface = DesignTypeMapper::MapFontWeight(Node->Text.FontWeight).ToString();
 			}
 			Widget.Text.TypefaceFontName = Typeface;
-			Widget.Text.bHasTypefaceFontName = true;
 		}
 
 		if (!Node->Text.FontStyle.IsEmpty())
 		{
 			Widget.Text.FontStyle = Node->Text.FontStyle;
-			Widget.Text.bHasFontStyle = true;
 		}
 
 		Widget.Text.Justification =
 			Node->Text.TextAlign == EDesignTextAlign::Center ? TEXT("Center") :
 			Node->Text.TextAlign == EDesignTextAlign::Right ? TEXT("Right") : TEXT("Left");
-		Widget.Text.bHasJustification = true;
 
 		const float ResolvedWrapTextAt = TextMeasurement::ResolveTextWrapAt(Node, 0.0f);
 		const bool bNeedsKnownWidthRuntimeWrap =
@@ -100,19 +96,15 @@ namespace
 		if (Node->Text.TextAlign == EDesignTextAlign::Justify)
 		{
 			Widget.Text.bAutoWrapText = true;
-			Widget.Text.bHasAutoWrapText = true;
 			if (ResolvedWrapTextAt > 0.0f)
 			{
 				Widget.Text.WrapTextAt = ResolvedWrapTextAt;
-				Widget.Text.bHasWrapTextAt = true;
 			}
 		}
 		else if (bNeedsKnownWidthRuntimeWrap && ResolvedWrapTextAt > 0.0f)
 		{
 			Widget.Text.bAutoWrapText = true;
-			Widget.Text.bHasAutoWrapText = true;
 			Widget.Text.WrapTextAt = ResolvedWrapTextAt;
-			Widget.Text.bHasWrapTextAt = true;
 		}
 
 		const bool bApplyRuntimeLineHeight =
@@ -120,7 +112,6 @@ namespace
 		if (bApplyRuntimeLineHeight)
 		{
 			Widget.Text.LineHeightPercentage = Node->Text.LineHeight;
-			Widget.Text.bHasLineHeightPercentage = true;
 		}
 
 		if (Node->Text.LetterSpacing != 0)
@@ -131,17 +122,14 @@ namespace
 		if (Node->Text.bUnderline)
 		{
 			Widget.Text.bUnderline = true;
-			Widget.Text.bHasUnderline = true;
 		}
 		if (Node->Text.bStrikethrough)
 		{
 			Widget.Text.bStrikethrough = true;
-			Widget.Text.bHasStrikethrough = true;
 		}
 		if (!Node->Text.Href.IsEmpty())
 		{
 			Widget.Text.Href = Node->Text.Href;
-			Widget.Text.bHasHref = true;
 		}
 
 		switch (Node->Text.TextGrowth)
@@ -151,21 +139,17 @@ namespace
 			if (Design2UMGSourceMetadata::HasNodeMetadataFlag(Node, TEXT("source.text.truncate")))
 			{
 				Widget.Render.Clipping = TEXT("ClipToBounds");
-				Widget.Render.bHasClipping = true;
 				break;
 			}
 
 			Widget.Text.bAutoWrapText = true;
-			Widget.Text.bHasAutoWrapText = true;
 			if (ResolvedWrapTextAt > 0.0f)
 			{
 				Widget.Text.WrapTextAt = ResolvedWrapTextAt;
-				Widget.Text.bHasWrapTextAt = true;
 			}
 			if (Node->Text.TextGrowth == EDesignTextGrowth::FixedWidthHeight)
 			{
 				Widget.Render.Clipping = TEXT("ClipToBounds");
-				Widget.Render.bHasClipping = true;
 			}
 			break;
 		default:
@@ -176,7 +160,6 @@ namespace
 		{
 			Widget.Text.TextAlignVertical =
 				Node->Text.TextAlignVertical == EDesignTextAlignVertical::Middle ? TEXT("Center") : TEXT("Bottom");
-			Widget.Text.bHasTextAlignVertical = true;
 
 			// textAlignVertical is an internal text-box alignment hint. It must not
 			// move the outer layout slot, but fixed-height text still needs internal
@@ -432,12 +415,10 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 	const FGeneratedRichTextContent RichTextContent = bUseRichTextBlock ? BuildRichTextContent(Node) : FGeneratedRichTextContent();
 	Widget.Type = bUseRichTextBlock ? TEXT("RichTextBlock") : TEXT("TextBlock");
 	Widget.Text.Text = bUseRichTextBlock ? RichTextContent.Markup : TextMeasurement::PrepareRuntimeTextContent(Node->Text.Content);
-	Widget.Text.bHasText = true;
 	ApplyTextProperties(Widget, Node);
 	if (bUseRichTextBlock && RichTextContent.bHasStyleRows)
 	{
 		Widget.Text.RichTextStyleRowsJson = RichTextContent.StyleRowsJson;
-		Widget.Text.bHasRichTextStyleRows = true;
 	}
 	if (!RichTextContent.SingleHref.IsEmpty())
 	{
@@ -562,7 +543,6 @@ Design2UMGTextWidgetBuilder::FIconFontBuildResult Design2UMGTextWidgetBuilder::C
 	if (!AssetPath.IsEmpty())
 	{
 		Widget.Text.FontFamily = AssetPath;
-		Widget.Text.bHasFontFamily = true;
 		ResolvedIconGlyph = FFontResolver::FindKnownIconGlyph(Node->Text.IconFontFamily, Node->Text.IconFontName);
 		const bool bUsingFallbackFontAsset = bUsedDefaultIconPath;
 		FString WeightToken = ResolveIconTypefaceWeightToken(Node, bUsingFallbackFontAsset);
@@ -574,7 +554,6 @@ Design2UMGTextWidgetBuilder::FIconFontBuildResult Design2UMGTextWidgetBuilder::C
 		if (!Typeface.IsEmpty())
 		{
 			Widget.Text.TypefaceFontName = Typeface;
-			Widget.Text.bHasTypefaceFontName = true;
 		}
 	}
 	else if (!Node->Text.IconFontFamily.IsEmpty())
@@ -596,7 +575,6 @@ Design2UMGTextWidgetBuilder::FIconFontBuildResult Design2UMGTextWidgetBuilder::C
 
 	// The icon name itself is the ligature text for fonts such as Material Symbols.
 	Widget.Text.IconName = Node->Text.IconFontName;
-	Widget.Text.bHasIconName = true;
 	FString IconText = !ResolvedIconGlyph.IsEmpty()
 		? ResolvedIconGlyph
 		: FFontResolver::FindKnownIconGlyph(Node->Text.IconFontFamily, Node->Text.IconFontName);
@@ -611,7 +589,6 @@ Design2UMGTextWidgetBuilder::FIconFontBuildResult Design2UMGTextWidgetBuilder::C
 	if (!IconText.IsEmpty())
 	{
 		Widget.Text.Text = IconText;
-		Widget.Text.bHasText = true;
 	}
 
 	if (Node->Text.FontSize > 0)
@@ -623,7 +600,6 @@ Design2UMGTextWidgetBuilder::FIconFontBuildResult Design2UMGTextWidgetBuilder::C
 	if (Node->Visual.Fill.Type == EDesignFillType::Color)
 	{
 		Widget.Text.Color = FUMGValueParser::ParseColor(Node->Visual.Fill.SolidColor);
-		Widget.Text.bHasColor = true;
 	}
 
 	return Result;

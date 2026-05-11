@@ -80,18 +80,14 @@ namespace
 		void ApplyTypedGradientBrushData(FUMGVisualBrushData& Brush, const FDesignGradient& Gradient)
 		{
 			Brush.Gradient.Type = ToTypedGradientTypeString(Gradient.GradientType);
-			Brush.Gradient.bHasType = true;
 			Brush.Gradient.Rotation = Gradient.Rotation;
-			Brush.Gradient.bHasRotation = true;
 			if (Gradient.bHasCenter)
 			{
 				Brush.Gradient.Center = FVector2D(Gradient.CenterX, Gradient.CenterY);
-				Brush.Gradient.bHasCenter = true;
 			}
 			if (Gradient.bHasSize)
 			{
 				Brush.Gradient.Size = FVector2D(Gradient.SizeWidth, Gradient.SizeHeight);
-				Brush.Gradient.bHasSize = true;
 			}
 			Brush.Gradient.Stops.Reset();
 			for (const FDesignGradientStop& Stop : Gradient.Colors)
@@ -117,9 +113,9 @@ namespace
 		}
 	}
 
-	bool HasVisualMapperWidgetStringProperty(const FUMGWidgetNode& Widget, const TCHAR* Key)
+	bool HasVisualMapperPropertyPresence(const FUMGWidgetNode& Widget, const TCHAR* Key)
 	{
-		return Design2UMGWidgetNodeAccess::HasWidgetString(Widget, Key);
+		return Design2UMGWidgetNodeAccess::HasWidgetPropertyPresence(Widget, Key);
 	}
 
 	void AddTextureSizeHints(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
@@ -175,12 +171,10 @@ namespace
 		{
 			const float EffectiveOpacity = FMath::Min(Fill.Image.Opacity, Options.LuminosityFitOpacityCap);
 			ImageChild.Render.RenderOpacity = EffectiveOpacity;
-			ImageChild.Render.bHasRenderOpacity = true;
 		}
 		else if (Fill.Image.Opacity < 1.0f)
 		{
 			ImageChild.Render.RenderOpacity = Fill.Image.Opacity;
-			ImageChild.Render.bHasRenderOpacity = true;
 		}
 	}
 
@@ -201,7 +195,6 @@ namespace
 		{
 			Layer.Type = TEXT("Border");
 			Layer.Brush.BrushColor = FUMGValueParser::ParseColor(Fill.SolidColor);
-			Layer.Brush.bHasBrushColor = true;
 			return true;
 		}
 
@@ -209,13 +202,11 @@ namespace
 		{
 			Layer.Type = TEXT("Image");
 			Layer.Brush.MaterialRef = GradientHelpers::ResolveGradientMaterialRef(Fill.Gradient);
-			Layer.Brush.bHasMaterialRef = true;
 			GradientHelpers::ApplyTypedGradientBrushData(Layer.Brush, Fill.Gradient);
 			const FString MaterialParams = GradientHelpers::BuildGradientMaterialParams(Fill.Gradient);
 			if (!MaterialParams.IsEmpty())
 			{
 				Layer.Brush.MaterialParams = MaterialParams;
-				Layer.Brush.bHasMaterialParams = true;
 			}
 			AddTextureSizeHints(Layer, Node);
 			return true;
@@ -240,9 +231,7 @@ namespace
 			ImageChild.Type = TEXT("Image");
 			ImageChild.Id = FString::Printf(TEXT("%s_fill%d_img"), *Widget.Id, FillIndex);
 			ImageChild.Name = FString::Printf(TEXT("%s_fill%d_img"), *Widget.Name, FillIndex);
-			ImageChild.Brush.TexturePath = Fill.Image.Url;
 			ImageChild.Brush.Image.TexturePath = Fill.Image.Url;
-			ImageChild.Brush.Image.bHasTexturePath = true;
 			ApplyMultiFillImageChildOpacity(ImageChild, Fill, Options);
 			if (bSquareNode)
 			{
@@ -253,9 +242,7 @@ namespace
 		}
 
 		Layer.Type = TEXT("Image");
-		Layer.Brush.TexturePath = Fill.Image.Url;
 		Layer.Brush.Image.TexturePath = Fill.Image.Url;
-		Layer.Brush.Image.bHasTexturePath = true;
 		ImageFillUtils::ApplyImageFillProperties(Layer, Fill.Image);
 		AddTextureSizeHints(Layer, Node);
 		return true;
@@ -275,10 +262,9 @@ namespace VisualMapperFillTransfer
 		{
 			if ((Node->Type == EDesignNodeType::Text || Node->Type == EDesignNodeType::IconFont)
 				&& Node->Visual.Fill.Type == EDesignFillType::Color
-				&& !HasVisualMapperWidgetStringProperty(Widget, UMGPropertyKeys::Color))
+				&& !HasVisualMapperPropertyPresence(Widget, UMGPropertyKeys::Color))
 			{
 				Widget.Text.Color = FUMGValueParser::ParseColor(Node->Visual.Fill.SolidColor);
-				Widget.Text.bHasColor = true;
 			}
 			return;
 		}
@@ -287,29 +273,25 @@ namespace VisualMapperFillTransfer
 		{
 			if (Node->Type == EDesignNodeType::Text || Node->Type == EDesignNodeType::IconFont)
 			{
-				if (!HasVisualMapperWidgetStringProperty(Widget, UMGPropertyKeys::Color))
+				if (!HasVisualMapperPropertyPresence(Widget, UMGPropertyKeys::Color))
 				{
 					Widget.Text.Color = FUMGValueParser::ParseColor(Node->Visual.Fill.SolidColor);
-					Widget.Text.bHasColor = true;
 				}
 				return;
 			}
 
 			Widget.Brush.BrushColor = FUMGValueParser::ParseColor(Node->Visual.Fill.SolidColor);
-			Widget.Brush.bHasBrushColor = true;
 			return;
 		}
 
 		if (Node->Visual.Fill.Type == EDesignFillType::Gradient && Node->Visual.Fill.Gradient.Colors.Num() > 0)
 		{
 			Widget.Brush.MaterialRef = GradientHelpers::ResolveGradientMaterialRef(Node->Visual.Fill.Gradient);
-			Widget.Brush.bHasMaterialRef = true;
 			GradientHelpers::ApplyTypedGradientBrushData(Widget.Brush, Node->Visual.Fill.Gradient);
 			const FString MaterialParams = GradientHelpers::BuildGradientMaterialParams(Node->Visual.Fill.Gradient);
 			if (!MaterialParams.IsEmpty())
 			{
 				Widget.Brush.MaterialParams = MaterialParams;
-				Widget.Brush.bHasMaterialParams = true;
 			}
 			AddTextureSizeHints(Widget, Node);
 			return;
@@ -317,7 +299,6 @@ namespace VisualMapperFillTransfer
 
 		if (Node->Visual.Fill.Type == EDesignFillType::Image && !Node->Visual.Fill.Image.Url.IsEmpty())
 		{
-			Widget.Brush.TexturePath = Node->Visual.Fill.Image.Url;
 			ImageFillUtils::ApplyImageFillProperties(Widget, Node->Visual.Fill.Image);
 			AddTextureSizeHints(Widget, Node);
 		}

@@ -342,11 +342,11 @@ bool FPenWelcomeWrapFontRegressionTest::RunTest(const FString& Parameters)
 		WelcomeBody->Bounds.Y,
 		WelcomeBody->Bounds.W,
 		WelcomeBody->Bounds.H,
-		WelcomeBody->Text.bAutoWrapText ? 1 : 0,
-		WelcomeBody->Text.WrapTextAt,
-		WelcomeBody->Text.LineHeightPercentage,
-		*WelcomeBody->Text.FontFamily,
-		*WelcomeBody->Text.TypefaceFontName,
+		WelcomeBody->Text.bAutoWrapText.Get(false) ? 1 : 0,
+		WelcomeBody->Text.WrapTextAt.Get(0.0f),
+		WelcomeBody->Text.LineHeightPercentage.Get(0.0f),
+		*WelcomeBody->Text.FontFamily.Get(FString()),
+		*WelcomeBody->Text.TypefaceFontName.Get(FString()),
 		WelcomeBodyPadding.Left,
 		WelcomeBodyPadding.Top,
 		WelcomeBodyPadding.Right,
@@ -359,11 +359,11 @@ bool FPenWelcomeWrapFontRegressionTest::RunTest(const FString& Parameters)
 		ProTips->Bounds.Y,
 		ProTips->Bounds.W,
 		ProTips->Bounds.H,
-		ProTips->Text.bAutoWrapText ? 1 : 0,
-		ProTips->Text.WrapTextAt,
-		ProTips->Text.LineHeightPercentage,
-		*ProTips->Text.FontFamily,
-		*ProTips->Text.TypefaceFontName,
+		ProTips->Text.bAutoWrapText.Get(false) ? 1 : 0,
+		ProTips->Text.WrapTextAt.Get(0.0f),
+		ProTips->Text.LineHeightPercentage.Get(0.0f),
+		*ProTips->Text.FontFamily.Get(FString()),
+		*ProTips->Text.TypefaceFontName.Get(FString()),
 		ProTipsPadding.Left,
 		ProTipsPadding.Top,
 		ProTipsPadding.Right,
@@ -1119,7 +1119,6 @@ bool FTreeBuilderStructureSnapshotStableTest::RunTest(const FString& Parameters)
 	TextNode.Name = TEXT("snap_text");
 	TextNode.Bounds = {0.0f, 0.0f, 100.0f, 30.0f};
 	TextNode.Text.Text = TEXT("snap");
-	TextNode.Text.bHasText = true;
 	BorderNode.Children.Add(TextNode);
 
 	FUMGWidgetNode GridNode;
@@ -1229,7 +1228,6 @@ bool FNamedSlotOverflowWrapStructureStableTest::RunTest(const FString& Parameter
 	HeaderNode.Name = TEXT("slot_header");
 	HeaderNode.Bounds = {0.0f, 0.0f, 120.0f, 24.0f};
 	HeaderNode.Text.Text = TEXT("Header");
-	HeaderNode.Text.bHasText = true;
 	HeaderNode.WidgetStyle.SlotName = TEXT("Header");
 
 	FUMGWidgetNode BodyPrimaryNode;
@@ -1238,7 +1236,6 @@ bool FNamedSlotOverflowWrapStructureStableTest::RunTest(const FString& Parameter
 	BodyPrimaryNode.Name = TEXT("slot_body_primary");
 	BodyPrimaryNode.Bounds = {0.0f, 28.0f, 180.0f, 24.0f};
 	BodyPrimaryNode.Text.Text = TEXT("BodyPrimary");
-	BodyPrimaryNode.Text.bHasText = true;
 	BodyPrimaryNode.WidgetStyle.SlotName = TEXT("Body");
 
 	FUMGWidgetNode BodySecondaryNode;
@@ -1247,7 +1244,6 @@ bool FNamedSlotOverflowWrapStructureStableTest::RunTest(const FString& Parameter
 	BodySecondaryNode.Name = TEXT("slot_body_secondary");
 	BodySecondaryNode.Bounds = {0.0f, 56.0f, 180.0f, 24.0f};
 	BodySecondaryNode.Text.Text = TEXT("BodySecondary");
-	BodySecondaryNode.Text.bHasText = true;
 	BodySecondaryNode.WidgetStyle.SlotName = TEXT("Body");
 	BodySecondaryNode.Slot.Padding = FMargin(3.0f, 0.0f, 0.0f, 7.0f);
 
@@ -1477,12 +1473,12 @@ namespace
 		S.Type = Node.Type;
 		S.Id = Node.Id;
 		S.Name = Node.Name;
-		S.PathGeometry = Node.Path.Geometry;
-		S.bHasGeometry = Node.Path.bHasGeometry;
-		S.MaterialRef = Node.Brush.MaterialRef;
-		S.bHasMaterialRef = Node.Brush.bHasMaterialRef;
-		S.TexturePath = Node.Brush.Image.TexturePath;
-		S.bHasTexturePath = Node.Brush.Image.bHasTexturePath;
+		S.PathGeometry = Node.Path.Geometry.Get(FString());
+		S.bHasGeometry = Node.Path.Geometry.IsSet();
+		S.MaterialRef = Node.Brush.MaterialRef.Get(FString());
+		S.bHasMaterialRef = Node.Brush.MaterialRef.IsSet();
+		S.TexturePath = Node.Brush.Image.TexturePath.Get(FString());
+		S.bHasTexturePath = Node.Brush.Image.TexturePath.IsSet();
 		return S;
 	}
 
@@ -1492,12 +1488,12 @@ namespace
 		Node.Type = TEXT("Image");
 		Node.Id = Id;
 		Node.Name = Id;
-		Node.Path.Geometry = Geometry;
-		Node.Path.bHasGeometry = !Geometry.IsEmpty();
+		if (!Geometry.IsEmpty())
+		{
+			Node.Path.Geometry = Geometry;
+		}
 		Node.Path.FillRule = TEXT("nonzero");
-		Node.Path.bHasFillRule = true;
 		Node.Path.FillColor = FLinearColor::White;
-		Node.Path.bHasFillColor = true;
 		Node.WidgetStyle.WidthOverride = 32.0f;
 		Node.WidgetStyle.HeightOverride = 32.0f;
 		return Node;
@@ -1509,8 +1505,10 @@ namespace
 		Node.Type = TEXT("Image");
 		Node.Id = Id;
 		Node.Name = Id;
-		Node.Brush.MaterialRef = MaterialRef;
-		Node.Brush.bHasMaterialRef = !MaterialRef.IsEmpty();
+		if (!MaterialRef.IsEmpty())
+		{
+			Node.Brush.MaterialRef = MaterialRef;
+		}
 		Node.WidgetStyle.WidthOverride = 32.0f;
 		Node.WidgetStyle.HeightOverride = 32.0f;
 		return Node;

@@ -238,9 +238,7 @@ namespace Design2UMGSourceMetadata
 		Widget.Type = TEXT("Image");
 
 		const FString& TexturePath = Node->Source().RenderFallback.ImageRef;
-		Widget.Brush.TexturePath = TexturePath;
 		Widget.Brush.Image.TexturePath = TexturePath;
-		Widget.Brush.Image.bHasTexturePath = true;
 
 		if (Node->Transform.Width.Value > 0.0f)
 		{

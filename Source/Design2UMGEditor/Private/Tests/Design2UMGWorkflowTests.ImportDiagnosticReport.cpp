@@ -100,7 +100,6 @@ bool FImportDiagnosticReportStructureTest::RunTest(const FString& Parameters)
 	Wrapper.Id = TEXT("hero_blur");
 	Wrapper.Name = TEXT("HeroBlur");
 	Wrapper.Effect.BlurStrength = 12.0f;
-	Wrapper.Effect.bHasBlurStrength = true;
 
 	FUMGWidgetNode Child;
 	Child.Type = TEXT("TextBlock");

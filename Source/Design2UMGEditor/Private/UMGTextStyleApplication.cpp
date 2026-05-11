@@ -48,14 +48,14 @@ namespace UMGTextStyleApplication
 		return false;
 	}
 
-	bool HasTypedTextValue(const bool bHasValue, const FString& Value)
+	bool HasTypedTextValue(const TOptional<FString>& Value)
 	{
-		return bHasValue && !Value.IsEmpty();
+		return Value.IsSet() && !Value.GetValue().IsEmpty();
 	}
 
 	bool IsTypedIconFontWidget(const FUMGWidgetNode& Node)
 	{
-		return HasTypedTextValue(Node.Text.bHasIconName, Node.Text.IconName);
+		return HasTypedTextValue(Node.Text.IconName);
 	}
 
 	FLinearColor NormalizeTypedTextColor(const FLinearColor& Color)
@@ -109,15 +109,15 @@ namespace UMGTextStyleApplication
 			bFontChanged = true;
 		}
 
-		if (HasTypedTextValue(Node.Text.bHasFontFamily, Node.Text.FontFamily))
+		if (HasTypedTextValue(Node.Text.FontFamily))
 		{
-			DesignResourceResolver::ApplyFontFamily(FontInfo, Node.Text.FontFamily, IsTypedIconFontWidget(Node));
+			DesignResourceResolver::ApplyFontFamily(FontInfo, Node.Text.FontFamily.GetValue(), IsTypedIconFontWidget(Node));
 			bFontChanged = true;
 		}
 
-		if (HasTypedTextValue(Node.Text.bHasTypefaceFontName, Node.Text.TypefaceFontName))
+		if (HasTypedTextValue(Node.Text.TypefaceFontName))
 		{
-			FontInfo.TypefaceFontName = FName(*Node.Text.TypefaceFontName);
+			FontInfo.TypefaceFontName = FName(*Node.Text.TypefaceFontName.GetValue());
 			bFontChanged = true;
 		}
 
@@ -204,26 +204,26 @@ namespace UMGTextStyleApplication
 		}
 
 		ETextJustify::Type Justification = ETextJustify::Left;
-		if (HasTypedTextValue(Node.Text.bHasJustification, Node.Text.Justification)
-			&& TryResolveTextJustification(Node.Text.Justification, Justification))
+		if (HasTypedTextValue(Node.Text.Justification)
+			&& TryResolveTextJustification(Node.Text.Justification.GetValue(), Justification))
 		{
 			TextWidget->SetJustification(Justification);
 		}
 
-		if (Node.Text.bHasLineHeightPercentage)
+		if (Node.Text.LineHeightPercentage.IsSet())
 		{
-			TextWidget->SetLineHeightPercentage(Node.Text.LineHeightPercentage);
+			TextWidget->SetLineHeightPercentage(Node.Text.LineHeightPercentage.GetValue());
 			TextWidget->SetApplyLineHeightToBottomLine(true);
 		}
 
-		if (Node.Text.bHasAutoWrapText)
+		if (Node.Text.bAutoWrapText.IsSet())
 		{
-			TextWidget->SetAutoWrapText(Node.Text.bAutoWrapText);
+			TextWidget->SetAutoWrapText(Node.Text.bAutoWrapText.GetValue());
 		}
 
-		if (Node.Text.bHasWrapTextAt)
+		if (Node.Text.WrapTextAt.IsSet())
 		{
-			TextWidget->SetWrapTextAt(Node.Text.WrapTextAt);
+			TextWidget->SetWrapTextAt(Node.Text.WrapTextAt.GetValue());
 		}
 
 		if (Node.WidgetStyle.Padding.IsSet())
@@ -349,23 +349,23 @@ namespace UMGTextStyleApplication
 		}
 
 		const bool bHasAnyDefaultStyleInput =
-			Node.Text.bHasColor
+			Node.Text.Color.IsSet()
 			|| Node.TextStyle.FontSize > 0.0f
-			|| HasTypedTextValue(Node.Text.bHasFontFamily, Node.Text.FontFamily)
-			|| HasTypedTextValue(Node.Text.bHasTypefaceFontName, Node.Text.TypefaceFontName)
+			|| HasTypedTextValue(Node.Text.FontFamily)
+			|| HasTypedTextValue(Node.Text.TypefaceFontName)
 			|| Node.TextStyle.LetterSpacing.IsSet()
-			|| Node.Text.bHasUnderline
-			|| Node.Text.bHasStrikethrough
-			|| HasTypedTextValue(Node.Text.bHasHref, Node.Text.Href);
+			|| Node.Text.bUnderline.IsSet()
+			|| Node.Text.bStrikethrough.IsSet()
+			|| HasTypedTextValue(Node.Text.Href);
 		if (!bHasAnyDefaultStyleInput)
 		{
 			return;
 		}
 
 		FTextBlockStyle DefaultStyle = ResolveRichTextBaseStyle(RichTextBlock);
-		if (Node.Text.bHasColor)
+		if (Node.Text.Color.IsSet())
 		{
-			DefaultStyle.ColorAndOpacity = FSlateColor(NormalizeTypedTextColor(Node.Text.Color));
+			DefaultStyle.ColorAndOpacity = FSlateColor(NormalizeTypedTextColor(Node.Text.Color.GetValue()));
 		}
 
 		FSlateFontInfo FontInfo = DefaultStyle.Font;
@@ -377,11 +377,11 @@ namespace UMGTextStyleApplication
 		}
 
 		const FLinearColor DecorationColor = DefaultStyle.ColorAndOpacity.GetSpecifiedColor();
-		if ((Node.Text.bHasUnderline && Node.Text.bUnderline) || HasTypedTextValue(Node.Text.bHasHref, Node.Text.Href))
+		if ((Node.Text.bUnderline.IsSet() && Node.Text.bUnderline.GetValue()) || HasTypedTextValue(Node.Text.Href))
 		{
 			DefaultStyle.UnderlineBrush = MakeTextDecorationBrush(DecorationColor);
 		}
-		if (Node.Text.bHasStrikethrough && Node.Text.bStrikethrough)
+		if (Node.Text.bStrikethrough.IsSet() && Node.Text.bStrikethrough.GetValue())
 		{
 			DefaultStyle.StrikeBrush = MakeTextDecorationBrush(DecorationColor);
 		}

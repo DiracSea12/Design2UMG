@@ -442,7 +442,7 @@ bool FNodeWidgetFactoryGeometryFallbackDoesNotMutateInputTest::RunTest(const FSt
 	TestEqual(TEXT("Ellipse input geometry remains untouched"), EllipseNode->Shape.Geometry, FString());
 	TestEqual(TEXT("Ellipse input X remains untouched"), EllipseNode->Transform.X, EllipseTransformBefore.X);
 	TestEqual(TEXT("Ellipse input Y remains untouched"), EllipseNode->Transform.Y, EllipseTransformBefore.Y);
-	TestTrue(TEXT("Ellipse fallback still builds widget geometry"), !EllipseResult.Widget.Path.Geometry.IsEmpty());
+	TestTrue(TEXT("Ellipse fallback still builds widget geometry"), EllipseResult.Widget.Path.Geometry.IsSet() && !EllipseResult.Widget.Path.Geometry.GetValue().IsEmpty());
 
 	TSharedPtr<FDesignNode> LineNode = MakeSharedSemanticsNode(TEXT("line_fallback"), EDesignNodeType::Line, FDesignSize::Fixed(120.0f), FDesignSize::Fixed(6.0f));
 	LineNode->Transform.SetPosition(6.0f, 18.0f);
@@ -454,7 +454,7 @@ bool FNodeWidgetFactoryGeometryFallbackDoesNotMutateInputTest::RunTest(const FSt
 	TestEqual(TEXT("Line input geometry remains untouched"), LineNode->Shape.Geometry, FString());
 	TestEqual(TEXT("Line input X remains untouched"), LineNode->Transform.X, LineTransformBefore.X);
 	TestEqual(TEXT("Line input Y remains untouched"), LineNode->Transform.Y, LineTransformBefore.Y);
-	TestTrue(TEXT("Line fallback still builds widget geometry"), !LineResult.Widget.Path.Geometry.IsEmpty());
+	TestTrue(TEXT("Line fallback still builds widget geometry"), LineResult.Widget.Path.Geometry.IsSet() && !LineResult.Widget.Path.Geometry.GetValue().IsEmpty());
 	return true;
 }
 
@@ -502,11 +502,8 @@ bool FPublicSurfacePostReviewFixesGuardTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Direct optional reset clears public row presence"), LayoutData.LayoutRow.IsSet());
 
 	FUMGWidgetNode Widget;
-	Widget.Text.bHasText = true;
 	Widget.Text.Text = TEXT("");
-	Widget.Text.bHasAutoWrapText = true;
 	Widget.Text.bAutoWrapText = true;
-	Widget.Text.bHasColor = true;
 	Widget.Text.Color = FLinearColor(0.2f, 0.4f, 0.6f, 1.0f);
 	Widget.WidgetState.ActiveWidgetIndex = 3;
 	Widget.ScrollBox.Orientation = TEXT("Horizontal");
@@ -551,7 +548,7 @@ bool FPublicSurfacePostReviewFixesGuardTest::RunTest(const FString& Parameters)
 
 	FLinearColor ParsedColor;
 	TestTrue(TEXT("Color helper still parses typed color"), Design2UMGWidgetNodeAccess::TryGetWidgetColor(Widget, UMGPropertyKeys::Color, ParsedColor));
-	TestEqual(TEXT("Typed color payload remains unchanged"), ParsedColor.ToFColor(true), Widget.Text.Color.ToFColor(true));
+	TestEqual(TEXT("Typed color payload remains unchanged"), ParsedColor.ToFColor(true), Widget.Text.Color.GetValue().ToFColor(true));
 
 	FUMGPropertyBag TypedBag;
 	Design2UMGWidgetNodeAccess::AddTypedWidgetPropertyIfPresent(TypedBag, Widget, UMGPropertyKeys::Text);
@@ -591,11 +588,13 @@ bool FConversionPlaceholderTintSettingsPayloadTest::RunTest(const FString& Param
 	}
 
 	TestEqual(TEXT("Placeholder widget uses direct image material"), PlaceholderWidget->Type, FString(TEXT("Image")));
-	TestEqual(TEXT("Placeholder widget uses placeholder surface material ref"), PlaceholderWidget->Brush.MaterialRef, FString(TEXT("placeholdersurface")));
-	TestTrue(TEXT("Placeholder material params use injected base fill color"), PlaceholderWidget->Brush.MaterialParams.Contains(TEXT("\"Color\":\"#123456\"")));
-	TestTrue(TEXT("Placeholder material params use injected base stripe color"), PlaceholderWidget->Brush.MaterialParams.Contains(TEXT("\"StripeColor\":\"#ABCDEF\"")));
-	TestTrue(TEXT("Placeholder material params use injected stripe width"), PlaceholderWidget->Brush.MaterialParams.Contains(TEXT("\"StripeWidth\":7")));
-	TestTrue(TEXT("Placeholder material params use injected stripe gap"), PlaceholderWidget->Brush.MaterialParams.Contains(TEXT("\"StripeGap\":11")));
+	TestTrue(TEXT("Placeholder widget uses placeholder surface material ref"),
+		PlaceholderWidget->Brush.MaterialRef.IsSet()
+		&& PlaceholderWidget->Brush.MaterialRef.GetValue() == TEXT("placeholdersurface"));
+	TestTrue(TEXT("Placeholder material params use injected base fill color"), PlaceholderWidget->Brush.MaterialParams.IsSet() && PlaceholderWidget->Brush.MaterialParams.GetValue().Contains(TEXT("\"Color\":\"#123456\"")));
+	TestTrue(TEXT("Placeholder material params use injected base stripe color"), PlaceholderWidget->Brush.MaterialParams.IsSet() && PlaceholderWidget->Brush.MaterialParams.GetValue().Contains(TEXT("\"StripeColor\":\"#ABCDEF\"")));
+	TestTrue(TEXT("Placeholder material params use injected stripe width"), PlaceholderWidget->Brush.MaterialParams.IsSet() && PlaceholderWidget->Brush.MaterialParams.GetValue().Contains(TEXT("\"StripeWidth\":7")));
+	TestTrue(TEXT("Placeholder material params use injected stripe gap"), PlaceholderWidget->Brush.MaterialParams.IsSet() && PlaceholderWidget->Brush.MaterialParams.GetValue().Contains(TEXT("\"StripeGap\":11")));
 	return true;
 }
 
@@ -637,8 +636,8 @@ bool FConversionLuminosityOpacitySettingsPayloadTest::RunTest(const FString& Par
 		return false;
 	}
 
-	TestTrue(TEXT("Luminosity image child exported render opacity"), OverlayImage->Render.bHasRenderOpacity);
-	TestTrue(TEXT("Luminosity image child clamps opacity using injected cap"), FMath::IsNearlyEqual(OverlayImage->Render.RenderOpacity, 0.2f, KINDA_SMALL_NUMBER));
+	TestTrue(TEXT("Luminosity image child exported render opacity"), OverlayImage->Render.RenderOpacity.IsSet());
+	TestTrue(TEXT("Luminosity image child clamps opacity using injected cap"), FMath::IsNearlyEqual(OverlayImage->Render.RenderOpacity.GetValue(), 0.2f, KINDA_SMALL_NUMBER));
 	return true;
 }
 
@@ -672,9 +671,9 @@ bool FTextSharedThresholdOwnerBoundaryTest::RunTest(const FString& Parameters)
 
 	const FUMGWidgetNode ThresholdWidget = Design2UMGTextWidgetBuilder::CreateTextWidget(ThresholdNode);
 	const FUMGWidgetNode BelowThresholdWidget = Design2UMGTextWidgetBuilder::CreateTextWidget(BelowThresholdNode);
-	TestTrue(TEXT("Builder keeps shared threshold owner's line-height decision"), ThresholdWidget.Text.bHasLineHeightPercentage);
-	TestEqual(TEXT("Builder writes the authored line height when threshold applies"), ThresholdWidget.Text.LineHeightPercentage, ThresholdNode->Text.LineHeight);
-	TestFalse(TEXT("Builder should not emit line height below the shared threshold"), BelowThresholdWidget.Text.bHasLineHeightPercentage);
+	TestTrue(TEXT("Builder keeps shared threshold owner's line-height decision"), ThresholdWidget.Text.LineHeightPercentage.IsSet());
+	TestEqual(TEXT("Builder writes the authored line height when threshold applies"), ThresholdWidget.Text.LineHeightPercentage.GetValue(), ThresholdNode->Text.LineHeight);
+	TestFalse(TEXT("Builder should not emit line height below the shared threshold"), BelowThresholdWidget.Text.LineHeightPercentage.IsSet());
 	return true;
 }
 
@@ -703,10 +702,10 @@ bool FTextWidgetBuilderSharedPathSettingsBoundaryTest::RunTest(const FString& Pa
 	const Design2UMGTextWidgetBuilder::FIconFontBuildResult Result =
 		Design2UMGTextWidgetBuilder::CreateIconFontWidget(Node, Args);
 	TestEqual(TEXT("Shared-path icon builder should consume the injected snapshot placeholder"),
-		Result.Widget.Text.Text,
+		Result.Widget.Text.Text.GetValue(),
 		FString(TEXT("[snapshot-placeholder]")));
 	TestFalse(TEXT("Injected snapshot should not silently fall back to the global placeholder"),
-		Result.Widget.Text.Text.Equals(TEXT("[global-placeholder]"), ESearchCase::CaseSensitive));
+		Result.Widget.Text.Text.IsSet() && Result.Widget.Text.Text.GetValue().Equals(TEXT("[global-placeholder]"), ESearchCase::CaseSensitive));
 
 	const Design2UMGTextWidgetBuilder::FIconFontBuildResult MissingSnapshotResult =
 		Design2UMGTextWidgetBuilder::CreateIconFontWidget(Node);

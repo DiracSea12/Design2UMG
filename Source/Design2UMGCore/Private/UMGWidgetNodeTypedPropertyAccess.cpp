@@ -13,8 +13,7 @@ namespace
 		None,
 		GradientMaterialRef,
 		ExplicitMaterialRef,
-		ImageTexturePath,
-		BrushTexturePath
+		ImageTexturePath
 	};
 
 	struct FResolvedBrushDescriptorValue
@@ -24,7 +23,7 @@ namespace
 
 		bool HasValue() const
 		{
-			return !Value.IsEmpty();
+			return Source != EBrushDescriptorValueSource::None;
 		}
 	};
 
@@ -38,9 +37,9 @@ namespace
 			};
 		}
 
-		if (Node.Brush.bHasMaterialRef || !Node.Brush.MaterialRef.IsEmpty())
+		if (Node.Brush.MaterialRef.IsSet())
 		{
-			return { Node.Brush.MaterialRef, EBrushDescriptorValueSource::ExplicitMaterialRef };
+			return { Node.Brush.MaterialRef.GetValue(), EBrushDescriptorValueSource::ExplicitMaterialRef };
 		}
 
 		return {};
@@ -48,14 +47,9 @@ namespace
 
 	FResolvedBrushDescriptorValue ResolveBrushTexturePathDescriptor(const FUMGWidgetNode& Node)
 	{
-		if (Node.Brush.Image.bHasTexturePath && !Node.Brush.Image.TexturePath.IsEmpty())
+		if (Node.Brush.Image.TexturePath.IsSet())
 		{
-			return { Node.Brush.Image.TexturePath, EBrushDescriptorValueSource::ImageTexturePath };
-		}
-
-		if (!Node.Brush.TexturePath.IsEmpty())
-		{
-			return { Node.Brush.TexturePath, EBrushDescriptorValueSource::BrushTexturePath };
+			return { Node.Brush.Image.TexturePath.GetValue(), EBrushDescriptorValueSource::ImageTexturePath };
 		}
 
 		return {};
@@ -171,22 +165,22 @@ namespace
 	FTypedWidgetDescriptorRange GetTextTypedWidgetDescriptors()
 	{
 		static const FTypedWidgetStringDescriptor Descriptors[] = {
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Text, Node.Text.bHasText, Node.Text.Text),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RichTextStyleRows, Node.Text.bHasRichTextStyleRows, Node.Text.RichTextStyleRowsJson),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::HintText, Node.Text.bHasHintText, Node.Text.HintText),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::FontFamily, Node.Text.bHasFontFamily, Node.Text.FontFamily),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::TypefaceFontName, Node.Text.bHasTypefaceFontName, Node.Text.TypefaceFontName),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::FontStyle, Node.Text.bHasFontStyle, Node.Text.FontStyle),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Justification, Node.Text.bHasJustification, Node.Text.Justification),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::AutoWrapText, Node.Text.bHasAutoWrapText, Design2UMGWidgetNodeAccess::SerializeWidgetBool(Node.Text.bAutoWrapText)),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::WrapTextAt, Node.Text.bHasWrapTextAt, Design2UMGWidgetNodeAccess::SerializeWidgetFloat(Node.Text.WrapTextAt)),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::LineHeightPercentage, Node.Text.bHasLineHeightPercentage, Design2UMGWidgetNodeAccess::SerializeWidgetFloat(Node.Text.LineHeightPercentage)),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Underline, Node.Text.bHasUnderline, Design2UMGWidgetNodeAccess::SerializeWidgetBool(Node.Text.bUnderline)),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Strikethrough, Node.Text.bHasStrikethrough, Design2UMGWidgetNodeAccess::SerializeWidgetBool(Node.Text.bStrikethrough)),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Href, Node.Text.bHasHref, Node.Text.Href),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::TextAlignVertical, Node.Text.bHasTextAlignVertical, Node.Text.TextAlignVertical),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::IconName, Node.Text.bHasIconName, Node.Text.IconName),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Color, Node.Text.bHasColor, Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Text.Color)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Text, Node.Text.Text.IsSet(), Node.Text.Text.GetValue()),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RichTextStyleRows, Node.Text.RichTextStyleRowsJson.IsSet(), Node.Text.RichTextStyleRowsJson.GetValue()),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::HintText, Node.Text.HintText.IsSet(), Node.Text.HintText.GetValue()),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::FontFamily, Node.Text.FontFamily.IsSet(), Node.Text.FontFamily.GetValue()),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::TypefaceFontName, Node.Text.TypefaceFontName.IsSet(), Node.Text.TypefaceFontName.GetValue()),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::FontStyle, Node.Text.FontStyle.IsSet(), Node.Text.FontStyle.GetValue()),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Justification, Node.Text.Justification.IsSet(), Node.Text.Justification.GetValue()),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::AutoWrapText, Node.Text.bAutoWrapText.IsSet(), Design2UMGWidgetNodeAccess::SerializeWidgetBool(Node.Text.bAutoWrapText.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::WrapTextAt, Node.Text.WrapTextAt.IsSet(), Design2UMGWidgetNodeAccess::SerializeWidgetFloat(Node.Text.WrapTextAt.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::LineHeightPercentage, Node.Text.LineHeightPercentage.IsSet(), Design2UMGWidgetNodeAccess::SerializeWidgetFloat(Node.Text.LineHeightPercentage.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Underline, Node.Text.bUnderline.IsSet(), Design2UMGWidgetNodeAccess::SerializeWidgetBool(Node.Text.bUnderline.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Strikethrough, Node.Text.bStrikethrough.IsSet(), Design2UMGWidgetNodeAccess::SerializeWidgetBool(Node.Text.bStrikethrough.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Href, Node.Text.Href.IsSet(), Node.Text.Href.GetValue()),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::TextAlignVertical, Node.Text.TextAlignVertical.IsSet(), Node.Text.TextAlignVertical.GetValue()),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::IconName, Node.Text.IconName.IsSet(), Node.Text.IconName.GetValue()),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Color, Node.Text.Color.IsSet(), Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Text.Color.GetValue())),
 		};
 		return { Descriptors, UE_ARRAY_COUNT(Descriptors) };
 	}
@@ -194,19 +188,19 @@ namespace
 	FTypedWidgetDescriptorRange GetBrushTypedWidgetDescriptors()
 	{
 		static const FTypedWidgetStringDescriptor Descriptors[] = {
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::BrushColor, Node.Brush.bHasBrushColor, Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Brush.BrushColor)),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::OutlineColor, Node.Brush.bHasOutlineColor, Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Brush.OutlineColor)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::BrushColor, Node.Brush.BrushColor.IsSet(), Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Brush.BrushColor.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::OutlineColor, Node.Brush.OutlineColor.IsSet(), Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Brush.OutlineColor.GetValue())),
 			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR_CUSTOM(UMGPropertyKeys::DrawAs, {
-				if (!Node.Brush.bHasDrawAs)
+				if (!Node.Brush.DrawAs.IsSet())
 				{
 					return false;
 				}
-				OutValue = Design2UMGWidgetNodeAccess::SerializeDrawAs(Node.Brush.DrawAs);
+				OutValue = Design2UMGWidgetNodeAccess::SerializeDrawAs(Node.Brush.DrawAs.GetValue());
 				return !OutValue.IsEmpty();
 			}),
 			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::OutlineCornerRadius, Node.Brush.OutlineCornerRadius >= 0.0f, Design2UMGWidgetNodeAccess::SerializeWidgetFloat(Node.Brush.OutlineCornerRadius)),
 			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::CornerRadii, Node.Brush.HasCornerRadii(), Design2UMGWidgetNodeAccess::SerializeWidgetVector4(Node.Brush.CornerRadii)),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::OutlineThickness, Node.Brush.bHasOutlineThickness, Design2UMGWidgetNodeAccess::SerializeWidgetFloat(Node.Brush.OutlineThickness)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::OutlineThickness, Node.Brush.OutlineThickness.IsSet(), Design2UMGWidgetNodeAccess::SerializeWidgetFloat(Node.Brush.OutlineThickness.GetValue())),
 			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR_CUSTOM(UMGPropertyKeys::MaterialRef, {
 				const FResolvedBrushDescriptorValue DescriptorValue = ResolveBrushMaterialRefDescriptor(Node);
 				OutValue = DescriptorValue.Value;
@@ -221,15 +215,15 @@ namespace
 				return !OutValue.IsEmpty();
 			}),
 			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::MaterialParams,
-				Node.Brush.bHasMaterialParams || !Node.Brush.MaterialParams.IsEmpty(),
-				Node.Brush.MaterialParams),
+				Node.Brush.MaterialParams.IsSet(),
+				Node.Brush.MaterialParams.GetValue()),
 			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR_CUSTOM(UMGPropertyKeys::TexturePath, {
 				const FResolvedBrushDescriptorValue DescriptorValue = ResolveBrushTexturePathDescriptor(Node);
 				OutValue = DescriptorValue.Value;
 				return DescriptorValue.HasValue();
 			}),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::ImageMode, Node.Brush.Image.bHasMode, Node.Brush.Image.Mode),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::ImageTransform, Node.Brush.Image.bHasTransform, Design2UMGWidgetNodeAccess::SerializeImageTransform(Node.Brush.Image.Transform)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::ImageMode, Node.Brush.Image.Mode.IsSet(), Node.Brush.Image.Mode.GetValue()),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::ImageTransform, Node.Brush.Image.Transform.IsSet(), Design2UMGWidgetNodeAccess::SerializeImageTransform(Node.Brush.Image.Transform.GetValue())),
 		};
 		return { Descriptors, UE_ARRAY_COUNT(Descriptors) };
 	}
@@ -237,19 +231,19 @@ namespace
 	FTypedWidgetDescriptorRange GetEffectTypedWidgetDescriptors()
 	{
 		static const FTypedWidgetStringDescriptor Descriptors[] = {
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::BlurStrength, Node.Effect.bHasBlurStrength, Design2UMGWidgetNodeAccess::SerializeWidgetFloat(Node.Effect.BlurStrength)),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RetainRendering, Node.Effect.bHasRetainRendering, Design2UMGWidgetNodeAccess::SerializeWidgetBool(Node.Effect.bRetainRendering)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::BlurStrength, Node.Effect.BlurStrength.IsSet(), Design2UMGWidgetNodeAccess::SerializeWidgetFloat(Node.Effect.BlurStrength.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RetainRendering, Node.Effect.bRetainRendering.IsSet(), Design2UMGWidgetNodeAccess::SerializeWidgetBool(Node.Effect.bRetainRendering.GetValue())),
 			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::EffectMaterial,
-				Node.Effect.bHasEffectMaterial || !Node.Effect.EffectMaterial.IsEmpty(),
-				Node.Effect.EffectMaterial),
+				Node.Effect.EffectMaterial.IsSet(),
+				Node.Effect.EffectMaterial.GetValue()),
 			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::TextureParameter,
-				Node.Effect.bHasTextureParameter || !Node.Effect.TextureParameter.IsEmpty(),
-				Node.Effect.TextureParameter),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::EffectBlurUVStep, Node.Effect.bHasEffectBlurUVStep, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Node.Effect.EffectBlurUVStep)),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::EffectColor, Node.Effect.bHasEffectColor, Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Effect.EffectColor)),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::EffectOffset, Node.Effect.bHasEffectOffset, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Node.Effect.EffectOffset)),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Phase, Node.Effect.bHasRenderingPhase, FString::FromInt(Node.Effect.Phase)),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::PhaseCount, Node.Effect.bHasRenderingPhase, FString::FromInt(Node.Effect.PhaseCount)),
+				Node.Effect.TextureParameter.IsSet(),
+				Node.Effect.TextureParameter.GetValue()),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::EffectBlurUVStep, Node.Effect.EffectBlurUVStep.IsSet(), Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Node.Effect.EffectBlurUVStep.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::EffectColor, Node.Effect.EffectColor.IsSet(), Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Effect.EffectColor.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::EffectOffset, Node.Effect.EffectOffset.IsSet(), Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Node.Effect.EffectOffset.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Phase, Node.Effect.RenderingPhase.IsSet(), FString::FromInt(Node.Effect.RenderingPhase.GetValue().Phase)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::PhaseCount, Node.Effect.RenderingPhase.IsSet(), FString::FromInt(Node.Effect.RenderingPhase.GetValue().PhaseCount)),
 		};
 		return { Descriptors, UE_ARRAY_COUNT(Descriptors) };
 	}
@@ -257,13 +251,13 @@ namespace
 	FTypedWidgetDescriptorRange GetPathTypedWidgetDescriptors()
 	{
 		static const FTypedWidgetStringDescriptor Descriptors[] = {
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::PathGeometry, Node.Path.bHasGeometry, Node.Path.Geometry),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::PathFillRule, Node.Path.bHasFillRule, Node.Path.FillRule),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::PathFillColor, Node.Path.bHasFillColor, Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.FillColor)),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::PathStrokeColor, Node.Path.bHasStrokeColor, Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.StrokeColor)),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::PathStrokeThickness, Node.Path.bHasStrokeThickness, Design2UMGWidgetNodeAccess::SerializeWidgetFloat(Node.Path.StrokeThickness)),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::PathStrokeCap, Node.Path.bHasStrokeCap, Node.Path.StrokeCap),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::PathStrokeJoin, Node.Path.bHasStrokeJoin, Node.Path.StrokeJoin),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::PathGeometry, Node.Path.Geometry.IsSet(), Node.Path.Geometry.GetValue()),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::PathFillRule, Node.Path.FillRule.IsSet(), Node.Path.FillRule.GetValue()),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::PathFillColor, Node.Path.FillColor.IsSet(), Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.FillColor.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::PathStrokeColor, Node.Path.StrokeColor.IsSet(), Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.StrokeColor.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::PathStrokeThickness, Node.Path.StrokeThickness.IsSet(), Design2UMGWidgetNodeAccess::SerializeWidgetFloat(Node.Path.StrokeThickness.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::PathStrokeCap, Node.Path.StrokeCap.IsSet(), Node.Path.StrokeCap.GetValue()),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::PathStrokeJoin, Node.Path.StrokeJoin.IsSet(), Node.Path.StrokeJoin.GetValue()),
 		};
 		return { Descriptors, UE_ARRAY_COUNT(Descriptors) };
 	}
@@ -271,9 +265,9 @@ namespace
 	FTypedWidgetDescriptorRange GetShadowTypedWidgetDescriptors()
 	{
 		static const FTypedWidgetStringDescriptor Descriptors[] = {
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::ShadowOffset, Node.Shadow.bHasShadowOffset, Design2UMGWidgetNodeAccess::SerializeWidgetCompactVector2D(Node.Shadow.ShadowOffset)),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::ShadowColorAndOpacity, Node.Shadow.bHasShadowColorAndOpacity, Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Shadow.ShadowColorAndOpacity)),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::ShadowBlur, Node.Shadow.bHasShadowBlur, Design2UMGWidgetNodeAccess::SerializeWidgetFloat(Node.Shadow.ShadowBlur)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::ShadowOffset, Node.Shadow.ShadowOffset.IsSet(), Design2UMGWidgetNodeAccess::SerializeWidgetCompactVector2D(Node.Shadow.ShadowOffset.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::ShadowColorAndOpacity, Node.Shadow.ShadowColorAndOpacity.IsSet(), Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Shadow.ShadowColorAndOpacity.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::ShadowBlur, Node.Shadow.ShadowBlur.IsSet(), Design2UMGWidgetNodeAccess::SerializeWidgetFloat(Node.Shadow.ShadowBlur.GetValue())),
 			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::BoxShadowCount, Node.Shadow.BoxShadows.Num() > 0, FString::FromInt(Node.Shadow.BoxShadows.Num())),
 		};
 		return { Descriptors, UE_ARRAY_COUNT(Descriptors) };
@@ -282,12 +276,12 @@ namespace
 	FTypedWidgetDescriptorRange GetRenderTypedWidgetDescriptors()
 	{
 		static const FTypedWidgetStringDescriptor Descriptors[] = {
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Clipping, Node.Render.bHasClipping, Node.Render.Clipping),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RenderOpacity, Node.Render.bHasRenderOpacity, Design2UMGWidgetNodeAccess::SerializeWidgetFloat(Node.Render.RenderOpacity)),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RenderAngle, Node.Render.bHasRenderAngle, Design2UMGWidgetNodeAccess::SerializeWidgetFloat(Node.Render.RenderAngle)),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RenderTransformScale, Node.Render.bHasRenderTransformScale, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Node.Render.RenderTransformScale)),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RenderTransformPivot, Node.Render.bHasRenderTransformPivot, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Node.Render.RenderTransformPivot)),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RenderTranslation, Node.Render.bHasRenderTranslation, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Node.Render.RenderTranslation)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Clipping, Node.Render.Clipping.IsSet(), Node.Render.Clipping.GetValue()),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RenderOpacity, Node.Render.RenderOpacity.IsSet(), Design2UMGWidgetNodeAccess::SerializeWidgetFloat(Node.Render.RenderOpacity.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RenderAngle, Node.Render.RenderAngle.IsSet(), Design2UMGWidgetNodeAccess::SerializeWidgetFloat(Node.Render.RenderAngle.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RenderTransformScale, Node.Render.RenderTransformScale.IsSet(), Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Node.Render.RenderTransformScale.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RenderTransformPivot, Node.Render.RenderTransformPivot.IsSet(), Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Node.Render.RenderTransformPivot.GetValue())),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::RenderTranslation, Node.Render.RenderTranslation.IsSet(), Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Node.Render.RenderTranslation.GetValue())),
 		};
 		return { Descriptors, UE_ARRAY_COUNT(Descriptors) };
 	}

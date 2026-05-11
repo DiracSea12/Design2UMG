@@ -128,9 +128,7 @@ FUMGWidgetNode PathWidgetBuilder::CreatePathWidget(const TSharedPtr<FDesignNode>
 	if (const FString VectorRasterFallback = GetVectorRasterFallbackTexturePath(Node); !VectorRasterFallback.IsEmpty())
 	{
 		Widget.Type = TEXT("Image");
-		Widget.Brush.TexturePath = VectorRasterFallback;
 		Widget.Brush.Image.TexturePath = VectorRasterFallback;
-		Widget.Brush.Image.bHasTexturePath = true;
 		ApplyPathSizeOverrides(Widget, Node);
 		return Widget;
 	}
@@ -138,9 +136,7 @@ FUMGWidgetNode PathWidgetBuilder::CreatePathWidget(const TSharedPtr<FDesignNode>
 	if (Node->Visual.Fill.Type == EDesignFillType::Image && !Node->Visual.Fill.Image.Url.IsEmpty())
 	{
 		Widget.Type = TEXT("Image");
-		Widget.Brush.TexturePath = Node->Visual.Fill.Image.Url;
 		Widget.Brush.Image.TexturePath = Node->Visual.Fill.Image.Url;
-		Widget.Brush.Image.bHasTexturePath = true;
 		ImageFillUtils::ApplyImageFillProperties(Widget, Node->Visual.Fill.Image);
 		ApplyPathSizeOverrides(Widget, Node);
 		return Widget;
@@ -163,24 +159,17 @@ FUMGWidgetNode PathWidgetBuilder::CreatePathWidget(const TSharedPtr<FDesignNode>
 
 			Widget.Type = TEXT("Image");
 			Widget.Path.Geometry = Node->Shape.Geometry;
-			Widget.Path.bHasGeometry = true;
 			Widget.Path.FillRule = Node->Shape.FillRule;
-			Widget.Path.bHasFillRule = true;
 			if (!FillColor.IsEmpty())
 			{
 				Widget.Path.FillColor = FUMGValueParser::ParseColor(FillColor);
-				Widget.Path.bHasFillColor = true;
 			}
 			if (!StrokeColor.IsEmpty() && StrokeThickness > 0.0f)
 			{
 				Widget.Path.StrokeColor = FUMGValueParser::ParseColor(StrokeColor);
-				Widget.Path.bHasStrokeColor = true;
 				Widget.Path.StrokeThickness = StrokeThickness;
-				Widget.Path.bHasStrokeThickness = true;
 				Widget.Path.StrokeCap = ResolvePathStrokeMetadata(Node, TEXT("stroke.cap"), TEXT("butt"));
-				Widget.Path.bHasStrokeCap = true;
 				Widget.Path.StrokeJoin = ResolvePathStrokeMetadata(Node, TEXT("stroke.join"), TEXT("miter"));
-				Widget.Path.bHasStrokeJoin = true;
 			}
 			ApplyPathSizeOverrides(Widget, Node);
 			return Widget;

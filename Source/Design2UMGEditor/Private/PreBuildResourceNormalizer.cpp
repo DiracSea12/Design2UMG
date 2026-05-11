@@ -47,12 +47,9 @@ namespace
 	{
 		Node.Path = FUMGPathData();
 		Node.Brush.MaterialRef.Reset();
-		Node.Brush.bHasMaterialRef = false;
 		Node.Brush.MaterialParams.Reset();
-		Node.Brush.bHasMaterialParams = false;
-		Node.Brush.TexturePath = TexturePath;
+		Node.Brush.TexturePath.Empty();
 		Node.Brush.Image.TexturePath = TexturePath;
-		Node.Brush.Image.bHasTexturePath = true;
 		Node.Brush.Gradient = FUMGVisualBrushData::FGradientData();
 	}
 
@@ -66,14 +63,14 @@ namespace
 
 	uint32 MakePathTextureKey(const FUMGWidgetNode& Node)
 	{
-		const FString Geometry    = GetPathField(Node, UMGPropertyKeys::PathGeometry,        Node.Path.Geometry);
-		const FString FillRule    = GetPathField(Node, UMGPropertyKeys::PathFillRule,         Node.Path.FillRule);
-		const FString FillColor   = GetPathField(Node, UMGPropertyKeys::PathFillColor,        Node.Path.bHasFillColor   ? Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.FillColor)   : FString());
-		const FString StrokeColor = GetPathField(Node, UMGPropertyKeys::PathStrokeColor,      Node.Path.bHasStrokeColor ? Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.StrokeColor) : FString());
+		const FString Geometry    = GetPathField(Node, UMGPropertyKeys::PathGeometry,        Node.Path.Geometry.Get(FString()));
+		const FString FillRule    = GetPathField(Node, UMGPropertyKeys::PathFillRule,         Node.Path.FillRule.Get(FString()));
+		const FString FillColor   = GetPathField(Node, UMGPropertyKeys::PathFillColor,        Node.Path.FillColor.IsSet()   ? Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.FillColor.GetValue())   : FString());
+		const FString StrokeColor = GetPathField(Node, UMGPropertyKeys::PathStrokeColor,      Node.Path.StrokeColor.IsSet() ? Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.StrokeColor.GetValue()) : FString());
 		const FString StrokeThickness = GetPathField(Node, UMGPropertyKeys::PathStrokeThickness,
-			Node.Path.StrokeThickness > 0.0f ? FString::SanitizeFloat(Node.Path.StrokeThickness) : FString());
-		const FString StrokeCap   = GetPathField(Node, UMGPropertyKeys::PathStrokeCap,        Node.Path.StrokeCap);
-		const FString StrokeJoin  = GetPathField(Node, UMGPropertyKeys::PathStrokeJoin,       Node.Path.StrokeJoin);
+			Node.Path.StrokeThickness.IsSet() && Node.Path.StrokeThickness.GetValue() > 0.0f ? FString::SanitizeFloat(Node.Path.StrokeThickness.GetValue()) : FString());
+		const FString StrokeCap   = GetPathField(Node, UMGPropertyKeys::PathStrokeCap,        Node.Path.StrokeCap.Get(FString()));
+		const FString StrokeJoin  = GetPathField(Node, UMGPropertyKeys::PathStrokeJoin,       Node.Path.StrokeJoin.Get(FString()));
 		const FString WidthOverride  = GetPathField(Node, UMGPropertyKeys::WidthOverride,
 			(Node.WidgetStyle.WidthOverride.IsSet()  && Node.WidgetStyle.WidthOverride.GetValue()  > 0.0f) ? FString::SanitizeFloat(Node.WidgetStyle.WidthOverride.GetValue())  : FString());
 		const FString HeightOverride = GetPathField(Node, UMGPropertyKeys::HeightOverride,
@@ -93,8 +90,8 @@ namespace
 
 	uint32 MakeProceduralTextureKey(const FUMGWidgetNode& Node)
 	{
-		const FString MaterialRef = FindNodePropertyOr(Node, UMGPropertyKeys::MaterialRef, Node.Brush.MaterialRef);
-		const FString MaterialParams = FindNodePropertyOr(Node, UMGPropertyKeys::MaterialParams, Node.Brush.MaterialParams);
+		const FString MaterialRef = FindNodePropertyOr(Node, UMGPropertyKeys::MaterialRef, Node.Brush.MaterialRef.Get(FString()));
+		const FString MaterialParams = FindNodePropertyOr(Node, UMGPropertyKeys::MaterialParams, Node.Brush.MaterialParams.Get(FString()));
 		const FString TextureWidth = FindNodeProperty(Node, UMGPropertyKeys::WidthOverride);
 		const FString TextureHeight = FindNodeProperty(Node, UMGPropertyKeys::HeightOverride);
 		const FString ShadowBlur = FindNodeProperty(Node, UMGPropertyKeys::ShadowBlur);
@@ -221,7 +218,7 @@ namespace
 		const FString& AssetPrefix,
 		TMap<uint32, FString>& Cache)
 	{
-		const FString Geometry = GetPathField(Node, UMGPropertyKeys::PathGeometry, Node.Path.Geometry);
+		const FString Geometry = GetPathField(Node, UMGPropertyKeys::PathGeometry, Node.Path.Geometry.Get(FString()));
 		if (Node.Type == TEXT("Image") && !Geometry.IsEmpty())
 		{
 			const uint32 Key = MakePathTextureKey(Node);
@@ -231,13 +228,13 @@ namespace
 			}
 			else
 			{
-				const FString FillRule    = GetPathField(Node, UMGPropertyKeys::PathFillRule,    Node.Path.FillRule.IsEmpty()    ? TEXT("nonzero") : Node.Path.FillRule);
-				const FString FillColor   = GetPathField(Node, UMGPropertyKeys::PathFillColor,   Node.Path.bHasFillColor   ? Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.FillColor)   : FString());
-				const FString StrokeColor = GetPathField(Node, UMGPropertyKeys::PathStrokeColor, Node.Path.bHasStrokeColor ? Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.StrokeColor) : FString());
-				const FString StrokeCap   = GetPathField(Node, UMGPropertyKeys::PathStrokeCap,   Node.Path.StrokeCap.IsEmpty()   ? TEXT("butt")    : Node.Path.StrokeCap);
-				const FString StrokeJoin  = GetPathField(Node, UMGPropertyKeys::PathStrokeJoin,  Node.Path.StrokeJoin.IsEmpty()  ? TEXT("miter")   : Node.Path.StrokeJoin);
-				const float StrokeThickness = Node.Path.StrokeThickness > 0.0f
-					? Node.Path.StrokeThickness
+				const FString FillRule    = GetPathField(Node, UMGPropertyKeys::PathFillRule,    Node.Path.FillRule.Get(FString()).IsEmpty() ? TEXT("nonzero") : Node.Path.FillRule.GetValue());
+				const FString FillColor   = GetPathField(Node, UMGPropertyKeys::PathFillColor,   Node.Path.FillColor.IsSet()   ? Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.FillColor.GetValue())   : FString());
+				const FString StrokeColor = GetPathField(Node, UMGPropertyKeys::PathStrokeColor, Node.Path.StrokeColor.IsSet() ? Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.StrokeColor.GetValue()) : FString());
+				const FString StrokeCap   = GetPathField(Node, UMGPropertyKeys::PathStrokeCap,   Node.Path.StrokeCap.Get(FString()).IsEmpty() ? TEXT("butt") : Node.Path.StrokeCap.GetValue());
+				const FString StrokeJoin  = GetPathField(Node, UMGPropertyKeys::PathStrokeJoin,  Node.Path.StrokeJoin.Get(FString()).IsEmpty() ? TEXT("miter") : Node.Path.StrokeJoin.GetValue());
+				const float StrokeThickness = Node.Path.StrokeThickness.IsSet() && Node.Path.StrokeThickness.GetValue() > 0.0f
+					? Node.Path.StrokeThickness.GetValue()
 					: FCString::Atof(*FindNodePropertyOr(Node, UMGPropertyKeys::PathStrokeThickness, TEXT("0")));
 				const int32 Width  = (Node.WidgetStyle.WidthOverride.IsSet()  && Node.WidgetStyle.WidthOverride.GetValue()  > 0.0f) ? FMath::RoundToInt(Node.WidgetStyle.WidthOverride.GetValue())
 					: FMath::Max(1, GetNodeRoundedIntProperty(Node, UMGPropertyKeys::WidthOverride, 64));
@@ -279,7 +276,7 @@ namespace
 		const FString& AssetPrefix,
 		TMap<uint32, FString>& Cache)
 	{
-		const FString MaterialRef = FindNodePropertyOr(Node, UMGPropertyKeys::MaterialRef, Node.Brush.MaterialRef);
+		const FString MaterialRef = FindNodePropertyOr(Node, UMGPropertyKeys::MaterialRef, Node.Brush.MaterialRef.Get(FString()));
 		if (!MaterialRef.IsEmpty())
 		{
 			const uint32 Key = MakeProceduralTextureKey(Node);

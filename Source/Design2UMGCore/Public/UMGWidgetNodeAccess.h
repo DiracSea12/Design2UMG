@@ -21,9 +21,11 @@ namespace Design2UMGWidgetNodeAccess
 	DESIGN2UMGCORE_API FString SerializeWidgetColor(const FLinearColor& Value);
 	DESIGN2UMGCORE_API FString SerializeWidgetVector4(const FVector4& Value);
 	DESIGN2UMGCORE_API FString SerializeImageTransform(const FUMGVisualBrushData::FImageTransformData& Value);
+	DESIGN2UMGCORE_API bool TryParseImageTransform(const FString& Value, FUMGVisualBrushData::FImageTransformData& OutTransform);
 	DESIGN2UMGCORE_API FString SerializeDrawAs(const ESlateBrushDrawType::Type DrawAs);
 	DESIGN2UMGCORE_API FString GetGradientMaterialRef(const FUMGVisualBrushData::FGradientData& Gradient);
 	DESIGN2UMGCORE_API FString SerializeGradientMaterialParams(const FUMGVisualBrushData::FGradientData& Gradient);
+	DESIGN2UMGCORE_API bool NormalizeBrushTexturePathOwner(FUMGVisualBrushData& Brush, FString* OutDiagnostic = nullptr);
 
 	DESIGN2UMGCORE_API void ForEachStaticTypedWidgetPropertyKey(TFunctionRef<void(const TCHAR*)> Visitor);
 	template <typename VisitorType>
@@ -49,7 +51,7 @@ namespace Design2UMGWidgetNodeAccess
 	DESIGN2UMGCORE_API bool TryGetTypedWidgetString(const FUMGWidgetNode& Node, const TCHAR* Key, FString& OutValue);
 
 	DESIGN2UMGCORE_API bool TryGetWidgetString(const FUMGWidgetNode& Node, const TCHAR* Key, FString& OutValue);
-	DESIGN2UMGCORE_API bool HasWidgetString(const FUMGWidgetNode& Node, const TCHAR* Key);
+	DESIGN2UMGCORE_API bool HasWidgetPropertyPresence(const FUMGWidgetNode& Node, const TCHAR* Key);
 	DESIGN2UMGCORE_API bool TryGetWidgetBool(const FUMGWidgetNode& Node, const TCHAR* Key, bool& OutValue);
 	DESIGN2UMGCORE_API bool TryGetWidgetInt(const FUMGWidgetNode& Node, const TCHAR* Key, int32& OutValue);
 	DESIGN2UMGCORE_API bool TryGetWidgetFloat(const FUMGWidgetNode& Node, const TCHAR* Key, float& OutValue);

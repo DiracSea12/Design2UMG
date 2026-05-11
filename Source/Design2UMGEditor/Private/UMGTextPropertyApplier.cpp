@@ -49,9 +49,9 @@ namespace
 			bStyleChanged = true;
 		}
 
-		if (Node.Text.bHasColor)
+		if (Node.Text.Color.IsSet())
 		{
-			Style.SetColorAndOpacity(FSlateColor(UMGTextStyleApplication::NormalizeTypedTextColor(Node.Text.Color)));
+			Style.SetColorAndOpacity(FSlateColor(UMGTextStyleApplication::NormalizeTypedTextColor(Node.Text.Color.GetValue())));
 			bStyleChanged = true;
 		}
 	}
@@ -68,9 +68,9 @@ namespace
 			bStyleChanged = true;
 		}
 
-		if (Node.Text.bHasColor)
+		if (Node.Text.Color.IsSet())
 		{
-			const FSlateColor TypedColor(UMGTextStyleApplication::NormalizeTypedTextColor(Node.Text.Color));
+			const FSlateColor TypedColor(UMGTextStyleApplication::NormalizeTypedTextColor(Node.Text.Color.GetValue()));
 			TextStyle.ColorAndOpacity = TypedColor;
 			Style.ForegroundColor = TypedColor;
 			bStyleChanged = true;
@@ -206,14 +206,14 @@ namespace UMGTextPropertyApplier
 	void ApplyTextBlockProps(UWidget* Widget, const FUMGWidgetNode& Node, const FUMGPropertyBag& ResidualProperties)
 	{
 		UTextBlock* TextBlock = CastChecked<UTextBlock>(Widget);
-		if (Node.Text.bHasText)
+		if (Node.Text.Text.IsSet())
 		{
-			TextBlock->SetText(FText::FromString(Node.Text.Text));
+			TextBlock->SetText(FText::FromString(Node.Text.Text.GetValue()));
 		}
 
-		if (Node.Text.bHasColor)
+		if (Node.Text.Color.IsSet())
 		{
-			TextBlock->SetColorAndOpacity(FSlateColor(UMGTextStyleApplication::NormalizeTypedTextColor(Node.Text.Color)));
+			TextBlock->SetColorAndOpacity(FSlateColor(UMGTextStyleApplication::NormalizeTypedTextColor(Node.Text.Color.GetValue())));
 		}
 
 		FSlateFontInfo FontInfo = TextBlock->GetFont();
@@ -292,13 +292,13 @@ namespace UMGTextPropertyApplier
 	void ApplyEditableTextBoxProps(UWidget* Widget, const FUMGWidgetNode& Node, const FUMGPropertyBag& ResidualProperties)
 	{
 		UEditableTextBox* EditableTextBox = CastChecked<UEditableTextBox>(Widget);
-		if (Node.Text.bHasText)
+		if (Node.Text.Text.IsSet())
 		{
-			EditableTextBox->SetText(FText::FromString(Node.Text.Text));
+			EditableTextBox->SetText(FText::FromString(Node.Text.Text.GetValue()));
 		}
-		if (Node.Text.bHasHintText)
+		if (Node.Text.HintText.IsSet())
 		{
-			EditableTextBox->SetHintText(FText::FromString(Node.Text.HintText));
+			EditableTextBox->SetHintText(FText::FromString(Node.Text.HintText.GetValue()));
 		}
 
 		FEditableTextBoxStyle Style = EditableTextBox->GetWidgetStyle();
@@ -309,10 +309,10 @@ namespace UMGTextPropertyApplier
 			EditableTextBox->SetWidgetStyle(Style);
 		}
 
-		if (UMGTextStyleApplication::HasTypedTextValue(Node.Text.bHasJustification, Node.Text.Justification))
+		if (UMGTextStyleApplication::HasTypedTextValue(Node.Text.Justification))
 		{
 			ETextJustify::Type Justification = ETextJustify::Left;
-			if (UMGTextStyleApplication::TryResolveTextJustification(Node.Text.Justification, Justification))
+			if (UMGTextStyleApplication::TryResolveTextJustification(Node.Text.Justification.GetValue(), Justification))
 			{
 				EditableTextBox->SetJustification(Justification);
 			}
@@ -388,13 +388,13 @@ namespace UMGTextPropertyApplier
 	void ApplyMultiLineEditableTextBoxProps(UWidget* Widget, const FUMGWidgetNode& Node, const FUMGPropertyBag& ResidualProperties)
 	{
 		UMultiLineEditableTextBox* EditableTextBox = CastChecked<UMultiLineEditableTextBox>(Widget);
-		if (Node.Text.bHasText)
+		if (Node.Text.Text.IsSet())
 		{
-			EditableTextBox->SetText(FText::FromString(Node.Text.Text));
+			EditableTextBox->SetText(FText::FromString(Node.Text.Text.GetValue()));
 		}
-		if (Node.Text.bHasHintText)
+		if (Node.Text.HintText.IsSet())
 		{
-			EditableTextBox->SetHintText(FText::FromString(Node.Text.HintText));
+			EditableTextBox->SetHintText(FText::FromString(Node.Text.HintText.GetValue()));
 		}
 
 		FEditableTextBoxStyle Style = EditableTextBox->WidgetStyle;
@@ -404,9 +404,9 @@ namespace UMGTextPropertyApplier
 		{
 			EditableTextBox->WidgetStyle = Style;
 			EditableTextBox->SetTextStyle(Style.TextStyle);
-			if (Node.Text.bHasColor)
+			if (Node.Text.Color.IsSet())
 			{
-				EditableTextBox->SetForegroundColor(UMGTextStyleApplication::NormalizeTypedTextColor(Node.Text.Color));
+				EditableTextBox->SetForegroundColor(UMGTextStyleApplication::NormalizeTypedTextColor(Node.Text.Color.GetValue()));
 			}
 		}
 
@@ -482,13 +482,13 @@ namespace UMGTextPropertyApplier
 	void ApplyEditableTextProps(UWidget* Widget, const FUMGWidgetNode& Node, const FUMGPropertyBag& ResidualProperties)
 	{
 		UEditableText* EditableText = CastChecked<UEditableText>(Widget);
-		if (Node.Text.bHasText)
+		if (Node.Text.Text.IsSet())
 		{
-			EditableText->SetText(FText::FromString(Node.Text.Text));
+			EditableText->SetText(FText::FromString(Node.Text.Text.GetValue()));
 		}
-		if (Node.Text.bHasHintText)
+		if (Node.Text.HintText.IsSet())
 		{
-			EditableText->SetHintText(FText::FromString(Node.Text.HintText));
+			EditableText->SetHintText(FText::FromString(Node.Text.HintText.GetValue()));
 		}
 
 		FEditableTextStyle Style = EditableText->WidgetStyle;
@@ -499,10 +499,10 @@ namespace UMGTextPropertyApplier
 			EditableText->SetWidgetStyle(Style);
 		}
 
-		if (UMGTextStyleApplication::HasTypedTextValue(Node.Text.bHasJustification, Node.Text.Justification))
+		if (UMGTextStyleApplication::HasTypedTextValue(Node.Text.Justification))
 		{
 			ETextJustify::Type Justification = ETextJustify::Left;
-			if (UMGTextStyleApplication::TryResolveTextJustification(Node.Text.Justification, Justification))
+			if (UMGTextStyleApplication::TryResolveTextJustification(Node.Text.Justification.GetValue(), Justification))
 			{
 				EditableText->SetJustification(Justification);
 			}
@@ -571,13 +571,13 @@ namespace UMGTextPropertyApplier
 	void ApplyMultiLineEditableTextProps(UWidget* Widget, const FUMGWidgetNode& Node, const FUMGPropertyBag& ResidualProperties)
 	{
 		UMultiLineEditableText* EditableText = CastChecked<UMultiLineEditableText>(Widget);
-		if (Node.Text.bHasText)
+		if (Node.Text.Text.IsSet())
 		{
-			EditableText->SetText(FText::FromString(Node.Text.Text));
+			EditableText->SetText(FText::FromString(Node.Text.Text.GetValue()));
 		}
-		if (Node.Text.bHasHintText)
+		if (Node.Text.HintText.IsSet())
 		{
-			EditableText->SetHintText(FText::FromString(Node.Text.HintText));
+			EditableText->SetHintText(FText::FromString(Node.Text.HintText.GetValue()));
 		}
 
 		FTextBlockStyle Style = EditableText->WidgetStyle;
@@ -590,9 +590,9 @@ namespace UMGTextPropertyApplier
 			Style.Font = FontInfo;
 			bStyleChanged = true;
 		}
-		if (Node.Text.bHasColor)
+		if (Node.Text.Color.IsSet())
 		{
-			Style.ColorAndOpacity = FSlateColor(UMGTextStyleApplication::NormalizeTypedTextColor(Node.Text.Color));
+			Style.ColorAndOpacity = FSlateColor(UMGTextStyleApplication::NormalizeTypedTextColor(Node.Text.Color.GetValue()));
 			bStyleChanged = true;
 		}
 		if (bStyleChanged)
@@ -633,16 +633,16 @@ namespace UMGTextPropertyApplier
 	void ApplyRichTextBlockProps(UWidget* Widget, const FUMGWidgetNode& Node)
 	{
 		URichTextBlock* RichTextBlock = CastChecked<URichTextBlock>(Widget);
-		if (Node.Text.bHasText)
+		if (Node.Text.Text.IsSet())
 		{
-			RichTextBlock->SetText(FText::FromString(Node.Text.Text));
+			RichTextBlock->SetText(FText::FromString(Node.Text.Text.GetValue()));
 		}
 
 		UMGTextStyleApplication::ApplyRichTextDefaultStyle(RichTextBlock, Node);
 
-		if (Node.Text.bHasRichTextStyleRows)
+		if (Node.Text.RichTextStyleRowsJson.IsSet())
 		{
-			UMGTextStyleApplication::ApplyRichTextStyleRows(RichTextBlock, Node.Text.RichTextStyleRowsJson);
+			UMGTextStyleApplication::ApplyRichTextStyleRows(RichTextBlock, Node.Text.RichTextStyleRowsJson.GetValue());
 		}
 
 		UMGTextStyleApplication::ApplyTypedTextLayoutProps(RichTextBlock, Node);

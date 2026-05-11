@@ -51,9 +51,9 @@ namespace
 		return (Parsed.A <= 0x20) || ((MaxChannel - MinChannel) <= 0x10);
 	}
 
-	bool HasWidgetStringProperty(const FUMGWidgetNode& Widget, const TCHAR* Key)
+	bool HasWidgetPropertyPresence(const FUMGWidgetNode& Widget, const TCHAR* Key)
 	{
-		return Design2UMGWidgetNodeAccess::HasWidgetString(Widget, Key);
+		return Design2UMGWidgetNodeAccess::HasWidgetPropertyPresence(Widget, Key);
 	}
 }
 
@@ -70,16 +70,14 @@ namespace Design2UMGConverterVisualSupport
 	{
 		VisualMapper::ApplyVisualProperties(Widget, Node);
 		if (Widget.Type == TEXT("Border")
-			&& !HasWidgetStringProperty(Widget, UMGPropertyKeys::BrushColor)
-			&& !HasWidgetStringProperty(Widget, UMGPropertyKeys::TexturePath)
-			&& !HasWidgetStringProperty(Widget, UMGPropertyKeys::MaterialRef))
+			&& !HasWidgetPropertyPresence(Widget, UMGPropertyKeys::BrushColor)
+			&& !HasWidgetPropertyPresence(Widget, UMGPropertyKeys::TexturePath)
+			&& !HasWidgetPropertyPresence(Widget, UMGPropertyKeys::MaterialRef))
 		{
 			Widget.Brush.BrushColor = FLinearColor::Transparent;
-			Widget.Brush.bHasBrushColor = true;
-			if (HasWidgetStringProperty(Widget, UMGPropertyKeys::OutlineThickness))
+			if (HasWidgetPropertyPresence(Widget, UMGPropertyKeys::OutlineThickness))
 			{
 				Widget.Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
-				Widget.Brush.bHasDrawAs = true;
 			}
 		}
 	}
@@ -145,7 +143,6 @@ namespace Design2UMGConverterVisualSupport
 			10);
 		Widget.Brush = FUMGVisualBrushData();
 		Widget.Brush.MaterialRef = TEXT("placeholdersurface");
-		Widget.Brush.bHasMaterialRef = true;
 		Widget.Brush.MaterialParams = FString::Printf(
 			TEXT("{\"Color\":\"%s\",\"StripeColor\":\"%s\",\"StripeWidth\":%d,\"StripeGap\":%d,\"Inset\":%d}"),
 			*PlaceholderFillColor,
@@ -153,7 +150,6 @@ namespace Design2UMGConverterVisualSupport
 			Style.StripeWidthPx,
 			Style.StripeGapPx,
 			InsetPx);
-		Widget.Brush.bHasMaterialParams = true;
 		if (Node->Transform.Width.Value > 0.0f)
 		{
 			Widget.WidgetStyle.WidthOverride = Node->Transform.Width.Value;

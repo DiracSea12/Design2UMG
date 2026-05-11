@@ -61,9 +61,9 @@ namespace
 		return Design2UMGCore::SharedSemantics::ShouldSkipNode(Node);
 	}
 
-	bool HasWidgetStringProperty(const FUMGWidgetNode& Widget, const TCHAR* Key)
+	bool HasWidgetPropertyPresence(const FUMGWidgetNode& Widget, const TCHAR* Key)
 	{
-		return Design2UMGWidgetNodeAccess::HasWidgetString(Widget, Key);
+		return Design2UMGWidgetNodeAccess::HasWidgetPropertyPresence(Widget, Key);
 	}
 
 	bool ShouldKeepStructuralLeafInFlow(const TSharedPtr<FDesignNode>& Node, EDesignLayout ParentLayout)
@@ -147,11 +147,11 @@ namespace
 				Node->LayoutData.Layout != EDesignLayout::None
 				&& ChildWidget.Type == TEXT("Image")
 				&& ChildNode->Children.Num() == 0
-				&& (HasWidgetStringProperty(ChildWidget, UMGPropertyKeys::WidthOverride)
-					|| HasWidgetStringProperty(ChildWidget, UMGPropertyKeys::HeightOverride))
-				&& (HasWidgetStringProperty(ChildWidget, UMGPropertyKeys::MaterialRef)
-					|| HasWidgetStringProperty(ChildWidget, UMGPropertyKeys::TexturePath)
-					|| HasWidgetStringProperty(ChildWidget, UMGPropertyKeys::PathGeometry));
+				&& (HasWidgetPropertyPresence(ChildWidget, UMGPropertyKeys::WidthOverride)
+					|| HasWidgetPropertyPresence(ChildWidget, UMGPropertyKeys::HeightOverride))
+				&& (HasWidgetPropertyPresence(ChildWidget, UMGPropertyKeys::MaterialRef)
+					|| HasWidgetPropertyPresence(ChildWidget, UMGPropertyKeys::TexturePath)
+					|| HasWidgetPropertyPresence(ChildWidget, UMGPropertyKeys::PathGeometry));
 			// Images with their own brush size already produce the intended desired size; wrapping would double-apply it.
 			return Node->LayoutData.Layout == EDesignLayout::None
 				? bCanvasMixedAxis

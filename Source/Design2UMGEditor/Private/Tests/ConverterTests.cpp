@@ -163,8 +163,8 @@ bool FConverterNestedNodesTest::RunTest(const FString&)
 	TestEqual(TEXT("Second child is wrapped in SizeBox"), Data.RootWidget.Children[1].Name, FString(TEXT("ChildText_sz")));
 	TestEqual(TEXT("Text wrapper contains one child"), Data.RootWidget.Children[1].Children.Num(), 1);
 	TestEqual(TEXT("Inner text widget name"), Data.RootWidget.Children[1].Children[0].Name, FString(TEXT("ChildText")));
-	TestTrue(TEXT("Inner text widget keeps text payload"), Data.RootWidget.Children[1].Children[0].Text.bHasText);
-	TestEqual(TEXT("Inner text content"), Data.RootWidget.Children[1].Children[0].Text.Text, FString(TEXT("Nested text")));
+	TestTrue(TEXT("Inner text widget keeps text payload"), Data.RootWidget.Children[1].Children[0].Text.Text.IsSet());
+	TestEqual(TEXT("Inner text content"), Data.RootWidget.Children[1].Children[0].Text.Text.GetValue(), FString(TEXT("Nested text")));
 
 	return true;
 }

@@ -69,76 +69,43 @@ struct FUMGWidgetStyleData
 	}
 };
 
-// Not migrated to TOptional: bHas* presence bits feed parser/serializer typed access
-// paths that depend on explicit set/unset distinction (e.g. bHasText vs empty string).
 struct FUMGTextData
 {
-	FString Text;
-	bool bHasText = false;
-
-	FString RichTextStyleRowsJson;
-	bool bHasRichTextStyleRows = false;
-
-	FString HintText;
-	bool bHasHintText = false;
-
-	FString FontFamily;
-	bool bHasFontFamily = false;
-
-	FString TypefaceFontName;
-	bool bHasTypefaceFontName = false;
-
-	FString FontStyle;
-	bool bHasFontStyle = false;
-
-	FString Justification;
-	bool bHasJustification = false;
-
-	bool bAutoWrapText = false;
-	bool bHasAutoWrapText = false;
-
-	float WrapTextAt = 0.0f;
-	bool bHasWrapTextAt = false;
-
-	float LineHeightPercentage = 0.0f;
-	bool bHasLineHeightPercentage = false;
-
-	bool bUnderline = false;
-	bool bHasUnderline = false;
-
-	bool bStrikethrough = false;
-	bool bHasStrikethrough = false;
-
-	FString Href;
-	bool bHasHref = false;
-
-	FString TextAlignVertical;
-	bool bHasTextAlignVertical = false;
-
-	FString IconName;
-	bool bHasIconName = false;
-
-	FLinearColor Color = FLinearColor::Transparent;
-	bool bHasColor = false;
+	TOptional<FString> Text;
+	TOptional<FString> RichTextStyleRowsJson;
+	TOptional<FString> HintText;
+	TOptional<FString> FontFamily;
+	TOptional<FString> TypefaceFontName;
+	TOptional<FString> FontStyle;
+	TOptional<FString> Justification;
+	TOptional<bool> bAutoWrapText;
+	TOptional<float> WrapTextAt;
+	TOptional<float> LineHeightPercentage;
+	TOptional<bool> bUnderline;
+	TOptional<bool> bStrikethrough;
+	TOptional<FString> Href;
+	TOptional<FString> TextAlignVertical;
+	TOptional<FString> IconName;
+	TOptional<FLinearColor> Color;
 
 	bool HasAny() const
 	{
-		return bHasText
-			|| bHasRichTextStyleRows
-			|| bHasHintText
-			|| bHasFontFamily
-			|| bHasTypefaceFontName
-			|| bHasFontStyle
-			|| bHasJustification
-			|| bHasAutoWrapText
-			|| bHasWrapTextAt
-			|| bHasLineHeightPercentage
-			|| bHasUnderline
-			|| bHasStrikethrough
-			|| bHasHref
-			|| bHasTextAlignVertical
-			|| bHasIconName
-			|| bHasColor;
+		return Text.IsSet()
+			|| RichTextStyleRowsJson.IsSet()
+			|| HintText.IsSet()
+			|| FontFamily.IsSet()
+			|| TypefaceFontName.IsSet()
+			|| FontStyle.IsSet()
+			|| Justification.IsSet()
+			|| bAutoWrapText.IsSet()
+			|| WrapTextAt.IsSet()
+			|| LineHeightPercentage.IsSet()
+			|| bUnderline.IsSet()
+			|| bStrikethrough.IsSet()
+			|| Href.IsSet()
+			|| TextAlignVertical.IsSet()
+			|| IconName.IsSet()
+			|| Color.IsSet();
 	}
 };
 
@@ -146,8 +113,6 @@ struct FUMGTextData
  * Typed visual brush fields that progressively replace visual keys from the legacy property bag.
  * They are transferred to the Border node as a whole when WrapWithBorder is used.
  */
-// Not migrated to TOptional: parser, serializer, and typed descriptors depend on the
-// same bHas* presence-bit shape for FUMGVisualBrushData.
 struct FUMGVisualBrushData
 {
 	struct FImageTransformData
@@ -168,18 +133,13 @@ struct FUMGVisualBrushData
 
 	struct FImageData
 	{
-		FString TexturePath;
-		bool bHasTexturePath = false;
-
-		FString Mode;
-		bool bHasMode = false;
-
-		FImageTransformData Transform;
-		bool bHasTransform = false;
+		TOptional<FString> TexturePath;
+		TOptional<FString> Mode;
+		TOptional<FImageTransformData> Transform;
 
 		bool HasAny() const
 		{
-			return bHasTexturePath || bHasMode || bHasTransform;
+			return TexturePath.IsSet() || Mode.IsSet() || Transform.IsSet();
 		}
 	};
 
@@ -191,42 +151,27 @@ struct FUMGVisualBrushData
 
 	struct FGradientData
 	{
-		FString Type;
-		bool bHasType = false;
-
-		float Rotation = 0.0f;
-		bool bHasRotation = false;
-
-		FVector2D Center = FVector2D(0.5f, 0.5f);
-		bool bHasCenter = false;
-
-		FVector2D Size = FVector2D(1.0f, 1.0f);
-		bool bHasSize = false;
+		TOptional<FString> Type;
+		TOptional<float> Rotation;
+		TOptional<FVector2D> Center;
+		TOptional<FVector2D> Size;
 
 		TArray<FGradientStopData> Stops;
 
 		bool HasAny() const
 		{
-			return bHasType || bHasRotation || bHasCenter || bHasSize || Stops.Num() > 0;
+			return Type.IsSet() || Rotation.IsSet() || Center.IsSet() || Size.IsSet() || Stops.Num() > 0;
 		}
 	};
 
 	float OutlineCornerRadius = -1;  // -1 = unset
 	FVector4 CornerRadii = FVector4(-1, -1, -1, -1);
-	float OutlineThickness = 0;
-	bool bHasOutlineThickness = false;
-
-	ESlateBrushDrawType::Type DrawAs = ESlateBrushDrawType::NoDrawType;
-	bool bHasDrawAs = false;         // Distinguishes an explicit NoDrawType from "unset"
-	FLinearColor BrushColor = FLinearColor::Transparent;
-	bool bHasBrushColor = false;
-	FLinearColor OutlineColor = FLinearColor::Transparent;
-	bool bHasOutlineColor = false;
-
-	FString MaterialRef;
-	bool bHasMaterialRef = false;
-	FString MaterialParams;
-	bool bHasMaterialParams = false;
+	TOptional<float> OutlineThickness;
+	TOptional<ESlateBrushDrawType::Type> DrawAs;
+	TOptional<FLinearColor> BrushColor;
+	TOptional<FLinearColor> OutlineColor;
+	TOptional<FString> MaterialRef;
+	TOptional<FString> MaterialParams;
 	FString TexturePath;
 	FImageData Image;
 	FGradientData Gradient;
@@ -238,81 +183,55 @@ struct FUMGVisualBrushData
  * Typed effect fields such as BackgroundBlur and Retainer effects.
  * New effect contracts should land here instead of extending the legacy property bag.
  */
-// Not migrated to TOptional: unset vs explicit value distinction is required by the
-// typed effect contract (e.g. bHasBlurStrength distinguishes zero from absent).
 struct FUMGEffectData
 {
-	float BlurStrength = 0.0f;
-	bool bHasBlurStrength = false;
+	struct FRenderingPhaseData
+	{
+		int32 Phase = 0;
+		int32 PhaseCount = 1;
+	};
 
-	bool bRetainRendering = false;
-	bool bHasRetainRendering = false;
-
-	FString EffectMaterial;
-	bool bHasEffectMaterial = false;
-	FString TextureParameter;
-	bool bHasTextureParameter = false;
-
-	FVector2D EffectBlurUVStep = FVector2D::ZeroVector;
-	bool bHasEffectBlurUVStep = false;
-
-	FLinearColor EffectColor = FLinearColor::Transparent;
-	bool bHasEffectColor = false;
-
-	FVector2D EffectOffset = FVector2D::ZeroVector;
-	bool bHasEffectOffset = false;
-
-	int32 Phase = 0;
-	int32 PhaseCount = 1;
-	bool bHasRenderingPhase = false;
+	TOptional<float> BlurStrength;
+	TOptional<bool> bRetainRendering;
+	TOptional<FString> EffectMaterial;
+	TOptional<FString> TextureParameter;
+	TOptional<FVector2D> EffectBlurUVStep;
+	TOptional<FLinearColor> EffectColor;
+	TOptional<FVector2D> EffectOffset;
+	TOptional<FRenderingPhaseData> RenderingPhase;
 
 	bool HasAny() const
 	{
-		return bHasBlurStrength
-			|| bHasRetainRendering
-			|| bHasEffectMaterial
-			|| bHasTextureParameter
-			|| bHasEffectBlurUVStep
-			|| bHasEffectColor
-			|| bHasEffectOffset
-			|| bHasRenderingPhase;
+		return BlurStrength.IsSet()
+			|| bRetainRendering.IsSet()
+			|| EffectMaterial.IsSet()
+			|| TextureParameter.IsSet()
+			|| EffectBlurUVStep.IsSet()
+			|| EffectColor.IsSet()
+			|| EffectOffset.IsSet()
+			|| RenderingPhase.IsSet();
 	}
 };
 
-// Not migrated to TOptional: path/shadow presence bits are retained payload
-// ownership, not optional cleanup candidates.
 struct FUMGPathData
 {
-	FString Geometry;
-	bool bHasGeometry = false;
-
-	FString FillRule;
-	bool bHasFillRule = false;
-
-	FLinearColor FillColor = FLinearColor::Transparent;
-	bool bHasFillColor = false;
-
-	FLinearColor StrokeColor = FLinearColor::Transparent;
-	bool bHasStrokeColor = false;
-
-	float StrokeThickness = 0.0f;
-	bool bHasStrokeThickness = false;
-
-	FString StrokeCap;
-	bool bHasStrokeCap = false;
-
-	FString StrokeJoin;
-	bool bHasStrokeJoin = false;
+	TOptional<FString> Geometry;
+	TOptional<FString> FillRule;
+	TOptional<FLinearColor> FillColor;
+	TOptional<FLinearColor> StrokeColor;
+	TOptional<float> StrokeThickness;
+	TOptional<FString> StrokeCap;
+	TOptional<FString> StrokeJoin;
 
 	bool HasAny() const
 	{
-		return bHasGeometry
-			|| bHasFillRule
-			|| bHasFillColor
-			|| bHasStrokeColor
-			|| bHasStrokeThickness
-			|| bHasStrokeCap
-			|| bHasStrokeJoin;
+		return Geometry.IsSet()
+			|| FillRule.IsSet()
+			|| FillColor.IsSet()
+			|| StrokeColor.IsSet()
+			|| StrokeThickness.IsSet()
+			|| StrokeCap.IsSet()
+			|| StrokeJoin.IsSet();
 	}
 };
 
@@ -326,22 +245,17 @@ struct FUMGBoxShadowLayerData
 
 struct FUMGShadowData
 {
-	FVector2D ShadowOffset = FVector2D::ZeroVector;
-	bool bHasShadowOffset = false;
-
-	FLinearColor ShadowColorAndOpacity = FLinearColor::Transparent;
-	bool bHasShadowColorAndOpacity = false;
-
-	float ShadowBlur = 0.0f;
-	bool bHasShadowBlur = false;
+	TOptional<FVector2D> ShadowOffset;
+	TOptional<FLinearColor> ShadowColorAndOpacity;
+	TOptional<float> ShadowBlur;
 
 	TArray<FUMGBoxShadowLayerData> BoxShadows;
 
 	bool HasAny() const
 	{
-		return bHasShadowOffset
-			|| bHasShadowColorAndOpacity
-			|| bHasShadowBlur
+		return ShadowOffset.IsSet()
+			|| ShadowColorAndOpacity.IsSet()
+			|| ShadowBlur.IsSet()
 			|| BoxShadows.Num() > 0;
 	}
 };
@@ -349,36 +263,23 @@ struct FUMGShadowData
 /**
  * Typed render transform and clipping fields for the generated widget node.
  */
-// Not migrated to TOptional: generated widget distinguishes unset from explicit value
-// for render transform fields.
 struct FUMGRenderStyleData
 {
-	float RenderOpacity = 0.0f;
-	bool bHasRenderOpacity = false;
-
-	float RenderAngle = 0.0f;
-	bool bHasRenderAngle = false;
-
-	FVector2D RenderTransformScale = FVector2D::ZeroVector;
-	bool bHasRenderTransformScale = false;
-
-	FVector2D RenderTransformPivot = FVector2D(0.5f, 0.5f);
-	bool bHasRenderTransformPivot = false;
-
-	FVector2D RenderTranslation = FVector2D::ZeroVector;
-	bool bHasRenderTranslation = false;
-
-	FString Clipping;
-	bool bHasClipping = false;
+	TOptional<float> RenderOpacity;
+	TOptional<float> RenderAngle;
+	TOptional<FVector2D> RenderTransformScale;
+	TOptional<FVector2D> RenderTransformPivot;
+	TOptional<FVector2D> RenderTranslation;
+	TOptional<FString> Clipping;
 
 	bool HasAny() const
 	{
-		return bHasRenderOpacity
-			|| bHasRenderAngle
-			|| bHasRenderTransformScale
-			|| bHasRenderTransformPivot
-			|| bHasRenderTranslation
-			|| bHasClipping;
+		return RenderOpacity.IsSet()
+			|| RenderAngle.IsSet()
+			|| RenderTransformScale.IsSet()
+			|| RenderTransformPivot.IsSet()
+			|| RenderTranslation.IsSet()
+			|| Clipping.IsSet();
 	}
 };
 

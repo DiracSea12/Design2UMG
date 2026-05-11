@@ -3,7 +3,7 @@
 #include "WidgetResourceBinder.h"
 #include "DesignResourceResolver.h"
 #include "Design2UMGLog.h"
-#include "ProceduralShapeGenerator.h"
+#include "UMGImageCropUtils.h"
 #include "UMGPropertyKeys.h"
 #include "UMGWidgetNodeAccess.h"
 
@@ -14,9 +14,13 @@ bool FWidgetResourceBinder::BindImageResource(UImage* ImageWidget, const FUMGWid
 {
 	// --- material (procedural shape) path ---
 	FString MatRef;
-	Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::MaterialRef, MatRef);
-	if (!MatRef.IsEmpty())
+	if (Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::MaterialRef, MatRef))
 	{
+		if (MatRef.IsEmpty())
+		{
+			return false;
+		}
+
 		FUMGPropertyBag GenerationProps = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
 		UTexture2D* Texture = DesignResourceResolver::ResolveTextureFromMaterialRef(MatRef, GenerationProps, ImageWidget);
 		if (Texture)
@@ -76,6 +80,20 @@ bool FWidgetResourceBinder::BindImageResource(UImage* ImageWidget, const FUMGWid
 	if (OldUVRegion.GetSize().GetMax() > KINDA_SMALL_NUMBER)
 	{
 		Brush.SetUVRegion(OldUVRegion);
+	}
+
+	UMGImageCropUtils::FImageCropRequest CropRequest;
+	if (UMGImageCropUtils::TryBuildCropRequest(Node, CropRequest))
+	{
+		UMGImageCropUtils::TryApplyCropToBrush(
+			Brush,
+			Texture,
+			CropRequest,
+			[ImageWidget, &Brush](UTexture2D* Cropped)
+			{
+				ImageWidget->SetBrushFromTexture(Cropped);
+				Brush = ImageWidget->GetBrush();
+			});
 	}
 
 	ImageWidget->SetBrush(Brush);

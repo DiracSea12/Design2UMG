@@ -187,15 +187,10 @@ bool FBatchCTextStyleApplicationSmokeTest::RunTest(const FString& Parameters)
 {
 	FUMGWidgetNode Node;
 	Node.TextStyle.FontSize = 18.0f;
-	Node.Text.bHasTypefaceFontName = true;
 	Node.Text.TypefaceFontName = TEXT("Bold");
-	Node.Text.bHasJustification = true;
 	Node.Text.Justification = TEXT("Center");
-	Node.Text.bHasAutoWrapText = true;
 	Node.Text.bAutoWrapText = true;
-	Node.Text.bHasWrapTextAt = true;
 	Node.Text.WrapTextAt = 144.0f;
-	Node.Text.bHasLineHeightPercentage = true;
 	Node.Text.LineHeightPercentage = 1.25f;
 	Node.WidgetStyle.Padding = FMargin(4.0f, 5.0f, 6.0f, 7.0f);
 

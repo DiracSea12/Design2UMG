@@ -47,9 +47,9 @@ namespace
 
 	FString ExtractFirstWidgetText(const FUMGWidgetNode& WidgetNode)
 	{
-		if (WidgetNode.Text.bHasText && !WidgetNode.Text.Text.IsEmpty())
+		if (WidgetNode.Text.Text.IsSet() && !WidgetNode.Text.Text.GetValue().IsEmpty())
 		{
-			return WidgetNode.Text.Text;
+			return WidgetNode.Text.Text.GetValue();
 		}
 
 		for (const FUMGWidgetNode& Child : WidgetNode.Children)
@@ -143,7 +143,6 @@ namespace
 		LabelWidget.Name = TEXT("PreviewLabel");
 		LabelWidget.Bounds = { 24.0f, 24.0f, 160.0f, 32.0f };
 		LabelWidget.Text.Text = LabelText;
-		LabelWidget.Text.bHasText = true;
 		LabelWidget.TextStyle.FontSize = 18.0f;
 		Data.RootWidget.Children.Add(LabelWidget);
 
@@ -165,7 +164,6 @@ namespace
 		LabelWidget.Name = TEXT("SpyPreviewLabel");
 		LabelWidget.Bounds = { 16.0f, 16.0f, 220.0f, 32.0f };
 		LabelWidget.Text.Text = LabelText;
-		LabelWidget.Text.bHasText = true;
 		LabelWidget.TextStyle.FontSize = 20.0f;
 		Data.RootWidget.Children.Add(LabelWidget);
 		return Data;

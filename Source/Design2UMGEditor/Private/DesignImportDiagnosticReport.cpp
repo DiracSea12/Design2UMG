@@ -206,15 +206,16 @@ namespace DesignImportDiagnosticReport
 
 			if (Widget.Type.Equals(TEXT("RetainerBox"), ESearchCase::IgnoreCase))
 			{
-				if (Widget.Effect.EffectMaterial.Contains(TEXT("inner_shadow"), ESearchCase::IgnoreCase))
+				const FString EffectMaterial = Widget.Effect.EffectMaterial.Get(FString());
+				if (EffectMaterial.Contains(TEXT("inner_shadow"), ESearchCase::IgnoreCase))
 				{
 					return TEXT("inner_shadow");
 				}
-				if (Widget.Effect.EffectMaterial.Contains(TEXT("blur"), ESearchCase::IgnoreCase))
+				if (EffectMaterial.Contains(TEXT("blur"), ESearchCase::IgnoreCase))
 				{
 					return TEXT("foreground_blur");
 				}
-				return Widget.Effect.EffectMaterial.IsEmpty() ? TEXT("retainer_effect") : Widget.Effect.EffectMaterial;
+				return EffectMaterial.IsEmpty() ? TEXT("retainer_effect") : EffectMaterial;
 			}
 
 			return FString();
@@ -235,13 +236,13 @@ namespace DesignImportDiagnosticReport
 				Entry->SetStringField(TEXT("wrapperType"), Widget.Type);
 				Entry->SetStringField(TEXT("reason"), InferEffectWrapperReason(Widget));
 				Entry->SetNumberField(TEXT("childCount"), Widget.Children.Num());
-				if (Widget.Effect.bHasEffectMaterial || !Widget.Effect.EffectMaterial.IsEmpty())
+				if (Widget.Effect.EffectMaterial.IsSet())
 				{
-					Entry->SetStringField(TEXT("effectMaterial"), Widget.Effect.EffectMaterial);
+					Entry->SetStringField(TEXT("effectMaterial"), Widget.Effect.EffectMaterial.GetValue());
 				}
-				if (Widget.Effect.bHasBlurStrength)
+				if (Widget.Effect.BlurStrength.IsSet())
 				{
-					Entry->SetNumberField(TEXT("blurStrength"), Widget.Effect.BlurStrength);
+					Entry->SetNumberField(TEXT("blurStrength"), Widget.Effect.BlurStrength.GetValue());
 				}
 				OutValues.Add(MakeShared<FJsonValueObject>(Entry));
 				AddUniqueRecommendation(

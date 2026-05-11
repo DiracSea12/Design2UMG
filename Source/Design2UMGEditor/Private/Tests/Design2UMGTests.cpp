@@ -275,9 +275,9 @@ bool FRenderTransformScaleJsonContractTest::RunTest(const FString& Parameters)
 	}
 
 	const FUMGWidgetNode& Root = Parsed.RootWidget;
-	TestTrue(TEXT("RenderTransformScale is marked present"), Root.Render.bHasRenderTransformScale);
-	TestTrue(TEXT("RenderTransformScale X preserved"), FMath::IsNearlyEqual(Root.Render.RenderTransformScale.X, 1.25, KINDA_SMALL_NUMBER));
-	TestTrue(TEXT("RenderTransformScale Y preserved"), FMath::IsNearlyEqual(Root.Render.RenderTransformScale.Y, 0.75, KINDA_SMALL_NUMBER));
+	TestTrue(TEXT("RenderTransformScale is marked present"), Root.Render.RenderTransformScale.IsSet());
+	TestTrue(TEXT("RenderTransformScale X preserved"), FMath::IsNearlyEqual(Root.Render.RenderTransformScale.GetValue().X, 1.25, KINDA_SMALL_NUMBER));
+	TestTrue(TEXT("RenderTransformScale Y preserved"), FMath::IsNearlyEqual(Root.Render.RenderTransformScale.GetValue().Y, 0.75, KINDA_SMALL_NUMBER));
 
 	const FString RoundTripJson = FUMGJsonSerializer::Serialize(Parsed);
 	TestTrue(TEXT("Serializer keeps RenderTransformScale"), RoundTripJson.Contains(TEXT("\"RenderTransformScale\"")));
@@ -2321,7 +2321,7 @@ bool FMultiParagraphFixedWidthTextKeepsDeclaredFontSizeTest::RunTest(const FStri
 		return false;
 	}
 
-	TestEqual(TEXT("Body text keeps declared runtime content"), TextWidget->Text.Text, FString(TEXT("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.\n\nDuis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.")));
+	TestEqual(TEXT("Body text keeps declared runtime content"), TextWidget->Text.Text.GetValue(), FString(TEXT("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.\n\nDuis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.")));
 	TestEqual(TEXT("Body text enables runtime wrap"), GetWidgetProperty(*TextWidget, TEXT("AutoWrapText")), TEXT("true"));
 	TestEqual(TEXT("Body text keeps authored wrap width"), GetWidgetProperty(*TextWidget, TEXT("WrapTextAt")), TEXT("1325.0"));
 	TestTrue(TEXT("Body text should not clip after conversion"), GetWidgetProperty(*TextWidget, TEXT("Clipping")).IsEmpty());
@@ -2475,8 +2475,8 @@ bool FPenRichTextConverterUsesRichTextBlockTest::RunTest(const FString& Paramete
 	TestTrue(TEXT("Rich text markup keeps link text"), Markup.Contains(TEXT("Docs")));
 	TestEqual(TEXT("Single rich hyperlink becomes tooltip"), GetWidgetProperty(*RichLabel, TEXT("ToolTipText")), TEXT("https://docs.example.com"));
 
-	TestTrue(TEXT("Rich text style rows exported via typed text payload"), RichLabel->Text.bHasRichTextStyleRows);
-	if (!RichLabel->Text.bHasRichTextStyleRows)
+	TestTrue(TEXT("Rich text style rows exported via typed text payload"), RichLabel->Text.RichTextStyleRowsJson.IsSet());
+	if (!RichLabel->Text.RichTextStyleRowsJson.IsSet())
 	{
 		return false;
 	}
@@ -2484,7 +2484,7 @@ bool FPenRichTextConverterUsesRichTextBlockTest::RunTest(const FString& Paramete
 	// Parse JSON → stable snapshot: rowName{key=value;...}|... (rows sorted by name, keys in fixed order)
 	TSharedPtr<FJsonObject> StyleRows;
 	{
-		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(RichLabel->Text.RichTextStyleRowsJson);
+		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(RichLabel->Text.RichTextStyleRowsJson.GetValue());
 		TestTrue(TEXT("Style rows JSON is valid"), FJsonSerializer::Deserialize(Reader, StyleRows) && StyleRows.IsValid());
 		if (!StyleRows.IsValid())
 		{

@@ -25,11 +25,11 @@ namespace
 
 	FString GetGradientMaterialRef(const FUMGVisualBrushData::FGradientData& Gradient)
 	{
-		if (Gradient.bHasType && Gradient.Type.Equals(TEXT("Radial"), ESearchCase::IgnoreCase))
+		if (Gradient.Type.IsSet() && Gradient.Type.GetValue().Equals(TEXT("Radial"), ESearchCase::IgnoreCase))
 		{
 			return TEXT("radialgradient");
 		}
-		if (Gradient.bHasType && Gradient.Type.Equals(TEXT("Angular"), ESearchCase::IgnoreCase))
+		if (Gradient.Type.IsSet() && Gradient.Type.GetValue().Equals(TEXT("Angular"), ESearchCase::IgnoreCase))
 		{
 			return TEXT("angulargradient");
 		}
@@ -47,19 +47,17 @@ namespace
 		const FUMGVisualBrushData::FGradientStopData& EndStop = Gradient.Stops.Last();
 		const FString StartColor = Design2UMGWidgetNodeAccess::SerializeWidgetColor(StartStop.Color);
 		const FString EndColor = Design2UMGWidgetNodeAccess::SerializeWidgetColor(EndStop.Color);
-		const float Rotation = Gradient.bHasRotation ? Gradient.Rotation : 0.0f;
-		const float CenterX = Gradient.bHasCenter ? Gradient.Center.X : 0.5f;
-		const float CenterY = Gradient.bHasCenter ? Gradient.Center.Y : 0.5f;
-		const float SizeWidth = Gradient.bHasSize ? Gradient.Size.X : 1.0f;
-		const float SizeHeight = Gradient.bHasSize ? Gradient.Size.Y : 1.0f;
-		const bool bIsRadial = Gradient.bHasType && Gradient.Type.Equals(TEXT("Radial"), ESearchCase::IgnoreCase);
+		const float Rotation = Gradient.Rotation.Get(0.0f);
+		const FVector2D Center = Gradient.Center.Get(FVector2D(0.5f, 0.5f));
+		const FVector2D Size = Gradient.Size.Get(FVector2D(1.0f, 1.0f));
+		const bool bIsRadial = Gradient.Type.IsSet() && Gradient.Type.GetValue().Equals(TEXT("Radial"), ESearchCase::IgnoreCase);
 
 		const FString RadialParams = FString::Printf(
 			TEXT("\"CenterX\":%.4f,\"CenterY\":%.4f,\"SizeWidth\":%.4f,\"SizeHeight\":%.4f,\"Rotation\":%.4f"),
-			CenterX,
-			CenterY,
-			SizeWidth,
-			SizeHeight,
+			Center.X,
+			Center.Y,
+			Size.X,
+			Size.Y,
 			Rotation);
 
 		if (Gradient.Stops.Num() > 2)
@@ -146,6 +144,24 @@ FString Design2UMGWidgetNodeAccess::SerializeImageTransform(const FUMGVisualBrus
 			Value.TY);
 }
 
+bool Design2UMGWidgetNodeAccess::TryParseImageTransform(const FString& Value, FUMGVisualBrushData::FImageTransformData& OutTransform)
+{
+	TArray<FString> Parts;
+	Value.ParseIntoArray(Parts, TEXT(","), true);
+	if (Parts.Num() != 6)
+	{
+		return false;
+	}
+
+	OutTransform.A = FCString::Atof(*Parts[0].TrimStartAndEnd());
+	OutTransform.B = FCString::Atof(*Parts[1].TrimStartAndEnd());
+	OutTransform.TX = FCString::Atof(*Parts[2].TrimStartAndEnd());
+	OutTransform.C = FCString::Atof(*Parts[3].TrimStartAndEnd());
+	OutTransform.D = FCString::Atof(*Parts[4].TrimStartAndEnd());
+	OutTransform.TY = FCString::Atof(*Parts[5].TrimStartAndEnd());
+	return true;
+}
+
 FString Design2UMGWidgetNodeAccess::GetGradientMaterialRef(const FUMGVisualBrushData::FGradientData& Gradient)
 {
 	return ::GetGradientMaterialRef(Gradient);
@@ -173,6 +189,40 @@ FString Design2UMGWidgetNodeAccess::SerializeDrawAs(const ESlateBrushDrawType::T
 	default:
 		return FString();
 	}
+}
+
+bool Design2UMGWidgetNodeAccess::NormalizeBrushTexturePathOwner(FUMGVisualBrushData& Brush, FString* OutDiagnostic)
+{
+	if (OutDiagnostic)
+	{
+		OutDiagnostic->Reset();
+	}
+
+	if (!Brush.Image.TexturePath.IsSet())
+	{
+		if (Brush.TexturePath.IsEmpty())
+		{
+			return false;
+		}
+
+		Brush.Image.TexturePath = Brush.TexturePath;
+		Brush.TexturePath.Empty();
+		return true;
+	}
+
+	if (!Brush.TexturePath.IsEmpty() && Brush.TexturePath != Brush.Image.TexturePath.GetValue())
+	{
+		if (OutDiagnostic)
+		{
+			*OutDiagnostic = FString::Printf(
+				TEXT("Brush.TexturePath conflicts with Brush.Image.TexturePath; using Brush.Image.TexturePath ('%s') instead of legacy/root '%s'."),
+				*Brush.Image.TexturePath.GetValue(),
+				*Brush.TexturePath);
+		}
+	}
+
+	Brush.TexturePath.Empty();
+	return true;
 }
 
 void Design2UMGWidgetNodeAccess::ForEachStaticTypedWidgetPropertyKey(TFunctionRef<void(const TCHAR*)> Visitor)
@@ -255,10 +305,10 @@ bool Design2UMGWidgetNodeAccess::TryGetWidgetString(const FUMGWidgetNode& Node, 
 	return Design2UMGWidgetNodeTypedPropertyAccess::TryGetTypedWidgetString(Node, Key, OutValue);
 }
 
-bool Design2UMGWidgetNodeAccess::HasWidgetString(const FUMGWidgetNode& Node, const TCHAR* Key)
+bool Design2UMGWidgetNodeAccess::HasWidgetPropertyPresence(const FUMGWidgetNode& Node, const TCHAR* Key)
 {
 	FString Value;
-	return TryGetWidgetString(Node, Key, Value) && !Value.IsEmpty();
+	return TryGetWidgetString(Node, Key, Value);
 }
 
 bool Design2UMGWidgetNodeAccess::TryGetWidgetBool(const FUMGWidgetNode& Node, const TCHAR* Key, bool& OutValue)

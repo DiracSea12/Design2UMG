@@ -849,10 +849,9 @@ namespace
 				DebugName.IsEmpty() ? TEXT("UnnamedWidget") : DebugName,
 				Node.Id,
 				Context);
-			// Synchronize typed fields to prevent typed-first readers from seeing the unresolved raw URL.
-			Node.Brush.TexturePath = ResolvedTexturePath;
+			// Keep the canonical typed owner in sync after import-time path rewriting.
+			Node.Brush.TexturePath.Empty();
 			Node.Brush.Image.TexturePath = ResolvedTexturePath;
-			Node.Brush.Image.bHasTexturePath = true;
 		}
 
 		for (FUMGWidgetNode& Child : Node.Children)
