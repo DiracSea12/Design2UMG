@@ -481,25 +481,25 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPublicSurfacePostReviewFixesGuardTest,
 bool FPublicSurfacePostReviewFixesGuardTest::RunTest(const FString& Parameters)
 {
 	FDesignLayoutNodeData LayoutData;
-	LayoutData.SetLayoutRowValue(3);
-	LayoutData.SetLayoutColumnValue(1);
-	LayoutData.SetLayoutRowSpanValue(2);
-	LayoutData.SetLayoutColumnGapValue(16.0f);
-	LayoutData.SetLayoutChildHorizontalAlignValue(TEXT("CENTER"));
+	LayoutData.LayoutRow = 3;
+	LayoutData.LayoutColumn = 1;
+	LayoutData.LayoutRowSpan = 2;
+	LayoutData.LayoutColumnGap = 16.0f;
+	LayoutData.LayoutChildHorizontalAlign = TEXT("CENTER");
 
 	TestTrue(TEXT("Public grid row flag still drives explicit grid position"), LayoutData.HasExplicitGridPosition());
-	TestTrue(TEXT("Accessor sees public row storage"), LayoutData.GetLayoutRowValue().IsSet());
-	TestEqual(TEXT("Accessor returns public row value"), LayoutData.GetLayoutRowOr(-1), 3);
-	TestEqual(TEXT("Accessor returns public column value"), LayoutData.GetLayoutColumnOr(-1), 1);
-	TestEqual(TEXT("Accessor returns row span"), LayoutData.GetLayoutRowSpanOr(1), 2);
-	TestEqual(TEXT("Accessor returns column gap"), LayoutData.GetLayoutColumnGapOr(0.0f), 16.0f);
+	TestTrue(TEXT("Direct optional row storage is set"), LayoutData.LayoutRow.IsSet());
+	TestEqual(TEXT("Direct optional returns public row value"), LayoutData.LayoutRow.Get(-1), 3);
+	TestEqual(TEXT("Direct optional returns public column value"), LayoutData.LayoutColumn.Get(-1), 1);
+	TestEqual(TEXT("Direct optional returns row span"), LayoutData.LayoutRowSpan.Get(1), 2);
+	TestEqual(TEXT("Direct optional returns column gap"), LayoutData.LayoutColumnGap.Get(0.0f), 16.0f);
 	TestEqual(
-		TEXT("Accessor returns child horizontal alignment"),
-		LayoutData.GetLayoutChildHorizontalAlignOr(TEXT("Left")),
+		TEXT("Direct optional returns child horizontal alignment"),
+		LayoutData.LayoutChildHorizontalAlign.Get(FString(TEXT("Left"))),
 		FString(TEXT("CENTER")));
 
-	LayoutData.ClearLayoutRowValue();
-	TestFalse(TEXT("Clear helper resets public row presence"), LayoutData.HasLayoutRowValue());
+	LayoutData.LayoutRow.Reset();
+	TestFalse(TEXT("Direct optional reset clears public row presence"), LayoutData.LayoutRow.IsSet());
 
 	FUMGWidgetNode Widget;
 	Widget.Text.bHasText = true;
@@ -508,8 +508,9 @@ bool FPublicSurfacePostReviewFixesGuardTest::RunTest(const FString& Parameters)
 	Widget.Text.bAutoWrapText = true;
 	Widget.Text.bHasColor = true;
 	Widget.Text.Color = FLinearColor(0.2f, 0.4f, 0.6f, 1.0f);
-	Widget.WidgetState.bHasActiveWidgetIndex = true;
 	Widget.WidgetState.ActiveWidgetIndex = 3;
+	Widget.ScrollBox.Orientation = TEXT("Horizontal");
+	Widget.ScrollBox.ScrollBarVisibility = TEXT("Hidden");
 
 	bool bSawColorKey = false;
 	Design2UMGWidgetNodeAccess::ForEachStaticTypedWidgetPropertyKey([&bSawColorKey](const TCHAR* Key)
@@ -533,6 +534,20 @@ bool FPublicSurfacePostReviewFixesGuardTest::RunTest(const FString& Parameters)
 	int32 ActiveWidgetIndex = INDEX_NONE;
 	TestTrue(TEXT("Int helper still parses typed int"), Design2UMGWidgetNodeAccess::TryGetWidgetInt(Widget, UMGPropertyKeys::ActiveWidgetIndex, ActiveWidgetIndex));
 	TestEqual(TEXT("Typed int payload remains unchanged"), ActiveWidgetIndex, 3);
+
+	FString ScrollBoxOrientation;
+	TestTrue(TEXT("Typed helper returns explicit ScrollBox orientation"), Design2UMGWidgetNodeAccess::TryGetWidgetString(Widget, UMGPropertyKeys::Orientation, ScrollBoxOrientation));
+	TestEqual(TEXT("Typed ScrollBox orientation remains unchanged"), ScrollBoxOrientation, FString(TEXT("Horizontal")));
+
+	FString ScrollBarVisibility;
+	TestTrue(TEXT("Typed helper returns explicit ScrollBox scrollbar visibility"), Design2UMGWidgetNodeAccess::TryGetWidgetString(Widget, UMGPropertyKeys::ScrollBarVisibility, ScrollBarVisibility));
+	TestEqual(TEXT("Typed ScrollBox scrollbar visibility remains unchanged"), ScrollBarVisibility, FString(TEXT("Hidden")));
+
+	FUMGWidgetNode UnsetWidget;
+	int32 MissingActiveWidgetIndex = INDEX_NONE;
+	TestFalse(TEXT("Unset optional widget state stays absent"), Design2UMGWidgetNodeAccess::TryGetWidgetInt(UnsetWidget, UMGPropertyKeys::ActiveWidgetIndex, MissingActiveWidgetIndex));
+	FString MissingOrientation;
+	TestFalse(TEXT("Unset optional ScrollBox orientation stays absent"), Design2UMGWidgetNodeAccess::TryGetWidgetString(UnsetWidget, UMGPropertyKeys::Orientation, MissingOrientation));
 
 	FLinearColor ParsedColor;
 	TestTrue(TEXT("Color helper still parses typed color"), Design2UMGWidgetNodeAccess::TryGetWidgetColor(Widget, UMGPropertyKeys::Color, ParsedColor));

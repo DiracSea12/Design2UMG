@@ -1,4 +1,6 @@
-﻿#include "Automation/Design2UMGAutomationRender.h"
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+
+#include "Automation/Design2UMGAutomationRender.h"
 
 #include "Automation/Design2UMGAutomationStructureSnapshot.h"
 #include "Design2UMGLocalFigmaImport.h"

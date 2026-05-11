@@ -1,4 +1,6 @@
-﻿#include "Design2UMGLocalFigmaImport.h"
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+
+#include "Design2UMGLocalFigmaImport.h"
 #include "DesignSchemaSourceExtensions.h"
 
 #include "Design2UMGConverter.h"

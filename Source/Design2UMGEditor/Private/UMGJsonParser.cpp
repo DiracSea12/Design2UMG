@@ -707,8 +707,22 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 		double Val;
 		if ((*WidgetStateObject)->TryGetNumberField(UMGPropertyKeys::ActiveWidgetIndex, Val))
 		{
-			OutNode.WidgetState.ActiveWidgetIndex = (int32)Val;
-			OutNode.WidgetState.bHasActiveWidgetIndex = true;
+			OutNode.WidgetState.ActiveWidgetIndex = static_cast<int32>(Val);
+		}
+	}
+
+	// Parse ScrollBox (v2.6)
+	const TSharedPtr<FJsonObject>* ScrollBoxObject;
+	if (JsonObject->TryGetObjectField(TEXT("ScrollBox"), ScrollBoxObject))
+	{
+		FString Str;
+		if ((*ScrollBoxObject)->TryGetStringField(UMGPropertyKeys::Orientation, Str))
+		{
+			OutNode.ScrollBox.Orientation = Str;
+		}
+		if ((*ScrollBoxObject)->TryGetStringField(UMGPropertyKeys::ScrollBarVisibility, Str))
+		{
+			OutNode.ScrollBox.ScrollBarVisibility = Str;
 		}
 	}
 

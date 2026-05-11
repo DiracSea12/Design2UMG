@@ -301,9 +301,9 @@ namespace
 
 	void ApplyTypedWidgetSwitcherProps(UWidgetSwitcher* WS, const FUMGWidgetStateData& State)
 	{
-		if (WS && State.bHasActiveWidgetIndex)
+		if (WS && State.ActiveWidgetIndex.IsSet())
 		{
-			WS->SetActiveWidgetIndex(State.ActiveWidgetIndex);
+			WS->SetActiveWidgetIndex(State.ActiveWidgetIndex.GetValue());
 		}
 	}
 
@@ -314,19 +314,19 @@ namespace
 			return;
 		}
 
-		if (ScrollBox.bHasOrientation)
+		if (ScrollBox.Orientation.IsSet())
 		{
-			Sc->SetOrientation(ScrollBox.Orientation == TEXT("Horizontal") ? Orient_Horizontal : Orient_Vertical);
+			Sc->SetOrientation(ScrollBox.Orientation.GetValue() == TEXT("Horizontal") ? Orient_Horizontal : Orient_Vertical);
 		}
 
-		if (ScrollBox.bHasScrollBarVisibility)
+		if (ScrollBox.ScrollBarVisibility.IsSet())
 		{
 			static const TMap<FString, ESlateVisibility> VisMap = {
 				{TEXT("Visible"), ESlateVisibility::Visible},
 				{TEXT("Collapsed"), ESlateVisibility::Collapsed},
 				{TEXT("Hidden"), ESlateVisibility::Hidden},
 			};
-			if (const ESlateVisibility* Vis = VisMap.Find(ScrollBox.ScrollBarVisibility))
+			if (const ESlateVisibility* Vis = VisMap.Find(ScrollBox.ScrollBarVisibility.GetValue()))
 			{
 				Sc->SetScrollBarVisibility(*Vis);
 			}

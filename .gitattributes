@@ -1,4 +1,4 @@
-# Normalize Windows-facing text files in the repository.
+﻿# Normalize Windows-facing text files in the repository.
 * text=auto
 *.h text eol=crlf
 *.hpp text eol=crlf
@@ -13,12 +13,16 @@
 # Exclude maintainer-only workflow files from generated source archives.
 AGENTS.md export-ignore
 CLAUDE.md export-ignore
-code_review.md export-ignore
-code_review_report.md export-ignore
-code_review_report 2.md export-ignore
+/*REVIEW*.md export-ignore
+/*Review*.md export-ignore
+/*review*.md export-ignore
+/CODE_REVIEW*.md export-ignore
+/code_review*.md export-ignore
+/design2umg_code_review*.md export-ignore
 
 # Exclude local workflow directories from generated source archives.
 .cowork-temp/ export-ignore
 .claude/ export-ignore
 .codex/ export-ignore
 openspec/ export-ignore
+openspec/** export-ignore

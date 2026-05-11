@@ -1,4 +1,6 @@
-﻿#include "DesignImageBakeUtils.h"
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+
+#include "DesignImageBakeUtils.h"
 
 #include "Design2UMGLog.h"
 #include "DesignSchema.h"

@@ -74,20 +74,6 @@ struct FDesignLayoutNodeData
 		ExplicitClip = bInClip;
 	}
 
-	void SetLayoutRowValue(const int32 InLayoutRow)        { LayoutRow = InLayoutRow; }
-	void ClearLayoutRowValue()                             { LayoutRow.Reset(); }
-	void SetLayoutColumnValue(const int32 InLayoutColumn)  { LayoutColumn = InLayoutColumn; }
-	void ClearLayoutColumnValue()                          { LayoutColumn.Reset(); }
-	void SetLayoutRowSpanValue(const int32 InVal)          { LayoutRowSpan = InVal; }
-	void SetLayoutColumnSpanValue(const int32 InVal)       { LayoutColumnSpan = InVal; }
-	void SetLayoutRowCountValue(const int32 InVal)         { LayoutRowCount = InVal; }
-	void SetLayoutColumnCountValue(const int32 InVal)      { LayoutColumnCount = InVal; }
-	void SetLayoutRowGapValue(const float InVal)           { LayoutRowGap = InVal; }
-	void SetLayoutColumnGapValue(const float InVal)        { LayoutColumnGap = InVal; }
-
-	void SetLayoutChildHorizontalAlignValue(const FString& InVal) { LayoutChildHorizontalAlign = InVal; }
-	void SetLayoutChildVerticalAlignValue(const FString& InVal)   { LayoutChildVerticalAlign = InVal; }
-
 	bool HasExplicitGap() const      { return ExplicitGap.IsSet(); }
 	bool HasExplicitPadding() const  { return ExplicitPadding.IsSet(); }
 	bool HasExplicitClip() const     { return ExplicitClip.IsSet(); }
@@ -95,34 +81,6 @@ struct FDesignLayoutNodeData
 	bool HasExplicitGridPosition() const
 	{
 		return LayoutRow.IsSet() || LayoutColumn.IsSet();
-	}
-
-	bool HasLayoutRowValue() const          { return LayoutRow.IsSet(); }
-	bool HasLayoutColumnValue() const       { return LayoutColumn.IsSet(); }
-	bool HasLayoutRowSpanValue() const      { return LayoutRowSpan.IsSet(); }
-	bool HasLayoutColumnSpanValue() const   { return LayoutColumnSpan.IsSet(); }
-	bool HasLayoutRowCountValue() const     { return LayoutRowCount.IsSet(); }
-	bool HasLayoutColumnCountValue() const  { return LayoutColumnCount.IsSet(); }
-	bool HasLayoutRowGapValue() const       { return LayoutRowGap.IsSet(); }
-	bool HasLayoutColumnGapValue() const    { return LayoutColumnGap.IsSet(); }
-
-	TOptional<int32> GetLayoutRowValue() const    { return LayoutRow; }
-
-	int32 GetLayoutRowOr(const int32 DefaultValue) const         { return LayoutRow.Get(DefaultValue); }
-	int32 GetLayoutColumnOr(const int32 DefaultValue) const      { return LayoutColumn.Get(DefaultValue); }
-	int32 GetLayoutRowSpanOr(const int32 DefaultValue) const     { return LayoutRowSpan.Get(DefaultValue); }
-	int32 GetLayoutColumnSpanOr(const int32 DefaultValue) const  { return LayoutColumnSpan.Get(DefaultValue); }
-	float GetLayoutRowGapOr(const float DefaultValue) const      { return LayoutRowGap.Get(DefaultValue); }
-	float GetLayoutColumnGapOr(const float DefaultValue) const   { return LayoutColumnGap.Get(DefaultValue); }
-
-	FString GetLayoutChildHorizontalAlignOr(const FString& DefaultValue) const
-	{
-		return LayoutChildHorizontalAlign.Get(DefaultValue);
-	}
-
-	FString GetLayoutChildVerticalAlignOr(const FString& DefaultValue) const
-	{
-		return LayoutChildVerticalAlign.Get(DefaultValue);
 	}
 };
 

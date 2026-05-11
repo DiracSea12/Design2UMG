@@ -101,7 +101,11 @@ $exportForbiddenRootNames = @(
 $forbiddenRootReviewPatterns = @(
     '*REVIEW*.md',
     '*Review*.md',
+    '*review*.md',
+    'CODE_REVIEW*.md',
     'code_review_report*.md',
+    'code_review*.md',
+    'design2umg_code_review*.md',
     'OPEN_SOURCE_PROJECT_REVIEW*.md',
     'OPEN_SOURCE_READINESS_REVIEW*.md',
     'CODEX_*REVIEW*.md'

@@ -69,8 +69,8 @@ bool FFigmaPrototypeNavigationConverterTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Prototype transition type preserved"), Binding.Transition.Type, TEXT("DISSOLVE"));
 	TestTrue(TEXT("Prototype transition duration preserved"), FMath::IsNearlyEqual(Binding.Transition.DurationSeconds, 0.18f, 0.0001f));
 	TestEqual(TEXT("Prototype transition easing preserved"), Binding.Transition.EasingType, TEXT("EASE_IN_AND_OUT"));
-	TestTrue(TEXT("Prototype switcher active index exported via typed state"), Data.RootWidget.WidgetState.bHasActiveWidgetIndex);
-	TestEqual(TEXT("Prototype switcher typed active index preserved"), Data.RootWidget.WidgetState.ActiveWidgetIndex, 1);
+	TestTrue(TEXT("Prototype switcher active index exported via typed state"), Data.RootWidget.WidgetState.ActiveWidgetIndex.IsSet());
+	TestEqual(TEXT("Prototype switcher typed active index preserved"), Data.RootWidget.WidgetState.ActiveWidgetIndex.GetValue(), 1);
 
 	const FUMGWidgetNode* TriggerWidget = FindWidgetById(Data.RootWidget, TEXT("cta_button"));
 	TestTrue(TEXT("Prototype trigger widget exists"), TriggerWidget != nullptr);

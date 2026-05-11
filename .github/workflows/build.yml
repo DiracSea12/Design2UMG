@@ -22,7 +22,7 @@ jobs:
 
       - name: Fail on tracked local-only files that should not ship in the repo
         run: |
-          if git ls-files | grep -E '^\.cowork-temp/|^\.claude/|^\.codex/|^\.vs/|^openspec/|^progress\.txt$|^ocr_result\.txt$|^CLAUDE\.md$|^AGENTS\.md$|^code_review_report.*\.md$|^.*REVIEW.*\.md$|^Design2UMG图片/|^capture_editor_screenshot\.py$|^capture_umg_screenshot\.py$|^compare_coordinates\.py$|^screenshot\.ps1$|^screenshot\.py$|^show_expected_coords\.py$|^test_import\.py$|^verify_coords\.py$|^verify_design_size\.py$|^editor_screenshot\.png$'; then
+          if git ls-files | grep -Ei '^\.cowork-temp/|^\.claude/|^\.codex/|^\.vs/|^openspec/|^progress\.txt$|^ocr_result\.txt$|^CLAUDE\.md$|^AGENTS\.md$|^[^/]*review[^/]*\.md$|^Design2UMG图片/|^capture_editor_screenshot\.py$|^capture_umg_screenshot\.py$|^compare_coordinates\.py$|^screenshot\.ps1$|^screenshot\.py$|^show_expected_coords\.py$|^test_import\.py$|^verify_coords\.py$|^verify_design_size\.py$|^editor_screenshot\.png$'; then
             echo "Local-only files are tracked. Remove them before release."
             exit 1
           fi

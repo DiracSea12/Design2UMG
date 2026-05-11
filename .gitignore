@@ -1,4 +1,4 @@
-# UE build artifacts
+﻿# UE build artifacts
 Binaries/
 Intermediate/
 Saved/
@@ -30,8 +30,12 @@ AGENTS.md
 CLAUDE.md
 ENCODING_GUARD.md
 Tools/Invoke-ClaudeWorker.ps1
-code_review_report.md
-code_review_report 2.md
+/*REVIEW*.md
+/*Review*.md
+/*review*.md
+/CODE_REVIEW*.md
+/code_review*.md
+/design2umg_code_review*.md
 Design2UMG图片/
 
 # Local helper outputs

@@ -295,7 +295,7 @@ namespace
 	FTypedWidgetDescriptorRange GetWidgetStateTypedWidgetDescriptors()
 	{
 		static const FTypedWidgetStringDescriptor Descriptors[] = {
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::ActiveWidgetIndex, Node.WidgetState.bHasActiveWidgetIndex, FString::FromInt(Node.WidgetState.ActiveWidgetIndex)),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::ActiveWidgetIndex, Node.WidgetState.ActiveWidgetIndex.IsSet(), FString::FromInt(Node.WidgetState.ActiveWidgetIndex.GetValue())),
 		};
 		return { Descriptors, UE_ARRAY_COUNT(Descriptors) };
 	}
@@ -303,8 +303,8 @@ namespace
 	FTypedWidgetDescriptorRange GetScrollBoxTypedWidgetDescriptors()
 	{
 		static const FTypedWidgetStringDescriptor Descriptors[] = {
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Orientation, Node.ScrollBox.bHasOrientation, Node.ScrollBox.Orientation),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::ScrollBarVisibility, Node.ScrollBox.bHasScrollBarVisibility, Node.ScrollBox.ScrollBarVisibility),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::Orientation, Node.ScrollBox.Orientation.IsSet(), Node.ScrollBox.Orientation.GetValue()),
+			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::ScrollBarVisibility, Node.ScrollBox.ScrollBarVisibility.IsSet(), Node.ScrollBox.ScrollBarVisibility.GetValue()),
 		};
 		return { Descriptors, UE_ARRAY_COUNT(Descriptors) };
 	}

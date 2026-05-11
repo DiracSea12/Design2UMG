@@ -91,17 +91,13 @@ namespace
 			{
 				Widget.Type = TEXT("ScrollBox");
 				Widget.ScrollBox.Orientation = TEXT("Vertical");
-				Widget.ScrollBox.bHasOrientation = true;
 				Widget.ScrollBox.ScrollBarVisibility = TEXT("Hidden");
-				Widget.ScrollBox.bHasScrollBarVisibility = true;
 			}
 			else if (OverflowDirection.Equals(TEXT("HORIZONTAL_SCROLLING"), ESearchCase::IgnoreCase))
 			{
 				Widget.Type = TEXT("ScrollBox");
 				Widget.ScrollBox.Orientation = TEXT("Horizontal");
-				Widget.ScrollBox.bHasOrientation = true;
 				Widget.ScrollBox.ScrollBarVisibility = TEXT("Hidden");
-				Widget.ScrollBox.bHasScrollBarVisibility = true;
 			}
 		}
 		return Widget;

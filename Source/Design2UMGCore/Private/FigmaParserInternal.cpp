@@ -105,47 +105,47 @@ static void PromoteFigmaGridLayout(FDesignNode& OutNode)
 	const FDesignSourceNodeData& SourceData = OutNode.Source();
 	if (SourceData.LayoutExtensions.GridRowCount.IsSet())
 	{
-		OutNode.LayoutData.SetLayoutRowCountValue(FMath::Max(0, SourceData.LayoutExtensions.GridRowCount.GetValue()));
+		OutNode.LayoutData.LayoutRowCount = FMath::Max(0, SourceData.LayoutExtensions.GridRowCount.GetValue());
 	}
 	if (SourceData.LayoutExtensions.GridColumnCount.IsSet())
 	{
-		OutNode.LayoutData.SetLayoutColumnCountValue(FMath::Max(0, SourceData.LayoutExtensions.GridColumnCount.GetValue()));
+		OutNode.LayoutData.LayoutColumnCount = FMath::Max(0, SourceData.LayoutExtensions.GridColumnCount.GetValue());
 	}
 	if (SourceData.LayoutExtensions.GridRowGap.IsSet())
 	{
-		OutNode.LayoutData.SetLayoutRowGapValue(FMath::Max(0.0f, SourceData.LayoutExtensions.GridRowGap.GetValue()));
+		OutNode.LayoutData.LayoutRowGap = FMath::Max(0.0f, SourceData.LayoutExtensions.GridRowGap.GetValue());
 	}
 	else if (SourceData.LayoutExtensions.CounterAxisSpacing.IsSet())
 	{
-		OutNode.LayoutData.SetLayoutRowGapValue(FMath::Max(0.0f, SourceData.LayoutExtensions.CounterAxisSpacing.GetValue()));
+		OutNode.LayoutData.LayoutRowGap = FMath::Max(0.0f, SourceData.LayoutExtensions.CounterAxisSpacing.GetValue());
 	}
 	if (SourceData.LayoutExtensions.GridColumnGap.IsSet())
 	{
-		OutNode.LayoutData.SetLayoutColumnGapValue(FMath::Max(0.0f, SourceData.LayoutExtensions.GridColumnGap.GetValue()));
+		OutNode.LayoutData.LayoutColumnGap = FMath::Max(0.0f, SourceData.LayoutExtensions.GridColumnGap.GetValue());
 	}
 	if (!SourceData.LayoutExtensions.GridChildHorizontalAlign.IsEmpty())
 	{
-		OutNode.LayoutData.SetLayoutChildHorizontalAlignValue(SourceData.LayoutExtensions.GridChildHorizontalAlign);
+		OutNode.LayoutData.LayoutChildHorizontalAlign = SourceData.LayoutExtensions.GridChildHorizontalAlign;
 	}
 	if (!SourceData.LayoutExtensions.GridChildVerticalAlign.IsEmpty())
 	{
-		OutNode.LayoutData.SetLayoutChildVerticalAlignValue(SourceData.LayoutExtensions.GridChildVerticalAlign);
+		OutNode.LayoutData.LayoutChildVerticalAlign = SourceData.LayoutExtensions.GridChildVerticalAlign;
 	}
 	if (SourceData.LayoutExtensions.GridRowSpan.IsSet())
 	{
-		OutNode.LayoutData.SetLayoutRowSpanValue(FMath::Max(1, SourceData.LayoutExtensions.GridRowSpan.GetValue()));
+		OutNode.LayoutData.LayoutRowSpan = FMath::Max(1, SourceData.LayoutExtensions.GridRowSpan.GetValue());
 	}
 	if (SourceData.LayoutExtensions.GridColumnSpan.IsSet())
 	{
-		OutNode.LayoutData.SetLayoutColumnSpanValue(FMath::Max(1, SourceData.LayoutExtensions.GridColumnSpan.GetValue()));
+		OutNode.LayoutData.LayoutColumnSpan = FMath::Max(1, SourceData.LayoutExtensions.GridColumnSpan.GetValue());
 	}
 	if (SourceData.LayoutExtensions.GridRowAnchorIndex.IsSet())
 	{
-		OutNode.LayoutData.SetLayoutRowValue(FMath::Max(0, SourceData.LayoutExtensions.GridRowAnchorIndex.GetValue()));
+		OutNode.LayoutData.LayoutRow = FMath::Max(0, SourceData.LayoutExtensions.GridRowAnchorIndex.GetValue());
 	}
 	if (SourceData.LayoutExtensions.GridColumnAnchorIndex.IsSet())
 	{
-		OutNode.LayoutData.SetLayoutColumnValue(FMath::Max(0, SourceData.LayoutExtensions.GridColumnAnchorIndex.GetValue()));
+		OutNode.LayoutData.LayoutColumn = FMath::Max(0, SourceData.LayoutExtensions.GridColumnAnchorIndex.GetValue());
 	}
 }
 

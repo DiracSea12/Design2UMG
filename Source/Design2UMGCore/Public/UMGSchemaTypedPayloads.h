@@ -279,8 +279,8 @@ struct FUMGEffectData
 	}
 };
 
-// Not migrated to TOptional: path/shadow/widget-state/scroll-box presence bits are
-// retained payload ownership, not optional cleanup candidates.
+// Not migrated to TOptional: path/shadow presence bits are retained payload
+// ownership, not optional cleanup candidates.
 struct FUMGPathData
 {
 	FString Geometry;
@@ -382,30 +382,24 @@ struct FUMGRenderStyleData
 	}
 };
 
-// Not migrated to TOptional: active-widget index carries presence semantics.
 struct FUMGWidgetStateData
 {
-	int32 ActiveWidgetIndex = 0;
-	bool bHasActiveWidgetIndex = false;
+	TOptional<int32> ActiveWidgetIndex;
 
 	bool HasAny() const
 	{
-		return bHasActiveWidgetIndex;
+		return ActiveWidgetIndex.IsSet();
 	}
 };
 
-// Not migrated to TOptional: scroll-box contract relies on explicit presence markers.
 struct FUMGScrollBoxData
 {
-	FString Orientation;
-	bool bHasOrientation = false;
-
-	FString ScrollBarVisibility;
-	bool bHasScrollBarVisibility = false;
+	TOptional<FString> Orientation;
+	TOptional<FString> ScrollBarVisibility;
 
 	bool HasAny() const
 	{
-		return bHasOrientation || bHasScrollBarVisibility;
+		return Orientation.IsSet() || ScrollBarVisibility.IsSet();
 	}
 };
 

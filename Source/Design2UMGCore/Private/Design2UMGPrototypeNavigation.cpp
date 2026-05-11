@@ -24,7 +24,6 @@ namespace
 		Switcher.Id = NavigationData.SwitcherWidgetId;
 		Switcher.Name = NavigationData.SwitcherWidgetName;
 		Switcher.WidgetState.ActiveWidgetIndex = NavigationData.InitialPageIndex;
-		Switcher.WidgetState.bHasActiveWidgetIndex = true;
 
 		float MaxWidth = 0.0f;
 		float MaxHeight = 0.0f;

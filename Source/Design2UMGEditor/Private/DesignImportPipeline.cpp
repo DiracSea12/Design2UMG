@@ -1,4 +1,6 @@
-﻿#include "DesignImportPipeline.h"
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+
+#include "DesignImportPipeline.h"
 #include "DesignImportDiagnosticReport.h"
 #include "DesignImportPlanning.h"
 

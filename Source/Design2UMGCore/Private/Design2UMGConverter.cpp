@@ -513,13 +513,13 @@ namespace
 				}
 				else
 				{
-					if (EffectiveChild->LayoutData.HasLayoutRowValue())
+					if (EffectiveChild->LayoutData.LayoutRow.IsSet())
 					{
-						ChildWidget.Slot.Row = FMath::Max(0, EffectiveChild->LayoutData.GetLayoutRowOr(0));
+						ChildWidget.Slot.Row = FMath::Max(0, EffectiveChild->LayoutData.LayoutRow.GetValue());
 					}
-					if (EffectiveChild->LayoutData.HasLayoutColumnValue())
+					if (EffectiveChild->LayoutData.LayoutColumn.IsSet())
 					{
-						ChildWidget.Slot.Column = FMath::Max(0, EffectiveChild->LayoutData.GetLayoutColumnOr(0));
+						ChildWidget.Slot.Column = FMath::Max(0, EffectiveChild->LayoutData.LayoutColumn.GetValue());
 					}
 					Design2UMGGridLayout::ApplyGridChildAlignmentOverrides(ChildWidget, Node, EffectiveChild);
 				}

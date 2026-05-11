@@ -402,11 +402,27 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeWidgetNode(const FUMGWidget
 	{
 		const FUMGWidgetStateData& State = Node.WidgetState;
 		TSharedRef<FJsonObject> StateObject = MakeShared<FJsonObject>();
-		if (State.bHasActiveWidgetIndex)
+		if (State.ActiveWidgetIndex.IsSet())
 		{
-			StateObject->SetNumberField(UMGPropertyKeys::ActiveWidgetIndex, State.ActiveWidgetIndex);
+			StateObject->SetNumberField(UMGPropertyKeys::ActiveWidgetIndex, State.ActiveWidgetIndex.GetValue());
 		}
 		J->SetObjectField(TEXT("WidgetState"), StateObject);
+	}
+
+	// ScrollBox (v2.6)
+	if (Node.ScrollBox.HasAny())
+	{
+		const FUMGScrollBoxData& ScrollBox = Node.ScrollBox;
+		TSharedRef<FJsonObject> ScrollBoxObject = MakeShared<FJsonObject>();
+		if (ScrollBox.Orientation.IsSet())
+		{
+			ScrollBoxObject->SetStringField(UMGPropertyKeys::Orientation, ScrollBox.Orientation.GetValue());
+		}
+		if (ScrollBox.ScrollBarVisibility.IsSet())
+		{
+			ScrollBoxObject->SetStringField(UMGPropertyKeys::ScrollBarVisibility, ScrollBox.ScrollBarVisibility.GetValue());
+		}
+		J->SetObjectField(TEXT("ScrollBox"), ScrollBoxObject);
 	}
 
 	if (Node.Children.Num() > 0)

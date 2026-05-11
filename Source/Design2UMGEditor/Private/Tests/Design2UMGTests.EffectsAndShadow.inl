@@ -1077,7 +1077,6 @@ bool FWidgetSwitcherUsesTypedStateTest::RunTest(const FString& Parameters)
 	FUMGWidgetNode Node;
 	Node.Type = TEXT("WidgetSwitcher");
 	Node.WidgetState.ActiveWidgetIndex = 2;
-	Node.WidgetState.bHasActiveWidgetIndex = true;
 
 	FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node);
 	TestEqual(TEXT("Typed widget state applies active index"), Widget->GetActiveWidgetIndex(), 2);
@@ -1527,7 +1526,6 @@ bool FWidgetStateJsonRoundTripTest::RunTest(const FString& Parameters)
 	SourceData.RootWidget.Id = TEXT("switcher_root");
 	SourceData.RootWidget.Name = TEXT("SwitcherRoot");
 	SourceData.RootWidget.WidgetState.ActiveWidgetIndex = 1;
-	SourceData.RootWidget.WidgetState.bHasActiveWidgetIndex = true;
 
 	FUMGWidgetNode FirstPage;
 	FirstPage.Type = TEXT("TextBlock");
@@ -1557,8 +1555,49 @@ bool FWidgetStateJsonRoundTripTest::RunTest(const FString& Parameters)
 		AddInfo(ParseError);
 	}
 
-	TestTrue(TEXT("Parsed widget state keeps typed active index"), ParsedData.RootWidget.WidgetState.bHasActiveWidgetIndex);
-	TestEqual(TEXT("Parsed widget state active index preserved"), ParsedData.RootWidget.WidgetState.ActiveWidgetIndex, 1);
+	TestTrue(TEXT("Parsed widget state keeps typed active index"), ParsedData.RootWidget.WidgetState.ActiveWidgetIndex.IsSet());
+	TestEqual(TEXT("Parsed widget state active index preserved"), ParsedData.RootWidget.WidgetState.ActiveWidgetIndex.GetValue(), 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FScrollBoxJsonRoundTripTest,
+	"Design2UMG.UMGJson.ScrollBoxRoundTrip",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FScrollBoxJsonRoundTripTest::RunTest(const FString& Parameters)
+{
+	FUMGWidgetData SourceData;
+	SourceData.WidgetName = TEXT("WBP_ScrollBoxRoundTrip");
+	SourceData.RootWidget.Type = TEXT("ScrollBox");
+	SourceData.RootWidget.Id = TEXT("scroll_root");
+	SourceData.RootWidget.Name = TEXT("ScrollRoot");
+	SourceData.RootWidget.ScrollBox.Orientation = TEXT("Horizontal");
+	SourceData.RootWidget.ScrollBox.ScrollBarVisibility = FString();
+
+	FUMGWidgetNode Child;
+	Child.Type = TEXT("TextBlock");
+	Child.Id = TEXT("scroll_child");
+	Child.Name = TEXT("ScrollChild");
+	Child.Text.Text = TEXT("Child");
+	Child.Text.bHasText = true;
+	SourceData.RootWidget.Children.Add(MoveTemp(Child));
+
+	const FString Json = FUMGJsonSerializer::Serialize(SourceData);
+	TestFalse(TEXT("Serialized scroll box emits ScrollBox payload"), Json.IsEmpty() || !Json.Contains(TEXT("\"ScrollBox\"")));
+	TestTrue(TEXT("Serialized scroll box keeps orientation key"), Json.Contains(FString::Printf(TEXT("\"%s\""), UMGPropertyKeys::Orientation)));
+	TestTrue(TEXT("Serialized scroll box keeps explicit empty scrollbar visibility key"), Json.Contains(FString::Printf(TEXT("\"%s\""), UMGPropertyKeys::ScrollBarVisibility)));
+
+	FUMGWidgetData ParsedData;
+	FString ParseError;
+	TestTrue(TEXT("ScrollBox JSON parses"), FUMGJsonParser::ParseJson(Json, ParsedData, &ParseError));
+	if (!ParseError.IsEmpty())
+	{
+		AddInfo(ParseError);
+	}
+
+	TestTrue(TEXT("Parsed scroll box keeps orientation presence"), ParsedData.RootWidget.ScrollBox.Orientation.IsSet());
+	TestEqual(TEXT("Parsed scroll box orientation value"), ParsedData.RootWidget.ScrollBox.Orientation.GetValue(), FString(TEXT("Horizontal")));
+	TestTrue(TEXT("Parsed scroll box keeps explicit empty scrollbar visibility presence"), ParsedData.RootWidget.ScrollBox.ScrollBarVisibility.IsSet());
+	TestEqual(TEXT("Parsed scroll box explicit empty scrollbar visibility value"), ParsedData.RootWidget.ScrollBox.ScrollBarVisibility.GetValue(), FString());
 	return true;
 }
 
@@ -1569,7 +1608,6 @@ bool FTypedPropertyBagEnumeratesLateTypedKeysTest::RunTest(const FString& Parame
 {
 	FUMGWidgetNode Node;
 	Node.WidgetState.ActiveWidgetIndex = 2;
-	Node.WidgetState.bHasActiveWidgetIndex = true;
 	Node.Render.RenderTranslation = FVector2D(1.5f, -2.0f);
 	Node.Render.bHasRenderTranslation = true;
 

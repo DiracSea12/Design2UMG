@@ -7,18 +7,18 @@ namespace
 	bool HasExplicitGridSpan(const TSharedPtr<FDesignNode>& Node)
 	{
 		return Node.IsValid()
-			&& ((Node->LayoutData.HasLayoutRowSpanValue() && Node->LayoutData.GetLayoutRowSpanOr(0) > 1)
-				|| (Node->LayoutData.HasLayoutColumnSpanValue() && Node->LayoutData.GetLayoutColumnSpanOr(0) > 1));
+			&& (Node->LayoutData.LayoutRowSpan.Get(0) > 1
+				|| Node->LayoutData.LayoutColumnSpan.Get(0) > 1);
 	}
 
 	int32 ResolveGridRowSpan(const TSharedPtr<FDesignNode>& Node)
 	{
-		return Node.IsValid() ? FMath::Max(1, Node->LayoutData.GetLayoutRowSpanOr(1)) : 1;
+		return Node.IsValid() ? FMath::Max(1, Node->LayoutData.LayoutRowSpan.Get(1)) : 1;
 	}
 
 	int32 ResolveGridColumnSpan(const TSharedPtr<FDesignNode>& Node)
 	{
-		return Node.IsValid() ? FMath::Max(1, Node->LayoutData.GetLayoutColumnSpanOr(1)) : 1;
+		return Node.IsValid() ? FMath::Max(1, Node->LayoutData.LayoutColumnSpan.Get(1)) : 1;
 	}
 
 	bool TryMapGridHorizontalAlignment(const FString& Value, FString& OutAlignment)
@@ -197,9 +197,9 @@ namespace Design2UMGGridLayout
 		{
 			return 0.0f;
 		}
-		if (Node->LayoutData.HasLayoutColumnGapValue())
+		if (Node->LayoutData.LayoutColumnGap.IsSet())
 		{
-			return FMath::Max(0.0f, Node->LayoutData.GetLayoutColumnGapOr(0.0f));
+			return FMath::Max(0.0f, Node->LayoutData.LayoutColumnGap.GetValue());
 		}
 		return FMath::Max(0.0f, Node->LayoutData.ExplicitGap.Get(0.0f));
 	}
@@ -210,9 +210,9 @@ namespace Design2UMGGridLayout
 		{
 			return 0.0f;
 		}
-		if (Node->LayoutData.HasLayoutRowGapValue())
+		if (Node->LayoutData.LayoutRowGap.IsSet())
 		{
-			return FMath::Max(0.0f, Node->LayoutData.GetLayoutRowGapOr(0.0f));
+			return FMath::Max(0.0f, Node->LayoutData.LayoutRowGap.GetValue());
 		}
 		return FMath::Max(0.0f, Node->LayoutData.ExplicitGap.Get(0.0f));
 	}
@@ -228,15 +228,15 @@ namespace Design2UMGGridLayout
 		}
 
 		FString AlignmentValue;
-		const FString HorizontalAlignSource = ChildNode->LayoutData.GetLayoutChildHorizontalAlignOr(
-			ParentNode->LayoutData.GetLayoutChildHorizontalAlignOr(FString()));
+		const FString HorizontalAlignSource = ChildNode->LayoutData.LayoutChildHorizontalAlign.Get(
+			ParentNode->LayoutData.LayoutChildHorizontalAlign.Get(FString()));
 		if (TryMapGridHorizontalAlignment(HorizontalAlignSource, AlignmentValue))
 		{
 			ChildWidget.Slot.HorizontalAlignment = AlignmentValue;
 		}
 
-		const FString VerticalAlignSource = ChildNode->LayoutData.GetLayoutChildVerticalAlignOr(
-			ParentNode->LayoutData.GetLayoutChildVerticalAlignOr(FString()));
+		const FString VerticalAlignSource = ChildNode->LayoutData.LayoutChildVerticalAlign.Get(
+			ParentNode->LayoutData.LayoutChildVerticalAlign.Get(FString()));
 		if (TryMapGridVerticalAlignment(VerticalAlignSource, AlignmentValue))
 		{
 			ChildWidget.Slot.VerticalAlignment = AlignmentValue;
@@ -247,8 +247,8 @@ namespace Design2UMGGridLayout
 		const TSharedPtr<FDesignNode>& Node,
 		const TArray<TSharedPtr<FDesignNode>>& VisibleChildren)
 	{
-		int32 ColumnCount = (Node.IsValid() && Node->LayoutData.HasLayoutColumnCountValue())
-			? FMath::Max(1, Node->LayoutData.LayoutColumnCount.Get(0))
+		int32 ColumnCount = (Node.IsValid() && Node->LayoutData.LayoutColumnCount.IsSet())
+			? FMath::Max(1, Node->LayoutData.LayoutColumnCount.GetValue())
 			: 0;
 		int32 ExplicitRequiredColumns = 0;
 		for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
@@ -258,16 +258,16 @@ namespace Design2UMGGridLayout
 				continue;
 			}
 
-			const int32 AnchorColumn = FMath::Max(0, Child->LayoutData.GetLayoutColumnOr(0));
+			const int32 AnchorColumn = FMath::Max(0, Child->LayoutData.LayoutColumn.Get(0));
 			ExplicitRequiredColumns = FMath::Max(
 				ExplicitRequiredColumns,
 				AnchorColumn + ResolveGridColumnSpan(Child));
 		}
 
 		ColumnCount = FMath::Max(ColumnCount, ExplicitRequiredColumns);
-		if (ColumnCount <= 0 && Node.IsValid() && Node->LayoutData.HasLayoutRowCountValue() && Node->LayoutData.LayoutRowCount.Get(0) > 0)
+		if (ColumnCount <= 0 && Node.IsValid() && Node->LayoutData.LayoutRowCount.IsSet() && Node->LayoutData.LayoutRowCount.GetValue() > 0)
 		{
-			ColumnCount = FMath::CeilToInt(static_cast<float>(VisibleChildren.Num()) / Node->LayoutData.LayoutRowCount.Get(0));
+			ColumnCount = FMath::CeilToInt(static_cast<float>(VisibleChildren.Num()) / Node->LayoutData.LayoutRowCount.GetValue());
 		}
 
 		return FMath::Max(1, ColumnCount > 0 ? ColumnCount : VisibleChildren.Num());
@@ -278,8 +278,8 @@ namespace Design2UMGGridLayout
 		const TArray<TSharedPtr<FDesignNode>>& VisibleChildren,
 		int32 ColumnCount)
 	{
-		int32 RowCount = (Node.IsValid() && Node->LayoutData.HasLayoutRowCountValue())
-			? FMath::Max(1, Node->LayoutData.LayoutRowCount.Get(0))
+		int32 RowCount = (Node.IsValid() && Node->LayoutData.LayoutRowCount.IsSet())
+			? FMath::Max(1, Node->LayoutData.LayoutRowCount.GetValue())
 			: 0;
 		int32 ExplicitRequiredRows = 0;
 		for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
@@ -289,7 +289,7 @@ namespace Design2UMGGridLayout
 				continue;
 			}
 
-			const int32 AnchorRow = FMath::Max(0, Child->LayoutData.GetLayoutRowOr(0));
+			const int32 AnchorRow = FMath::Max(0, Child->LayoutData.LayoutRow.Get(0));
 			ExplicitRequiredRows = FMath::Max(
 				ExplicitRequiredRows,
 				AnchorRow + ResolveGridRowSpan(Child));
@@ -316,11 +316,11 @@ namespace Design2UMGGridLayout
 
 		const int32 RowSpan = ResolveGridRowSpan(ChildNode);
 		const int32 ColumnSpan = ResolveGridColumnSpan(ChildNode);
-		const TOptional<int32> FixedRow = (ChildNode->LayoutData.HasLayoutRowValue() && ChildNode->LayoutData.GetLayoutRowOr(-1) >= 0)
-			? TOptional<int32>(ChildNode->LayoutData.GetLayoutRowOr(-1))
+		const TOptional<int32> FixedRow = (ChildNode->LayoutData.LayoutRow.IsSet() && ChildNode->LayoutData.LayoutRow.GetValue() >= 0)
+			? ChildNode->LayoutData.LayoutRow
 			: TOptional<int32>();
-		const TOptional<int32> FixedColumn = (ChildNode->LayoutData.HasLayoutColumnValue() && ChildNode->LayoutData.GetLayoutColumnOr(-1) >= 0)
-			? TOptional<int32>(ChildNode->LayoutData.GetLayoutColumnOr(-1))
+		const TOptional<int32> FixedColumn = (ChildNode->LayoutData.LayoutColumn.IsSet() && ChildNode->LayoutData.LayoutColumn.GetValue() >= 0)
+			? ChildNode->LayoutData.LayoutColumn
 			: TOptional<int32>();
 
 		int32 Row = FixedRow.Get(FMath::Max(0, State.CursorRow));
@@ -347,12 +347,12 @@ namespace Design2UMGGridLayout
 		const float HalfRowGap = RowGap * 0.5f;
 		const bool bTouchesLeftEdge = Column <= 0;
 		const bool bTouchesTopEdge = Row <= 0;
-		const bool bTouchesRightEdge = ParentNode->LayoutData.HasLayoutColumnCountValue()
-			&& ParentNode->LayoutData.LayoutColumnCount.Get(0) > 0
-			&& (Column + ColumnSpan) >= ParentNode->LayoutData.LayoutColumnCount.Get(0);
-		const bool bTouchesBottomEdge = ParentNode->LayoutData.HasLayoutRowCountValue()
-			&& ParentNode->LayoutData.LayoutRowCount.Get(0) > 0
-			&& (Row + RowSpan) >= ParentNode->LayoutData.LayoutRowCount.Get(0);
+		const bool bTouchesRightEdge = ParentNode->LayoutData.LayoutColumnCount.IsSet()
+			&& ParentNode->LayoutData.LayoutColumnCount.GetValue() > 0
+			&& (Column + ColumnSpan) >= ParentNode->LayoutData.LayoutColumnCount.GetValue();
+		const bool bTouchesBottomEdge = ParentNode->LayoutData.LayoutRowCount.IsSet()
+			&& ParentNode->LayoutData.LayoutRowCount.GetValue() > 0
+			&& (Row + RowSpan) >= ParentNode->LayoutData.LayoutRowCount.GetValue();
 		ChildWidget.Slot.Padding = FMargin(
 			bTouchesLeftEdge ? 0.0f : HalfColumnGap,
 			bTouchesTopEdge ? 0.0f : HalfRowGap,
