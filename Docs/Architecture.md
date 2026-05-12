@@ -1,4 +1,4 @@
-﻿# Architecture
+# Architecture
 
 Design2UMG converts design-side documents into Unreal Engine 5 UMG Widget Blueprints through a layered, source-agnostic pipeline.
 
@@ -144,7 +144,7 @@ Contributor checklist by scenario:
 
 ### Extending the IR without breaking existing conversions
 
-New fields in `DesignSchema.h` should prefer `TOptional<T>` with a default unset state. `UMGSchemaTypedPayloads.h` is different: several typed payload structs still intentionally keep `bHas*` presence bits because parser / serializer / typed access paths rely on explicit set-vs-unset semantics there. Fields with `UPROPERTY()` cannot use `TOptional` (UE serialization does not support it); use `FD2UMGOptionalBool` wrapper instead. The converter checks `IsSet()` before processing optional fields, so unset fields are safely ignored by existing conversion paths.
+New fields in `DesignSchema.h` and adjacent transient schema bridges should prefer `TOptional<T>` with a default unset state when the current UE baseline supports and tests the optional property shape. On UE 5.7, `UPROPERTY()` and `TOptional` are supported for the raw-schema optional presence patterns used here, so new code must not add a parallel `Value + bHasValue` pair just to express set-vs-unset semantics. The converter checks `IsSet()` before processing optional fields, so unset fields are safely ignored by existing conversion paths.
 
 Reference pattern:
 
@@ -165,7 +165,7 @@ struct FD2UMGOptionalBool
 };
 ```
 
-Do not introduce new `bHas*` + value shadow pairs into `DesignSchema.h`-style transient IR unless there is a documented serializer / typed-contract reason to keep that shape. For serialized `USTRUCT` fields, the allowed exception is the `FD2UMGOptionalBool` wrapper path already established in `UMGSchemaSourceExtensions.h`. For existing typed payload structs in `UMGSchemaTypedPayloads.h`, follow the current local contract instead of forcing a blind `TOptional` rewrite.
+Do not introduce new `bHas*` + value shadow pairs into `DesignSchema.h`-style transient IR unless there is a documented serializer, legacy asset migration, or typed-contract reason to keep that shape. Wrapper or paired forms are compatibility exceptions, not the default presence model. For existing typed payload structs in `UMGSchemaTypedPayloads.h`, follow the current local contract instead of forcing a blind `TOptional` rewrite.
 
 ## Known Issues
 

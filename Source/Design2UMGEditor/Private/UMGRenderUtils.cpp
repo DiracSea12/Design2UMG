@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGWidgetUtils.h"
 #include "Design2UMGLog.h"
@@ -13,6 +13,8 @@
 #include "Components/Widget.h"
 #include "Components/TextBlock.h"
 #include "Editor.h"
+#include "Engine/Font.h"
+#include "Engine/FontFace.h"
 #include "Engine/Texture2D.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Framework/Application/SlateApplication.h"
@@ -176,6 +178,65 @@ namespace
 		Texture->GetPlatformData();
 	}
 
+	void WarmUpFontData(const FFontData& FontData)
+	{
+		const UObject* FontFaceAsset = FontData.GetFontFaceAsset();
+		if (!FontFaceAsset)
+		{
+			FontData.GetFontFaceData();
+			return;
+		}
+
+		UObject* MutableFontFaceAsset = const_cast<UObject*>(FontFaceAsset);
+		MutableFontFaceAsset->ConditionalPostLoad();
+		if (UFontFace* FontFace = Cast<UFontFace>(MutableFontFaceAsset))
+		{
+#if WITH_EDITORONLY_DATA
+			FontFace->CacheSubFaces();
+#endif
+			FontFace->GetFontFaceData();
+		}
+	}
+
+	void WarmUpTypeface(const FTypeface& Typeface)
+	{
+		for (const FTypefaceEntry& Entry : Typeface.Fonts)
+		{
+			WarmUpFontData(Entry.Font);
+		}
+	}
+
+	void WarmUpCompositeFont(const FCompositeFont& CompositeFont)
+	{
+		WarmUpTypeface(CompositeFont.DefaultTypeface);
+		WarmUpTypeface(CompositeFont.FallbackTypeface.Typeface);
+		for (const FCompositeSubFont& SubTypeface : CompositeFont.SubTypefaces)
+		{
+			WarmUpTypeface(SubTypeface.Typeface);
+		}
+	}
+
+	void WarmUpFontResource(const FSlateFontInfo& FontInfo)
+	{
+		if (const UObject* FontObject = FontInfo.FontObject.Get())
+		{
+			UObject* MutableFontObject = const_cast<UObject*>(FontObject);
+			MutableFontObject->ConditionalPostLoad();
+			if (UFont* Font = Cast<UFont>(MutableFontObject))
+			{
+				if (const FCompositeFont* CompositeFont = Font->GetCompositeFont())
+				{
+					WarmUpCompositeFont(*CompositeFont);
+				}
+			}
+		}
+
+		if (const FCompositeFont* CompositeFont = FontInfo.GetCompositeFont())
+		{
+			WarmUpCompositeFont(*CompositeFont);
+		}
+	}
+
 	void WarmUpWidgetResources(UWidgetTree* WidgetTree)
 	{
 		if (!WidgetTree)
@@ -192,10 +253,7 @@ namespace
 
 			if (const UTextBlock* TextBlock = Cast<UTextBlock>(Widget))
 			{
-				if (const UObject* FontObject = TextBlock->GetFont().FontObject.Get())
-				{
-					const_cast<UObject*>(FontObject)->ConditionalPostLoad();
-				}
+				WarmUpFontResource(TextBlock->GetFont());
 			}
 
 			const FSlateBrush* Brush = nullptr;

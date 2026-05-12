@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "RefExpander.h"
 #include "DesignSchema.h"
@@ -26,7 +26,7 @@ namespace
 	void ApplyOverrideProperties(FDesignNode& Target, const FDesignNode& Override)
 	{
 		const bool bFillExplicitClear = Override.Visual.Fill.bExplicitClear;
-		const bool bKeepExplicitStrokeFill = Override.Visual.Stroke.bHasExplicitFill;
+		const bool bKeepExplicitStrokeFill = Override.Visual.Stroke.Fill.IsSet();
 
 		if (!Override.Text.Content.IsEmpty())
 			Target.Text.Content = Override.Text.Content;
@@ -46,7 +46,7 @@ namespace
 		if (Override.Visual.Stroke.HasStroke())
 			Target.Visual.Stroke = Override.Visual.Stroke;
 		if (bFillExplicitClear && !bKeepExplicitStrokeFill)
-			Target.Visual.Stroke.Fill = FDesignFill();
+			Target.Visual.Stroke.Fill.Reset();
 		if (Override.Visual.bEffectsExplicitClear || Override.Visual.Effects.Num() > 0)
 		{
 			Target.Visual.Effects = Override.Visual.Effects;
@@ -212,7 +212,7 @@ namespace
 			return;
 
 		const bool bFillExplicitClear = RefNode->Visual.Fill.bExplicitClear;
-		const bool bKeepExplicitStrokeFill = RefNode->Visual.Stroke.bHasExplicitFill;
+		const bool bKeepExplicitStrokeFill = RefNode->Visual.Stroke.Fill.IsSet();
 
 		Expanded->Id = RefNode->Id;
 		if (!RefNode->Name.IsEmpty())
@@ -259,7 +259,7 @@ namespace
 		if (RefNode->Visual.Stroke.HasStroke())
 			Expanded->Visual.Stroke = RefNode->Visual.Stroke;
 		if (bFillExplicitClear && !bKeepExplicitStrokeFill)
-			Expanded->Visual.Stroke.Fill = FDesignFill();
+			Expanded->Visual.Stroke.Fill.Reset();
 		if (RefNode->Visual.bEffectsExplicitClear || RefNode->Visual.Effects.Num() > 0)
 		{
 			Expanded->Visual.Effects = RefNode->Visual.Effects;
@@ -433,8 +433,8 @@ void RefExpander::ReThemeNode(TSharedPtr<FDesignNode>& Node, const FDesignVariab
 		}
 	}
 
-	if (!Node->Visual.Stroke.Fill.SourceVar.IsEmpty())
-		Node->Visual.Stroke.Fill.SolidColor = Resolver.ResolveColor(Node->Visual.Stroke.Fill.SourceVar);
+	if (Node->Visual.Stroke.Fill.IsSet() && !Node->Visual.Stroke.Fill->SourceVar.IsEmpty())
+		Node->Visual.Stroke.Fill->SolidColor = Resolver.ResolveColor(Node->Visual.Stroke.Fill->SourceVar);
 
 	for (auto& Effect : Node->Visual.Effects)
 	{

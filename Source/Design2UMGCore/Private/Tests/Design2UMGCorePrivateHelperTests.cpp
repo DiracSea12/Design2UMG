@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -83,9 +83,7 @@ namespace
 		Fill.Type = EDesignFillType::Gradient;
 		Fill.Gradient.GradientType = EDesignGradientType::Radial;
 		Fill.Gradient.Rotation = 25.0f;
-		Fill.Gradient.bHasCenter = true;
-		Fill.Gradient.CenterX = 0.25f;
-		Fill.Gradient.CenterY = 0.75f;
+		Fill.Gradient.Center = FVector2D(0.25f, 0.75f);
 		FDesignGradientStop& StartStop = Fill.Gradient.Colors.AddDefaulted_GetRef();
 		StartStop.Color = TEXT("#FF0000FF");
 		StartStop.Position = 0.0f;
@@ -101,12 +99,8 @@ namespace
 		Fill.Type = EDesignFillType::Gradient;
 		Fill.Gradient.GradientType = EDesignGradientType::Radial;
 		Fill.Gradient.Rotation = 37.5f;
-		Fill.Gradient.bHasCenter = true;
-		Fill.Gradient.CenterX = 0.2f;
-		Fill.Gradient.CenterY = 0.7f;
-		Fill.Gradient.bHasSize = true;
-		Fill.Gradient.SizeWidth = 0.8f;
-		Fill.Gradient.SizeHeight = 1.35f;
+		Fill.Gradient.Center = FVector2D(0.2f, 0.7f);
+		Fill.Gradient.Size = FVector2D(0.8f, 1.35f);
 
 		FDesignGradientStop& Stop0 = Fill.Gradient.Colors.AddDefaulted_GetRef();
 		Stop0.Color = TEXT("#FF0000FF");

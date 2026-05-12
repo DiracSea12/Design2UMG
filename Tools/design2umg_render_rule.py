@@ -1,4 +1,4 @@
-﻿import json
+import json
 from pathlib import Path
 
 
@@ -14,6 +14,7 @@ TEXT_MEASUREMENT_CACHE_SCOPE = "per_automation_render"
 TEXT_SINGLE_LINE_HEIGHT_PROBE_AUTHORITY = "slate_font_measure_single_line_height_v1"
 ASSET_PACKAGE_RELOAD_AUTHORITY = "ue_reload_package_before_asset_render_v1"
 SLATE_FONT_CACHE_AUTHORITY = "flush_before_automation_render_v1"
+RENDER_CHAIN_MATCH_EPSILON = 1e-9
 AUTOMATION_SPEC_FILENAMES = (
     "automation_spec.json",
     "automation_generate_spec.json",
@@ -183,6 +184,14 @@ def evaluate_report_pipeline_determinism_rule(report_path: Path) -> dict:
         "force_reload_package_requested": None,
         "asset_package_reload_authority": "",
         "slate_font_cache_authority": "",
+        "final_render_mode": "",
+        "generation_vs_asset_changed_ratio": None,
+        "generation_vs_asset_stable_changed_ratio": None,
+        "generation_vs_asset_mean_abs_error": None,
+        "generation_vs_asset_stable_mean_abs_error": None,
+        "generation_vs_asset_structure_available": None,
+        "generation_vs_asset_structure_texts_match": None,
+        "generation_vs_asset_structure_counts_match": None,
     }
 
     if not report_path.is_file():
@@ -244,6 +253,55 @@ def evaluate_report_pipeline_determinism_rule(report_path: Path) -> dict:
     if result["slate_font_cache_authority"] != SLATE_FONT_CACHE_AUTHORITY:
         result["reason"] = "slate_font_cache_authority_missing_or_mismatch"
         return result
+
+    render_chain = report.get("render_chain") or {}
+    if not isinstance(render_chain, dict):
+        result["reason"] = "render_chain_missing"
+        return result
+
+    result["final_render_mode"] = render_chain.get("final_render_mode", "")
+    generation_vs_asset = render_chain.get("generation_vs_asset")
+    if result["final_render_mode"] == "asset_reload":
+        if not isinstance(generation_vs_asset, dict):
+            result["reason"] = "generation_vs_asset_metrics_missing"
+            return result
+
+        metric_fields = (
+            ("generation_vs_asset_changed_ratio", "changed_ratio"),
+            ("generation_vs_asset_stable_changed_ratio", "stable_changed_ratio"),
+            ("generation_vs_asset_mean_abs_error", "mean_abs_error"),
+            ("generation_vs_asset_stable_mean_abs_error", "stable_mean_abs_error"),
+        )
+        for result_key, metric_key in metric_fields:
+            metric_value = generation_vs_asset.get(metric_key)
+            result[result_key] = metric_value
+            if metric_value is None or metric_value > RENDER_CHAIN_MATCH_EPSILON:
+                result["reason"] = f"{metric_key}_mismatch"
+                return result
+
+        generation_vs_asset_structure = render_chain.get("generation_vs_asset_structure") or {}
+        if not isinstance(generation_vs_asset_structure, dict):
+            result["reason"] = "generation_vs_asset_structure_missing"
+            return result
+
+        result["generation_vs_asset_structure_available"] = generation_vs_asset_structure.get("available")
+        result["generation_vs_asset_structure_texts_match"] = generation_vs_asset_structure.get("texts_match")
+        counts_match = (
+            generation_vs_asset_structure.get("left_total_nodes") == generation_vs_asset_structure.get("right_total_nodes")
+            and generation_vs_asset_structure.get("left_leaf_nodes") == generation_vs_asset_structure.get("right_leaf_nodes")
+            and generation_vs_asset_structure.get("left_container_nodes") == generation_vs_asset_structure.get("right_container_nodes")
+            and generation_vs_asset_structure.get("left_text_nodes") == generation_vs_asset_structure.get("right_text_nodes")
+            and generation_vs_asset_structure.get("left_visual_nodes") == generation_vs_asset_structure.get("right_visual_nodes")
+            and generation_vs_asset_structure.get("kind_histograms_match") is True
+            and generation_vs_asset_structure.get("class_histograms_match") is True
+        )
+        result["generation_vs_asset_structure_counts_match"] = counts_match
+        if result["generation_vs_asset_structure_available"] is not True:
+            result["reason"] = "generation_vs_asset_structure_unavailable"
+            return result
+        if result["generation_vs_asset_structure_texts_match"] is not True or not counts_match:
+            result["reason"] = "generation_vs_asset_structure_mismatch"
+            return result
 
     result["compatible"] = True
     return result

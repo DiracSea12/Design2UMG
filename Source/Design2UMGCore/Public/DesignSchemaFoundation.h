@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -143,22 +143,10 @@ struct FDesignGradient
 	float Rotation = 0.0f;
 
 	UPROPERTY()
-	float CenterX = 0.5f;
+	TOptional<FVector2D> Center;
 
 	UPROPERTY()
-	float CenterY = 0.5f;
-
-	UPROPERTY()
-	float SizeWidth = 1.0f;
-
-	UPROPERTY()
-	float SizeHeight = 1.0f;
-
-	UPROPERTY()
-	bool bHasCenter = false;
-
-	UPROPERTY()
-	bool bHasSize = false;
+	TOptional<FVector2D> Size;
 
 	UPROPERTY()
 	TArray<FDesignGradientStop> Colors;
@@ -170,13 +158,7 @@ struct FDesignMeshGradientHandle
 	GENERATED_BODY()
 
 	UPROPERTY()
-	float X = 0.0f;
-
-	UPROPERTY()
-	float Y = 0.0f;
-
-	UPROPERTY()
-	bool bHasValue = false;
+	TOptional<FVector2D> Value;
 };
 
 USTRUCT()
@@ -185,13 +167,7 @@ struct FDesignMeshGradientPoint
 	GENERATED_BODY()
 
 	UPROPERTY()
-	float X = 0.0f;
-
-	UPROPERTY()
-	float Y = 0.0f;
-
-	UPROPERTY()
-	bool bHasPosition = false;
+	TOptional<FVector2D> Position;
 
 	UPROPERTY()
 	FString Color;
@@ -215,16 +191,10 @@ struct FDesignMeshGradient
 	GENERATED_BODY()
 
 	UPROPERTY()
-	int32 Rows = 0;
+	TOptional<int32> Rows;
 
 	UPROPERTY()
-	int32 Columns = 0;
-
-	UPROPERTY()
-	bool bHasRows = false;
-
-	UPROPERTY()
-	bool bHasColumns = false;
+	TOptional<int32> Columns;
 
 	UPROPERTY()
 	TArray<FDesignMeshGradientPoint> Points;
@@ -290,10 +260,7 @@ struct FDesignImageFill
 	float Opacity = 1.0f;
 
 	UPROPERTY()
-	float ScalingFactor = 1.0f;
-
-	UPROPERTY()
-	bool bHasScalingFactor = false;
+	TOptional<float> ScalingFactor;
 
 	UPROPERTY()
 	FDesignImageTransform Transform;
@@ -422,9 +389,7 @@ struct FDesignStroke
 	FDesignStrokeThickness Thickness;
 
 	UPROPERTY()
-	FDesignFill Fill;
-
-	bool bHasExplicitFill = false;
+	TOptional<FDesignFill> Fill;
 
 	bool HasStroke() const { return Thickness.bUniform ? Thickness.Uniform > 0 :
 		(Thickness.Top > 0 || Thickness.Right > 0 || Thickness.Bottom > 0 || Thickness.Left > 0); }
@@ -540,10 +505,7 @@ struct FDesignTextRun
 	FString FontFamily;
 
 	UPROPERTY()
-	float FontSize = 0.0f;
-
-	UPROPERTY()
-	bool bHasFontSize = false;
+	TOptional<float> FontSize;
 
 	UPROPERTY()
 	FString FontWeight;
@@ -552,28 +514,16 @@ struct FDesignTextRun
 	FString FontStyle;
 
 	UPROPERTY()
-	float LineHeight = 0.0f;
+	TOptional<float> LineHeight;
 
 	UPROPERTY()
-	bool bHasLineHeight = false;
+	TOptional<float> LetterSpacing;
 
 	UPROPERTY()
-	float LetterSpacing = 0.0f;
+	TOptional<bool> bUnderline;
 
 	UPROPERTY()
-	bool bHasLetterSpacing = false;
-
-	UPROPERTY()
-	bool bUnderline = false;
-
-	UPROPERTY()
-	bool bHasUnderline = false;
-
-	UPROPERTY()
-	bool bStrikethrough = false;
-
-	UPROPERTY()
-	bool bHasStrikethrough = false;
+	TOptional<bool> bStrikethrough;
 
 	UPROPERTY()
 	FString Href;

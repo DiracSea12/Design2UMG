@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGConverterVisualSupport.h"
 
@@ -120,7 +120,9 @@ namespace Design2UMGConverterVisualSupport
 		}
 
 		const FString FillColor = IsHexColorLiteral(Node->Visual.Fill.SolidColor) ? Node->Visual.Fill.SolidColor : FString();
-		const FString StrokeColor = IsHexColorLiteral(Node->Visual.Stroke.Fill.SolidColor) ? Node->Visual.Stroke.Fill.SolidColor : FString();
+		const FString StrokeColor = (Node->Visual.Stroke.Fill.IsSet() && IsHexColorLiteral(Node->Visual.Stroke.Fill.GetValue().SolidColor))
+			? Node->Visual.Stroke.Fill.GetValue().SolidColor
+			: FString();
 		const FString PlaceholderOutlineColor =
 			(!StrokeColor.IsEmpty() && !IsNeutralPlaceholderColor(StrokeColor)) ? StrokeColor : DefaultPlaceholderOutlineColor;
 		FString PlaceholderFillColor =

@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGTextWidgetBuilder.h"
 
@@ -282,13 +282,13 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 	const auto TextRunNeedsRichText = [](const FDesignTextRun& Run)
 	{
 		return !Run.FontFamily.IsEmpty()
-			|| Run.bHasFontSize
+			|| Run.FontSize.IsSet()
 			|| !Run.FontWeight.IsEmpty()
 			|| !Run.FontStyle.IsEmpty()
-			|| Run.bHasLineHeight
-			|| Run.bHasLetterSpacing
-			|| Run.bHasUnderline
-			|| Run.bHasStrikethrough
+			|| Run.LineHeight.IsSet()
+			|| Run.LetterSpacing.IsSet()
+			|| Run.bUnderline.IsSet()
+			|| Run.bStrikethrough.IsSet()
 			|| !Run.Href.IsEmpty();
 	};
 
@@ -328,34 +328,41 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 			EffectiveFontFamily,
 			(Run && !Run->FontWeight.IsEmpty()) ? Run->FontWeight : InNode->Text.FontWeight);
 
-		const float EffectiveDesignFontSize = (Run && Run->bHasFontSize) ? Run->FontSize : InNode->Text.FontSize;
+		const bool bRunHasFontSize = Run && Run->FontSize.IsSet();
+		const float EffectiveDesignFontSize = bRunHasFontSize ? Run->FontSize.GetValue() : InNode->Text.FontSize;
 		if (EffectiveDesignFontSize > 0.0f)
 		{
 			Result.DesignFontSize = EffectiveDesignFontSize;
-			Result.FontSize = (Run && Run->bHasFontSize && InNode->Text.FontSize > KINDA_SMALL_NUMBER && ResolvedNodeFontSize > KINDA_SMALL_NUMBER)
-				? (Run->FontSize * (ResolvedNodeFontSize / InNode->Text.FontSize))
-				: ((Run && Run->bHasFontSize) ? Run->FontSize : ResolvedNodeFontSize);
-			Result.bHasFontSize = Result.FontSize > 0.0f;
+			const float ResolvedRunFontSize = (bRunHasFontSize && InNode->Text.FontSize > KINDA_SMALL_NUMBER && ResolvedNodeFontSize > KINDA_SMALL_NUMBER)
+				? (Run->FontSize.GetValue() * (ResolvedNodeFontSize / InNode->Text.FontSize))
+				: (bRunHasFontSize ? Run->FontSize.GetValue() : ResolvedNodeFontSize);
+			if (ResolvedRunFontSize > 0.0f)
+			{
+				Result.FontSize = ResolvedRunFontSize;
+			}
 		}
 
 		const bool bHasNodeColor = InNode->Visual.Fill.Type == EDesignFillType::Color;
 		if (bHasNodeColor)
 		{
 			Result.Color = Design2UMGWidgetNodeAccess::SerializeWidgetColor(FUMGValueParser::ParseColor(InNode->Visual.Fill.SolidColor));
-			Result.bHasColor = !Result.Color.IsEmpty();
+			if (Result.Color->IsEmpty())
+			{
+				Result.Color.Reset();
+			}
 		}
 
-		const bool bRunUnderline = Run ? (Run->bHasUnderline ? Run->bUnderline : InNode->Text.bUnderline) : InNode->Text.bUnderline;
-		Result.bStrikethrough = Run ? (Run->bHasStrikethrough ? Run->bStrikethrough : InNode->Text.bStrikethrough) : InNode->Text.bStrikethrough;
+		const bool bRunUnderline = Run ? Run->bUnderline.Get(InNode->Text.bUnderline) : InNode->Text.bUnderline;
+		Result.bStrikethrough = Run ? Run->bStrikethrough.Get(InNode->Text.bStrikethrough) : InNode->Text.bStrikethrough;
 		Result.Href = (Run && !Run->Href.IsEmpty()) ? Run->Href : InNode->Text.Href;
 		Result.bUnderline = bRunUnderline || !Result.Href.IsEmpty();
 
-		const float EffectiveLetterSpacing = (Run && Run->bHasLetterSpacing) ? Run->LetterSpacing : InNode->Text.LetterSpacing;
-		const bool bHasLetterSpacing = (Run && Run->bHasLetterSpacing) || InNode->Text.LetterSpacing != 0.0f;
+		const bool bRunHasLetterSpacing = Run && Run->LetterSpacing.IsSet();
+		const float EffectiveLetterSpacing = bRunHasLetterSpacing ? Run->LetterSpacing.GetValue() : InNode->Text.LetterSpacing;
+		const bool bHasLetterSpacing = bRunHasLetterSpacing || InNode->Text.LetterSpacing != 0.0f;
 		if (bHasLetterSpacing)
 		{
 			Result.LetterSpacing = EffectiveLetterSpacing;
-			Result.bHasLetterSpacing = true;
 		}
 
 		return Result;

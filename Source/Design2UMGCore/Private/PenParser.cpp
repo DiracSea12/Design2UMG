@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "PenParser.h"
 #include "Design2UMGLog.h"
@@ -206,9 +206,7 @@ namespace
 		if (!TryParsePointXY(HandleField, Resolver, X, Y))
 			return false;
 
-		OutHandle.X = X;
-		OutHandle.Y = Y;
-		OutHandle.bHasValue = true;
+		OutHandle.Value = FVector2D(X, Y);
 		return true;
 	}
 
@@ -236,13 +234,33 @@ namespace
 		if (StyleObj->TryGetStringField(TEXT("fontFamily"), FontFamily))
 			OutRun.FontFamily = Resolver.ResolveString(FontFamily);
 
-		OutRun.bHasFontSize = TryGetResolvedNumberField(StyleObj, TEXT("fontSize"), Resolver, OutRun.FontSize);
+		float FontSize = 0.0f;
+		if (TryGetResolvedNumberField(StyleObj, TEXT("fontSize"), Resolver, FontSize))
+		{
+			OutRun.FontSize = FontSize;
+		}
 		StyleObj->TryGetStringField(TEXT("fontWeight"), OutRun.FontWeight);
 		StyleObj->TryGetStringField(TEXT("fontStyle"), OutRun.FontStyle);
-		OutRun.bHasLineHeight = TryGetResolvedNumberField(StyleObj, TEXT("lineHeight"), Resolver, OutRun.LineHeight);
-		OutRun.bHasLetterSpacing = TryGetResolvedNumberField(StyleObj, TEXT("letterSpacing"), Resolver, OutRun.LetterSpacing);
-		OutRun.bHasUnderline = TryGetResolvedBoolField(StyleObj, TEXT("underline"), Resolver, OutRun.bUnderline);
-		OutRun.bHasStrikethrough = TryGetResolvedBoolField(StyleObj, TEXT("strikethrough"), Resolver, OutRun.bStrikethrough);
+		float LineHeight = 0.0f;
+		if (TryGetResolvedNumberField(StyleObj, TEXT("lineHeight"), Resolver, LineHeight))
+		{
+			OutRun.LineHeight = LineHeight;
+		}
+		float LetterSpacing = 0.0f;
+		if (TryGetResolvedNumberField(StyleObj, TEXT("letterSpacing"), Resolver, LetterSpacing))
+		{
+			OutRun.LetterSpacing = LetterSpacing;
+		}
+		bool bUnderline = false;
+		if (TryGetResolvedBoolField(StyleObj, TEXT("underline"), Resolver, bUnderline))
+		{
+			OutRun.bUnderline = bUnderline;
+		}
+		bool bStrikethrough = false;
+		if (TryGetResolvedBoolField(StyleObj, TEXT("strikethrough"), Resolver, bStrikethrough))
+		{
+			OutRun.bStrikethrough = bStrikethrough;
+		}
 		StyleObj->TryGetStringField(TEXT("href"), OutRun.Href);
 	}
 

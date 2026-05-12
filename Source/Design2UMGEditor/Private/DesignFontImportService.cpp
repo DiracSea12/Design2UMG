@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignFontImportService.h"
 
@@ -361,7 +361,214 @@ namespace
 		return SafeName;
 	}
 
-	bool TryResolvePinnedAutomationFontAssetPath(const FString& FontName, FString& OutFontObjectPath)
+	bool SaveAssetPackage(UObject* Asset, const FString& PackageName)
+	{
+		if (!Asset || PackageName.IsEmpty())
+		{
+			return false;
+		}
+
+		UPackage* Package = Asset->GetOutermost();
+		if (!Package)
+		{
+			return false;
+		}
+
+		FSavePackageArgs SaveArgs;
+		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+		const FString Filename = FPackageName::LongPackageNameToFilename(PackageName, FPackageName::GetAssetPackageExtension());
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(Filename), true);
+		return UPackage::SavePackage(Package, Asset, *Filename, SaveArgs);
+	}
+
+	bool HasReloadSafeFontFaceData(const UFontFace* FontFace)
+	{
+		return FontFace
+			&& FontFace->FontFaceData->HasData();
+	}
+
+	bool MakeFontFaceReloadSafeInternal(UFontFace* FontFace, TArray<uint8>* ReplacementData)
+	{
+		if (!FontFace)
+		{
+			return false;
+		}
+
+		bool bModified = false;
+		if (ReplacementData && ReplacementData->Num() > 0)
+		{
+			FontFace->FontFaceData->SetData(MoveTemp(*ReplacementData));
+			FontFace->CacheSubFaces();
+			bModified = true;
+		}
+
+		if (FontFace->LoadingPolicy != EFontLoadingPolicy::Inline)
+		{
+			FontFace->LoadingPolicy = EFontLoadingPolicy::Inline;
+			bModified = true;
+		}
+
+		if (!HasReloadSafeFontFaceData(FontFace))
+		{
+			return false;
+		}
+
+		if (!bModified)
+		{
+			return true;
+		}
+
+		FontFace->MarkPackageDirty();
+		if (UPackage* FacePackage = FontFace->GetOutermost())
+		{
+			FacePackage->MarkPackageDirty();
+			return SaveAssetPackage(FontFace, FacePackage->GetName());
+		}
+
+		return false;
+	}
+
+	bool MakeFontFaceReloadSafe(UFontFace* FontFace)
+	{
+		return MakeFontFaceReloadSafeInternal(FontFace, nullptr);
+	}
+
+	bool MakeFontFaceReloadSafe(UFontFace* FontFace, TArray<uint8>&& ReplacementData)
+	{
+		return MakeFontFaceReloadSafeInternal(FontFace, &ReplacementData);
+	}
+
+	bool TypefaceEntryHasReloadSafeData(const FTypefaceEntry& Entry)
+	{
+		const UFontFace* FontFace = Cast<UFontFace>(Entry.Font.GetFontFaceAsset());
+		return HasReloadSafeFontFaceData(FontFace);
+	}
+
+	bool LoadFontBytesFromSource(const FString& SafeName, const FString& Source, TArray<uint8>& OutFontData)
+	{
+		OutFontData.Reset();
+		if (Source.IsEmpty())
+		{
+			return false;
+		}
+
+		const bool bIsRemote = Source.StartsWith(TEXT("http://"), ESearchCase::IgnoreCase)
+			|| Source.StartsWith(TEXT("https://"), ESearchCase::IgnoreCase);
+		if (bIsRemote)
+		{
+			FString Extension = FPaths::GetExtension(Source, false);
+			if (Extension.IsEmpty() || !(Extension == TEXT("ttf") || Extension == TEXT("otf") || Extension == TEXT("woff2")))
+			{
+				Extension = TEXT("ttf");
+			}
+			const FString TempPath = FPaths::ProjectSavedDir() / TEXT("Design2UMG") / SafeName + TEXT(".") + Extension;
+			if (!DownloadToFile(Source, TempPath))
+			{
+				return false;
+			}
+			const bool bLoaded = FFileHelper::LoadFileToArray(OutFontData, *TempPath);
+			IFileManager::Get().Delete(*TempPath);
+			return bLoaded && OutFontData.Num() > 0;
+		}
+
+		return FFileHelper::LoadFileToArray(OutFontData, *Source) && OutFontData.Num() > 0;
+	}
+
+	bool EnsureExistingFontReloadSafe(UFont* Font, const FString& FontObjectPath, const FString& RepairSource, const FString& PrimaryTypefaceName)
+	{
+		if (!Font)
+		{
+			return false;
+		}
+
+		FCompositeFont& Composite = Font->GetMutableInternalCompositeFont();
+		bool bHasAnyReloadSafeEntry = false;
+		bool bModifiedFont = false;
+		for (FTypefaceEntry& Entry : Composite.DefaultTypeface.Fonts)
+		{
+			if (UFontFace* FontFace = const_cast<UFontFace*>(Cast<UFontFace>(Entry.Font.GetFontFaceAsset())))
+			{
+				if (MakeFontFaceReloadSafe(FontFace))
+				{
+					bHasAnyReloadSafeEntry = true;
+				}
+			}
+		}
+
+		if (bHasAnyReloadSafeEntry)
+		{
+			return true;
+		}
+
+		TArray<uint8> FontBytes;
+		if (!LoadFontBytesFromSource(Font->GetName(), RepairSource, FontBytes))
+		{
+			return false;
+		}
+
+		const FString FontPackageName = FPackageName::ObjectPathToPackageName(FontObjectPath);
+		const FString FontImportPath = FPaths::GetPath(FontPackageName);
+		const FString FaceAssetName = Font->GetName() + TEXT("_Face");
+		const FString FacePackageName = FontImportPath / FaceAssetName;
+		const FString FaceObjectPath = FacePackageName + TEXT(".") + FaceAssetName;
+
+		UFontFace* FontFace = LoadObject<UFontFace>(nullptr, *FaceObjectPath);
+		if (!FontFace)
+		{
+			UPackage* FacePackage = CreatePackage(*FacePackageName);
+			if (!FacePackage)
+			{
+				return false;
+			}
+
+			FontFace = NewObject<UFontFace>(FacePackage, *FaceAssetName, RF_Public | RF_Standalone);
+			if (!FontFace)
+			{
+				return false;
+			}
+			FAssetRegistryModule::AssetCreated(FontFace);
+		}
+
+		if (!MakeFontFaceReloadSafe(FontFace, MoveTemp(FontBytes)))
+		{
+			return false;
+		}
+
+		FTypefaceEntry* EntryToRepair = nullptr;
+		for (FTypefaceEntry& Entry : Composite.DefaultTypeface.Fonts)
+		{
+			if (Entry.Name == FName(*PrimaryTypefaceName))
+			{
+				EntryToRepair = &Entry;
+				break;
+			}
+		}
+		if (!EntryToRepair)
+		{
+			EntryToRepair = &Composite.DefaultTypeface.Fonts.AddDefaulted_GetRef();
+			EntryToRepair->Name = *PrimaryTypefaceName;
+			bModifiedFont = true;
+		}
+		if (EntryToRepair->Font.GetFontFaceAsset() != FontFace)
+		{
+			EntryToRepair->Font = FFontData(FontFace);
+			bModifiedFont = true;
+		}
+
+		if (bModifiedFont)
+		{
+			Font->MarkPackageDirty();
+			if (UPackage* FontPackage = Font->GetOutermost())
+			{
+				FontPackage->MarkPackageDirty();
+				SaveAssetPackage(Font, FontPackage->GetName());
+			}
+		}
+
+		return TypefaceEntryHasReloadSafeData(*EntryToRepair);
+	}
+
+	bool TryResolvePinnedAutomationFontAssetPath(const FString& FontName, const FString& RepairSource, FString& OutFontObjectPath)
 	{
 		OutFontObjectPath.Reset();
 		if (!Design2UMGAutomationRender::IsAutomationRenderActive())
@@ -377,7 +584,16 @@ namespace
 
 		const FString PinnedFontPackageName = FString(TEXT("/Game/Design2UMG/Automation/ImportedFonts")) / SafeName;
 		const FString PinnedFontObjectPath = PinnedFontPackageName + TEXT(".") + SafeName;
-		if (!LoadObject<UFont>(nullptr, *PinnedFontObjectPath))
+		UFont* PinnedFont = LoadObject<UFont>(nullptr, *PinnedFontObjectPath);
+		if (!PinnedFont)
+		{
+			return false;
+		}
+
+		const bool bIsRemote = RepairSource.StartsWith(TEXT("http://"), ESearchCase::IgnoreCase)
+			|| RepairSource.StartsWith(TEXT("https://"), ESearchCase::IgnoreCase);
+		const FString PrimaryWeightName = bIsRemote ? TEXT("Regular") : WeightNameFromFile(RepairSource, FontName);
+		if (!EnsureExistingFontReloadSafe(PinnedFont, PinnedFontObjectPath, RepairSource, PrimaryWeightName))
 		{
 			return false;
 		}
@@ -416,7 +632,7 @@ namespace
 		const FString FontObjPath = FontPkgName + TEXT(".") + SafeName;
 
 		FString PinnedFontObjectPath;
-		if (TryResolvePinnedAutomationFontAssetPath(FontName, PinnedFontObjectPath)
+		if (TryResolvePinnedAutomationFontAssetPath(FontName, Url, PinnedFontObjectPath)
 			&& !PinnedFontObjectPath.Equals(FontObjPath, ESearchCase::IgnoreCase))
 		{
 			return PinnedFontObjectPath;
@@ -424,6 +640,10 @@ namespace
 
 		if (UFont* Existing = LoadObject<UFont>(nullptr, *FontObjPath))
 		{
+			const bool bIsRemoteExisting = Url.StartsWith(TEXT("http://"), ESearchCase::IgnoreCase)
+				|| Url.StartsWith(TEXT("https://"), ESearchCase::IgnoreCase);
+			const FString PrimaryWeightName = bIsRemoteExisting ? TEXT("Regular") : WeightNameFromFile(Url, FontName);
+			EnsureExistingFontReloadSafe(Existing, FontObjPath, Url, PrimaryWeightName);
 			return FontObjPath;
 		}
 
@@ -468,8 +688,7 @@ namespace
 			return FString();
 		}
 
-		FontFace->FontFaceData->SetData(MoveTemp(FontData));
-		FontFace->CacheSubFaces();
+		MakeFontFaceReloadSafe(FontFace, MoveTemp(FontData));
 		FacePkg->MarkPackageDirty();
 		FAssetRegistryModule::AssetCreated(FontFace);
 
@@ -524,8 +743,7 @@ namespace
 					continue;
 				}
 
-				SibFace->FontFaceData->SetData(MoveTemp(SibData));
-				SibFace->CacheSubFaces();
+				MakeFontFaceReloadSafe(SibFace, MoveTemp(SibData));
 				SibFacePkg->MarkPackageDirty();
 				FAssetRegistryModule::AssetCreated(SibFace);
 
@@ -650,23 +868,24 @@ namespace
 		const FCompositeFont* ExistingComposite = Font->GetCompositeFont();
 		if (ExistingComposite && ExistingComposite->DefaultTypeface.Fonts.Num() > 0)
 		{
-			TSet<FString> ExistingTypefaces;
+			TMap<FString, const FTypefaceEntry*> ExistingTypefaces;
 			for (const FTypefaceEntry& Entry : ExistingComposite->DefaultTypeface.Fonts)
 			{
-				ExistingTypefaces.Add(Entry.Name.ToString());
+				ExistingTypefaces.Add(Entry.Name.ToString(), &Entry);
 			}
 
-			bool bHasAllKnownWeights = true;
+			bool bHasAllKnownWeightsReloadSafe = true;
 			for (const int32 Weight : RequestedWeights)
 			{
-				if (!ExistingTypefaces.Contains(WeightNameFromNumeric(Weight)))
+				const FTypefaceEntry* const* ExistingEntry = ExistingTypefaces.Find(WeightNameFromNumeric(Weight));
+				if (!ExistingEntry || !*ExistingEntry || !TypefaceEntryHasReloadSafeData(**ExistingEntry))
 				{
-					bHasAllKnownWeights = false;
+					bHasAllKnownWeightsReloadSafe = false;
 					break;
 				}
 			}
 
-			if (bHasAllKnownWeights)
+			if (bHasAllKnownWeightsReloadSafe)
 			{
 				return false;
 			}
@@ -694,8 +913,7 @@ namespace
 		}
 
 		bool bModifiedFont = false;
-		FSavePackageArgs SaveArgs;
-		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+		bool bModifiedFace = false;
 
 		for (const int32 Weight : RequestedWeights)
 		{
@@ -710,55 +928,40 @@ namespace
 			const FString FaceObjectPath = FacePackageName + TEXT(".") + FaceAssetName;
 
 			UFontFace* TypefaceFace = LoadObject<UFontFace>(nullptr, *FaceObjectPath);
-			if (!TypefaceFace)
+			if (!TypefaceFace || !HasReloadSafeFontFaceData(TypefaceFace) || TypefaceFace->LoadingPolicy != EFontLoadingPolicy::Inline)
 			{
 				const FString* TypefaceUrl = TypefaceUrls.Find(TypefaceName);
-				if (!TypefaceUrl || TypefaceUrl->IsEmpty())
-				{
-					continue;
-				}
-
-				FString Extension = FPaths::GetExtension(*TypefaceUrl, false);
-				if (Extension.IsEmpty())
-				{
-					Extension = TEXT("ttf");
-				}
-
-				const FString TempFontPath = FPaths::ProjectSavedDir() / TEXT("Design2UMG") / (FaceAssetName + TEXT(".") + Extension);
-				if (!DownloadToFile(*TypefaceUrl, TempFontPath))
-				{
-					continue;
-				}
-
 				TArray<uint8> FontData;
-				const bool bLoadedData = FFileHelper::LoadFileToArray(FontData, *TempFontPath);
-				IFileManager::Get().Delete(*TempFontPath);
-				if (!bLoadedData || FontData.Num() == 0)
+				if ((!TypefaceFace || !HasReloadSafeFontFaceData(TypefaceFace))
+					&& (!TypefaceUrl || !LoadFontBytesFromSource(FaceAssetName, *TypefaceUrl, FontData)))
 				{
 					continue;
 				}
 
-				UPackage* FacePackage = CreatePackage(*FacePackageName);
-				if (!FacePackage)
-				{
-					continue;
-				}
-
-				TypefaceFace = NewObject<UFontFace>(FacePackage, *FaceAssetName, RF_Public | RF_Standalone);
 				if (!TypefaceFace)
 				{
-					continue;
+					UPackage* FacePackage = CreatePackage(*FacePackageName);
+					if (!FacePackage)
+					{
+						continue;
+					}
+
+					TypefaceFace = NewObject<UFontFace>(FacePackage, *FaceAssetName, RF_Public | RF_Standalone);
+					if (!TypefaceFace)
+					{
+						continue;
+					}
+					FAssetRegistryModule::AssetCreated(TypefaceFace);
 				}
 
-				TypefaceFace->FontFaceData->SetData(MoveTemp(FontData));
-				TypefaceFace->CacheSubFaces();
-				TypefaceFace->MarkPackageDirty();
-				FacePackage->MarkPackageDirty();
-				FAssetRegistryModule::AssetCreated(TypefaceFace);
-
-				const FString FaceFilename = FPackageName::LongPackageNameToFilename(FacePackageName, FPackageName::GetAssetPackageExtension());
-				IFileManager::Get().MakeDirectory(*FPaths::GetPath(FaceFilename), true);
-				UPackage::SavePackage(FacePackage, TypefaceFace, *FaceFilename, SaveArgs);
+				const bool bFaceOk = FontData.Num() > 0
+					? MakeFontFaceReloadSafe(TypefaceFace, MoveTemp(FontData))
+					: MakeFontFaceReloadSafe(TypefaceFace);
+				if (!bFaceOk)
+				{
+					continue;
+				}
+				bModifiedFace = true;
 			}
 
 			if (!TypefaceFace)
@@ -788,7 +991,7 @@ namespace
 
 		if (!bModifiedFont)
 		{
-			return false;
+			return bModifiedFace;
 		}
 
 		UPackage* FontPackage = Font->GetOutermost();
@@ -800,9 +1003,7 @@ namespace
 		Font->MarkPackageDirty();
 		FontPackage->MarkPackageDirty();
 
-		const FString FontFilename = FPackageName::LongPackageNameToFilename(FontPackageName, FPackageName::GetAssetPackageExtension());
-		IFileManager::Get().MakeDirectory(*FPaths::GetPath(FontFilename), true);
-		return UPackage::SavePackage(FontPackage, Font, *FontFilename, SaveArgs);
+		return SaveAssetPackage(Font, FontPackageName);
 	}
 
 	FString ImportKnownCssFontFamily(const FString& FontFamily, const TArray<int32>& RequestedWeights)

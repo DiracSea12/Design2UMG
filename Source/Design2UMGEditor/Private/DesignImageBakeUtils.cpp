@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignImageBakeUtils.h"
 
@@ -126,9 +126,9 @@ namespace
 			return 1.0f;
 		}
 
-		if (Fill.Image.bHasScalingFactor && Fill.Image.ScalingFactor > KINDA_SMALL_NUMBER)
+		if (Fill.Image.ScalingFactor.IsSet() && Fill.Image.ScalingFactor.GetValue() > KINDA_SMALL_NUMBER)
 		{
-			return Fill.Image.ScalingFactor;
+			return Fill.Image.ScalingFactor.GetValue();
 		}
 
 		return 1.0f;
@@ -594,8 +594,7 @@ int32 DesignImageBakeUtils::BakeMappedImageBlendOverlays(
 			Fill.Image.Opacity = 1.0f;
 			Fill.Opacity = 1.0f;
 			Fill.BlendMode = TEXT("NORMAL");
-			Fill.Image.ScalingFactor = 1.0f;
-			Fill.Image.bHasScalingFactor = false;
+			Fill.Image.ScalingFactor.Reset();
 			bNodeChanged = true;
 			++BakedCount;
 		}

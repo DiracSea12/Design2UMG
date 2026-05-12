@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "RichTextStyleRowSerializer.h"
 
 #include "UMGPropertyKeys.h"
@@ -20,18 +20,18 @@ bool RichTextStyleRowSerializer::Serialize(const TArray<FResolvedRichTextRun>& R
 		{
 			RowObject->SetStringField(UMGPropertyKeys::TypefaceFontName, Run.TypefaceFontName);
 		}
-		if (Run.bHasFontSize)
+		if (Run.FontSize.IsSet())
 		{
-			RowObject->SetNumberField(UMGPropertyKeys::FontSize, Run.FontSize);
-			RowObject->SetNumberField(UMGPropertyKeys::DesignFontSize, Run.DesignFontSize > 0.0f ? Run.DesignFontSize : Run.FontSize);
+			RowObject->SetNumberField(UMGPropertyKeys::FontSize, Run.FontSize.GetValue());
+			RowObject->SetNumberField(UMGPropertyKeys::DesignFontSize, Run.DesignFontSize > 0.0f ? Run.DesignFontSize : Run.FontSize.GetValue());
 		}
-		if (Run.bHasLetterSpacing)
+		if (Run.LetterSpacing.IsSet())
 		{
-			RowObject->SetNumberField(UMGPropertyKeys::LetterSpacing, Run.LetterSpacing);
+			RowObject->SetNumberField(UMGPropertyKeys::LetterSpacing, Run.LetterSpacing.GetValue());
 		}
-		if (Run.bHasColor)
+		if (Run.Color.IsSet())
 		{
-			RowObject->SetStringField(UMGPropertyKeys::Color, Run.Color);
+			RowObject->SetStringField(UMGPropertyKeys::Color, Run.Color.GetValue());
 		}
 		if (Run.bUnderline)
 		{

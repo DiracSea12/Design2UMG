@@ -2188,12 +2188,12 @@ bool FFigmaRadialGradientHandleFidelityTest::RunTest(const FString& Parameters)
 
 	const TSharedPtr<FDesignNode>& GradientNode = Doc.Children[0]->Children[0];
 	TestEqual(TEXT("Figma radial gradient type preserved"), GradientNode->Visual.Fill.Gradient.GradientType, EDesignGradientType::Radial);
-	TestTrue(TEXT("Figma radial center parsed"), GradientNode->Visual.Fill.Gradient.bHasCenter
-		&& FMath::IsNearlyEqual(GradientNode->Visual.Fill.Gradient.CenterX, 0.25f, 0.001f)
-		&& FMath::IsNearlyEqual(GradientNode->Visual.Fill.Gradient.CenterY, 0.75f, 0.001f));
-	TestTrue(TEXT("Figma radial size parsed"), GradientNode->Visual.Fill.Gradient.bHasSize
-		&& FMath::IsNearlyEqual(GradientNode->Visual.Fill.Gradient.SizeWidth, 0.25f, 0.001f)
-		&& FMath::IsNearlyEqual(GradientNode->Visual.Fill.Gradient.SizeHeight, 1.0f, 0.001f));
+	TestTrue(TEXT("Figma radial center parsed"), GradientNode->Visual.Fill.Gradient.Center.IsSet()
+		&& FMath::IsNearlyEqual(GradientNode->Visual.Fill.Gradient.Center.GetValue().X, 0.25f, 0.001f)
+		&& FMath::IsNearlyEqual(GradientNode->Visual.Fill.Gradient.Center.GetValue().Y, 0.75f, 0.001f));
+	TestTrue(TEXT("Figma radial size parsed"), GradientNode->Visual.Fill.Gradient.Size.IsSet()
+		&& FMath::IsNearlyEqual(GradientNode->Visual.Fill.Gradient.Size.GetValue().X, 0.25f, 0.001f)
+		&& FMath::IsNearlyEqual(GradientNode->Visual.Fill.Gradient.Size.GetValue().Y, 1.0f, 0.001f));
 	TestTrue(TEXT("Figma radial rotation parsed"), FMath::IsNearlyEqual(GradientNode->Visual.Fill.Gradient.Rotation, 90.0f, 0.001f));
 
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);

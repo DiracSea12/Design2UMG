@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "PenParserInternal.h"
 #include "DesignSchema.h"
@@ -58,9 +58,7 @@ static bool TryParseMeshHandle(
 	if (!TryParsePointXY(HandleField, Resolver, X, Y))
 		return false;
 
-	OutHandle.X = X;
-	OutHandle.Y = Y;
-	OutHandle.bHasValue = true;
+	OutHandle.Value = FVector2D(X, Y);
 	return true;
 }
 
@@ -145,18 +143,26 @@ FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariable
 		if (CenterField.IsValid() && CenterField->Type == EJson::Object)
 		{
 			const TSharedPtr<FJsonObject>& CenterObj = CenterField->AsObject();
-			const bool bHasCenterX = TryGetResolvedNumberField(CenterObj, TEXT("x"), Resolver, Result.Gradient.CenterX);
-			const bool bHasCenterY = TryGetResolvedNumberField(CenterObj, TEXT("y"), Resolver, Result.Gradient.CenterY);
-			Result.Gradient.bHasCenter = bHasCenterX || bHasCenterY;
+			FVector2D Center = Result.Gradient.Center.Get(FVector2D(0.5f, 0.5f));
+			const bool bHasCenterX = TryGetResolvedNumberField(CenterObj, TEXT("x"), Resolver, Center.X);
+			const bool bHasCenterY = TryGetResolvedNumberField(CenterObj, TEXT("y"), Resolver, Center.Y);
+			if (bHasCenterX || bHasCenterY)
+			{
+				Result.Gradient.Center = Center;
+			}
 		}
 
 		const TSharedPtr<FJsonValue>& SizeField = Obj->TryGetField(TEXT("size"));
 		if (SizeField.IsValid() && SizeField->Type == EJson::Object)
 		{
 			const TSharedPtr<FJsonObject>& SizeObj = SizeField->AsObject();
-			const bool bHasSizeW = TryGetResolvedNumberField(SizeObj, TEXT("width"), Resolver, Result.Gradient.SizeWidth);
-			const bool bHasSizeH = TryGetResolvedNumberField(SizeObj, TEXT("height"), Resolver, Result.Gradient.SizeHeight);
-			Result.Gradient.bHasSize = bHasSizeW || bHasSizeH;
+			FVector2D Size = Result.Gradient.Size.Get(FVector2D(1.0f, 1.0f));
+			const bool bHasSizeW = TryGetResolvedNumberField(SizeObj, TEXT("width"), Resolver, Size.X);
+			const bool bHasSizeH = TryGetResolvedNumberField(SizeObj, TEXT("height"), Resolver, Size.Y);
+			if (bHasSizeW || bHasSizeH)
+			{
+				Result.Gradient.Size = Size;
+			}
 		}
 
 		const TSharedPtr<FJsonValue>& ColorsField = Obj->TryGetField(TEXT("colors"));
@@ -225,8 +231,16 @@ FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariable
 		Result.Type = EDesignFillType::Gradient;
 		Result.bFromMeshGradient = true;
 		Result.MeshGradientRaw = DesignJsonUtils::ToCompactString(Value);
-		Result.MeshGradient.bHasColumns = TryGetResolvedNumberField(Obj, TEXT("columns"), Resolver, Result.MeshGradient.Columns);
-		Result.MeshGradient.bHasRows = TryGetResolvedNumberField(Obj, TEXT("rows"), Resolver, Result.MeshGradient.Rows);
+		int32 Columns = 0;
+		if (TryGetResolvedNumberField(Obj, TEXT("columns"), Resolver, Columns))
+		{
+			Result.MeshGradient.Columns = Columns;
+		}
+		int32 Rows = 0;
+		if (TryGetResolvedNumberField(Obj, TEXT("rows"), Resolver, Rows))
+		{
+			Result.MeshGradient.Rows = Rows;
+		}
 
 		const TSharedPtr<FJsonValue>& ColorsField = Obj->TryGetField(TEXT("colors"));
 		if (ColorsField.IsValid() && ColorsField->Type == EJson::Array)
@@ -267,11 +281,13 @@ FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariable
 				FDesignMeshGradientPoint MeshPoint;
 				MeshPoint.RawJson = DesignJsonUtils::ToCompactString(PointVal);
 
-				const bool bHasXY = TryGetResolvedNumberField(PointObj, TEXT("x"), Resolver, MeshPoint.X)
-					&& TryGetResolvedNumberField(PointObj, TEXT("y"), Resolver, MeshPoint.Y);
+				float PointX = 0.0f;
+				float PointY = 0.0f;
+				const bool bHasXY = TryGetResolvedNumberField(PointObj, TEXT("x"), Resolver, PointX)
+					&& TryGetResolvedNumberField(PointObj, TEXT("y"), Resolver, PointY);
 				if (bHasXY)
 				{
-					MeshPoint.bHasPosition = true;
+					MeshPoint.Position = FVector2D(PointX, PointY);
 				}
 				else
 				{
@@ -280,9 +296,7 @@ FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariable
 					const TSharedPtr<FJsonValue>& PositionField = PointObj->TryGetField(TEXT("position"));
 					if (TryParsePointXY(PositionField, Resolver, PosX, PosY))
 					{
-						MeshPoint.X = PosX;
-						MeshPoint.Y = PosY;
-						MeshPoint.bHasPosition = true;
+						MeshPoint.Position = FVector2D(PosX, PosY);
 					}
 				}
 
@@ -344,7 +358,6 @@ FDesignStroke ParseStroke(const TSharedPtr<FJsonObject>& JsonObj, const FDesignV
 
 	if (JsonObj->HasField(TEXT("fill")))
 	{
-		Result.bHasExplicitFill = true;
 		Result.Fill = ParseFill(JsonObj->TryGetField(TEXT("fill")), Resolver);
 	}
 

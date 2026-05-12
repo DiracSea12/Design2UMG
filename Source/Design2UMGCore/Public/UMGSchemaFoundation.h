@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -130,8 +130,7 @@ struct FUMGSlotData
 struct FUMGTypedProperty
 {
 	/** SerializedValue is the final-consumer bridge value; typed fields are transient parse caches. */
-	FString SerializedValue;
-	bool bHasValue = false;
+	TOptional<FString> SerializedValue;
 	bool BoolValue = false;
 	int32 IntValue = 0;
 	float FloatValue = 0.0f;

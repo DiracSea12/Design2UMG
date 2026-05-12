@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "VisualMapper.h"
 #include "ImageFillUtils.h"
@@ -178,12 +178,12 @@ namespace
 
 		bool TryResolveStrokeColor(const FDesignStroke& Stroke, FLinearColor& OutColor)
 		{
-			if (Stroke.Fill.Type != EDesignFillType::Color || Stroke.Fill.SolidColor.IsEmpty())
+			if (!Stroke.Fill.IsSet() || Stroke.Fill->Type != EDesignFillType::Color || Stroke.Fill->SolidColor.IsEmpty())
 			{
 				return false;
 			}
 
-			OutColor = FUMGValueParser::ParseColor(Stroke.Fill.SolidColor);
+			OutColor = FUMGValueParser::ParseColor(Stroke.Fill->SolidColor);
 			return true;
 		}
 
@@ -777,9 +777,9 @@ void VisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FDesignStroke& Stro
 
 	Widget.Brush.OutlineThickness = Thickness;
 
-	if (Stroke.Fill.Type == EDesignFillType::Color)
+	if (Stroke.Fill.IsSet() && Stroke.Fill->Type == EDesignFillType::Color)
 	{
-		Widget.Brush.OutlineColor = FUMGValueParser::ParseColor(Stroke.Fill.SolidColor);
+		Widget.Brush.OutlineColor = FUMGValueParser::ParseColor(Stroke.Fill->SolidColor);
 	}
 
 	// Stroke alignment compensation:

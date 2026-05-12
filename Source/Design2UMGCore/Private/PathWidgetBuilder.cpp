@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "PathWidgetBuilder.h"
 #include "DesignSchemaSourceExtensions.h"
@@ -61,9 +61,11 @@ namespace
 			return Node->Visual.Fill.Gradient.Colors[0].Color;
 		}
 
-		if (Node->Visual.Stroke.HasStroke() && Node->Visual.Stroke.Fill.Type == EDesignFillType::Color)
+		if (Node->Visual.Stroke.HasStroke()
+			&& Node->Visual.Stroke.Fill.IsSet()
+			&& Node->Visual.Stroke.Fill->Type == EDesignFillType::Color)
 		{
-			return Node->Visual.Stroke.Fill.SolidColor;
+			return Node->Visual.Stroke.Fill->SolidColor;
 		}
 
 		for (const FDesignFill& Fill : Node->Visual.Fills)
@@ -84,9 +86,11 @@ namespace
 
 	FString ResolvePathRasterStrokeColor(const TSharedPtr<FDesignNode>& Node)
 	{
-		if (Node->Visual.Stroke.HasStroke() && Node->Visual.Stroke.Fill.Type == EDesignFillType::Color)
+		if (Node->Visual.Stroke.HasStroke()
+			&& Node->Visual.Stroke.Fill.IsSet()
+			&& Node->Visual.Stroke.Fill->Type == EDesignFillType::Color)
 		{
-			return Node->Visual.Stroke.Fill.SolidColor;
+			return Node->Visual.Stroke.Fill->SolidColor;
 		}
 
 		return FString();

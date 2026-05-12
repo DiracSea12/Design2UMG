@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -171,16 +171,18 @@ bool FFigmaParserGradientGeometryTest::RunTest(const FString&)
 	TestEqual(TEXT("Parsed gradient fill type"), Node->Visual.Fill.Type, EDesignFillType::Gradient);
 	TestEqual(TEXT("Parsed gradient type"), Node->Visual.Fill.Gradient.GradientType, EDesignGradientType::Radial);
 	TestEqual(TEXT("Parsed gradient stops"), Node->Visual.Fill.Gradient.Colors.Num(), 3);
-	TestTrue(TEXT("Parsed radial center present"), Node->Visual.Fill.Gradient.bHasCenter);
-	TestTrue(TEXT("Parsed radial size present"), Node->Visual.Fill.Gradient.bHasSize);
+	TestTrue(TEXT("Parsed radial center present"), Node->Visual.Fill.Gradient.Center.IsSet());
+	TestTrue(TEXT("Parsed radial size present"), Node->Visual.Fill.Gradient.Size.IsSet());
+	const FVector2D ParsedCenter = Node->Visual.Fill.Gradient.Center.Get(FVector2D::ZeroVector);
+	const FVector2D ParsedSize = Node->Visual.Fill.Gradient.Size.Get(FVector2D::ZeroVector);
 	TestTrue(TEXT("Parsed radial center X"),
-		FMath::IsNearlyEqual(Node->Visual.Fill.Gradient.CenterX, 0.25f, 0.0001f));
+		FMath::IsNearlyEqual(ParsedCenter.X, 0.25f, 0.0001f));
 	TestTrue(TEXT("Parsed radial center Y"),
-		FMath::IsNearlyEqual(Node->Visual.Fill.Gradient.CenterY, 0.75f, 0.0001f));
+		FMath::IsNearlyEqual(ParsedCenter.Y, 0.75f, 0.0001f));
 	TestTrue(TEXT("Parsed radial size width"),
-		FMath::IsNearlyEqual(Node->Visual.Fill.Gradient.SizeWidth, 0.8f, 0.0001f));
+		FMath::IsNearlyEqual(ParsedSize.X, 0.8f, 0.0001f));
 	TestTrue(TEXT("Parsed radial size height"),
-		FMath::IsNearlyEqual(Node->Visual.Fill.Gradient.SizeHeight, 0.8f, 0.0001f));
+		FMath::IsNearlyEqual(ParsedSize.Y, 0.8f, 0.0001f));
 	TestTrue(TEXT("Parsed middle stop position"),
 		FMath::IsNearlyEqual(Node->Visual.Fill.Gradient.Colors[1].Position, 0.4f, 0.0001f));
 	return true;

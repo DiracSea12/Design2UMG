@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -105,12 +105,9 @@ FDesignFill ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)
 
 				if (Result.Gradient.GradientType == EDesignGradientType::Radial)
 				{
-					Result.Gradient.CenterX = CenterX;
-					Result.Gradient.CenterY = CenterY;
-					Result.Gradient.bHasCenter = true;
-					Result.Gradient.SizeWidth = FMath::Max(KINDA_SMALL_NUMBER, 2.0f * FMath::Sqrt(DX * DX + DY * DY));
-					Result.Gradient.SizeHeight = Result.Gradient.SizeWidth;
-					Result.Gradient.bHasSize = true;
+					Result.Gradient.Center = FVector2D(CenterX, CenterY);
+					FVector2D Size(FMath::Max(KINDA_SMALL_NUMBER, 2.0f * FMath::Sqrt(DX * DX + DY * DY)), 0.0f);
+					Size.Y = Size.X;
 
 					if (Handles->Num() >= 3)
 					{
@@ -119,11 +116,12 @@ FDesignFill ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)
 						{
 							const float DYHandleX = GetNumber(P2, TEXT("x")) - CenterX;
 							const float DYHandleY = GetNumber(P2, TEXT("y")) - CenterY;
-							Result.Gradient.SizeHeight = FMath::Max(
+							Size.Y = FMath::Max(
 								KINDA_SMALL_NUMBER,
 								2.0f * FMath::Sqrt(DYHandleX * DYHandleX + DYHandleY * DYHandleY));
 						}
 					}
+					Result.Gradient.Size = Size;
 				}
 			}
 		}
@@ -165,7 +163,6 @@ FDesignFill ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)
 		if (FillObj->TryGetNumberField(TEXT("scalingFactor"), ScalingFactor))
 		{
 			Result.Image.ScalingFactor = static_cast<float>(ScalingFactor);
-			Result.Image.bHasScalingFactor = true;
 		}
 
 		const auto* TransformArr = GetArray(FillObj, TEXT("imageTransform"));

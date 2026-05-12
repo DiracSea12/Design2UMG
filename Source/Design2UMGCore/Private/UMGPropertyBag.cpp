@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGSchemaFoundation.h"
 #include "UMGPropertyKeys.h"
@@ -103,7 +103,6 @@ namespace
 	void AssignTypedValue(FUMGTypedProperty& Property, EKnownPropertyValueType ValueType, const FString& Value)
 	{
 		Property.SerializedValue = Value;
-		Property.bHasValue = true;
 
 		switch (ValueType)
 		{
@@ -187,8 +186,11 @@ bool FUMGPropertyBag::TryGetBool(const FString& Key, bool& OutValue) const
 {
 	if (const FUMGTypedProperty* Property = Values.Find(Key))
 	{
-		OutValue = Property->SerializedValue.ToBool();
-		return Property->bHasValue;
+		if (Property->SerializedValue.IsSet())
+		{
+			OutValue = Property->SerializedValue.GetValue().ToBool();
+			return true;
+		}
 	}
 	return false;
 }
@@ -197,8 +199,11 @@ bool FUMGPropertyBag::TryGetInt(const FString& Key, int32& OutValue) const
 {
 	if (const FUMGTypedProperty* Property = Values.Find(Key))
 	{
-		OutValue = FCString::Atoi(*Property->SerializedValue);
-		return Property->bHasValue;
+		if (Property->SerializedValue.IsSet())
+		{
+			OutValue = FCString::Atoi(*Property->SerializedValue.GetValue());
+			return true;
+		}
 	}
 	return false;
 }
@@ -207,8 +212,11 @@ bool FUMGPropertyBag::TryGetFloat(const FString& Key, float& OutValue) const
 {
 	if (const FUMGTypedProperty* Property = Values.Find(Key))
 	{
-		OutValue = FCString::Atof(*Property->SerializedValue);
-		return Property->bHasValue;
+		if (Property->SerializedValue.IsSet())
+		{
+			OutValue = FCString::Atof(*Property->SerializedValue.GetValue());
+			return true;
+		}
 	}
 	return false;
 }
@@ -217,8 +225,11 @@ bool FUMGPropertyBag::TryGetString(const FString& Key, FString& OutValue) const
 {
 	if (const FUMGTypedProperty* Property = Values.Find(Key))
 	{
-		OutValue = Property->SerializedValue;
-		return Property->bHasValue;
+		if (Property->SerializedValue.IsSet())
+		{
+			OutValue = Property->SerializedValue.GetValue();
+			return true;
+		}
 	}
 	return false;
 }
@@ -227,14 +238,19 @@ bool FUMGPropertyBag::TryGetColor(const FString& Key, FLinearColor& OutValue) co
 {
 	if (const FUMGTypedProperty* Property = Values.Find(Key))
 	{
+		if (!Property->SerializedValue.IsSet())
+		{
+			return false;
+		}
+
 		if (IsKnownColorKey(Key))
 		{
 			OutValue = Property->ColorValue;
-			return Property->bHasValue;
+			return true;
 		}
 
-		OutValue = FUMGValueParser::ParseColor(Property->SerializedValue);
-		return Property->bHasValue;
+		OutValue = FUMGValueParser::ParseColor(Property->SerializedValue.GetValue());
+		return true;
 	}
 	return false;
 }
@@ -243,8 +259,11 @@ bool FUMGPropertyBag::TryGetVector2D(const FString& Key, FVector2D& OutValue) co
 {
 	if (const FUMGTypedProperty* Property = Values.Find(Key))
 	{
-		OutValue = FUMGValueParser::ParseVector2D(Property->SerializedValue);
-		return Property->bHasValue;
+		if (Property->SerializedValue.IsSet())
+		{
+			OutValue = FUMGValueParser::ParseVector2D(Property->SerializedValue.GetValue());
+			return true;
+		}
 	}
 	return false;
 }
@@ -253,8 +272,13 @@ bool FUMGPropertyBag::TryGetVector4(const FString& Key, FVector4& OutValue) cons
 {
 	if (const FUMGTypedProperty* Property = Values.Find(Key))
 	{
+		if (!Property->SerializedValue.IsSet())
+		{
+			return false;
+		}
+
 		TArray<FString> Parts;
-		Property->SerializedValue.ParseIntoArray(Parts, TEXT(","));
+		Property->SerializedValue.GetValue().ParseIntoArray(Parts, TEXT(","));
 		if (Parts.Num() != 4)
 		{
 			return false;
@@ -265,7 +289,7 @@ bool FUMGPropertyBag::TryGetVector4(const FString& Key, FVector4& OutValue) cons
 			FCString::Atof(*Parts[1].TrimStartAndEnd()),
 			FCString::Atof(*Parts[2].TrimStartAndEnd()),
 			FCString::Atof(*Parts[3].TrimStartAndEnd()));
-		return Property->bHasValue;
+		return true;
 	}
 	return false;
 }
@@ -274,8 +298,11 @@ bool FUMGPropertyBag::TryGetMargin(const FString& Key, FMargin& OutValue) const
 {
 	if (const FUMGTypedProperty* Property = Values.Find(Key))
 	{
-		OutValue = FUMGValueParser::ParseMargin(Property->SerializedValue);
-		return Property->bHasValue;
+		if (Property->SerializedValue.IsSet())
+		{
+			OutValue = FUMGValueParser::ParseMargin(Property->SerializedValue.GetValue());
+			return true;
+		}
 	}
 	return false;
 }
@@ -284,6 +311,9 @@ void FUMGPropertyBag::ForEachSerialized(TFunctionRef<void(const FString&, const 
 {
 	for (const TPair<FString, FUMGTypedProperty>& Pair : Values)
 	{
-		Visitor(Pair.Key, Pair.Value.SerializedValue);
+		if (Pair.Value.SerializedValue.IsSet())
+		{
+			Visitor(Pair.Key, Pair.Value.SerializedValue.GetValue());
+		}
 	}
 }

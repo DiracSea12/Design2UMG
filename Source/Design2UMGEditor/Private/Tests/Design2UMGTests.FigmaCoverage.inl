@@ -1185,24 +1185,24 @@ bool FPenOfficialFieldParityTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("stroke.cap preserved"), FrameNode->Metadata.FindRef(TEXT("stroke.cap")) == TEXT("round"));
 	TestTrue(TEXT("stroke.dashPattern preserved"), FrameNode->Metadata.FindRef(TEXT("stroke.dashPattern")).Contains(TEXT("1")));
 	TestTrue(TEXT("mesh gradient preserved"), TextNode->Visual.Fill.bFromMeshGradient && !TextNode->Visual.Fill.MeshGradientRaw.IsEmpty());
-	TestTrue(TEXT("mesh gradient rows/columns parsed"), TextNode->Visual.Fill.MeshGradient.bHasRows
-		&& TextNode->Visual.Fill.MeshGradient.bHasColumns
-		&& TextNode->Visual.Fill.MeshGradient.Rows == 2
-		&& TextNode->Visual.Fill.MeshGradient.Columns == 2);
+	TestTrue(TEXT("mesh gradient rows/columns parsed"), TextNode->Visual.Fill.MeshGradient.Rows.IsSet()
+		&& TextNode->Visual.Fill.MeshGradient.Columns.IsSet()
+		&& TextNode->Visual.Fill.MeshGradient.Rows.Get(0) == 2
+		&& TextNode->Visual.Fill.MeshGradient.Columns.Get(0) == 2);
 	TestTrue(TEXT("mesh gradient points parsed"), TextNode->Visual.Fill.MeshGradient.Points.Num() == 2
-		&& TextNode->Visual.Fill.MeshGradient.Points[0].bHasPosition
-		&& TextNode->Visual.Fill.MeshGradient.Points[0].InHandle.bHasValue
-		&& TextNode->Visual.Fill.MeshGradient.Points[1].OutHandle.bHasValue);
+		&& TextNode->Visual.Fill.MeshGradient.Points[0].Position.IsSet()
+		&& TextNode->Visual.Fill.MeshGradient.Points[0].InHandle.Value.IsSet()
+		&& TextNode->Visual.Fill.MeshGradient.Points[1].OutHandle.Value.IsSet());
 	TestTrue(TEXT("fill blendMode preserved"), TextNode->Visual.Fill.BlendMode == TEXT("multiply"));
 	TestTrue(TEXT("fill opacity preserved"), FMath::IsNearlyEqual(TextNode->Visual.Fill.Opacity, 0.42f, 0.001f));
 	TestTrue(TEXT("text href preserved"), TextNode->Text.Href == TEXT("https://docs.pencil.dev"));
 	TestTrue(TEXT("text strikethrough preserved"), TextNode->Text.bStrikethrough);
-	TestTrue(TEXT("gradient center parsed"), GradientNode->Visual.Fill.Gradient.bHasCenter
-		&& FMath::IsNearlyEqual(GradientNode->Visual.Fill.Gradient.CenterX, 0.2f, 0.001f)
-		&& FMath::IsNearlyEqual(GradientNode->Visual.Fill.Gradient.CenterY, 0.8f, 0.001f));
-	TestTrue(TEXT("gradient size parsed"), GradientNode->Visual.Fill.Gradient.bHasSize
-		&& FMath::IsNearlyEqual(GradientNode->Visual.Fill.Gradient.SizeWidth, 2.5f, 0.001f)
-		&& FMath::IsNearlyEqual(GradientNode->Visual.Fill.Gradient.SizeHeight, 1.25f, 0.001f));
+	TestTrue(TEXT("gradient center parsed"), GradientNode->Visual.Fill.Gradient.Center.IsSet()
+		&& FMath::IsNearlyEqual(GradientNode->Visual.Fill.Gradient.Center.GetValue().X, 0.2f, 0.001f)
+		&& FMath::IsNearlyEqual(GradientNode->Visual.Fill.Gradient.Center.GetValue().Y, 0.8f, 0.001f));
+	TestTrue(TEXT("gradient size parsed"), GradientNode->Visual.Fill.Gradient.Size.IsSet()
+		&& FMath::IsNearlyEqual(GradientNode->Visual.Fill.Gradient.Size.GetValue().X, 2.5f, 0.001f)
+		&& FMath::IsNearlyEqual(GradientNode->Visual.Fill.Gradient.Size.GetValue().Y, 1.25f, 0.001f));
 	TestTrue(TEXT("shadow blendMode preserved"), GradientNode->Visual.Effects.Num() > 0
 		&& GradientNode->Visual.Effects[0].BlendMode == TEXT("screen")
 		&& GradientNode->Visual.Effects[0].Shadow.BlendMode == TEXT("screen"));

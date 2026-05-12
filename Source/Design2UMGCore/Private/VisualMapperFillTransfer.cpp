@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "VisualMapperFillTransfer.h"
 
@@ -39,16 +39,14 @@ namespace
 			const FString& StartColor = Gradient.Colors[0].Color;
 			const FString& EndColor = Gradient.Colors.Last().Color;
 			const float Rotation = Gradient.Rotation;
-			const float CenterX = Gradient.bHasCenter ? Gradient.CenterX : 0.5f;
-			const float CenterY = Gradient.bHasCenter ? Gradient.CenterY : 0.5f;
-			const float SizeWidth = Gradient.bHasSize ? Gradient.SizeWidth : 1.0f;
-			const float SizeHeight = Gradient.bHasSize ? Gradient.SizeHeight : 1.0f;
+			const FVector2D Center = Gradient.Center.Get(FVector2D(0.5f, 0.5f));
+			const FVector2D Size = Gradient.Size.Get(FVector2D(1.0f, 1.0f));
 			const FString RadialParams = FString::Printf(
 				TEXT("\"CenterX\":%.4f,\"CenterY\":%.4f,\"SizeWidth\":%.4f,\"SizeHeight\":%.4f,\"Rotation\":%.4f"),
-				CenterX,
-				CenterY,
-				SizeWidth,
-				SizeHeight,
+				Center.X,
+				Center.Y,
+				Size.X,
+				Size.Y,
 				Rotation);
 
 			if (Gradient.Colors.Num() > 2)
@@ -81,13 +79,13 @@ namespace
 		{
 			Brush.Gradient.Type = ToTypedGradientTypeString(Gradient.GradientType);
 			Brush.Gradient.Rotation = Gradient.Rotation;
-			if (Gradient.bHasCenter)
+			if (Gradient.Center.IsSet())
 			{
-				Brush.Gradient.Center = FVector2D(Gradient.CenterX, Gradient.CenterY);
+				Brush.Gradient.Center = Gradient.Center.GetValue();
 			}
-			if (Gradient.bHasSize)
+			if (Gradient.Size.IsSet())
 			{
-				Brush.Gradient.Size = FVector2D(Gradient.SizeWidth, Gradient.SizeHeight);
+				Brush.Gradient.Size = Gradient.Size.GetValue();
 			}
 			Brush.Gradient.Stops.Reset();
 			for (const FDesignGradientStop& Stop : Gradient.Colors)

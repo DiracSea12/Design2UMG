@@ -124,7 +124,7 @@ bool FFigmaLocalLuminosityBakeWorkflowTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Luminosity fill now points at derived png"), !FPaths::IsSamePath(FPaths::ConvertRelativePathToFull(ImageFill.Image.Url), FPaths::ConvertRelativePathToFull(SourcePngPath)));
 	TestTrue(TEXT("Luminosity fill blend mode baked to normal"), ImageFill.BlendMode == TEXT("NORMAL"));
 	TestTrue(TEXT("Luminosity fill opacity baked into derived png"), FMath::IsNearlyEqual(ImageFill.Image.Opacity, 1.0f));
-	TestTrue(TEXT("Luminosity fill scaling factor cleared"), !ImageFill.Image.bHasScalingFactor);
+	TestTrue(TEXT("Luminosity fill scaling factor cleared"), !ImageFill.Image.ScalingFactor.IsSet());
 
 	IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
 	return true;
@@ -452,7 +452,7 @@ bool FPenLocalBlendModeBakeWorkflowTest::RunTest(const FString& Parameters)
 		TestTrue(*DerivedPathLabel, !FPaths::IsSamePath(FPaths::ConvertRelativePathToFull(ImageFill.Image.Url), FullSourcePath));
 		TestTrue(*BlendNormalLabel, ImageFill.BlendMode == TEXT("NORMAL"));
 		TestTrue(*OpacityLabel, FMath::IsNearlyEqual(ImageFill.Image.Opacity, 1.0f));
-		TestTrue(*ScalingFactorLabel, !ImageFill.Image.bHasScalingFactor);
+		TestTrue(*ScalingFactorLabel, !ImageFill.Image.ScalingFactor.IsSet());
 
 		TArray<FColor> DecodedPixels;
 		int32 Width = 0;
