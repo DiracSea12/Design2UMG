@@ -833,7 +833,7 @@ bool FPlaceholderSurfaceConversionTest::RunTest(const FString& Parameters)
 	}
 	TestEqual(TEXT("Empty slot metadata preserved"), Doc.Children[0]->Metadata.FindRef(TEXT("pen.slot.empty")), TEXT("true"));
 	TestTrue(TEXT("Empty slot array keeps semantic placeholder"), Doc.Children[0]->LayoutData.bSemanticPlaceholderSurface);
-	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::FromSettings(Settings));
 	const FUMGWidgetNode* SlotCell = FindWidgetById(Data.RootWidget, TEXT("slotCell"));
 	const FUMGWidgetNode* PageSlot = FindWidgetById(Data.RootWidget, TEXT("pageSlot"));
 	TestTrue(TEXT("slotCell widget exists"), SlotCell != nullptr);
@@ -891,7 +891,7 @@ bool FPlaceholderSurfacePaletteTracksRefContextTest::RunTest(const FString& Para
 	})JSON");
 	FDesignDocument BaseDoc;
 	TestTrue(TEXT("Base placeholder parse succeeds"), FPenParser::ParseDocument(BaseJson, BaseDoc));
-	const FUMGWidgetData BaseData = FDesign2UMGConverter::Convert(BaseDoc);
+	const FUMGWidgetData BaseData = FDesign2UMGConverter::Convert(BaseDoc, FDesign2UMGConversionSettings::FromSettings(Settings));
 	const FUMGWidgetNode* BaseSlot = FindWidgetById(BaseData.RootWidget, TEXT("slotBase"));
 	TestTrue(TEXT("slotBase exists"), BaseSlot != nullptr);
 	if (BaseSlot != nullptr)
@@ -931,7 +931,7 @@ bool FPlaceholderSurfacePaletteTracksRefContextTest::RunTest(const FString& Para
 	})JSON");
 	FDesignDocument Doc;
 	TestTrue(TEXT("Ref-context placeholder parse succeeds"), FPenParser::ParseDocument(Json, Doc));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::FromSettings(Settings));
 	const FUMGWidgetNode* SlotInstance = FindWidgetById(Data.RootWidget, TEXT("slotInstance"));
 	TestTrue(TEXT("slotInstance exists"), SlotInstance != nullptr);
 	if (SlotInstance != nullptr)
@@ -984,7 +984,7 @@ bool FConverterTextAlignVerticalDoesNotMoveSlotTest::RunTest(const FString& Para
 		return false;
 	}
 	TestEqual(TEXT("textAlignVertical kept as metadata"), GetWidgetProperty(*Label, TEXT("TextAlignVertical")), TEXT("Center"));
-	TestEqual(TEXT("Outer SizeBox slot stays top-aligned"), LabelSizeBox->Slot.VerticalAlignment, TEXT("Top"));
+	TestTrue(TEXT("Outer SizeBox slot stays top-aligned"), LabelSizeBox->Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Top);
 	FMargin Padding = FMargin(0.0f);
 	TestFalse(TEXT("Auto-height text does not synthesize internal padding"),
 		Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(*Label).TryGetMargin(TEXT("Padding"), Padding));
@@ -1034,7 +1034,7 @@ bool FConverterTextAlignVerticalUsesInternalPaddingWhenHeightFixedTest::RunTest(
 	}
 
 	TestEqual(TEXT("Fixed-height textAlignVertical kept as metadata"), GetWidgetProperty(*Label, TEXT("TextAlignVertical")), TEXT("Center"));
-	TestEqual(TEXT("Fixed-height label outer slot stays top-aligned"), LabelSizeBox->Slot.VerticalAlignment, TEXT("Top"));
+	TestTrue(TEXT("Fixed-height label outer slot stays top-aligned"), LabelSizeBox->Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Top);
 	FMargin Padding = FMargin(0.0f);
 	TestTrue(TEXT("Fixed-height text synthesizes internal padding"),
 		Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(*Label).TryGetMargin(TEXT("Padding"), Padding));
@@ -1663,7 +1663,7 @@ bool FFigmaLuminosityImageOverlayTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Overlay fill remains image"), Node->Visual.Fills[1].Type, EDesignFillType::Image);
 	TestEqual(TEXT("Overlay image mode preserved"), Node->Visual.Fills[1].Image.Mode, EDesignImageMode::Fit);
 
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::FromSettings(UDesign2UMGSettings::Get()));
 	const FUMGWidgetNode* Overlay = FindWidgetById(Data.RootWidget, TEXT("node_lum"));
 	TestTrue(TEXT("Converted widget found"), Overlay != nullptr);
 	if (!Overlay)
@@ -1740,7 +1740,7 @@ bool FFigmaWideLuminosityImageOverlayTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::FromSettings(UDesign2UMGSettings::Get()));
 	const FUMGWidgetNode* Overlay = FindWidgetById(Data.RootWidget, TEXT("overlay_wide"));
 	TestTrue(TEXT("Wide luminosity overlay widget exists"), Overlay != nullptr);
 	if (!Overlay || Overlay->Children.Num() < 2)
@@ -1804,7 +1804,7 @@ bool FFigmaSquareLuminosityImageOverlayTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::FromSettings(UDesign2UMGSettings::Get()));
 	const FUMGWidgetNode* Overlay = FindWidgetById(Data.RootWidget, TEXT("overlay_square"));
 	TestTrue(TEXT("Square luminosity overlay widget exists"), Overlay != nullptr);
 	if (!Overlay)
@@ -1874,7 +1874,7 @@ bool FFigmaLuminosityIdentityTransformOverlayTest::RunTest(const FString& Parame
 		return false;
 	}
 
-	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::FromSettings(UDesign2UMGSettings::Get()));
 	const FUMGWidgetNode* Overlay = FindWidgetById(Data.RootWidget, TEXT("overlay_id"));
 	TestTrue(TEXT("Identity transform overlay widget exists"), Overlay != nullptr);
 	if (!Overlay)

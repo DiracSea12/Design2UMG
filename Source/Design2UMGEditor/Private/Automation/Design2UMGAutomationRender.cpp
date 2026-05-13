@@ -6,6 +6,7 @@
 #include "Design2UMGLocalFigmaImport.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGNotifications.h"
+#include "Design2UMGSettings.h"
 #include "DesignFontImportService.h"
 #include "DesignImportPipeline.h"
 #include "DesignImportUtils.h"
@@ -497,6 +498,8 @@ namespace
 		const TGuardValue<FString> FontImportPathGuard(
 			GDesign2UMGAutomationFontImportPath,
 			ResolveAutomationFontImportPath(Spec.OutputPath));
+		const FDesign2UMGImportSettingsSnapshot AutomationSettingsSnapshot =
+			FDesign2UMGImportSettingsSnapshot::FromSettings(UDesign2UMGSettings::Get());
 
 		auto MakeAutomationImportRequest = [&](const bool bResolveImages)
 		{
@@ -506,6 +509,7 @@ namespace
 			Request.bResolveImages = bResolveImages;
 			Request.Generation.Mode = EDesignBlueprintGenerationMode::BlueprintAndCompiledPng;
 			Request.Generation.CompiledPngFilePath = Spec.RenderPngPath;
+			Request.SettingsSnapshot = AutomationSettingsSnapshot;
 			return Request;
 		};
 
@@ -635,7 +639,12 @@ namespace
 				return false;
 			}
 
-			if (!FPenMCPBridge::ConvertFromMCP(NodesJson, VariablesJson, Data, Spec.NodeId))
+			if (!FPenMCPBridge::ConvertFromMCP(
+				NodesJson,
+				VariablesJson,
+				AutomationSettingsSnapshot,
+				Data,
+				Spec.NodeId))
 			{
 				OutResult.ErrorMessage = FString::Printf(TEXT("Failed to convert MCP payload for %s"), *Spec.SourcePath);
 				return false;
@@ -645,7 +654,10 @@ namespace
 				SourceDocument,
 				Spec.NodeId,
 				ShouldSkipDesignerOnlyNodeForAutomationSnapshot);
-			const FImportAnalysisResult AnalysisResult = DesignImportPipeline::AnalyzeImport(Data, FImportAnalysisInput{ true });
+			FImportAnalysisInput AnalysisInput;
+			AnalysisInput.bResolveImages = true;
+			AnalysisInput.SettingsSnapshot = &AutomationSettingsSnapshot;
+			const FImportAnalysisResult AnalysisResult = DesignImportPipeline::AnalyzeImport(Data, AnalysisInput);
 			Data = AnalysisResult.Data;
 			DeferredAnalysisResult = AnalysisResult;
 			DiagnosticDocument = SourceDocument;
@@ -720,7 +732,11 @@ namespace
 			GenerationRequest.RuntimeImageReport = DeferredAnalysisResult->ImageReport;
 		}
 
-		if (!ApplyGenerationResult(DesignImportPipeline::GenerateArtifacts(Data, GenerationRequest)))
+		if (!ApplyGenerationResult(
+			DesignImportPipeline::GenerateArtifacts(
+				Data,
+				GenerationRequest,
+				AutomationSettingsSnapshot.GenerationSettings)))
 		{
 			OutResult.ErrorMessage = FString::Printf(TEXT("Failed to generate compiled PNG for %s"), *Spec.SourcePath);
 			return false;

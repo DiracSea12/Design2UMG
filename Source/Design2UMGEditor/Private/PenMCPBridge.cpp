@@ -1,11 +1,12 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "PenMCPBridge.h"
+#include "Design2UMGEditorDesignSourceRegistry.h"
 #include "DesignImportPipeline.h"
-#include "PenParser.h"
 #include "UMGSchema.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogPenMCPBridge, Log, All);
 
@@ -199,11 +200,35 @@ namespace
 		UE_LOG(LogPenMCPBridge, Log, TEXT("BuildDocumentJson: %d children"), Children.Num());
 		return OutDocumentObject.IsValid();
 	}
+
+	bool SerializeDocumentObject(const TSharedPtr<FJsonObject>& DocumentObject, FString& OutJson)
+	{
+		if (!DocumentObject.IsValid())
+		{
+			return false;
+		}
+
+		OutJson.Reset();
+		const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutJson);
+		return FJsonSerializer::Serialize(DocumentObject.ToSharedRef(), Writer);
+	}
 }
 
 bool FPenMCPBridge::ConvertFromMCP(
 	const FString& NodesJson,
 	const FString& VariablesJson,
+	FUMGWidgetData& OutData,
+	const FString& TargetNodeId)
+{
+	const FDesign2UMGImportSettingsSnapshot SettingsSnapshot =
+		FDesign2UMGImportSettingsSnapshot::FromSettings(UDesign2UMGSettings::Get());
+	return ConvertFromMCP(NodesJson, VariablesJson, SettingsSnapshot, OutData, TargetNodeId);
+}
+
+bool FPenMCPBridge::ConvertFromMCP(
+	const FString& NodesJson,
+	const FString& VariablesJson,
+	const FDesign2UMGImportSettingsSnapshot& SettingsSnapshot,
 	FUMGWidgetData& OutData,
 	const FString& TargetNodeId)
 {
@@ -213,14 +238,17 @@ bool FPenMCPBridge::ConvertFromMCP(
 		return false;
 	}
 
-	FDesignDocument Document;
-	if (!FPenParser::ParseDocumentObject(DocumentObject, Document))
+	FString DocumentJson;
+	if (!SerializeDocumentObject(DocumentObject, DocumentJson))
 	{
 		return false;
 	}
 
-	OutData = DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{ false }).Data;
-	return true;
+	return Design2UMGEditorDesignSourceRegistry::TryConvertSource(
+		TEXT("Pen"),
+		DocumentJson,
+		SettingsSnapshot,
+		OutData);
 }
 
 bool FPenMCPBridge::BuildFilteredDocumentObject(

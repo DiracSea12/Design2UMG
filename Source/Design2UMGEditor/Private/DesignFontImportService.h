@@ -12,4 +12,5 @@ namespace DesignFontImportService
 	FString EnsureFontFamilyAvailable(const FString& FontFamily);
 	void PrimeKnownIconFamily(const FString& FontFamily);
 	void ResetTransientState();
+	bool CanReusePinnedAutomationFontPath(const FString& AutomationFontImportPath);
 }

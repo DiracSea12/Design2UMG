@@ -77,6 +77,40 @@ struct FUMGOffsetsData
 /**
  * Slot layout data describing placement inside the parent container.
  */
+UENUM()
+enum class EUMGSlotHorizontalAlignment : uint8
+{
+	// Keep zero-initialized slot data aligned with the semantic default.
+	Fill = 0,
+	Left = 1,
+	Center = 2,
+	Right = 3
+};
+
+UENUM()
+enum class EUMGSlotVerticalAlignment : uint8
+{
+	// Keep zero-initialized slot data aligned with the semantic default.
+	Fill = 0,
+	Top = 1,
+	Center = 2,
+	Bottom = 3
+};
+
+UENUM()
+enum class EUMGSlotSizeRule : uint8
+{
+	Auto = 0,
+	Fill = 1
+};
+
+static_assert(static_cast<uint8>(EUMGSlotHorizontalAlignment::Fill) == 0,
+	"EUMGSlotHorizontalAlignment::Fill must stay zero for default slot compatibility.");
+static_assert(static_cast<uint8>(EUMGSlotVerticalAlignment::Fill) == 0,
+	"EUMGSlotVerticalAlignment::Fill must stay zero for default slot compatibility.");
+static_assert(static_cast<uint8>(EUMGSlotSizeRule::Auto) == 0,
+	"EUMGSlotSizeRule::Auto must stay zero for default slot compatibility.");
+
 USTRUCT()
 struct FUMGSlotData
 {
@@ -98,13 +132,13 @@ struct FUMGSlotData
 
 	// VerticalBox / HorizontalBox / Overlay
 	UPROPERTY()
-	FString HorizontalAlignment = TEXT("Fill"); // Left, Center, Right, Fill
+	EUMGSlotHorizontalAlignment HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
 
 	UPROPERTY()
-	FString VerticalAlignment = TEXT("Fill"); // Top, Center, Bottom, Fill
+	EUMGSlotVerticalAlignment VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
 
 	UPROPERTY()
-	FString SizeRule = TEXT("Auto"); // Auto, Fill
+	EUMGSlotSizeRule SizeRule = EUMGSlotSizeRule::Auto;
 
 	UPROPERTY()
 	float FillWeight = 1.0f;

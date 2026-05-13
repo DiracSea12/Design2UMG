@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "WidgetResourceBinder.h"
 #include "DesignResourceResolver.h"
@@ -6,6 +6,7 @@
 #include "UMGImageCropUtils.h"
 #include "UMGPropertyKeys.h"
 #include "UMGWidgetNodeAccess.h"
+#include "UMGWidgetNodeProceduralResourceAccess.h"
 
 #include "Components/Image.h"
 #include "Engine/Texture2D.h"
@@ -21,8 +22,16 @@ bool FWidgetResourceBinder::BindImageResource(UImage* ImageWidget, const FUMGWid
 			return false;
 		}
 
-		FUMGPropertyBag GenerationProps = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
-		UTexture2D* Texture = DesignResourceResolver::ResolveTextureFromMaterialRef(MatRef, GenerationProps, ImageWidget);
+		FUMGProceduralResourceRequest ResourceRequest;
+		if (!Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Node, ResourceRequest))
+		{
+			return false;
+		}
+
+		UTexture2D* Texture = DesignResourceResolver::ResolveTextureFromMaterialRef(
+			ResourceRequest.MaterialRef,
+			ResourceRequest.BuildCompatibilityPropertyBag(),
+			ImageWidget);
 		if (Texture)
 		{
 			ImageWidget->SetBrushFromTexture(Texture);

@@ -1,7 +1,8 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignPreviewMaterializationService.h"
 
+#include "Design2UMGGenerationSettingsSnapshot.h"
 #include "UMGWidgetUtils.h"
 #include "DesignRemoteImageImporter.h"
 #include "Design2UMGLog.h"
@@ -12,6 +13,18 @@
 
 namespace
 {
+	FDesign2UMGGenerationSettingsSnapshot BuildPreviewGenerationSettings(
+		const FPreviewApprovedSnapshot& ApprovedSnapshot)
+	{
+		FDesign2UMGGenerationSettingsSnapshot GenerationSettings;
+		if (ApprovedSnapshot.MaterializationSettingsSnapshot.IsSet())
+		{
+			GenerationSettings.ClassOverrides =
+				ApprovedSnapshot.MaterializationSettingsSnapshot->ClassOverrides;
+		}
+		return GenerationSettings;
+	}
+
 	bool TryResolvePreviewDesignSize(const FPreviewApprovedSnapshot& ApprovedSnapshot, FVector2D& OutPreviewDesignSize)
 	{
 		const FDesignPixelBounds& RootBounds = ApprovedSnapshot.Data.RootWidget.Bounds;
@@ -112,6 +125,10 @@ UUserWidget* FDesignPreviewMaterializationService::CreatePreviewWidget(
 		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create WidgetTree"));
 		return nullptr;
 	}
+
+	const FDesign2UMGGenerationSettingsSnapshot GenerationSettings =
+		BuildPreviewGenerationSettings(ApprovedSnapshot);
+	const Design2UMGGenerationSettingsContext::FScopedSettingsSnapshot ScopedGenerationSettings(GenerationSettings);
 
 	UWidget* RootWidget = FUMGWidgetUtils::CreateWidgetRecursive(
 		TempWidget->WidgetTree,

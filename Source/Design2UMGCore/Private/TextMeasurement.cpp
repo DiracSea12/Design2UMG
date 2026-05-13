@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "TextMeasurement.h"
 #include "TextMeasurementInternal.h"
@@ -126,7 +126,7 @@ bool TextMeasurement::ShouldApplyExplicitLineHeight(const TSharedPtr<FDesignNode
 	}
 
 	const float EffectiveProbeFontSize = ProbeFontSize > 0.0f ? ProbeFontSize : Node->Text.FontSize;
-	const int32 LetterSpacingTracking = (EffectiveProbeFontSize > 0.0f && Node->Text.LetterSpacing != 0.0f)
+	const int32 LetterSpacingTracking = (EffectiveProbeFontSize > 0.0f && Node->Text.HasLetterSpacingValue() && Node->Text.LetterSpacing != 0.0f)
 		? TextStyleUtils::ConvertLetterSpacingPxToTracking(Node->Text.LetterSpacing, Node->Text.FontSize, EffectiveProbeFontSize)
 		: 0;
 	const FVector2D UnwrappedSize = RuntimeProbe::MeasureTextSize(
@@ -185,7 +185,7 @@ FVector2D TextMeasurement::MeasureTextNodeSize(const TSharedPtr<FDesignNode>& No
 	}
 
 	const float AppliedFontSize = ResolveTextFontSizeForUMG(Node);
-	const int32 LetterSpacingTracking = (AppliedFontSize > 0.0f && Node->Text.LetterSpacing != 0.0f)
+	const int32 LetterSpacingTracking = (AppliedFontSize > 0.0f && Node->Text.HasLetterSpacingValue() && Node->Text.LetterSpacing != 0.0f)
 		? TextStyleUtils::ConvertLetterSpacingPxToTracking(Node->Text.LetterSpacing, Node->Text.FontSize, AppliedFontSize)
 		: 0;
 	FVector2D FallbackSize = RuntimeProbe::MeasureTextSize(

@@ -408,8 +408,8 @@ namespace
 
 			if (UBorder* Border = Cast<UBorder>(Content))
 			{
-				Border->SetHorizontalAlignment(FUMGValueParser::ParseHAlign(ChildNode.Slot.HorizontalAlignment));
-				Border->SetVerticalAlignment(FUMGValueParser::ParseVAlign(ChildNode.Slot.VerticalAlignment));
+				Border->SetHorizontalAlignment(FUMGValueParser::ToSlateHorizontalAlignment(ChildNode.Slot.HorizontalAlignment));
+				Border->SetVerticalAlignment(FUMGValueParser::ToSlateVerticalAlignment(ChildNode.Slot.VerticalAlignment));
 			}
 		}
 

@@ -22,6 +22,12 @@ ROOT_MIN_SIZE = 8
 ROOT_CONTAINER_TYPES = {"frame", "group", "component", "ref"}
 NO_REGRESSION_EPSILON = 1.25e-4
 REFERENCE_CACHE_SCHEMA_VERSION = 1
+DEFAULT_FIGMA_EXPORT_DIR_NAMES = (
+    "figma_export",
+    "figma_export1",
+    "figma_export2",
+    "figma_export3",
+)
 
 
 def parse_args():
@@ -56,6 +62,22 @@ def default_output_root() -> Path:
     return verify.plugin_root() / "Saved" / "Design2UMG" / "Automation" / f"batch_{stamp}_{Path.cwd().name}"
 
 
+def resolve_default_figma_export_roots(design_root: Path, explicit_roots: list[str]) -> list[str]:
+    if explicit_roots:
+        return [str(Path(root).resolve()) for root in explicit_roots if root]
+
+    for ancestor in design_root.parents:
+        resolved_roots = []
+        for directory_name in DEFAULT_FIGMA_EXPORT_DIR_NAMES:
+            candidate = ancestor / directory_name
+            if candidate.is_dir():
+                resolved_roots.append(str(candidate.resolve()))
+        if resolved_roots:
+            return resolved_roots
+
+    return []
+
+
 def sanitize_case_name(value: str) -> str:
     normalized = (value or "").strip().lower()
     normalized = re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")
@@ -70,13 +92,14 @@ def classify_run_scope(include_pattern: str, exclude_pattern: str) -> str:
     return "full"
 
 
-def write_run_scope(output_root: Path, args, cases: list[dict]) -> Path:
+def write_run_scope(output_root: Path, args, cases: list[dict], effective_figma_export_roots: list[str]) -> Path:
     run_scope = {
         "scope": classify_run_scope(args.include, args.exclude),
         "include_pattern": args.include,
         "exclude_pattern": args.exclude,
         "discovered_total": len(cases),
         "formal_admissible_candidate": not bool(args.include),
+        "figma_export_roots": effective_figma_export_roots,
         "case_names": [case["name"] for case in cases],
         "case_inputs": [
             {
@@ -1320,6 +1343,9 @@ def process_case_result(state: dict, batch_exit_code: int, batch_log_path: Path)
                 "blocked": True,
                 "report_path": str(report_path),
                 "verdict": "unverified_reference",
+                "verification_level": reference_authority.get("verification_level"),
+                "canonical_source": reference_authority.get("canonical_source") or reference_context.get("canonical_source"),
+                "reason": reference_authority.get("reason") or reference_validation.get("reason") or "unverified_reference",
             }
 
     if not reference_validation["valid"]:
@@ -1339,6 +1365,9 @@ def process_case_result(state: dict, batch_exit_code: int, batch_log_path: Path)
             "blocked": True,
             "report_path": str(report_path),
             "verdict": "invalid_reference",
+            "verification_level": reference_authority.get("verification_level"),
+            "canonical_source": reference_authority.get("canonical_source") or reference_context.get("canonical_source"),
+            "reason": reference_validation.get("reason") or reference_authority.get("reason") or "invalid_reference",
         }
 
     report_path = verify.compare_and_report(
@@ -1435,6 +1464,7 @@ def main():
     design_root = Path(args.design_root).resolve()
     if not design_root.is_dir():
         raise RuntimeError(f"Design root not found: {design_root}")
+    effective_figma_export_roots = resolve_default_figma_export_roots(design_root, args.figma_export_root)
 
     runtime_args = SimpleNamespace(
         project=args.project,
@@ -1443,7 +1473,7 @@ def main():
 
     runtime_args.project, project_plugin_root = verify.prepare_runtime_project(
         runtime_args,
-        [str(design_root), *args.figma_export_root],
+        [str(design_root), *effective_figma_export_roots],
     )
     runtime_args.project_plugin_root = project_plugin_root
     runtime_args.log_cmds = args.log_cmds
@@ -1453,6 +1483,7 @@ def main():
         print(f"editor={args.editor}")
         print(f"project_plugin_root={project_plugin_root}")
         print(f"design_root={design_root}")
+        print(f"figma_export_roots={effective_figma_export_roots}")
         sys.exit(0)
 
     output_root = Path(args.output_root).resolve() if args.output_root else default_output_root()
@@ -1460,11 +1491,11 @@ def main():
     verify.sync_project_plugin_build_id(args.editor, project_plugin_root)
 
     cases = discover_pen_cases(design_root, args.include, args.exclude)
-    cases.extend(discover_figma_export_cases(args.figma_export_root, args.include, args.exclude))
+    cases.extend(discover_figma_export_cases(effective_figma_export_roots, args.include, args.exclude))
     if not cases:
         raise RuntimeError(f"No eligible pen or figma export cases discovered under: {design_root}")
     verify.seed_runtime_font_assets(runtime_args.project, [case["source"] for case in cases])
-    run_scope_path = write_run_scope(output_root, args, cases)
+    run_scope_path = write_run_scope(output_root, args, cases, effective_figma_export_roots)
     reference_cache_root = resolve_reference_cache_root(args, output_root)
     if reference_cache_root:
         reference_cache_root.mkdir(parents=True, exist_ok=True)
@@ -1518,7 +1549,17 @@ def main():
     case_results = process_case_results(states, editor_exit_code, batch_log_path, post_workers)
     for result in case_results:
         status = "BLOCKED" if result.get("blocked") else "CASE"
-        print(f"[{status}] {result['name']} report={result['report_path']}")
+        line = f"[{status}] {result['name']} report={result['report_path']}"
+        if result.get("blocked"):
+            if result.get("verdict"):
+                line += f" verdict={result['verdict']}"
+            if result.get("verification_level"):
+                line += f" verification_level={result['verification_level']}"
+            if result.get("canonical_source"):
+                line += f" canonical_source={result['canonical_source']}"
+            if result.get("reason"):
+                line += f" reason={result['reason']}"
+        print(line)
     postprocess_completed_at = time.time()
 
     no_regression_cases = [item for item in case_results if item.get("no_regression_available")]

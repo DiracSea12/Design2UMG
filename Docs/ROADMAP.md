@@ -3,7 +3,7 @@
 **创建日期**：2026-02-15
 **基于**：代码 Review + 竞品调研 + 三轮交叉验证
 **状态说明**：`[ ]` 待开始 | `[~]` 进行中 | `[x]` 已完成
-**Phase 14 Review 必做项**：见 [ReviewActionPlan.md](ReviewActionPlan.md)。这份文档只记录还要实际动手做什么、做到什么才算完。
+**Review 驱动优化**：内部 review 计划不作为公开发布文档；当前仍需实现的 review 硬化项以对应 OpenSpec phase 为准。
 
 ---
 

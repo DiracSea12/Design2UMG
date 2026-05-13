@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "TextMeasurementInternal.h"
 
@@ -65,7 +65,9 @@ namespace CacheTrace
 		const FString LineHeightKey = Node->Text.LineHeight > 0.0f
 			? FString::Printf(TEXT("%.4f"), Node->Text.LineHeight)
 			: TEXT("default");
-		const FString LetterSpacingKey = FString::Printf(TEXT("%.4f"), Node->Text.LetterSpacing);
+		const FString LetterSpacingKey = Node->Text.HasLetterSpacingValue()
+			? FString::Printf(TEXT("%.4f"), Node->Text.LetterSpacing)
+			: FString(TEXT("unset"));
 		const bool bApplyExplicitLineHeight = TextMeasurement::ShouldApplyExplicitLineHeight(Node, Node->Text.FontSize);
 		return FString::Printf(
 			TEXT("%s|%s|%.1f|lh=%s|ls=%s|explicit=%d"),
@@ -241,7 +243,9 @@ namespace CacheTrace
 			: TEXT("default");
 		const FString NormalizedFamily = NormalizeFontFamilyKeyForCacheKey(Node->Text.FontFamily);
 		const FString TypefaceName = ResolveTypefaceNameForCacheKey(Node);
-		const FString LetterSpacingKey = FString::Printf(TEXT("%.4f"), Node->Text.LetterSpacing);
+		const FString LetterSpacingKey = Node->Text.HasLetterSpacingValue()
+			? FString::Printf(TEXT("%.4f"), Node->Text.LetterSpacing)
+			: FString(TEXT("unset"));
 		const FString WidthKey = FString::Printf(
 			TEXT("%d:%.2f"),
 			static_cast<int32>(Node->Transform.Width.Mode),
@@ -278,7 +282,9 @@ namespace CacheTrace
 			: TEXT("default");
 		const FString NormalizedFamily = NormalizeFontFamilyKeyForCacheKey(Node->Text.FontFamily);
 		const FString TypefaceName = ResolveTypefaceNameForCacheKey(Node);
-		const FString LetterSpacingKey = FString::Printf(TEXT("%.4f"), Node->Text.LetterSpacing);
+		const FString LetterSpacingKey = Node->Text.HasLetterSpacingValue()
+			? FString::Printf(TEXT("%.4f"), Node->Text.LetterSpacing)
+			: FString(TEXT("unset"));
 		return FString::Printf(
 			TEXT("%s|%s|%s|%.1f|ls=%s|grow=%d|align=%d|valign=%d|wrap=%d|truncate=%d"),
 			*NormalizedFamily,

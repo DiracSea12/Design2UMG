@@ -21,6 +21,7 @@ public:
 		SLATE_ARGUMENT(FString, OriginalJson)
 		SLATE_ARGUMENT(FString, OutputPath)
 		SLATE_ARGUMENT(TArray<FString>, Warnings)
+		SLATE_ARGUMENT(TOptional<FDesignPreviewMaterializationSettingsSnapshot>, InitialMaterializationSettingsSnapshot)
 		SLATE_ARGUMENT(TSharedPtr<IDesignPreviewRefreshAnalyzer>, PreviewRefreshAnalyzer)
 		SLATE_ARGUMENT(TSharedPtr<IDesignPreviewMaterializationService>, PreviewMaterializationService)
 		SLATE_EVENT(FOnPreviewConfirmed, OnConfirmed)
@@ -45,6 +46,7 @@ private:
 	uint64 NextRefreshRequestId = 1;
 	uint64 LatestRequestedRefreshId = 0;
 	TOptional<FPreviewApprovedSnapshot> LatestApprovedSnapshot;
+	TOptional<FDesignPreviewMaterializationSettingsSnapshot> CachedMaterializationSettingsSnapshot;
 	bool bLatestApprovedSnapshotStale = true;
 
 	FOnPreviewConfirmed OnConfirmed;
@@ -57,6 +59,7 @@ private:
 	void RefreshUMGPreview();
 	void DoRefreshPreview(uint64 RequestId, const FString& JsonString);
 	void CleanupPreviewWidget();
+	TOptional<FDesignPreviewMaterializationSettingsSnapshot> ResolveMaterializationSettingsSnapshot();
 	void OnJsonTextChanged(const FText& NewText);
 	void OnOutputPathChanged(const FText& NewText);
 	void InvalidateApprovedSnapshot();

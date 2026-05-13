@@ -21,57 +21,57 @@ namespace
 		return Node.IsValid() ? FMath::Max(1, Node->LayoutData.LayoutColumnSpan.Get(1)) : 1;
 	}
 
-	bool TryMapGridHorizontalAlignment(const FString& Value, FString& OutAlignment)
+	bool TryMapGridHorizontalAlignment(const FString& Value, EUMGSlotHorizontalAlignment& OutAlignment)
 	{
 		if (Value.Equals(TEXT("MIN"), ESearchCase::IgnoreCase)
 			|| Value.Equals(TEXT("LEFT"), ESearchCase::IgnoreCase))
 		{
-			OutAlignment = TEXT("Left");
+			OutAlignment = EUMGSlotHorizontalAlignment::Left;
 			return true;
 		}
 		if (Value.Equals(TEXT("CENTER"), ESearchCase::IgnoreCase))
 		{
-			OutAlignment = TEXT("Center");
+			OutAlignment = EUMGSlotHorizontalAlignment::Center;
 			return true;
 		}
 		if (Value.Equals(TEXT("MAX"), ESearchCase::IgnoreCase)
 			|| Value.Equals(TEXT("RIGHT"), ESearchCase::IgnoreCase))
 		{
-			OutAlignment = TEXT("Right");
+			OutAlignment = EUMGSlotHorizontalAlignment::Right;
 			return true;
 		}
 		if (Value.Equals(TEXT("STRETCH"), ESearchCase::IgnoreCase)
 			|| Value.Equals(TEXT("FILL"), ESearchCase::IgnoreCase))
 		{
-			OutAlignment = TEXT("Fill");
+			OutAlignment = EUMGSlotHorizontalAlignment::Fill;
 			return true;
 		}
 		return false;
 	}
 
-	bool TryMapGridVerticalAlignment(const FString& Value, FString& OutAlignment)
+	bool TryMapGridVerticalAlignment(const FString& Value, EUMGSlotVerticalAlignment& OutAlignment)
 	{
 		if (Value.Equals(TEXT("MIN"), ESearchCase::IgnoreCase)
 			|| Value.Equals(TEXT("TOP"), ESearchCase::IgnoreCase))
 		{
-			OutAlignment = TEXT("Top");
+			OutAlignment = EUMGSlotVerticalAlignment::Top;
 			return true;
 		}
 		if (Value.Equals(TEXT("CENTER"), ESearchCase::IgnoreCase))
 		{
-			OutAlignment = TEXT("Center");
+			OutAlignment = EUMGSlotVerticalAlignment::Center;
 			return true;
 		}
 		if (Value.Equals(TEXT("MAX"), ESearchCase::IgnoreCase)
 			|| Value.Equals(TEXT("BOTTOM"), ESearchCase::IgnoreCase))
 		{
-			OutAlignment = TEXT("Bottom");
+			OutAlignment = EUMGSlotVerticalAlignment::Bottom;
 			return true;
 		}
 		if (Value.Equals(TEXT("STRETCH"), ESearchCase::IgnoreCase)
 			|| Value.Equals(TEXT("FILL"), ESearchCase::IgnoreCase))
 		{
-			OutAlignment = TEXT("Fill");
+			OutAlignment = EUMGSlotVerticalAlignment::Fill;
 			return true;
 		}
 		return false;
@@ -227,19 +227,20 @@ namespace Design2UMGGridLayout
 			return;
 		}
 
-		FString AlignmentValue;
+		EUMGSlotHorizontalAlignment HorizontalAlignmentValue = EUMGSlotHorizontalAlignment::Fill;
 		const FString HorizontalAlignSource = ChildNode->LayoutData.LayoutChildHorizontalAlign.Get(
 			ParentNode->LayoutData.LayoutChildHorizontalAlign.Get(FString()));
-		if (TryMapGridHorizontalAlignment(HorizontalAlignSource, AlignmentValue))
+		if (TryMapGridHorizontalAlignment(HorizontalAlignSource, HorizontalAlignmentValue))
 		{
-			ChildWidget.Slot.HorizontalAlignment = AlignmentValue;
+			ChildWidget.Slot.HorizontalAlignment = HorizontalAlignmentValue;
 		}
 
+		EUMGSlotVerticalAlignment VerticalAlignmentValue = EUMGSlotVerticalAlignment::Fill;
 		const FString VerticalAlignSource = ChildNode->LayoutData.LayoutChildVerticalAlign.Get(
 			ParentNode->LayoutData.LayoutChildVerticalAlign.Get(FString()));
-		if (TryMapGridVerticalAlignment(VerticalAlignSource, AlignmentValue))
+		if (TryMapGridVerticalAlignment(VerticalAlignSource, VerticalAlignmentValue))
 		{
-			ChildWidget.Slot.VerticalAlignment = AlignmentValue;
+			ChildWidget.Slot.VerticalAlignment = VerticalAlignmentValue;
 		}
 	}
 

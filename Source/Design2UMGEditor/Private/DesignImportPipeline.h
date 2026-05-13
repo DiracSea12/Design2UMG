@@ -3,23 +3,36 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Design2UMGConverter.h"
+#include "Design2UMGGenerationSettingsSnapshot.h"
 #include "DesignPreviewContracts.h"
 #include "DesignImportTypes.h"
 #include "UMGSchema.h"
 
 class UWidgetBlueprint;
+class UDesign2UMGSettings;
+
+struct FDesign2UMGImportSettingsSnapshot
+{
+	FDesign2UMGConversionSettings ConversionSettings;
+	FDesign2UMGGenerationSettingsSnapshot GenerationSettings;
+
+	static FDesign2UMGImportSettingsSnapshot FromSettings(const UDesign2UMGSettings* Settings);
+};
 
 // Import-core seams: analysis, preview, and artifact generation exchange
 // explicit request/result payloads so callers do not depend on UI state.
 struct FImportAnalysisInput
 {
 	bool bResolveImages = true;
+	const FDesign2UMGImportSettingsSnapshot* SettingsSnapshot = nullptr;
 };
 
 struct FImportAnalysisResult
 {
 	FUMGWidgetData Data;
 	FString ImageReport;
+	TOptional<FDesign2UMGImportSettingsSnapshot> SettingsSnapshot;
 };
 
 struct FArtifactGenerationResult
@@ -37,6 +50,7 @@ struct FDesignImportRequest
 	bool bUsePreview = true;
 	bool bResolveImages = true;
 	FBlueprintGenerationOptions Generation;
+	TOptional<FDesign2UMGImportSettingsSnapshot> SettingsSnapshot;
 	TOptional<FDesignDocument> DiagnosticDocument;
 	FString DiagnosticImageReport;
 };
@@ -59,7 +73,15 @@ namespace DesignImportPipeline
 		const FPreviewRefreshInput& Input,
 		const FUMGIconFontMappingChanges* MappingChanges = nullptr);
 	FArtifactGenerationResult GenerateArtifacts(FUMGWidgetData& Data, const FArtifactGenerationRequest& Request);
+	FArtifactGenerationResult GenerateArtifacts(
+		FUMGWidgetData& Data,
+		const FArtifactGenerationRequest& Request,
+		const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings);
 	FArtifactGenerationResult GenerateArtifacts(const FPreviewApprovedSnapshot& ApprovedSnapshot, const FArtifactGenerationRequest& Request);
+	FArtifactGenerationResult GenerateArtifacts(
+		const FPreviewApprovedSnapshot& ApprovedSnapshot,
+		const FArtifactGenerationRequest& Request,
+		const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings);
 	FDesignImportExecutionResult Execute(FUMGWidgetData& Data, const FDesignImportRequest& Request);
 	FDesignImportExecutionResult Execute(FDesignDocument& Document, const FDesignImportRequest& Request);
 	void WriteImportDiagnosticReport(

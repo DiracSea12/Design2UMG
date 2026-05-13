@@ -31,7 +31,8 @@ namespace DesignImportDialogs
 		const FString& OutputPath,
 		const FText& WindowTitle,
 		FOnPreviewConfirmed OnConfirmed,
-		FOnPreviewCancelled OnCancelled)
+		FOnPreviewCancelled OnCancelled,
+		const TOptional<FDesignPreviewMaterializationSettingsSnapshot>& InitialMaterializationSettingsSnapshot)
 	{
 		if (!FSlateApplication::IsInitialized())
 		{
@@ -49,6 +50,7 @@ namespace DesignImportDialogs
 			.OriginalJson(FUMGJsonSerializer::Serialize(Data))
 			.OutputPath(ResolveDialogOutputPath(OutputPath))
 			.Warnings(Data.Warnings)
+			.InitialMaterializationSettingsSnapshot(InitialMaterializationSettingsSnapshot)
 			.OnConfirmed(MoveTemp(OnConfirmed))
 			.OnCancelled(MoveTemp(OnCancelled)));
 

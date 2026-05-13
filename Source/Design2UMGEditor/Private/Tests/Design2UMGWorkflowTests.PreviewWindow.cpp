@@ -1,5 +1,7 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "Misc/AutomationTest.h"
+#include "Design2UMGGenerationSettingsSnapshot.h"
+#include "DesignImportPipeline.h"
 #include "DesignPreviewMaterializationService.h"
 #include "PreviewUserWidget.h"
 #include "SDesign2UMGPreviewWindow.h"
@@ -37,6 +39,19 @@ struct FDesign2UMGPreviewWindowTestAccess
 	static bool CanConfirmLatestSnapshot(const SDesign2UMGPreviewWindow& Window)
 	{
 		return Window.CanConfirmLatestSnapshot();
+	}
+
+	static bool LatestApprovedSnapshotHasMaterializationSettings(const SDesign2UMGPreviewWindow& Window)
+	{
+		return Window.LatestApprovedSnapshot.IsSet()
+			&& Window.LatestApprovedSnapshot->MaterializationSettingsSnapshot.IsSet();
+	}
+
+	static int32 GetLatestApprovedSnapshotMaterializationOverrideCount(const SDesign2UMGPreviewWindow& Window)
+	{
+		return LatestApprovedSnapshotHasMaterializationSettings(Window)
+			? Window.LatestApprovedSnapshot->MaterializationSettingsSnapshot->ClassOverrides.Num()
+			: 0;
 	}
 };
 
@@ -262,6 +277,11 @@ namespace
 			++InvocationCount;
 			LastMaterializedRequestId = Request.RequestId;
 			LastMaterializedWidgetName = Request.ApprovedSnapshot.Data.WidgetName;
+			bSawMaterializationSettingsSnapshot = Request.ApprovedSnapshot.MaterializationSettingsSnapshot.IsSet();
+			LastMaterializationSnapshotOverrideCount =
+				Request.ApprovedSnapshot.MaterializationSettingsSnapshot.IsSet()
+					? Request.ApprovedSnapshot.MaterializationSettingsSnapshot->ClassOverrides.Num()
+					: 0;
 
 			const bool bSawInjectedAnalyzerPayload =
 				Request.ApprovedSnapshot.Data.WidgetName == PreviewHarnessAnalyzerWidgetName
@@ -335,8 +355,10 @@ namespace
 			InvocationCount = 0;
 			LastMaterializedRequestId = 0;
 			bInjectedSeamObserved = false;
+			bSawMaterializationSettingsSnapshot = false;
 			LastMaterializedWidgetName.Reset();
 			LastPreviewWidgetText.Reset();
+			LastMaterializationSnapshotOverrideCount = 0;
 		}
 
 		int32 GetInvocationCount() const
@@ -364,12 +386,24 @@ namespace
 			return LastMaterializedRequestId;
 		}
 
+		bool SawMaterializationSettingsSnapshot() const
+		{
+			return bSawMaterializationSettingsSnapshot;
+		}
+
+		int32 GetLastMaterializationSnapshotOverrideCount() const
+		{
+			return LastMaterializationSnapshotOverrideCount;
+		}
+
 	private:
 		int32 InvocationCount = 0;
 		uint64 LastMaterializedRequestId = 0;
 		bool bInjectedSeamObserved = false;
+		bool bSawMaterializationSettingsSnapshot = false;
 		FString LastMaterializedWidgetName;
 		FString LastPreviewWidgetText;
+		int32 LastMaterializationSnapshotOverrideCount = 0;
 		TStrongObjectPtr<UUserWidget> MaterializedPreviewWidget;
 	};
 
@@ -480,7 +514,13 @@ namespace
 			}
 		}
 
-		bool Open(const FString& OriginalJson, const FString& OutputPath, const TArray<FString>& Warnings = TArray<FString>())
+		bool Open(
+			const FString& OriginalJson,
+			const FString& OutputPath,
+			const TArray<FString>& Warnings = TArray<FString>(),
+			const TOptional<FDesignPreviewMaterializationSettingsSnapshot>& InitialMaterializationSettingsSnapshot =
+				TOptional<FDesignPreviewMaterializationSettingsSnapshot>(),
+			const bool bPumpAfterOpen = true)
 		{
 			if (!FSlateApplication::IsInitialized())
 			{
@@ -503,6 +543,7 @@ namespace
 				.OriginalJson(OriginalJson)
 				.OutputPath(OutputPath)
 				.Warnings(Warnings)
+				.InitialMaterializationSettingsSnapshot(InitialMaterializationSettingsSnapshot)
 				.PreviewRefreshAnalyzer(AnalyzerSpy)
 				.PreviewMaterializationService(MaterializationSpy)
 				.OnConfirmed(FOnPreviewConfirmed::CreateLambda(
@@ -517,7 +558,10 @@ namespace
 					})));
 
 			FSlateApplication::Get().AddWindow(Window.ToSharedRef());
-			PumpSlate();
+			if (bPumpAfterOpen)
+			{
+				PumpSlate();
+			}
 			Telemetry->bPreviewUiOpened = IsWindowAttached();
 			return PreviewWindow.IsValid();
 		}
@@ -795,6 +839,129 @@ bool FPreviewWindowHarnessRefreshFailureBlocksConfirmTest::RunTest(const FString
 	TestFalse(TEXT("Confirm remains blocked after failed refresh"), Harness.CanConfirm());
 	TestFalse(TEXT("Confirm helper reports blocked confirm"), Harness.Confirm());
 	TestEqual(TEXT("Confirm delegate invocation count stays zero"), Harness.ConfirmDelegateSpy->GetInvocationCount(), 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreviewWindowCarriesExplicitMaterializationSnapshotTest,
+	"Design2UMG.PreviewWindow.CarriesExplicitMaterializationSnapshot",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPreviewWindowCarriesExplicitMaterializationSnapshotTest::RunTest(const FString& Parameters)
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		return true;
+	}
+
+	FPreviewWindowHarness Harness;
+	FDesign2UMGGenerationSettingsSnapshot GenerationSnapshot;
+	FWidgetClassOverride& OverrideRule = GenerationSnapshot.ClassOverrides.AddDefaulted_GetRef();
+	OverrideRule.NamePattern = TEXT("PreviewHarness");
+	OverrideRule.WidgetClass = UTextBlock::StaticClass();
+	FDesignPreviewMaterializationSettingsSnapshot MaterializationSnapshot;
+	MaterializationSnapshot.ClassOverrides = GenerationSnapshot.ClassOverrides;
+
+	{
+		const Design2UMGGenerationSettingsContext::FScopedSettingsSnapshot ScopedSnapshot(GenerationSnapshot);
+		TestTrue(TEXT("Preview harness opens window with explicit initial snapshot"),
+			Harness.Open(
+				MakePreviewHarnessJson(TEXT("Snapshot Original")),
+				TEXT("/Game/Design2UMG/_TestOutput/PreviewHarnessSnapshot"),
+				TArray<FString>(),
+				MaterializationSnapshot,
+				false));
+	}
+	Harness.PumpSlate();
+
+	if (!Harness.PreviewWindow.IsValid())
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("Initial preview materialization receives explicit snapshot"),
+		Harness.MaterializationSpy->SawMaterializationSettingsSnapshot());
+	TestEqual(TEXT("Initial preview materialization keeps override count"),
+		Harness.MaterializationSpy->GetLastMaterializationSnapshotOverrideCount(),
+		1);
+
+	Harness.ResetObservedTelemetry();
+	TestTrue(TEXT("Refresh after scope reuse still rebuilds preview"),
+		Harness.RequestRefresh(MakePreviewHarnessJson(TEXT("Snapshot Edited"))));
+	TestTrue(TEXT("Refresh keeps explicit materialization snapshot after scope exits"),
+		Harness.MaterializationSpy->SawMaterializationSettingsSnapshot());
+	TestEqual(TEXT("Refresh keeps the captured override count"),
+		Harness.MaterializationSpy->GetLastMaterializationSnapshotOverrideCount(),
+		1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreviewWindowPipelineCarriesExplicitMaterializationSnapshotTest,
+	"Design2UMG.PreviewWindow.PipelineCarriesExplicitMaterializationSnapshot",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPreviewWindowPipelineCarriesExplicitMaterializationSnapshotTest::RunTest(const FString& Parameters)
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		return true;
+	}
+
+	auto PumpSlate = []()
+	{
+		for (int32 TickIndex = 0; TickIndex < 2; ++TickIndex)
+		{
+			FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
+			FSlateApplication::Get().PumpMessages();
+			FSlateApplication::Get().Tick(ESlateTickType::All);
+			FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
+		}
+	};
+
+	FDesign2UMGImportSettingsSnapshot SettingsSnapshot;
+	FWidgetClassOverride& OverrideRule = SettingsSnapshot.GenerationSettings.ClassOverrides.AddDefaulted_GetRef();
+	OverrideRule.NamePattern = TEXT("PipelinePreviewHarness");
+	OverrideRule.WidgetClass = UTextBlock::StaticClass();
+
+	FUMGWidgetData Data;
+	Data.WidgetName = TEXT("WBP_PipelinePreviewHarness");
+	Data.RootWidget.Type = TEXT("TextBlock");
+	Data.RootWidget.Id = TEXT("pipeline_preview_root");
+	Data.RootWidget.Name = TEXT("PipelinePreviewHarness_Content");
+	Data.RootWidget.Bounds = { 0.0f, 0.0f, 180.0f, 40.0f };
+	Data.RootWidget.Text.Text = TEXT("Pipeline Preview");
+
+	FDesignImportRequest Request;
+	Request.OutputPath = TEXT("/Game/Design2UMG/_TestOutput/PipelinePreviewHarness");
+	Request.PreviewWindowTitle = FText::FromString(TEXT("Pipeline Preview Harness"));
+	Request.bUsePreview = true;
+	Request.bResolveImages = false;
+	Request.Generation.Mode = EDesignBlueprintGenerationMode::BlueprintOnly;
+	Request.SettingsSnapshot = SettingsSnapshot;
+
+	const FDesignImportExecutionResult Result = DesignImportPipeline::Execute(Data, Request);
+	TestTrue(TEXT("Pipeline preview opens a preview window"), Result.bPreviewOpened);
+	if (!Result.bPreviewOpened)
+	{
+		return false;
+	}
+
+	PumpSlate();
+
+	const TSharedPtr<SWindow> ActiveWindow = FSlateApplication::Get().GetActiveTopLevelWindow();
+	TestTrue(TEXT("Active top-level window exists after pipeline preview open"), ActiveWindow.IsValid());
+	if (!ActiveWindow.IsValid())
+	{
+		return false;
+	}
+
+	TSharedRef<SDesign2UMGPreviewWindow> PreviewWindow =
+		StaticCastSharedRef<SDesign2UMGPreviewWindow>(ActiveWindow->GetContent());
+	TestTrue(TEXT("Pipeline preview stores explicit materialization snapshot on first refresh"),
+		FDesign2UMGPreviewWindowTestAccess::LatestApprovedSnapshotHasMaterializationSettings(PreviewWindow.Get()));
+	TestEqual(TEXT("Pipeline preview keeps override count through dialog seam"),
+		FDesign2UMGPreviewWindowTestAccess::GetLatestApprovedSnapshotMaterializationOverrideCount(PreviewWindow.Get()),
+		1);
+
+	ActiveWindow->RequestDestroyWindow();
+	PumpSlate();
 	return true;
 }
 

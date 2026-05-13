@@ -17,7 +17,9 @@ namespace DesignImportDialogs
 		const FString& OutputPath,
 		const FText& WindowTitle,
 		FOnPreviewConfirmed OnConfirmed,
-		FOnPreviewCancelled OnCancelled = FOnPreviewCancelled());
+		FOnPreviewCancelled OnCancelled = FOnPreviewCancelled(),
+		const TOptional<FDesignPreviewMaterializationSettingsSnapshot>& InitialMaterializationSettingsSnapshot =
+			TOptional<FDesignPreviewMaterializationSettingsSnapshot>());
 
 	void ShowFrameSelector(
 		const TArray<FDesignFrameInfo>& Frames,

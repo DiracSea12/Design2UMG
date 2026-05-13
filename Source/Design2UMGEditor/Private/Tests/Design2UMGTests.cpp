@@ -285,6 +285,53 @@ bool FRenderTransformScaleJsonContractTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSlotJsonTypedCompatibilityTest,
+	"Design2UMG.Json.SlotTypedCompatibility",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FSlotJsonTypedCompatibilityTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"RootWidget": {
+			"Type": "TextBlock",
+			"Name": "SlotText",
+			"Slot": {
+				"HorizontalAlignment": "left",
+				"HAlign": "center",
+				"VerticalAlignment": "top",
+				"VAlign": "bottom",
+				"SizeRule": "fill"
+			}
+		}
+	})");
+
+	FUMGWidgetData Parsed;
+	FString ParseError;
+	TestTrue(TEXT("UMGJsonParser parses slot aliases"), FUMGJsonParser::ParseJson(Json, Parsed, &ParseError));
+	if (!ParseError.IsEmpty())
+	{
+		AddError(ParseError);
+	}
+
+	const FUMGSlotData& Slot = Parsed.RootWidget.Slot;
+	TestTrue(TEXT("HAlign alias wins over HorizontalAlignment"), Slot.HorizontalAlignment == EUMGSlotHorizontalAlignment::Center);
+	TestTrue(TEXT("VAlign alias wins over VerticalAlignment"), Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Bottom);
+	TestTrue(TEXT("Lowercase SizeRule parses as Fill"), Slot.SizeRule == EUMGSlotSizeRule::Fill);
+
+	const FString RoundTripJson = FUMGJsonSerializer::Serialize(Parsed);
+	TestTrue(TEXT("Serializer keeps canonical horizontal alignment"), RoundTripJson.Contains(TEXT("\"HorizontalAlignment\": \"Center\"")));
+	TestTrue(TEXT("Serializer keeps canonical vertical alignment"), RoundTripJson.Contains(TEXT("\"VerticalAlignment\": \"Bottom\"")));
+	TestTrue(TEXT("Serializer keeps canonical size rule"), RoundTripJson.Contains(TEXT("\"SizeRule\": \"Fill\"")));
+
+	FUMGSlotData UnknownAlignmentSlot;
+	UnknownAlignmentSlot.HorizontalAlignment = FUMGValueParser::ParseSlotHorizontalAlignment(TEXT("Diagonal"));
+	UnknownAlignmentSlot.VerticalAlignment = FUMGValueParser::ParseSlotVerticalAlignment(TEXT("Outside"));
+	TestTrue(TEXT("Unknown horizontal alignment falls back to Fill"), UnknownAlignmentSlot.HorizontalAlignment == EUMGSlotHorizontalAlignment::Fill);
+	TestTrue(TEXT("Unknown vertical alignment falls back to Fill"), UnknownAlignmentSlot.VerticalAlignment == EUMGSlotVerticalAlignment::Fill);
+	TestTrue(TEXT("Unknown SizeRule falls back to Auto"), FUMGValueParser::ParseSlotSizeRule(TEXT("Unexpected")) == EUMGSlotSizeRule::Auto);
+	TestTrue(TEXT("Lowercase Auto size rule parses as Auto"), FUMGValueParser::ParseSlotSizeRule(TEXT("auto")) == EUMGSlotSizeRule::Auto);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenParserTest,
 	"Design2UMG.Parser.BasicDocument",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -860,6 +907,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIconFontNoMappingFallbackTest,
 bool FIconFontNoMappingFallbackTest::RunTest(const FString& Parameters)
 {
 	UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+	TestTrue(TEXT("Settings available"), Settings != nullptr);
+	if (!Settings)
+	{
+		return false;
+	}
 	const TMap<FString, TSoftObjectPtr<UFont>> SavedMap = Settings->IconFontAssetMap;
 	const FString SavedDefaultPath = Settings->DefaultIconFontAssetPath;
 	const FString SavedPlaceholder = Settings->MissingIconFontPlaceholder;
@@ -916,7 +968,7 @@ bool FIconFontNoMappingKeepIconNameTest::RunTest(const FString& Parameters)
 	}
 	FDesignDocument Doc;
 	TestTrue(TEXT("Icon fallback parse succeeds"), FPenParser::ParseDocument(Json, Doc));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::FromSettings(Settings));
 	const FString ExpectedIconName = TEXT("dashboard");
 	const FUMGWidgetNode* IconNode = FindWidgetByProperty(Data.RootWidget, TEXT("IconName"), &ExpectedIconName);
 	TestTrue(TEXT("Icon widget exists"), IconNode != nullptr);
@@ -963,7 +1015,7 @@ bool FIconFontLigatureFallbackUsesRegularWeightTest::RunTest(const FString& Para
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Icon weight fixture parse succeeds"), FPenParser::ParseDocument(Json, Doc));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::FromSettings(Settings));
 	const FString ExpectedIconName = TEXT("dashboard");
 	const FUMGWidgetNode* IconNode = FindWidgetByProperty(Data.RootWidget, TEXT("IconName"), &ExpectedIconName);
 	TestTrue(TEXT("Icon widget exists"), IconNode != nullptr);
@@ -2466,6 +2518,7 @@ bool FPenRichTextConverterUsesRichTextBlockTest::RunTest(const FString& Paramete
 						"height": "fit_content",
 						"fontFamily": "Geist",
 						"fontSize": 18,
+						"letterSpacing": 0,
 						"fill": "#112233",
 						"content": [
 							{ "content": "Open " },
@@ -2480,6 +2533,8 @@ bool FPenRichTextConverterUsesRichTextBlockTest::RunTest(const FString& Paramete
 	FDesignDocument Doc;
 	TestTrue(TEXT("Pen rich text fixture parses"), FPenParser::ParseDocument(Json, Doc));
 	const TSharedPtr<FDesignNode>& ParsedRichTextNode = Doc.Children[0]->Children[0];
+	TestTrue(TEXT("Node-level explicit zero letter spacing remains present"), ParsedRichTextNode->Text.HasLetterSpacingValue());
+	TestEqual(TEXT("Node-level explicit zero letter spacing value"), ParsedRichTextNode->Text.LetterSpacing, 0.0f);
 	TestEqual(TEXT("Rich text run count"), ParsedRichTextNode->Text.TextRuns.Num(), 2);
 	if (ParsedRichTextNode->Text.TextRuns.Num() == 2)
 	{
@@ -2572,7 +2627,7 @@ bool FPenRichTextConverterUsesRichTextBlockTest::RunTest(const FString& Paramete
 	}
 
 	const FString ExpectedSnapshot =
-		TEXT("d2u_run_0{Color=#112233FF;DesignFontSize=18.0;FontFamily=/Game/Design2UMG/Fonts/Geist.Geist;FontSize=27.0;TypefaceFontName=Regular}")
+		TEXT("d2u_run_0{Color=#112233FF;DesignFontSize=18.0;FontFamily=/Game/Design2UMG/Fonts/Geist.Geist;FontSize=27.0;LetterSpacing=0.0;TypefaceFontName=Regular}")
 		TEXT("|d2u_run_1{Color=#112233FF;FontFamily=/Game/Design2UMG/Fonts/Geist.Geist;Href=https://docs.example.com;LetterSpacing=0.0;TypefaceFontName=Bold;Underline=true}");
 
 	TestEqual(TEXT("Rich text style rows snapshot matches"), Snapshot, ExpectedSnapshot);

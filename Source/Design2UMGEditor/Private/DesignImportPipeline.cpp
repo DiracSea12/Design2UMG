@@ -1,22 +1,34 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignImportPipeline.h"
 #include "DesignImportDiagnosticReport.h"
 #include "DesignImportPlanning.h"
+#include "Design2UMGEditorDesignSourceRegistry.h"
 
 #include "Design2UMGLog.h"
 #include "DesignImportDialogs.h"
 #include "DesignImportUtils.h"
 #include "PenMCPBridge.h"
-#include "PenParser.h"
-#include "FigmaParser.h"
 #include "UMGSchema.h"
+#include "Design2UMGSettings.h"
 
 #include "WidgetBlueprint.h"
 #include "Dom/JsonObject.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
+
+FDesign2UMGImportSettingsSnapshot FDesign2UMGImportSettingsSnapshot::FromSettings(const UDesign2UMGSettings* Settings)
+{
+	FDesign2UMGImportSettingsSnapshot Snapshot;
+	Snapshot.ConversionSettings = FDesign2UMGConversionSettings::FromSettings(Settings);
+	if (Settings)
+	{
+		Snapshot.GenerationSettings = FDesign2UMGGenerationSettingsSnapshot::FromSettings(*Settings);
+	}
+	return Snapshot;
+}
 
 namespace DesignImportPipeline
 {
@@ -27,7 +39,6 @@ namespace DesignImportPipeline
 			UWidgetBlueprint* GeneratedBlueprint = nullptr;
 		};
 
-		bool ImportPenJsonInternal(const FString& JsonString, FUMGWidgetData& OutData);
 		FOnPreviewConfirmed CreatePreviewConfirmedHandler(
 			const FDesignImportRequest& Request,
 			const TOptional<FDesignDocument>& DiagnosticDocument,
@@ -37,6 +48,18 @@ namespace DesignImportPipeline
 			const FImportAnalysisResult& AnalysisResult,
 			const FDesignImportRequest& Request,
 			const TOptional<FDesignDocument>& DiagnosticDocument);
+		FDesign2UMGImportSettingsSnapshot BuildFallbackImportSettingsSnapshot()
+		{
+			return FDesign2UMGImportSettingsSnapshot::FromSettings(UDesign2UMGSettings::Get());
+		}
+
+		FDesignPreviewMaterializationSettingsSnapshot BuildPreviewMaterializationSettingsSnapshot(
+			const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings)
+		{
+			FDesignPreviewMaterializationSettingsSnapshot Snapshot;
+			Snapshot.ClassOverrides = GenerationSettings.ClassOverrides;
+			return Snapshot;
+		}
 
 		void MaybeWriteImportDiagnosticReport(
 			const FArtifactGenerationRequest& Request,
@@ -61,6 +84,7 @@ namespace DesignImportPipeline
 		FArtifactGenerationResult GenerateArtifactsInternal(
 			FUMGWidgetData& Data,
 			const FArtifactGenerationRequest& Request,
+			const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings,
 			FArtifactGenerationRuntimeResult* OutRuntimeResult = nullptr)
 		{
 			FArtifactGenerationResult Result;
@@ -68,7 +92,8 @@ namespace DesignImportPipeline
 			{
 			case EDesignBlueprintGenerationMode::BlueprintOnly:
 			{
-				UWidgetBlueprint* GeneratedBlueprint = DesignImportUtils::GenerateBlueprint(Data, Request.OutputPath);
+				UWidgetBlueprint* GeneratedBlueprint =
+					DesignImportUtils::GenerateBlueprint(Data, Request.OutputPath, GenerationSettings);
 				Result.bSucceeded = (GeneratedBlueprint != nullptr);
 				if (GeneratedBlueprint)
 				{
@@ -86,7 +111,8 @@ namespace DesignImportPipeline
 					Data,
 					Request.OutputPath,
 					&Result.GeneratedAssetPath,
-					&Result.RenderPngPath);
+					&Result.RenderPngPath,
+					GenerationSettings);
 				break;
 
 			case EDesignBlueprintGenerationMode::BlueprintAndCompiledPng:
@@ -95,7 +121,8 @@ namespace DesignImportPipeline
 					Request.OutputPath,
 					Request.Generation.CompiledPngFilePath,
 					&Result.GeneratedAssetPath,
-					&Result.RenderedSize);
+					&Result.RenderedSize,
+					GenerationSettings);
 				Result.RenderPngPath = Request.Generation.CompiledPngFilePath;
 				break;
 			}
@@ -106,16 +133,16 @@ namespace DesignImportPipeline
 
 
 
-		bool ImportPenJsonInternal(const FString& JsonString, FUMGWidgetData& OutData)
+		bool SerializeJsonObjectToString(const TSharedPtr<FJsonObject>& Object, FString& OutJson)
 		{
-			FDesignDocument Document;
-			if (!FPenParser::ParseDocument(JsonString, Document))
+			if (!Object.IsValid())
 			{
 				return false;
 			}
 
-			OutData = AnalyzeImport(Document, FImportAnalysisInput{false}).Data;
-			return true;
+			OutJson.Reset();
+			const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutJson);
+			return FJsonSerializer::Serialize(Object.ToSharedRef(), Writer);
 		}
 
 		FOnPreviewConfirmed CreatePreviewConfirmedHandler(
@@ -127,7 +154,8 @@ namespace DesignImportPipeline
 				[CapturedIconFontMappingChanges = IconFontMappingChanges,
 				 CapturedGeneration = Request.Generation,
 				 bCapturedResolveImages = Request.bResolveImages,
-				 CapturedDiagnosticDocument = DiagnosticDocument](const FPreviewGenerationRequest& PreviewGenerationRequest)
+				 CapturedDiagnosticDocument = DiagnosticDocument,
+				 CapturedSettingsSnapshot = Request.SettingsSnapshot](const FPreviewGenerationRequest& PreviewGenerationRequest)
 				{
 					FPreviewApprovedSnapshot ApprovedSnapshot = PreviewGenerationRequest.ApprovedSnapshot;
 					ApprovedSnapshot.Data.IconFontMappingChanges = CapturedIconFontMappingChanges;
@@ -140,7 +168,14 @@ namespace DesignImportPipeline
 						GenerationRequest.DiagnosticDocument = CapturedDiagnosticDocument;
 					}
 
-					GenerateArtifacts(ApprovedSnapshot, GenerationRequest);
+					if (CapturedSettingsSnapshot.IsSet())
+					{
+						GenerateArtifacts(ApprovedSnapshot, GenerationRequest, CapturedSettingsSnapshot->GenerationSettings);
+					}
+					else
+					{
+						GenerateArtifacts(ApprovedSnapshot, GenerationRequest);
+					}
 				});
 		}
 
@@ -151,6 +186,22 @@ namespace DesignImportPipeline
 			const TOptional<FDesignDocument>& DiagnosticDocument)
 		{
 			FDesignImportExecutionResult Result;
+			const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr;
+			FDesign2UMGImportSettingsSnapshot FallbackSettingsSnapshot;
+			if (AnalysisResult.SettingsSnapshot.IsSet())
+			{
+				GenerationSettings = &AnalysisResult.SettingsSnapshot->GenerationSettings;
+			}
+			else if (Request.SettingsSnapshot.IsSet())
+			{
+				GenerationSettings = &Request.SettingsSnapshot->GenerationSettings;
+			}
+			else
+			{
+				FallbackSettingsSnapshot = BuildFallbackImportSettingsSnapshot();
+				GenerationSettings = &FallbackSettingsSnapshot.GenerationSettings;
+			}
+
 			if (Request.bUsePreview
 				&& DesignImportDialogs::OpenPreviewWindow(
 					Data,
@@ -161,7 +212,11 @@ namespace DesignImportPipeline
 						[]()
 						{
 							UE_LOG(LogDesign2UMG, Log, TEXT("DesignImportPipeline: Preview cancelled"));
-						})))
+						}),
+					GenerationSettings
+						? TOptional<FDesignPreviewMaterializationSettingsSnapshot>(
+							BuildPreviewMaterializationSettingsSnapshot(*GenerationSettings))
+						: TOptional<FDesignPreviewMaterializationSettingsSnapshot>()))
 			{
 				Result.bSucceeded = true;
 				Result.bPreviewOpened = true;
@@ -183,7 +238,8 @@ namespace DesignImportPipeline
 			}
 
 			FArtifactGenerationRuntimeResult RuntimeResult;
-			const FArtifactGenerationResult GenerationResult = GenerateArtifactsInternal(Data, GenerationRequest, &RuntimeResult);
+			const FArtifactGenerationResult GenerationResult =
+				GenerateArtifactsInternal(Data, GenerationRequest, GenerationSettings, &RuntimeResult);
 			Result.bSucceeded = GenerationResult.bSucceeded;
 			Result.GeneratedBlueprint = RuntimeResult.GeneratedBlueprint;
 			Result.GeneratedAssetPath = GenerationResult.GeneratedAssetPath;
@@ -212,10 +268,28 @@ namespace DesignImportPipeline
 
 	FArtifactGenerationResult GenerateArtifacts(FUMGWidgetData& Data, const FArtifactGenerationRequest& Request)
 	{
-		return GenerateArtifactsInternal(Data, Request);
+		const FDesign2UMGImportSettingsSnapshot FallbackSettingsSnapshot = BuildFallbackImportSettingsSnapshot();
+		return GenerateArtifactsInternal(Data, Request, &FallbackSettingsSnapshot.GenerationSettings);
+	}
+
+	FArtifactGenerationResult GenerateArtifacts(
+		FUMGWidgetData& Data,
+		const FArtifactGenerationRequest& Request,
+		const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings)
+	{
+		return GenerateArtifactsInternal(Data, Request, &GenerationSettings);
 	}
 
 	FArtifactGenerationResult GenerateArtifacts(const FPreviewApprovedSnapshot& ApprovedSnapshot, const FArtifactGenerationRequest& Request)
+	{
+		const FDesign2UMGImportSettingsSnapshot FallbackSettingsSnapshot = BuildFallbackImportSettingsSnapshot();
+		return GenerateArtifacts(ApprovedSnapshot, Request, FallbackSettingsSnapshot.GenerationSettings);
+	}
+
+	FArtifactGenerationResult GenerateArtifacts(
+		const FPreviewApprovedSnapshot& ApprovedSnapshot,
+		const FArtifactGenerationRequest& Request,
+		const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings)
 	{
 		FArtifactGenerationRequest GenerationRequest = Request;
 		if (GenerationRequest.SourceRequestId == 0)
@@ -234,20 +308,30 @@ namespace DesignImportPipeline
 			DesignImportPlanning::ResolveImages(GenerationData, &ResolvedImageReport);
 			GenerationRequest.RuntimeImageReport = ResolvedImageReport;
 		}
-		return GenerateArtifactsInternal(GenerationData, GenerationRequest);
+		return GenerateArtifactsInternal(GenerationData, GenerationRequest, &GenerationSettings);
 	}
 
 	FDesignImportExecutionResult Execute(FUMGWidgetData& Data, const FDesignImportRequest& Request)
 	{
-		const FImportAnalysisResult AnalysisResult = AnalyzeImport(Data, FImportAnalysisInput{Request.bResolveImages});
+		FImportAnalysisInput AnalysisInput;
+		AnalysisInput.bResolveImages = Request.bResolveImages;
+		AnalysisInput.SettingsSnapshot = Request.SettingsSnapshot.IsSet() ? &Request.SettingsSnapshot.GetValue() : nullptr;
+		const FImportAnalysisResult AnalysisResult = AnalyzeImport(Data, AnalysisInput);
 		return ExecuteWithAnalysis(Data, AnalysisResult, Request, Request.DiagnosticDocument);
 	}
 
 	FDesignImportExecutionResult Execute(FDesignDocument& Document, const FDesignImportRequest& Request)
 	{
-		const FImportAnalysisResult AnalysisResult = AnalyzeImport(Document, FImportAnalysisInput{Request.bResolveImages});
+		FImportAnalysisInput AnalysisInput;
+		AnalysisInput.bResolveImages = Request.bResolveImages;
+		AnalysisInput.SettingsSnapshot = Request.SettingsSnapshot.IsSet() ? &Request.SettingsSnapshot.GetValue() : nullptr;
+		const FImportAnalysisResult AnalysisResult = AnalyzeImport(Document, AnalysisInput);
 		FUMGWidgetData Data = AnalysisResult.Data;
 		FDesignImportRequest FinalRequest = Request;
+		if (!FinalRequest.SettingsSnapshot.IsSet() && AnalysisResult.SettingsSnapshot.IsSet())
+		{
+			FinalRequest.SettingsSnapshot = AnalysisResult.SettingsSnapshot;
+		}
 		FinalRequest.DiagnosticImageReport = AnalysisResult.ImageReport;
 		return ExecuteWithAnalysis(Data, AnalysisResult, FinalRequest, TOptional<FDesignDocument>(Document));
 	}
@@ -286,21 +370,21 @@ namespace DesignImportPipeline
 			return false;
 		};
 
-		if (TargetNodeId.IsEmpty())
-		{
-			if (FPenParser::ParseFromFile(FilePath, OutDocument))
-			{
-				OutDocument.Metadata.Add(TEXT("design.sourceFilePath"), FPaths::ConvertRelativePathToFull(FilePath));
-				return true;
-			}
-
-			return Fail(FString::Printf(TEXT("Failed to parse pen source: %s"), *FilePath));
-		}
-
 		FString JsonString;
 		if (!FFileHelper::LoadFileToString(JsonString, *FilePath))
 		{
 			return Fail(FString::Printf(TEXT("Failed to read pen source: %s"), *FilePath));
+		}
+
+		if (TargetNodeId.IsEmpty())
+		{
+			if (!Design2UMGEditorDesignSourceRegistry::TryParseSourceDocument(TEXT("Pen"), JsonString, OutDocument))
+			{
+				return Fail(FString::Printf(TEXT("Failed to parse pen source: %s"), *FilePath));
+			}
+
+			OutDocument.Metadata.Add(TEXT("design.sourceFilePath"), FPaths::ConvertRelativePathToFull(FilePath));
+			return true;
 		}
 
 		TSharedPtr<FJsonObject> RootObject;
@@ -316,7 +400,13 @@ namespace DesignImportPipeline
 			return Fail(FString::Printf(TEXT("Failed to filter pen source for target node '%s'"), *TargetNodeId));
 		}
 
-		if (!FPenParser::ParseDocumentObject(FilteredDocumentObject, OutDocument))
+		FString FilteredJsonString;
+		if (!SerializeJsonObjectToString(FilteredDocumentObject, FilteredJsonString))
+		{
+			return Fail(FString::Printf(TEXT("Failed to serialize filtered pen source: %s"), *FilePath));
+		}
+
+		if (!Design2UMGEditorDesignSourceRegistry::TryParseSourceDocument(TEXT("Pen"), FilteredJsonString, OutDocument))
 		{
 			return Fail(FString::Printf(TEXT("Failed to parse filtered pen source: %s"), *FilePath));
 		}

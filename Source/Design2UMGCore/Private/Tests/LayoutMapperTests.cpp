@@ -35,7 +35,7 @@ bool FLayoutMapperHBoxSlotTest::RunTest(const FString&)
 		FUMGWidgetNode Widget;
 		TSharedPtr<FDesignNode> Node = MakeNode(EDesignSizeMode::Fixed, 100.f, EDesignSizeMode::Fixed, 50.f);
 		LayoutMapper::ApplySlotProperties(Widget, Node, EDesignLayout::Horizontal);
-		TestEqual(TEXT("HBox fixed width -> Auto"), Widget.Slot.SizeRule, FString(TEXT("Auto")));
+		TestTrue(TEXT("HBox fixed width -> Auto"), Widget.Slot.SizeRule == EUMGSlotSizeRule::Auto);
 	}
 
 	// Fill-width child in HBox -> SizeRule=Fill
@@ -44,7 +44,7 @@ bool FLayoutMapperHBoxSlotTest::RunTest(const FString&)
 		TSharedPtr<FDesignNode> Node = MakeNode(EDesignSizeMode::FillContainer, 0.f, EDesignSizeMode::Fixed, 50.f);
 		Node->LayoutData.LayoutGrow = 1.0f;
 		LayoutMapper::ApplySlotProperties(Widget, Node, EDesignLayout::Horizontal);
-		TestEqual(TEXT("HBox fill width -> Fill"), Widget.Slot.SizeRule, FString(TEXT("Fill")));
+		TestTrue(TEXT("HBox fill width -> Fill"), Widget.Slot.SizeRule == EUMGSlotSizeRule::Fill);
 	}
 
 	// Fill-height child in HBox -> VerticalAlignment=Fill
@@ -52,7 +52,7 @@ bool FLayoutMapperHBoxSlotTest::RunTest(const FString&)
 		FUMGWidgetNode Widget;
 		TSharedPtr<FDesignNode> Node = MakeNode(EDesignSizeMode::Fixed, 100.f, EDesignSizeMode::FillContainer, 0.f);
 		LayoutMapper::ApplySlotProperties(Widget, Node, EDesignLayout::Horizontal);
-		TestEqual(TEXT("HBox fill height -> VAlign Fill"), Widget.Slot.VerticalAlignment, FString(TEXT("Fill")));
+		TestTrue(TEXT("HBox fill height -> VAlign Fill"), Widget.Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Fill);
 	}
 
 	return true;
@@ -73,7 +73,7 @@ bool FLayoutMapperVBoxSlotTest::RunTest(const FString&)
 		FUMGWidgetNode Widget;
 		TSharedPtr<FDesignNode> Node = MakeNode(EDesignSizeMode::Fixed, 100.f, EDesignSizeMode::Fixed, 50.f);
 		LayoutMapper::ApplySlotProperties(Widget, Node, EDesignLayout::Vertical);
-		TestEqual(TEXT("VBox fixed height -> Auto"), Widget.Slot.SizeRule, FString(TEXT("Auto")));
+		TestTrue(TEXT("VBox fixed height -> Auto"), Widget.Slot.SizeRule == EUMGSlotSizeRule::Auto);
 	}
 
 	// Fill-height child in VBox -> SizeRule=Fill
@@ -82,7 +82,7 @@ bool FLayoutMapperVBoxSlotTest::RunTest(const FString&)
 		TSharedPtr<FDesignNode> Node = MakeNode(EDesignSizeMode::Fixed, 100.f, EDesignSizeMode::FillContainer, 0.f);
 		Node->LayoutData.LayoutGrow = 1.0f;
 		LayoutMapper::ApplySlotProperties(Widget, Node, EDesignLayout::Vertical);
-		TestEqual(TEXT("VBox fill height -> Fill"), Widget.Slot.SizeRule, FString(TEXT("Fill")));
+		TestTrue(TEXT("VBox fill height -> Fill"), Widget.Slot.SizeRule == EUMGSlotSizeRule::Fill);
 	}
 
 	// Fill-width child in VBox -> HAlign=Fill
@@ -90,7 +90,7 @@ bool FLayoutMapperVBoxSlotTest::RunTest(const FString&)
 		FUMGWidgetNode Widget;
 		TSharedPtr<FDesignNode> Node = MakeNode(EDesignSizeMode::FillContainer, 0.f, EDesignSizeMode::Fixed, 50.f);
 		LayoutMapper::ApplySlotProperties(Widget, Node, EDesignLayout::Vertical);
-		TestEqual(TEXT("VBox fill width -> HAlign Fill"), Widget.Slot.HorizontalAlignment, FString(TEXT("Fill")));
+		TestTrue(TEXT("VBox fill width -> HAlign Fill"), Widget.Slot.HorizontalAlignment == EUMGSlotHorizontalAlignment::Fill);
 	}
 
 	return true;

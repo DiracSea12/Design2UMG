@@ -3,9 +3,22 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Design2UMGSettings.h"
 #include "UMGSchema.h"
 
 struct FDesignDocument;
+
+struct DESIGN2UMGCORE_API FDesign2UMGConversionSettings
+{
+	UDesign2UMGSettings::FResolvedPlaceholderHatchStyle PlaceholderHatchStyle;
+	float LuminosityFitOpacityCap = UDesign2UMGSettings::CanonicalLuminosityFitOpacityCap;
+	TMap<FString, FString> IconFontAssetPaths;
+	FString DefaultIconFontAssetPath;
+	FString MissingIconFontPlaceholder;
+
+	static FDesign2UMGConversionSettings Defaults();
+	static FDesign2UMGConversionSettings FromSettings(const UDesign2UMGSettings* Settings);
+};
 
 /**
  * Converts shared design IR into normalized UMG generation IR.
@@ -19,5 +32,6 @@ public:
 	 * @return Generated UMG widget tree and associated metadata.
 	 */
 	static FUMGWidgetData Convert(const FDesignDocument& Document);
+	static FUMGWidgetData Convert(const FDesignDocument& Document, const FDesign2UMGConversionSettings& Settings);
 };
 

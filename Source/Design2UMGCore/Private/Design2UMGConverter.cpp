@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGConverter.h"
 #include "DesignSchemaSourceExtensions.h"
@@ -21,25 +21,19 @@
 #include "UMGPropertyKeys.h"
 #include "UMGWidgetNodeAccess.h"
 
-namespace
+namespace Design2UMGConverterOwners
 {
 	using namespace Design2UMGConverterInternal;
 	namespace VisualSupport = Design2UMGConverterVisualSupport;
 
-	FConversionSettingsSnapshot BuildConversionSettingsSnapshot()
+	FConversionSettingsSnapshot BuildConversionSettingsSnapshot(const FDesign2UMGConversionSettings& Settings)
 	{
 		FConversionSettingsSnapshot Snapshot;
-		if (const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get())
-		{
-			Snapshot.PlaceholderHatchStyle = Settings->ResolvePlaceholderHatchStyle();
-			Snapshot.VisualMapperOptions.LuminosityFitOpacityCap = Settings->ResolveLuminosityFitOpacityCap();
-			Snapshot.IconFont = Design2UMGTextWidgetBuilder::BuildIconFontSettingsSnapshot(Settings);
-		}
-		else
-		{
-			Snapshot.PlaceholderHatchStyle = UDesign2UMGSettings::FResolvedPlaceholderHatchStyle();
-			Snapshot.VisualMapperOptions.LuminosityFitOpacityCap = UDesign2UMGSettings::CanonicalLuminosityFitOpacityCap;
-		}
+		Snapshot.PlaceholderHatchStyle = Settings.PlaceholderHatchStyle;
+		Snapshot.VisualMapperOptions.LuminosityFitOpacityCap = Settings.LuminosityFitOpacityCap;
+		Snapshot.IconFont.IconFontAssetPaths = Settings.IconFontAssetPaths;
+		Snapshot.IconFont.DefaultIconFontAssetPath = Settings.DefaultIconFontAssetPath;
+		Snapshot.IconFont.MissingIconFontPlaceholder = Settings.MissingIconFontPlaceholder;
 		return Snapshot;
 	}
 
@@ -545,9 +539,53 @@ namespace
 			Widget.Children.Add(MoveTemp(ChildWidget));
 		}
 	}
+} // namespace Design2UMGConverterOwners
+
+FDesign2UMGConversionSettings FDesign2UMGConversionSettings::Defaults()
+{
+	FDesign2UMGConversionSettings Settings;
+	Settings.PlaceholderHatchStyle = UDesign2UMGSettings::FResolvedPlaceholderHatchStyle();
+	Settings.PlaceholderHatchStyle.BaseFillColor = UDesign2UMGSettings::CanonicalPlaceholderHatchBackgroundColor;
+	Settings.PlaceholderHatchStyle.RefFillColor = UDesign2UMGSettings::CanonicalPlaceholderRefHatchBackgroundColor;
+	Settings.PlaceholderHatchStyle.BaseStripeColor = UDesign2UMGSettings::CanonicalPlaceholderHatchStripeColor;
+	Settings.PlaceholderHatchStyle.RefStripeColor = UDesign2UMGSettings::CanonicalPlaceholderRefHatchStripeColor;
+	Settings.PlaceholderHatchStyle.StripeWidthPx = UDesign2UMGSettings::CanonicalPlaceholderHatchStripeWidth;
+	Settings.PlaceholderHatchStyle.StripeGapPx = UDesign2UMGSettings::CanonicalPlaceholderHatchStripeGap;
+	Settings.LuminosityFitOpacityCap = UDesign2UMGSettings::CanonicalLuminosityFitOpacityCap;
+	return Settings;
+}
+
+FDesign2UMGConversionSettings FDesign2UMGConversionSettings::FromSettings(const UDesign2UMGSettings* SourceSettings)
+{
+	FDesign2UMGConversionSettings Settings = Defaults();
+	if (!SourceSettings)
+	{
+		return Settings;
+	}
+
+	Settings.PlaceholderHatchStyle = SourceSettings->ResolvePlaceholderHatchStyle();
+	Settings.LuminosityFitOpacityCap = SourceSettings->ResolveLuminosityFitOpacityCap();
+	Settings.DefaultIconFontAssetPath = SourceSettings->DefaultIconFontAssetPath;
+	Settings.MissingIconFontPlaceholder = SourceSettings->MissingIconFontPlaceholder;
+	for (const TPair<FString, TSoftObjectPtr<UFont>>& Pair : SourceSettings->IconFontAssetMap)
+	{
+		const FSoftObjectPath AssetPath = Pair.Value.ToSoftObjectPath();
+		if (!AssetPath.IsNull())
+		{
+			Settings.IconFontAssetPaths.Add(Pair.Key, AssetPath.ToString());
+		}
+	}
+	return Settings;
 }
 
 FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document)
+{
+	// Compatibility shim: preserve the historical settings-backed public overload
+	// while keeping the main conversion path on an explicit payload snapshot.
+	return Convert(Document, FDesign2UMGConversionSettings::FromSettings(UDesign2UMGSettings::Get()));
+}
+
+FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, const FDesign2UMGConversionSettings& Settings)
 {
 	FUMGWidgetData Result;
 
@@ -561,10 +599,11 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document)
 			Report.Reason.IsEmpty() ? TEXT("designer_only") : *Report.Reason));
 	}
 
-	const FConversionSettingsSnapshot SettingsSnapshot = BuildConversionSettingsSnapshot();
-	FConversionState State(Document, Result.Warnings, SettingsSnapshot);
-	FConversionContext RootContext(State);
-	const FNodeConversionOrchestrator NodeOrchestrator(RootContext);
+	const Design2UMGConverterInternal::FConversionSettingsSnapshot SettingsSnapshot =
+		Design2UMGConverterOwners::BuildConversionSettingsSnapshot(Settings);
+	Design2UMGConverterInternal::FConversionState State(Document, Result.Warnings, SettingsSnapshot);
+	Design2UMGConverterInternal::FConversionContext RootContext(State);
+	const Design2UMGConverterOwners::FNodeConversionOrchestrator NodeOrchestrator(RootContext);
 
 	if (!Document.SourceDocument().ComponentsJson.IsEmpty() || !Document.SourceDocument().ComponentSetsJson.IsEmpty())
 	{
@@ -585,7 +624,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document)
 	VisibleChildren.Reserve(Children.Num());
 	for (const auto& Child : Children)
 	{
-		if (!ShouldSkipNode(Child))
+		if (!Design2UMGConverterOwners::ShouldSkipNode(Child))
 		{
 			VisibleChildren.Add(Child);
 		}

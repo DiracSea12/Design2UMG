@@ -1,11 +1,11 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGWidgetUtils.h"
+#include "Design2UMGGenerationSettingsSnapshot.h"
 #include "WidgetTreeChildBuilder.h"
 #include "WidgetMetadataCollector.h"
 #include "WidgetResourceBinder.h"
 #include "Design2UMGLog.h"
-#include "Design2UMGSettings.h"
 #include "UMGLayoutProjection.h"
 #include "WidgetLayoutAdapter.h"
 #include "UMGPropertyKeys.h"
@@ -136,9 +136,12 @@ namespace
 UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords, const FIntPoint* ExplicitDesignSize)
 {
 	UClass* WidgetClass = ResolveWidgetClass(Node.Type);
-	if (UClass* Override = UDesign2UMGSettings::Get()->FindClassOverride(Node.Name))
+	if (const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = Design2UMGGenerationSettingsContext::GetCurrent())
 	{
-		WidgetClass = Override;
+		if (UClass* Override = GenerationSettings->FindClassOverride(Node.Name))
+		{
+			WidgetClass = Override;
+		}
 	}
 
 	if (!WidgetClass)

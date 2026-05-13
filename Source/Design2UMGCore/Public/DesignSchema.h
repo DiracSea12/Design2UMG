@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -20,6 +20,7 @@ struct FDesignTextNodeData
 	FString FontStyle = TEXT("normal");
 	float LineHeight = 0.0f;
 	float LetterSpacing = 0.0f;
+	bool bHasLetterSpacing = false;
 	EDesignTextAlign TextAlign = EDesignTextAlign::Left;
 	EDesignTextAlignVertical TextAlignVertical = EDesignTextAlignVertical::Top;
 	EDesignTextGrowth TextGrowth = EDesignTextGrowth::Auto;
@@ -30,6 +31,23 @@ struct FDesignTextNodeData
 	FString IconFontName;
 	FString IconFontFamily;
 	int32 IconWeight = 400;
+
+	void SetLetterSpacingValue(const float InLetterSpacing)
+	{
+		LetterSpacing = InLetterSpacing;
+		bHasLetterSpacing = true;
+	}
+
+	void ClearLetterSpacingValue()
+	{
+		LetterSpacing = 0.0f;
+		bHasLetterSpacing = false;
+	}
+
+	bool HasLetterSpacingValue() const
+	{
+		return bHasLetterSpacing || !FMath::IsNearlyZero(LetterSpacing);
+	}
 };
 
 /**

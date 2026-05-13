@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Design2UMGSettings.h"
 #include "DesignSchema.h"
 #include "UMGSchema.h"
 
@@ -21,6 +22,13 @@ struct FBlueprintGenerationOptions
 	FString CompiledPngFilePath;
 };
 
+// Preview materialization only needs the generation-domain subset that can
+// affect in-editor widget construction, not the full import settings payload.
+struct FDesignPreviewMaterializationSettingsSnapshot
+{
+	TArray<FWidgetClassOverride> ClassOverrides;
+};
+
 struct FPreviewRefreshInput
 {
 	uint64 RequestId = 0;
@@ -34,6 +42,7 @@ struct FPreviewApprovedSnapshot
 	FString EditedJson;
 	FUMGWidgetData Data;
 	FString ImageReport;
+	TOptional<FDesignPreviewMaterializationSettingsSnapshot> MaterializationSettingsSnapshot;
 };
 
 struct FPreviewRefreshResult

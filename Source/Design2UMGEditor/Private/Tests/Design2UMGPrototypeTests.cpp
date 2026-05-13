@@ -500,8 +500,8 @@ bool FFigmaGridSlotSemanticsConverterTest::RunTest(const FString& Parameters)
 
 	TestEqual(TEXT("Tail card row exported"), TailCard->Slot.Row, 0);
 	TestEqual(TEXT("Tail card column exported"), TailCard->Slot.Column, 1);
-	TestEqual(TEXT("Tail card horizontal align exported"), TailCard->Slot.HorizontalAlignment, TEXT("Center"));
-	TestEqual(TEXT("Tail card vertical align exported"), TailCard->Slot.VerticalAlignment, TEXT("Bottom"));
+	TestTrue(TEXT("Tail card horizontal align exported"), TailCard->Slot.HorizontalAlignment == EUMGSlotHorizontalAlignment::Center);
+	TestTrue(TEXT("Tail card vertical align exported"), TailCard->Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Bottom);
 	TestTrue(TEXT("Tail card gets half horizontal gap on the inner edge"), FMath::IsNearlyEqual(TailCard->Slot.Padding.Left, 6.0f, 0.01f));
 	TestTrue(TEXT("Tail card keeps zero right padding on the outer edge"), FMath::IsNearlyEqual(TailCard->Slot.Padding.Right, 0.0f, 0.01f));
 	TestTrue(TEXT("Tail card gets half row gap before the next row"), FMath::IsNearlyEqual(TailCard->Slot.Padding.Bottom, 12.0f, 0.01f));
@@ -509,8 +509,8 @@ bool FFigmaGridSlotSemanticsConverterTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Hero card row exported"), HeroCard->Slot.Row, 1);
 	TestEqual(TEXT("Hero card column exported"), HeroCard->Slot.Column, 0);
 	TestEqual(TEXT("Hero card column span exported"), HeroCard->Slot.ColumnSpan, 2);
-	TestEqual(TEXT("Hero card horizontal align exported"), HeroCard->Slot.HorizontalAlignment, TEXT("Center"));
-	TestEqual(TEXT("Hero card vertical align exported"), HeroCard->Slot.VerticalAlignment, TEXT("Bottom"));
+	TestTrue(TEXT("Hero card horizontal align exported"), HeroCard->Slot.HorizontalAlignment == EUMGSlotHorizontalAlignment::Center);
+	TestTrue(TEXT("Hero card vertical align exported"), HeroCard->Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Bottom);
 	TestTrue(TEXT("Hero card gets zero left padding on the outer edge"), FMath::IsNearlyEqual(HeroCard->Slot.Padding.Left, 0.0f, 0.01f));
 	TestTrue(TEXT("Hero card gets half row gap above the second row"), FMath::IsNearlyEqual(HeroCard->Slot.Padding.Top, 12.0f, 0.01f));
 	TestTrue(TEXT("Hero card keeps zero right padding when spanning to the edge"), FMath::IsNearlyEqual(HeroCard->Slot.Padding.Right, 0.0f, 0.01f));

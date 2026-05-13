@@ -1,11 +1,13 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGLocalFigmaImport.h"
+#include "Design2UMGEditorDesignSourceRegistry.h"
 #include "DesignSchemaSourceExtensions.h"
 
 #include "Design2UMGConverter.h"
 #include "DesignImageBakeUtils.h"
 #include "Design2UMGLog.h"
+#include "Design2UMGSettings.h"
 #include "DesignImportPipeline.h"
 #include "DesignImportUtils.h"
 #include "FigmaParser.h"
@@ -490,7 +492,7 @@ namespace Design2UMGLocalFigmaImport
 			return false;
 		}
 
-		if (!FFigmaParser::ParseDocument(JsonStr, ParsedDocument))
+		if (!Design2UMGEditorDesignSourceRegistry::TryParseSourceDocument(TEXT("Figma"), JsonStr, ParsedDocument))
 		{
 			OutError = FString::Printf(TEXT("Failed to parse Figma JSON: %s"), *JsonFilePath);
 			return false;
@@ -549,7 +551,12 @@ namespace Design2UMGLocalFigmaImport
 			return false;
 		}
 
-		OutData = DesignImportPipeline::AnalyzeImport(ParsedDoc, FImportAnalysisInput{ true }).Data;
+		FImportAnalysisInput AnalysisInput;
+		AnalysisInput.bResolveImages = true;
+		const FDesign2UMGImportSettingsSnapshot SettingsSnapshot =
+			FDesign2UMGImportSettingsSnapshot::FromSettings(UDesign2UMGSettings::Get());
+		AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
+		OutData = DesignImportPipeline::AnalyzeImport(ParsedDoc, AnalysisInput).Data;
 
 		if (OutData.RootWidget.Children.Num() == 0)
 		{

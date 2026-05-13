@@ -239,13 +239,16 @@ void DesignImportUtils::ApplyPendingIconFontMappingChanges(const FUMGWidgetData&
 	}
 }
 
-UWidgetBlueprint* DesignImportUtils::GenerateBlueprint(const FUMGWidgetData& Data, const FString& OutputPath)
+UWidgetBlueprint* DesignImportUtils::GenerateBlueprint(
+	const FUMGWidgetData& Data,
+	const FString& OutputPath,
+	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
 {
 	ApplyPendingIconFontMappingChanges(Data);
 	const double StartTime = FPlatformTime::Seconds();
 	const FString FinalPath = ResolveImportOutputPath(OutputPath);
 
-	UWidgetBlueprint* WBP = FUMGGenerator::GenerateWidgetBlueprint(Data, FinalPath);
+	UWidgetBlueprint* WBP = FUMGGenerator::GenerateWidgetBlueprint(Data, FinalPath, GenerationSettings);
 	if (!WBP)
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint generation failed"));
@@ -262,13 +265,14 @@ bool DesignImportUtils::GenerateBlueprintAndPng(
 	const FUMGWidgetData& Data,
 	const FString& OutputPath,
 	FString* OutGeneratedAssetPath,
-	FString* OutRenderPngPath)
+	FString* OutRenderPngPath,
+	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
 {
 	ApplyPendingIconFontMappingChanges(Data);
 	const FString FinalPath = ResolveImportOutputPath(OutputPath);
 
 	// Build first without saving immediately, then render PNG from a transient instance and save the Blueprint at the end.
-	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(Data, FinalPath);
+	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(Data, FinalPath, GenerationSettings);
 	if (!WBP)
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint build failed"));
@@ -351,10 +355,11 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 	const FString& OutputPath,
 	const FString& OutputPngFilePath,
 	FString* OutGeneratedAssetPath,
-	FIntPoint* OutRenderedSize)
+	FIntPoint* OutRenderedSize,
+	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
 {
 	ApplyPendingIconFontMappingChanges(Data);
-	UWidgetBlueprint* WidgetBlueprint = GenerateBlueprint(Data, OutputPath);
+	UWidgetBlueprint* WidgetBlueprint = GenerateBlueprint(Data, OutputPath, GenerationSettings);
 	if (!WidgetBlueprint)
 	{
 		return false;

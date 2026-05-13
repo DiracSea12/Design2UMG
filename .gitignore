@@ -36,6 +36,7 @@ Tools/Invoke-ClaudeWorker.ps1
 /CODE_REVIEW*.md
 /code_review*.md
 /design2umg_code_review*.md
+/Docs/ReviewActionPlan.md
 Design2UMG图片/
 
 # Local helper outputs

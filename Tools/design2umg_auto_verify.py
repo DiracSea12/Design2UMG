@@ -1,5 +1,6 @@
 ﻿import argparse
 import base64
+import csv
 import glob
 import hashlib
 import json
@@ -27,6 +28,7 @@ REFERENCE_ASPECT_COMPATIBILITY_THRESHOLD = 0.08
 RUNTIME_PROJECT_ENV_VAR = "DESIGN2UMG_RUNTIME_PROJECT"
 UNREAL_EDITOR_ENV_VAR = "DESIGN2UMG_UNREAL_EDITOR"
 UE_ROOT_ENV_VAR = "UE_ROOT"
+PENCIL_EXPORT_TOOL_TIMEOUT_SEC = 60.0
 
 
 def parse_numeric_dimension(value):
@@ -715,20 +717,25 @@ def sync_pencil_vscode_app_alias(app_name: str):
         if existing != source_port or existing_bytes != desired_bytes:
             target.write_bytes(desired_bytes)
 
+PENCIL_APP_PROCESS_CANDIDATES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("visual_studio_code", ("Code.exe", "code")),
+    ("vscode", ("Code.exe", "code")),
+    ("cursor", ("Cursor.exe", "cursor")),
+    ("antigravity", ("Antigravity.exe", "antigravity")),
+    ("codium", ("VSCodium.exe", "codium")),
+)
 
-def discover_pencil_app_name(override_app_name: str) -> str:
-    if override_app_name:
-        return override_app_name
 
+def read_pencil_registered_apps() -> set[str]:
     user_home = Path(os.environ.get("USERPROFILE", ""))
     apps_dir = user_home / ".pencil" / "apps"
-    if apps_dir.is_dir():
-        available_apps = {path.name.lower(): path for path in apps_dir.iterdir() if path.is_file()}
-        for preferred_name in ("visual_studio_code", "vscode", "antigravity"):
-            if preferred_name in available_apps:
-                return preferred_name
+    if not apps_dir.is_dir():
+        return set()
+    return {path.name.lower() for path in apps_dir.iterdir() if path.is_file()}
 
-    for process_name in ("Code.exe", "code", "Cursor.exe", "cursor", "VSCodium.exe", "codium"):
+
+def is_windows_process_running(process_names: tuple[str, ...]) -> bool:
+    for process_name in process_names:
         try:
             result = subprocess.run(
                 ["tasklist", "/FI", f"IMAGENAME eq {process_name}"],
@@ -738,12 +745,196 @@ def discover_pencil_app_name(override_app_name: str) -> str:
             )
         except OSError:
             continue
-        if process_name.lower().startswith("code") and process_name.lower() in result.stdout.lower():
-            return "visual_studio_code"
-        if "cursor" in process_name.lower() and process_name.lower() in result.stdout.lower():
-            return "cursor"
+        if process_name.lower() in result.stdout.lower():
+            return True
+    return False
 
-    return "visual_studio_code"
+
+def list_windows_task_rows(filter_expression: str, *, verbose: bool) -> list[dict[str, str]]:
+    if os.name != "nt":
+        return []
+    args = ["tasklist", "/fo", "csv"]
+    if verbose:
+        args.append("/v")
+    args.extend(["/fi", filter_expression])
+    try:
+        result = subprocess.run(
+            args,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return []
+    if result.returncode != 0 or not result.stdout.strip():
+        return []
+    return list(csv.DictReader(result.stdout.splitlines()))
+
+
+def get_foreground_window_process_name() -> str:
+    if os.name != "nt":
+        return ""
+    try:
+        import ctypes
+
+        hwnd = ctypes.windll.user32.GetForegroundWindow()
+        if not hwnd:
+            return ""
+        process_id = ctypes.c_ulong()
+        ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(process_id))
+        if not process_id.value:
+            return ""
+        rows = list_windows_task_rows(f"PID eq {process_id.value}", verbose=False)
+        if not rows:
+            return ""
+        return ((rows[0].get("Image Name", "") or "").strip().lower())
+    except Exception:
+        return ""
+
+
+def title_looks_like_pencil_document_window(title: str, preferred_document_path: str = "") -> bool:
+    lowered_title = (title or "").strip().lower()
+    if not lowered_title:
+        return False
+
+    preferred_document_name = Path(preferred_document_path).name.strip().lower()
+    if preferred_document_name and preferred_document_name in lowered_title:
+        return True
+
+    return ".pen" in lowered_title
+
+
+def describe_pencil_app_runtime_observations(preferred_document_path: str = "") -> dict[str, dict]:
+    target_document_name = Path(preferred_document_path).name.strip().lower()
+    foreground_process_name = get_foreground_window_process_name()
+    rows_by_process_name: dict[str, list[dict[str, str]]] = {}
+    for _, process_names in PENCIL_APP_PROCESS_CANDIDATES:
+        for process_name in process_names:
+            normalized_process_name = process_name.lower()
+            if normalized_process_name not in rows_by_process_name:
+                rows_by_process_name[normalized_process_name] = [
+                    row
+                    for row in list_windows_task_rows(f"IMAGENAME eq {process_name}", verbose=True)
+                    if (row.get("Image Name", "") or "").strip().lower() == normalized_process_name
+                ]
+
+    observations: dict[str, dict] = {}
+    for app_name, process_names in PENCIL_APP_PROCESS_CANDIDATES:
+        rows: list[dict[str, str]] = []
+        for process_name in process_names:
+            rows.extend(rows_by_process_name.get(process_name.lower(), []))
+        window_titles = []
+        for row in rows:
+            title = (row.get("Window Title", "") or "").strip()
+            if not title or title.upper() == "N/A" or title == "OleMainThreadWndName":
+                continue
+            window_titles.append(title)
+        lowered_titles = [title.lower() for title in window_titles]
+        observations[app_name] = {
+            "running": bool(rows),
+            "foreground": any(process_name.lower() == foreground_process_name for process_name in process_names),
+            "document_match": bool(target_document_name and any(target_document_name in title for title in lowered_titles)),
+            "compatible_window": any(
+                title_looks_like_pencil_document_window(title, preferred_document_path)
+                for title in window_titles
+            ),
+            "window_titles": window_titles,
+        }
+    return observations
+
+
+def order_pencil_app_candidates(
+    available_apps: set[str],
+    running_apps: set[str],
+    *,
+    preferred_apps: list[str] | None = None,
+    foreground_compatible_apps: list[str] | None = None,
+    compatible_window_apps: list[str] | None = None,
+    foreground_apps: list[str] | None = None,
+    windowed_apps: list[str] | None = None,
+) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+
+    def append_candidates(candidates: list[str]):
+        for app_name in candidates:
+            if app_name not in seen:
+                ordered.append(app_name)
+                seen.add(app_name)
+
+    append_candidates(preferred_apps or [])
+    append_candidates(foreground_compatible_apps or [])
+    append_candidates(compatible_window_apps or [])
+    append_candidates(foreground_apps or [])
+    append_candidates(windowed_apps or [])
+
+    for app_name, _ in PENCIL_APP_PROCESS_CANDIDATES:
+        if app_name in running_apps and app_name not in seen:
+            ordered.append(app_name)
+            seen.add(app_name)
+
+    for app_name, _ in PENCIL_APP_PROCESS_CANDIDATES:
+        if app_name in available_apps and app_name not in seen:
+            ordered.append(app_name)
+            seen.add(app_name)
+
+    for app_name in sorted(available_apps):
+        if app_name not in seen:
+            ordered.append(app_name)
+            seen.add(app_name)
+
+    if not ordered:
+        ordered.append("visual_studio_code")
+
+    return ordered
+
+
+def discover_pencil_app_candidates(override_app_name: str, preferred_document_path: str = "") -> list[str]:
+    if override_app_name:
+        return [override_app_name]
+
+    available_apps = read_pencil_registered_apps()
+    observations = describe_pencil_app_runtime_observations(preferred_document_path)
+    running_apps = {
+        app_name
+        for app_name, _ in PENCIL_APP_PROCESS_CANDIDATES
+        if observations.get(app_name, {}).get("running")
+    }
+    preferred_apps = [
+        app_name
+        for app_name, _ in PENCIL_APP_PROCESS_CANDIDATES
+        if observations.get(app_name, {}).get("document_match")
+    ]
+    foreground_compatible_apps = [
+        app_name
+        for app_name, _ in PENCIL_APP_PROCESS_CANDIDATES
+        if observations.get(app_name, {}).get("foreground")
+        and observations.get(app_name, {}).get("compatible_window")
+    ]
+    compatible_window_apps = [
+        app_name
+        for app_name, _ in PENCIL_APP_PROCESS_CANDIDATES
+        if observations.get(app_name, {}).get("compatible_window")
+    ]
+    foreground_apps = [
+        app_name
+        for app_name, _ in PENCIL_APP_PROCESS_CANDIDATES
+        if observations.get(app_name, {}).get("foreground")
+    ]
+    windowed_apps = [
+        app_name
+        for app_name, _ in PENCIL_APP_PROCESS_CANDIDATES
+        if observations.get(app_name, {}).get("window_titles")
+    ]
+    return order_pencil_app_candidates(
+        available_apps,
+        running_apps,
+        preferred_apps=preferred_apps,
+        foreground_compatible_apps=foreground_compatible_apps,
+        compatible_window_apps=compatible_window_apps,
+        foreground_apps=foreground_apps,
+        windowed_apps=windowed_apps,
+    )
 
 
 def find_available_port(start_port: int = 18900) -> int:
@@ -759,34 +950,42 @@ def find_available_port(start_port: int = 18900) -> int:
     return start_port
 
 
-def request_json(url: str, payload: dict, headers: dict[str, str]) -> tuple[str, dict]:
+def request_json(url: str, payload: dict, headers: dict[str, str], timeout_sec: float = 30.0) -> tuple[str, dict]:
     body = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(url, data=body, headers=headers, method="POST")
-    with urllib.request.urlopen(request, timeout=30) as response:
+    with urllib.request.urlopen(request, timeout=timeout_sec) as response:
         return response.headers.get("Mcp-Session-Id", ""), response.read().decode("utf-8")
 
 
 class PencilMcpClient:
-    def __init__(self, server_path: str, app_name: str):
+    def __init__(self, server_path: str, app_name: str, preferred_document_path: str = ""):
         self.server_path = server_path
-        self.app_name = discover_pencil_app_name(app_name)
+        self.app_candidates = discover_pencil_app_candidates(app_name, preferred_document_path)
+        self.app_name = self.app_candidates[0]
         self.port = find_available_port()
         self.endpoint = f"http://127.0.0.1:{self.port}/mcp"
         self.session_id = ""
         self.process: subprocess.Popen | None = None
 
     def __enter__(self):
-        sync_pencil_vscode_app_alias(self.app_name)
-        args = [self.server_path, "-app", self.app_name, "-http", "-http-port", str(self.port)]
-        self.process = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        deadline = time.time() + 10.0
-        while time.time() < deadline:
-            try:
-                self.connect()
-                return self
-            except Exception:
-                time.sleep(0.2)
-        raise RuntimeError(f"Failed to connect to Pencil MCP server at {self.endpoint}")
+        errors: list[str] = []
+        for candidate in self.app_candidates:
+            self.app_name = candidate
+            sync_pencil_vscode_app_alias(self.app_name)
+            args = [self.server_path, "-app", self.app_name, "-http", "-http-port", str(self.port)]
+            self.process = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            deadline = time.time() + 10.0
+            last_error = ""
+            while time.time() < deadline:
+                try:
+                    self.connect()
+                    return self
+                except Exception as exc:
+                    last_error = str(exc)
+                    time.sleep(0.2)
+            self.__exit__(None, None, None)
+            errors.append(f"{candidate}: {last_error or 'failed to connect'}")
+        raise RuntimeError(f"Failed to connect to Pencil MCP server at {self.endpoint} ({'; '.join(errors)})")
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.process and self.process.poll() is None:
@@ -822,7 +1021,7 @@ class PencilMcpClient:
             headers,
         )
 
-    def call_tool_content(self, name: str, arguments: dict) -> list[dict]:
+    def call_tool_content(self, name: str, arguments: dict, timeout_sec: float = 30.0) -> list[dict]:
         headers = {
             "Content-Type": "application/json",
             "Accept": "text/event-stream",
@@ -834,7 +1033,7 @@ class PencilMcpClient:
             "method": "tools/call",
             "params": {"name": name, "arguments": arguments},
         }
-        _, body = request_json(self.endpoint, payload, headers)
+        _, body = request_json(self.endpoint, payload, headers, timeout_sec=timeout_sec)
         data_lines = [line[5:].strip() for line in body.splitlines() if line.startswith("data:")]
         content = data_lines[-1] if data_lines else body
         rpc = json.loads(content)
@@ -845,8 +1044,8 @@ class PencilMcpClient:
         parts = result.get("content", [])
         return parts
 
-    def call_tool(self, name: str, arguments: dict):
-        parts = self.call_tool_content(name, arguments)
+    def call_tool(self, name: str, arguments: dict, timeout_sec: float = 30.0):
+        parts = self.call_tool_content(name, arguments, timeout_sec=timeout_sec)
         if not parts:
             return ""
         return parts[0].get("text", "")
@@ -886,28 +1085,51 @@ def normalize_local_document_path(value: str) -> str:
     return os.path.normcase(os.path.normpath(normalized))
 
 
-def ensure_pencil_document_open(client: PencilMcpClient, source_path: str):
+def ensure_pencil_document_open(
+    client: PencilMcpClient,
+    source_path: str,
+    *,
+    force_reopen: bool = False,
+    timeout_sec: float = 15.0,
+    poll_interval: float = 0.5,
+):
     normalized_target = normalize_local_document_path(str(Path(source_path).resolve()))
     active_document = normalize_local_document_path(get_active_pencil_document(client))
-    if active_document == normalized_target:
+    if active_document == normalized_target and not force_reopen:
         return
 
+    open_error: Exception | None = None
     try:
-        client.call_tool_content("open_document", {"filePathOrTemplate": source_path})
-    except Exception:
-        # Some Pencil builds time out even though the document switch still succeeds.
-        pass
+        client.call_tool_content("open_document", {"path": source_path})
+    except Exception as exc:
+        open_error = exc
 
-    deadline = time.time() + 15.0
+    deadline = time.time() + timeout_sec
     while time.time() < deadline:
         active_document = normalize_local_document_path(get_active_pencil_document(client))
         if active_document == normalized_target:
             return
-        time.sleep(0.5)
-    raise RuntimeError(f"Pencil did not switch to document: {source_path}")
+        time.sleep(poll_interval)
+
+    if open_error:
+        raise RuntimeError(
+            f"Pencil did not switch to document: {source_path} "
+            f"(active={active_document or '<none>'}, app={client.app_name}, open_document_error={open_error})"
+        ) from open_error
+    raise RuntimeError(
+        f"Pencil did not switch to document: {source_path} "
+        f"(active={active_document or '<none>'}, app={client.app_name})"
+    )
 
 
-def export_pencil_reference_png(client: PencilMcpClient, source_path: str, node_id: str, output_dir: Path) -> Path | None:
+def export_pencil_reference_png(
+    client: PencilMcpClient,
+    source_path: str,
+    node_id: str,
+    output_dir: Path,
+    *,
+    timeout_sec: float = PENCIL_EXPORT_TOOL_TIMEOUT_SEC,
+) -> Path | None:
     tool_result = ""
     export_error = None
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -920,6 +1142,7 @@ def export_pencil_reference_png(client: PencilMcpClient, source_path: str, node_
                 "outputDir": str(output_dir),
                 "format": "png",
             },
+            timeout_sec=timeout_sec,
         )
     except Exception as exc:
         export_error = exc
@@ -946,6 +1169,43 @@ def screenshot_pencil_reference_png(client: PencilMcpClient, source_path: str, n
             output_path.write_bytes(base64.b64decode(part["data"]))
             return output_path
     return None
+
+
+def reset_pen_authority_attempt_outputs(export_dir: Path, screenshot_path: Path) -> None:
+    shutil.rmtree(export_dir, ignore_errors=True)
+    try:
+        screenshot_path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def run_pen_authority_reference_attempt(
+    source_path: str,
+    node_id: str,
+    server_path: str,
+    app_name: str,
+    export_dir: Path,
+    screenshot_path: Path,
+    *,
+    force_reopen: bool = False,
+) -> tuple[Path | None, Path | None, str]:
+    mcp_server = discover_mcp_server(server_path)
+    reset_pen_authority_attempt_outputs(export_dir, screenshot_path)
+
+    export_error = ""
+    with PencilMcpClient(mcp_server, app_name, source_path) as client:
+        ensure_pencil_document_open(client, source_path, force_reopen=force_reopen)
+        export_path = None
+        try:
+            export_path = export_pencil_reference_png(client, source_path, node_id, export_dir)
+        except Exception as exc:
+            export_error = str(exc)
+        try:
+            witness_path = screenshot_pencil_reference_png(client, source_path, node_id, screenshot_path)
+        except Exception:
+            witness_path = None
+
+    return export_path, witness_path, export_error
 
 
 def compare_image_paths(left_path: Path, right_path: Path, pixel_tolerance: int) -> dict | None:
@@ -1118,7 +1378,7 @@ def try_fetch_pencil_source_structure_snapshot(
         return None
 
     try:
-        with PencilMcpClient(mcp_server, app_name) as client:
+        with PencilMcpClient(mcp_server, app_name, source_path) as client:
             ensure_pencil_document_open(client, source_path)
             def fetch_parts(patterns: list[dict]) -> list[dict]:
                 return client.call_tool_content(
@@ -1424,23 +1684,67 @@ def prepare_pen_authority_reference(
         "witness_aspect_delta": None,
         "witness_content_validation": None,
         "verification_level": "none",
+        "attempts": [],
     }
 
-    mcp_server = discover_mcp_server(server_path)
     authority_dir = output_dir / "reference_authority"
     export_dir = authority_dir / "export_nodes"
     screenshot_path = authority_dir / "get_screenshot.png"
-    with PencilMcpClient(mcp_server, app_name) as client:
+    export_path = None
+    witness_path = None
+    fallback_witness_path = None
+
+    max_attempts = 3
+    last_error = ""
+    for attempt_index in range(max_attempts):
+        attempt_number = attempt_index + 1
         try:
-            ensure_pencil_document_open(client, source_path)
-        except Exception:
-            pass
-        export_path = export_pencil_reference_png(client, source_path, node_id, export_dir)
-        witness_path = None
-        try:
-            witness_path = screenshot_pencil_reference_png(client, source_path, node_id, screenshot_path)
-        except Exception:
-            witness_path = None
+            export_path, witness_path, export_error = run_pen_authority_reference_attempt(
+                source_path,
+                node_id,
+                server_path,
+                app_name,
+                export_dir,
+                screenshot_path,
+                force_reopen=(attempt_number > 1),
+            )
+            attempt_result = {
+                "attempt": attempt_number,
+                "status": "ok",
+                "export_available": bool(export_path and export_path.is_file()),
+                "screenshot_available": bool(witness_path and witness_path.is_file()),
+            }
+            if witness_path and witness_path.is_file():
+                fallback_witness_path = witness_path
+            if export_path and export_path.is_file():
+                if export_error:
+                    attempt_result["reason"] = f"pencil_export_nodes_unavailable: {export_error}"
+                authority["attempts"].append(attempt_result)
+                break
+
+            last_error = export_error or "Pencil authority reference did not produce a usable PNG"
+            attempt_result["status"] = "retry" if attempt_number < max_attempts else "failed"
+            attempt_result["reason"] = last_error
+            authority["attempts"].append(attempt_result)
+        except Exception as exc:
+            last_error = str(exc)
+            reason_prefix = "pencil_document_switch_failed" if "did not switch to document" in last_error.lower() else "pencil_authority_attempt_failed"
+            authority["attempts"].append(
+                {
+                    "attempt": attempt_number,
+                    "status": "retry" if attempt_number < max_attempts else "failed",
+                    "reason": f"{reason_prefix}: {last_error}",
+                    "export_available": False,
+                    "screenshot_available": False,
+                }
+            )
+        if export_path and export_path.is_file():
+            break
+        if attempt_number < max_attempts:
+            time.sleep(float(attempt_number))
+
+    if not (export_path and export_path.is_file()) and fallback_witness_path and fallback_witness_path.is_file():
+        witness_path = fallback_witness_path
 
     if export_path and export_path.is_file():
         authority["available"] = True
@@ -1454,6 +1758,9 @@ def prepare_pen_authority_reference(
 
     if witness_path and witness_path.is_file():
         authority["available"] = True
+        if not authority["canonical_source"]:
+            authority["canonical_source"] = "pencil_get_screenshot"
+            authority["canonical_path"] = str(witness_path)
         authority["get_screenshot_path"] = str(witness_path)
         authority["get_screenshot_validation"] = validate_reference_against_design(
             read_image_size(witness_path),
@@ -1461,7 +1768,13 @@ def prepare_pen_authority_reference(
         )
 
     if not authority["available"]:
-        authority["reason"] = "pencil_authority_not_available"
+        if last_error:
+            if "did not switch to document" in last_error.lower():
+                authority["reason"] = f"pencil_document_switch_failed: {last_error}"
+            else:
+                authority["reason"] = f"pencil_authority_not_available: {last_error}"
+        else:
+            authority["reason"] = "pencil_authority_not_available"
         return authority
 
     canonical_validation = authority["export_nodes_validation"] or authority["get_screenshot_validation"]
@@ -1501,8 +1814,38 @@ def prepare_pen_authority_reference(
     elif authority["export_nodes_validation"] and authority["valid"]:
         authority["reason"] = authority["reason"] or "pencil_get_screenshot_unavailable"
         authority["verification_level"] = "weak"
+    elif authority["get_screenshot_validation"] and authority["valid"]:
+        authority["reason"] = authority["reason"] or "pencil_export_nodes_unavailable"
+        authority["verification_level"] = "witness_only"
 
     return authority
+
+
+def summarize_pen_authority_stdout(authority: dict | None, *, fail_closed: bool = False) -> None:
+    if not isinstance(authority, dict):
+        return
+
+    canonical_source = authority.get("canonical_source") or ""
+    verification_level = authority.get("verification_level") or ""
+    reason = authority.get("reason") or ""
+
+    if canonical_source == "pencil_get_screenshot":
+        print(f"[AUTHORITY] live Pencil export_nodes unavailable: {reason or 'pencil_export_nodes_unavailable'}")
+        print(
+            "[AUTHORITY] fell back to get_screenshot witness: "
+            f"{authority.get('get_screenshot_path') or authority.get('canonical_path') or '<missing>'}"
+        )
+        if fail_closed or verification_level == "witness_only":
+            print(
+                "[AUTHORITY] witness fallback can keep compare artifacts flowing, "
+                "but formal/historical-best still fail-closed until live Pencil export_nodes succeeds"
+            )
+        return
+
+    if not authority.get("available"):
+        print("[AUTHORITY] export_nodes fallback attempted and get_screenshot witness was also attempted")
+        print("[AUTHORITY] no usable Pencil authority PNG was produced")
+        print(f"[AUTHORITY] reason={reason or 'pencil_authority_not_available'}")
 
 
 def prepare_pencil_reference(source_path: str, node_id: str, output_dir: Path, output_path: Path, server_path: str, app_name: str) -> Path:
@@ -2149,6 +2492,7 @@ def prepare_reference(args, output_dir: Path, expected_design_size: tuple[int, i
                 args.pixel_tolerance,
             )
             context["reference_authority"] = authority
+            summarize_pen_authority_stdout(authority)
             canonical_path = authority.get("canonical_path")
             if canonical_path:
                 shutil.copyfile(canonical_path, reference_png)
@@ -2172,9 +2516,11 @@ def prepare_reference(args, output_dir: Path, expected_design_size: tuple[int, i
             args.pixel_tolerance,
         )
         context["reference_authority"] = authority
+        summarize_pen_authority_stdout(authority)
         canonical_path = authority.get("canonical_path")
         if not canonical_path:
-            raise RuntimeError("Pencil authority reference did not produce a usable PNG")
+            reason = authority.get("reason") or "pencil_authority_not_available"
+            raise RuntimeError(f"Pencil authority reference did not produce a usable PNG ({reason})")
         shutil.copyfile(canonical_path, reference_png)
         context["canonical_source"] = authority.get("canonical_source")
         return reference_png, context

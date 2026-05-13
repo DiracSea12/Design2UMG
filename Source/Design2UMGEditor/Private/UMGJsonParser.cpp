@@ -746,7 +746,7 @@ void FUMGJsonParser::ParseSlotData(const TSharedPtr<FJsonObject>& JsonObject, FU
 	if (JsonObject->TryGetStringField(TEXT("HAlign"), HAlign) ||
 		JsonObject->TryGetStringField(TEXT("HorizontalAlignment"), HAlign))
 	{
-		OutSlot.HorizontalAlignment = HAlign;
+		OutSlot.HorizontalAlignment = FUMGValueParser::ParseSlotHorizontalAlignment(HAlign);
 	}
 
 	// Parse VerticalAlignment.
@@ -754,14 +754,14 @@ void FUMGJsonParser::ParseSlotData(const TSharedPtr<FJsonObject>& JsonObject, FU
 	if (JsonObject->TryGetStringField(TEXT("VAlign"), VAlign) ||
 		JsonObject->TryGetStringField(TEXT("VerticalAlignment"), VAlign))
 	{
-		OutSlot.VerticalAlignment = VAlign;
+		OutSlot.VerticalAlignment = FUMGValueParser::ParseSlotVerticalAlignment(VAlign);
 	}
 
 	// Parse SizeRule (Auto/Fill).
 	FString SizeRule;
 	if (JsonObject->TryGetStringField(TEXT("SizeRule"), SizeRule))
 	{
-		OutSlot.SizeRule = SizeRule;
+		OutSlot.SizeRule = FUMGValueParser::ParseSlotSizeRule(SizeRule);
 	}
 
 	// Parse FillWeight.

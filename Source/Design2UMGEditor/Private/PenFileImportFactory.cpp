@@ -3,6 +3,7 @@
 #include "PenFileImportFactory.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGNotifications.h"
+#include "Design2UMGSettings.h"
 #include "DesignImportDialogs.h"
 #include "DesignImportPipeline.h"
 
@@ -15,21 +16,28 @@ namespace
 {
 	const TCHAR* DefaultOutputPath = TEXT("/Game/Design2UMG/PenConvert_Output");
 
-	FDesignImportRequest MakeFactoryImportRequest(const FString& OutputPath)
+	FDesignImportRequest MakeFactoryImportRequest(
+		const FString& OutputPath,
+		const FDesign2UMGImportSettingsSnapshot& SettingsSnapshot)
 	{
 		FDesignImportRequest Request;
 		Request.OutputPath = OutputPath;
 		Request.PreviewWindowTitle = LOCTEXT("PenImportPreviewTitle", "Design2UMG Import Preview");
 		Request.Generation.Mode = EDesignBlueprintGenerationMode::BlueprintOnly;
+		Request.SettingsSnapshot = SettingsSnapshot;
 		return Request;
 	}
 
 	FDesignImportExecutionResult ExecuteFactoryImport(
 		const FString& FilePath,
 		const FString& TargetNodeId,
-		const FString& OutputPath)
+		const FString& OutputPath,
+		const FDesign2UMGImportSettingsSnapshot& SettingsSnapshot)
 	{
-		return DesignImportPipeline::ExecutePenFile(FilePath, TargetNodeId, MakeFactoryImportRequest(OutputPath));
+		return DesignImportPipeline::ExecutePenFile(
+			FilePath,
+			TargetNodeId,
+			MakeFactoryImportRequest(OutputPath, SettingsSnapshot));
 	}
 }
 
@@ -71,10 +79,13 @@ UObject* UPenFileImportFactory::FactoryCreateFile(
 	}
 
 	const FString OutputPath = InParent ? InParent->GetPathName() : FString(DefaultOutputPath);
+	const FDesign2UMGImportSettingsSnapshot SettingsSnapshot =
+		FDesign2UMGImportSettingsSnapshot::FromSettings(UDesign2UMGSettings::Get());
 
 	if (Frames.Num() == 1)
 	{
-		const FDesignImportExecutionResult Result = ExecuteFactoryImport(Filename, FString(), OutputPath);
+		const FDesignImportExecutionResult Result =
+			ExecuteFactoryImport(Filename, FString(), OutputPath, SettingsSnapshot);
 		bOutOperationCanceled = Result.bPreviewOpened;
 		return Result.GeneratedBlueprint;
 	}
@@ -84,9 +95,10 @@ UObject* UPenFileImportFactory::FactoryCreateFile(
 		Frames,
 		LOCTEXT("FrameSelectorTitle", "Select Frame to Import"),
 		LOCTEXT("FrameSelectorHint", "This file contains multiple frames. Double-click to import:"),
-		[Filename, OutputPath](const FString& FrameId)
+		[Filename, OutputPath, SettingsSnapshot](const FString& FrameId)
 		{
-			const FDesignImportExecutionResult Result = ExecuteFactoryImport(Filename, FrameId, OutputPath);
+			const FDesignImportExecutionResult Result =
+				ExecuteFactoryImport(Filename, FrameId, OutputPath, SettingsSnapshot);
 			if (!Result.bSucceeded)
 			{
 				FDesign2UMGNotification::Error(LOCTEXT("TargetNodeFailed", "Design2UMG: Failed to import selected frame"));

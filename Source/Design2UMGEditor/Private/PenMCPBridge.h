@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 
 class FJsonObject;
+struct FDesign2UMGImportSettingsSnapshot;
 struct FUMGWidgetData;
 
 class FPenMCPBridge
@@ -13,6 +14,12 @@ public:
 	static bool ConvertFromMCP(
 		const FString& NodesJson,
 		const FString& VariablesJson,
+		FUMGWidgetData& OutData,
+		const FString& TargetNodeId = TEXT(""));
+	static bool ConvertFromMCP(
+		const FString& NodesJson,
+		const FString& VariablesJson,
+		const FDesign2UMGImportSettingsSnapshot& SettingsSnapshot,
 		FUMGWidgetData& OutData,
 		const FString& TargetNodeId = TEXT(""));
 

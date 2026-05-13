@@ -1,9 +1,10 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Misc/AutomationTest.h"
 #include "WidgetResourceBinder.h"
 #include "UMGSchema.h"
 #include "UMGPropertyKeys.h"
+#include "UMGWidgetNodeProceduralResourceAccess.h"
 #include "UMGWidgetUtils.h"
 #include "Components/Border.h"
 #include "Components/Image.h"
@@ -52,6 +53,36 @@ bool FWidgetResourceBinderMaterialRefSuccess::RunTest(const FString& Parameters)
 	// roundedrect is a valid MaterialRef and should bind successfully, returning true.
 	TestTrue(TEXT("MaterialRef 'roundedrect' binds successfully"), bBound);
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWidgetResourceBinderGradientDescriptorMaterialPath,
+	"Design2UMG.WidgetResourceBinder.GradientDescriptorMaterialPath",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FWidgetResourceBinderGradientDescriptorMaterialPath::RunTest(const FString& Parameters)
+{
+	FUMGWidgetNode Node;
+	Node.Type = TEXT("Image");
+	Node.Name = TEXT("GradientImage");
+	Node.Brush.Gradient.Type = TEXT("Radial");
+	Node.Brush.Gradient.Center = FVector2D(0.5f, 0.5f);
+	Node.Brush.Gradient.Size = FVector2D(0.8f, 0.6f);
+	Node.Brush.Gradient.Stops = {
+		{ FLinearColor::White, 0.0f },
+		{ FLinearColor::Black, 1.0f }
+	};
+	Node.WidgetStyle.WidthOverride = 48.0f;
+	Node.WidgetStyle.HeightOverride = 24.0f;
+
+	FUMGProceduralResourceRequest Request;
+	TestTrue(TEXT("Gradient brush builds a typed-first procedural request"),
+		Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Node, Request));
+	TestEqual(TEXT("Gradient brush resolves radial material ref"), Request.MaterialRef, FString(TEXT("radialgradient")));
+
+	UImage* ImageWidget = NewObject<UImage>();
+	const bool bBound = FWidgetResourceBinder::BindImageResource(ImageWidget, Node, nullptr);
+	TestTrue(TEXT("Descriptor-backed gradient material path still binds"), bBound);
+	TestTrue(TEXT("Gradient material path produces a brush resource"), ImageWidget->GetBrush().GetResourceObject() != nullptr);
 	return true;
 }
 

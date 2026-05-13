@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "VisualMapper.h"
 #include "ImageFillUtils.h"
@@ -164,16 +164,16 @@ namespace
 		{
 			StrokeHelpers::EStrokeSide Side = StrokeHelpers::EStrokeSide::Top;
 			const TCHAR* Suffix = TEXT("");
-			const TCHAR* HorizontalAlignment = TEXT("Fill");
-			const TCHAR* VerticalAlignment = TEXT("Fill");
+			EUMGSlotHorizontalAlignment HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
+			EUMGSlotVerticalAlignment VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
 			bool bHorizontalLine = false;
 		};
 
 		const FExplicitStrokeSideSpec ExplicitStrokeSideSpecs[] = {
-			{ StrokeHelpers::EStrokeSide::Top, TEXT("_stroke_top"), TEXT("Fill"), TEXT("Top"), true },
-			{ StrokeHelpers::EStrokeSide::Right, TEXT("_stroke_right"), TEXT("Right"), TEXT("Fill"), false },
-			{ StrokeHelpers::EStrokeSide::Bottom, TEXT("_stroke_bottom"), TEXT("Fill"), TEXT("Bottom"), true },
-			{ StrokeHelpers::EStrokeSide::Left, TEXT("_stroke_left"), TEXT("Left"), TEXT("Fill"), false },
+			{ StrokeHelpers::EStrokeSide::Top, TEXT("_stroke_top"), EUMGSlotHorizontalAlignment::Fill, EUMGSlotVerticalAlignment::Top, true },
+			{ StrokeHelpers::EStrokeSide::Right, TEXT("_stroke_right"), EUMGSlotHorizontalAlignment::Right, EUMGSlotVerticalAlignment::Fill, false },
+			{ StrokeHelpers::EStrokeSide::Bottom, TEXT("_stroke_bottom"), EUMGSlotHorizontalAlignment::Fill, EUMGSlotVerticalAlignment::Bottom, true },
+			{ StrokeHelpers::EStrokeSide::Left, TEXT("_stroke_left"), EUMGSlotHorizontalAlignment::Left, EUMGSlotVerticalAlignment::Fill, false },
 		};
 
 		bool TryResolveStrokeColor(const FDesignStroke& Stroke, FLinearColor& OutColor)
@@ -274,8 +274,8 @@ namespace
 		{
 			Widget.Bounds = FDesignPixelBounds();
 			Widget.Slot = FUMGSlotData();
-			Widget.Slot.HorizontalAlignment = TEXT("Fill");
-			Widget.Slot.VerticalAlignment = TEXT("Fill");
+			Widget.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
+			Widget.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
 		}
 
 		void StripExplicitStrokeFromSurface(FUMGWidgetNode& BorderSurface)
@@ -293,8 +293,8 @@ namespace
 			const FLinearColor& Color,
 			float Width,
 			float Height,
-			const FString& HorizontalAlignment,
-			const FString& VerticalAlignment)
+			EUMGSlotHorizontalAlignment HorizontalAlignment,
+			EUMGSlotVerticalAlignment VerticalAlignment)
 		{
 			FUMGWidgetNode Line;
 			Line.Type = TEXT("Image");
@@ -315,8 +315,8 @@ namespace
 			float Width,
 			float Height,
 			const TCHAR* Suffix,
-			const TCHAR* HorizontalAlignment,
-			const TCHAR* VerticalAlignment)
+			EUMGSlotHorizontalAlignment HorizontalAlignment,
+			EUMGSlotVerticalAlignment VerticalAlignment)
 		{
 			if (Width <= KINDA_SMALL_NUMBER || Height <= KINDA_SMALL_NUMBER)
 			{
@@ -632,8 +632,8 @@ namespace
 		Widget.Id += TEXT("_inner");
 		Widget.Name += TEXT("_inner");
 		Widget.Bounds = FDesignPixelBounds();
-		Widget.Slot.HorizontalAlignment = TEXT("Fill");
-		Widget.Slot.VerticalAlignment = TEXT("Fill");
+		Widget.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
+		Widget.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
 	}
 
 	void ApplyRenderTransformPropertiesInternal(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
@@ -857,8 +857,8 @@ FUMGWidgetNode VisualMapper::WrapWithBackgroundBlur(FUMGWidgetNode&& Widget, flo
 
 	Widget.Bounds = FDesignPixelBounds();
 	Widget.Slot = FUMGSlotData();
-	Widget.Slot.HorizontalAlignment = TEXT("Fill");
-	Widget.Slot.VerticalAlignment = TEXT("Fill");
+	Widget.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
+	Widget.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
 
 	Blur.Children.Add(MoveTemp(Widget));
 	return Blur;
@@ -971,8 +971,8 @@ FUMGWidgetNode VisualMapper::WrapWithBoxShadow(
 	}
 
 	// Shadow offset positioning.
-	Shadow.Slot.HorizontalAlignment = TEXT("Fill");
-	Shadow.Slot.VerticalAlignment = TEXT("Fill");
+	Shadow.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
+	Shadow.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
 	const float ShadowMarginLeft = OffX - Extent + NegativeSpreadInset;
 	const float ShadowMarginTop = OffY - Extent + NegativeSpreadInset;
 	Shadow.Render.RenderTranslation = FVector2D(ShadowMarginLeft, ShadowMarginTop);
@@ -984,8 +984,8 @@ FUMGWidgetNode VisualMapper::WrapWithBoxShadow(
 	Widget.Name = Widget.Name + TEXT("_content");
 	Widget.Bounds = FDesignPixelBounds();
 	Widget.Slot = FUMGSlotData();
-	Widget.Slot.HorizontalAlignment = TEXT("Fill");
-	Widget.Slot.VerticalAlignment = TEXT("Fill");
+	Widget.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
+	Widget.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
 
 	Wrapper.Children.Add(MoveTemp(Widget));
 	return Wrapper;

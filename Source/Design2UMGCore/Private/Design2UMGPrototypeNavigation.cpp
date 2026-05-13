@@ -106,8 +106,8 @@ namespace Design2UMGPrototypeNavigation
 		BaseSwitcher.Bounds.X = 0.0f;
 		BaseSwitcher.Bounds.Y = 0.0f;
 		BaseSwitcher.Slot = FUMGSlotData();
-		BaseSwitcher.Slot.HorizontalAlignment = TEXT("Fill");
-		BaseSwitcher.Slot.VerticalAlignment = TEXT("Fill");
+		BaseSwitcher.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
+		BaseSwitcher.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
 
 		FUMGWidgetNode Root;
 		Root.Type = TEXT("Overlay");

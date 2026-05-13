@@ -1,9 +1,11 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "FigmaParserInternal.h"
 #include "DesignSchemaSourceExtensions.h"
 #include "FigmaParserPrototype.h"
 #include "FigmaParserMetadata.h"
+#include "FigmaParserStyling.h"
+#include "FigmaParserText.h"
 #include "Design2UMGLog.h"
 #include "DesignJsonUtils.h"
 #include "Dom/JsonObject.h"
@@ -74,18 +76,6 @@ static void SetBoolFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHA
 	bool Value = false;
 	if (Obj->TryGetBoolField(Key, Value))
 		Out.Emplace(Value);
-}
-
-static void SetBoolFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key, bool& OutValue, bool& bOutHasValue)
-{
-	if (!Obj.IsValid())
-		return;
-	bool Value = false;
-	if (Obj->TryGetBoolField(Key, Value))
-	{
-		OutValue = Value;
-		bOutHasValue = true;
-	}
 }
 
 static void SetJsonFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key, FString& OutValue)
@@ -588,16 +578,8 @@ static bool ParseGeometryArray(
 
 EDesignNodeType MapNodeType(const FString& FigmaType);
 bool HasAutoLayout(const TSharedPtr<FJsonObject>& NodeObj);
-FString ColorToHex(const TSharedPtr<FJsonObject>& ColorObj, float Opacity = 1.0f);
 void ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode);
 void ParseSize(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj, FDesignNode& OutNode, bool bParentHasAutoLayout);
-FDesignFill ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj);
-TArray<FDesignFill> ParseFills(const TArray<TSharedPtr<FJsonValue>>& Fills);
-FDesignFill ParseFill(const TArray<TSharedPtr<FJsonValue>>& Fills);
-FDesignStroke ParseStroke(const TSharedPtr<FJsonObject>& NodeObj);
-FDesignCornerRadius ParseCornerRadius(const TSharedPtr<FJsonObject>& NodeObj);
-TArray<FDesignEffect> ParseEffects(const TArray<TSharedPtr<FJsonValue>>& Effects);
-void ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode);
 void ParsePosition(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj, FDesignNode& OutNode, bool bParentHasAutoLayout);
 TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj);
 TSharedPtr<FDesignNode> ParseNode(
@@ -1069,25 +1051,6 @@ bool HasAutoLayout(const TSharedPtr<FJsonObject>& NodeObj)
 }
 
 // ---------------------------------------------------------------------------
-// ColorToHex
-// ---------------------------------------------------------------------------
-
-FString ColorToHex(const TSharedPtr<FJsonObject>& ColorObj, float Opacity)
-{
-	if (!ColorObj) return TEXT("#000000");
-
-	uint8 R = FMath::Clamp(FMath::RoundToInt(GetNumber(ColorObj, TEXT("r")) * 255.0), 0, 255);
-	uint8 G = FMath::Clamp(FMath::RoundToInt(GetNumber(ColorObj, TEXT("g")) * 255.0), 0, 255);
-	uint8 B = FMath::Clamp(FMath::RoundToInt(GetNumber(ColorObj, TEXT("b")) * 255.0), 0, 255);
-	float A = GetNumber(ColorObj, TEXT("a"), 1.0) * Opacity;
-	uint8 AI = FMath::Clamp(FMath::RoundToInt(A * 255.0), 0, 255);
-
-	if (AI >= 255)
-		return FString::Printf(TEXT("#%02X%02X%02X"), R, G, B);
-	return FString::Printf(TEXT("#%02X%02X%02X%02X"), R, G, B, AI);
-}
-
-// ---------------------------------------------------------------------------
 // ParseLayout
 // ---------------------------------------------------------------------------
 
@@ -1260,9 +1223,6 @@ void ParseSize(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObj
 		OutNode.LayoutData.LayoutGrow = static_cast<float>(GrowVal);
 
 }
-
-#include "FigmaParserStyling.h"
-
 // ---------------------------------------------------------------------------
 // ParsePosition
 // ---------------------------------------------------------------------------

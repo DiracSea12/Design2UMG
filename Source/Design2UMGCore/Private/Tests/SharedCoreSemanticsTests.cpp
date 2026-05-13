@@ -580,7 +580,9 @@ bool FConversionPlaceholderTintSettingsPayloadTest::RunTest(const FString& Param
 	PlaceholderNode->LayoutData.bSemanticPlaceholderSurface = true;
 	Doc.Children.Add(PlaceholderNode);
 
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(
+		Doc,
+		FDesign2UMGConversionSettings::FromSettings(PlaceholderScope.Settings));
 	const FUMGWidgetNode* PlaceholderWidget = FindWidgetByIdRecursive(Data.RootWidget, TEXT("placeholder_payload_root"));
 	if (!TestNotNull(TEXT("Converted placeholder widget exists"), PlaceholderWidget))
 	{
@@ -629,7 +631,9 @@ bool FConversionLuminosityOpacitySettingsPayloadTest::RunTest(const FString& Par
 	CardNode->Visual.Fills = { SolidFill, ImageFill };
 	Doc.Children.Add(CardNode);
 
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(
+		Doc,
+		FDesign2UMGConversionSettings::FromSettings(OpacityScope.Settings));
 	const FUMGWidgetNode* OverlayImage = FindWidgetByIdRecursive(Data.RootWidget, TEXT("luminosity_payload_root_fill1_img"));
 	if (!TestNotNull(TEXT("Multi-fill luminosity image child exists"), OverlayImage))
 	{
@@ -638,6 +642,73 @@ bool FConversionLuminosityOpacitySettingsPayloadTest::RunTest(const FString& Par
 
 	TestTrue(TEXT("Luminosity image child exported render opacity"), OverlayImage->Render.RenderOpacity.IsSet());
 	TestTrue(TEXT("Luminosity image child clamps opacity using injected cap"), FMath::IsNearlyEqual(OverlayImage->Render.RenderOpacity.GetValue(), 0.2f, KINDA_SMALL_NUMBER));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConversionSettingsCompatibilityShimTest,
+	"Design2UMG.Converter.SettingsCompatibilityShim",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FConversionSettingsCompatibilityShimTest::RunTest(const FString& Parameters)
+{
+	FPlaceholderHatchOverrideScope PlaceholderScope(TEXT("#123456"), TEXT("#ABCDEF"), 7, 11);
+	FLuminosityOpacityCapOverrideScope OpacityScope(0.2f);
+	if (!TestNotNull(TEXT("Settings available for converter compatibility shim test"), PlaceholderScope.Settings))
+	{
+		return false;
+	}
+
+	FDesignFill SolidFill = FDesignFill::FromColor(TEXT("#F5F5F5"));
+
+	FDesignFill ImageFill;
+	ImageFill.bEnabled = true;
+	ImageFill.Type = EDesignFillType::Image;
+	ImageFill.BlendMode = TEXT("LUMINOSITY");
+	ImageFill.Image.Url = TEXT("/Game/Design2UMG/Tests/T_LuminosityPayload");
+	ImageFill.Image.Mode = EDesignImageMode::Fit;
+	ImageFill.Image.Opacity = 0.6f;
+
+	FDesignDocument Doc;
+
+	TSharedPtr<FDesignNode> PlaceholderNode = MakeSharedSemanticsNode(
+		TEXT("placeholder_compat_root"),
+		EDesignNodeType::Frame,
+		FDesignSize::Fixed(120.0f),
+		FDesignSize::Fixed(48.0f));
+	PlaceholderNode->LayoutData.bSemanticPlaceholderSurface = true;
+	Doc.Children.Add(PlaceholderNode);
+
+	TSharedPtr<FDesignNode> CardNode = MakeSharedSemanticsNode(
+		TEXT("luminosity_compat_root"),
+		EDesignNodeType::Frame,
+		FDesignSize::Fixed(160.0f),
+		FDesignSize::Fixed(96.0f));
+	CardNode->Visual.Fill = SolidFill;
+	CardNode->Visual.Fills = { SolidFill, ImageFill };
+	Doc.Children.Add(CardNode);
+
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+
+	const FUMGWidgetNode* PlaceholderWidget = FindWidgetByIdRecursive(Data.RootWidget, TEXT("placeholder_compat_root"));
+	if (!TestNotNull(TEXT("Compatibility placeholder widget exists"), PlaceholderWidget))
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Compatibility shim keeps placeholder image material conversion"), PlaceholderWidget->Type, FString(TEXT("Image")));
+	TestTrue(TEXT("Compatibility shim keeps custom placeholder base fill"), PlaceholderWidget->Brush.MaterialParams.IsSet() && PlaceholderWidget->Brush.MaterialParams.GetValue().Contains(TEXT("\"Color\":\"#123456\"")));
+	TestTrue(TEXT("Compatibility shim keeps custom placeholder stripe color"), PlaceholderWidget->Brush.MaterialParams.IsSet() && PlaceholderWidget->Brush.MaterialParams.GetValue().Contains(TEXT("\"StripeColor\":\"#ABCDEF\"")));
+	TestTrue(TEXT("Compatibility shim keeps custom placeholder stripe width"), PlaceholderWidget->Brush.MaterialParams.IsSet() && PlaceholderWidget->Brush.MaterialParams.GetValue().Contains(TEXT("\"StripeWidth\":7")));
+	TestTrue(TEXT("Compatibility shim keeps custom placeholder stripe gap"), PlaceholderWidget->Brush.MaterialParams.IsSet() && PlaceholderWidget->Brush.MaterialParams.GetValue().Contains(TEXT("\"StripeGap\":11")));
+
+	const FUMGWidgetNode* OverlayImage = FindWidgetByIdRecursive(Data.RootWidget, TEXT("luminosity_compat_root_fill1_img"));
+	if (!TestNotNull(TEXT("Compatibility luminosity image child exists"), OverlayImage))
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("Compatibility shim keeps luminosity opacity payload"), OverlayImage->Render.RenderOpacity.IsSet());
+	TestTrue(TEXT("Compatibility shim keeps custom luminosity opacity cap"),
+		FMath::IsNearlyEqual(OverlayImage->Render.RenderOpacity.GetValue(), 0.2f, KINDA_SMALL_NUMBER));
 	return true;
 }
 

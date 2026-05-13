@@ -93,6 +93,8 @@ namespace
 			Target.Text.TextAlign = Override.Text.TextAlign;
 		if (Override.Text.LineHeight > 0)
 			Target.Text.LineHeight = Override.Text.LineHeight;
+		if (Override.Text.HasLetterSpacingValue())
+			Target.Text.SetLetterSpacingValue(Override.Text.LetterSpacing);
 		if (Override.Text.TextGrowth != EDesignTextGrowth::Auto)
 			Target.Text.TextGrowth = Override.Text.TextGrowth;
 		if (Override.Text.bUnderline)
@@ -264,6 +266,10 @@ namespace
 		{
 			Expanded->Visual.Effects = RefNode->Visual.Effects;
 			Expanded->Visual.bEffectsExplicitClear = RefNode->Visual.bEffectsExplicitClear;
+		}
+		if (RefNode->Text.HasLetterSpacingValue())
+		{
+			Expanded->Text.SetLetterSpacingValue(RefNode->Text.LetterSpacing);
 		}
 		if (RefNode->LayoutData.HasExplicitPadding())
 		{

@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "PenParserInternal.h"
 #include "DesignSchema.h"
@@ -97,6 +97,11 @@ void ApplyNodeTextStyleProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesig
 	TryGetResolvedNumberField(JsonObj, TEXT("fontSize"), Resolver, OutNode.Text.FontSize);
 	JsonObj->TryGetStringField(TEXT("fontWeight"), OutNode.Text.FontWeight);
 	JsonObj->TryGetStringField(TEXT("fontStyle"), OutNode.Text.FontStyle);
+	float LetterSpacing = 0.0f;
+	if (TryGetResolvedNumberField(JsonObj, TEXT("letterSpacing"), Resolver, LetterSpacing))
+	{
+		OutNode.Text.SetLetterSpacingValue(LetterSpacing);
+	}
 	TryGetResolvedBoolField(JsonObj, TEXT("underline"), Resolver, OutNode.Text.bUnderline);
 	TryGetResolvedBoolField(JsonObj, TEXT("strikethrough"), Resolver, OutNode.Text.bStrikethrough);
 	JsonObj->TryGetStringField(TEXT("href"), OutNode.Text.Href);

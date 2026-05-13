@@ -1,9 +1,10 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "PreBuildResourceNormalizer.h"
 #include "DesignResourceResolver.h"
 #include "UMGWidgetNodeAccess.h"
 #include "UMGPropertyKeys.h"
 #include "UMGValueParsing.h"
+#include "UMGWidgetNodeProceduralResourceAccess.h"
 #include "Design2UMGLog.h"
 #include "DesignPathRasterizer.h"
 #include "ProceduralShapeGenerator.h"
@@ -90,12 +91,26 @@ namespace
 
 	uint32 MakeProceduralTextureKey(const FUMGWidgetNode& Node)
 	{
-		const FString MaterialRef = FindNodePropertyOr(Node, UMGPropertyKeys::MaterialRef, Node.Brush.MaterialRef.Get(FString()));
-		const FString MaterialParams = FindNodePropertyOr(Node, UMGPropertyKeys::MaterialParams, Node.Brush.MaterialParams.Get(FString()));
-		const FString TextureWidth = FindNodeProperty(Node, UMGPropertyKeys::WidthOverride);
-		const FString TextureHeight = FindNodeProperty(Node, UMGPropertyKeys::HeightOverride);
-		const FString ShadowBlur = FindNodeProperty(Node, UMGPropertyKeys::ShadowBlur);
-		const FString BrushColor = FindNodeProperty(Node, UMGPropertyKeys::BrushColor);
+		FUMGProceduralResourceRequest Request;
+		if (!Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Node, Request))
+		{
+			return 0u;
+		}
+
+		const FString MaterialRef = Request.MaterialRef;
+		const FString MaterialParams = Request.MaterialParams.Get(FString());
+		const FString TextureWidth = Request.WidthOverride.IsSet()
+			? Design2UMGWidgetNodeAccess::SerializeWidgetFloat(Request.WidthOverride.GetValue())
+			: FString();
+		const FString TextureHeight = Request.HeightOverride.IsSet()
+			? Design2UMGWidgetNodeAccess::SerializeWidgetFloat(Request.HeightOverride.GetValue())
+			: FString();
+		const FString ShadowBlur = Request.ShadowBlur.IsSet()
+			? Design2UMGWidgetNodeAccess::SerializeWidgetFloat(Request.ShadowBlur.GetValue())
+			: FString();
+		const FString BrushColor = Request.BrushColor.IsSet()
+			? Design2UMGWidgetNodeAccess::SerializeWidgetColor(Request.BrushColor.GetValue())
+			: FString();
 
 		uint32 Key = GetTypeHash(MaterialRef);
 		Key = HashCombine(Key, GetTypeHash(MaterialParams));
@@ -276,8 +291,9 @@ namespace
 		const FString& AssetPrefix,
 		TMap<uint32, FString>& Cache)
 	{
-		const FString MaterialRef = FindNodePropertyOr(Node, UMGPropertyKeys::MaterialRef, Node.Brush.MaterialRef.Get(FString()));
-		if (!MaterialRef.IsEmpty())
+		FUMGProceduralResourceRequest ResourceRequest;
+		if (Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Node, ResourceRequest)
+			&& ResourceRequest.HasNonEmptyMaterialRef())
 		{
 			const uint32 Key = MakeProceduralTextureKey(Node);
 			if (const FString* Cached = Cache.Find(Key))
@@ -286,22 +302,24 @@ namespace
 			}
 			else
 			{
-				FUMGPropertyBag GenerationProps = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
-				if (UTexture2D* Generated = DesignResourceResolver::ResolveTextureFromMaterialRef(MaterialRef, GenerationProps, nullptr))
+				if (UTexture2D* Generated = DesignResourceResolver::ResolveTextureFromMaterialRef(
+					ResourceRequest.MaterialRef,
+					ResourceRequest.BuildCompatibilityPropertyBag(),
+					nullptr))
 				{
 					TArray64<uint8> RawData;
 					int32 RawW = 0, RawH = 0;
 					if (ExtractTextureRawData(Generated, RawData, RawW, RawH))
 					{
 						const FString SanitizedName = ObjectTools::SanitizeObjectName(Node.Name.IsEmpty() ? Node.Id : Node.Name);
-						const FString SanitizedMat = ObjectTools::SanitizeObjectName(MaterialRef);
+						const FString SanitizedMat = ObjectTools::SanitizeObjectName(ResourceRequest.MaterialRef);
 						const FString AssetName = ObjectTools::SanitizeObjectName(FString::Printf(TEXT("%s_%s_%s_%08X"), *AssetPrefix, *SanitizedName, *SanitizedMat, Key));
 						FString ObjectPath;
 						if (CreateOrUpdatePathTextureAsset(TextureImportPath, AssetName, RawData, RawW, RawH, TF_Bilinear, ObjectPath))
 						{
 							ReplaceNodeFillWithTexturePath(Node, ObjectPath);
 							Cache.Add(Key, ObjectPath);
-							UE_LOG(LogDesign2UMG, Log, TEXT("Persisted procedural texture '%s' (%s) -> %s"), *Node.Name, *MaterialRef, *ObjectPath);
+							UE_LOG(LogDesign2UMG, Log, TEXT("Persisted procedural texture '%s' (%s) -> %s"), *Node.Name, *ResourceRequest.MaterialRef, *ObjectPath);
 						}
 					}
 				}

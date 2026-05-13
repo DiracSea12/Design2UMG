@@ -2,6 +2,8 @@
 
 Convert design files into Unreal Engine 5 UMG Widget Blueprints.
 
+[![Plugin CI](https://github.com/DiracSea12/ImageToUMG/actions/workflows/build.yml/badge.svg)](https://github.com/DiracSea12/ImageToUMG/actions/workflows/build.yml)
+
 Formal release scope:
 - Pencil `.pen` files
 - Figma Design import through REST API or local export JSON
@@ -12,6 +14,25 @@ Bridge / debug utilities that remain available but are not formal release promis
 
 ![Light Theme](Docs/Images/step1_light_theme.png)
 ![Dark Theme](Docs/Images/step2_dark_theme.png)
+
+## Demo And Examples
+
+- `Examples/` includes ready-to-import `.pen` samples such as `Dashboard.pen`, `GameHUD.pen`, `LoginForm.pen`, and `SimpleCard.pen`.
+- The screenshots above show the current preview surfaces shipped with the plugin workflow.
+- A fast local smoke path is: enable the plugin, drag one of the example `.pen` files into Content Browser, then inspect the generated Widget Blueprint and preview PNG.
+
+## Validation At A Glance
+
+This repo intentionally separates contributor-facing validation from maintainer release gating:
+
+| Layer | Purpose | Who runs it |
+|------|------|------|
+| `repository-hygiene` | Public repo boundary and required-file checks | GitHub Actions on push / PR |
+| `self-hosted build` | Package the plugin with Unreal `BuildPlugin` and upload the artifact | Maintainers via manual workflow |
+| `public smoke / public validate` | Local build plus focused validation / repro commands | Contributors and maintainers |
+| `maintainer formal admissible gate` | Full discovered 47-case release gate | Maintainers only |
+
+The workflow badge above reflects the tracked `Plugin CI` workflow. The packaged plugin job is intentionally manual and self-hosted; it is not presented as a public hosted UE formal gate.
 
 ## Features
 
@@ -111,6 +132,8 @@ python Tools/design2umg_auto_verify.py local-figma --source <FigmaExportRoot>\de
 
 `DESIGN2UMG_RUNTIME_PROJECT` can replace `--project`. `DESIGN2UMG_UNREAL_EDITOR` or `UE_ROOT` can replace `--editor`.
 The script fails if neither the project nor editor path is provided; it does not create or infer a HostProject.
+
+Contributor-facing helpers versus maintainer-only automation flows are listed in [Tools/README.md](Tools/README.md).
 
 ## Settings
 

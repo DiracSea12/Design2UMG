@@ -4,6 +4,7 @@
 #include "UMGWidgetNodeAccess.h"
 #include "UMGPropertyKeys.h"
 #include "UMGSchema.h"
+#include "UMGValueParsing.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "Dom/JsonObject.h"
@@ -69,12 +70,12 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeSlot(const FUMGSlotData& Sl
 			Slot.Padding.Left, Slot.Padding.Top, Slot.Padding.Right, Slot.Padding.Bottom));
 	}
 
-	if (Slot.HorizontalAlignment != TEXT("Fill"))
-		J->SetStringField(TEXT("HorizontalAlignment"), Slot.HorizontalAlignment);
-	if (Slot.VerticalAlignment != TEXT("Fill"))
-		J->SetStringField(TEXT("VerticalAlignment"), Slot.VerticalAlignment);
-	if (Slot.SizeRule != TEXT("Auto"))
-		J->SetStringField(TEXT("SizeRule"), Slot.SizeRule);
+	if (Slot.HorizontalAlignment != EUMGSlotHorizontalAlignment::Fill)
+		J->SetStringField(TEXT("HorizontalAlignment"), FUMGValueParser::FormatSlotHorizontalAlignment(Slot.HorizontalAlignment));
+	if (Slot.VerticalAlignment != EUMGSlotVerticalAlignment::Fill)
+		J->SetStringField(TEXT("VerticalAlignment"), FUMGValueParser::FormatSlotVerticalAlignment(Slot.VerticalAlignment));
+	if (Slot.SizeRule != EUMGSlotSizeRule::Auto)
+		J->SetStringField(TEXT("SizeRule"), FUMGValueParser::FormatSlotSizeRule(Slot.SizeRule));
 	if (!FMath::IsNearlyEqual(Slot.FillWeight, 1.0f))
 		J->SetNumberField(TEXT("FillWeight"), Slot.FillWeight);
 	if (Slot.Row != 0)

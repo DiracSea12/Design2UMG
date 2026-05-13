@@ -1,6 +1,7 @@
 ﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "SDesign2UMGPreviewWindow.h"
+#include "Design2UMGGenerationSettingsSnapshot.h"
 #include "DesignImportPipeline.h"
 #include "DesignPreviewMaterializationService.h"
 
@@ -27,6 +28,14 @@ namespace
 {
 	constexpr float JsonEditDebounceSeconds = 0.5f;
 
+	FDesignPreviewMaterializationSettingsSnapshot BuildPreviewMaterializationSettingsSnapshot(
+		const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings)
+	{
+		FDesignPreviewMaterializationSettingsSnapshot Snapshot;
+		Snapshot.ClassOverrides = GenerationSettings.ClassOverrides;
+		return Snapshot;
+	}
+
 	class FDesignImportPipelinePreviewRefreshAnalyzer final : public IDesignPreviewRefreshAnalyzer
 	{
 	public:
@@ -45,6 +54,7 @@ void SDesign2UMGPreviewWindow::Construct(const FArguments& InArgs)
 	CurrentJson = InArgs._OriginalJson;
 	CurrentOutputPath = InArgs._OutputPath;
 	ConversionWarnings = InArgs._Warnings;
+	CachedMaterializationSettingsSnapshot = InArgs._InitialMaterializationSettingsSnapshot;
 	OnConfirmed = InArgs._OnConfirmed;
 	OnCancelled = InArgs._OnCancelled;
 	PreviewRefreshAnalyzer = InArgs._PreviewRefreshAnalyzer;
@@ -282,6 +292,27 @@ SDesign2UMGPreviewWindow::~SDesign2UMGPreviewWindow()
 		GEditor->GetTimerManager()->ClearTimer(PreviewRefreshTimerHandle);
 	}
 	CleanupPreviewWidget();
+}
+
+TOptional<FDesignPreviewMaterializationSettingsSnapshot>
+SDesign2UMGPreviewWindow::ResolveMaterializationSettingsSnapshot()
+{
+	if (const FDesign2UMGGenerationSettingsSnapshot* CurrentGenerationSettings =
+		Design2UMGGenerationSettingsContext::GetCurrent())
+	{
+		CachedMaterializationSettingsSnapshot =
+			BuildPreviewMaterializationSettingsSnapshot(*CurrentGenerationSettings);
+		return CachedMaterializationSettingsSnapshot;
+	}
+
+	if (LatestApprovedSnapshot.IsSet() && LatestApprovedSnapshot->MaterializationSettingsSnapshot.IsSet())
+	{
+		CachedMaterializationSettingsSnapshot =
+			LatestApprovedSnapshot->MaterializationSettingsSnapshot;
+		return CachedMaterializationSettingsSnapshot;
+	}
+
+	return CachedMaterializationSettingsSnapshot;
 }
 
 FReply SDesign2UMGPreviewWindow::OnGenerateClicked()
@@ -548,6 +579,7 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(uint64 RequestId, const FString&
 	ApprovedSnapshot.EditedJson = RefreshResult.EditedJson;
 	ApprovedSnapshot.Data = RefreshResult.Data;
 	ApprovedSnapshot.ImageReport = RefreshResult.ImageReport;
+	ApprovedSnapshot.MaterializationSettingsSnapshot = ResolveMaterializationSettingsSnapshot();
 
 	FDesignPreviewMaterializationRequest MaterializationRequest;
 	MaterializationRequest.RequestId = RequestId;

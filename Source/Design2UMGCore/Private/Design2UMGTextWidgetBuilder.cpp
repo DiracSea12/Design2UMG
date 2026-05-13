@@ -114,6 +114,8 @@ namespace
 			Widget.Text.LineHeightPercentage = Node->Text.LineHeight;
 		}
 
+		// Preserve authored explicit-zero semantics on the design model, but avoid
+		// redundantly emitting runtime letter spacing when the effective value is zero.
 		if (Node->Text.LetterSpacing != 0)
 		{
 			Widget.TextStyle.LetterSpacing = Node->Text.LetterSpacing;
@@ -359,7 +361,7 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 
 		const bool bRunHasLetterSpacing = Run && Run->LetterSpacing.IsSet();
 		const float EffectiveLetterSpacing = bRunHasLetterSpacing ? Run->LetterSpacing.GetValue() : InNode->Text.LetterSpacing;
-		const bool bHasLetterSpacing = bRunHasLetterSpacing || InNode->Text.LetterSpacing != 0.0f;
+		const bool bHasLetterSpacing = bRunHasLetterSpacing || InNode->Text.HasLetterSpacingValue();
 		if (bHasLetterSpacing)
 		{
 			Result.LetterSpacing = EffectiveLetterSpacing;

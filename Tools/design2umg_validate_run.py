@@ -128,6 +128,7 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
         "historical_best_checked": False,
         "historical_best_missing_cases": [],
         "historical_best_incompatible_cases": [],
+        "historical_best_degraded_authority_cases": [],
         "historical_best_regressions": [],
         "render_size_rule_checked": False,
         "render_size_rule_incompatible_cases": [],
@@ -241,7 +242,24 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
                     continue
 
                 resolved_current_metrics = resolve_case_metrics(output_root, case_name, current_case)
-                current_rule = render_rule.evaluate_report_render_size_rule(Path(resolved_current_metrics.get("report_path", "")))
+                current_report_path = Path(resolved_current_metrics.get("report_path", ""))
+                current_report = load_json(current_report_path) if current_report_path.is_file() else {}
+                current_reference_authority = (
+                    ((current_report.get("reference_context") or {}).get("reference_authority") or {})
+                )
+                current_verification_level = str(current_reference_authority.get("verification_level") or "")
+                if current_verification_level and current_verification_level not in {"strong", "external_export_nodes"}:
+                    result["historical_best_degraded_authority_cases"].append(
+                        {
+                            "case": case_name,
+                            "verification_level": current_verification_level,
+                            "canonical_source": current_reference_authority.get("canonical_source", ""),
+                            "reason": current_reference_authority.get("reason", ""),
+                        }
+                    )
+                    continue
+
+                current_rule = render_rule.evaluate_report_render_size_rule(current_report_path)
                 best_rule = render_rule.evaluate_report_render_size_rule(Path(best_case.get("report_path", "")))
                 if not current_rule.get("compatible") or not best_rule.get("compatible"):
                     result["historical_best_incompatible_cases"].append(
@@ -298,6 +316,8 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
                 result["blocked_reasons"].append("historical_best_render_size_rule_incompatible")
             if result["historical_best_pipeline_determinism_incompatible_cases"]:
                 result["blocked_reasons"].append("historical_best_pipeline_determinism_rule_incompatible")
+            if result["historical_best_degraded_authority_cases"]:
+                result["blocked_reasons"].append("historical_best_degraded_authority")
             if result["historical_best_regressions"]:
                 result["blocked_reasons"].append("historical_best_regression")
 

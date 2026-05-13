@@ -676,7 +676,11 @@ void ParseNodeExtended(const TSharedPtr<FJsonObject>& JsonObj, TSharedPtr<FDesig
 	ParseNodeContentField(JsonObj->TryGetField(TEXT("content")), Resolver, Node);
 	ApplyNodeTextStyleProperties(JsonObj, *Node, Resolver);
 	TryGetResolvedNumberField(JsonObj, TEXT("lineHeight"), Resolver, Node->Text.LineHeight);
-	TryGetResolvedNumberField(JsonObj, TEXT("letterSpacing"), Resolver, Node->Text.LetterSpacing);
+	float LetterSpacing = 0.0f;
+	if (TryGetResolvedNumberField(JsonObj, TEXT("letterSpacing"), Resolver, LetterSpacing))
+	{
+		Node->Text.SetLetterSpacingValue(LetterSpacing);
+	}
 
 	{
 		FString TAStr;

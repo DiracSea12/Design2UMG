@@ -177,6 +177,11 @@ Reference sourcing for the formal gate:
 - `pen_*` cases may use Pencil MCP / export-nodes capture as the authoritative source reference when no checked-in external reference root is provided
 - `figma_*` cases use the top-level export PNG found under each local Figma export root as the authoritative source reference
 - if you package a checked-in external reference root for a formal full run, every formal case directory must contain both `reference.png` and `compare_report.json`
+- `Tools/design2umg_auto_verify_batch.py` now auto-discovers the default local Figma export roots from the `design-root` workspace ancestry when `--figma-export-root` is omitted, so the maintainer formal gate does not silently drop the Figma members of the 47-case set
+
+Default user flow is fail-closed. If live Pencil `export_nodes` is unavailable, the verifier may still keep a `get_screenshot` witness PNG so the run can preserve diagnostic and comparison artifacts, but that witness fallback does not prove live Pencil export health and it does not relax formal or historical-best gates.
+
+Maintainers may also run a local regression-only comparison against a curated external `--reference-root`, but that is a manual local workflow. It must not be treated as proof that the live Pencil export path is healthy, and it must not be confused with the default fail-closed user flow above.
 
 If `reference.png` exists but the baseline `compare_report.json` is missing, the run can still render and compare, but the run root's own `summary.no_regression` becomes unavailable. That is not acceptable for the formal archived gate.
 

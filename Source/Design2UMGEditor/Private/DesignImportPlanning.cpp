@@ -5,6 +5,7 @@
 #include "Design2UMGConverter.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGNotifications.h"
+#include "Design2UMGSettings.h"
 #include "DesignFontImportService.h"
 #include "DesignImageBakeUtils.h"
 #include "DesignRemoteImageImporter.h"
@@ -12,6 +13,11 @@
 
 namespace
 {
+	FDesign2UMGConversionSettings BuildFallbackConversionSettings()
+	{
+		return FDesign2UMGConversionSettings::FromSettings(UDesign2UMGSettings::Get());
+	}
+
 	bool ParseWidgetJson(const FString& JsonString, FUMGWidgetData& OutData, FString* OutError)
 	{
 		FString ParseError;
@@ -27,14 +33,17 @@ namespace
 		return false;
 	}
 
-	void PrepareDocumentForGeneration(FDesignDocument& Document, FUMGWidgetData& OutPreparedData)
+	void PrepareDocumentForGeneration(
+		FDesignDocument& Document,
+		FUMGWidgetData& OutPreparedData,
+		const FDesign2UMGConversionSettings& ConversionSettings)
 	{
 		DesignFontImportService::PrepareDocumentFonts(Document);
 		DesignImageBakeUtils::BakeDocumentLocalImageBlendOverlays(
 			Document,
 			FString(),
 			TEXT("DesignImportPipeline"));
-		OutPreparedData = FDesign2UMGConverter::Convert(Document);
+		OutPreparedData = FDesign2UMGConverter::Convert(Document, ConversionSettings);
 	}
 }
 
@@ -62,6 +71,10 @@ namespace DesignImportPlanning
 	FImportAnalysisResult AnalyzeWidgetData(FUMGWidgetData& Data, const FImportAnalysisInput& Input)
 	{
 		FImportAnalysisResult Result;
+		if (Input.SettingsSnapshot)
+		{
+			Result.SettingsSnapshot = *Input.SettingsSnapshot;
+		}
 		if (Input.bResolveImages)
 		{
 			ResolveImages(Data, &Result.ImageReport);
@@ -73,7 +86,16 @@ namespace DesignImportPlanning
 	FImportAnalysisResult AnalyzeDocument(FDesignDocument& Document, const FImportAnalysisInput& Input)
 	{
 		FImportAnalysisResult Result;
-		PrepareDocumentForGeneration(Document, Result.Data);
+		if (Input.SettingsSnapshot)
+		{
+			Result.SettingsSnapshot = *Input.SettingsSnapshot;
+		}
+
+		const FDesign2UMGConversionSettings& ConversionSettings =
+			Result.SettingsSnapshot.IsSet()
+				? Result.SettingsSnapshot->ConversionSettings
+				: BuildFallbackConversionSettings();
+		PrepareDocumentForGeneration(Document, Result.Data, ConversionSettings);
 		if (Input.bResolveImages)
 		{
 			ResolveImages(Result.Data, &Result.ImageReport);

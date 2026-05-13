@@ -111,6 +111,11 @@ $forbiddenRootReviewPatterns = @(
     'CODEX_*REVIEW*.md'
 )
 
+$forbiddenInternalReviewPathPatterns = @(
+    'Docs/ReviewActionPlan.md',
+    'Docs/ReviewRemainingWork.md'
+)
+
 $commonForbiddenRecursivePathPatterns = @(
     'openspec',
     'Saved/Design2UMG/Automation',
@@ -178,6 +183,29 @@ $forbiddenPathPatterns = @(
 $selfPath = (Resolve-Path -LiteralPath $PSCommandPath).Path
 $failures = @()
 
+if ($Mode -eq 'SourceWorkspace') {
+    $trackedPaths = @(git -C $resolvedRoot ls-files 2>$null)
+    if ($LASTEXITCODE -eq 0) {
+        foreach ($trackedPath in $trackedPaths) {
+            $relative = $trackedPath.Replace('\', '/')
+
+            if ($relative -notlike '*/*') {
+                foreach ($pattern in $forbiddenRootReviewPatterns) {
+                    if ($relative -like $pattern) {
+                        $failures += "Forbidden root review report tracked in SourceWorkspace: $relative"
+                    }
+                }
+            }
+
+            foreach ($pattern in $forbiddenInternalReviewPathPatterns) {
+                if (Test-BoundaryPathPattern -RelativePath $relative -Pattern $pattern) {
+                    $failures += "Forbidden internal review/planning markdown tracked in SourceWorkspace: $relative"
+                }
+            }
+        }
+    }
+}
+
 if ($Mode -in @('Package', 'ExportWorkspace')) {
     $forbiddenRootNames = @($commonForbiddenRootNames)
     $forbiddenRecursivePathPatterns = @($commonForbiddenRecursivePathPatterns)
@@ -233,8 +261,8 @@ if ($Mode -eq 'SourceWorkspace') {
     $trackedPublicSurfaceFiles = @()
     foreach ($file in $publicSurfaceFiles) {
         $relative = Get-RelativeBoundaryPath -BasePath $resolvedRoot -Path $file.FullName
-        git -C $resolvedRoot ls-files --error-unmatch -- $relative *> $null
-        if ($LASTEXITCODE -eq 0) {
+        $trackedMatches = @(git -C $resolvedRoot ls-files -- $relative 2>$null)
+        if ($LASTEXITCODE -eq 0 -and $trackedMatches.Count -gt 0) {
             $trackedPublicSurfaceFiles += $file
         }
     }
@@ -244,6 +272,12 @@ if ($Mode -eq 'SourceWorkspace') {
 foreach ($file in $publicSurfaceFiles) {
     if ((Resolve-Path -LiteralPath $file.FullName).Path -eq $selfPath) {
         continue
+    }
+    $relative = Get-RelativeBoundaryPath -BasePath $resolvedRoot -Path $file.FullName
+    foreach ($pattern in $forbiddenInternalReviewPathPatterns) {
+        if (Test-BoundaryPathPattern -RelativePath $relative -Pattern $pattern) {
+            $failures += "Forbidden internal review/planning markdown present in $Mode public surface: $relative"
+        }
     }
     $content = Get-Content -LiteralPath $file.FullName -Raw
     foreach ($pattern in $forbiddenPathPatterns) {

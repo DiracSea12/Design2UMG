@@ -63,24 +63,32 @@ void LayoutMapper::ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr<
 {
 	if (ParentLayout == EDesignLayout::Vertical)
 	{
-		Widget.Slot.HorizontalAlignment = Node->Transform.Width.Mode == EDesignSizeMode::FillContainer ? TEXT("Fill") : TEXT("Left");
-		Widget.Slot.SizeRule = Node->Transform.Height.Mode == EDesignSizeMode::FillContainer ? TEXT("Fill") : TEXT("Auto");
-		if (Widget.Slot.SizeRule == TEXT("Fill") && Node->LayoutData.LayoutGrow >= 0.0f)
+		Widget.Slot.HorizontalAlignment = Node->Transform.Width.Mode == EDesignSizeMode::FillContainer
+			? EUMGSlotHorizontalAlignment::Fill
+			: EUMGSlotHorizontalAlignment::Left;
+		Widget.Slot.SizeRule = Node->Transform.Height.Mode == EDesignSizeMode::FillContainer
+			? EUMGSlotSizeRule::Fill
+			: EUMGSlotSizeRule::Auto;
+		if (Widget.Slot.SizeRule == EUMGSlotSizeRule::Fill && Node->LayoutData.LayoutGrow >= 0.0f)
 		{
 			if (FMath::IsNearlyZero(Node->LayoutData.LayoutGrow))
-				Widget.Slot.SizeRule = TEXT("Auto");
+				Widget.Slot.SizeRule = EUMGSlotSizeRule::Auto;
 			else
 				Widget.Slot.FillWeight = Node->LayoutData.LayoutGrow;
 		}
 	}
 	else if (ParentLayout == EDesignLayout::Horizontal)
 	{
-		Widget.Slot.VerticalAlignment = Node->Transform.Height.Mode == EDesignSizeMode::FillContainer ? TEXT("Fill") : TEXT("Top");
-		Widget.Slot.SizeRule = Node->Transform.Width.Mode == EDesignSizeMode::FillContainer ? TEXT("Fill") : TEXT("Auto");
-		if (Widget.Slot.SizeRule == TEXT("Fill") && Node->LayoutData.LayoutGrow >= 0.0f)
+		Widget.Slot.VerticalAlignment = Node->Transform.Height.Mode == EDesignSizeMode::FillContainer
+			? EUMGSlotVerticalAlignment::Fill
+			: EUMGSlotVerticalAlignment::Top;
+		Widget.Slot.SizeRule = Node->Transform.Width.Mode == EDesignSizeMode::FillContainer
+			? EUMGSlotSizeRule::Fill
+			: EUMGSlotSizeRule::Auto;
+		if (Widget.Slot.SizeRule == EUMGSlotSizeRule::Fill && Node->LayoutData.LayoutGrow >= 0.0f)
 		{
 			if (FMath::IsNearlyZero(Node->LayoutData.LayoutGrow))
-				Widget.Slot.SizeRule = TEXT("Auto");
+				Widget.Slot.SizeRule = EUMGSlotSizeRule::Auto;
 			else
 				Widget.Slot.FillWeight = Node->LayoutData.LayoutGrow;
 		}
@@ -88,7 +96,7 @@ void LayoutMapper::ApplySlotProperties(FUMGWidgetNode& Widget, const TSharedPtr<
 	else if (ParentLayout == EDesignLayout::Wrap || ParentLayout == EDesignLayout::Grid)
 	{
 		Widget.Slot.Padding = FMargin(0.0f);
-		Widget.Slot.SizeRule = TEXT("Auto");
+		Widget.Slot.SizeRule = EUMGSlotSizeRule::Auto;
 	}
 	else
 	{
@@ -187,7 +195,7 @@ void LayoutMapper::ApplyJustifyContent(TArray<FUMGWidgetNode>& Children, EDesign
 	bool bHasFillChild = false;
 	for (const auto& C : Children)
 	{
-		if (C.Slot.SizeRule == TEXT("Fill"))
+		if (C.Slot.SizeRule == EUMGSlotSizeRule::Fill)
 		{
 			bHasFillChild = true;
 			break;
@@ -199,7 +207,7 @@ void LayoutMapper::ApplyJustifyContent(TArray<FUMGWidgetNode>& Children, EDesign
 	auto CreateSpacer = [](float FillWeight = 1.0f) -> FUMGWidgetNode {
 		FUMGWidgetNode Spacer;
 		Spacer.Type = TEXT("Spacer");
-		Spacer.Slot.SizeRule = TEXT("Fill");
+		Spacer.Slot.SizeRule = EUMGSlotSizeRule::Fill;
 		if (!FMath::IsNearlyEqual(FillWeight, 1.0f))
 			Spacer.Slot.FillWeight = FillWeight;
 		return Spacer;
@@ -236,20 +244,20 @@ void LayoutMapper::ApplyAlignItems(FUMGWidgetNode& Widget, EDesignAlignItems Ali
 {
 	if (ParentLayout == EDesignLayout::Vertical)
 	{
-		if (Widget.Slot.HorizontalAlignment != TEXT("Fill"))
+		if (Widget.Slot.HorizontalAlignment != EUMGSlotHorizontalAlignment::Fill)
 		{
 			EHorizontalAlignment H = DesignTypeMapper::MapAlignItemsH(Align);
-			Widget.Slot.HorizontalAlignment = H == HAlign_Center ? TEXT("Center") :
-				H == HAlign_Right ? TEXT("Right") : TEXT("Left");
+			Widget.Slot.HorizontalAlignment = H == HAlign_Center ? EUMGSlotHorizontalAlignment::Center :
+				H == HAlign_Right ? EUMGSlotHorizontalAlignment::Right : EUMGSlotHorizontalAlignment::Left;
 		}
 	}
 	else if (ParentLayout == EDesignLayout::Horizontal)
 	{
-		if (Widget.Slot.VerticalAlignment != TEXT("Fill"))
+		if (Widget.Slot.VerticalAlignment != EUMGSlotVerticalAlignment::Fill)
 		{
 			EVerticalAlignment V = DesignTypeMapper::MapAlignItemsV(Align);
-			Widget.Slot.VerticalAlignment = V == VAlign_Center ? TEXT("Center") :
-				V == VAlign_Bottom ? TEXT("Bottom") : TEXT("Top");
+			Widget.Slot.VerticalAlignment = V == VAlign_Center ? EUMGSlotVerticalAlignment::Center :
+				V == VAlign_Bottom ? EUMGSlotVerticalAlignment::Bottom : EUMGSlotVerticalAlignment::Top;
 		}
 	}
 }

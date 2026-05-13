@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Design2UMGGenerationSettingsSnapshot.h"
 #include "UMGSchema.h"
 
 class UWidgetBlueprint;
@@ -10,8 +11,14 @@ class UWidgetBlueprint;
 class FUMGGenerator
 {
 public:
-	static UWidgetBlueprint* GenerateWidgetBlueprint(const FUMGWidgetData& WidgetData, const FString& PackagePath);
-	static UWidgetBlueprint* BuildWidgetBlueprint(const FUMGWidgetData& WidgetData, const FString& PackagePath);
+	static UWidgetBlueprint* GenerateWidgetBlueprint(
+		const FUMGWidgetData& WidgetData,
+		const FString& PackagePath,
+		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr);
+	static UWidgetBlueprint* BuildWidgetBlueprint(
+		const FUMGWidgetData& WidgetData,
+		const FString& PackagePath,
+		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr);
 	static void SaveWidgetBlueprint(UWidgetBlueprint* WBP);
 };
 

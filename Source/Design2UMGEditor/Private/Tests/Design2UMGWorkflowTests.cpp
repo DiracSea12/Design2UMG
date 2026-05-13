@@ -1,7 +1,8 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "Misc/AutomationTest.h"
 #include "Design2UMGConverter.h"
 #include "Design2UMGFigmaMetadataExtensions.h"
+#include "Design2UMGEditorDesignSourceRegistry.h"
 #include "WidgetMetadataCollector.h"
 #include "Design2UMGLocalFigmaImport.h"
 #include "DesignFontImportService.h"
@@ -438,6 +439,24 @@ bool FPenWelcomeLigatureIconWeightWorkflowTest::RunTest(const FString& Parameter
 	return DashboardIcon != nullptr && ArrowDownIcon != nullptr;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationPinnedFontReuseScopeTest,
+	"Design2UMG.BatchImport.AutomationPinnedFontReuseScope",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FAutomationPinnedFontReuseScopeTest::RunTest(const FString& Parameters)
+{
+	TestTrue(TEXT("Legacy empty automation font path may reuse pinned global fonts"),
+		DesignFontImportService::CanReusePinnedAutomationFontPath(FString()));
+	TestTrue(TEXT("Legacy global automation font path may reuse pinned global fonts"),
+		DesignFontImportService::CanReusePinnedAutomationFontPath(TEXT("/Game/Design2UMG/Automation/ImportedFonts")));
+	TestTrue(TEXT("Legacy global automation font path ignores slash and case differences"),
+		DesignFontImportService::CanReusePinnedAutomationFontPath(TEXT("\\game\\design2umg\\automation\\importedfonts\\")));
+	TestFalse(TEXT("Case-local automation font path must not reuse pinned global fonts"),
+		DesignFontImportService::CanReusePinnedAutomationFontPath(TEXT("/Game/Design2UMG/Automation/pen-pencil-demo-dashboard/primary/ImportedFonts")));
+	TestFalse(TEXT("Nested case-local automation font path must not reuse pinned global fonts"),
+		DesignFontImportService::CanReusePinnedAutomationFontPath(TEXT("/Game/Design2UMG/Automation/figma-figma-export-source/primary/ImportedFonts")));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenMcpImportWorkflowTest,
 	"Design2UMG.BatchImport.PenMCP",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -537,7 +556,8 @@ bool FFigmaSourceImportWorkflowTest::RunTest(const FString& Parameters)
 	}
 
 	FDesignDocument Document;
-	TestTrue(TEXT("Parse raw Figma json"), FFigmaParser::ParseDocument(RawJson, Document));
+	TestTrue(TEXT("Parse raw Figma json through source registry"),
+		Design2UMGEditorDesignSourceRegistry::TryParseSourceDocument(TEXT("Figma"), RawJson, Document));
 	TestTrue(TEXT("Parsed Figma source should contain children"), Document.Children.Num() > 0);
 
 	FUMGWidgetData Data = DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{false}).Data;

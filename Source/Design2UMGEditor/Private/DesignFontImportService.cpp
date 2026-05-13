@@ -361,6 +361,17 @@ namespace
 		return SafeName;
 	}
 
+	FString NormalizeAutomationFontImportPath(const FString& InPath)
+	{
+		FString Normalized = InPath.TrimStartAndEnd();
+		Normalized.ReplaceInline(TEXT("\\"), TEXT("/"));
+		while (Normalized.EndsWith(TEXT("/")))
+		{
+			Normalized.LeftChopInline(1, EAllowShrinking::No);
+		}
+		return Normalized;
+	}
+
 	bool SaveAssetPackage(UObject* Asset, const FString& PackageName)
 	{
 		if (!Asset || PackageName.IsEmpty())
@@ -572,6 +583,11 @@ namespace
 	{
 		OutFontObjectPath.Reset();
 		if (!Design2UMGAutomationRender::IsAutomationRenderActive())
+		{
+			return false;
+		}
+
+		if (!DesignFontImportService::CanReusePinnedAutomationFontPath(Design2UMGAutomationRender::GetAutomationFontImportPath()))
 		{
 			return false;
 		}
@@ -1351,6 +1367,13 @@ void DesignFontImportService::PrimeKnownIconFamily(const FString& FontFamily)
 		Families.Add(FontFamily);
 	}
 	PrimeKnownIconGlyphs(Families);
+}
+
+bool DesignFontImportService::CanReusePinnedAutomationFontPath(const FString& AutomationFontImportPath)
+{
+	const FString NormalizedPath = NormalizeAutomationFontImportPath(AutomationFontImportPath);
+	return NormalizedPath.IsEmpty()
+		|| NormalizedPath.Equals(TEXT("/Game/Design2UMG/Automation/ImportedFonts"), ESearchCase::IgnoreCase);
 }
 
 void DesignFontImportService::ResetTransientState()

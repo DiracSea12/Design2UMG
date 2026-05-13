@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "VisualMapperFillTransfer.h"
 
@@ -144,8 +144,8 @@ namespace
 		FUMGWidgetNode Layer;
 		Layer.Id = FString::Printf(TEXT("%s_fill%d"), *Widget.Id, FillIndex);
 		Layer.Name = FString::Printf(TEXT("%s_fill%d"), *Widget.Name, FillIndex);
-		Layer.Slot.HorizontalAlignment = TEXT("Fill");
-		Layer.Slot.VerticalAlignment = TEXT("Fill");
+		Layer.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
+		Layer.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
 		return Layer;
 	}
 
@@ -155,8 +155,8 @@ namespace
 		Widget.Name += TEXT("_content");
 		Widget.Bounds = FDesignPixelBounds();
 		Widget.Slot = FUMGSlotData();
-		Widget.Slot.HorizontalAlignment = TEXT("Fill");
-		Widget.Slot.VerticalAlignment = TEXT("Fill");
+		Widget.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
+		Widget.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
 	}
 
 	void ApplyMultiFillImageChildOpacity(

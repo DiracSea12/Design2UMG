@@ -1,9 +1,11 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGGenerator.h"
+#include "Design2UMGGenerationSettingsSnapshot.h"
 #include "UMGPrototypeAnimationBuilder.h"
 #include "UMGGeneratorRootHandoff.h"
 #include "UMGWidgetNodeAccess.h"
+#include "UMGValueParsing.h"
 #include "Design2UMGPrototypeNavigationTagHelper.h"
 #include "UObject/SavePackage.h"
 #include "Design2UMGFigmaMetadataExtensions.h"
@@ -220,15 +222,21 @@ namespace
 
 }
 
-UWidgetBlueprint* FUMGGenerator::GenerateWidgetBlueprint(const FUMGWidgetData& WidgetData, const FString& PackagePath)
+UWidgetBlueprint* FUMGGenerator::GenerateWidgetBlueprint(
+	const FUMGWidgetData& WidgetData,
+	const FString& PackagePath,
+	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
 {
-	UWidgetBlueprint* WBP = BuildWidgetBlueprint(WidgetData, PackagePath);
+	UWidgetBlueprint* WBP = BuildWidgetBlueprint(WidgetData, PackagePath, GenerationSettings);
 	if (WBP)
 		SaveWidgetBlueprint(WBP);
 	return WBP;
 }
 
-UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& WidgetData, const FString& PackagePath)
+UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
+	const FUMGWidgetData& WidgetData,
+	const FString& PackagePath,
+	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
 {
 	FString AssetName = ObjectTools::SanitizeObjectName(WidgetData.WidgetName);
 	FString FullPath = PackagePath / AssetName;
@@ -289,6 +297,13 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 	}
 
 	FUMGPrototypeNavigationData NavigationData = WidgetData.PrototypeNavigation();
+	const FDesign2UMGGenerationSettingsSnapshot FallbackGenerationSettings =
+		GenerationSettings
+			? FDesign2UMGGenerationSettingsSnapshot()
+			: FDesign2UMGGenerationSettingsSnapshot::FromSettings(*UDesign2UMGSettings::Get());
+	const FDesign2UMGGenerationSettingsSnapshot& EffectiveGenerationSettings =
+		GenerationSettings ? *GenerationSettings : FallbackGenerationSettings;
+	const Design2UMGGenerationSettingsContext::FScopedSettingsSnapshot ScopedGenerationSettings(EffectiveGenerationSettings);
 
 	const UMGGeneratorRootHandoff::FPreparedRoot PreparedRoot =
 		UMGGeneratorRootHandoff::PrepareRootForBuild(WidgetData, PackagePath, AssetName);
@@ -313,8 +328,9 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 			for (int32 i = 0; i < Depth; ++i) Indent += TEXT("  ");
 
 			FString SlotInfo = FString::Printf(TEXT("slot[h=%s v=%s sz=%s fw=%.1f off=(%.0f,%.0f,%.0f,%.0f) anc=(%.2f,%.2f,%.2f,%.2f) aln=(%.2f,%.2f) auto=%d]"),
-				*Node.Slot.HorizontalAlignment, *Node.Slot.VerticalAlignment,
-				*Node.Slot.SizeRule, Node.Slot.FillWeight,
+				FUMGValueParser::FormatSlotHorizontalAlignment(Node.Slot.HorizontalAlignment),
+				FUMGValueParser::FormatSlotVerticalAlignment(Node.Slot.VerticalAlignment),
+				FUMGValueParser::FormatSlotSizeRule(Node.Slot.SizeRule), Node.Slot.FillWeight,
 				Node.Slot.Offsets.Left, Node.Slot.Offsets.Top, Node.Slot.Offsets.Right, Node.Slot.Offsets.Bottom,
 				Node.Slot.Anchors.Min.X, Node.Slot.Anchors.Min.Y, Node.Slot.Anchors.Max.X, Node.Slot.Anchors.Max.Y,
 				Node.Slot.Alignment.X, Node.Slot.Alignment.Y,
@@ -353,7 +369,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(const FUMGWidgetData& Widg
 		return nullptr;
 	}
 	WBP->WidgetTree->RootWidget = Root;
-	switch (UDesign2UMGSettings::Get()->PrototypeNavigationGenerationMode)
+	switch (EffectiveGenerationSettings.PrototypeNavigationGenerationMode)
 	{
 	case EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension:
 		UMGPrototypeAnimationBuilder::GenerateNavigationAnimations(WBP, FixedRoot, NavigationData);

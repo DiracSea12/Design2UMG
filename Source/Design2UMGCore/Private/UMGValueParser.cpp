@@ -1,14 +1,15 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGValueParser.h"
+#include "Design2UMGLog.h"
 
 namespace
 {
 	const TMap<FString, EHorizontalAlignment>& GetHAlignMap()
 	{
 		static const TMap<FString, EHorizontalAlignment> Map = {
-			{TEXT("Left"), HAlign_Left}, {TEXT("Center"), HAlign_Center},
-			{TEXT("Right"), HAlign_Right}, {TEXT("Fill"), HAlign_Fill}
+			{TEXT("left"), HAlign_Left}, {TEXT("center"), HAlign_Center},
+			{TEXT("right"), HAlign_Right}, {TEXT("fill"), HAlign_Fill}
 		};
 		return Map;
 	}
@@ -16,10 +17,15 @@ namespace
 	const TMap<FString, EVerticalAlignment>& GetVAlignMap()
 	{
 		static const TMap<FString, EVerticalAlignment> Map = {
-			{TEXT("Top"), VAlign_Top}, {TEXT("Center"), VAlign_Center},
-			{TEXT("Bottom"), VAlign_Bottom}, {TEXT("Fill"), VAlign_Fill}
+			{TEXT("top"), VAlign_Top}, {TEXT("center"), VAlign_Center},
+			{TEXT("bottom"), VAlign_Bottom}, {TEXT("fill"), VAlign_Fill}
 		};
 		return Map;
+	}
+
+	FString NormalizeSlotToken(const FString& Str)
+	{
+		return Str.TrimStartAndEnd().ToLower();
 	}
 
 	const TMap<FString, ESlateVisibility>& GetVisibilityMap()
@@ -79,14 +85,150 @@ namespace FUMGValueParser
 
 	EHorizontalAlignment ParseHAlign(const FString& Str)
 	{
-		const EHorizontalAlignment* Found = GetHAlignMap().Find(Str);
-		return Found ? *Found : HAlign_Fill;
+		return ToSlateHorizontalAlignment(ParseSlotHorizontalAlignment(Str));
 	}
 
 	EVerticalAlignment ParseVAlign(const FString& Str)
 	{
-		const EVerticalAlignment* Found = GetVAlignMap().Find(Str);
-		return Found ? *Found : VAlign_Fill;
+		return ToSlateVerticalAlignment(ParseSlotVerticalAlignment(Str));
+	}
+
+	EUMGSlotHorizontalAlignment ParseSlotHorizontalAlignment(const FString& Str)
+	{
+		const FString Normalized = NormalizeSlotToken(Str);
+		const EHorizontalAlignment* Found = GetHAlignMap().Find(Normalized);
+		if (!Found)
+		{
+			UE_LOG(LogDesign2UMG, Warning, TEXT("Unknown slot horizontal alignment '%s'; defaulting to Fill."), *Str);
+			return EUMGSlotHorizontalAlignment::Fill;
+		}
+
+		switch (*Found)
+		{
+		case HAlign_Left:
+			return EUMGSlotHorizontalAlignment::Left;
+		case HAlign_Center:
+			return EUMGSlotHorizontalAlignment::Center;
+		case HAlign_Right:
+			return EUMGSlotHorizontalAlignment::Right;
+		case HAlign_Fill:
+		default:
+			return EUMGSlotHorizontalAlignment::Fill;
+		}
+	}
+
+	EUMGSlotVerticalAlignment ParseSlotVerticalAlignment(const FString& Str)
+	{
+		const FString Normalized = NormalizeSlotToken(Str);
+		const EVerticalAlignment* Found = GetVAlignMap().Find(Normalized);
+		if (!Found)
+		{
+			UE_LOG(LogDesign2UMG, Warning, TEXT("Unknown slot vertical alignment '%s'; defaulting to Fill."), *Str);
+			return EUMGSlotVerticalAlignment::Fill;
+		}
+
+		switch (*Found)
+		{
+		case VAlign_Top:
+			return EUMGSlotVerticalAlignment::Top;
+		case VAlign_Center:
+			return EUMGSlotVerticalAlignment::Center;
+		case VAlign_Bottom:
+			return EUMGSlotVerticalAlignment::Bottom;
+		case VAlign_Fill:
+		default:
+			return EUMGSlotVerticalAlignment::Fill;
+		}
+	}
+
+	EUMGSlotSizeRule ParseSlotSizeRule(const FString& Str)
+	{
+		const FString Normalized = NormalizeSlotToken(Str);
+		if (Normalized == TEXT("fill"))
+		{
+			return EUMGSlotSizeRule::Fill;
+		}
+		if (Normalized == TEXT("auto"))
+		{
+			return EUMGSlotSizeRule::Auto;
+		}
+
+		UE_LOG(LogDesign2UMG, Warning, TEXT("Unknown slot size rule '%s'; defaulting to Auto."), *Str);
+		return EUMGSlotSizeRule::Auto;
+	}
+
+	const TCHAR* FormatSlotHorizontalAlignment(EUMGSlotHorizontalAlignment Value)
+	{
+		switch (Value)
+		{
+		case EUMGSlotHorizontalAlignment::Left:
+			return TEXT("Left");
+		case EUMGSlotHorizontalAlignment::Center:
+			return TEXT("Center");
+		case EUMGSlotHorizontalAlignment::Right:
+			return TEXT("Right");
+		case EUMGSlotHorizontalAlignment::Fill:
+		default:
+			return TEXT("Fill");
+		}
+	}
+
+	const TCHAR* FormatSlotVerticalAlignment(EUMGSlotVerticalAlignment Value)
+	{
+		switch (Value)
+		{
+		case EUMGSlotVerticalAlignment::Top:
+			return TEXT("Top");
+		case EUMGSlotVerticalAlignment::Center:
+			return TEXT("Center");
+		case EUMGSlotVerticalAlignment::Bottom:
+			return TEXT("Bottom");
+		case EUMGSlotVerticalAlignment::Fill:
+		default:
+			return TEXT("Fill");
+		}
+	}
+
+	const TCHAR* FormatSlotSizeRule(EUMGSlotSizeRule Value)
+	{
+		return Value == EUMGSlotSizeRule::Fill ? TEXT("Fill") : TEXT("Auto");
+	}
+
+	EHorizontalAlignment ToSlateHorizontalAlignment(EUMGSlotHorizontalAlignment Value)
+	{
+		switch (Value)
+		{
+		case EUMGSlotHorizontalAlignment::Left:
+			return HAlign_Left;
+		case EUMGSlotHorizontalAlignment::Center:
+			return HAlign_Center;
+		case EUMGSlotHorizontalAlignment::Right:
+			return HAlign_Right;
+		case EUMGSlotHorizontalAlignment::Fill:
+		default:
+			return HAlign_Fill;
+		}
+	}
+
+	EVerticalAlignment ToSlateVerticalAlignment(EUMGSlotVerticalAlignment Value)
+	{
+		switch (Value)
+		{
+		case EUMGSlotVerticalAlignment::Top:
+			return VAlign_Top;
+		case EUMGSlotVerticalAlignment::Center:
+			return VAlign_Center;
+		case EUMGSlotVerticalAlignment::Bottom:
+			return VAlign_Bottom;
+		case EUMGSlotVerticalAlignment::Fill:
+		default:
+			return VAlign_Fill;
+		}
+	}
+
+	bool IsFillSizeRule(EUMGSlotSizeRule Value)
+	{
+		return Value == EUMGSlotSizeRule::Fill;
 	}
 
 	ESlateVisibility ParseVisibility(const FString& Str)
