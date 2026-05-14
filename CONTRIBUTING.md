@@ -1,5 +1,7 @@
 ﻿# Contributing to Design2UMG
 
+Chinese companion: [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md)
+
 Thanks for contributing.
 
 ## Development Setup

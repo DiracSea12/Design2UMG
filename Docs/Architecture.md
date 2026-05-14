@@ -1,5 +1,7 @@
 ﻿# Architecture
 
+Chinese companion: [Architecture.zh-CN.md](Architecture.zh-CN.md)
+
 Design2UMG converts design-side documents into Unreal Engine 5 UMG Widget Blueprints through a layered, source-agnostic pipeline.
 
 ## Pipeline
@@ -60,6 +62,28 @@ The formal release gate is not just "does it render" but "does no admissible cas
 - The public release promise covers `.pen` import and Figma design import through REST or local export JSON.
 - Bridge/debug workflows such as MCP JSON import remain available but are not treated as the primary release contract.
 - Local maintainer workflow files such as `AGENTS.md`, `CLAUDE.md`, `.claude/`, and `.codex/` should remain untracked and are excluded from packaged release outputs.
+
+## Public API Boundary
+
+The retained public header surface is intentional, but it is still a plugin API surface, not a runtime support promise.
+
+`Source/Design2UMGCore/Public/` owns the shared parser, converter, settings, schema, font, notification, text measurement, layout, value parsing, and typed widget-node access contracts used across Core, Editor, and tests.
+
+`Source/Design2UMGEditor/Public/` owns editor-only module, preview, remote image import, Figma/MCP/Pencil connector, preview widget/window, and JSON bridge contracts. These headers remain editor-facing and should not be treated as runtime module API.
+
+Within that editor-facing surface there are two explicit buckets:
+
+- stable editor workflow contracts:
+  - preview service/window contracts
+  - remote image import service
+  - Figma / MCP / Pencil bridge entrypoints
+- compatibility-retained bridge utilities:
+  - `UMGJsonParser.h`
+  - `UMGJsonSerializer.h`
+
+The JSON bridge headers stay public for source compatibility and because preview/import/debug workflows still consume them, but they are not meant to imply a broad runtime support promise.
+
+Headers that are kept public for bridge/debug utilities are documented as such. If a future change narrows one of them, it needs current include evidence, source-compatibility review, and validation.
 
 ## IR Data Flow
 

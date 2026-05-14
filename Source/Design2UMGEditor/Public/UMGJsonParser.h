@@ -9,7 +9,8 @@ struct FUMGWidgetData;
 struct FUMGWidgetNode;
 
 /**
- * Parses JSON payloads into normalized UMG widget data.
+ * Editor-facing JSON parse bridge for preview, import, and debugging workflows.
+ * Kept public for source compatibility; this is not a runtime module API promise.
  */
 class FUMGJsonParser
 {

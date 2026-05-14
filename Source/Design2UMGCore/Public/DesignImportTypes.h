@@ -7,6 +7,7 @@
 struct FUMGWidgetData;
 struct FDesignDocument;
 
+/** Summary for a top-level importable design frame. */
 struct DESIGN2UMGCORE_API FDesignFrameInfo
 {
 	FString Id;
@@ -15,6 +16,5 @@ struct DESIGN2UMGCORE_API FDesignFrameInfo
 	float Height = 0.0f;
 };
 
+/** Extract importable top-level frames from a parsed design document. */
 DESIGN2UMGCORE_API TArray<FDesignFrameInfo> ExtractTopFrames(const FDesignDocument& Document);
-
-

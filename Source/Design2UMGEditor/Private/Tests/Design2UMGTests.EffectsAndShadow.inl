@@ -376,6 +376,8 @@ bool FInnerShadowRetainerMaterialApplicationTest::RunTest(const FString& Paramet
 	Node.Effect.EffectColor = FLinearColor(0.1f, 0.2f, 0.3f, 0.4f);
 	Node.Effect.EffectOffset = FVector2D(0.05f, -0.03f);
 	Node.Effect.EffectBlurUVStep = FVector2D(0.01f, 0.02f);
+	const FLinearColor NormalizedEffectColor = FUMGValueParser::ParseColor(
+		Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Effect.EffectColor.GetValue()));
 
 	TestTrue(TEXT("Typed retainer payload keeps EffectColor directly"),
 		Node.Effect.EffectColor.IsSet()
@@ -397,8 +399,8 @@ bool FInnerShadowRetainerMaterialApplicationTest::RunTest(const FString& Paramet
 	}
 
 	const FLinearColor PayloadInnerShadowColor = PayloadEffect->K2_GetVectorParameterValue(TEXT("InnerShadowColor"));
-	TestTrue(TEXT("Typed payload inner shadow color follows typed payload color"),
-		PayloadInnerShadowColor.Equals(Node.Effect.EffectColor.GetValue(), 0.0001f));
+	TestTrue(TEXT("Typed payload inner shadow color follows normalized typed payload color"),
+		PayloadInnerShadowColor.Equals(NormalizedEffectColor, 0.0001f));
 
 	FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node);
 
@@ -415,9 +417,9 @@ bool FInnerShadowRetainerMaterialApplicationTest::RunTest(const FString& Paramet
 	const float InnerShadowStrength = DynamicEffect->K2_GetScalarParameterValue(TEXT("InnerShadowStrength"));
 	TestTrue(TEXT("Inner shadow blur UV step X applied"), FMath::IsNearlyEqual(BlurUVStep.R, 0.01f, 0.0001f));
 	TestTrue(TEXT("Inner shadow blur UV step Y applied"), FMath::IsNearlyEqual(BlurUVStep.G, 0.02f, 0.0001f));
-	TestTrue(TEXT("Inner shadow color R applied"), FMath::IsNearlyEqual(InnerShadowColor.R, 0.1f, 0.0001f));
-	TestTrue(TEXT("Inner shadow color A applied"), FMath::IsNearlyEqual(InnerShadowColor.A, 0.4f, 0.0001f));
-	TestTrue(TEXT("Inner shadow strength applied"), FMath::IsNearlyEqual(InnerShadowStrength, 0.4f, 0.0001f));
+	TestTrue(TEXT("Inner shadow color R applied"), FMath::IsNearlyEqual(InnerShadowColor.R, NormalizedEffectColor.R, 0.0001f));
+	TestTrue(TEXT("Inner shadow color A applied"), FMath::IsNearlyEqual(InnerShadowColor.A, NormalizedEffectColor.A, 0.0001f));
+	TestTrue(TEXT("Inner shadow strength applied"), FMath::IsNearlyEqual(InnerShadowStrength, NormalizedEffectColor.A, 0.0001f));
 	TestTrue(TEXT("Inner shadow offset X applied"), FMath::IsNearlyEqual(InnerShadowOffset.R, 0.05f, 0.0001f));
 	TestTrue(TEXT("Inner shadow offset Y applied"), FMath::IsNearlyEqual(InnerShadowOffset.G, -0.03f, 0.0001f));
 	return true;

@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignFontImportService.h"
 
@@ -618,6 +618,139 @@ namespace
 		return true;
 	}
 
+	bool TryCloneExistingFontIntoAutomationImportPath(
+		const FString& FontName,
+		const FString& FontImportPath,
+		FString& OutFontObjectPath)
+	{
+		OutFontObjectPath.Reset();
+		if (!Design2UMGAutomationRender::IsAutomationRenderActive()
+			|| DesignFontImportService::CanReusePinnedAutomationFontPath(FontImportPath))
+		{
+			return false;
+		}
+
+		const FString ExistingFontObjectPath = FFontResolver::FindFontAssetPath(FontName);
+		if (ExistingFontObjectPath.IsEmpty())
+		{
+			return false;
+		}
+
+		const FString SafeName = MakeSafeFontAssetName(FontName);
+		if (SafeName.IsEmpty())
+		{
+			return false;
+		}
+
+		const FString TargetFontPackageName = FontImportPath / SafeName;
+		const FString TargetFontObjectPath = TargetFontPackageName + TEXT(".") + SafeName;
+		if (ExistingFontObjectPath.Equals(TargetFontObjectPath, ESearchCase::IgnoreCase))
+		{
+			return false;
+		}
+
+		UFont* ExistingFont = LoadObject<UFont>(nullptr, *ExistingFontObjectPath);
+		if (!ExistingFont)
+		{
+			return false;
+		}
+
+		const FCompositeFont* CompositeFont = ExistingFont->GetCompositeFont();
+		if (!CompositeFont || CompositeFont->DefaultTypeface.Fonts.Num() == 0)
+		{
+			return false;
+		}
+
+		const FTypefaceEntry* PreferredEntry = nullptr;
+		for (const FTypefaceEntry& Entry : CompositeFont->DefaultTypeface.Fonts)
+		{
+			if (Entry.Name.IsEqual(TEXT("Regular"), ENameCase::IgnoreCase))
+			{
+				PreferredEntry = &Entry;
+				break;
+			}
+		}
+		if (!PreferredEntry)
+		{
+			PreferredEntry = &CompositeFont->DefaultTypeface.Fonts[0];
+		}
+
+		const UFontFace* ExistingFontFace = Cast<UFontFace>(PreferredEntry->Font.GetFontFaceAsset());
+		if (!ExistingFontFace || !ExistingFontFace->FontFaceData->HasData())
+		{
+			return false;
+		}
+
+		TArray<uint8> ClonedFontData = ExistingFontFace->FontFaceData->GetData();
+		if (ClonedFontData.Num() == 0)
+		{
+			return false;
+		}
+
+		const FString FaceAssetName = SafeName + TEXT("_Face");
+		const FString FacePackageName = FontImportPath / FaceAssetName;
+		const FString PrimaryTypefaceName = PreferredEntry->Name.IsNone()
+			? TEXT("Regular")
+			: PreferredEntry->Name.ToString();
+
+		UPackage* FacePackage = CreatePackage(*FacePackageName);
+		if (!FacePackage)
+		{
+			return false;
+		}
+
+		UFontFace* FontFace = NewObject<UFontFace>(FacePackage, *FaceAssetName, RF_Public | RF_Standalone);
+		if (!FontFace)
+		{
+			return false;
+		}
+
+		if (!MakeFontFaceReloadSafe(FontFace, MoveTemp(ClonedFontData)))
+		{
+			return false;
+		}
+		FacePackage->MarkPackageDirty();
+		FAssetRegistryModule::AssetCreated(FontFace);
+
+		UPackage* FontPackage = CreatePackage(*TargetFontPackageName);
+		if (!FontPackage)
+		{
+			return false;
+		}
+
+		UFont* Font = NewObject<UFont>(FontPackage, *SafeName, RF_Public | RF_Standalone);
+		if (!Font)
+		{
+			return false;
+		}
+
+		Font->FontCacheType = EFontCacheType::Runtime;
+		FTypefaceEntry& Entry = Font->GetMutableInternalCompositeFont().DefaultTypeface.Fonts.AddDefaulted_GetRef();
+		Entry.Name = *PrimaryTypefaceName;
+		Entry.Font = FFontData(FontFace);
+
+		FSavePackageArgs SaveArgs;
+		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+
+		const FString FaceFile = FPackageName::LongPackageNameToFilename(FacePackageName, FPackageName::GetAssetPackageExtension());
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(FaceFile), true);
+		UPackage::SavePackage(FacePackage, FontFace, *FaceFile, SaveArgs);
+
+		const FString FontFile = FPackageName::LongPackageNameToFilename(TargetFontPackageName, FPackageName::GetAssetPackageExtension());
+		UPackage::SavePackage(FontPackage, Font, *FontFile, SaveArgs);
+
+		UE_LOG(
+			LogDesign2UMG,
+			Log,
+			TEXT("DesignFontImportService: cloned existing font '%s' from '%s' into case-local automation path '%s'"),
+			*FontName,
+			*ExistingFontObjectPath,
+			*TargetFontObjectPath);
+
+		OutFontObjectPath = TargetFontObjectPath;
+		return true;
+	}
+
 	FString ResolveFont(const FString& FontName, const FString& Url)
 	{
 		FString FontImportPath;
@@ -661,6 +794,12 @@ namespace
 			const FString PrimaryWeightName = bIsRemoteExisting ? TEXT("Regular") : WeightNameFromFile(Url, FontName);
 			EnsureExistingFontReloadSafe(Existing, FontObjPath, Url, PrimaryWeightName);
 			return FontObjPath;
+		}
+
+		FString ClonedFontObjectPath;
+		if (TryCloneExistingFontIntoAutomationImportPath(FontName, FontImportPath, ClonedFontObjectPath))
+		{
+			return ClonedFontObjectPath;
 		}
 
 		const bool bIsRemote = Url.StartsWith(TEXT("http://"), ESearchCase::IgnoreCase)

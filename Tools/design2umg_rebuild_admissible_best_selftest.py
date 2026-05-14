@@ -176,6 +176,42 @@ def assert_validate_run_pixel_quantum_epsilon() -> None:
         assert two_pixel_validation["historical_best_regressions"], two_pixel_validation
 
 
+def assert_validate_run_reason_details() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        run_root = Path(temp_dir) / "_formal_missing_report"
+        case_root = run_root / "case_a"
+        case_root.mkdir(parents=True)
+
+        write_json(run_root / "run_scope.json", {"formal_admissible_candidate": True, "case_names": ["case_a"]})
+        missing_report_path = case_root / "compare_report.json"
+        write_json(
+            run_root / "summary.json",
+            {
+                "cases": [
+                    {
+                        "name": "case_a",
+                        "report_path": str(missing_report_path),
+                    }
+                ]
+            },
+        )
+
+        validation = validate_run.validate_run(run_root)
+        assert validation["blocked"], validation
+        assert "missing_compare_report" in validation["blocked_reasons"], validation
+        assert validation["missing_compare_report_details"], validation
+        assert validation["missing_compare_report_details"][0]["case"] == "case_a", validation
+        assert str(missing_report_path.resolve()) in validation["missing_compare_report_details"][0]["checked_paths"], validation
+
+        blocked_detail_by_reason = {
+            item["reason"]: item
+            for item in validation["blocked_reason_details"]
+        }
+        missing_report_detail = blocked_detail_by_reason.get("missing_compare_report")
+        assert missing_report_detail is not None, validation
+        assert missing_report_detail.get("detail_field") == "missing_compare_report_details", validation
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         automation_root = Path(temp_dir)
@@ -213,6 +249,7 @@ def main() -> None:
     assert_skipped(manifest, "_formal_historical_blocked", "historical_validation_blocked")
     assert_skipped(manifest, "_formal_historical_regressed", "historical_validation_regressed")
     assert_validate_run_pixel_quantum_epsilon()
+    assert_validate_run_reason_details()
     print("admissible best rebuild selftest passed")
 
 

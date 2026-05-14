@@ -216,6 +216,64 @@ bool FVisualMapperWrapWithBorderTypedTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperWrapWithBorderExplicitSideStrokeTest,
+	"Design2UMG.VisualMapper.WrapWithBorderExplicitSideStroke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperWrapWithBorderExplicitSideStrokeTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 128.0f, 48.0f);
+	Node->Visual.Stroke.Thickness.bUniform = false;
+	Node->Visual.Stroke.Thickness.Top = 2.0f;
+	Node->Visual.Stroke.Thickness.Right = 4.0f;
+	Node->Visual.Stroke.Thickness.Bottom = 6.0f;
+	Node->Visual.Stroke.Thickness.Left = 8.0f;
+	Node->Visual.Stroke.Fill = FDesignFill::FromColor(TEXT("#112233FF"));
+
+	FUMGWidgetNode Widget;
+	Widget.Type = TEXT("Image");
+	Widget.Id = TEXT("stroke_panel");
+	Widget.Name = TEXT("StrokePanel");
+	Widget.Bounds.W = 128.0f;
+	Widget.Bounds.H = 48.0f;
+
+	VisualMapper::ApplyStroke(Widget, Node->Visual.Stroke);
+	FUMGWidgetNode Wrapped = VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
+
+	TestEqual(TEXT("Explicit side stroke wraps with overlay"), Wrapped.Type, TEXT("Overlay"));
+	TestEqual(TEXT("Explicit side stroke child count"), Wrapped.Children.Num(), 5);
+	if (Wrapped.Children.Num() != 5)
+	{
+		return false;
+	}
+
+	const FUMGWidgetNode& Surface = Wrapped.Children[0];
+	TestEqual(TEXT("Surface child stays first"), Surface.Name, TEXT("StrokePanel_surface"));
+	TestEqual(TEXT("Surface id gets suffix"), Surface.Id, TEXT("stroke_panel_surface"));
+	TestEqual(TEXT("Surface keeps wrapped content count"), Surface.Children.Num(), 1);
+	TestFalse(TEXT("Surface outline color cleared"), Surface.Brush.OutlineColor.IsSet());
+	TestFalse(TEXT("Surface stroke padding cleared"), Surface.WidgetStyle.StrokePadding.IsSet());
+
+	const FUMGWidgetNode& Top = Wrapped.Children[1];
+	const FUMGWidgetNode& Right = Wrapped.Children[2];
+	const FUMGWidgetNode& Bottom = Wrapped.Children[3];
+	const FUMGWidgetNode& Left = Wrapped.Children[4];
+
+	TestEqual(TEXT("Top stroke name"), Top.Name, TEXT("StrokePanel_stroke_top"));
+	TestEqual(TEXT("Right stroke name"), Right.Name, TEXT("StrokePanel_stroke_right"));
+	TestEqual(TEXT("Bottom stroke name"), Bottom.Name, TEXT("StrokePanel_stroke_bottom"));
+	TestEqual(TEXT("Left stroke name"), Left.Name, TEXT("StrokePanel_stroke_left"));
+
+	TestTrue(TEXT("Top stroke height tracks thickness"),
+		Top.WidgetStyle.HeightOverride.IsSet() && FMath::IsNearlyEqual(Top.WidgetStyle.HeightOverride.GetValue(), 2.0f));
+	TestTrue(TEXT("Right stroke width tracks thickness"),
+		Right.WidgetStyle.WidthOverride.IsSet() && FMath::IsNearlyEqual(Right.WidgetStyle.WidthOverride.GetValue(), 4.0f));
+	TestTrue(TEXT("Bottom stroke height tracks thickness"),
+		Bottom.WidgetStyle.HeightOverride.IsSet() && FMath::IsNearlyEqual(Bottom.WidgetStyle.HeightOverride.GetValue(), 6.0f));
+	TestTrue(TEXT("Left stroke width tracks thickness"),
+		Left.WidgetStyle.WidthOverride.IsSet() && FMath::IsNearlyEqual(Left.WidgetStyle.WidthOverride.GetValue(), 8.0f));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWidgetNodeAccessExplicitEmptyStringPresenceTest,
 	"Design2UMG.WidgetNodeAccess.ExplicitEmptyStringPresence",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -485,11 +543,11 @@ bool FGradientTypedPayloadMaterialParamsTest::RunTest(const FString& Parameters)
 
 	Widget.Brush.MaterialParams = TEXT("{\"ColorCenter\":\"#01020304\",\"ColorEdge\":\"#05060708\"}");
 	FUMGProceduralResourceRequest ExistingParamsRequest;
-	TestTrue(TEXT("Typed procedural request keeps authored material params"),
+	TestTrue(TEXT("Typed procedural request still builds when legacy raw material params are present"),
 		Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Widget, ExistingParamsRequest));
-	TestEqual(TEXT("Request keeps authored material params"),
+	TestEqual(TEXT("Typed gradient descriptor keeps precedence over legacy raw material params"),
 		ExistingParamsRequest.MaterialParams.Get(FString()),
-		FString(TEXT("{\"ColorCenter\":\"#01020304\",\"ColorEdge\":\"#05060708\"}")));
+		MaterialParams);
 	return true;
 }
 

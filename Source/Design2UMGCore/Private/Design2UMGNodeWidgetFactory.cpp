@@ -148,10 +148,19 @@ Design2UMGNodeWidgetFactory::FBuildResult Design2UMGNodeWidgetFactory::CreateWid
 			Result.Widget = Design2UMGTextWidgetBuilder::CreateTextWidget(Node);
 			if (Design2UMGSourceMetadata::IsSourceNodeType(Node, TEXT("TEXT_PATH")))
 			{
-				const FString NodeLabel = Node->Name.IsEmpty() ? Node->Id : Node->Name;
-				Result.Warnings.Add(FString::Printf(
-					TEXT("Figma TEXT_PATH '%s' -> TextBlock (text-on-path downgraded to regular text)"),
-					*NodeLabel));
+				if (Node->Name.IsEmpty())
+				{
+					Result.Warnings.Add(FString::Printf(
+						TEXT("Figma TEXT_PATH [id=%s] -> TextBlock (text-on-path downgraded to regular text)"),
+						*Node->Id));
+				}
+				else
+				{
+					Result.Warnings.Add(FString::Printf(
+						TEXT("Figma TEXT_PATH '%s' [id=%s] -> TextBlock (text-on-path downgraded to regular text)"),
+						*Node->Name,
+						*Node->Id));
+				}
 			}
 			return Result;
 		}

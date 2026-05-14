@@ -21,6 +21,46 @@
 #include "UMGPropertyKeys.h"
 #include "UMGWidgetNodeAccess.h"
 
+namespace Design2UMGConverterInternal
+{
+// Default source handoff implementation - delegates to Design2UMGSourceMetadata
+// preserving exact existing behavior
+bool FDefaultSourceHandoff::ShouldUseRenderFallback(
+	const TSharedPtr<FDesignNode>& Node) const
+{
+	return Design2UMGSourceMetadata::ShouldUseRenderFallback(Node);
+}
+
+FUMGWidgetNode FDefaultSourceHandoff::CreateRenderFallbackWidget(
+	const TSharedPtr<FDesignNode>& Node) const
+{
+	return Design2UMGSourceMetadata::CreateRenderFallbackWidget(Node);
+}
+
+FUMGSourceNodeData FDefaultSourceHandoff::BuildSourceNodeData(
+	const TSharedPtr<FDesignNode>& Node) const
+{
+	return Design2UMGSourceMetadata::BuildSourceNodeData(Node);
+}
+
+float FDefaultSourceHandoff::ResolveWrapCrossAxisGap(
+	const TSharedPtr<FDesignNode>& Node) const
+{
+	return Design2UMGSourceMetadata::ResolveWrapCrossAxisGap(Node);
+}
+
+	FUMGWidgetNode CreateFallbackBranchWidget(
+	const TSharedPtr<FDesignNode>& Node,
+	const IDesign2UMGSourceHandoff& SourceHandoff)
+{
+	FUMGWidgetNode Widget = SourceHandoff.CreateRenderFallbackWidget(Node);
+	Design2UMGNodeWidgetFactory::PopulateWidgetIdentityAndBounds(Widget, Node);
+	Widget.MutableSource() = SourceHandoff.BuildSourceNodeData(Node);
+	UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: '%s' -> Figma render fallback image"), *Widget.Name);
+	return Widget;
+}
+} // namespace Design2UMGConverterInternal
+
 namespace Design2UMGConverterOwners
 {
 	using namespace Design2UMGConverterInternal;
@@ -162,8 +202,11 @@ namespace Design2UMGConverterOwners
 
 	struct FNodeConversionOrchestrator
 	{
-		explicit FNodeConversionOrchestrator(const FConversionContext& InRootContext)
+		explicit FNodeConversionOrchestrator(
+			const FConversionContext& InRootContext,
+			const Design2UMGConverterInternal::IDesign2UMGSourceHandoff& InSourceHandoff)
 			: RootContext(InRootContext)
+			, SourceHandoff(InSourceHandoff)
 		{
 		}
 
@@ -201,7 +244,7 @@ namespace Design2UMGConverterOwners
 				return ConvertExpandedRefNode(Node, ActiveContext, ParentLayout, PreResolutionResolver);
 			}
 
-			const bool bUsingRenderFallback = Design2UMGSourceMetadata::ShouldUseRenderFallback(Node);
+			const bool bUsingRenderFallback = SourceHandoff.ShouldUseRenderFallback(Node);
 			FUMGWidgetNode Widget = CreateBaseWidgetForNode(Node, Context.State);
 			LogCreatedWidget(Widget, Node);
 
@@ -216,7 +259,7 @@ namespace Design2UMGConverterOwners
 			{
 				ApplyRenderFallbackVisuals(Widget, Node);
 			}
-			Widget.MutableSource() = Design2UMGSourceMetadata::BuildSourceNodeData(Node);
+			Widget.MutableSource() = SourceHandoff.BuildSourceNodeData(Node);
 
 			return Widget;
 		}
@@ -301,7 +344,7 @@ namespace Design2UMGConverterOwners
 			{
 				if (Node->LayoutData.Layout == EDesignLayout::Wrap)
 				{
-					const float CrossAxisGap = Design2UMGSourceMetadata::ResolveWrapCrossAxisGap(Node);
+					const float CrossAxisGap = SourceHandoff.ResolveWrapCrossAxisGap(Node);
 					Widget.WidgetStyle.InnerSlotPadding = FVector2D(Node->LayoutData.ExplicitGap.Get(0.0f), CrossAxisGap);
 				}
 				else if (Node->LayoutData.Layout == EDesignLayout::Grid)
@@ -377,13 +420,9 @@ namespace Design2UMGConverterOwners
 
 		FUMGWidgetNode CreateBaseWidgetForNode(const TSharedPtr<FDesignNode>& Node, FConversionState& State) const
 		{
-			if (Design2UMGSourceMetadata::ShouldUseRenderFallback(Node))
+			if (SourceHandoff.ShouldUseRenderFallback(Node))
 			{
-				FUMGWidgetNode Widget = Design2UMGSourceMetadata::CreateRenderFallbackWidget(Node);
-				Design2UMGNodeWidgetFactory::PopulateWidgetIdentityAndBounds(Widget, Node);
-				Widget.MutableSource() = Design2UMGSourceMetadata::BuildSourceNodeData(Node);
-				UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: '%s' -> Figma render fallback image"), *Widget.Name);
-				return Widget;
+				return Design2UMGConverterInternal::CreateFallbackBranchWidget(Node, SourceHandoff);
 			}
 
 			Design2UMGNodeWidgetFactory::FBuildArgs BuildArgs;
@@ -412,6 +451,7 @@ namespace Design2UMGConverterOwners
 		}
 
 		const FConversionContext& RootContext;
+		const Design2UMGConverterInternal::IDesign2UMGSourceHandoff& SourceHandoff;
 	};
 
 	void WarmSharedTextCalibrationRecursive(
@@ -603,7 +643,8 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 		Design2UMGConverterOwners::BuildConversionSettingsSnapshot(Settings);
 	Design2UMGConverterInternal::FConversionState State(Document, Result.Warnings, SettingsSnapshot);
 	Design2UMGConverterInternal::FConversionContext RootContext(State);
-	const Design2UMGConverterOwners::FNodeConversionOrchestrator NodeOrchestrator(RootContext);
+	const Design2UMGConverterInternal::FDefaultSourceHandoff DefaultSourceHandoff;
+	const Design2UMGConverterOwners::FNodeConversionOrchestrator NodeOrchestrator(RootContext, DefaultSourceHandoff);
 
 	if (!Document.SourceDocument().ComponentsJson.IsEmpty() || !Document.SourceDocument().ComponentSetsJson.IsEmpty())
 	{

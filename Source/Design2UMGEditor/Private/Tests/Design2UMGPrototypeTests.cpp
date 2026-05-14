@@ -2,6 +2,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "Design2UMGConverter.h"
+#include "Design2UMGPrototypeRuntimeValueResolver.h"
 #include "Design2UMGTestUtils.h"
 #include "FigmaParser.h"
 #include "UMGPropertyKeys.h"
@@ -11,6 +12,74 @@
 #if WITH_AUTOMATION_WORKER
 
 using namespace Design2UMGTestUtils;
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPrototypeRuntimeValueResolverTypeDomainCompatibilityTest,
+	"Design2UMG.Unit.PrototypeRuntimeValueResolver.TypeDomainCompatibility",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPrototypeRuntimeValueResolverTypeDomainCompatibilityTest::RunTest(const FString& Parameters)
+{
+	const TMap<FString, FString> EmptyModes;
+	TMap<FString, FString> VariableValues;
+	VariableValues.Add(TEXT("var:isPrimary"), TEXT(R"({"resolvedType":"BOOLEAN","value":true})"));
+
+	TestTrue(TEXT("resolvedType stays case-insensitive"),
+		Design2UMGPrototypeRuntimeValueResolver::EvaluateConditionJson(
+			TEXT(R"({"resolvedType":"boolean","value":true})"),
+			VariableValues,
+			EmptyModes));
+	TestTrue(TEXT("resolvedType still wins over raw type"),
+		Design2UMGPrototypeRuntimeValueResolver::EvaluateConditionJson(
+			TEXT(R"({"resolvedType":"BoOlEaN","type":"string","value":true})"),
+			VariableValues,
+			EmptyModes));
+	TestTrue(TEXT("raw float type still resolves"),
+		Design2UMGPrototypeRuntimeValueResolver::EvaluateConditionJson(
+			TEXT(R"({"type":"FlOaT","value":1.25})"),
+			VariableValues,
+			EmptyModes));
+	TestTrue(TEXT("raw string type still resolves"),
+		Design2UMGPrototypeRuntimeValueResolver::EvaluateConditionJson(
+			TEXT(R"({"type":"sTrInG","value":"ready"})"),
+			VariableValues,
+			EmptyModes));
+	TestTrue(TEXT("raw color type still resolves"),
+		Design2UMGPrototypeRuntimeValueResolver::EvaluateConditionJson(
+			TEXT(R"({"type":"CoLoR","value":{"r":0.1,"g":0.2,"b":0.3,"a":1.0}})"),
+			VariableValues,
+			EmptyModes));
+	TestTrue(TEXT("variable alias type still resolves nested id payload"),
+		Design2UMGPrototypeRuntimeValueResolver::EvaluateConditionJson(
+			TEXT(R"({"type":"variable_alias","value":{"id":"var:isPrimary"}})"),
+			VariableValues,
+			EmptyModes));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPrototypeRuntimeValueResolverExpressionFunctionCompatibilityTest,
+	"Design2UMG.Unit.PrototypeRuntimeValueResolver.ExpressionFunctionCompatibility",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPrototypeRuntimeValueResolverExpressionFunctionCompatibilityTest::RunTest(const FString& Parameters)
+{
+	TMap<FString, FString> VariableModes;
+	VariableModes.Add(TEXT("collection:theme"), TEXT("mode:dark"));
+
+	TestTrue(TEXT("NOT_EQUALS stays case-insensitive"),
+		Design2UMGPrototypeRuntimeValueResolver::EvaluateConditionJson(
+			TEXT(R"({"type":"expression","value":{"expressionFunction":"nOt_eQuAlS","expressionArguments":[1,2]}})"),
+			TMap<FString, FString>(),
+			VariableModes));
+	TestTrue(TEXT("LESS_THAN_OR_EQUAL still resolves numeric comparison"),
+		Design2UMGPrototypeRuntimeValueResolver::EvaluateConditionJson(
+			TEXT(R"({"type":"expression","value":{"expressionFunction":"less_than_or_equal","expressionArguments":[3,3]}})"),
+			TMap<FString, FString>(),
+			VariableModes));
+	TestTrue(TEXT("VAR_MODE_LOOKUP still resolves active mode match"),
+		Design2UMGPrototypeRuntimeValueResolver::EvaluateConditionJson(
+			TEXT(R"({"type":"expression","value":{"expressionFunction":"vAr_mOdE_lOoKuP","expressionArguments":["collection:theme","mode:dark"]}})"),
+			TMap<FString, FString>(),
+			VariableModes));
+	return true;
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeNavigationConverterTest,
 	"Design2UMG.Converter.FigmaPrototypeNavigation",

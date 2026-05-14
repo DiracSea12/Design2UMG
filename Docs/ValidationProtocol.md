@@ -1,6 +1,8 @@
 ﻿# Design2UMG Validation Protocol
 
-Last verified: 2026-05-06
+Chinese companion: [ValidationProtocol.zh-CN.md](ValidationProtocol.zh-CN.md)
+
+Last verified: 2026-05-14
 
 ## Purpose
 
@@ -39,6 +41,20 @@ A Design2UMG visual fix is only considered verified when all of the following ag
 - the post-save rendered PNG is newly regenerated
 - the editor-side Designer screenshot is newly regenerated when Designer parity is in scope
 - the result matches the intended source design in the specific area being fixed
+
+## Automation Font Isolation Rules
+
+Automation font imports are transient per-case evidence, not shared truth.
+
+Maintainer rules:
+
+- Do not persist case-local automation icon font paths into shared settings or any cross-case snapshot. Paths such as `/Game/Design2UMG/Automation/<case>/ImportedFonts/...` belong to one formal case only.
+- During automation, the active case must resolve its own imported font object path. If the current case-local font asset is missing, repair or recreate the current case-local asset first.
+- Do not silently let a case-local run reuse `/Game/Design2UMG/Automation/ImportedFonts/...` as if it were the current case's font asset. That path can carry stale typography state from an older run and create fake regressions.
+- If a case-local font import cannot be downloaded again, prefer rebuilding the current case-local asset from an already loadable font asset over borrowing the old global automation object path directly.
+- When diagnosing a font regression, inspect both the generation-stage and compiled-instance font object paths in the Unreal log. If the family resolves to another case's `ImportedFonts` path or to the global automation path during a case-local run, treat that as contamination first and only then judge the score delta.
+
+These rules were reconfirmed during phase 21 batch 2: the real regression was caused by cross-case automation font reuse, not by the converter boundary cleanup itself.
 
 ## Required Validation Order
 
@@ -184,6 +200,26 @@ Default user flow is fail-closed. If live Pencil `export_nodes` is unavailable, 
 Maintainers may also run a local regression-only comparison against a curated external `--reference-root`, but that is a manual local workflow. It must not be treated as proof that the live Pencil export path is healthy, and it must not be confused with the default fail-closed user flow above.
 
 If `reference.png` exists but the baseline `compare_report.json` is missing, the run can still render and compare, but the run root's own `summary.no_regression` becomes unavailable. That is not acceptable for the formal archived gate.
+
+Operational reminder from phase 21 Batch 6:
+
+- If the maintainer goal is the archived `summary.no_regression` proof, do not forget `--reference-root`.
+- Omitting `--reference-root` can still produce a technically useful live Pencil run, but many Pencil cases may then downgrade to `unverified_reference`, `comparison_mode_mismatch`, or degraded reference authority, which blocks the archived no-regression gate even when the scripts themselves are behaving correctly.
+- So treat these as two different questions:
+  - "Is live Pencil export healthy right now?"
+  - "Did this formal tooling change preserve the archived no-regression evidence chain?"
+- The second question requires the curated external reference root.
+
+Formal gate reading order:
+
+- `summary.json` answers whether the current run regressed against the chosen baseline for this run (`summary.no_regression`).
+- `validation_against_historical_best.json` answers whether any admissible case is still worse than the traceable historical best.
+- Do not collapse these into one statement. A run may pass `no_regression` while still failing historical-best parity, and it may also fail for pipeline-determinism reasons without being a historical-best regression.
+
+Formal gate execution discipline:
+
+- Run the full 47-case formal gate alone. Do not run focused automation, other editor validations, or another formal batch in parallel against the same runtime project or automation asset roots.
+- If a new pipeline-determinism incompatibility appears right after a concurrent validation run, rerun the formal gate in isolation before changing code. Parallel validation can manufacture false determinism noise.
 
 ## Pencil MCP App Alias Compatibility
 

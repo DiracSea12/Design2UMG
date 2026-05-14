@@ -2,7 +2,9 @@
 
 Convert design files into Unreal Engine 5 UMG Widget Blueprints.
 
-[![Plugin CI](https://github.com/DiracSea12/ImageToUMG/actions/workflows/build.yml/badge.svg)](https://github.com/DiracSea12/ImageToUMG/actions/workflows/build.yml)
+[![Repository Hygiene](https://github.com/DiracSea12/ImageToUMG/actions/workflows/build.yml/badge.svg)](https://github.com/DiracSea12/ImageToUMG/actions/workflows/build.yml)
+
+Chinese companion: [README.zh-CN.md](README.zh-CN.md)
 
 Formal release scope:
 - Pencil `.pen` files
@@ -32,7 +34,7 @@ This repo intentionally separates contributor-facing validation from maintainer 
 | `public smoke / public validate` | Local build plus focused validation / repro commands | Contributors and maintainers |
 | `maintainer formal admissible gate` | Full discovered 47-case release gate | Maintainers only |
 
-The workflow badge above reflects the tracked `Plugin CI` workflow. The packaged plugin job is intentionally manual and self-hosted; it is not presented as a public hosted UE formal gate.
+The workflow badge above reflects the public repository hygiene job in the tracked `Plugin CI` workflow. The packaged plugin job is intentionally manual and self-hosted; it is not presented as a public hosted UE formal gate.
 
 ## Features
 
@@ -205,4 +207,3 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 ## License
 
 [MIT](LICENSE)
-

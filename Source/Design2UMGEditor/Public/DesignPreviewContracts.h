@@ -9,6 +9,7 @@
 
 class UUserWidget;
 
+/** Output mode requested when materializing a preview snapshot. */
 enum class EDesignBlueprintGenerationMode : uint8
 {
 	BlueprintOnly,
@@ -16,6 +17,7 @@ enum class EDesignBlueprintGenerationMode : uint8
 	BlueprintAndCompiledPng
 };
 
+/** Blueprint/PNG generation options for preview-approved snapshots. */
 struct FBlueprintGenerationOptions
 {
 	EDesignBlueprintGenerationMode Mode = EDesignBlueprintGenerationMode::BlueprintAndPng;
@@ -91,15 +93,20 @@ class IDesignPreviewRefreshAnalyzer
 public:
 	virtual ~IDesignPreviewRefreshAnalyzer() = default;
 
+	/** Parse edited preview JSON and return generated UMG data plus diagnostics. */
 	virtual FPreviewRefreshResult AnalyzePreview(const FPreviewRefreshInput& Input) = 0;
 };
 
+/** Service boundary that owns in-editor preview widget materialization. */
 class IDesignPreviewMaterializationService
 {
 public:
 	virtual ~IDesignPreviewMaterializationService() = default;
 
+	/** Materialize the approved snapshot into a preview widget. */
 	virtual bool MaterializePreview(const FDesignPreviewMaterializationRequest& Request, FDesignPreviewMaterializationResult& OutResult) = 0;
+	/** Return the currently materialized preview widget, if any. */
 	virtual UUserWidget* GetMaterializedPreviewWidget() const = 0;
+	/** Release preview state held by the service. */
 	virtual void Reset() = 0;
 };

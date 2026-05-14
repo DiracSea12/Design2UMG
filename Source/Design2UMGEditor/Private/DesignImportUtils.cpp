@@ -215,6 +215,24 @@ void DesignImportUtils::ApplyPendingIconFontMappingChanges(const FUMGWidgetData&
 			continue;
 		}
 
+		if (Design2UMGAutomationRender::IsCaseLocalAutomationImportedFontPath(Pair.Value))
+		{
+			const TSoftObjectPtr<UFont>* ExistingTransient = Settings->IconFontAssetMap.Find(Pair.Key);
+			if (ExistingTransient
+				&& Design2UMGAutomationRender::IsCaseLocalAutomationImportedFontPath(ExistingTransient->ToString()))
+			{
+				Settings->IconFontAssetMap.Remove(Pair.Key);
+				bModified = true;
+				UE_LOG(LogDesign2UMG, Display, TEXT("Removed transient automation icon font mapping for '%s'"), *Pair.Key);
+			}
+
+			UE_LOG(LogDesign2UMG, Display,
+				TEXT("Skip persisting transient automation icon font mapping '%s' -> '%s'"),
+				*Pair.Key,
+				*Pair.Value);
+			continue;
+		}
+
 		const TSoftObjectPtr<UFont>* Existing = Settings->IconFontAssetMap.Find(Pair.Key);
 		if (Existing && Existing->ToString() == Pair.Value)
 		{
@@ -228,14 +246,7 @@ void DesignImportUtils::ApplyPendingIconFontMappingChanges(const FUMGWidgetData&
 
 	if (bModified)
 	{
-		if (Design2UMGAutomationRender::IsAutomationRenderActive())
-		{
-			UE_LOG(LogDesign2UMG, Display, TEXT("Skip persisting icon font mapping changes during automation render"));
-		}
-		else
-		{
-			Settings->SaveConfig();
-		}
+		Settings->SaveConfig();
 	}
 }
 

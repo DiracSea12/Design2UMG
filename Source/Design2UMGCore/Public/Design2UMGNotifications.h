@@ -8,6 +8,10 @@
 DECLARE_DELEGATE_TwoParams(FDesign2UMGSuccessNotificationHandler, const FText&, const FString&);
 DECLARE_DELEGATE_OneParam(FDesign2UMGMessageNotificationHandler, const FText&);
 
+/**
+ * Lightweight notification facade used by Core and Editor code.
+ * Editor UI can register handlers, while Core stays independent from Slate.
+ */
 struct DESIGN2UMGCORE_API FDesign2UMGNotification
 {
 	static void RegisterSuccessHandler(FDesign2UMGSuccessNotificationHandler InHandler);

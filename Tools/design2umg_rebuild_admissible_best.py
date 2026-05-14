@@ -5,6 +5,19 @@ from pathlib import Path
 
 import design2umg_auto_verify as verify
 import design2umg_render_rule as render_rule
+from design2umg_verify_lib.case_metrics import (
+    normalize_case_metrics,
+    resolve_case_report_path,
+    resolve_report_metrics,
+    summary_metrics_payload,
+)
+from design2umg_verify_lib.compatibility import evaluate_report_compatibility
+from design2umg_verify_lib.json_io import load_json
+from design2umg_verify_lib.json_io import write_json
+from design2umg_verify_lib.manifest_paths import (
+    default_pinned_baseline_path as helper_default_pinned_baseline_path,
+    iter_manifest_case_report_paths as helper_iter_manifest_case_report_paths,
+)
 
 
 METRIC_FIELDS = (
@@ -24,77 +37,27 @@ CACHE_VERSION = 3
 PINNED_BASELINE_FILENAME = "design2umg_pinned_baseline.json"
 
 
-def load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8-sig"))
-
-
-def write_json(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8-sig")
-
-
-def default_pinned_baseline_path() -> Path:
-    return Path(__file__).resolve().with_name(PINNED_BASELINE_FILENAME)
-
-
-def resolve_pinned_report_path(report_path: str, manifest_path: Path) -> Path:
-    candidate = Path(report_path)
-    if candidate.is_absolute():
-        return candidate
-
-    manifest_dir = manifest_path.resolve().parent
-    plugin_root = manifest_dir.parent
-    for base in (plugin_root, manifest_dir):
-        resolved = (base / candidate).resolve()
-        if resolved.is_file():
-            return resolved
-
-    return (plugin_root / candidate).resolve()
-
-
-def iter_pinned_case_report_paths(case: dict, manifest_path: Path) -> list[Path]:
-    report_paths: list[Path] = []
-    seen: set[str] = set()
-
-    def add_report_path(raw_path: str) -> None:
-        if not raw_path:
-            return
-        resolved = resolve_pinned_report_path(raw_path, manifest_path)
-        normalized = str(resolved)
-        if normalized not in seen:
-            seen.add(normalized)
-            report_paths.append(resolved)
-
-    add_report_path(case.get("report_path", ""))
-    metric_sources = case.get("metric_sources") or {}
-    if isinstance(metric_sources, dict):
-        for source in metric_sources.values():
-            if isinstance(source, dict):
-                add_report_path(source.get("report_path", ""))
-
-    return report_paths
-
-
 def resolve_admissible_best_manifest(automation_root: Path) -> tuple[Path, dict, str]:
     output_path = automation_root / "_admissible_best_latest.json"
-    pinned_path = default_pinned_baseline_path()
+    pinned_path = helper_default_pinned_baseline_path(Path(__file__), PINNED_BASELINE_FILENAME)
     if pinned_path.is_file():
         pinned_manifest = load_json(pinned_path)
         pinned_cases = pinned_manifest.get("cases") or {}
         skipped_by_reason: dict[str, int] = {}
         for case in pinned_cases.values():
             case_skip_reasons: set[str] = set()
-            report_paths = iter_pinned_case_report_paths(case, pinned_path)
+            report_paths = helper_iter_manifest_case_report_paths(case, pinned_path)
             if not report_paths:
                 case_skip_reasons.add("report_missing")
 
             for report_path in report_paths:
-                rule_status = render_rule.evaluate_report_render_size_rule(report_path)
+                compatibility = evaluate_report_compatibility(report_path)
+                rule_status = compatibility["render_size"]
                 if not rule_status.get("compatible"):
                     case_skip_reasons.add(rule_status.get("reason", "render_size_rule_incompatible"))
                     continue
 
-                pipeline_rule_status = render_rule.evaluate_report_pipeline_determinism_rule(report_path)
+                pipeline_rule_status = compatibility["pipeline_determinism"]
                 if not pipeline_rule_status.get("compatible"):
                     case_skip_reasons.add(pipeline_rule_status.get("reason", "pipeline_determinism_rule_incompatible"))
 
@@ -155,32 +118,6 @@ def file_signature(path: Path) -> dict | None:
         "mtime_ns": stat.st_mtime_ns,
         "size": stat.st_size,
     }
-
-
-def normalize_case_metrics(metrics: dict | None) -> dict | None:
-    if not isinstance(metrics, dict):
-        return None
-
-    stable_changed_ratio = metrics.get("stable_changed_ratio")
-    changed_ratio = metrics.get("changed_ratio")
-    stable_mae = metrics.get("stable_mae")
-    if stable_mae is None:
-        stable_mae = metrics.get("stable_mean_abs_error")
-    mae = metrics.get("mae")
-    if mae is None:
-        mae = metrics.get("mean_abs_error")
-
-    normalized = {
-        "stable_changed_ratio": stable_changed_ratio,
-        "changed_ratio": changed_ratio,
-        "stable_mae": stable_mae,
-        "mae": mae,
-    }
-    if all(value is None for value in normalized.values()):
-        return None
-    return normalized
-
-
 def cache_lookup(
     cache_entries: dict,
     report_path: Path,
@@ -440,94 +377,27 @@ def build_case_entry(case_name: str) -> dict:
         "updated_timestamp": 0.0,
         "case": case_name,
     }
-
-
-def resolve_report_path(run_root: Path, case_name: str, case_summary: dict) -> Path:
-    summary_report_path = case_summary.get("report_path", "")
-    if summary_report_path:
-        candidate = Path(summary_report_path)
-        if candidate.is_file():
-            return candidate.resolve()
-
-    return (run_root / case_name / "compare_report.json").resolve()
-
-
 def resolve_case_metrics(run_root: Path, case_name: str, case_summary: dict, cache_entries: dict) -> tuple[dict, Path]:
-    report_path = resolve_report_path(run_root, case_name, case_summary)
-    summary_metrics = normalize_case_metrics(
-        {
-            "stable_changed_ratio": case_summary.get("stable_changed_ratio"),
-            "changed_ratio": case_summary.get("changed_ratio"),
-            "stable_mae": case_summary.get("stable_mae"),
-            "mae": case_summary.get("mae"),
-        }
-    )
+    report_path = resolve_case_report_path(run_root, case_name, case_summary)
+    summary_metrics = normalize_case_metrics(summary_metrics_payload(case_summary))
     if summary_metrics:
         return summary_metrics, report_path
 
-    report = load_json(report_path) if report_path.is_file() else {}
-    pixel_tolerance = report.get("pixel_tolerance", DEFAULT_PIXEL_TOLERANCE)
-    try:
-        pixel_tolerance = int(pixel_tolerance)
-    except (TypeError, ValueError):
-        pixel_tolerance = DEFAULT_PIXEL_TOLERANCE
-
-    reference_png_path = Path(report.get("reference_png_path") or (report_path.parent / "reference.png"))
-    candidate_png_path = Path(report.get("candidate_png_path") or (report_path.parent / "candidate.png"))
-    report_signature = file_signature(report_path)
-    reference_signature = file_signature(reference_png_path)
-    candidate_signature = file_signature(candidate_png_path)
-    cached_metrics = cache_lookup(
-        cache_entries,
+    report_metrics, _ = resolve_report_metrics(
         report_path,
-        report_signature,
-        reference_signature,
-        candidate_signature,
-        pixel_tolerance,
+        load_json_fn=load_json,
+        extract_compare_metrics_fn=verify.extract_compare_metrics,
+        compare_image_paths_fn=verify.compare_image_paths,
+        default_pixel_tolerance=DEFAULT_PIXEL_TOLERANCE,
+        file_signature_fn=file_signature,
+        cache_entries=cache_entries,
+        cache_lookup_fn=cache_lookup,
+        cache_store_fn=cache_store,
     )
-    if cached_metrics:
-        return cached_metrics, report_path
-
-    report_metrics = normalize_case_metrics(verify.extract_compare_metrics(report))
     if report_metrics:
-        cache_store(
-            cache_entries,
-            report_path,
-            report_signature,
-            reference_signature,
-            candidate_signature,
-            pixel_tolerance,
-            report_metrics,
-        )
         return report_metrics, report_path
 
-    image_metrics = verify.compare_image_paths(reference_png_path, candidate_png_path, pixel_tolerance)
-    normalized_image_metrics = normalize_case_metrics(
-        {
-            "stable_changed_ratio": image_metrics.get("stable_changed_ratio") if image_metrics else None,
-            "changed_ratio": image_metrics.get("changed_ratio") if image_metrics else None,
-            "stable_mae": image_metrics.get("stable_mean_abs_error") if image_metrics else None,
-            "mae": image_metrics.get("mean_abs_error") if image_metrics else None,
-        }
-    )
-    if normalized_image_metrics:
-        cache_store(
-            cache_entries,
-            report_path,
-            report_signature,
-            reference_signature,
-            candidate_signature,
-            pixel_tolerance,
-            normalized_image_metrics,
-        )
-        return normalized_image_metrics, report_path
-
-    return normalize_case_metrics({
-        "stable_changed_ratio": case_summary.get("stable_changed_ratio"),
-        "changed_ratio": case_summary.get("changed_ratio"),
-        "stable_mae": case_summary.get("stable_mae"),
-        "mae": case_summary.get("mae"),
-    }) or {
+    return {
         "stable_changed_ratio": None,
         "changed_ratio": None,
         "stable_mae": None,
@@ -620,14 +490,15 @@ def collect_best_cases(automation_root: Path, cache_payload: dict) -> tuple[
                 skipped_case_results_by_reason["output_collision"] = skipped_case_results_by_reason.get("output_collision", 0) + 1
                 continue
 
-            report_path = resolve_report_path(run_root, case_name, case)
-            rule_status = render_rule.evaluate_report_render_size_rule(report_path)
+            report_path = resolve_case_report_path(run_root, case_name, case)
+            compatibility = evaluate_report_compatibility(report_path)
+            rule_status = compatibility["render_size"]
             if not rule_status.get("compatible"):
                 skipped_case_results.append(f"{run_root.name}:{case_name}:render_size_rule_incompatible:{rule_status.get('reason', '')}")
                 skipped_case_results_by_reason["render_size_rule_incompatible"] = skipped_case_results_by_reason.get("render_size_rule_incompatible", 0) + 1
                 continue
 
-            pipeline_rule_status = render_rule.evaluate_report_pipeline_determinism_rule(report_path)
+            pipeline_rule_status = compatibility["pipeline_determinism"]
             if not pipeline_rule_status.get("compatible"):
                 skipped_case_results.append(f"{run_root.name}:{case_name}:pipeline_determinism_rule_incompatible:{pipeline_rule_status.get('reason', '')}")
                 skipped_case_results_by_reason["pipeline_determinism_rule_incompatible"] = skipped_case_results_by_reason.get("pipeline_determinism_rule_incompatible", 0) + 1

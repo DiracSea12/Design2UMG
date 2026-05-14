@@ -14,6 +14,10 @@ class SBox;
 DECLARE_DELEGATE_OneParam(FOnPreviewConfirmed, const FPreviewGenerationRequest& /*GenerationRequest*/);
 DECLARE_DELEGATE(FOnPreviewCancelled);
 
+/**
+ * Editor preview UI contract for Design2UMG preview workflows.
+ * Public for editor composition only; this is not a runtime extensibility promise.
+ */
 class SDesign2UMGPreviewWindow : public SCompoundWidget
 {
 public:

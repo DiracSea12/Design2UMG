@@ -1,9 +1,6 @@
 ﻿import argparse
 import concurrent.futures
-import hashlib
-import json
 import os
-import re
 import shutil
 import shlex
 import subprocess
@@ -16,18 +13,12 @@ import design2umg_auto_verify as verify
 import design2umg_rebuild_admissible_best as rebuild_best
 import design2umg_render_rule as render_rule
 import design2umg_validate_run as validate_run_tool
+from design2umg_verify_lib import batch_discovery
+from design2umg_verify_lib import execution_shards
+from design2umg_verify_lib import reference_cache
 
 
-ROOT_MIN_SIZE = 8
-ROOT_CONTAINER_TYPES = {"frame", "group", "component", "ref"}
 NO_REGRESSION_EPSILON = 1.25e-4
-REFERENCE_CACHE_SCHEMA_VERSION = 1
-DEFAULT_FIGMA_EXPORT_DIR_NAMES = (
-    "figma_export",
-    "figma_export1",
-    "figma_export2",
-    "figma_export3",
-)
 
 
 def parse_args():
@@ -55,335 +46,6 @@ def parse_args():
     parser.add_argument("--exclude", default="", help="Skip discovered case names matching this regex")
     parser.add_argument("--log-cmds", default="", help="Optional Unreal -LogCmds payload, for example 'LogDesign2UMG Verbose'")
     return parser.parse_args()
-
-
-def default_output_root() -> Path:
-    stamp = time.strftime("%Y%m%d_%H%M%S")
-    return verify.plugin_root() / "Saved" / "Design2UMG" / "Automation" / f"batch_{stamp}_{Path.cwd().name}"
-
-
-def resolve_default_figma_export_roots(design_root: Path, explicit_roots: list[str]) -> list[str]:
-    if explicit_roots:
-        return [str(Path(root).resolve()) for root in explicit_roots if root]
-
-    for ancestor in design_root.parents:
-        resolved_roots = []
-        for directory_name in DEFAULT_FIGMA_EXPORT_DIR_NAMES:
-            candidate = ancestor / directory_name
-            if candidate.is_dir():
-                resolved_roots.append(str(candidate.resolve()))
-        if resolved_roots:
-            return resolved_roots
-
-    return []
-
-
-def sanitize_case_name(value: str) -> str:
-    normalized = (value or "").strip().lower()
-    normalized = re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")
-    return normalized or "unnamed"
-
-
-def classify_run_scope(include_pattern: str, exclude_pattern: str) -> str:
-    if include_pattern:
-        return "focus"
-    if exclude_pattern:
-        return "full_with_exclusions"
-    return "full"
-
-
-def write_run_scope(output_root: Path, args, cases: list[dict], effective_figma_export_roots: list[str]) -> Path:
-    run_scope = {
-        "scope": classify_run_scope(args.include, args.exclude),
-        "include_pattern": args.include,
-        "exclude_pattern": args.exclude,
-        "discovered_total": len(cases),
-        "formal_admissible_candidate": not bool(args.include),
-        "figma_export_roots": effective_figma_export_roots,
-        "case_names": [case["name"] for case in cases],
-        "case_inputs": [
-            {
-                "name": case["name"],
-                "mode": case["mode"],
-                "source": str(Path(case["source"]).resolve()),
-                "source_signature": verify.build_file_signature(case["source"]),
-                "provided_reference_signature": verify.build_file_signature(case.get("reference_path")),
-            }
-            for case in cases
-        ],
-    }
-    run_scope_path = output_root / "run_scope.json"
-    verify.write_json(run_scope_path, run_scope)
-    return run_scope_path
-
-
-def collect_batch_completeness(states: list[dict], case_results: list[dict]) -> dict:
-    missing_compare_reports = []
-    missing_case_results = []
-    for state in states:
-        compare_report_path = state["output_dir"] / "compare_report.json"
-        if not compare_report_path.is_file():
-            missing_compare_reports.append(state["case"]["name"])
-
-    reported_names = {item["name"] for item in case_results}
-    for state in states:
-        case_name = state["case"]["name"]
-        if case_name not in reported_names:
-            missing_case_results.append(case_name)
-
-    blocked_reasons = []
-    if missing_compare_reports:
-        blocked_reasons.append("missing_compare_report")
-    if missing_case_results:
-        blocked_reasons.append("missing_case_summary_entry")
-
-    return {
-        "blocked": bool(blocked_reasons),
-        "blocked_reasons": blocked_reasons,
-        "discovered_total": len(states),
-        "reported_total": len(case_results),
-        "missing_compare_reports": missing_compare_reports,
-        "missing_case_results": missing_case_results,
-    }
-
-
-def discover_pen_cases(design_root: Path, include_pattern: str, exclude_pattern: str) -> list[dict]:
-    include_regex = re.compile(include_pattern) if include_pattern else None
-    exclude_regex = re.compile(exclude_pattern) if exclude_pattern else None
-    discovered = []
-    used_names: dict[str, int] = {}
-
-    for pen_path in sorted(design_root.rglob("*.pen")):
-        document = verify.load_json_document(pen_path)
-        nodes = document.get("children", [])
-        if not isinstance(nodes, list):
-            continue
-
-        for index, node in enumerate(nodes):
-            if not isinstance(node, dict):
-                continue
-            node_id = node.get("id", "")
-            if not node_id:
-                continue
-            node_type = str(node.get("type", "")).strip().lower()
-            has_children = isinstance(node.get("children"), list) and bool(node.get("children"))
-            if node_type not in ROOT_CONTAINER_TYPES and not has_children:
-                continue
-            size = verify.extract_node_size(node)
-            declared_width, declared_height = verify.extract_node_numeric_size(node)
-            has_declared_extent = (
-                (declared_width is not None and declared_width >= ROOT_MIN_SIZE)
-                or (declared_height is not None and declared_height >= ROOT_MIN_SIZE)
-            )
-            if not size and not has_declared_extent:
-                continue
-            if size and (size[0] < ROOT_MIN_SIZE or size[1] < ROOT_MIN_SIZE):
-                continue
-
-            node_name = node.get("name") or node_id
-            case_name = f"pen_{sanitize_case_name(pen_path.stem)}_{sanitize_case_name(node_name)}"
-            duplicate_index = used_names.get(case_name, 0)
-            used_names[case_name] = duplicate_index + 1
-            if duplicate_index:
-                case_name = f"{case_name}-{duplicate_index + 1}"
-
-            if include_regex and not include_regex.search(case_name):
-                continue
-            if exclude_regex and exclude_regex.search(case_name):
-                continue
-
-            discovered.append(
-                {
-                    "name": case_name,
-                    "mode": "pen",
-                    "source": str(pen_path),
-                    "node": node_id,
-                    "node_name": node_name,
-                }
-            )
-
-    return discovered
-
-
-def discover_figma_export_cases(export_roots: list[str], include_pattern: str, exclude_pattern: str) -> list[dict]:
-    include_regex = re.compile(include_pattern) if include_pattern else None
-    exclude_regex = re.compile(exclude_pattern) if exclude_pattern else None
-    discovered = []
-
-    for raw_root in export_roots:
-        if not raw_root:
-            continue
-
-        export_root = Path(raw_root).resolve()
-        design_json = export_root / "design.json"
-        if not design_json.is_file():
-            continue
-
-        top_level_pngs = sorted(
-            [path for path in export_root.glob("*.png") if path.is_file()],
-            key=lambda path: (-path.stat().st_size, path.name.lower()),
-        )
-        if not top_level_pngs:
-            continue
-
-        reference_png = top_level_pngs[0]
-        base_name = f"figma_{sanitize_case_name(export_root.name)}"
-        for mode, suffix in (("local-figma", "local"), ("figma-source", "source")):
-            case_name = f"{base_name}_{suffix}"
-            if include_regex and not include_regex.search(case_name):
-                continue
-            if exclude_regex and exclude_regex.search(case_name):
-                continue
-
-            discovered.append(
-                {
-                    "name": case_name,
-                    "mode": mode,
-                    "source": str(design_json),
-                    "node": "",
-                    "node_name": export_root.name,
-                    "reference_path": str(reference_png),
-                    "export_root": str(export_root),
-                }
-            )
-
-    return discovered
-
-
-def resolve_reference_cache_root(args, output_root: Path) -> Path | None:
-    if args.reference_cache == "off":
-        return None
-    if args.reference_cache_root:
-        return Path(args.reference_cache_root).resolve()
-    return output_root.parent / "_reference_cache"
-
-
-def build_source_signature(source_path: Path) -> dict:
-    resolved = source_path.resolve()
-    stat = resolved.stat()
-    digest = hashlib.sha1(resolved.read_bytes()).hexdigest()
-    return {
-        "path": str(resolved),
-        "size": stat.st_size,
-        "mtime_ns": stat.st_mtime_ns,
-        "sha1": digest,
-    }
-
-
-def build_reference_cache_key(case_args) -> str:
-    payload = {
-        "schema": REFERENCE_CACHE_SCHEMA_VERSION,
-        "mode": case_args.mode,
-        "source": str(Path(case_args.source).resolve()),
-        "node": case_args.node or "",
-        "reference_provider": case_args.reference_provider,
-    }
-    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
-
-
-def can_use_reference_cache(case_args, case: dict) -> bool:
-    if case_args.mode != "pen":
-        return False
-    if case.get("reference_path"):
-        return False
-    if case_args.reference:
-        return False
-    return case_args.reference_provider == "pencil"
-
-
-def restore_reference_from_cache(
-    case_args,
-    case: dict,
-    output_dir: Path,
-    cache_root: Path | None,
-) -> tuple[Path, dict] | None:
-    if not cache_root or not can_use_reference_cache(case_args, case):
-        return None
-
-    source_path = Path(case_args.source)
-    if not source_path.is_file():
-        return None
-
-    cache_key = build_reference_cache_key(case_args)
-    cache_dir = cache_root / cache_key
-    meta_path = cache_dir / "meta.json"
-    cached_reference_path = cache_dir / "reference.png"
-    if not meta_path.is_file() or not cached_reference_path.is_file():
-        return None
-
-    metadata = verify.load_json_document(meta_path)
-    if metadata.get("schema") != REFERENCE_CACHE_SCHEMA_VERSION:
-        return None
-    if metadata.get("mode") != case_args.mode:
-        return None
-    if metadata.get("node") != (case_args.node or ""):
-        return None
-    if metadata.get("reference_provider") != case_args.reference_provider:
-        return None
-
-    expected_signature = metadata.get("source_signature") or {}
-    current_signature = build_source_signature(source_path)
-    if expected_signature != current_signature:
-        return None
-
-    output_reference_path = output_dir / "reference.png"
-    verify.shutil.copyfile(cached_reference_path, output_reference_path)
-
-    reference_context = metadata.get("reference_context") or {}
-    cached_structure_path = cache_dir / "source_structure_live.json"
-    if cached_structure_path.is_file():
-        try:
-            reference_context["source_structure_live"] = verify.load_json_document(cached_structure_path)
-            reference_context["source_structure_live_path"] = str(cached_structure_path)
-        except Exception:
-            pass
-
-    cache_meta = {
-        "hit": True,
-        "cache_dir": str(cache_dir),
-        "cache_key": cache_key,
-    }
-    reference_context["reference_cache"] = cache_meta
-    reference_context.setdefault("reference_authority", {})
-    return output_reference_path, reference_context
-
-
-def save_reference_to_cache(
-    case_args,
-    case: dict,
-    cache_root: Path | None,
-    reference_path: Path,
-    reference_context: dict,
-) -> None:
-    if not cache_root or not can_use_reference_cache(case_args, case):
-        return
-
-    source_path = Path(case_args.source)
-    if not source_path.is_file():
-        return
-
-    cache_key = build_reference_cache_key(case_args)
-    cache_dir = cache_root / cache_key
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    verify.shutil.copyfile(reference_path, cache_dir / "reference.png")
-
-    cached_context = dict(reference_context or {})
-    source_structure_live = cached_context.pop("source_structure_live", None)
-    cached_context.pop("source_structure_live_path", None)
-    if source_structure_live is not None:
-        verify.write_json(cache_dir / "source_structure_live.json", source_structure_live)
-
-    metadata = {
-        "schema": REFERENCE_CACHE_SCHEMA_VERSION,
-        "mode": case_args.mode,
-        "source": str(source_path.resolve()),
-        "node": case_args.node or "",
-        "reference_provider": case_args.reference_provider,
-        "source_signature": build_source_signature(source_path),
-        "reference_context": cached_context,
-    }
-    verify.write_json(cache_dir / "meta.json", metadata)
 
 
 def build_case_args(batch_args, case: dict) -> SimpleNamespace:
@@ -477,7 +139,7 @@ def prepare_case_state(
     restored_from_cache = None
     if reference_cache_mode in {"read", "read-write"}:
         try:
-            restored_from_cache = restore_reference_from_cache(case_args, case, output_dir, reference_cache_root)
+            restored_from_cache = reference_cache.restore_reference_from_cache(case_args, case, output_dir, reference_cache_root)
         except Exception:
             restored_from_cache = None
 
@@ -492,7 +154,7 @@ def prepare_case_state(
 
     if restored_from_cache is None and reference_cache_mode in {"read-write", "refresh"}:
         try:
-            save_reference_to_cache(case_args, case, reference_cache_root, reference_path, reference_context)
+            reference_cache.save_reference_to_cache(case_args, case, reference_cache_root, reference_path, reference_context)
         except Exception:
             pass
 
@@ -710,7 +372,7 @@ def build_case_specs(state: dict):
 
 def write_editor_driver_script(output_root: Path, spec_paths: list[Path], tag: str = "batch") -> Path:
     output_root = output_root.resolve()
-    normalized_tag = sanitize_case_name(tag)
+    normalized_tag = batch_discovery.sanitize_case_name(tag)
     manifest_path = output_root / f"editor_driver_manifest_{normalized_tag}.json"
     driver_log_path = output_root / f"editor_driver_{normalized_tag}.log"
     verify.write_json(
@@ -861,55 +523,6 @@ def run_editor_driver(
             return 0
 
     return exit_code
-
-
-def resolve_parallel_editor_count(requested: int, case_count: int) -> int:
-    if case_count <= 1:
-        return 1
-    if requested > 0:
-        return max(1, requested)
-
-    cpu_count = os.cpu_count() or 1
-    if case_count < 8:
-        return 1
-    # Keep auto-sharding conservative on shared projects; users can still force
-    # higher values with --parallel-editors when the machine is stable.
-    if cpu_count >= 12 and case_count >= 8:
-        return 2
-    return 1
-
-
-def resolve_post_worker_count(requested: int, case_count: int) -> int:
-    if case_count <= 1:
-        return 1
-    if requested > 0:
-        return max(1, requested)
-
-    cpu_count = os.cpu_count() or 1
-    baseline = max(1, cpu_count // 2)
-    return max(1, min(8, baseline, case_count))
-
-
-def build_execution_shards(states: list[dict], shard_count: int) -> list[dict]:
-    normalized_shard_count = max(1, min(shard_count, len(states)))
-    shards = [
-        {
-            "id": index,
-            "states": [],
-            "spec_paths": [],
-            "result_paths": [],
-        }
-        for index in range(normalized_shard_count)
-    ]
-
-    sorted_states = sorted(states, key=lambda item: len(item["spec_paths"]), reverse=True)
-    for state in sorted_states:
-        shard = min(shards, key=lambda item: len(item["spec_paths"]))
-        shard["states"].append(state)
-        shard["spec_paths"].extend(state["spec_paths"])
-        shard["result_paths"].extend(step["result_json_path"] for step in state["steps"].values())
-
-    return [shard for shard in shards if shard["states"]]
 
 
 def run_execution_shard(
@@ -1464,7 +1077,7 @@ def main():
     design_root = Path(args.design_root).resolve()
     if not design_root.is_dir():
         raise RuntimeError(f"Design root not found: {design_root}")
-    effective_figma_export_roots = resolve_default_figma_export_roots(design_root, args.figma_export_root)
+    effective_figma_export_roots = batch_discovery.resolve_default_figma_export_roots(design_root, args.figma_export_root)
 
     runtime_args = SimpleNamespace(
         project=args.project,
@@ -1486,17 +1099,17 @@ def main():
         print(f"figma_export_roots={effective_figma_export_roots}")
         sys.exit(0)
 
-    output_root = Path(args.output_root).resolve() if args.output_root else default_output_root()
+    output_root = Path(args.output_root).resolve() if args.output_root else batch_discovery.default_output_root()
     output_root.mkdir(parents=True, exist_ok=True)
     verify.sync_project_plugin_build_id(args.editor, project_plugin_root)
 
-    cases = discover_pen_cases(design_root, args.include, args.exclude)
-    cases.extend(discover_figma_export_cases(effective_figma_export_roots, args.include, args.exclude))
+    cases = batch_discovery.discover_pen_cases(design_root, args.include, args.exclude)
+    cases.extend(batch_discovery.discover_figma_export_cases(effective_figma_export_roots, args.include, args.exclude))
     if not cases:
         raise RuntimeError(f"No eligible pen or figma export cases discovered under: {design_root}")
     verify.seed_runtime_font_assets(runtime_args.project, [case["source"] for case in cases])
-    run_scope_path = write_run_scope(output_root, args, cases, effective_figma_export_roots)
-    reference_cache_root = resolve_reference_cache_root(args, output_root)
+    run_scope_path = batch_discovery.write_run_scope(output_root, args, cases, effective_figma_export_roots)
+    reference_cache_root = reference_cache.resolve_reference_cache_root(args, output_root)
     if reference_cache_root:
         reference_cache_root.mkdir(parents=True, exist_ok=True)
 
@@ -1516,8 +1129,8 @@ def main():
         states.append(state)
     prep_completed_at = time.time()
 
-    parallel_editors = resolve_parallel_editor_count(args.parallel_editors, len(states))
-    shards = build_execution_shards(states, parallel_editors)
+    parallel_editors = execution_shards.resolve_parallel_editor_count(args.parallel_editors, len(states))
+    shards = execution_shards.build_execution_shards(states, parallel_editors)
     verify.ensure_clean_editor()
     shard_results = run_execution_shards(
         shards,
@@ -1545,7 +1158,7 @@ def main():
     batch_log_path = output_root / "unreal_batch.log"
     editor_completed_at = time.time()
 
-    post_workers = resolve_post_worker_count(args.post_workers, len(states))
+    post_workers = execution_shards.resolve_post_worker_count(args.post_workers, len(states))
     case_results = process_case_results(states, editor_exit_code, batch_log_path, post_workers)
     for result in case_results:
         status = "BLOCKED" if result.get("blocked") else "CASE"
@@ -1565,7 +1178,7 @@ def main():
     no_regression_cases = [item for item in case_results if item.get("no_regression_available")]
     no_regression_passed = sum(1 for item in no_regression_cases if item.get("no_regression_passed"))
     blocked_cases = [item for item in case_results if item.get("blocked")]
-    completeness = collect_batch_completeness(states, case_results)
+    completeness = batch_discovery.collect_batch_completeness(states, case_results)
     summary = {
         "total": len(case_results),
         "editor_exit_code": editor_exit_code,

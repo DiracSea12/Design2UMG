@@ -14,6 +14,32 @@ namespace
 		None, Boolean, Number, String, Color
 	};
 
+	enum class EDesign2UMGPrototypeSerializedValueDomain : uint8
+	{
+		Unknown,
+		Boolean,
+		Number,
+		String,
+		Color,
+		VariableAlias,
+		Expression
+	};
+
+	enum class EDesign2UMGPrototypeExpressionFunction : uint8
+	{
+		Unknown,
+		And,
+		Or,
+		Not,
+		Equals,
+		NotEquals,
+		GreaterThan,
+		GreaterThanOrEqual,
+		LessThan,
+		LessThanOrEqual,
+		VarModeLookup
+	};
+
 	struct FDesign2UMGPrototypeRuntimeValue
 	{
 		EDesign2UMGPrototypeRuntimeValueKind Kind = EDesign2UMGPrototypeRuntimeValueKind::None;
@@ -22,6 +48,81 @@ namespace
 		FString StringValue;
 		FLinearColor ColorValue = FLinearColor::Transparent;
 	};
+
+	EDesign2UMGPrototypeSerializedValueDomain ParseSerializedValueDomain(const FString& DomainToken)
+	{
+		if (DomainToken.Equals(TEXT("BOOLEAN"), ESearchCase::IgnoreCase))
+		{
+			return EDesign2UMGPrototypeSerializedValueDomain::Boolean;
+		}
+		if (DomainToken.Equals(TEXT("FLOAT"), ESearchCase::IgnoreCase)
+			|| DomainToken.Equals(TEXT("NUMBER"), ESearchCase::IgnoreCase))
+		{
+			return EDesign2UMGPrototypeSerializedValueDomain::Number;
+		}
+		if (DomainToken.Equals(TEXT("STRING"), ESearchCase::IgnoreCase))
+		{
+			return EDesign2UMGPrototypeSerializedValueDomain::String;
+		}
+		if (DomainToken.Equals(TEXT("COLOR"), ESearchCase::IgnoreCase))
+		{
+			return EDesign2UMGPrototypeSerializedValueDomain::Color;
+		}
+		if (DomainToken.Equals(TEXT("VARIABLE_ALIAS"), ESearchCase::IgnoreCase))
+		{
+			return EDesign2UMGPrototypeSerializedValueDomain::VariableAlias;
+		}
+		if (DomainToken.Equals(TEXT("EXPRESSION"), ESearchCase::IgnoreCase))
+		{
+			return EDesign2UMGPrototypeSerializedValueDomain::Expression;
+		}
+		return EDesign2UMGPrototypeSerializedValueDomain::Unknown;
+	}
+
+	EDesign2UMGPrototypeExpressionFunction ParseExpressionFunctionToken(const FString& FunctionToken)
+	{
+		if (FunctionToken.Equals(TEXT("AND"), ESearchCase::IgnoreCase))
+		{
+			return EDesign2UMGPrototypeExpressionFunction::And;
+		}
+		if (FunctionToken.Equals(TEXT("OR"), ESearchCase::IgnoreCase))
+		{
+			return EDesign2UMGPrototypeExpressionFunction::Or;
+		}
+		if (FunctionToken.Equals(TEXT("NOT"), ESearchCase::IgnoreCase))
+		{
+			return EDesign2UMGPrototypeExpressionFunction::Not;
+		}
+		if (FunctionToken.Equals(TEXT("EQUALS"), ESearchCase::IgnoreCase))
+		{
+			return EDesign2UMGPrototypeExpressionFunction::Equals;
+		}
+		if (FunctionToken.Equals(TEXT("NOT_EQUALS"), ESearchCase::IgnoreCase))
+		{
+			return EDesign2UMGPrototypeExpressionFunction::NotEquals;
+		}
+		if (FunctionToken.Equals(TEXT("GREATER_THAN"), ESearchCase::IgnoreCase))
+		{
+			return EDesign2UMGPrototypeExpressionFunction::GreaterThan;
+		}
+		if (FunctionToken.Equals(TEXT("GREATER_THAN_OR_EQUAL"), ESearchCase::IgnoreCase))
+		{
+			return EDesign2UMGPrototypeExpressionFunction::GreaterThanOrEqual;
+		}
+		if (FunctionToken.Equals(TEXT("LESS_THAN"), ESearchCase::IgnoreCase))
+		{
+			return EDesign2UMGPrototypeExpressionFunction::LessThan;
+		}
+		if (FunctionToken.Equals(TEXT("LESS_THAN_OR_EQUAL"), ESearchCase::IgnoreCase))
+		{
+			return EDesign2UMGPrototypeExpressionFunction::LessThanOrEqual;
+		}
+		if (FunctionToken.Equals(TEXT("VAR_MODE_LOOKUP"), ESearchCase::IgnoreCase))
+		{
+			return EDesign2UMGPrototypeExpressionFunction::VarModeLookup;
+		}
+		return EDesign2UMGPrototypeExpressionFunction::Unknown;
+	}
 
 	bool TryParseJsonValue(const FString& Json, TSharedPtr<FJsonValue>& OutValue)
 	{
@@ -76,6 +177,22 @@ namespace
 		return nullptr;
 	}
 
+	EDesign2UMGPrototypeSerializedValueDomain GetSerializedValueDomain(const TSharedPtr<FJsonObject>& Object)
+	{
+		if (!Object.IsValid())
+		{
+			return EDesign2UMGPrototypeSerializedValueDomain::Unknown;
+		}
+
+		const FString ResolvedType = GetJsonString(Object, TEXT("resolvedType"));
+		if (!ResolvedType.IsEmpty())
+		{
+			return ParseSerializedValueDomain(ResolvedType);
+		}
+
+		return ParseSerializedValueDomain(GetJsonString(Object, TEXT("type")));
+	}
+
 	bool TryConvertJsonValueToRuntimeValue(
 		const TSharedPtr<FJsonValue>& JsonValue,
 		const TMap<FString, FString>& VariableValues,
@@ -95,11 +212,9 @@ namespace
 			return false;
 		}
 
-		const FString ResolvedType = GetJsonString(Object, TEXT("resolvedType")).ToUpper();
-		const FString RawType = GetJsonString(Object, TEXT("type")).ToUpper();
-		const FString ValueType = !ResolvedType.IsEmpty() ? ResolvedType : RawType;
-
-		if (ValueType == TEXT("BOOLEAN"))
+		switch (GetSerializedValueDomain(Object))
+		{
+		case EDesign2UMGPrototypeSerializedValueDomain::Boolean:
 		{
 			bool bValue = false;
 			if (Object->TryGetBoolField(TEXT("value"), bValue))
@@ -108,8 +223,9 @@ namespace
 				OutValue.BoolValue = bValue;
 				return true;
 			}
+			break;
 		}
-		else if (ValueType == TEXT("FLOAT") || ValueType == TEXT("NUMBER"))
+		case EDesign2UMGPrototypeSerializedValueDomain::Number:
 		{
 			double NumberValue = 0.0;
 			if (Object->TryGetNumberField(TEXT("value"), NumberValue))
@@ -118,8 +234,9 @@ namespace
 				OutValue.NumberValue = NumberValue;
 				return true;
 			}
+			break;
 		}
-		else if (ValueType == TEXT("STRING"))
+		case EDesign2UMGPrototypeSerializedValueDomain::String:
 		{
 			FString StringValue;
 			if (Object->TryGetStringField(TEXT("value"), StringValue))
@@ -128,8 +245,9 @@ namespace
 				OutValue.StringValue = StringValue;
 				return true;
 			}
+			break;
 		}
-		else if (ValueType == TEXT("COLOR"))
+		case EDesign2UMGPrototypeSerializedValueDomain::Color:
 		{
 			const TSharedPtr<FJsonObject> ColorObject = GetJsonObject(Object, TEXT("value"));
 			if (ColorObject.IsValid())
@@ -153,8 +271,9 @@ namespace
 					: 1.0f;
 				return true;
 			}
+			break;
 		}
-		else if (ValueType == TEXT("VARIABLE_ALIAS"))
+		case EDesign2UMGPrototypeSerializedValueDomain::VariableAlias:
 		{
 			FString AliasId = GetJsonString(Object, TEXT("id"));
 			if (AliasId.IsEmpty())
@@ -181,14 +300,15 @@ namespace
 				}
 				AliasGuard.Remove(AliasId);
 			}
+			break;
 		}
-		else if (ValueType == TEXT("EXPRESSION"))
+		case EDesign2UMGPrototypeSerializedValueDomain::Expression:
 		{
 			const TSharedPtr<FJsonObject> ExpressionObject = GetJsonObject(Object, TEXT("value"));
 			const TSharedPtr<FJsonObject> EffectiveExpressionObject =
 				ExpressionObject.IsValid() ? ExpressionObject : Object;
-			const FString ExpressionFunction =
-				GetJsonString(EffectiveExpressionObject, TEXT("expressionFunction")).ToUpper();
+			const EDesign2UMGPrototypeExpressionFunction ExpressionFunction =
+				ParseExpressionFunctionToken(GetJsonString(EffectiveExpressionObject, TEXT("expressionFunction")));
 			const TArray<TSharedPtr<FJsonValue>>* Arguments =
 				GetJsonArray(EffectiveExpressionObject, TEXT("expressionArguments"));
 
@@ -242,7 +362,7 @@ namespace
 				}
 			};
 
-			if (ExpressionFunction == TEXT("AND"))
+			if (ExpressionFunction == EDesign2UMGPrototypeExpressionFunction::And)
 			{
 				OutValue.Kind = EDesign2UMGPrototypeRuntimeValueKind::Boolean;
 				OutValue.BoolValue = true;
@@ -252,7 +372,7 @@ namespace
 				}
 				return true;
 			}
-			if (ExpressionFunction == TEXT("OR"))
+			if (ExpressionFunction == EDesign2UMGPrototypeExpressionFunction::Or)
 			{
 				OutValue.Kind = EDesign2UMGPrototypeRuntimeValueKind::Boolean;
 				OutValue.BoolValue = false;
@@ -262,42 +382,42 @@ namespace
 				}
 				return true;
 			}
-			if (ExpressionFunction == TEXT("NOT") && ResolvedArgs.Num() >= 1)
+			if (ExpressionFunction == EDesign2UMGPrototypeExpressionFunction::Not && ResolvedArgs.Num() >= 1)
 			{
 				OutValue.Kind = EDesign2UMGPrototypeRuntimeValueKind::Boolean;
 				OutValue.BoolValue = !ToBool(ResolvedArgs[0]);
 				return true;
 			}
-			if (ExpressionFunction == TEXT("EQUALS") && ResolvedArgs.Num() >= 2)
+			if (ExpressionFunction == EDesign2UMGPrototypeExpressionFunction::Equals && ResolvedArgs.Num() >= 2)
 			{
 				OutValue.Kind = EDesign2UMGPrototypeRuntimeValueKind::Boolean;
 				OutValue.BoolValue = EqualsValue(ResolvedArgs[0], ResolvedArgs[1]);
 				return true;
 			}
-			if (ExpressionFunction == TEXT("NOT_EQUALS") && ResolvedArgs.Num() >= 2)
+			if (ExpressionFunction == EDesign2UMGPrototypeExpressionFunction::NotEquals && ResolvedArgs.Num() >= 2)
 			{
 				OutValue.Kind = EDesign2UMGPrototypeRuntimeValueKind::Boolean;
 				OutValue.BoolValue = !EqualsValue(ResolvedArgs[0], ResolvedArgs[1]);
 				return true;
 			}
-			if ((ExpressionFunction == TEXT("GREATER_THAN")
-				|| ExpressionFunction == TEXT("GREATER_THAN_OR_EQUAL")
-				|| ExpressionFunction == TEXT("LESS_THAN")
-				|| ExpressionFunction == TEXT("LESS_THAN_OR_EQUAL"))
+			if ((ExpressionFunction == EDesign2UMGPrototypeExpressionFunction::GreaterThan
+				|| ExpressionFunction == EDesign2UMGPrototypeExpressionFunction::GreaterThanOrEqual
+				|| ExpressionFunction == EDesign2UMGPrototypeExpressionFunction::LessThan
+				|| ExpressionFunction == EDesign2UMGPrototypeExpressionFunction::LessThanOrEqual)
 				&& ResolvedArgs.Num() >= 2
 				&& ResolvedArgs[0].Kind == EDesign2UMGPrototypeRuntimeValueKind::Number
 				&& ResolvedArgs[1].Kind == EDesign2UMGPrototypeRuntimeValueKind::Number)
 			{
 				OutValue.Kind = EDesign2UMGPrototypeRuntimeValueKind::Boolean;
-				if (ExpressionFunction == TEXT("GREATER_THAN"))
+				if (ExpressionFunction == EDesign2UMGPrototypeExpressionFunction::GreaterThan)
 				{
 					OutValue.BoolValue = ResolvedArgs[0].NumberValue > ResolvedArgs[1].NumberValue;
 				}
-				else if (ExpressionFunction == TEXT("GREATER_THAN_OR_EQUAL"))
+				else if (ExpressionFunction == EDesign2UMGPrototypeExpressionFunction::GreaterThanOrEqual)
 				{
 					OutValue.BoolValue = ResolvedArgs[0].NumberValue >= ResolvedArgs[1].NumberValue;
 				}
-				else if (ExpressionFunction == TEXT("LESS_THAN"))
+				else if (ExpressionFunction == EDesign2UMGPrototypeExpressionFunction::LessThan)
 				{
 					OutValue.BoolValue = ResolvedArgs[0].NumberValue < ResolvedArgs[1].NumberValue;
 				}
@@ -307,7 +427,7 @@ namespace
 				}
 				return true;
 			}
-			if (ExpressionFunction == TEXT("VAR_MODE_LOOKUP") && ResolvedArgs.Num() >= 2)
+			if (ExpressionFunction == EDesign2UMGPrototypeExpressionFunction::VarModeLookup && ResolvedArgs.Num() >= 2)
 			{
 				const FString CollectionId =
 					ResolvedArgs[0].Kind == EDesign2UMGPrototypeRuntimeValueKind::String
@@ -323,6 +443,10 @@ namespace
 					return true;
 				}
 			}
+			break;
+		}
+		default:
+			break;
 		}
 
 		return false;

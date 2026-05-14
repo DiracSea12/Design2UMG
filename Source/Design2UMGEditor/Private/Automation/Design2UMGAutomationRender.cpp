@@ -408,6 +408,13 @@ namespace
 			.StartsWith(TEXT("/Game/Design2UMG/Automation/"), ESearchCase::CaseSensitive);
 	}
 
+	bool IsAutomationImportedFontPath(const FString& FontAssetPath)
+	{
+		const FString NormalizedPath = NormalizeAutomationPackagePath(FontAssetPath);
+		return NormalizedPath.Contains(TEXT("/Design2UMG/Automation/"), ESearchCase::CaseSensitive)
+			&& NormalizedPath.Contains(TEXT("/ImportedFonts/"), ESearchCase::CaseSensitive);
+	}
+
 	FString ResolveAutomationFontImportPath(const FString& OutputPath)
 	{
 		const FString NormalizedOutputPath = NormalizeAutomationPackagePath(OutputPath);
@@ -498,8 +505,9 @@ namespace
 		const TGuardValue<FString> FontImportPathGuard(
 			GDesign2UMGAutomationFontImportPath,
 			ResolveAutomationFontImportPath(Spec.OutputPath));
-		const FDesign2UMGImportSettingsSnapshot AutomationSettingsSnapshot =
+		FDesign2UMGImportSettingsSnapshot AutomationSettingsSnapshot =
 			FDesign2UMGImportSettingsSnapshot::FromSettings(UDesign2UMGSettings::Get());
+		Design2UMGAutomationRender::SanitizeImportSettingsSnapshot(AutomationSettingsSnapshot);
 
 		auto MakeAutomationImportRequest = [&](const bool bResolveImages)
 		{
@@ -759,6 +767,36 @@ namespace Design2UMGAutomationRender
 	FString GetAutomationFontImportPath()
 	{
 		return GDesign2UMGAutomationFontImportPath;
+	}
+
+	bool IsCaseLocalAutomationImportedFontPath(const FString& FontAssetPath)
+	{
+		const FString NormalizedPath = NormalizeAutomationPackagePath(FontAssetPath);
+		return IsAutomationImportedFontPath(NormalizedPath)
+			&& !NormalizedPath.Equals(TEXT("/Game/Design2UMG/Automation/ImportedFonts"), ESearchCase::CaseSensitive)
+			&& !NormalizedPath.StartsWith(TEXT("/Game/Design2UMG/Automation/ImportedFonts/"), ESearchCase::CaseSensitive);
+	}
+
+	void SanitizeImportSettingsSnapshot(FDesign2UMGImportSettingsSnapshot& InOutSettingsSnapshot)
+	{
+		TArray<FString> FamiliesToRemove;
+		for (const TPair<FString, FString>& Pair : InOutSettingsSnapshot.ConversionSettings.IconFontAssetPaths)
+		{
+			if (IsCaseLocalAutomationImportedFontPath(Pair.Value))
+			{
+				FamiliesToRemove.Add(Pair.Key);
+			}
+		}
+
+		for (const FString& Family : FamiliesToRemove)
+		{
+			InOutSettingsSnapshot.ConversionSettings.IconFontAssetPaths.Remove(Family);
+		}
+
+		if (IsCaseLocalAutomationImportedFontPath(InOutSettingsSnapshot.ConversionSettings.DefaultIconFontAssetPath))
+		{
+			InOutSettingsSnapshot.ConversionSettings.DefaultIconFontAssetPath.Reset();
+		}
 	}
 
 	void HandleConsoleCommand(const TArray<FString>& Args)

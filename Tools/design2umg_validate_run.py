@@ -4,7 +4,13 @@ import sys
 from pathlib import Path
 
 import design2umg_auto_verify as verify
-import design2umg_render_rule as render_rule
+from design2umg_verify_lib.case_metrics import (
+    resolve_case_report_path as helper_resolve_case_report_path,
+    resolve_report_metrics,
+    summary_metrics_payload,
+)
+from design2umg_verify_lib.compatibility import evaluate_report_compatibility
+from design2umg_verify_lib.json_io import load_json as helper_load_json
 
 
 BLOCKED_EXIT_CODE = 2
@@ -20,7 +26,24 @@ METRIC_PAIRS = [
 
 
 def load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8-sig"))
+    return helper_load_json(path)
+
+
+def append_blocked_reason(result: dict, reason: str, summary: str, **details: object) -> None:
+    if reason not in result["blocked_reasons"]:
+        result["blocked_reasons"].append(reason)
+
+    detail_payload = {
+        "reason": reason,
+        "summary": summary,
+    }
+    for key, value in details.items():
+        if value is None:
+            continue
+        if isinstance(value, (str, list, dict)) and not value:
+            continue
+        detail_payload[key] = value
+    result["blocked_reason_details"].append(detail_payload)
 
 
 def collect_case_dirs(output_root: Path) -> set[str]:
@@ -37,14 +60,7 @@ def collect_case_dirs(output_root: Path) -> set[str]:
 
 
 def resolve_report_path(output_root: Path, case_name: str, summary_case: dict | None) -> Path:
-    summary_case = summary_case or {}
-    summary_report_path = summary_case.get("report_path", "")
-    if summary_report_path:
-        candidate = Path(summary_report_path)
-        if candidate.is_file():
-            return candidate.resolve()
-
-    direct_case_report_path = output_root / case_name / "compare_report.json"
+    direct_case_report_path = helper_resolve_case_report_path(output_root, case_name, summary_case)
     if direct_case_report_path.is_file():
         return direct_case_report_path.resolve()
 
@@ -55,48 +71,49 @@ def resolve_report_path(output_root: Path, case_name: str, summary_case: dict | 
     return direct_case_report_path.resolve()
 
 
+def collect_report_path_candidates(output_root: Path, case_name: str, summary_case: dict | None) -> list[str]:
+    summary_case = summary_case or {}
+    candidates: list[Path] = []
+
+    summary_report_path = summary_case.get("report_path", "")
+    if summary_report_path:
+        candidates.append(Path(summary_report_path))
+
+    candidates.append(output_root / case_name / "compare_report.json")
+    candidates.append(output_root / "compare_report.json")
+
+    unique_candidates: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        candidate_text = str(candidate.resolve())
+        if candidate_text in seen:
+            continue
+        seen.add(candidate_text)
+        unique_candidates.append(candidate_text)
+    return unique_candidates
+
+
 def resolve_case_metrics(output_root: Path, case_name: str, summary_case: dict | None) -> dict:
     summary_case = summary_case or {}
     report_path = resolve_report_path(output_root, case_name, summary_case)
-    summary_metrics = {
-        "stable_changed_ratio": summary_case.get("stable_changed_ratio"),
-        "changed_ratio": summary_case.get("changed_ratio"),
-        "stable_mae": summary_case.get("stable_mae"),
-        "mae": summary_case.get("mae"),
-    }
+    summary_metrics = summary_metrics_payload(summary_case)
     if any(value is not None for value in summary_metrics.values()):
         return {
             "report_path": str(report_path),
             **summary_metrics,
         }
 
-    report = load_json(report_path) if report_path.is_file() else {}
-    pixel_tolerance = report.get("pixel_tolerance", DEFAULT_PIXEL_TOLERANCE)
-    try:
-        pixel_tolerance = int(pixel_tolerance)
-    except (TypeError, ValueError):
-        pixel_tolerance = DEFAULT_PIXEL_TOLERANCE
-
-    reference_png_path = Path(report.get("reference_png_path") or (report_path.parent / "reference.png"))
-    candidate_png_path = Path(report.get("candidate_png_path") or (report_path.parent / "candidate.png"))
-    report_metrics = verify.extract_compare_metrics(report)
+    report_metrics, _ = resolve_report_metrics(
+        report_path,
+        load_json_fn=load_json,
+        extract_compare_metrics_fn=verify.extract_compare_metrics,
+        compare_image_paths_fn=verify.compare_image_paths,
+        default_pixel_tolerance=DEFAULT_PIXEL_TOLERANCE,
+    )
     if report_metrics:
         return {
             "report_path": str(report_path),
-            "stable_changed_ratio": report_metrics.get("stable_changed_ratio"),
-            "changed_ratio": report_metrics.get("changed_ratio"),
-            "stable_mae": report_metrics.get("stable_mean_abs_error"),
-            "mae": report_metrics.get("mean_abs_error"),
-        }
-
-    image_metrics = verify.compare_image_paths(reference_png_path, candidate_png_path, pixel_tolerance)
-    if image_metrics:
-        return {
-            "report_path": str(report_path),
-            "stable_changed_ratio": image_metrics.get("stable_changed_ratio"),
-            "changed_ratio": image_metrics.get("changed_ratio"),
-            "stable_mae": image_metrics.get("stable_mean_abs_error"),
-            "mae": image_metrics.get("mean_abs_error"),
+            **report_metrics,
         }
 
     return {
@@ -140,6 +157,7 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
         "output_root": str(output_root),
         "blocked": False,
         "blocked_reasons": [],
+        "blocked_reason_details": [],
         "run_scope_path": str(output_root / "run_scope.json"),
         "summary_path": str(output_root / "summary.json"),
         "expected_case_names": [],
@@ -148,7 +166,9 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
         "missing_summary": False,
         "missing_run_scope": False,
         "missing_compare_reports": [],
+        "missing_compare_report_details": [],
         "missing_case_summary_entries": [],
+        "missing_case_summary_entry_details": [],
         "unexpected_summary_cases": [],
         "unexpected_case_dirs": [],
         "admissible_best_path": str(admissible_best_path) if admissible_best_path else "",
@@ -173,11 +193,23 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
 
     if run_scope is None:
         result["missing_run_scope"] = True
-        result["blocked_reasons"].append("missing_run_scope")
+        append_blocked_reason(
+            result,
+            "missing_run_scope",
+            f"run_scope.json is missing: {run_scope_path}",
+            path=str(run_scope_path),
+            action="Confirm the automation run reached the stage that writes run_scope.json.",
+        )
 
     if summary is None:
         result["missing_summary"] = True
-        result["blocked_reasons"].append("missing_summary")
+        append_blocked_reason(
+            result,
+            "missing_summary",
+            f"summary.json is missing: {summary_path}",
+            path=str(summary_path),
+            action="Confirm the automation run completed summary writing before validating the output root.",
+        )
 
     expected_case_names = list((run_scope or {}).get("case_names") or [])
     result["expected_case_names"] = expected_case_names
@@ -203,8 +235,20 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
             compare_report_path = resolve_report_path(output_root, case_name, summary_case)
             if not compare_report_path.is_file():
                 result["missing_compare_reports"].append(case_name)
+                result["missing_compare_report_details"].append(
+                    {
+                        "case": case_name,
+                        "checked_paths": collect_report_path_candidates(output_root, case_name, summary_case),
+                    }
+                )
             if case_name not in summary_case_set:
                 result["missing_case_summary_entries"].append(case_name)
+                result["missing_case_summary_entry_details"].append(
+                    {
+                        "case": case_name,
+                        "summary_path": str(summary_path),
+                    }
+                )
 
         result["unexpected_summary_cases"] = sorted(summary_case_set - expected_case_set)
         result["unexpected_case_dirs"] = sorted(case_dir_set - expected_case_set)
@@ -216,11 +260,31 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
             compare_report_path = resolve_report_path(output_root, case_name, item)
             if not compare_report_path.is_file():
                 result["missing_compare_reports"].append(case_name)
+                result["missing_compare_report_details"].append(
+                    {
+                        "case": case_name,
+                        "checked_paths": collect_report_path_candidates(output_root, case_name, item),
+                    }
+                )
 
     if result["missing_compare_reports"]:
-        result["blocked_reasons"].append("missing_compare_report")
+        append_blocked_reason(
+            result,
+            "missing_compare_report",
+            f"{len(result['missing_compare_reports'])} case(s) are missing compare_report.json.",
+            count=len(result["missing_compare_reports"]),
+            detail_field="missing_compare_report_details",
+            action="Check the reported paths or rerun automation for the affected cases so each case writes compare_report.json.",
+        )
     if result["missing_case_summary_entries"]:
-        result["blocked_reasons"].append("missing_case_summary_entry")
+        append_blocked_reason(
+            result,
+            "missing_case_summary_entry",
+            f"{len(result['missing_case_summary_entries'])} expected case(s) are missing from summary.json.",
+            count=len(result["missing_case_summary_entries"]),
+            detail_field="missing_case_summary_entry_details",
+            action="Regenerate summary.json and confirm every run-scope case is emitted into the summary cases list.",
+        )
 
     current_rule_case_names = expected_case_names or summary_case_names or case_dir_names
     for case_name in current_rule_case_names:
@@ -229,8 +293,9 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
         if not compare_report_path.is_file():
             continue
 
+        compatibility = evaluate_report_compatibility(compare_report_path)
         result["render_size_rule_checked"] = True
-        current_rule = render_rule.evaluate_report_render_size_rule(compare_report_path)
+        current_rule = compatibility["render_size"]
         if not current_rule.get("compatible"):
             result["render_size_rule_incompatible_cases"].append(
                 {
@@ -240,7 +305,7 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
             )
 
         result["pipeline_determinism_rule_checked"] = True
-        current_pipeline_rule = render_rule.evaluate_report_pipeline_determinism_rule(compare_report_path)
+        current_pipeline_rule = compatibility["pipeline_determinism"]
         if not current_pipeline_rule.get("compatible"):
             result["pipeline_determinism_rule_incompatible_cases"].append(
                 {
@@ -250,14 +315,34 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
             )
 
     if result["render_size_rule_incompatible_cases"]:
-        result["blocked_reasons"].append("render_size_rule_incompatible")
+        append_blocked_reason(
+            result,
+            "render_size_rule_incompatible",
+            f"{len(result['render_size_rule_incompatible_cases'])} case(s) violate the render-size rule.",
+            count=len(result["render_size_rule_incompatible_cases"]),
+            detail_field="render_size_rule_incompatible_cases",
+            action="Inspect the listed render-size payloads and compare them with the report's reference authority and UE result dimensions.",
+        )
     if result["pipeline_determinism_rule_incompatible_cases"]:
-        result["blocked_reasons"].append("pipeline_determinism_rule_incompatible")
+        append_blocked_reason(
+            result,
+            "pipeline_determinism_rule_incompatible",
+            f"{len(result['pipeline_determinism_rule_incompatible_cases'])} case(s) violate the pipeline-determinism rule.",
+            count=len(result["pipeline_determinism_rule_incompatible_cases"]),
+            detail_field="pipeline_determinism_rule_incompatible_cases",
+            action="Inspect the listed determinism payloads and confirm transient-state reset, package reload, and font-cache authorities are present.",
+        )
 
     if admissible_best_path is not None:
         admissible_best = load_json(admissible_best_path) if admissible_best_path.is_file() else None
         if admissible_best is None:
-            result["blocked_reasons"].append("missing_admissible_best")
+            append_blocked_reason(
+                result,
+                "missing_admissible_best",
+                f"Admissible-best manifest is missing: {admissible_best_path}",
+                path=str(admissible_best_path),
+                action="Rebuild or point --admissible-best-json at a valid admissible-best manifest before validating historical-best parity.",
+            )
         else:
             result["historical_best_checked"] = True
             best_cases = (admissible_best or {}).get("cases") or {}
@@ -287,8 +372,10 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
                     )
                     continue
 
-                current_rule = render_rule.evaluate_report_render_size_rule(current_report_path)
-                best_rule = render_rule.evaluate_report_render_size_rule(Path(best_case.get("report_path", "")))
+                current_compatibility = evaluate_report_compatibility(current_report_path)
+                best_compatibility = evaluate_report_compatibility(Path(best_case.get("report_path", "")))
+                current_rule = current_compatibility["render_size"]
+                best_rule = best_compatibility["render_size"]
                 if not current_rule.get("compatible") or not best_rule.get("compatible"):
                     result["historical_best_incompatible_cases"].append(
                         {
@@ -299,10 +386,8 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
                     )
                     continue
 
-                current_pipeline_rule = render_rule.evaluate_report_pipeline_determinism_rule(
-                    Path(resolved_current_metrics.get("report_path", ""))
-                )
-                best_pipeline_rule = render_rule.evaluate_report_pipeline_determinism_rule(Path(best_case.get("report_path", "")))
+                current_pipeline_rule = current_compatibility["pipeline_determinism"]
+                best_pipeline_rule = best_compatibility["pipeline_determinism"]
                 if not current_pipeline_rule.get("compatible") or not best_pipeline_rule.get("compatible"):
                     result["historical_best_pipeline_determinism_incompatible_cases"].append(
                         {
@@ -341,15 +426,50 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
                     )
 
             if result["historical_best_missing_cases"]:
-                result["blocked_reasons"].append("historical_best_missing_case")
+                append_blocked_reason(
+                    result,
+                    "historical_best_missing_case",
+                    f"{len(result['historical_best_missing_cases'])} case(s) cannot be matched between the current run and admissible-best manifest.",
+                    count=len(result["historical_best_missing_cases"]),
+                    detail_field="historical_best_missing_cases",
+                    action="Check case discovery and manifest contents so the same case names exist in both the current run and admissible-best JSON.",
+                )
             if result["historical_best_incompatible_cases"]:
-                result["blocked_reasons"].append("historical_best_render_size_rule_incompatible")
+                append_blocked_reason(
+                    result,
+                    "historical_best_render_size_rule_incompatible",
+                    f"{len(result['historical_best_incompatible_cases'])} case(s) are not comparable because the current or historical-best report violates the render-size rule.",
+                    count=len(result["historical_best_incompatible_cases"]),
+                    detail_field="historical_best_incompatible_cases",
+                    action="Inspect both current and historical-best compare reports for the listed cases before judging regressions.",
+                )
             if result["historical_best_pipeline_determinism_incompatible_cases"]:
-                result["blocked_reasons"].append("historical_best_pipeline_determinism_rule_incompatible")
+                append_blocked_reason(
+                    result,
+                    "historical_best_pipeline_determinism_rule_incompatible",
+                    f"{len(result['historical_best_pipeline_determinism_incompatible_cases'])} case(s) are not comparable because the current or historical-best report violates the pipeline-determinism rule.",
+                    count=len(result["historical_best_pipeline_determinism_incompatible_cases"]),
+                    detail_field="historical_best_pipeline_determinism_incompatible_cases",
+                    action="Inspect both current and historical-best compare reports for the listed determinism metadata before judging regressions.",
+                )
             if result["historical_best_degraded_authority_cases"]:
-                result["blocked_reasons"].append("historical_best_degraded_authority")
+                append_blocked_reason(
+                    result,
+                    "historical_best_degraded_authority",
+                    f"{len(result['historical_best_degraded_authority_cases'])} case(s) use degraded reference authority and cannot be admitted as historical-best parity evidence.",
+                    count=len(result["historical_best_degraded_authority_cases"]),
+                    detail_field="historical_best_degraded_authority_cases",
+                    action="Re-run those cases with strong or external_export_nodes reference authority before using them for historical-best validation.",
+                )
             if result["historical_best_regressions"]:
-                result["blocked_reasons"].append("historical_best_regression")
+                append_blocked_reason(
+                    result,
+                    "historical_best_regression",
+                    f"{len(result['historical_best_regressions'])} case(s) regressed against admissible-best metrics.",
+                    count=len(result["historical_best_regressions"]),
+                    detail_field="historical_best_regressions",
+                    action="Inspect the per-metric regression deltas and rerun or fix the current output before claiming no regression.",
+                )
 
     result["blocked"] = bool(result["blocked_reasons"])
     return result

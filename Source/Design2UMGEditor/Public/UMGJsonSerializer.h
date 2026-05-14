@@ -10,8 +10,8 @@ struct FUMGWidgetData;
 struct FUMGWidgetNode;
 
 /**
- * Serializes normalized UMG widget data into JSON.
- * It is the counterpart to FUMGJsonParser and is reused by preview and import flows.
+ * Editor-facing JSON serialize bridge/debug utility for preview and import workflows.
+ * Kept public for source compatibility; this is not a runtime module API promise.
  */
 class FUMGJsonSerializer
 {
