@@ -93,7 +93,7 @@ bool FImportDiagnosticReportStructureTest::RunTest(const FString& Parameters)
 
 	FUMGWidgetData Data;
 	Data.WidgetName = TEXT("WBP_ImportReportFixture");
-	Data.Warnings.Add(TEXT("Figma TEXT_PATH 'Curved Label' → TextBlock (text-on-path 降级为普通文本)"));
+	Data.Warnings.Add(TEXT("Figma TEXT_PATH 'Curved Label' -> TextBlock (text-on-path downgraded to regular text)"));
 
 	FUMGWidgetNode Wrapper;
 	Wrapper.Type = TEXT("BackgroundBlur");
@@ -109,8 +109,8 @@ bool FImportDiagnosticReportStructureTest::RunTest(const FString& Parameters)
 	Data.RootWidget = Wrapper;
 
 	const FString ImageReport =
-		TEXT("远程图片导入: 新增=0 复用=0 修复=0 失败=1 路径=/Game/Design2UMG/ImportedImages\n")
-		TEXT("图片 'Hero' 下载失败: https://example.com/hero.png (原因: 网络请求失败)");
+		TEXT("Remote image import: imported=0 reused=0 repaired=0 failed=1 path=/Game/Design2UMG/ImportedImages\n")
+		TEXT("Image 'Hero' download failed: https://example.com/hero.png (reason: Network request failed)");
 
 	DesignImportPipeline::WriteImportDiagnosticReport(
 		Document,

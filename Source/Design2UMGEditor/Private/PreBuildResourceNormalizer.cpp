@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "PreBuildResourceNormalizer.h"
 #include "DesignResourceResolver.h"
 #include "UMGWidgetNodeAccess.h"
@@ -21,29 +21,6 @@
 
 namespace
 {
-	FString FindNodeProperty(const FUMGWidgetNode& Node, const TCHAR* Key)
-	{
-		FString Value;
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, Key, Value);
-		return Value;
-	}
-
-	FString FindNodePropertyOr(const FUMGWidgetNode& Node, const TCHAR* Key, const FString& DefaultValue)
-	{
-		FString Value;
-		return Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, Key, Value) ? Value : DefaultValue;
-	}
-
-	int32 GetNodeRoundedIntProperty(const FUMGWidgetNode& Node, const TCHAR* Key, int32 DefaultValue)
-	{
-		FString SerializedValue;
-		if (Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, Key, SerializedValue))
-		{
-			return FMath::RoundToInt(FCString::Atof(*SerializedValue));
-		}
-		return DefaultValue;
-	}
-
 	void ReplaceNodeFillWithTexturePath(FUMGWidgetNode& Node, const FString& TexturePath)
 	{
 		Node.Path = FUMGPathData();
@@ -54,28 +31,20 @@ namespace
 		Node.Brush.Gradient = FUMGVisualBrushData::FGradientData();
 	}
 
-	FString GetPathField(const FUMGWidgetNode& Node, const TCHAR* BagKey, const FString& TypedValue)
-	{
-		if (!TypedValue.IsEmpty()) return TypedValue;
-		FString BagValue;
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, BagKey, BagValue);
-		return BagValue;
-	}
-
 	uint32 MakePathTextureKey(const FUMGWidgetNode& Node)
 	{
-		const FString Geometry    = GetPathField(Node, UMGPropertyKeys::PathGeometry,        Node.Path.Geometry.Get(FString()));
-		const FString FillRule    = GetPathField(Node, UMGPropertyKeys::PathFillRule,         Node.Path.FillRule.Get(FString()));
-		const FString FillColor   = GetPathField(Node, UMGPropertyKeys::PathFillColor,        Node.Path.FillColor.IsSet()   ? Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.FillColor.GetValue())   : FString());
-		const FString StrokeColor = GetPathField(Node, UMGPropertyKeys::PathStrokeColor,      Node.Path.StrokeColor.IsSet() ? Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.StrokeColor.GetValue()) : FString());
-		const FString StrokeThickness = GetPathField(Node, UMGPropertyKeys::PathStrokeThickness,
-			Node.Path.StrokeThickness.IsSet() && Node.Path.StrokeThickness.GetValue() > 0.0f ? FString::SanitizeFloat(Node.Path.StrokeThickness.GetValue()) : FString());
-		const FString StrokeCap   = GetPathField(Node, UMGPropertyKeys::PathStrokeCap,        Node.Path.StrokeCap.Get(FString()));
-		const FString StrokeJoin  = GetPathField(Node, UMGPropertyKeys::PathStrokeJoin,       Node.Path.StrokeJoin.Get(FString()));
-		const FString WidthOverride  = GetPathField(Node, UMGPropertyKeys::WidthOverride,
-			(Node.WidgetStyle.WidthOverride.IsSet()  && Node.WidgetStyle.WidthOverride.GetValue()  > 0.0f) ? FString::SanitizeFloat(Node.WidgetStyle.WidthOverride.GetValue())  : FString());
-		const FString HeightOverride = GetPathField(Node, UMGPropertyKeys::HeightOverride,
-			(Node.WidgetStyle.HeightOverride.IsSet() && Node.WidgetStyle.HeightOverride.GetValue() > 0.0f) ? FString::SanitizeFloat(Node.WidgetStyle.HeightOverride.GetValue()) : FString());
+		const FString Geometry = Node.Path.Geometry.Get(FString());
+		const FString FillRule = Node.Path.FillRule.Get(FString());
+		const FString FillColor = Node.Path.FillColor.IsSet() ? Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.FillColor.GetValue()) : FString();
+		const FString StrokeColor = Node.Path.StrokeColor.IsSet() ? Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.StrokeColor.GetValue()) : FString();
+		const FString StrokeThickness =
+			Node.Path.StrokeThickness.IsSet() && Node.Path.StrokeThickness.GetValue() > 0.0f ? FString::SanitizeFloat(Node.Path.StrokeThickness.GetValue()) : FString();
+		const FString StrokeCap = Node.Path.StrokeCap.Get(FString());
+		const FString StrokeJoin = Node.Path.StrokeJoin.Get(FString());
+		const FString WidthOverride =
+			(Node.WidgetStyle.WidthOverride.IsSet() && Node.WidgetStyle.WidthOverride.GetValue() > 0.0f) ? FString::SanitizeFloat(Node.WidgetStyle.WidthOverride.GetValue()) : FString();
+		const FString HeightOverride =
+			(Node.WidgetStyle.HeightOverride.IsSet() && Node.WidgetStyle.HeightOverride.GetValue() > 0.0f) ? FString::SanitizeFloat(Node.WidgetStyle.HeightOverride.GetValue()) : FString();
 
 		uint32 Key = Geometry.IsEmpty() ? 0u : GetTypeHash(Geometry);
 		Key = HashCombine(Key, FillRule.IsEmpty() ? 0u : GetTypeHash(FillRule));
@@ -233,7 +202,7 @@ namespace
 		const FString& AssetPrefix,
 		TMap<uint32, FString>& Cache)
 	{
-		const FString Geometry = GetPathField(Node, UMGPropertyKeys::PathGeometry, Node.Path.Geometry.Get(FString()));
+		const FString Geometry = Node.Path.Geometry.Get(FString());
 		if (Node.Type == TEXT("Image") && !Geometry.IsEmpty())
 		{
 			const uint32 Key = MakePathTextureKey(Node);
@@ -243,18 +212,16 @@ namespace
 			}
 			else
 			{
-				const FString FillRule    = GetPathField(Node, UMGPropertyKeys::PathFillRule,    Node.Path.FillRule.Get(FString()).IsEmpty() ? TEXT("nonzero") : Node.Path.FillRule.GetValue());
-				const FString FillColor   = GetPathField(Node, UMGPropertyKeys::PathFillColor,   Node.Path.FillColor.IsSet()   ? Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.FillColor.GetValue())   : FString());
-				const FString StrokeColor = GetPathField(Node, UMGPropertyKeys::PathStrokeColor, Node.Path.StrokeColor.IsSet() ? Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.StrokeColor.GetValue()) : FString());
-				const FString StrokeCap   = GetPathField(Node, UMGPropertyKeys::PathStrokeCap,   Node.Path.StrokeCap.Get(FString()).IsEmpty() ? TEXT("butt") : Node.Path.StrokeCap.GetValue());
-				const FString StrokeJoin  = GetPathField(Node, UMGPropertyKeys::PathStrokeJoin,  Node.Path.StrokeJoin.Get(FString()).IsEmpty() ? TEXT("miter") : Node.Path.StrokeJoin.GetValue());
-				const float StrokeThickness = Node.Path.StrokeThickness.IsSet() && Node.Path.StrokeThickness.GetValue() > 0.0f
-					? Node.Path.StrokeThickness.GetValue()
-					: FCString::Atof(*FindNodePropertyOr(Node, UMGPropertyKeys::PathStrokeThickness, TEXT("0")));
+				const FString FillRule = Node.Path.FillRule.Get(FString()).IsEmpty() ? TEXT("nonzero") : Node.Path.FillRule.GetValue();
+				const FString FillColor = Node.Path.FillColor.IsSet() ? Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.FillColor.GetValue()) : FString();
+				const FString StrokeColor = Node.Path.StrokeColor.IsSet() ? Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.StrokeColor.GetValue()) : FString();
+				const FString StrokeCap = Node.Path.StrokeCap.Get(FString()).IsEmpty() ? TEXT("butt") : Node.Path.StrokeCap.GetValue();
+				const FString StrokeJoin = Node.Path.StrokeJoin.Get(FString()).IsEmpty() ? TEXT("miter") : Node.Path.StrokeJoin.GetValue();
+				const float StrokeThickness = Node.Path.StrokeThickness.Get(0.0f);
 				const int32 Width  = (Node.WidgetStyle.WidthOverride.IsSet()  && Node.WidgetStyle.WidthOverride.GetValue()  > 0.0f) ? FMath::RoundToInt(Node.WidgetStyle.WidthOverride.GetValue())
-					: FMath::Max(1, GetNodeRoundedIntProperty(Node, UMGPropertyKeys::WidthOverride, 64));
+					: 64;
 				const int32 Height = (Node.WidgetStyle.HeightOverride.IsSet() && Node.WidgetStyle.HeightOverride.GetValue() > 0.0f) ? FMath::RoundToInt(Node.WidgetStyle.HeightOverride.GetValue())
-					: FMath::Max(1, GetNodeRoundedIntProperty(Node, UMGPropertyKeys::HeightOverride, 64));
+					: 64;
 
 				constexpr int32 PathSupersample = 2;
 				const TOptional<FLinearColor> OptFill = FillColor.IsEmpty() ? TOptional<FLinearColor>() : TOptional<FLinearColor>(FUMGValueParser::ParseColor(FillColor));
@@ -302,10 +269,7 @@ namespace
 			}
 			else
 			{
-				if (UTexture2D* Generated = DesignResourceResolver::ResolveTextureFromMaterialRef(
-					ResourceRequest.MaterialRef,
-					ResourceRequest.BuildCompatibilityPropertyBag(),
-					nullptr))
+				if (UTexture2D* Generated = DesignResourceResolver::ResolveTextureFromMaterialRef(ResourceRequest, nullptr))
 				{
 					TArray64<uint8> RawData;
 					int32 RawW = 0, RawH = 0;

@@ -3,17 +3,17 @@
 
 #include "CoreMinimal.h"
 #include "Fonts/SlateFontInfo.h"
+#include "UMGWidgetNodeProceduralResourceAccess.h"
 
 class UTexture2D;
-struct FUMGPropertyBag;
 
 namespace DesignResourceResolver
 {
 	// Apply font family string to FSlateFontInfo. Mirrors the existing inline logic exactly.
 	void ApplyFontFamily(FSlateFontInfo& FontInfo, const FString& Value, bool bIsIconFontWidget);
 
-	// Generate a UTexture2D from a material ref string via FProceduralShapeGenerator.
-	UTexture2D* ResolveTextureFromMaterialRef(const FString& MaterialRef, const FUMGPropertyBag& Props, UObject* Outer);
+	// Generate a UTexture2D from a typed procedural request via FProceduralShapeGenerator.
+	UTexture2D* ResolveTextureFromMaterialRef(const FUMGProceduralResourceRequest& Request, UObject* Outer);
 
 	enum class ELoadMode : uint8
 	{

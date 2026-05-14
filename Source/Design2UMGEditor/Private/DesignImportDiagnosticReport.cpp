@@ -265,22 +265,23 @@ namespace DesignImportDiagnosticReport
 			ImageReport.ParseIntoArrayLines(Lines, true);
 			for (const FString& Line : Lines)
 			{
-				if (!Line.Contains(TEXT("失败")) || Line.StartsWith(TEXT("远程图片导入:"), ESearchCase::CaseSensitive))
+				if (!Line.Contains(TEXT("failed"), ESearchCase::IgnoreCase)
+					|| Line.StartsWith(TEXT("Remote image import:"), ESearchCase::CaseSensitive))
 				{
 					continue;
 				}
 
 				TSharedRef<FJsonObject> Entry = MakeShared<FJsonObject>();
 				Entry->SetStringField(TEXT("message"), Line);
-				if (Line.Contains(TEXT("下载失败")))
+				if (Line.Contains(TEXT("download failed"), ESearchCase::IgnoreCase))
 				{
 					Entry->SetStringField(TEXT("kind"), TEXT("download_failure"));
 				}
-				else if (Line.Contains(TEXT("解码失败")))
+				else if (Line.Contains(TEXT("decode failed"), ESearchCase::IgnoreCase))
 				{
 					Entry->SetStringField(TEXT("kind"), TEXT("decode_failure"));
 				}
-				else if (Line.Contains(TEXT("导入失败")))
+				else if (Line.Contains(TEXT("import failed"), ESearchCase::IgnoreCase))
 				{
 					Entry->SetStringField(TEXT("kind"), TEXT("import_failure"));
 				}

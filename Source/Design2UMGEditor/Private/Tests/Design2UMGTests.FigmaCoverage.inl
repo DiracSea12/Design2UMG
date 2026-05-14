@@ -987,7 +987,7 @@ bool FConverterTextAlignVerticalDoesNotMoveSlotTest::RunTest(const FString& Para
 	TestTrue(TEXT("Outer SizeBox slot stays top-aligned"), LabelSizeBox->Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Top);
 	FMargin Padding = FMargin(0.0f);
 	TestFalse(TEXT("Auto-height text does not synthesize internal padding"),
-		Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(*Label).TryGetMargin(TEXT("Padding"), Padding));
+		Design2UMGWidgetNodeAccess::TryGetWidgetMargin(*Label, TEXT("Padding"), Padding));
 	return true;
 }
 
@@ -1037,7 +1037,7 @@ bool FConverterTextAlignVerticalUsesInternalPaddingWhenHeightFixedTest::RunTest(
 	TestTrue(TEXT("Fixed-height label outer slot stays top-aligned"), LabelSizeBox->Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Top);
 	FMargin Padding = FMargin(0.0f);
 	TestTrue(TEXT("Fixed-height text synthesizes internal padding"),
-		Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(*Label).TryGetMargin(TEXT("Padding"), Padding));
+		Design2UMGWidgetNodeAccess::TryGetWidgetMargin(*Label, TEXT("Padding"), Padding));
 	TestTrue(TEXT("Fixed-height text gets positive top padding"), Padding.Top > 0.5f);
 	TestTrue(TEXT("Fixed-height text gets positive bottom padding"), Padding.Bottom > 0.5f);
 	TestTrue(TEXT("Center alignment splits slack symmetrically"),

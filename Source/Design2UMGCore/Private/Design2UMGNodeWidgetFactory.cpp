@@ -150,7 +150,7 @@ Design2UMGNodeWidgetFactory::FBuildResult Design2UMGNodeWidgetFactory::CreateWid
 			{
 				const FString NodeLabel = Node->Name.IsEmpty() ? Node->Id : Node->Name;
 				Result.Warnings.Add(FString::Printf(
-					TEXT("Figma TEXT_PATH '%s' → TextBlock (text-on-path 降级为普通文本)"),
+					TEXT("Figma TEXT_PATH '%s' -> TextBlock (text-on-path downgraded to regular text)"),
 					*NodeLabel));
 			}
 			return Result;
@@ -189,8 +189,8 @@ Design2UMGNodeWidgetFactory::FBuildResult Design2UMGNodeWidgetFactory::CreateWid
 			return Result;
 		}
 
-		UE_LOG(LogDesign2UMG, Warning, TEXT("多边形 '%s' 无 PathGeometry，降级为 Border"), *Node->Name);
-		Result.Warnings.Add(FString::Printf(TEXT("Polygon '%s' → Border (无 PathGeometry)"), *Node->Name));
+		UE_LOG(LogDesign2UMG, Warning, TEXT("Polygon '%s' has no PathGeometry; falling back to Border."), *Node->Name);
+		Result.Warnings.Add(FString::Printf(TEXT("Polygon '%s' -> Border (missing PathGeometry)"), *Node->Name));
 		Result.Widget = CreateContainerWidget(Node);
 		return Result;
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Misc/AutomationTest.h"
 
@@ -55,10 +55,10 @@ namespace
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FProceduralResourceRequestBuildsCompatibilityBridgeTest,
-	"Design2UMG.WidgetNodeAccess.ProceduralResourceRequestBuildsCompatibilityBridge",
+	FProceduralResourceRequestBuildsTypedRequestTest,
+	"Design2UMG.WidgetNodeAccess.ProceduralResourceRequestBuildsTypedRequest",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FProceduralResourceRequestBuildsCompatibilityBridgeTest::RunTest(const FString& Parameters)
+bool FProceduralResourceRequestBuildsTypedRequestTest::RunTest(const FString& Parameters)
 {
 	FUMGWidgetNode Node;
 	Node.Type = TEXT("Image");
@@ -74,6 +74,11 @@ bool FProceduralResourceRequestBuildsCompatibilityBridgeTest::RunTest(const FStr
 	Node.WidgetStyle.HeightOverride = 32.0f;
 	Node.Shadow.ShadowBlur = 12.0f;
 	Node.Brush.BrushColor = FLinearColor(0.2f, 0.4f, 0.6f, 1.0f);
+	Node.Brush.MaterialParams = TEXT("{\"ColorCenter\":\"#01020304\",\"ColorEdge\":\"#05060708\"}");
+
+	FString DescriptorMaterialParams;
+	TestTrue(TEXT("Typed descriptor keeps gradient params ahead of explicit params"),
+		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::MaterialParams, DescriptorMaterialParams));
 
 	FUMGProceduralResourceRequest Request;
 	TestTrue(
@@ -81,21 +86,17 @@ bool FProceduralResourceRequestBuildsCompatibilityBridgeTest::RunTest(const FStr
 		Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Node, Request));
 	TestEqual(TEXT("Gradient descriptor resolves to material ref"), Request.MaterialRef, FString(TEXT("radialgradient")));
 	TestTrue(TEXT("Gradient descriptor resolves material params"), Request.MaterialParams.IsSet());
+	TestEqual(TEXT("Request material params match typed descriptor"), Request.MaterialParams.Get(FString()), DescriptorMaterialParams);
 	TestTrue(TEXT("Width override preserved"), Request.WidthOverride.IsSet() && FMath::IsNearlyEqual(Request.WidthOverride.GetValue(), 64.0f));
 	TestTrue(TEXT("Height override preserved"), Request.HeightOverride.IsSet() && FMath::IsNearlyEqual(Request.HeightOverride.GetValue(), 32.0f));
 	TestTrue(TEXT("Shadow blur preserved"), Request.ShadowBlur.IsSet() && FMath::IsNearlyEqual(Request.ShadowBlur.GetValue(), 12.0f));
-	const FLinearColor ExpectedBridgeBrushColor =
+	const FLinearColor ExpectedTypedBrushColor =
 		FUMGValueParser::ParseColor(Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Brush.BrushColor.GetValue()));
-	TestTrue(TEXT("Brush color preserved through typed bridge serialization"),
-		Request.BrushColor.IsSet() && Request.BrushColor.GetValue().Equals(ExpectedBridgeBrushColor, 0.0001f));
+	TestTrue(TEXT("Brush color preserved through typed request serialization"),
+		Request.BrushColor.IsSet() && Request.BrushColor.GetValue().Equals(ExpectedTypedBrushColor, 0.0001f));
 
-	const FUMGPropertyBag CompatibilityBag = Request.BuildCompatibilityPropertyBag();
-	FString MaterialParams;
-	TestTrue(TEXT("Compatibility bag keeps material params"), CompatibilityBag.TryGetString(UMGPropertyKeys::MaterialParams, MaterialParams));
-	TestTrue(TEXT("Compatibility material params keep radial center"), MaterialParams.Contains(TEXT("\"CenterX\":0.2500")));
-	float WidthOverride = 0.0f;
-	TestTrue(TEXT("Compatibility bag keeps width override"), CompatibilityBag.TryGetFloat(UMGPropertyKeys::WidthOverride, WidthOverride));
-	TestEqual(TEXT("Compatibility width override value"), WidthOverride, 64.0f);
+	TestTrue(TEXT("Typed request keeps radial center"), Request.MaterialParams.GetValue().Contains(TEXT("\"CenterX\":0.2500")));
+	TestEqual(TEXT("Typed request width override value"), Request.WidthOverride.GetValue(), 64.0f);
 	return true;
 }
 

@@ -1,35 +1,9 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGWidgetNodeProceduralResourceAccess.h"
 
 #include "UMGPropertyKeys.h"
 #include "UMGWidgetNodeAccess.h"
-
-FUMGPropertyBag FUMGProceduralResourceRequest::BuildCompatibilityPropertyBag() const
-{
-	FUMGPropertyBag Result;
-	if (MaterialParams.IsSet())
-	{
-		Result.Add(UMGPropertyKeys::MaterialParams, MaterialParams.GetValue());
-	}
-	if (WidthOverride.IsSet())
-	{
-		Result.Add(UMGPropertyKeys::WidthOverride, Design2UMGWidgetNodeAccess::SerializeWidgetFloat(WidthOverride.GetValue()));
-	}
-	if (HeightOverride.IsSet())
-	{
-		Result.Add(UMGPropertyKeys::HeightOverride, Design2UMGWidgetNodeAccess::SerializeWidgetFloat(HeightOverride.GetValue()));
-	}
-	if (ShadowBlur.IsSet())
-	{
-		Result.Add(UMGPropertyKeys::ShadowBlur, Design2UMGWidgetNodeAccess::SerializeWidgetFloat(ShadowBlur.GetValue()));
-	}
-	if (BrushColor.IsSet())
-	{
-		Result.Add(UMGPropertyKeys::BrushColor, Design2UMGWidgetNodeAccess::SerializeWidgetColor(BrushColor.GetValue()));
-	}
-	return Result;
-}
 
 namespace Design2UMGWidgetNodeProceduralResourceAccess
 {

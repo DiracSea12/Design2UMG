@@ -435,13 +435,10 @@ bool FFigmaOverflowDirectionMapsToScrollBoxTest::RunTest(const FString& Paramete
 	TestEqual(TEXT("ScrollBox orientation exported"), GetWidgetProperty(*ScrollFrame, UMGPropertyKeys::Orientation), TEXT("Vertical"));
 	TestEqual(TEXT("ScrollBox scrollbar visibility exported"), GetWidgetProperty(*ScrollFrame, UMGPropertyKeys::ScrollBarVisibility), TEXT("Hidden"));
 
-	const FUMGPropertyBag TypedProperties = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(*ScrollFrame);
-	FString Orientation;
-	TestTrue(TEXT("Typed property bag keeps ScrollBox orientation"), TypedProperties.TryGetString(UMGPropertyKeys::Orientation, Orientation));
-	TestEqual(TEXT("Typed property bag ScrollBox orientation value"), Orientation, FString(TEXT("Vertical")));
-	FString ScrollBarVisibility;
-	TestTrue(TEXT("Typed property bag keeps ScrollBox scrollbar visibility"), TypedProperties.TryGetString(UMGPropertyKeys::ScrollBarVisibility, ScrollBarVisibility));
-	TestEqual(TEXT("Typed property bag ScrollBox scrollbar visibility value"), ScrollBarVisibility, FString(TEXT("Hidden")));
+	TestTrue(TEXT("Typed ScrollBox owner keeps orientation"), ScrollFrame->ScrollBox.Orientation.IsSet());
+	TestEqual(TEXT("Typed ScrollBox orientation value"), ScrollFrame->ScrollBox.Orientation.GetValue(), FString(TEXT("Vertical")));
+	TestTrue(TEXT("Typed ScrollBox owner keeps scrollbar visibility"), ScrollFrame->ScrollBox.ScrollBarVisibility.IsSet());
+	TestEqual(TEXT("Typed ScrollBox scrollbar visibility value"), ScrollFrame->ScrollBox.ScrollBarVisibility.GetValue(), FString(TEXT("Hidden")));
 	TestTrue(TEXT("ScrollBox keeps both children"), ScrollFrame->Children.Num() == 2);
 	return true;
 }

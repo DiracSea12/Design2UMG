@@ -36,8 +36,8 @@ namespace Design2UMGWidgetNodeAccess
 
 	DESIGN2UMGCORE_API bool IsTypedWidgetPropertyKey(const FString& Key);
 
-	// Domain readers are retained as focused test-helper/cross-module contract
-	// seams. Production consumers should prefer TryGetWidget* or BuildTypedPropertyBag.
+	// Domain readers are retained as focused cross-module typed inspection seams.
+	// Final widget consumers should read the typed owner structs directly.
 	DESIGN2UMGCORE_API bool TryGetTextStyleTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue);
 	DESIGN2UMGCORE_API bool TryGetWidgetStyleTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue);
 	DESIGN2UMGCORE_API bool TryGetTextTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue);
@@ -59,6 +59,4 @@ namespace Design2UMGWidgetNodeAccess
 	DESIGN2UMGCORE_API bool TryGetWidgetVector4(const FUMGWidgetNode& Node, const TCHAR* Key, FVector4& OutValue);
 	DESIGN2UMGCORE_API bool TryGetWidgetMargin(const FUMGWidgetNode& Node, const TCHAR* Key, FMargin& OutValue);
 	DESIGN2UMGCORE_API bool TryGetWidgetColor(const FUMGWidgetNode& Node, const TCHAR* Key, FLinearColor& OutValue);
-	DESIGN2UMGCORE_API void AddTypedWidgetPropertyIfPresent(FUMGPropertyBag& Bag, const FUMGWidgetNode& Node, const TCHAR* Key);
-	DESIGN2UMGCORE_API FUMGPropertyBag BuildTypedPropertyBag(const FUMGWidgetNode& Node);
 }

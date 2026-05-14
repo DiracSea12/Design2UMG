@@ -6,6 +6,7 @@
 #include "UMGPropertyApplierSupport.h"
 #include "UMGPropertyKeys.h"
 #include "UMGValueParsing.h"
+#include "UMGWidgetNodeAccess.h"
 
 #include "Brushes/SlateColorBrush.h"
 #include "Components/EditableTextBox.h"
@@ -18,8 +19,6 @@
 
 namespace UMGTextStyleApplication
 {
-	using namespace UMGPropertyApplierSupport;
-
 	static int32 ConvertLetterSpacingPxToTracking(const float PixelSpacing, const float DesignFontSize, const float AppliedFontSize)
 	{
 		const float BaseFontSize = DesignFontSize > 0.0f ? DesignFontSize : AppliedFontSize;
@@ -63,44 +62,6 @@ namespace UMGTextStyleApplication
 		return Color;
 	}
 
-	void ApplyLegacyTextFontInfo(
-		FSlateFontInfo& FontInfo,
-		const FUMGPropertyBag& Properties,
-		const bool bIsIconFontWidget,
-		bool& bFontChanged)
-	{
-		float FontSize = 0.0f;
-		if (Properties.TryGetFloat(UMGPropertyKeys::FontSize, FontSize))
-		{
-			FontInfo.Size = FMath::Max(1, FMath::RoundToInt(FontSize));
-			bFontChanged = true;
-		}
-
-		FString Value;
-		if (TryGetProp(Properties, UMGPropertyKeys::FontFamily, Value))
-		{
-			DesignResourceResolver::ApplyFontFamily(FontInfo, Value, bIsIconFontWidget);
-			bFontChanged = true;
-		}
-		if (TryGetProp(Properties, UMGPropertyKeys::TypefaceFontName, Value))
-		{
-			FontInfo.TypefaceFontName = FName(*Value);
-			bFontChanged = true;
-		}
-
-		float PixelSpacing = 0.0f;
-		if (Properties.TryGetFloat(UMGPropertyKeys::LetterSpacing, PixelSpacing))
-		{
-			float DesignFontSize = 0.0f;
-			Properties.TryGetFloat(UMGPropertyKeys::DesignFontSize, DesignFontSize);
-			if (FontInfo.Size > 0 || DesignFontSize > 0.0f)
-			{
-				FontInfo.LetterSpacing = ConvertLetterSpacingPxToTracking(PixelSpacing, DesignFontSize, FontInfo.Size);
-			}
-			bFontChanged = true;
-		}
-	}
-
 	void ApplyTypedFontInfo(FSlateFontInfo& FontInfo, const FUMGWidgetNode& Node, bool& bFontChanged)
 	{
 		if (Node.TextStyle.FontSize > 0.0f)
@@ -132,67 +93,6 @@ namespace UMGTextStyleApplication
 					FontInfo.Size);
 			}
 			bFontChanged = true;
-		}
-	}
-
-	void ApplyLegacyTextLayoutProps(UTextLayoutWidget* TextWidget, const FUMGPropertyBag& Properties)
-	{
-		if (!TextWidget)
-		{
-			return;
-		}
-
-		FString Value;
-		if (TryGetProp(Properties, UMGPropertyKeys::Justification, Value))
-		{
-			ETextJustify::Type Justification = ETextJustify::Left;
-			if (TryResolveTextJustification(Value, Justification))
-			{
-				TextWidget->SetJustification(Justification);
-			}
-		}
-
-		float LineHeightPercentage = 0.0f;
-		if (Properties.TryGetFloat(UMGPropertyKeys::LineHeightPercentage, LineHeightPercentage))
-		{
-			TextWidget->SetLineHeightPercentage(LineHeightPercentage);
-			TextWidget->SetApplyLineHeightToBottomLine(true);
-		}
-
-		bool bAutoWrapText = false;
-		if (Properties.TryGetBool(UMGPropertyKeys::AutoWrapText, bAutoWrapText))
-		{
-			TextWidget->SetAutoWrapText(bAutoWrapText);
-		}
-
-		float WrapTextAt = 0.0f;
-		if (Properties.TryGetFloat(UMGPropertyKeys::WrapTextAt, WrapTextAt))
-		{
-			TextWidget->SetWrapTextAt(WrapTextAt);
-		}
-
-		FMargin TextMargin;
-		if (Properties.TryGetMargin(UMGPropertyKeys::Padding, TextMargin))
-		{
-			TextWidget->SetMargin(TextMargin);
-		}
-	}
-
-	void ApplyLegacyTextLayoutProps(UEditableTextBox* TextWidget, const FUMGPropertyBag& Properties)
-	{
-		if (!TextWidget)
-		{
-			return;
-		}
-
-		FString Value;
-		if (TryGetProp(Properties, UMGPropertyKeys::Justification, Value))
-		{
-			ETextJustify::Type Justification = ETextJustify::Left;
-			if (TryResolveTextJustification(Value, Justification))
-			{
-				TextWidget->SetJustification(Justification);
-			}
 		}
 	}
 
@@ -228,7 +128,8 @@ namespace UMGTextStyleApplication
 
 		if (Node.WidgetStyle.Padding.IsSet())
 		{
-			TextWidget->SetMargin(Node.WidgetStyle.Padding.GetValue());
+			TextWidget->SetMargin(FUMGValueParser::ParseMargin(
+				Design2UMGWidgetNodeAccess::SerializeWidgetMargin(Node.WidgetStyle.Padding.GetValue())));
 		}
 	}
 
@@ -276,69 +177,6 @@ namespace UMGTextStyleApplication
 		}
 
 		return BaseStyle;
-	}
-
-	void ApplyRichTextDefaultStyle(URichTextBlock* RichTextBlock, const FUMGPropertyBag& Properties)
-	{
-		if (!RichTextBlock)
-		{
-			return;
-		}
-
-		FLinearColor IgnoredColor;
-		float IgnoredFloat = 0.0f;
-		bool IgnoredBool = false;
-		FString IgnoredString;
-		const bool bHasAnyDefaultStyleInput =
-			Properties.TryGetColor(UMGPropertyKeys::Color, IgnoredColor)
-			|| Properties.TryGetFloat(UMGPropertyKeys::FontSize, IgnoredFloat)
-			|| TryGetProp(Properties, UMGPropertyKeys::FontFamily, IgnoredString)
-			|| TryGetProp(Properties, UMGPropertyKeys::TypefaceFontName, IgnoredString)
-			|| Properties.TryGetFloat(UMGPropertyKeys::LetterSpacing, IgnoredFloat)
-			|| Properties.TryGetBool(UMGPropertyKeys::Underline, IgnoredBool)
-			|| Properties.TryGetBool(UMGPropertyKeys::Strikethrough, IgnoredBool)
-			|| TryGetProp(Properties, UMGPropertyKeys::Href, IgnoredString);
-		if (!bHasAnyDefaultStyleInput)
-		{
-			return;
-		}
-
-		FTextBlockStyle DefaultStyle = ResolveRichTextBaseStyle(RichTextBlock);
-		FLinearColor TextColor;
-		if (Properties.TryGetColor(UMGPropertyKeys::Color, TextColor))
-		{
-			DefaultStyle.ColorAndOpacity = FSlateColor(TextColor);
-		}
-
-		FSlateFontInfo FontInfo = DefaultStyle.Font;
-		bool bFontChanged = false;
-		ApplyLegacyTextFontInfo(
-			FontInfo,
-			Properties,
-			HasProp(Properties, UMGPropertyKeys::IconName),
-			bFontChanged);
-		if (bFontChanged)
-		{
-			DefaultStyle.Font = FontInfo;
-		}
-
-		bool bUnderline = false;
-		const bool bHasUnderlineValue = Properties.TryGetBool(UMGPropertyKeys::Underline, bUnderline);
-		bool bStrikethrough = false;
-		const bool bHasStrikethroughValue = Properties.TryGetBool(UMGPropertyKeys::Strikethrough, bStrikethrough);
-		FString HrefValue;
-		const bool bHasHrefValue = TryGetProp(Properties, UMGPropertyKeys::Href, HrefValue);
-		const FLinearColor DecorationColor = DefaultStyle.ColorAndOpacity.GetSpecifiedColor();
-		if ((bHasUnderlineValue && bUnderline) || bHasHrefValue)
-		{
-			DefaultStyle.UnderlineBrush = MakeTextDecorationBrush(DecorationColor);
-		}
-		if (bHasStrikethroughValue && bStrikethrough)
-		{
-			DefaultStyle.StrikeBrush = MakeTextDecorationBrush(DecorationColor);
-		}
-
-		RichTextBlock->SetDefaultTextStyle(DefaultStyle);
 	}
 
 	void ApplyRichTextDefaultStyle(URichTextBlock* RichTextBlock, const FUMGWidgetNode& Node)

@@ -15,51 +15,44 @@ namespace
 	{
 		return Mode.Equals(TEXT("Crop"), ESearchCase::CaseSensitive);
 	}
-}
 
-bool UMGImageCropUtils::TryBuildCropRequest(const FUMGPropertyBag& Properties, FImageCropRequest& OutRequest)
-{
-	FString Mode;
-	if (!Properties.TryGetString(UMGPropertyKeys::ImageMode, Mode) || !IsCropMode(Mode))
+	FUMGVisualBrushData::FImageTransformData NormalizeTypedImageTransform(
+		const FUMGVisualBrushData::FImageTransformData& Transform)
 	{
-		return false;
+		FUMGVisualBrushData::FImageTransformData NormalizedTransform;
+		if (Design2UMGWidgetNodeAccess::TryParseImageTransform(
+			Design2UMGWidgetNodeAccess::SerializeImageTransform(Transform),
+			NormalizedTransform))
+		{
+			return NormalizedTransform;
+		}
+		return Transform;
 	}
-
-	FString TransformString;
-	if (!Properties.TryGetString(UMGPropertyKeys::ImageTransform, TransformString)
-		|| !Design2UMGWidgetNodeAccess::TryParseImageTransform(TransformString, OutRequest.Transform))
-	{
-		return false;
-	}
-
-	float CropWidth = 64.0f;
-	float CropHeight = 64.0f;
-	Properties.TryGetFloat(UMGPropertyKeys::WidthOverride, CropWidth);
-	Properties.TryGetFloat(UMGPropertyKeys::HeightOverride, CropHeight);
-	OutRequest.OutputWidth = FMath::Max(1, FMath::RoundToInt(CropWidth));
-	OutRequest.OutputHeight = FMath::Max(1, FMath::RoundToInt(CropHeight));
-	return true;
 }
 
 bool UMGImageCropUtils::TryBuildCropRequest(const FUMGWidgetNode& Node, FImageCropRequest& OutRequest)
 {
-	FString Mode;
-	if (!Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::ImageMode, Mode) || !IsCropMode(Mode))
+	const FString Mode = Node.WidgetStyle.ImageMode.Get(Node.Brush.Image.Mode.Get(FString()));
+	if (!IsCropMode(Mode))
 	{
 		return false;
 	}
 
-	FString TransformString;
-	if (!Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::ImageTransform, TransformString)
-		|| !Design2UMGWidgetNodeAccess::TryParseImageTransform(TransformString, OutRequest.Transform))
+	if (Node.Brush.Image.Transform.IsSet())
+	{
+		OutRequest.Transform = NormalizeTypedImageTransform(Node.Brush.Image.Transform.GetValue());
+	}
+	else if (Node.WidgetStyle.ImageTransform.IsSet()
+		&& Design2UMGWidgetNodeAccess::TryParseImageTransform(Node.WidgetStyle.ImageTransform.GetValue(), OutRequest.Transform))
+	{
+	}
+	else
 	{
 		return false;
 	}
 
-	float CropWidth = 64.0f;
-	float CropHeight = 64.0f;
-	Design2UMGWidgetNodeAccess::TryGetWidgetFloat(Node, UMGPropertyKeys::WidthOverride, CropWidth);
-	Design2UMGWidgetNodeAccess::TryGetWidgetFloat(Node, UMGPropertyKeys::HeightOverride, CropHeight);
+	const float CropWidth = Node.WidgetStyle.WidthOverride.Get(64.0f);
+	const float CropHeight = Node.WidgetStyle.HeightOverride.Get(64.0f);
 	OutRequest.OutputWidth = FMath::Max(1, FMath::RoundToInt(CropWidth));
 	OutRequest.OutputHeight = FMath::Max(1, FMath::RoundToInt(CropHeight));
 	return true;

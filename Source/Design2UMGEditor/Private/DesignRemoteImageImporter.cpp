@@ -4,7 +4,6 @@
 
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
-#include "UMGWidgetNodeAccess.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/AssetData.h"
@@ -316,21 +315,21 @@ namespace
 				bDone = true;
 				if (!bWasSuccessful || !Response.IsValid())
 				{
-					ErrorString = TEXT("网络请求失败");
+					ErrorString = TEXT("Network request failed");
 					return;
 				}
 
 				ResponseCode = Response->GetResponseCode();
 				if (ResponseCode < 200 || ResponseCode >= 300)
 				{
-					ErrorString = FString::Printf(TEXT("服务器返回错误 (HTTP %d)"), ResponseCode);
+					ErrorString = FString::Printf(TEXT("Server returned an error (HTTP %d)"), ResponseCode);
 					return;
 				}
 
 				Downloaded = Response->GetContent();
 				if (Downloaded.Num() == 0)
 				{
-					ErrorString = TEXT("服务器返回了空内容");
+					ErrorString = TEXT("Server returned an empty response");
 					return;
 				}
 
@@ -339,7 +338,7 @@ namespace
 
 		if (!Request->ProcessRequest())
 		{
-			OutError = TEXT("无法发起网络请求");
+			OutError = TEXT("Unable to start network request");
 			return false;
 		}
 
@@ -347,7 +346,7 @@ namespace
 		if (!bDone || !bSuccess)
 		{
 			OutError = ErrorString.IsEmpty()
-				? FString::Printf(TEXT("网络请求失败 (HTTP %d)"), ResponseCode)
+				? FString::Printf(TEXT("Network request failed (HTTP %d)"), ResponseCode)
 				: ErrorString;
 			return false;
 		}
@@ -360,7 +359,7 @@ namespace
 	{
 		if (CompressedData.Num() == 0)
 		{
-			OutError = TEXT("图片数据为空");
+			OutError = TEXT("Image data is empty");
 			return false;
 		}
 
@@ -368,14 +367,14 @@ namespace
 		const EImageFormat Format = ImageWrapperModule.DetectImageFormat(CompressedData.GetData(), CompressedData.Num());
 		if (Format == EImageFormat::Invalid)
 		{
-			OutError = TEXT("不支持的图片格式");
+			OutError = TEXT("Unsupported image format");
 			return false;
 		}
 
 		TSharedPtr<IImageWrapper> Wrapper = ImageWrapperModule.CreateImageWrapper(Format);
 		if (!Wrapper.IsValid() || !Wrapper->SetCompressed(CompressedData.GetData(), CompressedData.Num()))
 		{
-			OutError = TEXT("图片数据解析失败");
+			OutError = TEXT("Failed to parse image data");
 			return false;
 		}
 
@@ -383,20 +382,20 @@ namespace
 		OutHeight = Wrapper->GetHeight();
 		if (OutWidth <= 0 || OutHeight <= 0)
 		{
-			OutError = TEXT("图片尺寸无效");
+			OutError = TEXT("Invalid image dimensions");
 			return false;
 		}
 
 		if (!Wrapper->GetRaw(ERGBFormat::BGRA, 8, OutRawData))
 		{
-			OutError = TEXT("图片解码失败");
+			OutError = TEXT("Image decode failed");
 			return false;
 		}
 
 		const int64 ExpectedSize = static_cast<int64>(OutWidth) * static_cast<int64>(OutHeight) * 4;
 		if (OutRawData.Num() < ExpectedSize)
 		{
-			OutError = TEXT("图片解码数据大小异常");
+			OutError = TEXT("Decoded image data size is invalid");
 			return false;
 		}
 
@@ -496,7 +495,7 @@ namespace
 		const FString LongPackageName = BuildLongPackageName(ImportPath, AssetName);
 		if (!FPackageName::IsValidLongPackageName(LongPackageName))
 		{
-			OutError = FString::Printf(TEXT("资产路径无效: %s"), *LongPackageName);
+			OutError = FString::Printf(TEXT("Invalid asset path: %s"), *LongPackageName);
 			return false;
 		}
 
@@ -505,14 +504,14 @@ namespace
 		UPackage* Package = CreatePackage(*LongPackageName);
 		if (!Package)
 		{
-			OutError = FString::Printf(TEXT("无法创建资产包: %s"), *LongPackageName);
+			OutError = FString::Printf(TEXT("Unable to create asset package: %s"), *LongPackageName);
 			return false;
 		}
 
 		UTexture2D* Texture = NewObject<UTexture2D>(Package, *AssetName, RF_Public | RF_Standalone);
 		if (!Texture)
 		{
-			OutError = FString::Printf(TEXT("无法创建纹理对象: %s"), *AssetName);
+			OutError = FString::Printf(TEXT("Unable to create texture object: %s"), *AssetName);
 			return false;
 		}
 
@@ -532,7 +531,7 @@ namespace
 		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
 		if (!UPackage::SavePackage(Package, Texture, *PackageFilename, SaveArgs))
 		{
-			OutError = FString::Printf(TEXT("无法保存资产包: %s"), *PackageFilename);
+			OutError = FString::Printf(TEXT("Unable to save asset package: %s"), *PackageFilename);
 			return false;
 		}
 
@@ -549,14 +548,14 @@ namespace
 	{
 		if (!Texture || Width <= 0 || Height <= 0 || RawData.Num() <= 0)
 		{
-			OutError = TEXT("参数无效");
+			OutError = TEXT("Invalid arguments");
 			return false;
 		}
 
 		UPackage* Package = Texture->GetPackage();
 		if (!Package)
 		{
-			OutError = TEXT("纹理包无效");
+			OutError = TEXT("Invalid texture package");
 			return false;
 		}
 
@@ -573,7 +572,7 @@ namespace
 		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
 		if (!UPackage::SavePackage(Package, Texture, *PackageFilename, SaveArgs))
 		{
-			OutError = FString::Printf(TEXT("保存纹理失败: %s"), *PackageFilename);
+			OutError = FString::Printf(TEXT("Failed to save texture package: %s"), *PackageFilename);
 			return false;
 		}
 
@@ -614,7 +613,7 @@ namespace
 			if (!FFileHelper::LoadFileToArray(FileData, *LocalPath))
 			{
 				++Context.FailedCount;
-				AddReportMessage(Context, FString::Printf(TEXT("本地文件读取失败 '%s': %s"), *WidgetName, *LocalPath));
+				AddReportMessage(Context, FString::Printf(TEXT("Local file read failed for '%s': %s"), *WidgetName, *LocalPath));
 				return false;
 			}
 
@@ -643,7 +642,7 @@ namespace
 					++Context.ReusedCount;
 					Context.UrlToAssetPath.Add(LocalKey, PersistedObjectPath);
 					Context.ContentHashToAsset.Add(ContentKey, PersistedObjectPath);
-					AddReportMessage(Context, FString::Printf(TEXT("跨运行内容去重复用: %s"), *PersistedObjectPath));
+					AddReportMessage(Context, FString::Printf(TEXT("Reused cross-run content: %s"), *PersistedObjectPath));
 					return true;
 				}
 
@@ -673,12 +672,12 @@ namespace
 						if (RewriteTextureAsset(Existing, SourceRawBGRA, SourceWidth, SourceHeight, RewriteError))
 						{
 							++Context.RepairedCount;
-							AddReportMessage(Context, FString::Printf(TEXT("修复本地纹理: %s (%dx%d -> %dx%d)"),
+							AddReportMessage(Context, FString::Printf(TEXT("Repaired local texture: %s (%dx%d -> %dx%d)"),
 								*ObjectPath, ExistingWidth, ExistingHeight, SourceWidth, SourceHeight));
 						}
 						else
 						{
-							AddReportMessage(Context, FString::Printf(TEXT("修复纹理失败 '%s': %s"), *WidgetName, *RewriteError));
+							AddReportMessage(Context, FString::Printf(TEXT("Texture repair failed for '%s': %s"), *WidgetName, *RewriteError));
 						}
 					}
 				}
@@ -698,7 +697,7 @@ namespace
 			if (!DecodeToBGRA8(FileData, Width, Height, RawBGRA, DecodeError))
 			{
 				++Context.FailedCount;
-				AddReportMessage(Context, FString::Printf(TEXT("本地图片解码失败 '%s': %s"), *WidgetName, *DecodeError));
+				AddReportMessage(Context, FString::Printf(TEXT("Local image decode failed for '%s': %s"), *WidgetName, *DecodeError));
 				return false;
 			}
 
@@ -706,7 +705,7 @@ namespace
 			if (!CreateTextureAsset(BuildSharedImportPath(Context.ImportPath), SharedAssetName, RawBGRA, Width, Height, ImportedObjectPath, ImportError))
 			{
 				++Context.FailedCount;
-				AddReportMessage(Context, FString::Printf(TEXT("本地图片导入失败 '%s': %s"), *WidgetName, *ImportError));
+				AddReportMessage(Context, FString::Printf(TEXT("Local image import failed for '%s': %s"), *WidgetName, *ImportError));
 				return false;
 			}
 
@@ -720,13 +719,13 @@ namespace
 			Context.UrlToAssetPath.Add(LocalKey, ImportedObjectPath);
 			Context.ContentHashToAsset.Add(ContentKey, ImportedObjectPath);
 			RememberImportedTexturePath(Context.ImportPath, SharedAssetName, ImportedObjectPath);
-			AddReportMessage(Context, FString::Printf(TEXT("已导入本地纹理: %s"), *ImportedObjectPath));
+			AddReportMessage(Context, FString::Printf(TEXT("Imported local texture: %s"), *ImportedObjectPath));
 			return true;
 		}
 
 		if (!IsRemoteUrl(InOutTexturePath))
 		{
-			AddReportMessage(Context, FString::Printf(TEXT("跳过非资产路径 '%s': %s"), *WidgetName, *InOutTexturePath));
+			AddReportMessage(Context, FString::Printf(TEXT("Skipped non-asset path for '%s': %s"), *WidgetName, *InOutTexturePath));
 			return true;
 		}
 
@@ -750,7 +749,7 @@ namespace
 		if (!DownloadUrl(NormalizedUrl, Context.TimeoutSeconds, CompressedData, DownloadError))
 		{
 			++Context.FailedCount;
-			AddReportMessage(Context, FString::Printf(TEXT("图片 '%s' 下载失败: %s (原因: %s)"), *WidgetName, *NormalizedUrl, *DownloadError));
+			AddReportMessage(Context, FString::Printf(TEXT("Image '%s' download failed: %s (reason: %s)"), *WidgetName, *NormalizedUrl, *DownloadError));
 			return false;
 		}
 
@@ -765,7 +764,7 @@ namespace
 			InOutTexturePath = *ExistingPath;
 			++Context.ReusedCount;
 			Context.UrlToAssetPath.Add(SourceKey, *ExistingPath);
-			AddReportMessage(Context, FString::Printf(TEXT("内容去重复用: %s"), **ExistingPath));
+				AddReportMessage(Context, FString::Printf(TEXT("Reused deduplicated content: %s"), **ExistingPath));
 			return true;
 		}
 
@@ -780,7 +779,7 @@ namespace
 				++Context.ReusedCount;
 				Context.UrlToAssetPath.Add(SourceKey, PersistedObjectPath);
 				Context.ContentHashToAsset.Add(ContentKey, PersistedObjectPath);
-				AddReportMessage(Context, FString::Printf(TEXT("跨运行内容去重复用: %s"), *PersistedObjectPath));
+				AddReportMessage(Context, FString::Printf(TEXT("Reused cross-run content: %s"), *PersistedObjectPath));
 				return true;
 			}
 
@@ -798,7 +797,7 @@ namespace
 			Context.UrlToAssetPath.Add(SourceKey, ObjectPath);
 			Context.ContentHashToAsset.Add(ContentKey, ObjectPath);
 			RememberImportedTexturePath(Context.ImportPath, SharedAssetName, ObjectPath);
-			AddReportMessage(Context, FString::Printf(TEXT("复用已有纹理: %s"), *ObjectPath));
+			AddReportMessage(Context, FString::Printf(TEXT("Reused existing texture: %s"), *ObjectPath));
 			return true;
 		}
 
@@ -809,7 +808,7 @@ namespace
 		if (!DecodeToBGRA8(CompressedData, Width, Height, RawBGRA, DecodeError))
 		{
 			++Context.FailedCount;
-			AddReportMessage(Context, FString::Printf(TEXT("图片 '%s' 解码失败: %s (原因: %s)"), *WidgetName, *NormalizedUrl, *DecodeError));
+			AddReportMessage(Context, FString::Printf(TEXT("Image '%s' decode failed: %s (reason: %s)"), *WidgetName, *NormalizedUrl, *DecodeError));
 			return false;
 		}
 
@@ -818,7 +817,7 @@ namespace
 		if (!CreateTextureAsset(BuildSharedImportPath(Context.ImportPath), SharedAssetName, RawBGRA, Width, Height, ImportedObjectPath, ImportError))
 		{
 			++Context.FailedCount;
-			AddReportMessage(Context, FString::Printf(TEXT("图片 '%s' 导入失败: %s (原因: %s)"), *WidgetName, *NormalizedUrl, *ImportError));
+			AddReportMessage(Context, FString::Printf(TEXT("Image '%s' import failed: %s (reason: %s)"), *WidgetName, *NormalizedUrl, *ImportError));
 			return false;
 		}
 
@@ -832,14 +831,13 @@ namespace
 		Context.UrlToAssetPath.Add(SourceKey, ImportedObjectPath);
 		Context.ContentHashToAsset.Add(ContentKey, ImportedObjectPath);
 		RememberImportedTexturePath(Context.ImportPath, SharedAssetName, ImportedObjectPath);
-		AddReportMessage(Context, FString::Printf(TEXT("已导入纹理: %s"), *ImportedObjectPath));
+		AddReportMessage(Context, FString::Printf(TEXT("Imported texture: %s"), *ImportedObjectPath));
 		return true;
 	}
 
 	void ResolveNodeRecursive(FUMGWidgetNode& Node, FResolveContext& Context)
 	{
-		FString TexturePath;
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, TEXT("TexturePath"), TexturePath);
+		FString TexturePath = Node.Brush.Image.TexturePath.Get(Node.Brush.TexturePath);
 		if (!TexturePath.IsEmpty())
 		{
 			const FString DebugName = Node.Name.IsEmpty() ? Node.Id : Node.Name;
@@ -868,7 +866,7 @@ bool FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, 
 	{
 		if (OutReport)
 		{
-			*OutReport = TEXT("远程图片导入: 设置不可用");
+			*OutReport = TEXT("Remote image import: settings unavailable");
 		}
 		return false;
 	}
@@ -877,7 +875,7 @@ bool FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, 
 	{
 		if (OutReport)
 		{
-			*OutReport = TEXT("远程图片导入: 已禁用");
+			*OutReport = TEXT("Remote image import: disabled");
 		}
 		return true;
 	}
@@ -893,7 +891,7 @@ bool FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, 
 	if (OutReport)
 	{
 			FString Summary = FString::Printf(
-				TEXT("远程图片导入: 新增=%d 复用=%d 修复=%d 失败=%d 路径=%s"),
+				TEXT("Remote image import: imported=%d reused=%d repaired=%d failed=%d path=%s"),
 				Context.ImportedCount,
 				Context.ReusedCount,
 				Context.RepairedCount,
@@ -910,7 +908,7 @@ bool FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, 
 	if (Context.FailedCount > 0)
 	{
 		UE_LOG(LogDesign2UMG, Verbose, TEXT("Remote image import finished with failures (%d)"), Context.FailedCount);
-		UE_LOG(LogDesign2UMG, Warning, TEXT("%d 张图片下载失败，生成将继续但部分图片可能缺失。"), Context.FailedCount);
+		UE_LOG(LogDesign2UMG, Warning, TEXT("%d image downloads failed; generation will continue but some images may be missing."), Context.FailedCount);
 		return false;
 	}
 
@@ -927,8 +925,8 @@ namespace
 {
 	void CollectRemoteUrls(const FUMGWidgetNode& Node, TSet<FString>& OutUrls)
 	{
-		FString TexturePath;
-		if (Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, TEXT("TexturePath"), TexturePath))
+		const FString TexturePath = Node.Brush.Image.TexturePath.Get(Node.Brush.TexturePath);
+		if (!TexturePath.IsEmpty())
 		{
 			const FString Trimmed = TexturePath.TrimStartAndEnd();
 			if (IsRemoteUrl(Trimmed))
@@ -978,7 +976,7 @@ void FDesignRemoteImageImporter::ResolveTransientTextures(const FUMGWidgetNode& 
 		if (!DownloadUrl(NormalizeUrl(Url), Timeout, CompressedData, Error))
 		{
 			UE_LOG(LogDesign2UMG, Verbose, TEXT("Transient download failed: %s (%s)"), *Url, *Error);
-			UE_LOG(LogDesign2UMG, Warning, TEXT("图片下载失败: %s (原因: %s)"), *Url, *Error);
+			UE_LOG(LogDesign2UMG, Warning, TEXT("Image download failed: %s (reason: %s)"), *Url, *Error);
 			continue;
 		}
 
@@ -987,7 +985,7 @@ void FDesignRemoteImageImporter::ResolveTransientTextures(const FUMGWidgetNode& 
 		if (!DecodeToBGRA8(CompressedData, Width, Height, RawBGRA, Error))
 		{
 			UE_LOG(LogDesign2UMG, Verbose, TEXT("Transient decode failed: %s (%s)"), *Url, *Error);
-			UE_LOG(LogDesign2UMG, Warning, TEXT("图片解码失败: %s (原因: %s)"), *Url, *Error);
+			UE_LOG(LogDesign2UMG, Warning, TEXT("Image decode failed: %s (reason: %s)"), *Url, *Error);
 			continue;
 		}
 

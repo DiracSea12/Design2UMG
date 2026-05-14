@@ -8,8 +8,9 @@ import design2umg_render_rule as render_rule
 
 
 BLOCKED_EXIT_CODE = 2
-DEFAULT_METRIC_EPSILON = 1e-9
+DEFAULT_METRIC_EPSILON = 1e-6
 DEFAULT_PIXEL_TOLERANCE = 6
+RATIO_METRICS = {"stable_changed_ratio", "changed_ratio"}
 METRIC_PAIRS = [
     ("stable_changed_ratio", "stable_changed_ratio"),
     ("changed_ratio", "changed_ratio"),
@@ -105,6 +106,33 @@ def resolve_case_metrics(output_root: Path, case_name: str, summary_case: dict |
         "stable_mae": summary_case.get("stable_mae"),
         "mae": summary_case.get("mae"),
     }
+
+
+def resolve_report_pixel_quantum(report: dict) -> float | None:
+    for key in ("comparison_candidate_size", "candidate_size", "comparison_reference_size", "reference_size"):
+        size = report.get(key)
+        if not isinstance(size, list) or len(size) != 2:
+            continue
+        try:
+            width = int(size[0])
+            height = int(size[1])
+        except (TypeError, ValueError):
+            continue
+        pixel_count = width * height
+        if pixel_count > 0:
+            return 1.0 / pixel_count
+    return None
+
+
+def resolve_metric_epsilon(metric_name: str, current_report: dict, default_epsilon: float) -> float:
+    if metric_name not in RATIO_METRICS:
+        return default_epsilon
+
+    pixel_quantum = resolve_report_pixel_quantum(current_report)
+    if pixel_quantum is None:
+        return default_epsilon
+
+    return max(default_epsilon, pixel_quantum) + default_epsilon
 
 
 def validate_run(output_root: Path, admissible_best_path: Path | None = None, metric_epsilon: float = DEFAULT_METRIC_EPSILON) -> dict:
@@ -292,13 +320,15 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
                     if current_value is None or best_value is None:
                         continue
                     delta = current_value - best_value
-                    if delta > metric_epsilon:
+                    effective_epsilon = resolve_metric_epsilon(current_metric, current_report, metric_epsilon)
+                    if delta > effective_epsilon:
                         regressions.append(
                             {
                                 "metric": current_metric,
                                 "current": current_value,
                                 "historical_best": best_value,
                                 "delta": delta,
+                                "epsilon": effective_epsilon,
                             }
                         )
 

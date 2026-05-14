@@ -2,10 +2,6 @@
 #include "UMGTextPropertyApplier.h"
 
 #include "UMGTextStyleApplication.h"
-#include "UMGEditorPropertyKeys.h"
-#include "UMGPropertyApplierSupport.h"
-#include "UMGPropertyKeys.h"
-#include "UMGWidgetNodeAccess.h"
 
 #include "Components/EditableText.h"
 #include "Components/EditableTextBox.h"
@@ -14,28 +10,29 @@
 #include "Components/RichTextBlock.h"
 #include "Components/TextBlock.h"
 #include "Components/TextWidgetTypes.h"
+
 namespace
 {
-	using namespace UMGPropertyApplierSupport;
-
-	void ApplyTextBlockResidualProps(UTextBlock* TextBlock, const FUMGPropertyBag& Properties)
+	void ApplyTextBlockShadow(UTextBlock* TextBlock, const FUMGShadowData& Shadow)
 	{
 		if (!TextBlock)
 		{
 			return;
 		}
-
-		FVector2D ShadowOffset;
-		if (Properties.TryGetVector2D(UMGPropertyKeys::ShadowOffset, ShadowOffset))
+		if (Shadow.ShadowOffset.IsSet())
 		{
-			TextBlock->SetShadowOffset(ShadowOffset);
+			TextBlock->SetShadowOffset(Shadow.ShadowOffset.GetValue());
 		}
-
-		FLinearColor ShadowColor;
-		if (Properties.TryGetColor(UMGPropertyKeys::ShadowColorAndOpacity, ShadowColor))
+		if (Shadow.ShadowColorAndOpacity.IsSet())
 		{
-			TextBlock->SetShadowColorAndOpacity(ShadowColor);
+			TextBlock->SetShadowColorAndOpacity(Shadow.ShadowColorAndOpacity.GetValue());
 		}
+	}
+
+	void ApplyIconShaping(FShapedTextOptions& ShapedTextOptions)
+	{
+		ShapedTextOptions.bOverride_TextShapingMethod = true;
+		ShapedTextOptions.TextShapingMethod = ETextShapingMethod::FullShaping;
 	}
 
 	void ApplyEditableTextStyle(FEditableTextStyle& Style, const FUMGWidgetNode& Node, bool& bStyleChanged)
@@ -82,128 +79,54 @@ namespace
 		}
 	}
 
-	void ApplyEditableTextBoxResidualProps(UEditableTextBox* Widget, const FUMGPropertyBag& Properties)
+	void ApplyEditableTextBoxResidualProps(UEditableTextBox* Widget, const FUMGWidgetNode& Node)
 	{
-		if (!Widget)
+		if (Widget && Node.WidgetStyle.MinDesiredWidth.IsSet())
 		{
-			return;
-		}
-
-		bool bIsReadOnly = false;
-		if (Properties.TryGetBool(UMGPropertyKeys::IsReadOnly, bIsReadOnly))
-		{
-			Widget->SetIsReadOnly(bIsReadOnly);
-		}
-
-		bool bIsPassword = false;
-		if (Properties.TryGetBool(UMGPropertyKeys::IsPassword, bIsPassword))
-		{
-			Widget->SetIsPassword(bIsPassword);
-		}
-
-		float MinimumDesiredWidth = 0.0f;
-		if (Properties.TryGetFloat(UMGPropertyKeys::MinimumDesiredWidth, MinimumDesiredWidth))
-		{
-			Widget->SetMinDesiredWidth(MinimumDesiredWidth);
+			Widget->SetMinDesiredWidth(Node.WidgetStyle.MinDesiredWidth.GetValue());
 		}
 	}
 
-	void ApplyEditableTextResidualProps(UEditableText* Widget, const FUMGPropertyBag& Properties)
+	void ApplyEditableTextResidualProps(UEditableText* Widget, const FUMGWidgetNode& Node)
 	{
-		if (!Widget)
+		if (Widget && Node.WidgetStyle.MinDesiredWidth.IsSet())
 		{
-			return;
-		}
-
-		bool bIsReadOnly = false;
-		if (Properties.TryGetBool(UMGPropertyKeys::IsReadOnly, bIsReadOnly))
-		{
-			Widget->SetIsReadOnly(bIsReadOnly);
-		}
-
-		bool bIsPassword = false;
-		if (Properties.TryGetBool(UMGPropertyKeys::IsPassword, bIsPassword))
-		{
-			Widget->SetIsPassword(bIsPassword);
-		}
-
-		float MinimumDesiredWidth = 0.0f;
-		if (Properties.TryGetFloat(UMGPropertyKeys::MinimumDesiredWidth, MinimumDesiredWidth))
-		{
-			Widget->SetMinimumDesiredWidth(MinimumDesiredWidth);
+			Widget->SetMinimumDesiredWidth(Node.WidgetStyle.MinDesiredWidth.GetValue());
 		}
 	}
 
-	void ApplyMultiLineEditableTextResidualProps(UMultiLineEditableText* Widget, const FUMGPropertyBag& Properties)
+	void ApplyEditableTextJustification(UEditableTextBox* EditableTextBox, const FUMGWidgetNode& Node)
 	{
-		if (!Widget)
+		if (!EditableTextBox || !UMGTextStyleApplication::HasTypedTextValue(Node.Text.Justification))
 		{
 			return;
 		}
 
-		bool bIsReadOnly = false;
-		if (Properties.TryGetBool(UMGPropertyKeys::IsReadOnly, bIsReadOnly))
+		ETextJustify::Type Justification = ETextJustify::Left;
+		if (UMGTextStyleApplication::TryResolveTextJustification(Node.Text.Justification.GetValue(), Justification))
 		{
-			Widget->SetIsReadOnly(bIsReadOnly);
+			EditableTextBox->SetJustification(Justification);
 		}
 	}
 
-	void ApplyMultiLineEditableTextBoxResidualProps(UMultiLineEditableTextBox* Widget, const FUMGPropertyBag& Properties)
+	void ApplyEditableTextJustification(UEditableText* EditableText, const FUMGWidgetNode& Node)
 	{
-		if (!Widget)
+		if (!EditableText || !UMGTextStyleApplication::HasTypedTextValue(Node.Text.Justification))
 		{
 			return;
 		}
 
-		bool bIsReadOnly = false;
-		if (Properties.TryGetBool(UMGPropertyKeys::IsReadOnly, bIsReadOnly))
+		ETextJustify::Type Justification = ETextJustify::Left;
+		if (UMGTextStyleApplication::TryResolveTextJustification(Node.Text.Justification.GetValue(), Justification))
 		{
-			Widget->SetIsReadOnly(bIsReadOnly);
+			EditableText->SetJustification(Justification);
 		}
 	}
 }
 
 namespace UMGTextPropertyApplier
 {
-	using namespace UMGPropertyApplierSupport;
-
-	void ApplyTextBlockProps(UWidget* Widget, const FUMGPropertyBag& Properties)
-	{
-		UTextBlock* TextBlock = CastChecked<UTextBlock>(Widget);
-		FString Value;
-		if (TryGetPropAllowEmpty(Properties, UMGPropertyKeys::Text, Value))
-		{
-			TextBlock->SetText(FText::FromString(Value));
-		}
-
-		FLinearColor TextColor;
-		if (Properties.TryGetColor(UMGPropertyKeys::Color, TextColor))
-		{
-			TextBlock->SetColorAndOpacity(FSlateColor(TextColor));
-		}
-
-		FSlateFontInfo FontInfo = TextBlock->GetFont();
-		bool bFontChanged = false;
-		const bool bIsIconFontWidget = HasProp(Properties, UMGPropertyKeys::IconName);
-		UMGTextStyleApplication::ApplyLegacyTextFontInfo(FontInfo, Properties, bIsIconFontWidget, bFontChanged);
-		if (bFontChanged)
-		{
-			TextBlock->SetFont(FontInfo);
-		}
-
-		ApplyTextBlockResidualProps(TextBlock, Properties);
-		UMGTextStyleApplication::ApplyLegacyTextLayoutProps(TextBlock, Properties);
-
-		if (bIsIconFontWidget)
-		{
-			FShapedTextOptions IconShaping;
-			IconShaping.bOverride_TextShapingMethod = true;
-			IconShaping.TextShapingMethod = ETextShapingMethod::FullShaping;
-			TextBlock->SetShapedTextOptions(IconShaping);
-		}
-	}
-
-	void ApplyTextBlockProps(UWidget* Widget, const FUMGWidgetNode& Node, const FUMGPropertyBag& ResidualProperties)
+	void ApplyTextBlockProps(UWidget* Widget, const FUMGWidgetNode& Node)
 	{
 		UTextBlock* TextBlock = CastChecked<UTextBlock>(Widget);
 		if (Node.Text.Text.IsSet())
@@ -225,71 +148,35 @@ namespace UMGTextPropertyApplier
 		}
 
 		UMGTextStyleApplication::ApplyTypedTextLayoutProps(TextBlock, Node);
-		ApplyTextBlockResidualProps(TextBlock, ResidualProperties);
+		ApplyTextBlockShadow(TextBlock, Node.Shadow);
 
 		if (UMGTextStyleApplication::IsTypedIconFontWidget(Node))
 		{
 			FShapedTextOptions IconShaping;
-			IconShaping.bOverride_TextShapingMethod = true;
-			IconShaping.TextShapingMethod = ETextShapingMethod::FullShaping;
+			ApplyIconShaping(IconShaping);
 			TextBlock->SetShapedTextOptions(IconShaping);
 		}
 	}
 
-	void ApplyEditableTextBoxProps(UWidget* Widget, const FUMGPropertyBag& Properties)
+	void ApplyRichTextBlockProps(UWidget* Widget, const FUMGWidgetNode& Node)
 	{
-		UEditableTextBox* EditableTextBox = CastChecked<UEditableTextBox>(Widget);
-		FString Value;
-		if (TryGetPropAllowEmpty(Properties, UMGPropertyKeys::Text, Value))
+		URichTextBlock* RichTextBlock = CastChecked<URichTextBlock>(Widget);
+		if (Node.Text.Text.IsSet())
 		{
-			EditableTextBox->SetText(FText::FromString(Value));
-		}
-		if (TryGetPropAllowEmpty(Properties, UMGPropertyKeys::HintText, Value))
-		{
-			EditableTextBox->SetHintText(FText::FromString(Value));
+			RichTextBlock->SetText(FText::FromString(Node.Text.Text.GetValue()));
 		}
 
-		FEditableTextBoxStyle Style = EditableTextBox->GetWidgetStyle();
-		FTextBlockStyle TextStyle = Style.TextStyle;
-		FSlateFontInfo FontInfo = TextStyle.Font;
-		bool bStyleChanged = false;
-		bool bFontChanged = false;
-		const bool bIsIconFontWidget = HasProp(Properties, UMGPropertyKeys::IconName);
-		UMGTextStyleApplication::ApplyLegacyTextFontInfo(FontInfo, Properties, bIsIconFontWidget, bFontChanged);
-		if (bFontChanged)
+		UMGTextStyleApplication::ApplyRichTextDefaultStyle(RichTextBlock, Node);
+
+		if (Node.Text.RichTextStyleRowsJson.IsSet())
 		{
-			TextStyle.Font = FontInfo;
-			bStyleChanged = true;
+			UMGTextStyleApplication::ApplyRichTextStyleRows(RichTextBlock, Node.Text.RichTextStyleRowsJson.GetValue());
 		}
 
-		FLinearColor TextColor;
-		if (Properties.TryGetColor(UMGPropertyKeys::Color, TextColor))
-		{
-			const FSlateColor ForegroundColor(TextColor);
-			TextStyle.ColorAndOpacity = ForegroundColor;
-			Style.ForegroundColor = ForegroundColor;
-			bStyleChanged = true;
-		}
-
-		if (bStyleChanged)
-		{
-			Style.SetTextStyle(TextStyle);
-			EditableTextBox->SetWidgetStyle(Style);
-		}
-
-		UMGTextStyleApplication::ApplyLegacyTextLayoutProps(EditableTextBox, Properties);
-		ApplyEditableTextBoxResidualProps(EditableTextBox, Properties);
-
-		if (bIsIconFontWidget)
-		{
-			FShapedTextOptions IconShaping;
-			IconShaping.bOverride_TextShapingMethod = true;
-			IconShaping.TextShapingMethod = ETextShapingMethod::FullShaping;
-			EditableTextBox->ShapedTextOptions = IconShaping;
-		}
+		UMGTextStyleApplication::ApplyTypedTextLayoutProps(RichTextBlock, Node);
 	}
 
-	void ApplyEditableTextBoxProps(UWidget* Widget, const FUMGWidgetNode& Node, const FUMGPropertyBag& ResidualProperties)
+	void ApplyEditableTextBoxProps(UWidget* Widget, const FUMGWidgetNode& Node)
 	{
 		UEditableTextBox* EditableTextBox = CastChecked<UEditableTextBox>(Widget);
 		if (Node.Text.Text.IsSet())
@@ -309,83 +196,16 @@ namespace UMGTextPropertyApplier
 			EditableTextBox->SetWidgetStyle(Style);
 		}
 
-		if (UMGTextStyleApplication::HasTypedTextValue(Node.Text.Justification))
-		{
-			ETextJustify::Type Justification = ETextJustify::Left;
-			if (UMGTextStyleApplication::TryResolveTextJustification(Node.Text.Justification.GetValue(), Justification))
-			{
-				EditableTextBox->SetJustification(Justification);
-			}
-		}
-
-		ApplyEditableTextBoxResidualProps(EditableTextBox, ResidualProperties);
+		ApplyEditableTextJustification(EditableTextBox, Node);
+		ApplyEditableTextBoxResidualProps(EditableTextBox, Node);
 
 		if (UMGTextStyleApplication::IsTypedIconFontWidget(Node))
 		{
-			FShapedTextOptions IconShaping;
-			IconShaping.bOverride_TextShapingMethod = true;
-			IconShaping.TextShapingMethod = ETextShapingMethod::FullShaping;
-			EditableTextBox->ShapedTextOptions = IconShaping;
+			ApplyIconShaping(EditableTextBox->ShapedTextOptions);
 		}
 	}
 
-	void ApplyMultiLineEditableTextBoxProps(UWidget* Widget, const FUMGPropertyBag& Properties)
-	{
-		UMultiLineEditableTextBox* EditableTextBox = CastChecked<UMultiLineEditableTextBox>(Widget);
-		FString Value;
-		if (TryGetPropAllowEmpty(Properties, UMGPropertyKeys::Text, Value))
-		{
-			EditableTextBox->SetText(FText::FromString(Value));
-		}
-		if (TryGetPropAllowEmpty(Properties, UMGPropertyKeys::HintText, Value))
-		{
-			EditableTextBox->SetHintText(FText::FromString(Value));
-		}
-
-		FTextBlockStyle TextStyle = EditableTextBox->WidgetStyle.TextStyle;
-		FSlateFontInfo FontInfo = TextStyle.Font;
-		bool bStyleChanged = false;
-		bool bFontChanged = false;
-		const bool bIsIconFontWidget = HasProp(Properties, UMGPropertyKeys::IconName);
-		UMGTextStyleApplication::ApplyLegacyTextFontInfo(FontInfo, Properties, bIsIconFontWidget, bFontChanged);
-		if (bFontChanged)
-		{
-			TextStyle.Font = FontInfo;
-			bStyleChanged = true;
-		}
-
-		FLinearColor TextColor;
-		if (Properties.TryGetColor(UMGPropertyKeys::Color, TextColor))
-		{
-			const FSlateColor TypedColor(TextColor);
-			TextStyle.ColorAndOpacity = TypedColor;
-			EditableTextBox->WidgetStyle.ForegroundColor = TypedColor;
-			bStyleChanged = true;
-		}
-
-		if (bStyleChanged)
-		{
-			EditableTextBox->WidgetStyle.SetTextStyle(TextStyle);
-			EditableTextBox->SetTextStyle(TextStyle);
-		}
-
-		if (bStyleChanged && Properties.TryGetColor(UMGPropertyKeys::Color, TextColor))
-		{
-			EditableTextBox->SetForegroundColor(TextColor);
-		}
-		UMGTextStyleApplication::ApplyLegacyTextLayoutProps(EditableTextBox, Properties);
-		ApplyMultiLineEditableTextBoxResidualProps(EditableTextBox, Properties);
-
-		if (bIsIconFontWidget)
-		{
-			FShapedTextOptions IconShaping;
-			IconShaping.bOverride_TextShapingMethod = true;
-			IconShaping.TextShapingMethod = ETextShapingMethod::FullShaping;
-			EditableTextBox->SetShapedTextOptions(IconShaping);
-		}
-	}
-
-	void ApplyMultiLineEditableTextBoxProps(UWidget* Widget, const FUMGWidgetNode& Node, const FUMGPropertyBag& ResidualProperties)
+	void ApplyMultiLineEditableTextBoxProps(UWidget* Widget, const FUMGWidgetNode& Node)
 	{
 		UMultiLineEditableTextBox* EditableTextBox = CastChecked<UMultiLineEditableTextBox>(Widget);
 		if (Node.Text.Text.IsSet())
@@ -411,75 +231,16 @@ namespace UMGTextPropertyApplier
 		}
 
 		UMGTextStyleApplication::ApplyTypedTextLayoutProps(EditableTextBox, Node);
-		ApplyMultiLineEditableTextBoxResidualProps(EditableTextBox, ResidualProperties);
 
 		if (UMGTextStyleApplication::IsTypedIconFontWidget(Node))
 		{
 			FShapedTextOptions IconShaping;
-			IconShaping.bOverride_TextShapingMethod = true;
-			IconShaping.TextShapingMethod = ETextShapingMethod::FullShaping;
+			ApplyIconShaping(IconShaping);
 			EditableTextBox->SetShapedTextOptions(IconShaping);
 		}
 	}
 
-	void ApplyEditableTextProps(UWidget* Widget, const FUMGPropertyBag& Properties)
-	{
-		UEditableText* EditableText = CastChecked<UEditableText>(Widget);
-		FString Value;
-		if (TryGetPropAllowEmpty(Properties, UMGPropertyKeys::Text, Value))
-		{
-			EditableText->SetText(FText::FromString(Value));
-		}
-		if (TryGetPropAllowEmpty(Properties, UMGPropertyKeys::HintText, Value))
-		{
-			EditableText->SetHintText(FText::FromString(Value));
-		}
-
-		FEditableTextStyle Style = EditableText->WidgetStyle;
-		bool bStyleChanged = false;
-		FSlateFontInfo FontInfo = Style.Font;
-		bool bFontChanged = false;
-		const bool bIsIconFontWidget = HasProp(Properties, UMGPropertyKeys::IconName);
-		UMGTextStyleApplication::ApplyLegacyTextFontInfo(FontInfo, Properties, bIsIconFontWidget, bFontChanged);
-		if (bFontChanged)
-		{
-			Style.SetFont(FontInfo);
-			bStyleChanged = true;
-		}
-
-		FLinearColor TextColor;
-		if (Properties.TryGetColor(UMGPropertyKeys::Color, TextColor))
-		{
-			Style.SetColorAndOpacity(FSlateColor(TextColor));
-			bStyleChanged = true;
-		}
-
-		if (bStyleChanged)
-		{
-			EditableText->SetWidgetStyle(Style);
-		}
-
-		if (TryGetProp(Properties, UMGPropertyKeys::Justification, Value))
-		{
-			ETextJustify::Type Justification = ETextJustify::Left;
-			if (UMGTextStyleApplication::TryResolveTextJustification(Value, Justification))
-			{
-				EditableText->SetJustification(Justification);
-			}
-		}
-
-		ApplyEditableTextResidualProps(EditableText, Properties);
-
-		if (bIsIconFontWidget)
-		{
-			FShapedTextOptions IconShaping;
-			IconShaping.bOverride_TextShapingMethod = true;
-			IconShaping.TextShapingMethod = ETextShapingMethod::FullShaping;
-			EditableText->ShapedTextOptions = IconShaping;
-		}
-	}
-
-	void ApplyEditableTextProps(UWidget* Widget, const FUMGWidgetNode& Node, const FUMGPropertyBag& ResidualProperties)
+	void ApplyEditableTextProps(UWidget* Widget, const FUMGWidgetNode& Node)
 	{
 		UEditableText* EditableText = CastChecked<UEditableText>(Widget);
 		if (Node.Text.Text.IsSet())
@@ -499,76 +260,16 @@ namespace UMGTextPropertyApplier
 			EditableText->SetWidgetStyle(Style);
 		}
 
-		if (UMGTextStyleApplication::HasTypedTextValue(Node.Text.Justification))
-		{
-			ETextJustify::Type Justification = ETextJustify::Left;
-			if (UMGTextStyleApplication::TryResolveTextJustification(Node.Text.Justification.GetValue(), Justification))
-			{
-				EditableText->SetJustification(Justification);
-			}
-		}
-
-		ApplyEditableTextResidualProps(EditableText, ResidualProperties);
+		ApplyEditableTextJustification(EditableText, Node);
+		ApplyEditableTextResidualProps(EditableText, Node);
 
 		if (UMGTextStyleApplication::IsTypedIconFontWidget(Node))
 		{
-			FShapedTextOptions IconShaping;
-			IconShaping.bOverride_TextShapingMethod = true;
-			IconShaping.TextShapingMethod = ETextShapingMethod::FullShaping;
-			EditableText->ShapedTextOptions = IconShaping;
+			ApplyIconShaping(EditableText->ShapedTextOptions);
 		}
 	}
 
-	void ApplyMultiLineEditableTextProps(UWidget* Widget, const FUMGPropertyBag& Properties)
-	{
-		UMultiLineEditableText* EditableText = CastChecked<UMultiLineEditableText>(Widget);
-		FString Value;
-		if (TryGetPropAllowEmpty(Properties, UMGPropertyKeys::Text, Value))
-		{
-			EditableText->SetText(FText::FromString(Value));
-		}
-		if (TryGetPropAllowEmpty(Properties, UMGPropertyKeys::HintText, Value))
-		{
-			EditableText->SetHintText(FText::FromString(Value));
-		}
-
-		FTextBlockStyle Style = EditableText->WidgetStyle;
-		FSlateFontInfo FontInfo = Style.Font;
-		bool bStyleChanged = false;
-		bool bFontChanged = false;
-		const bool bIsIconFontWidget = HasProp(Properties, UMGPropertyKeys::IconName);
-		UMGTextStyleApplication::ApplyLegacyTextFontInfo(FontInfo, Properties, bIsIconFontWidget, bFontChanged);
-		if (bFontChanged)
-		{
-			Style.Font = FontInfo;
-			bStyleChanged = true;
-		}
-
-		FLinearColor TextColor;
-		if (Properties.TryGetColor(UMGPropertyKeys::Color, TextColor))
-		{
-			Style.ColorAndOpacity = FSlateColor(TextColor);
-			bStyleChanged = true;
-		}
-
-		if (bStyleChanged)
-		{
-			EditableText->SetWidgetStyle(Style);
-		}
-
-		UMGTextStyleApplication::ApplyLegacyTextLayoutProps(EditableText, Properties);
-		ApplyMultiLineEditableTextResidualProps(EditableText, Properties);
-
-		if (bIsIconFontWidget)
-		{
-			FShapedTextOptions IconShaping;
-			IconShaping.bOverride_TextShapingMethod = true;
-			IconShaping.TextShapingMethod = ETextShapingMethod::FullShaping;
-			EditableText->SetShapedTextOptions(IconShaping);
-		}
-	}
-
-	void ApplyMultiLineEditableTextProps(UWidget* Widget, const FUMGWidgetNode& Node, const FUMGPropertyBag& ResidualProperties)
+	void ApplyMultiLineEditableTextProps(UWidget* Widget, const FUMGWidgetNode& Node)
 	{
 		UMultiLineEditableText* EditableText = CastChecked<UMultiLineEditableText>(Widget);
 		if (Node.Text.Text.IsSet())
@@ -581,9 +282,9 @@ namespace UMGTextPropertyApplier
 		}
 
 		FTextBlockStyle Style = EditableText->WidgetStyle;
-		bool bStyleChanged = false;
 		FSlateFontInfo FontInfo = Style.Font;
 		bool bFontChanged = false;
+		bool bStyleChanged = false;
 		UMGTextStyleApplication::ApplyTypedFontInfo(FontInfo, Node, bFontChanged);
 		if (bFontChanged)
 		{
@@ -601,51 +302,12 @@ namespace UMGTextPropertyApplier
 		}
 
 		UMGTextStyleApplication::ApplyTypedTextLayoutProps(EditableText, Node);
-		ApplyMultiLineEditableTextResidualProps(EditableText, ResidualProperties);
 
 		if (UMGTextStyleApplication::IsTypedIconFontWidget(Node))
 		{
 			FShapedTextOptions IconShaping;
-			IconShaping.bOverride_TextShapingMethod = true;
-			IconShaping.TextShapingMethod = ETextShapingMethod::FullShaping;
+			ApplyIconShaping(IconShaping);
 			EditableText->SetShapedTextOptions(IconShaping);
 		}
 	}
-
-	void ApplyRichTextBlockProps(UWidget* Widget, const FUMGPropertyBag& Properties)
-	{
-		URichTextBlock* RichTextBlock = CastChecked<URichTextBlock>(Widget);
-		FString Value;
-		if (TryGetPropAllowEmpty(Properties, UMGPropertyKeys::Text, Value))
-		{
-			RichTextBlock->SetText(FText::FromString(Value));
-		}
-
-		UMGTextStyleApplication::ApplyRichTextDefaultStyle(RichTextBlock, Properties);
-
-		if (TryGetPropAllowEmpty(Properties, UMGPropertyKeys::RichTextStyleRows, Value))
-		{
-			UMGTextStyleApplication::ApplyRichTextStyleRows(RichTextBlock, Value);
-		}
-		UMGTextStyleApplication::ApplyLegacyTextLayoutProps(RichTextBlock, Properties);
-	}
-
-	void ApplyRichTextBlockProps(UWidget* Widget, const FUMGWidgetNode& Node)
-	{
-		URichTextBlock* RichTextBlock = CastChecked<URichTextBlock>(Widget);
-		if (Node.Text.Text.IsSet())
-		{
-			RichTextBlock->SetText(FText::FromString(Node.Text.Text.GetValue()));
-		}
-
-		UMGTextStyleApplication::ApplyRichTextDefaultStyle(RichTextBlock, Node);
-
-		if (Node.Text.RichTextStyleRowsJson.IsSet())
-		{
-			UMGTextStyleApplication::ApplyRichTextStyleRows(RichTextBlock, Node.Text.RichTextStyleRowsJson.GetValue());
-		}
-
-		UMGTextStyleApplication::ApplyTypedTextLayoutProps(RichTextBlock, Node);
-	}
 }
-

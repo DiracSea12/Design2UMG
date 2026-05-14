@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -6,8 +6,7 @@
 #include "UMGSchema.h"
 
 /**
- * Typed-first procedural resource request used by final editor consumers before
- * they adapt into the resolver's retained property-bag bridge.
+ * Typed procedural resource request used by final editor consumers.
  */
 struct DESIGN2UMGCORE_API FUMGProceduralResourceRequest
 {
@@ -23,7 +22,6 @@ struct DESIGN2UMGCORE_API FUMGProceduralResourceRequest
 		return !MaterialRef.IsEmpty();
 	}
 
-	FUMGPropertyBag BuildCompatibilityPropertyBag() const;
 };
 
 namespace Design2UMGWidgetNodeProceduralResourceAccess

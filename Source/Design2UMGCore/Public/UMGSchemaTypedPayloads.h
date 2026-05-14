@@ -110,7 +110,7 @@ struct FUMGTextData
 };
 
 /**
- * Typed visual brush fields that progressively replace visual keys from the legacy property bag.
+ * Typed visual brush fields consumed directly by widget/resource application.
  * They are transferred to the Border node as a whole when WrapWithBorder is used.
  */
 struct FUMGVisualBrushData
@@ -181,7 +181,7 @@ struct FUMGVisualBrushData
 
 /**
  * Typed effect fields such as BackgroundBlur and Retainer effects.
- * New effect contracts should land here instead of extending the legacy property bag.
+ * New effect contracts should land here as explicit typed payload fields.
  */
 struct FUMGEffectData
 {

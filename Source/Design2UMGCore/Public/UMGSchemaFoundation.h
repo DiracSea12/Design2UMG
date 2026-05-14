@@ -1,10 +1,9 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Layout/Margin.h"
-#include "Templates/Function.h"
 #include "UMGSchemaFoundation.generated.h"
 
 /**
@@ -159,53 +158,4 @@ struct FUMGSlotData
 
 	UPROPERTY()
 	int32 ColumnSpan = 1;
-};
-
-struct FUMGTypedProperty
-{
-	/** SerializedValue is the final-consumer bridge value; typed fields are transient parse caches. */
-	TOptional<FString> SerializedValue;
-	bool BoolValue = false;
-	int32 IntValue = 0;
-	float FloatValue = 0.0f;
-	FVector2D Vector2DValue = FVector2D::ZeroVector;
-	FVector4 Vector4Value = FVector4(0, 0, 0, 0);
-	FMargin MarginValue = FMargin(0.0f);
-	FLinearColor ColorValue = FLinearColor::Transparent;
-};
-
-struct DESIGN2UMGCORE_API FUMGPropertyBag
-{
-	// Runtime bridge for final UMG consumers. It is rebuilt from typed node data
-	// at generation time and is not legacy serialized FUMGWidgetNode state.
-	void Add(const FString& Key, const FString& Value);
-	void Add(const TCHAR* Key, const FString& Value);
-	void Add(const TCHAR* Key, const TCHAR* Value);
-
-	int32 Remove(const FString& Key);
-	int32 Remove(const TCHAR* Key);
-	int32 Num() const;
-	void Empty();
-
-	bool TryGetBool(const FString& Key, bool& OutValue) const;
-	bool TryGetBool(const TCHAR* Key, bool& OutValue) const { return TryGetBool(FString(Key), OutValue); }
-	bool TryGetInt(const FString& Key, int32& OutValue) const;
-	bool TryGetInt(const TCHAR* Key, int32& OutValue) const { return TryGetInt(FString(Key), OutValue); }
-	bool TryGetFloat(const FString& Key, float& OutValue) const;
-	bool TryGetFloat(const TCHAR* Key, float& OutValue) const { return TryGetFloat(FString(Key), OutValue); }
-	bool TryGetString(const FString& Key, FString& OutValue) const;
-	bool TryGetString(const TCHAR* Key, FString& OutValue) const { return TryGetString(FString(Key), OutValue); }
-	bool TryGetColor(const FString& Key, FLinearColor& OutValue) const;
-	bool TryGetColor(const TCHAR* Key, FLinearColor& OutValue) const { return TryGetColor(FString(Key), OutValue); }
-	bool TryGetVector2D(const FString& Key, FVector2D& OutValue) const;
-	bool TryGetVector2D(const TCHAR* Key, FVector2D& OutValue) const { return TryGetVector2D(FString(Key), OutValue); }
-	bool TryGetVector4(const FString& Key, FVector4& OutValue) const;
-	bool TryGetVector4(const TCHAR* Key, FVector4& OutValue) const { return TryGetVector4(FString(Key), OutValue); }
-	bool TryGetMargin(const FString& Key, FMargin& OutValue) const;
-	bool TryGetMargin(const TCHAR* Key, FMargin& OutValue) const { return TryGetMargin(FString(Key), OutValue); }
-
-	void ForEachSerialized(TFunctionRef<void(const FString&, const FString&)> Visitor) const;
-
-private:
-	TMap<FString, FUMGTypedProperty> Values;
 };

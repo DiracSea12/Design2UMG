@@ -1,64 +1,63 @@
-﻿# Design2UMG 开发路线图
+﻿# Design2UMG Roadmap
 
-**创建日期**：2026-02-15
-**基于**：代码 Review + 竞品调研 + 三轮交叉验证
-**状态说明**：`[ ]` 待开始 | `[~]` 进行中 | `[x]` 已完成
-**Review 驱动优化**：内部 review 计划不作为公开发布文档；当前仍需实现的 review 硬化项以对应 OpenSpec phase 为准。
-
----
-
-## 战略定位：开源核心 + 商业增值
-
-### 为什么开源
-
-- UE5 生态内"设计→UMG"赛道几乎空白，仅有 Figma2UMG（29 stars，从付费转免费）和 Figma2Unreal（87 stars，自称 rudimentary）
-- Unity 生态的 Figma Converter for Unity（$99，49 评价，6 年持续更新）验证了市场需求存在，但 UE 侧付费意愿不足
-- Design2UMG 的架构完成度远超现有竞品，开源可快速建立生态位
-- AI 设计转代码浪潮尚未进入游戏引擎领域，时间窗口有限
-
-### 商业增值方向（开源后探索，不代表当前公开发布承诺）
-
-- Pencil MCP / live sync 是否产品化仍待验证；当前仓库只公开 bridge / debug utility 形态
-- 企业级支持/咨询
-- 高级功能插件（动画状态导出、设计系统同步）
+**Created**: 2026-02-15
+**Basis**: code review, competitor research, and three rounds of cross-checking
+**Status legend**: `[ ]` not started | `[~]` in progress | `[x]` complete
+**Review-driven hardening**: internal review plans are not public release promises. Remaining hardening work is tracked by the corresponding OpenSpec phase.
 
 ---
 
-## 竞品差距分析
+## Strategy: Open-Core Foundation Plus Commercial Upside
 
-| 能力 | Design2UMG | Figma2UMG | 差距 |
+### Why open source
+
+- The UE5 "design to UMG" space is still thin. Existing references include Figma2UMG (29 stars, moved from paid to free) and Figma2Unreal (87 stars, self-described as rudimentary).
+- Unity's Figma Converter for Unity ($99, 49 reviews, six years of updates) shows that demand exists, while UE-side willingness to pay is less proven.
+- Design2UMG has a more complete architecture than the visible UE competitors; open source can establish the project position quickly.
+- The AI design-to-code wave has not fully reached game-engine UI workflows yet, so the window matters.
+
+### Commercial directions to explore after open source
+
+- Pencil MCP / live sync may become a product direction, but the current repository only promises bridge and debug utility behavior.
+- Enterprise support and consulting.
+- Advanced feature plugins, such as animation-state export and design-system sync.
+
+---
+
+## Competitor Gap
+
+| Capability | Design2UMG | Figma2UMG | Gap |
 |------|----------|-----------|------|
-| 布局转换 | ✅ Flexbox→Anchors，9宫格+Hysteresis | ✅ 基础布局 | 领先 |
-| 视觉属性 | ✅ 填充/描边/圆角/阴影/模糊 | ⚠️ 基础填充 | 领先 |
-| 组件系统 | ✅ Ref展开+变量解析+主题 | ✅ Components/Variants | 持平 |
-| Prototype Flow | ⚠️ 最小闭环已落地（仍待扩容） | ✅ 交互解析+蓝图图表生成 | 仍有差距 |
-| 渐变 | ⚠️ 双色H/V/Radial | ❌ 无 | 领先 |
-| SVG Path | ✅ 完整指令集栅格化 | ❌ 无 | 领先 |
-| 多输入源 | ✅ .pen + Figma + MCP bridge/debug utility | Figma only | 领先 |
-| 蓝图逻辑生成 | ⚠️ 以 runtime extension 为主，未走完整 UEdGraph authoring | ✅ UEdGraph节点 | 仍有差距 |
+| Layout conversion | Flexbox -> Anchors, nine-slice, hysteresis | basic layout | Ahead |
+| Visual properties | fill / stroke / radius / shadow / blur | basic fill | Ahead |
+| Component system | ref expansion + variables + themes | components / variants | Similar |
+| Prototype flow | minimal loop shipped, more scope pending | interaction parsing + Blueprint graph generation | Still behind |
+| Gradients | two-color H/V/radial | none | Ahead |
+| SVG path | full command rasterization | none | Ahead |
+| Multiple input sources | .pen + Figma + MCP bridge/debug utility | Figma only | Ahead |
+| Blueprint logic generation | runtime extension first; no full UEdGraph authoring path | UEdGraph nodes | Still behind |
 
-**结论**：核心短板已从“有无”转为“覆盖度与语义完整性”；Prototype Flow 和通用动画/图表 authoring 仍是主要差距。Figma2UMG 的 `WidgetBlueprintHelper`（MIT）可作为参考实现。
+**Conclusion**: the main gaps have moved from "does it exist" to coverage and semantic completeness. Prototype flow plus general animation / graph authoring remain the largest gaps. Figma2UMG's MIT-licensed `WidgetBlueprintHelper` can remain a reference implementation.
 
 ---
 
-## Phase 0：开源准备
+## Phase 0: Open-Source Readiness
 
-> 目标：代码清理、文档完善，达到开源发布标准
+> Goal: clean code and docs enough to meet the open-source release bar.
 
-| 任务 | 文件 | 状态 | 说明 |
+| Task | File | Status | Notes |
 |------|------|------|------|
-| **替换版权头**（阻塞项） | 全部 .h/.cpp | [x] | `Diracsea12` MIT 版权头 |
-| 清理内部引用和硬编码路径 | 全局 | [x] | 扫描完成，无敏感信息 |
-| 补充 LICENSE 文件 | LICENSE | [x] | MIT |
-| 完善 README（英文为主，中文可选） | README.md | [x] | 多输入源/架构图/Quick Start/Known Limitations |
-| 补充 CONTRIBUTING.md | CONTRIBUTING.md | [x] | 贡献指南、代码规范、架构概览 |
-| 创建 GitHub Actions CI | .github/workflows/ | [~] | 已有公开 `repository-hygiene` 检查和手动触发的 self-hosted BuildPlugin 工作流；当前不是完整公开 CI matrix |
-| 创建 GitHub Release 模板 | .github/ | [~] | 当前已有 PR 模板和 Bug Report Issue 模板；尚未单独提供 release notes template，也不能把现状写成已具备完整 release 模板 |
-| 整理 CHANGELOG | CHANGELOG.md | [x] | Keep a Changelog 格式，v1.0.0 + Unreleased |
-| 更新 .uplugin 元信息 | Design2UMG.uplugin | [x] | CreatedBy / DocsURL / SupportURL |
+| **Replace copyright headers** (blocking) | all `.h/.cpp` | [x] | `Diracsea12` MIT copyright header |
+| Remove internal references and hard-coded paths | global | [x] | scan complete; no sensitive information found |
+| Add LICENSE | LICENSE | [x] | MIT |
+| Improve README | README.md | [x] | multiple input sources, architecture diagram, Quick Start, Known Limitations |
+| Add CONTRIBUTING | CONTRIBUTING.md | [x] | contributor guide, coding standards, architecture overview |
+| Add GitHub Actions CI | .github/workflows/ | [~] | public `repository-hygiene` check and manually triggered self-hosted BuildPlugin workflow exist; this is not a complete public CI matrix |
+| Add GitHub Release template | .github/ | [~] | PR and bug-report templates exist; release-notes template is still separate future work |
+| Maintain CHANGELOG | CHANGELOG.md | [x] | Keep a Changelog format, v1.0.0 plus Unreleased |
+| Update `.uplugin` metadata | Design2UMG.uplugin | [x] | CreatedBy / DocsURL / SupportURL |
 
 ---
-
 ## Phase 1：性能与质量修复（纯内部优化）
 
 > 目标：修掉已知限制中投入最小、收益最大的问题
@@ -221,33 +220,32 @@
 
 ---
 
-## 开源发布计划
+## Open-Source Release Plan
 
-### v1.0 发布内容（按当前仓库公开口径收口）
+### v1.0 release contents (current public boundary)
 
-- 核心转换管线（.pen / Figma / 本地 Figma export JSON → UMG Widget Blueprint）
-- 布局引擎（Flexbox → Anchors/Offsets，Fixer 规则修复）
-- 当前公开主线视觉属性（填充/描边/圆角/阴影/模糊），不宣称已发布 SDF 材质方案
-- SVG Path 栅格化（带缓存）
-- 组件引用展开 + 变量/主题解析
-- Content Browser 拖拽导入 + 命令行导入
-- 公开 smoke/public validate 文档
-- Bridge / debug utilities 继续保留：MCP JSON bridge import、live Pencil MCP 本地调试链路；这不是当前 release support promise
-- 维护者 formal admissible gate 作为 release gate
+- Core conversion pipeline: `.pen`, Figma, and local Figma export JSON to UMG Widget Blueprint.
+- Layout engine: Flexbox to Anchors/Offsets, plus Fixer rules.
+- Current public visual-property path: fill, stroke, radius, shadow, and blur. The unreleased SDF material exploration is not a v1.0 promise.
+- SVG path rasterization with caching.
+- Component reference expansion plus variable / theme parsing.
+- Content Browser drag-and-drop import and command-line import.
+- Public smoke / validation documentation.
+- Bridge and debug utilities remain available: MCP JSON bridge import and local Pencil MCP debug chain. These are not the current release support promise.
+- Maintainer-owned formal admissible gate remains the release gate.
 
-### v1.1 发布内容（Phase 2 扩容后）
+### v1.1 release contents (after Phase 2 expansion)
 
-- Prototype Flow 扩容（hover/drag/keyboard/conditional 与 overlay semantics 收口）
-- 评估是否补充蓝图图表自动生成（OnClicked → SetActiveWidgetIndex）
-- Tag 方案替代选项
-- 渐变多色站点 + 任意角度
+- Prototype flow expansion: hover, drag, keyboard, conditional flows, and overlay semantics.
+- Evaluate whether automatic Blueprint graph generation should be added (`OnClicked -> SetActiveWidgetIndex`).
+- Tag-based alternative option.
+- Multi-stop gradients and arbitrary angles.
 
-### v1.2+（社区驱动）
+### v1.2+ (community driven)
 
-- 高级交互、响应式适配、设计系统同步等
+- Advanced interaction, responsive adaptation, design-system sync, and similar follow-up areas.
 
 ---
-
 ## 关键技术决策记录
 
 ### 决策 1：CanContainContent 从 false 改为 true（历史探索，当前未采纳为 release 路线）

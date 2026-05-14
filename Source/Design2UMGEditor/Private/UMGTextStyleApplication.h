@@ -19,20 +19,12 @@ namespace UMGTextStyleApplication
 	bool IsTypedIconFontWidget(const FUMGWidgetNode& Node);
 	FLinearColor NormalizeTypedTextColor(const FLinearColor& Color);
 
-	void ApplyLegacyTextFontInfo(
-		FSlateFontInfo& FontInfo,
-		const FUMGPropertyBag& Properties,
-		bool bIsIconFontWidget,
-		bool& bFontChanged);
 	void ApplyTypedFontInfo(FSlateFontInfo& FontInfo, const FUMGWidgetNode& Node, bool& bFontChanged);
 
-	void ApplyLegacyTextLayoutProps(UTextLayoutWidget* TextWidget, const FUMGPropertyBag& Properties);
-	void ApplyLegacyTextLayoutProps(UEditableTextBox* TextWidget, const FUMGPropertyBag& Properties);
 	void ApplyTypedTextLayoutProps(UTextLayoutWidget* TextWidget, const FUMGWidgetNode& Node);
 
 	FSlateBrush MakeTextDecorationBrush(const FLinearColor& Color);
 	FTextBlockStyle ResolveRichTextBaseStyle(const URichTextBlock* RichTextBlock);
-	void ApplyRichTextDefaultStyle(URichTextBlock* RichTextBlock, const FUMGPropertyBag& Properties);
 	void ApplyRichTextDefaultStyle(URichTextBlock* RichTextBlock, const FUMGWidgetNode& Node);
 	void ApplyRichTextStyleRows(URichTextBlock* RichTextBlock, const FString& StyleRowsJson);
 }

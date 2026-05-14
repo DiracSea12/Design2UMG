@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "Misc/AutomationTest.h"
 #include "PenParser.h"
 #include "Design2UMGConverter.h"
@@ -11,8 +11,10 @@
 #include "UMGJsonSerializer.h"
 #include "UMGPropertyKeys.h"
 #include "UMGSchemaSourceExtensions.h"
+#include "UMGTextStyleApplication.h"
 #include "UMGValueParsing.h"
 #include "UMGWidgetNodeAccess.h"
+#include "UMGWidgetNodeProceduralResourceAccess.h"
 #include "UMGWidgetUtils.h"
 #include "FigmaParser.h"
 #include "DesignPathRasterizer.h"
@@ -41,6 +43,15 @@
 using namespace Design2UMGTestUtils;
 namespace
 {
+	FUMGProceduralResourceRequest BuildProceduralRequestForTest(FAutomationTestBase& Test, const FUMGWidgetNode& Node)
+	{
+		FUMGProceduralResourceRequest Request;
+		Test.TestTrue(
+			TEXT("Typed procedural resource request builds"),
+			Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Node, Request));
+		return Request;
+	}
+
 	struct FLuminosityOpacityCapScope
 	{
 		explicit FLuminosityOpacityCapScope(const float NewValue, const bool bEnableOverride = true)
@@ -182,10 +193,10 @@ namespace
 	}
 
 }
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPropertyBagEmptyStringStillAppliesTest,
-	"Design2UMG.PropertyBag.EmptyStringApplies",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTypedNodeEmptyStringStillAppliesTest,
+	"Design2UMG.PropertyApplier.TypedEmptyStringApplies",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FPropertyBagEmptyStringStillAppliesTest::RunTest(const FString& Parameters)
+bool FTypedNodeEmptyStringStillAppliesTest::RunTest(const FString& Parameters)
 {
 	UEditableTextBox* Widget = NewObject<UEditableTextBox>(GetTransientPackageAsObject());
 	TestTrue(TEXT("EditableTextBox created"), Widget != nullptr);
@@ -197,51 +208,13 @@ bool FPropertyBagEmptyStringStillAppliesTest::RunTest(const FString& Parameters)
 	Widget->SetText(FText::FromString(TEXT("Existing Text")));
 	Widget->SetHintText(FText::FromString(TEXT("Existing Hint")));
 
-	FUMGPropertyBag Properties;
-	Properties.Add(TEXT("Text"), TEXT(""));
-	Properties.Add(TEXT("HintText"), TEXT(""));
-	FUMGWidgetUtils::ApplyWidgetProperties(Widget, Properties);
+	FUMGWidgetNode Node;
+	Node.Text.Text = FString();
+	Node.Text.HintText = FString();
+	FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node);
 
 	TestTrue(TEXT("Explicit empty Text still clears widget text"), Widget->GetText().ToString().IsEmpty());
 	TestTrue(TEXT("Explicit empty HintText still clears widget hint"), Widget->GetHintText().ToString().IsEmpty());
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPropertyBagDynamicFloatKeyTest,
-	"Design2UMG.PropertyBag.DynamicFloatKey",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FPropertyBagDynamicFloatKeyTest::RunTest(const FString& Parameters)
-{
-	FUMGPropertyBag Properties;
-	Properties.Add(TEXT("BoxShadow_0_OffsetX"), TEXT("12.5"));
-	Properties.Add(TEXT("BoxShadow_0_OffsetY"), TEXT("-4.25"));
-	Properties.Add(TEXT("BoxShadow_0_Blur"), TEXT("16"));
-
-	float OffsetX = 0.0f;
-	float OffsetY = 0.0f;
-	float Blur = 0.0f;
-	TestTrue(TEXT("Dynamic OffsetX key is readable as float"), Properties.TryGetFloat(TEXT("BoxShadow_0_OffsetX"), OffsetX));
-	TestTrue(TEXT("Dynamic OffsetY key is readable as float"), Properties.TryGetFloat(TEXT("BoxShadow_0_OffsetY"), OffsetY));
-	TestTrue(TEXT("Dynamic Blur key is readable as float"), Properties.TryGetFloat(TEXT("BoxShadow_0_Blur"), Blur));
-	TestEqual(TEXT("OffsetX value preserved"), OffsetX, 12.5f);
-	TestEqual(TEXT("OffsetY value preserved"), OffsetY, -4.25f);
-	TestEqual(TEXT("Blur value preserved"), Blur, 16.0f);
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPropertyBagDynamicColorKeyTest,
-	"Design2UMG.PropertyBag.DynamicColorKey",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FPropertyBagDynamicColorKeyTest::RunTest(const FString& Parameters)
-{
-	FUMGPropertyBag Properties;
-	const FLinearColor ExpectedColor(0.1f, 0.2f, 0.3f, 0.4f);
-	const FString SerializedColor = Design2UMGWidgetNodeAccess::SerializeWidgetColor(ExpectedColor);
-	Properties.Add(TEXT("BoxShadow_0_Color"), SerializedColor);
-
-	FLinearColor ActualColor = FLinearColor::Transparent;
-	TestTrue(TEXT("Dynamic box shadow color key is readable as color"), Properties.TryGetColor(TEXT("BoxShadow_0_Color"), ActualColor));
-	TestTrue(TEXT("Dynamic box shadow color follows serialized color value"), ActualColor.Equals(FUMGValueParser::ParseColor(SerializedColor), 0.0001f));
 	return true;
 }
 

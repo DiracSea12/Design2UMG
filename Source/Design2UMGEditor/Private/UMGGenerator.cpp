@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGGenerator.h"
 #include "Design2UMGGenerationSettingsSnapshot.h"
@@ -337,11 +337,17 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 				Node.Slot.bAutoSize ? 1 : 0);
 
 			FString PropsInfo;
-			const FUMGPropertyBag TypedProperties = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
-			TypedProperties.ForEachSerialized([&PropsInfo](const FString& Key, const FString& Value)
+			Design2UMGWidgetNodeAccess::ForEachStaticTypedWidgetPropertyKey([&PropsInfo, &Node](const TCHAR* Key)
 			{
-				if (Key == TEXT("PathGeometry") || Key == TEXT("MaterialParams")) return;
-				PropsInfo += FString::Printf(TEXT(" %s=%s"), *Key, *Value.Left(40));
+				FString Value;
+				if (!Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, Key, Value)
+					|| Value.IsEmpty()
+					|| FCString::Strcmp(Key, TEXT("PathGeometry")) == 0
+					|| FCString::Strcmp(Key, TEXT("MaterialParams")) == 0)
+				{
+					return;
+				}
+				PropsInfo += FString::Printf(TEXT(" %s=%s"), Key, *Value.Left(40));
 			});
 
 			UE_LOG(LogDesign2UMG, Verbose, TEXT("TREE: %s[%s] '%s' bounds=(%.1f,%.1f,%.1f,%.1f) %s%s"),

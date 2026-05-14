@@ -312,14 +312,64 @@ def infer_legacy_formal_candidate(run_root: Path, summary: dict) -> bool:
     return False
 
 
+def load_historical_validation(run_root: Path) -> dict | None:
+    validation_path = run_root / "validation_against_historical_best.json"
+    if not validation_path.is_file():
+        return None
+
+    try:
+        payload = load_json(validation_path)
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def classify_summary_admissibility(run_root: Path, summary: dict) -> tuple[bool, str]:
+    blocked_cases = summary.get("blocked_cases")
+    if isinstance(blocked_cases, int) and blocked_cases > 0:
+        return False, "summary_blocked_cases"
+
+    completeness = summary.get("completeness") or {}
+    if isinstance(completeness, dict) and bool(completeness.get("blocked")):
+        return False, "summary_completeness_blocked"
+
+    no_regression = summary.get("no_regression") or {}
+    if isinstance(no_regression, dict):
+        no_regression_available = no_regression.get("available")
+        no_regression_failed = no_regression.get("failed")
+        if (
+            isinstance(no_regression_available, int)
+            and no_regression_available > 0
+            and isinstance(no_regression_failed, int)
+            and no_regression_failed > 0
+        ):
+            return False, "summary_no_regression_failed"
+
+    historical_validation = load_historical_validation(run_root)
+    if historical_validation is not None:
+        if bool(historical_validation.get("blocked")):
+            return False, "historical_validation_blocked"
+        historical_regressions = historical_validation.get("historical_best_regressions") or []
+        if isinstance(historical_regressions, list) and historical_regressions:
+            return False, "historical_validation_regressed"
+
+    return True, "summary_admissible"
+
+
 def classify_run_inclusion(run_root: Path, summary: dict) -> tuple[bool, str]:
     run_scope = load_run_scope(run_root)
     if run_scope is not None:
         if bool(run_scope.get("formal_admissible_candidate")):
+            summary_admissible, summary_reason = classify_summary_admissibility(run_root, summary)
+            if not summary_admissible:
+                return False, summary_reason
             return True, "run_scope"
         return False, "run_scope_excluded"
 
     if infer_legacy_formal_candidate(run_root, summary):
+        summary_admissible, summary_reason = classify_summary_admissibility(run_root, summary)
+        if not summary_admissible:
+            return False, summary_reason
         return True, "legacy_inferred"
     return False, "legacy_excluded"
 
@@ -514,7 +564,15 @@ def collect_best_cases(automation_root: Path, cache_payload: dict) -> tuple[
     source_runs: list[str] = []
     skipped_runs: list[str] = []
     included_runs_by_reason: dict[str, int] = {"run_scope": 0, "legacy_inferred": 0}
-    skipped_runs_by_reason: dict[str, int] = {"run_scope_excluded": 0, "legacy_excluded": 0}
+    skipped_runs_by_reason: dict[str, int] = {
+        "run_scope_excluded": 0,
+        "legacy_excluded": 0,
+        "summary_blocked_cases": 0,
+        "summary_completeness_blocked": 0,
+        "summary_no_regression_failed": 0,
+        "historical_validation_blocked": 0,
+        "historical_validation_regressed": 0,
+    }
     skipped_case_results: list[str] = []
     skipped_case_results_by_reason: dict[str, int] = {
         "output_collision": 0,

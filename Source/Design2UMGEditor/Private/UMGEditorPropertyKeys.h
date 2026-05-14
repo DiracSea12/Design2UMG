@@ -6,7 +6,7 @@
 
 namespace UMGPropertyKeys
 {
-	// Editor-only property bag keys consumed by appliers and editor-private tests.
+	// Editor-only keys retained only for JSON/tooling contracts outside Core typed payloads.
 	// These are intentionally outside Design2UMGCore/Public because current code
 	// has no Core typed-property inference, serialization, or resource use.
 	inline constexpr const TCHAR* ColumnFill = TEXT("ColumnFill");

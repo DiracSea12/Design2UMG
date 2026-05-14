@@ -550,12 +550,9 @@ bool FPublicSurfacePostReviewFixesGuardTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Color helper still parses typed color"), Design2UMGWidgetNodeAccess::TryGetWidgetColor(Widget, UMGPropertyKeys::Color, ParsedColor));
 	TestEqual(TEXT("Typed color payload remains unchanged"), ParsedColor.ToFColor(true), Widget.Text.Color.GetValue().ToFColor(true));
 
-	FUMGPropertyBag TypedBag;
-	Design2UMGWidgetNodeAccess::AddTypedWidgetPropertyIfPresent(TypedBag, Widget, UMGPropertyKeys::Text);
-
-	FString BagText;
-	TestTrue(TEXT("Public bag helper still writes explicit empty text"), TypedBag.TryGetString(UMGPropertyKeys::Text, BagText));
-	TestEqual(TEXT("Bag helper preserves explicit empty string"), BagText, FString());
+	FString TypedText;
+	TestTrue(TEXT("Typed string helper returns explicit empty text"), Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Widget, UMGPropertyKeys::Text, TypedText));
+	TestEqual(TEXT("Typed string helper preserves explicit empty string"), TypedText, FString());
 
 	return true;
 }

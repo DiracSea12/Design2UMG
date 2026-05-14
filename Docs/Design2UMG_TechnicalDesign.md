@@ -1448,19 +1448,12 @@ UTexture2D* GenerateGradientTexture(const FPenGradient& Gradient, int32 Width, i
 
 ### 3.16 Typed Property Migration Status
 
-当前强类型收口已经进入“typed-first + shrinking legacy bag”阶段：
+The typed-property migration has reached the direct typed-consumption stage:
 
-- `WidgetStyle / TextData / Brush / Effect / PathData / Render / WidgetState` 已有 typed schema
-- `UMGJsonParser` 解析后只保留当前 typed schema；旧 UMG JSON 兼容不再作为持续扩张目标
-- `UMGJsonParser` 已移除 `CanvasSlot` / `Slots` / 节点平铺 property 入口等纯旧 UMG JSON 旁路，只保留当前 typed 主链
-- 运行时 `ApplyWidgetProperties(UWidget*, FUMGWidgetNode)` 统一走 merged effective bag，并仅对少数会受量化或运行时对象重建影响的 typed 字段做精度补写
-- typed 空字符串 override 现在是合法 payload，可阻止回退到同名 legacy key
+- `WidgetStyle / TextData / Brush / Effect / PathData / Render / WidgetState` are current typed schema owners.
+- `UMGJsonParser` keeps only the current typed schema after parsing; old UMG JSON compatibility is not a continuing expansion target.
+- `UMGJsonParser` has removed old pure-UMG JSON side channels such as `CanvasSlot`, `Slots`, and flattened node properties, leaving the current typed main path.
+- `ApplyWidgetProperties(UWidget*, FUMGWidgetNode)` consumes typed payloads directly. Brush, text, render, widget state, and procedural resource paths no longer rebuild a generic property store for final application.
+- Explicit empty typed string overrides are valid payload values and can intentionally block same-name fallback behavior.
 
-当前仍保留 `Properties`，但它的角色已经收缩为：
-
-- 尚未 typed 化的 widget-specific 参数承载层
-
-本轮不继续做“删除整个 legacy bag”有两个原因：
-
-- 仍有一批 class-specific runtime 参数通过 `FUMGPropertyBag` applier 消费，直接删除会破坏当前运行时链路
-- 这轮目标是收缩 legacy 表面面积，而不是扩张到新的 widget-specific schema 改造
+Current extension rule: add new behavior to the typed owner that owns the domain, or introduce a narrow typed request DTO for a specific procedural/resource need. Do not reintroduce a broad property bag as a shortcut for final UMG consumption.

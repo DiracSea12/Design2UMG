@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -12,6 +12,7 @@
 #include "UMGPropertyKeys.h"
 #include "UMGValueParser.h"
 #include "UMGWidgetNodeAccess.h"
+#include "UMGWidgetNodeProceduralResourceAccess.h"
 #include "VisualMapper.h"
 
 namespace
@@ -253,11 +254,10 @@ bool FWidgetNodeAccessExplicitNoDrawTypePresenceTest::RunTest(const FString& Par
 	TestTrue(TEXT("Presence helper treats explicit NoDrawType as present"), HasWidgetProperty(Node, UMGPropertyKeys::DrawAs));
 	TestEqual(TEXT("Explicit NoDrawType stays queryable"), GetWidgetProperty(Node, UMGPropertyKeys::DrawAs), FString(TEXT("NoDrawType")));
 
-	FUMGPropertyBag TypedProperties = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Node);
 	FString DrawAs;
-	TestTrue(TEXT("Typed property bag keeps explicit NoDrawType"),
-		TypedProperties.TryGetString(UMGPropertyKeys::DrawAs, DrawAs));
-	TestEqual(TEXT("Typed property bag explicit NoDrawType stays serialized"), DrawAs, FString(TEXT("NoDrawType")));
+	TestTrue(TEXT("Typed draw-as helper keeps explicit NoDrawType"),
+		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::DrawAs, DrawAs));
+	TestEqual(TEXT("Typed draw-as helper keeps serialized value"), DrawAs, FString(TEXT("NoDrawType")));
 	return true;
 }
 
@@ -477,15 +477,19 @@ bool FGradientTypedPayloadMaterialParamsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Material params include radial size"), MaterialParams.Contains(TEXT("\"SizeHeight\":1.3500")));
 	TestTrue(TEXT("Material params include rotation"), MaterialParams.Contains(TEXT("\"Rotation\":37.5000")));
 
-	const FUMGPropertyBag PropertyBag = Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(Widget);
-	FString BagMaterialRef;
-	FString BagMaterialParams;
-	TestTrue(TEXT("Typed property bag exposes gradient material ref"),
-		PropertyBag.TryGetString(UMGPropertyKeys::MaterialRef, BagMaterialRef));
-	TestTrue(TEXT("Typed property bag exposes gradient material params"),
-		PropertyBag.TryGetString(UMGPropertyKeys::MaterialParams, BagMaterialParams));
-	TestEqual(TEXT("Bag material ref"), BagMaterialRef, FString(TEXT("radialgradient")));
-	TestEqual(TEXT("Bag material params"), BagMaterialParams, MaterialParams);
+	FUMGProceduralResourceRequest Request;
+	TestTrue(TEXT("Typed procedural request exposes gradient material data"),
+		Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Widget, Request));
+	TestEqual(TEXT("Request material ref"), Request.MaterialRef, FString(TEXT("radialgradient")));
+	TestEqual(TEXT("Request material params"), Request.MaterialParams.Get(FString()), MaterialParams);
+
+	Widget.Brush.MaterialParams = TEXT("{\"ColorCenter\":\"#01020304\",\"ColorEdge\":\"#05060708\"}");
+	FUMGProceduralResourceRequest ExistingParamsRequest;
+	TestTrue(TEXT("Typed procedural request keeps authored material params"),
+		Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Widget, ExistingParamsRequest));
+	TestEqual(TEXT("Request keeps authored material params"),
+		ExistingParamsRequest.MaterialParams.Get(FString()),
+		FString(TEXT("{\"ColorCenter\":\"#01020304\",\"ColorEdge\":\"#05060708\"}")));
 	return true;
 }
 

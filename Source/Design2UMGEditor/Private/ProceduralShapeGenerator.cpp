@@ -885,7 +885,7 @@ UTexture2D* FProceduralShapeGenerator::ApplyAffineCrop(UTexture2D* Source, float
 	return Result;
 }
 
-UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& MaterialRef, const FUMGPropertyBag& Properties, UObject* Outer)
+UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FUMGProceduralResourceRequest& Request, UObject* Outer)
 {
 	FLinearColor Color = FLinearColor::White;
 	FLinearColor ColorStart = FLinearColor::White;
@@ -903,11 +903,10 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 	FVector2D RadialCenter(0.5f, 0.5f);
 	FVector2D RadialSize(1.0f, 1.0f);
 
-	FString ParamsStr;
-	if (Properties.TryGetString(UMGPropertyKeys::MaterialParams, ParamsStr))
+	if (Request.MaterialParams.IsSet())
 	{
 		TSharedPtr<FJsonObject> Params;
-		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ParamsStr);
+		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Request.MaterialParams.GetValue());
 		if (FJsonSerializer::Deserialize(Reader, Params) && Params.IsValid())
 		{
 			FString ColorStr;
@@ -986,14 +985,12 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 		}
 	}
 
-	float WidthValue = 64.0f;
-	float HeightValue = 64.0f;
-	Properties.TryGetFloat(UMGPropertyKeys::WidthOverride, WidthValue);
-	Properties.TryGetFloat(UMGPropertyKeys::HeightOverride, HeightValue);
+	const float WidthValue = Request.WidthOverride.Get(64.0f);
+	const float HeightValue = Request.HeightOverride.Get(64.0f);
 	const int32 Width = FMath::Max(1, FMath::RoundToInt(WidthValue));
 	const int32 Height = FMath::Max(1, FMath::RoundToInt(HeightValue));
 
-	const FString Shape = MaterialRef.ToLower();
+	const FString Shape = Request.MaterialRef.ToLower();
 	if (Shape == TEXT("circle") || Shape == TEXT("ellipse"))
 		return GenerateCircle(FMath::Max(Width, Height), Color, Outer);
 	if (Shape == TEXT("ring"))
@@ -1045,8 +1042,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FString& Ma
 	}
 	if (Shape == TEXT("boxshadow"))
 	{
-		float BlurPx = 0.0f;
-		Properties.TryGetFloat(UMGPropertyKeys::ShadowBlur, BlurPx);
+		const float BlurPx = Request.ShadowBlur.Get(0.0f);
 		const float BlurPadding = BoxShadowBlurPadding;
 
 		if (CornerRadii[0] >= 0.f)

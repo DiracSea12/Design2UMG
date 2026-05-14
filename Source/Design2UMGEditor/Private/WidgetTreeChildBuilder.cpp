@@ -247,10 +247,9 @@ namespace
 		bFallbackAppend = false;
 
 		FName TargetSlot = NAME_None;
-		FString FallbackSlotName;
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(ChildNode, UMGPropertyKeys::NamedSlot, FallbackSlotName);
-		FString RequestedSlotName;
-		if (!Design2UMGWidgetNodeAccess::TryGetWidgetString(ChildNode, UMGPropertyKeys::SlotName, RequestedSlotName) || RequestedSlotName.IsEmpty())
+		const FString FallbackSlotName = ChildNode.WidgetStyle.NamedSlot.Get(FString());
+		FString RequestedSlotName = ChildNode.WidgetStyle.SlotName.Get(FString());
+		if (RequestedSlotName.IsEmpty())
 		{
 			RequestedSlotName = FallbackSlotName;
 		}
@@ -334,7 +333,7 @@ namespace
 		{
 			if (Node.Children.Num() > 0)
 			{
-				UE_LOG(LogDesign2UMG, Warning, TEXT("NamedSlot 宿主 '%s' 没有槽位名称但有 %d 个子控件"),
+				UE_LOG(LogDesign2UMG, Warning, TEXT("NamedSlot host '%s' has no slot names but has %d child widgets."),
 					*Node.Name, Node.Children.Num());
 			}
 			return;
@@ -358,25 +357,25 @@ namespace
 				bFallbackAppend);
 			if (TargetSlot.IsNone())
 			{
-				UE_LOG(LogDesign2UMG, Warning, TEXT("NamedSlot 宿主 '%s' 没有可用槽位，子控件 '%s' 已跳过"),
+				UE_LOG(LogDesign2UMG, Warning, TEXT("NamedSlot host '%s' has no available slot; child widget '%s' was skipped."),
 					*Node.Name, *ChildNode.Name);
 				continue;
 			}
 
 			if (HasMeaningfulSlotData(ChildNode.Slot))
 			{
-				UE_LOG(LogDesign2UMG, Warning, TEXT("NamedSlot 子控件 '%s' 的 Slot 不生效，已忽略（宿主 '%s'）"),
+				UE_LOG(LogDesign2UMG, Warning, TEXT("NamedSlot child '%s' has slot data that cannot be applied and was ignored (host '%s')."),
 					*ChildNode.Name, *Node.Name);
 			}
 
 			if (bFallbackAppend)
 			{
-				UE_LOG(LogDesign2UMG, Warning, TEXT("NamedSlot 宿主 '%s' 槽位已满，子控件 '%s' 追加到 '%s'"),
+				UE_LOG(LogDesign2UMG, Warning, TEXT("NamedSlot host '%s' is full; child widget '%s' was appended to '%s'."),
 					*Node.Name, *ChildNode.Name, *TargetSlot.ToString());
 			}
 			else if (NamedSlotHost->GetContentForSlot(TargetSlot) != nullptr)
 			{
-				UE_LOG(LogDesign2UMG, Warning, TEXT("NamedSlot '%s' 在 '%s' 已存在内容，合并子控件 '%s'"),
+				UE_LOG(LogDesign2UMG, Warning, TEXT("NamedSlot '%s' on '%s' already has content; merging child widget '%s'."),
 					*TargetSlot.ToString(), *Node.Name, *ChildNode.Name);
 			}
 

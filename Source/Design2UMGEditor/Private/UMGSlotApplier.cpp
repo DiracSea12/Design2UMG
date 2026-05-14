@@ -236,22 +236,22 @@ void FUMGWidgetUtils::ApplySlotProperties(UPanelSlot* Slot, const FUMGSlotData& 
 	{
 		if (bHasNonDefaultPadding || bHasNonDefaultBox || bHasNonDefaultGrid)
 		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("CanvasPanelSlot 忽略非Canvas字段（Padding/HAlign/VAlign/SizeRule/FillWeight/Row/Column等）"));
+			UE_LOG(LogDesign2UMG, Warning, TEXT("CanvasPanelSlot ignored non-canvas fields (Padding/HAlign/VAlign/SizeRule/FillWeight/Row/Column, etc.)."));
 		}
 	}
 	else
 	{
 		if (bHasNonDefaultCanvas)
 		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("%s 忽略 Anchors/Offsets/Alignment"), *Slot->GetClass()->GetName());
+			UE_LOG(LogDesign2UMG, Warning, TEXT("%s ignored Anchors/Offsets/Alignment."), *Slot->GetClass()->GetName());
 		}
 		if (!bIsGrid && bHasNonDefaultGrid)
 		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("%s 忽略 Row/Column/RowSpan/ColumnSpan"), *Slot->GetClass()->GetName());
+			UE_LOG(LogDesign2UMG, Warning, TEXT("%s ignored Row/Column/RowSpan/ColumnSpan."), *Slot->GetClass()->GetName());
 		}
 		if (Slot->IsA<UScaleBoxSlot>() && bHasNonDefaultPadding)
 		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("ScaleBoxSlot 不支持Padding"));
+			UE_LOG(LogDesign2UMG, Warning, TEXT("ScaleBoxSlot does not support Padding."));
 		}
 	}
 
@@ -261,7 +261,7 @@ void FUMGWidgetUtils::ApplySlotProperties(UPanelSlot* Slot, const FUMGSlotData& 
 	}
 	else
 	{
-		UE_LOG(LogDesign2UMG, Warning, TEXT("未支持的Slot类型: %s"), *Slot->GetClass()->GetName());
+		UE_LOG(LogDesign2UMG, Warning, TEXT("Unsupported slot type: %s"), *Slot->GetClass()->GetName());
 	}
 }
 

@@ -454,13 +454,3 @@ bool Design2UMGWidgetNodeTypedPropertyAccess::TryParseWidgetVector4String(const 
 	OutValue = FVector4(X, Y, Z, W);
 	return true;
 }
-
-void Design2UMGWidgetNodeTypedPropertyAccess::AddTypedWidgetPropertyIfPresent(FUMGPropertyBag& Bag, const FUMGWidgetNode& Node, const TCHAR* Key)
-{
-	FString TypedValue;
-	if (TryGetTypedWidgetString(Node, Key, TypedValue))
-	{
-		Bag.Remove(Key);
-		Bag.Add(Key, TypedValue);
-	}
-}

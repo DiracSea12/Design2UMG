@@ -5,7 +5,7 @@
 ## Typed Property Status
 
 - 当前常用的 `WidgetStyle / TextData / Brush / Effect / PathData / Render / WidgetState` 字段已进入 typed schema。
-- `UMGJson` 解析后会清理同名 legacy `Properties`；运行时统一走 typed-first 的 merged effective bag，并只对少数量化敏感 typed 字段做精度补写。
+- `UMGJson` parsing removes same-name legacy `Properties`; runtime consumers use the typed payload merge directly, with precision preservation only for the few quantization-sensitive typed fields.
 - `Properties` 仍保留给尚未 typed 化的 widget-specific 参数；新公共字段不应再继续落回 legacy key。
 - 编辑器侧贴图导入缓存已按源身份隔离：本地/远程图片资产使用 `source + content-version` 复合键，本地 Figma 派生图按 `源文档 + 源文件身份` 隔离，避免跨来源串用和共享资产污染。
 
@@ -205,7 +205,7 @@
 
 | Property | Reason |
 |----------|--------|
-| Legacy `Properties` 全量删除 | 当前仍有若干 widget-specific 运行时参数通过 class-specific `FUMGPropertyBag` applier 消费，直接删除会破坏当前未迁移字段与运行时链路 |
+| Legacy `Properties` full removal | Completed for current final consumers: widget appliers, resource binders, and procedural material/image flows now use typed payloads or narrow typed request DTOs instead of a generic property bag |
 | Foreground blur full semantic parity | 当前走 `RetainerBox + EffectMaterial` 近似，不是完整设计器语义还原 |
 | Inner shadow full semantic parity | 当前为单层 `RetainerBox + EffectMaterial` 近似，不是完整设计器/浏览器语义 |
 | Prototype overlay full layer semantics / generalized history graph | 当前 overlay/back 已进入 typed runtime contract，但仍以 `WidgetSwitcher` 页面切换为中心，没有独立浮层系统或通用状态机/事件图生成链 |

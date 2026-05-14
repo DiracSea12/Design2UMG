@@ -1,4 +1,4 @@
-# Architecture
+﻿# Architecture
 
 Design2UMG converts design-side documents into Unreal Engine 5 UMG Widget Blueprints through a layered, source-agnostic pipeline.
 
@@ -117,16 +117,15 @@ In practice, a new source format needs three edits:
 ### Adding a new Widget type mapping
 
 1. Add a type mapping entry in `FDesignTypeMapper` (`Source/Design2UMGCore/Private/DesignTypeMapper.cpp`).
-2. For widgets that only need property-bag data: add a handler function and register it in `GetPropsApplierMap()` inside `UMGPropertyApplierInternal` namespace (`Source/Design2UMGEditor/Private/UMGPropertyApplierInternal.cpp`). Signature: `void(UWidget*, const FUMGPropertyBag&)`.
-3. For widgets that also need typed-node data (e.g. text widgets): additionally add a branch in `ApplyWidgetProperties(UWidget*, const FUMGWidgetNode&)` in the same file.
-4. To add typed payload data: add a new struct in `UMGSchemaTypedPayloads.h` and hold it in `FUMGWidgetNode` via `TUniquePtr`.
+2. Add a typed-node handler function and register it in `GetPropsApplierMap()` inside the `UMGPropertyApplierInternal` namespace (`Source/Design2UMGEditor/Private/UMGPropertyApplierInternal.cpp`). Signature: `void(UWidget*, const FUMGWidgetNode&)`.
+3. Add or reuse the narrow typed payload / request DTO that owns the behavior. Text, brush, render, widget style, widget state, and procedural resource flows already have typed owners.
+4. To add new typed payload data, add a field or struct in `UMGSchemaTypedPayloads.h` and hold it from `FUMGWidgetNode` through the existing local typed payload pattern.
 
 Reference signatures:
 
 ```cpp
 static FString FDesignTypeMapper::MapNodeTypeToWidget(EDesignNodeType Type, EDesignLayout Layout);
 const TMap<UClass*, FApplyPropsFunc>& GetPropsApplierMap();
-void ApplyWidgetProperties(UWidget* Widget, const FUMGPropertyBag& Properties);
 void ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNode& Node);
 ```
 
@@ -135,12 +134,12 @@ Contributor checklist by scenario:
 1. New design node kind -> widget class:
    - file: `Source/Design2UMGCore/Private/DesignTypeMapper.cpp`
    - function: `FDesignTypeMapper::MapNodeTypeToWidget(...)`
-2. New widget that only consumes property-bag fields:
+2. New widget that consumes current typed payloads:
    - file: `Source/Design2UMGEditor/Private/UMGPropertyApplierInternal.cpp`
    - function: `GetPropsApplierMap()`
-3. New widget that also consumes typed payload:
+3. New widget that needs a new typed owner or DTO:
    - file: `Source/Design2UMGEditor/Private/UMGPropertyApplierInternal.cpp`
-   - functions: `GetPropsApplierMap()` and `ApplyWidgetProperties(UWidget*, const FUMGWidgetNode&)`
+   - functions: `GetPropsApplierMap()` and the relevant typed payload / request builder
 
 ### Extending the IR without breaking existing conversions
 
@@ -173,4 +172,4 @@ Do not introduce new `bHas*` + value shadow pairs into `DesignSchema.h`-style tr
 
 `UMGPropertyApplierInternal.cpp` stays in `Design2UMGEditor` for this release by design. The current supported product path is editor-side import and Widget Blueprint generation, so mutating `UWidget` instances belongs with the editor generation pipeline instead of becoming a Core public contract.
 
-Re-evaluate this placement only if the supported product scope explicitly adds a runtime module, or if the `UWidget` mutation pipeline is split from editor-side generation into a separately supported runtime path. Until then, keep Core responsible for typed schema, serializers, and property-bag construction, and keep final `UWidget` mutation in the Editor module.
+Re-evaluate this placement only if the supported product scope explicitly adds a runtime module, or if the `UWidget` mutation pipeline is split from editor-side generation into a separately supported runtime path. Until then, keep Core responsible for typed schema and narrow typed inspection/request helpers, and keep final `UWidget` mutation in the Editor module.

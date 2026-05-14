@@ -43,13 +43,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGradientProceduralLinearMultiStopTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FGradientProceduralLinearMultiStopTest::RunTest(const FString& Parameters)
 {
-	FUMGPropertyBag Properties;
-	Properties.Add(UMGPropertyKeys::WidthOverride, TEXT("9"));
-	Properties.Add(UMGPropertyKeys::HeightOverride, TEXT("9"));
-	Properties.Add(UMGPropertyKeys::MaterialParams,
-		TEXT("{\"Rotation\":45.0000,\"Stops\":[{\"Pos\":0.0000,\"Color\":\"#FF0000FF\"},{\"Pos\":0.5000,\"Color\":\"#00FF00FF\"},{\"Pos\":1.0000,\"Color\":\"#0000FFFF\"}]}"));
+	FUMGProceduralResourceRequest Request;
+	Request.MaterialRef = TEXT("gradientlinear");
+	Request.WidthOverride = 9.0f;
+	Request.HeightOverride = 9.0f;
+	Request.MaterialParams = TEXT("{\"Rotation\":45.0000,\"Stops\":[{\"Pos\":0.0000,\"Color\":\"#FF0000FF\"},{\"Pos\":0.5000,\"Color\":\"#00FF00FF\"},{\"Pos\":1.0000,\"Color\":\"#0000FFFF\"}]}");
 
-	UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(TEXT("gradientlinear"), Properties, GetTransientPackage());
+	UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(Request, GetTransientPackage());
 	TestNotNull(TEXT("Linear multi-stop procedural texture is generated"), Texture);
 	if (!Texture)
 	{
@@ -77,13 +77,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGradientProceduralRadialGeometryTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FGradientProceduralRadialGeometryTest::RunTest(const FString& Parameters)
 {
-	FUMGPropertyBag Properties;
-	Properties.Add(UMGPropertyKeys::WidthOverride, TEXT("17"));
-	Properties.Add(UMGPropertyKeys::HeightOverride, TEXT("17"));
-	Properties.Add(UMGPropertyKeys::MaterialParams,
-		TEXT("{\"CenterX\":0.2500,\"CenterY\":0.5000,\"SizeWidth\":0.5000,\"SizeHeight\":1.2500,\"Rotation\":90.0000,\"Stops\":[{\"Pos\":0.0000,\"Color\":\"#FF0000FF\"},{\"Pos\":0.5000,\"Color\":\"#00FF00FF\"},{\"Pos\":1.0000,\"Color\":\"#0000FFFF\"}]}"));
+	FUMGProceduralResourceRequest Request;
+	Request.MaterialRef = TEXT("radialgradient");
+	Request.WidthOverride = 17.0f;
+	Request.HeightOverride = 17.0f;
+	Request.MaterialParams = TEXT("{\"CenterX\":0.2500,\"CenterY\":0.5000,\"SizeWidth\":0.5000,\"SizeHeight\":1.2500,\"Rotation\":90.0000,\"Stops\":[{\"Pos\":0.0000,\"Color\":\"#FF0000FF\"},{\"Pos\":0.5000,\"Color\":\"#00FF00FF\"},{\"Pos\":1.0000,\"Color\":\"#0000FFFF\"}]}");
 
-	UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(TEXT("radialgradient"), Properties, GetTransientPackage());
+	UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(Request, GetTransientPackage());
 	TestNotNull(TEXT("Radial procedural texture is generated"), Texture);
 	if (!Texture)
 	{

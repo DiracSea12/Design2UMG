@@ -2,14 +2,13 @@
 #include "UMGBrushPropertyApplier.h"
 
 #include "Design2UMGEffectMaterialBuilder.h"
-#include "Design2UMGLog.h"
 #include "DesignPathRasterizer.h"
 #include "DesignResourceResolver.h"
-#include "ProceduralShapeGenerator.h"
 #include "UMGImageCropUtils.h"
-#include "UMGEditorPropertyKeys.h"
 #include "UMGPropertyApplierSupport.h"
-#include "UMGPropertyKeys.h"
+#include "UMGValueParsing.h"
+#include "UMGWidgetNodeAccess.h"
+#include "UMGWidgetNodeProceduralResourceAccess.h"
 
 #include "Components/BackgroundBlur.h"
 #include "Components/Border.h"
@@ -20,15 +19,46 @@
 
 namespace
 {
-	using namespace UMGPropertyApplierSupport;
+	FMargin NormalizeSerializedWidgetMargin(const FMargin& Margin)
+	{
+		return FUMGValueParser::ParseMargin(
+			Design2UMGWidgetNodeAccess::SerializeWidgetMargin(Margin));
+	}
+
+	FVector4 NormalizeSerializedWidgetVector4(const FVector4& Vector)
+	{
+		FVector4 ParsedVector = Vector;
+		UMGPropertyApplierSupport::TryParseVector4(
+			Design2UMGWidgetNodeAccess::SerializeWidgetVector4(Vector),
+			ParsedVector);
+		return ParsedVector;
+	}
+
+	FLinearColor NormalizeTypedDescriptorColor(const FLinearColor& Color)
+	{
+		return FUMGValueParser::ParseColor(
+			Design2UMGWidgetNodeAccess::SerializeWidgetColor(Color));
+	}
+
+	TOptional<FLinearColor> NormalizeOptionalTypedDescriptorColor(const TOptional<FLinearColor>& Color)
+	{
+		return Color.IsSet()
+			? TOptional<FLinearColor>(NormalizeTypedDescriptorColor(Color.GetValue()))
+			: TOptional<FLinearColor>();
+	}
+
+	FString ResolveImageMode(const FUMGWidgetNode& Node)
+	{
+		return Node.WidgetStyle.ImageMode.Get(Node.Brush.Image.Mode.Get(FString()));
+	}
 
 	bool ApplyImageModeToSlateBrush(
 		FSlateBrush& Brush,
-		const FUMGPropertyBag& Properties,
+		const FUMGWidgetNode& Node,
 		TFunctionRef<void(UTexture2D*)> ApplyCroppedTexture)
 	{
-		FString Mode;
-		if (!TryGetProp(Properties, UMGPropertyKeys::ImageMode, Mode))
+		const FString Mode = ResolveImageMode(Node);
+		if (Mode.IsEmpty())
 		{
 			return false;
 		}
@@ -36,7 +66,7 @@ namespace
 		if (Mode == TEXT("Crop"))
 		{
 			UMGImageCropUtils::FImageCropRequest CropRequest;
-			if (!UMGImageCropUtils::TryBuildCropRequest(Properties, CropRequest))
+			if (!UMGImageCropUtils::TryBuildCropRequest(Node, CropRequest))
 			{
 				return false;
 			}
@@ -56,92 +86,79 @@ namespace
 
 		return false;
 	}
+
+	bool ResolveProceduralTexture(const FUMGWidgetNode& Node, UObject* Outer, UTexture2D*& OutTexture)
+	{
+		FUMGProceduralResourceRequest Request;
+		if (!Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Node, Request)
+			|| Request.MaterialRef.IsEmpty())
+		{
+			return false;
+		}
+
+		OutTexture = DesignResourceResolver::ResolveTextureFromMaterialRef(Request, Outer);
+		return OutTexture != nullptr;
+	}
+
+	FVector2D ResolveWidgetImageSize(const FUMGWidgetNode& Node, const FVector2D& DefaultSize)
+	{
+		return FVector2D(
+			Node.WidgetStyle.WidthOverride.Get(DefaultSize.X),
+			Node.WidgetStyle.HeightOverride.Get(DefaultSize.Y));
+	}
 }
 
 namespace UMGBrushPropertyApplier
 {
-	using namespace UMGPropertyApplierSupport;
-
-	void ApplyImageProps(UWidget* Widget, const FUMGPropertyBag& Properties)
+	void ApplyImageProps(UWidget* Widget, const FUMGWidgetNode& Node)
 	{
 		UImage* Image = CastChecked<UImage>(Widget);
-		FString Value;
+
 		FLinearColor ImageColor;
-		if (Properties.TryGetColor(UMGPropertyKeys::Color, ImageColor) || Properties.TryGetColor(UMGPropertyKeys::ColorAndOpacity, ImageColor))
+		if (Node.Text.Color.IsSet())
 		{
+			ImageColor = NormalizeTypedDescriptorColor(Node.Text.Color.GetValue());
 			Image->SetColorAndOpacity(ImageColor);
 		}
 
-		FLinearColor BrushTint;
-		if (Properties.TryGetColor(UMGPropertyKeys::BrushColor, BrushTint))
+		if (Node.Brush.BrushColor.IsSet())
 		{
-			Image->SetBrushTintColor(FSlateColor(BrushTint));
-		}
-		const bool bHasMaterialRef = TryGetPropAllowEmpty(Properties, UMGPropertyKeys::MaterialRef, Value);
-		const bool bExplicitEmptyMaterialRef = bHasMaterialRef && Value.IsEmpty();
-		if (bHasMaterialRef && !Value.IsEmpty())
-		{
-			if (UTexture2D* GeneratedTex = DesignResourceResolver::ResolveTextureFromMaterialRef(Value, Properties, Image))
-			{
-				Image->SetBrushFromTexture(GeneratedTex);
-				FSlateBrush GeneratedBrush = Image->GetBrush();
-				float DesiredWidth = static_cast<float>(GeneratedTex->GetSizeX());
-				float DesiredHeight = static_cast<float>(GeneratedTex->GetSizeY());
-				Properties.TryGetFloat(UMGPropertyKeys::WidthOverride, DesiredWidth);
-				Properties.TryGetFloat(UMGPropertyKeys::HeightOverride, DesiredHeight);
-				GeneratedBrush.ImageSize = FVector2D(DesiredWidth, DesiredHeight);
-				GeneratedBrush.Tiling = ESlateBrushTileType::NoTile;
-				Image->SetBrush(GeneratedBrush);
-				Image->SetDesiredSizeOverride(GeneratedBrush.ImageSize);
-				return;
-			}
+			Image->SetBrushTintColor(FSlateColor(NormalizeTypedDescriptorColor(Node.Brush.BrushColor.GetValue())));
 		}
 
-		FString Geometry;
-		if (TryGetProp(Properties, UMGPropertyKeys::PathGeometry, Geometry))
+		const bool bExplicitEmptyMaterialRef = Node.Brush.MaterialRef.IsSet() && Node.Brush.MaterialRef.GetValue().IsEmpty();
+		UTexture2D* GeneratedTexture = nullptr;
+		if (ResolveProceduralTexture(Node, Image, GeneratedTexture))
 		{
-			FString FillRuleStr;
-			if (!TryGetProp(Properties, UMGPropertyKeys::PathFillRule, FillRuleStr))
-			{
-				FillRuleStr = TEXT("nonzero");
-			}
-			TOptional<FLinearColor> FillColor;
-			FLinearColor ParsedFillColor;
-			if (Properties.TryGetColor(UMGPropertyKeys::PathFillColor, ParsedFillColor))
-			{
-				FillColor = ParsedFillColor;
-			}
+			Image->SetBrushFromTexture(GeneratedTexture);
+			FSlateBrush GeneratedBrush = Image->GetBrush();
+			GeneratedBrush.ImageSize = ResolveWidgetImageSize(
+				Node,
+				FVector2D(GeneratedTexture->GetSizeX(), GeneratedTexture->GetSizeY()));
+			GeneratedBrush.Tiling = ESlateBrushTileType::NoTile;
+			Image->SetBrush(GeneratedBrush);
+			Image->SetDesiredSizeOverride(GeneratedBrush.ImageSize);
+			return;
+		}
 
-			TOptional<FLinearColor> StrokeColor;
-			FLinearColor ParsedStrokeColor;
-			if (Properties.TryGetColor(UMGPropertyKeys::PathStrokeColor, ParsedStrokeColor))
-			{
-				StrokeColor = ParsedStrokeColor;
-			}
-
-			float StrokeThickness = 0.0f;
-			Properties.TryGetFloat(UMGPropertyKeys::PathStrokeThickness, StrokeThickness);
-
-			FString StrokeCap = TEXT("butt");
-			TryGetProp(Properties, UMGPropertyKeys::PathStrokeCap, StrokeCap);
-
-			FString StrokeJoin = TEXT("miter");
-			TryGetProp(Properties, UMGPropertyKeys::PathStrokeJoin, StrokeJoin);
-
-			float PathWidth = 64.0f;
-			float PathHeight = 64.0f;
-			Properties.TryGetFloat(UMGPropertyKeys::WidthOverride, PathWidth);
-			Properties.TryGetFloat(UMGPropertyKeys::HeightOverride, PathHeight);
-			const int32 PathPixelWidth = FMath::Max(1, FMath::RoundToInt(PathWidth));
-			const int32 PathPixelHeight = FMath::Max(1, FMath::RoundToInt(PathHeight));
+		if (Node.Path.Geometry.IsSet())
+		{
+			const FString FillRule = Node.Path.FillRule.Get(TEXT("nonzero"));
+			const TOptional<FLinearColor> FillColor = NormalizeOptionalTypedDescriptorColor(Node.Path.FillColor);
+			const TOptional<FLinearColor> StrokeColor = NormalizeOptionalTypedDescriptorColor(Node.Path.StrokeColor);
+			const float StrokeThickness = Node.Path.StrokeThickness.Get(0.0f);
+			const FString StrokeCap = Node.Path.StrokeCap.Get(TEXT("butt"));
+			const FString StrokeJoin = Node.Path.StrokeJoin.Get(TEXT("miter"));
+			const int32 PathPixelWidth = FMath::Max(1, FMath::RoundToInt(Node.WidgetStyle.WidthOverride.Get(64.0f)));
+			const int32 PathPixelHeight = FMath::Max(1, FMath::RoundToInt(Node.WidgetStyle.HeightOverride.Get(64.0f)));
 			constexpr int32 PathSupersample = 2;
 
 			if (UTexture2D* Texture = FDesignPathRasterizer::Rasterize(
-				Geometry,
+				Node.Path.Geometry.GetValue(),
 				PathPixelWidth * PathSupersample,
 				PathPixelHeight * PathSupersample,
 				FillColor,
-				FillRuleStr,
+				FillRule,
 				StrokeColor,
 				StrokeThickness,
 				StrokeCap,
@@ -157,9 +174,10 @@ namespace UMGBrushPropertyApplier
 			}
 		}
 
-		if (!bExplicitEmptyMaterialRef && TryGetPropAllowEmpty(Properties, UMGPropertyKeys::TexturePath, Value) && !Value.IsEmpty())
+		const FString TexturePath = bExplicitEmptyMaterialRef ? FString() : Node.Brush.Image.TexturePath.Get(Node.Brush.TexturePath);
+		if (!TexturePath.IsEmpty())
 		{
-			if (UTexture2D* Texture = DesignResourceResolver::LoadTextureFromPath(Value, DesignResourceResolver::ELoadMode::LoadThenFind))
+			if (UTexture2D* Texture = DesignResourceResolver::LoadTextureFromPath(TexturePath, DesignResourceResolver::ELoadMode::LoadThenFind))
 			{
 				Image->SetBrushFromTexture(Texture);
 			}
@@ -167,20 +185,18 @@ namespace UMGBrushPropertyApplier
 
 		FSlateBrush Brush = Image->GetBrush();
 		bool bBrushModified = false;
-		float WidthOverride = 0.0f;
-		if (Properties.TryGetFloat(UMGPropertyKeys::WidthOverride, WidthOverride))
+		if (Node.WidgetStyle.WidthOverride.IsSet())
 		{
-			Brush.ImageSize.X = WidthOverride;
+			Brush.ImageSize.X = Node.WidgetStyle.WidthOverride.GetValue();
 			bBrushModified = true;
 		}
-		float HeightOverride = 0.0f;
-		if (Properties.TryGetFloat(UMGPropertyKeys::HeightOverride, HeightOverride))
+		if (Node.WidgetStyle.HeightOverride.IsSet())
 		{
-			Brush.ImageSize.Y = HeightOverride;
+			Brush.ImageSize.Y = Node.WidgetStyle.HeightOverride.GetValue();
 			bBrushModified = true;
 		}
 
-		bBrushModified = ApplyImageModeToSlateBrush(Brush, Properties, [&Image, &Brush, &bBrushModified](UTexture2D* Cropped)
+		bBrushModified = ApplyImageModeToSlateBrush(Brush, Node, [&Image, &Brush, &bBrushModified](UTexture2D* Cropped)
 		{
 			Image->SetBrushFromTexture(Cropped);
 			Brush = Image->GetBrush();
@@ -189,7 +205,7 @@ namespace UMGBrushPropertyApplier
 
 		if (bBrushModified)
 		{
-			if (Brush.Tiling == ESlateBrushTileType::Both && !HasProp(Properties, UMGPropertyKeys::ImageMode))
+			if (Brush.Tiling == ESlateBrushTileType::Both && ResolveImageMode(Node).IsEmpty())
 			{
 				Brush.Tiling = ESlateBrushTileType::NoTile;
 			}
@@ -201,48 +217,45 @@ namespace UMGBrushPropertyApplier
 		}
 	}
 
-	void ApplyBorderProps(UWidget* Widget, const FUMGPropertyBag& Properties)
+	void ApplyBorderProps(UWidget* Widget, const FUMGWidgetNode& Node)
 	{
 		UBorder* Border = CastChecked<UBorder>(Widget);
 		Border->SetPadding(FMargin(0.0f));
 		FSlateBrush Brush = Border->Background;
 		bool bBrushChanged = false;
-		FString Value;
-		const bool bHasMaterialRef = TryGetPropAllowEmpty(Properties, UMGPropertyKeys::MaterialRef, Value);
-		const bool bExplicitEmptyMaterialRef = bHasMaterialRef && Value.IsEmpty();
-		bool bMaterialRefResolved = false;
-		if (bHasMaterialRef && !Value.IsEmpty())
+
+		const bool bExplicitEmptyMaterialRef = Node.Brush.MaterialRef.IsSet() && Node.Brush.MaterialRef.GetValue().IsEmpty();
+		UTexture2D* GeneratedTexture = nullptr;
+		if (ResolveProceduralTexture(Node, Border, GeneratedTexture))
 		{
-			if (UTexture2D* GeneratedTex = DesignResourceResolver::ResolveTextureFromMaterialRef(Value, Properties, Border))
+			Brush.SetResourceObject(GeneratedTexture);
+			Brush.DrawAs = ESlateBrushDrawType::Image;
+			Brush.ImageSize = FVector2D(GeneratedTexture->GetSizeX(), GeneratedTexture->GetSizeY());
+			bBrushChanged = true;
+		}
+		else
+		{
+			const FString TexturePath = bExplicitEmptyMaterialRef ? FString() : Node.Brush.Image.TexturePath.Get(Node.Brush.TexturePath);
+			if (!TexturePath.IsEmpty())
 			{
-				Brush.SetResourceObject(GeneratedTex);
-				Brush.DrawAs = ESlateBrushDrawType::Image;
-				Brush.ImageSize = FVector2D(GeneratedTex->GetSizeX(), GeneratedTex->GetSizeY());
-				bBrushChanged = true;
-				bMaterialRefResolved = true;
+				if (UTexture2D* Texture = DesignResourceResolver::LoadTextureFromPath(TexturePath, DesignResourceResolver::ELoadMode::LoadThenFind))
+				{
+					Brush.SetResourceObject(Texture);
+					Brush.DrawAs = ESlateBrushDrawType::Image;
+					Brush.ImageSize = FVector2D(Texture->GetSizeX(), Texture->GetSizeY());
+					bBrushChanged = true;
+				}
 			}
 		}
 
-		if (!bMaterialRefResolved && !bExplicitEmptyMaterialRef && TryGetPropAllowEmpty(Properties, UMGPropertyKeys::TexturePath, Value) && !Value.IsEmpty())
+		if (Node.Brush.DrawAs.IsSet())
 		{
-			if (UTexture2D* Texture = DesignResourceResolver::LoadTextureFromPath(Value, DesignResourceResolver::ELoadMode::LoadThenFind))
-			{
-				Brush.SetResourceObject(Texture);
-				Brush.DrawAs = ESlateBrushDrawType::Image;
-				Brush.ImageSize = FVector2D(Texture->GetSizeX(), Texture->GetSizeY());
-				bBrushChanged = true;
-			}
-		}
-
-		ESlateBrushDrawType::Type DrawAsType;
-		if (TryGetProp(Properties, UMGPropertyKeys::DrawAs, Value) && TryParseDrawAs(Value, DrawAsType))
-		{
-			Brush.DrawAs = DrawAsType;
+			Brush.DrawAs = Node.Brush.DrawAs.GetValue();
 			bBrushChanged = true;
 		}
 
-		const bool bHasOutlineCornerRadius = HasProp(Properties, UMGPropertyKeys::OutlineCornerRadius);
-		const bool bHasCornerRadii = HasProp(Properties, UMGPropertyKeys::CornerRadii);
+		const bool bHasOutlineCornerRadius = Node.Brush.OutlineCornerRadius >= 0.0f;
+		const bool bHasCornerRadii = Node.Brush.HasCornerRadii();
 		if (Brush.DrawAs == ESlateBrushDrawType::RoundedBox && !bHasOutlineCornerRadius && !bHasCornerRadii)
 		{
 			Brush.OutlineSettings.CornerRadii = FVector4(0, 0, 0, 0);
@@ -250,25 +263,24 @@ namespace UMGBrushPropertyApplier
 			bBrushChanged = true;
 		}
 
-		float OutlineCornerRadius = 0.0f;
-		if (Properties.TryGetFloat(UMGPropertyKeys::OutlineCornerRadius, OutlineCornerRadius))
+		if (bHasOutlineCornerRadius)
 		{
-			if (OutlineCornerRadius >= 999.0f)
+			if (Node.Brush.OutlineCornerRadius >= 999.0f)
 			{
 				Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::HalfHeightRadius;
 			}
 			else
 			{
-				const float Radius = FMath::Max(0.0f, OutlineCornerRadius);
+				const float Radius = FMath::Max(0.0f, Node.Brush.OutlineCornerRadius);
 				Brush.OutlineSettings.CornerRadii = FVector4(Radius, Radius, Radius, Radius);
 				Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
 			}
 			bBrushChanged = true;
 		}
 
-		FVector4 CornerRadii;
-		if (TryGetProp(Properties, UMGPropertyKeys::CornerRadii, Value) && TryParseVector4(Value, CornerRadii))
+		if (bHasCornerRadii)
 		{
+			const FVector4 CornerRadii = NormalizeSerializedWidgetVector4(Node.Brush.CornerRadii);
 			const float MaxRadius = FMath::Max3(CornerRadii.X, CornerRadii.Y, FMath::Max(CornerRadii.Z, CornerRadii.W));
 			if (MaxRadius >= 999.0f)
 			{
@@ -282,22 +294,19 @@ namespace UMGBrushPropertyApplier
 			bBrushChanged = true;
 		}
 
-		float OutlineThickness = 0.0f;
-		if (Properties.TryGetFloat(UMGPropertyKeys::OutlineThickness, OutlineThickness))
+		if (Node.Brush.OutlineThickness.IsSet())
 		{
-			Brush.OutlineSettings.Width = FMath::Max(0.0f, OutlineThickness);
+			Brush.OutlineSettings.Width = FMath::Max(0.0f, Node.Brush.OutlineThickness.GetValue());
 			bBrushChanged = true;
 		}
 
-		FLinearColor OutlineColor;
-		if (Properties.TryGetColor(UMGPropertyKeys::OutlineColor, OutlineColor))
+		if (Node.Brush.OutlineColor.IsSet())
 		{
-			Brush.OutlineSettings.Color = FSlateColor(OutlineColor);
+			Brush.OutlineSettings.Color = FSlateColor(NormalizeTypedDescriptorColor(Node.Brush.OutlineColor.GetValue()));
 			bBrushChanged = true;
 		}
 
-		FLinearColor BorderColor;
-		if (Properties.TryGetColor(UMGPropertyKeys::BrushColor, BorderColor))
+		if (Node.Brush.BrushColor.IsSet())
 		{
 			if (!Brush.GetResourceObject() && Brush.DrawAs != ESlateBrushDrawType::RoundedBox)
 			{
@@ -315,10 +324,9 @@ namespace UMGBrushPropertyApplier
 					bBrushChanged = true;
 				}
 			}
-			Border->SetBrushColor(BorderColor);
 		}
 
-		bBrushChanged = ApplyImageModeToSlateBrush(Brush, Properties, [&Brush](UTexture2D* Cropped)
+		bBrushChanged = ApplyImageModeToSlateBrush(Brush, Node, [&Brush](UTexture2D* Cropped)
 		{
 			Brush.SetResourceObject(Cropped);
 		}) || bBrushChanged;
@@ -328,104 +336,25 @@ namespace UMGBrushPropertyApplier
 			Border->SetBrush(Brush);
 		}
 
-		FLinearColor ContentColor;
-		if (Properties.TryGetColor(UMGPropertyKeys::ContentColor, ContentColor))
+		if (Node.Brush.BrushColor.IsSet())
 		{
-			Border->SetContentColorAndOpacity(ContentColor);
+			Border->SetBrushColor(NormalizeTypedDescriptorColor(Node.Brush.BrushColor.GetValue()));
 		}
 
-		FMargin BorderPadding;
-		if (Properties.TryGetMargin(UMGPropertyKeys::Padding, BorderPadding))
+		if (Node.WidgetStyle.Padding.IsSet())
 		{
-			Border->SetPadding(BorderPadding);
+			Border->SetPadding(NormalizeSerializedWidgetMargin(Node.WidgetStyle.Padding.GetValue()));
 		}
 
-		FMargin StrokePadding;
-		if (Properties.TryGetMargin(UMGPropertyKeys::StrokePadding, StrokePadding))
+		if (Node.WidgetStyle.StrokePadding.IsSet())
 		{
 			const FMargin Current = Border->GetPadding();
+			const FMargin StrokePadding = NormalizeSerializedWidgetMargin(Node.WidgetStyle.StrokePadding.GetValue());
 			Border->SetPadding(FMargin(
 				Current.Left + StrokePadding.Left,
 				Current.Top + StrokePadding.Top,
 				Current.Right + StrokePadding.Right,
 				Current.Bottom + StrokePadding.Bottom));
-		}
-	}
-
-	void ApplyTypedBorderBrush(UBorder* Border, const FUMGVisualBrushData& BrushData)
-	{
-		FSlateBrush Brush = Border->Background;
-		bool bChanged = false;
-
-		if (BrushData.DrawAs.IsSet())
-		{
-			Brush.DrawAs = BrushData.DrawAs.GetValue();
-			bChanged = true;
-		}
-
-		if (BrushData.OutlineCornerRadius >= 0)
-		{
-			if (BrushData.OutlineCornerRadius >= 999.0f)
-			{
-				Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::HalfHeightRadius;
-			}
-			else
-			{
-				Brush.OutlineSettings.CornerRadii = FVector4(
-					BrushData.OutlineCornerRadius,
-					BrushData.OutlineCornerRadius,
-					BrushData.OutlineCornerRadius,
-					BrushData.OutlineCornerRadius);
-				Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
-			}
-			bChanged = true;
-		}
-
-		if (BrushData.HasCornerRadii())
-		{
-			const float MaxRadius = FMath::Max3(
-				BrushData.CornerRadii.X,
-				BrushData.CornerRadii.Y,
-				FMath::Max(BrushData.CornerRadii.Z, BrushData.CornerRadii.W));
-			if (MaxRadius >= 999.0f)
-			{
-				Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::HalfHeightRadius;
-			}
-			else
-			{
-				Brush.OutlineSettings.CornerRadii = BrushData.CornerRadii;
-				Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
-			}
-			bChanged = true;
-		}
-
-		if (Brush.DrawAs == ESlateBrushDrawType::RoundedBox && BrushData.OutlineCornerRadius < 0 && !BrushData.HasCornerRadii())
-		{
-			Brush.OutlineSettings.CornerRadii = FVector4(0, 0, 0, 0);
-			Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
-			bChanged = true;
-		}
-
-		if (BrushData.OutlineThickness.IsSet())
-		{
-			Brush.OutlineSettings.Width = FMath::Max(0.0f, BrushData.OutlineThickness.GetValue());
-			bChanged = true;
-		}
-
-		if (BrushData.OutlineColor.IsSet())
-		{
-			Brush.OutlineSettings.Color = FSlateColor(BrushData.OutlineColor.GetValue());
-			bChanged = true;
-		}
-
-		if (bChanged)
-		{
-			Border->Background = Brush;
-		}
-
-		if (BrushData.BrushColor.IsSet())
-		{
-			Border->SetBrushColor(BrushData.BrushColor.GetValue());
 		}
 	}
 
@@ -441,45 +370,9 @@ namespace UMGBrushPropertyApplier
 		return FindObject<UMaterialInterface>(nullptr, *EffectMaterialRef);
 	}
 
-	void ApplyRetainerBoxProps(UWidget* W, const FUMGPropertyBag& P)
+	void ApplyRetainerBoxProps(UWidget* Widget, const FUMGWidgetNode& Node)
 	{
-		URetainerBox* RB = CastChecked<URetainerBox>(W);
-		bool bRetainRendering = false;
-		if (P.TryGetBool(UMGPropertyKeys::RetainRendering, bRetainRendering)) RB->SetRetainRendering(bRetainRendering);
-		FString TextureParameterValue;
-		if (TryGetProp(P, UMGPropertyKeys::TextureParameter, TextureParameterValue))
-			RB->SetTextureParameter(FName(*TextureParameterValue));
-		FString EffectMaterialRef;
-		if (TryGetProp(P, UMGPropertyKeys::EffectMaterial, EffectMaterialRef))
-		{
-			if (UMaterialInterface* Mat = ResolveRetainerEffectMaterial(EffectMaterialRef))
-				RB->SetEffectMaterial(Mat);
-		}
-		int32 Phase = RB->GetPhase();
-		int32 PhaseCount = RB->GetPhaseCount();
-		bool bHasPhase = P.TryGetInt(UMGPropertyKeys::Phase, Phase);
-		if (P.TryGetInt(UMGPropertyKeys::PhaseCount, PhaseCount))
-		{
-			PhaseCount = FMath::Max(1, PhaseCount);
-			bHasPhase = true;
-		}
-		if (bHasPhase) RB->SetRenderingPhase(Phase, PhaseCount);
-		RB->TakeWidget();
-		if (UMaterialInstanceDynamic* DynamicEffect = RB->GetEffectMaterial())
-		{
-			FVector2D BlurUVStep = FVector2D::ZeroVector;
-			if (P.TryGetVector2D(UMGPropertyKeys::EffectBlurUVStep, BlurUVStep))
-				DynamicEffect->SetVectorParameterValue(TEXT("BlurUVStep"), FLinearColor(BlurUVStep.X, BlurUVStep.Y, 0.0f, 0.0f));
-			FLinearColor InnerShadowColor = FLinearColor::Transparent;
-			if (P.TryGetColor(UMGPropertyKeys::EffectColor, InnerShadowColor))
-			{
-				DynamicEffect->SetVectorParameterValue(TEXT("InnerShadowColor"), InnerShadowColor);
-				DynamicEffect->SetScalarParameterValue(TEXT("InnerShadowStrength"), InnerShadowColor.A);
-			}
-			FVector2D InnerShadowOffset = FVector2D::ZeroVector;
-			if (P.TryGetVector2D(UMGPropertyKeys::EffectOffset, InnerShadowOffset))
-				DynamicEffect->SetVectorParameterValue(TEXT("InnerShadowOffset"), FLinearColor(InnerShadowOffset.X, InnerShadowOffset.Y, 0.0f, 0.0f));
-		}
+		ApplyTypedRetainerBoxProps(CastChecked<URetainerBox>(Widget), Node.Effect);
 	}
 
 	void ApplyTypedRetainerBoxProps(URetainerBox* RB, const FUMGEffectData& Effect)
@@ -505,7 +398,7 @@ namespace UMGBrushPropertyApplier
 			}
 			if (Effect.EffectColor.IsSet())
 			{
-				const FLinearColor& EffectColor = Effect.EffectColor.GetValue();
+				const FLinearColor EffectColor = NormalizeTypedDescriptorColor(Effect.EffectColor.GetValue());
 				DynamicEffect->SetVectorParameterValue(TEXT("InnerShadowColor"), EffectColor);
 				DynamicEffect->SetScalarParameterValue(TEXT("InnerShadowStrength"), EffectColor.A);
 			}

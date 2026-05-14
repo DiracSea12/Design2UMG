@@ -4,7 +4,6 @@
 
 #include "CoreMinimal.h"
 
-struct FUMGPropertyBag;
 struct FUMGWidgetNode;
 
 namespace Design2UMGWidgetNodeTypedPropertyAccess
@@ -22,5 +21,4 @@ namespace Design2UMGWidgetNodeTypedPropertyAccess
 	bool TryGetScrollBoxTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue);
 	bool TryGetTypedWidgetString(const FUMGWidgetNode& Node, const TCHAR* Key, FString& OutValue);
 	bool TryParseWidgetVector4String(const FString& Value, FVector4& OutValue);
-	void AddTypedWidgetPropertyIfPresent(FUMGPropertyBag& Bag, const FUMGWidgetNode& Node, const TCHAR* Key);
 }

@@ -1,115 +1,117 @@
-﻿# Design2UMG 属性类型化契约与维护说明
+﻿# Design2UMG Typed Property Contract
 
-本文记录当前代码里的属性类型化契约，不是改造 proposal。
+This document records the current typed-property contract in the codebase. It is not a migration proposal.
 
-## 当前主路径
+## Current Main Path
 
-Design2UMG 的导入与生成链路现在按下面的职责分层：
+Design2UMG now keeps import and generation responsibilities split as follows:
 
 ```text
 .pen / Figma export
   -> parser / mapper
   -> FUMGWidgetNode typed payloads
-  -> Design2UMGWidgetNodeAccess::BuildTypedPropertyBag
+  -> direct typed consumers or narrow typed request DTOs
   -> UMG property appliers / resource binders
 ```
 
-`FUMGWidgetNode` 的主属性不是通用字符串 map。节点上的属性按领域放在强类型 payload 中，例如：
+`FUMGWidgetNode` is not a generic string map. Its main properties live in domain payloads:
 
-| 领域 | 当前 payload |
-|------|--------------|
-| 文本样式 | `FUMGTextStyleData` |
-| 控件样式 | `FUMGWidgetStyleData` |
-| 文本内容与行为 | `FUMGTextData` |
-| 视觉画刷、图片、渐变 | `FUMGVisualBrushData` |
-| 效果 | `FUMGEffectData` |
-| 路径与向量 | `FUMGPathData` |
-| 阴影 | `FUMGShadowData` |
-| 渲染样式 | `FUMGRenderStyleData` |
-| 控件状态 | `FUMGWidgetStateData` |
-| ScrollBox 配置 | `FUMGScrollBoxData` |
+| Domain | Current payload |
+|--------|-----------------|
+| Text style | `FUMGTextStyleData` |
+| Widget style | `FUMGWidgetStyleData` |
+| Text content and behavior | `FUMGTextData` |
+| Brush, image, and gradient data | `FUMGVisualBrushData` |
+| Effects | `FUMGEffectData` |
+| Path and vector data | `FUMGPathData` |
+| Shadow data | `FUMGShadowData` |
+| Render style | `FUMGRenderStyleData` |
+| Widget state | `FUMGWidgetStateData` |
+| ScrollBox configuration | `FUMGScrollBoxData` |
 
-最终 UMG 侧仍需要一个按 key 读取的桥接对象，这个对象是 `FUMGPropertyBag`。它不是节点上的持久旧状态，而是在生成阶段由 typed node 数据重建出来。
+Final UMG consumers no longer rebuild a generic property bag. They consume `FUMGWidgetNode` typed ownership directly, or use a domain DTO such as `FUMGProceduralResourceRequest` when a procedural/material/image path needs a compact request object.
 
-## 关键边界
+## Key Boundaries
 
 ### `FUMGWidgetNode`
 
-`FUMGWidgetNode` 是导入后的中间节点。它保留布局、slot、children、source/prototype 扩展数据，并聚合各类 typed payload。
+`FUMGWidgetNode` is the imported intermediate node. It carries layout, slot data, children, source/prototype extensions, and typed payloads.
 
-维护规则：
+Maintenance rules:
 
-- 新的节点属性优先加入对应 typed payload。
-- 不要在 `FUMGWidgetNode` 上重新增加通用字符串属性表。
-- 不要为同一属性做 typed payload 与字符串属性表的双写。
-- source/prototype 相关数据继续走显式 opt-in 扩展，不放回默认聚合面。
+- Add new node properties to the appropriate typed payload first.
+- Do not reintroduce a generic string property table on `FUMGWidgetNode`.
+- Do not dual-write the same property to typed payloads and a string map.
+- Keep source/prototype data in explicit opt-in extensions instead of moving it into the default aggregate surface.
 
-### `FUMGPropertyBag`
+### Final typed consumers
 
-`FUMGPropertyBag` 是最终消费者桥。它负责把 typed 值以稳定 key 暴露给 UMG property applier、resource binder 和少量生成期工具。
+Final consumers read the typed owner that actually owns the behavior:
 
-它的定位是“生成期消费接口”，不是 parser 的真实数据模型。维护时要保持这个方向：
+- Widget style and common state: `Node.WidgetStyle`, `Node.Render`, `Node.WidgetState`, `Node.ScrollBox`.
+- Text content, font, layout, and shadow: `Node.Text`, `Node.TextStyle`, `Node.Shadow`.
+- Brush, image, path, effect, and crop behavior: `Node.Brush`, `Node.Path`, `Node.Effect`, plus typed crop/request helpers where needed.
+- Procedural resources: `Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(...)`.
 
-- parser / mapper 写 typed payload。
-- Core 中的 `Design2UMGWidgetNodeAccess` 负责把 typed payload 序列化成 property bag。
-- Editor 中的 UMG applier 从 `FUMGPropertyBag` 读取最终可应用值。
-- 如果新属性只服务某个 typed domain，先补 typed payload 和 `Design2UMGWidgetNodeAccess`，再让 applier 读取 bag。
+The old generic bag bridge is not a supported current contract. New final-consumer code must not create another broad key/value store under a different name.
 
 ### `Design2UMGWidgetNodeAccess`
 
-`Design2UMGWidgetNodeAccess` 是跨模块读取 typed node 的稳定门面。Core 拥有 typed payload 与序列化规则，Editor 不应该绕过它去依赖 Core 私有实现。
+`Design2UMGWidgetNodeAccess` remains the cross-module typed inspection facade owned by Core. It is useful for focused tests, diagnostics, and internal typed-domain helpers that need stable serialized key behavior.
 
-常用入口：
+Common retained entries:
 
-| 入口 | 用途 |
-|------|------|
-| `BuildTypedPropertyBag(const FUMGWidgetNode&)` | 为最终 UMG 消费者构建完整属性包 |
-| `TryGetWidget*` | 以类型化方式读取单个 widget key |
-| `TryGet*TypedWidgetString` | 领域内字符串序列化读取，主要用于测试和跨模块契约 |
-| `SerializeWidget*` | 统一基础类型序列化 |
+| Entry | Use |
+|-------|-----|
+| `TryGetWidget*` | Typed inspection helper for Core-internal mapping and focused tests; not the preferred final-consumer production path |
+| `TryGet*TypedWidgetString` | Domain string serialization for tests and cross-module typed contract checks |
+| `SerializeWidget*` | Shared primitive serialization helpers |
+| `TryBuildProceduralResourceRequest` | Narrow procedural/material/image DTO construction |
 
-## 渐变与材质参数
+## Gradients And Material Parameters
 
-渐变已经有当前 typed contract：
+Gradients already have a current typed contract:
 
-- typed 数据结构：`FUMGVisualBrushData::FGradientData`
-- material ref 派生：`Design2UMGWidgetNodeAccess::GetGradientMaterialRef`
-- material params 序列化：`Design2UMGWidgetNodeAccess::SerializeGradientMaterialParams`
+- typed data structure: `FUMGVisualBrushData::FGradientData`
+- material ref derivation: `Design2UMGWidgetNodeAccess::GetGradientMaterialRef`
+- material params serialization: `Design2UMGWidgetNodeAccess::SerializeGradientMaterialParams`
+- final procedural request: `Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest`
 
-因此维护渐变时不要再把 `MaterialParams` 当成待拆分的开放项。主路径是：parser / mapper 写入 `Brush.Gradient`，Core 序列化成最终 UMG 消费所需的 material ref 与 params。
+Do not treat `MaterialParams` as an open untyped backlog item when maintaining gradients. The main path is: parser / mapper writes `Brush.Gradient`, Core serializes the specific material request fields, and Editor consumers pass the typed request DTO to the procedural resource resolver.
 
-## 新增属性流程
+## Adding A Property
 
-新增一个属性时，按这个顺序做：
+Use this order:
 
-1. 判断它属于哪个 typed domain。
-2. 在对应 payload 里增加字段，并明确 unset 与显式值的语义。
-3. 在 parser / mapper 写入 typed 字段。
-4. 在 `Design2UMGWidgetNodeAccess` 中补读取和序列化。
-5. 在对应 UMG applier / binder 中通过 `FUMGPropertyBag` 消费。
-6. 增加覆盖 typed payload、property bag 和最终 UMG 应用结果的测试。
+1. Decide which typed domain owns the property.
+2. Add a field to that payload and define unset vs explicit value semantics.
+3. Write the typed field from parser / mapper code.
+4. Add a narrow typed inspection or request helper only if a cross-module consumer needs it.
+5. Apply the value in the relevant UMG applier / binder from the typed owner or DTO.
+6. Add coverage for typed payload parsing and the final UMG application result.
 
-如果属性语义只是最终 UMG 应用细节，且源数据没有独立领域含义，也可以只在 property bag 消费层处理；但不能因此把 parser 主数据模型退回通用字符串 map。
+If a property is only a final UMG application detail and has no independent source-domain meaning, keep it in the narrow final consumer path. Do not turn the parser model back into a generic string map.
 
-## 不要做什么
+## Do Not Do This
 
-| 做法 | 原因 |
-|------|------|
-| 重新增加名为 `Properties` 的通用字符串属性表 | 会把主数据模型拉回弱类型通道 |
-| typed payload 和字符串 map 双写 | 会制造两个事实来源 |
-| 让 Editor 直接读取 Core 私有实现 | 会破坏跨模块边界 |
-| 用单个宽泛 bag 代替 typed payload | 会丢掉领域语义和 unset 语义 |
-| 为单个样例或单个设计稿定制 key / 分支 | 会变成过拟合，不符合正式 gate 要求 |
+| Pattern | Reason |
+|---------|--------|
+| Add a generic `Properties` string table again | It weakens the typed data model |
+| Dual-write typed payloads and a string map | It creates two sources of truth |
+| Make Editor depend on Core private implementation details | It breaks the cross-module boundary |
+| Replace typed payloads with a broad bag-like object | It loses domain and unset semantics |
+| Add case-, node-, file-, or sample-specific branches | It becomes overfit and does not satisfy the formal gate |
 
-## 相关代码入口
+## Related Code
 
-| 文件 | 说明 |
-|------|------|
-| `Source/Design2UMGCore/Public/UMGSchema.h` | `FUMGWidgetNode` 聚合 typed payload |
-| `Source/Design2UMGCore/Public/UMGSchemaTypedPayloads.h` | typed payload 定义 |
-| `Source/Design2UMGCore/Public/UMGSchemaFoundation.h` | `FUMGTypedProperty` 与 `FUMGPropertyBag` |
-| `Source/Design2UMGCore/Public/UMGWidgetNodeAccess.h` | typed node 跨模块读取契约 |
-| `Source/Design2UMGCore/Private/UMGWidgetNodeAccess.cpp` | property bag 构建与序列化规则 |
-| `Source/Design2UMGEditor/Private/UMGPropertyApplierInternal.cpp` | widget property 应用注册表 |
-| `Source/Design2UMGEditor/Private/UMGBrushPropertyApplier.cpp` | brush / image / border 等视觉属性应用 |
-| `Source/Design2UMGEditor/Private/UMGTextPropertyApplier.cpp` | 文本属性应用 |
+| File | Purpose |
+|------|---------|
+| `Source/Design2UMGCore/Public/UMGSchema.h` | `FUMGWidgetNode` typed payload aggregate |
+| `Source/Design2UMGCore/Public/UMGSchemaTypedPayloads.h` | typed payload definitions |
+| `Source/Design2UMGCore/Public/UMGSchemaFoundation.h` | primitive typed-property value support |
+| `Source/Design2UMGCore/Public/UMGWidgetNodeAccess.h` | typed node inspection contract |
+| `Source/Design2UMGCore/Public/UMGWidgetNodeProceduralResourceAccess.h` | procedural resource request contract |
+| `Source/Design2UMGCore/Private/UMGWidgetNodeAccess.cpp` | typed inspection and serialization helpers |
+| `Source/Design2UMGEditor/Private/UMGPropertyApplierInternal.cpp` | typed widget property application registry |
+| `Source/Design2UMGEditor/Private/UMGBrushPropertyApplier.cpp` | typed brush / image / border application |
+| `Source/Design2UMGEditor/Private/UMGTextPropertyApplier.cpp` | typed text property application |

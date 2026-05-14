@@ -4,6 +4,8 @@
 #include "WidgetResourceBinder.h"
 #include "UMGSchema.h"
 #include "UMGPropertyKeys.h"
+#include "UMGValueParsing.h"
+#include "UMGWidgetNodeAccess.h"
 #include "UMGWidgetNodeProceduralResourceAccess.h"
 #include "UMGWidgetUtils.h"
 #include "Components/Border.h"
@@ -132,24 +134,47 @@ bool FWidgetResourceBinderExplicitEmptyMaterialRefBlocksTextureFallback::RunTest
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPropertyApplierExplicitEmptyMaterialRefBlocksTextureFallback,
-	"Design2UMG.PropertyApplier.ExplicitEmptyMaterialRefBlocksTextureFallback",
+	"Design2UMG.PropertyApplier.TypedEmptyMaterialRefBlocksTextureFallback",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FPropertyApplierExplicitEmptyMaterialRefBlocksTextureFallback::RunTest(const FString& Parameters)
 {
-	FUMGPropertyBag Properties;
-	Properties.Add(UMGPropertyKeys::MaterialRef, FString());
-	Properties.Add(UMGPropertyKeys::TexturePath, TEXT("/Engine/EngineMaterials/DefaultDiffuse"));
+	FUMGWidgetNode Node;
+	Node.Brush.MaterialRef = FString();
+	Node.Brush.Image.TexturePath = TEXT("/Engine/EngineMaterials/DefaultDiffuse");
 
 	UImage* ImageWidget = NewObject<UImage>();
-	FUMGWidgetUtils::ApplyWidgetProperties(ImageWidget, Properties);
+	FUMGWidgetUtils::ApplyWidgetProperties(ImageWidget, Node);
 	TestTrue(TEXT("Image explicit empty MaterialRef blocks TexturePath fallback"),
 		ImageWidget->GetBrush().GetResourceObject() == nullptr);
 
 	UBorder* BorderWidget = NewObject<UBorder>();
-	FUMGWidgetUtils::ApplyWidgetProperties(BorderWidget, Properties);
+	FUMGWidgetUtils::ApplyWidgetProperties(BorderWidget, Node);
 	TestTrue(TEXT("Border explicit empty MaterialRef blocks TexturePath fallback"),
 		BorderWidget->Background.GetResourceObject() == nullptr);
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPropertyApplierBorderBrushColorSurvivesBrushMutation,
+	"Design2UMG.PropertyApplier.BorderBrushColorSurvivesBrushMutation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPropertyApplierBorderBrushColorSurvivesBrushMutation::RunTest(const FString& Parameters)
+{
+	const FLinearColor RawColor(0.1234f, 0.5678f, 0.9012f, 0.6543f);
+	const FLinearColor ExpectedColor = FUMGValueParser::ParseColor(
+		Design2UMGWidgetNodeAccess::SerializeWidgetColor(RawColor));
+
+	FUMGWidgetNode Node;
+	Node.Brush.BrushColor = RawColor;
+	Node.Brush.DrawAs = ESlateBrushDrawType::Image;
+
+	UBorder* BorderWidget = NewObject<UBorder>();
+	FUMGWidgetUtils::ApplyWidgetProperties(BorderWidget, Node);
+
+	TestTrue(TEXT("Border brush color survives final brush assignment"),
+		BorderWidget->GetBrushColor().Equals(ExpectedColor, 0.0001f));
+	TestTrue(TEXT("Border brush receives a resource when color needs an image brush"),
+		BorderWidget->Background.GetResourceObject() != nullptr);
 	return true;
 }
 
@@ -173,6 +198,36 @@ bool FPropertyApplierUsesSharedAxisAlignedCropSemantics::RunTest(const FString& 
 	TestTrue(TEXT("Property applier axis crop preserves UV min Y"), FMath::IsNearlyEqual(UVRegion.Min.Y, 0.10f, 0.0001f));
 	TestTrue(TEXT("Property applier axis crop preserves UV max X"), FMath::IsNearlyEqual(UVRegion.Max.X, 0.75f, 0.0001f));
 	TestTrue(TEXT("Property applier axis crop preserves UV max Y"), FMath::IsNearlyEqual(UVRegion.Max.Y, 0.85f, 0.0001f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPropertyApplierNormalizesTypedAxisAlignedCropTransform,
+	"Design2UMG.PropertyApplier.NormalizesTypedAxisAlignedCropTransform",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPropertyApplierNormalizesTypedAxisAlignedCropTransform::RunTest(const FString& Parameters)
+{
+	FUMGWidgetNode Node;
+	Node.Type = TEXT("Image");
+	Node.Name = TEXT("TypedAxisCropPropertyApply");
+	Node.Brush.Image.TexturePath = TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture");
+	Node.Brush.Image.Mode = TEXT("Crop");
+	FUMGVisualBrushData::FImageTransformData Transform;
+	Transform.A = 0.50000049f;
+	Transform.B = 0.0f;
+	Transform.TX = 0.25000049f;
+	Transform.C = 0.0f;
+	Transform.D = 0.75000049f;
+	Transform.TY = 0.10000049f;
+	Node.Brush.Image.Transform = Transform;
+
+	UImage* ImageWidget = NewObject<UImage>();
+	FUMGWidgetUtils::ApplyWidgetProperties(ImageWidget, Node);
+
+	const FBox2f UVRegion = ImageWidget->GetBrush().GetUVRegion();
+	TestTrue(TEXT("Typed crop transform uses serialized contract min X"), FMath::IsNearlyEqual(UVRegion.Min.X, 0.25f, 0.0000001f));
+	TestTrue(TEXT("Typed crop transform uses serialized contract min Y"), FMath::IsNearlyEqual(UVRegion.Min.Y, 0.10f, 0.0000001f));
+	TestTrue(TEXT("Typed crop transform uses serialized contract max X"), FMath::IsNearlyEqual(UVRegion.Max.X, 0.75f, 0.0000001f));
+	TestTrue(TEXT("Typed crop transform uses serialized contract max Y"), FMath::IsNearlyEqual(UVRegion.Max.Y, 0.85f, 0.0000001f));
 	return true;
 }
 

@@ -26,10 +26,9 @@ This document tracks current limitations that are known and accepted for now.
 
 ## Typed Property Boundary
 
-- Common `WidgetStyle / TextData / Brush / Effect / PathData / Render / WidgetState` fields now run typed-first and shadow same-key legacy `Properties`.
-- Legacy `Properties` still exists only for widget-specific runtime parameters that are still consumed by class-specific `FUMGPropertyBag` appliers.
+- Common `WidgetStyle / TextData / Brush / Effect / PathData / Render / WidgetState` fields now run through typed ownership or narrow typed request DTOs.
+- The legacy `FUMGPropertyBag` bridge has been removed from current code ownership; new runtime or parser work should not reintroduce a broad key/value property store.
 - Old UMG JSON compatibility is no longer a product goal; parser/runtime cleanup should continue to shrink legacy-only paths when it does not affect active baselines.
-- This round does not delete the legacy bag entirely because doing so would couple a typed migration with wider widget-specific schema work and old JSON breakage.
 
 ## Build Context And Measurement
 

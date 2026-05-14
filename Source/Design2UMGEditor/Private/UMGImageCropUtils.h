@@ -17,7 +17,6 @@ namespace UMGImageCropUtils
 		int32 OutputHeight = 64;
 	};
 
-	bool TryBuildCropRequest(const FUMGPropertyBag& Properties, FImageCropRequest& OutRequest);
 	bool TryBuildCropRequest(const FUMGWidgetNode& Node, FImageCropRequest& OutRequest);
 	bool TryApplyCropToBrush(
 		FSlateBrush& InOutBrush,

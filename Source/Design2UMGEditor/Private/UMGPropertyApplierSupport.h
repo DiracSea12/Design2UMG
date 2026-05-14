@@ -8,22 +8,6 @@
 
 namespace UMGPropertyApplierSupport
 {
-	inline bool TryGetProp(const FUMGPropertyBag& Properties, const TCHAR* Key, FString& OutValue)
-	{
-		return Properties.TryGetString(Key, OutValue) && !OutValue.IsEmpty();
-	}
-
-	inline bool TryGetPropAllowEmpty(const FUMGPropertyBag& Properties, const TCHAR* Key, FString& OutValue)
-	{
-		return Properties.TryGetString(Key, OutValue);
-	}
-
-	inline bool HasProp(const FUMGPropertyBag& Properties, const TCHAR* Key)
-	{
-		FString Value;
-		return TryGetProp(Properties, Key, Value);
-	}
-
 	inline bool TryParseVector4(const FString& Value, FVector4& OutVector)
 	{
 		TArray<FString> Parts;

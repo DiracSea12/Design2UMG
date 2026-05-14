@@ -391,26 +391,3 @@ bool Design2UMGWidgetNodeAccess::TryGetWidgetColor(const FUMGWidgetNode& Node, c
 
 	return false;
 }
-
-void Design2UMGWidgetNodeAccess::AddTypedWidgetPropertyIfPresent(FUMGPropertyBag& Bag, const FUMGWidgetNode& Node, const TCHAR* Key)
-{
-	Design2UMGWidgetNodeTypedPropertyAccess::AddTypedWidgetPropertyIfPresent(Bag, Node, Key);
-}
-
-FUMGPropertyBag Design2UMGWidgetNodeAccess::BuildTypedPropertyBag(const FUMGWidgetNode& Node)
-{
-	FUMGPropertyBag Result;
-	ForEachStaticTypedWidgetPropertyKey([&Result, &Node](const TCHAR* Key)
-	{
-		AddTypedWidgetPropertyIfPresent(Result, Node, Key);
-	});
-	for (int32 Index = 0; Index < Node.Shadow.BoxShadows.Num(); ++Index)
-	{
-		AddTypedWidgetPropertyIfPresent(Result, Node, *FString::Printf(TEXT("BoxShadow_%d_OffsetX"), Index));
-		AddTypedWidgetPropertyIfPresent(Result, Node, *FString::Printf(TEXT("BoxShadow_%d_OffsetY"), Index));
-		AddTypedWidgetPropertyIfPresent(Result, Node, *FString::Printf(TEXT("BoxShadow_%d_Blur"), Index));
-		AddTypedWidgetPropertyIfPresent(Result, Node, *FString::Printf(TEXT("BoxShadow_%d_Spread"), Index));
-		AddTypedWidgetPropertyIfPresent(Result, Node, *FString::Printf(TEXT("BoxShadow_%d_Color"), Index));
-	}
-	return Result;
-}
