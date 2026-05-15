@@ -45,6 +45,7 @@ def make_run(
     automation_root: Path,
     name: str,
     *,
+    include_run_scope: bool = True,
     blocked_cases: int = 0,
     completeness_blocked: bool = False,
     no_regression_available: int = 1,
@@ -54,7 +55,8 @@ def make_run(
     run_root = automation_root / name
     case_root = run_root / "case_a"
     case_root.mkdir(parents=True)
-    write_json(run_root / "run_scope.json", {"formal_admissible_candidate": True, "case_names": ["case_a"]})
+    if include_run_scope:
+        write_json(run_root / "run_scope.json", {"formal_admissible_candidate": True, "case_names": ["case_a"]})
     report_path = case_root / "compare_report.json"
     write_json(report_path, compatible_report())
     write_json(
@@ -237,8 +239,26 @@ def main() -> None:
                 "historical_best_regressions": [{"case": "case_a"}],
             },
         )
+        make_run(automation_root, "_formal_legacy_name_without_scope", include_run_scope=False)
+        write_json(
+            automation_root / "_admissible_best_cache.json",
+            {
+                "version": rebuild.CACHE_VERSION,
+                "generated_at": "",
+                "automation_root": "",
+                "entries": {},
+                "runs": {
+                    "_formal_good": {
+                        "collision_cases": {
+                            "case_a": True,
+                        },
+                    },
+                },
+            },
+        )
 
         manifest = rebuild.rebuild_historical_best_manifest(automation_root)
+        cache_payload = rebuild.load_json(automation_root / "_admissible_best_cache.json")
 
     assert manifest["runs"] == ["_formal_good"], manifest["runs"]
     assert manifest["admissible_run_count"] == 1
@@ -248,6 +268,9 @@ def main() -> None:
     assert_skipped(manifest, "_formal_no_regression_failed", "summary_no_regression_failed")
     assert_skipped(manifest, "_formal_historical_blocked", "historical_validation_blocked")
     assert_skipped(manifest, "_formal_historical_regressed", "historical_validation_regressed")
+    assert_skipped(manifest, "_formal_legacy_name_without_scope", "run_scope_missing")
+    assert "runs" not in cache_payload, cache_payload
+    assert "output_collision" not in manifest["skipped_case_results_by_reason"], manifest["skipped_case_results_by_reason"]
     assert_validate_run_pixel_quantum_epsilon()
     assert_validate_run_reason_details()
     print("admissible best rebuild selftest passed")

@@ -442,14 +442,14 @@ bool FixEqualSpacing(
 		Gaps.Add(Gap);
 	}
 
-	// v2.2: Use the median instead of the mean for better robustness.
-	float MedianGap = GetMedian(Gaps);
-	float AvgGap = GetAverage(Gaps);
-	float MaxDiff = GetMaxDeviation(Gaps, AvgGap);
+	// Use median as the correction target, while deviation still compares to the historical mean baseline.
+	float CorrectionGap = GetMedian(Gaps);
+	float DeviationBaselineGap = GetAverage(Gaps);
+	float MaxDiff = GetMaxDeviation(Gaps, DeviationBaselineGap);
 
 	float AbsThreshold = FixerConstants::SpacingAbsThresholdMultiplier * Threshold;
 	float RatioThreshold = FixerConstants::SpacingRatioThreshold;
-	float EffectiveThreshold = FMath::Max(AbsThreshold, FMath::Abs(MedianGap) * RatioThreshold);
+	float EffectiveThreshold = FMath::Max(AbsThreshold, FMath::Abs(CorrectionGap) * RatioThreshold);
 
 	if (MaxDiff <= EffectiveThreshold) return false;
 
@@ -465,7 +465,7 @@ bool FixEqualSpacing(
 		if (bHorizontal)
 		{
 			float PrevRight = Bounds[PrevIdx].X + Bounds[PrevIdx].W;
-			float NewX = PrevRight + MedianGap;
+			float NewX = PrevRight + CorrectionGap;
 			float DeltaX = NewX - Bounds[Idx].X;
 
 			// v2.2: Limit movement distance.
@@ -484,7 +484,7 @@ bool FixEqualSpacing(
 		else
 		{
 			float PrevBottom = Bounds[PrevIdx].Y + Bounds[PrevIdx].H;
-			float NewY = PrevBottom + MedianGap;
+			float NewY = PrevBottom + CorrectionGap;
 			float DeltaY = NewY - Bounds[Idx].Y;
 
 			// v2.2: Limit movement distance.

@@ -99,7 +99,11 @@ static TSharedPtr<FJsonObject> ParseJsonString(const FString& Json)
 {
 	TSharedPtr<FJsonObject> Root;
 	auto Reader = TJsonReaderFactory<>::Create(Json);
-	FJsonSerializer::Deserialize(Reader, Root);
+	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+	{
+		UE_LOG(LogDesign2UMG, Error, TEXT("Invalid Figma export JSON. Please verify the export file is a valid JSON object."));
+		return nullptr;
+	}
 	return Root;
 }
 
@@ -885,8 +889,24 @@ void ApplyImageUrlsRecursive(TArray<TSharedPtr<FDesignNode>>& Nodes, const TMap<
 	}
 }
 
+}
 
+bool FFigmaParser::ParseDocument(const FString& FigmaJson, FDesignDocument& OutDocument)
+{
+	return FigmaParserInternal::ParseDocument(FigmaJson, OutDocument);
+}
 
+bool FFigmaParser::ExtractFileKey(const FString& UrlOrKey, FString& OutKey)
+{
+	return FigmaParserInternal::ExtractFileKey(UrlOrKey, OutKey);
+}
 
+void FFigmaParser::CollectImageRefs(const FDesignDocument& Document, TSet<FString>& OutImageRefs)
+{
+	FigmaParserInternal::CollectImageRefs(Document, OutImageRefs);
+}
 
+void FFigmaParser::ApplyImageUrls(FDesignDocument& Document, const TMap<FString, FString>& ImageRefToUrl)
+{
+	FigmaParserInternal::ApplyImageUrls(Document, ImageRefToUrl);
 }

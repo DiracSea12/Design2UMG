@@ -16,6 +16,13 @@
 
 namespace
 {
+	constexpr int32 MaxPenParserNodeDepth = 512;
+
+	struct FPenParserParseContext
+	{
+		bool bDepthExceeded = false;
+	};
+
 	void ApplyPenStrokeExtensions(
 		const TSharedPtr<FJsonObject>& StrokeObj,
 		FDesignNode& Node,
@@ -97,8 +104,12 @@ namespace
 
 bool ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FDesignDocument& OutDocument);
 void ParseVariables(const TSharedPtr<FJsonObject>& JsonObj, TMap<FString, FDesignVariable>& OutVariables);
+bool ValidateNodeDepth(const TSharedPtr<FJsonObject>& JsonObj, FPenParserParseContext& ParseContext, int32 Depth);
+bool ValidateChildrenDepth(const TSharedPtr<FJsonValue>& ChildrenField, FPenParserParseContext& ParseContext, int32 Depth);
 TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver);
+TSharedPtr<FDesignNode> ParseNodeAtDepth(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver, FPenParserParseContext& ParseContext, int32 Depth);
 void AppendParsedChildren(const TSharedPtr<FJsonValue>& ChildrenField, const FDesignVariableResolver& Resolver, TArray<TSharedPtr<FDesignNode>>& OutChildren);
+void AppendParsedChildrenAtDepth(const TSharedPtr<FJsonValue>& ChildrenField, const FDesignVariableResolver& Resolver, TArray<TSharedPtr<FDesignNode>>& OutChildren, FPenParserParseContext& ParseContext, int32 Depth);
 void ParseNodeFillProperties(const TSharedPtr<FJsonValue>& Value, FDesignNode& OutNode, const FDesignVariableResolver& Resolver);
 void ParseNodeStrokeProperties(const TSharedPtr<FJsonValue>& Value, FDesignNode& OutNode, const FDesignVariableResolver& Resolver);
 void ApplyNodeBoxProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, EDesignNodeType SizeNodeType, const FDesignVariableResolver& Resolver);
@@ -223,7 +234,20 @@ bool ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FDesignDocume
 	FDesignVariableResolver Resolver(OutDocument.Variables);
 
 	// Parse top-level children.
-	AppendParsedChildren(JsonObj->TryGetField(TEXT("children")), Resolver, OutDocument.Children);
+	FPenParserParseContext ParseContext;
+	if (!ValidateChildrenDepth(JsonObj->TryGetField(TEXT("children")), ParseContext, 0))
+	{
+		UE_LOG(LogDesign2UMG, Error, TEXT("Design file parsing failed because node nesting exceeds the supported depth."));
+		return false;
+	}
+
+	AppendParsedChildrenAtDepth(JsonObj->TryGetField(TEXT("children")), Resolver, OutDocument.Children, ParseContext, 0);
+
+	if (ParseContext.bDepthExceeded)
+	{
+		UE_LOG(LogDesign2UMG, Error, TEXT("Design file parsing failed because node nesting exceeds the supported depth."));
+		return false;
+	}
 
 	return true;
 }
@@ -312,10 +336,100 @@ void ParseVariables(const TSharedPtr<FJsonObject>& JsonObj, TMap<FString, FDesig
 	}
 }
 
+bool ValidateNodeDepth(
+	const TSharedPtr<FJsonObject>& JsonObj,
+	FPenParserParseContext& ParseContext,
+	int32 Depth)
+{
+	if (!JsonObj.IsValid())
+		return true;
+
+	if (Depth > MaxPenParserNodeDepth)
+	{
+		ParseContext.bDepthExceeded = true;
+		UE_LOG(LogDesign2UMG, Error, TEXT("Pen document children nesting is too deep (over %d levels)."), MaxPenParserNodeDepth);
+		return false;
+	}
+
+	if (!ValidateChildrenDepth(JsonObj->TryGetField(TEXT("children")), ParseContext, Depth + 1))
+		return false;
+
+	const TSharedPtr<FJsonValue> DescendantsField = JsonObj->TryGetField(TEXT("descendants"));
+	if (!DescendantsField.IsValid() || DescendantsField->Type != EJson::Object)
+		return true;
+
+	for (const auto& Pair : DescendantsField->AsObject()->Values)
+	{
+		if (!Pair.Value.IsValid() || Pair.Value->Type != EJson::Object)
+			continue;
+
+		const TSharedPtr<FJsonObject> DescendantObj = Pair.Value->AsObject();
+		if (!DescendantObj.IsValid())
+			continue;
+
+		const bool bFullNodeOverride = DescendantObj->HasField(TEXT("type"));
+		if (bFullNodeOverride)
+		{
+			if (!ValidateNodeDepth(DescendantObj, ParseContext, 0))
+				return false;
+		}
+		else if (!ValidateChildrenDepth(DescendantObj->TryGetField(TEXT("children")), ParseContext, 0))
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool ValidateChildrenDepth(
+	const TSharedPtr<FJsonValue>& ChildrenField,
+	FPenParserParseContext& ParseContext,
+	int32 Depth)
+{
+	if (!ChildrenField.IsValid() || ChildrenField->Type != EJson::Array)
+		return true;
+
+	if (Depth > MaxPenParserNodeDepth)
+	{
+		ParseContext.bDepthExceeded = true;
+		UE_LOG(LogDesign2UMG, Error, TEXT("Pen document children nesting is too deep (over %d levels)."), MaxPenParserNodeDepth);
+		return false;
+	}
+
+	for (const TSharedPtr<FJsonValue>& ChildVal : ChildrenField->AsArray())
+	{
+		if (ChildVal.IsValid() && ChildVal->Type == EJson::Object
+			&& !ValidateNodeDepth(ChildVal->AsObject(), ParseContext, Depth))
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
 TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver)
+{
+	FPenParserParseContext ParseContext;
+	return ParseNodeAtDepth(JsonObj, Resolver, ParseContext, 0);
+}
+
+TSharedPtr<FDesignNode> ParseNodeAtDepth(
+	const TSharedPtr<FJsonObject>& JsonObj,
+	const FDesignVariableResolver& Resolver,
+	FPenParserParseContext& ParseContext,
+	int32 Depth)
 {
 	if (!JsonObj.IsValid())
 		return nullptr;
+
+	if (Depth > MaxPenParserNodeDepth)
+	{
+		ParseContext.bDepthExceeded = true;
+		UE_LOG(LogDesign2UMG, Error, TEXT("Pen document nesting is too deep (over %d levels); node skipped."), MaxPenParserNodeDepth);
+		return nullptr;
+	}
 
     TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
     Node->Metadata.Add(TEXT("source.provider"), TEXT("pen"));
@@ -406,7 +520,7 @@ TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const 
 
 	PenParserNodeExtensions::ParseNodeExtended(JsonObj, Node, *ActiveResolver, GetNodeExtensionCallbacks());
 
-	AppendParsedChildren(JsonObj->TryGetField(TEXT("children")), *ActiveResolver, Node->Children);
+	AppendParsedChildrenAtDepth(JsonObj->TryGetField(TEXT("children")), *ActiveResolver, Node->Children, ParseContext, Depth + 1);
 	PenParserNodeExtensions::FinalizePenPaddingRuntimeWrapPolicy(Node);
 
 	PenParserNodeExtensions::ParsePenSemanticMetadata(JsonObj, *Node, *ActiveResolver);
@@ -419,12 +533,30 @@ void AppendParsedChildren(
 	const FDesignVariableResolver& Resolver,
 	TArray<TSharedPtr<FDesignNode>>& OutChildren)
 {
+	FPenParserParseContext ParseContext;
+	AppendParsedChildrenAtDepth(ChildrenField, Resolver, OutChildren, ParseContext, 0);
+}
+
+void AppendParsedChildrenAtDepth(
+	const TSharedPtr<FJsonValue>& ChildrenField,
+	const FDesignVariableResolver& Resolver,
+	TArray<TSharedPtr<FDesignNode>>& OutChildren,
+	FPenParserParseContext& ParseContext,
+	int32 Depth)
+{
 	if (!ChildrenField.IsValid() || ChildrenField->Type != EJson::Array)
 		return;
 
+	if (Depth > MaxPenParserNodeDepth)
+	{
+		ParseContext.bDepthExceeded = true;
+		UE_LOG(LogDesign2UMG, Error, TEXT("Pen document children nesting is too deep (over %d levels); remaining children skipped."), MaxPenParserNodeDepth);
+		return;
+	}
+
 	for (const TSharedPtr<FJsonValue>& ChildVal : ChildrenField->AsArray())
 	{
-		if (TSharedPtr<FDesignNode> Child = ParseNode(ChildVal->AsObject(), Resolver))
+		if (TSharedPtr<FDesignNode> Child = ParseNodeAtDepth(ChildVal->AsObject(), Resolver, ParseContext, Depth))
 			OutChildren.Add(Child);
 	}
 }

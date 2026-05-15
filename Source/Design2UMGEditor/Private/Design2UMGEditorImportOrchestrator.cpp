@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGEditorImportOrchestrator.h"
 
@@ -36,8 +36,9 @@ namespace
 		const FText& PreviewWindowTitle,
 		const bool bUsePreview,
 		const EDesignBlueprintGenerationMode GenerationMode,
+		const FDesign2UMGImportSettingsSnapshot& SettingsSnapshot,
 		const bool bResolveImages = true,
-		const FDesign2UMGImportSettingsSnapshot* SettingsSnapshot = nullptr)
+		const TOptional<FDesignDocument>& DiagnosticDocument = TOptional<FDesignDocument>())
 	{
 		FDesignImportRequest Request;
 		Request.OutputPath = OutputPath;
@@ -45,10 +46,8 @@ namespace
 		Request.bUsePreview = bUsePreview;
 		Request.bResolveImages = bResolveImages;
 		Request.Generation.Mode = GenerationMode;
-		Request.SettingsSnapshot = SettingsSnapshot
-			? TOptional<FDesign2UMGImportSettingsSnapshot>(*SettingsSnapshot)
-			: TOptional<FDesign2UMGImportSettingsSnapshot>(
-				FDesign2UMGImportSettingsSnapshot::FromSettings(UDesign2UMGSettings::Get()));
+		Request.SettingsSnapshot = SettingsSnapshot;
+		Request.DiagnosticDocument = DiagnosticDocument;
 		return Request;
 	}
 
@@ -56,14 +55,13 @@ namespace
 		const FString& OutputPath,
 		const bool bUsePreview,
 		const bool bRenderPng,
-		const FDesign2UMGImportSettingsSnapshot* SettingsSnapshot = nullptr)
+		const FDesign2UMGImportSettingsSnapshot& SettingsSnapshot)
 	{
 		return MakeImportRequest(
 			OutputPath,
 			LOCTEXT("PenConvertPreviewWindowTitle", "Design2UMG Pen Preview"),
 			bUsePreview,
 			bRenderPng ? EDesignBlueprintGenerationMode::BlueprintAndPng : EDesignBlueprintGenerationMode::BlueprintOnly,
-			true,
 			SettingsSnapshot);
 	}
 
@@ -160,47 +158,56 @@ namespace
 		return Result;
 	}
 
-	FDesignImportExecutionResult ExecuteWidgetImportWithCapturedSettings(
+	template<typename TInvoke>
+	FDesignImportExecutionResult ExecuteWithCapturedSettings(
+		const FDesignImportRequest& Request,
+		TInvoke&& Invoke)
+	{
+		if (Request.SettingsSnapshot.IsSet())
+		{
+			const Design2UMGGenerationSettingsContext::FScopedSettingsSnapshot ScopedGenerationSettings(
+				Request.SettingsSnapshot->GenerationSettings);
+			return Invoke();
+		}
+
+		return Invoke();
+	}
+
+	FDesignImportExecutionResult ExecuteImport(
 		FUMGWidgetData& Data,
 		const FDesignImportRequest& Request)
 	{
-		if (Request.SettingsSnapshot.IsSet())
+		return ExecuteWithCapturedSettings(
+			Request,
+			[&Data, &Request]()
 		{
-			const Design2UMGGenerationSettingsContext::FScopedSettingsSnapshot ScopedGenerationSettings(
-				Request.SettingsSnapshot->GenerationSettings);
 			return DesignImportPipeline::Execute(Data, Request);
-		}
-
-		return DesignImportPipeline::Execute(Data, Request);
+		});
 	}
 
-	FDesignImportExecutionResult ExecuteDocumentImportWithCapturedSettings(
+	FDesignImportExecutionResult ExecuteImport(
 		FDesignDocument& Document,
 		const FDesignImportRequest& Request)
 	{
-		if (Request.SettingsSnapshot.IsSet())
+		return ExecuteWithCapturedSettings(
+			Request,
+			[&Document, &Request]()
 		{
-			const Design2UMGGenerationSettingsContext::FScopedSettingsSnapshot ScopedGenerationSettings(
-				Request.SettingsSnapshot->GenerationSettings);
 			return DesignImportPipeline::Execute(Document, Request);
-		}
-
-		return DesignImportPipeline::Execute(Document, Request);
+		});
 	}
 
-	FDesignImportExecutionResult ExecutePenFileImportWithCapturedSettings(
+	FDesignImportExecutionResult ExecutePenFileImport(
 		const FString& FilePath,
 		const FString& TargetNodeId,
 		const FDesignImportRequest& Request)
 	{
-		if (Request.SettingsSnapshot.IsSet())
+		return ExecuteWithCapturedSettings(
+			Request,
+			[&FilePath, &TargetNodeId, &Request]()
 		{
-			const Design2UMGGenerationSettingsContext::FScopedSettingsSnapshot ScopedGenerationSettings(
-				Request.SettingsSnapshot->GenerationSettings);
 			return DesignImportPipeline::ExecutePenFile(FilePath, TargetNodeId, Request);
-		}
-
-		return DesignImportPipeline::ExecutePenFile(FilePath, TargetNodeId, Request);
+		});
 	}
 
 	void ProcessMCPData(const FString& NodesJson, const FString& VarsJson, const FString& TargetNodeId, const FString& OutputPath)
@@ -214,8 +221,8 @@ namespace
 			return;
 		}
 
-		FDesignImportRequest ImportRequest = MakePenImportRequest(OutputPath, true, true, &SettingsSnapshot);
-		ExecuteWidgetImportWithCapturedSettings(Data, ImportRequest);
+		FDesignImportRequest ImportRequest = MakePenImportRequest(OutputPath, true, true, SettingsSnapshot);
+		ExecuteImport(Data, ImportRequest);
 	}
 
 	void HandleMCPDataReady(const FString& NodesJson, const FString& VarsJson)
@@ -259,14 +266,14 @@ namespace
 			LOCTEXT("FrameSelectorHint", "This file contains multiple frames. Double-click to import:"),
 			[CapturedRequest = Request, CapturedSettingsSnapshot = SettingsSnapshot](const FString& FrameId)
 			{
-				ExecutePenFileImportWithCapturedSettings(
+				ExecutePenFileImport(
 					CapturedRequest.FilePath,
 					FrameId,
 					MakePenImportRequest(
 						CapturedRequest.OutputPath,
 						CapturedRequest.bUsePreview,
 						CapturedRequest.bRenderPng,
-						&CapturedSettingsSnapshot));
+						CapturedSettingsSnapshot));
 			});
 	}
 
@@ -634,9 +641,8 @@ namespace
 			LOCTEXT("FigmaPreviewTitle", "Design2UMG Figma Preview"),
 			!FApp::IsUnattended(),
 			EDesignBlueprintGenerationMode::BlueprintAndPng,
-			true,
-			&SettingsSnapshot);
-		ExecuteDocumentImportWithCapturedSettings(*Document, ImportRequest);
+			SettingsSnapshot);
+		ExecuteImport(*Document, ImportRequest);
 
 		RequestExitIfUnattended(TEXT("Unattended mode: requesting engine exit after figma import"));
 	}
@@ -670,8 +676,8 @@ namespace Design2UMGEditorImportOrchestrator
 		}
 
 		FDesignImportRequest ImportRequest =
-			MakePenImportRequest(Request.OutputPath, Request.bUsePreview, true, &SettingsSnapshot);
-		ExecuteWidgetImportWithCapturedSettings(Data, ImportRequest);
+			MakePenImportRequest(Request.OutputPath, Request.bUsePreview, true, SettingsSnapshot);
+		ExecuteImport(Data, ImportRequest);
 		RequestExitIfUnattended(TEXT("Unattended mode: requesting engine exit after pen convert"));
 	}
 
@@ -691,14 +697,14 @@ namespace Design2UMGEditorImportOrchestrator
 		}
 		else
 		{
-			ExecutePenFileImportWithCapturedSettings(
+			ExecutePenFileImport(
 				Request.FilePath,
 				Request.TargetNodeId,
 				MakePenImportRequest(
 					Request.OutputPath,
 					Request.bUsePreview,
 					Request.bRenderPng,
-					&SettingsSnapshot));
+					SettingsSnapshot));
 		}
 
 		RequestExitIfUnattended(TEXT("Unattended mode: requesting engine exit after import"));
@@ -732,9 +738,8 @@ namespace Design2UMGEditorImportOrchestrator
 			LOCTEXT("ImportSourcePreviewTitle", "Design2UMG Import Preview"),
 			Request.bUsePreview,
 			EDesignBlueprintGenerationMode::BlueprintAndPng,
-			true,
-			&SettingsSnapshot);
-		ExecuteWidgetImportWithCapturedSettings(Data, ImportRequest);
+			SettingsSnapshot);
+		ExecuteImport(Data, ImportRequest);
 
 		RequestExitIfUnattended(TEXT("Unattended mode: requesting engine exit after import source"));
 	}
@@ -782,9 +787,9 @@ namespace Design2UMGEditorImportOrchestrator
 			LOCTEXT("LocalFigmaPreviewTitle", "Design2UMG Local Figma Preview"),
 			Request.bUsePreview && !FApp::IsUnattended(),
 			EDesignBlueprintGenerationMode::BlueprintAndPng,
-			false,
-			&SettingsSnapshot);
-		ExecuteDocumentImportWithCapturedSettings(Document, ImportRequest);
+			SettingsSnapshot,
+			false);
+		ExecuteImport(Document, ImportRequest);
 
 		RequestExitIfUnattended(TEXT("Unattended mode: requesting engine exit after local figma import"));
 	}

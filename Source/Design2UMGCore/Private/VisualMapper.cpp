@@ -75,23 +75,14 @@ namespace
 		return Design2UMGWidgetNodeAccess::HasWidgetPropertyPresence(Widget, Key);
 	}
 
-	bool TryParseVisualMapperDrawAs(const FString& Value, ESlateBrushDrawType::Type& OutDrawAs)
+	FString BuildWidgetIdOrNameWithSuffix(const FString& Base, const TCHAR* Suffix)
 	{
-		static const TMap<FString, ESlateBrushDrawType::Type> DrawAsMap = {
-			{ TEXT("NoDrawType"), ESlateBrushDrawType::NoDrawType },
-			{ TEXT("Box"), ESlateBrushDrawType::Box },
-			{ TEXT("Border"), ESlateBrushDrawType::Border },
-			{ TEXT("Image"), ESlateBrushDrawType::Image },
-			{ TEXT("RoundedBox"), ESlateBrushDrawType::RoundedBox },
-		};
+		return Base + Suffix;
+	}
 
-		if (const ESlateBrushDrawType::Type* Found = DrawAsMap.Find(Value))
-		{
-			OutDrawAs = *Found;
-			return true;
-		}
-
-		return false;
+	FString BuildIndexedShadowSuffix(const int32 ShadowIndex)
+	{
+		return FString::Printf(TEXT("_shadow%d"), ShadowIndex);
 	}
 
 	void TransferBorderBackgroundProperties(FUMGWidgetNode& Border, FUMGWidgetNode& Widget)
@@ -171,7 +162,7 @@ namespace
 			&& Design2UMGWidgetNodeAccess::TryGetWidgetString(Widget, UMGPropertyKeys::DrawAs, StringValue))
 		{
 			ESlateBrushDrawType::Type DrawAs = ESlateBrushDrawType::NoDrawType;
-			if (TryParseVisualMapperDrawAs(StringValue, DrawAs))
+			if (Design2UMGWidgetNodeAccess::TryParseDrawAs(StringValue, DrawAs))
 			{
 				Border.Brush.DrawAs = DrawAs;
 			}
@@ -323,8 +314,9 @@ namespace
 
 	void PrepareWrappedContentWidget(FUMGWidgetNode& Widget)
 	{
-		Widget.Id += TEXT("_inner");
-		Widget.Name += TEXT("_inner");
+		constexpr TCHAR InnerSuffix[] = TEXT("_inner");
+		Widget.Id = BuildWidgetIdOrNameWithSuffix(Widget.Id, InnerSuffix);
+		Widget.Name = BuildWidgetIdOrNameWithSuffix(Widget.Name, InnerSuffix);
 		Widget.Bounds = FDesignPixelBounds();
 		Widget.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
 		Widget.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
@@ -562,8 +554,9 @@ FUMGWidgetNode VisualMapper::WrapWithForegroundBlur(FUMGWidgetNode&& Widget, con
 {
 	FUMGWidgetNode Retainer;
 	Retainer.Type = TEXT("RetainerBox");
-	Retainer.Id = Widget.Id + TEXT("_fxblur");
-	Retainer.Name = Widget.Name + TEXT("_fxblur");
+	constexpr TCHAR ForegroundBlurSuffix[] = TEXT("_fxblur");
+	Retainer.Id = BuildWidgetIdOrNameWithSuffix(Widget.Id, ForegroundBlurSuffix);
+	Retainer.Name = BuildWidgetIdOrNameWithSuffix(Widget.Name, ForegroundBlurSuffix);
 	Retainer.Bounds = Widget.Bounds;
 	Retainer.Slot = Widget.Slot;
 	Retainer.Effect.bRetainRendering = true;
@@ -583,8 +576,9 @@ FUMGWidgetNode VisualMapper::WrapWithInnerShadow(FUMGWidgetNode&& Widget, const 
 {
 	FUMGWidgetNode Retainer;
 	Retainer.Type = TEXT("RetainerBox");
-	Retainer.Id = Widget.Id + TEXT("_innershadow");
-	Retainer.Name = Widget.Name + TEXT("_innershadow");
+	constexpr TCHAR InnerShadowSuffix[] = TEXT("_innershadow");
+	Retainer.Id = BuildWidgetIdOrNameWithSuffix(Widget.Id, InnerShadowSuffix);
+	Retainer.Name = BuildWidgetIdOrNameWithSuffix(Widget.Name, InnerShadowSuffix);
 	Retainer.Bounds = Widget.Bounds;
 	Retainer.Slot = Widget.Slot;
 	Retainer.Effect.bRetainRendering = true;
@@ -629,7 +623,7 @@ FUMGWidgetNode VisualMapper::WrapWithBoxShadow(
 	const float ShapeHeight = FMath::Max(1.0f, Node->Transform.Height.Value - NegativeSpreadInset * 2.0f);
 	FUMGWidgetNode Shadow;
 	Shadow.Type = TEXT("Image");
-	FString ShadowSuffix = FString::Printf(TEXT("_shadow%d"), ShadowIndex);
+	const FString ShadowSuffix = BuildIndexedShadowSuffix(ShadowIndex);
 	Shadow.Id = Widget.Id + ShadowSuffix;
 	Shadow.Name = Widget.Name + ShadowSuffix;
 	Shadow.Brush.BrushColor = ShadowLayer.Color;

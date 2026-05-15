@@ -111,7 +111,7 @@ bool FPenConverterTest::RunTest(const FString& Parameters)
 	})");
 	FDesignDocument Doc;
 	TestTrue(TEXT("Parse succeeds"), FPenParser::ParseDocument(Json, Doc));
-	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	// The root widget should be present.
 	TestFalse(TEXT("Root type not empty"), Data.RootWidget.Type.IsEmpty());
 	TestTrue(TEXT("Root has children"), Data.RootWidget.Children.Num() > 0);
@@ -186,7 +186,7 @@ bool FRefOfRefDescendantsOverrideTest::RunTest(const FString& Parameters)
 		return false;
 	FDesignDocument Doc;
 	TestTrue(TEXT("RefOfRef parse succeeds"), FPenParser::ParseDocument(Json, Doc));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	TArray<FString> TextValues;
 	CollectTextValues(Data.RootWidget, TextValues);
 	TestTrue(TEXT("Text contains Integrations"), TextValues.Contains(TEXT("Integrations")));
@@ -248,7 +248,7 @@ bool FRefDeepDescendantsBareIdOverrideTest::RunTest(const FString& Parameters)
 	})JSON");
 	FDesignDocument Doc;
 	TestTrue(TEXT("Deep descendants parse succeeds"), FPenParser::ParseDocument(Json, Doc));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	TArray<FString> TextValues;
 	CollectTextValues(Data.RootWidget, TextValues);
 	TestTrue(TEXT("Text contains Final Override"), TextValues.Contains(TEXT("Final Override")));
@@ -304,7 +304,7 @@ bool FRefExplicitEffectClearTest::RunTest(const FString& Parameters)
 	})JSON");
 	FDesignDocument Doc;
 	TestTrue(TEXT("Effect-clear fixture parses"), FPenParser::ParseDocument(Json, Doc));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	TestNull(TEXT("Explicit effect clear should remove inherited box shadow widget"),
 		FindWidgetById(Data.RootWidget, TEXT("inactiveInstance_shadow0")));
 	return true;
@@ -320,7 +320,7 @@ bool FHorizontalParentRefChildCrossFillTest::RunTest(const FString& Parameters)
 		return false;
 	FDesignDocument Doc;
 	TestTrue(TEXT("CrossFill parse succeeds"), FPenParser::ParseDocument(Json, Doc));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* Sidebar = FindWidgetById(Data.RootWidget, TEXT("sidebar"));
 	TestTrue(TEXT("Sidebar widget exists"), Sidebar != nullptr);
 	if (Sidebar)
@@ -401,7 +401,7 @@ bool FRefFillClearSuppressesInheritedStrokeFillTest::RunTest(const FString& Para
 	})JSON");
 	FDesignDocument Doc;
 	TestTrue(TEXT("Fill clear ref parse succeeds"), FPenParser::ParseDocument(Json, Doc));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* DefaultItem = FindWidgetById(Data.RootWidget, TEXT("defaultItem"));
 	TestTrue(TEXT("Default item exists"), DefaultItem != nullptr);
 	if (DefaultItem != nullptr)
@@ -448,7 +448,7 @@ bool FFlowParentChildBoundsLocalizedTest::RunTest(const FString& Parameters)
 	})JSON");
 	FDesignDocument Doc;
 	TestTrue(TEXT("Flow bounds-localized parse succeeds"), FPenParser::ParseDocument(Json, Doc));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* ChildA = FindWidgetById(Data.RootWidget, TEXT("childA"));
 	TestTrue(TEXT("childA exists"), ChildA != nullptr);
 	if (ChildA)
@@ -499,7 +499,7 @@ bool FRefInstanceNoPositionUsesLocalOriginTest::RunTest(const FString& Parameter
 	})JSON");
 	FDesignDocument Doc;
 	TestTrue(TEXT("Ref instance local-origin parse succeeds"), FPenParser::ParseDocument(Json, Doc));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* Instance = FindWidgetById(Data.RootWidget, TEXT("instance"));
 	TestTrue(TEXT("instance widget exists"), Instance != nullptr);
 	if (Instance)
@@ -550,7 +550,7 @@ bool FCanvasFillContainerFallbackSizeTest::RunTest(const FString& Parameters)
 	})JSON");
 	FDesignDocument Doc;
 	TestTrue(TEXT("Canvas fallback parse succeeds"), FPenParser::ParseDocument(Json, Doc));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* WithFallback = FindWidgetById(Data.RootWidget, TEXT("withFallback"));
 	TestTrue(TEXT("withFallback widget exists"), WithFallback != nullptr);
 	if (WithFallback)

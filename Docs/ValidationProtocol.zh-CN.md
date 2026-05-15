@@ -147,7 +147,7 @@ formal gate 执行纪律：
 
 HostProject fallback 不属于支持的验证 workflow。自动化脚本不能偷偷创建 runtime project、formal evidence root、HostProject fallback 或维护者本地路径。
 
-Pencil 的 `visual_studio_code` / `vscode` app alias 兼容只写用户本地 Pencil app alias 文件，不能扩大成项目级兼容链或发布证据。
+旧的 Pencil `visual_studio_code` / `vscode` app alias 兼容已经删除。若 Pencil 因 editor app id 注册不符合预期而连不上，只记录真实 blocker 并停止；不要重新加入 alias 文件修补、HostProject fallback 或其他兼容补丁来强行继续跑。
 
 ## 回归敏感区域
 

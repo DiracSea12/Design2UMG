@@ -5,6 +5,7 @@
 #include "Styling/SlateBrush.h"
 #include "Components/Widget.h"
 #include "UMGSchema.h"
+#include "UMGWidgetNodeAccess.h"
 
 namespace UMGPropertyApplierSupport
 {
@@ -27,20 +28,7 @@ namespace UMGPropertyApplierSupport
 
 	inline bool TryParseDrawAs(const FString& Value, ESlateBrushDrawType::Type& OutDrawAs)
 	{
-		static const TMap<FString, ESlateBrushDrawType::Type> DrawAsMap = {
-			{TEXT("NoDrawType"), ESlateBrushDrawType::NoDrawType},
-			{TEXT("Box"), ESlateBrushDrawType::Box},
-			{TEXT("Border"), ESlateBrushDrawType::Border},
-			{TEXT("Image"), ESlateBrushDrawType::Image},
-			{TEXT("RoundedBox"), ESlateBrushDrawType::RoundedBox},
-		};
-
-		if (const ESlateBrushDrawType::Type* Found = DrawAsMap.Find(Value))
-		{
-			OutDrawAs = *Found;
-			return true;
-		}
-		return false;
+		return Design2UMGWidgetNodeAccess::TryParseDrawAs(Value, OutDrawAs);
 	}
 
 	inline bool TryParseWidgetClipping(const FString& Value, EWidgetClipping& OutClipping)

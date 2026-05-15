@@ -245,7 +245,7 @@ bool FFigmaPrototypeNavigationRuntimeWorkflowTest::RunTest(const FString& Parame
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse prototype navigation fixture"), FFigmaParser::ParseDocument(Json, Document));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
 	TestTrue(TEXT("Prototype navigation data available"), NavigationData.IsValid());
 	if (!NavigationData.IsValid())
@@ -335,7 +335,7 @@ bool FFigmaPrototypeTagHelperRuntimeWorkflowTest::RunTest(const FString& Paramet
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse prototype tag helper fixture"),
 		FFigmaParser::ParseDocument(BasicPrototypeNavigationJson(), Document));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	TestTrue(TEXT("Prototype tag helper data available"), Data.PrototypeNavigation().IsValid());
 	if (!Data.PrototypeNavigation().IsValid())
 	{
@@ -412,7 +412,7 @@ bool FFigmaPrototypeDisabledRuntimeWorkflowTest::RunTest(const FString& Paramete
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse prototype disabled fixture"),
 		FFigmaParser::ParseDocument(BasicPrototypeNavigationJson(), Document));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	TestTrue(TEXT("Prototype disabled mode still converts navigation data"), Data.PrototypeNavigation().IsValid());
 	if (!Data.PrototypeNavigation().IsValid())
 	{
@@ -504,7 +504,7 @@ bool FFigmaPrototypeTagHelperOpenLinkNoMetadataWorkflowTest::RunTest(const FStri
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse TagHelper open-link fixture"), FFigmaParser::ParseDocument(Json, Document));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
 	TestTrue(TEXT("TagHelper open-link navigation data is valid"), NavigationData.IsValid());
 	TestFalse(TEXT("TagHelper open-link has no switcher requirement"), NavigationData.RequiresSwitcher());
@@ -580,7 +580,7 @@ bool FFigmaPrototypeSpecialActionsRuntimeWorkflowTest::RunTest(const FString& Pa
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse prototype special actions fixture"), FFigmaParser::ParseDocument(Json, Document));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
 	TestTrue(TEXT("Prototype special action data available"), NavigationData.IsValid());
 	if (!NavigationData.IsValid())
@@ -726,7 +726,7 @@ bool FFigmaPrototypeHoverAndPressRuntimeWorkflowTest::RunTest(const FString& Par
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse prototype hover/press fixture"), FFigmaParser::ParseDocument(Json, Document));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
 	TestTrue(TEXT("Prototype hover/press data available"), NavigationData.IsValid());
 	if (!NavigationData.IsValid())
@@ -847,7 +847,7 @@ bool FFigmaPrototypeAdvancedTriggersRuntimeWorkflowTest::RunTest(const FString& 
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse prototype advanced trigger fixture"), FFigmaParser::ParseDocument(Json, Document));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
 	TestTrue(TEXT("Prototype advanced trigger data available"), NavigationData.IsValid());
 	if (!NavigationData.IsValid())
@@ -970,7 +970,7 @@ bool FFigmaPrototypeSinglePageOpenLinkRuntimeWorkflowTest::RunTest(const FString
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse single-page open-link fixture"), FFigmaParser::ParseDocument(Json, Document));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
 	TestTrue(TEXT("Single-page open-link navigation data available"), NavigationData.IsValid());
 	TestFalse(TEXT("Single-page open-link does not require switcher"), NavigationData.RequiresSwitcher());
@@ -1067,7 +1067,7 @@ bool FFigmaPrototypeSlideTransitionRuntimeWorkflowTest::RunTest(const FString& P
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse prototype slide fixture"), FFigmaParser::ParseDocument(Json, Document));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
 	TestTrue(TEXT("Prototype slide data available"), NavigationData.IsValid());
 	if (!NavigationData.IsValid())

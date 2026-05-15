@@ -42,7 +42,6 @@ public:
 	void SetMetadata(
 		const FUMGSourceDocumentData& InDocumentData,
 		const TArray<FDesign2UMGFigmaWidgetMetadataRecord>& InWidgetRecords);
-	virtual void PostLoad() override;
 
 	const FUMGSourceDocumentData& GetDocumentData() const { return DocumentData; }
 	const TArray<FDesign2UMGFigmaWidgetMetadataRecord>& GetWidgetRecords() const { return WidgetRecords; }

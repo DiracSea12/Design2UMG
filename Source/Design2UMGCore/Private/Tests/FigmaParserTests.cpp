@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -254,6 +254,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FFigmaParserErrorInputTest::RunTest(const FString&)
 {
 	{
+		AddExpectedError(TEXT("Invalid Figma export JSON"), EAutomationExpectedErrorFlags::Contains, 1);
 		AddExpectedError(TEXT("Failed to parse JSON"), EAutomationExpectedErrorFlags::Contains, 1);
 		FDesignDocument Doc;
 		TestFalse(TEXT("Empty string returns false"), FFigmaParser::ParseDocument(TEXT(""), Doc));

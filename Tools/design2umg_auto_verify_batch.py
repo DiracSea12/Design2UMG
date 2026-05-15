@@ -16,6 +16,7 @@ import design2umg_validate_run as validate_run_tool
 from design2umg_verify_lib import batch_discovery
 from design2umg_verify_lib import execution_shards
 from design2umg_verify_lib import reference_cache
+from design2umg_verify_lib.run_history import write_historical_best_validation
 
 
 NO_REGRESSION_EPSILON = 1.25e-4
@@ -1216,21 +1217,16 @@ def main():
     summary_path = output_root / "summary.json"
     verify.write_json(summary_path, summary)
     print(f"[SUMMARY] report={summary_path}")
-    automation_root = output_root.parent
-    historical_best_manifest_path, historical_best_manifest, historical_best_manifest_source = rebuild_best.resolve_admissible_best_manifest(automation_root)
-    run_manifest_path = output_root / "historical_best_manifest.json"
-    rebuild_best.write_json(run_manifest_path, historical_best_manifest)
-
-    historical_validation = validate_run_tool.validate_run(
+    history_result = write_historical_best_validation(
         output_root,
-        admissible_best_path=historical_best_manifest_path,
+        output_root.parent,
+        rebuild_best,
+        validate_run_tool,
+        verify.write_json,
+        print_paths=True,
     )
-    historical_validation_path = output_root / "validation_against_historical_best.json"
-    verify.write_json(historical_validation_path, historical_validation)
+    historical_validation = history_result["validation"]
     historical_completed_at = time.time()
-    print(f"[HISTORICAL_BEST] source={historical_best_manifest_source}")
-    print(f"[HISTORICAL_BEST] manifest={historical_best_manifest_path}")
-    print(f"[HISTORICAL_BEST] validation={historical_validation_path}")
 
     summary["phase_durations_sec"]["historical_manifest_and_validation"] = max(
         0.0,

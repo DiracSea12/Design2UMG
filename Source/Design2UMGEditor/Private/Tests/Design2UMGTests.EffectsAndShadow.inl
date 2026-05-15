@@ -39,7 +39,7 @@ bool FForegroundBlurRetainerWrapperTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Foreground blur radius preserved"),
 		Doc.Children[0]->Visual.Effects.Num() == 1 && FMath::IsNearlyEqual(Doc.Children[0]->Visual.Effects[0].Radius, 12.0f));
 
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	TestEqual(TEXT("Foreground blur uses RetainerBox wrapper"), Data.RootWidget.Type, TEXT("RetainerBox"));
 	TestTrue(TEXT("Foreground blur retain rendering typed"), Data.RootWidget.Effect.bRetainRendering.IsSet() && Data.RootWidget.Effect.bRetainRendering.GetValue());
 	TestEqual(TEXT("Foreground blur effect material ref exported"), Data.RootWidget.Effect.EffectMaterial.GetValue(), TEXT("d2u.retainer.foreground_blur"));
@@ -97,7 +97,7 @@ bool FInnerShadowRetainerWrapperTest::RunTest(const FString& Parameters)
 		&& Doc.Children[0]->Visual.Effects[0].Type == EDesignEffectType::Shadow
 		&& Doc.Children[0]->Visual.Effects[0].Shadow.bInner);
 
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	TestEqual(TEXT("Inner shadow uses RetainerBox wrapper"), Data.RootWidget.Type, TEXT("RetainerBox"));
 	TestTrue(TEXT("Inner shadow retain rendering typed"), Data.RootWidget.Effect.bRetainRendering.IsSet() && Data.RootWidget.Effect.bRetainRendering.GetValue());
 	TestEqual(TEXT("Inner shadow effect material ref exported"), Data.RootWidget.Effect.EffectMaterial.GetValue(), TEXT("d2u.retainer.inner_shadow"));
@@ -148,7 +148,7 @@ bool FBackgroundBlurUsesTypedEffectDataTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	TestEqual(TEXT("Background blur uses BackgroundBlur wrapper"), Data.RootWidget.Type, TEXT("BackgroundBlur"));
 	TestTrue(TEXT("Background blur strength exported via typed effect"), Data.RootWidget.Effect.BlurStrength.IsSet());
 	TestTrue(TEXT("Background blur strength preserved"), FMath::IsNearlyEqual(Data.RootWidget.Effect.BlurStrength.GetValue(), 18.0f));
@@ -209,7 +209,7 @@ bool FFigmaEffectsConvertToTypedWrappersTest::RunTest(const FString& Parameters)
 	FDesignDocument Doc;
 	TestTrue(TEXT("Figma effect wrapper fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
 
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	TestEqual(TEXT("Figma background blur becomes outer wrapper"), Data.RootWidget.Type, TEXT("BackgroundBlur"));
 	TestTrue(TEXT("Figma background blur keeps typed strength"), Data.RootWidget.Effect.BlurStrength.IsSet() && FMath::IsNearlyEqual(Data.RootWidget.Effect.BlurStrength.GetValue(), 16.0f, 0.001f));
 	TestTrue(TEXT("Figma background blur keeps one child"), Data.RootWidget.Children.Num() == 1);
@@ -262,7 +262,7 @@ bool FFigmaLayerBlurConvertsToForegroundBlurWrapperTest::RunTest(const FString& 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Figma layer blur fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
 
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	TestEqual(TEXT("Figma layer blur becomes foreground retainer wrapper"), Data.RootWidget.Type, TEXT("RetainerBox"));
 	TestTrue(TEXT("Figma layer blur retain rendering typed"), Data.RootWidget.Effect.bRetainRendering.IsSet() && Data.RootWidget.Effect.bRetainRendering.GetValue());
 	TestEqual(TEXT("Figma layer blur effect material typed"), Data.RootWidget.Effect.EffectMaterial.GetValue(), TEXT("d2u.retainer.foreground_blur"));
@@ -310,7 +310,7 @@ bool FFigmaDropShadowConvertsToBoxShadowWrapperTest::RunTest(const FString& Para
 	FDesignDocument Doc;
 	TestTrue(TEXT("Figma drop shadow fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
 
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	TestEqual(TEXT("Figma outer shadow becomes overlay wrapper"), Data.RootWidget.Type, TEXT("Overlay"));
 	TestTrue(TEXT("Figma outer shadow wrapper keeps shadow and content children"), Data.RootWidget.Children.Num() == 2);
 	if (Data.RootWidget.Children.Num() != 2)
@@ -1949,7 +1949,7 @@ bool FRadialGradientMultiStopFidelityTest::RunTest(const FString& Parameters)
 	FDesignDocument Doc;
 	TestTrue(TEXT("Radial multi-stop gradient fixture parses"), FPenParser::ParseDocument(Json, Doc));
 
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* Widget = FindWidgetById(Data.RootWidget, TEXT("grad_card"));
 	TestTrue(TEXT("Radial gradient widget exists"), Widget != nullptr);
 	if (!Widget)
@@ -2022,7 +2022,7 @@ bool FRadialGradientTransformFidelityTest::RunTest(const FString& Parameters)
 	FDesignDocument Doc;
 	TestTrue(TEXT("Radial transform fixture parses"), FPenParser::ParseDocument(Json, Doc));
 
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* Widget = FindWidgetById(Data.RootWidget, TEXT("grad_transform"));
 	TestTrue(TEXT("Radial transform widget exists"), Widget != nullptr);
 	if (!Widget)
@@ -2123,7 +2123,7 @@ bool FFigmaRadialGradientHandleFidelityTest::RunTest(const FString& Parameters)
 		&& FMath::IsNearlyEqual(GradientNode->Visual.Fill.Gradient.Size.GetValue().Y, 1.0f, 0.001f));
 	TestTrue(TEXT("Figma radial rotation parsed"), FMath::IsNearlyEqual(GradientNode->Visual.Fill.Gradient.Rotation, 90.0f, 0.001f));
 
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* Widget = FindWidgetById(Data.RootWidget, TEXT("grad_figma"));
 	TestTrue(TEXT("Figma radial widget exists"), Widget != nullptr);
 	if (!Widget)
@@ -2188,7 +2188,7 @@ bool FBoxShadowBlurPaddingFidelityTest::RunTest(const FString& Parameters)
 	FDesignDocument Doc;
 	TestTrue(TEXT("Box shadow blur-padding fixture parses"), FPenParser::ParseDocument(Json, Doc));
 
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* Wrapper = FindWidgetById(Data.RootWidget, TEXT("shadow_card"));
 	const FUMGWidgetNode* ShadowWidget = FindWidgetById(Data.RootWidget, TEXT("shadow_card_shadow0"));
 	TestTrue(TEXT("Shadow wrapper exists"), Wrapper != nullptr);
@@ -2290,7 +2290,7 @@ bool FBoxShadowNegativeSpreadFidelityTest::RunTest(const FString& Parameters)
 	FDesignDocument Doc;
 	TestTrue(TEXT("Negative spread shadow fixture parses"), FPenParser::ParseDocument(Json, Doc));
 
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* ShadowWidget = FindWidgetById(Data.RootWidget, TEXT("shadow_chip_shadow0"));
 	TestTrue(TEXT("Negative spread shadow image child exists"), ShadowWidget != nullptr);
 	if (!ShadowWidget)

@@ -115,7 +115,7 @@ bool FFigmaPrototypeNavigationConverterTest::RunTest(const FString& Parameters)
 	FDesignDocument Doc;
 	TestTrue(TEXT("Figma prototype navigation parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
 
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
 	TestTrue(TEXT("Prototype navigation plan exists"), NavigationData.IsValid());
 	TestEqual(TEXT("Prototype root uses WidgetSwitcher"), Data.RootWidget.Type, TEXT("WidgetSwitcher"));
@@ -193,7 +193,7 @@ bool FFigmaPrototypeSpecialActionsConverterTest::RunTest(const FString& Paramete
 	FDesignDocument Document;
 	TestTrue(TEXT("Figma prototype special actions parse succeeds"), FFigmaParser::ParseDocument(Json, Document));
 
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
 	TestTrue(TEXT("Prototype special action plan exists"), NavigationData.IsValid());
 	TestEqual(TEXT("Prototype special action binding count"), NavigationData.ClickBindings.Num(), 3);
@@ -292,7 +292,7 @@ bool FFigmaPrototypeHoverAndPressConverterTest::RunTest(const FString& Parameter
 	FDesignDocument Document;
 	TestTrue(TEXT("Figma prototype hover/press parse succeeds"), FFigmaParser::ParseDocument(Json, Document));
 
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
 	TestTrue(TEXT("Prototype hover/press plan exists"), NavigationData.IsValid());
 	TestEqual(TEXT("Prototype hover/press binding count"), NavigationData.ClickBindings.Num(), 3);
@@ -404,7 +404,7 @@ bool FFigmaPrototypeKeyboardAndConditionalConverterTest::RunTest(const FString& 
 	FDesignDocument Document;
 	TestTrue(TEXT("Figma prototype keyboard/conditional parse succeeds"), FFigmaParser::ParseDocument(Json, Document));
 
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
 	TestTrue(TEXT("Prototype keyboard/conditional plan exists"), NavigationData.IsValid());
 	TestEqual(TEXT("Prototype keyboard/conditional binding count"), NavigationData.ClickBindings.Num(), 3);
@@ -492,7 +492,7 @@ bool FFigmaOverflowDirectionMapsToScrollBoxTest::RunTest(const FString& Paramete
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse scrollable figma fixture"), FFigmaParser::ParseDocument(Json, Document));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* ScrollFrame = FindWidgetById(Data.RootWidget, TEXT("scroll_frame"));
 	TestNotNull(TEXT("Scrollable frame converts"), ScrollFrame);
 	if (!ScrollFrame)
@@ -549,7 +549,7 @@ bool FFigmaGridSlotSemanticsConverterTest::RunTest(const FString& Parameters)
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse figma grid slot semantics fixture"), FFigmaParser::ParseDocument(Json, Document));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 
 	const FUMGWidgetNode* GridFrame = FindWidgetById(Data.RootWidget, TEXT("grid_frame"));
 	const FUMGWidgetNode* TailCard = FindWidgetById(Data.RootWidget, TEXT("tail_card_sz"));

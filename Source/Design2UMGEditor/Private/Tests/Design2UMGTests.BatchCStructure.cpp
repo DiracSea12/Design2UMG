@@ -127,7 +127,7 @@ bool FBatchCFlowChildPreResolutionSmokeTest::RunTest(const FString& Parameters)
 	Document.Children.Add(Reusable);
 	Document.Children.Add(Screen);
 
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* ScreenWidget = Design2UMGTestUtils::FindWidgetById(Data.RootWidget, TEXT("batch_c_screen"));
 	const FUMGWidgetNode* RefWidget = Design2UMGTestUtils::FindWidgetById(Data.RootWidget, TEXT("batch_c_ref"));
 

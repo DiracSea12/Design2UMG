@@ -191,6 +191,25 @@ FString Design2UMGWidgetNodeAccess::SerializeDrawAs(const ESlateBrushDrawType::T
 	}
 }
 
+bool Design2UMGWidgetNodeAccess::TryParseDrawAs(const FString& Value, ESlateBrushDrawType::Type& OutDrawAs)
+{
+	static const TMap<FString, ESlateBrushDrawType::Type> DrawAsMap = {
+		{ TEXT("NoDrawType"), ESlateBrushDrawType::NoDrawType },
+		{ TEXT("Box"), ESlateBrushDrawType::Box },
+		{ TEXT("Border"), ESlateBrushDrawType::Border },
+		{ TEXT("Image"), ESlateBrushDrawType::Image },
+		{ TEXT("RoundedBox"), ESlateBrushDrawType::RoundedBox },
+	};
+
+	if (const ESlateBrushDrawType::Type* Found = DrawAsMap.Find(Value))
+	{
+		OutDrawAs = *Found;
+		return true;
+	}
+
+	return false;
+}
+
 bool Design2UMGWidgetNodeAccess::NormalizeBrushTexturePathOwner(FUMGVisualBrushData& Brush, FString* OutDiagnostic)
 {
 	if (OutDiagnostic)

@@ -31,7 +31,6 @@ public:
 	 * @param Document Parsed design-side IR.
 	 * @return Generated UMG widget tree and associated metadata.
 	 */
-	static FUMGWidgetData Convert(const FDesignDocument& Document);
 	static FUMGWidgetData Convert(const FDesignDocument& Document, const FDesign2UMGConversionSettings& Settings);
 };
 

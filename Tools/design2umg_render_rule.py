@@ -1,5 +1,6 @@
-import json
-from pathlib import Path
+﻿from pathlib import Path
+
+from design2umg_verify_lib.json_io import load_json as helper_load_json
 
 
 DESIGN_SIZE_RENDER_RULE = "source_design_size_v1"
@@ -26,7 +27,7 @@ REQUESTED_RENDER_SIZE_FIELDS = ("render_width", "render_height")
 
 
 def load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8-sig"))
+    return helper_load_json(path)
 
 
 def nested_value(payload: dict, path: tuple[str, ...]):

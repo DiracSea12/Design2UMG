@@ -102,7 +102,7 @@ bool FPenExtendedFieldsAndMeshGradientTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("stroke miterAngle preserved"), StrokeMiterAngle && !StrokeMiterAngle->IsEmpty());
 	const FString* StrokeDashPattern = ComponentNode->Metadata.Find(TEXT("stroke.dashPattern"));
 	TestTrue(TEXT("stroke dashPattern preserved"), StrokeDashPattern && StrokeDashPattern->Contains(TEXT("2")) && StrokeDashPattern->Contains(TEXT("4")));
-	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* OverrideLabel = FindWidgetById(Data.RootWidget, TEXT("label"));
 	TestTrue(TEXT("Find override text widget"), OverrideLabel != nullptr);
 	if (!OverrideLabel)
@@ -167,7 +167,7 @@ bool FPenRichTextConverterUsesRichTextBlockTest::RunTest(const FString& Paramete
 		TestTrue(TEXT("Explicit false strikethrough remains present"), LinkRun.bStrikethrough.IsSet());
 		TestFalse(TEXT("Explicit false strikethrough value"), LinkRun.bStrikethrough.Get(true));
 	}
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* RichLabel = FindWidgetById(Data.RootWidget, TEXT("rich_label"));
 	TestNotNull(TEXT("Rich text widget exists"), RichLabel);
 	if (!RichLabel)
@@ -290,7 +290,7 @@ bool FPathStrokeOnlyIconRasterizationTest::RunTest(const FString& Parameters)
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Stroke-only path parses"), FPenParser::ParseDocument(Json, Doc));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* Widget = FindWidgetById(Data.RootWidget, TEXT("icon_plus"));
 	TestTrue(TEXT("Converted widget keeps stroke-only icon"), Widget != nullptr);
 	if (!Widget)

@@ -223,13 +223,7 @@ Formal gate execution discipline:
 
 ## Pencil MCP App Alias Compatibility
 
-The project currently keeps Pencil's `visual_studio_code` / `vscode` app alias compatibility because both startup paths need to work with Pencil extension registrations that differ by app id.
-
-Supported startup chains:
-- Python automation: `Tools/design2umg_auto_verify.py` calls `sync_pencil_vscode_app_alias()` before launching the Pencil MCP server. This keeps the two app-id files in the user's `.pencil/apps` directory aligned when the selected app is VS Code compatible.
-- Editor connector: `Source/Design2UMGEditor/Private/PencilConnector.cpp` calls `SyncVSCodePencilAppAlias()` before sync or async MCP launch. It then detects the registered app id or running editor process and launches the latest discovered Pencil MCP server.
-
-This compatibility writes only user-local Pencil app alias files. It must not create runtime projects, formal evidence roots, HostProject fallbacks, or maintainer-only paths.
+The old Pencil `visual_studio_code` / `vscode` app alias compatibility has been removed. If Pencil cannot connect because the editor app id is not registered as expected, record the real blocker in the validation evidence and stop; do not reintroduce alias-file repair, HostProject fallback, or any other compatibility patch to keep the run going.
 
 ## Regression-Sensitive Areas
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGWidgetUtils.h"
 #include "Design2UMGGenerationSettingsSnapshot.h"
@@ -7,6 +7,7 @@
 #include "WidgetResourceBinder.h"
 #include "Design2UMGLog.h"
 #include "UMGLayoutProjection.h"
+#include "UMGPropertyApplierInternal.h"
 #include "WidgetLayoutAdapter.h"
 #include "UMGPropertyKeys.h"
 #include "UMGWidgetNodeAccess.h"
@@ -225,7 +226,10 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 
 	if (UImage* ImageWidget = Cast<UImage>(NewWidget))
 	{
-		FWidgetResourceBinder::BindImageResource(ImageWidget, Node, TextureMap);
+		if (!FWidgetResourceBinder::BindImageResource(ImageWidget, Node, TextureMap))
+		{
+			UE_LOG(LogDesign2UMG, Verbose, TEXT("No image resource bound for widget '%s' (Id: %s)"), *Node.Name, *Node.Id);
+		}
 	}
 
 	return NewWidget;
@@ -255,6 +259,16 @@ UClass* FUMGWidgetUtils::ResolveWidgetClass(const FString& TypeName)
 	}
 
 	return nullptr;
+}
+
+void FUMGWidgetUtils::ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNode& Node)
+{
+	if (!Widget)
+	{
+		return;
+	}
+
+	UMGPropertyApplierInternal::ApplyWidgetProperties(Widget, Node);
 }
 
 FName FUMGWidgetUtils::SanitizeWidgetName(const FString& InName, const FString& FallbackPrefix)

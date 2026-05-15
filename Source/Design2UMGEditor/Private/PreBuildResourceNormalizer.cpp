@@ -196,94 +196,116 @@ namespace
 		return true;
 	}
 
-	void NormalizePathTexturesRecursive(
-		FUMGWidgetNode& Node,
-		const FString& TextureImportPath,
+	struct FTextureMaterializationPlan
+	{
+		uint32 Key = 0u;
+		TextureFilter Filter = TF_Bilinear;
+		FString AssetName;
+		FString ProceduralMaterialRef;
+		FUMGProceduralResourceRequest ProceduralRequest;
+	};
+
+	bool TryBuildPathTextureMaterializationPlan(
+		const FUMGWidgetNode& Node,
 		const FString& AssetPrefix,
-		TMap<uint32, FString>& Cache)
+		FTextureMaterializationPlan& OutPlan)
 	{
 		const FString Geometry = Node.Path.Geometry.Get(FString());
-		if (Node.Type == TEXT("Image") && !Geometry.IsEmpty())
+		if (Node.Type != TEXT("Image") || Geometry.IsEmpty())
 		{
-			const uint32 Key = MakePathTextureKey(Node);
-			if (const FString* Cached = Cache.Find(Key))
-			{
-				ReplaceNodeFillWithTexturePath(Node, *Cached);
-			}
-			else
-			{
-				const FString FillRule = Node.Path.FillRule.Get(FString()).IsEmpty() ? TEXT("nonzero") : Node.Path.FillRule.GetValue();
-				const FString FillColor = Node.Path.FillColor.IsSet() ? Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.FillColor.GetValue()) : FString();
-				const FString StrokeColor = Node.Path.StrokeColor.IsSet() ? Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.StrokeColor.GetValue()) : FString();
-				const FString StrokeCap = Node.Path.StrokeCap.Get(FString()).IsEmpty() ? TEXT("butt") : Node.Path.StrokeCap.GetValue();
-				const FString StrokeJoin = Node.Path.StrokeJoin.Get(FString()).IsEmpty() ? TEXT("miter") : Node.Path.StrokeJoin.GetValue();
-				const float StrokeThickness = Node.Path.StrokeThickness.Get(0.0f);
-				const int32 Width  = (Node.WidgetStyle.WidthOverride.IsSet()  && Node.WidgetStyle.WidthOverride.GetValue()  > 0.0f) ? FMath::RoundToInt(Node.WidgetStyle.WidthOverride.GetValue())
-					: 64;
-				const int32 Height = (Node.WidgetStyle.HeightOverride.IsSet() && Node.WidgetStyle.HeightOverride.GetValue() > 0.0f) ? FMath::RoundToInt(Node.WidgetStyle.HeightOverride.GetValue())
-					: 64;
-
-				constexpr int32 PathSupersample = 2;
-				const TOptional<FLinearColor> OptFill = FillColor.IsEmpty() ? TOptional<FLinearColor>() : TOptional<FLinearColor>(FUMGValueParser::ParseColor(FillColor));
-				const TOptional<FLinearColor> OptStroke = StrokeColor.IsEmpty() ? TOptional<FLinearColor>() : TOptional<FLinearColor>(FUMGValueParser::ParseColor(StrokeColor));
-				if (UTexture2D* Rasterized = FDesignPathRasterizer::Rasterize(
-					*Geometry, Width * PathSupersample, Height * PathSupersample,
-					OptFill, FillRule, OptStroke, StrokeThickness, StrokeCap, StrokeJoin))
-				{
-					TArray64<uint8> RawData;
-					int32 RawW = 0, RawH = 0;
-					if (ExtractTextureRawData(Rasterized, RawData, RawW, RawH))
-					{
-						const FString SanitizedName = ObjectTools::SanitizeObjectName(Node.Name.IsEmpty() ? Node.Id : Node.Name);
-						const FString AssetName = ObjectTools::SanitizeObjectName(FString::Printf(TEXT("%s_%s_%08X"), *AssetPrefix, *SanitizedName, Key));
-						FString ObjectPath;
-						if (CreateOrUpdatePathTextureAsset(TextureImportPath, AssetName, RawData, RawW, RawH, TF_Nearest, ObjectPath))
-						{
-							ReplaceNodeFillWithTexturePath(Node, ObjectPath);
-							Cache.Add(Key, ObjectPath);
-							UE_LOG(LogDesign2UMG, Log, TEXT("Persisted path texture '%s' -> %s"), *Node.Name, *ObjectPath);
-						}
-					}
-				}
-			}
+			return false;
 		}
 
-		for (FUMGWidgetNode& Child : Node.Children)
-			NormalizePathTexturesRecursive(Child, TextureImportPath, AssetPrefix, Cache);
+		OutPlan.Key = MakePathTextureKey(Node);
+		OutPlan.Filter = TF_Nearest;
+		const FString SanitizedName = ObjectTools::SanitizeObjectName(Node.Name.IsEmpty() ? Node.Id : Node.Name);
+		OutPlan.AssetName = ObjectTools::SanitizeObjectName(FString::Printf(TEXT("%s_%s_%08X"), *AssetPrefix, *SanitizedName, OutPlan.Key));
+		return true;
 	}
 
-	void NormalizeProceduralTexturesRecursive(
+	UTexture2D* CreatePathTexture(const FUMGWidgetNode& Node, const FTextureMaterializationPlan&)
+	{
+		const FString Geometry = Node.Path.Geometry.Get(FString());
+		const FString FillRule = Node.Path.FillRule.Get(FString()).IsEmpty() ? TEXT("nonzero") : Node.Path.FillRule.GetValue();
+		const FString FillColor = Node.Path.FillColor.IsSet() ? Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.FillColor.GetValue()) : FString();
+		const FString StrokeColor = Node.Path.StrokeColor.IsSet() ? Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.StrokeColor.GetValue()) : FString();
+		const FString StrokeCap = Node.Path.StrokeCap.Get(FString()).IsEmpty() ? TEXT("butt") : Node.Path.StrokeCap.GetValue();
+		const FString StrokeJoin = Node.Path.StrokeJoin.Get(FString()).IsEmpty() ? TEXT("miter") : Node.Path.StrokeJoin.GetValue();
+		const float StrokeThickness = Node.Path.StrokeThickness.Get(0.0f);
+		const int32 Width  = (Node.WidgetStyle.WidthOverride.IsSet()  && Node.WidgetStyle.WidthOverride.GetValue()  > 0.0f) ? FMath::RoundToInt(Node.WidgetStyle.WidthOverride.GetValue())
+			: 64;
+		const int32 Height = (Node.WidgetStyle.HeightOverride.IsSet() && Node.WidgetStyle.HeightOverride.GetValue() > 0.0f) ? FMath::RoundToInt(Node.WidgetStyle.HeightOverride.GetValue())
+			: 64;
+
+		constexpr int32 PathSupersample = 2;
+		const TOptional<FLinearColor> OptFill = FillColor.IsEmpty() ? TOptional<FLinearColor>() : TOptional<FLinearColor>(FUMGValueParser::ParseColor(FillColor));
+		const TOptional<FLinearColor> OptStroke = StrokeColor.IsEmpty() ? TOptional<FLinearColor>() : TOptional<FLinearColor>(FUMGValueParser::ParseColor(StrokeColor));
+		return FDesignPathRasterizer::Rasterize(
+			*Geometry, Width * PathSupersample, Height * PathSupersample,
+			OptFill, FillRule, OptStroke, StrokeThickness, StrokeCap, StrokeJoin);
+	}
+
+	bool TryBuildProceduralTextureMaterializationPlan(
+		const FUMGWidgetNode& Node,
+		const FString& AssetPrefix,
+		FTextureMaterializationPlan& OutPlan)
+	{
+		FUMGProceduralResourceRequest ResourceRequest;
+		if (!Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Node, ResourceRequest)
+			|| !ResourceRequest.HasNonEmptyMaterialRef())
+		{
+			return false;
+		}
+
+		OutPlan.Key = MakeProceduralTextureKey(Node);
+		OutPlan.Filter = TF_Bilinear;
+		OutPlan.ProceduralMaterialRef = ResourceRequest.MaterialRef;
+		OutPlan.ProceduralRequest = ResourceRequest;
+		const FString SanitizedName = ObjectTools::SanitizeObjectName(Node.Name.IsEmpty() ? Node.Id : Node.Name);
+		const FString SanitizedMat = ObjectTools::SanitizeObjectName(ResourceRequest.MaterialRef);
+		OutPlan.AssetName = ObjectTools::SanitizeObjectName(FString::Printf(TEXT("%s_%s_%s_%08X"), *AssetPrefix, *SanitizedName, *SanitizedMat, OutPlan.Key));
+		return true;
+	}
+
+	UTexture2D* CreateProceduralTexture(const FUMGWidgetNode&, const FTextureMaterializationPlan& Plan)
+	{
+		return DesignResourceResolver::ResolveTextureFromMaterialRef(Plan.ProceduralRequest, nullptr);
+	}
+
+	void NormalizeTextureResourcesRecursive(
 		FUMGWidgetNode& Node,
 		const FString& TextureImportPath,
 		const FString& AssetPrefix,
-		TMap<uint32, FString>& Cache)
+		TMap<uint32, FString>& Cache,
+		TFunctionRef<bool(const FUMGWidgetNode&, const FString&, FTextureMaterializationPlan&)> TryBuildPlan,
+		TFunctionRef<UTexture2D*(const FUMGWidgetNode&, const FTextureMaterializationPlan&)> CreateTexture)
 	{
-		FUMGProceduralResourceRequest ResourceRequest;
-		if (Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Node, ResourceRequest)
-			&& ResourceRequest.HasNonEmptyMaterialRef())
+		FTextureMaterializationPlan Plan;
+		if (TryBuildPlan(Node, AssetPrefix, Plan))
 		{
-			const uint32 Key = MakeProceduralTextureKey(Node);
-			if (const FString* Cached = Cache.Find(Key))
+			if (const FString* Cached = Cache.Find(Plan.Key))
 			{
 				ReplaceNodeFillWithTexturePath(Node, *Cached);
 			}
-			else
+			else if (UTexture2D* Generated = CreateTexture(Node, Plan))
 			{
-				if (UTexture2D* Generated = DesignResourceResolver::ResolveTextureFromMaterialRef(ResourceRequest, nullptr))
+				TArray64<uint8> RawData;
+				int32 RawW = 0;
+				int32 RawH = 0;
+				if (ExtractTextureRawData(Generated, RawData, RawW, RawH))
 				{
-					TArray64<uint8> RawData;
-					int32 RawW = 0, RawH = 0;
-					if (ExtractTextureRawData(Generated, RawData, RawW, RawH))
+					FString ObjectPath;
+					if (CreateOrUpdatePathTextureAsset(TextureImportPath, Plan.AssetName, RawData, RawW, RawH, Plan.Filter, ObjectPath))
 					{
-						const FString SanitizedName = ObjectTools::SanitizeObjectName(Node.Name.IsEmpty() ? Node.Id : Node.Name);
-						const FString SanitizedMat = ObjectTools::SanitizeObjectName(ResourceRequest.MaterialRef);
-						const FString AssetName = ObjectTools::SanitizeObjectName(FString::Printf(TEXT("%s_%s_%s_%08X"), *AssetPrefix, *SanitizedName, *SanitizedMat, Key));
-						FString ObjectPath;
-						if (CreateOrUpdatePathTextureAsset(TextureImportPath, AssetName, RawData, RawW, RawH, TF_Bilinear, ObjectPath))
+						ReplaceNodeFillWithTexturePath(Node, ObjectPath);
+						Cache.Add(Plan.Key, ObjectPath);
+						if (Plan.ProceduralMaterialRef.IsEmpty())
 						{
-							ReplaceNodeFillWithTexturePath(Node, ObjectPath);
-							Cache.Add(Key, ObjectPath);
-							UE_LOG(LogDesign2UMG, Log, TEXT("Persisted procedural texture '%s' (%s) -> %s"), *Node.Name, *ResourceRequest.MaterialRef, *ObjectPath);
+							UE_LOG(LogDesign2UMG, Log, TEXT("Persisted path texture '%s' -> %s"), *Node.Name, *ObjectPath);
+						}
+						else
+						{
+							UE_LOG(LogDesign2UMG, Log, TEXT("Persisted procedural texture '%s' (%s) -> %s"), *Node.Name, *Plan.ProceduralMaterialRef, *ObjectPath);
 						}
 					}
 				}
@@ -291,18 +313,32 @@ namespace
 		}
 
 		for (FUMGWidgetNode& Child : Node.Children)
-			NormalizeProceduralTexturesRecursive(Child, TextureImportPath, AssetPrefix, Cache);
+		{
+			NormalizeTextureResourcesRecursive(Child, TextureImportPath, AssetPrefix, Cache, TryBuildPlan, CreateTexture);
+		}
 	}
 }
 
 void FPreBuildResourceNormalizer::NormalizePathTextures(FUMGWidgetNode& Root, const FString& TextureImportPath, const FString& AssetPrefix)
 {
 	TMap<uint32, FString> Cache;
-	NormalizePathTexturesRecursive(Root, TextureImportPath, AssetPrefix, Cache);
+	NormalizeTextureResourcesRecursive(
+		Root,
+		TextureImportPath,
+		AssetPrefix,
+		Cache,
+		TryBuildPathTextureMaterializationPlan,
+		CreatePathTexture);
 }
 
 void FPreBuildResourceNormalizer::NormalizeProceduralTextures(FUMGWidgetNode& Root, const FString& TextureImportPath, const FString& AssetPrefix)
 {
 	TMap<uint32, FString> Cache;
-	NormalizeProceduralTexturesRecursive(Root, TextureImportPath, AssetPrefix, Cache);
+	NormalizeTextureResourcesRecursive(
+		Root,
+		TextureImportPath,
+		AssetPrefix,
+		Cache,
+		TryBuildProceduralTextureMaterializationPlan,
+		CreateProceduralTexture);
 }

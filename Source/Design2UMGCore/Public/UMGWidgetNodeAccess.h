@@ -23,6 +23,7 @@ namespace Design2UMGWidgetNodeAccess
 	DESIGN2UMGCORE_API FString SerializeImageTransform(const FUMGVisualBrushData::FImageTransformData& Value);
 	DESIGN2UMGCORE_API bool TryParseImageTransform(const FString& Value, FUMGVisualBrushData::FImageTransformData& OutTransform);
 	DESIGN2UMGCORE_API FString SerializeDrawAs(const ESlateBrushDrawType::Type DrawAs);
+	DESIGN2UMGCORE_API bool TryParseDrawAs(const FString& Value, ESlateBrushDrawType::Type& OutDrawAs);
 	DESIGN2UMGCORE_API FString GetGradientMaterialRef(const FUMGVisualBrushData::FGradientData& Gradient);
 	DESIGN2UMGCORE_API FString SerializeGradientMaterialParams(const FUMGVisualBrushData::FGradientData& Gradient);
 	DESIGN2UMGCORE_API bool NormalizeBrushTexturePathOwner(FUMGVisualBrushData& Brush, FString* OutDiagnostic = nullptr);
@@ -35,9 +36,6 @@ namespace Design2UMGWidgetNodeAccess
 	}
 
 	DESIGN2UMGCORE_API bool IsTypedWidgetPropertyKey(const FString& Key);
-
-	// Domain readers are retained as focused cross-module typed inspection seams.
-	// Final widget consumers should read the typed owner structs directly.
 	DESIGN2UMGCORE_API bool TryGetTextStyleTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue);
 	DESIGN2UMGCORE_API bool TryGetWidgetStyleTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue);
 	DESIGN2UMGCORE_API bool TryGetTextTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue);

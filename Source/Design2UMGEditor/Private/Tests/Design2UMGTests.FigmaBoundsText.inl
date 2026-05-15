@@ -912,7 +912,7 @@ bool FFigmaTextFitPreserveSizeTest::RunTest(const FString& Parameters)
 		return nullptr;
 	};
 
-	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 
 	const auto VerifySingleLineFitLabel = [&](const FString& ExpectedText, const float ExpectedWidth, const float ExpectedHeight, const float SourceFontSize)
 	{

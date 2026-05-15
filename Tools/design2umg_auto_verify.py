@@ -2,7 +2,6 @@
 import base64
 import csv
 import glob
-import hashlib
 import json
 import math
 import os
@@ -20,6 +19,10 @@ from pathlib import Path
 
 import design2umg_rebuild_admissible_best as rebuild_best
 import design2umg_validate_run as validate_run_tool
+from design2umg_verify_lib.json_io import content_file_signature as helper_content_file_signature
+from design2umg_verify_lib.json_io import load_json as helper_load_json
+from design2umg_verify_lib.json_io import write_json as helper_write_json
+from design2umg_verify_lib.run_history import write_historical_best_validation
 from PIL import Image, ImageChops, ImageFilter, ImageStat
 
 
@@ -38,7 +41,7 @@ def parse_numeric_dimension(value):
 
 
 def load_json_document(path: Path):
-    return json.loads(path.read_text(encoding="utf-8-sig"))
+    return helper_load_json(path)
 
 
 _COMPARE_IMAGE_CACHE: dict[tuple, dict] = {}
@@ -689,34 +692,6 @@ def discover_mcp_server(override_path: str) -> str:
     raise FileNotFoundError("Pencil MCP server binary not found; use --mcp-server to override")
 
 
-def sync_pencil_vscode_app_alias(app_name: str):
-    normalized_app = (app_name or "").strip().lower()
-    if normalized_app not in {"", "vscode", "visual studio code", "code", "visual_studio_code"}:
-        return
-
-    user_home = Path(os.environ.get("USERPROFILE", ""))
-    apps_dir = user_home / ".pencil" / "apps"
-    canonical_path = apps_dir / "visual_studio_code"
-    legacy_path = apps_dir / "vscode"
-
-    source_port = ""
-    for candidate in (canonical_path, legacy_path):
-        if candidate.is_file():
-            source_port = candidate.read_text(encoding="utf-8-sig").lstrip("\ufeff").strip()
-            if source_port:
-                break
-
-    if not source_port:
-        return
-
-    apps_dir.mkdir(parents=True, exist_ok=True)
-    desired_bytes = source_port.encode("utf-8")
-    for target in (canonical_path, legacy_path):
-        existing = target.read_text(encoding="utf-8-sig").lstrip("\ufeff").strip() if target.is_file() else ""
-        existing_bytes = target.read_bytes() if target.is_file() else b""
-        if existing != source_port or existing_bytes != desired_bytes:
-            target.write_bytes(desired_bytes)
-
 PENCIL_APP_PROCESS_CANDIDATES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("visual_studio_code", ("Code.exe", "code")),
     ("vscode", ("Code.exe", "code")),
@@ -971,7 +946,6 @@ class PencilMcpClient:
         errors: list[str] = []
         for candidate in self.app_candidates:
             self.app_name = candidate
-            sync_pencil_vscode_app_alias(self.app_name)
             args = [self.server_path, "-app", self.app_name, "-http", "-http-port", str(self.port)]
             self.process = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             deadline = time.time() + 10.0
@@ -2070,9 +2044,7 @@ def read_image_size(path: Path) -> tuple[int, int]:
 
 
 def write_json(path: Path, payload: dict):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8-sig") as handle:
-        json.dump(payload, handle, ensure_ascii=False, indent=2)
+    helper_write_json(path, payload)
 
 
 def write_single_editor_driver_script(output_dir: Path, spec_path: Path) -> Path:
@@ -2136,22 +2108,7 @@ _run()
 
 
 def build_file_signature(path_like: str | Path) -> dict | None:
-    try:
-        resolved = Path(path_like).resolve()
-    except (OSError, RuntimeError, ValueError, TypeError):
-        return None
-
-    if not resolved.is_file():
-        return None
-
-    stat = resolved.stat()
-    digest = hashlib.sha1(resolved.read_bytes()).hexdigest()
-    return {
-        "path": str(resolved),
-        "size": stat.st_size,
-        "mtime_ns": stat.st_mtime_ns,
-        "sha1": digest,
-    }
+    return helper_content_file_signature(path_like)
 
 
 def infer_single_case_name(args, output_dir: Path) -> str:
@@ -2251,16 +2208,13 @@ def finalize_single_run_history(output_dir: Path, args, report_path: Path) -> No
     }
     write_json(output_dir / "summary.json", summary)
 
-    automation_root = output_dir.parent
-    historical_best_manifest_path, historical_best_manifest, historical_best_manifest_source = rebuild_best.resolve_admissible_best_manifest(automation_root)
-    rebuild_best.write_json(output_dir / "historical_best_manifest.json", historical_best_manifest)
-
-    historical_validation = validate_run_tool.validate_run(
+    write_historical_best_validation(
         output_dir,
-        admissible_best_path=historical_best_manifest_path,
+        output_dir.parent,
+        rebuild_best,
+        validate_run_tool,
+        write_json,
     )
-    write_json(output_dir / "validation_against_historical_best.json", historical_validation)
-    print(f"[HISTORICAL_BEST] source={historical_best_manifest_source}")
 
 
 def load_ue_result(path: Path) -> dict:

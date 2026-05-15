@@ -19,6 +19,64 @@
 
 namespace UMGTextStyleApplication
 {
+	namespace RichTextStyleReflection
+	{
+		const FBoolProperty* FindOverrideFlagProperty()
+		{
+			return FindFProperty<FBoolProperty>(URichTextBlock::StaticClass(), TEXT("bOverrideDefaultStyle"));
+		}
+
+		const FStructProperty* FindOverrideStyleProperty()
+		{
+			return FindFProperty<FStructProperty>(URichTextBlock::StaticClass(), TEXT("DefaultTextStyleOverride"));
+		}
+
+		const FStructProperty* FindDefaultStyleProperty()
+		{
+			return FindFProperty<FStructProperty>(URichTextBlock::StaticClass(), TEXT("DefaultTextStyle"));
+		}
+
+		bool TryResolveStyle(
+			const URichTextBlock* RichTextBlock,
+			const FStructProperty* StyleProperty,
+			FTextBlockStyle& OutStyle)
+		{
+			if (!RichTextBlock || !StyleProperty)
+			{
+				return false;
+			}
+
+			if (const FTextBlockStyle* Style = StyleProperty->ContainerPtrToValuePtr<FTextBlockStyle>(RichTextBlock))
+			{
+				OutStyle = *Style;
+				return true;
+			}
+
+			return false;
+		}
+
+		FTextBlockStyle ResolveBaseStyle(const URichTextBlock* RichTextBlock)
+		{
+			FTextBlockStyle BaseStyle = FTextBlockStyle::GetDefault();
+			if (!RichTextBlock)
+			{
+				return BaseStyle;
+			}
+
+			const FBoolProperty* OverrideFlagProperty = FindOverrideFlagProperty();
+			const FStructProperty* OverrideStyleProperty = FindOverrideStyleProperty();
+			if (OverrideFlagProperty
+				&& OverrideFlagProperty->GetPropertyValue_InContainer(RichTextBlock)
+				&& TryResolveStyle(RichTextBlock, OverrideStyleProperty, BaseStyle))
+			{
+				return BaseStyle;
+			}
+
+			TryResolveStyle(RichTextBlock, FindDefaultStyleProperty(), BaseStyle);
+			return BaseStyle;
+		}
+	}
+
 	static int32 ConvertLetterSpacingPxToTracking(const float PixelSpacing, const float DesignFontSize, const float AppliedFontSize)
 	{
 		const float BaseFontSize = DesignFontSize > 0.0f ? DesignFontSize : AppliedFontSize;
@@ -144,39 +202,7 @@ namespace UMGTextStyleApplication
 
 	FTextBlockStyle ResolveRichTextBaseStyle(const URichTextBlock* RichTextBlock)
 	{
-		FTextBlockStyle BaseStyle = FTextBlockStyle::GetDefault();
-		if (!RichTextBlock)
-		{
-			return BaseStyle;
-		}
-
-		const FBoolProperty* OverrideFlagProperty =
-			FindFProperty<FBoolProperty>(URichTextBlock::StaticClass(), TEXT("bOverrideDefaultStyle"));
-		const FStructProperty* OverrideStyleProperty =
-			FindFProperty<FStructProperty>(URichTextBlock::StaticClass(), TEXT("DefaultTextStyleOverride"));
-		const FStructProperty* DefaultStyleProperty =
-			FindFProperty<FStructProperty>(URichTextBlock::StaticClass(), TEXT("DefaultTextStyle"));
-
-		if (OverrideFlagProperty && OverrideStyleProperty
-			&& OverrideFlagProperty->GetPropertyValue_InContainer(RichTextBlock))
-		{
-			if (const FTextBlockStyle* OverrideStyle =
-				OverrideStyleProperty->ContainerPtrToValuePtr<FTextBlockStyle>(RichTextBlock))
-			{
-				return *OverrideStyle;
-			}
-		}
-
-		if (DefaultStyleProperty)
-		{
-			if (const FTextBlockStyle* DefaultStyle =
-				DefaultStyleProperty->ContainerPtrToValuePtr<FTextBlockStyle>(RichTextBlock))
-			{
-				return *DefaultStyle;
-			}
-		}
-
-		return BaseStyle;
+		return RichTextStyleReflection::ResolveBaseStyle(RichTextBlock);
 	}
 
 	void ApplyRichTextDefaultStyle(URichTextBlock* RichTextBlock, const FUMGWidgetNode& Node)

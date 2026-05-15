@@ -5,12 +5,7 @@
 #include "CoreMinimal.h"
 #include "UMGSchemaSourceExtensions.generated.h"
 
-/**
- * UPROPERTY-compatible optional bool wrapper for serialized bHas* fields that cannot
- * use TOptional<bool> due to UE serialization constraints.
- * PostLoad migration copies the legacy authored state into bIsSet and only copies
- * the legacy bool value when that authored state was true.
- */
+/** UPROPERTY-compatible optional bool wrapper for serialized authored bool fields. */
 USTRUCT()
 struct FD2UMGOptionalBool
 {
@@ -42,14 +37,6 @@ struct FUMGPrototypeTransitionData
 
 	UPROPERTY()
 	FString EasingJson;
-
-	UPROPERTY()
-	bool bMatchLayers = false;
-
-	// Legacy authored-presence bit kept only so previously serialized assets can
-	// migrate into HasMatchLayers without losing "unset" vs "authored false".
-	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use HasMatchLayers"))
-	bool bHasMatchLayers = false;
 
 	UPROPERTY()
 	FD2UMGOptionalBool HasMatchLayers;
@@ -101,14 +88,6 @@ struct FUMGSourceNodeData
 	UPROPERTY() FString OverridesJson;
 
 	UPROPERTY()
-	bool bIsExposedInstance = false;
-
-	// Legacy authored-presence bit kept only so previously serialized assets can
-	// migrate into HasIsExposedInstance without collapsing "unset" into false.
-	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use HasIsExposedInstance"))
-	bool bHasIsExposedInstance = false;
-
-	UPROPERTY()
 	FD2UMGOptionalBool HasIsExposedInstance;
 
 	bool IsInstance() const
@@ -135,8 +114,7 @@ struct FUMGSourceNodeData
 			|| !ComponentPropertiesJson.IsEmpty()
 			|| !VariantPropertiesJson.IsEmpty()
 			|| !OverridesJson.IsEmpty()
-			|| HasIsExposedInstance.bIsSet
-			|| bHasIsExposedInstance;
+			|| HasIsExposedInstance.bIsSet;
 	}
 };
 

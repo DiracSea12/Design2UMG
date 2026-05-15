@@ -180,11 +180,53 @@ bool FFigmaTextLetterSpacingPresenceExplicitZeroVsUnsetTest::RunTest(const FStri
 	TestTrue(TEXT("Explicit-zero letter spacing value stays zero"), FMath::IsNearlyZero(ExplicitZeroNode->Text.LetterSpacing));
 	TestFalse(TEXT("Unset letter spacing keeps absence"), UnsetNode->Text.HasLetterSpacingValue());
 
-	const FUMGWidgetData ExplicitZeroData = FDesign2UMGConverter::Convert(ExplicitZeroDocument);
-	const FUMGWidgetData UnsetData = FDesign2UMGConverter::Convert(UnsetDocument);
+	const FUMGWidgetData ExplicitZeroData = FDesign2UMGConverter::Convert(ExplicitZeroDocument, FDesign2UMGConversionSettings::Defaults());
+	const FUMGWidgetData UnsetData = FDesign2UMGConverter::Convert(UnsetDocument, FDesign2UMGConversionSettings::Defaults());
 	TestFalse(TEXT("Explicit-zero conversion omits redundant zero-valued runtime letter spacing"),
 		ExplicitZeroData.RootWidget.TextStyle.LetterSpacing.IsSet());
 	TestFalse(TEXT("Unset conversion does not emit typed letter spacing"), UnsetData.RootWidget.TextStyle.LetterSpacing.IsSet());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FFigmaParserMalformedJsonFailsCleanlyTest,
+	"Design2UMG.FigmaParser.MalformedJsonFailsCleanly",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaParserMalformedJsonFailsCleanlyTest::RunTest(const FString& Parameters)
+{
+	AddExpectedError(TEXT("Invalid Figma export JSON"), EAutomationExpectedErrorFlags::Contains, 1);
+	AddExpectedError(TEXT("Failed to parse JSON"), EAutomationExpectedErrorFlags::Contains, 1);
+	FDesignDocument Document;
+	TestFalse(TEXT("Malformed Figma JSON is rejected"), FFigmaParser::ParseDocument(TEXT("{\"document\":"), Document));
+	TestEqual(TEXT("Malformed Figma JSON does not append children"), Document.Children.Num(), 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FPenParserDeepNestingGuardRejectsOverflowTest,
+	"Design2UMG.PenParser.DeepNestingGuardRejectsOverflow",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPenParserDeepNestingGuardRejectsOverflowTest::RunTest(const FString& Parameters)
+{
+	AddExpectedError(TEXT("Pen document children nesting is too deep"), EAutomationExpectedErrorFlags::Contains, 1);
+	AddExpectedError(TEXT("Design file parsing failed because node nesting exceeds"), EAutomationExpectedErrorFlags::Contains, 1);
+	FString Json = TEXT("{\"children\":[");
+	for (int32 Index = 0; Index < 520; ++Index)
+	{
+		Json += FString::Printf(
+			TEXT("{\"id\":\"node_%d\",\"type\":\"frame\",\"children\":["),
+			Index);
+	}
+	Json += TEXT("{\"id\":\"leaf\",\"type\":\"frame\"}");
+	for (int32 Index = 0; Index < 520; ++Index)
+	{
+		Json += TEXT("]}");
+	}
+	Json += TEXT("]}");
+
+	FDesignDocument Document;
+	TestFalse(TEXT("Over-deep Pen JSON fails cleanly without stack overflow"), FPenParser::ParseDocument(Json, Document));
+	TestTrue(TEXT("Parser reports failure instead of appending a truncated top-level tree"), Document.Children.Num() <= 1);
 	return true;
 }
 
@@ -232,7 +274,7 @@ bool FPenRefOverrideExplicitZeroLetterSpacingPresenceTest::RunTest(const FString
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Pen ref override fixture parses"), FPenParser::ParseDocument(Json, Document));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* LabelWidget = FindWidgetByIdRecursive(Data.RootWidget, TEXT("label"));
 	if (!TestNotNull(TEXT("Expanded override label exists"), LabelWidget))
 	{

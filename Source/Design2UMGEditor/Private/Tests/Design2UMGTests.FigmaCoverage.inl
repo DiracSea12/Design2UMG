@@ -111,7 +111,7 @@ bool FFigmaGridWrapMetadataTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("grid sizing preserved"), GridNode->Metadata.Contains(TEXT("gridRowsSizing")) && GridNode->Metadata.Contains(TEXT("gridColumnsSizing")));
 	TestTrue(TEXT("grid child align preserved"), GridNode->Metadata.Contains(TEXT("gridChildHorizontalAlign")) && GridNode->Metadata.Contains(TEXT("gridChildVerticalAlign")));
 	TestTrue(TEXT("grid child span/anchor preserved"), GridNode->Metadata.Contains(TEXT("gridRowSpan")) && GridNode->Metadata.Contains(TEXT("gridColumnAnchorIndex")));
-	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* GridWidget = FindWidgetById(Data.RootWidget, TEXT("grid1"));
 	const FUMGWidgetNode* WrapWidget = FindWidgetById(Data.RootWidget, TEXT("wrap1"));
 	TestTrue(TEXT("Grid widget exists"), GridWidget != nullptr);
@@ -164,7 +164,7 @@ bool FWrapGapUsesInnerSlotPaddingOnlyTest::RunTest(const FString& Parameters)
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Wrap gap parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
-	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* WrapWidget = FindWidgetById(Data.RootWidget, TEXT("wrap1"));
 	TestTrue(TEXT("Wrap widget exists"), WrapWidget != nullptr);
 	if (!WrapWidget || WrapWidget->Children.Num() < 2)
@@ -263,7 +263,7 @@ bool FFigmaWrapFillChildPreservesMeasuredSizeTest::RunTest(const FString& Parame
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Wrap fill parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
-	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* WrapWidget = FindWidgetById(Data.RootWidget, TEXT("wrap1"));
 	const FUMGWidgetNode* Card1SizeBox = FindWidgetById(Data.RootWidget, TEXT("card1_sz"));
 	TestTrue(TEXT("Wrap widget exists"), WrapWidget != nullptr);
@@ -340,7 +340,7 @@ bool FFigmaCenteredFlowFillTextKeepsMeasuredWidthTest::RunTest(const FString& Pa
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Centered flow fill text parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
-	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* LabelSizeBox = FindWidgetById(Data.RootWidget, TEXT("nav_label_sz"));
 	TestTrue(TEXT("Centered flow fill text gets SizeBox"), LabelSizeBox != nullptr);
 	if (!LabelSizeBox)
@@ -402,7 +402,7 @@ bool FFigmaWrapPaddingUsesBorderWrapperTest::RunTest(const FString& Parameters)
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Wrap padding parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
-	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* WrapWidget = FindWidgetById(Data.RootWidget, TEXT("wrap_pad"));
 	TestTrue(TEXT("Wrap padding widget exists"), WrapWidget != nullptr);
 	if (!WrapWidget)
@@ -460,7 +460,7 @@ bool FFigmaFlowPaddingUsesBorderWrapperTest::RunTest(const FString& Parameters)
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Flow padding parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
-	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* FlowWidget = FindWidgetById(Data.RootWidget, TEXT("flow_pad"));
 	TestTrue(TEXT("Flow padding widget exists"), FlowWidget != nullptr);
 	if (!FlowWidget)
@@ -526,7 +526,7 @@ bool FFigmaInstanceSubtreePaddingSkipsBorderWrapperTest::RunTest(const FString& 
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Instance subtree parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* FlowWidget = FindWidgetById(Data.RootWidget, TEXT("flow_in_instance"));
 	TestTrue(TEXT("Flow widget inside instance subtree exists"), FlowWidget != nullptr);
 	if (!FlowWidget)
@@ -613,7 +613,7 @@ bool FFigmaTopLevelInstanceMixedStretchPaddingUsesBorderWrapperTest::RunTest(con
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Top-level instance mixed stretch parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* RootInstance = FindWidgetById(Data.RootWidget, TEXT("inst_nav_root"));
 	TestTrue(TEXT("Top-level mixed-stretch instance exists"), RootInstance != nullptr);
 	if (!RootInstance)
@@ -703,7 +703,7 @@ bool FFigmaTopLevelInstanceUniformStretchPaddingSkipsBorderWrapperTest::RunTest(
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Top-level instance uniform stretch parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* RootInstance = FindWidgetById(Data.RootWidget, TEXT("inst_app_root"));
 	TestTrue(TEXT("Top-level uniform-stretch instance exists"), RootInstance != nullptr);
 	if (!RootInstance)
@@ -974,7 +974,7 @@ bool FConverterTextAlignVerticalDoesNotMoveSlotTest::RunTest(const FString& Para
 	})");
 	FDesignDocument Doc;
 	TestTrue(TEXT("ParseDocument succeeds"), FPenParser::ParseDocument(Json, Doc));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* Label = FindWidgetById(Data.RootWidget, TEXT("label"));
 	const FUMGWidgetNode* LabelSizeBox = FindWidgetById(Data.RootWidget, TEXT("label_sz"));
 	TestNotNull(TEXT("Converted label exists"), Label);
@@ -1023,7 +1023,7 @@ bool FConverterTextAlignVerticalUsesInternalPaddingWhenHeightFixedTest::RunTest(
 	})");
 	FDesignDocument Doc;
 	TestTrue(TEXT("ParseDocument succeeds"), FPenParser::ParseDocument(Json, Doc));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* Label = FindWidgetById(Data.RootWidget, TEXT("label"));
 	const FUMGWidgetNode* LabelSizeBox = FindWidgetById(Data.RootWidget, TEXT("label_sz"));
 	TestNotNull(TEXT("Converted fixed-height label exists"), Label);
@@ -1078,7 +1078,7 @@ bool FConverterNonUniformStrokePaddingTest::RunTest(const FString& Parameters)
 	})");
 	FDesignDocument Doc;
 	TestTrue(TEXT("ParseDocument succeeds"), FPenParser::ParseDocument(Json, Doc));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* Panel = FindWidgetById(Data.RootWidget, TEXT("panel"));
 	TestNotNull(TEXT("Converted panel exists"), Panel);
 	if (!Panel)
@@ -1363,7 +1363,7 @@ TestTrue(TEXT("figma instance variantProperties preserved"), InstanceNode->Metad
 TestTrue(TEXT("figma instance overrides preserved"), InstanceNode->Metadata.Contains(TEXT("overrides")));
 TestTrue(TEXT("figma instance isExposedInstance preserved"), InstanceNode->Metadata.FindRef(TEXT("isExposedInstance")) == TEXT("true"));
 
-	const FUMGWidgetData ConvertedData = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData ConvertedData = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	TestTrue(TEXT("figma document components catalog exported"), ConvertedData.SourceDocument().ComponentsJson.Contains(TEXT("component-key-1")));
 	TestTrue(TEXT("figma document componentSets catalog exported"), ConvertedData.SourceDocument().ComponentSetsJson.Contains(TEXT("component-set-key-1")));
 
@@ -1442,7 +1442,7 @@ bool FFigmaTransformGroupPreservedTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("TRANSFORM_GROUP source type preserved"), TransformGroup->Source().SourceNodeType, TEXT("TRANSFORM_GROUP"));
 	TestEqual(TEXT("TRANSFORM_GROUP keeps child hierarchy"), TransformGroup->Children.Num(), 1);
 
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* GroupWidget = FindWidgetById(Data.RootWidget, TEXT("tg1"));
 	const FUMGWidgetNode* RectWidget = FindWidgetById(Data.RootWidget, TEXT("rect1"));
 	TestTrue(TEXT("Transform group widget exists"), GroupWidget != nullptr);
@@ -1513,7 +1513,7 @@ bool FFigmaTextPathFallbackTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("TEXT_PATH source type preserved"), TextPathNode->Source().SourceNodeType, TEXT("TEXT_PATH"));
 	TestEqual(TEXT("TEXT_PATH keeps text content"), TextPathNode->Text.Content, TEXT("Curved Title"));
 
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* TextWidget = FindWidgetById(Data.RootWidget, TEXT("text_path_1"));
 	TestTrue(TEXT("TEXT_PATH widget exists"), TextWidget != nullptr);
 	if (!TextWidget)
@@ -1603,7 +1603,7 @@ bool FFigmaSkipDesignOnlyNodesTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("First skipped node id recorded"), Doc.ParseDiagnostics().SkippedDesignerNodes[0].NodeId, TEXT("slice1"));
 	TestEqual(TEXT("Second skipped node reason recorded"), Doc.ParseDiagnostics().SkippedDesignerNodes[1].Reason, TEXT("figjam_only"));
 
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	TestNull(TEXT("SLICE node should be skipped"), FindWidgetById(Data.RootWidget, TEXT("slice1")));
 	TestNull(TEXT("FigJam STICKY node should be skipped"), FindWidgetById(Data.RootWidget, TEXT("sticky1")));
 	TestTrue(TEXT("Normal text node should remain"), FindWidgetById(Data.RootWidget, TEXT("keep_text")) != nullptr);
@@ -1956,7 +1956,7 @@ bool FFigmaVectorRasterFallbackTest::RunTest(const FString& Parameters)
 	FFigmaParser::ApplyImageUrls(Doc, ImageMap);
 	TestTrue(TEXT("ApplyImageUrls remaps vector fallback"), EllipseNode->Source().VectorRasterFallbackImageRef == TEXT("/Game/Transient/T_vec_grad_1.T_vec_grad_1"));
 
-	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* Widget = FindWidgetById(Data.RootWidget, TEXT("ellipse_grad"));
 	TestTrue(TEXT("Gradient ellipse widget exists"), Widget != nullptr);
 	if (!Widget)
@@ -2076,7 +2076,7 @@ bool FFigmaStructuredLeafRenderFallbackWidgetTest::RunTest(const FString& Parame
 	Root->Children.Add(Leaf);
 	Doc.Children.Add(Root);
 
-	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* Widget = FindWidgetById(Data.RootWidget, TEXT("render_leaf_structured"));
 	TestTrue(TEXT("Structured render fallback widget exists"), Widget != nullptr);
 	if (!Widget)
@@ -2130,7 +2130,7 @@ bool FFigmaLeafRenderFallbackWidgetTest::RunTest(const FString& Parameters)
 	Root->Children.Add(Leaf);
 	Doc.Children.Add(Root);
 
-	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* Widget = FindWidgetById(Data.RootWidget, TEXT("render_leaf"));
 	TestTrue(TEXT("Leaf render fallback widget exists"), Widget != nullptr);
 	if (!Widget)
@@ -2211,7 +2211,7 @@ bool FFigmaRenderFallbackKeepsChildTreeTest::RunTest(const FString& Parameters)
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Render fallback parent parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
-	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* ParentWidget = FindWidgetById(Data.RootWidget, TEXT("render_parent"));
 	const FUMGWidgetNode* ChildWidget = FindWidgetById(Data.RootWidget, TEXT("render_child"));
 	TestTrue(TEXT("Render fallback parent widget exists"), ParentWidget != nullptr);
@@ -2251,7 +2251,7 @@ bool FFigmaComplexConverterTest::RunTest(const FString& Parameters)
 		return false;
 	FDesignDocument Doc;
 	TestTrue(TEXT("E2E parse"), FFigmaParser::ParseDocument(Json, Doc));
-	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	TestFalse(TEXT("E2E root type"), Data.RootWidget.Type.IsEmpty());
 	TestTrue(TEXT("E2E has children"), Data.RootWidget.Children.Num() > 0);
 	// Verify that key text widgets survive end-to-end conversion.
@@ -2301,7 +2301,7 @@ bool FFigmaRealDashboardTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Has Text nodes"), TypeCounts.Contains(EDesignNodeType::Text));
 	TestTrue(TEXT("Has Rectangle nodes"), TypeCounts.Contains(EDesignNodeType::Rectangle));
 	// Run the full end-to-end conversion on the parsed dashboard.
-	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	TestFalse(TEXT("Widget root type not empty"), Data.RootWidget.Type.IsEmpty());
 	TestTrue(TEXT("Widget has children"), Data.RootWidget.Children.Num() > 0);
 	// Verify that text content still exists after conversion.

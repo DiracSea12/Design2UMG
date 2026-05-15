@@ -1080,35 +1080,6 @@ void UDesign2UMGPrototypeNavigationClassExtension::SetNavigationData(const FUMGP
 	NavigationData = InNavigationData;
 }
 
-void UDesign2UMGPrototypeNavigationClassExtension::PostLoad()
-{
-	Super::PostLoad();
-	for (FUMGPrototypeNavigationBinding& Binding : NavigationData.ClickBindings)
-	{
-		FUMGPrototypeTransitionData& T = Binding.Transition;
-		if (!T.HasMatchLayers.bIsSet)
-		{
-			T.HasMatchLayers.bIsSet = T.bHasMatchLayers;
-			if (T.bHasMatchLayers)
-			{
-				T.HasMatchLayers.bValue = T.bMatchLayers;
-			}
-		}
-		for (FUMGPrototypeNavigationStep& Step : Binding.Steps)
-		{
-			FUMGPrototypeTransitionData& ST = Step.Transition;
-			if (!ST.HasMatchLayers.bIsSet)
-			{
-				ST.HasMatchLayers.bIsSet = ST.bHasMatchLayers;
-				if (ST.bHasMatchLayers)
-				{
-					ST.HasMatchLayers.bValue = ST.bMatchLayers;
-				}
-			}
-		}
-	}
-}
-
 void UDesign2UMGPrototypeNavigationClassExtension::EnsureNavigationBound(UUserWidget* UserWidget)
 {
 	if (!NavigationData.IsValid() || !UserWidget)

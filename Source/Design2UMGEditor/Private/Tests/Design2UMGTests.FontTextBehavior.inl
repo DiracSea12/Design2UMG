@@ -26,7 +26,7 @@ bool FIconFontNoMappingFallbackTest::RunTest(const FString& Parameters)
 	}
 	FDesignDocument Doc;
 	TestTrue(TEXT("Icon fallback parse succeeds"), FPenParser::ParseDocument(Json, Doc));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::FromSettings(Settings));
 	const FUMGWidgetNode* IconNode = FindWidgetByProperty(Data.RootWidget, TEXT("IconName"));
 	TestTrue(TEXT("Icon widget exists"), IconNode != nullptr);
 	if (IconNode)
@@ -186,7 +186,7 @@ bool FJustifyAutoTextWrapParityTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* TextWidget = FindWidgetById(Data.RootWidget, TEXT("justify_auto"));
 	TestTrue(TEXT("Justify auto text widget exists"), TextWidget != nullptr);
 	if (!TextWidget)
@@ -227,7 +227,7 @@ bool FKnownWidthFillTextWrapParityTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* TextWidget = FindWidgetById(Data.RootWidget, TEXT("fill_known_wrap"));
 	TestTrue(TEXT("Known-width fill text widget exists"), TextWidget != nullptr);
 	if (!TextWidget)
@@ -290,7 +290,7 @@ bool FMultiParagraphFixedWidthTextKeepsDeclaredFontSizeTest::RunTest(const FStri
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Figma multi-paragraph fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* TextWidget = FindWidgetById(Data.RootWidget, TEXT("body"));
 	TestNotNull(TEXT("Converted body text exists"), TextWidget);
 	if (!TextWidget)

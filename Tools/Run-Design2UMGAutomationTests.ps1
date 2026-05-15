@@ -10,49 +10,10 @@
 
 $ErrorActionPreference = "Stop"
 
-function Resolve-RequiredProjectPath {
-    param([string]$Value)
-    $candidate = $Value
-    if ([string]::IsNullOrWhiteSpace($candidate)) {
-        $candidate = $env:DESIGN2UMG_RUNTIME_PROJECT
-    }
-    if ([string]::IsNullOrWhiteSpace($candidate)) {
-        throw "Runtime project path is required. Pass -ProjectPath or set DESIGN2UMG_RUNTIME_PROJECT. HostProject fallback is not supported."
-    }
-    $resolved = [System.IO.Path]::GetFullPath($candidate)
-    $lower = $resolved.ToLowerInvariant()
-    $hostProjectFileName = ("hostproject" + ".uproject")
-    $generatedProjectMarker = ("design2umg" + "_host_")
-    if ($lower.EndsWith($hostProjectFileName) -or $lower.Contains("hostproject") -or $lower.Contains($generatedProjectMarker)) {
-        throw "Refusing temporary or generated runtime project: $resolved"
-    }
-    if (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
-        throw "Runtime project not found: $resolved"
-    }
-    return $resolved
-}
+. (Join-Path $PSScriptRoot "design2umg_verify_lib\Design2UMG.Validation.ps1")
 
-function Resolve-RequiredEditorPath {
-    param([string]$Value)
-    $candidate = $Value
-    if ([string]::IsNullOrWhiteSpace($candidate)) {
-        $candidate = $env:DESIGN2UMG_UNREAL_EDITOR
-    }
-    if ([string]::IsNullOrWhiteSpace($candidate) -and -not [string]::IsNullOrWhiteSpace($env:UE_ROOT)) {
-        $candidate = Join-Path $env:UE_ROOT "Engine\Binaries\Win64\UnrealEditor.exe"
-    }
-    if ([string]::IsNullOrWhiteSpace($candidate)) {
-        throw "UnrealEditor path is required. Pass -EditorPath, set DESIGN2UMG_UNREAL_EDITOR, or set UE_ROOT."
-    }
-    $resolved = [System.IO.Path]::GetFullPath($candidate)
-    if (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
-        throw "UnrealEditor not found: $resolved"
-    }
-    return $resolved
-}
-
-$ProjectPath = Resolve-RequiredProjectPath $ProjectPath
-$EditorPath = Resolve-RequiredEditorPath $EditorPath
+$ProjectPath = Resolve-D2URequiredProjectPath $ProjectPath
+$EditorPath = Resolve-D2URequiredEditorPath $EditorPath
 if ([string]::IsNullOrWhiteSpace($LogPath)) {
     $LogPath = Join-Path (Split-Path -Parent $PSScriptRoot) "Saved\Logs\Design2UMG-Automation.log"
 }
@@ -65,10 +26,7 @@ if ($ValidateOnly) {
     exit 0
 }
 
-if (-not $KeepExistingEditor) {
-    Get-Process UnrealEditor, UnrealEditor-Cmd -ErrorAction SilentlyContinue | Stop-Process -Force
-    Start-Sleep -Milliseconds 800
-}
+Stop-D2UEditorsUnlessKeeping -KeepExistingEditor:$KeepExistingEditor
 
 # UE automation prefix filtering matches "Design2UMG", not "Design2UMG.*".
 # Normalize the common wildcard form so full-suite runs do not fail with "No automation tests matched".
@@ -98,22 +56,17 @@ $arguments.Add('"-TestExit=Automation Test Queue Empty"')
 $arguments.Add(('"-AbsLog={0}"' -f $LogPath))
 $argumentLine = $arguments -join ' '
 
-$process = Start-Process -FilePath $EditorPath -ArgumentList $argumentLine -PassThru
-Wait-Process -Id $process.Id
-$process.Refresh()
+$editorExitCode = Invoke-D2UEditorAndWait -EditorPath $EditorPath -ArgumentLine $argumentLine
 
-if ($process.ExitCode -ne 0) {
-    throw "UnrealEditor exited with code $($process.ExitCode)."
+if ($editorExitCode -ne 0) {
+    throw "UnrealEditor exited with code $editorExitCode."
 }
 
-if (-not (Test-Path $LogPath)) {
-    throw "Automation log not found: $LogPath"
-}
-
-$logItem = Get-Item $LogPath
-if ($logItem.LastWriteTime -le $startTime) {
-    throw "Automation log is stale. LastWriteTime=$($logItem.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss')), StartTime=$($startTime.ToString('yyyy-MM-dd HH:mm:ss'))"
-}
+$logItem = Assert-D2UFreshFile `
+    -Path $LogPath `
+    -StartTime $startTime `
+    -MissingMessage "Automation log not found: $LogPath" `
+    -StaleMessageFormat "Automation log is stale. LastWriteTime={0}, StartTime={1}"
 
 $logContent = Get-Content $LogPath -Raw
 if ($logContent -notmatch "\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*\*") {

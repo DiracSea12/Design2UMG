@@ -243,7 +243,7 @@ bool FPenWelcomeWrapFontRegressionTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* WelcomeBody = FindWidgetById(Data.RootWidget, TEXT("moD8f"));
 	const FUMGWidgetNode* ProTips = FindWidgetById(Data.RootWidget, TEXT("vCuCj"));
 	TestTrue(TEXT("Find welcome body text widget"), WelcomeBody != nullptr);
@@ -339,7 +339,7 @@ bool FFigmaInstanceMetadataWorkflowTest::RunTest(const FString& Parameters)
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse figma instance metadata fixture"), FFigmaParser::ParseDocument(Json, Document));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	TestTrue(TEXT("Converted widget data preserves Figma component catalog"), Data.SourceDocument().HasAnyComponentCatalog());
 
 	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/FigmaInstanceMetadata");
@@ -443,7 +443,7 @@ bool FTextAlignVerticalRuntimeWorkflowTest::RunTest(const FString& Parameters)
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse textAlignVertical runtime fixture"), FPenParser::ParseDocument(Json, Document));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 
 	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/TextAlignVerticalRuntime");
 	DeleteGeneratedAssetsAtPath(OutputPath);
@@ -520,7 +520,7 @@ bool FFigmaOverflowDirectionRuntimeWorkflowTest::RunTest(const FString& Paramete
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse scrollable figma workflow fixture"), FFigmaParser::ParseDocument(Json, Document));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 
 	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/FigmaOverflowDirection");
 	DeleteGeneratedAssetsAtPath(OutputPath);
@@ -606,7 +606,7 @@ bool FFigmaGridSlotSemanticsRuntimeWorkflowTest::RunTest(const FString& Paramete
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse figma grid runtime fixture"), FFigmaParser::ParseDocument(Json, Document));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 
 	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/FigmaGridSlotSemantics");
 	DeleteGeneratedAssetsAtPath(OutputPath);
@@ -793,7 +793,7 @@ bool FFitContentMinimumExpandsToContentTest::RunTest(const FString& Parameters)
 	Row->Children.Add(Content);
 	Root->Children.Add(Row);
 	Doc.Children.Add(Root);
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* RootWidget = FindWidgetById(Data.RootWidget, TEXT("fit-min-root"));
 	const FUMGWidgetNode* RowSizeBox = FindWidgetById(Data.RootWidget, TEXT("fit-min-row_sz"));
 	TestTrue(TEXT("Find fit-content minimum root widget"), RootWidget != nullptr);
@@ -865,7 +865,7 @@ bool FFillWidthSingleLineTextDoesNotInflateFitHeightTest::RunTest(const FString&
 	HeaderCell->Children.Add(HeaderText);
 	Root->Children.Add(HeaderCell);
 	Doc.Children.Add(Root);
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* RootWidget = FindWidgetById(Data.RootWidget, TEXT("text-fit-root"));
 	const FUMGWidgetNode* HeaderCellSizeBox = FindWidgetById(Data.RootWidget, TEXT("header-cell_sz"));
 	TestTrue(TEXT("Find single-line text fit root widget"), RootWidget != nullptr);

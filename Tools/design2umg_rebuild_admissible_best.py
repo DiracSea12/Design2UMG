@@ -12,6 +12,7 @@ from design2umg_verify_lib.case_metrics import (
     summary_metrics_payload,
 )
 from design2umg_verify_lib.compatibility import evaluate_report_compatibility
+from design2umg_verify_lib.json_io import file_signature
 from design2umg_verify_lib.json_io import load_json
 from design2umg_verify_lib.json_io import write_json
 from design2umg_verify_lib.manifest_paths import (
@@ -27,10 +28,6 @@ METRIC_FIELDS = (
     ("mean_abs_error", "mae"),
 )
 METRIC_EPSILON = 1e-9
-OUTPUT_COLLISION_WARNINGS = (
-    "Output path already contained an asset with this name; auto-renamed",
-    "输出路径已存在同名资产，自动重命名为",
-)
 DEFAULT_PIXEL_TOLERANCE = 6
 CACHE_FILENAME = "_admissible_best_cache.json"
 CACHE_VERSION = 3
@@ -83,7 +80,7 @@ def resolve_admissible_best_manifest(automation_root: Path) -> tuple[Path, dict,
 
 def load_cache(path: Path) -> dict:
     if not path.is_file():
-        return {"version": CACHE_VERSION, "generated_at": "", "automation_root": "", "entries": {}, "runs": {}}
+        return {"version": CACHE_VERSION, "generated_at": "", "automation_root": "", "entries": {}}
 
     try:
         payload = load_json(path)
@@ -91,33 +88,20 @@ def load_cache(path: Path) -> dict:
         return {"version": CACHE_VERSION, "generated_at": "", "automation_root": "", "entries": {}}
 
     if not isinstance(payload, dict):
-        return {"version": CACHE_VERSION, "generated_at": "", "automation_root": "", "entries": {}, "runs": {}}
+        return {"version": CACHE_VERSION, "generated_at": "", "automation_root": "", "entries": {}}
 
     entries = payload.get("entries")
     if not isinstance(entries, dict):
         entries = {}
-    runs = payload.get("runs")
-    if not isinstance(runs, dict):
-        runs = {}
 
     payload["version"] = CACHE_VERSION
     payload["entries"] = entries
-    payload["runs"] = runs
+    payload.pop("runs", None)
     payload.setdefault("generated_at", "")
     payload.setdefault("automation_root", "")
     return payload
 
 
-def file_signature(path: Path) -> dict | None:
-    try:
-        stat = path.stat()
-    except OSError:
-        return None
-    return {
-        "path": str(path.resolve()),
-        "mtime_ns": stat.st_mtime_ns,
-        "size": stat.st_size,
-    }
 def cache_lookup(
     cache_entries: dict,
     report_path: Path,
@@ -175,44 +159,6 @@ def cache_store(
     }
 
 
-def run_cache_lookup(runs_cache: dict, run_root: Path, summary_signature: dict | None, log_signature: dict | None) -> dict | None:
-    if summary_signature is None:
-        return None
-
-    run_cache = runs_cache.get(run_root.name)
-    if not isinstance(run_cache, dict):
-        return None
-    if run_cache.get("version") != CACHE_VERSION:
-        return None
-    if run_cache.get("summary_signature") != summary_signature:
-        return None
-    if run_cache.get("log_signature") != log_signature:
-        return None
-
-    collision_cases = run_cache.get("collision_cases")
-    if not isinstance(collision_cases, dict):
-        return None
-    return run_cache
-
-
-def run_cache_store(
-    runs_cache: dict,
-    run_root: Path,
-    summary_signature: dict | None,
-    log_signature: dict | None,
-    collision_cases: dict[str, bool],
-) -> None:
-    if summary_signature is None:
-        return
-
-    runs_cache[run_root.name] = {
-        "version": CACHE_VERSION,
-        "summary_signature": summary_signature,
-        "log_signature": log_signature,
-        "collision_cases": collision_cases,
-    }
-
-
 def load_run_scope(run_root: Path) -> dict | None:
     run_scope_path = run_root / "run_scope.json"
     if not run_scope_path.is_file():
@@ -223,30 +169,6 @@ def load_run_scope(run_root: Path) -> dict | None:
     except Exception:
         return None
     return payload if isinstance(payload, dict) else None
-
-
-def infer_legacy_formal_candidate(run_root: Path, summary: dict) -> bool:
-    run_name = run_root.name.lower()
-    if run_name.startswith(("_probe_", "_focus_", "_codex_focus_")):
-        return False
-
-    if run_name.startswith(("_formal_", "_admissible_", "_full47_", "_final_")):
-        return True
-
-    cases = summary.get("cases") or []
-    completeness = summary.get("completeness") or {}
-    total = summary.get("total")
-    discovered_total = completeness.get("discovered_total")
-    reported_total = completeness.get("reported_total")
-    if isinstance(total, int) and total >= 40:
-        if isinstance(discovered_total, int) and discovered_total < 40:
-            return False
-        if isinstance(reported_total, int) and reported_total < 40:
-            return False
-        if isinstance(cases, list) and len(cases) >= 40:
-            return True
-
-    return False
 
 
 def load_historical_validation(run_root: Path) -> dict | None:
@@ -303,53 +225,7 @@ def classify_run_inclusion(run_root: Path, summary: dict) -> tuple[bool, str]:
             return True, "run_scope"
         return False, "run_scope_excluded"
 
-    if infer_legacy_formal_candidate(run_root, summary):
-        summary_admissible, summary_reason = classify_summary_admissibility(run_root, summary)
-        if not summary_admissible:
-            return False, summary_reason
-        return True, "legacy_inferred"
-    return False, "legacy_excluded"
-
-
-def detect_case_output_collisions(run_root: Path, cases: list[dict]) -> dict[str, bool]:
-    log_path = run_root / "unreal_batch.log"
-    if not log_path.is_file():
-        return {}
-
-    try:
-        log_text = log_path.read_text(encoding="utf-8-sig", errors="ignore")
-    except Exception:
-        return {}
-
-    case_markers: list[tuple[int, str]] = []
-    for case in cases:
-        case_name = case.get("name")
-        if not case_name:
-            continue
-
-        positions = []
-        for marker_name in (
-            "automation_generate_spec.json",
-            "automation_asset_spec.json",
-            "automation_native_generate_spec.json",
-            "automation_native_asset_spec.json",
-        ):
-            marker = f"{case_name}/{marker_name}"
-            position = log_text.find(marker)
-            if position >= 0:
-                positions.append(position)
-
-        if positions:
-            case_markers.append((min(positions), case_name))
-
-    case_markers.sort()
-    collisions: dict[str, bool] = {}
-    for index, (start, case_name) in enumerate(case_markers):
-        end = case_markers[index + 1][0] if index + 1 < len(case_markers) else len(log_text)
-        case_chunk = log_text[start:end]
-        collisions[case_name] = any(warning in case_chunk for warning in OUTPUT_COLLISION_WARNINGS)
-
-    return collisions
+    return False, "run_scope_missing"
 
 
 def iter_run_roots(automation_root: Path):
@@ -429,14 +305,13 @@ def collect_best_cases(automation_root: Path, cache_payload: dict) -> tuple[
     dict[str, int],
 ]:
     metric_cache = cache_payload.setdefault("entries", {})
-    runs_cache = cache_payload.setdefault("runs", {})
     best_cases: dict[str, dict] = {}
     source_runs: list[str] = []
     skipped_runs: list[str] = []
-    included_runs_by_reason: dict[str, int] = {"run_scope": 0, "legacy_inferred": 0}
+    included_runs_by_reason: dict[str, int] = {"run_scope": 0}
     skipped_runs_by_reason: dict[str, int] = {
+        "run_scope_missing": 0,
         "run_scope_excluded": 0,
-        "legacy_excluded": 0,
         "summary_blocked_cases": 0,
         "summary_completeness_blocked": 0,
         "summary_no_regression_failed": 0,
@@ -445,7 +320,6 @@ def collect_best_cases(automation_root: Path, cache_payload: dict) -> tuple[
     }
     skipped_case_results: list[str] = []
     skipped_case_results_by_reason: dict[str, int] = {
-        "output_collision": 0,
         "render_size_rule_incompatible": 0,
         "pipeline_determinism_rule_incompatible": 0,
     }
@@ -469,25 +343,11 @@ def collect_best_cases(automation_root: Path, cache_payload: dict) -> tuple[
 
         source_runs.append(run_root.name)
         included_runs_by_reason[inclusion_reason] = included_runs_by_reason.get(inclusion_reason, 0) + 1
-        summary_signature = file_signature(summary_path)
-        log_path = run_root / "unreal_batch.log"
-        log_signature = file_signature(log_path)
-        run_cache = run_cache_lookup(runs_cache, run_root, summary_signature, log_signature)
         run_timestamp = summary_path.stat().st_mtime
         run_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(run_timestamp))
-        if run_cache is not None:
-            collision_cases = run_cache.get("collision_cases") or {}
-        else:
-            collision_cases = detect_case_output_collisions(run_root, cases)
-            run_cache_store(runs_cache, run_root, summary_signature, log_signature, collision_cases)
         for case in cases:
             case_name = case.get("name")
             if not case_name:
-                continue
-
-            if collision_cases.get(case_name, False):
-                skipped_case_results.append(f"{run_root.name}:{case_name}:output_collision")
-                skipped_case_results_by_reason["output_collision"] = skipped_case_results_by_reason.get("output_collision", 0) + 1
                 continue
 
             report_path = resolve_case_report_path(run_root, case_name, case)

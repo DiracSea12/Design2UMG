@@ -6,7 +6,6 @@
 
 #include "HAL/PlatformProcess.h"
 #include "HAL/FileManager.h"
-#include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Containers/Ticker.h"
 #include "Sockets.h"
@@ -76,69 +75,6 @@ namespace
 		}
 
 		return FString();
-	}
-
-	void SyncVSCodePencilAppAlias()
-	{
-		const FString AppsDir = GetPencilAppsDir();
-		if (AppsDir.IsEmpty())
-		{
-			return;
-		}
-
-		const FString CanonicalPath = AppsDir / TEXT("visual_studio_code");
-		const FString LegacyPath = AppsDir / TEXT("vscode");
-		FString PortValue;
-		for (const FString& CandidatePath : { CanonicalPath, LegacyPath })
-		{
-			if (!FPaths::FileExists(CandidatePath))
-			{
-				continue;
-			}
-
-			if (FFileHelper::LoadFileToString(PortValue, *CandidatePath))
-			{
-				PortValue.TrimStartAndEndInline();
-				if (!PortValue.IsEmpty())
-				{
-					break;
-				}
-			}
-		}
-
-		if (PortValue.IsEmpty())
-		{
-			return;
-		}
-
-		IFileManager::Get().MakeDirectory(*AppsDir, true);
-		for (const FString& TargetPath : { CanonicalPath, LegacyPath })
-		{
-			FString Existing;
-			bool bHasUtf8Bom = false;
-			if (FPaths::FileExists(TargetPath) && FFileHelper::LoadFileToString(Existing, *TargetPath))
-			{
-				Existing.TrimStartAndEndInline();
-			}
-			if (FPaths::FileExists(TargetPath))
-			{
-				TArray<uint8> ExistingBytes;
-				if (FFileHelper::LoadFileToArray(ExistingBytes, *TargetPath) && ExistingBytes.Num() >= 3)
-				{
-					bHasUtf8Bom =
-						ExistingBytes[0] == 0xEF &&
-						ExistingBytes[1] == 0xBB &&
-						ExistingBytes[2] == 0xBF;
-				}
-			}
-			if (Existing != PortValue || bHasUtf8Bom)
-			{
-				FFileHelper::SaveStringToFile(
-					PortValue,
-					*TargetPath,
-					FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
-			}
-		}
 	}
 
 	void CompleteLaunchOnce(const TSharedRef<TFunction<void(bool bSuccess)>>& OnComplete, bool bSuccess)
@@ -281,7 +217,6 @@ int32 FPencilConnector::FindAvailablePort(int32 StartPort)
 bool FPencilConnector::Launch(int32 Port)
 {
 	Shutdown();
-	SyncVSCodePencilAppAlias();
 
 	const FString ServerPath = DiscoverMCPServerPath();
 	if (ServerPath.IsEmpty())
@@ -351,7 +286,6 @@ bool FPencilConnector::Launch(int32 Port)
 void FPencilConnector::LaunchAsync(int32 Port, TFunction<void(bool bSuccess)> OnComplete)
 {
 	Shutdown();
-	SyncVSCodePencilAppAlias();
 	const int32 LaunchToken = ++ActiveLaunchToken;
 	const TSharedRef<TFunction<void(bool bSuccess)>> SharedComplete =
 		MakeShared<TFunction<void(bool bSuccess)>>(MoveTemp(OnComplete));

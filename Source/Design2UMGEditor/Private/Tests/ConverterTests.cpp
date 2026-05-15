@@ -115,7 +115,7 @@ bool FConverterDeepTreeDoesNotCrashTest::RunTest(const FString&)
 	}
 	Doc.Children.Add(Root);
 
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	TestEqual(TEXT("Root widget name"), Data.RootWidget.Name, FString(TEXT("DeepRoot")));
 	const FUMGWidgetNode* CurrentWidget = &Data.RootWidget;
 	int32 ConvertedDepth = 0;
@@ -139,7 +139,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FConverterSingleNodeTest::RunTest(const FString&)
 {
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(BuildSingleNodeDocument());
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(
+		BuildSingleNodeDocument(),
+		FDesign2UMGConversionSettings::Defaults());
 	TestFalse(TEXT("RootWidget type is set"), Data.RootWidget.Type.IsEmpty());
 	TestEqual(TEXT("RootWidget name"), Data.RootWidget.Name, FString(TEXT("SingleNode")));
 
@@ -156,7 +158,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FConverterNestedNodesTest::RunTest(const FString&)
 {
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(BuildNestedNodesDocument());
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(
+		BuildNestedNodesDocument(),
+		FDesign2UMGConversionSettings::Defaults());
 	TestEqual(TEXT("Root widget name"), Data.RootWidget.Name, FString(TEXT("ParentFrame")));
 	TestEqual(TEXT("Parent has nested children"), Data.RootWidget.Children.Num(), 2);
 	TestEqual(TEXT("First child is wrapped in SizeBox"), Data.RootWidget.Children[0].Name, FString(TEXT("ChildRect_sz")));
@@ -180,7 +184,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FConverterEmptyDocTest::RunTest(const FString&)
 {
 	FDesignDocument EmptyDoc;
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(EmptyDoc);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(EmptyDoc, FDesign2UMGConversionSettings::Defaults());
 	TestEqual(TEXT("Empty doc produces no root children"), Data.RootWidget.Children.Num(), 0);
 	return true;
 }
@@ -195,7 +199,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FConverterRefExpandTest::RunTest(const FString&)
 {
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(BuildRefExpandDocument());
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(
+		BuildRefExpandDocument(),
+		FDesign2UMGConversionSettings::Defaults());
 	TestEqual(TEXT("Reusable root is skipped from render tree"), Data.RootWidget.Name, FString(TEXT("HostFrame")));
 	TestEqual(TEXT("Host frame child count"), Data.RootWidget.Children.Num(), 1);
 	TestEqual(TEXT("Expanded child is wrapped in SizeBox"), Data.RootWidget.Children[0].Name, FString(TEXT("RefNode_sz")));
