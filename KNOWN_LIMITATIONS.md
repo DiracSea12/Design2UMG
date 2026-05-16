@@ -84,9 +84,15 @@ This document tracks current limitations that are known and accepted for now.
 
 ## Repository Workflow Boundary
 
-- Maintainer-local helper files such as `AGENTS.md`, `CLAUDE.md`, `.codex/`, and `.serena/` remain workspace-local aids rather than release artifacts.
+- Maintainer-local helper files such as `AGENTS.md`, `CLAUDE.md`, `.claude/`, `.codex/`, `.cowork-temp/`, and `openspec/` remain workspace-local aids rather than public package promises or release artifacts.
 - Repo-safe collaboration rules that future contributors still need must be duplicated into tracked documents like this file or `CONTRIBUTING.md`; hygiene passes must not rely on deleting tracked guidance without moving the durable parts first.
-- Historical planning and change-history working sets remain maintainer-local workspace artifacts rather than release artifacts. Repo-safe guidance that contributors still need must be copied into tracked docs instead of relying on local planning folders to ship that context.
+- Historical planning and change-history working sets may stay in the maintainer source workspace, but BuildPlugin packages and public repo exports must exclude them.
+
+## Public Secret Handling Boundary
+
+- Figma token examples in public docs and release notes should use placeholders such as `<FigmaAccessToken>`.
+- Real tokens should come from maintainer-local env vars or secure input, not from committed scripts or checked-in command snippets.
+- Real tokens must not appear in public logs, command transcripts, screenshots, or release artifacts.
 
 ## Widget Class Overrides
 

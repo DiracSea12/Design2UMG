@@ -40,7 +40,7 @@ The project uses four different validation tiers:
 | `repository-hygiene` | Required-file and public-boundary checks in GitHub Actions | Public, lightweight |
 | `self-hosted build` | Manual BuildPlugin packaging on a maintainer Windows UE runner | Maintainer-operated |
 | `public smoke/public validate` | Contributor-reproducible local build and focused validation | Public repro boundary |
-| `maintainer formal admissible gate` | Full discovered 47-case no-regression release gate | Maintainer release gate |
+| `maintainer formal admissible gate` | Full discovered admissible case set no-regression release gate | Maintainer release gate |
 
 The repository does not currently publish a public hosted UE matrix, public hosted full formal gate, or coverage badge.
 

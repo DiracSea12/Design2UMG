@@ -11,6 +11,7 @@ Use this workflow when freezing a validated plugin state into a standalone GitHu
 ## Inputs
 
 - candidate commit SHA in the maintainer workspace
+- current public workflow badge expectation: only `repository-hygiene` from `.github/workflows/build.yml` is badge-backed today
 - successful self-hosted plugin build (`RunUAT BuildPlugin -StrictIncludes`) on a maintainer-provided UE runner
 - successful `Automation RunTests Design2UMG`
 - successful full admissible summary:
@@ -58,10 +59,12 @@ Excluded from public export unless they are first rewritten into generic reusabl
 ## Boundary Rules
 
 - Public docs must describe a `maintainer-owned canonical runtime boundary`, not a maintainer machine path.
+- Public badge/release wording must match today's workflow truth: `repository-hygiene` is the public badge, `build-plugin` is a manual self-hosted artifact job, and the maintainer formal gate is separate release evidence.
 - Public `validate` commands must be labeled as smoke/public validation unless they truly reproduce the maintainer full admissible gate.
 - The maintainer full admissible gate may stay private as long as the public repo makes that boundary explicit.
 - Public docs may say that HostProject fallback is unsupported; generated fallback projects and concrete fallback paths must not ship.
 - Source workspace checks are intentionally separate from package/export workspace checks. Local ignored planning files may remain in the maintainer source workspace, but package and export workspaces must not contain them.
+- This repo currently relies on GitHub generated release notes from `.github/release.yml`; phase22.b does not add a separate checked-in release-notes template.
 
 ## Freeze Procedure
 
@@ -73,7 +76,7 @@ Excluded from public export unless they are first rewritten into generic reusabl
 6. Re-check text encoding, secrets, and path leakage in the export workspace.
 7. Verify the exported tree still contains the same plugin version and release notes as the validated source tree.
 8. Run `pwsh -NoProfile -File Tools/Release/Assert-PublicRepoBoundary.ps1 -Mode ExportWorkspace` inside the export workspace.
-9. Review GitHub generated release notes from `.github/release.yml` and edit them for user-facing clarity.
+9. Review GitHub generated release notes from `.github/release.yml`, edit them for user-facing clarity, and keep gate claims aligned with actual evidence.
 10. Upload the BuildPlugin package as the release artifact, not the raw maintainer workspace.
 
 ## Publication Checks
@@ -87,7 +90,9 @@ Before publishing the exported repository:
 - no raw automation tree is present
 - no root review report, `openspec/`, AGENTS/CLAUDE local rule file, cache folder, generated HostProject fallback artifact, generated fallback host directory, or concrete fallback project path is present
 - no maintainer absolute path is present in public-facing docs
+- no public doc, release note, screenshot, or transcript contains a real Figma token; placeholders such as `<FigmaAccessToken>` are used instead
 - `Assert-PublicRepoBoundary.ps1` passes
+- any badge or release blurb only describes the current public workflow truth; it must not imply a hosted BuildPlugin gate or hosted formal admissible gate
 - release notes identify the evidence level for each gate: public smoke, self-hosted BuildPlugin, focused automation, and maintainer formal admissible validation
 - release assets contain the packaged plugin artifact and do not contain maintainer-only planning, local caches, or raw formal-run output
 

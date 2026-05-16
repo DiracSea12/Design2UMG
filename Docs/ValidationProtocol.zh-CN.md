@@ -23,11 +23,13 @@ Last verified: 2026-05-14
 - `repository-hygiene`：公开仓库检查，例如必需文件和 tracked maintainer-local path 检测。
 - `self-hosted build`：维护者自托管 Windows UE runner 上的手动 BuildPlugin 打包 workflow，会验证 package boundary 并上传插件产物。
 - `public smoke/public validate`：贡献者可复现的本地构建和聚焦验证。这是公开验证边界。
-- `maintainer formal admissible gate`：维护者拥有的完整 47-case 正式 release gate。
+- `maintainer formal admissible gate`：维护者拥有的完整 admissible case set 正式 release gate。
 
 除非某节明确写 `maintainer formal admissible gate`，否则下面的命令都应理解为 public smoke/public validate 指南，不是单独的 release gate。
 
 Package/export boundary validation 是 release hygiene 层，不是 UE 行为验证的替代。Source workspace 检查可以忽略 intentionally local 的规划文件；package/export 检查必须拒绝 root review reports、`openspec/`、AGENTS/CLAUDE local rules、raw automation trees、cache、HostProject fallback artifacts、generated fallback host directories、具体 fallback project paths 和维护者绝对路径。
+
+如果只想快速看“贡献者能跑什么、维护者独占什么”，请看 [ValidationGovernance/TestCoverageBoundary.zh-CN.md](ValidationGovernance/TestCoverageBoundary.zh-CN.md)。
 
 ## 核心规则
 
@@ -107,12 +109,11 @@ pwsh -NoProfile -File <PluginRoot>\Tools\Run-DesignerSnapshotValidation.ps1 -Pro
 
 ## 当前 formal gate
 
-当前 formal admissible gate 是 full discovered 47-case set。
+当前 formal admissible gate 是 full discovered admissible case set。
 
 这意味着：
 
 - formal full gate 不能带 exclude pattern。
-- `figma_figma-export_source` 和 `pen_pencil-welcome_step-2-frame` 已重新纳入 release gate。
 - formal batch report 不能把 raw visual-threshold `passed/failed` totals 当成成绩。
 - formal historical-best parity 要用：
 

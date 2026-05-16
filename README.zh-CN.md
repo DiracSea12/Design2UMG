@@ -30,9 +30,11 @@ Design2UMG 把设计文件转换成 Unreal Engine 5 的 UMG Widget Blueprint。
 | `repository-hygiene` | 检查公开仓库边界和必需文件 | GitHub Actions push / PR |
 | `self-hosted build` | 在维护者自托管 Windows UE runner 上打包插件并上传产物 | 维护者手动触发 |
 | `public smoke/public validate` | 本地构建和聚焦验证，用于贡献者复现 | 贡献者和维护者 |
-| `maintainer formal admissible gate` | 维护者拥有的 47-case 正式无回退发布门禁 | 维护者 |
+| `maintainer formal admissible gate` | 维护者拥有的完整 admissible case set 正式无回退发布门禁 | 维护者 |
 
 当前公开 badge 只代表仓库 hygiene job。插件打包 job 是手动、自托管的，不是公开托管的 UE formal gate。
+
+如果想看“各层测试到底覆盖什么、普通贡献者和维护者分别能跑什么”，请直接看 [Docs/ValidationGovernance/TestCoverageBoundary.zh-CN.md](Docs/ValidationGovernance/TestCoverageBoundary.zh-CN.md)。
 
 ## 功能概览
 
@@ -65,7 +67,7 @@ Design2UMG.Import <absolute_or_relative_path_to.pen>
 导入 Figma：
 
 ```text
-Design2UMG.FigmaImport <file_url_or_key> <token_from_secure_source>
+Design2UMG.FigmaImport <file_url_or_key> <FigmaAccessToken>
 ```
 
 导入本地 Figma export JSON：
@@ -83,8 +85,11 @@ Design2UMG.PenConvert <nodes.json> <vars.json> [TargetNodeId] [--preview|--no-pr
 ## 自动化和 HostProject 边界
 
 `Tools/design2umg_auto_verify.py` 必须显式拿到 runtime project 和 editor 路径，或通过 `DESIGN2UMG_RUNTIME_PROJECT`、`DESIGN2UMG_UNREAL_EDITOR`、`UE_ROOT` 提供。脚本不应创建或推断 HostProject。
+这里的 `design2umg_auto_verify.py` 示例属于维护者侧 focused automation，不是 public PR 自动门禁。
 
 正式发布验证在维护者拥有的真实运行边界上完成。公开仓库不能把维护者机器路径当成用户安装教程。
+
+测试覆盖边界、贡献者可跑项和维护者专属门禁的总览见 [Docs/ValidationGovernance/TestCoverageBoundary.zh-CN.md](Docs/ValidationGovernance/TestCoverageBoundary.zh-CN.md)。
 
 ## 仓库和发布检查
 

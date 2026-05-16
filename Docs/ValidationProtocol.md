@@ -24,11 +24,13 @@ This repository has four different validation layers. Do not collapse them into 
 - `repository-hygiene`: public repo checks such as required-file presence and tracked maintainer-local path detection.
 - `self-hosted build`: the manual BuildPlugin packaging workflow that runs on a maintainer-provided self-hosted Windows UE runner, validates the package boundary, and uploads the packaged plugin artifact.
 - `public smoke/public validate`: contributor-reproducible local build plus focused validation. This is the public validation boundary.
-- `maintainer formal admissible gate`: the maintainer-owned full discovered 47-case release gate.
+- `maintainer formal admissible gate`: the maintainer-owned full discovered admissible case set release gate.
 
 Unless a section explicitly says `maintainer formal admissible gate`, treat the step-by-step commands below as public smoke/public validate guidance, not as the release gate on their own.
 
 Package/export boundary validation is a release hygiene layer, not a substitute for UE behavior validation. Source workspace checks may ignore local planning files that are intentionally outside the public artifact, while package/export checks must reject root review reports, `openspec/` including verification evidence, AGENTS/CLAUDE local rules, raw automation trees, cache folders, generated HostProject fallback artifacts, generated fallback host directories, concrete fallback project paths, and maintainer absolute paths.
+
+For a shorter coverage-boundary summary of what contributors can run versus what stays maintainer-only, see [ValidationGovernance/TestCoverageBoundary.md](ValidationGovernance/TestCoverageBoundary.md).
 
 ## Core Rule
 
@@ -173,11 +175,10 @@ Do not tighten this into exact full-tree equality unless the generator guarantee
 
 ## Current Formal Gate
 
-The current formal admissible gate is the full discovered 47-case set.
+The current formal admissible gate is the full discovered admissible case set.
 
 That means:
 - do not run the formal full gate with an exclude pattern
-- `figma_figma-export_source` and `pen_pencil-welcome_step-2-frame` are part of the release gate again
 - formal batch reports do not use raw visual-threshold `passed/failed` totals as a score
 - formal historical-best parity should be checked with:
   `python Tools/design2umg_validate_run.py --output-root <run_root> --admissible-best-json <PluginRoot>\Saved\Design2UMG\Automation\_admissible_best_latest.json`
@@ -193,7 +194,7 @@ Reference sourcing for the formal gate:
 - `pen_*` cases may use Pencil MCP / export-nodes capture as the authoritative source reference when no checked-in external reference root is provided
 - `figma_*` cases use the top-level export PNG found under each local Figma export root as the authoritative source reference
 - if you package a checked-in external reference root for a formal full run, every formal case directory must contain both `reference.png` and `compare_report.json`
-- `Tools/design2umg_auto_verify_batch.py` now auto-discovers the default local Figma export roots from the `design-root` workspace ancestry when `--figma-export-root` is omitted, so the maintainer formal gate does not silently drop the Figma members of the 47-case set
+- `Tools/design2umg_auto_verify_batch.py` now auto-discovers the default local Figma export roots from the `design-root` workspace ancestry when `--figma-export-root` is omitted, so the maintainer formal gate does not silently drop the Figma members of the full discovered case set
 
 Default user flow is fail-closed. If live Pencil `export_nodes` is unavailable, the verifier may still keep a `get_screenshot` witness PNG so the run can preserve diagnostic and comparison artifacts, but that witness fallback does not prove live Pencil export health and it does not relax formal or historical-best gates.
 
@@ -218,7 +219,7 @@ Formal gate reading order:
 
 Formal gate execution discipline:
 
-- Run the full 47-case formal gate alone. Do not run focused automation, other editor validations, or another formal batch in parallel against the same runtime project or automation asset roots.
+- Run the full admissible case set formal gate alone. Do not run focused automation, other editor validations, or another formal batch in parallel against the same runtime project or automation asset roots.
 - If a new pipeline-determinism incompatibility appears right after a concurrent validation run, rerun the formal gate in isolation before changing code. Parallel validation can manufacture false determinism noise.
 
 ## Pencil MCP App Alias Compatibility

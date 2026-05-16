@@ -58,6 +58,12 @@ Pencil .pen / Figma JSON
 - MCP JSON import 等 bridge/debug workflow 仍可用，但不是主要 release contract。
 - `AGENTS.md`、`CLAUDE.md`、`.claude/`、`.codex/` 等维护者本地文件应保持 untracked，并从 packaged release output 中排除。
 
+## 验证边界
+
+- 公开文档和 public CI 只承诺 [ValidationProtocol.md](ValidationProtocol.md) 与 [ValidationGovernance/TestCoverageBoundary.zh-CN.md](ValidationGovernance/TestCoverageBoundary.zh-CN.md) 里写清的层级：公开仓库 `repository-hygiene`、贡献者可复现的 smoke/repro、手动 self-hosted BuildPlugin，以及分开的维护者 formal admissible gate。
+- 真实项目验证按“角色边界”描述，不按某台机器路径描述。公开示例统一用 `<UE5_Root>`、`<PluginRoot>`、`<MaintainerRuntimeProject.uproject>` 这类占位符。
+- HostProject fallback 不是可接受的架构或验证路径。只要 workflow 需要 runtime project，就必须显式使用真实 UE 项目，不能临时创建或偷偷推断 host project。
+
 ## Public API 边界
 
 `Source/Design2UMGCore/Public/` 中保留的 public headers 主要覆盖 parser entrypoints、converter entrypoints、settings payloads、schema aggregates、font resolver、notification hooks、text measurement facade、typed widget access 和 layout/value helpers。

@@ -32,9 +32,11 @@ This repo intentionally separates contributor-facing validation from maintainer 
 | `repository-hygiene` | Public repo boundary and required-file checks | GitHub Actions on push / PR |
 | `self-hosted build` | Package the plugin with Unreal `BuildPlugin` and upload the artifact | Maintainers via manual workflow |
 | `public smoke / public validate` | Local build plus focused validation / repro commands | Contributors and maintainers |
-| `maintainer formal admissible gate` | Full discovered 47-case release gate | Maintainers only |
+| `maintainer formal admissible gate` | Full discovered case set release gate | Maintainers only |
 
 The workflow badge above reflects the public repository hygiene job in the tracked `Plugin CI` workflow. The packaged plugin job is intentionally manual and self-hosted; it is not presented as a public hosted UE formal gate.
+
+For a plain-language coverage boundary and a contributor-versus-maintainer split, see [Docs/ValidationGovernance/TestCoverageBoundary.md](Docs/ValidationGovernance/TestCoverageBoundary.md).
 
 ## Features
 
@@ -83,7 +85,7 @@ Design2UMG.Import <file.pen> [--node=<id>] [--out=/Game/Path] [--no-preview] [--
 ### 2. Import from Figma
 
 ```text
-Design2UMG.FigmaImport <file_url_or_key> <token_from_secure_source>
+Design2UMG.FigmaImport <file_url_or_key> <FigmaAccessToken>
 ```
 
 Use a token from a secure source such as local user settings or environment provisioning.
@@ -123,19 +125,21 @@ The report is the single authority artifact for import troubleshooting and inclu
 Example:
 
 ```text
-python Tools/design2umg_auto_verify.py pen --source <DesignRoot>\screen.pen --node sbChi --reference-provider png --reference <DesignRoot>\screen.png --project <RuntimeProject.uproject> --editor <UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe
+python Tools/design2umg_auto_verify.py pen --source <DesignRoot>\screen.pen --node sbChi --reference-provider png --reference <DesignRoot>\screen.png --project <MaintainerRuntimeProject.uproject> --editor <UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe
 ```
 
 Figma reference export is also supported:
 
 ```text
-python Tools/design2umg_auto_verify.py local-figma --source <FigmaExportRoot>\design.json --reference-provider figma --figma-file <fileKeyOrUrl> --figma-node 123:456 --figma-token <token_from_secure_source> --project <RuntimeProject.uproject> --editor <UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe
+python Tools/design2umg_auto_verify.py local-figma --source <FigmaExportRoot>\design.json --reference-provider figma --figma-file <fileKeyOrUrl> --figma-node 123:456 --figma-token <FigmaAccessToken> --project <MaintainerRuntimeProject.uproject> --editor <UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe
 ```
 
 `DESIGN2UMG_RUNTIME_PROJECT` can replace `--project`. `DESIGN2UMG_UNREAL_EDITOR` or `UE_ROOT` can replace `--editor`.
 The script fails if neither the project nor editor path is provided; it does not create or infer a HostProject.
+These `design2umg_auto_verify.py` examples are maintainer-oriented focused automation, not the public PR gate.
 
 Contributor-facing helpers versus maintainer-only automation flows are listed in [Tools/README.md](Tools/README.md).
+Coverage boundaries for unit tests, smoke checks, focused automation render, and the maintainer formal gate are summarized in [Docs/ValidationGovernance/TestCoverageBoundary.md](Docs/ValidationGovernance/TestCoverageBoundary.md).
 
 ## Settings
 
@@ -166,7 +170,7 @@ Key options:
 - `repository-hygiene`: the public GitHub Actions check that verifies required repo files and blocks tracked maintainer-local paths.
 - `self-hosted build`: the manual `workflow_dispatch` packaging job in `.github/workflows/build.yml`; it requires a maintainer-provided self-hosted Windows runner with `UE_ROOT`, validates the package boundary, and uploads the packaged plugin as a GitHub Actions artifact.
 - `public smoke/public validate`: contributor-facing build and validation steps used for smoke checks and local repro, using explicit `--project` / `--editor` values or the matching environment variables; do not present them as the release gate.
-- `maintainer formal admissible gate`: the maintainer-owned full discovered 47-case release gate documented in `Docs/ValidationProtocol.md`.
+- `maintainer formal admissible gate`: the maintainer-owned full discovered admissible case set release gate documented in `Docs/ValidationProtocol.md`.
 - `Tools/README.md`: the short index for contributor-facing helpers versus maintainer-only workflows.
 - Public packages and repo exports must exclude root review reports, `openspec/`, AGENTS/CLAUDE local rules, raw automation trees, cache folders, generated HostProject fallback artifacts, generated fallback host directories, concrete fallback project paths, and maintainer absolute paths.
 - No public hosted UE formal gate, public UE matrix, or coverage badge is published in this repo today.

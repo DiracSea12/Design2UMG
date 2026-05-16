@@ -63,6 +63,14 @@ The formal release gate is not just "does it render" but "does no admissible cas
 - Bridge/debug workflows such as MCP JSON import remain available but are not treated as the primary release contract.
 - Local maintainer workflow files such as `AGENTS.md`, `CLAUDE.md`, `.claude/`, and `.codex/` should remain untracked and are excluded from packaged release outputs.
 
+## Validation Boundary
+
+- Public docs and public CI only promise the layers described in [ValidationProtocol.md](ValidationProtocol.md) and [ValidationGovernance/TestCoverageBoundary.md](ValidationGovernance/TestCoverageBoundary.md): `repository-hygiene` for public repo checks, contributor-facing smoke/repro commands, a manual self-hosted BuildPlugin job, and the separate maintainer formal admissible gate.
+- Real-project validation is role-based, not machine-path-based. Public examples should use placeholders such as `<UE5_Root>`, `<PluginRoot>`, and `<MaintainerRuntimeProject.uproject>`.
+- HostProject fallback is not an acceptable architecture or validation route. If a workflow needs a runtime project, it must use an explicit real UE project instead of creating or inferring a temporary host project.
+
+For a plain-language summary of coverage layers and who can run them, see [ValidationGovernance/TestCoverageBoundary.md](ValidationGovernance/TestCoverageBoundary.md).
+
 ## Public API Boundary
 
 The retained public header surface is intentional, but it is still a plugin API surface, not a runtime support promise.

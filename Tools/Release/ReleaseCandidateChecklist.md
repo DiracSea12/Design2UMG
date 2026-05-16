@@ -26,8 +26,10 @@ Use this checklist before cutting a GitHub release branch or tag.
 
 ## 4. Security and Secrets
 
+- [ ] Public token examples use placeholders such as `<FigmaAccessToken>`
 - [ ] Figma token flow docs prioritize env var / secure input
 - [ ] CLI plaintext token path is marked as compatibility only
+- [ ] Real tokens are absent from public logs, command transcripts, screenshots, and release artifacts
 - [ ] Runtime logs do not print token values
 - [ ] Known web font auto import is documented as experimental / optional, not as the primary offline-safe workflow
 
@@ -50,13 +52,15 @@ Use this checklist before cutting a GitHub release branch or tag.
 - [ ] Version follows semantic versioning (`MAJOR.MINOR.PATCH`)
 - [ ] Public docs describe the maintainer validation boundary without exposing maintainer absolute paths
 - [ ] Public docs do not claim a hosted full UE formal gate, public CI matrix, or coverage badge
+- [ ] Any badge explanation only maps the current public badge to `repository-hygiene`; it does not imply hosted BuildPlugin or hosted formal-gate coverage
 
 ## 7. GitHub Release Notes and Assets
 
 - [ ] GitHub generated release notes use `.github/release.yml` categories
+- [ ] No standalone checked-in release-notes template is assumed for this release; generated notes are reviewed and edited instead
 - [ ] Generated notes were reviewed and edited for plain-language user impact
 - [ ] Release notes clearly separate public smoke evidence, self-hosted BuildPlugin evidence, and maintainer formal admissible evidence
-- [ ] Release notes do not claim a hosted full UE gate or a public formal 47-case gate
+- [ ] Release notes do not claim a hosted full UE gate or a public formal admissible gate
 - [ ] Uploaded artifact is the packaged plugin output from the validated candidate commit, not a raw engine workspace copy
 - [ ] Uploaded artifact excludes root review reports, `openspec/`, AGENTS/CLAUDE local rules, raw automation trees, cache folders, generated HostProject fallback artifacts, local paths, and transient debug output
 - [ ] Public export workspace boundary check passed: `pwsh -NoProfile -File Tools/Release/Assert-PublicRepoBoundary.ps1 -Mode ExportWorkspace`
