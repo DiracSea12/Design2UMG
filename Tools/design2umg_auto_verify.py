@@ -20,6 +20,8 @@ from pathlib import Path
 import design2umg_rebuild_admissible_best as rebuild_best
 import design2umg_validate_run as validate_run_tool
 from design2umg_verify_lib.json_io import content_file_signature as helper_content_file_signature
+from design2umg_verify_lib.diagnostics import EvidenceReadError
+from design2umg_verify_lib.diagnostics import emit_diagnostic
 from design2umg_verify_lib.json_io import load_json as helper_load_json
 from design2umg_verify_lib.json_io import write_json as helper_write_json
 from design2umg_verify_lib.run_history import write_historical_best_validation
@@ -294,7 +296,8 @@ def get_expected_design_size(mode: str, source_path: str, node_id: str) -> tuple
         return None
     try:
         document = load_json_document(source)
-    except Exception:
+    except EvidenceReadError as exc:
+        emit_diagnostic("warning", "expected_design_size_source_unreadable", exc.path, exc.detail)
         return None
 
     if mode == "pen" and source.suffix.lower() == ".pen":
@@ -1393,7 +1396,8 @@ def try_fetch_pencil_source_structure_snapshot(
 def try_get_pen_node_name(source_path: str, node_id: str) -> str:
     try:
         document = load_json_document(Path(source_path))
-    except Exception:
+    except EvidenceReadError as exc:
+        emit_diagnostic("warning", "pen_node_name_source_unreadable", exc.path, exc.detail)
         return ""
     node = find_node_by_id(document.get("children", []), node_id)
     if not isinstance(node, dict):

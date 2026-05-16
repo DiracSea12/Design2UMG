@@ -98,6 +98,7 @@ namespace
 				return;
 			}
 
+			Navigation->Modify();
 			Navigation->Up = FWidgetNavigationData();
 			Navigation->Down = FWidgetNavigationData();
 			Navigation->Left = FWidgetNavigationData();
@@ -116,6 +117,7 @@ namespace
 				return;
 			}
 
+			Widget->Modify();
 			// Clear stale directional navigation payloads so UMG compile/validation
 			// cannot resurrect old NavigationMethod state from previous template trees.
 			ResetNavigationObject(Widget->Navigation);
@@ -192,6 +194,7 @@ namespace
 			return;
 		}
 
+		CDO->Modify();
 		CDO->DesignTimeSize = FVector2D(DesignSize.X, DesignSize.Y);
 		CDO->DesignSizeMode = EDesignPreviewSizeMode::Custom;
 		UE_LOG(LogDesign2UMG, Log, TEXT("Set DesignTimeSize to %.0fx%.0f (mode=Custom, phase=%s)"),
@@ -295,6 +298,9 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 		Package->SetFlags(RF_Transient);
 		return nullptr;
 	}
+
+	WBP->Modify();
+	WBP->WidgetTree->Modify();
 
 	FUMGPrototypeNavigationData NavigationData = WidgetData.PrototypeNavigation();
 	const FDesign2UMGGenerationSettingsSnapshot FallbackGenerationSettings =
@@ -408,6 +414,12 @@ void FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP)
 {
 	if (!WBP) return;
 
+	WBP->Modify();
+	if (WBP->WidgetTree)
+	{
+		WBP->WidgetTree->Modify();
+	}
+
 	FIntPoint DesiredDesignSize = ReadDesignPreviewSize(WBP);
 	if (DesiredDesignSize.X <= 1 || DesiredDesignSize.Y <= 1)
 	{
@@ -423,6 +435,7 @@ void FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP)
 	// MarkBlueprintAsStructurallyModified can populate the GUID map during an
 	// intermediate compile. Clear it so CompileBlueprint rebuilds from the widget tree
 	// instead of carrying stale entries forward.
+	WBP->Modify();
 	WBP->WidgetVariableNameToGuidMap.Empty();
 	ClearGeneratedWidgetNavigationState(WBP);
 	const EBlueprintCompileOptions CompileOptions =

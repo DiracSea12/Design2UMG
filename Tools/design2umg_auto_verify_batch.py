@@ -16,6 +16,8 @@ import design2umg_validate_run as validate_run_tool
 from design2umg_verify_lib import batch_discovery
 from design2umg_verify_lib import execution_shards
 from design2umg_verify_lib import reference_cache
+from design2umg_verify_lib.diagnostics import EvidenceReadError
+from design2umg_verify_lib.diagnostics import emit_diagnostic
 from design2umg_verify_lib.run_history import write_historical_best_validation
 
 
@@ -96,8 +98,13 @@ def prepare_external_reference(case_args, case: dict, reference_root: Path, outp
         try:
             reference_context["source_structure_live"] = verify.load_json_document(source_structure_path)
             reference_context["source_structure_live_path"] = str(source_structure_path)
-        except Exception:
-            pass
+        except EvidenceReadError as exc:
+            reference_context["source_structure_live_unavailable"] = {
+                "reason": exc.reason,
+                "path": str(exc.path),
+                "detail": exc.detail,
+            }
+            emit_diagnostic("warning", exc.reason, exc.path, exc.detail)
     return reference_path, reference_context
 
 
@@ -141,7 +148,8 @@ def prepare_case_state(
     if reference_cache_mode in {"read", "read-write"}:
         try:
             restored_from_cache = reference_cache.restore_reference_from_cache(case_args, case, output_dir, reference_cache_root)
-        except Exception:
+        except (OSError, RuntimeError, ValueError) as exc:
+            emit_diagnostic("warning", "reference_cache_restore_failed", reference_cache_root or "", str(exc))
             restored_from_cache = None
 
     if restored_from_cache is not None:
@@ -156,8 +164,8 @@ def prepare_case_state(
     if restored_from_cache is None and reference_cache_mode in {"read-write", "refresh"}:
         try:
             reference_cache.save_reference_to_cache(case_args, case, reference_cache_root, reference_path, reference_context)
-        except Exception:
-            pass
+        except (OSError, RuntimeError, ValueError) as exc:
+            emit_diagnostic("warning", "reference_cache_save_failed", reference_cache_root or "", str(exc))
 
     verify.finalize_reference_context(case_args, reference_path, reference_context)
     # Formal full-runs with an external reference root already carry the authoritative

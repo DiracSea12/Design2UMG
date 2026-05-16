@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from design2umg_verify_lib.diagnostics import EvidenceReadError
 from design2umg_verify_lib.json_io import load_json as helper_load_json
 
 
@@ -67,7 +68,7 @@ def requested_render_size_fields(spec_path: Path) -> list[str]:
 
     try:
         payload = load_json(spec_path)
-    except Exception:
+    except EvidenceReadError:
         return []
 
     if not isinstance(payload, dict):
@@ -96,8 +97,10 @@ def evaluate_report_render_size_rule(report_path: Path) -> dict:
 
     try:
         report = load_json(report_path)
-    except Exception:
-        result["reason"] = "report_unreadable"
+    except EvidenceReadError as exc:
+        result["reason"] = exc.reason
+        result["diagnostic_path"] = str(exc.path)
+        result["diagnostic_detail"] = exc.detail
         return result
 
     if not isinstance(report, dict):
@@ -201,8 +204,10 @@ def evaluate_report_pipeline_determinism_rule(report_path: Path) -> dict:
 
     try:
         report = load_json(report_path)
-    except Exception:
-        result["reason"] = "report_unreadable"
+    except EvidenceReadError as exc:
+        result["reason"] = exc.reason
+        result["diagnostic_path"] = str(exc.path)
+        result["diagnostic_detail"] = exc.detail
         return result
 
     if not isinstance(report, dict):

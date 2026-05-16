@@ -12,6 +12,8 @@ from design2umg_verify_lib.case_metrics import (
     summary_metrics_payload,
 )
 from design2umg_verify_lib.compatibility import evaluate_report_compatibility
+from design2umg_verify_lib.diagnostics import EvidenceReadError
+from design2umg_verify_lib.diagnostics import emit_diagnostic
 from design2umg_verify_lib.json_io import file_signature
 from design2umg_verify_lib.json_io import load_json
 from design2umg_verify_lib.json_io import write_json
@@ -84,7 +86,8 @@ def load_cache(path: Path) -> dict:
 
     try:
         payload = load_json(path)
-    except Exception:
+    except EvidenceReadError as exc:
+        emit_diagnostic("warning", "admissible_best_cache_unreadable", exc.path, exc.detail)
         return {"version": CACHE_VERSION, "generated_at": "", "automation_root": "", "entries": {}}
 
     if not isinstance(payload, dict):
@@ -166,7 +169,8 @@ def load_run_scope(run_root: Path) -> dict | None:
 
     try:
         payload = load_json(run_scope_path)
-    except Exception:
+    except EvidenceReadError as exc:
+        emit_diagnostic("warning", "run_scope_unreadable", exc.path, exc.detail)
         return None
     return payload if isinstance(payload, dict) else None
 
@@ -178,7 +182,8 @@ def load_historical_validation(run_root: Path) -> dict | None:
 
     try:
         payload = load_json(validation_path)
-    except Exception:
+    except EvidenceReadError as exc:
+        emit_diagnostic("warning", "historical_validation_unreadable", exc.path, exc.detail)
         return None
     return payload if isinstance(payload, dict) else None
 
@@ -328,7 +333,8 @@ def collect_best_cases(automation_root: Path, cache_payload: dict) -> tuple[
         summary_path = run_root / "summary.json"
         try:
             summary = load_json(summary_path)
-        except Exception:
+        except EvidenceReadError as exc:
+            emit_diagnostic("warning", "summary_unreadable", exc.path, exc.detail)
             continue
 
         cases = summary.get("cases") or []

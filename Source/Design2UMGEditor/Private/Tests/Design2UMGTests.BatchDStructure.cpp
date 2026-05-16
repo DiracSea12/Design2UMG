@@ -1,11 +1,17 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignImportPlanning.h"
+#include "DesignImportUtils.h"
+#include "Design2UMGNotifications.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "ObjectTools.h"
 #include "Misc/AutomationTest.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Modules/ModuleManager.h"
 #include "UMGGeneratorRootHandoff.h"
+#include "WidgetBlueprint.h"
 
 namespace
 {
@@ -56,6 +62,86 @@ namespace
 
 		return Source.Mid(SectionStart, NextSectionStart - SectionStart);
 	}
+
+	FUMGWidgetData MakeCancelBoundaryWidgetData(const FString& WidgetName)
+	{
+		FUMGWidgetData Data;
+		Data.WidgetName = WidgetName;
+		Data.RootWidget.Type = TEXT("CanvasPanel");
+		Data.RootWidget.Id = TEXT("cancel_root");
+		Data.RootWidget.Name = TEXT("CancelRoot");
+		Data.RootWidget.Bounds.W = 96.0f;
+		Data.RootWidget.Bounds.H = 64.0f;
+		return Data;
+	}
+
+	void DeleteGeneratedAssetsAtPath(const FString& AssetDir)
+	{
+		if (AssetDir.IsEmpty())
+		{
+			return;
+		}
+
+		FAssetRegistryModule& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+		TArray<FAssetData> Assets;
+		AssetRegistry.Get().GetAssetsByPath(FName(*AssetDir), Assets, true);
+
+		TArray<UObject*> ObjectsToDelete;
+		for (const FAssetData& Asset : Assets)
+		{
+			if (UObject* Object = Asset.GetAsset())
+			{
+				ObjectsToDelete.Add(Object);
+			}
+		}
+
+		if (ObjectsToDelete.Num() > 0)
+		{
+			ObjectTools::ForceDeleteObjects(ObjectsToDelete, false);
+		}
+	}
+
+	struct FScopedGenerationCancelPoint
+	{
+		explicit FScopedGenerationCancelPoint(const DesignImportUtils::EAutomationGenerationCancelPoint CancelPoint)
+		{
+			DesignImportUtils::SetAutomationGenerationCancelPoint(CancelPoint);
+		}
+
+		~FScopedGenerationCancelPoint()
+		{
+			DesignImportUtils::ResetAutomationGenerationCancelPoint();
+		}
+	};
+
+	struct FScopedNotificationCapture
+	{
+		TArray<FString> Warnings;
+		TArray<FString> Successes;
+
+		FScopedNotificationCapture()
+		{
+			FDesign2UMGNotification::RegisterWarningHandler(
+				FDesign2UMGMessageNotificationHandler::CreateRaw(this, &FScopedNotificationCapture::OnWarning));
+			FDesign2UMGNotification::RegisterSuccessHandler(
+				FDesign2UMGSuccessNotificationHandler::CreateRaw(this, &FScopedNotificationCapture::OnSuccess));
+		}
+
+		~FScopedNotificationCapture()
+		{
+			FDesign2UMGNotification::ResetHandlers();
+		}
+
+		void OnWarning(const FText& Message)
+		{
+			Warnings.Add(Message.ToString());
+		}
+
+		void OnSuccess(const FText& Message, const FString&)
+		{
+			Successes.Add(Message.ToString());
+		}
+	};
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDContributorFacingStaticBoundaryTest,
@@ -155,5 +241,95 @@ bool FBatchDImportPlanningSmokeTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Import planning copies root type"), Result.Data.RootWidget.Type, FString(TEXT("CanvasPanel")));
 	TestEqual(TEXT("Import planning copies root bounds width"), Result.Data.RootWidget.Bounds.W, 256.0f);
 	TestTrue(TEXT("Import planning without image resolution produces no image report"), Result.ImageReport.IsEmpty());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDGenerationTransactionBoundaryStaticTest,
+	"Design2UMG.BatchD.GenerationTransactionBoundaryStatic",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FBatchDGenerationTransactionBoundaryStaticTest::RunTest(const FString& Parameters)
+{
+	FString ImportUtilsSource;
+	if (!LoadPluginFile(*this, TEXT("Source/Design2UMGEditor/Private/DesignImportUtils.cpp"), ImportUtilsSource))
+	{
+		return false;
+	}
+
+	FString GeneratorSource;
+	if (!LoadPluginFile(*this, TEXT("Source/Design2UMGEditor/Private/UMGGenerator.cpp"), GeneratorSource))
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("Interactive generation owns one scoped transaction at DesignImportUtils boundary"),
+		ImportUtilsSource.Contains(TEXT("FInteractiveGenerationScope"), ESearchCase::CaseSensitive)
+		&& ImportUtilsSource.Contains(TEXT("FScopedTransaction"), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("Interactive progress is gated away from unattended automation"),
+		ImportUtilsSource.Contains(TEXT("!FApp::IsUnattended()"), ESearchCase::CaseSensitive)
+		&& ImportUtilsSource.Contains(TEXT("FScopedSlowTask"), ESearchCase::CaseSensitive));
+	TestFalse(TEXT("Low-level generator does not create nested top-level transactions"),
+		GeneratorSource.Contains(TEXT("FScopedTransaction"), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("Low-level generator marks mutated Blueprint objects for the outer transaction"),
+		GeneratorSource.Contains(TEXT("WBP->Modify()"), ESearchCase::CaseSensitive)
+		&& GeneratorSource.Contains(TEXT("WBP->WidgetTree->Modify()"), ESearchCase::CaseSensitive));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDGenerationCancelBoundaryBehaviorTest,
+	"Design2UMG.BatchD.GenerationCancelBoundaryBehavior",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FBatchDGenerationCancelBoundaryBehaviorTest::RunTest(const FString& Parameters)
+{
+	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/Phase23CancelBoundary");
+	DeleteGeneratedAssetsAtPath(OutputDir);
+
+	{
+		FScopedNotificationCapture Notifications;
+		FScopedGenerationCancelPoint CancelPoint(DesignImportUtils::EAutomationGenerationCancelPoint::BeforeBuild);
+		UWidgetBlueprint* CancelledBlueprint = DesignImportUtils::GenerateBlueprint(
+			MakeCancelBoundaryWidgetData(TEXT("WBP_Phase23CancelBeforeMutation")),
+			OutputDir);
+
+		TestNull(TEXT("Pre-mutation cancel returns null"), CancelledBlueprint);
+		TestEqual(TEXT("Pre-mutation cancel emits one warning"), Notifications.Warnings.Num(), 1);
+		TestEqual(TEXT("Pre-mutation cancel emits no success"), Notifications.Successes.Num(), 0);
+		TestNull(TEXT("Pre-mutation cancel does not create Blueprint asset"),
+			FindObject<UWidgetBlueprint>(nullptr, TEXT("/Game/Design2UMG/_TestOutput/Phase23CancelBoundary/WBP_Phase23CancelBeforeMutation.WBP_Phase23CancelBeforeMutation")));
+	}
+
+	DeleteGeneratedAssetsAtPath(OutputDir);
+
+	{
+		FScopedNotificationCapture Notifications;
+		FScopedGenerationCancelPoint CancelPoint(DesignImportUtils::EAutomationGenerationCancelPoint::AfterBuildBeforeSave);
+		UWidgetBlueprint* CompletedBlueprint = DesignImportUtils::GenerateBlueprint(
+			MakeCancelBoundaryWidgetData(TEXT("WBP_Phase23CancelAfterMutation")),
+			OutputDir);
+
+		TestNotNull(TEXT("Post-mutation cancel completes generation"), CompletedBlueprint);
+		if (CompletedBlueprint)
+		{
+			TestTrue(TEXT("Post-mutation cancel leaves a coherent saved Blueprint package"),
+				!CompletedBlueprint->GetOutermost()->IsDirty());
+			TestTrue(TEXT("Post-mutation cancel generated a valid WidgetTree"), CompletedBlueprint->WidgetTree != nullptr);
+		}
+		TestEqual(TEXT("Post-mutation cancel emits one warning"), Notifications.Warnings.Num(), 1);
+		TestEqual(TEXT("Post-mutation cancel emits no normal success summary"), Notifications.Successes.Num(), 0);
+	}
+
+	DeleteGeneratedAssetsAtPath(OutputDir);
+
+	{
+		FScopedNotificationCapture Notifications;
+		UWidgetBlueprint* CompletedBlueprint = DesignImportUtils::GenerateBlueprint(
+			MakeCancelBoundaryWidgetData(TEXT("WBP_Phase23CancelNoSeam")),
+			OutputDir);
+
+		TestNotNull(TEXT("No cancel seam keeps generation path working"), CompletedBlueprint);
+		TestEqual(TEXT("No cancel seam emits no warning"), Notifications.Warnings.Num(), 0);
+		TestEqual(TEXT("No cancel seam emits normal success summary"), Notifications.Successes.Num(), 1);
+	}
+
+	DeleteGeneratedAssetsAtPath(OutputDir);
 	return true;
 }

@@ -11,6 +11,18 @@ class UWidgetBlueprint;
 
 namespace DesignImportUtils
 {
+#if WITH_AUTOMATION_TESTS
+	enum class EAutomationGenerationCancelPoint : uint8
+	{
+		None,
+		BeforeBuild,
+		AfterBuildBeforeSave,
+	};
+
+	void SetAutomationGenerationCancelPoint(EAutomationGenerationCancelPoint CancelPoint);
+	void ResetAutomationGenerationCancelPoint();
+#endif
+
 	void ApplyPendingIconFontMappingChanges(const FUMGWidgetData& Data);
 	UWidgetBlueprint* GenerateBlueprint(
 		const FUMGWidgetData& Data,

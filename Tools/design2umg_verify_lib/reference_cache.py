@@ -3,6 +3,8 @@ import json
 from pathlib import Path
 
 import design2umg_auto_verify as verify
+from design2umg_verify_lib.diagnostics import EvidenceReadError
+from design2umg_verify_lib.diagnostics import emit_diagnostic
 
 
 REFERENCE_CACHE_SCHEMA_VERSION = 1
@@ -94,8 +96,13 @@ def restore_reference_from_cache(
         try:
             reference_context["source_structure_live"] = verify.load_json_document(cached_structure_path)
             reference_context["source_structure_live_path"] = str(cached_structure_path)
-        except Exception:
-            pass
+        except EvidenceReadError as exc:
+            reference_context["source_structure_live_unavailable"] = {
+                "reason": exc.reason,
+                "path": str(exc.path),
+                "detail": exc.detail,
+            }
+            emit_diagnostic("warning", exc.reason, exc.path, exc.detail)
 
     cache_meta = {
         "hit": True,

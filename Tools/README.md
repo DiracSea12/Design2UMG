@@ -24,6 +24,16 @@ These files support release governance, historical-best validation, or internal 
 - `Release/`
 - `Invoke-ClaudeWorker.ps1`
 
+## Python dependencies
+
+The maintainer visual-validation scripts use Pillow for image loading and diffing:
+
+```powershell
+python -m pip install Pillow
+```
+
+No other external Python runtime package is required for the scripts listed above.
+
 ## Boundary rule
 
 The public repository and packaged release artifacts must keep maintainer-only files out of the shipped boundary. Use `Tools/Release/Assert-PublicRepoBoundary.ps1` when checking that boundary.

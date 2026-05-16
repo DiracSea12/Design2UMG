@@ -10,6 +10,7 @@
 
 #include "WidgetBlueprint.h"
 #include "Blueprint/UserWidget.h"
+#include "Misc/ScopedSlowTask.h"
 #include "HAL/FileManager.h"
 #include "Misc/App.h"
 #include "Misc/FileHelper.h"
@@ -20,6 +21,7 @@
 #include "UObject/Package.h"
 #include "UObject/PackageReload.h"
 #include "UObject/UObjectGlobals.h"
+#include "ScopedTransaction.h"
 
 #define LOCTEXT_NAMESPACE "DesignImportUtils"
 
@@ -161,6 +163,185 @@ namespace
 		return Count;
 	}
 
+	bool ShouldUseInteractiveEditorWork()
+	{
+		return GIsEditor && !FApp::IsUnattended();
+	}
+
+	struct FInteractiveGenerationScope
+	{
+		explicit FInteractiveGenerationScope(const TCHAR* Context)
+		{
+			if (!ShouldUseInteractiveEditorWork())
+			{
+				return;
+			}
+
+			++Depth;
+			if (Depth == 1)
+			{
+				Transaction = BeginTransaction(Context);
+			}
+		}
+
+		~FInteractiveGenerationScope()
+		{
+			if (ShouldUseInteractiveEditorWork() && Depth > 0)
+			{
+				--Depth;
+			}
+		}
+
+		bool IsOwner() const
+		{
+			return Transaction.IsValid();
+		}
+
+	private:
+		static TUniquePtr<FScopedTransaction> BeginTransaction(const TCHAR* Context)
+		{
+			const FText Description = FText::Format(
+				LOCTEXT("GenerateTransaction", "Design2UMG Generate Widget Blueprint ({0})"),
+				FText::FromString(Context ? FString(Context) : FString(TEXT("Import"))));
+			return MakeUnique<FScopedTransaction>(Description);
+		}
+
+		static int32 Depth;
+		TUniquePtr<FScopedTransaction> Transaction;
+	};
+
+	int32 FInteractiveGenerationScope::Depth = 0;
+
+#if WITH_AUTOMATION_TESTS
+	DesignImportUtils::EAutomationGenerationCancelPoint GAutomationGenerationCancelPoint =
+		DesignImportUtils::EAutomationGenerationCancelPoint::None;
+	bool GAutomationGenerationCancelArmed = false;
+
+	bool IsAutomationCancelPoint(const DesignImportUtils::EAutomationGenerationCancelPoint CancelPoint)
+	{
+		return GAutomationGenerationCancelArmed && GAutomationGenerationCancelPoint == CancelPoint;
+	}
+#endif
+
+	bool BeginInteractiveGenerationProgress(FScopedSlowTask*& OutSlowTask, const TCHAR* Context)
+	{
+		OutSlowTask = nullptr;
+		if (!ShouldUseInteractiveEditorWork())
+		{
+			return true;
+		}
+
+		OutSlowTask = new FScopedSlowTask(
+			3.0f,
+		FText::Format(
+			LOCTEXT("GenerateProgress", "Design2UMG: Generating Widget Blueprint ({0})"),
+			FText::FromString(Context ? FString(Context) : FString(TEXT("Import")))));
+		OutSlowTask->MakeDialog(true);
+		OutSlowTask->EnterProgressFrame(1.0f, LOCTEXT("GenerateProgressPrepare", "Preparing import"));
+		return !OutSlowTask->ShouldCancel();
+	}
+
+	bool AdvanceInteractiveGenerationProgress(
+		FScopedSlowTask* SlowTask,
+		const float Work,
+		const FText& StepText,
+		const TCHAR* CancelContext)
+	{
+#if WITH_AUTOMATION_TESTS
+		if (IsAutomationCancelPoint(DesignImportUtils::EAutomationGenerationCancelPoint::BeforeBuild))
+		{
+			UE_LOG(LogDesign2UMG, Warning,
+				TEXT("DesignImportUtils: %s cancelled before mutation by automation seam"),
+				CancelContext ? CancelContext : TEXT("generation"));
+			FDesign2UMGNotification::Warning(LOCTEXT("GenerationCancelled", "Design2UMG: Generation cancelled"));
+			return false;
+		}
+#endif
+
+		if (!SlowTask)
+		{
+			return true;
+		}
+
+		if (SlowTask->ShouldCancel())
+		{
+			UE_LOG(LogDesign2UMG, Warning,
+				TEXT("DesignImportUtils: %s cancelled before step"),
+				CancelContext ? CancelContext : TEXT("generation"));
+			FDesign2UMGNotification::Warning(LOCTEXT("GenerationCancelled", "Design2UMG: Generation cancelled"));
+			return false;
+		}
+
+		SlowTask->EnterProgressFrame(Work, StepText);
+		if (SlowTask->ShouldCancel())
+		{
+			UE_LOG(LogDesign2UMG, Warning,
+				TEXT("DesignImportUtils: %s cancelled after step"),
+				CancelContext ? CancelContext : TEXT("generation"));
+			FDesign2UMGNotification::Warning(LOCTEXT("GenerationCancelled", "Design2UMG: Generation cancelled"));
+			return false;
+		}
+
+		return true;
+	}
+
+	void NoteInteractiveCancellationAfterMutation(
+		FScopedSlowTask* SlowTask,
+		const TCHAR* CancelContext,
+		bool& bCancelRequestedAfterMutation)
+	{
+#if WITH_AUTOMATION_TESTS
+		if (IsAutomationCancelPoint(DesignImportUtils::EAutomationGenerationCancelPoint::AfterBuildBeforeSave))
+		{
+			if (!bCancelRequestedAfterMutation)
+			{
+				bCancelRequestedAfterMutation = true;
+				UE_LOG(LogDesign2UMG, Warning,
+					TEXT("DesignImportUtils: %s cancellation requested after asset mutation by automation seam; completing generation to avoid partial state"),
+					CancelContext ? CancelContext : TEXT("generation"));
+			}
+			return;
+		}
+#endif
+
+		if (!SlowTask || !SlowTask->ShouldCancel() || bCancelRequestedAfterMutation)
+		{
+			return;
+		}
+
+		bCancelRequestedAfterMutation = true;
+		UE_LOG(LogDesign2UMG, Warning,
+			TEXT("DesignImportUtils: %s cancellation requested after asset mutation; completing generation to avoid partial state"),
+			CancelContext ? CancelContext : TEXT("generation"));
+	}
+
+	void AdvanceInteractiveGenerationProgressAfterMutation(
+		FScopedSlowTask* SlowTask,
+		const float Work,
+		const FText& StepText,
+		const TCHAR* CancelContext,
+		bool& bCancelRequestedAfterMutation)
+	{
+		NoteInteractiveCancellationAfterMutation(SlowTask, CancelContext, bCancelRequestedAfterMutation);
+		if (!SlowTask)
+		{
+			return;
+		}
+		SlowTask->EnterProgressFrame(Work, StepText);
+		NoteInteractiveCancellationAfterMutation(SlowTask, CancelContext, bCancelRequestedAfterMutation);
+	}
+
+	void FinishInteractiveGenerationProgress(FScopedSlowTask*& SlowTask)
+	{
+		if (!SlowTask)
+		{
+			return;
+		}
+
+		delete SlowTask;
+		SlowTask = nullptr;
+	}
+
 	void NotifyImportSummary(const FUMGWidgetData& Data, const double ElapsedSeconds)
 	{
 		if (Data.Warnings.Num() > 0)
@@ -176,9 +357,30 @@ namespace
 			FText::AsNumber(CountWidgets(Data.RootWidget)),
 			FText::FromString(FString::Printf(TEXT("%.1f"), ElapsedSeconds))));
 	}
+
+	void NotifyGenerationCompletedAfterCancel()
+	{
+		FDesign2UMGNotification::Warning(LOCTEXT(
+			"GenerationCancelCompleted",
+			"Design2UMG: Cancel requested after asset creation; saved generated output to avoid partial state"));
+	}
 }
 
 // Blueprint generation.
+
+#if WITH_AUTOMATION_TESTS
+void DesignImportUtils::SetAutomationGenerationCancelPoint(const EAutomationGenerationCancelPoint CancelPoint)
+{
+	GAutomationGenerationCancelPoint = CancelPoint;
+	GAutomationGenerationCancelArmed = CancelPoint != EAutomationGenerationCancelPoint::None;
+}
+
+void DesignImportUtils::ResetAutomationGenerationCancelPoint()
+{
+	GAutomationGenerationCancelPoint = EAutomationGenerationCancelPoint::None;
+	GAutomationGenerationCancelArmed = false;
+}
+#endif
 
 void DesignImportUtils::ApplyPendingIconFontMappingChanges(const FUMGWidgetData& Data)
 {
@@ -255,20 +457,72 @@ UWidgetBlueprint* DesignImportUtils::GenerateBlueprint(
 	const FString& OutputPath,
 	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
 {
-	ApplyPendingIconFontMappingChanges(Data);
+	FInteractiveGenerationScope TransactionScope(TEXT("Blueprint"));
+	FScopedSlowTask* SlowTask = nullptr;
+	if (TransactionScope.IsOwner() && !BeginInteractiveGenerationProgress(SlowTask, TEXT("Blueprint")))
+	{
+		FinishInteractiveGenerationProgress(SlowTask);
+		UE_LOG(LogDesign2UMG, Warning, TEXT("DesignImportUtils: Blueprint generation cancelled before asset mutation"));
+		return nullptr;
+	}
+
+	if (!AdvanceInteractiveGenerationProgress(
+		SlowTask,
+		0.0f,
+		LOCTEXT("GenerateProgressPrepare", "Preparing import"),
+		TEXT("Blueprint generation")))
+	{
+		FinishInteractiveGenerationProgress(SlowTask);
+		return nullptr;
+	}
+
 	const double StartTime = FPlatformTime::Seconds();
 	const FString FinalPath = ResolveImportOutputPath(OutputPath);
 
-	UWidgetBlueprint* WBP = FUMGGenerator::GenerateWidgetBlueprint(Data, FinalPath, GenerationSettings);
+	if (!AdvanceInteractiveGenerationProgress(
+		SlowTask,
+		1.0f,
+		LOCTEXT("GenerateProgressBuild", "Building Widget Blueprint"),
+		TEXT("Blueprint generation")))
+	{
+		FinishInteractiveGenerationProgress(SlowTask);
+		return nullptr;
+	}
+	ApplyPendingIconFontMappingChanges(Data);
+	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(Data, FinalPath, GenerationSettings);
 	if (!WBP)
 	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint generation failed"));
+		FinishInteractiveGenerationProgress(SlowTask);
+		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint build failed"));
 		FDesign2UMGNotification::Error(LOCTEXT("GenFailed", "Design2UMG: Widget Blueprint generation failed"));
 		return nullptr;
 	}
+
+	bool bCancelRequestedAfterMutation = false;
+	AdvanceInteractiveGenerationProgressAfterMutation(
+		SlowTask,
+		1.0f,
+		LOCTEXT("GenerateProgressSave", "Saving generated assets"),
+		TEXT("Blueprint generation"),
+		bCancelRequestedAfterMutation);
+	FUMGGenerator::SaveWidgetBlueprint(WBP);
 	UE_LOG(LogDesign2UMG, Log, TEXT("DesignImportUtils: Generated %s"), *WBP->GetPathName());
 
-	NotifyImportSummary(Data, FPlatformTime::Seconds() - StartTime);
+	AdvanceInteractiveGenerationProgressAfterMutation(
+		SlowTask,
+		1.0f,
+		LOCTEXT("GenerateProgressDone", "Finishing import"),
+		TEXT("Blueprint generation"),
+		bCancelRequestedAfterMutation);
+	FinishInteractiveGenerationProgress(SlowTask);
+	if (bCancelRequestedAfterMutation)
+	{
+		NotifyGenerationCompletedAfterCancel();
+	}
+	else
+	{
+		NotifyImportSummary(Data, FPlatformTime::Seconds() - StartTime);
+	}
 	return WBP;
 }
 
@@ -279,13 +533,42 @@ bool DesignImportUtils::GenerateBlueprintAndPng(
 	FString* OutRenderPngPath,
 	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
 {
-	ApplyPendingIconFontMappingChanges(Data);
+	FInteractiveGenerationScope TransactionScope(TEXT("Blueprint and PNG"));
+	FScopedSlowTask* SlowTask = nullptr;
+	if (TransactionScope.IsOwner() && !BeginInteractiveGenerationProgress(SlowTask, TEXT("Blueprint and PNG")))
+	{
+		FinishInteractiveGenerationProgress(SlowTask);
+		UE_LOG(LogDesign2UMG, Warning, TEXT("DesignImportUtils: Blueprint and PNG generation cancelled before asset mutation"));
+		return false;
+	}
+
+	if (!AdvanceInteractiveGenerationProgress(
+		SlowTask,
+		0.0f,
+		LOCTEXT("GenerateProgressPrepare", "Preparing import"),
+		TEXT("Blueprint and PNG generation")))
+	{
+		FinishInteractiveGenerationProgress(SlowTask);
+		return false;
+	}
+
 	const FString FinalPath = ResolveImportOutputPath(OutputPath);
 
 	// Build first without saving immediately, then render PNG from a transient instance and save the Blueprint at the end.
+	if (!AdvanceInteractiveGenerationProgress(
+		SlowTask,
+		1.0f,
+		LOCTEXT("GenerateProgressBuild", "Building Widget Blueprint"),
+		TEXT("Blueprint and PNG generation")))
+	{
+		FinishInteractiveGenerationProgress(SlowTask);
+		return false;
+	}
+	ApplyPendingIconFontMappingChanges(Data);
 	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(Data, FinalPath, GenerationSettings);
 	if (!WBP)
 	{
+		FinishInteractiveGenerationProgress(SlowTask);
 		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint build failed"));
 		return false;
 	}
@@ -294,6 +577,7 @@ bool DesignImportUtils::GenerateBlueprintAndPng(
 		*OutGeneratedAssetPath = WBP->GetPathName();
 	}
 
+	bool bCancelRequestedAfterMutation = false;
 	FIntPoint Size = ResolveSourceWidgetTreeRenderSize(Data);
 	const FString PngName = WBP ? WBP->GetName() : FPaths::GetBaseFilename(FinalPath);
 	const FString OutPng = FPaths::ProjectSavedDir() / TEXT("Design2UMG") / (PngName + TEXT(".png"));
@@ -301,16 +585,35 @@ bool DesignImportUtils::GenerateBlueprintAndPng(
 	{
 		*OutRenderPngPath = OutPng;
 	}
+	AdvanceInteractiveGenerationProgressAfterMutation(
+		SlowTask,
+		0.5f,
+		LOCTEXT("GenerateProgressRender", "Rendering generated asset"),
+		TEXT("Blueprint and PNG generation"),
+		bCancelRequestedAfterMutation);
 	if (!RenderWidgetTreeToPngFile(WBP, OutPng, &Size))
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget PNG render failed"));
 		// Save the Blueprint even when rendering fails so the issue can be inspected.
 		FUMGGenerator::SaveWidgetBlueprint(WBP);
+		FinishInteractiveGenerationProgress(SlowTask);
 		return false;
 	}
 
 	// Save the Blueprint after successful rendering.
+	AdvanceInteractiveGenerationProgressAfterMutation(
+		SlowTask,
+		0.5f,
+		LOCTEXT("GenerateProgressSave", "Saving generated assets"),
+		TEXT("Blueprint and PNG generation"),
+		bCancelRequestedAfterMutation);
 	FUMGGenerator::SaveWidgetBlueprint(WBP);
+	AdvanceInteractiveGenerationProgressAfterMutation(
+		SlowTask,
+		1.0f,
+		LOCTEXT("GenerateProgressDone", "Finishing import"),
+		TEXT("Blueprint and PNG generation"),
+		bCancelRequestedAfterMutation);
 	if (OutGeneratedAssetPath)
 	{
 		*OutGeneratedAssetPath = WBP->GetPathName();
@@ -320,6 +623,11 @@ bool DesignImportUtils::GenerateBlueprintAndPng(
 		*OutRenderPngPath = OutPng;
 	}
 	UE_LOG(LogDesign2UMG, Log, TEXT("DesignImportUtils: Rendered PNG saved: %s (%dx%d)"), *OutPng, Size.X, Size.Y);
+	FinishInteractiveGenerationProgress(SlowTask);
+	if (bCancelRequestedAfterMutation)
+	{
+		NotifyGenerationCompletedAfterCancel();
+	}
 	return true;
 }
 
@@ -369,12 +677,52 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 	FIntPoint* OutRenderedSize,
 	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
 {
-	ApplyPendingIconFontMappingChanges(Data);
-	UWidgetBlueprint* WidgetBlueprint = GenerateBlueprint(Data, OutputPath, GenerationSettings);
-	if (!WidgetBlueprint)
+	FInteractiveGenerationScope TransactionScope(TEXT("Compiled PNG"));
+	FScopedSlowTask* SlowTask = nullptr;
+	if (TransactionScope.IsOwner() && !BeginInteractiveGenerationProgress(SlowTask, TEXT("Compiled PNG")))
 	{
+		FinishInteractiveGenerationProgress(SlowTask);
+		UE_LOG(LogDesign2UMG, Warning, TEXT("DesignImportUtils: Compiled PNG generation cancelled before asset mutation"));
 		return false;
 	}
+
+	if (!AdvanceInteractiveGenerationProgress(
+		SlowTask,
+		0.0f,
+		LOCTEXT("GenerateProgressPrepare", "Preparing import"),
+		TEXT("Compiled PNG generation")))
+	{
+		FinishInteractiveGenerationProgress(SlowTask);
+		return false;
+	}
+
+	if (!AdvanceInteractiveGenerationProgress(
+		SlowTask,
+		1.0f,
+		LOCTEXT("GenerateProgressBuild", "Building Widget Blueprint"),
+		TEXT("Compiled PNG generation")))
+	{
+		FinishInteractiveGenerationProgress(SlowTask);
+		return false;
+	}
+
+	const FString FinalPath = ResolveImportOutputPath(OutputPath);
+	ApplyPendingIconFontMappingChanges(Data);
+	UWidgetBlueprint* WidgetBlueprint = FUMGGenerator::BuildWidgetBlueprint(Data, FinalPath, GenerationSettings);
+	if (!WidgetBlueprint)
+	{
+		FinishInteractiveGenerationProgress(SlowTask);
+		return false;
+	}
+
+	bool bCancelRequestedAfterMutation = false;
+	AdvanceInteractiveGenerationProgressAfterMutation(
+		SlowTask,
+		0.5f,
+		LOCTEXT("GenerateProgressSave", "Saving generated assets"),
+		TEXT("Compiled PNG generation"),
+		bCancelRequestedAfterMutation);
+	FUMGGenerator::SaveWidgetBlueprint(WidgetBlueprint);
 
 	if (OutGeneratedAssetPath)
 	{
@@ -384,6 +732,12 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 	{
 		if (!FApp::IsUnattended())
 		{
+			AdvanceInteractiveGenerationProgressAfterMutation(
+				SlowTask,
+				0.5f,
+				LOCTEXT("GenerateProgressRender", "Rendering generated asset"),
+				TEXT("Compiled PNG generation"),
+				bCancelRequestedAfterMutation);
 			const FString TreeRenderPath = FPaths::Combine(
 				FPaths::GetPath(OutputPngFilePath),
 				FPaths::GetBaseFilename(OutputPngFilePath) + TEXT(".widgettree.png"));
@@ -393,10 +747,31 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 
 	WidgetBlueprint = ReloadWidgetBlueprintForRender(WidgetBlueprint);
 
-	return RenderCompiledBlueprintToPngFile(
+	AdvanceInteractiveGenerationProgressAfterMutation(
+		SlowTask,
+		1.0f,
+		LOCTEXT("GenerateProgressRender", "Rendering generated asset"),
+		TEXT("Compiled PNG generation"),
+		bCancelRequestedAfterMutation);
+	const bool bRendered = RenderCompiledBlueprintToPngFile(
 		WidgetBlueprint,
 		OutputPngFilePath,
 		OutRenderedSize);
+	if (bRendered)
+	{
+		AdvanceInteractiveGenerationProgressAfterMutation(
+			SlowTask,
+			0.5f,
+			LOCTEXT("GenerateProgressDone", "Finishing import"),
+			TEXT("Compiled PNG generation"),
+			bCancelRequestedAfterMutation);
+	}
+	FinishInteractiveGenerationProgress(SlowTask);
+	if (bRendered && bCancelRequestedAfterMutation)
+	{
+		NotifyGenerationCompletedAfterCancel();
+	}
+	return bRendered;
 }
 
 #undef LOCTEXT_NAMESPACE

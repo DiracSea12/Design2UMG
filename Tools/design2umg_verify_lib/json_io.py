@@ -2,9 +2,14 @@ import json
 import hashlib
 from pathlib import Path
 
+from design2umg_verify_lib.diagnostics import diagnose_json_load_error
+
 
 def load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8-sig"))
+    try:
+        return json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise diagnose_json_load_error(path, exc) from exc
 
 
 def write_json(path: Path, payload: dict) -> None:
