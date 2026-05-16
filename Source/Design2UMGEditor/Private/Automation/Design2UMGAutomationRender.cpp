@@ -415,6 +415,66 @@ namespace
 			&& NormalizedPath.Contains(TEXT("/ImportedFonts/"), ESearchCase::CaseSensitive);
 	}
 
+	bool RefreshAutomationImportedFontPackages(const FString& FontImportPath, FString& OutError)
+	{
+		const FString NormalizedPath = NormalizeAutomationPackagePath(FontImportPath);
+		if (!IsAutomationImportedFontPath(NormalizedPath))
+		{
+			return true;
+		}
+
+		const FString FontDirectory = FPackageName::LongPackageNameToFilename(NormalizedPath, TEXT(""));
+		if (FontDirectory.IsEmpty() || !IFileManager::Get().DirectoryExists(*FontDirectory))
+		{
+			return true;
+		}
+
+		TArray<FString> FontAssetFiles;
+		IFileManager::Get().FindFiles(FontAssetFiles, *(FontDirectory / TEXT("*.uasset")), true, false);
+		if (FontAssetFiles.Num() == 0)
+		{
+			return true;
+		}
+
+		FlushAsyncLoading();
+		for (const FString& FontAssetFile : FontAssetFiles)
+		{
+			const FString AssetName = FPaths::GetBaseFilename(FontAssetFile);
+			if (AssetName.IsEmpty())
+			{
+				continue;
+			}
+
+			const FString PackageName = NormalizeAutomationPackagePath(NormalizedPath / AssetName);
+			UPackage* Package = FindPackage(nullptr, *PackageName);
+			if (!Package)
+			{
+				Package = LoadPackage(nullptr, *PackageName, LOAD_None);
+				if (!Package)
+				{
+					OutError = FString::Printf(
+						TEXT("Failed to load automation imported font package before asset render: %s"),
+						*PackageName);
+					return false;
+				}
+				continue;
+			}
+
+			ResetLoaders(static_cast<UObject*>(Package));
+			if (!ReloadPackage(Package, LOAD_None))
+			{
+				OutError = FString::Printf(
+					TEXT("Failed to reload automation imported font package before asset render: %s"),
+					*PackageName);
+				return false;
+			}
+		}
+
+		FlushRenderingCommands();
+		CollectGarbage(RF_NoFlags, true);
+		return true;
+	}
+
 	FString ResolveAutomationFontImportPath(const FString& OutputPath)
 	{
 		const FString NormalizedOutputPath = NormalizeAutomationPackagePath(OutputPath);
@@ -569,6 +629,11 @@ namespace
 		if (Spec.Mode.Equals(TEXT("asset"), ESearchCase::IgnoreCase))
 		{
 			const FString ObjectPath = NormalizeWidgetBlueprintObjectPath(Spec.SourcePath);
+			if (Spec.bForceReloadPackage
+				&& !RefreshAutomationImportedFontPackages(GDesign2UMGAutomationFontImportPath, OutResult.ErrorMessage))
+			{
+				return false;
+			}
 			if (Spec.bForceReloadPackage && !ReloadAssetPackageForAutomationRender(ObjectPath, OutResult.ErrorMessage))
 			{
 				return false;
