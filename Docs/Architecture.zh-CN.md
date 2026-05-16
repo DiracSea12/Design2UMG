@@ -1,4 +1,4 @@
-﻿# Architecture
+# Architecture
 
 English canonical: [Architecture.md](Architecture.md)
 

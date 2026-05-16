@@ -1,4 +1,4 @@
-﻿# Design2UMG 贡献指南
+# Design2UMG 贡献指南
 
 English canonical: [CONTRIBUTING.md](CONTRIBUTING.md)
 

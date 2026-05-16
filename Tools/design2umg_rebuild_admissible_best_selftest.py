@@ -1,4 +1,4 @@
-﻿import tempfile
+import tempfile
 from pathlib import Path
 
 import design2umg_rebuild_admissible_best as rebuild

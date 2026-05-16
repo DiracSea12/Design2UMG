@@ -1,4 +1,4 @@
-﻿# Design2UMG
+# Design2UMG
 
 English canonical: [README.md](README.md)
 

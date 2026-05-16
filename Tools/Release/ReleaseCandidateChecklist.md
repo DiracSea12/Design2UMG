@@ -1,4 +1,4 @@
-﻿# Design2UMG Release Candidate Checklist
+# Design2UMG Release Candidate Checklist
 
 Use this checklist before cutting a GitHub release branch or tag.
 
@@ -20,7 +20,7 @@ Use this checklist before cutting a GitHub release branch or tag.
 
 ## 3. Encoding and Text Integrity
 
-- [ ] UTF-8 BOM encoding guard passed for tracked `.h/.cpp/.cs/.py/.md/.json/.yml/.yaml`
+- [ ] UTF-8 without BOM encoding guard passed for tracked `.h/.cpp/.cs/.py/.md/.json/.yml/.yaml`
 - [ ] Mojibake markers check passed (garbled-path marker and replacement-character marker not found)
 - [ ] Critical files manually spot-checked for readable logs/comments
 

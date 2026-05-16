@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 
 def default_pinned_baseline_path(script_path: Path, pinned_baseline_filename: str) -> Path:

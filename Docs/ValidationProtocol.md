@@ -1,4 +1,4 @@
-﻿# Design2UMG Validation Protocol
+# Design2UMG Validation Protocol
 
 Chinese companion: [ValidationProtocol.zh-CN.md](ValidationProtocol.zh-CN.md)
 

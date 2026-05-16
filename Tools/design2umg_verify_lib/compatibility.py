@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 import design2umg_render_rule as render_rule
 

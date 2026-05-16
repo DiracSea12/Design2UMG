@@ -1,4 +1,4 @@
-﻿# Tools
+# Tools
 
 This directory contains the maintainer and validation utilities for Design2UMG.
 

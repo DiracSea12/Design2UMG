@@ -1,4 +1,4 @@
-﻿import argparse
+import argparse
 import json
 import time
 from pathlib import Path

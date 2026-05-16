@@ -1,4 +1,4 @@
-﻿# Design2UMG Roadmap
+# Design2UMG Roadmap
 
 English canonical: [ROADMAP.md](ROADMAP.md)
 

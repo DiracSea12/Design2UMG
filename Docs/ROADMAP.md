@@ -1,4 +1,4 @@
-﻿# Design2UMG Roadmap
+# Design2UMG Roadmap
 
 Chinese companion: [ROADMAP.zh-CN.md](ROADMAP.zh-CN.md)
 

@@ -5,4 +5,4 @@ insert_final_newline = true
 trim_trailing_whitespace = true
 
 [*.{h,hpp,cpp,cs,py,md,json,yml,yaml}]
-charset = utf-8-bom
+charset = utf-8

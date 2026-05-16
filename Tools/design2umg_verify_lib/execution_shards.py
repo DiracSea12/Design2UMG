@@ -1,4 +1,4 @@
-﻿import os
+import os
 
 
 def resolve_parallel_editor_count(requested: int, case_count: int) -> int:

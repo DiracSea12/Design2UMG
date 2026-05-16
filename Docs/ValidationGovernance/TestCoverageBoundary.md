@@ -1,4 +1,4 @@
-﻿# Test Coverage Boundary
+# Test Coverage Boundary
 
 Chinese companion: [TestCoverageBoundary.zh-CN.md](TestCoverageBoundary.zh-CN.md)
 

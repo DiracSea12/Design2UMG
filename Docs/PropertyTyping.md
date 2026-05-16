@@ -1,4 +1,4 @@
-﻿# Design2UMG Typed Property Contract
+# Design2UMG Typed Property Contract
 
 This document records the current typed-property contract in the codebase. It is not a migration proposal.
 

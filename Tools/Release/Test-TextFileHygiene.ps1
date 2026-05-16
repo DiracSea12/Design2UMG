@@ -1,4 +1,4 @@
-﻿# Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+# Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 # Requires: PowerShell 5.1+
 Set-StrictMode -Version Latest
@@ -46,6 +46,23 @@ foreach ($line in (git ls-files --eol)) {
 
 	if ($metadata -match 'attr/text eol=crlf' -and $metadata -match 'w/(lf|mixed)') {
 		$failures += "EOL mismatch: $line"
+	}
+
+	$fullPath = Join-Path $repoRoot $relativePath
+	if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
+		$stream = [System.IO.File]::OpenRead($fullPath)
+		try {
+			if ($stream.Length -ge 3) {
+				$prefix = New-Object byte[] 3
+				[void]$stream.Read($prefix, 0, 3)
+				if ($prefix[0] -eq 0xEF -and $prefix[1] -eq 0xBB -and $prefix[2] -eq 0xBF) {
+					$failures += "UTF-8 BOM present: $relativePath"
+				}
+			}
+		}
+		finally {
+			$stream.Dispose()
+		}
 	}
 }
 

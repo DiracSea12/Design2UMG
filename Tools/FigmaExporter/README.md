@@ -1,4 +1,4 @@
-﻿# Design2UMG - Figma 本地导出导入指南
+# Design2UMG - Figma 本地导出导入指南
 
 ## 概述
 

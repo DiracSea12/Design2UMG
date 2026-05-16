@@ -1,4 +1,4 @@
-﻿# Contributor Internals
+# Contributor Internals
 
 This guide explains where to make changes when extending Design2UMG without breaking the shared conversion pipeline.
 

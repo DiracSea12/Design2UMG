@@ -1,4 +1,4 @@
-﻿# Design2UMG Public Repo Export Workflow
+# Design2UMG Public Repo Export Workflow
 
 Use this workflow when freezing a validated plugin state into a standalone GitHub repository.
 

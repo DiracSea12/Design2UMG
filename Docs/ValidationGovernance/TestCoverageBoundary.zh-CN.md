@@ -1,4 +1,4 @@
-﻿# 测试覆盖边界说明
+# 测试覆盖边界说明
 
 English canonical: [TestCoverageBoundary.md](TestCoverageBoundary.md)
 

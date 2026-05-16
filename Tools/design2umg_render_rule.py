@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 from design2umg_verify_lib.json_io import load_json as helper_load_json
 

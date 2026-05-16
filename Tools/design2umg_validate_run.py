@@ -1,4 +1,4 @@
-﻿import argparse
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -517,7 +517,7 @@ def main() -> None:
     if args.write_json:
         write_path = Path(args.write_json).resolve()
         write_path.parent.mkdir(parents=True, exist_ok=True)
-        write_path.write_text(payload, encoding="utf-8-sig")
+        write_path.write_text(payload, encoding="utf-8")
 
     sys.exit(BLOCKED_EXIT_CODE if result["blocked"] else 0)
 

@@ -1,4 +1,4 @@
-﻿---
+---
 name: Bug Report
 about: Report a conversion or rendering issue
 labels: bug

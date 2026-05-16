@@ -1,4 +1,4 @@
-﻿# Design2UMG Validation Protocol
+# Design2UMG Validation Protocol
 
 English canonical: [ValidationProtocol.md](ValidationProtocol.md)
 

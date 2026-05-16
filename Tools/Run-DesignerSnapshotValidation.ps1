@@ -1,4 +1,4 @@
-﻿param(
+param(
     [string]$ProjectPath = "",
     [string]$EditorPath = "",
     [string]$LogPath = "",
@@ -12,6 +12,18 @@
 $ErrorActionPreference = "Stop"
 
 . (Join-Path $PSScriptRoot "design2umg_verify_lib\Design2UMG.Validation.ps1")
+
+function Set-D2UJsonContent {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$Json
+    )
+
+    $encoding = [System.Text.UTF8Encoding]::new($false)
+    [System.IO.File]::WriteAllText($Path, $Json, $encoding)
+}
 
 $ProjectPath = Resolve-D2URequiredProjectPath $ProjectPath
 $EditorPath = Resolve-D2URequiredEditorPath $EditorPath
@@ -50,7 +62,7 @@ $spec = [ordered]@{
     render_png_path = $DesignerPngPath
     result_json_path = $ResultJsonPath
 }
-($spec | ConvertTo-Json -Depth 8) | Set-Content -Path $specPath -Encoding utf8BOM
+Set-D2UJsonContent -Path $specPath -Json ($spec | ConvertTo-Json -Depth 8)
 
 $specArg = ($specPath -replace '\\', '/')
 $argumentLine = @(

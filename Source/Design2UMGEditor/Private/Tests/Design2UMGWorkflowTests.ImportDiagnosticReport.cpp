@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "Misc/AutomationTest.h"
 #include "DesignImportPipeline.h"
 #include "DesignSchema.h"
@@ -291,7 +291,7 @@ bool FImportDiagnosticReportExecutePathTest::RunTest(const FString& Parameters)
 		FFileHelper::LoadFileToArray(Bytes, *ReportPath);
 		return Bytes;
 	}();
-	TestTrue(TEXT("Execute data path report keeps UTF-8 BOM"),
+	TestFalse(TEXT("Execute data path report is UTF-8 without BOM"),
 		ReportBytes.Num() >= 3
 		&& ReportBytes[0] == 0xEF
 		&& ReportBytes[1] == 0xBB

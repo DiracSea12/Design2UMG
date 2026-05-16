@@ -1,4 +1,4 @@
-﻿import argparse
+import argparse
 import concurrent.futures
 import os
 import shutil
@@ -430,7 +430,7 @@ def _run():
 
 _run()
 """
-    script_path.write_text(script_content, encoding="utf-8-sig")
+    script_path.write_text(script_content, encoding="utf-8")
     return script_path
 
 
@@ -462,7 +462,7 @@ def run_editor_driver(
     if log_cmds:
         command.append(f"-LogCmds={log_cmds}")
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(log_path, "w", encoding="utf-8-sig") as handle:
+    with open(log_path, "w", encoding="utf-8") as handle:
         process = subprocess.Popen(command, stdout=handle, stderr=subprocess.STDOUT)
         process_started_at = time.time()
         last_progress_time = time.time()

@@ -1,4 +1,4 @@
-﻿# Architecture
+# Architecture
 
 Chinese companion: [Architecture.zh-CN.md](Architecture.zh-CN.md)
 

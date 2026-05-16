@@ -1,4 +1,4 @@
-﻿# Known Limitations
+# Known Limitations
 
 This document tracks current limitations that are known and accepted for now.
 

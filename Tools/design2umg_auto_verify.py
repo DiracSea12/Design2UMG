@@ -1,4 +1,4 @@
-﻿import argparse
+import argparse
 import base64
 import csv
 import glob
@@ -524,7 +524,7 @@ def sync_project_plugin_build_id(editor_path: str, project_plugin_root: Path):
     if project_data.get("BuildId") == engine_build_id:
         return
     project_data["BuildId"] = engine_build_id
-    project_manifest.write_text(json.dumps(project_data, ensure_ascii=False, indent=4), encoding="utf-8-sig")
+    project_manifest.write_text(json.dumps(project_data, ensure_ascii=False, indent=4), encoding="utf-8")
 
 
 def discover_local_font_seed_dirs(source_paths: list[str], destination_dir: Path | None = None) -> list[Path]:
@@ -1990,7 +1990,7 @@ def run_editor(
     if log_cmds:
         command.append(f"-LogCmds={log_cmds}")
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(log_path, "w", encoding="utf-8-sig") as handle:
+    with open(log_path, "w", encoding="utf-8") as handle:
         process = subprocess.Popen(command, stdout=handle, stderr=subprocess.STDOUT)
         process_started_at = time.time()
         last_progress_time = time.time()
@@ -2103,7 +2103,7 @@ def _run():
 
 _run()
 """
-    script_path.write_text(script_content, encoding="utf-8-sig")
+    script_path.write_text(script_content, encoding="utf-8")
     return script_path
 
 

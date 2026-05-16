@@ -1,4 +1,4 @@
-﻿# Design2UMG
+# Design2UMG
 
 Convert design files into Unreal Engine 5 UMG Widget Blueprints.
 

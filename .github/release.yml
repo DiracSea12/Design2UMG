@@ -1,4 +1,4 @@
-﻿# GitHub generated release notes configuration for public Design2UMG releases.
+# GitHub generated release notes configuration for public Design2UMG releases.
 # This only classifies merged PRs. It does not imply a hosted full UE formal gate.
 changelog:
   exclude:
