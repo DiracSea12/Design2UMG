@@ -5,8 +5,8 @@
 #include "CoreMinimal.h"
 #include "Design2UMGPrototypeNavigation.h"
 
-// Step graph owner: prototype routing analysis, action parsing, step appending,
-// binding gathering, and binding summary reconstruction.
+// Step graph owner: prototype page selection, routing analysis orchestration,
+// binding gathering, and navigation data validity checks.
 namespace Design2UMGPrototypeStepGraph
 {
 	Design2UMGPrototypeNavigation::FPrototypeNavigationAnalysis BuildAnalysis(

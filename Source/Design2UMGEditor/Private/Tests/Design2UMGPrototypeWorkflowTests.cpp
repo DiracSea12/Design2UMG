@@ -6,10 +6,10 @@
 #include "Design2UMGPrototypeNavigationTagHelper.h"
 #include "Design2UMGSettings.h"
 #include "Design2UMGTestUtils.h"
+#include "Tests/Design2UMGTestAssetCleanup.h"
 #include "FigmaParser.h"
 #include "UMGGenerator.h"
 #include "UMGSchemaSourceExtensions.h"
-#include "AssetRegistry/AssetRegistryModule.h"
 #include "Animation/WidgetAnimation.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetBlueprintGeneratedClass.h"
@@ -21,12 +21,11 @@
 #include "Containers/Ticker.h"
 #include "Editor.h"
 #include "InputCoreTypes.h"
-#include "Modules/ModuleManager.h"
-#include "ObjectTools.h"
 
 #if WITH_AUTOMATION_WORKER
 
 using namespace Design2UMGTestUtils;
+using Design2UMGEditorTests::DeleteGeneratedAssetsAtPath;
 
 extern bool GDesign2UMGPrototypeNavigationCaptureOpenUrl;
 extern FString GDesign2UMGPrototypeNavigationLastOpenedUrl;
@@ -128,32 +127,6 @@ namespace
 		}
 
 		return Cast<UOverlay>(WidgetInstance->WidgetTree->FindWidget(FName(*NavigationData.OverlayHostWidgetName)));
-	}
-
-	void DeleteGeneratedAssetsAtPath(const FString& AssetDir)
-	{
-		if (AssetDir.IsEmpty())
-		{
-			return;
-		}
-
-		FAssetRegistryModule& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
-		TArray<FAssetData> Assets;
-		AssetRegistry.Get().GetAssetsByPath(FName(*AssetDir), Assets, true);
-
-		TArray<UObject*> ObjectsToDelete;
-		for (const FAssetData& Asset : Assets)
-		{
-			if (UObject* Object = Asset.GetAsset())
-			{
-				ObjectsToDelete.Add(Object);
-			}
-		}
-
-		if (ObjectsToDelete.Num() > 0)
-		{
-			ObjectTools::ForceDeleteObjects(ObjectsToDelete, false);
-		}
 	}
 
 	void TickCoreTickerFor(const float TotalSeconds, const float StepSeconds = 1.0f / 60.0f)

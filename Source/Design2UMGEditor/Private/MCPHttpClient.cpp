@@ -84,6 +84,54 @@ namespace
 		HttpRequest->SetTimeout(30.0f);
 		return HttpRequest;
 	}
+
+	struct FMCPBlockingRequestState
+	{
+		FThreadSafeBool bCompleted{false};
+		bool bSuccess = false;
+		FString ResponseBody;
+		FString NewSessionId;
+	};
+
+	bool WaitForMCPResponse(
+		const FString& Method,
+		const TSharedRef<IHttpRequest, ESPMode::ThreadSafe>& HttpRequest,
+		const TSharedRef<FMCPBlockingRequestState>& RequestState)
+	{
+		const double StartTime = FPlatformTime::Seconds();
+		const double Timeout = 30.0;
+		const float TotalSteps = static_cast<float>(Timeout / 0.01);
+
+		FScopedSlowTask SlowTask(TotalSteps,
+			FText::FromString(FString::Printf(TEXT("Design2UMG: Waiting for MCP response (%s)..."), *Method)));
+		SlowTask.MakeDialog(true);
+
+		while (!RequestState->bCompleted)
+		{
+			if (SlowTask.ShouldCancel())
+			{
+				UE_LOG(LogDesign2UMG, Warning, TEXT("MCPHttpClient: Cancelled by user for %s"), *Method);
+				HttpRequest->CancelRequest();
+				return false;
+			}
+			if (FPlatformTime::Seconds() - StartTime > Timeout)
+			{
+				UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: Timeout for %s"), *Method);
+				HttpRequest->CancelRequest();
+				return false;
+			}
+			FHttpModule::Get().GetHttpManager().Tick(0.01f);
+			if (FSlateApplication::IsInitialized())
+			{
+				FSlateApplication::Get().PumpMessages();
+				FSlateApplication::Get().Tick();
+			}
+			SlowTask.EnterProgressFrame(1.0f);
+			FPlatformProcess::Sleep(0.01f);
+		}
+
+		return true;
+	}
 }
 
 FMCPHttpClient::FMCPHttpClient()
@@ -336,14 +384,7 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = CreatePostRequest(ServerEndpoint, SessionId, RequestBody);
 
 	// Keep request state on the heap so timeout/cancel cannot leave a dangling stack capture.
-	struct FRequestState
-	{
-		FThreadSafeBool bCompleted{false};
-		bool bSuccess = false;
-		FString ResponseBody;
-		FString NewSessionId;
-	};
-	TSharedRef<FRequestState> RequestState = MakeShared<FRequestState>();
+	TSharedRef<FMCPBlockingRequestState> RequestState = MakeShared<FMCPBlockingRequestState>();
 
 	HttpRequest->OnProcessRequestComplete().BindLambda(
 		[RequestState, Method](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnectedSuccessfully)
@@ -375,37 +416,9 @@ bool FMCPHttpClient::SendRequest(const FString& Method,
 		return false;
 	}
 
-	// Wait synchronously while ticking Slate through the progress UI to keep the editor responsive.
-	const double StartTime = FPlatformTime::Seconds();
-	const double Timeout = 30.0;
-	const float TotalSteps = static_cast<float>(Timeout / 0.01);
-
-	FScopedSlowTask SlowTask(TotalSteps,
-		FText::FromString(FString::Printf(TEXT("Design2UMG: Waiting for MCP response (%s)..."), *Method)));
-	SlowTask.MakeDialog(true);
-
-	while (!RequestState->bCompleted)
+	if (!WaitForMCPResponse(Method, HttpRequest, RequestState))
 	{
-		if (SlowTask.ShouldCancel())
-		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("MCPHttpClient: Cancelled by user for %s"), *Method);
-			HttpRequest->CancelRequest();
-			return false;
-		}
-		if (FPlatformTime::Seconds() - StartTime > Timeout)
-		{
-			UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: Timeout for %s"), *Method);
-			HttpRequest->CancelRequest();
-			return false;
-		}
-		FHttpModule::Get().GetHttpManager().Tick(0.01f);
-		if (FSlateApplication::IsInitialized())
-		{
-			FSlateApplication::Get().PumpMessages();
-			FSlateApplication::Get().Tick();
-		}
-		SlowTask.EnterProgressFrame(1.0f);
-		FPlatformProcess::Sleep(0.01f);
+		return false;
 	}
 
 	if (!RequestState->NewSessionId.IsEmpty())

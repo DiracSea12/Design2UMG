@@ -9,6 +9,7 @@
 #include "Design2UMGTestUtils.h"
 #include "DesignImportPipeline.h"
 #include "DesignImportUtils.h"
+#include "Tests/Design2UMGTestAssetCleanup.h"
 #include "FontResolver.h"
 #include "FigmaParser.h"
 #include "PenParser.h"
@@ -52,6 +53,7 @@
 #include "Components/VerticalBox.h"
 #if WITH_AUTOMATION_WORKER
 using namespace Design2UMGTestUtils;
+using Design2UMGEditorTests::DeleteGeneratedAssetsAtPath;
 
 namespace
 {
@@ -88,32 +90,6 @@ namespace
 			Plugin->GetBaseDir(),
 			TEXT("Source/Design2UMGEditor/Private/Tests/Fixtures"),
 			FixtureFileName);
-	}
-
-	void DeleteGeneratedAssetsAtPath(const FString& AssetDir)
-	{
-		if (AssetDir.IsEmpty())
-		{
-			return;
-		}
-
-		FAssetRegistryModule& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
-		TArray<FAssetData> Assets;
-		AssetRegistry.Get().GetAssetsByPath(FName(*AssetDir), Assets, true);
-
-		TArray<UObject*> ObjectsToDelete;
-		for (const FAssetData& Asset : Assets)
-		{
-			if (UObject* Object = Asset.GetAsset())
-			{
-				ObjectsToDelete.Add(Object);
-			}
-		}
-
-		if (ObjectsToDelete.Num() > 0)
-		{
-			ObjectTools::ForceDeleteObjects(ObjectsToDelete, false);
-		}
 	}
 
 	bool BuildPenMcpPayloadFromFixture(const FString& PenFilePath, FString& OutNodesJson, FString& OutVariablesJson)

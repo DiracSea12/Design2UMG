@@ -39,7 +39,7 @@ public:
 
 private:
 	FString Token;
-	TSharedRef<struct FFigmaHttpClientState, ESPMode::ThreadSafe> State;
+	TSharedRef<struct FFigmaHttpClientStateImpl, ESPMode::ThreadSafe> State;
 
 	void SendGet(const FString& Url, FOnComplete OnComplete);
 };

@@ -7,10 +7,10 @@
 #include "DesignPreviewMaterializationService.h"
 #include "Design2UMGGenerationSettingsSnapshot.h"
 #include "PenMCPBridge.h"
+#include "Tests/Design2UMGTestAssetCleanup.h"
 #include "UMGGenerator.h"
 #include "UMGWidgetUtils.h"
 
-#include "AssetRegistry/AssetRegistryModule.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/BackgroundBlur.h"
 #include "Components/Border.h"
@@ -19,10 +19,11 @@
 #include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
-#include "ObjectTools.h"
 #include "WidgetBlueprint.h"
 
 #if WITH_AUTOMATION_WORKER
+
+using Design2UMGEditorTests::DeleteGeneratedAssetsAtPath;
 
 namespace
 {
@@ -125,32 +126,6 @@ namespace
 			TEXT("Source/Design2UMGEditor/Private/Tests/Fixtures/pencil-welcome.pen"));
 		FString FixtureJson;
 		return FFileHelper::LoadFileToString(FixtureJson, *FixturePath) ? FixtureJson : FString();
-	}
-
-	void DeleteGeneratedAssetsAtPath(const FString& AssetDir)
-	{
-		if (AssetDir.IsEmpty())
-		{
-			return;
-		}
-
-		FAssetRegistryModule& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
-		TArray<FAssetData> Assets;
-		AssetRegistry.Get().GetAssetsByPath(FName(*AssetDir), Assets, true);
-
-		TArray<UObject*> ObjectsToDelete;
-		for (const FAssetData& Asset : Assets)
-		{
-			if (UObject* Object = Asset.GetAsset())
-			{
-				ObjectsToDelete.Add(Object);
-			}
-		}
-
-		if (ObjectsToDelete.Num() > 0)
-		{
-			ObjectTools::ForceDeleteObjects(ObjectsToDelete, false);
-		}
 	}
 
 	struct FScopedClassOverrideSettings

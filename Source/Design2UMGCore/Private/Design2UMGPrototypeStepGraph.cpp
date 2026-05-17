@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGPrototypeStepGraph.h"
+#include "Design2UMGPrototypeRouting.h"
 #include "Design2UMGPrototypeStepGraphAssembly.h"
 #include "DesignSchemaSourceExtensions.h"
 
@@ -71,11 +72,11 @@ namespace Design2UMGPrototypeStepGraph
 			return Analysis;
 		}
 
-		Design2UMGPrototypeStepGraphAssembly::FPrototypeRoutingContext RoutingContext = Design2UMGPrototypeStepGraphAssembly::BuildRoutingContext(PrototypePages);
+		Design2UMGPrototypeRouting::FPrototypeRoutingContext RoutingContext = Design2UMGPrototypeRouting::BuildRoutingContext(PrototypePages);
 		if (PrototypePages.Num() > 1)
 		{
 			Analysis.Data.PageIds = RoutingContext.PageIds;
-			Analysis.Data.SwitcherWidgetId = Design2UMGPrototypeStepGraphAssembly::MakeUniquePrototypeInternalToken(
+			Analysis.Data.SwitcherWidgetId = Design2UMGPrototypeRouting::MakeUniquePrototypeInternalToken(
 				RoutingContext.ReservedTokens,
 				RoutingContext.InternalTokenHash,
 				TEXT("switcher"));
@@ -98,7 +99,7 @@ namespace Design2UMGPrototypeStepGraph
 
 		if (Analysis.Data.HasOverlayBindings())
 		{
-			Analysis.Data.OverlayHostWidgetId = Design2UMGPrototypeStepGraphAssembly::MakeUniquePrototypeInternalToken(
+			Analysis.Data.OverlayHostWidgetId = Design2UMGPrototypeRouting::MakeUniquePrototypeInternalToken(
 				RoutingContext.ReservedTokens,
 				RoutingContext.InternalTokenHash,
 				TEXT("overlay_host"));

@@ -3,46 +3,18 @@
 #include "DesignImportPipeline.h"
 #include "DesignSchema.h"
 #include "DesignSchemaSourceExtensions.h"
+#include "Tests/Design2UMGTestAssetCleanup.h"
 #include "UMGSchema.h"
-#include "AssetRegistry/AssetRegistryModule.h"
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
 #include "Misc/Paths.h"
-#include "Modules/ModuleManager.h"
-#include "ObjectTools.h"
 #include "Serialization/JsonSerializer.h"
 
 #if WITH_AUTOMATION_WORKER
-namespace
-{
-	void DeleteGeneratedAssetsAtPath(const FString& AssetDir)
-	{
-		if (AssetDir.IsEmpty())
-		{
-			return;
-		}
 
-		FAssetRegistryModule& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
-		TArray<FAssetData> Assets;
-		AssetRegistry.Get().GetAssetsByPath(FName(*AssetDir), Assets, true);
-
-		TArray<UObject*> ObjectsToDelete;
-		for (const FAssetData& Asset : Assets)
-		{
-			if (UObject* Object = Asset.GetAsset())
-			{
-				ObjectsToDelete.Add(Object);
-			}
-		}
-
-		if (ObjectsToDelete.Num() > 0)
-		{
-			ObjectTools::ForceDeleteObjects(ObjectsToDelete, false);
-		}
-	}
-}
+using Design2UMGEditorTests::DeleteGeneratedAssetsAtPath;
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImportDiagnosticReportStructureTest,
 	"Design2UMG.Import.ImportDiagnosticReportStructure",

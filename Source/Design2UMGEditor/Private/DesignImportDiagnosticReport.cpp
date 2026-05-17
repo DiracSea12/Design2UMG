@@ -454,7 +454,7 @@ namespace DesignImportDiagnosticReport
 		FString Payload;
 		TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Payload);
 		FJsonSerializer::Serialize(Root, Writer);
-		FFileHelper::SaveStringToFile(Payload, *ReportPath, FFileHelper::EEncodingOptions::ForceUTF8);
+		FFileHelper::SaveStringToFile(Payload, *ReportPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
 		UE_LOG(LogDesign2UMG, Log, TEXT("DesignImportPipeline: wrote import diagnostic report %s"), *ReportPath);
 	}
 }

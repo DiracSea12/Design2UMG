@@ -18,6 +18,7 @@ from design2umg_verify_lib import execution_shards
 from design2umg_verify_lib import reference_cache
 from design2umg_verify_lib.diagnostics import EvidenceReadError
 from design2umg_verify_lib.diagnostics import emit_diagnostic
+from design2umg_verify_lib.editor_driver_writer import write_editor_driver_script as write_shared_editor_driver_script
 from design2umg_verify_lib.run_history import write_historical_best_validation
 
 
@@ -385,62 +386,14 @@ def write_editor_driver_script(output_root: Path, spec_paths: list[Path], tag: s
     normalized_tag = batch_discovery.sanitize_case_name(tag)
     manifest_path = output_root / f"editor_driver_manifest_{normalized_tag}.json"
     driver_log_path = output_root / f"editor_driver_{normalized_tag}.log"
-    verify.write_json(
-        manifest_path,
-        {
-            "spec_paths": [spec_path.as_posix() for spec_path in spec_paths],
-            "driver_log_path": str(driver_log_path),
-        },
-    )
-
     script_path = output_root / f"editor_driver_{normalized_tag}.py"
-    script_content = f"""import json
-import traceback
-from datetime import datetime
-import unreal
-
-MANIFEST_PATH = r\"{manifest_path}\"
-
-
-def _write_line(path, message):
-    timestamp = datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
-    with open(path, "a", encoding="utf-8") as handle:
-        handle.write(f"{{timestamp}} {{message}}\\n")
-
-
-def _get_world():
-    try:
-        return unreal.EditorLevelLibrary.get_editor_world()
-    except Exception:
-        return None
-
-
-def _run():
-    driver_log_path = ""
-    try:
-        with open(MANIFEST_PATH, "r", encoding="utf-8-sig") as handle:
-            manifest = json.load(handle)
-        driver_log_path = manifest.get("driver_log_path", "")
-        if driver_log_path:
-            _write_line(driver_log_path, "driver:start")
-        world = _get_world()
-        for spec_path in manifest.get("spec_paths", []):
-            if driver_log_path:
-                _write_line(driver_log_path, f"driver:run:{{spec_path}}")
-            unreal.SystemLibrary.execute_console_command(world, f"Design2UMG.AutomationRender {{spec_path}}")
-        if driver_log_path:
-            _write_line(driver_log_path, "driver:quit")
-        unreal.SystemLibrary.execute_console_command(world, "QUIT_EDITOR")
-    except Exception:
-        if driver_log_path:
-            _write_line(driver_log_path, traceback.format_exc())
-        raise
-
-
-_run()
-"""
-    script_path.write_text(script_content, encoding="utf-8")
-    return script_path
+    return write_shared_editor_driver_script(
+        script_path,
+        manifest_path,
+        driver_log_path,
+        {"spec_paths": [spec_path.as_posix() for spec_path in spec_paths]},
+        "spec_paths",
+    )
 
 
 def run_editor_driver(

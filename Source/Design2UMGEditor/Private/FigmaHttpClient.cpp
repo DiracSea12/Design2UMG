@@ -17,7 +17,7 @@ namespace
 }
 #endif
 
-struct FFigmaHttpClientState
+struct FFigmaHttpClientStateImpl
 {
 	FHttpRequestPtr ActiveRequest;
 	int32 ActiveRequestId = 0;
@@ -26,7 +26,7 @@ struct FFigmaHttpClientState
 };
 
 FFigmaHttpClient::FFigmaHttpClient()
-	: State(MakeShared<FFigmaHttpClientState, ESPMode::ThreadSafe>())
+	: State(MakeShared<FFigmaHttpClientStateImpl, ESPMode::ThreadSafe>())
 {
 }
 

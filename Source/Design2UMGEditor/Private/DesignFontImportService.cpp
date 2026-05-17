@@ -5,6 +5,8 @@
 #include "Design2UMGLog.h"
 #include "Design2UMGNotifications.h"
 #include "Design2UMGSettings.h"
+#include "DesignFontImportAutomationPaths.h"
+#include "DesignFontImportCatalog.h"
 #include "Automation/Design2UMGAutomationRender.h"
 #include "DesignSchema.h"
 #include "FontResolver.h"
@@ -32,15 +34,6 @@ namespace
 	TMap<FString, TMap<FString, FString>> GKnownIconGlyphCache;
 	TMap<FString, TMap<FString, FString>> GKnownIconNameCache;
 
-	FString NormalizeFontFamilyKey(const FString& InFamily)
-	{
-		FString Key = InFamily.ToLower().TrimStartAndEnd();
-		Key.ReplaceInline(TEXT(" "), TEXT(""));
-		Key.ReplaceInline(TEXT("-"), TEXT(""));
-		Key.ReplaceInline(TEXT("_"), TEXT(""));
-		return Key;
-	}
-
 	FString NormalizeIconNameKey(const FString& InName)
 	{
 		FString Key = InName.ToLower().TrimStartAndEnd();
@@ -66,68 +59,7 @@ namespace
 	{
 		return !ExistingFontPath.IsEmpty()
 			&& !IsEngineFallbackFontPath(ExistingFontPath)
-			&& !(ExistingFontPath.Contains(TEXT("/Design2UMG/Automation/"), ESearchCase::IgnoreCase)
-				&& ExistingFontPath.Contains(TEXT("/ImportedFonts/"), ESearchCase::IgnoreCase));
-	}
-
-	bool IsAutomationImportedFontPath(const FString& ExistingFontPath)
-	{
-		return ExistingFontPath.Contains(TEXT("/Design2UMG/Automation/"), ESearchCase::IgnoreCase)
-			&& ExistingFontPath.Contains(TEXT("/ImportedFonts/"), ESearchCase::IgnoreCase);
-	}
-
-	const TMap<FString, FString>& GetKnownWebFontUrls()
-	{
-		static const TMap<FString, FString> KnownUrls = {
-			{TEXT("inter"), TEXT("https://github.com/google/fonts/raw/main/ofl/inter/Inter%5Bopsz,wght%5D.ttf")},
-			{TEXT("rubik"), TEXT("https://github.com/google/fonts/raw/main/ofl/rubik/Rubik%5Bwght%5D.ttf")},
-			{TEXT("robotomono"), TEXT("https://github.com/google/fonts/raw/main/ofl/robotomono/RobotoMono%5Bwght%5D.ttf")},
-			{TEXT("funneldisplay"), TEXT("https://github.com/google/fonts/raw/main/ofl/funneldisplay/FunnelDisplay%5Bwght%5D.ttf")},
-			{TEXT("oxygen"), TEXT("https://github.com/google/fonts/raw/main/ofl/oxygen/Oxygen-Regular.ttf")},
-			{TEXT("geist"), TEXT("https://github.com/google/fonts/raw/main/ofl/geist/Geist%5Bwght%5D.ttf")},
-			{TEXT("jetbrainsmono"), TEXT("https://github.com/google/fonts/raw/main/ofl/jetbrainsmono/JetBrainsMono%5Bwght%5D.ttf")},
-			{TEXT("lucide"), TEXT("https://unpkg.com/lucide-static/font/lucide.ttf")},
-			{TEXT("materialsymbolssharp"), TEXT("https://github.com/google/material-design-icons/raw/master/variablefont/MaterialSymbolsSharp%5BFILL,GRAD,opsz,wght%5D.ttf")},
-			{TEXT("pingfangsc"), TEXT("https://github.com/google/fonts/raw/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf")},
-			{TEXT("buenosaires"), TEXT("https://github.com/google/fonts/raw/main/ofl/inter/Inter%5Bopsz,wght%5D.ttf")},
-		};
-		return KnownUrls;
-	}
-
-	const TMap<FString, FString>& GetKnownIconFontCssUrls()
-	{
-		static const TMap<FString, FString> KnownUrls = {
-			{TEXT("lucide"), TEXT("https://unpkg.com/lucide-static/font/lucide.css")},
-		};
-		return KnownUrls;
-	}
-
-	const TSet<FString>& GetKnownCssFontFamilies()
-	{
-		static const TSet<FString> KnownCssFamilies = {
-			TEXT("inter"),
-			TEXT("roboto"),
-			TEXT("rubik"),
-			TEXT("funneldisplay"),
-			TEXT("geist"),
-			TEXT("jetbrainsmono"),
-			TEXT("oxygen"),
-			TEXT("materialsymbolssharp"),
-			TEXT("materialsymbolsrounded"),
-			TEXT("materialsymbolsoutlined"),
-		};
-		return KnownCssFamilies;
-	}
-
-	const TArray<int32>& GetDefaultKnownCssFontWeights()
-	{
-		static const TArray<int32> KnownCssWeights = { 400, 500, 600, 700 };
-		return KnownCssWeights;
-	}
-
-	int32 NormalizeCssWeightValue(const int32 Weight)
-	{
-		return FMath::Clamp(FMath::RoundToInt(static_cast<float>(Weight) / 100.0f) * 100, 100, 900);
+			&& !DesignFontImportAutomationPaths::IsAutomationImportedFontPath(ExistingFontPath);
 	}
 
 	bool HasExplicitNonDefaultFontWeight(const FString& FontWeight)
@@ -166,35 +98,8 @@ namespace
 			return;
 		}
 
-		const int32 ParsedWeight = NormalizeCssWeightValue(FFontResolver::ParseWeightValue(WeightToken));
-		OutRequestedWeights.FindOrAdd(NormalizeFontFamilyKey(FontFamily)).Add(ParsedWeight);
-	}
-
-	TArray<int32> ResolveKnownCssFontWeights(
-		const FString& FontFamily,
-		const TMap<FString, TSet<int32>>& RequestedWeightsByFamily)
-	{
-		TSet<int32> WeightSet;
-		if (const TSet<int32>* RequestedWeights = RequestedWeightsByFamily.Find(NormalizeFontFamilyKey(FontFamily)))
-		{
-			WeightSet.Append(*RequestedWeights);
-		}
-
-		if (WeightSet.Num() == 0)
-		{
-			for (const int32 Weight : GetDefaultKnownCssFontWeights())
-			{
-				WeightSet.Add(Weight);
-			}
-		}
-		else
-		{
-			WeightSet.Add(400);
-		}
-
-		TArray<int32> ResolvedWeights = WeightSet.Array();
-		ResolvedWeights.Sort();
-		return ResolvedWeights;
+		const int32 ParsedWeight = DesignFontImportCatalog::NormalizeCssWeightValue(FFontResolver::ParseWeightValue(WeightToken));
+		OutRequestedWeights.FindOrAdd(DesignFontImportCatalog::NormalizeFontFamilyKey(FontFamily)).Add(ParsedWeight);
 	}
 
 	bool DownloadToFile(const FString& Url, const FString& LocalPath)
@@ -260,23 +165,6 @@ namespace
 
 		IFileManager::Get().MakeDirectory(*FPaths::GetPath(LocalPath), true);
 		return FFileHelper::SaveArrayToFile(Data, *LocalPath);
-	}
-
-	FString WeightNameFromNumeric(int32 Weight)
-	{
-		switch (FMath::Clamp(FMath::RoundToInt(Weight / 100.0f) * 100, 100, 900))
-		{
-		case 100: return TEXT("Thin");
-		case 200: return TEXT("ExtraLight");
-		case 300: return TEXT("Light");
-		case 400: return TEXT("Regular");
-		case 500: return TEXT("Medium");
-		case 600: return TEXT("SemiBold");
-		case 700: return TEXT("Bold");
-		case 800: return TEXT("ExtraBold");
-		case 900: return TEXT("Black");
-		default: return TEXT("Regular");
-		}
 	}
 
 	FString WeightNameFromFile(const FString& FilePath, const FString& FamilyName)
@@ -359,17 +247,6 @@ namespace
 		SafeName.ReplaceInline(TEXT(" "), TEXT("_"));
 		SafeName.ReplaceInline(TEXT("."), TEXT("_"));
 		return SafeName;
-	}
-
-	FString NormalizeAutomationFontImportPath(const FString& InPath)
-	{
-		FString Normalized = InPath.TrimStartAndEnd();
-		Normalized.ReplaceInline(TEXT("\\"), TEXT("/"));
-		while (Normalized.EndsWith(TEXT("/")))
-		{
-			Normalized.LeftChopInline(1, EAllowShrinking::No);
-		}
-		return Normalized;
 	}
 
 	bool SaveAssetPackage(UObject* Asset, const FString& PackageName)
@@ -925,8 +802,8 @@ namespace
 		TMap<FString, FString>& OutTypefaceUrls)
 	{
 		OutTypefaceUrls.Reset();
-		const FString NormalizedFamily = NormalizeFontFamilyKey(FontFamily);
-		if (!GetKnownCssFontFamilies().Contains(NormalizedFamily))
+		const FString NormalizedFamily = DesignFontImportCatalog::NormalizeFontFamilyKey(FontFamily);
+		if (!DesignFontImportCatalog::GetKnownCssFontFamilies().Contains(NormalizedFamily))
 		{
 			return false;
 		}
@@ -1003,7 +880,7 @@ namespace
 				continue;
 			}
 
-			OutTypefaceUrls.FindOrAdd(WeightNameFromNumeric(WeightValue)) = TypefaceUrl;
+			OutTypefaceUrls.FindOrAdd(DesignFontImportCatalog::WeightNameFromNumeric(WeightValue)) = TypefaceUrl;
 		}
 
 		return OutTypefaceUrls.Num() > 0;
@@ -1032,7 +909,7 @@ namespace
 			bool bHasAllKnownWeightsReloadSafe = true;
 			for (const int32 Weight : RequestedWeights)
 			{
-				const FTypefaceEntry* const* ExistingEntry = ExistingTypefaces.Find(WeightNameFromNumeric(Weight));
+				const FTypefaceEntry* const* ExistingEntry = ExistingTypefaces.Find(DesignFontImportCatalog::WeightNameFromNumeric(Weight));
 				if (!ExistingEntry || !*ExistingEntry || !TypefaceEntryHasReloadSafeData(**ExistingEntry))
 				{
 					bHasAllKnownWeightsReloadSafe = false;
@@ -1072,7 +949,7 @@ namespace
 
 		for (const int32 Weight : RequestedWeights)
 		{
-			const FString TypefaceName = WeightNameFromNumeric(Weight);
+			const FString TypefaceName = DesignFontImportCatalog::WeightNameFromNumeric(Weight);
 			if (TypefaceName.IsEmpty())
 			{
 				continue;
@@ -1163,8 +1040,8 @@ namespace
 
 	FString ImportKnownCssFontFamily(const FString& FontFamily, const TArray<int32>& RequestedWeights)
 	{
-		const FString NormalizedFamily = NormalizeFontFamilyKey(FontFamily);
-		if (!GetKnownCssFontFamilies().Contains(NormalizedFamily))
+		const FString NormalizedFamily = DesignFontImportCatalog::NormalizeFontFamilyKey(FontFamily);
+		if (!DesignFontImportCatalog::GetKnownCssFontFamilies().Contains(NormalizedFamily))
 		{
 			return FString();
 		}
@@ -1253,7 +1130,7 @@ namespace
 	{
 		for (const FString& Family : IconFamilies)
 		{
-			const FString NormalizedFamily = NormalizeFontFamilyKey(Family);
+			const FString NormalizedFamily = DesignFontImportCatalog::NormalizeFontFamilyKey(Family);
 			if (NormalizedFamily.IsEmpty())
 			{
 				continue;
@@ -1263,7 +1140,7 @@ namespace
 			{
 				TMap<FString, FString> Glyphs;
 				TMap<FString, FString> IconNames;
-				if (const FString* CssUrl = GetKnownIconFontCssUrls().Find(NormalizedFamily))
+				if (const FString* CssUrl = DesignFontImportCatalog::GetKnownIconFontCssUrls().Find(NormalizedFamily))
 				{
 					const FString TempCssPath = FPaths::ProjectSavedDir() / TEXT("Design2UMG") / (NormalizedFamily + TEXT("_iconfont.css"));
 					if (DownloadToFile(*CssUrl, TempCssPath))
@@ -1370,17 +1247,17 @@ void DesignFontImportService::PrepareDocumentFonts(const FDesignDocument& Docume
 	{
 		for (const FString& Family : UsedFamilies)
 		{
-			const FString NormalizedFamily = NormalizeFontFamilyKey(Family);
+			const FString NormalizedFamily = DesignFontImportCatalog::NormalizeFontFamilyKey(Family);
 			if (NormalizedFamily.IsEmpty())
 			{
 				continue;
 			}
 
-			const bool bKnownCssFamily = GetKnownCssFontFamilies().Contains(NormalizedFamily);
-			const bool bKnownDirectFamily = GetKnownWebFontUrls().Contains(NormalizedFamily);
+			const bool bKnownCssFamily = DesignFontImportCatalog::GetKnownCssFontFamilies().Contains(NormalizedFamily);
+			const bool bKnownDirectFamily = DesignFontImportCatalog::GetKnownWebFontUrls().Contains(NormalizedFamily);
 			const FString ExistingFontPath = FFontResolver::FindFontAssetPath(Family);
-			const bool bExistingAutomationFont = IsAutomationImportedFontPath(ExistingFontPath);
-			const TArray<int32> RequestedWeights = ResolveKnownCssFontWeights(Family, RequestedWeightsByFamily);
+			const bool bExistingAutomationFont = DesignFontImportAutomationPaths::IsAutomationImportedFontPath(ExistingFontPath);
+			const TArray<int32> RequestedWeights = DesignFontImportCatalog::ResolveKnownCssFontWeights(Family, RequestedWeightsByFamily);
 			if (bKnownCssFamily
 				&& !ExistingFontPath.IsEmpty()
 				&& !IsEngineFallbackFontPath(ExistingFontPath)
@@ -1407,7 +1284,7 @@ void DesignFontImportService::PrepareDocumentFonts(const FDesignDocument& Docume
 			{
 				ImportedPath = ImportKnownCssFontFamily(Family, RequestedWeights);
 			}
-			else if (const FString* KnownUrl = GetKnownWebFontUrls().Find(NormalizedFamily))
+			else if (const FString* KnownUrl = DesignFontImportCatalog::GetKnownWebFontUrls().Find(NormalizedFamily))
 			{
 				ImportedPath = ResolveFont(Family, *KnownUrl);
 			}
@@ -1454,7 +1331,7 @@ FString DesignFontImportService::EnsureFontFamilyAvailable(const FString& FontFa
 		return FString();
 	}
 
-	const FString NormalizedFamily = NormalizeFontFamilyKey(FontFamily);
+	const FString NormalizedFamily = DesignFontImportCatalog::NormalizeFontFamilyKey(FontFamily);
 	if (NormalizedFamily.IsEmpty())
 	{
 		return FString();
@@ -1465,13 +1342,13 @@ FString DesignFontImportService::EnsureFontFamilyAvailable(const FString& FontFa
 		return FString();
 	}
 
-	const TArray<int32> RequestedWeights = ResolveKnownCssFontWeights(FontFamily, TMap<FString, TSet<int32>>());
+	const TArray<int32> RequestedWeights = DesignFontImportCatalog::ResolveKnownCssFontWeights(FontFamily, TMap<FString, TSet<int32>>());
 	FString ImportedPath;
-	if (GetKnownCssFontFamilies().Contains(NormalizedFamily))
+	if (DesignFontImportCatalog::GetKnownCssFontFamilies().Contains(NormalizedFamily))
 	{
 		ImportedPath = ImportKnownCssFontFamily(FontFamily, RequestedWeights);
 	}
-	else if (const FString* KnownUrl = GetKnownWebFontUrls().Find(NormalizedFamily))
+	else if (const FString* KnownUrl = DesignFontImportCatalog::GetKnownWebFontUrls().Find(NormalizedFamily))
 	{
 		ImportedPath = ResolveFont(FontFamily, *KnownUrl);
 	}
@@ -1485,7 +1362,7 @@ FString DesignFontImportService::EnsureFontFamilyAvailable(const FString& FontFa
 	}
 	FFontResolver::RegisterFontAssetPath(FontFamily, ImportedPath);
 
-	if (GetKnownCssFontFamilies().Contains(NormalizedFamily))
+	if (DesignFontImportCatalog::GetKnownCssFontFamilies().Contains(NormalizedFamily))
 	{
 		if (UFont* Font = LoadObject<UFont>(nullptr, *ImportedPath))
 		{
@@ -1510,9 +1387,7 @@ void DesignFontImportService::PrimeKnownIconFamily(const FString& FontFamily)
 
 bool DesignFontImportService::CanReusePinnedAutomationFontPath(const FString& AutomationFontImportPath)
 {
-	const FString NormalizedPath = NormalizeAutomationFontImportPath(AutomationFontImportPath);
-	return NormalizedPath.IsEmpty()
-		|| NormalizedPath.Equals(TEXT("/Game/Design2UMG/Automation/ImportedFonts"), ESearchCase::IgnoreCase);
+	return DesignFontImportAutomationPaths::CanReusePinnedFontImportPath(AutomationFontImportPath);
 }
 
 void DesignFontImportService::ResetTransientState()
