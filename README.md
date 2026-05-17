@@ -6,6 +6,8 @@ Convert design files into Unreal Engine 5 UMG Widget Blueprints.
 
 Chinese companion: [README.zh-CN.md](README.zh-CN.md)
 
+Project roadmap: [Docs/ROADMAP.md](Docs/ROADMAP.md)
+
 Formal release scope:
 - Pencil `.pen` files
 - Figma Design import through REST API or local export JSON

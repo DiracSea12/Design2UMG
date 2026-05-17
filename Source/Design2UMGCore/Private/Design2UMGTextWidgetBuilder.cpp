@@ -396,15 +396,18 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 		TSet<FString> UniqueHrefs;
 		for (const FResolvedRichTextRun& Run : Runs)
 		{
-			Result.Markup += FString::Printf(TEXT("<%s"), *Run.RowName);
+			Result.Markup.AppendChar(TEXT('<'));
+			Result.Markup.Append(Run.RowName);
 			if (!Run.Href.IsEmpty())
 			{
-				Result.Markup += FString::Printf(TEXT(" href=\"%s\""), *EscapeRichTextAttribute(Run.Href));
+				Result.Markup.Append(TEXT(" href=\""));
+				Result.Markup.Append(EscapeRichTextAttribute(Run.Href));
+				Result.Markup.AppendChar(TEXT('"'));
 				UniqueHrefs.Add(Run.Href);
 			}
-			Result.Markup += TEXT(">");
-			Result.Markup += EscapeRichTextText(Run.Content);
-			Result.Markup += TEXT("</>");
+			Result.Markup.AppendChar(TEXT('>'));
+			Result.Markup.Append(EscapeRichTextText(Run.Content));
+			Result.Markup.Append(TEXT("</>"));
 		}
 
 		if (UniqueHrefs.Num() == 1)

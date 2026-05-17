@@ -75,6 +75,23 @@ namespace
 		return Design2UMGWidgetNodeAccess::HasWidgetPropertyPresence(Widget, Key);
 	}
 
+	int32 RoundPositivePixelExtent(float Value)
+	{
+		if (!FMath::IsFinite(Value) || Value <= 0.0f)
+		{
+			return 1;
+		}
+
+		constexpr int32 SafeRoundToIntMax = TNumericLimits<int32>::Max() - 64;
+		constexpr float SafeRoundToIntMaxAsFloat = static_cast<float>(SafeRoundToIntMax);
+		if (Value >= SafeRoundToIntMaxAsFloat)
+		{
+			return SafeRoundToIntMax;
+		}
+
+		return FMath::RoundToInt(Value);
+	}
+
 	FString BuildWidgetIdOrNameWithSuffix(const FString& Base, const TCHAR* Suffix)
 	{
 		return Base + Suffix;
@@ -629,8 +646,8 @@ FUMGWidgetNode VisualMapper::WrapWithBoxShadow(
 	Shadow.Brush.BrushColor = ShadowLayer.Color;
 
 	// Shadow texture parameters.
-	const int32 TexW = FMath::Max(1, FMath::RoundToInt(ShapeWidth + Extent * 2.0f));
-	const int32 TexH = FMath::Max(1, FMath::RoundToInt(ShapeHeight + Extent * 2.0f));
+	const int32 TexW = RoundPositivePixelExtent(ShapeWidth + Extent * 2.0f);
+	const int32 TexH = RoundPositivePixelExtent(ShapeHeight + Extent * 2.0f);
 	Shadow.WidgetStyle.WidthOverride = TexW;
 	Shadow.WidgetStyle.HeightOverride = TexH;
 	Shadow.Brush.MaterialRef = (Blur > 0.0f) ? TEXT("boxshadow") : MatRef_RoundedRect;

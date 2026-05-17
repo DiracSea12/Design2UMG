@@ -177,6 +177,33 @@ bool FBatchDContributorFacingStaticBoundaryTest::RunTest(const FString& Paramete
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDUMGGeneratorFailureLogStaticTest,
+	"Design2UMG.BatchD.UMGGeneratorFailureLogStatic",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FBatchDUMGGeneratorFailureLogStaticTest::RunTest(const FString& Parameters)
+{
+	FString GeneratorSource;
+	if (!LoadPluginFile(*this, TEXT("Source/Design2UMGEditor/Private/UMGGenerator.cpp"), GeneratorSource))
+	{
+		return false;
+	}
+
+	TestFalse(TEXT("Unique-name failure path no longer emits duplicate verbose failure log"),
+		GeneratorSource.Contains(TEXT("Failed to find unique name for asset"), ESearchCase::CaseSensitive));
+	TestFalse(TEXT("Package creation failure path no longer emits duplicate verbose failure log"),
+		GeneratorSource.Contains(TEXT("Failed to create package at"), ESearchCase::CaseSensitive));
+	TestFalse(TEXT("WidgetBlueprint creation failure path no longer emits duplicate verbose failure log"),
+		GeneratorSource.Contains(TEXT("Failed to create Widget Blueprint\""), ESearchCase::CaseSensitive));
+	TestFalse(TEXT("Root creation failure path no longer emits duplicate verbose failure log"),
+		GeneratorSource.Contains(TEXT("Failed to create root widget for '%s'"), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("Root creation error keeps package, blueprint, and root context"),
+		GeneratorSource.Contains(TEXT("WidgetBlueprint '%s'"), ESearchCase::CaseSensitive)
+		&& GeneratorSource.Contains(TEXT("root type '%s'"), ESearchCase::CaseSensitive)
+		&& GeneratorSource.Contains(TEXT("root name '%s'"), ESearchCase::CaseSensitive)
+		&& GeneratorSource.Contains(TEXT("root id '%s'"), ESearchCase::CaseSensitive));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDUMGGeneratorRootHandoffSmokeTest,
 	"Design2UMG.BatchD.UMGGeneratorRootHandoffSmoke",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)

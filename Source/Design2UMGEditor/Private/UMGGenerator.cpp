@@ -263,8 +263,12 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 
 		if (Suffix > MaxAttempts && AR.GetAssetByObjectPath(FSoftObjectPath(TestPath)).IsValid())
 		{
-			UE_LOG(LogDesign2UMG, Verbose, TEXT("Failed to find unique name for asset '%s'"), *WidgetData.WidgetName);
-			UE_LOG(LogDesign2UMG, Error, TEXT("Failed to generate a unique asset name for '%s'. Clean the output directory and retry."), *WidgetData.WidgetName);
+			UE_LOG(LogDesign2UMG, Error,
+				TEXT("Failed to generate a unique asset name for widget '%s' in package path '%s' after %d attempts; last tested object path '%s'. Clean the output directory and retry."),
+				*WidgetData.WidgetName,
+				*PackagePath,
+				MaxAttempts,
+				*TestPath);
 			return nullptr;
 		}
 
@@ -277,8 +281,12 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 	UPackage* Package = CreatePackage(*FullPath);
 	if (!Package)
 	{
-		UE_LOG(LogDesign2UMG, Verbose, TEXT("Failed to create package at %s"), *FullPath);
-		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create the asset package. Check that the output path is valid: %s"), *FullPath);
+		UE_LOG(LogDesign2UMG, Error,
+			TEXT("Failed to create asset package for widget '%s': package path '%s', asset name '%s', full path '%s'. Check that the output path is valid."),
+			*WidgetData.WidgetName,
+			*PackagePath,
+			*AssetName,
+			*FullPath);
 		return nullptr;
 	}
 
@@ -292,8 +300,14 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 
 	if (!WBP || !WBP->WidgetTree)
 	{
-		UE_LOG(LogDesign2UMG, Verbose, TEXT("Failed to create Widget Blueprint"));
-		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create the Widget Blueprint. Check engine-version compatibility."));
+		UE_LOG(LogDesign2UMG, Error,
+			TEXT("Failed to create Widget Blueprint for widget '%s': package path '%s', asset name '%s', full path '%s', blueprint valid=%d, widget tree valid=%d. Check engine-version compatibility."),
+			*WidgetData.WidgetName,
+			*PackagePath,
+			*AssetName,
+			*FullPath,
+			WBP ? 1 : 0,
+			(WBP && WBP->WidgetTree) ? 1 : 0);
 		Package->ClearDirtyFlag();
 		Package->SetFlags(RF_Transient);
 		return nullptr;
@@ -374,8 +388,15 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 	UWidget* Root = UMGGeneratorRootHandoff::CreateRootWidget(WBP, PreparedRoot, FigmaMetadataRecords);
 	if (!Root)
 	{
-		UE_LOG(LogDesign2UMG, Verbose, TEXT("Failed to create root widget for '%s'"), *WidgetData.WidgetName);
-		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create root widget '%s'. The design may contain unsupported node types."), *WidgetData.WidgetName);
+		UE_LOG(LogDesign2UMG, Error,
+			TEXT("Failed to create root widget for widget '%s': package path '%s', asset name '%s', WidgetBlueprint '%s', root type '%s', root name '%s', root id '%s'. The design may contain unsupported node types."),
+			*WidgetData.WidgetName,
+			*PackagePath,
+			*AssetName,
+			*WBP->GetPathName(),
+			*FixedRoot.Type,
+			*FixedRoot.Name,
+			*FixedRoot.Id);
 		Package->ClearDirtyFlag();
 		Package->SetFlags(RF_Transient);
 		return nullptr;

@@ -39,7 +39,7 @@
 
 这些应该一个语义一个语义地处理，用 focused tests 或直接 before/after 证据证明没有行为变化。
 
-   Phase 26 只声明已处理当前纳入 intake 的条目。后续核查发现还有遗漏 review 候选项，因此新增 `phase-26b-review-intake-backfill-and-current-truth-recheck` 专门补录和核实；这些遗漏项不算 Phase 26 封板时已经暗含完成。
+   Phase 26 只声明已处理当前纳入 intake 的条目。后续核查发现还有遗漏 review 候选项，因此新增 `phase-26b-review-intake-backfill-and-current-truth-recheck` 专门补录和核实；这些遗漏项不算 Phase 26 封板时已经暗含完成。若 26.b 核实出真实、范围小、没有红线冲突的当前问题，应在 26.b 内直接收掉，不能再假设还有 Phase 27 承接。
 
 3. 小范围 optional presence 审计
    `TOptional` 在 UE 5.7 里是正常基础类型，插件里也已经大量使用。Phase 26 可以审剩余 `bHas*`，但只迁移真实 value-presence contract。不要为了命名好看去动局部控制流。
@@ -122,7 +122,7 @@
 - 小范围诊断清晰度改进；
 - 验证证据和 touched surface 匹配。
 
-更大的事要写成 later-phase，不要偷偷塞进 Phase 26；这次真正已经做进来的，就是上面 4 个 current-truth 已踩实的小项。Phase 26 封板后，遗漏 review 候选只通过 `phase-26b-review-intake-backfill-and-current-truth-recheck` 继续处理，不能再假设还有 Phase 27 承接。
+更大的事要写成 later-phase，不要偷偷塞进 Phase 26；这次真正已经做进来的，就是上面 4 个 current-truth 已踩实的小项。Phase 26 封板后，遗漏 review 候选只通过 `phase-26b-review-intake-backfill-and-current-truth-recheck` 继续处理，不能再假设还有 Phase 27 承接。26.b 的口径是 ledger-first，但不是“只写文档”：README Roadmap 链接、富文本构建拼接、box shadow 尺寸安全取整、UMGGenerator 重复失败日志这类小而硬问题，核实成立就必须在 26.b 内完成。
 
 ## 根据后续独立反馈补强
 

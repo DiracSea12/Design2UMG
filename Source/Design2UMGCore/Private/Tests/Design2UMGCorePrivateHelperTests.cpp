@@ -3,6 +3,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Design2UMGConverterVisualSupport.h"
+#include "Design2UMGTextWidgetBuilder.h"
 #include "Misc/AutomationTest.h"
 #include "DesignSchema.h"
 #include "DesignVariableResolver.h"
@@ -316,6 +317,87 @@ bool FWidgetNodeAccessExplicitNoDrawTypePresenceTest::RunTest(const FString& Par
 	TestTrue(TEXT("Typed draw-as helper keeps explicit NoDrawType"),
 		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::DrawAs, DrawAs));
 	TestEqual(TEXT("Typed draw-as helper keeps serialized value"), DrawAs, FString(TEXT("NoDrawType")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextWidgetBuilderRichTextMarkupContractTest,
+	"Design2UMG.TextWidgetBuilder.RichTextMarkupContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTextWidgetBuilderRichTextMarkupContractTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Text, 200.0f, 40.0f);
+	Node->Text.Content = TEXT("unused");
+	Node->Text.FontSize = 16.0f;
+	Node->Text.FontFamily = TEXT("Roboto");
+
+	FDesignTextRun& LinkRun = Node->Text.TextRuns.AddDefaulted_GetRef();
+	LinkRun.Content = TEXT("A&B <C>");
+	LinkRun.Href = TEXT("https://example.test/?q=\"x\"&v='y'");
+	LinkRun.bUnderline = true;
+
+	FDesignTextRun& PlainRun = Node->Text.TextRuns.AddDefaulted_GetRef();
+	PlainRun.Content = TEXT(" tail");
+	PlainRun.FontSize = 18.0f;
+
+	const FUMGWidgetNode Widget = Design2UMGTextWidgetBuilder::CreateTextWidget(Node);
+	TestEqual(TEXT("Rich text node type"), Widget.Type, FString(TEXT("RichTextBlock")));
+	TestEqual(TEXT("Rich text markup keeps escaping contract"),
+		Widget.Text.Text.Get(FString()),
+		FString(TEXT("<d2u_run_0 href=\"https://example.test/?q=&quot;x&quot;&amp;v=&apos;y&apos;\">A&amp;B &lt;C&gt;</><d2u_run_1> tail</>")));
+	TestEqual(TEXT("Single href remains tooltip text"), Widget.WidgetStyle.ToolTipText.Get(FString()), LinkRun.Href);
+	TestTrue(TEXT("Style rows still serialize"), Widget.Text.RichTextStyleRowsJson.IsSet());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperBoxShadowTextureExtentClampTest,
+	"Design2UMG.VisualMapper.BoxShadowTextureExtentClamp",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperBoxShadowTextureExtentClampTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Rectangle, 10.0f, 20.0f);
+
+	FUMGWidgetNode Widget;
+	Widget.Type = TEXT("Image");
+	Widget.Id = TEXT("shadow_source");
+	Widget.Name = TEXT("ShadowSource");
+
+	FUMGBoxShadowLayerData NormalShadow;
+	NormalShadow.Color = FLinearColor::Black;
+	NormalShadow.Blur = 2.0f;
+	NormalShadow.Spread = 3.0f;
+	FUMGWidgetNode NormalWrapped = VisualMapper::WrapWithBoxShadow(MoveTemp(Widget), Node, NormalShadow, 0);
+	TestEqual(TEXT("Normal shadow wrapper has shadow and content"), NormalWrapped.Children.Num(), 2);
+	if (NormalWrapped.Children.Num() != 2)
+	{
+		return false;
+	}
+	TestEqual(TEXT("Normal finite width keeps existing rounded result"), NormalWrapped.Children[0].WidgetStyle.WidthOverride.Get(0), 20.0f);
+	TestEqual(TEXT("Normal finite height keeps existing rounded result"), NormalWrapped.Children[0].WidgetStyle.HeightOverride.Get(0), 30.0f);
+
+	FUMGWidgetNode HugeWidget;
+	HugeWidget.Type = TEXT("Image");
+	HugeWidget.Id = TEXT("huge_shadow_source");
+	HugeWidget.Name = TEXT("HugeShadowSource");
+
+	FUMGBoxShadowLayerData HugeShadow;
+	HugeShadow.Color = FLinearColor::Black;
+	HugeShadow.Blur = 1.0e20f;
+	constexpr float SafeRoundToIntMax = static_cast<float>(TNumericLimits<int32>::Max() - 64);
+	FUMGWidgetNode HugeWrapped = VisualMapper::WrapWithBoxShadow(MoveTemp(HugeWidget), Node, HugeShadow, 0);
+	TestEqual(TEXT("Overflowing shadow clamps width to safe RoundToInt max"), HugeWrapped.Children[0].WidgetStyle.WidthOverride.Get(0), SafeRoundToIntMax);
+	TestEqual(TEXT("Overflowing shadow clamps height to safe RoundToInt max"), HugeWrapped.Children[0].WidgetStyle.HeightOverride.Get(0), SafeRoundToIntMax);
+
+	FUMGWidgetNode InvalidWidget;
+	InvalidWidget.Type = TEXT("Image");
+	InvalidWidget.Id = TEXT("invalid_shadow_source");
+	InvalidWidget.Name = TEXT("InvalidShadowSource");
+
+	FUMGBoxShadowLayerData InvalidShadow;
+	InvalidShadow.Color = FLinearColor::Black;
+	InvalidShadow.Blur = FMath::Sqrt(-1.0f);
+	FUMGWidgetNode InvalidWrapped = VisualMapper::WrapWithBoxShadow(MoveTemp(InvalidWidget), Node, InvalidShadow, 0);
+	TestEqual(TEXT("Non-finite shadow width falls back to one pixel"), InvalidWrapped.Children[0].WidgetStyle.WidthOverride.Get(0), 1.0f);
+	TestEqual(TEXT("Non-finite shadow height falls back to one pixel"), InvalidWrapped.Children[0].WidgetStyle.HeightOverride.Get(0), 1.0f);
 	return true;
 }
 
