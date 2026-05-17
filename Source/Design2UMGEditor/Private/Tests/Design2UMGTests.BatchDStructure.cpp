@@ -3,6 +3,9 @@
 #include "DesignImportPlanning.h"
 #include "DesignImportUtils.h"
 #include "Design2UMGNotifications.h"
+#include "FigmaHttpClient.h"
+#include "MCPHttpClient.h"
+#include "Tests/HttpClientAutomationHooks.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "ObjectTools.h"
 #include "Misc/AutomationTest.h"
@@ -10,6 +13,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
+#include "Dom/JsonObject.h"
 #include "UMGGeneratorRootHandoff.h"
 #include "WidgetBlueprint.h"
 
@@ -272,6 +276,207 @@ bool FBatchDGenerationTransactionBoundaryStaticTest::RunTest(const FString& Para
 	TestTrue(TEXT("Low-level generator marks mutated Blueprint objects for the outer transaction"),
 		GeneratorSource.Contains(TEXT("WBP->Modify()"), ESearchCase::CaseSensitive)
 		&& GeneratorSource.Contains(TEXT("WBP->WidgetTree->Modify()"), ESearchCase::CaseSensitive));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDFigmaHttpCancellationStaticTest,
+	"Design2UMG.BatchD.FigmaHttpCancellationStatic",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FBatchDFigmaHttpCancellationStaticTest::RunTest(const FString& Parameters)
+{
+	FString FigmaHttpHeader;
+	if (!LoadPluginFile(*this, TEXT("Source/Design2UMGEditor/Public/FigmaHttpClient.h"), FigmaHttpHeader))
+	{
+		return false;
+	}
+
+	FString OrchestratorSource;
+	if (!LoadPluginFile(*this, TEXT("Source/Design2UMGEditor/Private/Design2UMGEditorImportOrchestrator.cpp"), OrchestratorSource))
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("Figma HTTP client exposes active request cancellation"),
+		FigmaHttpHeader.Contains(TEXT("CancelActiveRequest()"), ESearchCase::CaseSensitive)
+		&& FigmaHttpHeader.Contains(TEXT("CancelRequests()"), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("Figma import session cancellation reaches the HTTP client"),
+		OrchestratorSource.Contains(TEXT("FFigmaImportSession::CancelRequests()"), ESearchCase::CaseSensitive)
+		&& OrchestratorSource.Contains(TEXT("Client->CancelRequests()"), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("Figma import service invalidation cancels active sessions"),
+		OrchestratorSource.Contains(TEXT("ActiveSession.Pin()->CancelRequests()"), ESearchCase::CaseSensitive)
+		&& OrchestratorSource.Contains(TEXT("FigmaService.Invalidate()"), ESearchCase::CaseSensitive));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDMCPHttpCancellationStaticTest,
+	"Design2UMG.BatchD.MCPHttpCancellationStatic",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FBatchDMCPHttpCancellationStaticTest::RunTest(const FString& Parameters)
+{
+	FString MCPHttpHeader;
+	if (!LoadPluginFile(*this, TEXT("Source/Design2UMGEditor/Public/MCPHttpClient.h"), MCPHttpHeader))
+	{
+		return false;
+	}
+
+	FString MCPHttpSource;
+	if (!LoadPluginFile(*this, TEXT("Source/Design2UMGEditor/Private/MCPHttpClient.cpp"), MCPHttpSource))
+	{
+		return false;
+	}
+
+	FString OrchestratorSource;
+	if (!LoadPluginFile(*this, TEXT("Source/Design2UMGEditor/Private/Design2UMGEditorImportOrchestrator.cpp"), OrchestratorSource))
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("MCP HTTP client exposes active request cancellation"),
+		MCPHttpHeader.Contains(TEXT("CancelActiveRequest()"), ESearchCase::CaseSensitive)
+		&& MCPHttpHeader.Contains(TEXT("CancelRequests()"), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("MCP disconnect cancels active async requests and invalidates the session"),
+		MCPHttpSource.Contains(TEXT("FMCPHttpClient::Disconnect()"), ESearchCase::CaseSensitive)
+		&& MCPHttpSource.Contains(TEXT("CancelRequests();"), ESearchCase::CaseSensitive)
+		&& MCPHttpSource.Contains(TEXT("SessionId.Empty();"), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("Pencil shutdown reaches MCP request cancellation"),
+		OrchestratorSource.Contains(TEXT("Connector->GetClient().CancelRequests()"), ESearchCase::CaseSensitive)
+		&& OrchestratorSource.Contains(TEXT("Connector->Shutdown()"), ESearchCase::CaseSensitive));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDFigmaHttpCancellationBehaviorTest,
+	"Design2UMG.BatchD.FigmaHttpCancellationBehavior",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FBatchDFigmaHttpCancellationBehaviorTest::RunTest(const FString& Parameters)
+{
+	struct FHookState
+	{
+		int32 StartCount = 0;
+		int32 CancelCount = 0;
+		TFunction<void(bool, const FString&, int32)> Completion;
+	};
+
+	TSharedRef<FHookState> HookState = MakeShared<FHookState>();
+	TSharedRef<FFigmaHttpClientAutomationHooks> Hooks = MakeShared<FFigmaHttpClientAutomationHooks>();
+	Hooks->StartRequest =
+		[HookState](const FString&, const FString&, int32, TFunction<void(bool, const FString&, int32)> OnComplete)
+		{
+			++HookState->StartCount;
+			HookState->Completion = MoveTemp(OnComplete);
+			return true;
+		};
+	Hooks->CancelRequest =
+		[HookState](int32)
+		{
+			++HookState->CancelCount;
+		};
+
+	SetFigmaHttpClientAutomationHooks(Hooks);
+
+	bool bCallbackCalled = false;
+	{
+		FFigmaHttpClient Client;
+		Client.SetToken(TEXT("phase24-token"));
+		Client.GetFile(TEXT("phase24-file"), [&bCallbackCalled](bool, const FString&)
+		{
+			bCallbackCalled = true;
+		});
+
+		TestEqual(TEXT("Figma behavior hook started one request"), HookState->StartCount, 1);
+		Client.CancelRequests();
+		TestEqual(TEXT("Figma behavior hook observed one cancellation"), HookState->CancelCount, 1);
+		TestTrue(TEXT("Figma behavior hook captured completion"), static_cast<bool>(HookState->Completion));
+
+		HookState->Completion(false, TEXT(""), 0);
+		TestFalse(TEXT("Cancelled Figma request suppresses late callback"), bCallbackCalled);
+	}
+
+	ResetFigmaHttpClientAutomationHooks();
+
+	TSharedRef<FFigmaHttpClientAutomationHooks> FailHooks = MakeShared<FFigmaHttpClientAutomationHooks>();
+	FailHooks->StartRequest =
+		[](const FString&, const FString&, int32, TFunction<void(bool, const FString&, int32)>)
+		{
+			return false;
+		};
+	SetFigmaHttpClientAutomationHooks(FailHooks);
+
+	bool bFailureCalled = false;
+	bool bFailureSuccess = true;
+	{
+		FFigmaHttpClient Client;
+		Client.SetToken(TEXT("phase24-token"));
+		Client.GetFile(TEXT("phase24-file"), [&bFailureCalled, &bFailureSuccess](bool bSuccess, const FString&)
+		{
+			bFailureCalled = true;
+			bFailureSuccess = bSuccess;
+		});
+	}
+
+	ResetFigmaHttpClientAutomationHooks();
+
+	TestTrue(TEXT("Synchronous Figma launch failure reports callback"), bFailureCalled);
+	TestFalse(TEXT("Synchronous Figma launch failure reports failure"), bFailureSuccess);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDMCPHttpCancellationBehaviorTest,
+	"Design2UMG.BatchD.MCPHttpCancellationBehavior",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FBatchDMCPHttpCancellationBehaviorTest::RunTest(const FString& Parameters)
+{
+	struct FHookState
+	{
+		TMap<FString, TFunction<void(bool, const FString&, int32, const FString&)>> PendingByMethod;
+		int32 CancelCount = 0;
+	};
+
+	TSharedRef<FHookState> HookState = MakeShared<FHookState>();
+	TSharedRef<FMCPHttpClientAutomationHooks> Hooks = MakeShared<FMCPHttpClientAutomationHooks>();
+	Hooks->StartAsyncRequest =
+		[HookState](const FString& Method, const FString&, int32, TFunction<void(bool, const FString&, int32, const FString&)> OnComplete)
+		{
+			HookState->PendingByMethod.Add(Method, MoveTemp(OnComplete));
+			return true;
+		};
+	Hooks->CancelRequest =
+		[HookState](int32)
+		{
+			++HookState->CancelCount;
+		};
+
+	SetMCPHttpClientAutomationHooks(Hooks);
+
+	FMCPHttpClient Client;
+	bool bConnectCalled = false;
+	bool bToolCallbackCalled = false;
+	Client.ConnectAsync(TEXT("http://phase24.test"), [&bConnectCalled](bool bSuccess)
+	{
+		bConnectCalled = bSuccess;
+	});
+
+	TestTrue(TEXT("MCP behavior hook captured initialize"), HookState->PendingByMethod.Contains(TEXT("initialize")));
+	HookState->PendingByMethod[TEXT("initialize")](true, TEXT("{}"), 200, TEXT("phase24-session"));
+	TestTrue(TEXT("MCP behavior hook captured notifications/initialized"), HookState->PendingByMethod.Contains(TEXT("notifications/initialized")));
+	HookState->PendingByMethod[TEXT("notifications/initialized")](true, TEXT(""), 202, TEXT(""));
+	TestTrue(TEXT("Async MCP connect completes"), bConnectCalled);
+
+	Client.CallToolAsync(TEXT("batch_get"), MakeShared<FJsonObject>(), [&bToolCallbackCalled](bool, const FString&)
+	{
+		bToolCallbackCalled = true;
+	});
+
+	TestTrue(TEXT("MCP behavior hook captured tools/call"), HookState->PendingByMethod.Contains(TEXT("tools/call")));
+	Client.CancelRequests();
+	TestEqual(TEXT("MCP behavior hook observed one cancellation"), HookState->CancelCount, 1);
+
+	const FString ToolResponse =
+		TEXT("event: message\n")
+		TEXT("data: {\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"phase24\"}]}}\n\n");
+	HookState->PendingByMethod[TEXT("tools/call")](true, ToolResponse, 200, TEXT(""));
+	TestFalse(TEXT("Cancelled MCP async request suppresses late callback"), bToolCallbackCalled);
+
+	ResetMCPHttpClientAutomationHooks();
 	return true;
 }
 

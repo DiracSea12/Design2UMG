@@ -1,0 +1,73 @@
+{
+  "version": "1.0",
+  "variables": {
+    "size96": { "type": "number", "value": 96 },
+    "sizeZero": { "type": "number", "value": 0 }
+  },
+  "children": [
+    {
+      "id": "node-fill-none",
+      "name": "FillNone",
+      "type": "frame",
+      "x": 0, "y": 0,
+      "width": "fill_container",
+      "height": "fill_container"
+    },
+    {
+      "id": "node-fill-with-value",
+      "name": "FillWithFallback",
+      "type": "frame",
+      "x": 0, "y": 0,
+      "width": "fill_container(200)",
+      "height": "fill_container(100)"
+    },
+    {
+      "id": "node-fit-none",
+      "name": "FitNone",
+      "type": "frame",
+      "x": 0, "y": 0,
+      "width": "fit_content",
+      "height": "fit_content"
+    },
+    {
+      "id": "node-fit-with-value",
+      "name": "FitWithMin",
+      "type": "frame",
+      "x": 0, "y": 0,
+      "width": "fit_content(50)",
+      "height": "fit_content(80)"
+    },
+    {
+      "id": "node-numeric-string",
+      "name": "NumericString",
+      "type": "frame",
+      "x": 0, "y": 0,
+      "width": "128",
+      "height": "64"
+    },
+    {
+      "id": "node-variable-reference",
+      "name": "VariableReference",
+      "type": "frame",
+      "x": 0, "y": 0,
+      "width": "$size96",
+      "height": "$sizeZero"
+    },
+    {
+      "id": "node-zero-numeric",
+      "name": "ZeroNumeric",
+      "type": "rectangle",
+      "x": 0, "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "id": "node-line-zero-numeric",
+      "name": "LineZeroNumeric",
+      "type": "line",
+      "x": 0, "y": 0,
+      "width": 0,
+      "height": 0
+    }
+  ]
+}

@@ -22,6 +22,7 @@ from design2umg_verify_lib.run_history import write_historical_best_validation
 
 
 NO_REGRESSION_EPSILON = 1.25e-4
+EDITOR_GRACEFUL_EXIT_DEADLINE_SEC = 30.0  # seconds to wait for editor results after process exits
 
 
 def parse_args():
@@ -517,14 +518,14 @@ def run_editor_driver(
 
             time.sleep(2)
 
-    exit_deadline = time.time() + 30.0
+    exit_deadline = time.time() + EDITOR_GRACEFUL_EXIT_DEADLINE_SEC
     while time.time() < exit_deadline:
         current_result_count = sum(1 for path in result_paths if path.is_file())
         if current_result_count >= len(result_paths):
             break
         if current_result_count > last_result_count:
             last_result_count = current_result_count
-            exit_deadline = time.time() + 30.0
+            exit_deadline = time.time() + EDITOR_GRACEFUL_EXIT_DEADLINE_SEC
         time.sleep(1)
 
     if exit_code != 0 and all(path.is_file() for path in result_paths):

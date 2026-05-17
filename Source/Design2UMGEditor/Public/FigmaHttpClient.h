@@ -13,12 +13,20 @@
 class FFigmaHttpClient
 {
 public:
-	FFigmaHttpClient() = default;
+	FFigmaHttpClient();
+	~FFigmaHttpClient();
+
+	FFigmaHttpClient(const FFigmaHttpClient&) = delete;
+	FFigmaHttpClient& operator=(const FFigmaHttpClient&) = delete;
 
 	void SetToken(const FString& InToken) { Token = InToken; }
 	bool HasToken() const { return !Token.IsEmpty(); }
 
 	using FOnComplete = TFunction<void(bool bSuccess, const FString& ResponseBody)>;
+
+	/** Cancel the currently active Figma HTTP request, if any. */
+	void CancelActiveRequest();
+	void CancelRequests() { CancelActiveRequest(); }
 
 	/** GET /v1/files/:key - Fetch the full file payload. */
 	void GetFile(const FString& FileKey, FOnComplete OnComplete);
@@ -31,6 +39,7 @@ public:
 
 private:
 	FString Token;
+	TSharedRef<struct FFigmaHttpClientState, ESPMode::ThreadSafe> State;
 
 	void SendGet(const FString& Url, FOnComplete OnComplete);
 };

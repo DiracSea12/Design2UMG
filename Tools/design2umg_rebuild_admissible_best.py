@@ -423,6 +423,26 @@ def collect_best_cases(automation_root: Path, cache_payload: dict) -> tuple[
 
 
 def rebuild_historical_best_manifest(automation_root: Path) -> dict:
+    """Rebuild the admissible historical-best manifest from all admissible runs.
+
+    **Contract**: Writes a deterministic manifest to
+    ``automation_root / "_admissible_best_latest.json"`` containing the best
+    metrics (lowest ``stable_changed_ratio`` / ``changed_ratio``) found across all
+    admissible runs, plus a local cache to ``automation_root / CACHE_FILENAME``
+    for fast incremental rebuilds.
+
+    An *admissible* run is one whose ``run_scope.json`` carries
+    ``formal_admissible_candidate: true`` and whose summary passes
+    ``classify_summary_admissibility()`` (no blocked cases, no no-regression
+    failures, no historical-best regressions).
+
+    Args:
+        automation_root: Directory containing per-run subdirectories with
+            ``summary.json`` files.
+
+    Returns:
+        The manifest dict (same content as the written JSON file).
+    """
     cache_path = automation_root / CACHE_FILENAME
     cache_payload = load_cache(cache_path)
     (

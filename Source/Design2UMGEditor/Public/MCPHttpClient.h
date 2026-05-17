@@ -13,6 +13,12 @@ class FJsonObject;
 class FMCPHttpClient
 {
 public:
+	FMCPHttpClient();
+	~FMCPHttpClient();
+
+	FMCPHttpClient(const FMCPHttpClient&) = delete;
+	FMCPHttpClient& operator=(const FMCPHttpClient&) = delete;
+
 	/**
 	 * Connect to the MCP server and complete the handshake.
 	 * Internally this sends initialize, extracts Mcp-Session-Id, then sends
@@ -42,12 +48,17 @@ public:
 					   const TSharedPtr<FJsonObject>& Arguments,
 					   TFunction<void(bool bSuccess, const FString& Result)> OnComplete);
 
+	/** Cancel the currently active asynchronous MCP HTTP request, if any. */
+	void CancelActiveRequest();
+	void CancelRequests() { CancelActiveRequest(); }
+
 	bool IsConnected() const { return !SessionId.IsEmpty(); }
 
 private:
 	FString ServerEndpoint;
 	FString SessionId;
 	int32 NextRequestId = 1;
+	TSharedRef<struct FMCPHttpClientState, ESPMode::ThreadSafe> State;
 
 	/** Send a JSON-RPC request and wait for the SSE response. */
 	bool SendRequest(const FString& Method,

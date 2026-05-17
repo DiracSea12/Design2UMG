@@ -297,7 +297,13 @@ namespace
 			Client->SetToken(Token);
 		}
 
+		~FFigmaImportSession()
+		{
+			CancelRequests();
+		}
+
 		void Start();
+		void CancelRequests();
 
 	private:
 		void HandleFileResponse(const bool bSuccess, const FString& Body);
@@ -323,6 +329,7 @@ namespace
 			const FString& Token,
 			const FDesign2UMGImportSettingsSnapshot& SettingsSnapshot)
 		{
+			Invalidate();
 			const uint32 ImportGeneration = static_cast<uint32>(Generation.GetValue());
 			const TSharedRef<FFigmaImportSession> Session = MakeShared<FFigmaImportSession>(
 				*this,
@@ -330,12 +337,18 @@ namespace
 				Token,
 				ImportGeneration,
 				SettingsSnapshot);
+			ActiveSession = Session;
 			Session->Start();
 		}
 
 		void Invalidate()
 		{
 			Generation.Increment();
+			if (ActiveSession.IsValid())
+			{
+				ActiveSession.Pin()->CancelRequests();
+				ActiveSession.Reset();
+			}
 		}
 
 		bool IsGenerationCurrent(const uint32 Token) const
@@ -345,6 +358,7 @@ namespace
 
 	private:
 		FThreadSafeCounter Generation{ 1 };
+		TWeakPtr<FFigmaImportSession> ActiveSession;
 	};
 
 	class FPencilImportService
@@ -394,6 +408,7 @@ namespace
 
 			if (Connector)
 			{
+				Connector->GetClient().CancelRequests();
 				Connector->Shutdown();
 				Connector.Reset();
 			}
@@ -530,6 +545,14 @@ namespace
 	bool FFigmaImportSession::IsCancelled() const
 	{
 		return !Owner.IsGenerationCurrent(Generation);
+	}
+
+	void FFigmaImportSession::CancelRequests()
+	{
+		if (Client)
+		{
+			Client->CancelRequests();
+		}
 	}
 
 	void FFigmaImportSession::Start()
