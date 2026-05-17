@@ -2,9 +2,11 @@
 
 #include "Misc/AutomationTest.h"
 
+#include "Design2UMGLog.h"
 #include "Design2UMGConverter.h"
 #include "FigmaParser.h"
 #include "PenParser.h"
+#include "Misc/OutputDevice.h"
 #include "TextMeasurement.h"
 #include "UMGValueParser.h"
 #include "UMGWidgetNodeProceduralResourceAccess.h"
@@ -14,6 +16,37 @@
 #if WITH_AUTOMATION_WORKER
 namespace
 {
+	class FDesign2UMGLogCapture final : public FOutputDevice
+	{
+	public:
+		virtual void Serialize(const TCHAR* V, ELogVerbosity::Type Verbosity, const FName& Category) override
+		{
+			if (V != nullptr && Category == FName(TEXT("LogDesign2UMG")))
+			{
+				Captured += V;
+				Captured += TEXT("\n");
+			}
+		}
+
+		virtual bool CanBeUsedOnAnyThread() const override
+		{
+			return true;
+		}
+
+		virtual bool CanBeUsedOnPanicThread() const override
+		{
+			return true;
+		}
+
+		const FString& GetCaptured() const
+		{
+			return Captured;
+		}
+
+	private:
+		FString Captured;
+	};
+
 	const FUMGWidgetNode* FindWidgetByIdRecursive(const FUMGWidgetNode& Root, const FString& Id)
 	{
 		if (Root.Id == Id)
@@ -197,8 +230,22 @@ bool FFigmaParserMalformedJsonFailsCleanlyTest::RunTest(const FString& Parameter
 	AddExpectedError(TEXT("Invalid Figma export JSON"), EAutomationExpectedErrorFlags::Contains, 1);
 	AddExpectedError(TEXT("Failed to parse JSON"), EAutomationExpectedErrorFlags::Contains, 1);
 	FDesignDocument Document;
-	TestFalse(TEXT("Malformed Figma JSON is rejected"), FFigmaParser::ParseDocument(TEXT("{\"document\":"), Document));
+	FDesign2UMGLogCapture Capture;
+	if (GLog != nullptr)
+	{
+		GLog->AddOutputDevice(&Capture);
+	}
+	const bool bParsed = FFigmaParser::ParseDocument(TEXT("{\"document\":"), Document);
+	if (GLog != nullptr)
+	{
+		GLog->FlushThreadedLogs();
+		GLog->Flush();
+		GLog->RemoveOutputDevice(&Capture);
+	}
+	TestFalse(TEXT("Malformed Figma JSON is rejected"), bParsed);
 	TestEqual(TEXT("Malformed Figma JSON does not append children"), Document.Children.Num(), 0);
+	TestTrue(TEXT("Malformed Figma JSON logs reader error context"), Capture.GetCaptured().Contains(TEXT("Reader error:")));
+	TestTrue(TEXT("Malformed Figma JSON logs reader line context"), Capture.GetCaptured().Contains(TEXT("Line:")));
 	return true;
 }
 

@@ -7,6 +7,7 @@
 
 namespace Design2UMGCore::SharedSemantics
 {
+	bool HasVisibleFill(const FDesignFill& Fill);
 	bool IsDesignerOnlyNodeType(EDesignNodeType Type);
 	bool HasRenderableVisual(const TSharedPtr<FDesignNode>& Node);
 	bool ShouldSkipNode(const TSharedPtr<FDesignNode>& Node);

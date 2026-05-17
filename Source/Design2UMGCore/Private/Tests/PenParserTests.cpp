@@ -152,6 +152,101 @@ bool FPenParserTextNodeTest::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FPenParserPointParsingParityTest,
+	"Design2UMG.Unit.PenParser.PointParsingParity",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FPenParserPointParsingParityTest::RunTest(const FString&)
+{
+	const FString Json = TEXT(R"JSON(
+{
+  "version": "1.0",
+  "variables": {
+    "meshX": { "type": "number", "value": 0.25 },
+    "meshY": { "type": "number", "value": 0.75 },
+    "handleX": { "type": "number", "value": 0.9 },
+    "handleY": { "type": "number", "value": 0.1 }
+  },
+  "children": [
+    {
+      "id": "mesh-node",
+      "name": "MeshNode",
+      "type": "rectangle",
+      "x": 0,
+      "y": 0,
+      "width": 120,
+      "height": 80,
+      "fill": {
+        "type": "mesh_gradient",
+        "columns": 2,
+        "rows": 2,
+        "points": [
+          {
+            "position": [0.1, 0.2],
+            "color": "#FF0000",
+            "in": { "x": "$meshX", "y": "$meshY" },
+            "out": [0.3, 0.4]
+          },
+          {
+            "position": { "x": "$meshX", "y": "$meshY" },
+            "color": "#00FF00",
+            "handleIn": [0.5, 0.6],
+            "handleOut": { "x": "$handleX", "y": "$handleY" }
+          },
+          {
+            "position": [0.8],
+            "color": "#0000FF",
+            "in": [0.1],
+            "out": { "x": 0.2 }
+          }
+        ]
+      }
+    }
+  ]
+}
+)JSON");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Pen document parses"), FPenParser::ParseDocument(Json, Doc));
+	TestEqual(TEXT("One parsed root child"), Doc.Children.Num(), 1);
+	if (Doc.Children.Num() != 1 || !Doc.Children[0].IsValid())
+	{
+		return false;
+	}
+
+	const TSharedPtr<FDesignNode>& Node = Doc.Children[0];
+	TestEqual(TEXT("Mesh gradient point count preserved"), Node->Visual.Fill.MeshGradient.Points.Num(), 3);
+
+	const FDesignMeshGradientPoint& ArrayPoint = Node->Visual.Fill.MeshGradient.Points[0];
+	TestTrue(TEXT("Array position parsed"), ArrayPoint.Position.IsSet());
+	TestTrue(TEXT("Array position X preserved"), FMath::IsNearlyEqual(ArrayPoint.Position->X, 0.1f, KINDA_SMALL_NUMBER));
+	TestTrue(TEXT("Array position Y preserved"), FMath::IsNearlyEqual(ArrayPoint.Position->Y, 0.2f, KINDA_SMALL_NUMBER));
+	TestTrue(TEXT("Object handle with variables parsed"), ArrayPoint.InHandle.Value.IsSet());
+	TestTrue(TEXT("Object handle variable X preserved"), FMath::IsNearlyEqual(ArrayPoint.InHandle.Value->X, 0.25f, KINDA_SMALL_NUMBER));
+	TestTrue(TEXT("Object handle variable Y preserved"), FMath::IsNearlyEqual(ArrayPoint.InHandle.Value->Y, 0.75f, KINDA_SMALL_NUMBER));
+	TestTrue(TEXT("Array handle parsed"), ArrayPoint.OutHandle.Value.IsSet());
+	TestTrue(TEXT("Array handle X preserved"), FMath::IsNearlyEqual(ArrayPoint.OutHandle.Value->X, 0.3f, KINDA_SMALL_NUMBER));
+	TestTrue(TEXT("Array handle Y preserved"), FMath::IsNearlyEqual(ArrayPoint.OutHandle.Value->Y, 0.4f, KINDA_SMALL_NUMBER));
+
+	const FDesignMeshGradientPoint& ObjectPoint = Node->Visual.Fill.MeshGradient.Points[1];
+	TestTrue(TEXT("Object position with variables parsed"), ObjectPoint.Position.IsSet());
+	TestTrue(TEXT("Object position variable X preserved"), FMath::IsNearlyEqual(ObjectPoint.Position->X, 0.25f, KINDA_SMALL_NUMBER));
+	TestTrue(TEXT("Object position variable Y preserved"), FMath::IsNearlyEqual(ObjectPoint.Position->Y, 0.75f, KINDA_SMALL_NUMBER));
+	TestTrue(TEXT("Fallback array handleIn parsed"), ObjectPoint.InHandle.Value.IsSet());
+	TestTrue(TEXT("Fallback array handleIn X preserved"), FMath::IsNearlyEqual(ObjectPoint.InHandle.Value->X, 0.5f, KINDA_SMALL_NUMBER));
+	TestTrue(TEXT("Fallback array handleIn Y preserved"), FMath::IsNearlyEqual(ObjectPoint.InHandle.Value->Y, 0.6f, KINDA_SMALL_NUMBER));
+	TestTrue(TEXT("Fallback object handleOut with variables parsed"), ObjectPoint.OutHandle.Value.IsSet());
+	TestTrue(TEXT("Fallback object handleOut X preserved"), FMath::IsNearlyEqual(ObjectPoint.OutHandle.Value->X, 0.9f, KINDA_SMALL_NUMBER));
+	TestTrue(TEXT("Fallback object handleOut Y preserved"), FMath::IsNearlyEqual(ObjectPoint.OutHandle.Value->Y, 0.1f, KINDA_SMALL_NUMBER));
+
+	const FDesignMeshGradientPoint& InvalidPoint = Node->Visual.Fill.MeshGradient.Points[2];
+	TestFalse(TEXT("Invalid short array position stays unset"), InvalidPoint.Position.IsSet());
+	TestFalse(TEXT("Invalid short array handleIn stays unset"), InvalidPoint.InHandle.Value.IsSet());
+	TestFalse(TEXT("Incomplete object handleOut stays unset"), InvalidPoint.OutHandle.Value.IsSet());
+	return true;
+}
+
 // ---------------------------------------------------------------------------
 // Error / empty input
 // ---------------------------------------------------------------------------

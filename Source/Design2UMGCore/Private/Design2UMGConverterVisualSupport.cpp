@@ -5,16 +5,12 @@
 #include "Design2UMGLog.h"
 #include "Design2UMGSourceMetadata.h"
 #include "LayoutMapper.h"
+#include "SharedCoreSemantics.h"
 #include "UMGPropertyKeys.h"
 #include "UMGWidgetNodeAccess.h"
 
 namespace
 {
-	bool HasVisibleFill(const FDesignFill& Fill)
-	{
-		return Fill.bEnabled && Fill.Type != EDesignFillType::None;
-	}
-
 	bool IsHexColorLiteral(const FString& ColorValue)
 	{
 		if (!ColorValue.StartsWith(TEXT("#")))
@@ -61,7 +57,7 @@ namespace Design2UMGConverterVisualSupport
 {
 	bool HasVisualFill(const TSharedPtr<FDesignNode>& Node)
 	{
-		return Node.IsValid() && (HasVisibleFill(Node->Visual.Fill) || Node->Visual.Fills.Num() > 0);
+		return Node.IsValid() && (Design2UMGCore::SharedSemantics::HasVisibleFill(Node->Visual.Fill) || Node->Visual.Fills.Num() > 0);
 	}
 
 	void ApplyBaseVisualProperties(

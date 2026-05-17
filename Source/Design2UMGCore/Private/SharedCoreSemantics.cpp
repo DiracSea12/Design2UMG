@@ -2,16 +2,13 @@
 
 #include "SharedCoreSemantics.h"
 
-namespace
+namespace Design2UMGCore::SharedSemantics
 {
 	bool HasVisibleFill(const FDesignFill& Fill)
 	{
 		return Fill.bEnabled && Fill.Type != EDesignFillType::None;
 	}
-}
 
-namespace Design2UMGCore::SharedSemantics
-{
 	bool IsDesignerOnlyNodeType(EDesignNodeType Type)
 	{
 		return Type == EDesignNodeType::Connection

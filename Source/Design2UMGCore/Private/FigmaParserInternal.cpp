@@ -36,10 +36,12 @@ static void AddJsonExtensionIfPresent(const TSharedPtr<FJsonObject>& Obj, TMap<F
 }
 
 
-static void SetStringFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key, FString& OutValue)
+void Private::SetStringFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key, FString& OutValue)
 {
 	if (!Obj.IsValid())
+	{
 		return;
+	}
 
 	const FString Value = GetString(Obj, Key);
 	if (!Value.IsEmpty())
@@ -101,7 +103,15 @@ static TSharedPtr<FJsonObject> ParseJsonString(const FString& Json)
 	auto Reader = TJsonReaderFactory<>::Create(Json);
 	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
 	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("Invalid Figma export JSON. Please verify the export file is a valid JSON object."));
+		const FString ReaderError = Reader->GetErrorMessage();
+		if (ReaderError.IsEmpty())
+		{
+			UE_LOG(LogDesign2UMG, Error, TEXT("Invalid Figma export JSON. Please verify the export file is a valid JSON object."));
+		}
+		else
+		{
+			UE_LOG(LogDesign2UMG, Error, TEXT("Invalid Figma export JSON. Please verify the export file is a valid JSON object. Reader error: %s"), *ReaderError);
+		}
 		return nullptr;
 	}
 	return Root;
@@ -527,8 +537,8 @@ static void ApplyInstanceTrackingData(
 		ComponentInstance.ComponentId = ComponentId;
 		OutNode.Metadata.Add(TEXT("instanceComponentId"), ComponentId);
 	}
-	SetStringFieldIfPresent(NodeObj, TEXT("componentSetId"), ComponentInstance.ComponentSetId);
-	SetStringFieldIfPresent(NodeObj, TEXT("mainComponentKey"), ComponentInstance.MainComponentKey);
+	Private::SetStringFieldIfPresent(NodeObj, TEXT("componentSetId"), ComponentInstance.ComponentSetId);
+	Private::SetStringFieldIfPresent(NodeObj, TEXT("mainComponentKey"), ComponentInstance.MainComponentKey);
 	SetJsonFieldIfPresent(NodeObj, TEXT("componentProperties"), ComponentInstance.ComponentPropertiesJson);
 	SetJsonFieldIfPresent(NodeObj, TEXT("variantProperties"), ComponentInstance.VariantPropertiesJson);
 	SetJsonFieldIfPresent(NodeObj, TEXT("overrides"), ComponentInstance.OverridesJson);

@@ -11,32 +11,6 @@
 FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver);
 FDesignStroke ParseStroke(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver);
 
-static bool TryParsePointXY(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver, float& OutX, float& OutY)
-{
-	if (!Value.IsValid())
-		return false;
-
-	if (Value->Type == EJson::Object)
-	{
-		const TSharedPtr<FJsonObject> Obj = Value->AsObject();
-		if (!Obj.IsValid())
-			return false;
-		const bool bHasX = TryGetResolvedNumberField(Obj, TEXT("x"), Resolver, OutX);
-		const bool bHasY = TryGetResolvedNumberField(Obj, TEXT("y"), Resolver, OutY);
-		return bHasX && bHasY;
-	}
-
-	if (Value->Type == EJson::Array)
-	{
-		const TArray<TSharedPtr<FJsonValue>>& Arr = Value->AsArray();
-		if (Arr.Num() < 2)
-			return false;
-		return TryGetNumberValueFlexible(Arr[0], OutX) && TryGetNumberValueFlexible(Arr[1], OutY);
-	}
-
-	return false;
-}
-
 static bool TryParseMeshHandle(
 	const TSharedPtr<FJsonObject>& PointObj,
 	const FDesignVariableResolver& Resolver,

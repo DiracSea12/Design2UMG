@@ -98,20 +98,6 @@ namespace
 		}
 	}
 
-	void SetStringFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key, FString& OutValue)
-	{
-		if (!Obj.IsValid())
-		{
-			return;
-		}
-
-		const FString Value = GetString(Obj, Key);
-		if (!Value.IsEmpty())
-		{
-			OutValue = Value;
-		}
-	}
-
 	void SetFloatFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key, TOptional<float>& OutValue)
 	{
 		double Value = 0.0;
@@ -391,16 +377,16 @@ void ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 	OutNode.LayoutData.SetClipValue(GetBool(NodeObj, TEXT("clipsContent"), false));
 
 	FDesignLayoutExtensions& LayoutExtensions = OutNode.MutableSource().LayoutExtensions;
-	SetStringFieldIfPresent(NodeObj, TEXT("layoutWrap"), LayoutExtensions.LayoutWrap);
-	SetStringFieldIfPresent(NodeObj, TEXT("counterAxisAlignContent"), LayoutExtensions.CounterAxisAlignContent);
-	SetStringFieldIfPresent(NodeObj, TEXT("layoutPositioning"), LayoutExtensions.LayoutPositioning);
-	SetStringFieldIfPresent(NodeObj, TEXT("layoutAlign"), LayoutExtensions.LayoutAlign);
-	SetStringFieldIfPresent(NodeObj, TEXT("primaryAxisSizingMode"), LayoutExtensions.PrimaryAxisSizingMode);
-	SetStringFieldIfPresent(NodeObj, TEXT("counterAxisSizingMode"), LayoutExtensions.CounterAxisSizingMode);
-	SetStringFieldIfPresent(NodeObj, TEXT("gridRowsSizing"), LayoutExtensions.GridRowsSizing);
-	SetStringFieldIfPresent(NodeObj, TEXT("gridColumnsSizing"), LayoutExtensions.GridColumnsSizing);
-	SetStringFieldIfPresent(NodeObj, TEXT("gridChildHorizontalAlign"), LayoutExtensions.GridChildHorizontalAlign);
-	SetStringFieldIfPresent(NodeObj, TEXT("gridChildVerticalAlign"), LayoutExtensions.GridChildVerticalAlign);
+	Private::SetStringFieldIfPresent(NodeObj, TEXT("layoutWrap"), LayoutExtensions.LayoutWrap);
+	Private::SetStringFieldIfPresent(NodeObj, TEXT("counterAxisAlignContent"), LayoutExtensions.CounterAxisAlignContent);
+	Private::SetStringFieldIfPresent(NodeObj, TEXT("layoutPositioning"), LayoutExtensions.LayoutPositioning);
+	Private::SetStringFieldIfPresent(NodeObj, TEXT("layoutAlign"), LayoutExtensions.LayoutAlign);
+	Private::SetStringFieldIfPresent(NodeObj, TEXT("primaryAxisSizingMode"), LayoutExtensions.PrimaryAxisSizingMode);
+	Private::SetStringFieldIfPresent(NodeObj, TEXT("counterAxisSizingMode"), LayoutExtensions.CounterAxisSizingMode);
+	Private::SetStringFieldIfPresent(NodeObj, TEXT("gridRowsSizing"), LayoutExtensions.GridRowsSizing);
+	Private::SetStringFieldIfPresent(NodeObj, TEXT("gridColumnsSizing"), LayoutExtensions.GridColumnsSizing);
+	Private::SetStringFieldIfPresent(NodeObj, TEXT("gridChildHorizontalAlign"), LayoutExtensions.GridChildHorizontalAlign);
+	Private::SetStringFieldIfPresent(NodeObj, TEXT("gridChildVerticalAlign"), LayoutExtensions.GridChildVerticalAlign);
 	SetFloatFieldIfPresent(NodeObj, TEXT("counterAxisSpacing"), LayoutExtensions.CounterAxisSpacing);
 	SetFloatFieldIfPresent(NodeObj, TEXT("minWidth"), LayoutExtensions.MinWidth);
 	SetFloatFieldIfPresent(NodeObj, TEXT("maxWidth"), LayoutExtensions.MaxWidth);

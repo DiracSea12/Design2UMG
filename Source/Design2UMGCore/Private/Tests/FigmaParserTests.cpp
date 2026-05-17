@@ -243,6 +243,90 @@ bool FFigmaParserBoundVariablesTest::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FFigmaParserPrivateStringFieldParityTest,
+	"Design2UMG.Unit.FigmaParser.PrivateStringFieldParity",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFigmaParserPrivateStringFieldParityTest::RunTest(const FString&)
+{
+	const FString Json = TEXT(R"JSON(
+{
+  "document": {
+    "id": "0:0",
+    "name": "Document",
+    "type": "DOCUMENT",
+    "children": [
+      {
+        "id": "0:1",
+        "name": "Page 1",
+        "type": "CANVAS",
+        "children": [
+          {
+            "id": "10:1",
+            "name": "LayoutFrame",
+            "type": "FRAME",
+            "layoutMode": "HORIZONTAL",
+            "layoutWrap": "WRAP",
+            "counterAxisAlignContent": "SPACE_BETWEEN",
+            "layoutPositioning": "ABSOLUTE",
+            "layoutAlign": "STRETCH",
+            "primaryAxisSizingMode": "AUTO",
+            "counterAxisSizingMode": "FIXED",
+            "gridRowsSizing": "auto auto",
+            "gridColumnsSizing": "1fr 1fr",
+            "gridChildHorizontalAlign": "CENTER",
+            "gridChildVerticalAlign": "MIN",
+            "absoluteBoundingBox": { "x": 0, "y": 0, "width": 120, "height": 80 },
+            "children": []
+          },
+          {
+            "id": "10:2",
+            "name": "InstanceNode",
+            "type": "INSTANCE",
+            "componentId": "12:34",
+            "componentSetId": "set:5678",
+            "mainComponentKey": "main-key-123",
+            "absoluteBoundingBox": { "x": 140, "y": 0, "width": 80, "height": 32 },
+            "children": []
+          }
+        ]
+      }
+    ]
+  },
+  "components": {},
+  "componentSets": {},
+  "styles": {}
+}
+)JSON");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Figma document parses"), FFigmaParser::ParseDocument(Json, Doc));
+	TestEqual(TEXT("Two parsed root children"), Doc.Children.Num(), 2);
+	if (Doc.Children.Num() != 2 || !Doc.Children[0].IsValid() || !Doc.Children[1].IsValid())
+	{
+		return false;
+	}
+
+	const TSharedPtr<FDesignNode>& LayoutNode = Doc.Children[0];
+	TestEqual(TEXT("LayoutWrap preserved"), LayoutNode->Source().LayoutExtensions.LayoutWrap, FString(TEXT("WRAP")));
+	TestEqual(TEXT("CounterAxisAlignContent preserved"), LayoutNode->Source().LayoutExtensions.CounterAxisAlignContent, FString(TEXT("SPACE_BETWEEN")));
+	TestEqual(TEXT("LayoutPositioning preserved"), LayoutNode->Source().LayoutExtensions.LayoutPositioning, FString(TEXT("ABSOLUTE")));
+	TestEqual(TEXT("LayoutAlign preserved"), LayoutNode->Source().LayoutExtensions.LayoutAlign, FString(TEXT("STRETCH")));
+	TestEqual(TEXT("PrimaryAxisSizingMode preserved"), LayoutNode->Source().LayoutExtensions.PrimaryAxisSizingMode, FString(TEXT("AUTO")));
+	TestEqual(TEXT("CounterAxisSizingMode preserved"), LayoutNode->Source().LayoutExtensions.CounterAxisSizingMode, FString(TEXT("FIXED")));
+	TestEqual(TEXT("GridRowsSizing preserved"), LayoutNode->Source().LayoutExtensions.GridRowsSizing, FString(TEXT("auto auto")));
+	TestEqual(TEXT("GridColumnsSizing preserved"), LayoutNode->Source().LayoutExtensions.GridColumnsSizing, FString(TEXT("1fr 1fr")));
+	TestEqual(TEXT("GridChildHorizontalAlign preserved"), LayoutNode->Source().LayoutExtensions.GridChildHorizontalAlign, FString(TEXT("CENTER")));
+	TestEqual(TEXT("GridChildVerticalAlign preserved"), LayoutNode->Source().LayoutExtensions.GridChildVerticalAlign, FString(TEXT("MIN")));
+
+	const TSharedPtr<FDesignNode>& InstanceNode = Doc.Children[1];
+	TestTrue(TEXT("Instance flag preserved"), InstanceNode->Source().ComponentInstance.bIsInstance);
+	TestEqual(TEXT("ComponentSetId preserved"), InstanceNode->Source().ComponentInstance.ComponentSetId, FString(TEXT("set:5678")));
+	TestEqual(TEXT("MainComponentKey preserved"), InstanceNode->Source().ComponentInstance.MainComponentKey, FString(TEXT("main-key-123")));
+	return true;
+}
+
 // ---------------------------------------------------------------------------
 // Error input
 // ---------------------------------------------------------------------------
@@ -258,6 +342,12 @@ bool FFigmaParserErrorInputTest::RunTest(const FString&)
 		AddExpectedError(TEXT("Failed to parse JSON"), EAutomationExpectedErrorFlags::Contains, 1);
 		FDesignDocument Doc;
 		TestFalse(TEXT("Empty string returns false"), FFigmaParser::ParseDocument(TEXT(""), Doc));
+	}
+	{
+		AddExpectedError(TEXT("Invalid Figma export JSON"), EAutomationExpectedErrorFlags::Contains, 1);
+		AddExpectedError(TEXT("Failed to parse JSON"), EAutomationExpectedErrorFlags::Contains, 1);
+		FDesignDocument Doc;
+		TestFalse(TEXT("Malformed JSON returns false"), FFigmaParser::ParseDocument(TEXT("{\"document\":"), Doc));
 	}
 	{
 		AddExpectedError(TEXT("Missing 'document' field"), EAutomationExpectedErrorFlags::Contains, 1);

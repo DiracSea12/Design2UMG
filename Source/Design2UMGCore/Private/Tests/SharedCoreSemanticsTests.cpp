@@ -3,6 +3,7 @@
 #include "Misc/AutomationTest.h"
 
 #include "Design2UMGConverter.h"
+#include "Design2UMGConverterVisualSupport.h"
 #include "Design2UMGNodeWidgetFactory.h"
 #include "Design2UMGSettings.h"
 #include "Design2UMGTextWidgetBuilder.h"
@@ -426,6 +427,34 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSharedSemanticsWidthHintParityTest,
 bool FSharedSemanticsWidthHintParityTest::RunTest(const FString& Parameters)
 {
 	return RunSharedSemanticsWidthHintChecks(*this);
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSharedSemanticsVisibleFillOwnerBoundaryTest,
+	"Design2UMG.SharedSemantics.VisibleFillOwnerBoundary",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FSharedSemanticsVisibleFillOwnerBoundaryTest::RunTest(const FString& Parameters)
+{
+	FDesignFill VisibleFill = FDesignFill::FromColor(TEXT("#2288CC"));
+	TestTrue(TEXT("Shared visible-fill helper accepts enabled color fill"), Design2UMGCore::SharedSemantics::HasVisibleFill(VisibleFill));
+
+	FDesignFill DisabledFill = FDesignFill::FromColor(TEXT("#2288CC"));
+	DisabledFill.bEnabled = false;
+	TestFalse(TEXT("Shared visible-fill helper rejects disabled color fill"), Design2UMGCore::SharedSemantics::HasVisibleFill(DisabledFill));
+
+	FDesignFill EmptyFill;
+	TestFalse(TEXT("Shared visible-fill helper rejects empty fill"), Design2UMGCore::SharedSemantics::HasVisibleFill(EmptyFill));
+
+	TSharedPtr<FDesignNode> PrimaryVisibleNode = MakeSharedSemanticsNode(TEXT("primary_visible_fill"), EDesignNodeType::Rectangle);
+	PrimaryVisibleNode->Visual.Fill = VisibleFill;
+	TestTrue(TEXT("Shared semantics keeps primary visible fill renderable"), Design2UMGCore::SharedSemantics::HasRenderableVisual(PrimaryVisibleNode));
+	TestTrue(TEXT("Converter visual support still sees primary visible fill"), Design2UMGConverterVisualSupport::HasVisualFill(PrimaryVisibleNode));
+
+	TSharedPtr<FDesignNode> SecondaryPresenceNode = MakeSharedSemanticsNode(TEXT("secondary_fill_presence"), EDesignNodeType::Rectangle);
+	SecondaryPresenceNode->Visual.Fill = EmptyFill;
+	SecondaryPresenceNode->Visual.Fills.Add(DisabledFill);
+	TestFalse(TEXT("Shared semantics does not treat disabled secondary fill as renderable"), Design2UMGCore::SharedSemantics::HasRenderableVisual(SecondaryPresenceNode));
+	TestTrue(TEXT("Converter visual support still treats secondary fill presence as visual fill"), Design2UMGConverterVisualSupport::HasVisualFill(SecondaryPresenceNode));
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNodeWidgetFactoryGeometryFallbackDoesNotMutateInputTest,

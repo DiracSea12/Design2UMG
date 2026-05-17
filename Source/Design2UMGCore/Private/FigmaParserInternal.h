@@ -4,8 +4,15 @@
 
 #include "FigmaParser.h"
 
+class FJsonObject;
+
 namespace FigmaParserInternal
 {
+	namespace Private
+	{
+		void SetStringFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key, FString& OutValue);
+	}
+
 	bool ParseDocument(const FString& FigmaJson, FDesignDocument& OutDocument);
 	bool ExtractFileKey(const FString& UrlOrKey, FString& OutKey);
 	void CollectImageRefs(const FDesignDocument& Document, TSet<FString>& OutImageRefs);
