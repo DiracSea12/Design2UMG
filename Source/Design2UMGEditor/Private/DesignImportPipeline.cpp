@@ -8,6 +8,7 @@
 #include "Design2UMGLog.h"
 #include "DesignImportDialogs.h"
 #include "DesignImportUtils.h"
+#include "DesignSchemaSourceExtensions.h"
 #include "ExternalServices/PenMCPBridge.h"
 #include "UMGSchema.h"
 #include "Design2UMGSettings.h"
@@ -383,7 +384,9 @@ namespace DesignImportPipeline
 				return Fail(FString::Printf(TEXT("Failed to parse pen source: %s"), *FilePath));
 			}
 
-			OutDocument.Metadata.Add(TEXT("design.sourceFilePath"), FPaths::ConvertRelativePathToFull(FilePath));
+			const FString ResolvedSourceFilePath = FPaths::ConvertRelativePathToFull(FilePath);
+			OutDocument.MutableSourceDocument().SourceFilePath = ResolvedSourceFilePath;
+			OutDocument.Metadata.Add(TEXT("design.sourceFilePath"), ResolvedSourceFilePath);
 			return true;
 		}
 
@@ -411,7 +414,9 @@ namespace DesignImportPipeline
 			return Fail(FString::Printf(TEXT("Failed to parse filtered pen source: %s"), *FilePath));
 		}
 
-		OutDocument.Metadata.Add(TEXT("design.sourceFilePath"), FPaths::ConvertRelativePathToFull(FilePath));
+		const FString ResolvedSourceFilePath = FPaths::ConvertRelativePathToFull(FilePath);
+		OutDocument.MutableSourceDocument().SourceFilePath = ResolvedSourceFilePath;
+		OutDocument.Metadata.Add(TEXT("design.sourceFilePath"), ResolvedSourceFilePath);
 		return true;
 	}
 

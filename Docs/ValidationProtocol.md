@@ -2,7 +2,7 @@
 
 Chinese companion: [ValidationProtocol.zh-CN.md](ValidationProtocol.zh-CN.md)
 
-Last verified: 2026-05-14
+Last verified: 2026-05-18
 
 ## Purpose
 
@@ -173,6 +173,43 @@ The snapshot test intentionally compares stable semantics rather than exact full
 
 Do not tighten this into exact full-tree equality unless the generator guarantees zero wrapper normalization drift after save.
 
+### 8. Run determinism smoke before the final formal gate when automation-render parity changed
+
+Use determinism smoke after touching any of these surfaces:
+
+- automation render orchestration
+- package reload preparation
+- transient reset
+- automation font refresh
+- bootstrap render preparation
+
+This is a focused maintainer pre-gate, not release closeout.
+
+The canonical sentinel owner is `Tools/design2umg_determinism_smoke.py:CANONICAL_SENTINEL_CASES`.
+Do not maintain a second handwritten sentinel list in wrapper logic or selftests. Inspect the current pair with:
+
+```text
+python Tools/design2umg_determinism_smoke.py print-sentinels
+```
+
+Focused smoke command:
+
+```text
+pwsh -NoProfile -File <PluginRoot>\Tools\Run-Design2UMGDeterminismSmoke.ps1 -ProjectPath <MaintainerRuntimeProject.uproject> -EditorPath <UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe -ReferenceRoot <TrustedReferenceRoot> -OutputRoot <MaintainerRuntimeProjectRoot>\Saved\Design2UMG\Automation\_determinism_smoke_<stamp>
+```
+
+Smoke rules:
+
+- `-ProjectPath`, `-EditorPath`, `-ReferenceRoot`, and `-OutputRoot` must be explicit.
+- The smoke helper must fail closed if the run root, required sentinel case, compare report, `generation_vs_asset`, or `generation_vs_asset_structure` evidence is missing, stale, unreadable, or mismatched.
+- A passing smoke must prove `generation_vs_asset.changed_ratio = 0.0` and `generation_vs_asset.stable_changed_ratio = 0.0` for every sentinel.
+- A passing smoke must also prove `generation_vs_asset_structure.available = true` plus structure/text parity for every sentinel.
+- Passing this smoke only means the bootstrap-vs-asset parity path still looks trustworthy enough to continue to the formal gate.
+
+Sentinel maintenance rule:
+
+- If an isolated formal replay proves a new bootstrap-vs-asset drift case that is not covered by the current sentinel pair, the next determinism-focused batch must explicitly revisit the sentinel set instead of silently growing a second list elsewhere.
+
 ## Current Formal Gate
 
 The current formal admissible gate is the full discovered admissible case set.
@@ -182,7 +219,15 @@ That means:
 - formal batch reports do not use raw visual-threshold `passed/failed` totals as a score
 - formal historical-best parity should be checked with:
   `python Tools/design2umg_validate_run.py --output-root <run_root> --admissible-best-json <PluginRoot>\Saved\Design2UMG\Automation\_admissible_best_latest.json`
-- the Python helper contracts are checked separately with `python Tools/design2umg_validation_helpers_selftest.py`; this UE-free selftest covers discovery filtering, default Figma export root resolution, run-scope writing, shard sizing, worker-count resolution, completeness aggregation, and helper output shape
+- the Python helper contracts are checked separately with these UE-free selftests:
+  - `python Tools/design2umg_validation_helpers_selftest.py`
+  - `python Tools/design2umg_compatibility_selftest.py`
+  - `python Tools/design2umg_diagnostics_selftest.py`
+  - `python Tools/design2umg_run_history_selftest.py`
+  - `python Tools/design2umg_batch_report_contract_selftest.py`
+  - `python Tools/design2umg_determinism_smoke_selftest.py`
+- together they cover discovery filtering, default Figma export root resolution, run-scope writing, shard sizing, completeness aggregation, compatibility-rule routing, diagnostic stderr shape, historical-best helper ownership, batch summary shape, and batch timing-history persistence
+- import diagnostic report JSON is a separate contract from those helper stderr lines; see `Docs/ImportDiagnosticContract.md`
 
 If the active render-size or pipeline-determinism rules changed, rebuild the admissible best manifest first:
 `python Tools/design2umg_rebuild_admissible_best.py`
@@ -198,6 +243,8 @@ Reference sourcing for the formal gate:
 - `Tools/design2umg_auto_verify_batch.py` now auto-discovers the default local Figma export roots from the `design-root` workspace ancestry when `--figma-export-root` is omitted, so the maintainer formal gate does not silently drop the Figma members of the full discovered case set
 
 The batch verifier requires an explicit runtime project through `--project` or `DESIGN2UMG_RUNTIME_PROJECT`. Missing project input is a hard error with no design-root inference and no HostProject creation.
+
+Batch-level timing drift is recorded at `Saved/Design2UMG/Automation/batch_timing_history.jsonl`. This history is for contributor inspection only; it does not replace fidelity or no-regression as the release gate.
 
 Default user flow is fail-closed. If live Pencil `export_nodes` is unavailable, the verifier may still keep a `get_screenshot` witness PNG so the run can preserve diagnostic and comparison artifacts, but that witness fallback does not prove live Pencil export health and it does not relax formal or historical-best gates.
 

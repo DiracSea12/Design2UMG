@@ -1,5 +1,6 @@
 import argparse
 import concurrent.futures
+import json
 import os
 import shutil
 import shlex
@@ -1033,6 +1034,86 @@ def process_case_results(
     return [item for item in ordered_results if item is not None]
 
 
+def build_batch_summary(
+    *,
+    args,
+    editor_exit_code: int,
+    editor_exit_codes: list[int],
+    shards: list[dict],
+    shard_results: list[dict],
+    post_workers: int,
+    design_root: Path,
+    output_root: Path,
+    run_scope_path: Path,
+    reference_cache_root: Path | None,
+    batch_start_time: float,
+    prep_completed_at: float,
+    editor_completed_at: float,
+    postprocess_completed_at: float,
+    case_results: list[dict],
+    completeness: dict,
+) -> dict:
+    no_regression_cases = [item for item in case_results if item.get("no_regression_available")]
+    no_regression_passed = sum(1 for item in no_regression_cases if item.get("no_regression_passed"))
+    blocked_cases = [item for item in case_results if item.get("blocked")]
+    return {
+        "total": len(case_results),
+        "editor_exit_code": editor_exit_code,
+        "editor_exit_codes": editor_exit_codes,
+        "parallel_editors_requested": args.parallel_editors,
+        "parallel_editors_used": len(shards),
+        "idle_timeout_sec": args.idle_timeout_sec,
+        "startup_timeout_sec": args.startup_timeout_sec,
+        "execution_shards": shard_results,
+        "post_workers_requested": args.post_workers,
+        "post_workers_used": post_workers,
+        "design_root": str(design_root),
+        "output_root": str(output_root),
+        "run_scope": batch_discovery.classify_run_scope(args.include, args.exclude),
+        "run_scope_path": str(run_scope_path),
+        "reference_cache": {
+            "mode": args.reference_cache,
+            "root": str(reference_cache_root) if reference_cache_root else "",
+        },
+        "native_self_check_mode": args.native_self_check,
+        "phase_durations_sec": {
+            "total_until_summary": max(0.0, postprocess_completed_at - batch_start_time),
+            "prepare_cases": max(0.0, prep_completed_at - batch_start_time),
+            "editor_execution": max(0.0, editor_completed_at - prep_completed_at),
+            "postprocess_reports": max(0.0, postprocess_completed_at - editor_completed_at),
+        },
+        "completeness": completeness,
+        "blocked_cases": len(blocked_cases),
+        "no_regression": {
+            "available": len(no_regression_cases),
+            "passed": no_regression_passed,
+            "failed": len(no_regression_cases) - no_regression_passed,
+        },
+        "cases": case_results,
+    }
+
+
+def build_batch_timing_history_entry(output_root: Path, summary: dict, *, recorded_at_utc: str | None = None) -> dict:
+    return {
+        "recorded_at_utc": recorded_at_utc or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "run_root": str(output_root),
+        "run_scope": summary.get("run_scope", ""),
+        "total_cases": summary.get("total", 0),
+        "blocked_cases": summary.get("blocked_cases", 0),
+        "phase_durations_sec": dict(summary.get("phase_durations_sec", {})),
+        "no_regression": dict(summary.get("no_regression", {})),
+    }
+
+
+def append_batch_timing_history(automation_root: Path, entry: dict) -> Path:
+    automation_root.mkdir(parents=True, exist_ok=True)
+    history_path = automation_root / "batch_timing_history.jsonl"
+    with open(history_path, "a", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=False, sort_keys=True))
+        handle.write("\n")
+    return history_path
+
+
 def main():
     batch_start_time = time.time()
     args = parse_args()
@@ -1138,44 +1219,25 @@ def main():
         print(line)
     postprocess_completed_at = time.time()
 
-    no_regression_cases = [item for item in case_results if item.get("no_regression_available")]
-    no_regression_passed = sum(1 for item in no_regression_cases if item.get("no_regression_passed"))
-    blocked_cases = [item for item in case_results if item.get("blocked")]
     completeness = batch_discovery.collect_batch_completeness(states, case_results)
-    summary = {
-        "total": len(case_results),
-        "editor_exit_code": editor_exit_code,
-        "editor_exit_codes": editor_exit_codes,
-        "parallel_editors_requested": args.parallel_editors,
-        "parallel_editors_used": len(shards),
-        "idle_timeout_sec": args.idle_timeout_sec,
-        "startup_timeout_sec": args.startup_timeout_sec,
-        "execution_shards": shard_results,
-        "post_workers_requested": args.post_workers,
-        "post_workers_used": post_workers,
-        "design_root": str(design_root),
-        "output_root": str(output_root),
-        "run_scope_path": str(run_scope_path),
-        "reference_cache": {
-            "mode": args.reference_cache,
-            "root": str(reference_cache_root) if reference_cache_root else "",
-        },
-        "native_self_check_mode": args.native_self_check,
-        "phase_durations_sec": {
-            "total_until_summary": max(0.0, postprocess_completed_at - batch_start_time),
-            "prepare_cases": max(0.0, prep_completed_at - batch_start_time),
-            "editor_execution": max(0.0, editor_completed_at - prep_completed_at),
-            "postprocess_reports": max(0.0, postprocess_completed_at - editor_completed_at),
-        },
-        "completeness": completeness,
-        "blocked_cases": len(blocked_cases),
-        "no_regression": {
-            "available": len(no_regression_cases),
-            "passed": no_regression_passed,
-            "failed": len(no_regression_cases) - no_regression_passed,
-        },
-        "cases": case_results,
-    }
+    summary = build_batch_summary(
+        args=args,
+        editor_exit_code=editor_exit_code,
+        editor_exit_codes=editor_exit_codes,
+        shards=shards,
+        shard_results=shard_results,
+        post_workers=post_workers,
+        design_root=design_root,
+        output_root=output_root,
+        run_scope_path=run_scope_path,
+        reference_cache_root=reference_cache_root,
+        batch_start_time=batch_start_time,
+        prep_completed_at=prep_completed_at,
+        editor_completed_at=editor_completed_at,
+        postprocess_completed_at=postprocess_completed_at,
+        case_results=case_results,
+        completeness=completeness,
+    )
     summary_path = output_root / "summary.json"
     verify.write_json(summary_path, summary)
     print(f"[SUMMARY] report={summary_path}")
@@ -1198,6 +1260,11 @@ def main():
         0.0,
         historical_completed_at - batch_start_time,
     )
+    timing_history_path = append_batch_timing_history(
+        output_root.parent,
+        build_batch_timing_history_entry(output_root, summary),
+    )
+    summary["timing_history_path"] = str(timing_history_path)
     verify.write_json(summary_path, summary)
 
     formal_gate_candidate = not bool(args.include or args.exclude)
@@ -1206,8 +1273,9 @@ def main():
         or (formal_gate_candidate and historical_validation["blocked"])
     ):
         sys.exit(2)
+    blocked_cases = summary["blocked_cases"]
     historical_regressions = historical_validation.get("historical_best_regressions") or []
-    no_regression_failed = len(no_regression_cases) - no_regression_passed
+    no_regression_failed = summary["no_regression"]["failed"]
     if blocked_cases or historical_regressions or no_regression_failed > 0:
         sys.exit(1)
     sys.exit(0)

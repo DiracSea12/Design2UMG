@@ -497,7 +497,9 @@ namespace Design2UMGLocalFigmaImport
 			OutError = FString::Printf(TEXT("Failed to parse Figma JSON: %s"), *JsonFilePath);
 			return false;
 		}
-		ParsedDocument.Metadata.Add(TEXT("design.sourceFilePath"), FPaths::ConvertRelativePathToFull(JsonFilePath));
+		const FString ResolvedSourceFilePath = FPaths::ConvertRelativePathToFull(JsonFilePath);
+		ParsedDocument.MutableSourceDocument().SourceFilePath = ResolvedSourceFilePath;
+		ParsedDocument.Metadata.Add(TEXT("design.sourceFilePath"), ResolvedSourceFilePath);
 
 		const FString ImagesDir = FPaths::GetPath(JsonFilePath) / TEXT("images");
 		const FString SourceDocumentIdentity = DesignImageBakeUtils::BuildSourceDocumentIdentity(JsonFilePath);

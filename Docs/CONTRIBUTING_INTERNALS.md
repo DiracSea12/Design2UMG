@@ -44,6 +44,8 @@ Do not add source-specific branches in `Design2UMGConverter`, `LayoutMapper`, or
 3. Consume them in `VisualMapper`, `LayoutMapper`, or `UMGPropertyApplier` as appropriate.
 4. Prefer typed accessors over ad hoc string properties.
 
+If an old metadata key must stay alive for compatibility, keep the typed field as the real owner and document the alias explicitly instead of letting the string key become the only truth again.
+
 ## Reference and component behavior
 
 - `RefExpander` owns component expansion, deep-copying, descendant overrides, and retheming.
@@ -59,3 +61,10 @@ For any behavior change:
 4. Treat the formal admissible gate as the final regression authority when behavior changes are involved.
 
 Do not accept a change that makes any formal case worse than its tracked historical best.
+
+## Import diagnostic report boundary
+
+- `Docs/ImportDiagnosticContract.md` is the current contract doc for the import report JSON.
+- Treat grouped sections such as `source`, `output`, `diagnostics`, `resources`, and `effects` as the preferred machine-facing read path.
+- Treat top-level duplicates like `sourceFilePath`, `requestedOutputPath`, `warnings`, and `missingFonts` as compatibility aliases unless a future change explicitly retires them.
+- Do not couple automation to `recommendations` prose.

@@ -112,7 +112,9 @@ namespace
 		return true;
 	}
 
-	UWidgetBlueprint* ReloadWidgetBlueprintForRender(UWidgetBlueprint* WidgetBlueprint)
+	UWidgetBlueprint* ReloadWidgetBlueprintForRender(
+		UWidgetBlueprint* WidgetBlueprint,
+		FString* OutAutomationPreparationError = nullptr)
 	{
 		if (!WidgetBlueprint)
 		{
@@ -124,6 +126,30 @@ namespace
 		if (PackageName.IsEmpty())
 		{
 			return WidgetBlueprint;
+		}
+
+		if (Design2UMGAutomationRender::IsAutomationRenderActive())
+		{
+			FString PrepareError;
+			if (!Design2UMGAutomationRender::PrepareGeneratedAssetForAutomationRender(
+				ObjectPath,
+				true,
+				PrepareError))
+			{
+				UE_LOG(LogDesign2UMG, Error,
+					TEXT("DesignImportUtils: bootstrap render shared automation prep failed for %s: %s"),
+					*ObjectPath,
+					*PrepareError);
+				if (OutAutomationPreparationError)
+				{
+					*OutAutomationPreparationError = PrepareError;
+				}
+				return nullptr;
+			}
+			else if (UWidgetBlueprint* ReloadedBlueprint = LoadObject<UWidgetBlueprint>(nullptr, *ObjectPath))
+			{
+				return ReloadedBlueprint;
+			}
 		}
 
 		UPackage* Package = FindPackage(nullptr, *PackageName);
@@ -745,7 +771,19 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 		}
 	}
 
-	WidgetBlueprint = ReloadWidgetBlueprintForRender(WidgetBlueprint);
+	FString AutomationPreparationError;
+	WidgetBlueprint = ReloadWidgetBlueprintForRender(WidgetBlueprint, &AutomationPreparationError);
+	if (!WidgetBlueprint)
+	{
+		if (!AutomationPreparationError.IsEmpty())
+		{
+			UE_LOG(LogDesign2UMG, Error,
+				TEXT("DesignImportUtils: aborting compiled PNG render because shared automation prep failed: %s"),
+				*AutomationPreparationError);
+		}
+		FinishInteractiveGenerationProgress(SlowTask);
+		return false;
+	}
 
 	AdvanceInteractiveGenerationProgressAfterMutation(
 		SlowTask,

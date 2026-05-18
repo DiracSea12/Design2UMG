@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "Misc/AutomationTest.h"
+#include "DesignImageBakeUtils.h"
 #include "DesignImportPipeline.h"
 #include "DesignSchema.h"
 #include "DesignSchemaSourceExtensions.h"
@@ -142,6 +143,8 @@ bool FImportDiagnosticReportStructureTest::RunTest(const FString& Parameters)
 
 	TestEqual(TEXT("Source origin inferred from json input"), (*SourceObject)->GetStringField(TEXT("origin")), TEXT("local_json"));
 	TestTrue(TEXT("Source identity emitted"), !(*SourceObject)->GetStringField(TEXT("identity")).IsEmpty());
+	TestEqual(TEXT("Top-level sourceFilePath aliases source.filePath"), RootObject->GetStringField(TEXT("sourceFilePath")), (*SourceObject)->GetStringField(TEXT("filePath")));
+	TestEqual(TEXT("Top-level sourceIdentity aliases source.identity"), RootObject->GetStringField(TEXT("sourceIdentity")), (*SourceObject)->GetStringField(TEXT("identity")));
 
 	const TSharedPtr<FJsonObject>* DiagnosticsObject = nullptr;
 	TestTrue(TEXT("Report has diagnostics object"), RootObject->TryGetObjectField(TEXT("diagnostics"), DiagnosticsObject) && DiagnosticsObject);
@@ -153,6 +156,8 @@ bool FImportDiagnosticReportStructureTest::RunTest(const FString& Parameters)
 	const TArray<TSharedPtr<FJsonValue>>* Degradations = nullptr;
 	TestTrue(TEXT("Diagnostics include degradations"), (*DiagnosticsObject)->TryGetArrayField(TEXT("degradations"), Degradations) && Degradations && Degradations->Num() >= 2);
 	TestTrue(TEXT("Diagnostics include skipped designer nodes"), (*DiagnosticsObject)->GetArrayField(TEXT("skippedDesignerNodes")).Num() == 1);
+	TestEqual(TEXT("Top-level warnings alias diagnostics.warnings"), RootObject->GetArrayField(TEXT("warnings")).Num(), (*DiagnosticsObject)->GetArrayField(TEXT("warnings")).Num());
+	TestEqual(TEXT("Top-level skipped nodes alias diagnostics.skippedDesignerNodes"), RootObject->GetArrayField(TEXT("skippedDesignerNodes")).Num(), (*DiagnosticsObject)->GetArrayField(TEXT("skippedDesignerNodes")).Num());
 
 	bool bFoundTextPathFallback = false;
 	bool bFoundRenderFallback = false;
@@ -180,9 +185,102 @@ bool FImportDiagnosticReportStructureTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Report has resources object"), RootObject->TryGetObjectField(TEXT("resources"), ResourcesObject) && ResourcesObject);
 	TestEqual(TEXT("Report records missing fonts"), (*ResourcesObject)->GetArrayField(TEXT("missingFonts")).Num(), 1);
 	TestEqual(TEXT("Report records image failures"), (*ResourcesObject)->GetArrayField(TEXT("imageFailures")).Num(), 1);
+	TestEqual(TEXT("Top-level missingFonts alias resources.missingFonts"), RootObject->GetArrayField(TEXT("missingFonts")).Num(), (*ResourcesObject)->GetArrayField(TEXT("missingFonts")).Num());
+	TestEqual(TEXT("Top-level imageImportReport aliases resources.imageImportSummary"), RootObject->GetStringField(TEXT("imageImportReport")), (*ResourcesObject)->GetStringField(TEXT("imageImportSummary")));
+
+	const TSharedPtr<FJsonObject>* OutputObject = nullptr;
+	TestTrue(TEXT("Report has output object"), RootObject->TryGetObjectField(TEXT("output"), OutputObject) && OutputObject);
+	if (OutputObject)
+	{
+		TestEqual(TEXT("Top-level requestedOutputPath aliases output.requestedOutputPath"), RootObject->GetStringField(TEXT("requestedOutputPath")), (*OutputObject)->GetStringField(TEXT("requestedOutputPath")));
+		TestEqual(TEXT("Top-level requestedRenderPngPath aliases output.requestedRenderPngPath"), RootObject->GetStringField(TEXT("requestedRenderPngPath")), (*OutputObject)->GetStringField(TEXT("requestedRenderPngPath")));
+	}
 
 	const TArray<TSharedPtr<FJsonValue>>* Recommendations = nullptr;
 	TestTrue(TEXT("Report includes recommendations"), RootObject->TryGetArrayField(TEXT("recommendations"), Recommendations) && Recommendations && Recommendations->Num() > 0);
+	IFileManager::Get().Delete(*ReportPath);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImportDiagnosticReportTypedSourcePathContractTest,
+	"Design2UMG.Import.ImportDiagnosticReportTypedSourcePathContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FImportDiagnosticReportTypedSourcePathContractTest::RunTest(const FString& Parameters)
+{
+	const FString ReportDir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Design2UMG"), TEXT("ImportReports"));
+	TArray<FString> ReportsBefore;
+	IFileManager::Get().FindFilesRecursive(ReportsBefore, *ReportDir, TEXT("*.import_report.json"), true, false, false);
+	TSet<FString> ExistingReports;
+	for (const FString& ExistingReport : ReportsBefore)
+	{
+		ExistingReports.Add(ExistingReport);
+	}
+
+	FDesignDocument Document;
+	Document.Version = TEXT("typed-source-path-v1");
+	Document.MutableSourceDocument().SourceFilePath =
+		FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Design2UMG"), TEXT("typed_source_only.pen"));
+
+	const FString ExpectedIdentity = DesignImageBakeUtils::BuildSourceDocumentIdentity(Document.SourceDocument().SourceFilePath);
+	TestEqual(
+		TEXT("Typed source path drives image bake identity"),
+		DesignImageBakeUtils::ResolveDocumentImageBakeIdentity(Document, FString()),
+		ExpectedIdentity);
+
+	FUMGWidgetData Data;
+	Data.WidgetName = TEXT("WBP_TypedSourcePathFixture");
+	Data.RootWidget.Type = TEXT("CanvasPanel");
+	Data.RootWidget.Id = TEXT("root");
+	Data.RootWidget.Name = TEXT("Root");
+	Data.RootWidget.Bounds = {0.0f, 0.0f, 64.0f, 64.0f};
+
+	DesignImportPipeline::WriteImportDiagnosticReport(
+		Document,
+		Data,
+		FString(),
+		TEXT("/Game/Design2UMG/_TestOutput/TypedSourcePath"),
+		TEXT("G:/UE5/FPSRoguelike/Saved/Design2UMG/WBP_TypedSourcePathFixture.png"),
+		TEXT("/Game/Design2UMG/_TestOutput/TypedSourcePath/WBP_TypedSourcePathFixture"));
+
+	TArray<FString> ReportsAfter;
+	IFileManager::Get().FindFilesRecursive(ReportsAfter, *ReportDir, TEXT("*.import_report.json"), true, false, false);
+	FString ReportPath;
+	for (const FString& Candidate : ReportsAfter)
+	{
+		if (!ExistingReports.Contains(Candidate))
+		{
+			ReportPath = Candidate;
+			break;
+		}
+	}
+
+	TestTrue(TEXT("Typed source path report was generated"), !ReportPath.IsEmpty() && FPaths::FileExists(ReportPath));
+	if (ReportPath.IsEmpty() || !FPaths::FileExists(ReportPath))
+	{
+		return false;
+	}
+
+	FString ReportJson;
+	TestTrue(TEXT("Load typed-source report json"), FFileHelper::LoadFileToString(ReportJson, *ReportPath));
+	TSharedPtr<FJsonObject> RootObject;
+	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ReportJson);
+	TestTrue(TEXT("Parse typed-source report json"), FJsonSerializer::Deserialize(Reader, RootObject) && RootObject.IsValid());
+	if (!RootObject.IsValid())
+	{
+		IFileManager::Get().Delete(*ReportPath);
+		return false;
+	}
+
+	const TSharedPtr<FJsonObject>* SourceObject = nullptr;
+	TestTrue(TEXT("Typed source path report has source object"), RootObject->TryGetObjectField(TEXT("source"), SourceObject) && SourceObject);
+	if (SourceObject)
+	{
+		TestEqual(TEXT("Typed source path surfaces source.filePath"), (*SourceObject)->GetStringField(TEXT("filePath")), Document.SourceDocument().SourceFilePath);
+		TestEqual(TEXT("Typed source path surfaces source.identity"), (*SourceObject)->GetStringField(TEXT("identity")), ExpectedIdentity);
+	}
+	TestEqual(TEXT("Typed source path keeps top-level sourceFilePath alias"), RootObject->GetStringField(TEXT("sourceFilePath")), Document.SourceDocument().SourceFilePath);
+	TestEqual(TEXT("Typed source path keeps top-level sourceIdentity alias"), RootObject->GetStringField(TEXT("sourceIdentity")), ExpectedIdentity);
+
 	IFileManager::Get().Delete(*ReportPath);
 	return true;
 }

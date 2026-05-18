@@ -36,8 +36,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install Pillow
-          python -m py_compile Tools/design2umg_auto_verify.py Tools/design2umg_auto_verify_batch.py Tools/design2umg_verify_lib/batch_discovery.py Tools/design2umg_verify_lib/execution_shards.py Tools/design2umg_validation_helpers_selftest.py
+          python -m py_compile Tools/design2umg_auto_verify.py Tools/design2umg_auto_verify_batch.py Tools/design2umg_determinism_smoke.py Tools/design2umg_verify_lib/batch_discovery.py Tools/design2umg_verify_lib/compatibility.py Tools/design2umg_verify_lib/diagnostics.py Tools/design2umg_verify_lib/execution_shards.py Tools/design2umg_verify_lib/run_history.py Tools/design2umg_validation_helpers_selftest.py Tools/design2umg_compatibility_selftest.py Tools/design2umg_diagnostics_selftest.py Tools/design2umg_run_history_selftest.py Tools/design2umg_batch_report_contract_selftest.py Tools/design2umg_determinism_smoke_selftest.py
           python Tools/design2umg_validation_helpers_selftest.py
+          python Tools/design2umg_compatibility_selftest.py
+          python Tools/design2umg_diagnostics_selftest.py
+          python Tools/design2umg_run_history_selftest.py
+          python Tools/design2umg_batch_report_contract_selftest.py
+          python Tools/design2umg_determinism_smoke_selftest.py
 
   build-plugin:
     if: github.event_name == 'workflow_dispatch'

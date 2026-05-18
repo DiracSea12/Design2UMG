@@ -2,7 +2,7 @@
 
 English canonical: [ValidationProtocol.md](ValidationProtocol.md)
 
-Last verified: 2026-05-14
+Last verified: 2026-05-18
 
 ## 目的
 
@@ -107,6 +107,42 @@ pwsh -NoProfile -File <PluginRoot>\Tools\Run-DesignerSnapshotValidation.ps1 -Pro
 
 结构快照用于比较 source design conversion tree 和同一次自动化 run 生成的 saved `UWidgetBlueprint` widget tree。它是结构证据，不是视觉证据。
 
+### 8. 只要改了 automation-render parity 相关面，就先跑 determinism smoke，再进 formal gate
+
+以下改动都必须先过 determinism smoke：
+
+- automation render orchestration
+- package reload preparation
+- transient reset
+- automation font refresh
+- bootstrap render preparation
+
+这一步是维护者用的 focused pre-gate，不是 release closeout。
+
+canonical sentinel owner 固定在 `Tools/design2umg_determinism_smoke.py:CANONICAL_SENTINEL_CASES`。不要在 wrapper 或 selftest 里再手写第二份列表。要看当前 pair，直接跑：
+
+```text
+python Tools/design2umg_determinism_smoke.py print-sentinels
+```
+
+推荐命令：
+
+```text
+pwsh -NoProfile -File <PluginRoot>\Tools\Run-Design2UMGDeterminismSmoke.ps1 -ProjectPath <MaintainerRuntimeProject.uproject> -EditorPath <UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe -ReferenceRoot <TrustedReferenceRoot> -OutputRoot <MaintainerRuntimeProjectRoot>\Saved\Design2UMG\Automation\_determinism_smoke_<stamp>
+```
+
+这条 smoke 的规则很直接：
+
+- `-ProjectPath`、`-EditorPath`、`-ReferenceRoot`、`-OutputRoot` 都必须显式传。
+- 缺 run root、缺 sentinel case、缺 compare report、缺 `generation_vs_asset`、缺 `generation_vs_asset_structure`、证据 stale / unreadable / mismatch，都必须 fail closed。
+- 通过时，每个 sentinel 的 `generation_vs_asset.changed_ratio` 和 `generation_vs_asset.stable_changed_ratio` 都必须是 `0.0`。
+- 通过时，每个 sentinel 的 `generation_vs_asset_structure.available` 也必须是 `true`，并且结构/文本 parity 不能坏。
+- 这一步通过，只代表 bootstrap-vs-asset parity 这条路径当前还值得继续跑 formal gate；它不是 formal 47-case 的替代品。
+
+sentinel 维护规则：
+
+- 如果后续某次 isolated formal replay 证明了一个当前 sentinel pair 没覆盖到的新 bootstrap-vs-asset drift case，那么下一次 determinism-focused batch 必须显式重审 sentinel set，不能默默在别处再长一份新名单。
+
 ## 当前 formal gate
 
 当前 formal admissible gate 是 full discovered admissible case set。
@@ -120,6 +156,18 @@ pwsh -NoProfile -File <PluginRoot>\Tools\Run-DesignerSnapshotValidation.ps1 -Pro
 ```text
 python Tools/design2umg_validate_run.py --output-root <run_root> --admissible-best-json <PluginRoot>\Saved\Design2UMG\Automation\_admissible_best_latest.json
 ```
+
+- Python helper 合同要单独通过这些不依赖 UE 的自测检查：
+  - `python Tools/design2umg_validation_helpers_selftest.py`
+  - `python Tools/design2umg_compatibility_selftest.py`
+  - `python Tools/design2umg_diagnostics_selftest.py`
+  - `python Tools/design2umg_run_history_selftest.py`
+  - `python Tools/design2umg_batch_report_contract_selftest.py`
+  - `python Tools/design2umg_determinism_smoke_selftest.py`
+- 它们一起覆盖 case discovery 过滤、默认 Figma export root 解析、run scope 写入、shard sizing、completeness 聚合、compatibility 规则路由、diagnostic stderr 形状、historical-best helper owner，以及 batch summary / timing-history 落盘合同。
+- import diagnostic report JSON 和这些 helper 的 stderr 行不是一回事；前者单独见 `Docs/ImportDiagnosticContract.md`。
+- batch verifier 必须通过 `--project` 或 `DESIGN2UMG_RUNTIME_PROJECT` 显式传入真实 runtime project。缺少 project 输入时要直接报错，不能靠 design-root 推断，也不能生成 HostProject。
+- batch 级耗时漂移会落到 `Saved/Design2UMG/Automation/batch_timing_history.jsonl`。这只是给维护者看趋势的证据，不是替代 fidelity / no-regression 的发布门禁。
 
 正式 full-run 如果使用 external reference root，每个 formal case 目录都必须同时有 `reference.png` 和 `compare_report.json`。只有 `reference.png` 会让 run root 的 `summary.no_regression` 变成 unavailable，不能作为正式归档 gate。
 

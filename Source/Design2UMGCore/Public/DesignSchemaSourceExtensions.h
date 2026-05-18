@@ -156,6 +156,7 @@ struct FDesignSourceDocumentData
 {
 	GENERATED_BODY()
 
+	UPROPERTY() FString SourceFilePath;
 	UPROPERTY() FString ComponentsJson;
 	UPROPERTY() FString ComponentSetsJson;
 	UPROPERTY() FString PrototypeStartNodeId;

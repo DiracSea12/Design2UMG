@@ -11,6 +11,10 @@ namespace Design2UMGAutomationRender
 	bool IsAutomationRenderActive();
 	FString GetAutomationFontImportPath();
 	bool IsCaseLocalAutomationImportedFontPath(const FString& FontAssetPath);
+	bool PrepareGeneratedAssetForAutomationRender(
+		const FString& GeneratedAssetPath,
+		bool bForceReloadPackage,
+		FString& OutError);
 	void SanitizeImportSettingsSnapshot(FDesign2UMGImportSettingsSnapshot& InOutSettingsSnapshot);
 	void HandleConsoleCommand(const TArray<FString>& Args);
 }

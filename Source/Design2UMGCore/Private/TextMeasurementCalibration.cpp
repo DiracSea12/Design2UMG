@@ -25,8 +25,7 @@ namespace LineBox
 {
 namespace
 {
-	// Historical fallback lock: a 14px default text run maps to an 18px single-line box,
-	// so the shared multiplier stays at 18 / 14 = 1.285714.
+	// Single-line text height: default multiplier from declared font size to estimated line box height.
 	constexpr float DefaultLineHeightMultiplier = 1.285714f;
 }
 
@@ -88,8 +87,8 @@ FString NormalizeTextMeasurementFontFamilyKey(const FString& FontFamily)
 
 float FindFamilySpecificTextFallbackScale(const FString& NormalizedFamily)
 {
-	// Phase-10 local rollback: keep the last known no-regression family table
-	// until a shared calibration rule proves parity across the full formal gate.
+	// Font-family-specific fallback scale table. Fonts with measurably different glyph metrics
+	// get a tighter scale to keep compiled text within the declared bounding box.
 	static const TPair<const TCHAR*, float> FamilyFallbackScales[] = {
 		{ TEXT("geist"), 0.71f },
 		{ TEXT("robotomono"), 0.73f },

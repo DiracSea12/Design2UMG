@@ -81,6 +81,7 @@ namespace
 
 void FDesign2UMGEditorModule::StartupModule()
 {
+	// Compatibility boundary only: this keeps pre-Core user settings visible until the legacy section can be retired explicitly.
 	UDesign2UMGSettings::MigrateLegacySettingsSectionToCurrent();
 	FDesign2UMGNotification::RegisterSuccessHandler(
 		FDesign2UMGSuccessNotificationHandler::CreateStatic(&ShowEditorSuccessNotification));

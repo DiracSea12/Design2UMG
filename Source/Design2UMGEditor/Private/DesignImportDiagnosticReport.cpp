@@ -19,6 +19,21 @@ namespace DesignImportDiagnosticReport
 {
 	namespace
 	{
+		FString ResolveDocumentSourceFilePath(const FDesignDocument& Document)
+		{
+			if (!Document.SourceDocument().SourceFilePath.IsEmpty())
+			{
+				return Document.SourceDocument().SourceFilePath;
+			}
+
+			if (const FString* SourceFilePath = Document.Metadata.Find(TEXT("design.sourceFilePath")))
+			{
+				return *SourceFilePath;
+			}
+
+			return FString();
+		}
+
 		void AddUniqueRecommendation(TArray<FString>& InOutRecommendations, const FString& Recommendation)
 		{
 			if (!Recommendation.IsEmpty())
@@ -29,9 +44,10 @@ namespace DesignImportDiagnosticReport
 
 		FString InferSourceOrigin(const FDesignDocument& Document)
 		{
-			if (const FString* SourceFilePath = Document.Metadata.Find(TEXT("design.sourceFilePath")))
+			const FString SourceFilePath = ResolveDocumentSourceFilePath(Document);
+			if (!SourceFilePath.IsEmpty())
 			{
-				const FString Extension = FPaths::GetExtension(*SourceFilePath, false).ToLower();
+				const FString Extension = FPaths::GetExtension(SourceFilePath, false).ToLower();
 				if (Extension == TEXT("pen"))
 				{
 					return TEXT("pen_file");
@@ -302,9 +318,9 @@ namespace DesignImportDiagnosticReport
 
 		FString BuildImportReportPath(const FDesignDocument& Document)
 		{
-			const FString* SourceFilePath = Document.Metadata.Find(TEXT("design.sourceFilePath"));
-			const FString SourceLabel = SourceFilePath
-				? FPaths::GetBaseFilename(*SourceFilePath)
+			const FString SourceFilePath = ResolveDocumentSourceFilePath(Document);
+			const FString SourceLabel = !SourceFilePath.IsEmpty()
+				? FPaths::GetBaseFilename(SourceFilePath)
 				: TEXT("inline");
 			const FString Timestamp = FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S"));
 			const FString UniqueSuffix = FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8);
@@ -345,12 +361,13 @@ namespace DesignImportDiagnosticReport
 			Source->SetStringField(TEXT("documentVersion"), Document.Version);
 		}
 
-		if (const FString* SourceFilePath = Document.Metadata.Find(TEXT("design.sourceFilePath")))
+		const FString SourceFilePath = ResolveDocumentSourceFilePath(Document);
+		if (!SourceFilePath.IsEmpty())
 		{
-			Root->SetStringField(TEXT("sourceFilePath"), *SourceFilePath);
-			const FString SourceIdentity = DesignImageBakeUtils::BuildSourceDocumentIdentity(*SourceFilePath);
+			Root->SetStringField(TEXT("sourceFilePath"), SourceFilePath);
+			const FString SourceIdentity = DesignImageBakeUtils::BuildSourceDocumentIdentity(SourceFilePath);
 			Root->SetStringField(TEXT("sourceIdentity"), SourceIdentity);
-			Source->SetStringField(TEXT("filePath"), *SourceFilePath);
+			Source->SetStringField(TEXT("filePath"), SourceFilePath);
 			Source->SetStringField(TEXT("identity"), SourceIdentity);
 		}
 

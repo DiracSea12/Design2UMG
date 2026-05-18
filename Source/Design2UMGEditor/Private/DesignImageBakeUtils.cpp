@@ -4,6 +4,7 @@
 
 #include "Design2UMGLog.h"
 #include "DesignSchema.h"
+#include "DesignSchemaSourceExtensions.h"
 
 #include "HAL/FileManager.h"
 #include "IImageWrapper.h"
@@ -478,6 +479,11 @@ FString DesignImageBakeUtils::ResolveDocumentImageBakeIdentity(const FDesignDocu
 	if (!ExplicitSourcePath.IsEmpty())
 	{
 		return BuildSourceDocumentIdentity(ExplicitSourcePath);
+	}
+
+	if (!Document.SourceDocument().SourceFilePath.IsEmpty())
+	{
+		return BuildSourceDocumentIdentity(Document.SourceDocument().SourceFilePath);
 	}
 
 	if (const FString* SourceFilePath = Document.Metadata.Find(TEXT("design.sourceFilePath")))

@@ -629,12 +629,10 @@ namespace
 		if (Spec.Mode.Equals(TEXT("asset"), ESearchCase::IgnoreCase))
 		{
 			const FString ObjectPath = NormalizeWidgetBlueprintObjectPath(Spec.SourcePath);
-			if (Spec.bForceReloadPackage
-				&& !RefreshAutomationImportedFontPackages(GDesign2UMGAutomationFontImportPath, OutResult.ErrorMessage))
-			{
-				return false;
-			}
-			if (Spec.bForceReloadPackage && !ReloadAssetPackageForAutomationRender(ObjectPath, OutResult.ErrorMessage))
+			if (!Design2UMGAutomationRender::PrepareGeneratedAssetForAutomationRender(
+				ObjectPath,
+				Spec.bForceReloadPackage,
+				OutResult.ErrorMessage))
 			{
 				return false;
 			}
@@ -840,6 +838,32 @@ namespace Design2UMGAutomationRender
 		return IsAutomationImportedFontPath(NormalizedPath)
 			&& !NormalizedPath.Equals(TEXT("/Game/Design2UMG/Automation/ImportedFonts"), ESearchCase::CaseSensitive)
 			&& !NormalizedPath.StartsWith(TEXT("/Game/Design2UMG/Automation/ImportedFonts/"), ESearchCase::CaseSensitive);
+	}
+
+	bool PrepareGeneratedAssetForAutomationRender(
+		const FString& GeneratedAssetPath,
+		const bool bForceReloadPackage,
+		FString& OutError)
+	{
+		if (!IsAutomationRenderActive())
+		{
+			return true;
+		}
+
+		ResetAutomationTransientState();
+		if (!RefreshAutomationImportedFontPackages(GDesign2UMGAutomationFontImportPath, OutError))
+		{
+			return false;
+		}
+
+		if (!bForceReloadPackage)
+		{
+			return true;
+		}
+
+		return ReloadAssetPackageForAutomationRender(
+			NormalizeWidgetBlueprintObjectPath(GeneratedAssetPath),
+			OutError);
 	}
 
 	void SanitizeImportSettingsSnapshot(FDesign2UMGImportSettingsSnapshot& InOutSettingsSnapshot)
