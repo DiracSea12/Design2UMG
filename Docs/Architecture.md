@@ -200,6 +200,12 @@ Do not introduce new `bHas*` + value shadow pairs into `DesignSchema.h`-style tr
 
 ## Known Issues
 
+### TextMeasurement and FontResolver process-local state
+
+`TextMeasurement` and `FontResolver` currently keep process-local cache/callback state. The shared state is guarded by locks and fits the normal editor import path, where imports are not treated as independent parallel jobs.
+
+This is not a full architecture promise for parallel imports. If the product scope later requires concurrent import workers in the same editor process, this state must be reviewed as part of that design instead of assuming the current cache/callback boundary is already sufficient.
+
 ### UMGPropertyApplierInternal module placement
 
 `UMGPropertyApplierInternal.cpp` stays in `Design2UMGEditor` for this release by design. The current supported product path is editor-side import and Widget Blueprint generation, so mutating `UWidget` instances belongs with the editor generation pipeline instead of becoming a Core public contract.

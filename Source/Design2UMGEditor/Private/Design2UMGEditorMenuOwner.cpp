@@ -3,6 +3,7 @@
 #include "Design2UMGEditorMenuOwner.h"
 
 #include "Design2UMGEditorImportOrchestrator.h"
+#include "Design2UMGNotifications.h"
 #include "Design2UMGSettings.h"
 
 #include "Containers/Ticker.h"
@@ -129,6 +130,7 @@ namespace
 					const FString Token = TokenBox->GetText().ToString().TrimStartAndEnd();
 					if (Url.IsEmpty() || Token.IsEmpty())
 					{
+						FDesign2UMGNotification::Warning(LOCTEXT("FigmaImportMissingInput", "Design2UMG: Figma URL and access token are required."));
 						return FReply::Handled();
 					}
 

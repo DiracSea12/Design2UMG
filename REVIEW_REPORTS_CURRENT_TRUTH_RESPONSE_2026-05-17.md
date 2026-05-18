@@ -79,8 +79,8 @@
 3. Runtime 模块化或模块改名
    `Design2UMGCore` 当前是 Editor module，而且文档里已有解释。改成 Runtime 是产品/API 决策，不是 review cleanup。
 
-4. Pencil MCP 分步诊断和 Figma 对话框 UX
-   有价值，但属于用户流程改造，不该和 parser/converter 清理混在一批。
+4. Pencil MCP 分步诊断
+   完整分步诊断有价值，但属于用户流程改造，不能凭过时路径直接大改。26.b 最终只收掉已核实的小 UX 缺口：Figma 导入对话框空 URL / 空 Token 不再静默失败。
 
 5. Public API doxygen 和贡献者文档润色
    可以做，但优先级低于 current-truth cleanup 和已核实重复语义收敛。
@@ -122,7 +122,7 @@
 - 小范围诊断清晰度改进；
 - 验证证据和 touched surface 匹配。
 
-更大的事要写成 later-phase，不要偷偷塞进 Phase 26；这次真正已经做进来的，就是上面 4 个 current-truth 已踩实的小项。Phase 26 封板后，遗漏 review 候选只通过 `phase-26b-review-intake-backfill-and-current-truth-recheck` 继续处理，不能再假设还有 Phase 27 承接。26.b 的口径是 ledger-first，但不是“只写文档”：README Roadmap 链接、富文本构建拼接、box shadow 尺寸安全取整、UMGGenerator 重复失败日志这类小而硬问题，核实成立就必须在 26.b 内完成。
+更大的事要明确写成“不作为 26.b 小补丁实现”，不要偷偷塞进 Phase 26；这次真正已经做进来的，就是 current-truth 已踩实的小项。Phase 26 封板后，遗漏 review 候选只通过 `phase-26b-review-intake-backfill-and-current-truth-recheck` 继续处理，不能再假设还有 Phase 27 承接。26.b 的口径是 ledger-first，但不是“只写文档”：README Roadmap 链接、富文本构建拼接、box shadow 尺寸安全取整、UMGGenerator 重复失败日志、Figma 空输入反馈、TextMeasurement / FontResolver 全局状态架构说明这类小而硬问题，核实成立就必须在 26.b 内完成。
 
 ## 根据后续独立反馈补强
 

@@ -89,6 +89,12 @@ Phase 21 Batch 1 的审计结论是：当前没有足够硬的证据支持在本
 
 ## 已知架构边界
 
+### TextMeasurement 和 FontResolver 的进程内全局状态
+
+`TextMeasurement` 和 `FontResolver` 目前都有进程内的 cache / callback 状态。这些共享状态有锁保护，适合现在的 editor import 主路径：正常导入不是把多个任务当成同一进程里的并行 import worker 来跑。
+
+这不等于已经承诺完整支持并行导入。如果以后产品范围真的要支持同一个 editor 进程里多个导入任务并行跑，需要把这些全局状态作为架构设计的一部分重新审一遍，不能默认现在这层 cache / callback 边界就足够。
+
 `UMGPropertyApplierInternal.cpp` 当前留在 `Design2UMGEditor` 是有意设计。当前支持的产品路径是 editor-side import 和 Widget Blueprint generation，所以最终 `UWidget` mutation 属于 editor generation pipeline，而不是 Core public contract。
 
 只有当支持范围明确增加 runtime module，或者把 `UWidget` mutation pipeline 从 editor-side generation 拆成独立 runtime path 时，才应重新评估这个 placement。

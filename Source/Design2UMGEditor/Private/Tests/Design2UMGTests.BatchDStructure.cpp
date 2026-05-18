@@ -249,6 +249,45 @@ bool FBatchDImportPlanningSmokeTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDFigmaDialogEmptyInputStaticTest,
+	"Design2UMG.BatchD.FigmaDialogEmptyInputStatic",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FBatchDFigmaDialogEmptyInputStaticTest::RunTest(const FString& Parameters)
+{
+	FString MenuOwnerSource;
+	if (!LoadPluginFile(*this, TEXT("Source/Design2UMGEditor/Private/Design2UMGEditorMenuOwner.cpp"), MenuOwnerSource))
+	{
+		return false;
+	}
+
+	const int32 EmptyInputBranch = MenuOwnerSource.Find(TEXT("if (Url.IsEmpty() || Token.IsEmpty())"), ESearchCase::CaseSensitive);
+	TestTrue(TEXT("Figma dialog keeps an explicit empty URL/token branch"), EmptyInputBranch != INDEX_NONE);
+	if (EmptyInputBranch == INDEX_NONE)
+	{
+		return false;
+	}
+
+	const int32 DestroyWindowCall = MenuOwnerSource.Find(TEXT("RequestDestroyWindow"), ESearchCase::CaseSensitive, ESearchDir::FromStart, EmptyInputBranch);
+	const int32 ImportCall = MenuOwnerSource.Find(TEXT("RunFigmaImport(Url, Token)"), ESearchCase::CaseSensitive, ESearchDir::FromStart, EmptyInputBranch);
+	const int32 WarningCall = MenuOwnerSource.Find(TEXT("FDesign2UMGNotification::Warning"), ESearchCase::CaseSensitive, ESearchDir::FromStart, EmptyInputBranch);
+	const int32 EmptyInputReturn = WarningCall != INDEX_NONE
+		? MenuOwnerSource.Find(TEXT("return FReply::Handled();"), ESearchCase::CaseSensitive, ESearchDir::FromStart, WarningCall)
+		: INDEX_NONE;
+
+	TestTrue(TEXT("Figma dialog warns the user for empty URL/token"), WarningCall != INDEX_NONE);
+	TestTrue(TEXT("Figma dialog empty-input warning happens before closing the window"),
+		WarningCall != INDEX_NONE && DestroyWindowCall != INDEX_NONE && WarningCall < DestroyWindowCall);
+	TestTrue(TEXT("Figma dialog empty-input warning happens before import starts"),
+		WarningCall != INDEX_NONE && ImportCall != INDEX_NONE && WarningCall < ImportCall);
+	TestTrue(TEXT("Figma dialog empty-input branch returns before closing or importing"),
+		EmptyInputReturn != INDEX_NONE
+		&& DestroyWindowCall != INDEX_NONE
+		&& ImportCall != INDEX_NONE
+		&& EmptyInputReturn < DestroyWindowCall
+		&& EmptyInputReturn < ImportCall);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDGenerationTransactionBoundaryStaticTest,
 	"Design2UMG.BatchD.GenerationTransactionBoundaryStatic",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
