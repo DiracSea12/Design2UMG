@@ -6,7 +6,7 @@
 #include "Design2UMGSettings.h"
 #include "DesignPreviewMaterializationService.h"
 #include "Design2UMGGenerationSettingsSnapshot.h"
-#include "PenMCPBridge.h"
+#include "ExternalServices/PenMCPBridge.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 #include "UMGGenerator.h"
 #include "UMGWidgetUtils.h"

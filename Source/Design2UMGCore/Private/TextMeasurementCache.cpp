@@ -305,6 +305,16 @@ void TextMeasurement::ResetCache()
 	CacheTrace::GResolvedScaleCache.Reset();
 }
 
+void TextMeasurement::ResetCacheForConversionBoundary()
+{
+	ResetCache();
+}
+
+void TextMeasurement::ResetCacheForAutomationBoundary()
+{
+	ResetCache();
+}
+
 #if WITH_AUTOMATION_WORKER
 TextMeasurement::Testing::FTextMeasurementCacheStats TextMeasurement::Testing::GetCacheStats()
 {

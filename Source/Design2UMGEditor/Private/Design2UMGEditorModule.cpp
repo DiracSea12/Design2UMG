@@ -9,7 +9,7 @@
 #include "Design2UMGLog.h"
 #include "Design2UMGNotifications.h"
 #include "Design2UMGSettings.h"
-#include "DesignFontImportService.h"
+#include "FontImport/DesignFontImportService.h"
 #include "FontResolver.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"

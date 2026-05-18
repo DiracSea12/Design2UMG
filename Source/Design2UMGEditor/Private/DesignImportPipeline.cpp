@@ -8,7 +8,7 @@
 #include "Design2UMGLog.h"
 #include "DesignImportDialogs.h"
 #include "DesignImportUtils.h"
-#include "PenMCPBridge.h"
+#include "ExternalServices/PenMCPBridge.h"
 #include "UMGSchema.h"
 #include "Design2UMGSettings.h"
 

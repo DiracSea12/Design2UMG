@@ -511,11 +511,22 @@ bool FTextMeasurementResetCacheClearsOwnedCachesTest::RunTest(const FString& Par
 	const TextMeasurement::Testing::FTextMeasurementCacheStats BaselinePopulatedStats = TextMeasurement::Testing::GetCacheStats();
 	TestTrue(TEXT("Baseline fallback cache is populated"), BaselinePopulatedStats.BaselineFallbackEntries > 0);
 
-	TextMeasurement::ResetCache();
+	TextMeasurement::ResetCacheForConversionBoundary();
 	const TextMeasurement::Testing::FTextMeasurementCacheStats ClearedStats = TextMeasurement::Testing::GetCacheStats();
-	TestEqual(TEXT("Resolved cache clears with ResetCache"), ClearedStats.ResolvedScaleEntries, 0);
-	TestEqual(TEXT("Shared-style cache clears with ResetCache"), ClearedStats.SharedStyleScaleEntries, 0);
-	TestEqual(TEXT("Baseline cache clears with ResetCache"), ClearedStats.BaselineFallbackEntries, 0);
+	TestEqual(TEXT("Resolved cache clears at conversion boundary"), ClearedStats.ResolvedScaleEntries, 0);
+	TestEqual(TEXT("Shared-style cache clears at conversion boundary"), ClearedStats.SharedStyleScaleEntries, 0);
+	TestEqual(TEXT("Baseline cache clears at conversion boundary"), ClearedStats.BaselineFallbackEntries, 0);
+
+	const float ResolvedFontSizeAfterConversionReset = TextMeasurement::ResolveTextFontSizeForUMG(Node);
+	TestTrue(TEXT("Probe node resolves again after conversion boundary reset"), ResolvedFontSizeAfterConversionReset > 0.0f);
+	const float BaselineScaleAfterConversionReset = TextMeasurement::Testing::ResolveBaselineFallbackScale(BaselineNode);
+	TestTrue(TEXT("Baseline fallback resolves again after conversion boundary reset"), BaselineScaleAfterConversionReset > 0.0f);
+
+	TextMeasurement::ResetCacheForAutomationBoundary();
+	const TextMeasurement::Testing::FTextMeasurementCacheStats AutomationClearedStats = TextMeasurement::Testing::GetCacheStats();
+	TestEqual(TEXT("Resolved cache clears at automation boundary"), AutomationClearedStats.ResolvedScaleEntries, 0);
+	TestEqual(TEXT("Shared-style cache clears at automation boundary"), AutomationClearedStats.SharedStyleScaleEntries, 0);
+	TestEqual(TEXT("Baseline cache clears at automation boundary"), AutomationClearedStats.BaselineFallbackEntries, 0);
 	return true;
 }
 

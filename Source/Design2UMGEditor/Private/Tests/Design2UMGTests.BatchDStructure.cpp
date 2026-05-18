@@ -360,7 +360,7 @@ bool FBatchDMCPHttpCancellationStaticTest::RunTest(const FString& Parameters)
 	}
 
 	FString MCPHttpSource;
-	if (!LoadPluginFile(*this, TEXT("Source/Design2UMGEditor/Private/MCPHttpClient.cpp"), MCPHttpSource))
+	if (!LoadPluginFile(*this, TEXT("Source/Design2UMGEditor/Private/ExternalServices/MCPHttpClient.cpp"), MCPHttpSource))
 	{
 		return false;
 	}

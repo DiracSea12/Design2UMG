@@ -20,6 +20,7 @@ These files support release governance, historical-best validation, or internal 
 - `design2umg_validate_run.py`
 - `design2umg_render_rule.py`
 - `design2umg_structure_guard_selftest.py`
+- `design2umg_validation_helpers_selftest.py`
 - `design2umg_pinned_baseline.json`
 - `Release/`
 - `Invoke-ClaudeWorker.ps1`
@@ -33,6 +34,14 @@ python -m pip install Pillow
 ```
 
 No other external Python runtime package is required for the scripts listed above.
+
+The helper-level contract selftest is intentionally UE-free and can run on a plain GitHub runner:
+
+```powershell
+python Tools/design2umg_validation_helpers_selftest.py
+```
+
+It covers batch case discovery, default Figma export root resolution, run-scope writing, execution sharding, worker-count resolution, and completeness aggregation. Runtime validation still requires an explicit real project path; the batch verifier fails closed when `--project` or `DESIGN2UMG_RUNTIME_PROJECT` is missing and never creates a HostProject fallback.
 
 ## Boundary rule
 

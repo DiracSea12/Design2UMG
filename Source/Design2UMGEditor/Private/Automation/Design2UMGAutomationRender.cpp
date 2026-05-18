@@ -7,14 +7,14 @@
 #include "Design2UMGLog.h"
 #include "Design2UMGNotifications.h"
 #include "Design2UMGSettings.h"
-#include "DesignFontImportService.h"
+#include "FontImport/DesignFontImportService.h"
 #include "DesignImportPipeline.h"
 #include "DesignImportUtils.h"
 #include "DesignPathRasterizer.h"
 #include "DesignSchema.h"
 #include "FigmaParser.h"
 #include "FontResolver.h"
-#include "PenMCPBridge.h"
+#include "ExternalServices/PenMCPBridge.h"
 #include "ProceduralShapeGenerator.h"
 #include "TextMeasurement.h"
 #include "UMGSchema.h"
@@ -329,7 +329,7 @@ namespace
 				SlateRenderer->FlushFontCache(TEXT("Design2UMG automation transient reset"));
 			}
 		}
-		TextMeasurement::ResetCache();
+		TextMeasurement::ResetCacheForAutomationBoundary();
 		FFontResolver::ClearCache();
 		FFontResolver::ResetExternalResolvers();
 		DesignFontImportService::ResetTransientState();

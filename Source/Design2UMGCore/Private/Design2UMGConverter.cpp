@@ -613,7 +613,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 		SourceDocument.ComponentSetsJson = Document.SourceDocument().ComponentSetsJson;
 	}
 
-	TextMeasurement::ResetCache();
+	TextMeasurement::ResetCacheForConversionBoundary();
 
 	// Deep-copy children so conversion never mutates the caller's source tree through shared refs.
 	TArray<TSharedPtr<FDesignNode>> Children;

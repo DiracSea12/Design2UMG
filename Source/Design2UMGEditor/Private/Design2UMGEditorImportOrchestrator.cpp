@@ -17,7 +17,7 @@
 #include "Misc/App.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
-#include "PenMCPBridge.h"
+#include "ExternalServices/PenMCPBridge.h"
 #include "PencilConnector.h"
 #include "ProceduralShapeGenerator.h"
 #include "Serialization/JsonSerializer.h"

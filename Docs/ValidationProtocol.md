@@ -182,6 +182,7 @@ That means:
 - formal batch reports do not use raw visual-threshold `passed/failed` totals as a score
 - formal historical-best parity should be checked with:
   `python Tools/design2umg_validate_run.py --output-root <run_root> --admissible-best-json <PluginRoot>\Saved\Design2UMG\Automation\_admissible_best_latest.json`
+- the Python helper contracts are checked separately with `python Tools/design2umg_validation_helpers_selftest.py`; this UE-free selftest covers discovery filtering, default Figma export root resolution, run-scope writing, shard sizing, worker-count resolution, completeness aggregation, and helper output shape
 
 If the active render-size or pipeline-determinism rules changed, rebuild the admissible best manifest first:
 `python Tools/design2umg_rebuild_admissible_best.py`
@@ -195,6 +196,8 @@ Reference sourcing for the formal gate:
 - `figma_*` cases use the top-level export PNG found under each local Figma export root as the authoritative source reference
 - if you package a checked-in external reference root for a formal full run, every formal case directory must contain both `reference.png` and `compare_report.json`
 - `Tools/design2umg_auto_verify_batch.py` now auto-discovers the default local Figma export roots from the `design-root` workspace ancestry when `--figma-export-root` is omitted, so the maintainer formal gate does not silently drop the Figma members of the full discovered case set
+
+The batch verifier requires an explicit runtime project through `--project` or `DESIGN2UMG_RUNTIME_PROJECT`. Missing project input is a hard error with no design-root inference and no HostProject creation.
 
 Default user flow is fail-closed. If live Pencil `export_nodes` is unavailable, the verifier may still keep a `get_screenshot` witness PNG so the run can preserve diagnostic and comparison artifacts, but that witness fallback does not prove live Pencil export health and it does not relax formal or historical-best gates.
 

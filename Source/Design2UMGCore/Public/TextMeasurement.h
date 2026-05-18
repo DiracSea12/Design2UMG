@@ -11,6 +11,10 @@ namespace TextMeasurement
 {
 	/** Clear process-local text measurement caches. */
 	DESIGN2UMGCORE_API void ResetCache();
+	/** Clear text measurement caches at the start of an explicit document conversion boundary. */
+	DESIGN2UMGCORE_API void ResetCacheForConversionBoundary();
+	/** Clear text measurement caches at the start of an explicit automation render boundary. */
+	DESIGN2UMGCORE_API void ResetCacheForAutomationBoundary();
 	/** Return whether the node should use wrapping text behavior. */
 	DESIGN2UMGCORE_API bool IsWrappingTextMode(const TSharedPtr<FDesignNode>& Node);
 	/** Decide whether explicit line height should be applied for the node. */
