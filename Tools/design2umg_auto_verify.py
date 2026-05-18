@@ -1982,6 +1982,7 @@ def run_editor(
         editor_path,
         project_path,
         "-nop4",
+        "-NoSound",
         "-nosplash",
         "-NoMutex",
         "-stdout",

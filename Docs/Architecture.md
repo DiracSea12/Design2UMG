@@ -182,21 +182,10 @@ Reference pattern:
 ```cpp
 TOptional<float> Width;
 TOptional<FMargin> Padding;
-
-USTRUCT()
-struct FD2UMGOptionalBool
-{
-    GENERATED_BODY()
-
-    UPROPERTY()
-    bool bValue = false;
-
-    UPROPERTY()
-    bool bIsSet = false;
-};
+UPROPERTY() TOptional<bool> IsExposedInstance;
 ```
 
-Do not introduce new `bHas*` + value shadow pairs into `DesignSchema.h`-style transient IR unless there is a documented serializer, legacy asset migration, or typed-contract reason to keep that shape. Wrapper or paired forms are compatibility exceptions, not the default presence model. For existing typed payload structs in `UMGSchemaTypedPayloads.h`, follow the current local contract instead of forcing a blind `TOptional` rewrite.
+Do not introduce new `bHas*` + value shadow pairs into `DesignSchema.h`-style transient IR unless there is a documented serializer or typed-contract reason to keep that shape. Prefer `TOptional<T>` when you only need set-vs-unset presence. For existing typed payload structs in `UMGSchemaTypedPayloads.h`, follow the current local contract instead of forcing a blind `TOptional` rewrite.
 
 ## Known Issues
 

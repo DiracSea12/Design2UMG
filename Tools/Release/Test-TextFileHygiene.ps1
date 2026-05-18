@@ -69,6 +69,9 @@ foreach ($line in (git ls-files --eol)) {
 $sourceFiles = git ls-files Source | Where-Object { $_ -match '\.(h|cpp|cs)$' }
 foreach ($relativePath in $sourceFiles) {
 	$fullPath = Join-Path $repoRoot $relativePath
+	if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+		continue
+	}
 	$firstLines = Get-Content -LiteralPath $fullPath -TotalCount 5
 	if (($firstLines -join "`n") -notmatch 'Copyright|SPDX-License-Identifier') {
 		$failures += "Missing copyright/SPDX header: $relativePath"

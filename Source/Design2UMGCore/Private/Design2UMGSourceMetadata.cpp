@@ -70,8 +70,7 @@ namespace
 			Target.ComponentPropertiesJson = Source.ComponentPropertiesJson;
 			Target.VariantPropertiesJson = Source.VariantPropertiesJson;
 			Target.OverridesJson = Source.OverridesJson;
-			Target.HasIsExposedInstance.bValue = Source.IsExposedInstance.Get(false);
-			Target.HasIsExposedInstance.bIsSet = Source.IsExposedInstance.IsSet();
+			Target.HasIsExposedInstance = Source.IsExposedInstance;
 		}
 
 		void BackfillDefinitionIds(FUMGSourceNodeData& SourceData, const TSharedPtr<FDesignNode>& Node)

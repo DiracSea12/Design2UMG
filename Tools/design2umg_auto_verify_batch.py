@@ -412,6 +412,7 @@ def run_editor_driver(
         editor_path,
         project_path,
         "-nop4",
+        "-NoSound",
         "-nosplash",
         "-NoMutex",
         "-stdout",

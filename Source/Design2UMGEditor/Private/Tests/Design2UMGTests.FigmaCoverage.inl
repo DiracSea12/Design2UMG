@@ -1,4 +1,4 @@
-﻿IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaGridWrapMetadataTest,
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaGridWrapMetadataTest,
 	"Design2UMG.FigmaParser.GridWrapMetadata",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaGridWrapMetadataTest::RunTest(const FString& Parameters)
@@ -1383,7 +1383,8 @@ TestTrue(TEXT("figma instance isExposedInstance preserved"), InstanceNode->Metad
 	TestTrue(TEXT("figma instance variantProperties exported"), !ConvertedInstanceWidget->Source().VariantPropertiesJson.IsEmpty());
 	TestTrue(TEXT("figma instance overrides exported"), !ConvertedInstanceWidget->Source().OverridesJson.IsEmpty());
 	TestTrue(TEXT("figma instance exposed flag exported"),
-		ConvertedInstanceWidget->Source().HasIsExposedInstance.bIsSet && ConvertedInstanceWidget->Source().HasIsExposedInstance.bValue);
+		ConvertedInstanceWidget->Source().HasIsExposedInstance.IsSet()
+			&& ConvertedInstanceWidget->Source().HasIsExposedInstance.GetValue());
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaTransformGroupPreservedTest,

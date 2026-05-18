@@ -33,7 +33,7 @@ FUMGWidgetNode CreateFallbackBranchWidget(const TSharedPtr<FDesignNode>& Node)
 }
 } // namespace Design2UMGConverterInternal
 
-namespace Design2UMGConverterOwners
+namespace Design2UMGConverterPrivate
 {
 	using namespace Design2UMGConverterInternal;
 	namespace VisualSupport = Design2UMGConverterVisualSupport;
@@ -547,7 +547,7 @@ namespace Design2UMGConverterOwners
 			Widget.Children.Add(MoveTemp(ChildWidget));
 		}
 	}
-} // namespace Design2UMGConverterOwners
+} // namespace Design2UMGConverterPrivate
 
 FDesign2UMGConversionSettings FDesign2UMGConversionSettings::Defaults()
 {
@@ -601,10 +601,15 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 	}
 
 	const Design2UMGConverterInternal::FConversionSettingsSnapshot SettingsSnapshot =
-		Design2UMGConverterOwners::BuildConversionSettingsSnapshot(Settings);
+		Design2UMGConverterPrivate::BuildConversionSettingsSnapshot(Settings);
 	Design2UMGConverterInternal::FConversionState State(Document, Result.Warnings, SettingsSnapshot);
+	auto FinalizeResult = [&Result, &State]()
+	{
+		Result.IconFontMappingChanges.Upserts = MoveTemp(State.PendingIconFontMappings);
+		Result.IconFontMappingChanges.Removals = MoveTemp(State.PrunedInvalidMappings);
+	};
 	Design2UMGConverterInternal::FConversionContext RootContext(State);
-	const Design2UMGConverterOwners::FNodeConversionOrchestrator NodeOrchestrator(RootContext);
+	const Design2UMGConverterPrivate::FNodeConversionOrchestrator NodeOrchestrator(RootContext);
 
 	if (!Document.SourceDocument().ComponentsJson.IsEmpty() || !Document.SourceDocument().ComponentSetsJson.IsEmpty())
 	{
@@ -625,7 +630,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 	VisibleChildren.Reserve(Children.Num());
 	for (const auto& Child : Children)
 	{
-		if (!Design2UMGConverterOwners::ShouldSkipNode(Child))
+		if (!Design2UMGConverterPrivate::ShouldSkipNode(Child))
 		{
 			VisibleChildren.Add(Child);
 		}
@@ -681,8 +686,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 			RenderWidgets.Num(),
 			State.PrototypeNavigation.ClickBindings.Num());
 		Result.RootWidget = Design2UMGPrototypeNavigation::BuildRoot(MoveTemp(RenderWidgets), State.PrototypeNavigation);
-		Result.IconFontMappingChanges.Upserts = MoveTemp(State.PendingIconFontMappings);
-		Result.IconFontMappingChanges.Removals = MoveTemp(State.PrunedInvalidMappings);
+		FinalizeResult();
 		return Result;
 	}
 
@@ -690,8 +694,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 	{
 		UE_LOG(LogDesign2UMG, Log, TEXT("Convert: single root '%s' type=%s"), *RenderWidgets[0].Name, *RenderWidgets[0].Type);
 		Result.RootWidget = MoveTemp(RenderWidgets[0]);
-		Result.IconFontMappingChanges.Upserts = MoveTemp(State.PendingIconFontMappings);
-		Result.IconFontMappingChanges.Removals = MoveTemp(State.PrunedInvalidMappings);
+		FinalizeResult();
 		return Result;
 	}
 
@@ -702,8 +705,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 	for (auto& W : RenderWidgets)
 		Result.RootWidget.Children.Add(MoveTemp(W));
 
-	Result.IconFontMappingChanges.Upserts = MoveTemp(State.PendingIconFontMappings);
-	Result.IconFontMappingChanges.Removals = MoveTemp(State.PrunedInvalidMappings);
+	FinalizeResult();
 	return Result;
 }
 

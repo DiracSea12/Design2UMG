@@ -3,7 +3,7 @@ param(
     [string]$EditorPath = "",
     [string]$ReferenceRoot = "",
     [string]$OutputRoot = "",
-    [string]$DesignRoot = "G:\UE5\FPSRoguelike\Designs",
+    [string]$DesignRoot = "",
     [string]$LogCmds = "",
     [switch]$ValidateOnly
 )

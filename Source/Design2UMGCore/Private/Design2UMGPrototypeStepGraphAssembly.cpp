@@ -175,8 +175,7 @@ namespace Design2UMGPrototypeStepGraphAssembly
 		Transition.Type = Source.Type.ToUpper();
 		Transition.Direction = Source.Direction.ToUpper();
 		Transition.EasingType = Source.EasingType.ToUpper();
-		Transition.HasMatchLayers.bValue = Source.MatchLayers.Get(false);
-		Transition.HasMatchLayers.bIsSet = Source.MatchLayers.IsSet();
+		Transition.HasMatchLayers = Source.MatchLayers;
 
 		if (Source.Duration.IsSet())
 		{

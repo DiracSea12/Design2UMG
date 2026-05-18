@@ -5,19 +5,6 @@
 #include "CoreMinimal.h"
 #include "UMGSchemaSourceExtensions.generated.h"
 
-/** UPROPERTY-compatible optional bool wrapper for serialized authored bool fields. */
-USTRUCT()
-struct FD2UMGOptionalBool
-{
-	GENERATED_BODY()
-
-	UPROPERTY()
-	bool bValue = false;
-
-	UPROPERTY()
-	bool bIsSet = false;
-};
-
 USTRUCT()
 struct FUMGPrototypeTransitionData
 {
@@ -39,7 +26,7 @@ struct FUMGPrototypeTransitionData
 	FString EasingJson;
 
 	UPROPERTY()
-	FD2UMGOptionalBool HasMatchLayers;
+	TOptional<bool> HasMatchLayers;
 
 	UPROPERTY()
 	FString OutgoingAnimationName;
@@ -88,7 +75,7 @@ struct FUMGSourceNodeData
 	UPROPERTY() FString OverridesJson;
 
 	UPROPERTY()
-	FD2UMGOptionalBool HasIsExposedInstance;
+	TOptional<bool> HasIsExposedInstance;
 
 	bool IsInstance() const
 	{
@@ -114,7 +101,7 @@ struct FUMGSourceNodeData
 			|| !ComponentPropertiesJson.IsEmpty()
 			|| !VariantPropertiesJson.IsEmpty()
 			|| !OverridesJson.IsEmpty()
-			|| HasIsExposedInstance.bIsSet;
+			|| HasIsExposedInstance.IsSet();
 	}
 };
 

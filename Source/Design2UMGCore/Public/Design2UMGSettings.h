@@ -46,9 +46,6 @@ class DESIGN2UMGCORE_API UDesign2UMGSettings : public UDeveloperSettings
 public:
 	/** Return the settings singleton without migration or save/flush side effects. */
 	static UDesign2UMGSettings* Get();
-
-	/** Explicit compatibility boundary for the old editor-module settings section; remove once supported local setups no longer carry that legacy section. */
-	static bool MigrateLegacySettingsSectionToCurrent();
 	static constexpr const TCHAR* CanonicalPlaceholderHatchBackgroundColor = TEXT("#D282FF33");
 	static constexpr const TCHAR* CanonicalPlaceholderRefHatchBackgroundColor = TEXT("#9682FF33");
 	static constexpr const TCHAR* CanonicalPlaceholderHatchStripeColor = TEXT("#D480FF");
