@@ -60,6 +60,8 @@ struct FDesignLayoutExtensions
 	TOptional<int32> GridColumnAnchorIndex;
 	TOptional<int32> GridRowAnchorIndex;
 	TOptional<bool> ItemReverseZIndex;
+	// Primary typed storage for source stroke-in-layout semantics.
+	// Keep Pen "layoutIncludeStroke" and Figma "strokesIncludedInLayout" metadata aliases explicit this phase.
 	TOptional<bool> StrokesIncludedInLayout;
 };
 

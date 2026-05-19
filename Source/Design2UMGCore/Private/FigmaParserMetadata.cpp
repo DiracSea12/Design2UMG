@@ -255,6 +255,7 @@ namespace FigmaParserMetadata
 		if (SlotField.IsValid() && SlotField->Type == EJson::Array)
 		{
 			const int32 SlotCount = SlotField->AsArray().Num();
+			// Preserve source slot keys for source truth; only *.slot.empty is a supplementary explicit-empty hint.
 			Node.Metadata.Add(TEXT("source.slot.present"), TEXT("true"));
 			Node.Metadata.Add(TEXT("source.slot.count"), FString::FromInt(SlotCount));
 			if (SlotCount == 0)
@@ -269,6 +270,7 @@ namespace FigmaParserMetadata
 			TryReadSemanticHintFromJsonValue(NodeObj->TryGetField(TEXT("pluginData")))
 			|| TryReadSemanticHintFromJsonValue(NodeObj->TryGetField(TEXT("sharedPluginData")));
 
+		// Placeholder surface is the main runtime contract for this family; present/count stay preservation-only metadata.
 		Node.LayoutData.bSemanticPlaceholderSurface =
 			bExplicitPlaceholder
 			|| bExplicitSlot

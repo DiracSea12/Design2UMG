@@ -9,11 +9,11 @@ struct FDesignNode;
 /** Text fitting and measurement facade used by converter text paths. */
 namespace TextMeasurement
 {
-	/** Clear process-local text measurement caches. */
+	/** Low-level primitive for clearing process-local text measurement caches. Shared callers should prefer the named boundary resets below. */
 	DESIGN2UMGCORE_API void ResetCache();
-	/** Clear text measurement caches at the start of an explicit document conversion boundary. */
+	/** Preferred shared-path reset for starting an explicit document conversion boundary. */
 	DESIGN2UMGCORE_API void ResetCacheForConversionBoundary();
-	/** Clear text measurement caches at the start of an explicit automation render boundary. */
+	/** Preferred shared-path reset for starting an explicit automation render boundary. */
 	DESIGN2UMGCORE_API void ResetCacheForAutomationBoundary();
 	/** Return whether the node should use wrapping text behavior. */
 	DESIGN2UMGCORE_API bool IsWrappingTextMode(const TSharedPtr<FDesignNode>& Node);

@@ -693,6 +693,33 @@ bool FTextMeasurementPrivateShimHeaderRemovedTest::RunTest(const FString& Parame
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextMeasurementResetContractCommentsTest,
+	"Design2UMG.TextMeasurement.ResetContractComments",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTextMeasurementResetContractCommentsTest::RunTest(const FString& Parameters)
+{
+	const FString PublicHeaderPath = GetTextMeasurementPublicHeaderPath();
+	TestFalse(TEXT("Public TextMeasurement.h path resolved"), PublicHeaderPath.IsEmpty());
+	if (PublicHeaderPath.IsEmpty())
+	{
+		return false;
+	}
+
+	FString HeaderSource;
+	TestTrue(TEXT("Load public TextMeasurement.h"), FFileHelper::LoadFileToString(HeaderSource, *PublicHeaderPath));
+	if (HeaderSource.IsEmpty())
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("ResetCache comment marks the API as a low-level primitive"), HeaderSource.Contains(TEXT("Low-level primitive")));
+	TestTrue(TEXT("ResetCache comment points contributors to conversion boundary reset"), HeaderSource.Contains(TEXT("ResetCacheForConversionBoundary()")));
+	TestTrue(TEXT("ResetCache comment points contributors to automation boundary reset"), HeaderSource.Contains(TEXT("ResetCacheForAutomationBoundary()")));
+	TestTrue(TEXT("Conversion boundary comment stays contributor-facing"), HeaderSource.Contains(TEXT("Preferred shared-path reset for starting an explicit document conversion boundary.")));
+	TestTrue(TEXT("Automation boundary comment stays contributor-facing"), HeaderSource.Contains(TEXT("Preferred shared-path reset for starting an explicit automation render boundary.")));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextMeasurementNoIdentityDispatchGuardTest,
 	"Design2UMG.TextMeasurement.NoIdentityDispatchGuard",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)

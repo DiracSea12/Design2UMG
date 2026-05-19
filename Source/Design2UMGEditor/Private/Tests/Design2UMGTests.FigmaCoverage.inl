@@ -101,6 +101,7 @@ bool FFigmaGridWrapMetadataTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("itemReverseZIndex preserved"), ItemReverseZIndex && *ItemReverseZIndex == TEXT("true"));
 	const FString* StrokesIncludedInLayout = GridNode->Metadata.Find(TEXT("strokesIncludedInLayout"));
 	TestTrue(TEXT("strokesIncludedInLayout preserved"), StrokesIncludedInLayout && *StrokesIncludedInLayout == TEXT("true"));
+	TestTrue(TEXT("strokesIncludedInLayout typed primary storage"), GridNode->Source().LayoutExtensions.StrokesIncludedInLayout.IsSet() && GridNode->Source().LayoutExtensions.StrokesIncludedInLayout.GetValue());
 	TestTrue(TEXT("boundVariables preserved"), GridNode->Metadata.Contains(TEXT("boundVariables.itemSpacing")));
 	TestTrue(TEXT("counterAxisSpacing preserved"), GridNode->Metadata.Contains(TEXT("counterAxisSpacing")));
 	TestTrue(TEXT("layoutAlign preserved"), GridNode->Metadata.Contains(TEXT("layoutAlign")));
@@ -734,8 +735,14 @@ bool FPenEmptySlotSemanticHintTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
+	TestEqual(TEXT("Empty slot keeps pen.slot.present for preservation"), Doc.Children[0]->Metadata.FindRef(TEXT("pen.slot.present")), TEXT("true"));
+	TestEqual(TEXT("Empty slot keeps pen.slot.count for preservation"), Doc.Children[0]->Metadata.FindRef(TEXT("pen.slot.count")), TEXT("0"));
 	TestTrue(TEXT("Empty slot array should mark placeholder surface"), Doc.Children[0]->LayoutData.bSemanticPlaceholderSurface);
+	TestEqual(TEXT("Non-empty slot keeps pen.slot.present for preservation"), Doc.Children[1]->Metadata.FindRef(TEXT("pen.slot.present")), TEXT("true"));
+	TestEqual(TEXT("Non-empty slot keeps pen.slot.count for preservation"), Doc.Children[1]->Metadata.FindRef(TEXT("pen.slot.count")), TEXT("1"));
+	TestFalse(TEXT("Non-empty slot should not synthesize pen.slot.empty"), Doc.Children[1]->Metadata.Contains(TEXT("pen.slot.empty")));
 	TestTrue(TEXT("Non-empty slot array should mark placeholder surface"), Doc.Children[1]->LayoutData.bSemanticPlaceholderSurface);
+	TestFalse(TEXT("Explicit placeholder should not synthesize pen slot preservation keys"), Doc.Children[2]->Metadata.Contains(TEXT("pen.slot.present")) || Doc.Children[2]->Metadata.Contains(TEXT("pen.slot.count")) || Doc.Children[2]->Metadata.Contains(TEXT("pen.slot.empty")));
 	TestTrue(TEXT("Explicit placeholder=true should mark placeholder surface"), Doc.Children[2]->LayoutData.bSemanticPlaceholderSurface);
 	return true;
 }
@@ -795,8 +802,14 @@ bool FFigmaEmptySlotSemanticHintTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
+	TestEqual(TEXT("Empty slot keeps source.slot.present for preservation"), Doc.Children[0]->Children[0]->Metadata.FindRef(TEXT("source.slot.present")), TEXT("true"));
+	TestEqual(TEXT("Empty slot keeps source.slot.count for preservation"), Doc.Children[0]->Children[0]->Metadata.FindRef(TEXT("source.slot.count")), TEXT("0"));
 	TestTrue(TEXT("Empty slot array should mark placeholder surface"), Doc.Children[0]->Children[0]->LayoutData.bSemanticPlaceholderSurface);
+	TestEqual(TEXT("Non-empty slot keeps source.slot.present for preservation"), Doc.Children[0]->Children[1]->Metadata.FindRef(TEXT("source.slot.present")), TEXT("true"));
+	TestEqual(TEXT("Non-empty slot keeps source.slot.count for preservation"), Doc.Children[0]->Children[1]->Metadata.FindRef(TEXT("source.slot.count")), TEXT("1"));
+	TestFalse(TEXT("Non-empty slot should not synthesize source.slot.empty"), Doc.Children[0]->Children[1]->Metadata.Contains(TEXT("source.slot.empty")));
 	TestTrue(TEXT("Non-empty slot array should mark placeholder surface"), Doc.Children[0]->Children[1]->LayoutData.bSemanticPlaceholderSurface);
+	TestFalse(TEXT("Explicit placeholder should not synthesize source slot preservation keys"), Doc.Children[0]->Children[2]->Metadata.Contains(TEXT("source.slot.present")) || Doc.Children[0]->Children[2]->Metadata.Contains(TEXT("source.slot.count")) || Doc.Children[0]->Children[2]->Metadata.Contains(TEXT("source.slot.empty")));
 	TestTrue(TEXT("Explicit placeholder=true should mark placeholder surface"), Doc.Children[0]->Children[2]->LayoutData.bSemanticPlaceholderSurface);
 	return true;
 }
@@ -1181,6 +1194,7 @@ bool FPenOfficialFieldParityTest::RunTest(const FString& Parameters)
 	const TSharedPtr<FDesignNode>& GradientNode = FrameNode->Children[1];
 	const TSharedPtr<FDesignNode>& RichTextNode = FrameNode->Children[2];
 	TestTrue(TEXT("layoutIncludeStroke false preserved"), FrameNode->Metadata.FindRef(TEXT("layoutIncludeStroke")) == TEXT("false"));
+	TestTrue(TEXT("layoutIncludeStroke false typed primary storage"), FrameNode->Source().LayoutExtensions.StrokesIncludedInLayout.IsSet() && !FrameNode->Source().LayoutExtensions.StrokesIncludedInLayout.GetValue());
 	TestTrue(TEXT("stroke.join preserved"), FrameNode->Metadata.FindRef(TEXT("stroke.join")) == TEXT("miter"));
 	TestTrue(TEXT("stroke.cap preserved"), FrameNode->Metadata.FindRef(TEXT("stroke.cap")) == TEXT("round"));
 	TestTrue(TEXT("stroke.dashPattern preserved"), FrameNode->Metadata.FindRef(TEXT("stroke.dashPattern")).Contains(TEXT("1")));

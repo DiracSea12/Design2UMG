@@ -55,6 +55,7 @@ namespace
 			return;
 		}
 
+		// Preserve raw Pen slot keys for source truth; only pen.slot.empty is the supplementary explicit-empty hint.
 		Node.Metadata.Add(TEXT("pen.slot.present"), TEXT("true"));
 		Node.Metadata.Add(TEXT("pen.slot.count"), FString::FromInt(SlotMetadata.SlotNodeCount));
 		if (SlotMetadata.SlotNodeCount == 0)
@@ -72,6 +73,7 @@ namespace
 			!bTextLikeNode && Node.Name.Contains(TEXT("slot"), ESearchCase::IgnoreCase);
 		const bool bNameLooksLikeContentSlot =
 			!bTextLikeNode && SlotMetadata.bHasSlot && Node.Name.Contains(TEXT("content"), ESearchCase::IgnoreCase);
+		// Placeholder surface is the runtime contract; present/count remain preservation-only metadata.
 		Node.LayoutData.bSemanticPlaceholderSurface =
 			!bTextLikeNode
 			&& (bPenPlaceholder

@@ -1,4 +1,4 @@
-﻿IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenExtendedFieldsAndMeshGradientTest,
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenExtendedFieldsAndMeshGradientTest,
 	"Design2UMG.PenParser.ExtendedFieldsAndMeshGradient",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FPenExtendedFieldsAndMeshGradientTest::RunTest(const FString& Parameters)
@@ -94,6 +94,7 @@ bool FPenExtendedFieldsAndMeshGradientTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("stroke explicit fill is color"), ComponentNode->Visual.Stroke.Fill.IsSet() && ComponentNode->Visual.Stroke.Fill.GetValue().Type == EDesignFillType::Color);
 	const FString* LayoutIncludeStroke = ComponentNode->Metadata.Find(TEXT("layoutIncludeStroke"));
 	TestTrue(TEXT("layoutIncludeStroke preserved"), LayoutIncludeStroke && *LayoutIncludeStroke == TEXT("true"));
+	TestTrue(TEXT("layoutIncludeStroke typed primary storage"), ComponentNode->Source().LayoutExtensions.StrokesIncludedInLayout.IsSet() && ComponentNode->Source().LayoutExtensions.StrokesIncludedInLayout.GetValue());
 	const FString* StrokeJoin = ComponentNode->Metadata.Find(TEXT("stroke.join"));
 	TestTrue(TEXT("stroke join preserved"), StrokeJoin && *StrokeJoin == TEXT("round"));
 	const FString* StrokeCap = ComponentNode->Metadata.Find(TEXT("stroke.cap"));

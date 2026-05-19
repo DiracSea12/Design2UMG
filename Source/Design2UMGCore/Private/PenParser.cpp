@@ -481,7 +481,11 @@ TSharedPtr<FDesignNode> ParseNodeAtDepth(
 	{
 		bool bLayoutIncludeStroke = false;
 		if (TryGetResolvedBoolField(JsonObj, TEXT("layoutIncludeStroke"), *ActiveResolver, bLayoutIncludeStroke))
+		{
+			// Typed source extensions are the primary storage; keep the Pen key as an explicit source-shaped alias.
+			Node->MutableSource().LayoutExtensions.StrokesIncludedInLayout = bLayoutIncludeStroke;
 			Node->Metadata.Add(TEXT("layoutIncludeStroke"), bLayoutIncludeStroke ? TEXT("true") : TEXT("false"));
+		}
 	}
 	TryGetResolvedNumberField(JsonObj, TEXT("layoutGrow"), *ActiveResolver, Node->LayoutData.LayoutGrow);
 

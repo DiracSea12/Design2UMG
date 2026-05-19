@@ -302,16 +302,19 @@ namespace CacheTrace
 
 void TextMeasurement::ResetCache()
 {
+	// Keep the raw cache reset as a low-level primitive for focused tests and boundary wrappers.
 	CacheTrace::GResolvedScaleCache.Reset();
 }
 
 void TextMeasurement::ResetCacheForConversionBoundary()
 {
+	// Shared conversion code should prefer this named boundary instead of calling ResetCache() directly.
 	ResetCache();
 }
 
 void TextMeasurement::ResetCacheForAutomationBoundary()
 {
+	// Shared automation code should prefer this named boundary instead of calling ResetCache() directly.
 	ResetCache();
 }
 
