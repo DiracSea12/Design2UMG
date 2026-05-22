@@ -500,6 +500,7 @@ namespace Design2UMGLocalFigmaImport
 		const FString ResolvedSourceFilePath = FPaths::ConvertRelativePathToFull(JsonFilePath);
 		ParsedDocument.MutableSourceDocument().SourceFilePath = ResolvedSourceFilePath;
 		ParsedDocument.Metadata.Add(TEXT("design.sourceFilePath"), ResolvedSourceFilePath);
+		ParsedDocument.Metadata.Add(TEXT("source.filePath"), ResolvedSourceFilePath);
 
 		const FString ImagesDir = FPaths::GetPath(JsonFilePath) / TEXT("images");
 		const FString SourceDocumentIdentity = DesignImageBakeUtils::BuildSourceDocumentIdentity(JsonFilePath);

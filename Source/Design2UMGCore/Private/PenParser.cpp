@@ -129,7 +129,15 @@ bool FPenParser::ParseFromFile(const FString& FilePath, FDesignDocument& OutDocu
 		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to read design file. Verify the path is valid and not locked: %s"), *FilePath);
 		return false;
 	}
-	return ParseDocument(JsonString, OutDocument);
+	const bool bSuccess = ParseDocument(JsonString, OutDocument);
+	if (bSuccess)
+	{
+		const FString ResolvedFilePath = FPaths::ConvertRelativePathToFull(FilePath);
+		OutDocument.MutableSourceDocument().SourceFilePath = ResolvedFilePath;
+		OutDocument.Metadata.FindOrAdd(TEXT("design.sourceFilePath")) = ResolvedFilePath;
+		OutDocument.Metadata.FindOrAdd(TEXT("source.filePath")) = ResolvedFilePath;
+	}
+	return bSuccess;
 }
 
 bool FPenParser::ParseDocument(const FString& JsonString, FDesignDocument& OutDocument)
