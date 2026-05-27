@@ -5,7 +5,6 @@
 #include "Design2UMGEditorDesignSourceRegistry.h"
 #include "WidgetMetadataCollector.h"
 #include "Design2UMGLocalFigmaImport.h"
-#include "FontImport/DesignFontImportService.h"
 #include "Design2UMGTestUtils.h"
 #include "DesignImportPipeline.h"
 #include "DesignImportUtils.h"

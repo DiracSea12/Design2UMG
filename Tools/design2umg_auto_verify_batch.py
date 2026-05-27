@@ -263,7 +263,6 @@ def build_case_specs(state: dict):
     output_dir = state["output_dir"]
     game_output_root = state["game_output_root"]
     primary_game_output = verify.build_automation_phase_output(game_output_root, "primary")
-    primary_asset_output = verify.build_automation_phase_output(game_output_root, "primary-asset")
     native_game_output = verify.build_automation_phase_output(game_output_root, "native")
     native_asset_output = verify.build_automation_phase_output(game_output_root, "native-asset")
     asset_only_output = verify.build_automation_phase_output(game_output_root, "asset")
@@ -313,7 +312,7 @@ def build_case_specs(state: dict):
                 "mode": "asset",
                 "source_path": f"@generated_asset_from:{generate_result_path}",
                 "node_id": "",
-                "output_path": primary_asset_output,
+                "output_path": primary_game_output,
                 "render_png_path": str(candidate_path),
                 "result_json_path": str(output_dir / "ue_render_result.json"),
                 "force_reload_package": True,

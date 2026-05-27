@@ -142,7 +142,7 @@ bool FPenRichTextConverterUsesRichTextBlockTest::RunTest(const FString& Paramete
 						"fill": "#112233",
 						"content": [
 							{ "content": "Open " },
-							{ "content": "Docs", "fontWeight": "700", "fontSize": 0, "letterSpacing": 0, "underline": true, "strikethrough": false, "href": "https://docs.example.com" }
+							{ "content": "Docs", "fontFamily": "Inter", "fontWeight": "700", "fontSize": 0, "letterSpacing": 0, "underline": true, "strikethrough": false, "href": "https://docs.example.com" }
 						]
 					}
 				]
@@ -247,8 +247,8 @@ bool FPenRichTextConverterUsesRichTextBlockTest::RunTest(const FString& Paramete
 	}
 
 	const FString ExpectedSnapshot =
-		TEXT("d2u_run_0{Color=#112233FF;DesignFontSize=18.0;FontFamily=/Game/Design2UMG/Fonts/Geist.Geist;FontSize=27.0;LetterSpacing=0.0;TypefaceFontName=Regular}")
-		TEXT("|d2u_run_1{Color=#112233FF;FontFamily=/Game/Design2UMG/Fonts/Geist.Geist;Href=https://docs.example.com;LetterSpacing=0.0;TypefaceFontName=Bold;Underline=true}");
+		TEXT("d2u_run_0{Color=#112233FF;DesignFontSize=18.0;FontSize=27.0;LetterSpacing=0.0}")
+		TEXT("|d2u_run_1{Color=#112233FF;FontFamily=/Game/Design2UMG/Fonts/Inter.Inter;Href=https://docs.example.com;LetterSpacing=0.0;TypefaceFontName=Bold;Underline=true}");
 
 	TestEqual(TEXT("Rich text style rows snapshot matches"), Snapshot, ExpectedSnapshot);
 	return true;

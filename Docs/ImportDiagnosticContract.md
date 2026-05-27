@@ -16,6 +16,7 @@ The current machine-facing contract is built around these grouped sections:
   - `output`
   - `diagnostics`
   - `resources`
+  - `fontResolution`
   - `effects`
 
 These grouped objects are the fields new tooling should read first.
@@ -44,13 +45,16 @@ These grouped objects are the fields new tooling should read first.
 - `imageFailures`
 - `imageImportSummary`
 
+`fontResolution`
+- `results`: compact per-declaration font resolution diagnostics. `resolvedAssetPath` can be an exact project font match, or a diagnostic fallback candidate when `resolutionState` remains `default-font`; it does not by itself prove the generated UMG node was explicitly bound to that fallback asset.
+
 `effects`
 - `wrapperCount`
 - `wrappers`
 
-## Top-level compatibility aliases
+## Top-level path aliases
 
-The writer still emits these top-level aliases because they are already shipped and tested:
+The writer still emits these top-level scalar path aliases because existing import/bake paths read them directly:
 
 - `sourceFilePath` -> alias of `source.filePath`
 - `sourceIdentity` -> alias of `source.identity`
@@ -58,12 +62,8 @@ The writer still emits these top-level aliases because they are already shipped 
 - `requestedRenderPngPath` -> alias of `output.requestedRenderPngPath`
 - `generatedAssetPath` -> alias of `output.generatedAssetPath`
 - `renderPngPath` -> alias of `output.renderPngPath`
-- `warnings` -> alias of `diagnostics.warnings`
-- `skippedDesignerNodes` -> alias of `diagnostics.skippedDesignerNodes`
-- `missingFonts` -> alias of `resources.missingFonts`
-- `imageImportReport` -> alias of `resources.imageImportSummary`
 
-These aliases are compatibility-retained fields, not the preferred long-term read path.
+Diagnostics and resources are only emitted through grouped sections. New tooling should not read top-level `warnings`, `skippedDesignerNodes`, `missingFonts`, or `imageImportReport` fields.
 
 ## Human-facing fields
 

@@ -339,6 +339,121 @@ namespace DesignImportDiagnosticReport
 			}
 			return TEXT("unknown");
 		}
+
+		bool IsUnsupportedFontSource(const FString& Source)
+		{
+			const FString Trimmed = Source.TrimStartAndEnd();
+			if (Trimmed.IsEmpty())
+			{
+				return false;
+			}
+
+			if (Trimmed.StartsWith(TEXT("http://"), ESearchCase::IgnoreCase)
+				|| Trimmed.StartsWith(TEXT("https://"), ESearchCase::IgnoreCase))
+			{
+				return true;
+			}
+
+			const FString Extension = FPaths::GetExtension(Trimmed, false).ToLower();
+			return Extension == TEXT("ttf")
+				|| Extension == TEXT("otf")
+				|| Extension == TEXT("ttc")
+				|| Extension == TEXT("otc")
+				|| Extension == TEXT("woff")
+				|| Extension == TEXT("woff2");
+		}
+
+		void AddFontResolutionResult(
+			TArray<TSharedPtr<FJsonValue>>& OutValues,
+			TSet<FString>& InOutSeenKeys,
+			const FString& Family,
+			const FString& PostScriptName,
+			const FString& Weight,
+			const FString& Style,
+			const bool bUnsupportedInput)
+		{
+			const FFontResolutionDiagnostic Diagnostic = FFontResolver::ResolveFontDiagnostic(
+				Family,
+				PostScriptName,
+				Weight,
+				Style,
+				bUnsupportedInput);
+			if (InOutSeenKeys.Contains(Diagnostic.DeclarationKey))
+			{
+				return;
+			}
+			InOutSeenKeys.Add(Diagnostic.DeclarationKey);
+
+			TSharedRef<FJsonObject> Entry = MakeShared<FJsonObject>();
+			Entry->SetStringField(TEXT("declarationKey"), Diagnostic.DeclarationKey);
+			Entry->SetStringField(TEXT("declaredFamily"), Diagnostic.DeclaredFamily);
+			if (!Diagnostic.DeclaredPostScriptName.TrimStartAndEnd().IsEmpty())
+			{
+				Entry->SetStringField(TEXT("declaredPostScriptName"), Diagnostic.DeclaredPostScriptName);
+			}
+			if (!Diagnostic.ResolvedAssetPath.IsEmpty())
+			{
+				Entry->SetStringField(TEXT("resolvedAssetPath"), Diagnostic.ResolvedAssetPath);
+			}
+			if (!Diagnostic.ResolvedTypeface.IsEmpty())
+			{
+				Entry->SetStringField(TEXT("resolvedTypeface"), Diagnostic.ResolvedTypeface);
+			}
+			Entry->SetStringField(TEXT("resolutionState"), Diagnostic.ResolutionState);
+			Entry->SetStringField(TEXT("severity"), Diagnostic.Severity);
+
+			TArray<TSharedPtr<FJsonValue>> IssueCodes;
+			for (const FString& IssueCode : Diagnostic.IssueCodes)
+			{
+				IssueCodes.Add(MakeShared<FJsonValueString>(IssueCode));
+			}
+			Entry->SetArrayField(TEXT("issueCodes"), IssueCodes);
+
+			OutValues.Add(MakeShared<FJsonValueObject>(Entry));
+		}
+
+		void CollectFontResolutionResultsRecursive(
+			const TSharedPtr<FDesignNode>& Node,
+			TArray<TSharedPtr<FJsonValue>>& OutValues,
+			TSet<FString>& InOutSeenKeys)
+		{
+			if (!Node.IsValid())
+			{
+				return;
+			}
+
+			if (!Node->Text.FontFamily.IsEmpty() || !Node->Text.FontPostScriptName.IsEmpty())
+			{
+				AddFontResolutionResult(
+					OutValues,
+					InOutSeenKeys,
+					Node->Text.FontFamily,
+					Node->Text.FontPostScriptName,
+					Node->Text.FontWeight,
+					Node->Text.FontStyle,
+					false);
+			}
+
+			for (const FDesignTextRun& Run : Node->Text.TextRuns)
+			{
+				if (!Run.FontFamily.IsEmpty() || !Run.FontPostScriptName.IsEmpty())
+				{
+					AddFontResolutionResult(
+						OutValues,
+						InOutSeenKeys,
+						Run.FontFamily,
+						Run.FontPostScriptName,
+						Run.FontWeight,
+						Run.FontStyle,
+						false);
+				}
+			}
+
+			for (const TSharedPtr<FDesignNode>& Child : Node->Children)
+			{
+				CollectFontResolutionResultsRecursive(Child, OutValues, InOutSeenKeys);
+			}
+		}
 	}
 
 	void Write(
@@ -350,7 +465,10 @@ namespace DesignImportDiagnosticReport
 		const FString& GeneratedAssetPath,
 		const FString& RenderPngPath)
 	{
+		const FString ReportPath = BuildImportReportPath(Document);
 		TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+		Root->SetStringField(TEXT("schemaVersion"), TEXT("design2umg-import-report-v2"));
+		Root->SetStringField(TEXT("reportPath"), ReportPath);
 		Root->SetStringField(TEXT("pluginVersion"), ResolvePluginVersionName());
 		Root->SetStringField(TEXT("documentVersion"), Document.Version);
 
@@ -396,32 +514,44 @@ namespace DesignImportDiagnosticReport
 		TArray<FString> Recommendations;
 		TArray<TSharedPtr<FJsonValue>> SkippedNodeValues;
 		CollectSkippedDesignerNodes(Document, SkippedNodeValues, Recommendations);
-		Root->SetArrayField(TEXT("skippedDesignerNodes"), SkippedNodeValues);
 
 		TArray<TSharedPtr<FJsonValue>> WarningValues;
 		for (const FString& Warning : Data.Warnings)
 		{
 			WarningValues.Add(MakeShared<FJsonValueString>(Warning));
 		}
-		Root->SetArrayField(TEXT("warnings"), WarningValues);
 
 		TArray<TSharedPtr<FJsonValue>> MissingFontValues;
 		for (const FString& FontFamily : FFontResolver::FindMissingFonts(Document))
 		{
 			MissingFontValues.Add(MakeShared<FJsonValueString>(FontFamily));
 		}
-		Root->SetArrayField(TEXT("missingFonts"), MissingFontValues);
 		if (MissingFontValues.Num() > 0)
 		{
 			AddUniqueRecommendation(
 				Recommendations,
-				TEXT("Map required fonts locally or keep font auto-import optional; missing fonts should not be treated as an online-only runtime dependency."));
+				TEXT("Map required fonts to project font assets or configure a default font; missing fonts should not be treated as an online-only runtime dependency."));
 		}
 
-		if (!ImageReport.IsEmpty())
+		TArray<TSharedPtr<FJsonValue>> FontResolutionValues;
+		TSet<FString> SeenFontResolutionKeys;
+		for (const FDesignFont& Font : Document.Fonts)
 		{
-			Root->SetStringField(TEXT("imageImportReport"), ImageReport);
+			AddFontResolutionResult(
+				FontResolutionValues,
+				SeenFontResolutionKeys,
+				Font.Name,
+				FString(),
+				TEXT("400"),
+				TEXT("normal"),
+				IsUnsupportedFontSource(Font.Url));
 		}
+		for (const TSharedPtr<FDesignNode>& RootNode : Document.Children)
+		{
+			CollectFontResolutionResultsRecursive(RootNode, FontResolutionValues, SeenFontResolutionKeys);
+		}
+		TSharedRef<FJsonObject> FontResolution = MakeShared<FJsonObject>();
+		FontResolution->SetArrayField(TEXT("results"), FontResolutionValues);
 
 		TArray<TSharedPtr<FJsonValue>> DegradationValues;
 		TSet<FString> SeenDegradationKeys;
@@ -463,10 +593,10 @@ namespace DesignImportDiagnosticReport
 		Root->SetObjectField(TEXT("output"), Output);
 		Root->SetObjectField(TEXT("diagnostics"), Diagnostics);
 		Root->SetObjectField(TEXT("resources"), Resources);
+		Root->SetObjectField(TEXT("fontResolution"), FontResolution);
 		Root->SetObjectField(TEXT("effects"), Effects);
 		Root->SetArrayField(TEXT("recommendations"), RecommendationValues);
 
-		const FString ReportPath = BuildImportReportPath(Document);
 		IFileManager::Get().MakeDirectory(*FPaths::GetPath(ReportPath), true);
 		FString Payload;
 		TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Payload);

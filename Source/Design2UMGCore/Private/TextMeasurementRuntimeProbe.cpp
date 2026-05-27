@@ -82,6 +82,7 @@ namespace
 		Request.FontAssetPath = FFontResolver::FindFontAssetPath(FontFamily);
 		Request.TypefaceName = ResolveTypefaceName(FontFamily, FontWeight);
 		Request.LetterSpacing = LetterSpacing;
+		Request.bRequiresResolvedFontAsset = FFontResolver::HasInvalidProjectFontAsset(FontFamily);
 		return Request;
 	}
 
@@ -102,6 +103,7 @@ namespace
 		Request.FontSize = FontSize;
 		Request.FontAssetPath = FFontResolver::FindFontAssetPath(Node->Text.FontFamily);
 		Request.TypefaceName = ResolveTypefaceName(Node);
+		Request.bRequiresResolvedFontAsset = FFontResolver::HasInvalidProjectFontAsset(Node->Text.FontFamily);
 		Request.LetterSpacing = (Node->Text.LetterSpacing != 0.0f && FontSize > 0.0f)
 			? TextStyleUtils::ConvertLetterSpacingPxToTracking(Node->Text.LetterSpacing, Node->Text.FontSize, FontSize)
 			: 0;
@@ -117,6 +119,7 @@ namespace
 namespace RuntimeProbe
 {
 const float FallbackMeasureWidthScale = 0.60f;
+const float UnresolvedFontFallbackMeasureWidthScale = 1.05f;
 const float FallbackMeasureHeightScale = 1.5f;
 
 namespace
@@ -175,9 +178,9 @@ FVector2D MeasureTextSize(const FString& Text, float FontSize, const FString& Fo
 {
 	const FString RuntimeText = TextMeasurement::PrepareRuntimeTextContent(Text);
 	FVector2D MeasuredSize = FVector2D::ZeroVector;
-	if (TextMeasurementRuntimeProbe::TryMeasureText(
-		BuildTextMeasureRequest(RuntimeText, FontSize, FontFamily, FontWeight, LetterSpacing),
-		MeasuredSize))
+	const TextMeasurementRuntimeProbe::FTextMeasureRequest Request =
+		BuildTextMeasureRequest(RuntimeText, FontSize, FontFamily, FontWeight, LetterSpacing);
+	if (TextMeasurementRuntimeProbe::TryMeasureText(Request, MeasuredSize))
 	{
 		return MeasuredSize;
 	}
@@ -240,6 +243,10 @@ bool TextMeasurementRuntimeProbe::TryMeasureText(const FTextMeasureRequest& Requ
 	{
 		return false;
 	}
+	if (Request.bRequiresResolvedFontAsset && Request.FontAssetPath.IsEmpty())
+	{
+		return false;
+	}
 
 	TSharedRef<FSlateFontMeasure> FontMeasure = FSlateApplication::Get().GetRenderer()->GetFontMeasureService();
 	const FVector2D MeasuredSize = FontMeasure->Measure(Request.Text, BuildProbeFontInfo(Request));
@@ -256,6 +263,10 @@ bool TextMeasurementRuntimeProbe::TryMeasureTextBlockDesiredSize(const FTextBloc
 {
 	OutSize = FVector2D::ZeroVector;
 	if (Request.FontSize <= 0.0f || !IsAvailable())
+	{
+		return false;
+	}
+	if (Request.bRequiresResolvedFontAsset && Request.FontAssetPath.IsEmpty())
 	{
 		return false;
 	}

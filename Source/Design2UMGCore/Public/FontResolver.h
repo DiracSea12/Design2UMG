@@ -10,13 +10,31 @@ struct FDesignNode;
 struct FDesignFont;
 class UFont;
 
+struct DESIGN2UMGCORE_API FFontResolutionDiagnostic
+{
+	FString DeclarationKey;
+	FString DeclaredFamily;
+	FString DeclaredPostScriptName;
+	FString ResolvedAssetPath;
+	FString ResolvedTypeface;
+	FString ResolutionState;
+	FString Severity;
+	TArray<FString> IssueCodes;
+};
+
 struct DESIGN2UMGCORE_API FFontResolver
 {
 	/** Scan document for all used font families, compare with project assets, return missing list */
 	static TArray<FString> FindMissingFonts(const FDesignDocument& Document);
 
-	/** Look up cached asset path for a font family name. Returns empty if not found. */
+	/** Look up an explicit or exact /Game UFont asset path for a font family name. Returns empty if not found or ambiguous. */
 	static FString FindFontAssetPath(const FString& FontFamily);
+
+	/** Look up an explicit PostScript/family mapping before exact /Game family asset matching. */
+	static FString FindFontAssetPath(const FString& FontFamily, const FString& PostScriptName);
+
+	/** Look up configured project default font before engine default fallback. */
+	static FString FindDefaultFontAssetPath();
 
 	/** Resolve a known icon family/name pair to a concrete glyph string when the icon set ships codepoints. */
 	static FString FindKnownIconGlyph(const FString& FontFamily, const FString& IconName);
@@ -26,6 +44,26 @@ struct DESIGN2UMGCORE_API FFontResolver
 
 	/** Find best matching typeface name for a given weight. Returns empty if font not loaded. */
 	static FString FindBestTypeface(const FString& FontFamily, const FString& RequestedWeight);
+
+	/** Find best matching typeface name inside an already resolved UFont asset. */
+	static FString FindBestTypefaceForAssetPath(const FString& FontAssetPath, const FString& RequestedWeight);
+
+	/** Find an exact weight typeface inside an already resolved UFont asset. Returns empty when missing. */
+	static FString FindExactTypefaceForAssetPath(const FString& FontAssetPath, const FString& RequestedWeight);
+
+	/** Return true when the declaration is covered by an explicit settings mapping, even if the mapped asset is invalid. */
+	static bool HasExplicitFontMapping(const FString& FontFamily, const FString& PostScriptName = FString());
+
+	/** Return true when exactly one same-name project UFont exists but is rejected as unusable. */
+	static bool HasInvalidProjectFontAsset(const FString& FontFamily);
+
+	/** Resolve a font declaration into the shared diagnostic state used by import reports. */
+	static FFontResolutionDiagnostic ResolveFontDiagnostic(
+		const FString& FontFamily,
+		const FString& PostScriptName,
+		const FString& Weight,
+		const FString& Style,
+		bool bUnsupportedInput);
 
 	/** Parse a weight string ("bold", "700", etc.) to numeric value (100-900). */
 	static int32 ParseWeightValue(const FString& Weight);
@@ -41,15 +79,6 @@ struct DESIGN2UMGCORE_API FFontResolver
 		const FString& FontFamily,
 		const TMap<FString, FString>& Glyphs,
 		const TMap<FString, FString>& IconNames);
-
-	/** Register an editor-side callback that can attempt to import/resolve a missing font family. */
-	static void RegisterMissingFontResolver(TFunction<FString(const FString&)> InResolver);
-
-	/** Register an editor-side callback that can lazily prime icon glyph/name lookups for a family. */
-	static void RegisterKnownIconGlyphPrimer(TFunction<void(const FString&)> InPrimer);
-
-	/** Remove any editor-side resolver callbacks. */
-	static void ResetExternalResolvers();
 };
 
 

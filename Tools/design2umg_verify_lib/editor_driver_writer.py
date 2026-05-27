@@ -58,7 +58,7 @@ def _run():
             if driver_log_path:
                 if SPEC_MANIFEST_KEY != \"spec_path\":
                     _write_line(driver_log_path, f\"driver:run:{{spec_path}}\")
-            unreal.SystemLibrary.execute_console_command(world, f\"Design2UMG.AutomationRender {{spec_path}}\")
+            unreal.SystemLibrary.execute_console_command(world, f\"Design2UMG.AutomationRender {{spec_path}} --no-quit\")
         if driver_log_path:
             _write_line(driver_log_path, \"driver:quit\")
         unreal.SystemLibrary.execute_console_command(world, \"QUIT_EDITOR\")

@@ -15,6 +15,7 @@ struct FDesignTextNodeData
 {
 	FString Content;
 	FString FontFamily;
+	FString FontPostScriptName;
 	float FontSize = 16.0f;
 	FString FontWeight = TEXT("normal");
 	FString FontStyle = TEXT("normal");

@@ -94,14 +94,13 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Pencil Connection", meta = (DisplayName = "App Name (Optional)", ToolTip = "Override -app parameter. Leave empty to auto-detect from ~/.pencil/apps and running IDE processes (for example visual_studio_code / antigravity)."))
 	FString PencilAppName;
 
-	// ========== Font Import ==========
+	// ========== Font Resolution ==========
 
-	UPROPERTY(Config, EditAnywhere, Category = "Font Import", meta = (DisplayName = "Auto Import Fonts", ToolTip = "Automatically download and import fonts from .pen file URLs during import."))
-	bool bAutoImportFonts = false;
+	UPROPERTY(Config, EditAnywhere, Category = "Font Resolution", meta = (DisplayName = "Font Family → Font Asset", ToolTip = "Map design font family or PostScript name to an existing /Game UFont asset."))
+	TMap<FString, TSoftObjectPtr<UFont>> ExplicitFontMappings;
 
-	/** Whether to auto-import known web fonts (Inter/Geist/JetBrainsMono/Material Symbols, etc.) when family is used but not found locally. */
-	UPROPERTY(Config, EditAnywhere, Category = "Font Import", meta = (DisplayName = "Auto Import Known Web Fonts", ToolTip = "When a known font family is referenced but no local asset exists, try one-time auto import from curated public URLs."))
-	bool bAutoImportKnownWebFonts = false;
+	UPROPERTY(Config, EditAnywhere, Category = "Font Resolution", meta = (DisplayName = "Default Font Asset", ToolTip = "Project UFont reported as the diagnostic fallback candidate when no design font matches. Leave empty to report the engine default font."))
+	TSoftObjectPtr<UFont> DefaultFontAsset;
 
 	// ========== Icon Font ==========
 

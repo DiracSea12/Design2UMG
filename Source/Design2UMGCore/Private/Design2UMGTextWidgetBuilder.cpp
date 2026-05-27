@@ -55,6 +55,7 @@ namespace
 
 	void ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
 	{
+		FString ResolvedFontAssetPath;
 		const float ResolvedFontSize = TextMeasurement::ResolveTextFontSizeForUMG(Node);
 		if (ResolvedFontSize > 0)
 		{
@@ -62,20 +63,40 @@ namespace
 			Widget.TextStyle.SourceFontSize = Node->Text.FontSize;
 		}
 
-		if (!Node->Text.FontFamily.IsEmpty())
+		const bool bExplicitMapping = FFontResolver::HasExplicitFontMapping(Node->Text.FontFamily, Node->Text.FontPostScriptName);
+		FString Typeface;
+		if (!Node->Text.FontFamily.IsEmpty() || !Node->Text.FontPostScriptName.IsEmpty())
 		{
-			const FString AssetPath = FFontResolver::FindFontAssetPath(Node->Text.FontFamily);
-			Widget.Text.FontFamily = AssetPath.IsEmpty() ? Node->Text.FontFamily : AssetPath;
+			const FString AssetPath = FFontResolver::FindFontAssetPath(Node->Text.FontFamily, Node->Text.FontPostScriptName);
+			if (!AssetPath.IsEmpty())
+			{
+				const bool bMissingExplicitTypeface = bExplicitMapping
+					&& FFontResolver::FindExactTypefaceForAssetPath(AssetPath, Node->Text.FontWeight).IsEmpty();
+				if (!bMissingExplicitTypeface)
+				{
+					ResolvedFontAssetPath = AssetPath;
+					Widget.Text.FontFamily = AssetPath;
+				}
+			}
 		}
 
 		if (!Node->Text.FontWeight.IsEmpty())
 		{
-			FString Typeface = FFontResolver::FindBestTypeface(Node->Text.FontFamily, Node->Text.FontWeight);
-			if (Typeface.IsEmpty())
+			Typeface = bExplicitMapping
+				? FFontResolver::FindExactTypefaceForAssetPath(ResolvedFontAssetPath, Node->Text.FontWeight)
+				: FFontResolver::FindBestTypefaceForAssetPath(ResolvedFontAssetPath, Node->Text.FontWeight);
+			if (!bExplicitMapping && Typeface.IsEmpty())
+			{
+				Typeface = FFontResolver::FindBestTypeface(Node->Text.FontFamily, Node->Text.FontWeight);
+			}
+			if (!bExplicitMapping && Typeface.IsEmpty())
 			{
 				Typeface = DesignTypeMapper::MapFontWeight(Node->Text.FontWeight).ToString();
 			}
-			Widget.Text.TypefaceFontName = Typeface;
+			if (!Typeface.IsEmpty())
+			{
+				Widget.Text.TypefaceFontName = Typeface;
+			}
 		}
 
 		if (!Node->Text.FontStyle.IsEmpty())
@@ -259,22 +280,34 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 		return Escaped;
 	};
 
-	const auto ResolveFontAssetPath = [](const FString& FontFamily)
+	const auto ResolveFontAssetPath = [](const FString& FontFamily, const FString& PostScriptName, const FString& FontWeight)
 	{
-		if (FontFamily.IsEmpty())
+		if (FontFamily.IsEmpty() && PostScriptName.IsEmpty())
 		{
 			return FString();
 		}
 
-		const FString AssetPath = FFontResolver::FindFontAssetPath(FontFamily);
-		return AssetPath.IsEmpty() ? FontFamily : AssetPath;
+		const FString AssetPath = FFontResolver::FindFontAssetPath(FontFamily, PostScriptName);
+		if (FFontResolver::HasExplicitFontMapping(FontFamily, PostScriptName)
+			&& FFontResolver::FindExactTypefaceForAssetPath(AssetPath, FontWeight).IsEmpty())
+		{
+			return FString();
+		}
+		return AssetPath;
 	};
 
-	const auto ResolveTypefaceName = [](const FString& FontFamily, const FString& FontWeight)
+	const auto ResolveTypefaceName = [](const FString& FontFamily, const FString& PostScriptName, const FString& FontAssetPath, const FString& FontWeight)
 	{
 		const FString EffectiveWeight = FontWeight.IsEmpty() ? TEXT("normal") : FontWeight;
-		FString Typeface = FFontResolver::FindBestTypeface(FontFamily, EffectiveWeight);
-		if (Typeface.IsEmpty())
+		const bool bExplicitMapping = FFontResolver::HasExplicitFontMapping(FontFamily, PostScriptName);
+		FString Typeface = bExplicitMapping
+			? FFontResolver::FindExactTypefaceForAssetPath(FontAssetPath, EffectiveWeight)
+			: FFontResolver::FindBestTypefaceForAssetPath(FontAssetPath, EffectiveWeight);
+		if (!bExplicitMapping && Typeface.IsEmpty())
+		{
+			Typeface = FFontResolver::FindBestTypeface(FontFamily, EffectiveWeight);
+		}
+		if (!bExplicitMapping && Typeface.IsEmpty())
 		{
 			Typeface = DesignTypeMapper::MapFontWeight(EffectiveWeight).ToString();
 		}
@@ -284,6 +317,7 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 	const auto TextRunNeedsRichText = [](const FDesignTextRun& Run)
 	{
 		return !Run.FontFamily.IsEmpty()
+			|| !Run.FontPostScriptName.IsEmpty()
 			|| Run.FontSize.IsSet()
 			|| !Run.FontWeight.IsEmpty()
 			|| !Run.FontStyle.IsEmpty()
@@ -324,11 +358,29 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 		Result.RowName = FString::Printf(TEXT("d2u_run_%d"), RunIndex);
 		Result.Content = Run ? Run->Content : InNode->Text.Content;
 
-		const FString EffectiveFontFamily = (Run && !Run->FontFamily.IsEmpty()) ? Run->FontFamily : InNode->Text.FontFamily;
-		Result.FontFamily = ResolveFontAssetPath(EffectiveFontFamily);
-		Result.TypefaceFontName = ResolveTypefaceName(
-			EffectiveFontFamily,
-			(Run && !Run->FontWeight.IsEmpty()) ? Run->FontWeight : InNode->Text.FontWeight);
+		if (!Run || !Run->FontFamily.IsEmpty() || !Run->FontPostScriptName.IsEmpty())
+		{
+			const FString EffectiveFontFamily = (Run && !Run->FontFamily.IsEmpty()) ? Run->FontFamily : InNode->Text.FontFamily;
+			const FString EffectivePostScriptName = Run
+				? Run->FontPostScriptName
+				: InNode->Text.FontPostScriptName;
+			const FString EffectiveFontWeight = (Run && !Run->FontWeight.IsEmpty()) ? Run->FontWeight : InNode->Text.FontWeight;
+			Result.FontFamily = ResolveFontAssetPath(EffectiveFontFamily, EffectivePostScriptName, EffectiveFontWeight);
+			Result.TypefaceFontName = ResolveTypefaceName(
+				EffectiveFontFamily,
+				EffectivePostScriptName,
+				Result.FontFamily,
+				EffectiveFontWeight);
+		}
+		else if (!Run->FontWeight.IsEmpty())
+		{
+			const FString ParentFontAssetPath = ResolveFontAssetPath(InNode->Text.FontFamily, InNode->Text.FontPostScriptName, Run->FontWeight);
+			Result.TypefaceFontName = ResolveTypefaceName(
+				InNode->Text.FontFamily,
+				InNode->Text.FontPostScriptName,
+				ParentFontAssetPath,
+				Run->FontWeight);
+		}
 
 		const bool bRunHasFontSize = Run && Run->FontSize.IsSet();
 		const float EffectiveDesignFontSize = bRunHasFontSize ? Run->FontSize.GetValue() : InNode->Text.FontSize;

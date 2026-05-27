@@ -3,6 +3,7 @@
 #include "FontResolver.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGNotification.h"
+#include "Design2UMGSettings.h"
 #include "DesignSchema.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/AssetData.h"
@@ -17,16 +18,19 @@
 namespace
 {
 	TMap<FString, FString> GFontAssetCache;
-	TMap<FString, FString> GNormalizedProjectFontAssetIndex;
+	TMap<FString, TArray<FString>> GNormalizedProjectFontAssetIndex;
 	TMap<FString, TMap<FString, FString>> GKnownIconGlyphCache;
 	TMap<FString, TMap<FString, FString>> GKnownIconNameCache;
-	TFunction<FString(const FString&)> GMissingFontResolver;
-	TFunction<void(const FString&)> GKnownIconGlyphPrimer;
 	bool bProjectFontIndexBuilt = false;
-	thread_local bool bResolvingMissingFontExternally = false;
-	thread_local bool bPrimingKnownIconExternally = false;
 	FCriticalSection GFontResolverCacheMutex;
 	FCriticalSection GFontIndexMutex;
+
+	enum class EExplicitFontMappingResult : uint8
+	{
+		NoMapping,
+		Resolved,
+		Invalid
+	};
 
 	void CollectFontFamilies(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSet<FString>& OutFamilies);
 
@@ -52,54 +56,28 @@ namespace
 		}
 	}
 
-	bool IsTypefaceQualifierToken(const FString& Token)
-	{
-		const FString Normalized = NormalizeCompactResolverKey(Token);
-		static const TSet<FString> Qualifiers = {
-			TEXT("thin"),
-			TEXT("extralight"),
-			TEXT("ultralight"),
-			TEXT("light"),
-			TEXT("regular"),
-			TEXT("normal"),
-			TEXT("book"),
-			TEXT("roman"),
-			TEXT("medium"),
-			TEXT("semibold"),
-			TEXT("demibold"),
-			TEXT("bold"),
-			TEXT("extrabold"),
-			TEXT("ultrabold"),
-			TEXT("black"),
-			TEXT("heavy"),
-			TEXT("italic"),
-			TEXT("oblique"),
-		};
-		return Qualifiers.Contains(Normalized);
-	}
-
 	TArray<FString> BuildFontFamilyLookupKeys(const FString& FontFamily)
 	{
 		TArray<FString> Keys;
 		AddUniqueLookupKey(Keys, NormalizeFontFamilyKeyForResolver(FontFamily));
-
-		FString Tokenized = FontFamily;
-		Tokenized.ReplaceInline(TEXT("-"), TEXT(" "));
-		Tokenized.ReplaceInline(TEXT("_"), TEXT(" "));
-
-		TArray<FString> Tokens;
-		Tokenized.ParseIntoArrayWS(Tokens);
-		while (Tokens.Num() > 1 && IsTypefaceQualifierToken(Tokens.Last()))
-		{
-			Tokens.Pop();
-		}
-
-		if (Tokens.Num() > 0)
-		{
-			AddUniqueLookupKey(Keys, NormalizeFontFamilyKeyForResolver(FString::Join(Tokens, TEXT(" "))));
-		}
-
 		return Keys;
+	}
+
+	FString MakeTypefaceNameForWeight(const int32 Weight)
+	{
+		switch (Weight)
+		{
+		case 100: return TEXT("Thin");
+		case 200: return TEXT("ExtraLight");
+		case 300: return TEXT("Light");
+		case 400: return TEXT("Regular");
+		case 500: return TEXT("Medium");
+		case 600: return TEXT("SemiBold");
+		case 700: return TEXT("Bold");
+		case 800: return TEXT("ExtraBold");
+		case 900: return TEXT("Black");
+		default: return TEXT("Regular");
+		}
 	}
 
 	FString NormalizeIconNameKeyForResolver(const FString& InName)
@@ -118,52 +96,229 @@ namespace
 		return Key;
 	}
 
-	bool IsEngineAssetPath(const FString& ObjectPath)
-	{
-		return ObjectPath.StartsWith(TEXT("/Engine/"), ESearchCase::IgnoreCase);
-	}
-
 	bool IsAutomationImportedFontPath(const FString& ObjectPath)
 	{
 		return ObjectPath.Contains(TEXT("/Design2UMG/Automation/"), ESearchCase::IgnoreCase)
 			&& ObjectPath.Contains(TEXT("/ImportedFonts/"), ESearchCase::IgnoreCase);
 	}
 
+	bool IsProjectFontAssetPath(const FString& ObjectPath)
+	{
+		return ObjectPath.StartsWith(TEXT("/Game/"), ESearchCase::IgnoreCase)
+			&& !IsAutomationImportedFontPath(ObjectPath);
+	}
+
+	bool IsEngineFontAssetPath(const FString& ObjectPath)
+	{
+		return ObjectPath.StartsWith(TEXT("/Engine/EngineFonts/"), ESearchCase::IgnoreCase);
+	}
+
 	void IndexFontAssetName(const FString& AssetName, const FString& ObjectPath)
 	{
 		const FString Normalized = NormalizeFontFamilyKeyForResolver(AssetName);
-		if (!Normalized.IsEmpty())
+		if (!Normalized.IsEmpty() && IsProjectFontAssetPath(ObjectPath))
 		{
-			if (FString* ExistingPath = GNormalizedProjectFontAssetIndex.Find(Normalized))
-			{
-				const bool bExistingEngine = IsEngineAssetPath(*ExistingPath);
-				const bool bIncomingEngine = IsEngineAssetPath(ObjectPath);
-				const bool bExistingAutomation = IsAutomationImportedFontPath(*ExistingPath);
-				const bool bIncomingAutomation = IsAutomationImportedFontPath(ObjectPath);
-				if ((bExistingEngine && !bIncomingEngine)
-					|| (bExistingAutomation && !bIncomingAutomation))
-				{
-					*ExistingPath = ObjectPath;
-				}
-			}
-			else
-			{
-				GNormalizedProjectFontAssetIndex.Add(Normalized, ObjectPath);
-			}
+			GNormalizedProjectFontAssetIndex.FindOrAdd(Normalized).AddUnique(ObjectPath);
 		}
 	}
 
-	bool IsLoadableFontPath(const FString& ObjectPath)
+	bool FontHasUsableDefaultTypefaceEntry(const UFont* Font)
 	{
-		return !ObjectPath.IsEmpty() && LoadObject<UFont>(nullptr, *ObjectPath) != nullptr;
+		const FCompositeFont* Composite = Font ? Font->GetCompositeFont() : nullptr;
+		if (!Composite)
+		{
+			return false;
+		}
+
+		for (const FTypefaceEntry& Entry : Composite->DefaultTypeface.Fonts)
+		{
+			if (Entry.Font.HasFont())
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	bool IsUsableResolvedFontPath(const FString& ObjectPath)
+	{
+		if (!IsProjectFontAssetPath(ObjectPath) && !IsEngineFontAssetPath(ObjectPath))
+		{
+			return false;
+		}
+
+		return FontHasUsableDefaultTypefaceEntry(LoadObject<UFont>(nullptr, *ObjectPath));
+	}
+
+	bool IsLoadableProjectFontPath(const FString& ObjectPath)
+	{
+		return IsProjectFontAssetPath(ObjectPath) && IsUsableResolvedFontPath(ObjectPath);
+	}
+
+	bool TryResolveEngineFontAssetPath(const FString& NormalizedFamily, FString& OutPath)
+	{
+		if (NormalizedFamily.IsEmpty())
+		{
+			return false;
+		}
+
+		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+		TArray<FAssetData> FontAssets;
+		ARM.Get().GetAssetsByPath(FName(TEXT("/Engine/EngineFonts")), FontAssets, false);
+		for (const FAssetData& Asset : FontAssets)
+		{
+			if (Asset.AssetClassPath != UFont::StaticClass()->GetClassPathName())
+			{
+				continue;
+			}
+
+			if (NormalizeFontFamilyKeyForResolver(Asset.AssetName.ToString()) != NormalizedFamily)
+			{
+				continue;
+			}
+
+			const FString ObjectPath = Asset.GetObjectPathString();
+			if (IsUsableResolvedFontPath(ObjectPath))
+			{
+				OutPath = ObjectPath;
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	bool IsUsableExplicitFontPath(const FString& ObjectPath)
+	{
+		return IsProjectFontAssetPath(ObjectPath) && IsUsableResolvedFontPath(ObjectPath);
+	}
+
+	bool TryResolveDefaultFontPath(const TSoftObjectPtr<UFont>& FontAsset, FString& OutPath)
+	{
+		const FSoftObjectPath AssetPath = FontAsset.ToSoftObjectPath();
+		if (AssetPath.IsNull())
+		{
+			return false;
+		}
+
+		const FString ObjectPath = AssetPath.ToString();
+		if (!IsLoadableProjectFontPath(ObjectPath))
+		{
+			return false;
+		}
+
+		OutPath = ObjectPath;
+		return true;
+	}
+
+	EExplicitFontMappingResult ResolveExplicitFontMappingAsset(const TSoftObjectPtr<UFont>& FontAsset, FString& OutPath)
+	{
+		const FSoftObjectPath AssetPath = FontAsset.ToSoftObjectPath();
+		if (AssetPath.IsNull())
+		{
+			return EExplicitFontMappingResult::Invalid;
+		}
+
+		const FString ObjectPath = AssetPath.ToString();
+		if (!IsUsableExplicitFontPath(ObjectPath))
+		{
+			return EExplicitFontMappingResult::Invalid;
+		}
+
+		OutPath = ObjectPath;
+		return EExplicitFontMappingResult::Resolved;
+	}
+
+	EExplicitFontMappingResult TryResolveExplicitFontMapping(const FString& Family, const FString& PostScriptName, FString& OutPath)
+	{
+		const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+		if (!Settings)
+		{
+			return EExplicitFontMappingResult::NoMapping;
+		}
+
+		const auto TryResolveMappingKey = [&Settings, &OutPath](const FString& Key)
+		{
+			const FString TrimmedKey = Key.TrimStartAndEnd();
+			if (TrimmedKey.IsEmpty())
+			{
+				return EExplicitFontMappingResult::NoMapping;
+			}
+			if (const TSoftObjectPtr<UFont>* FontAsset = Settings->ExplicitFontMappings.Find(TrimmedKey))
+			{
+				return ResolveExplicitFontMappingAsset(*FontAsset, OutPath);
+			}
+			for (const TPair<FString, TSoftObjectPtr<UFont>>& Pair : Settings->ExplicitFontMappings)
+			{
+				if (Pair.Key.Equals(TrimmedKey, ESearchCase::IgnoreCase))
+				{
+					return ResolveExplicitFontMappingAsset(Pair.Value, OutPath);
+				}
+			}
+			return EExplicitFontMappingResult::NoMapping;
+		};
+
+		const EExplicitFontMappingResult PostScriptResult = TryResolveMappingKey(PostScriptName);
+		if (PostScriptResult != EExplicitFontMappingResult::NoMapping)
+		{
+			return PostScriptResult;
+		}
+
+		return TryResolveMappingKey(Family);
+	}
+
+	bool HasExplicitFontMappingKey(const FString& Key)
+	{
+		const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+		if (!Settings)
+		{
+			return false;
+		}
+
+		const FString TrimmedKey = Key.TrimStartAndEnd();
+		if (TrimmedKey.IsEmpty())
+		{
+			return false;
+		}
+
+		if (Settings->ExplicitFontMappings.Contains(TrimmedKey))
+		{
+			return true;
+		}
+
+		for (const TPair<FString, TSoftObjectPtr<UFont>>& Pair : Settings->ExplicitFontMappings)
+		{
+			if (Pair.Key.Equals(TrimmedKey, ESearchCase::IgnoreCase))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	TArray<FString> GetIndexedFontAssetPathsSnapshot(const FString& NormalizedFamily)
+	{
+		FScopeLock Lock(&GFontIndexMutex);
+		if (const TArray<FString>* IndexedPaths = GNormalizedProjectFontAssetIndex.Find(NormalizedFamily))
+		{
+			return *IndexedPaths;
+		}
+		return {};
 	}
 
 	bool TryGetIndexedFontAssetPath(const FString& NormalizedFamily, FString& OutPath)
 	{
-		FScopeLock Lock(&GFontIndexMutex);
-		if (const FString* IndexedPath = GNormalizedProjectFontAssetIndex.Find(NormalizedFamily))
+		const TArray<FString> IndexedPaths = GetIndexedFontAssetPathsSnapshot(NormalizedFamily);
+		if (IndexedPaths.Num() != 1)
 		{
-			OutPath = *IndexedPath;
+			return false;
+		}
+
+		if (IsLoadableProjectFontPath(IndexedPaths[0]))
+		{
+			OutPath = IndexedPaths[0];
 			return true;
 		}
 		return false;
@@ -173,20 +328,6 @@ namespace
 	{
 		FScopeLock Lock(&GFontIndexMutex);
 		GNormalizedProjectFontAssetIndex.Remove(NormalizedFamily);
-	}
-
-	TArray<FString> SnapshotMaterialSymbolAssetPaths()
-	{
-		TArray<FString> CandidatePaths;
-		FScopeLock Lock(&GFontIndexMutex);
-		for (const TPair<FString, FString>& Pair : GNormalizedProjectFontAssetIndex)
-		{
-			if (Pair.Key.Contains(TEXT("materialsymbol")) || Pair.Key.Contains(TEXT("materialicon")))
-			{
-				CandidatePaths.Add(Pair.Value);
-			}
-		}
-		return CandidatePaths;
 	}
 
 	bool TryGetKnownIconCacheValue(
@@ -207,18 +348,6 @@ namespace
 		return false;
 	}
 
-	TFunction<FString(const FString&)> GetMissingFontResolverCallback()
-	{
-		FScopeLock Lock(&GFontResolverCacheMutex);
-		return GMissingFontResolver;
-	}
-
-	TFunction<void(const FString&)> GetKnownIconGlyphPrimerCallback()
-	{
-		FScopeLock Lock(&GFontResolverCacheMutex);
-		return GKnownIconGlyphPrimer;
-	}
-
 	void BuildProjectFontAssetIndexIfNeeded()
 	{
 		FScopeLock Lock(&GFontIndexMutex);
@@ -235,6 +364,10 @@ namespace
 		AR.GetAssetsByClass(UFont::StaticClass()->GetClassPathName(), FontAssets, true);
 		for (const FAssetData& Asset : FontAssets)
 		{
+			if (!Asset.PackagePath.ToString().StartsWith(TEXT("/Game/"), ESearchCase::IgnoreCase))
+			{
+				continue;
+			}
 			IndexFontAssetName(Asset.AssetName.ToString(), Asset.GetObjectPathString());
 		}
 
@@ -248,45 +381,270 @@ namespace
 		GNormalizedProjectFontAssetIndex.Reset();
 	}
 
-	bool TryResolveEngineFontFallback(const FString& FontFamily, FString& OutAssetPath)
+	bool TryGetSingleLoadableProjectFontAssetPath(const FString& FontFamily, FString& OutPath)
 	{
 		const TArray<FString> LookupKeys = BuildFontFamilyLookupKeys(FontFamily);
-		if (LookupKeys.Num() == 0)
+		if (LookupKeys.IsEmpty())
 		{
 			return false;
 		}
 
+		BuildProjectFontAssetIndexIfNeeded();
+		for (const FString& LookupKey : LookupKeys)
+		{
+			if (TryGetIndexedFontAssetPath(LookupKey, OutPath))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	FString NormalizeFontStyleToken(const FString& Style)
+	{
+		const FString Normalized = Style.ToLower().TrimStartAndEnd();
+		return (Normalized == TEXT("italic") || Normalized == TEXT("oblique")) ? Normalized : TEXT("normal");
+	}
+
+	FString BuildFontDiagnosticDeclarationKey(
+		const FString& Family,
+		const FString& PostScriptName,
+		const FString& Weight,
+		const FString& Style)
+	{
+		const FString FamilyKey = Family.TrimStartAndEnd().IsEmpty()
+			? TEXT("unknown-family")
+			: NormalizeCompactResolverKey(Family);
+		const FString PostScriptKey = PostScriptName.TrimStartAndEnd().IsEmpty()
+			? TEXT("none")
+			: NormalizeCompactResolverKey(PostScriptName);
+		return FString::Printf(
+			TEXT("%s|%s|%d|%s"),
+			*FamilyKey,
+			*PostScriptKey,
+			FFontResolver::ParseWeightValue(Weight),
+			*NormalizeFontStyleToken(Style));
+	}
+
+	FString ResolveEngineDefaultFontAssetPath()
+	{
 		FString DefaultFontPackageName = UWidget::GetDefaultFontName();
 		if (DefaultFontPackageName.IsEmpty())
 		{
-			return false;
+			return FString();
 		}
 
 		DefaultFontPackageName = FPackageName::ObjectPathToPackageName(DefaultFontPackageName);
 		const FString DefaultFontAssetName = FPackageName::GetLongPackageAssetName(DefaultFontPackageName);
 		if (DefaultFontAssetName.IsEmpty())
 		{
-			return false;
+			return FString();
 		}
 
-		const FString DefaultFontPath = DefaultFontPackageName + TEXT(".") + DefaultFontAssetName;
-		const FString DefaultFontKey = NormalizeFontFamilyKeyForResolver(DefaultFontAssetName);
-		if (!DefaultFontPath.IsEmpty()
-			&& LookupKeys.Contains(DefaultFontKey)
-			&& IsLoadableFontPath(DefaultFontPath))
+		return DefaultFontPackageName + TEXT(".") + DefaultFontAssetName;
+	}
+
+	int32 CountProjectFontAssetCandidates(const FString& Family)
+	{
+		const FString NormalizedFamily = NormalizeCompactResolverKey(Family);
+		if (NormalizedFamily.IsEmpty() || NormalizedFamily == TEXT("unknown-family"))
 		{
-			OutAssetPath = DefaultFontPath;
-			return true;
+			return 0;
 		}
+
+		FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+		TArray<FAssetData> FontAssets;
+		AssetRegistryModule.Get().GetAssetsByClass(UFont::StaticClass()->GetClassPathName(), FontAssets, true);
+
+		TSet<FString> MatchingObjectPaths;
+		for (const FAssetData& Asset : FontAssets)
+		{
+			const FString ObjectPath = Asset.GetObjectPathString();
+			if (IsProjectFontAssetPath(ObjectPath)
+				&& NormalizeCompactResolverKey(Asset.AssetName.ToString()) == NormalizedFamily)
+			{
+				MatchingObjectPaths.Add(ObjectPath);
+			}
+		}
+		return MatchingObjectPaths.Num();
+	}
+
+	void AddFontDiagnosticIssue(FFontResolutionDiagnostic& Diagnostic, const TCHAR* IssueCode)
+	{
+		Diagnostic.IssueCodes.Add(FString(IssueCode));
+	}
+
+}
+
+FString FFontResolver::FindFontAssetPath(const FString& FontFamily, const FString& PostScriptName)
+{
+	FString ExplicitPath;
+	const EExplicitFontMappingResult MappingResult = TryResolveExplicitFontMapping(FontFamily, PostScriptName, ExplicitPath);
+	if (MappingResult == EExplicitFontMappingResult::Resolved)
+	{
+		return ExplicitPath;
+	}
+	if (MappingResult == EExplicitFontMappingResult::Invalid)
+	{
+		return FString();
+	}
+
+	if (!PostScriptName.TrimStartAndEnd().IsEmpty() && FontFamily.TrimStartAndEnd().IsEmpty())
+	{
+		return FString();
+	}
+
+	return FindFontAssetPath(FontFamily);
+}
+
+FString FFontResolver::FindDefaultFontAssetPath()
+{
+	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+	FString DefaultPath;
+	if (Settings && TryResolveDefaultFontPath(Settings->DefaultFontAsset, DefaultPath))
+	{
+		return DefaultPath;
+	}
+	return FString();
+}
+
+bool FFontResolver::HasExplicitFontMapping(const FString& FontFamily, const FString& PostScriptName)
+{
+	return HasExplicitFontMappingKey(PostScriptName) || HasExplicitFontMappingKey(FontFamily);
+}
+
+bool FFontResolver::HasInvalidProjectFontAsset(const FString& FontFamily)
+{
+	const TArray<FString> LookupKeys = BuildFontFamilyLookupKeys(FontFamily);
+	if (LookupKeys.IsEmpty())
+	{
 		return false;
 	}
 
+	BuildProjectFontAssetIndexIfNeeded();
+	for (const FString& LookupKey : LookupKeys)
+	{
+		const TArray<FString> IndexedPaths = GetIndexedFontAssetPathsSnapshot(LookupKey);
+		if (IndexedPaths.Num() == 1 && !IsLoadableProjectFontPath(IndexedPaths[0]))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+FFontResolutionDiagnostic FFontResolver::ResolveFontDiagnostic(
+	const FString& FontFamily,
+	const FString& PostScriptName,
+	const FString& Weight,
+	const FString& Style,
+	const bool bUnsupportedInput)
+{
+	FFontResolutionDiagnostic Diagnostic;
+	Diagnostic.DeclarationKey = BuildFontDiagnosticDeclarationKey(FontFamily, PostScriptName, Weight, Style);
+	Diagnostic.DeclaredFamily = FontFamily.TrimStartAndEnd().IsEmpty() ? TEXT("unknown-family") : FontFamily;
+	Diagnostic.DeclaredPostScriptName = PostScriptName;
+	Diagnostic.ResolutionState = TEXT("default-font");
+	Diagnostic.Severity = TEXT("warning");
+
+	bool bAllowFallbackAsset = true;
+	if (bUnsupportedInput)
+	{
+		Diagnostic.ResolutionState = TEXT("unsupported-input");
+		AddFontDiagnosticIssue(Diagnostic, TEXT("unsupported-font-source"));
+	}
+	else
+	{
+		FString ExplicitPath;
+		const EExplicitFontMappingResult ExplicitMappingResult = TryResolveExplicitFontMapping(FontFamily, PostScriptName, ExplicitPath);
+		if (ExplicitMappingResult == EExplicitFontMappingResult::Invalid)
+		{
+			Diagnostic.ResolutionState = TEXT("rejected");
+			Diagnostic.Severity = TEXT("error");
+			bAllowFallbackAsset = false;
+			AddFontDiagnosticIssue(Diagnostic, TEXT("invalid-explicit-font-mapping"));
+		}
+		else
+		{
+			Diagnostic.ResolvedAssetPath = FindFontAssetPath(FontFamily, PostScriptName);
+			if (!Diagnostic.ResolvedAssetPath.IsEmpty())
+			{
+				if (IsEngineFontAssetPath(Diagnostic.ResolvedAssetPath))
+				{
+					AddFontDiagnosticIssue(Diagnostic, TEXT("missing-project-font"));
+				}
+				else if (ExplicitMappingResult == EExplicitFontMappingResult::Resolved)
+				{
+					Diagnostic.ResolvedTypeface = FindExactTypefaceForAssetPath(Diagnostic.ResolvedAssetPath, Weight);
+					if (Diagnostic.ResolvedTypeface.IsEmpty())
+					{
+						Diagnostic.ResolutionState = TEXT("rejected");
+						Diagnostic.Severity = TEXT("error");
+						Diagnostic.ResolvedAssetPath.Empty();
+						bAllowFallbackAsset = false;
+						AddFontDiagnosticIssue(Diagnostic, TEXT("missing-explicit-font-typeface"));
+					}
+					else
+					{
+						Diagnostic.ResolutionState = TEXT("exact");
+						Diagnostic.Severity = TEXT("info");
+					}
+				}
+				else
+				{
+					Diagnostic.ResolvedTypeface = FindBestTypefaceForAssetPath(Diagnostic.ResolvedAssetPath, Weight);
+					Diagnostic.ResolutionState = TEXT("exact");
+					Diagnostic.Severity = TEXT("info");
+				}
+			}
+			else if (FontFamily.TrimStartAndEnd().IsEmpty())
+			{
+				AddFontDiagnosticIssue(Diagnostic, TEXT("missing-family"));
+			}
+			else if (CountProjectFontAssetCandidates(FontFamily) > 1)
+			{
+				Diagnostic.ResolutionState = TEXT("ambiguous");
+				AddFontDiagnosticIssue(Diagnostic, TEXT("ambiguous-project-font"));
+			}
+			else
+			{
+				AddFontDiagnosticIssue(Diagnostic, TEXT("missing-project-font"));
+			}
+		}
+	}
+
+	if (Diagnostic.ResolvedAssetPath.IsEmpty() && bAllowFallbackAsset)
+	{
+		Diagnostic.ResolvedAssetPath = FindDefaultFontAssetPath();
+		if (Diagnostic.ResolvedAssetPath.IsEmpty())
+		{
+			Diagnostic.ResolvedAssetPath = ResolveEngineDefaultFontAssetPath();
+		}
+	}
+	if (Diagnostic.ResolvedTypeface.IsEmpty() && Diagnostic.ResolutionState != TEXT("rejected"))
+	{
+		Diagnostic.ResolvedTypeface = TEXT("Regular");
+	}
+
+	return Diagnostic;
 }
 
 FString FFontResolver::FindFontAssetPath(const FString& FontFamily)
 {
 	if (FontFamily.TrimStartAndEnd().IsEmpty())
 		return FString();
+
+	FString ExplicitPath;
+	const EExplicitFontMappingResult MappingResult = TryResolveExplicitFontMapping(FontFamily, FString(), ExplicitPath);
+	if (MappingResult == EExplicitFontMappingResult::Resolved)
+	{
+		return ExplicitPath;
+	}
+	if (MappingResult == EExplicitFontMappingResult::Invalid)
+	{
+		return FString();
+	}
 
 	const FString NormalizedFamily = NormalizeFontFamilyKeyForResolver(FontFamily);
 	const TArray<FString> LookupKeys = BuildFontFamilyLookupKeys(FontFamily);
@@ -303,7 +661,7 @@ FString FFontResolver::FindFontAssetPath(const FString& FontFamily)
 	}
 	if (bHasCachedPath)
 	{
-		if (IsLoadableFontPath(CachedPath))
+		if (IsUsableResolvedFontPath(CachedPath))
 		{
 			return CachedPath;
 		}
@@ -320,7 +678,7 @@ FString FFontResolver::FindFontAssetPath(const FString& FontFamily)
 			continue;
 		}
 
-		if (IsLoadableFontPath(IndexedPath))
+		if (IsLoadableProjectFontPath(IndexedPath))
 		{
 			FScopeLock Lock(&GFontResolverCacheMutex);
 			GFontAssetCache.FindOrAdd(NormalizedFamily) = IndexedPath;
@@ -330,48 +688,14 @@ FString FFontResolver::FindFontAssetPath(const FString& FontFamily)
 		RemoveIndexedFontAssetPath(LookupKey);
 	}
 
-	// Material Symbols families differ by variant suffix (Sharp/Rounded/Outlined).
-	// If exact family name is absent, resolve to any imported Material Symbols asset.
-	bool bRequestsMaterialSymbolFamily = false;
 	for (const FString& LookupKey : LookupKeys)
 	{
-		if (LookupKey.Contains(TEXT("materialsymbol")) || LookupKey.Contains(TEXT("materialicon")))
-		{
-			bRequestsMaterialSymbolFamily = true;
-			break;
-		}
-	}
-	if (bRequestsMaterialSymbolFamily)
-	{
-		for (const FString& CandidatePath : SnapshotMaterialSymbolAssetPaths())
-		{
-			if (IsLoadableFontPath(CandidatePath))
-			{
-				FScopeLock Lock(&GFontResolverCacheMutex);
-				GFontAssetCache.FindOrAdd(NormalizedFamily) = CandidatePath;
-				return CandidatePath;
-			}
-		}
-	}
-
-	FString EngineFallbackPath;
-	if (TryResolveEngineFontFallback(FontFamily, EngineFallbackPath))
-	{
-		FScopeLock Lock(&GFontResolverCacheMutex);
-		GFontAssetCache.FindOrAdd(NormalizedFamily) = EngineFallbackPath;
-		return EngineFallbackPath;
-	}
-
-	const TFunction<FString(const FString&)> MissingFontResolver = GetMissingFontResolverCallback();
-	if (MissingFontResolver && !bResolvingMissingFontExternally)
-	{
-		TGuardValue<bool> GuardResolvingExternal(bResolvingMissingFontExternally, true);
-		FString ImportedPath = MissingFontResolver(FontFamily);
-		if (IsLoadableFontPath(ImportedPath))
+		FString EngineFontPath;
+		if (TryResolveEngineFontAssetPath(LookupKey, EngineFontPath))
 		{
 			FScopeLock Lock(&GFontResolverCacheMutex);
-			GFontAssetCache.FindOrAdd(NormalizedFamily) = ImportedPath;
-			return ImportedPath;
+			GFontAssetCache.FindOrAdd(NormalizedFamily) = EngineFontPath;
+			return EngineFontPath;
 		}
 	}
 
@@ -402,17 +726,6 @@ FString FFontResolver::FindKnownIconGlyph(const FString& FontFamily, const FStri
 		return Glyph;
 	}
 
-	const TFunction<void(const FString&)> KnownIconGlyphPrimer = GetKnownIconGlyphPrimerCallback();
-	if (KnownIconGlyphPrimer && !bPrimingKnownIconExternally)
-	{
-		TGuardValue<bool> GuardPrimingExternal(bPrimingKnownIconExternally, true);
-		KnownIconGlyphPrimer(FontFamily);
-		if (TryGetKnownIconCacheValue(GKnownIconGlyphCache, NormalizedFamily, NormalizedIcon, Glyph))
-		{
-			return Glyph;
-		}
-	}
-
 	return FString();
 }
 
@@ -428,17 +741,6 @@ FString FFontResolver::FindKnownIconNameByGlyph(const FString& FontFamily, const
 	if (TryGetKnownIconCacheValue(GKnownIconNameCache, NormalizedFamily, Glyph, IconName))
 	{
 		return IconName;
-	}
-
-	const TFunction<void(const FString&)> KnownIconGlyphPrimer = GetKnownIconGlyphPrimerCallback();
-	if (KnownIconGlyphPrimer && !bPrimingKnownIconExternally)
-	{
-		TGuardValue<bool> GuardPrimingExternal(bPrimingKnownIconExternally, true);
-		KnownIconGlyphPrimer(FontFamily);
-		if (TryGetKnownIconCacheValue(GKnownIconNameCache, NormalizedFamily, Glyph, IconName))
-		{
-			return IconName;
-		}
 	}
 
 	return FString();
@@ -463,6 +765,11 @@ void FFontResolver::RegisterFontAssetPath(const FString& FontFamily, const FStri
 		return;
 	}
 
+	if (!IsLoadableProjectFontPath(ObjectPath))
+	{
+		return;
+	}
+
 	{
 		FScopeLock Lock(&GFontResolverCacheMutex);
 		GFontAssetCache.FindOrAdd(NormalizedFamily) = ObjectPath;
@@ -470,7 +777,7 @@ void FFontResolver::RegisterFontAssetPath(const FString& FontFamily, const FStri
 
 	{
 		FScopeLock Lock(&GFontIndexMutex);
-		GNormalizedProjectFontAssetIndex.FindOrAdd(NormalizedFamily) = ObjectPath;
+		GNormalizedProjectFontAssetIndex.FindOrAdd(NormalizedFamily).AddUnique(ObjectPath);
 	}
 }
 
@@ -488,25 +795,6 @@ void FFontResolver::RegisterKnownIconGlyphs(
 	FScopeLock Lock(&GFontResolverCacheMutex);
 	GKnownIconGlyphCache.Add(NormalizedFamily, Glyphs);
 	GKnownIconNameCache.Add(NormalizedFamily, IconNames);
-}
-
-void FFontResolver::RegisterMissingFontResolver(TFunction<FString(const FString&)> InResolver)
-{
-	FScopeLock Lock(&GFontResolverCacheMutex);
-	GMissingFontResolver = MoveTemp(InResolver);
-}
-
-void FFontResolver::RegisterKnownIconGlyphPrimer(TFunction<void(const FString&)> InPrimer)
-{
-	FScopeLock Lock(&GFontResolverCacheMutex);
-	GKnownIconGlyphPrimer = MoveTemp(InPrimer);
-}
-
-void FFontResolver::ResetExternalResolvers()
-{
-	FScopeLock Lock(&GFontResolverCacheMutex);
-	GMissingFontResolver = nullptr;
-	GKnownIconGlyphPrimer = nullptr;
 }
 
 int32 FFontResolver::ParseWeightValue(const FString& Weight)
@@ -550,9 +838,20 @@ int32 WeightFromTypefaceName(const FString& Name)
 
 FString FFontResolver::FindBestTypeface(const FString& FontFamily, const FString& RequestedWeight)
 {
-	FString AssetPath = FindFontAssetPath(FontFamily);
+	const FString AssetPath = FindFontAssetPath(FontFamily);
 	if (AssetPath.IsEmpty())
 		return FString();
+
+	return FindBestTypefaceForAssetPath(AssetPath, RequestedWeight);
+}
+
+FString FFontResolver::FindBestTypefaceForAssetPath(const FString& FontAssetPath, const FString& RequestedWeight)
+{
+	const FString AssetPath = FontAssetPath.TrimStartAndEnd();
+	if (!IsProjectFontAssetPath(AssetPath) && !IsEngineFontAssetPath(AssetPath))
+	{
+		return FString();
+	}
 
 	UFont* Font = LoadObject<UFont>(nullptr, *AssetPath);
 	const FCompositeFont* Composite = Font ? Font->GetCompositeFont() : nullptr;
@@ -575,9 +874,36 @@ FString FFontResolver::FindBestTypeface(const FString& FontFamily, const FString
 		}
 	}
 
-	UE_LOG(LogDesign2UMG, Verbose, TEXT("FontResolver: family='%s' requested='%s' selected='%s' entries=%d"),
-		*FontFamily, *RequestedWeight, *BestName, Composite->DefaultTypeface.Fonts.Num());
+	UE_LOG(LogDesign2UMG, Verbose, TEXT("FontResolver: asset='%s' requested='%s' selected='%s' entries=%d"),
+		*AssetPath, *RequestedWeight, *BestName, Composite->DefaultTypeface.Fonts.Num());
 	return BestName;
+}
+
+FString FFontResolver::FindExactTypefaceForAssetPath(const FString& FontAssetPath, const FString& RequestedWeight)
+{
+	const FString AssetPath = FontAssetPath.TrimStartAndEnd();
+	if (!IsProjectFontAssetPath(AssetPath) && !IsEngineFontAssetPath(AssetPath))
+	{
+		return FString();
+	}
+
+	UFont* Font = LoadObject<UFont>(nullptr, *AssetPath);
+	const FCompositeFont* Composite = Font ? Font->GetCompositeFont() : nullptr;
+	if (!Composite || Composite->DefaultTypeface.Fonts.Num() == 0)
+	{
+		return FString();
+	}
+
+	const FString ExpectedName = MakeTypefaceNameForWeight(ParseWeightValue(RequestedWeight));
+	for (const FTypefaceEntry& Entry : Composite->DefaultTypeface.Fonts)
+	{
+		if (Entry.Name.ToString().Equals(ExpectedName, ESearchCase::IgnoreCase))
+		{
+			return Entry.Name.ToString();
+		}
+	}
+
+	return FString();
 }
 
 TArray<FString> FFontResolver::FindMissingFonts(const FDesignDocument& Document)
@@ -597,13 +923,27 @@ TArray<FString> FFontResolver::FindMissingFonts(const FDesignDocument& Document)
 	if (UsedFamilies.Num() == 0)
 		return {};
 
-	// Find missing fonts by using FindFontAssetPath fuzzy matching.
-	// This keeps result consistent with runtime resolution behavior.
 	TArray<FString> Missing;
+	TArray<FString> InvalidProjectFonts;
 	for (const FString& Family : UsedFamilies)
 	{
-		if (FindFontAssetPath(Family).IsEmpty())
+		FString ProjectFontPath;
+		if (!TryGetSingleLoadableProjectFontAssetPath(Family, ProjectFontPath))
+		{
 			Missing.Add(Family);
+			BuildProjectFontAssetIndexIfNeeded();
+			for (const FString& LookupKey : BuildFontFamilyLookupKeys(Family))
+			{
+				for (const FString& IndexedPath : GetIndexedFontAssetPathsSnapshot(LookupKey))
+				{
+					UFont* Font = IsProjectFontAssetPath(IndexedPath) ? LoadObject<UFont>(nullptr, *IndexedPath) : nullptr;
+					if (Font && !FontHasUsableDefaultTypefaceEntry(Font))
+					{
+						InvalidProjectFonts.AddUnique(FString::Printf(TEXT("%s (%s)"), *Family, *IndexedPath));
+					}
+				}
+			}
+		}
 	}
 
 	if (Missing.Num() > 0)
@@ -613,6 +953,14 @@ TArray<FString> FFontResolver::FindMissingFonts(const FDesignDocument& Document)
 		FDesign2UMGNotification::Warning(
 			FText::Format(LOCTEXT("MissingFonts", "Design2UMG: {0} font(s) not found in project: {1}"),
 				FText::AsNumber(Missing.Num()), FText::FromString(List)));
+	}
+	if (InvalidProjectFonts.Num() > 0)
+	{
+		const FString List = FString::Join(InvalidProjectFonts, TEXT(", "));
+		UE_LOG(LogDesign2UMG, Warning, TEXT("Invalid project font assets: %s"), *List);
+		FDesign2UMGNotification::Warning(
+			FText::Format(LOCTEXT("InvalidProjectFonts", "Design2UMG: {0} project font asset(s) are invalid. Reimport them as UFont assets with a valid default typeface: {1}"),
+				FText::AsNumber(InvalidProjectFonts.Num()), FText::FromString(List)));
 	}
 
 	return Missing;

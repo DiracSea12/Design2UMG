@@ -94,6 +94,7 @@ void ApplyNodeTextStyleProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesig
 	FString FontFamily;
 	if (JsonObj->TryGetStringField(TEXT("fontFamily"), FontFamily))
 		OutNode.Text.FontFamily = Resolver.ResolveString(FontFamily);
+	JsonObj->TryGetStringField(TEXT("fontPostScriptName"), OutNode.Text.FontPostScriptName);
 	TryGetResolvedNumberField(JsonObj, TEXT("fontSize"), Resolver, OutNode.Text.FontSize);
 	JsonObj->TryGetStringField(TEXT("fontWeight"), OutNode.Text.FontWeight);
 	JsonObj->TryGetStringField(TEXT("fontStyle"), OutNode.Text.FontStyle);

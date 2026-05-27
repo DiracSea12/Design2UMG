@@ -20,6 +20,7 @@ void ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& Ou
 	}
 
 	OutNode.Text.FontFamily = GetString(Style, TEXT("fontFamily"));
+	OutNode.Text.FontPostScriptName = GetString(Style, TEXT("fontPostScriptName"));
 	OutNode.Text.FontSize = GetNumber(Style, TEXT("fontSize"), 16.0);
 	OutNode.Text.FontStyle = GetString(Style, TEXT("fontStyle"), TEXT("normal"));
 

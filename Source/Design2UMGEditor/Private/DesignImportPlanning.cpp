@@ -6,9 +6,9 @@
 #include "Design2UMGLog.h"
 #include "Design2UMGNotifications.h"
 #include "Design2UMGSettings.h"
-#include "FontImport/DesignFontImportService.h"
 #include "DesignImageBakeUtils.h"
 #include "DesignRemoteImageImporter.h"
+#include "FontResolver.h"
 #include "UMGJsonParser.h"
 
 namespace
@@ -38,7 +38,7 @@ namespace
 		FUMGWidgetData& OutPreparedData,
 		const FDesign2UMGConversionSettings& ConversionSettings)
 	{
-		DesignFontImportService::PrepareDocumentFonts(Document);
+		FFontResolver::FindMissingFonts(Document);
 		DesignImageBakeUtils::BakeDocumentLocalImageBlendOverlays(
 			Document,
 			FString(),

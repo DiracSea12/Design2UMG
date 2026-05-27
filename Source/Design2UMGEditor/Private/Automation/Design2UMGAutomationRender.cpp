@@ -7,7 +7,6 @@
 #include "Design2UMGLog.h"
 #include "Design2UMGNotifications.h"
 #include "Design2UMGSettings.h"
-#include "FontImport/DesignFontImportService.h"
 #include "DesignImportPipeline.h"
 #include "DesignImportUtils.h"
 #include "DesignPathRasterizer.h"
@@ -24,6 +23,7 @@
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Widget.h"
+#include "Engine/Texture2D.h"
 #include "WidgetBlueprint.h"
 #include "Dom/JsonObject.h"
 #include "Framework/Application/SlateApplication.h"
@@ -301,7 +301,7 @@ namespace
 			return false;
 		}
 
-		DesignFontImportService::PrepareDocumentFonts(OutDocument);
+		FFontResolver::FindMissingFonts(OutDocument);
 		OutAnalysis = DesignImportPipeline::AnalyzeImport(OutDocument, FImportAnalysisInput{ true });
 		return true;
 	}
@@ -331,8 +331,6 @@ namespace
 		}
 		TextMeasurement::ResetCacheForAutomationBoundary();
 		FFontResolver::ClearCache();
-		FFontResolver::ResetExternalResolvers();
-		DesignFontImportService::ResetTransientState();
 		FDesignPathRasterizer::ClearCache();
 		FProceduralShapeGenerator::ReleaseTransientTextures();
 		CollectGarbage(RF_NoFlags, true);
@@ -415,31 +413,26 @@ namespace
 			&& NormalizedPath.Contains(TEXT("/ImportedFonts/"), ESearchCase::CaseSensitive);
 	}
 
-	bool RefreshAutomationImportedFontPackages(const FString& FontImportPath, FString& OutError)
+	bool RefreshAutomationPackagesInDirectory(const FString& PackagePath, const TCHAR* Description, FString& OutError)
 	{
-		const FString NormalizedPath = NormalizeAutomationPackagePath(FontImportPath);
-		if (!IsAutomationImportedFontPath(NormalizedPath))
+		const FString NormalizedPath = NormalizeAutomationPackagePath(PackagePath);
+		const FString PackageDirectory = FPackageName::LongPackageNameToFilename(NormalizedPath, TEXT(""));
+		if (PackageDirectory.IsEmpty() || !IFileManager::Get().DirectoryExists(*PackageDirectory))
 		{
 			return true;
 		}
 
-		const FString FontDirectory = FPackageName::LongPackageNameToFilename(NormalizedPath, TEXT(""));
-		if (FontDirectory.IsEmpty() || !IFileManager::Get().DirectoryExists(*FontDirectory))
-		{
-			return true;
-		}
-
-		TArray<FString> FontAssetFiles;
-		IFileManager::Get().FindFiles(FontAssetFiles, *(FontDirectory / TEXT("*.uasset")), true, false);
-		if (FontAssetFiles.Num() == 0)
+		TArray<FString> AssetFiles;
+		IFileManager::Get().FindFiles(AssetFiles, *(PackageDirectory / TEXT("*.uasset")), true, false);
+		if (AssetFiles.Num() == 0)
 		{
 			return true;
 		}
 
 		FlushAsyncLoading();
-		for (const FString& FontAssetFile : FontAssetFiles)
+		for (const FString& AssetFile : AssetFiles)
 		{
-			const FString AssetName = FPaths::GetBaseFilename(FontAssetFile);
+			const FString AssetName = FPaths::GetBaseFilename(AssetFile);
 			if (AssetName.IsEmpty())
 			{
 				continue;
@@ -453,20 +446,100 @@ namespace
 				if (!Package)
 				{
 					OutError = FString::Printf(
-						TEXT("Failed to load automation imported font package before asset render: %s"),
+						TEXT("Failed to load %s package before asset render: %s"),
+						Description,
 						*PackageName);
 					return false;
 				}
+			}
+			else
+			{
+				ResetLoaders(static_cast<UObject*>(Package));
+				if (!ReloadPackage(Package, LOAD_None))
+				{
+					OutError = FString::Printf(
+						TEXT("Failed to reload %s package before asset render: %s"),
+						Description,
+						*PackageName);
+					return false;
+				}
+			}
+
+			if (UTexture2D* Texture = FindObject<UTexture2D>(Package, *AssetName))
+			{
+				Texture->ConditionalPostLoad();
+				Texture->FinishCachePlatformData();
+				Texture->UpdateResource();
+			}
+		}
+
+		FlushRenderingCommands();
+		CollectGarbage(RF_NoFlags, true);
+		return true;
+	}
+
+	bool RefreshAutomationImportedFontPackages(const FString& FontImportPath, FString& OutError)
+	{
+		const FString NormalizedPath = NormalizeAutomationPackagePath(FontImportPath);
+		if (!IsAutomationImportedFontPath(NormalizedPath))
+		{
+			return true;
+		}
+
+		return RefreshAutomationPackagesInDirectory(NormalizedPath, TEXT("automation imported font"), OutError);
+	}
+
+	bool RefreshAutomationTextureResourcesInDirectory(const FString& PackagePath, const TCHAR* Description, FString& OutError)
+	{
+		const FString NormalizedPath = NormalizeAutomationPackagePath(PackagePath);
+		const FString PackageDirectory = FPackageName::LongPackageNameToFilename(NormalizedPath, TEXT(""));
+		if (PackageDirectory.IsEmpty() || !IFileManager::Get().DirectoryExists(*PackageDirectory))
+		{
+			return true;
+		}
+
+		TArray<FString> AssetFiles;
+		IFileManager::Get().FindFiles(AssetFiles, *(PackageDirectory / TEXT("*.uasset")), true, false);
+		if (AssetFiles.Num() == 0)
+		{
+			return true;
+		}
+
+		FlushAsyncLoading();
+		for (const FString& AssetFile : AssetFiles)
+		{
+			const FString AssetName = FPaths::GetBaseFilename(AssetFile);
+			if (AssetName.IsEmpty())
+			{
 				continue;
 			}
 
-			ResetLoaders(static_cast<UObject*>(Package));
-			if (!ReloadPackage(Package, LOAD_None))
+			const FString PackageName = NormalizeAutomationPackagePath(NormalizedPath / AssetName);
+			UPackage* Package = FindPackage(nullptr, *PackageName);
+			if (!Package)
 			{
-				OutError = FString::Printf(
-					TEXT("Failed to reload automation imported font package before asset render: %s"),
-					*PackageName);
-				return false;
+				Package = LoadPackage(nullptr, *PackageName, LOAD_None);
+				if (!Package)
+				{
+					OutError = FString::Printf(
+						TEXT("Failed to load %s package before asset render: %s"),
+						Description,
+						*PackageName);
+					return false;
+				}
+			}
+
+			UTexture2D* Texture = FindObject<UTexture2D>(Package, *AssetName);
+			if (!Texture)
+			{
+				const FString ObjectPath = PackageName + TEXT(".") + AssetName;
+				Texture = LoadObject<UTexture2D>(nullptr, *ObjectPath);
+			}
+			if (Texture)
+			{
+				Texture->ConditionalPostLoad();
+				Texture->FinishCachePlatformData();
+				Texture->UpdateResource();
 			}
 		}
 
@@ -486,6 +559,19 @@ namespace
 		const FString ParentPath = FPaths::GetPath(NormalizedOutputPath);
 		const FString ImportRoot = ParentPath.IsEmpty() ? NormalizedOutputPath : ParentPath;
 		return NormalizeAutomationPackagePath(ImportRoot / TEXT("ImportedFonts"));
+	}
+
+	bool RefreshGeneratedTexturePackagesForAutomationRender(const FString& GeneratedAssetPath, FString& OutError)
+	{
+		const FString PackageName = FPackageName::ObjectPathToPackageName(GeneratedAssetPath);
+		if (PackageName.IsEmpty())
+		{
+			return true;
+		}
+
+		const FString PackagePath = FPaths::GetPath(PackageName);
+		return RefreshAutomationTextureResourcesInDirectory(PackagePath / TEXT("D2U_PathTextures"), TEXT("automation path texture"), OutError)
+			&& RefreshAutomationTextureResourcesInDirectory(PackagePath / TEXT("D2U_ProceduralTextures"), TEXT("automation procedural texture"), OutError);
 	}
 
 	bool ClearDefaultAutomationOutputAssets(const FString& OutputPath, FString& OutError)
@@ -861,9 +947,9 @@ namespace Design2UMGAutomationRender
 			return true;
 		}
 
-		return ReloadAssetPackageForAutomationRender(
-			NormalizeWidgetBlueprintObjectPath(GeneratedAssetPath),
-			OutError);
+		const FString ObjectPath = NormalizeWidgetBlueprintObjectPath(GeneratedAssetPath);
+		return RefreshGeneratedTexturePackagesForAutomationRender(ObjectPath, OutError)
+			&& ReloadAssetPackageForAutomationRender(ObjectPath, OutError);
 	}
 
 	void SanitizeImportSettingsSnapshot(FDesign2UMGImportSettingsSnapshot& InOutSettingsSnapshot)
@@ -893,16 +979,24 @@ namespace Design2UMGAutomationRender
 		TGuardValue<bool> AutomationGuard(GDesign2UMGAutomationRenderActive, true);
 		FAutomationRenderResult Result;
 		Result.Mode = TEXT("unknown");
-		const bool bRequestExitAfterCompletion = Args.ContainsByPredicate([](const FString& Arg)
+		const bool bSuppressExitAfterCompletion = Args.ContainsByPredicate([](const FString& Arg)
 		{
-			return Arg.Equals(TEXT("--quit"), ESearchCase::IgnoreCase)
-				|| Arg.Equals(TEXT("quit"), ESearchCase::IgnoreCase);
+			return Arg.Equals(TEXT("--no-quit"), ESearchCase::IgnoreCase)
+				|| Arg.Equals(TEXT("no-quit"), ESearchCase::IgnoreCase);
 		});
+		const bool bRequestExitAfterCompletion = !bSuppressExitAfterCompletion
+			&& Args.ContainsByPredicate([](const FString& Arg)
+			{
+				return Arg.Equals(TEXT("--quit"), ESearchCase::IgnoreCase)
+					|| Arg.Equals(TEXT("quit"), ESearchCase::IgnoreCase);
+			});
+		const bool bShouldExitAfterCompletion = bRequestExitAfterCompletion
+			|| (!bSuppressExitAfterCompletion && FApp::IsUnattended());
 
 		if (Args.Num() < 1)
 		{
 			UE_LOG(LogDesign2UMG, Error, TEXT("Usage: Design2UMG.AutomationRender <spec.json>"));
-			if (bRequestExitAfterCompletion || FApp::IsUnattended())
+			if (bShouldExitAfterCompletion)
 			{
 				FPlatformMisc::RequestExitWithStatus(false, 1);
 			}
@@ -921,7 +1015,7 @@ namespace Design2UMGAutomationRender
 			UE_LOG(LogDesign2UMG, Error, TEXT("%s"), *LoadError);
 			Result.ErrorMessage = LoadError;
 			WriteAutomationRenderResult(Spec, Result);
-			if (bRequestExitAfterCompletion || FApp::IsUnattended())
+			if (bShouldExitAfterCompletion)
 			{
 				FPlatformMisc::RequestExitWithStatus(false, 1);
 			}
@@ -937,7 +1031,7 @@ namespace Design2UMGAutomationRender
 			Result.RenderPngPath = Spec.RenderPngPath;
 			Result.ErrorMessage = ResolveError;
 			WriteAutomationRenderResult(Spec, Result);
-			if (bRequestExitAfterCompletion || FApp::IsUnattended())
+			if (bShouldExitAfterCompletion)
 			{
 				FPlatformMisc::RequestExitWithStatus(false, 1);
 			}
@@ -963,7 +1057,7 @@ namespace Design2UMGAutomationRender
 				Result.RenderSize.Y);
 		}
 
-		if (bRequestExitAfterCompletion || FApp::IsUnattended())
+		if (bShouldExitAfterCompletion)
 		{
 			FPlatformMisc::RequestExitWithStatus(false, bOk ? 0 : 1);
 		}

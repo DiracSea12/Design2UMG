@@ -13,6 +13,7 @@ struct FSlateFontInfo;
 namespace RuntimeProbe
 {
 	extern const float FallbackMeasureWidthScale;
+	extern const float UnresolvedFontFallbackMeasureWidthScale;
 	extern const float FallbackMeasureHeightScale;
 
 	FSlateFontInfo BuildSlateFontInfoForSize(const TSharedPtr<FDesignNode>& Node, float FontSize);

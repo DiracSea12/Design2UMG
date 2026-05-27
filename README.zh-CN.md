@@ -87,6 +87,8 @@ Design2UMG.PenConvert <nodes.json> <vars.json> [TargetNodeId] [--preview|--no-pr
 `Tools/design2umg_auto_verify.py` 必须显式拿到 runtime project 和 editor 路径，或通过 `DESIGN2UMG_RUNTIME_PROJECT`、`DESIGN2UMG_UNREAL_EDITOR`、`UE_ROOT` 提供。脚本不应创建或推断 HostProject。
 这里的 `design2umg_auto_verify.py` 示例属于维护者侧 focused automation，不是 public PR 自动门禁。
 
+维护者视觉验证需要提前准备本地字体 seed。字体资产应放在设计源旁可发现的 `Content/Design2UMG/Fonts`，或放在显式 runtime project 的同名目录。验证脚本只复制这些资产，不负责下载字体，也不负责修复坏掉的 UE 字体资产。有效 seed 必须是 UE `UFont`，default typeface 至少有一个 entry，并且 entry 必须绑定有效 `FontFace` 或等价 font data。单独的 `.ttf`、空 `UFont`、没有 font data 的 typeface entry，都按缺失或无效字体处理。
+
 正式发布验证在维护者拥有的真实运行边界上完成。公开仓库不能把维护者机器路径当成用户安装教程。
 
 测试覆盖边界、贡献者可跑项和维护者专属门禁的总览见 [Docs/ValidationGovernance/TestCoverageBoundary.zh-CN.md](Docs/ValidationGovernance/TestCoverageBoundary.zh-CN.md)。

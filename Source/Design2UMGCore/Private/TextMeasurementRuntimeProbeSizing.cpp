@@ -3,6 +3,7 @@
 #include "TextMeasurementInternal.h"
 
 #include "DesignSchema.h"
+#include "FontResolver.h"
 #include "SharedCoreSemantics.h"
 #include "TextMeasurementRuntimeProbe.h"
 
@@ -388,7 +389,20 @@ float ResolveTextFontSizeForUMGInternal(const TSharedPtr<FDesignNode>& Node, FSt
 
 		auto MeasureWidth = [&](float CandidateFontSize) -> float
 		{
-			return RuntimeProbe::MeasureUMGTextBlockDesiredSize(Node, CandidateFontSize, Node->Text.Content, 0.0f, false).X;
+			const float MeasuredWidth = RuntimeProbe::MeasureUMGTextBlockDesiredSize(Node, CandidateFontSize, Node->Text.Content, 0.0f, false).X;
+			if (MeasuredWidth > 0.0f)
+			{
+				return MeasuredWidth;
+			}
+
+			const float WidthScale = Node->Transform.bSourceHasWidth
+				&& TextMeasurement::IsWrappingTextMode(Node)
+				&& FFontResolver::HasInvalidProjectFontAsset(Node->Text.FontFamily)
+				? RuntimeProbe::UnresolvedFontFallbackMeasureWidthScale
+				: RuntimeProbe::FallbackMeasureWidthScale;
+			return TextMeasurement::PrepareRuntimeTextContent(Node->Text.Content).Len()
+				* CandidateFontSize
+				* WidthScale;
 		};
 
 		const int32 BestWrappedFitFontSize =

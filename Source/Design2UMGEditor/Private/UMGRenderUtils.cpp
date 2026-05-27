@@ -426,6 +426,10 @@ bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8
 	FDesignPathRasterizer::FlushPendingTextureUpdates();
 	Renderer.DrawWindow(RT, *HitTestGrid, Window, 1.0f, FVector2D(EffectiveSize.X, EffectiveSize.Y), 0.1f);
 	if (!GUsingNullRHI) { FlushRenderingCommands(); }
+	Window->SlatePrepass(1.0f);
+	Widget->ForceLayoutPrepass();
+	Renderer.DrawWindow(RT, *HitTestGrid, Window, 1.0f, FVector2D(EffectiveSize.X, EffectiveSize.Y), 0.1f);
+	if (!GUsingNullRHI) { FlushRenderingCommands(); }
 	Widget->ForceLayoutPrepass();
 	DumpWidgetVisualState(TEXT("compiled-after-draw"), Widget->WidgetTree, WidgetBP->GetPathName());
 
@@ -489,6 +493,9 @@ namespace
 		TUniquePtr<FHittestGrid> HitTestGrid = MakeUnique<FHittestGrid>();
 		FProceduralShapeGenerator::FlushPendingTextureUpdates();
 		FDesignPathRasterizer::FlushPendingTextureUpdates();
+		Renderer.DrawWindow(RT, *HitTestGrid, Window, 1.0f, FVector2D(OutputSize.X, OutputSize.Y), 0.1f);
+		if (!GUsingNullRHI) { FlushRenderingCommands(); }
+		Window->SlatePrepass(1.0f);
 		Renderer.DrawWindow(RT, *HitTestGrid, Window, 1.0f, FVector2D(OutputSize.X, OutputSize.Y), 0.1f);
 		if (!GUsingNullRHI) { FlushRenderingCommands(); }
 

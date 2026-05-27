@@ -55,6 +55,8 @@ python Tools/design2umg_determinism_smoke_selftest.py
 
 It covers batch case discovery, default Figma export root resolution, run-scope writing, execution sharding, worker-count resolution, and completeness aggregation. Runtime validation still requires an explicit real project path; the batch verifier fails closed when `--project` or `DESIGN2UMG_RUNTIME_PROJECT` is missing and never creates a HostProject fallback.
 
+`design2umg_auto_verify.py` and `design2umg_auto_verify_batch.py` also seed runtime fonts from a discoverable `Content/Design2UMG/Fonts` directory. They copy the prepared UE assets into the runtime project; they do not download fonts or repair invalid font packages. A valid seed font must be a loadable `UFont` whose default typeface contains at least one entry backed by a valid `FontFace` or equivalent font data. Empty composite fonts and orphaned font-face files are invalid evidence for visual validation.
+
 ## Determinism smoke
 
 `Run-Design2UMGDeterminismSmoke.ps1` is the focused pre-gate for automation-render parity work. Use it after touching automation render, package reload preparation, transient reset, automation font refresh, or bootstrap render preparation, and before spending a full 47-case formal run.

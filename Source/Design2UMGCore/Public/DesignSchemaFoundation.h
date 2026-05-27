@@ -505,6 +505,9 @@ struct FDesignTextRun
 	FString FontFamily;
 
 	UPROPERTY()
+	FString FontPostScriptName;
+
+	UPROPERTY()
 	TOptional<float> FontSize;
 
 	UPROPERTY()

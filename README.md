@@ -140,6 +140,8 @@ python Tools/design2umg_auto_verify.py local-figma --source <FigmaExportRoot>\de
 The script fails if neither the project nor editor path is provided; it does not create or infer a HostProject.
 These `design2umg_auto_verify.py` examples are maintainer-oriented focused automation, not the public PR gate.
 
+Maintainer visual validation expects local font seed assets to be prepared before the run. Place them in a discoverable `Content/Design2UMG/Fonts` directory next to the design source or in the explicit runtime project. The verifier copies those assets; it does not download fonts or repair broken UE font assets. A valid seed is a UE `UFont` with at least one default typeface entry backed by a valid `FontFace` or equivalent font data. A lone `.ttf` file, an empty `UFont`, or a typeface entry with no font data is treated as missing/invalid.
+
 Contributor-facing helpers versus maintainer-only automation flows are listed in [Tools/README.md](Tools/README.md).
 Coverage boundaries for unit tests, smoke checks, focused automation render, and the maintainer formal gate are summarized in [Docs/ValidationGovernance/TestCoverageBoundary.md](Docs/ValidationGovernance/TestCoverageBoundary.md).
 

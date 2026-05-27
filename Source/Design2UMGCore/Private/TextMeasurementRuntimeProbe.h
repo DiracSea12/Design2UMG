@@ -14,6 +14,7 @@ namespace TextMeasurementRuntimeProbe
 		FString FontAssetPath;
 		FString TypefaceName;
 		int32 LetterSpacing = 0;
+		bool bRequiresResolvedFontAsset = false;
 	};
 
 	struct FTextBlockMeasureRequest : FTextMeasureRequest

@@ -9,8 +9,6 @@
 #include "Design2UMGLog.h"
 #include "Design2UMGNotifications.h"
 #include "Design2UMGSettings.h"
-#include "FontImport/DesignFontImportService.h"
-#include "FontResolver.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "ContentBrowserModule.h"
@@ -87,16 +85,6 @@ void FDesign2UMGEditorModule::StartupModule()
 		FDesign2UMGMessageNotificationHandler::CreateStatic(&ShowEditorWarningNotification));
 	FDesign2UMGNotification::RegisterErrorHandler(
 		FDesign2UMGMessageNotificationHandler::CreateStatic(&ShowEditorErrorNotification));
-	FFontResolver::RegisterMissingFontResolver(
-		[](const FString& FontFamily)
-		{
-			return DesignFontImportService::EnsureFontFamilyAvailable(FontFamily);
-		});
-	FFontResolver::RegisterKnownIconGlyphPrimer(
-		[](const FString& FontFamily)
-		{
-			DesignFontImportService::PrimeKnownIconFamily(FontFamily);
-		});
 	Design2UMGEditorDesignSourceRegistry::RegisterBuiltInSources();
 	Design2UMGEditorCommandOwner::RegisterConsoleCommands();
 	ToolMenusStartupHandle = Design2UMGEditorMenuOwner::RegisterMenus();
@@ -106,8 +94,6 @@ void FDesign2UMGEditorModule::StartupModule()
 void FDesign2UMGEditorModule::ShutdownModule()
 {
 	FDesign2UMGNotification::ResetHandlers();
-	FFontResolver::ResetExternalResolvers();
-	DesignFontImportService::ResetTransientState();
 	Design2UMGEditorImportOrchestrator::ShutdownTransientState();
 	Design2UMGEditorMenuOwner::UnregisterMenus(ToolMenusStartupHandle, this);
 	Design2UMGEditorCommandOwner::UnregisterConsoleCommands();

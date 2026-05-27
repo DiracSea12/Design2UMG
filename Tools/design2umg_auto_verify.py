@@ -2601,7 +2601,6 @@ def main():
     candidate_path = output_dir / "candidate.png"
     game_output_root = build_automation_asset_root(output_dir, args.game_output, infer_single_case_name(args, output_dir))
     primary_game_output = build_automation_phase_output(game_output_root, "primary")
-    primary_asset_output = build_automation_phase_output(game_output_root, "primary-asset")
     asset_only_output = build_automation_phase_output(game_output_root, "asset")
     mode_map = {
         "pen": "pen",
@@ -2658,7 +2657,7 @@ def main():
             "mode": "asset",
             "source_path": generated_asset_path,
             "node_id": "",
-            "output_path": primary_asset_output,
+            "output_path": primary_game_output,
             "render_png_path": str(candidate_path),
             "result_json_path": str(output_dir / "ue_render_result.json"),
             "force_reload_package": True,

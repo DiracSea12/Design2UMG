@@ -66,5 +66,5 @@ Do not accept a change that makes any formal case worse than its tracked histori
 
 - `Docs/ImportDiagnosticContract.md` is the current contract doc for the import report JSON.
 - Treat grouped sections such as `source`, `output`, `diagnostics`, `resources`, and `effects` as the preferred machine-facing read path.
-- Treat top-level duplicates like `sourceFilePath`, `requestedOutputPath`, `warnings`, and `missingFonts` as compatibility aliases unless a future change explicitly retires them.
+- Treat top-level scalar paths like `sourceFilePath` and `requestedOutputPath` as compatibility aliases unless a future change explicitly retires them; diagnostics and resources should be read from grouped sections only.
 - Do not couple automation to `recommendations` prose.

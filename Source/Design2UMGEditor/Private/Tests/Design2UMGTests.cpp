@@ -1,5 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "Misc/AutomationTest.h"
+#include "Misc/PackageName.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "PenParser.h"
 #include "Design2UMGConverter.h"
 #include "Design2UMGSettings.h"
@@ -34,8 +36,10 @@
 #include "Components/MultiLineEditableTextBox.h"
 #include "Components/RichTextBlock.h"
 #include "Components/TextBlock.h"
+#include "Components/Widget.h"
 #include "Components/WidgetSwitcher.h"
 #include "Engine/DataTable.h"
+#include "Engine/Font.h"
 #include "Engine/Texture2D.h"
 #include "TextureResource.h"
 #include "UObject/UObjectGlobals.h"

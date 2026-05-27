@@ -1,12 +1,15 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "Misc/AutomationTest.h"
+#include "Design2UMGSettings.h"
 #include "DesignImageBakeUtils.h"
 #include "DesignImportPipeline.h"
 #include "DesignSchema.h"
 #include "DesignSchemaSourceExtensions.h"
+#include "FontResolver.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 #include "UMGSchema.h"
 #include "Dom/JsonObject.h"
+#include "Engine/Font.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
@@ -133,6 +136,8 @@ bool FImportDiagnosticReportStructureTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
+	TestEqual(TEXT("Report exposes schema version"), RootObject->GetStringField(TEXT("schemaVersion")), TEXT("design2umg-import-report-v2"));
+	TestEqual(TEXT("Report exposes its own path"), RootObject->GetStringField(TEXT("reportPath")), ReportPath);
 
 	const TSharedPtr<FJsonObject>* SourceObject = nullptr;
 	TestTrue(TEXT("Report has source object"), RootObject->TryGetObjectField(TEXT("source"), SourceObject) && SourceObject);
@@ -155,9 +160,10 @@ bool FImportDiagnosticReportStructureTest::RunTest(const FString& Parameters)
 
 	const TArray<TSharedPtr<FJsonValue>>* Degradations = nullptr;
 	TestTrue(TEXT("Diagnostics include degradations"), (*DiagnosticsObject)->TryGetArrayField(TEXT("degradations"), Degradations) && Degradations && Degradations->Num() >= 2);
-	TestTrue(TEXT("Diagnostics include skipped designer nodes"), (*DiagnosticsObject)->GetArrayField(TEXT("skippedDesignerNodes")).Num() == 1);
-	TestEqual(TEXT("Top-level warnings alias diagnostics.warnings"), RootObject->GetArrayField(TEXT("warnings")).Num(), (*DiagnosticsObject)->GetArrayField(TEXT("warnings")).Num());
-	TestEqual(TEXT("Top-level skipped nodes alias diagnostics.skippedDesignerNodes"), RootObject->GetArrayField(TEXT("skippedDesignerNodes")).Num(), (*DiagnosticsObject)->GetArrayField(TEXT("skippedDesignerNodes")).Num());
+	TestTrue(TEXT("Diagnostics include warnings"), (*DiagnosticsObject)->GetArrayField(TEXT("warnings")).Num() == 1);
+		TestTrue(TEXT("Diagnostics include skipped designer nodes"), (*DiagnosticsObject)->GetArrayField(TEXT("skippedDesignerNodes")).Num() == 1);
+	TestFalse(TEXT("Top-level warnings alias is retired"), RootObject->HasField(TEXT("warnings")));
+	TestFalse(TEXT("Top-level skipped nodes alias is retired"), RootObject->HasField(TEXT("skippedDesignerNodes")));
 
 	bool bFoundTextPathFallback = false;
 	bool bFoundRenderFallback = false;
@@ -185,8 +191,26 @@ bool FImportDiagnosticReportStructureTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Report has resources object"), RootObject->TryGetObjectField(TEXT("resources"), ResourcesObject) && ResourcesObject);
 	TestEqual(TEXT("Report records missing fonts"), (*ResourcesObject)->GetArrayField(TEXT("missingFonts")).Num(), 1);
 	TestEqual(TEXT("Report records image failures"), (*ResourcesObject)->GetArrayField(TEXT("imageFailures")).Num(), 1);
-	TestEqual(TEXT("Top-level missingFonts alias resources.missingFonts"), RootObject->GetArrayField(TEXT("missingFonts")).Num(), (*ResourcesObject)->GetArrayField(TEXT("missingFonts")).Num());
-	TestEqual(TEXT("Top-level imageImportReport aliases resources.imageImportSummary"), RootObject->GetStringField(TEXT("imageImportReport")), (*ResourcesObject)->GetStringField(TEXT("imageImportSummary")));
+	TestFalse(TEXT("Top-level missingFonts alias is retired"), RootObject->HasField(TEXT("missingFonts")));
+	TestFalse(TEXT("Top-level imageImportReport alias is retired"), RootObject->HasField(TEXT("imageImportReport")));
+	const TSharedPtr<FJsonObject>* FontResolutionObject = nullptr;
+	TestTrue(TEXT("Report has compact font resolution object"),
+		RootObject->TryGetObjectField(TEXT("fontResolution"), FontResolutionObject) && FontResolutionObject);
+	if (FontResolutionObject)
+	{
+		const TArray<TSharedPtr<FJsonValue>>& FontResults = (*FontResolutionObject)->GetArrayField(TEXT("results"));
+		TestEqual(TEXT("Missing project font is represented in font results"), FontResults.Num(), 1);
+		if (FontResults.Num() == 1 && FontResults[0].IsValid())
+		{
+			const TSharedPtr<FJsonObject> FontResult = FontResults[0]->AsObject();
+			TestEqual(TEXT("Missing font falls back with warning state"),
+				FontResult->GetStringField(TEXT("resolutionState")),
+				TEXT("default-font"));
+			TestEqual(TEXT("Font result key is stable"),
+				FontResult->GetStringField(TEXT("declarationKey")),
+				TEXT("definitelymissingreportfont|none|400|normal"));
+		}
+	}
 
 	const TSharedPtr<FJsonObject>* OutputObject = nullptr;
 	TestTrue(TEXT("Report has output object"), RootObject->TryGetObjectField(TEXT("output"), OutputObject) && OutputObject);
@@ -198,6 +222,404 @@ bool FImportDiagnosticReportStructureTest::RunTest(const FString& Parameters)
 
 	const TArray<TSharedPtr<FJsonValue>>* Recommendations = nullptr;
 	TestTrue(TEXT("Report includes recommendations"), RootObject->TryGetArrayField(TEXT("recommendations"), Recommendations) && Recommendations && Recommendations->Num() > 0);
+	IFileManager::Get().Delete(*ReportPath);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImportDiagnosticReportEngineFontFallbackWarnsTest,
+	"Design2UMG.Import.ImportDiagnosticReportEngineFontFallbackWarns",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FImportDiagnosticReportEngineFontFallbackWarnsTest::RunTest(const FString& Parameters)
+{
+	UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+	TestTrue(TEXT("Settings available"), Settings != nullptr);
+	if (!Settings)
+	{
+		return false;
+	}
+
+	const TMap<FString, TSoftObjectPtr<UFont>> SavedMappings = Settings->ExplicitFontMappings;
+	const TSoftObjectPtr<UFont> SavedDefaultFont = Settings->DefaultFontAsset;
+	Settings->ExplicitFontMappings.Empty();
+	Settings->DefaultFontAsset.Reset();
+	FFontResolver::ClearCache();
+
+	FDesignDocument Document;
+	Document.Version = TEXT("engine-font-fallback-report-v1");
+	TSharedPtr<FDesignNode> TextNode = MakeShared<FDesignNode>();
+	TextNode->Id = TEXT("engine_fallback_text");
+	TextNode->Name = TEXT("Engine Fallback Text");
+	TextNode->Type = EDesignNodeType::Text;
+	TextNode->Text.FontFamily = TEXT("Roboto");
+	TextNode->Text.FontWeight = TEXT("500");
+	Document.Children.Add(TextNode);
+
+	FUMGWidgetData Data;
+	Data.WidgetName = TEXT("WBP_EngineFontFallbackReportFixture");
+	Data.RootWidget.Type = TEXT("TextBlock");
+	Data.RootWidget.Id = TextNode->Id;
+	Data.RootWidget.Name = TextNode->Name;
+
+	const FString ReportDir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Design2UMG"), TEXT("ImportReports"));
+	TArray<FString> ReportsBefore;
+	IFileManager::Get().FindFilesRecursive(ReportsBefore, *ReportDir, TEXT("*.import_report.json"), true, false, false);
+	TSet<FString> ExistingReports;
+	for (const FString& ExistingReport : ReportsBefore)
+	{
+		ExistingReports.Add(ExistingReport);
+	}
+
+	DesignImportPipeline::WriteImportDiagnosticReport(
+		Document,
+		Data,
+		FString(),
+		TEXT("/Game/Design2UMG/_TestOutput/EngineFontFallback"),
+		FString(),
+		TEXT("/Game/Design2UMG/_TestOutput/EngineFontFallback/WBP_EngineFontFallbackReportFixture"));
+
+	Settings->ExplicitFontMappings = SavedMappings;
+	Settings->DefaultFontAsset = SavedDefaultFont;
+	FFontResolver::ClearCache();
+
+	TArray<FString> ReportsAfter;
+	IFileManager::Get().FindFilesRecursive(ReportsAfter, *ReportDir, TEXT("*.import_report.json"), true, false, false);
+
+	FString ReportPath;
+	for (const FString& Candidate : ReportsAfter)
+	{
+		if (!ExistingReports.Contains(Candidate))
+		{
+			ReportPath = Candidate;
+			break;
+		}
+	}
+
+	TestTrue(TEXT("Engine fallback report was generated"), !ReportPath.IsEmpty() && FPaths::FileExists(ReportPath));
+	if (ReportPath.IsEmpty() || !FPaths::FileExists(ReportPath))
+	{
+		return false;
+	}
+
+	FString ReportJson;
+	TestTrue(TEXT("Load engine fallback report json"), FFileHelper::LoadFileToString(ReportJson, *ReportPath));
+	TSharedPtr<FJsonObject> RootObject;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ReportJson);
+	TestTrue(TEXT("Parse engine fallback report json"), FJsonSerializer::Deserialize(Reader, RootObject) && RootObject.IsValid());
+	if (!RootObject.IsValid())
+	{
+		IFileManager::Get().Delete(*ReportPath);
+		return false;
+	}
+
+	const TSharedPtr<FJsonObject>* FontResolutionObject = nullptr;
+	TestTrue(TEXT("Report has compact font resolution object"),
+		RootObject->TryGetObjectField(TEXT("fontResolution"), FontResolutionObject) && FontResolutionObject);
+	if (FontResolutionObject)
+	{
+		const TArray<TSharedPtr<FJsonValue>>& FontResults = (*FontResolutionObject)->GetArrayField(TEXT("results"));
+		TestEqual(TEXT("Engine fallback emits one font result"), FontResults.Num(), 1);
+		if (FontResults.Num() == 1 && FontResults[0].IsValid())
+		{
+			const TSharedPtr<FJsonObject> FontResult = FontResults[0]->AsObject();
+			TestEqual(TEXT("Engine fallback remains a warning fallback"),
+				FontResult->GetStringField(TEXT("resolutionState")),
+				TEXT("default-font"));
+			TestEqual(TEXT("Engine fallback keeps warning severity"),
+				FontResult->GetStringField(TEXT("severity")),
+				TEXT("warning"));
+			TestEqual(TEXT("Engine fallback reports the resolved engine font asset"),
+				FontResult->GetStringField(TEXT("resolvedAssetPath")),
+				TEXT("/Engine/EngineFonts/Roboto.Roboto"));
+			bool bFoundMissingProjectIssue = false;
+			for (const TSharedPtr<FJsonValue>& IssueValue : FontResult->GetArrayField(TEXT("issueCodes")))
+			{
+				bFoundMissingProjectIssue |= IssueValue.IsValid()
+					&& IssueValue->AsString() == TEXT("missing-project-font");
+			}
+			TestTrue(TEXT("Engine fallback still records missing project font"), bFoundMissingProjectIssue);
+		}
+	}
+
+	IFileManager::Get().Delete(*ReportPath);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImportDiagnosticReportInvalidExplicitFontMappingTest,
+	"Design2UMG.Import.ImportDiagnosticReportInvalidExplicitFontMapping",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FImportDiagnosticReportInvalidExplicitFontMappingTest::RunTest(const FString& Parameters)
+{
+	UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+	TestTrue(TEXT("Settings available"), Settings != nullptr);
+	if (!Settings)
+	{
+		return false;
+	}
+
+	const TMap<FString, TSoftObjectPtr<UFont>> SavedMappings = Settings->ExplicitFontMappings;
+	const TSoftObjectPtr<UFont> SavedDefaultFont = Settings->DefaultFontAsset;
+	Settings->ExplicitFontMappings.Empty();
+	Settings->DefaultFontAsset.Reset();
+
+	UPackage* EmptyFontPackage = CreatePackage(TEXT("/Game/Design2UMG/Fonts/D2U_EmptyCompositeReportFont"));
+	UFont* EmptyCompositeFont = NewObject<UFont>(
+		EmptyFontPackage,
+		TEXT("D2U_EmptyCompositeReportFont"),
+		RF_Public | RF_Standalone);
+	TestTrue(TEXT("Invalid explicit mapping fixture font created"), EmptyCompositeFont != nullptr);
+	if (!EmptyCompositeFont)
+	{
+		Settings->ExplicitFontMappings = SavedMappings;
+		Settings->DefaultFontAsset = SavedDefaultFont;
+		return false;
+	}
+
+	Settings->ExplicitFontMappings.Add(
+		TEXT("Inter"),
+		TSoftObjectPtr<UFont>(FSoftObjectPath(EmptyCompositeFont)));
+	FFontResolver::ClearCache();
+
+	FDesignDocument Document;
+	Document.Version = TEXT("invalid-explicit-font-mapping-v1");
+	TSharedPtr<FDesignNode> TextNode = MakeShared<FDesignNode>();
+	TextNode->Id = TEXT("explicit_mapping_text");
+	TextNode->Name = TEXT("Explicit Mapping Text");
+	TextNode->Type = EDesignNodeType::Text;
+	TextNode->Text.FontFamily = TEXT("Inter");
+	TextNode->Text.FontWeight = TEXT("700");
+	Document.Children.Add(TextNode);
+
+	FUMGWidgetData Data;
+	Data.WidgetName = TEXT("WBP_InvalidExplicitFontMappingReportFixture");
+	Data.RootWidget.Type = TEXT("TextBlock");
+	Data.RootWidget.Id = TextNode->Id;
+	Data.RootWidget.Name = TextNode->Name;
+
+	const FString ReportDir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Design2UMG"), TEXT("ImportReports"));
+	TArray<FString> ReportsBefore;
+	IFileManager::Get().FindFilesRecursive(ReportsBefore, *ReportDir, TEXT("*.import_report.json"), true, false, false);
+	TSet<FString> ExistingReports;
+	for (const FString& ExistingReport : ReportsBefore)
+	{
+		ExistingReports.Add(ExistingReport);
+	}
+
+	DesignImportPipeline::WriteImportDiagnosticReport(
+		Document,
+		Data,
+		FString(),
+		TEXT("/Game/Design2UMG/_TestOutput/InvalidExplicitFontMapping"),
+		FString(),
+		TEXT("/Game/Design2UMG/_TestOutput/InvalidExplicitFontMapping/WBP_InvalidExplicitFontMappingReportFixture"));
+
+	Settings->ExplicitFontMappings = SavedMappings;
+	Settings->DefaultFontAsset = SavedDefaultFont;
+	FFontResolver::ClearCache();
+
+	TArray<FString> ReportsAfter;
+	IFileManager::Get().FindFilesRecursive(ReportsAfter, *ReportDir, TEXT("*.import_report.json"), true, false, false);
+
+	FString ReportPath;
+	for (const FString& Candidate : ReportsAfter)
+	{
+		if (!ExistingReports.Contains(Candidate))
+		{
+			ReportPath = Candidate;
+			break;
+		}
+	}
+
+	TestTrue(TEXT("Invalid explicit mapping report was generated"), !ReportPath.IsEmpty() && FPaths::FileExists(ReportPath));
+	if (ReportPath.IsEmpty() || !FPaths::FileExists(ReportPath))
+	{
+		return false;
+	}
+
+	FString ReportJson;
+	TestTrue(TEXT("Load invalid explicit mapping report json"), FFileHelper::LoadFileToString(ReportJson, *ReportPath));
+	TSharedPtr<FJsonObject> RootObject;
+	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ReportJson);
+	TestTrue(TEXT("Parse invalid explicit mapping report json"), FJsonSerializer::Deserialize(Reader, RootObject) && RootObject.IsValid());
+	if (!RootObject.IsValid())
+	{
+		IFileManager::Get().Delete(*ReportPath);
+		return false;
+	}
+
+	const TSharedPtr<FJsonObject>* FontResolutionObject = nullptr;
+	TestTrue(TEXT("Report has compact font resolution object"),
+		RootObject->TryGetObjectField(TEXT("fontResolution"), FontResolutionObject) && FontResolutionObject);
+	if (FontResolutionObject)
+	{
+		const TArray<TSharedPtr<FJsonValue>>& FontResults = (*FontResolutionObject)->GetArrayField(TEXT("results"));
+		TestEqual(TEXT("Invalid explicit mapping emits one font result"), FontResults.Num(), 1);
+		if (FontResults.Num() == 1 && FontResults[0].IsValid())
+		{
+			const TSharedPtr<FJsonObject> FontResult = FontResults[0]->AsObject();
+			TestEqual(TEXT("Invalid explicit mapping is reported as rejected"),
+				FontResult->GetStringField(TEXT("resolutionState")),
+				TEXT("rejected"));
+			TestEqual(TEXT("Invalid explicit mapping reports error severity"),
+				FontResult->GetStringField(TEXT("severity")),
+				TEXT("error"));
+			TestFalse(TEXT("Invalid explicit mapping must not report an auto-substituted font asset"),
+				FontResult->HasField(TEXT("resolvedAssetPath")));
+
+			bool bFoundInvalidMappingIssue = false;
+			for (const TSharedPtr<FJsonValue>& IssueValue : FontResult->GetArrayField(TEXT("issueCodes")))
+			{
+				bFoundInvalidMappingIssue |= IssueValue.IsValid()
+					&& IssueValue->AsString() == TEXT("invalid-explicit-font-mapping");
+			}
+			TestTrue(TEXT("Invalid explicit mapping issue code is present"), bFoundInvalidMappingIssue);
+		}
+	}
+
+	IFileManager::Get().Delete(*ReportPath);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImportDiagnosticReportExplicitMappingMissingTypefaceTest,
+	"Design2UMG.Import.ImportDiagnosticReportExplicitMappingMissingTypeface",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FImportDiagnosticReportExplicitMappingMissingTypefaceTest::RunTest(const FString& Parameters)
+{
+	UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+	TestTrue(TEXT("Settings available"), Settings != nullptr);
+	if (!Settings)
+	{
+		return false;
+	}
+
+	const TMap<FString, TSoftObjectPtr<UFont>> SavedMappings = Settings->ExplicitFontMappings;
+	const TSoftObjectPtr<UFont> SavedDefaultFont = Settings->DefaultFontAsset;
+	Settings->ExplicitFontMappings.Empty();
+	Settings->DefaultFontAsset.Reset();
+
+	UPackage* RegularOnlyPackage = CreatePackage(TEXT("/Game/Design2UMG/Fonts/D2U_RegularOnlyExplicitReportFont"));
+	UFont* RegularOnlyFont = NewObject<UFont>(
+		RegularOnlyPackage,
+		TEXT("D2U_RegularOnlyExplicitReportFont"),
+		RF_Public | RF_Standalone);
+	TestTrue(TEXT("Regular-only explicit report font created"), RegularOnlyFont != nullptr);
+	if (!RegularOnlyFont)
+	{
+		Settings->ExplicitFontMappings = SavedMappings;
+		Settings->DefaultFontAsset = SavedDefaultFont;
+		return false;
+	}
+
+	RegularOnlyFont->FontCacheType = EFontCacheType::Runtime;
+	RegularOnlyFont->GetMutableInternalCompositeFont().DefaultTypeface.Fonts.Add(FTypefaceEntry(
+		FName(TEXT("Regular")),
+		FPaths::Combine(FPaths::EngineContentDir(), TEXT("Slate/Fonts/Roboto-Regular.ttf")),
+		EFontHinting::Default,
+		EFontLoadingPolicy::LazyLoad));
+
+	Settings->ExplicitFontMappings.Add(
+		TEXT("D2URegularOnlyPS"),
+		TSoftObjectPtr<UFont>(FSoftObjectPath(RegularOnlyFont)));
+	FFontResolver::ClearCache();
+
+	FDesignDocument Document;
+	Document.Version = TEXT("explicit-missing-typeface-report-v1");
+	TSharedPtr<FDesignNode> TextNode = MakeShared<FDesignNode>();
+	TextNode->Id = TEXT("explicit_mapping_missing_typeface_text");
+	TextNode->Name = TEXT("Explicit Mapping Missing Typeface Text");
+	TextNode->Type = EDesignNodeType::Text;
+	TextNode->Text.FontFamily = TEXT("D2URegularOnly");
+	TextNode->Text.FontPostScriptName = TEXT("D2URegularOnlyPS");
+	TextNode->Text.FontWeight = TEXT("700");
+	Document.Children.Add(TextNode);
+
+	FUMGWidgetData Data;
+	Data.WidgetName = TEXT("WBP_ExplicitMappingMissingTypefaceReportFixture");
+	Data.RootWidget.Type = TEXT("TextBlock");
+	Data.RootWidget.Id = TextNode->Id;
+	Data.RootWidget.Name = TextNode->Name;
+
+	const FString ReportDir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Design2UMG"), TEXT("ImportReports"));
+	TArray<FString> ReportsBefore;
+	IFileManager::Get().FindFilesRecursive(ReportsBefore, *ReportDir, TEXT("*.import_report.json"), true, false, false);
+	TSet<FString> ExistingReports;
+	for (const FString& ExistingReport : ReportsBefore)
+	{
+		ExistingReports.Add(ExistingReport);
+	}
+
+	DesignImportPipeline::WriteImportDiagnosticReport(
+		Document,
+		Data,
+		FString(),
+		TEXT("/Game/Design2UMG/_TestOutput/ExplicitMappingMissingTypeface"),
+		FString(),
+		TEXT("/Game/Design2UMG/_TestOutput/ExplicitMappingMissingTypeface/WBP_ExplicitMappingMissingTypefaceReportFixture"));
+
+	Settings->ExplicitFontMappings = SavedMappings;
+	Settings->DefaultFontAsset = SavedDefaultFont;
+	FFontResolver::ClearCache();
+
+	TArray<FString> ReportsAfter;
+	IFileManager::Get().FindFilesRecursive(ReportsAfter, *ReportDir, TEXT("*.import_report.json"), true, false, false);
+
+	FString ReportPath;
+	for (const FString& Candidate : ReportsAfter)
+	{
+		if (!ExistingReports.Contains(Candidate))
+		{
+			ReportPath = Candidate;
+			break;
+		}
+	}
+
+	TestTrue(TEXT("Explicit missing typeface report was generated"), !ReportPath.IsEmpty() && FPaths::FileExists(ReportPath));
+	if (ReportPath.IsEmpty() || !FPaths::FileExists(ReportPath))
+	{
+		return false;
+	}
+
+	FString ReportJson;
+	TestTrue(TEXT("Load explicit missing typeface report json"), FFileHelper::LoadFileToString(ReportJson, *ReportPath));
+	TSharedPtr<FJsonObject> RootObject;
+	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ReportJson);
+	TestTrue(TEXT("Parse explicit missing typeface report json"), FJsonSerializer::Deserialize(Reader, RootObject) && RootObject.IsValid());
+	if (!RootObject.IsValid())
+	{
+		IFileManager::Get().Delete(*ReportPath);
+		return false;
+	}
+
+	const TSharedPtr<FJsonObject>* FontResolutionObject = nullptr;
+	TestTrue(TEXT("Report has compact font resolution object"),
+		RootObject->TryGetObjectField(TEXT("fontResolution"), FontResolutionObject) && FontResolutionObject);
+	if (FontResolutionObject)
+	{
+		const TArray<TSharedPtr<FJsonValue>>& FontResults = (*FontResolutionObject)->GetArrayField(TEXT("results"));
+		TestEqual(TEXT("Missing explicit typeface emits one font result"), FontResults.Num(), 1);
+		if (FontResults.Num() == 1 && FontResults[0].IsValid())
+		{
+			const TSharedPtr<FJsonObject> FontResult = FontResults[0]->AsObject();
+			TestEqual(TEXT("Missing explicit typeface is reported as rejected"),
+				FontResult->GetStringField(TEXT("resolutionState")),
+				TEXT("rejected"));
+			TestEqual(TEXT("Missing explicit typeface reports error severity"),
+				FontResult->GetStringField(TEXT("severity")),
+				TEXT("error"));
+			TestFalse(TEXT("Missing explicit typeface must not report an auto-substituted font asset"),
+				FontResult->HasField(TEXT("resolvedAssetPath")));
+			TestFalse(TEXT("Missing explicit typeface must not report an auto-substituted typeface"),
+				FontResult->HasField(TEXT("resolvedTypeface")));
+
+			bool bFoundMissingTypefaceIssue = false;
+			for (const TSharedPtr<FJsonValue>& IssueValue : FontResult->GetArrayField(TEXT("issueCodes")))
+			{
+				bFoundMissingTypefaceIssue |= IssueValue.IsValid()
+					&& IssueValue->AsString() == TEXT("missing-explicit-font-typeface");
+			}
+			TestTrue(TEXT("Missing explicit typeface issue code is present"), bFoundMissingTypefaceIssue);
+		}
+	}
+
 	IFileManager::Get().Delete(*ReportPath);
 	return true;
 }

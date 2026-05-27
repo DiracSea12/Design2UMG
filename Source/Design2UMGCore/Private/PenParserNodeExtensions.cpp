@@ -117,6 +117,7 @@ namespace
 		{
 			OutRun.FontFamily = Resolver.ResolveString(FontFamily);
 		}
+		StyleObj->TryGetStringField(TEXT("fontPostScriptName"), OutRun.FontPostScriptName);
 
 		float FontSize = 0.0f;
 		if (TryGetResolvedNumberField(StyleObj, TEXT("fontSize"), Resolver, FontSize))
