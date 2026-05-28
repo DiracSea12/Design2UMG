@@ -52,6 +52,76 @@ namespace
 	// Measured fallback should not collapse below half of the declared size.
 	constexpr float MinMeasuredFontFallbackScale = 0.5f;
 	constexpr float MaxMeasuredFontFallbackScale = DefaultFontFallbackScale;
+	constexpr int32 MaxMeasuredFallbackCandidateMeasurements = 6;
+	constexpr float MeasuredFitTolerance = 0.5f;
+
+	struct FMeasuredFallbackTargets
+	{
+		float Width = 0.0f;
+		float Height = 0.0f;
+		bool bAutoWrapText = false;
+	};
+
+	bool TryBuildMeasuredFallbackTargets(const TSharedPtr<FDesignNode>& Node, FMeasuredFallbackTargets& OutTargets)
+	{
+		if (!Node.IsValid())
+		{
+			return false;
+		}
+
+		OutTargets.Width = ResolveTextWidthHint(Node, 0.0f);
+		OutTargets.Height = Node->Transform.Height.Value > 0.0f
+			? Node->Transform.Height.Value
+			: LineBox::EstimateSingleLineTextHeight(Node);
+		OutTargets.bAutoWrapText = TextMeasurement::ShouldAutoWrapText(Node);
+		return OutTargets.Height > 0.0f || OutTargets.Width > 0.0f;
+	}
+
+	bool DoesMeasuredSizeFitTargets(const FVector2D& Size, const FMeasuredFallbackTargets& Targets)
+	{
+		if (Size.X <= 0.0f || Size.Y <= 0.0f)
+		{
+			return false;
+		}
+		if (Targets.Width > 0.0f && Size.X > Targets.Width + MeasuredFitTolerance)
+		{
+			return false;
+		}
+		if (Targets.Height > 0.0f && Size.Y > Targets.Height + MeasuredFitTolerance)
+		{
+			return false;
+		}
+		return true;
+	}
+
+	float ComputeMeasuredOverflowRatio(const FVector2D& Size, const FMeasuredFallbackTargets& Targets)
+	{
+		float Ratio = 1.0f;
+		bool bHasOverflow = false;
+		if (Targets.Width > 0.0f && Size.X > Targets.Width + MeasuredFitTolerance)
+		{
+			Ratio = FMath::Min(Ratio, Targets.Width / Size.X);
+			bHasOverflow = true;
+		}
+		if (Targets.Height > 0.0f && Size.Y > Targets.Height + MeasuredFitTolerance)
+		{
+			Ratio = FMath::Min(Ratio, Targets.Height / Size.Y);
+			bHasOverflow = true;
+		}
+		return bHasOverflow ? Ratio : 1.0f;
+	}
+
+	bool HasCompleteNodeMetricEvidence(const TSharedPtr<FDesignNode>& Node)
+	{
+		Phase32TextMetrics::FNodeFontIdentity Identity;
+		if (!Phase32TextMetrics::TryBuildNodeFontIdentity(Node, Identity)
+			|| !Phase32TextMetrics::IsMeasuredFallbackStateAllowed(Identity))
+		{
+			return false;
+		}
+
+		return Phase32TextMetrics::BuildMetricToken(Identity) != TEXT("metric:unavailable");
+	}
 }
 
 extern const float IntrinsicSingleLineSlackThreshold = 1.08f;
@@ -229,59 +299,53 @@ TOptional<float> TryResolveMeasuredTextFontFallbackScale(const TSharedPtr<FDesig
 {
 	if (!Node.IsValid()
 		|| Node->Text.FontSize <= 0.0f
-		|| !TextMeasurementRuntimeProbe::IsAvailable())
+		|| !TextMeasurementRuntimeProbe::IsAvailable()
+		|| !HasCompleteNodeMetricEvidence(Node))
 	{
 		return {};
 	}
 
-	float BestScale = 1.0f;
-	bool bHasScale = false;
-
-	const float TargetLineBoxHeight = LineBox::EstimateSingleLineTextHeight(Node);
-	if (TargetLineBoxHeight > 0.0f)
+	FMeasuredFallbackTargets Targets;
+	if (!TryBuildMeasuredFallbackTargets(Node, Targets))
 	{
-		const float MeasuredLineHeight = RuntimeProbe::MeasureSingleLineTextBlockHeight(Node, Node->Text.FontSize);
-		if (MeasuredLineHeight > KINDA_SMALL_NUMBER)
-		{
-			BestScale = TargetLineBoxHeight / MeasuredLineHeight;
-			bHasScale = true;
-		}
+		return {};
 	}
 
-	const float WidthHint = ResolveTextWidthHint(Node, 0.0f);
-	if (!Node->Text.Content.IsEmpty() && WidthHint > 0.0f)
+	float CandidateScale = DefaultFontFallbackScale;
+	for (int32 MeasurementCount = 0; MeasurementCount < MaxMeasuredFallbackCandidateMeasurements; ++MeasurementCount)
 	{
-		const int32 LetterSpacingTracking = Node->Text.LetterSpacing != 0.0f
-			? TextStyleUtils::ConvertLetterSpacingPxToTracking(Node->Text.LetterSpacing, Node->Text.FontSize, Node->Text.FontSize)
-			: 0;
-		const FVector2D UnwrappedSize = RuntimeProbe::MeasureTextSize(
+		const float CandidateFontSize = Node->Text.FontSize * CandidateScale;
+		const FVector2D CandidateSize = RuntimeProbe::MeasureUMGTextBlockDesiredSize(
+			Node,
+			CandidateFontSize,
 			Node->Text.Content,
-			Node->Text.FontSize,
-			Node->Text.FontFamily,
-			Node->Text.FontWeight,
-			LetterSpacingTracking);
-		if (UnwrappedSize.X > KINDA_SMALL_NUMBER)
+			Targets.Width,
+			Targets.bAutoWrapText);
+		if (DoesMeasuredSizeFitTargets(CandidateSize, Targets))
 		{
-			const bool bHasWidthConstraint =
-				TextMeasurement::IsWrappingTextMode(Node)
-				|| Node->Text.Content.Contains(TEXT("\n"))
-				|| WidthHint > 0.0f;
-			if (bHasWidthConstraint)
-			{
-				const float WidthScale = WidthHint / UnwrappedSize.X;
-				BestScale = bHasScale ? FMath::Min(BestScale, WidthScale) : WidthScale;
-				bHasScale = true;
-			}
+			return FMath::Clamp(CandidateScale, MinMeasuredFontFallbackScale, MaxMeasuredFontFallbackScale);
 		}
+
+		const float OverflowRatio = ComputeMeasuredOverflowRatio(CandidateSize, Targets);
+		if (!FMath::IsFinite(OverflowRatio) || OverflowRatio <= 0.0f || OverflowRatio >= 1.0f)
+		{
+			return {};
+		}
+
+		const float NextScale = FMath::Clamp(
+			CandidateScale * OverflowRatio,
+			MinMeasuredFontFallbackScale,
+			MaxMeasuredFontFallbackScale);
+		if (FMath::IsNearlyEqual(NextScale, CandidateScale, 0.0001f))
+		{
+			return {};
+		}
+		CandidateScale = NextScale;
 	}
 
-	if (!bHasScale)
-	{
-		return {};
-	}
-
-	return FMath::Clamp(BestScale, MinMeasuredFontFallbackScale, MaxMeasuredFontFallbackScale);
+	return {};
 }
+
 
 float ResolveTextFontSizeFallback(const TSharedPtr<FDesignNode>& Node)
 {
@@ -290,17 +354,24 @@ float ResolveTextFontSizeFallback(const TSharedPtr<FDesignNode>& Node)
 		return 0.0f;
 	}
 
-	float FallbackScale = FindFamilySpecificTextFallbackScale(
-		NormalizeTextMeasurementFontFamilyKey(Node->Text.FontFamily));
+	float FallbackScale = DefaultFontFallbackScale;
 	if (SingleLineHeuristics::ShouldUseMeasuredTextFontFallbackScale(Node)
 		&& !SingleLineHeuristics::ShouldPreferIntrinsicSingleLineFallbackFontSize(Node))
 	{
 		if (const TOptional<float> MeasuredScale = TryResolveMeasuredTextFontFallbackScale(Node))
 		{
-			FallbackScale = FMath::Min(FallbackScale, MeasuredScale.GetValue());
+			return Node->Text.FontSize * MeasuredScale.GetValue();
 		}
 	}
 
+	if (const TOptional<float> SemanticScale = TryResolveSemanticSingleLineFallbackScale(Node))
+	{
+		FallbackScale = FMath::Min(FallbackScale, SemanticScale.GetValue());
+	}
+
+	FallbackScale = FMath::Min(
+		FallbackScale,
+		FindFamilySpecificTextFallbackScale(NormalizeTextMeasurementFontFamilyKey(Node->Text.FontFamily)));
 	return Node->Text.FontSize * FallbackScale;
 }
 }
@@ -458,6 +529,74 @@ float TextMeasurement::Testing::ResolveBaselineFallbackScale(const TSharedPtr<FD
 float TextMeasurement::Testing::ResolveLineBoxFallbackScale(const TSharedPtr<FDesignNode>& Node)
 {
 	return FallbackCalibration::ResolveLineBoxFallbackScale(Node);
+}
+
+
+TextMeasurement::Testing::FSlateMetricFingerprintTrace TextMeasurement::Testing::MeasureSlateMetricFingerprint(const TSharedPtr<FDesignNode>& Node)
+{
+	FSlateMetricFingerprintTrace Trace;
+	Phase32TextMetrics::FNodeFontIdentity Identity;
+	if (!Phase32TextMetrics::TryBuildNodeFontIdentity(Node, Identity))
+	{
+		Trace.Token = TEXT("metric:unavailable");
+		return Trace;
+	}
+
+	TextMeasurementRuntimeProbe::FTextMeasureRequest Request;
+	Request.Text = TEXT("Hg");
+	Request.FontSize = 64.0f;
+	Request.FontAssetPath = Identity.ResolvedAssetPath;
+	Request.TypefaceName = Identity.ResolvedTypeface;
+	Request.bRequiresResolvedFontAsset = true;
+	const TextMeasurementRuntimeProbe::FSlateTextMetricFingerprint Metric = TextMeasurementRuntimeProbe::MeasureSlateTextMetricFingerprint(Request);
+	Trace.SignedBaselineRatio = Metric.SignedBaselineRatio;
+	Trace.MaxHeightRatio = Metric.MaxHeightRatio;
+	Trace.bIsAvailable = Metric.bIsAvailable;
+	Trace.Token = TextMeasurementRuntimeProbe::SerializeSlateTextMetricToken(Metric);
+	return Trace;
+}
+
+FString TextMeasurement::Testing::BuildBaselineFallbackScaleKeyForTest(const TSharedPtr<FDesignNode>& Node)
+{
+	return CacheTrace::BuildBaselineFallbackScaleKey(Node);
+}
+
+float TextMeasurement::Testing::ResolveTextFontSizeFallbackForTest(const TSharedPtr<FDesignNode>& Node)
+{
+	return FallbackCalibration::ResolveTextFontSizeFallback(Node);
+}
+
+TextMeasurement::Testing::FTextFontSizeFallbackTrace TextMeasurement::Testing::ResolveTextFontSizeFallbackTraceForTest(const TSharedPtr<FDesignNode>& Node)
+{
+	FTextFontSizeFallbackTrace Trace;
+	if (!Node.IsValid())
+	{
+		return Trace;
+	}
+
+	if (SingleLineHeuristics::ShouldUseMeasuredTextFontFallbackScale(Node)
+		&& !SingleLineHeuristics::ShouldPreferIntrinsicSingleLineFallbackFontSize(Node))
+	{
+		if (const TOptional<float> MeasuredScale = FallbackCalibration::TryResolveMeasuredTextFontFallbackScale(Node))
+		{
+			Trace.Branch = ETextFontSizeFallbackBranch::Measured;
+			Trace.Scale = MeasuredScale.GetValue();
+			return Trace;
+		}
+	}
+
+	if (const TOptional<float> SemanticScale = FallbackCalibration::TryResolveSemanticSingleLineFallbackScale(Node))
+	{
+		Trace.Branch = ETextFontSizeFallbackBranch::Semantic;
+		Trace.Scale = SemanticScale.GetValue();
+		return Trace;
+	}
+
+	Trace.Branch = ETextFontSizeFallbackBranch::FamilyOrDefault;
+	Trace.Scale = FMath::Min(
+		0.75f,
+		FallbackCalibration::FindFamilySpecificTextFallbackScale(FallbackCalibration::NormalizeTextMeasurementFontFamilyKey(Node->Text.FontFamily)));
+	return Trace;
 }
 
 float TextMeasurement::Testing::ResolveSingleLineWidthFitTarget(const TSharedPtr<FDesignNode>& Node)

@@ -45,7 +45,33 @@ namespace TextMeasurement
 		DESIGN2UMGCORE_API float EstimateSingleLineHeight(const TSharedPtr<FDesignNode>& Node);
 		DESIGN2UMGCORE_API float ResolveBaselineFallbackScale(const TSharedPtr<FDesignNode>& Node);
 		DESIGN2UMGCORE_API float ResolveLineBoxFallbackScale(const TSharedPtr<FDesignNode>& Node);
+		enum class ETextFontSizeFallbackBranch : uint8
+		{
+			None,
+			Measured,
+			Semantic,
+			FamilyOrDefault
+		};
+
+		struct FSlateMetricFingerprintTrace
+		{
+			float SignedBaselineRatio = 0.0f;
+			float MaxHeightRatio = 0.0f;
+			bool bIsAvailable = false;
+			FString Token;
+		};
+
+		struct FTextFontSizeFallbackTrace
+		{
+			ETextFontSizeFallbackBranch Branch = ETextFontSizeFallbackBranch::None;
+			float Scale = 0.0f;
+		};
+
 		DESIGN2UMGCORE_API float ResolveSingleLineWidthFitTarget(const TSharedPtr<FDesignNode>& Node);
+		DESIGN2UMGCORE_API FSlateMetricFingerprintTrace MeasureSlateMetricFingerprint(const TSharedPtr<FDesignNode>& Node);
+		DESIGN2UMGCORE_API FString BuildBaselineFallbackScaleKeyForTest(const TSharedPtr<FDesignNode>& Node);
+		DESIGN2UMGCORE_API float ResolveTextFontSizeFallbackForTest(const TSharedPtr<FDesignNode>& Node);
+		DESIGN2UMGCORE_API FTextFontSizeFallbackTrace ResolveTextFontSizeFallbackTraceForTest(const TSharedPtr<FDesignNode>& Node);
 		DESIGN2UMGCORE_API int32 ResolveBestWidthFitFontSizeFromWidths(
 			float FallbackFontSize,
 			int32 MaxProbeFontSize,

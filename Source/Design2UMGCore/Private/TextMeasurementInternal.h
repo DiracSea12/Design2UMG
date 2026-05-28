@@ -43,6 +43,33 @@ namespace LineBox
 	float EstimateSingleLineTextHeight(const TSharedPtr<FDesignNode>& Node);
 }
 
+namespace Phase32TextMetrics
+{
+	struct FNodeFontIdentity
+	{
+		FString DeclaredFamily;
+		FString DeclaredPostScriptName;
+		FString DeclaredWeight;
+		FString DeclaredStyle;
+		FString ResolvedAssetPath;
+		FString FallbackAssetPath;
+		FString FallbackToken;
+		FString UnresolvedToken;
+		FString ResolvedTypeface;
+		FString DeclarationSourceKind;
+		FString ResolutionSourceKind;
+		FString FallbackState;
+		FString MatchReason;
+		FString IssueCodesToken;
+	};
+
+	bool TryBuildNodeFontIdentity(const TSharedPtr<FDesignNode>& Node, FNodeFontIdentity& OutIdentity);
+	bool IsMeasuredFallbackStateAllowed(const FNodeFontIdentity& Identity);
+	FString BuildMetricToken(const FNodeFontIdentity& Identity);
+	FString BuildFontIdentityKeyToken(const FNodeFontIdentity& Identity);
+	FString BuildFallbackScaleFloatToken(float Value);
+}
+
 namespace FallbackCalibration
 {
 	extern const float IntrinsicSingleLineSlackThreshold;

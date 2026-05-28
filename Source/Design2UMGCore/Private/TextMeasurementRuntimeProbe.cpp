@@ -14,6 +14,28 @@
 
 namespace
 {
+	constexpr float MetricProbeFontSize = 64.0f;
+
+	bool IsFinitePositive(const float Value)
+	{
+		return FMath::IsFinite(Value) && Value > 0.0f;
+	}
+
+	FString SerializeQuantizedMetricRatio(const float Value)
+	{
+		if (!FMath::IsFinite(Value))
+		{
+			return FString();
+		}
+
+		float Quantized = FMath::RoundToFloat(Value * 10000.0f) / 10000.0f;
+		if (FMath::IsNearlyZero(Quantized, 0.00005f))
+		{
+			Quantized = 0.0f;
+		}
+		return FString::Printf(TEXT("%.4f"), Quantized);
+	}
+
 	FSlateFontInfo BuildProbeFontInfo(const TextMeasurementRuntimeProbe::FTextMeasureRequest& Request)
 	{
 		FSlateFontInfo FontInfo = FTextBlockStyle::GetDefault().Font;
@@ -234,6 +256,57 @@ float MeasureSingleLineTextBlockHeight(const TSharedPtr<FDesignNode>& Node, floa
 bool TextMeasurementRuntimeProbe::IsAvailable()
 {
 	return FSlateApplication::IsInitialized() && FSlateApplication::Get().GetRenderer() != nullptr;
+}
+
+TextMeasurementRuntimeProbe::FSlateTextMetricFingerprint TextMeasurementRuntimeProbe::MeasureSlateTextMetricFingerprint(const FTextMeasureRequest& Request)
+{
+	FSlateTextMetricFingerprint Metric;
+	if (!IsAvailable())
+	{
+		return Metric;
+	}
+	if (Request.bRequiresResolvedFontAsset && Request.FontAssetPath.IsEmpty())
+	{
+		return Metric;
+	}
+
+	FTextMeasureRequest ProbeRequest = Request;
+	ProbeRequest.FontSize = MetricProbeFontSize;
+	TSharedRef<FSlateFontMeasure> FontMeasure = FSlateApplication::Get().GetRenderer()->GetFontMeasureService();
+	const FSlateFontInfo FontInfo = BuildProbeFontInfo(ProbeRequest);
+	const float Baseline = FontMeasure->GetBaseline(FontInfo, MetricProbeFontSize);
+	const float MaxCharacterHeight = FontMeasure->GetMaxCharacterHeight(FontInfo, MetricProbeFontSize);
+	if (!FMath::IsFinite(Baseline)
+		|| !IsFinitePositive(MaxCharacterHeight)
+		|| FMath::IsNearlyZero(Baseline)
+		|| FMath::Abs(Baseline) > TNumericLimits<float>::Max() / MetricProbeFontSize
+		|| MaxCharacterHeight > TNumericLimits<float>::Max() / MetricProbeFontSize)
+	{
+		return Metric;
+	}
+
+	Metric.SignedBaselineRatio = Baseline / MetricProbeFontSize;
+	Metric.MaxHeightRatio = MaxCharacterHeight / MetricProbeFontSize;
+	Metric.bIsAvailable = FMath::IsFinite(Metric.SignedBaselineRatio)
+		&& IsFinitePositive(Metric.MaxHeightRatio)
+		&& !FMath::IsNearlyZero(Metric.SignedBaselineRatio);
+	return Metric;
+}
+
+FString TextMeasurementRuntimeProbe::SerializeSlateTextMetricToken(const FSlateTextMetricFingerprint& Metric)
+{
+	if (!Metric.bIsAvailable)
+	{
+		return TEXT("metric:unavailable");
+	}
+
+	const FString BaselineToken = SerializeQuantizedMetricRatio(Metric.SignedBaselineRatio);
+	const FString MaxHeightToken = SerializeQuantizedMetricRatio(Metric.MaxHeightRatio);
+	if (BaselineToken.IsEmpty() || MaxHeightToken.IsEmpty())
+	{
+		return TEXT("metric:unavailable");
+	}
+	return FString::Printf(TEXT("metric:%s:%s"), *BaselineToken, *MaxHeightToken);
 }
 
 bool TextMeasurementRuntimeProbe::TryMeasureText(const FTextMeasureRequest& Request, FVector2D& OutSize)

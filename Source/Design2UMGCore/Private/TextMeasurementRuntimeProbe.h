@@ -26,7 +26,16 @@ namespace TextMeasurementRuntimeProbe
 		float WrapTextAt = 0.0f;
 	};
 
+	struct FSlateTextMetricFingerprint
+	{
+		float SignedBaselineRatio = 0.0f;
+		float MaxHeightRatio = 0.0f;
+		bool bIsAvailable = false;
+	};
+
 	bool IsAvailable();
+	FSlateTextMetricFingerprint MeasureSlateTextMetricFingerprint(const FTextMeasureRequest& Request);
+	FString SerializeSlateTextMetricToken(const FSlateTextMetricFingerprint& Metric);
 	bool TryMeasureText(const FTextMeasureRequest& Request, FVector2D& OutSize);
 	bool TryMeasureTextBlockDesiredSize(const FTextBlockMeasureRequest& Request, FVector2D& OutSize);
 }
