@@ -8,6 +8,7 @@
 #include "FontResolver.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 #include "UMGSchema.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "Dom/JsonObject.h"
 #include "Engine/Font.h"
 #include "HAL/FileManager.h"
@@ -19,6 +20,156 @@
 #if WITH_AUTOMATION_WORKER
 
 using Design2UMGEditorTests::DeleteGeneratedAssetsAtPath;
+
+namespace
+{
+	void AddRuntimeTypeface(UFont* Font, const FString& TypefaceName)
+	{
+		if (!Font)
+		{
+			return;
+		}
+
+		Font->FontCacheType = EFontCacheType::Runtime;
+		Font->GetMutableInternalCompositeFont().DefaultTypeface.Fonts.Add(FTypefaceEntry(
+			FName(*TypefaceName),
+			FPaths::Combine(FPaths::EngineContentDir(), TEXT("Slate/Fonts/Roboto-Regular.ttf")),
+			EFontHinting::Default,
+			EFontLoadingPolicy::LazyLoad));
+	}
+
+	UFont* CreateUsableTestFont(const FString& PackagePath, const FString& AssetName, const TArray<FString>& Typefaces)
+	{
+		UPackage* Package = CreatePackage(*PackagePath);
+		UFont* Font = NewObject<UFont>(Package, *AssetName, RF_Public | RF_Standalone);
+		for (const FString& Typeface : Typefaces)
+		{
+			AddRuntimeTypeface(Font, Typeface);
+		}
+		if (Font)
+		{
+			FAssetRegistryModule::AssetCreated(Font);
+		}
+		return Font;
+	}
+
+	FString FindNewImportReport(
+		const FString& ReportDir,
+		const TSet<FString>& ExistingReports)
+	{
+		TArray<FString> ReportsAfter;
+		IFileManager::Get().FindFilesRecursive(ReportsAfter, *ReportDir, TEXT("*.import_report.json"), true, false, false);
+		for (const FString& Candidate : ReportsAfter)
+		{
+			if (!ExistingReports.Contains(Candidate))
+			{
+				return Candidate;
+			}
+		}
+		return FString();
+	}
+
+	bool LoadImportReportJson(
+		FAutomationTestBase& Test,
+		const FString& ReportPath,
+		TSharedPtr<FJsonObject>& OutRootObject)
+	{
+		FString ReportJson;
+		Test.TestTrue(TEXT("Load import report json"), FFileHelper::LoadFileToString(ReportJson, *ReportPath));
+		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ReportJson);
+		Test.TestTrue(TEXT("Parse import report json"), FJsonSerializer::Deserialize(Reader, OutRootObject) && OutRootObject.IsValid());
+		return OutRootObject.IsValid();
+	}
+
+	TArray<TSharedPtr<FJsonValue>> GetFontResolutionResults(const TSharedPtr<FJsonObject>& RootObject)
+	{
+		const TSharedPtr<FJsonObject>* FontResolutionObject = nullptr;
+		if (!RootObject.IsValid()
+			|| !RootObject->TryGetObjectField(TEXT("fontResolution"), FontResolutionObject)
+			|| !FontResolutionObject)
+		{
+			return {};
+		}
+		return (*FontResolutionObject)->GetArrayField(TEXT("results"));
+	}
+
+	TSet<FString> GetIssueCodeSet(const TSharedPtr<FJsonObject>& Entry)
+	{
+		TSet<FString> Codes;
+		if (!Entry.IsValid())
+		{
+			return Codes;
+		}
+		const TArray<TSharedPtr<FJsonValue>>* IssueValues = nullptr;
+		if (Entry->TryGetArrayField(TEXT("issueCodes"), IssueValues) && IssueValues)
+		{
+			for (const TSharedPtr<FJsonValue>& IssueValue : *IssueValues)
+			{
+				FString IssueCode;
+				if (IssueValue.IsValid() && IssueValue->TryGetString(IssueCode))
+				{
+					Codes.Add(IssueCode);
+				}
+			}
+		}
+		return Codes;
+	}
+
+	TSharedPtr<FJsonObject> FindFontResultByNodeId(
+		const TArray<TSharedPtr<FJsonValue>>& Results,
+		const FString& NodeId,
+		const TOptional<int32> RunId = TOptional<int32>())
+	{
+		for (const TSharedPtr<FJsonValue>& Value : Results)
+		{
+			const TSharedPtr<FJsonObject> Entry = Value.IsValid() ? Value->AsObject() : nullptr;
+			FString FoundNodeId;
+			if (!Entry.IsValid()
+				|| !Entry->TryGetStringField(TEXT("nodeId"), FoundNodeId)
+				|| FoundNodeId != NodeId)
+			{
+				continue;
+			}
+
+			double FoundRunId = 0.0;
+			const bool bHasRunId = Entry->TryGetNumberField(TEXT("runId"), FoundRunId);
+			if (!RunId.IsSet() && !bHasRunId)
+			{
+				return Entry;
+			}
+			if (RunId.IsSet() && bHasRunId && static_cast<int32>(FoundRunId) == RunId.GetValue())
+			{
+				return Entry;
+			}
+		}
+		return nullptr;
+	}
+
+	TSharedPtr<FJsonObject> FindDocumentFontResultByIndex(
+		const TArray<TSharedPtr<FJsonValue>>& Results,
+		const int32 DocumentFontIndex)
+	{
+		for (const TSharedPtr<FJsonValue>& Value : Results)
+		{
+			const TSharedPtr<FJsonObject> Entry = Value.IsValid() ? Value->AsObject() : nullptr;
+			FString EntryScope;
+			if (!Entry.IsValid()
+				|| !Entry->TryGetStringField(TEXT("entryScope"), EntryScope)
+				|| EntryScope != TEXT("document-font-clue"))
+			{
+				continue;
+			}
+
+			double FoundIndex = -1.0;
+			if (Entry->TryGetNumberField(TEXT("documentFontIndex"), FoundIndex)
+				&& static_cast<int32>(FoundIndex) == DocumentFontIndex)
+			{
+				return Entry;
+			}
+		}
+		return nullptr;
+	}
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImportDiagnosticReportStructureTest,
 	"Design2UMG.Import.ImportDiagnosticReportStructure",
@@ -206,6 +357,14 @@ bool FImportDiagnosticReportStructureTest::RunTest(const FString& Parameters)
 			TestEqual(TEXT("Missing font falls back with warning state"),
 				FontResult->GetStringField(TEXT("resolutionState")),
 				TEXT("default-font"));
+			TestEqual(TEXT("Missing font reports source declaration"),
+				FontResult->GetStringField(TEXT("declarationSourceKind")),
+				TEXT("source-declaration"));
+			TestTrue(TEXT("Missing font reports a fallback source"),
+				FontResult->GetStringField(TEXT("resolutionSourceKind")) == TEXT("default-font-asset")
+				|| FontResult->GetStringField(TEXT("resolutionSourceKind")) == TEXT("engine-default"));
+			TestTrue(TEXT("Missing font does not report fallback as resolved asset"),
+				!FontResult->HasField(TEXT("resolvedAssetPath")));
 			TestEqual(TEXT("Font result key is stable"),
 				FontResult->GetStringField(TEXT("declarationKey")),
 				TEXT("definitelymissingreportfont|none|400|normal"));
@@ -327,16 +486,19 @@ bool FImportDiagnosticReportEngineFontFallbackWarnsTest::RunTest(const FString& 
 			TestEqual(TEXT("Engine fallback keeps warning severity"),
 				FontResult->GetStringField(TEXT("severity")),
 				TEXT("warning"));
-			TestEqual(TEXT("Engine fallback reports the resolved engine font asset"),
-				FontResult->GetStringField(TEXT("resolvedAssetPath")),
+			TestFalse(TEXT("Engine fallback must not report a resolved asset"),
+				FontResult->HasField(TEXT("resolvedAssetPath")));
+			TestEqual(TEXT("Engine fallback reports the fallback engine font asset"),
+				FontResult->GetStringField(TEXT("fallbackAssetPath")),
 				TEXT("/Engine/EngineFonts/Roboto.Roboto"));
-			bool bFoundMissingProjectIssue = false;
-			for (const TSharedPtr<FJsonValue>& IssueValue : FontResult->GetArrayField(TEXT("issueCodes")))
-			{
-				bFoundMissingProjectIssue |= IssueValue.IsValid()
-					&& IssueValue->AsString() == TEXT("missing-project-font");
-			}
-			TestTrue(TEXT("Engine fallback still records missing project font"), bFoundMissingProjectIssue);
+			TestEqual(TEXT("Engine fallback uses structured source kind"),
+				FontResult->GetStringField(TEXT("resolutionSourceKind")),
+				TEXT("engine-default"));
+			TestEqual(TEXT("Engine fallback uses structured fallback state"),
+				FontResult->GetStringField(TEXT("fallbackState")),
+				TEXT("engine-default"));
+			TestTrue(TEXT("Engine fallback records engine-default-used"),
+				GetIssueCodeSet(FontResult).Contains(TEXT("engine-default-used")));
 		}
 	}
 
@@ -465,13 +627,14 @@ bool FImportDiagnosticReportInvalidExplicitFontMappingTest::RunTest(const FStrin
 			TestFalse(TEXT("Invalid explicit mapping must not report an auto-substituted font asset"),
 				FontResult->HasField(TEXT("resolvedAssetPath")));
 
-			bool bFoundInvalidMappingIssue = false;
-			for (const TSharedPtr<FJsonValue>& IssueValue : FontResult->GetArrayField(TEXT("issueCodes")))
-			{
-				bFoundInvalidMappingIssue |= IssueValue.IsValid()
-					&& IssueValue->AsString() == TEXT("invalid-explicit-font-mapping");
-			}
-			TestTrue(TEXT("Invalid explicit mapping issue code is present"), bFoundInvalidMappingIssue);
+			TestEqual(TEXT("Invalid explicit mapping reports unresolved source kind"),
+				FontResult->GetStringField(TEXT("resolutionSourceKind")),
+				TEXT("unresolved"));
+			TestEqual(TEXT("Invalid explicit mapping records unresolved token"),
+				FontResult->GetStringField(TEXT("unresolvedToken")),
+				TEXT("unresolved-declaration"));
+			TestTrue(TEXT("Invalid explicit mapping issue code is present"),
+				GetIssueCodeSet(FontResult).Contains(TEXT("unresolved-declaration")));
 		}
 	}
 
@@ -610,14 +773,359 @@ bool FImportDiagnosticReportExplicitMappingMissingTypefaceTest::RunTest(const FS
 			TestFalse(TEXT("Missing explicit typeface must not report an auto-substituted typeface"),
 				FontResult->HasField(TEXT("resolvedTypeface")));
 
-			bool bFoundMissingTypefaceIssue = false;
-			for (const TSharedPtr<FJsonValue>& IssueValue : FontResult->GetArrayField(TEXT("issueCodes")))
-			{
-				bFoundMissingTypefaceIssue |= IssueValue.IsValid()
-					&& IssueValue->AsString() == TEXT("missing-explicit-font-typeface");
-			}
-			TestTrue(TEXT("Missing explicit typeface issue code is present"), bFoundMissingTypefaceIssue);
+			TestEqual(TEXT("Missing explicit typeface reports unresolved source kind"),
+				FontResult->GetStringField(TEXT("resolutionSourceKind")),
+				TEXT("unresolved"));
+			TestEqual(TEXT("Missing explicit typeface records rejected typeface issue"),
+				FontResult->GetStringField(TEXT("unresolvedToken")),
+				TEXT("unresolved-declaration"));
+			TestTrue(TEXT("Missing explicit typeface issue code is present"),
+				GetIssueCodeSet(FontResult).Contains(TEXT("rejected-typeface")));
 		}
+	}
+
+	IFileManager::Get().Delete(*ReportPath);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImportDiagnosticReportFontIdentityEvidenceTest,
+	"Design2UMG.Import.ImportDiagnosticReportFontIdentityEvidence",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FImportDiagnosticReportFontIdentityEvidenceTest::RunTest(const FString& Parameters)
+{
+	UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+	TestTrue(TEXT("Settings available"), Settings != nullptr);
+	if (!Settings)
+	{
+		return false;
+	}
+
+	const TMap<FString, TSoftObjectPtr<UFont>> SavedMappings = Settings->ExplicitFontMappings;
+	const TSoftObjectPtr<UFont> SavedDefaultFont = Settings->DefaultFontAsset;
+	Settings->ExplicitFontMappings.Empty();
+
+	UFont* ExactFont = CreateUsableTestFont(
+		TEXT("/Game/Design2UMG/Fonts/D2U_Phase315ExactReportFont"),
+		TEXT("D2U_Phase315ExactReportFont"),
+		{TEXT("Regular"), TEXT("Bold")});
+	UFont* DefaultFont = CreateUsableTestFont(
+		TEXT("/Game/Design2UMG/Fonts/D2U_Phase315DefaultReportFont"),
+		TEXT("D2U_Phase315DefaultReportFont"),
+		{TEXT("Regular")});
+	TestTrue(TEXT("Exact fixture font created"), ExactFont != nullptr);
+	TestTrue(TEXT("Default fixture font created"), DefaultFont != nullptr);
+	if (!ExactFont || !DefaultFont)
+	{
+		Settings->ExplicitFontMappings = SavedMappings;
+		Settings->DefaultFontAsset = SavedDefaultFont;
+		FFontResolver::ClearCache();
+		return false;
+	}
+
+	Settings->ExplicitFontMappings.Add(
+		TEXT("D2UPhase315PS"),
+		TSoftObjectPtr<UFont>(FSoftObjectPath(ExactFont)));
+	Settings->ExplicitFontMappings.Add(
+		TEXT("D2UPhase315"),
+		TSoftObjectPtr<UFont>(FSoftObjectPath(ExactFont)));
+	Settings->DefaultFontAsset = TSoftObjectPtr<UFont>(FSoftObjectPath(DefaultFont));
+	FFontResolver::ClearCache();
+
+	FDesignDocument Document;
+	Document.Version = TEXT("font-identity-evidence-v1");
+
+	FDesignFont UrlClue;
+	UrlClue.Name = TEXT("D2UPhase315");
+	UrlClue.Url = TEXT("https://example.com/fonts/D2UPhase315.woff2");
+	Document.Fonts.Add(UrlClue);
+
+	FDesignFont UnsupportedFileClue;
+	UnsupportedFileClue.Name = TEXT("D2UUnsupportedFileOnly");
+	UnsupportedFileClue.Url = TEXT("C:/fonts/D2UUnsupportedFileOnly.ttf");
+	Document.Fonts.Add(UnsupportedFileClue);
+
+	TSharedPtr<FDesignNode> NodeOnly = MakeShared<FDesignNode>();
+	NodeOnly->Id = TEXT("font_identity_node_only");
+	NodeOnly->Name = TEXT("Font Identity Node Only");
+	NodeOnly->Type = EDesignNodeType::Text;
+	NodeOnly->Text.FontFamily = TEXT("D2UPhase315");
+	NodeOnly->Text.FontPostScriptName = TEXT("D2UPhase315PS");
+	NodeOnly->Text.FontWeight = TEXT("700");
+	Document.Children.Add(NodeOnly);
+
+	TSharedPtr<FDesignNode> DuplicateA = MakeShared<FDesignNode>();
+	DuplicateA->Id = TEXT("duplicate_a");
+	DuplicateA->Type = EDesignNodeType::Text;
+	DuplicateA->Text.FontFamily = TEXT("D2UPhase315");
+	DuplicateA->Text.FontPostScriptName = TEXT("D2UPhase315PS");
+	DuplicateA->Text.FontWeight = TEXT("700");
+	Document.Children.Add(DuplicateA);
+
+	TSharedPtr<FDesignNode> DuplicateB = MakeShared<FDesignNode>();
+	DuplicateB->Id = TEXT("duplicate_b");
+	DuplicateB->Type = EDesignNodeType::Text;
+	DuplicateB->Text.FontFamily = TEXT("D2UPhase315");
+	DuplicateB->Text.FontPostScriptName = TEXT("D2UPhase315PS");
+	DuplicateB->Text.FontWeight = TEXT("700");
+	Document.Children.Add(DuplicateB);
+
+	TSharedPtr<FDesignNode> RunNode = MakeShared<FDesignNode>();
+	RunNode->Id = TEXT("font_identity_runs");
+	RunNode->Name = TEXT("Font Identity Runs");
+	RunNode->Type = EDesignNodeType::Text;
+	FDesignTextRun& Run0 = RunNode->Text.TextRuns.AddDefaulted_GetRef();
+	Run0.Content = TEXT("A");
+	Run0.FontFamily = TEXT("D2UPhase315");
+	Run0.FontPostScriptName = TEXT("D2UPhase315PS");
+	Run0.FontWeight = TEXT("400");
+	FDesignTextRun& Run1 = RunNode->Text.TextRuns.AddDefaulted_GetRef();
+	Run1.Content = TEXT("B");
+	Run1.FontFamily = TEXT("D2UPhase315");
+	Run1.FontPostScriptName = TEXT("D2UPhase315PS");
+	Run1.FontWeight = TEXT("700");
+	Document.Children.Add(RunNode);
+
+	TSharedPtr<FDesignNode> DefaultFallbackNode = MakeShared<FDesignNode>();
+	DefaultFallbackNode->Id = TEXT("default_fallback_text");
+	DefaultFallbackNode->Type = EDesignNodeType::Text;
+	DefaultFallbackNode->Text.FontFamily = TEXT("D2UMissingDefaultFallback");
+	Document.Children.Add(DefaultFallbackNode);
+
+	FUMGWidgetData Data;
+	Data.WidgetName = TEXT("WBP_FontIdentityEvidenceReportFixture");
+	Data.RootWidget.Type = TEXT("CanvasPanel");
+	Data.RootWidget.Id = TEXT("root");
+	Data.RootWidget.Name = TEXT("Root");
+
+	const FString ReportDir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Design2UMG"), TEXT("ImportReports"));
+	TArray<FString> ReportsBefore;
+	IFileManager::Get().FindFilesRecursive(ReportsBefore, *ReportDir, TEXT("*.import_report.json"), true, false, false);
+	TSet<FString> ExistingReports;
+	for (const FString& ExistingReport : ReportsBefore)
+	{
+		ExistingReports.Add(ExistingReport);
+	}
+
+	DesignImportPipeline::WriteImportDiagnosticReport(
+		Document,
+		Data,
+		FString(),
+		TEXT("/Game/Design2UMG/_TestOutput/FontIdentityEvidence"),
+		FString(),
+		TEXT("/Game/Design2UMG/_TestOutput/FontIdentityEvidence/WBP_FontIdentityEvidenceReportFixture"));
+
+	const FString ReportPath = FindNewImportReport(ReportDir, ExistingReports);
+	TestTrue(TEXT("Font identity report was generated"), !ReportPath.IsEmpty() && FPaths::FileExists(ReportPath));
+	if (ReportPath.IsEmpty() || !FPaths::FileExists(ReportPath))
+	{
+		Settings->ExplicitFontMappings = SavedMappings;
+		Settings->DefaultFontAsset = SavedDefaultFont;
+		FFontResolver::ClearCache();
+		return false;
+	}
+
+	Settings->ExplicitFontMappings = SavedMappings;
+	Settings->DefaultFontAsset = SavedDefaultFont;
+	FFontResolver::ClearCache();
+
+	TSharedPtr<FJsonObject> RootObject;
+	if (!LoadImportReportJson(*this, ReportPath, RootObject))
+	{
+		IFileManager::Get().Delete(*ReportPath);
+		return false;
+	}
+
+	const TArray<TSharedPtr<FJsonValue>> FontResults = GetFontResolutionResults(RootObject);
+	TestEqual(TEXT("Duplicate declarations stay separate across document clue, nodes, and runs"), FontResults.Num(), 8);
+
+	const TSharedPtr<FJsonObject> NodeOnlyResult = FindFontResultByNodeId(FontResults, TEXT("font_identity_node_only"));
+	TestTrue(TEXT("Node-only result is present"), NodeOnlyResult.IsValid());
+	if (NodeOnlyResult.IsValid())
+	{
+		TestEqual(TEXT("Node-only entry scope"), NodeOnlyResult->GetStringField(TEXT("entryScope")), TEXT("text-node"));
+		TestFalse(TEXT("Node-only entry omits runId"), NodeOnlyResult->HasField(TEXT("runId")));
+		TestEqual(TEXT("Explicit PostScript mapping source kind"),
+			NodeOnlyResult->GetStringField(TEXT("resolutionSourceKind")),
+			TEXT("explicit-project-mapping"));
+		TestEqual(TEXT("Explicit PostScript mapping reason"),
+			NodeOnlyResult->GetStringField(TEXT("matchReason")),
+			TEXT("explicit-postscript-mapping"));
+		TestEqual(TEXT("Exact mapping fallback state"),
+			NodeOnlyResult->GetStringField(TEXT("fallbackState")),
+			TEXT("exact"));
+		TestTrue(TEXT("Exact mapping writes resolved asset"),
+			NodeOnlyResult->HasField(TEXT("resolvedAssetPath")));
+	}
+
+	TestTrue(TEXT("Duplicate node A has its own evidence"),
+		FindFontResultByNodeId(FontResults, TEXT("duplicate_a")).IsValid());
+	TestTrue(TEXT("Duplicate node B has its own evidence"),
+		FindFontResultByNodeId(FontResults, TEXT("duplicate_b")).IsValid());
+
+	const TSharedPtr<FJsonObject> Run0Result = FindFontResultByNodeId(FontResults, TEXT("font_identity_runs"), 0);
+	const TSharedPtr<FJsonObject> Run1Result = FindFontResultByNodeId(FontResults, TEXT("font_identity_runs"), 1);
+	TestTrue(TEXT("Run 0 result is present"), Run0Result.IsValid());
+	TestTrue(TEXT("Run 1 result is present"), Run1Result.IsValid());
+	if (Run0Result.IsValid() && Run1Result.IsValid())
+	{
+		TestEqual(TEXT("Run 0 uses stable runId"), static_cast<int32>(Run0Result->GetNumberField(TEXT("runId"))), 0);
+		TestEqual(TEXT("Run 1 uses stable runId"), static_cast<int32>(Run1Result->GetNumberField(TEXT("runId"))), 1);
+		TestEqual(TEXT("Run 0 keeps declared weight"), Run0Result->GetStringField(TEXT("declaredWeight")), TEXT("400"));
+		TestEqual(TEXT("Run 1 keeps declared weight"), Run1Result->GetStringField(TEXT("declaredWeight")), TEXT("700"));
+	}
+
+	const TSharedPtr<FJsonObject> DocumentUrlClue = FindDocumentFontResultByIndex(FontResults, 0);
+	TestTrue(TEXT("Document URL clue is present"), DocumentUrlClue.IsValid());
+	if (DocumentUrlClue.IsValid())
+	{
+		TestEqual(TEXT("Document clue entry scope"),
+			DocumentUrlClue->GetStringField(TEXT("entryScope")),
+			TEXT("document-font-clue"));
+		TestFalse(TEXT("Document clue omits nodeId"), DocumentUrlClue->HasField(TEXT("nodeId")));
+		TestFalse(TEXT("Document clue omits runId"), DocumentUrlClue->HasField(TEXT("runId")));
+		TestTrue(TEXT("URL clue records ignored issue"),
+			GetIssueCodeSet(DocumentUrlClue).Contains(TEXT("font-url-ignored")));
+		TestEqual(TEXT("URL clue keeps resolver choice"),
+			DocumentUrlClue->GetStringField(TEXT("resolutionSourceKind")),
+			TEXT("explicit-project-mapping"));
+	}
+
+	const TSharedPtr<FJsonObject> UnsupportedFileClueResult = FindDocumentFontResultByIndex(FontResults, 1);
+	TestTrue(TEXT("Unsupported file clue is present"), UnsupportedFileClueResult.IsValid());
+	if (UnsupportedFileClueResult.IsValid())
+	{
+		TestEqual(TEXT("Unsupported file clue is unresolved"),
+			UnsupportedFileClueResult->GetStringField(TEXT("resolutionSourceKind")),
+			TEXT("unresolved"));
+		TestEqual(TEXT("Unsupported file clue fallback state"),
+			UnsupportedFileClueResult->GetStringField(TEXT("fallbackState")),
+			TEXT("unsupported-input"));
+		TestEqual(TEXT("Unsupported file clue writes unresolved token"),
+			UnsupportedFileClueResult->GetStringField(TEXT("unresolvedToken")),
+			TEXT("unsupported-input"));
+		TestTrue(TEXT("Unsupported file clue records issue"),
+			GetIssueCodeSet(UnsupportedFileClueResult).Contains(TEXT("unsupported-font-file-input")));
+	}
+
+	const TSharedPtr<FJsonObject> DefaultFallbackResult = FindFontResultByNodeId(FontResults, TEXT("default_fallback_text"));
+	TestTrue(TEXT("Default fallback result is present"), DefaultFallbackResult.IsValid());
+	if (DefaultFallbackResult.IsValid())
+	{
+		TestEqual(TEXT("Default fallback source kind"),
+			DefaultFallbackResult->GetStringField(TEXT("resolutionSourceKind")),
+			TEXT("default-font-asset"));
+		TestEqual(TEXT("Default fallback state"),
+			DefaultFallbackResult->GetStringField(TEXT("fallbackState")),
+			TEXT("default-font-asset"));
+		TestTrue(TEXT("Default fallback writes fallback asset path"),
+			DefaultFallbackResult->HasField(TEXT("fallbackAssetPath")));
+		TestFalse(TEXT("Default fallback does not write resolved asset path"),
+			DefaultFallbackResult->HasField(TEXT("resolvedAssetPath")));
+	}
+
+	IFileManager::Get().Delete(*ReportPath);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImportDiagnosticReportAmbiguousFontIdentityEvidenceTest,
+	"Design2UMG.Import.ImportDiagnosticReportAmbiguousFontIdentityEvidence",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FImportDiagnosticReportAmbiguousFontIdentityEvidenceTest::RunTest(const FString& Parameters)
+{
+	UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+	TestTrue(TEXT("Settings available"), Settings != nullptr);
+	if (!Settings)
+	{
+		return false;
+	}
+
+	const TMap<FString, TSoftObjectPtr<UFont>> SavedMappings = Settings->ExplicitFontMappings;
+	const TSoftObjectPtr<UFont> SavedDefaultFont = Settings->DefaultFontAsset;
+	Settings->ExplicitFontMappings.Empty();
+	Settings->DefaultFontAsset.Reset();
+
+	UFont* AmbiguousA = CreateUsableTestFont(
+		TEXT("/Game/Design2UMG/Fonts/Phase315AmbiguousA/D2U_Phase315Ambiguous"),
+		TEXT("D2U_Phase315Ambiguous"),
+		{TEXT("Regular")});
+	UFont* AmbiguousB = CreateUsableTestFont(
+		TEXT("/Game/Design2UMG/Fonts/Phase315AmbiguousB/D2U_Phase315Ambiguous"),
+		TEXT("D2U_Phase315Ambiguous"),
+		{TEXT("Regular")});
+	TestTrue(TEXT("Ambiguous fixture font A created"), AmbiguousA != nullptr);
+	TestTrue(TEXT("Ambiguous fixture font B created"), AmbiguousB != nullptr);
+	if (!AmbiguousA || !AmbiguousB)
+	{
+		Settings->ExplicitFontMappings = SavedMappings;
+		Settings->DefaultFontAsset = SavedDefaultFont;
+		FFontResolver::ClearCache();
+		return false;
+	}
+
+	FFontResolver::ClearCache();
+
+	FDesignDocument Document;
+	Document.Version = TEXT("ambiguous-font-identity-evidence-v1");
+	TSharedPtr<FDesignNode> TextNode = MakeShared<FDesignNode>();
+	TextNode->Id = TEXT("ambiguous_font_text");
+	TextNode->Type = EDesignNodeType::Text;
+	TextNode->Text.FontFamily = TEXT("D2U_Phase315Ambiguous");
+	Document.Children.Add(TextNode);
+
+	FUMGWidgetData Data;
+	Data.WidgetName = TEXT("WBP_AmbiguousFontIdentityEvidenceReportFixture");
+	Data.RootWidget.Type = TEXT("TextBlock");
+	Data.RootWidget.Id = TextNode->Id;
+	Data.RootWidget.Name = TEXT("Ambiguous Font");
+
+	const FString ReportDir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Design2UMG"), TEXT("ImportReports"));
+	TArray<FString> ReportsBefore;
+	IFileManager::Get().FindFilesRecursive(ReportsBefore, *ReportDir, TEXT("*.import_report.json"), true, false, false);
+	TSet<FString> ExistingReports;
+	for (const FString& ExistingReport : ReportsBefore)
+	{
+		ExistingReports.Add(ExistingReport);
+	}
+
+	DesignImportPipeline::WriteImportDiagnosticReport(
+		Document,
+		Data,
+		FString(),
+		TEXT("/Game/Design2UMG/_TestOutput/AmbiguousFontIdentityEvidence"),
+		FString(),
+		TEXT("/Game/Design2UMG/_TestOutput/AmbiguousFontIdentityEvidence/WBP_AmbiguousFontIdentityEvidenceReportFixture"));
+
+	Settings->ExplicitFontMappings = SavedMappings;
+	Settings->DefaultFontAsset = SavedDefaultFont;
+	FFontResolver::ClearCache();
+
+	const FString ReportPath = FindNewImportReport(ReportDir, ExistingReports);
+	TestTrue(TEXT("Ambiguous font report was generated"), !ReportPath.IsEmpty() && FPaths::FileExists(ReportPath));
+	if (ReportPath.IsEmpty() || !FPaths::FileExists(ReportPath))
+	{
+		return false;
+	}
+
+	TSharedPtr<FJsonObject> RootObject;
+	if (!LoadImportReportJson(*this, ReportPath, RootObject))
+	{
+		IFileManager::Get().Delete(*ReportPath);
+		return false;
+	}
+
+	const TArray<TSharedPtr<FJsonValue>> FontResults = GetFontResolutionResults(RootObject);
+	TestEqual(TEXT("Ambiguous font emits one result"), FontResults.Num(), 1);
+	const TSharedPtr<FJsonObject> AmbiguousResult = FindFontResultByNodeId(FontResults, TEXT("ambiguous_font_text"));
+	TestTrue(TEXT("Ambiguous result is present"), AmbiguousResult.IsValid());
+	if (AmbiguousResult.IsValid())
+	{
+		TestTrue(TEXT("Ambiguous same-priority match records issue"),
+			GetIssueCodeSet(AmbiguousResult).Contains(TEXT("ambiguous-font-match")));
+		TestEqual(TEXT("Ambiguous source kind remains project asset"),
+			AmbiguousResult->GetStringField(TEXT("resolutionSourceKind")),
+			TEXT("project-asset"));
+		TestFalse(TEXT("Ambiguous match is not exact"),
+			AmbiguousResult->GetStringField(TEXT("fallbackState")) == TEXT("exact"));
 	}
 
 	IFileManager::Get().Delete(*ReportPath);

@@ -472,7 +472,19 @@ namespace
 
 	void AddFontDiagnosticIssue(FFontResolutionDiagnostic& Diagnostic, const TCHAR* IssueCode)
 	{
-		Diagnostic.IssueCodes.Add(FString(IssueCode));
+		Diagnostic.IssueCodes.AddUnique(FString(IssueCode));
+	}
+
+	void SetUnresolvedDiagnostic(
+		FFontResolutionDiagnostic& Diagnostic,
+		const FString& Token,
+		const FString& FallbackState,
+		const FString& MatchReason)
+	{
+		Diagnostic.ResolutionSourceKind = TEXT("unresolved");
+		Diagnostic.FallbackState = FallbackState;
+		Diagnostic.MatchReason = MatchReason;
+		Diagnostic.UnresolvedToken = Token;
 	}
 
 }
@@ -539,20 +551,35 @@ FFontResolutionDiagnostic FFontResolver::ResolveFontDiagnostic(
 	const FString& PostScriptName,
 	const FString& Weight,
 	const FString& Style,
-	const bool bUnsupportedInput)
+	const bool bUnsupportedInput,
+	const bool bFontUrlIgnored)
 {
 	FFontResolutionDiagnostic Diagnostic;
 	Diagnostic.DeclarationKey = BuildFontDiagnosticDeclarationKey(FontFamily, PostScriptName, Weight, Style);
 	Diagnostic.DeclaredFamily = FontFamily.TrimStartAndEnd().IsEmpty() ? TEXT("unknown-family") : FontFamily;
 	Diagnostic.DeclaredPostScriptName = PostScriptName;
+	Diagnostic.DeclaredWeight = Weight;
+	Diagnostic.DeclaredStyle = Style;
 	Diagnostic.ResolutionState = TEXT("default-font");
+	Diagnostic.DeclarationSourceKind = TEXT("source-declaration");
+	Diagnostic.ResolutionSourceKind = TEXT("unresolved");
+	Diagnostic.FallbackState = TEXT("unresolved");
+	Diagnostic.MatchReason = TEXT("unresolved-declaration");
 	Diagnostic.Severity = TEXT("warning");
+
+	if (bFontUrlIgnored)
+	{
+		AddFontDiagnosticIssue(Diagnostic, TEXT("font-url-ignored"));
+	}
 
 	bool bAllowFallbackAsset = true;
 	if (bUnsupportedInput)
 	{
 		Diagnostic.ResolutionState = TEXT("unsupported-input");
-		AddFontDiagnosticIssue(Diagnostic, TEXT("unsupported-font-source"));
+		Diagnostic.Severity = TEXT("error");
+		bAllowFallbackAsset = false;
+		SetUnresolvedDiagnostic(Diagnostic, TEXT("unsupported-input"), TEXT("unsupported-input"), TEXT("declaration-only"));
+		AddFontDiagnosticIssue(Diagnostic, TEXT("unsupported-font-file-input"));
 	}
 	else
 	{
@@ -563,7 +590,8 @@ FFontResolutionDiagnostic FFontResolver::ResolveFontDiagnostic(
 			Diagnostic.ResolutionState = TEXT("rejected");
 			Diagnostic.Severity = TEXT("error");
 			bAllowFallbackAsset = false;
-			AddFontDiagnosticIssue(Diagnostic, TEXT("invalid-explicit-font-mapping"));
+			SetUnresolvedDiagnostic(Diagnostic, TEXT("unresolved-declaration"), TEXT("unresolved"), TEXT("unresolved-declaration"));
+			AddFontDiagnosticIssue(Diagnostic, TEXT("unresolved-declaration"));
 		}
 		else
 		{
@@ -572,7 +600,14 @@ FFontResolutionDiagnostic FFontResolver::ResolveFontDiagnostic(
 			{
 				if (IsEngineFontAssetPath(Diagnostic.ResolvedAssetPath))
 				{
-					AddFontDiagnosticIssue(Diagnostic, TEXT("missing-project-font"));
+					Diagnostic.FallbackAssetPath = Diagnostic.ResolvedAssetPath;
+					Diagnostic.ResolvedAssetPath.Empty();
+					Diagnostic.ResolutionState = TEXT("default-font");
+					Diagnostic.ResolutionSourceKind = TEXT("engine-default");
+					Diagnostic.FallbackState = TEXT("engine-default");
+					Diagnostic.MatchReason = TEXT("engine-default-fallback");
+					bAllowFallbackAsset = false;
+					AddFontDiagnosticIssue(Diagnostic, TEXT("engine-default-used"));
 				}
 				else if (ExplicitMappingResult == EExplicitFontMappingResult::Resolved)
 				{
@@ -583,11 +618,17 @@ FFontResolutionDiagnostic FFontResolver::ResolveFontDiagnostic(
 						Diagnostic.Severity = TEXT("error");
 						Diagnostic.ResolvedAssetPath.Empty();
 						bAllowFallbackAsset = false;
-						AddFontDiagnosticIssue(Diagnostic, TEXT("missing-explicit-font-typeface"));
+						SetUnresolvedDiagnostic(Diagnostic, TEXT("unresolved-declaration"), TEXT("unresolved"), TEXT("unresolved-declaration"));
+						AddFontDiagnosticIssue(Diagnostic, TEXT("rejected-typeface"));
 					}
 					else
 					{
 						Diagnostic.ResolutionState = TEXT("exact");
+						Diagnostic.ResolutionSourceKind = TEXT("explicit-project-mapping");
+						Diagnostic.FallbackState = TEXT("exact");
+						Diagnostic.MatchReason = HasExplicitFontMappingKey(PostScriptName)
+							? TEXT("explicit-postscript-mapping")
+							: TEXT("explicit-family-mapping");
 						Diagnostic.Severity = TEXT("info");
 					}
 				}
@@ -595,34 +636,70 @@ FFontResolutionDiagnostic FFontResolver::ResolveFontDiagnostic(
 				{
 					Diagnostic.ResolvedTypeface = FindBestTypefaceForAssetPath(Diagnostic.ResolvedAssetPath, Weight);
 					Diagnostic.ResolutionState = TEXT("exact");
+					Diagnostic.ResolutionSourceKind = TEXT("project-asset");
+					Diagnostic.FallbackState = TEXT("exact");
+					Diagnostic.MatchReason = TEXT("project-family-match");
 					Diagnostic.Severity = TEXT("info");
+					if (Diagnostic.ResolvedTypeface != MakeTypefaceNameForWeight(ParseWeightValue(Weight)))
+					{
+						Diagnostic.FallbackState = TEXT("typeface-substituted");
+						AddFontDiagnosticIssue(Diagnostic, TEXT("typeface-substituted"));
+					}
 				}
 			}
 			else if (FontFamily.TrimStartAndEnd().IsEmpty())
 			{
-				AddFontDiagnosticIssue(Diagnostic, TEXT("missing-family"));
+				SetUnresolvedDiagnostic(Diagnostic, TEXT("unresolved-declaration"), TEXT("unresolved"), TEXT("unresolved-declaration"));
+				AddFontDiagnosticIssue(Diagnostic, TEXT("unresolved-declaration"));
 			}
 			else if (CountProjectFontAssetCandidates(FontFamily) > 1)
 			{
 				Diagnostic.ResolutionState = TEXT("ambiguous");
-				AddFontDiagnosticIssue(Diagnostic, TEXT("ambiguous-project-font"));
+				Diagnostic.ResolutionSourceKind = TEXT("project-asset");
+				Diagnostic.FallbackState = TEXT("family-substituted");
+				Diagnostic.MatchReason = TEXT("project-family-match");
+				bAllowFallbackAsset = false;
+				AddFontDiagnosticIssue(Diagnostic, TEXT("ambiguous-font-match"));
 			}
 			else
 			{
-				AddFontDiagnosticIssue(Diagnostic, TEXT("missing-project-font"));
+				SetUnresolvedDiagnostic(Diagnostic, TEXT("unresolved-declaration"), TEXT("unresolved"), TEXT("unresolved-declaration"));
+				AddFontDiagnosticIssue(Diagnostic, TEXT("unresolved-declaration"));
 			}
 		}
 	}
 
 	if (Diagnostic.ResolvedAssetPath.IsEmpty() && bAllowFallbackAsset)
 	{
-		Diagnostic.ResolvedAssetPath = FindDefaultFontAssetPath();
-		if (Diagnostic.ResolvedAssetPath.IsEmpty())
+		FString FallbackPath = FindDefaultFontAssetPath();
+		if (!FallbackPath.IsEmpty())
 		{
-			Diagnostic.ResolvedAssetPath = ResolveEngineDefaultFontAssetPath();
+			Diagnostic.UnresolvedToken.Empty();
+			Diagnostic.FallbackAssetPath = FallbackPath;
+			Diagnostic.ResolutionSourceKind = TEXT("default-font-asset");
+			Diagnostic.FallbackState = TEXT("default-font-asset");
+			Diagnostic.MatchReason = TEXT("default-font-asset-fallback");
+			AddFontDiagnosticIssue(Diagnostic, TEXT("default-font-asset-used"));
+		}
+		else
+		{
+			FallbackPath = ResolveEngineDefaultFontAssetPath();
+			Diagnostic.UnresolvedToken.Empty();
+			if (!FallbackPath.IsEmpty())
+			{
+				Diagnostic.FallbackAssetPath = FallbackPath;
+			}
+			else
+			{
+				Diagnostic.FallbackToken = TEXT("engine-default");
+			}
+			Diagnostic.ResolutionSourceKind = TEXT("engine-default");
+			Diagnostic.FallbackState = TEXT("engine-default");
+			Diagnostic.MatchReason = TEXT("engine-default-fallback");
+			AddFontDiagnosticIssue(Diagnostic, TEXT("engine-default-used"));
 		}
 	}
-	if (Diagnostic.ResolvedTypeface.IsEmpty() && Diagnostic.ResolutionState != TEXT("rejected"))
+	if (Diagnostic.ResolvedTypeface.IsEmpty() && Diagnostic.ResolutionSourceKind != TEXT("unresolved"))
 	{
 		Diagnostic.ResolvedTypeface = TEXT("Regular");
 	}

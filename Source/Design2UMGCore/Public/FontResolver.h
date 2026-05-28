@@ -15,9 +15,18 @@ struct DESIGN2UMGCORE_API FFontResolutionDiagnostic
 	FString DeclarationKey;
 	FString DeclaredFamily;
 	FString DeclaredPostScriptName;
+	FString DeclaredWeight;
+	FString DeclaredStyle;
 	FString ResolvedAssetPath;
+	FString FallbackAssetPath;
+	FString FallbackToken;
+	FString UnresolvedToken;
 	FString ResolvedTypeface;
 	FString ResolutionState;
+	FString DeclarationSourceKind;
+	FString ResolutionSourceKind;
+	FString FallbackState;
+	FString MatchReason;
 	FString Severity;
 	TArray<FString> IssueCodes;
 };
@@ -63,7 +72,8 @@ struct DESIGN2UMGCORE_API FFontResolver
 		const FString& PostScriptName,
 		const FString& Weight,
 		const FString& Style,
-		bool bUnsupportedInput);
+		bool bUnsupportedInput,
+		bool bFontUrlIgnored = false);
 
 	/** Parse a weight string ("bold", "700", etc.) to numeric value (100-900). */
 	static int32 ParseWeightValue(const FString& Weight);

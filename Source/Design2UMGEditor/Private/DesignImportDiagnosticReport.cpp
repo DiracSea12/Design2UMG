@@ -363,47 +363,126 @@ namespace DesignImportDiagnosticReport
 				|| Extension == TEXT("woff2");
 		}
 
+		bool IsFontUrlSource(const FString& Source)
+		{
+			const FString Trimmed = Source.TrimStartAndEnd();
+			return Trimmed.StartsWith(TEXT("http://"), ESearchCase::IgnoreCase)
+				|| Trimmed.StartsWith(TEXT("https://"), ESearchCase::IgnoreCase);
+		}
+
+		bool IsUnsupportedFontFileSource(const FString& Source)
+		{
+			const FString Trimmed = Source.TrimStartAndEnd();
+			if (Trimmed.IsEmpty() || IsFontUrlSource(Trimmed))
+			{
+				return false;
+			}
+
+			return IsUnsupportedFontSource(Trimmed);
+		}
+
+		struct FFontResolutionEntryKey
+		{
+			FString EntryScope = TEXT("text-node");
+			FString NodeId;
+			TOptional<int32> RunId;
+			TOptional<int32> DocumentFontIndex;
+		};
+
+		FString BuildFontResolutionInstanceKey(const FFontResolutionEntryKey& EntryKey)
+		{
+			if (EntryKey.EntryScope == TEXT("document-font-clue"))
+			{
+				return FString::Printf(
+					TEXT("document-font-clue|%d"),
+					EntryKey.DocumentFontIndex.GetValue());
+			}
+			if (EntryKey.RunId.IsSet())
+			{
+				return FString::Printf(
+					TEXT("text-run|%s|%d"),
+					*EntryKey.NodeId,
+					EntryKey.RunId.GetValue());
+			}
+			return FString::Printf(TEXT("text-node|%s"), *EntryKey.NodeId);
+		}
+
 		void AddFontResolutionResult(
 			TArray<TSharedPtr<FJsonValue>>& OutValues,
 			TSet<FString>& InOutSeenKeys,
+			const FFontResolutionEntryKey& EntryKey,
 			const FString& Family,
 			const FString& PostScriptName,
 			const FString& Weight,
 			const FString& Style,
-			const bool bUnsupportedInput)
+			const bool bUnsupportedInput,
+			const bool bFontUrlIgnored)
 		{
+			const FString InstanceKey = BuildFontResolutionInstanceKey(EntryKey);
+			if (InOutSeenKeys.Contains(InstanceKey))
+			{
+				return;
+			}
+			InOutSeenKeys.Add(InstanceKey);
+
 			const FFontResolutionDiagnostic Diagnostic = FFontResolver::ResolveFontDiagnostic(
 				Family,
 				PostScriptName,
 				Weight,
 				Style,
-				bUnsupportedInput);
-			if (InOutSeenKeys.Contains(Diagnostic.DeclarationKey))
-			{
-				return;
-			}
-			InOutSeenKeys.Add(Diagnostic.DeclarationKey);
+				bUnsupportedInput,
+				bFontUrlIgnored);
 
 			TSharedRef<FJsonObject> Entry = MakeShared<FJsonObject>();
+			Entry->SetStringField(TEXT("entryScope"), EntryKey.EntryScope);
+			if (!EntryKey.NodeId.IsEmpty())
+			{
+				Entry->SetStringField(TEXT("nodeId"), EntryKey.NodeId);
+			}
+			if (EntryKey.RunId.IsSet())
+			{
+				Entry->SetNumberField(TEXT("runId"), EntryKey.RunId.GetValue());
+			}
+			if (EntryKey.DocumentFontIndex.IsSet())
+			{
+				Entry->SetNumberField(TEXT("documentFontIndex"), EntryKey.DocumentFontIndex.GetValue());
+			}
 			Entry->SetStringField(TEXT("declarationKey"), Diagnostic.DeclarationKey);
 			Entry->SetStringField(TEXT("declaredFamily"), Diagnostic.DeclaredFamily);
-			if (!Diagnostic.DeclaredPostScriptName.TrimStartAndEnd().IsEmpty())
-			{
-				Entry->SetStringField(TEXT("declaredPostScriptName"), Diagnostic.DeclaredPostScriptName);
-			}
+			Entry->SetStringField(TEXT("declaredPostScriptName"), Diagnostic.DeclaredPostScriptName);
+			Entry->SetStringField(TEXT("declaredWeight"), Diagnostic.DeclaredWeight);
+			Entry->SetStringField(TEXT("declaredStyle"), Diagnostic.DeclaredStyle);
 			if (!Diagnostic.ResolvedAssetPath.IsEmpty())
 			{
 				Entry->SetStringField(TEXT("resolvedAssetPath"), Diagnostic.ResolvedAssetPath);
+			}
+			if (!Diagnostic.FallbackAssetPath.IsEmpty())
+			{
+				Entry->SetStringField(TEXT("fallbackAssetPath"), Diagnostic.FallbackAssetPath);
+			}
+			if (!Diagnostic.FallbackToken.IsEmpty())
+			{
+				Entry->SetStringField(TEXT("fallbackToken"), Diagnostic.FallbackToken);
+			}
+			if (!Diagnostic.UnresolvedToken.IsEmpty())
+			{
+				Entry->SetStringField(TEXT("unresolvedToken"), Diagnostic.UnresolvedToken);
 			}
 			if (!Diagnostic.ResolvedTypeface.IsEmpty())
 			{
 				Entry->SetStringField(TEXT("resolvedTypeface"), Diagnostic.ResolvedTypeface);
 			}
 			Entry->SetStringField(TEXT("resolutionState"), Diagnostic.ResolutionState);
+			Entry->SetStringField(TEXT("declarationSourceKind"), Diagnostic.DeclarationSourceKind);
+			Entry->SetStringField(TEXT("resolutionSourceKind"), Diagnostic.ResolutionSourceKind);
+			Entry->SetStringField(TEXT("fallbackState"), Diagnostic.FallbackState);
+			Entry->SetStringField(TEXT("matchReason"), Diagnostic.MatchReason);
 			Entry->SetStringField(TEXT("severity"), Diagnostic.Severity);
 
 			TArray<TSharedPtr<FJsonValue>> IssueCodes;
-			for (const FString& IssueCode : Diagnostic.IssueCodes)
+			TArray<FString> SortedIssueCodes = Diagnostic.IssueCodes;
+			SortedIssueCodes.Sort();
+			for (const FString& IssueCode : SortedIssueCodes)
 			{
 				IssueCodes.Add(MakeShared<FJsonValueString>(IssueCode));
 			}
@@ -424,27 +503,38 @@ namespace DesignImportDiagnosticReport
 
 			if (!Node->Text.FontFamily.IsEmpty() || !Node->Text.FontPostScriptName.IsEmpty())
 			{
+				FFontResolutionEntryKey EntryKey;
+				EntryKey.NodeId = Node->Id;
 				AddFontResolutionResult(
 					OutValues,
 					InOutSeenKeys,
+					EntryKey,
 					Node->Text.FontFamily,
 					Node->Text.FontPostScriptName,
 					Node->Text.FontWeight,
 					Node->Text.FontStyle,
+					false,
 					false);
 			}
 
-			for (const FDesignTextRun& Run : Node->Text.TextRuns)
+			for (int32 RunIndex = 0; RunIndex < Node->Text.TextRuns.Num(); ++RunIndex)
 			{
+				const FDesignTextRun& Run = Node->Text.TextRuns[RunIndex];
 				if (!Run.FontFamily.IsEmpty() || !Run.FontPostScriptName.IsEmpty())
 				{
+					FFontResolutionEntryKey EntryKey;
+					EntryKey.EntryScope = TEXT("text-run");
+					EntryKey.NodeId = Node->Id;
+					EntryKey.RunId = RunIndex;
 					AddFontResolutionResult(
 						OutValues,
 						InOutSeenKeys,
+						EntryKey,
 						Run.FontFamily,
 						Run.FontPostScriptName,
 						Run.FontWeight,
 						Run.FontStyle,
+						false,
 						false);
 				}
 			}
@@ -535,16 +625,22 @@ namespace DesignImportDiagnosticReport
 
 		TArray<TSharedPtr<FJsonValue>> FontResolutionValues;
 		TSet<FString> SeenFontResolutionKeys;
-		for (const FDesignFont& Font : Document.Fonts)
+		for (int32 FontIndex = 0; FontIndex < Document.Fonts.Num(); ++FontIndex)
 		{
+			const FDesignFont& Font = Document.Fonts[FontIndex];
+			FFontResolutionEntryKey EntryKey;
+			EntryKey.EntryScope = TEXT("document-font-clue");
+			EntryKey.DocumentFontIndex = FontIndex;
 			AddFontResolutionResult(
 				FontResolutionValues,
 				SeenFontResolutionKeys,
+				EntryKey,
 				Font.Name,
 				FString(),
 				TEXT("400"),
 				TEXT("normal"),
-				IsUnsupportedFontSource(Font.Url));
+				IsUnsupportedFontFileSource(Font.Url),
+				IsFontUrlSource(Font.Url));
 		}
 		for (const TSharedPtr<FDesignNode>& RootNode : Document.Children)
 		{
