@@ -36,6 +36,7 @@
 #include "RenderingThread.h"
 #include "Rendering/SlateRenderer.h"
 #include "Serialization/JsonSerializer.h"
+#include "TextureCompiler.h"
 #include "UObject/Linker.h"
 #include "UObject/Package.h"
 #include "UObject/PackageReload.h"
@@ -468,7 +469,9 @@ namespace
 			if (UTexture2D* Texture = FindObject<UTexture2D>(Package, *AssetName))
 			{
 				Texture->ConditionalPostLoad();
-				Texture->FinishCachePlatformData();
+#if WITH_EDITOR
+				FTextureCompilingManager::Get().FinishCompilation({ Texture });
+#endif
 				Texture->UpdateResource();
 			}
 		}
@@ -538,7 +541,9 @@ namespace
 			if (Texture)
 			{
 				Texture->ConditionalPostLoad();
-				Texture->FinishCachePlatformData();
+#if WITH_EDITOR
+				FTextureCompilingManager::Get().FinishCompilation({ Texture });
+#endif
 				Texture->UpdateResource();
 			}
 		}

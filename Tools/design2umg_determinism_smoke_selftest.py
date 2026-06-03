@@ -237,6 +237,25 @@ def test_nonzero_drift_fails_closed() -> None:
         assert_contains(summary["blocked_reasons"], "generation_vs_asset_nonzero")
 
 
+def test_nonzero_stable_or_error_drift_fails_closed() -> None:
+    def mutate_report(case_name: str, payload: dict) -> dict:
+        if case_name == smoke.CANONICAL_SENTINEL_CASES[0]:
+            payload["render_chain"]["generation_vs_asset"].update(
+                {
+                    "stable_changed_ratio": 0.0001,
+                    "mean_abs_error": 0.0001,
+                    "stable_mean_abs_error": 0.0001,
+                }
+            )
+        return payload
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        run_root = build_run_root(Path(temp_dir) / "run", mutate_report=mutate_report)
+        summary = smoke.validate_run_root(run_root)
+        assert_equal(summary["passed"], False)
+        assert_contains(summary["blocked_reasons"], "generation_vs_asset_nonzero")
+
+
 def test_stale_summary_report_fails_closed() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         run_root = build_run_root(Path(temp_dir) / "run", stale_summary_report=smoke.CANONICAL_SENTINEL_CASES[0])
@@ -256,6 +275,7 @@ def main() -> None:
     test_missing_generation_vs_asset_structure_fails_closed()
     test_structure_mismatch_fails_closed()
     test_nonzero_drift_fails_closed()
+    test_nonzero_stable_or_error_drift_fails_closed()
     test_stale_summary_report_fails_closed()
     print("determinism smoke selftest passed")
 

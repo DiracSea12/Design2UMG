@@ -1,4 +1,4 @@
-﻿IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIconFontNoMappingFallbackTest,
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIconFontNoMappingFallbackTest,
 	"Design2UMG.IconFont.NoMappingFallback",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FIconFontNoMappingFallbackTest::RunTest(const FString& Parameters)

@@ -1850,6 +1850,21 @@ def apply_stable_visual_tolerance(image: Image.Image) -> Image.Image:
     return image.filter(ImageFilter.MaxFilter(3)).filter(ImageFilter.MinFilter(3))
 
 
+def normalize_fully_transparent_rgb(reference_canvas: Image.Image, candidate_canvas: Image.Image) -> tuple[Image.Image, Image.Image]:
+    reference = reference_canvas.copy()
+    candidate = candidate_canvas.copy()
+    reference_pixels = reference.load()
+    candidate_pixels = candidate.load()
+
+    for y in range(reference.height):
+        for x in range(reference.width):
+            if reference_pixels[x, y][3] == 0 and candidate_pixels[x, y][3] == 0:
+                reference_pixels[x, y] = (0, 0, 0, 0)
+                candidate_pixels[x, y] = (0, 0, 0, 0)
+
+    return reference, candidate
+
+
 def measure_canvas_diff(reference_canvas: Image.Image, candidate_canvas: Image.Image, pixel_tolerance: int):
     diff = ImageChops.difference(reference_canvas, candidate_canvas)
     stat = ImageStat.Stat(diff)
@@ -1879,10 +1894,14 @@ def build_diff(reference: Image.Image, candidate: Image.Image, pixel_tolerance: 
     reference_canvas.paste(reference, (0, 0))
     candidate_canvas.paste(candidate, (0, 0))
 
+    reference_canvas, candidate_canvas = normalize_fully_transparent_rgb(reference_canvas, candidate_canvas)
+
     raw_metrics = measure_canvas_diff(reference_canvas, candidate_canvas, pixel_tolerance)
     stable_metrics = measure_canvas_diff(
-        apply_stable_visual_tolerance(reference_canvas),
-        apply_stable_visual_tolerance(candidate_canvas),
+        *normalize_fully_transparent_rgb(
+            apply_stable_visual_tolerance(reference_canvas),
+            apply_stable_visual_tolerance(candidate_canvas),
+        ),
         pixel_tolerance,
     )
 

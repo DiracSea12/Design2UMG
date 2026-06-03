@@ -51,7 +51,11 @@ def make_run(
     no_regression_available: int = 1,
     no_regression_failed: int = 0,
     historical_validation: dict | None = None,
-) -> None:
+    stable_changed_ratio: float = 0.1,
+    changed_ratio: float = 0.2,
+    stable_mae: float = 1.0,
+    mae: float = 2.0,
+) -> Path:
     run_root = automation_root / name
     case_root = run_root / "case_a"
     case_root.mkdir(parents=True)
@@ -77,10 +81,10 @@ def make_run(
                 {
                     "name": "case_a",
                     "report_path": str(report_path),
-                    "stable_changed_ratio": 0.1,
-                    "changed_ratio": 0.2,
-                    "stable_mae": 1.0,
-                    "mae": 2.0,
+                    "stable_changed_ratio": stable_changed_ratio,
+                    "changed_ratio": changed_ratio,
+                    "stable_mae": stable_mae,
+                    "mae": mae,
                     "structure_required": True,
                     "structure_passed": True,
                 }
@@ -89,6 +93,7 @@ def make_run(
     )
     if historical_validation is not None:
         write_json(run_root / "validation_against_historical_best.json", historical_validation)
+    return run_root
 
 
 def assert_skipped(manifest: dict, run_name: str, reason: str) -> None:
@@ -214,6 +219,52 @@ def assert_validate_run_reason_details() -> None:
         assert missing_report_detail.get("detail_field") == "missing_compare_report_details", validation
 
 
+def assert_collect_best_cases_uses_coherent_case_source() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        automation_root = Path(temp_dir)
+        make_run(
+            automation_root,
+            "_formal_source_a",
+            stable_changed_ratio=0.09,
+            changed_ratio=0.20,
+            stable_mae=1.5,
+            mae=2.5,
+        )
+        make_run(
+            automation_root,
+            "_formal_source_b",
+            stable_changed_ratio=0.10,
+            changed_ratio=0.18,
+            stable_mae=1.0,
+            mae=2.0,
+        )
+        manifest = rebuild.rebuild_historical_best_manifest(automation_root)
+
+    case_entry = manifest["cases"]["case_a"]
+    expected_report_path = str((automation_root / "_formal_source_a" / "case_a" / "compare_report.json").resolve())
+    assert case_entry["run"] == "_formal_source_a", case_entry
+    assert case_entry["report_path"] == expected_report_path, case_entry
+    assert case_entry["stable_changed_ratio"] == 0.09, case_entry
+    assert case_entry["changed_ratio"] == 0.20, case_entry
+    assert case_entry["stable_mean_abs_error"] == 1.5, case_entry
+    assert case_entry["mean_abs_error"] == 2.5, case_entry
+    expected_metric_values = {
+        "stable_changed_ratio": 0.09,
+        "changed_ratio": 0.20,
+        "stable_mean_abs_error": 1.5,
+        "mean_abs_error": 2.5,
+    }
+    assert set(case_entry["metric_sources"]) == set(expected_metric_values), case_entry
+    assert {source["run"] for source in case_entry["metric_sources"].values()} == {"_formal_source_a"}, case_entry
+    assert {source["report_path"] for source in case_entry["metric_sources"].values()} == {case_entry["report_path"]}, case_entry
+    for metric_name, expected_value in expected_metric_values.items():
+        metric_source = case_entry["metric_sources"][metric_name]
+        assert metric_source["run"] == "_formal_source_a", case_entry
+        assert metric_source["report_path"] == expected_report_path, case_entry
+        assert metric_source["value"] == expected_value, case_entry
+
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         automation_root = Path(temp_dir)
@@ -271,6 +322,7 @@ def main() -> None:
     assert_skipped(manifest, "_formal_legacy_name_without_scope", "run_scope_missing")
     assert "runs" not in cache_payload, cache_payload
     assert "output_collision" not in manifest["skipped_case_results_by_reason"], manifest["skipped_case_results_by_reason"]
+    assert_collect_best_cases_uses_coherent_case_source()
     assert_validate_run_pixel_quantum_epsilon()
     assert_validate_run_reason_details()
     print("admissible best rebuild selftest passed")

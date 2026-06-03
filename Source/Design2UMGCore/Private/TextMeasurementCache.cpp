@@ -7,25 +7,11 @@
 #include "DesignSchemaSourceExtensions.h"
 #include "DesignTypeMapper.h"
 #include "FontResolver.h"
-#include "TextMeasurementRuntimeProbe.h"
 
 #include "Misc/ScopeLock.h"
 
 namespace
 {
-	FString JoinIssueCodesForCacheKey(const TArray<FString>& IssueCodes)
-	{
-		TArray<FString> SortedIssues = IssueCodes;
-		SortedIssues.Sort();
-		return FString::Join(SortedIssues, TEXT(","));
-	}
-
-	FString NormalizeTokenForCacheKey(FString Value)
-	{
-		Value.TrimStartAndEndInline();
-		return Value.IsEmpty() ? TEXT("none") : Value.ToLower();
-	}
-
 	bool IsFigmaTruncateTextNodeForCacheKey(const TSharedPtr<FDesignNode>& Node)
 	{
 		if (!Node.IsValid())
@@ -62,107 +48,6 @@ namespace
 	}
 }
 
-namespace Phase32TextMetrics
-{
-	bool TryBuildNodeFontIdentity(const TSharedPtr<FDesignNode>& Node, FNodeFontIdentity& OutIdentity)
-	{
-		if (!Node.IsValid())
-		{
-			return false;
-		}
-
-		const FFontResolutionDiagnostic Diagnostic = FFontResolver::ResolveFontDiagnostic(
-			Node->Text.FontFamily,
-			Node->Text.FontPostScriptName,
-			Node->Text.FontWeight,
-			Node->Text.FontStyle,
-			false,
-			false);
-		OutIdentity.DeclaredFamily = Diagnostic.DeclaredFamily;
-		OutIdentity.DeclaredPostScriptName = Diagnostic.DeclaredPostScriptName;
-		OutIdentity.DeclaredWeight = Diagnostic.DeclaredWeight;
-		OutIdentity.DeclaredStyle = Diagnostic.DeclaredStyle;
-		OutIdentity.ResolvedAssetPath = Diagnostic.ResolvedAssetPath;
-		OutIdentity.FallbackAssetPath = Diagnostic.FallbackAssetPath;
-		OutIdentity.FallbackToken = Diagnostic.FallbackToken;
-		OutIdentity.UnresolvedToken = Diagnostic.UnresolvedToken;
-		OutIdentity.ResolvedTypeface = Diagnostic.ResolvedTypeface;
-		OutIdentity.DeclarationSourceKind = Diagnostic.DeclarationSourceKind;
-		OutIdentity.ResolutionSourceKind = Diagnostic.ResolutionSourceKind;
-		OutIdentity.FallbackState = Diagnostic.FallbackState;
-		OutIdentity.MatchReason = Diagnostic.MatchReason;
-		OutIdentity.IssueCodesToken = JoinIssueCodesForCacheKey(Diagnostic.IssueCodes);
-
-		const bool bHasDeclaration = !OutIdentity.DeclaredFamily.IsEmpty()
-			|| !OutIdentity.DeclaredPostScriptName.IsEmpty();
-		const bool bHasResolutionIdentity = !OutIdentity.ResolvedAssetPath.IsEmpty()
-			|| !OutIdentity.FallbackAssetPath.IsEmpty()
-			|| !OutIdentity.FallbackToken.IsEmpty()
-			|| !OutIdentity.UnresolvedToken.IsEmpty();
-		return bHasDeclaration
-			&& bHasResolutionIdentity
-			&& !OutIdentity.ResolvedTypeface.IsEmpty()
-			&& !OutIdentity.DeclarationSourceKind.IsEmpty()
-			&& !OutIdentity.ResolutionSourceKind.IsEmpty()
-			&& !OutIdentity.FallbackState.IsEmpty()
-			&& !OutIdentity.MatchReason.IsEmpty();
-	}
-
-	bool IsMeasuredFallbackStateAllowed(const FNodeFontIdentity& Identity)
-	{
-		return Identity.FallbackState == TEXT("exact")
-			|| Identity.FallbackState == TEXT("typeface-substituted")
-			|| Identity.FallbackState == TEXT("weight-substituted");
-	}
-
-	FString BuildMetricToken(const FNodeFontIdentity& Identity)
-	{
-		TextMeasurementRuntimeProbe::FTextMeasureRequest Request;
-		Request.Text = TEXT("Hg");
-		Request.FontSize = 64.0f;
-		Request.FontAssetPath = Identity.ResolvedAssetPath;
-		Request.TypefaceName = Identity.ResolvedTypeface;
-		Request.bRequiresResolvedFontAsset = true;
-		return TextMeasurementRuntimeProbe::SerializeSlateTextMetricToken(
-			TextMeasurementRuntimeProbe::MeasureSlateTextMetricFingerprint(Request));
-	}
-
-	FString BuildFontIdentityKeyToken(const FNodeFontIdentity& Identity)
-	{
-		return FString::Printf(
-			TEXT("decl=%s|ps=%s|weight=%s|style=%s|asset=%s|fallbackAsset=%s|fallbackToken=%s|unresolved=%s|typeface=%s|declSrc=%s|resSrc=%s|state=%s|match=%s|issues=%s"),
-			*NormalizeTokenForCacheKey(Identity.DeclaredFamily),
-			*NormalizeTokenForCacheKey(Identity.DeclaredPostScriptName),
-			*NormalizeTokenForCacheKey(Identity.DeclaredWeight),
-			*NormalizeTokenForCacheKey(Identity.DeclaredStyle),
-			*NormalizeTokenForCacheKey(Identity.ResolvedAssetPath),
-			*NormalizeTokenForCacheKey(Identity.FallbackAssetPath),
-			*NormalizeTokenForCacheKey(Identity.FallbackToken),
-			*NormalizeTokenForCacheKey(Identity.UnresolvedToken),
-			*NormalizeTokenForCacheKey(Identity.ResolvedTypeface),
-			*NormalizeTokenForCacheKey(Identity.DeclarationSourceKind),
-			*NormalizeTokenForCacheKey(Identity.ResolutionSourceKind),
-			*NormalizeTokenForCacheKey(Identity.FallbackState),
-			*NormalizeTokenForCacheKey(Identity.MatchReason),
-			*NormalizeTokenForCacheKey(Identity.IssueCodesToken));
-	}
-
-	FString BuildFallbackScaleFloatToken(const float Value)
-	{
-		if (!FMath::IsFinite(Value))
-		{
-			return FString();
-		}
-
-		float Quantized = FMath::RoundToFloat(Value * 10000.0f) / 10000.0f;
-		if (FMath::IsNearlyZero(Quantized, 0.00005f))
-		{
-			Quantized = 0.0f;
-		}
-		return FString::Printf(TEXT("%.4f"), Quantized);
-	}
-}
-
 namespace CacheTrace
 {
 	FString BuildBaselineFallbackScaleKey(const TSharedPtr<FDesignNode>& Node)
@@ -177,34 +62,21 @@ namespace CacheTrace
 			? FontAssetPath
 			: NormalizeFontFamilyKeyForCacheKey(Node->Text.FontFamily);
 		const FString TypefaceName = ResolveTypefaceNameForCacheKey(Node);
-		const FString FontSizeKey = Phase32TextMetrics::BuildFallbackScaleFloatToken(Node->Text.FontSize);
 		const FString LineHeightKey = Node->Text.LineHeight > 0.0f
-			? Phase32TextMetrics::BuildFallbackScaleFloatToken(Node->Text.LineHeight)
+			? FString::Printf(TEXT("%.4f"), Node->Text.LineHeight)
 			: TEXT("default");
 		const FString LetterSpacingKey = Node->Text.HasLetterSpacingValue()
-			? Phase32TextMetrics::BuildFallbackScaleFloatToken(Node->Text.LetterSpacing)
+			? FString::Printf(TEXT("%.4f"), Node->Text.LetterSpacing)
 			: FString(TEXT("unset"));
 		const bool bApplyExplicitLineHeight = TextMeasurement::ShouldApplyExplicitLineHeight(Node, Node->Text.FontSize);
-
-		Phase32TextMetrics::FNodeFontIdentity NodeFontIdentity;
-		const bool bHasNodeFontIdentity = Phase32TextMetrics::TryBuildNodeFontIdentity(Node, NodeFontIdentity);
-		const FString NodeFontIdentityKey = bHasNodeFontIdentity
-			? Phase32TextMetrics::BuildFontIdentityKeyToken(NodeFontIdentity)
-			: TEXT("identity:unavailable");
-		const FString MetricToken = bHasNodeFontIdentity
-			? Phase32TextMetrics::BuildMetricToken(NodeFontIdentity)
-			: TEXT("metric:unavailable");
-
 		return FString::Printf(
-			TEXT("%s|%s|fs=%s|lh=%s|ls=%s|explicit=%d|%s|%s"),
+			TEXT("%s|%s|%.1f|lh=%s|ls=%s|explicit=%d"),
 			*FontIdentity,
 			*TypefaceName,
-			*(FontSizeKey.IsEmpty() ? FString(TEXT("unavailable")) : FontSizeKey),
-			*(LineHeightKey.IsEmpty() ? FString(TEXT("unavailable")) : LineHeightKey),
-			*(LetterSpacingKey.IsEmpty() ? FString(TEXT("unavailable")) : LetterSpacingKey),
-			bApplyExplicitLineHeight ? 1 : 0,
-			*NodeFontIdentityKey,
-			*MetricToken);
+			Node->Text.FontSize,
+			*LineHeightKey,
+			*LetterSpacingKey,
+			bApplyExplicitLineHeight ? 1 : 0);
 	}
 
 	bool FResolvedScaleCacheOwner::TryGetResolvedTextScale(const FString& CalibrationKey, float& OutScale) const

@@ -27,6 +27,13 @@ def write_bytes(path: Path, content: bytes) -> None:
     path.write_bytes(content)
 
 
+def make_rgba_png(path: Path, rgba: tuple[int, int, int, int]) -> None:
+    from PIL import Image
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGBA", (1, 1), rgba).save(path)
+
+
 def assert_equal(actual, expected) -> None:
     assert actual == expected, f"expected {expected!r}, got {actual!r}"
 
@@ -151,6 +158,49 @@ def test_completeness_contract() -> None:
         assert_equal(completeness["missing_case_results"], ["case-b"])
 
 
+def test_transparent_rgb_does_not_count_as_visible_change() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        left = root / "left.png"
+        right = root / "right.png"
+        make_rgba_png(left, (12, 34, 56, 0))
+        make_rgba_png(right, (200, 210, 220, 0))
+
+        comparison = verify.build_diff(verify.load_rgba(left), verify.load_rgba(right), 0)
+        assert_equal(comparison["changed_ratio"], 0.0)
+        assert_equal(comparison["stable_changed_ratio"], 0.0)
+        assert_equal(comparison["mean_abs_error"], 0.0)
+        assert_equal(comparison["stable_mean_abs_error"], 0.0)
+        assert_equal(comparison["diff_bbox"], None)
+        assert_equal(comparison["stable_diff_bbox"], None)
+
+
+def test_opaque_rgb_difference_still_counts() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        left = root / "left.png"
+        right = root / "right.png"
+        make_rgba_png(left, (12, 34, 56, 255))
+        make_rgba_png(right, (200, 210, 220, 255))
+
+        comparison = verify.build_diff(verify.load_rgba(left), verify.load_rgba(right), 0)
+        assert comparison["changed_ratio"] > 0.0
+        assert comparison["mean_abs_error"] > 0.0
+
+
+def test_semi_transparent_difference_still_counts() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        left = root / "left.png"
+        right = root / "right.png"
+        make_rgba_png(left, (12, 34, 56, 64))
+        make_rgba_png(right, (200, 210, 220, 64))
+
+        comparison = verify.build_diff(verify.load_rgba(left), verify.load_rgba(right), 0)
+        assert comparison["changed_ratio"] > 0.0
+        assert comparison["mean_abs_error"] > 0.0
+
+
 def make_state(name: str, spec_count: int) -> dict:
     spec_paths = [Path(f"{name}-spec-{index}.json") for index in range(spec_count)]
     steps = {
@@ -216,6 +266,9 @@ def test_runtime_project_fails_closed_without_explicit_input() -> None:
 def main() -> None:
     test_discovery_and_run_scope_contracts()
     test_completeness_contract()
+    test_transparent_rgb_does_not_count_as_visible_change()
+    test_opaque_rgb_difference_still_counts()
+    test_semi_transparent_difference_still_counts()
     test_execution_shards_contracts()
     test_runtime_project_fails_closed_without_explicit_input()
     print("validation helpers selftest passed")

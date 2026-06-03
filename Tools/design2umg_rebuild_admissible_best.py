@@ -258,6 +258,8 @@ def build_case_entry(case_name: str) -> dict:
         "updated_timestamp": 0.0,
         "case": case_name,
     }
+
+
 def resolve_case_metrics(run_root: Path, case_name: str, case_summary: dict, cache_entries: dict) -> tuple[dict, Path]:
     report_path = resolve_case_report_path(run_root, case_name, case_summary)
     summary_metrics = normalize_case_metrics(summary_metrics_payload(case_summary))
@@ -286,18 +288,29 @@ def resolve_case_metrics(run_root: Path, case_name: str, case_summary: dict, cac
     }, report_path
 
 
-def update_metric(entry: dict, metric_name: str, value, run_root: Path, report_path: str, timestamp: float) -> None:
-    if value is None:
-        return
-    current = entry.get(metric_name)
-    if current is None or value < current - METRIC_EPSILON:
-        entry[metric_name] = value
-        entry["metric_sources"][metric_name] = {
-            "run": run_root.name,
-            "report_path": report_path,
-            "value": value,
-            "timestamp": timestamp,
-        }
+def select_case_source(candidate: dict, current: dict | None) -> bool:
+    if current is None:
+        return True
+
+    candidate_key = (
+        candidate.get("stable_changed_ratio") is None,
+        candidate.get("stable_changed_ratio") if candidate.get("stable_changed_ratio") is not None else 0.0,
+        candidate.get("changed_ratio") is None,
+        candidate.get("changed_ratio") if candidate.get("changed_ratio") is not None else 0.0,
+        -candidate.get("timestamp", 0.0),
+        candidate.get("run", ""),
+        candidate.get("report_path", ""),
+    )
+    current_key = (
+        current.get("stable_changed_ratio") is None,
+        current.get("stable_changed_ratio") if current.get("stable_changed_ratio") is not None else 0.0,
+        current.get("changed_ratio") is None,
+        current.get("changed_ratio") if current.get("changed_ratio") is not None else 0.0,
+        -current.get("timestamp", 0.0),
+        current.get("run", ""),
+        current.get("report_path", ""),
+    )
+    return candidate_key < current_key
 
 
 def collect_best_cases(automation_root: Path, cache_payload: dict) -> tuple[
@@ -371,42 +384,49 @@ def collect_best_cases(automation_root: Path, cache_payload: dict) -> tuple[
                 continue
 
             resolved_metrics, report_path = resolve_case_metrics(run_root, case_name, case, metric_cache)
+            candidate_source = {
+                "run": run_root.name,
+                "report_path": str(report_path),
+                "timestamp": run_timestamp,
+                "stable_changed_ratio": resolved_metrics.get("stable_changed_ratio"),
+                "changed_ratio": resolved_metrics.get("changed_ratio"),
+                "stable_mae": resolved_metrics.get("stable_mae"),
+                "mae": resolved_metrics.get("mae"),
+                "structure_required": bool(case.get("structure_required")),
+                "structure_passed": bool(case.get("structure_passed", True)),
+                "render_size_rule": render_rule.DESIGN_SIZE_RENDER_RULE,
+                "pipeline_determinism_rule": render_rule.PIPELINE_DETERMINISM_RULE,
+            }
+
             entry = best_cases.setdefault(case_name, build_case_entry(case_name))
             entry["render_size_rule"] = render_rule.DESIGN_SIZE_RENDER_RULE
             entry["pipeline_determinism_rule"] = render_rule.PIPELINE_DETERMINISM_RULE
+            entry["structure_required"] = bool(entry.get("structure_required")) or candidate_source["structure_required"]
+            if candidate_source["structure_required"]:
+                entry["structure_passed"] = bool(entry.get("structure_passed", True)) and candidate_source["structure_passed"]
 
-            for output_metric, _summary_metric in METRIC_FIELDS:
-                update_metric(
-                    entry,
-                    output_metric,
-                    resolved_metrics.get(output_metric),
-                    run_root,
-                    str(report_path),
-                    run_timestamp,
-                )
+            if not select_case_source(candidate_source, entry):
+                continue
 
-            entry["structure_required"] = bool(entry.get("structure_required")) or bool(case.get("structure_required"))
-            if case.get("structure_required"):
-                entry["structure_passed"] = bool(entry.get("structure_passed", True)) and bool(case.get("structure_passed"))
-            if run_root.name not in entry["source_runs"]:
-                entry["source_runs"].append(run_root.name)
-
-            newest_metric_timestamp = max(
-                (source.get("timestamp", 0.0) for source in entry["metric_sources"].values()),
-                default=0.0,
-            )
-            if newest_metric_timestamp >= entry.get("updated_timestamp", 0.0):
-                primary_source = (
-                    entry["metric_sources"].get("stable_changed_ratio")
-                    or entry["metric_sources"].get("changed_ratio")
-                    or entry["metric_sources"].get("stable_mean_abs_error")
-                    or entry["metric_sources"].get("mean_abs_error")
-                )
-                if primary_source:
-                    entry["run"] = primary_source.get("run", "")
-                    entry["report_path"] = primary_source.get("report_path", "")
-                entry["updated_timestamp"] = newest_metric_timestamp
-                entry["updated_at"] = run_iso
+            entry["run"] = candidate_source["run"]
+            entry["report_path"] = candidate_source["report_path"]
+            entry["updated_timestamp"] = candidate_source["timestamp"]
+            entry["updated_at"] = run_iso
+            entry["source_runs"] = sorted(set(entry["source_runs"] + [run_root.name]))
+            entry["metric_sources"] = {
+                metric_name: {
+                    "run": candidate_source["run"],
+                    "report_path": candidate_source["report_path"],
+                    "value": candidate_source[summary_metric],
+                    "timestamp": candidate_source["timestamp"],
+                }
+                for metric_name, summary_metric in METRIC_FIELDS
+                if candidate_source.get(summary_metric) is not None
+            }
+            entry["stable_changed_ratio"] = candidate_source["stable_changed_ratio"]
+            entry["changed_ratio"] = candidate_source["changed_ratio"]
+            entry["stable_mean_abs_error"] = candidate_source["stable_mae"]
+            entry["mean_abs_error"] = candidate_source["mae"]
 
     for entry in best_cases.values():
         entry.pop("updated_timestamp", None)
