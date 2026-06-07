@@ -25,6 +25,7 @@ from design2umg_verify_lib.run_history import write_historical_best_validation
 
 NO_REGRESSION_EPSILON = 1.25e-4
 EDITOR_GRACEFUL_EXIT_DEADLINE_SEC = 30.0  # seconds to wait for editor results after process exits
+AUTOMATION_GAME_OUTPUT_PREFIX = "/Game/Design2UMG/Automation"
 
 
 def parse_args():
@@ -55,6 +56,7 @@ def parse_args():
 
 
 def build_case_args(batch_args, case: dict) -> SimpleNamespace:
+    effective_game_output_root = getattr(batch_args, "effective_game_output_root", getattr(batch_args, "game_output", ""))
     return SimpleNamespace(
         mode=case["mode"],
         source=case["source"],
@@ -67,9 +69,96 @@ def build_case_args(batch_args, case: dict) -> SimpleNamespace:
         mcp_server=batch_args.mcp_server,
         pencil_app=batch_args.pencil_app,
         pixel_tolerance=batch_args.pixel_tolerance,
-        game_output=batch_args.game_output,
+        game_output=build_case_game_output_root(effective_game_output_root, case.get("name", "")),
         native_self_check=batch_args.native_self_check,
     )
+
+
+def normalize_game_output_path(value: str) -> str:
+    normalized = (value or "").strip().replace("\\", "/").rstrip("/")
+    while "//" in normalized:
+        normalized = normalized.replace("//", "/")
+    return normalized
+
+
+def build_default_batch_game_output_root(output_root: Path, batch_start_time: float) -> str:
+    output_segment = verify.sanitize_case_name(output_root.name)
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(batch_start_time))
+    return f"{AUTOMATION_GAME_OUTPUT_PREFIX}/{output_segment}-{stamp}-{os.getpid()}"
+
+
+def resolve_effective_batch_game_output_root(raw_game_output: str, output_root: Path, batch_start_time: float) -> str:
+    explicit_root = normalize_game_output_path(raw_game_output)
+    if explicit_root:
+        return explicit_root
+    return build_default_batch_game_output_root(output_root, batch_start_time)
+
+
+def build_case_game_output_root(effective_game_output_root: str, case_name: str) -> str:
+    normalized_root = normalize_game_output_path(effective_game_output_root)
+    if not normalized_root:
+        return ""
+    case_segment = verify.sanitize_case_name(case_name)
+    return f"{normalized_root}/{case_segment}"
+
+
+def automation_game_output_relative_path(game_output_root: str) -> str | None:
+    normalized_root = normalize_game_output_path(game_output_root)
+    normalized_prefix = AUTOMATION_GAME_OUTPUT_PREFIX.rstrip("/")
+    if normalized_root.lower() == normalized_prefix.lower():
+        return ""
+    prefix_with_slash = f"{normalized_prefix}/"
+    if normalized_root.lower().startswith(prefix_with_slash.lower()):
+        return normalized_root[len(prefix_with_slash):].strip("/")
+    return None
+
+
+def has_run_unique_marker(segment: str) -> bool:
+    value = (segment or "").strip()
+    lower = value.lower()
+    if lower.startswith(("_", "run_", "run-", "batch_", "batch-")):
+        return True
+    if lower.startswith("after") and "unique" in lower:
+        return True
+
+    consecutive_digits = 0
+    for character in value:
+        if character.isdigit():
+            consecutive_digits += 1
+            if consecutive_digits in {8, 13}:
+                return True
+        else:
+            consecutive_digits = 0
+    return False
+
+
+def validate_explicit_batch_game_output_root(game_output_root: str, cases: list[dict]) -> None:
+    relative_path = automation_game_output_relative_path(game_output_root)
+    if relative_path is None:
+        return
+
+    if not relative_path:
+        raise RuntimeError(
+            f"Unsafe --game-output: {game_output_root}. Use a unique run-level root under "
+            f"{AUTOMATION_GAME_OUTPUT_PREFIX}, for example "
+            f"{AUTOMATION_GAME_OUTPUT_PREFIX}/Run_YYYYMMDD-HHMMSS."
+        )
+
+    first_segment = relative_path.split("/", 1)[0]
+    if not has_run_unique_marker(first_segment):
+        raise RuntimeError(
+            f"Unsafe --game-output: {game_output_root} does not use a unique run-level automation root. "
+            f"Use a unique run-level root such as {AUTOMATION_GAME_OUTPUT_PREFIX}/Run_YYYYMMDD-HHMMSS."
+        )
+
+
+def record_effective_game_output_root(run_scope_path: Path, args) -> None:
+    run_scope = verify.load_json_document(run_scope_path)
+    run_scope["game_output"] = {
+        "explicit": bool(getattr(args, "game_output_explicit", False)),
+        "effective_root": getattr(args, "effective_game_output_root", getattr(args, "game_output", "")),
+    }
+    verify.write_json(run_scope_path, run_scope)
 
 
 def prepare_external_reference(case_args, case: dict, reference_root: Path, output_dir: Path) -> tuple[Path, dict]:
@@ -1069,6 +1158,10 @@ def build_batch_summary(
         "post_workers_used": post_workers,
         "design_root": str(design_root),
         "output_root": str(output_root),
+        "game_output": {
+            "explicit": bool(getattr(args, "game_output_explicit", False)),
+            "effective_root": getattr(args, "effective_game_output_root", getattr(args, "game_output", "")),
+        },
         "run_scope": batch_discovery.classify_run_scope(args.include, args.exclude),
         "run_scope_path": str(run_scope_path),
         "reference_cache": {
@@ -1145,14 +1238,23 @@ def main():
 
     output_root = Path(args.output_root).resolve() if args.output_root else batch_discovery.default_output_root()
     output_root.mkdir(parents=True, exist_ok=True)
-    verify.sync_project_plugin_build_id(args.editor, project_plugin_root)
+    args.game_output_explicit = bool(normalize_game_output_path(args.game_output))
+    args.effective_game_output_root = resolve_effective_batch_game_output_root(
+        args.game_output,
+        output_root,
+        batch_start_time,
+    )
 
     cases = batch_discovery.discover_pen_cases(design_root, args.include, args.exclude)
     cases.extend(batch_discovery.discover_figma_export_cases(effective_figma_export_roots, args.include, args.exclude))
     if not cases:
         raise RuntimeError(f"No eligible pen or figma export cases discovered under: {design_root}")
+    if args.game_output_explicit:
+        validate_explicit_batch_game_output_root(args.effective_game_output_root, cases)
+    verify.sync_project_plugin_build_id(args.editor, project_plugin_root)
     verify.seed_runtime_font_assets(runtime_args.project, [case["source"] for case in cases])
     run_scope_path = batch_discovery.write_run_scope(output_root, args, cases, effective_figma_export_roots)
+    record_effective_game_output_root(run_scope_path, args)
     reference_cache_root = reference_cache.resolve_reference_cache_root(args, output_root)
     if reference_cache_root:
         reference_cache_root.mkdir(parents=True, exist_ok=True)

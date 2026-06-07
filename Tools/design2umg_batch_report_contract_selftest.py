@@ -10,6 +10,19 @@ def assert_equal(actual, expected) -> None:
     assert actual == expected, f"expected {expected!r}, got {actual!r}"
 
 
+def assert_true(condition, message: str) -> None:
+    assert condition, message
+
+
+def assert_raises_runtime_error(func, expected_text: str) -> None:
+    try:
+        func()
+    except RuntimeError as exc:
+        assert_true(expected_text in str(exc), f"expected {expected_text!r} in {str(exc)!r}")
+        return
+    raise AssertionError(f"expected RuntimeError containing {expected_text!r}")
+
+
 def main() -> None:
     args = SimpleNamespace(
         parallel_editors=3,
@@ -85,6 +98,90 @@ def main() -> None:
         lines = history_path.read_text(encoding="utf-8").strip().splitlines()
         assert_equal(len(lines), 1)
         assert_equal(json.loads(lines[0]), entry)
+
+        output_root = automation_root / "batch_output"
+        effective_root = batch_verify.resolve_effective_batch_game_output_root("", output_root, 1780838795.0)
+        assert_true(
+            effective_root.startswith("/Game/Design2UMG/Automation/batch-output-"),
+            f"unexpected default game-output root: {effective_root}",
+        )
+        case_args = batch_verify.build_case_args(
+            SimpleNamespace(
+                reference_root="",
+                reference_provider="pencil",
+                mcp_server="",
+                pencil_app="",
+                pixel_tolerance=6,
+                game_output="",
+                effective_game_output_root=effective_root,
+                native_self_check="off",
+            ),
+            {"mode": "pen", "source": "design.pen", "name": "pen_sample_card"},
+        )
+        assert_equal(case_args.game_output, f"{effective_root}/pen-sample-card")
+        assert_true(
+            case_args.game_output != "/Game/Design2UMG/Automation/pen-sample-card",
+            "omitted game-output fell back to the old stable per-case root",
+        )
+
+        cases = [{"name": "pen_sample_card"}, {"name": "figma_export_source"}]
+        assert_raises_runtime_error(
+            lambda: batch_verify.validate_explicit_batch_game_output_root(
+                "/Game/Design2UMG/Automation/pen_sample_card",
+                cases,
+            ),
+            "unique run-level automation root",
+        )
+        assert_raises_runtime_error(
+            lambda: batch_verify.validate_explicit_batch_game_output_root(
+                "/Game/Design2UMG/Automation/foo",
+                cases,
+            ),
+            "unique run-level automation root",
+        )
+        assert_raises_runtime_error(
+            lambda: batch_verify.validate_explicit_batch_game_output_root(
+                "/Game/Design2UMG/Automation/foo1",
+                cases,
+            ),
+            "unique run-level automation root",
+        )
+        allowed_root = "/Game/Design2UMG/Automation/AfterPhase32RevertUnique_20260607-132635"
+        batch_verify.validate_explicit_batch_game_output_root(allowed_root, cases)
+        batch_verify.validate_explicit_batch_game_output_root(
+            "/Game/Design2UMG/Automation/Run_20260607-132635",
+            cases,
+        )
+        allowed_case_args = batch_verify.build_case_args(
+            SimpleNamespace(
+                reference_root="",
+                reference_provider="pencil",
+                mcp_server="",
+                pencil_app="",
+                pixel_tolerance=6,
+                game_output=allowed_root,
+                effective_game_output_root=allowed_root,
+                native_self_check="off",
+            ),
+            {"mode": "figma-source", "source": "design.json", "name": "figma_export_source"},
+        )
+        assert_equal(allowed_case_args.game_output, f"{allowed_root}/figma-export-source")
+
+        run_scope_path = automation_root / "run_scope.json"
+        run_scope_path.write_text(json.dumps({"scope": "focus"}), encoding="utf-8")
+        batch_verify.record_effective_game_output_root(
+            run_scope_path,
+            SimpleNamespace(
+                game_output="",
+                game_output_explicit=False,
+                effective_game_output_root=effective_root,
+            ),
+        )
+        run_scope = json.loads(run_scope_path.read_text(encoding="utf-8"))
+        assert_equal(
+            run_scope["game_output"],
+            {"explicit": False, "effective_root": effective_root},
+        )
 
     print("batch report contract selftest passed")
 
