@@ -47,11 +47,24 @@ namespace FallbackCalibration
 {
 	extern const float IntrinsicSingleLineSlackThreshold;
 
+	struct FProtectedMeasuredCandidate
+	{
+		float StableAcceptedScale = 0.0f;
+		float CandidateScale = 0.0f;
+		int32 MeasurementAttempts = 0;
+		bool bCandidateAvailable = false;
+		bool bBlockedByMissingFontIdentity = false;
+		bool bBlockedByFallbackState = false;
+		FString FallbackState;
+		FString MetricToken;
+	};
+
 	float ResolveBaselineTextFontFallbackScale(const TSharedPtr<FDesignNode>& Node);
 	float ResolveLineBoxFallbackScale(const TSharedPtr<FDesignNode>& Node);
 	TOptional<float> TryResolveSemanticSingleLineFallbackScale(const TSharedPtr<FDesignNode>& Node);
 	TOptional<float> TryResolveBaselineTextFontFallbackScale(const TSharedPtr<FDesignNode>& Node);
 	TOptional<float> TryResolveMeasuredTextFontFallbackScale(const TSharedPtr<FDesignNode>& Node);
+	FProtectedMeasuredCandidate ResolveProtectedMeasuredCandidate(const TSharedPtr<FDesignNode>& Node, float StableAcceptedScale);
 	float ResolveTextFontSizeFallback(const TSharedPtr<FDesignNode>& Node);
 	FString NormalizeTextMeasurementFontFamilyKey(const FString& FontFamily);
 	float FindFamilySpecificTextFallbackScale(const FString& NormalizedFamily);
@@ -63,8 +76,31 @@ namespace FallbackCalibration
 
 namespace FontCalibration
 {
+	struct FLocalFontIdentityPayload
+	{
+		FString DeclaredFamily;
+		FString DeclaredPostScriptName;
+		FString DeclaredWeight;
+		FString DeclaredStyle;
+		FString ResolvedAssetPath;
+		FString FallbackAssetPath;
+		FString FallbackToken;
+		FString UnresolvedToken;
+		FString ResolvedTypeface;
+		FString DeclarationSourceKind;
+		FString ResolutionSourceKind;
+		FString FallbackState;
+		FString MatchReason;
+		TArray<FString> IssueCodes;
+		bool bHasRequiredIdentity = false;
+		bool bAllowsMeasuredCandidate = false;
+	};
+
 	FString ResolveTypefaceName(const FString& FontFamily, const FString& FontWeight);
 	FString ResolveTypefaceName(const TSharedPtr<FDesignNode>& Node);
+	bool BuildLocalFontIdentityPayload(const TSharedPtr<FDesignNode>& Node, FLocalFontIdentityPayload& OutPayload);
+	FString BuildFontIdentityKeyToken(const FLocalFontIdentityPayload& Payload);
+	FString ResolveMetricFontAssetPath(const FLocalFontIdentityPayload& Payload);
 }
 
 namespace SharedThresholdOwners

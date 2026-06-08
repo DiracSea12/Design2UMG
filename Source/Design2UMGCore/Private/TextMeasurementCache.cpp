@@ -7,6 +7,7 @@
 #include "DesignSchemaSourceExtensions.h"
 #include "DesignTypeMapper.h"
 #include "FontResolver.h"
+#include "TextMeasurementRuntimeProbe.h"
 
 #include "Misc/ScopeLock.h"
 
@@ -46,6 +47,45 @@ namespace
 		}
 		return Typeface;
 	}
+
+	FString SerializeFiniteKeyFloat(const float Value)
+	{
+		if (!FMath::IsFinite(Value))
+		{
+			return FString();
+		}
+
+		const float Scaled = Value * 10000.0f;
+		if (!FMath::IsFinite(Scaled))
+		{
+			return FString();
+		}
+
+		float Quantized = FMath::RoundToFloat(Scaled) / 10000.0f;
+		if (FMath::IsNearlyZero(Quantized, 0.00005f))
+		{
+			Quantized = 0.0f;
+		}
+		return FString::Printf(TEXT("%.4f"), Quantized);
+	}
+
+	FString BuildMetricTokenForCacheKey(const FontCalibration::FLocalFontIdentityPayload& Payload, const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid() || !Payload.bHasRequiredIdentity)
+		{
+			return FString();
+		}
+
+		TextMeasurementRuntimeProbe::FTextMeasureRequest Request;
+		Request.Text = TEXT("Hg");
+		Request.FontSize = Node->Text.FontSize;
+		Request.FontAssetPath = FontCalibration::ResolveMetricFontAssetPath(Payload);
+		Request.TypefaceName = Payload.ResolvedTypeface;
+		Request.bRequiresResolvedFontAsset = true;
+		const TextMeasurementRuntimeProbe::FSlateTextMetricFingerprint Metric =
+			TextMeasurementRuntimeProbe::MeasureSlateTextMetricFingerprint(Request);
+		return TextMeasurementRuntimeProbe::SerializeSlateTextMetricToken(Metric);
+	}
 }
 
 namespace CacheTrace
@@ -57,26 +97,43 @@ namespace CacheTrace
 			return FString();
 		}
 
-		const FString FontAssetPath = FFontResolver::FindFontAssetPath(Node->Text.FontFamily).ToLower();
-		const FString FontIdentity = !FontAssetPath.IsEmpty()
-			? FontAssetPath
+		FontCalibration::FLocalFontIdentityPayload Payload;
+		const bool bHasLocalIdentity = FontCalibration::BuildLocalFontIdentityPayload(Node, Payload);
+		const FString FontIdentity = bHasLocalIdentity
+			? FontCalibration::BuildFontIdentityKeyToken(Payload)
 			: NormalizeFontFamilyKeyForCacheKey(Node->Text.FontFamily);
 		const FString TypefaceName = ResolveTypefaceNameForCacheKey(Node);
 		const FString LineHeightKey = Node->Text.LineHeight > 0.0f
-			? FString::Printf(TEXT("%.4f"), Node->Text.LineHeight)
+			? SerializeFiniteKeyFloat(Node->Text.LineHeight)
 			: TEXT("default");
+		if (LineHeightKey.IsEmpty())
+		{
+			return FString();
+		}
 		const FString LetterSpacingKey = Node->Text.HasLetterSpacingValue()
-			? FString::Printf(TEXT("%.4f"), Node->Text.LetterSpacing)
+			? SerializeFiniteKeyFloat(Node->Text.LetterSpacing)
 			: FString(TEXT("unset"));
+		if (LetterSpacingKey.IsEmpty())
+		{
+			return FString();
+		}
+		const FString FontSizeKey = SerializeFiniteKeyFloat(Node->Text.FontSize);
+		if (FontSizeKey.IsEmpty())
+		{
+			return FString();
+		}
+		const FString MetricToken = bHasLocalIdentity ? BuildMetricTokenForCacheKey(Payload, Node) : FString();
 		const bool bApplyExplicitLineHeight = TextMeasurement::ShouldApplyExplicitLineHeight(Node, Node->Text.FontSize);
 		return FString::Printf(
-			TEXT("%s|%s|%.1f|lh=%s|ls=%s|explicit=%d"),
+			TEXT("%s|%s|fs=%s|lh=%s|ls=%s|explicit=%d%s%s"),
 			*FontIdentity,
 			*TypefaceName,
-			Node->Text.FontSize,
+			*FontSizeKey,
 			*LineHeightKey,
 			*LetterSpacingKey,
-			bApplyExplicitLineHeight ? 1 : 0);
+			bApplyExplicitLineHeight ? 1 : 0,
+			MetricToken.IsEmpty() ? TEXT("") : TEXT("|"),
+			*MetricToken);
 	}
 
 	bool FResolvedScaleCacheOwner::TryGetResolvedTextScale(const FString& CalibrationKey, float& OutScale) const
@@ -322,5 +379,10 @@ void TextMeasurement::ResetCacheForAutomationBoundary()
 TextMeasurement::Testing::FTextMeasurementCacheStats TextMeasurement::Testing::GetCacheStats()
 {
 	return CacheTrace::GResolvedScaleCache.BuildStats();
+}
+
+FString TextMeasurement::Testing::BuildBaselineFallbackScaleKey(const TSharedPtr<FDesignNode>& Node)
+{
+	return CacheTrace::BuildBaselineFallbackScaleKey(Node);
 }
 #endif

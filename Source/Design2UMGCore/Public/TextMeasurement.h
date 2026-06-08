@@ -40,11 +40,36 @@ namespace TextMeasurement
 			int32 BaselineFallbackEntries = 0;
 		};
 
+		struct FSlateMetricProbeResult
+		{
+			float SignedBaselineRatio = 0.0f;
+			float MaxHeightRatio = 0.0f;
+			double ElapsedSeconds = 0.0;
+			FString Token;
+			bool bAvailable = false;
+		};
+
+		struct FProtectedMeasuredCandidateResult
+		{
+			float StableAcceptedScale = 0.0f;
+			float CandidateScale = 0.0f;
+			int32 MeasurementAttempts = 0;
+			bool bCandidateAvailable = false;
+			bool bBlockedByMissingFontIdentity = false;
+			bool bBlockedByFallbackState = false;
+			FString FallbackState;
+			FString MetricToken;
+		};
+
 		// Tests-only read-only bridge for Batch B executable evidence.
 		DESIGN2UMGCORE_API FTextMeasurementCacheStats GetCacheStats();
 		DESIGN2UMGCORE_API float EstimateSingleLineHeight(const TSharedPtr<FDesignNode>& Node);
 		DESIGN2UMGCORE_API float ResolveBaselineFallbackScale(const TSharedPtr<FDesignNode>& Node);
 		DESIGN2UMGCORE_API float ResolveLineBoxFallbackScale(const TSharedPtr<FDesignNode>& Node);
+		DESIGN2UMGCORE_API FString BuildBaselineFallbackScaleKey(const TSharedPtr<FDesignNode>& Node);
+		DESIGN2UMGCORE_API FString BuildSlateMetricToken(float SignedBaselineRatio, float MaxHeightRatio, bool bAvailable);
+		DESIGN2UMGCORE_API FSlateMetricProbeResult MeasureSlateMetricProbe(const TSharedPtr<FDesignNode>& Node, int32 BatchCount);
+		DESIGN2UMGCORE_API FProtectedMeasuredCandidateResult ResolveProtectedMeasuredCandidate(const TSharedPtr<FDesignNode>& Node);
 		DESIGN2UMGCORE_API float ResolveSingleLineWidthFitTarget(const TSharedPtr<FDesignNode>& Node);
 		DESIGN2UMGCORE_API int32 ResolveBestWidthFitFontSizeFromWidths(
 			float FallbackFontSize,

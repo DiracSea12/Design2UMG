@@ -28,7 +28,13 @@ namespace
 			return FString();
 		}
 
-		float Quantized = FMath::RoundToFloat(Value * 10000.0f) / 10000.0f;
+		const float Scaled = Value * 10000.0f;
+		if (!FMath::IsFinite(Scaled))
+		{
+			return FString();
+		}
+
+		float Quantized = FMath::RoundToFloat(Scaled) / 10000.0f;
 		if (FMath::IsNearlyZero(Quantized, 0.00005f))
 		{
 			Quantized = 0.0f;
@@ -274,8 +280,9 @@ TextMeasurementRuntimeProbe::FSlateTextMetricFingerprint TextMeasurementRuntimeP
 	ProbeRequest.FontSize = MetricProbeFontSize;
 	TSharedRef<FSlateFontMeasure> FontMeasure = FSlateApplication::Get().GetRenderer()->GetFontMeasureService();
 	const FSlateFontInfo FontInfo = BuildProbeFontInfo(ProbeRequest);
-	const float Baseline = FontMeasure->GetBaseline(FontInfo, MetricProbeFontSize);
-	const float MaxCharacterHeight = FontMeasure->GetMaxCharacterHeight(FontInfo, MetricProbeFontSize);
+	constexpr float ProbeFontScale = 1.0f;
+	const float Baseline = FontMeasure->GetBaseline(FontInfo, ProbeFontScale);
+	const float MaxCharacterHeight = FontMeasure->GetMaxCharacterHeight(FontInfo, ProbeFontScale);
 	if (!FMath::IsFinite(Baseline)
 		|| !IsFinitePositive(MaxCharacterHeight)
 		|| FMath::IsNearlyZero(Baseline)
