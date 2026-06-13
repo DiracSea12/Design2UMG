@@ -165,6 +165,17 @@ namespace
 		return true;
 	}
 
+	bool HasProjectRubikFont(FAutomationTestBase& Test)
+	{
+		const FString ProjectRubikPath = TEXT("/Game/Design2UMG/Fonts/Rubik.Rubik");
+		if (!LoadObject<UFont>(nullptr, *ProjectRubikPath))
+		{
+			Test.AddWarning(TEXT("Project Rubik font asset is unavailable; skipping Phase 32B wrapped paragraph regression guard."));
+			return false;
+		}
+		return true;
+	}
+
 	TSharedPtr<FDesignNode> MakePhase32MeasuredCandidateNode(const FString& Id, const FString& FontFamily)
 	{
 		TSharedPtr<FDesignNode> Node = MakeBaselineFallbackProbeNode(
@@ -239,6 +250,21 @@ namespace
 			*FString::Printf(TEXT("%s fallback font size is observable"), Node.IsValid() ? *Node->Name : TEXT("<invalid>")),
 			Trace.FallbackFontSize > 0.0f);
 		return Trace.FallbackFontSize;
+	}
+
+	FTextResolutionTrace ResolvePhase32B1TextResolutionTrace(
+		FAutomationTestBase& Test,
+		const TSharedPtr<FDesignNode>& Node)
+	{
+		TextMeasurement::ResetCache();
+		const FTextResolutionTrace Trace = TextMeasurementTestTrace::DumpTextResolutionTrace(Node);
+		Test.TestTrue(
+			*FString::Printf(TEXT("%s fallback font size is observable"), Node.IsValid() ? *Node->Name : TEXT("<invalid>")),
+			Trace.FallbackFontSize > 0.0f);
+		Test.TestTrue(
+			*FString::Printf(TEXT("%s compiled font size is observable"), Node.IsValid() ? *Node->Name : TEXT("<invalid>")),
+			Trace.CompiledFontSize > 0.0f);
+		return Trace;
 	}
 
 	bool IsConservativePhase32B1Fallback(const float FallbackFontSize)
@@ -987,9 +1013,12 @@ bool FTextMeasurementPhase32B1LayoutShapeBehaviorTest::RunTest(const FString& Pa
 		LongContent,
 		-1.0f,
 		-1.0f);
-	const float IntrinsicLabelFallback = ResolvePhase32B1FallbackFontSize(*this, IntrinsicLabelNode);
+	const FTextResolutionTrace IntrinsicLabelTrace = ResolvePhase32B1TextResolutionTrace(*this, IntrinsicLabelNode);
 	TestTrue(TEXT("Intrinsic single-line label shape reaches measured fallback through ResolveTextFontSizeForUMG"),
-		IntrinsicLabelFallback > 0.0f && IntrinsicLabelFallback < 24.0f);
+		IntrinsicLabelTrace.CompiledFontSize > 0.0f
+		&& IntrinsicLabelTrace.FallbackFontSize > 0.0f
+		&& IntrinsicLabelTrace.CompiledFontSize < IntrinsicLabelTrace.FallbackFontSize
+		&& IntrinsicLabelTrace.ResolutionPath == TEXT("height-fit"));
 
 	const TSharedPtr<FDesignNode> TruncateNode = MakePhase32B1LayoutShapeNode(
 		TEXT("phase32b1_truncate_present"),
@@ -1038,6 +1067,33 @@ bool FTextMeasurementPhase32B1LayoutShapeBehaviorTest::RunTest(const FString& Pa
 	TestTrue(TEXT("Unknown unsupported layout shape fails closed to conservative fallback"),
 		IsConservativePhase32B1Fallback(UnknownShapeFallback));
 
+	const TSharedPtr<FDesignNode> RuntimeOnlyWidthNode = MakePhase32B1LayoutShapeNode(
+		TEXT("phase32b3_runtime_only_width"),
+		EDesignNodeType::Text,
+		EDesignTextGrowth::FixedWidth,
+		TEXT("Runtime layout width must not enable measured fallback."),
+		120.0f,
+		-1.0f);
+	RuntimeOnlyWidthNode->Transform.bSourceHasWidth = false;
+	const float RuntimeOnlyWidthFallback = ResolvePhase32B1FallbackFontSize(*this, RuntimeOnlyWidthNode);
+	TestTrue(TEXT("Runtime-only width stays on the conservative fallback path"),
+		RuntimeOnlyWidthFallback > 0.0f
+		&& FMath::IsNearlyEqual(RuntimeOnlyWidthFallback, UnknownShapeFallback, 0.01f));
+
+	const TSharedPtr<FDesignNode> NonFiniteMeasuredConstraintNode = MakePhase32B1LayoutShapeNode(
+		TEXT("phase32b3_non_finite_measured_constraint"),
+		EDesignNodeType::Text,
+		EDesignTextGrowth::FixedWidthHeight,
+		TEXT("Invalid constraints must stay conservative."),
+		72.0f,
+		36.0f);
+	NonFiniteMeasuredConstraintNode->Transform.SetWidthValue(FDesignSize::Fixed(-std::numeric_limits<float>::infinity()));
+	NonFiniteMeasuredConstraintNode->Transform.SetHeightValue(FDesignSize::Fixed(std::numeric_limits<float>::quiet_NaN()));
+	const float NonFiniteMeasuredConstraintFallback = ResolvePhase32B1FallbackFontSize(*this, NonFiniteMeasuredConstraintNode);
+	TestTrue(TEXT("Non-finite measured constraints fail closed instead of enabling measured fallback"),
+		NonFiniteMeasuredConstraintFallback > 0.0f
+		&& FMath::IsNearlyEqual(NonFiniteMeasuredConstraintFallback, UnknownShapeFallback, 0.01f));
+
 	const TSharedPtr<FDesignNode> ContentVariantA = MakePhase32B1LayoutShapeNode(
 		TEXT("phase32b1_content_a"),
 		EDesignNodeType::Text,
@@ -1058,6 +1114,26 @@ bool FTextMeasurementPhase32B1LayoutShapeBehaviorTest::RunTest(const FString& Pa
 		ContentFallbackA > 0.0f
 		&& ContentFallbackB > 0.0f
 		&& FMath::IsNearlyEqual(ContentFallbackA, ContentFallbackB, 0.01f));
+
+	const TSharedPtr<FDesignNode> DenseTokenContentNode = MakePhase32B1LayoutShapeNode(
+		TEXT("phase32b3_dense_token_content"),
+		EDesignNodeType::Text,
+		EDesignTextGrowth::Auto,
+		TEXT("CPU_99%[MAX]"),
+		-1.0f,
+		-1.0f);
+	const TSharedPtr<FDesignNode> ProseContentNode = MakePhase32B1LayoutShapeNode(
+		TEXT("phase32b3_prose_content"),
+		EDesignNodeType::Text,
+		EDesignTextGrowth::Auto,
+		TEXT("ordinary lowercase prose"),
+		-1.0f,
+		-1.0f);
+	const float DenseTokenFallback = ResolvePhase32B1FallbackFontSize(*this, DenseTokenContentNode);
+	const float ProseFallback = ResolvePhase32B1FallbackFontSize(*this, ProseContentNode);
+	TestTrue(TEXT("Token/prose content stays on a valid fallback path without measured eligibility content scanning"),
+		DenseTokenFallback > 0.0f
+		&& ProseFallback > 0.0f);
 
 	const TSharedPtr<FDesignNode> AlignLeftNode = MakePhase32B1LayoutShapeNode(
 		TEXT("phase32b1_align_left"),
@@ -1088,6 +1164,245 @@ bool FTextMeasurementPhase32B1LayoutShapeBehaviorTest::RunTest(const FString& Pa
 	TestTrue(TEXT("Alignment variants keep the same protected candidate branch shape"),
 		AlignLeftCandidate.MeasurementAttempts == AlignRightCandidate.MeasurementAttempts
 		&& FMath::IsNearlyEqual(AlignLeftCandidate.CandidateScale, AlignRightCandidate.CandidateScale, 0.01f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextMeasurementPhase32BWidthFitSourceSignalsGrowthCapTest,
+	"Design2UMG.TextMeasurement.Phase32B.WidthFitSourceSignalsGrowthCap",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTextMeasurementPhase32BWidthFitSourceSignalsGrowthCapTest::RunTest(const FString& Parameters)
+{
+	if (!FSlateApplication::IsInitialized() || !HasProjectInterFont(*this))
+	{
+		return true;
+	}
+
+	const TSharedPtr<FDesignNode> SourceWidthGrowthNode = MakePhase32B1LayoutShapeNode(
+		TEXT("phase32b_widthfit_source_width_growth_cap"),
+		EDesignNodeType::Text,
+		EDesignTextGrowth::Auto,
+		TEXT("Sample"),
+		360.0f,
+		-1.0f,
+		0.0f);
+	TextMeasurement::ResetCache();
+	const FTextResolutionTrace SourceWidthGrowthTrace =
+		TextMeasurementTestTrace::DumpTextResolutionTrace(SourceWidthGrowthNode);
+	const float FallbackNearFontSize = static_cast<float>(FMath::Max(
+		1,
+		FMath::RoundToInt(SourceWidthGrowthTrace.FallbackFontSize)));
+	TestTrue(TEXT("Source fixed-width single-line width-fit growth is capped near fallback"),
+		SourceWidthGrowthTrace.FallbackFontSize > 0.0f
+		&& SourceWidthGrowthTrace.CompiledFontSize <= FallbackNearFontSize + 0.01f
+		&& SourceWidthGrowthTrace.ResolutionPath == TEXT("width-fit-capped-to-fallback"));
+
+	const TSharedPtr<FDesignNode> SourceFitWidthSymbolNode = MakePhase32B1LayoutShapeNode(
+		TEXT("phase32b_widthfit_source_fit_width_symbol"),
+		EDesignNodeType::Text,
+		EDesignTextGrowth::Auto,
+		TEXT("•"),
+		5.0f,
+		16.0f,
+		0.0f);
+	SourceFitWidthSymbolNode->Transform.SetWidthValue(FDesignSize::Fit(5.0f));
+	SourceFitWidthSymbolNode->Transform.SetHeightValue(FDesignSize::Fit(16.0f));
+	TextMeasurement::ResetCache();
+	const FTextResolutionTrace SourceFitWidthSymbolTrace =
+		TextMeasurementTestTrace::DumpTextResolutionTrace(SourceFitWidthSymbolNode);
+	TestTrue(TEXT("Source fit-width symbol keeps source width inset and does not grow above fallback"),
+		SourceFitWidthSymbolTrace.FallbackFontSize > 0.0f
+		&& SourceFitWidthSymbolTrace.CompiledFontSize > 0.0f
+		&& SourceFitWidthSymbolTrace.CompiledFontSize <= SourceFitWidthSymbolTrace.FallbackFontSize + 0.01f);
+
+	const TSharedPtr<FDesignNode> RuntimeWidthGrowthNode = MakePhase32B1LayoutShapeNode(
+		TEXT("phase32b_widthfit_runtime_width_growth"),
+		EDesignNodeType::Text,
+		EDesignTextGrowth::Auto,
+		TEXT("Sample"),
+		360.0f,
+		-1.0f,
+		0.0f);
+	RuntimeWidthGrowthNode->Transform.bSourceHasWidth = false;
+	TextMeasurement::ResetCache();
+	const FTextResolutionTrace RuntimeWidthGrowthTrace =
+		TextMeasurementTestTrace::DumpTextResolutionTrace(RuntimeWidthGrowthNode);
+	TestTrue(TEXT("Runtime-only fixed width does not enable the source-width growth cap"),
+		RuntimeWidthGrowthTrace.FallbackFontSize > 0.0f
+		&& RuntimeWidthGrowthTrace.CompiledFontSize > FallbackNearFontSize + 0.01f
+		&& RuntimeWidthGrowthTrace.ResolutionPath == TEXT("width-fit"));
+
+	const TSharedPtr<FDesignNode> SourceWidthShrinkNode = MakePhase32B1LayoutShapeNode(
+		TEXT("phase32b_widthfit_source_width_shrink"),
+		EDesignNodeType::Text,
+		EDesignTextGrowth::Auto,
+		TEXT("Source width still shrinks to avoid overflow."),
+		40.0f,
+		-1.0f,
+		0.0f);
+	TextMeasurement::ResetCache();
+	const FTextResolutionTrace SourceWidthShrinkTrace =
+		TextMeasurementTestTrace::DumpTextResolutionTrace(SourceWidthShrinkNode);
+	TestTrue(TEXT("Source-width width-fit can still shrink below fallback"),
+		SourceWidthShrinkTrace.FallbackFontSize > 0.0f
+		&& SourceWidthShrinkTrace.CompiledFontSize > 0.0f
+		&& SourceWidthShrinkTrace.CompiledFontSize < SourceWidthShrinkTrace.FallbackFontSize
+		&& SourceWidthShrinkTrace.ResolutionPath == TEXT("width-fit"));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextMeasurementPhase32BVerticalWrapFixedHeightCandidateRankingTest,
+	"Design2UMG.TextMeasurement.Phase32B.VerticalWrapFixedHeightCandidateRanking",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTextMeasurementPhase32BVerticalWrapFixedHeightCandidateRankingTest::RunTest(const FString& Parameters)
+{
+	if (!FSlateApplication::IsInitialized() || !HasProjectInterFont(*this) || !HasProjectRubikFont(*this))
+	{
+		return true;
+	}
+
+	const TSharedPtr<FDesignNode> FixedHeightSingleLineNode = MakePhase32B1LayoutShapeNode(
+		TEXT("phase32b_vertical_fixed_height_single_line"),
+		EDesignNodeType::Text,
+		EDesignTextGrowth::Auto,
+		TEXT("Wide label"),
+		360.0f,
+		64.0f,
+		1.25f);
+	FixedHeightSingleLineNode->Text.TextAlignVertical = EDesignTextAlignVertical::Middle;
+	TextMeasurement::ResetCache();
+	const FTextResolutionTrace FixedHeightSingleLineTrace =
+		TextMeasurementTestTrace::DumpTextResolutionTrace(FixedHeightSingleLineNode);
+
+	TestTrue(TEXT("Fixed-height vertical candidate ranking reaches the vertical-wrap path"),
+		FixedHeightSingleLineTrace.ResolutionPath == TEXT("vertical-wrap-fit"));
+	TestTrue(TEXT("Fixed height alone must not make the vertical-wrap path prefer the smallest safe font"),
+		FixedHeightSingleLineTrace.FallbackFontSize > 0.0f
+		&& FixedHeightSingleLineTrace.CompiledFontSize >= FixedHeightSingleLineTrace.FallbackFontSize - 0.01f);
+
+	const TSharedPtr<FDesignNode> FixedHeightWrappedParagraphNode = MakePhase32B1LayoutShapeNode(
+		TEXT("phase32b_vertical_fixed_height_wrapped_paragraph"),
+		EDesignNodeType::Text,
+		EDesignTextGrowth::FixedWidth,
+		TEXT("Look around and see what's possible, or clear the canvas and start creating."),
+		630.0f,
+		99.2f,
+		1.4583333333333333f);
+	FixedHeightWrappedParagraphNode->Text.FontFamily = TEXT("Rubik");
+	FixedHeightWrappedParagraphNode->Text.FontSize = 48.0f;
+	FixedHeightWrappedParagraphNode->Text.TextAlignVertical = EDesignTextAlignVertical::Bottom;
+	FixedHeightWrappedParagraphNode->Text.SetLetterSpacingValue(-1.44f);
+	TextMeasurement::ResetCache();
+	const FTextResolutionTrace FixedHeightWrappedParagraphTrace =
+		TextMeasurementTestTrace::DumpTextResolutionTrace(FixedHeightWrappedParagraphNode);
+
+	TestTrue(TEXT("Fixed-height wrapped paragraph reaches the vertical-wrap path"),
+		FixedHeightWrappedParagraphTrace.ResolutionPath == TEXT("vertical-wrap-fit"));
+	TestEqual(TEXT("Representative fixed-height wrapped paragraph preserves historical font size"),
+		FixedHeightWrappedParagraphTrace.CompiledFontSize,
+		16.0f);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextMeasurementPhase32B2FixedSampleKeyBehaviorTest,
+	"Design2UMG.TextMeasurement.Phase32B2.FixedSampleKeyBehavior",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTextMeasurementPhase32B2FixedSampleKeyBehaviorTest::RunTest(const FString& Parameters)
+{
+	if (!FSlateApplication::IsInitialized() || !HasProjectInterFont(*this))
+	{
+		return true;
+	}
+
+	const TSharedPtr<FDesignNode> NonPositiveConstraintNode = MakePhase32B1LayoutShapeNode(
+		TEXT("phase32b2_non_positive_constraint_sample"),
+		EDesignNodeType::Text,
+		EDesignTextGrowth::FixedWidthHeight,
+		TEXT("Baseline fallback key rollback reuses source constraint variants."),
+		72.0f,
+		36.0f,
+		0.0f);
+	NonPositiveConstraintNode->Text.SetLetterSpacingValue(0.0f);
+	NonPositiveConstraintNode->Transform.SetWidthValue(FDesignSize::Fixed(0.0f));
+	NonPositiveConstraintNode->Transform.SetHeightValue(FDesignSize::Fixed(-12.0f));
+	const FString NonPositiveConstraintKey = TextMeasurement::Testing::BuildBaselineFallbackScaleKey(NonPositiveConstraintNode);
+	TestFalse(TEXT("Rolled-back baseline key does not include Latin fixed-sample advance"),
+		NonPositiveConstraintKey.Contains(TEXT("latin-advance:")));
+	TestFalse(TEXT("Rolled-back baseline key does not include text shape category"),
+		NonPositiveConstraintKey.Contains(TEXT("shape:")));
+	TestFalse(TEXT("Rolled-back baseline key does not include wrap/truncate/max-lines behavior"),
+		NonPositiveConstraintKey.Contains(TEXT("wrap="))
+		|| NonPositiveConstraintKey.Contains(TEXT("truncate="))
+		|| NonPositiveConstraintKey.Contains(TEXT("maxlines=")));
+	TestFalse(TEXT("Rolled-back baseline key does not include source width/height constraint tokens"),
+		NonPositiveConstraintKey.Contains(TEXT("|w="))
+		|| NonPositiveConstraintKey.Contains(TEXT("|h=")));
+
+	const TSharedPtr<FDesignNode> NonFiniteConstraintNode = MakePhase32B1LayoutShapeNode(
+		TEXT("phase32b2_non_finite_constraint_sample"),
+		EDesignNodeType::Text,
+		EDesignTextGrowth::FixedWidthHeight,
+		TEXT("Baseline fallback key rollback reuses source constraint variants."),
+		72.0f,
+		36.0f,
+		0.0f);
+	NonFiniteConstraintNode->Text.SetLetterSpacingValue(0.0f);
+	NonFiniteConstraintNode->Transform.SetWidthValue(FDesignSize::Fixed(std::numeric_limits<float>::quiet_NaN()));
+	NonFiniteConstraintNode->Transform.SetHeightValue(FDesignSize::Fixed(std::numeric_limits<float>::infinity()));
+	const FString NonFiniteConstraintKey = TextMeasurement::Testing::BuildBaselineFallbackScaleKey(NonFiniteConstraintNode);
+	TestEqual(TEXT("Non-finite source constraints no longer split the baseline fallback key"),
+		NonFiniteConstraintKey,
+		NonPositiveConstraintKey);
+
+	NonFiniteConstraintNode->Transform.SetWidthValue(FDesignSize::Fixed(-std::numeric_limits<float>::infinity()));
+	const FString NegativeInfinityConstraintKey = TextMeasurement::Testing::BuildBaselineFallbackScaleKey(NonFiniteConstraintNode);
+	TestEqual(TEXT("Negative infinity source constraint reuses the same baseline fallback key"),
+		NegativeInfinityConstraintKey,
+		NonPositiveConstraintKey);
+
+	TextMeasurement::ResetCache();
+	const float NonPositiveConstraintScale = TextMeasurement::Testing::ResolveBaselineFallbackScale(NonPositiveConstraintNode);
+	const TextMeasurement::Testing::FTextMeasurementCacheStats AfterNonPositiveConstraintScale =
+		TextMeasurement::Testing::GetCacheStats();
+	const float NonFiniteConstraintScale = TextMeasurement::Testing::ResolveBaselineFallbackScale(NonFiniteConstraintNode);
+	const TextMeasurement::Testing::FTextMeasurementCacheStats AfterNonFiniteConstraintScale =
+		TextMeasurement::Testing::GetCacheStats();
+	TestTrue(TEXT("Non-finite source constraints reuse the non-positive baseline fallback cache bucket"),
+		NonPositiveConstraintScale > 0.0f
+		&& FMath::IsNearlyEqual(NonPositiveConstraintScale, NonFiniteConstraintScale, 0.0001f)
+		&& AfterNonPositiveConstraintScale.BaselineFallbackEntries == 1
+		&& AfterNonFiniteConstraintScale.BaselineFallbackEntries == 1);
+	TextMeasurement::ResetCache();
+
+	const TSharedPtr<FDesignNode> WiderNode = MakePhase32B1LayoutShapeNode(
+		TEXT("phase32b2_wider_sample"),
+		EDesignNodeType::Text,
+		EDesignTextGrowth::FixedWidthHeight,
+		TEXT("Baseline fallback key rollback reuses source constraint variants."),
+		96.0f,
+		36.0f,
+		0.0f);
+	WiderNode->Text.SetLetterSpacingValue(0.0f);
+	const FString WiderKey = TextMeasurement::Testing::BuildBaselineFallbackScaleKey(WiderNode);
+	TestEqual(TEXT("Finite source width changes no longer isolate the baseline fallback key"),
+		WiderKey,
+		NonPositiveConstraintKey);
+
+	const TSharedPtr<FDesignNode> RuntimeWidthNode = MakePhase32B1LayoutShapeNode(
+		TEXT("phase32b2_runtime_width_sample"),
+		EDesignNodeType::Text,
+		EDesignTextGrowth::FixedWidthHeight,
+		TEXT("Baseline fallback key rollback reuses source constraint variants."),
+		120.0f,
+		36.0f,
+		0.0f);
+	RuntimeWidthNode->Text.SetLetterSpacingValue(0.0f);
+	RuntimeWidthNode->Transform.bSourceHasWidth = false;
+	const FString RuntimeWidthKey = TextMeasurement::Testing::BuildBaselineFallbackScaleKey(RuntimeWidthNode);
+	TestEqual(TEXT("Missing source width flag reuses the same baseline fallback key"),
+		RuntimeWidthKey,
+		NonPositiveConstraintKey);
 	return true;
 }
 
@@ -1146,6 +1461,17 @@ bool FTextMeasurementPhase32B1LayoutShapeGoalGuardTest::RunTest(const FString& P
 		return false;
 	}
 
+	FString MeasuredEligibilitySource;
+	if (!ExtractSourceBetween(
+		*this,
+		SingleLineHeuristicsSource,
+		TEXT("bool ShouldUseMeasuredTextFontFallbackScale"),
+		TEXT("bool ShouldPreferIntrinsicSingleLineFallbackFontSize"),
+		MeasuredEligibilitySource))
+	{
+		return false;
+	}
+
 	TestTrue(TEXT("32B1 defines a fixed-width single-line goal"),
 		SelectorSource.Contains(TEXT("FixedWidthSingleLine")));
 	TestTrue(TEXT("32B1 defines a fixed-width multiline body goal"),
@@ -1186,6 +1512,18 @@ bool FTextMeasurementPhase32B1LayoutShapeGoalGuardTest::RunTest(const FString& P
 		MeasuredFallbackSource.Contains(TEXT("Content.Contains")));
 	TestFalse(TEXT("32B1 helper must not live in TextMeasurementSingleLineHeuristics.cpp"),
 		SingleLineHeuristicsSource.Contains(TEXT("Phase32B1LayoutShape")));
+	TestFalse(TEXT("Measured eligibility must not classify prose length"),
+		MeasuredEligibilitySource.Contains(TEXT("LongSentence")));
+	TestFalse(TEXT("Measured eligibility must not count words"),
+		MeasuredEligibilitySource.Contains(TEXT("CountSingleLineTextWords")));
+	TestFalse(TEXT("Measured eligibility must not scan digits"),
+		MeasuredEligibilitySource.Contains(TEXT("ContainsAsciiDigit")));
+	TestFalse(TEXT("Measured eligibility must not scan lowercase or uppercase shape"),
+		MeasuredEligibilitySource.Contains(TEXT("ContainsLowercaseLetter")));
+	TestFalse(TEXT("Measured eligibility must not scan punctuation/token symbols"),
+		MeasuredEligibilitySource.Contains(TEXT("ContainsMetricMetaSymbol")));
+	TestFalse(TEXT("Measured eligibility must not normalize and inspect runtime text content"),
+		MeasuredEligibilitySource.Contains(TEXT("PrepareRuntimeTextContent")));
 	return true;
 }
 

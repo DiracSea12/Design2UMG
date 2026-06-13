@@ -14,6 +14,8 @@ from design2umg_verify_lib.case_metrics import (
 from design2umg_verify_lib.compatibility import evaluate_report_compatibility
 from design2umg_verify_lib.diagnostics import EvidenceReadError
 from design2umg_verify_lib.diagnostics import emit_diagnostic
+from design2umg_verify_lib.evidence_contract import collect_binary_binding
+from design2umg_verify_lib.evidence_contract import collect_source_input
 from design2umg_verify_lib.json_io import file_signature
 from design2umg_verify_lib.json_io import load_json
 from design2umg_verify_lib.json_io import write_json
@@ -253,6 +255,7 @@ def build_case_entry(case_name: str) -> dict:
         "structure_required": False,
         "structure_passed": True,
         "metric_sources": {},
+        "admitted_sources": [],
         "source_runs": [],
         "updated_at": "",
         "updated_timestamp": 0.0,
@@ -360,6 +363,7 @@ def collect_best_cases(automation_root: Path, cache_payload: dict) -> tuple[
             skipped_runs_by_reason[inclusion_reason] = skipped_runs_by_reason.get(inclusion_reason, 0) + 1
             continue
 
+        run_scope = load_run_scope(run_root) or {}
         source_runs.append(run_root.name)
         included_runs_by_reason[inclusion_reason] = included_runs_by_reason.get(inclusion_reason, 0) + 1
         run_timestamp = summary_path.stat().st_mtime
@@ -384,6 +388,7 @@ def collect_best_cases(automation_root: Path, cache_payload: dict) -> tuple[
                 continue
 
             resolved_metrics, report_path = resolve_case_metrics(run_root, case_name, case, metric_cache)
+            report = load_json(report_path) if report_path.is_file() else {}
             candidate_source = {
                 "run": run_root.name,
                 "report_path": str(report_path),
@@ -396,6 +401,8 @@ def collect_best_cases(automation_root: Path, cache_payload: dict) -> tuple[
                 "structure_passed": bool(case.get("structure_passed", True)),
                 "render_size_rule": render_rule.DESIGN_SIZE_RENDER_RULE,
                 "pipeline_determinism_rule": render_rule.PIPELINE_DETERMINISM_RULE,
+                "binary_binding": collect_binary_binding(run_scope, summary, report),
+                "source_input": collect_source_input(run_root, case_name, run_scope, summary, report, report_path),
             }
 
             entry = best_cases.setdefault(case_name, build_case_entry(case_name))
@@ -404,6 +411,19 @@ def collect_best_cases(automation_root: Path, cache_payload: dict) -> tuple[
             entry["structure_required"] = bool(entry.get("structure_required")) or candidate_source["structure_required"]
             if candidate_source["structure_required"]:
                 entry["structure_passed"] = bool(entry.get("structure_passed", True)) and candidate_source["structure_passed"]
+            entry["admitted_sources"].append(
+                {
+                    "run": candidate_source["run"],
+                    "report_path": candidate_source["report_path"],
+                    "timestamp": candidate_source["timestamp"],
+                    "stable_changed_ratio": candidate_source["stable_changed_ratio"],
+                    "changed_ratio": candidate_source["changed_ratio"],
+                    "stable_mean_abs_error": candidate_source["stable_mae"],
+                    "mean_abs_error": candidate_source["mae"],
+                    "binary_binding": candidate_source["binary_binding"],
+                    "source_input": candidate_source["source_input"],
+                }
+            )
 
             if not select_case_source(candidate_source, entry):
                 continue
@@ -419,6 +439,8 @@ def collect_best_cases(automation_root: Path, cache_payload: dict) -> tuple[
                     "report_path": candidate_source["report_path"],
                     "value": candidate_source[summary_metric],
                     "timestamp": candidate_source["timestamp"],
+                    "binary_binding": candidate_source["binary_binding"],
+                    "source_input": candidate_source["source_input"],
                 }
                 for metric_name, summary_metric in METRIC_FIELDS
                 if candidate_source.get(summary_metric) is not None
@@ -430,6 +452,17 @@ def collect_best_cases(automation_root: Path, cache_payload: dict) -> tuple[
 
     for entry in best_cases.values():
         entry.pop("updated_timestamp", None)
+        entry["admitted_sources"] = sorted(
+            entry.get("admitted_sources") or [],
+            key=lambda source: (
+                source.get("stable_changed_ratio") is None,
+                source.get("stable_changed_ratio") if source.get("stable_changed_ratio") is not None else 0.0,
+                source.get("changed_ratio") is None,
+                source.get("changed_ratio") if source.get("changed_ratio") is not None else 0.0,
+                source.get("run", ""),
+                source.get("report_path", ""),
+            ),
+        )
 
     return (
         best_cases,

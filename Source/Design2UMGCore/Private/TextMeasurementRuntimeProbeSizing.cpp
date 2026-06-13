@@ -67,6 +67,76 @@ namespace
 {
 	constexpr float WidthFitTolerance = 0.5f;
 	constexpr float WidthFitOvershootTolerance = 2.0f;
+
+	bool HasPositiveSourceWidth(const TSharedPtr<FDesignNode>& Node)
+	{
+		return Node.IsValid()
+			&& Node->Transform.bSourceHasWidth
+			&& (Node->Transform.Width.IsFixed() || Node->Transform.Width.IsFit())
+			&& FMath::IsFinite(Node->Transform.Width.Value)
+			&& Node->Transform.Width.Value > 0.0f;
+	}
+
+	bool HasPositiveSourceHeight(const TSharedPtr<FDesignNode>& Node)
+	{
+		return Node.IsValid()
+			&& Node->Transform.bSourceHasHeight
+			&& (Node->Transform.Height.IsFixed() || Node->Transform.Height.IsFit())
+			&& FMath::IsFinite(Node->Transform.Height.Value)
+			&& Node->Transform.Height.Value > 0.0f;
+	}
+
+	int32 ResolveSourceWidthSingleLineGrowthCap(
+		const TSharedPtr<FDesignNode>& Node,
+		const float FallbackFontSize,
+		const int32 BestFontSize)
+	{
+		if (!Node.IsValid()
+			|| !FMath::IsFinite(FallbackFontSize)
+			|| FallbackFontSize <= 0.0f
+			|| !HasPositiveSourceWidth(Node)
+			|| Node->Text.Content.Contains(TEXT("\n"))
+			|| TextMeasurement::ShouldAutoWrapText(Node)
+			|| Node->Text.TextGrowth != EDesignTextGrowth::Auto)
+		{
+			return INDEX_NONE;
+		}
+
+		const int32 FallbackNearFontSize = FMath::Max(1, FMath::RoundToInt(FallbackFontSize));
+		if (BestFontSize <= FallbackNearFontSize)
+		{
+			return INDEX_NONE;
+		}
+
+		return FallbackNearFontSize;
+	}
+
+	int32 ResolveFixedHeightSingleLineWidthFitCap(
+		const TSharedPtr<FDesignNode>& Node,
+		const int32 BestFontSize)
+	{
+		if (!Node.IsValid()
+			|| BestFontSize <= 1
+			|| Node->Text.Content.Contains(TEXT("\n"))
+			|| TextMeasurement::ShouldAutoWrapText(Node)
+			|| Node->Text.TextGrowth != EDesignTextGrowth::Auto
+			|| !HasPositiveSourceHeight(Node)
+			|| !HasPositiveSourceWidth(Node))
+		{
+			return INDEX_NONE;
+		}
+
+		for (int32 CandidateFontSize = BestFontSize; CandidateFontSize >= 1; --CandidateFontSize)
+		{
+			const float CandidateHeight = RuntimeProbe::MeasureSingleLineTextBlockHeight(Node, static_cast<float>(CandidateFontSize));
+			if (CandidateHeight > 0.0f && CandidateHeight <= Node->Transform.Height.Value + 0.5f)
+			{
+				return CandidateFontSize;
+			}
+		}
+
+		return INDEX_NONE;
+	}
 }
 
 int32 ResolveBestProbeFontSize(
@@ -281,6 +351,12 @@ int32 ResolveVerticalAlignedWrappingFontSize(
 		const float CandidateHeightSlack = bHasFixedHeight
 			? AvailableHeight - CandidateWrappedSize.Y
 			: TNumericLimits<float>::Max();
+		const int32 SourceLineCount = bHasFixedHeight
+			? FMath::Max(1, FMath::RoundToInt(AvailableHeight / FMath::Max(1.0f, TargetLineBoxHeight)))
+			: 0;
+		const int32 CandidateLineCountError = bHasFixedHeight
+			? FMath::Abs(CandidateLineCount - SourceLineCount)
+			: MAX_int32;
 		const bool bSameLineCountAsBest = CandidateLineCount == BestLineCount;
 		const bool bPreferHeightErrorBeforeWidthSlack = !bHasFixedHeight;
 		const bool bBetterPrimaryMetric = bPreferHeightErrorBeforeWidthSlack
@@ -316,22 +392,36 @@ int32 ResolveVerticalAlignedWrappingFontSize(
 
 		if (!bHasFixedHeight || CandidateHeightSlack + KINDA_SMALL_NUMBER >= VerticalWrapSafetySlack)
 		{
+			const bool bCandidateIsWrappingShape = bAutoWrapText || CandidateLineCount > 1;
+			const int32 BestSafeLineCountError = bHasFixedHeight && BestSafeLineCount != MAX_int32
+				? FMath::Abs(BestSafeLineCount - SourceLineCount)
+				: MAX_int32;
+			const bool bBetterFixedHeightWrappingShape =
+				bHasFixedHeight
+				&& bCandidateIsWrappingShape
+				&& (CandidateLineCountError < BestSafeLineCountError
+					|| (CandidateLineCountError == BestSafeLineCountError
+						&& CandidateLineCount < BestSafeLineCount));
+			const bool bBetterSingleLineOrFlexibleHeight =
+				(!bHasFixedHeight || !bCandidateIsWrappingShape)
+				&& (CandidateLineCount < BestSafeLineCount
+					|| (CandidateLineCount == BestSafeLineCount
+						&& CandidateHeightSlack + 0.5f < BestSafeHeightSlack)
+					|| (CandidateLineCount == BestSafeLineCount
+						&& FMath::IsNearlyEqual(CandidateHeightSlack, BestSafeHeightSlack, 0.5f)
+						&& CandidateWidthSlack + 0.5f < BestSafeWidthSlack)
+					|| (CandidateLineCount == BestSafeLineCount
+						&& FMath::IsNearlyEqual(CandidateHeightSlack, BestSafeHeightSlack, 0.5f)
+						&& FMath::IsNearlyEqual(CandidateWidthSlack, BestSafeWidthSlack, 0.5f)
+						&& CandidateHeightError + 0.5f < BestSafeHeightError)
+					|| (CandidateLineCount == BestSafeLineCount
+						&& FMath::IsNearlyEqual(CandidateHeightSlack, BestSafeHeightSlack, 0.5f)
+						&& FMath::IsNearlyEqual(CandidateWidthSlack, BestSafeWidthSlack, 0.5f)
+						&& FMath::IsNearlyEqual(CandidateHeightError, BestSafeHeightError, 0.5f)
+						&& CandidateDistanceToFallback < BestSafeDistanceToFallback));
 			if (BestSafeFontSize == INDEX_NONE
-				|| CandidateLineCount < BestSafeLineCount
-				|| (CandidateLineCount == BestSafeLineCount
-					&& CandidateHeightSlack + 0.5f < BestSafeHeightSlack)
-				|| (CandidateLineCount == BestSafeLineCount
-					&& FMath::IsNearlyEqual(CandidateHeightSlack, BestSafeHeightSlack, 0.5f)
-					&& CandidateWidthSlack + 0.5f < BestSafeWidthSlack)
-				|| (CandidateLineCount == BestSafeLineCount
-					&& FMath::IsNearlyEqual(CandidateHeightSlack, BestSafeHeightSlack, 0.5f)
-					&& FMath::IsNearlyEqual(CandidateWidthSlack, BestSafeWidthSlack, 0.5f)
-					&& CandidateHeightError + 0.5f < BestSafeHeightError)
-				|| (CandidateLineCount == BestSafeLineCount
-					&& FMath::IsNearlyEqual(CandidateHeightSlack, BestSafeHeightSlack, 0.5f)
-					&& FMath::IsNearlyEqual(CandidateWidthSlack, BestSafeWidthSlack, 0.5f)
-					&& FMath::IsNearlyEqual(CandidateHeightError, BestSafeHeightError, 0.5f)
-					&& CandidateDistanceToFallback < BestSafeDistanceToFallback))
+				|| bBetterFixedHeightWrappingShape
+				|| bBetterSingleLineOrFlexibleHeight)
 			{
 				BestSafeFontSize = CandidateFontSize;
 				BestSafeLineCount = CandidateLineCount;
@@ -450,6 +540,18 @@ float ResolveTextFontSizeForUMGInternal(const TSharedPtr<FDesignNode>& Node, FSt
 			const float ClampedFontSize = static_cast<float>(FMath::CeilToInt(FMath::Max(1.0f, FallbackFontSize - 0.05f)));
 			CacheTrace::LogResolvedTextDecision(Node, TEXT("width-fit-clamped-to-fallback"), ClampedFontSize, FallbackFontSize, OutResolutionPath);
 			return ClampedFontSize;
+		}
+		if (const int32 CappedFontSize = ResolveSourceWidthSingleLineGrowthCap(Node, FallbackFontSize, BestFontSize);
+			CappedFontSize != INDEX_NONE)
+		{
+			CacheTrace::LogResolvedTextDecision(Node, TEXT("width-fit-capped-to-fallback"), static_cast<float>(CappedFontSize), FallbackFontSize, OutResolutionPath);
+			return static_cast<float>(CappedFontSize);
+		}
+		if (const int32 HeightCappedFontSize = ResolveFixedHeightSingleLineWidthFitCap(Node, BestFontSize);
+			HeightCappedFontSize != INDEX_NONE && HeightCappedFontSize < BestFontSize)
+		{
+			CacheTrace::LogResolvedTextDecision(Node, TEXT("width-fit-height-capped"), static_cast<float>(HeightCappedFontSize), FallbackFontSize, OutResolutionPath);
+			return static_cast<float>(HeightCappedFontSize);
 		}
 		CacheTrace::LogResolvedTextDecision(Node, TEXT("width-fit"), static_cast<float>(BestFontSize), FallbackFontSize, OutResolutionPath);
 		return static_cast<float>(BestFontSize);

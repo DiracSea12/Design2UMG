@@ -19,6 +19,24 @@ namespace
 	{
 		return Design2UMGCore::SharedSemantics::ResolveWidthHint(Node, ParentContentWidth);
 	}
+
+	bool HasPositiveSourceWidth(const TSharedPtr<FDesignNode>& Node)
+	{
+		return Node.IsValid()
+			&& Node->Transform.bSourceHasWidth
+			&& (Node->Transform.Width.IsFixed() || Node->Transform.Width.IsFit())
+			&& FMath::IsFinite(Node->Transform.Width.Value)
+			&& Node->Transform.Width.Value > 0.0f;
+	}
+
+	bool HasPositiveSourceHeight(const TSharedPtr<FDesignNode>& Node)
+	{
+		return Node.IsValid()
+			&& Node->Transform.bSourceHasHeight
+			&& (Node->Transform.Height.IsFixed() || Node->Transform.Height.IsFit())
+			&& FMath::IsFinite(Node->Transform.Height.Value)
+			&& Node->Transform.Height.Value > 0.0f;
+	}
 }
 
 namespace LineBox
@@ -448,6 +466,31 @@ TOptional<float> TryResolveMeasuredTextFontFallbackScale(const TSharedPtr<FDesig
 		}
 	}
 
+	if (LayoutDecision.Goal == EPhase32B1LayoutShapeGoal::FixedWidthMultilineBody
+		&& HasPositiveSourceWidth(Node)
+		&& HasPositiveSourceHeight(Node)
+		&& LayoutDecision.WidthConstraint > 0.0f
+		&& LayoutDecision.HeightConstraint > 0.0f)
+	{
+		const FVector2D DesiredSize = RuntimeProbe::MeasureUMGTextBlockDesiredSize(
+			Node,
+			Node->Text.FontSize,
+			Node->Text.Content,
+			LayoutDecision.WidthConstraint,
+			TextMeasurement::ShouldAutoWrapText(Node));
+		if (DesiredSize.X > KINDA_SMALL_NUMBER && DesiredSize.Y > KINDA_SMALL_NUMBER)
+		{
+			const float WrappedScale = FMath::Min(
+				LayoutDecision.WidthConstraint / DesiredSize.X,
+				LayoutDecision.HeightConstraint / DesiredSize.Y);
+			if (FMath::IsFinite(WrappedScale) && WrappedScale > 0.0f)
+			{
+				BestScale = bHasScale ? FMath::Min(BestScale, WrappedScale) : WrappedScale;
+				bHasScale = true;
+			}
+		}
+	}
+
 	if (LayoutDecision.bUseWidthGoal && !Node->Text.Content.IsEmpty() && LayoutDecision.WidthConstraint > 0.0f)
 	{
 		const int32 LetterSpacingTracking = Node->Text.LetterSpacing != 0.0f
@@ -734,10 +777,9 @@ bool TryBuildProbePlan(
 	}
 
 	const bool bShouldApplyWidthInset =
-		Node->Transform.bSourceHasWidth
+		HasPositiveSourceWidth(Node)
 		&& !TextMeasurement::ShouldAutoWrapText(Node)
-		&& Node->Text.TextAlignVertical == EDesignTextAlignVertical::Top
-		&& SourceMetadata::IsFigmaSourceNode(Node);
+		&& Node->Text.TextAlignVertical == EDesignTextAlignVertical::Top;
 	const float WidthInset = IsCompactSingleLineLabel(Node, OutPlan.TargetTextWidth)
 		? SharedThresholds::CompactSingleLineLabelWidthInset
 		: SharedThresholds::DefaultFigmaWidthInset;
@@ -833,10 +875,9 @@ float TextMeasurement::Testing::ResolveSingleLineWidthFitTarget(const TSharedPtr
 	}
 
 	const bool bShouldApplySourceWidthInset =
-		Node->Transform.bSourceHasWidth
+		HasPositiveSourceWidth(Node)
 		&& !TextMeasurement::ShouldAutoWrapText(Node)
-		&& Node->Text.TextAlignVertical == EDesignTextAlignVertical::Top
-		&& SourceMetadata::IsFigmaSourceNode(Node);
+		&& Node->Text.TextAlignVertical == EDesignTextAlignVertical::Top;
 	const float WidthInset = bShouldApplySourceWidthInset
 		? (SingleLineWidthFit::IsCompactSingleLineLabel(Node, Node->Transform.Width.Value)
 			? SharedThresholds::CompactSingleLineLabelWidthInset

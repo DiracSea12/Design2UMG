@@ -56,22 +56,12 @@ namespace
 			|| Normalized == TEXT("900");
 	}
 
-	bool IsLongSentenceLikeSingleLineText(const TSharedPtr<FDesignNode>& Node)
+	bool HasFinitePositiveSourceConstraint(const FDesignSize& Size, const bool bHasSourceConstraint)
 	{
-		if (!Node.IsValid())
-		{
-			return false;
-		}
-
-		const FString RuntimeText = TextMeasurement::PrepareRuntimeTextContent(Node->Text.Content).TrimStartAndEnd();
-		if (RuntimeText.Len() >= 28)
-		{
-			return true;
-		}
-
-		TArray<FString> Words;
-		RuntimeText.ParseIntoArrayWS(Words);
-		return Words.Num() >= 4;
+		return bHasSourceConstraint
+			&& (Size.IsFixed() || Size.IsFill())
+			&& FMath::IsFinite(Size.Value)
+			&& Size.Value > 0.0f;
 	}
 
 	bool StartsWithAsciiDigit(const FString& Text)
@@ -474,25 +464,29 @@ bool ShouldClampSingleLineWidthFitToFallback(const TSharedPtr<FDesignNode>& Node
 
 bool ShouldUseMeasuredTextFontFallbackScale(const TSharedPtr<FDesignNode>& Node)
 {
-	if (!Node.IsValid())
+	if (!Node.IsValid() || Node->Text.FontSize <= 0.0f)
 	{
 		return false;
 	}
 
-	const bool bBehavesLikeSingleLine =
-		!Node->Text.Content.Contains(TEXT("\n"))
-		&& !TextMeasurement::IsWrappingTextMode(Node);
-	if (!bBehavesLikeSingleLine)
+	if (Node->Type == EDesignNodeType::IconFont
+		|| !Node->Text.IconFontName.IsEmpty()
+		|| !Node->Text.IconFontFamily.IsEmpty())
 	{
 		return true;
 	}
 
-	if (Node->Text.TextAlignVertical != EDesignTextAlignVertical::Top)
+	const bool bHasStableConstraint =
+		HasFinitePositiveSourceConstraint(Node->Transform.Width, Node->Transform.bSourceHasWidth)
+		|| HasFinitePositiveSourceConstraint(Node->Transform.Height, Node->Transform.bSourceHasHeight);
+	if ((TextMeasurement::IsWrappingTextMode(Node)
+			|| Node->Text.Content.Contains(TEXT("\n")))
+		&& bHasStableConstraint)
 	{
-		return false;
+		return true;
 	}
 
-	return IsLongSentenceLikeSingleLineText(Node);
+	return bHasStableConstraint;
 }
 
 bool ShouldPreferIntrinsicSingleLineFallbackFontSize(const TSharedPtr<FDesignNode>& Node)

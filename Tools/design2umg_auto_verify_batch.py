@@ -25,6 +25,7 @@ from design2umg_verify_lib.run_history import write_historical_best_validation
 
 NO_REGRESSION_EPSILON = 1.25e-4
 EDITOR_GRACEFUL_EXIT_DEADLINE_SEC = 30.0  # seconds to wait for editor results after process exits
+EDITOR_STEP_DRIVER_START_ATTEMPTS = 2
 AUTOMATION_GAME_OUTPUT_PREFIX = "/Game/Design2UMG/Automation"
 
 
@@ -45,6 +46,7 @@ def parse_args():
     parser.add_argument("--idle-timeout-sec", type=int, default=180, help="Kill the editor if no log or result progress is observed for this many seconds")
     parser.add_argument("--startup-timeout-sec", type=int, default=60, help="Kill a shard early if UnrealEditor shows zero progress right after launch for this many seconds")
     parser.add_argument("--parallel-editors", type=int, default=0, help="How many UnrealEditor shards to run in parallel. 0 means auto.")
+    parser.add_argument("--editor-isolation", choices=["shard", "step"], default="shard", help="Editor process isolation level. shard keeps the current batched shard behavior; step runs each automation spec in its own UnrealEditor process.")
     parser.add_argument("--post-workers", type=int, default=0, help="How many parallel workers to use for post-render compare/report. 0 means auto.")
     parser.add_argument("--native-self-check", choices=["auto", "off"], default="off", help="Whether to run optional native-size self-check passes. 'off' is faster and does not affect formal scoring metrics.")
     parser.add_argument("--reference-cache", choices=["off", "read", "read-write", "refresh"], default="read-write", help="Reference cache policy for pen+pencil cases without --reference-root. read-write is recommended for faster reruns.")
@@ -485,6 +487,27 @@ def write_editor_driver_script(output_root: Path, spec_paths: list[Path], tag: s
     )
 
 
+def get_editor_driver_log_path(driver_script_path: Path) -> Path:
+    return driver_script_path.with_suffix(".log")
+
+
+def editor_driver_started(driver_log_path: Path) -> bool:
+    if not driver_log_path.is_file():
+        return False
+    try:
+        return "driver:start" in driver_log_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+
+
+def extend_deadline(current_deadline: float, extension_sec: float) -> float:
+    return max(current_deadline, time.time() + extension_sec)
+
+
+class EditorDriverStartError(RuntimeError):
+    pass
+
+
 def run_editor_driver(
     editor_path: str,
     project_path: str,
@@ -496,6 +519,7 @@ def run_editor_driver(
     log_cmds: str = "",
 ) -> int:
     driver_script_path = driver_script_path.resolve()
+    driver_log_path = get_editor_driver_log_path(driver_script_path)
     command = [
         editor_path,
         project_path,
@@ -532,6 +556,13 @@ def run_editor_driver(
                 last_result_count = current_result_count
                 last_progress_time = time.time()
                 observed_progress = True
+            if current_result_count >= len(result_paths) and verify.log_indicates_clean_editor_shutdown(log_path):
+                process.kill()
+                return 0
+
+            if editor_driver_started(driver_log_path):
+                last_progress_time = time.time()
+                observed_progress = True
 
             try:
                 current_log_size = log_path.stat().st_size
@@ -561,15 +592,28 @@ def run_editor_driver(
 
             time.sleep(2)
 
-    exit_deadline = time.time() + EDITOR_GRACEFUL_EXIT_DEADLINE_SEC
+    exit_deadline = time.time() + max(EDITOR_GRACEFUL_EXIT_DEADLINE_SEC, float(idle_timeout_sec))
     while time.time() < exit_deadline:
         current_result_count = sum(1 for path in result_paths if path.is_file())
         if current_result_count >= len(result_paths):
             break
         if current_result_count > last_result_count:
             last_result_count = current_result_count
-            exit_deadline = time.time() + EDITOR_GRACEFUL_EXIT_DEADLINE_SEC
+            exit_deadline = extend_deadline(exit_deadline, EDITOR_GRACEFUL_EXIT_DEADLINE_SEC)
+        try:
+            current_log_size = log_path.stat().st_size
+        except FileNotFoundError:
+            current_log_size = 0
+        if current_log_size > last_log_size:
+            last_log_size = current_log_size
+            exit_deadline = extend_deadline(exit_deadline, max(EDITOR_GRACEFUL_EXIT_DEADLINE_SEC, 10.0))
         time.sleep(1)
+
+    if not editor_driver_started(driver_log_path):
+        raise EditorDriverStartError(
+            f"Editor exited before the automation driver started: "
+            f"exit_code={exit_code} driver_log={driver_log_path} log={log_path}"
+        )
 
     if exit_code != 0 and all(path.is_file() for path in result_paths):
         if verify.log_indicates_clean_editor_shutdown(log_path):
@@ -673,6 +717,129 @@ def run_execution_shards(
     return sorted(results, key=lambda item: item["shard_id"])
 
 
+def load_step_spec(step: dict) -> dict:
+    return verify.load_json_document(step["spec_path"])
+
+
+def ensure_step_dependencies_ready(case_name: str, step_key: str, step: dict) -> None:
+    spec = load_step_spec(step)
+    source_path = str(spec.get("source_path", ""))
+    if not source_path.startswith("@generated_asset_from:"):
+        return
+
+    dependency_path = Path(source_path.removeprefix("@generated_asset_from:"))
+    if not dependency_path.is_file():
+        raise RuntimeError(
+            f"Step isolation blocked dependent asset render before generation result existed: "
+            f"{case_name}:{step_key} missing generated asset dependency result {dependency_path}"
+        )
+
+    dependency_result = verify.load_json_document(dependency_path)
+    generated_asset_path = str(dependency_result.get("generated_asset_path", "")).strip()
+    if not dependency_result.get("success") or not generated_asset_path:
+        raise RuntimeError(
+            f"Step isolation blocked dependent asset render before generation produced a generated asset path: "
+            f"{case_name}:{step_key} dependency={dependency_path}"
+        )
+
+
+def run_execution_steps(
+    states: list[dict],
+    output_root: Path,
+    editor_path: str,
+    project_path: str,
+    idle_timeout_sec: int,
+    startup_timeout_sec: int,
+    log_cmds: str,
+) -> list[dict]:
+    results = []
+    step_index = 0
+    for state in states:
+        case_name = state["case"]["name"]
+        for step_key, step in state["steps"].items():
+            ensure_step_dependencies_ready(case_name, step_key, step)
+
+            step_tag = f"step-{step_index + 1:03d}"
+            log_tag = f"{step_tag}-{case_name}-{step_key}"
+            log_path = output_root / f"unreal_batch_{batch_discovery.sanitize_case_name(log_tag)}.log"
+            driver_script_path = write_editor_driver_script(output_root, [step["spec_path"]], step_tag)
+            step["log_path"] = log_path
+            state["ue_log_path"] = log_path
+            print(f"[EDITOR_STEP] {case_name}:{step_key} log={log_path}", flush=True)
+            exit_code = 0
+            for attempt in range(1, EDITOR_STEP_DRIVER_START_ATTEMPTS + 1):
+                verify.ensure_clean_editor()
+                try:
+                    exit_code = run_editor_driver(
+                        editor_path,
+                        project_path,
+                        driver_script_path,
+                        [step["result_json_path"]],
+                        log_path,
+                        idle_timeout_sec,
+                        startup_timeout_sec,
+                        log_cmds,
+                    )
+                    break
+                except EditorDriverStartError:
+                    if attempt >= EDITOR_STEP_DRIVER_START_ATTEMPTS:
+                        raise
+                    print(f"[EDITOR_STEP_RETRY] {case_name}:{step_key} driver did not start; retrying", flush=True)
+                    time.sleep(5)
+            step["editor_exit_code"] = exit_code
+            if not step["result_json_path"].is_file():
+                raise RuntimeError(
+                    f"Step isolation editor did not produce result json: "
+                    f"{case_name}:{step_key} exit_code={exit_code} "
+                    f"result={step['result_json_path']} log={log_path}"
+                )
+            results.append(
+                {
+                    "shard_id": step_index,
+                    "exit_code": exit_code,
+                    "log_path": str(log_path),
+                    "spec_count": 1,
+                    "editor_isolation": "step",
+                    "case_name": case_name,
+                    "step": step_key,
+                }
+            )
+            step_index += 1
+    return results
+
+
+def build_missing_step_states(states: list[dict]) -> list[dict]:
+    missing_states = []
+    for state in states:
+        missing_steps = {
+            key: step
+            for key, step in state["steps"].items()
+            if not step["result_json_path"].is_file()
+        }
+        if missing_steps:
+            missing_states.append(
+                {
+                    "case": state["case"],
+                    "output_dir": state["output_dir"],
+                    "spec_paths": [step["spec_path"] for step in missing_steps.values()],
+                    "steps": missing_steps,
+                }
+            )
+    return missing_states
+
+
+def build_step_isolation_summary_shards(states: list[dict]) -> list[dict]:
+    return [
+        {
+            "id": 0,
+            "states": states,
+            "spec_paths": [step["spec_path"] for state in states for step in state["steps"].values()],
+            "result_paths": [step["result_json_path"] for state in states for step in state["steps"].values()],
+            "editor_isolation": "step",
+        }
+    ]
+
+
 def rerun_missing_steps(
     states: list[dict],
     output_root: Path,
@@ -681,6 +848,7 @@ def rerun_missing_steps(
     idle_timeout_sec: int,
     startup_timeout_sec: int,
     log_cmds: str,
+    editor_isolation: str = "shard",
 ) -> dict | None:
     missing_steps = []
     for state in states:
@@ -690,6 +858,26 @@ def rerun_missing_steps(
 
     if not missing_steps:
         return None
+
+    if editor_isolation == "step":
+        step_results = run_execution_steps(
+            build_missing_step_states(states),
+            output_root,
+            editor_path,
+            project_path,
+            idle_timeout_sec,
+            startup_timeout_sec,
+            log_cmds,
+        )
+        return {
+            "shard_id": -1,
+            "exit_code": next((item["exit_code"] for item in step_results if item["exit_code"] != 0), 0),
+            "log_path": "",
+            "spec_count": len(missing_steps),
+            "retry": True,
+            "editor_isolation": "step",
+            "steps": step_results,
+        }
 
     spec_paths = [step["spec_path"] for step in missing_steps]
     result_paths = [step["result_json_path"] for step in missing_steps]
@@ -1151,6 +1339,7 @@ def build_batch_summary(
         "editor_exit_codes": editor_exit_codes,
         "parallel_editors_requested": args.parallel_editors,
         "parallel_editors_used": len(shards),
+        "editor_isolation": args.editor_isolation,
         "idle_timeout_sec": args.idle_timeout_sec,
         "startup_timeout_sec": args.startup_timeout_sec,
         "execution_shards": shard_results,
@@ -1278,15 +1467,28 @@ def main():
     parallel_editors = execution_shards.resolve_parallel_editor_count(args.parallel_editors, len(states))
     shards = execution_shards.build_execution_shards(states, parallel_editors)
     verify.ensure_clean_editor()
-    shard_results = run_execution_shards(
-        shards,
-        output_root,
-        args.editor,
-        runtime_args.project,
-        args.idle_timeout_sec,
-        args.startup_timeout_sec,
-        args.log_cmds,
-    )
+    if args.editor_isolation == "step":
+        shard_results = run_execution_steps(
+            states,
+            output_root,
+            args.editor,
+            runtime_args.project,
+            args.idle_timeout_sec,
+            args.startup_timeout_sec,
+            args.log_cmds,
+        )
+        summary_shards = build_step_isolation_summary_shards(states)
+    else:
+        shard_results = run_execution_shards(
+            shards,
+            output_root,
+            args.editor,
+            runtime_args.project,
+            args.idle_timeout_sec,
+            args.startup_timeout_sec,
+            args.log_cmds,
+        )
+        summary_shards = shards
     retry_result = rerun_missing_steps(
         states,
         output_root,
@@ -1295,6 +1497,7 @@ def main():
         args.idle_timeout_sec,
         args.startup_timeout_sec,
         args.log_cmds,
+        args.editor_isolation,
     )
     if retry_result is not None:
         shard_results.append(retry_result)
@@ -1326,7 +1529,7 @@ def main():
         args=args,
         editor_exit_code=editor_exit_code,
         editor_exit_codes=editor_exit_codes,
-        shards=shards,
+        shards=summary_shards,
         shard_results=shard_results,
         post_workers=post_workers,
         design_root=design_root,
@@ -1388,5 +1591,8 @@ if __name__ == "__main__":
         main()
     except RuntimeError as error:
         print(f"[ERROR] {error}", file=sys.stderr)
+        sys.exit(2)
+    except Exception as error:
+        print(f"[ERROR] {type(error).__name__}: {error}", file=sys.stderr)
         sys.exit(2)
 

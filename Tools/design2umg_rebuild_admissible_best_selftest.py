@@ -41,6 +41,26 @@ def compatible_report() -> dict:
     }
 
 
+def binary_binding_payload() -> dict:
+    return {
+        "plugin_source_snapshot": "commit:test",
+        "design2umg_core_dll": {
+            "path": "G:/UE5/FPSRoguelike/Binaries/Win64/UnrealEditor-Design2UMGCore.dll",
+            "sha256": "c" * 64,
+            "size": 123,
+            "mtime": "2026-06-08T00:00:00Z",
+        },
+        "design2umg_editor_dll": {
+            "path": "G:/UE5/FPSRoguelike/Binaries/Win64/UnrealEditor-Design2UMGEditor.dll",
+            "sha256": "e" * 64,
+            "size": 456,
+            "mtime": "2026-06-08T00:00:00Z",
+        },
+        "validation_project_path": "G:/UE5/FPSRoguelike/FPSRoguelike.uproject",
+        "engine_root": "G:/UE5/UnrealEngine",
+    }
+
+
 def make_run(
     automation_root: Path,
     name: str,
@@ -55,14 +75,43 @@ def make_run(
     changed_ratio: float = 0.2,
     stable_mae: float = 1.0,
     mae: float = 2.0,
+    binary_bound: bool = False,
+    source_hash: str = "source-a",
+    reference_hash: str = "reference-a",
+    include_pattern: str = "case_a",
+    missing_source_compare_field: str | None = None,
 ) -> Path:
     run_root = automation_root / name
     case_root = run_root / "case_a"
     case_root.mkdir(parents=True)
     if include_run_scope:
-        write_json(run_root / "run_scope.json", {"formal_admissible_candidate": True, "case_names": ["case_a"]})
+        write_json(
+            run_root / "run_scope.json",
+            {
+                "formal_admissible_candidate": True,
+                "case_names": ["case_a"],
+                "include_pattern": include_pattern,
+                "validation_project_path": "G:/UE5/FPSRoguelike/FPSRoguelike.uproject",
+                "case_inputs": [
+                    {
+                        "name": "case_a",
+                        "mode": "figma-source",
+                        "source": "G:/UE5/Designs/source.json",
+                        "source_signature": {"sha1": source_hash},
+                    }
+                ],
+            },
+        )
     report_path = case_root / "compare_report.json"
-    write_json(report_path, compatible_report())
+    report = compatible_report()
+    if missing_source_compare_field != "reference_image_hash":
+        report["effective_reference_signature"] = {"sha1": reference_hash}
+    if missing_source_compare_field != "baseline_compare_report_hash":
+        report["baseline_compare_report_hash"] = "baseline-a"
+    report["reference_root_case_path"] = "G:/UE5/FPSRoguelike/Saved/ReferenceRoot/case_a"
+    if binary_bound:
+        report["binary_binding"] = binary_binding_payload()
+    write_json(report_path, report)
     write_json(
         run_root / "summary.json",
         {
@@ -130,7 +179,16 @@ def make_historical_best(automation_root: Path, best_ratio: float) -> Path:
     return best_path
 
 
-def make_current_validation_run(automation_root: Path, name: str, ratio: float) -> Path:
+def make_current_validation_run(
+    automation_root: Path,
+    name: str,
+    ratio: float,
+    *,
+    source_hash: str = "source-a",
+    reference_hash: str = "reference-a",
+    include_pattern: str = "case_a",
+    missing_source_compare_field: str | None = None,
+) -> Path:
     run_root = automation_root / name
     case_root = run_root / "case_a"
     case_root.mkdir(parents=True)
@@ -140,9 +198,30 @@ def make_current_validation_run(automation_root: Path, name: str, ratio: float) 
     report["changed_ratio"] = ratio
     report["stable_mean_abs_error"] = 1.0
     report["mean_abs_error"] = 2.0
+    if missing_source_compare_field != "reference_image_hash":
+        report["effective_reference_signature"] = {"sha1": reference_hash}
+    if missing_source_compare_field != "baseline_compare_report_hash":
+        report["baseline_compare_report_hash"] = "baseline-a"
+    report["reference_root_case_path"] = "G:/UE5/FPSRoguelike/Saved/ReferenceRoot/case_a"
     report_path = case_root / "compare_report.json"
     write_json(report_path, report)
-    write_json(run_root / "run_scope.json", {"formal_admissible_candidate": True, "case_names": ["case_a"]})
+    write_json(
+        run_root / "run_scope.json",
+        {
+            "formal_admissible_candidate": True,
+            "case_names": ["case_a"],
+            "include_pattern": include_pattern,
+            "validation_project_path": "G:/UE5/FPSRoguelike/FPSRoguelike.uproject",
+            "case_inputs": [
+                {
+                    "name": "case_a",
+                    "mode": "figma-source",
+                    "source": "G:/UE5/Designs/source.json",
+                    "source_signature": {"sha1": source_hash},
+                }
+            ],
+        },
+    )
     write_json(
         run_root / "summary.json",
         {
@@ -217,6 +296,185 @@ def assert_validate_run_reason_details() -> None:
         missing_report_detail = blocked_detail_by_reason.get("missing_compare_report")
         assert missing_report_detail is not None, validation
         assert missing_report_detail.get("detail_field") == "missing_compare_report_details", validation
+
+
+def make_quarantine_manifest(
+    automation_root: Path,
+    *,
+    best_binary_bound: bool = False,
+    repeatable_best: bool = False,
+    missing_source_compare_field: str | None = None,
+) -> Path:
+    make_run(
+        automation_root,
+        "_formal_one_off_best",
+        stable_changed_ratio=0.09,
+        changed_ratio=0.09,
+        stable_mae=1.0,
+        mae=2.0,
+        binary_bound=best_binary_bound,
+        missing_source_compare_field=missing_source_compare_field,
+    )
+    if repeatable_best:
+        make_run(
+            automation_root,
+            "_formal_repeat_best",
+            stable_changed_ratio=0.09,
+            changed_ratio=0.09,
+            stable_mae=1.0,
+            mae=2.0,
+        )
+    make_run(
+        automation_root,
+        "_formal_next_best",
+        stable_changed_ratio=0.10,
+        changed_ratio=0.10,
+        stable_mae=1.0,
+        mae=2.0,
+    )
+    manifest = rebuild.rebuild_historical_best_manifest(automation_root)
+    manifest_path = automation_root / "_admissible_best_latest.json"
+    write_json(manifest_path, manifest)
+    return manifest_path
+
+
+def assert_one_off_best_can_be_quarantined() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        automation_root = Path(temp_dir)
+        manifest_path = make_quarantine_manifest(automation_root)
+        current_run = make_current_validation_run(automation_root, "_formal_current", 0.10)
+
+        validation = validate_run.validate_run(current_run, admissible_best_path=manifest_path)
+        assert not validation["blocked"], validation
+        assert validation["historical_best_status"] == "pass_with_quarantined_one_off_best", validation
+        assert "historical_best_regression" not in validation["blocked_reasons"], validation
+        quarantined = validation["historical_best_quarantined_one_off_sources"]
+        assert quarantined, validation
+        assert quarantined[0]["case"] == "case_a", validation
+        assert quarantined[0]["quarantined_run"] == "_formal_one_off_best", validation
+        assert quarantined[0]["next_best_values"]["stable_changed_ratio"] == 0.10, validation
+        assert validation["expected_case_names"] == ["case_a"], validation
+
+
+def assert_normal_historical_best_blocks_worse_current() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        automation_root = Path(temp_dir)
+        best_path = make_historical_best(automation_root, 0.1)
+        current_run = make_current_validation_run(automation_root, "_formal_current_worse", 0.2)
+
+        validation = validate_run.validate_run(current_run, admissible_best_path=best_path)
+        assert validation["blocked"], validation
+        assert validation["historical_best_status"] == "blocked", validation
+        assert "historical_best_regression" in validation["blocked_reasons"], validation
+        assert not validation["historical_best_quarantined_one_off_sources"], validation
+
+
+def assert_repeatable_or_binary_bound_best_blocks_quarantine() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        automation_root = Path(temp_dir)
+        repeatable_manifest = make_quarantine_manifest(automation_root, repeatable_best=True)
+        current_run = make_current_validation_run(automation_root, "_formal_current_repeatable", 0.10)
+
+        repeatable_validation = validate_run.validate_run(current_run, admissible_best_path=repeatable_manifest)
+        assert repeatable_validation["blocked"], repeatable_validation
+        assert repeatable_validation["historical_best_status"] == "blocked", repeatable_validation
+        assert not repeatable_validation["historical_best_quarantined_one_off_sources"], repeatable_validation
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        automation_root = Path(temp_dir)
+        binary_bound_manifest = make_quarantine_manifest(automation_root, best_binary_bound=True)
+        current_run = make_current_validation_run(automation_root, "_formal_current_binary_bound", 0.10)
+
+        binary_bound_validation = validate_run.validate_run(current_run, admissible_best_path=binary_bound_manifest)
+        assert binary_bound_validation["blocked"], binary_bound_validation
+        assert binary_bound_validation["historical_best_status"] == "blocked", binary_bound_validation
+        assert not binary_bound_validation["historical_best_quarantined_one_off_sources"], binary_bound_validation
+
+
+def assert_quarantine_denied_when_current_is_worse_than_next_best() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        automation_root = Path(temp_dir)
+        manifest_path = make_quarantine_manifest(automation_root)
+        current_run = make_current_validation_run(automation_root, "_formal_current_worse_than_next", 0.11)
+
+        validation = validate_run.validate_run(current_run, admissible_best_path=manifest_path)
+        assert validation["blocked"], validation
+        assert validation["historical_best_status"] == "blocked", validation
+        assert "historical_best_regression" in validation["blocked_reasons"], validation
+        assert not validation["historical_best_quarantined_one_off_sources"], validation
+
+
+def assert_missing_binary_binding_does_not_auto_pass() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        automation_root = Path(temp_dir)
+        make_run(
+            automation_root,
+            "_formal_one_off_best",
+            stable_changed_ratio=0.09,
+            changed_ratio=0.09,
+            stable_mae=1.0,
+            mae=2.0,
+        )
+        manifest = rebuild.rebuild_historical_best_manifest(automation_root)
+        manifest_path = automation_root / "_admissible_best_latest.json"
+        write_json(manifest_path, manifest)
+        current_run = make_current_validation_run(automation_root, "_formal_current_no_next_best", 0.10)
+
+        validation = validate_run.validate_run(current_run, admissible_best_path=manifest_path)
+        assert validation["blocked"], validation
+        assert validation["historical_best_status"] == "blocked", validation
+        assert not validation["historical_best_quarantined_one_off_sources"], validation
+
+
+def assert_same_source_input_mismatch_denies_quarantine() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        automation_root = Path(temp_dir)
+        manifest_path = make_quarantine_manifest(automation_root)
+        current_run = make_current_validation_run(
+            automation_root,
+            "_formal_current_mismatch",
+            0.10,
+            source_hash="different-source",
+        )
+
+        validation = validate_run.validate_run(current_run, admissible_best_path=manifest_path)
+        assert validation["blocked"], validation
+        assert validation["historical_best_status"] == "blocked", validation
+        assert "historical_best_regression" in validation["blocked_reasons"], validation
+        assert not validation["historical_best_quarantined_one_off_sources"], validation
+
+
+def assert_missing_required_source_input_field_denies_quarantine(field_name: str) -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        automation_root = Path(temp_dir)
+        manifest_path = make_quarantine_manifest(
+            automation_root,
+            missing_source_compare_field=field_name,
+        )
+        current_run = make_current_validation_run(
+            automation_root,
+            "_formal_current_missing_source_input",
+            0.10,
+            missing_source_compare_field=field_name,
+        )
+
+        validation = validate_run.validate_run(current_run, admissible_best_path=manifest_path)
+        assert validation["blocked"], validation
+        assert validation["historical_best_status"] == "blocked", validation
+        assert "historical_best_regression" in validation["blocked_reasons"], validation
+        assert not validation["historical_best_quarantined_one_off_sources"], validation
+
+
+def assert_historical_best_status_normal_pass() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        automation_root = Path(temp_dir)
+        best_path = make_historical_best(automation_root, 0.1)
+        current_run = make_current_validation_run(automation_root, "_formal_current_equal", 0.1)
+
+        validation = validate_run.validate_run(current_run, admissible_best_path=best_path)
+        assert not validation["blocked"], validation
+        assert validation["historical_best_status"] == "normal_pass", validation
+        assert not validation["historical_best_quarantined_one_off_sources"], validation
 
 
 def assert_collect_best_cases_uses_coherent_case_source() -> None:
@@ -325,6 +583,15 @@ def main() -> None:
     assert_collect_best_cases_uses_coherent_case_source()
     assert_validate_run_pixel_quantum_epsilon()
     assert_validate_run_reason_details()
+    assert_normal_historical_best_blocks_worse_current()
+    assert_one_off_best_can_be_quarantined()
+    assert_repeatable_or_binary_bound_best_blocks_quarantine()
+    assert_quarantine_denied_when_current_is_worse_than_next_best()
+    assert_missing_binary_binding_does_not_auto_pass()
+    assert_same_source_input_mismatch_denies_quarantine()
+    assert_missing_required_source_input_field_denies_quarantine("reference_image_hash")
+    assert_missing_required_source_input_field_denies_quarantine("baseline_compare_report_hash")
+    assert_historical_best_status_normal_pass()
     print("admissible best rebuild selftest passed")
 
 

@@ -10,6 +10,8 @@ from design2umg_verify_lib.case_metrics import (
     summary_metrics_payload,
 )
 from design2umg_verify_lib.compatibility import evaluate_report_compatibility
+from design2umg_verify_lib.evidence_contract import collect_source_input
+from design2umg_verify_lib.evidence_contract import same_source_input
 from design2umg_verify_lib.json_io import load_json as helper_load_json
 
 
@@ -152,6 +154,177 @@ def resolve_metric_epsilon(metric_name: str, current_report: dict, default_epsil
     return max(default_epsilon, pixel_quantum) + default_epsilon
 
 
+def source_metric_value(source: dict, metric_name: str) -> object:
+    return source.get(metric_name)
+
+
+def best_metric_source(best_case: dict, best_metric: str) -> dict:
+    metric_sources = best_case.get("metric_sources") or {}
+    source = metric_sources.get(best_metric)
+    return source if isinstance(source, dict) else {}
+
+
+def source_matches_metric_source(source: dict, metric_source: dict) -> bool:
+    if not metric_source:
+        return False
+    return (
+        source.get("run") == metric_source.get("run")
+        and source.get("report_path") == metric_source.get("report_path")
+    )
+
+
+def current_source_input(case_name: str, output_root: Path, run_scope: dict | None, summary: dict | None, report: dict, current_report_path: Path) -> dict:
+    return collect_source_input(
+        output_root,
+        case_name,
+        run_scope,
+        summary,
+        report,
+        current_report_path,
+        allow_explicit=False,
+    )
+
+
+def find_next_admissible_source(
+    admitted_sources: list[dict],
+    suspect_source: dict,
+    best_metric: str,
+) -> dict | None:
+    candidates = []
+    for source in admitted_sources:
+        if not isinstance(source, dict):
+            continue
+        if source_matches_metric_source(source, suspect_source):
+            continue
+        value = source_metric_value(source, best_metric)
+        if value is None:
+            continue
+        candidates.append(source)
+    if not candidates:
+        return None
+    return sorted(
+        candidates,
+        key=lambda source: (
+            source_metric_value(source, best_metric),
+            source.get("run", ""),
+            source.get("report_path", ""),
+        ),
+    )[0]
+
+
+def count_best_repetitions(admitted_sources: list[dict], best_metric: str, best_value: object, epsilon: float) -> int:
+    count = 0
+    for source in admitted_sources:
+        value = source_metric_value(source, best_metric)
+        if value is None or best_value is None:
+            continue
+        try:
+            if abs(float(value) - float(best_value)) <= epsilon:
+                count += 1
+        except (TypeError, ValueError):
+            continue
+    return count
+
+
+def evaluate_one_off_quarantine(
+    *,
+    case_name: str,
+    regressions: list[dict],
+    best_case: dict,
+    current_metrics: dict,
+    current_source: dict,
+    current_report: dict,
+    metric_epsilon: float,
+) -> dict | None:
+    admitted_sources = best_case.get("admitted_sources") or []
+    if not isinstance(admitted_sources, list) or not admitted_sources:
+        return None
+
+    quarantined_metrics = []
+    quarantined_run = ""
+    quarantined_report_path = ""
+    reasons = set()
+    for regression in regressions:
+        current_metric = regression["metric"]
+        best_metric = next((pair_best for pair_current, pair_best in METRIC_PAIRS if pair_current == current_metric), "")
+        if not best_metric:
+            return None
+        best_source = best_metric_source(best_case, best_metric)
+        if not best_source:
+            best_source = {
+                "run": best_case.get("run", ""),
+                "report_path": best_case.get("report_path", ""),
+                "value": best_case.get(best_metric),
+            }
+        source_match = next(
+            (source for source in admitted_sources if source_matches_metric_source(source, best_source)),
+            None,
+        )
+        if source_match is None:
+            return None
+        if quarantined_run and (
+            quarantined_run != source_match.get("run", "")
+            or quarantined_report_path != source_match.get("report_path", "")
+        ):
+            return None
+        quarantined_run = source_match.get("run", "")
+        quarantined_report_path = source_match.get("report_path", "")
+        best_binding = (best_source.get("binary_binding") or source_match.get("binary_binding") or {})
+        if best_binding.get("binary_bound"):
+            return None
+        reasons.add("best_source_lacks_binary_binding")
+
+        effective_epsilon = resolve_metric_epsilon(current_metric, current_report, metric_epsilon)
+        best_value = best_source.get("value", best_case.get(best_metric))
+        if count_best_repetitions(admitted_sources, best_metric, best_value, effective_epsilon) != 1:
+            return None
+        reasons.add("best_metric_source_single_admitted_run")
+
+        best_source_input = best_source.get("source_input") or source_match.get("source_input") or {}
+        inputs_match, mismatches = same_source_input(best_source_input, current_source)
+        if not inputs_match:
+            return None
+        reasons.add("same_source_input_rerun_did_not_reproduce_best")
+
+        next_source = find_next_admissible_source(admitted_sources, source_match, best_metric)
+        if next_source is None:
+            return None
+        next_value = next_source.get(best_metric)
+        current_value = current_metrics.get(current_metric)
+        if current_value is None or next_value is None:
+            return None
+        delta_to_next = current_value - next_value
+        if delta_to_next > effective_epsilon:
+            return None
+        reasons.add("current_matches_next_admissible_best")
+        quarantined_metrics.append(
+            {
+                "metric": current_metric,
+                "historical_best_metric": best_metric,
+                "quarantined_value": best_value,
+                "current_value": current_value,
+                "next_best_value": next_value,
+                "delta_to_next_best": delta_to_next,
+                "effective_epsilon": effective_epsilon,
+                "next_best_run": next_source.get("run", ""),
+                "next_best_report_path": next_source.get("report_path", ""),
+                "same_source_input_mismatches": mismatches,
+            }
+        )
+
+    return {
+        "case": case_name,
+        "metrics": [item["metric"] for item in quarantined_metrics],
+        "quarantined_run": quarantined_run,
+        "quarantined_report_path": quarantined_report_path,
+        "reasons": sorted(reasons),
+        "next_best_replacement": quarantined_metrics,
+        "current_values": {item["metric"]: item["current_value"] for item in quarantined_metrics},
+        "next_best_values": {item["metric"]: item["next_best_value"] for item in quarantined_metrics},
+        "effective_epsilon": {item["metric"]: item["effective_epsilon"] for item in quarantined_metrics},
+    }
+
+
 def validate_run(output_root: Path, admissible_best_path: Path | None = None, metric_epsilon: float = DEFAULT_METRIC_EPSILON) -> dict:
     result = {
         "output_root": str(output_root),
@@ -183,6 +356,8 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
         "pipeline_determinism_rule_checked": False,
         "pipeline_determinism_rule_incompatible_cases": [],
         "historical_best_pipeline_determinism_incompatible_cases": [],
+        "historical_best_status": "normal_pass",
+        "historical_best_quarantined_one_off_sources": [],
     }
 
     run_scope_path = output_root / "run_scope.json"
@@ -418,12 +593,32 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
                         )
 
                 if regressions:
-                    result["historical_best_regressions"].append(
-                        {
-                            "case": case_name,
-                            "regressions": regressions,
-                        }
+                    current_source = current_source_input(
+                        case_name,
+                        output_root,
+                        run_scope,
+                        summary,
+                        current_report,
+                        current_report_path,
                     )
+                    quarantine = evaluate_one_off_quarantine(
+                        case_name=case_name,
+                        regressions=regressions,
+                        best_case=best_case,
+                        current_metrics=resolved_current_metrics,
+                        current_source=current_source,
+                        current_report=current_report,
+                        metric_epsilon=metric_epsilon,
+                    )
+                    if quarantine is None:
+                        result["historical_best_regressions"].append(
+                            {
+                                "case": case_name,
+                                "regressions": regressions,
+                            }
+                        )
+                    else:
+                        result["historical_best_quarantined_one_off_sources"].append(quarantine)
 
             if result["historical_best_missing_cases"]:
                 append_blocked_reason(
@@ -470,6 +665,16 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
                     detail_field="historical_best_regressions",
                     action="Inspect the per-metric regression deltas and rerun or fix the current output before claiming no regression.",
                 )
+
+    if result["historical_best_checked"]:
+        if result["blocked_reasons"] or result["historical_best_regressions"]:
+            result["historical_best_status"] = "blocked"
+        elif result["historical_best_quarantined_one_off_sources"]:
+            result["historical_best_status"] = "pass_with_quarantined_one_off_best"
+        else:
+            result["historical_best_status"] = "normal_pass"
+    elif result["blocked_reasons"]:
+        result["historical_best_status"] = "blocked"
 
     result["blocked"] = bool(result["blocked_reasons"])
     return result

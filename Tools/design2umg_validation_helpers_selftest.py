@@ -1,10 +1,17 @@
 import os
+import sys
 import tempfile
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 
 import design2umg_auto_verify as verify
+import design2umg_auto_verify_batch as batch_verify
+import design2umg_rebuild_admissible_best as rebuild_best
+import design2umg_validate_run as validate_run
 from design2umg_verify_lib import batch_discovery
+from design2umg_verify_lib import evidence_contract
 from design2umg_verify_lib import execution_shards
 
 
@@ -247,6 +254,411 @@ def test_execution_shards_contracts() -> None:
     assert_equal(sum(len(shard["states"]) for shard in single_shard), len(states))
 
 
+def test_evidence_contract_shared_by_manifest_and_run_validation() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        report_path = root / "case-a" / "compare_report.json"
+        run_scope = {
+            "validation_project_path": "G:/UE5/FPSRoguelike/FPSRoguelike.uproject",
+            "case_names": ["case-a"],
+            "include_pattern": "case-a",
+            "case_inputs": [
+                {
+                    "name": "case-a",
+                    "mode": "figma-source",
+                    "source": "G:/UE5/Designs/source.json",
+                    "source_signature": {"sha1": "source-hash"},
+                }
+            ],
+        }
+        summary = {}
+        report = {
+            "effective_reference_signature": {"sha256": "reference-hash"},
+            "baseline_compare_report_hash": "baseline-hash",
+            "reference_root_case_path": "G:/UE5/FPSRoguelike/Saved/ReferenceRoot/case-a",
+        }
+
+        manifest_source = rebuild_best.collect_source_input(root, "case-a", run_scope, summary, report, report_path)
+        current_source = validate_run.current_source_input("case-a", root, run_scope, summary, report, report_path)
+
+        assert_equal(manifest_source, current_source)
+        inputs_match, mismatches = validate_run.same_source_input(manifest_source, current_source)
+        assert inputs_match, mismatches
+
+        changed_source = dict(current_source)
+        changed_source["source_design_artifact_hash"] = "other-source"
+        inputs_match, mismatches = validate_run.same_source_input(manifest_source, changed_source)
+        assert not inputs_match
+        assert_equal(mismatches[0]["field"], "source_design_artifact_hash")
+
+        assert rebuild_best.collect_source_input is evidence_contract.collect_source_input
+        assert validate_run.same_source_input is evidence_contract.same_source_input
+
+
+def test_binary_binding_contract_shared_by_manifest_production() -> None:
+    report = {
+        "binary_binding": {
+            "plugin_source_snapshot": "commit:test",
+            "design2umg_core_dll": {
+                "path": "G:/UE5/FPSRoguelike/Binaries/Win64/UnrealEditor-Design2UMGCore.dll",
+                "sha256": "c" * 64,
+                "size": 123,
+                "mtime": "2026-06-08T00:00:00Z",
+            },
+            "design2umg_editor_dll": {
+                "path": "G:/UE5/FPSRoguelike/Binaries/Win64/UnrealEditor-Design2UMGEditor.dll",
+                "sha256": "e" * 64,
+                "size": 456,
+                "mtime": "2026-06-08T00:00:00Z",
+            },
+            "validation_project_path": "G:/UE5/FPSRoguelike/FPSRoguelike.uproject",
+            "engine_root": "G:/UE5/UnrealEngine",
+        }
+    }
+
+    binding = rebuild_best.collect_binary_binding({}, {}, report)
+
+    assert rebuild_best.collect_binary_binding is evidence_contract.collect_binary_binding
+    assert binding["binary_bound"], binding
+    assert_equal(binding["missing_fields"], [])
+    assert_equal(binding["design2umg_core_dll"]["sha256"], "c" * 64)
+
+
+def make_step_isolation_state(root: Path, *, include_generation: bool = True) -> dict:
+    output_dir = root / "case-a"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    generate_result_path = output_dir / "ue_generate_result.json"
+    asset_result_path = output_dir / "ue_render_result.json"
+    generation_spec_path = output_dir / "automation_generate_spec.json"
+    asset_spec_path = output_dir / "automation_asset_spec.json"
+    verify.write_json(
+        generation_spec_path,
+        {
+            "mode": "pen",
+            "source_path": str(root / "source.pen"),
+            "node_id": "root",
+            "output_path": "/Game/Design2UMG/Automation/Test/primary",
+            "render_png_path": str(output_dir / "candidate.bootstrap.png"),
+            "result_json_path": str(generate_result_path),
+        },
+    )
+    verify.write_json(
+        asset_spec_path,
+        {
+            "mode": "asset",
+            "source_path": f"@generated_asset_from:{generate_result_path}",
+            "node_id": "",
+            "output_path": "/Game/Design2UMG/Automation/Test/primary",
+            "render_png_path": str(output_dir / "candidate.png"),
+            "result_json_path": str(asset_result_path),
+            "force_reload_package": True,
+        },
+    )
+    steps = {}
+    spec_paths = []
+    if include_generation:
+        spec_paths.append(generation_spec_path)
+        steps["generation"] = {
+            "spec_path": generation_spec_path,
+            "result_json_path": generate_result_path,
+            "render_png_path": output_dir / "candidate.bootstrap.png",
+            "log_path": output_dir / "unreal_batch.log",
+            "editor_exit_code": None,
+            "fallback_error": "",
+        }
+    spec_paths.append(asset_spec_path)
+    steps["asset_render"] = {
+        "spec_path": asset_spec_path,
+        "result_json_path": asset_result_path,
+        "render_png_path": output_dir / "candidate.png",
+        "log_path": output_dir / "unreal_batch.log",
+        "editor_exit_code": None,
+        "fallback_error": "",
+    }
+    return {
+        "case": {"name": "case-a"},
+        "output_dir": output_dir,
+        "spec_paths": spec_paths,
+        "steps": steps,
+    }
+
+
+def make_step_isolation_state_with_name(root: Path, case_name: str) -> dict:
+    state = make_step_isolation_state(root)
+    state["case"]["name"] = case_name
+    return state
+
+
+def test_editor_isolation_defaults_to_shard() -> None:
+    original_argv = sys.argv
+    try:
+        sys.argv = ["design2umg_auto_verify_batch.py", "--design-root", "."]
+        assert_equal(batch_verify.parse_args().editor_isolation, "shard")
+    finally:
+        sys.argv = original_argv
+
+
+def test_step_editor_isolation_runs_single_specs_in_dependency_order() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        state = make_step_isolation_state(root)
+        driver_specs: dict[Path, list[Path]] = {}
+        calls = []
+
+        original_writer = batch_verify.write_editor_driver_script
+        original_runner = batch_verify.run_editor_driver
+        try:
+            def fake_writer(output_root: Path, spec_paths: list[Path], tag: str = "batch") -> Path:
+                assert_equal(len(spec_paths), 1)
+                driver_path = output_root / f"driver-{tag}.py"
+                driver_specs[driver_path] = list(spec_paths)
+                return driver_path
+
+            def fake_runner(editor_path, project_path, driver_script_path, result_paths, log_path, idle_timeout_sec, startup_timeout_sec, log_cmds="") -> int:
+                spec_path = driver_specs[driver_script_path][0]
+                calls.append(spec_path.name)
+                spec = verify.load_json_document(spec_path)
+                result_path = Path(spec["result_json_path"])
+                if spec["mode"] == "pen":
+                    verify.write_json(result_path, {"success": True, "generated_asset_path": "/Game/Generated.CaseA"})
+                else:
+                    verify.write_json(result_path, {"success": True, "generated_asset_path": "/Game/Generated.CaseA"})
+                return 0
+
+            batch_verify.write_editor_driver_script = fake_writer
+            batch_verify.run_editor_driver = fake_runner
+            with redirect_stdout(StringIO()):
+                results = batch_verify.run_execution_steps(
+                    [state],
+                    root,
+                    "UnrealEditor.exe",
+                    "G:/UE5/FPSRoguelike/FPSRoguelike.uproject",
+                    180,
+                    60,
+                    "",
+                )
+        finally:
+            batch_verify.write_editor_driver_script = original_writer
+            batch_verify.run_editor_driver = original_runner
+
+        assert_equal(calls, ["automation_generate_spec.json", "automation_asset_spec.json"])
+        assert_equal([item["spec_count"] for item in results], [1, 1])
+        assert_equal(state["steps"]["generation"]["editor_exit_code"], 0)
+        assert_equal(state["steps"]["asset_render"]["editor_exit_code"], 0)
+
+
+def test_step_editor_isolation_uses_short_driver_script_names() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        long_case_name = "pen_pencil-lunaris_lunaris-design-system-components"
+        state = make_step_isolation_state_with_name(root, long_case_name)
+        driver_paths = []
+
+        original_writer = batch_verify.write_editor_driver_script
+        original_runner = batch_verify.run_editor_driver
+        try:
+            def fake_writer(output_root: Path, spec_paths: list[Path], tag: str = "batch") -> Path:
+                driver_path = output_root / f"editor_driver_{tag}.py"
+                driver_paths.append(driver_path)
+                return driver_path
+
+            def fake_runner(editor_path, project_path, driver_script_path, result_paths, log_path, idle_timeout_sec, startup_timeout_sec, log_cmds="") -> int:
+                spec = verify.load_json_document(Path(result_paths[0]).with_name("automation_generate_spec.json")) if "generate" in str(result_paths[0]) else None
+                if Path(result_paths[0]).name == "ue_generate_result.json":
+                    verify.write_json(result_paths[0], {"success": True, "generated_asset_path": "/Game/Generated.CaseA"})
+                else:
+                    verify.write_json(result_paths[0], {"success": True})
+                return 0
+
+            batch_verify.write_editor_driver_script = fake_writer
+            batch_verify.run_editor_driver = fake_runner
+            with redirect_stdout(StringIO()):
+                batch_verify.run_execution_steps([state], root, "UnrealEditor.exe", "G:/UE5/FPSRoguelike/FPSRoguelike.uproject", 180, 60, "")
+        finally:
+            batch_verify.write_editor_driver_script = original_writer
+            batch_verify.run_editor_driver = original_runner
+
+        assert_equal([path.name for path in driver_paths], ["editor_driver_step-001.py", "editor_driver_step-002.py"])
+        assert long_case_name not in " ".join(path.name for path in driver_paths)
+
+
+def test_step_editor_isolation_retries_driver_start_once() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        state = make_step_isolation_state(root)
+        driver_specs: dict[Path, list[Path]] = {}
+        attempts = []
+
+        original_writer = batch_verify.write_editor_driver_script
+        original_runner = batch_verify.run_editor_driver
+        original_attempts = batch_verify.EDITOR_STEP_DRIVER_START_ATTEMPTS
+        try:
+            def fake_writer(output_root: Path, spec_paths: list[Path], tag: str = "batch") -> Path:
+                driver_path = output_root / f"driver-{tag}.py"
+                driver_specs[driver_path] = list(spec_paths)
+                return driver_path
+
+            def fake_runner(editor_path, project_path, driver_script_path, result_paths, log_path, idle_timeout_sec, startup_timeout_sec, log_cmds="") -> int:
+                spec_path = driver_specs[driver_script_path][0]
+                attempts.append(spec_path.name)
+                if spec_path.name == "automation_generate_spec.json" and attempts.count(spec_path.name) == 1:
+                    raise batch_verify.EditorDriverStartError("driver did not start")
+                spec = verify.load_json_document(spec_path)
+                result_path = Path(spec["result_json_path"])
+                if spec["mode"] == "pen":
+                    verify.write_json(result_path, {"success": True, "generated_asset_path": "/Game/Generated.CaseA"})
+                else:
+                    verify.write_json(result_path, {"success": True})
+                return 0
+
+            batch_verify.write_editor_driver_script = fake_writer
+            batch_verify.run_editor_driver = fake_runner
+            batch_verify.EDITOR_STEP_DRIVER_START_ATTEMPTS = 2
+            with redirect_stdout(StringIO()):
+                batch_verify.run_execution_steps([state], root, "UnrealEditor.exe", "G:/UE5/FPSRoguelike/FPSRoguelike.uproject", 180, 60, "")
+        finally:
+            batch_verify.write_editor_driver_script = original_writer
+            batch_verify.run_editor_driver = original_runner
+            batch_verify.EDITOR_STEP_DRIVER_START_ATTEMPTS = original_attempts
+
+        assert_equal(attempts, ["automation_generate_spec.json", "automation_generate_spec.json", "automation_asset_spec.json"])
+
+
+def test_step_editor_isolation_blocks_asset_before_generation_result() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        state = make_step_isolation_state(root, include_generation=False)
+        calls = []
+
+        original_runner = batch_verify.run_editor_driver
+        try:
+            def fake_runner(*args, **kwargs) -> int:
+                calls.append(args)
+                return 0
+
+            batch_verify.run_editor_driver = fake_runner
+            try:
+                batch_verify.run_execution_steps(
+                    [state],
+                    root,
+                    "UnrealEditor.exe",
+                    "G:/UE5/FPSRoguelike/FPSRoguelike.uproject",
+                    180,
+                    60,
+                    "",
+                )
+            except RuntimeError as exc:
+                assert "missing generated asset dependency result" in str(exc)
+            else:
+                raise AssertionError("expected asset step to be blocked before editor launch")
+        finally:
+            batch_verify.run_editor_driver = original_runner
+
+        assert_equal(calls, [])
+
+
+def test_step_editor_isolation_reports_driver_never_started() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        driver_path = root / "editor_driver_missing.py"
+        driver_path.write_text("", encoding="utf-8")
+        result_path = root / "missing_result.json"
+        log_path = root / "unreal.log"
+
+        class FakeProcess:
+            pid = 12345
+
+            def poll(self):
+                return 1
+
+        original_popen = batch_verify.subprocess.Popen
+        original_deadline = batch_verify.EDITOR_GRACEFUL_EXIT_DEADLINE_SEC
+        try:
+            def fake_popen(command, stdout=None, stderr=None):
+                if stdout is not None:
+                    stdout.write("editor exited before python driver\n")
+                    stdout.flush()
+                return FakeProcess()
+
+            batch_verify.subprocess.Popen = fake_popen
+            batch_verify.EDITOR_GRACEFUL_EXIT_DEADLINE_SEC = 0.0
+            try:
+                batch_verify.run_editor_driver(
+                    "UnrealEditor.exe",
+                    "G:/UE5/FPSRoguelike/FPSRoguelike.uproject",
+                    driver_path,
+                    [result_path],
+                    log_path,
+                    0,
+                    0,
+                    "",
+                )
+            except RuntimeError as exc:
+                assert "automation driver started" in str(exc)
+                assert str(driver_path.with_suffix(".log")) in str(exc)
+            else:
+                raise AssertionError("expected missing driver start to fail explicitly")
+        finally:
+            batch_verify.subprocess.Popen = original_popen
+            batch_verify.EDITOR_GRACEFUL_EXIT_DEADLINE_SEC = original_deadline
+
+
+def test_run_editor_driver_returns_after_clean_shutdown_result() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        driver_path = root / "editor_driver_step-001.py"
+        driver_path.write_text("", encoding="utf-8")
+        driver_log_path = driver_path.with_suffix(".log")
+        result_path = root / "ue_render_result.json"
+        log_path = root / "unreal.log"
+        verify.write_json(result_path, {"success": True})
+        write_text(driver_log_path, "2026-06-12T00:00:00.000Z driver:start\n")
+
+        class FakeProcess:
+            pid = 12345
+
+            def __init__(self):
+                self.killed = False
+
+            def poll(self):
+                return None
+
+            def kill(self):
+                self.killed = True
+
+        fake_process = FakeProcess()
+        original_popen = batch_verify.subprocess.Popen
+        try:
+            def fake_popen(command, stdout=None, stderr=None):
+                if stdout is not None:
+                    stdout.write("LogExit: Exiting.\n")
+                    stdout.flush()
+                return fake_process
+
+            batch_verify.subprocess.Popen = fake_popen
+            exit_code = batch_verify.run_editor_driver(
+                "UnrealEditor.exe",
+                "G:/UE5/FPSRoguelike/FPSRoguelike.uproject",
+                driver_path,
+                [result_path],
+                log_path,
+                180,
+                60,
+                "",
+            )
+        finally:
+            batch_verify.subprocess.Popen = original_popen
+
+        assert_equal(exit_code, 0)
+        assert fake_process.killed
+
+
+def test_extend_deadline_never_shortens_existing_wait() -> None:
+    current_deadline = batch_verify.time.time() + 180.0
+    extended = batch_verify.extend_deadline(current_deadline, 30.0)
+    assert extended >= current_deadline
+
+
 def test_runtime_project_fails_closed_without_explicit_input() -> None:
     original_project = os.environ.pop(verify.RUNTIME_PROJECT_ENV_VAR, None)
     try:
@@ -270,6 +682,16 @@ def main() -> None:
     test_opaque_rgb_difference_still_counts()
     test_semi_transparent_difference_still_counts()
     test_execution_shards_contracts()
+    test_evidence_contract_shared_by_manifest_and_run_validation()
+    test_binary_binding_contract_shared_by_manifest_production()
+    test_editor_isolation_defaults_to_shard()
+    test_step_editor_isolation_runs_single_specs_in_dependency_order()
+    test_step_editor_isolation_uses_short_driver_script_names()
+    test_step_editor_isolation_retries_driver_start_once()
+    test_step_editor_isolation_blocks_asset_before_generation_result()
+    test_step_editor_isolation_reports_driver_never_started()
+    test_run_editor_driver_returns_after_clean_shutdown_result()
+    test_extend_deadline_never_shortens_existing_wait()
     test_runtime_project_fails_closed_without_explicit_input()
     print("validation helpers selftest passed")
 
