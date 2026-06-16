@@ -17,6 +17,13 @@ Thumbs.db
 .DS_Store
 Desktop.ini
 
+# Claude/Agent artifacts (must not be released)
+.artifacts/
+phase32b-rootcause/
+phase32b-scoped-gate/
+phase32b-handoff/
+phase32b-rework/
+
 # Local workspace noise (must not be released)
 .cowork-temp/
 .claude/
