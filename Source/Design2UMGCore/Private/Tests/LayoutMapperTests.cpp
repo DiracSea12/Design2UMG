@@ -169,4 +169,39 @@ bool FLayoutMapperPaddingTest::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FLayoutMapperSourceTextBoxUsesStrictSizeBoxTest,
+	"Design2UMG.Unit.LayoutMapper.SourceTextBoxUsesStrictSizeBox",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FLayoutMapperSourceTextBoxUsesStrictSizeBoxTest::RunTest(const FString&)
+{
+	FUMGWidgetNode TextWidget;
+	TextWidget.Id = TEXT("text");
+	TextWidget.Name = TEXT("Text");
+	TextWidget.Type = TEXT("TextBlock");
+	TextWidget.Bounds = { 0.0f, 0.0f, 117.0f, 40.0f };
+
+	TSharedPtr<FDesignNode> Node = MakeNode(EDesignSizeMode::Fixed, 188.16f, EDesignSizeMode::Fixed, 42.0f);
+	Node->Type = EDesignNodeType::Text;
+	Node->Text.Content = TEXT("Score 0000");
+	Node->Text.TextGrowth = EDesignTextGrowth::Auto;
+	Node->Transform.bSourceHasWidth = true;
+	Node->Transform.bSourceHasHeight = true;
+
+	const FUMGWidgetNode SizeBox = LayoutMapper::WrapWithSizeBox(MoveTemp(TextWidget), Node, EDesignLayout::Horizontal);
+
+	TestEqual(TEXT("Source textbox wrapper type"), SizeBox.Type, FString(TEXT("SizeBox")));
+	TestTrue(TEXT("Source textbox width uses source textbox width"),
+		FMath::IsNearlyEqual(SizeBox.Bounds.W, 188.16f, 0.001f));
+	TestTrue(TEXT("Source textbox height uses source textbox height"),
+		FMath::IsNearlyEqual(SizeBox.Bounds.H, 42.0f, 0.001f));
+	TestTrue(TEXT("Source textbox WidthOverride remains source textbox width"),
+		FMath::IsNearlyEqual(SizeBox.WidgetStyle.WidthOverride.Get(0.0f), 188.16f, 0.001f));
+	TestTrue(TEXT("Source textbox HeightOverride remains source textbox height"),
+		FMath::IsNearlyEqual(SizeBox.WidgetStyle.HeightOverride.Get(0.0f), 42.0f, 0.001f));
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

@@ -150,7 +150,13 @@ def assert_skipped(manifest: dict, run_name: str, reason: str) -> None:
     assert manifest["skipped_runs_by_reason"].get(reason) == 1, manifest["skipped_runs_by_reason"]
 
 
-def make_historical_best(automation_root: Path, best_ratio: float) -> Path:
+def make_historical_best(
+    automation_root: Path,
+    best_ratio: float,
+    *,
+    source_hash: str = "source-a",
+    reference_hash: str = "reference-a",
+) -> Path:
     best_path = automation_root / "_admissible_best_latest.json"
     report_path = automation_root / "_formal_best" / "case_a" / "compare_report.json"
     report_path.parent.mkdir(parents=True)
@@ -161,6 +167,23 @@ def make_historical_best(automation_root: Path, best_ratio: float) -> Path:
     best_report["stable_mean_abs_error"] = 1.0
     best_report["mean_abs_error"] = 2.0
     write_json(report_path, best_report)
+    source_input = {
+        "source_design_artifact_hash": source_hash,
+        "reference_image_hash": reference_hash,
+    }
+    metric_sources = {
+        metric: {
+            "run": "_formal_best",
+            "report_path": str(report_path),
+            "source_input": source_input,
+        }
+        for metric in (
+            "stable_changed_ratio",
+            "changed_ratio",
+            "stable_mean_abs_error",
+            "mean_abs_error",
+        )
+    }
     write_json(
         best_path,
         {
@@ -172,6 +195,7 @@ def make_historical_best(automation_root: Path, best_ratio: float) -> Path:
                     "stable_mean_abs_error": 1.0,
                     "mean_abs_error": 2.0,
                     "reference_authority": {"verification_level": "strong"},
+                    "metric_sources": metric_sources,
                 }
             }
         },
@@ -222,6 +246,19 @@ def make_current_validation_run(
             ],
         },
     )
+    case_summary = {
+        "name": "case_a",
+        "report_path": str(report_path),
+        "stable_changed_ratio": ratio,
+        "changed_ratio": ratio,
+        "stable_mae": 1.0,
+        "mae": 2.0,
+        "structure_required": True,
+        "structure_passed": True,
+        "source_signature": {"sha1": source_hash},
+    }
+    if missing_source_compare_field != "reference_image_hash":
+        case_summary["effective_reference_signature"] = {"sha1": reference_hash}
     write_json(
         run_root / "summary.json",
         {
@@ -229,18 +266,7 @@ def make_current_validation_run(
             "blocked_cases": 0,
             "completeness": {"blocked": False, "discovered_total": 1, "reported_total": 1},
             "no_regression": {"available": 1, "failed": 0},
-            "cases": [
-                {
-                    "name": "case_a",
-                    "report_path": str(report_path),
-                    "stable_changed_ratio": ratio,
-                    "changed_ratio": ratio,
-                    "stable_mae": 1.0,
-                    "mae": 2.0,
-                    "structure_required": True,
-                    "structure_passed": True,
-                }
-            ],
+            "cases": [case_summary],
         },
     )
     return run_root
@@ -440,8 +466,54 @@ def assert_same_source_input_mismatch_denies_quarantine() -> None:
         validation = validate_run.validate_run(current_run, admissible_best_path=manifest_path)
         assert validation["blocked"], validation
         assert validation["historical_best_status"] == "blocked", validation
-        assert "historical_best_regression" in validation["blocked_reasons"], validation
+        assert "historical_best_content_identity_incompatible" in validation["blocked_reasons"], validation
+        assert validation["historical_best_identity_incompatible_cases"], validation
+        assert not validation["historical_best_regressions"], validation
         assert not validation["historical_best_quarantined_one_off_sources"], validation
+
+
+def assert_historical_best_identity_contract() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        automation_root = Path(temp_dir)
+        best_path = make_historical_best(automation_root, 0.1)
+
+        source_mismatch_run = make_current_validation_run(
+            automation_root,
+            "_formal_current_source_mismatch",
+            0.1,
+            source_hash="source-b",
+        )
+        source_mismatch = validate_run.validate_run(source_mismatch_run, admissible_best_path=best_path)
+        assert source_mismatch["blocked"], source_mismatch
+        assert "historical_best_content_identity_incompatible" in source_mismatch["blocked_reasons"], source_mismatch
+        assert source_mismatch["historical_best_identity_incompatible_cases"], source_mismatch
+        assert {
+            item["field"]
+            for item in source_mismatch["historical_best_identity_incompatible_cases"][0]["mismatches"]
+        } == {"source_signature.sha1"}, source_mismatch
+        assert not source_mismatch["historical_best_regressions"], source_mismatch
+
+        reference_mismatch_run = make_current_validation_run(
+            automation_root,
+            "_formal_current_reference_mismatch",
+            0.1,
+            reference_hash="reference-b",
+        )
+        reference_mismatch = validate_run.validate_run(reference_mismatch_run, admissible_best_path=best_path)
+        assert reference_mismatch["blocked"], reference_mismatch
+        assert "historical_best_content_identity_incompatible" in reference_mismatch["blocked_reasons"], reference_mismatch
+        assert reference_mismatch["historical_best_identity_incompatible_cases"], reference_mismatch
+        assert {
+            item["field"]
+            for item in reference_mismatch["historical_best_identity_incompatible_cases"][0]["mismatches"]
+        } == {"effective_reference_signature.sha1"}, reference_mismatch
+        assert not reference_mismatch["historical_best_regressions"], reference_mismatch
+
+        matching_run = make_current_validation_run(automation_root, "_formal_current_identity_match", 0.1)
+        matching = validate_run.validate_run(matching_run, admissible_best_path=best_path)
+        assert not matching["blocked"], matching
+        assert matching["historical_best_status"] == "normal_pass", matching
+        assert not matching["historical_best_identity_incompatible_cases"], matching
 
 
 def assert_missing_required_source_input_field_denies_quarantine(field_name: str) -> None:
@@ -461,7 +533,15 @@ def assert_missing_required_source_input_field_denies_quarantine(field_name: str
         validation = validate_run.validate_run(current_run, admissible_best_path=manifest_path)
         assert validation["blocked"], validation
         assert validation["historical_best_status"] == "blocked", validation
-        assert "historical_best_regression" in validation["blocked_reasons"], validation
+        expected_reason = (
+            "historical_best_content_identity_incompatible"
+            if field_name == "reference_image_hash"
+            else "historical_best_regression"
+        )
+        assert expected_reason in validation["blocked_reasons"], validation
+        if field_name == "reference_image_hash":
+            assert validation["historical_best_identity_incompatible_cases"], validation
+            assert not validation["historical_best_regressions"], validation
         assert not validation["historical_best_quarantined_one_off_sources"], validation
 
 
@@ -589,6 +669,7 @@ def main() -> None:
     assert_quarantine_denied_when_current_is_worse_than_next_best()
     assert_missing_binary_binding_does_not_auto_pass()
     assert_same_source_input_mismatch_denies_quarantine()
+    assert_historical_best_identity_contract()
     assert_missing_required_source_input_field_denies_quarantine("reference_image_hash")
     assert_missing_required_source_input_field_denies_quarantine("baseline_compare_report_hash")
     assert_historical_best_status_normal_pass()

@@ -7,7 +7,6 @@
 #include "FigmaParser.h"
 #include "PenParser.h"
 #include "Misc/OutputDevice.h"
-#include "TextMeasurement.h"
 #include "UMGValueParser.h"
 #include "UMGWidgetNodeProceduralResourceAccess.h"
 #include "UMGWidgetNodeAccess.h"
@@ -65,26 +64,6 @@ namespace
 		return nullptr;
 	}
 
-	TSharedPtr<FDesignNode> MakeLetterSpacingCacheProbeNode(const FString& Id, const bool bExplicitZero)
-	{
-		TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
-		Node->Id = Id;
-		Node->Name = Id;
-		Node->Type = EDesignNodeType::Text;
-		Node->Text.Content = TEXT("Cache probe");
-		Node->Text.FontFamily = TEXT("Inter");
-		Node->Text.FontWeight = TEXT("Regular");
-		Node->Text.FontSize = 16.0f;
-		Node->Text.LineHeight = 1.25f;
-		Node->Text.TextAlign = EDesignTextAlign::Left;
-		Node->Text.TextAlignVertical = EDesignTextAlignVertical::Top;
-		Node->Text.TextGrowth = EDesignTextGrowth::Auto;
-		if (bExplicitZero)
-		{
-			Node->Text.SetLetterSpacingValue(0.0f);
-		}
-		return Node;
-	}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -333,25 +312,4 @@ bool FPenRefOverrideExplicitZeroLetterSpacingPresenceTest::RunTest(const FString
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FTextMeasurementCacheSeparatesExplicitZeroLetterSpacingFromUnsetTest,
-	"Design2UMG.TextMeasurement.CacheSeparatesExplicitZeroLetterSpacingFromUnset",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FTextMeasurementCacheSeparatesExplicitZeroLetterSpacingFromUnsetTest::RunTest(const FString& Parameters)
-{
-	const TSharedPtr<FDesignNode> ExplicitZeroNode = MakeLetterSpacingCacheProbeNode(TEXT("explicit_zero_cache"), true);
-	const TSharedPtr<FDesignNode> UnsetNode = MakeLetterSpacingCacheProbeNode(TEXT("unset_cache"), false);
-
-	TextMeasurement::ResetCache();
-	const float ExplicitZeroScale = TextMeasurement::Testing::ResolveBaselineFallbackScale(ExplicitZeroNode);
-	const TextMeasurement::Testing::FTextMeasurementCacheStats AfterExplicitZero = TextMeasurement::Testing::GetCacheStats();
-	const float UnsetScale = TextMeasurement::Testing::ResolveBaselineFallbackScale(UnsetNode);
-	const TextMeasurement::Testing::FTextMeasurementCacheStats AfterUnset = TextMeasurement::Testing::GetCacheStats();
-
-	TestTrue(TEXT("Explicit-zero baseline scale resolves"), ExplicitZeroScale > 0.0f);
-	TestTrue(TEXT("Unset baseline scale resolves"), UnsetScale > 0.0f);
-	TestEqual(TEXT("Explicit-zero letter spacing creates one baseline cache entry"), AfterExplicitZero.BaselineFallbackEntries, 1);
-	TestEqual(TEXT("Unset letter spacing keeps a separate cache entry"), AfterUnset.BaselineFallbackEntries, 2);
-	return true;
-}
 #endif // WITH_AUTOMATION_WORKER

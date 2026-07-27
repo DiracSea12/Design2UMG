@@ -11,6 +11,6 @@ namespace Design2UMGCore::SharedSemantics
 	bool IsDesignerOnlyNodeType(EDesignNodeType Type);
 	bool HasRenderableVisual(const TSharedPtr<FDesignNode>& Node);
 	bool ShouldSkipNode(const TSharedPtr<FDesignNode>& Node);
+	bool TryGetConcreteSourceTextBoxSize(const TSharedPtr<FDesignNode>& Node, float& OutWidth, float& OutHeight);
 	float ResolveWidthHint(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth);
 }
-

@@ -10,7 +10,7 @@ EDesignNodeType ParseNodeType(const FString& S)
 	if (S == TEXT("line")) return EDesignNodeType::Line;
 	if (S == TEXT("polygon")) return EDesignNodeType::Polygon;
 	if (S == TEXT("text")) return EDesignNodeType::Text;
-	if (S == TEXT("icon_font")) return EDesignNodeType::IconFont;
+	if (S == TEXT("icon")) return EDesignNodeType::IconFont;
 	if (S == TEXT("path")) return EDesignNodeType::Path;
 	if (S == TEXT("ref")) return EDesignNodeType::Ref;
 	if (S == TEXT("group")) return EDesignNodeType::Group;

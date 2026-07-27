@@ -30,19 +30,6 @@ namespace
 		}
 	}
 
-	bool ShouldLockExplicitFitDimensionForFlow(const TSharedPtr<FDesignNode>& Node)
-	{
-		return Node.IsValid()
-			&& Node->Children.Num() == 0
-			&& (Node->Type == EDesignNodeType::Text || Node->Type == EDesignNodeType::IconFont)
-			&& !Node->Text.Content.IsEmpty();
-	}
-
-	bool HasExplicitFitDimension(const FDesignSize& Size)
-	{
-		return Size.IsFit() && Size.Value > 0.0f;
-	}
-
 	bool ShouldPreResolveLinearFlow(const TSharedPtr<FDesignNode>& Node, const FUMGWidgetNode& Widget)
 	{
 		return Node.IsValid()
@@ -151,10 +138,14 @@ namespace
 		const FDesignSize& CrossSize = SizingContext.bHorizontal ? ChildSnapshot.EffectiveHeight : ChildSnapshot.EffectiveWidth;
 		if (CrossSize.IsFill())
 		{
+			const bool bKeepSourceDimension = SizingContext.bHorizontal
+				? ChildSnapshot.Child->Transform.bSourceHasHeight
+				: ChildSnapshot.Child->Transform.bSourceHasWidth;
 			SizeEstimator::SetResolvedNodeDimension(
 				ChildSnapshot.Child,
 				!SizingContext.bHorizontal,
-				SizingContext.bHorizontal ? SizingContext.InnerH : SizingContext.InnerW);
+				SizingContext.bHorizontal ? SizingContext.InnerH : SizingContext.InnerW,
+				bKeepSourceDimension);
 		}
 	}
 
@@ -183,7 +174,10 @@ namespace
 			const FDesignSize& MainSize = SizingContext.bHorizontal ? ChildSnapshot.EffectiveWidth : ChildSnapshot.EffectiveHeight;
 			if (MainSize.IsFill())
 			{
-				SizeEstimator::SetResolvedNodeDimension(ChildSnapshot.Child, SizingContext.bHorizontal, FillMain);
+				const bool bKeepSourceDimension = SizingContext.bHorizontal
+					? ChildSnapshot.Child->Transform.bSourceHasWidth
+					: ChildSnapshot.Child->Transform.bSourceHasHeight;
+				SizeEstimator::SetResolvedNodeDimension(ChildSnapshot.Child, SizingContext.bHorizontal, FillMain, bKeepSourceDimension);
 			}
 
 			ApplyFlowCrossFillSizing(ChildSnapshot, SizingContext);
@@ -228,18 +222,11 @@ namespace
 			return;
 		}
 
-		const bool bLockExplicitFit = ShouldLockExplicitFitDimensionForFlow(Child);
 		const float ChildContentWidth = SizeEstimator::ComputeChildContentWidthHint(ParentNode, Child, 0.0f);
 		const TSharedPtr<FDesignNode> EstimateChild = PreResolutionResolver.ResolveExpandedChild(Child, false);
 		const FVector2D Estimate = SizeEstimator::EstimateNodeSize(EstimateChild, ChildContentWidth);
-		if (!(bLockExplicitFit && HasExplicitFitDimension(Child->Transform.Width)))
-		{
-			SizeEstimator::PromoteFitNodeDimension(Child, true, Estimate.X);
-		}
-		if (!(bLockExplicitFit && HasExplicitFitDimension(Child->Transform.Height)))
-		{
-			SizeEstimator::PromoteFitNodeDimension(Child, false, Estimate.Y);
-		}
+		SizeEstimator::PromoteFitNodeDimension(Child, true, Estimate.X);
+		SizeEstimator::PromoteFitNodeDimension(Child, false, Estimate.Y);
 		if (Estimate.X > 0.0f || Estimate.Y > 0.0f)
 		{
 			UE_LOG(LogDesign2UMG, Log, TEXT("PreResolveFitContent: '%s' estimated=(%.0f,%.0f)"),

@@ -243,7 +243,7 @@ namespace
 		{
 			Callbacks.ParseNodeFillProperties(JsonObj->TryGetField(TEXT("fill")), *Node, Resolver);
 		}
-		Callbacks.ParseNodeStrokeProperties(JsonObj->TryGetField(TEXT("stroke")), *Node, Resolver);
+		Callbacks.ParseNodeStrokeProperties(JsonObj, *Node, Resolver);
 		Callbacks.ApplyNodeBoxProperties(JsonObj, *Node, EDesignNodeType::Frame, Resolver);
 		TryGetResolvedBoolField(JsonObj, TEXT("enabled"), Resolver, Node->Transform.bEnabled);
 		Callbacks.ApplyNodeLayoutProperties(JsonObj, *Node, Resolver, true);
@@ -340,7 +340,15 @@ void PenParserNodeExtensions::ParseNodeExtended(
 {
 	ParseNodeContentField(JsonObj->TryGetField(TEXT("content")), Resolver, Node);
 	Callbacks.ApplyNodeTextStyleProperties(JsonObj, *Node, Resolver);
-	TryGetResolvedNumberField(JsonObj, TEXT("lineHeight"), Resolver, Node->Text.LineHeight);
+	float LineHeight = 0.0f;
+	if (TryGetResolvedNumberField(JsonObj, TEXT("lineHeight"), Resolver, LineHeight) && LineHeight > 0.0f)
+	{
+		Node->Text.LineHeight = LineHeight;
+	}
+	else if (Node->Type == EDesignNodeType::Text)
+	{
+		Node->Text.LineHeight = 0.0f;
+	}
 
 	float LetterSpacing = 0.0f;
 	if (TryGetResolvedNumberField(JsonObj, TEXT("letterSpacing"), Resolver, LetterSpacing))
@@ -370,10 +378,16 @@ void PenParserNodeExtensions::ParseNodeExtended(
 		}
 	}
 
-	JsonObj->TryGetStringField(TEXT("iconFontName"), Node->Text.IconFontName);
+	{
+		FString RawIconFontName;
+		if (JsonObj->TryGetStringField(TEXT("icon"), RawIconFontName))
+		{
+			Node->Text.IconFontName = RawIconFontName;
+		}
+	}
 	{
 		FString RawIconFontFamily;
-		if (JsonObj->TryGetStringField(TEXT("iconFontFamily"), RawIconFontFamily))
+		if (JsonObj->TryGetStringField(TEXT("library"), RawIconFontFamily))
 		{
 			Node->Text.IconFontFamily = Resolver.ResolveString(RawIconFontFamily);
 		}

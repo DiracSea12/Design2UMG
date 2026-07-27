@@ -91,7 +91,7 @@ namespace
 			Target.LayoutData.AlignItems = Override.LayoutData.AlignItems;
 		if (Override.Text.TextAlign != EDesignTextAlign::Left)
 			Target.Text.TextAlign = Override.Text.TextAlign;
-		if (Override.Text.LineHeight > 0)
+		if (Override.Text.LineHeight > 0.0f)
 			Target.Text.LineHeight = Override.Text.LineHeight;
 		if (Override.Text.HasLetterSpacingValue())
 			Target.Text.SetLetterSpacingValue(Override.Text.LetterSpacing);
@@ -270,6 +270,10 @@ namespace
 		if (RefNode->Text.HasLetterSpacingValue())
 		{
 			Expanded->Text.SetLetterSpacingValue(RefNode->Text.LetterSpacing);
+		}
+		if (RefNode->Text.LineHeight > 0.0f)
+		{
+			Expanded->Text.LineHeight = RefNode->Text.LineHeight;
 		}
 		if (RefNode->LayoutData.HasExplicitPadding())
 		{

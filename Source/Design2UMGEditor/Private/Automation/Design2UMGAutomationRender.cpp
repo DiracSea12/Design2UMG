@@ -15,7 +15,6 @@
 #include "FontResolver.h"
 #include "ExternalServices/PenMCPBridge.h"
 #include "ProceduralShapeGenerator.h"
-#include "TextMeasurement.h"
 #include "UMGSchema.h"
 #include "UMGWidgetUtils.h"
 
@@ -330,7 +329,6 @@ namespace
 				SlateRenderer->FlushFontCache(TEXT("Design2UMG automation transient reset"));
 			}
 		}
-		TextMeasurement::ResetCacheForAutomationBoundary();
 		FFontResolver::ClearCache();
 		FDesignPathRasterizer::ClearCache();
 		FProceduralShapeGenerator::ReleaseTransientTextures();

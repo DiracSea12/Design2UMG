@@ -2,12 +2,10 @@
 
 #include "TextMeasurement.h"
 #include "TextMeasurementInternal.h"
-#include "DesignSchemaSourceExtensions.h"
+#include "DesignSchema.h"
 
-#include "Design2UMGLog.h"
 #include "SharedCoreSemantics.h"
 #include "TextStyleUtils.h"
-#include "TextMeasurementRuntimeProbe.h"
 
 namespace
 {
@@ -15,64 +13,16 @@ namespace
 	{
 		return Design2UMGCore::SharedSemantics::ResolveWidthHint(Node, ParentContentWidth);
 	}
-}
 
-namespace SourceMetadata
-{
-	bool IsFigmaTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
+	bool IsTruncateTextNode(const TSharedPtr<FDesignNode>& Node)
 	{
 		if (!Node.IsValid())
 		{
 			return false;
 		}
 
-		const FString* Value = Node->Metadata.Find(TEXT("source.text.truncate"));
-		return Value && Value->Equals(TEXT("true"), ESearchCase::IgnoreCase);
-	}
-
-	bool IsFigmaSourceNode(const TSharedPtr<FDesignNode>& Node)
-	{
-		if (!Node.IsValid())
-		{
-			return false;
-		}
-
-		if (const FString* Provider = Node->Metadata.Find(TEXT("source.provider")))
-		{
-			return Provider->Equals(TEXT("figma"), ESearchCase::IgnoreCase);
-		}
-
-		return false;
-	}
-}
-
-namespace TextContentRules
-{
-	bool HasExplicitParagraphBreaks(const FString& Text)
-	{
-		return Text.Contains(TEXT("\n\n"))
-			|| Text.Contains(TEXT("\r\n\r\n"))
-			|| Text.Contains(TEXT("\r\r"));
-	}
-
-	bool HasExplicitParagraphBreaks(const TSharedPtr<FDesignNode>& Node)
-	{
-		return Node.IsValid() && HasExplicitParagraphBreaks(Node->Text.Content);
-	}
-}
-
-namespace SingleLineHeuristics
-{
-	int32 CountSingleLineTextWords(const TSharedPtr<FDesignNode>& Node)
-	{
-		if (!Node.IsValid())
-		{
-			return 0;
-		}
-
-		TArray<FString> Words;
-		TextMeasurement::PrepareRuntimeTextContent(Node->Text.Content).TrimStartAndEnd().ParseIntoArrayWS(Words);
-		return Words.Num();
+		const FString* Truncate = Node->Metadata.Find(TEXT("source.text.truncate"));
+		return Truncate && Truncate->Equals(TEXT("true"), ESearchCase::IgnoreCase);
 	}
 }
 
@@ -86,30 +36,29 @@ FString TextMeasurement::PrepareRuntimeTextContent(const FString& Text)
 
 bool TextMeasurement::IsWrappingTextMode(const TSharedPtr<FDesignNode>& Node)
 {
-	if (SourceMetadata::IsFigmaTruncateTextNode(Node))
+	if (!Node.IsValid())
 	{
 		return false;
 	}
 
-	return Node.IsValid()
-		&& (Node->Text.TextGrowth == EDesignTextGrowth::FixedWidth
-			|| Node->Text.TextGrowth == EDesignTextGrowth::FixedWidthHeight
-			|| Node->Text.TextAlign == EDesignTextAlign::Justify);
+	if (IsTruncateTextNode(Node))
+	{
+		return false;
+	}
+
+	return Node->Text.TextGrowth == EDesignTextGrowth::FixedWidth
+		|| Node->Text.TextGrowth == EDesignTextGrowth::FixedWidthHeight
+		|| Node->Text.TextAlign == EDesignTextAlign::Justify;
 }
 
 bool TextMeasurement::ShouldApplyExplicitLineHeight(const TSharedPtr<FDesignNode>& Node, float ProbeFontSize, float ParentContentWidth)
 {
-	if (!Node.IsValid() || Node->Text.LineHeight <= 0.0f)
+	if (!Node.IsValid() || !FMath::IsFinite(Node->Text.LineHeight) || Node->Text.LineHeight <= 0.0f)
 	{
 		return false;
 	}
 
 	if (Node->Text.Content.Contains(TEXT("\n")))
-	{
-		return true;
-	}
-
-	if (SharedThresholdOwners::ShouldApplyLargeNonWrappingExplicitLineHeight(Node))
 	{
 		return true;
 	}
@@ -126,21 +75,32 @@ bool TextMeasurement::ShouldApplyExplicitLineHeight(const TSharedPtr<FDesignNode
 	}
 
 	const float EffectiveProbeFontSize = ProbeFontSize > 0.0f ? ProbeFontSize : Node->Text.FontSize;
-	const int32 LetterSpacingTracking = (EffectiveProbeFontSize > 0.0f && Node->Text.HasLetterSpacingValue() && Node->Text.LetterSpacing != 0.0f)
+	const int32 LetterSpacingTracking = (EffectiveProbeFontSize > 0.0f
+		&& Node->Text.HasLetterSpacingValue()
+		&& Node->Text.LetterSpacing != 0.0f)
 		? TextStyleUtils::ConvertLetterSpacingPxToTracking(Node->Text.LetterSpacing, Node->Text.FontSize, EffectiveProbeFontSize)
 		: 0;
 	const FVector2D UnwrappedSize = RuntimeProbe::MeasureTextSize(
 		Node->Text.Content,
 		EffectiveProbeFontSize,
 		Node->Text.FontFamily,
+		Node->Text.FontPostScriptName,
 		Node->Text.FontWeight,
 		LetterSpacingTracking);
-	return UnwrappedSize.X > WidthLimit + 0.5f;
+	return UnwrappedSize.X > WidthLimit;
+}
+
+FResolvedTextLayoutForUMG TextMeasurementInternal::ResolveTextLayoutForUMG(
+	const TSharedPtr<FDesignNode>& Node,
+	const float ParentContentWidth)
+{
+	const float WrapTextAt = TextMeasurement::ResolveTextWrapAt(Node, ParentContentWidth);
+	return RuntimeProbeSizing::ResolveTextLayoutForUMGInternal(Node, WrapTextAt);
 }
 
 float TextMeasurement::ResolveTextFontSizeForUMG(const TSharedPtr<FDesignNode>& Node)
 {
-	return RuntimeProbeSizing::ResolveTextFontSizeForUMGInternal(Node, nullptr);
+	return TextMeasurementInternal::ResolveTextLayoutForUMG(Node).FontSize;
 }
 
 float TextMeasurement::ResolveTextWrapAt(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth)
@@ -150,7 +110,7 @@ float TextMeasurement::ResolveTextWrapAt(const TSharedPtr<FDesignNode>& Node, fl
 		return 0.0f;
 	}
 
-	if (SourceMetadata::IsFigmaTruncateTextNode(Node))
+	if (IsTruncateTextNode(Node))
 	{
 		return 0.0f;
 	}
@@ -177,6 +137,22 @@ bool TextMeasurement::ShouldAutoWrapText(const TSharedPtr<FDesignNode>& Node)
 	return IsWrappingTextMode(Node);
 }
 
+namespace
+{
+	FVector2D MeasureResolvedTextNodeDesiredSize(
+		const TSharedPtr<FDesignNode>& Node,
+		const FResolvedTextLayoutForUMG& ResolvedLayout)
+	{
+		return RuntimeProbe::MeasureUMGTextBlockDesiredSize(
+			Node,
+			ResolvedLayout.FontSize,
+			TextMeasurement::PrepareRuntimeTextContent(Node->Text.Content),
+			ResolvedLayout.WrapTextAt,
+			TextMeasurement::ShouldAutoWrapText(Node),
+			ResolvedLayout.LineHeightPercentage);
+	}
+}
+
 FVector2D TextMeasurement::MeasureTextNodeSize(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth)
 {
 	if (!Node.IsValid())
@@ -184,47 +160,34 @@ FVector2D TextMeasurement::MeasureTextNodeSize(const TSharedPtr<FDesignNode>& No
 		return FVector2D::ZeroVector;
 	}
 
-	const float AppliedFontSize = ResolveTextFontSizeForUMG(Node);
+	const FResolvedTextLayoutForUMG ResolvedLayout = TextMeasurementInternal::ResolveTextLayoutForUMG(Node, ParentContentWidth);
+	const float AppliedFontSize = ResolvedLayout.FontSize;
+	if (!FMath::IsFinite(AppliedFontSize) || AppliedFontSize <= 0.0f)
+	{
+		return FVector2D::ZeroVector;
+	}
 	const int32 LetterSpacingTracking = (AppliedFontSize > 0.0f && Node->Text.HasLetterSpacingValue() && Node->Text.LetterSpacing != 0.0f)
 		? TextStyleUtils::ConvertLetterSpacingPxToTracking(Node->Text.LetterSpacing, Node->Text.FontSize, AppliedFontSize)
 		: 0;
-	FVector2D FallbackSize = RuntimeProbe::MeasureTextSize(
+	const FVector2D UnwrappedSize = RuntimeProbe::MeasureTextSize(
 		PrepareRuntimeTextContent(Node->Text.Content),
-		AppliedFontSize > 0.0f ? AppliedFontSize : Node->Text.FontSize,
+		AppliedFontSize,
 		Node->Text.FontFamily,
+		Node->Text.FontPostScriptName,
 		Node->Text.FontWeight,
 		LetterSpacingTracking);
 
-	if (RuntimeProbeSizing::ShouldUseSingleLineTextHeight(Node, FallbackSize.X, ParentContentWidth))
-	{
-		FallbackSize.Y = LineBox::EstimateSingleLineTextHeight(Node);
-		return FallbackSize;
-	}
-
-	const float WrapTextAt = ResolveTextWrapAt(Node, ParentContentWidth);
+	const float WrapTextAt = ResolvedLayout.WrapTextAt;
 	if (WrapTextAt <= 0.0f && !Node->Text.Content.Contains(TEXT("\n")))
 	{
-		return FallbackSize;
+		return UnwrappedSize;
 	}
 
-	const FVector2D WrappedSize = RuntimeProbe::MeasureUMGTextBlockDesiredSize(
-		Node,
-		AppliedFontSize > 0.0f ? AppliedFontSize : Node->Text.FontSize,
-		PrepareRuntimeTextContent(Node->Text.Content),
-		WrapTextAt,
-		ShouldAutoWrapText(Node));
+	const FVector2D WrappedSize = MeasureResolvedTextNodeDesiredSize(Node, ResolvedLayout);
 	if (WrappedSize.X > 0.0f && WrappedSize.Y > 0.0f)
 	{
 		return WrappedSize;
 	}
 
-	if (WrapTextAt > 0.0f && FallbackSize.X > WrapTextAt + 0.5f)
-	{
-		const float LineHeight = LineBox::EstimateSingleLineTextHeight(Node);
-		const int32 EstimatedLineCount = FMath::Max(1, FMath::CeilToInt(FallbackSize.X / FMath::Max(1.0f, WrapTextAt)));
-		FallbackSize.X = WrapTextAt;
-		FallbackSize.Y = LineHeight * EstimatedLineCount;
-	}
-
-	return FallbackSize;
+	return FVector2D::ZeroVector;
 }

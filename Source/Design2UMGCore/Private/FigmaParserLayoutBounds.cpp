@@ -17,13 +17,6 @@ using DesignJsonUtils::GetString;
 
 namespace
 {
-	// Keep a half-pixel tolerance for source bounds comparisons because Figma export
-	// commonly jitters by sub-pixel amounts even when the effective layout is unchanged.
-	constexpr float FigmaBoundsComparisonTolerance = 0.5f;
-	// Smaller deltas are export noise and do not add useful metadata.
-	constexpr float FigmaBoundsMetadataDeltaTolerance = 0.001f;
-	// A 15%+ shrink usually indicates image-fill render bounds rather than the intended layout box.
-	constexpr float FigmaShrunkenImageBoundsRatio = 0.85f;
 	constexpr float FigmaCenterStrokeExpansionScale = 0.5f;
 	constexpr float FigmaMinimumVisibleBlurRadius = 0.0f;
 	constexpr float FigmaPositiveBoundsExtentThreshold = 0.0f;
@@ -104,74 +97,13 @@ namespace
 		}
 	}
 
-	bool HasImageCropFill(const TSharedPtr<FJsonObject>& NodeObj)
-	{
-		const TArray<TSharedPtr<FJsonValue>>* Fills = GetArray(NodeObj, TEXT("fills"));
-		if (!Fills)
-		{
-			return false;
-		}
-
-		for (const TSharedPtr<FJsonValue>& FillValue : *Fills)
-		{
-			const TSharedPtr<FJsonObject> FillObj = FillValue.IsValid() ? FillValue->AsObject() : nullptr;
-			if (!FillObj.IsValid() || !GetBool(FillObj, TEXT("visible"), true))
-			{
-				continue;
-			}
-
-			if (GetString(FillObj, TEXT("type")) != TEXT("IMAGE") || GetString(FillObj, TEXT("scaleMode")) != TEXT("CROP"))
-			{
-				continue;
-			}
-
-			return true;
-		}
-
-		return false;
-	}
-
-	bool IsIdentityImageTransformMatrix(const TArray<TSharedPtr<FJsonValue>>* Transform)
-	{
-		if (!Transform || Transform->Num() != 2)
-		{
-			return true;
-		}
-
-		const TArray<TSharedPtr<FJsonValue>> Row0 = (*Transform)[0]->AsArray();
-		const TArray<TSharedPtr<FJsonValue>> Row1 = (*Transform)[1]->AsArray();
-		if (Row0.Num() != 3 || Row1.Num() != 3)
-		{
-			return false;
-		}
-
-		return FMath::IsNearlyEqual(static_cast<float>(Row0[0]->AsNumber()), 1.0f, KINDA_SMALL_NUMBER)
-			&& FMath::IsNearlyEqual(static_cast<float>(Row0[1]->AsNumber()), 0.0f, KINDA_SMALL_NUMBER)
-			&& FMath::IsNearlyEqual(static_cast<float>(Row0[2]->AsNumber()), 0.0f, KINDA_SMALL_NUMBER)
-			&& FMath::IsNearlyEqual(static_cast<float>(Row1[0]->AsNumber()), 0.0f, KINDA_SMALL_NUMBER)
-			&& FMath::IsNearlyEqual(static_cast<float>(Row1[1]->AsNumber()), 1.0f, KINDA_SMALL_NUMBER)
-			&& FMath::IsNearlyEqual(static_cast<float>(Row1[2]->AsNumber()), 0.0f, KINDA_SMALL_NUMBER);
-	}
-
-	bool HasFillImageUsingShrunkenRenderBounds(
-		const TSharedPtr<FJsonObject>& NodeObj,
-		const FNodeBounds& RenderBounds,
-		const FNodeBounds& LayoutBounds)
+	bool HasVisibleImageFill(const TSharedPtr<FJsonObject>& NodeObj)
 	{
 		if (!NodeObj.IsValid() || GetString(NodeObj, TEXT("type")) != TEXT("RECTANGLE"))
 		{
 			return false;
 		}
 
-		const bool bWidthShrunk =
-			RenderBounds.W + FigmaBoundsComparisonTolerance < LayoutBounds.W * FigmaShrunkenImageBoundsRatio;
-		const bool bHeightShrunk =
-			RenderBounds.H + FigmaBoundsComparisonTolerance < LayoutBounds.H * FigmaShrunkenImageBoundsRatio;
-		if (!bWidthShrunk && !bHeightShrunk)
-		{
-			return false;
-		}
-
 		const TArray<TSharedPtr<FJsonValue>>* Fills = GetArray(NodeObj, TEXT("fills"));
 		if (!Fills)
 		{
@@ -186,12 +118,7 @@ namespace
 				continue;
 			}
 
-			if (GetString(FillObj, TEXT("type")) != TEXT("IMAGE") || GetString(FillObj, TEXT("scaleMode")) != TEXT("FILL"))
-			{
-				continue;
-			}
-
-			if (IsIdentityImageTransformMatrix(GetArray(FillObj, TEXT("imageTransform"))))
+			if (GetString(FillObj, TEXT("type")) == TEXT("IMAGE"))
 			{
 				return true;
 			}
@@ -239,10 +166,10 @@ namespace
 
 	bool FitsWithinBounds(const FNodeBounds& Inner, const FNodeBounds& Outer)
 	{
-		return Inner.X >= Outer.X - FigmaBoundsComparisonTolerance
-			&& Inner.Y >= Outer.Y - FigmaBoundsComparisonTolerance
-			&& Inner.X + Inner.W <= Outer.X + Outer.W + FigmaBoundsComparisonTolerance
-			&& Inner.Y + Inner.H <= Outer.Y + Outer.H + FigmaBoundsComparisonTolerance;
+		return Inner.X >= Outer.X - KINDA_SMALL_NUMBER
+			&& Inner.Y >= Outer.Y - KINDA_SMALL_NUMBER
+			&& Inner.X + Inner.W <= Outer.X + Outer.W + KINDA_SMALL_NUMBER
+			&& Inner.Y + Inner.H <= Outer.Y + Outer.H + KINDA_SMALL_NUMBER;
 	}
 
 	bool ShouldKeepShrunkenRenderBounds(
@@ -273,20 +200,15 @@ namespace
 		const FNodeBounds& LayoutBounds)
 	{
 		const bool bRenderBoundsExpandLayoutBounds =
-			RenderBounds.X + FigmaBoundsComparisonTolerance < LayoutBounds.X
-			|| RenderBounds.Y + FigmaBoundsComparisonTolerance < LayoutBounds.Y
-			|| RenderBounds.X + RenderBounds.W > LayoutBounds.X + LayoutBounds.W + FigmaBoundsComparisonTolerance
-			|| RenderBounds.Y + RenderBounds.H > LayoutBounds.Y + LayoutBounds.H + FigmaBoundsComparisonTolerance;
+			RenderBounds.X + KINDA_SMALL_NUMBER < LayoutBounds.X
+			|| RenderBounds.Y + KINDA_SMALL_NUMBER < LayoutBounds.Y
+			|| RenderBounds.X + RenderBounds.W > LayoutBounds.X + LayoutBounds.W + KINDA_SMALL_NUMBER
+			|| RenderBounds.Y + RenderBounds.H > LayoutBounds.Y + LayoutBounds.H + KINDA_SMALL_NUMBER;
 		const bool bRenderBoundsShrinkLayoutBounds =
-			RenderBounds.W + FigmaBoundsComparisonTolerance < LayoutBounds.W
-			|| RenderBounds.H + FigmaBoundsComparisonTolerance < LayoutBounds.H;
+			RenderBounds.W + KINDA_SMALL_NUMBER < LayoutBounds.W
+			|| RenderBounds.H + KINDA_SMALL_NUMBER < LayoutBounds.H;
 
-		if (HasImageCropFill(NodeObj))
-		{
-			return true;
-		}
-
-		if (HasFillImageUsingShrunkenRenderBounds(NodeObj, RenderBounds, LayoutBounds))
+		if (HasVisibleImageFill(NodeObj))
 		{
 			return true;
 		}
@@ -392,7 +314,7 @@ void CaptureBoundsDeltaMetadata(const TSharedPtr<FJsonObject>& Obj, TMap<FString
 
 	const auto AddDeltaIfNonZero = [&Extensions](const TCHAR* Key, const float Delta)
 	{
-		if (!FMath::IsNearlyZero(Delta, FigmaBoundsMetadataDeltaTolerance))
+		if (!FMath::IsNearlyZero(Delta))
 		{
 			Extensions.Add(Key, FString::SanitizeFloat(Delta));
 		}

@@ -46,7 +46,7 @@ def parse_args():
     parser.add_argument("--idle-timeout-sec", type=int, default=180, help="Kill the editor if no log or result progress is observed for this many seconds")
     parser.add_argument("--startup-timeout-sec", type=int, default=60, help="Kill a shard early if UnrealEditor shows zero progress right after launch for this many seconds")
     parser.add_argument("--parallel-editors", type=int, default=0, help="How many UnrealEditor shards to run in parallel. 0 means auto.")
-    parser.add_argument("--editor-isolation", choices=["shard", "step"], default="shard", help="Editor process isolation level. shard keeps the current batched shard behavior; step runs each automation spec in its own UnrealEditor process.")
+    parser.add_argument("--editor-isolation", choices=["shard", "case", "step"], default="shard", help="Editor process isolation level. shard keeps the current batched shard behavior; case runs each discovered case in its own UnrealEditor process; step runs each automation spec in its own UnrealEditor process.")
     parser.add_argument("--post-workers", type=int, default=0, help="How many parallel workers to use for post-render compare/report. 0 means auto.")
     parser.add_argument("--native-self-check", choices=["auto", "off"], default="off", help="Whether to run optional native-size self-check passes. 'off' is faster and does not affect formal scoring metrics.")
     parser.add_argument("--reference-cache", choices=["off", "read", "read-write", "refresh"], default="read-write", help="Reference cache policy for pen+pencil cases without --reference-root. read-write is recommended for faster reruns.")
@@ -717,6 +717,41 @@ def run_execution_shards(
     return sorted(results, key=lambda item: item["shard_id"])
 
 
+def run_execution_cases(
+    states: list[dict],
+    output_root: Path,
+    editor_path: str,
+    project_path: str,
+    idle_timeout_sec: int,
+    startup_timeout_sec: int,
+    log_cmds: str,
+) -> list[dict]:
+    results = []
+    for index, state in enumerate(states):
+        case_name = state["case"]["name"]
+        case_shard = {
+            "id": index,
+            "states": [state],
+            "spec_paths": list(state["spec_paths"]),
+            "result_paths": [step["result_json_path"] for step in state["steps"].values()],
+        }
+        print(f"[EDITOR_CASE] {case_name}", flush=True)
+        verify.ensure_clean_editor()
+        result = run_execution_shard(
+            case_shard,
+            output_root,
+            editor_path,
+            project_path,
+            idle_timeout_sec,
+            startup_timeout_sec,
+            log_cmds,
+        )
+        result["editor_isolation"] = "case"
+        result["case_name"] = case_name
+        results.append(result)
+    return results
+
+
 def load_step_spec(step: dict) -> dict:
     return verify.load_json_document(step["spec_path"])
 
@@ -828,14 +863,22 @@ def build_missing_step_states(states: list[dict]) -> list[dict]:
     return missing_states
 
 
-def build_step_isolation_summary_shards(states: list[dict]) -> list[dict]:
+def build_missing_case_states(states: list[dict]) -> list[dict]:
+    return [
+        state
+        for state in states
+        if any(not step["result_json_path"].is_file() for step in state["steps"].values())
+    ]
+
+
+def build_isolation_summary_shards(states: list[dict], editor_isolation: str) -> list[dict]:
     return [
         {
             "id": 0,
             "states": states,
             "spec_paths": [step["spec_path"] for state in states for step in state["steps"].values()],
             "result_paths": [step["result_json_path"] for state in states for step in state["steps"].values()],
-            "editor_isolation": "step",
+            "editor_isolation": editor_isolation,
         }
     ]
 
@@ -858,6 +901,26 @@ def rerun_missing_steps(
 
     if not missing_steps:
         return None
+
+    if editor_isolation == "case":
+        case_results = run_execution_cases(
+            build_missing_case_states(states),
+            output_root,
+            editor_path,
+            project_path,
+            idle_timeout_sec,
+            startup_timeout_sec,
+            log_cmds,
+        )
+        return {
+            "shard_id": -1,
+            "exit_code": next((item["exit_code"] for item in case_results if item["exit_code"] != 0), 0),
+            "log_path": "",
+            "spec_count": sum(int(item.get("spec_count", 0)) for item in case_results),
+            "retry": True,
+            "editor_isolation": "case",
+            "cases": case_results,
+        }
 
     if editor_isolation == "step":
         step_results = run_execution_steps(
@@ -1174,7 +1237,13 @@ def process_case_result(state: dict, batch_exit_code: int, batch_log_path: Path)
             "verdict": "render_failed",
         }
 
-    reference_validation = verify.apply_render_size_authority(reference_context, state["reference_path"], ue_result, candidate_path)
+    reference_validation = verify.apply_render_size_authority(
+        reference_context,
+        state["reference_path"],
+        ue_result,
+        candidate_path,
+        args.pixel_tolerance,
+    )
     state["reference_validation"] = reference_validation
 
     reference_authority = reference_context.get("reference_authority") or {}
@@ -1464,10 +1533,18 @@ def main():
         states.append(state)
     prep_completed_at = time.time()
 
-    parallel_editors = execution_shards.resolve_parallel_editor_count(args.parallel_editors, len(states))
-    shards = execution_shards.build_execution_shards(states, parallel_editors)
-    verify.ensure_clean_editor()
-    if args.editor_isolation == "step":
+    if args.editor_isolation == "case":
+        shard_results = run_execution_cases(
+            states,
+            output_root,
+            args.editor,
+            runtime_args.project,
+            args.idle_timeout_sec,
+            args.startup_timeout_sec,
+            args.log_cmds,
+        )
+        summary_shards = build_isolation_summary_shards(states, "case")
+    elif args.editor_isolation == "step":
         shard_results = run_execution_steps(
             states,
             output_root,
@@ -1477,8 +1554,11 @@ def main():
             args.startup_timeout_sec,
             args.log_cmds,
         )
-        summary_shards = build_step_isolation_summary_shards(states)
+        summary_shards = build_isolation_summary_shards(states, "step")
     else:
+        parallel_editors = execution_shards.resolve_parallel_editor_count(args.parallel_editors, len(states))
+        shards = execution_shards.build_execution_shards(states, parallel_editors)
+        verify.ensure_clean_editor()
         shard_results = run_execution_shards(
             shards,
             output_root,

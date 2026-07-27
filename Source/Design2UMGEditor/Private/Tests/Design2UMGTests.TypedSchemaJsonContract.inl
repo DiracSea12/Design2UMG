@@ -1,4 +1,4 @@
-﻿IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTypedNodeEmptyStringStillAppliesTest,
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTypedNodeEmptyStringStillAppliesTest,
 	"Design2UMG.PropertyApplier.TypedEmptyStringApplies",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FTypedNodeEmptyStringStillAppliesTest::RunTest(const FString& Parameters)
@@ -111,7 +111,7 @@ bool FSlotJsonTypedCompatibilityTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FParserNumberStringFlexibleTest,
-	"Design2UMG.Parser.NumberStringFlexible",
+	"Design2UMG.Unit.NumberStringFlexible",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FParserNumberStringFlexibleTest::RunTest(const FString& Parameters)
 {

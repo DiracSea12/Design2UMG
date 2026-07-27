@@ -107,10 +107,6 @@ namespace Design2UMGConverterPrivate
 		}
 	}
 
-	void WarmSharedTextNode(
-		const TSharedPtr<FDesignNode>& Node,
-		const FConversionContext& Context);
-
 	struct FNodeConversionOrchestrator;
 
 	struct FNodeChildAppender
@@ -422,67 +418,6 @@ namespace Design2UMGConverterPrivate
 		const FConversionContext& RootContext;
 	};
 
-	void WarmSharedTextCalibrationRecursive(
-		const TSharedPtr<FDesignNode>& Node,
-		const FConversionContext& Context)
-	{
-		if (!Node.IsValid() || ShouldSkipNode(Node))
-		{
-			return;
-		}
-
-		const FConversionContext ActiveContext = Context.WithNodeTheme(Node);
-		if (Node->Type == EDesignNodeType::Ref)
-		{
-			const Design2UMGConverterInternal::FFlowChildPreResolutionResolver PreResolutionResolver(
-				ActiveContext.State.Document,
-				ActiveContext.ThemeContext);
-			const TSharedPtr<FDesignNode> ActiveNode = PreResolutionResolver.ExpandRef(Node);
-			if (!ActiveNode.IsValid() || ShouldSkipNode(ActiveNode))
-			{
-				return;
-			}
-
-			WarmSharedTextNode(ActiveNode, ActiveContext.WithNodeTheme(ActiveNode));
-			return;
-		}
-
-		WarmSharedTextNode(Node, ActiveContext);
-	}
-
-	void WarmSharedTextNode(
-		const TSharedPtr<FDesignNode>& Node,
-		const FConversionContext& Context)
-	{
-		if (!Node.IsValid() || ShouldSkipNode(Node))
-		{
-			return;
-		}
-
-		if (Node->Type == EDesignNodeType::Text
-			&& Node->Text.TextAlignVertical != EDesignTextAlignVertical::Top
-			&& !Node->Text.Content.Contains(TEXT("\n"))
-			&& TextMeasurement::IsWrappingTextMode(Node))
-		{
-			(void)TextMeasurement::ResolveTextFontSizeForUMG(Node);
-		}
-
-		for (const TSharedPtr<FDesignNode>& Child : Node->Children)
-		{
-			WarmSharedTextCalibrationRecursive(Child, Context);
-		}
-	}
-
-	void WarmSharedTextCalibration(
-		const TArray<TSharedPtr<FDesignNode>>& Nodes,
-		const FConversionContext& Context)
-	{
-		for (const TSharedPtr<FDesignNode>& Node : Nodes)
-		{
-			WarmSharedTextCalibrationRecursive(Node, Context);
-		}
-	}
-
 	void FNodeChildAppender::AppendChildren() const
 	{
 		const bool bGridPanelParent =
@@ -532,7 +467,8 @@ namespace Design2UMGConverterPrivate
 				ChildWidget.Bounds.Y = 0.0f;
 			}
 
-			if (ShouldWrapChildWithSizeBox(EffectiveChild, ChildWidget))
+			const bool bWrapChildWithSizeBox = ShouldWrapChildWithSizeBox(EffectiveChild, ChildWidget);
+			if (bWrapChildWithSizeBox)
 			{
 				const bool bHasFixedSize = EffectiveChild->Transform.Width.IsFixed() || EffectiveChild->Transform.Height.IsFixed();
 				const bool bHasMinSize = (EffectiveChild->Transform.Width.IsFit() && EffectiveChild->Transform.Width.Value > 0)
@@ -617,8 +553,6 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 		SourceDocument.ComponentsJson = Document.SourceDocument().ComponentsJson;
 		SourceDocument.ComponentSetsJson = Document.SourceDocument().ComponentSetsJson;
 	}
-
-	TextMeasurement::ResetCacheForConversionBoundary();
 
 	// Deep-copy children so conversion never mutates the caller's source tree through shared refs.
 	TArray<TSharedPtr<FDesignNode>> Children;

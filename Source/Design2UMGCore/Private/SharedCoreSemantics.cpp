@@ -4,6 +4,15 @@
 
 namespace Design2UMGCore::SharedSemantics
 {
+	namespace
+	{
+		bool IsTextLikeNode(const TSharedPtr<FDesignNode>& Node)
+		{
+			return Node.IsValid()
+				&& (Node->Type == EDesignNodeType::Text || Node->Type == EDesignNodeType::IconFont);
+		}
+	}
+
 	bool HasVisibleFill(const FDesignFill& Fill)
 	{
 		return Fill.bEnabled && Fill.Type != EDesignFillType::None;
@@ -86,6 +95,35 @@ namespace Design2UMGCore::SharedSemantics
 		return false;
 	}
 
+	bool TryGetConcreteSourceTextBoxSize(const TSharedPtr<FDesignNode>& Node, float& OutWidth, float& OutHeight)
+	{
+		if (!IsTextLikeNode(Node))
+		{
+			return false;
+		}
+
+		const bool bHasFinitePositiveSourceSize =
+			Node->Transform.bSourceHasWidth
+			&& Node->Transform.bSourceHasHeight
+			&& FMath::IsFinite(Node->Transform.Width.Value)
+			&& FMath::IsFinite(Node->Transform.Height.Value)
+			&& Node->Transform.Width.Value > 0.0f
+			&& Node->Transform.Height.Value > 0.0f;
+		if (!bHasFinitePositiveSourceSize)
+		{
+			return false;
+		}
+
+		if (!Node->Transform.Width.IsFixed() || !Node->Transform.Height.IsFixed())
+		{
+			return false;
+		}
+
+		OutWidth = Node->Transform.Width.Value;
+		OutHeight = Node->Transform.Height.Value;
+		return true;
+	}
+
 	float ResolveWidthHint(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth)
 	{
 		if (!Node.IsValid())
@@ -100,5 +138,6 @@ namespace Design2UMGCore::SharedSemantics
 
 		return Node->Transform.Width.Value > 0.0f ? Node->Transform.Width.Value : 0.0f;
 	}
+
 }
 

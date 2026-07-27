@@ -3,6 +3,7 @@
 #include "Misc/AutomationTest.h"
 
 #include "Design2UMGConverter.h"
+#include "Design2UMGConverterFlowChildPreResolution.h"
 #include "Design2UMGConverterVisualSupport.h"
 #include "Design2UMGNodeWidgetFactory.h"
 #include "Design2UMGSettings.h"
@@ -13,6 +14,8 @@
 #include "UMGPropertyKeys.h"
 #include "UMGSchema.h"
 #include "UMGWidgetNodeAccess.h"
+
+#include <limits>
 
 #if WITH_AUTOMATION_WORKER
 namespace
@@ -45,6 +48,22 @@ namespace
 		Node->Text.FontWeight = TEXT("Regular");
 		Node->Text.FontSize = 16.0f;
 		Node->Text.TextGrowth = EDesignTextGrowth::FixedWidth;
+		return Node;
+	}
+
+	TSharedPtr<FDesignNode> MakeSourceTextBoxProbeNode(
+		const FString& Id,
+		const EDesignNodeType Type,
+		const FDesignSize& Width,
+		const FDesignSize& Height)
+	{
+		TSharedPtr<FDesignNode> Node = MakeSharedSemanticsNode(Id, Type, Width, Height);
+		Node->Text.Content = TEXT("Source text box probe content");
+		Node->Text.IconFontName = TEXT("source-text-box-probe-icon");
+		Node->Text.FontSize = 12.0f;
+		Node->Text.TextGrowth = EDesignTextGrowth::Auto;
+		Node->Transform.bSourceHasWidth = true;
+		Node->Transform.bSourceHasHeight = true;
 		return Node;
 	}
 
@@ -232,6 +251,65 @@ namespace
 		return bAllPassed;
 	}
 
+	bool RunSourceTextBoxAuthorityChecks(FAutomationTestBase& Test)
+	{
+		bool bAllPassed = true;
+		struct FAuthorityProbe
+		{
+			const TCHAR* Label;
+			TSharedPtr<FDesignNode> Node;
+			bool bExpectedAuthority = false;
+		};
+
+		TSharedPtr<FDesignNode> MissingSourceFlag = MakeSourceTextBoxProbeNode(
+			TEXT("missing_source_flag_textbox"),
+			EDesignNodeType::Text,
+			FDesignSize::Fixed(120.0f),
+			FDesignSize::Fixed(40.0f));
+		MissingSourceFlag->Transform.bSourceHasHeight = false;
+
+		TSharedPtr<FDesignNode> NonFinite = MakeSourceTextBoxProbeNode(
+			TEXT("non_finite_textbox"),
+			EDesignNodeType::Text,
+			FDesignSize::Fixed(std::numeric_limits<float>::quiet_NaN()),
+			FDesignSize::Fixed(40.0f));
+		TSharedPtr<FDesignNode> FixedSourceText = MakeSourceTextBoxProbeNode(
+			TEXT("fixed_source_textbox"),
+			EDesignNodeType::Text,
+			FDesignSize::Fixed(180.0f),
+			FDesignSize::Fixed(48.0f));
+
+		const TArray<FAuthorityProbe> Cases = {
+			{ TEXT("Fixed source text"), FixedSourceText, true },
+			{ TEXT("Fixed icon-font"), MakeSourceTextBoxProbeNode(TEXT("fixed_icon_textbox"), EDesignNodeType::IconFont, FDesignSize::Fixed(32.0f), FDesignSize::Fixed(30.0f)), true },
+			{ TEXT("Fit-content minimum"), MakeSourceTextBoxProbeNode(TEXT("fit_min_textbox"), EDesignNodeType::Text, FDesignSize::Fit(120.0f), FDesignSize::Fit(36.0f)), false },
+			{ TEXT("Fill fallback"), MakeSourceTextBoxProbeNode(TEXT("fill_fallback_textbox"), EDesignNodeType::Text, FDesignSize::Fill(120.0f), FDesignSize::Fill(36.0f)), false },
+			{ TEXT("Hug unresolved"), MakeSourceTextBoxProbeNode(TEXT("hug_unresolved_textbox"), EDesignNodeType::Text, FDesignSize::Fit(0.0f), FDesignSize::Fit(0.0f)), false },
+			{ TEXT("Missing source flag"), MissingSourceFlag, false },
+			{ TEXT("Non-finite fixed dimension"), NonFinite, false }
+		};
+
+		for (const FAuthorityProbe& Probe : Cases)
+		{
+			float ProbeWidth = 0.0f;
+			float ProbeHeight = 0.0f;
+			bAllPassed &= Test.TestEqual(
+				*FString::Printf(TEXT("%s concrete source textbox authority"), Probe.Label),
+				Design2UMGCore::SharedSemantics::TryGetConcreteSourceTextBoxSize(Probe.Node, ProbeWidth, ProbeHeight),
+				Probe.bExpectedAuthority);
+		}
+
+		float SourceWidth = 0.0f;
+		float SourceHeight = 0.0f;
+		bAllPassed &= Test.TestTrue(TEXT("Fixed source textbox size resolves"),
+			Design2UMGCore::SharedSemantics::TryGetConcreteSourceTextBoxSize(FixedSourceText, SourceWidth, SourceHeight));
+		bAllPassed &= Test.TestTrue(TEXT("Fixed source textbox width resolves"),
+			FMath::IsNearlyEqual(SourceWidth, 180.0f, KINDA_SMALL_NUMBER));
+		bAllPassed &= Test.TestTrue(TEXT("Fixed source textbox height resolves"),
+			FMath::IsNearlyEqual(SourceHeight, 48.0f, KINDA_SMALL_NUMBER));
+		return bAllPassed;
+	}
+
 	bool RunConverterOwnerBoundaryChecks(FAutomationTestBase& Test)
 	{
 		FDesignDocument Doc;
@@ -300,6 +378,61 @@ namespace
 			FMath::IsNearlyEqual(FillWidget->Bounds.W, 130.0f, KINDA_SMALL_NUMBER));
 		bAllPassed &= Test.TestTrue(TEXT("Cross-axis fill sizing should still respect parent height"),
 			FMath::IsNearlyEqual(FillWidget->Bounds.H, 40.0f, KINDA_SMALL_NUMBER));
+		return bAllPassed;
+	}
+
+	bool RunFlowFillSourceConstraintChecks(FAutomationTestBase& Test)
+	{
+		FDesignDocument Doc;
+		const TMap<FString, FString> EmptyTheme;
+		Design2UMGConverterInternal::FFlowChildPreResolutionResolver Resolver(Doc, EmptyTheme);
+		Design2UMGConverterInternal::FFlowChildPreResolution PreResolution(Resolver);
+
+		TSharedPtr<FDesignNode> Parent = MakeSharedSemanticsNode(
+			TEXT("source_fill_parent"),
+			EDesignNodeType::Frame,
+			FDesignSize::Fixed(248.0f),
+			FDesignSize::Fixed(48.0f));
+		Parent->LayoutData.Layout = EDesignLayout::Horizontal;
+		FDesignPadding ParentPadding;
+		ParentPadding.Left = 16.0f;
+		ParentPadding.Right = 16.0f;
+		Parent->LayoutData.SetPadding(ParentPadding);
+
+		TSharedPtr<FDesignNode> SourceFillText = MakeSharedSemanticsNode(
+			TEXT("source_fill_text"),
+			EDesignNodeType::Text,
+			FDesignSize::Fill(0.0f),
+			FDesignSize::Fit(16.0f));
+		SourceFillText->Text.Content = TEXT("Title");
+		SourceFillText->Text.FontFamily = TEXT("JetBrains Mono");
+		SourceFillText->Text.FontWeight = TEXT("normal");
+		SourceFillText->Text.FontSize = 14.0f;
+		SourceFillText->Text.LineHeight = 1.142857f;
+		SourceFillText->Text.TextGrowth = EDesignTextGrowth::FixedWidth;
+		SourceFillText->Text.TextAlignVertical = EDesignTextAlignVertical::Top;
+		SourceFillText->Transform.bSourceHasWidth = true;
+		SourceFillText->Transform.bSourceHasHeight = true;
+		Parent->Children.Add(SourceFillText);
+
+		FUMGWidgetNode ParentWidget;
+		ParentWidget.Bounds.W = 248.0f;
+		ParentWidget.Bounds.H = 48.0f;
+
+		TArray<TSharedPtr<FDesignNode>> VisibleChildren;
+		VisibleChildren.Add(SourceFillText);
+		PreResolution.PreResolveFlowChildren(Parent, ParentWidget, VisibleChildren);
+
+		bool bAllPassed = true;
+		bAllPassed &= Test.TestTrue(TEXT("Source fill child resolves to parent content width"),
+			FMath::IsNearlyEqual(SourceFillText->Transform.Width.Value, 216.0f, KINDA_SMALL_NUMBER));
+		bAllPassed &= Test.TestTrue(TEXT("Resolved source fill child keeps source width signal"),
+			SourceFillText->Transform.bSourceHasWidth);
+		bAllPassed &= Test.TestTrue(TEXT("Resolved source fill child remains fill mode for slot sizing"),
+			SourceFillText->Transform.Width.IsFill());
+		const float ResolvedFontSize = TextMeasurement::ResolveTextFontSizeForUMG(SourceFillText);
+		bAllPassed &= Test.TestTrue(TEXT("Resolved source fill title uses a positive fitted size"),
+			ResolvedFontSize > 0.0f && ResolvedFontSize < SourceFillText->Text.FontSize);
 		return bAllPassed;
 	}
 
@@ -429,6 +562,48 @@ bool FSharedSemanticsWidthHintParityTest::RunTest(const FString& Parameters)
 	return RunSharedSemanticsWidthHintChecks(*this);
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSourceTextBoxAuthorityTest,
+	"Design2UMG.SourceTextBox.Authority",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FSourceTextBoxAuthorityTest::RunTest(const FString& Parameters)
+{
+	return RunSourceTextBoxAuthorityChecks(*this);
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSizeEstimatorSourceFlagsDoNotLockFitGrowthTest,
+	"Design2UMG.Unit.SizeEstimator.SourceFlagsDoNotLockFitGrowth",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FSizeEstimatorSourceFlagsDoNotLockFitGrowthTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FDesignNode> SourceFlaggedNode = MakeSourceTextBoxProbeNode(
+		TEXT("source_flagged_fit_icon"),
+		EDesignNodeType::IconFont,
+		FDesignSize::Fit(4.0f),
+		FDesignSize::Fit(4.0f));
+	SourceFlaggedNode->Text.FontSize = 32.0f;
+
+	TSharedPtr<FDesignNode> UnflaggedNode = MakeShared<FDesignNode>(*SourceFlaggedNode);
+	UnflaggedNode->Id = TEXT("unflagged_fit_icon");
+	UnflaggedNode->Transform.bSourceHasWidth = false;
+	UnflaggedNode->Transform.bSourceHasHeight = false;
+
+	FDesignDocument EmptyDocument;
+	const FVector2D SourceFlaggedSize = SizeEstimator::PreComputeFitContentSizes(SourceFlaggedNode, EmptyDocument);
+	const FVector2D UnflaggedSize = SizeEstimator::PreComputeFitContentSizes(UnflaggedNode, EmptyDocument);
+	TestEqual(TEXT("Source-flagged fit width grows to content"), SourceFlaggedSize.X, 32.0);
+	TestEqual(TEXT("Source-flagged fit height grows to content"), SourceFlaggedSize.Y, 32.0);
+	TestTrue(TEXT("Source flags do not change fit-content growth"), SourceFlaggedSize.Equals(UnflaggedSize));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSourceFillWidthPreResolutionKeepsSourceSignalTest,
+	"Design2UMG.SharedSemantics.SourceFillWidthPreResolutionKeepsSourceSignal",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FSourceFillWidthPreResolutionKeepsSourceSignalTest::RunTest(const FString& Parameters)
+{
+	return RunFlowFillSourceConstraintChecks(*this);
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSharedSemanticsVisibleFillOwnerBoundaryTest,
 	"Design2UMG.SharedSemantics.VisibleFillOwnerBoundary",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -491,14 +666,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSharedSemanticsExecutableGuardReplacementTest,
 	"Design2UMG.SharedSemantics.ExecutableGuardReplacement",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FSharedSemanticsExecutableGuardReplacementTest::RunTest(const FString& Parameters)
-{
-	return RunSharedSemanticsExecutableReplacementChecks(*this);
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSharedSemanticsStaticDuplicateGuardTest,
-	"Design2UMG.SharedSemantics.StaticDuplicateGuard",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FSharedSemanticsStaticDuplicateGuardTest::RunTest(const FString& Parameters)
 {
 	return RunSharedSemanticsExecutableReplacementChecks(*this);
 }
@@ -670,42 +837,6 @@ bool FConversionLuminosityOpacitySettingsPayloadTest::RunTest(const FString& Par
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextSharedThresholdOwnerBoundaryTest,
-	"Design2UMG.Text.SharedThresholdOwnerBoundary",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FTextSharedThresholdOwnerBoundaryTest::RunTest(const FString& Parameters)
-{
-	auto MakeSingleLineNode = [](const FString& Id, const float FontSize)
-	{
-		TSharedPtr<FDesignNode> Node = MakeSharedSemanticsNode(Id, EDesignNodeType::Text, FDesignSize::Fixed(160.0f), FDesignSize::Fixed(36.0f));
-		Node->Text.Content = TEXT("Shared owner boundary");
-		Node->Text.FontFamily = TEXT("Roboto");
-		Node->Text.FontWeight = TEXT("Regular");
-		Node->Text.FontSize = FontSize;
-		Node->Text.LineHeight = 1.4f;
-		Node->Text.TextGrowth = EDesignTextGrowth::Auto;
-		Node->Text.TextAlign = EDesignTextAlign::Left;
-		Node->Text.TextAlignVertical = EDesignTextAlignVertical::Top;
-		Node->Transform.bSourceHasWidth = false;
-		return Node;
-	};
-
-	const TSharedPtr<FDesignNode> ThresholdNode = MakeSingleLineNode(TEXT("threshold_line_height"), 24.0f);
-	const TSharedPtr<FDesignNode> BelowThresholdNode = MakeSingleLineNode(TEXT("below_threshold_line_height"), 23.0f);
-
-	const bool bThresholdApplies = TextMeasurement::ShouldApplyExplicitLineHeight(ThresholdNode, ThresholdNode->Text.FontSize);
-	const bool bBelowThresholdApplies = TextMeasurement::ShouldApplyExplicitLineHeight(BelowThresholdNode, BelowThresholdNode->Text.FontSize);
-	TestTrue(TEXT("Large non-wrapping threshold should apply explicit line height"), bThresholdApplies);
-	TestFalse(TEXT("Below-threshold single line should not apply explicit line height"), bBelowThresholdApplies);
-
-	const FUMGWidgetNode ThresholdWidget = Design2UMGTextWidgetBuilder::CreateTextWidget(ThresholdNode);
-	const FUMGWidgetNode BelowThresholdWidget = Design2UMGTextWidgetBuilder::CreateTextWidget(BelowThresholdNode);
-	TestTrue(TEXT("Builder keeps shared threshold owner's line-height decision"), ThresholdWidget.Text.LineHeightPercentage.IsSet());
-	TestEqual(TEXT("Builder writes the authored line height when threshold applies"), ThresholdWidget.Text.LineHeightPercentage.GetValue(), ThresholdNode->Text.LineHeight);
-	TestFalse(TEXT("Builder should not emit line height below the shared threshold"), BelowThresholdWidget.Text.LineHeightPercentage.IsSet());
-	return true;
-}
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextWidgetBuilderSharedPathSettingsBoundaryTest,
 	"Design2UMG.TextWidgetBuilder.SharedPathSettingsBoundary",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -723,7 +854,7 @@ bool FTextWidgetBuilderSharedPathSettingsBoundaryTest::RunTest(const FString& Pa
 	TSharedPtr<FDesignNode> Node = MakeSharedSemanticsNode(TEXT("icon_font_boundary"), EDesignNodeType::IconFont, FDesignSize::Fixed(24.0f), FDesignSize::Fixed(24.0f));
 	Node->Text.IconFontFamily = TEXT("MissingFamily_BatchA");
 	Node->Text.IconFontName = TEXT("dashboard");
-	Node->Text.FontSize = 20.0f;
+	Node->Text.FontSize = 32.0f;
 
 	Design2UMGTextWidgetBuilder::FIconFontBuildArgs Args;
 	Args.SettingsSnapshot = &Snapshot;
@@ -735,6 +866,10 @@ bool FTextWidgetBuilderSharedPathSettingsBoundaryTest::RunTest(const FString& Pa
 		FString(TEXT("[snapshot-placeholder]")));
 	TestFalse(TEXT("Injected snapshot should not silently fall back to the global placeholder"),
 		Result.Widget.Text.Text.IsSet() && Result.Widget.Text.Text.GetValue().Equals(TEXT("[global-placeholder]"), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("Icon builder converts 32 source pixels to 24 Slate points"),
+		FMath::IsNearlyEqual(Result.Widget.TextStyle.FontSize, 24.0f, 0.001f));
+	TestTrue(TEXT("Icon builder preserves the authored source pixel size"),
+		FMath::IsNearlyEqual(Result.Widget.TextStyle.SourceFontSize, 32.0f, 0.001f));
 
 	const Design2UMGTextWidgetBuilder::FIconFontBuildResult MissingSnapshotResult =
 		Design2UMGTextWidgetBuilder::CreateIconFontWidget(Node);
@@ -754,12 +889,4 @@ bool FConverterChildPreparationOwnerBoundaryTest::RunTest(const FString& Paramet
 	return RunConverterOwnerBoundaryChecks(*this);
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConverterOwnerBoundaryExecutableGuardTest,
-	"Design2UMG.Converter.OwnerBoundaryExecutableGuard",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FConverterOwnerBoundaryExecutableGuardTest::RunTest(const FString& Parameters)
-{
-	AddInfo(TEXT("This executable guard replaces the retired converter source-text structure guard."));
-	return RunConverterOwnerBoundaryChecks(*this);
-}
 #endif

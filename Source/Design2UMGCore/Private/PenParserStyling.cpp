@@ -9,7 +9,6 @@
 
 // Forward declarations of functions defined in other PenParser*.cpp files.
 FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver);
-FDesignStroke ParseStroke(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver);
 
 static bool TryParseMeshHandle(
 	const TSharedPtr<FJsonObject>& PointObj,
@@ -287,52 +286,6 @@ FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariable
 				Result.MeshGradient.Points.Add(MoveTemp(MeshPoint));
 			}
 		}
-	}
-
-	return Result;
-}
-
-FDesignStroke ParseStroke(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver)
-{
-	FDesignStroke Result;
-
-	if (!JsonObj.IsValid())
-		return Result;
-
-	FString Align;
-	if (JsonObj->TryGetStringField(TEXT("align"), Align))
-	{
-		if (Align == TEXT("center"))
-			Result.Align = EDesignStrokeAlign::Center;
-		else if (Align == TEXT("outside"))
-			Result.Align = EDesignStrokeAlign::Outside;
-	}
-	if (JsonObj->HasField(TEXT("thickness")))
-	{
-		const auto& ThickVal = JsonObj->TryGetField(TEXT("thickness"));
-		if (TryGetNumberValueFlexible(ThickVal, Result.Thickness.Uniform))
-		{
-			Result.Thickness.bUniform = true;
-		}
-		else if (ThickVal->Type == EJson::String && FDesignVariableResolver::IsVariableRef(ThickVal->AsString()))
-		{
-			Result.Thickness.bUniform = true;
-			Result.Thickness.Uniform = Resolver.ResolveNumber(ThickVal->AsString());
-		}
-		else if (ThickVal->Type == EJson::Object)
-		{
-			Result.Thickness.bUniform = false;
-			const auto& ThickObj = ThickVal->AsObject();
-			TryGetResolvedNumberField(ThickObj, TEXT("top"), Resolver, Result.Thickness.Top);
-			TryGetResolvedNumberField(ThickObj, TEXT("right"), Resolver, Result.Thickness.Right);
-			TryGetResolvedNumberField(ThickObj, TEXT("bottom"), Resolver, Result.Thickness.Bottom);
-			TryGetResolvedNumberField(ThickObj, TEXT("left"), Resolver, Result.Thickness.Left);
-		}
-	}
-
-	if (JsonObj->HasField(TEXT("fill")))
-	{
-		Result.Fill = ParseFill(JsonObj->TryGetField(TEXT("fill")), Resolver);
 	}
 
 	return Result;

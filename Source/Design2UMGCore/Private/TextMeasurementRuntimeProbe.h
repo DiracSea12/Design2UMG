@@ -5,6 +5,8 @@
 #include "CoreMinimal.h"
 #include "DesignSchema.h"
 
+struct FSlateFontInfo;
+
 namespace TextMeasurementRuntimeProbe
 {
 	struct FTextMeasureRequest
@@ -26,16 +28,8 @@ namespace TextMeasurementRuntimeProbe
 		float WrapTextAt = 0.0f;
 	};
 
-	struct FSlateTextMetricFingerprint
-	{
-		float SignedBaselineRatio = 0.0f;
-		float MaxHeightRatio = 0.0f;
-		bool bIsAvailable = false;
-	};
-
 	bool IsAvailable();
-	FSlateTextMetricFingerprint MeasureSlateTextMetricFingerprint(const FTextMeasureRequest& Request);
-	FString SerializeSlateTextMetricToken(const FSlateTextMetricFingerprint& Metric);
+	FSlateFontInfo BuildFontInfo(const FTextMeasureRequest& Request);
 	bool TryMeasureText(const FTextMeasureRequest& Request, FVector2D& OutSize);
 	bool TryMeasureTextBlockDesiredSize(const FTextBlockMeasureRequest& Request, FVector2D& OutSize);
 }

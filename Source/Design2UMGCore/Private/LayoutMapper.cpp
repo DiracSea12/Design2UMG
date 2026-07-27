@@ -1,8 +1,11 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "LayoutMapper.h"
+#include "Design2UMGLog.h"
 #include "DesignSchema.h"
 #include "DesignTypeMapper.h"
+#include "SharedCoreSemantics.h"
+#include "UMGSchemaSourceExtensions.h"
 
 namespace
 {
@@ -277,8 +280,16 @@ FUMGWidgetNode LayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, const
 	SizeBox.Name = ChildWidget.Name + TEXT("_sz");
 	const bool bUseFitOverride = ShouldUseFitOverride(ChildNode);
 	const bool bPreserveMeasuredFillSize = ShouldPreserveMeasuredFillSize(ChildNode, ParentLayout);
+	float SourceTextBoxWidth = 0.0f;
+	float SourceTextBoxHeight = 0.0f;
+	const bool bHasConcreteSourceTextBoxSize =
+		Design2UMGCore::SharedSemantics::TryGetConcreteSourceTextBoxSize(ChildNode, SourceTextBoxWidth, SourceTextBoxHeight);
 
-	if (ChildNode->Transform.Width.IsFixed())
+	if (bHasConcreteSourceTextBoxSize)
+	{
+		SizeBox.WidgetStyle.WidthOverride = SourceTextBoxWidth;
+	}
+	else if (ChildNode->Transform.Width.IsFixed())
 	{
 		SizeBox.WidgetStyle.WidthOverride = ChildNode->Transform.Width.Value;
 	}
@@ -298,7 +309,11 @@ FUMGWidgetNode LayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, const
 		SizeBox.WidgetStyle.WidthOverride = ChildNode->Transform.Width.Value;
 	}
 
-	if (ChildNode->Transform.Height.IsFixed())
+	if (bHasConcreteSourceTextBoxSize)
+	{
+		SizeBox.WidgetStyle.HeightOverride = SourceTextBoxHeight;
+	}
+	else if (ChildNode->Transform.Height.IsFixed())
 	{
 		SizeBox.WidgetStyle.HeightOverride = ChildNode->Transform.Height.Value;
 	}
@@ -319,12 +334,18 @@ FUMGWidgetNode LayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, const
 	}
 
 	SizeBox.Bounds = ChildWidget.Bounds;
+	if (bHasConcreteSourceTextBoxSize)
+	{
+		SizeBox.Bounds.W = SourceTextBoxWidth;
+		SizeBox.Bounds.H = SourceTextBoxHeight;
+	}
 	SizeBox.Slot = MoveTemp(ChildWidget.Slot);
+	if (ChildWidget.HasSourceData())
+	{
+		SizeBox.MutableSource() = ChildWidget.Source();
+	}
 	ChildWidget.Slot = FUMGSlotData();
 	SizeBox.Children.Add(MoveTemp(ChildWidget));
 	return SizeBox;
 }
-
-
-
 

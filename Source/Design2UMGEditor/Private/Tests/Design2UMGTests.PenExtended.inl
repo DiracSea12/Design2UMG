@@ -31,15 +31,9 @@ bool FPenExtendedFieldsAndMeshGradientTest::RunTest(const FString& Parameters)
 				"type": "frame",
 				"reusable": true,
 				"layoutIncludeStroke": true,
-				"stroke": {
-					"align": "inside",
-					"thickness": 1,
-					"fill": "#000000",
-					"join": "round",
-					"miterAngle": 45,
-					"cap": "square",
-					"dashPattern": [2, 4]
-				},
+				"stroke": "#000000",
+				"strokeWidth": 1,
+				"strokeAlignment": "inner",
 				"children": [
 					{
 						"id": "label",
@@ -60,12 +54,26 @@ bool FPenExtendedFieldsAndMeshGradientTest::RunTest(const FString& Parameters)
 						"href": "https://override.example"
 					}
 				}
+			},
+			{
+				"id": "legacyStroke",
+				"type": "frame",
+				"stroke": {
+					"align": "inside",
+					"thickness": 1,
+					"fill": "#000000",
+					"join": "round",
+					"miterAngle": 45,
+					"cap": "square",
+					"dashPattern": [2, 4]
+				}
 			}
 		]
 	})");
 	FDesignDocument Doc;
 	TestTrue(TEXT("Pen parse succeeds"), FPenParser::ParseDocument(Json, Doc));
-	if (Doc.Children.Num() < 2)
+	TestEqual(TEXT("Pen root count"), Doc.Children.Num(), 4);
+	if (Doc.Children.Num() != 4)
 		return false;
 	const TSharedPtr<FDesignNode>& TextNode = Doc.Children[0];
 	TestEqual(TEXT("Text node type"), TextNode->Type, EDesignNodeType::Text);
@@ -95,14 +103,12 @@ bool FPenExtendedFieldsAndMeshGradientTest::RunTest(const FString& Parameters)
 	const FString* LayoutIncludeStroke = ComponentNode->Metadata.Find(TEXT("layoutIncludeStroke"));
 	TestTrue(TEXT("layoutIncludeStroke preserved"), LayoutIncludeStroke && *LayoutIncludeStroke == TEXT("true"));
 	TestTrue(TEXT("layoutIncludeStroke typed primary storage"), ComponentNode->Source().LayoutExtensions.StrokesIncludedInLayout.IsSet() && ComponentNode->Source().LayoutExtensions.StrokesIncludedInLayout.GetValue());
-	const FString* StrokeJoin = ComponentNode->Metadata.Find(TEXT("stroke.join"));
-	TestTrue(TEXT("stroke join preserved"), StrokeJoin && *StrokeJoin == TEXT("round"));
-	const FString* StrokeCap = ComponentNode->Metadata.Find(TEXT("stroke.cap"));
-	TestTrue(TEXT("stroke cap preserved"), StrokeCap && *StrokeCap == TEXT("square"));
-	const FString* StrokeMiterAngle = ComponentNode->Metadata.Find(TEXT("stroke.miterAngle"));
-	TestTrue(TEXT("stroke miterAngle preserved"), StrokeMiterAngle && !StrokeMiterAngle->IsEmpty());
-	const FString* StrokeDashPattern = ComponentNode->Metadata.Find(TEXT("stroke.dashPattern"));
-	TestTrue(TEXT("stroke dashPattern preserved"), StrokeDashPattern && StrokeDashPattern->Contains(TEXT("2")) && StrokeDashPattern->Contains(TEXT("4")));
+	const TSharedPtr<FDesignNode>& LegacyStrokeNode = Doc.Children[3];
+	TestFalse(TEXT("legacy nested stroke is rejected"), LegacyStrokeNode->Visual.Stroke.HasStroke());
+	TestFalse(TEXT("legacy stroke join is not preserved"), LegacyStrokeNode->Metadata.Contains(TEXT("stroke.join")));
+	TestFalse(TEXT("legacy stroke cap is not preserved"), LegacyStrokeNode->Metadata.Contains(TEXT("stroke.cap")));
+	TestFalse(TEXT("legacy stroke miter angle is not preserved"), LegacyStrokeNode->Metadata.Contains(TEXT("stroke.miterAngle")));
+	TestFalse(TEXT("legacy stroke dash pattern is not preserved"), LegacyStrokeNode->Metadata.Contains(TEXT("stroke.dashPattern")));
 	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* OverrideLabel = FindWidgetById(Data.RootWidget, TEXT("label"));
 	TestTrue(TEXT("Find override text widget"), OverrideLabel != nullptr);
@@ -247,7 +253,7 @@ bool FPenRichTextConverterUsesRichTextBlockTest::RunTest(const FString& Paramete
 	}
 
 	const FString ExpectedSnapshot =
-		TEXT("d2u_run_0{Color=#112233FF;DesignFontSize=18.0;FontSize=27.0;LetterSpacing=0.0}")
+		TEXT("d2u_run_0{Color=#112233FF;DesignFontSize=18.0;FontSize=13.5;LetterSpacing=0.0}")
 		TEXT("|d2u_run_1{Color=#112233FF;FontFamily=/Game/Design2UMG/Fonts/Inter.Inter;Href=https://docs.example.com;LetterSpacing=0.0;TypefaceFontName=Bold;Underline=true}");
 
 	TestEqual(TEXT("Rich text style rows snapshot matches"), Snapshot, ExpectedSnapshot);

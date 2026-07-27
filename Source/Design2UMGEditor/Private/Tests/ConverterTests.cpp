@@ -5,7 +5,9 @@
 #include "Misc/AutomationTest.h"
 #include "Design2UMGConverter.h"
 #include "DesignSchema.h"
+#include "PenParser.h"
 #include "UMGSchema.h"
+#include "UMGSchemaSourceExtensions.h"
 
 namespace
 {
@@ -26,6 +28,32 @@ namespace
 		Node->Transform.SetWidthValue(FDesignSize::Fixed(Width));
 		Node->Transform.SetHeightValue(FDesignSize::Fixed(Height));
 		return Node;
+	}
+
+	const FUMGWidgetNode* FindWidgetById(const FUMGWidgetNode& Root, const FString& Id)
+	{
+		if (Root.Id == Id)
+		{
+			return &Root;
+		}
+		for (const FUMGWidgetNode& Child : Root.Children)
+		{
+			if (const FUMGWidgetNode* Found = FindWidgetById(Child, Id))
+			{
+				return Found;
+			}
+		}
+		return nullptr;
+	}
+
+	int32 CountWidgetsById(const FUMGWidgetNode& Root, const FString& Id)
+	{
+		int32 Count = Root.Id == Id ? 1 : 0;
+		for (const FUMGWidgetNode& Child : Root.Children)
+		{
+			Count += CountWidgetsById(Child, Id);
+		}
+		return Count;
 	}
 
 	FDesignDocument BuildSingleNodeDocument()
@@ -81,6 +109,40 @@ namespace
 		Doc.Children.Add(Host);
 		return Doc;
 	}
+
+	bool BuildPenAuthoredTextBoxOwnerDocument(FDesignDocument& OutDoc)
+	{
+		const FString Json = TEXT(R"JSON(
+{
+  "version": "1.0",
+  "children": [
+    {
+      "id": "root",
+      "name": "Root",
+      "type": "frame",
+      "width": 400,
+      "height": 120,
+      "layout": "vertical",
+      "padding": 20,
+      "children": [
+        {
+          "id": "estimated-text",
+          "name": "Estimated Text",
+          "type": "text",
+          "content": "abcd",
+          "fontSize": 20,
+          "lineHeight": 1.4,
+          "width": 44.8,
+          "height": 28
+        }
+      ]
+    }
+  ]
+}
+)JSON");
+		return FPenParser::ParseDocument(Json, OutDoc);
+	}
+
 }
 
 // ---------------------------------------------------------------------------
@@ -170,6 +232,36 @@ bool FConverterNestedNodesTest::RunTest(const FString&)
 	TestTrue(TEXT("Inner text widget keeps text payload"), Data.RootWidget.Children[1].Children[0].Text.Text.IsSet());
 	TestEqual(TEXT("Inner text content"), Data.RootWidget.Children[1].Children[0].Text.Text.GetValue(), FString(TEXT("Nested text")));
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FConverterPenAuthoredTextBoxOwnerTest,
+	"Design2UMG.Unit.Converter.PenAuthoredTextBoxOwner",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FConverterPenAuthoredTextBoxOwnerTest::RunTest(const FString&)
+{
+	FDesignDocument Doc;
+	TestTrue(TEXT("Pen authored textbox fixture parses"), BuildPenAuthoredTextBoxOwnerDocument(Doc));
+
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
+	const FUMGWidgetNode* Owner = FindWidgetById(Data.RootWidget, TEXT("estimated-text_sz"));
+	const FUMGWidgetNode* Placeholder = FindWidgetById(Data.RootWidget, TEXT("estimated-text_source_textbox_placeholder"));
+	TestTrue(TEXT("Find Pen authored text SizeBox owner"), Owner != nullptr);
+	TestTrue(TEXT("Pen authored text does not create flow placeholder"), Placeholder == nullptr);
+	if (!Owner)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Pen authored text owner is SizeBox"), Owner->Type, FString(TEXT("SizeBox")));
+	TestTrue(TEXT("Pen authored text owner width is constrained"), Owner->WidgetStyle.WidthOverride.IsSet());
+	TestTrue(TEXT("Pen authored text owner height is constrained"), Owner->WidgetStyle.HeightOverride.IsSet());
+	TestEqual(TEXT("Pen authored text owner width"), Owner->WidgetStyle.WidthOverride.Get(0.0f), 44.8f);
+	TestEqual(TEXT("Pen authored text owner height"), Owner->WidgetStyle.HeightOverride.Get(0.0f), 28.0f);
+	TestEqual(TEXT("Pen authored text owner source id"), Owner->Source().SourceNodeId, FString(TEXT("estimated-text")));
+	TestEqual(TEXT("Pen authored text owner appears once"), CountWidgetsById(Data.RootWidget, TEXT("estimated-text_sz")), 1);
 	return true;
 }
 

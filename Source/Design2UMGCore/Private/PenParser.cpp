@@ -2,7 +2,6 @@
 
 #include "PenParser.h"
 #include "Design2UMGLog.h"
-#include "DesignJsonUtils.h"
 #include "DesignImportTypes.h"
 #include "DesignSchema.h"
 #include "DesignVariableResolver.h"
@@ -22,31 +21,6 @@ namespace
 	{
 		bool bDepthExceeded = false;
 	};
-
-	void ApplyPenStrokeExtensions(
-		const TSharedPtr<FJsonObject>& StrokeObj,
-		FDesignNode& Node,
-		const FDesignVariableResolver& Resolver)
-	{
-		if (!StrokeObj.IsValid())
-			return;
-
-		FString Join;
-		if (StrokeObj->TryGetStringField(TEXT("join"), Join) && !Join.IsEmpty())
-			Node.Metadata.Add(TEXT("stroke.join"), Join);
-
-		double MiterAngle = 0.0;
-		if (TryGetResolvedNumberField(StrokeObj, TEXT("miterAngle"), Resolver, MiterAngle))
-			Node.Metadata.Add(TEXT("stroke.miterAngle"), FString::SanitizeFloat(static_cast<float>(MiterAngle)));
-
-		FString Cap;
-		if (StrokeObj->TryGetStringField(TEXT("cap"), Cap) && !Cap.IsEmpty())
-			Node.Metadata.Add(TEXT("stroke.cap"), Cap);
-
-		const TSharedPtr<FJsonValue> DashPatternField = StrokeObj->TryGetField(TEXT("dashPattern"));
-		if (DashPatternField.IsValid() && DashPatternField->Type == EJson::Array)
-			Node.Metadata.Add(TEXT("stroke.dashPattern"), DesignJsonUtils::ToCompactString(DashPatternField));
-	}
 
 	bool TryParseMeshHandle(
 		const TSharedPtr<FJsonObject>& PointObj,
@@ -85,13 +59,12 @@ TSharedPtr<FDesignNode> ParseNodeAtDepth(const TSharedPtr<FJsonObject>& JsonObj,
 void AppendParsedChildren(const TSharedPtr<FJsonValue>& ChildrenField, const FDesignVariableResolver& Resolver, TArray<TSharedPtr<FDesignNode>>& OutChildren);
 void AppendParsedChildrenAtDepth(const TSharedPtr<FJsonValue>& ChildrenField, const FDesignVariableResolver& Resolver, TArray<TSharedPtr<FDesignNode>>& OutChildren, FPenParserParseContext& ParseContext, int32 Depth);
 void ParseNodeFillProperties(const TSharedPtr<FJsonValue>& Value, FDesignNode& OutNode, const FDesignVariableResolver& Resolver);
-void ParseNodeStrokeProperties(const TSharedPtr<FJsonValue>& Value, FDesignNode& OutNode, const FDesignVariableResolver& Resolver);
+void ParseNodeStrokeProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver);
 void ApplyNodeBoxProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, EDesignNodeType SizeNodeType, const FDesignVariableResolver& Resolver);
 void ApplyNodeLayoutProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver, bool bIncludeTextProperties);
 void ApplyNodeTextStyleProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver);
 FDesignSize ParseSize(const TSharedPtr<FJsonValue>& Value, EDesignNodeType NodeType, const FDesignVariableResolver& Resolver);
 FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver);
-FDesignStroke ParseStroke(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver);
 FDesignPadding ParsePadding(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver);
 EDesignNodeType ParseNodeType(const FString& S);
 EDesignLayout ParseLayout(const FString& S);
@@ -500,7 +473,7 @@ TSharedPtr<FDesignNode> ParseNodeAtDepth(
 	// Visual properties.
 	if (JsonObj->HasField(TEXT("fill")))
 		ParseNodeFillProperties(JsonObj->TryGetField(TEXT("fill")), *Node, *ActiveResolver);
-	ParseNodeStrokeProperties(JsonObj->TryGetField(TEXT("stroke")), *Node, *ActiveResolver);
+	ParseNodeStrokeProperties(JsonObj, *Node, *ActiveResolver);
 	if (JsonObj->HasField(TEXT("cornerRadius")))
 		Node->Visual.CornerRadius = ActiveResolver->ResolveCornerRadius(JsonObj->TryGetField(TEXT("cornerRadius")));
 
@@ -566,14 +539,107 @@ void ParseNodeFillProperties(const TSharedPtr<FJsonValue>& Value, FDesignNode& O
 	}
 }
 
-void ParseNodeStrokeProperties(const TSharedPtr<FJsonValue>& Value, FDesignNode& OutNode, const FDesignVariableResolver& Resolver)
+namespace
 {
-	if (!Value.IsValid() || Value->Type != EJson::Object)
+	EDesignStrokeAlign ParsePenStrokeAlign(const FString& Align)
+	{
+		if (Align == TEXT("center"))
+		{
+			return EDesignStrokeAlign::Center;
+		}
+		if (Align == TEXT("outside"))
+		{
+			return EDesignStrokeAlign::Outside;
+		}
+		return EDesignStrokeAlign::Inside;
+	}
+
+	bool TryParsePenStrokeThickness(
+		const TSharedPtr<FJsonValue>& Value,
+		const FDesignVariableResolver& Resolver,
+		FDesignStrokeThickness& OutThickness)
+	{
+		if (!Value.IsValid())
+		{
+			return false;
+		}
+
+		float Uniform = 0.0f;
+		if (TryGetNumberValueFlexible(Value, Uniform))
+		{
+			OutThickness.bUniform = true;
+			OutThickness.Uniform = Uniform;
+			return true;
+		}
+
+		if (Value->Type == EJson::String && FDesignVariableResolver::IsVariableRef(Value->AsString()))
+		{
+			OutThickness.bUniform = true;
+			OutThickness.Uniform = Resolver.ResolveNumber(Value->AsString());
+			return true;
+		}
+
+		if (Value->Type == EJson::Object)
+		{
+			const TSharedPtr<FJsonObject> ThicknessObj = Value->AsObject();
+			if (!ThicknessObj.IsValid())
+			{
+				return false;
+			}
+
+			FDesignStrokeThickness ParsedThickness;
+			ParsedThickness.bUniform = false;
+			bool bParsedSide = false;
+			bParsedSide |= TryGetResolvedNumberField(ThicknessObj, TEXT("top"), Resolver, ParsedThickness.Top);
+			bParsedSide |= TryGetResolvedNumberField(ThicknessObj, TEXT("right"), Resolver, ParsedThickness.Right);
+			bParsedSide |= TryGetResolvedNumberField(ThicknessObj, TEXT("bottom"), Resolver, ParsedThickness.Bottom);
+			bParsedSide |= TryGetResolvedNumberField(ThicknessObj, TEXT("left"), Resolver, ParsedThickness.Left);
+			if (bParsedSide)
+			{
+				OutThickness = ParsedThickness;
+			}
+			return bParsedSide;
+		}
+
+		return false;
+	}
+}
+
+void ParseNodeStrokeProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver)
+{
+	if (!JsonObj.IsValid())
 		return;
 
-	const TSharedPtr<FJsonObject> StrokeObj = Value->AsObject();
-	OutNode.Visual.Stroke = ParseStroke(StrokeObj, Resolver);
-	ApplyPenStrokeExtensions(StrokeObj, OutNode, Resolver);
+	const TSharedPtr<FJsonValue> StrokeField = JsonObj->TryGetField(TEXT("stroke"));
+	FDesignStroke Stroke;
+	bool bHasCurrentStroke = false;
+
+	FString StrokeAlignment;
+	if (JsonObj->TryGetStringField(TEXT("strokeAlignment"), StrokeAlignment))
+	{
+		Stroke.Align = ParsePenStrokeAlign(StrokeAlignment);
+		bHasCurrentStroke = true;
+	}
+
+	if (TryParsePenStrokeThickness(JsonObj->TryGetField(TEXT("strokeWidth")), Resolver, Stroke.Thickness))
+	{
+		bHasCurrentStroke = true;
+	}
+
+	if (StrokeField.IsValid())
+	{
+		FDesignFill StrokeFill = ParseFill(StrokeField, Resolver);
+		if (StrokeFill.Type != EDesignFillType::None || StrokeFill.bExplicitClear)
+		{
+			Stroke.Fill = StrokeFill;
+			bHasCurrentStroke = true;
+		}
+	}
+
+	if (bHasCurrentStroke)
+	{
+		OutNode.Visual.Stroke = Stroke;
+	}
 }
 
 

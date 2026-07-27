@@ -8,6 +8,8 @@
 #include "DesignTypeMapper.h"
 #include "FontResolver.h"
 #include "TextMeasurement.h"
+#include "TextMeasurementInternal.h"
+#include "TextFontResolution.h"
 #include "UMGValueParser.h"
 #include "UMGWidgetNodeAccess.h"
 #include "Misc/PackageName.h"
@@ -55,48 +57,26 @@ namespace
 
 	void ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
 	{
-		FString ResolvedFontAssetPath;
-		const float ResolvedFontSize = TextMeasurement::ResolveTextFontSizeForUMG(Node);
+		const FResolvedTextLayoutForUMG ResolvedLayout = TextMeasurementInternal::ResolveTextLayoutForUMG(Node);
+		const float ResolvedFontSize = ResolvedLayout.FontSize;
 		if (ResolvedFontSize > 0)
 		{
 			Widget.TextStyle.FontSize = ResolvedFontSize;
 			Widget.TextStyle.SourceFontSize = Node->Text.FontSize;
 		}
 
-		const bool bExplicitMapping = FFontResolver::HasExplicitFontMapping(Node->Text.FontFamily, Node->Text.FontPostScriptName);
-		FString Typeface;
-		if (!Node->Text.FontFamily.IsEmpty() || !Node->Text.FontPostScriptName.IsEmpty())
+		const TextFontResolution::FResolvedFontSelection ResolvedFont = TextFontResolution::Resolve(
+			Node->Text.FontFamily,
+			Node->Text.FontPostScriptName,
+			Node->Text.FontWeight);
+		if (!ResolvedFont.FontAssetPath.IsEmpty())
 		{
-			const FString AssetPath = FFontResolver::FindFontAssetPath(Node->Text.FontFamily, Node->Text.FontPostScriptName);
-			if (!AssetPath.IsEmpty())
-			{
-				const bool bMissingExplicitTypeface = bExplicitMapping
-					&& FFontResolver::FindExactTypefaceForAssetPath(AssetPath, Node->Text.FontWeight).IsEmpty();
-				if (!bMissingExplicitTypeface)
-				{
-					ResolvedFontAssetPath = AssetPath;
-					Widget.Text.FontFamily = AssetPath;
-				}
-			}
+			Widget.Text.FontFamily = ResolvedFont.FontAssetPath;
 		}
 
-		if (!Node->Text.FontWeight.IsEmpty())
+		if (!Node->Text.FontWeight.IsEmpty() && !ResolvedFont.TypefaceName.IsEmpty())
 		{
-			Typeface = bExplicitMapping
-				? FFontResolver::FindExactTypefaceForAssetPath(ResolvedFontAssetPath, Node->Text.FontWeight)
-				: FFontResolver::FindBestTypefaceForAssetPath(ResolvedFontAssetPath, Node->Text.FontWeight);
-			if (!bExplicitMapping && Typeface.IsEmpty())
-			{
-				Typeface = FFontResolver::FindBestTypeface(Node->Text.FontFamily, Node->Text.FontWeight);
-			}
-			if (!bExplicitMapping && Typeface.IsEmpty())
-			{
-				Typeface = DesignTypeMapper::MapFontWeight(Node->Text.FontWeight).ToString();
-			}
-			if (!Typeface.IsEmpty())
-			{
-				Widget.Text.TypefaceFontName = Typeface;
-			}
+			Widget.Text.TypefaceFontName = ResolvedFont.TypefaceName;
 		}
 
 		if (!Node->Text.FontStyle.IsEmpty())
@@ -108,7 +88,7 @@ namespace
 			Node->Text.TextAlign == EDesignTextAlign::Center ? TEXT("Center") :
 			Node->Text.TextAlign == EDesignTextAlign::Right ? TEXT("Right") : TEXT("Left");
 
-		const float ResolvedWrapTextAt = TextMeasurement::ResolveTextWrapAt(Node, 0.0f);
+		const float ResolvedWrapTextAt = ResolvedLayout.WrapTextAt;
 		const bool bNeedsKnownWidthRuntimeWrap =
 			Node->Text.TextGrowth == EDesignTextGrowth::Auto
 			&& Node->Transform.Width.IsFill()
@@ -128,13 +108,10 @@ namespace
 			Widget.Text.WrapTextAt = ResolvedWrapTextAt;
 		}
 
-		const bool bApplyRuntimeLineHeight =
-			TextMeasurement::ShouldApplyExplicitLineHeight(Node, ResolvedFontSize);
-		if (bApplyRuntimeLineHeight)
+		if (ResolvedLayout.LineHeightPercentage.IsSet())
 		{
-			Widget.Text.LineHeightPercentage = Node->Text.LineHeight;
+			Widget.Text.LineHeightPercentage = ResolvedLayout.LineHeightPercentage.GetValue();
 		}
-
 		// Preserve authored explicit-zero semantics on the design model, but avoid
 		// redundantly emitting runtime letter spacing when the effective value is zero.
 		if (Node->Text.LetterSpacing != 0)
@@ -193,7 +170,7 @@ namespace
 				const FVector2D MeasuredTextSize = TextMeasurement::MeasureTextNodeSize(Node, 0.0f);
 				const float ContentHeight = MeasuredTextSize.Y;
 				const float SlackHeight = Node->Transform.Height.Value - ContentHeight;
-				if (ContentHeight > 0.0f && SlackHeight > 0.5f)
+				if (ContentHeight > 0.0f && SlackHeight > 0.0f)
 				{
 					FMargin InternalPadding = Widget.WidgetStyle.Padding.Get(FMargin(0.0f));
 					if (Node->Text.TextAlignVertical == EDesignTextAlignVertical::Middle)
@@ -280,40 +257,6 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 		return Escaped;
 	};
 
-	const auto ResolveFontAssetPath = [](const FString& FontFamily, const FString& PostScriptName, const FString& FontWeight)
-	{
-		if (FontFamily.IsEmpty() && PostScriptName.IsEmpty())
-		{
-			return FString();
-		}
-
-		const FString AssetPath = FFontResolver::FindFontAssetPath(FontFamily, PostScriptName);
-		if (FFontResolver::HasExplicitFontMapping(FontFamily, PostScriptName)
-			&& FFontResolver::FindExactTypefaceForAssetPath(AssetPath, FontWeight).IsEmpty())
-		{
-			return FString();
-		}
-		return AssetPath;
-	};
-
-	const auto ResolveTypefaceName = [](const FString& FontFamily, const FString& PostScriptName, const FString& FontAssetPath, const FString& FontWeight)
-	{
-		const FString EffectiveWeight = FontWeight.IsEmpty() ? TEXT("normal") : FontWeight;
-		const bool bExplicitMapping = FFontResolver::HasExplicitFontMapping(FontFamily, PostScriptName);
-		FString Typeface = bExplicitMapping
-			? FFontResolver::FindExactTypefaceForAssetPath(FontAssetPath, EffectiveWeight)
-			: FFontResolver::FindBestTypefaceForAssetPath(FontAssetPath, EffectiveWeight);
-		if (!bExplicitMapping && Typeface.IsEmpty())
-		{
-			Typeface = FFontResolver::FindBestTypeface(FontFamily, EffectiveWeight);
-		}
-		if (!bExplicitMapping && Typeface.IsEmpty())
-		{
-			Typeface = DesignTypeMapper::MapFontWeight(EffectiveWeight).ToString();
-		}
-		return Typeface;
-	};
-
 	const auto TextRunNeedsRichText = [](const FDesignTextRun& Run)
 	{
 		return !Run.FontFamily.IsEmpty()
@@ -352,7 +295,7 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 	};
 
 	const auto BuildResolvedRichTextRun =
-		[&ResolveFontAssetPath, &ResolveTypefaceName](const TSharedPtr<FDesignNode>& InNode, const FDesignTextRun* Run, int32 RunIndex, float ResolvedNodeFontSize)
+		[](const TSharedPtr<FDesignNode>& InNode, const FDesignTextRun* Run, int32 RunIndex, float ResolvedNodeFontSize)
 	{
 		FResolvedRichTextRun Result;
 		Result.RowName = FString::Printf(TEXT("d2u_run_%d"), RunIndex);
@@ -365,34 +308,34 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 				? Run->FontPostScriptName
 				: InNode->Text.FontPostScriptName;
 			const FString EffectiveFontWeight = (Run && !Run->FontWeight.IsEmpty()) ? Run->FontWeight : InNode->Text.FontWeight;
-			Result.FontFamily = ResolveFontAssetPath(EffectiveFontFamily, EffectivePostScriptName, EffectiveFontWeight);
-			Result.TypefaceFontName = ResolveTypefaceName(
+			const TextFontResolution::FResolvedFontSelection ResolvedFont = TextFontResolution::Resolve(
 				EffectiveFontFamily,
 				EffectivePostScriptName,
-				Result.FontFamily,
 				EffectiveFontWeight);
+			Result.FontFamily = ResolvedFont.FontAssetPath;
+			Result.TypefaceFontName = ResolvedFont.TypefaceName;
 		}
 		else if (!Run->FontWeight.IsEmpty())
 		{
-			const FString ParentFontAssetPath = ResolveFontAssetPath(InNode->Text.FontFamily, InNode->Text.FontPostScriptName, Run->FontWeight);
-			Result.TypefaceFontName = ResolveTypefaceName(
+			Result.TypefaceFontName = TextFontResolution::Resolve(
 				InNode->Text.FontFamily,
 				InNode->Text.FontPostScriptName,
-				ParentFontAssetPath,
-				Run->FontWeight);
+				Run->FontWeight).TypefaceName;
 		}
 
 		const bool bRunHasFontSize = Run && Run->FontSize.IsSet();
-		const float EffectiveDesignFontSize = bRunHasFontSize ? Run->FontSize.GetValue() : InNode->Text.FontSize;
-		if (EffectiveDesignFontSize > 0.0f)
+		const float SourceFontSize = bRunHasFontSize ? Run->FontSize.GetValue() : InNode->Text.FontSize;
+		const TOptional<float> ResolvedSourceFontSize = TextFontResolution::ResolveSourceFontSizeForUMG(SourceFontSize);
+		if (ResolvedSourceFontSize.IsSet())
 		{
-			Result.DesignFontSize = EffectiveDesignFontSize;
-			const float ResolvedRunFontSize = (bRunHasFontSize && InNode->Text.FontSize > KINDA_SMALL_NUMBER && ResolvedNodeFontSize > KINDA_SMALL_NUMBER)
-				? (Run->FontSize.GetValue() * (ResolvedNodeFontSize / InNode->Text.FontSize))
-				: (bRunHasFontSize ? Run->FontSize.GetValue() : ResolvedNodeFontSize);
-			if (ResolvedRunFontSize > 0.0f)
+			Result.DesignFontSize = SourceFontSize;
+			if (bRunHasFontSize)
 			{
-				Result.FontSize = ResolvedRunFontSize;
+				Result.FontSize = ResolvedSourceFontSize.GetValue();
+			}
+			else if (FMath::IsFinite(ResolvedNodeFontSize) && ResolvedNodeFontSize > 0.0f)
+			{
+				Result.FontSize = ResolvedNodeFontSize;
 			}
 		}
 
@@ -655,9 +598,10 @@ Design2UMGTextWidgetBuilder::FIconFontBuildResult Design2UMGTextWidgetBuilder::C
 		Widget.Text.Text = IconText;
 	}
 
-	if (Node->Text.FontSize > 0)
+	const TOptional<float> ResolvedFontSize = TextFontResolution::ResolveSourceFontSizeForUMG(Node->Text.FontSize);
+	if (ResolvedFontSize.IsSet())
 	{
-		Widget.TextStyle.FontSize = Node->Text.FontSize;
+		Widget.TextStyle.FontSize = ResolvedFontSize.GetValue();
 		Widget.TextStyle.SourceFontSize = Node->Text.FontSize;
 	}
 

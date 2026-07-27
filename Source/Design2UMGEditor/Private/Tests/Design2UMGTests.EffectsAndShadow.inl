@@ -1,4 +1,4 @@
-﻿IMPLEMENT_SIMPLE_AUTOMATION_TEST(FForegroundBlurRetainerWrapperTest,
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FForegroundBlurRetainerWrapperTest,
 	"Design2UMG.Converter.ForegroundBlurRetainerWrapper",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FForegroundBlurRetainerWrapperTest::RunTest(const FString& Parameters)
@@ -919,7 +919,7 @@ bool FRichTextBlockStyleRowsApplicationTest::RunTest(const FString& Parameters)
 	Node.Text.WrapTextAt = 180.0f;
 	Node.Text.LineHeightPercentage = 1.25f;
 	Node.Text.Color = FLinearColor(0.1f, 0.2f, 0.3f, 1.0f);
-	Node.Text.RichTextStyleRowsJson = TEXT("{\"d2u_run_0\":{\"Color\":\"#112233FF\"},\"d2u_run_1\":{\"FontSize\":22.0,\"DesignFontSize\":22.0,\"Color\":\"#224466FF\",\"Underline\":true,\"Href\":\"https://docs.example.com\"}}");
+	Node.Text.RichTextStyleRowsJson = TEXT("{\"d2u_run_0\":{\"Color\":\"#112233FF\"},\"d2u_run_1\":{\"FontSize\":22.5,\"DesignFontSize\":22.5,\"Color\":\"#224466FF\",\"Underline\":true,\"Href\":\"https://docs.example.com\"},\"d2u_run_2\":{\"FontSize\":0.375,\"DesignFontSize\":0.5}}");
 	Node.TextStyle.FontSize = 18.0f;
 	Node.TextStyle.SourceFontSize = 18.0f;
 	Node.TextStyle.LetterSpacing = 1.5f;
@@ -981,7 +981,7 @@ bool FRichTextBlockStyleRowsApplicationTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	TestEqual(TEXT("Link row font size applied"), LinkRow->TextStyle.Font.Size, 22.0f);
+	TestTrue(TEXT("Link row preserves the exact fractional font size"), FMath::IsNearlyEqual(LinkRow->TextStyle.Font.Size, 22.5f, 0.001f));
 	TestTrue(TEXT("Link row underline brush created"), LinkRow->TextStyle.UnderlineBrush.DrawAs != ESlateBrushDrawType::NoDrawType);
 	TestTrue(TEXT("Link row color applied"),
 		LinkRow->TextStyle.ColorAndOpacity.GetSpecifiedColor().Equals(
@@ -991,6 +991,15 @@ bool FRichTextBlockStyleRowsApplicationTest::RunTest(const FString& Parameters)
 		LinkRow->TextStyle.ShadowColorAndOpacity.Equals(PreconfiguredStyle.ShadowColorAndOpacity, 0.0001f));
 	TestTrue(TEXT("Link row preserves base shadow offset"),
 		LinkRow->TextStyle.ShadowOffset == PreconfiguredStyle.ShadowOffset);
+
+	const FRichTextStyleRow* SubpointRow = StyleSet->FindRow<FRichTextStyleRow>(TEXT("d2u_run_2"), TEXT("RichTextBlockStyleRowsApplication"));
+	TestNotNull(TEXT("Subpoint row exists"), SubpointRow);
+	if (!SubpointRow)
+	{
+		return false;
+	}
+	TestTrue(TEXT("Rich text application preserves 0.375 point row sizes"),
+		FMath::IsNearlyEqual(SubpointRow->TextStyle.Font.Size, 0.375f, 0.001f));
 
 	URichTextBlock* LegacyWidget = NewObject<URichTextBlock>(GetTransientPackageAsObject());
 	TestTrue(TEXT("Legacy RichTextBlock created"), LegacyWidget != nullptr);

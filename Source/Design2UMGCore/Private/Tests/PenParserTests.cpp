@@ -6,6 +6,7 @@
 #include "PenParser.h"
 #include "RefExpander.h"
 #include "DesignSchema.h"
+#include "SizeEstimator.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -53,6 +54,7 @@ namespace
 		Test.TestEqual(FString::Printf(TEXT("%s mode"), What), Actual.Mode, ExpectedMode);
 		Test.TestEqual(FString::Printf(TEXT("%s value"), What), Actual.Value, 0.0f);
 	}
+
 }
 
 // ---------------------------------------------------------------------------
@@ -148,6 +150,227 @@ bool FPenParserTextNodeTest::RunTest(const FString&)
 	TestEqual(TEXT("FontSize"), Node->Text.FontSize, 24.0f);
 	TestEqual(TEXT("TextAlign"), Node->Text.TextAlign, EDesignTextAlign::Center);
 	TestEqual(TEXT("TextGrowth"), Node->Text.TextGrowth, EDesignTextGrowth::FixedWidthHeight);
+	TestEqual(TEXT("Missing Pencil line height remains zero"), Node->Text.LineHeight, 0.0f);
+
+	const FString ExplicitLineHeightJson = TEXT(R"JSON(
+{
+  "version": "2.14",
+  "children": [{
+    "id": "explicit-line-height",
+    "name": "Explicit Line Height",
+    "type": "text",
+    "content": "Explicit",
+    "fontSize": 16,
+    "lineHeight": 1.0
+  }]
+}
+)JSON");
+	FDesignDocument ExplicitDoc;
+	TestTrue(TEXT("Explicit Pencil line height fixture parses"), FPenParser::ParseDocument(ExplicitLineHeightJson, ExplicitDoc));
+	TestEqual(TEXT("Explicit Pencil line height fixture has one node"), ExplicitDoc.Children.Num(), 1);
+	if (ExplicitDoc.Children.Num() == 1 && ExplicitDoc.Children[0].IsValid())
+	{
+		TestEqual(TEXT("Explicit Pencil line height is preserved"), ExplicitDoc.Children[0]->Text.LineHeight, 1.0f);
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FPenParserIconNodeFormatsTest,
+	"Design2UMG.Unit.PenParser.IconNodeFormats",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FPenParserIconNodeFormatsTest::RunTest(const FString&)
+{
+	const FString Json = TEXT(R"JSON(
+{
+  "version": "2.13",
+  "children": [
+    {
+      "id": "current-icon",
+      "name": "Current Icon",
+      "type": "icon",
+      "icon": "search",
+      "library": "lucide",
+      "width": 24,
+      "height": 24
+    },
+    {
+      "id": "legacy-icon",
+      "name": "Legacy Icon",
+      "type": "icon_font",
+      "iconFontName": "search",
+      "iconFontFamily": "lucide"
+    }
+  ]
+}
+)JSON");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Pen icon formats parse"), FPenParser::ParseDocument(Json, Doc));
+	TestEqual(TEXT("Root count"), Doc.Children.Num(), 2);
+	if (Doc.Children.Num() != 2)
+	{
+		return false;
+	}
+
+	const TSharedPtr<FDesignNode>& CurrentIcon = Doc.Children[0];
+	TestTrue(TEXT("Current icon valid"), CurrentIcon.IsValid());
+	TestEqual(TEXT("Current icon type"), CurrentIcon->Type, EDesignNodeType::IconFont);
+	TestEqual(TEXT("Current icon name"), CurrentIcon->Text.IconFontName, FString(TEXT("search")));
+	TestEqual(TEXT("Current icon family"), CurrentIcon->Text.IconFontFamily, FString(TEXT("lucide")));
+	const TSharedPtr<FDesignNode>& LegacyIcon = Doc.Children[1];
+	TestTrue(TEXT("Legacy icon node remains structurally present"), LegacyIcon.IsValid());
+	TestEqual(TEXT("Legacy icon type is rejected"), LegacyIcon->Type, EDesignNodeType::Unknown);
+	TestTrue(TEXT("Legacy icon name is not migrated"), LegacyIcon->Text.IconFontName.IsEmpty());
+	TestTrue(TEXT("Legacy icon family is not migrated"), LegacyIcon->Text.IconFontFamily.IsEmpty());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSizeEstimatorFitContentLeafMinimumGrowthTest,
+	"Design2UMG.Unit.SizeEstimator.FitContentLeafMinimumGrowth",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FSizeEstimatorFitContentLeafMinimumGrowthTest::RunTest(const FString&)
+{
+	TSharedPtr<FDesignNode> TextNode = MakeShared<FDesignNode>();
+	TextNode->Id = TEXT("fit-text");
+	TextNode->Name = TEXT("Fit Text");
+	TextNode->Type = EDesignNodeType::Text;
+	TextNode->Text.Content = TEXT("Fit content grows to measured text");
+	TextNode->Text.FontSize = 32.0f;
+	TextNode->Transform.Width = FDesignSize::Fit(4.0f);
+	TextNode->Transform.Height = FDesignSize::Fit(4.0f);
+
+	FDesignDocument EmptyDoc;
+	const FVector2D TextSize = SizeEstimator::PreComputeFitContentSizes(TextNode, EmptyDoc);
+	TestTrue(TEXT("Text fit width grows beyond its declared minimum"), TextSize.X > 4.0f);
+	TestTrue(TEXT("Text fit height grows beyond its declared minimum"), TextSize.Y > 4.0f);
+	TestTrue(TEXT("Text node stores the grown fit width"), TextNode->Transform.Width.Value > 4.0f);
+	TestTrue(TEXT("Text node stores the grown fit height"), TextNode->Transform.Height.Value > 4.0f);
+
+	TSharedPtr<FDesignNode> IconNode = MakeShared<FDesignNode>();
+	IconNode->Id = TEXT("fit-icon");
+	IconNode->Name = TEXT("Fit Icon");
+	IconNode->Type = EDesignNodeType::IconFont;
+	IconNode->Text.Content = TEXT("search");
+	IconNode->Text.IconFontName = TEXT("search");
+	IconNode->Text.FontSize = 32.0f;
+	IconNode->Transform.Width = FDesignSize::Fit(4.0f);
+	IconNode->Transform.Height = FDesignSize::Fit(4.0f);
+
+	const FVector2D IconSize = SizeEstimator::PreComputeFitContentSizes(IconNode, EmptyDoc);
+	TestEqual(TEXT("Icon fit width grows to its measured content"), IconSize.X, 32.0);
+	TestEqual(TEXT("Icon fit height grows to its measured content"), IconSize.Y, 32.0);
+	TestEqual(TEXT("Icon node stores the grown fit width"), IconNode->Transform.Width.Value, 32.0f);
+	TestEqual(TEXT("Icon node stores the grown fit height"), IconNode->Transform.Height.Value, 32.0f);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FPenParserStrokeNodeFormatsTest,
+	"Design2UMG.Unit.PenParser.StrokeNodeFormats",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FPenParserStrokeNodeFormatsTest::RunTest(const FString&)
+{
+	const FString Json = TEXT(R"JSON(
+{
+  "version": "2.13",
+  "children": [
+    {
+      "id": "current-stroke",
+      "name": "Current Stroke",
+      "type": "frame",
+      "stroke": "#112233",
+      "strokeWidth": { "top": 1, "right": 2, "bottom": 3, "left": 4 },
+      "strokeAlignment": "outside"
+    },
+    {
+      "id": "current-inner-stroke",
+      "name": "Current Inner Stroke",
+      "type": "frame",
+      "stroke": "#445566",
+      "strokeWidth": 2,
+      "strokeAlignment": "inner"
+    },
+    {
+      "id": "malformed-thickness",
+      "name": "Malformed Thickness",
+      "type": "frame",
+      "strokeWidth": { "unexpected": 3 }
+    },
+    {
+      "id": "legacy-nested-stroke",
+      "name": "Legacy Nested Stroke",
+      "type": "frame",
+      "stroke": {
+        "fill": "#778899",
+        "thickness": 3,
+        "align": "center",
+        "join": "round",
+        "miterAngle": 45,
+        "cap": "square",
+        "dashPattern": [2, 4]
+      }
+    }
+  ]
+}
+)JSON");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Pen stroke formats parse"), FPenParser::ParseDocument(Json, Doc));
+	TestEqual(TEXT("Root count"), Doc.Children.Num(), 4);
+	if (Doc.Children.Num() != 4)
+	{
+		return false;
+	}
+
+	const TSharedPtr<FDesignNode>& Current = Doc.Children[0];
+	const TSharedPtr<FDesignNode>& CurrentInner = Doc.Children[1];
+	const TSharedPtr<FDesignNode>& MalformedThickness = Doc.Children[2];
+	const TSharedPtr<FDesignNode>& LegacyNestedStroke = Doc.Children[3];
+	TestTrue(TEXT("Current stroke valid"), Current.IsValid());
+	TestTrue(TEXT("Current inner stroke valid"), CurrentInner.IsValid());
+	TestTrue(TEXT("Malformed thickness node valid"), MalformedThickness.IsValid());
+	TestTrue(TEXT("Legacy nested stroke node valid"), LegacyNestedStroke.IsValid());
+	if (!Current.IsValid() || !CurrentInner.IsValid() || !MalformedThickness.IsValid() || !LegacyNestedStroke.IsValid())
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Current align"), Current->Visual.Stroke.Align, EDesignStrokeAlign::Outside);
+	TestEqual(TEXT("Current non-uniform thickness"), Current->Visual.Stroke.Thickness.bUniform, false);
+	TestEqual(TEXT("Current top thickness"), Current->Visual.Stroke.Thickness.Top, 1.0f);
+	TestEqual(TEXT("Current right thickness"), Current->Visual.Stroke.Thickness.Right, 2.0f);
+	TestEqual(TEXT("Current bottom thickness"), Current->Visual.Stroke.Thickness.Bottom, 3.0f);
+	TestEqual(TEXT("Current left thickness"), Current->Visual.Stroke.Thickness.Left, 4.0f);
+	TestTrue(TEXT("Current fill set"), Current->Visual.Stroke.Fill.IsSet());
+	if (Current->Visual.Stroke.Fill.IsSet())
+	{
+		TestEqual(TEXT("Current stroke color"), Current->Visual.Stroke.Fill.GetValue().SolidColor, FString(TEXT("#112233")));
+	}
+
+	TestEqual(TEXT("Current inner align maps to inside"), CurrentInner->Visual.Stroke.Align, EDesignStrokeAlign::Inside);
+	TestEqual(TEXT("Current inner uniform thickness"), CurrentInner->Visual.Stroke.Thickness.bUniform, true);
+	TestEqual(TEXT("Current inner thickness"), CurrentInner->Visual.Stroke.Thickness.Uniform, 2.0f);
+	TestTrue(TEXT("Current inner fill set"), CurrentInner->Visual.Stroke.Fill.IsSet());
+	if (CurrentInner->Visual.Stroke.Fill.IsSet())
+	{
+		TestEqual(TEXT("Current inner color"), CurrentInner->Visual.Stroke.Fill.GetValue().SolidColor, FString(TEXT("#445566")));
+	}
+	TestTrue(TEXT("Malformed thickness object keeps the default uniform representation"),
+		MalformedThickness->Visual.Stroke.Thickness.bUniform);
+	TestFalse(TEXT("Malformed thickness object does not fabricate a stroke"),
+		MalformedThickness->Visual.Stroke.HasStroke());
+	TestFalse(TEXT("Legacy nested stroke is not parsed"), LegacyNestedStroke->Visual.Stroke.HasStroke());
+	TestFalse(TEXT("Legacy join is not migrated to metadata"), LegacyNestedStroke->Metadata.Contains(TEXT("stroke.join")));
+	TestFalse(TEXT("Legacy miter angle is not migrated to metadata"), LegacyNestedStroke->Metadata.Contains(TEXT("stroke.miterAngle")));
+	TestFalse(TEXT("Legacy cap is not migrated to metadata"), LegacyNestedStroke->Metadata.Contains(TEXT("stroke.cap")));
+	TestFalse(TEXT("Legacy dash pattern is not migrated to metadata"), LegacyNestedStroke->Metadata.Contains(TEXT("stroke.dashPattern")));
 
 	return true;
 }
@@ -309,6 +532,108 @@ bool FPenParserErrorInputTest::RunTest(const FString&)
 		const TSharedPtr<FDesignNode> Expanded = RefExpander::ExpandRef(Doc.Children[2], Doc);
 		TestFalse(TEXT("Circular ref expansion returns null"), Expanded.IsValid());
 	}
+
+	// A ref instance that omits height must keep the reusable component's authored fit-content minimum.
+	{
+		const FString RefDefaultFitSizeJson =
+			TEXT("{")
+			TEXT("\"version\":\"1.0\",")
+			TEXT("\"children\":[")
+			TEXT("{\"id\":\"row-template\",\"name\":\"RowTemplate\",\"type\":\"frame\",\"reusable\":true,\"height\":\"fit_content(44)\"},")
+			TEXT("{\"id\":\"row-instance\",\"name\":\"RowInstance\",\"type\":\"ref\",\"ref\":\"row-template\"}")
+			TEXT("]}")
+			;
+
+		FDesignDocument Doc;
+		TestTrue(TEXT("Default-fit ref document parses"), FPenParser::ParseDocument(RefDefaultFitSizeJson, Doc));
+		TestEqual(TEXT("Default-fit ref roots parsed"), Doc.Children.Num(), 2);
+		const TSharedPtr<FDesignNode> Expanded = RefExpander::ExpandRef(Doc.Children[1], Doc);
+		TestTrue(TEXT("Default-fit ref expansion returns node"), Expanded.IsValid());
+		if (Expanded.IsValid())
+		{
+			ExpectSize(*this, TEXT("Default-fit ref keeps target height"), Expanded->Transform.Height, EDesignSizeMode::FitContent, 44.0f);
+		}
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FPenParserRefFitHeightPropagationTest,
+	"Design2UMG.Unit.PenParser.RefFitHeightPropagation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FPenParserRefFitHeightPropagationTest::RunTest(const FString&)
+{
+	const FString RefTableJson =
+		TEXT("{")
+		TEXT("\"version\":\"1.0\",")
+		TEXT("\"children\":[")
+		TEXT("{\"id\":\"cell-template\",\"name\":\"CellTemplate\",\"type\":\"frame\",\"reusable\":true,\"width\":1440,\"height\":\"fit_content(56)\"},")
+		TEXT("{\"id\":\"row-template\",\"name\":\"RowTemplate\",\"type\":\"frame\",\"reusable\":true,\"width\":1440,\"height\":\"fit_content(44)\",\"layout\":\"horizontal\",\"children\":[")
+		TEXT("{\"id\":\"cell\",\"name\":\"Cell\",\"type\":\"ref\",\"ref\":\"cell-template\"}")
+		TEXT("]},")
+		TEXT("{\"id\":\"table-template\",\"name\":\"TableTemplate\",\"type\":\"frame\",\"reusable\":true,\"width\":1440,\"height\":\"fit_content\",\"layout\":\"vertical\",\"children\":[")
+		TEXT("{\"id\":\"header-row\",\"name\":\"HeaderRow\",\"type\":\"frame\",\"width\":1440,\"height\":\"fit_content(44)\"},")
+		TEXT("{\"id\":\"row-1\",\"name\":\"Row1\",\"type\":\"ref\",\"ref\":\"row-template\",\"children\":[{\"id\":\"cell-1\",\"name\":\"Cell1\",\"type\":\"ref\",\"ref\":\"cell-template\"}]},")
+		TEXT("{\"id\":\"row-2\",\"name\":\"Row2\",\"type\":\"ref\",\"ref\":\"row-template\",\"children\":[{\"id\":\"cell-2\",\"name\":\"Cell2\",\"type\":\"ref\",\"ref\":\"cell-template\"}]},")
+		TEXT("{\"id\":\"row-3\",\"name\":\"Row3\",\"type\":\"ref\",\"ref\":\"row-template\",\"children\":[{\"id\":\"cell-3\",\"name\":\"Cell3\",\"type\":\"ref\",\"ref\":\"cell-template\"}]},")
+		TEXT("{\"id\":\"row-4\",\"name\":\"Row4\",\"type\":\"ref\",\"ref\":\"row-template\",\"children\":[{\"id\":\"cell-4\",\"name\":\"Cell4\",\"type\":\"ref\",\"ref\":\"cell-template\"}]}")
+		TEXT("]},")
+		TEXT("{\"id\":\"root\",\"name\":\"Root\",\"type\":\"frame\",\"width\":1440,\"height\":\"fit_content\",\"layout\":\"vertical\",\"children\":[")
+		TEXT("{\"id\":\"table-instance\",\"name\":\"TableInstance\",\"type\":\"ref\",\"ref\":\"table-template\",\"height\":\"fit_content\"}")
+		TEXT("]}")
+		TEXT("]}")
+		;
+
+	FDesignDocument Doc;
+	if (!TestTrue(TEXT("Ref table document parses"), FPenParser::ParseDocument(RefTableJson, Doc)))
+	{
+		return false;
+	}
+	TestEqual(TEXT("Ref table roots parsed"), Doc.Children.Num(), 4);
+	if (Doc.Children.Num() != 4 || !Doc.Children[3].IsValid() || Doc.Children[3]->Children.Num() != 1)
+	{
+		return false;
+	}
+
+	const TSharedPtr<FDesignNode> Root = Doc.Children[3];
+	const TSharedPtr<FDesignNode> TableRef = Root->Children[0];
+	const FVector2D Precomputed = SizeEstimator::PreComputeFitContentSizes(Root, Doc);
+	TestTrue(TEXT("Precompute sees the expanded table height"),
+		FMath::IsNearlyEqual(Precomputed.Y, 268.0f, KINDA_SMALL_NUMBER));
+	TestTrue(TEXT("Ref instance keeps the expanded table height"),
+		FMath::IsNearlyEqual(TableRef->Transform.Height.Value, 268.0f, KINDA_SMALL_NUMBER));
+
+	for (int32 Index = 0; Index < 4; ++Index)
+	{
+		TSharedPtr<FDesignNode> LocalRowRef = MakeShared<FDesignNode>();
+		LocalRowRef->Id = FString::Printf(TEXT("local-row-%d"), Index);
+		LocalRowRef->Name = LocalRowRef->Id;
+		LocalRowRef->Type = EDesignNodeType::Ref;
+		LocalRowRef->Ref = TEXT("row-template");
+		LocalRowRef->Transform.Width = FDesignSize::Fixed(1440.0f);
+		LocalRowRef->Transform.Height = FDesignSize::Fit(56.0f);
+		LocalRowRef->Transform.bHasWidth = true;
+		LocalRowRef->Transform.bHasHeight = true;
+		LocalRowRef->Transform.bSourceHasWidth = true;
+		LocalRowRef->Transform.bSourceHasHeight = true;
+
+		TSharedPtr<FDesignNode> LocalCellRef = MakeShared<FDesignNode>();
+		LocalCellRef->Id = FString::Printf(TEXT("local-cell-%d"), Index);
+		LocalCellRef->Name = LocalCellRef->Id;
+		LocalCellRef->Type = EDesignNodeType::Ref;
+		LocalCellRef->Ref = TEXT("cell-template");
+		LocalRowRef->Children.Add(LocalCellRef);
+
+		TableRef->Children.Add(LocalRowRef);
+	}
+
+	const FVector2D ParentEstimate = SizeEstimator::EstimateNodeSize(Root, 1440.0f);
+	TestTrue(TEXT("Parent uses expanded ref table height instead of one row"),
+		FMath::IsNearlyEqual(ParentEstimate.Y, 268.0f, KINDA_SMALL_NUMBER));
+	TestTrue(TEXT("Row-like source fit minimum remains source-authored"),
+		TableRef->Children[1]->Transform.bSourceHasHeight);
 
 	return true;
 }

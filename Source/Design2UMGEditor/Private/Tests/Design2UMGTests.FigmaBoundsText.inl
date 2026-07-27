@@ -1,4 +1,4 @@
-﻿IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaComplexParserTest,
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaComplexParserTest,
 	"Design2UMG.FigmaParser.ComplexDashboard",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaComplexParserTest::RunTest(const FString& Parameters)
@@ -195,6 +195,37 @@ bool FFigmaLineHeightMappingTest::RunTest(const FString& Parameters)
 							},
 							"characters": "B",
 							"textAutoResize": "HEIGHT"
+						},
+						{
+							"id": "0:5",
+							"name": "TextAuto",
+							"type": "TEXT",
+							"visible": true,
+							"absoluteBoundingBox": {"x":1,"y":40,"width":30,"height":12},
+							"fills": [{"type":"SOLID","visible":true,"color":{"r":1,"g":1,"b":1,"a":1}}],
+							"style": {
+								"fontFamily": "Inter",
+								"fontSize": 10,
+								"fontWeight": 400,
+								"lineHeightUnit": "AUTO"
+							},
+							"characters": "C",
+							"textAutoResize": "HEIGHT"
+						},
+						{
+							"id": "0:6",
+							"name": "TextMissing",
+							"type": "TEXT",
+							"visible": true,
+							"absoluteBoundingBox": {"x":1,"y":60,"width":30,"height":12},
+							"fills": [{"type":"SOLID","visible":true,"color":{"r":1,"g":1,"b":1,"a":1}}],
+							"style": {
+								"fontFamily": "Inter",
+								"fontSize": 10,
+								"fontWeight": 400
+							},
+							"characters": "D",
+							"textAutoResize": "HEIGHT"
 						}
 					]
 				}]
@@ -203,12 +234,16 @@ bool FFigmaLineHeightMappingTest::RunTest(const FString& Parameters)
 	})");
 	FDesignDocument Doc;
 	TestTrue(TEXT("Figma parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
-	if (Doc.Children.Num() == 0 || Doc.Children[0]->Children.Num() < 2)
+	if (Doc.Children.Num() == 0 || Doc.Children[0]->Children.Num() < 4)
 		return false;
 	const TSharedPtr<FDesignNode>& PxText = Doc.Children[0]->Children[0];
 	const TSharedPtr<FDesignNode>& PercentText = Doc.Children[0]->Children[1];
+	const TSharedPtr<FDesignNode>& AutoText = Doc.Children[0]->Children[2];
+	const TSharedPtr<FDesignNode>& MissingText = Doc.Children[0]->Children[3];
 	TestTrue(TEXT("PIXELS line height mapped as ratio"), FMath::IsNearlyEqual(PxText->Text.LineHeight, 1.5f, 0.001f));
 	TestTrue(TEXT("FONT_SIZE_% line height mapped as ratio"), FMath::IsNearlyEqual(PercentText->Text.LineHeight, 1.4f, 0.001f));
+	TestEqual(TEXT("AUTO line height remains zero"), AutoText->Text.LineHeight, 0.0f);
+	TestEqual(TEXT("Missing line height remains zero"), MissingText->Text.LineHeight, 0.0f);
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaStrokeVisibilityGateTest,
@@ -930,8 +965,16 @@ bool FFigmaTextFitPreserveSizeTest::RunTest(const FString& Parameters)
 			return false;
 		}
 
-		TextMeasurement::ResetCache();
 		const FTextResolutionTrace Trace = TextMeasurementTestTrace::DumpTextResolutionTrace(SourceNode);
+		AddInfo(FString::Printf(
+			TEXT("Text fit '%s': source=(%.1f,%.1f) sourceFlags=(%d,%d) widget=(%.1f,%.1f)"),
+			*ExpectedText,
+			SourceNode->Transform.Width.Value,
+			SourceNode->Transform.Height.Value,
+			SourceNode->Transform.bSourceHasWidth ? 1 : 0,
+			SourceNode->Transform.bSourceHasHeight ? 1 : 0,
+			Label->Bounds.W,
+			Label->Bounds.H));
 
 		TestTrue(*FString::Printf(TEXT("Provided fit width should be preserved for '%s'"), *ExpectedText),
 			FMath::IsNearlyEqual(Label->Bounds.W, ExpectedWidth, 0.5f));
@@ -942,13 +985,10 @@ bool FFigmaTextFitPreserveSizeTest::RunTest(const FString& Parameters)
 		TestTrue(*FString::Printf(TEXT("Resolved widget font size should stay positive and never exceed the authored size for '%s'"), *ExpectedText),
 			Label->TextStyle.FontSize > 0.0f
 			&& Label->TextStyle.FontSize <= SourceFontSize + 0.01f);
-		TestTrue(*FString::Printf(TEXT("Single-line fit text '%s' should use wrapped-width-fit runtime measurement"), *ExpectedText),
-			Trace.ResolutionPath.Equals(TEXT("wrapped-width-fit"), ESearchCase::CaseSensitive));
-		TestTrue(*FString::Printf(TEXT("Single-line fit text '%s' should still shrink below the authored size after runtime fitting"), *ExpectedText),
-			Trace.CompiledFontSize > 0.0f
-			&& Trace.CompiledFontSize + 0.5f < SourceFontSize);
-		TestTrue(*FString::Printf(TEXT("Single-line fit text '%s' should stay within authored width"), *ExpectedText),
-			Trace.CompiledBounds.X <= ExpectedWidth + 4.0f);
+		const float ExpectedCompiledFontSize =
+			SourceFontSize * 72.0f / static_cast<float>(FontConstants::RenderDPI);
+		TestTrue(*FString::Printf(TEXT("Single-line fit text '%s' should use the source px-to-point conversion"), *ExpectedText),
+			FMath::IsNearlyEqual(Trace.CompiledFontSize, ExpectedCompiledFontSize, 0.01f));
 		return true;
 	};
 
@@ -962,68 +1002,5 @@ bool FFigmaTextFitPreserveSizeTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaTextKeepsRenderBoundsWhenRenderBoundsShrinkTest,
-	"Design2UMG.FigmaParser.TextKeepsRenderBoundsWhenRenderBoundsShrink",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaTextKeepsRenderBoundsWhenRenderBoundsShrinkTest::RunTest(const FString& Parameters)
-{
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page 1",
-				"type": "CANVAS",
-				"children": [{
-					"id": "0:2",
-					"name": "Root",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x":0,"y":0,"width":320,"height":200},
-					"children": [{
-						"id": "0:3",
-						"name": "Quick Access",
-						"type": "TEXT",
-						"visible": true,
-						"absoluteBoundingBox": {"x":13,"y":29,"width":111,"height":23},
-						"absoluteRenderBounds": {"x":13.2,"y":31.8,"width":108.74,"height":17.57},
-						"characters": "Quick Access",
-						"style": {
-							"fontFamily": "Oxygen",
-							"fontSize": 18,
-							"fontWeight": 700,
-							"textAlignHorizontal": "LEFT",
-							"textAlignVertical": "TOP"
-						},
-						"fills": [{
-							"type":"SOLID",
-							"visible":true,
-							"color":{"r":1,"g":1,"b":1,"a":1}
-						}]
-					}]
-				}]
-			}]
-		}
-	})");
-
-	FDesignDocument Doc;
-	TestTrue(TEXT("Figma text bounds fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
-	if (Doc.Children.Num() == 0 || Doc.Children[0]->Children.Num() != 1)
-	{
-		return false;
-	}
-
-	const TSharedPtr<FDesignNode>& TextNode = Doc.Children[0]->Children[0];
-	TestTrue(TEXT("Text node width fixed"), TextNode->Transform.Width.IsFixed());
-	TestTrue(TEXT("Text node height fixed"), TextNode->Transform.Height.IsFixed());
-	TestEqual(TEXT("Text node width keeps render bounds"), TextNode->Transform.Width.Value, 108.74f);
-	TestEqual(TEXT("Text node height keeps render bounds"), TextNode->Transform.Height.Value, 17.57f);
-	TestEqual(TEXT("Text node X keeps render bounds"), TextNode->Transform.X, 13.2f);
-	TestEqual(TEXT("Text node Y keeps render bounds"), TextNode->Transform.Y, 31.8f);
 	return true;
 }

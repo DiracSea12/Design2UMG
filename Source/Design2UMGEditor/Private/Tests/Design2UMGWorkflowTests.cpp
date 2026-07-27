@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "Misc/AutomationTest.h"
 #include "Design2UMGConverter.h"
+#include "DesignSchema.h"
 #include "Design2UMGFigmaMetadataExtensions.h"
 #include "Design2UMGEditorDesignSourceRegistry.h"
 #include "WidgetMetadataCollector.h"
@@ -272,11 +273,14 @@ bool FPenWelcomeWrapFontRegressionTest::RunTest(const FString& Parameters)
 		ProTipsPadding.Right,
 		ProTipsPadding.Bottom));
 
-	constexpr float ExpectedCompiledRubikFontSize = 20.0f;
-	TestTrue(TEXT("Welcome body keeps the authoritative 20px compiled Rubik size"),
-		FMath::IsNearlyEqual(WelcomeBody->TextStyle.FontSize, ExpectedCompiledRubikFontSize, 0.01f));
-	TestTrue(TEXT("Pro tips keeps the authoritative 20px compiled Rubik size"),
-		FMath::IsNearlyEqual(ProTips->TextStyle.FontSize, ExpectedCompiledRubikFontSize, 0.01f));
+	const float ExpectedWelcomeBodySize =
+		WelcomeBody->TextStyle.SourceFontSize * 72.0f / static_cast<float>(FontConstants::RenderDPI);
+	const float ExpectedProTipsSize =
+		ProTips->TextStyle.SourceFontSize * 72.0f / static_cast<float>(FontConstants::RenderDPI);
+	TestTrue(TEXT("Welcome body uses the source px-to-point conversion"),
+		FMath::IsNearlyEqual(WelcomeBody->TextStyle.FontSize, ExpectedWelcomeBodySize, 0.01f));
+	TestTrue(TEXT("Pro tips uses the source px-to-point conversion"),
+		FMath::IsNearlyEqual(ProTips->TextStyle.FontSize, ExpectedProTipsSize, 0.01f));
 	TestTrue(TEXT("Welcome body and Pro tips stay on the same authoritative Rubik size"),
 		FMath::IsNearlyEqual(WelcomeBody->TextStyle.FontSize, ProTips->TextStyle.FontSize, 0.01f));
 	return true;

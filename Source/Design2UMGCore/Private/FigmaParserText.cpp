@@ -28,6 +28,7 @@ void ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& Ou
 	Weight = FMath::Clamp(FMath::RoundToInt(Weight / 100.0f) * 100, 100, 900);
 	OutNode.Text.FontWeight = FString::FromInt(Weight);
 
+	OutNode.Text.LineHeight = 0.0f;
 	const FString LineHeightUnit = GetString(Style, TEXT("lineHeightUnit"));
 	if (LineHeightUnit != TEXT("AUTO"))
 	{
@@ -48,7 +49,6 @@ void ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& Ou
 			}
 		}
 	}
-
 	if (Style->HasField(TEXT("letterSpacing")))
 	{
 		OutNode.Text.SetLetterSpacingValue(GetNumber(Style, TEXT("letterSpacing")));

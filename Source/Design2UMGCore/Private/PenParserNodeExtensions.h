@@ -11,7 +11,7 @@ namespace PenParserNodeExtensions
 	struct FParseCallbacks
 	{
 		void (*ParseNodeFillProperties)(const TSharedPtr<FJsonValue>& Value, FDesignNode& OutNode, const FDesignVariableResolver& Resolver) = nullptr;
-		void (*ParseNodeStrokeProperties)(const TSharedPtr<FJsonValue>& Value, FDesignNode& OutNode, const FDesignVariableResolver& Resolver) = nullptr;
+		void (*ParseNodeStrokeProperties)(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver) = nullptr;
 		void (*ApplyNodeBoxProperties)(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, EDesignNodeType SizeNodeType, const FDesignVariableResolver& Resolver) = nullptr;
 		void (*ApplyNodeLayoutProperties)(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver, bool bIncludeTextProperties) = nullptr;
 		void (*ApplyNodeTextStyleProperties)(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver) = nullptr;

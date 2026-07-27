@@ -122,9 +122,9 @@ namespace UMGTextStyleApplication
 
 	void ApplyTypedFontInfo(FSlateFontInfo& FontInfo, const FUMGWidgetNode& Node, bool& bFontChanged)
 	{
-		if (Node.TextStyle.FontSize > 0.0f)
+		if (FMath::IsFinite(Node.TextStyle.FontSize) && Node.TextStyle.FontSize > 0.0f)
 		{
-			FontInfo.Size = FMath::Max(1, FMath::RoundToInt(Node.TextStyle.FontSize));
+			FontInfo.Size = Node.TextStyle.FontSize;
 			bFontChanged = true;
 		}
 
@@ -315,8 +315,12 @@ namespace UMGTextStyleApplication
 			double NumberValue = 0.0;
 			if (RowObject->TryGetNumberField(UMGPropertyKeys::FontSize, NumberValue))
 			{
-				FontInfo.Size = FMath::Max(1, FMath::RoundToInt(static_cast<float>(NumberValue)));
-				bFontChanged = true;
+				const float RowFontSize = static_cast<float>(NumberValue);
+				if (FMath::IsFinite(RowFontSize) && RowFontSize > 0.0f)
+				{
+					FontInfo.Size = RowFontSize;
+					bFontChanged = true;
+				}
 			}
 			double DesignFontSize = 0.0;
 			if (RowObject->TryGetNumberField(UMGPropertyKeys::LetterSpacing, NumberValue))

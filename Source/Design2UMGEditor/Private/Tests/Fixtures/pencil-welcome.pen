@@ -4064,12 +4064,12 @@
                   ]
                 },
                 {
-                  "type": "icon_font",
+                  "type": "icon",
                   "id": "UlKF0",
                   "width": 24,
                   "height": 24,
-                  "iconFontName": "keyboard_arrow_down",
-                  "iconFontFamily": "Material Symbols Sharp",
+                  "icon": "keyboard_arrow_down",
+                  "library": "Material Symbols Sharp",
                   "weight": 100,
                   "fill": "$--sidebar-foreground"
                 }
@@ -4129,12 +4129,12 @@
           "alignItems": "center",
           "children": [
             {
-              "type": "icon_font",
+              "type": "icon",
               "id": "xGT5g",
               "width": 24,
               "height": 24,
-              "iconFontName": "dashboard",
-              "iconFontFamily": "Material Symbols Sharp",
+              "icon": "dashboard",
+              "library": "Material Symbols Sharp",
               "weight": 100,
               "fill": "$--sidebar-accent-foreground"
             },

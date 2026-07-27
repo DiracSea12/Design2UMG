@@ -28,6 +28,7 @@ def main() -> None:
         parallel_editors=3,
         idle_timeout_sec=180,
         startup_timeout_sec=60,
+        editor_isolation="shard",
         post_workers=4,
         include="hero",
         exclude="",
@@ -182,6 +183,41 @@ def main() -> None:
             run_scope["game_output"],
             {"explicit": False, "effective_root": effective_root},
         )
+
+        case_a_result = automation_root / "case-a-result.json"
+        case_a_result.write_text("{}", encoding="utf-8")
+        states = [
+            {
+                "case": {"name": "case-a"},
+                "spec_paths": [automation_root / "case-a-generate.json", automation_root / "case-a-asset.json"],
+                "steps": {
+                    "generation": {
+                        "spec_path": automation_root / "case-a-generate.json",
+                        "result_json_path": case_a_result,
+                    },
+                    "asset_render": {
+                        "spec_path": automation_root / "case-a-asset.json",
+                        "result_json_path": automation_root / "case-a-asset-result.json",
+                    },
+                },
+            },
+            {
+                "case": {"name": "case-b"},
+                "spec_paths": [automation_root / "case-b-generate.json"],
+                "steps": {
+                    "generation": {
+                        "spec_path": automation_root / "case-b-generate.json",
+                        "result_json_path": case_a_result,
+                    },
+                },
+            },
+        ]
+        case_summary_shards = batch_verify.build_isolation_summary_shards(states, "case")
+        assert_equal(len(case_summary_shards), 1)
+        assert_equal(case_summary_shards[0]["editor_isolation"], "case")
+        assert_equal(len(case_summary_shards[0]["spec_paths"]), 3)
+        missing_case_states = batch_verify.build_missing_case_states(states)
+        assert_equal([state["case"]["name"] for state in missing_case_states], ["case-a"])
 
     print("batch report contract selftest passed")
 

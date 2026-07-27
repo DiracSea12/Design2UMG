@@ -9,9 +9,9 @@
       "children": [
         {
           "id": "icon1",
-          "type": "icon_font",
-          "iconFontFamily": "MissingIconFamily_UnitTest",
-          "iconFontName": "dashboard",
+          "type": "icon",
+          "library": "MissingIconFamily_UnitTest",
+          "icon": "dashboard",
           "fontSize": 20
         }
       ]

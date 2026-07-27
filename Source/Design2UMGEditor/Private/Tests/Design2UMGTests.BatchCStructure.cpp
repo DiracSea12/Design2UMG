@@ -201,6 +201,23 @@ bool FBatchCTextStyleApplicationSmokeTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Typed font application applies rounded font size"), static_cast<int32>(FontInfo.Size), 18);
 	TestEqual(TEXT("Typed font application applies typeface name"), FontInfo.TypefaceFontName, FName(TEXT("Bold")));
 
+	FUMGWidgetNode HalfFontNode;
+	HalfFontNode.TextStyle.FontSize = 10.5f;
+	FSlateFontInfo ExactHalfFontInfo;
+	bool bExactHalfFontChanged = false;
+	UMGTextStyleApplication::ApplyTypedFontInfo(ExactHalfFontInfo, HalfFontNode, bExactHalfFontChanged);
+	TestTrue(TEXT("Typed font application reports an exact half font change"), bExactHalfFontChanged);
+	TestTrue(TEXT("Typed font application preserves ordinary half font sizes"), FMath::IsNearlyEqual(ExactHalfFontInfo.Size, 10.5f, 0.001f));
+
+	FUMGWidgetNode SubpointFontNode;
+	SubpointFontNode.TextStyle.FontSize = 0.375f;
+	FSlateFontInfo SubpointFontInfo;
+	bool bSubpointFontChanged = false;
+	UMGTextStyleApplication::ApplyTypedFontInfo(SubpointFontInfo, SubpointFontNode, bSubpointFontChanged);
+	TestTrue(TEXT("Typed font application reports a subpoint font change"), bSubpointFontChanged);
+	TestTrue(TEXT("Typed font application preserves 0.375 point sizes"),
+		FMath::IsNearlyEqual(SubpointFontInfo.Size, 0.375f, 0.001f));
+
 	UTextBlock* TextBlock = NewObject<UTextBlock>();
 	TestNotNull(TEXT("Text block can be allocated for typed layout smoke"), TextBlock);
 	if (!TextBlock)

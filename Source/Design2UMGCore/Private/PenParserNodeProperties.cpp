@@ -83,7 +83,11 @@ void ApplyNodeLayoutProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNo
 	FString TextAlign;
 	if (JsonObj->TryGetStringField(TEXT("textAlign"), TextAlign))
 		OutNode.Text.TextAlign = ParseTextAlign(TextAlign);
-	TryGetResolvedNumberField(JsonObj, TEXT("lineHeight"), Resolver, OutNode.Text.LineHeight);
+	float LineHeight = 0.0f;
+	if (TryGetResolvedNumberField(JsonObj, TEXT("lineHeight"), Resolver, LineHeight) && LineHeight > 0.0f)
+	{
+		OutNode.Text.LineHeight = LineHeight;
+	}
 	FString TextGrowth;
 	if (JsonObj->TryGetStringField(TEXT("textGrowth"), TextGrowth))
 		OutNode.Text.TextGrowth = ParseTextGrowth(TextGrowth);

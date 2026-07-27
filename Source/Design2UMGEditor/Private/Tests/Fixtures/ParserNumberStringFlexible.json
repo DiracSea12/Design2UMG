@@ -13,10 +13,9 @@
       "opacity": "0.75",
       "padding": ["1", "2", "3", "4"],
       "cornerRadius": ["5", "6", "7", "8"],
-      "stroke": {
-        "align": "inside",
-        "thickness": "2.5"
-      },
+      "stroke": "#000000",
+      "strokeWidth": "2.5",
+      "strokeAlignment": "inside",
       "fill": {
         "type": "image",
         "url": "https://example.com/icon.png",
@@ -33,8 +32,9 @@
         },
         {
           "id": "icon",
-          "type": "icon_font",
-          "iconFontName": "dashboard",
+          "type": "icon",
+          "icon": "dashboard",
+          "library": "material-symbols",
           "weight": "500"
         }
       ]

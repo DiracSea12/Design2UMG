@@ -164,6 +164,48 @@ def best_metric_source(best_case: dict, best_metric: str) -> dict:
     return source if isinstance(source, dict) else {}
 
 
+def evaluate_historical_best_identity(current_case: dict, best_case: dict) -> dict:
+    current_source_signature = current_case.get("source_signature") or {}
+    current_reference_signature = current_case.get("effective_reference_signature") or {}
+    current_identity = {
+        "source_signature.sha1": (current_source_signature.get("sha1") or "") if isinstance(current_source_signature, dict) else "",
+        "effective_reference_signature.sha1": (
+            (current_reference_signature.get("sha1") or "") if isinstance(current_reference_signature, dict) else ""
+        ),
+    }
+    mismatches = []
+    historical_sources = []
+    for _, best_metric in METRIC_PAIRS:
+        if best_case.get(best_metric) is None:
+            continue
+        metric_source = best_metric_source(best_case, best_metric)
+        source_input = metric_source.get("source_input")
+        if not isinstance(source_input, dict):
+            source_input = {}
+        historical_identity = {
+            "source_signature.sha1": source_input.get("source_design_artifact_hash") or "",
+            "effective_reference_signature.sha1": source_input.get("reference_image_hash") or "",
+        }
+        historical_sources.append({"metric": best_metric, **historical_identity})
+        for field in current_identity:
+            if not current_identity[field] or current_identity[field] != historical_identity[field]:
+                mismatches.append(
+                    {
+                        "metric": best_metric,
+                        "field": field,
+                        "current": current_identity[field],
+                        "historical_best": historical_identity[field],
+                    }
+                )
+
+    return {
+        "compatible": not mismatches,
+        "current": current_identity,
+        "historical_best_sources": historical_sources,
+        "mismatches": mismatches,
+    }
+
+
 def source_matches_metric_source(source: dict, metric_source: dict) -> bool:
     if not metric_source:
         return False
@@ -349,6 +391,7 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
         "historical_best_checked": False,
         "historical_best_missing_cases": [],
         "historical_best_incompatible_cases": [],
+        "historical_best_identity_incompatible_cases": [],
         "historical_best_degraded_authority_cases": [],
         "historical_best_regressions": [],
         "render_size_rule_checked": False,
@@ -573,6 +616,16 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
                     )
                     continue
 
+                identity = evaluate_historical_best_identity(current_case, best_case)
+                if not identity["compatible"]:
+                    result["historical_best_identity_incompatible_cases"].append(
+                        {
+                            "case": case_name,
+                            **identity,
+                        }
+                    )
+                    continue
+
                 regressions = []
                 for current_metric, best_metric in METRIC_PAIRS:
                     current_value = resolved_current_metrics.get(current_metric)
@@ -646,6 +699,15 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
                     count=len(result["historical_best_pipeline_determinism_incompatible_cases"]),
                     detail_field="historical_best_pipeline_determinism_incompatible_cases",
                     action="Inspect both current and historical-best compare reports for the listed determinism metadata before judging regressions.",
+                )
+            if result["historical_best_identity_incompatible_cases"]:
+                append_blocked_reason(
+                    result,
+                    "historical_best_content_identity_incompatible",
+                    f"{len(result['historical_best_identity_incompatible_cases'])} case(s) are not comparable because source or effective-reference identity differs or is missing.",
+                    count=len(result["historical_best_identity_incompatible_cases"]),
+                    detail_field="historical_best_identity_incompatible_cases",
+                    action="Inspect source_signature.sha1 and effective_reference_signature.sha1 for the current case and every historical-best metric source.",
                 )
             if result["historical_best_degraded_authority_cases"]:
                 append_blocked_reason(

@@ -1,5 +1,5 @@
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIconFontNoMappingFallbackTest,
-	"Design2UMG.IconFont.NoMappingFallback",
+	"Design2UMG.Unit.IconFont.NoMappingFallback",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FIconFontNoMappingFallbackTest::RunTest(const FString& Parameters)
 {
@@ -43,7 +43,7 @@ bool FIconFontNoMappingFallbackTest::RunTest(const FString& Parameters)
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIconFontNoMappingKeepIconNameTest,
-	"Design2UMG.IconFont.NoMappingKeepsIconName",
+	"Design2UMG.Unit.IconFont.NoMappingKeepsIconName",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FIconFontNoMappingKeepIconNameTest::RunTest(const FString& Parameters)
 {
@@ -83,7 +83,7 @@ bool FIconFontNoMappingKeepIconNameTest::RunTest(const FString& Parameters)
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIconFontLigatureFallbackUsesRegularWeightTest,
-	"Design2UMG.IconFont.LigatureFallbackUsesRegularWeight",
+	"Design2UMG.Unit.IconFont.LigatureFallbackUsesRegularWeight",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FIconFontLigatureFallbackUsesRegularWeightTest::RunTest(const FString& Parameters)
 {
@@ -101,9 +101,9 @@ bool FIconFontLigatureFallbackUsesRegularWeightTest::RunTest(const FString& Para
 			"type": "frame",
 			"children": [{
 				"id": "icon1",
-				"type": "icon_font",
-				"iconFontFamily": "MissingIconFamily_UnitTest",
-				"iconFontName": "dashboard",
+				"type": "icon",
+				"library": "MissingIconFamily_UnitTest",
+				"icon": "dashboard",
 				"fontSize": 20,
 				"weight": 100
 			}]
@@ -340,6 +340,175 @@ bool FExplicitFontMappingMissingTypefaceDoesNotAutoSubstituteTest::RunTest(const
 	return TextWidget != nullptr;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FExplicitPostScriptMeasurementGenerationParityTest,
+	"Design2UMG.Text.ExplicitPostScriptMeasurementGenerationParity",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FExplicitPostScriptMeasurementGenerationParityTest::RunTest(const FString& Parameters)
+{
+	FFontResolver::ClearCache();
+	UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+	TestTrue(TEXT("Settings available"), Settings != nullptr);
+	if (!Settings)
+	{
+		return false;
+	}
+
+	const TMap<FString, TSoftObjectPtr<UFont>> SavedMappings = Settings->ExplicitFontMappings;
+	const TSoftObjectPtr<UFont> SavedDefaultFont = Settings->DefaultFontAsset;
+	Settings->ExplicitFontMappings.Empty();
+	Settings->DefaultFontAsset.Reset();
+
+	UPackage* FontPackage = CreatePackage(TEXT("/Game/Design2UMG/Fonts/D2U_PostScriptMeasurementParityFont"));
+	UFont* Font = NewObject<UFont>(
+		FontPackage,
+		TEXT("D2U_PostScriptMeasurementParityFont"),
+		RF_Public | RF_Standalone);
+	if (!TestNotNull(TEXT("PostScript parity font fixture created"), Font))
+	{
+		Settings->ExplicitFontMappings = SavedMappings;
+		Settings->DefaultFontAsset = SavedDefaultFont;
+		return false;
+	}
+
+	Font->FontCacheType = EFontCacheType::Runtime;
+	Font->GetMutableInternalCompositeFont().DefaultTypeface.Fonts.Add(FTypefaceEntry(
+		FName(TEXT("Bold")),
+		FPaths::Combine(FPaths::EngineContentDir(), TEXT("Slate/Fonts/Roboto-Bold.ttf")),
+		EFontHinting::Default,
+		EFontLoadingPolicy::LazyLoad));
+	const FString FontPath = Font->GetPathName();
+	const FString Typeface = FFontResolver::FindExactTypefaceForAssetPath(FontPath, TEXT("700"));
+	TestFalse(TEXT("PostScript parity font exposes an exact bold typeface"), Typeface.IsEmpty());
+	Settings->ExplicitFontMappings.Add(
+		TEXT("D2UPostScriptMeasurementParity-Bold"),
+		TSoftObjectPtr<UFont>(FSoftObjectPath(Font)));
+	FFontResolver::ClearCache();
+
+	const FString Json = TEXT(R"({
+		"version": "1.0",
+		"children": [{
+			"id": "postscript_measurement_parity",
+			"type": "text",
+			"content": "First line\nSecond line",
+			"fontFamily": "D2UPostScriptMeasurementParity",
+			"fontPostScriptName": "D2UPostScriptMeasurementParity-Bold",
+			"fontWeight": "700",
+			"fontSize": 24,
+			"lineHeight": 1.5
+		}, {
+			"id": "postscript_default_typeface_parity",
+			"type": "text",
+			"content": "Default first line\nDefault second line",
+			"fontFamily": "D2UPostScriptMeasurementParity",
+			"fontPostScriptName": "D2UPostScriptMeasurementParity-Bold",
+			"fontSize": 24,
+			"lineHeight": 1.5
+		}]
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("PostScript measurement parity fixture parses"), FPenParser::ParseDocument(Json, Doc));
+	const TSharedPtr<FDesignNode> DesignNode = Doc.Children.Num() > 0 ? Doc.Children[0] : nullptr;
+	const TSharedPtr<FDesignNode> DefaultTypefaceDesignNode = Doc.Children.Num() > 1 ? Doc.Children[1] : nullptr;
+	if (DefaultTypefaceDesignNode.IsValid())
+	{
+		DefaultTypefaceDesignNode->Text.FontWeight.Empty();
+	}
+	TestTrue(TEXT("PostScript measurement parity design node exists"), DesignNode.IsValid());
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
+	const FUMGWidgetNode* TextWidget = FindWidgetById(Data.RootWidget, TEXT("postscript_measurement_parity"));
+	const FUMGWidgetNode* DefaultTypefaceWidget =
+		FindWidgetById(Data.RootWidget, TEXT("postscript_default_typeface_parity"));
+	TestNotNull(TEXT("PostScript measurement parity widget exists"), TextWidget);
+	TestTrue(TEXT("PostScript default-typeface design node exists"), DefaultTypefaceDesignNode.IsValid());
+	TestNotNull(TEXT("PostScript default-typeface widget exists"), DefaultTypefaceWidget);
+
+	bool bPassed = DesignNode.IsValid()
+		&& TextWidget != nullptr
+		&& DefaultTypefaceDesignNode.IsValid()
+		&& DefaultTypefaceWidget != nullptr;
+	if (DesignNode.IsValid() && TextWidget)
+	{
+		bPassed &= TestTrue(TEXT("Generated font asset is set"), TextWidget->Text.FontFamily.IsSet());
+		bPassed &= TestTrue(TEXT("Generated typeface is set"), TextWidget->Text.TypefaceFontName.IsSet());
+		bPassed &= TestTrue(TEXT("Generated explicit line height is set"), TextWidget->Text.LineHeightPercentage.IsSet());
+		if (TextWidget->Text.FontFamily.IsSet())
+		{
+			bPassed &= TestEqual(TEXT("Generation uses the explicit PostScript font asset"),
+				TextWidget->Text.FontFamily.GetValue(), FontPath);
+		}
+		if (TextWidget->Text.TypefaceFontName.IsSet())
+		{
+			bPassed &= TestEqual(TEXT("Generation uses the exact mapped typeface"),
+				TextWidget->Text.TypefaceFontName.GetValue(), Typeface);
+		}
+
+		const FVector2D MeasuredSize = TextMeasurement::MeasureTextNodeSize(DesignNode, 0.0f);
+		UTextBlock* ExpectedTextBlock = NewObject<UTextBlock>();
+		FSlateFontInfo ExpectedFont = FTextBlockStyle::GetDefault().Font;
+		ExpectedFont.FontObject = Font;
+		ExpectedFont.TypefaceFontName = FName(*Typeface);
+		ExpectedFont.Size = TextWidget->TextStyle.FontSize;
+		ExpectedTextBlock->SetText(FText::FromString(TextMeasurement::PrepareRuntimeTextContent(DesignNode->Text.Content)));
+		ExpectedTextBlock->SetFont(ExpectedFont);
+		if (TextWidget->Text.LineHeightPercentage.IsSet())
+		{
+			ExpectedTextBlock->SetLineHeightPercentage(TextWidget->Text.LineHeightPercentage.GetValue());
+			ExpectedTextBlock->SetApplyLineHeightToBottomLine(true);
+		}
+		TSharedRef<SWidget> ExpectedSlateWidget = ExpectedTextBlock->TakeWidget();
+		ExpectedSlateWidget->SlatePrepass(1.0f);
+		ExpectedSlateWidget->SlatePrepass(1.0f);
+		const FVector2D ExpectedSize = ExpectedSlateWidget->GetDesiredSize();
+		bPassed &= TestTrue(TEXT("Runtime measurement remains available"), MeasuredSize.X > 0.0f && MeasuredSize.Y > 0.0f);
+		bPassed &= TestTrue(TEXT("Measurement matches the generated font asset, typeface, and line height"),
+			MeasuredSize.Equals(ExpectedSize, 0.01f));
+	}
+
+	if (DefaultTypefaceDesignNode.IsValid() && DefaultTypefaceWidget)
+	{
+		bPassed &= TestTrue(TEXT("Empty-weight generation keeps the explicit PostScript font asset"),
+			DefaultTypefaceWidget->Text.FontFamily.IsSet());
+		bPassed &= TestFalse(TEXT("Empty-weight generation leaves typeface unset"),
+			DefaultTypefaceWidget->Text.TypefaceFontName.IsSet());
+		bPassed &= TestTrue(TEXT("Empty-weight generation keeps explicit line height"),
+			DefaultTypefaceWidget->Text.LineHeightPercentage.IsSet());
+		if (DefaultTypefaceWidget->Text.FontFamily.IsSet())
+		{
+			bPassed &= TestEqual(TEXT("Empty-weight generation uses the mapped font asset"),
+				DefaultTypefaceWidget->Text.FontFamily.GetValue(), FontPath);
+		}
+
+		const FVector2D MeasuredSize = TextMeasurement::MeasureTextNodeSize(DefaultTypefaceDesignNode, 0.0f);
+		UTextBlock* ExpectedTextBlock = NewObject<UTextBlock>();
+		FSlateFontInfo ExpectedFont = FTextBlockStyle::GetDefault().Font;
+		ExpectedFont.FontObject = Font;
+		ExpectedFont.Size = DefaultTypefaceWidget->TextStyle.FontSize;
+		ExpectedTextBlock->SetText(FText::FromString(
+			TextMeasurement::PrepareRuntimeTextContent(DefaultTypefaceDesignNode->Text.Content)));
+		ExpectedTextBlock->SetFont(ExpectedFont);
+		if (DefaultTypefaceWidget->Text.LineHeightPercentage.IsSet())
+		{
+			ExpectedTextBlock->SetLineHeightPercentage(
+				DefaultTypefaceWidget->Text.LineHeightPercentage.GetValue());
+			ExpectedTextBlock->SetApplyLineHeightToBottomLine(true);
+		}
+		TSharedRef<SWidget> ExpectedSlateWidget = ExpectedTextBlock->TakeWidget();
+		ExpectedSlateWidget->SlatePrepass(1.0f);
+		ExpectedSlateWidget->SlatePrepass(1.0f);
+		const FVector2D ExpectedSize = ExpectedSlateWidget->GetDesiredSize();
+		bPassed &= TestTrue(TEXT("Empty-weight runtime measurement remains available"),
+			MeasuredSize.X > 0.0f && MeasuredSize.Y > 0.0f);
+		bPassed &= TestTrue(TEXT("Empty-weight measurement matches generated default typeface and line height"),
+			MeasuredSize.Equals(ExpectedSize, 0.01f));
+	}
+
+	Settings->ExplicitFontMappings = SavedMappings;
+	Settings->DefaultFontAsset = SavedDefaultFont;
+	FFontResolver::ClearCache();
+	return bPassed;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextRunPostScriptNameTriggersRichTextBlockTest,
 	"Design2UMG.Text.TextRunPostScriptNameTriggersRichTextBlock",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -563,10 +732,10 @@ bool FKnownWidthFillTextWrapParityTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FInvalidProjectFontWidthFitUsesDeterministicFallbackTest,
-	"Design2UMG.Text.InvalidProjectFontWidthFitUsesDeterministicFallback",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FInvalidProjectFontWidthFitKeepsSourceConversionTest,
+	"Design2UMG.Text.InvalidProjectFontWidthFitKeepsSourceConversion",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FInvalidProjectFontWidthFitUsesDeterministicFallbackTest::RunTest(const FString& Parameters)
+bool FInvalidProjectFontWidthFitKeepsSourceConversionTest::RunTest(const FString& Parameters)
 {
 	const FString InvalidFamily = TEXT("D2U_InvalidWidthFitFontForResolverTest");
 	UPackage* InvalidFontPackage = CreatePackage(TEXT("/Game/Design2UMG/Fonts/D2U_InvalidWidthFitFontForResolverTest"));
@@ -599,8 +768,10 @@ bool FInvalidProjectFontWidthFitUsesDeterministicFallbackTest::RunTest(const FSt
 	TextNode->Transform.Height = FDesignSize::Fixed(130.4f);
 
 	const float ResolvedFontSize = TextMeasurement::ResolveTextFontSizeForUMG(TextNode);
-	TestTrue(TEXT("Invalid project font width fit stays below broad fallback size"), ResolvedFontSize < 20.0f);
-	TestEqual(TEXT("Invalid project font width fit uses deterministic heuristic width"), ResolvedFontSize, 18.0f);
+	const float ExpectedFontSize =
+		TextNode->Text.FontSize * 72.0f / static_cast<float>(FontConstants::RenderDPI);
+	TestTrue(TEXT("Invalid project font does not redefine the source conversion"),
+		FMath::IsNearlyEqual(ResolvedFontSize, ExpectedFontSize, 0.001f));
 	FFontResolver::ClearCache();
 	return true;
 }
