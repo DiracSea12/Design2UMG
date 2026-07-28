@@ -83,7 +83,7 @@ def main() -> None:
         entry,
         {
             "recorded_at_utc": "2026-05-18T12:34:56Z",
-            "run_root": "G:\\Runs\\batch_run",
+            "run_root": str(Path("G:/Runs/batch_run")),
             "run_scope": "focus",
             "total_cases": 2,
             "blocked_cases": 1,
