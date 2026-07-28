@@ -499,6 +499,7 @@ def test_step_editor_isolation_runs_single_specs_in_dependency_order() -> None:
 
         original_writer = batch_verify.write_editor_driver_script
         original_runner = batch_verify.run_editor_driver
+        original_cleaner = verify.ensure_clean_editor
         try:
             def fake_writer(output_root: Path, spec_paths: list[Path], tag: str = "batch") -> Path:
                 assert_equal(len(spec_paths), 1)
@@ -519,6 +520,7 @@ def test_step_editor_isolation_runs_single_specs_in_dependency_order() -> None:
 
             batch_verify.write_editor_driver_script = fake_writer
             batch_verify.run_editor_driver = fake_runner
+            verify.ensure_clean_editor = lambda: None
             with redirect_stdout(StringIO()):
                 results = batch_verify.run_execution_steps(
                     [state],
@@ -532,6 +534,7 @@ def test_step_editor_isolation_runs_single_specs_in_dependency_order() -> None:
         finally:
             batch_verify.write_editor_driver_script = original_writer
             batch_verify.run_editor_driver = original_runner
+            verify.ensure_clean_editor = original_cleaner
 
         assert_equal(calls, ["automation_generate_spec.json", "automation_asset_spec.json"])
         assert_equal([item["spec_count"] for item in results], [1, 1])
@@ -548,6 +551,7 @@ def test_step_editor_isolation_uses_short_driver_script_names() -> None:
 
         original_writer = batch_verify.write_editor_driver_script
         original_runner = batch_verify.run_editor_driver
+        original_cleaner = verify.ensure_clean_editor
         try:
             def fake_writer(output_root: Path, spec_paths: list[Path], tag: str = "batch") -> Path:
                 driver_path = output_root / f"editor_driver_{tag}.py"
@@ -564,11 +568,13 @@ def test_step_editor_isolation_uses_short_driver_script_names() -> None:
 
             batch_verify.write_editor_driver_script = fake_writer
             batch_verify.run_editor_driver = fake_runner
+            verify.ensure_clean_editor = lambda: None
             with redirect_stdout(StringIO()):
                 batch_verify.run_execution_steps([state], root, "UnrealEditor.exe", "G:/UE5/FPSRoguelike/FPSRoguelike.uproject", 180, 60, "")
         finally:
             batch_verify.write_editor_driver_script = original_writer
             batch_verify.run_editor_driver = original_runner
+            verify.ensure_clean_editor = original_cleaner
 
         assert_equal([path.name for path in driver_paths], ["editor_driver_step-001.py", "editor_driver_step-002.py"])
         assert long_case_name not in " ".join(path.name for path in driver_paths)
@@ -583,6 +589,7 @@ def test_step_editor_isolation_retries_driver_start_once() -> None:
 
         original_writer = batch_verify.write_editor_driver_script
         original_runner = batch_verify.run_editor_driver
+        original_cleaner = verify.ensure_clean_editor
         original_attempts = batch_verify.EDITOR_STEP_DRIVER_START_ATTEMPTS
         try:
             def fake_writer(output_root: Path, spec_paths: list[Path], tag: str = "batch") -> Path:
@@ -605,12 +612,14 @@ def test_step_editor_isolation_retries_driver_start_once() -> None:
 
             batch_verify.write_editor_driver_script = fake_writer
             batch_verify.run_editor_driver = fake_runner
+            verify.ensure_clean_editor = lambda: None
             batch_verify.EDITOR_STEP_DRIVER_START_ATTEMPTS = 2
             with redirect_stdout(StringIO()):
                 batch_verify.run_execution_steps([state], root, "UnrealEditor.exe", "G:/UE5/FPSRoguelike/FPSRoguelike.uproject", 180, 60, "")
         finally:
             batch_verify.write_editor_driver_script = original_writer
             batch_verify.run_editor_driver = original_runner
+            verify.ensure_clean_editor = original_cleaner
             batch_verify.EDITOR_STEP_DRIVER_START_ATTEMPTS = original_attempts
 
         assert_equal(attempts, ["automation_generate_spec.json", "automation_generate_spec.json", "automation_asset_spec.json"])
