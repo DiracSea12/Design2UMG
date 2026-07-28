@@ -479,6 +479,20 @@ bool FExplicitPostScriptMeasurementGenerationParityTest::RunTest(const FString& 
 				DefaultTypefaceWidget->Text.FontFamily.GetValue(), FontPath);
 		}
 
+		const FFontResolutionDiagnostic EmptyWeightDiagnostic = FFontResolver::ResolveFontDiagnostic(
+			DefaultTypefaceDesignNode->Text.FontFamily,
+			DefaultTypefaceDesignNode->Text.FontPostScriptName,
+			DefaultTypefaceDesignNode->Text.FontWeight,
+			DefaultTypefaceDesignNode->Text.FontStyle,
+			false,
+			false);
+		bPassed &= TestEqual(TEXT("Empty-weight diagnostic accepts the mapped default typeface"),
+			EmptyWeightDiagnostic.ResolutionState, TEXT("exact"));
+		bPassed &= TestEqual(TEXT("Empty-weight diagnostic keeps the mapped font asset"),
+			EmptyWeightDiagnostic.ResolvedAssetPath, FontPath);
+		bPassed &= TestTrue(TEXT("Empty-weight diagnostic leaves the default typeface implicit"),
+			EmptyWeightDiagnostic.ResolvedTypeface.IsEmpty());
+
 		const FVector2D MeasuredSize = TextMeasurement::MeasureTextNodeSize(DefaultTypefaceDesignNode, 0.0f);
 		UTextBlock* ExpectedTextBlock = NewObject<UTextBlock>();
 		FSlateFontInfo ExpectedFont = FTextBlockStyle::GetDefault().Font;

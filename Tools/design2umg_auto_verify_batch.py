@@ -1126,21 +1126,29 @@ def evaluate_no_regression(report: dict, case_dir: Path | None, pixel_tolerance:
         result["reasons"].append(baseline.get("reason", "baseline_unavailable"))
         return result
 
-    decisive_metric = "unavailable"
-    decisive_delta = None
-    no_regression_metric_passed = False
+    first_metric = ""
+    first_delta = None
+    regressed_metric = ""
+    regressed_delta = None
     for metric_name in ("stable_changed_ratio", "changed_ratio", "stable_mean_abs_error", "mean_abs_error"):
         current_value = result["current"].get(metric_name)
         baseline_value = baseline.get(metric_name)
         if current_value is None or baseline_value is None:
             continue
-        decisive_metric = metric_name
-        decisive_delta = current_value - baseline_value
-        no_regression_metric_passed = decisive_delta <= NO_REGRESSION_EPSILON
-        break
-    if decisive_metric == "unavailable":
+        delta = current_value - baseline_value
+        if not first_metric:
+            first_metric = metric_name
+            first_delta = delta
+        if delta > NO_REGRESSION_EPSILON and not regressed_metric:
+            regressed_metric = metric_name
+            regressed_delta = delta
+    if not first_metric:
         result["reasons"].append("comparison_metric_unavailable")
         return result
+
+    no_regression_metric_passed = not regressed_metric
+    decisive_metric = regressed_metric or first_metric
+    decisive_delta = regressed_delta if regressed_metric else first_delta
 
     structure_validation = report.get("structure_validation") or {}
     structure_guard_passed = structure_validation.get("passed") if structure_validation.get("required") else True

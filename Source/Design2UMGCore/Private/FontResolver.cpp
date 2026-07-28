@@ -573,6 +573,7 @@ FFontResolutionDiagnostic FFontResolver::ResolveFontDiagnostic(
 	}
 
 	bool bAllowFallbackAsset = true;
+	bool bUseMappedAssetDefaultTypeface = false;
 	if (bUnsupportedInput)
 	{
 		Diagnostic.ResolutionState = TEXT("unsupported-input");
@@ -611,8 +612,11 @@ FFontResolutionDiagnostic FFontResolver::ResolveFontDiagnostic(
 				}
 				else if (ExplicitMappingResult == EExplicitFontMappingResult::Resolved)
 				{
-					Diagnostic.ResolvedTypeface = FindExactTypefaceForAssetPath(Diagnostic.ResolvedAssetPath, Weight);
-					if (Diagnostic.ResolvedTypeface.IsEmpty())
+					bUseMappedAssetDefaultTypeface = Weight.IsEmpty();
+					Diagnostic.ResolvedTypeface = bUseMappedAssetDefaultTypeface
+						? FString()
+						: FindExactTypefaceForAssetPath(Diagnostic.ResolvedAssetPath, Weight);
+					if (!bUseMappedAssetDefaultTypeface && Diagnostic.ResolvedTypeface.IsEmpty())
 					{
 						Diagnostic.ResolutionState = TEXT("rejected");
 						Diagnostic.Severity = TEXT("error");
@@ -699,7 +703,9 @@ FFontResolutionDiagnostic FFontResolver::ResolveFontDiagnostic(
 			AddFontDiagnosticIssue(Diagnostic, TEXT("engine-default-used"));
 		}
 	}
-	if (Diagnostic.ResolvedTypeface.IsEmpty() && Diagnostic.ResolutionSourceKind != TEXT("unresolved"))
+	if (Diagnostic.ResolvedTypeface.IsEmpty()
+		&& Diagnostic.ResolutionSourceKind != TEXT("unresolved")
+		&& !bUseMappedAssetDefaultTypeface)
 	{
 		Diagnostic.ResolvedTypeface = TEXT("Regular");
 	}

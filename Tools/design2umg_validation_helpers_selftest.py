@@ -208,6 +208,98 @@ def test_semi_transparent_difference_still_counts() -> None:
         assert comparison["mean_abs_error"] > 0.0
 
 
+def test_evaluate_no_regression_checks_every_available_metric() -> None:
+    original_loader = batch_verify.load_baseline_case_metrics
+
+    def evaluate(baseline: dict, report: dict) -> dict:
+        batch_verify.load_baseline_case_metrics = lambda _case_dir, _pixel_tolerance: baseline
+        return batch_verify.evaluate_no_regression(report, None, 6)
+
+    complete_baseline = {
+        "available": True,
+        "stable_changed_ratio": 0.4,
+        "changed_ratio": 0.3,
+        "stable_mean_abs_error": 4.0,
+        "mean_abs_error": 3.0,
+    }
+    try:
+        changed_ratio_regression = evaluate(
+            complete_baseline,
+            {
+                "stable_changed_ratio": 0.2,
+                "changed_ratio": 0.301,
+                "stable_mean_abs_error": 3.0,
+                "mean_abs_error": 2.0,
+            },
+        )
+        assert not changed_ratio_regression["passed"]
+        assert changed_ratio_regression["visual_regressed"]
+        assert_equal(changed_ratio_regression["decisive_metric"], "changed_ratio")
+        assert abs(changed_ratio_regression["decisive_delta"] - 0.001) < 1e-12
+
+        mae_regression = evaluate(
+            complete_baseline,
+            {
+                "stable_changed_ratio": 0.2,
+                "changed_ratio": 0.2,
+                "stable_mean_abs_error": 3.0,
+                "mean_abs_error": 3.001,
+            },
+        )
+        assert not mae_regression["passed"]
+        assert mae_regression["visual_regressed"]
+        assert_equal(mae_regression["decisive_metric"], "mean_abs_error")
+        assert abs(mae_regression["decisive_delta"] - 0.001) < 1e-12
+
+        within_tolerance = evaluate(
+            complete_baseline,
+            {
+                "stable_changed_ratio": 0.4 + batch_verify.NO_REGRESSION_EPSILON,
+                "changed_ratio": 0.3,
+                "stable_mean_abs_error": 4.0,
+                "mean_abs_error": 3.0,
+                "structure_validation": {"required": True, "passed": True},
+            },
+        )
+        assert within_tolerance["passed"]
+        assert not within_tolerance["visual_regressed"]
+        assert_equal(within_tolerance["decisive_metric"], "stable_changed_ratio")
+        assert abs(within_tolerance["decisive_delta"] - batch_verify.NO_REGRESSION_EPSILON) < 1e-12
+
+        partial_metrics = evaluate(
+            {
+                "available": True,
+                "stable_changed_ratio": None,
+                "changed_ratio": 0.3,
+                "stable_mean_abs_error": None,
+                "mean_abs_error": None,
+            },
+            {"changed_ratio": 0.2},
+        )
+        assert partial_metrics["passed"]
+        assert_equal(partial_metrics["decisive_metric"], "changed_ratio")
+
+        structure_regression = evaluate(
+            complete_baseline,
+            {
+                **complete_baseline,
+                "structure_validation": {"required": True, "passed": False},
+            },
+        )
+        assert not structure_regression["passed"]
+        assert not structure_regression["visual_regressed"]
+        assert not structure_regression["structure_guard_passed"]
+        assert_equal(structure_regression["reasons"], ["structure_guard_failed"])
+
+        missing_metrics = evaluate(complete_baseline, {})
+        assert not missing_metrics["passed"]
+        assert_equal(missing_metrics["reasons"], ["comparison_metric_unavailable"])
+        assert_equal(missing_metrics["decisive_metric"], "")
+        assert_equal(missing_metrics["decisive_delta"], None)
+    finally:
+        batch_verify.load_baseline_case_metrics = original_loader
+
+
 def make_state(name: str, spec_count: int) -> dict:
     spec_paths = [Path(f"{name}-spec-{index}.json") for index in range(spec_count)]
     steps = {
@@ -681,6 +773,7 @@ def main() -> None:
     test_transparent_rgb_does_not_count_as_visible_change()
     test_opaque_rgb_difference_still_counts()
     test_semi_transparent_difference_still_counts()
+    test_evaluate_no_regression_checks_every_available_metric()
     test_execution_shards_contracts()
     test_evidence_contract_shared_by_manifest_and_run_validation()
     test_binary_binding_contract_shared_by_manifest_production()
