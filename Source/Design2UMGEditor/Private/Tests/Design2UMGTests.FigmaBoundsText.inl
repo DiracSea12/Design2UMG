@@ -965,7 +965,6 @@ bool FFigmaTextFitPreserveSizeTest::RunTest(const FString& Parameters)
 			return false;
 		}
 
-		const FTextResolutionTrace Trace = TextMeasurementTestTrace::DumpTextResolutionTrace(SourceNode);
 		AddInfo(FString::Printf(
 			TEXT("Text fit '%s': source=(%.1f,%.1f) sourceFlags=(%d,%d) widget=(%.1f,%.1f)"),
 			*ExpectedText,
@@ -988,7 +987,7 @@ bool FFigmaTextFitPreserveSizeTest::RunTest(const FString& Parameters)
 		const float ExpectedCompiledFontSize =
 			SourceFontSize * 72.0f / static_cast<float>(FontConstants::RenderDPI);
 		TestTrue(*FString::Printf(TEXT("Single-line fit text '%s' should use the source px-to-point conversion"), *ExpectedText),
-			FMath::IsNearlyEqual(Trace.CompiledFontSize, ExpectedCompiledFontSize, 0.01f));
+			FMath::IsNearlyEqual(Label->TextStyle.FontSize, ExpectedCompiledFontSize, 0.01f));
 		return true;
 	};
 

@@ -443,13 +443,12 @@ bool FExplicitPostScriptMeasurementGenerationParityTest::RunTest(const FString& 
 				TextWidget->Text.TypefaceFontName.GetValue(), Typeface);
 		}
 
-		const FVector2D MeasuredSize = TextMeasurement::MeasureTextNodeSize(DesignNode, 0.0f);
 		UTextBlock* ExpectedTextBlock = NewObject<UTextBlock>();
 		FSlateFontInfo ExpectedFont = FTextBlockStyle::GetDefault().Font;
 		ExpectedFont.FontObject = Font;
 		ExpectedFont.TypefaceFontName = FName(*Typeface);
 		ExpectedFont.Size = TextWidget->TextStyle.FontSize;
-		ExpectedTextBlock->SetText(FText::FromString(TextMeasurement::PrepareRuntimeTextContent(DesignNode->Text.Content)));
+		ExpectedTextBlock->SetText(FText::FromString(TextWidget->Text.Text.Get(DesignNode->Text.Content)));
 		ExpectedTextBlock->SetFont(ExpectedFont);
 		if (TextWidget->Text.LineHeightPercentage.IsSet())
 		{
@@ -460,9 +459,9 @@ bool FExplicitPostScriptMeasurementGenerationParityTest::RunTest(const FString& 
 		ExpectedSlateWidget->SlatePrepass(1.0f);
 		ExpectedSlateWidget->SlatePrepass(1.0f);
 		const FVector2D ExpectedSize = ExpectedSlateWidget->GetDesiredSize();
-		bPassed &= TestTrue(TEXT("Runtime measurement remains available"), MeasuredSize.X > 0.0f && MeasuredSize.Y > 0.0f);
-		bPassed &= TestTrue(TEXT("Measurement matches the generated font asset, typeface, and line height"),
-			MeasuredSize.Equals(ExpectedSize, 0.01f));
+		const FVector2D ConvertedSize(TextWidget->Bounds.W, TextWidget->Bounds.H);
+		bPassed &= TestTrue(TEXT("Converted bounds match the generated font asset, typeface, and line height"),
+			ConvertedSize.Equals(ExpectedSize, 0.01f));
 	}
 
 	if (DefaultTypefaceDesignNode.IsValid() && DefaultTypefaceWidget)
@@ -493,13 +492,12 @@ bool FExplicitPostScriptMeasurementGenerationParityTest::RunTest(const FString& 
 		bPassed &= TestTrue(TEXT("Empty-weight diagnostic leaves the default typeface implicit"),
 			EmptyWeightDiagnostic.ResolvedTypeface.IsEmpty());
 
-		const FVector2D MeasuredSize = TextMeasurement::MeasureTextNodeSize(DefaultTypefaceDesignNode, 0.0f);
 		UTextBlock* ExpectedTextBlock = NewObject<UTextBlock>();
 		FSlateFontInfo ExpectedFont = FTextBlockStyle::GetDefault().Font;
 		ExpectedFont.FontObject = Font;
 		ExpectedFont.Size = DefaultTypefaceWidget->TextStyle.FontSize;
 		ExpectedTextBlock->SetText(FText::FromString(
-			TextMeasurement::PrepareRuntimeTextContent(DefaultTypefaceDesignNode->Text.Content)));
+			DefaultTypefaceWidget->Text.Text.Get(DefaultTypefaceDesignNode->Text.Content)));
 		ExpectedTextBlock->SetFont(ExpectedFont);
 		if (DefaultTypefaceWidget->Text.LineHeightPercentage.IsSet())
 		{
@@ -511,10 +509,9 @@ bool FExplicitPostScriptMeasurementGenerationParityTest::RunTest(const FString& 
 		ExpectedSlateWidget->SlatePrepass(1.0f);
 		ExpectedSlateWidget->SlatePrepass(1.0f);
 		const FVector2D ExpectedSize = ExpectedSlateWidget->GetDesiredSize();
-		bPassed &= TestTrue(TEXT("Empty-weight runtime measurement remains available"),
-			MeasuredSize.X > 0.0f && MeasuredSize.Y > 0.0f);
-		bPassed &= TestTrue(TEXT("Empty-weight measurement matches generated default typeface and line height"),
-			MeasuredSize.Equals(ExpectedSize, 0.01f));
+		const FVector2D ConvertedSize(DefaultTypefaceWidget->Bounds.W, DefaultTypefaceWidget->Bounds.H);
+		bPassed &= TestTrue(TEXT("Empty-weight converted bounds match generated default typeface and line height"),
+			ConvertedSize.Equals(ExpectedSize, 0.01f));
 	}
 
 	Settings->ExplicitFontMappings = SavedMappings;
@@ -781,13 +778,22 @@ bool FInvalidProjectFontWidthFitKeepsSourceConversionTest::RunTest(const FString
 	TextNode->Transform.bSourceHasWidth = true;
 	TextNode->Transform.Height = FDesignSize::Fixed(130.4f);
 
-	const float ResolvedFontSize = TextMeasurement::ResolveTextFontSizeForUMG(TextNode);
+	FDesignDocument Document;
+	Document.Children.Add(TextNode);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(
+		Document,
+		FDesign2UMGConversionSettings::Defaults());
+	const FUMGWidgetNode* TextWidget = FindWidgetById(Data.RootWidget, TextNode->Id);
 	const float ExpectedFontSize =
 		TextNode->Text.FontSize * 72.0f / static_cast<float>(FontConstants::RenderDPI);
-	TestTrue(TEXT("Invalid project font does not redefine the source conversion"),
-		FMath::IsNearlyEqual(ResolvedFontSize, ExpectedFontSize, 0.001f));
+	TestNotNull(TEXT("Invalid project font text widget is generated"), TextWidget);
+	if (TextWidget)
+	{
+		TestTrue(TEXT("Invalid project font does not redefine the source conversion"),
+			FMath::IsNearlyEqual(TextWidget->TextStyle.FontSize, ExpectedFontSize, 0.001f));
+	}
 	FFontResolver::ClearCache();
-	return true;
+	return TextWidget != nullptr;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMultiParagraphFixedWidthTextKeepsDeclaredFontSizeTest,

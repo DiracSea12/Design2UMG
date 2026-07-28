@@ -8,6 +8,7 @@
 #include "UMGSchema.h"
 
 #include "Engine/Texture2D.h"
+#include "TextureResource.h"
 
 namespace
 {

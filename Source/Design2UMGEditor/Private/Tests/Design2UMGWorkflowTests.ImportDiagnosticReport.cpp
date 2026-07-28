@@ -16,6 +16,7 @@
 #include "Misc/Guid.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonSerializer.h"
+#include "UObject/Package.h"
 
 #if WITH_AUTOMATION_WORKER
 
@@ -812,9 +813,14 @@ bool FImportDiagnosticReportFontIdentityEvidenceTest::RunTest(const FString& Par
 		TEXT("/Game/Design2UMG/Fonts/D2U_Phase315DefaultReportFont"),
 		TEXT("D2U_Phase315DefaultReportFont"),
 		{TEXT("Regular")});
+	UFont* DefaultFaceFont = CreateUsableTestFont(
+		TEXT("/Game/Design2UMG/Fonts/D2U_EmptyWeightDefaultFace"),
+		TEXT("D2U_EmptyWeightDefaultFace"),
+		{TEXT("Book")});
 	TestTrue(TEXT("Exact fixture font created"), ExactFont != nullptr);
 	TestTrue(TEXT("Default fixture font created"), DefaultFont != nullptr);
-	if (!ExactFont || !DefaultFont)
+	TestTrue(TEXT("Empty-weight default-face fixture font created"), DefaultFaceFont != nullptr);
+	if (!ExactFont || !DefaultFont || !DefaultFaceFont)
 	{
 		Settings->ExplicitFontMappings = SavedMappings;
 		Settings->DefaultFontAsset = SavedDefaultFont;
@@ -843,6 +849,10 @@ bool FImportDiagnosticReportFontIdentityEvidenceTest::RunTest(const FString& Par
 	UnsupportedFileClue.Name = TEXT("D2UUnsupportedFileOnly");
 	UnsupportedFileClue.Url = TEXT("C:/fonts/D2UUnsupportedFileOnly.ttf");
 	Document.Fonts.Add(UnsupportedFileClue);
+
+	FDesignFont EmptyWeightClue;
+	EmptyWeightClue.Name = TEXT("D2U_EmptyWeightDefaultFace");
+	Document.Fonts.Add(EmptyWeightClue);
 
 	TSharedPtr<FDesignNode> NodeOnly = MakeShared<FDesignNode>();
 	NodeOnly->Id = TEXT("font_identity_node_only");
@@ -936,7 +946,7 @@ bool FImportDiagnosticReportFontIdentityEvidenceTest::RunTest(const FString& Par
 	}
 
 	const TArray<TSharedPtr<FJsonValue>> FontResults = GetFontResolutionResults(RootObject);
-	TestEqual(TEXT("Duplicate declarations stay separate across document clue, nodes, and runs"), FontResults.Num(), 8);
+	TestEqual(TEXT("Duplicate declarations stay separate across document clue, nodes, and runs"), FontResults.Num(), 9);
 
 	const TSharedPtr<FJsonObject> NodeOnlyResult = FindFontResultByNodeId(FontResults, TEXT("font_identity_node_only"));
 	TestTrue(TEXT("Node-only result is present"), NodeOnlyResult.IsValid());
@@ -1005,6 +1015,29 @@ bool FImportDiagnosticReportFontIdentityEvidenceTest::RunTest(const FString& Par
 			TEXT("unsupported-input"));
 		TestTrue(TEXT("Unsupported file clue records issue"),
 			GetIssueCodeSet(UnsupportedFileClueResult).Contains(TEXT("unsupported-font-file-input")));
+	}
+
+	const TSharedPtr<FJsonObject> EmptyWeightClueResult = FindDocumentFontResultByIndex(FontResults, 2);
+	TestTrue(TEXT("Empty-weight document font clue is present"), EmptyWeightClueResult.IsValid());
+	if (EmptyWeightClueResult.IsValid())
+	{
+		TestTrue(TEXT("Empty-weight document font clue keeps source weight empty"),
+			EmptyWeightClueResult->GetStringField(TEXT("declaredWeight")).IsEmpty());
+		TestEqual(TEXT("Empty-weight document font clue does not normalize missing weight to 400"),
+			EmptyWeightClueResult->GetStringField(TEXT("declarationKey")),
+			TEXT("d2uemptyweightdefaultface|none|none|normal"));
+		TestEqual(TEXT("Empty-weight document font clue keeps mapped asset"),
+			EmptyWeightClueResult->GetStringField(TEXT("resolvedAssetPath")),
+			DefaultFaceFont->GetPathName());
+		TestEqual(TEXT("Empty-weight document font clue resolves through the project asset"),
+			EmptyWeightClueResult->GetStringField(TEXT("resolutionSourceKind")),
+			TEXT("project-asset"));
+		TestFalse(TEXT("Empty-weight document font clue leaves mapped default face implicit"),
+			EmptyWeightClueResult->HasField(TEXT("resolvedTypeface")));
+		TestFalse(TEXT("Empty-weight document font clue does not reject the mapped default face"),
+			GetIssueCodeSet(EmptyWeightClueResult).Contains(TEXT("rejected-typeface")));
+		TestFalse(TEXT("Empty-weight document font clue does not substitute an undeclared typeface"),
+			GetIssueCodeSet(EmptyWeightClueResult).Contains(TEXT("typeface-substituted")));
 	}
 
 	const TSharedPtr<FJsonObject> DefaultFallbackResult = FindFontResultByNodeId(FontResults, TEXT("default_fallback_text"));

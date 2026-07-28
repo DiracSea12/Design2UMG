@@ -7,6 +7,7 @@
 #include "UMGPropertyKeys.h"
 #include "UMGValueParsing.h"
 #include "UMGWidgetNodeAccess.h"
+#include "TextStyleUtils.h"
 
 #include "Brushes/SlateColorBrush.h"
 #include "Components/EditableTextBox.h"
@@ -77,17 +78,6 @@ namespace UMGTextStyleApplication
 		}
 	}
 
-	static int32 ConvertLetterSpacingPxToTracking(const float PixelSpacing, const float DesignFontSize, const float AppliedFontSize)
-	{
-		const float BaseFontSize = DesignFontSize > 0.0f ? DesignFontSize : AppliedFontSize;
-		if (BaseFontSize <= 0.0f)
-		{
-			return 0;
-		}
-
-		return FMath::RoundToInt(PixelSpacing / BaseFontSize * 1000.0f);
-	}
-
 	bool TryResolveTextJustification(const FString& Value, ETextJustify::Type& OutJustification)
 	{
 		static const TMap<FString, ETextJustify::Type> JustifyMap = {
@@ -145,7 +135,7 @@ namespace UMGTextStyleApplication
 			const float DesignFontSize = Node.TextStyle.SourceFontSize;
 			if (FontInfo.Size > 0 || DesignFontSize > 0.0f)
 			{
-				FontInfo.LetterSpacing = ConvertLetterSpacingPxToTracking(
+				FontInfo.LetterSpacing = TextStyleUtils::ConvertLetterSpacingPxToTracking(
 					Node.TextStyle.LetterSpacing.GetValue(),
 					DesignFontSize,
 					FontInfo.Size);
@@ -328,7 +318,7 @@ namespace UMGTextStyleApplication
 				RowObject->TryGetNumberField(UMGPropertyKeys::DesignFontSize, DesignFontSize);
 				if (FontInfo.Size > 0 || DesignFontSize > 0.0)
 				{
-					FontInfo.LetterSpacing = ConvertLetterSpacingPxToTracking(
+					FontInfo.LetterSpacing = TextStyleUtils::ConvertLetterSpacingPxToTracking(
 						static_cast<float>(NumberValue),
 						static_cast<float>(DesignFontSize),
 						FontInfo.Size);

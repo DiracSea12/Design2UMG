@@ -89,23 +89,13 @@ namespace
 			Node->Text.TextAlign == EDesignTextAlign::Right ? TEXT("Right") : TEXT("Left");
 
 		const float ResolvedWrapTextAt = ResolvedLayout.WrapTextAt;
-		const bool bNeedsKnownWidthRuntimeWrap =
-			Node->Text.TextGrowth == EDesignTextGrowth::Auto
-			&& Node->Transform.Width.IsFill()
-			&& Node->Transform.Width.Value > 0.0f
-			&& !Design2UMGSourceMetadata::HasNodeMetadataFlag(Node, TEXT("source.text.truncate"));
-		if (Node->Text.TextAlign == EDesignTextAlign::Justify)
+		if (TextMeasurement::ShouldAutoWrapText(Node))
 		{
 			Widget.Text.bAutoWrapText = true;
 			if (ResolvedWrapTextAt > 0.0f)
 			{
 				Widget.Text.WrapTextAt = ResolvedWrapTextAt;
 			}
-		}
-		else if (bNeedsKnownWidthRuntimeWrap && ResolvedWrapTextAt > 0.0f)
-		{
-			Widget.Text.bAutoWrapText = true;
-			Widget.Text.WrapTextAt = ResolvedWrapTextAt;
 		}
 
 		if (ResolvedLayout.LineHeightPercentage.IsSet())
@@ -142,11 +132,6 @@ namespace
 				break;
 			}
 
-			Widget.Text.bAutoWrapText = true;
-			if (ResolvedWrapTextAt > 0.0f)
-			{
-				Widget.Text.WrapTextAt = ResolvedWrapTextAt;
-			}
 			if (Node->Text.TextGrowth == EDesignTextGrowth::FixedWidthHeight)
 			{
 				Widget.Render.Clipping = TEXT("ClipToBounds");

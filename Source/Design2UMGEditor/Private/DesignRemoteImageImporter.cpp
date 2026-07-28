@@ -9,6 +9,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Engine/Texture.h"
 #include "Engine/Texture2D.h"
+#include "TextureResource.h"
 #include "HAL/FileManager.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"

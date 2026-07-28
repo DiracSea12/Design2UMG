@@ -10,6 +10,7 @@
 #include "Serialization/JsonWriter.h"
 #include "Misc/FileHelper.h"
 #include "Misc/DefaultValueHelper.h"
+#include "Misc/Paths.h"
 #include "PenParserInternal.h"
 #include "PenParserNodeExtensions.h"
 

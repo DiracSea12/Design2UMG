@@ -238,7 +238,7 @@ namespace
 
 	int32 FInteractiveGenerationScope::Depth = 0;
 
-#if WITH_AUTOMATION_TESTS
+#if defined(WITH_AUTOMATION_TESTS) && WITH_AUTOMATION_TESTS
 	DesignImportUtils::EAutomationGenerationCancelPoint GAutomationGenerationCancelPoint =
 		DesignImportUtils::EAutomationGenerationCancelPoint::None;
 	bool GAutomationGenerationCancelArmed = false;
@@ -273,7 +273,7 @@ namespace
 		const FText& StepText,
 		const TCHAR* CancelContext)
 	{
-#if WITH_AUTOMATION_TESTS
+#if defined(WITH_AUTOMATION_TESTS) && WITH_AUTOMATION_TESTS
 		if (IsAutomationCancelPoint(DesignImportUtils::EAutomationGenerationCancelPoint::BeforeBuild))
 		{
 			UE_LOG(LogDesign2UMG, Warning,
@@ -316,7 +316,7 @@ namespace
 		const TCHAR* CancelContext,
 		bool& bCancelRequestedAfterMutation)
 	{
-#if WITH_AUTOMATION_TESTS
+#if defined(WITH_AUTOMATION_TESTS) && WITH_AUTOMATION_TESTS
 		if (IsAutomationCancelPoint(DesignImportUtils::EAutomationGenerationCancelPoint::AfterBuildBeforeSave))
 		{
 			if (!bCancelRequestedAfterMutation)
@@ -394,7 +394,7 @@ namespace
 
 // Blueprint generation.
 
-#if WITH_AUTOMATION_TESTS
+#if defined(WITH_AUTOMATION_TESTS) && WITH_AUTOMATION_TESTS
 void DesignImportUtils::SetAutomationGenerationCancelPoint(const EAutomationGenerationCancelPoint CancelPoint)
 {
 	GAutomationGenerationCancelPoint = CancelPoint;

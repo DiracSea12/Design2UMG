@@ -21,8 +21,6 @@
 #include "FigmaParser.h"
 #include "DesignPathRasterizer.h"
 #include "ProceduralShapeGenerator.h"
-#include "TextMeasurement.h"
-#include "TextMeasurementTestTrace.h"
 #include "Design2UMGLog.h"
 #include "Dom/JsonObject.h"
 #include "Framework/Application/SlateApplication.h"

@@ -5,13 +5,14 @@
 #include "CoreMinimal.h"
 #include "Design2UMGGenerationSettingsSnapshot.h"
 #include "DesignImportTypes.h"
+#include "Misc/AutomationTest.h"
 
 struct FUMGWidgetData;
 class UWidgetBlueprint;
 
 namespace DesignImportUtils
 {
-#if WITH_AUTOMATION_TESTS
+#if defined(WITH_AUTOMATION_TESTS) && WITH_AUTOMATION_TESTS
 	enum class EAutomationGenerationCancelPoint : uint8
 	{
 		None,

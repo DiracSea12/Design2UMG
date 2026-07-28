@@ -40,7 +40,7 @@ namespace
 			TEXT("Private/TextFontResolution.h"),
 			TEXT("Private/SizeEstimator.cpp"),
 			TEXT("Private/Design2UMGTextWidgetBuilder.cpp"),
-			TEXT("Public/TextMeasurement.h"),
+			TEXT("Private/TextMeasurement.h"),
 			TEXT("Public/UMGSchemaTypedPayloads.h"),
 		};
 
@@ -417,14 +417,14 @@ bool FTextMeasurementRuntimeContentPreservesParagraphBreaksTest::RunTest(const F
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FTextMeasurementPrivateShimHeaderRemovedTest,
-	"Design2UMG.TextMeasurement.PrivateShimHeaderRemoved",
+	FTextMeasurementPublicHeaderRemovedTest,
+	"Design2UMG.TextMeasurement.PublicHeaderRemoved",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 
-bool FTextMeasurementPrivateShimHeaderRemovedTest::RunTest(const FString&)
+bool FTextMeasurementPublicHeaderRemovedTest::RunTest(const FString&)
 {
-	TestTrue(TEXT("Public TextMeasurement header still exists"), IFileManager::Get().FileExists(*GetCoreSourcePath(TEXT("Public/TextMeasurement.h"))));
-	TestFalse(TEXT("Private TextMeasurement shim remains removed"), IFileManager::Get().FileExists(*GetCoreSourcePath(TEXT("Private/TextMeasurement.h"))));
+	TestFalse(TEXT("TextMeasurement is not exposed as a public header"), IFileManager::Get().FileExists(*GetCoreSourcePath(TEXT("Public/TextMeasurement.h"))));
+	TestTrue(TEXT("Private TextMeasurement header exists"), IFileManager::Get().FileExists(*GetCoreSourcePath(TEXT("Private/TextMeasurement.h"))));
 	return true;
 }
 

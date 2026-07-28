@@ -24,6 +24,12 @@ from design2umg_verify_lib.run_history import write_historical_best_validation
 
 
 NO_REGRESSION_EPSILON = 1.25e-4
+NO_REGRESSION_METRICS = (
+    "stable_changed_ratio",
+    "changed_ratio",
+    "stable_mean_abs_error",
+    "mean_abs_error",
+)
 EDITOR_GRACEFUL_EXIT_DEADLINE_SEC = 30.0  # seconds to wait for editor results after process exits
 EDITOR_STEP_DRIVER_START_ATTEMPTS = 2
 AUTOMATION_GAME_OUTPUT_PREFIX = "/Game/Design2UMG/Automation"
@@ -1081,18 +1087,23 @@ def load_baseline_case_metrics(case_dir: Path | None, pixel_tolerance: int) -> d
             mean_abs_error = report.get("mean_abs_error")
             stable_mean_abs_error = report.get("stable_mean_abs_error")
 
-    available = any(
-        value is not None
-        for value in (
-            changed_ratio,
-            stable_changed_ratio,
-            mean_abs_error,
-            stable_mean_abs_error,
-        )
-    )
+    metric_values = {
+        "changed_ratio": changed_ratio,
+        "stable_changed_ratio": stable_changed_ratio,
+        "mean_abs_error": mean_abs_error,
+        "stable_mean_abs_error": stable_mean_abs_error,
+    }
+    missing_metrics = [metric_name for metric_name in NO_REGRESSION_METRICS if metric_values[metric_name] is None]
+    available = not missing_metrics
+    if available:
+        reason = ""
+    elif len(missing_metrics) == len(NO_REGRESSION_METRICS):
+        reason = "baseline_metrics_unavailable"
+    else:
+        reason = "baseline_metrics_incomplete"
     return {
         "available": available,
-        "reason": "" if available else "baseline_metrics_unavailable",
+        "reason": reason,
         "case_dir": str(case_dir),
         "report_path": str(report_path) if report_path.is_file() else "",
         "reference_png_path": str(reference_png_path) if reference_png_path.is_file() else "",
@@ -1106,8 +1117,10 @@ def load_baseline_case_metrics(case_dir: Path | None, pixel_tolerance: int) -> d
 
 def evaluate_no_regression(report: dict, case_dir: Path | None, pixel_tolerance: int) -> dict:
     baseline = load_baseline_case_metrics(case_dir, pixel_tolerance)
+    baseline_missing_metrics = [metric_name for metric_name in NO_REGRESSION_METRICS if baseline.get(metric_name) is None]
+    baseline_available = bool(baseline.get("available")) and not baseline_missing_metrics
     result = {
-        "available": baseline.get("available", False),
+        "available": baseline_available,
         "passed": False,
         "baseline": baseline,
         "current": {
@@ -1122,15 +1135,26 @@ def evaluate_no_regression(report: dict, case_dir: Path | None, pixel_tolerance:
         "structure_guard_passed": True,
         "reasons": [],
     }
-    if not baseline.get("available"):
-        result["reasons"].append(baseline.get("reason", "baseline_unavailable"))
+    if not baseline_available:
+        if baseline.get("available"):
+            reason = "baseline_metrics_unavailable" if len(baseline_missing_metrics) == len(NO_REGRESSION_METRICS) else "baseline_metrics_incomplete"
+        else:
+            reason = baseline.get("reason", "baseline_unavailable")
+        result["reasons"].append(reason)
+        return result
+
+    current_missing_metrics = [metric_name for metric_name in NO_REGRESSION_METRICS if result["current"].get(metric_name) is None]
+    if current_missing_metrics:
+        result["available"] = False
+        reason = "current_metrics_unavailable" if len(current_missing_metrics) == len(NO_REGRESSION_METRICS) else "current_metrics_incomplete"
+        result["reasons"].append(reason)
         return result
 
     first_metric = ""
     first_delta = None
     regressed_metric = ""
     regressed_delta = None
-    for metric_name in ("stable_changed_ratio", "changed_ratio", "stable_mean_abs_error", "mean_abs_error"):
+    for metric_name in NO_REGRESSION_METRICS:
         current_value = result["current"].get(metric_name)
         baseline_value = baseline.get(metric_name)
         if current_value is None or baseline_value is None:
@@ -1329,6 +1353,7 @@ def process_case_result(state: dict, batch_exit_code: int, batch_log_path: Path)
         "structure_required": (report.get("structure_validation") or {}).get("required"),
         "structure_available": (report.get("structure_validation") or {}).get("available"),
         "structure_reasons": (report.get("structure_validation") or {}).get("reasons"),
+        "no_regression_required": state.get("baseline_case_dir") is not None,
         "no_regression_available": no_regression.get("available"),
         "no_regression_passed": no_regression.get("passed"),
         "no_regression_reasons": no_regression.get("reasons"),
@@ -1409,6 +1434,11 @@ def build_batch_summary(
 ) -> dict:
     no_regression_cases = [item for item in case_results if item.get("no_regression_available")]
     no_regression_passed = sum(1 for item in no_regression_cases if item.get("no_regression_passed"))
+    no_regression_required_unavailable = sum(
+        1
+        for item in case_results
+        if item.get("no_regression_required") and not item.get("no_regression_available")
+    )
     blocked_cases = [item for item in case_results if item.get("blocked")]
     return {
         "total": len(case_results),
@@ -1446,7 +1476,7 @@ def build_batch_summary(
         "no_regression": {
             "available": len(no_regression_cases),
             "passed": no_regression_passed,
-            "failed": len(no_regression_cases) - no_regression_passed,
+            "failed": len(no_regression_cases) - no_regression_passed + no_regression_required_unavailable,
         },
         "cases": case_results,
     }

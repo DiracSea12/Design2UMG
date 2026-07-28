@@ -266,7 +266,7 @@ def test_evaluate_no_regression_checks_every_available_metric() -> None:
         assert_equal(within_tolerance["decisive_metric"], "stable_changed_ratio")
         assert abs(within_tolerance["decisive_delta"] - batch_verify.NO_REGRESSION_EPSILON) < 1e-12
 
-        partial_metrics = evaluate(
+        incomplete_baseline = evaluate(
             {
                 "available": True,
                 "stable_changed_ratio": None,
@@ -274,10 +274,29 @@ def test_evaluate_no_regression_checks_every_available_metric() -> None:
                 "stable_mean_abs_error": None,
                 "mean_abs_error": None,
             },
-            {"changed_ratio": 0.2},
+            complete_baseline,
         )
-        assert partial_metrics["passed"]
-        assert_equal(partial_metrics["decisive_metric"], "changed_ratio")
+        assert not incomplete_baseline["available"]
+        assert not incomplete_baseline["passed"]
+        assert_equal(incomplete_baseline["reasons"], ["baseline_metrics_incomplete"])
+
+        incomplete_current = evaluate(
+            complete_baseline,
+            {
+                "stable_changed_ratio": 0.2,
+                "changed_ratio": 0.2,
+                "stable_mean_abs_error": None,
+                "mean_abs_error": 2.0,
+            },
+        )
+        assert not incomplete_current["available"]
+        assert not incomplete_current["passed"]
+        assert_equal(incomplete_current["reasons"], ["current_metrics_incomplete"])
+
+        unavailable_current = evaluate(complete_baseline, {})
+        assert not unavailable_current["available"]
+        assert not unavailable_current["passed"]
+        assert_equal(unavailable_current["reasons"], ["current_metrics_unavailable"])
 
         structure_regression = evaluate(
             complete_baseline,
@@ -291,13 +310,84 @@ def test_evaluate_no_regression_checks_every_available_metric() -> None:
         assert not structure_regression["structure_guard_passed"]
         assert_equal(structure_regression["reasons"], ["structure_guard_failed"])
 
-        missing_metrics = evaluate(complete_baseline, {})
-        assert not missing_metrics["passed"]
-        assert_equal(missing_metrics["reasons"], ["comparison_metric_unavailable"])
-        assert_equal(missing_metrics["decisive_metric"], "")
-        assert_equal(missing_metrics["decisive_delta"], None)
     finally:
         batch_verify.load_baseline_case_metrics = original_loader
+
+
+def test_load_baseline_case_metrics_rejects_incomplete_metrics() -> None:
+    original_render_rule = batch_verify.render_rule.evaluate_report_render_size_rule
+    try:
+        batch_verify.render_rule.evaluate_report_render_size_rule = lambda _report_path: {"compatible": True}
+        with tempfile.TemporaryDirectory() as temp_dir:
+            case_dir = Path(temp_dir)
+            verify.write_json(
+                case_dir / "compare_report.json",
+                {
+                    "changed_ratio": 0.3,
+                    "stable_changed_ratio": None,
+                    "mean_abs_error": 3.0,
+                    "stable_mean_abs_error": None,
+                },
+            )
+
+            baseline = batch_verify.load_baseline_case_metrics(case_dir, 6)
+
+        assert not baseline["available"]
+        assert_equal(baseline["reason"], "baseline_metrics_incomplete")
+    finally:
+        batch_verify.render_rule.evaluate_report_render_size_rule = original_render_rule
+
+
+def test_batch_summary_fails_required_unavailable_no_regression() -> None:
+    args = SimpleNamespace(
+        parallel_editors=1,
+        idle_timeout_sec=180,
+        startup_timeout_sec=60,
+        editor_isolation="shard",
+        post_workers=1,
+        include="",
+        exclude="",
+        reference_cache="read-write",
+        native_self_check="off",
+    )
+    case_results = [
+        {
+            "name": "baseline-incomplete",
+            "blocked": False,
+            "no_regression_required": True,
+            "no_regression_available": False,
+            "no_regression_passed": False,
+            "no_regression_reasons": ["baseline_metrics_incomplete"],
+        },
+        {
+            "name": "current-incomplete",
+            "blocked": False,
+            "no_regression_required": True,
+            "no_regression_available": False,
+            "no_regression_passed": False,
+            "no_regression_reasons": ["current_metrics_incomplete"],
+        },
+    ]
+    summary = batch_verify.build_batch_summary(
+        args=args,
+        editor_exit_code=0,
+        editor_exit_codes=[0],
+        shards=[{"shard_id": 0}],
+        shard_results=[{"shard_id": 0, "exit_code": 0}],
+        post_workers=1,
+        design_root=Path("G:/Designs"),
+        output_root=Path("G:/Runs/batch_run"),
+        run_scope_path=Path("G:/Runs/batch_run/run_scope.json"),
+        reference_cache_root=None,
+        batch_start_time=10.0,
+        prep_completed_at=11.0,
+        editor_completed_at=12.0,
+        postprocess_completed_at=13.0,
+        case_results=case_results,
+        completeness={"blocked": False},
+    )
+
+    assert_equal(summary["no_regression"], {"available": 0, "passed": 0, "failed": 2})
 
 
 def make_state(name: str, spec_count: int) -> dict:
@@ -783,6 +873,8 @@ def main() -> None:
     test_opaque_rgb_difference_still_counts()
     test_semi_transparent_difference_still_counts()
     test_evaluate_no_regression_checks_every_available_metric()
+    test_load_baseline_case_metrics_rejects_incomplete_metrics()
+    test_batch_summary_fails_required_unavailable_no_regression()
     test_execution_shards_contracts()
     test_evidence_contract_shared_by_manifest_and_run_validation()
     test_binary_binding_contract_shared_by_manifest_production()

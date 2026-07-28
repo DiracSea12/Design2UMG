@@ -637,7 +637,7 @@ namespace DesignImportDiagnosticReport
 				EntryKey,
 				Font.Name,
 				FString(),
-				TEXT("400"),
+				FString(),
 				TEXT("normal"),
 				IsUnsupportedFontFileSource(Font.Url),
 				IsFontUrlSource(Font.Url));

@@ -48,6 +48,9 @@ bool TextMeasurement::IsWrappingTextMode(const TSharedPtr<FDesignNode>& Node)
 
 	return Node->Text.TextGrowth == EDesignTextGrowth::FixedWidth
 		|| Node->Text.TextGrowth == EDesignTextGrowth::FixedWidthHeight
+		|| (Node->Text.TextGrowth == EDesignTextGrowth::Auto
+			&& Node->Transform.Width.IsFill()
+			&& Node->Transform.Width.Value > 0.0f)
 		|| Node->Text.TextAlign == EDesignTextAlign::Justify;
 }
 

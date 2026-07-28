@@ -236,6 +236,53 @@ bool FConverterNestedNodesTest::RunTest(const FString&)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FConverterTextAutoWrapUsesResolvedLayoutTest,
+	"Design2UMG.Unit.Converter.TextAutoWrapUsesResolvedLayout",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FConverterTextAutoWrapUsesResolvedLayoutTest::RunTest(const FString&)
+{
+	FDesignDocument Doc;
+	Doc.Version = TEXT("converter-text-auto-wrap");
+
+	const TSharedPtr<FDesignNode> Root =
+		MakeNode(TEXT("text-wrap-root"), TEXT("TextWrapRoot"), EDesignNodeType::Frame, 0.0f, 0.0f, 400.0f, 120.0f);
+	const TSharedPtr<FDesignNode> TruncatedJustifiedText =
+		MakeNode(TEXT("truncated-justify"), TEXT("TruncatedJustify"), EDesignNodeType::Text, 0.0f, 0.0f, 200.0f, 40.0f);
+	TruncatedJustifiedText->Text.Content = TEXT("Truncated justified text");
+	TruncatedJustifiedText->Text.FontSize = 16.0f;
+	TruncatedJustifiedText->Text.TextGrowth = EDesignTextGrowth::FixedWidthHeight;
+	TruncatedJustifiedText->Text.TextAlign = EDesignTextAlign::Justify;
+	TruncatedJustifiedText->Metadata.Add(TEXT("source.text.truncate"), TEXT("true"));
+
+	const TSharedPtr<FDesignNode> JustifiedText =
+		MakeNode(TEXT("plain-justify"), TEXT("PlainJustify"), EDesignNodeType::Text, 0.0f, 50.0f, 200.0f, 40.0f);
+	JustifiedText->Text.Content = TEXT("Plain justified text");
+	JustifiedText->Text.FontSize = 16.0f;
+	JustifiedText->Text.TextGrowth = EDesignTextGrowth::FixedWidthHeight;
+	JustifiedText->Text.TextAlign = EDesignTextAlign::Justify;
+
+	Root->Children.Add(TruncatedJustifiedText);
+	Root->Children.Add(JustifiedText);
+	Doc.Children.Add(Root);
+
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
+	const FUMGWidgetNode* TruncatedWidget = FindWidgetById(Data.RootWidget, TEXT("truncated-justify"));
+	const FUMGWidgetNode* JustifiedWidget = FindWidgetById(Data.RootWidget, TEXT("plain-justify"));
+	if (!TestNotNull(TEXT("Converted truncated justified text exists"), TruncatedWidget)
+		|| !TestNotNull(TEXT("Converted plain justified text exists"), JustifiedWidget))
+	{
+		return false;
+	}
+
+	TestFalse(TEXT("Truncated justified text does not enable auto wrap"), TruncatedWidget->Text.bAutoWrapText.Get(false));
+	TestFalse(TEXT("Truncated justified text does not emit a wrap width"), TruncatedWidget->Text.WrapTextAt.IsSet());
+	TestTrue(TEXT("Plain justified text enables auto wrap"), JustifiedWidget->Text.bAutoWrapText.Get(false));
+	TestEqual(TEXT("Plain justified text keeps its wrap width"), JustifiedWidget->Text.WrapTextAt.Get(0.0f), 200.0f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FConverterPenAuthoredTextBoxOwnerTest,
 	"Design2UMG.Unit.Converter.PenAuthoredTextBoxOwner",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)

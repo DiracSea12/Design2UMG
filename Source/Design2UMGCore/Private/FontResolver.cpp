@@ -419,11 +419,14 @@ namespace
 		const FString PostScriptKey = PostScriptName.TrimStartAndEnd().IsEmpty()
 			? TEXT("none")
 			: NormalizeCompactResolverKey(PostScriptName);
+		const FString WeightKey = Weight.IsEmpty()
+			? TEXT("none")
+			: FString::FromInt(FFontResolver::ParseWeightValue(Weight));
 		return FString::Printf(
-			TEXT("%s|%s|%d|%s"),
+			TEXT("%s|%s|%s|%s"),
 			*FamilyKey,
 			*PostScriptKey,
-			FFontResolver::ParseWeightValue(Weight),
+			*WeightKey,
 			*NormalizeFontStyleToken(Style));
 	}
 
@@ -599,6 +602,8 @@ FFontResolutionDiagnostic FFontResolver::ResolveFontDiagnostic(
 			Diagnostic.ResolvedAssetPath = FindFontAssetPath(FontFamily, PostScriptName);
 			if (!Diagnostic.ResolvedAssetPath.IsEmpty())
 			{
+				bUseMappedAssetDefaultTypeface = Weight.IsEmpty()
+					&& IsProjectFontAssetPath(Diagnostic.ResolvedAssetPath);
 				if (IsEngineFontAssetPath(Diagnostic.ResolvedAssetPath))
 				{
 					Diagnostic.FallbackAssetPath = Diagnostic.ResolvedAssetPath;
@@ -612,7 +617,6 @@ FFontResolutionDiagnostic FFontResolver::ResolveFontDiagnostic(
 				}
 				else if (ExplicitMappingResult == EExplicitFontMappingResult::Resolved)
 				{
-					bUseMappedAssetDefaultTypeface = Weight.IsEmpty();
 					Diagnostic.ResolvedTypeface = bUseMappedAssetDefaultTypeface
 						? FString()
 						: FindExactTypefaceForAssetPath(Diagnostic.ResolvedAssetPath, Weight);
@@ -638,13 +642,16 @@ FFontResolutionDiagnostic FFontResolver::ResolveFontDiagnostic(
 				}
 				else
 				{
-					Diagnostic.ResolvedTypeface = FindBestTypefaceForAssetPath(Diagnostic.ResolvedAssetPath, Weight);
+					Diagnostic.ResolvedTypeface = bUseMappedAssetDefaultTypeface
+						? FString()
+						: FindBestTypefaceForAssetPath(Diagnostic.ResolvedAssetPath, Weight);
 					Diagnostic.ResolutionState = TEXT("exact");
 					Diagnostic.ResolutionSourceKind = TEXT("project-asset");
 					Diagnostic.FallbackState = TEXT("exact");
 					Diagnostic.MatchReason = TEXT("project-family-match");
 					Diagnostic.Severity = TEXT("info");
-					if (Diagnostic.ResolvedTypeface != MakeTypefaceNameForWeight(ParseWeightValue(Weight)))
+					if (!bUseMappedAssetDefaultTypeface
+						&& Diagnostic.ResolvedTypeface != MakeTypefaceNameForWeight(ParseWeightValue(Weight)))
 					{
 						Diagnostic.FallbackState = TEXT("typeface-substituted");
 						AddFontDiagnosticIssue(Diagnostic, TEXT("typeface-substituted"));

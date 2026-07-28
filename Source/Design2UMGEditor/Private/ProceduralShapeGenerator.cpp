@@ -6,6 +6,7 @@
 #include "UMGValueParsing.h"
 #include "Dom/JsonObject.h"
 #include "Engine/Texture2D.h"
+#include "TextureResource.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 

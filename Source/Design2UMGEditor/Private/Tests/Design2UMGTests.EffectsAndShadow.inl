@@ -1361,6 +1361,44 @@ bool FTextStyleLetterSpacingOptionalSemanticsTest::RunTest(const FString& Parame
 		&& ParsedNonZeroNode->TextStyle.LetterSpacing.IsSet()
 		&& FMath::IsNearlyEqual(ParsedNonZeroNode->TextStyle.LetterSpacing.GetValue(), 1.25f, 0.001f));
 
+	UTextBlock* NonZeroWidget = NewObject<UTextBlock>(GetTransientPackageAsObject());
+	TestNotNull(TEXT("Non-zero widget created"), NonZeroWidget);
+	if (NonZeroWidget && ParsedNonZeroNode)
+	{
+		FUMGWidgetUtils::ApplyWidgetProperties(NonZeroWidget, *ParsedNonZeroNode);
+		TestEqual(TEXT("Pixel letter spacing converts to Slate tracking"), NonZeroWidget->GetFont().LetterSpacing, 63);
+	}
+
+	FUMGWidgetNode ScaledNegativeNode = ExplicitZeroNode;
+	ScaledNegativeNode.TextStyle.FontSize = 12.0f;
+	ScaledNegativeNode.TextStyle.SourceFontSize = 20.0f;
+	ScaledNegativeNode.TextStyle.LetterSpacing = -1.25f;
+	UTextBlock* ScaledNegativeWidget = NewObject<UTextBlock>(GetTransientPackageAsObject());
+	TestNotNull(TEXT("Scaled negative-spacing widget created"), ScaledNegativeWidget);
+	if (ScaledNegativeWidget)
+	{
+		FUMGWidgetUtils::ApplyWidgetProperties(ScaledNegativeWidget, ScaledNegativeNode);
+		TestEqual(TEXT("Design font size owns scaled negative letter-spacing conversion"), ScaledNegativeWidget->GetFont().LetterSpacing, -62);
+	}
+
+	URichTextBlock* RichTextWidget = NewObject<URichTextBlock>(GetTransientPackageAsObject());
+	TestNotNull(TEXT("Rich text spacing widget created"), RichTextWidget);
+	if (RichTextWidget)
+	{
+		UMGTextStyleApplication::ApplyRichTextStyleRows(
+			RichTextWidget,
+			TEXT("{\"row\":{\"FontSize\":12.0,\"DesignFontSize\":20.0,\"LetterSpacing\":-1.25}}"));
+		const UDataTable* StyleSet = RichTextWidget->GetTextStyleSet();
+		const FRichTextStyleRow* Row = StyleSet
+			? StyleSet->FindRow<FRichTextStyleRow>(TEXT("row"), TEXT("LetterSpacingConversion"))
+			: nullptr;
+		TestNotNull(TEXT("Rich text spacing row created"), Row);
+		if (Row)
+		{
+			TestEqual(TEXT("Rich text row uses shared pixel-spacing conversion"), Row->TextStyle.Font.LetterSpacing, -62);
+		}
+	}
+
 	const FString UnsetJson = SerializeSingleNode(UnsetNode);
 	TestFalse(TEXT("Unset letter spacing does not serialize"), TryReadSerializedLetterSpacing(UnsetJson, SerializedLetterSpacing));
 
