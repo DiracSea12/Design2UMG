@@ -32,6 +32,11 @@ jobs:
         run: |
           ./Tools/Release/Assert-PublicRepoBoundary.ps1 -Mode SourceWorkspace
 
+      - name: Verify text file hygiene
+        shell: pwsh
+        run: |
+          ./Tools/Release/Test-TextFileHygiene.ps1
+
       - name: Run Python validation helper selftests
         run: |
           python -m pip install --upgrade pip
@@ -45,7 +50,6 @@ jobs:
           python Tools/design2umg_determinism_smoke_selftest.py
 
   build-plugin:
-    if: github.event_name == 'workflow_dispatch'
     runs-on: [self-hosted, windows, ue5]
     defaults:
       run:

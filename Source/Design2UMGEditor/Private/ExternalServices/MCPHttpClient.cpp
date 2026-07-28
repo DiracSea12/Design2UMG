@@ -167,7 +167,7 @@ bool FMCPHttpClient::Connect(const FString& Endpoint)
 	FString NotifyBody;
 	SendRequest(TEXT("notifications/initialized"), nullptr, NotifyBody, false);
 
-	UE_LOG(LogDesign2UMG, Log, TEXT("MCPHttpClient: Connected to %s (session: %s)"), *ServerEndpoint, *SessionId);
+	UE_LOG(LogDesign2UMG, Log, TEXT("MCPHttpClient: Connected to %s"), *ServerEndpoint);
 	return true;
 }
 
@@ -203,7 +203,7 @@ void FMCPHttpClient::ConnectAsync(const FString& Endpoint, TFunction<void(bool b
 			if (!bNotifyOk)
 				UE_LOG(LogDesign2UMG, Warning, TEXT("MCPHttpClient: notifications/initialized failed after async initialize"));
 
-			UE_LOG(LogDesign2UMG, Log, TEXT("MCPHttpClient: Connected to %s (session: %s)"), *ServerEndpoint, *SessionId);
+			UE_LOG(LogDesign2UMG, Log, TEXT("MCPHttpClient: Connected to %s"), *ServerEndpoint);
 			if (OnComplete)
 				OnComplete(true);
 		});

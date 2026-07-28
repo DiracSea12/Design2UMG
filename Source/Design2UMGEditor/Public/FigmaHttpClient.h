@@ -10,7 +10,7 @@
  * Wraps Personal Access Token authentication and the common endpoints used by
  * the plugin. All requests are asynchronous and report through callbacks.
  */
-class FFigmaHttpClient
+class DESIGN2UMGEDITOR_API FFigmaHttpClient
 {
 public:
 	FFigmaHttpClient();

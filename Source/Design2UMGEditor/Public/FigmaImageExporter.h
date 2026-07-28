@@ -15,7 +15,7 @@ class FFigmaHttpClient;
  * URLs via the Figma images API, and writes the results back into the node tree.
  * The URLs can then be downloaded and imported by FDesignRemoteImageImporter.
  */
-class FFigmaImageExporter
+class DESIGN2UMGEDITOR_API FFigmaImageExporter
 {
 public:
 	using FOnComplete = TFunction<void(bool bSuccess)>;

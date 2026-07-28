@@ -10,8 +10,8 @@
  * Concrete UserWidget subclass used for editor preview instantiation.
  * UUserWidget is abstract in UE5, so a concrete subclass is required.
  */
-UCLASS(MinimalAPI)
-class UPreviewUserWidget : public UUserWidget
+UCLASS()
+class DESIGN2UMGEDITOR_API UPreviewUserWidget : public UUserWidget
 {
 	GENERATED_BODY()
 

@@ -365,9 +365,10 @@ void FPencilConnector::TryConnectAsync(
 			return;
 		}
 
-		FTSTicker::GetCoreTicker().AddTicker(
+		RetryTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
 			FTickerDelegate::CreateLambda([this, Endpoint, DeadlineSeconds, LaunchToken, OnComplete](float)
 			{
+				RetryTickerHandle.Reset();
 				TryConnectAsync(Endpoint, DeadlineSeconds, LaunchToken, OnComplete);
 				return false;
 			}),
@@ -378,6 +379,11 @@ void FPencilConnector::TryConnectAsync(
 void FPencilConnector::Shutdown()
 {
 	++ActiveLaunchToken;
+	if (RetryTickerHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(RetryTickerHandle);
+		RetryTickerHandle.Reset();
+	}
 	Client.Disconnect();
 
 	if (ServerProcess.IsValid())

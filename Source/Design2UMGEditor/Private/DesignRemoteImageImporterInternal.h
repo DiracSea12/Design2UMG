@@ -6,6 +6,19 @@
 
 namespace DesignRemoteImageImporterInternal
 {
+	struct FImageResourceLimits
+	{
+		static constexpr uint64 DefaultMaxCompressedBytes = 32ull * 1024ull * 1024ull;
+		static constexpr int32 DefaultMaxDimension = 16384;
+		static constexpr int64 DefaultMaxPixels = 64ll * 1024ll * 1024ll;
+		static constexpr int32 DefaultMaxUrlsPerOperation = 128;
+
+		uint64 MaxCompressedBytes = DefaultMaxCompressedBytes;
+		int32 MaxDimension = DefaultMaxDimension;
+		int64 MaxPixels = DefaultMaxPixels;
+		int32 MaxUrlsPerOperation = DefaultMaxUrlsPerOperation;
+	};
+
 	struct FResolveReport
 	{
 		int32 ImportedCount = 0;
@@ -23,6 +36,7 @@ namespace DesignRemoteImageImporterInternal
 		FString ImportPath;
 		FString FrameName;
 		float TimeoutSeconds = 20.0f;
+		FImageResourceLimits ImageLimits;
 		FResolveReport Report;
 		TMap<FString, FString> UrlToAssetPath;
 		TMap<FString, FString> ContentHashToAsset;
@@ -39,9 +53,18 @@ namespace DesignRemoteImageImporterInternal
 	class FImagePayloadIO
 	{
 	public:
-		static bool DownloadUrl(const FString& Url, float TimeoutSeconds, TArray<uint8>& OutData, FString& OutError);
+		static bool ValidateCompressedByteCount(uint64 ByteCount, const FImageResourceLimits& Limits, FString& OutError);
+		static bool ValidateDimensions(int32 Width, int32 Height, const FImageResourceLimits& Limits, FString& OutError);
+		static bool ValidateUrlCount(int32 UrlCount, const FImageResourceLimits& Limits, FString& OutError);
+		static bool DownloadUrl(
+			const FString& Url,
+			float TimeoutSeconds,
+			const FImageResourceLimits& Limits,
+			TArray<uint8>& OutData,
+			FString& OutError);
 		static bool DecodeToBGRA8(
 			const TArray<uint8>& CompressedData,
+			const FImageResourceLimits& Limits,
 			int32& OutWidth,
 			int32& OutHeight,
 			TArray64<uint8>& OutRawData,

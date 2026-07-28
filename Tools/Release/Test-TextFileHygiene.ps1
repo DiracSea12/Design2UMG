@@ -25,7 +25,7 @@ if (-not $repoRoot) {
 
 Set-Location $repoRoot
 
-$targetTextPattern = '\.(h|cpp|cs|py|md|json|ya?ml)$'
+$targetTextPattern = '\.(h|cpp|cs|py|md|json|ya?ml|uplugin|uproject)$'
 $failures = @()
 
 foreach ($line in (git ls-files --eol)) {

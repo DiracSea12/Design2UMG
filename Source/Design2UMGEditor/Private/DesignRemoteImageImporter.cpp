@@ -22,6 +22,7 @@
 namespace
 {
 	using DesignRemoteImageImporterInternal::FImagePayloadIO;
+	using DesignRemoteImageImporterInternal::FImageResourceLimits;
 	using DesignRemoteImageImporterInternal::FImportedTextureIndex;
 	using DesignRemoteImageImporterInternal::FResolveContext;
 
@@ -452,7 +453,7 @@ namespace
 				int32 SourceHeight = 0;
 				TArray64<uint8> SourceRawBGRA;
 				FString SourceDecodeError;
-				const bool bDecoded = FImagePayloadIO::DecodeToBGRA8(FileData, SourceWidth, SourceHeight, SourceRawBGRA, SourceDecodeError);
+				const bool bDecoded = FImagePayloadIO::DecodeToBGRA8(FileData, Context.ImageLimits, SourceWidth, SourceHeight, SourceRawBGRA, SourceDecodeError);
 				if (bDecoded)
 				{
 					const int32 ExistingWidth = Existing->GetSizeX();
@@ -487,7 +488,7 @@ namespace
 			int32 Width = 0, Height = 0;
 			TArray64<uint8> RawBGRA;
 			FString DecodeError;
-			if (!FImagePayloadIO::DecodeToBGRA8(FileData, Width, Height, RawBGRA, DecodeError))
+			if (!FImagePayloadIO::DecodeToBGRA8(FileData, Context.ImageLimits, Width, Height, RawBGRA, DecodeError))
 			{
 				++Context.Report.FailedCount;
 				Context.Report.AddMessage(FString::Printf(TEXT("Local image decode failed for '%s': %s"), *WidgetName, *DecodeError));
@@ -539,7 +540,7 @@ namespace
 
 		TArray<uint8> CompressedData;
 		FString DownloadError;
-		if (!FImagePayloadIO::DownloadUrl(NormalizedUrl, Context.TimeoutSeconds, CompressedData, DownloadError))
+		if (!FImagePayloadIO::DownloadUrl(NormalizedUrl, Context.TimeoutSeconds, Context.ImageLimits, CompressedData, DownloadError))
 		{
 			++Context.Report.FailedCount;
 			Context.Report.AddMessage(FString::Printf(TEXT("Image '%s' download failed: %s (reason: %s)"), *WidgetName, *NormalizedUrl, *DownloadError));
@@ -598,7 +599,7 @@ namespace
 		int32 Height = 0;
 		TArray64<uint8> RawBGRA;
 		FString DecodeError;
-		if (!FImagePayloadIO::DecodeToBGRA8(CompressedData, Width, Height, RawBGRA, DecodeError))
+		if (!FImagePayloadIO::DecodeToBGRA8(CompressedData, Context.ImageLimits, Width, Height, RawBGRA, DecodeError))
 		{
 			++Context.Report.FailedCount;
 			Context.Report.AddMessage(FString::Printf(TEXT("Image '%s' decode failed: %s (reason: %s)"), *WidgetName, *NormalizedUrl, *DecodeError));
@@ -650,6 +651,23 @@ namespace
 			ResolveNodeRecursive(Child, Context);
 		}
 	}
+
+	void CollectRemoteUrls(const FUMGWidgetNode& Node, TSet<FString>& OutUrls)
+	{
+		const FString TexturePath = Node.Brush.Image.TexturePath.Get(Node.Brush.TexturePath);
+		if (!TexturePath.IsEmpty())
+		{
+			const FString Trimmed = TexturePath.TrimStartAndEnd();
+			if (IsRemoteUrl(Trimmed))
+			{
+				OutUrls.Add(NormalizeUrl(Trimmed));
+			}
+		}
+		for (const FUMGWidgetNode& Child : Node.Children)
+		{
+			CollectRemoteUrls(Child, OutUrls);
+		}
+	}
 }
 
 bool FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, FString* OutReport)
@@ -673,7 +691,20 @@ bool FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, 
 		return true;
 	}
 
+	TSet<FString> RemoteUrls;
+	CollectRemoteUrls(InOutData.RootWidget, RemoteUrls);
 	FResolveContext Context;
+	FString LimitError;
+	if (!FImagePayloadIO::ValidateUrlCount(RemoteUrls.Num(), Context.ImageLimits, LimitError))
+	{
+		if (OutReport)
+		{
+			*OutReport = LimitError;
+		}
+		UE_LOG(LogDesign2UMG, Error, TEXT("Remote image import rejected: %s"), *LimitError);
+		return false;
+	}
+
 	Context.ImportPath = NormalizeImportPath(Settings->RemoteImageImportPath);
 	Context.TimeoutSeconds = FMath::Max(1.0f, Settings->RemoteImageTimeoutSeconds);
 	Context.FrameName = InOutData.WidgetName;
@@ -704,23 +735,6 @@ bool FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, 
 
 namespace
 {
-	void CollectRemoteUrls(const FUMGWidgetNode& Node, TSet<FString>& OutUrls)
-	{
-		const FString TexturePath = Node.Brush.Image.TexturePath.Get(Node.Brush.TexturePath);
-		if (!TexturePath.IsEmpty())
-		{
-			const FString Trimmed = TexturePath.TrimStartAndEnd();
-			if (IsRemoteUrl(Trimmed))
-			{
-				OutUrls.Add(Trimmed);
-			}
-		}
-		for (const FUMGWidgetNode& Child : Node.Children)
-		{
-			CollectRemoteUrls(Child, OutUrls);
-		}
-	}
-
 	UTexture2D* CreateTransientTexture(const TArray64<uint8>& RawBGRA, int32 Width, int32 Height)
 	{
 		UTexture2D* Texture = UTexture2D::CreateTransient(Width, Height, PF_B8G8R8A8);
@@ -747,6 +761,13 @@ void FDesignRemoteImageImporter::ResolveTransientTextures(const FUMGWidgetNode& 
 
 	TSet<FString> Urls;
 	CollectRemoteUrls(RootNode, Urls);
+	const FImageResourceLimits ImageLimits;
+	FString LimitError;
+	if (!FImagePayloadIO::ValidateUrlCount(Urls.Num(), ImageLimits, LimitError))
+	{
+		UE_LOG(LogDesign2UMG, Warning, TEXT("Transient remote image import rejected: %s"), *LimitError);
+		return;
+	}
 
 	for (const FString& Url : Urls)
 	{
@@ -754,7 +775,7 @@ void FDesignRemoteImageImporter::ResolveTransientTextures(const FUMGWidgetNode& 
 
 		TArray<uint8> CompressedData;
 		FString Error;
-		if (!FImagePayloadIO::DownloadUrl(NormalizeUrl(Url), Timeout, CompressedData, Error))
+		if (!FImagePayloadIO::DownloadUrl(NormalizeUrl(Url), Timeout, ImageLimits, CompressedData, Error))
 		{
 			UE_LOG(LogDesign2UMG, Verbose, TEXT("Transient download failed: %s (%s)"), *Url, *Error);
 			UE_LOG(LogDesign2UMG, Warning, TEXT("Image download failed: %s (reason: %s)"), *Url, *Error);
@@ -763,7 +784,7 @@ void FDesignRemoteImageImporter::ResolveTransientTextures(const FUMGWidgetNode& 
 
 		int32 Width = 0, Height = 0;
 		TArray64<uint8> RawBGRA;
-		if (!FImagePayloadIO::DecodeToBGRA8(CompressedData, Width, Height, RawBGRA, Error))
+		if (!FImagePayloadIO::DecodeToBGRA8(CompressedData, ImageLimits, Width, Height, RawBGRA, Error))
 		{
 			UE_LOG(LogDesign2UMG, Verbose, TEXT("Transient decode failed: %s (%s)"), *Url, *Error);
 			UE_LOG(LogDesign2UMG, Warning, TEXT("Image decode failed: %s (reason: %s)"), *Url, *Error);

@@ -231,8 +231,10 @@ UWidgetBlueprint* FUMGGenerator::GenerateWidgetBlueprint(
 	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
 {
 	UWidgetBlueprint* WBP = BuildWidgetBlueprint(WidgetData, PackagePath, GenerationSettings);
-	if (WBP)
-		SaveWidgetBlueprint(WBP);
+	if (WBP && !SaveWidgetBlueprint(WBP))
+	{
+		return nullptr;
+	}
 	return WBP;
 }
 
@@ -431,9 +433,13 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 	return WBP;
 }
 
-void FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP)
+bool FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP)
 {
-	if (!WBP) return;
+	if (!WBP)
+	{
+		UE_LOG(LogDesign2UMG, Error, TEXT("SaveWidgetBlueprint: Widget Blueprint is null"));
+		return false;
+	}
 
 	WBP->Modify();
 	if (WBP->WidgetTree)
@@ -447,7 +453,7 @@ void FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP)
 		UE_LOG(LogDesign2UMG, Error,
 			TEXT("SaveWidgetBlueprint: missing valid DesignTimeSize for %s; source design size is required"),
 			*WBP->GetPathName());
-		return;
+		return false;
 	}
 
 	// Compile after rendering; transient texture data may already be gone at this point.
@@ -463,6 +469,14 @@ void FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP)
 		EBlueprintCompileOptions::SkipDefaultObjectValidation |
 		EBlueprintCompileOptions::SkipFiBSearchMetaUpdate;
 	FKismetEditorUtilities::CompileBlueprint(WBP, CompileOptions);
+	if (WBP->Status != BS_UpToDate && WBP->Status != BS_UpToDateWithWarnings)
+	{
+		UE_LOG(LogDesign2UMG, Error,
+			TEXT("SaveWidgetBlueprint: compilation failed for %s (status=%d)"),
+			*WBP->GetPathName(),
+			static_cast<int32>(WBP->Status));
+		return false;
+	}
 	DumpTemplateTextBlockFontState(TEXT("template-postcompile"), WBP);
 	ApplyDesignPreviewSize(WBP, DesiredDesignSize, TEXT("post-compile"));
 
@@ -471,7 +485,15 @@ void FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP)
 	FSavePackageArgs SaveArgs;
 	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
 	FString FileName = FPackageName::LongPackageNameToFilename(FullPath, FPackageName::GetAssetPackageExtension());
-	UPackage::SavePackage(Package, WBP, *FileName, SaveArgs);
+	if (!UPackage::SavePackage(Package, WBP, *FileName, SaveArgs))
+	{
+		UE_LOG(LogDesign2UMG, Error,
+			TEXT("SaveWidgetBlueprint: failed to save %s to %s"),
+			*FullPath,
+			*FileName);
+		return false;
+	}
 
 	UE_LOG(LogDesign2UMG, Log, TEXT("Saved Widget Blueprint at %s"), *FullPath);
+	return true;
 }

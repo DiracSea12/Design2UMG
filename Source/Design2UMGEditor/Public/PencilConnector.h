@@ -3,13 +3,14 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Containers/Ticker.h"
 #include "HAL/PlatformProcess.h"
 #include "MCPHttpClient.h"
 
 /**
  * Discovers, launches, and manages the Pencil MCP server lifecycle.
  */
-class FPencilConnector
+class DESIGN2UMGEDITOR_API FPencilConnector
 {
 public:
 	~FPencilConnector();
@@ -35,6 +36,7 @@ public:
 private:
 	mutable FProcHandle ServerProcess;
 	FMCPHttpClient Client;
+	FTSTicker::FDelegateHandle RetryTickerHandle;
 	int32 ServerPort = 0;
 	int32 ActiveLaunchToken = 0;
 

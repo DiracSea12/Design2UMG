@@ -124,7 +124,10 @@ namespace DesignImportPipeline
 					&Result.GeneratedAssetPath,
 					&Result.RenderedSize,
 					GenerationSettings);
-				Result.RenderPngPath = Request.Generation.CompiledPngFilePath;
+				if (Result.bSucceeded)
+				{
+					Result.RenderPngPath = Request.Generation.CompiledPngFilePath;
+				}
 				break;
 			}
 

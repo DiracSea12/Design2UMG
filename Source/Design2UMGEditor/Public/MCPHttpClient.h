@@ -10,7 +10,7 @@ class FJsonObject;
  * Streamable MCP HTTP client implementing JSON-RPC 2.0 with Mcp-Session-Id.
  * Responses are received through SSE (text/event-stream).
  */
-class FMCPHttpClient
+class DESIGN2UMGEDITOR_API FMCPHttpClient
 {
 public:
 	FMCPHttpClient();

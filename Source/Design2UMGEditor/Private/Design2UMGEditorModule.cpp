@@ -9,9 +9,11 @@
 #include "Design2UMGLog.h"
 #include "Design2UMGNotifications.h"
 #include "Design2UMGSettings.h"
+#include "FontResolver.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "ContentBrowserModule.h"
+#include "Engine/Font.h"
 #include "IContentBrowserSingleton.h"
 #include "Framework/Docking/TabManager.h"
 #include "Framework/Notifications/NotificationManager.h"
@@ -88,16 +90,46 @@ void FDesign2UMGEditorModule::StartupModule()
 	Design2UMGEditorDesignSourceRegistry::RegisterBuiltInSources();
 	Design2UMGEditorCommandOwner::RegisterConsoleCommands();
 	ToolMenusStartupHandle = Design2UMGEditorMenuOwner::RegisterMenus();
+	IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+	FontAssetAddedHandle = AssetRegistry.OnAssetAdded().AddRaw(this, &FDesign2UMGEditorModule::HandleFontAssetChanged);
+	FontAssetRemovedHandle = AssetRegistry.OnAssetRemoved().AddRaw(this, &FDesign2UMGEditorModule::HandleFontAssetChanged);
+	FontAssetRenamedHandle = AssetRegistry.OnAssetRenamed().AddRaw(this, &FDesign2UMGEditorModule::HandleFontAssetRenamed);
+	FontAssetUpdatedHandle = AssetRegistry.OnAssetUpdated().AddRaw(this, &FDesign2UMGEditorModule::HandleFontAssetChanged);
 	Design2UMGEditorMenuOwner::MaybeShowWelcomeDialog();
 }
 
 void FDesign2UMGEditorModule::ShutdownModule()
 {
+	if (FAssetRegistryModule* AssetRegistryModule = FModuleManager::GetModulePtr<FAssetRegistryModule>(TEXT("AssetRegistry")))
+	{
+		IAssetRegistry& AssetRegistry = AssetRegistryModule->Get();
+		AssetRegistry.OnAssetAdded().Remove(FontAssetAddedHandle);
+		AssetRegistry.OnAssetRemoved().Remove(FontAssetRemovedHandle);
+		AssetRegistry.OnAssetRenamed().Remove(FontAssetRenamedHandle);
+		AssetRegistry.OnAssetUpdated().Remove(FontAssetUpdatedHandle);
+	}
+	FontAssetAddedHandle.Reset();
+	FontAssetRemovedHandle.Reset();
+	FontAssetRenamedHandle.Reset();
+	FontAssetUpdatedHandle.Reset();
 	FDesign2UMGNotification::ResetHandlers();
 	Design2UMGEditorImportOrchestrator::ShutdownTransientState();
 	Design2UMGEditorMenuOwner::UnregisterMenus(ToolMenusStartupHandle, this);
 	Design2UMGEditorCommandOwner::UnregisterConsoleCommands();
 	Design2UMGEditorDesignSourceRegistry::UnregisterBuiltInSources();
+}
+
+void FDesign2UMGEditorModule::HandleFontAssetChanged(const FAssetData& AssetData)
+{
+	if (AssetData.AssetClassPath == UFont::StaticClass()->GetClassPathName())
+	{
+		FFontResolver::ClearCache();
+	}
+}
+
+void FDesign2UMGEditorModule::HandleFontAssetRenamed(const FAssetData& AssetData, const FString&)
+{
+	HandleFontAssetChanged(AssetData);
 }
 
 IMPLEMENT_MODULE(FDesign2UMGEditorModule, Design2UMGEditor)

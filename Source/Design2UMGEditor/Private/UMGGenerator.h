@@ -19,6 +19,6 @@ public:
 		const FUMGWidgetData& WidgetData,
 		const FString& PackagePath,
 		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr);
-	static void SaveWidgetBlueprint(UWidgetBlueprint* WBP);
+	static bool SaveWidgetBlueprint(UWidgetBlueprint* WBP);
 };
 

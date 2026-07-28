@@ -531,7 +531,13 @@ UWidgetBlueprint* DesignImportUtils::GenerateBlueprint(
 		LOCTEXT("GenerateProgressSave", "Saving generated assets"),
 		TEXT("Blueprint generation"),
 		bCancelRequestedAfterMutation);
-	FUMGGenerator::SaveWidgetBlueprint(WBP);
+	if (!FUMGGenerator::SaveWidgetBlueprint(WBP))
+	{
+		FinishInteractiveGenerationProgress(SlowTask);
+		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint compile or save failed"));
+		FDesign2UMGNotification::Error(LOCTEXT("SaveFailed", "Design2UMG: Widget Blueprint compile or save failed"));
+		return nullptr;
+	}
 	UE_LOG(LogDesign2UMG, Log, TEXT("DesignImportUtils: Generated %s"), *WBP->GetPathName());
 
 	AdvanceInteractiveGenerationProgressAfterMutation(
@@ -559,6 +565,15 @@ bool DesignImportUtils::GenerateBlueprintAndPng(
 	FString* OutRenderPngPath,
 	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
 {
+	if (OutGeneratedAssetPath)
+	{
+		OutGeneratedAssetPath->Empty();
+	}
+	if (OutRenderPngPath)
+	{
+		OutRenderPngPath->Empty();
+	}
+
 	FInteractiveGenerationScope TransactionScope(TEXT("Blueprint and PNG"));
 	FScopedSlowTask* SlowTask = nullptr;
 	if (TransactionScope.IsOwner() && !BeginInteractiveGenerationProgress(SlowTask, TEXT("Blueprint and PNG")))
@@ -598,19 +613,10 @@ bool DesignImportUtils::GenerateBlueprintAndPng(
 		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint build failed"));
 		return false;
 	}
-	if (OutGeneratedAssetPath)
-	{
-		*OutGeneratedAssetPath = WBP->GetPathName();
-	}
-
 	bool bCancelRequestedAfterMutation = false;
 	FIntPoint Size = ResolveSourceWidgetTreeRenderSize(Data);
 	const FString PngName = WBP ? WBP->GetName() : FPaths::GetBaseFilename(FinalPath);
 	const FString OutPng = FPaths::ProjectSavedDir() / TEXT("Design2UMG") / (PngName + TEXT(".png"));
-	if (OutRenderPngPath)
-	{
-		*OutRenderPngPath = OutPng;
-	}
 	AdvanceInteractiveGenerationProgressAfterMutation(
 		SlowTask,
 		0.5f,
@@ -621,7 +627,10 @@ bool DesignImportUtils::GenerateBlueprintAndPng(
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget PNG render failed"));
 		// Save the Blueprint even when rendering fails so the issue can be inspected.
-		FUMGGenerator::SaveWidgetBlueprint(WBP);
+		if (FUMGGenerator::SaveWidgetBlueprint(WBP) && OutGeneratedAssetPath)
+		{
+			*OutGeneratedAssetPath = WBP->GetPathName();
+		}
 		FinishInteractiveGenerationProgress(SlowTask);
 		return false;
 	}
@@ -633,7 +642,12 @@ bool DesignImportUtils::GenerateBlueprintAndPng(
 		LOCTEXT("GenerateProgressSave", "Saving generated assets"),
 		TEXT("Blueprint and PNG generation"),
 		bCancelRequestedAfterMutation);
-	FUMGGenerator::SaveWidgetBlueprint(WBP);
+	if (!FUMGGenerator::SaveWidgetBlueprint(WBP))
+	{
+		FinishInteractiveGenerationProgress(SlowTask);
+		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint compile or save failed after PNG render"));
+		return false;
+	}
 	AdvanceInteractiveGenerationProgressAfterMutation(
 		SlowTask,
 		1.0f,
@@ -703,6 +717,15 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 	FIntPoint* OutRenderedSize,
 	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
 {
+	if (OutGeneratedAssetPath)
+	{
+		OutGeneratedAssetPath->Empty();
+	}
+	if (OutRenderedSize)
+	{
+		*OutRenderedSize = FIntPoint::ZeroValue;
+	}
+
 	FInteractiveGenerationScope TransactionScope(TEXT("Compiled PNG"));
 	FScopedSlowTask* SlowTask = nullptr;
 	if (TransactionScope.IsOwner() && !BeginInteractiveGenerationProgress(SlowTask, TEXT("Compiled PNG")))
@@ -748,7 +771,12 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 		LOCTEXT("GenerateProgressSave", "Saving generated assets"),
 		TEXT("Compiled PNG generation"),
 		bCancelRequestedAfterMutation);
-	FUMGGenerator::SaveWidgetBlueprint(WidgetBlueprint);
+	if (!FUMGGenerator::SaveWidgetBlueprint(WidgetBlueprint))
+	{
+		FinishInteractiveGenerationProgress(SlowTask);
+		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint compile or save failed before compiled PNG render"));
+		return false;
+	}
 
 	if (OutGeneratedAssetPath)
 	{

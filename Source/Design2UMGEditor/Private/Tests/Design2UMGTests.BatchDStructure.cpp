@@ -384,6 +384,25 @@ bool FBatchDMCPHttpCancellationStaticTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDPencilRetryTickerLifecycleStaticTest,
+	"Design2UMG.BatchD.PencilRetryTickerLifecycleStatic",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FBatchDPencilRetryTickerLifecycleStaticTest::RunTest(const FString& Parameters)
+{
+	FString PencilHeader;
+	FString PencilSource;
+	if (!LoadPluginFile(*this, TEXT("Source/Design2UMGEditor/Public/PencilConnector.h"), PencilHeader)
+		|| !LoadPluginFile(*this, TEXT("Source/Design2UMGEditor/Private/ExternalServices/PencilConnector.cpp"), PencilSource))
+	{
+		return false;
+	}
+	TestTrue(TEXT("Pencil connector owns and unregisters its retry ticker"),
+		PencilHeader.Contains(TEXT("RetryTickerHandle"), ESearchCase::CaseSensitive)
+		&& PencilSource.Contains(TEXT("RemoveTicker(RetryTickerHandle)"), ESearchCase::CaseSensitive)
+		&& PencilSource.Contains(TEXT("RetryTickerHandle.Reset()"), ESearchCase::CaseSensitive));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDFigmaHttpCancellationBehaviorTest,
 	"Design2UMG.BatchD.FigmaHttpCancellationBehavior",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)

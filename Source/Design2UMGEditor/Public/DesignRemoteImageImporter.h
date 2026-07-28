@@ -12,7 +12,7 @@ class UTexture2D;
  * - /Game/... and /Engine/... paths are preserved
  * - http/https URLs are downloaded and imported as Texture2D assets
  */
-class FDesignRemoteImageImporter
+class DESIGN2UMGEDITOR_API FDesignRemoteImageImporter
 {
 public:
 	/**
