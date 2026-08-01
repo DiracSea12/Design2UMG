@@ -294,6 +294,9 @@ assert.ok(componentSets.set1.variantGroupProperties, 'variant group properties m
   assert.equal(riskyRestNode.design2umgRenderFallbackScope, 'full', 'render fallback scope missing');
   assert.equal(riskyRestNode.design2umgRenderFallbackSource, 'figma_render_png', 'render fallback source missing');
   assert.equal(riskyRestNode.design2umgRenderFallbackReason, 'image_filters+image_blend_luminosity', 'render fallback reason missing');
+
+  const reference = await api.exportReferencePng(riskyLeafNode, 2);
+  assert.deepEqual(Array.from(reference), [9, 8, 7, 6], 'reference PNG should come from the selected root');
   console.log('FigmaExporter smoke test passed');
 })().catch((err) => {
   console.error(err);

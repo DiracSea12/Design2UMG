@@ -5,6 +5,7 @@
 #include "UMGPropertyKeys.h"
 #include "UMGValueParsing.h"
 #include "UMGWidgetNodeProceduralResourceAccess.h"
+#include "UMGImageCropUtils.h"
 #include "Design2UMGLog.h"
 #include "DesignPathRasterizer.h"
 #include "ProceduralShapeGenerator.h"
@@ -87,6 +88,17 @@ namespace
 		Key = HashCombine(Key, GetTypeHash(TextureHeight));
 		Key = HashCombine(Key, GetTypeHash(ShadowBlur));
 		Key = HashCombine(Key, GetTypeHash(BrushColor));
+		return Key;
+	}
+
+	uint32 MakeImageTransformTextureKey(
+		const FString& TexturePath,
+		const UMGImageCropUtils::FImageCropRequest& Request)
+	{
+		uint32 Key = GetTypeHash(TexturePath);
+		Key = HashCombine(Key, GetTypeHash(Design2UMGWidgetNodeAccess::SerializeImageTransform(Request.Transform)));
+		Key = HashCombine(Key, GetTypeHash(Request.OutputWidth));
+		Key = HashCombine(Key, GetTypeHash(Request.OutputHeight));
 		return Key;
 	}
 
@@ -198,11 +210,21 @@ namespace
 
 	struct FTextureMaterializationPlan
 	{
+		enum class EKind : uint8
+		{
+			Path,
+			Procedural,
+			ImageTransform,
+		};
+
 		uint32 Key = 0u;
 		TextureFilter Filter = TF_Bilinear;
 		FString AssetName;
+		EKind Kind = EKind::Path;
 		FString ProceduralMaterialRef;
 		FUMGProceduralResourceRequest ProceduralRequest;
+		FString SourceTexturePath;
+		UMGImageCropUtils::FImageCropRequest ImageCropRequest;
 	};
 
 	bool TryBuildPathTextureMaterializationPlan(
@@ -218,6 +240,7 @@ namespace
 
 		OutPlan.Key = MakePathTextureKey(Node);
 		OutPlan.Filter = TF_Nearest;
+		OutPlan.Kind = FTextureMaterializationPlan::EKind::Path;
 		const FString SanitizedName = ObjectTools::SanitizeObjectName(Node.Name.IsEmpty() ? Node.Id : Node.Name);
 		OutPlan.AssetName = ObjectTools::SanitizeObjectName(FString::Printf(TEXT("%s_%s_%08X"), *AssetPrefix, *SanitizedName, OutPlan.Key));
 		return true;
@@ -259,6 +282,7 @@ namespace
 
 		OutPlan.Key = MakeProceduralTextureKey(Node);
 		OutPlan.Filter = TF_Bilinear;
+		OutPlan.Kind = FTextureMaterializationPlan::EKind::Procedural;
 		OutPlan.ProceduralMaterialRef = ResourceRequest.MaterialRef;
 		OutPlan.ProceduralRequest = ResourceRequest;
 		const FString SanitizedName = ObjectTools::SanitizeObjectName(Node.Name.IsEmpty() ? Node.Id : Node.Name);
@@ -270,6 +294,67 @@ namespace
 	UTexture2D* CreateProceduralTexture(const FUMGWidgetNode&, const FTextureMaterializationPlan& Plan)
 	{
 		return DesignResourceResolver::ResolveTextureFromMaterialRef(Plan.ProceduralRequest, nullptr);
+	}
+
+	bool TryBuildImageTransformTextureMaterializationPlan(
+		const FUMGWidgetNode& Node,
+		const FString& AssetPrefix,
+		FTextureMaterializationPlan& OutPlan)
+	{
+		const FString TexturePath = Node.Brush.Image.TexturePath.Get(Node.Brush.TexturePath).TrimStartAndEnd();
+		if (TexturePath.IsEmpty()
+			|| !UMGImageCropUtils::TryBuildCropRequest(Node, OutPlan.ImageCropRequest)
+			|| UMGImageCropUtils::CanUseUvRegion(OutPlan.ImageCropRequest.Transform))
+		{
+			return false;
+		}
+
+		OutPlan.Key = MakeImageTransformTextureKey(TexturePath, OutPlan.ImageCropRequest);
+		OutPlan.Filter = TF_Bilinear;
+		OutPlan.Kind = FTextureMaterializationPlan::EKind::ImageTransform;
+		OutPlan.SourceTexturePath = TexturePath;
+		const FString SanitizedName = ObjectTools::SanitizeObjectName(Node.Name.IsEmpty() ? Node.Id : Node.Name);
+		OutPlan.AssetName = ObjectTools::SanitizeObjectName(
+			FString::Printf(TEXT("%s_%s_ImageTransform_%08X"), *AssetPrefix, *SanitizedName, OutPlan.Key));
+		return true;
+	}
+
+	UTexture2D* CreateImageTransformTexture(const FUMGWidgetNode&, const FTextureMaterializationPlan& Plan)
+	{
+		UTexture2D* SourceTexture = DesignResourceResolver::LoadTextureFromPath(
+			Plan.SourceTexturePath,
+			DesignResourceResolver::ELoadMode::LoadThenFind);
+		if (!SourceTexture)
+		{
+			return nullptr;
+		}
+
+		const FUMGVisualBrushData::FImageTransformData& Transform = Plan.ImageCropRequest.Transform;
+		return FProceduralShapeGenerator::ApplyAffineCrop(
+			SourceTexture,
+			Transform.A,
+			Transform.B,
+			Transform.TX,
+			Transform.C,
+			Transform.D,
+			Transform.TY,
+			Plan.ImageCropRequest.OutputWidth,
+			Plan.ImageCropRequest.OutputHeight);
+	}
+
+	void ApplyMaterializedTextureToNode(
+		FUMGWidgetNode& Node,
+		const FString& TexturePath,
+		const FTextureMaterializationPlan::EKind Kind)
+	{
+		ReplaceNodeFillWithTexturePath(Node, TexturePath);
+		if (Kind == FTextureMaterializationPlan::EKind::ImageTransform)
+		{
+			Node.Brush.Image.Transform.Reset();
+			Node.WidgetStyle.ImageTransform.Reset();
+			Node.Brush.Image.Mode.Reset();
+			Node.WidgetStyle.ImageMode.Reset();
+		}
 	}
 
 	void NormalizeTextureResourcesRecursive(
@@ -285,7 +370,7 @@ namespace
 		{
 			if (const FString* Cached = Cache.Find(Plan.Key))
 			{
-				ReplaceNodeFillWithTexturePath(Node, *Cached);
+				ApplyMaterializedTextureToNode(Node, *Cached, Plan.Kind);
 			}
 			else if (UTexture2D* Generated = CreateTexture(Node, Plan))
 			{
@@ -297,15 +382,19 @@ namespace
 					FString ObjectPath;
 					if (CreateOrUpdatePathTextureAsset(TextureImportPath, Plan.AssetName, RawData, RawW, RawH, Plan.Filter, ObjectPath))
 					{
-						ReplaceNodeFillWithTexturePath(Node, ObjectPath);
+						ApplyMaterializedTextureToNode(Node, ObjectPath, Plan.Kind);
 						Cache.Add(Plan.Key, ObjectPath);
-						if (Plan.ProceduralMaterialRef.IsEmpty())
+						if (Plan.Kind == FTextureMaterializationPlan::EKind::Path)
 						{
 							UE_LOG(LogDesign2UMG, Log, TEXT("Persisted path texture '%s' -> %s"), *Node.Name, *ObjectPath);
 						}
-						else
+						else if (Plan.Kind == FTextureMaterializationPlan::EKind::Procedural)
 						{
 							UE_LOG(LogDesign2UMG, Log, TEXT("Persisted procedural texture '%s' (%s) -> %s"), *Node.Name, *Plan.ProceduralMaterialRef, *ObjectPath);
+						}
+						else
+						{
+							UE_LOG(LogDesign2UMG, Log, TEXT("Persisted image transform texture '%s' -> %s"), *Node.Name, *ObjectPath);
 						}
 					}
 				}
@@ -341,4 +430,16 @@ void FPreBuildResourceNormalizer::NormalizeProceduralTextures(FUMGWidgetNode& Ro
 		Cache,
 		TryBuildProceduralTextureMaterializationPlan,
 		CreateProceduralTexture);
+}
+
+void FPreBuildResourceNormalizer::NormalizeImageTransformTextures(FUMGWidgetNode& Root, const FString& TextureImportPath, const FString& AssetPrefix)
+{
+	TMap<uint32, FString> Cache;
+	NormalizeTextureResourcesRecursive(
+		Root,
+		TextureImportPath,
+		AssetPrefix,
+		Cache,
+		TryBuildImageTransformTextureMaterializationPlan,
+		CreateImageTransformTexture);
 }

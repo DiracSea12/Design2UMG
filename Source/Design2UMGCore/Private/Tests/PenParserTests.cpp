@@ -287,7 +287,7 @@ bool FPenParserStrokeNodeFormatsTest::RunTest(const FString&)
       "type": "frame",
       "stroke": "#112233",
       "strokeWidth": { "top": 1, "right": 2, "bottom": 3, "left": 4 },
-      "strokeAlignment": "outside"
+      "strokeAlignment": "outer"
     },
     {
       "id": "current-inner-stroke",

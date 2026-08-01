@@ -36,6 +36,7 @@
 ```
 figma_export.zip
 ├── design.json              # REST API 兼容的设计数据
+├── reference.png            # Figma 对选中根节点的官方 PNG 渲染（与 design.json 同次导出）
 └── images/
     ├── {imageHash}.png      # 图片填充素材
     └── vec_{nodeId}.png     # 矢量节点渲染图
@@ -59,6 +60,7 @@ figma_export.zip
 - 图片文件名必须是 `{imageRef}.png` 格式（插件自动生成，无需手动修改）
 - 重复导入同一设计时，已存在的纹理资产会被复用，不会重复创建
 - 矢量节点（VECTOR、STAR、LINE 等）会被自动渲染为 PNG 导出
+- `reference.png` 由 Figma Plugin API 对选中的根节点直接渲染，用作该导出的权威参考图；不会通过 JSON 或其他图片后处理补背景
 
 ## 故障排查
 

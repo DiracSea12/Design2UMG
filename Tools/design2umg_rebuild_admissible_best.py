@@ -36,6 +36,7 @@ DEFAULT_PIXEL_TOLERANCE = 6
 CACHE_FILENAME = "_admissible_best_cache.json"
 CACHE_VERSION = 3
 PINNED_BASELINE_FILENAME = "design2umg_pinned_baseline.json"
+FORMAL_CASE_COUNT = 71
 
 
 def resolve_admissible_best_manifest(automation_root: Path) -> tuple[Path, dict, str]:
@@ -44,6 +45,16 @@ def resolve_admissible_best_manifest(automation_root: Path) -> tuple[Path, dict,
     if pinned_path.is_file():
         pinned_manifest = load_json(pinned_path)
         pinned_cases = pinned_manifest.get("cases") or {}
+        pinned_scope_count = pinned_manifest.get("scope_case_count", pinned_manifest.get("case_count"))
+        if pinned_scope_count != FORMAL_CASE_COUNT:
+            pinned_manifest["scope_case_count"] = FORMAL_CASE_COUNT
+        if len(pinned_cases) != FORMAL_CASE_COUNT:
+            manifest = rebuild_historical_best_manifest(automation_root)
+            manifest["pinned_baseline_source"] = str(pinned_path)
+            manifest["pinned_baseline_skipped_by_reason"] = {"pinned_case_count_incomplete": len(pinned_cases)}
+            manifest["formal_scope_case_count"] = FORMAL_CASE_COUNT
+            write_json(output_path, manifest)
+            return output_path, manifest, f"{pinned_path} (incomplete pinned case set)"
         skipped_by_reason: dict[str, int] = {}
         for case in pinned_cases.values():
             case_skip_reasons: set[str] = set()

@@ -7,7 +7,10 @@
 #include "Design2UMGConverterVisualSupport.h"
 #include "Design2UMGNodeWidgetFactory.h"
 #include "Design2UMGSettings.h"
+#include "Design2UMGSourceMetadata.h"
 #include "Design2UMGTextWidgetBuilder.h"
+#include "DesignSchemaSourceExtensions.h"
+#include "ImageFillUtils.h"
 #include "SharedCoreSemantics.h"
 #include "SizeEstimator.h"
 #include "TextMeasurement.h"
@@ -632,6 +635,39 @@ bool FSharedSemanticsVisibleFillOwnerBoundaryTest::RunTest(const FString& Parame
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImageFillTransformModeIndependenceTest,
+	"Design2UMG.SharedSemantics.ImageFillTransformModeIndependence",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FImageFillTransformModeIndependenceTest::RunTest(const FString& Parameters)
+{
+	FDesignImageFill TransformedStretch;
+	TransformedStretch.Mode = EDesignImageMode::Stretch;
+	TransformedStretch.Transform.A = 0.5f;
+	TransformedStretch.Transform.TX = 0.25f;
+	TransformedStretch.Transform.D = 0.75f;
+	TransformedStretch.Transform.TY = 0.1f;
+
+	FUMGWidgetNode TransformedWidget;
+	ImageFillUtils::ApplyImageFillProperties(TransformedWidget, TransformedStretch);
+	TestTrue(TEXT("Non-identity image transform selects executable crop mode"),
+		TransformedWidget.Brush.Image.Mode.IsSet()
+		&& TransformedWidget.Brush.Image.Mode.GetValue() == TEXT("Crop"));
+	TestTrue(TEXT("Non-identity image transform is preserved independent of source scale mode"),
+		TransformedWidget.Brush.Image.Transform.IsSet()
+		&& FMath::IsNearlyEqual(TransformedWidget.Brush.Image.Transform.GetValue().A, 0.5f)
+		&& FMath::IsNearlyEqual(TransformedWidget.Brush.Image.Transform.GetValue().TX, 0.25f)
+		&& FMath::IsNearlyEqual(TransformedWidget.Brush.Image.Transform.GetValue().D, 0.75f)
+		&& FMath::IsNearlyEqual(TransformedWidget.Brush.Image.Transform.GetValue().TY, 0.1f));
+
+	FDesignImageFill PlainStretch;
+	PlainStretch.Mode = EDesignImageMode::Stretch;
+	FUMGWidgetNode PlainWidget;
+	ImageFillUtils::ApplyImageFillProperties(PlainWidget, PlainStretch);
+	TestFalse(TEXT("Identity stretch does not synthesize crop mode"), PlainWidget.Brush.Image.Mode.IsSet());
+	TestFalse(TEXT("Identity stretch does not synthesize image transform"), PlainWidget.Brush.Image.Transform.IsSet());
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNodeWidgetFactoryGeometryFallbackDoesNotMutateInputTest,
 	"Design2UMG.NodeWidgetFactory.GeometryFallbackDoesNotMutateInput",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -648,6 +684,22 @@ bool FNodeWidgetFactoryGeometryFallbackDoesNotMutateInputTest::RunTest(const FSt
 	TestEqual(TEXT("Ellipse input Y remains untouched"), EllipseNode->Transform.Y, EllipseTransformBefore.Y);
 	TestTrue(TEXT("Ellipse fallback still builds widget geometry"), EllipseResult.Widget.Path.Geometry.IsSet() && !EllipseResult.Widget.Path.Geometry.GetValue().IsEmpty());
 
+	TSharedPtr<FDesignNode> RasterizedEllipseNode = MakeSharedSemanticsNode(TEXT("ellipse_raster"), EDesignNodeType::Ellipse, FDesignSize::Fixed(96.0f), FDesignSize::Fixed(48.0f));
+	RasterizedEllipseNode->Visual.Fill.Type = EDesignFillType::Image;
+	RasterizedEllipseNode->Visual.Fill.Image.Url = TEXT("/Game/Textures/T_EllipseCrop.T_EllipseCrop");
+	RasterizedEllipseNode->MutableSource().VectorRasterFallbackImageRef = TEXT("/Game/Textures/T_EllipseCrop.T_EllipseCrop");
+	const Design2UMGNodeWidgetFactory::FBuildResult RasterizedEllipseResult =
+		Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(RasterizedEllipseNode);
+	TestEqual(TEXT("Full pre-rasterized ellipse keeps its ellipse mask"), RasterizedEllipseResult.Widget.Type, TEXT("Border"));
+
+	RasterizedEllipseNode->Metadata.Add(Design2UMGSourceMetadata::RenderBoundsClippedByParentKey, TEXT("true"));
+	const Design2UMGNodeWidgetFactory::FBuildResult ClippedRasterizedEllipseResult =
+		Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(RasterizedEllipseNode);
+	TestEqual(TEXT("Parent-clipped rasterized ellipse does not add another ellipse mask"), ClippedRasterizedEllipseResult.Widget.Type, TEXT("Image"));
+	TestTrue(TEXT("Parent-clipped rasterized ellipse keeps its texture"),
+		ClippedRasterizedEllipseResult.Widget.Brush.Image.TexturePath.IsSet()
+		&& ClippedRasterizedEllipseResult.Widget.Brush.Image.TexturePath.GetValue() == TEXT("/Game/Textures/T_EllipseCrop.T_EllipseCrop"));
+
 	TSharedPtr<FDesignNode> LineNode = MakeSharedSemanticsNode(TEXT("line_fallback"), EDesignNodeType::Line, FDesignSize::Fixed(120.0f), FDesignSize::Fixed(6.0f));
 	LineNode->Transform.SetPosition(6.0f, 18.0f);
 	LineNode->Visual.Stroke.Thickness.Uniform = 2.0f;
@@ -659,6 +711,26 @@ bool FNodeWidgetFactoryGeometryFallbackDoesNotMutateInputTest::RunTest(const FSt
 	TestEqual(TEXT("Line input X remains untouched"), LineNode->Transform.X, LineTransformBefore.X);
 	TestEqual(TEXT("Line input Y remains untouched"), LineNode->Transform.Y, LineTransformBefore.Y);
 	TestTrue(TEXT("Line fallback still builds widget geometry"), LineResult.Widget.Path.Geometry.IsSet() && !LineResult.Widget.Path.Geometry.GetValue().IsEmpty());
+
+	TSharedPtr<FDesignNode> DashedVectorNode = MakeSharedSemanticsNode(
+		TEXT("dashed_vector_fallback"),
+		EDesignNodeType::Path,
+		FDesignSize::Fixed(27.2578f),
+		FDesignSize::Fixed(322.1843f));
+	DashedVectorNode->Visual.Stroke.Thickness.Uniform = 5.11084f;
+	DashedVectorNode->Visual.Stroke.Fill = FDesignFill::FromColor(TEXT("#CDE7FFFF"));
+	DashedVectorNode->Metadata.Add(TEXT("stroke.dashes"), TEXT("21.173479,21.173479"));
+	DashedVectorNode->Metadata.Add(TEXT("stroke.cap"), TEXT("ROUND"));
+	DashedVectorNode->Metadata.Add(TEXT("source.renderBoundsDeltaW"), TEXT("27.257773"));
+	DashedVectorNode->Metadata.Add(TEXT("source.renderBoundsDeltaH"), TEXT("16.184288"));
+
+	const Design2UMGNodeWidgetFactory::FBuildResult DashedVectorResult =
+		Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(DashedVectorNode);
+	TestEqual(TEXT("Degenerate dashed VECTOR becomes a rasterized path image"), DashedVectorResult.Widget.Type, TEXT("Image"));
+	TestTrue(TEXT("Degenerate dashed VECTOR receives generated capsule geometry"),
+		DashedVectorResult.Widget.Path.Geometry.IsSet()
+		&& DashedVectorResult.Widget.Path.Geometry.GetValue().Contains(TEXT(" A ")));
+	TestTrue(TEXT("Dashed VECTOR fallback does not mutate source geometry"), DashedVectorNode->Shape.Geometry.IsEmpty());
 	return true;
 }
 

@@ -1071,11 +1071,9 @@ bool FConverterNonUniformStrokePaddingTest::RunTest(const FString& Parameters)
 				"height": 60,
 				"layout": "horizontal",
 				"padding": [10, 12],
-				"stroke": {
-					"align": "outside",
-					"thickness": { "right": 1 },
-					"fill": "#FFFFFF"
-				},
+				"stroke": "#FFFFFF",
+				"strokeWidth": { "right": 1 },
+				"strokeAlignment": "outer",
 				"children": [
 					{
 						"id": "text",
@@ -1118,15 +1116,11 @@ bool FPenOfficialFieldParityTest::RunTest(const FString& Parameters)
 			"type": "frame",
 			"layout": "horizontal",
 			"layoutIncludeStroke": false,
-			"stroke": {
-				"align": "inside",
-				"thickness": 2,
-				"fill": "#112233",
-				"join": "miter",
-				"miterAngle": 30,
-				"cap": "round",
-				"dashPattern": [1, 2]
-			},
+			"stroke": "#112233",
+			"strokeWidth": 2,
+			"strokeAlignment": "inner",
+			"strokeLinejoin": "miter",
+			"strokeLinecap": "round",
 			"children": [{
 				"id": "text1",
 				"type": "text",
@@ -1195,9 +1189,8 @@ bool FPenOfficialFieldParityTest::RunTest(const FString& Parameters)
 	const TSharedPtr<FDesignNode>& RichTextNode = FrameNode->Children[2];
 	TestTrue(TEXT("layoutIncludeStroke false preserved"), FrameNode->Metadata.FindRef(TEXT("layoutIncludeStroke")) == TEXT("false"));
 	TestTrue(TEXT("layoutIncludeStroke false typed primary storage"), FrameNode->Source().LayoutExtensions.StrokesIncludedInLayout.IsSet() && !FrameNode->Source().LayoutExtensions.StrokesIncludedInLayout.GetValue());
-	TestTrue(TEXT("stroke.join preserved"), FrameNode->Metadata.FindRef(TEXT("stroke.join")) == TEXT("miter"));
-	TestTrue(TEXT("stroke.cap preserved"), FrameNode->Metadata.FindRef(TEXT("stroke.cap")) == TEXT("round"));
-	TestTrue(TEXT("stroke.dashPattern preserved"), FrameNode->Metadata.FindRef(TEXT("stroke.dashPattern")).Contains(TEXT("1")));
+	TestTrue(TEXT("strokeLinejoin preserved"), FrameNode->Metadata.FindRef(TEXT("stroke.join")) == TEXT("miter"));
+	TestTrue(TEXT("strokeLinecap preserved"), FrameNode->Metadata.FindRef(TEXT("stroke.cap")) == TEXT("round"));
 	TestTrue(TEXT("mesh gradient preserved"), TextNode->Visual.Fill.bFromMeshGradient && !TextNode->Visual.Fill.MeshGradientRaw.IsEmpty());
 	TestTrue(TEXT("mesh gradient rows/columns parsed"), TextNode->Visual.Fill.MeshGradient.Rows.IsSet()
 		&& TextNode->Visual.Fill.MeshGradient.Columns.IsSet()

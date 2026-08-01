@@ -4,7 +4,9 @@
 
 #include "Misc/AutomationTest.h"
 #include "FigmaParser.h"
+#include "DesignTreeLimits.h"
 #include "DesignSchema.h"
+#include "SizeEstimator.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -31,6 +33,59 @@ namespace
 		}
 		return FFigmaParser::ParseDocument(Json, OutDoc);
 	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FFigmaParserInputBudgetTest,
+	"Design2UMG.Unit.FigmaParser.InputBudget",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFigmaParserInputBudgetTest::RunTest(const FString&)
+{
+	FDesignParserBudget Budget;
+	for (int32 Index = 0; Index < DesignTreeLimits::MaxParsedNodeCount; ++Index)
+	{
+		if (!Budget.TryEnterNode(0))
+		{
+			AddError(FString::Printf(TEXT("Node budget rejected valid node %d"), Index));
+			return false;
+		}
+	}
+	TestFalse(TEXT("Node budget rejects one node beyond the shared limit"), Budget.TryEnterNode(0));
+
+	FDesignParserBudget DepthBudget;
+	TestTrue(TEXT("Depth at the shared limit is accepted"), DepthBudget.TryEnterNode(DesignTreeLimits::MaxNodeDepth));
+	TestFalse(TEXT("Depth beyond the shared limit is rejected"), DepthBudget.TryEnterNode(DesignTreeLimits::MaxNodeDepth + 1));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FFigmaParserRejectsDeepNodeTreeTest,
+	"Design2UMG.Unit.FigmaParser.RejectsDeepNodeTree",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFigmaParserRejectsDeepNodeTreeTest::RunTest(const FString&)
+{
+	FString Json = TEXT("{\"document\":");
+	for (int32 Depth = 0; Depth <= DesignTreeLimits::MaxNodeDepth + 1; ++Depth)
+	{
+		Json += FString::Printf(
+			TEXT("{\"type\":\"FRAME\",\"id\":\"%d\",\"name\":\"Node%d\",\"children\":["),
+			Depth,
+			Depth);
+	}
+	Json += TEXT("{\"type\":\"RECTANGLE\",\"id\":\"leaf\",\"name\":\"Leaf\"}");
+	for (int32 Depth = 0; Depth <= DesignTreeLimits::MaxNodeDepth + 1; ++Depth)
+	{
+		Json += TEXT("]}");
+	}
+	Json += TEXT("}");
+
+	AddExpectedError(TEXT("node tree exceeds the supported limits"), EAutomationExpectedErrorFlags::Contains, 1);
+	FDesignDocument Document;
+	TestFalse(TEXT("Figma parser rejects a tree beyond the shared depth limit"), FFigmaParser::ParseDocument(Json, Document));
+	TestEqual(TEXT("Rejected parse leaves no partial tree"), Document.Children.Num(), 0);
+	return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -61,6 +116,144 @@ bool FFigmaParserBasicNodesTest::RunTest(const FString&)
 	TestTrue(TEXT("Rect valid"), RectNode.IsValid());
 	TestEqual(TEXT("Rect type"), RectNode->Type, EDesignNodeType::Rectangle);
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FFigmaParserHugSizingOutsideAutoLayoutParentTest,
+	"Design2UMG.Unit.FigmaParser.HugSizingOutsideAutoLayoutParent",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFigmaParserHugSizingOutsideAutoLayoutParentTest::RunTest(const FString&)
+{
+	const FString Json = TEXT(R"JSON(
+{
+  "document": {
+    "type": "DOCUMENT",
+    "children": [{
+      "type": "CANVAS",
+      "children": [{
+        "id": "parent",
+        "name": "Parent",
+        "type": "FRAME",
+        "absoluteBoundingBox": { "x": 0, "y": 0, "width": 800, "height": 1000 },
+        "children": [
+          {
+            "id": "hug",
+            "name": "Hug",
+            "type": "FRAME",
+            "layoutMode": "HORIZONTAL",
+            "layoutSizingHorizontal": "HUG",
+            "layoutSizingVertical": "HUG",
+            "paddingLeft": 12,
+            "paddingRight": 12,
+            "paddingTop": 12,
+            "paddingBottom": 12,
+            "absoluteBoundingBox": { "x": 0, "y": 0, "width": 400, "height": 900 },
+            "children": [{
+              "id": "hug-child",
+              "name": "Hug Child",
+              "type": "RECTANGLE",
+              "absoluteBoundingBox": { "x": 12, "y": 12, "width": 100, "height": 32 },
+              "fills": [{ "type": "SOLID", "color": { "r": 1, "g": 1, "b": 1, "a": 1 } }]
+            }]
+          },
+          {
+            "id": "fill",
+            "name": "Fill",
+            "type": "FRAME",
+            "layoutMode": "HORIZONTAL",
+            "layoutSizingHorizontal": "FILL",
+            "layoutSizingVertical": "FILL",
+            "absoluteBoundingBox": { "x": 0, "y": 0, "width": 200, "height": 80 },
+            "children": []
+          },
+          {
+            "id": "fixed",
+            "name": "Fixed",
+            "type": "FRAME",
+            "layoutMode": "HORIZONTAL",
+            "absoluteBoundingBox": { "x": 0, "y": 0, "width": 160, "height": 64 },
+            "children": []
+          }
+        ]
+      }]
+    }]
+  }
+}
+)JSON");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Document parses"), FFigmaParser::ParseDocument(Json, Doc));
+	TestEqual(TEXT("One root parent"), Doc.Children.Num(), 1);
+	if (Doc.Children.Num() != 1 || !Doc.Children[0].IsValid() || Doc.Children[0]->Children.Num() != 3)
+	{
+		return false;
+	}
+
+	const TSharedPtr<FDesignNode>& HugNode = Doc.Children[0]->Children[0];
+	TestTrue(TEXT("Self auto-layout HUG width becomes fit-content"), HugNode->Transform.Width.IsFit());
+	TestTrue(TEXT("Self auto-layout HUG height becomes fit-content"), HugNode->Transform.Height.IsFit());
+	TestEqual(TEXT("Stale HUG width is not retained as a minimum"), HugNode->Transform.Width.Value, 0.0f);
+	TestEqual(TEXT("Stale HUG height is not retained as a minimum"), HugNode->Transform.Height.Value, 0.0f);
+
+	const FVector2D ResolvedHugSize = SizeEstimator::PreComputeFitContentSizes(HugNode, Doc);
+	TestEqual(TEXT("HUG width resolves from child and padding"), ResolvedHugSize.X, 124.0);
+	TestEqual(TEXT("HUG height resolves from child and padding"), ResolvedHugSize.Y, 56.0);
+
+	const TSharedPtr<FDesignNode>& FillNode = Doc.Children[0]->Children[1];
+	TestTrue(TEXT("FILL without an auto-layout parent keeps fixed width"), FillNode->Transform.Width.IsFixed());
+	TestTrue(TEXT("FILL without an auto-layout parent keeps fixed height"), FillNode->Transform.Height.IsFixed());
+	TestEqual(TEXT("Fixed FILL width keeps its source bounds"), FillNode->Transform.Width.Value, 200.0f);
+	TestEqual(TEXT("Fixed FILL height keeps its source bounds"), FillNode->Transform.Height.Value, 80.0f);
+
+	const TSharedPtr<FDesignNode>& FixedNode = Doc.Children[0]->Children[2];
+	TestTrue(TEXT("Missing horizontal sizing stays fixed"), FixedNode->Transform.Width.IsFixed());
+	TestTrue(TEXT("Missing vertical sizing stays fixed"), FixedNode->Transform.Height.IsFixed());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FFigmaParserStrokeDashMetadataTest,
+	"Design2UMG.Unit.FigmaParser.StrokeDashMetadata",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFigmaParserStrokeDashMetadataTest::RunTest(const FString&)
+{
+	const FString Json = TEXT(R"JSON(
+{
+  "document": {
+    "type": "DOCUMENT",
+    "children": [{
+      "type": "CANVAS",
+      "children": [{
+        "id": "dashed-vector",
+        "name": "Dashed Vector",
+        "type": "VECTOR",
+        "absoluteBoundingBox": {"x": 0, "y": 0, "width": 0.0001, "height": 306},
+        "absoluteRenderBounds": {"x": -3, "y": -3, "width": 6, "height": 312},
+        "strokes": [{"type": "SOLID", "visible": true, "color": {"r": 0.8, "g": 0.9, "b": 1, "a": 1}}],
+        "strokeWeight": 5.11,
+        "strokeAlign": "CENTER",
+        "strokeCap": "ROUND",
+        "strokeDashes": [21.17, 21.17]
+      }]
+    }]
+  }
+}
+)JSON");
+
+	FDesignDocument Document;
+	TestTrue(TEXT("Dashed VECTOR parses"), FFigmaParser::ParseDocument(Json, Document));
+	TestEqual(TEXT("One dashed VECTOR is emitted"), Document.Children.Num(), 1);
+	if (Document.Children.Num() != 1 || !Document.Children[0].IsValid())
+	{
+		return false;
+	}
+
+	const TSharedPtr<FDesignNode>& Node = Document.Children[0];
+	TestEqual(TEXT("Dashed stroke cap metadata is preserved"), Node->Metadata.FindRef(TEXT("stroke.cap")), TEXT("ROUND"));
+	TestEqual(TEXT("Stroke dash metadata is preserved"), Node->Metadata.FindRef(TEXT("stroke.dashes")), TEXT("21.17,21.17"));
 	return true;
 }
 
@@ -185,6 +378,71 @@ bool FFigmaParserGradientGeometryTest::RunTest(const FString&)
 		FMath::IsNearlyEqual(ParsedSize.Y, 0.8f, 0.0001f));
 	TestTrue(TEXT("Parsed middle stop position"),
 		FMath::IsNearlyEqual(Node->Visual.Fill.Gradient.Colors[1].Position, 0.4f, 0.0001f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FFigmaParserLinearGradientEndpointsTest,
+	"Design2UMG.Gradient.FigmaParserLinearEndpoints",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFigmaParserLinearGradientEndpointsTest::RunTest(const FString&)
+{
+	const FString Json = TEXT(R"JSON(
+{
+  "document": {
+    "id": "0:0",
+    "name": "Document",
+    "type": "DOCUMENT",
+    "children": [{
+      "id": "0:1",
+      "name": "Page",
+      "type": "CANVAS",
+      "children": [{
+        "id": "2:1",
+        "name": "LinearGradientNode",
+        "type": "RECTANGLE",
+        "absoluteBoundingBox": { "x": 0, "y": 0, "width": 120, "height": 80 },
+        "fills": [{
+          "type": "GRADIENT_LINEAR",
+          "gradientHandlePositions": [
+            { "x": 0.2, "y": 0.3 },
+            { "x": 0.8, "y": 0.7 },
+            { "x": 0.0, "y": 1.0 }
+          ],
+          "gradientStops": [
+            { "color": { "r": 1, "g": 0, "b": 0, "a": 1 }, "position": 0 },
+            { "color": { "r": 0, "g": 0, "b": 1, "a": 1 }, "position": 1 }
+          ]
+        }],
+        "children": []
+      }]
+    }]
+  }
+}
+)JSON");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Figma linear gradient parses"), FFigmaParser::ParseDocument(Json, Doc));
+	TestEqual(TEXT("One parsed linear gradient node"), Doc.Children.Num(), 1);
+	if (Doc.Children.Num() != 1 || !Doc.Children[0].IsValid())
+	{
+		return false;
+	}
+
+	const FDesignGradient& Gradient = Doc.Children[0]->Visual.Fill.Gradient;
+	TestEqual(TEXT("Parsed linear gradient type"), Gradient.GradientType, EDesignGradientType::Linear);
+	TestTrue(TEXT("Parsed linear start point"), Gradient.StartPoint.IsSet());
+	TestTrue(TEXT("Parsed linear end point"), Gradient.EndPoint.IsSet());
+	if (!Gradient.StartPoint.IsSet() || !Gradient.EndPoint.IsSet())
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("Linear start X preserved"), FMath::IsNearlyEqual(Gradient.StartPoint.GetValue().X, 0.2f, 0.0001f));
+	TestTrue(TEXT("Linear start Y preserved"), FMath::IsNearlyEqual(Gradient.StartPoint.GetValue().Y, 0.3f, 0.0001f));
+	TestTrue(TEXT("Linear end X preserved"), FMath::IsNearlyEqual(Gradient.EndPoint.GetValue().X, 0.8f, 0.0001f));
+	TestTrue(TEXT("Linear end Y preserved"), FMath::IsNearlyEqual(Gradient.EndPoint.GetValue().Y, 0.7f, 0.0001f));
 	return true;
 }
 
@@ -324,6 +582,110 @@ bool FFigmaParserPrivateStringFieldParityTest::RunTest(const FString&)
 	TestTrue(TEXT("Instance flag preserved"), InstanceNode->Source().ComponentInstance.bIsInstance);
 	TestEqual(TEXT("ComponentSetId preserved"), InstanceNode->Source().ComponentInstance.ComponentSetId, FString(TEXT("set:5678")));
 	TestEqual(TEXT("MainComponentKey preserved"), InstanceNode->Source().ComponentInstance.MainComponentKey, FString(TEXT("main-key-123")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FFigmaParserExplicitGeometryMaskTest,
+	"Design2UMG.Unit.FigmaParser.ExplicitGeometryMask",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFigmaParserExplicitGeometryMaskTest::RunTest(const FString&)
+{
+	const FString Json = TEXT(R"JSON(
+{
+  "document": {
+    "type": "DOCUMENT",
+    "children": [{
+      "type": "CANVAS",
+      "children": [
+        {
+          "id": "ellipse-group",
+          "name": "Shape A",
+          "type": "GROUP",
+          "absoluteBoundingBox": {"x": 0, "y": 0, "width": 100, "height": 80},
+          "children": [
+            {
+              "id": "ellipse-mask",
+              "name": "Clip A",
+              "type": "ELLIPSE",
+              "isMask": true,
+              "absoluteBoundingBox": {"x": 0, "y": 0, "width": 100, "height": 80}
+            },
+            {
+              "id": "ellipse-content",
+              "name": "Layer A",
+              "type": "RECTANGLE",
+              "absoluteBoundingBox": {"x": 0, "y": 0, "width": 100, "height": 80},
+              "fills": [{"type": "SOLID", "color": {"r": 1, "g": 0, "b": 0, "a": 1}}]
+            }
+          ]
+        },
+        {
+          "id": "rounded-group",
+          "name": "Shape B",
+          "type": "GROUP",
+          "absoluteBoundingBox": {"x": 120, "y": 0, "width": 100, "height": 80},
+          "children": [
+            {
+              "id": "rounded-mask",
+              "name": "Clip B",
+              "type": "RECTANGLE",
+              "isMask": true,
+              "cornerRadius": 12,
+              "absoluteBoundingBox": {"x": 120, "y": 0, "width": 100, "height": 80}
+            },
+            {
+              "id": "rounded-content",
+              "name": "Layer B",
+              "type": "RECTANGLE",
+              "absoluteBoundingBox": {"x": 120, "y": 0, "width": 100, "height": 80},
+              "fills": [{"type": "SOLID", "color": {"r": 0, "g": 1, "b": 0, "a": 1}}]
+            }
+          ]
+        },
+        {
+          "id": "mismatch-group",
+          "name": "Shape C",
+          "type": "GROUP",
+          "absoluteBoundingBox": {"x": 240, "y": 0, "width": 100, "height": 80},
+          "children": [
+            {
+              "id": "mismatch-mask",
+              "name": "Clip C",
+              "type": "ELLIPSE",
+              "isMask": true,
+              "absoluteBoundingBox": {"x": 250, "y": 0, "width": 80, "height": 80}
+            },
+            {
+              "id": "mismatch-content",
+              "name": "Layer C",
+              "type": "RECTANGLE",
+              "absoluteBoundingBox": {"x": 240, "y": 0, "width": 100, "height": 80},
+              "fills": [{"type": "SOLID", "color": {"r": 0, "g": 0, "b": 1, "a": 1}}]
+            }
+          ]
+        }
+      ]
+    }]
+  }
+}
+)JSON");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Geometry mask document parses"), FFigmaParser::ParseDocument(Json, Doc));
+	TestEqual(TEXT("All mask groups remain"), Doc.Children.Num(), 3);
+	if (Doc.Children.Num() != 3)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Ellipse mask shape preserved"), Doc.Children[0]->Visual.GeometryMask.Shape, EDesignGeometryMaskShape::Ellipse);
+	TestEqual(TEXT("Ellipse mask leaf is not emitted as content"), Doc.Children[0]->Children.Num(), 1);
+	TestEqual(TEXT("Rounded rectangle mask shape preserved"), Doc.Children[1]->Visual.GeometryMask.Shape, EDesignGeometryMaskShape::RoundedRectangle);
+	TestTrue(TEXT("Rounded rectangle radius preserved"),
+		FMath::IsNearlyEqual(Doc.Children[1]->Visual.GeometryMask.CornerRadius.Uniform, 12.0f));
+	TestEqual(TEXT("Mismatched mask is not approximated"), Doc.Children[2]->Visual.GeometryMask.Shape, EDesignGeometryMaskShape::None);
 	return true;
 }
 

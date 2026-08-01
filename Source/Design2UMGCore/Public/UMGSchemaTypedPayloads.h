@@ -153,6 +153,8 @@ struct FUMGVisualBrushData
 	{
 		TOptional<FString> Type;
 		TOptional<float> Rotation;
+		TOptional<FVector2D> StartPoint;
+		TOptional<FVector2D> EndPoint;
 		TOptional<FVector2D> Center;
 		TOptional<FVector2D> Size;
 
@@ -160,7 +162,8 @@ struct FUMGVisualBrushData
 
 		bool HasAny() const
 		{
-			return Type.IsSet() || Rotation.IsSet() || Center.IsSet() || Size.IsSet() || Stops.Num() > 0;
+			return Type.IsSet() || Rotation.IsSet() || StartPoint.IsSet() || EndPoint.IsSet()
+				|| Center.IsSet() || Size.IsSet() || Stops.Num() > 0;
 		}
 	};
 
@@ -183,6 +186,12 @@ struct FUMGVisualBrushData
  * Typed effect fields such as BackgroundBlur and Retainer effects.
  * New effect contracts should land here as explicit typed payload fields.
  */
+enum class EUMGGeometryMaskShape : uint8
+{
+	Ellipse,
+	RoundedRectangle
+};
+
 struct FUMGEffectData
 {
 	struct FRenderingPhaseData
@@ -198,6 +207,9 @@ struct FUMGEffectData
 	TOptional<FVector2D> EffectBlurUVStep;
 	TOptional<FLinearColor> EffectColor;
 	TOptional<FVector2D> EffectOffset;
+	TOptional<EUMGGeometryMaskShape> GeometryMaskShape;
+	TOptional<FVector2D> GeometryMaskSize;
+	TOptional<FVector4> GeometryMaskCornerRadii;
 	TOptional<FRenderingPhaseData> RenderingPhase;
 
 	bool HasAny() const
@@ -209,6 +221,9 @@ struct FUMGEffectData
 			|| EffectBlurUVStep.IsSet()
 			|| EffectColor.IsSet()
 			|| EffectOffset.IsSet()
+			|| GeometryMaskShape.IsSet()
+			|| GeometryMaskSize.IsSet()
+			|| GeometryMaskCornerRadii.IsSet()
 			|| RenderingPhase.IsSet();
 	}
 };

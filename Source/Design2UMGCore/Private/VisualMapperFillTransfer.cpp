@@ -39,6 +39,19 @@ namespace
 			const FString& StartColor = Gradient.Colors[0].Color;
 			const FString& EndColor = Gradient.Colors.Last().Color;
 			const float Rotation = Gradient.Rotation;
+			const bool bHasLinearEndpoints = Gradient.GradientType == EDesignGradientType::Linear
+				&& Gradient.StartPoint.IsSet()
+				&& Gradient.EndPoint.IsSet();
+			const FVector2D StartPoint = Gradient.StartPoint.Get(FVector2D::ZeroVector);
+			const FVector2D EndPoint = Gradient.EndPoint.Get(FVector2D(1.0f, 0.0f));
+			const FString LinearParams = bHasLinearEndpoints
+				? FString::Printf(
+					TEXT("\"StartX\":%.4f,\"StartY\":%.4f,\"EndX\":%.4f,\"EndY\":%.4f,"),
+					StartPoint.X,
+					StartPoint.Y,
+					EndPoint.X,
+					EndPoint.Y)
+				: FString();
 			const FVector2D Center = Gradient.Center.Get(FVector2D(0.5f, 0.5f));
 			const FVector2D Size = Gradient.Size.Get(FVector2D(1.0f, 1.0f));
 			const FString RadialParams = FString::Printf(
@@ -53,7 +66,7 @@ namespace
 			{
 				FString Stops = Gradient.GradientType == EDesignGradientType::Radial
 					? FString::Printf(TEXT("{%s,\"Stops\":["), *RadialParams)
-					: FString::Printf(TEXT("{\"Rotation\":%.4f,\"Stops\":["), Rotation);
+					: FString::Printf(TEXT("{%s\"Rotation\":%.4f,\"Stops\":["), *LinearParams, Rotation);
 				for (int32 Index = 0; Index < Gradient.Colors.Num(); ++Index)
 				{
 					if (Index > 0)
@@ -72,13 +85,26 @@ namespace
 				return FString::Printf(TEXT("{%s,\"ColorCenter\":\"%s\",\"ColorEdge\":\"%s\"}"), *RadialParams, *StartColor, *EndColor);
 			}
 
-			return FString::Printf(TEXT("{\"Rotation\":%.4f,\"ColorStart\":\"%s\",\"ColorEnd\":\"%s\"}"), Rotation, *StartColor, *EndColor);
+			return FString::Printf(
+				TEXT("{%s\"Rotation\":%.4f,\"ColorStart\":\"%s\",\"ColorEnd\":\"%s\"}"),
+				*LinearParams,
+				Rotation,
+				*StartColor,
+				*EndColor);
 		}
 
 		void ApplyTypedGradientBrushData(FUMGVisualBrushData& Brush, const FDesignGradient& Gradient)
 		{
 			Brush.Gradient.Type = ToTypedGradientTypeString(Gradient.GradientType);
 			Brush.Gradient.Rotation = Gradient.Rotation;
+			if (Gradient.StartPoint.IsSet())
+			{
+				Brush.Gradient.StartPoint = Gradient.StartPoint.GetValue();
+			}
+			if (Gradient.EndPoint.IsSet())
+			{
+				Brush.Gradient.EndPoint = Gradient.EndPoint.GetValue();
+			}
 			if (Gradient.Center.IsSet())
 			{
 				Brush.Gradient.Center = Gradient.Center.GetValue();

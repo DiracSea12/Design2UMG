@@ -13,7 +13,7 @@
 ## Validation level actually run
 
 - [ ] `repository-hygiene`
-- [ ] `self-hosted build`
+- [ ] `self-hosted build and automation`
 - [ ] `public smoke/public validate`
 - [ ] `maintainer formal admissible gate`
 

@@ -22,7 +22,7 @@ Public-note:
 This repository has four different validation layers. Do not collapse them into one label:
 
 - `repository-hygiene`: public repo checks such as required-file presence and tracked maintainer-local path detection.
-- `self-hosted build`: the manual BuildPlugin packaging workflow that runs on a maintainer-provided self-hosted Windows UE runner, validates the package boundary, and uploads the packaged plugin artifact.
+- `self-hosted build and automation`: packages the plugin and runs focused generation, Figma parser, and lifecycle automation on a maintainer-provided Windows UE runner for maintainer pushes, same-repository PRs, and manual runs, then uploads the packaged artifact.
 - `public smoke/public validate`: contributor-reproducible local build plus focused validation. This is the public validation boundary.
 - `maintainer formal admissible gate`: the maintainer-owned full discovered admissible case set release gate.
 
@@ -212,7 +212,7 @@ Sentinel maintenance rule:
 
 ## Current Formal Gate
 
-The current formal admissible gate is the full discovered admissible case set.
+The current formal admissible gate is the 71-case discovered admissible set: 39 Pencil cases plus 16 Figma export roots represented by `local` and `source` paths (32 Figma cases). The locked scope is recorded by the latest full-run `run_scope.json`; a run is not a formal full run when it discovers fewer than 71 cases.
 
 That means:
 - do not run the formal full gate with an exclude pattern

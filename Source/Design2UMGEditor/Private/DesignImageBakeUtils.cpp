@@ -115,7 +115,6 @@ namespace
 	{
 		return Fill.bEnabled
 			&& Fill.IsImage()
-			&& Fill.Image.Mode == EDesignImageMode::Fit
 			&& IsSupportedBakedOverlayBlendMode(Fill.BlendMode)
 			&& !Fill.Image.Url.IsEmpty();
 	}

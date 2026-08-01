@@ -65,7 +65,7 @@ The formal release gate is not just "does it render" but "does no admissible cas
 
 ## Validation Boundary
 
-- Public docs and public CI only promise the layers described in [ValidationProtocol.md](ValidationProtocol.md) and [ValidationGovernance/TestCoverageBoundary.md](ValidationGovernance/TestCoverageBoundary.md): `repository-hygiene` for public repo checks, contributor-facing smoke/repro commands, a manual self-hosted BuildPlugin job, and the separate maintainer formal admissible gate.
+- Public docs and CI only promise the layers described in [ValidationProtocol.md](ValidationProtocol.md) and [ValidationGovernance/TestCoverageBoundary.md](ValidationGovernance/TestCoverageBoundary.md): `repository-hygiene` for every PR, contributor-facing smoke/repro commands, self-hosted packaging and automation for maintainer changes, and the separate maintainer formal admissible gate.
 - Real-project validation is role-based, not machine-path-based. Public examples should use placeholders such as `<UE5_Root>`, `<PluginRoot>`, and `<MaintainerRuntimeProject.uproject>`.
 - HostProject fallback is not an acceptable architecture or validation route. If a workflow needs a runtime project, it must use an explicit real UE project instead of creating or inferring a temporary host project.
 

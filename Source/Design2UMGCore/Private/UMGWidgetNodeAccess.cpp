@@ -48,6 +48,19 @@ namespace
 		const FString StartColor = Design2UMGWidgetNodeAccess::SerializeWidgetColor(StartStop.Color);
 		const FString EndColor = Design2UMGWidgetNodeAccess::SerializeWidgetColor(EndStop.Color);
 		const float Rotation = Gradient.Rotation.Get(0.0f);
+		const bool bIsLinear = !Gradient.Type.IsSet()
+			|| Gradient.Type.GetValue().Equals(TEXT("Linear"), ESearchCase::IgnoreCase);
+		const bool bHasLinearEndpoints = bIsLinear && Gradient.StartPoint.IsSet() && Gradient.EndPoint.IsSet();
+		const FVector2D StartPoint = Gradient.StartPoint.Get(FVector2D::ZeroVector);
+		const FVector2D EndPoint = Gradient.EndPoint.Get(FVector2D(1.0f, 0.0f));
+		const FString LinearParams = bHasLinearEndpoints
+			? FString::Printf(
+				TEXT("\"StartX\":%.4f,\"StartY\":%.4f,\"EndX\":%.4f,\"EndY\":%.4f,"),
+				StartPoint.X,
+				StartPoint.Y,
+				EndPoint.X,
+				EndPoint.Y)
+			: FString();
 		const FVector2D Center = Gradient.Center.Get(FVector2D(0.5f, 0.5f));
 		const FVector2D Size = Gradient.Size.Get(FVector2D(1.0f, 1.0f));
 		const bool bIsRadial = Gradient.Type.IsSet() && Gradient.Type.GetValue().Equals(TEXT("Radial"), ESearchCase::IgnoreCase);
@@ -64,7 +77,7 @@ namespace
 		{
 			FString Stops = bIsRadial
 				? FString::Printf(TEXT("{%s,\"Stops\":["), *RadialParams)
-				: FString::Printf(TEXT("{\"Rotation\":%.4f,\"Stops\":["), Rotation);
+				: FString::Printf(TEXT("{%s\"Rotation\":%.4f,\"Stops\":["), *LinearParams, Rotation);
 			for (int32 Index = 0; Index < Gradient.Stops.Num(); ++Index)
 			{
 				if (Index > 0)
@@ -90,7 +103,8 @@ namespace
 		}
 
 		return FString::Printf(
-			TEXT("{\"Rotation\":%.4f,\"ColorStart\":\"%s\",\"ColorEnd\":\"%s\"}"),
+			TEXT("{%s\"Rotation\":%.4f,\"ColorStart\":\"%s\",\"ColorEnd\":\"%s\"}"),
+			*LinearParams,
 			Rotation,
 			*StartColor,
 			*EndColor);

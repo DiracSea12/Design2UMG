@@ -2,17 +2,16 @@
 
 #include "DesignRemoteImageImporterInternal.h"
 
-#include "AssetRegistry/AssetData.h"
-#include "AssetRegistry/AssetRegistryModule.h"
-#include "Engine/Texture2D.h"
 #include "HAL/CriticalSection.h"
+#include "HAL/FileManager.h"
+#include "HAL/PlatformProcess.h"
 #include "HttpManager.h"
 #include "HttpModule.h"
 #include "IImageWrapper.h"
 #include "IImageWrapperModule.h"
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
-#include "Misc/PackageName.h"
+#include "Misc/FileHelper.h"
 #include "Misc/ScopeLock.h"
 #include "Modules/ModuleManager.h"
 
@@ -20,72 +19,121 @@ namespace DesignRemoteImageImporterInternal
 {
 	namespace
 	{
-		FCriticalSection GImportedTextureIndexMutex;
-		TMap<FString, TMap<FString, FString>> GImportedTexturePathsByRoot;
-		TSet<FString> GImportedTextureIndexedRoots;
 		constexpr int64 Bgra8BytesPerPixel = 4;
+		constexpr float HttpWaitTickSeconds = 0.01f;
 
-		FString NormalizeImportPathForIndex(const FString& InPath)
+		bool TryAddWithinLimit(const uint64 Current, const uint64 Increment, const uint64 Limit, uint64& OutTotal)
 		{
-			FString Path = InPath.TrimStartAndEnd();
-			Path.ReplaceInline(TEXT("\\"), TEXT("/"));
-			while (Path.EndsWith(TEXT("/")))
+			if (Increment > Limit || Current > Limit - Increment)
 			{
-				Path.LeftChopInline(1);
+				return false;
 			}
-
-			if (Path.IsEmpty())
-			{
-				return TEXT("/Game/Design2UMG/ImportedImages");
-			}
-
-			if (!Path.StartsWith(TEXT("/Game/"), ESearchCase::CaseSensitive))
-			{
-				return TEXT("/Game/Design2UMG/ImportedImages");
-			}
-
-			if (!FPackageName::IsValidLongPackageName(Path))
-			{
-				return TEXT("/Game/Design2UMG/ImportedImages");
-			}
-
-			return Path;
+			OutTotal = Current + Increment;
+			return true;
 		}
 
-		FString MakeImportedTextureRootKey(const FString& ImportPath)
+		bool IsIpv4Literal(const FString& Host)
 		{
-			FString RootKey = NormalizeImportPathForIndex(ImportPath);
-			RootKey.ToLowerInline();
-			return RootKey;
-		}
-
-		void BuildImportedTextureIndexIfNeeded(const FString& ImportPath)
-		{
-			const FString RootKey = MakeImportedTextureRootKey(ImportPath);
+			bool bHasDigit = false;
+			for (const TCHAR Character : Host)
 			{
-				FScopeLock Lock(&GImportedTextureIndexMutex);
-				if (GImportedTextureIndexedRoots.Contains(RootKey))
+				if (FChar::IsDigit(Character))
 				{
-					return;
+					bHasDigit = true;
+				}
+				else if (Character != TEXT('.'))
+				{
+					return false;
 				}
 			}
+			return bHasDigit;
+		}
 
-			TMap<FString, FString> IndexedPaths;
-			FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
-			TArray<FAssetData> Assets;
-			AssetRegistryModule.Get().GetAssetsByPath(FName(*NormalizeImportPathForIndex(ImportPath)), Assets, true);
-			for (const FAssetData& Asset : Assets)
+		bool ExtractUrlHost(const FString& Url, FString& OutHost)
+		{
+			const int32 SchemeEnd = Url.Find(TEXT("://"), ESearchCase::IgnoreCase, ESearchDir::FromStart);
+			if (SchemeEnd == INDEX_NONE)
 			{
-				if (Asset.AssetClassPath == UTexture2D::StaticClass()->GetClassPathName())
-				{
-					IndexedPaths.Add(Asset.AssetName.ToString(), Asset.GetObjectPathString());
-				}
+				return false;
 			}
 
-			FScopeLock Lock(&GImportedTextureIndexMutex);
-			GImportedTexturePathsByRoot.Add(RootKey, MoveTemp(IndexedPaths));
-			GImportedTextureIndexedRoots.Add(RootKey);
+			FString Authority = Url.Mid(SchemeEnd + 3);
+			int32 PathStart = INDEX_NONE;
+			for (const TCHAR Delimiter : { TEXT('/'), TEXT('?'), TEXT('#') })
+			{
+				const int32 Candidate = Authority.FindChar(Delimiter, PathStart) ? PathStart : INDEX_NONE;
+				if (Candidate != INDEX_NONE)
+				{
+					Authority.LeftInline(Candidate);
+				}
+			}
+			if (Authority.IsEmpty() || Authority.Contains(TEXT("@")))
+			{
+				return false;
+			}
+
+			if (Authority.StartsWith(TEXT("[")))
+			{
+				const int32 ClosingBracket = Authority.Find(TEXT("]"));
+				if (ClosingBracket == INDEX_NONE)
+				{
+					return false;
+				}
+				OutHost = Authority.Mid(1, ClosingBracket - 1);
+			}
+			else
+			{
+				int32 PortSeparator = INDEX_NONE;
+				OutHost = Authority.FindChar(TEXT(':'), PortSeparator)
+					? Authority.Left(PortSeparator)
+					: Authority;
+			}
+
+			OutHost.TrimStartAndEndInline();
+			while (OutHost.RemoveFromEnd(TEXT(".")))
+			{
+			}
+			OutHost.ToLowerInline();
+			return !OutHost.IsEmpty();
 		}
+
+	}
+
+	bool FImageOperationBudget::ConsumeCompressedBytes(const uint64 ByteCount, FString& OutError)
+	{
+		uint64 NewTotal = 0;
+		if (!TryAddWithinLimit(TotalCompressedBytes, ByteCount, Limits.MaxTotalCompressedBytes, NewTotal))
+		{
+			OutError = FString::Printf(
+				TEXT("Total compressed image data exceeds the operation limit (%llu bytes)"),
+				static_cast<unsigned long long>(Limits.MaxTotalCompressedBytes));
+			return false;
+		}
+		TotalCompressedBytes = NewTotal;
+		OutError.Reset();
+		return true;
+	}
+
+	bool FImageOperationBudget::ConsumeDecodedPixels(const int64 PixelCount, FString& OutError)
+	{
+		if (PixelCount < 0 || static_cast<uint64>(PixelCount) > TNumericLimits<uint64>::Max() / Bgra8BytesPerPixel)
+		{
+			OutError = TEXT("Decoded image size is invalid");
+			return false;
+		}
+
+		const uint64 DecodedBytes = static_cast<uint64>(PixelCount) * Bgra8BytesPerPixel;
+		uint64 NewTotal = 0;
+		if (!TryAddWithinLimit(TotalDecodedBytes, DecodedBytes, Limits.MaxTotalDecodedBytes, NewTotal))
+		{
+			OutError = FString::Printf(
+				TEXT("Total decoded image data exceeds the operation limit (%llu bytes)"),
+				static_cast<unsigned long long>(Limits.MaxTotalDecodedBytes));
+			return false;
+		}
+		TotalDecodedBytes = NewTotal;
+		OutError.Reset();
+		return true;
 	}
 
 	void FResolveReport::AddMessage(const FString& Message)
@@ -111,40 +159,6 @@ namespace DesignRemoteImageImporterInternal
 			Summary += FString::Join(Messages, TEXT("\n"));
 		}
 		return Summary;
-	}
-
-	void FImportedTextureIndex::Remember(const FString& ImportPath, const FString& AssetName, const FString& ObjectPath)
-	{
-		FScopeLock Lock(&GImportedTextureIndexMutex);
-		const FString RootKey = MakeImportedTextureRootKey(ImportPath);
-		GImportedTexturePathsByRoot.FindOrAdd(RootKey).Add(AssetName, ObjectPath);
-		GImportedTextureIndexedRoots.Add(RootKey);
-	}
-
-	void FImportedTextureIndex::Forget(const FString& ImportPath, const FString& AssetName)
-	{
-		FScopeLock Lock(&GImportedTextureIndexMutex);
-		if (TMap<FString, FString>* IndexedPaths = GImportedTexturePathsByRoot.Find(MakeImportedTextureRootKey(ImportPath)))
-		{
-			IndexedPaths->Remove(AssetName);
-		}
-	}
-
-	bool FImportedTextureIndex::TryGetPersistedPath(const FString& ImportPath, const FString& AssetName, FString& OutObjectPath)
-	{
-		BuildImportedTextureIndexIfNeeded(ImportPath);
-
-		FScopeLock Lock(&GImportedTextureIndexMutex);
-		if (const TMap<FString, FString>* IndexedPaths = GImportedTexturePathsByRoot.Find(MakeImportedTextureRootKey(ImportPath)))
-		{
-			if (const FString* FoundPath = IndexedPaths->Find(AssetName))
-			{
-				OutObjectPath = *FoundPath;
-				return true;
-			}
-		}
-
-		return false;
 	}
 
 	bool FImagePayloadIO::ValidateCompressedByteCount(
@@ -217,21 +231,96 @@ namespace DesignRemoteImageImporterInternal
 		return true;
 	}
 
+	bool FImagePayloadIO::ValidateRemoteUrl(
+		const FString& Url,
+		const bool bAllowUnsafeRemoteUrls,
+		FString& OutError)
+	{
+		OutError.Reset();
+		const bool bHttps = Url.StartsWith(TEXT("https://"), ESearchCase::IgnoreCase);
+		const bool bHttp = Url.StartsWith(TEXT("http://"), ESearchCase::IgnoreCase);
+		if (!bHttps && !(bAllowUnsafeRemoteUrls && bHttp))
+		{
+			OutError = TEXT("Remote image URL must use HTTPS");
+			return false;
+		}
+
+		FString Host;
+		if (!ExtractUrlHost(Url, Host))
+		{
+			OutError = TEXT("Remote image URL has an invalid host");
+			return false;
+		}
+		if (!bAllowUnsafeRemoteUrls
+			&& (Host == TEXT("localhost")
+				|| Host.EndsWith(TEXT(".localhost"))
+				|| Host.EndsWith(TEXT(".local"))
+				|| !Host.Contains(TEXT("."))
+				|| Host.Contains(TEXT(":"))
+				|| IsIpv4Literal(Host)))
+		{
+			OutError = TEXT("Remote image URL points to a local-style or IP-literal host");
+			return false;
+		}
+		return true;
+	}
+
+	bool FImagePayloadIO::LoadLocalFile(
+		const FString& FilePath,
+		const FImageResourceLimits& Limits,
+		TArray<uint8>& OutData,
+		FString& OutError)
+	{
+		OutData.Reset();
+		const int64 FileSize = IFileManager::Get().FileSize(*FilePath);
+		if (FileSize < 0)
+		{
+			OutError = TEXT("Local image file is unavailable");
+			return false;
+		}
+		if (!ValidateCompressedByteCount(static_cast<uint64>(FileSize), Limits, OutError))
+		{
+			return false;
+		}
+		if (!FFileHelper::LoadFileToArray(OutData, *FilePath))
+		{
+			OutError = TEXT("Local image file could not be read");
+			return false;
+		}
+		if (!ValidateCompressedByteCount(static_cast<uint64>(OutData.Num()), Limits, OutError))
+		{
+			OutData.Reset();
+			return false;
+		}
+		return true;
+	}
+
 	bool FImagePayloadIO::DownloadUrl(
 		const FString& Url,
 		const float TimeoutSeconds,
+		const bool bAllowUnsafeRemoteUrls,
 		const FImageResourceLimits& Limits,
 		TArray<uint8>& OutData,
 		FString& OutError)
 	{
 		OutData.Reset();
 		OutError.Reset();
-		bool bDone = false;
-		bool bSuccess = false;
-		int32 ResponseCode = 0;
-		TArray<uint8> Downloaded;
-		FString ErrorString;
-		TAtomic<bool> bPayloadLimitExceeded{ false };
+		if (!ValidateRemoteUrl(Url, bAllowUnsafeRemoteUrls, OutError))
+		{
+			return false;
+		}
+
+		struct FDownloadState
+		{
+			FCriticalSection Mutex;
+			TAtomic<bool> bDone{ false };
+			TAtomic<bool> bPayloadLimitExceeded{ false };
+			bool bSuccess = false;
+			int32 ResponseCode = 0;
+			TArray<uint8> Downloaded;
+			FString ErrorString;
+		};
+		const TSharedRef<FDownloadState, ESPMode::ThreadSafe> State = MakeShared<FDownloadState, ESPMode::ThreadSafe>();
 
 		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
 		Request->SetURL(Url);
@@ -239,53 +328,51 @@ namespace DesignRemoteImageImporterInternal
 		Request->SetHeader(TEXT("User-Agent"), TEXT("Design2UMG/RemoteImageImporter"));
 		Request->SetTimeout(FMath::Max(1.0f, TimeoutSeconds));
 		Request->OnRequestProgress64().BindLambda(
-			[&bPayloadLimitExceeded, MaxCompressedBytes = Limits.MaxCompressedBytes](FHttpRequestPtr ProgressRequest, uint64, uint64 BytesReceived)
+			[State, MaxCompressedBytes = Limits.MaxCompressedBytes](FHttpRequestPtr ProgressRequest, uint64, uint64 BytesReceived)
 			{
 				if (BytesReceived > MaxCompressedBytes)
 				{
-					bPayloadLimitExceeded = true;
+					State->bPayloadLimitExceeded = true;
 					ProgressRequest->CancelRequest();
 				}
 			});
 		Request->OnProcessRequestComplete().BindLambda(
-			[&bDone, &bSuccess, &ResponseCode, &Downloaded, &ErrorString, &Limits, &bPayloadLimitExceeded](FHttpRequestPtr, FHttpResponsePtr Response, bool bWasSuccessful)
+			[State, Limits](FHttpRequestPtr, FHttpResponsePtr Response, bool bWasSuccessful)
 			{
-				bDone = true;
-				if (bPayloadLimitExceeded)
+				FScopeLock Lock(&State->Mutex);
+				if (State->bPayloadLimitExceeded)
 				{
-					ErrorString = TEXT("Image payload exceeded the byte limit during download");
-					return;
+					State->ErrorString = TEXT("Image payload exceeded the byte limit during download");
 				}
-				if (!bWasSuccessful || !Response.IsValid())
+				else if (!bWasSuccessful || !Response.IsValid())
 				{
-					ErrorString = TEXT("Network request failed");
-					return;
+					State->ErrorString = TEXT("Network request failed");
 				}
-
-				ResponseCode = Response->GetResponseCode();
-				if (ResponseCode < 200 || ResponseCode >= 300)
+				else
 				{
-					ErrorString = FString::Printf(TEXT("Server returned an error (HTTP %d)"), ResponseCode);
-					return;
+					State->ResponseCode = Response->GetResponseCode();
+					if (State->ResponseCode < 200 || State->ResponseCode >= 300)
+					{
+						State->ErrorString = FString::Printf(TEXT("Server returned an error (HTTP %d)"), State->ResponseCode);
+					}
+					else if (ValidateCompressedByteCount(Response->GetContentLength(), Limits, State->ErrorString))
+					{
+						const TArray<uint8>& ResponseContent = Response->GetContent();
+						if (ValidateCompressedByteCount(static_cast<uint64>(ResponseContent.Num()), Limits, State->ErrorString))
+						{
+							State->Downloaded = ResponseContent;
+							if (State->Downloaded.Num() == 0)
+							{
+								State->ErrorString = TEXT("Server returned an empty response");
+							}
+							else
+							{
+								State->bSuccess = true;
+							}
+						}
+					}
 				}
-				if (!ValidateCompressedByteCount(Response->GetContentLength(), Limits, ErrorString))
-				{
-					return;
-				}
-
-				const TArray<uint8>& ResponseContent = Response->GetContent();
-				if (!ValidateCompressedByteCount(static_cast<uint64>(ResponseContent.Num()), Limits, ErrorString))
-				{
-					return;
-				}
-				Downloaded = ResponseContent;
-				if (Downloaded.Num() == 0)
-				{
-					ErrorString = TEXT("Server returned an empty response");
-					return;
-				}
-
-				bSuccess = true;
+				State->bDone = true;
 			});
 
 		if (!Request->ProcessRequest())
@@ -294,16 +381,32 @@ namespace DesignRemoteImageImporterInternal
 			return false;
 		}
 
-		FHttpModule::Get().GetHttpManager().Flush(EHttpFlushReason::FullFlush);
-		if (!bDone || !bSuccess)
+		FHttpManager& HttpManager = FHttpModule::Get().GetHttpManager();
+		const double Deadline = FPlatformTime::Seconds() + FMath::Max(1.0f, TimeoutSeconds);
+		while (!State->bDone && FPlatformTime::Seconds() < Deadline)
 		{
-			OutError = ErrorString.IsEmpty()
-				? FString::Printf(TEXT("Network request failed (HTTP %d)"), ResponseCode)
-				: ErrorString;
+			HttpManager.Tick(HttpWaitTickSeconds);
+			FPlatformProcess::Sleep(HttpWaitTickSeconds);
+		}
+		if (!State->bDone)
+		{
+			Request->CancelRequest();
+			Request->OnRequestProgress64().Unbind();
+			Request->OnProcessRequestComplete().Unbind();
+			OutError = TEXT("Network request timed out");
 			return false;
 		}
 
-		OutData = MoveTemp(Downloaded);
+		FScopeLock Lock(&State->Mutex);
+		if (!State->bSuccess)
+		{
+			OutError = State->ErrorString.IsEmpty()
+				? FString::Printf(TEXT("Network request failed (HTTP %d)"), State->ResponseCode)
+				: State->ErrorString;
+			return false;
+		}
+
+		OutData = MoveTemp(State->Downloaded);
 		return true;
 	}
 
@@ -313,7 +416,8 @@ namespace DesignRemoteImageImporterInternal
 		int32& OutWidth,
 		int32& OutHeight,
 		TArray64<uint8>& OutRawData,
-		FString& OutError)
+		FString& OutError,
+		FImageOperationBudget* OperationBudget)
 	{
 		OutWidth = 0;
 		OutHeight = 0;
@@ -347,6 +451,11 @@ namespace DesignRemoteImageImporterInternal
 		OutWidth = Wrapper->GetWidth();
 		OutHeight = Wrapper->GetHeight();
 		if (!ValidateDimensions(OutWidth, OutHeight, Limits, OutError))
+		{
+			return false;
+		}
+		if (OperationBudget
+			&& !OperationBudget->ConsumeDecodedPixels(static_cast<int64>(OutWidth) * static_cast<int64>(OutHeight), OutError))
 		{
 			return false;
 		}

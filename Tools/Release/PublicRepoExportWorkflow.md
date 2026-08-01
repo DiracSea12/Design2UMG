@@ -59,7 +59,7 @@ Excluded from public export unless they are first rewritten into generic reusabl
 ## Boundary Rules
 
 - Public docs must describe a `maintainer-owned canonical runtime boundary`, not a maintainer machine path.
-- Public badge/release wording must match today's workflow truth: `repository-hygiene` is the public badge, `build-plugin` is a manual self-hosted artifact job, and the maintainer formal gate is separate release evidence.
+- Public badge/release wording must match today's workflow truth: `repository-hygiene` runs for every PR, `build-plugin` packages and tests on maintainer pushes, same-repository PRs, and manual runs, and the maintainer formal gate is separate release evidence.
 - Public `validate` commands must be labeled as smoke/public validation unless they truly reproduce the maintainer full admissible gate.
 - The maintainer full admissible gate may stay private as long as the public repo makes that boundary explicit.
 - Public docs may say that HostProject fallback is unsupported; generated fallback projects and concrete fallback paths must not ship.

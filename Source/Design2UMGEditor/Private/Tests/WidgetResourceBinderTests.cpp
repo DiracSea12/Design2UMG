@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Misc/AutomationTest.h"
+#include "ProceduralShapeGenerator.h"
 #include "WidgetResourceBinder.h"
 #include "UMGSchema.h"
 #include "UMGPropertyKeys.h"
@@ -13,6 +14,99 @@
 #include "Engine/Texture2D.h"
 
 #if WITH_AUTOMATION_WORKER
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAffineCropReadsTextureSourcePixels,
+	"Design2UMG.ImageCrop.ReadsTextureSourcePixels",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FAffineCropReadsTextureSourcePixels::RunTest(const FString& Parameters)
+{
+	const TArray<FColor> SourcePixels = {
+		FColor::Red,
+		FColor::Green,
+		FColor::Blue,
+		FColor::White,
+	};
+	UTexture2D* SourceTexture = NewObject<UTexture2D>();
+	SourceTexture->Source.Init(2, 2, 1, 1, TSF_BGRA8, reinterpret_cast<const uint8*>(SourcePixels.GetData()));
+
+	UTexture2D* Result = FProceduralShapeGenerator::ApplyAffineCrop(
+		SourceTexture,
+		1.0f, 0.0f, 0.0f,
+		0.0f, 1.0f, 0.0f,
+		2, 2);
+	if (!TestNotNull(TEXT("Affine crop produces a texture from TextureSource pixels"), Result))
+	{
+		return false;
+	}
+
+	FTexturePlatformData* PlatformData = Result->GetPlatformData();
+	if (!TestTrue(TEXT("Affine crop result exposes a readable mip"), PlatformData && PlatformData->Mips.Num() > 0))
+	{
+		return false;
+	}
+
+	const FColor* ResultPixels = static_cast<const FColor*>(PlatformData->Mips[0].BulkData.LockReadOnly());
+	if (!TestNotNull(TEXT("Affine crop result mip is readable"), ResultPixels))
+	{
+		PlatformData->Mips[0].BulkData.Unlock();
+		return false;
+	}
+
+	for (int32 Index = 0; Index < SourcePixels.Num(); ++Index)
+	{
+		TestEqual(*FString::Printf(TEXT("Affine crop preserves source pixel %d"), Index), ResultPixels[Index], SourcePixels[Index]);
+	}
+	PlatformData->Mips[0].BulkData.Unlock();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAffineCropUsesFigmaImageTransformDirection,
+	"Design2UMG.ImageCrop.UsesFigmaImageTransformDirection",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FAffineCropUsesFigmaImageTransformDirection::RunTest(const FString& Parameters)
+{
+	const TArray<FColor> SourcePixels = {
+		FColor(1, 2, 3, 255), FColor(11, 12, 13, 255), FColor(21, 22, 23, 255),
+		FColor(31, 32, 33, 255), FColor(41, 42, 43, 255), FColor(51, 52, 53, 255),
+		FColor(61, 62, 63, 255), FColor(71, 72, 73, 255), FColor(81, 82, 83, 255),
+	};
+	UTexture2D* SourceTexture = NewObject<UTexture2D>();
+	SourceTexture->Source.Init(3, 3, 1, 1, TSF_BGRA8, reinterpret_cast<const uint8*>(SourcePixels.GetData()));
+
+	UTexture2D* Result = FProceduralShapeGenerator::ApplyAffineCrop(
+		SourceTexture,
+		0.5f, 0.5f, 0.0f,
+		0.5f, -0.5f, 0.5f,
+		2, 2);
+	if (!TestNotNull(TEXT("Affine crop produces a transformed texture"), Result))
+	{
+		return false;
+	}
+
+	FTexturePlatformData* PlatformData = Result->GetPlatformData();
+	if (!TestTrue(TEXT("Transformed texture exposes a readable mip"), PlatformData && PlatformData->Mips.Num() > 0))
+	{
+		return false;
+	}
+
+	const FColor* ResultPixels = static_cast<const FColor*>(PlatformData->Mips[0].BulkData.LockReadOnly());
+	if (!TestNotNull(TEXT("Transformed texture mip is readable"), ResultPixels))
+	{
+		PlatformData->Mips[0].BulkData.Unlock();
+		return false;
+	}
+
+	const int32 ExpectedSourceIndices[] = {3, 7, 1, 5};
+	for (int32 Index = 0; Index < UE_ARRAY_COUNT(ExpectedSourceIndices); ++Index)
+	{
+		TestEqual(
+			*FString::Printf(TEXT("Destination pixel %d samples the expected source UV"), Index),
+			ResultPixels[Index],
+			SourcePixels[ExpectedSourceIndices[Index]]);
+	}
+	PlatformData->Mips[0].BulkData.Unlock();
+	return true;
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWidgetResourceBinderTexturePath,
 	"Design2UMG.WidgetResourceBinder.TexturePath",
@@ -189,7 +283,6 @@ bool FPropertyApplierUsesSharedAxisAlignedCropSemantics::RunTest(const FString& 
 	Node.Brush.Image.TexturePath = TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture");
 	Node.WidgetStyle.ImageMode = TEXT("Crop");
 	Node.WidgetStyle.ImageTransform = TEXT("0.5,0,0.25,0,0.75,0.1");
-
 	UImage* ImageWidget = NewObject<UImage>();
 	FUMGWidgetUtils::ApplyWidgetProperties(ImageWidget, Node);
 
@@ -219,7 +312,6 @@ bool FPropertyApplierNormalizesTypedAxisAlignedCropTransform::RunTest(const FStr
 	Transform.D = 0.75000049f;
 	Transform.TY = 0.10000049f;
 	Node.Brush.Image.Transform = Transform;
-
 	UImage* ImageWidget = NewObject<UImage>();
 	FUMGWidgetUtils::ApplyWidgetProperties(ImageWidget, Node);
 
@@ -322,7 +414,6 @@ bool FWidgetResourceBinderPreservesAxisAlignedCropAfterBinding::RunTest(const FS
 	Node.Brush.Image.TexturePath = TextureKey;
 	Node.WidgetStyle.ImageMode = TEXT("Crop");
 	Node.WidgetStyle.ImageTransform = TEXT("0.5,0,0.25,0,0.75,0.1");
-
 	UImage* ImageWidget = NewObject<UImage>();
 	TMap<FString, UTexture2D*> TextureMap;
 	TextureMap.Add(TextureKey, SourceTexture);

@@ -24,7 +24,7 @@
 2. 字体度量、字体实例和运行时实测结果优先于字体名字。
 3. source `fontSize` 不是 UMG runtime font size 的真值，只能作为求解输入之一。
 4. `FamilyFallbackScales` 只能逐步降为最后兜底，不能继续作为主路径扩表。
-5. 所有文本和字体改动都必须用 full 47-case formal gate 证明没有对历史最佳造成单点退步。
+5. 所有文本和字体改动都必须用 full 71-case formal gate 证明没有对历史最佳造成单点退步。
 
 ## 一句话结论
 

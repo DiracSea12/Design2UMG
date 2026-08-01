@@ -358,11 +358,27 @@ namespace UMGBrushPropertyApplier
 		}
 	}
 
-	static UMaterialInterface* ResolveRetainerEffectMaterial(const FString& EffectMaterialRef)
+	static UMaterialInterface* ResolveRetainerEffectMaterial(
+		const FString& EffectMaterialRef,
+		const FUMGEffectData* Effect = nullptr)
 	{
 		if (EffectMaterialRef.IsEmpty()) return nullptr;
 		if (EffectMaterialRef.Equals(TEXT("d2u.retainer.foreground_blur"), ESearchCase::CaseSensitive))
 			return Design2UMGEffectMaterialBuilder::GetOrCreateForegroundBlurRetainerMaterial();
+		if (EffectMaterialRef.Equals(TEXT("d2u.retainer.geometry_mask"), ESearchCase::CaseSensitive))
+		{
+			if (Effect
+				&& Effect->GeometryMaskShape.IsSet()
+				&& Effect->GeometryMaskSize.IsSet()
+				&& Effect->GeometryMaskCornerRadii.IsSet())
+			{
+				return Design2UMGEffectMaterialBuilder::GetOrCreateGeometryMaskRetainerMaterial(
+					Effect->GeometryMaskShape.GetValue(),
+					Effect->GeometryMaskSize.GetValue(),
+					Effect->GeometryMaskCornerRadii.GetValue());
+			}
+			return Design2UMGEffectMaterialBuilder::GetOrCreateGeometryMaskRetainerMaterial();
+		}
 		if (EffectMaterialRef.Equals(TEXT("d2u.retainer.inner_shadow"), ESearchCase::CaseSensitive))
 			return Design2UMGEffectMaterialBuilder::GetOrCreateInnerShadowRetainerMaterial();
 		if (UMaterialInterface* Loaded = LoadObject<UMaterialInterface>(nullptr, *EffectMaterialRef))
@@ -382,7 +398,7 @@ namespace UMGBrushPropertyApplier
 		if (Effect.TextureParameter.IsSet())
 			RB->SetTextureParameter(FName(*Effect.TextureParameter.GetValue()));
 		if (Effect.EffectMaterial.IsSet())
-			RB->SetEffectMaterial(ResolveRetainerEffectMaterial(Effect.EffectMaterial.GetValue()));
+			RB->SetEffectMaterial(ResolveRetainerEffectMaterial(Effect.EffectMaterial.GetValue(), &Effect));
 		if (Effect.RenderingPhase.IsSet())
 		{
 			const FUMGEffectData::FRenderingPhaseData& RenderingPhase = Effect.RenderingPhase.GetValue();
@@ -406,6 +422,23 @@ namespace UMGBrushPropertyApplier
 			{
 				const FVector2D& EffectOffset = Effect.EffectOffset.GetValue();
 				DynamicEffect->SetVectorParameterValue(TEXT("InnerShadowOffset"), FLinearColor(EffectOffset.X, EffectOffset.Y, 0.0f, 0.0f));
+			}
+			if (Effect.GeometryMaskShape.IsSet())
+			{
+				DynamicEffect->SetScalarParameterValue(
+					TEXT("MaskShape"),
+					Effect.GeometryMaskShape.GetValue() == EUMGGeometryMaskShape::Ellipse ? 0.0f : 1.0f);
+			}
+			if (Effect.GeometryMaskSize.IsSet())
+			{
+				const FVector2D& MaskSize = Effect.GeometryMaskSize.GetValue();
+				DynamicEffect->SetVectorParameterValue(TEXT("MaskSize"), FLinearColor(MaskSize.X, MaskSize.Y, 0.0f, 0.0f));
+			}
+			if (Effect.GeometryMaskCornerRadii.IsSet())
+			{
+				const FVector4& Radii = Effect.GeometryMaskCornerRadii.GetValue();
+				DynamicEffect->SetVectorParameterValue(TEXT("MaskCornerRadiiTop"), FLinearColor(Radii.X, Radii.Y, 0.0f, 0.0f));
+				DynamicEffect->SetVectorParameterValue(TEXT("MaskCornerRadiiBottom"), FLinearColor(Radii.Z, Radii.W, 0.0f, 0.0f));
 			}
 		}
 	}

@@ -19,6 +19,7 @@ namespace FigmaParserInternal
 	bool HasVisibleStroke(const TSharedPtr<FJsonObject>& NodeObj);
 	bool HasVisibleEffect(const TSharedPtr<FJsonObject>& NodeObj);
 	bool TryReadBounds(const TSharedPtr<FJsonObject>& BoundsObj, FNodeBounds& OutBounds);
+	bool HasParentClippedRenderBounds(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj);
 	void CaptureBoundsDeltaMetadata(const TSharedPtr<FJsonObject>& Obj, TMap<FString, FString>& Extensions);
 	bool TryGetVisualBounds(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj, FNodeBounds& OutBounds);
 }

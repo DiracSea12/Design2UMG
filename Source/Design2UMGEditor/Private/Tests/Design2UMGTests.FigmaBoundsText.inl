@@ -374,6 +374,182 @@ bool FFigmaExpandedContainerRenderBoundsUseLayoutSpaceTest::RunTest(const FStrin
 	TestEqual(TEXT("Child Y remains relative to layout bounds"), Child->Transform.Y, 12.0f);
 	return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaClippedSyntheticVectorRasterUsesVisibleBoundsTest,
+	"Design2UMG.FigmaParser.ClippedSyntheticVectorRasterUsesVisibleBounds",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaClippedSyntheticVectorRasterUsesVisibleBoundsTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page 1",
+				"type": "CANVAS",
+				"children": [{
+					"id": "0:2",
+					"name": "Viewport",
+					"type": "FRAME",
+					"visible": true,
+					"clipsContent": true,
+					"absoluteBoundingBox": {"x":0,"y":0,"width":1600,"height":920},
+					"absoluteRenderBounds": {"x":0,"y":0,"width":1600,"height":920},
+					"children": [{
+						"id": "0:3",
+						"name": "ClippingFrame",
+						"type": "FRAME",
+						"visible": true,
+						"clipsContent": true,
+						"absoluteBoundingBox": {"x":0,"y":0,"width":1600,"height":1200},
+						"absoluteRenderBounds": {"x":0,"y":0,"width":1600,"height":920},
+						"children": [{
+							"id": "0:4",
+							"name": "BackgroundShape",
+							"type": "ELLIPSE",
+							"visible": true,
+							"absoluteBoundingBox": {"x":-701,"y":-148,"width":1700,"height":1700},
+							"absoluteRenderBounds": {"x":0,"y":0,"width":999,"height":920},
+							"fills": [{"type":"SOLID","visible":true,"color":{"r":0.5,"g":0.2,"b":1,"a":1}}]
+						}, {
+							"id": "0:5",
+							"name": "RasterizedBackgroundShape",
+							"type": "ELLIPSE",
+							"visible": true,
+							"absoluteBoundingBox": {"x":-701,"y":-148,"width":1700,"height":1700},
+							"absoluteRenderBounds": {"x":0,"y":0,"width":999,"height":920},
+							"fills": [
+								{"type":"GRADIENT_LINEAR","visible":true,"gradientStops":[
+									{"position":0,"color":{"r":0.8,"g":0.2,"b":1,"a":1}},
+									{"position":1,"color":{"r":0.5,"g":0.1,"b":1,"a":1}}
+								]},
+								{"type":"IMAGE","visible":true,"imageRef":"vec_clipped_shape","scaleMode":"FILL"}
+							]
+						}, {
+							"id": "0:6",
+							"name": "RasterizedStroke",
+							"type": "VECTOR",
+							"visible": true,
+							"absoluteBoundingBox": {"x":0,"y":100,"width":599,"height":1},
+							"absoluteRenderBounds": {"x":0,"y":100.15,"width":560,"height":0.7},
+							"fills": [{"type":"IMAGE","visible":true,"imageRef":"vec_unclipped_stroke","scaleMode":"FILL"}]
+						}]
+					}]
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Clipped leaf parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	if (Doc.Children.Num() != 1
+		|| Doc.Children[0]->Children.Num() != 1
+		|| Doc.Children[0]->Children[0]->Children.Num() != 3)
+	{
+		AddError(TEXT("Expected viewport, clipping frame, and leaf shape"));
+		return false;
+	}
+
+	const TSharedPtr<FDesignNode>& Viewport = Doc.Children[0];
+	const TSharedPtr<FDesignNode>& ClippingFrame = Viewport->Children[0];
+	const TSharedPtr<FDesignNode>& BackgroundShape = ClippingFrame->Children[0];
+	const TSharedPtr<FDesignNode>& RasterizedBackgroundShape = ClippingFrame->Children[1];
+	const TSharedPtr<FDesignNode>& RasterizedStroke = ClippingFrame->Children[2];
+	TestTrue(TEXT("Viewport keeps clipping"), Viewport->LayoutData.ExplicitClip.Get(false));
+	TestTrue(TEXT("Nested frame keeps clipping"), ClippingFrame->LayoutData.ExplicitClip.Get(false));
+	TestEqual(TEXT("Ordinary clipped leaf keeps visible X"), BackgroundShape->Transform.X, 0.0f);
+	TestEqual(TEXT("Ordinary clipped leaf keeps visible Y"), BackgroundShape->Transform.Y, 0.0f);
+	TestTrue(TEXT("Clipped leaf width fixed"), BackgroundShape->Transform.Width.IsFixed());
+	TestTrue(TEXT("Clipped leaf height fixed"), BackgroundShape->Transform.Height.IsFixed());
+	TestEqual(TEXT("Ordinary clipped leaf keeps visible width"), BackgroundShape->Transform.Width.Value, 999.0f);
+	TestEqual(TEXT("Ordinary clipped leaf keeps visible height"), BackgroundShape->Transform.Height.Value, 920.0f);
+	TestEqual(TEXT("Pre-rasterized leaf keeps visible X"), RasterizedBackgroundShape->Transform.X, 0.0f);
+	TestEqual(TEXT("Pre-rasterized leaf keeps visible Y"), RasterizedBackgroundShape->Transform.Y, 0.0f);
+	TestEqual(TEXT("Pre-rasterized leaf keeps raster width"), RasterizedBackgroundShape->Transform.Width.Value, 999.0f);
+	TestEqual(TEXT("Pre-rasterized leaf keeps raster height"), RasterizedBackgroundShape->Transform.Height.Value, 920.0f);
+	TestEqual(TEXT("Unclipped vector raster keeps render X"), RasterizedStroke->Transform.X, 0.0f);
+	TestEqual(TEXT("Unclipped vector raster keeps render Y"), RasterizedStroke->Transform.Y, 100.15f);
+	TestEqual(TEXT("Unclipped vector raster keeps render width"), RasterizedStroke->Transform.Width.Value, 560.0f);
+	TestEqual(TEXT("Unclipped vector raster keeps render height"), RasterizedStroke->Transform.Height.Value, 0.7f);
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaClippedContainerOffsetsChildrenFromVisibleOriginTest,
+	"Design2UMG.FigmaParser.ClippedContainerOffsetsChildrenFromVisibleOrigin",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaClippedContainerOffsetsChildrenFromVisibleOriginTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page 1",
+				"type": "CANVAS",
+				"children": [{
+					"id": "root",
+					"name": "Viewport",
+					"type": "FRAME",
+					"clipsContent": true,
+					"absoluteBoundingBox": {"x":100,"y":200,"width":300,"height":200},
+					"absoluteRenderBounds": {"x":100,"y":200,"width":300,"height":200},
+					"children": [{
+						"id": "cropped",
+						"name": "CroppedContainer",
+						"type": "GROUP",
+						"absoluteBoundingBox": {"x":20,"y":140,"width":500,"height":400},
+						"absoluteRenderBounds": {"x":100,"y":200,"width":300,"height":200},
+						"children": [{
+							"id": "mask",
+							"name": "Mask",
+							"type": "VECTOR",
+							"isMask": true,
+							"absoluteBoundingBox": {"x":20,"y":140,"width":500,"height":400}
+						}, {
+							"id": "content",
+							"name": "Content",
+							"type": "INSTANCE",
+							"absoluteBoundingBox": {"x":80,"y":180,"width":360,"height":240},
+							"absoluteRenderBounds": {"x":100,"y":200,"width":300,"height":200},
+							"children": [{
+								"id": "tile",
+								"name": "VisibleTile",
+								"type": "RECTANGLE",
+								"absoluteBoundingBox": {"x":100,"y":200,"width":50,"height":50},
+								"absoluteRenderBounds": {"x":100,"y":200,"width":50,"height":50},
+								"fills": [{"type":"SOLID","color":{"r":0.2,"g":0.3,"b":0.5,"a":1}}]
+							}]
+						}]
+					}]
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Clipped container parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	if (Doc.Children.Num() != 1
+		|| Doc.Children[0]->Children.Num() != 1
+		|| Doc.Children[0]->Children[0]->Children.Num() != 1
+		|| Doc.Children[0]->Children[0]->Children[0]->Children.Num() != 1)
+	{
+		AddError(TEXT("Expected viewport, cropped container, content, and tile"));
+		return false;
+	}
+
+	const TSharedPtr<FDesignNode>& CroppedContainer = Doc.Children[0]->Children[0];
+	const TSharedPtr<FDesignNode>& Content = CroppedContainer->Children[0];
+	const TSharedPtr<FDesignNode>& Tile = Content->Children[0];
+	TestEqual(TEXT("Cropped container starts at viewport origin"), CroppedContainer->Transform.X, 0.0f);
+	TestEqual(TEXT("Cropped container visible width"), CroppedContainer->Transform.Width.Value, 300.0f);
+	TestEqual(TEXT("Content offsets from visible X origin"), Content->Transform.X, -20.0f);
+	TestEqual(TEXT("Content offsets from visible Y origin"), Content->Transform.Y, -20.0f);
+	TestEqual(TEXT("Nested tile remains relative to content layout X"), Tile->Transform.X, 20.0f);
+	TestEqual(TEXT("Nested tile remains relative to content layout Y"), Tile->Transform.Y, 20.0f);
+	return true;
+}
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLeafForegroundBlurUsesLayoutBoundsTest,
 	"Design2UMG.FigmaParser.LeafForegroundBlurUsesLayoutBounds",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -581,10 +757,10 @@ bool FFigmaFilledAutoLayoutContainerUsesLayoutBoundsTest::RunTest(const FString&
 	TestEqual(TEXT("Filled container child count"), Content->Children.Num(), 1);
 	return true;
 }
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaImplicitGroupMaskLeafSkippedTest,
-	"Design2UMG.FigmaParser.ImplicitGroupMaskLeafSkipped",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaExplicitGroupMaskLeafSkippedTest,
+	"Design2UMG.FigmaParser.ExplicitGroupMaskLeafSkipped",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaImplicitGroupMaskLeafSkippedTest::RunTest(const FString& Parameters)
+bool FFigmaExplicitGroupMaskLeafSkippedTest::RunTest(const FString& Parameters)
 {
 	const FString Json = TEXT(R"({
 		"document": {
@@ -607,6 +783,7 @@ bool FFigmaImplicitGroupMaskLeafSkippedTest::RunTest(const FString& Parameters)
 							"name": "Mask Shape",
 							"type": "RECTANGLE",
 							"visible": true,
+							"isMask": true,
 							"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 120},
 							"fills": [{
 								"type": "SOLID",
@@ -636,7 +813,7 @@ bool FFigmaImplicitGroupMaskLeafSkippedTest::RunTest(const FString& Parameters)
 	})");
 
 	FDesignDocument Doc;
-	TestTrue(TEXT("Implicit group mask fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
+	TestTrue(TEXT("Explicit group mask fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
 	if (Doc.Children.Num() != 1)
 	{
 		return false;
@@ -649,7 +826,272 @@ bool FFigmaImplicitGroupMaskLeafSkippedTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	TestEqual(TEXT("Implicit mask leaf is skipped"), Group->Children[0]->Id, TEXT("label"));
+	TestEqual(TEXT("Explicit mask leaf is skipped"), Group->Children[0]->Id, TEXT("label"));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaImplicitGroupMaskLeafStackSkippedTest,
+	"Design2UMG.FigmaParser.ImplicitGroupMaskLeafStackSkipped",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaImplicitGroupMaskLeafStackSkippedTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page",
+				"type": "CANVAS",
+				"children": [{
+					"id": "masked_group",
+					"name": "MaskedGroup",
+					"type": "GROUP",
+					"visible": true,
+					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 120},
+					"children": [
+						{
+							"id": "implicit_mask",
+							"name": "Shape",
+							"type": "RECTANGLE",
+							"visible": true,
+							"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 120},
+							"fills": [{
+								"type": "SOLID",
+								"visible": true,
+								"color": {"r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0}
+							}]
+						},
+						{
+							"id": "masked_image",
+							"name": "Image",
+							"type": "RECTANGLE",
+							"visible": true,
+							"absoluteBoundingBox": {"x": -10, "y": -10, "width": 140, "height": 140},
+							"fills": [{
+								"type": "IMAGE",
+								"visible": true,
+								"imageRef": "masked_image_ref",
+								"scaleMode": "FILL"
+							}]
+						}
+					]
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Implicit group mask stack fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
+	if (Doc.Children.Num() != 1)
+	{
+		return false;
+	}
+
+	const TSharedPtr<FDesignNode>& Group = Doc.Children[0];
+	TestEqual(TEXT("Implicit group mask stack keeps one runtime child"), Group->Children.Num(), 1);
+	if (Group->Children.Num() != 1)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Implicit mask leaf is skipped"), Group->Children[0]->Id, TEXT("masked_image"));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaImplicitGroupMaskGraphicalSubtreeSkippedTest,
+	"Design2UMG.FigmaParser.ImplicitGroupMaskGraphicalSubtreeSkipped",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaImplicitGroupMaskGraphicalSubtreeSkippedTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page",
+				"type": "CANVAS",
+				"children": [{
+					"id": "masked_group",
+					"name": "MaskedGroup",
+					"type": "GROUP",
+					"visible": true,
+					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 48, "height": 48},
+					"children": [
+						{
+							"id": "implicit_mask",
+							"name": "Shape",
+							"type": "ELLIPSE",
+							"visible": true,
+							"absoluteBoundingBox": {"x": 0, "y": 0, "width": 48, "height": 48},
+							"fills": [{
+								"type": "SOLID",
+								"visible": true,
+								"color": {"r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0}
+							}]
+						},
+						{
+							"id": "grouped_artwork",
+							"name": "Artwork",
+							"type": "GROUP",
+							"visible": true,
+							"absoluteBoundingBox": {"x": -4, "y": -4, "width": 56, "height": 56},
+							"children": [
+								{
+									"id": "art_circle",
+									"name": "Circle",
+									"type": "ELLIPSE",
+									"visible": true,
+									"absoluteBoundingBox": {"x": -4, "y": -4, "width": 56, "height": 56}
+								},
+								{
+									"id": "art_vector",
+									"name": "Detail",
+									"type": "VECTOR",
+									"visible": true,
+									"absoluteBoundingBox": {"x": 12, "y": 12, "width": 24, "height": 24}
+								}
+							]
+						}
+					]
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Implicit graphical subtree mask fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
+	if (Doc.Children.Num() != 1)
+	{
+		return false;
+	}
+
+	const TSharedPtr<FDesignNode>& Group = Doc.Children[0];
+	TestEqual(TEXT("Implicit graphical subtree keeps one runtime child"), Group->Children.Num(), 1);
+	if (Group->Children.Num() != 1)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Grouped artwork remains after implicit mask removal"), Group->Children[0]->Id, TEXT("grouped_artwork"));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaFullBoundsGraphicalBackgroundKeptWithoutClipEvidenceTest,
+	"Design2UMG.FigmaParser.FullBoundsGraphicalBackgroundKeptWithoutClipEvidence",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaFullBoundsGraphicalBackgroundKeptWithoutClipEvidenceTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0", "name": "Doc", "type": "DOCUMENT", "children": [{
+				"id": "0:1", "name": "Page", "type": "CANVAS", "children": [{
+					"id": "decorated_background", "name": "DecoratedBackground", "type": "GROUP",
+					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 120},
+					"children": [
+						{
+							"id": "background", "name": "Background", "type": "RECTANGLE",
+							"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 120},
+							"fills": [{"type": "SOLID", "color": {"r": 0.1, "g": 0.2, "b": 0.3, "a": 1}}]
+						},
+						{
+							"id": "dot_a", "name": "DotA", "type": "ELLIPSE",
+							"absoluteBoundingBox": {"x": 16, "y": 16, "width": 12, "height": 12},
+							"fills": [{"type": "SOLID", "color": {"r": 0.4, "g": 0.5, "b": 0.6, "a": 1}}]
+						},
+						{
+							"id": "dot_b", "name": "DotB", "type": "ELLIPSE",
+							"absoluteBoundingBox": {"x": 84, "y": 84, "width": 12, "height": 12},
+							"fills": [{"type": "SOLID", "color": {"r": 0.4, "g": 0.5, "b": 0.6, "a": 1}}]
+						}
+					]
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Decorated graphical background fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
+	if (Doc.Children.Num() != 1)
+	{
+		return false;
+	}
+
+	const TSharedPtr<FDesignNode>& Group = Doc.Children[0];
+	TestEqual(TEXT("Contained graphical decoration keeps all children"), Group->Children.Num(), 3);
+	return Group->Children.Num() == 3
+		&& TestEqual(TEXT("Full-bounds graphical background remains first"), Group->Children[0]->Id, TEXT("background"));
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaFullBoundsGroupBackgroundKeptWithoutMaskFlagTest,
+	"Design2UMG.FigmaParser.FullBoundsGroupBackgroundKeptWithoutMaskFlag",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaFullBoundsGroupBackgroundKeptWithoutMaskFlagTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page",
+				"type": "CANVAS",
+				"children": [{
+					"id": "background_group",
+					"name": "BackgroundGroup",
+					"type": "GROUP",
+					"visible": true,
+					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 120},
+					"children": [
+						{
+							"id": "background_rect",
+							"name": "Background",
+							"type": "RECTANGLE",
+							"visible": true,
+							"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 120},
+							"fills": [{
+								"type": "SOLID",
+								"visible": true,
+								"color": {"r": 0.1, "g": 0.2, "b": 0.3, "a": 1.0}
+							}]
+						},
+						{
+							"id": "label",
+							"name": "Label",
+							"type": "TEXT",
+							"visible": true,
+							"absoluteBoundingBox": {"x": 10, "y": 10, "width": 80, "height": 20},
+							"characters": "Visible",
+							"style": {
+								"fontFamily": "Inter",
+								"fontSize": 16,
+								"fontWeight": 400,
+								"textAlignHorizontal": "LEFT",
+								"textAlignVertical": "TOP"
+							}
+						}
+					]
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Full-bounds group background fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
+	if (Doc.Children.Num() != 1)
+	{
+		return false;
+	}
+
+	const TSharedPtr<FDesignNode>& Group = Doc.Children[0];
+	TestEqual(TEXT("Group keeps background and foreground"), Group->Children.Num(), 2);
+	if (Group->Children.Num() != 2)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Background remains the first child"), Group->Children[0]->Id, TEXT("background_rect"));
+	TestEqual(TEXT("Foreground remains the second child"), Group->Children[1]->Id, TEXT("label"));
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaImplicitMaskLeafKeepsMultiFillGeometryTest,
@@ -859,10 +1301,10 @@ bool FFigmaCornerRadiusNormalizationTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Mixed radii remains non-uniform"), NonUniform->Visual.CornerRadius.bUniform);
 	return true;
 }
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaTextFitPreserveSizeTest,
-	"Design2UMG.Converter.TextFitPreserveSize",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaTextFitUsesAuthoredMinimumSizeTest,
+	"Design2UMG.Converter.TextFitUsesAuthoredMinimumSize",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaTextFitPreserveSizeTest::RunTest(const FString& Parameters)
+bool FFigmaTextFitUsesAuthoredMinimumSizeTest::RunTest(const FString& Parameters)
 {
 	const FString Json = TEXT(R"({
 		"document": {
@@ -949,6 +1391,7 @@ bool FFigmaTextFitPreserveSizeTest::RunTest(const FString& Parameters)
 
 	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 
+	bool bObservedRuntimeGrowth = false;
 	const auto VerifySingleLineFitLabel = [&](const FString& ExpectedText, const float ExpectedWidth, const float ExpectedHeight, const float SourceFontSize)
 	{
 		const FUMGWidgetNode* Label = FindWidgetByProperty(Data.RootWidget, TEXT("Text"), &ExpectedText);
@@ -975,10 +1418,16 @@ bool FFigmaTextFitPreserveSizeTest::RunTest(const FString& Parameters)
 			Label->Bounds.W,
 			Label->Bounds.H));
 
-		TestTrue(*FString::Printf(TEXT("Provided fit width should be preserved for '%s'"), *ExpectedText),
-			FMath::IsNearlyEqual(Label->Bounds.W, ExpectedWidth, 0.5f));
-		TestTrue(*FString::Printf(TEXT("Provided fit height should be preserved for '%s'"), *ExpectedText),
-			FMath::IsNearlyEqual(Label->Bounds.H, ExpectedHeight, 0.5f));
+		TestTrue(*FString::Printf(TEXT("Parser should preserve the authored fit width for '%s'"), *ExpectedText),
+			FMath::IsNearlyEqual(SourceNode->Transform.Width.Value, ExpectedWidth, 0.5f));
+		TestTrue(*FString::Printf(TEXT("Parser should preserve the authored fit height for '%s'"), *ExpectedText),
+			FMath::IsNearlyEqual(SourceNode->Transform.Height.Value, ExpectedHeight, 0.5f));
+		TestTrue(*FString::Printf(TEXT("Runtime fit width should not shrink below the authored minimum for '%s'"), *ExpectedText),
+			Label->Bounds.W + 0.5f >= ExpectedWidth);
+		TestTrue(*FString::Printf(TEXT("Runtime fit height should not shrink below the authored minimum for '%s'"), *ExpectedText),
+			Label->Bounds.H + 0.5f >= ExpectedHeight);
+		bObservedRuntimeGrowth |= Label->Bounds.W > ExpectedWidth + 0.5f
+			|| Label->Bounds.H > ExpectedHeight + 0.5f;
 		TestTrue(*FString::Printf(TEXT("Source font size metadata should be preserved for '%s'"), *ExpectedText),
 			FMath::IsNearlyEqual(Label->TextStyle.SourceFontSize, SourceFontSize, 0.01f));
 		TestTrue(*FString::Printf(TEXT("Resolved widget font size should stay positive and never exceed the authored size for '%s'"), *ExpectedText),
@@ -1000,6 +1449,8 @@ bool FFigmaTextFitPreserveSizeTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
+
+	TestTrue(TEXT("At least one fit label should grow when runtime glyph metrics exceed the authored minimum"), bObservedRuntimeGrowth);
 
 	return true;
 }

@@ -227,6 +227,69 @@ bool FFigmaEffectsConvertToTypedWrappersTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaGeometryMaskConvertsBeforeInnerShadowTest,
+	"Design2UMG.FigmaParser.GeometryMaskConvertsBeforeInnerShadow",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaGeometryMaskConvertsBeforeInnerShadowTest::RunTest(const FString& Parameters)
+{
+	const FString Json = TEXT(R"({
+		"document": {
+			"type": "DOCUMENT",
+			"children": [{
+				"type": "CANVAS",
+				"children": [{
+					"id": "shape-group",
+					"name": "Shape Group",
+					"type": "GROUP",
+					"absoluteBoundingBox": {"x":0,"y":0,"width":100,"height":80},
+					"effects": [{
+						"type": "INNER_SHADOW",
+						"visible": true,
+						"offset": {"x":2,"y":2},
+						"radius": 4,
+						"color": {"r":0,"g":0,"b":0,"a":0.25}
+					}],
+					"children": [{
+						"id": "shape-mask",
+						"name": "Clip Shape",
+						"type": "ELLIPSE",
+						"isMask": true,
+						"absoluteBoundingBox": {"x":0,"y":0,"width":100,"height":80}
+					}, {
+						"id": "shape-content",
+						"name": "Color Layer",
+						"type": "RECTANGLE",
+						"absoluteBoundingBox": {"x":0,"y":0,"width":100,"height":80},
+						"fills": [{"type":"SOLID","color":{"r":0.2,"g":0.4,"b":0.8,"a":1}}]
+					}]
+				}]
+			}]
+		}
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Geometry mask fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
+	TestEqual(TEXT("Inner shadow remains the outer effect"), Data.RootWidget.Effect.EffectMaterial.GetValue(), TEXT("d2u.retainer.inner_shadow"));
+	TestEqual(TEXT("Inner shadow keeps one masked child"), Data.RootWidget.Children.Num(), 1);
+	if (Data.RootWidget.Children.Num() != 1)
+	{
+		return false;
+	}
+
+	const FUMGWidgetNode& MaskWrapper = Data.RootWidget.Children[0];
+	TestEqual(TEXT("Geometry mask uses RetainerBox"), MaskWrapper.Type, TEXT("RetainerBox"));
+	TestEqual(TEXT("Geometry mask material exported"), MaskWrapper.Effect.EffectMaterial.GetValue(), TEXT("d2u.retainer.geometry_mask"));
+	TestTrue(TEXT("Ellipse mask shape is typed"),
+		MaskWrapper.Effect.GeometryMaskShape.IsSet()
+		&& MaskWrapper.Effect.GeometryMaskShape.GetValue() == EUMGGeometryMaskShape::Ellipse);
+	TestTrue(TEXT("Geometry mask size is typed"),
+		MaskWrapper.Effect.GeometryMaskSize.IsSet()
+		&& MaskWrapper.Effect.GeometryMaskSize.GetValue().Equals(FVector2D(100.0f, 80.0f), 0.001f));
+	TestEqual(TEXT("Geometry mask keeps converted content"), MaskWrapper.Children.Num(), 1);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLayerBlurConvertsToForegroundBlurWrapperTest,
 	"Design2UMG.FigmaParser.LayerBlurConvertsToForegroundBlurWrapper",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -354,6 +417,61 @@ bool FRetainerEffectMaterialApplicationTest::RunTest(const FString& Parameters)
 	const FLinearColor BlurUVStep = DynamicEffect->K2_GetVectorParameterValue(TEXT("BlurUVStep"));
 	TestTrue(TEXT("RetainerBox blur UV step X applied"), FMath::IsNearlyEqual(BlurUVStep.R, 0.01f, 0.0001f));
 	TestTrue(TEXT("RetainerBox blur UV step Y applied"), FMath::IsNearlyEqual(BlurUVStep.G, 0.02f, 0.0001f));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGeometryMaskRetainerMaterialApplicationTest,
+	"Design2UMG.PropertyApplier.RetainerEffectMaterialGeometryMask",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FGeometryMaskRetainerMaterialApplicationTest::RunTest(const FString& Parameters)
+{
+	URetainerBox* Widget = NewObject<URetainerBox>(GetTransientPackageAsObject());
+	TestTrue(TEXT("Geometry mask RetainerBox created"), Widget != nullptr);
+	if (!Widget)
+	{
+		return false;
+	}
+
+	FUMGWidgetNode Node;
+	Node.Type = TEXT("RetainerBox");
+	Node.Effect.bRetainRendering = true;
+	Node.Effect.EffectMaterial = TEXT("d2u.retainer.geometry_mask");
+	Node.Effect.TextureParameter = TEXT("Texture");
+	Node.Effect.GeometryMaskShape = EUMGGeometryMaskShape::RoundedRectangle;
+	Node.Effect.GeometryMaskSize = FVector2D(100.0f, 80.0f);
+	Node.Effect.GeometryMaskCornerRadii = FVector4(4.0f, 8.0f, 12.0f, 16.0f);
+	FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node);
+
+	UMaterialInstanceDynamic* DynamicEffect = Widget->GetEffectMaterial();
+	TestTrue(TEXT("Geometry mask dynamic material created"), DynamicEffect != nullptr);
+	const UMaterialInterface* EffectMaterial = Widget->GetEffectMaterialInterface();
+	TestTrue(TEXT("Geometry mask material instance survives generated asset reload"),
+		EffectMaterial
+		&& EffectMaterial->GetMaterial()
+		&& EffectMaterial->GetMaterial()->GetPathName().Equals(
+			TEXT("/Game/Design2UMG/GeneratedMaterials/D2U_GeometryMaskRetainerV15.D2U_GeometryMaskRetainerV15"),
+			ESearchCase::CaseSensitive)
+		&& !EffectMaterial->HasAnyFlags(RF_Transient));
+	const FMaterialResource* MaterialResource = EffectMaterial
+		? EffectMaterial->GetMaterialResource(GMaxRHIShaderPlatform)
+		: nullptr;
+	TestTrue(TEXT("Geometry mask material shader compilation is complete"),
+		MaterialResource && MaterialResource->IsGameThreadShaderMapComplete());
+	TestTrue(TEXT("Geometry mask material has no compile errors"),
+		MaterialResource && MaterialResource->GetCompileErrors().IsEmpty());
+	if (!DynamicEffect)
+	{
+		return false;
+	}
+
+	const float MaskShape = DynamicEffect->K2_GetScalarParameterValue(TEXT("MaskShape"));
+	const FLinearColor MaskSize = DynamicEffect->K2_GetVectorParameterValue(TEXT("MaskSize"));
+	const FLinearColor MaskTopRadii = DynamicEffect->K2_GetVectorParameterValue(TEXT("MaskCornerRadiiTop"));
+	const FLinearColor MaskBottomRadii = DynamicEffect->K2_GetVectorParameterValue(TEXT("MaskCornerRadiiBottom"));
+	TestTrue(TEXT("Rounded rectangle material mode applied"), FMath::IsNearlyEqual(MaskShape, 1.0f));
+	TestTrue(TEXT("Geometry mask width applied"), FMath::IsNearlyEqual(MaskSize.R, 100.0f));
+	TestTrue(TEXT("Geometry mask height applied"), FMath::IsNearlyEqual(MaskSize.G, 80.0f));
+	TestTrue(TEXT("Geometry mask top-left radius applied"), FMath::IsNearlyEqual(MaskTopRadii.R, 4.0f));
+	TestTrue(TEXT("Geometry mask bottom-left radius applied"), FMath::IsNearlyEqual(MaskBottomRadii.G, 16.0f));
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FInnerShadowRetainerMaterialApplicationTest,
@@ -1868,6 +1986,8 @@ bool FTypedBrushImageGradientJsonRoundTripTest::RunTest(const FString& Parameter
 	GradientNode.Name = TEXT("TypedGradient");
 	GradientNode.Brush.Gradient.Type = TEXT("Angular");
 	GradientNode.Brush.Gradient.Rotation = 135.0f;
+	GradientNode.Brush.Gradient.StartPoint = FVector2D(0.15f, 0.25f);
+	GradientNode.Brush.Gradient.EndPoint = FVector2D(0.85f, 0.75f);
 	GradientNode.Brush.Gradient.Center = FVector2D(0.45f, 0.55f);
 	GradientNode.Brush.Gradient.Size = FVector2D(0.8f, 1.1f);
 	{
@@ -1913,11 +2033,54 @@ bool FTypedBrushImageGradientJsonRoundTripTest::RunTest(const FString& Parameter
 
 	TestTrue(TEXT("Typed gradient type preserved"), ParsedGradientNode->Brush.Gradient.Type.IsSet() && ParsedGradientNode->Brush.Gradient.Type.GetValue() == TEXT("Angular"));
 	TestTrue(TEXT("Typed gradient rotation preserved"), ParsedGradientNode->Brush.Gradient.Rotation.IsSet() && FMath::IsNearlyEqual(ParsedGradientNode->Brush.Gradient.Rotation.GetValue(), 135.0f, 0.001f));
+	TestTrue(TEXT("Typed gradient start point preserved"), ParsedGradientNode->Brush.Gradient.StartPoint.IsSet()
+		&& FMath::IsNearlyEqual(ParsedGradientNode->Brush.Gradient.StartPoint.GetValue().X, 0.15f, 0.001f)
+		&& FMath::IsNearlyEqual(ParsedGradientNode->Brush.Gradient.StartPoint.GetValue().Y, 0.25f, 0.001f));
+	TestTrue(TEXT("Typed gradient end point preserved"), ParsedGradientNode->Brush.Gradient.EndPoint.IsSet()
+		&& FMath::IsNearlyEqual(ParsedGradientNode->Brush.Gradient.EndPoint.GetValue().X, 0.85f, 0.001f)
+		&& FMath::IsNearlyEqual(ParsedGradientNode->Brush.Gradient.EndPoint.GetValue().Y, 0.75f, 0.001f));
 	TestTrue(TEXT("Typed gradient stop count preserved"), ParsedGradientNode->Brush.Gradient.Stops.Num() == 3);
 	TestEqual(TEXT("Typed gradient helper exposes material ref"), GetWidgetProperty(*ParsedGradientNode, TEXT("MaterialRef")), TEXT("angulargradient"));
 	TestTrue(TEXT("Typed gradient helper exposes material params"), GetWidgetProperty(*ParsedGradientNode, TEXT("MaterialParams")).Contains(TEXT("\"Stops\"")));
 	return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGeometryMaskEffectJsonRoundTripTest,
+	"Design2UMG.UMGJson.GeometryMaskEffectRoundTrip",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FGeometryMaskEffectJsonRoundTripTest::RunTest(const FString& Parameters)
+{
+	FUMGWidgetData SourceData;
+	SourceData.WidgetName = TEXT("WBP_GeometryMaskEffectRoundTrip");
+	SourceData.RootWidget.Type = TEXT("RetainerBox");
+	SourceData.RootWidget.Id = TEXT("geometry_mask_root");
+	SourceData.RootWidget.Name = TEXT("GeometryMaskRoot");
+	SourceData.RootWidget.Effect.bRetainRendering = true;
+	SourceData.RootWidget.Effect.EffectMaterial = TEXT("d2u.retainer.geometry_mask");
+	SourceData.RootWidget.Effect.TextureParameter = TEXT("Texture");
+	SourceData.RootWidget.Effect.GeometryMaskShape = EUMGGeometryMaskShape::RoundedRectangle;
+	SourceData.RootWidget.Effect.GeometryMaskSize = FVector2D(100.0f, 80.0f);
+	SourceData.RootWidget.Effect.GeometryMaskCornerRadii = FVector4(4.0f, 8.0f, 12.0f, 16.0f);
+
+	const FString Json = FUMGJsonSerializer::Serialize(SourceData);
+	TestTrue(TEXT("Serialized geometry mask emits shape"), Json.Contains(TEXT("\"GeometryMaskShape\"")));
+	TestTrue(TEXT("Serialized geometry mask emits size"), Json.Contains(TEXT("\"GeometryMaskSize\"")));
+	TestTrue(TEXT("Serialized geometry mask emits corner radii"), Json.Contains(TEXT("\"GeometryMaskCornerRadii\"")));
+
+	FUMGWidgetData ParsedData;
+	FString ParseError;
+	TestTrue(TEXT("Geometry mask effect JSON parses"), FUMGJsonParser::ParseJson(Json, ParsedData, &ParseError));
+	TestTrue(TEXT("Parsed geometry mask shape preserved"),
+		ParsedData.RootWidget.Effect.GeometryMaskShape.IsSet()
+		&& ParsedData.RootWidget.Effect.GeometryMaskShape.GetValue() == EUMGGeometryMaskShape::RoundedRectangle);
+	TestTrue(TEXT("Parsed geometry mask size preserved"),
+		ParsedData.RootWidget.Effect.GeometryMaskSize.IsSet()
+		&& ParsedData.RootWidget.Effect.GeometryMaskSize.GetValue().Equals(FVector2D(100.0f, 80.0f), 0.001f));
+	TestTrue(TEXT("Parsed geometry mask radii preserved"),
+		ParsedData.RootWidget.Effect.GeometryMaskCornerRadii.IsSet()
+		&& ParsedData.RootWidget.Effect.GeometryMaskCornerRadii.GetValue().Equals(FVector4(4.0f, 8.0f, 12.0f, 16.0f), 0.001f));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FInnerShadowEffectJsonRoundTripTest,
 	"Design2UMG.UMGJson.InnerShadowEffectRoundTrip",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)

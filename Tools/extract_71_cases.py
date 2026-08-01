@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Extract all 47 case specs from formal gate for the full isolation experiment."""
+"""Extract all 71 case specs from the current formal gate for isolation experiments."""
 import json
 from pathlib import Path
 
-run_root = Path(r'G:\UE5\UnrealEngine\Engine\Plugins\Marketplace\Design2UMG\Saved\Design2UMG\Automation\_formal_full_47_20260415_shared_semantics_refroot')
+run_root = Path(r'G:\UE5\FPSRoguelike\Saved\Design2UMG\Automation\_full71_dashed_vector_20260801_01')
 
 cases = []
 for case_dir in sorted(run_root.iterdir()):

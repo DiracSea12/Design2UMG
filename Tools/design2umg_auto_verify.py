@@ -1910,8 +1910,8 @@ def finalize_pen_reference_authority(
                 authority["reason"] = "pencil_witness_content_unavailable"
             else:
                 witness_content_ok = (
-                    witness_content["changed_ratio"] <= 0.15
-                    and witness_content["mean_abs_error"] <= 0.02
+                    witness_content["stable_changed_ratio"] <= 0.15
+                    or witness_content["stable_mean_abs_error"] <= 0.02
                 )
                 if not witness_content_ok:
                     authority["valid"] = False

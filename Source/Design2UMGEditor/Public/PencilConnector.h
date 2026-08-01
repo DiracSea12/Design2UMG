@@ -12,6 +12,10 @@
  */
 class DESIGN2UMGEDITOR_API FPencilConnector
 {
+#if WITH_DEV_AUTOMATION_TESTS
+	friend struct FPencilConnectorTestAccess;
+#endif
+
 public:
 	~FPencilConnector();
 
@@ -42,6 +46,7 @@ private:
 
 	/** Find an available local port. */
 	static int32 FindAvailablePort(int32 StartPort = 18900);
+	void ScheduleRetry(FTickerDelegate&& RetryDelegate, float DelaySeconds);
 	void TryConnectAsync(
 		const FString& Endpoint,
 		double DeadlineSeconds,

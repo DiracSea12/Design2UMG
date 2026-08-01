@@ -576,6 +576,54 @@ namespace ProceduralShapeGeneratorAssets
 		return Texture;
 	}
 
+	UTexture2D* GenerateGradientLinear(
+		int32 Width,
+		int32 Height,
+		const FVector2D& StartNormalized,
+		const FVector2D& EndNormalized,
+		const TArray<FGradientStop>& Stops,
+		UObject* Outer)
+	{
+		if (Stops.Num() < 2)
+		{
+			return nullptr;
+		}
+
+		const FVector2D TextureSize(static_cast<float>(Width), static_cast<float>(Height));
+		const FVector2D StartPixel = StartNormalized * TextureSize;
+		const FVector2D EndPixel = EndNormalized * TextureSize;
+		const FVector2D Direction = EndPixel - StartPixel;
+		const float DirectionSizeSquared = Direction.SizeSquared();
+		if (DirectionSizeSquared <= KINDA_SMALL_NUMBER)
+		{
+			return nullptr;
+		}
+
+		UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer);
+		if (!Texture)
+		{
+			return nullptr;
+		}
+
+		TArray<FColor> Pixels;
+		Pixels.SetNumUninitialized(Width * Height);
+		for (int32 Y = 0; Y < Height; ++Y)
+		{
+			for (int32 X = 0; X < Width; ++X)
+			{
+				const FVector2D Pixel(static_cast<float>(X) + 0.5f, static_cast<float>(Y) + 0.5f);
+				const float T = FMath::Clamp(
+					FVector2D::DotProduct(Pixel - StartPixel, Direction) / DirectionSizeSquared,
+					0.0f,
+					1.0f);
+				Pixels[Y * Width + X] = SampleGradientStops(Stops, T).ToFColor(true);
+			}
+		}
+
+		FillTextureData(Texture, Pixels);
+		return Texture;
+	}
+
 	UTexture2D* GenerateGradientAngled(int32 Width, int32 Height, float RotationDeg, const TArray<FGradientStop>& Stops, UObject* Outer)
 	{
 		if (Stops.Num() < 2)

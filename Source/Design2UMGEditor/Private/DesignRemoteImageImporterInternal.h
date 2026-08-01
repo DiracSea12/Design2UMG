@@ -12,11 +12,32 @@ namespace DesignRemoteImageImporterInternal
 		static constexpr int32 DefaultMaxDimension = 16384;
 		static constexpr int64 DefaultMaxPixels = 64ll * 1024ll * 1024ll;
 		static constexpr int32 DefaultMaxUrlsPerOperation = 128;
+		static constexpr uint64 DefaultMaxTotalCompressedBytes = DefaultMaxCompressedBytes * 8ull;
+		static constexpr uint64 DefaultMaxTotalDecodedBytes = 512ull * 1024ull * 1024ull;
 
 		uint64 MaxCompressedBytes = DefaultMaxCompressedBytes;
 		int32 MaxDimension = DefaultMaxDimension;
 		int64 MaxPixels = DefaultMaxPixels;
 		int32 MaxUrlsPerOperation = DefaultMaxUrlsPerOperation;
+		uint64 MaxTotalCompressedBytes = DefaultMaxTotalCompressedBytes;
+		uint64 MaxTotalDecodedBytes = DefaultMaxTotalDecodedBytes;
+	};
+
+	class FImageOperationBudget
+	{
+	public:
+		explicit FImageOperationBudget(const FImageResourceLimits& InLimits)
+			: Limits(InLimits)
+		{
+		}
+
+		bool ConsumeCompressedBytes(uint64 ByteCount, FString& OutError);
+		bool ConsumeDecodedPixels(int64 PixelCount, FString& OutError);
+
+	private:
+		FImageResourceLimits Limits;
+		uint64 TotalCompressedBytes = 0;
+		uint64 TotalDecodedBytes = 0;
 	};
 
 	struct FResolveReport
@@ -36,18 +57,13 @@ namespace DesignRemoteImageImporterInternal
 		FString ImportPath;
 		FString FrameName;
 		float TimeoutSeconds = 20.0f;
+		bool bAllowUnsafeRemoteUrls = false;
+		bool bTextureResourceUpdatePending = false;
 		FImageResourceLimits ImageLimits;
+		FImageOperationBudget OperationBudget{ ImageLimits };
 		FResolveReport Report;
 		TMap<FString, FString> UrlToAssetPath;
 		TMap<FString, FString> ContentHashToAsset;
-	};
-
-	class FImportedTextureIndex
-	{
-	public:
-		static void Remember(const FString& ImportPath, const FString& AssetName, const FString& ObjectPath);
-		static void Forget(const FString& ImportPath, const FString& AssetName);
-		static bool TryGetPersistedPath(const FString& ImportPath, const FString& AssetName, FString& OutObjectPath);
 	};
 
 	class FImagePayloadIO
@@ -56,9 +72,16 @@ namespace DesignRemoteImageImporterInternal
 		static bool ValidateCompressedByteCount(uint64 ByteCount, const FImageResourceLimits& Limits, FString& OutError);
 		static bool ValidateDimensions(int32 Width, int32 Height, const FImageResourceLimits& Limits, FString& OutError);
 		static bool ValidateUrlCount(int32 UrlCount, const FImageResourceLimits& Limits, FString& OutError);
+		static bool ValidateRemoteUrl(const FString& Url, bool bAllowUnsafeRemoteUrls, FString& OutError);
+		static bool LoadLocalFile(
+			const FString& FilePath,
+			const FImageResourceLimits& Limits,
+			TArray<uint8>& OutData,
+			FString& OutError);
 		static bool DownloadUrl(
 			const FString& Url,
 			float TimeoutSeconds,
+			bool bAllowUnsafeRemoteUrls,
 			const FImageResourceLimits& Limits,
 			TArray<uint8>& OutData,
 			FString& OutError);
@@ -68,6 +91,7 @@ namespace DesignRemoteImageImporterInternal
 			int32& OutWidth,
 			int32& OutHeight,
 			TArray64<uint8>& OutRawData,
-			FString& OutError);
+			FString& OutError,
+			FImageOperationBudget* OperationBudget = nullptr);
 	};
 }

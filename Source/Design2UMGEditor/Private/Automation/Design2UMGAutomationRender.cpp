@@ -574,7 +574,8 @@ namespace
 
 		const FString PackagePath = FPaths::GetPath(PackageName);
 		return RefreshAutomationTextureResourcesInDirectory(PackagePath / TEXT("D2U_PathTextures"), TEXT("automation path texture"), OutError)
-			&& RefreshAutomationTextureResourcesInDirectory(PackagePath / TEXT("D2U_ProceduralTextures"), TEXT("automation procedural texture"), OutError);
+			&& RefreshAutomationTextureResourcesInDirectory(PackagePath / TEXT("D2U_ProceduralTextures"), TEXT("automation procedural texture"), OutError)
+			&& RefreshAutomationTextureResourcesInDirectory(PackagePath / TEXT("D2U_ImageTransforms"), TEXT("automation image transform texture"), OutError);
 	}
 
 	bool ClearDefaultAutomationOutputAssets(const FString& OutputPath, FString& OutError)

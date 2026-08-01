@@ -143,6 +143,12 @@ struct FDesignGradient
 	float Rotation = 0.0f;
 
 	UPROPERTY()
+	TOptional<FVector2D> StartPoint;
+
+	UPROPERTY()
+	TOptional<FVector2D> EndPoint;
+
+	UPROPERTY()
 	TOptional<FVector2D> Center;
 
 	UPROPERTY()
@@ -456,6 +462,31 @@ struct FDesignCornerRadius
 	{
 		if (bUniform) return Uniform > 0;
 		return TopLeft > 0 || TopRight > 0 || BottomRight > 0 || BottomLeft > 0;
+	}
+};
+
+UENUM()
+enum class EDesignGeometryMaskShape : uint8
+{
+	None,
+	Ellipse,
+	RoundedRectangle
+};
+
+USTRUCT()
+struct FDesignGeometryMask
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	EDesignGeometryMaskShape Shape = EDesignGeometryMaskShape::None;
+
+	UPROPERTY()
+	FDesignCornerRadius CornerRadius;
+
+	bool HasMask() const
+	{
+		return Shape != EDesignGeometryMaskShape::None;
 	}
 };
 

@@ -21,6 +21,8 @@ namespace
 	constexpr TCHAR JsonModeKey[] = TEXT("Mode");
 	constexpr TCHAR JsonTransformKey[] = TEXT("Transform");
 	constexpr TCHAR JsonRotationKey[] = TEXT("Rotation");
+	constexpr TCHAR JsonStartPointKey[] = TEXT("StartPoint");
+	constexpr TCHAR JsonEndPointKey[] = TEXT("EndPoint");
 	constexpr TCHAR JsonCenterKey[] = TEXT("Center");
 	constexpr TCHAR JsonSizeKey[] = TEXT("Size");
 	constexpr TCHAR JsonStopsKey[] = TEXT("Stops");
@@ -58,6 +60,27 @@ namespace
 		}
 
 		return FMargin(0);
+	}
+
+	bool TryParseVector4(const FString& Value, FVector4& OutValue)
+	{
+		TArray<FString> Parts;
+		Value.ParseIntoArray(Parts, TEXT(","), true);
+		if (Parts.Num() != 4)
+		{
+			return false;
+		}
+
+		float Parsed[4] = {};
+		for (int32 Index = 0; Index < UE_ARRAY_COUNT(Parsed); ++Index)
+		{
+			if (!LexTryParseString(Parsed[Index], *Parts[Index].TrimStartAndEnd()))
+			{
+				return false;
+			}
+		}
+		OutValue = FVector4(Parsed[0], Parsed[1], Parsed[2], Parsed[3]);
+		return true;
 	}
 
 }
@@ -426,6 +449,14 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 			{
 				OutNode.Brush.Gradient.Rotation = (float)Val;
 			}
+			if ((*GradientObject)->TryGetStringField(JsonStartPointKey, Str))
+			{
+				OutNode.Brush.Gradient.StartPoint = FUMGValueParser::ParseVector2D(Str, FVector2D::ZeroVector);
+			}
+			if ((*GradientObject)->TryGetStringField(JsonEndPointKey, Str))
+			{
+				OutNode.Brush.Gradient.EndPoint = FUMGValueParser::ParseVector2D(Str, FVector2D(1.0f, 0.0f));
+			}
 			if ((*GradientObject)->TryGetStringField(JsonCenterKey, Str))
 			{
 				OutNode.Brush.Gradient.Center = FUMGValueParser::ParseVector2D(Str, FVector2D(0.5f, 0.5f));
@@ -493,6 +524,29 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 		if ((*EffectObject)->TryGetStringField(UMGPropertyKeys::EffectOffset, Str))
 		{
 			OutNode.Effect.EffectOffset = FUMGValueParser::ParseVector2D(Str);
+		}
+		if ((*EffectObject)->TryGetStringField(UMGPropertyKeys::GeometryMaskShape, Str))
+		{
+			if (Str.Equals(TEXT("Ellipse"), ESearchCase::IgnoreCase))
+			{
+				OutNode.Effect.GeometryMaskShape = EUMGGeometryMaskShape::Ellipse;
+			}
+			else if (Str.Equals(TEXT("RoundedRectangle"), ESearchCase::IgnoreCase))
+			{
+				OutNode.Effect.GeometryMaskShape = EUMGGeometryMaskShape::RoundedRectangle;
+			}
+		}
+		if ((*EffectObject)->TryGetStringField(UMGPropertyKeys::GeometryMaskSize, Str))
+		{
+			OutNode.Effect.GeometryMaskSize = FUMGValueParser::ParseVector2D(Str);
+		}
+		if ((*EffectObject)->TryGetStringField(UMGPropertyKeys::GeometryMaskCornerRadii, Str))
+		{
+			FVector4 Radii;
+			if (TryParseVector4(Str, Radii))
+			{
+				OutNode.Effect.GeometryMaskCornerRadii = Radii;
+			}
 		}
 		FUMGEffectData::FRenderingPhaseData RenderingPhase = OutNode.Effect.RenderingPhase.Get(FUMGEffectData::FRenderingPhaseData());
 		bool bRenderingPhaseSet = false;

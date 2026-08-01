@@ -18,6 +18,7 @@ namespace UMGImageCropUtils
 	};
 
 	bool TryBuildCropRequest(const FUMGWidgetNode& Node, FImageCropRequest& OutRequest);
+	bool CanUseUvRegion(const FUMGVisualBrushData::FImageTransformData& Transform);
 	bool TryApplyCropToBrush(
 		FSlateBrush& InOutBrush,
 		UTexture2D* SourceTexture,

@@ -617,6 +617,7 @@ bool DesignImportUtils::GenerateBlueprintAndPng(
 	FIntPoint Size = ResolveSourceWidgetTreeRenderSize(Data);
 	const FString PngName = WBP ? WBP->GetName() : FPaths::GetBaseFilename(FinalPath);
 	const FString OutPng = FPaths::ProjectSavedDir() / TEXT("Design2UMG") / (PngName + TEXT(".png"));
+	IFileManager::Get().Delete(*OutPng, false, true);
 	AdvanceInteractiveGenerationProgressAfterMutation(
 		SlowTask,
 		0.5f,
@@ -625,6 +626,7 @@ bool DesignImportUtils::GenerateBlueprintAndPng(
 		bCancelRequestedAfterMutation);
 	if (!RenderWidgetTreeToPngFile(WBP, OutPng, &Size))
 	{
+		IFileManager::Get().Delete(*OutPng, false, true);
 		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget PNG render failed"));
 		// Save the Blueprint even when rendering fails so the issue can be inspected.
 		if (FUMGGenerator::SaveWidgetBlueprint(WBP) && OutGeneratedAssetPath)
@@ -644,6 +646,7 @@ bool DesignImportUtils::GenerateBlueprintAndPng(
 		bCancelRequestedAfterMutation);
 	if (!FUMGGenerator::SaveWidgetBlueprint(WBP))
 	{
+		IFileManager::Get().Delete(*OutPng, false, true);
 		FinishInteractiveGenerationProgress(SlowTask);
 		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint compile or save failed after PNG render"));
 		return false;
@@ -777,6 +780,10 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint compile or save failed before compiled PNG render"));
 		return false;
 	}
+	if (!OutputPngFilePath.IsEmpty())
+	{
+		IFileManager::Get().Delete(*OutputPngFilePath, false, true);
+	}
 
 	if (OutGeneratedAssetPath)
 	{
@@ -823,6 +830,10 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 		WidgetBlueprint,
 		OutputPngFilePath,
 		OutRenderedSize);
+	if (!bRendered)
+	{
+		IFileManager::Get().Delete(*OutputPngFilePath, false, true);
+	}
 	if (bRendered)
 	{
 		AdvanceInteractiveGenerationProgressAfterMutation(

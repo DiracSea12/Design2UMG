@@ -365,7 +365,7 @@ void FPencilConnector::TryConnectAsync(
 			return;
 		}
 
-		RetryTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+		ScheduleRetry(
 			FTickerDelegate::CreateLambda([this, Endpoint, DeadlineSeconds, LaunchToken, OnComplete](float)
 			{
 				RetryTickerHandle.Reset();
@@ -374,6 +374,15 @@ void FPencilConnector::TryConnectAsync(
 			}),
 			0.2f);
 	});
+}
+
+void FPencilConnector::ScheduleRetry(FTickerDelegate&& RetryDelegate, const float DelaySeconds)
+{
+	if (RetryTickerHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(RetryTickerHandle);
+	}
+	RetryTickerHandle = FTSTicker::GetCoreTicker().AddTicker(MoveTemp(RetryDelegate), DelaySeconds);
 }
 
 void FPencilConnector::Shutdown()

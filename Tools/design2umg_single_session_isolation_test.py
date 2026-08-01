@@ -7,7 +7,7 @@ Compares rendering outputs between:
   B) single-session mode - all cases run in ONE UnrealEditor process
 
 If B produces identical (or within tolerance) images to A, then single-session
-is safe for the 47-case full gate.
+is safe for the 71-case full gate.
 """
 import argparse
 import base64
@@ -42,104 +42,39 @@ EDITOR_GRACEFUL_EXIT_DEADLINE_SEC = 30.0
 
 
 # ---------------------------------------------------------------------------
-# Case selection: ALL 47 formal gate cases
+# Case selection: the current 71-case formal gate scope.  Read the frozen
+# run scope so this experiment cannot silently drift from batch discovery.
 # ---------------------------------------------------------------------------
-EXPERIMENT_CASES = [
-    ("pen_pencil-demo_dashboard", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-demo.pen", "TiKtp", ""),
-    ("pen_pencil-demo_dashboard-elegant-luxury", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-demo.pen", "S6J8b", ""),
-    ("pen_pencil-demo_dashboard-industrial-technical", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-demo.pen", "OycZJ", ""),
-    ("pen_pencil-demo_dashboard-swiss-clean", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-demo.pen", "L8PC6", ""),
-    ("pen_pencil-demo_dashboard-terminal-technical-crisp", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-demo.pen", "ape0s", ""),
-    ("pen_pencil-demo_habit-tracker-bauhaus-digital", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-demo.pen", "1z85m", ""),
-    ("pen_pencil-demo_habit-tracker-elegant-luxury", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-demo.pen", "ZRyHQ", ""),
-    ("pen_pencil-demo_habit-tracker-industrial-technical", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-demo.pen", "kNhXa", ""),
-    ("pen_pencil-demo_habit-tracker-monochrome-type", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-demo.pen", "xkt7Z", ""),
-    ("pen_pencil-demo_habit-tracker-nyc-rebel", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-demo.pen", "XUa6B", ""),
-    ("pen_pencil-demo_habit-tracker-swiss-clean", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-demo.pen", "8fOqJ", ""),
-    ("pen_pencil-demo_habit-tracker-swiss-expressive", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-demo.pen", "PnYDC", ""),
-    ("pen_pencil-demo_habit-tracker-terminal-minimal", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-demo.pen", "9DnBu", ""),
-    ("pen_pencil-demo_habit-tracker-terminal-swiss", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-demo.pen", "q7jO6", ""),
-    ("pen_pencil-halo_dashboard-football", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-halo.pen", "rYhmQ", ""),
-    ("pen_pencil-halo_dashboard-revenue", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-halo.pen", "OVVG0", ""),
-    ("pen_pencil-halo_dashboard-utility", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-halo.pen", "uL1xr", ""),
-    ("pen_pencil-halo_halo-design-system-components", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-halo.pen", "vtHps", ""),
-    ("pen_pencil-lunaris_dashboard-football", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-lunaris.pen", "RZJKy", ""),
-    ("pen_pencil-lunaris_dashboard-revenue", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-lunaris.pen", "eELxA", ""),
-    ("pen_pencil-lunaris_dashboard-utility", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-lunaris.pen", "iIONl", ""),
-    ("pen_pencil-lunaris_lunaris-design-system-components", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-lunaris.pen", "frame-1761929672442", ""),
-    ("pen_pencil-new_frame", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-new.pen", "bi8Au", ""),
-    ("pen_pencil-new_gamehud-1920x1080", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-new.pen", "aytba", ""),
-    ("pen_pencil-nitro_dashboard-football", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-nitro.pen", "WA9Jo", ""),
-    ("pen_pencil-nitro_dashboard-revenue", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-nitro.pen", "sCAbY", ""),
-    ("pen_pencil-nitro_dashboard-utility", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-nitro.pen", "S6HIH", ""),
-    ("pen_pencil-nitro_nitro-design-system-components", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-nitro.pen", "rgGjc", ""),
-    ("pen_pencil-shadcn_dashboard-football", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-shadcn.pen", "6LMCW", ""),
-    ("pen_pencil-shadcn_dashboard-revenue", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-shadcn.pen", "TZ4am", ""),
-    ("pen_pencil-shadcn_dashboard-utility", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-shadcn.pen", "nSNTs", ""),
-    ("pen_pencil-shadcn_shadcn-design-system-components", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-shadcn.pen", "MzSDs", ""),
-    ("pen_pencil-welcome_fyi", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-welcome.pen", "DynJU", ""),
-    ("pen_pencil-welcome_fyi-2", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-welcome.pen", "CyTSW", ""),
-    ("pen_pencil-welcome_lunaris-design-system-components", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-welcome.pen", "frame-1761929672442", ""),
-    ("pen_pencil-welcome_step-1-frame", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-welcome.pen", "cOnQP", ""),
-    ("pen_pencil-welcome_step-2-frame", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-welcome.pen", "tlPHu", ""),
-    ("pen_pencil-welcome_step-3-frame", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-welcome.pen", "CzlXB", ""),
-    ("pen_pencil-welcome_welcome", "pen",
-     r"G:\UE5\FPSRoguelike\Designs\pencil-welcome.pen", "sbChi", ""),
-    ("figma_figma-export1_local", "local_figma",
-     r"G:\UE5\figma_export1\design.json", "", ""),
-    ("figma_figma-export1_source", "figma_source",
-     r"G:\UE5\figma_export1\design.json", "", ""),
-    ("figma_figma-export2_local", "local_figma",
-     r"G:\UE5\figma_export2\design.json", "", ""),
-    ("figma_figma-export2_source", "figma_source",
-     r"G:\UE5\figma_export2\design.json", "", ""),
-    ("figma_figma-export3_local", "local_figma",
-     r"G:\UE5\figma_export3\design.json", "", ""),
-    ("figma_figma-export3_source", "figma_source",
-     r"G:\UE5\figma_export3\design.json", "", ""),
-    ("figma_figma-export_local", "local_figma",
-     r"G:\UE5\figma_export\design.json", "", ""),
-    ("figma_figma-export_source", "figma_source",
-     r"G:\UE5\figma_export\design.json", "", ""),
-]
+FORMAL_AUTOMATION_ROOT = Path(r"G:\UE5\FPSRoguelike\Saved\Design2UMG\Automation")
+FORMAL_SCOPE_POINTER = FORMAL_AUTOMATION_ROOT.parent / "ReferenceCache" / "CURRENT.json"
+
+
+def load_formal_case_scope():
+    pointer = json.loads(FORMAL_SCOPE_POINTER.read_text(encoding="utf-8-sig"))
+    scope_path = Path(pointer["current_formal_scope"]["run_scope"])
+    if not scope_path.is_file():
+        raise RuntimeError(f"Current formal run scope not found: {scope_path}")
+    payload = json.loads(scope_path.read_text(encoding="utf-8-sig"))
+    cases = []
+    mode_map = {"local-figma": "local_figma", "figma-source": "figma_source"}
+    for item in payload.get("case_inputs", []):
+        mode = item.get("mode")
+        runtime_mode = mode if mode == "pen" else mode_map.get(mode)
+        if runtime_mode is None:
+            raise RuntimeError(f"Unsupported formal case mode: {mode!r}")
+        cases.append((
+            item["name"],
+            runtime_mode,
+            item["source"],
+            item.get("node", ""),
+            "",
+        ))
+    if len(cases) != 71:
+        raise RuntimeError(f"Expected the current 71-case scope, found {len(cases)} cases")
+    return cases
+
+
+EXPERIMENT_CASES = load_formal_case_scope()
 
 
 # ---------------------------------------------------------------------------
@@ -569,7 +504,7 @@ def run_experiment():
     print("=" * 60)
     if all_pass:
         print("RESULT: PASS - Single-session produces identical outputs")
-        print("  -> 47 cases CAN run in a single editor session without contamination")
+        print("  -> 71 cases CAN run in a single editor session without contamination")
     else:
         diff_cases = [r["case"] for r in rows if r["status"] not in ("PASS", "STEP_NO_OUTPUT", "SESSION_NO_OUTPUT")]
         print(f"RESULT: FAIL - {len(diff_cases)} case(s) show differences")

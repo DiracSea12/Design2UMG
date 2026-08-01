@@ -5,6 +5,7 @@
 #include "DesignImportTypes.h"
 #include "DesignSchema.h"
 #include "DesignVariableResolver.h"
+#include "DesignTreeLimits.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
@@ -16,8 +17,6 @@
 
 namespace
 {
-	constexpr int32 MaxPenParserNodeDepth = 512;
-
 	struct FPenParserParseContext
 	{
 		bool bDepthExceeded = false;
@@ -300,10 +299,10 @@ bool ValidateNodeDepth(
 	if (!JsonObj.IsValid())
 		return true;
 
-	if (Depth > MaxPenParserNodeDepth)
+	if (Depth > DesignTreeLimits::MaxNodeDepth)
 	{
 		ParseContext.bDepthExceeded = true;
-		UE_LOG(LogDesign2UMG, Error, TEXT("Pen document children nesting is too deep (over %d levels)."), MaxPenParserNodeDepth);
+		UE_LOG(LogDesign2UMG, Error, TEXT("Pen document children nesting is too deep (over %d levels)."), DesignTreeLimits::MaxNodeDepth);
 		return false;
 	}
 
@@ -346,10 +345,10 @@ bool ValidateChildrenDepth(
 	if (!ChildrenField.IsValid() || ChildrenField->Type != EJson::Array)
 		return true;
 
-	if (Depth > MaxPenParserNodeDepth)
+	if (Depth > DesignTreeLimits::MaxNodeDepth)
 	{
 		ParseContext.bDepthExceeded = true;
-		UE_LOG(LogDesign2UMG, Error, TEXT("Pen document children nesting is too deep (over %d levels)."), MaxPenParserNodeDepth);
+		UE_LOG(LogDesign2UMG, Error, TEXT("Pen document children nesting is too deep (over %d levels)."), DesignTreeLimits::MaxNodeDepth);
 		return false;
 	}
 
@@ -380,10 +379,10 @@ TSharedPtr<FDesignNode> ParseNodeAtDepth(
 	if (!JsonObj.IsValid())
 		return nullptr;
 
-	if (Depth > MaxPenParserNodeDepth)
+	if (Depth > DesignTreeLimits::MaxNodeDepth)
 	{
 		ParseContext.bDepthExceeded = true;
-		UE_LOG(LogDesign2UMG, Error, TEXT("Pen document nesting is too deep (over %d levels); node skipped."), MaxPenParserNodeDepth);
+		UE_LOG(LogDesign2UMG, Error, TEXT("Pen document nesting is too deep (over %d levels); node skipped."), DesignTreeLimits::MaxNodeDepth);
 		return nullptr;
 	}
 
@@ -507,10 +506,10 @@ void AppendParsedChildrenAtDepth(
 	if (!ChildrenField.IsValid() || ChildrenField->Type != EJson::Array)
 		return;
 
-	if (Depth > MaxPenParserNodeDepth)
+	if (Depth > DesignTreeLimits::MaxNodeDepth)
 	{
 		ParseContext.bDepthExceeded = true;
-		UE_LOG(LogDesign2UMG, Error, TEXT("Pen document children nesting is too deep (over %d levels); remaining children skipped."), MaxPenParserNodeDepth);
+		UE_LOG(LogDesign2UMG, Error, TEXT("Pen document children nesting is too deep (over %d levels); remaining children skipped."), DesignTreeLimits::MaxNodeDepth);
 		return;
 	}
 
@@ -548,7 +547,7 @@ namespace
 		{
 			return EDesignStrokeAlign::Center;
 		}
-		if (Align == TEXT("outside"))
+		if (Align == TEXT("outer"))
 		{
 			return EDesignStrokeAlign::Outside;
 		}
@@ -620,6 +619,18 @@ void ParseNodeStrokeProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNo
 	{
 		Stroke.Align = ParsePenStrokeAlign(StrokeAlignment);
 		bHasCurrentStroke = true;
+	}
+
+	FString StrokeLinecap;
+	if (JsonObj->TryGetStringField(TEXT("strokeLinecap"), StrokeLinecap))
+	{
+		OutNode.Metadata.Add(TEXT("stroke.cap"), StrokeLinecap);
+	}
+
+	FString StrokeLinejoin;
+	if (JsonObj->TryGetStringField(TEXT("strokeLinejoin"), StrokeLinejoin))
+	{
+		OutNode.Metadata.Add(TEXT("stroke.join"), StrokeLinejoin);
 	}
 
 	if (TryParsePenStrokeThickness(JsonObj->TryGetField(TEXT("strokeWidth")), Resolver, Stroke.Thickness))

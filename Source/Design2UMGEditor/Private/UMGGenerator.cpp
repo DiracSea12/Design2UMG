@@ -11,6 +11,8 @@
 #include "Design2UMGFigmaMetadataExtensions.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
+#include "GeneratedAssetLifecycle.h"
+#include "HAL/FileManager.h"
 #include "ObjectTools.h"
 
 #include "WidgetBlueprint.h"
@@ -25,6 +27,14 @@
 
 namespace
 {
+	void DiscardNewlyCreatedAsset(UObject* Asset, const bool bWasNewlyCreated)
+	{
+		if (bWasNewlyCreated)
+		{
+			GeneratedAssetLifecycle::DiscardUnsavedAsset(Asset);
+		}
+	}
+
 	void ConfigureFigmaMetadataExtension(
 		UWidgetBlueprint* WidgetBlueprint,
 		const FUMGSourceDocumentData& DocumentData,
@@ -291,7 +301,6 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 			*FullPath);
 		return nullptr;
 	}
-
 	UWidgetBlueprint* WBP = Cast<UWidgetBlueprint>(
 		FKismetEditorUtilities::CreateBlueprint(
 			UUserWidget::StaticClass(), Package, FName(*AssetName),
@@ -310,10 +319,11 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 			*FullPath,
 			WBP ? 1 : 0,
 			(WBP && WBP->WidgetTree) ? 1 : 0);
+		GeneratedAssetLifecycle::DiscardUnsavedAsset(WBP);
 		Package->ClearDirtyFlag();
-		Package->SetFlags(RF_Transient);
 		return nullptr;
 	}
+	Package->MarkAsNewlyCreated();
 
 	WBP->Modify();
 	WBP->WidgetTree->Modify();
@@ -336,8 +346,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 		UE_LOG(LogDesign2UMG, Error,
 			TEXT("Failed to generate '%s': source data did not provide a valid root design size"),
 			*WidgetData.WidgetName);
-		Package->ClearDirtyFlag();
-		Package->SetFlags(RF_Transient);
+		GeneratedAssetLifecycle::DiscardUnsavedAsset(WBP);
 		return nullptr;
 	}
 
@@ -399,8 +408,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 			*FixedRoot.Type,
 			*FixedRoot.Name,
 			*FixedRoot.Id);
-		Package->ClearDirtyFlag();
-		Package->SetFlags(RF_Transient);
+		GeneratedAssetLifecycle::DiscardUnsavedAsset(WBP);
 		return nullptr;
 	}
 	WBP->WidgetTree->RootWidget = Root;
@@ -427,7 +435,6 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 	ApplyDesignPreviewSize(WBP, DesignSize, TEXT("pre-compile"));
 
 	Package->MarkPackageDirty();
-	FAssetRegistryModule::AssetCreated(WBP);
 
 	UE_LOG(LogDesign2UMG, Log, TEXT("Built Widget Blueprint at %s (not yet compiled/saved)"), *FullPath);
 	return WBP;
@@ -440,6 +447,7 @@ bool FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP)
 		UE_LOG(LogDesign2UMG, Error, TEXT("SaveWidgetBlueprint: Widget Blueprint is null"));
 		return false;
 	}
+	const bool bWasNewlyCreated = WBP->GetOutermost()->HasAnyPackageFlags(PKG_NewlyCreated);
 
 	WBP->Modify();
 	if (WBP->WidgetTree)
@@ -453,6 +461,7 @@ bool FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP)
 		UE_LOG(LogDesign2UMG, Error,
 			TEXT("SaveWidgetBlueprint: missing valid DesignTimeSize for %s; source design size is required"),
 			*WBP->GetPathName());
+		DiscardNewlyCreatedAsset(WBP, bWasNewlyCreated);
 		return false;
 	}
 
@@ -475,6 +484,7 @@ bool FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP)
 			TEXT("SaveWidgetBlueprint: compilation failed for %s (status=%d)"),
 			*WBP->GetPathName(),
 			static_cast<int32>(WBP->Status));
+		DiscardNewlyCreatedAsset(WBP, bWasNewlyCreated);
 		return false;
 	}
 	DumpTemplateTextBlockFontState(TEXT("template-postcompile"), WBP);
@@ -485,13 +495,23 @@ bool FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP)
 	FSavePackageArgs SaveArgs;
 	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
 	FString FileName = FPackageName::LongPackageNameToFilename(FullPath, FPackageName::GetAssetPackageExtension());
+	const bool bPackageFileExisted = IFileManager::Get().FileExists(*FileName);
 	if (!UPackage::SavePackage(Package, WBP, *FileName, SaveArgs))
 	{
 		UE_LOG(LogDesign2UMG, Error,
 			TEXT("SaveWidgetBlueprint: failed to save %s to %s"),
 			*FullPath,
 			*FileName);
+		if (!bPackageFileExisted)
+		{
+			IFileManager::Get().Delete(*FileName, false, true);
+		}
+		DiscardNewlyCreatedAsset(WBP, bWasNewlyCreated);
 		return false;
+	}
+	if (bWasNewlyCreated)
+	{
+		GeneratedAssetLifecycle::RegisterSavedAsset(WBP);
 	}
 
 	UE_LOG(LogDesign2UMG, Log, TEXT("Saved Widget Blueprint at %s"), *FullPath);

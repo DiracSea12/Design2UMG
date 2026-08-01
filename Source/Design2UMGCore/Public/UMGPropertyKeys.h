@@ -36,6 +36,9 @@ namespace UMGPropertyKeys
 	inline constexpr const TCHAR* FontFamily = TEXT("FontFamily");
 	inline constexpr const TCHAR* FontSize = TEXT("FontSize");
 	inline constexpr const TCHAR* FontStyle = TEXT("FontStyle");
+	inline constexpr const TCHAR* GeometryMaskCornerRadii = TEXT("GeometryMaskCornerRadii");
+	inline constexpr const TCHAR* GeometryMaskShape = TEXT("GeometryMaskShape");
+	inline constexpr const TCHAR* GeometryMaskSize = TEXT("GeometryMaskSize");
 	inline constexpr const TCHAR* Height = TEXT("Height");
 	inline constexpr const TCHAR* HeightOverride = TEXT("HeightOverride");
 	inline constexpr const TCHAR* HintText = TEXT("HintText");

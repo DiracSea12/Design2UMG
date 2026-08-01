@@ -38,7 +38,7 @@ Design2UMG 的目标是让 Unreal Engine 项目的 design-to-UMG 流程更容易
 | 层级 | 含义 | 公开承诺 |
 | --- | --- | --- |
 | `repository-hygiene` | GitHub Actions 中的必需文件和公开边界检查 | 公开、轻量 |
-| `self-hosted build` | 维护者 Windows UE runner 上的手动 BuildPlugin 打包 | 维护者运行 |
+| `self-hosted build and automation` | 在维护者 Windows UE runner 上打包并运行 Unreal 自动化 | 维护者 push、同仓库 PR 和手动运行 |
 | `public smoke/public validate` | 贡献者可复现的本地构建和聚焦验证 | 公开复现边界 |
 | `maintainer formal admissible gate` | 完整 admissible case set 无回退发布门禁 | 维护者发布门禁 |
 

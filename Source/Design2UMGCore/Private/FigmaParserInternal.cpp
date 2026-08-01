@@ -1,6 +1,8 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "FigmaParserInternal.h"
+#include "Design2UMGSourceMetadata.h"
+#include "DesignTreeLimits.h"
 #include "DesignSchemaSourceExtensions.h"
 #include "FigmaParserLayout.h"
 #include "FigmaParserLayoutBounds.h"
@@ -117,134 +119,187 @@ static TSharedPtr<FJsonObject> ParseJsonString(const FString& Json)
 	return Root;
 }
 
-static bool HasOpaqueVisibleSolidFill(const TSharedPtr<FJsonObject>& NodeObj)
+static bool HasSingleOpaqueVisibleSolidFill(const TSharedPtr<FJsonObject>& NodeObj)
 {
-	const auto* Fills = GetArray(NodeObj, TEXT("fills"));
-	if (!Fills || Fills->Num() == 0)
+	const TArray<TSharedPtr<FJsonValue>>* Fills = GetArray(NodeObj, TEXT("fills"));
+	if (!Fills)
+	{
 		return false;
+	}
 
-	int32 VisibleFillCount = 0;
-	TSharedPtr<FJsonObject> VisibleSolidFill;
+	TSharedPtr<FJsonObject> VisibleFill;
 	for (const TSharedPtr<FJsonValue>& FillValue : *Fills)
 	{
-		const TSharedPtr<FJsonObject> FillObj = FillValue->AsObject();
-		if (!FillObj.IsValid() || !GetBool(FillObj, TEXT("visible"), true))
+		const TSharedPtr<FJsonObject> Fill = FillValue->AsObject();
+		if (!Fill.IsValid() || !GetBool(Fill, TEXT("visible"), true))
 		{
 			continue;
 		}
 
-		++VisibleFillCount;
-		if (VisibleFillCount > 1)
+		if (VisibleFill.IsValid())
 		{
 			return false;
 		}
-
-		VisibleSolidFill = FillObj;
+		VisibleFill = Fill;
 	}
 
-	if (!VisibleSolidFill.IsValid() || GetString(VisibleSolidFill, TEXT("type")) != TEXT("SOLID"))
+	if (!VisibleFill.IsValid() || GetString(VisibleFill, TEXT("type")) != TEXT("SOLID"))
 	{
 		return false;
 	}
 
-	const TSharedPtr<FJsonObject> ColorObj = GetObject(VisibleSolidFill, TEXT("color"));
-	if (!ColorObj.IsValid())
-		return false;
-
-	const double A = GetNumber(ColorObj, TEXT("a"), 1.0);
-	return A >= 0.99;
+	const TSharedPtr<FJsonObject> Color = GetObject(VisibleFill, TEXT("color"));
+	return Color.IsValid() && GetNumber(Color, TEXT("a"), 1.0) >= 0.99;
 }
 
-static bool HasSameBoundsAsParent(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj)
+static bool IsGraphicalLeaf(const TSharedPtr<FJsonObject>& NodeObj)
 {
-	const TSharedPtr<FJsonObject> ChildBBox = GetObject(NodeObj, TEXT("absoluteBoundingBox"));
-	const TSharedPtr<FJsonObject> ParentBBox = GetObject(ParentObj, TEXT("absoluteBoundingBox"));
-	if (!ChildBBox.IsValid() || !ParentBBox.IsValid())
+	if (!NodeObj.IsValid())
+	{
 		return false;
+	}
 
-	const double CX = GetNumber(ChildBBox, TEXT("x"));
-	const double CY = GetNumber(ChildBBox, TEXT("y"));
-	const double CW = GetNumber(ChildBBox, TEXT("width"));
-	const double CH = GetNumber(ChildBBox, TEXT("height"));
-	const double PX = GetNumber(ParentBBox, TEXT("x"));
-	const double PY = GetNumber(ParentBBox, TEXT("y"));
-	const double PW = GetNumber(ParentBBox, TEXT("width"));
-	const double PH = GetNumber(ParentBBox, TEXT("height"));
-	return FMath::IsNearlyEqual(CX, PX, 0.5) &&
-		FMath::IsNearlyEqual(CY, PY, 0.5) &&
-		FMath::IsNearlyEqual(CW, PW, 0.5) &&
-		FMath::IsNearlyEqual(CH, PH, 0.5);
-}
-
-static bool HasRenderableGeometryWithoutChildren(const TSharedPtr<FJsonObject>& NodeObj)
-{
 	const TArray<TSharedPtr<FJsonValue>>* Children = GetArray(NodeObj, TEXT("children"));
 	if (Children && Children->Num() > 0)
 	{
 		return false;
 	}
 
-	const FString FigmaType = GetString(NodeObj, TEXT("type"));
-	return FigmaType == TEXT("RECTANGLE")
-		|| FigmaType == TEXT("ELLIPSE")
-		|| FigmaType == TEXT("POLYGON")
-		|| FigmaType == TEXT("STAR")
-		|| FigmaType == TEXT("VECTOR")
-		|| FigmaType == TEXT("BOOLEAN_OPERATION");
+	const FString Type = GetString(NodeObj, TEXT("type"));
+	return Type == TEXT("RECTANGLE")
+		|| Type == TEXT("ELLIPSE")
+		|| Type == TEXT("LINE")
+		|| Type == TEXT("REGULAR_POLYGON")
+		|| Type == TEXT("POLYGON")
+		|| Type == TEXT("STAR")
+		|| Type == TEXT("VECTOR")
+		|| Type == TEXT("BOOLEAN_OPERATION");
 }
 
-static bool HasVisibleStrokesOrEffects(const TSharedPtr<FJsonObject>& NodeObj)
+static bool IsGraphicalMaskContentSubtree(const TSharedPtr<FJsonObject>& NodeObj, const int32 Depth = 0)
 {
-	return HasVisibleStroke(NodeObj) || HasVisibleEffect(NodeObj);
-}
-
-static int32 FindChildIndexById(const TSharedPtr<FJsonObject>& ParentObj, const FString& ChildId)
-{
-	const TArray<TSharedPtr<FJsonValue>>* Children = GetArray(ParentObj, TEXT("children"));
-	if (!Children)
+	if (Depth > DesignTreeLimits::MaxNodeDepth)
 	{
-		return INDEX_NONE;
+		return false;
+	}
+	if (IsGraphicalLeaf(NodeObj))
+	{
+		return true;
+	}
+	if (!NodeObj.IsValid())
+	{
+		return false;
 	}
 
-	for (int32 Index = 0; Index < Children->Num(); ++Index)
+	const FString Type = GetString(NodeObj, TEXT("type"));
+	if (Type != TEXT("GROUP") && Type != TEXT("TRANSFORM_GROUP") && Type != TEXT("INSTANCE"))
 	{
-		const TSharedPtr<FJsonObject> ChildObj = (*Children)[Index]->AsObject();
-		if (ChildObj.IsValid() && GetString(ChildObj, TEXT("id")) == ChildId)
+		return false;
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* Children = GetArray(NodeObj, TEXT("children"));
+	if (!Children || Children->Num() == 0)
+	{
+		return false;
+	}
+
+	for (const TSharedPtr<FJsonValue>& Child : *Children)
+	{
+		if (!IsGraphicalMaskContentSubtree(Child->AsObject(), Depth + 1))
 		{
-			return Index;
+			return false;
 		}
 	}
-
-	return INDEX_NONE;
+	return true;
 }
 
-static bool IsLikelyImplicitMaskLeaf(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj)
+static bool HasNearlyIdenticalBoundingBox(
+	const TSharedPtr<FJsonObject>& A,
+	const TSharedPtr<FJsonObject>& B);
+
+static bool DoesGraphicalSubtreeEscapeBounds(
+	const TSharedPtr<FJsonObject>& NodeObj,
+	const TSharedPtr<FJsonObject>& BoundsOwner,
+	const int32 Depth = 0)
 {
-	if (!NodeObj.IsValid() || !ParentObj.IsValid())
+	if (!NodeObj.IsValid() || !BoundsOwner.IsValid() || Depth > DesignTreeLimits::MaxNodeDepth)
 	{
 		return false;
 	}
 
-	if (GetString(ParentObj, TEXT("type")) != TEXT("GROUP"))
+	if (IsGraphicalLeaf(NodeObj))
+	{
+		const TSharedPtr<FJsonObject> NodeBounds = GetObject(NodeObj, TEXT("absoluteBoundingBox"));
+		const TSharedPtr<FJsonObject> ClipBounds = GetObject(BoundsOwner, TEXT("absoluteBoundingBox"));
+		if (!NodeBounds.IsValid() || !ClipBounds.IsValid())
+		{
+			return false;
+		}
+
+		const double NodeX = GetNumber(NodeBounds, TEXT("x"));
+		const double NodeY = GetNumber(NodeBounds, TEXT("y"));
+		const double NodeRight = NodeX + GetNumber(NodeBounds, TEXT("width"));
+		const double NodeBottom = NodeY + GetNumber(NodeBounds, TEXT("height"));
+		const double ClipX = GetNumber(ClipBounds, TEXT("x"));
+		const double ClipY = GetNumber(ClipBounds, TEXT("y"));
+		const double ClipRight = ClipX + GetNumber(ClipBounds, TEXT("width"));
+		const double ClipBottom = ClipY + GetNumber(ClipBounds, TEXT("height"));
+		return NodeX < ClipX - 0.5
+			|| NodeY < ClipY - 0.5
+			|| NodeRight > ClipRight + 0.5
+			|| NodeBottom > ClipBottom + 0.5;
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* Children = GetArray(NodeObj, TEXT("children"));
+	if (!Children)
 	{
 		return false;
 	}
 
-	if (!HasRenderableGeometryWithoutChildren(NodeObj)
-		|| HasVisibleStrokesOrEffects(NodeObj)
-		|| !HasOpaqueVisibleSolidFill(NodeObj)
-		|| !HasSameBoundsAsParent(NodeObj, ParentObj))
+	for (const TSharedPtr<FJsonValue>& Child : *Children)
+	{
+		if (DoesGraphicalSubtreeEscapeBounds(Child->AsObject(), BoundsOwner, Depth + 1))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+static bool IsImplicitGroupMaskStackStart(
+	const TSharedPtr<FJsonObject>& NodeObj,
+	const TSharedPtr<FJsonObject>& ParentObj)
+{
+	if (!NodeObj.IsValid()
+		|| !ParentObj.IsValid()
+		|| GetString(ParentObj, TEXT("type")) != TEXT("GROUP")
+		|| !IsGraphicalLeaf(NodeObj)
+		|| HasVisibleStroke(NodeObj)
+		|| HasVisibleEffect(NodeObj)
+		|| !HasSingleOpaqueVisibleSolidFill(NodeObj)
+		|| !HasNearlyIdenticalBoundingBox(NodeObj, ParentObj))
 	{
 		return false;
 	}
 
 	const TArray<TSharedPtr<FJsonValue>>* Children = GetArray(ParentObj, TEXT("children"));
-	if (!Children || Children->Num() <= 1)
+	if (!Children || Children->Num() <= 1 || (*Children)[0]->AsObject() != NodeObj)
 	{
 		return false;
 	}
 
-	return FindChildIndexById(ParentObj, GetString(NodeObj, TEXT("id"))) == 0;
+	bool bRequiresMaskClip = false;
+	for (int32 Index = 1; Index < Children->Num(); ++Index)
+	{
+		const TSharedPtr<FJsonObject> ContentNode = (*Children)[Index]->AsObject();
+		if (!IsGraphicalMaskContentSubtree(ContentNode))
+		{
+			return false;
+		}
+		bRequiresMaskClip |= DoesGraphicalSubtreeEscapeBounds(ContentNode, NodeObj);
+	}
+
+	return bRequiresMaskClip;
 }
 
 static bool HasNearlyIdenticalBoundingBox(const TSharedPtr<FJsonObject>& A, const TSharedPtr<FJsonObject>& B)
@@ -344,12 +399,14 @@ static bool ParseGeometryArray(
 }
 
 EDesignNodeType MapNodeType(const FString& FigmaType);
-TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj);
 TSharedPtr<FDesignNode> ParseNode(
 	const TSharedPtr<FJsonObject>& NodeObj,
 	const TSharedPtr<FJsonObject>& ParentObj,
+	const FNodeBounds* ParentCoordinateBounds,
 	TArray<FDesignSkippedNodeReport>* SkippedDesignerNodes,
-	bool bInsideInstanceSubtree);
+	bool bInsideInstanceSubtree,
+	FDesignParserBudget& ParseBudget,
+	int32 Depth);
 void CollectImageRefsRecursive(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSet<FString>& OutRefs);
 void ApplyImageUrlsRecursive(TArray<TSharedPtr<FDesignNode>>& Nodes, const TMap<FString, FString>& Map);
 
@@ -460,9 +517,45 @@ static bool ShouldSkipParsedFigmaNode(
 		return true;
 	}
 
-	// Infer only the narrow, source-agnostic case: the first full-bounds leaf
-	// shape inside a GROUP, with no strokes/effects and a single opaque solid fill.
-	return IsLikelyImplicitMaskLeaf(NodeObj, ParentObj);
+	return IsImplicitGroupMaskStackStart(NodeObj, ParentObj);
+}
+
+static void ParseExplicitGeometryMask(
+	const TSharedPtr<FJsonObject>& NodeObj,
+	FDesignNode& OutNode)
+{
+	const TArray<TSharedPtr<FJsonValue>>* Children = GetArray(NodeObj, TEXT("children"));
+	if (!Children || Children->Num() == 0)
+	{
+		return;
+	}
+
+	const TSharedPtr<FJsonObject> MaskNode = (*Children)[0]->AsObject();
+	if (!MaskNode.IsValid()
+		|| !GetBool(MaskNode, TEXT("isMask"), false)
+		|| !GetBool(MaskNode, TEXT("visible"), true)
+		|| !FMath::IsNearlyZero(GetNumber(MaskNode, TEXT("rotation")))
+		|| !HasNearlyIdenticalBoundingBox(MaskNode, NodeObj))
+	{
+		return;
+	}
+
+	const FString MaskType = GetString(MaskNode, TEXT("type"));
+	if (MaskType == TEXT("ELLIPSE"))
+	{
+		OutNode.Visual.GeometryMask.Shape = EDesignGeometryMaskShape::Ellipse;
+		return;
+	}
+
+	if (MaskType == TEXT("RECTANGLE"))
+	{
+		const FDesignCornerRadius CornerRadius = ParseCornerRadius(MaskNode);
+		if (CornerRadius.HasRadius())
+		{
+			OutNode.Visual.GeometryMask.Shape = EDesignGeometryMaskShape::RoundedRectangle;
+			OutNode.Visual.GeometryMask.CornerRadius = CornerRadius;
+		}
+	}
 }
 
 static void ApplyRelativeTransformFlipData(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& Node)
@@ -545,8 +638,45 @@ static void ApplyInstanceTrackingData(
 	SetBoolFieldIfPresent(NodeObj, TEXT("isExposedInstance"), ComponentInstance.IsExposedInstance);
 }
 
+static void CaptureFigmaStrokeMetadata(
+	const TSharedPtr<FJsonObject>& NodeObj,
+	FDesignNode& OutNode)
+{
+	const TArray<TSharedPtr<FJsonValue>>* StrokeDashes = GetArray(NodeObj, TEXT("strokeDashes"));
+	if (!StrokeDashes || StrokeDashes->Num() == 0)
+	{
+		return;
+	}
+
+	FString SerializedDashes;
+	for (const TSharedPtr<FJsonValue>& DashValue : *StrokeDashes)
+	{
+		if (!DashValue.IsValid() || DashValue->Type != EJson::Number)
+		{
+			continue;
+		}
+
+		if (!SerializedDashes.IsEmpty())
+		{
+			SerializedDashes += TEXT(",");
+		}
+		SerializedDashes += FString::SanitizeFloat(DashValue->AsNumber());
+	}
+
+	if (!SerializedDashes.IsEmpty())
+	{
+		OutNode.Metadata.Add(TEXT("stroke.dashes"), SerializedDashes);
+		const FString StrokeCap = GetString(NodeObj, TEXT("strokeCap"));
+		if (!StrokeCap.IsEmpty())
+		{
+			OutNode.Metadata.Add(TEXT("stroke.cap"), StrokeCap);
+		}
+	}
+}
+
 static void ParseNodeVisualData(
 	const TSharedPtr<FJsonObject>& NodeObj,
+	const TSharedPtr<FJsonObject>& ParentObj,
 	FDesignNode& OutNode)
 {
 	const TArray<TSharedPtr<FJsonValue>>* FillsArr = GetArray(NodeObj, TEXT("fills"));
@@ -558,12 +688,17 @@ static void ParseNodeVisualData(
 		if (!VectorRasterFallback.IsEmpty())
 		{
 			OutNode.MutableSource().VectorRasterFallbackImageRef = VectorRasterFallback;
+			if (HasParentClippedRenderBounds(NodeObj, ParentObj))
+			{
+				OutNode.Metadata.Add(Design2UMGSourceMetadata::RenderBoundsClippedByParentKey, TEXT("true"));
+			}
 		}
 	}
 	FigmaParserMetadata::CaptureRenderFallbackMetadata(NodeObj, OutNode);
 	CaptureBoundsDeltaMetadata(NodeObj, OutNode.Metadata);
 
 	OutNode.Visual.Stroke = ParseStroke(NodeObj);
+	CaptureFigmaStrokeMetadata(NodeObj, OutNode);
 	if (OutNode.Type == EDesignNodeType::Path
 		|| OutNode.Type == EDesignNodeType::Line
 		|| OutNode.Type == EDesignNodeType::Polygon
@@ -573,6 +708,7 @@ static void ParseNodeVisualData(
 	}
 
 	OutNode.Visual.CornerRadius = ParseCornerRadius(NodeObj);
+	ParseExplicitGeometryMask(NodeObj, OutNode);
 	if (const TArray<TSharedPtr<FJsonValue>>* EffectsArr = GetArray(NodeObj, TEXT("effects")))
 	{
 		OutNode.Visual.Effects = ParseEffects(*EffectsArr);
@@ -587,7 +723,10 @@ static void ParseNodeChildren(
 	const TSharedPtr<FJsonObject>& NodeObj,
 	const FString& FigmaType,
 	bool bParentAutoLayout,
+	const FNodeBounds* NodeCoordinateBounds,
 	TArray<FDesignSkippedNodeReport>* SkippedDesignerNodes,
+	FDesignParserBudget& ParseBudget,
+	int32 Depth,
 	FDesignNode& OutNode)
 {
 	if (FigmaType == TEXT("BOOLEAN_OPERATION") || FigmaType == TEXT("VECTOR"))
@@ -612,8 +751,11 @@ static void ParseNodeChildren(
 		if (TSharedPtr<FDesignNode> ChildNode = ParseNode(
 			ChildObj,
 			NodeObj,
+			NodeCoordinateBounds,
 			SkippedDesignerNodes,
-			OutNode.Source().ComponentInstance.bIsInstance || OutNode.Source().ComponentInstance.bInInstanceSubtree))
+			OutNode.Source().ComponentInstance.bIsInstance || OutNode.Source().ComponentInstance.bInInstanceSubtree,
+			ParseBudget,
+			Depth + 1))
 		{
 			OutNode.Children.Add(ChildNode);
 		}
@@ -623,9 +765,17 @@ static void ParseNodeChildren(
 TSharedPtr<FDesignNode> ParseNode(
 	const TSharedPtr<FJsonObject>& NodeObj,
 	const TSharedPtr<FJsonObject>& ParentObj,
+	const FNodeBounds* ParentCoordinateBounds,
 	TArray<FDesignSkippedNodeReport>* SkippedDesignerNodes,
-	bool bInsideInstanceSubtree)
+	bool bInsideInstanceSubtree,
+	FDesignParserBudget& ParseBudget,
+	int32 Depth)
 {
+	if (!ParseBudget.TryEnterNode(Depth))
+	{
+		return nullptr;
+	}
+
 	FString FigmaType;
 	if (ShouldSkipParsedFigmaNode(NodeObj, ParentObj, SkippedDesignerNodes, FigmaType))
 	{
@@ -639,7 +789,7 @@ TSharedPtr<FDesignNode> ParseNode(
 	const bool bParentAutoLayout = ParentObj ? HasAutoLayout(ParentObj) : false;
 
 	// Position
-	ParsePosition(NodeObj, ParentObj, *Node, bParentAutoLayout);
+	ParsePosition(NodeObj, ParentObj, ParentCoordinateBounds, *Node, bParentAutoLayout);
 
 	// Size
 	ParseSize(NodeObj, ParentObj, *Node, bParentAutoLayout);
@@ -647,18 +797,25 @@ TSharedPtr<FDesignNode> ParseNode(
 	// Layout (for containers)
 	ParseLayout(NodeObj, *Node);
 	ParsePrototypeNodeData(NodeObj, Node->MutableSource().Prototype);
-	ParseNodeVisualData(NodeObj, *Node);
-	ParseNodeChildren(NodeObj, FigmaType, bParentAutoLayout, SkippedDesignerNodes, *Node);
+	ParseNodeVisualData(NodeObj, ParentObj, *Node);
+	FNodeBounds NodeCoordinateBounds;
+	const bool bHasNodeCoordinateBounds = bParentAutoLayout
+		? TryReadBounds(GetObject(NodeObj, TEXT("absoluteBoundingBox")), NodeCoordinateBounds)
+		: TryGetVisualBounds(NodeObj, ParentObj, NodeCoordinateBounds);
+	ParseNodeChildren(
+		NodeObj,
+		FigmaType,
+		bParentAutoLayout,
+		bHasNodeCoordinateBounds ? &NodeCoordinateBounds : nullptr,
+		SkippedDesignerNodes,
+		ParseBudget,
+		Depth,
+		*Node);
 
 	FigmaParserMetadata::ApplyFigmaSemanticHints(NodeObj, *Node);
 	FinalizeNodePaddingRuntimeWrap(*Node, bInsideInstanceSubtree);
 
 	return Node;
-}
-
-TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj)
-{
-	return ParseNode(NodeObj, ParentObj, nullptr, false);
 }
 
 static FString SerializeSkippedDesignerNodes(const TArray<FDesignSkippedNodeReport>& Reports)
@@ -699,6 +856,7 @@ static FString SerializeSkippedDesignerNodes(const TArray<FDesignSkippedNodeRepo
 
 bool ParseDocument(const FString& FigmaJson, FDesignDocument& OutDocument)
 {
+	FDesignParserBudget ParseBudget;
 	auto Root = ParseJsonString(FigmaJson);
 	if (!Root)
 	{
@@ -769,7 +927,7 @@ bool ParseDocument(const FString& FigmaJson, FDesignDocument& OutDocument)
 			for (const auto& FrameVal : *Frames)
 			{
 				auto FrameObj = FrameVal->AsObject();
-				if (auto Node = ParseNode(FrameObj, nullptr, &OutDocument.MutableParseDiagnostics().SkippedDesignerNodes, false))
+				if (auto Node = ParseNode(FrameObj, nullptr, nullptr, &OutDocument.MutableParseDiagnostics().SkippedDesignerNodes, false, ParseBudget, 0))
 					OutDocument.Children.Add(Node);
 			}
 		}
@@ -783,15 +941,25 @@ bool ParseDocument(const FString& FigmaJson, FDesignDocument& OutDocument)
 			for (const auto& FrameVal : *Frames)
 			{
 				auto FrameObj = FrameVal->AsObject();
-				if (auto Node = ParseNode(FrameObj, nullptr, &OutDocument.MutableParseDiagnostics().SkippedDesignerNodes, false))
+				if (auto Node = ParseNode(FrameObj, nullptr, nullptr, &OutDocument.MutableParseDiagnostics().SkippedDesignerNodes, false, ParseBudget, 0))
 					OutDocument.Children.Add(Node);
 			}
 		}
 	}
 	else
 	{
-		if (auto Node = ParseNode(DocObj, nullptr, &OutDocument.MutableParseDiagnostics().SkippedDesignerNodes, false))
+		if (auto Node = ParseNode(DocObj, nullptr, nullptr, &OutDocument.MutableParseDiagnostics().SkippedDesignerNodes, false, ParseBudget, 0))
 			OutDocument.Children.Add(Node);
+	}
+
+	if (ParseBudget.WasExceeded())
+	{
+		UE_LOG(LogDesign2UMG, Error,
+			TEXT("FigmaParser: node tree exceeds the supported limits (%d levels or %d nodes)"),
+			DesignTreeLimits::MaxNodeDepth,
+			DesignTreeLimits::MaxParsedNodeCount);
+		OutDocument = FDesignDocument();
+		return false;
 	}
 
 	UE_LOG(LogDesign2UMG, Log, TEXT("FigmaParser: Parsed %d top-level frames"), OutDocument.Children.Num());

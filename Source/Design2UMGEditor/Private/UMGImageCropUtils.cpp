@@ -58,6 +58,14 @@ bool UMGImageCropUtils::TryBuildCropRequest(const FUMGWidgetNode& Node, FImageCr
 	return true;
 }
 
+bool UMGImageCropUtils::CanUseUvRegion(const FUMGVisualBrushData::FImageTransformData& Transform)
+{
+	return FMath::IsNearlyZero(Transform.B)
+		&& FMath::IsNearlyZero(Transform.C)
+		&& Transform.A > KINDA_SMALL_NUMBER
+		&& Transform.D > KINDA_SMALL_NUMBER;
+}
+
 bool UMGImageCropUtils::TryApplyCropToBrush(
 	FSlateBrush& InOutBrush,
 	UTexture2D* SourceTexture,
@@ -65,8 +73,7 @@ bool UMGImageCropUtils::TryApplyCropToBrush(
 	TFunctionRef<void(UTexture2D*)> ApplyAffineCropTexture)
 {
 	const FUMGVisualBrushData::FImageTransformData& Transform = Request.Transform;
-	if (FMath::IsNearlyZero(Transform.B) && FMath::IsNearlyZero(Transform.C)
-		&& Transform.A > KINDA_SMALL_NUMBER && Transform.D > KINDA_SMALL_NUMBER)
+	if (CanUseUvRegion(Transform))
 	{
 		InOutBrush.SetUVRegion(FBox2f(
 			FVector2f(Transform.TX, Transform.TY),

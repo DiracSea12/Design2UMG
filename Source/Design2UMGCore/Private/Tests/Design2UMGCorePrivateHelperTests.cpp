@@ -743,6 +743,37 @@ bool FGradientTypedPayloadMaterialParamsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Request material ref"), Request.MaterialRef, FString(TEXT("radialgradient")));
 	TestEqual(TEXT("Request material params"), Request.MaterialParams.Get(FString()), MaterialParams);
 
+	TSharedPtr<FDesignNode> LinearNode = MakeShared<FDesignNode>();
+	LinearNode->Id = TEXT("linear_gradient_payload_source");
+	LinearNode->Name = TEXT("LinearGradientPayloadSource");
+	LinearNode->Type = EDesignNodeType::Rectangle;
+	LinearNode->Transform.SetWidthValue(FDesignSize::Fixed(128.0f));
+	LinearNode->Transform.SetHeightValue(FDesignSize::Fixed(64.0f));
+	LinearNode->Visual.Fill.Type = EDesignFillType::Gradient;
+	LinearNode->Visual.Fill.Gradient.GradientType = EDesignGradientType::Linear;
+	LinearNode->Visual.Fill.Gradient.Rotation = 15.0f;
+	LinearNode->Visual.Fill.Gradient.StartPoint = FVector2D(0.2f, 0.3f);
+	LinearNode->Visual.Fill.Gradient.EndPoint = FVector2D(0.8f, 0.7f);
+	FDesignGradientStop& LinearStartStop = LinearNode->Visual.Fill.Gradient.Colors.AddDefaulted_GetRef();
+	LinearStartStop.Color = TEXT("#FF0000FF");
+	LinearStartStop.Position = 0.0f;
+	FDesignGradientStop& LinearEndStop = LinearNode->Visual.Fill.Gradient.Colors.AddDefaulted_GetRef();
+	LinearEndStop.Color = TEXT("#0000FFFF");
+	LinearEndStop.Position = 1.0f;
+
+	FUMGWidgetNode LinearWidget;
+	LinearWidget.Type = TEXT("Image");
+	LinearWidget.Id = TEXT("linear_gradient_payload_widget");
+	LinearWidget.Name = TEXT("LinearGradientPayloadWidget");
+	VisualMapper::ApplyVisualProperties(LinearWidget, LinearNode);
+	TestTrue(TEXT("Typed linear gradient keeps start point"), LinearWidget.Brush.Gradient.StartPoint.IsSet());
+	TestTrue(TEXT("Typed linear gradient keeps end point"), LinearWidget.Brush.Gradient.EndPoint.IsSet());
+	const FString LinearMaterialParams = GetWidgetProperty(LinearWidget, UMGPropertyKeys::MaterialParams);
+	TestTrue(TEXT("Linear material params include start point"), LinearMaterialParams.Contains(TEXT("\"StartX\":0.2000"))
+		&& LinearMaterialParams.Contains(TEXT("\"StartY\":0.3000")));
+	TestTrue(TEXT("Linear material params include end point"), LinearMaterialParams.Contains(TEXT("\"EndX\":0.8000"))
+		&& LinearMaterialParams.Contains(TEXT("\"EndY\":0.7000")));
+
 	Widget.Brush.MaterialParams = TEXT("{\"ColorCenter\":\"#01020304\",\"ColorEdge\":\"#05060708\"}");
 	FUMGProceduralResourceRequest ExistingParamsRequest;
 	TestTrue(TEXT("Typed procedural request still builds when legacy raw material params are present"),

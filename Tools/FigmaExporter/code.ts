@@ -786,6 +786,22 @@ async function collectImages(
   }
 }
 
+/** Export the selected root exactly as Figma renders it. This is the authoritative
+ * reference image shipped beside the serialized design data. */
+async function exportReferencePng(node: SceneNode, scale: number): Promise<Uint8Array> {
+  if (!('exportAsync' in node)) {
+    throw new Error('Selected node cannot be exported as a PNG reference.');
+  }
+  const bytes = await (node as any).exportAsync({
+    format: 'PNG',
+    constraint: { type: 'SCALE', value: scale },
+  });
+  if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
+    throw new Error('Figma returned an empty PNG reference.');
+  }
+  return bytes;
+}
+
 const testApi = {
   attachRenderFallbackMetadata,
   indexRestNodes,
@@ -797,6 +813,7 @@ const testApi = {
   unwrapRestExportResponse,
   collectReferencedComponents,
   collectImages,
+  exportReferencePng,
   shouldExportNodeRenderFallback,
 };
 
@@ -867,6 +884,9 @@ if (typeof figma !== 'undefined') {
         figma.ui.postMessage({ type: 'progress', percent: 50, text });
       }, restNodesById);
 
+      figma.ui.postMessage({ type: 'progress', percent: 70, text: 'Rendering reference PNG...' });
+      const reference = await exportReferencePng(root, scale);
+
       figma.ui.postMessage({ type: 'progress', percent: 80, text: 'Preparing download...' });
 
       const imageEntries: Array<{ name: string; data: number[] }> = [];
@@ -879,6 +899,7 @@ if (typeof figma !== 'undefined') {
         text: `Exported ${images.size} image(s). Saving...`,
         json: JSON.stringify(document, null, 2),
         images: imageEntries,
+        reference: Array.from(reference),
         exportPath: msg.exportPath,
       });
 

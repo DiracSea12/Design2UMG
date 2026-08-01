@@ -21,7 +21,7 @@ Last verified: 2026-05-18
 本仓库有四种验证层级，不能混成一个词：
 
 - `repository-hygiene`：公开仓库检查，例如必需文件和 tracked maintainer-local path 检测。
-- `self-hosted build`：维护者自托管 Windows UE runner 上的手动 BuildPlugin 打包 workflow，会验证 package boundary 并上传插件产物。
+- `self-hosted build and automation`：维护者 push、同仓库 PR 或手动触发时，在自托管 Windows UE runner 上打包插件并运行生成、Figma parser 和生命周期相关自动化测试，随后验证 package boundary 并上传插件产物。
 - `public smoke/public validate`：贡献者可复现的本地构建和聚焦验证。这是公开验证边界。
 - `maintainer formal admissible gate`：维护者拥有的完整 admissible case set 正式 release gate。
 
@@ -137,7 +137,7 @@ pwsh -NoProfile -File <PluginRoot>\Tools\Run-Design2UMGDeterminismSmoke.ps1 -Pro
 - 缺 run root、缺 sentinel case、缺 compare report、缺 `generation_vs_asset`、缺 `generation_vs_asset_structure`、证据 stale / unreadable / mismatch，都必须 fail closed。
 - 通过时，每个 sentinel 的 `generation_vs_asset.changed_ratio` 和 `generation_vs_asset.stable_changed_ratio` 都必须是 `0.0`。
 - 通过时，每个 sentinel 的 `generation_vs_asset_structure.available` 也必须是 `true`，并且结构/文本 parity 不能坏。
-- 这一步通过，只代表 bootstrap-vs-asset parity 这条路径当前还值得继续跑 formal gate；它不是 formal 47-case 的替代品。
+- 这一步通过，只代表 bootstrap-vs-asset parity 这条路径当前还值得继续跑 formal gate；它不是 formal 71-case 的替代品。
 
 sentinel 维护规则：
 
@@ -145,7 +145,7 @@ sentinel 维护规则：
 
 ## 当前 formal gate
 
-当前 formal admissible gate 是 full discovered admissible case set。
+当前 formal admissible gate 是 71 个 discovered admissible case：39 个 Pencil，加上 16 个 Figma export root 各自的 `local` 与 `source` 两条路径（共 32 个 Figma case）。锁定口径以最新 full-run 的 `run_scope.json` 为准；发现数少于 71 的 run 不算正式 full run。
 
 这意味着：
 
@@ -189,7 +189,7 @@ formal gate 读数顺序：
 
 formal gate 执行纪律：
 
-- full 47 formal gate 必须独占串行跑。不能和 focused automation、别的 editor validation、另一个 formal batch 并行打同一个真实工程或 automation 资产目录。
+- full 71 formal gate 必须独占串行跑。不能和 focused automation、别的 editor validation、另一个 formal batch 并行打同一个真实工程或 automation 资产目录。
 - 如果某次并行验证后突然冒出新的 pipeline determinism incompatibility，先独占重跑 formal gate，再决定要不要改代码。并行验证本身就可能制造假的 determinism 噪音。
 
 ## HostProject 和 Pencil MCP 边界

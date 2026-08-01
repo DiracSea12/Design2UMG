@@ -673,6 +673,43 @@ def test_render_size_authority_revalidates_live_pen_evidence_after_ue_generation
         assert_equal(authority["verification_level"], "strong")
 
 
+def test_pen_authority_uses_stable_witness_metrics():
+    original_compare = verify.compare_scaled_image_paths
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        export_path = root / "export.png"
+        witness_path = root / "witness.png"
+        verify.Image.new("RGBA", (200, 100), (20, 40, 60, 255)).save(export_path)
+        verify.Image.new("RGBA", (100, 50), (20, 40, 60, 255)).save(witness_path)
+        authority = {
+            "export_nodes_path": str(export_path),
+            "get_screenshot_path": str(witness_path),
+        }
+
+        try:
+            verify.compare_scaled_image_paths = lambda *_args, **_kwargs: {
+                "changed_ratio": 0.20,
+                "mean_abs_error": 0.03,
+                "stable_changed_ratio": 0.16,
+                "stable_mean_abs_error": 0.01,
+            }
+            verify.finalize_pen_reference_authority(authority, (200, 100), 6)
+            assert_equal(authority["valid"], True)
+            assert_equal(authority["verification_level"], "strong")
+
+            verify.compare_scaled_image_paths = lambda *_args, **_kwargs: {
+                "changed_ratio": 0.10,
+                "mean_abs_error": 0.01,
+                "stable_changed_ratio": 0.20,
+                "stable_mean_abs_error": 0.03,
+            }
+            verify.finalize_pen_reference_authority(authority, (200, 100), 6)
+            assert_equal(authority["valid"], False)
+            assert_equal(authority["reason"], "pencil_witness_content_mismatch")
+        finally:
+            verify.compare_scaled_image_paths = original_compare
+
+
 def main():
     test_current_pencil_icon_contract()
     test_discover_mcp_server_searches_editor_extension_dirs()
@@ -694,6 +731,7 @@ def main():
     test_prepare_pen_authority_reference_retries_with_fresh_attempt_after_export_timeout()
     test_prepare_pen_authority_reference_uses_screenshot_fallback_when_export_times_out()
     test_render_size_authority_revalidates_live_pen_evidence_after_ue_generation()
+    test_pen_authority_uses_stable_witness_metrics()
     print("authority selftest passed")
 
 

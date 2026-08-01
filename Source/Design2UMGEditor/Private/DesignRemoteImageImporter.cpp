@@ -5,8 +5,8 @@
 
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
+#include "GeneratedAssetLifecycle.h"
 
-#include "AssetRegistry/AssetRegistryModule.h"
 #include "Engine/Texture.h"
 #include "Engine/Texture2D.h"
 #include "TextureResource.h"
@@ -23,26 +23,7 @@ namespace
 {
 	using DesignRemoteImageImporterInternal::FImagePayloadIO;
 	using DesignRemoteImageImporterInternal::FImageResourceLimits;
-	using DesignRemoteImageImporterInternal::FImportedTextureIndex;
 	using DesignRemoteImageImporterInternal::FResolveContext;
-
-	int32 GPendingTextureResourceUpdates = 0;
-
-	void MarkPendingTextureResourceUpdate()
-	{
-		++GPendingTextureResourceUpdates;
-	}
-
-	void FlushPendingTextureResourceUpdatesIfNeeded()
-	{
-		if (GPendingTextureResourceUpdates <= 0)
-		{
-			return;
-		}
-
-		FlushRenderingCommands();
-		GPendingTextureResourceUpdates = 0;
-	}
 
 	bool IsRemoteUrl(const FString& Value)
 	{
@@ -254,11 +235,11 @@ namespace
 		return bChanged;
 	}
 
-	bool EnsureUiTextureReady(UTexture2D* Texture)
+	void EnsureUiTextureReady(UTexture2D* Texture, bool& bTextureResourceUpdatePending)
 	{
 		if (!Texture)
 		{
-			return false;
+			return;
 		}
 
 		Texture->ConditionalPostLoad();
@@ -273,8 +254,7 @@ namespace
 		// stale 32x32 data. Unconditional update ensures the GPU has the
 		// correct pixels before the widget tree is rendered.
 		Texture->UpdateResource();
-		MarkPendingTextureResourceUpdate();
-		return true;
+		bTextureResourceUpdatePending = true;
 	}
 
 	bool CreateTextureAsset(
@@ -315,19 +295,25 @@ namespace
 		Texture->PostEditChange();
 		Texture->MarkPackageDirty();
 
-		FAssetRegistryModule::AssetCreated(Texture);
 		Package->MarkPackageDirty();
 
 		const FString PackageFilename = FPackageName::LongPackageNameToFilename(LongPackageName, FPackageName::GetAssetPackageExtension());
+		const bool bPackageFileExisted = IFileManager::Get().FileExists(*PackageFilename);
 		IFileManager::Get().MakeDirectory(*FPaths::GetPath(PackageFilename), true);
 
 		FSavePackageArgs SaveArgs;
 		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
 		if (!UPackage::SavePackage(Package, Texture, *PackageFilename, SaveArgs))
 		{
+			if (!bPackageFileExisted)
+			{
+				IFileManager::Get().Delete(*PackageFilename, false, true);
+			}
+			GeneratedAssetLifecycle::DiscardUnsavedAsset(Texture);
 			OutError = FString::Printf(TEXT("Unable to save asset package: %s"), *PackageFilename);
 			return false;
 		}
+		GeneratedAssetLifecycle::RegisterSavedAsset(Texture);
 
 		OutObjectPath = ObjectPath;
 		return true;
@@ -396,7 +382,7 @@ namespace
 			{
 				if (UTexture2D* CachedTexture = LoadObject<UTexture2D>(nullptr, **CachedPath))
 				{
-					EnsureUiTextureReady(CachedTexture);
+					EnsureUiTextureReady(CachedTexture, Context.bTextureResourceUpdatePending);
 				}
 				InOutTexturePath = *CachedPath;
 				++Context.Report.ReusedCount;
@@ -404,10 +390,17 @@ namespace
 			}
 
 			TArray<uint8> FileData;
-			if (!FFileHelper::LoadFileToArray(FileData, *LocalPath))
+			FString ReadError;
+			if (!FImagePayloadIO::LoadLocalFile(LocalPath, Context.ImageLimits, FileData, ReadError))
 			{
 				++Context.Report.FailedCount;
-				Context.Report.AddMessage(FString::Printf(TEXT("Local file read failed for '%s': %s"), *WidgetName, *LocalPath));
+				Context.Report.AddMessage(FString::Printf(TEXT("Local file read failed for '%s': %s (%s)"), *WidgetName, *LocalPath, *ReadError));
+				return false;
+			}
+			if (!Context.OperationBudget.ConsumeCompressedBytes(static_cast<uint64>(FileData.Num()), ReadError))
+			{
+				++Context.Report.FailedCount;
+				Context.Report.AddMessage(FString::Printf(TEXT("Local image budget exceeded for '%s': %s"), *WidgetName, *ReadError));
 				return false;
 			}
 
@@ -417,7 +410,7 @@ namespace
 			{
 				if (UTexture2D* CachedTexture = LoadObject<UTexture2D>(nullptr, **ExistingPath))
 				{
-					EnsureUiTextureReady(CachedTexture);
+					EnsureUiTextureReady(CachedTexture, Context.bTextureResourceUpdatePending);
 				}
 				InOutTexturePath = *ExistingPath;
 				++Context.Report.ReusedCount;
@@ -426,21 +419,16 @@ namespace
 			}
 
 			const FString SharedAssetName = BuildSharedTextureAssetName(ContentHash);
-			FString PersistedObjectPath;
-			if (FImportedTextureIndex::TryGetPersistedPath(Context.ImportPath, SharedAssetName, PersistedObjectPath))
+			const FString PersistedObjectPath = BuildObjectPathFromImport(BuildSharedImportPath(Context.ImportPath), SharedAssetName);
+			if (UTexture2D* PersistedTexture = LoadObject<UTexture2D>(nullptr, *PersistedObjectPath))
 			{
-				if (UTexture2D* PersistedTexture = LoadObject<UTexture2D>(nullptr, *PersistedObjectPath))
-				{
-					EnsureUiTextureReady(PersistedTexture);
-					InOutTexturePath = PersistedObjectPath;
-					++Context.Report.ReusedCount;
-					Context.UrlToAssetPath.Add(LocalKey, PersistedObjectPath);
-					Context.ContentHashToAsset.Add(ContentKey, PersistedObjectPath);
-					Context.Report.AddMessage(FString::Printf(TEXT("Reused cross-run content: %s"), *PersistedObjectPath));
-					return true;
-				}
-
-				FImportedTextureIndex::Forget(Context.ImportPath, SharedAssetName);
+				EnsureUiTextureReady(PersistedTexture, Context.bTextureResourceUpdatePending);
+				InOutTexturePath = PersistedObjectPath;
+				++Context.Report.ReusedCount;
+				Context.UrlToAssetPath.Add(LocalKey, PersistedObjectPath);
+				Context.ContentHashToAsset.Add(ContentKey, PersistedObjectPath);
+				Context.Report.AddMessage(FString::Printf(TEXT("Reused cross-run content: %s"), *PersistedObjectPath));
+				return true;
 			}
 
 			const FString SubDir = BuildSubImportPath(Context.ImportPath, Context.FrameName);
@@ -453,7 +441,7 @@ namespace
 				int32 SourceHeight = 0;
 				TArray64<uint8> SourceRawBGRA;
 				FString SourceDecodeError;
-				const bool bDecoded = FImagePayloadIO::DecodeToBGRA8(FileData, Context.ImageLimits, SourceWidth, SourceHeight, SourceRawBGRA, SourceDecodeError);
+				const bool bDecoded = FImagePayloadIO::DecodeToBGRA8(FileData, Context.ImageLimits, SourceWidth, SourceHeight, SourceRawBGRA, SourceDecodeError, &Context.OperationBudget);
 				if (bDecoded)
 				{
 					const int32 ExistingWidth = Existing->GetSizeX();
@@ -476,19 +464,18 @@ namespace
 					}
 				}
 
-				EnsureUiTextureReady(Existing);
+				EnsureUiTextureReady(Existing, Context.bTextureResourceUpdatePending);
 				InOutTexturePath = ObjectPath;
 				++Context.Report.ReusedCount;
 				Context.UrlToAssetPath.Add(LocalKey, ObjectPath);
 				Context.ContentHashToAsset.Add(ContentKey, ObjectPath);
-				FImportedTextureIndex::Remember(Context.ImportPath, SharedAssetName, ObjectPath);
 				return true;
 			}
 
 			int32 Width = 0, Height = 0;
 			TArray64<uint8> RawBGRA;
 			FString DecodeError;
-			if (!FImagePayloadIO::DecodeToBGRA8(FileData, Context.ImageLimits, Width, Height, RawBGRA, DecodeError))
+			if (!FImagePayloadIO::DecodeToBGRA8(FileData, Context.ImageLimits, Width, Height, RawBGRA, DecodeError, &Context.OperationBudget))
 			{
 				++Context.Report.FailedCount;
 				Context.Report.AddMessage(FString::Printf(TEXT("Local image decode failed for '%s': %s"), *WidgetName, *DecodeError));
@@ -505,14 +492,13 @@ namespace
 
 			if (UTexture2D* ImportedTexture = LoadObject<UTexture2D>(nullptr, *ImportedObjectPath))
 			{
-				EnsureUiTextureReady(ImportedTexture);
+				EnsureUiTextureReady(ImportedTexture, Context.bTextureResourceUpdatePending);
 			}
 
 			InOutTexturePath = ImportedObjectPath;
 			++Context.Report.ImportedCount;
 			Context.UrlToAssetPath.Add(LocalKey, ImportedObjectPath);
 			Context.ContentHashToAsset.Add(ContentKey, ImportedObjectPath);
-			FImportedTextureIndex::Remember(Context.ImportPath, SharedAssetName, ImportedObjectPath);
 			Context.Report.AddMessage(FString::Printf(TEXT("Imported local texture: %s"), *ImportedObjectPath));
 			return true;
 		}
@@ -531,7 +517,7 @@ namespace
 		{
 			if (UTexture2D* CachedTexture = LoadObject<UTexture2D>(nullptr, **CachedPath))
 			{
-				EnsureUiTextureReady(CachedTexture);
+				EnsureUiTextureReady(CachedTexture, Context.bTextureResourceUpdatePending);
 			}
 			InOutTexturePath = *CachedPath;
 			++Context.Report.ReusedCount;
@@ -540,10 +526,16 @@ namespace
 
 		TArray<uint8> CompressedData;
 		FString DownloadError;
-		if (!FImagePayloadIO::DownloadUrl(NormalizedUrl, Context.TimeoutSeconds, Context.ImageLimits, CompressedData, DownloadError))
+		if (!FImagePayloadIO::DownloadUrl(NormalizedUrl, Context.TimeoutSeconds, Context.bAllowUnsafeRemoteUrls, Context.ImageLimits, CompressedData, DownloadError))
 		{
 			++Context.Report.FailedCount;
 			Context.Report.AddMessage(FString::Printf(TEXT("Image '%s' download failed: %s (reason: %s)"), *WidgetName, *NormalizedUrl, *DownloadError));
+			return false;
+		}
+		if (!Context.OperationBudget.ConsumeCompressedBytes(static_cast<uint64>(CompressedData.Num()), DownloadError))
+		{
+			++Context.Report.FailedCount;
+			Context.Report.AddMessage(FString::Printf(TEXT("Image '%s' exceeds the operation budget: %s"), *WidgetName, *DownloadError));
 			return false;
 		}
 
@@ -553,7 +545,7 @@ namespace
 		{
 			if (UTexture2D* CachedTexture = LoadObject<UTexture2D>(nullptr, **ExistingPath))
 			{
-				EnsureUiTextureReady(CachedTexture);
+				EnsureUiTextureReady(CachedTexture, Context.bTextureResourceUpdatePending);
 			}
 			InOutTexturePath = *ExistingPath;
 			++Context.Report.ReusedCount;
@@ -563,21 +555,16 @@ namespace
 		}
 
 		const FString SharedAssetName = BuildSharedTextureAssetName(ContentHash);
-		FString PersistedObjectPath;
-		if (FImportedTextureIndex::TryGetPersistedPath(Context.ImportPath, SharedAssetName, PersistedObjectPath))
+		const FString PersistedObjectPath = BuildObjectPathFromImport(BuildSharedImportPath(Context.ImportPath), SharedAssetName);
+		if (UTexture2D* PersistedTexture = LoadObject<UTexture2D>(nullptr, *PersistedObjectPath))
 		{
-			if (UTexture2D* PersistedTexture = LoadObject<UTexture2D>(nullptr, *PersistedObjectPath))
-			{
-				EnsureUiTextureReady(PersistedTexture);
-				InOutTexturePath = PersistedObjectPath;
-				++Context.Report.ReusedCount;
-				Context.UrlToAssetPath.Add(SourceKey, PersistedObjectPath);
-				Context.ContentHashToAsset.Add(ContentKey, PersistedObjectPath);
-				Context.Report.AddMessage(FString::Printf(TEXT("Reused cross-run content: %s"), *PersistedObjectPath));
-				return true;
-			}
-
-			FImportedTextureIndex::Forget(Context.ImportPath, SharedAssetName);
+			EnsureUiTextureReady(PersistedTexture, Context.bTextureResourceUpdatePending);
+			InOutTexturePath = PersistedObjectPath;
+			++Context.Report.ReusedCount;
+			Context.UrlToAssetPath.Add(SourceKey, PersistedObjectPath);
+			Context.ContentHashToAsset.Add(ContentKey, PersistedObjectPath);
+			Context.Report.AddMessage(FString::Printf(TEXT("Reused cross-run content: %s"), *PersistedObjectPath));
+			return true;
 		}
 
 		const FString VersionedSourceKey = BuildVersionedSourceKey(SourceKey, ContentHash);
@@ -585,12 +572,11 @@ namespace
 		const FString ObjectPath = BuildObjectPathFromImport(SubDir, LegacyAssetName);
 		if (UTexture2D* ExistingTexture = LoadObject<UTexture2D>(nullptr, *ObjectPath))
 		{
-			EnsureUiTextureReady(ExistingTexture);
+			EnsureUiTextureReady(ExistingTexture, Context.bTextureResourceUpdatePending);
 			InOutTexturePath = ObjectPath;
 			++Context.Report.ReusedCount;
 			Context.UrlToAssetPath.Add(SourceKey, ObjectPath);
 			Context.ContentHashToAsset.Add(ContentKey, ObjectPath);
-			FImportedTextureIndex::Remember(Context.ImportPath, SharedAssetName, ObjectPath);
 			Context.Report.AddMessage(FString::Printf(TEXT("Reused existing texture: %s"), *ObjectPath));
 			return true;
 		}
@@ -599,7 +585,7 @@ namespace
 		int32 Height = 0;
 		TArray64<uint8> RawBGRA;
 		FString DecodeError;
-		if (!FImagePayloadIO::DecodeToBGRA8(CompressedData, Context.ImageLimits, Width, Height, RawBGRA, DecodeError))
+		if (!FImagePayloadIO::DecodeToBGRA8(CompressedData, Context.ImageLimits, Width, Height, RawBGRA, DecodeError, &Context.OperationBudget))
 		{
 			++Context.Report.FailedCount;
 			Context.Report.AddMessage(FString::Printf(TEXT("Image '%s' decode failed: %s (reason: %s)"), *WidgetName, *NormalizedUrl, *DecodeError));
@@ -617,14 +603,13 @@ namespace
 
 		if (UTexture2D* ImportedTexture = LoadObject<UTexture2D>(nullptr, *ImportedObjectPath))
 		{
-			EnsureUiTextureReady(ImportedTexture);
+			EnsureUiTextureReady(ImportedTexture, Context.bTextureResourceUpdatePending);
 		}
 
 		InOutTexturePath = ImportedObjectPath;
 		++Context.Report.ImportedCount;
 		Context.UrlToAssetPath.Add(SourceKey, ImportedObjectPath);
 		Context.ContentHashToAsset.Add(ContentKey, ImportedObjectPath);
-		FImportedTextureIndex::Remember(Context.ImportPath, SharedAssetName, ImportedObjectPath);
 		Context.Report.AddMessage(FString::Printf(TEXT("Imported texture: %s"), *ImportedObjectPath));
 		return true;
 	}
@@ -707,10 +692,14 @@ bool FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, 
 
 	Context.ImportPath = NormalizeImportPath(Settings->RemoteImageImportPath);
 	Context.TimeoutSeconds = FMath::Max(1.0f, Settings->RemoteImageTimeoutSeconds);
+	Context.bAllowUnsafeRemoteUrls = Settings->bAllowUnsafeRemoteImageUrls;
 	Context.FrameName = InOutData.WidgetName;
 
 	ResolveNodeRecursive(InOutData.RootWidget, Context);
-	FlushPendingTextureResourceUpdatesIfNeeded();
+	if (Context.bTextureResourceUpdatePending)
+	{
+		FlushRenderingCommands();
+	}
 
 	if (OutReport)
 	{
@@ -749,7 +738,6 @@ namespace
 		Texture->GetPlatformData()->Mips[0].BulkData.Unlock();
 
 		ApplyTextureUiSettings(Texture);
-		MarkPendingTextureResourceUpdate();
 		return Texture;
 	}
 }
@@ -757,11 +745,17 @@ namespace
 void FDesignRemoteImageImporter::ResolveTransientTextures(const FUMGWidgetNode& RootNode, TMap<FString, UTexture2D*>& OutTextureMap)
 {
 	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
-	const float Timeout = Settings ? FMath::Max(1.0f, Settings->RemoteImageTimeoutSeconds) : 20.0f;
+	if (!Settings || !Settings->bEnableRemoteImageImport)
+	{
+		return;
+	}
+	const float Timeout = FMath::Max(1.0f, Settings->RemoteImageTimeoutSeconds);
 
 	TSet<FString> Urls;
 	CollectRemoteUrls(RootNode, Urls);
 	const FImageResourceLimits ImageLimits;
+	DesignRemoteImageImporterInternal::FImageOperationBudget OperationBudget(ImageLimits);
+	bool bTextureResourceUpdatePending = false;
 	FString LimitError;
 	if (!FImagePayloadIO::ValidateUrlCount(Urls.Num(), ImageLimits, LimitError))
 	{
@@ -775,16 +769,21 @@ void FDesignRemoteImageImporter::ResolveTransientTextures(const FUMGWidgetNode& 
 
 		TArray<uint8> CompressedData;
 		FString Error;
-		if (!FImagePayloadIO::DownloadUrl(NormalizeUrl(Url), Timeout, ImageLimits, CompressedData, Error))
+		if (!FImagePayloadIO::DownloadUrl(NormalizeUrl(Url), Timeout, Settings->bAllowUnsafeRemoteImageUrls, ImageLimits, CompressedData, Error))
 		{
 			UE_LOG(LogDesign2UMG, Verbose, TEXT("Transient download failed: %s (%s)"), *Url, *Error);
 			UE_LOG(LogDesign2UMG, Warning, TEXT("Image download failed: %s (reason: %s)"), *Url, *Error);
 			continue;
 		}
+		if (!OperationBudget.ConsumeCompressedBytes(static_cast<uint64>(CompressedData.Num()), Error))
+		{
+			UE_LOG(LogDesign2UMG, Warning, TEXT("Transient image operation budget exceeded: %s"), *Error);
+			break;
+		}
 
 		int32 Width = 0, Height = 0;
 		TArray64<uint8> RawBGRA;
-		if (!FImagePayloadIO::DecodeToBGRA8(CompressedData, ImageLimits, Width, Height, RawBGRA, Error))
+		if (!FImagePayloadIO::DecodeToBGRA8(CompressedData, ImageLimits, Width, Height, RawBGRA, Error, &OperationBudget))
 		{
 			UE_LOG(LogDesign2UMG, Verbose, TEXT("Transient decode failed: %s (%s)"), *Url, *Error);
 			UE_LOG(LogDesign2UMG, Warning, TEXT("Image decode failed: %s (reason: %s)"), *Url, *Error);
@@ -795,10 +794,14 @@ void FDesignRemoteImageImporter::ResolveTransientTextures(const FUMGWidgetNode& 
 		if (Texture)
 		{
 			OutTextureMap.Add(Url, Texture);
+			bTextureResourceUpdatePending = true;
 		}
 	}
 
-	FlushPendingTextureResourceUpdatesIfNeeded();
+	if (bTextureResourceUpdatePending)
+	{
+		FlushRenderingCommands();
+	}
 }
 
 void FDesignRemoteImageImporter::ReleaseTransientTextures(TMap<FString, UTexture2D*>& InOutTextureMap)

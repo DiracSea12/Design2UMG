@@ -78,7 +78,10 @@ public:
 	// ========== Remote Image Import ==========
 
 	UPROPERTY(Config, EditAnywhere, Category = "Remote Image Import", meta = (DisplayName = "Enable Remote Image Import"))
-	bool bEnableRemoteImageImport = true;
+	bool bEnableRemoteImageImport = false;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Remote Image Import", meta = (DisplayName = "Allow Insecure or Local Image URLs", ToolTip = "Allows HTTP, local-style hostnames, and IP-literal URLs. DNS resolution remains controlled by the operating system; keep disabled for untrusted design files."))
+	bool bAllowUnsafeRemoteImageUrls = false;
 
 	UPROPERTY(Config, EditAnywhere, Category = "Remote Image Import", meta = (DisplayName = "Remote Image Import Path"))
 	FString RemoteImageImportPath = TEXT("/Game/Design2UMG/ImportedImages");

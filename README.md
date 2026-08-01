@@ -32,11 +32,11 @@ This repo intentionally separates contributor-facing validation from maintainer 
 | Layer | Purpose | Who runs it |
 |------|------|------|
 | `repository-hygiene` | Public repo boundary and required-file checks | GitHub Actions on push / PR |
-| `self-hosted build` | Package the plugin with Unreal `BuildPlugin` and upload the artifact | Maintainers via manual workflow |
+| `self-hosted build and automation` | Package the plugin, run focused Unreal automation, and upload the artifact | Maintainer pushes, same-repository PRs, and manual runs |
 | `public smoke / public validate` | Local build plus focused validation / repro commands | Contributors and maintainers |
 | `maintainer formal admissible gate` | Full discovered case set release gate | Maintainers only |
 
-The workflow badge above reflects the public repository hygiene job in the tracked `Plugin CI` workflow. The packaged plugin job is intentionally manual and self-hosted; it is not presented as a public hosted UE formal gate.
+The workflow badge above reflects the tracked `Plugin CI` workflow. Unreal packaging and automation run on the maintainer self-hosted runner for pushes, same-repository PRs, and manual runs; external PRs run only repository hygiene. This is not presented as a public hosted UE formal gate.
 
 For a plain-language coverage boundary and a contributor-versus-maintainer split, see [Docs/ValidationGovernance/TestCoverageBoundary.md](Docs/ValidationGovernance/TestCoverageBoundary.md).
 
@@ -172,7 +172,7 @@ Key options:
 ## Repository And Release Checks
 
 - `repository-hygiene`: the public GitHub Actions check that verifies required repo files and blocks tracked maintainer-local paths.
-- `self-hosted build`: the manual `workflow_dispatch` packaging job in `.github/workflows/build.yml`; it requires a maintainer-provided self-hosted Windows runner with `UE_ROOT`, validates the package boundary, and uploads the packaged plugin as a GitHub Actions artifact.
+- `self-hosted build and automation`: the packaging and Unreal automation job in `.github/workflows/build.yml`; it runs for maintainer pushes, same-repository PRs, and manual dispatches, requires a Windows runner with `UE_ROOT` and `DESIGN2UMG_RUNTIME_PROJECT`, validates the package boundary, runs focused generation, Figma parser, and lifecycle tests from the packaged plugin, and uploads the artifact.
 - `public smoke/public validate`: contributor-facing build and validation steps used for smoke checks and local repro, using explicit `--project` / `--editor` values or the matching environment variables; do not present them as the release gate.
 - `maintainer formal admissible gate`: the maintainer-owned full discovered admissible case set release gate documented in `Docs/ValidationProtocol.md`.
 - `Tools/README.md`: the short index for contributor-facing helpers versus maintainer-only workflows.

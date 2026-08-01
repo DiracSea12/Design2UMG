@@ -115,12 +115,12 @@ def make_run(
     write_json(
         run_root / "summary.json",
         {
-            "total": 47,
+            "total": 71,
             "blocked_cases": blocked_cases,
             "completeness": {
                 "blocked": completeness_blocked,
-                "discovered_total": 47,
-                "reported_total": 47,
+                "discovered_total": 71,
+                "reported_total": 71,
             },
             "no_regression": {
                 "available": no_regression_available,
@@ -609,7 +609,7 @@ def main() -> None:
         make_run(automation_root, "_formal_good")
         make_run(automation_root, "_formal_blocked_cases", blocked_cases=1)
         make_run(automation_root, "_formal_completeness_blocked", completeness_blocked=True)
-        make_run(automation_root, "_formal_no_regression_failed", no_regression_available=47, no_regression_failed=1)
+        make_run(automation_root, "_formal_no_regression_failed", no_regression_available=71, no_regression_failed=1)
         make_run(
             automation_root,
             "_formal_historical_blocked",

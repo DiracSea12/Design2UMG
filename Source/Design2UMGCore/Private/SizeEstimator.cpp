@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "SizeEstimator.h"
+#include "DesignTreeLimits.h"
 
 #include "Design2UMGLog.h"
 #include "RefExpander.h"
@@ -9,8 +10,6 @@
 
 namespace
 {
-	constexpr int32 SizeEstimatorMaxTreeRecursionDepth = 512;
-
 	struct FSizeEstimatorState
 	{
 		int32 EstimateDepth = 0;
@@ -21,7 +20,7 @@ namespace
 	{
 		explicit FSizeEstimatorRecursionGuard(int32& InDepth, const TCHAR* InName)
 			: Depth(InDepth)
-			, bValid(InDepth < SizeEstimatorMaxTreeRecursionDepth)
+			, bValid(InDepth < DesignTreeLimits::MaxNodeDepth)
 		{
 			if (bValid)
 			{
@@ -29,8 +28,8 @@ namespace
 			}
 			else
 			{
-				UE_LOG(LogDesign2UMG, Verbose, TEXT("%s: recursion depth exceeded (%d)"), InName, SizeEstimatorMaxTreeRecursionDepth);
-				UE_LOG(LogDesign2UMG, Error, TEXT("Design node nesting exceeded %d levels; a cyclic reference is likely present."), SizeEstimatorMaxTreeRecursionDepth);
+				UE_LOG(LogDesign2UMG, Verbose, TEXT("%s: recursion depth exceeded (%d)"), InName, DesignTreeLimits::MaxNodeDepth);
+				UE_LOG(LogDesign2UMG, Error, TEXT("Design node nesting exceeded %d levels; a cyclic reference is likely present."), DesignTreeLimits::MaxNodeDepth);
 			}
 		}
 

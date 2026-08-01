@@ -6,6 +6,7 @@
 #include "UMGValueParsing.h"
 #include "Dom/JsonObject.h"
 #include "Engine/Texture2D.h"
+#include "ImageCore.h"
 #include "TextureResource.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -20,6 +21,10 @@ namespace
 	constexpr TCHAR MaterialParamColorEndKey[] = TEXT("ColorEnd");
 	constexpr TCHAR MaterialParamColorEdgeKey[] = TEXT("ColorEdge");
 	constexpr TCHAR MaterialParamCornerRadiiKey[] = TEXT("CornerRadii");
+	constexpr TCHAR MaterialParamStartXKey[] = TEXT("StartX");
+	constexpr TCHAR MaterialParamStartYKey[] = TEXT("StartY");
+	constexpr TCHAR MaterialParamEndXKey[] = TEXT("EndX");
+	constexpr TCHAR MaterialParamEndYKey[] = TEXT("EndY");
 	constexpr TCHAR MaterialParamCenterXKey[] = TEXT("CenterX");
 	constexpr TCHAR MaterialParamCenterYKey[] = TEXT("CenterY");
 	constexpr TCHAR MaterialParamSizeWidthKey[] = TEXT("SizeWidth");
@@ -34,6 +39,62 @@ namespace
 	constexpr TCHAR MaterialParamInsetKey[] = TEXT("Inset");
 	constexpr TCHAR MaterialParamStopsKey[] = TEXT("Stops");
 	constexpr TCHAR MaterialParamStopPosKey[] = TEXT("Pos");
+
+	bool ReadTexturePixels(UTexture2D* Texture, TArray<FColor>& OutPixels, int32& OutWidth, int32& OutHeight)
+	{
+		if (!Texture)
+		{
+			return false;
+		}
+
+#if WITH_EDITORONLY_DATA
+		FImage SourceImage;
+		if (Texture->Source.IsValid() && Texture->Source.GetMipImage(SourceImage, 0))
+		{
+			SourceImage.ChangeFormat(ERawImageFormat::BGRA8, SourceImage.GammaSpace);
+			OutWidth = SourceImage.SizeX;
+			OutHeight = SourceImage.SizeY;
+			const int64 PixelCount = static_cast<int64>(OutWidth) * static_cast<int64>(OutHeight);
+			const int64 ExpectedBytes = PixelCount * sizeof(FColor);
+			if (OutWidth <= 0 || OutHeight <= 0 || SourceImage.RawData.Num() < ExpectedBytes)
+			{
+				return false;
+			}
+
+			OutPixels.SetNumUninitialized(PixelCount);
+			FMemory::Memcpy(OutPixels.GetData(), SourceImage.RawData.GetData(), ExpectedBytes);
+			return true;
+		}
+#endif
+
+		FTexturePlatformData* PlatformData = Texture->GetPlatformData();
+		if (!PlatformData || PlatformData->Mips.Num() == 0 || Texture->GetPixelFormat() != PF_B8G8R8A8)
+		{
+			return false;
+		}
+
+		FTexture2DMipMap& Mip = PlatformData->Mips[0];
+		OutWidth = Mip.SizeX;
+		OutHeight = Mip.SizeY;
+		const int64 PixelCount = static_cast<int64>(OutWidth) * static_cast<int64>(OutHeight);
+		const int64 ExpectedBytes = PixelCount * sizeof(FColor);
+		if (OutWidth <= 0 || OutHeight <= 0 || Mip.BulkData.GetBulkDataSize() < ExpectedBytes)
+		{
+			return false;
+		}
+
+		const void* RawData = Mip.BulkData.LockReadOnly();
+		if (!RawData)
+		{
+			Mip.BulkData.Unlock();
+			return false;
+		}
+
+		OutPixels.SetNumUninitialized(PixelCount);
+		FMemory::Memcpy(OutPixels.GetData(), RawData, ExpectedBytes);
+		Mip.BulkData.Unlock();
+		return true;
+	}
 }
 
 void FProceduralShapeGenerator::ReleaseTransientTextures()
@@ -62,41 +123,15 @@ UTexture2D* FProceduralShapeGenerator::ApplyAffineCrop(
 		return nullptr;
 	}
 
-	const int32 SrcW = Source->GetSizeX();
-	const int32 SrcH = Source->GetSizeY();
-	if (SrcW <= 0 || SrcH <= 0)
+	TArray<FColor> SourcePixels;
+	int32 SrcW = 0;
+	int32 SrcH = 0;
+	if (!ReadTexturePixels(Source, SourcePixels, SrcW, SrcH))
 	{
 		return nullptr;
 	}
 
-	FTexturePlatformData* PlatformData = Source->GetPlatformData();
-	if (!PlatformData || PlatformData->Mips.Num() == 0)
-	{
-		return nullptr;
-	}
-
-	const void* RawData = PlatformData->Mips[0].BulkData.LockReadOnly();
-	if (!RawData)
-	{
-		return nullptr;
-	}
-
-	const FColor* SrcData = static_cast<const FColor*>(RawData);
-	const float Determinant = A * D - B * C;
-	if (FMath::IsNearlyZero(Determinant))
-	{
-		PlatformData->Mips[0].BulkData.Unlock();
-		return nullptr;
-	}
-
-	const float InvDeterminant = 1.0f / Determinant;
-	const float IA = D * InvDeterminant;
-	const float IB = -B * InvDeterminant;
-	const float IC = -C * InvDeterminant;
-	const float ID = A * InvDeterminant;
-	const float ITX = (B * TY - D * TX) * InvDeterminant;
-	const float ITY = (C * TX - A * TY) * InvDeterminant;
-
+	const FColor* SrcData = SourcePixels.GetData();
 	TArray<FColor> Pixels;
 	Pixels.SetNumUninitialized(OutW * OutH);
 
@@ -106,8 +141,9 @@ UTexture2D* FProceduralShapeGenerator::ApplyAffineCrop(
 		for (int32 X = 0; X < OutW; ++X)
 		{
 			const float NX = static_cast<float>(X) / FMath::Max(1, OutW - 1);
-			const float SU = IA * NX + IB * NY + ITX;
-			const float SV = IC * NX + ID * NY + ITY;
+			// Figma imageTransform maps destination-normalized coordinates to source UVs.
+			const float SU = A * NX + B * NY + TX;
+			const float SV = C * NX + D * NY + TY;
 			const float SX = SU * (SrcW - 1);
 			const float SY = SV * (SrcH - 1);
 
@@ -148,8 +184,6 @@ UTexture2D* FProceduralShapeGenerator::ApplyAffineCrop(
 		}
 	}
 
-	PlatformData->Mips[0].BulkData.Unlock();
-
 	UTexture2D* Result = ProceduralShapeGeneratorAssets::CreateTransientTexture(OutW, OutH, nullptr);
 	if (!Result)
 	{
@@ -175,6 +209,12 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FUMGProcedu
 	int32 InsetPx = 10;
 	float BoxShadowBlurPadding = -1.0f;
 	TArray<FGeneratedGradientStop> MultiStops;
+	FVector2D LinearStart(0.0f, 0.0f);
+	FVector2D LinearEnd(1.0f, 0.0f);
+	bool bHasLinearStartX = false;
+	bool bHasLinearStartY = false;
+	bool bHasLinearEndX = false;
+	bool bHasLinearEndY = false;
 	FVector2D RadialCenter(0.5f, 0.5f);
 	FVector2D RadialSize(1.0f, 1.0f);
 
@@ -201,6 +241,26 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FUMGProcedu
 			}
 
 			double NumVal = 0.0;
+			bHasLinearStartX = Params->TryGetNumberField(MaterialParamStartXKey, NumVal);
+			if (bHasLinearStartX)
+			{
+				LinearStart.X = static_cast<float>(NumVal);
+			}
+			bHasLinearStartY = Params->TryGetNumberField(MaterialParamStartYKey, NumVal);
+			if (bHasLinearStartY)
+			{
+				LinearStart.Y = static_cast<float>(NumVal);
+			}
+			bHasLinearEndX = Params->TryGetNumberField(MaterialParamEndXKey, NumVal);
+			if (bHasLinearEndX)
+			{
+				LinearEnd.X = static_cast<float>(NumVal);
+			}
+			bHasLinearEndY = Params->TryGetNumberField(MaterialParamEndYKey, NumVal);
+			if (bHasLinearEndY)
+			{
+				LinearEnd.Y = static_cast<float>(NumVal);
+			}
 			if (Params->TryGetNumberField(MaterialParamCenterXKey, NumVal))
 			{
 				RadialCenter.X = static_cast<float>(NumVal);
@@ -332,6 +392,16 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FUMGProcedu
 			MultiStops.Empty();
 			MultiStops.Add({0.0f, ColorStart});
 			MultiStops.Add({1.0f, ColorEnd});
+		}
+		if (bHasLinearStartX && bHasLinearStartY && bHasLinearEndX && bHasLinearEndY)
+		{
+			return ProceduralShapeGeneratorAssets::GenerateGradientLinear(
+				Width,
+				Height,
+				LinearStart,
+				LinearEnd,
+				MultiStops,
+				Outer);
 		}
 		return ProceduralShapeGeneratorAssets::GenerateGradientAngled(Width, Height, RotationDeg, MultiStops, Outer);
 	}

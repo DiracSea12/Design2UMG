@@ -14,7 +14,7 @@ namespace ImageFillUtils
 			Widget.Brush.Image.TexturePath = Image.Url;
 		}
 
-		if (Image.Mode == EDesignImageMode::Crop && !Image.Transform.IsIdentity())
+		if (!Image.Transform.IsIdentity())
 		{
 			Widget.Brush.Image.Mode = TEXT("Crop");
 			FUMGVisualBrushData::FImageTransformData Transform;

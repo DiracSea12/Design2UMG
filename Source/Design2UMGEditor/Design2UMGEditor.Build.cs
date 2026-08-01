@@ -35,6 +35,7 @@ public class Design2UMGEditor : ModuleRules
 			"InputCore",
 			"MovieScene",
 			"MovieSceneTracks",
+			"ImageCore",
 			"ImageWrapper",
 			"HTTP",
 			"RenderCore",

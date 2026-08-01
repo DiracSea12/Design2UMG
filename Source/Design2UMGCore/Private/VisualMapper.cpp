@@ -14,6 +14,7 @@ namespace
 {
 	// Material reference identifier used as an internal ProceduralShapeGenerator key, not an asset path.
 	const TCHAR* RetainerForegroundBlurEffectRef = TEXT("d2u.retainer.foreground_blur");
+	const TCHAR* RetainerGeometryMaskEffectRef = TEXT("d2u.retainer.geometry_mask");
 	const TCHAR* RetainerInnerShadowEffectRef = TEXT("d2u.retainer.inner_shadow");
 	const TCHAR* MatRef_RoundedRect = TEXT("roundedrect");
 
@@ -582,6 +583,32 @@ FUMGWidgetNode VisualMapper::WrapWithForegroundBlur(FUMGWidgetNode&& Widget, con
 
 	const FVector2D BlurUVStep = ComputeForegroundBlurUVStep(Node, BlurStrength);
 	Retainer.Effect.EffectBlurUVStep = BlurUVStep;
+
+	Widget.Bounds = FDesignPixelBounds();
+	Widget.Slot = FUMGSlotData();
+	Retainer.Children.Add(MoveTemp(Widget));
+	return Retainer;
+}
+
+FUMGWidgetNode VisualMapper::WrapWithGeometryMask(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node)
+{
+	FUMGWidgetNode Retainer;
+	Retainer.Type = TEXT("RetainerBox");
+	constexpr TCHAR GeometryMaskSuffix[] = TEXT("_geometrymask");
+	Retainer.Id = BuildWidgetIdOrNameWithSuffix(Widget.Id, GeometryMaskSuffix);
+	Retainer.Name = BuildWidgetIdOrNameWithSuffix(Widget.Name, GeometryMaskSuffix);
+	Retainer.Bounds = Widget.Bounds;
+	Retainer.Slot = Widget.Slot;
+	Retainer.Effect.bRetainRendering = true;
+	Retainer.Effect.EffectMaterial = RetainerGeometryMaskEffectRef;
+	Retainer.Effect.TextureParameter = TEXT("Texture");
+	Retainer.Effect.GeometryMaskShape = Node->Visual.GeometryMask.Shape == EDesignGeometryMaskShape::Ellipse
+		? EUMGGeometryMaskShape::Ellipse
+		: EUMGGeometryMaskShape::RoundedRectangle;
+	Retainer.Effect.GeometryMaskSize = FVector2D(
+		FMath::Max(1.0f, Node->Transform.Width.Value),
+		FMath::Max(1.0f, Node->Transform.Height.Value));
+	Retainer.Effect.GeometryMaskCornerRadii = Node->Visual.GeometryMask.CornerRadius.ToVector4();
 
 	Widget.Bounds = FDesignPixelBounds();
 	Widget.Slot = FUMGSlotData();

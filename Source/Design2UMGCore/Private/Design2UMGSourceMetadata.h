@@ -10,6 +10,8 @@ struct FUMGWidgetNode;
 
 namespace Design2UMGSourceMetadata
 {
+	inline constexpr TCHAR RenderBoundsClippedByParentKey[] = TEXT("source.renderBoundsClippedByParent");
+
 	// Raw metadata / source-extension access.
 	bool HasNodeMetadataFlag(const TSharedPtr<FDesignNode>& Node, const TCHAR* Key);
 	FString GetSourceExtension(const TSharedPtr<FDesignNode>& Node, const FString& Key);

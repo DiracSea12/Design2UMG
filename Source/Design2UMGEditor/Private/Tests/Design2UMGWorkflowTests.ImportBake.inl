@@ -292,6 +292,19 @@ bool FFigmaLocalBlendModeBakeWorkflowTest::RunTest(const FString& Parameters)
 							{"type": "IMAGE", "visible": true, "blendMode": "OVERLAY", "imageRef": "img_blend", "scaleMode": "FIT"}
 						],
 						"children": []
+					},
+					{
+						"id": "stretch_screen_node",
+						"name": "Stretch Screen",
+						"type": "FRAME",
+						"visible": true,
+						"absoluteBoundingBox": {"x": 420, "y": 0, "width": 120, "height": 80},
+						"absoluteRenderBounds": {"x": 420, "y": 0, "width": 120, "height": 80},
+						"fills": [
+							{"type": "SOLID", "visible": true, "blendMode": "NORMAL", "color": {"r": 0.2509804, "g": 0.2509804, "b": 0.2509804, "a": 1}},
+							{"type": "IMAGE", "visible": true, "blendMode": "SCREEN", "imageRef": "img_blend", "scaleMode": "STRETCH"}
+						],
+						"children": []
 					}
 				]
 			}]
@@ -307,7 +320,7 @@ bool FFigmaLocalBlendModeBakeWorkflowTest::RunTest(const FString& Parameters)
 	{
 		AddInfo(ErrorMessage);
 	}
-	if (!bLoaded || Document.Children.Num() < 3)
+	if (!bLoaded || Document.Children.Num() < 4)
 	{
 		IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
 		return false;
@@ -349,9 +362,10 @@ bool FFigmaLocalBlendModeBakeWorkflowTest::RunTest(const FString& Parameters)
 	const bool bMultiplyOk = ValidateBlendNode(Document.Children[0], 32, TEXT("Multiply"));
 	const bool bScreenOk = ValidateBlendNode(Document.Children[1], 160, TEXT("Screen"));
 	const bool bOverlayOk = ValidateBlendNode(Document.Children[2], 64, TEXT("Overlay"));
+	const bool bStretchScreenOk = ValidateBlendNode(Document.Children[3], 160, TEXT("Stretch Screen"));
 
 	IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
-	return bMultiplyOk && bScreenOk && bOverlayOk;
+	return bMultiplyOk && bScreenOk && bOverlayOk && bStretchScreenOk;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenLocalBlendModeBakeWorkflowTest,

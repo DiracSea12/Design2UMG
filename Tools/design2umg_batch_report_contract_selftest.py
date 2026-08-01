@@ -100,6 +100,27 @@ def main() -> None:
         assert_equal(len(lines), 1)
         assert_equal(json.loads(lines[0]), entry)
 
+        visual_case_dir = automation_root / "case-a"
+        visual_case_dir.mkdir()
+        for image_name in ("reference.png", "candidate.png", "diff_overlay.png"):
+            (visual_case_dir / image_name).write_bytes(b"png")
+        visual_review_path = batch_verify.write_visual_review_index(
+            automation_root,
+            [{
+                "name": "case-a<&",
+                "report_path": str(visual_case_dir / "compare_report.json"),
+                "stable_changed_ratio": 0.125,
+                "stable_mae": 0.03125,
+                "blocked": False,
+            }],
+        )
+        visual_review = visual_review_path.read_text(encoding="utf-8")
+        assert_equal(visual_review_path, automation_root / "visual_review.html")
+        assert_true("case-a&lt;&amp;" in visual_review, "case name should be HTML escaped")
+        assert_true('src="case-a/reference.png"' in visual_review, "reference image should be linked")
+        assert_true('src="case-a/candidate.png"' in visual_review, "candidate image should be linked")
+        assert_true('src="case-a/diff_overlay.png"' in visual_review, "diff overlay should be linked")
+
         output_root = automation_root / "batch_output"
         effective_root = batch_verify.resolve_effective_batch_game_output_root("", output_root, 1780838795.0)
         assert_true(

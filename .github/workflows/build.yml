@@ -50,7 +50,12 @@ jobs:
           python Tools/design2umg_determinism_smoke_selftest.py
 
   build-plugin:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, windows, ue5]
+    timeout-minutes: 60
+    concurrency:
+      group: design2umg-self-hosted-validation
+      cancel-in-progress: false
     defaults:
       run:
         shell: pwsh
@@ -104,6 +109,76 @@ jobs:
         run: |
           $packageRoot = Join-Path $pwd "dist\Design2UMG"
           ./Tools/Release/Assert-PublicRepoBoundary.ps1 -RepoRoot $packageRoot -Mode Package
+
+      - name: Run focused Design2UMG automation tests from packaged plugin
+        run: |
+          $project = $env:DESIGN2UMG_RUNTIME_PROJECT
+          $editor = Join-Path $env:UE_ROOT "Engine\Binaries\Win64\UnrealEditor-Cmd.exe"
+          $packageDescriptor = Join-Path $pwd "dist\Design2UMG\Design2UMG.uplugin"
+          $installedDescriptor = Join-Path $env:UE_ROOT "Engine\Plugins\Marketplace\Design2UMG\Design2UMG.uplugin"
+          $installedDescriptorBackup = "$installedDescriptor.ci-disabled"
+          $logPath = Join-Path $env:RUNNER_TEMP "Design2UMG-Automation-$env:GITHUB_RUN_ID.log"
+
+          if (-not $project) {
+            throw "DESIGN2UMG_RUNTIME_PROJECT is not set on runner. Point it to the maintainer runtime project."
+          }
+          foreach ($requiredPath in @($project, $editor, $packageDescriptor)) {
+            if (-not (Test-Path -LiteralPath $requiredPath)) {
+              throw "Required automation path not found: $requiredPath"
+            }
+          }
+          if (Test-Path -LiteralPath $installedDescriptorBackup) {
+            if (Test-Path -LiteralPath $installedDescriptor) {
+              Remove-Item -LiteralPath $installedDescriptorBackup -Force
+            }
+            else {
+              Move-Item -LiteralPath $installedDescriptorBackup -Destination $installedDescriptor
+            }
+          }
+
+          $descriptorWasMoved = $false
+          try {
+            if (Test-Path -LiteralPath $installedDescriptor) {
+              Move-Item -LiteralPath $installedDescriptor -Destination $installedDescriptorBackup
+              $descriptorWasMoved = $true
+            }
+
+            $testFilters = @(
+              "Design2UMG.Generation",
+              "Design2UMG.Unit.FigmaParser",
+              "Design2UMG.BatchD"
+            )
+            foreach ($testFilter in $testFilters) {
+              $filterLogPath = $logPath.Replace(".log", "-$($testFilter.Replace('.', '-')).log")
+              & $editor `
+                $project `
+                "-PLUGIN=$packageDescriptor" `
+                -unattended `
+                -NullRHI `
+                -NoSplash `
+                -NoSound `
+                -nop4 `
+                "-ExecCmds=Automation RunTests $testFilter; Quit" `
+                "-TestExit=Automation Test Queue Empty" `
+                "-AbsLog=$filterLogPath"
+              if ($LASTEXITCODE -ne 0) {
+                throw "$testFilter automation exited with code $LASTEXITCODE. Log: $filterLogPath"
+              }
+
+              $logContent = Get-Content -LiteralPath $filterLogPath -Raw
+              if ($logContent -notmatch '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*\*') {
+                throw "Automation success marker not found for $testFilter. Log: $filterLogPath"
+              }
+              if ($logContent -match '(?i)Design2UMG.*(duplicate|same name|already exists|ignored)') {
+                throw "Duplicate Design2UMG plugin warning detected. Log: $filterLogPath"
+              }
+            }
+          }
+          finally {
+            if ($descriptorWasMoved -and (Test-Path -LiteralPath $installedDescriptorBackup)) {
+              Move-Item -LiteralPath $installedDescriptorBackup -Destination $installedDescriptor
+            }
+          }
 
       - name: Upload packaged plugin artifact
         uses: actions/upload-artifact@v4

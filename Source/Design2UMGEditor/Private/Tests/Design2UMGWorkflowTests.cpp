@@ -51,6 +51,7 @@
 #include "WidgetLayoutAdapter.h"
 #include "Components/CanvasPanel.h"
 #include "Components/VerticalBox.h"
+#include "Engine/Texture2D.h"
 #if WITH_AUTOMATION_WORKER
 using namespace Design2UMGTestUtils;
 using Design2UMGEditorTests::DeleteGeneratedAssetsAtPath;
@@ -881,6 +882,8 @@ namespace
 		bool bHasMaterialRef = false;
 		FString TexturePath;
 		bool bHasTexturePath = false;
+		bool bHasImageMode = false;
+		bool bHasImageTransform = false;
 	};
 
 	FNormalizerSnapshot SnapNode(const FUMGWidgetNode& Node)
@@ -895,6 +898,8 @@ namespace
 		S.bHasMaterialRef = Node.Brush.MaterialRef.IsSet();
 		S.TexturePath = Node.Brush.Image.TexturePath.Get(FString());
 		S.bHasTexturePath = Node.Brush.Image.TexturePath.IsSet();
+		S.bHasImageMode = Node.Brush.Image.Mode.IsSet() || Node.WidgetStyle.ImageMode.IsSet();
+		S.bHasImageTransform = Node.Brush.Image.Transform.IsSet() || Node.WidgetStyle.ImageTransform.IsSet();
 		return S;
 	}
 
@@ -927,6 +932,20 @@ namespace
 		}
 		Node.WidgetStyle.WidthOverride = 32.0f;
 		Node.WidgetStyle.HeightOverride = 32.0f;
+		return Node;
+	}
+
+	FUMGWidgetNode MakeImageTransformNode(const FString& Id)
+	{
+		FUMGWidgetNode Node;
+		Node.Type = TEXT("Border");
+		Node.Id = Id;
+		Node.Name = Id;
+		Node.Brush.Image.TexturePath = TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture");
+		Node.WidgetStyle.ImageMode = TEXT("Crop");
+		Node.WidgetStyle.ImageTransform = TEXT("0.75,0.1,0.05,-0.1,0.65,0.2");
+		Node.WidgetStyle.WidthOverride = 8.0f;
+		Node.WidgetStyle.HeightOverride = 6.0f;
 		return Node;
 	}
 }
@@ -1026,6 +1045,55 @@ bool FPreBuildNormalizerPathTextureCacheDedupTest::RunTest(const FString& Parame
 	TestFalse(TEXT("A: geometry cleared"), AfterA.bHasGeometry);
 	TestFalse(TEXT("B: geometry cleared"), AfterB.bHasGeometry);
 	TestEqual(TEXT("Dedup: same geometry yields same asset path"), AfterA.TexturePath, AfterB.TexturePath);
+
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreBuildNormalizerImageTransformTextureTest,
+	"Design2UMG.PreBuildResourceNormalizer.ImageTransform.PersistedAndDeduplicated",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPreBuildNormalizerImageTransformTextureTest::RunTest(const FString& Parameters)
+{
+	if (GUsingNullRHI) return true;
+
+	FUMGWidgetNode Root;
+	Root.Type = TEXT("CanvasPanel");
+	Root.Id = TEXT("norm_image_transform_root");
+	Root.Name = TEXT("norm_image_transform_root");
+	Root.Bounds = {0, 0, 64, 64};
+	Root.Children.Add(MakeImageTransformNode(TEXT("image_transform_a")));
+	Root.Children.Add(MakeImageTransformNode(TEXT("image_transform_b")));
+
+	const FNormalizerSnapshot Before = SnapNode(Root.Children[0]);
+	TestTrue(TEXT("Before: image mode is present"), Before.bHasImageMode);
+	TestTrue(TEXT("Before: image transform is present"), Before.bHasImageTransform);
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/NormImageTransform");
+	FPreBuildResourceNormalizer::NormalizeImageTransformTextures(
+		Root,
+		OutputPath / TEXT("D2U_ImageTransforms"),
+		TEXT("norm_image_transform"));
+
+	const FNormalizerSnapshot AfterA = SnapNode(Root.Children[0]);
+	const FNormalizerSnapshot AfterB = SnapNode(Root.Children[1]);
+	TestTrue(TEXT("A: transformed texture path is set"), AfterA.bHasTexturePath);
+	TestTrue(TEXT("B: transformed texture path is set"), AfterB.bHasTexturePath);
+	TestEqual(TEXT("Equivalent transforms reuse the same persisted texture"), AfterA.TexturePath, AfterB.TexturePath);
+	TestFalse(TEXT("A: baked image mode is cleared"), AfterA.bHasImageMode);
+	TestFalse(TEXT("A: baked image transform is cleared"), AfterA.bHasImageTransform);
+	TestFalse(TEXT("B: baked image mode is cleared"), AfterB.bHasImageMode);
+	TestFalse(TEXT("B: baked image transform is cleared"), AfterB.bHasImageTransform);
+
+	UTexture2D* PersistedTexture = LoadObject<UTexture2D>(nullptr, *AfterA.TexturePath);
+	if (TestNotNull(TEXT("Transformed texture is loadable as an asset"), PersistedTexture))
+	{
+		TestFalse(TEXT("Persisted texture is not duplicate-transient"), PersistedTexture->HasAnyFlags(RF_DuplicateTransient));
+		TestTrue(TEXT("Persisted texture is public"), PersistedTexture->HasAnyFlags(RF_Public));
+		TestTrue(TEXT("Persisted texture is standalone"), PersistedTexture->HasAnyFlags(RF_Standalone));
+		TestEqual(TEXT("Persisted texture width matches the requested output"), PersistedTexture->GetSizeX(), 8);
+		TestEqual(TEXT("Persisted texture height matches the requested output"), PersistedTexture->GetSizeY(), 6);
+	}
 
 	DeleteGeneratedAssetsAtPath(OutputPath);
 	return true;

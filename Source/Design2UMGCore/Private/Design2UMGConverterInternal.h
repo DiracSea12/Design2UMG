@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DesignTreeLimits.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGPrototypeNavigation.h"
 #include "Design2UMGSettings.h"
@@ -13,8 +14,6 @@
 
 namespace Design2UMGConverterInternal
 {
-	constexpr int32 MaxTreeRecursionDepth = 512;
-
 	struct FConversionSettingsSnapshot
 	{
 		UDesign2UMGSettings::FResolvedPlaceholderHatchStyle PlaceholderHatchStyle;
@@ -74,7 +73,7 @@ namespace Design2UMGConverterInternal
 	{
 		explicit FRecursionGuard(int32& InDepth, const TCHAR* InName = TEXT(""))
 			: Depth(InDepth)
-			, bValid(InDepth < MaxTreeRecursionDepth)
+			, bValid(InDepth < DesignTreeLimits::MaxNodeDepth)
 		{
 			if (bValid)
 			{
@@ -82,8 +81,8 @@ namespace Design2UMGConverterInternal
 			}
 			else
 			{
-				UE_LOG(LogDesign2UMG, Verbose, TEXT("%s: recursion depth exceeded (%d)"), InName, MaxTreeRecursionDepth);
-				UE_LOG(LogDesign2UMG, Error, TEXT("Design tree nesting is too deep (over %d levels). A cyclic reference may exist."), MaxTreeRecursionDepth);
+				UE_LOG(LogDesign2UMG, Verbose, TEXT("%s: recursion depth exceeded (%d)"), InName, DesignTreeLimits::MaxNodeDepth);
+				UE_LOG(LogDesign2UMG, Error, TEXT("Design tree nesting is too deep (over %d levels). A cyclic reference may exist."), DesignTreeLimits::MaxNodeDepth);
 			}
 		}
 

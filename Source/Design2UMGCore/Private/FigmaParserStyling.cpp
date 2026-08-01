@@ -41,8 +41,7 @@ namespace
 			return false;
 		}
 
-		const FString ImageRef = GetString(FillObj, TEXT("imageRef"));
-		return ImageRef.StartsWith(TEXT("vec_"));
+		return GetString(FillObj, TEXT("imageRef")).StartsWith(TEXT("vec_"));
 	}
 
 	FDesignFill ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)
@@ -98,7 +97,12 @@ namespace
 					const float DY = GetNumber(P1, TEXT("y")) - CenterY;
 					Result.Gradient.Rotation = FMath::RadiansToDegrees(FMath::Atan2(DY, DX));
 
-					if (Result.Gradient.GradientType == EDesignGradientType::Radial)
+					if (Result.Gradient.GradientType == EDesignGradientType::Linear)
+					{
+						Result.Gradient.StartPoint = FVector2D(CenterX, CenterY);
+						Result.Gradient.EndPoint = FVector2D(CenterX + DX, CenterY + DY);
+					}
+					else if (Result.Gradient.GradientType == EDesignGradientType::Radial)
 					{
 						Result.Gradient.Center = FVector2D(CenterX, CenterY);
 						FVector2D Size(FMath::Max(KINDA_SMALL_NUMBER, 2.0f * FMath::Sqrt(DX * DX + DY * DY)), 0.0f);

@@ -197,6 +197,11 @@ namespace Design2UMGConverterVisualSupport
 			Widget = VisualMapper::WrapWithMultiFill(MoveTemp(Widget), Node, VisualMapperOptions);
 		}
 
+		if (Node->Visual.GeometryMask.HasMask())
+		{
+			Widget = VisualMapper::WrapWithGeometryMask(MoveTemp(Widget), Node);
+		}
+
 		// UMG has one inner-shadow surface here, so choose the strongest blur as the visible representative.
 		const FDesignShadow* InnerShadow = nullptr;
 		for (const FDesignEffect& Effect : Node->Visual.Effects)

@@ -2,10 +2,17 @@
 
 #pragma once
 
+#include "UMGSchemaTypedPayloads.h"
+
 class UMaterialInterface;
 
 namespace Design2UMGEffectMaterialBuilder
 {
 	UMaterialInterface* GetOrCreateForegroundBlurRetainerMaterial();
+	UMaterialInterface* GetOrCreateGeometryMaskRetainerMaterial();
+	UMaterialInterface* GetOrCreateGeometryMaskRetainerMaterial(
+		EUMGGeometryMaskShape Shape,
+		const FVector2D& Size,
+		const FVector4& CornerRadii);
 	UMaterialInterface* GetOrCreateInnerShadowRetainerMaterial();
 }

@@ -16,6 +16,8 @@ namespace
 	constexpr TCHAR JsonModeKey[] = TEXT("Mode");
 	constexpr TCHAR JsonTransformKey[] = TEXT("Transform");
 	constexpr TCHAR JsonRotationKey[] = TEXT("Rotation");
+	constexpr TCHAR JsonStartPointKey[] = TEXT("StartPoint");
+	constexpr TCHAR JsonEndPointKey[] = TEXT("EndPoint");
 	constexpr TCHAR JsonCenterKey[] = TEXT("Center");
 	constexpr TCHAR JsonSizeKey[] = TEXT("Size");
 	constexpr TCHAR JsonPositionKey[] = TEXT("Position");
@@ -253,6 +255,10 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeWidgetNode(const FUMGWidget
 				GradientObject->SetStringField(JsonTypeKey, B.Gradient.Type.GetValue());
 			if (B.Gradient.Rotation.IsSet())
 				GradientObject->SetNumberField(JsonRotationKey, B.Gradient.Rotation.GetValue());
+			if (B.Gradient.StartPoint.IsSet())
+				GradientObject->SetStringField(JsonStartPointKey, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(B.Gradient.StartPoint.GetValue()));
+			if (B.Gradient.EndPoint.IsSet())
+				GradientObject->SetStringField(JsonEndPointKey, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(B.Gradient.EndPoint.GetValue()));
 			if (B.Gradient.Center.IsSet())
 				GradientObject->SetStringField(JsonCenterKey, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(B.Gradient.Center.GetValue()));
 			if (B.Gradient.Size.IsSet())
@@ -305,6 +311,28 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeWidgetNode(const FUMGWidget
 			EJ->SetStringField(
 				UMGPropertyKeys::EffectOffset,
 				FString::Printf(TEXT("%.6f,%.6f"), EffectOffset.X, EffectOffset.Y));
+		}
+		if (E.GeometryMaskShape.IsSet())
+		{
+			EJ->SetStringField(
+				UMGPropertyKeys::GeometryMaskShape,
+				E.GeometryMaskShape.GetValue() == EUMGGeometryMaskShape::Ellipse
+					? TEXT("Ellipse")
+					: TEXT("RoundedRectangle"));
+		}
+		if (E.GeometryMaskSize.IsSet())
+		{
+			const FVector2D& GeometryMaskSize = E.GeometryMaskSize.GetValue();
+			EJ->SetStringField(
+				UMGPropertyKeys::GeometryMaskSize,
+				FString::Printf(TEXT("%.6f,%.6f"), GeometryMaskSize.X, GeometryMaskSize.Y));
+		}
+		if (E.GeometryMaskCornerRadii.IsSet())
+		{
+			const FVector4& Radii = E.GeometryMaskCornerRadii.GetValue();
+			EJ->SetStringField(
+				UMGPropertyKeys::GeometryMaskCornerRadii,
+				FString::Printf(TEXT("%.6f,%.6f,%.6f,%.6f"), Radii.X, Radii.Y, Radii.Z, Radii.W));
 		}
 		if (E.RenderingPhase.IsSet())
 		{

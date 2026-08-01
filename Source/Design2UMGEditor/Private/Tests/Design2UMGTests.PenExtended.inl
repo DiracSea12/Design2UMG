@@ -282,13 +282,11 @@ bool FPathStrokeOnlyIconRasterizationTest::RunTest(const FString& Parameters)
 						"width": 10,
 						"height": 10,
 						"geometry": "M7.07104 3.53555l-3.53552 0-3.53552 0m3.53552-3.53555l0 3.53555 0 3.53549",
-						"stroke": {
-							"align": "center",
-							"thickness": 1.5,
-							"fill": "#111111",
-							"join": "round",
-							"cap": "round"
-						}
+						"stroke": "#111111",
+						"strokeWidth": 1.5,
+						"strokeAlignment": "center",
+						"strokeLinejoin": "round",
+						"strokeLinecap": "round"
 					}
 				]
 			}

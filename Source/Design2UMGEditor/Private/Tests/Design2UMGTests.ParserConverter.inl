@@ -1,4 +1,4 @@
-﻿IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenParserTest,
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenParserTest,
 	"Design2UMG.Parser.BasicDocument",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FPenParserTest::RunTest(const FString& Parameters)
@@ -351,10 +351,8 @@ bool FRefFillClearSuppressesInheritedStrokeFillTest::RunTest(const FString& Para
 						"width": 120,
 						"height": 40,
 						"cornerRadius": 999,
-						"stroke": {
-							"align": "inside",
-							"thickness": 1
-						}
+						"strokeWidth": 1,
+						"strokeAlignment": "inner"
 					},
 					{
 						"id": "defaultItem",
@@ -367,11 +365,9 @@ bool FRefFillClearSuppressesInheritedStrokeFillTest::RunTest(const FString& Para
 						"type": "ref",
 						"ref": "pill",
 						"fill": [],
-						"stroke": {
-							"align": "inside",
-							"thickness": 1,
-							"fill": "#888888"
-						}
+						"stroke": "#888888",
+						"strokeWidth": 1,
+						"strokeAlignment": "inner"
 					}
 				]
 			},
@@ -382,10 +378,8 @@ bool FRefFillClearSuppressesInheritedStrokeFillTest::RunTest(const FString& Para
 				"width": 248,
 				"fill": "#222222",
 				"cornerRadius": 100,
-				"stroke": {
-					"align": "inside",
-					"thickness": 1
-				},
+				"strokeWidth": 1,
+				"strokeAlignment": "inner",
 				"padding": [12, 16],
 				"alignItems": "center",
 				"children": [

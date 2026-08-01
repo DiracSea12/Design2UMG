@@ -434,10 +434,11 @@ void ParseSize(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObj
 
 	const float Width = EffectiveBounds.W;
 	const float Height = EffectiveBounds.H;
+	const FString SizingH = GetString(NodeObj, TEXT("layoutSizingHorizontal"), TEXT("FIXED"));
+	const FString SizingV = GetString(NodeObj, TEXT("layoutSizingVertical"), TEXT("FIXED"));
 
 	if (bParentHasAutoLayout)
 	{
-		const FString SizingH = GetString(NodeObj, TEXT("layoutSizingHorizontal"), TEXT("FIXED"));
 		if (SizingH == TEXT("FILL"))
 		{
 			OutNode.Transform.SetWidthValue(FDesignSize::Fill(Width));
@@ -451,7 +452,6 @@ void ParseSize(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObj
 			OutNode.Transform.SetWidthValue(FDesignSize::Fixed(Width));
 		}
 
-		const FString SizingV = GetString(NodeObj, TEXT("layoutSizingVertical"), TEXT("FIXED"));
 		if (SizingV == TEXT("FILL"))
 		{
 			OutNode.Transform.SetHeightValue(FDesignSize::Fill(Height));
@@ -467,8 +467,13 @@ void ParseSize(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObj
 	}
 	else
 	{
-		OutNode.Transform.SetWidthValue(FDesignSize::Fixed(Width));
-		OutNode.Transform.SetHeightValue(FDesignSize::Fixed(Height));
+		const bool bNodeHasAutoLayout = HasAutoLayout(NodeObj);
+		OutNode.Transform.SetWidthValue(bNodeHasAutoLayout && SizingH == TEXT("HUG")
+			? FDesignSize::Fit()
+			: FDesignSize::Fixed(Width));
+		OutNode.Transform.SetHeightValue(bNodeHasAutoLayout && SizingV == TEXT("HUG")
+			? FDesignSize::Fit()
+			: FDesignSize::Fixed(Height));
 	}
 
 	double GrowValue = 0.0;
@@ -478,7 +483,12 @@ void ParseSize(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObj
 	}
 }
 
-void ParsePosition(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj, FDesignNode& OutNode, bool bParentHasAutoLayout)
+void ParsePosition(
+	const TSharedPtr<FJsonObject>& NodeObj,
+	const TSharedPtr<FJsonObject>& ParentObj,
+	const FNodeBounds* ParentCoordinateBounds,
+	FDesignNode& OutNode,
+	bool bParentHasAutoLayout)
 {
 	if (bParentHasAutoLayout)
 	{
@@ -490,7 +500,9 @@ void ParsePosition(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJso
 	const bool bHasChildBounds = TryGetVisualBounds(NodeObj, ParentObj, ChildBounds);
 
 	FNodeBounds ParentBounds;
-	const bool bHasParentBounds = ParentObj && TryGetVisualBounds(ParentObj, nullptr, ParentBounds);
+	const bool bHasParentBounds = ParentCoordinateBounds
+		? (ParentBounds = *ParentCoordinateBounds, true)
+		: ParentObj && TryGetVisualBounds(ParentObj, nullptr, ParentBounds);
 
 	if (bHasChildBounds && bHasParentBounds)
 	{

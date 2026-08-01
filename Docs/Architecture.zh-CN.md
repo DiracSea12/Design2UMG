@@ -60,7 +60,7 @@ Pencil .pen / Figma JSON
 
 ## 验证边界
 
-- 公开文档和 public CI 只承诺 [ValidationProtocol.md](ValidationProtocol.md) 与 [ValidationGovernance/TestCoverageBoundary.zh-CN.md](ValidationGovernance/TestCoverageBoundary.zh-CN.md) 里写清的层级：公开仓库 `repository-hygiene`、贡献者可复现的 smoke/repro、手动 self-hosted BuildPlugin，以及分开的维护者 formal admissible gate。
+- 公开文档和 public CI 只承诺 [ValidationProtocol.md](ValidationProtocol.md) 与 [ValidationGovernance/TestCoverageBoundary.zh-CN.md](ValidationGovernance/TestCoverageBoundary.zh-CN.md) 里写清的层级：公开仓库 `repository-hygiene`、贡献者可复现的 smoke/repro、维护者 self-hosted 打包与聚焦自动化，以及分开的维护者 formal admissible gate。
 - 真实项目验证按“角色边界”描述，不按某台机器路径描述。公开示例统一用 `<UE5_Root>`、`<PluginRoot>`、`<MaintainerRuntimeProject.uproject>` 这类占位符。
 - HostProject fallback 不是可接受的架构或验证路径。只要 workflow 需要 runtime project，就必须显式使用真实 UE 项目，不能临时创建或偷偷推断 host project。
 

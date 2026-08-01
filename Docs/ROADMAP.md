@@ -38,7 +38,7 @@ The project uses four different validation tiers:
 | Tier | Meaning | Public promise |
 | --- | --- | --- |
 | `repository-hygiene` | Required-file and public-boundary checks in GitHub Actions | Public, lightweight |
-| `self-hosted build` | Manual BuildPlugin packaging on a maintainer Windows UE runner | Maintainer-operated |
+| `self-hosted build and automation` | BuildPlugin packaging and Unreal automation on a maintainer Windows UE runner | Maintainer pushes, same-repository PRs, and manual runs |
 | `public smoke/public validate` | Contributor-reproducible local build and focused validation | Public repro boundary |
 | `maintainer formal admissible gate` | Full discovered admissible case set no-regression release gate | Maintainer release gate |
 

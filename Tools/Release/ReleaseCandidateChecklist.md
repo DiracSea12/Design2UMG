@@ -43,7 +43,7 @@ Use this checklist before cutting a GitHub release branch or tag.
 - [ ] Any coverage visibility is limited to the actually collected public/self-hosted scope; no percentage badge is published without a real collection job
 - [ ] BuildPlugin package artifact is uploaded and downloadable
 - [ ] BuildPlugin package boundary check passed before upload: `pwsh -NoProfile -File Tools/Release/Assert-PublicRepoBoundary.ps1 -RepoRoot <PackageRoot> -Mode Package`
-- [ ] Artifact publication evidence records the manual self-hosted workflow run URL or equivalent downloadable artifact proof
+- [ ] Artifact publication evidence records the self-hosted workflow run URL or equivalent downloadable artifact proof
 
 ## 6. Public Consistency
 

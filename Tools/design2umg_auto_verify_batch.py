@@ -1,5 +1,6 @@
 import argparse
 import concurrent.futures
+import html
 import json
 import os
 import shutil
@@ -33,6 +34,7 @@ NO_REGRESSION_METRICS = (
 EDITOR_GRACEFUL_EXIT_DEADLINE_SEC = 30.0  # seconds to wait for editor results after process exits
 EDITOR_STEP_DRIVER_START_ATTEMPTS = 2
 AUTOMATION_GAME_OUTPUT_PREFIX = "/Game/Design2UMG/Automation"
+FORMAL_DISCOVERED_CASE_COUNT = 71
 
 
 def parse_args():
@@ -1503,6 +1505,86 @@ def append_batch_timing_history(automation_root: Path, entry: dict) -> Path:
     return history_path
 
 
+def write_visual_review_index(output_root: Path, case_results: list[dict]) -> Path:
+    output_root = output_root.resolve()
+
+    def image_href(path: Path) -> str:
+        if not path.is_file():
+            return ""
+        try:
+            return path.resolve().relative_to(output_root).as_posix()
+        except ValueError:
+            return path.resolve().as_uri()
+
+    sections = []
+    for result in case_results:
+        report_path = Path(result["report_path"])
+        case_dir = report_path.parent
+        image_columns = (
+            ("Design reference", case_dir / "reference.png"),
+            ("UMG render", case_dir / "candidate.png"),
+            ("Difference overlay", case_dir / "diff_overlay.png"),
+        )
+        figures = []
+        for label, image_path in image_columns:
+            href = image_href(image_path)
+            if href:
+                content = f'<a href="{html.escape(href)}"><img src="{html.escape(href)}" loading="lazy" alt="{html.escape(label)}"></a>'
+            else:
+                content = '<div class="missing">Not available</div>'
+            figures.append(f'<figure><figcaption>{html.escape(label)}</figcaption>{content}</figure>')
+
+        stable_ratio = result.get("stable_changed_ratio")
+        stable_mae = result.get("stable_mae")
+        metrics = []
+        if stable_ratio is not None:
+            metrics.append(f"stable changed: {stable_ratio:.4%}")
+        if stable_mae is not None:
+            metrics.append(f"stable error: {stable_mae:.6f}")
+        if result.get("blocked"):
+            metrics.append(f"blocked: {result.get('reason') or 'unknown'}")
+
+        sections.append(
+            '<section class="case">'
+            f'<h2>{html.escape(result["name"])}</h2>'
+            f'<p>{html.escape(" | ".join(metrics))}</p>'
+            f'<div class="images">{"".join(figures)}</div>'
+            '</section>'
+        )
+
+    review_path = output_root / "visual_review.html"
+    document = f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Design2UMG Visual Review</title>
+<style>
+body {{ margin: 0; background: #f4f5f7; color: #17191d; font: 14px/1.5 Arial, sans-serif; }}
+header {{ padding: 20px 24px; background: #17191d; color: white; }}
+h1, h2, p {{ margin: 0; }}
+h1 {{ font-size: 22px; }}
+.case {{ padding: 20px 24px 28px; border-bottom: 1px solid #c9cdd3; }}
+.case h2 {{ font-size: 17px; overflow-wrap: anywhere; }}
+.case p {{ min-height: 21px; margin: 4px 0 12px; color: #555b65; }}
+.images {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }}
+figure {{ min-width: 0; margin: 0; }}
+figcaption {{ margin-bottom: 6px; font-weight: 700; }}
+img, .missing {{ display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; border: 1px solid #aeb4bd; background: white; box-sizing: border-box; }}
+.missing {{ display: grid; place-items: center; color: #6b7280; }}
+@media (max-width: 900px) {{ .images {{ grid-template-columns: 1fr; }} }}
+</style>
+</head>
+<body>
+<header><h1>Design2UMG Visual Review</h1></header>
+<main>{"".join(sections)}</main>
+</body>
+</html>
+"""
+    review_path.write_text(document, encoding="utf-8", newline="\n")
+    return review_path
+
+
 def main():
     batch_start_time = time.time()
     args = parse_args()
@@ -1545,6 +1627,11 @@ def main():
     cases.extend(batch_discovery.discover_figma_export_cases(effective_figma_export_roots, args.include, args.exclude))
     if not cases:
         raise RuntimeError(f"No eligible pen or figma export cases discovered under: {design_root}")
+    if not args.include and not args.exclude and len(cases) != FORMAL_DISCOVERED_CASE_COUNT:
+        raise RuntimeError(
+            f"Formal full discovery must produce {FORMAL_DISCOVERED_CASE_COUNT} cases; found {len(cases)}. "
+            "Check the Pencil design root and all configured Figma export roots."
+        )
     if args.game_output_explicit:
         validate_explicit_batch_game_output_root(args.effective_game_output_root, cases)
     verify.sync_project_plugin_build_id(args.editor, project_plugin_root)
@@ -1661,9 +1748,12 @@ def main():
         case_results=case_results,
         completeness=completeness,
     )
+    visual_review_path = write_visual_review_index(output_root, case_results)
+    summary["visual_review_path"] = str(visual_review_path)
     summary_path = output_root / "summary.json"
     verify.write_json(summary_path, summary)
     print(f"[SUMMARY] report={summary_path}")
+    print(f"[VISUAL_REVIEW] report={visual_review_path}")
     history_result = write_historical_best_validation(
         output_root,
         output_root.parent,

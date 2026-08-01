@@ -12,6 +12,18 @@ DEFAULT_FIGMA_EXPORT_DIR_NAMES = (
     "figma_export1",
     "figma_export2",
     "figma_export3",
+    "figma_general_einsen_dashboard",
+    "figma_general_team20_analytics",
+    "figma_general_tutortrek_user_dash",
+    "figma_general_vristo_sales",
+    "figma_general_data_analytics",
+    "figma_general_employee_table",
+    "figma_general_course_builder",
+    "figma_game_team09_start",
+    "figma_game_party_home",
+    "figma_game_koi_inventory",
+    "figma_game_bubbo_gameplay",
+    "figma_game_english_cycle",
 )
 
 

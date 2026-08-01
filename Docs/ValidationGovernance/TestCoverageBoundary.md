@@ -19,9 +19,9 @@ Today it has two different jobs with different trust levels:
 | Job | Trigger | What it really checks | Public PR default? |
 | --- | --- | --- | --- |
 | `repository-hygiene` | `push`, `pull_request`, `workflow_dispatch` | required files, tracked maintainer-local path rejection, public repo boundary script | Yes |
-| `build-plugin` | `workflow_dispatch` only | Unreal `BuildPlugin`, packaged-plugin boundary strip/verify, artifact upload | No |
+| `build-plugin` | maintainer push, same-repository PR, `workflow_dispatch` | Unreal `BuildPlugin`, packaged-plugin focused automation, boundary strip/verify, artifact upload | Same-repository PRs only |
 
-`build-plugin` requires a maintainer-provided self-hosted Windows UE runner and `UE_ROOT`. It is not a GitHub-hosted PR gate.
+`build-plugin` requires a maintainer-provided self-hosted Windows UE runner, `UE_ROOT`, and `DESIGN2UMG_RUNTIME_PROJECT`. External PRs do not run code on that runner.
 
 The full discovered admissible case set formal visual regression gate is not in public GitHub-hosted PR automation.
 
@@ -54,7 +54,7 @@ Contributor-facing examples should use placeholders such as:
 
 These checks require maintainer-owned infrastructure or evidence:
 
-1. The manual `build-plugin` workflow in GitHub Actions.
+1. The `build-plugin` workflow for maintainer pushes, same-repository PRs, and manual runs in GitHub Actions.
 2. The canonical packaged-plugin artifact that comes from the self-hosted UE runner.
 3. The archived formal admissible case set release gate and its `summary.no_regression` evidence chain.
 4. Historical-best parity checks tied to the maintainer admissible baseline.

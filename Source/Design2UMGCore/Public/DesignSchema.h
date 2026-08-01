@@ -112,6 +112,7 @@ struct FDesignVisualNodeData
 	TArray<FDesignFill> Fills;
 	FDesignStroke Stroke;
 	FDesignCornerRadius CornerRadius;
+	FDesignGeometryMask GeometryMask;
 	TArray<FDesignEffect> Effects;
 	bool bEffectsExplicitClear = false;
 };

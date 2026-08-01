@@ -114,6 +114,10 @@
       const files = [];
       const jsonBytes = new TextEncoder().encode(msg.json);
       files.push({ name: 'design.json', data: jsonBytes });
+      if (!Array.isArray(msg.reference) || msg.reference.length === 0) {
+        throw new Error('Figma reference PNG is missing from the export.');
+      }
+      files.push({ name: 'reference.png', data: new Uint8Array(msg.reference) });
       for (const img of (msg.images || [])) {
         files.push({ name: 'images/' + img.name + '.png', data: new Uint8Array(img.data) });
       }

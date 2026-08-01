@@ -36,6 +36,7 @@ namespace UMGGeneratorRootHandoff
 
 		FPreBuildResourceNormalizer::NormalizePathTextures(Prepared.Root, PackagePath / TEXT("D2U_PathTextures"), AssetName);
 		FPreBuildResourceNormalizer::NormalizeProceduralTextures(Prepared.Root, PackagePath / TEXT("D2U_ProceduralTextures"), AssetName);
+		FPreBuildResourceNormalizer::NormalizeImageTransformTextures(Prepared.Root, PackagePath / TEXT("D2U_ImageTransforms"), AssetName);
 		return Prepared;
 	}
 

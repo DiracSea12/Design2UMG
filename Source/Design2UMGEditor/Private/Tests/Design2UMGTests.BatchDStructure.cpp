@@ -5,6 +5,7 @@
 #include "Design2UMGNotifications.h"
 #include "FigmaHttpClient.h"
 #include "MCPHttpClient.h"
+#include "PencilConnector.h"
 #include "Tests/HttpClientAutomationHooks.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 #include "Misc/AutomationTest.h"
@@ -16,6 +17,19 @@
 #include "WidgetBlueprint.h"
 
 using Design2UMGEditorTests::DeleteGeneratedAssetsAtPath;
+
+struct FPencilConnectorTestAccess
+{
+	static void ScheduleRetry(FPencilConnector& Connector)
+	{
+		Connector.ScheduleRetry(FTickerDelegate::CreateLambda([](float) { return true; }), 60.0f);
+	}
+
+	static bool HasRetryTicker(const FPencilConnector& Connector)
+	{
+		return Connector.RetryTickerHandle.IsValid();
+	}
+};
 
 namespace
 {
@@ -384,22 +398,16 @@ bool FBatchDMCPHttpCancellationStaticTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDPencilRetryTickerLifecycleStaticTest,
-	"Design2UMG.BatchD.PencilRetryTickerLifecycleStatic",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDPencilRetryTickerLifecycleTest,
+	"Design2UMG.BatchD.PencilRetryTickerLifecycle",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FBatchDPencilRetryTickerLifecycleStaticTest::RunTest(const FString& Parameters)
+bool FBatchDPencilRetryTickerLifecycleTest::RunTest(const FString& Parameters)
 {
-	FString PencilHeader;
-	FString PencilSource;
-	if (!LoadPluginFile(*this, TEXT("Source/Design2UMGEditor/Public/PencilConnector.h"), PencilHeader)
-		|| !LoadPluginFile(*this, TEXT("Source/Design2UMGEditor/Private/ExternalServices/PencilConnector.cpp"), PencilSource))
-	{
-		return false;
-	}
-	TestTrue(TEXT("Pencil connector owns and unregisters its retry ticker"),
-		PencilHeader.Contains(TEXT("RetryTickerHandle"), ESearchCase::CaseSensitive)
-		&& PencilSource.Contains(TEXT("RemoveTicker(RetryTickerHandle)"), ESearchCase::CaseSensitive)
-		&& PencilSource.Contains(TEXT("RetryTickerHandle.Reset()"), ESearchCase::CaseSensitive));
+	FPencilConnector Connector;
+	FPencilConnectorTestAccess::ScheduleRetry(Connector);
+	TestTrue(TEXT("Pencil connector reports a scheduled retry ticker"), FPencilConnectorTestAccess::HasRetryTicker(Connector));
+	Connector.Shutdown();
+	TestFalse(TEXT("Shutdown unregisters the retry ticker"), FPencilConnectorTestAccess::HasRetryTicker(Connector));
 	return true;
 }
 

@@ -127,7 +127,7 @@ focused text automation 只能证明局部行为没有明显坏掉，不能单�
 可放行的最低证据是：
 
 - 真实项目验证，不使用 HostProject。
-- full 47-case formal gate。
+- full 71-case formal gate。
 - `summary.no_regression` 没有退步。
 - `validation_against_historical_best.json` 没有落后于当前可追溯历史最佳。
 - 如果使用字体专项独立标准，必须同时证明非字体通道相对 historical best 零退步。

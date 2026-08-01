@@ -172,6 +172,76 @@ namespace
 			&& Inner.Y + Inner.H <= Outer.Y + Outer.H + KINDA_SMALL_NUMBER;
 	}
 
+	bool TryIntersectBounds(const FNodeBounds& A, const FNodeBounds& B, FNodeBounds& OutIntersection)
+	{
+		const float Left = FMath::Max(A.X, B.X);
+		const float Top = FMath::Max(A.Y, B.Y);
+		const float Right = FMath::Min(A.X + A.W, B.X + B.W);
+		const float Bottom = FMath::Min(A.Y + A.H, B.Y + B.H);
+		if (Right <= Left || Bottom <= Top)
+		{
+			return false;
+		}
+
+		OutIntersection.X = Left;
+		OutIntersection.Y = Top;
+		OutIntersection.W = Right - Left;
+		OutIntersection.H = Bottom - Top;
+		return true;
+	}
+
+	bool AreBoundsNearlyEqual(const FNodeBounds& A, const FNodeBounds& B)
+	{
+		return FMath::IsNearlyEqual(A.X, B.X)
+			&& FMath::IsNearlyEqual(A.Y, B.Y)
+			&& FMath::IsNearlyEqual(A.W, B.W)
+			&& FMath::IsNearlyEqual(A.H, B.H);
+	}
+
+	bool IsRenderBoundsClippedByParent(
+		const TSharedPtr<FJsonObject>& NodeObj,
+		const TSharedPtr<FJsonObject>& ParentObj,
+		const FNodeBounds& RenderBounds,
+		const FNodeBounds& LayoutBounds)
+	{
+		if (!ParentObj.IsValid() || !GetBool(ParentObj, TEXT("clipsContent"), false))
+		{
+			return false;
+		}
+
+		const TArray<TSharedPtr<FJsonValue>>* Children = GetArray(NodeObj, TEXT("children"));
+		if ((Children && Children->Num() > 0)
+			|| HasVisibleEffect(NodeObj)
+			|| GetObject(NodeObj, TEXT("arcData")).IsValid())
+		{
+			return false;
+		}
+
+		FNodeBounds ParentLayoutBounds;
+		if (!TryReadBounds(GetObject(ParentObj, TEXT("absoluteBoundingBox")), ParentLayoutBounds))
+		{
+			return false;
+		}
+
+		FNodeBounds EffectiveClipBounds = ParentLayoutBounds;
+		FNodeBounds ParentRenderBounds;
+		FNodeBounds ParentVisibleBounds;
+		if (TryReadBounds(GetObject(ParentObj, TEXT("absoluteRenderBounds")), ParentRenderBounds)
+			&& TryIntersectBounds(ParentLayoutBounds, ParentRenderBounds, ParentVisibleBounds))
+		{
+			EffectiveClipBounds = ParentVisibleBounds;
+		}
+
+		if (FitsWithinBounds(LayoutBounds, EffectiveClipBounds))
+		{
+			return false;
+		}
+
+		FNodeBounds ExpectedVisibleBounds;
+		return TryIntersectBounds(LayoutBounds, EffectiveClipBounds, ExpectedVisibleBounds)
+			&& AreBoundsNearlyEqual(RenderBounds, ExpectedVisibleBounds);
+	}
+
 	bool ShouldKeepShrunkenRenderBounds(
 		const TSharedPtr<FJsonObject>& ParentObj,
 		const FNodeBounds& RenderBounds,
@@ -265,6 +335,17 @@ bool HasVisibleStroke(const TSharedPtr<FJsonObject>& NodeObj)
 	}
 
 	return false;
+}
+
+bool HasParentClippedRenderBounds(
+	const TSharedPtr<FJsonObject>& NodeObj,
+	const TSharedPtr<FJsonObject>& ParentObj)
+{
+	FNodeBounds RenderBounds;
+	FNodeBounds LayoutBounds;
+	return TryReadBounds(GetObject(NodeObj, TEXT("absoluteRenderBounds")), RenderBounds)
+		&& TryReadBounds(GetObject(NodeObj, TEXT("absoluteBoundingBox")), LayoutBounds)
+		&& IsRenderBoundsClippedByParent(NodeObj, ParentObj, RenderBounds, LayoutBounds);
 }
 
 bool HasVisibleEffect(const TSharedPtr<FJsonObject>& NodeObj)

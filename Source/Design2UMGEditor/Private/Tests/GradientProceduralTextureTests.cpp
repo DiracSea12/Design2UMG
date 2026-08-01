@@ -73,6 +73,64 @@ bool FGradientProceduralLinearMultiStopTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGradientProceduralLinearEndpointsTest,
+	"Design2UMG.Gradient.ProceduralLinearEndpoints",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FGradientProceduralLinearEndpointsTest::RunTest(const FString& Parameters)
+{
+	FUMGProceduralResourceRequest Request;
+	Request.MaterialRef = TEXT("gradientlinear");
+	Request.WidthOverride = 9.0f;
+	Request.HeightOverride = 9.0f;
+	Request.MaterialParams = TEXT("{\"StartX\":0.2500,\"StartY\":0.5000,\"EndX\":0.7500,\"EndY\":0.5000,\"Rotation\":0.0000,\"Stops\":[{\"Pos\":0.0000,\"Color\":\"#FF0000FF\"},{\"Pos\":1.0000,\"Color\":\"#0000FFFF\"}]}");
+
+	UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(Request, GetTransientPackage());
+	TestNotNull(TEXT("Linear endpoint procedural texture is generated"), Texture);
+	if (!Texture)
+	{
+		return false;
+	}
+
+	FColor BeforeStart;
+	FColor AtMiddle;
+	FColor AfterEnd;
+	TestTrue(TEXT("Read pixel before linear start"), ReadGeneratedPixel(Texture, 1, 4, BeforeStart));
+	TestTrue(TEXT("Read pixel at linear midpoint"), ReadGeneratedPixel(Texture, 4, 4, AtMiddle));
+	TestTrue(TEXT("Read pixel after linear end"), ReadGeneratedPixel(Texture, 7, 4, AfterEnd));
+	TestTrue(TEXT("Pixels before P0 keep the first stop"), BeforeStart.R > 245 && BeforeStart.B < 10);
+	TestTrue(TEXT("Pixel halfway between P0 and P1 blends both stops"), AtMiddle.R > 80 && AtMiddle.B > 80);
+	TestTrue(TEXT("Pixels after P1 keep the last stop"), AfterEnd.B > 245 && AfterEnd.R < 10);
+
+	FProceduralShapeGenerator::ReleaseTransientTextures();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGradientProceduralLinearEndpointsAspectRatioTest,
+	"Design2UMG.Gradient.ProceduralLinearEndpointsAspectRatio",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FGradientProceduralLinearEndpointsAspectRatioTest::RunTest(const FString& Parameters)
+{
+	FUMGProceduralResourceRequest Request;
+	Request.MaterialRef = TEXT("gradientlinear");
+	Request.WidthOverride = 33.0f;
+	Request.HeightOverride = 5.0f;
+	Request.MaterialParams = TEXT("{\"StartX\":0.0000,\"StartY\":0.0000,\"EndX\":1.0000,\"EndY\":1.0000,\"Rotation\":45.0000,\"Stops\":[{\"Pos\":0.0000,\"Color\":\"#FF0000FF\"},{\"Pos\":1.0000,\"Color\":\"#0000FFFF\"}]}");
+
+	UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(Request, GetTransientPackage());
+	TestNotNull(TEXT("Non-square linear endpoint texture is generated"), Texture);
+	if (!Texture)
+	{
+		return false;
+	}
+
+	FColor Pixel;
+	TestTrue(TEXT("Read non-square gradient sample"), ReadGeneratedPixel(Texture, 24, 0, Pixel));
+	TestTrue(TEXT("Endpoint projection accounts for texture aspect ratio"), Pixel.B > Pixel.R);
+
+	FProceduralShapeGenerator::ReleaseTransientTextures();
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGradientProceduralRadialGeometryTest,
 	"Design2UMG.Gradient.ProceduralRadialGeometry",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
