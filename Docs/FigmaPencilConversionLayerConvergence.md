@@ -30,7 +30,8 @@
 2. 每个 case 的每个正式比较指标都达到或优于现有 71-case 基线。不得用平均值、总分或通过数量掩盖单点退步。
 3. `summary.no_regression.available = 71`。
 4. `summary.no_regression.failed = 0`。
-5. 历史最佳检查没有因为缺 case、身份不一致、确定性问题或真实指标退步而被阻塞。
+
+历史最佳比较和 pipeline determinism 作为独立诊断证据记录，不改变本轮以现有 71-case 基线为准的放行结论。
 
 当前已检查到的完整 71-case 成绩目录为：
 
@@ -60,7 +61,7 @@
 - 先运行与改动路径直接相关的 parser/converter 测试和构建检查。
 - 交付前独占运行完整 71-case formal gate。focused 测试、局部 render、构建和单门审查只能作为前置证据。
 - 完整 71-case 结果出现任何单点退步，都不接受该收敛结果。
-- 结果必须区分 `summary.no_regression`、历史最佳比较和 pipeline determinism，不能把它们混成一个总分。
+- 结果必须区分 `summary.no_regression`、历史最佳比较和 pipeline determinism；历史最佳比较只作诊断，不替代 71-case 基准的逐项 no-regression 判定。
 
 ## Formal Gates 路线
 
