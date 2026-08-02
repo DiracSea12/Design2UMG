@@ -707,7 +707,7 @@ bool FGradientTypedPayloadMaterialParamsTest::RunTest(const FString& Parameters)
 	Node->Type = EDesignNodeType::Rectangle;
 	Node->Transform.SetWidthValue(FDesignSize::Fixed(128.0f));
 	Node->Transform.SetHeightValue(FDesignSize::Fixed(64.0f));
-	Node->Visual.PrimaryFill() = MakeRadialMultiStopGradientFill();
+	Node->Visual.Fills.Add(MakeRadialMultiStopGradientFill());
 
 	FUMGWidgetNode Widget;
 	Widget.Type = TEXT("Image");
@@ -749,15 +749,16 @@ bool FGradientTypedPayloadMaterialParamsTest::RunTest(const FString& Parameters)
 	LinearNode->Type = EDesignNodeType::Rectangle;
 	LinearNode->Transform.SetWidthValue(FDesignSize::Fixed(128.0f));
 	LinearNode->Transform.SetHeightValue(FDesignSize::Fixed(64.0f));
-	LinearNode->Visual.PrimaryFill().Type = EDesignFillType::Gradient;
-	LinearNode->Visual.PrimaryFill().Gradient.GradientType = EDesignGradientType::Linear;
-	LinearNode->Visual.PrimaryFill().Gradient.Rotation = 15.0f;
-	LinearNode->Visual.PrimaryFill().Gradient.StartPoint = FVector2D(0.2f, 0.3f);
-	LinearNode->Visual.PrimaryFill().Gradient.EndPoint = FVector2D(0.8f, 0.7f);
-	FDesignGradientStop& LinearStartStop = LinearNode->Visual.PrimaryFill().Gradient.Colors.AddDefaulted_GetRef();
+	FDesignFill& LinearFill = LinearNode->Visual.Fills.AddDefaulted_GetRef();
+	LinearFill.Type = EDesignFillType::Gradient;
+	LinearFill.Gradient.GradientType = EDesignGradientType::Linear;
+	LinearFill.Gradient.Rotation = 15.0f;
+	LinearFill.Gradient.StartPoint = FVector2D(0.2f, 0.3f);
+	LinearFill.Gradient.EndPoint = FVector2D(0.8f, 0.7f);
+	FDesignGradientStop& LinearStartStop = LinearFill.Gradient.Colors.AddDefaulted_GetRef();
 	LinearStartStop.Color = TEXT("#FF0000FF");
 	LinearStartStop.Position = 0.0f;
-	FDesignGradientStop& LinearEndStop = LinearNode->Visual.PrimaryFill().Gradient.Colors.AddDefaulted_GetRef();
+	FDesignGradientStop& LinearEndStop = LinearFill.Gradient.Colors.AddDefaulted_GetRef();
 	LinearEndStop.Color = TEXT("#0000FFFF");
 	LinearEndStop.Position = 1.0f;
 

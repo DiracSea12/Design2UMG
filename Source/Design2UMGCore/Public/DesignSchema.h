@@ -136,15 +136,6 @@ struct FDesignVisualNodeData
 		static const FDesignFill EmptyFill;
 		return Fills.Num() > 0 ? Fills.Last() : EmptyFill;
 	}
-
-	FDesignFill& PrimaryFill()
-	{
-		if (Fills.Num() == 0)
-		{
-			Fills.AddDefaulted();
-		}
-		return Fills.Last();
-	}
 };
 
 struct FDesignShapeNodeData

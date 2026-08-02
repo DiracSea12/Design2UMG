@@ -128,7 +128,7 @@ namespace
 		Fixture.FlowContainerLeaf->LayoutData.Layout = EDesignLayout::Horizontal;
 
 		Fixture.RenderableLeaf = MakeSharedSemanticsNode(TEXT("keep_renderable"), EDesignNodeType::Rectangle);
-		Fixture.RenderableLeaf->Visual.PrimaryFill() = FDesignFill::FromColor(TEXT("#2288CC"));
+		Fixture.RenderableLeaf->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#2288CC")));
 
 		Fixture.TextLeaf = MakeSharedSemanticsNode(TEXT("keep_text"), EDesignNodeType::Text, FDesignSize::Fixed(220.0f), FDesignSize::Fixed(36.0f));
 		Fixture.TextLeaf->Text.Content = TEXT("Shared semantics consistency check");
@@ -323,7 +323,7 @@ namespace
 			FDesignSize::Fixed(60.0f),
 			FDesignSize::Fixed(20.0f));
 		ReusableCard->bReusable = true;
-		ReusableCard->Visual.PrimaryFill() = FDesignFill::FromColor(TEXT("#AA3344"));
+		ReusableCard->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#AA3344")));
 		Doc.Children.Add(ReusableCard);
 
 		TSharedPtr<FDesignNode> Screen = MakeSharedSemanticsNode(
@@ -345,7 +345,7 @@ namespace
 			EDesignNodeType::Rectangle,
 			FDesignSize::Fill(0.0f),
 			FDesignSize::Fill(0.0f));
-		FillChild->Visual.PrimaryFill() = FDesignFill::FromColor(TEXT("#33AA44"));
+		FillChild->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#33AA44")));
 
 		Screen->Children.Add(RefChild);
 		Screen->Children.Add(FillChild);
@@ -623,15 +623,20 @@ bool FSharedSemanticsVisibleFillOwnerBoundaryTest::RunTest(const FString& Parame
 	TestFalse(TEXT("Shared visible-fill helper rejects empty fill"), Design2UMGCore::SharedSemantics::HasVisibleFill(EmptyFill));
 
 	TSharedPtr<FDesignNode> PrimaryVisibleNode = MakeSharedSemanticsNode(TEXT("primary_visible_fill"), EDesignNodeType::Rectangle);
-	PrimaryVisibleNode->Visual.PrimaryFill() = VisibleFill;
+	PrimaryVisibleNode->Visual.Fills.Add(VisibleFill);
 	TestTrue(TEXT("Shared semantics keeps primary visible fill renderable"), Design2UMGCore::SharedSemantics::HasRenderableVisual(PrimaryVisibleNode));
 	TestTrue(TEXT("Converter visual support still sees primary visible fill"), Design2UMGConverterVisualSupport::HasVisualFill(PrimaryVisibleNode));
 
 	TSharedPtr<FDesignNode> SecondaryPresenceNode = MakeSharedSemanticsNode(TEXT("secondary_fill_presence"), EDesignNodeType::Rectangle);
-	SecondaryPresenceNode->Visual.PrimaryFill() = EmptyFill;
+	SecondaryPresenceNode->Visual.Fills.Add(EmptyFill);
 	SecondaryPresenceNode->Visual.Fills.Add(DisabledFill);
 	TestFalse(TEXT("Shared semantics does not treat disabled secondary fill as renderable"), Design2UMGCore::SharedSemantics::HasRenderableVisual(SecondaryPresenceNode));
 	TestTrue(TEXT("Converter visual support still treats secondary fill presence as visual fill"), Design2UMGConverterVisualSupport::HasVisualFill(SecondaryPresenceNode));
+
+	TSharedPtr<FDesignNode> EmptyNode = MakeSharedSemanticsNode(TEXT("empty_fill_read"), EDesignNodeType::Frame);
+	const FDesignFill& ReadFill = EmptyNode->Visual.PrimaryFill();
+	TestEqual(TEXT("Reading an absent primary fill returns the empty value"), ReadFill.Type, EDesignFillType::None);
+	TestEqual(TEXT("Reading an absent primary fill does not create fill state"), EmptyNode->Visual.Fills.Num(), 0);
 	return true;
 }
 
@@ -675,7 +680,7 @@ bool FNodeWidgetFactoryGeometryFallbackDoesNotMutateInputTest::RunTest(const FSt
 {
 	TSharedPtr<FDesignNode> EllipseNode = MakeSharedSemanticsNode(TEXT("ellipse_fallback"), EDesignNodeType::Ellipse, FDesignSize::Fixed(96.0f), FDesignSize::Fixed(48.0f));
 	EllipseNode->Transform.SetPosition(12.0f, 34.0f);
-	EllipseNode->Visual.PrimaryFill() = FDesignFill::FromColor(TEXT("#FFAA44"));
+	EllipseNode->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#FFAA44")));
 	const FDesignTransformNodeData EllipseTransformBefore = EllipseNode->Transform;
 
 	const Design2UMGNodeWidgetFactory::FBuildResult EllipseResult = Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(EllipseNode);
@@ -685,8 +690,9 @@ bool FNodeWidgetFactoryGeometryFallbackDoesNotMutateInputTest::RunTest(const FSt
 	TestTrue(TEXT("Ellipse fallback still builds widget geometry"), EllipseResult.Widget.Path.Geometry.IsSet() && !EllipseResult.Widget.Path.Geometry.GetValue().IsEmpty());
 
 	TSharedPtr<FDesignNode> RasterizedEllipseNode = MakeSharedSemanticsNode(TEXT("ellipse_raster"), EDesignNodeType::Ellipse, FDesignSize::Fixed(96.0f), FDesignSize::Fixed(48.0f));
-	RasterizedEllipseNode->Visual.PrimaryFill().Type = EDesignFillType::Image;
-	RasterizedEllipseNode->Visual.PrimaryFill().Image.Url = TEXT("/Game/Textures/T_EllipseCrop.T_EllipseCrop");
+	FDesignFill& RasterizedEllipseFill = RasterizedEllipseNode->Visual.Fills.AddDefaulted_GetRef();
+	RasterizedEllipseFill.Type = EDesignFillType::Image;
+	RasterizedEllipseFill.Image.Url = TEXT("/Game/Textures/T_EllipseCrop.T_EllipseCrop");
 	RasterizedEllipseNode->Visual.VectorRasterFallbackImageRef = TEXT("/Game/Textures/T_EllipseCrop.T_EllipseCrop");
 	const Design2UMGNodeWidgetFactory::FBuildResult RasterizedEllipseResult =
 		Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(RasterizedEllipseNode);

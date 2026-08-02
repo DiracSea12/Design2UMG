@@ -707,7 +707,7 @@ bool DesignImportUtils::RenderCompiledBlueprintToPngFile(
 	}
 
 	UE_LOG(LogDesign2UMG, Log,
-		TEXT("DesignImportUtils: Compiled PNG saved: %s (%dx%d)"),
+		TEXT("DesignImportUtils: Rendered PNG saved: %s (%dx%d, compiled blueprint)"),
 		*OutputPngFilePath, ActualSize.X, ActualSize.Y);
 	return true;
 }
