@@ -241,26 +241,6 @@ TArray<FDesignFill> ParseFills(const TArray<TSharedPtr<FJsonValue>>& Fills)
 	return Result;
 }
 
-FDesignFill ParseFill(const TArray<TSharedPtr<FJsonValue>>& Fills)
-{
-	for (int32 Index = Fills.Num() - 1; Index >= 0; --Index)
-	{
-		const TSharedPtr<FJsonObject> FillObj = Fills[Index]->AsObject();
-		if (!FillObj.IsValid() || !GetBool(FillObj, TEXT("visible"), true) || IsSyntheticVectorRasterFill(FillObj))
-		{
-			continue;
-		}
-
-		FDesignFill Fill = ParseSingleFill(FillObj);
-		if (Fill.Type != EDesignFillType::None)
-		{
-			return Fill;
-		}
-	}
-
-	return FDesignFill();
-}
-
 FDesignStroke ParseStroke(const TSharedPtr<FJsonObject>& NodeObj)
 {
 	FDesignStroke Result;

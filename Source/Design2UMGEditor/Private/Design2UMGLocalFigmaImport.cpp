@@ -90,7 +90,7 @@ namespace
 			return false;
 		}
 
-		if (!Node->Source().VectorRasterFallbackImageRef.IsEmpty())
+		if (!Node->Visual.VectorRasterFallbackImageRef.IsEmpty())
 		{
 			return true;
 		}
@@ -100,7 +100,8 @@ namespace
 			return true;
 		}
 
-		if (Node->Visual.Fill.Type == EDesignFillType::Gradient || Node->Visual.Fill.Type == EDesignFillType::Image)
+		const FDesignFill& PrimaryFill = Node->Visual.PrimaryFill();
+		if (PrimaryFill.Type == EDesignFillType::Gradient || PrimaryFill.Type == EDesignFillType::Image)
 		{
 			return true;
 		}
@@ -261,7 +262,7 @@ namespace
 
 		if (!bHasEnabledImageFill)
 		{
-			return Node->Visual.Fill.IsImage() && !Node->Visual.Fill.Image.Url.IsEmpty();
+			return false;
 		}
 
 		return true;
@@ -352,10 +353,6 @@ namespace
 					{
 						return Effect.Type == EDesignEffectType::Blur;
 					});
-					if (Node->Visual.Fills.Num() > 0)
-					{
-						Node->Visual.Fill = Node->Visual.Fills.Last();
-					}
 					BakedCount += PendingBakes.Num();
 				}
 			}
@@ -383,7 +380,7 @@ namespace
 				(Node->Type == EDesignNodeType::Ellipse) ||
 				(Node->Type == EDesignNodeType::Polygon);
 
-			if (bIsVector && !Node->Visual.Fill.IsImage() && NeedsVectorRasterFallback(Node))
+			if (bIsVector && !Node->Visual.PrimaryFill().IsImage() && NeedsVectorRasterFallback(Node))
 			{
 				FString VecKey;
 				FString PngPath;
@@ -398,7 +395,6 @@ namespace
 					ImgFill.Type = EDesignFillType::Image;
 					ImgFill.Image.Url = VecKey;
 					ImgFill.Image.Mode = EDesignImageMode::Fill;
-					Node->Visual.Fill = ImgFill;
 					Node->Visual.Fills.Empty();
 					Node->Visual.Fills.Add(ImgFill);
 					if (!OutMapping.Contains(VecKey))

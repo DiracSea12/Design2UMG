@@ -116,80 +116,80 @@ namespace
 		}
 	}
 
-	void SetBoolFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key, TOptional<bool>& OutValue)
+	TOptional<EDesignAxisAlignment> ParseAxisAlignment(const FString& Value)
 	{
-		if (!Obj.IsValid())
+		if (Value.Equals(TEXT("MIN"), ESearchCase::IgnoreCase)
+			|| Value.Equals(TEXT("LEFT"), ESearchCase::IgnoreCase)
+			|| Value.Equals(TEXT("TOP"), ESearchCase::IgnoreCase))
 		{
-			return;
+			return EDesignAxisAlignment::Start;
 		}
-
-		bool Value = false;
-		if (Obj->TryGetBoolField(Key, Value))
+		if (Value.Equals(TEXT("CENTER"), ESearchCase::IgnoreCase))
 		{
-			OutValue.Emplace(Value);
+			return EDesignAxisAlignment::Center;
 		}
+		if (Value.Equals(TEXT("MAX"), ESearchCase::IgnoreCase)
+			|| Value.Equals(TEXT("RIGHT"), ESearchCase::IgnoreCase)
+			|| Value.Equals(TEXT("BOTTOM"), ESearchCase::IgnoreCase))
+		{
+			return EDesignAxisAlignment::End;
+		}
+		if (Value.Equals(TEXT("STRETCH"), ESearchCase::IgnoreCase)
+			|| Value.Equals(TEXT("FILL"), ESearchCase::IgnoreCase))
+		{
+			return EDesignAxisAlignment::Fill;
+		}
+		return {};
 	}
 
-	void SetJsonFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key, FString& OutValue)
+	void ParseFigmaGridLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 	{
-		if (!Obj.IsValid())
-		{
-			return;
-		}
+		SetIntFieldIfPresent(NodeObj, TEXT("gridRowCount"), OutNode.LayoutData.LayoutRowCount);
+		SetIntFieldIfPresent(NodeObj, TEXT("gridColumnCount"), OutNode.LayoutData.LayoutColumnCount);
+		SetFloatFieldIfPresent(NodeObj, TEXT("gridRowGap"), OutNode.LayoutData.LayoutRowGap);
+		SetFloatFieldIfPresent(NodeObj, TEXT("gridColumnGap"), OutNode.LayoutData.LayoutColumnGap);
+		SetIntFieldIfPresent(NodeObj, TEXT("gridRowSpan"), OutNode.LayoutData.LayoutRowSpan);
+		SetIntFieldIfPresent(NodeObj, TEXT("gridColumnSpan"), OutNode.LayoutData.LayoutColumnSpan);
+		SetIntFieldIfPresent(NodeObj, TEXT("gridRowAnchorIndex"), OutNode.LayoutData.LayoutRow);
+		SetIntFieldIfPresent(NodeObj, TEXT("gridColumnAnchorIndex"), OutNode.LayoutData.LayoutColumn);
 
-		const TSharedPtr<FJsonValue> FieldValue = Obj->TryGetField(Key);
-		if (FieldValue.IsValid())
+		if (OutNode.LayoutData.LayoutRowCount.IsSet())
 		{
-			OutValue = ToCompactString(FieldValue);
+			OutNode.LayoutData.LayoutRowCount = FMath::Max(0, OutNode.LayoutData.LayoutRowCount.GetValue());
 		}
-	}
-
-	void PromoteFigmaGridLayout(FDesignNode& OutNode)
-	{
-		const FDesignSourceNodeData& SourceData = OutNode.Source();
-		if (SourceData.LayoutExtensions.GridRowCount.IsSet())
+		if (OutNode.LayoutData.LayoutColumnCount.IsSet())
 		{
-			OutNode.LayoutData.LayoutRowCount = FMath::Max(0, SourceData.LayoutExtensions.GridRowCount.GetValue());
+			OutNode.LayoutData.LayoutColumnCount = FMath::Max(0, OutNode.LayoutData.LayoutColumnCount.GetValue());
 		}
-		if (SourceData.LayoutExtensions.GridColumnCount.IsSet())
+		if (OutNode.LayoutData.LayoutRowGap.IsSet())
 		{
-			OutNode.LayoutData.LayoutColumnCount = FMath::Max(0, SourceData.LayoutExtensions.GridColumnCount.GetValue());
+			OutNode.LayoutData.LayoutRowGap = FMath::Max(0.0f, OutNode.LayoutData.LayoutRowGap.GetValue());
 		}
-		if (SourceData.LayoutExtensions.GridRowGap.IsSet())
+		else if (OutNode.LayoutData.WrapCrossAxisGap.IsSet())
 		{
-			OutNode.LayoutData.LayoutRowGap = FMath::Max(0.0f, SourceData.LayoutExtensions.GridRowGap.GetValue());
+			OutNode.LayoutData.LayoutRowGap = OutNode.LayoutData.WrapCrossAxisGap;
 		}
-		else if (SourceData.LayoutExtensions.CounterAxisSpacing.IsSet())
+		if (OutNode.LayoutData.LayoutColumnGap.IsSet())
 		{
-			OutNode.LayoutData.LayoutRowGap = FMath::Max(0.0f, SourceData.LayoutExtensions.CounterAxisSpacing.GetValue());
+			OutNode.LayoutData.LayoutColumnGap = FMath::Max(0.0f, OutNode.LayoutData.LayoutColumnGap.GetValue());
 		}
-		if (SourceData.LayoutExtensions.GridColumnGap.IsSet())
+		OutNode.LayoutData.LayoutChildHorizontalAlign = ParseAxisAlignment(GetString(NodeObj, TEXT("gridChildHorizontalAlign")));
+		OutNode.LayoutData.LayoutChildVerticalAlign = ParseAxisAlignment(GetString(NodeObj, TEXT("gridChildVerticalAlign")));
+		if (OutNode.LayoutData.LayoutRowSpan.IsSet())
 		{
-			OutNode.LayoutData.LayoutColumnGap = FMath::Max(0.0f, SourceData.LayoutExtensions.GridColumnGap.GetValue());
+			OutNode.LayoutData.LayoutRowSpan = FMath::Max(1, OutNode.LayoutData.LayoutRowSpan.GetValue());
 		}
-		if (!SourceData.LayoutExtensions.GridChildHorizontalAlign.IsEmpty())
+		if (OutNode.LayoutData.LayoutColumnSpan.IsSet())
 		{
-			OutNode.LayoutData.LayoutChildHorizontalAlign = SourceData.LayoutExtensions.GridChildHorizontalAlign;
+			OutNode.LayoutData.LayoutColumnSpan = FMath::Max(1, OutNode.LayoutData.LayoutColumnSpan.GetValue());
 		}
-		if (!SourceData.LayoutExtensions.GridChildVerticalAlign.IsEmpty())
+		if (OutNode.LayoutData.LayoutRow.IsSet())
 		{
-			OutNode.LayoutData.LayoutChildVerticalAlign = SourceData.LayoutExtensions.GridChildVerticalAlign;
+			OutNode.LayoutData.LayoutRow = FMath::Max(0, OutNode.LayoutData.LayoutRow.GetValue());
 		}
-		if (SourceData.LayoutExtensions.GridRowSpan.IsSet())
+		if (OutNode.LayoutData.LayoutColumn.IsSet())
 		{
-			OutNode.LayoutData.LayoutRowSpan = FMath::Max(1, SourceData.LayoutExtensions.GridRowSpan.GetValue());
-		}
-		if (SourceData.LayoutExtensions.GridColumnSpan.IsSet())
-		{
-			OutNode.LayoutData.LayoutColumnSpan = FMath::Max(1, SourceData.LayoutExtensions.GridColumnSpan.GetValue());
-		}
-		if (SourceData.LayoutExtensions.GridRowAnchorIndex.IsSet())
-		{
-			OutNode.LayoutData.LayoutRow = FMath::Max(0, SourceData.LayoutExtensions.GridRowAnchorIndex.GetValue());
-		}
-		if (SourceData.LayoutExtensions.GridColumnAnchorIndex.IsSet())
-		{
-			OutNode.LayoutData.LayoutColumn = FMath::Max(0, SourceData.LayoutExtensions.GridColumnAnchorIndex.GetValue());
+			OutNode.LayoutData.LayoutColumn = FMath::Max(0, OutNode.LayoutData.LayoutColumn.GetValue());
 		}
 	}
 
@@ -200,7 +200,7 @@ namespace
 			return false;
 		}
 
-		if (Child->Source().LayoutExtensions.LayoutAlign.Equals(TEXT("STRETCH"), ESearchCase::IgnoreCase))
+		if (Child->LayoutData.SelfAlignment.Get(EDesignAxisAlignment::Start) == EDesignAxisAlignment::Fill)
 		{
 			return true;
 		}
@@ -325,6 +325,16 @@ void ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 
 	OutNode.LayoutData.bAbsoluteLayoutPositioning =
 		GetString(NodeObj, TEXT("layoutPositioning")).Equals(TEXT("ABSOLUTE"), ESearchCase::IgnoreCase);
+	OutNode.LayoutData.SelfAlignment = ParseAxisAlignment(GetString(NodeObj, TEXT("layoutAlign")));
+	const FString OverflowDirection = GetString(NodeObj, TEXT("overflowDirection"));
+	if (OverflowDirection.Equals(TEXT("HORIZONTAL_SCROLLING"), ESearchCase::IgnoreCase))
+	{
+		OutNode.LayoutData.Overflow = EDesignOverflow::HorizontalScrolling;
+	}
+	else if (OverflowDirection.Equals(TEXT("VERTICAL_SCROLLING"), ESearchCase::IgnoreCase))
+	{
+		OutNode.LayoutData.Overflow = EDesignOverflow::VerticalScrolling;
+	}
 
 	FigmaParserMetadata::CaptureLayoutMetadataExtensions(NodeObj, OutNode.Metadata);
 	AddBoolExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("itemReverseZIndex"));
@@ -377,44 +387,21 @@ void ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 
 	OutNode.LayoutData.SetClipValue(GetBool(NodeObj, TEXT("clipsContent"), false));
 
-	FDesignLayoutExtensions& LayoutExtensions = OutNode.MutableSource().LayoutExtensions;
-	Private::SetStringFieldIfPresent(NodeObj, TEXT("layoutWrap"), LayoutExtensions.LayoutWrap);
-	Private::SetStringFieldIfPresent(NodeObj, TEXT("counterAxisAlignContent"), LayoutExtensions.CounterAxisAlignContent);
-	Private::SetStringFieldIfPresent(NodeObj, TEXT("layoutPositioning"), LayoutExtensions.LayoutPositioning);
-	Private::SetStringFieldIfPresent(NodeObj, TEXT("layoutAlign"), LayoutExtensions.LayoutAlign);
-	Private::SetStringFieldIfPresent(NodeObj, TEXT("primaryAxisSizingMode"), LayoutExtensions.PrimaryAxisSizingMode);
-	Private::SetStringFieldIfPresent(NodeObj, TEXT("counterAxisSizingMode"), LayoutExtensions.CounterAxisSizingMode);
-	Private::SetStringFieldIfPresent(NodeObj, TEXT("gridRowsSizing"), LayoutExtensions.GridRowsSizing);
-	Private::SetStringFieldIfPresent(NodeObj, TEXT("gridColumnsSizing"), LayoutExtensions.GridColumnsSizing);
-	Private::SetStringFieldIfPresent(NodeObj, TEXT("gridChildHorizontalAlign"), LayoutExtensions.GridChildHorizontalAlign);
-	Private::SetStringFieldIfPresent(NodeObj, TEXT("gridChildVerticalAlign"), LayoutExtensions.GridChildVerticalAlign);
-	SetFloatFieldIfPresent(NodeObj, TEXT("counterAxisSpacing"), LayoutExtensions.CounterAxisSpacing);
-	SetFloatFieldIfPresent(NodeObj, TEXT("minWidth"), LayoutExtensions.MinWidth);
-	SetFloatFieldIfPresent(NodeObj, TEXT("maxWidth"), LayoutExtensions.MaxWidth);
-	SetFloatFieldIfPresent(NodeObj, TEXT("minHeight"), LayoutExtensions.MinHeight);
-	SetFloatFieldIfPresent(NodeObj, TEXT("maxHeight"), LayoutExtensions.MaxHeight);
-	SetIntFieldIfPresent(NodeObj, TEXT("gridRowCount"), LayoutExtensions.GridRowCount);
-	SetIntFieldIfPresent(NodeObj, TEXT("gridColumnCount"), LayoutExtensions.GridColumnCount);
-	SetFloatFieldIfPresent(NodeObj, TEXT("gridRowGap"), LayoutExtensions.GridRowGap);
-	SetFloatFieldIfPresent(NodeObj, TEXT("gridColumnGap"), LayoutExtensions.GridColumnGap);
-	SetIntFieldIfPresent(NodeObj, TEXT("gridRowSpan"), LayoutExtensions.GridRowSpan);
-	SetIntFieldIfPresent(NodeObj, TEXT("gridColumnSpan"), LayoutExtensions.GridColumnSpan);
-	SetIntFieldIfPresent(NodeObj, TEXT("gridColumnAnchorIndex"), LayoutExtensions.GridColumnAnchorIndex);
-	SetIntFieldIfPresent(NodeObj, TEXT("gridRowAnchorIndex"), LayoutExtensions.GridRowAnchorIndex);
-	SetBoolFieldIfPresent(NodeObj, TEXT("itemReverseZIndex"), LayoutExtensions.ItemReverseZIndex);
-	// Typed source extensions are the primary storage for stroke-in-layout semantics.
-	SetBoolFieldIfPresent(NodeObj, TEXT("strokesIncludedInLayout"), LayoutExtensions.StrokesIncludedInLayout);
-	SetJsonFieldIfPresent(NodeObj, TEXT("boundVariables"), LayoutExtensions.BoundVariablesJson);
-	PromoteFigmaGridLayout(OutNode);
+	SetFloatFieldIfPresent(NodeObj, TEXT("counterAxisSpacing"), OutNode.LayoutData.WrapCrossAxisGap);
+	if (OutNode.LayoutData.WrapCrossAxisGap.IsSet())
+	{
+		OutNode.LayoutData.WrapCrossAxisGap = FMath::Max(0.0f, OutNode.LayoutData.WrapCrossAxisGap.GetValue());
+	}
+	ParseFigmaGridLayout(NodeObj, OutNode);
 
-	OutNode.LayoutData.bHasPaddingRuntimeWrapDecision = true;
+	OutNode.LayoutData.PaddingRequiresRuntimeWrap = false;
 	if (OutNode.LayoutData.Layout == EDesignLayout::Horizontal || OutNode.LayoutData.Layout == EDesignLayout::Vertical)
 	{
-		OutNode.LayoutData.bPaddingRequiresRuntimeWrap = false;
+		OutNode.LayoutData.PaddingRequiresRuntimeWrap = false;
 	}
 	else
 	{
-		OutNode.LayoutData.bPaddingRequiresRuntimeWrap =
+		OutNode.LayoutData.PaddingRequiresRuntimeWrap =
 			OutNode.LayoutData.Layout == EDesignLayout::None
 			|| OutNode.LayoutData.Layout == EDesignLayout::Wrap
 			|| OutNode.LayoutData.Layout == EDesignLayout::Grid;
@@ -427,6 +414,10 @@ void ParseSize(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObj
 	FNodeBounds LayoutBounds;
 	const bool bHasVisualBounds = TryGetVisualBounds(NodeObj, ParentObj, VisualBounds);
 	const bool bHasLayoutBounds = TryReadBounds(GetObject(NodeObj, TEXT("absoluteBoundingBox")), LayoutBounds);
+	if (bHasLayoutBounds)
+	{
+		OutNode.Transform.LayoutBoundsSize = FVector2D(LayoutBounds.W, LayoutBounds.H);
+	}
 
 	const FNodeBounds& EffectiveBounds = bParentHasAutoLayout
 		? (bHasLayoutBounds ? LayoutBounds : VisualBounds)
@@ -518,11 +509,11 @@ void FinalizeNodePaddingRuntimeWrap(FDesignNode& Node, bool bInsideInstanceSubtr
 {
 	if (Node.LayoutData.Layout == EDesignLayout::Horizontal || Node.LayoutData.Layout == EDesignLayout::Vertical)
 	{
-		Node.LayoutData.bPaddingRequiresRuntimeWrap = ShouldFigmaAutoLayoutPaddingWrapAtRuntime(Node, bInsideInstanceSubtree);
+		Node.LayoutData.PaddingRequiresRuntimeWrap = ShouldFigmaAutoLayoutPaddingWrapAtRuntime(Node, bInsideInstanceSubtree);
 	}
 	else if (Node.LayoutData.Layout == EDesignLayout::Wrap || Node.LayoutData.Layout == EDesignLayout::Grid)
 	{
-		Node.LayoutData.bPaddingRequiresRuntimeWrap = Node.Children.Num() > 0;
+		Node.LayoutData.PaddingRequiresRuntimeWrap = Node.Children.Num() > 0;
 	}
 }
 }

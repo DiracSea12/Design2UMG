@@ -294,14 +294,6 @@ namespace
 				continue;
 			}
 
-			if (Node->Visual.Fill.IsImage() && !Node->Visual.Fill.Image.Url.IsEmpty())
-			{
-				if (const FString* ResolvedPath = ImageKeyToPath.Find(Node->Visual.Fill.Image.Url))
-				{
-					Node->Visual.Fill.Image.Url = *ResolvedPath;
-				}
-			}
-
 			for (FDesignFill& Fill : Node->Visual.Fills)
 			{
 				if (Fill.IsImage() && !Fill.Image.Url.IsEmpty())
@@ -336,7 +328,6 @@ namespace
 				}
 			};
 
-			TryAddImagePath(Node->Visual.Fill);
 			for (const FDesignFill& Fill : Node->Visual.Fills)
 			{
 				TryAddImagePath(Fill);
@@ -529,7 +520,6 @@ int32 DesignImageBakeUtils::BakeMappedImageBlendOverlays(
 			continue;
 		}
 
-		bool bNodeChanged = false;
 		for (int32 FillIndex = 0; FillIndex < Node->Visual.Fills.Num(); ++FillIndex)
 		{
 			FDesignFill& Fill = Node->Visual.Fills[FillIndex];
@@ -600,13 +590,7 @@ int32 DesignImageBakeUtils::BakeMappedImageBlendOverlays(
 			Fill.Opacity = 1.0f;
 			Fill.BlendMode = TEXT("NORMAL");
 			Fill.Image.ScalingFactor.Reset();
-			bNodeChanged = true;
 			++BakedCount;
-		}
-
-		if (bNodeChanged && Node->Visual.Fills.Num() > 0)
-		{
-			Node->Visual.Fill = Node->Visual.Fills.Last();
 		}
 
 		for (const TSharedPtr<FDesignNode>& Child : Node->Children)

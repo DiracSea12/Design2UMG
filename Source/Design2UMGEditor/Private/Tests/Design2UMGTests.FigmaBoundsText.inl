@@ -71,7 +71,7 @@ bool FFigmaComplexParserTest::RunTest(const FString& Parameters)
 	{
 		const auto& Avatar = Header->Children[1];
 		TestEqual(TEXT("Avatar type"), Avatar->Type, EDesignNodeType::Ellipse);
-		TestTrue(TEXT("Avatar has image fill"), Avatar->Visual.Fill.IsImage());
+		TestTrue(TEXT("Avatar has image fill"), Avatar->Visual.PrimaryFill().IsImage());
 		TestTrue(TEXT("Avatar multi-fills >= 2"), Avatar->Visual.Fills.Num() >= 2);
 	}
 	// StatCard: GRADIENT_LINEAR + DROP_SHADOW
@@ -79,9 +79,9 @@ bool FFigmaComplexParserTest::RunTest(const FString& Parameters)
 	if (StatsRow->Children.Num() >= 1)
 	{
 		const auto& Card = StatsRow->Children[0];
-		TestEqual(TEXT("Card fill gradient"), Card->Visual.Fill.Type, EDesignFillType::Gradient);
-		TestEqual(TEXT("Card gradient type"), Card->Visual.Fill.Gradient.GradientType, EDesignGradientType::Linear);
-		TestTrue(TEXT("Card gradient stops >= 2"), Card->Visual.Fill.Gradient.Colors.Num() >= 2);
+		TestEqual(TEXT("Card fill gradient"), Card->Visual.PrimaryFill().Type, EDesignFillType::Gradient);
+		TestEqual(TEXT("Card gradient type"), Card->Visual.PrimaryFill().Gradient.GradientType, EDesignGradientType::Linear);
+		TestTrue(TEXT("Card gradient stops >= 2"), Card->Visual.PrimaryFill().Gradient.Colors.Num() >= 2);
 		TestTrue(TEXT("Card has effects"), Card->Visual.Effects.Num() > 0);
 		TestEqual(TEXT("Card shadow type"), Card->Visual.Effects[0].Type, EDesignEffectType::Shadow);
 		TestFalse(TEXT("Card shadow not inner"), Card->Visual.Effects[0].Shadow.bInner);
@@ -125,11 +125,11 @@ bool FFigmaComplexParserTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("BoolOp type"), Overlay->Children[4]->Type, EDesignNodeType::Path);
 		// IMAGE fill with imageTransform + opacity
 		const auto& ImgCard = Overlay->Children[5];
-		TestTrue(TEXT("ImgCard has image fill"), ImgCard->Visual.Fill.IsImage());
+		TestTrue(TEXT("ImgCard has image fill"), ImgCard->Visual.PrimaryFill().IsImage());
 		TestTrue(TEXT("ImgCard opacity < 1"), ImgCard->Transform.Opacity < 1.0f);
 		// GRADIENT_RADIAL
 		const auto& GradBg = Overlay->Children[6];
-		TestEqual(TEXT("GradBg gradient type"), GradBg->Visual.Fill.Gradient.GradientType, EDesignGradientType::Radial);
+		TestEqual(TEXT("GradBg gradient type"), GradBg->Visual.PrimaryFill().Gradient.GradientType, EDesignGradientType::Radial);
 	}
 	// Justified text + textAlignVertical BOTTOM + textAutoResize NONE
 	if (Overlay->Children.Num() >= 8)

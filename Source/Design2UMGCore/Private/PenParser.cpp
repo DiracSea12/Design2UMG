@@ -463,8 +463,6 @@ TSharedPtr<FDesignNode> ParseNodeAtDepth(
 		bool bLayoutIncludeStroke = false;
 		if (TryGetResolvedBoolField(JsonObj, TEXT("layoutIncludeStroke"), *ActiveResolver, bLayoutIncludeStroke))
 		{
-			// Typed source extensions are the primary storage; keep the Pen key as an explicit source-shaped alias.
-			Node->MutableSource().LayoutExtensions.StrokesIncludedInLayout = bLayoutIncludeStroke;
 			Node->Metadata.Add(TEXT("layoutIncludeStroke"), bLayoutIncludeStroke ? TEXT("true") : TEXT("false"));
 		}
 	}
@@ -522,10 +520,11 @@ void AppendParsedChildrenAtDepth(
 
 void ParseNodeFillProperties(const TSharedPtr<FJsonValue>& Value, FDesignNode& OutNode, const FDesignVariableResolver& Resolver)
 {
-	OutNode.Visual.Fill = ParseFill(Value, Resolver);
 	OutNode.Visual.Fills.Empty();
+	OutNode.Visual.bFillExplicitClear = false;
 	if (Value.IsValid() && Value->Type == EJson::Array)
 	{
+		OutNode.Visual.bFillExplicitClear = Value->AsArray().Num() == 0;
 		for (const TSharedPtr<FJsonValue>& Item : Value->AsArray())
 		{
 			FDesignFill Fill = ParseFill(Item, Resolver);
@@ -533,9 +532,14 @@ void ParseNodeFillProperties(const TSharedPtr<FJsonValue>& Value, FDesignNode& O
 				OutNode.Visual.Fills.Add(MoveTemp(Fill));
 		}
 	}
-	else if (OutNode.Visual.Fill.Type != EDesignFillType::None)
+	else
 	{
-		OutNode.Visual.Fills.Add(OutNode.Visual.Fill);
+		FDesignFill Fill = ParseFill(Value, Resolver);
+		OutNode.Visual.bFillExplicitClear = Fill.bExplicitClear;
+		if (Fill.Type != EDesignFillType::None && Fill.bEnabled)
+		{
+			OutNode.Visual.Fills.Add(MoveTemp(Fill));
+		}
 	}
 }
 
@@ -625,12 +629,28 @@ void ParseNodeStrokeProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNo
 	if (JsonObj->TryGetStringField(TEXT("strokeLinecap"), StrokeLinecap))
 	{
 		OutNode.Metadata.Add(TEXT("stroke.cap"), StrokeLinecap);
+		if (StrokeLinecap.Equals(TEXT("round"), ESearchCase::IgnoreCase))
+		{
+			Stroke.Cap = TEXT("round");
+		}
+		else if (StrokeLinecap.Equals(TEXT("square"), ESearchCase::IgnoreCase))
+		{
+			Stroke.Cap = TEXT("square");
+		}
 	}
 
 	FString StrokeLinejoin;
 	if (JsonObj->TryGetStringField(TEXT("strokeLinejoin"), StrokeLinejoin))
 	{
 		OutNode.Metadata.Add(TEXT("stroke.join"), StrokeLinejoin);
+		if (StrokeLinejoin.Equals(TEXT("round"), ESearchCase::IgnoreCase))
+		{
+			Stroke.Join = TEXT("round");
+		}
+		else if (StrokeLinejoin.Equals(TEXT("bevel"), ESearchCase::IgnoreCase))
+		{
+			Stroke.Join = TEXT("bevel");
+		}
 	}
 
 	if (TryParsePenStrokeThickness(JsonObj->TryGetField(TEXT("strokeWidth")), Resolver, Stroke.Thickness))

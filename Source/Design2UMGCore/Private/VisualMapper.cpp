@@ -45,12 +45,16 @@ namespace
 
 	bool HasOpaqueSolidFill(const TSharedPtr<FDesignNode>& Node)
 	{
-		if (!Node.IsValid() || !Node->Visual.Fill.bEnabled || Node->Visual.Fill.Type != EDesignFillType::Color || Node->Visual.Fill.SolidColor.IsEmpty())
+		if (!Node.IsValid())
 		{
 			return false;
 		}
 
-		return FUMGValueParser::ParseColor(Node->Visual.Fill.SolidColor).A > KINDA_SMALL_NUMBER;
+		const FDesignFill& PrimaryFill = Node->Visual.PrimaryFill();
+		return PrimaryFill.bEnabled
+			&& PrimaryFill.Type == EDesignFillType::Color
+			&& !PrimaryFill.SolidColor.IsEmpty()
+			&& FUMGValueParser::ParseColor(PrimaryFill.SolidColor).A > KINDA_SMALL_NUMBER;
 	}
 
 	bool HasPlaceholderSurfaceChildren(const TSharedPtr<FDesignNode>& Node)

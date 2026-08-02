@@ -128,7 +128,7 @@ namespace
 		Fixture.FlowContainerLeaf->LayoutData.Layout = EDesignLayout::Horizontal;
 
 		Fixture.RenderableLeaf = MakeSharedSemanticsNode(TEXT("keep_renderable"), EDesignNodeType::Rectangle);
-		Fixture.RenderableLeaf->Visual.Fill = FDesignFill::FromColor(TEXT("#2288CC"));
+		Fixture.RenderableLeaf->Visual.PrimaryFill() = FDesignFill::FromColor(TEXT("#2288CC"));
 
 		Fixture.TextLeaf = MakeSharedSemanticsNode(TEXT("keep_text"), EDesignNodeType::Text, FDesignSize::Fixed(220.0f), FDesignSize::Fixed(36.0f));
 		Fixture.TextLeaf->Text.Content = TEXT("Shared semantics consistency check");
@@ -323,7 +323,7 @@ namespace
 			FDesignSize::Fixed(60.0f),
 			FDesignSize::Fixed(20.0f));
 		ReusableCard->bReusable = true;
-		ReusableCard->Visual.Fill = FDesignFill::FromColor(TEXT("#AA3344"));
+		ReusableCard->Visual.PrimaryFill() = FDesignFill::FromColor(TEXT("#AA3344"));
 		Doc.Children.Add(ReusableCard);
 
 		TSharedPtr<FDesignNode> Screen = MakeSharedSemanticsNode(
@@ -345,7 +345,7 @@ namespace
 			EDesignNodeType::Rectangle,
 			FDesignSize::Fill(0.0f),
 			FDesignSize::Fill(0.0f));
-		FillChild->Visual.Fill = FDesignFill::FromColor(TEXT("#33AA44"));
+		FillChild->Visual.PrimaryFill() = FDesignFill::FromColor(TEXT("#33AA44"));
 
 		Screen->Children.Add(RefChild);
 		Screen->Children.Add(FillChild);
@@ -623,12 +623,12 @@ bool FSharedSemanticsVisibleFillOwnerBoundaryTest::RunTest(const FString& Parame
 	TestFalse(TEXT("Shared visible-fill helper rejects empty fill"), Design2UMGCore::SharedSemantics::HasVisibleFill(EmptyFill));
 
 	TSharedPtr<FDesignNode> PrimaryVisibleNode = MakeSharedSemanticsNode(TEXT("primary_visible_fill"), EDesignNodeType::Rectangle);
-	PrimaryVisibleNode->Visual.Fill = VisibleFill;
+	PrimaryVisibleNode->Visual.PrimaryFill() = VisibleFill;
 	TestTrue(TEXT("Shared semantics keeps primary visible fill renderable"), Design2UMGCore::SharedSemantics::HasRenderableVisual(PrimaryVisibleNode));
 	TestTrue(TEXT("Converter visual support still sees primary visible fill"), Design2UMGConverterVisualSupport::HasVisualFill(PrimaryVisibleNode));
 
 	TSharedPtr<FDesignNode> SecondaryPresenceNode = MakeSharedSemanticsNode(TEXT("secondary_fill_presence"), EDesignNodeType::Rectangle);
-	SecondaryPresenceNode->Visual.Fill = EmptyFill;
+	SecondaryPresenceNode->Visual.PrimaryFill() = EmptyFill;
 	SecondaryPresenceNode->Visual.Fills.Add(DisabledFill);
 	TestFalse(TEXT("Shared semantics does not treat disabled secondary fill as renderable"), Design2UMGCore::SharedSemantics::HasRenderableVisual(SecondaryPresenceNode));
 	TestTrue(TEXT("Converter visual support still treats secondary fill presence as visual fill"), Design2UMGConverterVisualSupport::HasVisualFill(SecondaryPresenceNode));
@@ -675,7 +675,7 @@ bool FNodeWidgetFactoryGeometryFallbackDoesNotMutateInputTest::RunTest(const FSt
 {
 	TSharedPtr<FDesignNode> EllipseNode = MakeSharedSemanticsNode(TEXT("ellipse_fallback"), EDesignNodeType::Ellipse, FDesignSize::Fixed(96.0f), FDesignSize::Fixed(48.0f));
 	EllipseNode->Transform.SetPosition(12.0f, 34.0f);
-	EllipseNode->Visual.Fill = FDesignFill::FromColor(TEXT("#FFAA44"));
+	EllipseNode->Visual.PrimaryFill() = FDesignFill::FromColor(TEXT("#FFAA44"));
 	const FDesignTransformNodeData EllipseTransformBefore = EllipseNode->Transform;
 
 	const Design2UMGNodeWidgetFactory::FBuildResult EllipseResult = Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(EllipseNode);
@@ -685,14 +685,14 @@ bool FNodeWidgetFactoryGeometryFallbackDoesNotMutateInputTest::RunTest(const FSt
 	TestTrue(TEXT("Ellipse fallback still builds widget geometry"), EllipseResult.Widget.Path.Geometry.IsSet() && !EllipseResult.Widget.Path.Geometry.GetValue().IsEmpty());
 
 	TSharedPtr<FDesignNode> RasterizedEllipseNode = MakeSharedSemanticsNode(TEXT("ellipse_raster"), EDesignNodeType::Ellipse, FDesignSize::Fixed(96.0f), FDesignSize::Fixed(48.0f));
-	RasterizedEllipseNode->Visual.Fill.Type = EDesignFillType::Image;
-	RasterizedEllipseNode->Visual.Fill.Image.Url = TEXT("/Game/Textures/T_EllipseCrop.T_EllipseCrop");
-	RasterizedEllipseNode->MutableSource().VectorRasterFallbackImageRef = TEXT("/Game/Textures/T_EllipseCrop.T_EllipseCrop");
+	RasterizedEllipseNode->Visual.PrimaryFill().Type = EDesignFillType::Image;
+	RasterizedEllipseNode->Visual.PrimaryFill().Image.Url = TEXT("/Game/Textures/T_EllipseCrop.T_EllipseCrop");
+	RasterizedEllipseNode->Visual.VectorRasterFallbackImageRef = TEXT("/Game/Textures/T_EllipseCrop.T_EllipseCrop");
 	const Design2UMGNodeWidgetFactory::FBuildResult RasterizedEllipseResult =
 		Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(RasterizedEllipseNode);
 	TestEqual(TEXT("Full pre-rasterized ellipse keeps its ellipse mask"), RasterizedEllipseResult.Widget.Type, TEXT("Border"));
 
-	RasterizedEllipseNode->Metadata.Add(Design2UMGSourceMetadata::RenderBoundsClippedByParentKey, TEXT("true"));
+	RasterizedEllipseNode->Visual.bRenderBoundsClippedByParent = true;
 	const Design2UMGNodeWidgetFactory::FBuildResult ClippedRasterizedEllipseResult =
 		Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(RasterizedEllipseNode);
 	TestEqual(TEXT("Parent-clipped rasterized ellipse does not add another ellipse mask"), ClippedRasterizedEllipseResult.Widget.Type, TEXT("Image"));
@@ -719,10 +719,9 @@ bool FNodeWidgetFactoryGeometryFallbackDoesNotMutateInputTest::RunTest(const FSt
 		FDesignSize::Fixed(322.1843f));
 	DashedVectorNode->Visual.Stroke.Thickness.Uniform = 5.11084f;
 	DashedVectorNode->Visual.Stroke.Fill = FDesignFill::FromColor(TEXT("#CDE7FFFF"));
-	DashedVectorNode->Metadata.Add(TEXT("stroke.dashes"), TEXT("21.173479,21.173479"));
-	DashedVectorNode->Metadata.Add(TEXT("stroke.cap"), TEXT("ROUND"));
-	DashedVectorNode->Metadata.Add(TEXT("source.renderBoundsDeltaW"), TEXT("27.257773"));
-	DashedVectorNode->Metadata.Add(TEXT("source.renderBoundsDeltaH"), TEXT("16.184288"));
+	DashedVectorNode->Visual.Stroke.DashPattern = {21.173479f, 21.173479f};
+	DashedVectorNode->Visual.Stroke.Cap = TEXT("round");
+	DashedVectorNode->Transform.LayoutBoundsSize = FVector2D(0.000027f, 306.0f);
 
 	const Design2UMGNodeWidgetFactory::FBuildResult DashedVectorResult =
 		Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(DashedVectorNode);
@@ -752,7 +751,7 @@ bool FPublicSurfacePostReviewFixesGuardTest::RunTest(const FString& Parameters)
 	LayoutData.LayoutColumn = 1;
 	LayoutData.LayoutRowSpan = 2;
 	LayoutData.LayoutColumnGap = 16.0f;
-	LayoutData.LayoutChildHorizontalAlign = TEXT("CENTER");
+	LayoutData.LayoutChildHorizontalAlign = EDesignAxisAlignment::Center;
 
 	TestTrue(TEXT("Public grid row flag still drives explicit grid position"), LayoutData.HasExplicitGridPosition());
 	TestTrue(TEXT("Direct optional row storage is set"), LayoutData.LayoutRow.IsSet());
@@ -762,8 +761,8 @@ bool FPublicSurfacePostReviewFixesGuardTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Direct optional returns column gap"), LayoutData.LayoutColumnGap.Get(0.0f), 16.0f);
 	TestEqual(
 		TEXT("Direct optional returns child horizontal alignment"),
-		LayoutData.LayoutChildHorizontalAlign.Get(FString(TEXT("Left"))),
-		FString(TEXT("CENTER")));
+		LayoutData.LayoutChildHorizontalAlign.Get(EDesignAxisAlignment::Start),
+		EDesignAxisAlignment::Center);
 
 	LayoutData.LayoutRow.Reset();
 	TestFalse(TEXT("Direct optional reset clears public row presence"), LayoutData.LayoutRow.IsSet());
@@ -891,7 +890,6 @@ bool FConversionLuminosityOpacitySettingsPayloadTest::RunTest(const FString& Par
 		EDesignNodeType::Frame,
 		FDesignSize::Fixed(160.0f),
 		FDesignSize::Fixed(96.0f));
-	CardNode->Visual.Fill = SolidFill;
 	CardNode->Visual.Fills = { SolidFill, ImageFill };
 	Doc.Children.Add(CardNode);
 

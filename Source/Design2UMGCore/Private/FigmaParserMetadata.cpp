@@ -168,26 +168,38 @@ namespace FigmaParserMetadata
 			return;
 		}
 
-		const struct
+		const FString ImageRef = GetString(Obj, TEXT("design2umgRenderFallbackImageRef"));
+		if (!ImageRef.IsEmpty())
 		{
-			const TCHAR* SourceKey;
-			FString FDesignRenderFallbackData::* TargetField;
+			OutNode.Visual.RenderFallback.ImageRef = ImageRef;
 		}
-		RenderFallbackKeys[] = {
-			{ TEXT("design2umgRenderFallbackImageRef"), &FDesignRenderFallbackData::ImageRef },
-			{ TEXT("design2umgRenderFallbackScope"), &FDesignRenderFallbackData::Scope },
-			{ TEXT("design2umgRenderFallbackSource"), &FDesignRenderFallbackData::Source },
-			{ TEXT("design2umgRenderFallbackReason"), &FDesignRenderFallbackData::Reason },
-		};
 
-		for (const auto& KeyPair : RenderFallbackKeys)
+		const FString Scope = GetString(Obj, TEXT("design2umgRenderFallbackScope"));
+		if (Scope.Equals(TEXT("subtree"), ESearchCase::IgnoreCase))
 		{
-			const FString Value = GetString(Obj, FString(KeyPair.SourceKey));
+			OutNode.Visual.RenderFallback.Scope = EDesignRenderFallbackScope::Subtree;
+		}
+		else if (!Scope.IsEmpty() && !Scope.Equals(TEXT("full"), ESearchCase::IgnoreCase))
+		{
+			OutNode.Visual.RenderFallback.Scope = EDesignRenderFallbackScope::Unsupported;
+		}
+
+		for (const TCHAR* Key : {
+			 TEXT("design2umgRenderFallbackImageRef"),
+			 TEXT("design2umgRenderFallbackScope"),
+			 TEXT("design2umgRenderFallbackSource"),
+			 TEXT("design2umgRenderFallbackReason") })
+		{
+			const FString Value = GetString(Obj, Key);
 			if (!Value.IsEmpty())
 			{
-				OutNode.MutableSource().RenderFallback.*(KeyPair.TargetField) = Value;
+				OutNode.Metadata.Add(Key, Value);
 			}
 		}
+
+		OutNode.Visual.RenderFallback.bSuppressedBySourceSemantics =
+			OutNode.Source().ComponentInstance.bIsInstance
+			|| OutNode.Source().Prototype.Interactions.Num() > 0;
 	}
 
 	void CaptureSharedMetadataExtensions(const TSharedPtr<FJsonObject>& Obj, TMap<FString, FString>& Extensions)

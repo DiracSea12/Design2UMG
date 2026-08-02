@@ -59,8 +59,7 @@ void ApplyNodeLayoutProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNo
 	{
 		OutNode.LayoutData.SetPadding(ParsePadding(JsonObj->TryGetField(TEXT("padding")), Resolver));
 	}
-	OutNode.LayoutData.bHasPaddingRuntimeWrapDecision = true;
-	OutNode.LayoutData.bPaddingRequiresRuntimeWrap =
+	OutNode.LayoutData.PaddingRequiresRuntimeWrap =
 		OutNode.LayoutData.Layout == EDesignLayout::None
 		|| OutNode.LayoutData.Layout == EDesignLayout::Wrap
 		|| OutNode.LayoutData.Layout == EDesignLayout::Grid;

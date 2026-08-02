@@ -100,6 +100,40 @@ enum class EDesignAlignItems : uint8
 };
 
 /**
+ * Axis-relative child alignment used after source-specific layout values are normalized.
+ */
+UENUM()
+enum class EDesignAxisAlignment : uint8
+{
+	Start,
+	Center,
+	End,
+	Fill
+};
+
+/**
+ * Runtime overflow behavior after source-specific values are normalized.
+ */
+UENUM()
+enum class EDesignOverflow : uint8
+{
+	None,
+	HorizontalScrolling,
+	VerticalScrolling
+};
+
+/**
+ * Supported render-fallback replacement scope.
+ */
+UENUM()
+enum class EDesignRenderFallbackScope : uint8
+{
+	Leaf,
+	Subtree,
+	Unsupported
+};
+
+/**
  * Gradient type enumeration.
  */
 UENUM()
@@ -396,6 +430,15 @@ struct FDesignStroke
 
 	UPROPERTY()
 	TOptional<FDesignFill> Fill;
+
+	UPROPERTY()
+	FString Cap = TEXT("butt");
+
+	UPROPERTY()
+	FString Join = TEXT("miter");
+
+	UPROPERTY()
+	TArray<float> DashPattern;
 
 	bool HasStroke() const { return Thickness.bUniform ? Thickness.Uniform > 0 :
 		(Thickness.Top > 0 || Thickness.Right > 0 || Thickness.Bottom > 0 || Thickness.Left > 0); }

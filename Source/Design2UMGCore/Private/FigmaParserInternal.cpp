@@ -642,6 +642,34 @@ static void CaptureFigmaStrokeMetadata(
 	const TSharedPtr<FJsonObject>& NodeObj,
 	FDesignNode& OutNode)
 {
+	const FString StrokeCap = GetString(NodeObj, TEXT("strokeCap"));
+	if (!StrokeCap.IsEmpty())
+	{
+		OutNode.Metadata.Add(TEXT("stroke.cap"), StrokeCap);
+		if (StrokeCap.Equals(TEXT("ROUND"), ESearchCase::IgnoreCase))
+		{
+			OutNode.Visual.Stroke.Cap = TEXT("round");
+		}
+		else if (StrokeCap.Equals(TEXT("SQUARE"), ESearchCase::IgnoreCase))
+		{
+			OutNode.Visual.Stroke.Cap = TEXT("square");
+		}
+	}
+
+	const FString StrokeJoin = GetString(NodeObj, TEXT("strokeJoin"));
+	if (!StrokeJoin.IsEmpty())
+	{
+		OutNode.Metadata.Add(TEXT("stroke.join"), StrokeJoin);
+		if (StrokeJoin.Equals(TEXT("ROUND"), ESearchCase::IgnoreCase))
+		{
+			OutNode.Visual.Stroke.Join = TEXT("round");
+		}
+		else if (StrokeJoin.Equals(TEXT("BEVEL"), ESearchCase::IgnoreCase))
+		{
+			OutNode.Visual.Stroke.Join = TEXT("bevel");
+		}
+	}
+
 	const TArray<TSharedPtr<FJsonValue>>* StrokeDashes = GetArray(NodeObj, TEXT("strokeDashes"));
 	if (!StrokeDashes || StrokeDashes->Num() == 0)
 	{
@@ -656,6 +684,12 @@ static void CaptureFigmaStrokeMetadata(
 			continue;
 		}
 
+		const float DashLength = static_cast<float>(DashValue->AsNumber());
+		if (FMath::IsFinite(DashLength) && DashLength > KINDA_SMALL_NUMBER)
+		{
+			OutNode.Visual.Stroke.DashPattern.Add(DashLength);
+		}
+
 		if (!SerializedDashes.IsEmpty())
 		{
 			SerializedDashes += TEXT(",");
@@ -666,11 +700,6 @@ static void CaptureFigmaStrokeMetadata(
 	if (!SerializedDashes.IsEmpty())
 	{
 		OutNode.Metadata.Add(TEXT("stroke.dashes"), SerializedDashes);
-		const FString StrokeCap = GetString(NodeObj, TEXT("strokeCap"));
-		if (!StrokeCap.IsEmpty())
-		{
-			OutNode.Metadata.Add(TEXT("stroke.cap"), StrokeCap);
-		}
 	}
 }
 
@@ -683,13 +712,14 @@ static void ParseNodeVisualData(
 	if (FillsArr)
 	{
 		OutNode.Visual.Fills = ParseFills(*FillsArr);
-		OutNode.Visual.Fill = ParseFill(*FillsArr);
+		OutNode.Visual.bFillExplicitClear = FillsArr->Num() == 0;
 		const FString VectorRasterFallback = ExtractSyntheticVectorRasterImageRef(*FillsArr);
 		if (!VectorRasterFallback.IsEmpty())
 		{
-			OutNode.MutableSource().VectorRasterFallbackImageRef = VectorRasterFallback;
+			OutNode.Visual.VectorRasterFallbackImageRef = VectorRasterFallback;
 			if (HasParentClippedRenderBounds(NodeObj, ParentObj))
 			{
+				OutNode.Visual.bRenderBoundsClippedByParent = true;
 				OutNode.Metadata.Add(Design2UMGSourceMetadata::RenderBoundsClippedByParentKey, TEXT("true"));
 			}
 		}
@@ -712,6 +742,7 @@ static void ParseNodeVisualData(
 	if (const TArray<TSharedPtr<FJsonValue>>* EffectsArr = GetArray(NodeObj, TEXT("effects")))
 	{
 		OutNode.Visual.Effects = ParseEffects(*EffectsArr);
+		OutNode.Visual.bEffectsExplicitClear = EffectsArr->Num() == 0;
 	}
 	if (OutNode.Type == EDesignNodeType::Text)
 	{
@@ -1007,19 +1038,15 @@ void CollectImageRefsRecursive(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSe
 	for (const auto& Node : Nodes)
 	{
 		if (!Node) continue;
-		// Primary fill
-		if (Node->Visual.Fill.IsImage() && !Node->Visual.Fill.Image.Url.IsEmpty())
-			OutRefs.Add(Node->Visual.Fill.Image.Url);
-		// Multi-fill layers
 		for (const FDesignFill& F : Node->Visual.Fills)
 		{
 			if (F.IsImage() && !F.Image.Url.IsEmpty())
 				OutRefs.Add(F.Image.Url);
 		}
-		if (!Node->Source().VectorRasterFallbackImageRef.IsEmpty())
-			OutRefs.Add(Node->Source().VectorRasterFallbackImageRef);
-		if (!Node->Source().RenderFallback.ImageRef.IsEmpty())
-			OutRefs.Add(Node->Source().RenderFallback.ImageRef);
+		if (!Node->Visual.VectorRasterFallbackImageRef.IsEmpty())
+			OutRefs.Add(Node->Visual.VectorRasterFallbackImageRef);
+		if (!Node->Visual.RenderFallback.ImageRef.IsEmpty())
+			OutRefs.Add(Node->Visual.RenderFallback.ImageRef);
 		CollectImageRefsRecursive(Node->Children, OutRefs);
 	}
 }
@@ -1034,13 +1061,6 @@ void ApplyImageUrlsRecursive(TArray<TSharedPtr<FDesignNode>>& Nodes, const TMap<
 	for (auto& Node : Nodes)
 	{
 		if (!Node) continue;
-		// Primary fill
-		if (Node->Visual.Fill.IsImage() && !Node->Visual.Fill.Image.Url.IsEmpty())
-		{
-			if (const FString* Url = Map.Find(Node->Visual.Fill.Image.Url))
-				Node->Visual.Fill.Image.Url = *Url;
-		}
-		// Multi-fill layers
 		for (FDesignFill& F : Node->Visual.Fills)
 		{
 			if (F.IsImage() && !F.Image.Url.IsEmpty())
@@ -1049,18 +1069,18 @@ void ApplyImageUrlsRecursive(TArray<TSharedPtr<FDesignNode>>& Nodes, const TMap<
 					F.Image.Url = *Url;
 			}
 		}
-		if (!Node->Source().VectorRasterFallbackImageRef.IsEmpty())
+		if (!Node->Visual.VectorRasterFallbackImageRef.IsEmpty())
 		{
-			if (const FString* Url = Map.Find(Node->Source().VectorRasterFallbackImageRef))
+			if (const FString* Url = Map.Find(Node->Visual.VectorRasterFallbackImageRef))
 			{
-				Node->MutableSource().VectorRasterFallbackImageRef = *Url;
+				Node->Visual.VectorRasterFallbackImageRef = *Url;
 			}
 		}
-		if (!Node->Source().RenderFallback.ImageRef.IsEmpty())
+		if (!Node->Visual.RenderFallback.ImageRef.IsEmpty())
 		{
-			if (const FString* Url = Map.Find(Node->Source().RenderFallback.ImageRef))
+			if (const FString* Url = Map.Find(Node->Visual.RenderFallback.ImageRef))
 			{
-				Node->MutableSource().RenderFallback.ImageRef = *Url;
+				Node->Visual.RenderFallback.ImageRef = *Url;
 			}
 		}
 		ApplyImageUrlsRecursive(Node->Children, Map);

@@ -164,7 +164,7 @@ namespace DesignImportDiagnosticReport
 					TEXT("TEXT_PATH is not formally supported; convert path text to regular text if path geometry is required at runtime."));
 			}
 
-			if (!Node->Source().VectorRasterFallbackImageRef.IsEmpty())
+			if (!Node->Visual.VectorRasterFallbackImageRef.IsEmpty())
 			{
 				TSharedRef<FJsonObject> Entry = MakeNodeDiagnosticEntry(
 					TEXT("vector_raster_fallback"),
@@ -173,33 +173,39 @@ namespace DesignImportDiagnosticReport
 					Node->Source().SourceNodeType,
 					TEXT("complex vector was rasterized"),
 					TEXT("runtime output uses baked image content for the vector node"));
-				Entry->SetStringField(TEXT("imageRef"), Node->Source().VectorRasterFallbackImageRef);
+				Entry->SetStringField(TEXT("imageRef"), Node->Visual.VectorRasterFallbackImageRef);
 				OutValues.Add(MakeShared<FJsonValueObject>(Entry));
 				AddUniqueRecommendation(
 					InOutRecommendations,
 					TEXT("Vector raster fallback is an explicit degradation path; prefer exporter/parser-side simplification before treating it as semantic support."));
 			}
 
-			if (Node->Source().RenderFallback.HasAny())
+			const FString RenderFallbackReason = Node->Metadata.FindRef(TEXT("design2umgRenderFallbackReason"));
+			const FString RenderFallbackScope = Node->Metadata.FindRef(TEXT("design2umgRenderFallbackScope"));
+			const FString RenderFallbackSource = Node->Metadata.FindRef(TEXT("design2umgRenderFallbackSource"));
+			if (Node->Visual.RenderFallback.HasAny()
+				|| !RenderFallbackReason.IsEmpty()
+				|| !RenderFallbackScope.IsEmpty()
+				|| !RenderFallbackSource.IsEmpty())
 			{
 				TSharedRef<FJsonObject> Entry = MakeNodeDiagnosticEntry(
 					TEXT("render_fallback"),
 					Node->Id,
 					Node->Name,
 					Node->Source().SourceNodeType,
-					Node->Source().RenderFallback.Reason,
+					RenderFallbackReason,
 					TEXT("runtime output uses a baked render fallback image"));
-				if (!Node->Source().RenderFallback.ImageRef.IsEmpty())
+				if (!Node->Visual.RenderFallback.ImageRef.IsEmpty())
 				{
-					Entry->SetStringField(TEXT("imageRef"), Node->Source().RenderFallback.ImageRef);
+					Entry->SetStringField(TEXT("imageRef"), Node->Visual.RenderFallback.ImageRef);
 				}
-				if (!Node->Source().RenderFallback.Scope.IsEmpty())
+				if (!RenderFallbackScope.IsEmpty())
 				{
-					Entry->SetStringField(TEXT("scope"), Node->Source().RenderFallback.Scope);
+					Entry->SetStringField(TEXT("scope"), RenderFallbackScope);
 				}
-				if (!Node->Source().RenderFallback.Source.IsEmpty())
+				if (!RenderFallbackSource.IsEmpty())
 				{
-					Entry->SetStringField(TEXT("source"), Node->Source().RenderFallback.Source);
+					Entry->SetStringField(TEXT("source"), RenderFallbackSource);
 				}
 				OutValues.Add(MakeShared<FJsonValueObject>(Entry));
 				AddUniqueRecommendation(

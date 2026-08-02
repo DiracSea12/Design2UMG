@@ -116,6 +116,7 @@ void ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& Ou
 		OutNode.Text.TextGrowth = EDesignTextGrowth::FixedWidthHeight;
 		if (AutoResize == TEXT("TRUNCATE"))
 		{
+			OutNode.Text.bTruncateOverflow = true;
 			OutNode.Metadata.Add(TEXT("source.text.truncate"), TEXT("true"));
 		}
 	}

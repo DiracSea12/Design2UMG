@@ -27,6 +27,7 @@ struct FDesignTextNodeData
 	EDesignTextGrowth TextGrowth = EDesignTextGrowth::Auto;
 	bool bUnderline = false;
 	bool bStrikethrough = false;
+	bool bTruncateOverflow = false;
 	FString Href;
 	TArray<FDesignTextRun> TextRuns;
 	FString IconFontName;
@@ -58,11 +59,12 @@ struct FDesignLayoutNodeData
 {
 	EDesignLayout Layout = EDesignLayout::Horizontal;
 	TOptional<float> ExplicitGap;
+	TOptional<float> WrapCrossAxisGap;
 	TOptional<FDesignPadding> ExplicitPadding;
-	bool bHasPaddingRuntimeWrapDecision = false;
-	bool bPaddingRequiresRuntimeWrap = false;
+	TOptional<bool> PaddingRequiresRuntimeWrap;
 	EDesignJustifyContent JustifyContent = EDesignJustifyContent::Start;
 	EDesignAlignItems AlignItems = EDesignAlignItems::Start;
+	EDesignOverflow Overflow = EDesignOverflow::None;
 	bool bAbsoluteLayoutPositioning = false;
 	TOptional<bool> ExplicitClip;
 	bool bSemanticPlaceholderSurface = false;
@@ -75,8 +77,9 @@ struct FDesignLayoutNodeData
 	TOptional<int32> LayoutColumnCount;
 	TOptional<float> LayoutRowGap;
 	TOptional<float> LayoutColumnGap;
-	TOptional<FString> LayoutChildHorizontalAlign;
-	TOptional<FString> LayoutChildVerticalAlign;
+	TOptional<EDesignAxisAlignment> LayoutChildHorizontalAlign;
+	TOptional<EDesignAxisAlignment> LayoutChildVerticalAlign;
+	TOptional<EDesignAxisAlignment> SelfAlignment;
 
 	void SetGap(const float InGap)
 	{
@@ -103,18 +106,45 @@ struct FDesignLayoutNodeData
 	}
 };
 
+struct FDesignRenderFallbackData
+{
+	FString ImageRef;
+	EDesignRenderFallbackScope Scope = EDesignRenderFallbackScope::Leaf;
+	bool bSuppressedBySourceSemantics = false;
+
+	bool HasAny() const { return !ImageRef.IsEmpty(); }
+};
+
 /**
  * Shared visual payload for fills, strokes, corners, and effects.
  */
 struct FDesignVisualNodeData
 {
-	FDesignFill Fill;
 	TArray<FDesignFill> Fills;
+	bool bFillExplicitClear = false;
 	FDesignStroke Stroke;
 	FDesignCornerRadius CornerRadius;
 	FDesignGeometryMask GeometryMask;
 	TArray<FDesignEffect> Effects;
 	bool bEffectsExplicitClear = false;
+	FString VectorRasterFallbackImageRef;
+	bool bRenderBoundsClippedByParent = false;
+	FDesignRenderFallbackData RenderFallback;
+
+	const FDesignFill& PrimaryFill() const
+	{
+		static const FDesignFill EmptyFill;
+		return Fills.Num() > 0 ? Fills.Last() : EmptyFill;
+	}
+
+	FDesignFill& PrimaryFill()
+	{
+		if (Fills.Num() == 0)
+		{
+			Fills.AddDefaulted();
+		}
+		return Fills.Last();
+	}
 };
 
 struct FDesignShapeNodeData
@@ -140,6 +170,7 @@ struct FDesignTransformNodeData
 	TOptional<float> ExplicitY;
 	FDesignSize Width;
 	FDesignSize Height;
+	TOptional<FVector2D> LayoutBoundsSize;
 	bool bHasWidth = false;
 	bool bHasHeight = false;
 	bool bSourceHasWidth = false;
@@ -235,6 +266,7 @@ struct DESIGN2UMGCORE_API FDesignNode
 
 	FString Ref;
 	bool bReusable = false;
+	bool bExpandedRefInstance = false;
 	TMap<FString, TSharedPtr<FDesignNode>> Descendants;
 	TArray<TSharedPtr<FDesignNode>> Children;
 
@@ -245,7 +277,7 @@ struct DESIGN2UMGCORE_API FDesignNode
 
 	bool HasVisualProperties() const
 	{
-		return !Visual.Fill.IsNone() || Visual.Fills.Num() > 0 || Visual.Stroke.HasStroke() || Visual.CornerRadius.HasRadius();
+		return Visual.Fills.Num() > 0 || Visual.Stroke.HasStroke() || Visual.CornerRadius.HasRadius();
 	}
 
 	bool HasMultiFill() const

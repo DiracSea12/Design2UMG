@@ -1,7 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "PathWidgetBuilder.h"
-#include "DesignSchemaSourceExtensions.h"
 
 #include "Design2UMGLog.h"
 #include "DesignTypeMapper.h"
@@ -23,11 +22,6 @@ namespace
 			return false;
 		}
 
-		if (Node->Visual.Fill.Type == EDesignFillType::Gradient)
-		{
-			return true;
-		}
-
 		for (const FDesignFill& Fill : Node->Visual.Fills)
 		{
 			if (Fill.Type == EDesignFillType::Gradient)
@@ -46,19 +40,20 @@ namespace
 			return FString();
 		}
 
-		return Node->Source().VectorRasterFallbackImageRef;
+		return Node->Visual.VectorRasterFallbackImageRef;
 	}
 
 	FString ResolvePathRasterFillColor(const TSharedPtr<FDesignNode>& Node)
 	{
-		if (Node->Visual.Fill.Type == EDesignFillType::Color)
+		const FDesignFill& PrimaryFill = Node->Visual.PrimaryFill();
+		if (PrimaryFill.Type == EDesignFillType::Color)
 		{
-			return Node->Visual.Fill.SolidColor;
+			return PrimaryFill.SolidColor;
 		}
 
-		if (Node->Visual.Fill.Type == EDesignFillType::Gradient && Node->Visual.Fill.Gradient.Colors.Num() > 0)
+		if (PrimaryFill.Type == EDesignFillType::Gradient && PrimaryFill.Gradient.Colors.Num() > 0)
 		{
-			return Node->Visual.Fill.Gradient.Colors[0].Color;
+			return PrimaryFill.Gradient.Colors[0].Color;
 		}
 
 		if (Node->Visual.Stroke.HasStroke()
@@ -113,16 +108,6 @@ namespace
 			FMath::Max(Node->Visual.Stroke.Thickness.Bottom, Node->Visual.Stroke.Thickness.Left));
 	}
 
-	FString ResolvePathStrokeMetadata(const TSharedPtr<FDesignNode>& Node, const TCHAR* Key, const TCHAR* DefaultValue)
-	{
-		if (!Node.IsValid())
-		{
-			return FString(DefaultValue);
-		}
-
-		const FString* Value = Node->Metadata.Find(Key);
-		return (Value && !Value->IsEmpty()) ? *Value : FString(DefaultValue);
-	}
 }
 
 FUMGWidgetNode PathWidgetBuilder::CreatePathWidget(const TSharedPtr<FDesignNode>& Node)
@@ -137,11 +122,12 @@ FUMGWidgetNode PathWidgetBuilder::CreatePathWidget(const TSharedPtr<FDesignNode>
 		return Widget;
 	}
 
-	if (Node->Visual.Fill.Type == EDesignFillType::Image && !Node->Visual.Fill.Image.Url.IsEmpty())
+	const FDesignFill& PrimaryFill = Node->Visual.PrimaryFill();
+	if (PrimaryFill.Type == EDesignFillType::Image && !PrimaryFill.Image.Url.IsEmpty())
 	{
 		Widget.Type = TEXT("Image");
-		Widget.Brush.Image.TexturePath = Node->Visual.Fill.Image.Url;
-		ImageFillUtils::ApplyImageFillProperties(Widget, Node->Visual.Fill.Image);
+		Widget.Brush.Image.TexturePath = PrimaryFill.Image.Url;
+		ImageFillUtils::ApplyImageFillProperties(Widget, PrimaryFill.Image);
 		ApplyPathSizeOverrides(Widget, Node);
 		return Widget;
 	}
@@ -172,8 +158,8 @@ FUMGWidgetNode PathWidgetBuilder::CreatePathWidget(const TSharedPtr<FDesignNode>
 			{
 				Widget.Path.StrokeColor = FUMGValueParser::ParseColor(StrokeColor);
 				Widget.Path.StrokeThickness = StrokeThickness;
-				Widget.Path.StrokeCap = ResolvePathStrokeMetadata(Node, TEXT("stroke.cap"), TEXT("butt"));
-				Widget.Path.StrokeJoin = ResolvePathStrokeMetadata(Node, TEXT("stroke.join"), TEXT("miter"));
+				Widget.Path.StrokeCap = Node->Visual.Stroke.Cap;
+				Widget.Path.StrokeJoin = Node->Visual.Stroke.Join;
 			}
 			ApplyPathSizeOverrides(Widget, Node);
 			return Widget;

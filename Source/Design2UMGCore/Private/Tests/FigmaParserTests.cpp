@@ -233,10 +233,11 @@ bool FFigmaParserStrokeDashMetadataTest::RunTest(const FString&)
         "absoluteBoundingBox": {"x": 0, "y": 0, "width": 0.0001, "height": 306},
         "absoluteRenderBounds": {"x": -3, "y": -3, "width": 6, "height": 312},
         "strokes": [{"type": "SOLID", "visible": true, "color": {"r": 0.8, "g": 0.9, "b": 1, "a": 1}}],
-        "strokeWeight": 5.11,
-        "strokeAlign": "CENTER",
-        "strokeCap": "ROUND",
-        "strokeDashes": [21.17, 21.17]
+		"strokeWeight": 5.11,
+		"strokeAlign": "CENTER",
+		"strokeCap": "ROUND",
+		"strokeJoin": "BEVEL",
+		"strokeDashes": [21.17, 21.17]
       }]
     }]
   }
@@ -252,7 +253,16 @@ bool FFigmaParserStrokeDashMetadataTest::RunTest(const FString&)
 	}
 
 	const TSharedPtr<FDesignNode>& Node = Document.Children[0];
+	TestEqual(TEXT("Stroke cap is normalized for shared conversion"), Node->Visual.Stroke.Cap, TEXT("round"));
+	TestEqual(TEXT("Stroke join is normalized for shared conversion"), Node->Visual.Stroke.Join, TEXT("bevel"));
+	TestEqual(TEXT("Stroke dash count is normalized for shared conversion"), Node->Visual.Stroke.DashPattern.Num(), 2);
+	if (Node->Visual.Stroke.DashPattern.Num() == 2)
+	{
+		TestEqual(TEXT("First shared stroke dash"), Node->Visual.Stroke.DashPattern[0], 21.17f);
+		TestEqual(TEXT("Second shared stroke dash"), Node->Visual.Stroke.DashPattern[1], 21.17f);
+	}
 	TestEqual(TEXT("Dashed stroke cap metadata is preserved"), Node->Metadata.FindRef(TEXT("stroke.cap")), TEXT("ROUND"));
+	TestEqual(TEXT("Stroke join metadata is preserved"), Node->Metadata.FindRef(TEXT("stroke.join")), TEXT("BEVEL"));
 	TestEqual(TEXT("Stroke dash metadata is preserved"), Node->Metadata.FindRef(TEXT("stroke.dashes")), TEXT("21.17,21.17"));
 	return true;
 }
@@ -280,25 +290,25 @@ bool FFigmaParserFillTypesTest::RunTest(const FString&)
 	// Solid fill child
 	const TSharedPtr<FDesignNode>& SolidNode = FillsFrame->Children[0];
 	TestTrue(TEXT("SolidNode valid"), SolidNode.IsValid());
-	TestEqual(TEXT("SolidNode fill type"), SolidNode->Visual.Fill.Type, EDesignFillType::Color);
+	TestEqual(TEXT("SolidNode fill type"), SolidNode->Visual.PrimaryFill().Type, EDesignFillType::Color);
 	TestEqual(TEXT("SolidNode fills count"), SolidNode->Visual.Fills.Num(), 1);
-	TestFalse(TEXT("SolidNode solid color present"), SolidNode->Visual.Fill.SolidColor.IsEmpty());
+	TestFalse(TEXT("SolidNode solid color present"), SolidNode->Visual.PrimaryFill().SolidColor.IsEmpty());
 
 	// Gradient fill child
 	const TSharedPtr<FDesignNode>& GradNode = FillsFrame->Children[1];
 	TestTrue(TEXT("GradNode valid"), GradNode.IsValid());
-	TestEqual(TEXT("GradNode fill type"), GradNode->Visual.Fill.Type, EDesignFillType::Gradient);
-	TestEqual(TEXT("GradNode gradient type"), GradNode->Visual.Fill.Gradient.GradientType, EDesignGradientType::Linear);
-	TestEqual(TEXT("GradNode gradient stops"), GradNode->Visual.Fill.Gradient.Colors.Num(), 2);
-	TestEqual(TEXT("GradNode first stop position"), GradNode->Visual.Fill.Gradient.Colors[0].Position, 0.0f);
-	TestEqual(TEXT("GradNode second stop position"), GradNode->Visual.Fill.Gradient.Colors[1].Position, 1.0f);
+	TestEqual(TEXT("GradNode fill type"), GradNode->Visual.PrimaryFill().Type, EDesignFillType::Gradient);
+	TestEqual(TEXT("GradNode gradient type"), GradNode->Visual.PrimaryFill().Gradient.GradientType, EDesignGradientType::Linear);
+	TestEqual(TEXT("GradNode gradient stops"), GradNode->Visual.PrimaryFill().Gradient.Colors.Num(), 2);
+	TestEqual(TEXT("GradNode first stop position"), GradNode->Visual.PrimaryFill().Gradient.Colors[0].Position, 0.0f);
+	TestEqual(TEXT("GradNode second stop position"), GradNode->Visual.PrimaryFill().Gradient.Colors[1].Position, 1.0f);
 
 	// Image fill child
 	const TSharedPtr<FDesignNode>& ImgNode = FillsFrame->Children[2];
 	TestTrue(TEXT("ImgNode valid"), ImgNode.IsValid());
-	TestEqual(TEXT("ImgNode fill type"), ImgNode->Visual.Fill.Type, EDesignFillType::Image);
-	TestEqual(TEXT("ImgNode image ref"), ImgNode->Visual.Fill.Image.Url, FString(TEXT("abc123")));
-	TestEqual(TEXT("ImgNode image mode"), ImgNode->Visual.Fill.Image.Mode, EDesignImageMode::Fill);
+	TestEqual(TEXT("ImgNode fill type"), ImgNode->Visual.PrimaryFill().Type, EDesignFillType::Image);
+	TestEqual(TEXT("ImgNode image ref"), ImgNode->Visual.PrimaryFill().Image.Url, FString(TEXT("abc123")));
+	TestEqual(TEXT("ImgNode image mode"), ImgNode->Visual.PrimaryFill().Image.Mode, EDesignImageMode::Fill);
 
 	return true;
 }
@@ -361,13 +371,13 @@ bool FFigmaParserGradientGeometryTest::RunTest(const FString&)
 	}
 
 	const TSharedPtr<FDesignNode>& Node = Doc.Children[0];
-	TestEqual(TEXT("Parsed gradient fill type"), Node->Visual.Fill.Type, EDesignFillType::Gradient);
-	TestEqual(TEXT("Parsed gradient type"), Node->Visual.Fill.Gradient.GradientType, EDesignGradientType::Radial);
-	TestEqual(TEXT("Parsed gradient stops"), Node->Visual.Fill.Gradient.Colors.Num(), 3);
-	TestTrue(TEXT("Parsed radial center present"), Node->Visual.Fill.Gradient.Center.IsSet());
-	TestTrue(TEXT("Parsed radial size present"), Node->Visual.Fill.Gradient.Size.IsSet());
-	const FVector2D ParsedCenter = Node->Visual.Fill.Gradient.Center.Get(FVector2D::ZeroVector);
-	const FVector2D ParsedSize = Node->Visual.Fill.Gradient.Size.Get(FVector2D::ZeroVector);
+	TestEqual(TEXT("Parsed gradient fill type"), Node->Visual.PrimaryFill().Type, EDesignFillType::Gradient);
+	TestEqual(TEXT("Parsed gradient type"), Node->Visual.PrimaryFill().Gradient.GradientType, EDesignGradientType::Radial);
+	TestEqual(TEXT("Parsed gradient stops"), Node->Visual.PrimaryFill().Gradient.Colors.Num(), 3);
+	TestTrue(TEXT("Parsed radial center present"), Node->Visual.PrimaryFill().Gradient.Center.IsSet());
+	TestTrue(TEXT("Parsed radial size present"), Node->Visual.PrimaryFill().Gradient.Size.IsSet());
+	const FVector2D ParsedCenter = Node->Visual.PrimaryFill().Gradient.Center.Get(FVector2D::ZeroVector);
+	const FVector2D ParsedSize = Node->Visual.PrimaryFill().Gradient.Size.Get(FVector2D::ZeroVector);
 	TestTrue(TEXT("Parsed radial center X"),
 		FMath::IsNearlyEqual(ParsedCenter.X, 0.25f, 0.0001f));
 	TestTrue(TEXT("Parsed radial center Y"),
@@ -377,7 +387,48 @@ bool FFigmaParserGradientGeometryTest::RunTest(const FString&)
 	TestTrue(TEXT("Parsed radial size height"),
 		FMath::IsNearlyEqual(ParsedSize.Y, 0.8f, 0.0001f));
 	TestTrue(TEXT("Parsed middle stop position"),
-		FMath::IsNearlyEqual(Node->Visual.Fill.Gradient.Colors[1].Position, 0.4f, 0.0001f));
+		FMath::IsNearlyEqual(Node->Visual.PrimaryFill().Gradient.Colors[1].Position, 0.4f, 0.0001f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FFigmaParserVisualExplicitClearTest,
+	"Design2UMG.Unit.FigmaParser.VisualExplicitClear",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFigmaParserVisualExplicitClearTest::RunTest(const FString&)
+{
+	const FString Json = TEXT(R"JSON(
+{
+  "document": {
+    "type": "DOCUMENT",
+    "children": [{
+      "type": "CANVAS",
+      "children": [{
+        "id": "explicit-clear",
+        "type": "RECTANGLE",
+        "absoluteBoundingBox": {"x": 0, "y": 0, "width": 80, "height": 40},
+        "fills": [],
+        "effects": []
+      }]
+    }]
+  }
+}
+)JSON");
+
+	FDesignDocument Document;
+	TestTrue(TEXT("Figma explicit-clear fixture parses"), FFigmaParser::ParseDocument(Json, Document));
+	TestEqual(TEXT("One explicit-clear node is emitted"), Document.Children.Num(), 1);
+	if (Document.Children.Num() != 1 || !Document.Children[0].IsValid())
+	{
+		return false;
+	}
+
+	const FDesignVisualNodeData& Visual = Document.Children[0]->Visual;
+	TestTrue(TEXT("Empty fills are represented as an explicit shared clear"), Visual.bFillExplicitClear);
+	TestTrue(TEXT("Empty effects are represented as an explicit shared clear"), Visual.bEffectsExplicitClear);
+	TestEqual(TEXT("Explicit fill clear has no fill layers"), Visual.Fills.Num(), 0);
+	TestEqual(TEXT("Explicit effect clear has no effects"), Visual.Effects.Num(), 0);
 	return true;
 }
 
@@ -430,7 +481,7 @@ bool FFigmaParserLinearGradientEndpointsTest::RunTest(const FString&)
 		return false;
 	}
 
-	const FDesignGradient& Gradient = Doc.Children[0]->Visual.Fill.Gradient;
+	const FDesignGradient& Gradient = Doc.Children[0]->Visual.PrimaryFill().Gradient;
 	TestEqual(TEXT("Parsed linear gradient type"), Gradient.GradientType, EDesignGradientType::Linear);
 	TestTrue(TEXT("Parsed linear start point"), Gradient.StartPoint.IsSet());
 	TestTrue(TEXT("Parsed linear end point"), Gradient.EndPoint.IsSet());
@@ -493,10 +544,10 @@ bool FFigmaParserBoundVariablesTest::RunTest(const FString&)
 	const TSharedPtr<FDesignNode>& VarsFrame = Doc.Children[2];
 	TestTrue(TEXT("VarsFrame valid"), VarsFrame.IsValid());
 	TestEqual(TEXT("VarsFrame type"), VarsFrame->Type, EDesignNodeType::Frame);
-	TestFalse(TEXT("BoundVariablesJson captured"), VarsFrame->Source().LayoutExtensions.BoundVariablesJson.IsEmpty());
+	TestTrue(TEXT("Bound variables metadata captured"), VarsFrame->Metadata.Contains(TEXT("boundVariables")));
 	TestTrue(
 		TEXT("BoundVariablesJson keeps variable alias id"),
-		VarsFrame->Source().LayoutExtensions.BoundVariablesJson.Contains(TEXT("VariableID:color/primary")));
+		VarsFrame->Metadata.FindRef(TEXT("boundVariables")).Contains(TEXT("VariableID:color/primary")));
 
 	return true;
 }
@@ -567,16 +618,20 @@ bool FFigmaParserPrivateStringFieldParityTest::RunTest(const FString&)
 	}
 
 	const TSharedPtr<FDesignNode>& LayoutNode = Doc.Children[0];
-	TestEqual(TEXT("LayoutWrap preserved"), LayoutNode->Source().LayoutExtensions.LayoutWrap, FString(TEXT("WRAP")));
-	TestEqual(TEXT("CounterAxisAlignContent preserved"), LayoutNode->Source().LayoutExtensions.CounterAxisAlignContent, FString(TEXT("SPACE_BETWEEN")));
-	TestEqual(TEXT("LayoutPositioning preserved"), LayoutNode->Source().LayoutExtensions.LayoutPositioning, FString(TEXT("ABSOLUTE")));
-	TestEqual(TEXT("LayoutAlign preserved"), LayoutNode->Source().LayoutExtensions.LayoutAlign, FString(TEXT("STRETCH")));
-	TestEqual(TEXT("PrimaryAxisSizingMode preserved"), LayoutNode->Source().LayoutExtensions.PrimaryAxisSizingMode, FString(TEXT("AUTO")));
-	TestEqual(TEXT("CounterAxisSizingMode preserved"), LayoutNode->Source().LayoutExtensions.CounterAxisSizingMode, FString(TEXT("FIXED")));
-	TestEqual(TEXT("GridRowsSizing preserved"), LayoutNode->Source().LayoutExtensions.GridRowsSizing, FString(TEXT("auto auto")));
-	TestEqual(TEXT("GridColumnsSizing preserved"), LayoutNode->Source().LayoutExtensions.GridColumnsSizing, FString(TEXT("1fr 1fr")));
-	TestEqual(TEXT("GridChildHorizontalAlign preserved"), LayoutNode->Source().LayoutExtensions.GridChildHorizontalAlign, FString(TEXT("CENTER")));
-	TestEqual(TEXT("GridChildVerticalAlign preserved"), LayoutNode->Source().LayoutExtensions.GridChildVerticalAlign, FString(TEXT("MIN")));
+	TestEqual(TEXT("LayoutWrap preserved"), LayoutNode->Metadata.FindRef(TEXT("layoutWrap")), FString(TEXT("WRAP")));
+	TestEqual(TEXT("CounterAxisAlignContent preserved"), LayoutNode->Metadata.FindRef(TEXT("counterAxisAlignContent")), FString(TEXT("SPACE_BETWEEN")));
+	TestTrue(TEXT("LayoutPositioning normalized"), LayoutNode->LayoutData.bAbsoluteLayoutPositioning);
+	TestEqual(TEXT("LayoutAlign preserved"), LayoutNode->Metadata.FindRef(TEXT("layoutAlign")), FString(TEXT("STRETCH")));
+	TestEqual(
+		TEXT("LayoutAlign is normalized for shared layout decisions"),
+		LayoutNode->LayoutData.SelfAlignment.Get(EDesignAxisAlignment::Start),
+		EDesignAxisAlignment::Fill);
+	TestEqual(TEXT("PrimaryAxisSizingMode preserved"), LayoutNode->Metadata.FindRef(TEXT("primaryAxisSizingMode")), FString(TEXT("AUTO")));
+	TestEqual(TEXT("CounterAxisSizingMode preserved"), LayoutNode->Metadata.FindRef(TEXT("counterAxisSizingMode")), FString(TEXT("FIXED")));
+	TestEqual(TEXT("GridRowsSizing preserved"), LayoutNode->Metadata.FindRef(TEXT("gridRowsSizing")), FString(TEXT("auto auto")));
+	TestEqual(TEXT("GridColumnsSizing preserved"), LayoutNode->Metadata.FindRef(TEXT("gridColumnsSizing")), FString(TEXT("1fr 1fr")));
+	TestEqual(TEXT("GridChildHorizontalAlign normalized"), LayoutNode->LayoutData.LayoutChildHorizontalAlign.Get(EDesignAxisAlignment::Start), EDesignAxisAlignment::Center);
+	TestEqual(TEXT("GridChildVerticalAlign normalized"), LayoutNode->LayoutData.LayoutChildVerticalAlign.Get(EDesignAxisAlignment::End), EDesignAxisAlignment::Start);
 
 	const TSharedPtr<FDesignNode>& InstanceNode = Doc.Children[1];
 	TestTrue(TEXT("Instance flag preserved"), InstanceNode->Source().ComponentInstance.bIsInstance);

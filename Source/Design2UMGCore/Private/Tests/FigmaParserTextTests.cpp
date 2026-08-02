@@ -73,6 +73,7 @@ bool FFigmaParserTextStylePropertiesTest::RunTest(const FString&)
 	TestEqual(TEXT("Horizontal align preserved"), Node->Text.TextAlign, EDesignTextAlign::Justify);
 	TestEqual(TEXT("Vertical align preserved"), Node->Text.TextAlignVertical, EDesignTextAlignVertical::Bottom);
 	TestEqual(TEXT("Truncate maps to fixed width/height"), Node->Text.TextGrowth, EDesignTextGrowth::FixedWidthHeight);
+	TestTrue(TEXT("Truncate is normalized for shared conversion"), Node->Text.bTruncateOverflow);
 
 	const FString* TruncateFlag = Node->Metadata.Find(TEXT("source.text.truncate"));
 	TestTrue(TEXT("Truncate metadata recorded"), TruncateFlag != nullptr && *TruncateFlag == TEXT("true"));

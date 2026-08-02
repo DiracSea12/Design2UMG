@@ -3,7 +3,6 @@
 #include "Design2UMGConverterVisualSupport.h"
 
 #include "Design2UMGLog.h"
-#include "Design2UMGSourceMetadata.h"
 #include "LayoutMapper.h"
 #include "SharedCoreSemantics.h"
 #include "UMGPropertyKeys.h"
@@ -57,7 +56,44 @@ namespace Design2UMGConverterVisualSupport
 {
 	bool HasVisualFill(const TSharedPtr<FDesignNode>& Node)
 	{
-		return Node.IsValid() && (Design2UMGCore::SharedSemantics::HasVisibleFill(Node->Visual.Fill) || Node->Visual.Fills.Num() > 0);
+		return Node.IsValid() && Node->Visual.Fills.Num() > 0;
+	}
+
+	bool ShouldUseRenderFallback(const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid()
+			|| Node->Visual.RenderFallback.ImageRef.IsEmpty()
+			|| Node->Visual.RenderFallback.Scope == EDesignRenderFallbackScope::Unsupported
+			|| Node->Visual.RenderFallback.bSuppressedBySourceSemantics)
+		{
+			return false;
+		}
+
+		if (Node->Type == EDesignNodeType::Text
+			|| Node->Type == EDesignNodeType::IconFont
+			|| Node->Type == EDesignNodeType::Ref)
+		{
+			return false;
+		}
+
+		return Node->Children.Num() == 0
+			|| Node->Visual.RenderFallback.Scope == EDesignRenderFallbackScope::Subtree;
+	}
+
+	FUMGWidgetNode CreateRenderFallbackWidget(const TSharedPtr<FDesignNode>& Node)
+	{
+		FUMGWidgetNode Widget;
+		Widget.Type = TEXT("Image");
+		Widget.Brush.Image.TexturePath = Node->Visual.RenderFallback.ImageRef;
+		if (Node->Transform.Width.Value > 0.0f)
+		{
+			Widget.WidgetStyle.WidthOverride = Node->Transform.Width.Value;
+		}
+		if (Node->Transform.Height.Value > 0.0f)
+		{
+			Widget.WidgetStyle.HeightOverride = Node->Transform.Height.Value;
+		}
+		return Widget;
 	}
 
 	void ApplyBaseVisualProperties(
@@ -91,7 +127,7 @@ namespace Design2UMGConverterVisualSupport
 		const FConversionVisualSettingsPayload& VisualSettings)
 	{
 		const UDesign2UMGSettings::FResolvedPlaceholderHatchStyle& Style = VisualSettings.PlaceholderHatchStyle;
-		const bool bExpandedRefInstancePlaceholder = Design2UMGSourceMetadata::HasNodeMetadataFlag(Node, TEXT("design2umg.expanded_ref_instance"));
+		const bool bExpandedRefInstancePlaceholder = Node->bExpandedRefInstance;
 		const FString& DefaultPlaceholderFillColor =
 			bExpandedRefInstancePlaceholder ? Style.RefFillColor : Style.BaseFillColor;
 		const FString& DefaultPlaceholderOutlineColor =
@@ -101,21 +137,19 @@ namespace Design2UMGConverterVisualSupport
 				|| Node->Type == EDesignNodeType::Group
 				|| Node->Type == EDesignNodeType::Rectangle)
 			&& Node->Children.Num() == 0;
-		const bool bIsExplicitEmptySlotSurface =
-			Design2UMGSourceMetadata::HasNodeMetadataFlag(Node, TEXT("pen.slot.empty"))
-			|| Design2UMGSourceMetadata::HasNodeMetadataFlag(Node, TEXT("source.slot.empty"));
 		// Tint only semantic empty surfaces; authored non-placeholder art should stay on the normal visual path.
 		const bool bUseSlotPlaceholderTint =
 			bIsLeafContainer
 			&& Node->Transform.Width.Value >= 24.0f
 			&& Node->Transform.Height.Value >= 12.0f
-			&& (Node->LayoutData.bSemanticPlaceholderSurface || bIsExplicitEmptySlotSurface);
+			&& Node->LayoutData.bSemanticPlaceholderSurface;
 		if (!bUseSlotPlaceholderTint)
 		{
 			return false;
 		}
 
-		const FString FillColor = IsHexColorLiteral(Node->Visual.Fill.SolidColor) ? Node->Visual.Fill.SolidColor : FString();
+		const FDesignFill& PrimaryFill = Node->Visual.PrimaryFill();
+		const FString FillColor = IsHexColorLiteral(PrimaryFill.SolidColor) ? PrimaryFill.SolidColor : FString();
 		const FString StrokeColor = (Node->Visual.Stroke.Fill.IsSet() && IsHexColorLiteral(Node->Visual.Stroke.Fill.GetValue().SolidColor))
 			? Node->Visual.Stroke.Fill.GetValue().SolidColor
 			: FString();
@@ -166,11 +200,10 @@ namespace Design2UMGConverterVisualSupport
 		// Parser-owned padding decisions win; the fallback only covers layouts where runtime still owns the inset.
 		const bool bNeedsPaddingWrapper =
 			LayoutMapper::HasPadding(Node)
-			&& (Node->LayoutData.bHasPaddingRuntimeWrapDecision
-				? Node->LayoutData.bPaddingRequiresRuntimeWrap
-				: ((Node->LayoutData.Layout == EDesignLayout::None)
+			&& Node->LayoutData.PaddingRequiresRuntimeWrap.Get(
+				Node->LayoutData.Layout == EDesignLayout::None
 					|| ((Node->LayoutData.Layout == EDesignLayout::Wrap || Node->LayoutData.Layout == EDesignLayout::Grid)
-						&& Node->Children.Num() > 0)));
+						&& Node->Children.Num() > 0));
 
 		return (Node->Type == EDesignNodeType::Frame || Node->Type == EDesignNodeType::Group)
 			&& (HasVisualFill(Node)

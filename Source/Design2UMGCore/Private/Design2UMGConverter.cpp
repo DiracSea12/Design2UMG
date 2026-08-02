@@ -25,7 +25,7 @@ namespace Design2UMGConverterInternal
 {
 FUMGWidgetNode CreateFallbackBranchWidget(const TSharedPtr<FDesignNode>& Node)
 {
-	FUMGWidgetNode Widget = Design2UMGSourceMetadata::CreateRenderFallbackWidget(Node);
+	FUMGWidgetNode Widget = Design2UMGConverterVisualSupport::CreateRenderFallbackWidget(Node);
 	Design2UMGNodeWidgetFactory::PopulateWidgetIdentityAndBounds(Widget, Node);
 	Widget.MutableSource() = Design2UMGSourceMetadata::BuildSourceNodeData(Node);
 	UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: '%s' -> Figma render fallback image"), *Widget.Name);
@@ -209,7 +209,7 @@ namespace Design2UMGConverterPrivate
 				return ConvertExpandedRefNode(Node, ActiveContext, ParentLayout, PreResolutionResolver);
 			}
 
-			const bool bUsingRenderFallback = Design2UMGSourceMetadata::ShouldUseRenderFallback(Node);
+			const bool bUsingRenderFallback = Design2UMGConverterVisualSupport::ShouldUseRenderFallback(Node);
 			FUMGWidgetNode Widget = CreateBaseWidgetForNode(Node, Context.State);
 			LogCreatedWidget(Widget, Node);
 
@@ -309,7 +309,7 @@ namespace Design2UMGConverterPrivate
 			{
 				if (Node->LayoutData.Layout == EDesignLayout::Wrap)
 				{
-					const float CrossAxisGap = Design2UMGSourceMetadata::ResolveWrapCrossAxisGap(Node);
+					const float CrossAxisGap = Node->LayoutData.WrapCrossAxisGap.Get(Node->LayoutData.ExplicitGap.Get(0.0f));
 					Widget.WidgetStyle.InnerSlotPadding = FVector2D(Node->LayoutData.ExplicitGap.Get(0.0f), CrossAxisGap);
 				}
 				else if (Node->LayoutData.Layout == EDesignLayout::Grid)
@@ -385,7 +385,7 @@ namespace Design2UMGConverterPrivate
 
 		FUMGWidgetNode CreateBaseWidgetForNode(const TSharedPtr<FDesignNode>& Node, FConversionState& State) const
 		{
-			if (Design2UMGSourceMetadata::ShouldUseRenderFallback(Node))
+			if (Design2UMGConverterVisualSupport::ShouldUseRenderFallback(Node))
 			{
 				return Design2UMGConverterInternal::CreateFallbackBranchWidget(Node);
 			}

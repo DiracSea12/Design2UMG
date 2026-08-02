@@ -316,7 +316,7 @@ void PenParserNodeExtensions::FinalizePenPaddingRuntimeWrapPolicy(const TSharedP
 		}
 	}
 
-	Node->LayoutData.bPaddingRequiresRuntimeWrap = !bHasExplicitChildPosition;
+	Node->LayoutData.PaddingRequiresRuntimeWrap = !bHasExplicitChildPosition;
 }
 
 void PenParserNodeExtensions::ParsePenSemanticMetadata(

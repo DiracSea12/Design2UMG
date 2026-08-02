@@ -101,7 +101,6 @@ bool FFigmaGridWrapMetadataTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("itemReverseZIndex preserved"), ItemReverseZIndex && *ItemReverseZIndex == TEXT("true"));
 	const FString* StrokesIncludedInLayout = GridNode->Metadata.Find(TEXT("strokesIncludedInLayout"));
 	TestTrue(TEXT("strokesIncludedInLayout preserved"), StrokesIncludedInLayout && *StrokesIncludedInLayout == TEXT("true"));
-	TestTrue(TEXT("strokesIncludedInLayout typed primary storage"), GridNode->Source().LayoutExtensions.StrokesIncludedInLayout.IsSet() && GridNode->Source().LayoutExtensions.StrokesIncludedInLayout.GetValue());
 	TestTrue(TEXT("boundVariables preserved"), GridNode->Metadata.Contains(TEXT("boundVariables.itemSpacing")));
 	TestTrue(TEXT("counterAxisSpacing preserved"), GridNode->Metadata.Contains(TEXT("counterAxisSpacing")));
 	TestTrue(TEXT("layoutAlign preserved"), GridNode->Metadata.Contains(TEXT("layoutAlign")));
@@ -1188,28 +1187,27 @@ bool FPenOfficialFieldParityTest::RunTest(const FString& Parameters)
 	const TSharedPtr<FDesignNode>& GradientNode = FrameNode->Children[1];
 	const TSharedPtr<FDesignNode>& RichTextNode = FrameNode->Children[2];
 	TestTrue(TEXT("layoutIncludeStroke false preserved"), FrameNode->Metadata.FindRef(TEXT("layoutIncludeStroke")) == TEXT("false"));
-	TestTrue(TEXT("layoutIncludeStroke false typed primary storage"), FrameNode->Source().LayoutExtensions.StrokesIncludedInLayout.IsSet() && !FrameNode->Source().LayoutExtensions.StrokesIncludedInLayout.GetValue());
 	TestTrue(TEXT("strokeLinejoin preserved"), FrameNode->Metadata.FindRef(TEXT("stroke.join")) == TEXT("miter"));
 	TestTrue(TEXT("strokeLinecap preserved"), FrameNode->Metadata.FindRef(TEXT("stroke.cap")) == TEXT("round"));
-	TestTrue(TEXT("mesh gradient preserved"), TextNode->Visual.Fill.bFromMeshGradient && !TextNode->Visual.Fill.MeshGradientRaw.IsEmpty());
-	TestTrue(TEXT("mesh gradient rows/columns parsed"), TextNode->Visual.Fill.MeshGradient.Rows.IsSet()
-		&& TextNode->Visual.Fill.MeshGradient.Columns.IsSet()
-		&& TextNode->Visual.Fill.MeshGradient.Rows.Get(0) == 2
-		&& TextNode->Visual.Fill.MeshGradient.Columns.Get(0) == 2);
-	TestTrue(TEXT("mesh gradient points parsed"), TextNode->Visual.Fill.MeshGradient.Points.Num() == 2
-		&& TextNode->Visual.Fill.MeshGradient.Points[0].Position.IsSet()
-		&& TextNode->Visual.Fill.MeshGradient.Points[0].InHandle.Value.IsSet()
-		&& TextNode->Visual.Fill.MeshGradient.Points[1].OutHandle.Value.IsSet());
-	TestTrue(TEXT("fill blendMode preserved"), TextNode->Visual.Fill.BlendMode == TEXT("multiply"));
-	TestTrue(TEXT("fill opacity preserved"), FMath::IsNearlyEqual(TextNode->Visual.Fill.Opacity, 0.42f, 0.001f));
+	TestTrue(TEXT("mesh gradient preserved"), TextNode->Visual.PrimaryFill().bFromMeshGradient && !TextNode->Visual.PrimaryFill().MeshGradientRaw.IsEmpty());
+	TestTrue(TEXT("mesh gradient rows/columns parsed"), TextNode->Visual.PrimaryFill().MeshGradient.Rows.IsSet()
+		&& TextNode->Visual.PrimaryFill().MeshGradient.Columns.IsSet()
+		&& TextNode->Visual.PrimaryFill().MeshGradient.Rows.Get(0) == 2
+		&& TextNode->Visual.PrimaryFill().MeshGradient.Columns.Get(0) == 2);
+	TestTrue(TEXT("mesh gradient points parsed"), TextNode->Visual.PrimaryFill().MeshGradient.Points.Num() == 2
+		&& TextNode->Visual.PrimaryFill().MeshGradient.Points[0].Position.IsSet()
+		&& TextNode->Visual.PrimaryFill().MeshGradient.Points[0].InHandle.Value.IsSet()
+		&& TextNode->Visual.PrimaryFill().MeshGradient.Points[1].OutHandle.Value.IsSet());
+	TestTrue(TEXT("fill blendMode preserved"), TextNode->Visual.PrimaryFill().BlendMode == TEXT("multiply"));
+	TestTrue(TEXT("fill opacity preserved"), FMath::IsNearlyEqual(TextNode->Visual.PrimaryFill().Opacity, 0.42f, 0.001f));
 	TestTrue(TEXT("text href preserved"), TextNode->Text.Href == TEXT("https://docs.pencil.dev"));
 	TestTrue(TEXT("text strikethrough preserved"), TextNode->Text.bStrikethrough);
-	TestTrue(TEXT("gradient center parsed"), GradientNode->Visual.Fill.Gradient.Center.IsSet()
-		&& FMath::IsNearlyEqual(GradientNode->Visual.Fill.Gradient.Center.GetValue().X, 0.2f, 0.001f)
-		&& FMath::IsNearlyEqual(GradientNode->Visual.Fill.Gradient.Center.GetValue().Y, 0.8f, 0.001f));
-	TestTrue(TEXT("gradient size parsed"), GradientNode->Visual.Fill.Gradient.Size.IsSet()
-		&& FMath::IsNearlyEqual(GradientNode->Visual.Fill.Gradient.Size.GetValue().X, 2.5f, 0.001f)
-		&& FMath::IsNearlyEqual(GradientNode->Visual.Fill.Gradient.Size.GetValue().Y, 1.25f, 0.001f));
+	TestTrue(TEXT("gradient center parsed"), GradientNode->Visual.PrimaryFill().Gradient.Center.IsSet()
+		&& FMath::IsNearlyEqual(GradientNode->Visual.PrimaryFill().Gradient.Center.GetValue().X, 0.2f, 0.001f)
+		&& FMath::IsNearlyEqual(GradientNode->Visual.PrimaryFill().Gradient.Center.GetValue().Y, 0.8f, 0.001f));
+	TestTrue(TEXT("gradient size parsed"), GradientNode->Visual.PrimaryFill().Gradient.Size.IsSet()
+		&& FMath::IsNearlyEqual(GradientNode->Visual.PrimaryFill().Gradient.Size.GetValue().X, 2.5f, 0.001f)
+		&& FMath::IsNearlyEqual(GradientNode->Visual.PrimaryFill().Gradient.Size.GetValue().Y, 1.25f, 0.001f));
 	TestTrue(TEXT("shadow blendMode preserved"), GradientNode->Visual.Effects.Num() > 0
 		&& GradientNode->Visual.Effects[0].BlendMode == TEXT("screen")
 		&& GradientNode->Visual.Effects[0].Shadow.BlendMode == TEXT("screen"));
@@ -1316,13 +1314,12 @@ bool FFigmaOfficialFieldParityTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("figma doc prototypeStartNodeID"), Doc.Metadata.FindRef(TEXT("prototypeStartNodeID")) == TEXT("0:2"));
 	TestTrue(TEXT("figma doc prototypeDevice"), Doc.Metadata.Contains(TEXT("prototypeDevice")));
 	TestTrue(TEXT("figma absolute positioning semantic"), Node->LayoutData.bAbsoluteLayoutPositioning);
-	TestTrue(TEXT("figma layout ext layoutPositioning"), Node->Source().LayoutExtensions.LayoutPositioning == TEXT("ABSOLUTE"));
-	TestTrue(TEXT("figma layout ext counterAxisSpacing"), Node->Source().LayoutExtensions.CounterAxisSpacing.IsSet() && FMath::IsNearlyEqual(Node->Source().LayoutExtensions.CounterAxisSpacing.GetValue(), 6.0f, 0.001f));
-	TestTrue(TEXT("figma layout ext layoutWrap"), Node->Source().LayoutExtensions.LayoutWrap == TEXT("WRAP"));
-	TestTrue(TEXT("figma layout ext strokesIncludedInLayout"), Node->Source().LayoutExtensions.StrokesIncludedInLayout.IsSet() && Node->Source().LayoutExtensions.StrokesIncludedInLayout.GetValue() == false);
-	TestTrue(TEXT("figma layout ext itemReverseZIndex"), Node->Source().LayoutExtensions.ItemReverseZIndex.IsSet() && Node->Source().LayoutExtensions.ItemReverseZIndex.GetValue() != 0);
-	TestTrue(TEXT("figma layout ext boundVariables"), !Node->Source().LayoutExtensions.BoundVariablesJson.IsEmpty());
-	TestTrue(TEXT("figma prototype overflowDirection typed"), Node->Source().Prototype.OverflowDirection == TEXT("HORIZONTAL_SCROLLING"));
+	TestTrue(TEXT("figma wrap cross-axis gap semantic"), Node->LayoutData.WrapCrossAxisGap.IsSet() && FMath::IsNearlyEqual(Node->LayoutData.WrapCrossAxisGap.GetValue(), 6.0f, 0.001f));
+	TestTrue(TEXT("figma layoutWrap metadata"), Node->Metadata.FindRef(TEXT("layoutWrap")) == TEXT("WRAP"));
+	TestTrue(TEXT("figma strokesIncludedInLayout metadata"), Node->Metadata.FindRef(TEXT("strokesIncludedInLayout")) == TEXT("false"));
+	TestTrue(TEXT("figma itemReverseZIndex metadata"), Node->Metadata.FindRef(TEXT("itemReverseZIndex")) == TEXT("true"));
+	TestTrue(TEXT("figma boundVariables metadata"), Node->Metadata.Contains(TEXT("boundVariables")));
+	TestEqual(TEXT("figma overflowDirection semantic"), Node->LayoutData.Overflow, EDesignOverflow::HorizontalScrolling);
 	TestTrue(TEXT("figma prototype transitionNodeID typed"), Node->Source().Prototype.TransitionNodeId == TEXT("1:3"));
 	TestTrue(TEXT("figma prototype legacy transition typed"), Node->Source().Prototype.Transition.Duration.IsSet()
 		&& FMath::IsNearlyEqual(Node->Source().Prototype.Transition.Duration.GetValue(), 420.0f, 0.001f)
@@ -1348,8 +1345,8 @@ bool FFigmaOfficialFieldParityTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("figma doc flowStartingPoints typed"), Doc.SourceDocument().FlowStartingPoints.Num() == 1
 		&& Doc.SourceDocument().FlowStartingPoints[0].NodeId == TEXT("0:2")
 		&& Doc.SourceDocument().FlowStartingPoints[0].Name == TEXT("Doc Flow"));
-	TestTrue(TEXT("figma fill blendMode preserved"), PaintNode->Visual.Fill.BlendMode == TEXT("MULTIPLY"));
-	TestTrue(TEXT("figma fill opacity preserved"), FMath::IsNearlyEqual(PaintNode->Visual.Fill.Opacity, 0.5f, 0.001f));
+	TestTrue(TEXT("figma fill blendMode preserved"), PaintNode->Visual.PrimaryFill().BlendMode == TEXT("MULTIPLY"));
+	TestTrue(TEXT("figma fill opacity preserved"), FMath::IsNearlyEqual(PaintNode->Visual.PrimaryFill().Opacity, 0.5f, 0.001f));
 	TestTrue(TEXT("figma effect blendMode preserved"), PaintNode->Visual.Effects.Num() > 0
 		&& PaintNode->Visual.Effects[0].BlendMode == TEXT("SCREEN")
 		&& PaintNode->Visual.Effects[0].Shadow.BlendMode == TEXT("SCREEN"));
@@ -1953,7 +1950,7 @@ bool FFigmaVectorRasterFallbackTest::RunTest(const FString& Parameters)
 	}
 
 	const TSharedPtr<FDesignNode>& EllipseNode = Doc.Children[0]->Children[0];
-	TestTrue(TEXT("Vector raster fallback captured"), EllipseNode->Source().VectorRasterFallbackImageRef == TEXT("vec_grad_1"));
+	TestTrue(TEXT("Vector raster fallback captured"), EllipseNode->Visual.VectorRasterFallbackImageRef == TEXT("vec_grad_1"));
 
 	TSet<FString> ImageRefs;
 	FFigmaParser::CollectImageRefs(Doc, ImageRefs);
@@ -1962,7 +1959,7 @@ bool FFigmaVectorRasterFallbackTest::RunTest(const FString& Parameters)
 	TMap<FString, FString> ImageMap;
 	ImageMap.Add(TEXT("vec_grad_1"), TEXT("/Game/Transient/T_vec_grad_1.T_vec_grad_1"));
 	FFigmaParser::ApplyImageUrls(Doc, ImageMap);
-	TestTrue(TEXT("ApplyImageUrls remaps vector fallback"), EllipseNode->Source().VectorRasterFallbackImageRef == TEXT("/Game/Transient/T_vec_grad_1.T_vec_grad_1"));
+	TestTrue(TEXT("ApplyImageUrls remaps vector fallback"), EllipseNode->Visual.VectorRasterFallbackImageRef == TEXT("/Game/Transient/T_vec_grad_1.T_vec_grad_1"));
 
 	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* Widget = FindWidgetById(Data.RootWidget, TEXT("ellipse_grad"));
@@ -2026,10 +2023,10 @@ bool FFigmaRenderFallbackMetadataRoundTripTest::RunTest(const FString& Parameter
 	}
 
 	const TSharedPtr<FDesignNode>& RenderNode = Doc.Children[0]->Children[0];
-	TestEqual(TEXT("Render fallback image ref preserved"), RenderNode->Source().RenderFallback.ImageRef, TEXT("render_202_5356"));
-	TestEqual(TEXT("Render fallback scope preserved"), RenderNode->Source().RenderFallback.Scope, TEXT("full"));
-	TestEqual(TEXT("Render fallback source preserved"), RenderNode->Source().RenderFallback.Source, TEXT("figma_render_png"));
-	TestEqual(TEXT("Render fallback reason preserved"), RenderNode->Source().RenderFallback.Reason, TEXT("image_filters+image_blend_luminosity"));
+	TestEqual(TEXT("Render fallback image ref normalized"), RenderNode->Visual.RenderFallback.ImageRef, TEXT("render_202_5356"));
+	TestEqual(TEXT("Render fallback scope normalized"), RenderNode->Visual.RenderFallback.Scope, EDesignRenderFallbackScope::Leaf);
+	TestEqual(TEXT("Render fallback source preserved"), RenderNode->Metadata.FindRef(TEXT("design2umgRenderFallbackSource")), TEXT("figma_render_png"));
+	TestEqual(TEXT("Render fallback reason preserved"), RenderNode->Metadata.FindRef(TEXT("design2umgRenderFallbackReason")), TEXT("image_filters+image_blend_luminosity"));
 
 	TSet<FString> ImageRefs;
 	FFigmaParser::CollectImageRefs(Doc, ImageRefs);
@@ -2040,7 +2037,7 @@ bool FFigmaRenderFallbackMetadataRoundTripTest::RunTest(const FString& Parameter
 	ImageMap.Add(TEXT("img_orig"), TEXT("/Game/Transient/T_img_orig.T_img_orig"));
 	ImageMap.Add(TEXT("render_202_5356"), TEXT("/Game/Transient/T_render_202_5356.T_render_202_5356"));
 	FFigmaParser::ApplyImageUrls(Doc, ImageMap);
-	TestEqual(TEXT("ApplyImageUrls remaps render fallback image"), RenderNode->Source().RenderFallback.ImageRef, TEXT("/Game/Transient/T_render_202_5356.T_render_202_5356"));
+	TestEqual(TEXT("ApplyImageUrls remaps render fallback image"), RenderNode->Visual.RenderFallback.ImageRef, TEXT("/Game/Transient/T_render_202_5356.T_render_202_5356"));
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaStructuredLeafRenderFallbackWidgetTest,
@@ -2073,14 +2070,11 @@ bool FFigmaStructuredLeafRenderFallbackWidgetTest::RunTest(const FString& Parame
 	Leaf->Transform.Width = FDesignSize::Fixed(26.0f);
 	Leaf->Transform.Height = FDesignSize::Fixed(26.0f);
 	Leaf->MutableSource().SourceNodeType = TEXT("FRAME");
-	Leaf->Visual.Fill.Type = EDesignFillType::Image;
-	Leaf->Visual.Fill.bEnabled = true;
-	Leaf->Visual.Fill.Image.Url = TEXT("img_avatar");
-	Leaf->Visual.Fill.Image.Mode = EDesignImageMode::Fit;
-	Leaf->MutableSource().RenderFallback.ImageRef = TEXT("/Game/Transient/T_render_202_5356.T_render_202_5356");
-	Leaf->MutableSource().RenderFallback.Scope = TEXT("full");
-	Leaf->MutableSource().RenderFallback.Source = TEXT("figma_render_png");
-	Leaf->MutableSource().RenderFallback.Reason = TEXT("foreground_blur");
+	Leaf->Visual.PrimaryFill().Type = EDesignFillType::Image;
+	Leaf->Visual.PrimaryFill().bEnabled = true;
+	Leaf->Visual.PrimaryFill().Image.Url = TEXT("img_avatar");
+	Leaf->Visual.PrimaryFill().Image.Mode = EDesignImageMode::Fit;
+	Leaf->Visual.RenderFallback.ImageRef = TEXT("/Game/Transient/T_render_202_5356.T_render_202_5356");
 	Root->Children.Add(Leaf);
 	Doc.Children.Add(Root);
 
@@ -2127,14 +2121,11 @@ bool FFigmaLeafRenderFallbackWidgetTest::RunTest(const FString& Parameters)
 	Leaf->Transform.Y = 12.0f;
 	Leaf->Transform.Width = FDesignSize::Fixed(26.0f);
 	Leaf->Transform.Height = FDesignSize::Fixed(26.0f);
-	Leaf->Visual.Fill.Type = EDesignFillType::Image;
-	Leaf->Visual.Fill.bEnabled = true;
-	Leaf->Visual.Fill.Image.Url = TEXT("img_avatar");
-	Leaf->Visual.Fill.Image.Mode = EDesignImageMode::Fit;
-	Leaf->MutableSource().RenderFallback.ImageRef = TEXT("/Game/Transient/T_render_202_5356.T_render_202_5356");
-	Leaf->MutableSource().RenderFallback.Scope = TEXT("full");
-	Leaf->MutableSource().RenderFallback.Source = TEXT("figma_render_png");
-	Leaf->MutableSource().RenderFallback.Reason = TEXT("foreground_blur");
+	Leaf->Visual.PrimaryFill().Type = EDesignFillType::Image;
+	Leaf->Visual.PrimaryFill().bEnabled = true;
+	Leaf->Visual.PrimaryFill().Image.Url = TEXT("img_avatar");
+	Leaf->Visual.PrimaryFill().Image.Mode = EDesignImageMode::Fit;
+	Leaf->Visual.RenderFallback.ImageRef = TEXT("/Game/Transient/T_render_202_5356.T_render_202_5356");
 	Root->Children.Add(Leaf);
 	Doc.Children.Add(Root);
 

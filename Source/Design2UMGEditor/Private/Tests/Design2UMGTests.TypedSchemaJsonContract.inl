@@ -140,8 +140,8 @@ bool FParserNumberStringFlexibleTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Root cornerRadius BL parsed from string"), Root->Visual.CornerRadius.BottomLeft, 8.0f);
 	TestTrue(TEXT("Root stroke thickness parsed as uniform"), Root->Visual.Stroke.Thickness.bUniform);
 	TestEqual(TEXT("Root stroke thickness parsed from string"), Root->Visual.Stroke.Thickness.Uniform, 2.5f);
-	TestEqual(TEXT("Root image transform A parsed from string"), Root->Visual.Fill.Image.Transform.A, 1.0f);
-	TestEqual(TEXT("Root image transform D parsed from string"), Root->Visual.Fill.Image.Transform.D, 1.0f);
+	TestEqual(TEXT("Root image transform A parsed from string"), Root->Visual.PrimaryFill().Image.Transform.A, 1.0f);
+	TestEqual(TEXT("Root image transform D parsed from string"), Root->Visual.PrimaryFill().Image.Transform.D, 1.0f);
 	TestEqual(TEXT("Root child count"), Root->Children.Num(), 2);
 	if (Root->Children.Num() < 2)
 		return false;

@@ -147,10 +147,6 @@ static void ParseFlowStartingPoints(const TSharedPtr<FJsonObject>& Obj, TArray<F
 
 void ParsePrototypeNodeData(const TSharedPtr<FJsonObject>& NodeObj, FDesignPrototypeNodeData& OutData)
 {
-	const FString OverflowDir = DesignJsonUtils::GetString(NodeObj, TEXT("overflowDirection"));
-	if (!OverflowDir.IsEmpty())
-		OutData.OverflowDirection = OverflowDir;
-
 	const FString TransitionNodeId = DesignJsonUtils::GetString(NodeObj, TEXT("transitionNodeID"));
 	if (!TransitionNodeId.IsEmpty())
 		OutData.TransitionNodeId = TransitionNodeId;

@@ -38,11 +38,6 @@ namespace Design2UMGCore::SharedSemantics
 			return true;
 		}
 
-		if (HasVisibleFill(Node->Visual.Fill))
-		{
-			return true;
-		}
-
 		for (const FDesignFill& Fill : Node->Visual.Fills)
 		{
 			if (HasVisibleFill(Fill))

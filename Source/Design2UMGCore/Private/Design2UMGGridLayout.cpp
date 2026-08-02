@@ -21,60 +21,36 @@ namespace
 		return Node.IsValid() ? FMath::Max(1, Node->LayoutData.LayoutColumnSpan.Get(1)) : 1;
 	}
 
-	bool TryMapGridHorizontalAlignment(const FString& Value, EUMGSlotHorizontalAlignment& OutAlignment)
+	EUMGSlotHorizontalAlignment MapGridHorizontalAlignment(const EDesignAxisAlignment Alignment)
 	{
-		if (Value.Equals(TEXT("MIN"), ESearchCase::IgnoreCase)
-			|| Value.Equals(TEXT("LEFT"), ESearchCase::IgnoreCase))
+		switch (Alignment)
 		{
-			OutAlignment = EUMGSlotHorizontalAlignment::Left;
-			return true;
+		case EDesignAxisAlignment::Start:
+			return EUMGSlotHorizontalAlignment::Left;
+		case EDesignAxisAlignment::Center:
+			return EUMGSlotHorizontalAlignment::Center;
+		case EDesignAxisAlignment::End:
+			return EUMGSlotHorizontalAlignment::Right;
+		case EDesignAxisAlignment::Fill:
+		default:
+			return EUMGSlotHorizontalAlignment::Fill;
 		}
-		if (Value.Equals(TEXT("CENTER"), ESearchCase::IgnoreCase))
-		{
-			OutAlignment = EUMGSlotHorizontalAlignment::Center;
-			return true;
-		}
-		if (Value.Equals(TEXT("MAX"), ESearchCase::IgnoreCase)
-			|| Value.Equals(TEXT("RIGHT"), ESearchCase::IgnoreCase))
-		{
-			OutAlignment = EUMGSlotHorizontalAlignment::Right;
-			return true;
-		}
-		if (Value.Equals(TEXT("STRETCH"), ESearchCase::IgnoreCase)
-			|| Value.Equals(TEXT("FILL"), ESearchCase::IgnoreCase))
-		{
-			OutAlignment = EUMGSlotHorizontalAlignment::Fill;
-			return true;
-		}
-		return false;
 	}
 
-	bool TryMapGridVerticalAlignment(const FString& Value, EUMGSlotVerticalAlignment& OutAlignment)
+	EUMGSlotVerticalAlignment MapGridVerticalAlignment(const EDesignAxisAlignment Alignment)
 	{
-		if (Value.Equals(TEXT("MIN"), ESearchCase::IgnoreCase)
-			|| Value.Equals(TEXT("TOP"), ESearchCase::IgnoreCase))
+		switch (Alignment)
 		{
-			OutAlignment = EUMGSlotVerticalAlignment::Top;
-			return true;
+		case EDesignAxisAlignment::Start:
+			return EUMGSlotVerticalAlignment::Top;
+		case EDesignAxisAlignment::Center:
+			return EUMGSlotVerticalAlignment::Center;
+		case EDesignAxisAlignment::End:
+			return EUMGSlotVerticalAlignment::Bottom;
+		case EDesignAxisAlignment::Fill:
+		default:
+			return EUMGSlotVerticalAlignment::Fill;
 		}
-		if (Value.Equals(TEXT("CENTER"), ESearchCase::IgnoreCase))
-		{
-			OutAlignment = EUMGSlotVerticalAlignment::Center;
-			return true;
-		}
-		if (Value.Equals(TEXT("MAX"), ESearchCase::IgnoreCase)
-			|| Value.Equals(TEXT("BOTTOM"), ESearchCase::IgnoreCase))
-		{
-			OutAlignment = EUMGSlotVerticalAlignment::Bottom;
-			return true;
-		}
-		if (Value.Equals(TEXT("STRETCH"), ESearchCase::IgnoreCase)
-			|| Value.Equals(TEXT("FILL"), ESearchCase::IgnoreCase))
-		{
-			OutAlignment = EUMGSlotVerticalAlignment::Fill;
-			return true;
-		}
-		return false;
 	}
 
 	uint64 MakeGridCellKey(int32 Row, int32 Column)
@@ -227,20 +203,20 @@ namespace Design2UMGGridLayout
 			return;
 		}
 
-		EUMGSlotHorizontalAlignment HorizontalAlignmentValue = EUMGSlotHorizontalAlignment::Fill;
-		const FString HorizontalAlignSource = ChildNode->LayoutData.LayoutChildHorizontalAlign.Get(
-			ParentNode->LayoutData.LayoutChildHorizontalAlign.Get(FString()));
-		if (TryMapGridHorizontalAlignment(HorizontalAlignSource, HorizontalAlignmentValue))
+		const TOptional<EDesignAxisAlignment> HorizontalAlignment = ChildNode->LayoutData.LayoutChildHorizontalAlign.IsSet()
+			? ChildNode->LayoutData.LayoutChildHorizontalAlign
+			: ParentNode->LayoutData.LayoutChildHorizontalAlign;
+		if (HorizontalAlignment.IsSet())
 		{
-			ChildWidget.Slot.HorizontalAlignment = HorizontalAlignmentValue;
+			ChildWidget.Slot.HorizontalAlignment = MapGridHorizontalAlignment(HorizontalAlignment.GetValue());
 		}
 
-		EUMGSlotVerticalAlignment VerticalAlignmentValue = EUMGSlotVerticalAlignment::Fill;
-		const FString VerticalAlignSource = ChildNode->LayoutData.LayoutChildVerticalAlign.Get(
-			ParentNode->LayoutData.LayoutChildVerticalAlign.Get(FString()));
-		if (TryMapGridVerticalAlignment(VerticalAlignSource, VerticalAlignmentValue))
+		const TOptional<EDesignAxisAlignment> VerticalAlignment = ChildNode->LayoutData.LayoutChildVerticalAlign.IsSet()
+			? ChildNode->LayoutData.LayoutChildVerticalAlign
+			: ParentNode->LayoutData.LayoutChildVerticalAlign;
+		if (VerticalAlignment.IsSet())
 		{
-			ChildWidget.Slot.VerticalAlignment = VerticalAlignmentValue;
+			ChildWidget.Slot.VerticalAlignment = MapGridVerticalAlignment(VerticalAlignment.GetValue());
 		}
 	}
 

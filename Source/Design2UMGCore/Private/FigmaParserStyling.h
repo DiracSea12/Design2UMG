@@ -10,7 +10,6 @@ namespace FigmaParserInternal
 {
 	FString ExtractSyntheticVectorRasterImageRef(const TArray<TSharedPtr<FJsonValue>>& Fills);
 	TArray<FDesignFill> ParseFills(const TArray<TSharedPtr<FJsonValue>>& Fills);
-	FDesignFill ParseFill(const TArray<TSharedPtr<FJsonValue>>& Fills);
 	FDesignStroke ParseStroke(const TSharedPtr<FJsonObject>& NodeObj);
 	FDesignCornerRadius ParseCornerRadius(const TSharedPtr<FJsonObject>& NodeObj);
 	TArray<FDesignEffect> ParseEffects(const TArray<TSharedPtr<FJsonValue>>& Effects);

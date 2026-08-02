@@ -73,7 +73,7 @@ namespace
 			MakeNode(TEXT("parent-1"), TEXT("ParentFrame"), EDesignNodeType::Frame, 0.0f, 0.0f, 400.0f, 300.0f);
 		const TSharedPtr<FDesignNode> Rect =
 			MakeNode(TEXT("child-1"), TEXT("ChildRect"), EDesignNodeType::Rectangle, 10.0f, 10.0f, 100.0f, 50.0f);
-		Rect->Visual.Fill = FDesignFill::FromColor(TEXT("#ff0000"));
+		Rect->Visual.PrimaryFill() = FDesignFill::FromColor(TEXT("#ff0000"));
 
 		const TSharedPtr<FDesignNode> Text =
 			MakeNode(TEXT("child-2"), TEXT("ChildText"), EDesignNodeType::Text, 10.0f, 70.0f, 200.0f, 30.0f);

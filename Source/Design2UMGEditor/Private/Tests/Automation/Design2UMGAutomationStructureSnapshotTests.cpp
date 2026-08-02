@@ -32,7 +32,7 @@ namespace
 		return TEXT("{id=") + Node->Id
 			+ TEXT(",type=") + LexToString(static_cast<int32>(Node->Type))
 			+ TEXT(",ref=") + Node->Ref
-			+ TEXT(",expanded=") + (Node->Source().bExpandedRefInstance ? TEXT("true") : TEXT("false"))
+			+ TEXT(",expanded=") + (Node->bExpandedRefInstance ? TEXT("true") : TEXT("false"))
 			+ TEXT(",meta=") + FString::Join(MetadataEntries, TEXT(","))
 			+ TEXT(",desc=") + FString::Join(DescendantKeys, TEXT(","))
 			+ TEXT(",children=") + FString::Join(ChildFingerprints, TEXT("|"))
@@ -89,7 +89,7 @@ bool FDesignStructureSnapshotDoesNotMutateSourceDocumentTest::RunTest(const FStr
 
 	const FString BeforeFingerprint = BuildDocumentFingerprint(Document);
 	TestFalse(TEXT("Before snapshot source document should not mark expanded ref instance"),
-		Component->Source().bExpandedRefInstance || Screen->Source().bExpandedRefInstance || Instance->Source().bExpandedRefInstance);
+		Component->bExpandedRefInstance || Screen->bExpandedRefInstance || Instance->bExpandedRefInstance);
 	TestFalse(TEXT("Before snapshot source document should not contain expanded ref metadata"),
 		Component->Metadata.Contains(TEXT("design2umg.expanded_ref_instance"))
 		|| Screen->Metadata.Contains(TEXT("design2umg.expanded_ref_instance"))
@@ -102,7 +102,7 @@ bool FDesignStructureSnapshotDoesNotMutateSourceDocumentTest::RunTest(const FStr
 	TestEqual(TEXT("Building structure snapshot must not mutate source document"), AfterFingerprint, BeforeFingerprint);
 	TestTrue(TEXT("Original instance remains a ref node"), Instance->Type == EDesignNodeType::Ref && Instance->Ref == TEXT("shared_component"));
 	TestFalse(TEXT("Snapshot traversal must not mark original nodes as expanded ref instances"),
-		Component->Source().bExpandedRefInstance || Screen->Source().bExpandedRefInstance || Instance->Source().bExpandedRefInstance);
+		Component->bExpandedRefInstance || Screen->bExpandedRefInstance || Instance->bExpandedRefInstance);
 	TestFalse(TEXT("Snapshot traversal must not inject expanded ref metadata into source nodes"),
 		Component->Metadata.Contains(TEXT("design2umg.expanded_ref_instance"))
 		|| Screen->Metadata.Contains(TEXT("design2umg.expanded_ref_instance"))

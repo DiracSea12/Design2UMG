@@ -25,7 +25,7 @@ namespace
 
 	void ApplyOverrideProperties(FDesignNode& Target, const FDesignNode& Override)
 	{
-		const bool bFillExplicitClear = Override.Visual.Fill.bExplicitClear;
+		const bool bFillExplicitClear = Override.Visual.bFillExplicitClear;
 		const bool bKeepExplicitStrokeFill = Override.Visual.Stroke.Fill.IsSet();
 
 		if (!Override.Text.Content.IsEmpty())
@@ -38,10 +38,10 @@ namespace
 			Target.Text.FontStyle = Override.Text.FontStyle;
 		if (!Override.Text.FontFamily.IsEmpty())
 			Target.Text.FontFamily = Override.Text.FontFamily;
-		if (Override.Visual.Fill.Type != EDesignFillType::None || Override.Visual.Fill.bExplicitClear)
+		if (Override.Visual.Fills.Num() > 0 || bFillExplicitClear)
 		{
-			Target.Visual.Fill = Override.Visual.Fill;
 			Target.Visual.Fills = Override.Visual.Fills;
+			Target.Visual.bFillExplicitClear = bFillExplicitClear;
 		}
 		if (Override.Visual.Stroke.HasStroke())
 			Target.Visual.Stroke = Override.Visual.Stroke;
@@ -71,6 +71,7 @@ namespace
 		if (Override.LayoutData.HasExplicitPadding())
 		{
 			Target.LayoutData.ExplicitPadding = Override.LayoutData.ExplicitPadding;
+			Target.LayoutData.PaddingRequiresRuntimeWrap = Override.LayoutData.PaddingRequiresRuntimeWrap;
 		}
 		if (Override.LayoutData.HasExplicitGap())
 		{
@@ -200,7 +201,7 @@ namespace
 			return;
 		}
 
-		Node->MutableSource().bExpandedRefInstance = true;
+		Node->bExpandedRefInstance = true;
 		Node->Metadata.Add(ExpandedRefInstanceMetadataKey, TEXT("true"));
 		for (TSharedPtr<FDesignNode>& Child : Node->Children)
 		{
@@ -213,7 +214,7 @@ namespace
 		if (!Expanded.IsValid() || !RefNode.IsValid())
 			return;
 
-		const bool bFillExplicitClear = RefNode->Visual.Fill.bExplicitClear;
+		const bool bFillExplicitClear = RefNode->Visual.bFillExplicitClear;
 		const bool bKeepExplicitStrokeFill = RefNode->Visual.Stroke.Fill.IsSet();
 
 		Expanded->Id = RefNode->Id;
@@ -253,10 +254,10 @@ namespace
 			Expanded->Transform.bHasHeight = true;
 		}
 
-		if (RefNode->Visual.Fill.Type != EDesignFillType::None || RefNode->Visual.Fill.bExplicitClear)
+		if (RefNode->Visual.Fills.Num() > 0 || bFillExplicitClear)
 		{
-			Expanded->Visual.Fill = RefNode->Visual.Fill;
 			Expanded->Visual.Fills = RefNode->Visual.Fills;
+			Expanded->Visual.bFillExplicitClear = bFillExplicitClear;
 		}
 		if (RefNode->Visual.Stroke.HasStroke())
 			Expanded->Visual.Stroke = RefNode->Visual.Stroke;
@@ -278,6 +279,7 @@ namespace
 		if (RefNode->LayoutData.HasExplicitPadding())
 		{
 			Expanded->LayoutData.ExplicitPadding = RefNode->LayoutData.ExplicitPadding;
+			Expanded->LayoutData.PaddingRequiresRuntimeWrap = RefNode->LayoutData.PaddingRequiresRuntimeWrap;
 		}
 		if (RefNode->LayoutData.HasExplicitGap())
 		{
@@ -416,22 +418,6 @@ void RefExpander::ReThemeNode(TSharedPtr<FDesignNode>& Node, const FDesignVariab
 	if (!Node.IsValid())
 		return;
 
-	// Primary fill
-	if (!Node->Visual.Fill.SourceVar.IsEmpty())
-	{
-		FString OldColor = Node->Visual.Fill.SolidColor;
-		Node->Visual.Fill.SolidColor = Resolver.ResolveColor(Node->Visual.Fill.SourceVar);
-		UE_LOG(LogDesign2UMG, Verbose, TEXT("ReThemeNode '%s': Fill %s -> %s (var=%s)"),
-			*Node->Id, *OldColor, *Node->Visual.Fill.SolidColor, *Node->Visual.Fill.SourceVar);
-	}
-
-	for (auto& Stop : Node->Visual.Fill.Gradient.Colors)
-	{
-		if (!Stop.SourceVar.IsEmpty())
-			Stop.Color = Resolver.ResolveColor(Stop.SourceVar);
-	}
-
-	// Multi-layer fills
 	for (FDesignFill& F : Node->Visual.Fills)
 	{
 		if (!F.SourceVar.IsEmpty())

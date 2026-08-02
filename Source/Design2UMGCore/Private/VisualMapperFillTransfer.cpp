@@ -277,7 +277,12 @@ namespace VisualMapperFillTransfer
 {
 	void ApplyFillProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
 	{
-		if (!Node.IsValid() || !Node->Visual.Fill.bEnabled)
+		if (!Node.IsValid())
+		{
+			return;
+		}
+		const FDesignFill& PrimaryFill = Node->Visual.PrimaryFill();
+		if (!PrimaryFill.bEnabled)
 		{
 			return;
 		}
@@ -285,34 +290,34 @@ namespace VisualMapperFillTransfer
 		if (Node->HasMultiFill())
 		{
 			if ((Node->Type == EDesignNodeType::Text || Node->Type == EDesignNodeType::IconFont)
-				&& Node->Visual.Fill.Type == EDesignFillType::Color
+				&& PrimaryFill.Type == EDesignFillType::Color
 				&& !HasVisualMapperPropertyPresence(Widget, UMGPropertyKeys::Color))
 			{
-				Widget.Text.Color = FUMGValueParser::ParseColor(Node->Visual.Fill.SolidColor);
+				Widget.Text.Color = FUMGValueParser::ParseColor(PrimaryFill.SolidColor);
 			}
 			return;
 		}
 
-		if (Node->Visual.Fill.Type == EDesignFillType::Color)
+		if (PrimaryFill.Type == EDesignFillType::Color)
 		{
 			if (Node->Type == EDesignNodeType::Text || Node->Type == EDesignNodeType::IconFont)
 			{
 				if (!HasVisualMapperPropertyPresence(Widget, UMGPropertyKeys::Color))
 				{
-					Widget.Text.Color = FUMGValueParser::ParseColor(Node->Visual.Fill.SolidColor);
+					Widget.Text.Color = FUMGValueParser::ParseColor(PrimaryFill.SolidColor);
 				}
 				return;
 			}
 
-			Widget.Brush.BrushColor = FUMGValueParser::ParseColor(Node->Visual.Fill.SolidColor);
+			Widget.Brush.BrushColor = FUMGValueParser::ParseColor(PrimaryFill.SolidColor);
 			return;
 		}
 
-		if (Node->Visual.Fill.Type == EDesignFillType::Gradient && Node->Visual.Fill.Gradient.Colors.Num() > 0)
+		if (PrimaryFill.Type == EDesignFillType::Gradient && PrimaryFill.Gradient.Colors.Num() > 0)
 		{
-			Widget.Brush.MaterialRef = GradientHelpers::ResolveGradientMaterialRef(Node->Visual.Fill.Gradient);
-			GradientHelpers::ApplyTypedGradientBrushData(Widget.Brush, Node->Visual.Fill.Gradient);
-			const FString MaterialParams = GradientHelpers::BuildGradientMaterialParams(Node->Visual.Fill.Gradient);
+			Widget.Brush.MaterialRef = GradientHelpers::ResolveGradientMaterialRef(PrimaryFill.Gradient);
+			GradientHelpers::ApplyTypedGradientBrushData(Widget.Brush, PrimaryFill.Gradient);
+			const FString MaterialParams = GradientHelpers::BuildGradientMaterialParams(PrimaryFill.Gradient);
 			if (!MaterialParams.IsEmpty())
 			{
 				Widget.Brush.MaterialParams = MaterialParams;
@@ -321,9 +326,9 @@ namespace VisualMapperFillTransfer
 			return;
 		}
 
-		if (Node->Visual.Fill.Type == EDesignFillType::Image && !Node->Visual.Fill.Image.Url.IsEmpty())
+		if (PrimaryFill.Type == EDesignFillType::Image && !PrimaryFill.Image.Url.IsEmpty())
 		{
-			ImageFillUtils::ApplyImageFillProperties(Widget, Node->Visual.Fill.Image);
+			ImageFillUtils::ApplyImageFillProperties(Widget, PrimaryFill.Image);
 			AddTextureSizeHints(Widget, Node);
 		}
 	}

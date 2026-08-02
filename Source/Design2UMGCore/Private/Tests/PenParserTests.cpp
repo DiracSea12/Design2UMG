@@ -285,9 +285,11 @@ bool FPenParserStrokeNodeFormatsTest::RunTest(const FString&)
       "id": "current-stroke",
       "name": "Current Stroke",
       "type": "frame",
-      "stroke": "#112233",
-      "strokeWidth": { "top": 1, "right": 2, "bottom": 3, "left": 4 },
-      "strokeAlignment": "outer"
+		"stroke": "#112233",
+		"strokeWidth": { "top": 1, "right": 2, "bottom": 3, "left": 4 },
+		"strokeAlignment": "outer",
+		"strokeLinecap": "round",
+		"strokeLinejoin": "bevel"
     },
     {
       "id": "current-inner-stroke",
@@ -348,6 +350,8 @@ bool FPenParserStrokeNodeFormatsTest::RunTest(const FString&)
 	TestEqual(TEXT("Current right thickness"), Current->Visual.Stroke.Thickness.Right, 2.0f);
 	TestEqual(TEXT("Current bottom thickness"), Current->Visual.Stroke.Thickness.Bottom, 3.0f);
 	TestEqual(TEXT("Current left thickness"), Current->Visual.Stroke.Thickness.Left, 4.0f);
+	TestEqual(TEXT("Current cap is normalized for shared conversion"), Current->Visual.Stroke.Cap, TEXT("round"));
+	TestEqual(TEXT("Current join is normalized for shared conversion"), Current->Visual.Stroke.Join, TEXT("bevel"));
 	TestTrue(TEXT("Current fill set"), Current->Visual.Stroke.Fill.IsSet());
 	if (Current->Visual.Stroke.Fill.IsSet())
 	{
@@ -439,9 +443,9 @@ bool FPenParserPointParsingParityTest::RunTest(const FString&)
 	}
 
 	const TSharedPtr<FDesignNode>& Node = Doc.Children[0];
-	TestEqual(TEXT("Mesh gradient point count preserved"), Node->Visual.Fill.MeshGradient.Points.Num(), 3);
+	TestEqual(TEXT("Mesh gradient point count preserved"), Node->Visual.PrimaryFill().MeshGradient.Points.Num(), 3);
 
-	const FDesignMeshGradientPoint& ArrayPoint = Node->Visual.Fill.MeshGradient.Points[0];
+	const FDesignMeshGradientPoint& ArrayPoint = Node->Visual.PrimaryFill().MeshGradient.Points[0];
 	TestTrue(TEXT("Array position parsed"), ArrayPoint.Position.IsSet());
 	TestTrue(TEXT("Array position X preserved"), FMath::IsNearlyEqual(ArrayPoint.Position->X, 0.1f, KINDA_SMALL_NUMBER));
 	TestTrue(TEXT("Array position Y preserved"), FMath::IsNearlyEqual(ArrayPoint.Position->Y, 0.2f, KINDA_SMALL_NUMBER));
@@ -452,7 +456,7 @@ bool FPenParserPointParsingParityTest::RunTest(const FString&)
 	TestTrue(TEXT("Array handle X preserved"), FMath::IsNearlyEqual(ArrayPoint.OutHandle.Value->X, 0.3f, KINDA_SMALL_NUMBER));
 	TestTrue(TEXT("Array handle Y preserved"), FMath::IsNearlyEqual(ArrayPoint.OutHandle.Value->Y, 0.4f, KINDA_SMALL_NUMBER));
 
-	const FDesignMeshGradientPoint& ObjectPoint = Node->Visual.Fill.MeshGradient.Points[1];
+	const FDesignMeshGradientPoint& ObjectPoint = Node->Visual.PrimaryFill().MeshGradient.Points[1];
 	TestTrue(TEXT("Object position with variables parsed"), ObjectPoint.Position.IsSet());
 	TestTrue(TEXT("Object position variable X preserved"), FMath::IsNearlyEqual(ObjectPoint.Position->X, 0.25f, KINDA_SMALL_NUMBER));
 	TestTrue(TEXT("Object position variable Y preserved"), FMath::IsNearlyEqual(ObjectPoint.Position->Y, 0.75f, KINDA_SMALL_NUMBER));
@@ -463,7 +467,7 @@ bool FPenParserPointParsingParityTest::RunTest(const FString&)
 	TestTrue(TEXT("Fallback object handleOut X preserved"), FMath::IsNearlyEqual(ObjectPoint.OutHandle.Value->X, 0.9f, KINDA_SMALL_NUMBER));
 	TestTrue(TEXT("Fallback object handleOut Y preserved"), FMath::IsNearlyEqual(ObjectPoint.OutHandle.Value->Y, 0.1f, KINDA_SMALL_NUMBER));
 
-	const FDesignMeshGradientPoint& InvalidPoint = Node->Visual.Fill.MeshGradient.Points[2];
+	const FDesignMeshGradientPoint& InvalidPoint = Node->Visual.PrimaryFill().MeshGradient.Points[2];
 	TestFalse(TEXT("Invalid short array position stays unset"), InvalidPoint.Position.IsSet());
 	TestFalse(TEXT("Invalid short array handleIn stays unset"), InvalidPoint.InHandle.Value.IsSet());
 	TestFalse(TEXT("Incomplete object handleOut stays unset"), InvalidPoint.OutHandle.Value.IsSet());
@@ -552,6 +556,44 @@ bool FPenParserErrorInputTest::RunTest(const FString&)
 		if (Expanded.IsValid())
 		{
 			ExpectSize(*this, TEXT("Default-fit ref keeps target height"), Expanded->Transform.Height, EDesignSizeMode::FitContent, 44.0f);
+		}
+	}
+
+	// Padding and its runtime ownership form one semantic override.
+	{
+		const FString RefPaddingPolicyJson =
+			TEXT("{")
+			TEXT("\"version\":\"1.0\",")
+			TEXT("\"children\":[")
+			TEXT("{\"id\":\"panel-template\",\"name\":\"PanelTemplate\",\"type\":\"frame\",\"reusable\":true,\"layout\":\"vertical\",\"padding\":8,\"children\":[{\"id\":\"body\",\"name\":\"Body\",\"type\":\"frame\"}]} ,")
+			TEXT("{\"id\":\"panel-instance\",\"name\":\"PanelInstance\",\"type\":\"ref\",\"ref\":\"panel-template\",\"padding\":24,\"children\":[{\"id\":\"positioned\",\"name\":\"Positioned\",\"type\":\"frame\",\"x\":24,\"y\":24}]},")
+			TEXT("{\"id\":\"panel-descendant-instance\",\"name\":\"PanelDescendantInstance\",\"type\":\"ref\",\"ref\":\"panel-template\",\"descendants\":{\"body\":{\"id\":\"body\",\"type\":\"frame\",\"padding\":12,\"children\":[{\"id\":\"nested-positioned\",\"name\":\"NestedPositioned\",\"type\":\"frame\",\"x\":12,\"y\":12}]}}}")
+			TEXT("]}");
+
+		FDesignDocument Doc;
+		TestTrue(TEXT("Ref padding policy document parses"), FPenParser::ParseDocument(RefPaddingPolicyJson, Doc));
+		TestEqual(TEXT("Ref padding policy roots parsed"), Doc.Children.Num(), 3);
+		const TSharedPtr<FDesignNode> Expanded = RefExpander::ExpandRef(Doc.Children[1], Doc);
+		TestTrue(TEXT("Ref padding policy expansion returns node"), Expanded.IsValid());
+		if (Expanded.IsValid())
+		{
+			TestTrue(TEXT("Instance padding is explicit"), Expanded->LayoutData.ExplicitPadding.IsSet());
+			TestTrue(TEXT("Instance padding policy is explicit"), Expanded->LayoutData.PaddingRequiresRuntimeWrap.IsSet());
+			TestFalse(TEXT("Instance padding already baked into explicit child coordinates"), Expanded->LayoutData.PaddingRequiresRuntimeWrap.GetValue());
+		}
+
+		const TSharedPtr<FDesignNode> DescendantExpanded = RefExpander::ExpandRef(Doc.Children[2], Doc);
+		TestTrue(TEXT("Descendant padding policy expansion returns node"), DescendantExpanded.IsValid());
+		if (DescendantExpanded.IsValid())
+		{
+			TestEqual(TEXT("Expanded template child count"), DescendantExpanded->Children.Num(), 1);
+			if (DescendantExpanded->Children.Num() == 1 && DescendantExpanded->Children[0].IsValid())
+			{
+				const TSharedPtr<FDesignNode>& Body = DescendantExpanded->Children[0];
+				TestTrue(TEXT("Descendant padding is explicit"), Body->LayoutData.ExplicitPadding.IsSet());
+				TestTrue(TEXT("Descendant padding policy is explicit"), Body->LayoutData.PaddingRequiresRuntimeWrap.IsSet());
+				TestFalse(TEXT("Descendant padding already baked into explicit child coordinates"), Body->LayoutData.PaddingRequiresRuntimeWrap.GetValue());
+			}
 		}
 	}
 

@@ -17,6 +17,8 @@ namespace Design2UMGConverterVisualSupport
 	};
 
 	bool HasVisualFill(const TSharedPtr<FDesignNode>& Node);
+	bool ShouldUseRenderFallback(const TSharedPtr<FDesignNode>& Node);
+	FUMGWidgetNode CreateRenderFallbackWidget(const TSharedPtr<FDesignNode>& Node);
 
 	void ApplyBaseVisualProperties(
 		FUMGWidgetNode& Widget,

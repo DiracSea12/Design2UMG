@@ -509,6 +509,12 @@ namespace
 			return true;
 		}
 
+		if (!DesignRemoteImageImporterInternal::ShouldResolveImagePath(InOutTexturePath, Context.bResolveRemoteImages))
+		{
+			Context.Report.AddMessage(FString::Printf(TEXT("Skipped remote image for '%s': remote image import is disabled"), *WidgetName));
+			return true;
+		}
+
 		const FString NormalizedUrl = NormalizeUrl(InOutTexturePath);
 		const FString SubDir = BuildSubImportPath(Context.ImportPath, Context.FrameName);
 		const FString SourceKey = BuildSourceKeyForRemote(NormalizedUrl);
@@ -655,6 +661,11 @@ namespace
 	}
 }
 
+bool DesignRemoteImageImporterInternal::ShouldResolveImagePath(const FString& ImagePath, const bool bResolveRemoteImages)
+{
+	return !IsRemoteUrl(ImagePath.TrimStartAndEnd()) || bResolveRemoteImages;
+}
+
 bool FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, FString* OutReport)
 {
 	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
@@ -667,17 +678,11 @@ bool FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, 
 		return false;
 	}
 
-	if (!Settings->bEnableRemoteImageImport)
-	{
-		if (OutReport)
-		{
-			*OutReport = TEXT("Remote image import: disabled");
-		}
-		return true;
-	}
-
 	TSet<FString> RemoteUrls;
-	CollectRemoteUrls(InOutData.RootWidget, RemoteUrls);
+	if (Settings->bEnableRemoteImageImport)
+	{
+		CollectRemoteUrls(InOutData.RootWidget, RemoteUrls);
+	}
 	FResolveContext Context;
 	FString LimitError;
 	if (!FImagePayloadIO::ValidateUrlCount(RemoteUrls.Num(), Context.ImageLimits, LimitError))
@@ -692,6 +697,7 @@ bool FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, 
 
 	Context.ImportPath = NormalizeImportPath(Settings->RemoteImageImportPath);
 	Context.TimeoutSeconds = FMath::Max(1.0f, Settings->RemoteImageTimeoutSeconds);
+	Context.bResolveRemoteImages = Settings->bEnableRemoteImageImport;
 	Context.bAllowUnsafeRemoteUrls = Settings->bAllowUnsafeRemoteImageUrls;
 	Context.FrameName = InOutData.WidgetName;
 

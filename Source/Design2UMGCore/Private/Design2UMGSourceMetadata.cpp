@@ -9,10 +9,6 @@ namespace
 	namespace SourceMetadataKeys
 	{
 		const TCHAR* SourceNodeType = TEXT("sourceNodeType");
-		const TCHAR* Interactions = TEXT("interactions");
-		const TCHAR* RenderFallbackScopeFull = TEXT("full");
-		const TCHAR* RenderFallbackScopeSubtree = TEXT("subtree");
-		const TCHAR* SourceNodeTypeInstance = TEXT("INSTANCE");
 	}
 
 	namespace MetadataAccess
@@ -50,14 +46,6 @@ namespace
 			return FString();
 		}
 
-		bool HasMeaningfulSourceMetadataValue(const TSharedPtr<FDesignNode>& Node, const TCHAR* Key)
-		{
-			const FString Value = GetSourceExtensionValue(Node, Key).TrimStartAndEnd();
-			return !Value.IsEmpty()
-				&& !Value.Equals(TEXT("[]"), ESearchCase::CaseSensitive)
-				&& !Value.Equals(TEXT("{}"), ESearchCase::CaseSensitive)
-				&& !Value.Equals(TEXT("null"), ESearchCase::IgnoreCase);
-		}
 	}
 
 	namespace SourceNodeDataBuilder
@@ -86,88 +74,10 @@ namespace
 		}
 	}
 
-	namespace RenderFallback
-	{
-		bool ReplacesSubtree(const TSharedPtr<FDesignNode>& Node)
-		{
-			return Node.IsValid()
-				&& Node->Source().RenderFallback.Scope.Equals(SourceMetadataKeys::RenderFallbackScopeSubtree, ESearchCase::IgnoreCase);
-		}
-
-		bool HasSupportedScope(const TSharedPtr<FDesignNode>& Node)
-		{
-			const FString& Scope = Node->Source().RenderFallback.Scope;
-			return Scope.IsEmpty()
-				|| Scope.Equals(SourceMetadataKeys::RenderFallbackScopeFull, ESearchCase::IgnoreCase)
-				|| ReplacesSubtree(Node);
-		}
-
-		bool SupportsLeafReplacement(const TSharedPtr<FDesignNode>& Node)
-		{
-			return Node->Children.Num() == 0 || ReplacesSubtree(Node);
-		}
-
-		bool IsUnsupportedNodeType(const TSharedPtr<FDesignNode>& Node)
-		{
-			return Node->Type == EDesignNodeType::Text
-				|| Node->Type == EDesignNodeType::IconFont
-				|| Node->Type == EDesignNodeType::Ref;
-		}
-
-		bool HasImageRef(const TSharedPtr<FDesignNode>& Node)
-		{
-			return Node.IsValid() && !Node->Source().RenderFallback.ImageRef.IsEmpty();
-		}
-
-		bool IsSourceInstanceNode(const TSharedPtr<FDesignNode>& Node)
-		{
-			return MetadataAccess::GetSourceExtensionValue(Node, SourceMetadataKeys::SourceNodeType)
-				.Equals(SourceMetadataKeys::SourceNodeTypeInstance, ESearchCase::IgnoreCase);
-		}
-
-		bool HasPrototypeInteractions(const TSharedPtr<FDesignNode>& Node)
-		{
-			return Node.IsValid()
-				&& (Node->Source().Prototype.Interactions.Num() > 0
-					|| MetadataAccess::HasMeaningfulSourceMetadataValue(Node, SourceMetadataKeys::Interactions));
-		}
-
-	}
-
-	namespace LayoutMetadata
-	{
-		float ResolveWrapCrossAxisGapValue(const TSharedPtr<FDesignNode>& Node)
-		{
-			return Node->Source().LayoutExtensions.CounterAxisSpacing.IsSet()
-				? Node->Source().LayoutExtensions.CounterAxisSpacing.GetValue()
-				: Node->LayoutData.ExplicitGap.Get(0.0f);
-		}
-	}
 }
 
 namespace Design2UMGSourceMetadata
 {
-	bool HasNodeMetadataFlag(const TSharedPtr<FDesignNode>& Node, const TCHAR* Key)
-	{
-		if (!Node.IsValid())
-		{
-			return false;
-		}
-
-		const FString* Value = Node->Metadata.Find(Key);
-		return Value && Value->Equals(TEXT("true"), ESearchCase::IgnoreCase);
-	}
-
-	FString GetSourceExtension(const TSharedPtr<FDesignNode>& Node, const FString& Key)
-	{
-		return MetadataAccess::GetSourceExtensionValue(Node, Key);
-	}
-
-	bool HasMeaningfulSourceMetadata(const TSharedPtr<FDesignNode>& Node, const TCHAR* Key)
-	{
-		return MetadataAccess::HasMeaningfulSourceMetadataValue(Node, Key);
-	}
-
 	FUMGSourceNodeData BuildSourceNodeData(const TSharedPtr<FDesignNode>& Node)
 	{
 		FUMGSourceNodeData Result;
@@ -191,73 +101,4 @@ namespace Design2UMGSourceMetadata
 			.Equals(ExpectedType, ESearchCase::IgnoreCase);
 	}
 
-	bool ShouldUseRenderFallback(const TSharedPtr<FDesignNode>& Node)
-	{
-		if (!Node.IsValid())
-		{
-			return false;
-		}
-
-		if (!RenderFallback::SupportsLeafReplacement(Node))
-		{
-			return false;
-		}
-
-		if (RenderFallback::IsUnsupportedNodeType(Node))
-		{
-			return false;
-		}
-
-		if (!RenderFallback::HasImageRef(Node))
-		{
-			return false;
-		}
-
-		if (!RenderFallback::HasSupportedScope(Node))
-		{
-			return false;
-		}
-
-		if (RenderFallback::IsSourceInstanceNode(Node))
-		{
-			return false;
-		}
-
-		if (RenderFallback::HasPrototypeInteractions(Node))
-		{
-			return false;
-		}
-
-		return true;
-	}
-
-	FUMGWidgetNode CreateRenderFallbackWidget(const TSharedPtr<FDesignNode>& Node)
-	{
-		FUMGWidgetNode Widget;
-		Widget.Type = TEXT("Image");
-
-		const FString& TexturePath = Node->Source().RenderFallback.ImageRef;
-		Widget.Brush.Image.TexturePath = TexturePath;
-
-		if (Node->Transform.Width.Value > 0.0f)
-		{
-			Widget.WidgetStyle.WidthOverride = Node->Transform.Width.Value;
-		}
-		if (Node->Transform.Height.Value > 0.0f)
-		{
-			Widget.WidgetStyle.HeightOverride = Node->Transform.Height.Value;
-		}
-
-		return Widget;
-	}
-
-	float ResolveWrapCrossAxisGap(const TSharedPtr<FDesignNode>& Node)
-	{
-		if (!Node.IsValid())
-		{
-			return 0.0f;
-		}
-
-		return LayoutMetadata::ResolveWrapCrossAxisGapValue(Node);
-	}
 }

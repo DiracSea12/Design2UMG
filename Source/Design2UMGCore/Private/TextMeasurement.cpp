@@ -21,8 +21,7 @@ namespace
 			return false;
 		}
 
-		const FString* Truncate = Node->Metadata.Find(TEXT("source.text.truncate"));
-		return Truncate && Truncate->Equals(TEXT("true"), ESearchCase::IgnoreCase);
+		return Node->Text.bTruncateOverflow;
 	}
 }
 

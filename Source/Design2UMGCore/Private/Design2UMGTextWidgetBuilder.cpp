@@ -4,7 +4,6 @@
 
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
-#include "Design2UMGSourceMetadata.h"
 #include "DesignTypeMapper.h"
 #include "FontResolver.h"
 #include "TextMeasurement.h"
@@ -126,7 +125,7 @@ namespace
 		{
 		case EDesignTextGrowth::FixedWidth:
 		case EDesignTextGrowth::FixedWidthHeight:
-			if (Design2UMGSourceMetadata::HasNodeMetadataFlag(Node, TEXT("source.text.truncate")))
+			if (Node->Text.bTruncateOverflow)
 			{
 				Widget.Render.Clipping = TEXT("ClipToBounds");
 				break;
@@ -324,10 +323,11 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 			}
 		}
 
-		const bool bHasNodeColor = InNode->Visual.Fill.Type == EDesignFillType::Color;
+		const FDesignFill& PrimaryFill = InNode->Visual.PrimaryFill();
+		const bool bHasNodeColor = PrimaryFill.Type == EDesignFillType::Color;
 		if (bHasNodeColor)
 		{
-			Result.Color = Design2UMGWidgetNodeAccess::SerializeWidgetColor(FUMGValueParser::ParseColor(InNode->Visual.Fill.SolidColor));
+			Result.Color = Design2UMGWidgetNodeAccess::SerializeWidgetColor(FUMGValueParser::ParseColor(PrimaryFill.SolidColor));
 			if (Result.Color->IsEmpty())
 			{
 				Result.Color.Reset();
@@ -590,9 +590,10 @@ Design2UMGTextWidgetBuilder::FIconFontBuildResult Design2UMGTextWidgetBuilder::C
 		Widget.TextStyle.SourceFontSize = Node->Text.FontSize;
 	}
 
-	if (Node->Visual.Fill.Type == EDesignFillType::Color)
+	const FDesignFill& PrimaryFill = Node->Visual.PrimaryFill();
+	if (PrimaryFill.Type == EDesignFillType::Color)
 	{
-		Widget.Text.Color = FUMGValueParser::ParseColor(Node->Visual.Fill.SolidColor);
+		Widget.Text.Color = FUMGValueParser::ParseColor(PrimaryFill.SolidColor);
 	}
 
 	return Result;

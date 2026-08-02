@@ -1,7 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGNodeWidgetFactory.h"
-#include "DesignSchemaSourceExtensions.h"
 
 #include "Design2UMGLog.h"
 #include "Design2UMGSourceMetadata.h"
@@ -55,23 +54,6 @@ namespace
 		return BuildPathFallbackNode(
 			Node,
 			FString::Printf(TEXT("M 0,%.1f L %.1f,%.1f"), Height * 0.5f, Width, Height * 0.5f));
-	}
-
-	bool TryGetMetadataFloat(const TSharedPtr<FDesignNode>& Node, const TCHAR* Key, float& OutValue)
-	{
-		if (!Node.IsValid())
-		{
-			return false;
-		}
-
-		const FString* Value = Node->Metadata.Find(Key);
-		if (!Value || Value->IsEmpty())
-		{
-			return false;
-		}
-
-		OutValue = FCString::Atof(**Value);
-		return FMath::IsFinite(OutValue);
 	}
 
 	void AppendDashedCapsule(
@@ -146,22 +128,14 @@ namespace
 			return nullptr;
 		}
 
-		const FString* DashPatternValue = Node->Metadata.Find(TEXT("stroke.dashes"));
-		if (!DashPatternValue || DashPatternValue->IsEmpty())
+		if (Node->Visual.Stroke.DashPattern.Num() == 0 || !Node->Transform.LayoutBoundsSize.IsSet())
 		{
 			return nullptr;
 		}
 
-		float RenderDeltaW = 0.0f;
-		float RenderDeltaH = 0.0f;
-		if (!TryGetMetadataFloat(Node, TEXT("source.renderBoundsDeltaW"), RenderDeltaW)
-			|| !TryGetMetadataFloat(Node, TEXT("source.renderBoundsDeltaH"), RenderDeltaH))
-		{
-			return nullptr;
-		}
-
-		const float LayoutWidth = Node->Transform.Width.Value - RenderDeltaW;
-		const float LayoutHeight = Node->Transform.Height.Value - RenderDeltaH;
+		const FVector2D LayoutBoundsSize = Node->Transform.LayoutBoundsSize.GetValue();
+		const float LayoutWidth = LayoutBoundsSize.X;
+		const float LayoutHeight = LayoutBoundsSize.Y;
 		constexpr float DegenerateAxisTolerance = 0.01f;
 		const bool bVertical = FMath::Abs(LayoutWidth) <= DegenerateAxisTolerance
 			&& LayoutHeight > DegenerateAxisTolerance;
@@ -172,21 +146,7 @@ namespace
 			return nullptr;
 		}
 
-		TArray<FString> DashParts;
-		DashPatternValue->ParseIntoArray(DashParts, TEXT(","), true);
-		TArray<float> DashPattern;
-		for (const FString& DashPart : DashParts)
-		{
-			const float DashLength = FCString::Atof(*DashPart);
-			if (FMath::IsFinite(DashLength) && DashLength > KINDA_SMALL_NUMBER)
-			{
-				DashPattern.Add(DashLength);
-			}
-		}
-		if (DashPattern.Num() == 0)
-		{
-			return nullptr;
-		}
+		TArray<float> DashPattern = Node->Visual.Stroke.DashPattern;
 		if (DashPattern.Num() % 2 != 0)
 		{
 			const TArray<float> RepeatedPattern = DashPattern;
@@ -206,7 +166,7 @@ namespace
 			return nullptr;
 		}
 
-		const bool bRoundCap = Node->Metadata.FindRef(TEXT("stroke.cap")).Equals(TEXT("ROUND"), ESearchCase::IgnoreCase);
+		const bool bRoundCap = Node->Visual.Stroke.Cap == TEXT("round");
 		FString Geometry;
 		float Cursor = 0.0f;
 		int32 PatternIndex = 0;
@@ -230,9 +190,8 @@ namespace
 			return nullptr;
 		}
 
-		FallbackNode->Visual.Fill = Node->Visual.Stroke.Fill.GetValue();
 		FallbackNode->Visual.Fills.Reset();
-		FallbackNode->Visual.Fills.Add(FallbackNode->Visual.Fill);
+		FallbackNode->Visual.Fills.Add(Node->Visual.Stroke.Fill.GetValue());
 		FallbackNode->Visual.Stroke = FDesignStroke();
 		return FallbackNode;
 	}
@@ -242,11 +201,6 @@ namespace
 		if (!Node.IsValid())
 		{
 			return false;
-		}
-
-		if (Node->Visual.Fill.Type == EDesignFillType::Gradient)
-		{
-			return true;
 		}
 
 		for (const FDesignFill& Fill : Node->Visual.Fills)
@@ -266,14 +220,13 @@ namespace
 		Widget.Type = DesignTypeMapper::MapNodeTypeToWidget(Node->Type, Node->LayoutData.Layout);
 		if (Node.IsValid())
 		{
-			const FString& OverflowDirection = Node->Source().Prototype.OverflowDirection;
-			if (OverflowDirection.Equals(TEXT("VERTICAL_SCROLLING"), ESearchCase::IgnoreCase))
+			if (Node->LayoutData.Overflow == EDesignOverflow::VerticalScrolling)
 			{
 				Widget.Type = TEXT("ScrollBox");
 				Widget.ScrollBox.Orientation = TEXT("Vertical");
 				Widget.ScrollBox.ScrollBarVisibility = TEXT("Hidden");
 			}
-			else if (OverflowDirection.Equals(TEXT("HORIZONTAL_SCROLLING"), ESearchCase::IgnoreCase))
+			else if (Node->LayoutData.Overflow == EDesignOverflow::HorizontalScrolling)
 			{
 				Widget.Type = TEXT("ScrollBox");
 				Widget.ScrollBox.Orientation = TEXT("Horizontal");
@@ -287,23 +240,22 @@ namespace
 	{
 		const float Width = Node->Transform.Width.IsFixed() ? Node->Transform.Width.Value : 0.0f;
 		const float Height = Node->Transform.Height.IsFixed() ? Node->Transform.Height.Value : 0.0f;
-		if (Node->Visual.Fill.IsImage()
-			&& !Node->Source().VectorRasterFallbackImageRef.IsEmpty()
-			&& Design2UMGSourceMetadata::HasNodeMetadataFlag(
-				Node,
-				Design2UMGSourceMetadata::RenderBoundsClippedByParentKey))
+		const FDesignFill& PrimaryFill = Node->Visual.PrimaryFill();
+		if (PrimaryFill.IsImage()
+			&& !Node->Visual.VectorRasterFallbackImageRef.IsEmpty()
+			&& Node->Visual.bRenderBoundsClippedByParent)
 		{
 			return PathWidgetBuilder::CreatePathWidget(Node);
 		}
 
 		const bool bHasGradientFill = HasGradientVisualFill(Node);
 		const bool bHasVectorRasterFallback =
-			bHasGradientFill && !Node->Source().VectorRasterFallbackImageRef.IsEmpty();
+			bHasGradientFill && !Node->Visual.VectorRasterFallbackImageRef.IsEmpty();
 		const bool bHasStroke = Node->Visual.Stroke.HasStroke();
 
 		if (Width > 0.0f
 			&& Height > 0.0f
-			&& ((Node->Visual.Fill.IsColor() && Node->Visual.Fill.bEnabled && !bHasStroke)
+			&& ((PrimaryFill.IsColor() && PrimaryFill.bEnabled && !bHasStroke)
 				|| bHasVectorRasterFallback))
 		{
 			if (TSharedPtr<FDesignNode> PathNode = BuildEllipseFallbackPathNode(Node, Width, Height))

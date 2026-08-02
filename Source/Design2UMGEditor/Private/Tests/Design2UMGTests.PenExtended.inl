@@ -81,17 +81,17 @@ bool FPenExtendedFieldsAndMeshGradientTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("underline parsed"), TextNode->Text.bUnderline);
 	TestTrue(TEXT("strikethrough parsed"), TextNode->Text.bStrikethrough);
 	TestEqual(TEXT("href parsed"), TextNode->Text.Href, TEXT("https://example.com"));
-	TestEqual(TEXT("mesh_gradient maps to gradient"), TextNode->Visual.Fill.Type, EDesignFillType::Gradient);
-	TestTrue(TEXT("mesh_gradient marker set"), TextNode->Visual.Fill.bFromMeshGradient);
-	TestTrue(TEXT("mesh_gradient raw payload kept"), !TextNode->Visual.Fill.MeshGradientRaw.IsEmpty());
-	TestTrue(TEXT("mesh_gradient columns present"), TextNode->Visual.Fill.MeshGradient.Columns.IsSet());
-	TestEqual(TEXT("mesh_gradient columns value"), TextNode->Visual.Fill.MeshGradient.Columns.Get(0), 2);
-	TestTrue(TEXT("mesh_gradient rows present"), TextNode->Visual.Fill.MeshGradient.Rows.IsSet());
-	TestEqual(TEXT("mesh_gradient rows value"), TextNode->Visual.Fill.MeshGradient.Rows.Get(0), 3);
-	TestEqual(TEXT("mesh_gradient point count"), TextNode->Visual.Fill.MeshGradient.Points.Num(), 1);
-	if (TextNode->Visual.Fill.MeshGradient.Points.Num() == 1)
+	TestEqual(TEXT("mesh_gradient maps to gradient"), TextNode->Visual.PrimaryFill().Type, EDesignFillType::Gradient);
+	TestTrue(TEXT("mesh_gradient marker set"), TextNode->Visual.PrimaryFill().bFromMeshGradient);
+	TestTrue(TEXT("mesh_gradient raw payload kept"), !TextNode->Visual.PrimaryFill().MeshGradientRaw.IsEmpty());
+	TestTrue(TEXT("mesh_gradient columns present"), TextNode->Visual.PrimaryFill().MeshGradient.Columns.IsSet());
+	TestEqual(TEXT("mesh_gradient columns value"), TextNode->Visual.PrimaryFill().MeshGradient.Columns.Get(0), 2);
+	TestTrue(TEXT("mesh_gradient rows present"), TextNode->Visual.PrimaryFill().MeshGradient.Rows.IsSet());
+	TestEqual(TEXT("mesh_gradient rows value"), TextNode->Visual.PrimaryFill().MeshGradient.Rows.Get(0), 3);
+	TestEqual(TEXT("mesh_gradient point count"), TextNode->Visual.PrimaryFill().MeshGradient.Points.Num(), 1);
+	if (TextNode->Visual.PrimaryFill().MeshGradient.Points.Num() == 1)
 	{
-		const FDesignMeshGradientPoint& MeshPoint = TextNode->Visual.Fill.MeshGradient.Points[0];
+		const FDesignMeshGradientPoint& MeshPoint = TextNode->Visual.PrimaryFill().MeshGradient.Points[0];
 		TestTrue(TEXT("mesh_gradient point position present"), MeshPoint.Position.IsSet());
 		TestTrue(TEXT("mesh_gradient point position value"), MeshPoint.Position.IsSet() && MeshPoint.Position.GetValue().Equals(FVector2D(0.25f, 0.75f), 0.0001f));
 		TestTrue(TEXT("mesh_gradient in handle present"), MeshPoint.InHandle.Value.IsSet());
@@ -102,7 +102,6 @@ bool FPenExtendedFieldsAndMeshGradientTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("stroke explicit fill is color"), ComponentNode->Visual.Stroke.Fill.IsSet() && ComponentNode->Visual.Stroke.Fill.GetValue().Type == EDesignFillType::Color);
 	const FString* LayoutIncludeStroke = ComponentNode->Metadata.Find(TEXT("layoutIncludeStroke"));
 	TestTrue(TEXT("layoutIncludeStroke preserved"), LayoutIncludeStroke && *LayoutIncludeStroke == TEXT("true"));
-	TestTrue(TEXT("layoutIncludeStroke typed primary storage"), ComponentNode->Source().LayoutExtensions.StrokesIncludedInLayout.IsSet() && ComponentNode->Source().LayoutExtensions.StrokesIncludedInLayout.GetValue());
 	const TSharedPtr<FDesignNode>& LegacyStrokeNode = Doc.Children[3];
 	TestFalse(TEXT("legacy nested stroke is rejected"), LegacyStrokeNode->Visual.Stroke.HasStroke());
 	TestFalse(TEXT("legacy stroke join is not preserved"), LegacyStrokeNode->Metadata.Contains(TEXT("stroke.join")));

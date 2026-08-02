@@ -211,10 +211,10 @@ bool FImportDiagnosticReportStructureTest::RunTest(const FString& Parameters)
 	RenderFallbackNode->Name = TEXT("Blurred Hero");
 	RenderFallbackNode->Type = EDesignNodeType::Rectangle;
 	RenderFallbackNode->MutableSource().SourceNodeType = TEXT("RECTANGLE");
-	RenderFallbackNode->MutableSource().RenderFallback.ImageRef = TEXT("render_hero");
-	RenderFallbackNode->MutableSource().RenderFallback.Scope = TEXT("full");
-	RenderFallbackNode->MutableSource().RenderFallback.Source = TEXT("figma_render_png");
-	RenderFallbackNode->MutableSource().RenderFallback.Reason = TEXT("foreground_blur");
+	RenderFallbackNode->Visual.RenderFallback.ImageRef = TEXT("render_hero");
+	RenderFallbackNode->Metadata.Add(TEXT("design2umgRenderFallbackScope"), TEXT("full"));
+	RenderFallbackNode->Metadata.Add(TEXT("design2umgRenderFallbackSource"), TEXT("figma_render_png"));
+	RenderFallbackNode->Metadata.Add(TEXT("design2umgRenderFallbackReason"), TEXT("foreground_blur"));
 
 	Document.Children.Add(TextPathNode);
 	Document.Children.Add(RenderFallbackNode);

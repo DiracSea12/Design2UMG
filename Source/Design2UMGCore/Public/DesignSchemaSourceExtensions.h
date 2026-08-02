@@ -5,66 +5,6 @@
 #include "DesignSchemaFoundation.h"
 #include "DesignSchemaSourceExtensions.generated.h"
 
-/**
- * Source-specific layout metadata that stays attached to parser-owned node state.
- */
-USTRUCT()
-struct FDesignLayoutExtensions
-{
-	GENERATED_BODY()
-
-	UPROPERTY()
-	FString LayoutWrap;
-
-	UPROPERTY()
-	FString CounterAxisAlignContent;
-
-	UPROPERTY()
-	FString LayoutPositioning;
-
-	UPROPERTY()
-	FString LayoutAlign;
-
-	UPROPERTY()
-	FString PrimaryAxisSizingMode;
-
-	UPROPERTY()
-	FString CounterAxisSizingMode;
-
-	UPROPERTY()
-	FString GridRowsSizing;
-
-	UPROPERTY()
-	FString GridColumnsSizing;
-
-	UPROPERTY()
-	FString GridChildHorizontalAlign;
-
-	UPROPERTY()
-	FString GridChildVerticalAlign;
-
-	UPROPERTY()
-	FString BoundVariablesJson;
-
-	TOptional<float> CounterAxisSpacing;
-	TOptional<float> MinWidth;
-	TOptional<float> MaxWidth;
-	TOptional<float> MinHeight;
-	TOptional<float> MaxHeight;
-	TOptional<int32> GridRowCount;
-	TOptional<int32> GridColumnCount;
-	TOptional<float> GridRowGap;
-	TOptional<float> GridColumnGap;
-	TOptional<int32> GridRowSpan;
-	TOptional<int32> GridColumnSpan;
-	TOptional<int32> GridColumnAnchorIndex;
-	TOptional<int32> GridRowAnchorIndex;
-	TOptional<bool> ItemReverseZIndex;
-	// Primary typed storage for source stroke-in-layout semantics.
-	// Keep Pen "layoutIncludeStroke" and Figma "strokesIncludedInLayout" metadata aliases explicit this phase.
-	TOptional<bool> StrokesIncludedInLayout;
-};
-
 USTRUCT()
 struct FDesignComponentInstanceData
 {
@@ -146,7 +86,6 @@ struct FDesignPrototypeNodeData
 {
 	GENERATED_BODY()
 
-	UPROPERTY() FString OverflowDirection;
 	UPROPERTY() FString TransitionNodeId;
 	UPROPERTY() FDesignPrototypeTransitionData Transition;
 	UPROPERTY() TArray<FDesignPrototypeInteraction> Interactions;
@@ -164,25 +103,6 @@ struct FDesignSourceDocumentData
 	UPROPERTY() FString PrototypeStartNodeId;
 	UPROPERTY() FString PrototypeDeviceJson;
 	UPROPERTY() TArray<FDesignFlowStartingPoint> FlowStartingPoints;
-};
-
-USTRUCT()
-struct FDesignRenderFallbackData
-{
-	GENERATED_BODY()
-
-	UPROPERTY() FString ImageRef;
-	UPROPERTY() FString Scope;
-	UPROPERTY() FString Source;
-	UPROPERTY() FString Reason;
-
-	bool HasAny() const
-	{
-		return !ImageRef.IsEmpty()
-			|| !Scope.IsEmpty()
-			|| !Source.IsEmpty()
-			|| !Reason.IsEmpty();
-	}
 };
 
 USTRUCT()
@@ -209,11 +129,7 @@ struct FDesignParseDiagnostics
  */
 struct FDesignSourceNodeData
 {
-	FDesignLayoutExtensions LayoutExtensions;
 	FDesignComponentInstanceData ComponentInstance;
 	FDesignPrototypeNodeData Prototype;
 	FString SourceNodeType;
-	bool bExpandedRefInstance = false;
-	FString VectorRasterFallbackImageRef;
-	FDesignRenderFallbackData RenderFallback;
 };
