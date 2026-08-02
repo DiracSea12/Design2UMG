@@ -6,8 +6,6 @@
 
 namespace DesignRemoteImageImporterInternal
 {
-	bool ShouldResolveImagePath(const FString& ImagePath, bool bResolveRemoteImages);
-
 	struct FImageResourceLimits
 	{
 		static constexpr uint64 DefaultMaxCompressedBytes = 32ull * 1024ull * 1024ull;
@@ -59,7 +57,6 @@ namespace DesignRemoteImageImporterInternal
 		FString ImportPath;
 		FString FrameName;
 		float TimeoutSeconds = 20.0f;
-		bool bResolveRemoteImages = false;
 		bool bAllowUnsafeRemoteUrls = false;
 		bool bTextureResourceUpdatePending = false;
 		FImageResourceLimits ImageLimits;
