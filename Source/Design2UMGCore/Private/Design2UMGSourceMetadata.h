@@ -8,8 +8,6 @@
 
 namespace Design2UMGSourceMetadata
 {
-	inline constexpr TCHAR RenderBoundsClippedByParentKey[] = TEXT("source.renderBoundsClippedByParent");
-
 	// Source-node responsibility mapping.
 	FUMGSourceNodeData BuildSourceNodeData(const TSharedPtr<FDesignNode>& Node);
 	bool IsSourceNodeType(const TSharedPtr<FDesignNode>& Node, const TCHAR* ExpectedType);

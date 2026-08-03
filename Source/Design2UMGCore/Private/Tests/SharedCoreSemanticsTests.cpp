@@ -710,6 +710,8 @@ bool FNodeWidgetFactoryGeometryFallbackDoesNotMutateInputTest::RunTest(const FSt
 	LineNode->Transform.SetPosition(6.0f, 18.0f);
 	LineNode->Visual.Stroke.Thickness.Uniform = 2.0f;
 	LineNode->Visual.Stroke.Fill = FDesignFill::FromColor(TEXT("#FFFFFFFF"));
+	LineNode->Visual.Stroke.Cap.Empty();
+	LineNode->Visual.Stroke.Join.Empty();
 	const FDesignTransformNodeData LineTransformBefore = LineNode->Transform;
 
 	const Design2UMGNodeWidgetFactory::FBuildResult LineResult = Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(LineNode);
@@ -717,6 +719,16 @@ bool FNodeWidgetFactoryGeometryFallbackDoesNotMutateInputTest::RunTest(const FSt
 	TestEqual(TEXT("Line input X remains untouched"), LineNode->Transform.X, LineTransformBefore.X);
 	TestEqual(TEXT("Line input Y remains untouched"), LineNode->Transform.Y, LineTransformBefore.Y);
 	TestTrue(TEXT("Line fallback still builds widget geometry"), LineResult.Widget.Path.Geometry.IsSet() && !LineResult.Widget.Path.Geometry.GetValue().IsEmpty());
+	TestTrue(TEXT("Missing line stroke cap is emitted"), LineResult.Widget.Path.StrokeCap.IsSet());
+	TestTrue(TEXT("Missing line stroke join is emitted"), LineResult.Widget.Path.StrokeJoin.IsSet());
+	if (LineResult.Widget.Path.StrokeCap.IsSet())
+	{
+		TestEqual(TEXT("Missing line stroke cap uses the schema default"), LineResult.Widget.Path.StrokeCap.GetValue(), FString(TEXT("butt")));
+	}
+	if (LineResult.Widget.Path.StrokeJoin.IsSet())
+	{
+		TestEqual(TEXT("Missing line stroke join uses the schema default"), LineResult.Widget.Path.StrokeJoin.GetValue(), FString(TEXT("miter")));
+	}
 
 	TSharedPtr<FDesignNode> DashedVectorNode = MakeSharedSemanticsNode(
 		TEXT("dashed_vector_fallback"),

@@ -1,7 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "FigmaParserInternal.h"
-#include "Design2UMGSourceMetadata.h"
 #include "DesignTreeLimits.h"
 #include "DesignSchemaSourceExtensions.h"
 #include "FigmaParserLayout.h"
@@ -720,7 +719,6 @@ static void ParseNodeVisualData(
 			if (HasParentClippedRenderBounds(NodeObj, ParentObj))
 			{
 				OutNode.Visual.bRenderBoundsClippedByParent = true;
-				OutNode.Metadata.Add(Design2UMGSourceMetadata::RenderBoundsClippedByParentKey, TEXT("true"));
 			}
 		}
 	}

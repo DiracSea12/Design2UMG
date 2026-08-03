@@ -158,8 +158,12 @@ FUMGWidgetNode PathWidgetBuilder::CreatePathWidget(const TSharedPtr<FDesignNode>
 			{
 				Widget.Path.StrokeColor = FUMGValueParser::ParseColor(StrokeColor);
 				Widget.Path.StrokeThickness = StrokeThickness;
-				Widget.Path.StrokeCap = Node->Visual.Stroke.Cap;
-				Widget.Path.StrokeJoin = Node->Visual.Stroke.Join;
+				Widget.Path.StrokeCap = Node->Visual.Stroke.Cap.IsEmpty()
+					? FString(TEXT("butt"))
+					: Node->Visual.Stroke.Cap;
+				Widget.Path.StrokeJoin = Node->Visual.Stroke.Join.IsEmpty()
+					? FString(TEXT("miter"))
+					: Node->Visual.Stroke.Join;
 			}
 			ApplyPathSizeOverrides(Widget, Node);
 			return Widget;
