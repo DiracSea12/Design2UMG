@@ -509,7 +509,7 @@ namespace
 			return true;
 		}
 
-		if (!DesignRemoteImageImporterInternal::ShouldResolveImagePath(InOutTexturePath, Context.bResolveRemoteImages))
+		if (!Context.bResolveRemoteImages)
 		{
 			Context.Report.AddMessage(FString::Printf(TEXT("Skipped remote image for '%s': remote image import is disabled"), *WidgetName));
 			return true;
@@ -659,11 +659,6 @@ namespace
 			CollectRemoteUrls(Child, OutUrls);
 		}
 	}
-}
-
-bool DesignRemoteImageImporterInternal::ShouldResolveImagePath(const FString& ImagePath, const bool bResolveRemoteImages)
-{
-	return !IsRemoteUrl(ImagePath.TrimStartAndEnd()) || bResolveRemoteImages;
 }
 
 bool FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, FString* OutReport)

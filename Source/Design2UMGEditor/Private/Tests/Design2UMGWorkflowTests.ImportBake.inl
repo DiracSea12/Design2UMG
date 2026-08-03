@@ -50,6 +50,71 @@ bool FFigmaTargetNodeAndImageMappingWorkflowTest::RunTest(const FString& Paramet
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLocalVectorExplicitClearWorkflowTest,
+	"Design2UMG.BatchImport.FigmaLocalVectorExplicitClear",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaLocalVectorExplicitClearWorkflowTest::RunTest(const FString& Parameters)
+{
+	const FString TempRoot = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Design2UMG"), TEXT("WorkflowTemp"), TEXT("FigmaVectorExplicitClear"));
+	const FString TempImagesDir = FPaths::Combine(TempRoot, TEXT("images"));
+	IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
+	IFileManager::Get().MakeDirectory(*TempImagesDir, true);
+
+	const FString TempJsonPath = FPaths::Combine(TempRoot, TEXT("design.json"));
+	const FString VectorPngPath = FPaths::Combine(TempImagesDir, TEXT("vec_vector_clear.png"));
+	TArray<FColor> Pixels;
+	Pixels.Init(FColor::White, 64);
+	TestTrue(TEXT("Write local vector image"), WriteTestPng(VectorPngPath, Pixels, 8, 8));
+
+	const FString Json = TEXT(R"({
+		"document": {
+			"id": "0:0",
+			"name": "Doc",
+			"type": "DOCUMENT",
+			"children": [{
+				"id": "0:1",
+				"name": "Page",
+				"type": "CANVAS",
+				"children": [{
+					"id": "vector_clear",
+					"name": "Vector",
+					"type": "VECTOR",
+					"visible": true,
+					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 8, "height": 8},
+					"fills": [],
+					"children": []
+				}]
+			}]
+		}
+	})");
+	TestTrue(TEXT("Write local vector json"), FFileHelper::SaveStringToFile(Json, *TempJsonPath));
+
+	FDesignDocument Document;
+	FString ErrorMessage;
+	const bool bLoaded = Design2UMGLocalFigmaImport::LoadLocalFigmaDocument(TempJsonPath, Document, ErrorMessage);
+	TestTrue(TEXT("Load local vector fixture"), bLoaded);
+	if (!ErrorMessage.IsEmpty())
+	{
+		AddInfo(ErrorMessage);
+	}
+	if (!bLoaded || Document.Children.Num() == 0 || !Document.Children[0].IsValid())
+	{
+		IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
+		return false;
+	}
+
+	const TSharedPtr<FDesignNode>& Node = Document.Children[0];
+	TestFalse(TEXT("Injected vector fill clears explicit fill state"), Node->Visual.bFillExplicitClear);
+	TestEqual(TEXT("Injected vector has one image fill"), Node->Visual.Fills.Num(), 1);
+	if (Node->Visual.Fills.Num() == 1)
+	{
+		TestTrue(TEXT("Injected vector fill maps to local png"), FPaths::IsSamePath(Node->Visual.Fills[0].Image.Url, VectorPngPath));
+	}
+
+	IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLocalLuminosityBakeWorkflowTest,
 	"Design2UMG.BatchImport.FigmaLocalLuminosityBake",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)

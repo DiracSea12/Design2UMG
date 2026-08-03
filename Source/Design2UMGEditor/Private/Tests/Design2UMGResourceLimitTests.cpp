@@ -19,7 +19,6 @@ bool FDesign2UMGRemoteImageResourceLimitsTest::RunTest(const FString& Parameters
 	using DesignRemoteImageImporterInternal::FImagePayloadIO;
 	using DesignRemoteImageImporterInternal::FImageOperationBudget;
 	using DesignRemoteImageImporterInternal::FImageResourceLimits;
-	using DesignRemoteImageImporterInternal::ShouldResolveImagePath;
 
 	FImageResourceLimits Limits;
 	Limits.MaxCompressedBytes = 8;
@@ -58,10 +57,6 @@ bool FDesign2UMGRemoteImageResourceLimitsTest::RunTest(const FString& Parameters
 	TestFalse(TEXT("Private IPv4 image URL is rejected by default"), FImagePayloadIO::ValidateRemoteUrl(TEXT("https://192.168.1.2/image.png"), false, Error));
 	TestFalse(TEXT("Public IPv4 image URL is rejected by default"), FImagePayloadIO::ValidateRemoteUrl(TEXT("https://203.0.113.1/image.png"), false, Error));
 	TestTrue(TEXT("Explicit unsafe URL setting permits HTTP fixtures"), FImagePayloadIO::ValidateRemoteUrl(TEXT("http://127.0.0.1/image.png"), true, Error));
-	TestTrue(TEXT("Local image resolution is independent of remote download setting"), ShouldResolveImagePath(TEXT("G:/fixtures/image.png"), false));
-	TestFalse(TEXT("Remote image resolution follows the remote download setting"), ShouldResolveImagePath(TEXT("https://cdn.example.com/image.png"), false));
-	TestTrue(TEXT("Enabled remote image resolution accepts remote URLs"), ShouldResolveImagePath(TEXT("https://cdn.example.com/image.png"), true));
-
 	const FString OversizedFile = FPaths::CreateTempFilename(*FPaths::ProjectSavedDir(), TEXT("D2UImageLimit"), TEXT(".bin"));
 	TArray<uint8> OversizedBytes;
 	OversizedBytes.Init(0x5a, 9);

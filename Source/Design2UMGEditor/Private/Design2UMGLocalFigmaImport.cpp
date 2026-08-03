@@ -397,6 +397,7 @@ namespace
 					ImgFill.Image.Mode = EDesignImageMode::Fill;
 					Node->Visual.Fills.Empty();
 					Node->Visual.Fills.Add(ImgFill);
+					Node->Visual.bFillExplicitClear = false;
 					if (!OutMapping.Contains(VecKey))
 					{
 						OutMapping.Add(VecKey, PngPath);

@@ -394,7 +394,6 @@ void ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 	}
 	ParseFigmaGridLayout(NodeObj, OutNode);
 
-	OutNode.LayoutData.PaddingRequiresRuntimeWrap = false;
 	if (OutNode.LayoutData.Layout == EDesignLayout::Horizontal || OutNode.LayoutData.Layout == EDesignLayout::Vertical)
 	{
 		OutNode.LayoutData.PaddingRequiresRuntimeWrap = false;
