@@ -4,7 +4,6 @@
 
 #include "Design2UMGLog.h"
 #include "LayoutMapper.h"
-#include "SharedCoreSemantics.h"
 #include "UMGPropertyKeys.h"
 #include "UMGWidgetNodeAccess.h"
 

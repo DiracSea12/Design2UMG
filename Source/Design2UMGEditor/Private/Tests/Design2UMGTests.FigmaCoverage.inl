@@ -2029,7 +2029,7 @@ bool FFigmaRenderFallbackMetadataRoundTripTest::RunTest(const FString& Parameter
 	TestEqual(TEXT("Render fallback source preserved"), RenderNode->Metadata.FindRef(TEXT("design2umgRenderFallbackSource")), TEXT("figma_render_png"));
 	TestEqual(TEXT("Render fallback reason preserved"), RenderNode->Metadata.FindRef(TEXT("design2umgRenderFallbackReason")), TEXT("image_filters+image_blend_luminosity"));
 	TestTrue(TEXT("Non-array interactions remain metadata"), RenderNode->Metadata.Contains(TEXT("interactions")));
-	TestTrue(TEXT("Non-array interactions suppress render fallback"), RenderNode->Visual.RenderFallback.bSuppressedBySourceSemantics);
+	TestFalse(TEXT("Non-array interactions do not suppress render fallback"), RenderNode->Visual.RenderFallback.bSuppressedBySourceSemantics);
 
 	TSet<FString> ImageRefs;
 	FFigmaParser::CollectImageRefs(Doc, ImageRefs);

@@ -391,6 +391,7 @@ namespace DesignImportDiagnosticReport
 		{
 			FString EntryScope = TEXT("text-node");
 			FString NodeId;
+			FString NodePath;
 			TOptional<int32> RunId;
 			TOptional<int32> DocumentFontIndex;
 		};
@@ -403,14 +404,15 @@ namespace DesignImportDiagnosticReport
 					TEXT("document-font-clue|%d"),
 					EntryKey.DocumentFontIndex.GetValue());
 			}
+			const FString NodeIdentity = EntryKey.NodePath.IsEmpty() ? EntryKey.NodeId : EntryKey.NodePath;
 			if (EntryKey.RunId.IsSet())
 			{
 				return FString::Printf(
 					TEXT("text-run|%s|%d"),
-					*EntryKey.NodeId,
+					*NodeIdentity,
 					EntryKey.RunId.GetValue());
 			}
-			return FString::Printf(TEXT("text-node|%s"), *EntryKey.NodeId);
+			return FString::Printf(TEXT("text-node|%s"), *NodeIdentity);
 		}
 
 		void AddFontResolutionResult(
@@ -444,6 +446,10 @@ namespace DesignImportDiagnosticReport
 			if (!EntryKey.NodeId.IsEmpty())
 			{
 				Entry->SetStringField(TEXT("nodeId"), EntryKey.NodeId);
+			}
+			if (!EntryKey.NodePath.IsEmpty())
+			{
+				Entry->SetStringField(TEXT("nodePath"), EntryKey.NodePath);
 			}
 			if (EntryKey.RunId.IsSet())
 			{
@@ -499,6 +505,7 @@ namespace DesignImportDiagnosticReport
 
 		void CollectFontResolutionResultsRecursive(
 			const TSharedPtr<FDesignNode>& Node,
+			const FString& NodePath,
 			TArray<TSharedPtr<FJsonValue>>& OutValues,
 			TSet<FString>& InOutSeenKeys)
 		{
@@ -511,6 +518,7 @@ namespace DesignImportDiagnosticReport
 			{
 				FFontResolutionEntryKey EntryKey;
 				EntryKey.NodeId = Node->Id;
+				EntryKey.NodePath = NodePath;
 				AddFontResolutionResult(
 					OutValues,
 					InOutSeenKeys,
@@ -531,6 +539,7 @@ namespace DesignImportDiagnosticReport
 					FFontResolutionEntryKey EntryKey;
 					EntryKey.EntryScope = TEXT("text-run");
 					EntryKey.NodeId = Node->Id;
+					EntryKey.NodePath = NodePath;
 					EntryKey.RunId = RunIndex;
 					AddFontResolutionResult(
 						OutValues,
@@ -545,9 +554,10 @@ namespace DesignImportDiagnosticReport
 				}
 			}
 
-			for (const TSharedPtr<FDesignNode>& Child : Node->Children)
+			for (int32 ChildIndex = 0; ChildIndex < Node->Children.Num(); ++ChildIndex)
 			{
-				CollectFontResolutionResultsRecursive(Child, OutValues, InOutSeenKeys);
+				const FString ChildPath = FString::Printf(TEXT("%s/%d"), *NodePath, ChildIndex);
+				CollectFontResolutionResultsRecursive(Node->Children[ChildIndex], ChildPath, OutValues, InOutSeenKeys);
 			}
 		}
 	}
@@ -648,9 +658,13 @@ namespace DesignImportDiagnosticReport
 				IsUnsupportedFontFileSource(Font.Url),
 				IsFontUrlSource(Font.Url));
 		}
-		for (const TSharedPtr<FDesignNode>& RootNode : Document.Children)
+		for (int32 RootIndex = 0; RootIndex < Document.Children.Num(); ++RootIndex)
 		{
-			CollectFontResolutionResultsRecursive(RootNode, FontResolutionValues, SeenFontResolutionKeys);
+			CollectFontResolutionResultsRecursive(
+				Document.Children[RootIndex],
+				LexToString(RootIndex),
+				FontResolutionValues,
+				SeenFontResolutionKeys);
 		}
 		TSharedRef<FJsonObject> FontResolution = MakeShared<FJsonObject>();
 		FontResolution->SetArrayField(TEXT("results"), FontResolutionValues);

@@ -199,8 +199,7 @@ namespace FigmaParserMetadata
 
 		OutNode.Visual.RenderFallback.bSuppressedBySourceSemantics =
 			OutNode.Source().ComponentInstance.bIsInstance
-			|| OutNode.Source().Prototype.Interactions.Num() > 0
-			|| OutNode.Metadata.Contains(TEXT("interactions"));
+			|| OutNode.Source().Prototype.Interactions.Num() > 0;
 	}
 
 	void CaptureSharedMetadataExtensions(const TSharedPtr<FJsonObject>& Obj, TMap<FString, FString>& Extensions)

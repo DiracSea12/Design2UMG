@@ -1,4 +1,4 @@
-﻿function Resolve-D2URequiredProjectPath {
+function Resolve-D2URequiredProjectPath {
     param([string]$Value)
     $candidate = $Value
     if ([string]::IsNullOrWhiteSpace($candidate)) {
@@ -18,6 +18,51 @@
         throw "Runtime project not found: $resolved"
     }
     return $resolved
+}
+
+$script:D2UEditorRunMutex = $null
+$script:D2UEditorRunMutexName = "Global\Design2UMG.UnrealEditorRun"
+
+function Enter-D2UEditorRunLock {
+    if ($null -ne $script:D2UEditorRunMutex) {
+        return
+    }
+
+    $mutex = New-Object -TypeName System.Threading.Mutex -ArgumentList @($false, $script:D2UEditorRunMutexName)
+    $acquired = $false
+    try {
+        try {
+            $acquired = $mutex.WaitOne([TimeSpan]::FromMinutes(30))
+        }
+        catch [System.Threading.AbandonedMutexException] {
+            $acquired = $true
+        }
+
+        if (-not $acquired) {
+            throw "Timed out waiting for the shared UnrealEditor validation lock."
+        }
+
+        $script:D2UEditorRunMutex = $mutex
+    }
+    catch {
+        $mutex.Dispose()
+        throw
+    }
+}
+
+function Exit-D2UEditorRunLock {
+    if ($null -eq $script:D2UEditorRunMutex) {
+        return
+    }
+
+    $mutex = $script:D2UEditorRunMutex
+    $script:D2UEditorRunMutex = $null
+    try {
+        $mutex.ReleaseMutex()
+    }
+    finally {
+        $mutex.Dispose()
+    }
 }
 
 function Resolve-D2URequiredEditorPath {
@@ -41,6 +86,7 @@ function Resolve-D2URequiredEditorPath {
 
 function Stop-D2UEditorsUnlessKeeping {
     param([switch]$KeepExistingEditor)
+    Enter-D2UEditorRunLock
     if (-not $KeepExistingEditor) {
         Get-Process UnrealEditor, UnrealEditor-Cmd -ErrorAction SilentlyContinue | Stop-Process -Force
         Start-Sleep -Milliseconds 800
@@ -60,10 +106,16 @@ function Invoke-D2UEditorAndWait {
         [string]$EditorPath,
         [string]$ArgumentLine
     )
-    $process = Start-Process -FilePath $EditorPath -ArgumentList $ArgumentLine -PassThru
-    Wait-Process -Id $process.Id
-    $process.Refresh()
-    return $process.ExitCode
+    Enter-D2UEditorRunLock
+    try {
+        $process = Start-Process -FilePath $EditorPath -ArgumentList $ArgumentLine -PassThru
+        Wait-Process -Id $process.Id
+        $process.Refresh()
+        return $process.ExitCode
+    }
+    finally {
+        Exit-D2UEditorRunLock
+    }
 }
 
 function Assert-D2UFreshFile {
