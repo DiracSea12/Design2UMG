@@ -110,6 +110,7 @@ void FFigmaImageExporter::ApplyExportedImages(TArray<TSharedPtr<FDesignNode>>& N
 				Fill.Image.Url = *Url;
 				Node->Visual.Fills.Empty();
 				Node->Visual.Fills.Add(MoveTemp(Fill));
+				Node->Visual.bFillExplicitClear = false;
 			}
 		}
 		ApplyExportedImages(Node->Children, IdToUrl);

@@ -2229,6 +2229,34 @@ bool FFigmaRenderFallbackKeepsChildTreeTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Child text preserved"), GetWidgetProperty(*ChildWidget, TEXT("Text")), TEXT("Hello"));
 	return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaExportedImageClearsExplicitFillTest,
+	"Design2UMG.FigmaParser.ExportedImageClearsExplicitFill",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaExportedImageClearsExplicitFillTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
+	Node->Id = TEXT("remote_vector");
+	Node->Type = EDesignNodeType::Path;
+	Node->Visual.bFillExplicitClear = true;
+
+	TMap<FString, FString> IdToUrl;
+	IdToUrl.Add(Node->Id, TEXT("https://cdn.example.com/remote-vector.png"));
+	TArray<TSharedPtr<FDesignNode>> Nodes;
+	Nodes.Add(Node);
+
+	FFigmaImageExporter::ApplyExportedImages(Nodes, IdToUrl);
+
+	TestEqual(TEXT("Exported vector becomes a rectangle"), Node->Type, EDesignNodeType::Rectangle);
+	TestFalse(TEXT("Exported image clears the stale explicit fill flag"), Node->Visual.bFillExplicitClear);
+	TestEqual(TEXT("Exported vector has one image fill"), Node->Visual.Fills.Num(), 1);
+	if (Node->Visual.Fills.Num() == 1)
+	{
+		TestTrue(TEXT("Exported fill keeps the resolved image URL"), Node->Visual.Fills[0].IsImage());
+		TestEqual(TEXT("Exported fill URL is preserved"), Node->Visual.Fills[0].Image.Url, TEXT("https://cdn.example.com/remote-vector.png"));
+	}
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaExtractKeyTest,
 	"Design2UMG.FigmaParser.ExtractFileKey",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)

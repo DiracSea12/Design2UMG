@@ -19,6 +19,7 @@
 #include "UMGWidgetNodeProceduralResourceAccess.h"
 #include "UMGWidgetUtils.h"
 #include "FigmaParser.h"
+#include "FigmaImageExporter.h"
 #include "DesignPathRasterizer.h"
 #include "ProceduralShapeGenerator.h"
 #include "Design2UMGLog.h"

@@ -393,18 +393,6 @@ void ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 		OutNode.LayoutData.WrapCrossAxisGap = FMath::Max(0.0f, OutNode.LayoutData.WrapCrossAxisGap.GetValue());
 	}
 	ParseFigmaGridLayout(NodeObj, OutNode);
-
-	if (OutNode.LayoutData.Layout == EDesignLayout::Horizontal || OutNode.LayoutData.Layout == EDesignLayout::Vertical)
-	{
-		OutNode.LayoutData.PaddingRequiresRuntimeWrap = false;
-	}
-	else
-	{
-		OutNode.LayoutData.PaddingRequiresRuntimeWrap =
-			OutNode.LayoutData.Layout == EDesignLayout::None
-			|| OutNode.LayoutData.Layout == EDesignLayout::Wrap
-			|| OutNode.LayoutData.Layout == EDesignLayout::Grid;
-	}
 }
 
 void ParseSize(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj, FDesignNode& OutNode, bool bParentHasAutoLayout)
