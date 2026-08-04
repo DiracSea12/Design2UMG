@@ -715,8 +715,7 @@ namespace
 		{
 			if (Window.IsValid())
 			{
-				Window->RequestDestroyWindow();
-				PumpSlate();
+				FSlateApplication::Get().DestroyWindowImmediately(Window.ToSharedRef());
 			}
 
 			PreviewWindow.Reset();
@@ -960,8 +959,15 @@ bool FPreviewWindowPipelineCarriesExplicitMaterializationSnapshotTest::RunTest(c
 		FDesign2UMGPreviewWindowTestAccess::GetLatestApprovedSnapshotMaterializationOverrideCount(PreviewWindow.Get()),
 		1);
 
-	ActiveWindow->RequestDestroyWindow();
-	PumpSlate();
+	const TSharedPtr<SWindow> PreviewSWindow =
+		FSlateApplication::Get().FindWidgetWindow(PreviewWindow);
+	TestTrue(TEXT("Pipeline preview resolves its owning window for cleanup"), PreviewSWindow.IsValid());
+	if (!PreviewSWindow.IsValid())
+	{
+		return false;
+	}
+
+	FSlateApplication::Get().DestroyWindowImmediately(PreviewSWindow.ToSharedRef());
 	return true;
 }
 
