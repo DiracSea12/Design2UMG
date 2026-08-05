@@ -941,9 +941,14 @@ namespace Design2UMGAutomationRender
 		}
 
 		ResetAutomationTransientState();
+		if (!RefreshAutomationImportedFontPackages(GDesign2UMGAutomationFontImportPath, OutError))
+		{
+			return false;
+		}
+
 		if (!bForceReloadPackage)
 		{
-			return RefreshAutomationImportedFontPackages(GDesign2UMGAutomationFontImportPath, OutError);
+			return true;
 		}
 
 		const FString ObjectPath = NormalizeWidgetBlueprintObjectPath(GeneratedAssetPath);
@@ -953,7 +958,7 @@ namespace Design2UMGAutomationRender
 			return false;
 		}
 
-		return RefreshAutomationImportedFontPackages(GDesign2UMGAutomationFontImportPath, OutError);
+		return true;
 	}
 
 	void SanitizeImportSettingsSnapshot(FDesign2UMGImportSettingsSnapshot& InOutSettingsSnapshot)
