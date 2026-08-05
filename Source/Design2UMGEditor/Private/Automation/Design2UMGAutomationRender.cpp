@@ -941,19 +941,19 @@ namespace Design2UMGAutomationRender
 		}
 
 		ResetAutomationTransientState();
-		if (!RefreshAutomationImportedFontPackages(GDesign2UMGAutomationFontImportPath, OutError))
+		if (!bForceReloadPackage)
+		{
+			return RefreshAutomationImportedFontPackages(GDesign2UMGAutomationFontImportPath, OutError);
+		}
+
+		const FString ObjectPath = NormalizeWidgetBlueprintObjectPath(GeneratedAssetPath);
+		if (!RefreshGeneratedTexturePackagesForAutomationRender(ObjectPath, OutError)
+			|| !ReloadAssetPackageForAutomationRender(ObjectPath, OutError))
 		{
 			return false;
 		}
 
-		if (!bForceReloadPackage)
-		{
-			return true;
-		}
-
-		const FString ObjectPath = NormalizeWidgetBlueprintObjectPath(GeneratedAssetPath);
-		return RefreshGeneratedTexturePackagesForAutomationRender(ObjectPath, OutError)
-			&& ReloadAssetPackageForAutomationRender(ObjectPath, OutError);
+		return RefreshAutomationImportedFontPackages(GDesign2UMGAutomationFontImportPath, OutError);
 	}
 
 	void SanitizeImportSettingsSnapshot(FDesign2UMGImportSettingsSnapshot& InOutSettingsSnapshot)
