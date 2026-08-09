@@ -23,10 +23,66 @@ namespace
 		return true;
 	}
 
-	void ApplyOverrideProperties(FDesignNode& Target, const FDesignNode& Override)
+	void ApplyCommonOverrideProperties(FDesignNode& Target, const FDesignNode& Override)
 	{
 		const bool bFillExplicitClear = Override.Visual.bFillExplicitClear;
 		const bool bKeepExplicitStrokeFill = Override.Visual.Stroke.Fill.IsSet();
+
+		if (Override.Visual.Fills.Num() > 0 || bFillExplicitClear)
+		{
+			Target.Visual.Fills = Override.Visual.Fills;
+			Target.Visual.bFillExplicitClear = bFillExplicitClear;
+		}
+		if (Override.Visual.Stroke.HasStroke())
+		{
+			Target.Visual.Stroke = Override.Visual.Stroke;
+		}
+		if (bFillExplicitClear && !bKeepExplicitStrokeFill)
+		{
+			Target.Visual.Stroke.Fill.Reset();
+		}
+		if (Override.Visual.bEffectsExplicitClear || Override.Visual.Effects.Num() > 0)
+		{
+			Target.Visual.Effects = Override.Visual.Effects;
+			Target.Visual.bEffectsExplicitClear = Override.Visual.bEffectsExplicitClear;
+		}
+
+		if (Override.LayoutData.HasExplicitPadding())
+		{
+			Target.LayoutData.ExplicitPadding = Override.LayoutData.ExplicitPadding;
+			Target.LayoutData.PaddingRequiresRuntimeWrap = Override.LayoutData.PaddingRequiresRuntimeWrap;
+		}
+		if (Override.LayoutData.HasExplicitGap())
+		{
+			Target.LayoutData.ExplicitGap = Override.LayoutData.ExplicitGap;
+		}
+		if (Override.LayoutData.HasExplicitClip())
+		{
+			Target.LayoutData.ExplicitClip = Override.LayoutData.ExplicitClip;
+		}
+
+		if (!Override.Transform.bEnabled)
+		{
+			Target.Transform.bEnabled = false;
+		}
+		if (Override.Transform.HasExplicitOpacity())
+		{
+			Target.Transform.Opacity = Override.Transform.Opacity;
+			Target.Transform.ExplicitOpacity = Override.Transform.Opacity;
+		}
+		if (Override.Text.LineHeight > 0.0f)
+		{
+			Target.Text.LineHeight = Override.Text.LineHeight;
+		}
+		if (Override.Text.HasLetterSpacingValue())
+		{
+			Target.Text.SetLetterSpacingValue(Override.Text.LetterSpacing);
+		}
+	}
+
+	void ApplyOverrideProperties(FDesignNode& Target, const FDesignNode& Override)
+	{
+		ApplyCommonOverrideProperties(Target, Override);
 
 		if (!Override.Text.Content.IsEmpty())
 			Target.Text.Content = Override.Text.Content;
@@ -38,20 +94,6 @@ namespace
 			Target.Text.FontStyle = Override.Text.FontStyle;
 		if (!Override.Text.FontFamily.IsEmpty())
 			Target.Text.FontFamily = Override.Text.FontFamily;
-		if (Override.Visual.Fills.Num() > 0 || bFillExplicitClear)
-		{
-			Target.Visual.Fills = Override.Visual.Fills;
-			Target.Visual.bFillExplicitClear = bFillExplicitClear;
-		}
-		if (Override.Visual.Stroke.HasStroke())
-			Target.Visual.Stroke = Override.Visual.Stroke;
-		if (bFillExplicitClear && !bKeepExplicitStrokeFill)
-			Target.Visual.Stroke.Fill.Reset();
-		if (Override.Visual.bEffectsExplicitClear || Override.Visual.Effects.Num() > 0)
-		{
-			Target.Visual.Effects = Override.Visual.Effects;
-			Target.Visual.bEffectsExplicitClear = Override.Visual.bEffectsExplicitClear;
-		}
 		if (Override.Transform.bHasWidth)
 			Target.Transform.Width = Override.Transform.Width;
 		if (Override.Transform.bHasHeight)
@@ -66,36 +108,12 @@ namespace
 			Target.Transform.Y = Override.Transform.Y;
 			Target.Transform.ExplicitY = Override.Transform.Y;
 		}
-		if (!Override.Transform.bEnabled)
-			Target.Transform.bEnabled = false;
-		if (Override.LayoutData.HasExplicitPadding())
-		{
-			Target.LayoutData.ExplicitPadding = Override.LayoutData.ExplicitPadding;
-			Target.LayoutData.PaddingRequiresRuntimeWrap = Override.LayoutData.PaddingRequiresRuntimeWrap;
-		}
-		if (Override.LayoutData.HasExplicitGap())
-		{
-			Target.LayoutData.ExplicitGap = Override.LayoutData.ExplicitGap;
-		}
-		if (Override.LayoutData.HasExplicitClip())
-		{
-			Target.LayoutData.ExplicitClip = Override.LayoutData.ExplicitClip;
-		}
-		if (Override.Transform.HasExplicitOpacity())
-		{
-			Target.Transform.Opacity = Override.Transform.Opacity;
-			Target.Transform.ExplicitOpacity = Override.Transform.Opacity;
-		}
 		if (Override.LayoutData.JustifyContent != EDesignJustifyContent::Start)
 			Target.LayoutData.JustifyContent = Override.LayoutData.JustifyContent;
 		if (Override.LayoutData.AlignItems != EDesignAlignItems::Start)
 			Target.LayoutData.AlignItems = Override.LayoutData.AlignItems;
 		if (Override.Text.TextAlign != EDesignTextAlign::Left)
 			Target.Text.TextAlign = Override.Text.TextAlign;
-		if (Override.Text.LineHeight > 0.0f)
-			Target.Text.LineHeight = Override.Text.LineHeight;
-		if (Override.Text.HasLetterSpacingValue())
-			Target.Text.SetLetterSpacingValue(Override.Text.LetterSpacing);
 		if (Override.Text.TextGrowth != EDesignTextGrowth::Auto)
 			Target.Text.TextGrowth = Override.Text.TextGrowth;
 		if (Override.Text.bUnderline)
@@ -214,8 +232,7 @@ namespace
 		if (!Expanded.IsValid() || !RefNode.IsValid())
 			return;
 
-		const bool bFillExplicitClear = RefNode->Visual.bFillExplicitClear;
-		const bool bKeepExplicitStrokeFill = RefNode->Visual.Stroke.Fill.IsSet();
+		ApplyCommonOverrideProperties(*Expanded, *RefNode);
 
 		Expanded->Id = RefNode->Id;
 		if (!RefNode->Name.IsEmpty())
@@ -254,48 +271,6 @@ namespace
 			Expanded->Transform.bHasHeight = true;
 		}
 
-		if (RefNode->Visual.Fills.Num() > 0 || bFillExplicitClear)
-		{
-			Expanded->Visual.Fills = RefNode->Visual.Fills;
-			Expanded->Visual.bFillExplicitClear = bFillExplicitClear;
-		}
-		if (RefNode->Visual.Stroke.HasStroke())
-			Expanded->Visual.Stroke = RefNode->Visual.Stroke;
-		if (bFillExplicitClear && !bKeepExplicitStrokeFill)
-			Expanded->Visual.Stroke.Fill.Reset();
-		if (RefNode->Visual.bEffectsExplicitClear || RefNode->Visual.Effects.Num() > 0)
-		{
-			Expanded->Visual.Effects = RefNode->Visual.Effects;
-			Expanded->Visual.bEffectsExplicitClear = RefNode->Visual.bEffectsExplicitClear;
-		}
-		if (RefNode->Text.HasLetterSpacingValue())
-		{
-			Expanded->Text.SetLetterSpacingValue(RefNode->Text.LetterSpacing);
-		}
-		if (RefNode->Text.LineHeight > 0.0f)
-		{
-			Expanded->Text.LineHeight = RefNode->Text.LineHeight;
-		}
-		if (RefNode->LayoutData.HasExplicitPadding())
-		{
-			Expanded->LayoutData.ExplicitPadding = RefNode->LayoutData.ExplicitPadding;
-			Expanded->LayoutData.PaddingRequiresRuntimeWrap = RefNode->LayoutData.PaddingRequiresRuntimeWrap;
-		}
-		if (RefNode->LayoutData.HasExplicitGap())
-		{
-			Expanded->LayoutData.ExplicitGap = RefNode->LayoutData.ExplicitGap;
-		}
-		if (RefNode->LayoutData.HasExplicitClip())
-		{
-			Expanded->LayoutData.ExplicitClip = RefNode->LayoutData.ExplicitClip;
-		}
-		if (!RefNode->Transform.bEnabled)
-			Expanded->Transform.bEnabled = false;
-		if (RefNode->Transform.HasExplicitOpacity())
-		{
-			Expanded->Transform.Opacity = RefNode->Transform.Opacity;
-			Expanded->Transform.ExplicitOpacity = RefNode->Transform.Opacity;
-		}
 		if (!FMath::IsNearlyZero(RefNode->Transform.Rotation))
 			Expanded->Transform.Rotation = RefNode->Transform.Rotation;
 		if (RefNode->Transform.bFlipX)

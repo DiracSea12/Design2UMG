@@ -10,7 +10,9 @@
 #include "Design2UMGSourceMetadata.h"
 #include "Design2UMGTextWidgetBuilder.h"
 #include "DesignSchemaSourceExtensions.h"
+#include "FigmaParser.h"
 #include "ImageFillUtils.h"
+#include "PenParser.h"
 #include "SharedCoreSemantics.h"
 #include "SizeEstimator.h"
 #include "TextMeasurement.h"
@@ -637,6 +639,149 @@ bool FSharedSemanticsVisibleFillOwnerBoundaryTest::RunTest(const FString& Parame
 	const FDesignFill& ReadFill = EmptyNode->Visual.PrimaryFill();
 	TestEqual(TEXT("Reading an absent primary fill returns the empty value"), ReadFill.Type, EDesignFillType::None);
 	TestEqual(TEXT("Reading an absent primary fill does not create fill state"), EmptyNode->Visual.Fills.Num(), 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSharedSourceParserSemanticParityTest,
+	"Design2UMG.SharedSemantics.SourceParserParity",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FSharedSourceParserSemanticParityTest::RunTest(const FString& Parameters)
+{
+	const FString FigmaJson = TEXT(R"JSON(
+{
+  "document": {
+    "type": "DOCUMENT",
+    "children": [{
+      "type": "CANVAS",
+      "children": [{
+        "id": "figma-root",
+        "name": "Root",
+        "type": "FRAME",
+        "layoutMode": "HORIZONTAL",
+        "itemSpacing": 6,
+        "paddingTop": 4,
+        "paddingRight": 8,
+        "paddingBottom": 4,
+        "paddingLeft": 8,
+        "counterAxisAlignItems": "CENTER",
+        "absoluteBoundingBox": {"x": 0, "y": 0, "width": 160, "height": 48},
+        "fills": [{"type": "SOLID", "visible": true, "color": {"r": 1, "g": 1, "b": 1}, "opacity": 1}],
+        "children": [{
+          "id": "figma-clear",
+          "name": "Clear",
+          "type": "RECTANGLE",
+          "absoluteBoundingBox": {"x": 8, "y": 4, "width": 24, "height": 24},
+          "fills": []
+        }]
+      }]
+    }]
+  }
+})JSON");
+
+	const FString PenJson = TEXT(R"JSON(
+{
+  "version": "1.0",
+  "children": [{
+    "id": "pen-root",
+    "name": "Root",
+    "type": "frame",
+    "width": 160,
+    "height": 48,
+    "layout": "horizontal",
+    "gap": 6,
+    "padding": [4, 8],
+    "alignItems": "center",
+    "fill": "#ffffff",
+    "children": [{
+      "id": "pen-clear",
+      "name": "Clear",
+      "type": "rectangle",
+      "width": 24,
+      "height": 24,
+      "fill": []
+    }]
+  }]
+})JSON");
+
+	FDesignDocument FigmaDocument;
+	FDesignDocument PenDocument;
+	TestTrue(TEXT("Figma parity fixture parses"), FFigmaParser::ParseDocument(FigmaJson, FigmaDocument));
+	TestTrue(TEXT("Pencil parity fixture parses"), FPenParser::ParseDocument(PenJson, PenDocument));
+	if (FigmaDocument.Children.Num() != 1 || PenDocument.Children.Num() != 1
+		|| !FigmaDocument.Children[0].IsValid() || !PenDocument.Children[0].IsValid())
+	{
+		return false;
+	}
+
+	const FDesignNode& FigmaRoot = *FigmaDocument.Children[0];
+	const FDesignNode& PenRoot = *PenDocument.Children[0];
+	TestEqual(TEXT("Both parsers normalize horizontal layout"), FigmaRoot.LayoutData.Layout, PenRoot.LayoutData.Layout);
+	TestEqual(TEXT("Both parsers normalize the main-axis gap"), FigmaRoot.LayoutData.ExplicitGap.Get(0.0f), PenRoot.LayoutData.ExplicitGap.Get(0.0f));
+	TestEqual(TEXT("Both parsers normalize counter-axis alignment"), FigmaRoot.LayoutData.AlignItems, PenRoot.LayoutData.AlignItems);
+	TestTrue(TEXT("Figma padding is present"), FigmaRoot.LayoutData.ExplicitPadding.IsSet());
+	TestTrue(TEXT("Pencil padding is present"), PenRoot.LayoutData.ExplicitPadding.IsSet());
+	if (FigmaRoot.LayoutData.ExplicitPadding.IsSet() && PenRoot.LayoutData.ExplicitPadding.IsSet())
+	{
+		const FDesignPadding& FigmaPadding = FigmaRoot.LayoutData.ExplicitPadding.GetValue();
+		const FDesignPadding& PenPadding = PenRoot.LayoutData.ExplicitPadding.GetValue();
+		TestEqual(TEXT("Padding top matches"), FigmaPadding.Top, PenPadding.Top);
+		TestEqual(TEXT("Padding right matches"), FigmaPadding.Right, PenPadding.Right);
+		TestEqual(TEXT("Padding bottom matches"), FigmaPadding.Bottom, PenPadding.Bottom);
+		TestEqual(TEXT("Padding left matches"), FigmaPadding.Left, PenPadding.Left);
+	}
+	TestEqual(TEXT("Both parsers make the padding ownership decision"), FigmaRoot.LayoutData.PaddingRequiresRuntimeWrap.IsSet(), PenRoot.LayoutData.PaddingRequiresRuntimeWrap.IsSet());
+	if (FigmaRoot.LayoutData.PaddingRequiresRuntimeWrap.IsSet() && PenRoot.LayoutData.PaddingRequiresRuntimeWrap.IsSet())
+	{
+		TestEqual(TEXT("Padding ownership decision matches"), FigmaRoot.LayoutData.PaddingRequiresRuntimeWrap.GetValue(), PenRoot.LayoutData.PaddingRequiresRuntimeWrap.GetValue());
+	}
+	TestEqual(TEXT("Both parsers produce one color fill"), FigmaRoot.Visual.Fills.Num(), PenRoot.Visual.Fills.Num());
+	TestEqual(TEXT("Color fill type matches"), FigmaRoot.Visual.PrimaryFill().Type, PenRoot.Visual.PrimaryFill().Type);
+	TestEqual(TEXT("Color fill value matches"), FigmaRoot.Visual.PrimaryFill().SolidColor, PenRoot.Visual.PrimaryFill().SolidColor);
+
+	TestEqual(TEXT("Both parsers preserve one clear child"), FigmaRoot.Children.Num(), PenRoot.Children.Num());
+	if (FigmaRoot.Children.Num() == 1 && PenRoot.Children.Num() == 1
+		&& FigmaRoot.Children[0].IsValid() && PenRoot.Children[0].IsValid())
+	{
+		TestTrue(TEXT("Figma clear child is explicit"), FigmaRoot.Children[0]->Visual.bFillExplicitClear);
+		TestTrue(TEXT("Pencil clear child is explicit"), PenRoot.Children[0]->Visual.bFillExplicitClear);
+		TestEqual(TEXT("Clear child has no fill layers in either parser"), FigmaRoot.Children[0]->Visual.Fills.Num(), PenRoot.Children[0]->Visual.Fills.Num());
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSharedColorLiteralNormalizationTest,
+	"Design2UMG.SharedSemantics.ColorLiteralNormalization",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FSharedColorLiteralNormalizationTest::RunTest(const FString& Parameters)
+{
+	const FString PenJson = TEXT(R"JSON(
+{
+  "version": "1.0",
+  "children": [
+    {"id": "short", "type": "rectangle", "fill": "#abc"},
+    {"id": "alpha", "type": "rectangle", "fill": "#102030aa"},
+    {"id": "invalid", "type": "rectangle", "fill": "#xyz"}
+  ]
+})JSON");
+
+	FDesignDocument Document;
+	TestTrue(TEXT("Color literal fixture parses"), FPenParser::ParseDocument(PenJson, Document));
+	TestEqual(TEXT("Three color literal nodes parse"), Document.Children.Num(), 3);
+	if (Document.Children.Num() != 3)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Three-digit color expands to uppercase RGB"),
+		Document.Children[0]->Visual.PrimaryFill().SolidColor,
+		FString(TEXT("#AABBCC")));
+	TestEqual(TEXT("Eight-digit color preserves alpha and normalizes case"),
+		Document.Children[1]->Visual.PrimaryFill().SolidColor,
+		FString(TEXT("#102030AA")));
+	TestEqual(TEXT("Invalid color literal stays untouched"),
+		Document.Children[2]->Visual.PrimaryFill().SolidColor,
+		FString(TEXT("#xyz")));
 	return true;
 }
 

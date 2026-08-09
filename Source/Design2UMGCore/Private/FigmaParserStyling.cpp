@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "FigmaParserStyling.h"
+#include "DesignColorUtils.h"
 #include "DesignJsonUtils.h"
 
 namespace FigmaParserInternal
@@ -26,12 +27,7 @@ namespace
 		const float A = GetNumber(ColorObj, TEXT("a"), 1.0) * Opacity;
 		const uint8 Alpha = FMath::Clamp(FMath::RoundToInt(A * 255.0), 0, 255);
 
-		if (Alpha >= 255)
-		{
-			return FString::Printf(TEXT("#%02X%02X%02X"), R, G, B);
-		}
-
-		return FString::Printf(TEXT("#%02X%02X%02X%02X"), R, G, B, Alpha);
+		return DesignColorUtils::FormatLiteral(FColor(R, G, B, Alpha));
 	}
 
 	bool IsSyntheticVectorRasterFill(const TSharedPtr<FJsonObject>& FillObj)

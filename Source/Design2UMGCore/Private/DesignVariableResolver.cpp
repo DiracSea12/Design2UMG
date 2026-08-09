@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignVariableResolver.h"
+#include "DesignColorUtils.h"
 #include "Design2UMGLog.h"
 #include "Dom/JsonValue.h"
 
@@ -123,7 +124,7 @@ bool FDesignVariableResolver::ResolveBoolean(const FString& Value) const
 
 FString FDesignVariableResolver::ResolveColor(const FString& Value) const
 {
-	return ResolveString(Value);
+	return DesignColorUtils::NormalizeLiteral(ResolveString(Value));
 }
 
 FDesignCornerRadius FDesignVariableResolver::ResolveCornerRadius(const TSharedPtr<FJsonValue>& Value) const
