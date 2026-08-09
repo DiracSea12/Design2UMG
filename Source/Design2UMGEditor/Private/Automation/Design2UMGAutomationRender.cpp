@@ -958,6 +958,9 @@ namespace Design2UMGAutomationRender
 			return false;
 		}
 
+		// Package refresh and reload populate render-related caches after the initial reset.
+		// Clear them once more so loading the asset below starts from the same state for every case.
+		ResetAutomationTransientState();
 		return true;
 	}
 
