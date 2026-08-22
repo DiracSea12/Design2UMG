@@ -13,6 +13,9 @@ class FakeClient:
         self.app_name = app_name
         self.state_index = 0
 
+    def has_tool(self, name):
+        return name == "get_editor_state"
+
     def _current_state(self):
         if not self.states:
             return ""
@@ -505,6 +508,9 @@ def test_export_pencil_reference_png_requests_scale_one():
     calls = []
 
     class RecordingClient:
+        def has_tool(self, name):
+            return name == "export_nodes"
+
         def call_tool(self, name, arguments, *, timeout_sec):
             calls.append((name, arguments, timeout_sec))
             return ""

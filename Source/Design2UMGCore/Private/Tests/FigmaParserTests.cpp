@@ -267,6 +267,53 @@ bool FFigmaParserStrokeDashMetadataTest::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FFigmaParserExpandedDropShadowUsesLayoutBoundsTest,
+	"Design2UMG.Unit.FigmaParser.ExpandedDropShadowUsesLayoutBounds",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFigmaParserExpandedDropShadowUsesLayoutBoundsTest::RunTest(const FString&)
+{
+	const FString Json = TEXT(R"JSON(
+{
+  "document": {
+    "type": "DOCUMENT",
+    "children": [{
+      "type": "CANVAS",
+      "children": [{
+        "id": "card",
+        "name": "Card",
+        "type": "GROUP",
+        "absoluteBoundingBox": { "x": 0, "y": 0, "width": 400, "height": 200 },
+        "children": [{
+          "id": "background",
+          "name": "Background",
+          "type": "RECTANGLE",
+          "absoluteBoundingBox": { "x": 40, "y": 32, "width": 210, "height": 86 },
+          "absoluteRenderBounds": { "x": 0, "y": -8, "width": 290, "height": 166 },
+          "effects": [{ "type": "DROP_SHADOW", "visible": true, "offset": { "x": 0, "y": 0 }, "radius": 40 }],
+          "fills": [{ "type": "SOLID", "color": { "r": 1, "g": 1, "b": 1, "a": 1 } }]
+        }]
+      }]
+    }]
+  }
+}
+)JSON");
+
+	FDesignDocument Document;
+	TestTrue(TEXT("Expanded drop-shadow node parses"), FFigmaParser::ParseDocument(Json, Document));
+	if (Document.Children.Num() != 1 || !Document.Children[0].IsValid()
+		|| Document.Children[0]->Children.Num() != 1 || !Document.Children[0]->Children[0].IsValid())
+	{
+		return false;
+	}
+
+	const TSharedPtr<FDesignNode>& Background = Document.Children[0]->Children[0];
+	TestEqual(TEXT("Drop-shadow node keeps layout width"), Background->Transform.Width.Value, 210.0f);
+	TestEqual(TEXT("Drop-shadow node keeps layout height"), Background->Transform.Height.Value, 86.0f);
+	return true;
+}
+
 // ---------------------------------------------------------------------------
 // Fill types: solid / gradient / image
 // ---------------------------------------------------------------------------

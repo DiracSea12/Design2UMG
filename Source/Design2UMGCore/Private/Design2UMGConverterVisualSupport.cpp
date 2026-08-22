@@ -254,15 +254,11 @@ namespace Design2UMGConverterVisualSupport
 			Widget = VisualMapper::WrapWithInnerShadow(MoveTemp(Widget), Node, *InnerShadow);
 		}
 
-		const int32 ShadowCount = Widget.Shadow.BoxShadows.Num();
-		if (ShadowCount > 0)
+		if (Widget.Shadow.BoxShadows.Num() > 0)
 		{
 			const TArray<FUMGBoxShadowLayerData> BoxShadows = Widget.Shadow.BoxShadows;
 			Widget.Shadow.BoxShadows.Reset();
-			for (int32 Index = 0; Index < ShadowCount; ++Index)
-			{
-				Widget = VisualMapper::WrapWithBoxShadow(MoveTemp(Widget), Node, BoxShadows[Index], Index);
-			}
+			Widget = VisualMapper::WrapWithBoxShadow(MoveTemp(Widget), Node, BoxShadows);
 		}
 
 		float MaxForegroundBlur = 0.0f;

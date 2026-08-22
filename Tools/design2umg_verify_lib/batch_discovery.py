@@ -21,7 +21,7 @@ DEFAULT_FIGMA_EXPORT_DIR_NAMES = (
     "figma_general_course_builder",
     "figma_game_team09_start",
     "figma_game_party_home",
-    "figma_game_koi_inventory",
+    "figma_game_potions_levelselect",
     "figma_game_bubbo_gameplay",
     "figma_game_english_cycle",
 )

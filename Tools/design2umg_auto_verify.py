@@ -621,8 +621,20 @@ def seed_runtime_font_assets(project_path: str, source_paths: list[str]) -> dict
 
 
 def ensure_clean_editor():
-    for image_name in ("UnrealEditor.exe", "UnrealEditor-Cmd.exe"):
-        subprocess.run(["taskkill", "/F", "/IM", image_name], check=False, capture_output=True, text=True)
+    # Only kill editors this automation launched: interactive user editors never
+    # carry the driver-script or test-exit command-line markers, so an
+    # image-wide taskkill would murder unrelated editor windows.
+    script = (
+        "Get-CimInstance Win32_Process -Filter \"Name='UnrealEditor.exe' OR Name='UnrealEditor-Cmd.exe'\" | "
+        "Where-Object { $_.CommandLine -like '*-ExecutePythonScript=*' -or $_.CommandLine -like '*-TestExit=*' } | "
+        "ForEach-Object { & taskkill /F /PID $_.ProcessId }"
+    )
+    subprocess.run(
+        ["powershell", "-NoProfile", "-Command", script],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
 
 
 def normalize_node_id(node_id: str) -> str:
@@ -769,6 +781,7 @@ def list_windows_task_rows(filter_expression: str, *, verbose: bool) -> list[dic
             check=False,
             capture_output=True,
             text=True,
+            errors="replace",
         )
     except OSError:
         return []
@@ -953,6 +966,7 @@ class PencilMcpClient:
         self._stderr_lines: deque[str] = deque(maxlen=50)
         self._stderr_thread: threading.Thread | None = None
         self._request_id = 0
+        self._tool_names: set[str] | None = None
 
     def __enter__(self):
         errors: list[str] = []
@@ -1119,6 +1133,15 @@ class PencilMcpClient:
             return ""
         return parts[0].get("text", "")
 
+    def available_tools(self) -> set[str]:
+        if self._tool_names is None:
+            result = self._request("tools/list", {}, timeout_sec=15.0)
+            self._tool_names = {str(tool.get("name")) for tool in result.get("tools", []) if tool.get("name")}
+        return self._tool_names
+
+    def has_tool(self, name: str) -> bool:
+        return name in self.available_tools()
+
 
 def extract_png_paths_from_tool_result(tool_result: str, output_dir: Path) -> list[Path]:
     candidate_paths = []
@@ -1137,13 +1160,20 @@ def extract_png_paths_from_tool_result(tool_result: str, output_dir: Path) -> li
 
 def get_active_pencil_document(client: PencilMcpClient) -> str:
     try:
-        parts = client.call_tool_content("get_editor_state", {"include_schema": False})
+        if client.has_tool("get_editor_state"):
+            parts = client.call_tool_content("get_editor_state", {"include_schema": False})
+            pattern = r"Currently active editor\s*-\s*`([^`]+)`"
+        elif client.has_tool("get_app_state"):
+            parts = client.call_tool_content("get_app_state", {})
+            pattern = r"Currently active canvas editor:\s*`([^`]+)`"
+        else:
+            return ""
     except Exception:
         return ""
     if not parts:
         return ""
     text = parts[0].get("text", "")
-    match = re.search(r"Currently active editor\s*-\s*`([^`]+)`", text, re.IGNORECASE | re.MULTILINE)
+    match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
     return match.group(1) if match else ""
 
 
@@ -1220,45 +1250,86 @@ def export_pencil_reference_png(
     *,
     timeout_sec: float = PENCIL_EXPORT_TOOL_TIMEOUT_SEC,
 ) -> Path | None:
-    tool_result = ""
-    export_error = None
     output_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        tool_result = client.call_tool(
-            "export_nodes",
-            {
-                "filePath": source_path,
-                "nodeIds": [node_id],
-                "outputDir": str(output_dir),
-                "format": "png",
-                "scale": 1,
-            },
-            timeout_sec=timeout_sec,
-        )
-    except Exception as exc:
-        export_error = exc
+    if client.has_tool("export_nodes"):
+        tool_result = ""
+        export_error = None
+        try:
+            tool_result = client.call_tool(
+                "export_nodes",
+                {
+                    "filePath": source_path,
+                    "nodeIds": [node_id],
+                    "outputDir": str(output_dir),
+                    "format": "png",
+                    "scale": 1,
+                },
+                timeout_sec=timeout_sec,
+            )
+        except Exception as exc:
+            export_error = exc
 
-    candidate_paths = extract_png_paths_from_tool_result(tool_result, output_dir)
-    if candidate_paths:
-        return candidate_paths[0]
-    if export_error:
-        raise RuntimeError(f"Pencil export_nodes did not produce any PNG: {export_error}") from export_error
-    return None
+        candidate_paths = extract_png_paths_from_tool_result(tool_result, output_dir)
+        if candidate_paths:
+            return candidate_paths[0]
+        if export_error:
+            raise RuntimeError(f"Pencil export_nodes did not produce any PNG: {export_error}") from export_error
+        return None
+
+    if not client.has_tool("execute"):
+        raise RuntimeError("Pencil MCP exposes neither export_nodes nor execute")
+    try:
+        snippet = f'Export({json.dumps([node_id])}, "png", {json.dumps(str(output_dir))}, {{"scale": 1}})'
+        client.call_tool("execute", {"input": snippet}, timeout_sec=timeout_sec)
+    except Exception as exc:
+        raise RuntimeError(f"Pencil execute Export did not produce any PNG: {exc}") from exc
+    # The execute Export treats outputPath as a directory and appends "<nodeId>.png".
+    exported_path = output_dir / f"{node_id}.png"
+    return exported_path if exported_path.is_file() else None
 
 
 def screenshot_pencil_reference_png(client: PencilMcpClient, source_path: str, node_id: str, output_path: Path) -> Path | None:
-    screenshot_parts = client.call_tool_content(
-        "get_screenshot",
-        {
-            "filePath": source_path,
-            "nodeId": node_id,
-        },
-    )
+    if client.has_tool("get_screenshot"):
+        screenshot_parts = client.call_tool_content(
+            "get_screenshot",
+            {
+                "filePath": source_path,
+                "nodeId": node_id,
+            },
+        )
+    elif client.has_tool("execute"):
+        try:
+            screenshot_parts = client.call_tool_content(
+                "execute",
+                {"input": f'TakeScreenshot({json.dumps([node_id])})'},
+                timeout_sec=60.0,
+            )
+        except Exception:
+            return None
+    else:
+        return None
     for part in screenshot_parts:
         if part.get("type") == "image" and part.get("data"):
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_bytes(base64.b64decode(part["data"]))
             return output_path
+    return None
+
+
+def parse_execute_print_json(parts: list[dict]):
+    """Read the first JSON value the execute kernel emitted via Print(...)."""
+    marker = "## Print output"
+    for part in parts or []:
+        if not isinstance(part, dict) or marker not in part.get("text", ""):
+            continue
+        for line in part["text"].split(marker, 1)[1].splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                continue
     return None
 
 
@@ -1385,6 +1456,20 @@ def _classify_pencil_node_kind(node: dict) -> str:
     return "other"
 
 
+_INVALID_WIDGET_NAME_CHARS = set("\"' ,/.:|&!~\n\r\t@#(){}[]=;^%$`")
+
+
+def sanitize_widget_name_for_match(name: str, fallback_prefix: str = "") -> str:
+    """Mirror FUMGWidgetUtils::SanitizeWidgetName so python-side source
+    snapshots produce the same names the converter gives widget objects."""
+    sanitized = "".join(char for char in (name or "") if char not in _INVALID_WIDGET_NAME_CHARS)
+    if not sanitized:
+        sanitized = f"{fallback_prefix}_Widget" if fallback_prefix else "_Widget"
+    if sanitized[0].isdigit():
+        sanitized = "_" + sanitized
+    return sanitized
+
+
 def _build_pencil_structure_snapshot(node: dict):
     if not isinstance(node, dict):
         return None
@@ -1402,6 +1487,7 @@ def _build_pencil_structure_snapshot(node: dict):
         "placeholder_nodes": 0,
         "max_depth": 0,
         "visible_texts": [],
+        "node_names": [],
         "kind_histogram": {},
         "truncated": False,
     }
@@ -1418,6 +1504,7 @@ def _build_pencil_structure_snapshot(node: dict):
 
         stats["total_nodes"] += 1
         stats["max_depth"] = max(stats["max_depth"], depth)
+        stats["node_names"].append(sanitize_widget_name_for_match(current.get("name", ""), node_type))
 
         kind = _classify_pencil_node_kind(current)
         stats["kind_histogram"][kind] = int(stats["kind_histogram"].get(kind, 0)) + 1
@@ -1425,7 +1512,9 @@ def _build_pencil_structure_snapshot(node: dict):
             stats["container_nodes"] += 1
         elif kind == "text":
             stats["text_nodes"] += 1
-            text = normalize_structure_text(current.get("content", "") or current.get("icon", ""))
+            # Icon nodes count as text slots but contribute no visible prose,
+            # matching the C++ design/asset snapshot semantics.
+            text = normalize_structure_text(current.get("content", ""))
             if text:
                 stats["visible_texts"].append(text)
         elif kind == "visual":
@@ -1449,6 +1538,7 @@ def _build_pencil_structure_snapshot(node: dict):
 
     visit(node, 0)
     stats["visible_texts"].sort()
+    stats["node_names"].sort()
     return stats
 
 
@@ -1471,34 +1561,44 @@ def try_fetch_pencil_source_structure_snapshot(
     try:
         with PencilMcpClient(mcp_server, app_name, source_path) as client:
             ensure_pencil_document_open(client, source_path)
-            def fetch_parts(patterns: list[dict]) -> list[dict]:
-                return client.call_tool_content(
-                    "batch_get",
-                    {
-                        "filePath": source_path,
-                        "patterns": patterns,
-                        "searchDepth": 6,
-                        "readDepth": 12,
-                        "resolveInstances": True,
-                        "resolveVariables": False,
-                    },
+            if client.has_tool("execute"):
+                snippet = (
+                    f'Print(JSON.stringify(Get({json.dumps(node_id)}, '
+                    f'{json.dumps({"depth": 12, "resolveInstances": True})})))'
                 )
+                parts = client.call_tool_content("execute", {"input": snippet}, timeout_sec=60.0)
+                target_node = parse_execute_print_json(parts)
+                if not isinstance(target_node, dict):
+                    return None
+            else:
+                def fetch_parts(patterns: list[dict]) -> list[dict]:
+                    return client.call_tool_content(
+                        "batch_get",
+                        {
+                            "filePath": source_path,
+                            "patterns": patterns,
+                            "searchDepth": 6,
+                            "readDepth": 12,
+                            "resolveInstances": True,
+                            "resolveVariables": False,
+                        },
+                    )
 
-            parts = fetch_parts([{"name": f"^{re.escape(search_name)}$"}])
-            parsed = _parse_tool_text_json(parts)
-            target_node = _find_pencil_node_by_id(parsed, node_id) if isinstance(parsed, list) else None
-            if not target_node:
-                parts = fetch_parts([])
+                parts = fetch_parts([{"name": f"^{re.escape(search_name)}$"}])
                 parsed = _parse_tool_text_json(parts)
                 target_node = _find_pencil_node_by_id(parsed, node_id) if isinstance(parsed, list) else None
+                if not target_node:
+                    parts = fetch_parts([])
+                    parsed = _parse_tool_text_json(parts)
+                    target_node = _find_pencil_node_by_id(parsed, node_id) if isinstance(parsed, list) else None
+                if not target_node and isinstance(parsed, list) and len(parsed) == 1 and isinstance(parsed[0], dict):
+                    target_node = parsed[0]
     except Exception:
         return None
 
-    if not isinstance(parsed, list):
+    if not isinstance(target_node, dict):
         return None
 
-    if not target_node and len(parsed) == 1 and isinstance(parsed[0], dict):
-        target_node = parsed[0]
     snapshot = _build_pencil_structure_snapshot(target_node)
     if snapshot:
         snapshot["source"] = "pencil_live"
@@ -1608,6 +1708,49 @@ def structure_comparison_counts_match(comparison: dict | None) -> bool:
     )
 
 
+def compute_structure_correspondence(source_snapshot, asset_snapshot) -> dict:
+    """Match source node names against widget object names: real structure
+    coverage (did every source node get a widget?) vs synthetic carrier
+    widgets (wrappers UMG needs but the source never declared)."""
+    source_names = [name for name in (source_snapshot or {}).get("node_names") or [] if name]
+    asset_names = [name for name in (asset_snapshot or {}).get("node_names") or [] if name]
+    if not source_names or not asset_names:
+        return {}
+
+    asset_counter = Counter(asset_names)
+    exact_unmatched = []
+    matched_sources = 0
+    for name in source_names:
+        if asset_counter.get(name, 0) > 0:
+            asset_counter[name] -= 1
+            matched_sources += 1
+        else:
+            exact_unmatched.append(name)
+
+    still_unmatched = []
+    for name in exact_unmatched:
+        # Widget names carry converter suffixes (content, shadow, slot wraps,
+        # uniqueness counters); a prefixed widget still corresponds to the node.
+        prefix = name + "_"
+        match = next((widget for widget in asset_counter if asset_counter[widget] > 0 and widget.startswith(prefix)), None)
+        if match is not None:
+            asset_counter[match] -= 1
+            matched_sources += 1
+        else:
+            still_unmatched.append(name)
+
+    consumed_widgets = len(asset_names) - sum(asset_counter.values())
+    carrier_widgets = len(asset_names) - consumed_widgets
+    return {
+        "source_named_nodes": len(source_names),
+        "matched_source_nodes": matched_sources,
+        "coverage_ratio": round(matched_sources / len(source_names), 4),
+        "carrier_widgets": carrier_widgets,
+        "carrier_overhead_ratio": round(carrier_widgets / len(source_names), 4),
+        "unmatched_source_names": still_unmatched[:20],
+    }
+
+
 def validate_structure_consistency(args, ue_result: dict, render_chain: dict, reference_context: dict | None = None) -> dict:
     generation_result = render_chain.get("generation")
     asset_result = render_chain.get("asset_render")
@@ -1685,6 +1828,8 @@ def validate_structure_consistency(args, ue_result: dict, render_chain: dict, re
     elif required and not structure_comparison_counts_match(generation_vs_asset):
         result["reasons"].append("generated_asset_structure_changed_after_reload")
 
+    expansion_ratio = round(asset_total / source_total, 3) if source_total > 0 else None
+
     result["metrics"] = {
         "source_total_nodes": source_total,
         "asset_total_nodes": asset_total,
@@ -1706,7 +1851,17 @@ def validate_structure_consistency(args, ue_result: dict, render_chain: dict, re
         "visible_texts_match": source_text_counter == asset_text_counter,
         "missing_texts": sorted((source_text_counter - asset_text_counter).elements()),
         "extra_texts": sorted((asset_text_counter - source_text_counter).elements()),
+        "expansion_ratio": expansion_ratio,
     }
+
+    # Name-level correspondence: coverage (source nodes with a widget) and
+    # carrier overhead (widgets without a source counterpart) are orthogonal
+    # signals; raw expansion_ratio conflates both.
+    correspondence = compute_structure_correspondence(source_snapshot, asset_snapshot)
+    if correspondence:
+        result["structure_correspondence"] = correspondence
+        result["metrics"]["structure_coverage_ratio"] = correspondence["coverage_ratio"]
+        result["metrics"]["carrier_overhead_ratio"] = correspondence["carrier_overhead_ratio"]
     result["passed"] = len(result["reasons"]) == 0
     return result
 

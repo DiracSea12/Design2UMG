@@ -21,6 +21,28 @@ namespace
 	constexpr float FigmaMinimumVisibleBlurRadius = 0.0f;
 	constexpr float FigmaPositiveBoundsExtentThreshold = 0.0f;
 
+	bool HasVisibleEffectOfType(const TSharedPtr<FJsonObject>& NodeObj, const TCHAR* EffectType)
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Effects = GetArray(NodeObj, TEXT("effects"));
+		if (!Effects)
+		{
+			return false;
+		}
+
+		for (const TSharedPtr<FJsonValue>& EffectValue : *Effects)
+		{
+			const TSharedPtr<FJsonObject> EffectObj = EffectValue.IsValid() ? EffectValue->AsObject() : nullptr;
+			if (EffectObj.IsValid()
+				&& GetBool(EffectObj, TEXT("visible"), true)
+				&& GetString(EffectObj, TEXT("type")) == EffectType)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	bool HasVisibleForegroundBlurEffect(const TSharedPtr<FJsonObject>& NodeObj)
 	{
 		const TArray<TSharedPtr<FJsonValue>>* Effects = GetArray(NodeObj, TEXT("effects"));
@@ -292,6 +314,14 @@ namespace
 
 		const TArray<TSharedPtr<FJsonValue>>* Children = GetArray(NodeObj, TEXT("children"));
 		const bool bHasChildren = Children && Children->Num() > 0;
+		if (bRenderBoundsExpandLayoutBounds && !bHasChildren
+			&& HasVisibleEffectOfType(NodeObj, TEXT("DROP_SHADOW")))
+		{
+			// UMG emits the drop shadow as a separate layer. The Figma render bounds already include
+			// that layer, so using them as the widget layout would inflate the shape and its shadow.
+			return true;
+		}
+
 		if (bHasChildren && bRenderBoundsExpandLayoutBounds)
 		{
 			// Child coordinates are defined in layout space; effect/stroke expansion must not shift the container origin.

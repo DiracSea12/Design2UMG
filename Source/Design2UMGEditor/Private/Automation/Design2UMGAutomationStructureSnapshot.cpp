@@ -5,6 +5,7 @@
 #include "DesignSchema.h"
 #include "FontResolver.h"
 #include "DesignReferenceExpansion.h"
+#include "UMGWidgetUtils.h"
 
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"
@@ -36,6 +37,7 @@ namespace Design2UMGAutomationStructureSnapshot
 			FString RootKind = TEXT("unknown");
 			TArray<FString> VisibleTexts;
 			TArray<FString> BorderWidgets;
+			TArray<FString> NodeNames;
 			TMap<FString, int32> KindHistogram;
 			TMap<FString, int32> ClassHistogram;
 
@@ -85,6 +87,15 @@ namespace Design2UMGAutomationStructureSnapshot
 					BorderValues.Add(MakeShared<FJsonValueString>(BorderName));
 				}
 				Root->SetArrayField(TEXT("border_widgets"), BorderValues);
+
+				TArray<FString> SortedNodeNames = NodeNames;
+				SortedNodeNames.Sort();
+				TArray<TSharedPtr<FJsonValue>> NodeNameValues;
+				for (const FString& NodeName : SortedNodeNames)
+				{
+					NodeNameValues.Add(MakeShared<FJsonValueString>(NodeName));
+				}
+				Root->SetArrayField(TEXT("node_names"), NodeNameValues);
 
 				TSharedPtr<FJsonObject> HistogramObject = MakeShared<FJsonObject>();
 				for (const TPair<FString, int32>& Pair : KindHistogram)
@@ -247,6 +258,14 @@ namespace Design2UMGAutomationStructureSnapshot
 
 			Stats.TotalNodes++;
 			Stats.MaxDepth = FMath::Max(Stats.MaxDepth, Depth);
+
+			// Record the name exactly as the converter sanitizes it, so the
+			// python side can match source nodes against widget object names.
+			// The empty-name fallback uses the design type label here; the
+			// converter's own fallback uses the widget type string, which only
+			// diverges for names that sanitize to nothing.
+			const FString NodeTypeLabel = StaticEnum<EDesignNodeType>()->GetNameStringByValue(static_cast<int64>(EffectiveNode->Type));
+			Stats.NodeNames.Add(FUMGWidgetUtils::SanitizeWidgetName(EffectiveNode->Name, NodeTypeLabel).ToString());
 
 			const FString Kind = ClassifyDesignNodeKindForStructure(EffectiveNode);
 			Stats.AddKind(Kind);
@@ -446,6 +465,8 @@ namespace Design2UMGAutomationStructureSnapshot
 
 			Stats.TotalNodes++;
 			Stats.MaxDepth = FMath::Max(Stats.MaxDepth, Depth);
+
+			Stats.NodeNames.Add(Widget->GetName());
 			Stats.AddClass(Widget);
 			if (Cast<UBorder>(Widget))
 			{

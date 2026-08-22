@@ -352,6 +352,7 @@ bool FFigmaDropShadowConvertsToBoxShadowWrapperTest::RunTest(const FString& Para
 					"name": "ShadowCard",
 					"type": "RECTANGLE",
 					"visible": true,
+					"clipsContent": true,
 					"absoluteBoundingBox": {"x":0,"y":0,"width":160,"height":80},
 					"absoluteRenderBounds": {"x":0,"y":0,"width":160,"height":80},
 					"fills": [{"type":"SOLID","visible":true,"color":{"r":1,"g":1,"b":1,"a":1}}],
@@ -374,15 +375,33 @@ bool FFigmaDropShadowConvertsToBoxShadowWrapperTest::RunTest(const FString& Para
 	TestTrue(TEXT("Figma drop shadow fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
 
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
-	TestEqual(TEXT("Figma outer shadow becomes overlay wrapper"), Data.RootWidget.Type, TEXT("Overlay"));
+	TestEqual(TEXT("Figma outer shadow keeps its overlay wrapper"), Data.RootWidget.Type, TEXT("Overlay"));
 	TestTrue(TEXT("Figma outer shadow wrapper keeps shadow and content children"), Data.RootWidget.Children.Num() == 2);
 	if (Data.RootWidget.Children.Num() != 2)
 	{
 		return false;
 	}
 
-	TestEqual(TEXT("Figma outer shadow synthetic shadow node is image"), Data.RootWidget.Children[0].Type, TEXT("Image"));
-	TestTrue(TEXT("Figma outer shadow synthetic blur typed"), Data.RootWidget.Children[0].Shadow.ShadowBlur.IsSet() && FMath::IsNearlyEqual(Data.RootWidget.Children[0].Shadow.ShadowBlur.GetValue(), 10.0f, 0.001f));
+	const FUMGWidgetNode& Shadow = Data.RootWidget.Children[0];
+	TestEqual(TEXT("Figma outer shadow synthetic shadow node is image"), Shadow.Type, TEXT("Image"));
+	TestTrue(TEXT("Figma outer shadow synthetic blur typed"), Shadow.Shadow.ShadowBlur.IsSet() && FMath::IsNearlyEqual(Shadow.Shadow.ShadowBlur.GetValue(), 10.0f, 0.001f));
+	TestTrue(TEXT("Figma outer shadow keeps its source brush colour"),
+		Shadow.Brush.BrushColor.IsSet()
+		&& Shadow.Brush.BrushColor.GetValue().Equals(FLinearColor(0.0f, 0.0f, 0.0f, 0.2f)));
+	TestTrue(TEXT("Figma outer shadow remains a fill child with its source offset"),
+		Shadow.Slot.HorizontalAlignment == EUMGSlotHorizontalAlignment::Fill
+		&& Shadow.Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Fill
+		&& Shadow.Render.RenderTranslation.IsSet()
+		&& Shadow.Render.RenderTranslation.GetValue().Equals(FVector2D(-6.0f, -8.0f), 0.001f));
+	TestEqual(TEXT("Figma outer shadow wrapper owns source clipping"),
+		Data.RootWidget.Render.Clipping.Get(FString()), TEXT("ClipToBounds"));
+	TestTrue(TEXT("Figma outer shadow content remains a fill child"),
+		FMath::IsNearlyEqual(Data.RootWidget.Children[1].Bounds.X, 0.0f, 0.001f)
+		&& FMath::IsNearlyEqual(Data.RootWidget.Children[1].Bounds.Y, 0.0f, 0.001f)
+		&& FMath::IsNearlyEqual(Data.RootWidget.Children[1].Bounds.W, 0.0f, 0.001f)
+		&& FMath::IsNearlyEqual(Data.RootWidget.Children[1].Bounds.H, 0.0f, 0.001f)
+		&& Data.RootWidget.Children[1].Slot.HorizontalAlignment == EUMGSlotHorizontalAlignment::Fill
+		&& Data.RootWidget.Children[1].Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Fill);
 	return true;
 }
 
@@ -2382,6 +2401,7 @@ bool FBoxShadowBlurPaddingFidelityTest::RunTest(const FString& Parameters)
 				"name": "Shadow Card",
 				"width": 40,
 				"height": 24,
+				"clip": true,
 				"fill": "#FFFFFFFF",
 				"effect": {
 					"type": "shadow",
@@ -2408,8 +2428,12 @@ bool FBoxShadowBlurPaddingFidelityTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	TestEqual(TEXT("Box shadow wraps widget with overlay"), Wrapper->Type, TEXT("Overlay"));
+	TestEqual(TEXT("Box shadow keeps the content overlay wrapper"), Wrapper->Type, TEXT("Overlay"));
+	TestEqual(TEXT("Box shadow wrapper owns clipping"), Wrapper->Render.Clipping.Get(FString()), TEXT("ClipToBounds"));
 	TestEqual(TEXT("Box shadow material ref preserved"), GetWidgetProperty(*ShadowWidget, UMGPropertyKeys::MaterialRef), TEXT("boxshadow"));
+	TestTrue(TEXT("Box shadow remains a fill child"),
+		ShadowWidget->Slot.HorizontalAlignment == EUMGSlotHorizontalAlignment::Fill
+		&& ShadowWidget->Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Fill);
 	TestTrue(TEXT("Box shadow width includes blur padding"),
 		FMath::IsNearlyEqual(FCString::Atof(*GetWidgetProperty(*ShadowWidget, TEXT("WidthOverride"))), 56.0f, 0.001f));
 	TestTrue(TEXT("Box shadow height includes blur padding"),
@@ -2484,6 +2508,7 @@ bool FBoxShadowNegativeSpreadFidelityTest::RunTest(const FString& Parameters)
 				"name": "Shadow Chip",
 				"width": 40,
 				"height": 40,
+				"clip": true,
 				"fill": "#FFFFFFFF",
 				"effect": {
 					"type": "shadow",
@@ -2501,22 +2526,25 @@ bool FBoxShadowNegativeSpreadFidelityTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Negative spread shadow fixture parses"), FPenParser::ParseDocument(Json, Doc));
 
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
+	const FUMGWidgetNode* Wrapper = FindWidgetById(Data.RootWidget, TEXT("shadow_chip"));
 	const FUMGWidgetNode* ShadowWidget = FindWidgetById(Data.RootWidget, TEXT("shadow_chip_shadow0"));
+	TestTrue(TEXT("Negative spread shadow wrapper exists"), Wrapper != nullptr);
 	TestTrue(TEXT("Negative spread shadow image child exists"), ShadowWidget != nullptr);
-	if (!ShadowWidget)
+	if (!Wrapper || !ShadowWidget)
 	{
 		return false;
 	}
 
+	TestEqual(TEXT("Negative spread keeps the layout overlay wrapper"), Wrapper->Type, TEXT("Overlay"));
+	TestEqual(TEXT("Negative spread wrapper owns clipping"), Wrapper->Render.Clipping.Get(FString()), TEXT("ClipToBounds"));
 	TestEqual(TEXT("Negative spread keeps rounded rect path when blur is zero"), GetWidgetProperty(*ShadowWidget, UMGPropertyKeys::MaterialRef), TEXT("roundedrect"));
 	TestTrue(TEXT("Negative spread shrinks width"),
 		FMath::IsNearlyEqual(FCString::Atof(*GetWidgetProperty(*ShadowWidget, TEXT("WidthOverride"))), 28.0f, 0.001f));
 	TestTrue(TEXT("Negative spread shrinks height"),
 		FMath::IsNearlyEqual(FCString::Atof(*GetWidgetProperty(*ShadowWidget, TEXT("HeightOverride"))), 28.0f, 0.001f));
-	FVector2D NegativeSpreadTranslation = FVector2D::ZeroVector;
-	TestTrue(TEXT("Negative spread exposes render translation"),
-		Design2UMGWidgetNodeAccess::TryGetWidgetVector2D(*ShadowWidget, TEXT("RenderTranslation"), NegativeSpreadTranslation));
-	TestTrue(TEXT("Negative spread translates back inward"), NegativeSpreadTranslation.Equals(FVector2D(6.0f, 6.0f), 0.001f));
+	TestTrue(TEXT("Negative spread keeps its source translation"),
+		ShadowWidget->Render.RenderTranslation.IsSet()
+		&& ShadowWidget->Render.RenderTranslation.GetValue().Equals(FVector2D(6.0f, 6.0f), 0.001f));
 
 	UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(BuildProceduralRequestForTest(*this, *ShadowWidget),
 		GetTransientPackageAsObject());

@@ -107,6 +107,69 @@ namespace
 		return FString::Printf(TEXT("_shadow%d"), ShadowIndex);
 	}
 
+	FUMGWidgetNode BuildBoxShadowLayerImage(
+		const TSharedPtr<FDesignNode>& Node,
+		const FUMGBoxShadowLayerData& ShadowLayer,
+		int32 ShadowIndex,
+		const FString& SourceId,
+		const FString& SourceName)
+	{
+		const float OffX = ShadowLayer.Offset.X;
+		const float OffY = ShadowLayer.Offset.Y;
+		const float Blur = ShadowLayer.Blur;
+		const float Spread = ShadowLayer.Spread;
+		const FString ShadowColor = Design2UMGWidgetNodeAccess::SerializeWidgetColor(ShadowLayer.Color);
+
+		const float PositiveSpread = FMath::Max(0.0f, Spread);
+		const float NegativeSpreadInset = FMath::Max(0.0f, -Spread);
+		const float ShadowTextureExtent = Blur + PositiveSpread;
+		const float ShapeWidth = FMath::Max(1.0f, Node->Transform.Width.Value - NegativeSpreadInset * 2.0f);
+		const float ShapeHeight = FMath::Max(1.0f, Node->Transform.Height.Value - NegativeSpreadInset * 2.0f);
+		FUMGWidgetNode Shadow;
+		Shadow.Type = TEXT("Image");
+		const FString ShadowSuffix = BuildIndexedShadowSuffix(ShadowIndex);
+		Shadow.Id = SourceId + ShadowSuffix;
+		Shadow.Name = SourceName + ShadowSuffix;
+		Shadow.Brush.BrushColor = ShadowLayer.Color;
+
+		// Shadow texture parameters.
+		const int32 TexW = RoundPositivePixelExtent(ShapeWidth + ShadowTextureExtent * 2.0f);
+		const int32 TexH = RoundPositivePixelExtent(ShapeHeight + ShadowTextureExtent * 2.0f);
+		Shadow.WidgetStyle.WidthOverride = TexW;
+		Shadow.WidgetStyle.HeightOverride = TexH;
+		Shadow.Brush.MaterialRef = (Blur > 0.0f) ? TEXT("boxshadow") : MatRef_RoundedRect;
+		Shadow.Shadow.ShadowBlur = Blur;
+
+		const float RadiusHalfMin = FMath::Min(TexW, TexH) * 0.5f;
+		auto NormalizeShadowRadius = [&](float SourceRadius)
+		{
+			const float EffectiveRadius = SourceRadius + ShadowTextureExtent;
+			return (RadiusHalfMin > 0.0f) ? EffectiveRadius / RadiusHalfMin : 0.0f;
+		};
+		if (Node->Visual.CornerRadius.bUniform)
+		{
+			Shadow.Brush.MaterialParams = FString::Printf(
+				TEXT("{\"Color\":\"%s\",\"CornerRadius\":%.3f}"),
+				*ShadowColor,
+				NormalizeShadowRadius(Node->Visual.CornerRadius.Uniform));
+		}
+		else
+		{
+			Shadow.Brush.MaterialParams = FString::Printf(
+				TEXT("{\"Color\":\"%s\",\"CornerRadii\":[%.3f,%.3f,%.3f,%.3f]}"),
+				*ShadowColor,
+				NormalizeShadowRadius(Node->Visual.CornerRadius.TopLeft), NormalizeShadowRadius(Node->Visual.CornerRadius.TopRight),
+				NormalizeShadowRadius(Node->Visual.CornerRadius.BottomRight), NormalizeShadowRadius(Node->Visual.CornerRadius.BottomLeft));
+		}
+
+		Shadow.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
+		Shadow.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
+		Shadow.Render.RenderTranslation = FVector2D(
+			OffX - ShadowTextureExtent + NegativeSpreadInset,
+			OffY - ShadowTextureExtent + NegativeSpreadInset);
+		return Shadow;
+	}
+
 	void TransferBorderBackgroundProperties(FUMGWidgetNode& Border, FUMGWidgetNode& Widget)
 	{
 		FString StringValue;
@@ -279,49 +342,49 @@ namespace
 		Widget.WidgetStyle.StrokeMargin.Reset();
 	}
 
-	void TransferBorderRenderProperties(FUMGWidgetNode& Border, FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
+	void TransferWrapperRenderProperties(FUMGWidgetNode& Wrapper, FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
 	{
 		FString StringValue;
 		float FloatValue = 0.0f;
 		FVector2D Vector2DValue = FVector2D::ZeroVector;
 
-		if (!Border.Render.Clipping.IsSet()
+		if (!Wrapper.Render.Clipping.IsSet()
 			&& Design2UMGWidgetNodeAccess::TryGetWidgetString(Widget, UMGPropertyKeys::Clipping, StringValue)
 			&& !StringValue.IsEmpty())
 		{
-			Border.Render.Clipping = StringValue;
+			Wrapper.Render.Clipping = StringValue;
 		}
-		if (!Border.Render.RenderOpacity.IsSet()
+		if (!Wrapper.Render.RenderOpacity.IsSet()
 			&& Design2UMGWidgetNodeAccess::TryGetWidgetFloat(Widget, UMGPropertyKeys::RenderOpacity, FloatValue))
 		{
-			Border.Render.RenderOpacity = FloatValue;
+			Wrapper.Render.RenderOpacity = FloatValue;
 		}
-		if (!Border.Render.RenderAngle.IsSet()
+		if (!Wrapper.Render.RenderAngle.IsSet()
 			&& Design2UMGWidgetNodeAccess::TryGetWidgetFloat(Widget, UMGPropertyKeys::RenderAngle, FloatValue))
 		{
-			Border.Render.RenderAngle = FloatValue;
+			Wrapper.Render.RenderAngle = FloatValue;
 		}
-		if (!Border.Render.RenderTransformScale.IsSet()
+		if (!Wrapper.Render.RenderTransformScale.IsSet()
 			&& Design2UMGWidgetNodeAccess::TryGetWidgetVector2D(Widget, UMGPropertyKeys::RenderTransformScale, Vector2DValue))
 		{
-			Border.Render.RenderTransformScale = Vector2DValue;
+			Wrapper.Render.RenderTransformScale = Vector2DValue;
 		}
-		if (!Border.Render.RenderTransformPivot.IsSet()
+		if (!Wrapper.Render.RenderTransformPivot.IsSet()
 			&& Design2UMGWidgetNodeAccess::TryGetWidgetVector2D(Widget, UMGPropertyKeys::RenderTransformPivot, Vector2DValue))
 		{
-			Border.Render.RenderTransformPivot = Vector2DValue;
+			Wrapper.Render.RenderTransformPivot = Vector2DValue;
 		}
-		if (!Border.Render.RenderTranslation.IsSet()
+		if (!Wrapper.Render.RenderTranslation.IsSet()
 			&& Design2UMGWidgetNodeAccess::TryGetWidgetVector2D(Widget, UMGPropertyKeys::RenderTranslation, Vector2DValue))
 		{
-			Border.Render.RenderTranslation = Vector2DValue;
+			Wrapper.Render.RenderTranslation = Vector2DValue;
 		}
 
 		Widget.Render = FUMGRenderStyleData();
 
-		if (!Border.Render.RenderOpacity.IsSet() && Node->Transform.Opacity < 1.0f)
+		if (!Wrapper.Render.RenderOpacity.IsSet() && Node->Transform.Opacity < 1.0f)
 		{
-			Border.Render.RenderOpacity = Node->Transform.Opacity;
+			Wrapper.Render.RenderOpacity = Node->Transform.Opacity;
 		}
 	}
 
@@ -528,7 +591,7 @@ FUMGWidgetNode VisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TShar
 	// so do NOT expand Border.Bounds again. Only add StrokePadding so the centered UMG
 	// outline doesn't eat into content space.
 	ApplyOutsideStrokePaddingToBorder(Border, Widget);
-	TransferBorderRenderProperties(Border, Widget, Node);
+	TransferWrapperRenderProperties(Border, Widget, Node);
 	TransferBorderBoxShadowProperties(Border, Widget);
 	PrepareWrappedContentWidget(Widget);
 
@@ -646,76 +709,26 @@ FUMGWidgetNode VisualMapper::WrapWithInnerShadow(FUMGWidgetNode&& Widget, const 
 FUMGWidgetNode VisualMapper::WrapWithBoxShadow(
 	FUMGWidgetNode&& Widget,
 	const TSharedPtr<FDesignNode>& Node,
-	const FUMGBoxShadowLayerData& ShadowLayer,
-	int32 ShadowIndex)
+	const TArray<FUMGBoxShadowLayerData>& ShadowLayers)
 {
-	const float OffX = ShadowLayer.Offset.X;
-	const float OffY = ShadowLayer.Offset.Y;
-	const float Blur = ShadowLayer.Blur;
-	const float Spread = ShadowLayer.Spread;
-	const FString ShadowColor = Design2UMGWidgetNodeAccess::SerializeWidgetColor(ShadowLayer.Color);
-
-	// Overlay contains the shadow Image and the original widget; Fill alignment works on Overlay children.
 	FUMGWidgetNode Wrapper;
+	// Keep the wrapper in the parent's established layout flow. It owns the
+	// source render properties so the shadows and content share one render space.
 	Wrapper.Type = TEXT("Overlay");
 	Wrapper.Id = Widget.Id;
 	Wrapper.Name = Widget.Name;
 	Wrapper.Bounds = Widget.Bounds;
 	Wrapper.Slot = Widget.Slot;
+	TransferWrapperRenderProperties(Wrapper, Widget, Node);
 
-	// Shadow Image node.
-	const float PositiveSpread = FMath::Max(0.0f, Spread);
-	const float NegativeSpreadInset = FMath::Max(0.0f, -Spread);
-	const float Extent = Blur + PositiveSpread;
-	const float ShapeWidth = FMath::Max(1.0f, Node->Transform.Width.Value - NegativeSpreadInset * 2.0f);
-	const float ShapeHeight = FMath::Max(1.0f, Node->Transform.Height.Value - NegativeSpreadInset * 2.0f);
-	FUMGWidgetNode Shadow;
-	Shadow.Type = TEXT("Image");
-	const FString ShadowSuffix = BuildIndexedShadowSuffix(ShadowIndex);
-	Shadow.Id = Widget.Id + ShadowSuffix;
-	Shadow.Name = Widget.Name + ShadowSuffix;
-	Shadow.Brush.BrushColor = ShadowLayer.Color;
-
-	// Shadow texture parameters.
-	const int32 TexW = RoundPositivePixelExtent(ShapeWidth + Extent * 2.0f);
-	const int32 TexH = RoundPositivePixelExtent(ShapeHeight + Extent * 2.0f);
-	Shadow.WidgetStyle.WidthOverride = TexW;
-	Shadow.WidgetStyle.HeightOverride = TexH;
-	Shadow.Brush.MaterialRef = (Blur > 0.0f) ? TEXT("boxshadow") : MatRef_RoundedRect;
-	Shadow.Shadow.ShadowBlur = Blur;
-
-	const float HalfMin = FMath::Min(TexW, TexH) * 0.5f;
-	if (Node->Visual.CornerRadius.bUniform)
+	// All shadow layers live in this single overlay. Later source layers render
+	// below earlier ones, matching the stacking the retired per-layer nesting produced.
+	for (int32 Index = ShadowLayers.Num() - 1; Index >= 0; --Index)
 	{
-		const float NormalizedRadius = (HalfMin > 0.0f) ? (Node->Visual.CornerRadius.Uniform + Extent) / HalfMin : 0.0f;
-		Shadow.Brush.MaterialParams = FString::Printf(
-			TEXT("{\"Color\":\"%s\",\"CornerRadius\":%.3f}"),
-			*ShadowColor,
-			NormalizedRadius);
-	}
-	else
-	{
-		auto Norm = [&](float RadiusPx)
-		{
-			return (HalfMin > 0.0f) ? (RadiusPx + Extent) / HalfMin : 0.0f;
-		};
-		Shadow.Brush.MaterialParams = FString::Printf(
-			TEXT("{\"Color\":\"%s\",\"CornerRadii\":[%.3f,%.3f,%.3f,%.3f]}"),
-			*ShadowColor,
-			Norm(Node->Visual.CornerRadius.TopLeft), Norm(Node->Visual.CornerRadius.TopRight),
-			Norm(Node->Visual.CornerRadius.BottomRight), Norm(Node->Visual.CornerRadius.BottomLeft));
+		Wrapper.Children.Add(BuildBoxShadowLayerImage(Node, ShadowLayers[Index], Index, Widget.Id, Widget.Name));
 	}
 
-	// Shadow offset positioning.
-	Shadow.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
-	Shadow.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
-	const float ShadowMarginLeft = OffX - Extent + NegativeSpreadInset;
-	const float ShadowMarginTop = OffY - Extent + NegativeSpreadInset;
-	Shadow.Render.RenderTranslation = FVector2D(ShadowMarginLeft, ShadowMarginTop);
-
-	Wrapper.Children.Add(MoveTemp(Shadow));
-
-	// Place the original widget above the shadow.
+	// Place the original widget above the shadows.
 	Widget.Id = Widget.Id + TEXT("_content");
 	Widget.Name = Widget.Name + TEXT("_content");
 	Widget.Bounds = FDesignPixelBounds();

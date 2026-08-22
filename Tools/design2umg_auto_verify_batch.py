@@ -31,6 +31,19 @@ NO_REGRESSION_METRICS = (
     "stable_mean_abs_error",
     "mean_abs_error",
 )
+# Structure metrics compared against a baseline run for horizontal tracking only
+# (baseline average + per-case deviation); never gate pass/fail on them.
+STRUCTURE_BASELINE_METRICS = (
+    "expansion_ratio",
+    "structure_coverage_ratio",
+    "carrier_overhead_ratio",
+)
+STRUCTURE_BASELINE_DELTA_EPSILON = 1e-4
+STRUCTURE_BASELINE_LOWER_IS_BETTER = {
+    "expansion_ratio": True,
+    "structure_coverage_ratio": False,
+    "carrier_overhead_ratio": True,
+}
 EDITOR_GRACEFUL_EXIT_DEADLINE_SEC = 30.0  # seconds to wait for editor results after process exits
 EDITOR_STEP_DRIVER_START_ATTEMPTS = 2
 AUTOMATION_GAME_OUTPUT_PREFIX = "/Game/Design2UMG/Automation"
@@ -273,7 +286,13 @@ def prepare_case_state(
     # Formal full-runs with an external reference root already carry the authoritative
     # reference image. In that mode, per-case live Pencil MCP structure fetches add a
     # large serial latency and routinely fall back to the local design snapshot anyway.
-    if case_args.mode == "pen" and not case_args.reference and "source_structure_live" not in reference_context:
+    # Cache hits are fully local: the .pen parse snapshot matches the live fetch.
+    if (
+        case_args.mode == "pen"
+        and restored_from_cache is None
+        and not case_args.reference
+        and "source_structure_live" not in reference_context
+    ):
         live_source_structure = verify.try_fetch_pencil_source_structure_snapshot(
             case_args.source,
             case_args.node,
@@ -1117,6 +1136,20 @@ def load_baseline_case_metrics(case_dir: Path | None, pixel_tolerance: int) -> d
     }
 
 
+def load_baseline_structure_metrics(case_dir: Path | None) -> dict:
+    if not case_dir or not case_dir.is_dir():
+        return {"available": False, "reason": "baseline_case_dir_missing"}
+
+    report_path = case_dir / "compare_report.json"
+    report = verify.load_json_document(report_path) if report_path.is_file() else {}
+    metrics = ((report.get("structure_validation") or {}).get("metrics")) or {}
+    values = {metric_name: metrics.get(metric_name) for metric_name in STRUCTURE_BASELINE_METRICS}
+    missing = [metric_name for metric_name, value in values.items() if value is None]
+    result = {"available": not missing, **values}
+    result["reason"] = "" if not missing else "baseline_structure_metrics_unavailable"
+    return result
+
+
 def evaluate_no_regression(report: dict, case_dir: Path | None, pixel_tolerance: int) -> dict:
     baseline = load_baseline_case_metrics(case_dir, pixel_tolerance)
     baseline_missing_metrics = [metric_name for metric_name in NO_REGRESSION_METRICS if baseline.get(metric_name) is None]
@@ -1340,6 +1373,26 @@ def process_case_result(state: dict, batch_exit_code: int, batch_log_path: Path)
     report = verify.load_json_document(report_path)
     no_regression = evaluate_no_regression(report, state.get("baseline_case_dir"), args.pixel_tolerance)
     report["no_regression"] = no_regression
+    structure_current = dict.fromkeys(STRUCTURE_BASELINE_METRICS)
+    structure_metrics = ((report.get("structure_validation") or {}).get("metrics")) or {}
+    for metric_name in STRUCTURE_BASELINE_METRICS:
+        structure_current[metric_name] = structure_metrics.get(metric_name)
+    structure_baseline = load_baseline_structure_metrics(state.get("baseline_case_dir"))
+    structure_delta = {
+        metric_name: (
+            None
+            if structure_current[metric_name] is None or structure_baseline.get(metric_name) is None
+            else round(structure_current[metric_name] - structure_baseline[metric_name], 6)
+        )
+        for metric_name in STRUCTURE_BASELINE_METRICS
+    }
+    report["structure_baseline"] = {
+        "available": structure_baseline.get("available"),
+        "reason": structure_baseline.get("reason"),
+        "current": structure_current,
+        "baseline": {metric_name: structure_baseline.get(metric_name) for metric_name in STRUCTURE_BASELINE_METRICS},
+        "delta": structure_delta,
+    }
     verify.write_json(Path(report_path), report)
     return {
         "name": state["case"]["name"],
@@ -1385,6 +1438,20 @@ def process_case_result(state: dict, batch_exit_code: int, batch_log_path: Path)
         ),
         "no_regression_decisive_metric": no_regression.get("decisive_metric"),
         "no_regression_decisive_delta": no_regression.get("decisive_delta"),
+        "structure_baseline": {
+            "available": structure_baseline.get("available"),
+            "current": structure_current,
+            "baseline": {metric_name: structure_baseline.get(metric_name) for metric_name in STRUCTURE_BASELINE_METRICS},
+            "delta": structure_delta,
+        },
+        "structure_baseline_available": structure_baseline.get("available"),
+        "structure_baseline_reason": structure_baseline.get("reason"),
+        "structure_expansion_ratio": structure_current["expansion_ratio"],
+        "structure_coverage_ratio": structure_current["structure_coverage_ratio"],
+        "structure_carrier_overhead_ratio": structure_current["carrier_overhead_ratio"],
+        "structure_expansion_ratio_delta": structure_delta["expansion_ratio"],
+        "structure_coverage_ratio_delta": structure_delta["structure_coverage_ratio"],
+        "structure_carrier_overhead_ratio_delta": structure_delta["carrier_overhead_ratio"],
         "source_signature": report.get("source_signature"),
         "provided_reference_signature": report.get("provided_reference_signature"),
         "effective_reference_signature": report.get("effective_reference_signature"),
@@ -1413,6 +1480,54 @@ def process_case_results(
             ordered_results[index] = future.result()
 
     return [item for item in ordered_results if item is not None]
+
+
+def summarize_structure_baseline(case_results: list[dict]) -> dict:
+    per_metric = {}
+    for metric_name in STRUCTURE_BASELINE_METRICS:
+        baseline_values: list[float] = []
+        current_values: list[float] = []
+        deltas: list[float] = []
+        for item in case_results:
+            block = item.get("structure_baseline") or {}
+            baseline = (block.get("baseline") or {}).get(metric_name)
+            current = (block.get("current") or {}).get(metric_name)
+            if baseline is None or current is None:
+                continue
+            baseline_values.append(baseline)
+            current_values.append(current)
+            deltas.append(current - baseline)
+
+        stats: dict = {"compared": len(deltas)}
+        if deltas:
+            lower_is_better = STRUCTURE_BASELINE_LOWER_IS_BETTER[metric_name]
+            improved = 0
+            regressed = 0
+            for delta in deltas:
+                if abs(delta) <= STRUCTURE_BASELINE_DELTA_EPSILON:
+                    continue
+                got_better = delta < 0 if lower_is_better else delta > 0
+                improved += 1 if got_better else 0
+                regressed += 0 if got_better else 1
+            stats.update(
+                {
+                    "baseline_avg": round(sum(baseline_values) / len(baseline_values), 4),
+                    "current_avg": round(sum(current_values) / len(current_values), 4),
+                    "avg_delta": round(sum(deltas) / len(deltas), 6),
+                    "improved": improved,
+                    "regressed": regressed,
+                }
+            )
+        per_metric[metric_name] = stats
+    return {
+        "delta_epsilon": STRUCTURE_BASELINE_DELTA_EPSILON,
+        "compared_cases": sum(
+            1
+            for item in case_results
+            if (item.get("structure_baseline") or {}).get("available")
+        ),
+        "metrics": per_metric,
+    }
 
 
 def build_batch_summary(
@@ -1480,6 +1595,7 @@ def build_batch_summary(
             "passed": no_regression_passed,
             "failed": len(no_regression_cases) - no_regression_passed + no_regression_required_unavailable,
         },
+        "structure_metrics": summarize_structure_baseline(case_results),
         "cases": case_results,
     }
 

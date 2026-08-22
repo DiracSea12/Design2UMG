@@ -28,6 +28,6 @@ namespace VisualMapper
 	DESIGN2UMGCORE_API FUMGWidgetNode WrapWithForegroundBlur(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, float BlurStrength);
 	DESIGN2UMGCORE_API FUMGWidgetNode WrapWithGeometryMask(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node);
 	DESIGN2UMGCORE_API FUMGWidgetNode WrapWithInnerShadow(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, const FDesignShadow& Shadow);
-	DESIGN2UMGCORE_API FUMGWidgetNode WrapWithBoxShadow(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, const FUMGBoxShadowLayerData& ShadowLayer, int32 ShadowIndex);
+	DESIGN2UMGCORE_API FUMGWidgetNode WrapWithBoxShadow(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, const TArray<FUMGBoxShadowLayerData>& ShadowLayers);
 	DESIGN2UMGCORE_API FUMGWidgetNode WrapWithMultiFill(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, const FVisualMapperOptions& Options);
 }

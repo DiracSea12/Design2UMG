@@ -84,7 +84,9 @@ def restore_reference_from_cache(
 
     expected_signature = metadata.get("source_signature") or {}
     current_signature = build_source_signature(source_path)
-    if expected_signature != current_signature:
+    # Content hash is the source identity; size/mtime can drift through file
+    # syncs that never alter bytes, and the cache key already pins the path.
+    if expected_signature.get("sha1") != current_signature.get("sha1"):
         return None
 
     output_reference_path = output_dir / "reference.png"

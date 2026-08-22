@@ -411,6 +411,9 @@ bool FDesignIdentityVariantConversionParityTest::RunTest(const FString& Paramete
 		{
 			return false;
 		}
+		// node_names lists source node names, which the variants intentionally
+		// change; the parity contract compares structure semantics, not names.
+		VariantStructureSnapshot->RemoveField(TEXT("node_names"));
 
 		if (VariantIndex == 0)
 		{
