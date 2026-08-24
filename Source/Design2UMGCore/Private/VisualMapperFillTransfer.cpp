@@ -185,6 +185,90 @@ namespace
 		Widget.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
 	}
 
+	bool HasMultiFillBorderPaintBeyondTransferredLayers(const FUMGVisualBrushData& Brush)
+	{
+		const bool bHasVisibleBrushColor = Brush.BrushColor.IsSet()
+			&& !Brush.BrushColor.GetValue().Equals(FLinearColor::Transparent);
+		return bHasVisibleBrushColor
+			|| Brush.OutlineThickness.IsSet()
+			|| Brush.OutlineColor.IsSet()
+			|| Brush.MaterialRef.IsSet()
+			|| Brush.MaterialParams.IsSet()
+			|| !Brush.TexturePath.IsEmpty()
+			|| Brush.Image.HasAny()
+			|| Brush.Gradient.HasAny();
+	}
+
+	bool CanElideMultiFillBorder(
+		const FUMGWidgetNode& Widget,
+		const TSharedPtr<FDesignNode>& Node)
+	{
+		return Node.IsValid()
+			&& Widget.Type == TEXT("Border")
+			&& Widget.Children.Num() <= 1
+			&& !Node->Visual.Stroke.HasStroke()
+			&& !Widget.HasSourceData()
+			&& !Widget.WidgetStyle.HasAny()
+			&& Widget.TextStyle.FontSize == 0.0f
+			&& Widget.TextStyle.SourceFontSize == 0.0f
+			&& !Widget.TextStyle.LetterSpacing.IsSet()
+			&& !Widget.Text.HasAny()
+			&& !HasMultiFillBorderPaintBeyondTransferredLayers(Widget.Brush)
+			&& !Widget.Effect.HasAny()
+			&& !Widget.Path.HasAny()
+			&& !Widget.Shadow.HasAny()
+			&& !Widget.Render.HasAny()
+			&& !Widget.WidgetState.HasAny()
+			&& !Widget.ScrollBox.HasAny();
+	}
+
+	bool CanElideEmptyMultiFillContent(const FUMGWidgetNode& Widget)
+	{
+		return Widget.Children.Num() == 0
+			&& !Widget.HasSourceData()
+			&& !Widget.WidgetStyle.HasAny()
+			&& !HasMultiFillBorderPaintBeyondTransferredLayers(Widget.Brush)
+			&& !Widget.Brush.DrawAs.IsSet()
+			&& !Widget.Brush.HasCornerRadii()
+			&& Widget.TextStyle.FontSize == 0.0f
+			&& Widget.TextStyle.SourceFontSize == 0.0f
+			&& !Widget.TextStyle.LetterSpacing.IsSet()
+			&& !Widget.Text.HasAny()
+			&& !Widget.Effect.HasAny()
+			&& !Widget.Path.HasAny()
+			&& !Widget.Shadow.HasAny()
+			&& !Widget.Render.HasAny()
+			&& !Widget.WidgetState.HasAny()
+			&& !Widget.ScrollBox.HasAny();
+	}
+
+	bool PrepareMultiFillContentForAppend(
+		FUMGWidgetNode& Widget,
+		const TSharedPtr<FDesignNode>& Node)
+	{
+		if (CanElideMultiFillBorder(Widget, Node))
+		{
+			if (Widget.Children.Num() == 0)
+			{
+				return false;
+			}
+
+			const FString ContentId = Widget.Id;
+			const FString ContentName = Widget.Name;
+			FUMGWidgetNode PromotedContent = MoveTemp(Widget.Children[0]);
+			Widget = MoveTemp(PromotedContent);
+			Widget.Id = ContentId;
+			Widget.Name = ContentName;
+		}
+		else if (CanElideEmptyMultiFillContent(Widget))
+		{
+			return false;
+		}
+
+		PrepareMultiFillContentWidget(Widget);
+		return true;
+	}
+
 	void ApplyMultiFillImageChildOpacity(
 		FUMGWidgetNode& ImageChild,
 		const FDesignFill& Fill,
@@ -367,8 +451,10 @@ namespace VisualMapperFillTransfer
 
 		Overlay.Render = Widget.Render;
 		Widget.Render = FUMGRenderStyleData();
-		PrepareMultiFillContentWidget(Widget);
-		Overlay.Children.Add(MoveTemp(Widget));
+		if (PrepareMultiFillContentForAppend(Widget, Node))
+		{
+			Overlay.Children.Add(MoveTemp(Widget));
+		}
 		return Overlay;
 	}
 }

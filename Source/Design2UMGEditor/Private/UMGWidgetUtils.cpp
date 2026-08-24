@@ -12,6 +12,7 @@
 #include "UMGPropertyKeys.h"
 #include "UMGWidgetNodeAccess.h"
 #include "UMGValueParsing.h"
+#include "Design2UMGConstrainedWidgets.h"
 
 #include "WidgetBlueprint.h"
 #include "Blueprint/UserWidget.h"
@@ -113,6 +114,11 @@ namespace
 			// Wrappers.
 			REG(Border); REG(SizeBox); REG(ScaleBox); REG(BackgroundBlur);
 			REG(InvalidationBox); REG(RetainerBox); REG(ExpandableArea); REG(NamedSlot);
+			REG(Design2UMGConstrainedBorder); REG(Design2UMGConstrainedCanvasPanel);
+			REG(Design2UMGConstrainedHorizontalBox); REG(Design2UMGConstrainedImage);
+			REG(Design2UMGConstrainedOverlay); REG(Design2UMGConstrainedRetainerBox);
+			REG(Design2UMGConstrainedTextBlock); REG(Design2UMGConstrainedVerticalBox);
+			REG(Design2UMGConstrainedWrapBox);
 			// Interactive widgets.
 			REG(Button); REG(CheckBox); REG(Slider); REG(SpinBox);
 			// Text widgets.

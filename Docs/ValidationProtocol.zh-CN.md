@@ -107,6 +107,24 @@ pwsh -NoProfile -File <PluginRoot>\Tools\Run-DesignerSnapshotValidation.ps1 -Pro
 
 结构快照用于比较 source design conversion tree 和同一次自动化 run 生成的 saved `UWidgetBlueprint` widget tree。它是结构证据，不是视觉证据。
 
+### 7.1 保存后必须做新进程重载
+
+同一 UnrealEditor 进程里拿到的内存 WidgetTree，只能证明生成阶段的对象树存在。保存后的正式结构结果必须按下面的顺序确认：
+
+1. 生成 Widget Blueprint，并记录保存前的结构快照。
+2. 等待 `UnrealEditor.exe` 真正退出。
+3. 用新 UnrealEditor 进程重新加载同一个 `.uasset`。
+4. 再做一次结构快照，并检查 `LoadErrors`、编译器 ensure 和最终 PNG。
+
+本项目已经用同一个工程和同一套自动化入口做过固定 A/B 复现：
+
+- 含有 `Design2UMGConstrained*` 的资产：新进程重载后稳定为 10 个节点、168 条 `LoadErrors`，错误集中在这些自定义控件的外部容器。
+- 只使用普通 UMG 节点的资产：新进程重载后稳定为 219 个节点、0 条 `LoadErrors`。
+
+这次实锤的直接触发链是：`LayoutMapper::TryFuseSizeConstraints()` 把 `SizeBox + 子控件` 融合成 `Design2UMGConstrained*`，这些编辑器模块控件在内存渲染阶段可用，但进入 WBP 资产后的新进程重载阶段失败，WidgetTree 随后被截断。`WidgetBlueprintCompiler.cpp:828` 中“deleted variable still has a GUID”属于重载失败后的后续症状。
+
+这条结论限定在当前 `Design2UMGConstrained*` 实现和保存/重载链；其他自定义控件需要单独通过新进程重载验证。同一进程内存快照只作过程证据，saved-asset parity 的最终证据必须包含新进程重载结果。
+
 ### 8. 只要改了 automation-render parity 相关面，就先跑 determinism smoke，再进 formal gate
 
 以下改动都必须先过 determinism smoke：
@@ -191,6 +209,10 @@ formal gate 执行纪律：
 
 - full 71 formal gate 必须独占串行跑。不能和 focused automation、别的 editor validation、另一个 formal batch 并行打同一个真实工程或 automation 资产目录。
 - 如果某次并行验证后突然冒出新的 pipeline determinism incompatibility，先独占重跑 formal gate，再决定要不要改代码。并行验证本身就可能制造假的 determinism 噪音。
+
+### shard 模式的分数波动
+
+`--editor-isolation shard` 适合批量执行和产物收集，但多个 shard / 编辑器生命周期可能共享或重置不同的 Slate 字体缓存、临时资产和渲染状态，导致 visual score 出现波动。shard 单次结果只作初筛；任何异常分数先用 `--editor-isolation case` 对受影响 case 独占、串行复跑，复跑结果稳定后再进入回归判断。报告同时记录 shard run 和 case recheck 的路径，shard 单次波动不直接当成视觉回退或改善。
 
 ## HostProject 和 Pencil MCP 边界
 

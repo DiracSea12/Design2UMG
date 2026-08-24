@@ -265,17 +265,17 @@ bool FFigmaWrapFillChildPreservesMeasuredSizeTest::RunTest(const FString& Parame
 	TestTrue(TEXT("Wrap fill parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
 	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* WrapWidget = FindWidgetById(Data.RootWidget, TEXT("wrap1"));
-	const FUMGWidgetNode* Card1SizeBox = FindWidgetById(Data.RootWidget, TEXT("card1_sz"));
+	const FUMGWidgetNode* Card1 = FindWidgetById(Data.RootWidget, TEXT("card1"));
 	TestTrue(TEXT("Wrap widget exists"), WrapWidget != nullptr);
-	TestTrue(TEXT("Wrap fill child gets SizeBox"), Card1SizeBox != nullptr);
-	if (!WrapWidget || !Card1SizeBox)
+	TestTrue(TEXT("Wrap fill child gets fused size constraints"), Card1 != nullptr);
+	if (!WrapWidget || !Card1)
 	{
 		return false;
 	}
 
-	TestEqual(TEXT("Wrap child SizeBox type"), Card1SizeBox->Type, TEXT("SizeBox"));
-	TestEqual(TEXT("Wrap fill child preserves measured width"), GetWidgetProperty(*Card1SizeBox, TEXT("WidthOverride")), TEXT("100.0"));
-	TestEqual(TEXT("Wrap fill child preserves measured height"), GetWidgetProperty(*Card1SizeBox, TEXT("HeightOverride")), TEXT("60.0"));
+	TestEqual(TEXT("Wrap child fused type"), Card1->Type, TEXT("Design2UMGConstrainedVerticalBox"));
+	TestEqual(TEXT("Wrap fill child preserves measured width"), GetWidgetProperty(*Card1, TEXT("WidthOverride")), TEXT("100.0"));
+	TestEqual(TEXT("Wrap fill child preserves measured height"), GetWidgetProperty(*Card1, TEXT("HeightOverride")), TEXT("60.0"));
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaCenteredFlowFillTextKeepsMeasuredWidthTest,
@@ -341,16 +341,17 @@ bool FFigmaCenteredFlowFillTextKeepsMeasuredWidthTest::RunTest(const FString& Pa
 	FDesignDocument Doc;
 	TestTrue(TEXT("Centered flow fill text parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
 	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
-	const FUMGWidgetNode* LabelSizeBox = FindWidgetById(Data.RootWidget, TEXT("nav_label_sz"));
-	TestTrue(TEXT("Centered flow fill text gets SizeBox"), LabelSizeBox != nullptr);
-	if (!LabelSizeBox)
+	const FUMGWidgetNode* Label = FindWidgetById(Data.RootWidget, TEXT("nav_label"));
+	TestTrue(TEXT("Centered flow fill text gets fused size constraints"), Label != nullptr);
+	if (!Label)
 	{
 		return false;
 	}
 
-	TestEqual(TEXT("Centered flow fill text preserves measured width"), GetWidgetProperty(*LabelSizeBox, TEXT("WidthOverride")), TEXT("72.0"));
-	const FString HeightOverride = GetWidgetProperty(*LabelSizeBox, TEXT("HeightOverride"));
-	const FString MinDesiredHeight = GetWidgetProperty(*LabelSizeBox, TEXT("MinDesiredHeight"));
+	TestEqual(TEXT("Centered flow fill text uses fused type"), Label->Type, TEXT("Design2UMGConstrainedTextBlock"));
+	TestEqual(TEXT("Centered flow fill text preserves measured width"), GetWidgetProperty(*Label, TEXT("WidthOverride")), TEXT("72.0"));
+	const FString HeightOverride = GetWidgetProperty(*Label, TEXT("HeightOverride"));
+	const FString MinDesiredHeight = GetWidgetProperty(*Label, TEXT("MinDesiredHeight"));
 	TestTrue(
 		TEXT("Centered flow fill text preserves measured height"),
 		HeightOverride == TEXT("16.0") || MinDesiredHeight == TEXT("16.0"));
@@ -988,15 +989,14 @@ bool FConverterTextAlignVerticalDoesNotMoveSlotTest::RunTest(const FString& Para
 	TestTrue(TEXT("ParseDocument succeeds"), FPenParser::ParseDocument(Json, Doc));
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* Label = FindWidgetById(Data.RootWidget, TEXT("label"));
-	const FUMGWidgetNode* LabelSizeBox = FindWidgetById(Data.RootWidget, TEXT("label_sz"));
 	TestNotNull(TEXT("Converted label exists"), Label);
-	TestNotNull(TEXT("Wrapped label SizeBox exists"), LabelSizeBox);
-	if (!Label || !LabelSizeBox)
+	if (!Label)
 	{
 		return false;
 	}
+	TestEqual(TEXT("Auto-height label uses fused type"), Label->Type, TEXT("Design2UMGConstrainedTextBlock"));
 	TestEqual(TEXT("textAlignVertical kept as metadata"), GetWidgetProperty(*Label, TEXT("TextAlignVertical")), TEXT("Center"));
-	TestTrue(TEXT("Outer SizeBox slot stays top-aligned"), LabelSizeBox->Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Top);
+	TestTrue(TEXT("Fused label slot stays top-aligned"), Label->Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Top);
 	FMargin Padding = FMargin(0.0f);
 	TestFalse(TEXT("Auto-height text does not synthesize internal padding"),
 		Design2UMGWidgetNodeAccess::TryGetWidgetMargin(*Label, TEXT("Padding"), Padding));
@@ -1037,16 +1037,15 @@ bool FConverterTextAlignVerticalUsesInternalPaddingWhenHeightFixedTest::RunTest(
 	TestTrue(TEXT("ParseDocument succeeds"), FPenParser::ParseDocument(Json, Doc));
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* Label = FindWidgetById(Data.RootWidget, TEXT("label"));
-	const FUMGWidgetNode* LabelSizeBox = FindWidgetById(Data.RootWidget, TEXT("label_sz"));
 	TestNotNull(TEXT("Converted fixed-height label exists"), Label);
-	TestNotNull(TEXT("Wrapped fixed-height label SizeBox exists"), LabelSizeBox);
-	if (!Label || !LabelSizeBox)
+	if (!Label)
 	{
 		return false;
 	}
+	TestEqual(TEXT("Fixed-height label uses fused type"), Label->Type, TEXT("Design2UMGConstrainedTextBlock"));
 
 	TestEqual(TEXT("Fixed-height textAlignVertical kept as metadata"), GetWidgetProperty(*Label, TEXT("TextAlignVertical")), TEXT("Center"));
-	TestTrue(TEXT("Fixed-height label outer slot stays top-aligned"), LabelSizeBox->Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Top);
+	TestTrue(TEXT("Fixed-height fused label slot stays top-aligned"), Label->Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Top);
 	FMargin Padding = FMargin(0.0f);
 	TestTrue(TEXT("Fixed-height text synthesizes internal padding"),
 		Design2UMGWidgetNodeAccess::TryGetWidgetMargin(*Label, TEXT("Padding"), Padding));
@@ -1677,8 +1676,8 @@ bool FFigmaLuminosityImageOverlayTest::RunTest(const FString& Parameters)
 	}
 
 	TestEqual(TEXT("Luminosity image converts to multi-fill overlay"), Overlay->Type, TEXT("Overlay"));
-	TestTrue(TEXT("Overlay has at least base + image layers"), Overlay->Children.Num() >= 2);
-	if (Overlay->Children.Num() < 2)
+	TestEqual(TEXT("Leaf multi-fill overlay keeps only base + image layers"), Overlay->Children.Num(), 2);
+	if (Overlay->Children.Num() != 2)
 	{
 		return false;
 	}

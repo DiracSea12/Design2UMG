@@ -1751,6 +1751,303 @@ def compute_structure_correspondence(source_snapshot, asset_snapshot) -> dict:
     }
 
 
+def compute_tree_correspondence(source_snapshot: dict | None, asset_snapshot: dict | None) -> dict:
+    """Compare source/asset named trees while ignoring synthetic carrier nodes.
+
+    The snapshots keep every traversed node in ``structure_nodes`` with a
+    numeric path. Source nodes are matched in source-tree order. Exact names
+    are preferred, then the converter's numeric uniqueness suffix (for example
+    ``Card`` -> ``Card_1``). A candidate must live below the already matched
+    source parent, while synthetic carriers are skipped when walking upward.
+    This prevents repeated names such as ``Base``/``Line`` from being attached
+    to a different branch by a global name-only greedy match.
+    """
+    source_nodes = [node for node in (source_snapshot or {}).get("structure_nodes") or [] if isinstance(node, dict)]
+    asset_nodes = [node for node in (asset_snapshot or {}).get("structure_nodes") or [] if isinstance(node, dict)]
+    result = {
+        "available": bool(source_nodes and asset_nodes),
+        "source_nodes": len(source_nodes),
+        "asset_nodes": len(asset_nodes),
+        "matched_source_nodes": 0,
+        "unmatched_source_names": [],
+        "named_parent_path_matches": 0,
+        "named_parent_path_compared": 0,
+        "sibling_order_matches": 0,
+        "sibling_order_compared": 0,
+        "kind_matches": 0,
+        "kind_compared": 0,
+        "kind_mismatch_pairs": {},
+        "identity_matches": 0,
+        "identity_compared": 0,
+        "identity_ratio": 0.0,
+        "semantic_kind_matches": 0,
+        "semantic_kind_compared": 0,
+        "semantic_kind_ratio": 0.0,
+        "kind_mismatch_classes": {},
+        "kind_mismatch_details": [],
+    }
+    if not result["available"]:
+        return result
+
+    def path_parts(node: dict) -> tuple[int, ...]:
+        raw_path = str(node.get("path") or "")
+        parts = []
+        for part in raw_path.split("/"):
+            try:
+                parts.append(int(part))
+            except (TypeError, ValueError):
+                return ()
+        return tuple(parts)
+
+    def parent_path(path: tuple[int, ...]) -> tuple[int, ...] | None:
+        return path[:-1] if path else None
+
+    def node_name(node: dict) -> str:
+        return str(node.get("name") or "")
+
+    def node_kind(node: dict) -> str:
+        return str(node.get("kind") or "")
+
+    def node_id(node: dict) -> str:
+        return str(node.get("id") or "")
+
+    source_paths = [path_parts(node) for node in source_nodes]
+    asset_paths = [path_parts(node) for node in asset_nodes]
+    asset_index_by_path = {path: index for index, path in enumerate(asset_paths) if path}
+    asset_by_name: dict[str, list[int]] = {}
+    asset_by_id: dict[str, list[int]] = {}
+    for index, node in enumerate(asset_nodes):
+        name = node_name(node)
+        if name:
+            asset_by_name.setdefault(name, []).append(index)
+        identity = node_id(node)
+        if identity:
+            asset_by_id.setdefault(identity, []).append(index)
+
+    def node_class(node: dict) -> str:
+        return str(node.get("class") or "")
+
+    def nearest_matched_asset_ancestor(asset_index: int, asset_to_source: dict[int, int]) -> int | None:
+        path = asset_paths[asset_index]
+        while path:
+            path = parent_path(path)
+            if path is None:
+                return None
+            candidate_index = asset_index_by_path.get(path)
+            if candidate_index is not None and candidate_index in asset_to_source:
+                return candidate_index
+        return None
+
+    def generated_name_candidates(source_name: str) -> list[int]:
+        if not source_name:
+            return []
+        generated_name_pattern = re.compile(rf"^{re.escape(source_name)}_[0-9]+$")
+        return [
+            index for index, asset_node in enumerate(asset_nodes)
+            if generated_name_pattern.fullmatch(node_name(asset_node))
+        ]
+
+    def fallback_name_candidates(source_node: dict, used_indices: set[int]) -> list[int]:
+        # Unreal's widget-tree builder treats the literal Figma placeholder
+        # name ``None`` as an empty name and allocates a type-based name. Keep
+        # this normalization in the audit instead of counting valid generated
+        # names (TextBlock_0/CanvasPanel_0) as missing source nodes.
+        if node_name(source_node) not in {"", "None"}:
+            return []
+        kind = node_kind(source_node)
+        if kind == "text":
+            prefixes = ["TextBlock"]
+        elif kind == "container":
+            prefixes = ["CanvasPanel", "HorizontalBox", "VerticalBox", "WrapBox", "Border", "Overlay"]
+        elif kind == "visual":
+            prefixes = ["Image", "Border"]
+        else:
+            prefixes = []
+        result: list[int] = []
+        for prefix in prefixes:
+            result.extend(index for index in asset_by_name.get(prefix, []) if index not in used_indices)
+            result.extend(index for index in generated_name_candidates(prefix) if index not in used_indices)
+        return result
+
+    def typed_projection_candidates(source_node: dict, used_indices: set[int]) -> list[int]:
+        # Icon-font nodes retain their source role as text, but the runtime
+        # widget name can come from the resolved glyph mapping (for example
+        # ``IconFont_Widget`` -> ``uJzgY``). Only use this fallback for the
+        # explicit IconFont type and keep the normal parent/sibling checks.
+        if str(source_node.get("type") or "") != "IconFont":
+            return []
+        return [
+            index for index, asset_node in enumerate(asset_nodes)
+            if node_kind(asset_node) == "text" and index not in used_indices
+        ]
+
+    used_asset_indices: set[int] = set()
+    source_to_asset: dict[int, int] = {}
+    unmatched_names: list[str] = []
+    source_index_by_path = {path: index for index, path in enumerate(source_paths) if path}
+    for source_index, source_node in enumerate(source_nodes):
+        source_name = node_name(source_node)
+        source_parent_path = parent_path(source_paths[source_index])
+        source_parent_index = source_index_by_path.get(source_parent_path) if source_parent_path is not None else None
+        expected_parent_asset = source_to_asset.get(source_parent_index) if source_parent_index is not None else None
+
+        source_identity = node_id(source_node)
+        identity_candidates = [
+            index for index in asset_by_id.get(source_identity, [])
+            if index not in used_asset_indices
+        ] if source_identity else []
+        if identity_candidates:
+            # A stable source ID is stronger evidence than a display name.
+            # Keep it even when a wrapper changed the ancestor path; otherwise
+            # the audit hides the very tree relocation it is meant to expose.
+            candidates = identity_candidates
+        else:
+            candidates = [index for index in asset_by_name.get(source_name, []) if index not in used_asset_indices]
+            candidates += [
+                index for index in generated_name_candidates(source_name)
+                if index not in used_asset_indices and index not in candidates
+            ]
+            candidates += [
+                index for index in fallback_name_candidates(source_node, used_asset_indices)
+                if index not in used_asset_indices
+                and index not in candidates
+                and node_kind(asset_nodes[index]) == node_kind(source_node)
+            ]
+            candidates += [
+                index for index in typed_projection_candidates(source_node, used_asset_indices)
+                if index not in used_asset_indices and index not in candidates
+            ]
+
+        if expected_parent_asset is not None and not identity_candidates:
+            parent_candidates = [
+                index for index in candidates
+                if nearest_matched_asset_ancestor(
+                    index,
+                    {asset_index: source for source, asset_index in source_to_asset.items()},
+                ) == expected_parent_asset
+            ]
+            if parent_candidates:
+                candidates = parent_candidates
+
+        if not candidates:
+            if source_name:
+                unmatched_names.append(source_name)
+            continue
+
+        source_kind = node_kind(source_node)
+        same_kind = [index for index in candidates if node_kind(asset_nodes[index]) == source_kind]
+        chosen = (same_kind or candidates)[0]
+        used_asset_indices.add(chosen)
+        source_to_asset[source_index] = chosen
+
+    result["matched_source_nodes"] = len(source_to_asset)
+    result["unmatched_source_names"] = unmatched_names[:20]
+
+    asset_to_source = {asset_index: source_index for source_index, asset_index in source_to_asset.items()}
+    for source_index, asset_index in source_to_asset.items():
+        source_parent_path = parent_path(source_paths[source_index])
+        source_parent_index = source_index_by_path.get(source_parent_path) if source_parent_path is not None else None
+        asset_parent_index = nearest_matched_asset_ancestor(asset_index, asset_to_source)
+        asset_parent_source_index = asset_to_source.get(asset_parent_index) if asset_parent_index is not None else None
+        result["named_parent_path_compared"] += 1
+        if source_parent_index == asset_parent_source_index:
+            result["named_parent_path_matches"] += 1
+        result["kind_compared"] += 1
+        if node_kind(source_nodes[source_index]) == node_kind(asset_nodes[asset_index]):
+            result["kind_matches"] += 1
+        else:
+            mismatch_key = f"{node_kind(source_nodes[source_index])}->{node_kind(asset_nodes[asset_index])}"
+            result["kind_mismatch_pairs"][mismatch_key] = result["kind_mismatch_pairs"].get(mismatch_key, 0) + 1
+
+        source_identity = node_id(source_nodes[source_index])
+        asset_identity = node_id(asset_nodes[asset_index])
+        if source_identity and asset_identity:
+            result["identity_compared"] += 1
+            if source_identity == asset_identity:
+                result["identity_matches"] += 1
+
+        source_kind = node_kind(source_nodes[source_index])
+        asset_kind = node_kind(asset_nodes[asset_index])
+        asset_widget_class = node_class(asset_nodes[asset_index])
+        mismatch_class = "exact"
+        if source_kind != asset_kind:
+            if source_kind == "placeholder":
+                mismatch_class = "placeholder_surface_projection"
+            elif source_kind == "visual" and asset_kind == "container" and "overlay" in asset_widget_class.lower():
+                mismatch_class = "visual_composite_carrier"
+            elif source_kind == "visual" and asset_kind == "container" and asset_widget_class.lower() in {
+                "canvaspanel",
+                "retainerbox",
+                "border",
+                "design2umgconstrainedborder",
+            }:
+                mismatch_class = "visual_surface_carrier"
+            elif source_kind == "container" and asset_kind == "visual" and asset_widget_class.lower() in {
+                "border",
+                "design2umgconstrainedborder",
+                "image",
+            }:
+                mismatch_class = "container_surface_projection"
+            else:
+                mismatch_class = "unclassified"
+        result["semantic_kind_compared"] += 1
+        result["kind_mismatch_classes"][mismatch_class] = result["kind_mismatch_classes"].get(mismatch_class, 0) + 1
+        if mismatch_class != "exact" and len(result["kind_mismatch_details"]) < 32:
+            result["kind_mismatch_details"].append({
+                "source_path": source_nodes[source_index].get("path"),
+                "source_name": source_nodes[source_index].get("name"),
+                "source_kind": source_kind,
+                "source_type": source_nodes[source_index].get("type"),
+                "asset_path": asset_nodes[asset_index].get("path"),
+                "asset_name": asset_nodes[asset_index].get("name"),
+                "asset_kind": asset_kind,
+                "asset_class": asset_widget_class,
+                "class": mismatch_class,
+            })
+        if mismatch_class != "unclassified":
+            result["semantic_kind_matches"] += 1
+
+    def named_siblings(source_parent_index: int | None, mapping: dict[int, int]) -> list[int]:
+        siblings = []
+        for source_index in mapping:
+            parent_path_value = parent_path(source_paths[source_index])
+            expected_parent_path = source_paths[source_parent_index] if source_parent_index is not None else None
+            if parent_path_value == expected_parent_path:
+                siblings.append(source_index)
+        return sorted(siblings, key=lambda index: source_paths[index])
+
+    source_parent_groups: dict[tuple[int, ...] | None, list[int]] = {}
+    for source_index in source_to_asset:
+        source_parent_groups.setdefault(parent_path(source_paths[source_index]), []).append(source_index)
+    for source_parent_path, source_children in source_parent_groups.items():
+        source_children.sort(key=lambda index: source_paths[index])
+        matched_children = [source_index for source_index in source_children if source_index in source_to_asset]
+        if len(matched_children) <= 1:
+            continue
+
+        expected_order = [source_to_asset[source_index] for source_index in matched_children]
+        asset_children = sorted(expected_order, key=lambda index: asset_paths[index])
+        for expected_asset_index, actual_asset_index in zip(expected_order, asset_children):
+            result["sibling_order_compared"] += 1
+            if expected_asset_index == actual_asset_index:
+                result["sibling_order_matches"] += 1
+
+    result["named_parent_path_ratio"] = round(
+        result["named_parent_path_matches"] / result["named_parent_path_compared"], 4
+    ) if result["named_parent_path_compared"] else 0.0
+    result["sibling_order_ratio"] = round(
+        result["sibling_order_matches"] / result["sibling_order_compared"], 4
+    ) if result["sibling_order_compared"] else 1.0
+    result["kind_ratio"] = round(result["kind_matches"] / result["kind_compared"], 4) if result["kind_compared"] else 0.0
+    result["identity_ratio"] = round(
+        result["identity_matches"] / result["identity_compared"], 4
+    ) if result["identity_compared"] else 0.0
+    result["semantic_kind_ratio"] = round(
+        result["semantic_kind_matches"] / result["semantic_kind_compared"], 4
+    ) if result["semantic_kind_compared"] else 0.0
+    return result
+
+
 def validate_structure_consistency(args, ue_result: dict, render_chain: dict, reference_context: dict | None = None) -> dict:
     generation_result = render_chain.get("generation")
     asset_result = render_chain.get("asset_render")
@@ -1768,6 +2065,7 @@ def validate_structure_consistency(args, ue_result: dict, render_chain: dict, re
         "source_origin": "pencil_live" if live_source_snapshot else "local_pen_fallback",
         "source_snapshot_type": source_snapshot.get("snapshot_type") if isinstance(source_snapshot, dict) else None,
         "asset_snapshot_type": asset_snapshot.get("snapshot_type") if isinstance(asset_snapshot, dict) else None,
+        "tree_correspondence": None,
         "reasons": [],
         "source": source_snapshot,
         "asset": asset_snapshot,
@@ -1781,6 +2079,7 @@ def validate_structure_consistency(args, ue_result: dict, render_chain: dict, re
         return result
 
     result["available"] = True
+    result["tree_correspondence"] = compute_tree_correspondence(source_snapshot, asset_snapshot)
 
     source_total = int(source_snapshot.get("total_nodes") or 0)
     asset_total = int(asset_snapshot.get("total_nodes") or 0)
@@ -1796,6 +2095,26 @@ def validate_structure_consistency(args, ue_result: dict, render_chain: dict, re
     asset_texts = normalize_structure_texts(asset_snapshot.get("visible_texts"))
     source_text_counter = Counter(source_texts)
     asset_text_counter = Counter(asset_texts)
+    source_node_names = [str(name) for name in (source_snapshot.get("node_names") or []) if str(name)]
+    asset_node_names = [str(name) for name in (asset_snapshot.get("node_names") or []) if str(name)]
+
+    empty_container_projected_as_visual_leaf = (
+        source_total == 1
+        and source_leaf == 1
+        and source_container == 1
+        and source_text_nodes == 0
+        and source_snapshot.get("root_kind") == "container"
+        and source_snapshot.get("root_child_count") == 0
+        and asset_total == 1
+        and asset_leaf == 1
+        and asset_container == 0
+        and asset_visual == 1
+        and asset_text_nodes == 0
+        and asset_snapshot.get("root_kind") == "visual"
+        and asset_snapshot.get("root_child_count") == 0
+        and len(source_node_names) == 1
+        and source_node_names == asset_node_names
+    )
 
     min_total_required = structure_count_floor(source_total, 0.50, 2)
     min_leaf_required = structure_count_floor(source_leaf, 0.50, 1)
@@ -1809,7 +2128,7 @@ def validate_structure_consistency(args, ue_result: dict, render_chain: dict, re
         result["reasons"].append("asset_total_nodes_collapsed")
     if source_leaf >= 2 and asset_leaf < min_leaf_required:
         result["reasons"].append("asset_leaf_nodes_collapsed")
-    if source_container > 0 and asset_container == 0:
+    if source_container > 0 and asset_container == 0 and not empty_container_projected_as_visual_leaf:
         result["reasons"].append("asset_container_missing")
     if source_total >= 8 and asset_total < min_total_required:
         result["reasons"].append("asset_tree_too_small")
@@ -3074,4 +3393,3 @@ if __name__ == "__main__":
     except RuntimeError as error:
         print(f"[ERROR] {error}", file=sys.stderr)
         sys.exit(2)
-

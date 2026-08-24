@@ -4,6 +4,7 @@
 #include "VisualMapperStrokeSupport.h"
 #include "ImageFillUtils.h"
 #include "LayoutMapper.h"
+#include "SharedCoreSemantics.h"
 #include "VisualMapperFillTransfer.h"
 #include "Design2UMGLog.h"
 #include "UMGPropertyKeys.h"
@@ -78,6 +79,63 @@ namespace
 	bool HasVisualMapperPropertyPresence(const FUMGWidgetNode& Widget, const TCHAR* Key)
 	{
 		return Design2UMGWidgetNodeAccess::HasWidgetPropertyPresence(Widget, Key);
+	}
+
+	bool IsLayoutPanelType(const FString& Type)
+	{
+		return Type == TEXT("CanvasPanel")
+			|| Type == TEXT("VerticalBox")
+			|| Type == TEXT("HorizontalBox")
+			|| Type == TEXT("WrapBox")
+			|| Type == TEXT("UniformGridPanel")
+			|| Type == TEXT("GridPanel");
+	}
+
+	bool HasVisualBrushPayload(const FUMGVisualBrushData& Brush)
+	{
+		return Brush.OutlineCornerRadius >= 0.0f
+			|| Brush.HasCornerRadii()
+			|| Brush.OutlineThickness.IsSet()
+			|| Brush.DrawAs.IsSet()
+			|| Brush.BrushColor.IsSet()
+			|| Brush.OutlineColor.IsSet()
+			|| Brush.MaterialRef.IsSet()
+			|| Brush.MaterialParams.IsSet()
+			|| !Brush.TexturePath.IsEmpty()
+			|| Brush.Image.HasAny()
+			|| Brush.Gradient.HasAny();
+	}
+
+	bool CanElideEmptyWrappedPanel(
+		const FUMGWidgetNode& Widget,
+		const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid()
+			|| Node->Children.Num() > 0
+			|| !IsLayoutPanelType(Widget.Type)
+			|| Widget.Children.Num() > 0
+			|| Widget.HasSourceData())
+		{
+			return false;
+		}
+
+		FUMGWidgetStyleData StandaloneStyle = Widget.WidgetStyle;
+		// Child-spacing data has no effect once the panel has no children.
+		StandaloneStyle.InnerSlotPadding.Reset();
+		StandaloneStyle.SlotPadding.Reset();
+
+		return !StandaloneStyle.HasAny()
+			&& Widget.TextStyle.FontSize == 0.0f
+			&& Widget.TextStyle.SourceFontSize == 0.0f
+			&& !Widget.TextStyle.LetterSpacing.IsSet()
+			&& !Widget.Text.HasAny()
+			&& !HasVisualBrushPayload(Widget.Brush)
+			&& !Widget.Effect.HasAny()
+			&& !Widget.Path.HasAny()
+			&& !Widget.Shadow.HasAny()
+			&& !Widget.Render.HasAny()
+			&& !Widget.WidgetState.HasAny()
+			&& !Widget.ScrollBox.HasAny();
 	}
 
 	int32 RoundPositivePixelExtent(float Value)
@@ -407,6 +465,198 @@ namespace
 		Widget.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
 	}
 
+	bool IsPromotableFlowPanelType(const FString& Type)
+	{
+		return Type == TEXT("HorizontalBox")
+			|| Type == TEXT("VerticalBox");
+	}
+
+	bool HasEnabledInnerShadow(const FDesignNode& Node)
+	{
+		for (const FDesignEffect& Effect : Node.Visual.Effects)
+		{
+			if (Effect.bEnabled
+				&& Effect.Type == EDesignEffectType::Shadow
+				&& Effect.Shadow.bInner)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	bool CanPromoteSingleChildFlowContent(
+		const FUMGWidgetNode& Widget,
+		const TSharedPtr<FDesignNode>& Node,
+		int32& OutContentIndex)
+	{
+		OutContentIndex = INDEX_NONE;
+		TArray<TSharedPtr<FDesignNode>> VisibleChildren;
+		if (Node.IsValid())
+		{
+			if (Node->Children.Num() == 1)
+			{
+				VisibleChildren.Add(Node->Children[0]);
+			}
+			else
+			{
+				for (const TSharedPtr<FDesignNode>& Child : Node->Children)
+				{
+					if (!Design2UMGCore::SharedSemantics::ShouldSkipNode(Child))
+					{
+						VisibleChildren.Add(Child);
+					}
+				}
+			}
+		}
+		if (!Node.IsValid()
+			|| VisibleChildren.Num() != 1
+			|| (Node->LayoutData.Layout != EDesignLayout::Horizontal
+				&& Node->LayoutData.Layout != EDesignLayout::Vertical)
+			|| !IsPromotableFlowPanelType(Widget.Type)
+			|| !VisibleChildren[0].IsValid()
+			|| VisibleChildren[0]->LayoutData.bAbsoluteLayoutPositioning
+			|| VisibleChildren[0]->Transform.HasExplicitPosition()
+			|| HasEnabledInnerShadow(*Node)
+			|| Widget.WidgetStyle.HasAny()
+			|| Widget.HasSourceData())
+		{
+			return false;
+		}
+
+		if (Node->LayoutData.JustifyContent == EDesignJustifyContent::Start)
+		{
+			if (Widget.Children.Num() != 1)
+			{
+				return false;
+			}
+			OutContentIndex = 0;
+			return true;
+		}
+
+		// A fill child already suppresses LayoutMapper's synthetic justify spacers;
+		// the flow panel therefore contributes no additional main-axis behavior.
+		if (Widget.Children.Num() == 1 && Widget.Children[0].Slot.SizeRule == EUMGSlotSizeRule::Fill)
+		{
+			OutContentIndex = 0;
+			return true;
+		}
+
+		// LayoutMapper intentionally skips justify spacers for a FitContent flow
+		// node when it is placed directly in an absolute parent. With one Auto
+		// child, that output has no remaining flow-panel duty; preserve the
+		// requested alignment on the Border slot instead.
+		const bool bSingleFitContentChild =
+			Widget.Children.Num() == 1
+			&& Widget.Children[0].Slot.SizeRule == EUMGSlotSizeRule::Auto
+			&& ((Node->LayoutData.Layout == EDesignLayout::Horizontal && Node->Transform.Width.IsFit())
+				|| (Node->LayoutData.Layout == EDesignLayout::Vertical && Node->Transform.Height.IsFit()));
+		const bool bJustifyWouldUseLeadingSpacer =
+			Node->LayoutData.JustifyContent == EDesignJustifyContent::Center
+			|| Node->LayoutData.JustifyContent == EDesignJustifyContent::End
+			|| Node->LayoutData.JustifyContent == EDesignJustifyContent::SpaceAround;
+		if (bSingleFitContentChild && bJustifyWouldUseLeadingSpacer)
+		{
+			OutContentIndex = 0;
+			return true;
+		}
+
+		auto IsSyntheticJustifySpacer = [](const FUMGWidgetNode& Candidate)
+		{
+			return Candidate.Type == TEXT("Spacer")
+				&& Candidate.Children.Num() == 0
+				&& !Candidate.HasSourceData();
+		};
+
+		int32 NonSpacerIndex = INDEX_NONE;
+		int32 SpacerCount = 0;
+		for (int32 Index = 0; Index < Widget.Children.Num(); ++Index)
+		{
+			if (IsSyntheticJustifySpacer(Widget.Children[Index]))
+			{
+				++SpacerCount;
+			}
+			else if (NonSpacerIndex == INDEX_NONE)
+			{
+				NonSpacerIndex = Index;
+			}
+			else
+			{
+				return false;
+			}
+		}
+
+		const int32 ExpectedSpacerCount =
+			Node->LayoutData.JustifyContent == EDesignJustifyContent::End ? 1 :
+			(Node->LayoutData.JustifyContent == EDesignJustifyContent::Center
+				|| Node->LayoutData.JustifyContent == EDesignJustifyContent::SpaceAround) ? 2 : 0;
+		if (NonSpacerIndex == INDEX_NONE || SpacerCount != ExpectedSpacerCount)
+		{
+			return false;
+		}
+
+		if (ExpectedSpacerCount == 1)
+		{
+			if (NonSpacerIndex != 1 || !IsSyntheticJustifySpacer(Widget.Children[0]))
+			{
+				return false;
+			}
+		}
+		else if (ExpectedSpacerCount == 2)
+		{
+			if (NonSpacerIndex != 1
+				|| !IsSyntheticJustifySpacer(Widget.Children[0])
+				|| !IsSyntheticJustifySpacer(Widget.Children[2]))
+			{
+				return false;
+			}
+		}
+
+		OutContentIndex = NonSpacerIndex;
+		return true;
+	}
+
+	void PreparePromotedBorderContent(
+		FUMGWidgetNode& Child,
+		const EDesignLayout ParentLayout,
+		const EDesignJustifyContent JustifyContent)
+	{
+		if (Child.Slot.SizeRule == EUMGSlotSizeRule::Fill)
+		{
+			if (ParentLayout == EDesignLayout::Horizontal)
+			{
+				Child.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
+			}
+			else
+			{
+				Child.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
+			}
+		}
+		else if (ParentLayout == EDesignLayout::Horizontal)
+		{
+			// HorizontalBox ignores horizontal alignment for its child; Border does not.
+			// Translate the one-child justify result to the Border content slot.
+			Child.Slot.HorizontalAlignment =
+				JustifyContent == EDesignJustifyContent::Center || JustifyContent == EDesignJustifyContent::SpaceAround
+					? EUMGSlotHorizontalAlignment::Center
+					: JustifyContent == EDesignJustifyContent::End
+						? EUMGSlotHorizontalAlignment::Right
+						: EUMGSlotHorizontalAlignment::Left;
+		}
+		else
+		{
+			// VerticalBox ignores vertical alignment for its child when the size is Auto.
+			Child.Slot.VerticalAlignment =
+				JustifyContent == EDesignJustifyContent::Center || JustifyContent == EDesignJustifyContent::SpaceAround
+					? EUMGSlotVerticalAlignment::Center
+					: JustifyContent == EDesignJustifyContent::End
+						? EUMGSlotVerticalAlignment::Bottom
+						: EUMGSlotVerticalAlignment::Top;
+		}
+		Child.Slot.SizeRule = EUMGSlotSizeRule::Auto;
+		Child.Slot.FillWeight = 1.0f;
+	}
+
 	void ApplyRenderTransformPropertiesInternal(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
 	{
 		if (Node->Transform.Opacity < 1.0f)
@@ -593,9 +843,21 @@ FUMGWidgetNode VisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TShar
 	ApplyOutsideStrokePaddingToBorder(Border, Widget);
 	TransferWrapperRenderProperties(Border, Widget, Node);
 	TransferBorderBoxShadowProperties(Border, Widget);
-	PrepareWrappedContentWidget(Widget);
-
-	Border.Children.Add(MoveTemp(Widget));
+	int32 PromotedContentIndex = INDEX_NONE;
+	const bool bPromoteSingleChildFlowContent =
+		CanPromoteSingleChildFlowContent(Widget, Node, PromotedContentIndex);
+	if (bPromoteSingleChildFlowContent)
+	{
+		FUMGWidgetNode PromotedContent = MoveTemp(Widget.Children[PromotedContentIndex]);
+		Widget.Children.Reset();
+		PreparePromotedBorderContent(PromotedContent, Node->LayoutData.Layout, Node->LayoutData.JustifyContent);
+		Border.Children.Add(MoveTemp(PromotedContent));
+	}
+	else if (!CanElideEmptyWrappedPanel(Widget, Node))
+	{
+		PrepareWrappedContentWidget(Widget);
+		Border.Children.Add(MoveTemp(Widget));
+	}
 
 	const bool bNeedsExplicitStroke =
 		(VisualMapperStrokeSupport::NeedsExplicitSideStroke(Node)

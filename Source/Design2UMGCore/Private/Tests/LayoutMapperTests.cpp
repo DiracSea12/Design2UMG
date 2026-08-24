@@ -189,17 +189,17 @@ bool FLayoutMapperSourceTextBoxUsesStrictSizeBoxTest::RunTest(const FString&)
 	Node->Transform.bSourceHasWidth = true;
 	Node->Transform.bSourceHasHeight = true;
 
-	const FUMGWidgetNode SizeBox = LayoutMapper::WrapWithSizeBox(MoveTemp(TextWidget), Node, EDesignLayout::Horizontal);
+	const FUMGWidgetNode ConstrainedText = LayoutMapper::WrapWithSizeBox(MoveTemp(TextWidget), Node, EDesignLayout::Horizontal);
 
-	TestEqual(TEXT("Source textbox wrapper type"), SizeBox.Type, FString(TEXT("SizeBox")));
+	TestEqual(TEXT("Source textbox uses constrained TextBlock"), ConstrainedText.Type, FString(TEXT("Design2UMGConstrainedTextBlock")));
 	TestTrue(TEXT("Source textbox width uses source textbox width"),
-		FMath::IsNearlyEqual(SizeBox.Bounds.W, 188.16f, 0.001f));
+		FMath::IsNearlyEqual(ConstrainedText.Bounds.W, 188.16f, 0.001f));
 	TestTrue(TEXT("Source textbox height uses source textbox height"),
-		FMath::IsNearlyEqual(SizeBox.Bounds.H, 42.0f, 0.001f));
+		FMath::IsNearlyEqual(ConstrainedText.Bounds.H, 42.0f, 0.001f));
 	TestTrue(TEXT("Source textbox WidthOverride remains source textbox width"),
-		FMath::IsNearlyEqual(SizeBox.WidgetStyle.WidthOverride.Get(0.0f), 188.16f, 0.001f));
+		FMath::IsNearlyEqual(ConstrainedText.WidgetStyle.WidthOverride.Get(0.0f), 188.16f, 0.001f));
 	TestTrue(TEXT("Source textbox HeightOverride remains source textbox height"),
-		FMath::IsNearlyEqual(SizeBox.WidgetStyle.HeightOverride.Get(0.0f), 42.0f, 0.001f));
+		FMath::IsNearlyEqual(ConstrainedText.WidgetStyle.HeightOverride.Get(0.0f), 42.0f, 0.001f));
 
 	return true;
 }

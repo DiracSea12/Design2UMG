@@ -173,6 +173,24 @@ The snapshot test intentionally compares stable semantics rather than exact full
 
 Do not tighten this into exact full-tree equality unless the generator guarantees zero wrapper normalization drift after save.
 
+### 7.1 Require a fresh-process reload after saving
+
+A WidgetTree observed inside the generation editor only proves that the in-memory object tree exists. The saved-asset structure result must follow this sequence:
+
+1. Generate the Widget Blueprint and capture the pre-save structure snapshot.
+2. Wait for the actual `UnrealEditor.exe` process to exit.
+3. Start a new `UnrealEditor` process and load the same `.uasset`.
+4. Capture a second structure snapshot and inspect `LoadErrors`, compiler ensures, and the final PNG.
+
+This repository has a fixed A/B reproduction using the same project and automation entry point:
+
+- The asset containing `Design2UMGConstrained*` widgets consistently reloads as 10 nodes with 168 `LoadErrors`; the errors are concentrated on those custom widgets' external containers.
+- The asset containing only native UMG widgets consistently reloads as 219 nodes with 0 `LoadErrors`.
+
+The established direct trigger is `LayoutMapper::TryFuseSizeConstraints()`: it fuses `SizeBox + child` into `Design2UMGConstrained*`. These editor-module widgets work during the in-memory render, but fail during fresh-process reload after they are placed in the WBP asset, which truncates the WidgetTree. The `WidgetBlueprintCompiler.cpp:828` “deleted variable still has a GUID” message is a downstream symptom of that reload failure.
+
+This conclusion is scoped to the current `Design2UMGConstrained*` implementation and its save/reload path. Other custom widgets require their own fresh-process reload evidence. An in-memory snapshot without a fresh-process reload is not final saved-asset parity evidence.
+
 ### 8. Run determinism smoke before the final formal gate when automation-render parity changed
 
 Use determinism smoke after touching any of these surfaces:
@@ -271,6 +289,10 @@ Formal gate execution discipline:
 
 - Run the full admissible case set formal gate alone. Do not run focused automation, other editor validations, or another formal batch in parallel against the same runtime project or automation asset roots.
 - If a new pipeline-determinism incompatibility appears right after a concurrent validation run, rerun the formal gate in isolation before changing code. Parallel validation can manufacture false determinism noise.
+
+### Shard-mode score variance
+
+`--editor-isolation shard` is suitable for batch execution and artifact collection, but multiple shard/editor lifecycles can share or reset Slate font caches, transient assets, and render state differently, which can make visual scores fluctuate. Treat a single shard result as screening evidence only; rerun every anomalous case exclusively and serially with `--editor-isolation case` before making a regression judgment. Record both the shard run and case-recheck paths in the report. A one-off shard fluctuation does not itself establish visual regression or improvement.
 
 ## Pencil MCP App Alias Compatibility
 

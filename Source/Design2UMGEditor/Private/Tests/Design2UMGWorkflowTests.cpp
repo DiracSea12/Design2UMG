@@ -620,11 +620,11 @@ bool FFigmaGridSlotSemanticsRuntimeWorkflowTest::RunTest(const FString& Paramete
 	WidgetInstance->TakeWidget();
 
 	UGridPanel* GridPanel = Cast<UGridPanel>(WidgetInstance->WidgetTree->FindWidget(TEXT("grid_frame")));
-	UWidget* TailCard = WidgetInstance->WidgetTree->FindWidget(TEXT("tail_card_sz"));
-	UWidget* HeroCard = WidgetInstance->WidgetTree->FindWidget(TEXT("hero_card_sz"));
+	UWidget* TailCard = WidgetInstance->WidgetTree->FindWidget(TEXT("tail_card"));
+	UWidget* HeroCard = WidgetInstance->WidgetTree->FindWidget(TEXT("hero_card"));
 	TestTrue(TEXT("Grid frame instantiates as GridPanel"), GridPanel != nullptr);
-	TestTrue(TEXT("Tail card runtime wrapper exists"), TailCard != nullptr);
-	TestTrue(TEXT("Hero card runtime wrapper exists"), HeroCard != nullptr);
+	TestTrue(TEXT("Tail card fused runtime widget exists"), TailCard != nullptr);
+	TestTrue(TEXT("Hero card fused runtime widget exists"), HeroCard != nullptr);
 	if (!GridPanel || !TailCard || !HeroCard)
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
@@ -775,18 +775,18 @@ bool FFitContentMinimumExpandsToContentTest::RunTest(const FString& Parameters)
 	Doc.Children.Add(Root);
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* RootWidget = FindWidgetById(Data.RootWidget, TEXT("fit-min-root"));
-	const FUMGWidgetNode* RowSizeBox = FindWidgetById(Data.RootWidget, TEXT("fit-min-row_sz"));
+	const FUMGWidgetNode* RowWidget = FindWidgetById(Data.RootWidget, TEXT("fit-min-row"));
 	TestTrue(TEXT("Find fit-content minimum root widget"), RootWidget != nullptr);
-	TestTrue(TEXT("Find fit-content minimum row size box"), RowSizeBox != nullptr);
-	if (!RootWidget || !RowSizeBox)
+	TestTrue(TEXT("Find fit-content minimum row fused widget"), RowWidget != nullptr);
+	if (!RootWidget || !RowWidget)
 	{
 		return false;
 	}
 	TestTrue(TEXT("Root fit-content height should grow beyond the minimum fallback"),
 		RootWidget->Bounds.H >= 56.0f - 0.5f);
-	const FString HeightOverride = GetWidgetProperty(*RowSizeBox, TEXT("HeightOverride"));
+	const FString HeightOverride = GetWidgetProperty(*RowWidget, TEXT("HeightOverride"));
 	const bool bHasHeightOverride = !HeightOverride.IsEmpty();
-	const FString MinDesiredHeight = GetWidgetProperty(*RowSizeBox, TEXT("MinDesiredHeight"));
+	const FString MinDesiredHeight = GetWidgetProperty(*RowWidget, TEXT("MinDesiredHeight"));
 	const bool bHasMinDesiredHeight = !MinDesiredHeight.IsEmpty();
 	TestTrue(TEXT("Flow fit-content(min) row should export a concrete height constraint"),
 		bHasHeightOverride || bHasMinDesiredHeight);
@@ -847,16 +847,16 @@ bool FFillWidthSingleLineTextDoesNotInflateFitHeightTest::RunTest(const FString&
 	Doc.Children.Add(Root);
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* RootWidget = FindWidgetById(Data.RootWidget, TEXT("text-fit-root"));
-	const FUMGWidgetNode* HeaderCellSizeBox = FindWidgetById(Data.RootWidget, TEXT("header-cell_sz"));
+	const FUMGWidgetNode* HeaderCellWidget = FindWidgetById(Data.RootWidget, TEXT("header-cell"));
 	TestTrue(TEXT("Find single-line text fit root widget"), RootWidget != nullptr);
-	TestTrue(TEXT("Find header cell size box"), HeaderCellSizeBox != nullptr);
-	if (!RootWidget || !HeaderCellSizeBox)
+	TestTrue(TEXT("Find header cell fused widget"), HeaderCellWidget != nullptr);
+	if (!RootWidget || !HeaderCellWidget)
 	{
 		return false;
 	}
-	const FString HeightOverride = GetWidgetProperty(*HeaderCellSizeBox, TEXT("HeightOverride"));
+	const FString HeightOverride = GetWidgetProperty(*HeaderCellWidget, TEXT("HeightOverride"));
 	const bool bHasHeightOverride = !HeightOverride.IsEmpty();
-	const FString MinDesiredHeight = GetWidgetProperty(*HeaderCellSizeBox, TEXT("MinDesiredHeight"));
+	const FString MinDesiredHeight = GetWidgetProperty(*HeaderCellWidget, TEXT("MinDesiredHeight"));
 	const bool bHasMinDesiredHeight = !MinDesiredHeight.IsEmpty();
 	TestTrue(TEXT("Header cell should export a height constraint"),
 		bHasHeightOverride || bHasMinDesiredHeight);

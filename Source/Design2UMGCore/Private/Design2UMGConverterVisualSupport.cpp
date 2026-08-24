@@ -203,9 +203,16 @@ namespace Design2UMGConverterVisualSupport
 				Node->LayoutData.Layout == EDesignLayout::None
 					|| ((Node->LayoutData.Layout == EDesignLayout::Wrap || Node->LayoutData.Layout == EDesignLayout::Grid)
 						&& Node->Children.Num() > 0));
+		// Multi-fill creates its own compositing surface. A separate Border is only
+		// needed when it still owns padding, corner, or stroke semantics.
+		const bool bMultiFillOwnsSurface =
+			Node->HasMultiFill()
+			&& !bNeedsPaddingWrapper
+			&& !Node->Visual.CornerRadius.HasRadius()
+			&& !Node->Visual.Stroke.HasStroke();
 
 		return (Node->Type == EDesignNodeType::Frame || Node->Type == EDesignNodeType::Group)
-			&& (HasVisualFill(Node)
+			&& ((HasVisualFill(Node) && !bMultiFillOwnsSurface)
 				|| bNeedsPaddingWrapper
 				|| Node->Visual.CornerRadius.HasRadius()
 				|| Node->Visual.Stroke.HasStroke())

@@ -153,6 +153,74 @@ namespace
 		BorderSurface.WidgetStyle.StrokeMargin.Reset();
 	}
 
+	bool IsPromotableStrokeContentType(const FString& Type)
+	{
+		return Type == TEXT("CanvasPanel")
+			|| Type == TEXT("HorizontalBox")
+			|| Type == TEXT("VerticalBox");
+	}
+
+	bool HasExplicitStrokeSurfacePaint(const FUMGVisualBrushData& Brush)
+	{
+		return (Brush.BrushColor.IsSet() && Brush.BrushColor.GetValue().A > KINDA_SMALL_NUMBER)
+			|| Brush.OutlineCornerRadius >= 0.0f
+			|| Brush.HasCornerRadii()
+			|| Brush.OutlineThickness.IsSet()
+			|| Brush.OutlineColor.IsSet()
+			|| Brush.MaterialRef.IsSet()
+			|| Brush.MaterialParams.IsSet()
+			|| !Brush.TexturePath.IsEmpty()
+			|| Brush.Image.HasAny()
+			|| Brush.Gradient.HasAny();
+	}
+
+	bool CanPromoteExplicitStrokeSurfaceContent(
+		const FUMGWidgetNode& BorderSurface,
+		const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node.IsValid()
+			|| Node->Visual.Fills.Num() > 0
+			|| Node->Visual.CornerRadius.HasRadius()
+			|| BorderSurface.Type != TEXT("Border")
+			|| BorderSurface.Children.Num() != 1
+			|| !IsPromotableStrokeContentType(BorderSurface.Children[0].Type)
+			|| BorderSurface.HasSourceData()
+			|| HasExplicitStrokeSurfacePaint(BorderSurface.Brush))
+		{
+			return false;
+		}
+
+		FUMGWidgetStyleData AppliedBorderStyle = BorderSurface.WidgetStyle;
+		// These four fields were transferred from the content when the synthetic
+		// Border was created; they do not give a paint-free surface a separate duty.
+		AppliedBorderStyle.WidthOverride.Reset();
+		AppliedBorderStyle.HeightOverride.Reset();
+		AppliedBorderStyle.ImageMode.Reset();
+		AppliedBorderStyle.ImageTransform.Reset();
+
+		return !AppliedBorderStyle.HasAny()
+			&& BorderSurface.TextStyle.FontSize == 0.0f
+			&& BorderSurface.TextStyle.SourceFontSize == 0.0f
+			&& !BorderSurface.TextStyle.LetterSpacing.IsSet()
+			&& !BorderSurface.Text.HasAny()
+			&& !BorderSurface.Effect.HasAny()
+			&& !BorderSurface.Path.HasAny()
+			&& !BorderSurface.Shadow.HasAny()
+			&& !BorderSurface.Render.HasAny()
+			&& !BorderSurface.WidgetState.HasAny()
+			&& !BorderSurface.ScrollBox.HasAny();
+	}
+
+	FUMGWidgetNode PromoteExplicitStrokeSurfaceContent(FUMGWidgetNode& BorderSurface)
+	{
+		FUMGWidgetNode Content = MoveTemp(BorderSurface.Children[0]);
+		Content.WidgetStyle.WidthOverride = BorderSurface.WidgetStyle.WidthOverride;
+		Content.WidgetStyle.HeightOverride = BorderSurface.WidgetStyle.HeightOverride;
+		Content.WidgetStyle.ImageMode = BorderSurface.WidgetStyle.ImageMode;
+		Content.WidgetStyle.ImageTransform = BorderSurface.WidgetStyle.ImageTransform;
+		return Content;
+	}
+
 	FUMGWidgetNode MakeStrokeLineNode(
 		const FString& Id,
 		const FString& Name,
@@ -293,7 +361,14 @@ namespace VisualMapperStrokeSupport
 		}
 
 		ResetChildToFill(Border);
-		Overlay.Children.Add(MoveTemp(Border));
+		if (CanPromoteExplicitStrokeSurfaceContent(Border, Node))
+		{
+			Overlay.Children.Add(PromoteExplicitStrokeSurfaceContent(Border));
+		}
+		else
+		{
+			Overlay.Children.Add(MoveTemp(Border));
+		}
 
 		for (const FExplicitStrokeSideSpec& SideSpec : ExplicitStrokeSideSpecs)
 		{

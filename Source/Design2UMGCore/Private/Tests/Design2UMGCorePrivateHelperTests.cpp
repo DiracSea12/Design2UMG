@@ -224,6 +224,459 @@ bool FVisualMapperWrapWithBorderTypedTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperWrapWithBorderElidesEmptyPanelTest,
+	"Design2UMG.VisualMapper.WrapWithBorderElidesEmptyPanel",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperWrapWithBorderElidesEmptyPanelTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 120.0f, 48.0f);
+	Node->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#224466FF")));
+
+	FUMGWidgetNode Widget;
+	Widget.Type = TEXT("CanvasPanel");
+	Widget.Id = TEXT("visual_leaf");
+	Widget.Name = TEXT("VisualLeaf");
+	Widget.Bounds.W = 120.0f;
+	Widget.Bounds.H = 48.0f;
+	Widget.Brush.BrushColor = FUMGValueParser::ParseColor(TEXT("#224466FF"));
+
+	const FUMGWidgetNode Wrapped = VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
+	TestEqual(TEXT("Visual leaf uses Border as the final primitive"), Wrapped.Type, FString(TEXT("Border")));
+	TestEqual(TEXT("Visual leaf does not keep an empty panel child"), Wrapped.Children.Num(), 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperWrapWithBorderPromotesSingleChildFlowTest,
+	"Design2UMG.VisualMapper.WrapWithBorderPromotesSingleChildFlow",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperWrapWithBorderPromotesSingleChildFlowTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 160.0f, 48.0f);
+	Node->LayoutData.Layout = EDesignLayout::Horizontal;
+	Node->LayoutData.ExplicitPadding = FDesignPadding{8.0f, 12.0f, 8.0f, 12.0f};
+	Node->Children.Add(MakeFixedNode(EDesignNodeType::Text, 80.0f, 20.0f));
+
+	FUMGWidgetNode Widget;
+	Widget.Type = TEXT("HorizontalBox");
+	Widget.Id = TEXT("single_flow");
+	Widget.Name = TEXT("SingleFlow");
+	Widget.Brush.BrushColor = FLinearColor::White;
+
+	FUMGWidgetNode Child;
+	Child.Type = TEXT("TextBlock");
+	Child.Id = TEXT("single_flow_text");
+	Child.Name = TEXT("SingleFlowText");
+	Child.Slot.SizeRule = EUMGSlotSizeRule::Fill;
+	Widget.Children.Add(MoveTemp(Child));
+
+	const FUMGWidgetNode Wrapped = VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
+	TestEqual(TEXT("Border remains the source visual surface"), Wrapped.Type, FString(TEXT("Border")));
+	TestTrue(TEXT("Source padding stays on the Border"), Wrapped.WidgetStyle.Padding.IsSet());
+	TestEqual(TEXT("Single flow child is promoted directly under Border"), Wrapped.Children.Num(), 1);
+	if (Wrapped.Children.Num() != 1)
+	{
+		return false;
+	}
+	TestEqual(TEXT("Promoted child keeps its widget type"), Wrapped.Children[0].Type, FString(TEXT("TextBlock")));
+	TestEqual(TEXT("Promoted child keeps its source identity"), Wrapped.Children[0].Name, FString(TEXT("SingleFlowText")));
+	TestEqual(TEXT("Border content fill is expressed as alignment"),
+		Wrapped.Children[0].Slot.HorizontalAlignment,
+		EUMGSlotHorizontalAlignment::Fill);
+	TestEqual(TEXT("Promoted child no longer carries a flow size rule"),
+		Wrapped.Children[0].Slot.SizeRule,
+		EUMGSlotSizeRule::Auto);
+
+	TSharedPtr<FDesignNode> FilteredNode = MakeFixedNode(EDesignNodeType::Frame, 160.0f, 48.0f);
+	FilteredNode->LayoutData.Layout = EDesignLayout::Horizontal;
+	TSharedPtr<FDesignNode> DisabledChild = MakeFixedNode(EDesignNodeType::Text, 80.0f, 20.0f);
+	DisabledChild->Transform.bEnabled = false;
+	FilteredNode->Children.Add(DisabledChild);
+	FilteredNode->Children.Add(MakeFixedNode(EDesignNodeType::Text, 80.0f, 20.0f));
+	FUMGWidgetNode FilteredWidget;
+	FilteredWidget.Type = TEXT("HorizontalBox");
+	FilteredWidget.Name = TEXT("FilteredSingleFlow");
+	FUMGWidgetNode& FilteredChild = FilteredWidget.Children.AddDefaulted_GetRef();
+	FilteredChild.Type = TEXT("TextBlock");
+	FilteredChild.Name = TEXT("FilteredSingleFlowText");
+	const FUMGWidgetNode FilteredWrapped = VisualMapper::WrapWithBorder(MoveTemp(FilteredWidget), FilteredNode);
+	TestEqual(TEXT("Skipped source child does not keep a redundant flow panel"), FilteredWrapped.Children.Num(), 1);
+	if (FilteredWrapped.Children.Num() == 1)
+	{
+		TestEqual(TEXT("Filtered flow keeps the remaining child"), FilteredWrapped.Children[0].Name, FString(TEXT("FilteredSingleFlowText")));
+	}
+
+	TSharedPtr<FDesignNode> InnerShadowNode = MakeFixedNode(EDesignNodeType::Frame, 160.0f, 48.0f);
+	InnerShadowNode->LayoutData.Layout = EDesignLayout::Horizontal;
+	FDesignEffect& InnerShadowEffect = InnerShadowNode->Visual.Effects.AddDefaulted_GetRef();
+	InnerShadowEffect.Type = EDesignEffectType::Shadow;
+	InnerShadowEffect.Shadow.bInner = true;
+	FUMGWidgetNode InnerShadowWidget;
+	InnerShadowWidget.Type = TEXT("HorizontalBox");
+	InnerShadowWidget.Name = TEXT("InnerShadowFlow");
+	FUMGWidgetNode& InnerShadowChild = InnerShadowWidget.Children.AddDefaulted_GetRef();
+	InnerShadowChild.Type = TEXT("TextBlock");
+	InnerShadowChild.Name = TEXT("InnerShadowFlowText");
+	const FUMGWidgetNode InnerShadowWrapped = VisualMapper::WrapWithBorder(MoveTemp(InnerShadowWidget), InnerShadowNode);
+	TestEqual(TEXT("Inner-shadow flow keeps its layout panel"), InnerShadowWrapped.Children.Num(), 1);
+	if (InnerShadowWrapped.Children.Num() == 1)
+	{
+		TestEqual(TEXT("Inner-shadow flow keeps the panel type"), InnerShadowWrapped.Children[0].Type, FString(TEXT("HorizontalBox")));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperWrapWithBorderSingleFlowSemanticsMatrixTest,
+	"Design2UMG.VisualMapper.WrapWithBorderSingleFlowSemanticsMatrix",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperWrapWithBorderSingleFlowSemanticsMatrixTest::RunTest(const FString& Parameters)
+{
+	struct FCase
+	{
+		EDesignLayout Layout;
+		EUMGSlotSizeRule SizeRule;
+		const TCHAR* WidgetType;
+		EDesignNodeType ChildNodeType;
+	};
+
+	const TArray<FCase> Cases = {
+		{EDesignLayout::Horizontal, EUMGSlotSizeRule::Auto, TEXT("TextBlock"), EDesignNodeType::Text},
+		{EDesignLayout::Horizontal, EUMGSlotSizeRule::Fill, TEXT("Image"), EDesignNodeType::Rectangle},
+		{EDesignLayout::Vertical, EUMGSlotSizeRule::Auto, TEXT("TextBlock"), EDesignNodeType::Text},
+		{EDesignLayout::Vertical, EUMGSlotSizeRule::Fill, TEXT("Image"), EDesignNodeType::Rectangle},
+	};
+
+	for (const FCase& Case : Cases)
+	{
+		TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 160.0f, 48.0f);
+		Node->LayoutData.Layout = Case.Layout;
+		Node->LayoutData.ExplicitPadding = FDesignPadding{6.0f, 10.0f, 6.0f, 10.0f};
+		Node->Children.Add(MakeFixedNode(Case.ChildNodeType, 80.0f, 20.0f));
+
+		FUMGWidgetNode Widget;
+		Widget.Type = Case.Layout == EDesignLayout::Horizontal ? TEXT("HorizontalBox") : TEXT("VerticalBox");
+		Widget.Id = TEXT("matrix_flow");
+		Widget.Name = TEXT("MatrixFlow");
+		Widget.Brush.BrushColor = FLinearColor::White;
+
+		FUMGWidgetNode Child;
+		Child.Type = Case.WidgetType;
+		Child.Name = TEXT("MatrixChild");
+		Child.Slot.SizeRule = Case.SizeRule;
+		Widget.Children.Add(MoveTemp(Child));
+
+		const FUMGWidgetNode Wrapped = VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
+		TestEqual(TEXT("Matrix case keeps Border as the source surface"), Wrapped.Type, FString(TEXT("Border")));
+		TestEqual(TEXT("Matrix case promotes exactly one child"), Wrapped.Children.Num(), 1);
+		if (Wrapped.Children.Num() != 1)
+		{
+			continue;
+		}
+
+		TestEqual(TEXT("Matrix case keeps child widget type"), Wrapped.Children[0].Type, FString(Case.WidgetType));
+		TestEqual(TEXT("Matrix case keeps child identity"), Wrapped.Children[0].Name, FString(TEXT("MatrixChild")));
+		TestTrue(TEXT("Matrix case keeps Border padding"), Wrapped.WidgetStyle.Padding.IsSet());
+		TestEqual(TEXT("Matrix case consumes flow size rule"), Wrapped.Children[0].Slot.SizeRule, EUMGSlotSizeRule::Auto);
+		if (Case.Layout == EDesignLayout::Horizontal)
+		{
+			TestEqual(
+				TEXT("Horizontal flow maps the main-axis rule to HAlign"),
+				Wrapped.Children[0].Slot.HorizontalAlignment,
+				Case.SizeRule == EUMGSlotSizeRule::Fill
+					? EUMGSlotHorizontalAlignment::Fill
+					: EUMGSlotHorizontalAlignment::Left);
+		}
+		else
+		{
+			TestEqual(
+				TEXT("Vertical flow maps the main-axis rule to VAlign"),
+				Wrapped.Children[0].Slot.VerticalAlignment,
+				Case.SizeRule == EUMGSlotSizeRule::Fill
+					? EUMGSlotVerticalAlignment::Fill
+					: EUMGSlotVerticalAlignment::Top);
+		}
+	}
+
+	// FitContent at the absolute-parent boundary suppresses spacer creation in
+	// LayoutMapper; the Border slot still carries the authored justify result.
+	{
+		TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 0.0f, 48.0f);
+		Node->Transform.Width = FDesignSize::Fit();
+		Node->LayoutData.Layout = EDesignLayout::Horizontal;
+		Node->LayoutData.JustifyContent = EDesignJustifyContent::Center;
+		Node->Children.Add(MakeFixedNode(EDesignNodeType::Text, 80.0f, 20.0f));
+
+		FUMGWidgetNode Widget;
+		Widget.Type = TEXT("HorizontalBox");
+		Widget.Name = TEXT("FitJustifyFlow");
+		Widget.Brush.BrushColor = FLinearColor::White;
+		FUMGWidgetNode& Content = Widget.Children.AddDefaulted_GetRef();
+		Content.Type = TEXT("TextBlock");
+		Content.Name = TEXT("FitJustifyChild");
+		Content.Slot.SizeRule = EUMGSlotSizeRule::Auto;
+		Content.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Top;
+
+		const FUMGWidgetNode Wrapped = VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
+		TestEqual(TEXT("FitContent justify promotes without synthetic spacers"), Wrapped.Children.Num(), 1);
+		if (Wrapped.Children.Num() == 1)
+		{
+			TestEqual(TEXT("FitContent justify keeps content identity"), Wrapped.Children[0].Name, FString(TEXT("FitJustifyChild")));
+			TestEqual(TEXT("FitContent justify maps to Border alignment"), Wrapped.Children[0].Slot.HorizontalAlignment, EUMGSlotHorizontalAlignment::Center);
+		}
+	}
+	{
+		TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 64.0f, 0.0f);
+		Node->Transform.Height = FDesignSize::Fit();
+		Node->LayoutData.Layout = EDesignLayout::Vertical;
+		Node->LayoutData.JustifyContent = EDesignJustifyContent::Center;
+		Node->Children.Add(MakeFixedNode(EDesignNodeType::Text, 40.0f, 20.0f));
+
+		FUMGWidgetNode Widget;
+		Widget.Type = TEXT("VerticalBox");
+		Widget.Name = TEXT("FitVerticalJustifyFlow");
+		Widget.Brush.BrushColor = FLinearColor::White;
+		FUMGWidgetNode& Content = Widget.Children.AddDefaulted_GetRef();
+		Content.Type = TEXT("TextBlock");
+		Content.Name = TEXT("FitVerticalJustifyChild");
+		Content.Slot.SizeRule = EUMGSlotSizeRule::Auto;
+		Content.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Left;
+
+		const FUMGWidgetNode Wrapped = VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
+		TestEqual(TEXT("Vertical FitContent justify promotes without synthetic spacers"), Wrapped.Children.Num(), 1);
+		if (Wrapped.Children.Num() == 1)
+		{
+			TestEqual(TEXT("Vertical FitContent justify keeps content identity"), Wrapped.Children[0].Name, FString(TEXT("FitVerticalJustifyChild")));
+			TestEqual(TEXT("Vertical FitContent justify maps to Border alignment"), Wrapped.Children[0].Slot.VerticalAlignment, EUMGSlotVerticalAlignment::Center);
+		}
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperWrapWithBorderSingleFlowBoundaryTest,
+	"Design2UMG.VisualMapper.WrapWithBorderSingleFlowBoundary",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperWrapWithBorderSingleFlowBoundaryTest::RunTest(const FString& Parameters)
+{
+	auto BuildWrapped = [](const TSharedPtr<FDesignNode>& Node, const bool bPanelPadding) -> FUMGWidgetNode
+	{
+		FUMGWidgetNode Widget;
+		Widget.Type = TEXT("HorizontalBox");
+		Widget.Id = TEXT("boundary_flow");
+		Widget.Name = TEXT("BoundaryFlow");
+		Widget.Brush.BrushColor = FLinearColor::White;
+		if (bPanelPadding)
+		{
+			Widget.WidgetStyle.InnerSlotPadding = FVector2D(4.0f, 4.0f);
+		}
+		FUMGWidgetNode Child;
+		Child.Type = TEXT("TextBlock");
+		Child.Name = TEXT("BoundaryChild");
+		Widget.Children.Add(MoveTemp(Child));
+		return VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
+	};
+
+	auto AssertKeptFlowPanel = [this](const FUMGWidgetNode& Wrapped, const TCHAR* Label)
+	{
+		TestEqual(Label, Wrapped.Children.Num(), 1);
+		if (Wrapped.Children.Num() == 1)
+		{
+			TestEqual(TEXT("Boundary case keeps the flow panel type"), Wrapped.Children[0].Type, FString(TEXT("HorizontalBox")));
+			TestEqual(TEXT("Boundary case marks the retained panel as inner"), Wrapped.Children[0].Name, FString(TEXT("BoundaryFlow_inner")));
+		}
+	};
+
+	{
+		TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 160.0f, 48.0f);
+		Node->LayoutData.Layout = EDesignLayout::None;
+		Node->Children.Add(MakeFixedNode(EDesignNodeType::Text, 80.0f, 20.0f));
+		AssertKeptFlowPanel(BuildWrapped(Node, false), TEXT("None-layout case does not promote"));
+	}
+	{
+		TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 160.0f, 48.0f);
+		Node->LayoutData.Layout = EDesignLayout::Horizontal;
+		Node->LayoutData.JustifyContent = EDesignJustifyContent::Center;
+		Node->Children.Add(MakeFixedNode(EDesignNodeType::Text, 80.0f, 20.0f));
+		AssertKeptFlowPanel(BuildWrapped(Node, false), TEXT("Justify case does not promote"));
+	}
+	{
+		TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 160.0f, 48.0f);
+		Node->LayoutData.Layout = EDesignLayout::Horizontal;
+		TSharedPtr<FDesignNode> Child = MakeFixedNode(EDesignNodeType::Text, 80.0f, 20.0f);
+		Child->Transform.SetPosition(12.0f, 4.0f);
+		Node->Children.Add(Child);
+		AssertKeptFlowPanel(BuildWrapped(Node, false), TEXT("Positioned child does not promote"));
+	}
+	{
+		TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 160.0f, 48.0f);
+		Node->LayoutData.Layout = EDesignLayout::Horizontal;
+		Node->Children.Add(MakeFixedNode(EDesignNodeType::Text, 80.0f, 20.0f));
+		AssertKeptFlowPanel(BuildWrapped(Node, true), TEXT("Panel-property case does not promote"));
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperWrapWithBorderSingleChildJustifyMatrixTest,
+	"Design2UMG.VisualMapper.WrapWithBorderSingleChildJustifyMatrix",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperWrapWithBorderSingleChildJustifyMatrixTest::RunTest(const FString& Parameters)
+{
+	struct FCase
+	{
+		EDesignLayout Layout;
+		EDesignJustifyContent Justify;
+		int32 SpacerCount;
+		EUMGSlotHorizontalAlignment ExpectedH;
+		EUMGSlotVerticalAlignment ExpectedV;
+	};
+
+	const TArray<FCase> Cases = {
+		{EDesignLayout::Horizontal, EDesignJustifyContent::Center, 2, EUMGSlotHorizontalAlignment::Center, EUMGSlotVerticalAlignment::Top},
+		{EDesignLayout::Horizontal, EDesignJustifyContent::End, 1, EUMGSlotHorizontalAlignment::Right, EUMGSlotVerticalAlignment::Top},
+		{EDesignLayout::Horizontal, EDesignJustifyContent::SpaceAround, 2, EUMGSlotHorizontalAlignment::Center, EUMGSlotVerticalAlignment::Top},
+		{EDesignLayout::Horizontal, EDesignJustifyContent::SpaceBetween, 0, EUMGSlotHorizontalAlignment::Left, EUMGSlotVerticalAlignment::Top},
+		{EDesignLayout::Vertical, EDesignJustifyContent::Center, 2, EUMGSlotHorizontalAlignment::Fill, EUMGSlotVerticalAlignment::Center},
+		{EDesignLayout::Vertical, EDesignJustifyContent::End, 1, EUMGSlotHorizontalAlignment::Fill, EUMGSlotVerticalAlignment::Bottom},
+		{EDesignLayout::Vertical, EDesignJustifyContent::SpaceAround, 2, EUMGSlotHorizontalAlignment::Fill, EUMGSlotVerticalAlignment::Center},
+		{EDesignLayout::Vertical, EDesignJustifyContent::SpaceBetween, 0, EUMGSlotHorizontalAlignment::Fill, EUMGSlotVerticalAlignment::Top},
+	};
+
+	for (const FCase& Case : Cases)
+	{
+		TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 160.0f, 48.0f);
+		Node->LayoutData.Layout = Case.Layout;
+		Node->LayoutData.JustifyContent = Case.Justify;
+		Node->Children.Add(MakeFixedNode(EDesignNodeType::Text, 80.0f, 20.0f));
+
+		FUMGWidgetNode Widget;
+		Widget.Type = Case.Layout == EDesignLayout::Horizontal ? TEXT("HorizontalBox") : TEXT("VerticalBox");
+		Widget.Name = TEXT("JustifyFlow");
+		Widget.Brush.BrushColor = FLinearColor::White;
+		for (int32 Index = 0; Index < Case.SpacerCount; ++Index)
+		{
+			FUMGWidgetNode Spacer;
+			Spacer.Type = TEXT("Spacer");
+			Spacer.Name = FString::Printf(TEXT("Spacer_Widget_%d"), Index);
+			Widget.Children.Add(MoveTemp(Spacer));
+		}
+		FUMGWidgetNode Content;
+		Content.Type = TEXT("TextBlock");
+		Content.Name = TEXT("JustifyChild");
+		if (Case.Layout == EDesignLayout::Horizontal)
+		{
+			Content.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Top;
+		}
+		else
+		{
+			Content.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
+		}
+		Widget.Children.Insert(MoveTemp(Content), Case.SpacerCount > 0 ? 1 : 0);
+
+		const FUMGWidgetNode Wrapped = VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
+		TestEqual(TEXT("Justify case promotes the content child"), Wrapped.Children.Num(), 1);
+		if (Wrapped.Children.Num() != 1)
+		{
+			continue;
+		}
+		TestEqual(TEXT("Justify case keeps content identity"), Wrapped.Children[0].Name, FString(TEXT("JustifyChild")));
+		TestEqual(TEXT("Justify case clears flow size rule"), Wrapped.Children[0].Slot.SizeRule, EUMGSlotSizeRule::Auto);
+		TestEqual(TEXT("Justify case maps horizontal alignment"), Wrapped.Children[0].Slot.HorizontalAlignment, Case.ExpectedH);
+		TestEqual(TEXT("Justify case maps vertical alignment"), Wrapped.Children[0].Slot.VerticalAlignment, Case.ExpectedV);
+	}
+
+	// LayoutMapper omits synthetic justify spacers when the only child already fills
+	// the main axis. The promotion rule must preserve that same behavior.
+	{
+		TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 160.0f, 48.0f);
+		Node->LayoutData.Layout = EDesignLayout::Horizontal;
+		Node->LayoutData.JustifyContent = EDesignJustifyContent::Center;
+		Node->Children.Add(MakeFixedNode(EDesignNodeType::Text, 80.0f, 20.0f));
+
+		FUMGWidgetNode Widget;
+		Widget.Type = TEXT("HorizontalBox");
+		Widget.Name = TEXT("FillJustifyFlow");
+		Widget.Brush.BrushColor = FLinearColor::White;
+		FUMGWidgetNode& Content = Widget.Children.AddDefaulted_GetRef();
+		Content.Type = TEXT("TextBlock");
+		Content.Name = TEXT("FillJustifyChild");
+		Content.Slot.SizeRule = EUMGSlotSizeRule::Fill;
+		Content.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Top;
+
+		const FUMGWidgetNode Wrapped = VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
+		TestEqual(TEXT("Fill child with justify still promotes"), Wrapped.Children.Num(), 1);
+		if (Wrapped.Children.Num() == 1)
+		{
+			TestEqual(TEXT("Fill justify keeps content identity"), Wrapped.Children[0].Name, FString(TEXT("FillJustifyChild")));
+			TestEqual(TEXT("Fill justify keeps fill alignment"), Wrapped.Children[0].Slot.HorizontalAlignment, EUMGSlotHorizontalAlignment::Fill);
+			TestEqual(TEXT("Fill justify clears transferred size rule"), Wrapped.Children[0].Slot.SizeRule, EUMGSlotSizeRule::Auto);
+		}
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperWrapWithBorderKeepsMultiChildFlowTest,
+	"Design2UMG.VisualMapper.WrapWithBorderKeepsMultiChildFlow",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperWrapWithBorderKeepsMultiChildFlowTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 160.0f, 48.0f);
+	Node->LayoutData.Layout = EDesignLayout::Horizontal;
+	Node->Children.Add(MakeFixedNode(EDesignNodeType::Text, 60.0f, 20.0f));
+	Node->Children.Add(MakeFixedNode(EDesignNodeType::Text, 60.0f, 20.0f));
+
+	FUMGWidgetNode Widget;
+	Widget.Type = TEXT("HorizontalBox");
+	Widget.Id = TEXT("multi_flow");
+	Widget.Name = TEXT("MultiFlow");
+	Widget.Brush.BrushColor = FLinearColor::White;
+	for (int32 Index = 0; Index < 2; ++Index)
+	{
+		FUMGWidgetNode& Child = Widget.Children.AddDefaulted_GetRef();
+		Child.Type = TEXT("TextBlock");
+		Child.Name = FString::Printf(TEXT("MultiFlowText%d"), Index);
+	}
+
+	const FUMGWidgetNode Wrapped = VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
+	TestEqual(TEXT("Multi-child flow panel remains the content widget"), Wrapped.Children.Num(), 1);
+	if (Wrapped.Children.Num() != 1)
+	{
+		return false;
+	}
+	TestEqual(TEXT("Multi-child flow panel keeps its layout type"), Wrapped.Children[0].Type, FString(TEXT("HorizontalBox")));
+	TestEqual(TEXT("Multi-child content receives the inner identity suffix"), Wrapped.Children[0].Name, FString(TEXT("MultiFlow_inner")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperWrapWithBorderKeepsEmptyScrollBoxTest,
+	"Design2UMG.VisualMapper.WrapWithBorderKeepsEmptyScrollBox",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperWrapWithBorderKeepsEmptyScrollBoxTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 120.0f, 48.0f);
+	Node->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#224466FF")));
+
+	FUMGWidgetNode Widget;
+	Widget.Type = TEXT("ScrollBox");
+	Widget.Id = TEXT("scroll_leaf");
+	Widget.Name = TEXT("ScrollLeaf");
+	Widget.Bounds.W = 120.0f;
+	Widget.Bounds.H = 48.0f;
+	Widget.Brush.BrushColor = FUMGValueParser::ParseColor(TEXT("#224466FF"));
+	Widget.ScrollBox.Orientation = TEXT("Vertical");
+	Widget.ScrollBox.ScrollBarVisibility = TEXT("Hidden");
+
+	const FUMGWidgetNode Wrapped = VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
+	TestEqual(TEXT("ScrollBox carrier remains under the visual Border"), Wrapped.Children.Num(), 1);
+	if (Wrapped.Children.Num() != 1)
+	{
+		return false;
+	}
+	TestEqual(TEXT("Scrollable leaf keeps its ScrollBox type"), Wrapped.Children[0].Type, FString(TEXT("ScrollBox")));
+	TestTrue(TEXT("Scrollable leaf keeps its orientation"), Wrapped.Children[0].ScrollBox.Orientation.IsSet());
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperWrapWithBorderExplicitSideStrokeTest,
 	"Design2UMG.VisualMapper.WrapWithBorderExplicitSideStroke",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -231,6 +684,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperWrapWithBorderExplicitSideStrokeTe
 bool FVisualMapperWrapWithBorderExplicitSideStrokeTest::RunTest(const FString& Parameters)
 {
 	TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 128.0f, 48.0f);
+	Node->Children.Add(MakeFixedNode(EDesignNodeType::Text, 64.0f, 20.0f));
 	Node->Visual.Stroke.Thickness.bUniform = false;
 	Node->Visual.Stroke.Thickness.Top = 2.0f;
 	Node->Visual.Stroke.Thickness.Right = 4.0f;
@@ -239,28 +693,30 @@ bool FVisualMapperWrapWithBorderExplicitSideStrokeTest::RunTest(const FString& P
 	Node->Visual.Stroke.Fill = FDesignFill::FromColor(TEXT("#112233FF"));
 
 	FUMGWidgetNode Widget;
-	Widget.Type = TEXT("Image");
+	Widget.Type = TEXT("HorizontalBox");
 	Widget.Id = TEXT("stroke_panel");
 	Widget.Name = TEXT("StrokePanel");
 	Widget.Bounds.W = 128.0f;
 	Widget.Bounds.H = 48.0f;
+	Widget.WidgetStyle.WidthOverride = 128.0f;
 
 	VisualMapper::ApplyStroke(Widget, Node->Visual.Stroke);
 	FUMGWidgetNode Wrapped = VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
 
 	TestEqual(TEXT("Explicit side stroke wraps with overlay"), Wrapped.Type, TEXT("Overlay"));
-	TestEqual(TEXT("Explicit side stroke child count"), Wrapped.Children.Num(), 5);
+	TestEqual(TEXT("Promoted content replaces the surface beside four stroke lines"), Wrapped.Children.Num(), 5);
 	if (Wrapped.Children.Num() != 5)
 	{
 		return false;
 	}
 
-	const FUMGWidgetNode& Surface = Wrapped.Children[0];
-	TestEqual(TEXT("Surface child stays first"), Surface.Name, TEXT("StrokePanel_surface"));
-	TestEqual(TEXT("Surface id gets suffix"), Surface.Id, TEXT("stroke_panel_surface"));
-	TestEqual(TEXT("Surface keeps wrapped content count"), Surface.Children.Num(), 1);
-	TestFalse(TEXT("Surface outline color cleared"), Surface.Brush.OutlineColor.IsSet());
-	TestFalse(TEXT("Surface stroke padding cleared"), Surface.WidgetStyle.StrokePadding.IsSet());
+	const FUMGWidgetNode& Content = Wrapped.Children[0];
+	TestEqual(TEXT("Layout content is promoted directly"), Content.Type, TEXT("HorizontalBox"));
+	TestEqual(TEXT("Promoted content keeps its inner identity"), Content.Name, TEXT("StrokePanel_inner"));
+	TestEqual(TEXT("Promoted content keeps its inner id"), Content.Id, TEXT("stroke_panel_inner"));
+	TestTrue(TEXT("Promoted content regains its transferred width"),
+		Content.WidgetStyle.WidthOverride.IsSet()
+		&& FMath::IsNearlyEqual(Content.WidgetStyle.WidthOverride.GetValue(), 128.0f));
 
 	const FUMGWidgetNode& Top = Wrapped.Children[1];
 	const FUMGWidgetNode& Right = Wrapped.Children[2];
@@ -809,6 +1265,209 @@ bool FBatchCVisualMapperMultiFillSmokeTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualSupportMultiFillOwnsSurfaceTest,
+	"Design2UMG.VisualSupport.MultiFillOwnsSurfaceWithoutBorder",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualSupportMultiFillOwnsSurfaceTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 96.0f, 48.0f);
+	Node->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#112233FF")));
+	Node->Visual.Fills.Add(MakeGradientFill());
+	TestFalse(
+		TEXT("A plain multi-fill frame lets the multi-fill overlay own the surface"),
+		Design2UMGConverterVisualSupport::ShouldWrapNodeWithBorder(Node, false));
+
+	Node->Visual.CornerRadius.bUniform = true;
+	Node->Visual.CornerRadius.Uniform = 8.0f;
+	TestTrue(
+		TEXT("A rounded multi-fill frame keeps a Border for the authored corner semantics"),
+		Design2UMGConverterVisualSupport::ShouldWrapNodeWithBorder(Node, false));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperExplicitSideStrokeKeepsNonLayoutSurfaceTest,
+	"Design2UMG.VisualMapper.ExplicitSideStrokeKeepsNonLayoutSurface",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperExplicitSideStrokeKeepsNonLayoutSurfaceTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 64.0f, 32.0f);
+	Node->Children.Add(MakeFixedNode(EDesignNodeType::Rectangle, 16.0f, 16.0f));
+	Node->Visual.Stroke.Thickness.bUniform = false;
+	Node->Visual.Stroke.Thickness.Left = 2.0f;
+	Node->Visual.Stroke.Fill = FDesignFill::FromColor(TEXT("#112233FF"));
+
+	FUMGWidgetNode Widget;
+	Widget.Type = TEXT("Image");
+	Widget.Id = TEXT("image_stroke_surface");
+	Widget.Name = TEXT("ImageStrokeSurface");
+	VisualMapper::ApplyStroke(Widget, Node->Visual.Stroke);
+
+	const FUMGWidgetNode Wrapped = VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
+	TestEqual(TEXT("Non-layout content keeps the surface plus one stroke line"), Wrapped.Children.Num(), 2);
+	if (Wrapped.Children.Num() != 2)
+	{
+		return false;
+	}
+	TestEqual(TEXT("Non-layout content remains owned by a Border"), Wrapped.Children[0].Type, TEXT("Border"));
+	TestEqual(TEXT("Surface keeps the image content"), Wrapped.Children[0].Children.Num(), 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperExplicitSideStrokeKeepsPaddedSurfaceTest,
+	"Design2UMG.VisualMapper.ExplicitSideStrokeKeepsPaddedSurface",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperExplicitSideStrokeKeepsPaddedSurfaceTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 128.0f, 48.0f);
+	Node->Children.Add(MakeFixedNode(EDesignNodeType::Text, 64.0f, 20.0f));
+	FDesignPadding Padding;
+	Padding.Left = 8.0f;
+	Padding.Top = 4.0f;
+	Padding.Right = 8.0f;
+	Padding.Bottom = 4.0f;
+	Node->LayoutData.ExplicitPadding = Padding;
+	Node->Visual.Stroke.Thickness.bUniform = false;
+	Node->Visual.Stroke.Thickness.Bottom = 2.0f;
+	Node->Visual.Stroke.Fill = FDesignFill::FromColor(TEXT("#112233FF"));
+
+	FUMGWidgetNode Widget;
+	Widget.Type = TEXT("VerticalBox");
+	Widget.Id = TEXT("padded_stroke_panel");
+	Widget.Name = TEXT("PaddedStrokePanel");
+	Widget.Bounds.W = 128.0f;
+	Widget.Bounds.H = 48.0f;
+
+	VisualMapper::ApplyStroke(Widget, Node->Visual.Stroke);
+	const FUMGWidgetNode Wrapped = VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
+	TestEqual(TEXT("Explicit side stroke still uses an overlay"), Wrapped.Type, TEXT("Overlay"));
+	TestEqual(TEXT("Padding keeps the surface plus one stroke line"), Wrapped.Children.Num(), 2);
+	if (Wrapped.Children.Num() != 2)
+	{
+		return false;
+	}
+	TestEqual(TEXT("Padded surface remains a Border"), Wrapped.Children[0].Type, TEXT("Border"));
+	TestTrue(TEXT("Padded surface retains authored padding"), Wrapped.Children[0].WidgetStyle.Padding.IsSet());
+	TestEqual(TEXT("Padded surface still owns its content"), Wrapped.Children[0].Children.Num(), 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperMultiFillElidesEmptyBorderContentTest,
+	"Design2UMG.BatchC.VisualMapperMultiFillElidesEmptyBorderContent",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperMultiFillElidesEmptyBorderContentTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 96.0f, 48.0f);
+	Node->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#112233FF")));
+	Node->Visual.Fills.Add(MakeGradientFill());
+	Node->Visual.CornerRadius.bUniform = true;
+	Node->Visual.CornerRadius.Uniform = 8.0f;
+
+	FUMGWidgetNode Border;
+	Border.Type = TEXT("Border");
+	Border.Id = TEXT("multi_fill_leaf");
+	Border.Name = TEXT("MultiFillLeaf");
+	Border.Bounds.W = 96.0f;
+	Border.Bounds.H = 48.0f;
+	Border.Brush.BrushColor = FLinearColor::Transparent;
+	VisualMapper::ApplyRoundedCorner(Border, Node->Visual.CornerRadius, 96.0f, 48.0f);
+
+	const FUMGWidgetNode Wrapped = VisualMapper::WrapWithMultiFill(MoveTemp(Border), Node, FVisualMapperOptions());
+	TestEqual(TEXT("Multi-fill leaf keeps only its two paint layers"), Wrapped.Children.Num(), 2);
+	for (const FUMGWidgetNode& Layer : Wrapped.Children)
+	{
+		TestTrue(TEXT("Each multi-fill paint layer keeps the authored corner"), Layer.Brush.DrawAs.IsSet());
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperMultiFillPromotesBorderContentTest,
+	"Design2UMG.BatchC.VisualMapperMultiFillPromotesBorderContent",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperMultiFillPromotesBorderContentTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 96.0f, 48.0f);
+	Node->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#112233FF")));
+	Node->Visual.Fills.Add(MakeGradientFill());
+
+	FUMGWidgetNode Border;
+	Border.Type = TEXT("Border");
+	Border.Id = TEXT("multi_fill_container");
+	Border.Name = TEXT("MultiFillContainer");
+	Border.Bounds.W = 96.0f;
+	Border.Bounds.H = 48.0f;
+	Border.Brush.BrushColor = FLinearColor::Transparent;
+
+	FUMGWidgetNode Content;
+	Content.Type = TEXT("HorizontalBox");
+	Content.Id = TEXT("multi_fill_container_inner");
+	Content.Name = TEXT("MultiFillContainer_inner");
+	Border.Children.Add(MoveTemp(Content));
+
+	const FUMGWidgetNode Wrapped = VisualMapper::WrapWithMultiFill(MoveTemp(Border), Node, FVisualMapperOptions());
+	TestEqual(TEXT("Multi-fill container keeps paint layers plus direct content"), Wrapped.Children.Num(), 3);
+	if (Wrapped.Children.Num() != 3)
+	{
+		return false;
+	}
+	TestEqual(TEXT("Content panel is promoted out of the empty Border"), Wrapped.Children[2].Type, FString(TEXT("HorizontalBox")));
+	TestTrue(TEXT("Promoted content keeps the stable content suffix"), Wrapped.Children[2].Id.EndsWith(TEXT("_content")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperMultiFillElidesEmptyPanelContentTest,
+	"Design2UMG.BatchC.VisualMapperMultiFillElidesEmptyPanelContent",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperMultiFillElidesEmptyPanelContentTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 96.0f, 48.0f);
+	Node->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#112233FF")));
+	Node->Visual.Fills.Add(MakeGradientFill());
+
+	FUMGWidgetNode EmptyPanel;
+	EmptyPanel.Type = TEXT("CanvasPanel");
+	EmptyPanel.Id = TEXT("multi_fill_empty_panel");
+	EmptyPanel.Name = TEXT("MultiFillEmptyPanel");
+
+	const FUMGWidgetNode Wrapped = VisualMapper::WrapWithMultiFill(MoveTemp(EmptyPanel), Node, FVisualMapperOptions());
+	TestEqual(TEXT("An empty non-border panel is not retained as a content carrier"), Wrapped.Children.Num(), 2);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperMultiFillKeepsPaddedBorderContentTest,
+	"Design2UMG.BatchC.VisualMapperMultiFillKeepsPaddedBorderContent",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperMultiFillKeepsPaddedBorderContentTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 96.0f, 48.0f);
+	Node->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#112233FF")));
+	Node->Visual.Fills.Add(MakeGradientFill());
+
+	FUMGWidgetNode Border;
+	Border.Type = TEXT("Border");
+	Border.Id = TEXT("multi_fill_padded");
+	Border.Name = TEXT("MultiFillPadded");
+	Border.Bounds.W = 96.0f;
+	Border.Bounds.H = 48.0f;
+	Border.Brush.BrushColor = FLinearColor::Transparent;
+	Border.WidgetStyle.Padding = FMargin(8.0f);
+
+	FUMGWidgetNode Content;
+	Content.Type = TEXT("HorizontalBox");
+	Content.Id = TEXT("multi_fill_padded_inner");
+	Content.Name = TEXT("MultiFillPadded_inner");
+	Border.Children.Add(MoveTemp(Content));
+
+	const FUMGWidgetNode Wrapped = VisualMapper::WrapWithMultiFill(MoveTemp(Border), Node, FVisualMapperOptions());
+	TestEqual(TEXT("Padded multi-fill keeps paint layers plus Border carrier"), Wrapped.Children.Num(), 3);
+	if (Wrapped.Children.Num() != 3)
+	{
+		return false;
+	}
+	TestEqual(TEXT("Padding remains owned by Border"), Wrapped.Children[2].Type, FString(TEXT("Border")));
+	TestTrue(TEXT("Padding remains present"), Wrapped.Children[2].WidgetStyle.Padding.IsSet());
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGradientTypedPayloadMaterialParamsTest,
 	"Design2UMG.Gradient.TypedPayloadMaterialParams",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -918,6 +1577,38 @@ bool FLayoutFixerConservatismTest::RunTest(const FString& Parameters)
 	FFixerStats Stats;
 	LayoutFixer::FixWidgetTree(Root, Preset, Log, &Stats);
 	TestEqual(TEXT("RolledBack should be non-negative"), Stats.RolledBack >= 0, true);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLayoutMapperSizeConstraintFusionTest,
+	"Design2UMG.LayoutMapper.SizeConstraintFusion",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FLayoutMapperSizeConstraintFusionTest::RunTest(const FString& Parameters)
+{
+	FUMGWidgetNode Child;
+	Child.Type = TEXT("Border");
+	Child.Id = TEXT("card");
+	Child.Name = TEXT("Card");
+
+	FUMGWidgetNode SizeBox;
+	SizeBox.Type = TEXT("SizeBox");
+	SizeBox.WidgetStyle.WidthOverride = 320.0f;
+	SizeBox.WidgetStyle.MinDesiredHeight = 48.0f;
+
+	TestTrue(TEXT("Border supports size constraint fusion"), LayoutMapper::TryFuseSizeConstraints(Child, SizeBox));
+	TestEqual(TEXT("Fused Border type"), Child.Type, FString(TEXT("Design2UMGConstrainedBorder")));
+	TestEqual(TEXT("Fused Border keeps id"), Child.Id, FString(TEXT("card")));
+	TestEqual(TEXT("Fused Border keeps name"), Child.Name, FString(TEXT("Card")));
+	TestTrue(TEXT("Fused width override is preserved"), Child.WidgetStyle.WidthOverride.IsSet());
+	TestTrue(TEXT("Fused minimum height is preserved"), Child.WidgetStyle.MinDesiredHeight.IsSet());
+	TestEqual(TEXT("Fused width override value"), Child.WidgetStyle.WidthOverride.Get(0.0f), 320.0f);
+	TestEqual(TEXT("Fused minimum height value"), Child.WidgetStyle.MinDesiredHeight.Get(0.0f), 48.0f);
+
+	FUMGWidgetNode Unsupported;
+	Unsupported.Type = TEXT("EditableTextBox");
+	TestFalse(TEXT("Unsupported widget stays wrapped"), LayoutMapper::TryFuseSizeConstraints(Unsupported, SizeBox));
+	TestEqual(TEXT("Unsupported type is unchanged"), Unsupported.Type, FString(TEXT("EditableTextBox")));
+
 	return true;
 }
 

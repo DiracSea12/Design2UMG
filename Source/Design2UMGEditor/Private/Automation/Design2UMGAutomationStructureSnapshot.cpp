@@ -11,9 +11,13 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
+#include "Components/CanvasPanel.h"
 #include "Components/ContentWidget.h"
 #include "Components/Image.h"
+#include "Components/Overlay.h"
 #include "Components/PanelWidget.h"
+#include "Components/RetainerBox.h"
+#include "Components/SizeBox.h"
 #include "Components/Spacer.h"
 #include "Components/TextBlock.h"
 #include "Components/Widget.h"
@@ -38,8 +42,12 @@ namespace Design2UMGAutomationStructureSnapshot
 			TArray<FString> VisibleTexts;
 			TArray<FString> BorderWidgets;
 			TArray<FString> NodeNames;
+			TArray<TSharedPtr<FJsonObject>> StructureNodes;
 			TMap<FString, int32> KindHistogram;
 			TMap<FString, int32> ClassHistogram;
+			TMap<FString, int32> CarrierReasonHistogram;
+			TMap<FString, int32> CarrierArityHistogram;
+			TMap<FString, int32> SingleChildCarrierHistogram;
 
 			void AddKind(const FString& Kind)
 			{
@@ -53,6 +61,26 @@ namespace Design2UMGAutomationStructureSnapshot
 					return;
 				}
 				ClassHistogram.FindOrAdd(Widget->GetClass()->GetName())++;
+			}
+
+			void AddStructureNode(
+				const FString& Path,
+				const FString& Name,
+				const FString& Kind,
+				const FString& TypeField,
+				const FString& TypeValue,
+				const FString& Identity = FString())
+			{
+				TSharedPtr<FJsonObject> Record = MakeShared<FJsonObject>();
+				Record->SetStringField(TEXT("path"), Path);
+				Record->SetStringField(TEXT("name"), Name);
+				Record->SetStringField(TEXT("kind"), Kind);
+				Record->SetStringField(TypeField, TypeValue);
+				if (!Identity.IsEmpty())
+				{
+					Record->SetStringField(TEXT("id"), Identity);
+				}
+				StructureNodes.Add(MoveTemp(Record));
 			}
 
 			TSharedPtr<FJsonObject> ToJson(const FString& SnapshotType) const
@@ -97,6 +125,13 @@ namespace Design2UMGAutomationStructureSnapshot
 				}
 				Root->SetArrayField(TEXT("node_names"), NodeNameValues);
 
+				TArray<TSharedPtr<FJsonValue>> StructureNodeValues;
+				for (const TSharedPtr<FJsonObject>& StructureNode : StructureNodes)
+				{
+					StructureNodeValues.Add(MakeShared<FJsonValueObject>(StructureNode));
+				}
+				Root->SetArrayField(TEXT("structure_nodes"), StructureNodeValues);
+
 				TSharedPtr<FJsonObject> HistogramObject = MakeShared<FJsonObject>();
 				for (const TPair<FString, int32>& Pair : KindHistogram)
 				{
@@ -110,6 +145,27 @@ namespace Design2UMGAutomationStructureSnapshot
 					ClassHistogramObject->SetNumberField(Pair.Key, Pair.Value);
 				}
 				Root->SetObjectField(TEXT("class_histogram"), ClassHistogramObject);
+
+				TSharedPtr<FJsonObject> CarrierReasonHistogramObject = MakeShared<FJsonObject>();
+				for (const TPair<FString, int32>& Pair : CarrierReasonHistogram)
+				{
+					CarrierReasonHistogramObject->SetNumberField(Pair.Key, Pair.Value);
+				}
+				Root->SetObjectField(TEXT("carrier_reason_histogram"), CarrierReasonHistogramObject);
+
+				TSharedPtr<FJsonObject> CarrierArityHistogramObject = MakeShared<FJsonObject>();
+				for (const TPair<FString, int32>& Pair : CarrierArityHistogram)
+				{
+					CarrierArityHistogramObject->SetNumberField(Pair.Key, Pair.Value);
+				}
+				Root->SetObjectField(TEXT("carrier_arity_histogram"), CarrierArityHistogramObject);
+
+				TSharedPtr<FJsonObject> SingleChildCarrierHistogramObject = MakeShared<FJsonObject>();
+				for (const TPair<FString, int32>& Pair : SingleChildCarrierHistogram)
+				{
+					SingleChildCarrierHistogramObject->SetNumberField(Pair.Key, Pair.Value);
+				}
+				Root->SetObjectField(TEXT("single_child_carrier_histogram"), SingleChildCarrierHistogramObject);
 				return Root;
 			}
 		};
@@ -247,6 +303,7 @@ namespace Design2UMGAutomationStructureSnapshot
 			const TSharedPtr<FDesignNode>& Node,
 			const FDesignDocument& Doc,
 			const TFunction<bool(const TSharedPtr<FDesignNode>&)>& AdditionalSkipNodePredicate,
+			const FString& Path,
 			const int32 Depth,
 			FStructureSnapshotStats& Stats)
 		{
@@ -265,9 +322,11 @@ namespace Design2UMGAutomationStructureSnapshot
 			// converter's own fallback uses the widget type string, which only
 			// diverges for names that sanitize to nothing.
 			const FString NodeTypeLabel = StaticEnum<EDesignNodeType>()->GetNameStringByValue(static_cast<int64>(EffectiveNode->Type));
-			Stats.NodeNames.Add(FUMGWidgetUtils::SanitizeWidgetName(EffectiveNode->Name, NodeTypeLabel).ToString());
+			const FString SanitizedName = FUMGWidgetUtils::SanitizeWidgetName(EffectiveNode->Name, NodeTypeLabel).ToString();
+			Stats.NodeNames.Add(SanitizedName);
 
 			const FString Kind = ClassifyDesignNodeKindForStructure(EffectiveNode);
+			Stats.AddStructureNode(Path, SanitizedName, Kind, TEXT("type"), NodeTypeLabel, EffectiveNode->Id);
 			Stats.AddKind(Kind);
 			if (Kind == TEXT("container"))
 			{
@@ -308,9 +367,15 @@ namespace Design2UMGAutomationStructureSnapshot
 				return;
 			}
 
-			for (const TSharedPtr<FDesignNode>& Child : Children)
+			for (int32 ChildIndex = 0; ChildIndex < Children.Num(); ++ChildIndex)
 			{
-				AccumulateDesignStructureSnapshot(Child, Doc, AdditionalSkipNodePredicate, Depth + 1, Stats);
+				AccumulateDesignStructureSnapshot(
+					Children[ChildIndex],
+					Doc,
+					AdditionalSkipNodePredicate,
+					Path + TEXT("/") + FString::FromInt(ChildIndex),
+					Depth + 1,
+					Stats);
 			}
 		}
 
@@ -456,7 +521,113 @@ namespace Design2UMGAutomationStructureSnapshot
 			return RawText;
 		}
 
-		void AccumulateWidgetStructureSnapshot(UWidget* Widget, const int32 Depth, FStructureSnapshotStats& Stats)
+		bool HasIndexedGeneratedChild(const TArray<UWidget*>& Children, const TCHAR* Marker, const TCHAR* OptionalSuffix = TEXT(""))
+		{
+			for (const UWidget* Child : Children)
+			{
+				FString Name = Child ? Child->GetName() : FString();
+				if (OptionalSuffix[0] != 0 && Name.EndsWith(OptionalSuffix))
+				{
+					Name.LeftChopInline(FCString::Strlen(OptionalSuffix));
+				}
+
+				const int32 MarkerIndex = Name.Find(Marker, ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+				if (MarkerIndex != INDEX_NONE && Name.Mid(MarkerIndex + FCString::Strlen(Marker)).IsNumeric())
+				{
+					return true;
+				}
+			}
+			return false;
+		}
+
+		FString ClassifyCarrierReason(UWidget* Widget, const TArray<UWidget*>& Children)
+		{
+			if (Cast<USizeBox>(Widget))
+			{
+				return TEXT("SizeBox.size_constraint");
+			}
+			if (Cast<UCanvasPanel>(Widget))
+			{
+				return TEXT("CanvasPanel.absolute_layout");
+			}
+			if (Cast<URetainerBox>(Widget))
+			{
+				const FString Name = Widget->GetName();
+				if (Name.EndsWith(TEXT("_fxblur")))
+				{
+					return TEXT("RetainerBox.foreground_blur");
+				}
+				if (Name.EndsWith(TEXT("_geometrymask")))
+				{
+					return TEXT("RetainerBox.geometry_mask");
+				}
+				if (Name.EndsWith(TEXT("_innershadow")))
+				{
+					return TEXT("RetainerBox.inner_shadow");
+				}
+				return TEXT("RetainerBox.effect");
+			}
+			if (Cast<UBorder>(Widget))
+			{
+				const FString Name = Widget->GetName();
+				if (Name.EndsWith(TEXT("_surface")))
+				{
+					return TEXT("Border.explicit_stroke_surface");
+				}
+				if (Name.EndsWith(TEXT("_content")))
+				{
+					return TEXT("Border.layer_content");
+				}
+				return TEXT("Border.visual_or_padding");
+			}
+			if (Cast<UOverlay>(Widget))
+			{
+				for (const UWidget* Child : Children)
+				{
+					const FString Name = Child ? Child->GetName() : FString();
+					if (Name.EndsWith(TEXT("_stroke_top"))
+						|| Name.EndsWith(TEXT("_stroke_right"))
+						|| Name.EndsWith(TEXT("_stroke_bottom"))
+						|| Name.EndsWith(TEXT("_stroke_left")))
+					{
+						return TEXT("Overlay.explicit_side_stroke");
+					}
+				}
+				if (HasIndexedGeneratedChild(Children, TEXT("_fill"), TEXT("_img")))
+				{
+					return TEXT("Overlay.multi_fill");
+				}
+				if (HasIndexedGeneratedChild(Children, TEXT("_shadow")))
+				{
+					return TEXT("Overlay.outer_shadow");
+				}
+				return TEXT("Overlay.layer_composition");
+			}
+			return FString();
+		}
+
+		void AccumulateCarrierDiagnostics(
+			UWidget* Widget,
+			const TArray<UWidget*>& Children,
+			FStructureSnapshotStats& Stats)
+		{
+			const FString Reason = ClassifyCarrierReason(Widget, Children);
+			if (Reason.IsEmpty())
+			{
+				return;
+			}
+
+			Stats.CarrierReasonHistogram.FindOrAdd(Reason)++;
+			const TCHAR* Arity = Children.Num() == 0 ? TEXT("0") : (Children.Num() == 1 ? TEXT("1") : TEXT("many"));
+			Stats.CarrierArityHistogram.FindOrAdd(Reason + TEXT(".children_") + Arity)++;
+			if (Children.Num() == 1 && Children[0])
+			{
+				Stats.SingleChildCarrierHistogram.FindOrAdd(
+					Reason + TEXT(">") + Children[0]->GetClass()->GetName())++;
+			}
+		}
+
+		void AccumulateWidgetStructureSnapshot(UWidget* Widget, const FString& Path, const int32 Depth, FStructureSnapshotStats& Stats)
 		{
 			if (!IsWidgetVisibleForStructure(Widget))
 			{
@@ -474,6 +645,7 @@ namespace Design2UMGAutomationStructureSnapshot
 			}
 
 			const FString Kind = ClassifyWidgetKindForStructure(Widget);
+			Stats.AddStructureNode(Path, Widget->GetName(), Kind, TEXT("class"), Widget->GetClass()->GetName());
 			Stats.AddKind(Kind);
 			if (Kind == TEXT("container"))
 			{
@@ -502,6 +674,7 @@ namespace Design2UMGAutomationStructureSnapshot
 
 			TArray<UWidget*> Children;
 			GatherWidgetStructureChildren(Widget, Children);
+			AccumulateCarrierDiagnostics(Widget, Children, Stats);
 			if (Depth == 0)
 			{
 				Stats.RootChildCount = Children.Num();
@@ -512,9 +685,13 @@ namespace Design2UMGAutomationStructureSnapshot
 				return;
 			}
 
-			for (UWidget* Child : Children)
+			for (int32 ChildIndex = 0; ChildIndex < Children.Num(); ++ChildIndex)
 			{
-				AccumulateWidgetStructureSnapshot(Child, Depth + 1, Stats);
+				AccumulateWidgetStructureSnapshot(
+					Children[ChildIndex],
+					Path + TEXT("/") + FString::FromInt(ChildIndex),
+					Depth + 1,
+					Stats);
 			}
 		}
 	}
@@ -540,7 +717,7 @@ namespace Design2UMGAutomationStructureSnapshot
 					}
 
 					Stats.RootKind = ClassifyDesignNodeKindForStructure(RootNode);
-					AccumulateDesignStructureSnapshot(RootNode, SnapshotDoc, AdditionalSkipNodePredicate, 0, Stats);
+					AccumulateDesignStructureSnapshot(RootNode, SnapshotDoc, AdditionalSkipNodePredicate, TEXT("0"), 0, Stats);
 					return Stats.ToJson(TEXT("design_semantic"));
 				}
 			}
@@ -555,11 +732,12 @@ namespace Design2UMGAutomationStructureSnapshot
 			}
 
 			Stats.RootKind = ClassifyDesignNodeKindForStructure(RootNode);
-			AccumulateDesignStructureSnapshot(RootNode, SnapshotDoc, AdditionalSkipNodePredicate, 0, Stats);
+			AccumulateDesignStructureSnapshot(RootNode, SnapshotDoc, AdditionalSkipNodePredicate, TEXT("0"), 0, Stats);
 			return Stats.ToJson(TEXT("design_semantic"));
 		}
 
 		Stats.RootKind = TEXT("document");
+		int32 RootChildIndex = 0;
 		for (const TSharedPtr<FDesignNode>& Child : SnapshotDoc.Children)
 		{
 			TSharedPtr<FDesignNode> EffectiveChild = ResolveEffectiveDesignNodeForStructure(Child, SnapshotDoc);
@@ -569,7 +747,13 @@ namespace Design2UMGAutomationStructureSnapshot
 			}
 
 			Stats.RootChildCount++;
-			AccumulateDesignStructureSnapshot(EffectiveChild, SnapshotDoc, AdditionalSkipNodePredicate, 1, Stats);
+			AccumulateDesignStructureSnapshot(
+				EffectiveChild,
+				SnapshotDoc,
+				AdditionalSkipNodePredicate,
+				FString::FromInt(RootChildIndex++),
+				1,
+				Stats);
 		}
 		return Stats.ToJson(TEXT("design_semantic"));
 	}
@@ -583,7 +767,7 @@ namespace Design2UMGAutomationStructureSnapshot
 
 		FStructureSnapshotStats Stats;
 		Stats.RootKind = ClassifyWidgetKindForStructure(WidgetTree->RootWidget);
-		AccumulateWidgetStructureSnapshot(WidgetTree->RootWidget, 0, Stats);
+		AccumulateWidgetStructureSnapshot(WidgetTree->RootWidget, TEXT("0"), 0, Stats);
 		return Stats.ToJson(TEXT("widget_tree_semantic"));
 	}
 }

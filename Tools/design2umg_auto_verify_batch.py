@@ -1408,6 +1408,7 @@ def process_case_result(state: dict, batch_exit_code: int, batch_log_path: Path)
         "structure_required": (report.get("structure_validation") or {}).get("required"),
         "structure_available": (report.get("structure_validation") or {}).get("available"),
         "structure_reasons": (report.get("structure_validation") or {}).get("reasons"),
+        "tree_correspondence": (report.get("structure_validation") or {}).get("tree_correspondence"),
         "no_regression_required": state.get("baseline_case_dir") is not None,
         "no_regression_available": no_regression.get("available"),
         "no_regression_passed": no_regression.get("passed"),
@@ -1530,6 +1531,44 @@ def summarize_structure_baseline(case_results: list[dict]) -> dict:
     }
 
 
+def summarize_tree_correspondence(case_results: list[dict]) -> dict:
+    metric_names = (
+        "identity_ratio",
+        "named_parent_path_ratio",
+        "sibling_order_ratio",
+        "kind_ratio",
+        "semantic_kind_ratio",
+    )
+    values_by_metric = {metric_name: [] for metric_name in metric_names}
+    available_cases = 0
+    mismatch_classes: dict[str, int] = {}
+    for item in case_results:
+        correspondence = item.get("tree_correspondence") or {}
+        if not correspondence.get("available"):
+            continue
+        available_cases += 1
+        for metric_name in metric_names:
+            value = correspondence.get(metric_name)
+            if value is not None:
+                values_by_metric[metric_name].append(float(value))
+        for class_name, count in (correspondence.get("kind_mismatch_classes") or {}).items():
+            mismatch_classes[class_name] = mismatch_classes.get(class_name, 0) + int(count)
+
+    metrics = {}
+    for metric_name, values in values_by_metric.items():
+        metrics[metric_name] = {
+            "compared": len(values),
+            "average": round(sum(values) / len(values), 4) if values else None,
+            "minimum": round(min(values), 4) if values else None,
+            "below_full_match": sum(value < 1.0 for value in values),
+        }
+    return {
+        "available_cases": available_cases,
+        "metrics": metrics,
+        "kind_mismatch_classes": mismatch_classes,
+    }
+
+
 def build_batch_summary(
     *,
     args,
@@ -1596,6 +1635,7 @@ def build_batch_summary(
             "failed": len(no_regression_cases) - no_regression_passed + no_regression_required_unavailable,
         },
         "structure_metrics": summarize_structure_baseline(case_results),
+        "tree_correspondence": summarize_tree_correspondence(case_results),
         "cases": case_results,
     }
 

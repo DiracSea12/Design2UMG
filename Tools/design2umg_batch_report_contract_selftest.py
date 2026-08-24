@@ -36,7 +36,20 @@ def main() -> None:
         native_self_check="off",
     )
     case_results = [
-        {"name": "case-a", "blocked": False, "no_regression_available": True, "no_regression_passed": True},
+        {
+            "name": "case-a",
+            "blocked": False,
+            "no_regression_available": True,
+            "no_regression_passed": True,
+            "tree_correspondence": {
+                "available": True,
+                "named_parent_path_ratio": 1.0,
+                "sibling_order_ratio": 0.5,
+                "kind_ratio": 1.0,
+                "semantic_kind_ratio": 1.0,
+                "kind_mismatch_classes": {"exact": 3},
+            },
+        },
         {"name": "case-b", "blocked": True, "no_regression_available": False, "no_regression_passed": True},
     ]
     completeness = {
@@ -70,6 +83,10 @@ def main() -> None:
     assert_equal(summary["run_scope"], "focus")
     assert_equal(summary["blocked_cases"], 1)
     assert_equal(summary["no_regression"], {"available": 1, "passed": 1, "failed": 0})
+    assert_equal(summary["tree_correspondence"]["available_cases"], 1)
+    assert_equal(summary["tree_correspondence"]["metrics"]["sibling_order_ratio"]["average"], 0.5)
+    assert_equal(summary["tree_correspondence"]["metrics"]["semantic_kind_ratio"]["average"], 1.0)
+    assert_equal(summary["tree_correspondence"]["kind_mismatch_classes"], {"exact": 3})
     assert_equal(summary["phase_durations_sec"]["prepare_cases"], 2.0)
     assert_equal(summary["phase_durations_sec"]["editor_execution"], 10.0)
     assert_equal(summary["phase_durations_sec"]["postprocess_reports"], 3.5)

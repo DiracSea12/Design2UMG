@@ -552,11 +552,11 @@ bool FFigmaGridSlotSemanticsConverterTest::RunTest(const FString& Parameters)
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 
 	const FUMGWidgetNode* GridFrame = FindWidgetById(Data.RootWidget, TEXT("grid_frame"));
-	const FUMGWidgetNode* TailCard = FindWidgetById(Data.RootWidget, TEXT("tail_card_sz"));
-	const FUMGWidgetNode* HeroCard = FindWidgetById(Data.RootWidget, TEXT("hero_card_sz"));
+	const FUMGWidgetNode* TailCard = FindWidgetById(Data.RootWidget, TEXT("tail_card"));
+	const FUMGWidgetNode* HeroCard = FindWidgetById(Data.RootWidget, TEXT("hero_card"));
 	TestNotNull(TEXT("Grid frame converts"), GridFrame);
-	TestNotNull(TEXT("Tail card wrapper converts"), TailCard);
-	TestNotNull(TEXT("Hero card wrapper converts"), HeroCard);
+	TestNotNull(TEXT("Tail card fused widget converts"), TailCard);
+	TestNotNull(TEXT("Hero card fused widget converts"), HeroCard);
 	if (!GridFrame || !TailCard || !HeroCard)
 	{
 		return false;

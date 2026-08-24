@@ -5,6 +5,13 @@
 #include "DesignSchema.h"
 #include "DesignSchemaSourceExtensions.h"
 #include "UMGJsonSerializer.h"
+#include "Blueprint/WidgetTree.h"
+#include "Components/Border.h"
+#include "Components/CanvasPanel.h"
+#include "Components/Image.h"
+#include "Components/Overlay.h"
+#include "Components/RetainerBox.h"
+#include "Components/SizeBox.h"
 #include "Dom/JsonValue.h"
 #include "Serialization/JsonSerializer.h"
 
@@ -252,6 +259,91 @@ namespace
 		}
 		return nullptr;
 	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWidgetStructureSnapshotCarrierResponsibilityTest,
+	"Design2UMG.Automation.WidgetStructureSnapshotCarrierResponsibility",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FWidgetStructureSnapshotCarrierResponsibilityTest::RunTest(const FString& Parameters)
+{
+	UWidgetTree* WidgetTree = NewObject<UWidgetTree>();
+	UOverlay* Root = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("StrokePanel"));
+	WidgetTree->RootWidget = Root;
+
+	UBorder* Surface = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("StrokePanel_surface"));
+	UCanvasPanel* Layout = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("StrokePanel_inner"));
+	Surface->SetContent(Layout);
+	Root->AddChild(Surface);
+
+	UImage* Stroke = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("StrokePanel_stroke_top"));
+	Root->AddChild(Stroke);
+
+	URetainerBox* Mask = WidgetTree->ConstructWidget<URetainerBox>(URetainerBox::StaticClass(), TEXT("Masked_geometrymask"));
+	USizeBox* SizedContent = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Masked_sz"));
+	Mask->SetContent(SizedContent);
+	Root->AddChild(Mask);
+
+	const TSharedPtr<FJsonObject> Snapshot =
+		Design2UMGAutomationStructureSnapshot::BuildWidgetTreeStructureSnapshot(WidgetTree);
+	TestTrue(TEXT("Widget structure snapshot is produced"), Snapshot.IsValid());
+	if (!Snapshot.IsValid())
+	{
+		return false;
+	}
+
+	const TSharedPtr<FJsonObject>* ReasonHistogram = nullptr;
+	TestTrue(TEXT("Snapshot exposes carrier responsibility histogram"),
+		Snapshot->TryGetObjectField(TEXT("carrier_reason_histogram"), ReasonHistogram));
+	if (!ReasonHistogram || !ReasonHistogram->IsValid())
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Explicit stroke overlay is classified"),
+		static_cast<int32>((*ReasonHistogram)->GetNumberField(TEXT("Overlay.explicit_side_stroke"))), 1);
+	TestEqual(TEXT("Explicit stroke surface is classified"),
+		static_cast<int32>((*ReasonHistogram)->GetNumberField(TEXT("Border.explicit_stroke_surface"))), 1);
+	TestEqual(TEXT("Absolute layout carrier is classified"),
+		static_cast<int32>((*ReasonHistogram)->GetNumberField(TEXT("CanvasPanel.absolute_layout"))), 1);
+	TestEqual(TEXT("Geometry-mask carrier is classified"),
+		static_cast<int32>((*ReasonHistogram)->GetNumberField(TEXT("RetainerBox.geometry_mask"))), 1);
+	TestEqual(TEXT("Size constraint carrier is classified"),
+		static_cast<int32>((*ReasonHistogram)->GetNumberField(TEXT("SizeBox.size_constraint"))), 1);
+
+	const TSharedPtr<FJsonObject>* SingleChildHistogram = nullptr;
+	TestTrue(TEXT("Snapshot exposes single-child carrier patterns"),
+		Snapshot->TryGetObjectField(TEXT("single_child_carrier_histogram"), SingleChildHistogram));
+	if (!SingleChildHistogram || !SingleChildHistogram->IsValid())
+	{
+		return false;
+	}
+	TestEqual(TEXT("Stroke surface to layout chain is counted"),
+		static_cast<int32>((*SingleChildHistogram)->GetNumberField(
+			TEXT("Border.explicit_stroke_surface>CanvasPanel"))), 1);
+	TestEqual(TEXT("Geometry mask to size constraint chain is counted"),
+		static_cast<int32>((*SingleChildHistogram)->GetNumberField(
+			TEXT("RetainerBox.geometry_mask>SizeBox"))), 1);
+
+	const TArray<TSharedPtr<FJsonValue>>* StructureNodes = nullptr;
+	TestTrue(TEXT("Snapshot exposes ordered structure nodes"),
+		Snapshot->TryGetArrayField(TEXT("structure_nodes"), StructureNodes));
+	if (!StructureNodes || StructureNodes->Num() < 4)
+	{
+		return false;
+	}
+	const TSharedPtr<FJsonObject> RootRecord = (*StructureNodes)[0]->AsObject();
+	const TSharedPtr<FJsonObject> SurfaceRecord = (*StructureNodes)[1]->AsObject();
+	TestTrue(TEXT("Root structure record is valid"), RootRecord.IsValid());
+	TestTrue(TEXT("Surface structure record is valid"), SurfaceRecord.IsValid());
+	if (!RootRecord.IsValid() || !SurfaceRecord.IsValid())
+	{
+		return false;
+	}
+	TestEqual(TEXT("Root structure path is stable"), RootRecord->GetStringField(TEXT("path")), FString(TEXT("0")));
+	TestEqual(TEXT("Root structure name is preserved"), RootRecord->GetStringField(TEXT("name")), FString(TEXT("StrokePanel")));
+	TestEqual(TEXT("Surface structure path preserves parent and order"), SurfaceRecord->GetStringField(TEXT("path")), FString(TEXT("0/0")));
+	TestEqual(TEXT("Surface structure name is preserved"), SurfaceRecord->GetStringField(TEXT("name")), FString(TEXT("StrokePanel_surface")));
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDesignStructureSnapshotDoesNotMutateSourceDocumentTest,

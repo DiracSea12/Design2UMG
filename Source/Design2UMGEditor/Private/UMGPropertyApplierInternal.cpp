@@ -9,6 +9,7 @@
 #include "UMGPropertyApplierSupport.h"
 #include "UMGTextPropertyApplier.h"
 #include "UMGValueParsing.h"
+#include "Design2UMGConstrainedWidgets.h"
 
 #include "Components/BackgroundBlur.h"
 #include "Components/Border.h"
@@ -253,6 +254,8 @@ namespace
 		{
 			return;
 		}
+
+		ApplyDesign2UMGSizeConstraints(Widget, Node);
 
 		const TMap<UClass*, FApplyPropsFunc>& ApplierMap = GetPropsApplierMap();
 		for (UClass* Class = Widget->GetClass(); Class; Class = Class->GetSuperClass())

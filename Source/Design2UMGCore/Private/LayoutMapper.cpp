@@ -272,6 +272,37 @@ bool LayoutMapper::HasPadding(const TSharedPtr<FDesignNode>& Node)
 		 Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Bottom > 0 || Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Left > 0);
 }
 
+bool LayoutMapper::TryFuseSizeConstraints(FUMGWidgetNode& ChildWidget, const FUMGWidgetNode& SizeBoxWidget)
+{
+	static const TSet<FString> SupportedWidgetTypes = {
+		TEXT("Border"),
+		TEXT("CanvasPanel"),
+		TEXT("HorizontalBox"),
+		TEXT("Image"),
+		TEXT("Overlay"),
+		TEXT("RetainerBox"),
+		TEXT("TextBlock"),
+		TEXT("VerticalBox"),
+		TEXT("WrapBox")
+	};
+
+	if (!SupportedWidgetTypes.Contains(ChildWidget.Type)
+		|| (!SizeBoxWidget.WidgetStyle.WidthOverride.IsSet()
+			&& !SizeBoxWidget.WidgetStyle.HeightOverride.IsSet()
+			&& !SizeBoxWidget.WidgetStyle.MinDesiredWidth.IsSet()
+			&& !SizeBoxWidget.WidgetStyle.MinDesiredHeight.IsSet()))
+	{
+		return false;
+	}
+
+	ChildWidget.Type = TEXT("Design2UMGConstrained") + ChildWidget.Type;
+	ChildWidget.WidgetStyle.WidthOverride = SizeBoxWidget.WidgetStyle.WidthOverride;
+	ChildWidget.WidgetStyle.HeightOverride = SizeBoxWidget.WidgetStyle.HeightOverride;
+	ChildWidget.WidgetStyle.MinDesiredWidth = SizeBoxWidget.WidgetStyle.MinDesiredWidth;
+	ChildWidget.WidgetStyle.MinDesiredHeight = SizeBoxWidget.WidgetStyle.MinDesiredHeight;
+	return true;
+}
+
 FUMGWidgetNode LayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, const TSharedPtr<FDesignNode>& ChildNode, EDesignLayout ParentLayout)
 {
 	FUMGWidgetNode SizeBox;
@@ -338,6 +369,11 @@ FUMGWidgetNode LayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, const
 	{
 		SizeBox.Bounds.W = SourceTextBoxWidth;
 		SizeBox.Bounds.H = SourceTextBoxHeight;
+	}
+	if (TryFuseSizeConstraints(ChildWidget, SizeBox))
+	{
+		ChildWidget.Bounds = SizeBox.Bounds;
+		return MoveTemp(ChildWidget);
 	}
 	SizeBox.Slot = MoveTemp(ChildWidget.Slot);
 	if (ChildWidget.HasSourceData())
