@@ -230,31 +230,34 @@ namespace
 
 	void TransferBorderBackgroundProperties(FUMGWidgetNode& Border, FUMGWidgetNode& Widget)
 	{
-		FString StringValue;
-		if (!Border.Brush.BrushColor.IsSet()
-			&& Design2UMGWidgetNodeAccess::TryGetWidgetString(Widget, UMGPropertyKeys::BrushColor, StringValue))
+		// Direct typed reads: identical semantics to the descriptor lookup
+		// (same presence rules), without the typed->string->parse roundtrip.
+		if (!Border.Brush.BrushColor.IsSet() && Widget.Brush.BrushColor.IsSet())
 		{
-			Border.Brush.BrushColor = FUMGValueParser::ParseColor(StringValue);
+			Border.Brush.BrushColor = Widget.Brush.BrushColor.GetValue();
 		}
-		if (!Border.Brush.Image.TexturePath.IsSet())
+		if (!Border.Brush.Image.TexturePath.IsSet() && Widget.Brush.Image.TexturePath.IsSet())
 		{
-			if (Design2UMGWidgetNodeAccess::TryGetWidgetString(Widget, UMGPropertyKeys::TexturePath, StringValue))
-			{
-				Border.Brush.Image.TexturePath = StringValue;
-			}
+			Border.Brush.Image.TexturePath = Widget.Brush.Image.TexturePath.GetValue();
 		}
 		if (!Border.Brush.MaterialRef.IsSet())
 		{
-			if (Design2UMGWidgetNodeAccess::TryGetWidgetString(Widget, UMGPropertyKeys::MaterialRef, StringValue))
+			// Mirror the MaterialRef descriptor precedence: gradient first, then explicit ref.
+			if (Widget.Brush.Gradient.HasAny())
 			{
-				Border.Brush.MaterialRef = StringValue;
+				Border.Brush.MaterialRef = Design2UMGWidgetNodeAccess::GetGradientMaterialRef(Widget.Brush.Gradient);
+			}
+			else if (Widget.Brush.MaterialRef.IsSet())
+			{
+				Border.Brush.MaterialRef = Widget.Brush.MaterialRef.GetValue();
 			}
 		}
 		if (!Border.Brush.MaterialParams.IsSet())
 		{
-			if (Design2UMGWidgetNodeAccess::TryGetWidgetString(Widget, UMGPropertyKeys::MaterialParams, StringValue))
+			FString StringValue;
+			if (Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Widget, UMGPropertyKeys::MaterialParams, StringValue))
 			{
-				Border.Brush.MaterialParams = StringValue;
+				Border.Brush.MaterialParams = MoveTemp(StringValue);
 			}
 		}
 
@@ -300,44 +303,26 @@ namespace
 
 	void TransferBorderStrokeProperties(FUMGWidgetNode& Border, FUMGWidgetNode& Widget)
 	{
-		FString StringValue;
-		if (!Border.Brush.DrawAs.IsSet()
-			&& Design2UMGWidgetNodeAccess::TryGetWidgetString(Widget, UMGPropertyKeys::DrawAs, StringValue))
+		// Direct typed reads with descriptor-identical presence rules.
+		if (!Border.Brush.DrawAs.IsSet() && Widget.Brush.DrawAs.IsSet())
 		{
-			ESlateBrushDrawType::Type DrawAs = ESlateBrushDrawType::NoDrawType;
-			if (Design2UMGWidgetNodeAccess::TryParseDrawAs(StringValue, DrawAs))
-			{
-				Border.Brush.DrawAs = DrawAs;
-			}
+			Border.Brush.DrawAs = Widget.Brush.DrawAs.GetValue();
 		}
-		if (Border.Brush.OutlineCornerRadius < 0.0f)
+		if (Border.Brush.OutlineCornerRadius < 0.0f && Widget.Brush.OutlineCornerRadius >= 0.0f)
 		{
-			float FloatValue = 0.0f;
-			if (Design2UMGWidgetNodeAccess::TryGetWidgetFloat(Widget, UMGPropertyKeys::OutlineCornerRadius, FloatValue))
-			{
-				Border.Brush.OutlineCornerRadius = FloatValue;
-			}
+			Border.Brush.OutlineCornerRadius = Widget.Brush.OutlineCornerRadius;
 		}
-		if (!Border.Brush.HasCornerRadii())
+		if (!Border.Brush.HasCornerRadii() && Widget.Brush.HasCornerRadii())
 		{
-			FVector4 VectorValue;
-			if (Design2UMGWidgetNodeAccess::TryGetWidgetVector4(Widget, UMGPropertyKeys::CornerRadii, VectorValue))
-			{
-				Border.Brush.CornerRadii = VectorValue;
-			}
+			Border.Brush.CornerRadii = Widget.Brush.CornerRadii;
 		}
-		if (!Border.Brush.OutlineThickness.IsSet())
+		if (!Border.Brush.OutlineThickness.IsSet() && Widget.Brush.OutlineThickness.IsSet())
 		{
-			float FloatValue = 0.0f;
-			if (Design2UMGWidgetNodeAccess::TryGetWidgetFloat(Widget, UMGPropertyKeys::OutlineThickness, FloatValue))
-			{
-				Border.Brush.OutlineThickness = FloatValue;
-			}
+			Border.Brush.OutlineThickness = Widget.Brush.OutlineThickness.GetValue();
 		}
-		if (!Border.Brush.OutlineColor.IsSet()
-			&& Design2UMGWidgetNodeAccess::TryGetWidgetString(Widget, UMGPropertyKeys::OutlineColor, StringValue))
+		if (!Border.Brush.OutlineColor.IsSet() && Widget.Brush.OutlineColor.IsSet())
 		{
-			Border.Brush.OutlineColor = FUMGValueParser::ParseColor(StringValue);
+			Border.Brush.OutlineColor = Widget.Brush.OutlineColor.GetValue();
 		}
 
 		if (Widget.WidgetStyle.StrokePadding.IsSet())
@@ -355,10 +340,6 @@ namespace
 		{
 			Margin = Widget.WidgetStyle.StrokeMargin.GetValue();
 			bHasStrokeMargin = true;
-		}
-		else
-		{
-			bHasStrokeMargin = Design2UMGWidgetNodeAccess::TryGetWidgetMargin(Widget, UMGPropertyKeys::StrokeMargin, Margin);
 		}
 
 		if (!bHasStrokeMargin)
@@ -382,16 +363,13 @@ namespace
 				Combined.Right += ExistingPadding.Right;
 				Combined.Bottom += ExistingPadding.Bottom;
 			}
-			else
+			else if (Border.WidgetStyle.StrokePadding.IsSet())
 			{
-				FMargin ExistingPadding = FMargin(0.0f);
-				if (Design2UMGWidgetNodeAccess::TryGetWidgetMargin(Border, UMGPropertyKeys::StrokePadding, ExistingPadding))
-				{
-					Combined.Left += ExistingPadding.Left;
-					Combined.Top += ExistingPadding.Top;
-					Combined.Right += ExistingPadding.Right;
-					Combined.Bottom += ExistingPadding.Bottom;
-				}
+				const FMargin& ExistingPadding = Border.WidgetStyle.StrokePadding.GetValue();
+				Combined.Left += ExistingPadding.Left;
+				Combined.Top += ExistingPadding.Top;
+				Combined.Right += ExistingPadding.Right;
+				Combined.Bottom += ExistingPadding.Bottom;
 			}
 
 			Border.WidgetStyle.StrokePadding = Combined;
@@ -402,40 +380,31 @@ namespace
 
 	void TransferWrapperRenderProperties(FUMGWidgetNode& Wrapper, FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
 	{
-		FString StringValue;
-		float FloatValue = 0.0f;
-		FVector2D Vector2DValue = FVector2D::ZeroVector;
-
-		if (!Wrapper.Render.Clipping.IsSet()
-			&& Design2UMGWidgetNodeAccess::TryGetWidgetString(Widget, UMGPropertyKeys::Clipping, StringValue)
-			&& !StringValue.IsEmpty())
+		// Direct typed reads with descriptor-identical presence rules.
+		if (!Wrapper.Render.Clipping.IsSet() && Widget.Render.Clipping.IsSet()
+			&& !Widget.Render.Clipping.GetValue().IsEmpty())
 		{
-			Wrapper.Render.Clipping = StringValue;
+			Wrapper.Render.Clipping = Widget.Render.Clipping.GetValue();
 		}
-		if (!Wrapper.Render.RenderOpacity.IsSet()
-			&& Design2UMGWidgetNodeAccess::TryGetWidgetFloat(Widget, UMGPropertyKeys::RenderOpacity, FloatValue))
+		if (!Wrapper.Render.RenderOpacity.IsSet() && Widget.Render.RenderOpacity.IsSet())
 		{
-			Wrapper.Render.RenderOpacity = FloatValue;
+			Wrapper.Render.RenderOpacity = Widget.Render.RenderOpacity.GetValue();
 		}
-		if (!Wrapper.Render.RenderAngle.IsSet()
-			&& Design2UMGWidgetNodeAccess::TryGetWidgetFloat(Widget, UMGPropertyKeys::RenderAngle, FloatValue))
+		if (!Wrapper.Render.RenderAngle.IsSet() && Widget.Render.RenderAngle.IsSet())
 		{
-			Wrapper.Render.RenderAngle = FloatValue;
+			Wrapper.Render.RenderAngle = Widget.Render.RenderAngle.GetValue();
 		}
-		if (!Wrapper.Render.RenderTransformScale.IsSet()
-			&& Design2UMGWidgetNodeAccess::TryGetWidgetVector2D(Widget, UMGPropertyKeys::RenderTransformScale, Vector2DValue))
+		if (!Wrapper.Render.RenderTransformScale.IsSet() && Widget.Render.RenderTransformScale.IsSet())
 		{
-			Wrapper.Render.RenderTransformScale = Vector2DValue;
+			Wrapper.Render.RenderTransformScale = Widget.Render.RenderTransformScale.GetValue();
 		}
-		if (!Wrapper.Render.RenderTransformPivot.IsSet()
-			&& Design2UMGWidgetNodeAccess::TryGetWidgetVector2D(Widget, UMGPropertyKeys::RenderTransformPivot, Vector2DValue))
+		if (!Wrapper.Render.RenderTransformPivot.IsSet() && Widget.Render.RenderTransformPivot.IsSet())
 		{
-			Wrapper.Render.RenderTransformPivot = Vector2DValue;
+			Wrapper.Render.RenderTransformPivot = Widget.Render.RenderTransformPivot.GetValue();
 		}
-		if (!Wrapper.Render.RenderTranslation.IsSet()
-			&& Design2UMGWidgetNodeAccess::TryGetWidgetVector2D(Widget, UMGPropertyKeys::RenderTranslation, Vector2DValue))
+		if (!Wrapper.Render.RenderTranslation.IsSet() && Widget.Render.RenderTranslation.IsSet())
 		{
-			Wrapper.Render.RenderTranslation = Vector2DValue;
+			Wrapper.Render.RenderTranslation = Widget.Render.RenderTranslation.GetValue();
 		}
 
 		Widget.Render = FUMGRenderStyleData();

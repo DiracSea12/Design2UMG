@@ -24,24 +24,15 @@ public:
 	 * Internally this sends initialize, extracts Mcp-Session-Id, then sends
 	 * notifications/initialized. IsConnected() returns true on success.
 	 */
-	bool Connect(const FString& Endpoint);
 	void ConnectAsync(const FString& Endpoint, TFunction<void(bool bSuccess)> OnComplete);
 
 	/** Disconnect the current session. */
 	void Disconnect();
 
 	/**
-	 * Call an MCP tool synchronously on the game thread.
-	 * OutResult receives the decoded result.content[0].text payload.
-	 * Concurrent calls are not supported.
-	 */
-	bool CallTool(const FString& ToolName,
-				  const TSharedPtr<FJsonObject>& Arguments,
-				  FString& OutResult);
-
-	/**
 	 * Call an MCP tool asynchronously.
-	 * The callback is invoked on the game thread with the same payload shape as CallTool.
+	 * The callback is invoked on the game thread with the decoded
+	 * result.content[0].text payload.
 	 * Concurrent calls are not supported.
 	 */
 	void CallToolAsync(const FString& ToolName,
@@ -57,14 +48,10 @@ public:
 private:
 	FString ServerEndpoint;
 	FString SessionId;
-	int32 NextRequestId = 1;
+	/** JSON-RPC id embedded in outgoing request bodies (resets on Disconnect). */
+	int32 NextRpcRequestId = 1;
 	TSharedRef<struct FMCPHttpClientState, ESPMode::ThreadSafe> State;
 
-	/** Send a JSON-RPC request and wait for the SSE response. */
-	bool SendRequest(const FString& Method,
-					 const TSharedPtr<FJsonObject>& Params,
-					 FString& OutResponseBody,
-					 bool bExpectResponse = true);
 	void SendRequestAsync(
 		const FString& Method,
 		const TSharedPtr<FJsonObject>& Params,

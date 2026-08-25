@@ -44,8 +44,8 @@ namespace
 		{
 			const FLinearColor BackgroundColor = Node.WidgetStyle.BackgroundColor.GetValue();
 			Style.Normal.TintColor = FSlateColor(BackgroundColor);
-			Style.Hovered.TintColor = FSlateColor(BackgroundColor * 1.1f);
-			Style.Pressed.TintColor = FSlateColor(BackgroundColor * 0.9f);
+			Style.Hovered.TintColor = FSlateColor(UMGPropertyApplierSupport::MakeHoverTintColor(BackgroundColor));
+			Style.Pressed.TintColor = FSlateColor(UMGPropertyApplierSupport::MakePressedTintColor(BackgroundColor));
 		}
 		if (Node.WidgetStyle.HoveredColor.IsSet())
 		{

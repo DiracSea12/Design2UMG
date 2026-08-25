@@ -6,6 +6,7 @@
 #include "Design2UMGSettings.h"
 
 class UClass;
+struct FDesignPreviewMaterializationSettingsSnapshot;
 
 struct FDesign2UMGGenerationSettingsSnapshot
 {
@@ -14,6 +15,8 @@ struct FDesign2UMGGenerationSettingsSnapshot
 	TArray<FWidgetClassOverride> ClassOverrides;
 
 	static FDesign2UMGGenerationSettingsSnapshot FromSettings(const UDesign2UMGSettings& Settings);
+	static FDesign2UMGGenerationSettingsSnapshot FromMaterializationSettings(
+		const FDesignPreviewMaterializationSettingsSnapshot& MaterializationSettings);
 	UClass* FindClassOverride(const FString& NodeName) const;
 };
 

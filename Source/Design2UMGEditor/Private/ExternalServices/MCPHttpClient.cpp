@@ -8,18 +8,18 @@
 #include "HttpManager.h"
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
-#include "HAL/ThreadSafeBool.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
-#include "Framework/Application/SlateApplication.h"
-#include "Misc/ScopedSlowTask.h"
 
 struct FMCPHttpClientState
 {
 	FHttpRequestPtr ActiveRequest;
-	int32 ActiveRequestId = 0;
-	int32 NextRequestId = 0;
+	/** Local active-request/cancel tracking id (not the JSON-RPC id). */
+	int32 ActiveTrackingRequestId = 0;
+	/** Monotonic across Disconnect(): late old-session callbacks can never collide with new-session ids. */
+	int32 NextTrackingRequestId = 0;
+	/** Cancel marks persist until their (possibly late) callback consumes them. */
 	TSet<int32> CancelledRequestIds;
 };
 
@@ -85,53 +85,6 @@ namespace
 		return HttpRequest;
 	}
 
-	struct FMCPBlockingRequestState
-	{
-		FThreadSafeBool bCompleted{false};
-		bool bSuccess = false;
-		FString ResponseBody;
-		FString NewSessionId;
-	};
-
-	bool WaitForMCPResponse(
-		const FString& Method,
-		const TSharedRef<IHttpRequest, ESPMode::ThreadSafe>& HttpRequest,
-		const TSharedRef<FMCPBlockingRequestState>& RequestState)
-	{
-		const double StartTime = FPlatformTime::Seconds();
-		const double Timeout = 30.0;
-		const float TotalSteps = static_cast<float>(Timeout / 0.01);
-
-		FScopedSlowTask SlowTask(TotalSteps,
-			FText::FromString(FString::Printf(TEXT("Design2UMG: Waiting for MCP response (%s)..."), *Method)));
-		SlowTask.MakeDialog(true);
-
-		while (!RequestState->bCompleted)
-		{
-			if (SlowTask.ShouldCancel())
-			{
-				UE_LOG(LogDesign2UMG, Warning, TEXT("MCPHttpClient: Cancelled by user for %s"), *Method);
-				HttpRequest->CancelRequest();
-				return false;
-			}
-			if (FPlatformTime::Seconds() - StartTime > Timeout)
-			{
-				UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: Timeout for %s"), *Method);
-				HttpRequest->CancelRequest();
-				return false;
-			}
-			FHttpModule::Get().GetHttpManager().Tick(0.01f);
-			if (FSlateApplication::IsInitialized())
-			{
-				FSlateApplication::Get().PumpMessages();
-				FSlateApplication::Get().Tick();
-			}
-			SlowTask.EnterProgressFrame(1.0f);
-			FPlatformProcess::Sleep(0.01f);
-		}
-
-		return true;
-	}
 }
 
 FMCPHttpClient::FMCPHttpClient()
@@ -142,33 +95,6 @@ FMCPHttpClient::FMCPHttpClient()
 FMCPHttpClient::~FMCPHttpClient()
 {
 	CancelRequests();
-}
-
-bool FMCPHttpClient::Connect(const FString& Endpoint)
-{
-	Disconnect();
-	ServerEndpoint = Endpoint;
-
-	// Step 1: POST initialize
-	FString ResponseBody;
-	if (!SendRequest(TEXT("initialize"), BuildInitializeParams(), ResponseBody))
-	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: initialize handshake failed"));
-		return false;
-	}
-
-	if (SessionId.IsEmpty())
-	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: No Mcp-Session-Id in initialize response"));
-		return false;
-	}
-
-	// Step 2: POST notifications/initialized
-	FString NotifyBody;
-	SendRequest(TEXT("notifications/initialized"), nullptr, NotifyBody, false);
-
-	UE_LOG(LogDesign2UMG, Log, TEXT("MCPHttpClient: Connected to %s"), *ServerEndpoint);
-	return true;
 }
 
 void FMCPHttpClient::ConnectAsync(const FString& Endpoint, TFunction<void(bool bSuccess)> OnComplete)
@@ -215,29 +141,35 @@ void FMCPHttpClient::Disconnect()
 	CancelRequests();
 	SessionId.Empty();
 	ServerEndpoint.Empty();
-	NextRequestId = 1;
+	// JSON-RPC ids are per-session protocol state and restart cleanly.
+	// Tracking ids intentionally stay MONOTONIC across sessions: a late-arriving
+	// callback from an old session can then never collide with a new session's
+	// request id, and its cancellation mark stays in the set until that late
+	// callback consumes it, so stale responses are always recognized as
+	// cancelled instead of being applied to the new session.
+	NextRpcRequestId = 1;
 }
 
 void FMCPHttpClient::CancelActiveRequest()
 {
 	if (State->ActiveRequest.IsValid())
 	{
-		State->CancelledRequestIds.Add(State->ActiveRequestId);
+		State->CancelledRequestIds.Add(State->ActiveTrackingRequestId);
 		State->ActiveRequest->CancelRequest();
 		State->ActiveRequest.Reset();
-		State->ActiveRequestId = 0;
+		State->ActiveTrackingRequestId = 0;
 		return;
 	}
 
 #if WITH_DEV_AUTOMATION_TESTS
-	if (GMCPHttpClientAutomationHooks.IsValid() && State->ActiveRequestId != 0)
+	if (GMCPHttpClientAutomationHooks.IsValid() && State->ActiveTrackingRequestId != 0)
 	{
-		State->CancelledRequestIds.Add(State->ActiveRequestId);
+		State->CancelledRequestIds.Add(State->ActiveTrackingRequestId);
 		if (GMCPHttpClientAutomationHooks->CancelRequest)
 		{
-			GMCPHttpClientAutomationHooks->CancelRequest(State->ActiveRequestId);
+			GMCPHttpClientAutomationHooks->CancelRequest(State->ActiveTrackingRequestId);
 		}
-		State->ActiveRequestId = 0;
+		State->ActiveTrackingRequestId = 0;
 	}
 #endif
 }
@@ -250,9 +182,9 @@ void FMCPHttpClient::SendRequestAsync(
 {
 	CancelActiveRequest();
 
-	const FString RequestBody = BuildRpcRequestBody(Method, Params, &NextRequestId);
-	const int32 RequestId = ++State->NextRequestId;
-	State->ActiveRequestId = RequestId;
+	const FString RequestBody = BuildRpcRequestBody(Method, Params, &NextRpcRequestId);
+	const int32 RequestId = ++State->NextTrackingRequestId;
+	State->ActiveTrackingRequestId = RequestId;
 
 #if WITH_DEV_AUTOMATION_TESTS
 	if (GMCPHttpClientAutomationHooks.IsValid() && GMCPHttpClientAutomationHooks->StartAsyncRequest)
@@ -268,9 +200,9 @@ void FMCPHttpClient::SendRequestAsync(
 				const FString& NewSessionId)
 			{
 				const bool bWasCancelled = State->CancelledRequestIds.Remove(RequestId) > 0;
-				if (State->ActiveRequestId == RequestId)
+				if (State->ActiveTrackingRequestId == RequestId)
 				{
-					State->ActiveRequestId = 0;
+					State->ActiveTrackingRequestId = 0;
 				}
 
 				if (bWasCancelled)
@@ -307,9 +239,9 @@ void FMCPHttpClient::SendRequestAsync(
 
 		if (!bStarted)
 		{
-			if (State->ActiveRequestId == RequestId)
+			if (State->ActiveTrackingRequestId == RequestId)
 			{
-				State->ActiveRequestId = 0;
+				State->ActiveTrackingRequestId = 0;
 			}
 			UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: ProcessRequest failed for %s"), *Method);
 			if (OnComplete)
@@ -327,10 +259,10 @@ void FMCPHttpClient::SendRequestAsync(
 		[State = State, RequestId, OnComplete, Method, bExpectResponse](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnectedSuccessfully)
 	{
 		const bool bWasCancelled = State->CancelledRequestIds.Remove(RequestId) > 0;
-		if (State->ActiveRequestId == RequestId)
+		if (State->ActiveTrackingRequestId == RequestId)
 		{
 			State->ActiveRequest.Reset();
-			State->ActiveRequestId = 0;
+			State->ActiveTrackingRequestId = 0;
 		}
 
 		if (bWasCancelled)
@@ -364,67 +296,15 @@ void FMCPHttpClient::SendRequestAsync(
 
 	if (!HttpRequest->ProcessRequest())
 	{
-		if (State->ActiveRequestId == RequestId)
+		if (State->ActiveTrackingRequestId == RequestId)
 		{
 			State->ActiveRequest.Reset();
-			State->ActiveRequestId = 0;
+			State->ActiveTrackingRequestId = 0;
 		}
 		UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: ProcessRequest failed for %s"), *Method);
 		if (OnComplete)
 			OnComplete(false, TEXT(""), TEXT(""));
 	}
-}
-
-bool FMCPHttpClient::SendRequest(const FString& Method,
-								 const TSharedPtr<FJsonObject>& Params,
-								 FString& OutResponseBody,
-								 bool bExpectResponse)
-{
-	const FString RequestBody = BuildRpcRequestBody(Method, Params, &NextRequestId);
-	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = CreatePostRequest(ServerEndpoint, SessionId, RequestBody);
-
-	// Keep request state on the heap so timeout/cancel cannot leave a dangling stack capture.
-	TSharedRef<FMCPBlockingRequestState> RequestState = MakeShared<FMCPBlockingRequestState>();
-
-	HttpRequest->OnProcessRequestComplete().BindLambda(
-		[RequestState, Method](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnectedSuccessfully)
-		{
-			if (bConnectedSuccessfully && Response.IsValid())
-			{
-				const int32 Code = Response->GetResponseCode();
-				if (Code >= 200 && Code < 300)
-				{
-					RequestState->NewSessionId = Response->GetHeader(TEXT("Mcp-Session-Id"));
-					RequestState->ResponseBody = Response->GetContentAsString();
-					RequestState->bSuccess = true;
-				}
-				else
-				{
-					UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: HTTP %d for %s"), Code, *Method);
-				}
-			}
-			else
-			{
-				UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: Connection failed for %s"), *Method);
-			}
-			RequestState->bCompleted = true;
-		});
-
-	if (!HttpRequest->ProcessRequest())
-	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: ProcessRequest failed for %s"), *Method);
-		return false;
-	}
-
-	if (!WaitForMCPResponse(Method, HttpRequest, RequestState))
-	{
-		return false;
-	}
-
-	if (!RequestState->NewSessionId.IsEmpty())
-		SessionId = RequestState->NewSessionId;
-	OutResponseBody = MoveTemp(RequestState->ResponseBody);
-	return RequestState->bSuccess;
 }
 
 bool FMCPHttpClient::ParseSSEResponse(const FString& SSEBody, TSharedPtr<FJsonObject>& OutResult)
@@ -483,38 +363,6 @@ bool FMCPHttpClient::ExtractToolResult(const TSharedPtr<FJsonObject>& Result, FS
 	return First->TryGetStringField(TEXT("text"), OutText);
 }
 
-bool FMCPHttpClient::CallTool(const FString& ToolName,
-							  const TSharedPtr<FJsonObject>& Arguments,
-							  FString& OutResult)
-{
-	if (!IsConnected())
-		return false;
-
-	TSharedPtr<FJsonObject> Params = MakeShared<FJsonObject>();
-	Params->SetStringField(TEXT("name"), ToolName);
-	if (Arguments.IsValid())
-		Params->SetObjectField(TEXT("arguments"), Arguments);
-
-	FString ResponseBody;
-	if (!SendRequest(TEXT("tools/call"), Params, ResponseBody))
-		return false;
-
-	TSharedPtr<FJsonObject> Result;
-	if (!ParseSSEResponse(ResponseBody, Result))
-	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: Failed to parse SSE response for %s"), *ToolName);
-		return false;
-	}
-
-	if (!ExtractToolResult(Result, OutResult))
-	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: No text content in result for %s"), *ToolName);
-		return false;
-	}
-
-	return true;
-}
-
 void FMCPHttpClient::CallToolAsync(const FString& ToolName,
 								   const TSharedPtr<FJsonObject>& Arguments,
 								   TFunction<void(bool bSuccess, const FString& Result)> OnComplete)
@@ -533,9 +381,9 @@ void FMCPHttpClient::CallToolAsync(const FString& ToolName,
 	if (Arguments.IsValid())
 		Params->SetObjectField(TEXT("arguments"), Arguments);
 
-	const FString RequestBody = BuildRpcRequestBody(TEXT("tools/call"), Params, &NextRequestId);
-	const int32 RequestId = ++State->NextRequestId;
-	State->ActiveRequestId = RequestId;
+	const FString RequestBody = BuildRpcRequestBody(TEXT("tools/call"), Params, &NextRpcRequestId);
+	const int32 RequestId = ++State->NextTrackingRequestId;
+	State->ActiveTrackingRequestId = RequestId;
 
 #if WITH_DEV_AUTOMATION_TESTS
 	if (GMCPHttpClientAutomationHooks.IsValid() && GMCPHttpClientAutomationHooks->StartAsyncRequest)
@@ -551,9 +399,9 @@ void FMCPHttpClient::CallToolAsync(const FString& ToolName,
 				const FString&)
 			{
 				const bool bWasCancelled = State->CancelledRequestIds.Remove(RequestId) > 0;
-				if (State->ActiveRequestId == RequestId)
+				if (State->ActiveTrackingRequestId == RequestId)
 				{
-					State->ActiveRequestId = 0;
+					State->ActiveTrackingRequestId = 0;
 				}
 
 				if (bWasCancelled)
@@ -592,9 +440,9 @@ void FMCPHttpClient::CallToolAsync(const FString& ToolName,
 
 		if (!bStarted)
 		{
-			if (State->ActiveRequestId == RequestId)
+			if (State->ActiveTrackingRequestId == RequestId)
 			{
-				State->ActiveRequestId = 0;
+				State->ActiveTrackingRequestId = 0;
 			}
 			UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: ProcessRequest failed for %s"), *ToolName);
 			if (OnComplete)
@@ -612,10 +460,10 @@ void FMCPHttpClient::CallToolAsync(const FString& ToolName,
 		[State = State, RequestId, OnComplete, ToolName](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnected)
 		{
 			const bool bWasCancelled = State->CancelledRequestIds.Remove(RequestId) > 0;
-			if (State->ActiveRequestId == RequestId)
+			if (State->ActiveTrackingRequestId == RequestId)
 			{
 				State->ActiveRequest.Reset();
-				State->ActiveRequestId = 0;
+				State->ActiveTrackingRequestId = 0;
 			}
 
 			if (bWasCancelled)
@@ -653,10 +501,10 @@ void FMCPHttpClient::CallToolAsync(const FString& ToolName,
 
 	if (!HttpRequest->ProcessRequest())
 	{
-		if (State->ActiveRequestId == RequestId)
+		if (State->ActiveTrackingRequestId == RequestId)
 		{
 			State->ActiveRequest.Reset();
-			State->ActiveRequestId = 0;
+			State->ActiveTrackingRequestId = 0;
 		}
 		UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: ProcessRequest failed for %s"), *ToolName);
 		if (OnComplete)

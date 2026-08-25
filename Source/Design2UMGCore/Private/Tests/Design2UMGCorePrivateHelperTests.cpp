@@ -9,7 +9,6 @@
 #include "DesignVariableResolver.h"
 #include "Dom/JsonObject.h"
 #include "Fonts/SlateFontInfo.h"
-#include "LayoutFixer.h"
 #include "LayoutMapper.h"
 #include "SizeEstimator.h"
 #include "TextMeasurementInternal.h"
@@ -1557,29 +1556,6 @@ bool FGradientTypedPayloadMaterialParamsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLayoutFixerConservatismTest,
-	"Design2UMG.LayoutFixer.ConservatismCheck",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FLayoutFixerConservatismTest::RunTest(const FString& Parameters)
-{
-	FFixerPreset Preset;
-	Preset.DesignSize = FIntPoint(1920, 1080);
-	Preset.SnapPx = 4;
-	FFixerWidgetNode Root;
-	Root.Bounds = {0, 0, 1, 1};
-	FFixerWidgetNode Child1;
-	Child1.Bounds = {0, 0, 0.1f, 0.1f};
-	FFixerWidgetNode Child2;
-	Child2.Bounds = {0.5f, 0, 0.1f, 0.1f};
-	Root.Children.Add(Child1);
-	Root.Children.Add(Child2);
-	TArray<FFixerLogEntry> Log;
-	FFixerStats Stats;
-	LayoutFixer::FixWidgetTree(Root, Preset, Log, &Stats);
-	TestEqual(TEXT("RolledBack should be non-negative"), Stats.RolledBack >= 0, true);
-	return true;
-}
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLayoutMapperSizeConstraintFusionTest,
 	"Design2UMG.LayoutMapper.SizeConstraintFusion",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -1609,6 +1585,119 @@ bool FLayoutMapperSizeConstraintFusionTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Unsupported widget stays wrapped"), LayoutMapper::TryFuseSizeConstraints(Unsupported, SizeBox));
 	TestEqual(TEXT("Unsupported type is unchanged"), Unsupported.Type, FString(TEXT("EditableTextBox")));
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperTypedDirectReadEquivalenceTest,
+	"Design2UMG.VisualMapper.TypedDirectReadEquivalence",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperTypedDirectReadEquivalenceTest::RunTest(const FString& Parameters)
+{
+	// Locks the typed-direct-read migration of the border/wrapper transfer helpers:
+	// values must arrive at the destination bit-identically (including sub-1e-6
+	// precision that a serialize->parse roundtrip would quantize) and presence
+	// rules must match the descriptor contract (absent stays absent).
+	TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
+	Node->Type = EDesignNodeType::Frame;
+	Node->Transform.Opacity = 1.0f;
+
+	const float SubQuantumOpacity = 0.123456789f; // More decimals than SanitizeFloat's %f keeps.
+	const FLinearColor PreciseColor(0.1111111f, 0.2222222f, 0.3333333f, 0.4444444f);
+
+	FUMGWidgetNode Widget;
+	Widget.Type = TEXT("Border");
+	Widget.Id = TEXT("direct_read_panel");
+	Widget.Name = TEXT("DirectReadPanel");
+	Widget.Bounds.W = 200.0f;
+	Widget.Bounds.H = 80.0f;
+	Widget.Brush.BrushColor = PreciseColor;
+	Widget.Brush.OutlineColor = PreciseColor;
+	Widget.Render.RenderOpacity = SubQuantumOpacity;
+	Widget.Render.RenderTransformScale = FVector2D(SubQuantumOpacity, 2.0f);
+
+	FUMGWidgetNode Wrapped = VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
+
+	// Direct typed reads keep full precision across the border transfer.
+	TestTrue(TEXT("Border BrushColor keeps full precision"),
+		Wrapped.Brush.BrushColor.IsSet()
+		&& Wrapped.Brush.BrushColor.GetValue().Equals(PreciseColor));
+	TestTrue(TEXT("Border OutlineColor keeps full precision"),
+		Wrapped.Brush.OutlineColor.IsSet()
+		&& Wrapped.Brush.OutlineColor.GetValue().Equals(PreciseColor));
+	TestTrue(TEXT("Border RenderOpacity keeps sub-quantum precision"),
+		Wrapped.Render.RenderOpacity.IsSet()
+		&& FMath::Abs(Wrapped.Render.RenderOpacity.GetValue() - SubQuantumOpacity) < 1e-9f);
+	TestTrue(TEXT("Border RenderTransformScale keeps full precision"),
+		Wrapped.Render.RenderTransformScale.IsSet()
+		&& Wrapped.Render.RenderTransformScale.GetValue().Equals(FVector2D(SubQuantumOpacity, 2.0f)));
+
+	// The inner widget loses the transferred fields entirely (presence rules).
+	const FUMGWidgetNode& Inner = Wrapped.Children[0];
+	TestFalse(TEXT("Inner widget does not keep BrushColor"), Inner.Brush.BrushColor.IsSet());
+	TestFalse(TEXT("Inner widget does not keep RenderOpacity"), Inner.Render.RenderOpacity.IsSet());
+
+	// Descriptor serialization of the transferred value still matches the
+	// historical string form so downstream JSON/diagnostic seams stay stable.
+	TestEqual(
+		TEXT("Descriptor color output unchanged after direct read migration"),
+		GetWidgetProperty(Wrapped, TEXT("BrushColor")),
+		TEXT("#5E829C71"));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FProceduralResourceAccessExplicitRefEquivalenceTest,
+	"Design2UMG.ProceduralResourceAccess.ExplicitRefEquivalence",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FProceduralResourceAccessExplicitRefEquivalenceTest::RunTest(const FString& Parameters)
+{
+	// Explicit MaterialRef path: the migrated direct reads must reproduce the
+	// descriptor precedence (gradient > explicit ref) and reject nodes with no
+	// material source exactly like the previous descriptor lookup did.
+	FUMGWidgetNode ExplicitRefNode;
+	ExplicitRefNode.Type = TEXT("Image");
+	ExplicitRefNode.WidgetStyle.WidthOverride = 320.5f;
+	ExplicitRefNode.WidgetStyle.HeightOverride = 64.25f;
+	ExplicitRefNode.Shadow.ShadowBlur = 7.5f;
+	ExplicitRefNode.Brush.MaterialRef = TEXT("roundedrect");
+	ExplicitRefNode.Brush.MaterialParams = TEXT("{\"Color\":\"#01020304\"}");
+	ExplicitRefNode.Brush.BrushColor = FLinearColor(0.05f, 0.1f, 0.15f, 0.2f);
+
+	FUMGProceduralResourceRequest ExplicitRequest;
+	TestTrue(TEXT("Explicit material ref builds a request"),
+		Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(ExplicitRefNode, ExplicitRequest));
+	TestEqual(TEXT("Explicit ref material ref"), ExplicitRequest.MaterialRef, FString(TEXT("roundedrect")));
+	TestEqual(TEXT("Explicit ref material params"), ExplicitRequest.MaterialParams.Get(FString()), TEXT("{\"Color\":\"#01020304\"}"));
+	TestTrue(TEXT("Width override read directly"),
+		ExplicitRequest.WidthOverride.IsSet() && FMath::Abs(ExplicitRequest.WidthOverride.GetValue() - 320.5f) < 1e-9f);
+	TestTrue(TEXT("Height override read directly"),
+		ExplicitRequest.HeightOverride.IsSet() && FMath::Abs(ExplicitRequest.HeightOverride.GetValue() - 64.25f) < 1e-9f);
+	TestTrue(TEXT("Shadow blur read directly"),
+		ExplicitRequest.ShadowBlur.IsSet() && FMath::Abs(ExplicitRequest.ShadowBlur.GetValue() - 7.5f) < 1e-9f);
+	TestTrue(TEXT("Brush color read directly"),
+		ExplicitRequest.BrushColor.IsSet()
+		&& ExplicitRequest.BrushColor.GetValue().Equals(FLinearColor(0.05f, 0.1f, 0.15f, 0.2f)));
+
+	// No material source at all -> request rejected (same as the descriptor gate).
+	FUMGWidgetNode NoMaterialNode;
+	NoMaterialNode.Type = TEXT("Image");
+	NoMaterialNode.Brush.BrushColor = FLinearColor::Red;
+	FUMGProceduralResourceRequest RejectedRequest;
+	TestFalse(TEXT("Node without any material source is rejected"),
+		Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(NoMaterialNode, RejectedRequest));
+
+	// Gradient wins over an also-present explicit ref (descriptor precedence).
+	FUMGWidgetNode GradientPrecedenceNode;
+	GradientPrecedenceNode.Type = TEXT("Image");
+	GradientPrecedenceNode.Brush.Gradient.Type = TEXT("Radial");
+	GradientPrecedenceNode.Brush.Gradient.Center = FVector2D::ZeroVector;
+	GradientPrecedenceNode.Brush.Gradient.Size = FVector2D(1.0f, 1.0f);
+	GradientPrecedenceNode.Brush.Gradient.Stops = { { FLinearColor::White, 0.0f }, { FLinearColor::Black, 1.0f } };
+	GradientPrecedenceNode.Brush.MaterialRef = TEXT("roundedrect");
+	FUMGProceduralResourceRequest GradientRequest;
+	TestTrue(TEXT("Gradient node builds a request"),
+		Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(GradientPrecedenceNode, GradientRequest));
+	TestEqual(TEXT("Gradient takes precedence over explicit ref"),
+		GradientRequest.MaterialRef, FString(TEXT("radialgradient")));
 	return true;
 }
 

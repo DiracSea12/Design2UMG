@@ -14,7 +14,7 @@ Pencil .pen / Figma JSON
   -> Design2UMGConverter
   -> VisualMapper + LayoutMapper
   -> FUMGWidgetNode IR
-  -> LayoutFixer + LayoutCalculator
+  -> LayoutCalculator
   -> UMGGenerator
   -> Widget Blueprint
 ```
@@ -34,7 +34,7 @@ Pencil .pen / Figma JSON
 
 ### Bounds 是布局投影的事实来源
 
-`LayoutFixer` 调整 bounds-level intent，`LayoutCalculator` 再把最终 bounds 转成 anchors 和 offsets。
+布局投影以 bounds 为事实来源，`LayoutCalculator` 把最终 bounds 转成 anchors 和 offsets。
 
 ### Typed data 是主 contract
 

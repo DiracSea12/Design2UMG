@@ -194,7 +194,7 @@ See [Docs/Architecture.md](Docs/Architecture.md) for the full pipeline, module b
 .pen / Figma / MCP
   -> Parser / Bridge
   -> Design2UMGConverter
-  -> LayoutFixer + LayoutCalculator
+  -> LayoutCalculator
   -> UMGGenerator
 ```
 

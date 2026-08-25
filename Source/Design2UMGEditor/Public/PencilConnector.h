@@ -25,8 +25,7 @@ public:
 	/** Detect the Pencil application name from settings, ~/.pencil/apps, and running IDE processes. */
 	static FString DetectAppName();
 
-	/** Launch the MCP server and connect to it. Port 0 chooses automatically. */
-	bool Launch(int32 Port = 0);
+	/** Launch the MCP server and connect to it asynchronously. Port 0 chooses automatically. */
 	void LaunchAsync(int32 Port, TFunction<void(bool bSuccess)> OnComplete);
 
 	/** Shut down the MCP server child process. */

@@ -129,6 +129,11 @@ namespace
 		}
 
 		const float AvgHeight = HeightSum / Items.Num();
+		// Row-grouping threshold: two items share a row when their centers are
+		// within half the average item height. 0.5 keeps same-baseline rows
+		// together while separating rows whose vertical gap exceeds half a row;
+		// the 0.01 floor guards degenerate all-tiny layouts. Empirical value kept
+		// from the original auto-grid work - change only with formal-gate evidence.
 		const float RowThreshold = FMath::Max(AvgHeight * 0.5f, 0.01f);
 
 		Items.Sort([](const FAutoGridItem& A, const FAutoGridItem& B)

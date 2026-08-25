@@ -19,6 +19,8 @@ These files support release governance, historical-best validation, or internal 
 - `design2umg_auto_verify_batch.py`
 - `design2umg_determinism_smoke.py`
 - `design2umg_determinism_smoke_selftest.py`
+- `design2umg_fresh_process_reload_gate.py`
+- `design2umg_fresh_process_reload_gate_selftest.py`
 - `design2umg_rebuild_admissible_best.py`
 - `design2umg_validate_run.py`
 - `design2umg_render_rule.py`

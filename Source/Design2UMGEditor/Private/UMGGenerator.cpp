@@ -339,7 +339,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 
 	const UMGGeneratorRootHandoff::FPreparedRoot PreparedRoot =
 		UMGGeneratorRootHandoff::PrepareRootForBuild(WidgetData, PackagePath, AssetName);
-	const FUMGWidgetNode& FixedRoot = PreparedRoot.Root;
+	const FUMGWidgetNode& PreparedRootRef = PreparedRoot.Root;
 	const FIntPoint& DesignSize = PreparedRoot.DesignSize;
 	if (DesignSize.X <= 1 || DesignSize.Y <= 1)
 	{
@@ -389,8 +389,8 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 			for (const auto& Child : Node.Children)
 				DumpNode(Child, Depth + 1);
 		};
-		UE_LOG(LogDesign2UMG, Verbose, TEXT("=== Widget Tree Dump (after Fixer) ==="));
-		DumpNode(FixedRoot, 0);
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("=== Widget Tree Dump ==="));
+		DumpNode(PreparedRootRef, 0);
 		UE_LOG(LogDesign2UMG, Verbose, TEXT("=== End Widget Tree Dump ==="));
 	}
 
@@ -405,9 +405,9 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 			*PackagePath,
 			*AssetName,
 			*WBP->GetPathName(),
-			*FixedRoot.Type,
-			*FixedRoot.Name,
-			*FixedRoot.Id);
+			*PreparedRootRef.Type,
+			*PreparedRootRef.Name,
+			*PreparedRootRef.Id);
 		GeneratedAssetLifecycle::DiscardUnsavedAsset(WBP);
 		return nullptr;
 	}
@@ -415,7 +415,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 	switch (EffectiveGenerationSettings.PrototypeNavigationGenerationMode)
 	{
 	case EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension:
-		UMGPrototypeAnimationBuilder::GenerateNavigationAnimations(WBP, FixedRoot, NavigationData);
+		UMGPrototypeAnimationBuilder::GenerateNavigationAnimations(WBP, PreparedRootRef, NavigationData);
 		UMGPrototypeAnimationBuilder::ConfigureNavigationExtension(WBP, NavigationData);
 		break;
 	case EDesign2UMGPrototypeNavigationGenerationMode::TagHelper:

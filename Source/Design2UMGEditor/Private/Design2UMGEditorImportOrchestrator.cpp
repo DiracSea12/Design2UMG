@@ -30,15 +30,30 @@
 
 namespace
 {
-	void RequestExitIfUnattended(const TCHAR* Message)
+	/**
+	 * Unattended exit policy lives at the command/orchestration boundary:
+	 * business import functions report success/failure, and this single helper
+	 * turns the final outcome into an engine exit status (0 = ok, 1 = failed).
+	 * Returns true when an exit was requested (unattended mode only).
+	 */
+	bool ExitUnattendedWithStatus(const bool bSuccess, const TCHAR* Message)
 	{
 		if (!FApp::IsUnattended())
 		{
-			return;
+			return false;
 		}
 
 		UE_LOG(LogDesign2UMG, Log, TEXT("%s"), Message);
-		FPlatformMisc::RequestExit(false);
+		FPlatformMisc::RequestExitWithStatus(false, bSuccess ? 0 : 1);
+		return true;
+	}
+
+	// Unattended sessions must never open an interactive preview: the preview
+	// path reports success as soon as the window opens, so exiting right after
+	// would end the process before any asset is actually generated.
+	bool ShouldUsePreviewInCurrentMode(const bool bRequestedPreview)
+	{
+		return bRequestedPreview && !FApp::IsUnattended();
 	}
 
 	bool LoadTextFileOrLog(const FString& FilePath, FString& OutContents)
@@ -476,7 +491,7 @@ namespace
 		if (!bSuccess)
 		{
 			ShowNotification(LOCTEXT("FigmaGetFileFailed", "Design2UMG: Figma API request failed"), SNotificationItem::CS_Fail);
-			RequestExitIfUnattended(TEXT("Unattended mode: requesting engine exit after figma api request failed"));
+			ExitUnattendedWithStatus(false, TEXT("Unattended mode: figma api request failed; exiting with status 1"));
 			return;
 		}
 
@@ -484,7 +499,7 @@ namespace
 		if (!Design2UMGEditorDesignSourceRegistry::TryParseSourceDocument(TEXT("Figma"), Body, ParsedDocument))
 		{
 			ShowNotification(LOCTEXT("FigmaParseFailed", "Design2UMG: Failed to parse Figma file"), SNotificationItem::CS_Fail);
-			RequestExitIfUnattended(TEXT("Unattended mode: requesting engine exit after figma parse failed"));
+			ExitUnattendedWithStatus(false, TEXT("Unattended mode: figma parse failed; exiting with status 1"));
 			return;
 		}
 
@@ -548,7 +563,7 @@ namespace
 		if (AnalysisResult.Data.RootWidget.Children.Num() == 0)
 		{
 			ShowNotification(LOCTEXT("FigmaNoFrames", "Design2UMG: No frames found in Figma file"), SNotificationItem::CS_Fail);
-			RequestExitIfUnattended(TEXT("Unattended mode: requesting engine exit after figma no frames"));
+			ExitUnattendedWithStatus(false, TEXT("Unattended mode: figma no frames; exiting with status 1"));
 			return;
 		}
 
@@ -564,9 +579,12 @@ namespace
 			!FApp::IsUnattended(),
 			EDesignBlueprintGenerationMode::BlueprintAndPng,
 			SettingsSnapshot);
-		Design2UMGEditorImportRequestSetup::ExecuteImportWithSettings(*Document, ImportRequest);
+		const FDesignImportExecutionResult ExecutionResult =
+			Design2UMGEditorImportRequestSetup::ExecuteImportWithSettings(*Document, ImportRequest);
 
-		RequestExitIfUnattended(TEXT("Unattended mode: requesting engine exit after figma import"));
+		ExitUnattendedWithStatus(
+			ExecutionResult.bSucceeded,
+			TEXT("Unattended mode: figma import finished; exiting"));
 	}
 }
 
@@ -576,94 +594,130 @@ namespace Design2UMGEditorImportOrchestrator
 	{
 		FString NodesContents;
 		FString VarsContents;
+		bool bOk = true;
 		if (!LoadTextFileOrLog(Request.NodesPath, NodesContents) || !LoadTextFileOrLog(Request.VarsPath, VarsContents))
 		{
-			return;
+			bOk = false;
 		}
 
 		const FDesign2UMGImportSettingsSnapshot SettingsSnapshot =
 			Design2UMGEditorImportRequestSetup::CaptureSettingsSnapshot();
 		FUMGWidgetData Data;
-		if (!FPenMCPBridge::ConvertFromMCP(NodesContents, VarsContents, SettingsSnapshot, Data, Request.TargetNodeId))
+		if (bOk && !FPenMCPBridge::ConvertFromMCP(NodesContents, VarsContents, SettingsSnapshot, Data, Request.TargetNodeId))
 		{
 			UE_LOG(LogDesign2UMG, Error, TEXT("[FAIL] PenConvert failed"));
-			return;
+			bOk = false;
 		}
 
-		UE_LOG(LogDesign2UMG, Log, TEXT("[OK] PenConvert succeeded, root children: %d"), Data.RootWidget.Children.Num());
-		for (int32 Index = 0; Index < Data.RootWidget.Children.Num(); ++Index)
+		if (bOk)
 		{
-			const FUMGWidgetNode& Child = Data.RootWidget.Children[Index];
-			UE_LOG(LogDesign2UMG, Log, TEXT("  [%d] %s (%s)"), Index, *Child.Name, *Child.Type);
+			UE_LOG(LogDesign2UMG, Log, TEXT("[OK] PenConvert succeeded, root children: %d"), Data.RootWidget.Children.Num());
+			for (int32 Index = 0; Index < Data.RootWidget.Children.Num(); ++Index)
+			{
+				const FUMGWidgetNode& Child = Data.RootWidget.Children[Index];
+				UE_LOG(LogDesign2UMG, Log, TEXT("  [%d] %s (%s)"), Index, *Child.Name, *Child.Type);
+			}
 		}
 
-		FDesignImportRequest ImportRequest =
-			Design2UMGEditorImportRequestSetup::MakePenImportRequest(Request.OutputPath, Request.bUsePreview, true, SettingsSnapshot);
-		Design2UMGEditorImportRequestSetup::ExecuteImportWithSettings(Data, ImportRequest);
-		RequestExitIfUnattended(TEXT("Unattended mode: requesting engine exit after pen convert"));
+		const FDesignImportExecutionResult ExecutionResult = bOk
+			? Design2UMGEditorImportRequestSetup::ExecuteImportWithSettings(
+				Data,
+				Design2UMGEditorImportRequestSetup::MakePenImportRequest(
+					Request.OutputPath, ShouldUsePreviewInCurrentMode(Request.bUsePreview), true, SettingsSnapshot))
+			: FDesignImportExecutionResult();
+
+		ExitUnattendedWithStatus(
+			bOk && ExecutionResult.bSucceeded,
+			TEXT("Unattended mode: pen convert finished; exiting"));
 	}
 
 	void RunPenImport(const FPenImportRequest& Request)
 	{
+		bool bOk = true;
+		FDesignImportExecutionResult ExecutionResult;
+
 		if (!FPaths::FileExists(Request.FilePath))
 		{
 			UE_LOG(LogDesign2UMG, Error, TEXT("File not found: %s"), *Request.FilePath);
-			return;
+			bOk = false;
 		}
-
-		const FDesign2UMGImportSettingsSnapshot SettingsSnapshot =
-			Design2UMGEditorImportRequestSetup::CaptureSettingsSnapshot();
-		if (Request.TargetNodeId.IsEmpty())
+		else if (FApp::IsUnattended() && Request.TargetNodeId.IsEmpty())
 		{
-			ImportPenFileWithFrameSelection(Request, SettingsSnapshot);
+			// Unattended runs must name the frame up front; the interactive
+			// Frame Selector can never appear in an unattended session.
+			UE_LOG(LogDesign2UMG, Error, TEXT("Unattended import requires --node=<id> for %s"), *Request.FilePath);
+			bOk = false;
 		}
 		else
 		{
-			Design2UMGEditorImportRequestSetup::ExecutePenFileImportWithSettings(
-				Request.FilePath,
-				Request.TargetNodeId,
-				Design2UMGEditorImportRequestSetup::MakePenImportRequest(
-					Request.OutputPath,
-					Request.bUsePreview,
-					Request.bRenderPng,
-					SettingsSnapshot));
+			const FDesign2UMGImportSettingsSnapshot SettingsSnapshot =
+				Design2UMGEditorImportRequestSetup::CaptureSettingsSnapshot();
+			if (Request.TargetNodeId.IsEmpty())
+			{
+				ImportPenFileWithFrameSelection(Request, SettingsSnapshot);
+			}
+			else
+			{
+				ExecutionResult = Design2UMGEditorImportRequestSetup::ExecutePenFileImportWithSettings(
+					Request.FilePath,
+					Request.TargetNodeId,
+					Design2UMGEditorImportRequestSetup::MakePenImportRequest(
+						Request.OutputPath,
+						ShouldUsePreviewInCurrentMode(Request.bUsePreview),
+						Request.bRenderPng,
+						SettingsSnapshot));
+				bOk = ExecutionResult.bSucceeded;
+			}
 		}
 
-		RequestExitIfUnattended(TEXT("Unattended mode: requesting engine exit after import"));
+		ExitUnattendedWithStatus(
+			bOk,
+			TEXT("Unattended mode: pen import finished; exiting"));
 	}
 
 	void RunRegisteredSourceImport(const FRegisteredSourceImportRequest& Request)
 	{
+		bool bOk = true;
+
 		FString JsonContents;
 		if (!LoadTextFileOrLog(Request.JsonPath, JsonContents))
 		{
-			return;
+			bOk = false;
 		}
 
-		const FDesign2UMGImportSettingsSnapshot SettingsSnapshot =
-			Design2UMGEditorImportRequestSetup::CaptureSettingsSnapshot();
 		FUMGWidgetData Data;
-		if (!Design2UMGEditorDesignSourceRegistry::TryConvertSource(
-			Request.SourceId,
-			JsonContents,
-			SettingsSnapshot,
-			Data))
+		if (bOk)
 		{
-			UE_LOG(LogDesign2UMG, Error, TEXT("[FAIL] ImportSource convert failed for: %s"), *Request.SourceId.ToString());
-			return;
+			const FDesign2UMGImportSettingsSnapshot SettingsSnapshot =
+				Design2UMGEditorImportRequestSetup::CaptureSettingsSnapshot();
+			if (!Design2UMGEditorDesignSourceRegistry::TryConvertSource(
+				Request.SourceId,
+				JsonContents,
+				SettingsSnapshot,
+				Data))
+			{
+				UE_LOG(LogDesign2UMG, Error, TEXT("[FAIL] ImportSource convert failed for: %s"), *Request.SourceId.ToString());
+				bOk = false;
+			}
+			else
+			{
+				UE_LOG(LogDesign2UMG, Log, TEXT("[OK] ImportSource succeeded (%s), root children: %d"), *Request.SourceId.ToString(), Data.RootWidget.Children.Num());
+
+				FDesignImportRequest ImportRequest = Design2UMGEditorImportRequestSetup::MakeImportRequest(
+					Request.OutputPath,
+					LOCTEXT("ImportSourcePreviewTitle", "Design2UMG Import Preview"),
+					ShouldUsePreviewInCurrentMode(Request.bUsePreview),
+					EDesignBlueprintGenerationMode::BlueprintAndPng,
+					SettingsSnapshot);
+				const FDesignImportExecutionResult ExecutionResult =
+					Design2UMGEditorImportRequestSetup::ExecuteImportWithSettings(Data, ImportRequest);
+				bOk = ExecutionResult.bSucceeded;
+			}
 		}
 
-		UE_LOG(LogDesign2UMG, Log, TEXT("[OK] ImportSource succeeded (%s), root children: %d"), *Request.SourceId.ToString(), Data.RootWidget.Children.Num());
-
-		FDesignImportRequest ImportRequest = Design2UMGEditorImportRequestSetup::MakeImportRequest(
-			Request.OutputPath,
-			LOCTEXT("ImportSourcePreviewTitle", "Design2UMG Import Preview"),
-			Request.bUsePreview,
-			EDesignBlueprintGenerationMode::BlueprintAndPng,
-			SettingsSnapshot);
-		Design2UMGEditorImportRequestSetup::ExecuteImportWithSettings(Data, ImportRequest);
-
-		RequestExitIfUnattended(TEXT("Unattended mode: requesting engine exit after import source"));
+		ExitUnattendedWithStatus(
+			bOk,
+			TEXT("Unattended mode: import source finished; exiting"));
 	}
 
 	void RunFigmaImport(const FString& FileUrl, const FString& Token)
@@ -672,7 +726,7 @@ namespace Design2UMGEditorImportOrchestrator
 		if (!FFigmaParser::ExtractFileKey(FileUrl, FileKey))
 		{
 			ShowNotification(LOCTEXT("FigmaInvalidUrl", "Design2UMG: Invalid Figma URL or file key"), SNotificationItem::CS_Fail);
-			RequestExitIfUnattended(TEXT("Unattended mode: requesting engine exit after figma url validation failed"));
+			ExitUnattendedWithStatus(false, TEXT("Unattended mode: figma url validation failed; exiting with status 1"));
 			return;
 		}
 
@@ -683,37 +737,44 @@ namespace Design2UMGEditorImportOrchestrator
 
 	void RunLocalFigmaImport(const FLocalFigmaImportRequest& Request)
 	{
+		bool bOk = true;
+
 		if (!FPaths::FileExists(Request.JsonFilePath))
 		{
 			UE_LOG(LogDesign2UMG, Error, TEXT("File not found: %s"), *Request.JsonFilePath);
-			return;
+			bOk = false;
 		}
 
 		FDesignDocument Document;
 		FString ErrorMessage;
-		if (!Design2UMGLocalFigmaImport::LoadLocalFigmaDocument(Request.JsonFilePath, Document, ErrorMessage))
+		if (bOk && !Design2UMGLocalFigmaImport::LoadLocalFigmaDocument(Request.JsonFilePath, Document, ErrorMessage))
 		{
 			ShowNotification(LOCTEXT("LocalFigmaImportFailed", "Design2UMG: Failed to import local Figma export"), SNotificationItem::CS_Fail);
 			UE_LOG(LogDesign2UMG, Error, TEXT("%s"), *ErrorMessage);
-			return;
+			bOk = false;
 		}
 
-		const FString FinalOutputPath = Request.OutputPath.IsEmpty()
-			? FString::Printf(TEXT("/Game/Design2UMG/Figma_%s"), *FDateTime::Now().ToString(TEXT("%m%d_%H%M%S")))
-			: Request.OutputPath;
+		if (bOk)
+		{
+			const FString FinalOutputPath = Request.OutputPath.IsEmpty()
+				? FString::Printf(TEXT("/Game/Design2UMG/Figma_%s"), *FDateTime::Now().ToString(TEXT("%m%d_%H%M%S")))
+				: Request.OutputPath;
 
-		const FDesign2UMGImportSettingsSnapshot SettingsSnapshot =
-			Design2UMGEditorImportRequestSetup::CaptureSettingsSnapshot();
-		FDesignImportRequest ImportRequest = Design2UMGEditorImportRequestSetup::MakeImportRequest(
-			FinalOutputPath,
-			LOCTEXT("LocalFigmaPreviewTitle", "Design2UMG Local Figma Preview"),
-			Request.bUsePreview && !FApp::IsUnattended(),
-			EDesignBlueprintGenerationMode::BlueprintAndPng,
-			SettingsSnapshot,
-			false);
-		Design2UMGEditorImportRequestSetup::ExecuteImportWithSettings(Document, ImportRequest);
+			const FDesign2UMGImportSettingsSnapshot SettingsSnapshot =
+				Design2UMGEditorImportRequestSetup::CaptureSettingsSnapshot();
+			FDesignImportRequest ImportRequest = Design2UMGEditorImportRequestSetup::MakeImportRequest(
+				FinalOutputPath,
+				LOCTEXT("LocalFigmaPreviewTitle", "Design2UMG Local Figma Preview"),
+				ShouldUsePreviewInCurrentMode(Request.bUsePreview),
+				EDesignBlueprintGenerationMode::BlueprintAndPng,
+				SettingsSnapshot,
+				false);
+			bOk = Design2UMGEditorImportRequestSetup::ExecuteImportWithSettings(Document, ImportRequest).bSucceeded;
+		}
 
-		RequestExitIfUnattended(TEXT("Unattended mode: requesting engine exit after local figma import"));
+		ExitUnattendedWithStatus(
+			bOk,
+			TEXT("Unattended mode: local figma import finished; exiting"));
 	}
 
 	void ConnectToPencilAndImport()

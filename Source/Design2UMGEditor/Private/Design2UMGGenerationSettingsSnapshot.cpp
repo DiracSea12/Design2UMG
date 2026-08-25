@@ -3,6 +3,7 @@
 #include "Design2UMGGenerationSettingsSnapshot.h"
 
 #include "Components/Widget.h"
+#include "DesignPreviewContracts.h"
 
 namespace
 {
@@ -15,6 +16,27 @@ FDesign2UMGGenerationSettingsSnapshot FDesign2UMGGenerationSettingsSnapshot::Fro
 	Snapshot.PrototypeNavigationGenerationMode = Settings.PrototypeNavigationGenerationMode;
 	Snapshot.ClassOverrides = Settings.ClassOverrides;
 	return Snapshot;
+}
+
+// Single copy boundary for the preview narrowing step. When a new generation
+// field must reach preview materialization, copy it here once.
+FDesignPreviewMaterializationSettingsSnapshot FDesignPreviewMaterializationSettingsSnapshot::FromGenerationSettings(
+	const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings)
+{
+	FDesignPreviewMaterializationSettingsSnapshot Snapshot;
+	Snapshot.ClassOverrides = GenerationSettings.ClassOverrides;
+	return Snapshot;
+}
+
+// Single copy boundary for the reverse (materialization -> generation) narrowing
+// step. When a new generation field must round-trip through preview approval,
+// copy it here once.
+FDesign2UMGGenerationSettingsSnapshot FDesign2UMGGenerationSettingsSnapshot::FromMaterializationSettings(
+	const FDesignPreviewMaterializationSettingsSnapshot& MaterializationSettings)
+{
+	FDesign2UMGGenerationSettingsSnapshot GenerationSettings;
+	GenerationSettings.ClassOverrides = MaterializationSettings.ClassOverrides;
+	return GenerationSettings;
 }
 
 UClass* FDesign2UMGGenerationSettingsSnapshot::FindClassOverride(const FString& NodeName) const

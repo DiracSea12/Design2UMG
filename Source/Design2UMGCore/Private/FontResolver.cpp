@@ -85,13 +85,16 @@ namespace
 		FString Key = InName.ToLower().TrimStartAndEnd();
 		Key.ReplaceInline(TEXT(" "), TEXT("-"));
 		Key.ReplaceInline(TEXT("_"), TEXT("-"));
-		if (Key == TEXT("more-horizontal"))
+
+		// Static alias table: design-source icon names that map onto different
+		// glyphs in the bundled icon fonts. Extend this table, not the lookup.
+		static const TMap<FString, FString> IconNameAliases = {
+			{TEXT("more-horizontal"), TEXT("ellipsis")},
+			{TEXT("more-vertical"), TEXT("ellipsis-vertical")},
+		};
+		if (const FString* Alias = IconNameAliases.Find(Key))
 		{
-			return TEXT("ellipsis");
-		}
-		if (Key == TEXT("more-vertical"))
-		{
-			return TEXT("ellipsis-vertical");
+			return *Alias;
 		}
 		return Key;
 	}
@@ -794,6 +797,11 @@ FString FFontResolver::FindFontAssetPath(const FString& FontFamily)
 		GFontAssetCache.FindOrAdd(NormalizedFamily) = FString();
 	}
 	return FString();
+}
+
+FString FFontResolver::NormalizeIconNameKey(const FString& IconName)
+{
+	return NormalizeIconNameKeyForResolver(IconName);
 }
 
 FString FFontResolver::FindKnownIconGlyph(const FString& FontFamily, const FString& IconName)

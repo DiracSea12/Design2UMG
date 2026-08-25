@@ -57,9 +57,7 @@ namespace DesignImportPipeline
 		FDesignPreviewMaterializationSettingsSnapshot BuildPreviewMaterializationSettingsSnapshot(
 			const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings)
 		{
-			FDesignPreviewMaterializationSettingsSnapshot Snapshot;
-			Snapshot.ClassOverrides = GenerationSettings.ClassOverrides;
-			return Snapshot;
+			return FDesignPreviewMaterializationSettingsSnapshot::FromGenerationSettings(GenerationSettings);
 		}
 
 		void MaybeWriteImportDiagnosticReport(

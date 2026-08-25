@@ -116,12 +116,43 @@ pwsh -NoProfile -File <PluginRoot>\Tools\Run-DesignerSnapshotValidation.ps1 -Pro
 3. 用新 UnrealEditor 进程重新加载同一个 `.uasset`。
 4. 再做一次结构快照，并检查 `LoadErrors`、编译器 ensure 和最终 PNG。
 
-本项目已经用同一个工程和同一套自动化入口做过固定 A/B 复现：
+本项目曾用同一个工程和同一套自动化入口做过一组 A/B 记录。
+**以下两条是已被推翻的历史失败样本，仅作为下文重载门禁的负样本模型保留，不是当前的生产缺陷结论：**
 
-- 含有 `Design2UMGConstrained*` 的资产：新进程重载后稳定为 10 个节点、168 条 `LoadErrors`，错误集中在这些自定义控件的外部容器。
-- 只使用普通 UMG 节点的资产：新进程重载后稳定为 219 个节点、0 条 `LoadErrors`。
+- 历史样本：含有 `Design2UMGConstrained*` 的资产当时被观察到新进程重载后为 10 个节点、168 条 `LoadErrors`，错误集中在这些自定义控件的外部容器。
+- 历史样本：只使用普通 UMG 节点的资产当时重载为 219 个节点、0 条 `LoadErrors`。
 
-这次实锤的直接触发链是：`LayoutMapper::TryFuseSizeConstraints()` 把 `SizeBox + 子控件` 融合成 `Design2UMGConstrained*`，这些编辑器模块控件在内存渲染阶段可用，但进入 WBP 资产后的新进程重载阶段失败，WidgetTree 随后被截断。`WidgetBlueprintCompiler.cpp:828` 中“deleted variable still has a GUID”属于重载失败后的后续症状。
+**当前结论（2026-08-25）：** 用完全相同的原始命令行（同一工程、同一 driver 入口、同一份磁盘资产、
+全新编辑器进程）受控复跑，融合资产干净加载：节点数完整、外部容器加载失败为零、变量 GUID ensure
+为零。上面的历史失败样本采集于并行工作线反复重编译插件二进制的时间窗，只能证明当时的局部环境，
+不能证明 `LayoutMapper::TryFuseSizeConstraints()` 存在固有的保存/重载缺陷。
+
+<details><summary>已推翻的历史触发链（原样保留，作为重载门禁负样本的失效模型）</summary>
+
+当时记录的判断是：`LayoutMapper::TryFuseSizeConstraints()` 把 `SizeBox + 子控件` 融合成 `Design2UMGConstrained*`，这些编辑器模块控件在内存渲染阶段可用，但进入 WBP 资产后的新进程重载阶段失败，WidgetTree 随后被截断；`WidgetBlueprintCompiler.cpp:828` 中“deleted variable still has a GUID”属于重载失败后的后续症状。该触发链不构成当前的生产缺陷结论。
+
+</details>
+
+### 7.1.1 运行新进程重载门禁
+
+`Tools/design2umg_fresh_process_reload_gate.py` 是本节的 executable 版本。它启动一个全新编辑器进程，
+用 `force_reload_package` 通过 `Design2UMG.AutomationRender` 重载每个目标资产，等待真实进程退出，
+然后 fail-closed 判定：每个结果必须 success、每棵 WidgetTree 节点数不得低于保护下限、新进程日志不得出现
+两类损坏签名（外部容器加载失败、变量 GUID ensure）。它的离线自测把历史失败日志当负样本回放：
+
+```text
+python Tools/design2umg_fresh_process_reload_gate_selftest.py
+pwsh -NoProfile -Command "python Tools/design2umg_fresh_process_reload_gate.py --project <MaintainerRuntimeProject.uproject> --editor <UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe --assets /Game/.../WBP_X.WBP_X[,...] --output-root <RuntimeProjectRoot>\Saved\Design2UMG\FreshReloadGate_<stamp> --min-total-nodes <下限>"
+```
+
+正式多资产验证时，用逐资产下限钉住每个资产的预期节点数，避免某个资产的局部截断被另一个资产的
+更大节点数掩盖：
+
+```text
+--asset-floors "0=136,1=219"
+```
+
+改动控件类、converter 输出形态或保存/编译链之后，先跑这个门禁，再采信生成进程里的结构快照。
 
 这条结论限定在当前 `Design2UMGConstrained*` 实现和保存/重载链；其他自定义控件需要单独通过新进程重载验证。同一进程内存快照只作过程证据，saved-asset parity 的最终证据必须包含新进程重载结果。
 

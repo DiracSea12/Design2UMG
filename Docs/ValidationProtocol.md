@@ -182,12 +182,47 @@ A WidgetTree observed inside the generation editor only proves that the in-memor
 3. Start a new `UnrealEditor` process and load the same `.uasset`.
 4. Capture a second structure snapshot and inspect `LoadErrors`, compiler ensures, and the final PNG.
 
-This repository has a fixed A/B reproduction using the same project and automation entry point:
+This repository once recorded an A/B reproduction using the same project and automation entry point.
+**The following bullets are a superseded historical failure sample, kept only as the negative fixture
+model for the reload gate below — they are not a current production-defect claim:**
 
-- The asset containing `Design2UMGConstrained*` widgets consistently reloads as 10 nodes with 168 `LoadErrors`; the errors are concentrated on those custom widgets' external containers.
-- The asset containing only native UMG widgets consistently reloads as 219 nodes with 0 `LoadErrors`.
+- Historical sample: the asset containing `Design2UMGConstrained*` widgets was observed reloading as 10 nodes with 168 `LoadErrors`; the errors were concentrated on those custom widgets' external containers.
+- Historical sample: the asset containing only native UMG widgets reloaded as 219 nodes with 0 `LoadErrors`.
 
-The established direct trigger is `LayoutMapper::TryFuseSizeConstraints()`: it fuses `SizeBox + child` into `Design2UMGConstrained*`. These editor-module widgets work during the in-memory render, but fail during fresh-process reload after they are placed in the WBP asset, which truncates the WidgetTree. The `WidgetBlueprintCompiler.cpp:828` “deleted variable still has a GUID” message is a downstream symptom of that reload failure.
+**Current conclusion (2026-08-25):** a controlled re-run of the original command line (same project,
+same driver entry point, same on-disk asset, brand-new editor process) loaded the fusion asset cleanly:
+full node count, zero outer-load failures, zero variable-GUID ensures. The historical failure sample above
+was captured during a window when plugin binaries were being rebuilt by parallel work; it is evidence of
+that environment, not of an inherent save/reload defect in `LayoutMapper::TryFuseSizeConstraints()`.
+
+<details><summary>Superseded historical failure model (kept verbatim for the reload-gate negative fixtures)</summary>
+
+The claim recorded at the time was that `LayoutMapper::TryFuseSizeConstraints()` fuses `SizeBox + child` into `Design2UMGConstrained*`, that these editor-module widgets work during the in-memory render but fail during fresh-process reload after they are placed in the WBP asset, truncating the WidgetTree, and that the `WidgetBlueprintCompiler.cpp:828` "deleted variable still has a GUID" message is a downstream symptom of that reload failure. This chain is not a current production-defect claim.
+
+</details>
+
+### 7.1.1 Run the fresh-process reload gate
+
+`Tools/design2umg_fresh_process_reload_gate.py` is the executable form of this section. It launches one fresh
+editor process, reloads each target asset through `Design2UMG.AutomationRender` with `force_reload_package`,
+waits for the real process exit, then fails closed unless every result reports success, every widget tree stays
+at or above the guarded node floor, and the fresh log contains none of the two corruption signatures (outer-load
+failures and variable-GUID ensures). Its offline selftest replays the historical failure log as negative fixture:
+
+```text
+python Tools/design2umg_fresh_process_reload_gate_selftest.py
+pwsh -NoProfile -Command "python Tools/design2umg_fresh_process_reload_gate.py --project <MaintainerRuntimeProject.uproject> --editor <UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe --assets /Game/.../WBP_X.WBP_X[,...] --output-root <RuntimeProjectRoot>\Saved\Design2UMG\FreshReloadGate_<stamp> --min-total-nodes <floor>"
+```
+
+For formal multi-asset verification, pin each asset's expected node count with per-asset floors so a local
+truncation cannot hide behind another asset's larger tree:
+
+```text
+--asset-floors "0=136,1=219"
+```
+
+Run it after any change to widget classes, the converter output shape, or the save/compile path, before trusting
+a structure snapshot from the generating process.
 
 This conclusion is scoped to the current `Design2UMGConstrained*` implementation and its save/reload path. Other custom widgets require their own fresh-process reload evidence. An in-memory snapshot without a fresh-process reload is not final saved-asset parity evidence.
 

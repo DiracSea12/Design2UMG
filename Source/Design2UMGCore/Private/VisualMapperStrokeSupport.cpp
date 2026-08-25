@@ -336,14 +336,6 @@ namespace VisualMapperStrokeSupport
 		{
 			Overlay.WidgetStyle.StrokePadding = Border.WidgetStyle.StrokePadding;
 		}
-		else
-		{
-			FMargin StrokePadding = FMargin(0.0f);
-			if (Design2UMGWidgetNodeAccess::TryGetWidgetMargin(Border, UMGPropertyKeys::StrokePadding, StrokePadding))
-			{
-				Overlay.WidgetStyle.StrokePadding = StrokePadding;
-			}
-		}
 
 		Border.Id += TEXT("_surface");
 		Border.Name += TEXT("_surface");

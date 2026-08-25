@@ -26,9 +26,16 @@ struct FBlueprintGenerationOptions
 
 // Preview materialization only needs the generation-domain subset that can
 // affect in-editor widget construction, not the full import settings payload.
+struct FDesign2UMGGenerationSettingsSnapshot;
+
 struct FDesignPreviewMaterializationSettingsSnapshot
 {
 	TArray<FWidgetClassOverride> ClassOverrides;
+
+	// Single copy boundary: new generation fields that preview must observe are
+	// registered here once, not at every call site.
+	static FDesignPreviewMaterializationSettingsSnapshot FromGenerationSettings(
+		const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings);
 };
 
 struct FPreviewRefreshInput

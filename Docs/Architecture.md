@@ -18,8 +18,7 @@ graph LR
     G --> I["LayoutMapper"]
     H --> J["FUMGWidgetNode IR"]
     I --> J
-    J --> K["LayoutFixer"]
-    K --> L["LayoutCalculator"]
+    J --> L["LayoutCalculator"]
     L --> M["UMGGenerator"]
     M --> N["Widget Blueprint"]
 ```
@@ -39,7 +38,7 @@ If a fidelity problem comes from source data semantics, fix the responsible pars
 
 ### Bounds are the source of truth
 
-Layout repair and projection are driven by bounds. `LayoutFixer` adjusts bounds-level intent, and `LayoutCalculator` turns the final bounds into anchors and offsets.
+Layout projection is driven by bounds. `LayoutCalculator` turns the final bounds into anchors and offsets.
 
 ### Typed data is the primary contract
 

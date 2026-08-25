@@ -28,14 +28,6 @@ namespace
 {
 	constexpr float JsonEditDebounceSeconds = 0.5f;
 
-	FDesignPreviewMaterializationSettingsSnapshot BuildPreviewMaterializationSettingsSnapshot(
-		const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings)
-	{
-		FDesignPreviewMaterializationSettingsSnapshot Snapshot;
-		Snapshot.ClassOverrides = GenerationSettings.ClassOverrides;
-		return Snapshot;
-	}
-
 	class FDesignImportPipelinePreviewRefreshAnalyzer final : public IDesignPreviewRefreshAnalyzer
 	{
 	public:
@@ -301,7 +293,7 @@ SDesign2UMGPreviewWindow::ResolveMaterializationSettingsSnapshot()
 		Design2UMGGenerationSettingsContext::GetCurrent())
 	{
 		CachedMaterializationSettingsSnapshot =
-			BuildPreviewMaterializationSettingsSnapshot(*CurrentGenerationSettings);
+			FDesignPreviewMaterializationSettingsSnapshot::FromGenerationSettings(*CurrentGenerationSettings);
 		return CachedMaterializationSettingsSnapshot;
 	}
 

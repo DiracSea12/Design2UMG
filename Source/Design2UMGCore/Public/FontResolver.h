@@ -48,6 +48,9 @@ struct DESIGN2UMGCORE_API FFontResolver
 	/** Resolve a known icon family/name pair to a concrete glyph string when the icon set ships codepoints. */
 	static FString FindKnownIconGlyph(const FString& FontFamily, const FString& IconName);
 
+	/** Normalize an icon name for resolver lookups: lower-case, separators, and the static alias table. */
+	static FString NormalizeIconNameKey(const FString& IconName);
+
 	/** Resolve a rendered glyph back to its semantic icon name when the icon set ships codepoints. */
 	static FString FindKnownIconNameByGlyph(const FString& FontFamily, const FString& Glyph);
 

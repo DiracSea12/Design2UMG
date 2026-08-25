@@ -11,7 +11,7 @@ This guide explains where to make changes when extending Design2UMG without brea
   -> RefExpander
   -> Design2UMGConverter
   -> FUMGWidgetNode IR
-  -> LayoutFixer / LayoutCalculator
+  -> LayoutCalculator
   -> UMGGenerator
 ```
 

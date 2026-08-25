@@ -13,18 +13,6 @@
 
 namespace
 {
-	FDesign2UMGGenerationSettingsSnapshot BuildPreviewGenerationSettings(
-		const FPreviewApprovedSnapshot& ApprovedSnapshot)
-	{
-		FDesign2UMGGenerationSettingsSnapshot GenerationSettings;
-		if (ApprovedSnapshot.MaterializationSettingsSnapshot.IsSet())
-		{
-			GenerationSettings.ClassOverrides =
-				ApprovedSnapshot.MaterializationSettingsSnapshot->ClassOverrides;
-		}
-		return GenerationSettings;
-	}
-
 	bool TryResolvePreviewDesignSize(const FPreviewApprovedSnapshot& ApprovedSnapshot, FVector2D& OutPreviewDesignSize)
 	{
 		const FDesignPixelBounds& RootBounds = ApprovedSnapshot.Data.RootWidget.Bounds;
@@ -127,7 +115,10 @@ UUserWidget* FDesignPreviewMaterializationService::CreatePreviewWidget(
 	}
 
 	const FDesign2UMGGenerationSettingsSnapshot GenerationSettings =
-		BuildPreviewGenerationSettings(ApprovedSnapshot);
+		ApprovedSnapshot.MaterializationSettingsSnapshot.IsSet()
+			? FDesign2UMGGenerationSettingsSnapshot::FromMaterializationSettings(
+				ApprovedSnapshot.MaterializationSettingsSnapshot.GetValue())
+			: FDesign2UMGGenerationSettingsSnapshot();
 	const Design2UMGGenerationSettingsContext::FScopedSettingsSnapshot ScopedGenerationSettings(GenerationSettings);
 
 	UWidget* RootWidget = FUMGWidgetUtils::CreateWidgetRecursive(

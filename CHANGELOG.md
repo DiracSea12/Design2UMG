@@ -12,6 +12,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 - Figma token examples in release-facing docs now use placeholders and explicitly say real tokens must not be committed or copied into public logs, command transcripts, screenshots, or release artifacts.
 
 ### Removed
+- `LayoutFixer` (test-only orphan, no production callers since the bounds-driven layout pipeline landed) removed together with its automation test; README and architecture docs now show `LayoutCalculator` as the only layout projection stage. Historical 1.0.0 entries keep the original mention.
 - `FUMGPropertyBag` removed legacy string-map accessors (`Contains/Find/FindRef/GetValueOr/operator[]/AsMap/ToMap`) in favor of typed getters plus `ForEachSerialized()`. External code should migrate to `TryGet*()` APIs.
 
 ## [1.0.0] - 2026-02-15

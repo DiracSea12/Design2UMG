@@ -605,3 +605,271 @@ bool FBatchDGenerationCancelBoundaryBehaviorTest::RunTest(const FString& Paramet
 	DeleteGeneratedAssetsAtPath(OutputDir);
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDUnattendedExitPolicyStaticTest,
+	"Design2UMG.BatchD.UnattendedExitPolicyStatic",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FBatchDUnattendedExitPolicyStaticTest::RunTest(const FString& Parameters)
+{
+	FString OrchestratorSource;
+	if (!LoadPluginFile(*this, TEXT("Source/Design2UMGEditor/Private/Design2UMGEditorImportOrchestrator.cpp"), OrchestratorSource))
+	{
+		return false;
+	}
+
+	// The unattended exit policy must use a single status-aware helper at the
+	// command/orchestration boundary; the old fire-and-forget helper is gone.
+	TestTrue(TEXT("Unattended exit uses RequestExitWithStatus with success-derived code"),
+		OrchestratorSource.Contains(TEXT("RequestExitWithStatus(false, bSuccess ? 0 : 1)"), ESearchCase::CaseSensitive));
+	TestFalse(TEXT("Legacy status-less unattended exit helper is removed"),
+		OrchestratorSource.Contains(TEXT("RequestExitIfUnattended"), ESearchCase::CaseSensitive));
+
+	// Unattended pen imports must fail fast without a target node instead of
+	// opening the interactive Frame Selector and then requesting an exit.
+	TestTrue(TEXT("Unattended pen import rejects a missing --node before the frame selector"),
+		OrchestratorSource.Contains(TEXT("Unattended import requires --node=<id>"), ESearchCase::CaseSensitive)
+		&& OrchestratorSource.Contains(TEXT("FApp::IsUnattended() && Request.TargetNodeId.IsEmpty()"), ESearchCase::CaseSensitive));
+
+	// Every failure path reports through ExitUnattendedWithStatus(false, ...) so
+	// the engine process ends with a non-zero status.
+	const TCHAR FailureExitPattern[] = TEXT("ExitUnattendedWithStatus(false,");
+	int32 FailureExits = 0;
+	for (int32 Index = OrchestratorSource.Find(FailureExitPattern, ESearchCase::CaseSensitive, ESearchDir::FromStart);
+		Index != INDEX_NONE;
+		Index = OrchestratorSource.Find(FailureExitPattern, ESearchCase::CaseSensitive, ESearchDir::FromStart, Index + 1))
+	{
+		++FailureExits;
+	}
+	TestEqual(TEXT("Every known failure branch requests exit status 1"), FailureExits, 4);
+
+	// Preview must be gated behind the unattended check at every request-builder
+	// call site, and success must never be derived from bPreviewOpened.
+	const int32 PreviewGates = [] (const FString& Source)
+	{
+		int32 Count = 0;
+		for (int32 Idx = Source.Find(TEXT("ShouldUsePreviewInCurrentMode(Request.bUsePreview)"), ESearchCase::CaseSensitive, ESearchDir::FromStart);
+			Idx != INDEX_NONE;
+			Idx = Source.Find(TEXT("ShouldUsePreviewInCurrentMode(Request.bUsePreview)"), ESearchCase::CaseSensitive, ESearchDir::FromStart, Idx + 1))
+		{
+			++Count;
+		}
+		return Count;
+	}(OrchestratorSource);
+	TestEqual(TEXT("All request builders gate preview for unattended runs"), PreviewGates, 4);
+	TestFalse(TEXT("Success must not be derived from an opened preview (pen paths)"),
+		OrchestratorSource.Contains(TEXT("|| ExecutionResult.bPreviewOpened"), ESearchCase::CaseSensitive));
+	TestFalse(TEXT("Success must not be derived from an opened preview (import source path)"),
+		OrchestratorSource.Contains(TEXT("bPreviewOpened && !FApp::IsUnattended()"), ESearchCase::CaseSensitive));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDMCPRequestIdSemanticsTest,
+	"Design2UMG.BatchD.MCPRequestIdSemantics",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FBatchDMCPRequestIdSemanticsTest::RunTest(const FString& Parameters)
+{
+	struct FHookState
+	{
+		TMap<int32, TFunction<void(bool, const FString&, int32, const FString&)>> PendingByTrackingId;
+		TArray<int32> CancelledIds;
+		int32 LastStartedTrackingId = 0;
+	};
+
+	TSharedRef<FHookState> HookState = MakeShared<FHookState>();
+	TSharedRef<FMCPHttpClientAutomationHooks> Hooks = MakeShared<FMCPHttpClientAutomationHooks>();
+	Hooks->StartAsyncRequest =
+		[HookState](const FString&, const FString&, int32 TrackingId, TFunction<void(bool, const FString&, int32, const FString&)> OnComplete)
+		{
+			HookState->PendingByTrackingId.Add(TrackingId, MoveTemp(OnComplete));
+			HookState->LastStartedTrackingId = TrackingId;
+			return true;
+		};
+	Hooks->CancelRequest =
+		[HookState](int32 TrackingId)
+		{
+			HookState->CancelledIds.Add(TrackingId);
+		};
+
+	SetMCPHttpClientAutomationHooks(Hooks);
+
+	FMCPHttpClient Client;
+	Client.ConnectAsync(TEXT("http://phase24.test"), [](bool){});
+	// Complete the FULL handshake: initialize chains notifications/initialized,
+	// so drain twice with the snapshot-then-clear pattern (live iteration is
+	// unsafe because completing one step queues the next into the same map).
+	for (int32 HandshakeStep = 0; HandshakeStep < 2; ++HandshakeStep)
+	{
+		TArray<TFunction<void(bool, const FString&, int32, const FString&)>> HandshakeCallbacks;
+		for (const TPair<int32, TFunction<void(bool, const FString&, int32, const FString&)>>& Pair
+			: HookState->PendingByTrackingId)
+		{
+			HandshakeCallbacks.Add(Pair.Value);
+		}
+		HookState->PendingByTrackingId.Reset();
+		if (HandshakeCallbacks.IsEmpty())
+		{
+			break;
+		}
+		for (const TFunction<void(bool, const FString&, int32, const FString&)>& Callback : HandshakeCallbacks)
+		{
+			Callback(true, TEXT("{}"), 200, TEXT("phase24-session"));
+		}
+	}
+	TestTrue(TEXT("Handshake fully drained before tool calls"),
+		HookState->PendingByTrackingId.Num() == 0);
+
+	// Start request A, then replace it with request B before A completes.
+	bool bACallbackFired = false;
+	bool bBCallbackFired = false;
+	Client.CallToolAsync(TEXT("batch_get"), MakeShared<FJsonObject>(), [&bACallbackFired](bool, const FString&)
+	{
+		bACallbackFired = true;
+	});
+	const int32 RequestATrackingId = HookState->LastStartedTrackingId;
+	Client.CallToolAsync(TEXT("get_variables"), MakeShared<FJsonObject>(), [&bBCallbackFired](bool, const FString&)
+	{
+		bBCallbackFired = true;
+	});
+	const int32 RequestBTrackingId = HookState->LastStartedTrackingId;
+
+	TestTrue(TEXT("Replacing an in-flight request cancels the old one"),
+		HookState->CancelledIds.Contains(RequestATrackingId));
+	TestTrue(TEXT("Replacement uses a fresh tracking id"), RequestBTrackingId != RequestATrackingId);
+
+	// The stale callback for the cancelled request must be swallowed...
+	HookState->PendingByTrackingId[RequestATrackingId](true,
+		TEXT("event: message\ndata: {\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"stale\"}]}}\n\n"),
+		200, TEXT(""));
+	TestFalse(TEXT("Stale cancelled callback does not fire"), bACallbackFired);
+
+	// ...while the live replacement still delivers.
+	HookState->PendingByTrackingId[RequestBTrackingId](true,
+		TEXT("event: message\ndata: {\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"live\"}]}}\n\n"),
+		200, TEXT(""));
+	TestTrue(TEXT("Live replacement callback fires after cancel+replace"), bBCallbackFired);
+
+	ResetMCPHttpClientAutomationHooks();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDMCPDisconnectCollisionTest,
+	"Design2UMG.BatchD.MCPDisconnectCollision",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FBatchDMCPDisconnectCollisionTest::RunTest(const FString& Parameters)
+{
+	// Models the real cross-session race: a session-1 request is cancelled, the
+	// client disconnects and reconnects, and THEN the late HTTP callback for the
+	// old request arrives. Tracking ids stay monotonic, so the late callback
+	// keeps its cancellation mark (no id reuse) and must be swallowed without
+	// disturbing the new session's active tracking state.
+	struct FHookState
+	{
+		TMap<int32, TFunction<void(bool, const FString&, int32, const FString&)>> PendingByTrackingId;
+		TArray<int32> CancelledIds;
+		int32 LastStartedTrackingId = 0;
+	};
+
+	TSharedRef<FHookState> HookState = MakeShared<FHookState>();
+	TSharedRef<FMCPHttpClientAutomationHooks> Hooks = MakeShared<FMCPHttpClientAutomationHooks>();
+	Hooks->StartAsyncRequest =
+		[HookState](const FString&, const FString&, int32 TrackingId, TFunction<void(bool, const FString&, int32, const FString&)> OnComplete)
+		{
+			HookState->PendingByTrackingId.Add(TrackingId, MoveTemp(OnComplete));
+			HookState->LastStartedTrackingId = TrackingId;
+			return true;
+		};
+	Hooks->CancelRequest =
+		[HookState](int32 TrackingId)
+		{
+			HookState->CancelledIds.Add(TrackingId);
+		};
+
+	SetMCPHttpClientAutomationHooks(Hooks);
+
+	FMCPHttpClient Client;
+
+	// Snapshot-drain pending callbacks safely (completing a step can queue
+	// another entry into the same map).
+	auto DrainPending = [&HookState](FAutomationTestBase& Test, const TCHAR* Label, int32 SkipTrackingId) -> int32
+	{
+		// Execute-and-remove each current entry except SkipTrackingId (a cancelled
+		// request whose LATE callback we simulate later in the test).
+		TArray<TPair<int32, TFunction<void(bool, const FString&, int32, const FString&)>>> Entries;
+		for (const TPair<int32, TFunction<void(bool, const FString&, int32, const FString&)>>& Pair
+			: HookState->PendingByTrackingId)
+		{
+			if (Pair.Key != SkipTrackingId)
+			{
+				Entries.Add(Pair);
+			}
+		}
+		for (const auto& Entry : Entries)
+		{
+			HookState->PendingByTrackingId.Remove(Entry.Key);
+			Entry.Value(true, TEXT("{}"), 200, TEXT("session"));
+		}
+		Test.AddInfo(FString::Printf(TEXT("%s drained %d callbacks"), Label, Entries.Num()));
+		return Entries.Num();
+	};
+
+	// Session 1: handshake, then a tool call that gets cancelled.
+	Client.ConnectAsync(TEXT("http://phase24.test"), [](bool){});
+	DrainPending(*this, TEXT("session-1 handshake"), INDEX_NONE);
+	bool bOldCallbackFired = false;
+	Client.CallToolAsync(TEXT("batch_get"), MakeShared<FJsonObject>(),
+		[&bOldCallbackFired](bool, const FString&){ bOldCallbackFired = true; });
+	const int32 OldRequestTrackingId = HookState->LastStartedTrackingId;
+	Client.CancelActiveRequest();
+
+	// Disconnect + reconnect. With monotonic ids the new requests must NOT reuse
+	// OldRequestTrackingId.
+	Client.Disconnect();
+	Client.ConnectAsync(TEXT("http://phase24.test"), [](bool){});
+	int32 HandshakeEntries = DrainPending(*this, TEXT("reconnect handshake"), OldRequestTrackingId);
+	HandshakeEntries += DrainPending(*this, TEXT("reconnect handshake notify"), OldRequestTrackingId);
+	// Both handshake steps (initialize + notification) must complete despite
+	// reused-id paranoia; the cancelled session-1 entry stays pending untouched.
+	TestTrue(TEXT("Reconnect handshake completed"), HandshakeEntries >= 2);
+	TestFalse(TEXT("Cancelled session-1 entry was not consumed by reconnect drains"),
+		HookState->PendingByTrackingId.Find(OldRequestTrackingId) == nullptr);
+	TestTrue(TEXT("New session ids are monotonic (no id reuse)"),
+		HookState->LastStartedTrackingId > OldRequestTrackingId);
+
+	// New session's live request completes normally...
+	FString NewResultPayload;
+	bool bNewCallbackFired = false;
+	Client.CallToolAsync(TEXT("get_variables"), MakeShared<FJsonObject>(),
+		[&bNewCallbackFired, &NewResultPayload](bool bSuccess, const FString& Result)
+		{
+			bNewCallbackFired = bSuccess;
+			NewResultPayload = Result;
+		});
+	const int32 NewRequestTrackingId = HookState->LastStartedTrackingId;
+
+	// ...and only then does the OLD request's late HTTP callback arrive with a
+	// valid-looking payload. It must be recognized as cancelled and swallowed:
+	// neither its completion runs, nor is the new request's tracking disturbed.
+	const TFunction<void(bool, const FString&, int32, const FString&)>* LateOldCallback =
+		HookState->PendingByTrackingId.Find(OldRequestTrackingId);
+	if (!TestNotNull(TEXT("Late old-session callback is still registered"), LateOldCallback))
+	{
+		ResetMCPHttpClientAutomationHooks();
+		return false;
+	}
+	(*LateOldCallback)(true,
+		TEXT("event: message\ndata: {\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"stale\"}]}}\n\n"),
+		200, TEXT(""));
+	TestFalse(TEXT("Late stale callback did not fire its completion"), bOldCallbackFired);
+
+	// Deliver the new request's own response; it must be unaffected by the late
+	// stale callback (active-tracking state was not stomped).
+	HookState->PendingByTrackingId[NewRequestTrackingId](true,
+		TEXT("event: message\ndata: {\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"live payload\"}]}}\n\n"),
+		200, TEXT(""));
+	TestTrue(TEXT("New request still delivers after the late stale callback"),
+		bNewCallbackFired && NewResultPayload.Contains(TEXT("live payload")));
+
+	ResetMCPHttpClientAutomationHooks();
+	return true;
+}

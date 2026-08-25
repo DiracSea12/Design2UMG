@@ -581,7 +581,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 		}
 	}
 
-	// Use the first non-skipped frame name for WidgetName, then fall back to WBP_FromPen.
+	// Use the first non-skipped frame name for WidgetName, then fall back to WBP_Generated.
 	for (const auto& Child : VisibleChildren)
 	{
 		if (!Child->bReusable && !Child->Name.IsEmpty())
@@ -591,7 +591,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 		}
 	}
 	if (Result.WidgetName.IsEmpty())
-		Result.WidgetName = TEXT("WBP_FromPen");
+		Result.WidgetName = TEXT("WBP_Generated");
 
 	// Pre-compute fit-content node sizes by recursively resolving child-driven bounds.
 	for (const auto& Child : VisibleChildren)

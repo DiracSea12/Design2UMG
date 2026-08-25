@@ -108,9 +108,7 @@ namespace
 	FDesignPreviewMaterializationSettingsSnapshot MakePreviewMaterializationSettingsSnapshot(
 		const FDesign2UMGGenerationSettingsSnapshot& GenerationSnapshot)
 	{
-		FDesignPreviewMaterializationSettingsSnapshot Snapshot;
-		Snapshot.ClassOverrides = GenerationSnapshot.ClassOverrides;
-		return Snapshot;
+		return FDesignPreviewMaterializationSettingsSnapshot::FromGenerationSettings(GenerationSnapshot);
 	}
 
 	FString LoadPenSourceImportFixtureJson()
@@ -477,6 +475,47 @@ bool FPenBridgeImportUsesSingleExplicitSettingsSnapshotTest::RunTest(const FStri
 
 	DeleteGeneratedAssetsAtPath(OutputPath);
 	return bUsesCapturedClassOverride;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreviewMaterializationSnapshotCopyBoundaryTest,
+	"Design2UMG.Unit.GenerationSettings.PreviewMaterializationSnapshotCopyBoundary",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPreviewMaterializationSnapshotCopyBoundaryTest::RunTest(const FString& Parameters)
+{
+	// Forward boundary: generation -> preview materialization carries overrides.
+	FDesign2UMGGenerationSettingsSnapshot GenerationSnapshot;
+	GenerationSnapshot.PrototypeNavigationGenerationMode =
+		EDesign2UMGPrototypeNavigationGenerationMode::TagHelper;
+	FWidgetClassOverride& Override = GenerationSnapshot.ClassOverrides.AddDefaulted_GetRef();
+	Override.NamePattern = TEXT("CopyBoundaryNode");
+	Override.WidgetClass = UBorder::StaticClass();
+
+	const FDesignPreviewMaterializationSettingsSnapshot MaterializationSnapshot =
+		FDesignPreviewMaterializationSettingsSnapshot::FromGenerationSettings(GenerationSnapshot);
+	TestEqual(TEXT("Materialization snapshot carries the override"),
+		MaterializationSnapshot.ClassOverrides.Num(), 1);
+	if (MaterializationSnapshot.ClassOverrides.Num() == 1)
+	{
+		TestEqual(TEXT("Materialization override pattern is preserved"),
+			MaterializationSnapshot.ClassOverrides[0].NamePattern, FString(TEXT("CopyBoundaryNode")));
+	}
+
+	// Reverse boundary: approved materialization -> generation keeps overrides
+	// and resets fields preview does not own to their defaults.
+	const FDesign2UMGGenerationSettingsSnapshot RoundTripped =
+		FDesign2UMGGenerationSettingsSnapshot::FromMaterializationSettings(MaterializationSnapshot);
+	TestEqual(TEXT("Round-tripped snapshot carries the override"),
+		RoundTripped.ClassOverrides.Num(), 1);
+	TestTrue(TEXT("Round-tripped navigation mode returns to default (preview does not own it)"),
+		RoundTripped.PrototypeNavigationGenerationMode == EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
+
+	// Unset materialization snapshot -> default-constructed generation settings.
+	const FDesign2UMGGenerationSettingsSnapshot Defaulted =
+		FDesign2UMGGenerationSettingsSnapshot::FromMaterializationSettings(
+			FDesignPreviewMaterializationSettingsSnapshot());
+	TestEqual(TEXT("Empty materialization produces empty overrides"), Defaulted.ClassOverrides.Num(), 0);
+
+	return true;
 }
 
 #endif

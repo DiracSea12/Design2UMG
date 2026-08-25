@@ -9,6 +9,24 @@
 
 namespace UMGPropertyApplierSupport
 {
+	// Button hover/pressed tint derivation from the authored background color.
+	// Hover brightens by 10%, pressed darkens by 10% (linear-space RGBA multiply
+	// via FLinearColor::operator*, no clamping: channels may legitimately exceed 1
+	// for HDR values, and multiplying by <=1.1 preserves the design's intent).
+	// Keep these multipliers stable unless the formal visual gate proves a change.
+	constexpr float HoverTintColorMultiplier = 1.1f;
+	constexpr float PressedTintColorMultiplier = 0.9f;
+
+	inline FLinearColor MakeHoverTintColor(const FLinearColor& BackgroundColor)
+	{
+		return BackgroundColor * HoverTintColorMultiplier;
+	}
+
+	inline FLinearColor MakePressedTintColor(const FLinearColor& BackgroundColor)
+	{
+		return BackgroundColor * PressedTintColorMultiplier;
+	}
+
 	inline bool TryParseVector4(const FString& Value, FVector4& OutVector)
 	{
 		TArray<FString> Parts;
