@@ -77,7 +77,8 @@ namespace
 		const TSharedPtr<FDesignNode>& Node,
 		const FDesignDocument& Doc,
 		float ParentContentWidth,
-		FSizeEstimatorState& State)
+		FSizeEstimatorState& State,
+		const SizeEstimator::FRefExpansionResolver* RefResolver = nullptr)
 	{
 		FSizeEstimatorRecursionGuard Guard(State.PrecomputeDepth, TEXT("PreComputeFitContentSizes"));
 		if (!Guard.bValid)
@@ -92,16 +93,25 @@ namespace
 
 		if (Node->Type == EDesignNodeType::Ref)
 		{
-			if (TSharedPtr<FDesignNode> Expanded = RefExpander::ExpandRef(Node, Doc))
+			TSharedPtr<FDesignNode> Expanded = RefResolver
+				? (*RefResolver)(Node)
+				: RefExpander::ExpandRef(Node, Doc);
+			if (Expanded.IsValid())
 			{
-				const FVector2D RefSize = PreComputeFitContentSizesImpl(Expanded, Doc, ParentContentWidth, State);
+				const FVector2D RefSize = PreComputeFitContentSizesImpl(Expanded, Doc, ParentContentWidth, State, RefResolver);
 				if (Node->Transform.Width.IsFit() && RefSize.X > Node->Transform.Width.Value && !Expanded->Transform.Width.IsFill())
 				{
 					Node->Transform.Width.Value = static_cast<float>(RefSize.X);
+					// Keep the current expanded working copy in sync with the
+					// promoted instance override.
+					Expanded->Transform.Width = Node->Transform.Width;
+					Expanded->Transform.bHasWidth = true;
 				}
 				if (Node->Transform.Height.IsFit() && RefSize.Y > Node->Transform.Height.Value && !Expanded->Transform.Height.IsFill())
 				{
 					Node->Transform.Height.Value = static_cast<float>(RefSize.Y);
+					Expanded->Transform.Height = Node->Transform.Height;
+					Expanded->Transform.bHasHeight = true;
 				}
 				return RefSize;
 			}
@@ -173,7 +183,7 @@ namespace
 		for (const TSharedPtr<FDesignNode>& Child : Node->Children)
 		{
 			const float ChildContentWidth = SizeEstimator::ComputeChildContentWidthHint(Node, Child, ParentContentWidth);
-			(void)PreComputeFitContentSizesImpl(Child, Doc, ChildContentWidth, State);
+			(void)PreComputeFitContentSizesImpl(Child, Doc, ChildContentWidth, State, RefResolver);
 		}
 		float FinalW = Node->Transform.Width.Value;
 		float FinalH = Node->Transform.Height.Value;
@@ -432,4 +442,13 @@ FVector2D SizeEstimator::PreComputeFitContentSizes(const TSharedPtr<FDesignNode>
 {
 	FSizeEstimatorState State;
 	return PreComputeFitContentSizesImpl(Node, Doc, 0.0f, State);
+}
+
+FVector2D SizeEstimator::PreComputeFitContentSizes(
+	const TSharedPtr<FDesignNode>& Node,
+	const FDesignDocument& Doc,
+	FRefExpansionResolver RefResolver)
+{
+	FSizeEstimatorState State;
+	return PreComputeFitContentSizesImpl(Node, Doc, 0.0f, State, &RefResolver);
 }

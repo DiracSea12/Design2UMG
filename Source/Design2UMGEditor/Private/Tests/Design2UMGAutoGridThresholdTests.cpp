@@ -96,16 +96,12 @@ namespace
 	}
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWidgetTreeChildBuilderAutoGridRowThresholdBoundaryTest,
-	"Design2UMG.WidgetTreeChildBuilder.AutoGridRowThresholdBoundary",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWidgetTreeChildBuilderAutoGridLocalRowGroupingTest,
+	"Design2UMG.WidgetTreeChildBuilder.AutoGridLocalRowGrouping",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FWidgetTreeChildBuilderAutoGridRowThresholdBoundaryTest::RunTest(const FString& Parameters)
+bool FWidgetTreeChildBuilderAutoGridLocalRowGroupingTest::RunTest(const FString& Parameters)
 {
-	// Row threshold = max(AvgHeight * 0.5, 0.01). These cases pin the documented
-	// boundary behavior of that heuristic without changing it.
-
-	// Case 1: homogeneous 40px-high items, second row starts exactly one item
-	// height below the first (40 > 20 threshold) => two rows.
+	// Case 1: homogeneous rows retain the existing clean slot assignment.
 	{
 		const TArray<FAutoGridChildSpec> Specs = {
 			{   0.0f,  0.0f, 80.0f, 40.0f },
@@ -125,25 +121,62 @@ bool FWidgetTreeChildBuilderAutoGridRowThresholdBoundaryTest::RunTest(const FStr
 		}
 	}
 
-	// Case 2: heterogeneous heights (10px and 90px). AvgHeight = 50, threshold 25:
-	// centers 5 and 85 are 80 apart -> separate rows despite overlapping bands.
+	// Case 2: heterogeneous heights with aligned tops remain in their authored rows.
 	{
 		const TArray<FAutoGridChildSpec> Specs = {
-			{   0.0f, 0.0f, 80.0f, 10.0f },
-			{ 100.0f, 40.0f, 80.0f, 90.0f },
+			{   0.0f,   0.0f, 80.0f, 20.0f },
+			{ 100.0f,   0.0f, 80.0f, 80.0f },
+			{   0.0f, 120.0f, 80.0f, 20.0f },
+			{ 100.0f, 120.0f, 80.0f, 80.0f },
 		};
 		const TArray<FIntPoint> Slots =
 			BuildBlueprintAndReadGridSlots(*this, MakeGridNodeWithChildren(Specs));
-		TestEqual(TEXT("Heterogeneous heights produce two slot assignments"), Slots.Num(), 2);
-		if (Slots.Num() == 2)
+		TestEqual(TEXT("Heterogeneous rows produce four slot assignments"), Slots.Num(), 4);
+		if (Slots.Num() == 4)
 		{
-			TestTrue(TEXT("Centers beyond half-average-height land on separate rows"),
+			TestTrue(TEXT("Aligned heterogeneous children share their local row"),
+				Slots[0].X == 0 && Slots[1].X == 0 && Slots[2].X == 1 && Slots[3].X == 1);
+		}
+	}
+
+	// Case 3: compare each item with a stable row anchor so a three-item center
+	// chain does not collapse its distant third item into the first row.
+	{
+		const TArray<FAutoGridChildSpec> Specs = {
+			{   0.0f, 0.0f, 80.0f, 100.0f },
+			{ 100.0f, 40.0f, 80.0f, 100.0f },
+			{ 200.0f, 80.0f, 80.0f, 100.0f },
+		};
+		const TArray<FIntPoint> Slots =
+			BuildBlueprintAndReadGridSlots(*this, MakeGridNodeWithChildren(Specs));
+		TestEqual(TEXT("Chained centers produce three slot assignments"), Slots.Num(), 3);
+		if (Slots.Num() == 3)
+		{
+			TestTrue(TEXT("Chained centers are split against the row anchor"),
+				Slots[0].X == 0 && Slots[1].X == 0 && Slots[2].X == 1);
+		}
+	}
+
+	// Case 4: a distant tall outlier must not widen the local threshold enough
+	// to merge two short rows.
+	{
+		const TArray<FAutoGridChildSpec> Specs = {
+			{   0.0f,    0.0f, 80.0f, 40.0f },
+			{   0.0f,   60.0f, 80.0f, 40.0f },
+			{ 200.0f, 1000.0f, 80.0f, 400.0f },
+		};
+		const TArray<FIntPoint> Slots =
+			BuildBlueprintAndReadGridSlots(*this, MakeGridNodeWithChildren(Specs));
+		TestEqual(TEXT("Outlier case produces three assignments"), Slots.Num(), 3);
+		if (Slots.Num() == 3)
+		{
+			TestTrue(TEXT("Short rows remain separate despite the tall outlier"),
 				Slots[0].X != Slots[1].X);
 		}
 	}
 
-	// Case 3: extreme vertical gap far exceeding any threshold stays two rows
-	// (guards against regressions toward single-row collapse).
+	// Case 5: extreme vertical gap far exceeding any local threshold stays two
+	// rows (guards against single-row collapse).
 	{
 		const TArray<FAutoGridChildSpec> Specs = {
 			{ 0.0f,   0.0f, 80.0f, 40.0f },

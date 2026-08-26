@@ -441,6 +441,55 @@ namespace
 		return bAllPassed;
 	}
 
+	bool RunFlowRefExpansionSnapshotChecks(FAutomationTestBase& Test)
+	{
+		FDesignDocument Doc;
+		TSharedPtr<FDesignNode> NestedReusable = MakeSharedSemanticsNode(
+			TEXT("snapshot_nested_reusable"),
+			EDesignNodeType::Rectangle,
+			FDesignSize::Fixed(12.0f),
+			FDesignSize::Fixed(12.0f));
+		NestedReusable->bReusable = true;
+		Doc.Children.Add(NestedReusable);
+
+		TSharedPtr<FDesignNode> Reusable = MakeSharedSemanticsNode(
+			TEXT("snapshot_reusable"),
+			EDesignNodeType::Rectangle,
+			FDesignSize::Fit(24.0f),
+			FDesignSize::Fixed(18.0f));
+		Reusable->bReusable = true;
+		Reusable->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#336699")));
+		TSharedPtr<FDesignNode> NestedRef = MakeShared<FDesignNode>();
+		NestedRef->Id = TEXT("snapshot_nested_ref");
+		NestedRef->Name = TEXT("snapshot_nested_ref");
+		NestedRef->Type = EDesignNodeType::Ref;
+		NestedRef->Ref = TEXT("snapshot_nested_reusable");
+		Reusable->Children.Add(NestedRef);
+		Doc.Children.Add(Reusable);
+
+		TSharedPtr<FDesignNode> RefInstance = MakeShared<FDesignNode>();
+		RefInstance->Id = TEXT("snapshot_ref_instance");
+		RefInstance->Name = TEXT("snapshot_ref_instance");
+		RefInstance->Type = EDesignNodeType::Ref;
+		RefInstance->Ref = TEXT("snapshot_reusable");
+
+		const TMap<FString, FString> EmptyTheme;
+		Design2UMGConverterInternal::FFlowChildPreResolutionResolver Resolver(Doc, EmptyTheme);
+		const TSharedPtr<FDesignNode> FirstExpansion = Resolver.ExpandRef(RefInstance);
+		const TSharedPtr<FDesignNode> FitExpansion = Resolver.ResolveExpandedChild(RefInstance, true);
+		const TSharedPtr<FDesignNode> AppendExpansion = Resolver.ResolveExpandedChild(RefInstance, false);
+
+		bool bAllPassed = true;
+		bAllPassed &= Test.TestNotNull(TEXT("Ref snapshot expands successfully"), FirstExpansion.Get());
+		bAllPassed &= Test.TestTrue(TEXT("Fit and append receive independent working copies"),
+			FirstExpansion.Get() != FitExpansion.Get() && FitExpansion.Get() != AppendExpansion.Get());
+		bAllPassed &= Test.TestTrue(TEXT("Working copies preserve the expanded geometry"),
+			FMath::IsNearlyEqual(FitExpansion->Transform.Width.Value, AppendExpansion->Transform.Width.Value)
+			&& FMath::IsNearlyEqual(FitExpansion->Transform.Height.Value, AppendExpansion->Transform.Height.Value));
+		bAllPassed &= Test.TestEqual(TEXT("Top-level and nested refs expand once per resolver snapshot"), Resolver.GetExpandRefCount(), 2);
+		return bAllPassed;
+	}
+
 	struct FLuminosityOpacityCapOverrideScope
 	{
 		explicit FLuminosityOpacityCapOverrideScope(const float InOpacityCap)
@@ -607,6 +656,14 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSourceFillWidthPreResolutionKeepsSourceSignalT
 bool FSourceFillWidthPreResolutionKeepsSourceSignalTest::RunTest(const FString& Parameters)
 {
 	return RunFlowFillSourceConstraintChecks(*this);
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFlowRefExpansionSnapshotReuseTest,
+	"Design2UMG.Converter.FlowRefExpansionSnapshotReuse",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFlowRefExpansionSnapshotReuseTest::RunTest(const FString& Parameters)
+{
+	return RunFlowRefExpansionSnapshotChecks(*this);
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSharedSemanticsVisibleFillOwnerBoundaryTest,

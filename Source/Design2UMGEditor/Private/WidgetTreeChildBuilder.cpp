@@ -67,10 +67,23 @@ namespace
 	struct FAutoGridItem
 	{
 		int32 Index = INDEX_NONE;
+		float Top = 0.0f;
 		float CenterX = 0.0f;
 		float CenterY = 0.0f;
+		float Bottom = 0.0f;
 		float Height = 0.0f;
 	};
+
+	bool BelongsToLocalRow(const FAutoGridItem& Item, const FAutoGridItem& RowAnchor)
+	{
+		// Compare against the first item in the row using the smaller local
+		// height.  This keeps a single tall/short outlier from changing the
+		// threshold for every other row and avoids transitive "chain" merges.
+		const float LocalTolerance = FMath::Max(0.01f, 0.5f * FMath::Min(Item.Height, RowAnchor.Height));
+		return FMath::Abs(Item.Top - RowAnchor.Top) <= LocalTolerance
+			|| FMath::Abs(Item.CenterY - RowAnchor.CenterY) <= LocalTolerance
+			|| FMath::Abs(Item.Bottom - RowAnchor.Bottom) <= LocalTolerance;
+	}
 
 	bool ShouldAutoAssignGridSlots(const TArray<FUMGWidgetNode>& Children)
 	{
@@ -105,7 +118,6 @@ namespace
 		TArray<FAutoGridItem> Items;
 		Items.Reserve(Children.Num());
 
-		float HeightSum = 0.0f;
 		for (int32 Index = 0; Index < Children.Num(); ++Index)
 		{
 			const FUMGWidgetNode& Child = Children[Index];
@@ -116,25 +128,18 @@ namespace
 
 			FAutoGridItem Item;
 			Item.Index = Index;
+			Item.Top = Child.Bounds.Y;
 			Item.CenterX = Child.Bounds.GetCenterX();
 			Item.CenterY = Child.Bounds.GetCenterY();
+			Item.Bottom = Child.Bounds.Y + Child.Bounds.H;
 			Item.Height = Child.Bounds.H;
 			Items.Add(Item);
-			HeightSum += Child.Bounds.H;
 		}
 
 		if (Items.Num() == 0)
 		{
 			return;
 		}
-
-		const float AvgHeight = HeightSum / Items.Num();
-		// Row-grouping threshold: two items share a row when their centers are
-		// within half the average item height. 0.5 keeps same-baseline rows
-		// together while separating rows whose vertical gap exceeds half a row;
-		// the 0.01 floor guards degenerate all-tiny layouts. Empirical value kept
-		// from the original auto-grid work - change only with formal-gate evidence.
-		const float RowThreshold = FMath::Max(AvgHeight * 0.5f, 0.01f);
 
 		Items.Sort([](const FAutoGridItem& A, const FAutoGridItem& B)
 		{
@@ -146,30 +151,26 @@ namespace
 		});
 
 		TArray<TArray<FAutoGridItem>> Rows;
-		float CurrentRowCenter = 0.0f;
-		int32 CurrentRowCount = 0;
+		TArray<FAutoGridItem> RowAnchors;
+		RowAnchors.Reserve(Items.Num());
 
 		for (const FAutoGridItem& Item : Items)
 		{
 			if (Rows.Num() == 0)
 			{
 				Rows.Add({ Item });
-				CurrentRowCenter = Item.CenterY;
-				CurrentRowCount = 1;
+				RowAnchors.Add(Item);
 				continue;
 			}
 
-			if (FMath::Abs(Item.CenterY - CurrentRowCenter) <= RowThreshold)
+			if (BelongsToLocalRow(Item, RowAnchors.Last()))
 			{
 				Rows.Last().Add(Item);
-				CurrentRowCenter = (CurrentRowCenter * CurrentRowCount + Item.CenterY) / (CurrentRowCount + 1);
-				++CurrentRowCount;
 				continue;
 			}
 
 			Rows.Add({ Item });
-			CurrentRowCenter = Item.CenterY;
-			CurrentRowCount = 1;
+			RowAnchors.Add(Item);
 		}
 
 		for (int32 RowIndex = 0; RowIndex < Rows.Num(); ++RowIndex)

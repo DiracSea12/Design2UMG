@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Misc/Crc.h"
 #include "DesignTreeLimits.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGPrototypeNavigation.h"
@@ -14,6 +15,44 @@
 
 namespace Design2UMGConverterInternal
 {
+	/**
+	 * Per-conversion reference expansion storage.  Keeping this on conversion
+	 * state (rather than in RefExpander) makes expanded nodes reusable only for
+	 * the current conversion and keeps theme-specific results isolated.
+	 */
+	struct FRefExpansionCacheKey
+	{
+		const FDesignNode* Node = nullptr;
+		FString ThemeSignature;
+
+		friend bool operator==(const FRefExpansionCacheKey& A, const FRefExpansionCacheKey& B)
+		{
+			return A.Node == B.Node && A.ThemeSignature == B.ThemeSignature;
+		}
+	};
+
+	inline uint32 GetTypeHash(const FRefExpansionCacheKey& Key)
+	{
+		return HashCombine(::GetTypeHash(reinterpret_cast<UPTRINT>(Key.Node)), FCrc::StrCrc32(*Key.ThemeSignature));
+	}
+
+	struct FRefExpansionCacheEntry
+	{
+		TSharedPtr<FDesignNode> Expanded;
+		bool bResolved = false;
+		bool bFitContentPrecomputed = false;
+	};
+
+	struct FRefExpansionCache
+	{
+		TMap<FRefExpansionCacheKey, FRefExpansionCacheEntry> Entries;
+		// Working copies retain aliases to their immutable snapshot nodes so nested
+		// refs can reuse the pointer-keyed cache without merging distinct instances.
+		TMap<const FDesignNode*, const FDesignNode*> SnapshotAliases;
+		int32 ExpandCallCount = 0;
+		int32 FitContentPrecomputeCount = 0;
+	};
+
 	struct FConversionSettingsSnapshot
 	{
 		UDesign2UMGSettings::FResolvedPlaceholderHatchStyle PlaceholderHatchStyle;
@@ -36,6 +75,7 @@ namespace Design2UMGConverterInternal
 		const FDesignDocument& Document;
 		TArray<FString>& Warnings;
 		const FConversionSettingsSnapshot& SettingsSnapshot;
+		TSharedPtr<FRefExpansionCache> RefExpansionCache = MakeShared<FRefExpansionCache>();
 		TSet<FString> WarnedFamilies;
 		TSet<FString> PrunedInvalidMappings;
 		TSet<FString> PrototypeTriggerNodeIds;

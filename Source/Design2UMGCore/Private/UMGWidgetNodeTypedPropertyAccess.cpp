@@ -13,6 +13,8 @@ namespace
 		None,
 		GradientMaterialRef,
 		ExplicitMaterialRef,
+		GradientMaterialParams,
+		ExplicitMaterialParams,
 		ImageTexturePath
 	};
 
@@ -40,6 +42,29 @@ namespace
 		if (Node.Brush.MaterialRef.IsSet())
 		{
 			return { Node.Brush.MaterialRef.GetValue(), EBrushDescriptorValueSource::ExplicitMaterialRef };
+		}
+
+		return {};
+	}
+
+	FResolvedBrushDescriptorValue ResolveBrushMaterialParamsDescriptor(const FUMGWidgetNode& Node)
+	{
+		if (Node.Brush.Gradient.HasAny())
+		{
+			const FString GradientMaterialParams =
+				Design2UMGWidgetNodeAccess::SerializeGradientMaterialParams(Node.Brush.Gradient);
+			if (!GradientMaterialParams.IsEmpty())
+			{
+				return { GradientMaterialParams, EBrushDescriptorValueSource::GradientMaterialParams };
+			}
+		}
+
+		if (Node.Brush.MaterialParams.IsSet())
+		{
+			return {
+				Node.Brush.MaterialParams.GetValue(),
+				EBrushDescriptorValueSource::ExplicitMaterialParams
+			};
 		}
 
 		return {};
@@ -207,16 +232,10 @@ namespace
 				return DescriptorValue.HasValue();
 			}),
 			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR_CUSTOM(UMGPropertyKeys::MaterialParams, {
-				if (!Node.Brush.Gradient.HasAny())
-				{
-					return false;
-				}
-				OutValue = Design2UMGWidgetNodeAccess::SerializeGradientMaterialParams(Node.Brush.Gradient);
-				return !OutValue.IsEmpty();
+				const FResolvedBrushDescriptorValue DescriptorValue = ResolveBrushMaterialParamsDescriptor(Node);
+				OutValue = DescriptorValue.Value;
+				return DescriptorValue.HasValue();
 			}),
-			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR(UMGPropertyKeys::MaterialParams,
-				Node.Brush.MaterialParams.IsSet(),
-				Node.Brush.MaterialParams.GetValue()),
 			DESIGN2UMG_TYPED_WIDGET_DESCRIPTOR_CUSTOM(UMGPropertyKeys::TexturePath, {
 				const FResolvedBrushDescriptorValue DescriptorValue = ResolveBrushTexturePathDescriptor(Node);
 				OutValue = DescriptorValue.Value;

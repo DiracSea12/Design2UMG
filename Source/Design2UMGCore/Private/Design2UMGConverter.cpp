@@ -237,7 +237,10 @@ namespace Design2UMGConverterPrivate
 		Design2UMGConverterInternal::FFlowChildPreResolutionResolver BuildPreResolutionResolver(
 			const FConversionContext& Context) const
 		{
-			return Design2UMGConverterInternal::FFlowChildPreResolutionResolver(Context.State.Document, Context.ThemeContext);
+			return Design2UMGConverterInternal::FFlowChildPreResolutionResolver(
+				Context.State.Document,
+				Context.ThemeContext,
+				Context.State.RefExpansionCache);
 		}
 
 		FUMGWidgetNode ConvertExpandedRefNode(
@@ -246,13 +249,21 @@ namespace Design2UMGConverterPrivate
 			const EDesignLayout ParentLayout,
 			const Design2UMGConverterInternal::FFlowChildPreResolutionResolver& PreResolutionResolver) const
 		{
-			TSharedPtr<FDesignNode> Expanded = PreResolutionResolver.ExpandRef(Node);
+			TSharedPtr<FDesignNode> Expanded = PreResolutionResolver.MakeWorkingCopy(Node);
 			if (!Expanded.IsValid())
 			{
 				return FUMGWidgetNode();
 			}
 
-			SizeEstimator::PreComputeFitContentSizes(Expanded, ActiveContext.State.Document);
+			const auto RefResolver =
+				[&PreResolutionResolver](const TSharedPtr<FDesignNode>& RefNode)
+				{
+					TSharedPtr<FDesignNode> ExpandedRef = PreResolutionResolver.MakeWorkingCopy(RefNode);
+					PreResolutionResolver.MarkFitContentPrecomputed(RefNode);
+					return ExpandedRef;
+				};
+			SizeEstimator::PreComputeFitContentSizes(Expanded, ActiveContext.State.Document, RefResolver);
+			PreResolutionResolver.MarkFitContentPrecomputed(Node);
 			return ConvertNode(Expanded, ActiveContext, ParentLayout);
 		}
 
@@ -594,9 +605,23 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 		Result.WidgetName = TEXT("WBP_Generated");
 
 	// Pre-compute fit-content node sizes by recursively resolving child-driven bounds.
+	// Fit estimation works on stage copies of the per-conversion expansion
+	// snapshots, leaving the cached expansion data immutable for conversion.
+	const TMap<FString, FString> RootThemeContext;
+	const Design2UMGConverterInternal::FFlowChildPreResolutionResolver RootPreResolutionResolver(
+		Document,
+		RootThemeContext,
+		State.RefExpansionCache);
+	const auto RefResolver =
+		[&RootPreResolutionResolver](const TSharedPtr<FDesignNode>& RefNode)
+		{
+			TSharedPtr<FDesignNode> ExpandedRef = RootPreResolutionResolver.MakeWorkingCopy(RefNode);
+			RootPreResolutionResolver.MarkFitContentPrecomputed(RefNode);
+			return ExpandedRef;
+		};
 	for (const auto& Child : VisibleChildren)
 	{
-		SizeEstimator::PreComputeFitContentSizes(Child, Document);
+		SizeEstimator::PreComputeFitContentSizes(Child, Document, RefResolver);
 	}
 
 	TArray<FUMGWidgetNode> RenderWidgets;

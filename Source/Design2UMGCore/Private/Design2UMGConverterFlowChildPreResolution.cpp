@@ -2,6 +2,7 @@
 
 #include "Design2UMGConverterFlowChildPreResolution.h"
 
+#include "Design2UMGConverterInternal.h"
 #include "Design2UMGLog.h"
 #include "DesignVariableResolver.h"
 #include "RefExpander.h"
@@ -9,6 +10,86 @@
 
 namespace
 {
+	FString BuildThemeSignature(const TMap<FString, FString>& ThemeContext)
+	{
+		if (ThemeContext.Num() == 0)
+		{
+			return FString();
+		}
+
+		TArray<FString> Keys;
+		ThemeContext.GetKeys(Keys);
+		Keys.Sort();
+
+		FString Signature;
+		for (const FString& Key : Keys)
+		{
+			Signature += FString::Printf(TEXT("%d:%s=%d:%s;"),
+				Key.Len(), *Key,
+				ThemeContext.FindChecked(Key).Len(), *ThemeContext.FindChecked(Key));
+		}
+		return Signature;
+	}
+
+	const FDesignNode* ResolveSnapshotNode(
+		const Design2UMGConverterInternal::FRefExpansionCache& Cache,
+		const FDesignNode* Node)
+	{
+		if (const FDesignNode* const* SnapshotNode = Cache.SnapshotAliases.Find(Node))
+		{
+			return *SnapshotNode;
+		}
+		return Node;
+	}
+
+	void RegisterSnapshotAliases(
+		const TSharedPtr<FDesignNode>& Snapshot,
+		const TSharedPtr<FDesignNode>& WorkingCopy,
+		TMap<const FDesignNode*, const FDesignNode*>& Aliases)
+	{
+		if (!Snapshot.IsValid() || !WorkingCopy.IsValid())
+		{
+			return;
+		}
+		if (WorkingCopy->Type == EDesignNodeType::Ref)
+		{
+			Aliases.Add(WorkingCopy.Get(), Snapshot.Get());
+		}
+		const int32 ChildCount = FMath::Min(Snapshot->Children.Num(), WorkingCopy->Children.Num());
+		for (int32 Index = 0; Index < ChildCount; ++Index)
+		{
+			RegisterSnapshotAliases(Snapshot->Children[Index], WorkingCopy->Children[Index], Aliases);
+		}
+		for (const auto& Pair : Snapshot->Descendants)
+		{
+			if (const TSharedPtr<FDesignNode>* WorkingDescendant = WorkingCopy->Descendants.Find(Pair.Key))
+			{
+				RegisterSnapshotAliases(Pair.Value, *WorkingDescendant, Aliases);
+			}
+		}
+	}
+
+	void ApplyLatestInstanceSizeOverrides(
+		const TSharedPtr<FDesignNode>& RefNode,
+		const TSharedPtr<FDesignNode>& Expanded)
+	{
+		if (!RefNode.IsValid() || !Expanded.IsValid())
+		{
+			return;
+		}
+
+		if (RefNode->Transform.Width.Value > 0.0f)
+		{
+			Expanded->Transform.Width = RefNode->Transform.Width;
+			Expanded->Transform.bHasWidth = true;
+		}
+		if (RefNode->Transform.Height.Value > 0.0f)
+		{
+			Expanded->Transform.Height = RefNode->Transform.Height;
+			Expanded->Transform.bHasHeight = true;
+		}
+	}
+
 	struct FChildSizeSnapshot
 	{
 		TSharedPtr<FDesignNode> Child;
@@ -239,9 +320,11 @@ namespace Design2UMGConverterInternal
 {
 	FFlowChildPreResolutionResolver::FFlowChildPreResolutionResolver(
 		const FDesignDocument& InDocument,
-		const TMap<FString, FString>& InThemeContext)
+		const TMap<FString, FString>& InThemeContext,
+		TSharedPtr<FRefExpansionCache> InExpansionCache)
 		: Document(InDocument)
 		, ThemeContext(InThemeContext)
+		, ExpansionCache(InExpansionCache.IsValid() ? MoveTemp(InExpansionCache) : MakeShared<FRefExpansionCache>())
 	{
 	}
 
@@ -252,9 +335,19 @@ namespace Design2UMGConverterInternal
 			return Node;
 		}
 
+		const FDesignNode* CacheNode = ResolveSnapshotNode(*ExpansionCache, Node.Get());
+		const FRefExpansionCacheKey CacheKey{ CacheNode, BuildThemeSignature(ThemeContext) };
+		if (FRefExpansionCacheEntry* Cached = ExpansionCache->Entries.Find(CacheKey))
+		{
+			return Cached->bResolved ? Cached->Expanded : nullptr;
+		}
+
+		FRefExpansionCacheEntry& CacheEntry = ExpansionCache->Entries.Add(CacheKey);
+		++ExpansionCache->ExpandCallCount;
 		TSharedPtr<FDesignNode> Expanded = RefExpander::ExpandRef(Node, Document);
 		if (!Expanded.IsValid())
 		{
+			CacheEntry.bResolved = true;
 			return nullptr;
 		}
 
@@ -265,7 +358,53 @@ namespace Design2UMGConverterInternal
 			RefExpander::ReThemeNode(Expanded, Resolver);
 		}
 
+		CacheEntry.Expanded = Expanded;
+		CacheEntry.bResolved = true;
 		return Expanded;
+	}
+
+	TSharedPtr<FDesignNode> FFlowChildPreResolutionResolver::MakeWorkingCopy(
+		const TSharedPtr<FDesignNode>& RefNode) const
+	{
+		TSharedPtr<FDesignNode> Snapshot = ExpandRef(RefNode);
+		if (!Snapshot.IsValid() || Snapshot == RefNode)
+		{
+			return Snapshot;
+		}
+
+		TSharedPtr<FDesignNode> WorkingCopy = RefExpander::DeepCopyNode(Snapshot);
+		RegisterSnapshotAliases(Snapshot, WorkingCopy, ExpansionCache->SnapshotAliases);
+		ApplyLatestInstanceSizeOverrides(RefNode, WorkingCopy);
+		return WorkingCopy;
+	}
+
+	int32 FFlowChildPreResolutionResolver::GetExpandRefCount() const
+	{
+		return ExpansionCache.IsValid() ? ExpansionCache->ExpandCallCount : 0;
+	}
+
+	int32 FFlowChildPreResolutionResolver::GetFitContentPrecomputeCount() const
+	{
+		return ExpansionCache.IsValid() ? ExpansionCache->FitContentPrecomputeCount : 0;
+	}
+
+	void FFlowChildPreResolutionResolver::MarkFitContentPrecomputed(const TSharedPtr<FDesignNode>& RefNode) const
+	{
+		if (!RefNode.IsValid() || RefNode->Type != EDesignNodeType::Ref)
+		{
+			return;
+		}
+
+		const FDesignNode* CacheNode = ResolveSnapshotNode(*ExpansionCache, RefNode.Get());
+		const FRefExpansionCacheKey CacheKey{ CacheNode, BuildThemeSignature(ThemeContext) };
+		if (FRefExpansionCacheEntry* CacheEntry = ExpansionCache->Entries.Find(CacheKey))
+		{
+			if (CacheEntry->Expanded.IsValid() && !CacheEntry->bFitContentPrecomputed)
+			{
+				CacheEntry->bFitContentPrecomputed = true;
+				++ExpansionCache->FitContentPrecomputeCount;
+			}
+		}
 	}
 
 	TSharedPtr<FDesignNode> FFlowChildPreResolutionResolver::ResolveExpandedChild(
@@ -280,10 +419,23 @@ namespace Design2UMGConverterInternal
 
 		if (bPreComputeFitContent && ExpandedChild != Child)
 		{
-			SizeEstimator::PreComputeFitContentSizes(ExpandedChild, Document);
+			auto RefResolver =
+				[this](const TSharedPtr<FDesignNode>& RefNode)
+				{
+					TSharedPtr<FDesignNode> ExpandedRef = MakeWorkingCopy(RefNode);
+					MarkFitContentPrecomputed(RefNode);
+					return ExpandedRef;
+				};
+			// Fit estimates depend on the current layout context (including
+			// available parent width), so reuse the Expanded snapshot but let
+			// each caller measure it for its own context.
+			TSharedPtr<FDesignNode> WorkingExpanded = MakeWorkingCopy(Child);
+			SizeEstimator::PreComputeFitContentSizes(WorkingExpanded, Document, RefResolver);
+			MarkFitContentPrecomputed(Child);
+			return WorkingExpanded;
 		}
 
-		return ExpandedChild;
+		return ExpandedChild == Child ? Child : MakeWorkingCopy(Child);
 	}
 
 	FFlowChildPreResolution::FFlowChildPreResolution(const FFlowChildPreResolutionResolver& InPreResolutionResolver)

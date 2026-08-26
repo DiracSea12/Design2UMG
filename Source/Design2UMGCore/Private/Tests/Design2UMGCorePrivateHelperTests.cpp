@@ -1547,12 +1547,30 @@ bool FGradientTypedPayloadMaterialParamsTest::RunTest(const FString& Parameters)
 		&& LinearMaterialParams.Contains(TEXT("\"EndY\":0.7000")));
 
 	Widget.Brush.MaterialParams = TEXT("{\"ColorCenter\":\"#01020304\",\"ColorEdge\":\"#05060708\"}");
+	const FString ExplicitMaterialParams = Widget.Brush.MaterialParams.GetValue();
 	FUMGProceduralResourceRequest ExistingParamsRequest;
 	TestTrue(TEXT("Typed procedural request still builds when legacy raw material params are present"),
 		Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Widget, ExistingParamsRequest));
 	TestEqual(TEXT("Typed gradient descriptor keeps precedence over legacy raw material params"),
 		ExistingParamsRequest.MaterialParams.Get(FString()),
 		MaterialParams);
+	FString GradientDescriptorWithFallback;
+	TestTrue(TEXT("Gradient source resolves through one MaterialParams descriptor"),
+		Design2UMGWidgetNodeAccess::TryGetWidgetString(Widget, UMGPropertyKeys::MaterialParams, GradientDescriptorWithFallback));
+	TestEqual(TEXT("Gradient descriptor ignores explicit fallback when both are present"),
+		GradientDescriptorWithFallback,
+		MaterialParams);
+
+	FUMGWidgetNode ExplicitParamsNode;
+	ExplicitParamsNode.Type = TEXT("Image");
+	ExplicitParamsNode.Brush.MaterialRef = TEXT("roundedrect");
+	ExplicitParamsNode.Brush.MaterialParams = ExplicitMaterialParams;
+	FString ExplicitDescriptorParams;
+	TestTrue(TEXT("Explicit MaterialParams source resolves through the same descriptor"),
+		Design2UMGWidgetNodeAccess::TryGetWidgetString(ExplicitParamsNode, UMGPropertyKeys::MaterialParams, ExplicitDescriptorParams));
+	TestEqual(TEXT("Explicit MaterialParams fallback is preserved without a gradient"),
+		ExplicitDescriptorParams,
+		ExplicitMaterialParams);
 	return true;
 }
 

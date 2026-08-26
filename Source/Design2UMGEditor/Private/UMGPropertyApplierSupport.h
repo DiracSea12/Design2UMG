@@ -10,21 +10,30 @@
 namespace UMGPropertyApplierSupport
 {
 	// Button hover/pressed tint derivation from the authored background color.
-	// Hover brightens by 10%, pressed darkens by 10% (linear-space RGBA multiply
-	// via FLinearColor::operator*, no clamping: channels may legitimately exceed 1
-	// for HDR values, and multiplying by <=1.1 preserves the design's intent).
+	// Keep the authored alpha independent from the RGB state tint. Hover moves
+	// 10% toward white so black still has a visible state color; pressed moves
+	// 10% toward black. State RGB values are clamped to the usable 0..1 range.
 	// Keep these multipliers stable unless the formal visual gate proves a change.
 	constexpr float HoverTintColorMultiplier = 1.1f;
 	constexpr float PressedTintColorMultiplier = 0.9f;
 
 	inline FLinearColor MakeHoverTintColor(const FLinearColor& BackgroundColor)
 	{
-		return BackgroundColor * HoverTintColorMultiplier;
+		const float HoverAmount = HoverTintColorMultiplier - 1.0f;
+		return FLinearColor(
+			FMath::Clamp(BackgroundColor.R + ((1.0f - BackgroundColor.R) * HoverAmount), 0.0f, 1.0f),
+			FMath::Clamp(BackgroundColor.G + ((1.0f - BackgroundColor.G) * HoverAmount), 0.0f, 1.0f),
+			FMath::Clamp(BackgroundColor.B + ((1.0f - BackgroundColor.B) * HoverAmount), 0.0f, 1.0f),
+			BackgroundColor.A);
 	}
 
 	inline FLinearColor MakePressedTintColor(const FLinearColor& BackgroundColor)
 	{
-		return BackgroundColor * PressedTintColorMultiplier;
+		return FLinearColor(
+			FMath::Clamp(BackgroundColor.R * PressedTintColorMultiplier, 0.0f, 1.0f),
+			FMath::Clamp(BackgroundColor.G * PressedTintColorMultiplier, 0.0f, 1.0f),
+			FMath::Clamp(BackgroundColor.B * PressedTintColorMultiplier, 0.0f, 1.0f),
+			BackgroundColor.A);
 	}
 
 	inline bool TryParseVector4(const FString& Value, FVector4& OutVector)
