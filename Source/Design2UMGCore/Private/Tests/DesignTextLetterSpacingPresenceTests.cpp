@@ -7,7 +7,6 @@
 #include "FigmaParser.h"
 #include "PenParser.h"
 #include "Misc/OutputDevice.h"
-#include "UMGValueParser.h"
 #include "UMGWidgetNodeProceduralResourceAccess.h"
 #include "UMGWidgetNodeAccess.h"
 #include "UMGPropertyKeys.h"
@@ -102,8 +101,7 @@ bool FProceduralResourceRequestBuildsTypedRequestTest::RunTest(const FString& Pa
 	TestTrue(TEXT("Width override preserved"), Request.WidthOverride.IsSet() && FMath::IsNearlyEqual(Request.WidthOverride.GetValue(), 64.0f));
 	TestTrue(TEXT("Height override preserved"), Request.HeightOverride.IsSet() && FMath::IsNearlyEqual(Request.HeightOverride.GetValue(), 32.0f));
 	TestTrue(TEXT("Shadow blur preserved"), Request.ShadowBlur.IsSet() && FMath::IsNearlyEqual(Request.ShadowBlur.GetValue(), 12.0f));
-	const FLinearColor ExpectedTypedBrushColor =
-		FUMGValueParser::ParseColor(Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Brush.BrushColor.GetValue()));
+	const FLinearColor ExpectedTypedBrushColor = Node.Brush.BrushColor.GetValue();
 	TestTrue(TEXT("Brush color preserved through typed request serialization"),
 		Request.BrushColor.IsSet() && Request.BrushColor.GetValue().Equals(ExpectedTypedBrushColor, 0.0001f));
 

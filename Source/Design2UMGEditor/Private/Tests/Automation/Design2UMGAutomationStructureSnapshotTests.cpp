@@ -71,6 +71,29 @@ namespace
 
 	void StripGeneratedIdentityFieldsFromValue(const TSharedPtr<FJsonValue>& Value);
 
+	void StripStructureNodeIdentityFields(const TSharedPtr<FJsonObject>& Snapshot)
+	{
+		if (!Snapshot.IsValid())
+		{
+			return;
+		}
+
+		const TSharedPtr<FJsonValue>* StructureNodesValue = Snapshot->Values.Find(TEXT("structure_nodes"));
+		if (!StructureNodesValue || !StructureNodesValue->IsValid() || (*StructureNodesValue)->Type != EJson::Array)
+		{
+			return;
+		}
+
+		for (const TSharedPtr<FJsonValue>& StructureNodeValue : (*StructureNodesValue)->AsArray())
+		{
+			if (StructureNodeValue.IsValid() && StructureNodeValue->Type == EJson::Object)
+			{
+				StructureNodeValue->AsObject()->RemoveField(TEXT("id"));
+				StructureNodeValue->AsObject()->RemoveField(TEXT("name"));
+			}
+		}
+	}
+
 	void StripGeneratedIdentityFieldsFromObject(const TSharedPtr<FJsonObject>& Object)
 	{
 		if (!Object.IsValid())
@@ -506,6 +529,9 @@ bool FDesignIdentityVariantConversionParityTest::RunTest(const FString& Paramete
 		// node_names lists source node names, which the variants intentionally
 		// change; the parity contract compares structure semantics, not names.
 		VariantStructureSnapshot->RemoveField(TEXT("node_names"));
+		// Structure-node ids and names are source identities too; renamed variants
+		// must compare their topology and semantics rather than those identities.
+		StripStructureNodeIdentityFields(VariantStructureSnapshot);
 
 		if (VariantIndex == 0)
 		{

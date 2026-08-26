@@ -1247,8 +1247,8 @@ bool FBatchCVisualMapperMultiFillSmokeTest::RunTest(const FString& Parameters)
 
 	const FUMGWidgetNode Wrapped = VisualMapper::WrapWithMultiFill(MoveTemp(BaseWidget), Node, FVisualMapperOptions());
 	TestEqual(TEXT("Multi-fill wrapper creates an overlay shell"), Wrapped.Type, FString(TEXT("Overlay")));
-	TestEqual(TEXT("Multi-fill wrapper keeps two paint layers plus content"), Wrapped.Children.Num(), 3);
-	if (Wrapped.Children.Num() != 3)
+	TestEqual(TEXT("Multi-fill wrapper keeps two paint layers when content is empty"), Wrapped.Children.Num(), 2);
+	if (Wrapped.Children.Num() != 2)
 	{
 		return false;
 	}
@@ -1260,7 +1260,11 @@ bool FBatchCVisualMapperMultiFillSmokeTest::RunTest(const FString& Parameters)
 		GradientLayer.Brush.MaterialRef.GetValue(),
 		FString(TEXT("radialgradient")));
 	TestTrue(TEXT("Gradient layer carries typed gradient stops"), GradientLayer.Brush.Gradient.Stops.Num() == 2);
-	TestTrue(TEXT("Original widget becomes content child"), Wrapped.Children[2].Id.EndsWith(TEXT("_content")));
+	TestFalse(TEXT("Empty original widget is elided from the wrapper"), Wrapped.Children.ContainsByPredicate(
+		[](const FUMGWidgetNode& Child)
+		{
+			return Child.Id.EndsWith(TEXT("_content"));
+		}));
 	return true;
 }
 

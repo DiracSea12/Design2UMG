@@ -70,11 +70,40 @@ namespace Design2UMGTestUtils
 
 	inline void CollectTextValues(const FUMGWidgetNode& Node, TArray<FString>& OutTexts)
 	{
-		if (Node.Type == TEXT("TextBlock"))
+		const bool bIsTextWidget = Node.Type.Contains(TEXT("TextBlock"), ESearchCase::CaseSensitive);
+		if (bIsTextWidget)
 		{
 			FString Text;
 			if (TryGetWidgetProperty(Node, TEXT("Text"), Text))
 			{
+				if (Node.Type.Contains(TEXT("RichTextBlock"), ESearchCase::CaseSensitive))
+				{
+					FString PlainText;
+					bool bInsideTag = false;
+					for (const TCHAR Character : Text)
+					{
+						if (Character == TEXT('<'))
+						{
+							bInsideTag = true;
+							continue;
+						}
+						if (Character == TEXT('>'))
+						{
+							bInsideTag = false;
+							continue;
+						}
+						if (!bInsideTag)
+						{
+							PlainText.AppendChar(Character);
+						}
+					}
+					Text = PlainText;
+					Text.ReplaceInline(TEXT("&lt;"), TEXT("<"));
+					Text.ReplaceInline(TEXT("&gt;"), TEXT(">"));
+					Text.ReplaceInline(TEXT("&quot;"), TEXT("\""));
+					Text.ReplaceInline(TEXT("&apos;"), TEXT("'"));
+					Text.ReplaceInline(TEXT("&amp;"), TEXT("&"));
+				}
 				OutTexts.Add(Text);
 			}
 		}
