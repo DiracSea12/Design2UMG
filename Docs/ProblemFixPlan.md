@@ -6,8 +6,8 @@
 
 ## 0. 执行环境与回归口径
 
-- 插件根：`G:\UE5\UnrealEngine\Engine\Plugins\Marketplace\Design2UMG`（分支 master）。
-- 运行时项目：`G:\UE5\FPSRoguelike\FPSRoguelike.uproject`；编辑器：`G:\UE5\UnrealEngine\Engine\Binaries\Win64\UnrealEditor.exe`。
+- 插件根：`PLUGIN_ROOT`（分支 master）。
+- 运行时项目：`RUNTIME_PROJECT/FPSRoguelike.uproject`；编辑器：`UNREAL_EDITOR/UnrealEditor.exe`。
 - 正式回归入口：`Tools/design2umg_auto_verify_batch.py`（71-case discovered set：39 Pencil + 32 Figma local/source）。
 - 回归判定：
   - `summary.no_regression` 逐 case `no_regression_passed` 必须全通过；
@@ -101,7 +101,7 @@
 ## 4. 执行记录（逐项回填）
 
 ### R0 冻结对照根
-- run 目录：`G:\UE5\FPSRoguelike\Saved\Design2UMG\Automation\problemfix-r0-clean-head-full71-20260825_01`（干净 HEAD `75011d2`）。
+- run 目录：`RUN_ROOT/problemfix-r0-clean-head-full71-20260825_01`（干净 HEAD `75011d2`）。
 - 完整性：71/71 case，compare_report 全齐，editor exit 0，无 blocked。
 - 指标快照已存：`Saved/ProblemFixR0Metrics.json`（逐 case 视觉四指标 + structure_passed）。
 - 已知现状（非本轮引入）：`pen_pencil-nitro_nitro-design-system-components`、
