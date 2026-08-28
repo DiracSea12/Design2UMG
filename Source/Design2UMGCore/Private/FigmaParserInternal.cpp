@@ -648,11 +648,11 @@ static void CaptureFigmaStrokeMetadata(
 		OutNode.Metadata.Add(TEXT("stroke.cap"), StrokeCap);
 		if (StrokeCap.Equals(TEXT("ROUND"), ESearchCase::IgnoreCase))
 		{
-			OutNode.Visual.Stroke.Cap = TEXT("round");
+			OutNode.Visual.Stroke.Cap = EDesignStrokeCap::Round;
 		}
 		else if (StrokeCap.Equals(TEXT("SQUARE"), ESearchCase::IgnoreCase))
 		{
-			OutNode.Visual.Stroke.Cap = TEXT("square");
+			OutNode.Visual.Stroke.Cap = EDesignStrokeCap::Square;
 		}
 	}
 
@@ -662,11 +662,11 @@ static void CaptureFigmaStrokeMetadata(
 		OutNode.Metadata.Add(TEXT("stroke.join"), StrokeJoin);
 		if (StrokeJoin.Equals(TEXT("ROUND"), ESearchCase::IgnoreCase))
 		{
-			OutNode.Visual.Stroke.Join = TEXT("round");
+			OutNode.Visual.Stroke.Join = EDesignStrokeJoin::Round;
 		}
 		else if (StrokeJoin.Equals(TEXT("BEVEL"), ESearchCase::IgnoreCase))
 		{
-			OutNode.Visual.Stroke.Join = TEXT("bevel");
+			OutNode.Visual.Stroke.Join = EDesignStrokeJoin::Bevel;
 		}
 	}
 

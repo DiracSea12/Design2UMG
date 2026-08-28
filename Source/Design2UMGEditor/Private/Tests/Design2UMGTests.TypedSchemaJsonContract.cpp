@@ -1,3 +1,20 @@
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+
+#include "Misc/AutomationTest.h"
+#include "Design2UMGConverter.h"
+#include "PenParser.h"
+#include "UMGJsonParser.h"
+#include "UMGJsonSerializer.h"
+#include "UMGSchemaSourceExtensions.h"
+#include "UMGValueParsing.h"
+#include "UMGWidgetUtils.h"
+#include "Design2UMGTestUtils.h"
+#include "Components/EditableTextBox.h"
+#include "UObject/UObjectGlobals.h"
+
+#if WITH_AUTOMATION_WORKER
+using namespace Design2UMGTestUtils;
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTypedNodeEmptyStringStillAppliesTest,
 	"Design2UMG.PropertyApplier.TypedEmptyStringApplies",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -253,3 +270,5 @@ bool FUMGSchemaSourceExtensionsRemainOptInTest::RunTest(const FString& Parameter
 	TestEqual(TEXT("Explicit UMG prototype mutation persists"), Data.PrototypeNavigation().ClickBindings.Num(), 1);
 	return true;
 }
+
+#endif // WITH_AUTOMATION_WORKER

@@ -350,8 +350,8 @@ bool FPenParserStrokeNodeFormatsTest::RunTest(const FString&)
 	TestEqual(TEXT("Current right thickness"), Current->Visual.Stroke.Thickness.Right, 2.0f);
 	TestEqual(TEXT("Current bottom thickness"), Current->Visual.Stroke.Thickness.Bottom, 3.0f);
 	TestEqual(TEXT("Current left thickness"), Current->Visual.Stroke.Thickness.Left, 4.0f);
-	TestEqual(TEXT("Current cap is normalized for shared conversion"), Current->Visual.Stroke.Cap, TEXT("round"));
-	TestEqual(TEXT("Current join is normalized for shared conversion"), Current->Visual.Stroke.Join, TEXT("bevel"));
+	TestEqual(TEXT("Current cap is normalized for shared conversion"), Current->Visual.Stroke.Cap, EDesignStrokeCap::Round);
+	TestEqual(TEXT("Current join is normalized for shared conversion"), Current->Visual.Stroke.Join, EDesignStrokeJoin::Bevel);
 	TestTrue(TEXT("Current fill set"), Current->Visual.Stroke.Fill.IsSet());
 	if (Current->Visual.Stroke.Fill.IsSet())
 	{

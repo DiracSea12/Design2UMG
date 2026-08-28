@@ -1,3 +1,23 @@
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+
+#include "Misc/AutomationTest.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Design2UMGConverter.h"
+#include "Design2UMGSettings.h"
+#include "FontResolver.h"
+#include "PenParser.h"
+#include "FigmaParser.h"
+#include "Design2UMGTestUtils.h"
+#include "Components/TextBlock.h"
+#include "Dom/JsonObject.h"
+#include "Engine/Font.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "UObject/UObjectGlobals.h"
+
+#if WITH_AUTOMATION_WORKER
+using namespace Design2UMGTestUtils;
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIconFontNoMappingFallbackTest,
 	"Design2UMG.Unit.IconFont.NoMappingFallback",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -859,3 +879,5 @@ bool FMultiParagraphFixedWidthTextKeepsDeclaredFontSizeTest::RunTest(const FStri
 	TestTrue(TEXT("Body text should not clip after conversion"), GetWidgetProperty(*TextWidget, TEXT("Clipping")).IsEmpty());
 	return true;
 }
+
+#endif // WITH_AUTOMATION_WORKER

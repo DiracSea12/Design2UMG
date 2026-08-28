@@ -1,3 +1,105 @@
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+
+#include "Misc/AutomationTest.h"
+#include "Design2UMGConverter.h"
+#include "Design2UMGSettings.h"
+#include "PenParser.h"
+#include "FigmaParser.h"
+#include "FigmaImageExporter.h"
+#include "UMGSchemaSourceExtensions.h"
+#include "UMGWidgetNodeAccess.h"
+#include "Design2UMGTestUtils.h"
+
+#if WITH_AUTOMATION_WORKER
+using namespace Design2UMGTestUtils;
+
+namespace
+{
+	struct FLuminosityOpacityCapScope
+	{
+		explicit FLuminosityOpacityCapScope(const float NewValue, const bool bEnableOverride = true)
+		{
+			Settings = UDesign2UMGSettings::Get();
+			if (Settings)
+			{
+				bSavedUseCustomOverride = Settings->bUseCustomLuminosityFitOpacityCap;
+				SavedValue = Settings->LuminosityFitOpacityCap;
+				Settings->bUseCustomLuminosityFitOpacityCap = bEnableOverride;
+				Settings->LuminosityFitOpacityCap = NewValue;
+			}
+		}
+
+		~FLuminosityOpacityCapScope()
+		{
+			if (Settings)
+			{
+				Settings->bUseCustomLuminosityFitOpacityCap = bSavedUseCustomOverride;
+				Settings->LuminosityFitOpacityCap = SavedValue;
+			}
+		}
+
+		UDesign2UMGSettings* Settings = nullptr;
+		bool bSavedUseCustomOverride = false;
+		float SavedValue = 0.15f;
+	};
+
+	struct FScopedPlaceholderHatchStyleOverride
+	{
+		FScopedPlaceholderHatchStyleOverride(
+			const bool bEnableOverride,
+			const FString& InBaseBg,
+			const FString& InBaseStripe,
+			const FString& InRefBg,
+			const FString& InRefStripe,
+			const int32 InStripeWidth = 1,
+			const int32 InStripeGap = 4)
+		{
+			Settings = UDesign2UMGSettings::Get();
+			if (Settings)
+			{
+				bSavedUseCustomOverride = Settings->bUseCustomPlaceholderHatchStyle;
+				SavedBaseBg = Settings->PlaceholderHatchBackgroundColor;
+				SavedBaseStripe = Settings->PlaceholderHatchStripeColor;
+				SavedRefBg = Settings->PlaceholderRefHatchBackgroundColor;
+				SavedRefStripe = Settings->PlaceholderRefHatchStripeColor;
+				SavedStripeWidth = Settings->PlaceholderHatchStripeWidth;
+				SavedStripeGap = Settings->PlaceholderHatchStripeGap;
+
+				Settings->bUseCustomPlaceholderHatchStyle = bEnableOverride;
+				Settings->PlaceholderHatchBackgroundColor = InBaseBg;
+				Settings->PlaceholderHatchStripeColor = InBaseStripe;
+				Settings->PlaceholderRefHatchBackgroundColor = InRefBg;
+				Settings->PlaceholderRefHatchStripeColor = InRefStripe;
+				Settings->PlaceholderHatchStripeWidth = InStripeWidth;
+				Settings->PlaceholderHatchStripeGap = InStripeGap;
+			}
+		}
+
+		~FScopedPlaceholderHatchStyleOverride()
+		{
+			if (Settings)
+			{
+				Settings->bUseCustomPlaceholderHatchStyle = bSavedUseCustomOverride;
+				Settings->PlaceholderHatchBackgroundColor = SavedBaseBg;
+				Settings->PlaceholderHatchStripeColor = SavedBaseStripe;
+				Settings->PlaceholderRefHatchBackgroundColor = SavedRefBg;
+				Settings->PlaceholderRefHatchStripeColor = SavedRefStripe;
+				Settings->PlaceholderHatchStripeWidth = SavedStripeWidth;
+				Settings->PlaceholderHatchStripeGap = SavedStripeGap;
+			}
+		}
+
+		UDesign2UMGSettings* Settings = nullptr;
+		bool bSavedUseCustomOverride = false;
+		FString SavedBaseBg;
+		FString SavedBaseStripe;
+		FString SavedRefBg;
+		FString SavedRefStripe;
+		int32 SavedStripeWidth = 1;
+		int32 SavedStripeGap = 4;
+	};
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaGridWrapMetadataTest,
 	"Design2UMG.FigmaParser.GridWrapMetadata",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -2332,3 +2434,5 @@ bool FFigmaRealDashboardTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Has text content"), Texts.Num() > 0);
 	return true;
 }
+
+#endif // WITH_AUTOMATION_WORKER

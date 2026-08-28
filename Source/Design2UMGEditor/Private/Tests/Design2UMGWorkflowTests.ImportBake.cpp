@@ -1,4 +1,87 @@
-﻿IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaTargetNodeAndImageMappingWorkflowTest,
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+
+#include "Misc/AutomationTest.h"
+#include "DesignSchema.h"
+#include "Design2UMGLocalFigmaImport.h"
+#include "DesignImportPipeline.h"
+#include "FigmaParser.h"
+#include "Design2UMGTestUtils.h"
+#include "HAL/FileManager.h"
+#include "IImageWrapper.h"
+#include "IImageWrapperModule.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Modules/ModuleManager.h"
+
+#if WITH_AUTOMATION_WORKER
+using namespace Design2UMGTestUtils;
+
+namespace
+{
+	bool WriteTinyPng(const FString& PngPath)
+	{
+		static const uint8 TinyPng[] = {
+			137,80,78,71,13,10,26,10,
+			0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,6,0,0,0,31,21,196,137,
+			0,0,0,13,73,68,65,84,120,156,99,248,255,255,63,0,5,254,2,254,65,13,16,55,
+			0,0,0,0,73,69,78,68,174,66,96,130
+		};
+
+		TArray<uint8> Bytes;
+		Bytes.Append(TinyPng, UE_ARRAY_COUNT(TinyPng));
+		return FFileHelper::SaveArrayToFile(Bytes, *PngPath);
+	}
+
+	bool WriteTestPng(const FString& PngPath, const TArray<FColor>& Pixels, int32 Width, int32 Height)
+	{
+		if (Pixels.Num() != Width * Height)
+		{
+			return false;
+		}
+
+		IImageWrapperModule& WrapperModule = FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
+		TSharedPtr<IImageWrapper> Wrapper = WrapperModule.CreateImageWrapper(EImageFormat::PNG);
+		if (!Wrapper.IsValid() || !Wrapper->SetRaw(Pixels.GetData(), Pixels.Num() * sizeof(FColor), Width, Height, ERGBFormat::BGRA, 8))
+		{
+			return false;
+		}
+
+		const TArray64<uint8>& Compressed = Wrapper->GetCompressed(100);
+		TArray<uint8> Bytes;
+		Bytes.Append(Compressed.GetData(), Compressed.Num());
+		return FFileHelper::SaveArrayToFile(Bytes, *PngPath);
+	}
+
+	bool ReadTestPng(const FString& PngPath, TArray<FColor>& OutPixels, int32& OutWidth, int32& OutHeight)
+	{
+		TArray<uint8> Bytes;
+		if (!FFileHelper::LoadFileToArray(Bytes, *PngPath))
+		{
+			return false;
+		}
+
+		IImageWrapperModule& WrapperModule = FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
+		TSharedPtr<IImageWrapper> Wrapper = WrapperModule.CreateImageWrapper(EImageFormat::PNG);
+		if (!Wrapper.IsValid() || !Wrapper->SetCompressed(Bytes.GetData(), Bytes.Num()))
+		{
+			return false;
+		}
+
+		TArray64<uint8> RawData;
+		if (!Wrapper->GetRaw(ERGBFormat::BGRA, 8, RawData))
+		{
+			return false;
+		}
+
+		OutWidth = Wrapper->GetWidth();
+		OutHeight = Wrapper->GetHeight();
+		OutPixels.SetNumUninitialized(OutWidth * OutHeight);
+		FMemory::Memcpy(OutPixels.GetData(), RawData.GetData(), OutPixels.Num() * sizeof(FColor));
+		return true;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaTargetNodeAndImageMappingWorkflowTest,
 	"Design2UMG.BatchImport.FigmaTargetNodeAndImageMapping",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaTargetNodeAndImageMappingWorkflowTest::RunTest(const FString& Parameters)
@@ -676,3 +759,5 @@ bool FFigmaLocalLayerBlurBakeWorkflowTest::RunTest(const FString& Parameters)
 	IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
 	return true;
 }
+
+#endif // WITH_AUTOMATION_WORKER

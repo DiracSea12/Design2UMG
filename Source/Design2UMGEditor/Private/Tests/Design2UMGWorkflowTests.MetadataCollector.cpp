@@ -1,4 +1,17 @@
-﻿IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMetadataCollectorExactSnapshotTest,
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+
+#include "Misc/AutomationTest.h"
+#include "WidgetMetadataCollector.h"
+#include "Components/TextBlock.h"
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
+#include "UObject/UObjectGlobals.h"
+
+#if WITH_AUTOMATION_WORKER
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMetadataCollectorExactSnapshotTest,
 	"Design2UMG.WidgetBlueprint.MetadataCollector.ExactSnapshot",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FMetadataCollectorExactSnapshotTest::RunTest(const FString& Parameters)
@@ -87,3 +100,5 @@ bool FMetadataCollectorNoRecordWithoutSemanticsTest::RunTest(const FString& Para
 	TestEqual(TEXT("No record appended for non-instance node"), Records.Num(), 0);
 	return true;
 }
+
+#endif // WITH_AUTOMATION_WORKER

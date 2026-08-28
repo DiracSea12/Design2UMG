@@ -1,3 +1,14 @@
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+
+#include "Misc/AutomationTest.h"
+#include "Design2UMGConverter.h"
+#include "FontResolver.h"
+#include "FigmaParser.h"
+#include "Design2UMGTestUtils.h"
+
+#if WITH_AUTOMATION_WORKER
+using namespace Design2UMGTestUtils;
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaComplexParserTest,
 	"Design2UMG.FigmaParser.ComplexDashboard",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -1454,3 +1465,5 @@ bool FFigmaTextFitUsesAuthoredMinimumSizeTest::RunTest(const FString& Parameters
 
 	return true;
 }
+
+#endif // WITH_AUTOMATION_WORKER

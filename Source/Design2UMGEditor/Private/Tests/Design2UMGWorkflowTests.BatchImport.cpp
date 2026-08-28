@@ -1,4 +1,71 @@
-﻿IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenWelcomeLigatureIconWeightWorkflowTest,
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+
+#include "Misc/AutomationTest.h"
+#include "DesignSchema.h"
+#include "Design2UMGEditorDesignSourceRegistry.h"
+#include "Design2UMGLocalFigmaImport.h"
+#include "DesignImportPipeline.h"
+#include "DesignImportUtils.h"
+#include "Tests/Design2UMGTestAssetCleanup.h"
+#include "FontResolver.h"
+#include "ExternalServices/PenMCPBridge.h"
+#include "Design2UMGTestUtils.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Dom/JsonObject.h"
+#include "Editor.h"
+#include "Interfaces/IPluginManager.h"
+#include "Misc/Paths.h"
+#include "Modules/ModuleManager.h"
+#include "ObjectTools.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
+
+#if WITH_AUTOMATION_WORKER
+using namespace Design2UMGTestUtils;
+using Design2UMGEditorTests::DeleteGeneratedAssetsAtPath;
+
+namespace
+{
+	bool BuildPenMcpPayloadFromFixture(const FString& PenFilePath, FString& OutNodesJson, FString& OutVariablesJson)
+	{
+		FString PenJson;
+		if (!FFileHelper::LoadFileToString(PenJson, *PenFilePath))
+		{
+			return false;
+		}
+
+		TSharedPtr<FJsonObject> RootObject;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(PenJson);
+		if (!FJsonSerializer::Deserialize(Reader, RootObject) || !RootObject.IsValid())
+		{
+			return false;
+		}
+
+		const TArray<TSharedPtr<FJsonValue>>* Children = nullptr;
+		if (!RootObject->TryGetArrayField(TEXT("children"), Children) || !Children)
+		{
+			return false;
+		}
+
+		const TSharedRef<TJsonWriter<>> NodesWriter = TJsonWriterFactory<>::Create(&OutNodesJson);
+		if (!FJsonSerializer::Serialize(*Children, NodesWriter))
+		{
+			return false;
+		}
+
+		TSharedPtr<FJsonObject> VariablesObject = RootObject->GetObjectField(TEXT("variables"));
+		if (!VariablesObject.IsValid())
+		{
+			VariablesObject = MakeShared<FJsonObject>();
+		}
+
+		const TSharedRef<TJsonWriter<>> VarsWriter = TJsonWriterFactory<>::Create(&OutVariablesJson);
+		return FJsonSerializer::Serialize(VariablesObject.ToSharedRef(), VarsWriter);
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenWelcomeLigatureIconWeightWorkflowTest,
 	"Design2UMG.BatchImport.PencilWelcomeLigatureIconWeight",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FPenWelcomeLigatureIconWeightWorkflowTest::RunTest(const FString& Parameters)
@@ -248,3 +315,5 @@ bool FPenWelcomeBatchImportTest::RunTest(const FString& Parameters)
 	}
 	return true;
 }
+
+#endif // WITH_AUTOMATION_WORKER

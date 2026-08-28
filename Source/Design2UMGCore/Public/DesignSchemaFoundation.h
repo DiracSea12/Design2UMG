@@ -328,6 +328,28 @@ enum class EDesignStrokeAlign : uint8
 };
 
 /**
+ * Stroke line cap enumeration.
+ */
+UENUM()
+enum class EDesignStrokeCap : uint8
+{
+	Butt,
+	Round,
+	Square
+};
+
+/**
+ * Stroke line join enumeration.
+ */
+UENUM()
+enum class EDesignStrokeJoin : uint8
+{
+	Miter,
+	Round,
+	Bevel
+};
+
+/**
  * Stroke thickness supporting either a uniform value or per-edge values.
  */
 USTRUCT()
@@ -372,10 +394,10 @@ struct FDesignStroke
 	TOptional<FDesignFill> Fill;
 
 	UPROPERTY()
-	FString Cap = TEXT("butt");
+	EDesignStrokeCap Cap = EDesignStrokeCap::Butt;
 
 	UPROPERTY()
-	FString Join = TEXT("miter");
+	EDesignStrokeJoin Join = EDesignStrokeJoin::Miter;
 
 	UPROPERTY()
 	TArray<float> DashPattern;

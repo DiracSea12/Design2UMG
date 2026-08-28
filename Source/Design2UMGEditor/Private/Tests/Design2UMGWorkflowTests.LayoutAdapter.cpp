@@ -1,4 +1,20 @@
-﻿// ---- WidgetLayoutAdapter focused tests ----
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+
+#include "Misc/AutomationTest.h"
+#include "Design2UMGConverter.h"
+#include "UMGGenerator.h"
+#include "UMGLayoutProjection.h"
+#include "WidgetLayoutAdapter.h"
+#include "WidgetBlueprint.h"
+#include "Blueprint/WidgetTree.h"
+#include "Components/CanvasPanel.h"
+#include "Components/VerticalBox.h"
+#include "Components/Widget.h"
+#include "UObject/UObjectGlobals.h"
+
+#if WITH_AUTOMATION_WORKER
+
+// ---- WidgetLayoutAdapter focused tests ----
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLayoutAdapterSlotSnapshotParityTest,
 	"Design2UMG.LayoutAdapter.SlotSnapshotParity",
@@ -117,3 +133,5 @@ bool FLayoutAdapterTopologyInvariantTest::RunTest(const FString& Parameters)
 
 	return true;
 }
+
+#endif // WITH_AUTOMATION_WORKER

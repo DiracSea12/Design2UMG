@@ -3,54 +3,24 @@
 #include "Design2UMGConverter.h"
 #include "DesignSchema.h"
 #include "Design2UMGFigmaMetadataExtensions.h"
-#include "Design2UMGEditorDesignSourceRegistry.h"
-#include "WidgetMetadataCollector.h"
-#include "Design2UMGLocalFigmaImport.h"
 #include "Design2UMGTestUtils.h"
 #include "DesignImportPipeline.h"
-#include "DesignImportUtils.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 #include "FontResolver.h"
 #include "FigmaParser.h"
 #include "PenParser.h"
 #include "UMGGenerator.h"
-#include "UMGWidgetUtils.h"
 #include "PreBuildResourceNormalizer.h"
-#include "ExternalServices/PenMCPBridge.h"
-#include "UMGJsonSerializer.h"
-#include "AssetRegistry/AssetRegistryModule.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetBlueprintGeneratedClass.h"
 #include "Blueprint/WidgetTree.h"
 #include "Editor.h"
-#include "Components/Button.h"
 #include "Components/GridPanel.h"
-#include "Components/PanelWidget.h"
-#include "Components/Image.h"
-#include "Components/Border.h"
-#include "Components/ExpandableArea.h"
 #include "Components/GridSlot.h"
-#include "Components/NamedSlotInterface.h"
 #include "Components/ScrollBox.h"
 #include "Components/TextBlock.h"
-#include "Components/VerticalBoxSlot.h"
-#include "Framework/Application/SlateApplication.h"
-#include "Interfaces/IPluginManager.h"
-#include "IImageWrapper.h"
-#include "IImageWrapperModule.h"
-#include "Layout/Children.h"
-#include "Dom/JsonObject.h"
-#include "Serialization/JsonSerializer.h"
-#include "Serialization/JsonWriter.h"
-#include "HAL/FileManager.h"
 #include "Misc/Paths.h"
-#include "Modules/ModuleManager.h"
-#include "ObjectTools.h"
 #include "RHI.h"
-#include "UMGLayoutProjection.h"
-#include "WidgetLayoutAdapter.h"
-#include "Components/CanvasPanel.h"
-#include "Components/VerticalBox.h"
 #include "Engine/Texture2D.h"
 #if WITH_AUTOMATION_WORKER
 using namespace Design2UMGTestUtils;
@@ -78,123 +48,7 @@ namespace
 
 		return FMargin();
 	}
-
-	FString GetFixturePath(const FString& FixtureFileName)
-	{
-		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
-		if (!Plugin.IsValid())
-		{
-			return FString();
-		}
-
-		return FPaths::Combine(
-			Plugin->GetBaseDir(),
-			TEXT("Source/Design2UMGEditor/Private/Tests/Fixtures"),
-			FixtureFileName);
-	}
-
-	bool BuildPenMcpPayloadFromFixture(const FString& PenFilePath, FString& OutNodesJson, FString& OutVariablesJson)
-	{
-		FString PenJson;
-		if (!FFileHelper::LoadFileToString(PenJson, *PenFilePath))
-		{
-			return false;
-		}
-
-		TSharedPtr<FJsonObject> RootObject;
-		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(PenJson);
-		if (!FJsonSerializer::Deserialize(Reader, RootObject) || !RootObject.IsValid())
-		{
-			return false;
-		}
-
-		const TArray<TSharedPtr<FJsonValue>>* Children = nullptr;
-		if (!RootObject->TryGetArrayField(TEXT("children"), Children) || !Children)
-		{
-			return false;
-		}
-
-		const TSharedRef<TJsonWriter<>> NodesWriter = TJsonWriterFactory<>::Create(&OutNodesJson);
-		if (!FJsonSerializer::Serialize(*Children, NodesWriter))
-		{
-			return false;
-		}
-
-		TSharedPtr<FJsonObject> VariablesObject = RootObject->GetObjectField(TEXT("variables"));
-		if (!VariablesObject.IsValid())
-		{
-			VariablesObject = MakeShared<FJsonObject>();
-		}
-
-		const TSharedRef<TJsonWriter<>> VarsWriter = TJsonWriterFactory<>::Create(&OutVariablesJson);
-		return FJsonSerializer::Serialize(VariablesObject.ToSharedRef(), VarsWriter);
-	}
-
-	bool WriteTinyPng(const FString& PngPath)
-	{
-		static const uint8 TinyPng[] = {
-			137,80,78,71,13,10,26,10,
-			0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,6,0,0,0,31,21,196,137,
-			0,0,0,13,73,68,65,84,120,156,99,248,255,255,63,0,5,254,2,254,65,13,16,55,
-			0,0,0,0,73,69,78,68,174,66,96,130
-		};
-
-		TArray<uint8> Bytes;
-		Bytes.Append(TinyPng, UE_ARRAY_COUNT(TinyPng));
-		return FFileHelper::SaveArrayToFile(Bytes, *PngPath);
-	}
-
-	bool WriteTestPng(const FString& PngPath, const TArray<FColor>& Pixels, int32 Width, int32 Height)
-	{
-		if (Pixels.Num() != Width * Height)
-		{
-			return false;
-		}
-
-		IImageWrapperModule& WrapperModule = FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
-		TSharedPtr<IImageWrapper> Wrapper = WrapperModule.CreateImageWrapper(EImageFormat::PNG);
-		if (!Wrapper.IsValid() || !Wrapper->SetRaw(Pixels.GetData(), Pixels.Num() * sizeof(FColor), Width, Height, ERGBFormat::BGRA, 8))
-		{
-			return false;
-		}
-
-		const TArray64<uint8>& Compressed = Wrapper->GetCompressed(100);
-		TArray<uint8> Bytes;
-		Bytes.Append(Compressed.GetData(), Compressed.Num());
-		return FFileHelper::SaveArrayToFile(Bytes, *PngPath);
-	}
-
-	bool ReadTestPng(const FString& PngPath, TArray<FColor>& OutPixels, int32& OutWidth, int32& OutHeight)
-	{
-		TArray<uint8> Bytes;
-		if (!FFileHelper::LoadFileToArray(Bytes, *PngPath))
-		{
-			return false;
-		}
-
-		IImageWrapperModule& WrapperModule = FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
-		TSharedPtr<IImageWrapper> Wrapper = WrapperModule.CreateImageWrapper(EImageFormat::PNG);
-		if (!Wrapper.IsValid() || !Wrapper->SetCompressed(Bytes.GetData(), Bytes.Num()))
-		{
-			return false;
-		}
-
-		TArray64<uint8> RawData;
-		if (!Wrapper->GetRaw(ERGBFormat::BGRA, 8, RawData))
-		{
-			return false;
-		}
-
-		OutWidth = Wrapper->GetWidth();
-		OutHeight = Wrapper->GetHeight();
-		OutPixels.SetNumUninitialized(OutWidth * OutHeight);
-		FMemory::Memcpy(OutPixels.GetData(), RawData.GetData(), OutPixels.Num() * sizeof(FColor));
-		return true;
-	}
-
 }
-
-#include "Design2UMGWorkflowTests.BatchImport.inl"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenWelcomeWrapFontRegressionTest,
 	"Design2UMG.Text.PencilWelcomeWrapFontRegression",
@@ -387,8 +241,6 @@ bool FFigmaInstanceMetadataWorkflowTest::RunTest(const FString& Parameters)
 	DeleteGeneratedAssetsAtPath(OutputPath);
 	return true;
 }
-
-#include "Design2UMGWorkflowTests.MetadataCollector.inl"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextAlignVerticalRuntimeWorkflowTest,
 	"Design2UMG.WidgetBlueprint.TextAlignVerticalRuntime",
@@ -662,80 +514,6 @@ bool FFigmaGridSlotSemanticsRuntimeWorkflowTest::RunTest(const FString& Paramete
 	return true;
 }
 
-#include "Design2UMGWorkflowTests.ImportBake.inl"
-
-namespace
-{
-	FString SerializeWidgetTree(const UWidget* Widget, int32 Depth = 0)
-	{
-		if (!Widget)
-		{
-			return FString();
-		}
-
-		const FString Indent = FString::ChrN(Depth * 2, TEXT(' '));
-		const FString SlotClass = Widget->Slot ? Widget->Slot->GetClass()->GetName() : TEXT("none");
-		FString Result = FString::Printf(TEXT("%s%s:%s[%s]\n"),
-			*Indent,
-			*Widget->GetClass()->GetName(),
-			*Widget->GetName(),
-			*SlotClass);
-
-		if (const UPanelWidget* Panel = Cast<UPanelWidget>(Widget))
-		{
-			for (int32 i = 0; i < Panel->GetChildrenCount(); ++i)
-			{
-				Result += SerializeWidgetTree(Panel->GetChildAt(i), Depth + 1);
-			}
-		}
-
-		return Result;
-	}
-
-	FString SerializeWidgetTreeWithNamedSlots(const UWidget* Widget, int32 Depth = 0)
-	{
-		if (!Widget)
-		{
-			return FString();
-		}
-
-		const FString Indent = FString::ChrN(Depth * 2, TEXT(' '));
-		const FString SlotClass = Widget->Slot ? Widget->Slot->GetClass()->GetName() : TEXT("none");
-		FString Result = FString::Printf(TEXT("%s%s:%s[%s]\n"),
-			*Indent,
-			*Widget->GetClass()->GetName(),
-			*Widget->GetName(),
-			*SlotClass);
-
-		if (const UPanelWidget* Panel = Cast<UPanelWidget>(Widget))
-		{
-			for (int32 ChildIndex = 0; ChildIndex < Panel->GetChildrenCount(); ++ChildIndex)
-			{
-				Result += SerializeWidgetTreeWithNamedSlots(Panel->GetChildAt(ChildIndex), Depth + 1);
-			}
-		}
-
-		if (const INamedSlotInterface* NamedSlotHost = Cast<INamedSlotInterface>(const_cast<UWidget*>(Widget)))
-		{
-			TArray<FName> SlotNames;
-			NamedSlotHost->GetSlotNames(SlotNames);
-			for (const FName& SlotName : SlotNames)
-			{
-				if (const UWidget* SlotContent = NamedSlotHost->GetContentForSlot(SlotName))
-				{
-					Result += FString::Printf(TEXT("%s<NamedSlot:%s>\n"),
-						*FString::ChrN((Depth + 1) * 2, TEXT(' ')),
-						*SlotName.ToString());
-					Result += SerializeWidgetTreeWithNamedSlots(SlotContent, Depth + 2);
-				}
-			}
-		}
-
-		return Result;
-	}
-}
-
-#include "Design2UMGWorkflowTests.StructureSnapshot.inl"
 
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFitContentMinimumExpandsToContentTest,
@@ -1098,8 +876,5 @@ bool FPreBuildNormalizerImageTransformTextureTest::RunTest(const FString& Parame
 	DeleteGeneratedAssetsAtPath(OutputPath);
 	return true;
 }
-
-
-#include "Design2UMGWorkflowTests.LayoutAdapter.inl"
 
 #endif // WITH_AUTOMATION_WORKER

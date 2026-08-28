@@ -610,11 +610,11 @@ void ParseNodeStrokeProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNo
 		OutNode.Metadata.Add(TEXT("stroke.cap"), StrokeLinecap);
 		if (StrokeLinecap.Equals(TEXT("round"), ESearchCase::IgnoreCase))
 		{
-			Stroke.Cap = TEXT("round");
+			Stroke.Cap = EDesignStrokeCap::Round;
 		}
 		else if (StrokeLinecap.Equals(TEXT("square"), ESearchCase::IgnoreCase))
 		{
-			Stroke.Cap = TEXT("square");
+			Stroke.Cap = EDesignStrokeCap::Square;
 		}
 	}
 
@@ -624,11 +624,11 @@ void ParseNodeStrokeProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNo
 		OutNode.Metadata.Add(TEXT("stroke.join"), StrokeLinejoin);
 		if (StrokeLinejoin.Equals(TEXT("round"), ESearchCase::IgnoreCase))
 		{
-			Stroke.Join = TEXT("round");
+			Stroke.Join = EDesignStrokeJoin::Round;
 		}
 		else if (StrokeLinejoin.Equals(TEXT("bevel"), ESearchCase::IgnoreCase))
 		{
-			Stroke.Join = TEXT("bevel");
+			Stroke.Join = EDesignStrokeJoin::Bevel;
 		}
 	}
 

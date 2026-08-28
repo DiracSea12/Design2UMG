@@ -1,3 +1,20 @@
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+
+#include "Misc/AutomationTest.h"
+#include "Design2UMGConverter.h"
+#include "PenParser.h"
+#include "UMGPropertyKeys.h"
+#include "UMGValueParsing.h"
+#include "DesignPathRasterizer.h"
+#include "Design2UMGTestUtils.h"
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "Engine/Texture2D.h"
+
+#if WITH_AUTOMATION_WORKER
+using namespace Design2UMGTestUtils;
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenExtendedFieldsTest,
 	"Design2UMG.PenParser.ExtendedFields",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -319,3 +336,5 @@ bool FPathStrokeOnlyIconRasterizationTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Stroke-only path produces visible pixels"), CountOpaqueTexturePixels(Texture) >= 24);
 	return true;
 }
+
+#endif // WITH_AUTOMATION_WORKER

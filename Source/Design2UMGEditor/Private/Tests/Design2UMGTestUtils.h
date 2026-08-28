@@ -5,9 +5,11 @@
 #include "Design2UMGConverter.h"
 #include "UMGWidgetNodeAccess.h"
 
+#include "Engine/Texture2D.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "TextureResource.h"
 
 namespace Design2UMGTestUtils
 {
@@ -113,18 +115,52 @@ namespace Design2UMGTestUtils
 		}
 	}
 
-	inline bool LoadFixtureJson(const FString& FixtureFileName, FString& OutJson)
+	inline FString GetFixturePath(const FString& FixtureFileName)
 	{
 		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
 		if (!Plugin.IsValid())
 		{
-			return false;
+			return FString();
 		}
 
-		const FString FixturePath = FPaths::Combine(
+		return FPaths::Combine(
 			Plugin->GetBaseDir(),
 			TEXT("Source/Design2UMGEditor/Private/Tests/Fixtures"),
 			FixtureFileName);
-		return FFileHelper::LoadFileToString(OutJson, *FixturePath);
+	}
+
+	inline bool LoadFixtureJson(const FString& FixtureFileName, FString& OutJson)
+	{
+		return FFileHelper::LoadFileToString(OutJson, *GetFixturePath(FixtureFileName));
+	}
+
+	inline int32 CountOpaqueTexturePixels(UTexture2D* Texture)
+	{
+		if (!Texture || !Texture->GetPlatformData() || Texture->GetPlatformData()->Mips.Num() <= 0)
+		{
+			return 0;
+		}
+
+		FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
+		const void* LockedData = Mip.BulkData.LockReadOnly();
+		if (!LockedData)
+		{
+			Mip.BulkData.Unlock();
+			return 0;
+		}
+
+		const FColor* Pixels = static_cast<const FColor*>(LockedData);
+		const int32 PixelCount = Mip.SizeX * Mip.SizeY;
+		int32 OpaqueCount = 0;
+		for (int32 Index = 0; Index < PixelCount; ++Index)
+		{
+			if (Pixels[Index].A > 0)
+			{
+				++OpaqueCount;
+			}
+		}
+
+		Mip.BulkData.Unlock();
+		return OpaqueCount;
 	}
 }

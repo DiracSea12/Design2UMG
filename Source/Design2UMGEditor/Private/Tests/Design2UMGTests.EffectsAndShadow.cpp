@@ -1,3 +1,81 @@
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+
+#include "Misc/AutomationTest.h"
+#include "Design2UMGConverter.h"
+#include "PenParser.h"
+#include "FigmaParser.h"
+#include "ProceduralShapeGenerator.h"
+#include "UMGJsonParser.h"
+#include "UMGJsonSerializer.h"
+#include "UMGPropertyKeys.h"
+#include "UMGTextStyleApplication.h"
+#include "UMGValueParsing.h"
+#include "UMGWidgetNodeAccess.h"
+#include "UMGWidgetNodeProceduralResourceAccess.h"
+#include "UMGWidgetUtils.h"
+#include "Design2UMGTestUtils.h"
+#include "Dom/JsonObject.h"
+#include "MaterialShared.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "RHI.h"
+#include "Components/EditableText.h"
+#include "Components/EditableTextBox.h"
+#include "Components/MultiLineEditableText.h"
+#include "Components/MultiLineEditableTextBox.h"
+#include "Components/RetainerBox.h"
+#include "Components/RichTextBlock.h"
+#include "Components/TextBlock.h"
+#include "Components/Widget.h"
+#include "Components/WidgetSwitcher.h"
+#include "Engine/DataTable.h"
+#include "Engine/Texture2D.h"
+#include "TextureResource.h"
+#include "UObject/UObjectGlobals.h"
+
+#if WITH_AUTOMATION_WORKER
+using namespace Design2UMGTestUtils;
+
+namespace
+{
+	FUMGProceduralResourceRequest BuildProceduralRequestForTest(FAutomationTestBase& Test, const FUMGWidgetNode& Node)
+	{
+		FUMGProceduralResourceRequest Request;
+		Test.TestTrue(
+			TEXT("Typed procedural resource request builds"),
+			Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Node, Request));
+		return Request;
+	}
+
+	bool ReadTexturePixel(UTexture2D* Texture, int32 X, int32 Y, FColor& OutPixel)
+	{
+		if (!Texture || !Texture->GetPlatformData() || Texture->GetPlatformData()->Mips.Num() <= 0)
+		{
+			return false;
+		}
+
+		FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
+		if (X < 0 || Y < 0 || X >= Mip.SizeX || Y >= Mip.SizeY)
+		{
+			return false;
+		}
+
+		const void* LockedData = Mip.BulkData.LockReadOnly();
+		if (!LockedData)
+		{
+			Mip.BulkData.Unlock();
+			return false;
+		}
+
+		const FColor* Pixels = static_cast<const FColor*>(LockedData);
+		OutPixel = Pixels[Y * Mip.SizeX + X];
+		Mip.BulkData.Unlock();
+		return true;
+	}
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FForegroundBlurRetainerWrapperTest,
 	"Design2UMG.Converter.ForegroundBlurRetainerWrapper",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -2557,3 +2635,5 @@ bool FBoxShadowNegativeSpreadFidelityTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Negative spread opaque pixel area matches shrunken rect"), CountOpaqueTexturePixels(Texture), 28 * 28);
 	return true;
 }
+
+#endif // WITH_AUTOMATION_WORKER

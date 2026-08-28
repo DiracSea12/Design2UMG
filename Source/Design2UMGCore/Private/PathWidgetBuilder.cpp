@@ -9,6 +9,32 @@
 
 namespace
 {
+	FString GetStrokeCapString(const EDesignStrokeCap Cap)
+	{
+		switch (Cap)
+		{
+		case EDesignStrokeCap::Round:
+			return TEXT("round");
+		case EDesignStrokeCap::Square:
+			return TEXT("square");
+		default:
+			return TEXT("butt");
+		}
+	}
+
+	FString GetStrokeJoinString(const EDesignStrokeJoin Join)
+	{
+		switch (Join)
+		{
+		case EDesignStrokeJoin::Round:
+			return TEXT("round");
+		case EDesignStrokeJoin::Bevel:
+			return TEXT("bevel");
+		default:
+			return TEXT("miter");
+		}
+	}
+
 	void ApplyPathSizeOverrides(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
 	{
 		Widget.WidgetStyle.WidthOverride = FMath::Max(1, FMath::RoundToInt(Node->Transform.Width.Value));
@@ -158,12 +184,8 @@ FUMGWidgetNode PathWidgetBuilder::CreatePathWidget(const TSharedPtr<FDesignNode>
 			{
 				Widget.Path.StrokeColor = FUMGValueParser::ParseColor(StrokeColor);
 				Widget.Path.StrokeThickness = StrokeThickness;
-				Widget.Path.StrokeCap = Node->Visual.Stroke.Cap.IsEmpty()
-					? FString(TEXT("butt"))
-					: Node->Visual.Stroke.Cap;
-				Widget.Path.StrokeJoin = Node->Visual.Stroke.Join.IsEmpty()
-					? FString(TEXT("miter"))
-					: Node->Visual.Stroke.Join;
+				Widget.Path.StrokeCap = GetStrokeCapString(Node->Visual.Stroke.Cap);
+				Widget.Path.StrokeJoin = GetStrokeJoinString(Node->Visual.Stroke.Join);
 			}
 			ApplyPathSizeOverrides(Widget, Node);
 			return Widget;

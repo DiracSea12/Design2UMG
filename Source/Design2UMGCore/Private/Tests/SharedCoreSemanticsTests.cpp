@@ -911,8 +911,8 @@ bool FNodeWidgetFactoryGeometryFallbackDoesNotMutateInputTest::RunTest(const FSt
 	LineNode->Transform.SetPosition(6.0f, 18.0f);
 	LineNode->Visual.Stroke.Thickness.Uniform = 2.0f;
 	LineNode->Visual.Stroke.Fill = FDesignFill::FromColor(TEXT("#FFFFFFFF"));
-	LineNode->Visual.Stroke.Cap.Empty();
-	LineNode->Visual.Stroke.Join.Empty();
+	LineNode->Visual.Stroke.Cap = EDesignStrokeCap::Butt;
+	LineNode->Visual.Stroke.Join = EDesignStrokeJoin::Miter;
 	const FDesignTransformNodeData LineTransformBefore = LineNode->Transform;
 
 	const Design2UMGNodeWidgetFactory::FBuildResult LineResult = Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(LineNode);
@@ -939,7 +939,7 @@ bool FNodeWidgetFactoryGeometryFallbackDoesNotMutateInputTest::RunTest(const FSt
 	DashedVectorNode->Visual.Stroke.Thickness.Uniform = 5.11084f;
 	DashedVectorNode->Visual.Stroke.Fill = FDesignFill::FromColor(TEXT("#CDE7FFFF"));
 	DashedVectorNode->Visual.Stroke.DashPattern = {21.173479f, 21.173479f};
-	DashedVectorNode->Visual.Stroke.Cap = TEXT("round");
+	DashedVectorNode->Visual.Stroke.Cap = EDesignStrokeCap::Round;
 	DashedVectorNode->Transform.LayoutBoundsSize = FVector2D(0.000027f, 306.0f);
 
 	const Design2UMGNodeWidgetFactory::FBuildResult DashedVectorResult =

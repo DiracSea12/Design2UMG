@@ -1,4 +1,97 @@
-﻿IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTreeBuilderStructureSnapshotStableTest,
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+
+#include "Misc/AutomationTest.h"
+#include "Tests/Design2UMGTestAssetCleanup.h"
+#include "UMGGenerator.h"
+#include "UMGWidgetUtils.h"
+#include "Blueprint/UserWidget.h"
+#include "Blueprint/WidgetBlueprintGeneratedClass.h"
+#include "Blueprint/WidgetTree.h"
+#include "WidgetBlueprint.h"
+#include "Components/ExpandableArea.h"
+#include "Components/NamedSlotInterface.h"
+#include "Components/PanelWidget.h"
+#include "Components/VerticalBox.h"
+#include "Components/VerticalBoxSlot.h"
+#include "Components/Widget.h"
+#include "Editor.h"
+#include "UObject/UObjectGlobals.h"
+
+#if WITH_AUTOMATION_WORKER
+using Design2UMGEditorTests::DeleteGeneratedAssetsAtPath;
+
+namespace
+{
+	FString SerializeWidgetTree(const UWidget* Widget, int32 Depth = 0)
+	{
+		if (!Widget)
+		{
+			return FString();
+		}
+
+		const FString Indent = FString::ChrN(Depth * 2, TEXT(' '));
+		const FString SlotClass = Widget->Slot ? Widget->Slot->GetClass()->GetName() : TEXT("none");
+		FString Result = FString::Printf(TEXT("%s%s:%s[%s]\n"),
+			*Indent,
+			*Widget->GetClass()->GetName(),
+			*Widget->GetName(),
+			*SlotClass);
+
+		if (const UPanelWidget* Panel = Cast<UPanelWidget>(Widget))
+		{
+			for (int32 i = 0; i < Panel->GetChildrenCount(); ++i)
+			{
+				Result += SerializeWidgetTree(Panel->GetChildAt(i), Depth + 1);
+			}
+		}
+
+		return Result;
+	}
+
+	FString SerializeWidgetTreeWithNamedSlots(const UWidget* Widget, int32 Depth = 0)
+	{
+		if (!Widget)
+		{
+			return FString();
+		}
+
+		const FString Indent = FString::ChrN(Depth * 2, TEXT(' '));
+		const FString SlotClass = Widget->Slot ? Widget->Slot->GetClass()->GetName() : TEXT("none");
+		FString Result = FString::Printf(TEXT("%s%s:%s[%s]\n"),
+			*Indent,
+			*Widget->GetClass()->GetName(),
+			*Widget->GetName(),
+			*SlotClass);
+
+		if (const UPanelWidget* Panel = Cast<UPanelWidget>(Widget))
+		{
+			for (int32 ChildIndex = 0; ChildIndex < Panel->GetChildrenCount(); ++ChildIndex)
+			{
+				Result += SerializeWidgetTreeWithNamedSlots(Panel->GetChildAt(ChildIndex), Depth + 1);
+			}
+		}
+
+		if (const INamedSlotInterface* NamedSlotHost = Cast<INamedSlotInterface>(const_cast<UWidget*>(Widget)))
+		{
+			TArray<FName> SlotNames;
+			NamedSlotHost->GetSlotNames(SlotNames);
+			for (const FName& SlotName : SlotNames)
+			{
+				if (const UWidget* SlotContent = NamedSlotHost->GetContentForSlot(SlotName))
+				{
+					Result += FString::Printf(TEXT("%s<NamedSlot:%s>\n"),
+						*FString::ChrN((Depth + 1) * 2, TEXT(' ')),
+						*SlotName.ToString());
+					Result += SerializeWidgetTreeWithNamedSlots(SlotContent, Depth + 2);
+				}
+			}
+		}
+
+		return Result;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTreeBuilderStructureSnapshotStableTest,
 	"Design2UMG.TreeBuilder.StructureSnapshotStable",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FTreeBuilderStructureSnapshotStableTest::RunTest(const FString& Parameters)
@@ -223,3 +316,5 @@ bool FNamedSlotOverflowWrapStructureStableTest::RunTest(const FString& Parameter
 
 	return true;
 }
+
+#endif // WITH_AUTOMATION_WORKER

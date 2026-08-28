@@ -1,3 +1,15 @@
+// Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+
+#include "Misc/AutomationTest.h"
+#include "Design2UMGConverter.h"
+#include "PenParser.h"
+#include "UMGLayoutProjection.h"
+#include "UMGValueParsing.h"
+#include "Design2UMGTestUtils.h"
+
+#if WITH_AUTOMATION_WORKER
+using namespace Design2UMGTestUtils;
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenParserTest,
 	"Design2UMG.Parser.BasicDocument",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -561,3 +573,5 @@ bool FCanvasFillContainerFallbackSizeTest::RunTest(const FString& Parameters)
 	}
 	return true;
 }
+
+#endif // WITH_AUTOMATION_WORKER

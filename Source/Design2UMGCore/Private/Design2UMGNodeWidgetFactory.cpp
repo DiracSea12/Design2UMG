@@ -166,7 +166,7 @@ namespace
 			return nullptr;
 		}
 
-		const bool bRoundCap = Node->Visual.Stroke.Cap == TEXT("round");
+		const bool bRoundCap = Node->Visual.Stroke.Cap == EDesignStrokeCap::Round;
 		FString Geometry;
 		float Cursor = 0.0f;
 		int32 PatternIndex = 0;
