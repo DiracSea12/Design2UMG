@@ -287,7 +287,7 @@ Design2UMGNodeWidgetFactory::FBuildResult Design2UMGNodeWidgetFactory::CreateWid
 	case EDesignNodeType::Text:
 		{
 			Result.Widget = Design2UMGTextWidgetBuilder::CreateTextWidget(Node);
-			if (Design2UMGSourceMetadata::IsSourceNodeType(Node, TEXT("TEXT_PATH")))
+			if (Design2UMGSourceMetadata::IsFigmaTextPathNode(Node))
 			{
 				if (Node->Name.IsEmpty())
 				{

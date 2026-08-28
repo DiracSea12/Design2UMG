@@ -49,14 +49,14 @@ namespace DesignComponentMapping
 		}
 
 		FString ComponentKey;
-		if (SourceNode.IsInstance())
+		if (SourceNode.IsFigmaInstance())
 		{
 			// Figma mainComponentKey is stable across exports, so prefer it; fall back to componentId when absent.
 			ComponentKey = !SourceNode.MainComponentKey.IsEmpty()
 				? SourceNode.MainComponentKey
 				: SourceNode.ComponentId;
 		}
-		else if (SourceNode.IsComponentDefinition())
+		else if (SourceNode.IsFigmaComponentDefinition())
 		{
 			// Component definition node: the mirroring chain has backfilled its own Id into ComponentId.
 			ComponentKey = SourceNode.ComponentId;

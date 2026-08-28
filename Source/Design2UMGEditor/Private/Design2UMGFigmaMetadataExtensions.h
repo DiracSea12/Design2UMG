@@ -28,7 +28,7 @@ struct FDesign2UMGFigmaWidgetMetadataRecord
 
 	bool IsValid() const
 	{
-		return WidgetName != NAME_None && SourceNode.HasAnyComponentSemantics();
+		return WidgetName != NAME_None && SourceNode.HasAnyFigmaComponentSemantics();
 	}
 };
 

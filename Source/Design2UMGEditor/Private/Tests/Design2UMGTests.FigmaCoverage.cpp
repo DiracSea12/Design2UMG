@@ -837,14 +837,14 @@ bool FPenEmptySlotSemanticHintTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
-	TestEqual(TEXT("Empty slot keeps pen.slot.present for preservation"), Doc.Children[0]->Metadata.FindRef(TEXT("pen.slot.present")), TEXT("true"));
-	TestEqual(TEXT("Empty slot keeps pen.slot.count for preservation"), Doc.Children[0]->Metadata.FindRef(TEXT("pen.slot.count")), TEXT("0"));
+	TestEqual(TEXT("Empty slot keeps source.slot.present for preservation"), Doc.Children[0]->Metadata.FindRef(TEXT("source.slot.present")), TEXT("true"));
+	TestEqual(TEXT("Empty slot keeps source.slot.count for preservation"), Doc.Children[0]->Metadata.FindRef(TEXT("source.slot.count")), TEXT("0"));
 	TestTrue(TEXT("Empty slot array should mark placeholder surface"), Doc.Children[0]->LayoutData.bSemanticPlaceholderSurface);
-	TestEqual(TEXT("Non-empty slot keeps pen.slot.present for preservation"), Doc.Children[1]->Metadata.FindRef(TEXT("pen.slot.present")), TEXT("true"));
-	TestEqual(TEXT("Non-empty slot keeps pen.slot.count for preservation"), Doc.Children[1]->Metadata.FindRef(TEXT("pen.slot.count")), TEXT("1"));
-	TestFalse(TEXT("Non-empty slot should not synthesize pen.slot.empty"), Doc.Children[1]->Metadata.Contains(TEXT("pen.slot.empty")));
+	TestEqual(TEXT("Non-empty slot keeps source.slot.present for preservation"), Doc.Children[1]->Metadata.FindRef(TEXT("source.slot.present")), TEXT("true"));
+	TestEqual(TEXT("Non-empty slot keeps source.slot.count for preservation"), Doc.Children[1]->Metadata.FindRef(TEXT("source.slot.count")), TEXT("1"));
+	TestFalse(TEXT("Non-empty slot should not synthesize source.slot.empty"), Doc.Children[1]->Metadata.Contains(TEXT("source.slot.empty")));
 	TestTrue(TEXT("Non-empty slot array should mark placeholder surface"), Doc.Children[1]->LayoutData.bSemanticPlaceholderSurface);
-	TestFalse(TEXT("Explicit placeholder should not synthesize pen slot preservation keys"), Doc.Children[2]->Metadata.Contains(TEXT("pen.slot.present")) || Doc.Children[2]->Metadata.Contains(TEXT("pen.slot.count")) || Doc.Children[2]->Metadata.Contains(TEXT("pen.slot.empty")));
+	TestFalse(TEXT("Explicit placeholder should not synthesize source slot preservation keys"), Doc.Children[2]->Metadata.Contains(TEXT("source.slot.present")) || Doc.Children[2]->Metadata.Contains(TEXT("source.slot.count")) || Doc.Children[2]->Metadata.Contains(TEXT("source.slot.empty")));
 	TestTrue(TEXT("Explicit placeholder=true should mark placeholder surface"), Doc.Children[2]->LayoutData.bSemanticPlaceholderSurface);
 	return true;
 }
@@ -946,7 +946,7 @@ bool FPlaceholderSurfaceConversionTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
-	TestEqual(TEXT("Empty slot metadata preserved"), Doc.Children[0]->Metadata.FindRef(TEXT("pen.slot.empty")), TEXT("true"));
+	TestEqual(TEXT("Empty slot metadata preserved"), Doc.Children[0]->Metadata.FindRef(TEXT("source.slot.empty")), TEXT("true"));
 	TestTrue(TEXT("Empty slot array keeps semantic placeholder"), Doc.Children[0]->LayoutData.bSemanticPlaceholderSurface);
 	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::FromSettings(Settings));
 	const FUMGWidgetNode* SlotCell = FindWidgetById(Data.RootWidget, TEXT("slotCell"));
@@ -1470,7 +1470,7 @@ TestTrue(TEXT("figma instance isExposedInstance preserved"), InstanceNode->Metad
 		return false;
 	}
 
-	TestTrue(TEXT("figma instance typed node data exported"), ConvertedInstanceWidget->Source().IsInstance());
+	TestTrue(TEXT("figma instance typed node data exported"), ConvertedInstanceWidget->Source().IsFigmaInstance());
 	TestEqual(TEXT("figma instance source node type exported"), ConvertedInstanceWidget->Source().SourceNodeType, TEXT("INSTANCE"));
 	TestEqual(TEXT("figma instance componentId exported"), ConvertedInstanceWidget->Source().ComponentId, TEXT("12:34"));
 	TestEqual(TEXT("figma instance componentSetId exported"), ConvertedInstanceWidget->Source().ComponentSetId, TEXT("56:78"));

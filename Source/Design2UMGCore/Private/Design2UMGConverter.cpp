@@ -29,7 +29,7 @@ FUMGWidgetNode CreateFallbackBranchWidget(const TSharedPtr<FDesignNode>& Node)
 	FUMGWidgetNode Widget = Design2UMGConverterVisualSupport::CreateRenderFallbackWidget(Node);
 	Design2UMGNodeWidgetFactory::PopulateWidgetIdentityAndBounds(Widget, Node);
 	Widget.MutableSource() = Design2UMGSourceMetadata::BuildSourceNodeData(Node);
-	UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: '%s' -> Figma render fallback image"), *Widget.Name);
+	UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: '%s' -> render fallback image"), *Widget.Name);
 	return Widget;
 }
 } // namespace Design2UMGConverterInternal
@@ -584,7 +584,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 	for (const FDesignSkippedNodeReport& Report : Document.ParseDiagnostics().SkippedDesignerNodes)
 	{
 		Result.Warnings.AddUnique(FString::Printf(
-			TEXT("Figma %s '%s' (%s) skipped from runtime widget tree [%s]"),
+			TEXT("Node %s '%s' (%s) skipped from runtime widget tree [%s]"),
 			*Report.NodeType,
 			Report.NodeName.IsEmpty() ? TEXT("<unnamed>") : *Report.NodeName,
 			Report.NodeId.IsEmpty() ? TEXT("<no-id>") : *Report.NodeId,

@@ -85,7 +85,10 @@ struct FUMGSourceNodeData
 	UPROPERTY()
 	FString MappedComponentKey;
 
-	bool IsInstance() const
+	// Figma component semantics: the uppercase SourceNodeType literals ("INSTANCE"/"COMPONENT"/"COMPONENT_SET") and the
+	// component instance fields (ComponentId/ComponentPropertiesJson/...) are only ever written by the Figma parser,
+	// so these predicates are false for every Pencil-sourced node data.
+	bool IsFigmaInstance() const
 	{
 		return SourceNodeType.Equals(TEXT("INSTANCE"), ESearchCase::IgnoreCase)
 			|| !ComponentId.IsEmpty()
@@ -94,9 +97,9 @@ struct FUMGSourceNodeData
 			|| !OverridesJson.IsEmpty();
 	}
 
-	bool IsComponentDefinition() const { return SourceNodeType.Equals(TEXT("COMPONENT"), ESearchCase::IgnoreCase); }
-	bool IsComponentSet() const { return SourceNodeType.Equals(TEXT("COMPONENT_SET"), ESearchCase::IgnoreCase); }
-	bool HasAnyComponentSemantics() const { return IsInstance() || IsComponentDefinition() || IsComponentSet(); }
+	bool IsFigmaComponentDefinition() const { return SourceNodeType.Equals(TEXT("COMPONENT"), ESearchCase::IgnoreCase); }
+	bool IsFigmaComponentSet() const { return SourceNodeType.Equals(TEXT("COMPONENT_SET"), ESearchCase::IgnoreCase); }
+	bool HasAnyFigmaComponentSemantics() const { return IsFigmaInstance() || IsFigmaComponentDefinition() || IsFigmaComponentSet(); }
 };
 
 USTRUCT()

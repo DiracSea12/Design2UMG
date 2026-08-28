@@ -63,11 +63,11 @@ namespace
 
 		void BackfillDefinitionIds(FUMGSourceNodeData& SourceData, const TSharedPtr<FDesignNode>& Node)
 		{
-			if (SourceData.IsComponentDefinition() && SourceData.ComponentId.IsEmpty())
+			if (SourceData.IsFigmaComponentDefinition() && SourceData.ComponentId.IsEmpty())
 			{
 				SourceData.ComponentId = Node->Id;
 			}
-			if (SourceData.IsComponentSet() && SourceData.ComponentSetId.IsEmpty())
+			if (SourceData.IsFigmaComponentSet() && SourceData.ComponentSetId.IsEmpty())
 			{
 				SourceData.ComponentSetId = Node->Id;
 			}
@@ -99,6 +99,11 @@ namespace Design2UMGSourceMetadata
 	{
 		return MetadataAccess::GetSourceExtensionValue(Node, SourceMetadataKeys::SourceNodeType)
 			.Equals(ExpectedType, ESearchCase::IgnoreCase);
+	}
+
+	bool IsFigmaTextPathNode(const TSharedPtr<FDesignNode>& Node)
+	{
+		return IsSourceNodeType(Node, TEXT("TEXT_PATH"));
 	}
 
 }

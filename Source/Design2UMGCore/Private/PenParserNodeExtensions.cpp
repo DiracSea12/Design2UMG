@@ -55,12 +55,12 @@ namespace
 			return;
 		}
 
-		// Preserve raw Pen slot keys for source truth; only pen.slot.empty is the supplementary explicit-empty hint.
-		Node.Metadata.Add(TEXT("pen.slot.present"), TEXT("true"));
-		Node.Metadata.Add(TEXT("pen.slot.count"), FString::FromInt(SlotMetadata.SlotNodeCount));
+		// Preserve source slot keys for source truth (same key family as the Figma parser); only source.slot.empty is the supplementary explicit-empty hint.
+		Node.Metadata.Add(TEXT("source.slot.present"), TEXT("true"));
+		Node.Metadata.Add(TEXT("source.slot.count"), FString::FromInt(SlotMetadata.SlotNodeCount));
 		if (SlotMetadata.SlotNodeCount == 0)
 		{
-			Node.Metadata.Add(TEXT("pen.slot.empty"), TEXT("true"));
+			Node.Metadata.Add(TEXT("source.slot.empty"), TEXT("true"));
 		}
 	}
 
