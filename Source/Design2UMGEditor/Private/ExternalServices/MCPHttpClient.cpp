@@ -178,10 +178,13 @@ void FMCPHttpClient::SendRequestAsync(
 	const FString& Method,
 	const TSharedPtr<FJsonObject>& Params,
 	bool bExpectResponse,
-	TFunction<void(bool bSuccess, const FString& ResponseBody, const FString& NewSessionId)> OnComplete)
+	TFunction<void(bool bSuccess, const FString& ResponseBody, const FString& NewSessionId)> OnComplete,
+	const FString& InLogLabel,
+	bool bLogTransportErrors)
 {
 	CancelActiveRequest();
 
+	const FString LogLabel = InLogLabel.IsEmpty() ? Method : InLogLabel;
 	const FString RequestBody = BuildRpcRequestBody(Method, Params, &NextRpcRequestId);
 	const int32 RequestId = ++State->NextTrackingRequestId;
 	State->ActiveTrackingRequestId = RequestId;
@@ -193,7 +196,7 @@ void FMCPHttpClient::SendRequestAsync(
 			Method,
 			RequestBody,
 			RequestId,
-			[State = State, RequestId, OnComplete, Method, bExpectResponse](
+			[State = State, RequestId, OnComplete, LogLabel, bExpectResponse, bLogTransportErrors](
 				bool bConnectedSuccessfully,
 				const FString& ResponseBody,
 				int32 ResponseCode,
@@ -207,13 +210,16 @@ void FMCPHttpClient::SendRequestAsync(
 
 				if (bWasCancelled)
 				{
-					UE_LOG(LogDesign2UMG, Verbose, TEXT("MCPHttpClient: Request cancelled for %s"), *Method);
+					UE_LOG(LogDesign2UMG, Verbose, TEXT("MCPHttpClient: Request cancelled for %s"), *LogLabel);
 					return;
 				}
 
 				if (!bConnectedSuccessfully)
 				{
-					UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: Connection failed for %s"), *Method);
+					if (bLogTransportErrors)
+					{
+						UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: Connection failed for %s"), *LogLabel);
+					}
 					if (OnComplete)
 					{
 						OnComplete(false, TEXT(""), TEXT(""));
@@ -223,7 +229,10 @@ void FMCPHttpClient::SendRequestAsync(
 
 				if (ResponseCode < 200 || ResponseCode >= 300)
 				{
-					UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: HTTP %d for %s"), ResponseCode, *Method);
+					if (bLogTransportErrors)
+					{
+						UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: HTTP %d for %s"), ResponseCode, *LogLabel);
+					}
 					if (OnComplete)
 					{
 						OnComplete(false, TEXT(""), TEXT(""));
@@ -243,7 +252,7 @@ void FMCPHttpClient::SendRequestAsync(
 			{
 				State->ActiveTrackingRequestId = 0;
 			}
-			UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: ProcessRequest failed for %s"), *Method);
+			UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: ProcessRequest failed for %s"), *LogLabel);
 			if (OnComplete)
 			{
 				OnComplete(false, TEXT(""), TEXT(""));
@@ -256,7 +265,7 @@ void FMCPHttpClient::SendRequestAsync(
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = CreatePostRequest(ServerEndpoint, SessionId, RequestBody);
 	State->ActiveRequest = HttpRequest;
 	HttpRequest->OnProcessRequestComplete().BindLambda(
-		[State = State, RequestId, OnComplete, Method, bExpectResponse](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnectedSuccessfully)
+		[State = State, RequestId, OnComplete, LogLabel, bExpectResponse, bLogTransportErrors](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnectedSuccessfully)
 	{
 		const bool bWasCancelled = State->CancelledRequestIds.Remove(RequestId) > 0;
 		if (State->ActiveTrackingRequestId == RequestId)
@@ -267,13 +276,16 @@ void FMCPHttpClient::SendRequestAsync(
 
 		if (bWasCancelled)
 		{
-			UE_LOG(LogDesign2UMG, Verbose, TEXT("MCPHttpClient: Request cancelled for %s"), *Method);
+			UE_LOG(LogDesign2UMG, Verbose, TEXT("MCPHttpClient: Request cancelled for %s"), *LogLabel);
 			return;
 		}
 
 		if (!bConnectedSuccessfully || !Response.IsValid())
 		{
-			UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: Connection failed for %s"), *Method);
+			if (bLogTransportErrors)
+			{
+				UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: Connection failed for %s"), *LogLabel);
+			}
 			if (OnComplete)
 				OnComplete(false, TEXT(""), TEXT(""));
 			return;
@@ -282,7 +294,10 @@ void FMCPHttpClient::SendRequestAsync(
 		const int32 Code = Response->GetResponseCode();
 		if (Code < 200 || Code >= 300)
 		{
-			UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: HTTP %d for %s"), Code, *Method);
+			if (bLogTransportErrors)
+			{
+				UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: HTTP %d for %s"), Code, *LogLabel);
+			}
 			if (OnComplete)
 				OnComplete(false, TEXT(""), TEXT(""));
 			return;
@@ -301,7 +316,7 @@ void FMCPHttpClient::SendRequestAsync(
 			State->ActiveRequest.Reset();
 			State->ActiveTrackingRequestId = 0;
 		}
-		UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: ProcessRequest failed for %s"), *Method);
+		UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: ProcessRequest failed for %s"), *LogLabel);
 		if (OnComplete)
 			OnComplete(false, TEXT(""), TEXT(""));
 	}
@@ -381,135 +396,35 @@ void FMCPHttpClient::CallToolAsync(const FString& ToolName,
 	if (Arguments.IsValid())
 		Params->SetObjectField(TEXT("arguments"), Arguments);
 
-	const FString RequestBody = BuildRpcRequestBody(TEXT("tools/call"), Params, &NextRpcRequestId);
-	const int32 RequestId = ++State->NextTrackingRequestId;
-	State->ActiveTrackingRequestId = RequestId;
-
-#if WITH_DEV_AUTOMATION_TESTS
-	if (GMCPHttpClientAutomationHooks.IsValid() && GMCPHttpClientAutomationHooks->StartAsyncRequest)
-	{
-		const bool bStarted = GMCPHttpClientAutomationHooks->StartAsyncRequest(
-			TEXT("tools/call"),
-			RequestBody,
-			RequestId,
-			[State = State, RequestId, OnComplete, ToolName](
-				bool bConnected,
-				const FString& Body,
-				int32 ResponseCode,
-				const FString&)
-			{
-				const bool bWasCancelled = State->CancelledRequestIds.Remove(RequestId) > 0;
-				if (State->ActiveTrackingRequestId == RequestId)
-				{
-					State->ActiveTrackingRequestId = 0;
-				}
-
-				if (bWasCancelled)
-				{
-					UE_LOG(LogDesign2UMG, Verbose, TEXT("MCPHttpClient: Request cancelled for %s"), *ToolName);
-					return;
-				}
-
-				if (!bConnected || ResponseCode < 200 || ResponseCode >= 300)
-				{
-					if (OnComplete)
-					{
-						OnComplete(false, TEXT(""));
-					}
-					return;
-				}
-
-				TSharedPtr<FJsonObject> Result;
-				FString Text;
-				if (ParseSSEResponse(Body, Result) && ExtractToolResult(Result, Text))
-				{
-					if (OnComplete)
-					{
-						OnComplete(true, Text);
-					}
-				}
-				else
-				{
-					UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: Async parse failed for %s"), *ToolName);
-					if (OnComplete)
-					{
-						OnComplete(false, TEXT(""));
-					}
-				}
-			});
-
-		if (!bStarted)
+	// Transport failures are reported through OnComplete only: the original
+	// tools/call path never logged connection/HTTP errors itself, so it passes
+	// bLogTransportErrors=false and keeps its own parse-failure log below.
+	SendRequestAsync(TEXT("tools/call"), Params, true,
+		[OnComplete, ToolName](bool bSuccess, const FString& ResponseBody, const FString&)
 		{
-			if (State->ActiveTrackingRequestId == RequestId)
-			{
-				State->ActiveTrackingRequestId = 0;
-			}
-			UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: ProcessRequest failed for %s"), *ToolName);
-			if (OnComplete)
-			{
-				OnComplete(false, TEXT(""));
-			}
-		}
-		return;
-	}
-#endif
-
-	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = CreatePostRequest(ServerEndpoint, SessionId, RequestBody);
-	State->ActiveRequest = HttpRequest;
-	HttpRequest->OnProcessRequestComplete().BindLambda(
-		[State = State, RequestId, OnComplete, ToolName](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnected)
-		{
-			const bool bWasCancelled = State->CancelledRequestIds.Remove(RequestId) > 0;
-			if (State->ActiveTrackingRequestId == RequestId)
-			{
-				State->ActiveRequest.Reset();
-				State->ActiveTrackingRequestId = 0;
-			}
-
-			if (bWasCancelled)
-			{
-				UE_LOG(LogDesign2UMG, Verbose, TEXT("MCPHttpClient: Request cancelled for %s"), *ToolName);
-				return;
-			}
-
-			if (!bConnected || !Response.IsValid()
-				|| Response->GetResponseCode() < 200
-				|| Response->GetResponseCode() >= 300)
+			if (!bSuccess)
 			{
 				if (OnComplete)
 					OnComplete(false, TEXT(""));
 				return;
 			}
 
-			const FString Body = Response->GetContentAsString();
 			TSharedPtr<FJsonObject> Result;
 			FString Text;
-
-			if (ParseSSEResponse(Body, Result) && ExtractToolResult(Result, Text))
+			if (ParseSSEResponse(ResponseBody, Result) && ExtractToolResult(Result, Text))
 			{
 				if (OnComplete)
 					OnComplete(true, Text);
 			}
 			else
 			{
-				UE_LOG(LogDesign2UMG, Error,
-					TEXT("MCPHttpClient: Async parse failed for %s"), *ToolName);
+				UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: Async parse failed for %s"), *ToolName);
 				if (OnComplete)
 					OnComplete(false, TEXT(""));
 			}
-		});
-
-	if (!HttpRequest->ProcessRequest())
-	{
-		if (State->ActiveTrackingRequestId == RequestId)
-		{
-			State->ActiveRequest.Reset();
-			State->ActiveTrackingRequestId = 0;
-		}
-		UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: ProcessRequest failed for %s"), *ToolName);
-		if (OnComplete)
-			OnComplete(false, TEXT(""));
-	}
+		},
+		ToolName,
+		/*bLogTransportErrors=*/false);
 }
 
 #if WITH_DEV_AUTOMATION_TESTS

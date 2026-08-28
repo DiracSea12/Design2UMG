@@ -13,34 +13,39 @@ bool FWidgetLayoutAdapter::IsRootCanvasChild(UPanelWidget* ParentWidget, UWidget
 		&& WidgetTree->RootWidget == ParentWidget;
 }
 
-bool FWidgetLayoutAdapter::HasMeaningfulSlot(const FUMGSlotData& Slot)
+FWidgetLayoutAdapter::FNonDefaultGroups FWidgetLayoutAdapter::GetNonDefaultSlotGroups(const FUMGSlotData& Slot)
 {
 	const FUMGSlotData Default;
-	const bool bAnchors =
+	FNonDefaultGroups Groups;
+	Groups.bCanvas =
 		!FMath::IsNearlyEqual(Slot.Anchors.Min.X, Default.Anchors.Min.X) ||
 		!FMath::IsNearlyEqual(Slot.Anchors.Min.Y, Default.Anchors.Min.Y) ||
 		!FMath::IsNearlyEqual(Slot.Anchors.Max.X, Default.Anchors.Max.X) ||
-		!FMath::IsNearlyEqual(Slot.Anchors.Max.Y, Default.Anchors.Max.Y);
-	const bool bAlignment =
+		!FMath::IsNearlyEqual(Slot.Anchors.Max.Y, Default.Anchors.Max.Y) ||
 		!FMath::IsNearlyEqual(Slot.Alignment.X, Default.Alignment.X) ||
-		!FMath::IsNearlyEqual(Slot.Alignment.Y, Default.Alignment.Y);
-	const bool bOffsets =
+		!FMath::IsNearlyEqual(Slot.Alignment.Y, Default.Alignment.Y) ||
 		!FMath::IsNearlyEqual(Slot.Offsets.Left, Default.Offsets.Left) ||
 		!FMath::IsNearlyEqual(Slot.Offsets.Top, Default.Offsets.Top) ||
 		!FMath::IsNearlyEqual(Slot.Offsets.Right, Default.Offsets.Right) ||
 		!FMath::IsNearlyEqual(Slot.Offsets.Bottom, Default.Offsets.Bottom);
-	const bool bPadding = !FUMGValueParser::IsNearlyEqualMargin(Slot.Padding, Default.Padding);
-	const bool bBox =
+	Groups.bPadding = !FUMGValueParser::IsNearlyEqualMargin(Slot.Padding, Default.Padding);
+	Groups.bBox =
 		Slot.HorizontalAlignment != Default.HorizontalAlignment ||
 		Slot.VerticalAlignment != Default.VerticalAlignment ||
 		Slot.SizeRule != Default.SizeRule ||
 		!FMath::IsNearlyEqual(Slot.FillWeight, Default.FillWeight);
-	const bool bGrid =
+	Groups.bGrid =
 		Slot.Row != Default.Row ||
 		Slot.Column != Default.Column ||
 		Slot.RowSpan != Default.RowSpan ||
 		Slot.ColumnSpan != Default.ColumnSpan;
-	return bAnchors || bAlignment || bOffsets || bPadding || bBox || bGrid;
+	return Groups;
+}
+
+bool FWidgetLayoutAdapter::HasMeaningfulSlot(const FUMGSlotData& Slot)
+{
+	const FNonDefaultGroups Groups = GetNonDefaultSlotGroups(Slot);
+	return Groups.bCanvas || Groups.bPadding || Groups.bBox || Groups.bGrid;
 }
 
 bool FWidgetLayoutAdapter::HasValidSlotHistory(const FUMGSlotData& Slot)

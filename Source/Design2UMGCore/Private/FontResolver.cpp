@@ -17,13 +17,11 @@
 
 namespace
 {
-	TMap<FString, FString> GFontAssetCache;
-	TMap<FString, TArray<FString>> GNormalizedProjectFontAssetIndex;
-	TMap<FString, TMap<FString, FString>> GKnownIconGlyphCache;
-	TMap<FString, TMap<FString, FString>> GKnownIconNameCache;
-	bool bProjectFontIndexBuilt = false;
-	FCriticalSection GFontResolverCacheMutex;
-	FCriticalSection GFontIndexMutex;
+	enum class EKnownIconCache : uint8
+	{
+		GlyphByIconName,
+		NameByGlyph
+	};
 
 	enum class EExplicitFontMappingResult : uint8
 	{
@@ -114,15 +112,6 @@ namespace
 	bool IsEngineFontAssetPath(const FString& ObjectPath)
 	{
 		return ObjectPath.StartsWith(TEXT("/Engine/EngineFonts/"), ESearchCase::IgnoreCase);
-	}
-
-	void IndexFontAssetName(const FString& AssetName, const FString& ObjectPath)
-	{
-		const FString Normalized = NormalizeFontFamilyKeyForResolver(AssetName);
-		if (!Normalized.IsEmpty() && IsProjectFontAssetPath(ObjectPath))
-		{
-			GNormalizedProjectFontAssetIndex.FindOrAdd(Normalized).AddUnique(ObjectPath);
-		}
 	}
 
 	bool FontHasUsableDefaultTypefaceEntry(const UFont* Font)
@@ -301,19 +290,152 @@ namespace
 		return false;
 	}
 
-	TArray<FString> GetIndexedFontAssetPathsSnapshot(const FString& NormalizedFamily)
+	// File-private cache state + locks behind FFontResolver. The instance lives
+	// for the process; FDesign2UMGCoreModule::ShutdownModule drains it through
+	// FFontResolver::ClearCache() so no resolver state outlives the module.
+	struct FFontResolverCache
 	{
-		FScopeLock Lock(&GFontIndexMutex);
-		if (const TArray<FString>* IndexedPaths = GNormalizedProjectFontAssetIndex.Find(NormalizedFamily))
+		TMap<FString, FString> FontAssetCache;
+		TMap<FString, TArray<FString>> NormalizedProjectFontAssetIndex;
+		TMap<FString, TMap<FString, FString>> KnownIconGlyphCache;
+		TMap<FString, TMap<FString, FString>> KnownIconNameCache;
+		bool bProjectFontIndexBuilt = false;
+		FCriticalSection FontResolverCacheMutex;
+		FCriticalSection FontIndexMutex;
+
+		bool TryGetFontAssetCachePath(const FString& NormalizedFamily, FString& OutPath)
 		{
-			return *IndexedPaths;
+			FScopeLock Lock(&FontResolverCacheMutex);
+			if (const FString* Path = FontAssetCache.Find(NormalizedFamily))
+			{
+				OutPath = *Path;
+				return true;
+			}
+			return false;
 		}
-		return {};
+
+		void RemoveFontAssetCachePath(const FString& NormalizedFamily)
+		{
+			FScopeLock Lock(&FontResolverCacheMutex);
+			FontAssetCache.Remove(NormalizedFamily);
+		}
+
+		void StoreFontAssetCachePath(const FString& NormalizedFamily, const FString& ObjectPath)
+		{
+			FScopeLock Lock(&FontResolverCacheMutex);
+			FontAssetCache.FindOrAdd(NormalizedFamily) = ObjectPath;
+		}
+
+		bool TryGetKnownIconCacheValue(EKnownIconCache CacheKind, const FString& NormalizedFamily, const FString& Key, FString& OutValue)
+		{
+			const TMap<FString, TMap<FString, FString>>& IconCache =
+				(CacheKind == EKnownIconCache::GlyphByIconName) ? KnownIconGlyphCache : KnownIconNameCache;
+			FScopeLock Lock(&FontResolverCacheMutex);
+			if (const TMap<FString, FString>* Values = IconCache.Find(NormalizedFamily))
+			{
+				if (const FString* Value = Values->Find(Key))
+				{
+					OutValue = *Value;
+					return true;
+				}
+			}
+			return false;
+		}
+
+		void StoreKnownIconCaches(
+			const FString& NormalizedFamily,
+			const TMap<FString, FString>& Glyphs,
+			const TMap<FString, FString>& IconNames)
+		{
+			FScopeLock Lock(&FontResolverCacheMutex);
+			KnownIconGlyphCache.Add(NormalizedFamily, Glyphs);
+			KnownIconNameCache.Add(NormalizedFamily, IconNames);
+		}
+
+		void ClearResolverCaches()
+		{
+			FScopeLock Lock(&FontResolverCacheMutex);
+			FontAssetCache.Empty();
+			KnownIconGlyphCache.Reset();
+			KnownIconNameCache.Reset();
+		}
+
+		TArray<FString> GetIndexedFontAssetPathsSnapshot(const FString& NormalizedFamily)
+		{
+			FScopeLock Lock(&FontIndexMutex);
+			if (const TArray<FString>* IndexedPaths = NormalizedProjectFontAssetIndex.Find(NormalizedFamily))
+			{
+				return *IndexedPaths;
+			}
+			return {};
+		}
+
+		void RemoveIndexedFontAssetPath(const FString& NormalizedFamily)
+		{
+			FScopeLock Lock(&FontIndexMutex);
+			NormalizedProjectFontAssetIndex.Remove(NormalizedFamily);
+		}
+
+		void BuildProjectFontAssetIndexIfNeeded()
+		{
+			FScopeLock Lock(&FontIndexMutex);
+
+			if (bProjectFontIndexBuilt)
+				return;
+
+			NormalizedProjectFontAssetIndex.Reset();
+
+			FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+			IAssetRegistry& AR = ARM.Get();
+
+			TArray<FAssetData> FontAssets;
+			AR.GetAssetsByClass(UFont::StaticClass()->GetClassPathName(), FontAssets, true);
+			for (const FAssetData& Asset : FontAssets)
+			{
+				if (!Asset.PackagePath.ToString().StartsWith(TEXT("/Game/"), ESearchCase::IgnoreCase))
+				{
+					continue;
+				}
+				AddIndexedFontAssetName(Asset.AssetName.ToString(), Asset.GetObjectPathString());
+			}
+
+			bProjectFontIndexBuilt = true;
+		}
+
+		void InvalidateProjectFontAssetIndex()
+		{
+			FScopeLock Lock(&FontIndexMutex);
+			bProjectFontIndexBuilt = false;
+			NormalizedProjectFontAssetIndex.Reset();
+		}
+
+		void AddIndexedFontAssetPath(const FString& NormalizedFamily, const FString& ObjectPath)
+		{
+			FScopeLock Lock(&FontIndexMutex);
+			NormalizedProjectFontAssetIndex.FindOrAdd(NormalizedFamily).AddUnique(ObjectPath);
+		}
+
+	private:
+		/** Caller must hold FontIndexMutex. */
+		void AddIndexedFontAssetName(const FString& AssetName, const FString& ObjectPath)
+		{
+			const FString Normalized = NormalizeFontFamilyKeyForResolver(AssetName);
+			if (!Normalized.IsEmpty() && IsProjectFontAssetPath(ObjectPath))
+			{
+				NormalizedProjectFontAssetIndex.FindOrAdd(Normalized).AddUnique(ObjectPath);
+			}
+		}
+	};
+
+	FFontResolverCache& GetFontResolverCache()
+	{
+		static FFontResolverCache Cache;
+		return Cache;
 	}
 
 	bool TryGetIndexedFontAssetPath(const FString& NormalizedFamily, FString& OutPath)
 	{
-		const TArray<FString> IndexedPaths = GetIndexedFontAssetPathsSnapshot(NormalizedFamily);
+		const TArray<FString> IndexedPaths = GetFontResolverCache().GetIndexedFontAssetPathsSnapshot(NormalizedFamily);
 		if (IndexedPaths.Num() != 1)
 		{
 			return false;
@@ -327,63 +449,6 @@ namespace
 		return false;
 	}
 
-	void RemoveIndexedFontAssetPath(const FString& NormalizedFamily)
-	{
-		FScopeLock Lock(&GFontIndexMutex);
-		GNormalizedProjectFontAssetIndex.Remove(NormalizedFamily);
-	}
-
-	bool TryGetKnownIconCacheValue(
-		const TMap<FString, TMap<FString, FString>>& Cache,
-		const FString& NormalizedFamily,
-		const FString& Key,
-		FString& OutValue)
-	{
-		FScopeLock Lock(&GFontResolverCacheMutex);
-		if (const TMap<FString, FString>* Values = Cache.Find(NormalizedFamily))
-		{
-			if (const FString* Value = Values->Find(Key))
-			{
-				OutValue = *Value;
-				return true;
-			}
-		}
-		return false;
-	}
-
-	void BuildProjectFontAssetIndexIfNeeded()
-	{
-		FScopeLock Lock(&GFontIndexMutex);
-
-		if (bProjectFontIndexBuilt)
-			return;
-
-		GNormalizedProjectFontAssetIndex.Reset();
-
-		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
-		IAssetRegistry& AR = ARM.Get();
-
-		TArray<FAssetData> FontAssets;
-		AR.GetAssetsByClass(UFont::StaticClass()->GetClassPathName(), FontAssets, true);
-		for (const FAssetData& Asset : FontAssets)
-		{
-			if (!Asset.PackagePath.ToString().StartsWith(TEXT("/Game/"), ESearchCase::IgnoreCase))
-			{
-				continue;
-			}
-			IndexFontAssetName(Asset.AssetName.ToString(), Asset.GetObjectPathString());
-		}
-
-		bProjectFontIndexBuilt = true;
-	}
-
-	void InvalidateProjectFontAssetIndex()
-	{
-		FScopeLock Lock(&GFontIndexMutex);
-		bProjectFontIndexBuilt = false;
-		GNormalizedProjectFontAssetIndex.Reset();
-	}
-
 	bool TryGetSingleLoadableProjectFontAssetPath(const FString& FontFamily, FString& OutPath)
 	{
 		const TArray<FString> LookupKeys = BuildFontFamilyLookupKeys(FontFamily);
@@ -392,7 +457,7 @@ namespace
 			return false;
 		}
 
-		BuildProjectFontAssetIndexIfNeeded();
+		GetFontResolverCache().BuildProjectFontAssetIndexIfNeeded();
 		for (const FString& LookupKey : LookupKeys)
 		{
 			if (TryGetIndexedFontAssetPath(LookupKey, OutPath))
@@ -540,10 +605,10 @@ bool FFontResolver::HasInvalidProjectFontAsset(const FString& FontFamily)
 		return false;
 	}
 
-	BuildProjectFontAssetIndexIfNeeded();
+	GetFontResolverCache().BuildProjectFontAssetIndexIfNeeded();
 	for (const FString& LookupKey : LookupKeys)
 	{
-		const TArray<FString> IndexedPaths = GetIndexedFontAssetPathsSnapshot(LookupKey);
+		const TArray<FString> IndexedPaths = GetFontResolverCache().GetIndexedFontAssetPathsSnapshot(LookupKey);
 		if (IndexedPaths.Num() == 1 && !IsLoadableProjectFontPath(IndexedPaths[0]))
 		{
 			return true;
@@ -741,28 +806,19 @@ FString FFontResolver::FindFontAssetPath(const FString& FontFamily)
 
 	const FString NormalizedFamily = NormalizeFontFamilyKeyForResolver(FontFamily);
 	const TArray<FString> LookupKeys = BuildFontFamilyLookupKeys(FontFamily);
+	FFontResolverCache& Cache = GetFontResolverCache();
 
 	FString CachedPath;
-	bool bHasCachedPath = false;
-	{
-		FScopeLock Lock(&GFontResolverCacheMutex);
-		if (const FString* Path = GFontAssetCache.Find(NormalizedFamily))
-		{
-			CachedPath = *Path;
-			bHasCachedPath = true;
-		}
-	}
-	if (bHasCachedPath)
+	if (Cache.TryGetFontAssetCachePath(NormalizedFamily, CachedPath))
 	{
 		if (IsUsableResolvedFontPath(CachedPath))
 		{
 			return CachedPath;
 		}
-		FScopeLock Lock(&GFontResolverCacheMutex);
-		GFontAssetCache.Remove(NormalizedFamily);
+		Cache.RemoveFontAssetCachePath(NormalizedFamily);
 	}
 
-	BuildProjectFontAssetIndexIfNeeded();
+	Cache.BuildProjectFontAssetIndexIfNeeded();
 	for (const FString& LookupKey : LookupKeys)
 	{
 		FString IndexedPath;
@@ -773,12 +829,11 @@ FString FFontResolver::FindFontAssetPath(const FString& FontFamily)
 
 		if (IsLoadableProjectFontPath(IndexedPath))
 		{
-			FScopeLock Lock(&GFontResolverCacheMutex);
-			GFontAssetCache.FindOrAdd(NormalizedFamily) = IndexedPath;
+			Cache.StoreFontAssetCachePath(NormalizedFamily, IndexedPath);
 			return IndexedPath;
 		}
 
-		RemoveIndexedFontAssetPath(LookupKey);
+		Cache.RemoveIndexedFontAssetPath(LookupKey);
 	}
 
 	for (const FString& LookupKey : LookupKeys)
@@ -786,16 +841,12 @@ FString FFontResolver::FindFontAssetPath(const FString& FontFamily)
 		FString EngineFontPath;
 		if (TryResolveEngineFontAssetPath(LookupKey, EngineFontPath))
 		{
-			FScopeLock Lock(&GFontResolverCacheMutex);
-			GFontAssetCache.FindOrAdd(NormalizedFamily) = EngineFontPath;
+			Cache.StoreFontAssetCachePath(NormalizedFamily, EngineFontPath);
 			return EngineFontPath;
 		}
 	}
 
-	{
-		FScopeLock Lock(&GFontResolverCacheMutex);
-		GFontAssetCache.FindOrAdd(NormalizedFamily) = FString();
-	}
+	Cache.StoreFontAssetCachePath(NormalizedFamily, FString());
 	return FString();
 }
 
@@ -819,7 +870,7 @@ FString FFontResolver::FindKnownIconGlyph(const FString& FontFamily, const FStri
 	}
 
 	FString Glyph;
-	if (TryGetKnownIconCacheValue(GKnownIconGlyphCache, NormalizedFamily, NormalizedIcon, Glyph))
+	if (GetFontResolverCache().TryGetKnownIconCacheValue(EKnownIconCache::GlyphByIconName, NormalizedFamily, NormalizedIcon, Glyph))
 	{
 		return Glyph;
 	}
@@ -836,7 +887,7 @@ FString FFontResolver::FindKnownIconNameByGlyph(const FString& FontFamily, const
 
 	const FString NormalizedFamily = NormalizeFontFamilyKeyForResolver(FontFamily);
 	FString IconName;
-	if (TryGetKnownIconCacheValue(GKnownIconNameCache, NormalizedFamily, Glyph, IconName))
+	if (GetFontResolverCache().TryGetKnownIconCacheValue(EKnownIconCache::NameByGlyph, NormalizedFamily, Glyph, IconName))
 	{
 		return IconName;
 	}
@@ -846,13 +897,9 @@ FString FFontResolver::FindKnownIconNameByGlyph(const FString& FontFamily, const
 
 void FFontResolver::ClearCache()
 {
-	{
-		FScopeLock Lock(&GFontResolverCacheMutex);
-		GFontAssetCache.Empty();
-		GKnownIconGlyphCache.Reset();
-		GKnownIconNameCache.Reset();
-	}
-	InvalidateProjectFontAssetIndex();
+	FFontResolverCache& Cache = GetFontResolverCache();
+	Cache.ClearResolverCaches();
+	Cache.InvalidateProjectFontAssetIndex();
 }
 
 void FFontResolver::RegisterFontAssetPath(const FString& FontFamily, const FString& ObjectPath)
@@ -868,15 +915,9 @@ void FFontResolver::RegisterFontAssetPath(const FString& FontFamily, const FStri
 		return;
 	}
 
-	{
-		FScopeLock Lock(&GFontResolverCacheMutex);
-		GFontAssetCache.FindOrAdd(NormalizedFamily) = ObjectPath;
-	}
-
-	{
-		FScopeLock Lock(&GFontIndexMutex);
-		GNormalizedProjectFontAssetIndex.FindOrAdd(NormalizedFamily).AddUnique(ObjectPath);
-	}
+	FFontResolverCache& Cache = GetFontResolverCache();
+	Cache.StoreFontAssetCachePath(NormalizedFamily, ObjectPath);
+	Cache.AddIndexedFontAssetPath(NormalizedFamily, ObjectPath);
 }
 
 void FFontResolver::RegisterKnownIconGlyphs(
@@ -890,9 +931,7 @@ void FFontResolver::RegisterKnownIconGlyphs(
 		return;
 	}
 
-	FScopeLock Lock(&GFontResolverCacheMutex);
-	GKnownIconGlyphCache.Add(NormalizedFamily, Glyphs);
-	GKnownIconNameCache.Add(NormalizedFamily, IconNames);
+	GetFontResolverCache().StoreKnownIconCaches(NormalizedFamily, Glyphs, IconNames);
 }
 
 int32 FFontResolver::ParseWeightValue(const FString& Weight)
@@ -1029,10 +1068,11 @@ TArray<FString> FFontResolver::FindMissingFonts(const FDesignDocument& Document)
 		if (!TryGetSingleLoadableProjectFontAssetPath(Family, ProjectFontPath))
 		{
 			Missing.Add(Family);
-			BuildProjectFontAssetIndexIfNeeded();
+			FFontResolverCache& Cache = GetFontResolverCache();
+			Cache.BuildProjectFontAssetIndexIfNeeded();
 			for (const FString& LookupKey : BuildFontFamilyLookupKeys(Family))
 			{
-				for (const FString& IndexedPath : GetIndexedFontAssetPathsSnapshot(LookupKey))
+				for (const FString& IndexedPath : Cache.GetIndexedFontAssetPathsSnapshot(LookupKey))
 				{
 					UFont* Font = IsProjectFontAssetPath(IndexedPath) ? LoadObject<UFont>(nullptr, *IndexedPath) : nullptr;
 					if (Font && !FontHasUsableDefaultTypefaceEntry(Font))

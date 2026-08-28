@@ -52,11 +52,20 @@ private:
 	int32 NextRpcRequestId = 1;
 	TSharedRef<struct FMCPHttpClientState, ESPMode::ThreadSafe> State;
 
+	/**
+	 * Send one JSON-RPC request and track cancellation for it.
+	 * @param LogLabel              Label used in log lines; defaults to Method when empty.
+	 * @param bLogTransportErrors   When false, connection/HTTP failures are reported to
+	 *                              OnComplete without the transport Error log lines
+	 *                              (tools/call callers own their failure reporting).
+	 */
 	void SendRequestAsync(
 		const FString& Method,
 		const TSharedPtr<FJsonObject>& Params,
 		bool bExpectResponse,
-		TFunction<void(bool bSuccess, const FString& ResponseBody, const FString& NewSessionId)> OnComplete);
+		TFunction<void(bool bSuccess, const FString& ResponseBody, const FString& NewSessionId)> OnComplete,
+		const FString& LogLabel = FString(),
+		bool bLogTransportErrors = true);
 
 	/** Parse the JSON-RPC result out of an SSE response body. */
 	static bool ParseSSEResponse(const FString& SSEBody, TSharedPtr<FJsonObject>& OutResult);

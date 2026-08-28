@@ -6,6 +6,7 @@
 #include "UMGPropertyKeys.h"
 #include "UMGValueParsing.h"
 #include "UMGWidgetNodeAccess.h"
+#include "WidgetLayoutAdapter.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
@@ -20,36 +21,6 @@
 
 namespace
 {
-	bool HasMeaningfulSlotData(const FUMGSlotData& Slot)
-	{
-		const FUMGSlotData Default;
-		const bool bAnchors =
-			!FMath::IsNearlyEqual(Slot.Anchors.Min.X, Default.Anchors.Min.X) ||
-			!FMath::IsNearlyEqual(Slot.Anchors.Min.Y, Default.Anchors.Min.Y) ||
-			!FMath::IsNearlyEqual(Slot.Anchors.Max.X, Default.Anchors.Max.X) ||
-			!FMath::IsNearlyEqual(Slot.Anchors.Max.Y, Default.Anchors.Max.Y);
-		const bool bAlignment =
-			!FMath::IsNearlyEqual(Slot.Alignment.X, Default.Alignment.X) ||
-			!FMath::IsNearlyEqual(Slot.Alignment.Y, Default.Alignment.Y);
-		const bool bOffsets =
-			!FMath::IsNearlyEqual(Slot.Offsets.Left, Default.Offsets.Left) ||
-			!FMath::IsNearlyEqual(Slot.Offsets.Top, Default.Offsets.Top) ||
-			!FMath::IsNearlyEqual(Slot.Offsets.Right, Default.Offsets.Right) ||
-			!FMath::IsNearlyEqual(Slot.Offsets.Bottom, Default.Offsets.Bottom);
-		const bool bPadding = !FUMGValueParser::IsNearlyEqualMargin(Slot.Padding, Default.Padding);
-		const bool bBox =
-			Slot.HorizontalAlignment != Default.HorizontalAlignment ||
-			Slot.VerticalAlignment != Default.VerticalAlignment ||
-			Slot.SizeRule != Default.SizeRule ||
-			!FMath::IsNearlyEqual(Slot.FillWeight, Default.FillWeight);
-		const bool bGrid =
-			Slot.Row != Default.Row ||
-			Slot.Column != Default.Column ||
-			Slot.RowSpan != Default.RowSpan ||
-			Slot.ColumnSpan != Default.ColumnSpan;
-		return bAnchors || bAlignment || bOffsets || bPadding || bBox || bGrid;
-	}
-
 	bool HasExplicitGridData(const FUMGSlotData& Slot)
 	{
 		const FUMGSlotData Default;
@@ -369,7 +340,7 @@ namespace
 				continue;
 			}
 
-			if (HasMeaningfulSlotData(ChildNode.Slot))
+			if (FWidgetLayoutAdapter::HasMeaningfulSlot(ChildNode.Slot))
 			{
 				UE_LOG(LogDesign2UMG, Warning, TEXT("NamedSlot child '%s' has slot data that cannot be applied and was ignored (host '%s')."),
 					*ChildNode.Name, *Node.Name);

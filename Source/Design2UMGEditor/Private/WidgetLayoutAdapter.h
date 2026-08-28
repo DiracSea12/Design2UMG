@@ -11,6 +11,25 @@ class UWidgetTree;
 class FWidgetLayoutAdapter
 {
 public:
+	/** Per-slot-group "differs from default FUMGSlotData" flags. */
+	struct FNonDefaultGroups
+	{
+		/** Anchors, Alignment, or Offsets differ (canvas slot fields). */
+		bool bCanvas = false;
+		/** Padding differs from the default margin. */
+		bool bPadding = false;
+		/** Horizontal/Vertical alignment, SizeRule, or FillWeight differ (box slot fields). */
+		bool bBox = false;
+		/** Row/Column/RowSpan/ColumnSpan differ (grid slot fields). */
+		bool bGrid = false;
+	};
+
+	/** Compare a slot against a default-constructed FUMGSlotData, grouped per slot family. */
+	static FNonDefaultGroups GetNonDefaultSlotGroups(const FUMGSlotData& Slot);
+
+	/** True when any slot field group differs from a default-constructed FUMGSlotData. */
+	static bool HasMeaningfulSlot(const FUMGSlotData& Slot);
+
 	/**
 	 * Resolve the final slot for a widget being added to a parent panel.
 	 * @param Node            Source widget node (provides Bounds and original Slot).
@@ -29,6 +48,5 @@ public:
 
 private:
 	static bool IsRootCanvasChild(UPanelWidget* ParentWidget, UWidgetTree* WidgetTree);
-	static bool HasMeaningfulSlot(const FUMGSlotData& Slot);
 	static bool HasValidSlotHistory(const FUMGSlotData& Slot);
 };

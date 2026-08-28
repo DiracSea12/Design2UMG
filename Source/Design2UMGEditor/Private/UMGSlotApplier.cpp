@@ -2,6 +2,7 @@
 
 #include "UMGWidgetUtils.h"
 #include "UMGValueParsing.h"
+#include "WidgetLayoutAdapter.h"
 #include "Design2UMGLog.h"
 
 #include "Components/PanelSlot.h"
@@ -206,50 +207,28 @@ namespace
 void FUMGWidgetUtils::ApplySlotProperties(UPanelSlot* Slot, const FUMGSlotData& S)
 {
 	if (!Slot) return;
-	const FUMGSlotData Default;
-	const bool bHasNonDefaultCanvas =
-		!FMath::IsNearlyEqual(S.Anchors.Min.X, Default.Anchors.Min.X) ||
-		!FMath::IsNearlyEqual(S.Anchors.Min.Y, Default.Anchors.Min.Y) ||
-		!FMath::IsNearlyEqual(S.Anchors.Max.X, Default.Anchors.Max.X) ||
-		!FMath::IsNearlyEqual(S.Anchors.Max.Y, Default.Anchors.Max.Y) ||
-		!FMath::IsNearlyEqual(S.Alignment.X, Default.Alignment.X) ||
-		!FMath::IsNearlyEqual(S.Alignment.Y, Default.Alignment.Y) ||
-		!FMath::IsNearlyEqual(S.Offsets.Left, Default.Offsets.Left) ||
-		!FMath::IsNearlyEqual(S.Offsets.Top, Default.Offsets.Top) ||
-		!FMath::IsNearlyEqual(S.Offsets.Right, Default.Offsets.Right) ||
-		!FMath::IsNearlyEqual(S.Offsets.Bottom, Default.Offsets.Bottom);
-	const bool bHasNonDefaultPadding = !FUMGValueParser::IsNearlyEqualMargin(S.Padding, Default.Padding);
-	const bool bHasNonDefaultBox =
-		S.HorizontalAlignment != Default.HorizontalAlignment ||
-		S.VerticalAlignment != Default.VerticalAlignment ||
-		S.SizeRule != Default.SizeRule ||
-		!FMath::IsNearlyEqual(S.FillWeight, Default.FillWeight);
-	const bool bHasNonDefaultGrid =
-		S.Row != Default.Row ||
-		S.Column != Default.Column ||
-		S.RowSpan != Default.RowSpan ||
-		S.ColumnSpan != Default.ColumnSpan;
+	const FWidgetLayoutAdapter::FNonDefaultGroups NonDefault = FWidgetLayoutAdapter::GetNonDefaultSlotGroups(S);
 
 	const bool bIsCanvas = Slot->IsA<UCanvasPanelSlot>();
 	const bool bIsGrid = Slot->IsA<UGridSlot>() || Slot->IsA<UUniformGridSlot>();
 	if (bIsCanvas)
 	{
-		if (bHasNonDefaultPadding || bHasNonDefaultBox || bHasNonDefaultGrid)
+		if (NonDefault.bPadding || NonDefault.bBox || NonDefault.bGrid)
 		{
 			UE_LOG(LogDesign2UMG, Warning, TEXT("CanvasPanelSlot ignored non-canvas fields (Padding/HAlign/VAlign/SizeRule/FillWeight/Row/Column, etc.)."));
 		}
 	}
 	else
 	{
-		if (bHasNonDefaultCanvas)
+		if (NonDefault.bCanvas)
 		{
 			UE_LOG(LogDesign2UMG, Warning, TEXT("%s ignored Anchors/Offsets/Alignment."), *Slot->GetClass()->GetName());
 		}
-		if (!bIsGrid && bHasNonDefaultGrid)
+		if (!bIsGrid && NonDefault.bGrid)
 		{
 			UE_LOG(LogDesign2UMG, Warning, TEXT("%s ignored Row/Column/RowSpan/ColumnSpan."), *Slot->GetClass()->GetName());
 		}
-		if (Slot->IsA<UScaleBoxSlot>() && bHasNonDefaultPadding)
+		if (Slot->IsA<UScaleBoxSlot>() && NonDefault.bPadding)
 		{
 			UE_LOG(LogDesign2UMG, Warning, TEXT("ScaleBoxSlot does not support Padding."));
 		}
