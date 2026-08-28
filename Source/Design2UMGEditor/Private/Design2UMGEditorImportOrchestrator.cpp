@@ -788,11 +788,11 @@ namespace Design2UMGEditorImportOrchestrator
 			TEXT("Unattended mode: local figma import finished; exiting"));
 	}
 
-	// Design2UMG.Reimport 控制台命令入口：reimport 的菜单 UI（OpenReimportDialog）之外
-	// 的命令行路径。只做参数映射薄包装：加载新源 design.json -> DesignImportPipeline::
-	// Reimport；逐节点诊断与总结（reimport_*）由 pipeline 内部打到 LogDesign2UMG，
-	// 这里补一条命令级结论（成功 / 全量冲突已生成并列副本 / 未生效），与菜单入口的
-	// Notification 三个分支一一对应。
+	// Design2UMG.Reimport console-command entry: the command-line path for reimport outside the reimport
+	// menu UI (OpenReimportDialog). A thin parameter-mapping wrapper only: load the new-source design.json ->
+	// DesignImportPipeline::Reimport; per-node diagnostics and the summary (reimport_*) are logged by the
+	// pipeline itself to LogDesign2UMG; this adds one command-level conclusion (success / all conflicts resolved
+	// via sibling copies / not applied), one-to-one with the three Notification branches of the menu entry.
 	void RunDesignReimport(const FString& TargetAssetPath, const FString& JsonFilePath, const bool bGenerateResolutionCopy)
 	{
 		bool bOk = false;

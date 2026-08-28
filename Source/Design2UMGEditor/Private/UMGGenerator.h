@@ -9,7 +9,7 @@
 
 class UWidgetBlueprint;
 
-/** 一次生成的结构化输出：manifest 载荷（成功保存后写 sidecar）+ Component Mapping 诊断。 */
+/** Structured output of one generation: the manifest payload (sidecar written after a successful save) + Component Mapping diagnostics. */
 struct FDesign2UMGGenerationOutput
 {
 	FDesign2UMGGenerationManifestPayload Manifest;
@@ -31,10 +31,10 @@ public:
 		FDesign2UMGGenerationOutput* OutGenerationOutput = nullptr);
 
 	/**
-	 * 编译并保存 WBP；传入生成输出时在保存成功后把 manifest 原子写到资产同目录 sidecar。
-	 * 保存失败不写 manifest（不允许半更新资产 + 新 manifest 的组合）；
-	 * 资产保存成功但 sidecar 写失败时，导入仍按成功处理，写失败作为结构化诊断
-	 * 追加进 GenerationOutput->MappingDiagnostics（进导入报告）。
+	 * Compile and save the WBP; when a generation output is passed in, atomically write the manifest sidecar next to the asset after a successful save.
+	 * Save failure writes no manifest (never a half-updated asset + new manifest combination);
+	 * if the asset saved but the sidecar failed, the import still counts as success; the write failure is appended
+	 * to GenerationOutput->MappingDiagnostics as a structured diagnostic (reaching the import report).
 	 */
 	static bool SaveWidgetBlueprint(
 		UWidgetBlueprint* WBP,
@@ -42,8 +42,8 @@ public:
 
 #if WITH_DEV_AUTOMATION_TESTS
 	/**
-	 * 测试注入（reimport 保存失败语义专用）：武装后下一次 SaveWidgetBlueprint 直接失败一次，
-	 * 不触碰任何状态；用于确定性验证「事务回滚 / manifest 不更新」路径。生产路径不受影响。
+	 * Test injection (specific to reimport save-failure semantics): once armed, the next SaveWidgetBlueprint fails
+	 * exactly once and touches no state; used to verify deterministically the "transaction rollback / manifest not updated" path. Production is unaffected.
 	 */
 	static void ArmAutomationSaveFailureOnce();
 #endif

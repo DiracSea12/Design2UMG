@@ -4,6 +4,7 @@
 #include "Design2UMGLog.h"
 #include "Design2UMGNotifications.h"
 #include "Automation/Design2UMGAutomationRender.h"
+#include "Design2UMGEditorImportOrchestrator.h"
 #include "UMGGenerator.h"
 #include "UMGWidgetUtils.h"
 #include "Design2UMGSettings.h"
@@ -27,11 +28,9 @@
 
 namespace
 {
-	const TCHAR* ImportUtilsFallbackOutputPath = TEXT("/Game/Design2UMG/PenConvert_Output");
-
 	FString ResolveImportOutputPath(const FString& OutputPath)
 	{
-		return OutputPath.IsEmpty() ? FString(ImportUtilsFallbackOutputPath) : OutputPath;
+		return OutputPath.IsEmpty() ? FString(Design2UMGEditorImportOrchestrator::DefaultPenOutputPath) : OutputPath;
 	}
 
 	FIntPoint ResolveOutputRenderSize(UWidgetBlueprint* WidgetBlueprint)
@@ -641,8 +640,8 @@ bool DesignImportUtils::GenerateBlueprintAndPng(
 			{
 				*OutGeneratedAssetPath = WBP->GetPathName();
 			}
-			// 资产与 sidecar 已落盘：GenerationOutput（含全部 mapping/manifest 诊断）必须
-			// 照常移出，否则导入报告与磁盘产物不对称（报告缺章节但资产存在）。
+			// Asset and sidecar are already on disk: GenerationOutput (with all mapping/manifest diagnostics) must
+			// still be moved out, or the import report and the disk artifacts disagree (report missing sections while the asset exists).
 			if (OutGenerationOutput)
 			{
 				*OutGenerationOutput = MoveTemp(GenerationOutput);
@@ -796,7 +795,7 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 		bCancelRequestedAfterMutation);
 	if (!FUMGGenerator::SaveWidgetBlueprint(WidgetBlueprint, &GenerationOutput))
 	{
-		// Build 期诊断（mapping 校验/命中等）随 GenerationOutput 移出，不随失败路径丢失。
+		// Build-time diagnostics (mapping validation/hits) move out with GenerationOutput; they are not lost on the failure path.
 		if (OutGenerationOutput)
 		{
 			*OutGenerationOutput = MoveTemp(GenerationOutput);

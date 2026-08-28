@@ -77,7 +77,7 @@ namespace Design2UMGWidgetBindingTools
 			return false;
 		}
 
-		// 事件绑定目标必须是 widget 类上的委托属性（事件广播或单播属性绑定）。
+		// The binding target must be a delegate property on the widget class (event multicast or unicast property binding).
 		const FName PropertyFName(*PropertyName);
 		const bool bDelegateProperty = FindFProperty<FDelegateProperty>(Widget->GetClass(), PropertyFName) != nullptr
 			|| FindFProperty<FMulticastDelegateProperty>(Widget->GetClass(), PropertyFName) != nullptr;
@@ -91,11 +91,11 @@ namespace Design2UMGWidgetBindingTools
 
 		WBP->Modify();
 
-		// 绑定的函数必须真实存在：编译期 IsBindingValid 按函数名解析，缺失的绑定
-		// 不会转成运行时绑定（PIE 不生效）。尚不存在时创建同签名空函数图（void() 签名，
-		// 与 OnClicked 等常见事件委托签名兼容）。函数名可能撞上既有成员（变量/图等）：
-		// FindUniqueKismetName 给出的才是实际可用的图名，绑定与 guid 查询必须用同一个
-		// 最终名字，否则绑定指向不存在的函数，编译期解析失败。
+		// The bound function must actually exist: compile-time IsBindingValid resolves by function name; a missing binding
+		// never becomes a runtime binding (no effect in PIE). When it does not exist yet, an empty same-signature
+		// function graph is created (void() signature, compatible with common event delegates like OnClicked).
+		// The function name may collide with an existing member (variables, graphs, ...): the name FindUniqueKismetName
+		// returns is the actually usable graph name; binding and guid lookup must use that same final name, or the binding points at a nonexistent function and fails compile-time resolution.
 		FName FunctionFName(*FunctionName);
 		if (!FunctionExistsOnBlueprint(WBP, FunctionFName))
 		{
@@ -109,7 +109,7 @@ namespace Design2UMGWidgetBindingTools
 				WBP, NewGraph, /*bIsUserCreated=*/true, /*SignatureFromObject=*/nullptr);
 		}
 
-		// 与编辑器 Bind 流程同构：先移除同 widget 同属性的旧绑定再落新条目。
+		// Isomorphic with the editor Bind flow: remove the old binding for the same widget+property first, then add the new entry.
 		FDelegateEditorBinding Binding;
 		Binding.ObjectName = Widget->GetFName().ToString();
 		Binding.PropertyName = PropertyFName;
@@ -153,7 +153,7 @@ namespace Design2UMGWidgetBindingTools
 				UE_LOG(LogDesign2UMG, Error, TEXT("[FAIL] %s"), *Error);
 				return;
 			}
-			// 编译 + 保存走生成链同一条路（含编译期绑定校验）；不写生成 manifest。
+			// Compile + save go through the same path as the generation chain (including compile-time binding validation); no generation manifest is written.
 			if (!FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr))
 			{
 				UE_LOG(LogDesign2UMG, Error,

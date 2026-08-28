@@ -87,9 +87,9 @@ namespace
 	FDesign2UMGGenerationSettingsSnapshot MakeMappingGenerationSettings()
 	{
 		FDesign2UMGGenerationSettingsSnapshot Settings;
-		// 名称型 ClassOverride 只允许作用于未命中 mapping 的普通节点：
-		// 这里同时命中 "PrimaryButton"（mapped 节点名）与 "PlainCard"（未映射节点名），
-		// 验证前者不改写 mapped 节点、后者照常生效。
+		// Name-based ClassOverride applies only to nodes that did not hit a mapping:
+		// both "PrimaryButton" (a mapped node name) and "PlainCard" (an unmapped node name) hit here,
+		// verifying the former does not rewrite the mapped node while the latter takes effect as usual.
 		FWidgetClassOverride& MappedNameOverride = Settings.ClassOverrides.AddDefaulted_GetRef();
 		MappedNameOverride.NamePattern = TEXT("PrimaryButton");
 		MappedNameOverride.WidgetClass = FSoftClassPath(TEXT("/Script/UMG.Border"));
@@ -117,7 +117,7 @@ namespace
 		Entry.Inputs.Add(MakeInput(TEXT("enabled"), TEXT("EnabledFlag"), TEXT("Bool")));
 		Entry.Inputs.Add(MakeInput(TEXT("variant"), TEXT("VariantName"), TEXT("Name")));
 		Entry.Inputs.Add(MakeInput(TEXT("value"), TEXT("Value"), TEXT("Float")));
-		// 目标属性不存在：只跳过这个 input，其余 input 与映射本身继续生效。
+		// Target property missing: only that input is skipped; the other inputs and the mapping itself stay in effect.
 		Entry.Inputs.Add(MakeInput(TEXT("label"), TEXT("DoesNotExist"), TEXT("Text")));
 		return Settings;
 	}
@@ -151,7 +151,7 @@ namespace
 		return FJsonSerializer::Deserialize(Reader, OutObject) && OutObject.IsValid();
 	}
 
-	// 清掉输出目录（含 .d2u.json sidecar 与残留资产），测试之间互不影响。
+	// Clear the output directory (including .d2u.json sidecars and leftover assets) so tests stay independent.
 	void DeleteOutputDirectory(const FString& OutputPath)
 	{
 		const FString OutputDir = FPackageName::LongPackageNameToFilename(OutputPath);
@@ -163,7 +163,7 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// 生成资产断言：mapped 实例、子树未展开、inputs 写入、回退与诊断、manifest
+// Generated-asset assertions: mapped instances, unexpanded subtrees, inputs written, fallback and diagnostics, manifest
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentMappingWorkflowTest,
@@ -190,7 +190,7 @@ bool FComponentMappingWorkflowTest::RunTest(const FString&)
 
 	UWidgetTree* WidgetTree = Blueprint->WidgetTree;
 
-	// mapped 实例 1：项目类实例 + inputs 写入 + 子树未展开。
+	// mapped instance 1: project class instance + inputs written + subtree unexpanded.
 	UDesign2UMGMappedComponentTestWidget* Instance1 = FindMappedInstanceByLabel(WidgetTree, FText::FromString(TEXT("Checkout")));
 	TestNotNull(TEXT("First mapped instance generated"), Instance1);
 	if (Instance1)
@@ -202,7 +202,7 @@ bool FComponentMappingWorkflowTest::RunTest(const FString&)
 		TestNull(TEXT("Component internals not expanded into host tree"), WidgetTree->FindWidget(TEXT("btn_inst_1_label")));
 	}
 
-	// mapped 实例 2：同一组件定义的第二实例，值互不混淆。
+	// mapped instance 2: a second instance of the same component definition; values never cross-contaminate.
 	UDesign2UMGMappedComponentTestWidget* Instance2 = FindMappedInstanceByLabel(WidgetTree, FText::FromString(TEXT("Pay Now")));
 	TestNotNull(TEXT("Second mapped instance generated"), Instance2);
 	if (Instance2)
@@ -218,20 +218,20 @@ bool FComponentMappingWorkflowTest::RunTest(const FString&)
 		TestNotEqual(TEXT("Instance widget names are unique"), Instance1->GetFName(), Instance2->GetFName());
 	}
 
-	// 未映射节点走现有转换链路：子树照常展开。
+	// Unmapped nodes go through the existing conversion path: subtrees expand as usual.
 	UWidget* PlainText = WidgetTree->FindWidget(TEXT("Caption"));
 	TestNotNull(TEXT("Unmapped node keeps normal conversion"), PlainText);
 	TestTrue(TEXT("Unmapped node is a TextBlock, not the mapped class"),
 		PlainText && PlainText->IsA(UTextBlock::StaticClass()));
 
-	// 名称型 ClassOverride 优先级：不改写命中 mapping 的节点，只作用于未命中节点。
+	// Name-based ClassOverride priority: nodes that hit a mapping are not rewritten; it applies only to unmatched nodes.
 	TestFalse(TEXT("Name-based override does not rewrite mapped nodes"),
 		Instance1 && Instance1->IsA(UBorder::StaticClass()));
 	UWidget* PlainCard = WidgetTree->FindWidget(TEXT("PlainCard"));
 	TestTrue(TEXT("Name-based override still applies to unmapped nodes"),
 		PlainCard && PlainCard->IsA(USizeBox::StaticClass()));
 
-	// 诊断：命中 + input 目标缺失跳过。
+	// Diagnostics: hits + one skipped input due to a missing target.
 	int32 HitDiagnostics = 0;
 	int32 SkippedInputDiagnostics = 0;
 	for (const FDesign2UMGMappingDiagnostic& Diagnostic : GenerationOutput.MappingDiagnostics)
@@ -242,7 +242,7 @@ bool FComponentMappingWorkflowTest::RunTest(const FString&)
 	TestEqual(TEXT("Both instances report mapping hits"), HitDiagnostics, 2);
 	TestEqual(TEXT("Bad-target input skipped with diagnostic"), SkippedInputDiagnostics, 2);
 
-	// manifest：存在且内容正确（provider/scope/sourceRoot/两实例/d2uOwned）。
+	// Manifest: present and correct (provider/scope/sourceRoot/two instances/d2uOwned).
 	const FString AssetPackageName = Blueprint->GetOutermost()->GetName();
 	TSharedPtr<FJsonObject> Manifest;
 	TestTrue(TEXT("Manifest sidecar written"), ReadSidecarJson(AssetPackageName, Manifest));
@@ -294,7 +294,7 @@ bool FComponentMappingWorkflowTest::RunTest(const FString&)
 			TestTrue(TEXT("Manifest d2uOwned present"), Manifest->TryGetArrayField(TEXT("d2uOwned"), D2UOwned) && D2UOwned != nullptr);
 			if (D2UOwned)
 			{
-				// d2uOwned 现在记录全部创建 widget 名（含嵌套叶子），是 instances 的超集。
+				// d2uOwned now records every created widget name (including nested leaves), a superset of instances.
 				TestTrue(TEXT("d2uOwned covers every recorded instance"),
 					D2UOwned->Num() >= MappedCount + GeneratedCount);
 			}
@@ -307,7 +307,7 @@ bool FComponentMappingWorkflowTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 类缺失回退：mapping 指向的类加载失败时回退普通转换路径
+// Class-missing fallback: when the mapping's class fails to load, fall back to the plain conversion path
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentMappingClassMissingFallbackTest,
@@ -343,7 +343,7 @@ bool FComponentMappingClassMissingFallbackTest::RunTest(const FString&)
 		});
 		TestFalse(TEXT("No mapped instance survives class load failure"), bSawMappedInstance);
 
-		// 组件实例回退为普通转换产物（子树照常展开，内部 Label 文本存在）。
+		// The component instance falls back to a plain conversion artifact (subtree expanded as usual, inner Label text present).
 		UWidget* FallbackLabel = Blueprint->WidgetTree->FindWidget(TEXT("Label"));
 		TestNotNull(TEXT("Fallback conversion expands component internals"), FallbackLabel);
 
@@ -361,7 +361,7 @@ bool FComponentMappingClassMissingFallbackTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 重复导入：普通路径仍新建（auto-rename）且不动旧 manifest
+// Repeated import: the plain path still creates anew (auto-rename) and leaves the old manifest untouched
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentMappingRepeatImportManifestTest,
@@ -390,7 +390,7 @@ bool FComponentMappingRepeatImportManifestTest::RunTest(const FString&)
 	const FString FirstSidecar = Design2UMGGenerationManifest::BuildSidecarPathForAsset(FirstPackage);
 	TestTrue(TEXT("First manifest written"), FFileHelper::LoadFileToString(FirstManifestText, *FirstSidecar));
 
-	// 普通导入对同名资产走既有 auto-rename 新建路径，不原地更新。
+	// A plain import of an existing asset name goes through the existing auto-rename creation path, not an in-place update.
 	UWidgetBlueprint* Second = FUMGGenerator::GenerateWidgetBlueprint(Data, OutputPath, &Settings);
 	TestTrue(TEXT("Second import generates"), Second != nullptr);
 	if (Second)
@@ -400,7 +400,7 @@ bool FComponentMappingRepeatImportManifestTest::RunTest(const FString&)
 		TestTrue(TEXT("Second asset name keeps _N suffix semantics"),
 			Second->GetOutermost()->GetName().Contains(TEXT("_1")));
 
-		// 旧资产与旧 manifest 都不动。
+		// Neither the old asset nor the old manifest is touched.
 		FString FirstManifestAfter;
 		TestTrue(TEXT("Old manifest still exists"), FFileHelper::LoadFileToString(FirstManifestAfter, *FirstSidecar));
 		TestTrue(TEXT("Old manifest untouched"), FirstManifestAfter == FirstManifestText);
@@ -416,7 +416,7 @@ bool FComponentMappingRepeatImportManifestTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// Prototype 边界：设计交互挂在 mapped 身份上时不生成绑定，输出「不生效」诊断
+// Prototype boundary: design interactions on a mapped identity generate no bindings and emit "inert" diagnostics
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentMappingPrototypeInertTest,
@@ -473,8 +473,8 @@ bool FComponentMappingPrototypeInertTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// sidecar 写失败：资产保存成功、导入语义不变，写失败并入结构化诊断
-// （GenerationOutput.MappingDiagnostics，随导入报告可见），且不落半截文件。
+// Sidecar write failure: the asset saved successfully and the import semantics hold; the write failure feeds into
+// structured diagnostics (GenerationOutput.MappingDiagnostics, visible in the import report), and no half-written file remains.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentMappingManifestWriteFailureTest,
@@ -482,8 +482,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentMappingManifestWriteFailureTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FComponentMappingManifestWriteFailureTest::RunTest(const FString&)
 {
-	// sidecar 写失败会按设计打一条 Error 日志（WriteSidecarForAsset），
-	// 本用例刻意触发它，登记为预期错误，避免自动化框架按意外错误判失败。
+	// The sidecar write failure path logs one Error by design (WriteSidecarForAsset);
+	// this case triggers it deliberately and registers it as an expected error so the automation framework does not fail on it.
 	AddExpectedError(
 		TEXT("GenerationManifest: failed to write temp manifest"),
 		EAutomationExpectedErrorFlags::Contains, 0);
@@ -507,7 +507,7 @@ bool FComponentMappingManifestWriteFailureTest::RunTest(const FString&)
 		return false;
 	}
 
-	// 用同名目录占住 sidecar 的 .tmp 临时文件路径，制造确定性的写失败。
+	// Occupy the sidecar's .tmp path with a same-named directory to produce a deterministic write failure.
 	const FString AssetPackageName = WBP->GetOutermost()->GetName();
 	const FString SidecarPath = Design2UMGGenerationManifest::BuildSidecarPathForAsset(AssetPackageName);
 	const FString TempPath = SidecarPath + TEXT(".tmp");

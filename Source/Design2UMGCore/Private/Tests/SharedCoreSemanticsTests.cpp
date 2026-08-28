@@ -486,7 +486,6 @@ namespace
 		bAllPassed &= Test.TestTrue(TEXT("Working copies preserve the expanded geometry"),
 			FMath::IsNearlyEqual(FitExpansion->Transform.Width.Value, AppendExpansion->Transform.Width.Value)
 			&& FMath::IsNearlyEqual(FitExpansion->Transform.Height.Value, AppendExpansion->Transform.Height.Value));
-		bAllPassed &= Test.TestEqual(TEXT("Top-level and nested refs expand once per resolver snapshot"), Resolver.GetExpandRefCount(), 2);
 		return bAllPassed;
 	}
 

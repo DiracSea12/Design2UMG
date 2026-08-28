@@ -343,7 +343,6 @@ namespace Design2UMGConverterInternal
 		}
 
 		FRefExpansionCacheEntry& CacheEntry = ExpansionCache->Entries.Add(CacheKey);
-		++ExpansionCache->ExpandCallCount;
 		TSharedPtr<FDesignNode> Expanded = RefExpander::ExpandRef(Node, Document);
 		if (!Expanded.IsValid())
 		{
@@ -378,11 +377,6 @@ namespace Design2UMGConverterInternal
 		return WorkingCopy;
 	}
 
-	int32 FFlowChildPreResolutionResolver::GetExpandRefCount() const
-	{
-		return ExpansionCache.IsValid() ? ExpansionCache->ExpandCallCount : 0;
-	}
-
 	void FFlowChildPreResolutionResolver::MarkFitContentPrecomputed(const TSharedPtr<FDesignNode>& RefNode) const
 	{
 		if (!RefNode.IsValid() || RefNode->Type != EDesignNodeType::Ref)
@@ -397,7 +391,6 @@ namespace Design2UMGConverterInternal
 			if (CacheEntry->Expanded.IsValid() && !CacheEntry->bFitContentPrecomputed)
 			{
 				CacheEntry->bFitContentPrecomputed = true;
-				++ExpansionCache->FitContentPrecomputeCount;
 			}
 		}
 	}

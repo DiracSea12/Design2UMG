@@ -10,12 +10,12 @@ struct FUMGWidgetData;
 
 namespace DesignImportDiagnosticReport
 {
-	/** 导入/reimport 诊断报告的产物与路径字段（Write 的结构化载荷，替代 5 个位置字符串）。 */
+	/** Artifact and path fields of the import/reimport diagnostic report (Write's structured payload, replacing 5 positional strings). */
 	struct FImportReportArtifacts
 	{
-		/** 图像解析报告文本（多行，图像失败条目来源）；可空。 */
+		/** Image parsing report text (multi-line; source of image failure entries); optional. */
 		FString ImageReport;
-		/** 请求侧输出位置：导入=请求输出目录，reimport=目标资产包路径。 */
+		/** Request-side output location: import = requested output directory, reimport = target asset package path. */
 		FString RequestedOutputPath;
 		FString RequestedRenderPngPath;
 		FString GeneratedAssetPath;
@@ -30,10 +30,10 @@ namespace DesignImportDiagnosticReport
 		const TArray<FDesign2UMGMappingDiagnostic>* ReimportDiagnostics = nullptr);
 
 	/**
-	 * Safe Reimport 结束时的报告出口：与导入共用同一份报告格式与文件落点
-	 * （ImportReports/*.import_report.json）。目标资产落在 requestedOutputPath，
-	 * 逐节点诊断进顶层 reimport 章节（条目 kind/message，与 componentMapping 同构）。
-	 * ComponentMappingDiagnostics（可选）随 componentMapping 章节落盘，与导入路径同一分类出口。
+	 * Report exit for Safe Reimport: shares the import report format and file location
+	 * (ImportReports/*.import_report.json). The target asset goes to requestedOutputPath;
+	 * per-node diagnostics go into the top-level reimport section (kind/message entries, same shape as componentMapping).
+	 * ComponentMappingDiagnostics (optional) lands in the componentMapping section, the same classification exit as the import path.
 	 */
 	void WriteReimport(
 		const FDesignDocument& Document,

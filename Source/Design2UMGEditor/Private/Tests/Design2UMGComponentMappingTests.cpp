@@ -26,7 +26,7 @@ namespace
 {
 	const TCHAR* TestScope = TEXT("mapping-test-file-key");
 
-	// 两实例（同一组件定义）+ 一个未映射普通节点的设计稿。
+	// A design with two instances (same component definition) + one unmapped ordinary node.
 	FString MakeMappingTestFigmaJson()
 	{
 		return TEXT(R"({
@@ -78,7 +78,7 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// IR 层断言（BatchC 模式）：Convert 候选标记 + ApplyMapping 的命中标记
+// IR-layer assertions (BatchC mode): Convert candidate markers + ApplyMapping hit markers
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentMappingIRMarkingTest,
@@ -91,7 +91,7 @@ bool FComponentMappingIRMarkingTest::RunTest(const FString&)
 
 	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 
-	// 文档级身份：file key 作为 DocumentScope。
+	// Document-level identity: the file key as DocumentScope.
 	TestTrue(TEXT("Converted data has source document identity"), Data.HasSourceDocumentData());
 	if (Data.HasSourceDocumentData())
 	{
@@ -109,12 +109,12 @@ bool FComponentMappingIRMarkingTest::RunTest(const FString&)
 		return false;
 	}
 
-	// 转换期候选标记：带组件身份的实例是 mapped 候选；普通节点不是。
+	// Conversion-time candidate markers: instances with component identity are mapped candidates; ordinary nodes are not.
 	TestTrue(TEXT("Component instance is a mapped candidate"), InstanceWidget->Source().bMappedComponentCandidate);
 	TestFalse(TEXT("Plain node is not a mapped candidate"), PlainWidget->Source().bMappedComponentCandidate);
 	TestTrue(TEXT("No mapping key before generation apply"), InstanceWidget->Source().MappedComponentKey.IsEmpty());
 
-	// 生成前匹配：命中条目把 Key 写进 IR 边车；未命中/普通节点不受影响。
+	// Pre-generation matching: hit entries write the Key into the IR sidecar; misses/ordinary nodes are unaffected.
 	FDesign2UMGComponentMappingConfig Config = MakeDirectMappingConfig(TEXT("/Script/Design2UMGEditor.Design2UMGMappedComponentTestWidget"));
 	FDesign2UMGComponentMappingBuildState BuildState(Config);
 	Design2UMGComponentMappingGeneration::ApplyMappingToWidgetTreeIR(
@@ -138,7 +138,7 @@ bool FComponentMappingIRMarkingTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 集组件集级匹配：variant 未命中时按 ComponentSetKey 兜底
+// Component-set-level matching: fall back to ComponentSetKey when the variant misses
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentMappingIRSetLevelMarkingTest,
@@ -175,7 +175,7 @@ bool FComponentMappingIRSetLevelMarkingTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// ini 加载与校验：合法条目入库、非法条目/非法 input 丢弃并出诊断
+// ini loading and validation: legal entries admitted; illegal entries/inputs dropped with diagnostics
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentMappingConfigLoadTest,
@@ -203,8 +203,8 @@ bool FComponentMappingConfigLoadTest::RunTest(const FString&)
 	TestTrue(TEXT("Missing ini stays silent and empty"), !Design2UMGComponentMappingConfig::Load(
 		FPaths::ProjectSavedDir() / TEXT("Design2UMG") / TEXT("Tests") / TEXT("__absent__.ini")).HasMappings());
 
-	// 合法条目（component-key-1）与“类合法但 input 非法”的条目（component-key-4）都入库；
-	// 非法 input 只丢 input 本身，映射条目继续生效。
+	// The legal entry (component-key-1) and the "class legal but input illegal" entry (component-key-4) are both
+	// admitted; an illegal input drops only the input itself; the mapping entry stays in effect.
 	TestEqual(TEXT("Valid entries survive validation"), Config.Table.Entries.Num(), 2);
 	const DesignComponentMapping::FComponentMappingEntry* ValidEntry =
 		Config.Table.FindEntryByKey(TEXT("figma|scope-1|component-key-1"));
@@ -222,7 +222,7 @@ bool FComponentMappingConfigLoadTest::RunTest(const FString&)
 		TestEqual(TEXT("Invalid input dropped from entry"), PartialEntry->Inputs.Num(), 0);
 	}
 
-	// 诊断覆盖：坏 Key、Pencil provider、类缺失、非法 input、重复 Key。
+	// Diagnostic coverage: bad Key, Pencil provider, missing class, illegal input, duplicate Key.
 	int32 BadKeyDiagnostics = 0;
 	int32 PencilDiagnostics = 0;
 	int32 ClassUnavailableDiagnostics = 0;
@@ -246,7 +246,7 @@ bool FComponentMappingConfigLoadTest::RunTest(const FString&)
 
 namespace
 {
-	// 直构单条 input 的 mapping 配置（绕过 ini，测试生成层逻辑）。
+	// Build a single-input mapping config directly (bypassing the ini; tests the generation layer).
 	FDesign2UMGComponentMappingConfig MakeSingleInputMappingConfig(
 		const FString& Key,
 		const FString& WidgetClassPath,
@@ -285,10 +285,10 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// inputs 目标属性名解析：spec 示例名（enabled -> IsEnabled，Bool）必须写入
-// 真实 UWidget 继承属性。UWidget 的真实属性名是 bIsEnabled；解析规则为
-// 原名查找未命中且声明类型为 Bool 时按 UE bool 命名惯例（b 前缀）重试。
-// 用真实编译的 WBP 生成类做目标，同时锁定「继承属性可按名命中」这一事实。
+// inputs target-name resolution: the spec example name (enabled -> IsEnabled, Bool) must write into the
+// real UWidget inherited property. UWidget's real property name is bIsEnabled; the resolution rule is an
+// exact-name lookup first and, when the declared type is Bool, one retry with UE's bool naming convention (b prefix).
+// The target is a really compiled WBP generated class, also pinning the fact that inherited properties resolve by name.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentMappingInheritedBoolTargetTest,
@@ -343,8 +343,8 @@ bool FComponentMappingInheritedBoolTargetTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// inputs 取值来源 ComponentText 的子树回退：典型 Figma 按钮的 label 由实例
-// 内部 TEXT 承载（无 componentProperties.label），主体文本取内部首个 TEXT。
+// inputs source ComponentText subtree fallback: a typical Figma button's label is carried by an inner TEXT of
+// the instance (no componentProperties.label); the main text takes the first inner TEXT.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentMappingComponentTextFromSubtreeTest,
@@ -356,7 +356,7 @@ bool FComponentMappingComponentTextFromSubtreeTest::RunTest(const FString&)
 	Node.Id = TEXT("subtree_text_inst");
 	Node.Type = TEXT("Button");
 	Node.MutableSource().MappedComponentKey = TEXT("figma|inherited-target-scope|mk-single-input");
-	// 实例自身无文本；label 挂在内部 TEXT 子节点上。
+	// The instance itself has no text; the label hangs on an inner TEXT child.
 	FUMGWidgetNode& InnerText = Node.Children.AddDefaulted_GetRef();
 	InnerText.Id = TEXT("subtree_text_inst_label");
 	InnerText.Type = TEXT("TextBlock");
@@ -391,9 +391,9 @@ bool FComponentMappingComponentTextFromSubtreeTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// Prototype 子树边界：触发点位于 mapped 实例本体与其内部（未展开）子树的交互
-// 都不生成绑定，都输出 mapping_prototype_inert 诊断，消息区分两种位置；
-// 普通节点的交互不受影响。
+// Prototype subtree boundary: interactions whose trigger sits on a mapped instance body or inside its
+// (unexpanded) subtree generate no bindings; both emit the mapping_prototype_inert diagnostic with messages
+// distinguishing the two locations; interactions of ordinary nodes are unaffected.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentMappingPrototypeSubtreeInertTest,
@@ -407,7 +407,7 @@ bool FComponentMappingPrototypeSubtreeInertTest::RunTest(const FString&)
 	Data.RootWidget.Id = TEXT("subtree_page");
 	Data.RootWidget.Type = TEXT("CanvasPanel");
 
-	// mapped 实例（候选身份与 entry 精确匹配）+ 内部 TEXT 子节点。
+	// mapped instance (candidate identity exactly matches the entry) + an inner TEXT child.
 	FUMGWidgetNode& MappedNode = Data.RootWidget.Children.AddDefaulted_GetRef();
 	MappedNode.Id = TEXT("mapped_inst");
 	MappedNode.Name = TEXT("MappedButton");

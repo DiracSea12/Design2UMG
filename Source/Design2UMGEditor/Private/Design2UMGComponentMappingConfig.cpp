@@ -20,8 +20,8 @@ namespace
 		Out.Add(MoveTemp(Diagnostic));
 	}
 
-	// 用 UE 属性系统把 "(Key=...,WidgetClass=...,Inputs=((...),...))" 行解析成结构体，
-	// 嵌套数组同样由 ImportText 处理，不自写 ini 值解析器。
+	// Parse each "(Key=...,WidgetClass=...,Inputs=((...),...))" line into a struct via the UE property system;
+	// nested arrays are handled by ImportText too - no hand-written ini value parser.
 	bool ParseEntryLine(const FString& Line, FDesignComponentMappingEntryLine& OutEntry)
 	{
 		if (!Line.StartsWith(TEXT("(")))
@@ -45,7 +45,7 @@ namespace Design2UMGComponentMappingConfig
 			: FPaths::ProjectConfigDir() / TEXT("Design2UMGComponentMapping.ini");
 		if (!FPaths::FileExists(IniPath))
 		{
-			// ini 不存在 = 项目没配置 mapping，未映射节点继续现有转换链路，保持静默。
+			// Missing ini = no project mapping configured; unmapped nodes keep the existing conversion path. Stay silent.
 			return Result;
 		}
 
@@ -53,8 +53,8 @@ namespace Design2UMGComponentMappingConfig
 		FString IniText;
 		if (!FFileHelper::LoadFileToString(IniText, *IniPath))
 		{
-			// ini 存在但整文件读取失败（权限/独占锁/IO 错误）≠「未配置」：此时静默返回
-			// 空表会让已配置项目全部节点无声走普通转换，必须出诊断与未配置区分。
+			// Ini present but the whole file fails to read (permissions/exclusive lock/IO error) is NOT "unconfigured": silently
+			// returning an empty table would send every node of a configured project down the plain conversion path. Diagnostics must distinguish this from unconfigured.
 			AddDiagnostic(
 				Result.ValidationDiagnostics,
 				TEXT("mapping_config_invalid"),
@@ -63,8 +63,8 @@ namespace Design2UMGComponentMappingConfig
 					*IniPath));
 			return Result;
 		}
-		// CombineFromBuffer 走完整的 ini 符号语义（含 +Mappings 的数组追加行），
-		// 不能用 FConfigFile::Read：它不处理 +/- 前缀命令。
+		// CombineFromBuffer goes through full ini symbol semantics (including +Mappings array-append lines);
+		// FConfigFile::Read must not be used: it ignores +/- command prefixes.
 		ConfigFile.CombineFromBuffer(IniText, IniPath);
 		TArray<FString> Lines;
 		ConfigFile.GetArray(MappingSection, MappingArrayKey, Lines);
@@ -115,8 +115,8 @@ namespace Design2UMGComponentMappingConfig
 				continue;
 			}
 
-			// 先加载 UClass 本体再做类型判定：TryLoadClass<UUserWidget> 会把「可加载但
-			// 不是 UUserWidget 子类」也折叠成 null，让类型错配被误报成加载失败。
+			// Load the UClass first, then judge the type: TryLoadClass<UUserWidget> collapses "loadable but not a
+			// UUserWidget subclass" into null as well, misreporting type mismatches as load failures.
 			const FSoftClassPath WidgetClassPath(EntryLine.WidgetClass);
 			UClass* LoadedClass = Cast<UClass>(WidgetClassPath.TryLoad());
 			if (!LoadedClass)

@@ -3,37 +3,11 @@
 #include "PenParserInternal.h"
 #include "DesignSchema.h"
 #include "DesignVariableResolver.h"
-#include "DesignJsonUtils.h"
 #include "Dom/JsonValue.h"
 #include "Dom/JsonObject.h"
 
 // Forward declarations of functions defined in other PenParser*.cpp files.
 FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver);
-
-static bool TryParseMeshHandle(
-	const TSharedPtr<FJsonObject>& PointObj,
-	const FDesignVariableResolver& Resolver,
-	const FString& PrimaryField,
-	const FString& FallbackField,
-	FDesignMeshGradientHandle& OutHandle)
-{
-	if (!PointObj.IsValid())
-		return false;
-
-	const TSharedPtr<FJsonValue> Primary = PointObj->TryGetField(PrimaryField);
-	const TSharedPtr<FJsonValue> Fallback = PointObj->TryGetField(FallbackField);
-	const TSharedPtr<FJsonValue> HandleField = Primary.IsValid() ? Primary : Fallback;
-	if (!HandleField.IsValid())
-		return false;
-
-	float X = 0.0f;
-	float Y = 0.0f;
-	if (!TryParsePointXY(HandleField, Resolver, X, Y))
-		return false;
-
-	OutHandle.Value = FVector2D(X, Y);
-	return true;
-}
 
 FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver)
 {
@@ -202,19 +176,6 @@ FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariable
 	if (FillType == TEXT("mesh_gradient"))
 	{
 		Result.Type = EDesignFillType::Gradient;
-		Result.bFromMeshGradient = true;
-		Result.MeshGradientRaw = DesignJsonUtils::ToCompactString(Value);
-		int32 Columns = 0;
-		if (TryGetResolvedNumberField(Obj, TEXT("columns"), Resolver, Columns))
-		{
-			Result.MeshGradient.Columns = Columns;
-		}
-		int32 Rows = 0;
-		if (TryGetResolvedNumberField(Obj, TEXT("rows"), Resolver, Rows))
-		{
-			Result.MeshGradient.Rows = Rows;
-		}
-
 		const TSharedPtr<FJsonValue>& ColorsField = Obj->TryGetField(TEXT("colors"));
 		if (ColorsField.IsValid() && ColorsField->Type == EJson::Array)
 		{
@@ -236,54 +197,6 @@ FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariable
 				if (!TryGetResolvedNumberField(StopObj, TEXT("position"), Resolver, Stop.Position))
 					Stop.Position = Result.Gradient.Colors.Num() > 0 ? 1.0f : 0.0f;
 				Result.Gradient.Colors.Add(Stop);
-			}
-		}
-
-		const TSharedPtr<FJsonValue>& PointsField = Obj->TryGetField(TEXT("points"));
-		if (PointsField.IsValid() && PointsField->Type == EJson::Array)
-		{
-			for (const TSharedPtr<FJsonValue>& PointVal : PointsField->AsArray())
-			{
-				if (!PointVal.IsValid() || PointVal->Type != EJson::Object)
-					continue;
-
-				const TSharedPtr<FJsonObject> PointObj = PointVal->AsObject();
-				if (!PointObj.IsValid())
-					continue;
-
-				FDesignMeshGradientPoint MeshPoint;
-				MeshPoint.RawJson = DesignJsonUtils::ToCompactString(PointVal);
-
-				float PointX = 0.0f;
-				float PointY = 0.0f;
-				const bool bHasXY = TryGetResolvedNumberField(PointObj, TEXT("x"), Resolver, PointX)
-					&& TryGetResolvedNumberField(PointObj, TEXT("y"), Resolver, PointY);
-				if (bHasXY)
-				{
-					MeshPoint.Position = FVector2D(PointX, PointY);
-				}
-				else
-				{
-					float PosX = 0.0f;
-					float PosY = 0.0f;
-					const TSharedPtr<FJsonValue>& PositionField = PointObj->TryGetField(TEXT("position"));
-					if (TryParsePointXY(PositionField, Resolver, PosX, PosY))
-					{
-						MeshPoint.Position = FVector2D(PosX, PosY);
-					}
-				}
-
-				FString MeshColor;
-				if (PointObj->TryGetStringField(TEXT("color"), MeshColor))
-				{
-					if (FDesignVariableResolver::IsVariableRef(MeshColor))
-						MeshPoint.SourceVar = MeshColor;
-					MeshPoint.Color = Resolver.ResolveColor(MeshColor);
-				}
-
-				TryParseMeshHandle(PointObj, Resolver, TEXT("in"), TEXT("handleIn"), MeshPoint.InHandle);
-				TryParseMeshHandle(PointObj, Resolver, TEXT("out"), TEXT("handleOut"), MeshPoint.OutHandle);
-				Result.MeshGradient.Points.Add(MoveTemp(MeshPoint));
 			}
 		}
 	}

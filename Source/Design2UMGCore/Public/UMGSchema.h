@@ -84,7 +84,7 @@ struct DESIGN2UMGCORE_API FUMGWidgetNode
 	const FUMGSourceNodeData& Source() const;
 	FUMGSourceNodeData& MutableSource();
 
-	/** design 身份键（manifest 与 reimport 对账的唯一规则）：优先源节点 id，包装节点回退确定性 IR Id。 */
+	/** Design identity key (the single rule for manifest/reimport reconciliation): prefer the source node id; wrapper nodes fall back to the deterministic IR Id. */
 	FString GetStableDesignNodeId() const;
 
 private:

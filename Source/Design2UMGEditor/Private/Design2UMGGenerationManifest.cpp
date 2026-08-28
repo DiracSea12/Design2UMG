@@ -19,7 +19,7 @@ namespace
 	constexpr int32 ManifestSchemaVersion = 1;
 
 #if WITH_DEV_AUTOMATION_TESTS
-	// 测试注入：见 Design2UMGGenerationManifest::ArmAutomationSidecarWriteFailureOnce。
+	// Test injection: see Design2UMGGenerationManifest::ArmAutomationSidecarWriteFailureOnce.
 	std::atomic<bool> bAutomationSidecarWriteFailureArmed{ false };
 #endif
 
@@ -36,8 +36,8 @@ namespace
 			Instance->SetBoolField(TEXT("matchedAtSetLevel"), true);
 		}
 
-		// inputs 只记录声明（source/target/valueKind）。设计值不进 manifest：
-		// reimport 按设计身份重新转换拿最新值，不靠 manifest 存属性值。
+		// inputs record declarations only (source/target/valueKind). Design values never enter the manifest:
+		// reimport re-converts by design identity to get fresh values instead of relying on stored property values.
 		TArray<TSharedPtr<FJsonValue>> Inputs;
 		for (const FDesign2UMGMappedInputRecord& Input : Record.Inputs)
 		{
@@ -97,7 +97,7 @@ namespace Design2UMGGenerationManifest
 		}
 		Root->SetArrayField(TEXT("instances"), Instances);
 
-		// d2uOwned 由调用方显式给定（导入 = 本次创建的全部 widget 名；reimport = 更新后的全集）。
+		// d2uOwned is given explicitly by the caller (import = every widget name created this run; reimport = the updated full set).
 		TArray<TSharedPtr<FJsonValue>> D2UOwned;
 		for (const FString& OwnedName : Payload.D2UOwnedNames)
 		{
@@ -123,7 +123,7 @@ namespace Design2UMGGenerationManifest
 			return false;
 		}
 
-		// 原子替换：临时文件写好后一次性 Move 到正式路径，避免半截 manifest。
+		// Atomic replace: write a temp file, then Move it onto the final path in one step - no half-written manifest.
 		if (!IFileManager::Get().Move(*SidecarPath, *TempPath, true))
 		{
 			UE_LOG(LogDesign2UMG, Error, TEXT("GenerationManifest: failed to finalize manifest %s"), *SidecarPath);
@@ -193,8 +193,8 @@ namespace Design2UMGGenerationManifest
 			(*SourceRoot)->TryGetStringField(TEXT("nodeId"), OutSidecar.SourceRootNodeId);
 			(*SourceRoot)->TryGetStringField(TEXT("name"), OutSidecar.SourceRootName);
 		}
-		// sourceRoot.nodeId 允许为空：带交互的文档在转换期会合成无身份的根（switcher/overlay
-		// 宿主），此时 reimport 以新 IR 的根作为 scope（同一文档的转换是确定性的）。
+		// sourceRoot.nodeId may be empty: interactive documents synthesize an identity-less root during conversion
+		// (switcher/overlay hosts); reimport then uses the new IR root as the scope (conversion of the same document is deterministic).
 
 		const TArray<TSharedPtr<FJsonValue>>* Instances = nullptr;
 		if (Root->TryGetArrayField(TEXT("instances"), Instances) && Instances)
@@ -215,7 +215,7 @@ namespace Design2UMGGenerationManifest
 				Instance->TryGetStringField(TEXT("mappedClass"), Record.MappedClass);
 				Record.bMatchedAtSetLevel = Instance->GetBoolField(TEXT("matchedAtSetLevel"));
 
-				// inputs 只回读声明；历史版本可能带的 value 字段按 schema 收口规则忽略。
+				// inputs are read back as declarations only; a value field from historical versions is ignored per the schema consolidation rule.
 				const TArray<TSharedPtr<FJsonValue>>* Inputs = nullptr;
 				if (Instance->TryGetArrayField(TEXT("inputs"), Inputs) && Inputs)
 				{

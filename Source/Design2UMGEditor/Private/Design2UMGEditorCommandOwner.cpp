@@ -225,8 +225,8 @@ namespace Design2UMGEditorCommandOwner
 			}),
 			ECVF_Default);
 
-		// WBP 事件绑定（FDelegateEditorBinding）的自动化构造通道：编辑器 UI 之外
-		// 唯一的脚本化入口（黑盒绑定场景 / 命令行 QA 用），不含特判逻辑。
+		// Automated construction channel for WBP event bindings (FDelegateEditorBinding): the only scripted entry
+		// outside the editor UI (black-box binding scenarios / command-line QA), with no special-casing logic.
 		IConsoleManager::Get().RegisterConsoleCommand(
 			TEXT("Design2UMG.WidgetBindings"),
 			TEXT("Inspect/add WBP widget event bindings: Design2UMG.WidgetBindings <WBPAssetPath> [--add <WidgetName> <PropertyName> <FunctionName>]"),

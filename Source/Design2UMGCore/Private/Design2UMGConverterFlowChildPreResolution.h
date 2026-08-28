@@ -20,7 +20,6 @@ namespace Design2UMGConverterInternal
 
 		TSharedPtr<FDesignNode> ExpandRef(const TSharedPtr<FDesignNode>& Node) const;
 		TSharedPtr<FDesignNode> ResolveExpandedChild(const TSharedPtr<FDesignNode>& Child, bool bPreComputeFitContent) const;
-		int32 GetExpandRefCount() const;
 		void MarkFitContentPrecomputed(const TSharedPtr<FDesignNode>& RefNode) const;
 		/** Return a mutable stage copy while keeping the cached expansion snapshot untouched. */
 		TSharedPtr<FDesignNode> MakeWorkingCopy(const TSharedPtr<FDesignNode>& RefNode) const;

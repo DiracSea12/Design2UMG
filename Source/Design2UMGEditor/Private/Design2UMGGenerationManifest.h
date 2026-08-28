@@ -8,10 +8,10 @@
 class UWidgetBlueprint;
 
 /**
- * sidecar 实例 kind 与「sidecar 写失败」诊断 kind 的规范值。
- * 写端（GenerationManifest 序列化 / UMGGenerator 诊断）与读端（Reimport 对账与
- * 保存成败判定）共用这一份常量：这些字符串是跨文件协议，任一端改字面量都会
- * 静默破坏对账（如 reimport 把 sidecar 写失败当成功汇报）。
+ * Canonical values for sidecar instance kinds and the "sidecar write failed" diagnostic kind.
+ * The write side (GenerationManifest serialization / UMGGenerator diagnostics) and the read side (reimport
+ * reconciliation and save-outcome decisions) share this one set of constants: these strings are a cross-file
+ * protocol - changing a literal on either end would silently break reconciliation (e.g. reimport reporting a failed sidecar write as success).
  */
 namespace Design2UMGManifestKinds
 {
@@ -22,11 +22,11 @@ namespace Design2UMGManifestKinds
 
 
 /**
- * 最小生成记录（sidecar manifest）载荷：
+ * Minimal generation record (sidecar manifest) payload:
  * schemaVersion/provider/documentScope/sourceRoot/instances(kind=mapped|generated)/d2uOwned。
- * 由 BuildWidgetBlueprint 组装，导入/reimport 成功保存资产后原子写入 <AssetName>.d2u.json。
- * 属性值不进 manifest：reimport 的属性更新靠「按 designNodeId 重新转换后对照」，
- * inputs 记录只保留声明（source/target/valueKind），不存设计值。
+ * assembled by BuildWidgetBlueprint and atomically written to <AssetName>.d2u.json after a successful import/reimport asset save.
+ * Property values never enter the manifest: reimport updates properties by "re-convert by designNodeId, then diff";
+ * the inputs record keeps declarations only (source/target/valueKind), not design values.
  */
 struct FDesign2UMGGenerationManifestPayload
 {
@@ -36,11 +36,11 @@ struct FDesign2UMGGenerationManifestPayload
 	FString SourceRootName;
 	TArray<FDesign2UMGMappedInstanceRecord> MappedInstances;
 	TArray<FDesign2UMGGeneratedInstanceRecord> TopLevelGenerated;
-	/** 全部由 D2U 创建的 widget 名（含嵌套叶子），reimport 用它做删除/移动的所有权判定。 */
+	/** Widget names created entirely by D2U (including nested leaves); reimport uses this for delete/move ownership decisions. */
 	TArray<FString> D2UOwnedNames;
 };
 
-/** 从 sidecar 反序列化出的生成记录（reimport 管线的输入）。 */
+/** Generation record deserialized from the sidecar (input of the reimport pipeline). */
 struct FDesign2UMGGenerationManifestSidecar
 {
 	int32 SchemaVersion = 0;
@@ -49,7 +49,7 @@ struct FDesign2UMGGenerationManifestSidecar
 	FString SourceRootNodeId;
 	FString SourceRootName;
 
-	/** 单条实例记录：kind = "mapped" | "generated"。 */
+	/** Single instance record: kind = "mapped" | "generated". */
 	struct FInstanceRecord
 	{
 		FString DesignNodeId;
@@ -79,29 +79,29 @@ struct FDesign2UMGGenerationManifestSidecar
 
 namespace Design2UMGGenerationManifest
 {
-	/** manifest sidecar 文件名后缀（<AssetName>.d2u.json）。 */
+	/** Manifest sidecar file name suffix (<AssetName>.d2u.json). */
 	FString BuildSidecarPathForAsset(const FString& AssetPackageName);
 
 #if WITH_DEV_AUTOMATION_TESTS
 	/**
-	 * 测试注入：武装后下一次 WriteSidecarForAsset 直接失败一次，不触碰任何文件。
-	 * 用于确定性验证 reimport 的「uasset 已保存但 manifest 未更新」传导路径
-	 * （真实只读 sidecar 会被 reimport 的保存前 pre-check 拦住，测不到该分支）。
+	 * Test injection: once armed, the next WriteSidecarForAsset fails exactly once and touches no file.
+	 * Used to verify deterministically the reimport propagation path "uasset saved but manifest not updated"
+	 * (a genuinely read-only sidecar is caught by reimport's pre-save check, so that branch is unreachable otherwise).
 	 */
 	void ArmAutomationSidecarWriteFailureOnce();
 #endif
 
 	/**
-	 * 导入成功保存资产后调用：把 manifest 原子写到资产同目录（先写临时文件再替换），
-	 * 失败不落半截文件。返回是否写入成功。
+	 * Called after a successful import save: atomically writes the manifest next to the asset (temp file, then replace);
+	 * on failure no half-written file remains. Returns whether the write succeeded.
 	 */
 	bool WriteSidecarForAsset(
 		const FString& AssetPackageName,
 		const FDesign2UMGGenerationManifestPayload& Payload);
 
 	/**
-	 * reimport 前读取并解析资产同目录的 sidecar。文件缺失/JSON 非法/schema 不识别时
-	 * 返回 false 并给出可读原因（进冲突诊断）。inputs 里的历史 value 字段一律忽略。
+	 * Reads and parses the sidecar next to the asset before reimport. Missing file / invalid JSON / unrecognized
+	 * schema returns false with a readable reason (goes into conflict diagnostics). Historical value fields inside inputs are always ignored.
 	 */
 	bool TryLoadSidecarForAsset(
 		const FString& AssetPackageName,

@@ -43,7 +43,7 @@ struct FArtifactGenerationResult
 	FString RenderPngPath;
 	FIntPoint RenderedSize = FIntPoint::ZeroValue;
 
-	/** Component Mapping 诊断（ini 校验 + 命中/回退/inputs/Prototype 边界），进导入诊断报告。 */
+	/** Component Mapping diagnostics (ini validation + hit/fallback/inputs/Prototype boundaries), going into the import diagnostic report. */
 	TArray<FDesign2UMGMappingDiagnostic> ComponentMappingDiagnostics;
 };
 
@@ -69,27 +69,27 @@ struct FDesignImportExecutionResult
 	FIntPoint RenderedSize = FIntPoint::ZeroValue;
 };
 
-/** Reimport 请求：目标 WBP 资产 + 新源数据（新源经 Reimport 的 Document 参数传入）。 */
+/** Reimport request: target WBP asset + new source data (the new source is passed via Reimport's Document parameter). */
 struct FDesignReimportRequest
 {
-	/** 目标页面宿主 WBP 的包路径（/Game/.../WBP_X）。 */
+	/** Package path of the target page-host WBP (/Game/.../WBP_X). */
 	FString TargetAssetPath;
 	TOptional<FDesign2UMGImportSettingsSnapshot> SettingsSnapshot;
-	/** 全量冲突时是否生成并列 WBP 副本；默认保留原资产 + 冲突诊断，不隐式生成副本。 */
+	/** Whether to generate a sibling WBP copy on full conflict; default keeps the original asset + conflict diagnostics, never implicitly creating a copy. */
 	bool bGenerateResolutionCopy = false;
 };
 
-/** Reimport 结果：逐节点诊断进 Diagnostics（kind 前缀 reimport_*）。 */
+/** Reimport result: per-node diagnostics go into Diagnostics (kind prefix reimport_*). */
 struct FDesignReimportResult
 {
 	bool bSucceeded = false;
-	/** 目标与生成记录关系断裂（manifest 缺失/scope 不一致/结构对不上），未做原地更新。 */
+	/** Relationship between target and generation records is broken (manifest missing / scope mismatch / structure mismatch); no in-place update happened. */
 	bool bFullConflict = false;
-	/** bGenerateResolutionCopy 生效时新生成的并列副本资产路径。 */
+	/** Path of the newly generated sibling copy asset when bGenerateResolutionCopy took effect. */
 	FString ResolutionCopyPath;
 	UWidgetBlueprint* UpdatedBlueprint = nullptr;
 	TArray<FDesign2UMGMappingDiagnostic> Diagnostics;
-	/** Component Mapping 诊断（ini 校验 + 命中/回退），进报告 componentMapping 章节（与导入路径同通道）。 */
+	/** Component Mapping diagnostics (ini validation + hit/fallback), going into the report's componentMapping section (same channel as the import path). */
 	TArray<FDesign2UMGMappingDiagnostic> ComponentMappingDiagnostics;
 };
 
@@ -114,10 +114,10 @@ namespace DesignImportPipeline
 	FDesignImportExecutionResult Execute(FDesignDocument& Document, const FDesignImportRequest& Request);
 
 	/**
-	 * Safe Reimport：load manifest → 重新解析源 → DocumentScope 匹配 → Convert →
-	 * 更新计划 → 编辑器事务内应用 → 编译保存 → manifest/诊断。
-	 * 只原地更新 D2U-owned 内容；保存失败回滚事务且不更新 manifest；
-	 * 关系断裂时按全量冲突处理（默认保留原资产）。
+	 * Safe Reimport: load manifest -> re-parse source -> DocumentScope match -> Convert ->
+	 * update plan -> apply inside an editor transaction -> compile & save -> manifest/diagnostics.
+	 * Only D2U-owned content is updated in place; save failure rolls the transaction back and leaves the manifest untouched;
+	 * a broken relationship is treated as a full conflict (original asset kept by default).
 	 */
 	FDesignReimportResult Reimport(FDesignDocument& Document, const FDesignReimportRequest& Request);
 	void WriteImportDiagnosticReport(

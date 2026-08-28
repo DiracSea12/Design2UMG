@@ -16,9 +16,9 @@ struct FDesign2UMGGenerationSettingsSnapshot
 	TArray<FWidgetClassOverride> ClassOverrides;
 
 	/**
-	 * 项目级 Component Mapping 配置（Config/Design2UMGComponentMapping.ini 的加载结果）。
-	 * 随导入设置快照传入生成链，生命周期与快照一致，不落全局对象；
-	 * 预览物化（preview narrowing）不带 mapping。
+	 * Project-level Component Mapping config (the loaded result of Config/Design2UMGComponentMapping.ini).
+	 * Carried into the generation chain with the import settings snapshot, lifetime tied to the snapshot, never a global;
+	 * preview materialization (preview narrowing) carries no mapping.
 	 */
 	FDesign2UMGComponentMappingConfig ComponentMapping;
 

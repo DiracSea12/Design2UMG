@@ -49,8 +49,6 @@ namespace Design2UMGConverterInternal
 		// Working copies retain aliases to their immutable snapshot nodes so nested
 		// refs can reuse the pointer-keyed cache without merging distinct instances.
 		TMap<const FDesignNode*, const FDesignNode*> SnapshotAliases;
-		int32 ExpandCallCount = 0;
-		int32 FitContentPrecomputeCount = 0;
 	};
 
 	struct FConversionSettingsSnapshot

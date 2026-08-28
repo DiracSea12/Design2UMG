@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 //
-// QA 白盒结构测试（run d2u-cmsr-slice-a，Component Mapping 阶段 1/2）。
-// 独立于交付内的开发测试设计：聚焦映射表比较语义中被实现锁定、
-// 但开发用例未覆盖的行为——Key 的大小写不敏感比较与无效身份的拒绝。
+// QA white-box structural tests (run d2u-cmsr-slice-a, Component Mapping phases 1/2).
+// Test design independent of the in-delivery dev tests: covers behaviors locked by implementation but
+// not exercised by dev cases - case-insensitive Key comparison and rejection of invalid identities.
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -27,9 +27,9 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// 匹配表比较语义：Key 比较大小写不敏感（Provider/DocumentScope/ComponentKey
-// 三段拼出的规范串整体 IgnoreCase 比较）；任一字段为空的身份是无效身份，
-// 两级匹配都必须拒绝，不得因大小写或空字段产生意外命中或漏配。
+// Match-table comparison semantics: Key comparison is case-insensitive (the canonical string assembled
+// from Provider/DocumentScope/ComponentKey compares with IgnoreCase as a whole); an identity with any
+// empty segment is invalid and must be rejected by both matching tiers - no accidental hits or misses from case or empty fields.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -40,7 +40,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDesign2UMGMappingQAKeyCaseInsensitiveAndInvalidIdentityTest::RunTest(const FString&)
 {
 	FComponentMappingTable Table;
-	// ini 里写的是全大写 scope；导入侧解析出的 Key 用小写。
+	// The ini stores an all-uppercase scope; the import side resolves the Key in lowercase.
 	Table.Entries.Add(MakeQAEntry(TEXT("figma|QA-CASE-SCOPE|component-key-1")));
 
 	FDesignComponentIdentity Identity;
@@ -58,7 +58,7 @@ bool FDesign2UMGMappingQAKeyCaseInsensitiveAndInvalidIdentityTest::RunTest(const
 			Hit->WidgetClass, TEXT("/Game/UI/WBP_QACase.WBP_QACase_C"));
 	}
 
-	// 无效身份（ComponentKey 空）：两级匹配都必须拒绝，不能走到 set 级兜底。
+	// Invalid identity (empty ComponentKey): both matching tiers must reject it; no falling through to the set-level fallback.
 	FDesignComponentIdentity EmptyComponentKey;
 	EmptyComponentKey.Provider = TEXT("figma");
 	EmptyComponentKey.DocumentScope = TEXT("qa-case-scope");
@@ -75,8 +75,8 @@ bool FDesign2UMGMappingQAKeyCaseInsensitiveAndInvalidIdentityTest::RunTest(const
 	TestNull(TEXT("empty provider identity never matches"),
 		Table.Match(EmptyProvider, bUnusedSetLevel));
 
-	// 生成阶段按 Key 回查条目（TryCreateMappedWidget / ApplyMappedComponentInputs）
-	// 走 FindEntryByKey，与 Match 的比较语义必须一致：大小写不敏感。
+	// The generation stage looks entries up by Key (TryCreateMappedWidget / ApplyMappedComponentInputs)
+	// via FindEntryByKey, whose comparison semantics must match Match: case-insensitive.
 	const FComponentMappingEntry* ByKey = Table.FindEntryByKey(TEXT("FIGMA|qa-case-scope|COMPONENT-KEY-1"));
 	TestNotNull(TEXT("find-by-key is case-insensitive"), ByKey);
 	if (ByKey)
@@ -87,7 +87,7 @@ bool FDesign2UMGMappingQAKeyCaseInsensitiveAndInvalidIdentityTest::RunTest(const
 	TestNull(TEXT("find-by-key with unknown key returns null"),
 		Table.FindEntryByKey(TEXT("figma|qa-case-scope|component-key-999")));
 
-	// 键解析对大小写不敏感的输入同样成立（ini 里 Provider 大小写漂移时仍三段解析）。
+	// Key parsing also holds for case-insensitive input (a Provider with drifted case in the ini still parses into three segments).
 	FString OutProvider;
 	FString OutScope;
 	FString OutComponentKey;

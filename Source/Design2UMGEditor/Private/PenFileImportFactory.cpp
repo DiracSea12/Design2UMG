@@ -4,6 +4,7 @@
 #include "Design2UMGLog.h"
 #include "Design2UMGNotifications.h"
 #include "Design2UMGSettings.h"
+#include "Design2UMGEditorImportOrchestrator.h"
 #include "DesignImportDialogs.h"
 #include "DesignImportPipeline.h"
 
@@ -14,8 +15,6 @@
 
 namespace
 {
-	const TCHAR* DefaultOutputPath = TEXT("/Game/Design2UMG/PenConvert_Output");
-
 	FDesignImportRequest MakeFactoryImportRequest(
 		const FString& OutputPath,
 		const FDesign2UMGImportSettingsSnapshot& SettingsSnapshot)
@@ -78,7 +77,7 @@ UObject* UPenFileImportFactory::FactoryCreateFile(
 		return nullptr;
 	}
 
-	const FString OutputPath = InParent ? InParent->GetPathName() : FString(DefaultOutputPath);
+	const FString OutputPath = InParent ? InParent->GetPathName() : FString(Design2UMGEditorImportOrchestrator::DefaultPenOutputPath);
 	const FDesign2UMGImportSettingsSnapshot SettingsSnapshot =
 		FDesign2UMGImportSettingsSnapshot::FromSettings(UDesign2UMGSettings::Get());
 

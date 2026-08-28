@@ -1,9 +1,9 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 //
-// QA 白盒结构测试（run d2u-cmsr-slice-a，阶段 2 manifest 回归面）。
-// 阶段 2 给所有成功导入追加了 sidecar 生成记录写入这一副作用：
-// 本用例验证「无 Component Mapping 配置的普通导入」也写 manifest，
-// 且记录只含 generated kind 实例、不产生任何 mapping 诊断（普通链路不受扰动）。
+// QA white-box structural tests (run d2u-cmsr-slice-a, phase 2 manifest regression surface).
+// Phase 2 added a side effect to every successful import: writing the sidecar generation record.
+// This case verifies that "a plain import without Component Mapping config" also writes the manifest,
+// that the record contains only generated-kind instances and produces no mapping diagnostics (the plain path stays undisturbed).
 
 #if WITH_AUTOMATION_WORKER
 
@@ -62,10 +62,10 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// 普通导入（无 mapping 配置）的 manifest 回归面：
-// 生成成功、sidecar 存在、provider/documentScope/sourceRoot 正确、
-// instances 全部 kind=generated（无 mapped 记录）、d2uOwned 与 instances 同长、
-// 且无任何 Component Mapping 诊断（配置为空时匹配阶段是纯空操作）。
+// Manifest regression surface of a plain import (no mapping config):
+// generation succeeds, the sidecar exists, provider/documentScope/sourceRoot are correct,
+// all instances are kind=generated (no mapped records), d2uOwned is as long as instances,
+// and there are no Component Mapping diagnostics at all (with an empty config the match stage is a pure no-op).
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -84,7 +84,7 @@ bool FDesign2UMGMappingQANormalImportWritesManifestTest::RunTest(const FString&)
 	DeleteGeneratedAssetsAtPath(OutputPath);
 	DeleteQATestOutputDir(OutputPath);
 
-	// 默认快照：ClassOverrides 空、ComponentMapping 空表（等价于项目没配 ini）。
+	// Default snapshot: ClassOverrides empty, ComponentMapping an empty table (equivalent to no project ini).
 	const FDesign2UMGGenerationSettingsSnapshot Settings;
 	FDesign2UMGGenerationOutput GenerationOutput;
 	UWidgetBlueprint* Blueprint = FUMGGenerator::GenerateWidgetBlueprint(
@@ -97,7 +97,7 @@ bool FDesign2UMGMappingQANormalImportWritesManifestTest::RunTest(const FString&)
 		return false;
 	}
 
-	// 普通链路不受 mapping 阶段扰动：无任何 mapping 诊断。
+	// The plain path is undisturbed by the mapping stage: no mapping diagnostics.
 	TestEqual(TEXT("no mapping diagnostics without config"),
 		GenerationOutput.MappingDiagnostics.Num(), 0);
 
@@ -157,7 +157,7 @@ bool FDesign2UMGMappingQANormalImportWritesManifestTest::RunTest(const FString&)
 				Manifest->TryGetArrayField(TEXT("d2uOwned"), D2UOwned) && D2UOwned);
 			if (D2UOwned)
 			{
-				// d2uOwned 是全部创建 widget 名（含嵌套叶子），是 instances 的超集。
+				// d2uOwned is every created widget name (including nested leaves), a superset of instances.
 				TestTrue(TEXT("d2uOwned covers every recorded instance"),
 					D2UOwned->Num() >= Instances->Num());
 			}

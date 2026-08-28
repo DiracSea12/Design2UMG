@@ -5,6 +5,7 @@
 #include "Design2UMGLog.h"
 #include "SDesign2UMGPreviewWindow.h"
 #include "DesignImportTypes.h"
+#include "Design2UMGEditorImportOrchestrator.h"
 #include "UMGSchema.h"
 #include "UMGJsonSerializer.h"
 
@@ -16,11 +17,9 @@
 
 namespace
 {
-	const TCHAR* DialogFallbackOutputPath = TEXT("/Game/Design2UMG/PenConvert_Output");
-
 	FString ResolveDialogOutputPath(const FString& OutputPath)
 	{
-		return OutputPath.IsEmpty() ? FString(DialogFallbackOutputPath) : OutputPath;
+		return OutputPath.IsEmpty() ? FString(Design2UMGEditorImportOrchestrator::DefaultPenOutputPath) : OutputPath;
 	}
 }
 

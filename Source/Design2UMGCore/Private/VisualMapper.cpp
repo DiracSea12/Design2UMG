@@ -363,14 +363,6 @@ namespace
 				Combined.Right += ExistingPadding.Right;
 				Combined.Bottom += ExistingPadding.Bottom;
 			}
-			else if (Border.WidgetStyle.StrokePadding.IsSet())
-			{
-				const FMargin& ExistingPadding = Border.WidgetStyle.StrokePadding.GetValue();
-				Combined.Left += ExistingPadding.Left;
-				Combined.Top += ExistingPadding.Top;
-				Combined.Right += ExistingPadding.Right;
-				Combined.Bottom += ExistingPadding.Bottom;
-			}
 
 			Border.WidgetStyle.StrokePadding = Combined;
 		}

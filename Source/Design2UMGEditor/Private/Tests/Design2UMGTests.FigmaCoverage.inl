@@ -1188,15 +1188,6 @@ bool FPenOfficialFieldParityTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("layoutIncludeStroke false preserved"), FrameNode->Metadata.FindRef(TEXT("layoutIncludeStroke")) == TEXT("false"));
 	TestTrue(TEXT("strokeLinejoin preserved"), FrameNode->Metadata.FindRef(TEXT("stroke.join")) == TEXT("miter"));
 	TestTrue(TEXT("strokeLinecap preserved"), FrameNode->Metadata.FindRef(TEXT("stroke.cap")) == TEXT("round"));
-	TestTrue(TEXT("mesh gradient preserved"), TextNode->Visual.PrimaryFill().bFromMeshGradient && !TextNode->Visual.PrimaryFill().MeshGradientRaw.IsEmpty());
-	TestTrue(TEXT("mesh gradient rows/columns parsed"), TextNode->Visual.PrimaryFill().MeshGradient.Rows.IsSet()
-		&& TextNode->Visual.PrimaryFill().MeshGradient.Columns.IsSet()
-		&& TextNode->Visual.PrimaryFill().MeshGradient.Rows.Get(0) == 2
-		&& TextNode->Visual.PrimaryFill().MeshGradient.Columns.Get(0) == 2);
-	TestTrue(TEXT("mesh gradient points parsed"), TextNode->Visual.PrimaryFill().MeshGradient.Points.Num() == 2
-		&& TextNode->Visual.PrimaryFill().MeshGradient.Points[0].Position.IsSet()
-		&& TextNode->Visual.PrimaryFill().MeshGradient.Points[0].InHandle.Value.IsSet()
-		&& TextNode->Visual.PrimaryFill().MeshGradient.Points[1].OutHandle.Value.IsSet());
 	TestTrue(TEXT("fill blendMode preserved"), TextNode->Visual.PrimaryFill().BlendMode == TEXT("multiply"));
 	TestTrue(TEXT("fill opacity preserved"), FMath::IsNearlyEqual(TextNode->Visual.PrimaryFill().Opacity, 0.42f, 0.001f));
 	TestTrue(TEXT("text href preserved"), TextNode->Text.Href == TEXT("https://docs.pencil.dev"));

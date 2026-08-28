@@ -1,9 +1,9 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
-// Safe Reimport（切片 B：阶段 3 属性级 reimport + 阶段 4 结构变化）白盒结构测试。
-// 独立于交付内开发测试设计：自带 Figma fixture 构造器与 QA 替身 mapped 类
-// （UDesign2UMGMappingQAWidget），用资产/结构/输入/行为/identity/manifest 断言验收，
-// 不用视觉分数。每条用例对应本文件里的一个 RunTest 函数（一对一）。
+// White-box structural tests for Safe Reimport (slice B: phase 3 property-level reimport + phase 4 structural changes).
+// Test design independent of the in-delivery dev tests: ships its own Figma fixture builders and a QA stand-in
+// mapped class (UDesign2UMGMappingQAWidget), verified with asset/structure/input/behavior/identity/manifest
+// assertions instead of visual scores. Each case maps one-to-one to a RunTest function in this file.
 
 #include "Misc/AutomationTest.h"
 
@@ -52,7 +52,7 @@ namespace
 {
 	using Design2UMGEditorTests::DeleteGeneratedAssetsAtPath;
 
-	// 本 QA 文件专属 fixture 身份：scope / 组件 Key / mapped 替身类与交付内开发测试互不共用。
+	// Fixture identities private to this QA file: scopes / component keys / mapped stand-in classes are not shared with the in-delivery dev tests.
 	const TCHAR* QAReimportScope = TEXT("qa-reimport-doc-9f31");
 	const TCHAR* QAReimportOtherScope = TEXT("qa-reimport-other-2c66");
 	const TCHAR* QAReimportComponentKey = TEXT("qa-reimport-comp-key");
@@ -61,7 +61,7 @@ namespace
 	const TCHAR* QAMappingKey = TEXT("figma|qa-reimport-doc-9f31|qa-reimport-comp-key");
 
 	// ---------------------------------------------------------------------------
-	// Figma fixture 构造器（本文件独立维护）
+	// Figma fixture builders (maintained independently in this file)
 	// ---------------------------------------------------------------------------
 
 	FString QATextStyle()
@@ -79,7 +79,7 @@ namespace
 			Id, Name, X, Y, Text, *QATextStyle());
 	}
 
-	// 无背景填充 + 多子节点的纯容器 FRAME：保持多子面板形态，项目/结构操作可挂载。
+	// Fill-less pure-container FRAME with multiple children: keeps the multi-child panel form so project/structure operations can mount.
 	FString MakeQAPanel(const TCHAR* Id, const TCHAR* Name, int32 X, int32 Y, const FString& ChildrenJson)
 	{
 		return FString::Printf(
@@ -209,7 +209,7 @@ namespace
 		return false;
 	}
 
-	/** 同一条诊断消息必须同时包含全部子串（防止跨条拼凑的假阳性配对）。 */
+	/** A single diagnostic message must contain all substrings (no cross-entry splicing that fakes a positive pairing). */
 	bool QAHasMessageWithAll(const FDesignReimportResult& Result, const TCHAR* Kind, std::initializer_list<const TCHAR*> Substrings)
 	{
 		for (const FDesign2UMGMappingDiagnostic& Diagnostic : Result.Diagnostics)
@@ -231,7 +231,7 @@ namespace
 		return false;
 	}
 
-	/** mapping_ 前缀诊断的单一归属是 componentMapping 章节：分类断言查 ComponentMappingDiagnostics。 */
+	/** mapping_-prefixed diagnostics belong solely to the componentMapping section: classification assertions check ComponentMappingDiagnostics. */
 	bool QAHasMappingMessageWithAll(const FDesignReimportResult& Result, const TCHAR* Kind, std::initializer_list<const TCHAR*> Substrings)
 	{
 		for (const FDesign2UMGMappingDiagnostic& Diagnostic : Result.ComponentMappingDiagnostics)
@@ -308,10 +308,10 @@ namespace
 		return Found;
 	}
 
-	// 多页原型文档 fixture（切片 D）：页 = 带 fills 的顶层 FRAME（转换成 Border 页形态，
-	// 页 widget 名 = 页 id）；页内放一条带跨页 ON_CLICK NODE 导航的文本（目标页必须
-	// 真实存在，绑定才有效），文档因此构成多页原型，转换链合成 switcher 宿主根
-	// （id = 页集合内容指纹，页集合一变即改写）。
+	// Multi-page prototype document fixture (slice D): a page = a top-level FRAME with fills (converted into the Border
+	// page form; the page widget name = the page id); inside the page sits a text with a cross-page ON_CLICK NODE
+	// navigation (the target page must really exist for the binding to be valid), so the document forms a multi-page
+	// prototype and the conversion chain synthesizes the switcher host root (id = the page-set content fingerprint, rewritten whenever the set changes).
 	FString MakeProtoNavText(const TCHAR* Id, const TCHAR* Name, int32 X, int32 Y, const TCHAR* DestinationPageId)
 	{
 		return FString::Printf(
@@ -341,8 +341,8 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// 用例 1（unit）：manifest schema 收口——inputs 只落声明（source/target/valueKind），
-// 设计值不进 manifest；历史 sidecar 里的 inputs[].value 字段一律忽略。
+// Case 1 (unit): manifest schema consolidation - inputs persist declarations only (source/target/valueKind);
+// design values never enter the manifest; the historical inputs[].value field in old sidecars is always ignored.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAManifestInputSchemaTest,
@@ -386,7 +386,7 @@ bool FSafeReimportQAManifestInputSchemaTest::RunTest(const FString&)
 		return false;
 	}
 
-	// 写侧：inputs 对象只有 source/target/valueKind 三个字段，value/bApplied 不落盘。
+	// Write side: the inputs object has exactly the three fields source/target/valueKind; value/bApplied are not persisted.
 	FString RawJson;
 	TestTrue(TEXT("sidecar file readable"), QAReadFileString(SidecarPath, RawJson));
 	TSharedPtr<FJsonObject> Root;
@@ -441,7 +441,7 @@ bool FSafeReimportQAManifestInputSchemaTest::RunTest(const FString&)
 		}
 	}
 
-	// 读侧：声明三字段原样回读（记录结构里已无 value/bApplied 字段可还原）。
+	// Read side: the three declaration fields round-trip as-is (the record structure no longer has value/bApplied fields to restore).
 	FDesign2UMGGenerationManifestSidecar Sidecar;
 	if (TestTrue(TEXT("TryLoadSidecarForAsset succeeds"), QALoadSidecar(Package, Sidecar)))
 	{
@@ -469,8 +469,8 @@ bool FSafeReimportQAManifestInputSchemaTest::RunTest(const FString&)
 		TestTrue(TEXT("d2uOwned loaded"), Sidecar.D2UOwned.Contains(TEXT("W1")) && Sidecar.D2UOwned.Contains(TEXT("G1")));
 	}
 
-	// 历史 sidecar（带 value 字段）按 schema 收口规则忽略 value，加载成功无报错。
-	// 注入用与序列化空白无关的针（值本身），在 valueKind 值后面补一个历史 value 兄弟字段。
+	// A historical sidecar (with a value field) ignores value per the schema consolidation rule and loads without errors.
+	// The injection needle is serialization-whitespace-independent (the value itself): append a historical value sibling field after the valueKind value.
 	FString LegacyJson = RawJson;
 	const TCHAR* DeclarationNeedle = TEXT("\"ComponentProperty\"");
 	LegacyJson.ReplaceInline(
@@ -498,8 +498,8 @@ bool FSafeReimportQAManifestInputSchemaTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 2（unit）：sidecar 读取失败的错误分类——文件缺失 / JSON 非法 / schema 版本
-// 不识别 / 缺 provider|documentScope / instances 为空，均返回 false + 精确原因。
+// Case 2 (unit): error classification of sidecar read failures - missing file / invalid JSON / unrecognized schema
+// version / missing provider|documentScope / empty instances each return false + a precise reason.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAManifestLoadRejectsBadSidecarsTest,
@@ -510,32 +510,32 @@ bool FSafeReimportQAManifestLoadRejectsBadSidecarsTest::RunTest(const FString&)
 	const FString Package = TEXT("/Game/Design2UMG/_TestOutput/QAReimportManifestErrors");
 	const FString SidecarPath = Design2UMGGenerationManifest::BuildSidecarPathForAsset(Package);
 
-	// 1) 文件缺失。
+	// 1) Missing file.
 	FDesign2UMGGenerationManifestSidecar Sidecar;
 	FString Error;
 	TestFalse(TEXT("missing sidecar rejected"), Design2UMGGenerationManifest::TryLoadSidecarForAsset(Package, Sidecar, Error));
 	TestTrue(TEXT("missing-file reason"), Error.Contains(TEXT("generation manifest sidecar not found")));
 
-	// 2) JSON 非法。
+	// 2) Invalid JSON.
 	TestTrue(TEXT("garbage written"), QAWriteFileString(SidecarPath, TEXT("{ this is not json")));
 	TestFalse(TEXT("invalid JSON rejected"), Design2UMGGenerationManifest::TryLoadSidecarForAsset(Package, Sidecar, Error));
 	TestTrue(TEXT("invalid-JSON reason"), Error.Contains(TEXT("generation manifest sidecar is not valid JSON")));
 
-	// 3) schema 版本不识别。
+	// 3) Unrecognized schema version.
 	TestTrue(TEXT("v2 schema written"), QAWriteFileString(
 		SidecarPath,
 		TEXT("{\"schemaVersion\":2,\"provider\":\"figma\",\"documentScope\":\"s\",\"sourceRoot\":{},\"instances\":[{}],\"d2uOwned\":[]}")));
 	TestFalse(TEXT("unsupported schema rejected"), Design2UMGGenerationManifest::TryLoadSidecarForAsset(Package, Sidecar, Error));
 	TestTrue(TEXT("schema-version reason"), Error.Contains(TEXT("schema version 2 is not supported (expected 1)")));
 
-	// 4) provider / documentScope 缺失。
+	// 4) provider / documentScope missing.
 	TestTrue(TEXT("empty provider written"), QAWriteFileString(
 		SidecarPath,
 		TEXT("{\"schemaVersion\":1,\"provider\":\"\",\"documentScope\":\"\",\"sourceRoot\":{},\"instances\":[{}],\"d2uOwned\":[]}")));
 	TestFalse(TEXT("missing provider/documentScope rejected"), Design2UMGGenerationManifest::TryLoadSidecarForAsset(Package, Sidecar, Error));
 	TestTrue(TEXT("missing-provider reason"), Error.Contains(TEXT("missing provider/documentScope")));
 
-	// 5) instances 为空。
+	// 5) Empty instances.
 	TestTrue(TEXT("empty instances written"), QAWriteFileString(
 		SidecarPath,
 		TEXT("{\"schemaVersion\":1,\"provider\":\"figma\",\"documentScope\":\"s\",\"sourceRoot\":{},\"instances\":[],\"d2uOwned\":[]}")));
@@ -547,8 +547,8 @@ bool FSafeReimportQAManifestLoadRejectsBadSidecarsTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 3（integration）：sidecar 损坏（非法 JSON）= 关系不清 → 全量冲突，
-// 资产字节保持原状，未显式选择时不生成并列副本。
+// Case 3 (integration): a corrupt sidecar (invalid JSON) = unclear relationship -> full conflict;
+// the asset bytes stay untouched, and no sibling copy is generated without an explicit choice.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAUnreadableManifestConflictTest,
@@ -569,7 +569,7 @@ bool FSafeReimportQAUnreadableManifestConflictTest::RunTest(const FString&)
 	const FString AssetFile = QAAssetFilePath(TargetPackage);
 	const int64 BytesBefore = IFileManager::Get().FileSize(*AssetFile);
 
-	// 损坏 sidecar：合法 JSON 都不是。
+	// Corrupt sidecar: not even valid JSON.
 	TestTrue(TEXT("corrupt sidecar written"), QAWriteFileString(
 		Design2UMGGenerationManifest::BuildSidecarPathForAsset(TargetPackage), TEXT("<<<corrupt-not-json>>>")));
 
@@ -589,8 +589,8 @@ bool FSafeReimportQAUnreadableManifestConflictTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 4（integration）：DocumentScope 不一致（新源 fileKey 不同）= 关系不清 →
-// 全量冲突，诊断写明两侧 provider/scope，资产不做原地更新。
+// Case 4 (integration): DocumentScope mismatch (a different fileKey in the new source) = unclear relationship ->
+// full conflict; the diagnostic names both sides' provider/scope, and the asset is not updated in place.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAScopeMismatchConflictTest,
@@ -633,7 +633,7 @@ bool FSafeReimportQAScopeMismatchConflictTest::RunTest(const FString&)
 	}
 	TestTrue(TEXT("conflict reason reports both scopes verbatim"), bExactMessage);
 
-	// 资产保持原状：文件字节不变，内存文本仍是 v1 值（管线在匹配阶段即返回）。
+	// The asset stays as it was: file bytes unchanged, the in-memory text still the v1 value (the pipeline returns at the matching stage).
 	TestTrue(TEXT("asset bytes unchanged"), IFileManager::Get().FileSize(*AssetFile) == BytesBefore);
 	if (UTextBlock* Alpha = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("AlphaText"))))
 	{
@@ -649,8 +649,8 @@ bool FSafeReimportQAScopeMismatchConflictTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 5（integration）：项目侧重构（manifest 记录的实例在目标树里一个都定位不到）
-// → 全量冲突；匹配阶段先行完成的诊断可见；项目侧结构不被改动。
+// Case 5 (integration): project-side restructure (none of the manifest-recorded instances can be located in the
+// target tree) -> full conflict; the diagnostics finished first by the matching stage are visible; the project-side structure is left untouched.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQARestructureConflictTest,
@@ -678,7 +678,7 @@ bool FSafeReimportQARestructureConflictTest::RunTest(const FString&)
 	const FString AssetFile = QAAssetFilePath(TargetPackage);
 	const int64 BytesBefore = IFileManager::Get().FileSize(*AssetFile);
 
-	// 模拟项目重构：把 manifest 记录的实例全部从树里移走，换成项目自己的控件。
+	// Simulate a project restructure: remove every manifest-recorded instance from the tree and put the project's own widgets in.
 	FDesign2UMGGenerationManifestSidecar Sidecar;
 	if (!TestTrue(TEXT("sidecar loads"), QALoadSidecar(TargetPackage, Sidecar)))
 	{
@@ -703,11 +703,11 @@ bool FSafeReimportQARestructureConflictTest::RunTest(const FString&)
 	TestTrue(TEXT("full conflict flagged"), Result.bFullConflict);
 	TestTrue(TEXT("restructure reason reported"),
 		QAHasMessage(Result, TEXT("reimport_full_conflict"), TEXT("none of the recorded instances could be located in the target widget tree")));
-	// spec：先完成 source matching / instance matching / ownership 分类，才谈应用；
-	// scope 匹配诊断必须先出现，随后才是全量冲突。
+	// Spec: source matching / instance matching / ownership classification must complete before anything applies;
+	// the scope-match diagnostic must appear first, followed by the full conflict.
 	TestTrue(TEXT("scope matching completed first"), QACountKind(Result, TEXT("reimport_scope_matched")) == 1);
 
-	// 项目侧结构不被改动。
+	// The project-side structure is left untouched.
 	TestNotNull(TEXT("project replacement widget preserved"), WBP->WidgetTree->FindWidget(TEXT("ProjectReplacement")));
 	TestTrue(TEXT("asset bytes unchanged"), IFileManager::Get().FileSize(*AssetFile) == BytesBefore);
 
@@ -716,9 +716,9 @@ bool FSafeReimportQARestructureConflictTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 6（integration）：matched 更新主流程——D2U-owned 文本/布局刷新、mapped 实例
-// 只更外层布局 + 显式 inputs 直接覆写（实例不被替换、内部不展开）、项目子控件保留、
-// 根尺寸刷新、manifest 收口；无全量冲突时 copy 标志被忽略。
+// Case 6 (integration): the matched-update main flow - D2U-owned text/layout refreshed, the mapped instance gets
+// only its outer layout + explicit inputs overwritten (instance not replaced, interior not expanded), project children
+// kept, root size refreshed, manifest consolidated; the copy flag is ignored when there is no full conflict.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAMatchedUpdateTest,
@@ -755,7 +755,7 @@ bool FSafeReimportQAMatchedUpdateTest::RunTest(const FString&)
 	}
 	TWeakObjectPtr<UDesign2UMGMappingQAWidget> MappedWeak = MappedBefore;
 
-	// 模拟开发者定制：改 mapped 输入值、改 D2U 文本、加项目子控件。
+	// Simulate developer customization: edit a mapped input value, edit D2U text, add a project child widget.
 	MappedBefore->TextValue = FText::FromString(TEXT("Hacked"));
 	if (UTextBlock* Head = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Head"))))
 	{
@@ -778,13 +778,13 @@ bool FSafeReimportQAMatchedUpdateTest::RunTest(const FString&)
 		*InfoPanelV2),
 		QAReimportScope, 480, 320);
 
-	// copy 标志在无全量冲突时必须被忽略（不生成副本）。
+	// The copy flag must be ignored without a full conflict (no copy generated).
 	const FDesignReimportResult Result = QAReimport(V2, QAMappedClassPath, TargetPackage, /*bGenerateResolutionCopy=*/true);
 	TestTrue(TEXT("v2 reimport succeeds"), Result.bSucceeded);
 	TestFalse(TEXT("not a full conflict"), Result.bFullConflict);
 	TestTrue(TEXT("updated blueprint returned"), Result.UpdatedBlueprint == WBP);
 
-	// D2U-owned 文本被设计值刷新（开发者改动被覆写——文本属 D2U-owned）。
+	// D2U-owned text is refreshed by the design value (the developer's edit is overwritten - text is D2U-owned).
 	if (UTextBlock* Head = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Head"))))
 	{
 		TestEqual(TEXT("D2U text refreshed from design"), Head->GetText().ToString(), FString(TEXT("Head v2")));
@@ -794,7 +794,7 @@ bool FSafeReimportQAMatchedUpdateTest::RunTest(const FString&)
 		AddError(TEXT("Head widget missing after reimport"));
 	}
 
-	// mapped 实例：同一个对象（不替换）、类不变、inputs 直接覆写、外层布局更新、内部子树不展开。
+	// mapped instance: the same object (not replaced), class unchanged, inputs overwritten directly, outer layout updated, interior subtree not expanded.
 	UDesign2UMGMappingQAWidget* MappedAfter = MappedWeak.Get();
 	TestNotNull(TEXT("mapped instance still alive"), MappedAfter);
 	if (MappedAfter)
@@ -802,7 +802,7 @@ bool FSafeReimportQAMatchedUpdateTest::RunTest(const FString&)
 		TestTrue(TEXT("mapped instance object identity preserved"), MappedAfter == MappedBefore);
 		TestEqual(TEXT("mapped instance class unchanged"), MappedAfter->GetClass()->GetPathName(), FString(QAMappedClassPath));
 		TestEqual(TEXT("declared input overwritten with latest design value"), MappedAfter->TextValue.ToString(), FString(TEXT("Pay Now")));
-		// 组件内部子树不展开：设计里的内部 label 永远不会以生成控件形态出现在宿主树里。
+		// The component's interior subtree is not expanded: the inner label in the design never appears as a generated widget inside the host tree.
 		TestNull(TEXT("mapped component internals not expanded into the host tree"),
 			WBP->WidgetTree->FindWidget(TEXT("InnerLabel")));
 		if (UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(MappedAfter->Slot))
@@ -816,10 +816,10 @@ bool FSafeReimportQAMatchedUpdateTest::RunTest(const FString&)
 		}
 	}
 
-	// 项目子控件保留。
+	// Project child widgets kept.
 	TestNotNull(TEXT("project-added widget preserved"), WBP->WidgetTree->FindWidget(TEXT("ProjectNote")));
 
-	// 根尺寸变化写入预览尺寸。
+	// The root size change lands in the preview size.
 	if (UUserWidget* CDO = Cast<UUserWidget>(WBP->GeneratedClass ? WBP->GeneratedClass->GetDefaultObject() : nullptr))
 	{
 		TestEqual(TEXT("root design size refreshed (X)"), static_cast<int32>(CDO->DesignTimeSize.X), 480);
@@ -831,17 +831,17 @@ bool FSafeReimportQAMatchedUpdateTest::RunTest(const FString&)
 		AddError(TEXT("CDO missing after reimport"));
 	}
 
-	// 诊断：matched 更新 + inputs 覆写（含具体设计值）。
+	// Diagnostics: matched update + inputs overwrite (with the concrete design value).
 	TestTrue(TEXT("update diagnostics present"), QACountKind(Result, TEXT("reimport_updated")) >= 2);
 	TestTrue(TEXT("input overwrite diagnostic carries the design value"),
 		QAHasMessage(Result, TEXT("mapping_input_applied"), TEXT("Pay Now")));
 
-	// copy 标志被忽略：无副本。
+	// The copy flag is ignored: no copy.
 	TestTrue(TEXT("no resolution copy without full conflict"), Result.ResolutionCopyPath.IsEmpty());
 	TestFalse(TEXT("no _Resolution asset file"),
 		FPaths::FileExists(QAAssetFilePath(FPaths::GetPath(TargetPackage) / TEXT("WBP_QAPage_Resolution"))));
 
-	// manifest：实例仍在；项目 widget 不进 d2uOwned。
+	// Manifest: the instances remain; project widgets do not enter d2uOwned.
 	FDesign2UMGGenerationManifestSidecar Sidecar;
 	if (TestTrue(TEXT("manifest reloads after reimport"), QALoadSidecar(TargetPackage, Sidecar)))
 	{
@@ -856,8 +856,8 @@ bool FSafeReimportQAMatchedUpdateTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 7（integration）：同名兄弟节点的确定性对照——第 k 个同名设计子节点对到
-// 后缀序第 k 个既有 widget，刷新不串位。
+// Case 7 (integration): deterministic pairing of same-named siblings - the k-th same-named design child pairs with
+// the k-th suffixed existing widget; the refresh does not cross-assign.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQASiblingNameCorrespondenceTest,
@@ -910,8 +910,8 @@ bool FSafeReimportQASiblingNameCorrespondenceTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 8（integration）：added——新顶层纯生成节点与新 mapped 实例加入树并记录进
-// 新 manifest（mapped 记录含 key/class/inputs 声明，inputs 值已按设计写入实例）。
+// Case 8 (integration): added - a new top-level purely generated node and a new mapped instance join the tree and
+// are recorded in the new manifest (the mapped record carries key/class/inputs declarations; the inputs values are already written into the instance per the design).
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAAddedNodesTest,
@@ -948,7 +948,7 @@ bool FSafeReimportQAAddedNodesTest::RunTest(const FString&)
 	TestTrue(TEXT("added panel diagnosed"), QAHasMessage(Result, TEXT("reimport_added"), TEXT("ExtraPanel")));
 	TestTrue(TEXT("added mapped instance diagnosed"), QAHasMessage(Result, TEXT("reimport_added"), TEXT("Sidekick")));
 
-	// 新纯生成节点 + 嵌套子节点加入。
+	// The new purely generated node + nested children join.
 	UWidget* ExtraPanel = WBP->WidgetTree->FindWidget(TEXT("ExtraPanel"));
 	TestNotNull(TEXT("new generated node added"), ExtraPanel);
 	if (UTextBlock* Beta = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Beta"))))
@@ -964,7 +964,7 @@ bool FSafeReimportQAAddedNodesTest::RunTest(const FString&)
 		AddError(TEXT("nested new child missing"));
 	}
 
-	// 新 mapped 实例加入且 inputs 已按设计写入。
+	// The new mapped instance joins and its inputs are already written per the design.
 	UDesign2UMGMappingQAWidget* Sidekick = Cast<UDesign2UMGMappingQAWidget>(WBP->WidgetTree->FindWidget(TEXT("Sidekick")));
 	TestNotNull(TEXT("new mapped instance added"), Sidekick);
 	if (Sidekick)
@@ -972,7 +972,7 @@ bool FSafeReimportQAAddedNodesTest::RunTest(const FString&)
 		TestEqual(TEXT("new mapped instance input written"), Sidekick->TextValue.ToString(), FString(TEXT("Jump In")));
 	}
 
-	// manifest 记录新关系。
+	// The manifest records the new relations.
 	FDesign2UMGGenerationManifestSidecar Sidecar;
 	if (TestTrue(TEXT("manifest reloads"), QALoadSidecar(TargetPackage, Sidecar)))
 	{
@@ -1007,8 +1007,8 @@ bool FSafeReimportQAAddedNodesTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 9（integration）：safe remove 正向——纯 D2U-owned 节点安全删除；
-// 设计删除但资产里已被项目删掉的节点只从记录移除（不报错、不误删）。
+// Case 9 (integration): safe remove, positive - a purely D2U-owned node is deleted safely;
+// a node the design deleted but the project already removed from the asset is only dropped from the records (no error, no wrongful delete).
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQARemovePureNodeTest,
@@ -1031,9 +1031,9 @@ bool FSafeReimportQARemovePureNodeTest::RunTest(const FString&)
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	// 项目侧已在编辑器里删掉 GhostStat 的 widget（manifest 仍记录它）。
-	// 走编辑器同款 DeleteWidgets（销毁对象 + 清理变量 GUID）；裸 RemoveWidget 只是从
-	// 树上摘下、对象仍存活，后续任何编译都会因游离 widget/GUID 触发编译器 ensure。
+	// The project side already deleted GhostStat's widget in the editor (the manifest still records it).
+	// Uses the editor's own DeleteWidgets (destroys the objects + cleans variable GUIDs); a bare RemoveWidget merely
+	// unhooks it from the tree while the object stays alive - any later compile would trip the compiler's ensure on the detached widget/GUID.
 	if (UWidget* Ghost = WBP->WidgetTree->FindWidget(TEXT("GhostStat")))
 	{
 		FWidgetBlueprintEditorUtils::DeleteWidgets(
@@ -1071,8 +1071,8 @@ bool FSafeReimportQARemovePureNodeTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 10（integration）：remove 冲突——被删节点子树含项目内容（项目后加的子控件 /
-// 开发者绑定）时不删、保留 + 冲突诊断写明原因，且新 manifest 保留该实例。
+// Case 10 (integration): remove conflict - when the deleted node's subtree contains project content (project-added
+// children / developer bindings), no delete: kept + a conflict diagnostic stating the reason, and the new manifest keeps the instance.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQARemoveProjectContentTest,
@@ -1103,13 +1103,13 @@ bool FSafeReimportQARemoveProjectContentTest::RunTest(const FString&)
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	// 项目内容信号 A：DoomedPanel 子树里挂项目后加的子控件。
+	// Project-content signal A: a project-added child hangs inside the DoomedPanel subtree.
 	if (UPanelWidget* Doomed = Cast<UPanelWidget>(WBP->WidgetTree->FindWidget(TEXT("DoomedPanel"))))
 	{
 		UTextBlock* ProjectChild = WBP->WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("ProjectChild"));
 		Doomed->AddChild(ProjectChild);
 	}
-	// 项目内容信号 B：WBP Bindings 引用 BoundPanel 子树内 widget。
+	// Project-content signal B: WBP Bindings reference a widget inside the BoundPanel subtree.
 	FDelegateEditorBinding ProjectBinding;
 	ProjectBinding.ObjectName = TEXT("BoundPanel");
 	ProjectBinding.PropertyName = TEXT("OnClicked");
@@ -1148,8 +1148,8 @@ bool FSafeReimportQARemoveProjectContentTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 11（integration）：kind-changed 冲突——mapped→generated 转换但旧子树含
-// 项目内容（开发者绑定）→ 保留现状 + 冲突诊断，不替换；manifest 记录不变。
+// Case 11 (integration): kind-changed conflict - a mapped->generated conversion whose old subtree contains
+// project content (developer bindings) -> kept as-is + conflict diagnostic, not replaced; the manifest record is unchanged.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAKindChangeProjectContentTest,
@@ -1176,14 +1176,14 @@ bool FSafeReimportQAKindChangeProjectContentTest::RunTest(const FString&)
 	}
 	TWeakObjectPtr<UDesign2UMGMappingQAWidget> MappedWeak = MappedBefore;
 
-	// 开发者绑定挂在 mapped 实例（子树根）上：旧子树不再是纯 D2U-owned。
+	// The developer binding hangs on the mapped instance (the subtree root): the old subtree is no longer purely D2U-owned.
 	FDelegateEditorBinding ProjectBinding;
 	ProjectBinding.ObjectName = TEXT("HeroButton");
 	ProjectBinding.PropertyName = TEXT("OnClicked");
 	ProjectBinding.FunctionName = TEXT("HandleHero");
 	WBP->Bindings.Add(ProjectBinding);
 
-	// v2：同一设计节点，但本轮不再提供 mapping → kind mapped→generated。
+	// v2: the same design node, but this round no longer provides the mapping -> kind flips mapped->generated.
 	const FString V2 = MakeQADoc(MakeQAButton(TEXT("qa_btn_1"), TEXT("HeroButton"), 24, 24, TEXT("Checkout")));
 	const FDesignReimportResult Result = QAReimport(V2, nullptr, TargetPackage);
 	TestTrue(TEXT("reimport itself succeeds (conflict is per-node)"), Result.bSucceeded);
@@ -1218,8 +1218,8 @@ bool FSafeReimportQAKindChangeProjectContentTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 12（integration）：move 正向——设计把节点挪进新增容器，两端明确 D2U-owned
-// → widget 换父但对象身份保留；manifest 顶层实例收口、所有权保留。
+// Case 12 (integration): move, positive - the design moves a node into a newly added container; both ends clearly
+// D2U-owned -> the widget changes parents but the object identity survives; manifest top-level instances consolidated, ownership kept.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAMoveWithinOwnedBoundsTest,
@@ -1229,7 +1229,7 @@ bool FSafeReimportQAMoveWithinOwnedBoundsTest::RunTest(const FString&)
 {
 	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/QAReimportMoveOk");
 
-	// MoverPanel 两版同为带两个子节点的纯容器（类型跨版本一致），v1 挂在宿主根下。
+	// MoverPanel is a fill-less two-child pure container in both versions (type consistent across versions); in v1 it hangs under the host root.
 	const FString MoverPanelJson = MakeQAPanel(TEXT("qa_mover"), TEXT("MoverPanel"), 40, 32,
 		FString::Printf(
 			TEXT("%s,%s"),
@@ -1258,7 +1258,7 @@ bool FSafeReimportQAMoveWithinOwnedBoundsTest::RunTest(const FString&)
 	TestEqual(TEXT("v1 parent is the page host root"),
 		MoverBefore->GetParent()->GetFName(), WBP->WidgetTree->RootWidget->GetFName());
 
-	// v2：新容器 TargetBox 收编 MoverPanel（整棵子树随迁）。
+	// v2: the new container TargetBox adopts MoverPanel (the whole subtree moves along).
 	const FString V2 = MakeQADoc(FString::Printf(
 		TEXT("%s,%s"),
 		*MakeQAPanel(TEXT("qa_target"), TEXT("TargetBox"), 24, 120,
@@ -1311,8 +1311,8 @@ bool FSafeReimportQAMoveWithinOwnedBoundsTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 13（integration）：move 冲突——新设计父端不是 manifest 实例也不是本轮新建
-// 的 D2U 节点（嵌套容器，归属不明）→ 结构保留 + move 冲突诊断，不挪。
+// Case 13 (integration): move conflict - the new design's parent end is neither a manifest instance nor a D2U node
+// created this round (a nested container, unclear ownership) -> structure kept + a move-conflict diagnostic; no move.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAMoveBoundaryConflictTest,
@@ -1322,7 +1322,7 @@ bool FSafeReimportQAMoveBoundaryConflictTest::RunTest(const FString&)
 {
 	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/QAReimportMoveConflict");
 
-	// v1：SidePanel > InnerZone（嵌套容器，非 manifest 实例）+ 顶层 Mover。
+	// v1: SidePanel > InnerZone (a nested container, not a manifest instance) + the top-level Mover.
 	const FString InnerZoneChildren = FString::Printf(
 		TEXT("%s,%s"),
 		*MakeQAText(TEXT("qa_i1"), TEXT("InnerA"), 40, 40, TEXT("A")),
@@ -1343,7 +1343,7 @@ bool FSafeReimportQAMoveBoundaryConflictTest::RunTest(const FString&)
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	// v2：设计把 Mover 挪进 InnerZone（嵌套容器，边界不清）。
+	// v2: the design moves Mover into InnerZone (a nested container, boundary unclear).
 	const FString V2 = MakeQADoc(FString::Printf(
 		TEXT("%s"),
 		*MakeQAPanel(TEXT("qa_side"), TEXT("SidePanel"), 24, 24,
@@ -1384,8 +1384,8 @@ bool FSafeReimportQAMoveBoundaryConflictTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 14（integration）：Prototype 绑定按稳定设计身份刷新（无项目冲突）——
-// URL 变化写入运行时扩展数据，刷新诊断写明生效条数。
+// Case 14 (integration): Prototype bindings refresh by stable design identity (no project conflict) - the URL
+// change lands in the runtime extension data and the refresh diagnostic states how many entries took effect.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAPrototypeRefreshTest,
@@ -1449,8 +1449,8 @@ bool FSafeReimportQAPrototypeRefreshTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 15（integration）：双触发冲突（hover 触发）——同一交互已有项目绑定 →
-// 项目行为保留、D2U 绑定让位 + 冲突诊断；未冲突绑定照常刷新。
+// Case 15 (integration): double-trigger conflict (hover trigger) - the same interaction already has a project
+// binding -> the project behavior stays, the D2U binding yields + a conflict diagnostic; non-conflicting bindings refresh as usual.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAPrototypeHoverConflictTest,
@@ -1472,7 +1472,7 @@ bool FSafeReimportQAPrototypeHoverConflictTest::RunTest(const FString&)
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	// 项目绑定占了 qa_hover_a 的 hover 交互。
+	// A project binding occupies qa_hover_a's hover interaction.
 	FDelegateEditorBinding ProjectBinding;
 	ProjectBinding.ObjectName = TEXT("qa_hover_a");
 	ProjectBinding.PropertyName = TEXT("OnHovered");
@@ -1517,10 +1517,10 @@ bool FSafeReimportQAPrototypeHoverConflictTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 15b（integration）：双触发冲突（click 触发、Figma 真实节点 id 形态）——
-// 触发节点 id 含 ':' 时按钮 widget 名是 id 清洗后的形态（如 "12:7" -> "W127"），
-// 项目绑定按 widget 名登记；冲突检测必须按同一清洗规则比对，否则真实 Figma
-// 稿上的双触发冲突全部漏判（项目绑定与 D2U 刷新绑定并存）。
+// Case 15b (integration): double-trigger conflict (click trigger, real Figma node-id shape) - when the trigger
+// node id contains ':', the button widget name is the slug-cleaned form (e.g. "12:7" -> "W127"), and project
+// bindings register by that widget name; conflict detection must compare with the same cleaning rule, or every
+// double-trigger conflict on a real Figma file is missed (project binding and refreshed D2U binding coexist).
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAPrototypeConflictFigmaIdTest,
@@ -1540,8 +1540,8 @@ bool FSafeReimportQAPrototypeConflictFigmaIdTest::RunTest(const FString&)
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	// 节点 id "12:7" 经 slug 清洗（删 ':'）+ 数字前缀处理得到按钮 widget 名 "W127"；
-	// 项目绑定在 UMG 编辑器里登记的是这个 widget 名。
+	// The node id "12:7" becomes the button widget name "W127" after slug cleaning (drop ':') + digit-prefix handling;
+	// the project binding is registered under that widget name in the UMG editor.
 	const FName SanitizedButtonName = FUMGWidgetUtils::SanitizeWidgetName(TEXT("12:7"), TEXT("Button"));
 	if (!TestEqual(TEXT("sanitized button name for Figma-style id"), SanitizedButtonName, FName(TEXT("W127"))))
 	{
@@ -1566,8 +1566,8 @@ bool FSafeReimportQAPrototypeConflictFigmaIdTest::RunTest(const FString&)
 			{ TEXT("trigger '12:7'"), TEXT("type 'ON_CLICK'"), TEXT("project behavior kept") }));
 	TestTrue(TEXT("project binding kept in the blueprint"), WBP->Bindings.Contains(ProjectBinding));
 
-	// 让位后无存活设计绑定（0 binding active）时不再挂 prototype 扩展属预期；
-	// 本用例的核心锁定点：确定性命名（按钮名可从节点 id 推导）+ 冲突检测不漏。
+	// With no surviving design binding after yielding (0 bindings active), not attaching the prototype extension is
+	// expected; the core lock-points of this case: deterministic naming (the button name derivable from the node id) + no missed conflict detection.
 	if (WBP->WidgetTree)
 	{
 		int32 ButtonCount = 0;
@@ -1584,8 +1584,8 @@ bool FSafeReimportQAPrototypeConflictFigmaIdTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 16（integration）：Mapped Class 变化冲突——mapping 换指向别的 WBP 类 →
-// 既有实例保留、不替换、inputs 不覆写；诊断报新旧类；manifest 记录保持旧类。
+// Case 16 (integration): Mapped Class change conflict - the mapping points at another WBP class -> the existing
+// instance is kept, not replaced, inputs not overwritten; the diagnostic reports old and new classes; the manifest record keeps the old class.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAMappedClassChangeTest,
@@ -1616,7 +1616,7 @@ bool FSafeReimportQAMappedClassChangeTest::RunTest(const FString&)
 	TWeakObjectPtr<UDesign2UMGMappingQAWidget> MappedWeak = MappedBefore;
 	MappedBefore->TextValue = FText::FromString(TEXT("Hacked"));
 
-	// v2：同一 Key 的 mapping 指向另一个 WBP 类。
+	// v2: the same Key's mapping points at another WBP class.
 	const FString V2 = MakeQADoc(FString::Printf(
 		TEXT("%s,%s"),
 		*MakeQAButton(TEXT("qa_btn_1"), TEXT("HeroButton"), 24, 24, TEXT("Pay Now")),
@@ -1653,8 +1653,8 @@ bool FSafeReimportQAMappedClassChangeTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 17（integration）：保存失败语义——事务回滚（内存文本与结构回到 reimport 前）、
-// manifest 字节不变、诊断写明失败；随后重试同一 reimport 可成功（资产未被污染）。
+// Case 17 (integration): save-failure semantics - transaction rollback (in-memory text and structure return to
+// pre-reimport), manifest bytes unchanged, the diagnostic names the failure; retrying the same reimport afterwards succeeds (the asset was not poisoned).
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQASaveFailureRollbackTest,
@@ -1662,7 +1662,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQASaveFailureRollbackTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FSafeReimportQASaveFailureRollbackTest::RunTest(const FString&)
 {
-	// 保存失败注入路径按设计打错误日志，登记为预期。
+	// The save-failure injection path logs an error by design; registered as expected.
 	AddExpectedError(TEXT("failed to save"), EAutomationExpectedErrorFlags::Contains, 0);
 
 	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/QAReimportSaveFailure");
@@ -1707,7 +1707,7 @@ bool FSafeReimportQASaveFailureRollbackTest::RunTest(const FString&)
 		QAHasMessageWithAll(Result, TEXT("reimport_save_failed"),
 			{ TEXT("transaction rolled back"), TEXT("asset keeps its pre-reimport state"), TEXT("manifest not updated") }));
 
-	// 事务回滚：内存状态保持 reimport 前（v1 设计值，v2 文本未写入）。
+	// Transaction rollback: the in-memory state stays pre-reimport (v1 design values, the v2 text never written).
 	if (UTextBlock* Head = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Head"))))
 	{
 		TestEqual(TEXT("in-memory text rolled back"), Head->GetText().ToString(), FString(TEXT("Head v1")));
@@ -1718,12 +1718,12 @@ bool FSafeReimportQASaveFailureRollbackTest::RunTest(const FString&)
 	}
 	TestNull(TEXT("reimport-added widget rolled back"), WBP->WidgetTree->FindWidget(TEXT("FreshText")));
 
-	// manifest 不更新：字节级不变。
+	// Manifest not updated: byte-for-byte identical.
 	FString ManifestAfter;
 	TestTrue(TEXT("manifest still exists"), QAReadFileString(SidecarPath, ManifestAfter));
 	TestTrue(TEXT("manifest untouched on save failure"), ManifestAfter == ManifestBefore);
 
-	// 资产未被污染：同一 v2 立即重试可以成功应用。
+	// The asset was not poisoned: retrying the same v2 immediately applies successfully.
 	const FDesignReimportResult Retry = QAReimport(V2, nullptr, TargetPackage);
 	TestTrue(TEXT("retry after rollback succeeds"), Retry.bSucceeded);
 	if (UTextBlock* Head = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Head"))))
@@ -1736,9 +1736,9 @@ bool FSafeReimportQASaveFailureRollbackTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 18（integration）：并列副本兜底——manifest 缺失 = 全量冲突；显式选择后生成
-// 并列 WBP + 自有 manifest，原资产字节不动；副本已存在时再次显式选择只提示跳过，
-// 不重复生成、不覆盖。
+// Case 18 (integration): sibling-copy fallback - a missing manifest = full conflict; after the explicit choice a
+// sibling WBP + its own manifest are generated and the original asset's bytes stay untouched; when the copy
+// already exists, choosing explicitly again only reports a skip - no duplicate generation, no overwrite.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAResolutionCopySkipsExistingTest,
@@ -1761,10 +1761,10 @@ bool FSafeReimportQAResolutionCopySkipsExistingTest::RunTest(const FString&)
 	const FString CopyPackage = FPaths::GetPath(TargetPackage) / TEXT("WBP_QAPage_Resolution");
 	const FString CopyAssetFile = QAAssetFilePath(CopyPackage);
 
-	// 制造全量冲突：删掉 sidecar。
+	// Create the full conflict: delete the sidecar.
 	IFileManager::Get().Delete(*Design2UMGGenerationManifest::BuildSidecarPathForAsset(TargetPackage), false, true);
 
-	// 第一次显式选择：生成副本。
+	// First explicit choice: the copy is generated.
 	FDesignReimportResult Result = QAReimport(V1, nullptr, TargetPackage, /*bGenerateResolutionCopy=*/true);
 	TestTrue(TEXT("full conflict still reported"), Result.bFullConflict);
 	TestFalse(TEXT("in-place update did not happen"), Result.bSucceeded);
@@ -1778,7 +1778,7 @@ bool FSafeReimportQAResolutionCopySkipsExistingTest::RunTest(const FString&)
 		FPaths::FileExists(Design2UMGGenerationManifest::BuildSidecarPathForAsset(TargetPackage)));
 	const int64 CopyBytes = IFileManager::Get().FileSize(*CopyAssetFile);
 
-	// 第二次显式选择：副本已存在 → 跳过，不覆盖。
+	// Second explicit choice: the copy already exists -> skip, no overwrite.
 	Result = QAReimport(V1, nullptr, TargetPackage, /*bGenerateResolutionCopy=*/true);
 	TestTrue(TEXT("full conflict still reported on retry"), Result.bFullConflict);
 	TestTrue(TEXT("no second copy path reported"), Result.ResolutionCopyPath.IsEmpty());
@@ -1794,8 +1794,8 @@ bool FSafeReimportQAResolutionCopySkipsExistingTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 19（integration）：普通导入回归面——同名资产仍走自动改名新建（不动旧资产、
-// 不动旧 manifest），原地更新只发生在 Reimport 路径。
+// Case 19 (integration): plain-import regression surface - an existing asset name still goes through the
+// auto-rename creation path (the old asset and old manifest untouched); in-place updates happen only on the Reimport path.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQANormalImportAutoRenameTest,
@@ -1807,7 +1807,7 @@ bool FSafeReimportQANormalImportAutoRenameTest::RunTest(const FString&)
 
 	const FString V1 = MakeQADoc(MakeQAText(TEXT("qa_t1"), TEXT("AlphaText"), 24, 24, TEXT("One")));
 
-	// 第一次普通导入。
+	// First plain import.
 	UWidgetBlueprint* First = QAImport(V1, nullptr, OutputDir, /*bCleanFirst=*/true);
 	if (!TestTrue(TEXT("first import generates"), First != nullptr))
 	{
@@ -1823,7 +1823,7 @@ bool FSafeReimportQANormalImportAutoRenameTest::RunTest(const FString&)
 		return false;
 	}
 
-	// 第二次普通导入（同名资产已存在）：自动改名新建，不动第一份。
+	// Second plain import (asset name already taken): auto-rename creates anew, leaving the first one untouched.
 	UWidgetBlueprint* Second = QAImport(V1, nullptr, OutputDir, /*bCleanFirst=*/false);
 	TestNotNull(TEXT("second import generates a renamed asset"), Second);
 	if (Second)
@@ -1835,7 +1835,7 @@ bool FSafeReimportQANormalImportAutoRenameTest::RunTest(const FString&)
 			FPaths::FileExists(Design2UMGGenerationManifest::BuildSidecarPathForAsset(SecondPackage)));
 	}
 
-	// 原资产未被原地更新：可加载、manifest 字节不变。
+	// The original asset was not updated in place: loadable, manifest bytes unchanged.
 	UWidgetBlueprint* FirstReloaded = LoadObject<UWidgetBlueprint>(
 		nullptr, *(FirstPackage + TEXT(".") + FPaths::GetBaseFilename(FirstPackage)));
 	TestNotNull(TEXT("original asset still loads"), FirstReloaded);
@@ -1848,8 +1848,8 @@ bool FSafeReimportQANormalImportAutoRenameTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 20（integration）：嵌套结构边界——设计在既有容器内新增嵌套节点走生成链补建；
-// 设计消失的嵌套子节点保留现状（manifest 只记录顶层实例，嵌套删除不是安全删除范围）。
+// Case 20 (integration): nested-structure boundary - design-added nested nodes inside an existing container go
+// through the generation-chain rebuild; nested subtrees the design dropped keep their current state (the manifest records top-level instances only; nested deletion is outside the safe-delete scope).
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQANestedStructureBoundaryTest,
@@ -1872,7 +1872,7 @@ bool FSafeReimportQANestedStructureBoundaryTest::RunTest(const FString&)
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	// v2：容器内 Head 文本变化 + 新增 FreshLine；Tail 从设计里消失。
+	// v2: the container's Head text changes + FreshLine is added; Tail disappears from the design.
 	const FString V2 = MakeQADoc(MakeQAPanel(TEXT("qa_panel"), TEXT("InfoPanel"), 24, 24,
 		FString::Printf(
 			TEXT("%s,%s"),
@@ -1902,7 +1902,7 @@ bool FSafeReimportQANestedStructureBoundaryTest::RunTest(const FString&)
 	TestTrue(TEXT("nested add diagnosed with parent context on one message"),
 		QAHasMessageWithAll(Result, TEXT("reimport_added"), { TEXT("FreshLine"), TEXT("added under 'InfoPanel'") }));
 
-	// 设计消失的嵌套子节点：保留现状（非 manifest 实例，不进安全删除流）。
+	// The design-dropped nested subtree: kept as-is (not a manifest instance, never enters the safe-delete flow).
 	TestNotNull(TEXT("design-removed nested node preserved"), WBP->WidgetTree->FindWidget(TEXT("Tail")));
 	TestEqual(TEXT("no removal performed"), QACountKind(Result, TEXT("reimport_removed")), 0);
 	TestEqual(TEXT("no removal conflict"), QACountKind(Result, TEXT("reimport_remove_conflict")), 0);
@@ -1920,9 +1920,9 @@ bool FSafeReimportQANestedStructureBoundaryTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 21（integration，R7a）：kind-changed 正向替换两方向——旧子树纯 D2U-owned 时
-// mapped->generated 与 generated->mapped 都整体替换为新形态 + reimport_kind_changed
-// 诊断（一条消息点名节点与方向）+ manifest kind 更新（对照：冲突分支见用例 11）。
+// Case 21 (integration, R7a): kind-changed positive replacement in both directions - when the old subtree is
+// purely D2U-owned, both mapped->generated and generated->mapped replace wholesale with the new form + a
+// reimport_kind_changed diagnostic (one message naming the node and the direction) + a manifest kind update (contrast: the conflict branch is case 11).
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAKindChangePositiveTest,
@@ -1940,7 +1940,7 @@ bool FSafeReimportQAKindChangePositiveTest::RunTest(const FString&)
 			*MakeQAText(TEXT("qa_keep"), TEXT("Keeper"), 200, 24, TEXT("Keep"))));
 	};
 
-	// v1：mapping 生效 -> 组件实例是 mapped 形态。
+	// v1: the mapping is active -> the component instance is in the mapped form.
 	UWidgetBlueprint* WBP = QAImport(BuildDoc(TEXT("Checkout")), QAMappedClassPath, OutputDir);
 	if (!TestTrue(TEXT("v1 import generates"), WBP != nullptr))
 	{
@@ -1954,7 +1954,7 @@ bool FSafeReimportQAKindChangePositiveTest::RunTest(const FString&)
 		return false;
 	}
 
-	// v2：撤掉 mapping -> 同一设计节点 mapped->generated，旧子树纯 D2U-owned -> 整体替换。
+	// v2: the mapping is withdrawn -> the same design node flips mapped->generated; the old subtree is purely D2U-owned -> replaced wholesale.
 	FDesignReimportResult Result = QAReimport(BuildDoc(TEXT("Checkout")), nullptr, TargetPackage);
 	TestTrue(TEXT("mapped->generated reimport succeeds"), Result.bSucceeded);
 	TestEqual(TEXT("kind change diagnosed once"), QACountKind(Result, TEXT("reimport_kind_changed")), 1);
@@ -1985,7 +1985,7 @@ bool FSafeReimportQAKindChangePositiveTest::RunTest(const FString&)
 		}
 	}
 
-	// v3：恢复 mapping -> generated->mapped，旧展开子树同样纯 D2U-owned -> 替换回实例。
+	// v3: the mapping is restored -> generated->mapped; the old expanded subtree is likewise purely D2U-owned -> replaced back into an instance.
 	Result = QAReimport(BuildDoc(TEXT("Checkout")), QAMappedClassPath, TargetPackage);
 	TestTrue(TEXT("generated->mapped reimport succeeds"), Result.bSucceeded);
 	TestEqual(TEXT("reverse kind change diagnosed once"), QACountKind(Result, TEXT("reimport_kind_changed")), 1);
@@ -2025,9 +2025,9 @@ bool FSafeReimportQAKindChangePositiveTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 22（integration，R7b）：generated 既有 D2U-owned 节点的几何与源派生视觉属性
-// 刷新——v2 改纯生成节点的位置/尺寸（ApplySlotForNode 路径）与文本填充色
-// （ApplyWidgetProperties 路径）后 reimport，断言新值生效。
+// Case 22 (integration, R7b): geometry and source-derived visual refresh of existing D2U-owned generated
+// nodes - after v2 changes a purely generated node's position/size (the ApplySlotForNode path) and text fill
+// color (the ApplyWidgetProperties path), reimport asserts the new values took effect.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAGeneratedGeometryVisualRefreshTest,
@@ -2037,7 +2037,7 @@ bool FSafeReimportQAGeneratedGeometryVisualRefreshTest::RunTest(const FString&)
 {
 	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/QAReimportGeometryVisual");
 
-	// 几何观察对象：无填充纯容器 panel（Fixed 尺寸 -> 宿主根下的直接 canvas slot）。
+	// Geometry observation target: a fill-less pure-container panel (Fixed size -> a direct canvas slot under the host root).
 	const auto MakeGeoPanel = [](int32 X, int32 Y, int32 W, int32 H)
 	{
 		return FString::Printf(
@@ -2049,7 +2049,7 @@ bool FSafeReimportQAGeneratedGeometryVisualRefreshTest::RunTest(const FString&)
 			X, Y, W, H, X + 8, Y + 8, *QATextStyle());
 	};
 
-	// 视觉观察对象：带 SOLID 填充的 TEXT（fills -> ColorAndOpacity，源派生视觉属性）。
+	// Visual observation target: a TEXT with a SOLID fill (fills -> ColorAndOpacity, a source-derived visual property).
 	const auto MakeStyledText = [](double R, double G, double B, int32 X, int32 Y, int32 W, int32 H, const TCHAR* Text)
 	{
 		return FString::Printf(
@@ -2072,7 +2072,7 @@ bool FSafeReimportQAGeneratedGeometryVisualRefreshTest::RunTest(const FString&)
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	// v1 基线：位置 (24,24)、尺寸 200x120、填充色 rgb(51,51,230)（fills 0.20/0.20/0.90 -> 字节）。
+	// v1 baseline: position (24,24), size 200x120, fill color rgb(51,51,230) (fills 0.20/0.20/0.90 -> bytes).
 	UWidget* GeoPanel = WBP->WidgetTree->FindWidget(TEXT("GeoPanel"));
 	UTextBlock* StatusLine = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("StatusLine")));
 	if (!TestNotNull(TEXT("GeoPanel present"), GeoPanel) || !TestNotNull(TEXT("StatusLine present"), StatusLine))
@@ -2093,7 +2093,7 @@ bool FSafeReimportQAGeneratedGeometryVisualRefreshTest::RunTest(const FString&)
 		AddError(TEXT("v1 GeoPanel slot is not a canvas slot"));
 	}
 
-	// v2：panel 挪到 (60,96) 缩到 160x90；文本填充色改 0.95/0.30/0.15 -> rgb(242,77,38)。
+	// v2: the panel moves to (60,96) and shrinks to 160x90; the text fill changes to 0.95/0.30/0.15 -> rgb(242,77,38).
 	const FString V2 = MakeQADoc(FString::Printf(
 		TEXT("%s,%s"),
 		*MakeGeoPanel(60, 96, 160, 90),
@@ -2110,7 +2110,7 @@ bool FSafeReimportQAGeneratedGeometryVisualRefreshTest::RunTest(const FString&)
 	if (TestNotNull(TEXT("GeoPanel still present"), GeoPanel)
 		&& TestNotNull(TEXT("StatusLine still present"), StatusLine))
 	{
-		// 几何刷新：ApplySlotForNode 路径（新位置 + 新尺寸）。
+		// Geometry refresh: the ApplySlotForNode path (new position + new size).
 		if (UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(GeoPanel->Slot))
 		{
 			TestTrue(TEXT("panel position refreshed from design"),
@@ -2123,14 +2123,14 @@ bool FSafeReimportQAGeneratedGeometryVisualRefreshTest::RunTest(const FString&)
 			AddError(TEXT("GeoPanel slot is not a canvas slot after reimport"));
 		}
 
-		// 视觉刷新：ApplyWidgetProperties 路径（fills -> ColorAndOpacity）+ 文本内容。
+		// Visual refresh: the ApplyWidgetProperties path (fills -> ColorAndOpacity) + the text content.
 		const FColor ColorAfter = StatusLine->GetColorAndOpacity().GetSpecifiedColor().ToFColor(true);
 		TestTrue(TEXT("text fill color refreshed from design"),
 			FMath::Abs(ColorAfter.R - 242) <= 1 && FMath::Abs(ColorAfter.G - 77) <= 1 && FMath::Abs(ColorAfter.B - 38) <= 1);
 		TestEqual(TEXT("text content refreshed from design"), StatusLine->GetText().ToString(), FString(TEXT("v2 line")));
 	}
 
-	// 生成几何变化的节点身份不变（刷新而非重建）。
+	// The node whose generated geometry changed keeps its identity (refreshed, not rebuilt).
 	TestTrue(TEXT("GeoPanel widget identity preserved (refreshed in place)"), GeoPanelWeak.Get() == GeoPanel);
 
 	QAWipeOutput(OutputDir);
@@ -2138,9 +2138,9 @@ bool FSafeReimportQAGeneratedGeometryVisualRefreshTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 23（integration，R2）：嵌套 mapped 实例的 IR 父是非实例嵌套容器
-// （SidePanel>InnerZone>Button）且无结构变化时，reimport 不得输出误导性的
-// reimport_move_conflict（诊断必须意味着真的跳过了结构变化）；实例照常刷新。
+// Case 23 (integration, R2): when a nested mapped instance's IR parent is a non-instance nested container
+// (SidePanel>InnerZone>Button) and the structure is unchanged, reimport must not emit a misleading
+// reimport_move_conflict (a diagnostic must mean a structural change was really skipped); the instance refreshes as usual.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQANestedParentNoNoiseTest,
@@ -2150,7 +2150,7 @@ bool FSafeReimportQANestedParentNoNoiseTest::RunTest(const FString&)
 {
 	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/QAReimportNestedNoNoise");
 
-	// SidePanel > InnerZone（嵌套纯容器，非 manifest 实例）> mapped 按钮。
+	// SidePanel > InnerZone (a nested pure container, not a manifest instance) > the mapped button.
 	const auto BuildDoc = [](const TCHAR* Label)
 	{
 		return MakeQADoc(FString::Printf(
@@ -2181,7 +2181,7 @@ bool FSafeReimportQANestedParentNoNoiseTest::RunTest(const FString&)
 	}
 	TWeakObjectPtr<UDesign2UMGMappingQAWidget> MappedWeak = Mapped;
 
-	// 无结构变化的 reimport（只换 input 值）：不得报 move 冲突噪音。
+	// A structure-unchanged reimport (only the input value changes): no move-conflict noise.
 	const FDesignReimportResult Result = QAReimport(BuildDoc(TEXT("Pay Now")), QAMappedClassPath, TargetPackage);
 	TestTrue(TEXT("reimport succeeds"), Result.bSucceeded);
 	TestEqual(TEXT("no move-conflict noise for the unchanged nested parent"),
@@ -2202,9 +2202,9 @@ bool FSafeReimportQANestedParentNoNoiseTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 24（integration，R3 嵌套 move）：设计把嵌套节点 N 从 ContainerA 挪到
-// ContainerB——源端纯 D2U-owned 时移动 widget（identity 保持、名字不变、源端
-// 不残留、目标端不建副本）+ reimport_moved 诊断；不再误报 reimport_added。
+// Case 24 (integration, R3 nested move): the design moves the nested node N from ContainerA to
+// ContainerB - when the source end is purely D2U-owned, the widget moves (identity preserved, name
+// unchanged, nothing left at the source, no copy built at the target) + a reimport_moved diagnostic; no false reimport_added.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQANestedMoveIdentityTest,
@@ -2240,7 +2240,7 @@ bool FSafeReimportQANestedMoveIdentityTest::RunTest(const FString&)
 	}
 	const TWeakObjectPtr<UTextBlock> NWeak = NBefore;
 
-	// v2：N 从 ContainerA 挪到 ContainerB。
+	// v2: N moves from ContainerA to ContainerB.
 	const FString V2 = MakeQADoc(FString::Printf(
 		TEXT("%s,%s"),
 		*MakeQAPanel(TEXT("qa_ca"), TEXT("ContainerA"), 20, 20,
@@ -2272,9 +2272,9 @@ bool FSafeReimportQANestedMoveIdentityTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 25（integration，R3 嵌套 move 冲突）：开发者已把嵌套节点 N 挂到项目容器
-// DevPanel 下，设计又把 N 挪到 ContainerB——N 保留在 DevPanel、ContainerB 下
-// 不得新建副本，输出 reimport_move_conflict 点名 N 与原因。
+// Case 25 (integration, R3 nested move conflict): the developer already hung the nested node N under the
+// project container DevPanel, and the design moves N to ContainerB - N stays in DevPanel, ContainerB must
+// not get a new copy, and a reimport_move_conflict names N and the reason.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQANestedMoveConflictNoCopyTest,
@@ -2300,7 +2300,7 @@ bool FSafeReimportQANestedMoveConflictNoCopyTest::RunTest(const FString&)
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	// 开发者定制：项目容器 DevPanel 挂进宿主根，把 N 挪进去。
+	// Developer customization: the project container DevPanel is hung into the host root and N is moved into it.
 	UVerticalBox* DevPanel = WBP->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("DevPanel"));
 	if (UPanelWidget* Host = Cast<UPanelWidget>(WBP->WidgetTree->RootWidget))
 	{
@@ -2316,7 +2316,7 @@ bool FSafeReimportQANestedMoveConflictNoCopyTest::RunTest(const FString&)
 	DevPanel->AddChild(N);
 	const TWeakObjectPtr<UWidget> NWeak = N;
 
-	// v2：设计把 N 挪到 ContainerB。
+	// v2: the design moves N to ContainerB.
 	const FString V2 = MakeQADoc(FString::Printf(
 		TEXT("%s,%s"),
 		*MakeQAPanel(TEXT("qa_ca"), TEXT("ContainerA"), 20, 20,
@@ -2347,9 +2347,9 @@ bool FSafeReimportQANestedMoveConflictNoCopyTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 26（integration，R3 嵌套删除冲突）：设计删除的嵌套节点 Tail 含项目子控件
-// （DevChild）——Tail 保留 + reimport_remove_conflict 点名节点与原因；
-// 纯 D2U 嵌套残留的静默保留由用例 20（NestedAddAndRemovalBoundary）覆盖。
+// Case 26 (integration, R3 nested delete conflict): the design-deleted nested node Tail contains a project
+// child (DevChild) - Tail is kept + a reimport_remove_conflict naming the node and the reason;
+// the silent keep of purely-D2U nested leftovers is covered by case 20 (NestedAddAndRemovalBoundary).
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQANestedRemoveConflictTest,
@@ -2372,7 +2372,7 @@ bool FSafeReimportQANestedRemoveConflictTest::RunTest(const FString&)
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	// 开发者定制：项目子控件 DevChild 挂进嵌套节点 Tail。
+	// Developer customization: the project child DevChild is hung into the nested node Tail.
 	UWidget* Tail = WBP->WidgetTree->FindWidget(TEXT("Tail"));
 	if (!TestNotNull(TEXT("nested Tail present in v1"), Tail))
 	{
@@ -2383,7 +2383,7 @@ bool FSafeReimportQANestedRemoveConflictTest::RunTest(const FString&)
 	DevChild->SetText(FText::FromString(TEXT("dev")));
 	Cast<UPanelWidget>(Tail)->AddChild(DevChild);
 
-	// v2：Tail 从设计里消失（Head 保留并更新）。
+	// v2: Tail disappears from the design (Head stays and updates).
 	const FString V2 = MakeQADoc(MakeQAPanel(TEXT("qa_panel"), TEXT("InfoPanel"), 24, 24,
 		MakeQAText(TEXT("qa_head"), TEXT("Head"), 32, 32, TEXT("Head v2"))));
 
@@ -2406,10 +2406,10 @@ bool FSafeReimportQANestedRemoveConflictTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 27（integration，宿主根形态变化）：v1 带交互文档生成合成 switcher 宿主根
-// （root_pc 成为顶层实例），v2 交互消失后 root_pc 直接成为 IR 根。reimport 不得
-// 把 root_pc 的嵌套子节点误报为「宿主根顶层 added」（Keep_1），也不得把 root_pc
-// 本身误报 move 冲突；被删除且含项目内容的嵌套节点 N 有 remove 冲突诊断。
+// Case 27 (integration, host-root form change): v1's interactive document generates the synthesized switcher
+// host root (root_pc becomes a top-level instance); in v2, after the interactions vanish, root_pc directly
+// becomes the IR root. Reimport must neither misreport root_pc's nested children as "host-root top-level
+// added" (Keep_1) nor misreport root_pc itself as a move conflict; the deleted nested node N containing project content gets a remove-conflict diagnostic.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAHostRootShapeChangeTest,
@@ -2419,7 +2419,7 @@ bool FSafeReimportQAHostRootShapeChangeTest::RunTest(const FString&)
 {
 	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/QAReimportHostRootShape");
 
-	// v1：root_pc 下有带 ON_CLICK 交互的按钮（文档有效导航 -> 合成 switcher 根）。
+	// v1: root_pc holds a button with an ON_CLICK interaction (a valid document navigation -> the switcher root is synthesized).
 	const auto MakeInteractiveButton = []()
 	{
 		return FString::Printf(
@@ -2462,7 +2462,7 @@ bool FSafeReimportQAHostRootShapeChangeTest::RunTest(const FString&)
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	// 前置确认：合成 switcher 根 + root_pc 是顶层实例。
+	// Precondition check: the synthesized switcher root + root_pc are top-level instances.
 	if (!TestTrue(TEXT("v1 host root is the synthetic switcher"),
 			WBP->WidgetTree->RootWidget && WBP->WidgetTree->RootWidget->IsA<UWidgetSwitcher>()))
 	{
@@ -2481,7 +2481,7 @@ bool FSafeReimportQAHostRootShapeChangeTest::RunTest(const FString&)
 	DevChild->SetText(FText::FromString(TEXT("dev")));
 	Cast<UPanelWidget>(N)->AddChild(DevChild);
 
-	// v2：交互与 N 整体消失 -> 无有效导航 -> root_pc 直接成为根。
+	// v2: the interaction and N vanish together -> no valid navigation -> root_pc directly becomes the root.
 	const FDesignReimportResult Result = QAReimport(MakeRoot(false), nullptr, TargetPackage);
 	TestTrue(TEXT("reimport succeeds"), Result.bSucceeded);
 
@@ -2499,9 +2499,9 @@ bool FSafeReimportQAHostRootShapeChangeTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 28（integration，S1 保存前可写性 pre-check）：场景 B（仅 sidecar 只读）
-// 与场景 A（uasset+sidecar 只读）都必须在进入保存流程前拦截——uasset 不落新状态、
-// sidecar 不变、不报 completed、bSucceeded=false 且诊断写明具体文件。
+// Case 28 (integration, S1 pre-save writability check): scenario B (sidecar read-only only)
+// and scenario A (uasset + sidecar read-only) must both be intercepted before entering the save flow -
+// the uasset does not land a new state, the sidecar is unchanged, completed is not reported, bSucceeded=false, and the diagnostic names the concrete file.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQASaveWritabilityPrecheckTest,
@@ -2535,15 +2535,15 @@ bool FSafeReimportQASaveWritabilityPrecheckTest::RunTest(const FString&)
 	}
 	const FString V2 = BuildDoc(TEXT("fail-v2"));
 
-	// 恢复可写的兜底（断言失败提前 return 时也不能把只读文件留给清理）。
+	// Restore-writability safety net (an early return on a failed assertion must not leave a read-only file behind for cleanup either).
 	const auto MakeWritable = [&]()
 	{
 		FPlatformFileManager::Get().GetPlatformFile().SetReadOnly(*AssetFile, false);
 		FPlatformFileManager::Get().GetPlatformFile().SetReadOnly(*SidecarFile, false);
 	};
 
-	// 场景 B：仅 sidecar 只读。pre-check 必须拦住保存：不得出现
-	// 「uasset 已更新 + sidecar 还是旧值」的半更新组合。
+	// Scenario B: sidecar read-only only. The pre-check must stop the save: never the half-updated
+	// combination "uasset updated + sidecar still old".
 	TestTrue(TEXT("sidecar set read-only"), FPlatformFileManager::Get().GetPlatformFile().SetReadOnly(*SidecarFile, true));
 	{
 		const FDesignReimportResult Result = QAReimport(V2, nullptr, TargetPackage);
@@ -2553,7 +2553,7 @@ bool FSafeReimportQASaveWritabilityPrecheckTest::RunTest(const FString&)
 		TestTrue(TEXT("scenario B diagnostic names the blocked sidecar file"),
 			QAHasMessageWithAll(Result, TEXT("reimport_save_failed"), { *SidecarFile, TEXT("read-only") }));
 		TestEqual(TEXT("scenario B does not report completion"), QACountKind(Result, TEXT("reimport_completed")), 0);
-		// 组合断言：磁盘完全未被触碰（uasset hash 不变 + sidecar 字节不变）。
+		// Combined assertion: the disk is completely untouched (uasset hash unchanged + sidecar bytes unchanged).
 		TestTrue(TEXT("scenario B leaves the uasset untouched on disk"),
 			FMD5Hash::HashFile(*AssetFile) == AssetHashBefore);
 		FString SidecarNow;
@@ -2566,7 +2566,7 @@ bool FSafeReimportQASaveWritabilityPrecheckTest::RunTest(const FString&)
 	}
 	FPlatformFileManager::Get().GetPlatformFile().SetReadOnly(*SidecarFile, false);
 
-	// 场景 A：uasset + sidecar 都只读（Perforce 未 checkout 的完整形态）。
+	// Scenario A: uasset + sidecar both read-only (the full Perforce-unchecked-out shape).
 	TestTrue(TEXT("uasset set read-only"), FPlatformFileManager::Get().GetPlatformFile().SetReadOnly(*AssetFile, true));
 	TestTrue(TEXT("sidecar set read-only again"), FPlatformFileManager::Get().GetPlatformFile().SetReadOnly(*SidecarFile, true));
 	{
@@ -2585,7 +2585,7 @@ bool FSafeReimportQASaveWritabilityPrecheckTest::RunTest(const FString&)
 	}
 	MakeWritable();
 
-	// 恢复可写后同一 v2 重试可以成功（资产未被前两轮失败污染）。
+	// After writability is restored, retrying the same v2 succeeds (the asset was not poisoned by the two failed rounds).
 	const FDesignReimportResult Retry = QAReimport(V2, nullptr, TargetPackage);
 	TestTrue(TEXT("retry succeeds after restoring writability"), Retry.bSucceeded);
 	if (UTextBlock* Head = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Head"))))
@@ -2598,9 +2598,9 @@ bool FSafeReimportQASaveWritabilityPrecheckTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 29（integration，S2 sidecar 写失败传导）：uasset 已保存但 manifest 写失败
-// （pre-check 拦不住的 IO 失败）——不报 completed，输出 reimport_save_failed
-// 说明资产与记录可能不一致，bSucceeded=false；内存保持新状态（磁盘已是新资产）。
+// Case 29 (integration, S2 sidecar write-failure propagation): the uasset saved but the manifest write failed
+// (an IO failure the pre-check cannot catch) - completed is not reported; a reimport_save_failed states
+// that asset and record may be inconsistent, bSucceeded=false; memory keeps the new state (the disk already holds the new asset).
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAManifestWriteFailurePropagatesTest,
@@ -2633,7 +2633,7 @@ bool FSafeReimportQAManifestWriteFailurePropagatesTest::RunTest(const FString&)
 		return false;
 	}
 
-	// 注入 sidecar 写失败（真实只读 sidecar 会被 pre-check 拦住，测不到该分支）。
+	// Inject the sidecar write failure (a genuinely read-only sidecar would be caught by the pre-check, so this branch is unreachable otherwise).
 	Design2UMGGenerationManifest::ArmAutomationSidecarWriteFailureOnce();
 	const FDesignReimportResult Result = QAReimport(BuildDoc(TEXT("half-v2")), nullptr, TargetPackage);
 
@@ -2647,7 +2647,7 @@ bool FSafeReimportQAManifestWriteFailurePropagatesTest::RunTest(const FString&)
 		QACountKind(Result, TEXT("manifest_write_failed")) >= 1);
 	TestEqual(TEXT("completion not reported"), QACountKind(Result, TEXT("reimport_completed")), 0);
 
-	// uasset 已保存新状态：内存与磁盘一致（不回滚成旧值）。
+	// The uasset saved the new state: memory and disk agree (not rolled back to the old value).
 	if (UTextBlock* Head = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Head"))))
 	{
 		TestEqual(TEXT("in-memory text stays at the saved v2 value"), Head->GetText().ToString(), FString(TEXT("half-v2")));
@@ -2662,9 +2662,9 @@ bool FSafeReimportQAManifestWriteFailurePropagatesTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 30（integration，S4 mapped 交互专门诊断）：挂在 mapped 组件上的设计交互
-// 在 reimport 时也输出专门「不生效」条目（mapping_prototype_inert，点名触发点与
-// 类型），不只有通用的 mapped-refresh 条目。
+// Case 30 (integration, S4 dedicated mapped-interaction diagnostic): a design interaction attached to a mapped
+// component also emits a dedicated "inert" entry at reimport (mapping_prototype_inert, naming the trigger
+// and type), not just the generic mapped-refresh entry.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAMappedInteractionInertTest,
@@ -2674,7 +2674,7 @@ bool FSafeReimportQAMappedInteractionInertTest::RunTest(const FString&)
 {
 	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/QAReimportMappedInert");
 
-	// mapped 按钮 + ON_CLICK 设计交互（挂在 mapped 实例本体上）。
+	// A mapped button + an ON_CLICK design interaction (attached to the mapped instance body).
 	const auto BuildDoc = [](const TCHAR* Label)
 	{
 		return FString::Printf(
@@ -2715,8 +2715,8 @@ bool FSafeReimportQAMappedInteractionInertTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 31（integration，S5 嵌套更新诊断粒度）：嵌套 D2U-owned 节点的属性刷新
-// 也发 reimport_updated 点名节点（诊断粒度与顶层一致），不只是顶层实例。
+// Case 31 (integration, S5 nested-update diagnostic granularity): property refreshes of nested D2U-owned
+// nodes also emit reimport_updated naming the node (diagnostic granularity equal to the top level), not just top-level instances.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQANestedUpdateDiagnosticTest,
@@ -2755,10 +2755,10 @@ bool FSafeReimportQANestedUpdateDiagnosticTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 32（integration，切片 C C1）：多页原型文档（合成 switcher 宿主根）下，
-// mapped 实例在 v2 获得交互（IR 侧同名节点变成以节点 id 命名的触发包装形态）。
-// reimport 更新计划必须把它按 Matched 路径处理：实例不被重复创建、无按 id 命名的
-// 副本、sidecar 不出现同 designNodeId 双记录、无「内容位被占用」的误报 move 冲突。
+// Case 32 (integration, slice C C1): under a multi-page prototype document (synthesized switcher host root),
+// the mapped instance gains an interaction in v2 (the same-named IR-side node becomes the trigger wrapper
+// form named by node id). The reimport update plan must handle it via the Matched path: the instance is not
+// created twice, no node-id-named copy appears, the sidecar holds no double record for the same designNodeId, and no false "content slot occupied" move conflict.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQASwitcherMappedNoDuplicateTest,
@@ -2768,7 +2768,7 @@ bool FSafeReimportQASwitcherMappedNoDuplicateTest::RunTest(const FString&)
 {
 	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/QAReimportSwitcherMapped");
 
-	// mapped 实例：v1 无交互；v2 获得 ON_CLICK NODE 导航（变成触发包装形态）。
+	// The mapped instance: no interaction in v1; in v2 it gains an ON_CLICK NODE navigation (becoming the trigger wrapper form).
 	const auto MakeMappedButton = [](const TCHAR* Label, const bool bWithInteraction)
 	{
 		const FString Interactions = bWithInteraction
@@ -2782,7 +2782,7 @@ bool FSafeReimportQASwitcherMappedNoDuplicateTest::RunTest(const FString&)
 				 "\"fills\":[{\"type\":\"SOLID\",\"visible\":true,\"color\":{\"r\":0.2,\"g\":0.5,\"b\":0.8,\"a\":1}}]%s}"),
 			QAReimportComponentKey, Label, *Interactions);
 	};
-	// PageA 内的文本带跨页导航（让文档成为多页原型文档，v1/v2 都合成 switcher 宿主根）。
+	// The text inside PageA carries a cross-page navigation (making the document a multi-page prototype; v1/v2 both synthesize the switcher host root).
 	const auto MakePageAText = []()
 	{
 		return FString::Printf(
@@ -2837,7 +2837,7 @@ bool FSafeReimportQASwitcherMappedNoDuplicateTest::RunTest(const FString&)
 	const FDesignReimportResult Result = QAReimport(MakeSwitcherDoc(true), QAMappedClassPath, TargetPackage);
 	TestTrue(TEXT("v2 reimport succeeds"), Result.bSucceeded);
 
-	// 唯一实例 + identity 保持 + 名字不变（不出现按节点 id 命名的副本）。
+	// The only instance + identity preserved + name unchanged (no node-id-named copy appears).
 	int32 MappedInstanceCount = 0;
 	UDesign2UMGMappingQAWidget* MappedAfter = nullptr;
 	WBP->WidgetTree->ForEachWidget([&MappedInstanceCount, &MappedAfter](UWidget* Widget)
@@ -2855,19 +2855,19 @@ bool FSafeReimportQASwitcherMappedNoDuplicateTest::RunTest(const FString&)
 	{
 		TestTrue(TEXT("mapped instance object identity preserved"), MappedAfter == MappedWeak.Get());
 		TestEqual(TEXT("mapped instance name unchanged"), MappedAfter->GetFName(), FName(TEXT("PrimaryButton")));
-		// Matched 路径的 inputs 直接覆写。
+		// The Matched path's inputs are overwritten directly.
 		TestEqual(TEXT("declared input overwritten with the v2 design value"),
 			MappedAfter->TextValue.ToString(), FString(TEXT("proto-v2")));
 	}
 
-	// 诊断：刷新点名；无 reimport_added（不重复创建）；无误报 move 冲突。
+	// Diagnostics: the refresh is named; no reimport_added (no duplicate creation); no false move conflict.
 	TestTrue(TEXT("mapped refresh diagnosed"),
 		QAHasMessageWithAll(Result, TEXT("reimport_updated"), { TEXT("PrimaryButton"), TEXT("qa_btn_1") }));
 	TestEqual(TEXT("no added duplicate"), QACountKind(Result, TEXT("reimport_added")), 0);
 	TestEqual(TEXT("no false move conflict from the synthetic inner layer"),
 		QACountKind(Result, TEXT("reimport_move_conflict")), 0);
 
-	// sidecar：同 designNodeId 只有一条 mapped 记录。
+	// Sidecar: only one mapped record per designNodeId.
 	FDesign2UMGGenerationManifestSidecar Sidecar;
 	if (TestTrue(TEXT("manifest reloads"), QALoadSidecar(TargetPackage, Sidecar)))
 	{
@@ -2894,10 +2894,10 @@ bool FSafeReimportQASwitcherMappedNoDuplicateTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 33（integration，切片 C C2）：canvas 容器在 v2 获得视觉填充后，转换器给它
-// 插入合成 inner 层（Border + inner canvas）。容器既有的嵌套子节点与新挪进来的
-// 节点都必须穿透合成层完成同名匹配：M 原地刷新、N 从 A 挪入 C（identity 保持），
-// 不产生重复副本、不误报新增。
+// Case 33 (integration, slice C C2): after the canvas container gains a visual fill in v2, the converter
+// inserts a synthetic inner layer for it (Border + inner canvas). Both the container's existing nested
+// children and the newly moved-in node must pierce the synthetic layer to complete same-name matching:
+// M refreshes in place, N moves from A into C (identity preserved), with no duplicate copies and no false additions.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQACompositeLayerNestedMoveTest,
@@ -2907,7 +2907,7 @@ bool FSafeReimportQACompositeLayerNestedMoveTest::RunTest(const FString&)
 {
 	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/QAReimportCompositeLayerMove");
 
-	// C：无 auto-layout 容器；bWithFill 决定本版是否合成 inner 层。A：VERTICAL 容器。
+	// C: a no-auto-layout container; bWithFill decides whether this version synthesizes the inner layer. A: a VERTICAL container.
 	const auto MakeBox = [](const TCHAR* Id, const TCHAR* Name, const bool bWithFill, const bool bVertical, const FString& Children)
 	{
 		const FString Fills = bWithFill
@@ -2920,7 +2920,7 @@ bool FSafeReimportQACompositeLayerNestedMoveTest::RunTest(const FString&)
 			Id, Name, *Fills, *Layout, *Children);
 	};
 
-	// v1：C 无填充（无 inner 层）直接装 M；A（VERTICAL）装 N。
+	// v1: C has no fill (no inner layer) and directly holds M; A (VERTICAL) holds N.
 	const FString V1 = MakeQADoc(FString::Printf(
 		TEXT("%s,%s"),
 		*MakeBox(TEXT("qa_c"), TEXT("C"), false, false, MakeQAText(TEXT("qa_m"), TEXT("M"), 40, 40, TEXT("m-v1"))),
@@ -2948,7 +2948,7 @@ bool FSafeReimportQACompositeLayerNestedMoveTest::RunTest(const FString&)
 	const TWeakObjectPtr<UTextBlock> MWeak = MBefore;
 	const TWeakObjectPtr<UTextBlock> NWeak = NBefore;
 
-	// v2：C 获得填充（转换器插入合成 inner 层）且 N 从 A 挪入 C。
+	// v2: C gains a fill (the converter inserts the synthetic inner layer) and N moves from A into C.
 	const FString V2 = MakeQADoc(FString::Printf(
 		TEXT("%s,%s"),
 		*MakeBox(TEXT("qa_c"), TEXT("C"), true, false, FString::Printf(
@@ -2986,10 +2986,10 @@ bool FSafeReimportQACompositeLayerNestedMoveTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 34（integration，切片 C C3）：单页 canvas root（带填充 -> 宿主根是 Border +
-// 合成 inner 层，manifest 顶层实例记录的是 inner 层）删除页面唯一子树 N 时，
-// 安全删除诊断必须同时点名被删子树里的设计节点（widget 名由设计节点名确定性
-// 派生），不能只引用宿主合成层。
+// Case 34 (integration, slice C C3): a single-page canvas root (with a fill -> the host root is a Border +
+// synthetic inner layer, and the manifest's top-level instance records the inner layer) deletes the page's only
+// subtree N: the safe-delete diagnostic must also name the design nodes inside the deleted subtree (widget
+// names derive deterministically from design node names), not just reference the host synthetic layer.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAEmptyRootRemovalNamesDesignNodesTest,
@@ -3010,7 +3010,7 @@ bool FSafeReimportQAEmptyRootRemovalNamesDesignNodesTest::RunTest(const FString&
 				 "\"children\":[%s]}]}]}}"),
 			QAReimportScope, *Children);
 	};
-	// 页面唯一子树：N（VERTICAL 带填充 -> Border）内含 Caption 文本。
+	// The page's only subtree: N (VERTICAL with a fill -> Border) containing a Caption text.
 	const FString NSubtree = FString::Printf(
 		TEXT("{\"id\":\"qa_n\",\"name\":\"N\",\"type\":\"FRAME\",\"layoutMode\":\"VERTICAL\","
 			 "\"absoluteBoundingBox\":{\"x\":40,\"y\":40,\"width\":180,\"height\":120},"
@@ -3034,7 +3034,7 @@ bool FSafeReimportQAEmptyRootRemovalNamesDesignNodesTest::RunTest(const FString&
 		return false;
 	}
 
-	// v2：删除唯一子树，页面变空 root。
+	// v2: delete the only subtree; the page becomes an empty root.
 	const FDesignReimportResult Result = QAReimport(MakeFilledRootDoc(FString()), nullptr, TargetPackage);
 	TestTrue(TEXT("v2 reimport succeeds"), Result.bSucceeded);
 
@@ -3042,15 +3042,15 @@ bool FSafeReimportQAEmptyRootRemovalNamesDesignNodesTest::RunTest(const FString&
 	TestNull(TEXT("Caption removed"), WBP->WidgetTree->FindWidget(TEXT("Caption")));
 	TestNull(TEXT("inner layer removed"), WBP->WidgetTree->FindWidget(TEXT("QAPage_inner")));
 
-	// 诊断粒度：宿主合成层之外必须点名设计节点（N、Caption）。
+	// Diagnostic granularity: beyond the host synthetic layer, the design nodes (N, Caption) must be named.
 	TestEqual(TEXT("one removal diagnostic"), QACountKind(Result, TEXT("reimport_removed")), 1);
 	TestTrue(TEXT("removal diagnostic names the synthetic host layer and the design nodes"),
 		QAHasMessageWithAll(Result, TEXT("reimport_removed"),
 			{ TEXT("QAPage_inner"), TEXT("N"), TEXT("Caption"), TEXT("removed through the safe delete flow") }));
 
-	// 空页面是合法终态：sidecar 写出 0 实例。切片 B 语义要求加载侧拒绝空实例
-	// sidecar（下一轮 reimport 会按关系不清走全量冲突），所以这里直接读原始 JSON
-	// 断言记录确实清空，而不是走 TryLoadSidecarForAsset。
+	// An empty page is a legal end state: the sidecar is written with 0 instances. Slice B semantics make the
+	// load side reject an empty-instances sidecar (the next reimport goes full conflict for an unclear
+	// relationship), so here the raw JSON is read directly to assert the records really emptied, instead of going through TryLoadSidecarForAsset.
 	FString RawSidecar;
 	if (TestTrue(TEXT("sidecar file readable"), QAReadFileString(Design2UMGGenerationManifest::BuildSidecarPathForAsset(TargetPackage), RawSidecar)))
 	{
@@ -3065,8 +3065,8 @@ bool FSafeReimportQAEmptyRootRemovalNamesDesignNodesTest::RunTest(const FString&
 			const TArray<TSharedPtr<FJsonValue>>* Owned = nullptr;
 			if (TestTrue(TEXT("d2uOwned array present"), SidecarRoot->TryGetArrayField(TEXT("d2uOwned"), Owned) && Owned != nullptr))
 			{
-				// 宿主根 Border 本来就不进 d2uOwned（生成链不记录根 widget），
-				// 唯一子树删除后 owned 名单清空是合法终态。
+				// The host-root Border never enters d2uOwned anyway (the generation chain does not record the root widget);
+				// an empty owned list after deleting the only subtree is a legal end state.
 				TArray<FString> OwnedNames;
 				for (const TSharedPtr<FJsonValue>& OwnedValue : *Owned)
 				{
@@ -3084,10 +3084,10 @@ bool FSafeReimportQAEmptyRootRemovalNamesDesignNodesTest::RunTest(const FString&
 }
 
 // ---------------------------------------------------------------------------
-// 用例 35（integration，切片 C 5.1 连续生命周期）：v1 导入 -> 开发者经 C4 通道给
-// 触发按钮加真实事件绑定（FDelegateEditorBinding + DevHandler 函数图）并加项目子
-// 控件 -> v2 reimport（断言项目逻辑仍在、设计更新生效、D2U 绑定按双触发让位）
-// -> v3 reimport（断言 Widget 关系与 identity 稳定、绑定仍在、manifest 一致）。
+// Case 35 (integration, slice C 5.1 continuous lifecycle): v1 import -> the developer adds a real event binding
+// to the trigger button via the C4 channel (FDelegateEditorBinding + a DevHandler function graph) and adds a
+// project child -> v2 reimport (asserting the project logic survives, the design updates apply, the D2U binding
+// yields on the double trigger) -> v3 reimport (asserting the widget relations and identity stay stable, the binding survives, the manifest stays consistent).
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAContinuousLifecycleBindingsTest,
@@ -3129,7 +3129,7 @@ bool FSafeReimportQAContinuousLifecycleBindingsTest::RunTest(const FString&)
 	const TWeakObjectPtr<UDesign2UMGMappingQAWidget> MappedWeak = MappedBefore;
 	const TWeakObjectPtr<UTextBlock> HeadWeak = HeadBefore;
 
-	// 开发者定制：C4 通道加真实事件绑定（函数图 + FDelegateEditorBinding）。
+	// Developer customization: the C4 channel adds a real event binding (function graph + FDelegateEditorBinding).
 	FString BindingError;
 	if (!TestTrue(TEXT("C4 channel adds the event binding"),
 			Design2UMGWidgetBindingTools::AddEventBinding(
@@ -3139,7 +3139,7 @@ bool FSafeReimportQAContinuousLifecycleBindingsTest::RunTest(const FString&)
 		QAWipeOutput(OutputDir);
 		return false;
 	}
-	// 幂等：同一绑定重复添加不产生第二条。
+	// Idempotent: adding the same binding twice does not create a second one.
 	TestTrue(TEXT("AddEventBinding is idempotent"),
 		Design2UMGWidgetBindingTools::AddEventBinding(
 			WBP, TEXT("qa_link"), TEXT("OnClicked"), TEXT("DevHandler"), BindingError));
@@ -3156,7 +3156,7 @@ bool FSafeReimportQAContinuousLifecycleBindingsTest::RunTest(const FString&)
 		InfoPanel->AddChild(ProjectNote);
 	}
 
-	// v2 reimport：设计值更新 + 项目逻辑保留 + 双触发让位。
+	// v2 reimport: design values updated + project logic kept + double-trigger yields.
 	const FDesignReimportResult ResultV2 = QAReimport(MakeLifeDoc(TEXT("life-v2"), TEXT("head-v2")), QAMappedClassPath, TargetPackage);
 	TestTrue(TEXT("v2 reimport succeeds"), ResultV2.bSucceeded);
 
@@ -3183,7 +3183,7 @@ bool FSafeReimportQAContinuousLifecycleBindingsTest::RunTest(const FString&)
 		TestEqual(TEXT("D2U text refreshed in v2"), HeadV2->GetText().ToString(), FString(TEXT("head-v2")));
 	}
 
-	// v3 reimport：设计属性再变一轮，断言关系/identity/绑定全部稳定。
+	// v3 reimport: design properties change one more round; assert relations/identity/bindings all stay stable.
 	const FDesignReimportResult ResultV3 = QAReimport(MakeLifeDoc(TEXT("life-v3"), TEXT("head-v3")), QAMappedClassPath, TargetPackage);
 	TestTrue(TEXT("v3 reimport succeeds"), ResultV3.bSucceeded);
 
@@ -3218,8 +3218,8 @@ bool FSafeReimportQAContinuousLifecycleBindingsTest::RunTest(const FString&)
 	if (TestTrue(TEXT("manifest reloads after v3"), QALoadSidecar(TargetPackage, Sidecar)))
 	{
 		TestNotNull(TEXT("mapped instance still recorded"), Sidecar.FindInstanceByDesignNodeId(TEXT("qa_btn_1")));
-		// 带交互文档的宿主根是合成 switcher：页面根 qa_root 是顶层实例；
-		// InfoPanel 等是页面内的嵌套节点，不进顶层实例记录。
+		// The host root of an interactive document is the synthesized switcher: the page root qa_root is a top-level instance;
+		// InfoPanel and friends are nested nodes inside the page and do not enter the top-level instance records.
 		TestNotNull(TEXT("page instance still recorded"), Sidecar.FindInstanceByDesignNodeId(TEXT("qa_root")));
 		TestFalse(TEXT("project child stays outside d2uOwned"), Sidecar.D2UOwned.Contains(TEXT("ProjectNote")));
 	}
@@ -3229,9 +3229,9 @@ bool FSafeReimportQAContinuousLifecycleBindingsTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 35b（integration）：reimport 报告的 componentMapping 章节——mapping 配置
-// 错误（ini 校验诊断 + 映射类不可加载回退）在 reimport 路径必须与导入路径同样可见：
-// 结果的 ComponentMappingDiagnostics 与落盘报告 JSON 的 componentMapping.entries 都要含对应条目。
+// Case 35b (integration): the reimport report's componentMapping section - mapping config errors (ini
+// validation diagnostics + the unmappable-class-load fallback) must be as visible on the reimport path as on
+// the import path: both the result's ComponentMappingDiagnostics and the persisted report JSON's componentMapping.entries must contain the entries.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAMappingDiagnosticsSurfacedTest,
@@ -3250,7 +3250,7 @@ bool FSafeReimportQAMappingDiagnosticsSurfacedTest::RunTest(const FString&)
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	// 报告文件按 reimport 前后目录差集定位（文件名含时间戳 + GUID，无法预知）。
+	// The report file is located by the before/after directory diff of the reimport (the file name carries a timestamp + GUID and cannot be predicted).
 	const FString ReportDir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Design2UMG"), TEXT("ImportReports"));
 	TSet<FString> ReportsBefore;
 	{
@@ -3262,8 +3262,8 @@ bool FSafeReimportQAMappingDiagnosticsSurfacedTest::RunTest(const FString&)
 		}
 	}
 
-	// v2 reimport：映射表指向不可加载类（ini 配置错误的类加载失败形态），
-	// 同时随快照携带一条 ini 校验诊断（Load() 在非法条目上产出的同类载荷）。
+	// v2 reimport: the mapping table points at an unloadable class (the class-load-failure shape of an ini config
+	// error), while a snapshot-carried ini validation diagnostic rides along (the same payload Load() produces on an illegal entry).
 	const TCHAR* BrokenClassPath = TEXT("/Script/Design2UMGEditor.NoSuchMappedWidgetClass");
 	FDesignDocument Document;
 	if (!TestTrue(TEXT("v2 source parses"), FFigmaParser::ParseDocument(V1, Document)))
@@ -3284,7 +3284,7 @@ bool FSafeReimportQAMappingDiagnosticsSurfacedTest::RunTest(const FString&)
 	const FDesignReimportResult Result = DesignImportPipeline::Reimport(Document, Request);
 	TestTrue(TEXT("reimport itself succeeds (class fallback is a per-node path)"), Result.bSucceeded);
 
-	// 结果出口：ini 校验诊断 + BuildState 收集的匹配/回退诊断都在 ComponentMappingDiagnostics。
+	// Result exit: the ini validation diagnostic + the BuildState-collected match/fallback diagnostics are all in ComponentMappingDiagnostics.
 	auto HasMappingDiagnostic = [&Result](const TCHAR* Kind, const TCHAR* Substring = nullptr)
 	{
 		for (const FDesign2UMGMappingDiagnostic& Diagnostic : Result.ComponentMappingDiagnostics)
@@ -3304,14 +3304,14 @@ bool FSafeReimportQAMappingDiagnosticsSurfacedTest::RunTest(const FString&)
 		HasMappingDiagnostic(TEXT("mapping_hit"), TEXT("HeroButton")));
 	TestTrue(TEXT("unavailable mapped class diagnostic carries the configured class path"),
 		HasMappingDiagnostic(TEXT("mapping_class_unavailable"), BrokenClassPath));
-	// 分类对齐导入路径：mapping 诊断不混进 reimport 章节（reimport_* 前缀）。
+	// Classification aligned with the import path: mapping diagnostics do not leak into the reimport section (reimport_* prefix).
 	TestEqual(TEXT("mapping diagnostics stay out of the reimport section"),
 		static_cast<int32>(Result.Diagnostics.ContainsByPredicate([](const FDesign2UMGMappingDiagnostic& Diagnostic)
 		{
 			return Diagnostic.Kind.StartsWith(TEXT("mapping_"));
 		})), 0);
 
-	// 落盘出口：新写出的报告 JSON 的 componentMapping.entries 含类加载失败条目。
+	// Persisted exit: the newly written report JSON's componentMapping.entries contains the class-load-failure entry.
 	TArray<FString> ReportsAfter;
 	IFileManager::Get().FindFiles(ReportsAfter, *(ReportDir / TEXT("*.import_report.json")), true, false);
 	FString NewReport;
@@ -3362,9 +3362,9 @@ bool FSafeReimportQAMappingDiagnosticsSurfacedTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 35c（integration）：C4 绑定通道的函数名撞名——请求的函数名与既有成员
-// （member variable）同名时，函数图以唯一名创建，绑定与 guid 查询用同一个最终名，
-// 编译保存后函数可解析、绑定仍在（不再指向不存在的函数）。
+// Case 35c (integration): function-name collision on the C4 binding channel - when the requested function name
+// collides with an existing member (a member variable), the function graph is created under a unique name, and
+// the binding and the guid lookup use that same final name; after compiling and saving, the function resolves and the binding survives (no longer pointing at a nonexistent function).
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQABindingFunctionNameCollisionTest,
@@ -3382,7 +3382,7 @@ bool FSafeReimportQABindingFunctionNameCollisionTest::RunTest(const FString&)
 		return false;
 	}
 
-	// 制造撞名：member variable 与请求的函数名同名（该名字不是函数，但占用 Kismet 名字空间）。
+	// Create the collision: a member variable shares the requested function name (that name is not a function, but it occupies the Kismet namespace).
 	FEdGraphPinType BoolPin;
 	BoolPin.PinCategory = UEdGraphSchema_K2::PC_Boolean;
 	TestTrue(TEXT("colliding member variable added"),
@@ -3411,7 +3411,7 @@ bool FSafeReimportQABindingFunctionNameCollisionTest::RunTest(const FString&)
 		QAWipeOutput(OutputDir);
 		return false;
 	}
-	// 绑定必须指向实际创建的唯一名函数（撞名时请求名 ClashHandler 已被 member variable 占用）。
+	// The binding must point at the actually created uniquely-named function (under collision the requested name ClashHandler is taken by the member variable).
 	TestTrue(TEXT("binding points at the unique function name, not the clashing requested name"),
 		Binding->FunctionName != TEXT("ClashHandler"));
 	bool bGraphExists = false;
@@ -3421,7 +3421,7 @@ bool FSafeReimportQABindingFunctionNameCollisionTest::RunTest(const FString&)
 	}
 	TestTrue(TEXT("function graph exists under the bound name"), bGraphExists);
 
-	// 编译保存（生成链同一条路）后：函数在生成类上可解析，绑定未被剥离。
+	// After compiling and saving (the same path as the generation chain): the function resolves on the generated class and the binding was not stripped.
 	if (!TestTrue(TEXT("compile + save succeeds with the collision binding"),
 			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr)))
 	{
@@ -3444,11 +3444,11 @@ bool FSafeReimportQABindingFunctionNameCollisionTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 36（integration，跨会话磁盘加载态）：v1 导入保存后卸载包（确认不再是内存
-// 命中），再 LoadPackage 从磁盘加载——引擎在 uasset 上重新持有不含写共享的读句柄
-// （新编辑器会话对已有资产执行 reimport 的常态）。此时 reimport 必须成功：uasset
-// 保存前置检查不做写探测（本进程读句柄会让探测假阳性，误杀本可成功的保存），
-// 真正的外部 IO 失败由保存失败路径兜底（reimport_save_failed + 回滚）。
+// Case 36 (integration, cross-session on-disk loaded state): after the v1 import saves, the package is unloaded
+// (confirmed no longer a memory hit), then LoadPackage loads it back from disk - the engine again holds a
+// read handle without write sharing on the uasset (the normal state of a fresh editor session reimporting an
+// existing asset). Reimport must then succeed: the uasset pre-save check does no write probe (this process's
+// read handle would falsely kill it and block a save that could succeed); real external IO failures are caught by the save-failure path (reimport_save_failed + rollback).
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQADiskLoadedAssetTest,
@@ -3478,13 +3478,13 @@ bool FSafeReimportQADiskLoadedAssetTest::RunTest(const FString&)
 		return false;
 	}
 
-	// 卸载包（编辑器同一条 UPackageTools 卸载路径：关编辑器引用 + 清 RF_Standalone +
-	// ResetLoaders + GC），确认资产不再是内存命中。
+	// Unload the package (the editor's own UPackageTools unload path: close editor refs + clear RF_Standalone +
+	// ResetLoaders + GC), confirming the asset is no longer a memory hit.
 	FText UnloadError;
 	TestTrue(TEXT("package unloads"), UPackageTools::UnloadPackages({ WBP->GetOutermost() }, UnloadError));
 	TestNull(TEXT("package no longer resident in memory"), FindObject<UPackage>(nullptr, *TargetPackage));
 
-	// 从磁盘重新加载：引擎重新持有 uasset 的读句柄（旧写探测假阳性的触发条件）。
+	// Reload from disk: the engine re-holds the uasset's read handle (the old write-probe false-positive trigger).
 	UPackage* const LoadedPackage = LoadPackage(nullptr, *TargetPackage, LOAD_None);
 	if (!TestNotNull(TEXT("package reloads from disk"), LoadedPackage))
 	{
@@ -3498,7 +3498,7 @@ bool FSafeReimportQADiskLoadedAssetTest::RunTest(const FString&)
 	TestEqual(TEXT("no save failure diagnosed"), QACountKind(Result, TEXT("reimport_save_failed")), 0);
 	TestEqual(TEXT("completion diagnosed once"), QACountKind(Result, TEXT("reimport_completed")), 1);
 
-	// 资产更新生效：磁盘加载回来的 WBP 文本被 v2 设计值刷新，manifest 正常收口。
+	// The asset update takes effect: the WBP loaded back from disk has its text refreshed by the v2 design values, and the manifest consolidates normally.
 	UWidgetBlueprint* const LoadedWBP = Result.UpdatedBlueprint;
 	if (TestNotNull(TEXT("updated blueprint returned"), LoadedWBP))
 	{
@@ -3523,10 +3523,10 @@ bool FSafeReimportQADiskLoadedAssetTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 37（integration，切片 D）：多页原型文档两页→三页。switcher 宿主根 id 是页
-// 集合内容指纹，增页必然改写指纹：宿主延续后 reimport 不得整体拒绝——新页按纯生成
-// added 挂进同一宿主 switcher（宿主与既有页 widget identity 保留），manifest 源根
-// 身份刷新为新指纹（下次 reimport 以新指纹为基准）。
+// Case 37 (integration, slice D): a multi-page prototype document going from two to three pages. The switcher
+// host root id is the page-set content fingerprint, so adding a page necessarily rewrites it: after host
+// continuation, reimport must not reject wholesale - the new page hangs into the same host switcher as a purely
+// generated add (the host's and the existing pages' widget identities preserved), and the manifest source-root identity refreshes to the new fingerprint (the next reimport benchmarks against it).
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQASwitcherHostAddPageTest,
@@ -3536,7 +3536,7 @@ bool FSafeReimportQASwitcherHostAddPageTest::RunTest(const FString&)
 {
 	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/QAReimportSwitcherAddPage");
 
-	// v1：两页互指导航（构成多页原型）。
+	// v1: two pages pointing at each other (forming a multi-page prototype).
 	const FString V1 = MakeProtoDoc(FString::Printf(
 		TEXT("%s,%s"),
 		*MakeProtoPage(TEXT("sd_pg1"), TEXT("Page1"), 0, MakeProtoNavText(TEXT("sd_t1"), TEXT("P1Nav"), 20, 20, TEXT("sd_pg2"))),
@@ -3562,7 +3562,7 @@ bool FSafeReimportQASwitcherHostAddPageTest::RunTest(const FString&)
 	const TWeakObjectPtr<UWidget> HostBefore = WBP->WidgetTree->RootWidget;
 	const TWeakObjectPtr<UWidget> Page1Before = WBP->WidgetTree->FindWidget(TEXT("sd_pg1"));
 
-	// v2：新增第三页（页内导航指向既有页，绑定有效）。
+	// v2: a third page is added (its in-page navigation points at existing pages; the bindings stay valid).
 	const FString V2 = MakeProtoDoc(FString::Printf(
 		TEXT("%s,%s,%s"),
 		*MakeProtoPage(TEXT("sd_pg1"), TEXT("Page1"), 0, MakeProtoNavText(TEXT("sd_t1"), TEXT("P1Nav"), 20, 20, TEXT("sd_pg2"))),
@@ -3576,7 +3576,7 @@ bool FSafeReimportQASwitcherHostAddPageTest::RunTest(const FString&)
 	TestEqual(TEXT("host continuation diagnosed once"),
 		QACountKind(Result, TEXT("reimport_prototype_host_continued")), 1);
 
-	// 宿主延续：同一宿主对象，新页挂进宿主 switcher。
+	// Host continuation: the same host object; the new page hangs into the host switcher.
 	TestTrue(TEXT("host switcher object identity preserved"),
 		WBP->WidgetTree->RootWidget == HostBefore.Get());
 	UWidget* Page3 = WBP->WidgetTree->FindWidget(TEXT("sd_pg3"));
@@ -3608,8 +3608,8 @@ bool FSafeReimportQASwitcherHostAddPageTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 38（integration，切片 D）：多页原型删纯 D2U 页。被删页按既有安全删除流程
-// 移除（树与 sidecar 都不再有它）+ removed 诊断点名；宿主延续不整体拒绝。
+// Case 38 (integration, slice D): a multi-page prototype deletes a purely D2U page. The deleted page is
+// removed by the existing safe-delete flow (neither the tree nor the sidecar keeps it) + a removed diagnostic naming it; host continuation does not reject wholesale.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQASwitcherHostRemovePageTest,
@@ -3619,7 +3619,7 @@ bool FSafeReimportQASwitcherHostRemovePageTest::RunTest(const FString&)
 {
 	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/QAReimportSwitcherRemovePage");
 
-	// v1：三页；pg1/pg2 互指，pg3 指向 pg1（删 pg3 后剩余导航仍全部有效）。
+	// v1: three pages; pg1/pg2 point at each other, pg3 points at pg1 (after deleting pg3 the remaining navigations all stay valid).
 	const auto MakeV1Pages = []()
 	{
 		return FString::Printf(
@@ -3641,7 +3641,7 @@ bool FSafeReimportQASwitcherHostRemovePageTest::RunTest(const FString&)
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 	const TWeakObjectPtr<UWidget> HostBefore = WBP->WidgetTree->RootWidget;
 
-	// v2：pg3 消失。
+	// v2: pg3 disappears.
 	const FString V2 = MakeProtoDoc(FString::Printf(
 		TEXT("%s,%s"),
 		*MakeProtoPage(TEXT("sd_pg1"), TEXT("Page1"), 0, MakeProtoNavText(TEXT("sd_t1"), TEXT("P1Nav"), 20, 20, TEXT("sd_pg2"))),
@@ -3677,9 +3677,9 @@ bool FSafeReimportQASwitcherHostRemovePageTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 39（integration，切片 D）：多页原型删含项目内容的页（页 inner 层挂着开发者
-// 子控件）。该页保留 + remove 冲突诊断点名，项目子控件存活；宿主延续不整体拒绝，
-// 其余页照常更新。
+// Case 39 (integration, slice D): a multi-page prototype deletes a page containing project content (the page's
+// inner layer holds developer children). The page is kept + a remove-conflict diagnostic names it, the project
+// children survive; host continuation does not reject wholesale, and the remaining pages update as usual.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQASwitcherHostRemovePageProjectContentTest,
@@ -3689,7 +3689,7 @@ bool FSafeReimportQASwitcherHostRemovePageProjectContentTest::RunTest(const FStr
 {
 	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/QAReimportSwitcherRemoveProjPage");
 
-	// v1：三页；pg2 是将被设计删除、但含项目内容的页（pg1/pg3 互指不受影响）。
+	// v1: three pages; pg2 is the page the design will delete but which contains project content (pg1/pg3 point at each other, unaffected).
 	const FString V1 = MakeProtoDoc(FString::Printf(
 		TEXT("%s,%s,%s"),
 		*MakeProtoPage(TEXT("sd_pg1"), TEXT("Page1"), 0, MakeProtoNavText(TEXT("sd_t1"), TEXT("P1Nav"), 20, 20, TEXT("sd_pg3"))),
@@ -3706,8 +3706,8 @@ bool FSafeReimportQASwitcherHostRemovePageProjectContentTest::RunTest(const FStr
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	// 开发者定制：项目子控件挂进 pg2 的 inner 层（合成层名 = 页显示名 + "_inner"；
-	// 设计删除时必须保留）。
+	// Developer customization: a project child is hung into pg2's inner layer (the synthetic layer name = the page
+	// display name + "_inner"; it must survive the design delete).
 	if (UPanelWidget* Page2Inner = Cast<UPanelWidget>(WBP->WidgetTree->FindWidget(TEXT("Page2_inner"))))
 	{
 		UTextBlock* ProjectNote = WBP->WidgetTree->ConstructWidget<UTextBlock>(
@@ -3721,7 +3721,7 @@ bool FSafeReimportQASwitcherHostRemovePageProjectContentTest::RunTest(const FStr
 		AddError(TEXT("page inner layer not found for the project child"));
 	}
 
-	// v2：pg2 从设计消失。
+	// v2: pg2 disappears from the design.
 	const FString V2 = MakeProtoDoc(FString::Printf(
 		TEXT("%s,%s"),
 		*MakeProtoPage(TEXT("sd_pg1"), TEXT("Page1"), 0, MakeProtoNavText(TEXT("sd_t1"), TEXT("P1Nav"), 20, 20, TEXT("sd_pg3"))),
@@ -3754,9 +3754,9 @@ bool FSafeReimportQASwitcherHostRemovePageProjectContentTest::RunTest(const FStr
 }
 
 // ---------------------------------------------------------------------------
-// 用例 40（integration，切片 D，回归锁定）：多页原型降级单页（宿主消失：新源不再
-// 构成多页原型，无 switcher 合成根）。维持全量冲突的保守语义（切片 C CASE-011
-// 已定性），资产保持 reimport 前状态。
+// Case 40 (integration, slice D, regression lock): a multi-page prototype downgrades to a single page (the host
+// disappears: the new source no longer forms a multi-page prototype, no switcher synthesized root). The
+// conservative full-conflict semantics hold (settled by slice C CASE-011); the asset keeps its pre-reimport state.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQASwitcherHostDegradeToSinglePageTest,
@@ -3766,7 +3766,7 @@ bool FSafeReimportQASwitcherHostDegradeToSinglePageTest::RunTest(const FString&)
 {
 	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/QAReimportSwitcherDegrade");
 
-	// v1：两页互指导航。
+	// v1: two pages pointing at each other's navigation.
 	const FString V1 = MakeProtoDoc(FString::Printf(
 		TEXT("%s,%s"),
 		*MakeProtoPage(TEXT("sd_pg1"), TEXT("Page1"), 0, MakeProtoNavText(TEXT("sd_t1"), TEXT("P1Nav"), 20, 20, TEXT("sd_pg2"))),
@@ -3782,7 +3782,7 @@ bool FSafeReimportQASwitcherHostDegradeToSinglePageTest::RunTest(const FString&)
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	// v2：只剩一页、无交互（不再构成多页原型，新 IR 根是页自身而非 switcher 合成根）。
+	// v2: only one page remains, without interactions (no longer a multi-page prototype; the new IR root is the page itself, not a synthesized switcher root).
 	const FString V2 = MakeProtoDoc(MakeProtoPage(
 		TEXT("sd_pg1"), TEXT("Page1"), 0, MakeQAText(TEXT("sd_t1"), TEXT("P1Text"), 20, 20, TEXT("solo"))));
 
@@ -3793,7 +3793,7 @@ bool FSafeReimportQASwitcherHostDegradeToSinglePageTest::RunTest(const FString&)
 	TestEqual(TEXT("no host continuation for the degraded source"),
 		QACountKind(Result, TEXT("reimport_prototype_host_continued")), 0);
 
-	// 资产保持原状态：宿主与第二页原样保留。
+	// The asset keeps its original state: the host and the second page survive unchanged.
 	TestTrue(TEXT("host switcher untouched"), WBP->WidgetTree->RootWidget->IsA<UWidgetSwitcher>());
 	TestNotNull(TEXT("second page untouched"), WBP->WidgetTree->FindWidget(TEXT("sd_pg2")));
 
@@ -3802,9 +3802,9 @@ bool FSafeReimportQASwitcherHostDegradeToSinglePageTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 41（integration，S2 mapped 自身属性分歧报告）：mapped 实例自身视觉属性
-// （节点级 opacity）导入时随通用属性写入，reimport 按「mapped 内部归项目」边界
-// 不刷新，但设计声明值与实例现状的分歧必须点名（项目值 vs 设计值）。
+// Case 41 (integration, S2 mapped self-property divergence report): the mapped instance's own visual
+// properties (node-level opacity) are written with the generic properties at import; reimport does not refresh
+// them per the "mapped interior belongs to the project" boundary, but the divergence between the declared design value and the instance's current state must be named (project value vs design value).
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAMappedOwnAttrDivergenceTest,
@@ -3814,7 +3814,7 @@ bool FSafeReimportQAMappedOwnAttrDivergenceTest::RunTest(const FString&)
 {
 	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/QAReimportMappedOwnAttr");
 
-	// mapped 实例节点带节点级 opacity（Figma "opacity" -> Render.RenderOpacity，仅 <1 时声明）。
+	// The mapped instance node carries a node-level opacity (Figma "opacity" -> Render.RenderOpacity, declared only when < 1).
 	const auto BuildDoc = [](const TCHAR* NodeOpacity)
 	{
 		return FString::Printf(
@@ -3850,8 +3850,8 @@ bool FSafeReimportQAMappedOwnAttrDivergenceTest::RunTest(const FString&)
 		MappedInstance->GetRenderOpacity(), 0.5f);
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	// v2：设计把节点透明度改成 0.25。reimport 不刷新自身属性（项目侧保留 0.5），
-	// 但分歧必须点名报告。
+	// v2: the design changes the node opacity to 0.25. Reimport does not refresh the self-property (the project side
+	// keeps 0.5), but the divergence must be named in the report.
 	const FDesignReimportResult Result = QAReimport(BuildDoc(TEXT("0.25")), QAMappedClassPath, TargetPackage);
 	TestTrue(TEXT("reimport succeeds"), Result.bSucceeded);
 
@@ -3866,9 +3866,9 @@ bool FSafeReimportQAMappedOwnAttrDivergenceTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 用例 42（integration，R3 顶层 reparent 源端所有权）：开发者把顶层生成节点挪进
-// 项目侧容器后，reimport 不得把它拽回宿主根——保留在项目容器 + reimport_move_conflict
-// 点名；设计侧内容更新（文本）照常到达（摆放归项目，内容归设计）。
+// Case 42 (integration, R3 top-level reparent source-side ownership): after the developer moves a top-level
+// generated node into a project-side container, reimport must not drag it back to the host root - it stays in
+// the project container + a reimport_move_conflict names it; the design-side content update (text) still arrives (placement belongs to the project, content to the design).
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQATopLevelReparentSourceOwnedTest,
@@ -3878,7 +3878,7 @@ bool FSafeReimportQATopLevelReparentSourceOwnedTest::RunTest(const FString&)
 {
 	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/QAReimportTopMoveSourceOwned");
 
-	// v1：N 是 qa_root 直下顶层节点（manifest instance），另有一个设计容器。
+	// v1: N is a top-level node directly under qa_root (a manifest instance); there is also a design container.
 	const FString V1 = MakeQADoc(FString::Printf(
 		TEXT("%s,%s"),
 		*MakeQAText(TEXT("qa_n"), TEXT("N"), 30, 30, TEXT("mv")),
@@ -3892,7 +3892,7 @@ bool FSafeReimportQATopLevelReparentSourceOwnedTest::RunTest(const FString&)
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	// 开发者定制：项目容器 DevPanel 挂进宿主根，把顶层节点 N 挪进去。
+	// Developer customization: the project container DevPanel is hung into the host root and the top-level node N is moved into it.
 	UVerticalBox* DevPanel = WBP->WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("DevPanel"));
 	if (UPanelWidget* Host = Cast<UPanelWidget>(WBP->WidgetTree->RootWidget))
 	{
@@ -3908,7 +3908,7 @@ bool FSafeReimportQATopLevelReparentSourceOwnedTest::RunTest(const FString&)
 	DevPanel->AddChild(N);
 	const TWeakObjectPtr<UWidget> NWeak = N;
 
-	// v2：设计里 N 仍是根下顶层节点（设计侧没挪它），文本更新。
+	// v2: in the design N is still a top-level node under the root (the design did not move it); its text updates.
 	const FString V2 = MakeQADoc(FString::Printf(
 		TEXT("%s,%s"),
 		*MakeQAText(TEXT("qa_n"), TEXT("N"), 30, 30, TEXT("mv-v2")),

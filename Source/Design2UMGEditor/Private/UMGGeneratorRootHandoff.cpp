@@ -52,8 +52,8 @@ namespace UMGGeneratorRootHandoff
 			return nullptr;
 		}
 
-		// 根 widget 构建前打标记：构建状态用它在子节点构建前捕获根指针，
-		// manifest 才能把根的直属子节点识别为顶层生成关系。
+		// Flag before the root widget is built: the build state uses it to capture the root pointer before children
+		// are built, so the manifest can recognize the root's direct children as top-level generation relations.
 		if (ComponentMappingState)
 		{
 			ComponentMappingState->BeginRootBuild();

@@ -704,7 +704,7 @@ namespace DesignImportDiagnosticReport
 			RecommendationValues.Add(MakeShared<FJsonValueString>(Recommendation));
 		}
 
-		// Component Mapping 诊断：ini 校验、命中、类缺失回退、inputs 覆写/跳过、Prototype 不生效。
+		// Component Mapping diagnostics: ini validation, hits, class-missing fallback, inputs overwrite/skip, Prototype inert.
 		TSharedRef<FJsonObject> ComponentMapping = MakeShared<FJsonObject>();
 		if (ComponentMappingDiagnostics && ComponentMappingDiagnostics->Num() > 0)
 		{
@@ -719,7 +719,7 @@ namespace DesignImportDiagnosticReport
 			ComponentMapping->SetArrayField(TEXT("entries"), MappingValues);
 		}
 
-		// Safe Reimport 逐节点诊断（reimport_* 条目）；仅 reimport 路径携带，普通导入报告不含此章节。
+		// Safe Reimport per-node diagnostics (reimport_* entries); carried only by the reimport path - plain import reports have no such section.
 		if (ReimportDiagnostics)
 		{
 			TSharedRef<FJsonObject> Reimport = MakeShared<FJsonObject>();
@@ -759,7 +759,7 @@ namespace DesignImportDiagnosticReport
 		const TArray<FDesign2UMGMappingDiagnostic>& ReimportDiagnostics,
 		const TArray<FDesign2UMGMappingDiagnostic>* ComponentMappingDiagnostics)
 	{
-		// requestedOutputPath 承载 reimport 的目标资产；诊断走 reimport 章节。
+		// requestedOutputPath carries the reimport target asset; its diagnostics go to the reimport section.
 		FImportReportArtifacts Artifacts;
 		Artifacts.RequestedOutputPath = TargetAssetPath;
 		Write(Document, Data, Artifacts, ComponentMappingDiagnostics, &ReimportDiagnostics);

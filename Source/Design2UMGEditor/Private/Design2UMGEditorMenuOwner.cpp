@@ -152,9 +152,9 @@ namespace
 		FSlateApplication::Get().AddWindow(Window);
 	}
 
-	// Reimport 入口只收集两样输入：新设计源（本地 Figma 导出 design.json）+ 目标资产
-	// （生成的 WBP .uasset 或其 .d2u.json sidecar），然后走 DesignImportPipeline::Reimport。
-	// 全量冲突时弹一次确认框问是否生成并列副本（用户显式选择，不隐式生成）。
+	// The reimport entry collects exactly two inputs: the new design source (a local Figma-exported design.json)
+	// and the target asset (the generated WBP .uasset or its .d2u.json sidecar), then calls DesignImportPipeline::Reimport.
+	// On full conflict it asks once whether to generate a sibling copy (explicit user choice; never implicit).
 	void OpenReimportDialog()
 	{
 		IDesktopPlatform* Desktop = FDesktopPlatformModule::Get();
@@ -191,7 +191,7 @@ namespace
 			return;
 		}
 
-		// sidecar（.d2u.json）与资产同名同目录：统一换算成 .uasset 再转包路径。
+		// The sidecar (.d2u.json) lives next to the asset with the same name: normalize to .uasset, then to a package path.
 		FString AssetFilePath = TargetFiles[0];
 		if (AssetFilePath.EndsWith(TEXT(".d2u.json")))
 		{
@@ -252,7 +252,7 @@ namespace
 		}
 		else
 		{
-			// 全量冲突且没有副本：用户在冲突对话框选了 No，或选 Yes 但副本生成失败。
+			// Full conflict with no copy: the user answered No in the conflict dialog, or answered Yes but copy generation failed.
 			FDesign2UMGNotification::Warning(LOCTEXT(
 				"ReimportFullConflictKept",
 				"Design2UMG: reimport hit a full conflict; the asset kept its previous state (see Output Log for details)"));

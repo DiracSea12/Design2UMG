@@ -1,7 +1,7 @@
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenExtendedFieldsAndMeshGradientTest,
-	"Design2UMG.PenParser.ExtendedFieldsAndMeshGradient",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenExtendedFieldsTest,
+	"Design2UMG.PenParser.ExtendedFields",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FPenExtendedFieldsAndMeshGradientTest::RunTest(const FString& Parameters)
+bool FPenExtendedFieldsTest::RunTest(const FString& Parameters)
 {
 	const FString Json = TEXT(R"({
 		"children": [
@@ -82,21 +82,6 @@ bool FPenExtendedFieldsAndMeshGradientTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("strikethrough parsed"), TextNode->Text.bStrikethrough);
 	TestEqual(TEXT("href parsed"), TextNode->Text.Href, TEXT("https://example.com"));
 	TestEqual(TEXT("mesh_gradient maps to gradient"), TextNode->Visual.PrimaryFill().Type, EDesignFillType::Gradient);
-	TestTrue(TEXT("mesh_gradient marker set"), TextNode->Visual.PrimaryFill().bFromMeshGradient);
-	TestTrue(TEXT("mesh_gradient raw payload kept"), !TextNode->Visual.PrimaryFill().MeshGradientRaw.IsEmpty());
-	TestTrue(TEXT("mesh_gradient columns present"), TextNode->Visual.PrimaryFill().MeshGradient.Columns.IsSet());
-	TestEqual(TEXT("mesh_gradient columns value"), TextNode->Visual.PrimaryFill().MeshGradient.Columns.Get(0), 2);
-	TestTrue(TEXT("mesh_gradient rows present"), TextNode->Visual.PrimaryFill().MeshGradient.Rows.IsSet());
-	TestEqual(TEXT("mesh_gradient rows value"), TextNode->Visual.PrimaryFill().MeshGradient.Rows.Get(0), 3);
-	TestEqual(TEXT("mesh_gradient point count"), TextNode->Visual.PrimaryFill().MeshGradient.Points.Num(), 1);
-	if (TextNode->Visual.PrimaryFill().MeshGradient.Points.Num() == 1)
-	{
-		const FDesignMeshGradientPoint& MeshPoint = TextNode->Visual.PrimaryFill().MeshGradient.Points[0];
-		TestTrue(TEXT("mesh_gradient point position present"), MeshPoint.Position.IsSet());
-		TestTrue(TEXT("mesh_gradient point position value"), MeshPoint.Position.IsSet() && MeshPoint.Position.GetValue().Equals(FVector2D(0.25f, 0.75f), 0.0001f));
-		TestTrue(TEXT("mesh_gradient in handle present"), MeshPoint.InHandle.Value.IsSet());
-		TestTrue(TEXT("mesh_gradient out handle present"), MeshPoint.OutHandle.Value.IsSet());
-	}
 	const TSharedPtr<FDesignNode>& ComponentNode = Doc.Children[1];
 	TestTrue(TEXT("stroke explicit fill present"), ComponentNode->Visual.Stroke.Fill.IsSet());
 	TestTrue(TEXT("stroke explicit fill is color"), ComponentNode->Visual.Stroke.Fill.IsSet() && ComponentNode->Visual.Stroke.Fill.GetValue().Type == EDesignFillType::Color);

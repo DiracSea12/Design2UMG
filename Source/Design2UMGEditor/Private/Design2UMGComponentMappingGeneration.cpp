@@ -13,8 +13,8 @@
 
 namespace
 {
-	// mapped 命中节点的子树不会展开生成：给全部后代打「子树内部」标记，
-	// 挂在这些节点上的设计交互同样不生效（ReportInertPrototypeBindings 据此输出诊断）。
+	// Subtrees of mapped hit nodes are not expanded: all descendants get the "inside mapped subtree" marker;
+	// design interactions attached to them are equally inert (ReportInertPrototypeBindings uses this for diagnostics).
 	void MarkMappedSubtreeRecursive(const FUMGWidgetNode& Node, FDesign2UMGComponentMappingBuildState& BuildState)
 	{
 		for (const FUMGWidgetNode& Child : Node.Children)
@@ -30,8 +30,8 @@ namespace
 		const DesignComponentMapping::FComponentMappingTable& Table,
 		FDesign2UMGComponentMappingBuildState& BuildState)
 	{
-		// 已被外层 mapped 命中吞并的子树不再参与匹配：命中也不会有实例（生成链不展开），
-		// 发出 mapping_hit 只会让用户以为内层组件接入了项目 WBP（诊断虚报）。
+		// Subtrees already swallowed by an outer mapped hit no longer participate in matching: a hit would create no
+		// instance (the generation chain does not expand it), and emitting mapping_hit would only make users believe the inner component was wired to the project WBP (false reporting).
 		if (!BuildState.IsInsideMappedSubtree(Node.Id) && Node.HasSourceData())
 		{
 			DesignComponentMapping::FDesignComponentIdentity Identity;
@@ -42,7 +42,7 @@ namespace
 				const DesignComponentMapping::FComponentMappingEntry* Entry = Table.Match(Identity, bMatchedAtSetLevel);
 				if (Entry)
 				{
-					// 命中：把 mapping Key 写进 IR 边车，生成阶段据此接入项目 WBP 实例。
+					// Hit: write the mapping Key into the IR sidecar; the generation stage attaches the project WBP instance based on it.
 					Node.MutableSource().MappedComponentKey = Entry->Key;
 					BuildState.AddMappedNodeId(Node.Id, bMatchedAtSetLevel);
 					MarkMappedSubtreeRecursive(Node, BuildState);
@@ -67,9 +67,9 @@ namespace
 		}
 	}
 
-	// NUMBER 值无损文本化：从低精度往上试，取第一个能精确还原回同一 double 的表示。
-	// %g 默认 6 位有效数字会把设计值静默舍入；固定 %.17g 虽无损但会把 9.99 拉长成
-	// 17 位噪音。最短可还原表示既不丢精度，也不污染诊断与 manifest 里的 value 文本。
+	// Lossless text rendering of NUMBER values: try increasing precision and take the first representation that
+	// round-trips to the exact same double. The %g default (6 significant digits) silently rounds design values;
+	// a fixed %.17g is lossless but stretches 9.99 into 17 digits of noise. The shortest round-trippable form loses no precision and keeps value text clean in diagnostics and the manifest.
 	FString NumberToLosslessString(const double NumberValue)
 	{
 		for (int32 Precision = 1; Precision < 17; ++Precision)
@@ -84,7 +84,7 @@ namespace
 		return FString::Printf(TEXT("%.17g"), NumberValue);
 	}
 
-	// 从 componentProperties JSON（{name:{type,value}}）里取 Source 键的 value 字段。
+	// Take the value field of the Source key from the componentProperties JSON ({name:{type,value}}).
 	bool TryGetComponentPropertyValue(const FString& PropertiesJson, const FString& SourceKey, FString& OutValue)
 	{
 		if (PropertiesJson.IsEmpty())
@@ -124,7 +124,7 @@ namespace
 		return false;
 	}
 
-	// 组件集实例的 variant 值落在 variantProperties（{name:value-string} 平铺映射）里，同属组件属性来源。
+	// Variant values of component-set instances live in variantProperties (a flat {name:value-string} map), the same component-property source.
 	bool TryGetVariantPropertyValue(const FString& VariantPropertiesJson, const FString& SourceKey, FString& OutValue)
 	{
 		if (VariantPropertiesJson.IsEmpty())
@@ -141,8 +141,8 @@ namespace
 		return PropertiesObject->TryGetStringField(SourceKey, OutValue);
 	}
 
-	// 组件主体文本的子树回退：深度优先找组件内部第一个带非空文本的 TEXT 子节点。
-	// 典型 Figma 数据里按钮 label 几乎都挂在实例内部 TEXT 上，而不是实例节点自身。
+	// Subtree fallback for the component's main text: depth-first, the first TEXT child inside the component with non-empty text.
+	// In typical Figma data the button label almost always sits on an inner TEXT node, not on the instance node itself.
 	void FindFirstTextChildRecursive(const FUMGWidgetNode& Node, FString& OutText)
 	{
 		for (const FUMGWidgetNode& Child : Node.Children)
@@ -164,8 +164,8 @@ namespace
 		}
 	}
 
-	// 按声明的取值来源解析设计值：ComponentProperty 取 componentProperties 键值（缺省回退 variantProperties），
-	// ComponentText 取组件主体文本（节点自身文本，若无则取内部首个 TEXT 子节点的文本）。
+	// Resolve design values by declared source: ComponentProperty takes the componentProperties key (falling back to variantProperties),
+	// ComponentText takes the component's main text (the node's own text, else the first inner TEXT child's text).
 	bool TryResolveComponentInputValue(
 		const FUMGWidgetNode& Node,
 		const DesignComponentMapping::FComponentInputDeclaration& Input,
@@ -223,10 +223,10 @@ namespace
 		return false;
 	}
 
-	// 反射写入：先解析目标属性，再按声明类型严格匹配，类型不匹配即失败（诊断 + 跳过该 input）。
-	// 名称解析（通用规则）：先按声明名精确查找；未命中且声明类型为 Bool 时，按 UE 官方
-	// bool 属性命名惯例（b 前缀）重试一次（如 spec 示例 IsEnabled -> bIsEnabled）。
-	// 类的属性链（PropertyLink）由 Link 按「含父类」的迭代重建，WBP 类与原生类的继承属性都能按名命中。
+	// Reflection write: resolve the target property first, then match the declared type strictly; a type mismatch fails (diagnostic + skip that input).
+	// Name resolution (generic rule): exact match on the declared name first; on miss, when the declared type is Bool,
+	// retry once with UE's canonical bool property naming (b prefix), e.g. the spec example IsEnabled -> bIsEnabled.
+	// The class property chain (PropertyLink) is rebuilt by Link with inherited properties included, so WBP and native class properties are both reachable by name.
 	bool TryWriteInputValue(
 		UUserWidget* Instance,
 		const DesignComponentMapping::FComponentInputDeclaration& Input,
@@ -328,25 +328,25 @@ void FDesign2UMGComponentMappingBuildState::RecordCreatedWidget(
 		return;
 	}
 
-	// 根 widget 本身不作为 instance 记录（manifest 的 sourceRoot 单独描述它）。
+	// The root widget itself is not recorded as an instance (the manifest's sourceRoot describes it separately).
 	if (IsRootWidget(CreatedWidget))
 	{
 		return;
 	}
 
-	// 所有权记录：本次创建的每个 widget（含嵌套叶子）都记名，
-	// manifest 的 d2uOwned 以此为数据源，reimport 用它判定删除/移动边界。
+	// Ownership record: every widget created this run (including nested leaves) is registered by name;
+	// the manifest's d2uOwned uses this as its data source; reimport uses it to decide delete/move boundaries.
 	CreatedWidgetNames.Add(CreatedWidget->GetFName().ToString());
 
-	// mapped 实例在 TryCreateMappedWidget 里已登记（含 inputs 回填），这里不重复记录。
+	// mapped instances were already registered in TryCreateMappedWidget (including inputs backfill); not recorded again here.
 	if (IsMappedNode(Node))
 	{
 		return;
 	}
 
-	// 只记录页面宿主根 widget 的直属子节点作为顶层生成关系；叶子控件不逐个记录。
-	// 转换器插入的包装节点（SizeBox/Button wrap 等）没有源数据边车，designNodeId 回退到 IR Id
-	// （IR Id 对包装节点也是确定性再生的，reimport 可按 designNodeId + widgetName 找回）。
+	// Only the direct children of the page-host root widget are recorded as top-level generation relations; leaves are not recorded individually.
+	// Wrapper nodes inserted by the converter (SizeBox/Button wraps) carry no source-data sidecar, so designNodeId falls back to the IR Id
+	// (the IR Id is deterministically reproducible for wrappers too; reimport recovers them by designNodeId + widgetName).
 	if (ParentWidget && IsRootWidget(ParentWidget))
 	{
 		FDesign2UMGGeneratedInstanceRecord Record;
@@ -358,8 +358,8 @@ void FDesign2UMGComponentMappingBuildState::RecordCreatedWidget(
 
 namespace
 {
-	// 按声明逐 input 写入：解析设计值 -> 反射写入，单个失败只跳过并诊断。
-	// 导入路径与 reimport 路径共用，区别只在诊断/记录的落点。
+	// Write inputs one by one per declaration: resolve design value -> reflection write; a single failure only skips with a diagnostic.
+	// The import path and the reimport path share this; only the diagnostic/record destinations differ.
 	void ApplyMappedComponentInputsInternal(
 		UUserWidget* Instance,
 		const FUMGWidgetNode& Node,
@@ -386,7 +386,7 @@ namespace
 			FDesign2UMGMappingDiagnostic Diagnostic;
 			if (bWritten)
 			{
-				// inputs 属 D2U-owned：直接写入最新设计值，不做项目侧当前值比对、不记基线。
+				// inputs are D2U-owned: write the latest design value directly - no comparison against the project-side current value, no baseline recording.
 				Diagnostic.Kind = TEXT("mapping_input_applied");
 				Diagnostic.Message = FString::Printf(
 					TEXT("Input '%s' -> %s.%s (%s) overwritten with design value '%s'"),
@@ -437,7 +437,7 @@ namespace Design2UMGComponentMappingGeneration
 
 		if (!Provider.Equals(DesignComponentMapping::ProviderFigma, ESearchCase::IgnoreCase))
 		{
-			// Pencil / 未知来源不进 mapping 匹配主路径。
+			// Pencil / unknown sources stay out of the mapping main path.
 			BuildState.AddDiagnostic(
 				TEXT("mapping_skipped"),
 				FString::Printf(
@@ -498,8 +498,8 @@ namespace Design2UMGComponentMappingGeneration
 			return nullptr;
 		}
 
-		// 项目 WBP 类实例直接挂进 WidgetTree（与编辑器里手动拖入 WBP 实例等价）；
-		// 外层布局（位置/尺寸/slot）仍由生成链正常处理，组件内部子树不展开。
+		// The project WBP class instance hangs directly in the WidgetTree (equivalent to dragging a WBP instance in
+		// by hand); the outer layout (position/size/slot) is still handled by the generation chain; the component's internal subtree is not expanded.
 		UUserWidget* MappedInstance = WidgetTree->ConstructWidget<UUserWidget>(WidgetClass, WidgetName);
 		if (!MappedInstance)
 		{
@@ -566,7 +566,7 @@ namespace Design2UMGComponentMappingGeneration
 		FDesign2UMGComponentMappingBuildState& BuildState,
 		TArray<FDesign2UMGMappingDiagnostic>* OutDiagnostics)
 	{
-		// 同一条诊断既进 BuildState（导入报告出口）也进可选 OutDiagnostics（reimport 报告出口）。
+		// The same diagnostic goes into BuildState (import report exit) and the optional OutDiagnostics (reimport report exit).
 		const auto ReportBoth = [&BuildState, OutDiagnostics](const TCHAR* Kind, const FString& Message)
 		{
 			BuildState.AddDiagnostic(Kind, Message);
@@ -581,8 +581,8 @@ namespace Design2UMGComponentMappingGeneration
 
 		for (const FUMGPrototypeNavigationBinding& Binding : NavigationData.ClickBindings)
 		{
-			// 触发点在 mapped 实例本体与在其内部子树是两种位置，消息分开说清；
-			// 两者都不会生成绑定，都需要「不生效」诊断。
+			// A trigger on the mapped instance body and one inside its subtree are two different locations; the messages say
+			// so explicitly; neither generates a binding, and both need the "inert" diagnostic.
 			if (BuildState.IsMappedNodeId(Binding.TriggerWidgetId)
 				|| BuildState.IsMappedNodeId(Binding.TriggerWidgetName))
 			{

@@ -192,54 +192,6 @@ struct FDesignGradient
 	TArray<FDesignGradientStop> Colors;
 };
 
-USTRUCT()
-struct FDesignMeshGradientHandle
-{
-	GENERATED_BODY()
-
-	UPROPERTY()
-	TOptional<FVector2D> Value;
-};
-
-USTRUCT()
-struct FDesignMeshGradientPoint
-{
-	GENERATED_BODY()
-
-	UPROPERTY()
-	TOptional<FVector2D> Position;
-
-	UPROPERTY()
-	FString Color;
-
-	/** Transient source-extension state: original variable reference resolved again during theme switching. */
-	FString SourceVar;
-
-	UPROPERTY()
-	FDesignMeshGradientHandle InHandle;
-
-	UPROPERTY()
-	FDesignMeshGradientHandle OutHandle;
-
-	UPROPERTY()
-	FString RawJson;
-};
-
-USTRUCT()
-struct FDesignMeshGradient
-{
-	GENERATED_BODY()
-
-	UPROPERTY()
-	TOptional<int32> Rows;
-
-	UPROPERTY()
-	TOptional<int32> Columns;
-
-	UPROPERTY()
-	TArray<FDesignMeshGradientPoint> Points;
-};
-
 /**
  * Image fill mode.
  */
@@ -342,9 +294,6 @@ struct FDesignFill
 	FDesignImageFill Image;
 
 	UPROPERTY()
-	FDesignMeshGradient MeshGradient;
-
-	UPROPERTY()
 	bool bEnabled = true;
 	UPROPERTY()
 	float Opacity = 1.0f;
@@ -353,12 +302,6 @@ struct FDesignFill
 
 	/** Transient parser/runtime state: source declared an explicit empty fill list. */
 	bool bExplicitClear = false;
-
-	/** Transient parser/runtime state: this fill came from source mesh-gradient data. */
-	bool bFromMeshGradient = false;
-
-	/** Transient source-extension state: compact original mesh-gradient payload for tooling/debug handoff. */
-	FString MeshGradientRaw;
 
 	bool IsNone() const { return Type == EDesignFillType::None; }
 	bool IsColor() const { return Type == EDesignFillType::Color; }

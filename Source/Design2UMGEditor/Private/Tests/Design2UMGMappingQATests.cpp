@@ -1,13 +1,13 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 //
-// QA 白盒结构测试（run d2u-cmsr-slice-a，Component Mapping 阶段 1/2，单元/配置级）。
-// 独立于交付内的开发测试设计，覆盖开发用例未覆盖的结构行为：
-// - ini 校验的“非 UUserWidget 子类”与“行不可解析”错误输入路径
-// - mapping 匹配主路径的 provider 门禁（Pencil 不进主路径）与 scope 解析失败路径
-// - design-facing inputs 的取值来源链（ComponentText、componentProperties 优先、
-//   variantProperties 回退、皆无跳过）与反射写入的类型不匹配/非法值路径
-// - manifest 序列化的 inputs/matchedAtSetLevel 字段语义
-// - Prototype inert 诊断不误报普通节点
+// QA white-box structural tests (run d2u-cmsr-slice-a, Component Mapping phases 1/2, unit/config level).
+// Test design independent of the in-delivery dev tests, covering structural behaviors dev cases do not:
+// - ini validation's "not a UUserWidget subclass" and "line unparseable" error-input paths
+// - the provider gate of the mapping main path (Pencil stays out of the main path) and the scope-resolution failure path
+// - the design-facing inputs source chain (ComponentText, componentProperties first,
+//   variantProperties fallback, skip when both absent) and the reflection-write type-mismatch/invalid-value paths
+// - manifest serialization semantics of the inputs/matchedAtSetLevel fields
+// - Prototype inert diagnostics not falsely accusing ordinary nodes
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -46,7 +46,7 @@ namespace
 		return FFileHelper::SaveStringToFile(Content, *IniPath);
 	}
 
-	// 带 INSTANCE 身份的 IR 节点（mapped 候选）。
+	// An IR node carrying the INSTANCE identity (a mapped candidate).
 	FUMGWidgetNode MakeQAMappedCandidateNode(const FString& NodeId)
 	{
 		FUMGWidgetNode Node;
@@ -62,7 +62,7 @@ namespace
 		return Node;
 	}
 
-	// 单条 entry 的直构 mapping 配置（绕过 ini，测试生成层逻辑）。
+	// A directly-built single-entry mapping config (bypassing the ini; tests the generation layer).
 	FDesign2UMGComponentMappingConfig MakeQAMappingConfig(
 		const FString& Key,
 		const TArray<DesignComponentMapping::FComponentInputDeclaration>& Inputs)
@@ -93,8 +93,8 @@ namespace
 		return Input;
 	}
 
-	// 节点带上命中标记后对实例应用 inputs。Config 由调用方持有：
-	// BuildState 只保存 Config 指针，其生命周期必须覆盖 BuildState 的全部使用。
+	// Apply inputs to the instance after the node carries the hit marker. The caller owns the Config:
+	// BuildState stores only a Config pointer, whose lifetime must cover every use of BuildState.
 	UDesign2UMGMappingQAWidget* ApplyQAInputs(
 		FUMGWidgetNode& Node,
 		const FDesign2UMGComponentMappingConfig& Config,
@@ -128,8 +128,8 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// ini 校验：WidgetClass 解析得到一个非 UUserWidget 子类（引擎原生控件类）时，
-// 该条目必须整体丢弃并输出可读诊断；同 ini 的其他合法条目必须继续入库。
+// ini validation: when WidgetClass resolves to a non-UUserWidget subclass (an engine native widget class),
+// the whole entry must be dropped with a readable diagnostic; other legal entries in the same ini must still be admitted.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -168,8 +168,8 @@ bool FDesign2UMGMappingQAConfigRejectsNonUserWidgetClassTest::RunTest(const FStr
 			}
 		}
 	}
-	// 加载 UClass 后显式 IsChildOf(UUserWidget) 判定：可加载但非 UUserWidget 子类的
-	// 引擎类必须报「is not a UUserWidget subclass」，与「类缺失/加载失败」分开。
+	// Load the UClass, then judge IsChildOf(UUserWidget) explicitly: a loadable engine class that is not a UUserWidget
+	// subclass must report "is not a UUserWidget subclass", distinct from "class missing/load failed".
 	TestEqual(TEXT("non-UserWidget class diagnosed exactly once"), NonUserWidgetDiagnostics, 1);
 	TestTrue(TEXT("diagnostic names the offending class"),
 		FirstMessage.Contains(TEXT("/Script/UMG.TextBlock")));
@@ -181,8 +181,8 @@ bool FDesign2UMGMappingQAConfigRejectsNonUserWidgetClassTest::RunTest(const FStr
 }
 
 // ---------------------------------------------------------------------------
-// ini 校验：结构体行无法被 UE config 系统解析（缺 "(" 前缀）时输出
-// mapping_config_invalid 诊断（含 "could not be parsed"），条目不入表。
+// ini validation: when a struct line cannot be parsed by the UE config system (missing "(" prefix), emit a
+// mapping_config_invalid diagnostic (containing "could not be parsed") and keep the entry out of the table.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -224,8 +224,8 @@ bool FDesign2UMGMappingQAConfigRejectsUnparseableLineTest::RunTest(const FString
 }
 
 // ---------------------------------------------------------------------------
-// 匹配主路径 provider 门禁：Pencil（provider "pencil"）文档即使配置了
-// 完全匹配的 Key 也不进 v1 主路径——输出 mapping_skipped 诊断、节点不命中。
+// Main-path provider gate: a Pencil (provider "pencil") document stays out of the v1 main path even with a
+// perfectly matching Key configured - it emits a mapping_skipped diagnostic and the node does not hit.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -240,8 +240,8 @@ bool FDesign2UMGMappingQAPencilProviderSkippedTest::RunTest(const FString&)
 	Data.MutableSourceDocument().DocumentScope = TEXT("qa-gen-scope");
 	Data.RootWidget = MakeQAMappedCandidateNode(TEXT("pen_inst_1"));
 
-	// 直接构造条目（绕过 ini 的 provider 校验），证明门禁在生成侧同样成立：
-	// 即使表里存在与节点身份逐字符匹配的 pencil 条目，也不得命中。
+	// Entries built directly (bypassing the ini provider validation) prove the gate also holds on the generation side:
+	// even a pencil entry matching the node identity character-for-character must not hit.
 	FDesign2UMGComponentMappingConfig Config;
 	DesignComponentMapping::FComponentMappingEntry& Entry = Config.Table.Entries.AddDefaulted_GetRef();
 	Entry.Key = TEXT("pencil|qa-gen-scope|qa-main-key");
@@ -279,8 +279,8 @@ bool FDesign2UMGMappingQAPencilProviderSkippedTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 匹配主路径 scope 门禁：figma 文档但 DocumentScope 解析失败（空）时输出
-// “无法解析 scope，任何节点都不可能命中”诊断，且不做匹配。
+// Main-path scope gate: a figma document whose DocumentScope failed to resolve (empty) emits the
+// "scope unresolvable, no node can possibly hit" diagnostic, and no matching happens.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -328,8 +328,8 @@ bool FDesign2UMGMappingQAUnresolvedDocumentScopeTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// inputs 取值来源 ComponentText：设计组件主体文本写入目标属性；
-// 组件自身与内部 TEXT 都无文本时跳过该 input 并输出可读诊断，映射本身保持生效。
+// inputs source ComponentText: the component's main text is written into the target property;
+// when neither the node itself nor any inner TEXT has text, the input is skipped with a readable diagnostic and the mapping itself stays in effect.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -345,7 +345,7 @@ bool FDesign2UMGMappingQAComponentTextInputValueTest::RunTest(const FString&)
 			DesignComponentMapping::EComponentInputValueKind::ComponentText),
 	};
 
-	// 有直接文本：写入成功 + 覆写诊断带设计值。
+	// Has direct text: write succeeds + the overwrite diagnostic carries the design value.
 	FUMGWidgetNode NodeWithText = MakeQAMappedCandidateNode(TEXT("text_inst_1"));
 	NodeWithText.Text.Text = FString(TEXT("Checkout"));
 	FDesign2UMGComponentMappingConfig ConfigWithText =
@@ -362,7 +362,7 @@ bool FDesign2UMGMappingQAComponentTextInputValueTest::RunTest(const FString&)
 	TestEqual(TEXT("no skip diagnostic on success"),
 		CountDiagnosticsByKind(StateWithText, TEXT("mapping_input_skipped")), 0);
 
-	// 无直接文本：跳过该 input + 诊断，不写默认值。
+	// No direct text: input skipped + diagnostic; the default value is not written.
 	FUMGWidgetNode NodeWithoutText = MakeQAMappedCandidateNode(TEXT("text_inst_2"));
 	FDesign2UMGComponentMappingConfig ConfigWithoutText =
 		MakeQAMappingConfig(TEXT("figma|qa-gen-scope|qa-main-key"), Inputs);
@@ -381,8 +381,8 @@ bool FDesign2UMGMappingQAComponentTextInputValueTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// inputs 取值来源 ComponentProperty：componentProperties 里的键优先；
-// 缺失时回退 variantProperties；两处都没有时跳过并诊断。
+// inputs source ComponentProperty: the componentProperties key wins;
+// on absence, fall back to variantProperties; when neither exists, skip with a diagnostic.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -396,7 +396,7 @@ bool FDesign2UMGMappingQAComponentPropertyFallbackTest::RunTest(const FString&)
 		MakeQAInput(TEXT("variant"), TEXT("NameValue"), DesignComponentMapping::EComponentInputType::Name),
 	};
 
-	// 两处都有同名键：componentProperties 的值优先。
+	// Both places have the same-named key: the componentProperties value wins.
 	FUMGWidgetNode BothNode = MakeQAMappedCandidateNode(TEXT("prop_inst_1"));
 	BothNode.MutableSource().ComponentPropertiesJson = TEXT("{\"variant\":{\"type\":\"VARIANT\",\"value\":\"Secondary\"}}");
 	BothNode.MutableSource().VariantPropertiesJson = TEXT("{\"variant\":\"Primary\"}");
@@ -409,7 +409,7 @@ bool FDesign2UMGMappingQAComponentPropertyFallbackTest::RunTest(const FString&)
 	TestEqual(TEXT("componentProperties hit applies cleanly"),
 		CountDiagnosticsByKind(BothState, TEXT("mapping_input_applied")), 1);
 
-	// 只在 variantProperties：回退生效。
+	// Only in variantProperties: the fallback takes effect.
 	FUMGWidgetNode VariantOnlyNode = MakeQAMappedCandidateNode(TEXT("prop_inst_2"));
 	VariantOnlyNode.MutableSource().VariantPropertiesJson = TEXT("{\"variant\":\"Primary\"}");
 	FDesign2UMGComponentMappingConfig VariantOnlyConfig =
@@ -424,7 +424,7 @@ bool FDesign2UMGMappingQAComponentPropertyFallbackTest::RunTest(const FString&)
 	TestTrue(TEXT("fallback apply reports the design value"),
 		VariantAppliedMessage.Contains(TEXT("'Primary'")));
 
-	// 两处都没有：跳过 + 诊断。
+	// Neither place has it: skipped + diagnostic.
 	FUMGWidgetNode MissingNode = MakeQAMappedCandidateNode(TEXT("prop_inst_3"));
 	MissingNode.MutableSource().ComponentPropertiesJson = TEXT("{\"other\":{\"type\":\"TEXT\",\"value\":\"x\"}}");
 	MissingNode.MutableSource().VariantPropertiesJson = TEXT("{\"other\":\"x\"}");
@@ -442,8 +442,8 @@ bool FDesign2UMGMappingQAComponentPropertyFallbackTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// inputs 反射写入：声明类型与目标属性类型不匹配、或设计值无法解析为声明类型时，
-// 跳过该 input 并给出精确诊断；Float 声明写入单精度 float 属性时成功。
+// inputs reflection write: when the declared type mismatches the target property type, or the design value
+// cannot be parsed as the declared type, skip that input with a precise diagnostic; a Float declaration writing a single-precision float property succeeds.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -454,13 +454,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDesign2UMGMappingQAInputTypeMismatchAndInvalidValuesTest::RunTest(const FString&)
 {
 	const TArray<DesignComponentMapping::FComponentInputDeclaration> Inputs = {
-		// Bool 声明但目标是 FText 属性：类型不匹配。
+		// Bool declared but the target is an FText property: type mismatch.
 		MakeQAInput(TEXT("label"), TEXT("TextValue"), DesignComponentMapping::EComponentInputType::Bool),
-		// Bool 声明但设计值不是 bool。
+		// Bool declared but the design value is not a bool.
 		MakeQAInput(TEXT("enabled"), TEXT("BoolValue"), DesignComponentMapping::EComponentInputType::Bool),
-		// Float 声明但设计值不是数值。
+		// Float declared but the design value is not numeric.
 		MakeQAInput(TEXT("value"), TEXT("DoubleValue"), DesignComponentMapping::EComponentInputType::Float),
-		// Float 声明写入单精度属性：应成功。
+		// Float declared writing a single-precision property: must succeed.
 		MakeQAInput(TEXT("ratio"), TEXT("FloatValue"), DesignComponentMapping::EComponentInputType::Float),
 	};
 
@@ -476,15 +476,15 @@ bool FDesign2UMGMappingQAInputTypeMismatchAndInvalidValuesTest::RunTest(const FS
 	FDesign2UMGComponentMappingBuildState BuildState(Config);
 	UDesign2UMGMappingQAWidget* Instance = ApplyQAInputs(Node, Config, BuildState);
 
-	// 三个失败 input 的属性终值都保持默认。
+	// All three failed inputs keep their default property values.
 	TestTrue(TEXT("text target untouched on type mismatch"), Instance->TextValue.IsEmpty());
 	TestTrue(TEXT("bool target keeps default on unparseable value"), Instance->BoolValue);
 	TestEqual(TEXT("double target keeps default on non-numeric value"), Instance->DoubleValue, 0.0);
-	// 单精度 float 写入成功。
+	// The single-precision float write succeeds.
 	TestEqual(TEXT("float target written through FFloatProperty branch"),
 		Instance->FloatValue, 2.5f);
 
-	// 逐条核对诊断消息片段。
+	// Check the diagnostic message fragments one by one.
 	int32 TypeMismatch = 0;
 	int32 NotABool = 0;
 	int32 NotAFloat = 0;
@@ -510,10 +510,10 @@ bool FDesign2UMGMappingQAInputTypeMismatchAndInvalidValuesTest::RunTest(const FS
 }
 
 // ---------------------------------------------------------------------------
-// manifest 序列化：inputs 只存声明（source/target/valueKind），不存设计值
-// （属性值不进 manifest，reimport 靠重新转换拿最新值）；
-// matchedAtSetLevel 只在 true 时写入；generated 记录无 mappedKey；
-// d2uOwned 由 payload 显式给定；写完不残留 .tmp 临时文件。
+// manifest serialization: inputs store declarations only (source/target/valueKind), never design values
+// (property values stay out of the manifest; reimport re-converts for fresh values);
+// matchedAtSetLevel is written only when true; generated records carry no mappedKey;
+// d2uOwned is whatever the payload explicitly gave; no .tmp temp file remains after writing.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -599,7 +599,7 @@ bool FDesign2UMGMappingQAManifestFieldSerializationTest::RunTest(const FString&)
 	}
 	TestEqual(TEXT("instance order is mapped entries then generated"), Instances->Num(), 3);
 
-	// 记录 1：set 级命中 + applied/skipped 两个 input。
+	// Record 1: set-level hit + applied/skipped inputs.
 	const TSharedPtr<FJsonObject> Record1 = (*Instances)[0]->AsObject();
 	TestEqual(TEXT("first record kind"), Record1->GetStringField(TEXT("kind")), TEXT("mapped"));
 	TestEqual(TEXT("first record widget name"), Record1->GetStringField(TEXT("widgetName")), TEXT("WBP_QA_SetLevel"));
@@ -619,20 +619,20 @@ bool FDesign2UMGMappingQAManifestFieldSerializationTest::RunTest(const FString&)
 		TestEqual(TEXT("skipped input still records source"), Input2->GetStringField(TEXT("source")), TEXT("missing"));
 	}
 
-	// 记录 2：variant 级命中，matchedAtSetLevel 字段省略。
+	// Record 2: variant-level hit; the matchedAtSetLevel field is omitted.
 	const TSharedPtr<FJsonObject> Record2 = (*Instances)[1]->AsObject();
 	TestEqual(TEXT("second record kind"), Record2->GetStringField(TEXT("kind")), TEXT("mapped"));
 	TestFalse(TEXT("variant-level record omits matchedAtSetLevel"),
 		Record2->HasField(TEXT("matchedAtSetLevel")));
 
-	// 记录 3：generated，无 mappedKey/mappedClass。
+	// Record 3: generated, no mappedKey/mappedClass.
 	const TSharedPtr<FJsonObject> Record3 = (*Instances)[2]->AsObject();
 	TestEqual(TEXT("third record kind"), Record3->GetStringField(TEXT("kind")), TEXT("generated"));
 	TestEqual(TEXT("generated record design node id"),
 		Record3->GetStringField(TEXT("designNodeId")), TEXT("qa-generated-1"));
 	TestFalse(TEXT("generated record has no mapped key"), Record3->HasField(TEXT("mappedKey")));
 
-	// d2uOwned 与 payload 显式给定的名字一致。
+	// d2uOwned matches the names the payload explicitly gave.
 	const TArray<TSharedPtr<FJsonValue>>* D2UOwned = nullptr;
 	TestTrue(TEXT("d2uOwned array present"), Manifest->TryGetArrayField(TEXT("d2uOwned"), D2UOwned) && D2UOwned);
 	if (D2UOwned && D2UOwned->Num() == 4)
@@ -656,9 +656,9 @@ bool FDesign2UMGMappingQAManifestFieldSerializationTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// Prototype 边界对照：同一导航数据里 mapped 与普通节点各挂一条交互，
-// inert 诊断只对 mapped 身份输出（含 trigger 名与 project-owned 说明），
-// 普通节点的交互不得产生 inert 诊断（不误报）。
+// Prototype boundary contrast: one interaction each on a mapped and an ordinary node in the same
+// navigation data; the inert diagnostic is emitted only for the mapped identity (with trigger name and
+// the project-owned note); the ordinary node's interaction must not produce an inert diagnostic (no false accusation).
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(

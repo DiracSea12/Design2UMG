@@ -42,7 +42,7 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// DocumentScope 解析：file key 优先，缺省回退导入源标识
+// DocumentScope resolution: file key first, fall back to the import source identifier when absent
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -67,7 +67,7 @@ bool FDesignComponentMappingScopeFileKeyPreferredTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// Figma 身份提取：mainComponentKey 优先、componentId 兜底、定义节点回填
+// Figma identity extraction: mainComponentKey first, componentId fallback, definition nodes backfilled
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -122,7 +122,7 @@ bool FDesignComponentMappingIdentityExtractionTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 两级匹配：variant 级精确优先，组件集级兜底，不做模糊匹配
+// Two-tier matching: exact variant level first, component-set level as fallback; no fuzzy matching
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -135,9 +135,9 @@ bool FDesignComponentMappingTwoLevelMatchTest::RunTest(const FString&)
 	const FString Scope = TEXT("file-key-1");
 
 	FComponentMappingTable Table;
-	// variant 级：一个 variant 一条 mapping。
+	// Variant level: one mapping per variant.
 	Table.Entries.Add(MakeEntry(TEXT("figma|file-key-1|component-key-1"), TEXT("/Game/UI/WBP_Variant.WBP_Variant_C")));
-	// 组件集级：整组一条 mapping。
+	// Component-set level: one mapping per set.
 	Table.Entries.Add(MakeEntry(TEXT("figma|file-key-1|56:78"), TEXT("/Game/UI/WBP_Set.WBP_Set_C")));
 
 	FDesignComponentIdentity Identity;
@@ -153,7 +153,7 @@ bool FDesignComponentMappingTwoLevelMatchTest::RunTest(const FString&)
 		TestEqual(TEXT("variant hit class"), VariantHit->WidgetClass, TEXT("/Game/UI/WBP_Variant.WBP_Variant_C"));
 	}
 
-	// 同一组件集下的另一个 variant（没有 variant 级条目）应命中组件集级条目。
+	// Another variant under the same component set (no variant-level entry) should hit the component-set-level entry.
 	FDesignComponentIdentity SetIdentity;
 	TestTrue(TEXT("second variant identity resolves"),
 		TryResolveFigmaComponentIdentity(MakeInstanceSource(TEXT("90:12"), TEXT("56:78"), TEXT("component-key-2")), Scope, SetIdentity));
@@ -165,19 +165,19 @@ bool FDesignComponentMappingTwoLevelMatchTest::RunTest(const FString&)
 		TestEqual(TEXT("set hit class"), SetHit->WidgetClass, TEXT("/Game/UI/WBP_Set.WBP_Set_C"));
 	}
 
-	// 无组件集归属且 variant 未命中：两级都不命中。
+	// No component-set membership and a variant miss: neither tier matches.
 	FDesignComponentIdentity LoneIdentity;
 	TestTrue(TEXT("lone variant identity resolves"),
 		TryResolveFigmaComponentIdentity(MakeInstanceSource(TEXT("77:77"), FString(), TEXT("component-key-3")), Scope, LoneIdentity));
 	TestNull(TEXT("unmapped variant without set stays unmatched"), Table.Match(LoneIdentity, bSetLevel));
 
-	// 不同 DocumentScope 的条目不许跨文档命中。
+	// Entries from different DocumentScopes must not match across documents.
 	FDesignComponentIdentity OtherScopeIdentity;
 	TestTrue(TEXT("other-scope identity resolves"),
 		TryResolveFigmaComponentIdentity(MakeInstanceSource(TEXT("12:34"), TEXT("56:78"), TEXT("component-key-1")), TEXT("file-key-2"), OtherScopeIdentity));
 	TestNull(TEXT("scope mismatch does not match"), Table.Match(OtherScopeIdentity, bSetLevel));
 
-	// 名称相近但 key 不同：不做模糊匹配（也不因同组 set key 而扩大命中）。
+	// Similar names but different keys: no fuzzy matching (a shared set key does not widen the hit either).
 	FDesignComponentIdentity NearIdentity;
 	TestTrue(TEXT("near-name identity resolves"),
 		TryResolveFigmaComponentIdentity(MakeInstanceSource(TEXT("12:34"), FString(), TEXT("component-key-1x")), Scope, NearIdentity));
@@ -189,7 +189,7 @@ bool FDesignComponentMappingTwoLevelMatchTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// Key / inputs 声明解析与非法声明诊断
+// Key / inputs declaration parsing and illegal-declaration diagnostics
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(

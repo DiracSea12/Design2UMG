@@ -7,9 +7,9 @@
 #include "Design2UMGMappedComponentTestWidget.generated.h"
 
 /**
- * Component Mapping 自动化测试用的项目 WBP 替身类。
- * 真实项目里 mapping 指向 WBP 生成类（WBP_X_C）；测试用 C++ UUserWidget 子类
- * 以同样的反射路径暴露四类 design-facing input 目标属性（Text/Bool/Name/Float）。
+ * Project WBP stand-in class for Component Mapping automation tests.
+ * In a real project the mapping points at a WBP generated class (WBP_X_C); tests use a C++ UUserWidget subclass
+ * exposing the four design-facing input target properties (Text/Bool/Name/Float) through the same reflection path.
  */
 UCLASS(MinimalAPI)
 class UDesign2UMGMappedComponentTestWidget : public UUserWidget
@@ -17,19 +17,19 @@ class UDesign2UMGMappedComponentTestWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
-	/** Text 输入目标：组件主体文本 / componentProperties 文本值。 */
+	/** Text input target: the component's main text / a componentProperties text value. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test")
 	FText Label;
 
-	/** Bool 输入目标（WBP 类自身属性，非 UWidget 继承属性）。 */
+	/** Bool input target (a property of the WBP class itself, not a UWidget inheritance). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test")
 	bool EnabledFlag = true;
 
-	/** Name 输入目标（variant 类）。 */
+	/** Name input target (variant kind). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test")
 	FName VariantName;
 
-	/** Float 输入目标（value 类）。 */
+	/** Float input target (value kind). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test")
 	double Value = 0.0;
 };

@@ -40,7 +40,7 @@ namespace
 	const TCHAR* OtherMappedTestClassPath = TEXT("/Script/Design2UMGEditor.Design2UMGMappingQAWidget");
 
 	// ---------------------------------------------------------------------------
-	// Figma fixture builders（v1/v2/v3 共用同一套节点拼装）
+	// Figma fixture builders (v1/v2/v3 share the same node assembly)
 	// ---------------------------------------------------------------------------
 
 	FString TextStyleJson()
@@ -58,8 +58,8 @@ namespace
 			Id, Name, X, Y, Text, *TextStyleJson());
 	}
 
-	// 无背景填充 + 两个子节点：带填充的单子 FRAME 会转成单内容控件（Border 类），
-	// 项目子控件会挤不进去；纯容器双子保持多子面板形态，测试才能往里加项目子控件/挪入节点。
+	// No background fill + two children: a filled single-child FRAME converts into a single-content widget (Border
+	// kind) and project children would not fit; a pure container with two children keeps the multi-child panel form, so the test can add project children/move nodes in.
 	FString MakeCardNode(const TCHAR* Id, const TCHAR* Name, int32 X, int32 Y, const TCHAR* CaptionText)
 	{
 		return FString::Printf(
@@ -86,8 +86,8 @@ namespace
 			Label, X, Y, X + 8, Y + 12, Label, *TextStyleJson());
 	}
 
-	// 无背景填充的纯容器：带填充的 FRAME 会被转换成单内容控件（Border 类），
-	// 会让 move 的目标面板拒绝挂载；纯容器保持多子面板形态。
+	// Fill-less pure container: a filled FRAME converts into a single-content widget (Border kind),
+	// which would make the move target panel refuse mounts; a pure container keeps the multi-child panel form.
 	FString MakeWrapperNode(const FString& ChildrenJson)
 	{
 		return FString::Printf(
@@ -97,7 +97,7 @@ namespace
 			*ChildrenJson);
 	}
 
-	// 可指定身份/位置的无填充纯容器 FRAME（多子面板形态），容器删除+内容迁移用例的 v1/v2 容器。
+	// Fill-less pure-container FRAME with configurable identity/position (multi-child panel form); the v1/v2 container of the container-delete + content-migration cases.
 	FString MakeNamedPanelNode(
 		const TCHAR* Id, const TCHAR* Name, int32 X, int32 Y, const FString& ChildrenJson)
 	{
@@ -235,9 +235,9 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// 属性级生命周期（tasks 3.2/3.4）：
-// v1 导入 -> 开发者定制（加项目子控件 / 改 D2U 属性）-> v2 reimport ->
-// D2U-owned 已更新（文本/布局/mapped inputs 覆写）且定制保留、mapped 实例不被替换。
+// Property-level lifecycle (tasks 3.2/3.4):
+// v1 import -> developer customization (add a project child / edit a D2U property) -> v2 reimport ->
+// D2U-owned updated (text/layout/mapped inputs overwritten) while customizations survive and mapped instances are not replaced.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportLifecycleTest,
@@ -278,7 +278,7 @@ bool FSafeReimportLifecycleTest::RunTest(const FString&)
 	UCanvasPanelSlot* MappedSlotBefore = Cast<UCanvasPanelSlot>(MappedBefore->Slot);
 	const float BeforeY = MappedSlotBefore ? MappedSlotBefore->GetPosition().Y : -1.0f;
 
-	// 模拟开发者定制：项目加一个子控件 + 改 D2U 文本属性（应被设计值刷新）。
+	// Simulate developer customization: the project adds one child widget + edits a D2U text property (should be refreshed by the design value).
 	UTextBlock* ProjectBadge = WBP->WidgetTree->ConstructWidget<UTextBlock>(
 		UTextBlock::StaticClass(), TEXT("ProjectBadge"));
 	ProjectBadge->SetText(FText::FromString(TEXT("Project Content")));
@@ -291,7 +291,7 @@ bool FSafeReimportLifecycleTest::RunTest(const FString&)
 		Caption->SetText(FText::FromString(TEXT("DeveloperEdit")));
 	}
 
-	// v2：label 换值、按钮下移、卡片文本换值。
+	// v2: label gets a new value, the button moves down, the card text changes.
 	const FString V2 = MakeReimportDoc(FString::Printf(
 		TEXT("%s,%s"),
 		*MakeMappedButtonNode(40, 88, TEXT("Pay Now")),
@@ -300,7 +300,7 @@ bool FSafeReimportLifecycleTest::RunTest(const FString&)
 	const FDesignReimportResult Result = ReimportFromJson(V2, MappedTestClassPath, TargetPackage);
 	TestTrue(TEXT("v2 reimport succeeds"), Result.bSucceeded);
 
-	// D2U-owned 已更新：文本、mapped inputs 直接覆写。
+	// D2U-owned updated: text, mapped inputs overwritten directly.
 	UTextBlock* CaptionAfter = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Caption")));
 	TestNotNull(TEXT("Caption widget still present"), CaptionAfter);
 	if (CaptionAfter)
@@ -315,7 +315,7 @@ bool FSafeReimportLifecycleTest::RunTest(const FString&)
 		TestTrue(TEXT("Mapped instance not replaced"), Mapped == MappedBefore);
 		TestEqual(TEXT("Declared input overwritten with latest design value"),
 			Mapped->Label.ToString(), TEXT("Pay Now"));
-		// 外层布局更新：按钮从 y=24 下移到 y=88。
+		// Outer layout updated: the button moves down from y=24 to y=88.
 		if (UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(Mapped->Slot))
 		{
 			TestTrue(TEXT("Mapped instance outer layout updated"),
@@ -328,15 +328,15 @@ bool FSafeReimportLifecycleTest::RunTest(const FString&)
 	}
 	TestTrue(TEXT("Pre-reimport slot Y was the v1 position"), FMath::Abs(BeforeY - 24.0f) < 4.0f);
 
-	// 定制保留：项目加的子控件还在（且不属于 d2uOwned）。
+	// Customization survives: the project-added child is still there (and not in d2uOwned).
 	TestNotNull(TEXT("Project-added widget preserved"), WBP->WidgetTree->FindWidget(TEXT("ProjectBadge")));
 
-	// 诊断：matched 更新 + inputs 覆写。
+	// Diagnostics: matched update + inputs overwrite.
 	TestTrue(TEXT("Update diagnostics present"), CountReimportDiagnostics(Result, TEXT("reimport_updated")) >= 2);
 	TestTrue(TEXT("Input overwrite diagnostics present"),
 		CountReimportDiagnostics(Result, TEXT("mapping_input_applied")) >= 1);
 
-	// manifest 更新：mapped 实例 + 顶层 generated 记录在，项目 widget 不在 d2uOwned。
+	// Manifest updated: mapped instances + top-level generated records present; project widgets not in d2uOwned.
 	FDesign2UMGGenerationManifestSidecar Sidecar;
 	if (TestTrue(TEXT("Manifest reloaded after reimport"), LoadManifestSidecar(TargetPackage, Sidecar)))
 	{
@@ -354,7 +354,7 @@ bool FSafeReimportLifecycleTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 结构变化（tasks 4.1/4.2/4.3）：add（新顶层节点）/ move（挪进新容器）/ remove（纯 D2U 删除）。
+// Structure changes (tasks 4.1/4.2/4.3): add (new top-level node) / move (into a new container) / remove (pure-D2U delete).
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportStructureTest,
@@ -378,8 +378,8 @@ bool FSafeReimportStructureTest::RunTest(const FString&)
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 	TestNotNull(TEXT("v1 has StatText"), WBP->WidgetTree->FindWidget(TEXT("StatText")));
 
-	// v2：StatText 消失（remove）；PlainCard 挪进新容器 Wrapper（move，容器里还有第二个
-	// 子节点保证它转换成多子面板）；新增 NewBadge（add）。
+	// v2: StatText disappears (remove); PlainCard moves into the new container Wrapper (move; the container also
+	// holds a second child so it converts into a multi-child panel); NewBadge is added (add).
 	const FString V2 = MakeReimportDoc(FString::Printf(
 		TEXT("%s,%s,%s"),
 		*MakeWrapperNode(FString::Printf(
@@ -392,16 +392,16 @@ bool FSafeReimportStructureTest::RunTest(const FString&)
 	const FDesignReimportResult Result = ReimportFromJson(V2, nullptr, TargetPackage);
 	TestTrue(TEXT("v2 reimport succeeds"), Result.bSucceeded);
 
-	// remove：纯 D2U 节点安全删除。
+	// remove: the pure-D2U node is deleted safely.
 	TestNull(TEXT("Removed design node deleted from tree"), WBP->WidgetTree->FindWidget(TEXT("StatText")));
 	TestTrue(TEXT("Safe remove diagnosed"), CountReimportDiagnostics(Result, TEXT("reimport_removed")) >= 1);
 
-	// add：新顶层节点加入并记录进 manifest。
+	// add: the new top-level node joins and is recorded in the manifest.
 	UWidget* NewBadge = WBP->WidgetTree->FindWidget(TEXT("NewBadge"));
 	TestNotNull(TEXT("New design node added"), NewBadge);
 	TestTrue(TEXT("Add diagnosed"), CountReimportDiagnostics(Result, TEXT("reimport_added")) >= 1);
 
-	// move：PlainCard 挂进 Wrapper，widget 身份保留。
+	// move: PlainCard hangs under Wrapper; the widget identity survives.
 	UWidget* Wrapper = WBP->WidgetTree->FindWidget(TEXT("Wrapper"));
 	UWidget* Card = WBP->WidgetTree->FindWidget(TEXT("PlainCard"));
 	TestNotNull(TEXT("New wrapper container added"), Wrapper);
@@ -412,13 +412,13 @@ bool FSafeReimportStructureTest::RunTest(const FString&)
 	}
 	TestTrue(TEXT("Move diagnosed"), CountReimportDiagnostics(Result, TEXT("reimport_moved")) >= 1);
 
-	// 卡片内部文本同样被刷新。
+	// The card's inner text is refreshed as well.
 	if (UTextBlock* Caption = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Caption"))))
 	{
 		TestEqual(TEXT("Moved subtree text refreshed"), Caption->GetText().ToString(), TEXT("Card v2"));
 	}
 
-	// manifest：Wrapper/NewBadge 记录为顶层实例；PlainCard 挪出顶层后不再是实例但仍在 d2uOwned。
+	// Manifest: Wrapper/NewBadge recorded as top-level instances; PlainCard leaves the top level, so it is no longer an instance but stays in d2uOwned.
 	FDesign2UMGGenerationManifestSidecar Sidecar;
 	if (TestTrue(TEXT("Manifest updated after structural reimport"), LoadManifestSidecar(TargetPackage, Sidecar)))
 	{
@@ -436,11 +436,11 @@ bool FSafeReimportStructureTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 容器删除 + 内容迁移（嵌套 mapped 实例，safe-reimport spec 的 identity-preserving
-// move）：v1 FrameA>Button(命中 mapping)；v2 删 FrameA、新增 FrameC>Button。
-// 旧容器整删判定必须识别子树内仍存活的 manifest 实例 -> 保守保留 FrameA，
-// Button 走自己的 move 计划挂到 FrameC 下：实例存活、identity 保留、manifest
-// 无幽灵记录（每条实例记录都能定位到树里的 widget）、无重复记录、诊断可读。
+// Container delete + content migration (nested mapped instance; the safe-reimport spec's identity-preserving
+// move): v1 FrameA>Button (mapping hit); v2 deletes FrameA and adds FrameC>Button.
+// The old-container whole-delete decision must recognize manifest instances still alive inside the subtree -> keep
+// FrameA conservatively; Button takes its own move plan and rehangs under FrameC: instance alive, identity
+// preserved, manifest free of ghost records (every instance record locates a widget in the tree), no duplicates, readable diagnostics.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportNestedInstanceMigrationTest,
@@ -450,7 +450,7 @@ bool FSafeReimportNestedInstanceMigrationTest::RunTest(const FString&)
 {
 	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/SafeReimportNestedMigration");
 
-	// v1：FrameA（纯容器双子保持面板形态）内挂 mapped 实例按钮 + 一条占位文本。
+	// v1: a mapped instance button + a placeholder text hang inside FrameA (pure container, two children keep the panel form).
 	const FString V1 = MakeReimportDoc(FString::Printf(
 		TEXT("%s,%s"),
 		*MakeNamedPanelNode(TEXT("re_frame_a"), TEXT("FrameA"), 24, 24, FString::Printf(
@@ -484,7 +484,7 @@ bool FSafeReimportNestedInstanceMigrationTest::RunTest(const FString&)
 	}
 	TWeakObjectPtr<UDesign2UMGMappedComponentTestWidget> MappedWeak = MappedBefore;
 
-	// v2：删 FrameA，新增 FrameC 收编同一个按钮（designNodeId 不变，仍是 mapped）。
+	// v2: FrameA deleted; FrameC added and adopts the same button (designNodeId unchanged, still mapped).
 	const FString V2 = MakeReimportDoc(FString::Printf(
 		TEXT("%s,%s"),
 		*MakeNamedPanelNode(TEXT("re_frame_c"), TEXT("FrameC"), 24, 108, FString::Printf(
@@ -496,7 +496,7 @@ bool FSafeReimportNestedInstanceMigrationTest::RunTest(const FString&)
 	const FDesignReimportResult Result = ReimportFromJson(V2, MappedTestClassPath, TargetPackage);
 	TestTrue(TEXT("v2 reimport succeeds"), Result.bSucceeded);
 
-	// 实例存活 + identity 保留：同一个对象，挂到新容器 FrameC 下。
+	// Instance alive + identity preserved: the same object, rehung under the new container FrameC.
 	UDesign2UMGMappedComponentTestWidget* MappedAfter = MappedWeak.Get();
 	TestNotNull(TEXT("nested mapped instance survived the container swap"), MappedAfter);
 	UWidget* NewContainer = WBP->WidgetTree->FindWidget(TEXT("FrameC"));
@@ -510,10 +510,10 @@ bool FSafeReimportNestedInstanceMigrationTest::RunTest(const FString&)
 			MappedAfter->Label.ToString(), TEXT("Pay Now"));
 	}
 
-	// 旧容器保守保留（子树内含存活实例，不可整删）。
+	// The old container is kept conservatively (the subtree holds live instances; no whole delete).
 	TestNotNull(TEXT("old container preserved conservatively"), WBP->WidgetTree->FindWidget(TEXT("FrameA")));
 
-	// 诊断可读：保守保留点名存活实例；move 点名 identity；不得出现 node_missing 幽灵路径。
+	// Readable diagnostics: the conservative keep names the live instance; the move names the identity; the node_missing ghost path must not appear.
 	TestEqual(TEXT("one remove conflict for the old container"),
 		CountReimportDiagnostics(Result, TEXT("reimport_remove_conflict")), 1);
 	TestTrue(TEXT("remove-conflict message names the live instance"),
@@ -535,7 +535,7 @@ bool FSafeReimportNestedInstanceMigrationTest::RunTest(const FString&)
 	TestEqual(TEXT("no ghost node-missing diagnostics"),
 		CountReimportDiagnostics(Result, TEXT("reimport_node_missing")), 0);
 
-	// manifest 自洽：实例在、新旧容器都在、无幽灵记录、无重复记录。
+	// Manifest self-consistent: instances present, old and new containers present, no ghost records, no duplicates.
 	FDesign2UMGGenerationManifestSidecar Sidecar;
 	if (TestTrue(TEXT("Manifest updated after migration"), LoadManifestSidecar(TargetPackage, Sidecar)))
 	{
@@ -564,8 +564,8 @@ bool FSafeReimportNestedInstanceMigrationTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 身份转换（task 4.6）：generated -> mapped（v2 补建 mapping）-> generated（v3 删 mapping）。
-// 旧子树纯 D2U-owned，两次都替换为新形态并诊断。
+// Identity conversion (task 4.6): generated -> mapped (v2 adds the mapping) -> generated (v3 drops it).
+// The old subtree is purely D2U-owned both times; each round replaces it with the new form plus diagnostics.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportKindChangedTest,
@@ -575,7 +575,7 @@ bool FSafeReimportKindChangedTest::RunTest(const FString&)
 {
 	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/SafeReimportKindChanged");
 
-	// v1：没有 mapping 配置 -> 组件实例走普通展开（generated）。
+	// v1: no mapping config -> the component instance takes the plain expansion (generated).
 	const FString V1 = MakeReimportDoc(MakeMappedButtonNode(24, 24, TEXT("Checkout")));
 	UWidgetBlueprint* WBP = ImportFromJson(V1, nullptr, OutputPath);
 	if (!TestTrue(TEXT("v1 import generates"), WBP != nullptr))
@@ -587,7 +587,7 @@ bool FSafeReimportKindChangedTest::RunTest(const FString&)
 	TestNotNull(TEXT("v1 expands component internals"),
 		WBP->WidgetTree->FindWidget(TEXT("Label")));
 
-	// v2：补建 mapping -> 同一设计节点变 mapped；旧子树纯 D2U-owned -> 替换。
+	// v2: mapping added -> the same design node becomes mapped; the old subtree is purely D2U-owned -> replaced.
 	const FString V2 = MakeReimportDoc(MakeMappedButtonNode(24, 24, TEXT("Checkout")));
 	FDesignReimportResult Result = ReimportFromJson(V2, MappedTestClassPath, TargetPackage);
 	TestTrue(TEXT("v2 reimport succeeds"), Result.bSucceeded);
@@ -615,7 +615,7 @@ bool FSafeReimportKindChangedTest::RunTest(const FString&)
 		}
 	}
 
-	// v3：删除 mapping -> 变回 generated 展开，同样替换。
+	// v3: mapping removed -> back to generated expansion; likewise replaced.
 	const FString V3 = MakeReimportDoc(MakeMappedButtonNode(24, 24, TEXT("Checkout")));
 	Result = ReimportFromJson(V3, nullptr, TargetPackage);
 	TestTrue(TEXT("v3 reimport succeeds"), Result.bSucceeded);
@@ -635,8 +635,8 @@ bool FSafeReimportKindChangedTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 冲突（tasks 4.4/4.5）：Mapped Class 变化不替换；同一交互已有项目绑定时
-// D2U Prototype 绑定让位。（remove 含项目内容的冲突见 SafeReimportRemoveConflict。）
+// Conflicts (tasks 4.4/4.5): a Mapped Class change never replaces; when the same interaction already has a
+// project binding, the D2U Prototype binding yields. (The remove-with-project-content conflict is in SafeReimportRemoveConflict.)
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportConflictTest,
@@ -660,14 +660,14 @@ bool FSafeReimportConflictTest::RunTest(const FString&)
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	// 模拟开发者定制：
-	// 1) 给 re_link_btn 挂项目 OnClicked 绑定（双触发冲突）。
+	// Simulate developer customization:
+	// 1) attach a project OnClicked binding to re_link_btn (double-trigger conflict).
 	FDelegateEditorBinding ProjectBinding;
 	ProjectBinding.ObjectName = TEXT("re_link_btn");
 	ProjectBinding.PropertyName = TEXT("OnClicked");
 	ProjectBinding.FunctionName = TEXT("HandleLinkClick");
 	WBP->Bindings.Add(ProjectBinding);
-	// 2) 改 mapped 实例的输入值（Mapped Class 冲突时不允许被刷新）。
+	// 2) edit the mapped instance's input value (must not be refreshed under a Mapped Class conflict).
 	TWeakObjectPtr<UDesign2UMGMappedComponentTestWidget> MappedBefore;
 	WBP->WidgetTree->ForEachWidget([&MappedBefore](UWidget* Widget)
 	{
@@ -681,7 +681,7 @@ bool FSafeReimportConflictTest::RunTest(const FString&)
 		Mapped->Label = FText::FromString(TEXT("Hacked"));
 	}
 
-	// v2：两个交互仍在（URL 变化）；mapping 换到另一个类。
+	// v2: both interactions remain (URL changed); the mapping points at another class.
 	const FString V2 = MakeReimportDoc(FString::Printf(
 		TEXT("%s,%s,%s"),
 		*MakeMappedButtonNode(24, 24, TEXT("Pay Now")),
@@ -691,7 +691,7 @@ bool FSafeReimportConflictTest::RunTest(const FString&)
 	const FDesignReimportResult Result = ReimportFromJson(V2, OtherMappedTestClassPath, TargetPackage);
 	TestTrue(TEXT("v2 reimport itself succeeds (conflicts are per-node)"), Result.bSucceeded);
 
-	// 冲突 1：Mapped Class 变化 -> 实例保留、不替换、inputs 不覆写。
+	// Conflict 1: Mapped Class changed -> instance kept, not replaced, inputs not overwritten.
 	UDesign2UMGMappedComponentTestWidget* MappedAfter = Cast<UDesign2UMGMappedComponentTestWidget>(MappedBefore.Get());
 	TestNotNull(TEXT("Mapped instance kept"), MappedAfter);
 	if (MappedAfter)
@@ -702,7 +702,7 @@ bool FSafeReimportConflictTest::RunTest(const FString&)
 	}
 	TestTrue(TEXT("Mapped class conflict diagnosed"), CountReimportDiagnostics(Result, TEXT("reimport_mapped_class_conflict")) == 1);
 
-	// 冲突 2：双触发 -> 项目绑定保留，D2U 绑定让位（只剩无冲突的第二条）。
+	// Conflict 2: double trigger -> the project binding stays; the D2U binding yields (only the non-conflicting second one remains).
 	TestTrue(TEXT("Dual-trigger conflict diagnosed"), CountReimportDiagnostics(Result, TEXT("reimport_prototype_conflict")) == 1);
 	TestTrue(TEXT("Project binding kept in WBP"), WBP->Bindings.Contains(ProjectBinding));
 	if (UWidgetBlueprintGeneratedClass* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(WBP->GeneratedClass))
@@ -727,8 +727,8 @@ bool FSafeReimportConflictTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// remove 含项目内容（task 4.3 冲突面）：设计删除的节点子树里有项目后加的子控件 ->
-// 不删，保留 + 冲突诊断（对照：不含项目内容的删除见 SafeReimportStructure）。
+// remove with project content (task 4.3 conflict surface): the design-deleted node's subtree contains
+// project-added children -> no delete; kept + conflict diagnostic (contrast: the content-free delete is in SafeReimportStructure).
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportRemoveConflictTest,
@@ -751,7 +751,7 @@ bool FSafeReimportRemoveConflictTest::RunTest(const FString&)
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	// 模拟开发者定制：在 PlainCard 子树里加项目子控件（设计删除时必须保留）。
+	// Simulate developer customization: add a project child inside the PlainCard subtree (must survive the design delete).
 	if (UPanelWidget* CardPanel = Cast<UPanelWidget>(WBP->WidgetTree->FindWidget(TEXT("PlainCard"))))
 	{
 		UTextBlock* ProjectChild = WBP->WidgetTree->ConstructWidget<UTextBlock>(
@@ -761,7 +761,7 @@ bool FSafeReimportRemoveConflictTest::RunTest(const FString&)
 		TestNotNull(TEXT("Project child added"), WBP->WidgetTree->FindWidget(TEXT("ProjectChild")));
 	}
 
-	// v2：PlainCard 从设计里消失。
+	// v2: PlainCard disappears from the design.
 	const FString V2 = MakeReimportDoc(MakeTextNode(TEXT("re_keep"), TEXT("KeepText"), 200, 24, TEXT("Keep")));
 	const FDesignReimportResult Result = ReimportFromJson(V2, nullptr, TargetPackage);
 	TestTrue(TEXT("v2 reimport succeeds (conflict is per-node)"), Result.bSucceeded);
@@ -784,8 +784,8 @@ bool FSafeReimportRemoveConflictTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 并列副本兜底（task 4.7）：scope 不一致 / manifest 缺失 = 全量冲突；
-// 默认保留原资产；用户显式选择才生成并列 WBP + 新 manifest。
+// Sibling-copy fallback (task 4.7): scope mismatch / missing manifest = full conflict;
+// the original asset is kept by default; a sibling WBP + new manifest is generated only on explicit user choice.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportResolutionCopyTest,
@@ -808,7 +808,7 @@ bool FSafeReimportResolutionCopyTest::RunTest(const FString&)
 
 	const FString V2 = MakeReimportDoc(MakeCardNode(TEXT("re_card"), TEXT("PlainCard"), 24, 24, TEXT("Card v2")));
 
-	// 场景 1：DocumentScope 不一致 -> 全量冲突，默认不生成副本。
+	// Scenario 1: DocumentScope mismatch -> full conflict; no copy by default.
 	const FString OtherScopeDoc = MakeOtherScopeDoc(MakeCardNode(TEXT("re_card"), TEXT("PlainCard"), 24, 24, TEXT("Card v2")));
 	FDesignReimportResult Result = ReimportFromJson(OtherScopeDoc, nullptr, TargetPackage);
 	TestFalse(TEXT("Scope mismatch reimport does not update in place"), Result.bSucceeded);
@@ -817,7 +817,7 @@ bool FSafeReimportResolutionCopyTest::RunTest(const FString&)
 	TestTrue(TEXT("Original asset file preserved"), FPaths::FileExists(OriginalAssetFile));
 	TestTrue(TEXT("No copy without explicit choice"), Result.ResolutionCopyPath.IsEmpty());
 
-	// 场景 2：manifest 缺失 -> 全量冲突；显式选择后生成并列副本（原资产、原状态不动）。
+	// Scenario 2: manifest missing -> full conflict; after the explicit choice a sibling copy is generated (the original asset and state untouched).
 	IFileManager::Get().Delete(*Design2UMGGenerationManifest::BuildSidecarPathForAsset(TargetPackage), false, true);
 	const int64 OriginalSize = IFileManager::Get().FileSize(*OriginalAssetFile);
 
@@ -847,9 +847,9 @@ bool FSafeReimportResolutionCopyTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 保存失败语义（task 3.3）：保存失败 -> 事务回滚、资产保持 reimport 前状态、manifest 不更新。
-// 保存失败由 FUMGGenerator::ArmAutomationSaveFailureOnce() 注入（引擎的 SavePackage 失败
-// 走 appError，不能当测试注入手段）。
+// Save-failure semantics (task 3.3): save fails -> transaction rollback, the asset keeps its pre-reimport state, the manifest is not updated.
+// The save failure is injected via FUMGGenerator::ArmAutomationSaveFailureOnce() (the engine's SavePackage
+// failure path goes through appError and cannot serve as a test injection vehicle).
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportSaveFailureTest,
@@ -857,7 +857,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportSaveFailureTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FSafeReimportSaveFailureTest::RunTest(const FString&)
 {
-	// 保存失败的注入路径会按设计打错误日志，登记为预期。
+	// The failure-injection path logs an error by design; registered as expected.
 	AddExpectedError(TEXT("failed to save"), EAutomationExpectedErrorFlags::Contains, 0);
 
 	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/SafeReimportSaveFailure");
@@ -876,15 +876,15 @@ bool FSafeReimportSaveFailureTest::RunTest(const FString&)
 
 	const FString V2 = MakeReimportDoc(MakeCardNode(TEXT("re_card"), TEXT("PlainCard"), 24, 24, TEXT("Card v2")));
 
-	// 用测试注入让下一次 SaveWidgetBlueprint 确定性失败一次（生产路径不受影响）。
-	// 引擎对 SavePackage 失败会走 appError，不能作为测试注入手段。
+	// Use the test injection to make the next SaveWidgetBlueprint fail deterministically once (production unaffected).
+	// The engine's SavePackage failure goes through appError and cannot be used as a test injection vehicle.
 	FUMGGenerator::ArmAutomationSaveFailureOnce();
 	const FDesignReimportResult Result = ReimportFromJson(V2, nullptr, TargetPackage);
 
 	TestFalse(TEXT("Reimport reports failure"), Result.bSucceeded);
 	TestTrue(TEXT("Save failure diagnosed"), CountReimportDiagnostics(Result, TEXT("reimport_save_failed")) == 1);
 
-	// 事务回滚：内存里的文本属性保持 reimport 前状态（开发者定制值），不是 v2 设计值。
+	// Transaction rollback: the in-memory text property keeps its pre-reimport state (the developer's value), not the v2 design value.
 	if (UTextBlock* Caption = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Caption"))))
 	{
 		TestEqual(TEXT("In-memory state rolled back to pre-reimport"),
@@ -895,7 +895,7 @@ bool FSafeReimportSaveFailureTest::RunTest(const FString&)
 		AddError(TEXT("Caption widget missing after rollback"));
 	}
 
-	// manifest 不更新：字节级不变。
+	// Manifest not updated: byte-for-byte identical.
 	FString ManifestAfter;
 	TestTrue(TEXT("Manifest still exists"), FFileHelper::LoadFileToString(ManifestAfter, *SidecarPath));
 	TestTrue(TEXT("Manifest untouched on save failure"), ManifestAfter == ManifestBefore);
@@ -906,9 +906,9 @@ bool FSafeReimportSaveFailureTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// 控制台命令冒烟：Design2UMG.Reimport 命令行入口（菜单 UI 之外的自动化路径）。
-// 只验证入口本身——命令可达、参数正确映射进 FDesignReimportRequest、成功路径
-// 走完同一 DesignImportPipeline::Reimport；reimport 语义由上面的测试覆盖。
+// Console-command smoke test: the Design2UMG.Reimport command-line entry (the automated path outside the menu UI).
+// Verifies the entry itself only - the command is reachable, parameters map correctly into
+// FDesignReimportRequest, and the success path runs the same DesignImportPipeline::Reimport; reimport semantics are covered above.
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportConsoleCommandTest,
@@ -927,7 +927,7 @@ bool FSafeReimportConsoleCommandTest::RunTest(const FString&)
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	// 命令入口只收磁盘上的 design.json 路径，v2 源先落盘（无 mapping 场景，默认设置即可匹配）。
+	// The command entry takes only on-disk design.json paths, so the v2 source is written to disk first (no-mapping scenario; default settings suffice to match).
 	const FString V2JsonPath = FPaths::ProjectSavedDir() / TEXT("Design2UMG") / TEXT("Temp")
 		/ TEXT("SafeReimportConsoleCommand_v2.json");
 	IFileManager::Get().MakeDirectory(*FPaths::GetPath(V2JsonPath), true);
@@ -947,7 +947,7 @@ bool FSafeReimportConsoleCommandTest::RunTest(const FString&)
 		const TArray<FString> Args = { TargetPackage, V2JsonPath };
 		TestTrue(TEXT("console command executes"), ConsoleObject->AsCommand()->Execute(Args, nullptr, *GLog));
 
-		// 成功路径打点：命令入口走完同一 pipeline，v2 设计文本已刷新进目标资产。
+		// Success-path marker: the command entry runs the same pipeline; the v2 design text is refreshed into the target asset.
 		if (UTextBlock* Caption = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Caption"))))
 		{
 			TestEqual(TEXT("v2 text refreshed through the console command"),

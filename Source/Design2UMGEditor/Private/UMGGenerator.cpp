@@ -346,7 +346,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 		GenerationSettings ? *GenerationSettings : FallbackGenerationSettings;
 	const Design2UMGGenerationSettingsContext::FScopedSettingsSnapshot ScopedGenerationSettings(EffectiveGenerationSettings);
 
-	// 非 const：Component Mapping 匹配要把命中 Key 写进这份根节点副本（只影响本次生成）。
+	// Non-const: Component Mapping matching writes the hit Key into this root-node copy (affects this generation only).
 	UMGGeneratorRootHandoff::FPreparedRoot PreparedRoot =
 		UMGGeneratorRootHandoff::PrepareRootForBuild(WidgetData, PackagePath, AssetName);
 	const FUMGWidgetNode& PreparedRootRef = PreparedRoot.Root;
@@ -360,8 +360,8 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 		return nullptr;
 	}
 
-	// Component Mapping：生成前对 IR（PreparedRoot 是 WidgetData 的副本，标记只影响本次生成）
-	// 做两级匹配并写入命中 Key；无配置 / 非 Figma 文档时为空操作，普通生成链路行为不变。
+	// Component Mapping: before generation, run two-tier matching on the IR (PreparedRoot is a copy of the
+	// WidgetData; markers affect this generation only) and write the hit Keys; no config / non-Figma documents make it a no-op, so the plain generation path is unchanged.
 	FDesign2UMGComponentMappingBuildState MappingBuildState(EffectiveGenerationSettings.ComponentMapping);
 	Design2UMGComponentMappingGeneration::ApplyMappingToWidgetTreeIR(
 		PreparedRoot.Root,
@@ -446,7 +446,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 	default:
 		break;
 	}
-	// mapped 节点不生成 Prototype 绑定：挂在 mapped 身份上的设计交互输出「不生效」诊断。
+	// mapped nodes get no Prototype bindings: design interactions attached to a mapped identity produce an "inert" diagnostic.
 	Design2UMGComponentMappingGeneration::ReportInertPrototypeBindings(NavigationData, MappingBuildState);
 	ConfigureFigmaMetadataExtension(WBP, WidgetData.SourceDocument(), FigmaMetadataRecords);
 	ClearGeneratedWidgetNavigationState(WBP);
@@ -458,7 +458,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 
 	Package->MarkPackageDirty();
 
-	// 组装生成输出：manifest 载荷（mapped 实例 + 顶层生成节点）与 mapping 诊断。
+	// Assemble the generation output: the manifest payload (mapped instances + top-level generated nodes) and mapping diagnostics.
 	if (OutGenerationOutput)
 	{
 		OutGenerationOutput->Manifest.Provider = WidgetData.HasSourceDocumentData()
@@ -471,7 +471,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 		OutGenerationOutput->Manifest.SourceRootName = PreparedRootRef.Name;
 		OutGenerationOutput->Manifest.MappedInstances = MappingBuildState.GetMappedInstances();
 		OutGenerationOutput->Manifest.TopLevelGenerated = MappingBuildState.GetTopLevelGenerated();
-		// 排序保证同一输入两次导入的 manifest 文本稳定（sidecar 可 diff）。
+		// Sorting keeps the manifest text stable across two imports of the same input (the sidecar stays diffable).
 		OutGenerationOutput->Manifest.D2UOwnedNames = MappingBuildState.GetCreatedWidgetNames().Array();
 		OutGenerationOutput->Manifest.D2UOwnedNames.Sort();
 
@@ -486,7 +486,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 #if WITH_DEV_AUTOMATION_TESTS
 namespace
 {
-	// 测试注入：见 FUMGGenerator::ArmAutomationSaveFailureOnce。
+	// Test injection: see FUMGGenerator::ArmAutomationSaveFailureOnce.
 	std::atomic<bool> bAutomationSaveFailureArmed{ false };
 }
 #endif
@@ -576,9 +576,9 @@ bool FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP, FDesign2UMGGenera
 		GeneratedAssetLifecycle::RegisterSavedAsset(WBP);
 	}
 
-	// 资产保存成功后写入生成记录 sidecar（原子写，失败不落半截文件）。
-	// 资产本体已保存成功：sidecar 写失败不改变导入成功语义，
-	// 只把失败并入结构化诊断（随导入报告可见），不静默只剩 UE_LOG。
+	// After a successful asset save, write the generation-record sidecar (atomic write; no half-written file on failure).
+	// The asset itself was saved successfully: a sidecar write failure does not change the import-success semantics;
+	// it only feeds the failure into structured diagnostics (visible in the import report) instead of a silent UE_LOG.
 	if (GenerationOutput)
 	{
 		const FString AssetPackageName = WBP->GetOutermost()->GetName();

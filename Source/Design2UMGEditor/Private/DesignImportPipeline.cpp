@@ -144,7 +144,7 @@ namespace DesignImportPipeline
 				&& Result.ComponentMappingDiagnostics.Num() == 0
 				&& GenerationSettings)
 			{
-				// 构建在组装输出前失败时，ini 校验诊断仍然要进报告。
+				// When the build fails before assembly output is produced, the ini validation diagnostics must still reach the report.
 				Result.ComponentMappingDiagnostics.Append(GenerationSettings->ComponentMapping.ValidationDiagnostics);
 			}
 

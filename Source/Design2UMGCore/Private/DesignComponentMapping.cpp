@@ -51,14 +51,14 @@ namespace DesignComponentMapping
 		FString ComponentKey;
 		if (SourceNode.IsInstance())
 		{
-			// Figma mainComponentKey 跨导出稳定，优先；缺省回退 componentId。
+			// Figma mainComponentKey is stable across exports, so prefer it; fall back to componentId when absent.
 			ComponentKey = !SourceNode.MainComponentKey.IsEmpty()
 				? SourceNode.MainComponentKey
 				: SourceNode.ComponentId;
 		}
 		else if (SourceNode.IsComponentDefinition())
 		{
-			// 组件定义节点：镜像链已把自身 Id 回填进 ComponentId。
+			// Component definition node: the mirroring chain has backfilled its own Id into ComponentId.
 			ComponentKey = SourceNode.ComponentId;
 		}
 
@@ -84,7 +84,7 @@ namespace DesignComponentMapping
 			return nullptr;
 		}
 
-		// 第一级：variant 级 Key 全等匹配（一个 variant 一条 mapping）。
+		// Tier 1: exact variant-level Key match (one mapping per variant).
 		const FString VariantKey = Identity.BuildVariantKey();
 		for (const FComponentMappingEntry& Entry : Entries)
 		{
@@ -94,7 +94,7 @@ namespace DesignComponentMapping
 			}
 		}
 
-		// 第二级：组件集级 Key 匹配（整组一条 mapping，具体 variant 值经 variant 输入传入）。
+		// Tier 2: component-set-level Key match (one mapping per set; concrete variant values arrive via variant inputs).
 		if (!Identity.ComponentSetKey.IsEmpty())
 		{
 			const FString SetKey = Identity.BuildSetKey();
@@ -230,7 +230,7 @@ namespace DesignComponentMapping
 			return false;
 		}
 
-		// ValueKind 可省略，默认取 componentProperties 键值；显式声明时必须在封闭集合内。
+		// ValueKind may be omitted; it defaults to the componentProperties key value. When declared explicitly it must be inside the closed set.
 		if (ValueKind.IsEmpty())
 		{
 			OutDeclaration.ValueKind = EComponentInputValueKind::ComponentProperty;

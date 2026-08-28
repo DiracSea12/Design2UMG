@@ -64,8 +64,8 @@ namespace Design2UMGConverterPrivate
 		}
 	}
 
-	// 转换收尾时把文档级 provider 与 DocumentScope 写进 IR 文档边车，并给可解析出
-	// Figma 组件身份的节点打上 mapped 候选标记。匹配决策不在这里做（Editor 生成期匹配）。
+	// At conversion finalization, stamp the document-level provider and DocumentScope into the IR document sidecar, and mark nodes
+	// with resolvable Figma component identities as mapped candidates. Matching decisions are not made here (Editor resolves them at generation time).
 	void StampDocumentComponentIdentity(const FDesignDocument& Document, FUMGWidgetData& Result)
 	{
 		const FString Provider = Document.Metadata.FindRef(TEXT("source.provider"));
@@ -100,14 +100,6 @@ namespace Design2UMGConverterPrivate
 			MarkMappedComponentCandidatesRecursive(Result.RootWidget, Scope.Value);
 		}
 	}
-
-	struct FResolvedPrototypeAction
-	{
-		EUMGPrototypeNavigationAction Kind = EUMGPrototypeNavigationAction::Navigate;
-		FString Payload;
-		FUMGPrototypeTransitionData Transition;
-		bool bResolved = false;
-	};
 
 	bool HasRenderableVisual(const TSharedPtr<FDesignNode>& Node)
 	{

@@ -23,31 +23,6 @@ namespace
 		bool bDepthExceeded = false;
 	};
 
-	bool TryParseMeshHandle(
-		const TSharedPtr<FJsonObject>& PointObj,
-		const FDesignVariableResolver& Resolver,
-		const FString& PrimaryField,
-		const FString& FallbackField,
-		FDesignMeshGradientHandle& OutHandle)
-	{
-		if (!PointObj.IsValid())
-			return false;
-
-		const TSharedPtr<FJsonValue> Primary = PointObj->TryGetField(PrimaryField);
-		const TSharedPtr<FJsonValue> Fallback = PointObj->TryGetField(FallbackField);
-		const TSharedPtr<FJsonValue> HandleField = Primary.IsValid() ? Primary : Fallback;
-		if (!HandleField.IsValid())
-			return false;
-
-		float X = 0.0f;
-		float Y = 0.0f;
-		if (!TryParsePointXY(HandleField, Resolver, X, Y))
-			return false;
-
-		OutHandle.Value = FVector2D(X, Y);
-		return true;
-	}
-
 	const PenParserNodeExtensions::FParseCallbacks& GetNodeExtensionCallbacks();
 }
 
@@ -145,7 +120,7 @@ bool ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FDesignDocume
 		UE_LOG(LogDesign2UMG, Warning, TEXT("Design file is missing a version; defaulting to %s."), *OutDocument.Version);
 	}
 
-	// 文档级 provider 标记：组件身份提取与 Component Matching 用它区分来源。
+	// Document-level provider marker: component identity extraction and component matching use it to distinguish the source.
 	OutDocument.Metadata.FindOrAdd(TEXT("source.provider")) = DesignComponentMapping::ProviderPencil;
 
 	// Parse declared fonts.

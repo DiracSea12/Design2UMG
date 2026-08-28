@@ -157,8 +157,8 @@ UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWid
 		}
 	}
 
-	// Component Mapping 命中优先：以项目 WBP 类实例接入，组件内部子树不展开；
-	// 类缺失/加载失败时 TryCreateMappedWidget 已记录诊断并返回空，继续走普通路径。
+	// Component Mapping hits take priority: attach as a project WBP class instance; the component's internal subtree is not expanded;
+	// on class-missing/load-failure TryCreateMappedWidget has already logged a diagnostic and returned empty, and the plain path continues.
 	if (ComponentMappingState
 		&& Node.HasSourceData()
 		&& !Node.Source().MappedComponentKey.IsEmpty())
@@ -174,7 +174,7 @@ UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWid
 	UClass* WidgetClass = ResolveWidgetClass(Node.Type);
 	if (const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = Design2UMGGenerationSettingsContext::GetCurrent())
 	{
-		// 名称型 ClassOverride 只作用于未命中 Component Mapping 的普通节点。
+		// Name-based ClassOverride applies only to ordinary nodes that did not hit a Component Mapping.
 		if (UClass* Override = GenerationSettings->FindClassOverride(Node.Name))
 		{
 			WidgetClass = Override;
@@ -206,7 +206,7 @@ UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWid
 
 	if (ComponentMappingState)
 	{
-		// 根 widget 的捕获必须发生在子节点构建之前（BuildChildren 在下面立刻执行）。
+		// The root-widget capture must happen before children are built (BuildChildren runs right below).
 		ComponentMappingState->OnWidgetConstructed(NewWidget);
 	}
 
@@ -253,7 +253,7 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 	ApplyWidgetProperties(NewWidget, Node);
 	FWidgetMetadataCollector::TryAppend(NewWidget, Node, FigmaMetadataRecords);
 
-	// mapped 实例：显式 design-facing inputs 在通用属性之后写入（声明值优先于设计默认值）。
+	// mapped instances: explicit design-facing inputs are written after generic properties (declared values win over design defaults).
 	if (ComponentMappingState
 		&& Node.HasSourceData()
 		&& !Node.Source().MappedComponentKey.IsEmpty())
@@ -265,7 +265,7 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 		}
 	}
 
-	// 记录顶层生成节点（mapped 实例已在创建时登记），供 manifest 组装。
+	// Record top-level generated nodes (mapped instances were registered at creation), for manifest assembly.
 	if (ComponentMappingState)
 	{
 		ComponentMappingState->RecordCreatedWidget(Node, NewWidget, ParentWidget);
@@ -327,8 +327,8 @@ FName FUMGWidgetUtils::SanitizeWidgetName(const FString& InName, const FString& 
 		Sanitized = FallbackPrefix + TEXT("_Widget");
 	}
 
-	// FName 对「单下划线 + 数字」形态（如 "_127"）会解析成 NAME_None，数字开头的名字
-	// 必须用字母前缀保住确定性（否则 NewObject 落到自动名，reimport 的同名匹配失效）。
+	// FName parses the "single underscore + digits" shape (e.g. "_127") into NAME_None; digit-leading names
+	// must keep determinism with an alphabetic prefix (otherwise NewObject falls back to auto-naming and reimport's same-name matching breaks).
 	if (Sanitized.Len() > 0 && FChar::IsDigit(Sanitized[0]))
 	{
 		Sanitized = TEXT("W") + Sanitized;

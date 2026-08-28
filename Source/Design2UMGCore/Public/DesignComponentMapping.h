@@ -7,18 +7,18 @@
 struct FUMGSourceNodeData;
 
 /**
- * 纯逻辑的组件身份与项目级 Component Mapping 匹配层。
+ * Pure-logic component identity and project-level Component Mapping matching layer.
  *
- * 这里只做字符串层面的工作：身份提取、DocumentScope 解析、mapping 声明解析
- * 和两级匹配。类加载与实例化只能发生在 Editor 模块，本层不依赖任何 UE 资产。
+ * Only string-level work happens here: identity extraction, DocumentScope resolution, mapping declaration
+ * parsing, and two-tier matching. Class loading and instantiation happen only in the Editor module; this layer depends on no UE assets.
  */
 namespace DesignComponentMapping
 {
-	/** provider 规范值（Core 全仓共享）：source.provider 元数据、IR 文档边车与 mapping Key 的 Provider 段统一用这两个值。 */
+	/** Canonical provider values (shared repo-wide in Core): source.provider metadata, the IR document sidecar, and the Provider segment of mapping keys all use these two values. */
 	constexpr const TCHAR* ProviderFigma = TEXT("figma");
 	constexpr const TCHAR* ProviderPencil = TEXT("pencil");
 
-	/** v1 封闭的输入类型集合：Text(FText) / Bool(bool) / Name(FName) / Float(double)。 */
+	/** Closed v1 input type set: Text(FText) / Bool(bool) / Name(FName) / Float(double). */
 	enum class EComponentInputType : uint8
 	{
 		Text,
@@ -27,14 +27,14 @@ namespace DesignComponentMapping
 		Float
 	};
 
-	/** v1 封闭的取值来源：组件自身文本 / componentProperties 键值。 */
+	/** Closed v1 value sources: the component's own text / a componentProperties key value. */
 	enum class EComponentInputValueKind : uint8
 	{
 		ComponentProperty,
 		ComponentText
 	};
 
-	/** 单条显式 design-facing input 声明（已解析、已校验）。 */
+	/** A single explicit design-facing input declaration (parsed and validated). */
 	struct FComponentInputDeclaration
 	{
 		FString Source;
@@ -43,7 +43,7 @@ namespace DesignComponentMapping
 		EComponentInputValueKind ValueKind = EComponentInputValueKind::ComponentProperty;
 	};
 
-	/** 一条项目级 mapping 声明（Key/类路径已校验格式，类是否可加载由 Editor 侧校验）。 */
+	/** A single project-level mapping declaration (Key/class-path format validated; class loadability is validated on the Editor side). */
 	struct FComponentMappingEntry
 	{
 		FString Key;
@@ -54,7 +54,7 @@ namespace DesignComponentMapping
 		TArray<FComponentInputDeclaration> Inputs;
 	};
 
-	/** 规范组件身份：Provider + DocumentScope + ComponentKey（可选 ComponentSetKey）。 */
+	/** Canonical component identity: Provider + DocumentScope + ComponentKey (optional ComponentSetKey). */
 	struct FDesignComponentIdentity
 	{
 		FString Provider;
@@ -67,13 +67,13 @@ namespace DesignComponentMapping
 			return !Provider.IsEmpty() && !DocumentScope.IsEmpty() && !ComponentKey.IsEmpty();
 		}
 
-		/** variant 级匹配键：Provider|DocumentScope|ComponentKey。 */
+		/** Variant-level match key: Provider|DocumentScope|ComponentKey. */
 		DESIGN2UMGCORE_API FString BuildVariantKey() const;
-		/** 组件集级匹配键：Provider|DocumentScope|ComponentSetKey。 */
+		/** Component-set-level match key: Provider|DocumentScope|ComponentSetKey. */
 		DESIGN2UMGCORE_API FString BuildSetKey() const;
 	};
 
-	/** DocumentScope 解析结果；Source 说明本次 scope 用的是哪个来源，可进诊断。 */
+	/** DocumentScope resolution result; Source tells which origin this scope came from, usable in diagnostics. */
 	struct FDocumentScopeResolution
 	{
 		FString Value;
@@ -82,31 +82,31 @@ namespace DesignComponentMapping
 		bool IsResolved() const { return !Value.IsEmpty(); }
 	};
 
-	/** DocumentScope 的统一解析规则（全仓库只此一处）：
-	 *  Figma 导出 JSON 顶层带 file key 就用 file key；否则用导入源标识（URL / 文件路径）。 */
+	/** The single unified DocumentScope resolution rule (exactly one in the whole repo):
+	 *  use the file key when the Figma export JSON carries one at the top level; otherwise use the import source identifier (URL / file path).*/
 	DESIGN2UMGCORE_API FDocumentScopeResolution ResolveFigmaDocumentScope(
 		const FString& DocumentFileKey,
 		const FString& ImportSourceIdentifier);
 
 	/**
-	 * 从 UMG 侧源数据边车提取 Figma 组件身份。
-	 * 判定规则：实例节点取 component 身份（mainComponentKey 优先，缺省用 componentId）；
-	 * 组件定义节点取自身 id 作为 ComponentKey；ComponentSetKey 一律取 componentSetId。
-	 * 提取不出非空 ComponentKey 时返回 false（不构成 mapped 候选）。
+	 * Extract the Figma component identity from the UMG-side source-data sidecar.
+	 * Rules: instance nodes take the component identity (mainComponentKey first, componentId when absent);
+	 * component definition nodes take their own id as ComponentKey; ComponentSetKey always comes from componentSetId.
+	 * Returns false when no non-empty ComponentKey can be extracted (not a mapped candidate).
 	 */
 	DESIGN2UMGCORE_API bool TryResolveFigmaComponentIdentity(
 		const FUMGSourceNodeData& SourceNode,
 		const FString& DocumentScope,
 		FDesignComponentIdentity& OutIdentity);
 
-	/** 两级匹配表。先按 variant 级 Key 精确匹配；未命中且 ComponentSetKey 非空时按组件集级 Key 匹配。不做任何模糊匹配。 */
+	/** Two-tier match table. Exact variant-level Key match first; when missed and ComponentSetKey is non-empty, component-set-level Key match. No fuzzy matching of any kind. */
 	struct FComponentMappingTable
 	{
 		TArray<FComponentMappingEntry> Entries;
 
 		bool IsEmpty() const { return Entries.Num() == 0; }
 
-		/** 返回命中的条目；bOutMatchedAtSetLevel 说明命中发生在组件集级。未命中返回 nullptr。 */
+		/** Returns the hit entry; bOutMatchedAtSetLevel tells whether the hit happened at component-set level. Returns nullptr on miss. */
 		DESIGN2UMGCORE_API const FComponentMappingEntry* Match(
 			const FDesignComponentIdentity& Identity,
 			bool& bOutMatchedAtSetLevel) const;
@@ -114,26 +114,26 @@ namespace DesignComponentMapping
 		DESIGN2UMGCORE_API const FComponentMappingEntry* FindEntryByKey(const FString& Key) const;
 	};
 
-	/** 解析 mapping Key 串（Provider|DocumentScope|ComponentKey）。三段都必须非空才算合法。 */
+	/** Parse a mapping key string (Provider|DocumentScope|ComponentKey). All three segments must be non-empty to be valid. */
 	DESIGN2UMGCORE_API bool ParseMappingKey(
 		const FString& Key,
 		FString& OutProvider,
 		FString& OutDocumentScope,
 		FString& OutComponentKey);
 
-	/** 输入类型名与封闭集合的互转；非法字符串返回 false。 */
+	/** Conversions between input type names and the closed set; illegal strings return false. */
 	DESIGN2UMGCORE_API bool ParseComponentInputType(const FString& Type, EComponentInputType& OutType);
 	DESIGN2UMGCORE_API FString GetComponentInputTypeName(EComponentInputType Type);
 
-	/** 取值来源名与封闭集合的互转；非法字符串返回 false。 */
+	/** Conversions between value-source names and the closed set; illegal strings return false. */
 	DESIGN2UMGCORE_API bool ParseComponentInputValueKind(
 		const FString& ValueKind,
 		EComponentInputValueKind& OutValueKind);
 	DESIGN2UMGCORE_API FString GetComponentInputValueKindName(EComponentInputValueKind ValueKind);
 
 	/**
-	 * 解析并校验一条 input 声明。Source/Target 非空、Type/ValueKind 属于封闭集合才算合法；
-	 * 非法时返回 false 并给出可读原因（进诊断）。
+	 * Parse and validate one input declaration. Valid only when Source/Target are non-empty and Type/ValueKind belong to the closed set;
+	 * returns false with a readable reason on failure (goes into diagnostics).
 	 */
 	DESIGN2UMGCORE_API bool TryParseComponentInputDeclaration(
 		const FString& Source,

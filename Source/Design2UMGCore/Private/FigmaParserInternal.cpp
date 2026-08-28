@@ -929,13 +929,13 @@ bool ParseDocument(const FString& FigmaJson, FDesignDocument& OutDocument)
 	};
 	CaptureDocumentMetadata(DocObj);
 	CaptureDocumentMetadata(Root);
-	// DocumentScope 首选 file key：导出链若在顶层带 file key 就捕获，供 Component Mapping 使用。
+	// DocumentScope prefers the file key: the export chain captures it when present at the top level, for Component Mapping use.
 	const FString FileKeyValue = GetString(Root, TEXT("fileKey"));
 	if (!FileKeyValue.IsEmpty())
 	{
 		OutDocument.Metadata.Add(TEXT("fileKey"), FileKeyValue);
 	}
-	// 文档级 provider 标记：组件身份提取与 Component Mapping 用它区分 Figma 与 Pencil。
+	// Document-level provider marker: component identity extraction and Component Mapping use it to distinguish Figma from Pencil.
 	OutDocument.Metadata.Add(TEXT("source.provider"), DesignComponentMapping::ProviderFigma);
 	AddJsonExtensionIfPresent(Root, OutDocument.Metadata, TEXT("components"), TEXT("components"));
 	AddJsonExtensionIfPresent(Root, OutDocument.Metadata, TEXT("componentSets"), TEXT("componentSets"));

@@ -77,11 +77,11 @@ struct FUMGSourceNodeData
 	UPROPERTY()
 	TOptional<bool> HasIsExposedInstance;
 
-	/** 转换期标记：该节点带有可解析的 Figma 组件身份，是 Component Mapping 的候选节点。 */
+	/** Conversion-time marker: this node carries a resolvable Figma component identity and is a Component Mapping candidate. */
 	UPROPERTY()
 	bool bMappedComponentCandidate = false;
 
-	/** Editor 生成期标记：命中的项目级 mapping Key（Provider|DocumentScope|ComponentKey）。空表示未命中。 */
+	/** Editor generation-time marker: the hit project-level mapping key (Provider|DocumentScope|ComponentKey). Empty means no hit. */
 	UPROPERTY()
 	FString MappedComponentKey;
 
@@ -107,12 +107,12 @@ struct FUMGSourceDocumentData
 	UPROPERTY() FString ComponentsJson;
 	UPROPERTY() FString ComponentSetsJson;
 
-	/** 文档级设计来源身份："figma" | "pencil"（规范值见 DesignComponentMapping::Provider*）。由 Converter 在 StampDocumentComponentIdentity 时写入。 */
+	/** Document-level design source identity: "figma" | "pencil" (canonical values in DesignComponentMapping::Provider*). Written by the Converter in StampDocumentComponentIdentity. */
 	UPROPERTY() FString Provider;
 
-	/** DocumentScope 统一解析结果（Figma：file key，缺省用导入源标识），供 mapping 匹配与 manifest 使用。 */
+	/** Unified DocumentScope resolution result (Figma: file key, falling back to the import source identifier), used for mapping matching and the manifest. */
 	UPROPERTY() FString DocumentScope;
-	/** DocumentScope 的来源说明："fileKey" | "importSource" | "unresolved"。 */
+	/** Origin of the DocumentScope: "fileKey" | "importSource" | "unresolved". */
 	UPROPERTY() FString DocumentScopeOrigin;
 
 	bool HasAnyComponentCatalog() const { return !ComponentsJson.IsEmpty() || !ComponentSetsJson.IsEmpty(); }
@@ -264,17 +264,17 @@ struct FUMGPrototypeNavigationData
 };
 
 /**
- * 多页原型合成 token 的跨模块协议常量：Core（组装侧）与 Editor（reimport 宿主延续
- * 判定侧）共用同一来源，任一端改字面量都会静默破坏对账——常量化让漂移变成编译错误。
+ * Cross-module protocol constants for multi-page prototype composite tokens: Core (the assembly side) and
+ * Editor (the reimport host-continuation side) share this single source - changing a literal on either end would silently break reconciliation, so constants turn drift into a compile error.
  */
 namespace Design2UMGPrototypeTokens
 {
-	/** 合成 token 通用前缀（Design2UMGPrototypeRouting 组装 <前缀><suffix>_<hash8>）。 */
+	/** Common prefix of composite tokens (Design2UMGPrototypeRouting assembles <prefix><suffix>_<hash8>). */
 	DESIGN2UMGCORE_API const TCHAR* TokenPrefix();
-	/** switcher 本体的 suffix（组装侧传入 MakeUniquePrototypeInternalToken）。 */
+	/** Suffix of the switcher body (the assembly side passes it into MakeUniquePrototypeInternalToken). */
 	DESIGN2UMGCORE_API const TCHAR* SwitcherSuffix();
-	/** switcher 本体合成根 id 的完整前缀（TokenPrefix + SwitcherSuffix + "_"）。 */
+	/** Full prefix of the switcher body's composite root id (TokenPrefix + SwitcherSuffix + "_"). */
 	DESIGN2UMGCORE_API const FString& SwitcherRootPrefix();
-	/** overlay 包裹根 id = switcher 本体根 id + 该后缀（Design2UMGPrototypeNavigation 组装）。 */
+	/** Overlay wrapper root id = switcher body root id + this suffix (assembled by Design2UMGPrototypeNavigation). */
 	DESIGN2UMGCORE_API const TCHAR* OverlayRootSuffix();
 }

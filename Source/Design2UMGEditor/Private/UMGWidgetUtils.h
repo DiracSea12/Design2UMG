@@ -28,9 +28,9 @@ public:
 	static FName SanitizeWidgetName(const FString& InName, const FString& FallbackPrefix);
 
 	/**
-	 * widget 命名去重契约（与 BuildWidgetTree 的 base_N 去重同名规则同源）：
-	 * 生成侧 SanitizeWidgetName+Suffix 探测产生 base / base_<数字>；reimport 侧
-	 * 同名对账用这两个谓词解析。放在同一个类里锚定：改去重规则必须同步这里。
+	 * Widget name dedup contract (same source as BuildWidgetTree's base_N dedup rule):
+	 * generation-side SanitizeWidgetName+Suffix probing produces base / base_<number>; reimport-side
+	 * same-name reconciliation parses with these two predicates. Anchored in one class: changing the dedup rule must update this in sync.
 	 */
 	static bool MatchesWidgetBaseName(const FString& WidgetName, const FString& BaseName);
 	static int32 GetWidgetNameSuffixRank(const FString& WidgetName, const FString& BaseName);
