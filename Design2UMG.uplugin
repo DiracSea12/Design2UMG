@@ -1,7 +1,7 @@
 {
 	"FileVersion": 3,
 	"Version": 1,
-	"VersionName": "1.0.0",
+	"VersionName": "1.1.0",
 	"FriendlyName": "Design2UMG",
 	"Description": "Editor-only Design2UMG import stack. Design2UMGCore keeps parsing, IR, conversion, and layout helpers in an Editor module; it is not a runtime module.",
 	"Category": "Editor",

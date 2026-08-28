@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "FigmaParserInternal.h"
+#include "DesignComponentMapping.h"
 #include "DesignTreeLimits.h"
 #include "DesignSchemaSourceExtensions.h"
 #include "FigmaParserLayout.h"
@@ -605,7 +606,7 @@ static void InitializeNodeFromFigma(
 	OutNode.Type = MapNodeType(FigmaType);
 	OutNode.MutableSource().SourceNodeType = FigmaType;
 	OutNode.bReusable = (FigmaType == TEXT("COMPONENT"));
-	OutNode.Metadata.Add(TEXT("source.provider"), TEXT("figma"));
+	OutNode.Metadata.Add(TEXT("source.provider"), DesignComponentMapping::ProviderFigma);
 	ApplyRelativeTransformFlipData(NodeObj, OutNode);
 }
 
@@ -928,6 +929,14 @@ bool ParseDocument(const FString& FigmaJson, FDesignDocument& OutDocument)
 	};
 	CaptureDocumentMetadata(DocObj);
 	CaptureDocumentMetadata(Root);
+	// DocumentScope 首选 file key：导出链若在顶层带 file key 就捕获，供 Component Mapping 使用。
+	const FString FileKeyValue = GetString(Root, TEXT("fileKey"));
+	if (!FileKeyValue.IsEmpty())
+	{
+		OutDocument.Metadata.Add(TEXT("fileKey"), FileKeyValue);
+	}
+	// 文档级 provider 标记：组件身份提取与 Component Mapping 用它区分 Figma 与 Pencil。
+	OutDocument.Metadata.Add(TEXT("source.provider"), DesignComponentMapping::ProviderFigma);
 	AddJsonExtensionIfPresent(Root, OutDocument.Metadata, TEXT("components"), TEXT("components"));
 	AddJsonExtensionIfPresent(Root, OutDocument.Metadata, TEXT("componentSets"), TEXT("componentSets"));
 	SetJsonFieldIfPresent(Root, TEXT("components"), OutDocument.MutableSourceDocument().ComponentsJson);

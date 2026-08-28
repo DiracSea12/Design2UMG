@@ -5,18 +5,23 @@
 #include "Design2UMGEditorImportOrchestrator.h"
 #include "Design2UMGNotifications.h"
 #include "Design2UMGSettings.h"
+#include "Design2UMGLocalFigmaImport.h"
+#include "DesignImportPipeline.h"
 
 #include "Containers/Ticker.h"
 #include "DesktopPlatformModule.h"
 #include "Framework/Application/SlateApplication.h"
 #include "IDesktopPlatform.h"
 #include "Misc/App.h"
+#include "Misc/MessageDialog.h"
+#include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "ToolMenus.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SEditableTextBox.h"
+#include "Widgets/Notifications/SNotificationList.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SWindow.h"
 #include "Widgets/Text/STextBlock.h"
@@ -147,6 +152,113 @@ namespace
 		FSlateApplication::Get().AddWindow(Window);
 	}
 
+	// Reimport 入口只收集两样输入：新设计源（本地 Figma 导出 design.json）+ 目标资产
+	// （生成的 WBP .uasset 或其 .d2u.json sidecar），然后走 DesignImportPipeline::Reimport。
+	// 全量冲突时弹一次确认框问是否生成并列副本（用户显式选择，不隐式生成）。
+	void OpenReimportDialog()
+	{
+		IDesktopPlatform* Desktop = FDesktopPlatformModule::Get();
+		if (!Desktop)
+		{
+			return;
+		}
+
+		TArray<FString> SourceFiles;
+		const bool bSourceOpened = Desktop->OpenFileDialog(
+			FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr),
+			TEXT("Reimport Design (Design2UMG): pick the new design source"),
+			FPaths::ProjectDir(),
+			TEXT("design.json"),
+			TEXT("Figma Export JSON (design.json)|design.json|JSON Files (*.json)|*.json"),
+			EFileDialogFlags::None,
+			SourceFiles);
+		if (!bSourceOpened || SourceFiles.Num() == 0)
+		{
+			return;
+		}
+
+		TArray<FString> TargetFiles;
+		const bool bTargetOpened = Desktop->OpenFileDialog(
+			FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr),
+			TEXT("Reimport Design (Design2UMG): pick the generated Widget Blueprint"),
+			FPaths::ProjectContentDir(),
+			TEXT(""),
+			TEXT("D2U Generated Asset (*.d2u.json;*.uasset)|*.d2u.json;*.uasset"),
+			EFileDialogFlags::None,
+			TargetFiles);
+		if (!bTargetOpened || TargetFiles.Num() == 0)
+		{
+			return;
+		}
+
+		// sidecar（.d2u.json）与资产同名同目录：统一换算成 .uasset 再转包路径。
+		FString AssetFilePath = TargetFiles[0];
+		if (AssetFilePath.EndsWith(TEXT(".d2u.json")))
+		{
+			AssetFilePath = AssetFilePath.LeftChop(9) + FPackageName::GetAssetPackageExtension();
+		}
+		FString TargetPackage;
+		if (!FPackageName::TryConvertFilenameToLongPackageName(AssetFilePath, TargetPackage))
+		{
+			FDesign2UMGNotification::Error(LOCTEXT(
+				"ReimportBadTarget",
+				"Design2UMG: could not resolve the selected file to a project asset path"));
+			return;
+		}
+
+		FDesignDocument Document;
+		FString LoadError;
+		if (!Design2UMGLocalFigmaImport::LoadLocalFigmaDocument(SourceFiles[0], Document, LoadError))
+		{
+			FDesign2UMGNotification::Error(FText::Format(
+				LOCTEXT("ReimportSourceLoadFailed", "Design2UMG: failed to load design source: {0}"),
+				FText::FromString(LoadError)));
+			return;
+		}
+
+		FDesignReimportRequest Request;
+		Request.TargetAssetPath = TargetPackage;
+		FDesignReimportResult Result = DesignImportPipeline::Reimport(Document, Request);
+		if (Result.bFullConflict && !Result.bSucceeded)
+		{
+			const EAppReturnType::Type Choice = FMessageDialog::Open(
+				EAppMsgCategory::Warning,
+				EAppMsgType::YesNo,
+				EAppReturnType::No,
+				LOCTEXT(
+					"ReimportFullConflictAsk",
+					"Reimport hit a full conflict: the asset and its manifest relationship is broken, so the asset was preserved.\nGenerate a side-by-side resolution copy from the new design? (the original stays untouched)"),
+				LOCTEXT("ReimportFullConflictTitle", "Design2UMG Reimport: full conflict"));
+			if (Choice == EAppReturnType::Yes)
+			{
+				Request.bGenerateResolutionCopy = true;
+				Result = DesignImportPipeline::Reimport(Document, Request);
+			}
+		}
+
+		if (Result.bSucceeded)
+		{
+			FDesign2UMGNotification::Success(LOCTEXT("ReimportDone", "Design2UMG: reimport applied (see Output Log for the node report)"));
+		}
+		else if (!Result.bFullConflict)
+		{
+			FDesign2UMGNotification::Error(LOCTEXT("ReimportFailed", "Design2UMG: reimport failed; asset kept its previous state"));
+		}
+		else if (Result.bFullConflict && !Result.ResolutionCopyPath.IsEmpty())
+		{
+			FDesign2UMGNotification::Success(FText::Format(
+				LOCTEXT("ReimportCopyDone", "Design2UMG: resolution copy generated at {0}"),
+				FText::FromString(Result.ResolutionCopyPath)));
+		}
+		else
+		{
+			// 全量冲突且没有副本：用户在冲突对话框选了 No，或选 Yes 但副本生成失败。
+			FDesign2UMGNotification::Warning(LOCTEXT(
+				"ReimportFullConflictKept",
+				"Design2UMG: reimport hit a full conflict; the asset kept its previous state (see Output Log for details)"));
+		}
+	}
+
 	void ShowWelcomeDialog(UDesign2UMGSettings* Settings)
 	{
 		if (!FSlateApplication::IsInitialized() || !Settings)
@@ -254,6 +366,19 @@ namespace Design2UMGEditorMenuOwner
 				FUIAction(FExecuteAction::CreateLambda([]()
 				{
 					OpenLocalFigmaJsonDialog();
+				})));
+
+			FToolMenuSection& ReimportSection = SubMenu->AddSection(
+				TEXT("Reimport"), LOCTEXT("ReimportSection", "Reimport"));
+
+			ReimportSection.AddMenuEntry(
+				TEXT("ReimportDesign"),
+				LOCTEXT("ReimportDesign", "Reimport Design..."),
+				LOCTEXT("ReimportDesignTooltip", "Safely update a D2U-generated Widget Blueprint from a newer design source"),
+				FSlateIcon(),
+				FUIAction(FExecuteAction::CreateLambda([]()
+				{
+					OpenReimportDialog();
 				})));
 		}));
 	}

@@ -362,7 +362,6 @@ struct FDesignFill
 
 	bool IsNone() const { return Type == EDesignFillType::None; }
 	bool IsColor() const { return Type == EDesignFillType::Color; }
-	bool IsGradient() const { return Type == EDesignFillType::Gradient; }
 	bool IsImage() const { return Type == EDesignFillType::Image; }
 
 	[[nodiscard]] static FDesignFill FromColor(const FString& Color)
@@ -410,8 +409,6 @@ struct FDesignStrokeThickness
 
 	UPROPERTY()
 	float Left = 0.0f;
-
-	float GetUniform() const { return bUniform ? Uniform : 0.0f; }
 };
 
 /**
@@ -463,8 +460,6 @@ struct FDesignPadding
 
 	UPROPERTY()
 	float Left = 0.0f;
-
-	bool IsZero() const { return Top == 0 && Right == 0 && Bottom == 0 && Left == 0; }
 };
 
 /**

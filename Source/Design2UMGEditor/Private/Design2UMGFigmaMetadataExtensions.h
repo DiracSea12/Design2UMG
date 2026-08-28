@@ -44,10 +44,8 @@ public:
 		const TArray<FDesign2UMGFigmaWidgetMetadataRecord>& InWidgetRecords);
 
 	const FUMGSourceDocumentData& GetDocumentData() const { return DocumentData; }
-	const TArray<FDesign2UMGFigmaWidgetMetadataRecord>& GetWidgetRecords() const { return WidgetRecords; }
 
 	const FDesign2UMGFigmaWidgetMetadataRecord* FindRecordBySourceNodeId(const FString& SourceNodeId) const;
-	const FDesign2UMGFigmaWidgetMetadataRecord* FindRecordByWidgetName(FName WidgetName) const;
 
 #if WITH_EDITOR
 	bool VerifyBindings(const UWidgetTree* WidgetTree) const;

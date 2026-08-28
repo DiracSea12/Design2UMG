@@ -8,12 +8,14 @@
 class UTexture2D;
 class UWidget;
 class UWidgetTree;
+class FDesign2UMGComponentMappingBuildState;
 
 struct FWidgetTreeChildBuildContext
 {
 	const TMap<FString, UTexture2D*>* TextureMap = nullptr;
 	TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords = nullptr;
 	const FIntPoint* ExplicitDesignSize = nullptr;
+	FDesign2UMGComponentMappingBuildState* ComponentMappingState = nullptr;
 };
 
 namespace FWidgetTreeChildBuilder

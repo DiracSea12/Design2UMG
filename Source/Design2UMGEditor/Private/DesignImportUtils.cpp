@@ -481,7 +481,8 @@ void DesignImportUtils::ApplyPendingIconFontMappingChanges(const FUMGWidgetData&
 UWidgetBlueprint* DesignImportUtils::GenerateBlueprint(
 	const FUMGWidgetData& Data,
 	const FString& OutputPath,
-	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
+	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings,
+	FDesign2UMGGenerationOutput* OutGenerationOutput)
 {
 	FInteractiveGenerationScope TransactionScope(TEXT("Blueprint"));
 	FScopedSlowTask* SlowTask = nullptr;
@@ -515,7 +516,8 @@ UWidgetBlueprint* DesignImportUtils::GenerateBlueprint(
 		return nullptr;
 	}
 	ApplyPendingIconFontMappingChanges(Data);
-	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(Data, FinalPath, GenerationSettings);
+	FDesign2UMGGenerationOutput GenerationOutput;
+	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(Data, FinalPath, GenerationSettings, &GenerationOutput);
 	if (!WBP)
 	{
 		FinishInteractiveGenerationProgress(SlowTask);
@@ -531,12 +533,16 @@ UWidgetBlueprint* DesignImportUtils::GenerateBlueprint(
 		LOCTEXT("GenerateProgressSave", "Saving generated assets"),
 		TEXT("Blueprint generation"),
 		bCancelRequestedAfterMutation);
-	if (!FUMGGenerator::SaveWidgetBlueprint(WBP))
+	if (!FUMGGenerator::SaveWidgetBlueprint(WBP, &GenerationOutput))
 	{
 		FinishInteractiveGenerationProgress(SlowTask);
 		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint compile or save failed"));
 		FDesign2UMGNotification::Error(LOCTEXT("SaveFailed", "Design2UMG: Widget Blueprint compile or save failed"));
 		return nullptr;
+	}
+	if (OutGenerationOutput)
+	{
+		*OutGenerationOutput = MoveTemp(GenerationOutput);
 	}
 	UE_LOG(LogDesign2UMG, Log, TEXT("DesignImportUtils: Generated %s"), *WBP->GetPathName());
 
@@ -563,7 +569,8 @@ bool DesignImportUtils::GenerateBlueprintAndPng(
 	const FString& OutputPath,
 	FString* OutGeneratedAssetPath,
 	FString* OutRenderPngPath,
-	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
+	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings,
+	FDesign2UMGGenerationOutput* OutGenerationOutput)
 {
 	if (OutGeneratedAssetPath)
 	{
@@ -606,7 +613,8 @@ bool DesignImportUtils::GenerateBlueprintAndPng(
 		return false;
 	}
 	ApplyPendingIconFontMappingChanges(Data);
-	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(Data, FinalPath, GenerationSettings);
+	FDesign2UMGGenerationOutput GenerationOutput;
+	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(Data, FinalPath, GenerationSettings, &GenerationOutput);
 	if (!WBP)
 	{
 		FinishInteractiveGenerationProgress(SlowTask);
@@ -624,18 +632,24 @@ bool DesignImportUtils::GenerateBlueprintAndPng(
 		LOCTEXT("GenerateProgressRender", "Rendering generated asset"),
 		TEXT("Blueprint and PNG generation"),
 		bCancelRequestedAfterMutation);
-	if (!RenderWidgetTreeToPngFile(WBP, OutPng, &Size))
-	{
-		IFileManager::Get().Delete(*OutPng, false, true);
-		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget PNG render failed"));
-		// Save the Blueprint even when rendering fails so the issue can be inspected.
-		if (FUMGGenerator::SaveWidgetBlueprint(WBP) && OutGeneratedAssetPath)
+		if (!RenderWidgetTreeToPngFile(WBP, OutPng, &Size))
 		{
-			*OutGeneratedAssetPath = WBP->GetPathName();
+			IFileManager::Get().Delete(*OutPng, false, true);
+			UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget PNG render failed"));
+			// Save the Blueprint even when rendering fails so the issue can be inspected.
+			if (FUMGGenerator::SaveWidgetBlueprint(WBP, &GenerationOutput) && OutGeneratedAssetPath)
+			{
+				*OutGeneratedAssetPath = WBP->GetPathName();
+			}
+			// 资产与 sidecar 已落盘：GenerationOutput（含全部 mapping/manifest 诊断）必须
+			// 照常移出，否则导入报告与磁盘产物不对称（报告缺章节但资产存在）。
+			if (OutGenerationOutput)
+			{
+				*OutGenerationOutput = MoveTemp(GenerationOutput);
+			}
+			FinishInteractiveGenerationProgress(SlowTask);
+			return false;
 		}
-		FinishInteractiveGenerationProgress(SlowTask);
-		return false;
-	}
 
 	// Save the Blueprint after successful rendering.
 	AdvanceInteractiveGenerationProgressAfterMutation(
@@ -644,12 +658,16 @@ bool DesignImportUtils::GenerateBlueprintAndPng(
 		LOCTEXT("GenerateProgressSave", "Saving generated assets"),
 		TEXT("Blueprint and PNG generation"),
 		bCancelRequestedAfterMutation);
-	if (!FUMGGenerator::SaveWidgetBlueprint(WBP))
+	if (!FUMGGenerator::SaveWidgetBlueprint(WBP, &GenerationOutput))
 	{
 		IFileManager::Get().Delete(*OutPng, false, true);
 		FinishInteractiveGenerationProgress(SlowTask);
 		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint compile or save failed after PNG render"));
 		return false;
+	}
+	if (OutGenerationOutput)
+	{
+		*OutGenerationOutput = MoveTemp(GenerationOutput);
 	}
 	AdvanceInteractiveGenerationProgressAfterMutation(
 		SlowTask,
@@ -718,7 +736,8 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 	const FString& OutputPngFilePath,
 	FString* OutGeneratedAssetPath,
 	FIntPoint* OutRenderedSize,
-	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
+	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings,
+	FDesign2UMGGenerationOutput* OutGenerationOutput)
 {
 	if (OutGeneratedAssetPath)
 	{
@@ -760,7 +779,8 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 
 	const FString FinalPath = ResolveImportOutputPath(OutputPath);
 	ApplyPendingIconFontMappingChanges(Data);
-	UWidgetBlueprint* WidgetBlueprint = FUMGGenerator::BuildWidgetBlueprint(Data, FinalPath, GenerationSettings);
+	FDesign2UMGGenerationOutput GenerationOutput;
+	UWidgetBlueprint* WidgetBlueprint = FUMGGenerator::BuildWidgetBlueprint(Data, FinalPath, GenerationSettings, &GenerationOutput);
 	if (!WidgetBlueprint)
 	{
 		FinishInteractiveGenerationProgress(SlowTask);
@@ -774,11 +794,20 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 		LOCTEXT("GenerateProgressSave", "Saving generated assets"),
 		TEXT("Compiled PNG generation"),
 		bCancelRequestedAfterMutation);
-	if (!FUMGGenerator::SaveWidgetBlueprint(WidgetBlueprint))
+	if (!FUMGGenerator::SaveWidgetBlueprint(WidgetBlueprint, &GenerationOutput))
 	{
+		// Build 期诊断（mapping 校验/命中等）随 GenerationOutput 移出，不随失败路径丢失。
+		if (OutGenerationOutput)
+		{
+			*OutGenerationOutput = MoveTemp(GenerationOutput);
+		}
 		FinishInteractiveGenerationProgress(SlowTask);
 		UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint compile or save failed before compiled PNG render"));
 		return false;
+	}
+	if (OutGenerationOutput)
+	{
+		*OutGenerationOutput = MoveTemp(GenerationOutput);
 	}
 	if (!OutputPngFilePath.IsEmpty())
 	{

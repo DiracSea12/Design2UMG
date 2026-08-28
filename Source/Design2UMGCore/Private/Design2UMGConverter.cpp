@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGConverter.h"
+#include "DesignComponentMapping.h"
 #include "DesignSchemaSourceExtensions.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
@@ -47,6 +48,57 @@ namespace Design2UMGConverterPrivate
 		Snapshot.IconFont.DefaultIconFontAssetPath = Settings.DefaultIconFontAssetPath;
 		Snapshot.IconFont.MissingIconFontPlaceholder = Settings.MissingIconFontPlaceholder;
 		return Snapshot;
+	}
+
+	void MarkMappedComponentCandidatesRecursive(FUMGWidgetNode& Node, const FString& DocumentScope)
+	{
+		DesignComponentMapping::FDesignComponentIdentity Identity;
+		if (Node.HasSourceData()
+			&& DesignComponentMapping::TryResolveFigmaComponentIdentity(Node.Source(), DocumentScope, Identity))
+		{
+			Node.MutableSource().bMappedComponentCandidate = true;
+		}
+		for (FUMGWidgetNode& Child : Node.Children)
+		{
+			MarkMappedComponentCandidatesRecursive(Child, DocumentScope);
+		}
+	}
+
+	// 转换收尾时把文档级 provider 与 DocumentScope 写进 IR 文档边车，并给可解析出
+	// Figma 组件身份的节点打上 mapped 候选标记。匹配决策不在这里做（Editor 生成期匹配）。
+	void StampDocumentComponentIdentity(const FDesignDocument& Document, FUMGWidgetData& Result)
+	{
+		const FString Provider = Document.Metadata.FindRef(TEXT("source.provider"));
+		if (Provider.IsEmpty())
+		{
+			return;
+		}
+
+		const bool bFigma = Provider.Equals(DesignComponentMapping::ProviderFigma, ESearchCase::IgnoreCase);
+		const bool bPencil = Provider.Equals(DesignComponentMapping::ProviderPencil, ESearchCase::IgnoreCase);
+		if (!bFigma && !bPencil)
+		{
+			return;
+		}
+
+		const FString FileKey = bFigma ? Document.Metadata.FindRef(TEXT("fileKey")) : FString();
+		FString ImportSource = Document.SourceDocument().SourceFilePath;
+		if (ImportSource.IsEmpty())
+		{
+			ImportSource = Document.Metadata.FindRef(TEXT("design.sourceFilePath"));
+		}
+		const DesignComponentMapping::FDocumentScopeResolution Scope =
+			DesignComponentMapping::ResolveFigmaDocumentScope(FileKey, ImportSource);
+
+		FUMGSourceDocumentData& SourceDocument = Result.MutableSourceDocument();
+		SourceDocument.Provider = bFigma ? DesignComponentMapping::ProviderFigma : DesignComponentMapping::ProviderPencil;
+		SourceDocument.DocumentScope = Scope.Value;
+		SourceDocument.DocumentScopeOrigin = Scope.Source;
+
+		if (bFigma && Scope.IsResolved())
+		{
+			MarkMappedComponentCandidatesRecursive(Result.RootWidget, Scope.Value);
+		}
 	}
 
 	struct FResolvedPrototypeAction
@@ -550,10 +602,11 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 	const Design2UMGConverterInternal::FConversionSettingsSnapshot SettingsSnapshot =
 		Design2UMGConverterPrivate::BuildConversionSettingsSnapshot(Settings);
 	Design2UMGConverterInternal::FConversionState State(Document, Result.Warnings, SettingsSnapshot);
-	auto FinalizeResult = [&Result, &State]()
+	auto FinalizeResult = [&Result, &State, &Document]()
 	{
 		Result.IconFontMappingChanges.Upserts = MoveTemp(State.PendingIconFontMappings);
 		Result.IconFontMappingChanges.Removals = MoveTemp(State.PrunedInvalidMappings);
+		Design2UMGConverterPrivate::StampDocumentComponentIdentity(Document, Result);
 	};
 	Design2UMGConverterInternal::FConversionContext RootContext(State);
 	const Design2UMGConverterPrivate::FNodeConversionOrchestrator NodeOrchestrator(RootContext);

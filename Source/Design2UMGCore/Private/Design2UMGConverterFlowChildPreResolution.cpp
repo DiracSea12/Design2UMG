@@ -383,11 +383,6 @@ namespace Design2UMGConverterInternal
 		return ExpansionCache.IsValid() ? ExpansionCache->ExpandCallCount : 0;
 	}
 
-	int32 FFlowChildPreResolutionResolver::GetFitContentPrecomputeCount() const
-	{
-		return ExpansionCache.IsValid() ? ExpansionCache->FitContentPrecomputeCount : 0;
-	}
-
 	void FFlowChildPreResolutionResolver::MarkFitContentPrecomputed(const TSharedPtr<FDesignNode>& RefNode) const
 	{
 		if (!RefNode.IsValid() || RefNode->Type != EDesignNodeType::Ref)

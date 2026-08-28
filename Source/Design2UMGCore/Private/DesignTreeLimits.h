@@ -26,7 +26,6 @@ public:
 	}
 
 	bool WasExceeded() const { return bExceeded; }
-	int32 GetNodeCount() const { return NodeCount; }
 
 private:
 	int32 NodeCount = 0;

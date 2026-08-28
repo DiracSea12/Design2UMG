@@ -47,6 +47,7 @@ namespace Design2UMGEditorImportOrchestrator
 	void RunRegisteredSourceImport(const FRegisteredSourceImportRequest& Request);
 	void RunFigmaImport(const FString& FileUrl, const FString& Token);
 	void RunLocalFigmaImport(const FLocalFigmaImportRequest& Request);
+	void RunDesignReimport(const FString& TargetAssetPath, const FString& JsonFilePath, bool bGenerateResolutionCopy);
 	void ConnectToPencilAndImport();
 	void ShutdownTransientState();
 }

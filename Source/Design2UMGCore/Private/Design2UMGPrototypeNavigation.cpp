@@ -4,6 +4,7 @@
 
 #include "Design2UMGPrototypeStepGraph.h"
 #include "UMGSchema.h"
+#include "UMGSchemaSourceExtensions.h"
 
 namespace
 {
@@ -113,10 +114,10 @@ namespace Design2UMGPrototypeNavigation
 		Root.Type = TEXT("Overlay");
 		Root.Id = NavigationData.SwitcherWidgetId.IsEmpty()
 			? TEXT("__d2u_prototype_root")
-			: NavigationData.SwitcherWidgetId + TEXT("_root");
+			: NavigationData.SwitcherWidgetId + Design2UMGPrototypeTokens::OverlayRootSuffix();
 		Root.Name = NavigationData.SwitcherWidgetName.IsEmpty()
 			? Root.Id
-			: NavigationData.SwitcherWidgetName + TEXT("_root");
+			: NavigationData.SwitcherWidgetName + Design2UMGPrototypeTokens::OverlayRootSuffix();
 		Root.Bounds = BaseSwitcher.Bounds;
 		Root.Children.Add(MoveTemp(BaseSwitcher));
 		Root.Children.Add(MoveTemp(OverlayHost));

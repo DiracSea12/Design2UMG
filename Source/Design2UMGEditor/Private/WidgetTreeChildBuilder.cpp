@@ -212,7 +212,8 @@ namespace
 			ParentWidget,
 			Context.TextureMap,
 			Context.FigmaMetadataRecords,
-			Context.ExplicitDesignSize);
+			Context.ExplicitDesignSize,
+			Context.ComponentMappingState);
 	}
 
 	void BuildPanelChildren(

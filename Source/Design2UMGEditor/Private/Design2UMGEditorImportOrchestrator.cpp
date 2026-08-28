@@ -31,20 +31,31 @@
 namespace
 {
 	/**
-	 * Unattended exit policy lives at the command/orchestration boundary:
+	 * Unattended exit policy lives at the command/orchestration boundary and covers
+	 * every Run* entry point in this file (PenConvert/PenImport/ImportSource/
+	 * FigmaImport/LocalFigmaImport/DesignReimport, including their async Figma callbacks):
 	 * business import functions report success/failure, and this single helper
 	 * turns the final outcome into an engine exit status (0 = ok, 1 = failed).
-	 * Returns true when an exit was requested (unattended mode only).
+	 * Attended sessions are untouched - it returns false and the editor keeps running.
+	 * Automation test sessions are untouched as well: FApp::IsUnattended() counts
+	 * GIsAutomationTesting as unattended, but there a RequestExit from a command would
+	 * kill the editor before the framework reports results (TEST COMPLETE); their
+	 * lifecycle is owned by -TestExit. Returns true when an exit was requested
+	 * (genuinely unattended mode only).
 	 */
 	bool ExitUnattendedWithStatus(const bool bSuccess, const TCHAR* Message)
 	{
-		if (!FApp::IsUnattended())
+		if (GIsAutomationTesting || !FApp::IsUnattended())
 		{
 			return false;
 		}
 
 		UE_LOG(LogDesign2UMG, Log, TEXT("%s"), Message);
-		FPlatformMisc::RequestExitWithStatus(false, bSuccess ? 0 : 1);
+		// Force=false only reaches PostQuitMessage, which the editor main loop does not
+		// forward as the process exit code (a failed import still exits 0). Force=true
+		// makes the engine flush the log and TerminateProcess with the real status.
+		// Failure forces the exit; success keeps the graceful shutdown path.
+		FPlatformMisc::RequestExitWithStatus(!bSuccess, bSuccess ? 0 : 1);
 		return true;
 	}
 
@@ -775,6 +786,49 @@ namespace Design2UMGEditorImportOrchestrator
 		ExitUnattendedWithStatus(
 			bOk,
 			TEXT("Unattended mode: local figma import finished; exiting"));
+	}
+
+	// Design2UMG.Reimport 控制台命令入口：reimport 的菜单 UI（OpenReimportDialog）之外
+	// 的命令行路径。只做参数映射薄包装：加载新源 design.json -> DesignImportPipeline::
+	// Reimport；逐节点诊断与总结（reimport_*）由 pipeline 内部打到 LogDesign2UMG，
+	// 这里补一条命令级结论（成功 / 全量冲突已生成并列副本 / 未生效），与菜单入口的
+	// Notification 三个分支一一对应。
+	void RunDesignReimport(const FString& TargetAssetPath, const FString& JsonFilePath, const bool bGenerateResolutionCopy)
+	{
+		bool bOk = false;
+
+		FDesignDocument Document;
+		FString ErrorMessage;
+		if (!Design2UMGLocalFigmaImport::LoadLocalFigmaDocument(JsonFilePath, Document, ErrorMessage))
+		{
+			UE_LOG(LogDesign2UMG, Error, TEXT("%s"), *ErrorMessage);
+		}
+		else
+		{
+			FDesignReimportRequest Request;
+			Request.TargetAssetPath = TargetAssetPath;
+			Request.bGenerateResolutionCopy = bGenerateResolutionCopy;
+			const FDesignReimportResult Result = DesignImportPipeline::Reimport(Document, Request);
+
+			if (Result.bSucceeded)
+			{
+				bOk = true;
+				UE_LOG(LogDesign2UMG, Log, TEXT("[OK] Reimport applied: %s"), *TargetAssetPath);
+			}
+			else if (Result.bFullConflict && !Result.ResolutionCopyPath.IsEmpty())
+			{
+				bOk = true;
+				UE_LOG(LogDesign2UMG, Log, TEXT("[OK] Resolution copy generated: %s"), *Result.ResolutionCopyPath);
+			}
+			else
+			{
+				UE_LOG(LogDesign2UMG, Error, TEXT("[FAIL] Reimport not applied; asset keeps its previous state: %s"), *TargetAssetPath);
+			}
+		}
+
+		ExitUnattendedWithStatus(
+			bOk,
+			TEXT("Unattended mode: design reimport finished; exiting"));
 	}
 
 	void ConnectToPencilAndImport()

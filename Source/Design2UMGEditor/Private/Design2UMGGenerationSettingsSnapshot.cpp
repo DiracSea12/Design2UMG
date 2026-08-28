@@ -15,6 +15,8 @@ FDesign2UMGGenerationSettingsSnapshot FDesign2UMGGenerationSettingsSnapshot::Fro
 	FDesign2UMGGenerationSettingsSnapshot Snapshot;
 	Snapshot.PrototypeNavigationGenerationMode = Settings.PrototypeNavigationGenerationMode;
 	Snapshot.ClassOverrides = Settings.ClassOverrides;
+	// 每次导入请求构建快照时读取一次项目级 Component Mapping ini，随快照进入生成链。
+	Snapshot.ComponentMapping = Design2UMGComponentMappingConfig::Load();
 	return Snapshot;
 }
 

@@ -2,6 +2,8 @@
 
 #include "UMGGenerator.h"
 #include "Design2UMGGenerationSettingsSnapshot.h"
+#include "Design2UMGComponentMappingGeneration.h"
+#include "Design2UMGGenerationManifest.h"
 #include "UMGPrototypeAnimationBuilder.h"
 #include "UMGGeneratorRootHandoff.h"
 #include "UMGWidgetNodeAccess.h"
@@ -238,12 +240,18 @@ namespace
 UWidgetBlueprint* FUMGGenerator::GenerateWidgetBlueprint(
 	const FUMGWidgetData& WidgetData,
 	const FString& PackagePath,
-	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
+	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings,
+	FDesign2UMGGenerationOutput* OutGenerationOutput)
 {
-	UWidgetBlueprint* WBP = BuildWidgetBlueprint(WidgetData, PackagePath, GenerationSettings);
-	if (WBP && !SaveWidgetBlueprint(WBP))
+	FDesign2UMGGenerationOutput GenerationOutput;
+	UWidgetBlueprint* WBP = BuildWidgetBlueprint(WidgetData, PackagePath, GenerationSettings, &GenerationOutput);
+	if (WBP && !SaveWidgetBlueprint(WBP, &GenerationOutput))
 	{
 		return nullptr;
+	}
+	if (OutGenerationOutput)
+	{
+		*OutGenerationOutput = MoveTemp(GenerationOutput);
 	}
 	return WBP;
 }
@@ -251,7 +259,8 @@ UWidgetBlueprint* FUMGGenerator::GenerateWidgetBlueprint(
 UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 	const FUMGWidgetData& WidgetData,
 	const FString& PackagePath,
-	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
+	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings,
+	FDesign2UMGGenerationOutput* OutGenerationOutput)
 {
 	FString AssetName = ObjectTools::SanitizeObjectName(WidgetData.WidgetName);
 	FString FullPath = PackagePath / AssetName;
@@ -337,7 +346,8 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 		GenerationSettings ? *GenerationSettings : FallbackGenerationSettings;
 	const Design2UMGGenerationSettingsContext::FScopedSettingsSnapshot ScopedGenerationSettings(EffectiveGenerationSettings);
 
-	const UMGGeneratorRootHandoff::FPreparedRoot PreparedRoot =
+	// 非 const：Component Mapping 匹配要把命中 Key 写进这份根节点副本（只影响本次生成）。
+	UMGGeneratorRootHandoff::FPreparedRoot PreparedRoot =
 		UMGGeneratorRootHandoff::PrepareRootForBuild(WidgetData, PackagePath, AssetName);
 	const FUMGWidgetNode& PreparedRootRef = PreparedRoot.Root;
 	const FIntPoint& DesignSize = PreparedRoot.DesignSize;
@@ -349,6 +359,15 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 		GeneratedAssetLifecycle::DiscardUnsavedAsset(WBP);
 		return nullptr;
 	}
+
+	// Component Mapping：生成前对 IR（PreparedRoot 是 WidgetData 的副本，标记只影响本次生成）
+	// 做两级匹配并写入命中 Key；无配置 / 非 Figma 文档时为空操作，普通生成链路行为不变。
+	FDesign2UMGComponentMappingBuildState MappingBuildState(EffectiveGenerationSettings.ComponentMapping);
+	Design2UMGComponentMappingGeneration::ApplyMappingToWidgetTreeIR(
+		PreparedRoot.Root,
+		EffectiveGenerationSettings.ComponentMapping,
+		WidgetData,
+		MappingBuildState);
 
 	// Dump widget tree only in verbose mode.
 	if (UE_LOG_ACTIVE(LogDesign2UMG, Verbose))
@@ -396,7 +415,8 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 
 	// Use the shared widget creation path.
 	TArray<FDesign2UMGFigmaWidgetMetadataRecord> FigmaMetadataRecords;
-	UWidget* Root = UMGGeneratorRootHandoff::CreateRootWidget(WBP, PreparedRoot, FigmaMetadataRecords);
+	UWidget* Root = UMGGeneratorRootHandoff::CreateRootWidget(
+		WBP, PreparedRoot, FigmaMetadataRecords, &MappingBuildState);
 	if (!Root)
 	{
 		UE_LOG(LogDesign2UMG, Error,
@@ -426,6 +446,8 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 	default:
 		break;
 	}
+	// mapped 节点不生成 Prototype 绑定：挂在 mapped 身份上的设计交互输出「不生效」诊断。
+	Design2UMGComponentMappingGeneration::ReportInertPrototypeBindings(NavigationData, MappingBuildState);
 	ConfigureFigmaMetadataExtension(WBP, WidgetData.SourceDocument(), FigmaMetadataRecords);
 	ClearGeneratedWidgetNavigationState(WBP);
 	DumpTemplateTextBlockFontState(TEXT("template-precompile"), WBP);
@@ -436,17 +458,57 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 
 	Package->MarkPackageDirty();
 
+	// 组装生成输出：manifest 载荷（mapped 实例 + 顶层生成节点）与 mapping 诊断。
+	if (OutGenerationOutput)
+	{
+		OutGenerationOutput->Manifest.Provider = WidgetData.HasSourceDocumentData()
+			? WidgetData.SourceDocument().Provider
+			: FString();
+		OutGenerationOutput->Manifest.DocumentScope = WidgetData.HasSourceDocumentData()
+			? WidgetData.SourceDocument().DocumentScope
+			: FString();
+		OutGenerationOutput->Manifest.SourceRootNodeId = PreparedRootRef.GetStableDesignNodeId();
+		OutGenerationOutput->Manifest.SourceRootName = PreparedRootRef.Name;
+		OutGenerationOutput->Manifest.MappedInstances = MappingBuildState.GetMappedInstances();
+		OutGenerationOutput->Manifest.TopLevelGenerated = MappingBuildState.GetTopLevelGenerated();
+		// 排序保证同一输入两次导入的 manifest 文本稳定（sidecar 可 diff）。
+		OutGenerationOutput->Manifest.D2UOwnedNames = MappingBuildState.GetCreatedWidgetNames().Array();
+		OutGenerationOutput->Manifest.D2UOwnedNames.Sort();
+
+		OutGenerationOutput->MappingDiagnostics = EffectiveGenerationSettings.ComponentMapping.ValidationDiagnostics;
+		OutGenerationOutput->MappingDiagnostics.Append(MappingBuildState.GetDiagnostics());
+	}
+
 	UE_LOG(LogDesign2UMG, Log, TEXT("Built Widget Blueprint at %s (not yet compiled/saved)"), *FullPath);
 	return WBP;
 }
 
-bool FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP)
+#if WITH_DEV_AUTOMATION_TESTS
+namespace
+{
+	// 测试注入：见 FUMGGenerator::ArmAutomationSaveFailureOnce。
+	std::atomic<bool> bAutomationSaveFailureArmed{ false };
+}
+#endif
+
+bool FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP, FDesign2UMGGenerationOutput* GenerationOutput)
 {
 	if (!WBP)
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("SaveWidgetBlueprint: Widget Blueprint is null"));
 		return false;
 	}
+
+#if WITH_DEV_AUTOMATION_TESTS
+	if (bAutomationSaveFailureArmed.exchange(false))
+	{
+		UE_LOG(LogDesign2UMG, Error,
+			TEXT("SaveWidgetBlueprint: failed to save %s (automation-injected save failure)"),
+			*WBP->GetPathName());
+		return false;
+	}
+#endif
+
 	const bool bWasNewlyCreated = WBP->GetOutermost()->HasAnyPackageFlags(PKG_NewlyCreated);
 
 	WBP->Modify();
@@ -514,6 +576,30 @@ bool FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP)
 		GeneratedAssetLifecycle::RegisterSavedAsset(WBP);
 	}
 
+	// 资产保存成功后写入生成记录 sidecar（原子写，失败不落半截文件）。
+	// 资产本体已保存成功：sidecar 写失败不改变导入成功语义，
+	// 只把失败并入结构化诊断（随导入报告可见），不静默只剩 UE_LOG。
+	if (GenerationOutput)
+	{
+		const FString AssetPackageName = WBP->GetOutermost()->GetName();
+		if (!Design2UMGGenerationManifest::WriteSidecarForAsset(AssetPackageName, GenerationOutput->Manifest))
+		{
+			FDesign2UMGMappingDiagnostic Diagnostic;
+			Diagnostic.Kind = Design2UMGManifestKinds::ManifestWriteFailedDiagnostic;
+			Diagnostic.Message = FString::Printf(
+				TEXT("Generation manifest sidecar could not be written for %s; the asset itself was saved"),
+				*Design2UMGGenerationManifest::BuildSidecarPathForAsset(AssetPackageName));
+			GenerationOutput->MappingDiagnostics.Add(MoveTemp(Diagnostic));
+		}
+	}
+
 	UE_LOG(LogDesign2UMG, Log, TEXT("Saved Widget Blueprint at %s"), *FullPath);
 	return true;
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+void FUMGGenerator::ArmAutomationSaveFailureOnce()
+{
+	bAutomationSaveFailureArmed.store(true);
+}
+#endif

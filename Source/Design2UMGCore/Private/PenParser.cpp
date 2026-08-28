@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "PenParser.h"
+#include "DesignComponentMapping.h"
 #include "Design2UMGLog.h"
 #include "DesignImportTypes.h"
 #include "DesignSchema.h"
@@ -143,6 +144,9 @@ bool ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FDesignDocume
 		OutDocument.Version = TEXT("1.0");
 		UE_LOG(LogDesign2UMG, Warning, TEXT("Design file is missing a version; defaulting to %s."), *OutDocument.Version);
 	}
+
+	// 文档级 provider 标记：组件身份提取与 Component Matching 用它区分来源。
+	OutDocument.Metadata.FindOrAdd(TEXT("source.provider")) = DesignComponentMapping::ProviderPencil;
 
 	// Parse declared fonts.
 	const TSharedPtr<FJsonValue>& FontsField = JsonObj->TryGetField(TEXT("fonts"));
@@ -387,7 +391,7 @@ TSharedPtr<FDesignNode> ParseNodeAtDepth(
 	}
 
     TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
-    Node->Metadata.Add(TEXT("source.provider"), TEXT("pen"));
+    Node->Metadata.Add(TEXT("source.provider"), DesignComponentMapping::ProviderPencil);
 
 	// Basic node fields.
 	if (!JsonObj->TryGetStringField(TEXT("id"), Node->Id))

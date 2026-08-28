@@ -2,6 +2,7 @@
 
 #include "DesignImportDiagnosticReport.h"
 
+#include "Design2UMGComponentMappingConfig.h"
 #include "Design2UMGLog.h"
 #include "DesignImageBakeUtils.h"
 #include "DesignSchema.h"
@@ -565,11 +566,9 @@ namespace DesignImportDiagnosticReport
 	void Write(
 		const FDesignDocument& Document,
 		const FUMGWidgetData& Data,
-		const FString& ImageReport,
-		const FString& RequestedOutputPath,
-		const FString& RequestedRenderPngPath,
-		const FString& GeneratedAssetPath,
-		const FString& RenderPngPath)
+		const FImportReportArtifacts& Artifacts,
+		const TArray<FDesign2UMGMappingDiagnostic>* ComponentMappingDiagnostics,
+		const TArray<FDesign2UMGMappingDiagnostic>* ReimportDiagnostics)
 	{
 		const FString ReportPath = BuildImportReportPath(Document);
 		TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
@@ -596,25 +595,25 @@ namespace DesignImportDiagnosticReport
 		}
 
 		TSharedRef<FJsonObject> Output = MakeShared<FJsonObject>();
-		if (!RequestedOutputPath.IsEmpty())
+		if (!Artifacts.RequestedOutputPath.IsEmpty())
 		{
-			Root->SetStringField(TEXT("requestedOutputPath"), RequestedOutputPath);
-			Output->SetStringField(TEXT("requestedOutputPath"), RequestedOutputPath);
+			Root->SetStringField(TEXT("requestedOutputPath"), Artifacts.RequestedOutputPath);
+			Output->SetStringField(TEXT("requestedOutputPath"), Artifacts.RequestedOutputPath);
 		}
-		if (!RequestedRenderPngPath.IsEmpty())
+		if (!Artifacts.RequestedRenderPngPath.IsEmpty())
 		{
-			Root->SetStringField(TEXT("requestedRenderPngPath"), RequestedRenderPngPath);
-			Output->SetStringField(TEXT("requestedRenderPngPath"), RequestedRenderPngPath);
+			Root->SetStringField(TEXT("requestedRenderPngPath"), Artifacts.RequestedRenderPngPath);
+			Output->SetStringField(TEXT("requestedRenderPngPath"), Artifacts.RequestedRenderPngPath);
 		}
-		if (!GeneratedAssetPath.IsEmpty())
+		if (!Artifacts.GeneratedAssetPath.IsEmpty())
 		{
-			Root->SetStringField(TEXT("generatedAssetPath"), GeneratedAssetPath);
-			Output->SetStringField(TEXT("generatedAssetPath"), GeneratedAssetPath);
+			Root->SetStringField(TEXT("generatedAssetPath"), Artifacts.GeneratedAssetPath);
+			Output->SetStringField(TEXT("generatedAssetPath"), Artifacts.GeneratedAssetPath);
 		}
-		if (!RenderPngPath.IsEmpty())
+		if (!Artifacts.RenderPngPath.IsEmpty())
 		{
-			Root->SetStringField(TEXT("renderPngPath"), RenderPngPath);
-			Output->SetStringField(TEXT("renderPngPath"), RenderPngPath);
+			Root->SetStringField(TEXT("renderPngPath"), Artifacts.RenderPngPath);
+			Output->SetStringField(TEXT("renderPngPath"), Artifacts.RenderPngPath);
 		}
 
 		TArray<FString> Recommendations;
@@ -680,7 +679,7 @@ namespace DesignImportDiagnosticReport
 		CollectEffectWrappersRecursive(Data.RootWidget, EffectWrapperValues, Recommendations);
 
 		TArray<TSharedPtr<FJsonValue>> ImageFailureValues;
-		CollectImageFailureEntries(ImageReport, ImageFailureValues, Recommendations);
+		CollectImageFailureEntries(Artifacts.ImageReport, ImageFailureValues, Recommendations);
 
 		TSharedRef<FJsonObject> Diagnostics = MakeShared<FJsonObject>();
 		Diagnostics->SetArrayField(TEXT("warnings"), WarningValues);
@@ -690,9 +689,9 @@ namespace DesignImportDiagnosticReport
 		TSharedRef<FJsonObject> Resources = MakeShared<FJsonObject>();
 		Resources->SetArrayField(TEXT("missingFonts"), MissingFontValues);
 		Resources->SetArrayField(TEXT("imageFailures"), ImageFailureValues);
-		if (!ImageReport.IsEmpty())
+		if (!Artifacts.ImageReport.IsEmpty())
 		{
-			Resources->SetStringField(TEXT("imageImportSummary"), ImageReport);
+			Resources->SetStringField(TEXT("imageImportSummary"), Artifacts.ImageReport);
 		}
 
 		TSharedRef<FJsonObject> Effects = MakeShared<FJsonObject>();
@@ -705,12 +704,44 @@ namespace DesignImportDiagnosticReport
 			RecommendationValues.Add(MakeShared<FJsonValueString>(Recommendation));
 		}
 
+		// Component Mapping 诊断：ini 校验、命中、类缺失回退、inputs 覆写/跳过、Prototype 不生效。
+		TSharedRef<FJsonObject> ComponentMapping = MakeShared<FJsonObject>();
+		if (ComponentMappingDiagnostics && ComponentMappingDiagnostics->Num() > 0)
+		{
+			TArray<TSharedPtr<FJsonValue>> MappingValues;
+			for (const FDesign2UMGMappingDiagnostic& MappingDiagnostic : *ComponentMappingDiagnostics)
+			{
+				TSharedRef<FJsonObject> Entry = MakeShared<FJsonObject>();
+				Entry->SetStringField(TEXT("kind"), MappingDiagnostic.Kind);
+				Entry->SetStringField(TEXT("message"), MappingDiagnostic.Message);
+				MappingValues.Add(MakeShared<FJsonValueObject>(Entry));
+			}
+			ComponentMapping->SetArrayField(TEXT("entries"), MappingValues);
+		}
+
+		// Safe Reimport 逐节点诊断（reimport_* 条目）；仅 reimport 路径携带，普通导入报告不含此章节。
+		if (ReimportDiagnostics)
+		{
+			TSharedRef<FJsonObject> Reimport = MakeShared<FJsonObject>();
+			TArray<TSharedPtr<FJsonValue>> ReimportValues;
+			for (const FDesign2UMGMappingDiagnostic& ReimportDiagnostic : *ReimportDiagnostics)
+			{
+				TSharedRef<FJsonObject> Entry = MakeShared<FJsonObject>();
+				Entry->SetStringField(TEXT("kind"), ReimportDiagnostic.Kind);
+				Entry->SetStringField(TEXT("message"), ReimportDiagnostic.Message);
+				ReimportValues.Add(MakeShared<FJsonValueObject>(Entry));
+			}
+			Reimport->SetArrayField(TEXT("entries"), ReimportValues);
+			Root->SetObjectField(TEXT("reimport"), Reimport);
+		}
+
 		Root->SetObjectField(TEXT("source"), Source);
 		Root->SetObjectField(TEXT("output"), Output);
 		Root->SetObjectField(TEXT("diagnostics"), Diagnostics);
 		Root->SetObjectField(TEXT("resources"), Resources);
 		Root->SetObjectField(TEXT("fontResolution"), FontResolution);
 		Root->SetObjectField(TEXT("effects"), Effects);
+		Root->SetObjectField(TEXT("componentMapping"), ComponentMapping);
 		Root->SetArrayField(TEXT("recommendations"), RecommendationValues);
 
 		IFileManager::Get().MakeDirectory(*FPaths::GetPath(ReportPath), true);
@@ -719,5 +750,18 @@ namespace DesignImportDiagnosticReport
 		FJsonSerializer::Serialize(Root, Writer);
 		FFileHelper::SaveStringToFile(Payload, *ReportPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
 		UE_LOG(LogDesign2UMG, Log, TEXT("DesignImportPipeline: wrote import diagnostic report %s"), *ReportPath);
+	}
+
+	void WriteReimport(
+		const FDesignDocument& Document,
+		const FUMGWidgetData& Data,
+		const FString& TargetAssetPath,
+		const TArray<FDesign2UMGMappingDiagnostic>& ReimportDiagnostics,
+		const TArray<FDesign2UMGMappingDiagnostic>* ComponentMappingDiagnostics)
+	{
+		// requestedOutputPath 承载 reimport 的目标资产；诊断走 reimport 章节。
+		FImportReportArtifacts Artifacts;
+		Artifacts.RequestedOutputPath = TargetAssetPath;
+		Write(Document, Data, Artifacts, ComponentMappingDiagnostics, &ReimportDiagnostics);
 	}
 }

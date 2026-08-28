@@ -20,7 +20,6 @@ public:
 	FFigmaHttpClient& operator=(const FFigmaHttpClient&) = delete;
 
 	void SetToken(const FString& InToken) { Token = InToken; }
-	bool HasToken() const { return !Token.IsEmpty(); }
 
 	using FOnComplete = TFunction<void(bool bSuccess, const FString& ResponseBody)>;
 

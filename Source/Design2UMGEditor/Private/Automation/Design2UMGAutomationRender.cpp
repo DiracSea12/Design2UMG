@@ -917,11 +917,6 @@ namespace Design2UMGAutomationRender
 		return GDesign2UMGAutomationRenderActive;
 	}
 
-	FString GetAutomationFontImportPath()
-	{
-		return GDesign2UMGAutomationFontImportPath;
-	}
-
 	bool IsCaseLocalAutomationImportedFontPath(const FString& FontAssetPath)
 	{
 		const FString NormalizedPath = NormalizeAutomationPackagePath(FontAssetPath);

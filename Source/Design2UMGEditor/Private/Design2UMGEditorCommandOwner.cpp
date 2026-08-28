@@ -6,6 +6,7 @@
 #include "Design2UMGEditorDesignSourceRegistry.h"
 #include "Design2UMGEditorImportOrchestrator.h"
 #include "Design2UMGLog.h"
+#include "Design2UMGWidgetBindingTools.h"
 
 #include "HAL/IConsoleManager.h"
 
@@ -192,11 +193,46 @@ namespace Design2UMGEditorCommandOwner
 			ECVF_Default);
 
 		IConsoleManager::Get().RegisterConsoleCommand(
+			TEXT("Design2UMG.Reimport"),
+			TEXT("Reimport design.json into an existing generated WBP: Design2UMG.Reimport <TargetWBPAssetPath> <design.json> [--resolution-copy]"),
+			FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
+			{
+				if (Args.Num() < 2)
+				{
+					UE_LOG(LogDesign2UMG, Warning, TEXT("Usage: Design2UMG.Reimport <TargetWBPAssetPath> <design.json> [--resolution-copy]"));
+					return;
+				}
+
+				bool bGenerateResolutionCopy = false;
+				for (int32 Index = 2; Index < Args.Num(); ++Index)
+				{
+					if (Args[Index] == TEXT("--resolution-copy"))
+					{
+						bGenerateResolutionCopy = true;
+					}
+				}
+
+				RunDesignReimport(Args[0], Args[1], bGenerateResolutionCopy);
+			}),
+			ECVF_Default);
+
+		IConsoleManager::Get().RegisterConsoleCommand(
 			TEXT("Design2UMG.AutomationRender"),
 			TEXT("Automation render from manifest JSON: Design2UMG.AutomationRender <spec.json>"),
 			FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
 			{
 				Design2UMGAutomationRender::HandleConsoleCommand(Args);
+			}),
+			ECVF_Default);
+
+		// WBP 事件绑定（FDelegateEditorBinding）的自动化构造通道：编辑器 UI 之外
+		// 唯一的脚本化入口（黑盒绑定场景 / 命令行 QA 用），不含特判逻辑。
+		IConsoleManager::Get().RegisterConsoleCommand(
+			TEXT("Design2UMG.WidgetBindings"),
+			TEXT("Inspect/add WBP widget event bindings: Design2UMG.WidgetBindings <WBPAssetPath> [--add <WidgetName> <PropertyName> <FunctionName>]"),
+			FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
+			{
+				Design2UMGWidgetBindingTools::HandleConsoleCommand(Args);
 			}),
 			ECVF_Default);
 	}
@@ -208,6 +244,8 @@ namespace Design2UMGEditorCommandOwner
 		IConsoleManager::Get().UnregisterConsoleObject(TEXT("Design2UMG.ImportSource"), false);
 		IConsoleManager::Get().UnregisterConsoleObject(TEXT("Design2UMG.FigmaImport"), false);
 		IConsoleManager::Get().UnregisterConsoleObject(TEXT("Design2UMG.LocalFigmaImport"), false);
+		IConsoleManager::Get().UnregisterConsoleObject(TEXT("Design2UMG.Reimport"), false);
 		IConsoleManager::Get().UnregisterConsoleObject(TEXT("Design2UMG.AutomationRender"), false);
+		IConsoleManager::Get().UnregisterConsoleObject(TEXT("Design2UMG.WidgetBindings"), false);
 	}
 }

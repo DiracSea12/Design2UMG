@@ -87,6 +87,13 @@ FUMGSourceNodeData& FUMGWidgetNode::MutableSource()
 	return *SourceData;
 }
 
+FString FUMGWidgetNode::GetStableDesignNodeId() const
+{
+	return HasSourceData() && !Source().SourceNodeId.IsEmpty()
+		? Source().SourceNodeId
+		: Id;
+}
+
 FUMGWidgetData::FUMGWidgetData() = default;
 FUMGWidgetData::FUMGWidgetData(FUMGWidgetData&& Other) noexcept = default;
 FUMGWidgetData::~FUMGWidgetData() = default;

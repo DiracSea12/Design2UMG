@@ -54,8 +54,14 @@ This document tracks current limitations that are known and accepted for now.
 
 ## Reimport Semantics
 
-- Re-import does not currently promise patch/update of an existing Widget Blueprint.
-- Name collisions currently resolve to creating a new generated asset rather than mutating the old one in place.
+- Normal import (same target name) still creates a new auto-renamed asset; it never mutates the old one in place.
+- Safe Reimport is a shipped capability (attribute-level in-place update with conservative conflict semantics); the known limitations below are the intentional boundaries of that capability:
+  - Conservative refusal, not data repair: whenever ownership or identity is unclear (scope mismatch, recorded instances no longer locatable, mapped class switched, subtree containing project content marked for removal), reimport keeps the asset as-is and reports a structured diagnostic instead of guessing.
+  - Multi-page prototype hosts with an overlay wrapper root (`<switcher id>_root`) keep the conservative full-conflict behavior across page-set changes (pages added/removed). Host continuation is currently implemented for the plain switcher root form only; the overlay wrapper's synthetic children would attach at wrong levels if diffed naively.
+  - Deleting a design node also removes the widget's blueprint variable nodes when nothing project-side references them (bindings, blueprint graph variable references, non-D2U children). Nodes with any project reference are preserved and reported as remove conflicts.
+  - The v1 delete scope is the recorded-instance level: nested widgets below surviving instances are never auto-deleted when their design nodes disappear (nested subtrees with project-side content get a conflict diagnostic; purely D2U nested subtrees are kept as-is).
+  - A mapped instance's own visual attributes (visibility, render opacity) are written at import but never refreshed by reimport; divergence from the design-declared values is reported as a diagnostic instead of being applied.
+- Name collisions during normal import still resolve to creating a new generated asset rather than mutating the old one in place.
 
 ## Interaction and Animation
 

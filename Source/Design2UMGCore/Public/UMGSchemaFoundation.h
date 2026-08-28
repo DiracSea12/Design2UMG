@@ -16,8 +16,6 @@ struct FDesignPixelBounds
 	float W = 0.0f;  // Width in pixels
 	float H = 0.0f;  // Height in pixels
 
-	float GetRight() const { return X + W; }
-	float GetBottom() const { return Y + H; }
 	float GetCenterX() const { return X + W / 2.0f; }
 	float GetCenterY() const { return Y + H / 2.0f; }
 };

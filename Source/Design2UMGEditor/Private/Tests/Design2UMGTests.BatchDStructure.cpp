@@ -619,8 +619,10 @@ bool FBatchDUnattendedExitPolicyStaticTest::RunTest(const FString& Parameters)
 
 	// The unattended exit policy must use a single status-aware helper at the
 	// command/orchestration boundary; the old fire-and-forget helper is gone.
+	// Failure must force the exit so the status code actually reaches the OS
+	// (PostQuitMessage alone does not propagate a non-zero process exit code).
 	TestTrue(TEXT("Unattended exit uses RequestExitWithStatus with success-derived code"),
-		OrchestratorSource.Contains(TEXT("RequestExitWithStatus(false, bSuccess ? 0 : 1)"), ESearchCase::CaseSensitive));
+		OrchestratorSource.Contains(TEXT("RequestExitWithStatus(!bSuccess, bSuccess ? 0 : 1)"), ESearchCase::CaseSensitive));
 	TestFalse(TEXT("Legacy status-less unattended exit helper is removed"),
 		OrchestratorSource.Contains(TEXT("RequestExitIfUnattended"), ESearchCase::CaseSensitive));
 

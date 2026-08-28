@@ -43,6 +43,8 @@ Design2UMG 把设计文件转换成 Unreal Engine 5 的 UMG Widget Blueprint。
 - fill、stroke、radius、shadow、gradient、SVG path 等视觉映射。
 - ref 展开、变量和主题解析。
 - Content Browser 拖拽导入。
+- 安全重导入（Safe Reimport）：对本插件生成的资产按设计身份做属性级原地更新——D2U 拥有的节点自动刷新，你手工加的控件/绑定/蓝图逻辑全部保留；身份不清时保守保留资产并给出结构化诊断（入口：菜单 `Design2UMG > Reimport > Reimport Design...`，或控制台 `Design2UMG.Reimport <目标资产> <design.json>`）。
+- 组件映射（Component Mapping）：项目级 `Config/Design2UMGComponentMapping.ini` 把 Figma 组件实例映射到你自己的 Widget Blueprint 类（替换整棵子树为真实实例），可声明 typed inputs 把设计值写进实例属性；语法与边界见 README.md 的 Component Mapping 一节。
 - 编辑器插件，不提供运行时模块依赖。
 
 ## 安装

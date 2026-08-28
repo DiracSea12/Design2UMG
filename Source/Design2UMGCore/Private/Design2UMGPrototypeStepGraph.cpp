@@ -4,6 +4,7 @@
 #include "Design2UMGPrototypeRouting.h"
 #include "Design2UMGPrototypeStepGraphAssembly.h"
 #include "DesignSchemaSourceExtensions.h"
+#include "UMGSchemaSourceExtensions.h"
 
 namespace
 {
@@ -79,7 +80,7 @@ namespace Design2UMGPrototypeStepGraph
 			Analysis.Data.SwitcherWidgetId = Design2UMGPrototypeRouting::MakeUniquePrototypeInternalToken(
 				RoutingContext.ReservedTokens,
 				RoutingContext.InternalTokenHash,
-				TEXT("switcher"));
+				Design2UMGPrototypeTokens::SwitcherSuffix());
 			Analysis.Data.SwitcherWidgetName = Analysis.Data.SwitcherWidgetId;
 			RoutingContext.ReservedTokens.Add(Analysis.Data.SwitcherWidgetId);
 		}

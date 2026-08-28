@@ -70,14 +70,21 @@ namespace DesignImportPipeline
 				return;
 			}
 
+			DesignImportDiagnosticReport::FImportReportArtifacts Artifacts;
+			Artifacts.ImageReport = Request.DiagnosticImageReportOverride.IsEmpty()
+				? Request.RuntimeImageReport
+				: Request.DiagnosticImageReportOverride;
+			Artifacts.RequestedOutputPath = Request.OutputPath;
+			Artifacts.RequestedRenderPngPath = Result.RenderPngPath.IsEmpty()
+				? Request.Generation.CompiledPngFilePath
+				: Result.RenderPngPath;
+			Artifacts.GeneratedAssetPath = Result.GeneratedAssetPath;
+			Artifacts.RenderPngPath = Result.RenderPngPath;
 			DesignImportDiagnosticReport::Write(
 				Request.DiagnosticDocument.GetValue(),
 				Data,
-				Request.DiagnosticImageReportOverride.IsEmpty() ? Request.RuntimeImageReport : Request.DiagnosticImageReportOverride,
-				Request.OutputPath,
-				Result.RenderPngPath.IsEmpty() ? Request.Generation.CompiledPngFilePath : Result.RenderPngPath,
-				Result.GeneratedAssetPath,
-				Result.RenderPngPath);
+				Artifacts,
+				&Result.ComponentMappingDiagnostics);
 		}
 
 		FArtifactGenerationResult GenerateArtifactsInternal(
@@ -87,12 +94,13 @@ namespace DesignImportPipeline
 			FArtifactGenerationRuntimeResult* OutRuntimeResult = nullptr)
 		{
 			FArtifactGenerationResult Result;
+			FDesign2UMGGenerationOutput GenerationOutput;
 			switch (Request.Generation.Mode)
 			{
 			case EDesignBlueprintGenerationMode::BlueprintOnly:
 			{
 				UWidgetBlueprint* GeneratedBlueprint =
-					DesignImportUtils::GenerateBlueprint(Data, Request.OutputPath, GenerationSettings);
+					DesignImportUtils::GenerateBlueprint(Data, Request.OutputPath, GenerationSettings, &GenerationOutput);
 				Result.bSucceeded = (GeneratedBlueprint != nullptr);
 				if (GeneratedBlueprint)
 				{
@@ -111,7 +119,8 @@ namespace DesignImportPipeline
 					Request.OutputPath,
 					&Result.GeneratedAssetPath,
 					&Result.RenderPngPath,
-					GenerationSettings);
+					GenerationSettings,
+					&GenerationOutput);
 				break;
 
 			case EDesignBlueprintGenerationMode::BlueprintAndCompiledPng:
@@ -121,12 +130,22 @@ namespace DesignImportPipeline
 					Request.Generation.CompiledPngFilePath,
 					&Result.GeneratedAssetPath,
 					&Result.RenderedSize,
-					GenerationSettings);
+					GenerationSettings,
+					&GenerationOutput);
 				if (Result.bSucceeded)
 				{
 					Result.RenderPngPath = Request.Generation.CompiledPngFilePath;
 				}
 				break;
+			}
+
+			Result.ComponentMappingDiagnostics = MoveTemp(GenerationOutput.MappingDiagnostics);
+			if (!Result.bSucceeded
+				&& Result.ComponentMappingDiagnostics.Num() == 0
+				&& GenerationSettings)
+			{
+				// 构建在组装输出前失败时，ini 校验诊断仍然要进报告。
+				Result.ComponentMappingDiagnostics.Append(GenerationSettings->ComponentMapping.ValidationDiagnostics);
 			}
 
 			MaybeWriteImportDiagnosticReport(Request, Data, Result);
@@ -347,14 +366,13 @@ namespace DesignImportPipeline
 		const FString& GeneratedAssetPath,
 		const FString& RenderPngPath)
 	{
-		DesignImportDiagnosticReport::Write(
-			Document,
-			Data,
-			ImageReport,
-			RequestedOutputPath,
-			RequestedRenderPngPath,
-			GeneratedAssetPath,
-			RenderPngPath);
+		DesignImportDiagnosticReport::FImportReportArtifacts Artifacts;
+		Artifacts.ImageReport = ImageReport;
+		Artifacts.RequestedOutputPath = RequestedOutputPath;
+		Artifacts.RequestedRenderPngPath = RequestedRenderPngPath;
+		Artifacts.GeneratedAssetPath = GeneratedAssetPath;
+		Artifacts.RenderPngPath = RenderPngPath;
+		DesignImportDiagnosticReport::Write(Document, Data, Artifacts);
 	}
 
 	bool LoadPenDocument(

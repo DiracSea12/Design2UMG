@@ -2,6 +2,7 @@
 
 #include "UMGWidgetUtils.h"
 #include "Design2UMGGenerationSettingsSnapshot.h"
+#include "Design2UMGComponentMappingGeneration.h"
 #include "WidgetTreeChildBuilder.h"
 #include "WidgetMetadataCollector.h"
 #include "WidgetResourceBinder.h"
@@ -140,11 +141,40 @@ namespace
 
 }
 
-UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords, const FIntPoint* ExplicitDesignSize)
+UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords, const FIntPoint* ExplicitDesignSize, FDesign2UMGComponentMappingBuildState* ComponentMappingState)
 {
+	FName WidgetName = SanitizeWidgetName(Node.Name, Node.Type);
+	if (FindObject<UObject>(WidgetTree, *WidgetName.ToString()))
+	{
+		for (int32 Suffix = 1; Suffix < 1000; ++Suffix)
+		{
+			FName Candidate = FName(*FString::Printf(TEXT("%s_%d"), *WidgetName.ToString(), Suffix));
+			if (!FindObject<UObject>(WidgetTree, *Candidate.ToString()))
+			{
+				WidgetName = Candidate;
+				break;
+			}
+		}
+	}
+
+	// Component Mapping 命中优先：以项目 WBP 类实例接入，组件内部子树不展开；
+	// 类缺失/加载失败时 TryCreateMappedWidget 已记录诊断并返回空，继续走普通路径。
+	if (ComponentMappingState
+		&& Node.HasSourceData()
+		&& !Node.Source().MappedComponentKey.IsEmpty())
+	{
+		if (UUserWidget* MappedInstance = Design2UMGComponentMappingGeneration::TryCreateMappedWidget(
+			WidgetTree, Node, WidgetName, *ComponentMappingState))
+		{
+			ComponentMappingState->OnWidgetConstructed(MappedInstance);
+			return MappedInstance;
+		}
+	}
+
 	UClass* WidgetClass = ResolveWidgetClass(Node.Type);
 	if (const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = Design2UMGGenerationSettingsContext::GetCurrent())
 	{
+		// 名称型 ClassOverride 只作用于未命中 Component Mapping 的普通节点。
 		if (UClass* Override = GenerationSettings->FindClassOverride(Node.Name))
 		{
 			WidgetClass = Override;
@@ -167,20 +197,6 @@ UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWid
 		return nullptr;
 	}
 
-	FName WidgetName = SanitizeWidgetName(Node.Name, Node.Type);
-	if (FindObject<UObject>(WidgetTree, *WidgetName.ToString()))
-	{
-		for (int32 Suffix = 1; Suffix < 1000; ++Suffix)
-		{
-			FName Candidate = FName(*FString::Printf(TEXT("%s_%d"), *WidgetName.ToString(), Suffix));
-			if (!FindObject<UObject>(WidgetTree, *Candidate.ToString()))
-			{
-				WidgetName = Candidate;
-				break;
-			}
-		}
-	}
-
 	UWidget* NewWidget = WidgetTree->ConstructWidget<UWidget>(WidgetClass, WidgetName);
 	if (!NewWidget)
 	{
@@ -188,21 +204,28 @@ UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWid
 		return nullptr;
 	}
 
+	if (ComponentMappingState)
+	{
+		// 根 widget 的捕获必须发生在子节点构建之前（BuildChildren 在下面立刻执行）。
+		ComponentMappingState->OnWidgetConstructed(NewWidget);
+	}
+
 	const FWidgetTreeChildBuildContext Context{
 		TextureMap,
 		FigmaMetadataRecords,
-		ExplicitDesignSize
+		ExplicitDesignSize,
+		ComponentMappingState
 	};
 	FWidgetTreeChildBuilder::BuildChildren(WidgetTree, NewWidget, Node, Context);
 
 	return NewWidget;
 }
 
-UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords, const FIntPoint* ExplicitDesignSize)
+UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords, const FIntPoint* ExplicitDesignSize, FDesign2UMGComponentMappingBuildState* ComponentMappingState)
 {
 	const FIntPoint EffectiveDesignSize = ResolveEffectiveDesignSize(Node, ExplicitDesignSize);
 
-	UWidget* NewWidget = BuildWidgetTree(WidgetTree, Node, TextureMap, FigmaMetadataRecords, &EffectiveDesignSize);
+	UWidget* NewWidget = BuildWidgetTree(WidgetTree, Node, TextureMap, FigmaMetadataRecords, &EffectiveDesignSize, ComponentMappingState);
 	if (!NewWidget)
 	{
 		return nullptr;
@@ -229,6 +252,24 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 
 	ApplyWidgetProperties(NewWidget, Node);
 	FWidgetMetadataCollector::TryAppend(NewWidget, Node, FigmaMetadataRecords);
+
+	// mapped 实例：显式 design-facing inputs 在通用属性之后写入（声明值优先于设计默认值）。
+	if (ComponentMappingState
+		&& Node.HasSourceData()
+		&& !Node.Source().MappedComponentKey.IsEmpty())
+	{
+		if (UUserWidget* MappedInstance = Cast<UUserWidget>(NewWidget))
+		{
+			Design2UMGComponentMappingGeneration::ApplyMappedComponentInputs(
+				MappedInstance, Node, *ComponentMappingState);
+		}
+	}
+
+	// 记录顶层生成节点（mapped 实例已在创建时登记），供 manifest 组装。
+	if (ComponentMappingState)
+	{
+		ComponentMappingState->RecordCreatedWidget(Node, NewWidget, ParentWidget);
+	}
 
 	if (UImage* ImageWidget = Cast<UImage>(NewWidget))
 	{
@@ -286,11 +327,33 @@ FName FUMGWidgetUtils::SanitizeWidgetName(const FString& InName, const FString& 
 		Sanitized = FallbackPrefix + TEXT("_Widget");
 	}
 
+	// FName 对「单下划线 + 数字」形态（如 "_127"）会解析成 NAME_None，数字开头的名字
+	// 必须用字母前缀保住确定性（否则 NewObject 落到自动名，reimport 的同名匹配失效）。
 	if (Sanitized.Len() > 0 && FChar::IsDigit(Sanitized[0]))
 	{
-		Sanitized = TEXT("_") + Sanitized;
+		Sanitized = TEXT("W") + Sanitized;
 	}
 
 	return FName(*Sanitized);
+}
+
+bool FUMGWidgetUtils::MatchesWidgetBaseName(const FString& WidgetName, const FString& BaseName)
+{
+	if (WidgetName == BaseName)
+	{
+		return true;
+	}
+	return WidgetName.StartsWith(BaseName + TEXT("_"))
+		&& WidgetName.Len() > BaseName.Len() + 1
+		&& WidgetName.RightChop(BaseName.Len() + 1).IsNumeric();
+}
+
+int32 FUMGWidgetUtils::GetWidgetNameSuffixRank(const FString& WidgetName, const FString& BaseName)
+{
+	if (WidgetName == BaseName)
+	{
+		return 0;
+	}
+	return FCString::Atoi(*WidgetName.RightChop(BaseName.Len() + 1));
 }
 

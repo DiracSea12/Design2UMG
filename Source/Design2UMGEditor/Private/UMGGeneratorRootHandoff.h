@@ -8,6 +8,7 @@
 
 class UWidget;
 class UWidgetBlueprint;
+class FDesign2UMGComponentMappingBuildState;
 
 namespace UMGGeneratorRootHandoff
 {
@@ -25,5 +26,6 @@ namespace UMGGeneratorRootHandoff
 	UWidget* CreateRootWidget(
 		UWidgetBlueprint* WidgetBlueprint,
 		const FPreparedRoot& PreparedRoot,
-		TArray<FDesign2UMGFigmaWidgetMetadataRecord>& OutFigmaMetadataRecords);
+		TArray<FDesign2UMGFigmaWidgetMetadataRecord>& OutFigmaMetadataRecords,
+		FDesign2UMGComponentMappingBuildState* ComponentMappingState = nullptr);
 }

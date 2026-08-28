@@ -77,6 +77,14 @@ struct FUMGSourceNodeData
 	UPROPERTY()
 	TOptional<bool> HasIsExposedInstance;
 
+	/** 转换期标记：该节点带有可解析的 Figma 组件身份，是 Component Mapping 的候选节点。 */
+	UPROPERTY()
+	bool bMappedComponentCandidate = false;
+
+	/** Editor 生成期标记：命中的项目级 mapping Key（Provider|DocumentScope|ComponentKey）。空表示未命中。 */
+	UPROPERTY()
+	FString MappedComponentKey;
+
 	bool IsInstance() const
 	{
 		return SourceNodeType.Equals(TEXT("INSTANCE"), ESearchCase::IgnoreCase)
@@ -89,20 +97,6 @@ struct FUMGSourceNodeData
 	bool IsComponentDefinition() const { return SourceNodeType.Equals(TEXT("COMPONENT"), ESearchCase::IgnoreCase); }
 	bool IsComponentSet() const { return SourceNodeType.Equals(TEXT("COMPONENT_SET"), ESearchCase::IgnoreCase); }
 	bool HasAnyComponentSemantics() const { return IsInstance() || IsComponentDefinition() || IsComponentSet(); }
-
-	bool HasAnyData() const
-	{
-		return !SourceNodeId.IsEmpty()
-			|| !SourceNodeName.IsEmpty()
-			|| !SourceNodeType.IsEmpty()
-			|| !ComponentId.IsEmpty()
-			|| !ComponentSetId.IsEmpty()
-			|| !MainComponentKey.IsEmpty()
-			|| !ComponentPropertiesJson.IsEmpty()
-			|| !VariantPropertiesJson.IsEmpty()
-			|| !OverridesJson.IsEmpty()
-			|| HasIsExposedInstance.IsSet();
-	}
 };
 
 USTRUCT()
@@ -112,6 +106,14 @@ struct FUMGSourceDocumentData
 
 	UPROPERTY() FString ComponentsJson;
 	UPROPERTY() FString ComponentSetsJson;
+
+	/** 文档级设计来源身份："figma" | "pencil"（规范值见 DesignComponentMapping::Provider*）。由 Converter 在 StampDocumentComponentIdentity 时写入。 */
+	UPROPERTY() FString Provider;
+
+	/** DocumentScope 统一解析结果（Figma：file key，缺省用导入源标识），供 mapping 匹配与 manifest 使用。 */
+	UPROPERTY() FString DocumentScope;
+	/** DocumentScope 的来源说明："fileKey" | "importSource" | "unresolved"。 */
+	UPROPERTY() FString DocumentScopeOrigin;
 
 	bool HasAnyComponentCatalog() const { return !ComponentsJson.IsEmpty() || !ComponentSetsJson.IsEmpty(); }
 };
@@ -148,7 +150,6 @@ struct FUMGPrototypeNavigationStep
 	bool RequiresPageTarget() const { return Kind == EUMGPrototypeNavigationStepKind::Navigate || Kind == EUMGPrototypeNavigationStepKind::Overlay; }
 	bool RequiresSwitcher() const { return Kind == EUMGPrototypeNavigationStepKind::Navigate || Kind == EUMGPrototypeNavigationStepKind::Overlay || Kind == EUMGPrototypeNavigationStepKind::Back; }
 	bool IsOverlayAction() const { return Kind == EUMGPrototypeNavigationStepKind::Overlay; }
-	bool IsTerminalAction() const { return Kind == EUMGPrototypeNavigationStepKind::Navigate || Kind == EUMGPrototypeNavigationStepKind::Overlay || Kind == EUMGPrototypeNavigationStepKind::Back || Kind == EUMGPrototypeNavigationStepKind::OpenLink; }
 
 	bool IsValid() const
 	{
@@ -261,3 +262,19 @@ struct FUMGPrototypeNavigationData
 		return !HasOverlayBindings() || HasOverlayLayer();
 	}
 };
+
+/**
+ * 多页原型合成 token 的跨模块协议常量：Core（组装侧）与 Editor（reimport 宿主延续
+ * 判定侧）共用同一来源，任一端改字面量都会静默破坏对账——常量化让漂移变成编译错误。
+ */
+namespace Design2UMGPrototypeTokens
+{
+	/** 合成 token 通用前缀（Design2UMGPrototypeRouting 组装 <前缀><suffix>_<hash8>）。 */
+	DESIGN2UMGCORE_API const TCHAR* TokenPrefix();
+	/** switcher 本体的 suffix（组装侧传入 MakeUniquePrototypeInternalToken）。 */
+	DESIGN2UMGCORE_API const TCHAR* SwitcherSuffix();
+	/** switcher 本体合成根 id 的完整前缀（TokenPrefix + SwitcherSuffix + "_"）。 */
+	DESIGN2UMGCORE_API const FString& SwitcherRootPrefix();
+	/** overlay 包裹根 id = switcher 本体根 id + 该后缀（Design2UMGPrototypeNavigation 组装）。 */
+	DESIGN2UMGCORE_API const TCHAR* OverlayRootSuffix();
+}

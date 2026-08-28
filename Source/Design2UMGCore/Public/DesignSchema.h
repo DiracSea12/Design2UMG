@@ -217,16 +217,6 @@ struct FDesignTransformNodeData
 	{
 		return HasExplicitX() || HasExplicitY();
 	}
-
-	bool HasExplicitSize() const
-	{
-		return bHasWidth || bHasHeight;
-	}
-
-	bool HasSourceExplicitSize() const
-	{
-		return bSourceHasWidth || bSourceHasHeight;
-	}
 };
 
 /**
@@ -264,11 +254,6 @@ struct DESIGN2UMGCORE_API FDesignNode
 	bool IsContainer() const
 	{
 		return Type == EDesignNodeType::Frame || Type == EDesignNodeType::Group;
-	}
-
-	bool HasVisualProperties() const
-	{
-		return Visual.Fills.Num() > 0 || Visual.Stroke.HasStroke() || Visual.CornerRadius.HasRadius();
 	}
 
 	bool HasMultiFill() const

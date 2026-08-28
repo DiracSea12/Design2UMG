@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Design2UMGSettings.h"
+#include "Design2UMGComponentMappingConfig.h"
 
 class UClass;
 struct FDesignPreviewMaterializationSettingsSnapshot;
@@ -13,6 +14,13 @@ struct FDesign2UMGGenerationSettingsSnapshot
 	EDesign2UMGPrototypeNavigationGenerationMode PrototypeNavigationGenerationMode =
 		EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension;
 	TArray<FWidgetClassOverride> ClassOverrides;
+
+	/**
+	 * 项目级 Component Mapping 配置（Config/Design2UMGComponentMapping.ini 的加载结果）。
+	 * 随导入设置快照传入生成链，生命周期与快照一致，不落全局对象；
+	 * 预览物化（preview narrowing）不带 mapping。
+	 */
+	FDesign2UMGComponentMappingConfig ComponentMapping;
 
 	static FDesign2UMGGenerationSettingsSnapshot FromSettings(const UDesign2UMGSettings& Settings);
 	static FDesign2UMGGenerationSettingsSnapshot FromMaterializationSettings(

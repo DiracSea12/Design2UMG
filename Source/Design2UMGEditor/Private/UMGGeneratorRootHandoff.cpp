@@ -2,6 +2,7 @@
 
 #include "UMGGeneratorRootHandoff.h"
 
+#include "Design2UMGComponentMappingGeneration.h"
 #include "Design2UMGLog.h"
 #include "PreBuildResourceNormalizer.h"
 #include "UMGWidgetUtils.h"
@@ -43,19 +44,29 @@ namespace UMGGeneratorRootHandoff
 	UWidget* CreateRootWidget(
 		UWidgetBlueprint* WidgetBlueprint,
 		const FPreparedRoot& PreparedRoot,
-		TArray<FDesign2UMGFigmaWidgetMetadataRecord>& OutFigmaMetadataRecords)
+		TArray<FDesign2UMGFigmaWidgetMetadataRecord>& OutFigmaMetadataRecords,
+		FDesign2UMGComponentMappingBuildState* ComponentMappingState)
 	{
 		if (!WidgetBlueprint || !WidgetBlueprint->WidgetTree)
 		{
 			return nullptr;
 		}
 
-		return FUMGWidgetUtils::CreateWidgetRecursive(
+		// 根 widget 构建前打标记：构建状态用它在子节点构建前捕获根指针，
+		// manifest 才能把根的直属子节点识别为顶层生成关系。
+		if (ComponentMappingState)
+		{
+			ComponentMappingState->BeginRootBuild();
+		}
+
+		UWidget* RootWidget = FUMGWidgetUtils::CreateWidgetRecursive(
 			WidgetBlueprint->WidgetTree,
 			PreparedRoot.Root,
 			nullptr,
 			nullptr,
 			&OutFigmaMetadataRecords,
-			&PreparedRoot.DesignSize);
+			&PreparedRoot.DesignSize,
+			ComponentMappingState);
+		return RootWidget;
 	}
 }

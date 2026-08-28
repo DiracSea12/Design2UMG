@@ -32,16 +32,6 @@ const FDesign2UMGFigmaWidgetMetadataRecord* UDesign2UMGFigmaMetadataClassExtensi
 		});
 }
 
-const FDesign2UMGFigmaWidgetMetadataRecord* UDesign2UMGFigmaMetadataClassExtension::FindRecordByWidgetName(
-	const FName WidgetName) const
-{
-	return WidgetRecords.FindByPredicate(
-		[WidgetName](const FDesign2UMGFigmaWidgetMetadataRecord& Record)
-		{
-			return Record.WidgetName == WidgetName;
-		});
-}
-
 #if WITH_EDITOR
 bool UDesign2UMGFigmaMetadataClassExtension::VerifyBindings(const UWidgetTree* WidgetTree) const
 {

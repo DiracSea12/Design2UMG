@@ -3,6 +3,34 @@
 #include "Design2UMGPrototypeRouting.h"
 
 #include "Misc/Crc.h"
+#include "UMGSchemaSourceExtensions.h"
+
+namespace Design2UMGPrototypeTokens
+{
+	const TCHAR* TokenPrefix()
+	{
+		static const TCHAR* Value = TEXT("__d2u_prototype_");
+		return Value;
+	}
+
+	const TCHAR* SwitcherSuffix()
+	{
+		static const TCHAR* Value = TEXT("switcher");
+		return Value;
+	}
+
+	const FString& SwitcherRootPrefix()
+	{
+		static const FString Value = FString::Printf(TEXT("%s%s_"), TokenPrefix(), SwitcherSuffix());
+		return Value;
+	}
+
+	const TCHAR* OverlayRootSuffix()
+	{
+		static const TCHAR* Value = TEXT("_root");
+		return Value;
+	}
+}
 
 namespace Design2UMGPrototypeRouting
 {
@@ -88,7 +116,8 @@ namespace Design2UMGPrototypeRouting
 	{
 		const FString SanitizedSuffix = SanitizePrototypeTokenSuffix(Suffix);
 		const FString BaseToken = FString::Printf(
-			TEXT("__d2u_prototype_%s_%08x"),
+			TEXT("%s%s_%08x"),
+			Design2UMGPrototypeTokens::TokenPrefix(),
 			*SanitizedSuffix,
 			PrototypeInternalTokenHash);
 
