@@ -295,21 +295,13 @@ namespace DesignRemoteImageImporterInternal
 		return true;
 	}
 
-	bool FImagePayloadIO::DownloadUrl(
-		const FString& Url,
+	void FImagePayloadIO::DownloadUrls(
+		const TArray<FString>& Urls,
 		const float TimeoutSeconds,
 		const bool bAllowUnsafeRemoteUrls,
 		const FImageResourceLimits& Limits,
-		TArray<uint8>& OutData,
-		FString& OutError)
+		TMap<FString, FUrlDownloadResult>& OutResults)
 	{
-		OutData.Reset();
-		OutError.Reset();
-		if (!ValidateRemoteUrl(Url, bAllowUnsafeRemoteUrls, OutError))
-		{
-			return false;
-		}
-
 		struct FDownloadState
 		{
 			FCriticalSection Mutex;
@@ -320,94 +312,132 @@ namespace DesignRemoteImageImporterInternal
 			TArray<uint8> Downloaded;
 			FString ErrorString;
 		};
-		const TSharedRef<FDownloadState, ESPMode::ThreadSafe> State = MakeShared<FDownloadState, ESPMode::ThreadSafe>();
+		struct FPendingRequest
+		{
+			FString Url;
+			TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request;
+			TSharedRef<FDownloadState, ESPMode::ThreadSafe> State;
+		};
 
-		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
-		Request->SetURL(Url);
-		Request->SetVerb(TEXT("GET"));
-		Request->SetHeader(TEXT("User-Agent"), TEXT("Design2UMG/RemoteImageImporter"));
-		Request->SetTimeout(FMath::Max(1.0f, TimeoutSeconds));
-		Request->OnRequestProgress64().BindLambda(
-			[State, MaxCompressedBytes = Limits.MaxCompressedBytes](FHttpRequestPtr ProgressRequest, uint64, uint64 BytesReceived)
+		const float EffectiveTimeoutSeconds = FMath::Max(1.0f, TimeoutSeconds);
+		const double Deadline = FPlatformTime::Seconds() + EffectiveTimeoutSeconds;
+		TArray<FPendingRequest> Pending;
+
+		for (const FString& Url : Urls)
+		{
+			FUrlDownloadResult& Result = OutResults.FindOrAdd(Url);
+			Result.bSuccess = false;
+			Result.Data.Reset();
+			Result.Error.Reset();
+			if (!ValidateRemoteUrl(Url, bAllowUnsafeRemoteUrls, Result.Error))
 			{
-				if (BytesReceived > MaxCompressedBytes)
+				continue;
+			}
+
+			const TSharedRef<FDownloadState, ESPMode::ThreadSafe> State = MakeShared<FDownloadState, ESPMode::ThreadSafe>();
+			TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
+			Request->SetURL(Url);
+			Request->SetVerb(TEXT("GET"));
+			Request->SetHeader(TEXT("User-Agent"), TEXT("Design2UMG/RemoteImageImporter"));
+			Request->SetTimeout(EffectiveTimeoutSeconds);
+			Request->OnRequestProgress64().BindLambda(
+				[State, MaxCompressedBytes = Limits.MaxCompressedBytes](FHttpRequestPtr ProgressRequest, uint64, uint64 BytesReceived)
 				{
-					State->bPayloadLimitExceeded = true;
-					ProgressRequest->CancelRequest();
-				}
-			});
-		Request->OnProcessRequestComplete().BindLambda(
-			[State, Limits](FHttpRequestPtr, FHttpResponsePtr Response, bool bWasSuccessful)
-			{
-				FScopeLock Lock(&State->Mutex);
-				if (State->bPayloadLimitExceeded)
-				{
-					State->ErrorString = TEXT("Image payload exceeded the byte limit during download");
-				}
-				else if (!bWasSuccessful || !Response.IsValid())
-				{
-					State->ErrorString = TEXT("Network request failed");
-				}
-				else
-				{
-					State->ResponseCode = Response->GetResponseCode();
-					if (State->ResponseCode < 200 || State->ResponseCode >= 300)
+					if (BytesReceived > MaxCompressedBytes)
 					{
-						State->ErrorString = FString::Printf(TEXT("Server returned an error (HTTP %d)"), State->ResponseCode);
+						State->bPayloadLimitExceeded = true;
+						ProgressRequest->CancelRequest();
 					}
-					else if (ValidateCompressedByteCount(Response->GetContentLength(), Limits, State->ErrorString))
+				});
+			Request->OnProcessRequestComplete().BindLambda(
+				[State, Limits](FHttpRequestPtr, FHttpResponsePtr Response, bool bWasSuccessful)
+				{
+					FScopeLock Lock(&State->Mutex);
+					if (State->bPayloadLimitExceeded)
 					{
-						const TArray<uint8>& ResponseContent = Response->GetContent();
-						if (ValidateCompressedByteCount(static_cast<uint64>(ResponseContent.Num()), Limits, State->ErrorString))
+						State->ErrorString = TEXT("Image payload exceeded the byte limit during download");
+					}
+					else if (!bWasSuccessful || !Response.IsValid())
+					{
+						State->ErrorString = TEXT("Network request failed");
+					}
+					else
+					{
+						State->ResponseCode = Response->GetResponseCode();
+						if (State->ResponseCode < 200 || State->ResponseCode >= 300)
 						{
-							State->Downloaded = ResponseContent;
-							if (State->Downloaded.Num() == 0)
+							State->ErrorString = FString::Printf(TEXT("Server returned an error (HTTP %d)"), State->ResponseCode);
+						}
+						else if (ValidateCompressedByteCount(Response->GetContentLength(), Limits, State->ErrorString))
+						{
+							const TArray<uint8>& ResponseContent = Response->GetContent();
+							if (ValidateCompressedByteCount(static_cast<uint64>(ResponseContent.Num()), Limits, State->ErrorString))
 							{
-								State->ErrorString = TEXT("Server returned an empty response");
-							}
-							else
-							{
-								State->bSuccess = true;
+								State->Downloaded = ResponseContent;
+								if (State->Downloaded.Num() == 0)
+								{
+									State->ErrorString = TEXT("Server returned an empty response");
+								}
+								else
+								{
+									State->bSuccess = true;
+								}
 							}
 						}
 					}
-				}
-				State->bDone = true;
-			});
+					State->bDone = true;
+				});
 
-		if (!Request->ProcessRequest())
-		{
-			OutError = TEXT("Unable to start network request");
-			return false;
+			if (!Request->ProcessRequest())
+			{
+				Result.Error = TEXT("Unable to start network request");
+				continue;
+			}
+			Pending.Add({ Url, Request, State });
 		}
 
 		FHttpManager& HttpManager = FHttpModule::Get().GetHttpManager();
-		const double Deadline = FPlatformTime::Seconds() + FMath::Max(1.0f, TimeoutSeconds);
-		while (!State->bDone && FPlatformTime::Seconds() < Deadline)
+		bool bAllDone = Pending.Num() == 0;
+		while (!bAllDone && FPlatformTime::Seconds() < Deadline)
 		{
 			HttpManager.Tick(HttpWaitTickSeconds);
 			FPlatformProcess::Sleep(HttpWaitTickSeconds);
-		}
-		if (!State->bDone)
-		{
-			Request->CancelRequest();
-			Request->OnRequestProgress64().Unbind();
-			Request->OnProcessRequestComplete().Unbind();
-			OutError = TEXT("Network request timed out");
-			return false;
-		}
-
-		FScopeLock Lock(&State->Mutex);
-		if (!State->bSuccess)
-		{
-			OutError = State->ErrorString.IsEmpty()
-				? FString::Printf(TEXT("Network request failed (HTTP %d)"), State->ResponseCode)
-				: State->ErrorString;
-			return false;
+			bAllDone = true;
+			for (const FPendingRequest& Entry : Pending)
+			{
+				if (!Entry.State->bDone)
+				{
+					bAllDone = false;
+					break;
+				}
+			}
 		}
 
-		OutData = MoveTemp(State->Downloaded);
-		return true;
+		for (FPendingRequest& Entry : Pending)
+		{
+			FUrlDownloadResult& Result = OutResults.FindOrAdd(Entry.Url);
+			if (!Entry.State->bDone)
+			{
+				Entry.Request->CancelRequest();
+				Entry.Request->OnRequestProgress64().Unbind();
+				Entry.Request->OnProcessRequestComplete().Unbind();
+				Result.Error = TEXT("Network request timed out");
+				continue;
+			}
+
+			FScopeLock Lock(&Entry.State->Mutex);
+			if (Entry.State->bSuccess)
+			{
+				Result.bSuccess = true;
+				Result.Data = MoveTemp(Entry.State->Downloaded);
+			}
+			else
+			{
+				Result.Error = Entry.State->ErrorString.IsEmpty()
+					? FString::Printf(TEXT("Network request failed (HTTP %d)"), Entry.State->ResponseCode)
+					: Entry.State->ErrorString;
+			}
+		}
 	}
 
 	bool FImagePayloadIO::DecodeToBGRA8(

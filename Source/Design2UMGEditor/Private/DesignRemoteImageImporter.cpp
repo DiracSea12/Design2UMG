@@ -24,6 +24,7 @@ namespace
 	using DesignRemoteImageImporterInternal::FImagePayloadIO;
 	using DesignRemoteImageImporterInternal::FImageResourceLimits;
 	using DesignRemoteImageImporterInternal::FResolveContext;
+	using DesignRemoteImageImporterInternal::FUrlDownloadResult;
 
 	bool IsRemoteUrl(const FString& Value)
 	{
@@ -530,15 +531,18 @@ namespace
 			return true;
 		}
 
-		TArray<uint8> CompressedData;
-		FString DownloadError;
-		if (!FImagePayloadIO::DownloadUrl(NormalizedUrl, Context.TimeoutSeconds, Context.bAllowUnsafeRemoteUrls, Context.ImageLimits, CompressedData, DownloadError))
+		// UrlDownloads is pre-populated by ResolveRemoteImages for every URL that
+		// CollectRemoteUrls gathered (same trim/is-remote/normalize logic as here).
+		const FUrlDownloadResult& Download = Context.UrlDownloads.FindChecked(NormalizedUrl);
+		if (!Download.bSuccess)
 		{
 			++Context.Report.FailedCount;
-			Context.Report.AddMessage(FString::Printf(TEXT("Image '%s' download failed: %s (reason: %s)"), *WidgetName, *NormalizedUrl, *DownloadError));
+			Context.Report.AddMessage(FString::Printf(TEXT("Image '%s' download failed: %s (reason: %s)"), *WidgetName, *NormalizedUrl, *Download.Error));
 			return false;
 		}
-		if (!Context.OperationBudget.ConsumeCompressedBytes(static_cast<uint64>(CompressedData.Num()), DownloadError))
+		const TArray<uint8>& CompressedData = Download.Data;
+	FString DownloadError;
+	if (!Context.OperationBudget.ConsumeCompressedBytes(static_cast<uint64>(CompressedData.Num()), DownloadError))
 		{
 			++Context.Report.FailedCount;
 			Context.Report.AddMessage(FString::Printf(TEXT("Image '%s' exceeds the operation budget: %s"), *WidgetName, *DownloadError));
@@ -697,6 +701,16 @@ bool FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, 
 	Context.bAllowUnsafeRemoteUrls = Settings->bAllowUnsafeRemoteImageUrls;
 	Context.FrameName = InOutData.WidgetName;
 
+	if (RemoteUrls.Num() > 0)
+	{
+		FImagePayloadIO::DownloadUrls(
+			RemoteUrls.Array(),
+			Context.TimeoutSeconds,
+			Context.bAllowUnsafeRemoteUrls,
+			Context.ImageLimits,
+			Context.UrlDownloads);
+	}
+
 	ResolveNodeRecursive(InOutData.RootWidget, Context);
 	if (Context.bTextureResourceUpdatePending)
 	{
@@ -765,19 +779,32 @@ void FDesignRemoteImageImporter::ResolveTransientTextures(const FUMGWidgetNode& 
 		return;
 	}
 
+	TArray<FString> PendingUrls;
 	for (const FString& Url : Urls)
 	{
-		if (OutTextureMap.Contains(Url)) continue;
-
-		TArray<uint8> CompressedData;
-		FString Error;
-		if (!FImagePayloadIO::DownloadUrl(NormalizeUrl(Url), Timeout, Settings->bAllowUnsafeRemoteImageUrls, ImageLimits, CompressedData, Error))
+		if (!OutTextureMap.Contains(Url))
 		{
-			UE_LOG(LogDesign2UMG, Verbose, TEXT("Transient download failed: %s (%s)"), *Url, *Error);
-			UE_LOG(LogDesign2UMG, Warning, TEXT("Image download failed: %s (reason: %s)"), *Url, *Error);
+			PendingUrls.Add(Url);
+		}
+	}
+
+	TMap<FString, FUrlDownloadResult> Downloads;
+	if (PendingUrls.Num() > 0)
+	{
+		FImagePayloadIO::DownloadUrls(PendingUrls, Timeout, Settings->bAllowUnsafeRemoteImageUrls, ImageLimits, Downloads);
+	}
+
+	for (const FString& Url : PendingUrls)
+	{
+		const FUrlDownloadResult& Download = Downloads.FindChecked(Url);
+		if (!Download.bSuccess)
+		{
+			UE_LOG(LogDesign2UMG, Verbose, TEXT("Transient download failed: %s (%s)"), *Url, *Download.Error);
+			UE_LOG(LogDesign2UMG, Warning, TEXT("Image download failed: %s (reason: %s)"), *Url, *Download.Error);
 			continue;
 		}
-		if (!OperationBudget.ConsumeCompressedBytes(static_cast<uint64>(CompressedData.Num()), Error))
+		FString Error;
+		if (!OperationBudget.ConsumeCompressedBytes(static_cast<uint64>(Download.Data.Num()), Error))
 		{
 			UE_LOG(LogDesign2UMG, Warning, TEXT("Transient image operation budget exceeded: %s"), *Error);
 			break;
@@ -785,7 +812,7 @@ void FDesignRemoteImageImporter::ResolveTransientTextures(const FUMGWidgetNode& 
 
 		int32 Width = 0, Height = 0;
 		TArray64<uint8> RawBGRA;
-		if (!FImagePayloadIO::DecodeToBGRA8(CompressedData, ImageLimits, Width, Height, RawBGRA, Error, &OperationBudget))
+		if (!FImagePayloadIO::DecodeToBGRA8(Download.Data, ImageLimits, Width, Height, RawBGRA, Error, &OperationBudget))
 		{
 			UE_LOG(LogDesign2UMG, Verbose, TEXT("Transient decode failed: %s (%s)"), *Url, *Error);
 			UE_LOG(LogDesign2UMG, Warning, TEXT("Image decode failed: %s (reason: %s)"), *Url, *Error);

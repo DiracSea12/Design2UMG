@@ -10,6 +10,10 @@
 
 static const FString FigmaApiBase = TEXT("https://api.figma.com");
 
+// Figma GetFile returns the full document JSON, which can be large; give the
+// request more headroom than the MCP transport's 30s timeout.
+constexpr float FigmaHttpRequestTimeoutSeconds = 60.0f;
+
 #if WITH_DEV_AUTOMATION_TESTS
 namespace
 {
@@ -153,6 +157,7 @@ void FFigmaHttpClient::SendGet(const FString& Url, FOnComplete OnComplete)
 	Request->SetURL(Url);
 	Request->SetVerb(TEXT("GET"));
 	Request->SetHeader(TEXT("X-Figma-Token"), Token);
+	Request->SetTimeout(FigmaHttpRequestTimeoutSeconds);
 
 	Request->OnProcessRequestComplete().BindLambda(
 		[State = State, RequestId, SharedOnComplete](FHttpRequestPtr CompletedRequest, FHttpResponsePtr Response, bool bConnected)

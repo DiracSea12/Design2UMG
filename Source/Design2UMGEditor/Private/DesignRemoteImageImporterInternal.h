@@ -52,6 +52,13 @@ namespace DesignRemoteImageImporterInternal
 		FString BuildSummary(const FString& ImportPath) const;
 	};
 
+	struct FUrlDownloadResult
+	{
+		bool bSuccess = false;
+		TArray<uint8> Data;
+		FString Error;
+	};
+
 	struct FResolveContext
 	{
 		FString ImportPath;
@@ -65,6 +72,7 @@ namespace DesignRemoteImageImporterInternal
 		FResolveReport Report;
 		TMap<FString, FString> UrlToAssetPath;
 		TMap<FString, FString> ContentHashToAsset;
+		TMap<FString, FUrlDownloadResult> UrlDownloads;
 	};
 
 	class FImagePayloadIO
@@ -79,13 +87,16 @@ namespace DesignRemoteImageImporterInternal
 			const FImageResourceLimits& Limits,
 			TArray<uint8>& OutData,
 			FString& OutError);
-		static bool DownloadUrl(
-			const FString& Url,
+		// Downloads all URLs concurrently: every request is started first, then a
+		// single deadline loop ticks the HttpManager until all requests complete.
+		// The deadline spans the whole batch (TimeoutSeconds measured from batch
+		// start, not per URL). Synchronous; fills one result per URL.
+		static void DownloadUrls(
+			const TArray<FString>& Urls,
 			float TimeoutSeconds,
 			bool bAllowUnsafeRemoteUrls,
 			const FImageResourceLimits& Limits,
-			TArray<uint8>& OutData,
-			FString& OutError);
+			TMap<FString, FUrlDownloadResult>& OutResults);
 		static bool DecodeToBGRA8(
 			const TArray<uint8>& CompressedData,
 			const FImageResourceLimits& Limits,
