@@ -541,8 +541,8 @@ namespace
 			return false;
 		}
 		const TArray<uint8>& CompressedData = Download.Data;
-	FString DownloadError;
-	if (!Context.OperationBudget.ConsumeCompressedBytes(static_cast<uint64>(CompressedData.Num()), DownloadError))
+		FString DownloadError;
+		if (!Context.OperationBudget.ConsumeCompressedBytes(static_cast<uint64>(CompressedData.Num()), DownloadError))
 		{
 			++Context.Report.FailedCount;
 			Context.Report.AddMessage(FString::Printf(TEXT("Image '%s' exceeds the operation budget: %s"), *WidgetName, *DownloadError));
