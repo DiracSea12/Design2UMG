@@ -7,6 +7,7 @@
 #include "DesignRemoteImageImporter.h"
 #include "Design2UMGLog.h"
 #include "PreviewUserWidget.h"
+#include "ProceduralShapeGenerator.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Blueprint/UserWidget.h"
@@ -57,6 +58,13 @@ bool FDesignPreviewMaterializationService::MaterializePreview(const FDesignPrevi
 	OutResult.bSucceeded = true;
 	OutResult.PreviewDesignSize = PreviewDesignSize;
 	OutResult.MaterializedWidgetName = Request.ApprovedSnapshot.Data.WidgetName;
+
+	// Preview materialization completion point: the preview widget owns its procedural
+	// textures through its brush UPROPERTYs (FSlateBrush::ResourceObject), so the
+	// per-import root ledger can be dropped here - textures from previous refreshes
+	// lost their last strong reference with the destroyed preview widget and become
+	// GC-eligible. Failure paths above return early and keep the roots (old behavior).
+	FProceduralShapeGenerator::ReleaseTransientTextures();
 	return true;
 }
 

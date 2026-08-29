@@ -281,6 +281,14 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FUMGProcedu
 			{
 				BoxShadowBlurPadding = FMath::Max(0.0f, static_cast<float>(NumVal));
 			}
+			// Thickness/CornerRadius/CornerRadii arrive in two source-side conventions with no
+			// unit marker in the payload: design-tool percentages (0-100) and normalized
+			// fractions (0-1). Values > 1.0 are treated as percentages and divided by 100;
+			// values <= 1.0 are already normalized and pass through unchanged.
+			// Known ambiguity: a value like 1.5 is read as 1.5%, not 150%, and lands near
+			// zero after the division. This cannot be tightened to a smarter cutoff without
+			// a unit flag in the source schema: any change to the >1.0 rule re-renders every
+			// existing design that relies on the current interpretation.
 			if (Params->TryGetNumberField(MaterialParamThicknessKey, NumVal))
 			{
 				Thickness = NumVal > 1.0 ? static_cast<float>(NumVal) / 100.0f : static_cast<float>(NumVal);
@@ -296,6 +304,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FUMGProcedu
 				for (int32 Index = 0; Index < 4; ++Index)
 				{
 					const double RadiusValue = (*RadiiArr)[Index]->AsNumber();
+					// Same percentage-vs-normalized convention as Thickness/CornerRadius above.
 					CornerRadii[Index] = RadiusValue > 1.0
 						? static_cast<float>(RadiusValue) / 100.0f
 						: static_cast<float>(RadiusValue);

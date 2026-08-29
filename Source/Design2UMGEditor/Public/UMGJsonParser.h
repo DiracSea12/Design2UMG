@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "UMGSchemaFoundation.h"
+#include "UMGSchemaTypedPayloads.h"
 
 struct FUMGWidgetData;
 struct FUMGWidgetNode;
@@ -26,6 +27,17 @@ public:
 
 private:
 	static bool ParseWidgetNode(const TSharedPtr<class FJsonObject>& JsonObject, FUMGWidgetNode& OutNode);
+	// Per-payload section parsers: each reads its own section key from the node object.
+	static void ParseTextStylePayload(const TSharedPtr<class FJsonObject>& NodeObject, FUMGTextStyleData& OutTextStyle);
+	static void ParseWidgetStylePayload(const TSharedPtr<class FJsonObject>& NodeObject, FUMGWidgetStyleData& OutWidgetStyle);
+	static void ParseTextPayload(const TSharedPtr<class FJsonObject>& NodeObject, FUMGTextData& OutText);
+	static void ParseBrushPayload(const TSharedPtr<class FJsonObject>& NodeObject, FUMGVisualBrushData& OutBrush);
+	static void ParseEffectPayload(const TSharedPtr<class FJsonObject>& NodeObject, FUMGEffectData& OutEffect);
+	static void ParsePathPayload(const TSharedPtr<class FJsonObject>& NodeObject, FUMGPathData& OutPath);
+	static void ParseShadowPayload(const TSharedPtr<class FJsonObject>& NodeObject, FUMGShadowData& OutShadow);
+	static void ParseRenderPayload(const TSharedPtr<class FJsonObject>& NodeObject, FUMGRenderStyleData& OutRender);
+	static void ParseWidgetStatePayload(const TSharedPtr<class FJsonObject>& NodeObject, FUMGWidgetStateData& OutWidgetState);
+	static void ParseScrollBoxPayload(const TSharedPtr<class FJsonObject>& NodeObject, FUMGScrollBoxData& OutScrollBox);
 	static void ParseSlotData(const TSharedPtr<class FJsonObject>& JsonObject, FUMGSlotData& OutSlot);
 	static void ParseAnchorsData(const TSharedPtr<class FJsonObject>& JsonObject, FUMGAnchorsData& OutAnchors);
 	static void ParseAnchorData(const TSharedPtr<class FJsonObject>& JsonObject, FUMGAnchorData& OutAnchor);

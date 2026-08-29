@@ -859,9 +859,18 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 		ScanlineFill(SubPaths, Pixels, Width, Height, FillColor->ToFColor(true), bEvenOdd);
 	}
 
-	// Complex glyph-style paths sometimes arrive with contour winding that our flattened
-	// nonzero scanline fill interprets too aggressively, collapsing the logo into a solid bar.
-	// For multi-subpath vectors, compare nonzero vs evenodd coverage and keep the more plausible one.
+	// Evenodd fallback heuristic, kept for glyph-style complex paths: multi-subpath vectors
+	// (logo/icon glyphs) can arrive with contour winding that our flattened nonzero scanline
+	// fill interprets too aggressively, collapsing the glyph's counters/holes and rendering
+	// the whole shape as a solid block. When the JSON did not explicitly request evenodd
+	// ("FillRule"), the fill is rasterized a second time with evenodd and both coverages are
+	// compared; "NonZeroCoverage > EvenOddCoverage * 12 / 10" means nonzero filled more than
+	// 1.2x the evenodd area, which for real glyphs indicates the holes were swallowed.
+	// The comparison uses integer math (12/10, not 1.2f) on pixel counts.
+	// Tightening the 1.2x threshold re-breaks those glyph inputs (solid-bar regression);
+	// loosening it toward parity would start flipping legitimate overlapping nonzero fills
+	// to evenodd and punch unwanted holes. The cost is one extra ScanlineFill pass (the
+	// complex path is rendered twice) on nonzero-filled multi-subpath inputs only.
 	if (bHasVisibleFill && !bEvenOdd)
 	{
 		TArray<FColor> EvenOddPixels;

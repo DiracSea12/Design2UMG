@@ -26,6 +26,21 @@ namespace
 	using DesignRemoteImageImporterInternal::FResolveContext;
 	using DesignRemoteImageImporterInternal::FUrlDownloadResult;
 
+	// Texture asset naming-scheme version tags. These are two independent asset families,
+	// each carrying its own current version - not an old/new pair of the same family:
+	// - LegacyTextureImportVersion ("ui4") owns per-widget textures named
+	//   T_{frame}_{node}_{sourceHash}_ui4 under {ImportPath}/{Frame}/, keyed by the
+	//   versioned source key (source URL/local path + content hash). This family also
+	//   feeds the existing-asset reuse/repair lookup.
+	// - SharedTextureImportVersion ("ui5") owns content-deduplicated textures named
+	//   T_D2U_{contentHash}_ui5 under {ImportPath}/_Shared/, shared across widgets,
+	//   frames, and runs that reference identical image bytes.
+	// Bumping a tag changes every asset name its family produces: existing assets stay
+	// on disk untouched, but the next import writes fresh assets instead of reusing
+	// (and repairing) the previous generation.
+	constexpr TCHAR LegacyTextureImportVersion[] = TEXT("ui4");
+	constexpr TCHAR SharedTextureImportVersion[] = TEXT("ui5");
+
 	bool IsRemoteUrl(const FString& Value)
 	{
 		return Value.StartsWith(TEXT("http://"), ESearchCase::IgnoreCase)
@@ -83,7 +98,6 @@ namespace
 
 	FString BuildLegacyTextureAssetName(const FString& FrameName, const FString& WidgetName, const FString& WidgetId, const FString& SourceKey)
 	{
-		constexpr TCHAR TextureImportVersion[] = TEXT("ui4");
 		const FString SafeFrame = SanitizeAssetName(FrameName).Left(24);
 		FString NodeBase = WidgetName;
 		if (NodeBase.IsEmpty())
@@ -92,14 +106,13 @@ namespace
 		}
 		const FString SafeNode = SanitizeAssetName(NodeBase).Left(24);
 		const FString SourceHash = MakeUrlHash(SourceKey).Left(10);
-		return FString::Printf(TEXT("T_%s_%s_%s_%s"), *SafeFrame, *SafeNode, *SourceHash, TextureImportVersion);
+		return FString::Printf(TEXT("T_%s_%s_%s_%s"), *SafeFrame, *SafeNode, *SourceHash, LegacyTextureImportVersion);
 	}
 
 	FString BuildSharedTextureAssetName(const FString& ContentHash)
 	{
-		constexpr TCHAR TextureImportVersion[] = TEXT("ui5");
 		const FString SafeHash = ContentHash.Left(16);
-		return FString::Printf(TEXT("T_D2U_%s_%s"), *SafeHash, TextureImportVersion);
+		return FString::Printf(TEXT("T_D2U_%s_%s"), *SafeHash, SharedTextureImportVersion);
 	}
 
 	FString BuildSubImportPath(const FString& ImportPath, const FString& FrameName)
