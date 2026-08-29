@@ -5,7 +5,6 @@
 #include "Design2UMGGeneratedNameSuffixes.h"
 #include "GradientMaterialParams.h"
 #include "ImageFillUtils.h"
-#include "UMGPropertyKeys.h"
 #include "UMGValueParser.h"
 #include "UMGWidgetNodeAccess.h"
 
@@ -97,11 +96,6 @@ namespace
 				return MatRef_GradientLinear;
 			}
 		}
-	}
-
-	bool HasVisualMapperPropertyPresence(const FUMGWidgetNode& Widget, const TCHAR* Key)
-	{
-		return Design2UMGWidgetNodeAccess::HasWidgetPropertyPresence(Widget, Key);
 	}
 
 	void AddTextureSizeHints(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
@@ -339,7 +333,7 @@ namespace VisualMapperFillTransfer
 		{
 			if ((Node->Type == EDesignNodeType::Text || Node->Type == EDesignNodeType::IconFont)
 				&& PrimaryFill.Type == EDesignFillType::Color
-				&& !HasVisualMapperPropertyPresence(Widget, UMGPropertyKeys::Color))
+				&& !Widget.Text.Color.IsSet())
 			{
 				Widget.Text.Color = FUMGValueParser::ParseColor(PrimaryFill.SolidColor);
 			}
@@ -350,7 +344,7 @@ namespace VisualMapperFillTransfer
 		{
 			if (Node->Type == EDesignNodeType::Text || Node->Type == EDesignNodeType::IconFont)
 			{
-				if (!HasVisualMapperPropertyPresence(Widget, UMGPropertyKeys::Color))
+				if (!Widget.Text.Color.IsSet())
 				{
 					Widget.Text.Color = FUMGValueParser::ParseColor(PrimaryFill.SolidColor);
 				}

@@ -9,7 +9,6 @@
 #include "Misc/OutputDevice.h"
 #include "UMGWidgetNodeProceduralResourceAccess.h"
 #include "UMGWidgetNodeAccess.h"
-#include "UMGPropertyKeys.h"
 
 #if WITH_AUTOMATION_WORKER
 namespace
@@ -87,9 +86,10 @@ bool FProceduralResourceRequestBuildsTypedRequestTest::RunTest(const FString& Pa
 	Node.Brush.BrushColor = FLinearColor(0.2f, 0.4f, 0.6f, 1.0f);
 	Node.Brush.MaterialParams = TEXT("{\"ColorCenter\":\"#01020304\",\"ColorEdge\":\"#05060708\"}");
 
-	FString DescriptorMaterialParams;
-	TestTrue(TEXT("Typed descriptor keeps gradient params ahead of explicit params"),
-		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::MaterialParams, DescriptorMaterialParams));
+	const FString DescriptorMaterialParams =
+		Design2UMGWidgetNodeAccess::SerializeGradientMaterialParams(Node.Brush.Gradient);
+	TestTrue(TEXT("Gradient params serialize ahead of explicit params"),
+		!DescriptorMaterialParams.IsEmpty());
 
 	FUMGProceduralResourceRequest Request;
 	TestTrue(

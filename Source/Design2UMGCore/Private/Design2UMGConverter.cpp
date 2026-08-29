@@ -19,8 +19,6 @@
 #include "SharedCoreSemantics.h"
 #include "TextMeasurement.h"
 #include "RefExpander.h"
-#include "UMGPropertyKeys.h"
-#include "UMGWidgetNodeAccess.h"
 
 namespace Design2UMGConverterInternal
 {
@@ -111,11 +109,6 @@ namespace Design2UMGConverterPrivate
 		return Design2UMGCore::SharedSemantics::ShouldSkipNode(Node);
 	}
 
-	bool HasWidgetPropertyPresence(const FUMGWidgetNode& Widget, const TCHAR* Key)
-	{
-		return Design2UMGWidgetNodeAccess::HasWidgetPropertyPresence(Widget, Key);
-	}
-
 	bool ShouldKeepStructuralLeafInFlow(const TSharedPtr<FDesignNode>& Node, EDesignLayout ParentLayout)
 	{
 		if (!Node.IsValid()
@@ -189,15 +182,19 @@ namespace Design2UMGConverterPrivate
 				(Node->LayoutData.Layout == EDesignLayout::Wrap || Node->LayoutData.Layout == EDesignLayout::Grid)
 				&& ((ChildNode->Transform.Width.IsFill() && ChildNode->Transform.Width.Value > 0.0f)
 					|| (ChildNode->Transform.Height.IsFill() && ChildNode->Transform.Height.Value > 0.0f));
+			// Direct typed reads with descriptor-identical presence rules:
+			// Width/HeightOverride and PathGeometry are plain optionals, while
+			// MaterialRef presence also covers a gradient-owned brush and
+			// TexturePath lives on the canonical image owner.
 			const bool bWidgetOwnsDesiredSize =
 				Node->LayoutData.Layout != EDesignLayout::None
 				&& ChildWidget.Type == TEXT("Image")
 				&& ChildNode->Children.Num() == 0
-				&& (HasWidgetPropertyPresence(ChildWidget, UMGPropertyKeys::WidthOverride)
-					|| HasWidgetPropertyPresence(ChildWidget, UMGPropertyKeys::HeightOverride))
-				&& (HasWidgetPropertyPresence(ChildWidget, UMGPropertyKeys::MaterialRef)
-					|| HasWidgetPropertyPresence(ChildWidget, UMGPropertyKeys::TexturePath)
-					|| HasWidgetPropertyPresence(ChildWidget, UMGPropertyKeys::PathGeometry));
+				&& (ChildWidget.WidgetStyle.WidthOverride.IsSet()
+					|| ChildWidget.WidgetStyle.HeightOverride.IsSet())
+				&& ((ChildWidget.Brush.Gradient.HasAny() || ChildWidget.Brush.MaterialRef.IsSet())
+					|| ChildWidget.Brush.Image.TexturePath.IsSet()
+					|| ChildWidget.Path.Geometry.IsSet());
 			// Images with their own brush size already produce the intended desired size; wrapping would double-apply it.
 			return Node->LayoutData.Layout == EDesignLayout::None
 				? bCanvasMixedAxis

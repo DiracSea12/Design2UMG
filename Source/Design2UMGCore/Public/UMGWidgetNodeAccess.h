@@ -2,7 +2,6 @@
 
 #pragma once
 
-#include "Templates/Function.h"
 #include "UMGSchemaFoundation.h"
 #include "UMGSchemaTypedPayloads.h"
 
@@ -28,31 +27,8 @@ namespace Design2UMGWidgetNodeAccess
 	DESIGN2UMGCORE_API FString SerializeGradientMaterialParams(const FUMGVisualBrushData::FGradientData& Gradient);
 	DESIGN2UMGCORE_API bool NormalizeBrushTexturePathOwner(FUMGVisualBrushData& Brush, FString* OutDiagnostic = nullptr);
 
-	DESIGN2UMGCORE_API void ForEachStaticTypedWidgetPropertyKey(TFunctionRef<void(const TCHAR*)> Visitor);
-	template <typename VisitorType>
-	void ForEachStaticTypedWidgetPropertyKey(VisitorType&& Visitor)
-	{
-		ForEachStaticTypedWidgetPropertyKey(TFunctionRef<void(const TCHAR*)>(Forward<VisitorType>(Visitor)));
-	}
-
-	DESIGN2UMGCORE_API bool IsTypedWidgetPropertyKey(const FString& Key);
-	DESIGN2UMGCORE_API bool TryGetTextStyleTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue);
-	DESIGN2UMGCORE_API bool TryGetWidgetStyleTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue);
-	DESIGN2UMGCORE_API bool TryGetTextTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue);
-	DESIGN2UMGCORE_API bool TryGetBrushTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue);
-	DESIGN2UMGCORE_API bool TryGetEffectTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue);
-	DESIGN2UMGCORE_API bool TryGetPathTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue);
-	DESIGN2UMGCORE_API bool TryGetShadowTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue);
-	DESIGN2UMGCORE_API bool TryGetRenderTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue);
-	DESIGN2UMGCORE_API bool TryGetWidgetStateTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue);
-	DESIGN2UMGCORE_API bool TryGetScrollBoxTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue);
-	DESIGN2UMGCORE_API bool TryGetTypedWidgetString(const FUMGWidgetNode& Node, const TCHAR* Key, FString& OutValue);
-	DESIGN2UMGCORE_API bool HasWidgetPropertyPresence(const FUMGWidgetNode& Node, const TCHAR* Key);
-	DESIGN2UMGCORE_API bool TryGetWidgetBool(const FUMGWidgetNode& Node, const TCHAR* Key, bool& OutValue);
-	DESIGN2UMGCORE_API bool TryGetWidgetInt(const FUMGWidgetNode& Node, const TCHAR* Key, int32& OutValue);
-	DESIGN2UMGCORE_API bool TryGetWidgetFloat(const FUMGWidgetNode& Node, const TCHAR* Key, float& OutValue);
-	DESIGN2UMGCORE_API bool TryGetWidgetVector2D(const FUMGWidgetNode& Node, const TCHAR* Key, FVector2D& OutValue);
-	DESIGN2UMGCORE_API bool TryGetWidgetVector4(const FUMGWidgetNode& Node, const TCHAR* Key, FVector4& OutValue);
-	DESIGN2UMGCORE_API bool TryGetWidgetMargin(const FUMGWidgetNode& Node, const TCHAR* Key, FMargin& OutValue);
-	DESIGN2UMGCORE_API bool TryGetWidgetColor(const FUMGWidgetNode& Node, const TCHAR* Key, FLinearColor& OutValue);
+	// Verbose-log presentation helper: renders the set typed payload fields of a
+	// widget node as " Key=Value" fragments grouped by payload, in the shared
+	// serializer formats. Pure log display; not a property lookup contract.
+	DESIGN2UMGCORE_API FString BuildWidgetNodeVerbosePropertyDump(const FUMGWidgetNode& Node);
 }

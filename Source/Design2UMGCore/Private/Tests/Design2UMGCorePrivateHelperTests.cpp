@@ -25,16 +25,168 @@
 
 namespace
 {
+	// Test-only typed assertion vocabulary: reads widget payload fields directly
+	// (no production property lookup layer) and renders them through the shared
+	// write-side serializers so assertions keep comparing serialized values.
+	bool TryGetWidgetProperty(const FUMGWidgetNode& Node, const TCHAR* Key, FString& OutValue)
+	{
+		OutValue.Reset();
+		const FString KeyString(Key);
+		if (KeyString == UMGPropertyKeys::BrushColor)
+		{
+			if (Node.Brush.BrushColor.IsSet())
+			{
+				OutValue = Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Brush.BrushColor.GetValue());
+				return true;
+			}
+			return false;
+		}
+		if (KeyString == UMGPropertyKeys::Clipping)
+		{
+			if (Node.Render.Clipping.IsSet())
+			{
+				OutValue = Node.Render.Clipping.GetValue();
+				return true;
+			}
+			return false;
+		}
+		if (KeyString == UMGPropertyKeys::DrawAs)
+		{
+			if (Node.Brush.DrawAs.IsSet())
+			{
+				OutValue = Design2UMGWidgetNodeAccess::SerializeDrawAs(Node.Brush.DrawAs.GetValue());
+				return !OutValue.IsEmpty();
+			}
+			return false;
+		}
+		if (KeyString == UMGPropertyKeys::HeightOverride)
+		{
+			if (Node.WidgetStyle.HeightOverride.IsSet())
+			{
+				OutValue = Design2UMGWidgetNodeAccess::SerializeWidgetFloat(Node.WidgetStyle.HeightOverride.GetValue());
+				return true;
+			}
+			return false;
+		}
+		if (KeyString == UMGPropertyKeys::MaterialParams)
+		{
+			// Descriptor-identical precedence: gradient params first, then explicit params.
+			if (Node.Brush.Gradient.HasAny())
+			{
+				OutValue = Design2UMGWidgetNodeAccess::SerializeGradientMaterialParams(Node.Brush.Gradient);
+				if (!OutValue.IsEmpty())
+				{
+					return true;
+				}
+			}
+			if (Node.Brush.MaterialParams.IsSet())
+			{
+				OutValue = Node.Brush.MaterialParams.GetValue();
+				return true;
+			}
+			return false;
+		}
+		if (KeyString == UMGPropertyKeys::MaterialRef)
+		{
+			// Descriptor-identical precedence: gradient ref first, then explicit ref.
+			if (Node.Brush.Gradient.HasAny())
+			{
+				OutValue = Design2UMGWidgetNodeAccess::GetGradientMaterialRef(Node.Brush.Gradient);
+				return true;
+			}
+			if (Node.Brush.MaterialRef.IsSet())
+			{
+				OutValue = Node.Brush.MaterialRef.GetValue();
+				return true;
+			}
+			return false;
+		}
+		if (KeyString == UMGPropertyKeys::OutlineColor)
+		{
+			if (Node.Brush.OutlineColor.IsSet())
+			{
+				OutValue = Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Brush.OutlineColor.GetValue());
+				return true;
+			}
+			return false;
+		}
+		if (KeyString == UMGPropertyKeys::Padding)
+		{
+			if (Node.WidgetStyle.Padding.IsSet())
+			{
+				OutValue = Design2UMGWidgetNodeAccess::SerializeWidgetMargin(Node.WidgetStyle.Padding.GetValue());
+				return true;
+			}
+			return false;
+		}
+		if (KeyString == UMGPropertyKeys::PathGeometry)
+		{
+			if (Node.Path.Geometry.IsSet())
+			{
+				OutValue = Node.Path.Geometry.GetValue();
+				return true;
+			}
+			return false;
+		}
+		if (KeyString == UMGPropertyKeys::RenderAngle)
+		{
+			if (Node.Render.RenderAngle.IsSet())
+			{
+				OutValue = Design2UMGWidgetNodeAccess::SerializeWidgetFloat(Node.Render.RenderAngle.GetValue());
+				return true;
+			}
+			return false;
+		}
+		if (KeyString == UMGPropertyKeys::RenderOpacity)
+		{
+			if (Node.Render.RenderOpacity.IsSet())
+			{
+				OutValue = Design2UMGWidgetNodeAccess::SerializeWidgetFloat(Node.Render.RenderOpacity.GetValue());
+				return true;
+			}
+			return false;
+		}
+		if (KeyString == UMGPropertyKeys::RenderTransformPivot)
+		{
+			if (Node.Render.RenderTransformPivot.IsSet())
+			{
+				OutValue = Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Node.Render.RenderTransformPivot.GetValue());
+				return true;
+			}
+			return false;
+		}
+		if (KeyString == UMGPropertyKeys::TexturePath)
+		{
+			if (Node.Brush.Image.TexturePath.IsSet())
+			{
+				OutValue = Node.Brush.Image.TexturePath.GetValue();
+				return true;
+			}
+			return false;
+		}
+		if (KeyString == UMGPropertyKeys::WidthOverride)
+		{
+			if (Node.WidgetStyle.WidthOverride.IsSet())
+			{
+				OutValue = Design2UMGWidgetNodeAccess::SerializeWidgetFloat(Node.WidgetStyle.WidthOverride.GetValue());
+				return true;
+			}
+			return false;
+		}
+		return false;
+	}
+
 	FString GetWidgetProperty(const FUMGWidgetNode& Node, const TCHAR* Key)
 	{
 		FString Value;
-		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, Key, Value);
+		TryGetWidgetProperty(Node, Key, Value);
 		return Value;
 	}
 
 	bool HasWidgetProperty(const FUMGWidgetNode& Node, const TCHAR* Key)
 	{
-		return Design2UMGWidgetNodeAccess::HasWidgetPropertyPresence(Node, Key);
+		FString Value;
+		return TryGetWidgetProperty(Node, Key, Value);
 	}
 
 	TSharedPtr<FDesignNode> MakeFixedNode(const EDesignNodeType Type, const float Width, const float Height)
@@ -737,51 +889,6 @@ bool FVisualMapperWrapWithBorderExplicitSideStrokeTest::RunTest(const FString& P
 		Bottom.WidgetStyle.HeightOverride.IsSet() && FMath::IsNearlyEqual(Bottom.WidgetStyle.HeightOverride.GetValue(), 6.0f));
 	TestTrue(TEXT("Left stroke width tracks thickness"),
 		Left.WidgetStyle.WidthOverride.IsSet() && FMath::IsNearlyEqual(Left.WidgetStyle.WidthOverride.GetValue(), 8.0f));
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWidgetNodeAccessExplicitEmptyStringPresenceTest,
-	"Design2UMG.WidgetNodeAccess.ExplicitEmptyStringPresence",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FWidgetNodeAccessExplicitEmptyStringPresenceTest::RunTest(const FString& Parameters)
-{
-	FUMGWidgetNode Node;
-	Node.Type = TEXT("Image");
-	Node.Name = TEXT("EmptyStringPresence");
-	Node.Brush.MaterialRef = TEXT("");
-	Node.Brush.Image.TexturePath = TEXT("");
-
-	FString MaterialRef;
-	TestTrue(TEXT("Explicit empty material ref is queryable"),
-		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::MaterialRef, MaterialRef));
-	TestTrue(TEXT("Explicit empty material ref stays empty"), MaterialRef.IsEmpty());
-	TestTrue(TEXT("Presence helper treats explicit empty material ref as present"), HasWidgetProperty(Node, UMGPropertyKeys::MaterialRef));
-
-	FString TexturePath;
-	TestTrue(TEXT("Explicit empty image texture path is queryable"),
-		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::TexturePath, TexturePath));
-	TestTrue(TEXT("Explicit empty image texture path stays empty"), TexturePath.IsEmpty());
-	TestTrue(TEXT("Presence helper treats explicit empty image texture path as present"), HasWidgetProperty(Node, UMGPropertyKeys::TexturePath));
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWidgetNodeAccessExplicitNoDrawTypePresenceTest,
-	"Design2UMG.WidgetNodeAccess.ExplicitNoDrawTypePresence",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FWidgetNodeAccessExplicitNoDrawTypePresenceTest::RunTest(const FString& Parameters)
-{
-	FUMGWidgetNode Node;
-	Node.Type = TEXT("Image");
-	Node.Name = TEXT("NoDrawTypePresence");
-	Node.Brush.DrawAs = ESlateBrushDrawType::NoDrawType;
-
-	TestTrue(TEXT("Presence helper treats explicit NoDrawType as present"), HasWidgetProperty(Node, UMGPropertyKeys::DrawAs));
-	TestEqual(TEXT("Explicit NoDrawType stays queryable"), GetWidgetProperty(Node, UMGPropertyKeys::DrawAs), FString(TEXT("NoDrawType")));
-
-	FString DrawAs;
-	TestTrue(TEXT("Typed draw-as helper keeps explicit NoDrawType"),
-		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::DrawAs, DrawAs));
-	TestEqual(TEXT("Typed draw-as helper keeps serialized value"), DrawAs, FString(TEXT("NoDrawType")));
 	return true;
 }
 
@@ -1553,30 +1660,23 @@ bool FGradientTypedPayloadMaterialParamsTest::RunTest(const FString& Parameters)
 		&& LinearMaterialParams.Contains(TEXT("\"EndY\":0.7000")));
 
 	Widget.Brush.MaterialParams = TEXT("{\"ColorCenter\":\"#01020304\",\"ColorEdge\":\"#05060708\"}");
-	const FString ExplicitMaterialParams = Widget.Brush.MaterialParams.GetValue();
 	FUMGProceduralResourceRequest ExistingParamsRequest;
 	TestTrue(TEXT("Typed procedural request still builds when legacy raw material params are present"),
 		Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Widget, ExistingParamsRequest));
 	TestEqual(TEXT("Typed gradient descriptor keeps precedence over legacy raw material params"),
 		ExistingParamsRequest.MaterialParams.Get(FString()),
 		MaterialParams);
-	FString GradientDescriptorWithFallback;
-	TestTrue(TEXT("Gradient source resolves through one MaterialParams descriptor"),
-		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Widget, UMGPropertyKeys::MaterialParams, GradientDescriptorWithFallback));
-	TestEqual(TEXT("Gradient descriptor ignores explicit fallback when both are present"),
-		GradientDescriptorWithFallback,
-		MaterialParams);
 
 	FUMGWidgetNode ExplicitParamsNode;
 	ExplicitParamsNode.Type = TEXT("Image");
 	ExplicitParamsNode.Brush.MaterialRef = TEXT("roundedrect");
-	ExplicitParamsNode.Brush.MaterialParams = ExplicitMaterialParams;
-	FString ExplicitDescriptorParams;
-	TestTrue(TEXT("Explicit MaterialParams source resolves through the same descriptor"),
-		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(ExplicitParamsNode, UMGPropertyKeys::MaterialParams, ExplicitDescriptorParams));
+	ExplicitParamsNode.Brush.MaterialParams = TEXT("{\"ColorCenter\":\"#01020304\",\"ColorEdge\":\"#05060708\"}");
+	FUMGProceduralResourceRequest ExplicitParamsRequest;
+	TestTrue(TEXT("Typed procedural request keeps explicit params without a gradient"),
+		Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(ExplicitParamsNode, ExplicitParamsRequest));
 	TestEqual(TEXT("Explicit MaterialParams fallback is preserved without a gradient"),
-		ExplicitDescriptorParams,
-		ExplicitMaterialParams);
+		ExplicitParamsRequest.MaterialParams.Get(FString()),
+		ExplicitParamsNode.Brush.MaterialParams.GetValue());
 	return true;
 }
 

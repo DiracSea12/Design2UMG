@@ -16,9 +16,7 @@
 #include "SharedCoreSemantics.h"
 #include "SizeEstimator.h"
 #include "TextMeasurement.h"
-#include "UMGPropertyKeys.h"
 #include "UMGSchema.h"
-#include "UMGWidgetNodeAccess.h"
 
 #include <limits>
 
@@ -985,59 +983,6 @@ bool FPublicSurfacePostReviewFixesGuardTest::RunTest(const FString& Parameters)
 
 	LayoutData.LayoutRow.Reset();
 	TestFalse(TEXT("Direct optional reset clears public row presence"), LayoutData.LayoutRow.IsSet());
-
-	FUMGWidgetNode Widget;
-	Widget.Text.Text = TEXT("");
-	Widget.Text.bAutoWrapText = true;
-	Widget.Text.Color = FLinearColor(0.2f, 0.4f, 0.6f, 1.0f);
-	Widget.WidgetState.ActiveWidgetIndex = 3;
-	Widget.ScrollBox.Orientation = TEXT("Horizontal");
-	Widget.ScrollBox.ScrollBarVisibility = TEXT("Hidden");
-
-	bool bSawColorKey = false;
-	Design2UMGWidgetNodeAccess::ForEachStaticTypedWidgetPropertyKey([&bSawColorKey](const TCHAR* Key)
-	{
-		if (FCString::Strcmp(Key, UMGPropertyKeys::Color) == 0)
-		{
-			bSawColorKey = true;
-		}
-	});
-	TestTrue(TEXT("Typed key enumeration still exposes public color key"), bSawColorKey);
-	TestTrue(TEXT("Typed key helper recognizes color"), Design2UMGWidgetNodeAccess::IsTypedWidgetPropertyKey(UMGPropertyKeys::Color));
-
-	FString SerializedText;
-	TestTrue(TEXT("Typed text helper still returns explicit empty string"), Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Widget, UMGPropertyKeys::Text, SerializedText));
-	TestEqual(TEXT("Typed text helper preserves empty payload"), SerializedText, FString());
-
-	bool bAutoWrap = false;
-	TestTrue(TEXT("Bool helper still parses typed bool"), Design2UMGWidgetNodeAccess::TryGetWidgetBool(Widget, UMGPropertyKeys::AutoWrapText, bAutoWrap));
-	TestTrue(TEXT("Typed bool payload remains true"), bAutoWrap);
-
-	int32 ActiveWidgetIndex = INDEX_NONE;
-	TestTrue(TEXT("Int helper still parses typed int"), Design2UMGWidgetNodeAccess::TryGetWidgetInt(Widget, UMGPropertyKeys::ActiveWidgetIndex, ActiveWidgetIndex));
-	TestEqual(TEXT("Typed int payload remains unchanged"), ActiveWidgetIndex, 3);
-
-	FString ScrollBoxOrientation;
-	TestTrue(TEXT("Typed helper returns explicit ScrollBox orientation"), Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Widget, UMGPropertyKeys::Orientation, ScrollBoxOrientation));
-	TestEqual(TEXT("Typed ScrollBox orientation remains unchanged"), ScrollBoxOrientation, FString(TEXT("Horizontal")));
-
-	FString ScrollBarVisibility;
-	TestTrue(TEXT("Typed helper returns explicit ScrollBox scrollbar visibility"), Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Widget, UMGPropertyKeys::ScrollBarVisibility, ScrollBarVisibility));
-	TestEqual(TEXT("Typed ScrollBox scrollbar visibility remains unchanged"), ScrollBarVisibility, FString(TEXT("Hidden")));
-
-	FUMGWidgetNode UnsetWidget;
-	int32 MissingActiveWidgetIndex = INDEX_NONE;
-	TestFalse(TEXT("Unset optional widget state stays absent"), Design2UMGWidgetNodeAccess::TryGetWidgetInt(UnsetWidget, UMGPropertyKeys::ActiveWidgetIndex, MissingActiveWidgetIndex));
-	FString MissingOrientation;
-	TestFalse(TEXT("Unset optional ScrollBox orientation stays absent"), Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(UnsetWidget, UMGPropertyKeys::Orientation, MissingOrientation));
-
-	FLinearColor ParsedColor;
-	TestTrue(TEXT("Color helper still parses typed color"), Design2UMGWidgetNodeAccess::TryGetWidgetColor(Widget, UMGPropertyKeys::Color, ParsedColor));
-	TestEqual(TEXT("Typed color payload remains unchanged"), ParsedColor.ToFColor(true), Widget.Text.Color.GetValue().ToFColor(true));
-
-	FString TypedText;
-	TestTrue(TEXT("Typed string helper returns explicit empty text"), Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Widget, UMGPropertyKeys::Text, TypedText));
-	TestEqual(TEXT("Typed string helper preserves explicit empty string"), TypedText, FString());
 
 	return true;
 }

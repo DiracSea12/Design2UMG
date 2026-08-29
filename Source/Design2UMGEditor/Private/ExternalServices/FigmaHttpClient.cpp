@@ -2,7 +2,7 @@
 
 #include "FigmaHttpClient.h"
 #include "Design2UMGLog.h"
-#include "Tests/HttpClientAutomationHooks.h"
+#include "DesignHttpClientSlot.h"
 
 #include "HttpModule.h"
 #include "Interfaces/IHttpRequest.h"
@@ -14,23 +14,8 @@ static const FString FigmaApiBase = TEXT("https://api.figma.com");
 // request more headroom than the MCP transport's 30s timeout.
 constexpr float FigmaHttpRequestTimeoutSeconds = 60.0f;
 
-#if WITH_DEV_AUTOMATION_TESTS
-namespace
-{
-	TSharedPtr<FFigmaHttpClientAutomationHooks> GFigmaHttpClientAutomationHooks;
-}
-#endif
-
-struct FFigmaHttpClientStateImpl
-{
-	FHttpRequestPtr ActiveRequest;
-	int32 ActiveRequestId = 0;
-	int32 NextRequestId = 0;
-	TSet<int32> CancelledRequestIds;
-};
-
 FFigmaHttpClient::FFigmaHttpClient()
-	: State(MakeShared<FFigmaHttpClientStateImpl, ESPMode::ThreadSafe>())
+	: State(MakeShared<FDesignHttpClientSlot, ESPMode::ThreadSafe>())
 {
 }
 
@@ -57,55 +42,28 @@ void FFigmaHttpClient::ExportImages(const FString& FileKey, const TArray<FString
 
 void FFigmaHttpClient::CancelActiveRequest()
 {
-	if (State->ActiveRequest.IsValid())
-	{
-		State->CancelledRequestIds.Add(State->ActiveRequestId);
-		State->ActiveRequest->CancelRequest();
-		State->ActiveRequest.Reset();
-		State->ActiveRequestId = 0;
-		return;
-	}
-
-#if WITH_DEV_AUTOMATION_TESTS
-	if (GFigmaHttpClientAutomationHooks.IsValid() && State->ActiveRequestId != 0)
-	{
-		State->CancelledRequestIds.Add(State->ActiveRequestId);
-		if (GFigmaHttpClientAutomationHooks->CancelRequest)
-		{
-			GFigmaHttpClientAutomationHooks->CancelRequest(State->ActiveRequestId);
-		}
-		State->ActiveRequestId = 0;
-	}
-#endif
+	State->CancelActiveRequest();
 }
 
 void FFigmaHttpClient::SendGet(const FString& Url, FOnComplete OnComplete)
 {
 	CancelActiveRequest();
 
-	const int32 RequestId = ++State->NextRequestId;
-	State->ActiveRequestId = RequestId;
+	const int32 RequestId = State->BeginRequest();
 	TSharedRef<FOnComplete> SharedOnComplete = MakeShared<FOnComplete>(MoveTemp(OnComplete));
 
 #if WITH_DEV_AUTOMATION_TESTS
-	if (GFigmaHttpClientAutomationHooks.IsValid() && GFigmaHttpClientAutomationHooks->StartRequest)
+	if (DesignHttpClientSlot::HasAutomationTransport())
 	{
-		const bool bStarted = GFigmaHttpClientAutomationHooks->StartRequest(
-			Url,
-			Token,
+		const bool bStarted = DesignHttpClientSlot::StartAutomationTransport(
 			RequestId,
 			[State = State, RequestId, SharedOnComplete](
 				bool bConnected,
 				const FString& ResponseBody,
-				int32 ResponseCode)
+				int32 ResponseCode,
+				const FString&)
 			{
-				const bool bWasCancelled = State->CancelledRequestIds.Remove(RequestId) > 0;
-				if (State->ActiveRequestId == RequestId)
-				{
-					State->ActiveRequestId = 0;
-				}
-
-				if (bWasCancelled)
+				if (!State->ConsumeCompletion(RequestId))
 				{
 					UE_LOG(LogDesign2UMG, Verbose, TEXT("FigmaHttpClient: Request cancelled"));
 					return;
@@ -139,10 +97,7 @@ void FFigmaHttpClient::SendGet(const FString& Url, FOnComplete OnComplete)
 
 		if (!bStarted)
 		{
-			if (State->ActiveRequestId == RequestId)
-			{
-				State->ActiveRequestId = 0;
-			}
+			State->ClearActiveRequest(RequestId);
 			if (*SharedOnComplete)
 			{
 				(*SharedOnComplete)(false, TEXT(""));
@@ -153,7 +108,7 @@ void FFigmaHttpClient::SendGet(const FString& Url, FOnComplete OnComplete)
 #endif
 
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
-	State->ActiveRequest = Request;
+	State->BindActiveRequest(Request);
 	Request->SetURL(Url);
 	Request->SetVerb(TEXT("GET"));
 	Request->SetHeader(TEXT("X-Figma-Token"), Token);
@@ -162,14 +117,7 @@ void FFigmaHttpClient::SendGet(const FString& Url, FOnComplete OnComplete)
 	Request->OnProcessRequestComplete().BindLambda(
 		[State = State, RequestId, SharedOnComplete](FHttpRequestPtr CompletedRequest, FHttpResponsePtr Response, bool bConnected)
 		{
-			const bool bWasCancelled = State->CancelledRequestIds.Remove(RequestId) > 0;
-			if (State->ActiveRequestId == RequestId)
-			{
-				State->ActiveRequest.Reset();
-				State->ActiveRequestId = 0;
-			}
-
-			if (bWasCancelled)
+			if (!State->ConsumeCompletion(RequestId))
 			{
 				UE_LOG(LogDesign2UMG, Verbose, TEXT("FigmaHttpClient: Request cancelled"));
 				return;
@@ -195,11 +143,7 @@ void FFigmaHttpClient::SendGet(const FString& Url, FOnComplete OnComplete)
 
 	if (!Request->ProcessRequest())
 	{
-		if (State->ActiveRequestId == RequestId)
-		{
-			State->ActiveRequest.Reset();
-			State->ActiveRequestId = 0;
-		}
+		State->ClearActiveRequest(RequestId);
 		UE_LOG(LogDesign2UMG, Error, TEXT("FigmaHttpClient: ProcessRequest failed"));
 		if (*SharedOnComplete)
 		{
@@ -207,16 +151,3 @@ void FFigmaHttpClient::SendGet(const FString& Url, FOnComplete OnComplete)
 		}
 	}
 }
-
-#if WITH_DEV_AUTOMATION_TESTS
-void SetFigmaHttpClientAutomationHooks(const TSharedPtr<FFigmaHttpClientAutomationHooks>& InHooks)
-{
-	GFigmaHttpClientAutomationHooks = InHooks;
-}
-
-void ResetFigmaHttpClientAutomationHooks()
-{
-	GFigmaHttpClientAutomationHooks.Reset();
-}
-#endif
-

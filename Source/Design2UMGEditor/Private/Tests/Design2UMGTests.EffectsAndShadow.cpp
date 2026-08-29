@@ -1832,110 +1832,11 @@ bool FScrollBoxJsonRoundTripTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTypedWidgetAccessEnumeratesLateTypedKeysTest,
-	"Design2UMG.WidgetNodeAccess.TypedAccessEnumeratesLateTypedKeys",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBrushLegacyTexturePathNormalizationTest,
+	"Design2UMG.WidgetNodeAccess.BrushLegacyTexturePathNormalization",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FTypedWidgetAccessEnumeratesLateTypedKeysTest::RunTest(const FString& Parameters)
+bool FBrushLegacyTexturePathNormalizationTest::RunTest(const FString& Parameters)
 {
-	FUMGWidgetNode Node;
-	Node.WidgetState.ActiveWidgetIndex = 2;
-	Node.Render.RenderTranslation = FVector2D(1.5f, -2.0f);
-
-	int32 ActiveWidgetIndex = INDEX_NONE;
-	TestTrue(TEXT("Typed access keeps active widget index"),
-		Design2UMGWidgetNodeAccess::TryGetWidgetInt(Node, UMGPropertyKeys::ActiveWidgetIndex, ActiveWidgetIndex));
-	TestEqual(TEXT("Typed access active widget index value"), ActiveWidgetIndex, 2);
-
-	FVector2D RenderTranslation = FVector2D::ZeroVector;
-	TestTrue(TEXT("Typed access keeps render translation"),
-		Design2UMGWidgetNodeAccess::TryGetWidgetVector2D(Node, UMGPropertyKeys::RenderTranslation, RenderTranslation));
-	TestTrue(TEXT("Typed access render translation value"), RenderTranslation.Equals(FVector2D(1.5f, -2.0f), 0.001f));
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTypedWidgetAccessEnumeratesDescriptorBackedBrushKeysTest,
-	"Design2UMG.WidgetNodeAccess.TypedAccessEnumeratesDescriptorBackedBrushKeys",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FTypedWidgetAccessEnumeratesDescriptorBackedBrushKeysTest::RunTest(const FString& Parameters)
-{
-	FUMGWidgetNode Node;
-	Node.Brush.Image.Mode = TEXT("Crop");
-	FUMGVisualBrushData::FImageTransformData Transform;
-	Transform.A = 1.0f;
-	Transform.B = 0.25f;
-	Transform.TX = 0.1f;
-	Transform.C = -0.05f;
-	Transform.D = 1.0f;
-	Transform.TY = 0.2f;
-	Node.Brush.Image.Transform = Transform;
-	Node.Brush.Gradient.Type = TEXT("Angular");
-	Node.Brush.Gradient.Rotation = 45.0f;
-	Node.Brush.Gradient.Stops = {
-		{ FLinearColor::Red, 0.0f },
-		{ FLinearColor::Blue, 1.0f },
-	};
-
-	FString ImageMode;
-	TestTrue(TEXT("Typed access keeps image mode"),
-		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::ImageMode, ImageMode));
-	TestEqual(TEXT("Typed access image mode value"), ImageMode, FString(TEXT("Crop")));
-
-	FString ImageTransform;
-	TestTrue(TEXT("Typed access keeps image transform"),
-		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::ImageTransform, ImageTransform));
-	TestEqual(
-		TEXT("Typed access image transform value"),
-		ImageTransform,
-		Design2UMGWidgetNodeAccess::SerializeImageTransform(Node.Brush.Image.Transform.GetValue()));
-
-	FString MaterialRef;
-	TestTrue(TEXT("Typed access keeps gradient material ref"),
-		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::MaterialRef, MaterialRef));
-	TestEqual(TEXT("Typed access gradient material ref value"), MaterialRef, FString(TEXT("angulargradient")));
-
-	FString MaterialParams;
-	TestTrue(TEXT("Typed access keeps gradient material params"),
-		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::MaterialParams, MaterialParams));
-	TestTrue(TEXT("Typed access gradient material params carry rotation"), MaterialParams.Contains(TEXT("\"Rotation\":45.0000")));
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBrushDescriptorPrecedenceContractTest,
-	"Design2UMG.WidgetNodeAccess.BrushDescriptorPrecedenceContract",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FBrushDescriptorPrecedenceContractTest::RunTest(const FString& Parameters)
-{
-	FUMGWidgetNode Node;
-	Node.Brush.MaterialRef = TEXT("roundedrect");
-	Node.Brush.TexturePath = TEXT("/Game/UI/T_LegacyBrush.T_LegacyBrush");
-	Node.Brush.Image.TexturePath = TEXT("/Game/UI/T_DescriptorBrush.T_DescriptorBrush");
-	Node.Brush.Gradient.Type = TEXT("Angular");
-	Node.Brush.Gradient.Rotation = 15.0f;
-	Node.Brush.Gradient.Stops = {
-		{ FLinearColor::Red, 0.0f },
-		{ FLinearColor::Blue, 1.0f },
-	};
-
-	FString MaterialRef;
-	TestTrue(TEXT("Brush typed string resolves material ref"), Design2UMGWidgetNodeAccess::TryGetBrushTypedWidgetString(Node, UMGPropertyKeys::MaterialRef, MaterialRef));
-	TestEqual(TEXT("Gradient-derived material ref takes precedence"), MaterialRef, FString(TEXT("angulargradient")));
-	FString PublicMaterialRef;
-	TestTrue(TEXT("Public getter resolves material ref through the same precedence"), Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::MaterialRef, PublicMaterialRef));
-	TestEqual(TEXT("Public getter material ref matches typed precedence"), PublicMaterialRef, MaterialRef);
-
-	FString TexturePath;
-	TestTrue(TEXT("Brush typed string resolves texture path"), Design2UMGWidgetNodeAccess::TryGetBrushTypedWidgetString(Node, UMGPropertyKeys::TexturePath, TexturePath));
-	TestEqual(TEXT("Descriptor-backed image texture path takes precedence"), TexturePath, FString(TEXT("/Game/UI/T_DescriptorBrush.T_DescriptorBrush")));
-	FString PublicTexturePath;
-	TestTrue(TEXT("Public getter resolves texture path through the same precedence"), Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::TexturePath, PublicTexturePath));
-	TestEqual(TEXT("Public getter texture path matches typed precedence"), PublicTexturePath, TexturePath);
-
-	Node.Brush.Gradient = FUMGVisualBrushData::FGradientData();
-	TestTrue(TEXT("Explicit material ref remains after removing gradient"), Design2UMGWidgetNodeAccess::TryGetBrushTypedWidgetString(Node, UMGPropertyKeys::MaterialRef, MaterialRef));
-	TestEqual(TEXT("Explicit material ref becomes fallback owner"), MaterialRef, FString(TEXT("roundedrect")));
-	TestTrue(TEXT("Public getter falls back to explicit material ref once gradient is removed"), Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::MaterialRef, PublicMaterialRef));
-	TestEqual(TEXT("Public getter explicit material ref matches typed fallback"), PublicMaterialRef, MaterialRef);
-
 	FUMGVisualBrushData LegacyOnlyBrush;
 	LegacyOnlyBrush.TexturePath = TEXT("/Game/UI/T_LegacyBrush.T_LegacyBrush");
 	FString NormalizationDiagnostic;
@@ -1945,64 +1846,6 @@ bool FBrushDescriptorPrecedenceContractTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Normalized texture path moved into image owner"),
 		LegacyOnlyBrush.Image.TexturePath.IsSet() && LegacyOnlyBrush.Image.TexturePath.GetValue() == TEXT("/Game/UI/T_LegacyBrush.T_LegacyBrush"));
 	TestTrue(TEXT("Normalization clears legacy/root owner"), LegacyOnlyBrush.TexturePath.IsEmpty());
-
-	TestTrue(TEXT("Typed access keeps explicit material ref after gradient removal"),
-		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::MaterialRef, PublicMaterialRef));
-	TestEqual(TEXT("Typed access explicit material ref matches typed fallback"), PublicMaterialRef, MaterialRef);
-
-	FUMGWidgetNode LegacyOnlyNode;
-	LegacyOnlyNode.Brush = LegacyOnlyBrush;
-	FString NormalizedTexturePath;
-	TestTrue(TEXT("Typed access keeps normalized canonical texture path"),
-		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(LegacyOnlyNode, UMGPropertyKeys::TexturePath, NormalizedTexturePath));
-	TestEqual(TEXT("Typed access normalized texture path matches canonical owner"), NormalizedTexturePath, FString(TEXT("/Game/UI/T_LegacyBrush.T_LegacyBrush")));
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBrushDescriptorExplicitEmptyMaterialRefTest,
-	"Design2UMG.WidgetNodeAccess.BrushDescriptorExplicitEmptyMaterialRef",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FBrushDescriptorExplicitEmptyMaterialRefTest::RunTest(const FString& Parameters)
-{
-	FUMGWidgetNode Node;
-	Node.Type = TEXT("Image");
-	Node.Name = TEXT("EmptyMaterialRef");
-	Node.Brush.MaterialRef = TEXT("");
-
-	FString MaterialRef;
-	TestTrue(TEXT("Explicit empty material ref is queryable"),
-		Design2UMGWidgetNodeAccess::TryGetBrushTypedWidgetString(Node, UMGPropertyKeys::MaterialRef, MaterialRef));
-	TestTrue(TEXT("Explicit empty material ref stays empty"), MaterialRef.IsEmpty());
-
-	FString PublicMaterialRef;
-	TestTrue(TEXT("Public getter returns explicit empty material ref"),
-		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::MaterialRef, PublicMaterialRef));
-	TestTrue(TEXT("Public getter keeps explicit empty material ref empty"), PublicMaterialRef.IsEmpty());
-
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBrushDescriptorExplicitEmptyImageTexturePathTest,
-	"Design2UMG.WidgetNodeAccess.BrushDescriptorExplicitEmptyImageTexturePath",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FBrushDescriptorExplicitEmptyImageTexturePathTest::RunTest(const FString& Parameters)
-{
-	FUMGWidgetNode Node;
-	Node.Type = TEXT("Image");
-	Node.Name = TEXT("EmptyImageTexturePath");
-	Node.Brush.MaterialRef = TEXT("roundedrect");
-	Node.Brush.Image.TexturePath = TEXT("");
-
-	FString TexturePath;
-	TestTrue(TEXT("Explicit empty image texture path is queryable"),
-		Design2UMGWidgetNodeAccess::TryGetBrushTypedWidgetString(Node, UMGPropertyKeys::TexturePath, TexturePath));
-	TestTrue(TEXT("Explicit empty image texture path stays empty"), TexturePath.IsEmpty());
-
-	FString PublicTexturePath;
-	TestTrue(TEXT("Public getter returns explicit empty image texture path"),
-		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::TexturePath, PublicTexturePath));
-	TestTrue(TEXT("Public getter keeps explicit empty image texture path empty"), PublicTexturePath.IsEmpty());
-
 	return true;
 }
 

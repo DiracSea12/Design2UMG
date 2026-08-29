@@ -7,7 +7,6 @@
 #include "SharedCoreSemantics.h"
 #include "VisualMapperFillTransfer.h"
 #include "Design2UMGLog.h"
-#include "UMGPropertyKeys.h"
 #include "UMGWidgetNodeAccess.h"
 #include "UMGValueParser.h"
 #include "Design2UMGGeneratedNameSuffixes.h"
@@ -75,11 +74,6 @@ namespace
 		}
 
 		return false;
-	}
-
-	bool HasVisualMapperPropertyPresence(const FUMGWidgetNode& Widget, const TCHAR* Key)
-	{
-		return Design2UMGWidgetNodeAccess::HasWidgetPropertyPresence(Widget, Key);
 	}
 
 	bool IsLayoutPanelType(const FString& Type)
@@ -255,10 +249,23 @@ namespace
 		}
 		if (!Border.Brush.MaterialParams.IsSet())
 		{
-			FString StringValue;
-			if (Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Widget, UMGPropertyKeys::MaterialParams, StringValue))
+			// Mirror the MaterialParams descriptor precedence: gradient params
+			// first, then the explicit params payload.
+			FString TransferParams;
+			bool bHasTransferParams = false;
+			if (Widget.Brush.Gradient.HasAny())
 			{
-				Border.Brush.MaterialParams = MoveTemp(StringValue);
+				TransferParams = Design2UMGWidgetNodeAccess::SerializeGradientMaterialParams(Widget.Brush.Gradient);
+				bHasTransferParams = !TransferParams.IsEmpty();
+			}
+			if (!bHasTransferParams && Widget.Brush.MaterialParams.IsSet())
+			{
+				TransferParams = Widget.Brush.MaterialParams.GetValue();
+				bHasTransferParams = true;
+			}
+			if (bHasTransferParams)
+			{
+				Border.Brush.MaterialParams = MoveTemp(TransferParams);
 			}
 		}
 
@@ -748,12 +755,9 @@ void VisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FDesignStroke& Stro
 	if (Thickness <= 0)
 		return;
 
-	if (!HasVisualMapperPropertyPresence(Widget, UMGPropertyKeys::DrawAs))
+	if (!Widget.Brush.DrawAs.IsSet())
 	{
-		if (!Widget.Brush.DrawAs.IsSet())
-		{
-			Widget.Brush.DrawAs = ESlateBrushDrawType::Box;
-		}
+		Widget.Brush.DrawAs = ESlateBrushDrawType::Box;
 	}
 
 	Widget.Brush.OutlineThickness = Thickness;

@@ -4,8 +4,6 @@
 
 #include "Design2UMGLog.h"
 #include "LayoutMapper.h"
-#include "UMGPropertyKeys.h"
-#include "UMGWidgetNodeAccess.h"
 
 namespace
 {
@@ -45,10 +43,6 @@ namespace
 		return (Parsed.A <= 0x20) || ((MaxChannel - MinChannel) <= 0x10);
 	}
 
-	bool HasWidgetPropertyPresence(const FUMGWidgetNode& Widget, const TCHAR* Key)
-	{
-		return Design2UMGWidgetNodeAccess::HasWidgetPropertyPresence(Widget, Key);
-	}
 }
 
 namespace Design2UMGConverterVisualSupport
@@ -100,13 +94,18 @@ namespace Design2UMGConverterVisualSupport
 		const TSharedPtr<FDesignNode>& Node)
 	{
 		VisualMapper::ApplyVisualProperties(Widget, Node);
-		if (Widget.Type == TEXT("Border")
-			&& !HasWidgetPropertyPresence(Widget, UMGPropertyKeys::BrushColor)
-			&& !HasWidgetPropertyPresence(Widget, UMGPropertyKeys::TexturePath)
-			&& !HasWidgetPropertyPresence(Widget, UMGPropertyKeys::MaterialRef))
+		// Direct typed reads with descriptor-identical presence rules:
+		// MaterialRef presence also covers a gradient-owned brush, and
+		// TexturePath lives on the canonical image owner.
+		const bool bHasBorderBackground =
+			Widget.Brush.BrushColor.IsSet()
+			|| Widget.Brush.Image.TexturePath.IsSet()
+			|| Widget.Brush.Gradient.HasAny()
+			|| Widget.Brush.MaterialRef.IsSet();
+		if (Widget.Type == TEXT("Border") && !bHasBorderBackground)
 		{
 			Widget.Brush.BrushColor = FLinearColor::Transparent;
-			if (HasWidgetPropertyPresence(Widget, UMGPropertyKeys::OutlineThickness))
+			if (Widget.Brush.OutlineThickness.IsSet())
 			{
 				Widget.Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
 			}

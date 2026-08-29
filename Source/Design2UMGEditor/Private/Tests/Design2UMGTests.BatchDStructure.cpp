@@ -3,10 +3,10 @@
 #include "DesignImportPlanning.h"
 #include "DesignImportUtils.h"
 #include "Design2UMGNotifications.h"
+#include "ExternalServices/DesignHttpClientSlot.h"
 #include "FigmaHttpClient.h"
 #include "MCPHttpClient.h"
 #include "PencilConnector.h"
-#include "Tests/HttpClientAutomationHooks.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 #include "Misc/AutomationTest.h"
 #include "Interfaces/IPluginManager.h"
@@ -420,13 +420,13 @@ bool FBatchDFigmaHttpCancellationBehaviorTest::RunTest(const FString& Parameters
 	{
 		int32 StartCount = 0;
 		int32 CancelCount = 0;
-		TFunction<void(bool, const FString&, int32)> Completion;
+		FDesignHttpClientSlotSimulatedCompletion Completion;
 	};
 
 	TSharedRef<FHookState> HookState = MakeShared<FHookState>();
-	TSharedRef<FFigmaHttpClientAutomationHooks> Hooks = MakeShared<FFigmaHttpClientAutomationHooks>();
+	TSharedRef<FDesignHttpClientSlotAutomationHooks> Hooks = MakeShared<FDesignHttpClientSlotAutomationHooks>();
 	Hooks->StartRequest =
-		[HookState](const FString&, const FString&, int32, TFunction<void(bool, const FString&, int32)> OnComplete)
+		[HookState](int32, FDesignHttpClientSlotSimulatedCompletion OnComplete)
 		{
 			++HookState->StartCount;
 			HookState->Completion = MoveTemp(OnComplete);
@@ -438,7 +438,7 @@ bool FBatchDFigmaHttpCancellationBehaviorTest::RunTest(const FString& Parameters
 			++HookState->CancelCount;
 		};
 
-	SetFigmaHttpClientAutomationHooks(Hooks);
+	SetDesignHttpClientSlotAutomationHooks(Hooks);
 
 	bool bCallbackCalled = false;
 	{
@@ -454,19 +454,19 @@ bool FBatchDFigmaHttpCancellationBehaviorTest::RunTest(const FString& Parameters
 		TestEqual(TEXT("Figma behavior hook observed one cancellation"), HookState->CancelCount, 1);
 		TestTrue(TEXT("Figma behavior hook captured completion"), static_cast<bool>(HookState->Completion));
 
-		HookState->Completion(false, TEXT(""), 0);
+		HookState->Completion(false, TEXT(""), 0, TEXT(""));
 		TestFalse(TEXT("Cancelled Figma request suppresses late callback"), bCallbackCalled);
 	}
 
-	ResetFigmaHttpClientAutomationHooks();
+	ResetDesignHttpClientSlotAutomationHooks();
 
-	TSharedRef<FFigmaHttpClientAutomationHooks> FailHooks = MakeShared<FFigmaHttpClientAutomationHooks>();
+	TSharedRef<FDesignHttpClientSlotAutomationHooks> FailHooks = MakeShared<FDesignHttpClientSlotAutomationHooks>();
 	FailHooks->StartRequest =
-		[](const FString&, const FString&, int32, TFunction<void(bool, const FString&, int32)>)
+		[](int32, FDesignHttpClientSlotSimulatedCompletion)
 		{
 			return false;
 		};
-	SetFigmaHttpClientAutomationHooks(FailHooks);
+	SetDesignHttpClientSlotAutomationHooks(FailHooks);
 
 	bool bFailureCalled = false;
 	bool bFailureSuccess = true;
@@ -480,7 +480,7 @@ bool FBatchDFigmaHttpCancellationBehaviorTest::RunTest(const FString& Parameters
 		});
 	}
 
-	ResetFigmaHttpClientAutomationHooks();
+	ResetDesignHttpClientSlotAutomationHooks();
 
 	TestTrue(TEXT("Synchronous Figma launch failure reports callback"), bFailureCalled);
 	TestFalse(TEXT("Synchronous Figma launch failure reports failure"), bFailureSuccess);
@@ -494,16 +494,18 @@ bool FBatchDMCPHttpCancellationBehaviorTest::RunTest(const FString& Parameters)
 {
 	struct FHookState
 	{
-		TMap<FString, TFunction<void(bool, const FString&, int32, const FString&)>> PendingByMethod;
+		TMap<int32, FDesignHttpClientSlotSimulatedCompletion> PendingByTrackingId;
+		int32 LastStartedTrackingId = 0;
 		int32 CancelCount = 0;
 	};
 
 	TSharedRef<FHookState> HookState = MakeShared<FHookState>();
-	TSharedRef<FMCPHttpClientAutomationHooks> Hooks = MakeShared<FMCPHttpClientAutomationHooks>();
-	Hooks->StartAsyncRequest =
-		[HookState](const FString& Method, const FString&, int32, TFunction<void(bool, const FString&, int32, const FString&)> OnComplete)
+	TSharedRef<FDesignHttpClientSlotAutomationHooks> Hooks = MakeShared<FDesignHttpClientSlotAutomationHooks>();
+	Hooks->StartRequest =
+		[HookState](int32 TrackingId, FDesignHttpClientSlotSimulatedCompletion OnComplete)
 		{
-			HookState->PendingByMethod.Add(Method, MoveTemp(OnComplete));
+			HookState->PendingByTrackingId.Add(TrackingId, MoveTemp(OnComplete));
+			HookState->LastStartedTrackingId = TrackingId;
 			return true;
 		};
 	Hooks->CancelRequest =
@@ -512,7 +514,7 @@ bool FBatchDMCPHttpCancellationBehaviorTest::RunTest(const FString& Parameters)
 			++HookState->CancelCount;
 		};
 
-	SetMCPHttpClientAutomationHooks(Hooks);
+	SetDesignHttpClientSlotAutomationHooks(Hooks);
 
 	FMCPHttpClient Client;
 	bool bConnectCalled = false;
@@ -522,10 +524,11 @@ bool FBatchDMCPHttpCancellationBehaviorTest::RunTest(const FString& Parameters)
 		bConnectCalled = bSuccess;
 	});
 
-	TestTrue(TEXT("MCP behavior hook captured initialize"), HookState->PendingByMethod.Contains(TEXT("initialize")));
-	HookState->PendingByMethod[TEXT("initialize")](true, TEXT("{}"), 200, TEXT("phase24-session"));
-	TestTrue(TEXT("MCP behavior hook captured notifications/initialized"), HookState->PendingByMethod.Contains(TEXT("notifications/initialized")));
-	HookState->PendingByMethod[TEXT("notifications/initialized")](true, TEXT(""), 202, TEXT(""));
+	const int32 InitializeTrackingId = HookState->LastStartedTrackingId;
+	TestTrue(TEXT("MCP behavior hook captured initialize"), HookState->PendingByTrackingId.Contains(InitializeTrackingId));
+	HookState->PendingByTrackingId[InitializeTrackingId](true, TEXT("{}"), 200, TEXT("phase24-session"));
+	TestTrue(TEXT("MCP handshake chained the initialized notification"), HookState->LastStartedTrackingId != InitializeTrackingId);
+	HookState->PendingByTrackingId[HookState->LastStartedTrackingId](true, TEXT(""), 202, TEXT(""));
 	TestTrue(TEXT("Async MCP connect completes"), bConnectCalled);
 
 	Client.CallToolAsync(TEXT("batch_get"), MakeShared<FJsonObject>(), [&bToolCallbackCalled](bool, const FString&)
@@ -533,17 +536,18 @@ bool FBatchDMCPHttpCancellationBehaviorTest::RunTest(const FString& Parameters)
 		bToolCallbackCalled = true;
 	});
 
-	TestTrue(TEXT("MCP behavior hook captured tools/call"), HookState->PendingByMethod.Contains(TEXT("tools/call")));
+	TestTrue(TEXT("MCP behavior hook captured tools/call"), HookState->PendingByTrackingId.Contains(HookState->LastStartedTrackingId));
+	const int32 ToolCallTrackingId = HookState->LastStartedTrackingId;
 	Client.CancelRequests();
 	TestEqual(TEXT("MCP behavior hook observed one cancellation"), HookState->CancelCount, 1);
 
 	const FString ToolResponse =
 		TEXT("event: message\n")
 		TEXT("data: {\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"phase24\"}]}}\n\n");
-	HookState->PendingByMethod[TEXT("tools/call")](true, ToolResponse, 200, TEXT(""));
+	HookState->PendingByTrackingId[ToolCallTrackingId](true, ToolResponse, 200, TEXT(""));
 	TestFalse(TEXT("Cancelled MCP async request suppresses late callback"), bToolCallbackCalled);
 
-	ResetMCPHttpClientAutomationHooks();
+	ResetDesignHttpClientSlotAutomationHooks();
 	return true;
 }
 
@@ -673,15 +677,15 @@ bool FBatchDMCPRequestIdSemanticsTest::RunTest(const FString& Parameters)
 {
 	struct FHookState
 	{
-		TMap<int32, TFunction<void(bool, const FString&, int32, const FString&)>> PendingByTrackingId;
+		TMap<int32, FDesignHttpClientSlotSimulatedCompletion> PendingByTrackingId;
 		TArray<int32> CancelledIds;
 		int32 LastStartedTrackingId = 0;
 	};
 
 	TSharedRef<FHookState> HookState = MakeShared<FHookState>();
-	TSharedRef<FMCPHttpClientAutomationHooks> Hooks = MakeShared<FMCPHttpClientAutomationHooks>();
-	Hooks->StartAsyncRequest =
-		[HookState](const FString&, const FString&, int32 TrackingId, TFunction<void(bool, const FString&, int32, const FString&)> OnComplete)
+	TSharedRef<FDesignHttpClientSlotAutomationHooks> Hooks = MakeShared<FDesignHttpClientSlotAutomationHooks>();
+	Hooks->StartRequest =
+		[HookState](int32 TrackingId, FDesignHttpClientSlotSimulatedCompletion OnComplete)
 		{
 			HookState->PendingByTrackingId.Add(TrackingId, MoveTemp(OnComplete));
 			HookState->LastStartedTrackingId = TrackingId;
@@ -693,7 +697,7 @@ bool FBatchDMCPRequestIdSemanticsTest::RunTest(const FString& Parameters)
 			HookState->CancelledIds.Add(TrackingId);
 		};
 
-	SetMCPHttpClientAutomationHooks(Hooks);
+	SetDesignHttpClientSlotAutomationHooks(Hooks);
 
 	FMCPHttpClient Client;
 	Client.ConnectAsync(TEXT("http://phase24.test"), [](bool){});
@@ -702,8 +706,8 @@ bool FBatchDMCPRequestIdSemanticsTest::RunTest(const FString& Parameters)
 	// unsafe because completing one step queues the next into the same map).
 	for (int32 HandshakeStep = 0; HandshakeStep < 2; ++HandshakeStep)
 	{
-		TArray<TFunction<void(bool, const FString&, int32, const FString&)>> HandshakeCallbacks;
-		for (const TPair<int32, TFunction<void(bool, const FString&, int32, const FString&)>>& Pair
+		TArray<FDesignHttpClientSlotSimulatedCompletion> HandshakeCallbacks;
+		for (const TPair<int32, FDesignHttpClientSlotSimulatedCompletion>& Pair
 			: HookState->PendingByTrackingId)
 		{
 			HandshakeCallbacks.Add(Pair.Value);
@@ -713,7 +717,7 @@ bool FBatchDMCPRequestIdSemanticsTest::RunTest(const FString& Parameters)
 		{
 			break;
 		}
-		for (const TFunction<void(bool, const FString&, int32, const FString&)>& Callback : HandshakeCallbacks)
+		for (const FDesignHttpClientSlotSimulatedCompletion& Callback : HandshakeCallbacks)
 		{
 			Callback(true, TEXT("{}"), 200, TEXT("phase24-session"));
 		}
@@ -751,7 +755,7 @@ bool FBatchDMCPRequestIdSemanticsTest::RunTest(const FString& Parameters)
 		200, TEXT(""));
 	TestTrue(TEXT("Live replacement callback fires after cancel+replace"), bBCallbackFired);
 
-	ResetMCPHttpClientAutomationHooks();
+	ResetDesignHttpClientSlotAutomationHooks();
 	return true;
 }
 
@@ -767,15 +771,15 @@ bool FBatchDMCPDisconnectCollisionTest::RunTest(const FString& Parameters)
 	// disturbing the new session's active tracking state.
 	struct FHookState
 	{
-		TMap<int32, TFunction<void(bool, const FString&, int32, const FString&)>> PendingByTrackingId;
+		TMap<int32, FDesignHttpClientSlotSimulatedCompletion> PendingByTrackingId;
 		TArray<int32> CancelledIds;
 		int32 LastStartedTrackingId = 0;
 	};
 
 	TSharedRef<FHookState> HookState = MakeShared<FHookState>();
-	TSharedRef<FMCPHttpClientAutomationHooks> Hooks = MakeShared<FMCPHttpClientAutomationHooks>();
-	Hooks->StartAsyncRequest =
-		[HookState](const FString&, const FString&, int32 TrackingId, TFunction<void(bool, const FString&, int32, const FString&)> OnComplete)
+	TSharedRef<FDesignHttpClientSlotAutomationHooks> Hooks = MakeShared<FDesignHttpClientSlotAutomationHooks>();
+	Hooks->StartRequest =
+		[HookState](int32 TrackingId, FDesignHttpClientSlotSimulatedCompletion OnComplete)
 		{
 			HookState->PendingByTrackingId.Add(TrackingId, MoveTemp(OnComplete));
 			HookState->LastStartedTrackingId = TrackingId;
@@ -787,7 +791,7 @@ bool FBatchDMCPDisconnectCollisionTest::RunTest(const FString& Parameters)
 			HookState->CancelledIds.Add(TrackingId);
 		};
 
-	SetMCPHttpClientAutomationHooks(Hooks);
+	SetDesignHttpClientSlotAutomationHooks(Hooks);
 
 	FMCPHttpClient Client;
 
@@ -797,8 +801,8 @@ bool FBatchDMCPDisconnectCollisionTest::RunTest(const FString& Parameters)
 	{
 		// Execute-and-remove each current entry except SkipTrackingId (a cancelled
 		// request whose LATE callback we simulate later in the test).
-		TArray<TPair<int32, TFunction<void(bool, const FString&, int32, const FString&)>>> Entries;
-		for (const TPair<int32, TFunction<void(bool, const FString&, int32, const FString&)>>& Pair
+		TArray<TPair<int32, FDesignHttpClientSlotSimulatedCompletion>> Entries;
+		for (const TPair<int32, FDesignHttpClientSlotSimulatedCompletion>& Pair
 			: HookState->PendingByTrackingId)
 		{
 			if (Pair.Key != SkipTrackingId)
@@ -852,11 +856,11 @@ bool FBatchDMCPDisconnectCollisionTest::RunTest(const FString& Parameters)
 	// ...and only then does the OLD request's late HTTP callback arrive with a
 	// valid-looking payload. It must be recognized as cancelled and swallowed:
 	// neither its completion runs, nor is the new request's tracking disturbed.
-	const TFunction<void(bool, const FString&, int32, const FString&)>* LateOldCallback =
+	const FDesignHttpClientSlotSimulatedCompletion* LateOldCallback =
 		HookState->PendingByTrackingId.Find(OldRequestTrackingId);
 	if (!TestNotNull(TEXT("Late old-session callback is still registered"), LateOldCallback))
 	{
-		ResetMCPHttpClientAutomationHooks();
+		ResetDesignHttpClientSlotAutomationHooks();
 		return false;
 	}
 	(*LateOldCallback)(true,
@@ -872,6 +876,6 @@ bool FBatchDMCPDisconnectCollisionTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("New request still delivers after the late stale callback"),
 		bNewCallbackFired && NewResultPayload.Contains(TEXT("live payload")));
 
-	ResetMCPHttpClientAutomationHooks();
+	ResetDesignHttpClientSlotAutomationHooks();
 	return true;
 }

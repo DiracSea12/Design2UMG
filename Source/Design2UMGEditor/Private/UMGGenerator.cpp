@@ -372,19 +372,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 				Node.Slot.Alignment.X, Node.Slot.Alignment.Y,
 				Node.Slot.bAutoSize ? 1 : 0);
 
-			FString PropsInfo;
-			Design2UMGWidgetNodeAccess::ForEachStaticTypedWidgetPropertyKey([&PropsInfo, &Node](const TCHAR* Key)
-			{
-				FString Value;
-				if (!Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, Key, Value)
-					|| Value.IsEmpty()
-					|| FCString::Strcmp(Key, TEXT("PathGeometry")) == 0
-					|| FCString::Strcmp(Key, TEXT("MaterialParams")) == 0)
-				{
-					return;
-				}
-				PropsInfo += FString::Printf(TEXT(" %s=%s"), Key, *Value.Left(40));
-			});
+			FString PropsInfo = Design2UMGWidgetNodeAccess::BuildWidgetNodeVerbosePropertyDump(Node);
 
 			UE_LOG(LogDesign2UMG, Verbose, TEXT("TREE: %s[%s] '%s' bounds=(%.1f,%.1f,%.1f,%.1f) %s%s"),
 				*Indent, *Node.Type, *Node.Name,

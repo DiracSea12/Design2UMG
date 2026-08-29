@@ -50,7 +50,7 @@ private:
 	FString SessionId;
 	/** JSON-RPC id embedded in outgoing request bodies (resets on Disconnect). */
 	int32 NextRpcRequestId = 1;
-	TSharedRef<struct FMCPHttpClientState, ESPMode::ThreadSafe> State;
+	TSharedRef<class FDesignHttpClientSlot, ESPMode::ThreadSafe> State;
 
 	/**
 	 * Send one JSON-RPC request and track cancellation for it.

@@ -3,9 +3,8 @@
 #include "UMGWidgetNodeAccess.h"
 
 #include "GradientMaterialParams.h"
+#include "UMGPropertyKeys.h"
 #include "UMGSchema.h"
-#include "UMGValueParser.h"
-#include "UMGWidgetNodeTypedPropertyAccess.h"
 
 namespace
 {
@@ -59,6 +58,53 @@ namespace
 			Params.Stops.Add({Stop.Position, Design2UMGWidgetNodeAccess::SerializeWidgetColor(Stop.Color)});
 		}
 		return Design2UMGGradientMaterialParams::BuildGradientMaterialParamsJson(Params);
+	}
+
+	void AppendVerboseProperty(FString& OutDump, const TCHAR* Key, const FString& Value)
+	{
+		if (Value.IsEmpty())
+		{
+			return;
+		}
+		OutDump += FString::Printf(TEXT(" %s=%s"), Key, *Value.Left(40));
+	}
+
+	void AppendVerboseProperty(FString& OutDump, const TCHAR* Key, const TOptional<FString>& Value)
+	{
+		if (Value.IsSet())
+		{
+			AppendVerboseProperty(OutDump, Key, Value.GetValue());
+		}
+	}
+
+	void AppendVerboseFloat(FString& OutDump, const TCHAR* Key, const float Value)
+	{
+		AppendVerboseProperty(OutDump, Key, Design2UMGWidgetNodeAccess::SerializeWidgetFloat(Value));
+	}
+
+	void AppendVerboseBool(FString& OutDump, const TCHAR* Key, const bool Value)
+	{
+		AppendVerboseProperty(OutDump, Key, Design2UMGWidgetNodeAccess::SerializeWidgetBool(Value));
+	}
+
+	void AppendVerboseInt(FString& OutDump, const TCHAR* Key, const int32 Value)
+	{
+		AppendVerboseProperty(OutDump, Key, FString::FromInt(Value));
+	}
+
+	void AppendVerboseVector2D(FString& OutDump, const TCHAR* Key, const FVector2D& Value)
+	{
+		AppendVerboseProperty(OutDump, Key, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Value));
+	}
+
+	void AppendVerboseColor(FString& OutDump, const TCHAR* Key, const FLinearColor& Value)
+	{
+		AppendVerboseProperty(OutDump, Key, Design2UMGWidgetNodeAccess::SerializeWidgetColor(Value));
+	}
+
+	void AppendVerboseMargin(FString& OutDump, const TCHAR* Key, const FMargin& Value)
+	{
+		AppendVerboseProperty(OutDump, Key, Design2UMGWidgetNodeAccess::SerializeWidgetMargin(Value));
 	}
 }
 
@@ -209,164 +255,269 @@ bool Design2UMGWidgetNodeAccess::NormalizeBrushTexturePathOwner(FUMGVisualBrushD
 	return true;
 }
 
-void Design2UMGWidgetNodeAccess::ForEachStaticTypedWidgetPropertyKey(TFunctionRef<void(const TCHAR*)> Visitor)
+FString Design2UMGWidgetNodeAccess::BuildWidgetNodeVerbosePropertyDump(const FUMGWidgetNode& Node)
 {
-	Design2UMGWidgetNodeTypedPropertyAccess::ForEachStaticTypedWidgetPropertyKey(Visitor);
-}
+	FString Dump;
 
-bool Design2UMGWidgetNodeAccess::IsTypedWidgetPropertyKey(const FString& Key)
-{
-	static const TSet<FString> TypedKeys = []()
+	// Text style.
+	if (Node.TextStyle.FontSize > 0.0f)
 	{
-		TSet<FString> Result;
-		Design2UMGWidgetNodeAccess::ForEachStaticTypedWidgetPropertyKey([&Result](const TCHAR* TypedKey)
-		{
-			Result.Add(TypedKey);
-		});
-		return Result;
-	}();
-
-	return TypedKeys.Contains(Key) || Key.StartsWith(TEXT("BoxShadow_"));
-}
-
-bool Design2UMGWidgetNodeAccess::TryGetTextStyleTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue)
-{
-	return Design2UMGWidgetNodeTypedPropertyAccess::TryGetTextStyleTypedWidgetString(Node, KeyString, OutValue);
-}
-
-bool Design2UMGWidgetNodeAccess::TryGetWidgetStyleTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue)
-{
-	return Design2UMGWidgetNodeTypedPropertyAccess::TryGetWidgetStyleTypedWidgetString(Node, KeyString, OutValue);
-}
-
-bool Design2UMGWidgetNodeAccess::TryGetTextTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue)
-{
-	return Design2UMGWidgetNodeTypedPropertyAccess::TryGetTextTypedWidgetString(Node, KeyString, OutValue);
-}
-
-bool Design2UMGWidgetNodeAccess::TryGetBrushTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue)
-{
-	return Design2UMGWidgetNodeTypedPropertyAccess::TryGetBrushTypedWidgetString(Node, KeyString, OutValue);
-}
-
-bool Design2UMGWidgetNodeAccess::TryGetEffectTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue)
-{
-	return Design2UMGWidgetNodeTypedPropertyAccess::TryGetEffectTypedWidgetString(Node, KeyString, OutValue);
-}
-
-bool Design2UMGWidgetNodeAccess::TryGetPathTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue)
-{
-	return Design2UMGWidgetNodeTypedPropertyAccess::TryGetPathTypedWidgetString(Node, KeyString, OutValue);
-}
-
-bool Design2UMGWidgetNodeAccess::TryGetShadowTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue)
-{
-	return Design2UMGWidgetNodeTypedPropertyAccess::TryGetShadowTypedWidgetString(Node, KeyString, OutValue);
-}
-
-bool Design2UMGWidgetNodeAccess::TryGetRenderTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue)
-{
-	return Design2UMGWidgetNodeTypedPropertyAccess::TryGetRenderTypedWidgetString(Node, KeyString, OutValue);
-}
-
-bool Design2UMGWidgetNodeAccess::TryGetWidgetStateTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue)
-{
-	return Design2UMGWidgetNodeTypedPropertyAccess::TryGetWidgetStateTypedWidgetString(Node, KeyString, OutValue);
-}
-
-bool Design2UMGWidgetNodeAccess::TryGetScrollBoxTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue)
-{
-	return Design2UMGWidgetNodeTypedPropertyAccess::TryGetScrollBoxTypedWidgetString(Node, KeyString, OutValue);
-}
-
-bool Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(const FUMGWidgetNode& Node, const TCHAR* Key, FString& OutValue)
-{
-	return Design2UMGWidgetNodeTypedPropertyAccess::TryGetTypedWidgetString(Node, Key, OutValue);
-}
-
-bool Design2UMGWidgetNodeAccess::HasWidgetPropertyPresence(const FUMGWidgetNode& Node, const TCHAR* Key)
-{
-	FString Value;
-	return TryGetTypedWidgetString(Node, Key, Value);
-}
-
-bool Design2UMGWidgetNodeAccess::TryGetWidgetBool(const FUMGWidgetNode& Node, const TCHAR* Key, bool& OutValue)
-{
-	FString TypedValue;
-	if (TryGetTypedWidgetString(Node, Key, TypedValue) && !TypedValue.IsEmpty())
+		AppendVerboseFloat(Dump, UMGPropertyKeys::FontSize, Node.TextStyle.FontSize);
+	}
+	if (Node.TextStyle.SourceFontSize > 0.0f)
 	{
-		OutValue = TypedValue.Equals(TEXT("true"), ESearchCase::IgnoreCase) || TypedValue == TEXT("1");
-		return true;
+		AppendVerboseFloat(Dump, UMGPropertyKeys::DesignFontSize, Node.TextStyle.SourceFontSize);
+	}
+	if (Node.TextStyle.LetterSpacing.IsSet())
+	{
+		AppendVerboseFloat(Dump, UMGPropertyKeys::LetterSpacing, Node.TextStyle.LetterSpacing.GetValue());
 	}
 
-	return false;
-}
-
-bool Design2UMGWidgetNodeAccess::TryGetWidgetInt(const FUMGWidgetNode& Node, const TCHAR* Key, int32& OutValue)
-{
-	FString TypedValue;
-	if (TryGetTypedWidgetString(Node, Key, TypedValue) && !TypedValue.IsEmpty())
+	// Widget style. ImageMode/ImageTransform prefer the widget style payload
+	// and fall back to the brush image payload, mirroring the old key lookup order.
+	if (Node.WidgetStyle.WidthOverride.IsSet())
 	{
-		return LexTryParseString(OutValue, *TypedValue);
+		AppendVerboseFloat(Dump, UMGPropertyKeys::WidthOverride, Node.WidgetStyle.WidthOverride.GetValue());
+	}
+	if (Node.WidgetStyle.HeightOverride.IsSet())
+	{
+		AppendVerboseFloat(Dump, UMGPropertyKeys::HeightOverride, Node.WidgetStyle.HeightOverride.GetValue());
+	}
+	if (Node.WidgetStyle.MinDesiredWidth.IsSet())
+	{
+		AppendVerboseFloat(Dump, UMGPropertyKeys::MinDesiredWidth, Node.WidgetStyle.MinDesiredWidth.GetValue());
+	}
+	if (Node.WidgetStyle.MinDesiredHeight.IsSet())
+	{
+		AppendVerboseFloat(Dump, UMGPropertyKeys::MinDesiredHeight, Node.WidgetStyle.MinDesiredHeight.GetValue());
+	}
+	if (Node.WidgetStyle.Padding.IsSet())
+	{
+		AppendVerboseMargin(Dump, UMGPropertyKeys::Padding, Node.WidgetStyle.Padding.GetValue());
+	}
+	if (Node.WidgetStyle.InnerSlotPadding.IsSet())
+	{
+		AppendVerboseProperty(
+			Dump, UMGPropertyKeys::InnerSlotPadding,
+			Design2UMGWidgetNodeAccess::SerializeWidgetCompactVector2D(Node.WidgetStyle.InnerSlotPadding.GetValue()));
+	}
+	if (Node.WidgetStyle.SlotPadding.IsSet())
+	{
+		AppendVerboseMargin(Dump, UMGPropertyKeys::SlotPadding, Node.WidgetStyle.SlotPadding.GetValue());
+	}
+	if (Node.WidgetStyle.StrokePadding.IsSet())
+	{
+		AppendVerboseMargin(Dump, UMGPropertyKeys::StrokePadding, Node.WidgetStyle.StrokePadding.GetValue());
+	}
+	if (Node.WidgetStyle.StrokeMargin.IsSet())
+	{
+		AppendVerboseMargin(Dump, UMGPropertyKeys::StrokeMargin, Node.WidgetStyle.StrokeMargin.GetValue());
+	}
+	AppendVerboseProperty(
+		Dump, UMGPropertyKeys::ImageMode,
+		Node.WidgetStyle.ImageMode.IsSet() ? Node.WidgetStyle.ImageMode : Node.Brush.Image.Mode);
+	if (Node.WidgetStyle.ImageTransform.IsSet())
+	{
+		AppendVerboseProperty(Dump, UMGPropertyKeys::ImageTransform, Node.WidgetStyle.ImageTransform.GetValue());
+	}
+	else if (Node.Brush.Image.Transform.IsSet())
+	{
+		AppendVerboseProperty(
+			Dump, UMGPropertyKeys::ImageTransform,
+			Design2UMGWidgetNodeAccess::SerializeImageTransform(Node.Brush.Image.Transform.GetValue()));
+	}
+	AppendVerboseProperty(Dump, UMGPropertyKeys::Stretch, Node.WidgetStyle.Stretch);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::StretchDirection, Node.WidgetStyle.StretchDirection);
+	if (Node.WidgetStyle.BackgroundColor.IsSet())
+	{
+		AppendVerboseColor(Dump, UMGPropertyKeys::BackgroundColor, Node.WidgetStyle.BackgroundColor.GetValue());
+	}
+	if (Node.WidgetStyle.HoveredColor.IsSet())
+	{
+		AppendVerboseColor(Dump, UMGPropertyKeys::HoveredColor, Node.WidgetStyle.HoveredColor.GetValue());
+	}
+	if (Node.WidgetStyle.PressedColor.IsSet())
+	{
+		AppendVerboseColor(Dump, UMGPropertyKeys::PressedColor, Node.WidgetStyle.PressedColor.GetValue());
+	}
+	AppendVerboseProperty(Dump, UMGPropertyKeys::NamedSlot, Node.WidgetStyle.NamedSlot);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::SlotName, Node.WidgetStyle.SlotName);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::Visibility, Node.WidgetStyle.Visibility);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::ToolTipText, Node.WidgetStyle.ToolTipText);
+	if (Node.WidgetStyle.IsEnabled.IsSet())
+	{
+		AppendVerboseBool(Dump, UMGPropertyKeys::IsEnabled, Node.WidgetStyle.IsEnabled.GetValue());
 	}
 
-	return false;
-}
-
-bool Design2UMGWidgetNodeAccess::TryGetWidgetFloat(const FUMGWidgetNode& Node, const TCHAR* Key, float& OutValue)
-{
-	FString TypedValue;
-	if (TryGetTypedWidgetString(Node, Key, TypedValue) && !TypedValue.IsEmpty())
+	// Text.
+	AppendVerboseProperty(Dump, UMGPropertyKeys::Text, Node.Text.Text);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::RichTextStyleRows, Node.Text.RichTextStyleRowsJson);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::HintText, Node.Text.HintText);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::FontFamily, Node.Text.FontFamily);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::TypefaceFontName, Node.Text.TypefaceFontName);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::FontStyle, Node.Text.FontStyle);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::Justification, Node.Text.Justification);
+	if (Node.Text.bAutoWrapText.IsSet())
 	{
-		return LexTryParseString(OutValue, *TypedValue);
+		AppendVerboseBool(Dump, UMGPropertyKeys::AutoWrapText, Node.Text.bAutoWrapText.GetValue());
+	}
+	if (Node.Text.WrapTextAt.IsSet())
+	{
+		AppendVerboseFloat(Dump, UMGPropertyKeys::WrapTextAt, Node.Text.WrapTextAt.GetValue());
+	}
+	if (Node.Text.LineHeightPercentage.IsSet())
+	{
+		AppendVerboseFloat(Dump, UMGPropertyKeys::LineHeightPercentage, Node.Text.LineHeightPercentage.GetValue());
+	}
+	if (Node.Text.bUnderline.IsSet())
+	{
+		AppendVerboseBool(Dump, UMGPropertyKeys::Underline, Node.Text.bUnderline.GetValue());
+	}
+	if (Node.Text.bStrikethrough.IsSet())
+	{
+		AppendVerboseBool(Dump, UMGPropertyKeys::Strikethrough, Node.Text.bStrikethrough.GetValue());
+	}
+	AppendVerboseProperty(Dump, UMGPropertyKeys::Href, Node.Text.Href);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::TextAlignVertical, Node.Text.TextAlignVertical);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::IconName, Node.Text.IconName);
+	if (Node.Text.Color.IsSet())
+	{
+		AppendVerboseColor(Dump, UMGPropertyKeys::Color, Node.Text.Color.GetValue());
 	}
 
-	return false;
-}
-
-bool Design2UMGWidgetNodeAccess::TryGetWidgetVector2D(const FUMGWidgetNode& Node, const TCHAR* Key, FVector2D& OutValue)
-{
-	FString TypedValue;
-	if (TryGetTypedWidgetString(Node, Key, TypedValue) && !TypedValue.IsEmpty())
+	// Brush. MaterialParams and PathGeometry stay out of the dump (payload noise).
+	if (Node.Brush.BrushColor.IsSet())
 	{
-		OutValue = FUMGValueParser::ParseVector2D(TypedValue);
-		return true;
+		AppendVerboseColor(Dump, UMGPropertyKeys::BrushColor, Node.Brush.BrushColor.GetValue());
+	}
+	if (Node.Brush.OutlineColor.IsSet())
+	{
+		AppendVerboseColor(Dump, UMGPropertyKeys::OutlineColor, Node.Brush.OutlineColor.GetValue());
+	}
+	if (Node.Brush.DrawAs.IsSet())
+	{
+		AppendVerboseProperty(Dump, UMGPropertyKeys::DrawAs, Design2UMGWidgetNodeAccess::SerializeDrawAs(Node.Brush.DrawAs.GetValue()));
+	}
+	if (Node.Brush.OutlineCornerRadius >= 0.0f)
+	{
+		AppendVerboseFloat(Dump, UMGPropertyKeys::OutlineCornerRadius, Node.Brush.OutlineCornerRadius);
+	}
+	if (Node.Brush.HasCornerRadii())
+	{
+		AppendVerboseProperty(Dump, UMGPropertyKeys::CornerRadii, Design2UMGWidgetNodeAccess::SerializeWidgetVector4(Node.Brush.CornerRadii));
+	}
+	if (Node.Brush.OutlineThickness.IsSet())
+	{
+		AppendVerboseFloat(Dump, UMGPropertyKeys::OutlineThickness, Node.Brush.OutlineThickness.GetValue());
+	}
+	if (Node.Brush.Gradient.HasAny())
+	{
+		AppendVerboseProperty(Dump, UMGPropertyKeys::MaterialRef, Design2UMGWidgetNodeAccess::GetGradientMaterialRef(Node.Brush.Gradient));
+	}
+	else if (Node.Brush.MaterialRef.IsSet())
+	{
+		AppendVerboseProperty(Dump, UMGPropertyKeys::MaterialRef, Node.Brush.MaterialRef.GetValue());
+	}
+	AppendVerboseProperty(Dump, UMGPropertyKeys::TexturePath, Node.Brush.Image.TexturePath);
+
+	// Effect.
+	if (Node.Effect.BlurStrength.IsSet())
+	{
+		AppendVerboseFloat(Dump, UMGPropertyKeys::BlurStrength, Node.Effect.BlurStrength.GetValue());
+	}
+	if (Node.Effect.bRetainRendering.IsSet())
+	{
+		AppendVerboseBool(Dump, UMGPropertyKeys::RetainRendering, Node.Effect.bRetainRendering.GetValue());
+	}
+	AppendVerboseProperty(Dump, UMGPropertyKeys::EffectMaterial, Node.Effect.EffectMaterial);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::TextureParameter, Node.Effect.TextureParameter);
+	if (Node.Effect.EffectBlurUVStep.IsSet())
+	{
+		AppendVerboseVector2D(Dump, UMGPropertyKeys::EffectBlurUVStep, Node.Effect.EffectBlurUVStep.GetValue());
+	}
+	if (Node.Effect.EffectColor.IsSet())
+	{
+		AppendVerboseColor(Dump, UMGPropertyKeys::EffectColor, Node.Effect.EffectColor.GetValue());
+	}
+	if (Node.Effect.EffectOffset.IsSet())
+	{
+		AppendVerboseVector2D(Dump, UMGPropertyKeys::EffectOffset, Node.Effect.EffectOffset.GetValue());
+	}
+	if (Node.Effect.RenderingPhase.IsSet())
+	{
+		AppendVerboseInt(Dump, UMGPropertyKeys::Phase, Node.Effect.RenderingPhase.GetValue().Phase);
+		AppendVerboseInt(Dump, UMGPropertyKeys::PhaseCount, Node.Effect.RenderingPhase.GetValue().PhaseCount);
 	}
 
-	return false;
-}
-
-bool Design2UMGWidgetNodeAccess::TryGetWidgetVector4(const FUMGWidgetNode& Node, const TCHAR* Key, FVector4& OutValue)
-{
-	FString TypedValue;
-	if (TryGetTypedWidgetString(Node, Key, TypedValue) && !TypedValue.IsEmpty())
+	// Path (geometry payload excluded: same dump filter as before).
+	AppendVerboseProperty(Dump, UMGPropertyKeys::PathFillRule, Node.Path.FillRule);
+	if (Node.Path.FillColor.IsSet())
 	{
-		return Design2UMGWidgetNodeTypedPropertyAccess::TryParseWidgetVector4String(TypedValue, OutValue);
+		AppendVerboseColor(Dump, UMGPropertyKeys::PathFillColor, Node.Path.FillColor.GetValue());
+	}
+	if (Node.Path.StrokeColor.IsSet())
+	{
+		AppendVerboseColor(Dump, UMGPropertyKeys::PathStrokeColor, Node.Path.StrokeColor.GetValue());
+	}
+	if (Node.Path.StrokeThickness.IsSet())
+	{
+		AppendVerboseFloat(Dump, UMGPropertyKeys::PathStrokeThickness, Node.Path.StrokeThickness.GetValue());
+	}
+	AppendVerboseProperty(Dump, UMGPropertyKeys::PathStrokeCap, Node.Path.StrokeCap);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::PathStrokeJoin, Node.Path.StrokeJoin);
+
+	// Shadow.
+	if (Node.Shadow.ShadowOffset.IsSet())
+	{
+		AppendVerboseProperty(
+			Dump, UMGPropertyKeys::ShadowOffset,
+			Design2UMGWidgetNodeAccess::SerializeWidgetCompactVector2D(Node.Shadow.ShadowOffset.GetValue()));
+	}
+	if (Node.Shadow.ShadowColorAndOpacity.IsSet())
+	{
+		AppendVerboseColor(Dump, UMGPropertyKeys::ShadowColorAndOpacity, Node.Shadow.ShadowColorAndOpacity.GetValue());
+	}
+	if (Node.Shadow.ShadowBlur.IsSet())
+	{
+		AppendVerboseFloat(Dump, UMGPropertyKeys::ShadowBlur, Node.Shadow.ShadowBlur.GetValue());
+	}
+	if (Node.Shadow.BoxShadows.Num() > 0)
+	{
+		AppendVerboseInt(Dump, UMGPropertyKeys::BoxShadowCount, Node.Shadow.BoxShadows.Num());
 	}
 
-	return false;
-}
-
-bool Design2UMGWidgetNodeAccess::TryGetWidgetMargin(const FUMGWidgetNode& Node, const TCHAR* Key, FMargin& OutValue)
-{
-	FString TypedValue;
-	if (TryGetTypedWidgetString(Node, Key, TypedValue) && !TypedValue.IsEmpty())
+	// Render.
+	AppendVerboseProperty(Dump, UMGPropertyKeys::Clipping, Node.Render.Clipping);
+	if (Node.Render.RenderOpacity.IsSet())
 	{
-		OutValue = FUMGValueParser::ParseMargin(TypedValue);
-		return true;
+		AppendVerboseFloat(Dump, UMGPropertyKeys::RenderOpacity, Node.Render.RenderOpacity.GetValue());
+	}
+	if (Node.Render.RenderAngle.IsSet())
+	{
+		AppendVerboseFloat(Dump, UMGPropertyKeys::RenderAngle, Node.Render.RenderAngle.GetValue());
+	}
+	if (Node.Render.RenderTransformScale.IsSet())
+	{
+		AppendVerboseVector2D(Dump, UMGPropertyKeys::RenderTransformScale, Node.Render.RenderTransformScale.GetValue());
+	}
+	if (Node.Render.RenderTransformPivot.IsSet())
+	{
+		AppendVerboseVector2D(Dump, UMGPropertyKeys::RenderTransformPivot, Node.Render.RenderTransformPivot.GetValue());
+	}
+	if (Node.Render.RenderTranslation.IsSet())
+	{
+		AppendVerboseVector2D(Dump, UMGPropertyKeys::RenderTranslation, Node.Render.RenderTranslation.GetValue());
 	}
 
-	return false;
-}
-
-bool Design2UMGWidgetNodeAccess::TryGetWidgetColor(const FUMGWidgetNode& Node, const TCHAR* Key, FLinearColor& OutValue)
-{
-	FString TypedValue;
-	if (TryGetTypedWidgetString(Node, Key, TypedValue) && !TypedValue.IsEmpty())
+	// Widget state.
+	if (Node.WidgetState.ActiveWidgetIndex.IsSet())
 	{
-		OutValue = FUMGValueParser::ParseColor(TypedValue);
-		return true;
+		AppendVerboseInt(Dump, UMGPropertyKeys::ActiveWidgetIndex, Node.WidgetState.ActiveWidgetIndex.GetValue());
 	}
 
-	return false;
+	// Scroll box.
+	AppendVerboseProperty(Dump, UMGPropertyKeys::Orientation, Node.ScrollBox.Orientation);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::ScrollBarVisibility, Node.ScrollBox.ScrollBarVisibility);
+
+	return Dump;
 }

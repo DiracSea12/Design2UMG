@@ -2,7 +2,7 @@
 
 #include "MCPHttpClient.h"
 #include "Design2UMGLog.h"
-#include "Tests/HttpClientAutomationHooks.h"
+#include "DesignHttpClientSlot.h"
 
 #include "HttpModule.h"
 #include "HttpManager.h"
@@ -11,24 +11,6 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
-
-struct FMCPHttpClientState
-{
-	FHttpRequestPtr ActiveRequest;
-	/** Local active-request/cancel tracking id (not the JSON-RPC id). */
-	int32 ActiveTrackingRequestId = 0;
-	/** Monotonic across Disconnect(): late old-session callbacks can never collide with new-session ids. */
-	int32 NextTrackingRequestId = 0;
-	/** Cancel marks persist until their (possibly late) callback consumes them. */
-	TSet<int32> CancelledRequestIds;
-};
-
-#if WITH_DEV_AUTOMATION_TESTS
-namespace
-{
-	TSharedPtr<FMCPHttpClientAutomationHooks> GMCPHttpClientAutomationHooks;
-}
-#endif
 
 namespace
 {
@@ -88,7 +70,7 @@ namespace
 }
 
 FMCPHttpClient::FMCPHttpClient()
-	: State(MakeShared<FMCPHttpClientState, ESPMode::ThreadSafe>())
+	: State(MakeShared<FDesignHttpClientSlot, ESPMode::ThreadSafe>())
 {
 }
 
@@ -144,34 +126,14 @@ void FMCPHttpClient::Disconnect()
 	// JSON-RPC ids are per-session protocol state and restart cleanly.
 	// Tracking ids intentionally stay MONOTONIC across sessions: a late-arriving
 	// callback from an old session can then never collide with a new session's
-	// request id, and its cancellation mark stays in the set until that late
-	// callback consumes it, so stale responses are always recognized as
-	// cancelled instead of being applied to the new session.
+	// request id, and the slot's cancellation watermark keeps recognizing it as
+	// cancelled, so stale responses are never applied to the new session.
 	NextRpcRequestId = 1;
 }
 
 void FMCPHttpClient::CancelActiveRequest()
 {
-	if (State->ActiveRequest.IsValid())
-	{
-		State->CancelledRequestIds.Add(State->ActiveTrackingRequestId);
-		State->ActiveRequest->CancelRequest();
-		State->ActiveRequest.Reset();
-		State->ActiveTrackingRequestId = 0;
-		return;
-	}
-
-#if WITH_DEV_AUTOMATION_TESTS
-	if (GMCPHttpClientAutomationHooks.IsValid() && State->ActiveTrackingRequestId != 0)
-	{
-		State->CancelledRequestIds.Add(State->ActiveTrackingRequestId);
-		if (GMCPHttpClientAutomationHooks->CancelRequest)
-		{
-			GMCPHttpClientAutomationHooks->CancelRequest(State->ActiveTrackingRequestId);
-		}
-		State->ActiveTrackingRequestId = 0;
-	}
-#endif
+	State->CancelActiveRequest();
 }
 
 void FMCPHttpClient::SendRequestAsync(
@@ -186,15 +148,12 @@ void FMCPHttpClient::SendRequestAsync(
 
 	const FString LogLabel = InLogLabel.IsEmpty() ? Method : InLogLabel;
 	const FString RequestBody = BuildRpcRequestBody(Method, Params, &NextRpcRequestId);
-	const int32 RequestId = ++State->NextTrackingRequestId;
-	State->ActiveTrackingRequestId = RequestId;
+	const int32 RequestId = State->BeginRequest();
 
 #if WITH_DEV_AUTOMATION_TESTS
-	if (GMCPHttpClientAutomationHooks.IsValid() && GMCPHttpClientAutomationHooks->StartAsyncRequest)
+	if (DesignHttpClientSlot::HasAutomationTransport())
 	{
-		const bool bStarted = GMCPHttpClientAutomationHooks->StartAsyncRequest(
-			Method,
-			RequestBody,
+		const bool bStarted = DesignHttpClientSlot::StartAutomationTransport(
 			RequestId,
 			[State = State, RequestId, OnComplete, LogLabel, bExpectResponse, bLogTransportErrors](
 				bool bConnectedSuccessfully,
@@ -202,13 +161,7 @@ void FMCPHttpClient::SendRequestAsync(
 				int32 ResponseCode,
 				const FString& NewSessionId)
 			{
-				const bool bWasCancelled = State->CancelledRequestIds.Remove(RequestId) > 0;
-				if (State->ActiveTrackingRequestId == RequestId)
-				{
-					State->ActiveTrackingRequestId = 0;
-				}
-
-				if (bWasCancelled)
+				if (!State->ConsumeCompletion(RequestId))
 				{
 					UE_LOG(LogDesign2UMG, Verbose, TEXT("MCPHttpClient: Request cancelled for %s"), *LogLabel);
 					return;
@@ -248,10 +201,7 @@ void FMCPHttpClient::SendRequestAsync(
 
 		if (!bStarted)
 		{
-			if (State->ActiveTrackingRequestId == RequestId)
-			{
-				State->ActiveTrackingRequestId = 0;
-			}
+			State->ClearActiveRequest(RequestId);
 			UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: ProcessRequest failed for %s"), *LogLabel);
 			if (OnComplete)
 			{
@@ -263,18 +213,11 @@ void FMCPHttpClient::SendRequestAsync(
 #endif
 
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = CreatePostRequest(ServerEndpoint, SessionId, RequestBody);
-	State->ActiveRequest = HttpRequest;
+	State->BindActiveRequest(HttpRequest);
 	HttpRequest->OnProcessRequestComplete().BindLambda(
 		[State = State, RequestId, OnComplete, LogLabel, bExpectResponse, bLogTransportErrors](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnectedSuccessfully)
 	{
-		const bool bWasCancelled = State->CancelledRequestIds.Remove(RequestId) > 0;
-		if (State->ActiveTrackingRequestId == RequestId)
-		{
-			State->ActiveRequest.Reset();
-			State->ActiveTrackingRequestId = 0;
-		}
-
-		if (bWasCancelled)
+		if (!State->ConsumeCompletion(RequestId))
 		{
 			UE_LOG(LogDesign2UMG, Verbose, TEXT("MCPHttpClient: Request cancelled for %s"), *LogLabel);
 			return;
@@ -311,11 +254,7 @@ void FMCPHttpClient::SendRequestAsync(
 
 	if (!HttpRequest->ProcessRequest())
 	{
-		if (State->ActiveTrackingRequestId == RequestId)
-		{
-			State->ActiveRequest.Reset();
-			State->ActiveTrackingRequestId = 0;
-		}
+		State->ClearActiveRequest(RequestId);
 		UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: ProcessRequest failed for %s"), *LogLabel);
 		if (OnComplete)
 			OnComplete(false, TEXT(""), TEXT(""));
@@ -426,15 +365,3 @@ void FMCPHttpClient::CallToolAsync(const FString& ToolName,
 		ToolName,
 		/*bLogTransportErrors=*/false);
 }
-
-#if WITH_DEV_AUTOMATION_TESTS
-void SetMCPHttpClientAutomationHooks(const TSharedPtr<FMCPHttpClientAutomationHooks>& InHooks)
-{
-	GMCPHttpClientAutomationHooks = InHooks;
-}
-
-void ResetMCPHttpClientAutomationHooks()
-{
-	GMCPHttpClientAutomationHooks.Reset();
-}
-#endif

@@ -2,6 +2,8 @@
 
 #include "DesignRemoteImageImporterInternal.h"
 
+#include "CoreGlobals.h"
+#include "Framework/Application/SlateApplication.h"
 #include "HAL/CriticalSection.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformProcess.h"
@@ -11,8 +13,10 @@
 #include "IImageWrapperModule.h"
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
+#include "Misc/App.h"
 #include "Misc/FileHelper.h"
 #include "Misc/ScopeLock.h"
+#include "Misc/ScopedSlowTask.h"
 #include "Modules/ModuleManager.h"
 
 namespace DesignRemoteImageImporterInternal
@@ -307,6 +311,8 @@ namespace DesignRemoteImageImporterInternal
 			FCriticalSection Mutex;
 			TAtomic<bool> bDone{ false };
 			TAtomic<bool> bPayloadLimitExceeded{ false };
+			/** Guarded by Mutex: set before cancelling a user-aborted download so its late HTTP callback keeps the cancel error. */
+			bool bCancelledByUser = false;
 			bool bSuccess = false;
 			int32 ResponseCode = 0;
 			TArray<uint8> Downloaded;
@@ -353,6 +359,12 @@ namespace DesignRemoteImageImporterInternal
 				[State, Limits](FHttpRequestPtr, FHttpResponsePtr Response, bool bWasSuccessful)
 				{
 					FScopeLock Lock(&State->Mutex);
+					if (State->bCancelledByUser)
+					{
+						// Late callback for a user-cancelled download: keep the cancel error.
+						State->bDone = true;
+						return;
+					}
 					if (State->bPayloadLimitExceeded)
 					{
 						State->ErrorString = TEXT("Image payload exceeded the byte limit during download");
@@ -397,19 +409,62 @@ namespace DesignRemoteImageImporterInternal
 		}
 
 		FHttpManager& HttpManager = FHttpModule::Get().GetHttpManager();
-		bool bAllDone = Pending.Num() == 0;
-		while (!bAllDone && FPlatformTime::Seconds() < Deadline)
+		const auto CountPending = [&Pending]()
 		{
-			HttpManager.Tick(HttpWaitTickSeconds);
-			FPlatformProcess::Sleep(HttpWaitTickSeconds);
-			bAllDone = true;
+			int32 StillPending = 0;
 			for (const FPendingRequest& Entry : Pending)
 			{
 				if (!Entry.State->bDone)
 				{
-					bAllDone = false;
+					++StillPending;
+				}
+			}
+			return StillPending;
+		};
+
+		// Interactive sessions keep the editor responsive through a cancellable
+		// slow task; unattended/automation runs keep the legacy tick+sleep pump
+		// so batch and regression behavior stays identical.
+		const bool bInteractiveWait = !FApp::IsUnattended()
+			&& !GIsAutomationTesting
+			&& FSlateApplication::IsInitialized();
+		bool bUserCancelled = false;
+		int32 Remaining = Pending.Num();
+		if (bInteractiveWait && Remaining > 0)
+		{
+			FScopedSlowTask SlowTask(static_cast<float>(Pending.Num()), NSLOCTEXT("Design2UMG", "DownloadingRemoteImages", "Downloading remote images..."), true);
+			SlowTask.MakeDialog(/*bShowCancelButton=*/true);
+			while (Remaining > 0 && FPlatformTime::Seconds() < Deadline)
+			{
+				HttpManager.Tick(HttpWaitTickSeconds);
+				if (SlowTask.ShouldCancel())
+				{
+					bUserCancelled = true;
+					for (FPendingRequest& Entry : Pending)
+					{
+						if (Entry.State->bDone)
+						{
+							continue;
+						}
+						FScopeLock Lock(&Entry.State->Mutex);
+						Entry.State->bCancelledByUser = true;
+						Entry.State->ErrorString = TEXT("cancelled by user");
+						Entry.Request->CancelRequest();
+					}
 					break;
 				}
+				const int32 CompletedThisRound = Remaining - CountPending();
+				Remaining -= CompletedThisRound;
+				SlowTask.EnterProgressFrame(static_cast<float>(CompletedThisRound));
+			}
+		}
+		else
+		{
+			while (Remaining > 0 && FPlatformTime::Seconds() < Deadline)
+			{
+				HttpManager.Tick(HttpWaitTickSeconds);
+				FPlatformProcess::Sleep(HttpWaitTickSeconds);
+				Remaining = CountPending();
 			}
 		}
 
@@ -418,9 +473,18 @@ namespace DesignRemoteImageImporterInternal
 			FUrlDownloadResult& Result = OutResults.FindOrAdd(Entry.Url);
 			if (!Entry.State->bDone)
 			{
+				if (bUserCancelled)
+				{
+					// Every unfinished request was marked and given the cancel
+					// error above; its late HTTP callback keeps that error.
+					FScopeLock Lock(&Entry.State->Mutex);
+					Result.Error = Entry.State->ErrorString;
+					continue;
+				}
+
+				// Late callbacks for cancelled requests are dropped by the
+				// State mutex/bDone guard, so no delegate unbinding is needed.
 				Entry.Request->CancelRequest();
-				Entry.Request->OnRequestProgress64().Unbind();
-				Entry.Request->OnProcessRequestComplete().Unbind();
 				Result.Error = TEXT("Network request timed out");
 				continue;
 			}
