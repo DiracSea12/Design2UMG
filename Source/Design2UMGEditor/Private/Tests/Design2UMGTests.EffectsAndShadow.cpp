@@ -1877,12 +1877,12 @@ bool FTypedWidgetAccessEnumeratesDescriptorBackedBrushKeysTest::RunTest(const FS
 
 	FString ImageMode;
 	TestTrue(TEXT("Typed access keeps image mode"),
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::ImageMode, ImageMode));
+		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::ImageMode, ImageMode));
 	TestEqual(TEXT("Typed access image mode value"), ImageMode, FString(TEXT("Crop")));
 
 	FString ImageTransform;
 	TestTrue(TEXT("Typed access keeps image transform"),
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::ImageTransform, ImageTransform));
+		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::ImageTransform, ImageTransform));
 	TestEqual(
 		TEXT("Typed access image transform value"),
 		ImageTransform,
@@ -1890,12 +1890,12 @@ bool FTypedWidgetAccessEnumeratesDescriptorBackedBrushKeysTest::RunTest(const FS
 
 	FString MaterialRef;
 	TestTrue(TEXT("Typed access keeps gradient material ref"),
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::MaterialRef, MaterialRef));
+		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::MaterialRef, MaterialRef));
 	TestEqual(TEXT("Typed access gradient material ref value"), MaterialRef, FString(TEXT("angulargradient")));
 
 	FString MaterialParams;
 	TestTrue(TEXT("Typed access keeps gradient material params"),
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::MaterialParams, MaterialParams));
+		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::MaterialParams, MaterialParams));
 	TestTrue(TEXT("Typed access gradient material params carry rotation"), MaterialParams.Contains(TEXT("\"Rotation\":45.0000")));
 	return true;
 }
@@ -1920,20 +1920,20 @@ bool FBrushDescriptorPrecedenceContractTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Brush typed string resolves material ref"), Design2UMGWidgetNodeAccess::TryGetBrushTypedWidgetString(Node, UMGPropertyKeys::MaterialRef, MaterialRef));
 	TestEqual(TEXT("Gradient-derived material ref takes precedence"), MaterialRef, FString(TEXT("angulargradient")));
 	FString PublicMaterialRef;
-	TestTrue(TEXT("Public getter resolves material ref through the same precedence"), Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::MaterialRef, PublicMaterialRef));
+	TestTrue(TEXT("Public getter resolves material ref through the same precedence"), Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::MaterialRef, PublicMaterialRef));
 	TestEqual(TEXT("Public getter material ref matches typed precedence"), PublicMaterialRef, MaterialRef);
 
 	FString TexturePath;
 	TestTrue(TEXT("Brush typed string resolves texture path"), Design2UMGWidgetNodeAccess::TryGetBrushTypedWidgetString(Node, UMGPropertyKeys::TexturePath, TexturePath));
 	TestEqual(TEXT("Descriptor-backed image texture path takes precedence"), TexturePath, FString(TEXT("/Game/UI/T_DescriptorBrush.T_DescriptorBrush")));
 	FString PublicTexturePath;
-	TestTrue(TEXT("Public getter resolves texture path through the same precedence"), Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::TexturePath, PublicTexturePath));
+	TestTrue(TEXT("Public getter resolves texture path through the same precedence"), Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::TexturePath, PublicTexturePath));
 	TestEqual(TEXT("Public getter texture path matches typed precedence"), PublicTexturePath, TexturePath);
 
 	Node.Brush.Gradient = FUMGVisualBrushData::FGradientData();
 	TestTrue(TEXT("Explicit material ref remains after removing gradient"), Design2UMGWidgetNodeAccess::TryGetBrushTypedWidgetString(Node, UMGPropertyKeys::MaterialRef, MaterialRef));
 	TestEqual(TEXT("Explicit material ref becomes fallback owner"), MaterialRef, FString(TEXT("roundedrect")));
-	TestTrue(TEXT("Public getter falls back to explicit material ref once gradient is removed"), Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::MaterialRef, PublicMaterialRef));
+	TestTrue(TEXT("Public getter falls back to explicit material ref once gradient is removed"), Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::MaterialRef, PublicMaterialRef));
 	TestEqual(TEXT("Public getter explicit material ref matches typed fallback"), PublicMaterialRef, MaterialRef);
 
 	FUMGVisualBrushData LegacyOnlyBrush;
@@ -1947,14 +1947,14 @@ bool FBrushDescriptorPrecedenceContractTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Normalization clears legacy/root owner"), LegacyOnlyBrush.TexturePath.IsEmpty());
 
 	TestTrue(TEXT("Typed access keeps explicit material ref after gradient removal"),
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::MaterialRef, PublicMaterialRef));
+		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::MaterialRef, PublicMaterialRef));
 	TestEqual(TEXT("Typed access explicit material ref matches typed fallback"), PublicMaterialRef, MaterialRef);
 
 	FUMGWidgetNode LegacyOnlyNode;
 	LegacyOnlyNode.Brush = LegacyOnlyBrush;
 	FString NormalizedTexturePath;
 	TestTrue(TEXT("Typed access keeps normalized canonical texture path"),
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(LegacyOnlyNode, UMGPropertyKeys::TexturePath, NormalizedTexturePath));
+		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(LegacyOnlyNode, UMGPropertyKeys::TexturePath, NormalizedTexturePath));
 	TestEqual(TEXT("Typed access normalized texture path matches canonical owner"), NormalizedTexturePath, FString(TEXT("/Game/UI/T_LegacyBrush.T_LegacyBrush")));
 	return true;
 }
@@ -1976,7 +1976,7 @@ bool FBrushDescriptorExplicitEmptyMaterialRefTest::RunTest(const FString& Parame
 
 	FString PublicMaterialRef;
 	TestTrue(TEXT("Public getter returns explicit empty material ref"),
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::MaterialRef, PublicMaterialRef));
+		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::MaterialRef, PublicMaterialRef));
 	TestTrue(TEXT("Public getter keeps explicit empty material ref empty"), PublicMaterialRef.IsEmpty());
 
 	return true;
@@ -2000,7 +2000,7 @@ bool FBrushDescriptorExplicitEmptyImageTexturePathTest::RunTest(const FString& P
 
 	FString PublicTexturePath;
 	TestTrue(TEXT("Public getter returns explicit empty image texture path"),
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::TexturePath, PublicTexturePath));
+		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::TexturePath, PublicTexturePath));
 	TestTrue(TEXT("Public getter keeps explicit empty image texture path empty"), PublicTexturePath.IsEmpty());
 
 	return true;
@@ -2421,14 +2421,14 @@ bool FFigmaRadialGradientHandleFidelityTest::RunTest(const FString& Parameters)
 	}
 
 	const TSharedPtr<FDesignNode>& GradientNode = Doc.Children[0]->Children[0];
-	TestEqual(TEXT("Figma radial gradient type preserved"), GradientNode->Visual.PrimaryFill().Gradient.GradientType, EDesignGradientType::Radial);
-	TestTrue(TEXT("Figma radial center parsed"), GradientNode->Visual.PrimaryFill().Gradient.Center.IsSet()
-		&& FMath::IsNearlyEqual(GradientNode->Visual.PrimaryFill().Gradient.Center.GetValue().X, 0.25f, 0.001f)
-		&& FMath::IsNearlyEqual(GradientNode->Visual.PrimaryFill().Gradient.Center.GetValue().Y, 0.75f, 0.001f));
-	TestTrue(TEXT("Figma radial size parsed"), GradientNode->Visual.PrimaryFill().Gradient.Size.IsSet()
-		&& FMath::IsNearlyEqual(GradientNode->Visual.PrimaryFill().Gradient.Size.GetValue().X, 0.25f, 0.001f)
-		&& FMath::IsNearlyEqual(GradientNode->Visual.PrimaryFill().Gradient.Size.GetValue().Y, 1.0f, 0.001f));
-	TestTrue(TEXT("Figma radial rotation parsed"), FMath::IsNearlyEqual(GradientNode->Visual.PrimaryFill().Gradient.Rotation, 90.0f, 0.001f));
+	TestEqual(TEXT("Figma radial gradient type preserved"), GradientNode->Visual.TopmostFill().Gradient.GradientType, EDesignGradientType::Radial);
+	TestTrue(TEXT("Figma radial center parsed"), GradientNode->Visual.TopmostFill().Gradient.Center.IsSet()
+		&& FMath::IsNearlyEqual(GradientNode->Visual.TopmostFill().Gradient.Center.GetValue().X, 0.25f, 0.001f)
+		&& FMath::IsNearlyEqual(GradientNode->Visual.TopmostFill().Gradient.Center.GetValue().Y, 0.75f, 0.001f));
+	TestTrue(TEXT("Figma radial size parsed"), GradientNode->Visual.TopmostFill().Gradient.Size.IsSet()
+		&& FMath::IsNearlyEqual(GradientNode->Visual.TopmostFill().Gradient.Size.GetValue().X, 0.25f, 0.001f)
+		&& FMath::IsNearlyEqual(GradientNode->Visual.TopmostFill().Gradient.Size.GetValue().Y, 1.0f, 0.001f));
+	TestTrue(TEXT("Figma radial rotation parsed"), FMath::IsNearlyEqual(GradientNode->Visual.TopmostFill().Gradient.Rotation, 90.0f, 0.001f));
 
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* Widget = FindWidgetById(Data.RootWidget, TEXT("grad_figma"));

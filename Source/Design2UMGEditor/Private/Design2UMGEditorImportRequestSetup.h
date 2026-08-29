@@ -32,7 +32,8 @@ namespace Design2UMGEditorImportRequestSetup
 
 	FDesignImportExecutionResult ExecuteImportWithSettings(
 		FDesignDocument& Document,
-		const FDesignImportRequest& Request);
+		const FDesignImportRequest& Request,
+		const FImportAnalysisResult* PrecomputedAnalysis = nullptr);
 
 	FDesignImportExecutionResult ExecutePenFileImportWithSettings(
 		const FString& FilePath,

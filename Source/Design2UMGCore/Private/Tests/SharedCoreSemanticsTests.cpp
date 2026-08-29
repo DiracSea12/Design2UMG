@@ -692,7 +692,7 @@ bool FSharedSemanticsVisibleFillOwnerBoundaryTest::RunTest(const FString& Parame
 	TestTrue(TEXT("Converter visual support still treats secondary fill presence as visual fill"), Design2UMGConverterVisualSupport::HasVisualFill(SecondaryPresenceNode));
 
 	TSharedPtr<FDesignNode> EmptyNode = MakeSharedSemanticsNode(TEXT("empty_fill_read"), EDesignNodeType::Frame);
-	const FDesignFill& ReadFill = EmptyNode->Visual.PrimaryFill();
+	const FDesignFill& ReadFill = EmptyNode->Visual.TopmostFill();
 	TestEqual(TEXT("Reading an absent primary fill returns the empty value"), ReadFill.Type, EDesignFillType::None);
 	TestEqual(TEXT("Reading an absent primary fill does not create fill state"), EmptyNode->Visual.Fills.Num(), 0);
 	return true;
@@ -791,8 +791,8 @@ bool FSharedSourceParserSemanticParityTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Padding ownership decision matches"), FigmaRoot.LayoutData.PaddingRequiresRuntimeWrap.GetValue(), PenRoot.LayoutData.PaddingRequiresRuntimeWrap.GetValue());
 	}
 	TestEqual(TEXT("Both parsers produce one color fill"), FigmaRoot.Visual.Fills.Num(), PenRoot.Visual.Fills.Num());
-	TestEqual(TEXT("Color fill type matches"), FigmaRoot.Visual.PrimaryFill().Type, PenRoot.Visual.PrimaryFill().Type);
-	TestEqual(TEXT("Color fill value matches"), FigmaRoot.Visual.PrimaryFill().SolidColor, PenRoot.Visual.PrimaryFill().SolidColor);
+	TestEqual(TEXT("Color fill type matches"), FigmaRoot.Visual.TopmostFill().Type, PenRoot.Visual.TopmostFill().Type);
+	TestEqual(TEXT("Color fill value matches"), FigmaRoot.Visual.TopmostFill().SolidColor, PenRoot.Visual.TopmostFill().SolidColor);
 
 	TestEqual(TEXT("Both parsers preserve one clear child"), FigmaRoot.Children.Num(), PenRoot.Children.Num());
 	if (FigmaRoot.Children.Num() == 1 && PenRoot.Children.Num() == 1
@@ -830,13 +830,13 @@ bool FSharedColorLiteralNormalizationTest::RunTest(const FString& Parameters)
 	}
 
 	TestEqual(TEXT("Three-digit color expands to uppercase RGB"),
-		Document.Children[0]->Visual.PrimaryFill().SolidColor,
+		Document.Children[0]->Visual.TopmostFill().SolidColor,
 		FString(TEXT("#AABBCC")));
 	TestEqual(TEXT("Eight-digit color preserves alpha and normalizes case"),
-		Document.Children[1]->Visual.PrimaryFill().SolidColor,
+		Document.Children[1]->Visual.TopmostFill().SolidColor,
 		FString(TEXT("#102030AA")));
 	TestEqual(TEXT("Invalid color literal stays untouched"),
-		Document.Children[2]->Visual.PrimaryFill().SolidColor,
+		Document.Children[2]->Visual.TopmostFill().SolidColor,
 		FString(TEXT("#xyz")));
 	return true;
 }
@@ -1018,18 +1018,18 @@ bool FPublicSurfacePostReviewFixesGuardTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Typed int payload remains unchanged"), ActiveWidgetIndex, 3);
 
 	FString ScrollBoxOrientation;
-	TestTrue(TEXT("Typed helper returns explicit ScrollBox orientation"), Design2UMGWidgetNodeAccess::TryGetWidgetString(Widget, UMGPropertyKeys::Orientation, ScrollBoxOrientation));
+	TestTrue(TEXT("Typed helper returns explicit ScrollBox orientation"), Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Widget, UMGPropertyKeys::Orientation, ScrollBoxOrientation));
 	TestEqual(TEXT("Typed ScrollBox orientation remains unchanged"), ScrollBoxOrientation, FString(TEXT("Horizontal")));
 
 	FString ScrollBarVisibility;
-	TestTrue(TEXT("Typed helper returns explicit ScrollBox scrollbar visibility"), Design2UMGWidgetNodeAccess::TryGetWidgetString(Widget, UMGPropertyKeys::ScrollBarVisibility, ScrollBarVisibility));
+	TestTrue(TEXT("Typed helper returns explicit ScrollBox scrollbar visibility"), Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Widget, UMGPropertyKeys::ScrollBarVisibility, ScrollBarVisibility));
 	TestEqual(TEXT("Typed ScrollBox scrollbar visibility remains unchanged"), ScrollBarVisibility, FString(TEXT("Hidden")));
 
 	FUMGWidgetNode UnsetWidget;
 	int32 MissingActiveWidgetIndex = INDEX_NONE;
 	TestFalse(TEXT("Unset optional widget state stays absent"), Design2UMGWidgetNodeAccess::TryGetWidgetInt(UnsetWidget, UMGPropertyKeys::ActiveWidgetIndex, MissingActiveWidgetIndex));
 	FString MissingOrientation;
-	TestFalse(TEXT("Unset optional ScrollBox orientation stays absent"), Design2UMGWidgetNodeAccess::TryGetWidgetString(UnsetWidget, UMGPropertyKeys::Orientation, MissingOrientation));
+	TestFalse(TEXT("Unset optional ScrollBox orientation stays absent"), Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(UnsetWidget, UMGPropertyKeys::Orientation, MissingOrientation));
 
 	FLinearColor ParsedColor;
 	TestTrue(TEXT("Color helper still parses typed color"), Design2UMGWidgetNodeAccess::TryGetWidgetColor(Widget, UMGPropertyKeys::Color, ParsedColor));

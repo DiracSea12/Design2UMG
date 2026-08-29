@@ -111,6 +111,8 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeWidgetNode(const FUMGWidget
 	if (!Node.Id.IsEmpty())
 		J->SetStringField(TEXT("Id"), Node.Id);
 	J->SetStringField(TEXT("Name"), Node.Name);
+	if (Node.bSyntheticJustifySpacer)
+		J->SetBoolField(TEXT("SyntheticJustifySpacer"), true);
 
 	const bool bHasBounds =
 		!FMath::IsNearlyZero(Node.Bounds.X) || !FMath::IsNearlyZero(Node.Bounds.Y) ||

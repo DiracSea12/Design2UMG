@@ -5,6 +5,7 @@
 #include "Design2UMGLog.h"
 #include "Engine/Texture2D.h"
 #include "HAL/IConsoleManager.h"
+#include "Hash/CityHash.h"
 #include "RenderingThread.h"
 #include "TextureResource.h"
 
@@ -35,7 +36,16 @@ void ScanlineFill(
 
 namespace
 {
-	uint32 MakeCacheKey(
+	// Cache entry keyed by a 64-bit CityHash of the full parameter signature. The signature is
+	// stored alongside the texture so a hit requires an exact match: key collisions degrade to
+	// a miss instead of silently returning another parameter set's texture.
+	struct FPathCacheEntry
+	{
+		TWeakObjectPtr<UTexture2D> Texture;
+		FString Signature;
+	};
+
+	FString MakeCacheSignature(
 		const FString& Geometry,
 		int32 W,
 		int32 H,
@@ -46,33 +56,26 @@ namespace
 		const FString& StrokeCap,
 		const FString& StrokeJoin)
 	{
-		uint32 K = GetTypeHash(Geometry);
-		K = HashCombine(K, GetTypeHash(W));
-		K = HashCombine(K, GetTypeHash(H));
-		K = HashCombine(K, GetTypeHash(FillColor.IsSet()));
-		if (FillColor.IsSet())
+		const auto FormatColor = [](const TOptional<FLinearColor>& Color) -> FString
 		{
-			K = HashCombine(K, GetTypeHash(FillColor->R));
-			K = HashCombine(K, GetTypeHash(FillColor->G));
-			K = HashCombine(K, GetTypeHash(FillColor->B));
-			K = HashCombine(K, GetTypeHash(FillColor->A));
-		}
-		K = HashCombine(K, GetTypeHash(Rule));
-		K = HashCombine(K, GetTypeHash(StrokeColor.IsSet()));
-		if (StrokeColor.IsSet())
-		{
-			K = HashCombine(K, GetTypeHash(StrokeColor->R));
-			K = HashCombine(K, GetTypeHash(StrokeColor->G));
-			K = HashCombine(K, GetTypeHash(StrokeColor->B));
-			K = HashCombine(K, GetTypeHash(StrokeColor->A));
-		}
-		K = HashCombine(K, GetTypeHash(StrokeWidth));
-		K = HashCombine(K, GetTypeHash(StrokeCap));
-		K = HashCombine(K, GetTypeHash(StrokeJoin));
-		return K;
+			return Color.IsSet()
+				? FString::Printf(TEXT("%.4f,%.4f,%.4f,%.4f"), Color->R, Color->G, Color->B, Color->A)
+				: FString(TEXT("unset"));
+		};
+		return FString::Printf(
+			TEXT("%s|%d|%d|%s|%s|%s|%.4f|%s|%s"),
+			*Geometry, W, H,
+			*FormatColor(FillColor), *Rule,
+			*FormatColor(StrokeColor), StrokeWidth,
+			*StrokeCap, *StrokeJoin);
 	}
 
-	TMap<uint32, TWeakObjectPtr<UTexture2D>> GPathCache;
+	uint64 MakeCacheKey(const FString& Signature)
+	{
+		return CityHash64(reinterpret_cast<const char*>(*Signature), Signature.Len() * sizeof(TCHAR));
+	}
+
+	TMap<uint64, FPathCacheEntry> GPathCache;
 	int32 GCacheHits = 0;
 	int32 GCacheMisses = 0;
 	bool bHasPendingTextureUpdates = false;
@@ -257,7 +260,7 @@ namespace
 	{
 		for (auto It = GPathCache.CreateIterator(); It; ++It)
 		{
-			if (!It->Value.IsValid())
+			if (!It->Value.Texture.IsValid())
 				It.RemoveCurrent();
 		}
 		if (GPathCache.Num() > GMaxCacheEntries)
@@ -265,7 +268,7 @@ namespace
 			int32 ToRemove = GPathCache.Num() - GMaxCacheEntries;
 			for (auto It = GPathCache.CreateIterator(); ToRemove > 0 && It; ++It, --ToRemove)
 			{
-				if (UTexture2D* Tex = It->Value.Get())
+				if (UTexture2D* Tex = It->Value.Texture.Get())
 					Tex->RemoveFromRoot();
 				It.RemoveCurrent();
 			}
@@ -289,15 +292,15 @@ namespace
 		TEXT("Clear path rasterization cache"),
 		FConsoleCommandDelegate::CreateLambda([]()
 		{
-			for (auto& Pair : GPathCache)
-			{
-				if (UTexture2D* Tex = Pair.Value.Get())
-					Tex->RemoveFromRoot();
-			}
-			GPathCache.Empty();
-			GCacheHits = GCacheMisses = 0;
-			bHasPendingTextureUpdates = false;
-			UE_LOG(LogDesign2UMG, Log, TEXT("DesignPathRasterizer: cache cleared"));
+		for (auto& Pair : GPathCache)
+		{
+			if (UTexture2D* Tex = Pair.Value.Texture.Get())
+				Tex->RemoveFromRoot();
+		}
+		GPathCache.Empty();
+		GCacheHits = GCacheMisses = 0;
+		bHasPendingTextureUpdates = false;
+		UE_LOG(LogDesign2UMG, Log, TEXT("DesignPathRasterizer: cache cleared"));
 		}));
 }
 
@@ -797,13 +800,14 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 	}
 
 	// --- Cache lookup ---
-	uint32 CacheKey = MakeCacheKey(Geometry, Width, Height, FillColor, FillRule, StrokeColor, StrokeWidth, StrokeCap, StrokeJoin);
-	if (TWeakObjectPtr<UTexture2D>* Found = GPathCache.Find(CacheKey))
+	const FString CacheSignature = MakeCacheSignature(Geometry, Width, Height, FillColor, FillRule, StrokeColor, StrokeWidth, StrokeCap, StrokeJoin);
+	const uint64 CacheKey = MakeCacheKey(CacheSignature);
+	if (FPathCacheEntry* Found = GPathCache.Find(CacheKey))
 	{
-		if (Found->IsValid())
+		if (Found->Signature == CacheSignature && Found->Texture.IsValid())
 		{
 			++GCacheHits;
-			return Found->Get();
+			return Found->Texture.Get();
 		}
 		GPathCache.Remove(CacheKey);
 	}
@@ -915,7 +919,7 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 
 	// --- Cache write ---
 	EvictStale();
-	GPathCache.Add(CacheKey, Texture);
+	GPathCache.Add(CacheKey, FPathCacheEntry{Texture, CacheSignature});
 
 	return Texture;
 }
@@ -933,7 +937,7 @@ void FDesignPathRasterizer::ClearCache()
 {
 	for (auto& Pair : GPathCache)
 	{
-		if (UTexture2D* Tex = Pair.Value.Get())
+		if (UTexture2D* Tex = Pair.Value.Texture.Get())
 			Tex->RemoveFromRoot();
 	}
 	GPathCache.Empty();

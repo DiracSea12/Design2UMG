@@ -81,6 +81,9 @@ struct DESIGN2UMGCORE_API FFontResolver
 	/** Parse a weight string ("bold", "700", etc.) to numeric value (100-900). */
 	static int32 ParseWeightValue(const FString& Weight);
 
+	/** Map a parsed 100..900 weight value onto its UMG typeface name (unknown values map to Regular). */
+	static FString TypefaceNameForWeightValue(int32 WeightValue);
+
 	/** Clear the font asset path cache */
 	static void ClearCache();
 

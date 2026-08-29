@@ -2,6 +2,7 @@
 
 #include "UMGWidgetNodeAccess.h"
 
+#include "GradientMaterialParams.h"
 #include "UMGSchema.h"
 #include "UMGValueParser.h"
 #include "UMGWidgetNodeTypedPropertyAccess.h"
@@ -43,71 +44,21 @@ namespace
 			return FString();
 		}
 
-		const FUMGVisualBrushData::FGradientStopData& StartStop = Gradient.Stops[0];
-		const FUMGVisualBrushData::FGradientStopData& EndStop = Gradient.Stops.Last();
-		const FString StartColor = Design2UMGWidgetNodeAccess::SerializeWidgetColor(StartStop.Color);
-		const FString EndColor = Design2UMGWidgetNodeAccess::SerializeWidgetColor(EndStop.Color);
-		const float Rotation = Gradient.Rotation.Get(0.0f);
+		Design2UMGGradientMaterialParams::FGradientParams Params;
+		Params.bRadial = Gradient.Type.IsSet() && Gradient.Type.GetValue().Equals(TEXT("Radial"), ESearchCase::IgnoreCase);
 		const bool bIsLinear = !Gradient.Type.IsSet()
 			|| Gradient.Type.GetValue().Equals(TEXT("Linear"), ESearchCase::IgnoreCase);
-		const bool bHasLinearEndpoints = bIsLinear && Gradient.StartPoint.IsSet() && Gradient.EndPoint.IsSet();
-		const FVector2D StartPoint = Gradient.StartPoint.Get(FVector2D::ZeroVector);
-		const FVector2D EndPoint = Gradient.EndPoint.Get(FVector2D(1.0f, 0.0f));
-		const FString LinearParams = bHasLinearEndpoints
-			? FString::Printf(
-				TEXT("\"StartX\":%.4f,\"StartY\":%.4f,\"EndX\":%.4f,\"EndY\":%.4f,"),
-				StartPoint.X,
-				StartPoint.Y,
-				EndPoint.X,
-				EndPoint.Y)
-			: FString();
-		const FVector2D Center = Gradient.Center.Get(FVector2D(0.5f, 0.5f));
-		const FVector2D Size = Gradient.Size.Get(FVector2D(1.0f, 1.0f));
-		const bool bIsRadial = Gradient.Type.IsSet() && Gradient.Type.GetValue().Equals(TEXT("Radial"), ESearchCase::IgnoreCase);
-
-		const FString RadialParams = FString::Printf(
-			TEXT("\"CenterX\":%.4f,\"CenterY\":%.4f,\"SizeWidth\":%.4f,\"SizeHeight\":%.4f,\"Rotation\":%.4f"),
-			Center.X,
-			Center.Y,
-			Size.X,
-			Size.Y,
-			Rotation);
-
-		if (Gradient.Stops.Num() > 2)
+		Params.bHasLinearEndpoints = bIsLinear && Gradient.StartPoint.IsSet() && Gradient.EndPoint.IsSet();
+		Params.StartPoint = Gradient.StartPoint.Get(FVector2D::ZeroVector);
+		Params.EndPoint = Gradient.EndPoint.Get(FVector2D(1.0f, 0.0f));
+		Params.Center = Gradient.Center.Get(FVector2D(0.5f, 0.5f));
+		Params.Size = Gradient.Size.Get(FVector2D(1.0f, 1.0f));
+		Params.Rotation = Gradient.Rotation.Get(0.0f);
+		for (const FUMGVisualBrushData::FGradientStopData& Stop : Gradient.Stops)
 		{
-			FString Stops = bIsRadial
-				? FString::Printf(TEXT("{%s,\"Stops\":["), *RadialParams)
-				: FString::Printf(TEXT("{%s\"Rotation\":%.4f,\"Stops\":["), *LinearParams, Rotation);
-			for (int32 Index = 0; Index < Gradient.Stops.Num(); ++Index)
-			{
-				if (Index > 0)
-				{
-					Stops += TEXT(",");
-				}
-				Stops += FString::Printf(
-					TEXT("{\"Pos\":%.4f,\"Color\":\"%s\"}"),
-					Gradient.Stops[Index].Position,
-					*Design2UMGWidgetNodeAccess::SerializeWidgetColor(Gradient.Stops[Index].Color));
-			}
-			Stops += TEXT("]}");
-			return Stops;
+			Params.Stops.Add({Stop.Position, Design2UMGWidgetNodeAccess::SerializeWidgetColor(Stop.Color)});
 		}
-
-		if (bIsRadial)
-		{
-			return FString::Printf(
-				TEXT("{%s,\"ColorCenter\":\"%s\",\"ColorEdge\":\"%s\"}"),
-				*RadialParams,
-				*StartColor,
-				*EndColor);
-		}
-
-		return FString::Printf(
-			TEXT("{%s\"Rotation\":%.4f,\"ColorStart\":\"%s\",\"ColorEnd\":\"%s\"}"),
-			*LinearParams,
-			Rotation,
-			*StartColor,
-			*EndColor);
+		return Design2UMGGradientMaterialParams::BuildGradientMaterialParamsJson(Params);
 	}
 }
 
@@ -333,15 +284,10 @@ bool Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(const FUMGWidgetNode& N
 	return Design2UMGWidgetNodeTypedPropertyAccess::TryGetTypedWidgetString(Node, Key, OutValue);
 }
 
-bool Design2UMGWidgetNodeAccess::TryGetWidgetString(const FUMGWidgetNode& Node, const TCHAR* Key, FString& OutValue)
-{
-	return Design2UMGWidgetNodeTypedPropertyAccess::TryGetTypedWidgetString(Node, Key, OutValue);
-}
-
 bool Design2UMGWidgetNodeAccess::HasWidgetPropertyPresence(const FUMGWidgetNode& Node, const TCHAR* Key)
 {
 	FString Value;
-	return TryGetWidgetString(Node, Key, Value);
+	return TryGetTypedWidgetString(Node, Key, Value);
 }
 
 bool Design2UMGWidgetNodeAccess::TryGetWidgetBool(const FUMGWidgetNode& Node, const TCHAR* Key, bool& OutValue)

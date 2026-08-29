@@ -1,11 +1,10 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGPrototypeRuntimeValueResolver.h"
+#include "DesignJsonUtils.h"
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
-#include "Serialization/JsonReader.h"
-#include "Serialization/JsonSerializer.h"
 
 namespace
 {
@@ -124,59 +123,6 @@ namespace
 		return EDesign2UMGPrototypeExpressionFunction::Unknown;
 	}
 
-	bool TryParseJsonValue(const FString& Json, TSharedPtr<FJsonValue>& OutValue)
-	{
-		OutValue.Reset();
-		if (Json.IsEmpty())
-		{
-			return false;
-		}
-		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
-		return FJsonSerializer::Deserialize(Reader, OutValue) && OutValue.IsValid();
-	}
-
-	FString GetJsonString(const TSharedPtr<FJsonObject>& Object, const TCHAR* FieldName)
-	{
-		if (!Object.IsValid())
-		{
-			return FString();
-		}
-		FString Value;
-		if (Object->TryGetStringField(FieldName, Value))
-		{
-			return Value;
-		}
-		return FString();
-	}
-
-	TSharedPtr<FJsonObject> GetJsonObject(const TSharedPtr<FJsonObject>& Object, const TCHAR* FieldName)
-	{
-		if (!Object.IsValid())
-		{
-			return nullptr;
-		}
-		const TSharedPtr<FJsonObject>* ObjectPtr = nullptr;
-		if (Object->TryGetObjectField(FieldName, ObjectPtr))
-		{
-			return *ObjectPtr;
-		}
-		return nullptr;
-	}
-
-	const TArray<TSharedPtr<FJsonValue>>* GetJsonArray(const TSharedPtr<FJsonObject>& Object, const TCHAR* FieldName)
-	{
-		if (!Object.IsValid())
-		{
-			return nullptr;
-		}
-		const TArray<TSharedPtr<FJsonValue>>* ArrayPtr = nullptr;
-		if (Object->TryGetArrayField(FieldName, ArrayPtr))
-		{
-			return ArrayPtr;
-		}
-		return nullptr;
-	}
-
 	EDesign2UMGPrototypeSerializedValueDomain GetSerializedValueDomain(const TSharedPtr<FJsonObject>& Object)
 	{
 		if (!Object.IsValid())
@@ -184,13 +130,13 @@ namespace
 			return EDesign2UMGPrototypeSerializedValueDomain::Unknown;
 		}
 
-		const FString ResolvedType = GetJsonString(Object, TEXT("resolvedType"));
+		const FString ResolvedType = DesignJsonUtils::GetString(Object, TEXT("resolvedType"));
 		if (!ResolvedType.IsEmpty())
 		{
 			return ParseSerializedValueDomain(ResolvedType);
 		}
 
-		return ParseSerializedValueDomain(GetJsonString(Object, TEXT("type")));
+		return ParseSerializedValueDomain(DesignJsonUtils::GetString(Object, TEXT("type")));
 	}
 
 	bool TryConvertJsonValueToRuntimeValue(
@@ -249,7 +195,7 @@ namespace
 		}
 		case EDesign2UMGPrototypeSerializedValueDomain::Color:
 		{
-			const TSharedPtr<FJsonObject> ColorObject = GetJsonObject(Object, TEXT("value"));
+			const TSharedPtr<FJsonObject> ColorObject = DesignJsonUtils::GetObject(Object, TEXT("value"));
 			if (ColorObject.IsValid())
 			{
 				OutValue.Kind = EDesign2UMGPrototypeRuntimeValueKind::Color;
@@ -275,12 +221,12 @@ namespace
 		}
 		case EDesign2UMGPrototypeSerializedValueDomain::VariableAlias:
 		{
-			FString AliasId = GetJsonString(Object, TEXT("id"));
+			FString AliasId = DesignJsonUtils::GetString(Object, TEXT("id"));
 			if (AliasId.IsEmpty())
 			{
-				if (const TSharedPtr<FJsonObject> AliasObject = GetJsonObject(Object, TEXT("value")))
+				if (const TSharedPtr<FJsonObject> AliasObject = DesignJsonUtils::GetObject(Object, TEXT("value")))
 				{
-					AliasId = GetJsonString(AliasObject, TEXT("id"));
+					AliasId = DesignJsonUtils::GetString(AliasObject, TEXT("id"));
 				}
 			}
 
@@ -291,7 +237,7 @@ namespace
 				if (StoredValueJson)
 				{
 					TSharedPtr<FJsonValue> AliasValue;
-					if (TryParseJsonValue(*StoredValueJson, AliasValue)
+					if (DesignJsonUtils::TryParseValue(*StoredValueJson, AliasValue)
 						&& TryConvertJsonValueToRuntimeValue(AliasValue, VariableValues, VariableModes, OutValue, AliasGuard))
 					{
 						AliasGuard.Remove(AliasId);
@@ -304,13 +250,13 @@ namespace
 		}
 		case EDesign2UMGPrototypeSerializedValueDomain::Expression:
 		{
-			const TSharedPtr<FJsonObject> ExpressionObject = GetJsonObject(Object, TEXT("value"));
+			const TSharedPtr<FJsonObject> ExpressionObject = DesignJsonUtils::GetObject(Object, TEXT("value"));
 			const TSharedPtr<FJsonObject> EffectiveExpressionObject =
 				ExpressionObject.IsValid() ? ExpressionObject : Object;
 			const EDesign2UMGPrototypeExpressionFunction ExpressionFunction =
-				ParseExpressionFunctionToken(GetJsonString(EffectiveExpressionObject, TEXT("expressionFunction")));
+				ParseExpressionFunctionToken(DesignJsonUtils::GetString(EffectiveExpressionObject, TEXT("expressionFunction")));
 			const TArray<TSharedPtr<FJsonValue>>* Arguments =
-				GetJsonArray(EffectiveExpressionObject, TEXT("expressionArguments"));
+				DesignJsonUtils::GetArray(EffectiveExpressionObject, TEXT("expressionArguments"));
 
 			TArray<FDesign2UMGPrototypeRuntimeValue> ResolvedArgs;
 			if (Arguments)
@@ -503,7 +449,7 @@ namespace Design2UMGPrototypeRuntimeValueResolver
 		}
 
 		TSharedPtr<FJsonValue> ConditionValue;
-		if (!TryParseJsonValue(ConditionJson, ConditionValue))
+		if (!DesignJsonUtils::TryParseValue(ConditionJson, ConditionValue))
 		{
 			return false;
 		}

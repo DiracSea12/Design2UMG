@@ -141,11 +141,21 @@ namespace
 
 }
 
-UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords, const FIntPoint* ExplicitDesignSize, FDesign2UMGComponentMappingBuildState* ComponentMappingState)
+UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords, const FIntPoint* ExplicitDesignSize, FDesign2UMGComponentMappingBuildState* ComponentMappingState, TMap<FString, UClass*>* ClassOverrideCache)
 {
+	// Class-override lookups are cached per tree: each root call owns the cache; recursive
+	// BuildWidgetTree/CreateWidgetRecursive entries reuse the same map so rule loading
+	// happens at most once per node name during one build.
+	TMap<FString, UClass*> LocalClassOverrideCache;
+	if (!ClassOverrideCache)
+	{
+		ClassOverrideCache = &LocalClassOverrideCache;
+	}
+
 	FName WidgetName = SanitizeWidgetName(Node.Name, Node.Type);
 	if (FindObject<UObject>(WidgetTree, *WidgetName.ToString()))
 	{
+		const FName OriginalWidgetName = WidgetName;
 		for (int32 Suffix = 1; Suffix < 1000; ++Suffix)
 		{
 			FName Candidate = FName(*FString::Printf(TEXT("%s_%d"), *WidgetName.ToString(), Suffix));
@@ -154,6 +164,14 @@ UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWid
 				WidgetName = Candidate;
 				break;
 			}
+		}
+		if (WidgetName == OriginalWidgetName)
+		{
+			// All 999 suffixed candidates are taken; the widget keeps the colliding name and the
+			// engine auto-renames on ConstructWidget, which can break reimport same-name matching.
+			UE_LOG(LogDesign2UMG, Error,
+				TEXT("Widget name '%s' has more than 999 duplicates in the widget tree; leaving the collision to engine auto-naming, reimport same-name matching may be affected."),
+				*WidgetName.ToString());
 		}
 	}
 
@@ -175,7 +193,7 @@ UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWid
 	if (const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = Design2UMGGenerationSettingsContext::GetCurrent())
 	{
 		// Name-based ClassOverride applies only to ordinary nodes that did not hit a Component Mapping.
-		if (UClass* Override = GenerationSettings->FindClassOverride(Node.Name))
+		if (UClass* Override = GenerationSettings->FindClassOverride(Node.Name, ClassOverrideCache))
 		{
 			WidgetClass = Override;
 		}
@@ -214,18 +232,19 @@ UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWid
 		TextureMap,
 		FigmaMetadataRecords,
 		ExplicitDesignSize,
-		ComponentMappingState
+		ComponentMappingState,
+		ClassOverrideCache
 	};
 	FWidgetTreeChildBuilder::BuildChildren(WidgetTree, NewWidget, Node, Context);
 
 	return NewWidget;
 }
 
-UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords, const FIntPoint* ExplicitDesignSize, FDesign2UMGComponentMappingBuildState* ComponentMappingState)
+UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords, const FIntPoint* ExplicitDesignSize, FDesign2UMGComponentMappingBuildState* ComponentMappingState, TMap<FString, UClass*>* ClassOverrideCache)
 {
 	const FIntPoint EffectiveDesignSize = ResolveEffectiveDesignSize(Node, ExplicitDesignSize);
 
-	UWidget* NewWidget = BuildWidgetTree(WidgetTree, Node, TextureMap, FigmaMetadataRecords, &EffectiveDesignSize, ComponentMappingState);
+	UWidget* NewWidget = BuildWidgetTree(WidgetTree, Node, TextureMap, FigmaMetadataRecords, &EffectiveDesignSize, ComponentMappingState, ClassOverrideCache);
 	if (!NewWidget)
 	{
 		return nullptr;

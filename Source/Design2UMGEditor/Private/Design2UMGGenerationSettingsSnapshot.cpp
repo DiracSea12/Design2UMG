@@ -41,26 +41,11 @@ FDesign2UMGGenerationSettingsSnapshot FDesign2UMGGenerationSettingsSnapshot::Fro
 	return GenerationSettings;
 }
 
-UClass* FDesign2UMGGenerationSettingsSnapshot::FindClassOverride(const FString& NodeName) const
+UClass* FDesign2UMGGenerationSettingsSnapshot::FindClassOverride(
+	const FString& NodeName,
+	TMap<FString, UClass*>* InOutNodeNameCache) const
 {
-	for (const FWidgetClassOverride& Rule : ClassOverrides)
-	{
-		if (Rule.NamePattern.IsEmpty() || Rule.WidgetClass.IsNull())
-		{
-			continue;
-		}
-
-		if (NodeName.Contains(Rule.NamePattern, ESearchCase::IgnoreCase))
-		{
-			UClass* Loaded = Rule.WidgetClass.LoadSynchronous();
-			if (Loaded && Loaded->IsChildOf(UWidget::StaticClass()))
-			{
-				return Loaded;
-			}
-		}
-	}
-
-	return nullptr;
+	return UDesign2UMGSettings::ResolveClassOverride(ClassOverrides, NodeName, InOutNodeNameCache);
 }
 
 namespace Design2UMGGenerationSettingsContext

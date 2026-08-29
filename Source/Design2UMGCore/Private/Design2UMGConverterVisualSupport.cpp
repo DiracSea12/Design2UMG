@@ -147,7 +147,7 @@ namespace Design2UMGConverterVisualSupport
 			return false;
 		}
 
-		const FDesignFill& PrimaryFill = Node->Visual.PrimaryFill();
+		const FDesignFill& PrimaryFill = Node->Visual.TopmostFill();
 		const FString FillColor = IsHexColorLiteral(PrimaryFill.SolidColor) ? PrimaryFill.SolidColor : FString();
 		const FString StrokeColor = (Node->Visual.Stroke.Fill.IsSet() && IsHexColorLiteral(Node->Visual.Stroke.Fill.GetValue().SolidColor))
 			? Node->Visual.Stroke.Fill.GetValue().SolidColor

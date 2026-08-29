@@ -2,6 +2,7 @@
 
 #include "UMGPrototypeAnimationBuilder.h"
 #include "Design2UMGPrototypeNavigationExtensions.h"
+#include "PrototypeTransitionMath.h"
 
 #include "Animation/MovieScene2DTransformSection.h"
 #include "Animation/MovieScene2DTransformTrack.h"
@@ -17,74 +18,6 @@ namespace UMGPrototypeAnimationBuilder
 {
 	constexpr TCHAR PrototypeAnimationPrefix[] = TEXT("__d2u_nav_anim_");
 	constexpr int32 PrototypeAnimationSampleCount = 5;
-	enum class EPrototypeAnimationEasing : uint8
-	{
-		Linear,
-		EaseIn,
-		EaseOut,
-		EaseInOut,
-		EaseInBack,
-		EaseOutBack
-	};
-
-	enum class EPrototypeAnimationDirection : uint8
-	{
-		Right,
-		Left,
-		Up,
-		Down
-	};
-
-	EPrototypeAnimationEasing ResolvePrototypeAnimationEasing(const FString& EasingType)
-	{
-		if (EasingType.IsEmpty())
-		{
-			return EPrototypeAnimationEasing::Linear;
-		}
-
-		static const TMap<FString, EPrototypeAnimationEasing> EasingTypeMap = {
-			{ TEXT("LINEAR"), EPrototypeAnimationEasing::Linear },
-			{ TEXT("EASE_IN"), EPrototypeAnimationEasing::EaseIn },
-			{ TEXT("EASE_OUT"), EPrototypeAnimationEasing::EaseOut },
-			{ TEXT("EASE_IN_AND_OUT"), EPrototypeAnimationEasing::EaseInOut },
-			{ TEXT("GENTLE"), EPrototypeAnimationEasing::EaseInOut },
-			{ TEXT("CUSTOM_CUBIC_BEZIER"), EPrototypeAnimationEasing::EaseInOut },
-			{ TEXT("CUSTOM_SPRING"), EPrototypeAnimationEasing::EaseInOut },
-			{ TEXT("EASE_IN_BACK"), EPrototypeAnimationEasing::EaseInBack },
-			{ TEXT("EASE_OUT_BACK"), EPrototypeAnimationEasing::EaseOutBack },
-		};
-
-		if (const EPrototypeAnimationEasing* Found = EasingTypeMap.Find(EasingType.ToUpper()))
-		{
-			return *Found;
-		}
-
-		return EPrototypeAnimationEasing::EaseInOut;
-	}
-
-	EPrototypeAnimationDirection ResolvePrototypeAnimationDirection(const FString& Direction)
-	{
-		if (Direction.IsEmpty())
-		{
-			return EPrototypeAnimationDirection::Right;
-		}
-
-		static const TMap<FString, EPrototypeAnimationDirection> DirectionMap = {
-			{ TEXT("LEFT"), EPrototypeAnimationDirection::Left },
-			{ TEXT("TOP"), EPrototypeAnimationDirection::Up },
-			{ TEXT("UP"), EPrototypeAnimationDirection::Up },
-			{ TEXT("BOTTOM"), EPrototypeAnimationDirection::Down },
-			{ TEXT("DOWN"), EPrototypeAnimationDirection::Down },
-			{ TEXT("RIGHT"), EPrototypeAnimationDirection::Right },
-		};
-
-		if (const EPrototypeAnimationDirection* Found = DirectionMap.Find(Direction.ToUpper()))
-		{
-			return *Found;
-		}
-
-		return EPrototypeAnimationDirection::Right;
-	}
 
 	const FUMGWidgetNode* FindWidgetNodeById(const FUMGWidgetNode& Node, const FString& TargetId)
 	{
@@ -103,51 +36,19 @@ namespace UMGPrototypeAnimationBuilder
 		return nullptr;
 	}
 
-	float EvaluatePrototypeAnimationAlpha(float Alpha, const FString& EasingType)
-	{
-		Alpha = FMath::Clamp(Alpha, 0.0f, 1.0f);
-		switch (ResolvePrototypeAnimationEasing(EasingType))
-		{
-		case EPrototypeAnimationEasing::Linear:
-			return Alpha;
-		case EPrototypeAnimationEasing::EaseIn:
-			return Alpha * Alpha;
-		case EPrototypeAnimationEasing::EaseOut:
-		{
-			const float InvAlpha = 1.0f - Alpha;
-			return 1.0f - (InvAlpha * InvAlpha);
-		}
-		case EPrototypeAnimationEasing::EaseInOut:
-			return FMath::InterpEaseInOut(0.0f, 1.0f, Alpha, 2.0f);
-		case EPrototypeAnimationEasing::EaseInBack:
-		{
-			constexpr float Overshoot = 1.70158f;
-			return Alpha * Alpha * ((Overshoot + 1.0f) * Alpha - Overshoot);
-		}
-		case EPrototypeAnimationEasing::EaseOutBack:
-		{
-			constexpr float Overshoot = 1.70158f;
-			const float Shifted = Alpha - 1.0f;
-			return 1.0f + (Shifted * Shifted * ((Overshoot + 1.0f) * Shifted + Overshoot));
-		}
-		default:
-			return FMath::InterpEaseInOut(0.0f, 1.0f, Alpha, 2.0f);
-		}
-	}
-
 	FVector2D ResolvePrototypeAnimationOffset(const FDesignPixelBounds& Bounds, const FString& Direction)
 	{
 		const float Width = Bounds.W > KINDA_SMALL_NUMBER ? Bounds.W : 120.0f;
 		const float Height = Bounds.H > KINDA_SMALL_NUMBER ? Bounds.H : 120.0f;
-		switch (ResolvePrototypeAnimationDirection(Direction))
+		switch (PrototypeTransitionMath::ResolveDirection(Direction))
 		{
-		case EPrototypeAnimationDirection::Left:
+		case PrototypeTransitionMath::EDirection::Left:
 			return FVector2D(-Width, 0.0f);
-		case EPrototypeAnimationDirection::Up:
+		case PrototypeTransitionMath::EDirection::Up:
 			return FVector2D(0.0f, -Height);
-		case EPrototypeAnimationDirection::Down:
+		case PrototypeTransitionMath::EDirection::Down:
 			return FVector2D(0.0f, Height);
-		case EPrototypeAnimationDirection::Right:
+		case PrototypeTransitionMath::EDirection::Right:
 		default:
 			return FVector2D(Width, 0.0f);
 		}
@@ -171,7 +72,7 @@ namespace UMGPrototypeAnimationBuilder
 		for (int32 SampleIndex = 0; SampleIndex < SampleCount; ++SampleIndex)
 		{
 			const float Alpha = SampleCount == 1 ? 1.0f : static_cast<float>(SampleIndex) / static_cast<float>(SampleCount - 1);
-			const float EasedAlpha = EvaluatePrototypeAnimationAlpha(Alpha, EasingType);
+			const float EasedAlpha = PrototypeTransitionMath::EvaluateAlpha(Alpha, EasingType);
 			const FFrameNumber Frame = PrototypeSecondsToFrame(MovieScene, DurationSeconds * Alpha);
 			Callback(EasedAlpha, Frame);
 		}

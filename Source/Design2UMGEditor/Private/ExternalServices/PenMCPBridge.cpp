@@ -3,10 +3,10 @@
 #include "PenMCPBridge.h"
 #include "Design2UMGEditorDesignSourceRegistry.h"
 #include "DesignImportPipeline.h"
+#include "PenParser.h"
 #include "UMGSchema.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
-#include "Serialization/JsonWriter.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogPenMCPBridge, Log, All);
 
@@ -200,18 +200,6 @@ namespace
 		UE_LOG(LogPenMCPBridge, Log, TEXT("BuildDocumentJson: %d children"), Children.Num());
 		return OutDocumentObject.IsValid();
 	}
-
-	bool SerializeDocumentObject(const TSharedPtr<FJsonObject>& DocumentObject, FString& OutJson)
-	{
-		if (!DocumentObject.IsValid())
-		{
-			return false;
-		}
-
-		OutJson.Reset();
-		const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutJson);
-		return FJsonSerializer::Serialize(DocumentObject.ToSharedRef(), Writer);
-	}
 }
 
 bool FPenMCPBridge::ConvertFromMCP(
@@ -238,17 +226,19 @@ bool FPenMCPBridge::ConvertFromMCP(
 		return false;
 	}
 
-	FString DocumentJson;
-	if (!SerializeDocumentObject(DocumentObject, DocumentJson))
+	// Parse the assembled DOM directly (no DOM->string->DOM round trip), then run the
+	// same analysis the string-based source registry path performs.
+	FDesignDocument Document;
+	if (!FPenParser::ParseDocumentObject(DocumentObject, Document))
 	{
 		return false;
 	}
 
-	return Design2UMGEditorDesignSourceRegistry::TryConvertSource(
-		TEXT("Pen"),
-		DocumentJson,
-		SettingsSnapshot,
-		OutData);
+	FImportAnalysisInput AnalysisInput;
+	AnalysisInput.bResolveImages = false;
+	AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
+	OutData = DesignImportPipeline::AnalyzeImport(Document, AnalysisInput).Data;
+	return true;
 }
 
 bool FPenMCPBridge::BuildFilteredDocumentObject(

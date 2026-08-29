@@ -8,6 +8,7 @@
 class UTexture2D;
 class UWidget;
 class UWidgetTree;
+class UClass;
 class FDesign2UMGComponentMappingBuildState;
 
 struct FWidgetTreeChildBuildContext
@@ -16,6 +17,8 @@ struct FWidgetTreeChildBuildContext
 	TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords = nullptr;
 	const FIntPoint* ExplicitDesignSize = nullptr;
 	FDesign2UMGComponentMappingBuildState* ComponentMappingState = nullptr;
+	/** Per-tree class-override resolution cache; owned by the root BuildWidgetTree call. */
+	TMap<FString, UClass*>* ClassOverrideCache = nullptr;
 };
 
 namespace FWidgetTreeChildBuilder

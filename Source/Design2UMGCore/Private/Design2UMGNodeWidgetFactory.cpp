@@ -240,7 +240,7 @@ namespace
 	{
 		const float Width = Node->Transform.Width.IsFixed() ? Node->Transform.Width.Value : 0.0f;
 		const float Height = Node->Transform.Height.IsFixed() ? Node->Transform.Height.Value : 0.0f;
-		const FDesignFill& PrimaryFill = Node->Visual.PrimaryFill();
+		const FDesignFill& PrimaryFill = Node->Visual.TopmostFill();
 		if (PrimaryFill.IsImage()
 			&& !Node->Visual.VectorRasterFallbackImageRef.IsEmpty()
 			&& Node->Visual.bRenderBoundsClippedByParent)

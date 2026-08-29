@@ -61,23 +61,6 @@ namespace
 		return Keys;
 	}
 
-	FString MakeTypefaceNameForWeight(const int32 Weight)
-	{
-		switch (Weight)
-		{
-		case 100: return TEXT("Thin");
-		case 200: return TEXT("ExtraLight");
-		case 300: return TEXT("Light");
-		case 400: return TEXT("Regular");
-		case 500: return TEXT("Medium");
-		case 600: return TEXT("SemiBold");
-		case 700: return TEXT("Bold");
-		case 800: return TEXT("ExtraBold");
-		case 900: return TEXT("Black");
-		default: return TEXT("Regular");
-		}
-	}
-
 	FString NormalizeIconNameKeyForResolver(const FString& InName)
 	{
 		FString Key = InName.ToLower().TrimStartAndEnd();
@@ -181,11 +164,6 @@ namespace
 		return false;
 	}
 
-	bool IsUsableExplicitFontPath(const FString& ObjectPath)
-	{
-		return IsProjectFontAssetPath(ObjectPath) && IsUsableResolvedFontPath(ObjectPath);
-	}
-
 	bool TryResolveDefaultFontPath(const TSoftObjectPtr<UFont>& FontAsset, FString& OutPath)
 	{
 		const FSoftObjectPath AssetPath = FontAsset.ToSoftObjectPath();
@@ -213,7 +191,7 @@ namespace
 		}
 
 		const FString ObjectPath = AssetPath.ToString();
-		if (!IsUsableExplicitFontPath(ObjectPath))
+		if (!IsLoadableProjectFontPath(ObjectPath))
 		{
 			return EExplicitFontMappingResult::Invalid;
 		}
@@ -719,7 +697,7 @@ FFontResolutionDiagnostic FFontResolver::ResolveFontDiagnostic(
 					Diagnostic.MatchReason = TEXT("project-family-match");
 					Diagnostic.Severity = TEXT("info");
 					if (!bUseMappedAssetDefaultTypeface
-						&& Diagnostic.ResolvedTypeface != MakeTypefaceNameForWeight(ParseWeightValue(Weight)))
+						&& Diagnostic.ResolvedTypeface != TypefaceNameForWeightValue(ParseWeightValue(Weight)))
 					{
 						Diagnostic.FallbackState = TEXT("typeface-substituted");
 						AddFontDiagnosticIssue(Diagnostic, TEXT("typeface-substituted"));
@@ -954,6 +932,23 @@ int32 FFontResolver::ParseWeightValue(const FString& Weight)
 	return 400;
 }
 
+FString FFontResolver::TypefaceNameForWeightValue(const int32 WeightValue)
+{
+	switch (WeightValue)
+	{
+	case 100: return TEXT("Thin");
+	case 200: return TEXT("ExtraLight");
+	case 300: return TEXT("Light");
+	case 400: return TEXT("Regular");
+	case 500: return TEXT("Medium");
+	case 600: return TEXT("SemiBold");
+	case 700: return TEXT("Bold");
+	case 800: return TEXT("ExtraBold");
+	case 900: return TEXT("Black");
+	default: return TEXT("Regular");
+	}
+}
+
 namespace
 {
 int32 WeightFromTypefaceName(const FString& Name)
@@ -1031,7 +1026,7 @@ FString FFontResolver::FindExactTypefaceForAssetPath(const FString& FontAssetPat
 		return FString();
 	}
 
-	const FString ExpectedName = MakeTypefaceNameForWeight(ParseWeightValue(RequestedWeight));
+	const FString ExpectedName = TypefaceNameForWeightValue(ParseWeightValue(RequestedWeight));
 	for (const FTypefaceEntry& Entry : Composite->DefaultTypeface.Fonts)
 	{
 		if (Entry.Name.ToString().Equals(ExpectedName, ESearchCase::IgnoreCase))

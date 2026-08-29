@@ -15,7 +15,7 @@ using DesignJsonUtils::GetBool;
 using DesignJsonUtils::GetNumber;
 using DesignJsonUtils::GetObject;
 using DesignJsonUtils::GetString;
-using DesignJsonUtils::ToCompactString;
+using DesignJsonUtils::ToPrettyString;
 using DesignJsonUtils::TryGetNumber;
 
 namespace
@@ -345,11 +345,11 @@ void ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 	const TSharedPtr<FJsonValue> BoundVarsField = NodeObj->TryGetField(TEXT("boundVariables"));
 	if (BoundVarsField.IsValid() && BoundVarsField->Type == EJson::Object)
 	{
-		OutNode.Metadata.Add(TEXT("boundVariables"), ToCompactString(BoundVarsField));
+		OutNode.Metadata.Add(TEXT("boundVariables"), ToPrettyString(BoundVarsField));
 		const TSharedPtr<FJsonObject> BoundVarsObj = BoundVarsField->AsObject();
 		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : BoundVarsObj->Values)
 		{
-			OutNode.Metadata.Add(FString::Printf(TEXT("boundVariables.%s"), *Pair.Key), ToCompactString(Pair.Value));
+			OutNode.Metadata.Add(FString::Printf(TEXT("boundVariables.%s"), *Pair.Key), ToPrettyString(Pair.Value));
 		}
 	}
 

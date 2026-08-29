@@ -15,4 +15,7 @@ namespace Design2UMGEffectMaterialBuilder
 		const FVector2D& Size,
 		const FVector4& CornerRadii);
 	UMaterialInterface* GetOrCreateInnerShadowRetainerMaterial();
+
+	/** Drop the root of every saved geometry mask instance; the /Game copy is reloaded on demand. */
+	void ReleaseRootedGeometryMaskInstances();
 }

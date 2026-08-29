@@ -107,34 +107,8 @@ namespace Design2UMGConverterInternal
 		TMap<FString, FString> ThemeContext;
 	};
 
-	struct FRecursionGuard
-	{
-		explicit FRecursionGuard(int32& InDepth, const TCHAR* InName = TEXT(""))
-			: Depth(InDepth)
-			, bValid(InDepth < DesignTreeLimits::MaxNodeDepth)
-		{
-			if (bValid)
-			{
-				++Depth;
-			}
-			else
-			{
-				UE_LOG(LogDesign2UMG, Verbose, TEXT("%s: recursion depth exceeded (%d)"), InName, DesignTreeLimits::MaxNodeDepth);
-				UE_LOG(LogDesign2UMG, Error, TEXT("Design tree nesting is too deep (over %d levels). A cyclic reference may exist."), DesignTreeLimits::MaxNodeDepth);
-			}
-		}
-
-		~FRecursionGuard()
-		{
-			if (bValid)
-			{
-				--Depth;
-			}
-		}
-
-		int32& Depth;
-		bool bValid = false;
-	};
+	// Shared guard implementation lives in DesignTreeLimits.h.
+	using FRecursionGuard = FDesignRecursionGuard;
 
 	// Encapsulates the complete render-fallback widget creation path.
 	// This separates the fallback branch decision from the normal widget creation path,

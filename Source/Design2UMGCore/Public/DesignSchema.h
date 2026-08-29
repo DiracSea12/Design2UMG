@@ -131,7 +131,8 @@ struct FDesignVisualNodeData
 	bool bRenderBoundsClippedByParent = false;
 	FDesignRenderFallbackData RenderFallback;
 
-	const FDesignFill& PrimaryFill() const
+	/** Topmost fill in paint order; both parsers append fills in source draw order, so the last entry paints on top. */
+	const FDesignFill& TopmostFill() const
 	{
 		static const FDesignFill EmptyFill;
 		return Fills.Num() > 0 ? Fills.Last() : EmptyFill;

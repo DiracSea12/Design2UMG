@@ -25,7 +25,13 @@ struct FDesign2UMGGenerationSettingsSnapshot
 	static FDesign2UMGGenerationSettingsSnapshot FromSettings(const UDesign2UMGSettings& Settings);
 	static FDesign2UMGGenerationSettingsSnapshot FromMaterializationSettings(
 		const FDesignPreviewMaterializationSettingsSnapshot& MaterializationSettings);
-	UClass* FindClassOverride(const FString& NodeName) const;
+
+	/**
+	 * Resolve the class override for a node name through the shared settings matcher.
+	 * The optional cache scopes LoadSynchronous to once per widget-tree build (see
+	 * UDesign2UMGSettings::ResolveClassOverride).
+	 */
+	UClass* FindClassOverride(const FString& NodeName, TMap<FString, UClass*>* InOutNodeNameCache = nullptr) const;
 };
 
 namespace Design2UMGGenerationSettingsContext

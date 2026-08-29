@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DesignPathRasterDefaults.h"
 
 class UTexture2D;
 
@@ -14,11 +15,11 @@ public:
 		int32 Width,
 		int32 Height,
 		const TOptional<FLinearColor>& FillColor,
-		const FString& FillRule = TEXT("nonzero"),
+		const FString& FillRule = DesignPathRasterDefaults::FillRule,
 		const TOptional<FLinearColor>& StrokeColor = TOptional<FLinearColor>(),
 		float StrokeWidth = 0.0f,
-		const FString& StrokeCap = TEXT("butt"),
-		const FString& StrokeJoin = TEXT("miter"));
+		const FString& StrokeCap = DesignPathRasterDefaults::StrokeCap,
+		const FString& StrokeJoin = DesignPathRasterDefaults::StrokeJoin);
 	static void FlushPendingTextureUpdates();
 	static void ClearCache();
 };

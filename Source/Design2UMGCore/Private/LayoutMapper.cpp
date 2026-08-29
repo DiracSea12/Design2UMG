@@ -210,6 +210,7 @@ void LayoutMapper::ApplyJustifyContent(TArray<FUMGWidgetNode>& Children, EDesign
 	auto CreateSpacer = [](float FillWeight = 1.0f) -> FUMGWidgetNode {
 		FUMGWidgetNode Spacer;
 		Spacer.Type = TEXT("Spacer");
+		Spacer.bSyntheticJustifySpacer = true;
 		Spacer.Slot.SizeRule = EUMGSlotSizeRule::Fill;
 		if (!FMath::IsNearlyEqual(FillWeight, 1.0f))
 			Spacer.Slot.FillWeight = FillWeight;

@@ -564,9 +564,6 @@ struct FDesignTextRun
 
 	UPROPERTY()
 	FString Href;
-
-	UPROPERTY()
-	FString RawJson;
 };
 
 /**

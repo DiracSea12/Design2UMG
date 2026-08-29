@@ -2,6 +2,8 @@
 
 #include "VisualMapperFillTransfer.h"
 
+#include "Design2UMGGeneratedNameSuffixes.h"
+#include "GradientMaterialParams.h"
 #include "ImageFillUtils.h"
 #include "UMGPropertyKeys.h"
 #include "UMGValueParser.h"
@@ -36,61 +38,21 @@ namespace
 				return FString();
 			}
 
-			const FString& StartColor = Gradient.Colors[0].Color;
-			const FString& EndColor = Gradient.Colors.Last().Color;
-			const float Rotation = Gradient.Rotation;
-			const bool bHasLinearEndpoints = Gradient.GradientType == EDesignGradientType::Linear
+			Design2UMGGradientMaterialParams::FGradientParams Params;
+			Params.bRadial = Gradient.GradientType == EDesignGradientType::Radial;
+			Params.bHasLinearEndpoints = Gradient.GradientType == EDesignGradientType::Linear
 				&& Gradient.StartPoint.IsSet()
 				&& Gradient.EndPoint.IsSet();
-			const FVector2D StartPoint = Gradient.StartPoint.Get(FVector2D::ZeroVector);
-			const FVector2D EndPoint = Gradient.EndPoint.Get(FVector2D(1.0f, 0.0f));
-			const FString LinearParams = bHasLinearEndpoints
-				? FString::Printf(
-					TEXT("\"StartX\":%.4f,\"StartY\":%.4f,\"EndX\":%.4f,\"EndY\":%.4f,"),
-					StartPoint.X,
-					StartPoint.Y,
-					EndPoint.X,
-					EndPoint.Y)
-				: FString();
-			const FVector2D Center = Gradient.Center.Get(FVector2D(0.5f, 0.5f));
-			const FVector2D Size = Gradient.Size.Get(FVector2D(1.0f, 1.0f));
-			const FString RadialParams = FString::Printf(
-				TEXT("\"CenterX\":%.4f,\"CenterY\":%.4f,\"SizeWidth\":%.4f,\"SizeHeight\":%.4f,\"Rotation\":%.4f"),
-				Center.X,
-				Center.Y,
-				Size.X,
-				Size.Y,
-				Rotation);
-
-			if (Gradient.Colors.Num() > 2)
+			Params.StartPoint = Gradient.StartPoint.Get(FVector2D::ZeroVector);
+			Params.EndPoint = Gradient.EndPoint.Get(FVector2D(1.0f, 0.0f));
+			Params.Center = Gradient.Center.Get(FVector2D(0.5f, 0.5f));
+			Params.Size = Gradient.Size.Get(FVector2D(1.0f, 1.0f));
+			Params.Rotation = Gradient.Rotation;
+			for (const FDesignGradientStop& Stop : Gradient.Colors)
 			{
-				FString Stops = Gradient.GradientType == EDesignGradientType::Radial
-					? FString::Printf(TEXT("{%s,\"Stops\":["), *RadialParams)
-					: FString::Printf(TEXT("{%s\"Rotation\":%.4f,\"Stops\":["), *LinearParams, Rotation);
-				for (int32 Index = 0; Index < Gradient.Colors.Num(); ++Index)
-				{
-					if (Index > 0)
-					{
-						Stops += TEXT(",");
-					}
-					Stops += FString::Printf(TEXT("{\"Pos\":%.4f,\"Color\":\"%s\"}"),
-						Gradient.Colors[Index].Position, *Gradient.Colors[Index].Color);
-				}
-				Stops += TEXT("]}");
-				return Stops;
+				Params.Stops.Add({Stop.Position, Stop.Color});
 			}
-
-			if (Gradient.GradientType == EDesignGradientType::Radial)
-			{
-				return FString::Printf(TEXT("{%s,\"ColorCenter\":\"%s\",\"ColorEdge\":\"%s\"}"), *RadialParams, *StartColor, *EndColor);
-			}
-
-			return FString::Printf(
-				TEXT("{%s\"Rotation\":%.4f,\"ColorStart\":\"%s\",\"ColorEnd\":\"%s\"}"),
-				*LinearParams,
-				Rotation,
-				*StartColor,
-				*EndColor);
+			return Design2UMGGradientMaterialParams::BuildGradientMaterialParamsJson(Params);
 		}
 
 		void ApplyTypedGradientBrushData(FUMGVisualBrushData& Brush, const FDesignGradient& Gradient)
@@ -168,8 +130,9 @@ namespace
 	FUMGWidgetNode MakeMultiFillLayerShell(const FUMGWidgetNode& Widget, const int32 FillIndex)
 	{
 		FUMGWidgetNode Layer;
-		Layer.Id = FString::Printf(TEXT("%s_fill%d"), *Widget.Id, FillIndex);
-		Layer.Name = FString::Printf(TEXT("%s_fill%d"), *Widget.Name, FillIndex);
+		const FString FillSuffix = Design2UMGGeneratedNameSuffixes::Fill(FillIndex);
+		Layer.Id = Widget.Id + FillSuffix;
+		Layer.Name = Widget.Name + FillSuffix;
 		Layer.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
 		Layer.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
 		return Layer;
@@ -177,8 +140,8 @@ namespace
 
 	void PrepareMultiFillContentWidget(FUMGWidgetNode& Widget)
 	{
-		Widget.Id += TEXT("_content");
-		Widget.Name += TEXT("_content");
+		Widget.Id += Design2UMGGeneratedNameSuffixes::Content();
+		Widget.Name += Design2UMGGeneratedNameSuffixes::Content();
 		Widget.Bounds = FDesignPixelBounds();
 		Widget.Slot = FUMGSlotData();
 		Widget.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
@@ -337,8 +300,9 @@ namespace
 
 			FUMGWidgetNode ImageChild;
 			ImageChild.Type = TEXT("Image");
-			ImageChild.Id = FString::Printf(TEXT("%s_fill%d_img"), *Widget.Id, FillIndex);
-			ImageChild.Name = FString::Printf(TEXT("%s_fill%d_img"), *Widget.Name, FillIndex);
+			const FString FillImageSuffix = Design2UMGGeneratedNameSuffixes::FillImage(FillIndex);
+			ImageChild.Id = Widget.Id + FillImageSuffix;
+			ImageChild.Name = Widget.Name + FillImageSuffix;
 			ImageChild.Brush.Image.TexturePath = Fill.Image.Url;
 			ApplyMultiFillImageChildOpacity(ImageChild, Fill, Options);
 			if (bSquareNode)
@@ -365,7 +329,7 @@ namespace VisualMapperFillTransfer
 		{
 			return;
 		}
-		const FDesignFill& PrimaryFill = Node->Visual.PrimaryFill();
+		const FDesignFill& PrimaryFill = Node->Visual.TopmostFill();
 		if (!PrimaryFill.bEnabled)
 		{
 			return;

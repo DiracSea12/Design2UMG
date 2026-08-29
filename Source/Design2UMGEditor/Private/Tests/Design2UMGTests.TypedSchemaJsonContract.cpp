@@ -157,8 +157,8 @@ bool FParserNumberStringFlexibleTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Root cornerRadius BL parsed from string"), Root->Visual.CornerRadius.BottomLeft, 8.0f);
 	TestTrue(TEXT("Root stroke thickness parsed as uniform"), Root->Visual.Stroke.Thickness.bUniform);
 	TestEqual(TEXT("Root stroke thickness parsed from string"), Root->Visual.Stroke.Thickness.Uniform, 2.5f);
-	TestEqual(TEXT("Root image transform A parsed from string"), Root->Visual.PrimaryFill().Image.Transform.A, 1.0f);
-	TestEqual(TEXT("Root image transform D parsed from string"), Root->Visual.PrimaryFill().Image.Transform.D, 1.0f);
+	TestEqual(TEXT("Root image transform A parsed from string"), Root->Visual.TopmostFill().Image.Transform.A, 1.0f);
+	TestEqual(TEXT("Root image transform D parsed from string"), Root->Visual.TopmostFill().Image.Transform.D, 1.0f);
 	TestEqual(TEXT("Root child count"), Root->Children.Num(), 2);
 	if (Root->Children.Num() < 2)
 		return false;
@@ -265,9 +265,55 @@ bool FUMGSchemaSourceExtensionsRemainOptInTest::RunTest(const FString& Parameter
 	Binding.Action = EUMGPrototypeNavigationAction::Back;
 
 	TestTrue(TEXT("Explicit UMG source document mutation materializes extension"), Data.HasSourceDocumentData());
-	TestTrue(TEXT("Explicit UMG prototype mutation materializes extension"), Data.HasPrototypeNavigationData());
+	TestTrue(TEXT("Explicit UMG prototype navigation mutation materializes extension"), Data.HasPrototypeNavigationData());
 	TestTrue(TEXT("Explicit UMG source document mutation persists"), Data.SourceDocument().ComponentsJson.Contains(TEXT("button")));
-	TestEqual(TEXT("Explicit UMG prototype mutation persists"), Data.PrototypeNavigation().ClickBindings.Num(), 1);
+	TestEqual(TEXT("Explicit UMG prototype navigation mutation persists"), Data.PrototypeNavigation().ClickBindings.Num(), 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBoxShadowLayerMissingFieldsDefaultTest,
+	"Design2UMG.Json.BoxShadowLayerMissingFieldsDefault",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FBoxShadowLayerMissingFieldsDefaultTest::RunTest(const FString& Parameters)
+{
+	// Node-level ShadowBlur is non-zero and the first layer omits Blur/Spread, so a layer
+	// missing those fields must keep the struct defaults (0) instead of leaking the stale
+	// scratch value from the node-level number read.
+	const FString Json = TEXT(R"({
+		"RootWidget": {
+			"Type": "Border",
+			"Name": "Shadowed",
+			"ShadowData": {
+				"ShadowBlur": 20,
+				"BoxShadows": [
+					{ "Offset": "4.000000,6.000000", "Color": "#00000080" },
+					{ "Offset": "1.000000,2.000000", "Blur": 12, "Spread": -3, "Color": "#FF0000FF" }
+				]
+			}
+		}
+	})");
+
+	FUMGWidgetData Parsed;
+	FString ParseError;
+	TestTrue(TEXT("UMGJsonParser parses BoxShadows payload"), FUMGJsonParser::ParseJson(Json, Parsed, &ParseError));
+	if (!ParseError.IsEmpty())
+	{
+		AddError(ParseError);
+	}
+	if (!TestEqual(TEXT("Two shadow layers parsed"), Parsed.RootWidget.Shadow.BoxShadows.Num(), 2))
+	{
+		return false;
+	}
+
+	const FUMGBoxShadowLayerData& MissingFieldsLayer = Parsed.RootWidget.Shadow.BoxShadows[0];
+	TestTrue(TEXT("Layer without Blur keeps Blur at 0 (no stale ShadowBlur leak)"),
+		FMath::IsNearlyEqual(MissingFieldsLayer.Blur, 0.0f, KINDA_SMALL_NUMBER));
+	TestTrue(TEXT("Layer without Spread keeps Spread at 0"),
+		FMath::IsNearlyEqual(MissingFieldsLayer.Spread, 0.0f, KINDA_SMALL_NUMBER));
+
+	const FUMGBoxShadowLayerData& CompleteLayer = Parsed.RootWidget.Shadow.BoxShadows[1];
+	TestTrue(TEXT("Complete layer keeps Blur"), FMath::IsNearlyEqual(CompleteLayer.Blur, 12.0f, KINDA_SMALL_NUMBER));
+	TestTrue(TEXT("Complete layer keeps negative Spread"), FMath::IsNearlyEqual(CompleteLayer.Spread, -3.0f, KINDA_SMALL_NUMBER));
 	return true;
 }
 

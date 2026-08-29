@@ -323,7 +323,7 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 			}
 		}
 
-		const FDesignFill& PrimaryFill = InNode->Visual.PrimaryFill();
+		const FDesignFill& PrimaryFill = InNode->Visual.TopmostFill();
 		const bool bHasNodeColor = PrimaryFill.Type == EDesignFillType::Color;
 		if (bHasNodeColor)
 		{
@@ -590,7 +590,7 @@ Design2UMGTextWidgetBuilder::FIconFontBuildResult Design2UMGTextWidgetBuilder::C
 		Widget.TextStyle.SourceFontSize = Node->Text.FontSize;
 	}
 
-	const FDesignFill& PrimaryFill = Node->Visual.PrimaryFill();
+	const FDesignFill& PrimaryFill = Node->Visual.TopmostFill();
 	if (PrimaryFill.Type == EDesignFillType::Color)
 	{
 		Widget.Text.Color = FUMGValueParser::ParseColor(PrimaryFill.SolidColor);

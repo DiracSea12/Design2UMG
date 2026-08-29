@@ -152,6 +152,9 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 	// Parse v2.2 path-based stable id.
 	JsonObject->TryGetStringField(TEXT("Id"), OutNode.Id);
 
+	// Parse the LayoutMapper justify-spacer marker (absent in older JSON means false).
+	JsonObject->TryGetBoolField(TEXT("SyntheticJustifySpacer"), OutNode.bSyntheticJustifySpacer);
+
 	// Parse Bounds, added in v2.2 for normalized coordinates.
 	const TSharedPtr<FJsonObject>* BoundsObject;
 	if (JsonObject->TryGetObjectField(TEXT("Bounds"), BoundsObject))
@@ -638,10 +641,14 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 				{
 					Layer.Offset = FUMGValueParser::ParseVector2D(Str);
 				}
-				(*LayerObject)->TryGetNumberField(JsonBlurKey, Val);
-				Layer.Blur = (float)Val;
-				(*LayerObject)->TryGetNumberField(JsonSpreadKey, Val);
-				Layer.Spread = (float)Val;
+				if ((*LayerObject)->TryGetNumberField(JsonBlurKey, Val))
+				{
+					Layer.Blur = (float)Val;
+				}
+				if ((*LayerObject)->TryGetNumberField(JsonSpreadKey, Val))
+				{
+					Layer.Spread = (float)Val;
+				}
 				if ((*LayerObject)->TryGetStringField(UMGPropertyKeys::Color, Str))
 				{
 					Layer.Color = FUMGValueParser::ParseColor(Str);

@@ -28,6 +28,11 @@ namespace
 	TStrongObjectPtr<UMaterial> GGeometryMaskRetainerMaterial;
 	TStrongObjectPtr<UMaterial> GInnerShadowRetainerMaterial;
 
+	// Per-unique-geometry instances that were rooted AND saved to /Game. They are
+	// recoverable via LoadObject, so the root is only an in-session crutch; the
+	// ledger lets the generator drop it once the owning asset save completed.
+	TArray<TWeakObjectPtr<UMaterialInstanceConstant>> GRootedGeometryMaskInstances;
+
 	int32 QuantizeMaterialValue(float Value)
 	{
 		return FMath::RoundToInt(Value * 1000.0f);
@@ -437,8 +442,24 @@ UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateGeometryMaskReta
 	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
 	if (!UPackage::SavePackage(Instance->GetOutermost(), Instance, *PackageFileName, SaveArgs))
 	{
+		// Unsaved instance keeps its root (old behavior): no disk copy exists to reload from.
 		UE_LOG(LogDesign2UMG, Warning, TEXT("Failed to save geometry mask material instance: %s"), *PackageFileName);
+		return Instance;
 	}
 
+	GRootedGeometryMaskInstances.Add(Instance);
 	return Instance;
+}
+
+void Design2UMGEffectMaterialBuilder::ReleaseRootedGeometryMaskInstances()
+{
+	for (const TWeakObjectPtr<UMaterialInstanceConstant>& WeakInstance : GRootedGeometryMaskInstances)
+	{
+		if (UMaterialInstanceConstant* Instance = WeakInstance.Get())
+		{
+			Instance->RemoveFromRoot();
+		}
+	}
+
+	GRootedGeometryMaskInstances.Empty();
 }

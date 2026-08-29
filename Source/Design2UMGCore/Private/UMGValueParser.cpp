@@ -75,13 +75,14 @@ namespace FUMGValueParser
 			return FColor::FromHex(Trimmed);
 		}
 
-		if (const FLinearColor* Named = GetNamedColors().Find(Trimmed.ToLower()))
-		{
-			return *Named;
-		}
-
-		return FLinearColor::White;
+	if (const FLinearColor* Named = GetNamedColors().Find(Trimmed.ToLower()))
+	{
+		return *Named;
 	}
+
+	UE_LOG(LogDesign2UMG, Warning, TEXT("Unknown color '%s'; defaulting to White."), *ColorStr);
+	return FLinearColor::White;
+}
 
 	EHorizontalAlignment ParseHAlign(const FString& Str)
 	{

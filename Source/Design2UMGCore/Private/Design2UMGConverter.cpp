@@ -492,6 +492,8 @@ namespace Design2UMGConverterPrivate
 			FUMGWidgetNode ChildWidget = Orchestrator.ConvertChild(EffectiveChild, Context, Node->LayoutData.Layout);
 			if (ChildWidget.Type.IsEmpty())
 			{
+				UE_LOG(LogDesign2UMG, Verbose, TEXT("Converter: skipped child '%s' (id='%s') with empty widget type"),
+					*EffectiveChild->Name, *EffectiveChild->Id);
 				continue;
 			}
 

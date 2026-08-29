@@ -3,6 +3,7 @@
 #include "SDesign2UMGPreviewWindow.h"
 #include "Design2UMGGenerationSettingsSnapshot.h"
 #include "DesignImportPipeline.h"
+#include "DesignJsonUtils.h"
 #include "DesignPreviewMaterializationService.h"
 
 #include "TimerManager.h"
@@ -395,9 +396,7 @@ void SDesign2UMGPreviewWindow::OnOutputPathChanged(const FText& NewText)
 bool SDesign2UMGPreviewWindow::ValidateJson(const FString& JsonString, FString& OutError)
 {
 	TSharedPtr<FJsonObject> JsonObject;
-	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonString);
-
-	if (!FJsonSerializer::Deserialize(Reader, JsonObject) || !JsonObject.IsValid())
+	if (!DesignJsonUtils::TryParseObject(JsonString, JsonObject))
 	{
 		OutError = TEXT("Failed to parse JSON. Please check the syntax.");
 		return false;

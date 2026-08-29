@@ -498,7 +498,23 @@ FString DesignImageBakeUtils::ResolveDocumentImageBakeIdentity(const FDesignDocu
 			Document.Children.Num());
 	}
 
-	return FString::Printf(TEXT("inline|%s|children:%d"), *Document.Version, Document.Children.Num());
+	// No source paths at all: fall back to a content-distinct identity. Besides the version and
+	// child count, the top-level child names are folded in so two different inline documents no
+	// longer share one bake cache directory. Changing this identity invalidates old fallback
+	// bakes only (cache rebuild, identical pixels).
+	FString ChildNameFingerprint;
+	for (const TSharedPtr<FDesignNode>& Child : Document.Children)
+	{
+		if (Child.IsValid())
+		{
+			ChildNameFingerprint += Child->Name + TEXT(",");
+		}
+	}
+	return FString::Printf(
+		TEXT("inline|%s|children:%d|%s"),
+		*Document.Version,
+		Document.Children.Num(),
+		*ChildNameFingerprint);
 }
 
 int32 DesignImageBakeUtils::BakeMappedImageBlendOverlays(

@@ -9,30 +9,59 @@
 #include "Components/Image.h"
 #include "Engine/Texture2D.h"
 
+FWidgetResourceBinder::EProceduralTextureResult FWidgetResourceBinder::TryResolveProceduralTexture(
+	const FUMGWidgetNode& Node,
+	UObject* Outer,
+	UTexture2D*& OutTexture,
+	FUMGProceduralResourceRequest* OutRequest)
+{
+	FUMGProceduralResourceRequest ResourceRequest;
+	if (!Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Node, ResourceRequest))
+	{
+		return EProceduralTextureResult::NoRequest;
+	}
+
+	if (OutRequest)
+	{
+		*OutRequest = ResourceRequest;
+	}
+
+	if (ResourceRequest.MaterialRef.IsEmpty())
+	{
+		return EProceduralTextureResult::EmptyMaterialRef;
+	}
+
+	OutTexture = DesignResourceResolver::ResolveTextureFromMaterialRef(ResourceRequest, Outer);
+	return OutTexture != nullptr ? EProceduralTextureResult::Resolved : EProceduralTextureResult::UnknownShape;
+}
+
 bool FWidgetResourceBinder::BindImageResource(UImage* ImageWidget, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap)
 {
 	// --- material (procedural shape) path ---
+	UTexture2D* ProceduralTexture = nullptr;
 	FUMGProceduralResourceRequest ResourceRequest;
-	if (Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Node, ResourceRequest))
+	switch (TryResolveProceduralTexture(Node, ImageWidget, ProceduralTexture, &ResourceRequest))
 	{
-		if (ResourceRequest.MaterialRef.IsEmpty())
-		{
-			return false;
-		}
-
-		UTexture2D* Texture = DesignResourceResolver::ResolveTextureFromMaterialRef(ResourceRequest, ImageWidget);
-		if (Texture)
-		{
-			ImageWidget->SetBrushFromTexture(Texture);
-			FSlateBrush Brush = ImageWidget->GetBrush();
-			Brush.ImageSize = FVector2D(Texture->GetSizeX(), Texture->GetSizeY());
-			Brush.Tiling = ESlateBrushTileType::NoTile;
-			ImageWidget->SetBrush(Brush);
-			ImageWidget->SetDesiredSizeOverride(Brush.ImageSize);
-			ImageWidget->SynchronizeProperties();
-			return true;
-		}
+	case EProceduralTextureResult::Resolved:
+	{
+		UTexture2D* Texture = ProceduralTexture;
+		ImageWidget->SetBrushFromTexture(Texture);
+		FSlateBrush Brush = ImageWidget->GetBrush();
+		Brush.ImageSize = FVector2D(Texture->GetSizeX(), Texture->GetSizeY());
+		Brush.Tiling = ESlateBrushTileType::NoTile;
+		ImageWidget->SetBrush(Brush);
+		ImageWidget->SetDesiredSizeOverride(Brush.ImageSize);
+		ImageWidget->SynchronizeProperties();
+		return true;
+	}
+	case EProceduralTextureResult::EmptyMaterialRef:
+		return false;
+	case EProceduralTextureResult::UnknownShape:
 		UE_LOG(LogDesign2UMG, Warning, TEXT("Image '%s' has unknown procedural shape type '%s'; falling back to TexturePath."), *Node.Name, *ResourceRequest.MaterialRef);
+		break;
+	case EProceduralTextureResult::NoRequest:
+	default:
+		break;
 	}
 
 	// --- texture fallback path ---

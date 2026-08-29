@@ -118,6 +118,7 @@ namespace
 		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(NodesJson);
 		if (!FJsonSerializer::Deserialize(Reader, Array))
 		{
+			UE_LOG(LogDesign2UMG, Error, TEXT("ExtractFramesFromMCPResult: JSON deserialization failed (length=%d)"), NodesJson.Len());
 			return Result;
 		}
 
@@ -567,8 +568,17 @@ namespace
 			FFigmaImageExporter::ApplyExportedImages(Document->Children, IdToUrl);
 		}
 
+		FDesignImportRequest ImportRequest = Design2UMGEditorImportRequestSetup::MakeImportRequest(
+			Design2UMGEditorImportOrchestrator::DefaultFigmaOutputPath,
+			LOCTEXT("FigmaPreviewTitle", "Design2UMG Figma Preview"),
+			!FApp::IsUnattended(),
+			EDesignBlueprintGenerationMode::BlueprintAndPng,
+			SettingsSnapshot);
+
+		// Single parse->convert->image-resolution pass: its result feeds the frame-count
+		// gate/notification and is handed to Execute as the precomputed analysis.
 		FImportAnalysisInput AnalysisInput;
-		AnalysisInput.bResolveImages = false;
+		AnalysisInput.bResolveImages = ImportRequest.bResolveImages;
 		AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
 		const FImportAnalysisResult AnalysisResult = DesignImportPipeline::AnalyzeImport(*Document, AnalysisInput);
 		if (AnalysisResult.Data.RootWidget.Children.Num() == 0)
@@ -584,14 +594,8 @@ namespace
 				FText::AsNumber(AnalysisResult.Data.RootWidget.Children.Num())),
 			SNotificationItem::CS_Success);
 
-		FDesignImportRequest ImportRequest = Design2UMGEditorImportRequestSetup::MakeImportRequest(
-			Design2UMGEditorImportOrchestrator::DefaultFigmaOutputPath,
-			LOCTEXT("FigmaPreviewTitle", "Design2UMG Figma Preview"),
-			!FApp::IsUnattended(),
-			EDesignBlueprintGenerationMode::BlueprintAndPng,
-			SettingsSnapshot);
 		const FDesignImportExecutionResult ExecutionResult =
-			Design2UMGEditorImportRequestSetup::ExecuteImportWithSettings(*Document, ImportRequest);
+			Design2UMGEditorImportRequestSetup::ExecuteImportWithSettings(*Document, ImportRequest, &AnalysisResult);
 
 		ExitUnattendedWithStatus(
 			ExecutionResult.bSucceeded,

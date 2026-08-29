@@ -22,7 +22,7 @@
 #include "Editor.h"
 #include "InputCoreTypes.h"
 
-#if WITH_AUTOMATION_WORKER
+#if WITH_DEV_AUTOMATION_TESTS
 
 using namespace Design2UMGTestUtils;
 using Design2UMGEditorTests::DeleteGeneratedAssetsAtPath;

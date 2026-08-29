@@ -98,7 +98,7 @@ bool FPenExtendedFieldsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("underline parsed"), TextNode->Text.bUnderline);
 	TestTrue(TEXT("strikethrough parsed"), TextNode->Text.bStrikethrough);
 	TestEqual(TEXT("href parsed"), TextNode->Text.Href, TEXT("https://example.com"));
-	TestEqual(TEXT("mesh_gradient maps to gradient"), TextNode->Visual.PrimaryFill().Type, EDesignFillType::Gradient);
+	TestEqual(TEXT("mesh_gradient maps to gradient"), TextNode->Visual.TopmostFill().Type, EDesignFillType::Gradient);
 	const TSharedPtr<FDesignNode>& ComponentNode = Doc.Children[1];
 	TestTrue(TEXT("stroke explicit fill present"), ComponentNode->Visual.Stroke.Fill.IsSet());
 	TestTrue(TEXT("stroke explicit fill is color"), ComponentNode->Visual.Stroke.Fill.IsSet() && ComponentNode->Visual.Stroke.Fill.GetValue().Type == EDesignFillType::Color);

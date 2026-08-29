@@ -47,6 +47,15 @@ struct FDesignPrototypeTransitionData
 	}
 };
 
+/**
+ * One CONDITIONAL action block: the condensed condition expression plus the
+ * nested actions to run when the condition holds. Blocks and actions are
+ * mutually recursive, so both sides stay plain members (UE reflection rejects
+ * circular UPROPERTY containers); these structs live on the plain-C++ FDesignNode
+ * side and never enter reflected serialization.
+ */
+struct FDesignPrototypeConditionalBlock;
+
 USTRUCT()
 struct FDesignPrototypeAction
 {
@@ -57,8 +66,26 @@ struct FDesignPrototypeAction
 	UPROPERTY() FString Navigation;
 	UPROPERTY() FString TransitionNodeId;
 	UPROPERTY() FString TransitionJson;
-	UPROPERTY() FString RawJson;
 	UPROPERTY() FDesignPrototypeTransitionData Transition;
+
+	// SET_VARIABLE payload: variableId plus the condensed JSON of variableValue
+	// (falling back to the legacy "value" field at parse time).
+	UPROPERTY() FString VariableId;
+	UPROPERTY() FString VariableValueJson;
+
+	// SET_VARIABLE_MODE payload.
+	UPROPERTY() FString VariableCollectionId;
+	UPROPERTY() FString VariableModeId;
+
+	// CONDITIONAL payload: one entry per conditionalBlock, each carrying the
+	// condensed condition JSON and the fully typed nested actions.
+	TArray<FDesignPrototypeConditionalBlock> ConditionalBlocks;
+};
+
+struct FDesignPrototypeConditionalBlock
+{
+	FString ConditionJson;
+	TArray<FDesignPrototypeAction> Actions;
 };
 
 USTRUCT()
@@ -68,7 +95,6 @@ struct FDesignPrototypeInteraction
 
 	UPROPERTY() FString TriggerType;
 	UPROPERTY() FString TriggerJson;
-	UPROPERTY() FString RawJson;
 	UPROPERTY() TArray<FDesignPrototypeAction> Actions;
 };
 

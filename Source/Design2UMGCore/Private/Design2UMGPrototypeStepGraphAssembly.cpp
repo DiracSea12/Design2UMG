@@ -1,11 +1,10 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGPrototypeStepGraphAssembly.h"
+#include "DesignJsonUtils.h"
 #include "DesignSchemaSourceExtensions.h"
 
 #include "Dom/JsonObject.h"
-#include "Policies/CondensedJsonPrintPolicy.h"
-#include "Serialization/JsonSerializer.h"
 
 namespace Design2UMGPrototypeStepGraphAssembly
 {
@@ -194,169 +193,6 @@ namespace Design2UMGPrototypeStepGraphAssembly
 		return Transition;
 	}
 
-	FString SerializePrototypeJsonValue(const TSharedPtr<FJsonValue>& Value)
-	{
-		if (!Value.IsValid())
-		{
-			return FString();
-		}
-
-		FString Json;
-		TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
-			TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Json);
-		if (FJsonSerializer::Serialize(Value.ToSharedRef(), FString(), Writer))
-		{
-			return Json;
-		}
-
-		return FString();
-	}
-
-	FString SerializePrototypeJsonObject(const TSharedPtr<FJsonObject>& Object)
-	{
-		return Object.IsValid()
-			? SerializePrototypeJsonValue(MakeShared<FJsonValueObject>(Object.ToSharedRef()))
-			: FString();
-	}
-
-	bool TryParsePrototypeJsonObject(const FString& Json, TSharedPtr<FJsonObject>& OutObject)
-	{
-		OutObject.Reset();
-		if (Json.IsEmpty())
-		{
-			return false;
-		}
-
-		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
-		return FJsonSerializer::Deserialize(Reader, OutObject) && OutObject.IsValid();
-	}
-
-	FString GetPrototypeJsonString(const TSharedPtr<FJsonObject>& Object, const TCHAR* FieldName)
-	{
-		if (!Object.IsValid())
-		{
-			return FString();
-		}
-
-		FString Value;
-		if (Object->TryGetStringField(FieldName, Value))
-		{
-			return Value;
-		}
-
-		return FString();
-	}
-
-	bool TryGetPrototypeJsonNumber(
-		const TSharedPtr<FJsonObject>& Object,
-		const TCHAR* FieldName,
-		double& OutValue)
-	{
-		return Object.IsValid() && Object->TryGetNumberField(FieldName, OutValue);
-	}
-
-	TSharedPtr<FJsonObject> GetPrototypeJsonObject(
-		const TSharedPtr<FJsonObject>& Object,
-		const TCHAR* FieldName)
-	{
-		if (!Object.IsValid())
-		{
-			return nullptr;
-		}
-
-		const TSharedPtr<FJsonObject>* ObjectPtr = nullptr;
-		if (Object->TryGetObjectField(FieldName, ObjectPtr))
-		{
-			return *ObjectPtr;
-		}
-
-		return nullptr;
-	}
-
-	const TArray<TSharedPtr<FJsonValue>>* GetPrototypeJsonArray(
-		const TSharedPtr<FJsonObject>& Object,
-		const TCHAR* FieldName)
-	{
-		if (!Object.IsValid())
-		{
-			return nullptr;
-		}
-
-		const TArray<TSharedPtr<FJsonValue>>* ArrayPtr = nullptr;
-		if (Object->TryGetArrayField(FieldName, ArrayPtr))
-		{
-			return ArrayPtr;
-		}
-
-		return nullptr;
-	}
-
-	void ParsePrototypeTransitionFromJsonObject(
-		const TSharedPtr<FJsonObject>& TransitionObject,
-		FDesignPrototypeTransitionData& OutTransition)
-	{
-		if (!TransitionObject.IsValid())
-		{
-			return;
-		}
-
-		OutTransition.Type = GetPrototypeJsonString(TransitionObject, TEXT("type"));
-		OutTransition.Direction = GetPrototypeJsonString(TransitionObject, TEXT("direction"));
-
-		double DurationValue = 0.0;
-		if (TryGetPrototypeJsonNumber(TransitionObject, TEXT("duration"), DurationValue))
-		{
-			OutTransition.Duration.Emplace(static_cast<float>(DurationValue));
-		}
-
-		if (const TSharedPtr<FJsonObject> EasingObject =
-			GetPrototypeJsonObject(TransitionObject, TEXT("easing")))
-		{
-			OutTransition.EasingJson = SerializePrototypeJsonObject(EasingObject);
-			OutTransition.EasingType = GetPrototypeJsonString(EasingObject, TEXT("type"));
-		}
-
-		bool bMatchLayers = false;
-		if (TransitionObject->TryGetBoolField(TEXT("matchLayers"), bMatchLayers))
-		{
-			OutTransition.MatchLayers.Emplace(bMatchLayers);
-		}
-	}
-
-	FDesignPrototypeAction ParsePrototypeActionFromJsonObject(
-		const TSharedPtr<FJsonObject>& ActionObject)
-	{
-		FDesignPrototypeAction Action;
-		if (!ActionObject.IsValid())
-		{
-			return Action;
-		}
-
-		Action.RawJson = SerializePrototypeJsonObject(ActionObject);
-		Action.Type = GetPrototypeJsonString(ActionObject, TEXT("type"));
-		Action.DestinationId = GetPrototypeJsonString(ActionObject, TEXT("destinationId"));
-		if (Action.DestinationId.IsEmpty())
-		{
-			Action.DestinationId = GetPrototypeJsonString(ActionObject, TEXT("url"));
-		}
-
-		if (Action.DestinationId.IsEmpty())
-		{
-			Action.DestinationId = GetPrototypeJsonString(ActionObject, TEXT("uri"));
-		}
-
-		Action.Navigation = GetPrototypeJsonString(ActionObject, TEXT("navigation"));
-		Action.TransitionNodeId = GetPrototypeJsonString(ActionObject, TEXT("transitionNodeID"));
-		if (const TSharedPtr<FJsonObject> TransitionObject =
-			GetPrototypeJsonObject(ActionObject, TEXT("transition")))
-		{
-			Action.TransitionJson = SerializePrototypeJsonObject(TransitionObject);
-			ParsePrototypeTransitionFromJsonObject(TransitionObject, Action.Transition);
-		}
-
-		return Action;
-	}
-
 	EUMGPrototypeNavigationAction MapPrototypeStepKindToLegacyAction(
 		const EUMGPrototypeNavigationStepKind Kind)
 	{
@@ -413,7 +249,10 @@ namespace Design2UMGPrototypeStepGraphAssembly
 		return true;
 	}
 
-	bool AppendPrototypeActionStepFromTypedAction(
+	// Single typed entry point for prototype actions: set-variable, set-variable-mode
+	// and conditional programs first, then the terminal kinds (Back/OpenLink/Overlay/
+	// Navigate). Payloads are parsed once by the source parser; no raw JSON re-parse.
+	bool AppendPrototypeActionStepsFromTypedAction(
 		const TSharedPtr<FDesignNode>& Node,
 		const FDesignPrototypeAction& Action,
 		const TMap<FString, FString>& NodeToPageId,
@@ -421,94 +260,14 @@ namespace Design2UMGPrototypeStepGraphAssembly
 		TArray<FUMGPrototypeNavigationStep>& OutSteps,
 		TArray<FString>& Warnings)
 	{
-		const FString DirectDestinationId = Action.DestinationId;
-		const FString ResolvedNodeDestinationId = ResolvePrototypeActionDestinationId(Node, Action);
-
-		FUMGPrototypeNavigationStep Step;
-		Step.Transition = BuildPrototypeTransition(Node, Action);
-
-		if (IsPrototypeBackAction(Action))
-		{
-			Step.Kind = EUMGPrototypeNavigationStepKind::Back;
-		}
-		else if (IsPrototypeOpenLinkAction(Action, DirectDestinationId)
-			&& !DirectDestinationId.IsEmpty())
-		{
-			Step.Kind = EUMGPrototypeNavigationStepKind::OpenLink;
-			Step.ExternalUrl = DirectDestinationId;
-		}
-		else if (IsPrototypeOverlayAction(Action) && !ResolvedNodeDestinationId.IsEmpty())
-		{
-			Step.Kind = EUMGPrototypeNavigationStepKind::Overlay;
-			if (!ResolvePrototypePageTarget(
-				Node,
-				EUMGPrototypeNavigationAction::Overlay,
-				ResolvedNodeDestinationId,
-				NodeToPageId,
-				PageIdToIndex,
-				Step,
-				Warnings))
-			{
-				return false;
-			}
-		}
-		else if (IsPrototypeNavigateAction(Action) && !ResolvedNodeDestinationId.IsEmpty())
-		{
-			Step.Kind = EUMGPrototypeNavigationStepKind::Navigate;
-			if (!ResolvePrototypePageTarget(
-				Node,
-				EUMGPrototypeNavigationAction::Navigate,
-				ResolvedNodeDestinationId,
-				NodeToPageId,
-				PageIdToIndex,
-				Step,
-				Warnings))
-			{
-				return false;
-			}
-		}
-		else
-		{
-			return false;
-		}
-
-		if (!Step.IsValid())
-		{
-			return false;
-		}
-
-		OutSteps.Add(MoveTemp(Step));
-		return true;
-	}
-
-	bool AppendPrototypeActionStepsFromJsonObject(
-		const TSharedPtr<FDesignNode>& Node,
-		const TSharedPtr<FJsonObject>& ActionObject,
-		const TMap<FString, FString>& NodeToPageId,
-		const TMap<FString, int32>& PageIdToIndex,
-		TArray<FUMGPrototypeNavigationStep>& OutSteps,
-		TArray<FString>& Warnings)
-	{
-		if (!ActionObject.IsValid())
-		{
-			return false;
-		}
-
-		const FDesignPrototypeAction ParsedAction = ParsePrototypeActionFromJsonObject(ActionObject);
-		const FString ActionTypeUpper = ParsedAction.Type.ToUpper();
+		const FString ActionTypeUpper = Action.Type.ToUpper();
 
 		if (ActionTypeUpper.Equals(TEXT("SET_VARIABLE"), ESearchCase::CaseSensitive))
 		{
 			FUMGPrototypeNavigationStep Step;
 			Step.Kind = EUMGPrototypeNavigationStepKind::SetVariable;
-			Step.VariableId = GetPrototypeJsonString(ActionObject, TEXT("variableId"));
-
-			const TSharedPtr<FJsonValue> VariableValueField =
-				ActionObject->TryGetField(TEXT("variableValue"));
-			const TSharedPtr<FJsonValue> LegacyValueField =
-				ActionObject->TryGetField(TEXT("value"));
-			Step.VariableValueJson = SerializePrototypeJsonValue(
-				VariableValueField.IsValid() ? VariableValueField : LegacyValueField);
+			Step.VariableId = Action.VariableId;
+			Step.VariableValueJson = Action.VariableValueJson;
 
 			if (!Step.IsValid())
 			{
@@ -526,9 +285,8 @@ namespace Design2UMGPrototypeStepGraphAssembly
 		{
 			FUMGPrototypeNavigationStep Step;
 			Step.Kind = EUMGPrototypeNavigationStepKind::SetVariableMode;
-			Step.VariableCollectionId =
-				GetPrototypeJsonString(ActionObject, TEXT("variableCollectionId"));
-			Step.VariableModeId = GetPrototypeJsonString(ActionObject, TEXT("variableModeId"));
+			Step.VariableCollectionId = Action.VariableCollectionId;
+			Step.VariableModeId = Action.VariableModeId;
 
 			if (!Step.IsValid())
 			{
@@ -544,12 +302,10 @@ namespace Design2UMGPrototypeStepGraphAssembly
 
 		const bool bLooksConditional =
 			ActionTypeUpper.Equals(TEXT("CONDITIONAL"), ESearchCase::CaseSensitive)
-			|| GetPrototypeJsonArray(ActionObject, TEXT("conditionalBlocks")) != nullptr;
+			|| Action.ConditionalBlocks.Num() > 0;
 		if (bLooksConditional)
 		{
-			const TArray<TSharedPtr<FJsonValue>>* ConditionalBlocks =
-				GetPrototypeJsonArray(ActionObject, TEXT("conditionalBlocks"));
-			if (!ConditionalBlocks || ConditionalBlocks->Num() == 0)
+			if (Action.ConditionalBlocks.Num() == 0)
 			{
 				Warnings.AddUnique(FString::Printf(
 					TEXT("Prototype conditional skipped on '%s': no conditional blocks"),
@@ -561,19 +317,8 @@ namespace Design2UMGPrototypeStepGraphAssembly
 			int32 PendingFalseJumpIndex = INDEX_NONE;
 			TArray<int32> ExitJumpIndices;
 
-			for (const TSharedPtr<FJsonValue>& BlockValue : *ConditionalBlocks)
+			for (const FDesignPrototypeConditionalBlock& Block : Action.ConditionalBlocks)
 			{
-				if (!BlockValue.IsValid())
-				{
-					continue;
-				}
-
-				const TSharedPtr<FJsonObject> BlockObject = BlockValue->AsObject();
-				if (!BlockObject.IsValid())
-				{
-					continue;
-				}
-
 				const int32 BlockStartIndex = OutSteps.Num();
 				if (PendingFalseJumpIndex != INDEX_NONE)
 				{
@@ -582,36 +327,19 @@ namespace Design2UMGPrototypeStepGraphAssembly
 
 				FUMGPrototypeNavigationStep ConditionStep;
 				ConditionStep.Kind = EUMGPrototypeNavigationStepKind::ConditionJump;
-				ConditionStep.ConditionJson = SerializePrototypeJsonValue(
-					BlockObject->TryGetField(TEXT("condition")));
+				ConditionStep.ConditionJson = Block.ConditionJson;
 				const int32 ConditionStepIndex = OutSteps.Add(MoveTemp(ConditionStep));
 				PendingFalseJumpIndex = ConditionStepIndex;
 
-				if (const TArray<TSharedPtr<FJsonValue>>* NestedActions =
-					GetPrototypeJsonArray(BlockObject, TEXT("actions")))
+				for (const FDesignPrototypeAction& NestedAction : Block.Actions)
 				{
-					for (const TSharedPtr<FJsonValue>& NestedActionValue : *NestedActions)
-					{
-						if (!NestedActionValue.IsValid())
-						{
-							continue;
-						}
-
-						const TSharedPtr<FJsonObject> NestedActionObject =
-							NestedActionValue->AsObject();
-						if (!NestedActionObject.IsValid())
-						{
-							continue;
-						}
-
-						AppendPrototypeActionStepsFromJsonObject(
-							Node,
-							NestedActionObject,
-							NodeToPageId,
-							PageIdToIndex,
-							OutSteps,
-							Warnings);
-					}
+					AppendPrototypeActionStepsFromTypedAction(
+						Node,
+						NestedAction,
+						NodeToPageId,
+						PageIdToIndex,
+						OutSteps,
+						Warnings);
 				}
 
 				FUMGPrototypeNavigationStep ExitJumpStep;
@@ -638,26 +366,64 @@ namespace Design2UMGPrototypeStepGraphAssembly
 			return true;
 		}
 
-		if (AppendPrototypeActionStepFromTypedAction(
-			Node,
-			ParsedAction,
-			NodeToPageId,
-			PageIdToIndex,
-			OutSteps,
-			Warnings))
+		const FString DirectDestinationId = Action.DestinationId;
+		const FString ResolvedNodeDestinationId = ResolvePrototypeActionDestinationId(Node, Action);
+
+		FUMGPrototypeNavigationStep Step;
+		Step.Transition = BuildPrototypeTransition(Node, Action);
+
+		bool bMatched = false;
+		if (IsPrototypeBackAction(Action))
 		{
-			return true;
+			Step.Kind = EUMGPrototypeNavigationStepKind::Back;
+			bMatched = true;
+		}
+		else if (IsPrototypeOpenLinkAction(Action, DirectDestinationId)
+			&& !DirectDestinationId.IsEmpty())
+		{
+			Step.Kind = EUMGPrototypeNavigationStepKind::OpenLink;
+			Step.ExternalUrl = DirectDestinationId;
+			bMatched = true;
+		}
+		else if (IsPrototypeOverlayAction(Action) && !ResolvedNodeDestinationId.IsEmpty())
+		{
+			Step.Kind = EUMGPrototypeNavigationStepKind::Overlay;
+			bMatched = ResolvePrototypePageTarget(
+				Node,
+				EUMGPrototypeNavigationAction::Overlay,
+				ResolvedNodeDestinationId,
+				NodeToPageId,
+				PageIdToIndex,
+				Step,
+				Warnings);
+		}
+		else if (IsPrototypeNavigateAction(Action) && !ResolvedNodeDestinationId.IsEmpty())
+		{
+			Step.Kind = EUMGPrototypeNavigationStepKind::Navigate;
+			bMatched = ResolvePrototypePageTarget(
+				Node,
+				EUMGPrototypeNavigationAction::Navigate,
+				ResolvedNodeDestinationId,
+				NodeToPageId,
+				PageIdToIndex,
+				Step,
+				Warnings);
 		}
 
-		if (!ParsedAction.Type.IsEmpty())
+		if (!bMatched || !Step.IsValid())
 		{
-			Warnings.AddUnique(FString::Printf(
-				TEXT("Prototype action '%s' on node '%s' not supported yet"),
-				*ParsedAction.Type,
-				Node.IsValid() ? *Node->Id : TEXT("<unknown>")));
+			if (!Action.Type.IsEmpty())
+			{
+				Warnings.AddUnique(FString::Printf(
+					TEXT("Prototype action '%s' on node '%s' not supported yet"),
+					*Action.Type,
+					Node.IsValid() ? *Node->Id : TEXT("<unknown>")));
+			}
+			return false;
 		}
 
-		return false;
+		OutSteps.Add(MoveTemp(Step));
+		return true;
 	}
 
 	FString NormalizePrototypeTriggerType(const FString& TriggerType)
@@ -700,13 +466,13 @@ namespace Design2UMGPrototypeStepGraphAssembly
 		TArray<FString> KeyCodes;
 
 		TSharedPtr<FJsonObject> TriggerObject;
-		if (!TryParsePrototypeJsonObject(TriggerJson, TriggerObject))
+		if (!DesignJsonUtils::TryParseObject(TriggerJson, TriggerObject))
 		{
 			return KeyCodes;
 		}
 
 		if (const TArray<TSharedPtr<FJsonValue>>* KeyCodeArray =
-			GetPrototypeJsonArray(TriggerObject, TEXT("keyCodes")))
+			DesignJsonUtils::GetArray(TriggerObject, TEXT("keyCodes")))
 		{
 			for (const TSharedPtr<FJsonValue>& KeyCodeValue : *KeyCodeArray)
 			{
@@ -723,7 +489,7 @@ namespace Design2UMGPrototypeStepGraphAssembly
 			}
 		}
 
-		const FString SingleKeyCode = GetPrototypeJsonString(TriggerObject, TEXT("keyCode"));
+		const FString SingleKeyCode = DesignJsonUtils::GetString(TriggerObject, TEXT("keyCode"));
 		if (!SingleKeyCode.IsEmpty())
 		{
 			KeyCodes.AddUnique(SingleKeyCode.ToUpper());
@@ -849,47 +615,15 @@ namespace Design2UMGPrototypeStepGraphAssembly
 				continue;
 			}
 
-			TSharedPtr<FJsonObject> InteractionObject;
-			if (TryParsePrototypeJsonObject(Interaction.RawJson, InteractionObject))
+			for (const FDesignPrototypeAction& Action : Interaction.Actions)
 			{
-				if (const TArray<TSharedPtr<FJsonValue>>* RawActions =
-					GetPrototypeJsonArray(InteractionObject, TEXT("actions")))
-				{
-					for (const TSharedPtr<FJsonValue>& RawActionValue : *RawActions)
-					{
-						if (!RawActionValue.IsValid())
-						{
-							continue;
-						}
-
-						const TSharedPtr<FJsonObject> RawActionObject = RawActionValue->AsObject();
-						if (!RawActionObject.IsValid())
-						{
-							continue;
-						}
-
-						AppendPrototypeActionStepsFromJsonObject(
-							Node,
-							RawActionObject,
-							NodeToPageId,
-							PageIdToIndex,
-							Binding.Steps,
-							Warnings);
-					}
-				}
-			}
-			else
-			{
-				for (const FDesignPrototypeAction& Action : Interaction.Actions)
-				{
-					AppendPrototypeActionStepFromTypedAction(
-						Node,
-						Action,
-						NodeToPageId,
-						PageIdToIndex,
-						Binding.Steps,
-						Warnings);
-				}
+				AppendPrototypeActionStepsFromTypedAction(
+					Node,
+					Action,
+					NodeToPageId,
+					PageIdToIndex,
+					Binding.Steps,
+					Warnings);
 			}
 
 			if (Binding.Steps.Num() == 0)

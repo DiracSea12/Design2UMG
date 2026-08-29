@@ -89,7 +89,7 @@ bool FProceduralResourceRequestBuildsTypedRequestTest::RunTest(const FString& Pa
 
 	FString DescriptorMaterialParams;
 	TestTrue(TEXT("Typed descriptor keeps gradient params ahead of explicit params"),
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::MaterialParams, DescriptorMaterialParams));
+		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::MaterialParams, DescriptorMaterialParams));
 
 	FUMGProceduralResourceRequest Request;
 	TestTrue(

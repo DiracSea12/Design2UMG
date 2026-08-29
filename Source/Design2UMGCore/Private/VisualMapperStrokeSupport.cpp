@@ -2,6 +2,7 @@
 
 #include "VisualMapperStrokeSupport.h"
 
+#include "Design2UMGGeneratedNameSuffixes.h"
 #include "DesignSchema.h"
 #include "UMGPropertyKeys.h"
 #include "UMGValueParser.h"
@@ -27,10 +28,10 @@ namespace
 	};
 
 	const FExplicitStrokeSideSpec ExplicitStrokeSideSpecs[] = {
-		{ EStrokeSide::Top, TEXT("_stroke_top"), EUMGSlotHorizontalAlignment::Fill, EUMGSlotVerticalAlignment::Top, true },
-		{ EStrokeSide::Right, TEXT("_stroke_right"), EUMGSlotHorizontalAlignment::Right, EUMGSlotVerticalAlignment::Fill, false },
-		{ EStrokeSide::Bottom, TEXT("_stroke_bottom"), EUMGSlotHorizontalAlignment::Fill, EUMGSlotVerticalAlignment::Bottom, true },
-		{ EStrokeSide::Left, TEXT("_stroke_left"), EUMGSlotHorizontalAlignment::Left, EUMGSlotVerticalAlignment::Fill, false },
+		{ EStrokeSide::Top, Design2UMGGeneratedNameSuffixes::StrokeTop(), EUMGSlotHorizontalAlignment::Fill, EUMGSlotVerticalAlignment::Top, true },
+		{ EStrokeSide::Right, Design2UMGGeneratedNameSuffixes::StrokeRight(), EUMGSlotHorizontalAlignment::Right, EUMGSlotVerticalAlignment::Fill, false },
+		{ EStrokeSide::Bottom, Design2UMGGeneratedNameSuffixes::StrokeBottom(), EUMGSlotHorizontalAlignment::Fill, EUMGSlotVerticalAlignment::Bottom, true },
+		{ EStrokeSide::Left, Design2UMGGeneratedNameSuffixes::StrokeLeft(), EUMGSlotHorizontalAlignment::Left, EUMGSlotVerticalAlignment::Fill, false },
 	};
 
 	float GetStrokeSideThicknessInternal(const FDesignStrokeThickness& Thickness, const EStrokeSide Side)
@@ -337,8 +338,8 @@ namespace VisualMapperStrokeSupport
 			Overlay.WidgetStyle.StrokePadding = Border.WidgetStyle.StrokePadding;
 		}
 
-		Border.Id += TEXT("_surface");
-		Border.Name += TEXT("_surface");
+		Border.Id += Design2UMGGeneratedNameSuffixes::Surface();
+		Border.Name += Design2UMGGeneratedNameSuffixes::Surface();
 		StripExplicitStrokeFromSurface(Border);
 
 		if (!HasUniformRectStroke(Node->Visual.Stroke))

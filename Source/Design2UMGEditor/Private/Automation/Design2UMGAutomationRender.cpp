@@ -43,8 +43,12 @@
 
 namespace
 {
+	// Test-only render-automation state; compiled out of non-test builds where
+	// IsAutomationRenderActive() is a constant false.
+#if WITH_DEV_AUTOMATION_TESTS
 	bool GDesign2UMGAutomationRenderActive = false;
 	FString GDesign2UMGAutomationFontImportPath;
+#endif
 	const TCHAR* AssetPackageReloadAuthority = TEXT("ue_reload_package_before_asset_render_v1");
 
 	struct FAutomationRenderSpec
@@ -652,9 +656,11 @@ namespace
 
 	bool RunAutomationRender(const FAutomationRenderSpec& Spec, FAutomationRenderResult& OutResult)
 	{
+#if WITH_DEV_AUTOMATION_TESTS
 		const TGuardValue<FString> FontImportPathGuard(
 			GDesign2UMGAutomationFontImportPath,
 			ResolveAutomationFontImportPath(Spec.OutputPath));
+#endif
 		FDesign2UMGImportSettingsSnapshot AutomationSettingsSnapshot =
 			FDesign2UMGImportSettingsSnapshot::FromSettings(UDesign2UMGSettings::Get());
 		Design2UMGAutomationRender::SanitizeImportSettingsSnapshot(AutomationSettingsSnapshot);
@@ -914,7 +920,11 @@ namespace Design2UMGAutomationRender
 {
 	bool IsAutomationRenderActive()
 	{
+#if WITH_DEV_AUTOMATION_TESTS
 		return GDesign2UMGAutomationRenderActive;
+#else
+		return false;
+#endif
 	}
 
 	bool IsCaseLocalAutomationImportedFontPath(const FString& FontAssetPath)
@@ -935,11 +945,13 @@ namespace Design2UMGAutomationRender
 			return true;
 		}
 
+#if WITH_DEV_AUTOMATION_TESTS
 		ResetAutomationTransientState();
 		if (!RefreshAutomationImportedFontPackages(GDesign2UMGAutomationFontImportPath, OutError))
 		{
 			return false;
 		}
+#endif
 
 		if (!bForceReloadPackage)
 		{
@@ -983,7 +995,9 @@ namespace Design2UMGAutomationRender
 
 	void HandleConsoleCommand(const TArray<FString>& Args)
 	{
+#if WITH_DEV_AUTOMATION_TESTS
 		TGuardValue<bool> AutomationGuard(GDesign2UMGAutomationRenderActive, true);
+#endif
 		FAutomationRenderResult Result;
 		Result.Mode = TEXT("unknown");
 		const bool bSuppressExitAfterCompletion = Args.ContainsByPredicate([](const FString& Arg)

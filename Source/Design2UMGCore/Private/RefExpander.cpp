@@ -189,6 +189,8 @@ namespace
 		const TSharedPtr<FDesignNode>& Override,
 		int32 Depth = 0)
 	{
+		// Ref-override recursion cap: bounds override application inside one expansion, deliberately
+		// independent of (and tighter than) DesignTreeLimits::MaxNodeDepth, which bounds whole-tree parse depth.
 		constexpr int32 MaxDepth = 100;
 		if (Depth > MaxDepth)
 		{

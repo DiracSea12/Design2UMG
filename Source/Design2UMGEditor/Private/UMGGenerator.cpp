@@ -8,12 +8,15 @@
 #include "UMGGeneratorRootHandoff.h"
 #include "UMGWidgetNodeAccess.h"
 #include "UMGValueParsing.h"
+#include "UMGWidgetUtils.h"
 #include "Design2UMGPrototypeNavigationTagHelper.h"
 #include "UObject/SavePackage.h"
 #include "Design2UMGFigmaMetadataExtensions.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
 #include "GeneratedAssetLifecycle.h"
+#include "Design2UMGEffectMaterialBuilder.h"
+#include "ProceduralShapeGenerator.h"
 #include "HAL/FileManager.h"
 #include "ObjectTools.h"
 
@@ -69,29 +72,12 @@ namespace
 			return;
 		}
 
-		WidgetBlueprint->WidgetTree->ForEachWidget([Stage, WidgetBlueprint](UWidget* Widget)
-		{
-			UTextBlock* TextBlock = Cast<UTextBlock>(Widget);
-			if (!TextBlock)
-			{
-				return;
-			}
-
-			const FSlateFontInfo FontInfo = TextBlock->GetFont();
-			const UObject* FontObject = FontInfo.FontObject;
-			UE_LOG(LogDesign2UMG, Verbose,
-				TEXT("TextFont[%s]: blueprint='%s' widget='%s' text='%s' fontObject='%s' typeface='%s' size=%.1f tracking=%d wrap=%.1f autoWrap=%d"),
-				Stage,
-				*WidgetBlueprint->GetPathName(),
-				*TextBlock->GetName(),
-				*TextBlock->GetText().ToString(),
-				FontObject ? *FontObject->GetPathName() : TEXT("<null>"),
-				*FontInfo.TypefaceFontName.ToString(),
-				FontInfo.Size,
-				FontInfo.LetterSpacing,
-				TextBlock->GetWrapTextAt(),
-				TextBlock->GetAutoWrapText() ? 1 : 0);
-		});
+		FUMGWidgetUtils::DumpTextBlockFontStates(
+			ELogVerbosity::Verbose,
+			Stage,
+			WidgetBlueprint->WidgetTree,
+			TEXT("blueprint"),
+			WidgetBlueprint->GetPathName());
 	}
 
 	void ClearGeneratedWidgetNavigationState(UWidgetBlueprint* WidgetBlueprint)
@@ -592,6 +578,14 @@ bool FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP, FDesign2UMGGenera
 			GenerationOutput->MappingDiagnostics.Add(MoveTemp(Diagnostic));
 		}
 	}
+
+	// Import/save completion point: the saved package keeps every template-tree brush and
+	// material reference alive without the transient roots, and later consumers (preview
+	// refresh, reimport, reload) regenerate or reload from disk instead of assuming a rooted
+	// in-memory object - so the per-import root ledgers can be dropped here. Failed saves
+	// return above and keep the roots (old behavior).
+	FProceduralShapeGenerator::ReleaseTransientTextures();
+	Design2UMGEffectMaterialBuilder::ReleaseRootedGeometryMaskInstances();
 
 	UE_LOG(LogDesign2UMG, Log, TEXT("Saved Widget Blueprint at %s"), *FullPath);
 	return true;

@@ -79,6 +79,11 @@ protected:
 private:
 	bool HasAnyMetadata() const;
 
+	// Raw pointer into the live widget-blueprint compile window: set in HandleBeginCompilation
+	// (the compiler context constructor calls BeginCompilation for every extension) and cleared
+	// in HandleEndCompilation, which the engine guarantees by invoking EndCompilation for every
+	// extension from FWidgetBlueprintCompilerContext's destructor. Only valid between those two
+	// points; never serialize, copy, or dereference outside a compile.
 	FWidgetBlueprintCompilerContext* CompilerContext = nullptr;
 
 	UPROPERTY()

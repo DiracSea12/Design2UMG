@@ -175,7 +175,7 @@ namespace
 			return;
 		}
 
-		Node->Metadata.Add(TEXT("text.content.raw"), DesignJsonUtils::ToCompactString(ContentField));
+		Node->Metadata.Add(TEXT("text.content.raw"), DesignJsonUtils::ToPrettyString(ContentField));
 		FString CombinedContent;
 		Node->Text.TextRuns.Reset();
 		for (const TSharedPtr<FJsonValue>& SegmentVal : ContentField->AsArray())
@@ -189,7 +189,6 @@ namespace
 			{
 				FDesignTextRun SegmentRun;
 				SegmentRun.Content = Resolver.ResolveString(SegmentVal->AsString());
-				SegmentRun.RawJson = DesignJsonUtils::ToCompactString(SegmentVal);
 				CombinedContent += SegmentRun.Content;
 				Node->Text.TextRuns.Add(MoveTemp(SegmentRun));
 				continue;
@@ -208,7 +207,6 @@ namespace
 
 			FDesignTextRun SegmentRun;
 			ParseTextRunFromObject(SegmentObj, Resolver, SegmentRun);
-			SegmentRun.RawJson = DesignJsonUtils::ToCompactString(SegmentVal);
 			if (!SegmentRun.Content.IsEmpty())
 			{
 				CombinedContent += SegmentRun.Content;

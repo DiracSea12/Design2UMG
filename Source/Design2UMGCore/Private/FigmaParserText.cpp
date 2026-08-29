@@ -2,6 +2,7 @@
 
 #include "FigmaParserText.h"
 #include "DesignJsonUtils.h"
+#include "FontResolver.h"
 
 namespace FigmaParserInternal
 {
@@ -24,9 +25,8 @@ void ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& Ou
 	OutNode.Text.FontSize = GetNumber(Style, TEXT("fontSize"), 16.0);
 	OutNode.Text.FontStyle = GetString(Style, TEXT("fontStyle"), TEXT("normal"));
 
-	int32 Weight = FMath::RoundToInt(GetNumber(Style, TEXT("fontWeight"), 400.0));
-	Weight = FMath::Clamp(FMath::RoundToInt(Weight / 100.0f) * 100, 100, 900);
-	OutNode.Text.FontWeight = FString::FromInt(Weight);
+	const int32 RawWeight = FMath::RoundToInt(GetNumber(Style, TEXT("fontWeight"), 400.0));
+	OutNode.Text.FontWeight = FString::FromInt(FFontResolver::ParseWeightValue(FString::FromInt(RawWeight)));
 
 	OutNode.Text.LineHeight = 0.0f;
 	const FString LineHeightUnit = GetString(Style, TEXT("lineHeightUnit"));

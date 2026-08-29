@@ -3,6 +3,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Design2UMGConverterVisualSupport.h"
+#include "Design2UMGGeneratedNameSuffixes.h"
 #include "Design2UMGTextWidgetBuilder.h"
 #include "Misc/AutomationTest.h"
 #include "DesignSchema.h"
@@ -27,7 +28,7 @@ namespace
 	FString GetWidgetProperty(const FUMGWidgetNode& Node, const TCHAR* Key)
 	{
 		FString Value;
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, Key, Value);
+		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, Key, Value);
 		return Value;
 	}
 
@@ -555,6 +556,7 @@ bool FVisualMapperWrapWithBorderSingleChildJustifyMatrixTest::RunTest(const FStr
 		{
 			FUMGWidgetNode Spacer;
 			Spacer.Type = TEXT("Spacer");
+			Spacer.bSyntheticJustifySpacer = true;
 			Spacer.Name = FString::Printf(TEXT("Spacer_Widget_%d"), Index);
 			Widget.Children.Add(MoveTemp(Spacer));
 		}
@@ -751,13 +753,13 @@ bool FWidgetNodeAccessExplicitEmptyStringPresenceTest::RunTest(const FString& Pa
 
 	FString MaterialRef;
 	TestTrue(TEXT("Explicit empty material ref is queryable"),
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::MaterialRef, MaterialRef));
+		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::MaterialRef, MaterialRef));
 	TestTrue(TEXT("Explicit empty material ref stays empty"), MaterialRef.IsEmpty());
 	TestTrue(TEXT("Presence helper treats explicit empty material ref as present"), HasWidgetProperty(Node, UMGPropertyKeys::MaterialRef));
 
 	FString TexturePath;
 	TestTrue(TEXT("Explicit empty image texture path is queryable"),
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, UMGPropertyKeys::TexturePath, TexturePath));
+		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, UMGPropertyKeys::TexturePath, TexturePath));
 	TestTrue(TEXT("Explicit empty image texture path stays empty"), TexturePath.IsEmpty());
 	TestTrue(TEXT("Presence helper treats explicit empty image texture path as present"), HasWidgetProperty(Node, UMGPropertyKeys::TexturePath));
 	return true;
@@ -1263,7 +1265,7 @@ bool FBatchCVisualMapperMultiFillSmokeTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Empty original widget is elided from the wrapper"), Wrapped.Children.ContainsByPredicate(
 		[](const FUMGWidgetNode& Child)
 		{
-			return Child.Id.EndsWith(TEXT("_content"));
+			return Child.Id.EndsWith(Design2UMGGeneratedNameSuffixes::Content());
 		}));
 	return true;
 }
@@ -1413,7 +1415,7 @@ bool FVisualMapperMultiFillPromotesBorderContentTest::RunTest(const FString& Par
 		return false;
 	}
 	TestEqual(TEXT("Content panel is promoted out of the empty Border"), Wrapped.Children[2].Type, FString(TEXT("HorizontalBox")));
-	TestTrue(TEXT("Promoted content keeps the stable content suffix"), Wrapped.Children[2].Id.EndsWith(TEXT("_content")));
+	TestTrue(TEXT("Promoted content keeps the stable content suffix"), Wrapped.Children[2].Id.EndsWith(Design2UMGGeneratedNameSuffixes::Content()));
 	return true;
 }
 
@@ -1560,7 +1562,7 @@ bool FGradientTypedPayloadMaterialParamsTest::RunTest(const FString& Parameters)
 		MaterialParams);
 	FString GradientDescriptorWithFallback;
 	TestTrue(TEXT("Gradient source resolves through one MaterialParams descriptor"),
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(Widget, UMGPropertyKeys::MaterialParams, GradientDescriptorWithFallback));
+		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Widget, UMGPropertyKeys::MaterialParams, GradientDescriptorWithFallback));
 	TestEqual(TEXT("Gradient descriptor ignores explicit fallback when both are present"),
 		GradientDescriptorWithFallback,
 		MaterialParams);
@@ -1571,7 +1573,7 @@ bool FGradientTypedPayloadMaterialParamsTest::RunTest(const FString& Parameters)
 	ExplicitParamsNode.Brush.MaterialParams = ExplicitMaterialParams;
 	FString ExplicitDescriptorParams;
 	TestTrue(TEXT("Explicit MaterialParams source resolves through the same descriptor"),
-		Design2UMGWidgetNodeAccess::TryGetWidgetString(ExplicitParamsNode, UMGPropertyKeys::MaterialParams, ExplicitDescriptorParams));
+		Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(ExplicitParamsNode, UMGPropertyKeys::MaterialParams, ExplicitDescriptorParams));
 	TestEqual(TEXT("Explicit MaterialParams fallback is preserved without a gradient"),
 		ExplicitDescriptorParams,
 		ExplicitMaterialParams);

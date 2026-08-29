@@ -33,36 +33,9 @@
 
 namespace
 {
-	void DumpTextBlockFontState(const TCHAR* Stage, UWidgetTree* WidgetTree, const FString& OwnerName)
+	void DumpOwnedTextBlockFontState(const TCHAR* Stage, UWidgetTree* WidgetTree, const FString& OwnerName)
 	{
-		if (!WidgetTree)
-		{
-			return;
-		}
-
-		WidgetTree->ForEachWidget([Stage, &OwnerName](UWidget* Widget)
-		{
-			UTextBlock* TextBlock = Cast<UTextBlock>(Widget);
-			if (!TextBlock)
-			{
-				return;
-			}
-
-			const FSlateFontInfo FontInfo = TextBlock->GetFont();
-			const UObject* FontObject = FontInfo.FontObject;
-			UE_LOG(LogDesign2UMG, Log,
-				TEXT("TextFont[%s]: owner='%s' widget='%s' text='%s' fontObject='%s' typeface='%s' size=%.1f tracking=%d wrap=%.1f autoWrap=%d"),
-				Stage,
-				*OwnerName,
-				*TextBlock->GetName(),
-				*TextBlock->GetText().ToString(),
-				FontObject ? *FontObject->GetPathName() : TEXT("<null>"),
-				*FontInfo.TypefaceFontName.ToString(),
-				FontInfo.Size,
-				FontInfo.LetterSpacing,
-				TextBlock->GetWrapTextAt(),
-				TextBlock->GetAutoWrapText() ? 1 : 0);
-		});
+		FUMGWidgetUtils::DumpTextBlockFontStates(ELogVerbosity::Log, Stage, WidgetTree, TEXT("owner"), OwnerName);
 	}
 
 	const TCHAR* BrushDrawTypeToString(ESlateBrushDrawType::Type DrawType)
@@ -352,6 +325,48 @@ namespace
 	}
 }
 
+void FUMGWidgetUtils::DumpTextBlockFontStates(
+	const ELogVerbosity::Type Verbosity,
+	const TCHAR* Stage,
+	UWidgetTree* WidgetTree,
+	const TCHAR* OwnerKey,
+	const FString& OwnerValue)
+{
+	if (!WidgetTree)
+	{
+		return;
+	}
+
+	WidgetTree->ForEachWidget([Verbosity, Stage, OwnerKey, &OwnerValue](UWidget* Widget)
+	{
+		UTextBlock* TextBlock = Cast<UTextBlock>(Widget);
+		if (!TextBlock)
+		{
+			return;
+		}
+
+		const FSlateFontInfo FontInfo = TextBlock->GetFont();
+		const UObject* FontObject = FontInfo.FontObject;
+		FMsg::Logf(
+			__FILE__,
+			__LINE__,
+			LogDesign2UMG.GetCategoryName(),
+			Verbosity,
+			TEXT("TextFont[%s]: %s='%s' widget='%s' text='%s' fontObject='%s' typeface='%s' size=%.1f tracking=%d wrap=%.1f autoWrap=%d"),
+			Stage,
+			OwnerKey,
+			*OwnerValue,
+			*TextBlock->GetName(),
+			*TextBlock->GetText().ToString(),
+			FontObject ? *FontObject->GetPathName() : TEXT("<null>"),
+			*FontInfo.TypefaceFontName.ToString(),
+			FontInfo.Size,
+			FontInfo.LetterSpacing,
+			TextBlock->GetWrapTextAt(),
+			TextBlock->GetAutoWrapText() ? 1 : 0);
+	});
+}
+
 bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8>& OutPngData, FIntPoint& OutSize)
 {
 	if (!WidgetBP || !WidgetBP->GeneratedClass)
@@ -374,7 +389,7 @@ bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8
 	{
 		FlushRenderingCommands();
 	}
-	DumpTextBlockFontState(TEXT("compiled-instance"), Widget->WidgetTree, WidgetBP->GetPathName());
+	DumpOwnedTextBlockFontState(TEXT("compiled-instance"), Widget->WidgetTree, WidgetBP->GetPathName());
 	ClearRenderInstanceNavigation(Widget);
 	Widget->ForceLayoutPrepass();
 	DumpWidgetVisualState(TEXT("compiled-instance"), Widget->WidgetTree, WidgetBP->GetPathName());

@@ -10,6 +10,7 @@
 #include "DesignImportUtils.h"
 #include "DesignSchemaSourceExtensions.h"
 #include "ExternalServices/PenMCPBridge.h"
+#include "PenParser.h"
 #include "UMGSchema.h"
 #include "Design2UMGSettings.h"
 
@@ -17,8 +18,8 @@
 #include "Dom/JsonObject.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
-#include "Serialization/JsonWriter.h"
 
 FDesign2UMGImportSettingsSnapshot FDesign2UMGImportSettingsSnapshot::FromSettings(const UDesign2UMGSettings* Settings)
 {
@@ -150,20 +151,6 @@ namespace DesignImportPipeline
 
 			MaybeWriteImportDiagnosticReport(Request, Data, Result);
 			return Result;
-		}
-
-
-
-		bool SerializeJsonObjectToString(const TSharedPtr<FJsonObject>& Object, FString& OutJson)
-		{
-			if (!Object.IsValid())
-			{
-				return false;
-			}
-
-			OutJson.Reset();
-			const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutJson);
-			return FJsonSerializer::Serialize(Object.ToSharedRef(), Writer);
 		}
 
 		FOnPreviewConfirmed CreatePreviewConfirmedHandler(
@@ -341,12 +328,20 @@ namespace DesignImportPipeline
 		return ExecuteWithAnalysis(Data, AnalysisResult, Request, Request.DiagnosticDocument);
 	}
 
-	FDesignImportExecutionResult Execute(FDesignDocument& Document, const FDesignImportRequest& Request)
+	FDesignImportExecutionResult Execute(FDesignDocument& Document, const FDesignImportRequest& Request, const FImportAnalysisResult* PrecomputedAnalysis)
 	{
-		FImportAnalysisInput AnalysisInput;
-		AnalysisInput.bResolveImages = Request.bResolveImages;
-		AnalysisInput.SettingsSnapshot = Request.SettingsSnapshot.IsSet() ? &Request.SettingsSnapshot.GetValue() : nullptr;
-		const FImportAnalysisResult AnalysisResult = AnalyzeImport(Document, AnalysisInput);
+		FImportAnalysisResult AnalysisResult;
+		if (PrecomputedAnalysis)
+		{
+			AnalysisResult = *PrecomputedAnalysis;
+		}
+		else
+		{
+			FImportAnalysisInput AnalysisInput;
+			AnalysisInput.bResolveImages = Request.bResolveImages;
+			AnalysisInput.SettingsSnapshot = Request.SettingsSnapshot.IsSet() ? &Request.SettingsSnapshot.GetValue() : nullptr;
+			AnalysisResult = AnalyzeImport(Document, AnalysisInput);
+		}
 		FUMGWidgetData Data = AnalysisResult.Data;
 		FDesignImportRequest FinalRequest = Request;
 		if (!FinalRequest.SettingsSnapshot.IsSet() && AnalysisResult.SettingsSnapshot.IsSet())
@@ -422,13 +417,7 @@ namespace DesignImportPipeline
 			return Fail(FString::Printf(TEXT("Failed to filter pen source for target node '%s'"), *TargetNodeId));
 		}
 
-		FString FilteredJsonString;
-		if (!SerializeJsonObjectToString(FilteredDocumentObject, FilteredJsonString))
-		{
-			return Fail(FString::Printf(TEXT("Failed to serialize filtered pen source: %s"), *FilePath));
-		}
-
-		if (!Design2UMGEditorDesignSourceRegistry::TryParseSourceDocument(TEXT("Pen"), FilteredJsonString, OutDocument))
+		if (!FPenParser::ParseDocumentObject(FilteredDocumentObject, OutDocument))
 		{
 			return Fail(FString::Printf(TEXT("Failed to parse filtered pen source: %s"), *FilePath));
 		}
@@ -445,8 +434,10 @@ namespace DesignImportPipeline
 		const FDesignImportRequest& Request)
 	{
 		FDesignDocument Document;
-		if (!LoadPenDocument(FilePath, TargetNodeId, Document, nullptr))
+		FString LoadError;
+		if (!LoadPenDocument(FilePath, TargetNodeId, Document, &LoadError))
 		{
+			UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportPipeline: ExecutePenFile failed for %s: %s"), *FilePath, *LoadError);
 			return FDesignImportExecutionResult();
 		}
 

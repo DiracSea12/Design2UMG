@@ -40,7 +40,7 @@ struct DESIGN2UMGCORE_API FUMGWidgetNode
 	UPROPERTY()
 	FString Name;
 
-	/** Pixel-space bounds, projected by LayoutCalculator from slot data. */
+	/** Pixel-space bounds, populated during Core conversion by NodeWidgetFactory/LayoutMapper; LayoutCalculator is not on this path (it only projects bounds->slot data for the Editor-side WidgetLayoutAdapter). */
 	FDesignPixelBounds Bounds;
 
 	/** Slot layout data, derived by LayoutCalculator from bounds. */
@@ -79,6 +79,9 @@ struct DESIGN2UMGCORE_API FUMGWidgetNode
 
 	/** Child widgets. Not serialized because recursive USTRUCT trees are unsupported by UHT. */
 	TArray<FUMGWidgetNode> Children;
+
+	/** Set only by LayoutMapper::ApplyJustifyContent: this child-less Spacer was synthesized to express justify-content, not mapped from a source node. Plain member like Children (UHT recursion limit); the JSON serializer/parser bridge it as "SyntheticJustifySpacer". */
+	bool bSyntheticJustifySpacer = false;
 
 	bool HasSourceData() const;
 	const FUMGSourceNodeData& Source() const;

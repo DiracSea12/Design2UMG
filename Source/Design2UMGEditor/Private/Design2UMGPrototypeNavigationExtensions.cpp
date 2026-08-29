@@ -5,6 +5,7 @@
 #include "Design2UMGPrototypeRuntimeValueResolver.h"
 #include "Design2UMGPrototypeNavigationInput.h"
 #include "Design2UMGLog.h"
+#include "PrototypeTransitionMath.h"
 #include "UMGWidgetUtils.h"
 #include "Animation/WidgetAnimation.h"
 #include "Blueprint/UserWidget.h"
@@ -20,8 +21,12 @@
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(Design2UMGPrototypeNavigationExtensions)
 
+// Test-only open-url capture hooks; compiled out of non-test builds where the URL always
+// launches natively (capture == false semantics).
+#if WITH_DEV_AUTOMATION_TESTS
 bool GDesign2UMGPrototypeNavigationCaptureOpenUrl = false;
 FString GDesign2UMGPrototypeNavigationLastOpenedUrl;
+#endif
 
 namespace
 {
@@ -563,11 +568,15 @@ void UDesign2UMGPrototypeNavigationUserWidgetExtension::HandleNavigationRequest(
 			return;
 		}
 
+#if WITH_DEV_AUTOMATION_TESTS
 		GDesign2UMGPrototypeNavigationLastOpenedUrl = Url;
 		if (!GDesign2UMGPrototypeNavigationCaptureOpenUrl)
 		{
 			FPlatformProcess::LaunchURL(*Url, nullptr, nullptr);
 		}
+#else
+		FPlatformProcess::LaunchURL(*Url, nullptr, nullptr);
+#endif
 		return;
 	}
 
@@ -932,46 +941,7 @@ float UDesign2UMGPrototypeNavigationUserWidgetExtension::EvaluateEasingAlpha(
 	float Alpha,
 	const FString& EasingType)
 {
-	Alpha = FMath::Clamp(Alpha, 0.0f, 1.0f);
-
-	if (EasingType.IsEmpty() || EasingType.Equals(TEXT("LINEAR"), ESearchCase::IgnoreCase))
-	{
-		return Alpha;
-	}
-
-	if (EasingType.Equals(TEXT("EASE_IN"), ESearchCase::IgnoreCase))
-	{
-		return Alpha * Alpha;
-	}
-
-	if (EasingType.Equals(TEXT("EASE_OUT"), ESearchCase::IgnoreCase))
-	{
-		const float InvAlpha = 1.0f - Alpha;
-		return 1.0f - (InvAlpha * InvAlpha);
-	}
-
-	if (EasingType.Equals(TEXT("EASE_IN_AND_OUT"), ESearchCase::IgnoreCase)
-		|| EasingType.Equals(TEXT("GENTLE"), ESearchCase::IgnoreCase)
-		|| EasingType.Equals(TEXT("CUSTOM_CUBIC_BEZIER"), ESearchCase::IgnoreCase)
-		|| EasingType.Equals(TEXT("CUSTOM_SPRING"), ESearchCase::IgnoreCase))
-	{
-		return FMath::InterpEaseInOut(0.0f, 1.0f, Alpha, 2.0f);
-	}
-
-	if (EasingType.Equals(TEXT("EASE_IN_BACK"), ESearchCase::IgnoreCase))
-	{
-		constexpr float Overshoot = 1.70158f;
-		return Alpha * Alpha * ((Overshoot + 1.0f) * Alpha - Overshoot);
-	}
-
-	if (EasingType.Equals(TEXT("EASE_OUT_BACK"), ESearchCase::IgnoreCase))
-	{
-		constexpr float Overshoot = 1.70158f;
-		const float Shifted = Alpha - 1.0f;
-		return 1.0f + (Shifted * Shifted * ((Overshoot + 1.0f) * Shifted + Overshoot));
-	}
-
-	return FMath::InterpEaseInOut(0.0f, 1.0f, Alpha, 2.0f);
+	return PrototypeTransitionMath::EvaluateAlpha(Alpha, EasingType);
 }
 
 FVector2D UDesign2UMGPrototypeNavigationUserWidgetExtension::ResolveTransitionOffset(
@@ -1005,26 +975,24 @@ FVector2D UDesign2UMGPrototypeNavigationUserWidgetExtension::ResolveTransitionOf
 		LocalSize.Y = 120.0f;
 	}
 
-	if (Direction.Equals(TEXT("LEFT"), ESearchCase::IgnoreCase))
+	switch (PrototypeTransitionMath::ResolveDirection(Direction))
 	{
+	case PrototypeTransitionMath::EDirection::Left:
 		return FVector2D(-LocalSize.X, 0.0f);
-	}
-	if (Direction.Equals(TEXT("TOP"), ESearchCase::IgnoreCase)
-		|| Direction.Equals(TEXT("UP"), ESearchCase::IgnoreCase))
-	{
+	case PrototypeTransitionMath::EDirection::Up:
 		return FVector2D(0.0f, -LocalSize.Y);
-	}
-	if (Direction.Equals(TEXT("BOTTOM"), ESearchCase::IgnoreCase)
-		|| Direction.Equals(TEXT("DOWN"), ESearchCase::IgnoreCase))
-	{
+	case PrototypeTransitionMath::EDirection::Down:
 		return FVector2D(0.0f, LocalSize.Y);
+	case PrototypeTransitionMath::EDirection::Right:
+	default:
+		return FVector2D(LocalSize.X, 0.0f);
 	}
-
-	return FVector2D(LocalSize.X, 0.0f);
 }
 
 #if WITH_EDITOR
-bool UDesign2UMGPrototypeNavigationUserWidgetExtension::VerifyBindings(const UWidgetTree* WidgetTree) const
+namespace
+{
+bool VerifyPrototypeNavigationBindings(const FUMGPrototypeNavigationData& NavigationData, const UWidgetTree* WidgetTree)
 {
 	if (!NavigationData.IsValid() || !WidgetTree)
 	{
@@ -1072,6 +1040,12 @@ bool UDesign2UMGPrototypeNavigationUserWidgetExtension::VerifyBindings(const UWi
 	}
 
 	return true;
+}
+}
+
+bool UDesign2UMGPrototypeNavigationUserWidgetExtension::VerifyBindings(const UWidgetTree* WidgetTree) const
+{
+	return VerifyPrototypeNavigationBindings(NavigationData, WidgetTree);
 }
 #endif
 
@@ -1121,52 +1095,7 @@ void UDesign2UMGPrototypeNavigationClassExtension::InitializeInEditor(UUserWidge
 
 bool UDesign2UMGPrototypeNavigationClassExtension::VerifyBindings(const UWidgetTree* WidgetTree) const
 {
-	if (!NavigationData.IsValid() || !WidgetTree)
-	{
-		return true;
-	}
-
-	UWidgetSwitcher* Switcher = nullptr;
-	if (NavigationData.RequiresSwitcher())
-	{
-		Switcher = FindPrototypeSwitcher(const_cast<UWidgetTree*>(WidgetTree), NavigationData);
-		if (!Switcher)
-		{
-			return false;
-		}
-	}
-
-	if (NavigationData.HasOverlayBindings() && !FindPrototypeOverlayHost(const_cast<UWidgetTree*>(WidgetTree), NavigationData))
-	{
-		return false;
-	}
-
-	for (const FUMGPrototypeNavigationBinding& Binding : NavigationData.ClickBindings)
-	{
-		if (!Binding.IsValid())
-		{
-			return false;
-		}
-
-		if (!Binding.UsesKeyboardTrigger()
-			&& !FindPrototypeTriggerButton(const_cast<UWidgetTree*>(WidgetTree), Binding))
-		{
-			return false;
-		}
-
-		if (Binding.RequiresSwitcher() && !Switcher)
-		{
-			return false;
-		}
-
-		if (Binding.RequiresPageTarget()
-			&& (!Switcher || Binding.TargetPageIndex < 0 || Binding.TargetPageIndex >= Switcher->GetNumWidgets()))
-		{
-			return false;
-		}
-	}
-
-	return true;
+	return VerifyPrototypeNavigationBindings(NavigationData, WidgetTree);
 }
 #endif
 

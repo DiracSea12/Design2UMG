@@ -1290,16 +1290,16 @@ bool FPenOfficialFieldParityTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("layoutIncludeStroke false preserved"), FrameNode->Metadata.FindRef(TEXT("layoutIncludeStroke")) == TEXT("false"));
 	TestTrue(TEXT("strokeLinejoin preserved"), FrameNode->Metadata.FindRef(TEXT("stroke.join")) == TEXT("miter"));
 	TestTrue(TEXT("strokeLinecap preserved"), FrameNode->Metadata.FindRef(TEXT("stroke.cap")) == TEXT("round"));
-	TestTrue(TEXT("fill blendMode preserved"), TextNode->Visual.PrimaryFill().BlendMode == TEXT("multiply"));
-	TestTrue(TEXT("fill opacity preserved"), FMath::IsNearlyEqual(TextNode->Visual.PrimaryFill().Opacity, 0.42f, 0.001f));
+	TestTrue(TEXT("fill blendMode preserved"), TextNode->Visual.TopmostFill().BlendMode == TEXT("multiply"));
+	TestTrue(TEXT("fill opacity preserved"), FMath::IsNearlyEqual(TextNode->Visual.TopmostFill().Opacity, 0.42f, 0.001f));
 	TestTrue(TEXT("text href preserved"), TextNode->Text.Href == TEXT("https://docs.pencil.dev"));
 	TestTrue(TEXT("text strikethrough preserved"), TextNode->Text.bStrikethrough);
-	TestTrue(TEXT("gradient center parsed"), GradientNode->Visual.PrimaryFill().Gradient.Center.IsSet()
-		&& FMath::IsNearlyEqual(GradientNode->Visual.PrimaryFill().Gradient.Center.GetValue().X, 0.2f, 0.001f)
-		&& FMath::IsNearlyEqual(GradientNode->Visual.PrimaryFill().Gradient.Center.GetValue().Y, 0.8f, 0.001f));
-	TestTrue(TEXT("gradient size parsed"), GradientNode->Visual.PrimaryFill().Gradient.Size.IsSet()
-		&& FMath::IsNearlyEqual(GradientNode->Visual.PrimaryFill().Gradient.Size.GetValue().X, 2.5f, 0.001f)
-		&& FMath::IsNearlyEqual(GradientNode->Visual.PrimaryFill().Gradient.Size.GetValue().Y, 1.25f, 0.001f));
+	TestTrue(TEXT("gradient center parsed"), GradientNode->Visual.TopmostFill().Gradient.Center.IsSet()
+		&& FMath::IsNearlyEqual(GradientNode->Visual.TopmostFill().Gradient.Center.GetValue().X, 0.2f, 0.001f)
+		&& FMath::IsNearlyEqual(GradientNode->Visual.TopmostFill().Gradient.Center.GetValue().Y, 0.8f, 0.001f));
+	TestTrue(TEXT("gradient size parsed"), GradientNode->Visual.TopmostFill().Gradient.Size.IsSet()
+		&& FMath::IsNearlyEqual(GradientNode->Visual.TopmostFill().Gradient.Size.GetValue().X, 2.5f, 0.001f)
+		&& FMath::IsNearlyEqual(GradientNode->Visual.TopmostFill().Gradient.Size.GetValue().Y, 1.25f, 0.001f));
 	TestTrue(TEXT("shadow blendMode preserved"), GradientNode->Visual.Effects.Num() > 0
 		&& GradientNode->Visual.Effects[0].BlendMode == TEXT("screen")
 		&& GradientNode->Visual.Effects[0].Shadow.BlendMode == TEXT("screen"));
@@ -1437,8 +1437,8 @@ bool FFigmaOfficialFieldParityTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("figma doc flowStartingPoints typed"), Doc.SourceDocument().FlowStartingPoints.Num() == 1
 		&& Doc.SourceDocument().FlowStartingPoints[0].NodeId == TEXT("0:2")
 		&& Doc.SourceDocument().FlowStartingPoints[0].Name == TEXT("Doc Flow"));
-	TestTrue(TEXT("figma fill blendMode preserved"), PaintNode->Visual.PrimaryFill().BlendMode == TEXT("MULTIPLY"));
-	TestTrue(TEXT("figma fill opacity preserved"), FMath::IsNearlyEqual(PaintNode->Visual.PrimaryFill().Opacity, 0.5f, 0.001f));
+	TestTrue(TEXT("figma fill blendMode preserved"), PaintNode->Visual.TopmostFill().BlendMode == TEXT("MULTIPLY"));
+	TestTrue(TEXT("figma fill opacity preserved"), FMath::IsNearlyEqual(PaintNode->Visual.TopmostFill().Opacity, 0.5f, 0.001f));
 	TestTrue(TEXT("figma effect blendMode preserved"), PaintNode->Visual.Effects.Num() > 0
 		&& PaintNode->Visual.Effects[0].BlendMode == TEXT("SCREEN")
 		&& PaintNode->Visual.Effects[0].Shadow.BlendMode == TEXT("SCREEN"));

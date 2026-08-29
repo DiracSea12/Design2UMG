@@ -7,6 +7,7 @@
 #include "UMGWidgetNodeProceduralResourceAccess.h"
 #include "UMGImageCropUtils.h"
 #include "Design2UMGLog.h"
+#include "DesignPathRasterDefaults.h"
 #include "DesignPathRasterizer.h"
 #include "ProceduralShapeGenerator.h"
 #include "ObjectTools.h"
@@ -249,18 +250,18 @@ namespace
 	UTexture2D* CreatePathTexture(const FUMGWidgetNode& Node, const FTextureMaterializationPlan&)
 	{
 		const FString Geometry = Node.Path.Geometry.Get(FString());
-		const FString FillRule = Node.Path.FillRule.Get(FString()).IsEmpty() ? TEXT("nonzero") : Node.Path.FillRule.GetValue();
+		const FString FillRule = Node.Path.FillRule.Get(FString()).IsEmpty() ? DesignPathRasterDefaults::FillRule : Node.Path.FillRule.GetValue();
 		const FString FillColor = Node.Path.FillColor.IsSet() ? Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.FillColor.GetValue()) : FString();
 		const FString StrokeColor = Node.Path.StrokeColor.IsSet() ? Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.StrokeColor.GetValue()) : FString();
-		const FString StrokeCap = Node.Path.StrokeCap.Get(FString()).IsEmpty() ? TEXT("butt") : Node.Path.StrokeCap.GetValue();
-		const FString StrokeJoin = Node.Path.StrokeJoin.Get(FString()).IsEmpty() ? TEXT("miter") : Node.Path.StrokeJoin.GetValue();
+		const FString StrokeCap = Node.Path.StrokeCap.Get(FString()).IsEmpty() ? DesignPathRasterDefaults::StrokeCap : Node.Path.StrokeCap.GetValue();
+		const FString StrokeJoin = Node.Path.StrokeJoin.Get(FString()).IsEmpty() ? DesignPathRasterDefaults::StrokeJoin : Node.Path.StrokeJoin.GetValue();
 		const float StrokeThickness = Node.Path.StrokeThickness.Get(0.0f);
 		const int32 Width  = (Node.WidgetStyle.WidthOverride.IsSet()  && Node.WidgetStyle.WidthOverride.GetValue()  > 0.0f) ? FMath::RoundToInt(Node.WidgetStyle.WidthOverride.GetValue())
-			: 64;
+			: DesignPathRasterDefaults::DefaultPixelSize;
 		const int32 Height = (Node.WidgetStyle.HeightOverride.IsSet() && Node.WidgetStyle.HeightOverride.GetValue() > 0.0f) ? FMath::RoundToInt(Node.WidgetStyle.HeightOverride.GetValue())
-			: 64;
+			: DesignPathRasterDefaults::DefaultPixelSize;
 
-		constexpr int32 PathSupersample = 2;
+		constexpr int32 PathSupersample = DesignPathRasterDefaults::Supersample;
 		const TOptional<FLinearColor> OptFill = FillColor.IsEmpty() ? TOptional<FLinearColor>() : TOptional<FLinearColor>(FUMGValueParser::ParseColor(FillColor));
 		const TOptional<FLinearColor> OptStroke = StrokeColor.IsEmpty() ? TOptional<FLinearColor>() : TOptional<FLinearColor>(FUMGValueParser::ParseColor(StrokeColor));
 		return FDesignPathRasterizer::Rasterize(

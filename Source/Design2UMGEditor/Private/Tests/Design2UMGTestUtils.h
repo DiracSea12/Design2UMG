@@ -15,7 +15,7 @@ namespace Design2UMGTestUtils
 {
 	inline bool TryGetWidgetProperty(const FUMGWidgetNode& Node, const TCHAR* Key, FString& OutValue)
 	{
-		return Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, Key, OutValue);
+		return Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, Key, OutValue);
 	}
 
 	inline FString GetWidgetProperty(const FUMGWidgetNode& Node, const TCHAR* Key)
@@ -53,7 +53,7 @@ namespace Design2UMGTestUtils
 		const FString* OptionalValue = nullptr)
 	{
 		FString Current;
-		if (Design2UMGWidgetNodeAccess::TryGetWidgetString(Node, *Key, Current))
+		if (Design2UMGWidgetNodeAccess::TryGetTypedWidgetString(Node, *Key, Current))
 		{
 			if (!OptionalValue || Current == *OptionalValue)
 			{

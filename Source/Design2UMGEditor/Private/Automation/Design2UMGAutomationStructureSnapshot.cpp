@@ -2,6 +2,7 @@
 
 #include "Automation/Design2UMGAutomationStructureSnapshot.h"
 
+#include "Design2UMGGeneratedNameSuffixes.h"
 #include "DesignSchema.h"
 #include "FontResolver.h"
 #include "DesignReferenceExpansion.h"
@@ -553,15 +554,15 @@ namespace Design2UMGAutomationStructureSnapshot
 			if (Cast<URetainerBox>(Widget))
 			{
 				const FString Name = Widget->GetName();
-				if (Name.EndsWith(TEXT("_fxblur")))
+				if (Name.EndsWith(Design2UMGGeneratedNameSuffixes::FxBlur()))
 				{
 					return TEXT("RetainerBox.foreground_blur");
 				}
-				if (Name.EndsWith(TEXT("_geometrymask")))
+				if (Name.EndsWith(Design2UMGGeneratedNameSuffixes::GeometryMask()))
 				{
 					return TEXT("RetainerBox.geometry_mask");
 				}
-				if (Name.EndsWith(TEXT("_innershadow")))
+				if (Name.EndsWith(Design2UMGGeneratedNameSuffixes::InnerShadow()))
 				{
 					return TEXT("RetainerBox.inner_shadow");
 				}
@@ -570,11 +571,11 @@ namespace Design2UMGAutomationStructureSnapshot
 			if (Cast<UBorder>(Widget))
 			{
 				const FString Name = Widget->GetName();
-				if (Name.EndsWith(TEXT("_surface")))
+				if (Name.EndsWith(Design2UMGGeneratedNameSuffixes::Surface()))
 				{
 					return TEXT("Border.explicit_stroke_surface");
 				}
-				if (Name.EndsWith(TEXT("_content")))
+				if (Name.EndsWith(Design2UMGGeneratedNameSuffixes::Content()))
 				{
 					return TEXT("Border.layer_content");
 				}
@@ -585,19 +586,22 @@ namespace Design2UMGAutomationStructureSnapshot
 				for (const UWidget* Child : Children)
 				{
 					const FString Name = Child ? Child->GetName() : FString();
-					if (Name.EndsWith(TEXT("_stroke_top"))
-						|| Name.EndsWith(TEXT("_stroke_right"))
-						|| Name.EndsWith(TEXT("_stroke_bottom"))
-						|| Name.EndsWith(TEXT("_stroke_left")))
+					if (Name.EndsWith(Design2UMGGeneratedNameSuffixes::StrokeTop())
+						|| Name.EndsWith(Design2UMGGeneratedNameSuffixes::StrokeRight())
+						|| Name.EndsWith(Design2UMGGeneratedNameSuffixes::StrokeBottom())
+						|| Name.EndsWith(Design2UMGGeneratedNameSuffixes::StrokeLeft()))
 					{
 						return TEXT("Overlay.explicit_side_stroke");
 					}
 				}
-				if (HasIndexedGeneratedChild(Children, TEXT("_fill"), TEXT("_img")))
+				if (HasIndexedGeneratedChild(
+					Children,
+					Design2UMGGeneratedNameSuffixes::FillMarker(),
+					Design2UMGGeneratedNameSuffixes::FillImageSuffix()))
 				{
 					return TEXT("Overlay.multi_fill");
 				}
-				if (HasIndexedGeneratedChild(Children, TEXT("_shadow")))
+				if (HasIndexedGeneratedChild(Children, Design2UMGGeneratedNameSuffixes::ShadowMarker()))
 				{
 					return TEXT("Overlay.outer_shadow");
 				}

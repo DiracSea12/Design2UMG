@@ -184,7 +184,8 @@ namespace
 			Context.TextureMap,
 			Context.FigmaMetadataRecords,
 			Context.ExplicitDesignSize,
-			Context.ComponentMappingState);
+			Context.ComponentMappingState,
+			Context.ClassOverrideCache);
 	}
 
 	void BuildPanelChildren(

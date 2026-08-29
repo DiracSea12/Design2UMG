@@ -104,18 +104,45 @@ FString UDesign2UMGSettings::FindIconFontAssetPath(const FString& FontFamily) co
 
 UClass* UDesign2UMGSettings::FindClassOverride(const FString& NodeName) const
 {
-	for (const FWidgetClassOverride& Rule : ClassOverrides)
+	return ResolveClassOverride(ClassOverrides, NodeName);
+}
+
+UClass* UDesign2UMGSettings::ResolveClassOverride(
+	const TArray<FWidgetClassOverride>& Rules,
+	const FString& NodeName,
+	TMap<FString, UClass*>* InOutNodeNameCache)
+{
+	if (InOutNodeNameCache)
+	{
+		if (UClass* const* Cached = InOutNodeNameCache->Find(NodeName))
+		{
+			return *Cached;
+		}
+	}
+
+	UClass* Resolved = nullptr;
+	for (const FWidgetClassOverride& Rule : Rules)
 	{
 		if (Rule.NamePattern.IsEmpty() || Rule.WidgetClass.IsNull())
+		{
 			continue;
+		}
 		if (NodeName.Contains(Rule.NamePattern, ESearchCase::IgnoreCase))
 		{
 			UClass* Loaded = Rule.WidgetClass.LoadSynchronous();
 			if (Loaded && Loaded->IsChildOf(UWidget::StaticClass()))
-				return Loaded;
+			{
+				Resolved = Loaded;
+				break;
+			}
 		}
 	}
-	return nullptr;
+
+	if (InOutNodeNameCache)
+	{
+		InOutNodeNameCache->Add(NodeName, Resolved);
+	}
+	return Resolved;
 }
 
 

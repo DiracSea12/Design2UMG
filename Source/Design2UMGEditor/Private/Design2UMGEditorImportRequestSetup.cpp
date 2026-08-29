@@ -79,13 +79,14 @@ namespace Design2UMGEditorImportRequestSetup
 
 	FDesignImportExecutionResult ExecuteImportWithSettings(
 		FDesignDocument& Document,
-		const FDesignImportRequest& Request)
+		const FDesignImportRequest& Request,
+		const FImportAnalysisResult* PrecomputedAnalysis)
 	{
 		return ExecuteWithCapturedSettings(
 			Request,
-			[&Document, &Request]()
+			[&Document, &Request, PrecomputedAnalysis]()
 		{
-			return DesignImportPipeline::Execute(Document, Request);
+			return DesignImportPipeline::Execute(Document, Request, PrecomputedAnalysis);
 		});
 	}
 

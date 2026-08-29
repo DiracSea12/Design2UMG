@@ -337,25 +337,25 @@ bool FFigmaParserFillTypesTest::RunTest(const FString&)
 	// Solid fill child
 	const TSharedPtr<FDesignNode>& SolidNode = FillsFrame->Children[0];
 	TestTrue(TEXT("SolidNode valid"), SolidNode.IsValid());
-	TestEqual(TEXT("SolidNode fill type"), SolidNode->Visual.PrimaryFill().Type, EDesignFillType::Color);
+	TestEqual(TEXT("SolidNode fill type"), SolidNode->Visual.TopmostFill().Type, EDesignFillType::Color);
 	TestEqual(TEXT("SolidNode fills count"), SolidNode->Visual.Fills.Num(), 1);
-	TestFalse(TEXT("SolidNode solid color present"), SolidNode->Visual.PrimaryFill().SolidColor.IsEmpty());
+	TestFalse(TEXT("SolidNode solid color present"), SolidNode->Visual.TopmostFill().SolidColor.IsEmpty());
 
 	// Gradient fill child
 	const TSharedPtr<FDesignNode>& GradNode = FillsFrame->Children[1];
 	TestTrue(TEXT("GradNode valid"), GradNode.IsValid());
-	TestEqual(TEXT("GradNode fill type"), GradNode->Visual.PrimaryFill().Type, EDesignFillType::Gradient);
-	TestEqual(TEXT("GradNode gradient type"), GradNode->Visual.PrimaryFill().Gradient.GradientType, EDesignGradientType::Linear);
-	TestEqual(TEXT("GradNode gradient stops"), GradNode->Visual.PrimaryFill().Gradient.Colors.Num(), 2);
-	TestEqual(TEXT("GradNode first stop position"), GradNode->Visual.PrimaryFill().Gradient.Colors[0].Position, 0.0f);
-	TestEqual(TEXT("GradNode second stop position"), GradNode->Visual.PrimaryFill().Gradient.Colors[1].Position, 1.0f);
+	TestEqual(TEXT("GradNode fill type"), GradNode->Visual.TopmostFill().Type, EDesignFillType::Gradient);
+	TestEqual(TEXT("GradNode gradient type"), GradNode->Visual.TopmostFill().Gradient.GradientType, EDesignGradientType::Linear);
+	TestEqual(TEXT("GradNode gradient stops"), GradNode->Visual.TopmostFill().Gradient.Colors.Num(), 2);
+	TestEqual(TEXT("GradNode first stop position"), GradNode->Visual.TopmostFill().Gradient.Colors[0].Position, 0.0f);
+	TestEqual(TEXT("GradNode second stop position"), GradNode->Visual.TopmostFill().Gradient.Colors[1].Position, 1.0f);
 
 	// Image fill child
 	const TSharedPtr<FDesignNode>& ImgNode = FillsFrame->Children[2];
 	TestTrue(TEXT("ImgNode valid"), ImgNode.IsValid());
-	TestEqual(TEXT("ImgNode fill type"), ImgNode->Visual.PrimaryFill().Type, EDesignFillType::Image);
-	TestEqual(TEXT("ImgNode image ref"), ImgNode->Visual.PrimaryFill().Image.Url, FString(TEXT("abc123")));
-	TestEqual(TEXT("ImgNode image mode"), ImgNode->Visual.PrimaryFill().Image.Mode, EDesignImageMode::Fill);
+	TestEqual(TEXT("ImgNode fill type"), ImgNode->Visual.TopmostFill().Type, EDesignFillType::Image);
+	TestEqual(TEXT("ImgNode image ref"), ImgNode->Visual.TopmostFill().Image.Url, FString(TEXT("abc123")));
+	TestEqual(TEXT("ImgNode image mode"), ImgNode->Visual.TopmostFill().Image.Mode, EDesignImageMode::Fill);
 
 	return true;
 }
@@ -418,13 +418,13 @@ bool FFigmaParserGradientGeometryTest::RunTest(const FString&)
 	}
 
 	const TSharedPtr<FDesignNode>& Node = Doc.Children[0];
-	TestEqual(TEXT("Parsed gradient fill type"), Node->Visual.PrimaryFill().Type, EDesignFillType::Gradient);
-	TestEqual(TEXT("Parsed gradient type"), Node->Visual.PrimaryFill().Gradient.GradientType, EDesignGradientType::Radial);
-	TestEqual(TEXT("Parsed gradient stops"), Node->Visual.PrimaryFill().Gradient.Colors.Num(), 3);
-	TestTrue(TEXT("Parsed radial center present"), Node->Visual.PrimaryFill().Gradient.Center.IsSet());
-	TestTrue(TEXT("Parsed radial size present"), Node->Visual.PrimaryFill().Gradient.Size.IsSet());
-	const FVector2D ParsedCenter = Node->Visual.PrimaryFill().Gradient.Center.Get(FVector2D::ZeroVector);
-	const FVector2D ParsedSize = Node->Visual.PrimaryFill().Gradient.Size.Get(FVector2D::ZeroVector);
+	TestEqual(TEXT("Parsed gradient fill type"), Node->Visual.TopmostFill().Type, EDesignFillType::Gradient);
+	TestEqual(TEXT("Parsed gradient type"), Node->Visual.TopmostFill().Gradient.GradientType, EDesignGradientType::Radial);
+	TestEqual(TEXT("Parsed gradient stops"), Node->Visual.TopmostFill().Gradient.Colors.Num(), 3);
+	TestTrue(TEXT("Parsed radial center present"), Node->Visual.TopmostFill().Gradient.Center.IsSet());
+	TestTrue(TEXT("Parsed radial size present"), Node->Visual.TopmostFill().Gradient.Size.IsSet());
+	const FVector2D ParsedCenter = Node->Visual.TopmostFill().Gradient.Center.Get(FVector2D::ZeroVector);
+	const FVector2D ParsedSize = Node->Visual.TopmostFill().Gradient.Size.Get(FVector2D::ZeroVector);
 	TestTrue(TEXT("Parsed radial center X"),
 		FMath::IsNearlyEqual(ParsedCenter.X, 0.25f, 0.0001f));
 	TestTrue(TEXT("Parsed radial center Y"),
@@ -434,7 +434,7 @@ bool FFigmaParserGradientGeometryTest::RunTest(const FString&)
 	TestTrue(TEXT("Parsed radial size height"),
 		FMath::IsNearlyEqual(ParsedSize.Y, 0.8f, 0.0001f));
 	TestTrue(TEXT("Parsed middle stop position"),
-		FMath::IsNearlyEqual(Node->Visual.PrimaryFill().Gradient.Colors[1].Position, 0.4f, 0.0001f));
+		FMath::IsNearlyEqual(Node->Visual.TopmostFill().Gradient.Colors[1].Position, 0.4f, 0.0001f));
 	return true;
 }
 
@@ -528,7 +528,7 @@ bool FFigmaParserLinearGradientEndpointsTest::RunTest(const FString&)
 		return false;
 	}
 
-	const FDesignGradient& Gradient = Doc.Children[0]->Visual.PrimaryFill().Gradient;
+	const FDesignGradient& Gradient = Doc.Children[0]->Visual.TopmostFill().Gradient;
 	TestEqual(TEXT("Parsed linear gradient type"), Gradient.GradientType, EDesignGradientType::Linear);
 	TestTrue(TEXT("Parsed linear start point"), Gradient.StartPoint.IsSet());
 	TestTrue(TEXT("Parsed linear end point"), Gradient.EndPoint.IsSet());

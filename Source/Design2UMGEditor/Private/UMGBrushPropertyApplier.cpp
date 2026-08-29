@@ -2,13 +2,14 @@
 #include "UMGBrushPropertyApplier.h"
 
 #include "Design2UMGEffectMaterialBuilder.h"
+#include "DesignPathRasterDefaults.h"
 #include "DesignPathRasterizer.h"
 #include "DesignResourceResolver.h"
 #include "UMGImageCropUtils.h"
 #include "UMGPropertyApplierSupport.h"
 #include "UMGValueParsing.h"
 #include "UMGWidgetNodeAccess.h"
-#include "UMGWidgetNodeProceduralResourceAccess.h"
+#include "WidgetResourceBinder.h"
 
 #include "Components/BackgroundBlur.h"
 #include "Components/Border.h"
@@ -87,19 +88,6 @@ namespace
 		return false;
 	}
 
-	bool ResolveProceduralTexture(const FUMGWidgetNode& Node, UObject* Outer, UTexture2D*& OutTexture)
-	{
-		FUMGProceduralResourceRequest Request;
-		if (!Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Node, Request)
-			|| Request.MaterialRef.IsEmpty())
-		{
-			return false;
-		}
-
-		OutTexture = DesignResourceResolver::ResolveTextureFromMaterialRef(Request, Outer);
-		return OutTexture != nullptr;
-	}
-
 	FVector2D ResolveWidgetImageSize(const FUMGWidgetNode& Node, const FVector2D& DefaultSize)
 	{
 		return FVector2D(
@@ -128,7 +116,8 @@ namespace UMGBrushPropertyApplier
 
 		const bool bExplicitEmptyMaterialRef = Node.Brush.MaterialRef.IsSet() && Node.Brush.MaterialRef.GetValue().IsEmpty();
 		UTexture2D* GeneratedTexture = nullptr;
-		if (ResolveProceduralTexture(Node, Image, GeneratedTexture))
+		if (FWidgetResourceBinder::TryResolveProceduralTexture(Node, Image, GeneratedTexture)
+			== FWidgetResourceBinder::EProceduralTextureResult::Resolved)
 		{
 			Image->SetBrushFromTexture(GeneratedTexture);
 			FSlateBrush GeneratedBrush = Image->GetBrush();
@@ -143,15 +132,15 @@ namespace UMGBrushPropertyApplier
 
 		if (Node.Path.Geometry.IsSet())
 		{
-			const FString FillRule = Node.Path.FillRule.Get(TEXT("nonzero"));
+			const FString FillRule = Node.Path.FillRule.Get(DesignPathRasterDefaults::FillRule);
 			const TOptional<FLinearColor> FillColor = NormalizeOptionalTypedDescriptorColor(Node.Path.FillColor);
 			const TOptional<FLinearColor> StrokeColor = NormalizeOptionalTypedDescriptorColor(Node.Path.StrokeColor);
 			const float StrokeThickness = Node.Path.StrokeThickness.Get(0.0f);
-			const FString StrokeCap = Node.Path.StrokeCap.Get(TEXT("butt"));
-			const FString StrokeJoin = Node.Path.StrokeJoin.Get(TEXT("miter"));
-			const int32 PathPixelWidth = FMath::Max(1, FMath::RoundToInt(Node.WidgetStyle.WidthOverride.Get(64.0f)));
-			const int32 PathPixelHeight = FMath::Max(1, FMath::RoundToInt(Node.WidgetStyle.HeightOverride.Get(64.0f)));
-			constexpr int32 PathSupersample = 2;
+			const FString StrokeCap = Node.Path.StrokeCap.Get(DesignPathRasterDefaults::StrokeCap);
+			const FString StrokeJoin = Node.Path.StrokeJoin.Get(DesignPathRasterDefaults::StrokeJoin);
+			const int32 PathPixelWidth = FMath::Max(1, FMath::RoundToInt(Node.WidgetStyle.WidthOverride.Get(static_cast<float>(DesignPathRasterDefaults::DefaultPixelSize))));
+			const int32 PathPixelHeight = FMath::Max(1, FMath::RoundToInt(Node.WidgetStyle.HeightOverride.Get(static_cast<float>(DesignPathRasterDefaults::DefaultPixelSize))));
+			constexpr int32 PathSupersample = DesignPathRasterDefaults::Supersample;
 
 			if (UTexture2D* Texture = FDesignPathRasterizer::Rasterize(
 				Node.Path.Geometry.GetValue(),
@@ -226,7 +215,8 @@ namespace UMGBrushPropertyApplier
 
 		const bool bExplicitEmptyMaterialRef = Node.Brush.MaterialRef.IsSet() && Node.Brush.MaterialRef.GetValue().IsEmpty();
 		UTexture2D* GeneratedTexture = nullptr;
-		if (ResolveProceduralTexture(Node, Border, GeneratedTexture))
+		if (FWidgetResourceBinder::TryResolveProceduralTexture(Node, Border, GeneratedTexture)
+			== FWidgetResourceBinder::EProceduralTextureResult::Resolved)
 		{
 			Brush.SetResourceObject(GeneratedTexture);
 			Brush.DrawAs = ESlateBrushDrawType::Image;

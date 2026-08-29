@@ -10,6 +10,7 @@
 #include "UMGPropertyKeys.h"
 #include "UMGWidgetNodeAccess.h"
 #include "UMGValueParser.h"
+#include "Design2UMGGeneratedNameSuffixes.h"
 
 namespace
 {
@@ -51,7 +52,7 @@ namespace
 			return false;
 		}
 
-		const FDesignFill& PrimaryFill = Node->Visual.PrimaryFill();
+		const FDesignFill& PrimaryFill = Node->Visual.TopmostFill();
 		return PrimaryFill.bEnabled
 			&& PrimaryFill.Type == EDesignFillType::Color
 			&& !PrimaryFill.SolidColor.IsEmpty()
@@ -162,7 +163,7 @@ namespace
 
 	FString BuildIndexedShadowSuffix(const int32 ShadowIndex)
 	{
-		return FString::Printf(TEXT("_shadow%d"), ShadowIndex);
+		return Design2UMGGeneratedNameSuffixes::Shadow(ShadowIndex);
 	}
 
 	FUMGWidgetNode BuildBoxShadowLayerImage(
@@ -524,9 +525,7 @@ namespace
 
 		auto IsSyntheticJustifySpacer = [](const FUMGWidgetNode& Candidate)
 		{
-			return Candidate.Type == TEXT("Spacer")
-				&& Candidate.Children.Num() == 0
-				&& !Candidate.HasSourceData();
+			return Candidate.bSyntheticJustifySpacer;
 		};
 
 		int32 NonSpacerIndex = INDEX_NONE;
@@ -862,9 +861,8 @@ FUMGWidgetNode VisualMapper::WrapWithForegroundBlur(FUMGWidgetNode&& Widget, con
 {
 	FUMGWidgetNode Retainer;
 	Retainer.Type = TEXT("RetainerBox");
-	constexpr TCHAR ForegroundBlurSuffix[] = TEXT("_fxblur");
-	Retainer.Id = BuildWidgetIdOrNameWithSuffix(Widget.Id, ForegroundBlurSuffix);
-	Retainer.Name = BuildWidgetIdOrNameWithSuffix(Widget.Name, ForegroundBlurSuffix);
+	Retainer.Id = BuildWidgetIdOrNameWithSuffix(Widget.Id, Design2UMGGeneratedNameSuffixes::FxBlur());
+	Retainer.Name = BuildWidgetIdOrNameWithSuffix(Widget.Name, Design2UMGGeneratedNameSuffixes::FxBlur());
 	Retainer.Bounds = Widget.Bounds;
 	Retainer.Slot = Widget.Slot;
 	Retainer.Effect.bRetainRendering = true;
@@ -884,9 +882,8 @@ FUMGWidgetNode VisualMapper::WrapWithGeometryMask(FUMGWidgetNode&& Widget, const
 {
 	FUMGWidgetNode Retainer;
 	Retainer.Type = TEXT("RetainerBox");
-	constexpr TCHAR GeometryMaskSuffix[] = TEXT("_geometrymask");
-	Retainer.Id = BuildWidgetIdOrNameWithSuffix(Widget.Id, GeometryMaskSuffix);
-	Retainer.Name = BuildWidgetIdOrNameWithSuffix(Widget.Name, GeometryMaskSuffix);
+	Retainer.Id = BuildWidgetIdOrNameWithSuffix(Widget.Id, Design2UMGGeneratedNameSuffixes::GeometryMask());
+	Retainer.Name = BuildWidgetIdOrNameWithSuffix(Widget.Name, Design2UMGGeneratedNameSuffixes::GeometryMask());
 	Retainer.Bounds = Widget.Bounds;
 	Retainer.Slot = Widget.Slot;
 	Retainer.Effect.bRetainRendering = true;
@@ -910,9 +907,8 @@ FUMGWidgetNode VisualMapper::WrapWithInnerShadow(FUMGWidgetNode&& Widget, const 
 {
 	FUMGWidgetNode Retainer;
 	Retainer.Type = TEXT("RetainerBox");
-	constexpr TCHAR InnerShadowSuffix[] = TEXT("_innershadow");
-	Retainer.Id = BuildWidgetIdOrNameWithSuffix(Widget.Id, InnerShadowSuffix);
-	Retainer.Name = BuildWidgetIdOrNameWithSuffix(Widget.Name, InnerShadowSuffix);
+	Retainer.Id = BuildWidgetIdOrNameWithSuffix(Widget.Id, Design2UMGGeneratedNameSuffixes::InnerShadow());
+	Retainer.Name = BuildWidgetIdOrNameWithSuffix(Widget.Name, Design2UMGGeneratedNameSuffixes::InnerShadow());
 	Retainer.Bounds = Widget.Bounds;
 	Retainer.Slot = Widget.Slot;
 	Retainer.Effect.bRetainRendering = true;
@@ -952,8 +948,8 @@ FUMGWidgetNode VisualMapper::WrapWithBoxShadow(
 	}
 
 	// Place the original widget above the shadows.
-	Widget.Id = Widget.Id + TEXT("_content");
-	Widget.Name = Widget.Name + TEXT("_content");
+	Widget.Id = Widget.Id + Design2UMGGeneratedNameSuffixes::Content();
+	Widget.Name = Widget.Name + Design2UMGGeneratedNameSuffixes::Content();
 	Widget.Bounds = FDesignPixelBounds();
 	Widget.Slot = FUMGSlotData();
 	Widget.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;

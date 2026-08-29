@@ -41,7 +41,7 @@ static void ParsePrototypeTransitionData(const TSharedPtr<FJsonObject>& Obj, FDe
 
 	const TSharedPtr<FJsonValue> EasingField = DesignJsonUtils::TryGetField(Obj, TEXT("easing"));
 	if (EasingField.IsValid())
-		Out.EasingJson = DesignJsonUtils::ToCompactString(EasingField);
+		Out.EasingJson = DesignJsonUtils::ToPrettyString(EasingField);
 
 	const FString EasingType = DesignJsonUtils::GetString(DesignJsonUtils::GetObject(Obj, TEXT("easing")), TEXT("type"));
 	if (!EasingType.IsEmpty())
@@ -51,6 +51,30 @@ static void ParsePrototypeTransitionData(const TSharedPtr<FJsonObject>& Obj, FDe
 	if (Obj->TryGetBoolField(TEXT("matchLayers"), bMatchLayers))
 	{
 		Out.MatchLayers.Emplace(bMatchLayers);
+	}
+}
+
+static void ParsePrototypeActions(const TSharedPtr<FJsonObject>& InteractionObj, TArray<FDesignPrototypeAction>& OutActions);
+
+static void ParsePrototypeConditionalBlocks(
+	const TSharedPtr<FJsonObject>& AObj,
+	TArray<FDesignPrototypeConditionalBlock>& OutBlocks)
+{
+	const TArray<TSharedPtr<FJsonValue>>* Blocks = DesignJsonUtils::GetArray(AObj, TEXT("conditionalBlocks"));
+	if (!Blocks)
+		return;
+
+	for (const TSharedPtr<FJsonValue>& BV : *Blocks)
+	{
+		const TSharedPtr<FJsonObject> BObj = BV->AsObject();
+		if (!BObj.IsValid())
+			continue;
+
+		FDesignPrototypeConditionalBlock Block;
+		Block.ConditionJson = DesignJsonUtils::ToCondensedString(
+			DesignJsonUtils::TryGetField(BObj, TEXT("condition")));
+		ParsePrototypeActions(BObj, Block.Actions);
+		OutBlocks.Add(MoveTemp(Block));
 	}
 }
 
@@ -67,7 +91,6 @@ static void ParsePrototypeActions(const TSharedPtr<FJsonObject>& InteractionObj,
 			continue;
 
 		FDesignPrototypeAction Action;
-		Action.RawJson = DesignJsonUtils::ToCompactString(AV);
 
 		const FString ActionType = DesignJsonUtils::GetString(AObj, TEXT("type"));
 		if (!ActionType.IsEmpty())
@@ -91,9 +114,31 @@ static void ParsePrototypeActions(const TSharedPtr<FJsonObject>& InteractionObj,
 
 		const TSharedPtr<FJsonValue> TransitionField = DesignJsonUtils::TryGetField(AObj, TEXT("transition"));
 		if (TransitionField.IsValid())
-			Action.TransitionJson = DesignJsonUtils::ToCompactString(TransitionField);
+			Action.TransitionJson = DesignJsonUtils::ToPrettyString(TransitionField);
 
 		ParsePrototypeTransitionData(DesignJsonUtils::GetObject(AObj, TEXT("transition")), Action.Transition);
+
+		const FString VariableId = DesignJsonUtils::GetString(AObj, TEXT("variableId"));
+		if (!VariableId.IsEmpty())
+			Action.VariableId = VariableId;
+
+		// Variable payload is condensed once here so the step graph never
+		// re-parses the raw action JSON; "value" is the legacy field name.
+		TSharedPtr<FJsonValue> VariableValueField = DesignJsonUtils::TryGetField(AObj, TEXT("variableValue"));
+		if (!VariableValueField.IsValid())
+			VariableValueField = DesignJsonUtils::TryGetField(AObj, TEXT("value"));
+		if (VariableValueField.IsValid())
+			Action.VariableValueJson = DesignJsonUtils::ToCondensedString(VariableValueField);
+
+		const FString VariableCollectionId = DesignJsonUtils::GetString(AObj, TEXT("variableCollectionId"));
+		if (!VariableCollectionId.IsEmpty())
+			Action.VariableCollectionId = VariableCollectionId;
+
+		const FString VariableModeId = DesignJsonUtils::GetString(AObj, TEXT("variableModeId"));
+		if (!VariableModeId.IsEmpty())
+			Action.VariableModeId = VariableModeId;
+
+		ParsePrototypeConditionalBlocks(AObj, Action.ConditionalBlocks);
 		OutActions.Add(MoveTemp(Action));
 	}
 }
@@ -111,11 +156,10 @@ static void ParsePrototypeInteractions(const TSharedPtr<FJsonObject>& Obj, TArra
 			continue;
 
 		FDesignPrototypeInteraction Interaction;
-		Interaction.RawJson = DesignJsonUtils::ToCompactString(IV);
 
 		const TSharedPtr<FJsonValue> TriggerField = DesignJsonUtils::TryGetField(IObj, TEXT("trigger"));
 		if (TriggerField.IsValid())
-			Interaction.TriggerJson = DesignJsonUtils::ToCompactString(TriggerField);
+			Interaction.TriggerJson = DesignJsonUtils::ToPrettyString(TriggerField);
 
 		const FString TriggerType = DesignJsonUtils::GetString(DesignJsonUtils::GetObject(IObj, TEXT("trigger")), TEXT("type"));
 		if (!TriggerType.IsEmpty())
@@ -161,7 +205,7 @@ void ParsePrototypeNodeData(const TSharedPtr<FJsonObject>& NodeObj, FDesignProto
 
 	const TSharedPtr<FJsonValue> EasingField = DesignJsonUtils::TryGetField(NodeObj, TEXT("transitionEasing"));
 	if (EasingField.IsValid())
-		OutData.Transition.EasingJson = DesignJsonUtils::ToCompactString(EasingField);
+		OutData.Transition.EasingJson = DesignJsonUtils::ToPrettyString(EasingField);
 
 	const FString EasingType = DesignJsonUtils::GetString(DesignJsonUtils::GetObject(NodeObj, TEXT("transitionEasing")), TEXT("type"));
 	if (!EasingType.IsEmpty())
@@ -179,7 +223,7 @@ void MergePrototypeDocumentData(const TSharedPtr<FJsonObject>& SourceObj, FDesig
 
 	const TSharedPtr<FJsonValue> DeviceField = DesignJsonUtils::TryGetField(SourceObj, TEXT("prototypeDevice"));
 	if (DeviceField.IsValid())
-		OutData.PrototypeDeviceJson = DesignJsonUtils::ToCompactString(DeviceField);
+		OutData.PrototypeDeviceJson = DesignJsonUtils::ToPrettyString(DeviceField);
 
 	ParseFlowStartingPoints(SourceObj, OutData.FlowStartingPoints);
 }

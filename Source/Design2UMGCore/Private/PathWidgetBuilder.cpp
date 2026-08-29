@@ -71,7 +71,7 @@ namespace
 
 	FString ResolvePathRasterFillColor(const TSharedPtr<FDesignNode>& Node)
 	{
-		const FDesignFill& PrimaryFill = Node->Visual.PrimaryFill();
+		const FDesignFill& PrimaryFill = Node->Visual.TopmostFill();
 		if (PrimaryFill.Type == EDesignFillType::Color)
 		{
 			return PrimaryFill.SolidColor;
@@ -148,7 +148,7 @@ FUMGWidgetNode PathWidgetBuilder::CreatePathWidget(const TSharedPtr<FDesignNode>
 		return Widget;
 	}
 
-	const FDesignFill& PrimaryFill = Node->Visual.PrimaryFill();
+	const FDesignFill& PrimaryFill = Node->Visual.TopmostFill();
 	if (PrimaryFill.Type == EDesignFillType::Image && !PrimaryFill.Image.Url.IsEmpty())
 	{
 		Widget.Type = TEXT("Image");

@@ -47,8 +47,6 @@ namespace Design2UMGWidgetNodeAccess
 	DESIGN2UMGCORE_API bool TryGetWidgetStateTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue);
 	DESIGN2UMGCORE_API bool TryGetScrollBoxTypedWidgetString(const FUMGWidgetNode& Node, const FString& KeyString, FString& OutValue);
 	DESIGN2UMGCORE_API bool TryGetTypedWidgetString(const FUMGWidgetNode& Node, const TCHAR* Key, FString& OutValue);
-
-	DESIGN2UMGCORE_API bool TryGetWidgetString(const FUMGWidgetNode& Node, const TCHAR* Key, FString& OutValue);
 	DESIGN2UMGCORE_API bool HasWidgetPropertyPresence(const FUMGWidgetNode& Node, const TCHAR* Key);
 	DESIGN2UMGCORE_API bool TryGetWidgetBool(const FUMGWidgetNode& Node, const TCHAR* Key, bool& OutValue);
 	DESIGN2UMGCORE_API bool TryGetWidgetInt(const FUMGWidgetNode& Node, const TCHAR* Key, int32& OutValue);

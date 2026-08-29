@@ -2,6 +2,7 @@
 
 #include "Design2UMGPrototypeNavigation.h"
 
+#include "Design2UMGGeneratedNameSuffixes.h"
 #include "Design2UMGPrototypeStepGraph.h"
 #include "UMGSchema.h"
 #include "UMGSchemaSourceExtensions.h"
@@ -77,8 +78,8 @@ namespace Design2UMGPrototypeNavigation
 		Button.WidgetStyle.HoveredColor = FLinearColor::Transparent;
 		Button.WidgetStyle.PressedColor = FLinearColor::Transparent;
 
-		Widget.Id = Node->Id + TEXT("_content");
-		Widget.Name = (Node->Name.IsEmpty() ? Node->Id : Node->Name) + TEXT("_content");
+		Widget.Id = Node->Id + Design2UMGGeneratedNameSuffixes::Content();
+		Widget.Name = (Node->Name.IsEmpty() ? Node->Id : Node->Name) + Design2UMGGeneratedNameSuffixes::Content();
 		Widget.Bounds.X = 0.0f;
 		Widget.Bounds.Y = 0.0f;
 		Widget.Slot = FUMGSlotData();

@@ -111,7 +111,11 @@ namespace DesignImportPipeline
 		const FArtifactGenerationRequest& Request,
 		const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings);
 	FDesignImportExecutionResult Execute(FUMGWidgetData& Data, const FDesignImportRequest& Request);
-	FDesignImportExecutionResult Execute(FDesignDocument& Document, const FDesignImportRequest& Request);
+	/** PrecomputedAnalysis lets a caller that already ran AnalyzeImport with this request's settings reuse it instead of a second parse->convert pass. */
+	FDesignImportExecutionResult Execute(
+		FDesignDocument& Document,
+		const FDesignImportRequest& Request,
+		const FImportAnalysisResult* PrecomputedAnalysis = nullptr);
 
 	/**
 	 * Safe Reimport: load manifest -> re-parse source -> DocumentScope match -> Convert ->

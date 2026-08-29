@@ -13,7 +13,7 @@
 namespace
 {
 	using DesignJsonUtils::GetString;
-	using DesignJsonUtils::ToCompactString;
+	using DesignJsonUtils::ToPrettyString;
 	using DesignJsonUtils::TryGetNumber;
 
 	void AddExtensionIfNonEmpty(TMap<FString, FString>& Extensions, const FString& Key, const FString& Value)
@@ -51,7 +51,7 @@ namespace
 		const TSharedPtr<FJsonValue> FieldValue = Obj->TryGetField(SourceKey);
 		if (FieldValue.IsValid())
 		{
-			Extensions.Add(ExtKey, ToCompactString(FieldValue));
+			Extensions.Add(ExtKey, ToPrettyString(FieldValue));
 		}
 	}
 

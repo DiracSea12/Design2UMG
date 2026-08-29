@@ -34,7 +34,7 @@ static void AddJsonExtensionIfPresent(const TSharedPtr<FJsonObject>& Obj, TMap<F
 	const TSharedPtr<FJsonValue> FieldValue = Obj->TryGetField(SourceKey);
 	if (!FieldValue.IsValid())
 		return;
-	Extensions.Add(ExtKey, DesignJsonUtils::ToCompactString(FieldValue));
+	Extensions.Add(ExtKey, DesignJsonUtils::ToPrettyString(FieldValue));
 }
 
 
@@ -69,7 +69,7 @@ static void SetJsonFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHA
 	const TSharedPtr<FJsonValue> FieldValue = Obj->TryGetField(Key);
 	if (FieldValue.IsValid())
 	{
-		OutValue = DesignJsonUtils::ToCompactString(FieldValue);
+		OutValue = DesignJsonUtils::ToPrettyString(FieldValue);
 	}
 }
 

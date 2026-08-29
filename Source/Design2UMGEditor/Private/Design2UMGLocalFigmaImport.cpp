@@ -100,7 +100,7 @@ namespace
 			return true;
 		}
 
-		const FDesignFill& PrimaryFill = Node->Visual.PrimaryFill();
+		const FDesignFill& PrimaryFill = Node->Visual.TopmostFill();
 		if (PrimaryFill.Type == EDesignFillType::Gradient || PrimaryFill.Type == EDesignFillType::Image)
 		{
 			return true;
@@ -380,7 +380,7 @@ namespace
 				(Node->Type == EDesignNodeType::Ellipse) ||
 				(Node->Type == EDesignNodeType::Polygon);
 
-			if (bIsVector && !Node->Visual.PrimaryFill().IsImage() && NeedsVectorRasterFallback(Node))
+			if (bIsVector && !Node->Visual.TopmostFill().IsImage() && NeedsVectorRasterFallback(Node))
 			{
 				FString VecKey;
 				FString PngPath;
@@ -503,7 +503,6 @@ namespace Design2UMGLocalFigmaImport
 		const FString SourceDocumentIdentity = DesignImageBakeUtils::BuildSourceDocumentIdentity(JsonFilePath);
 		TMap<FString, FString> ImageRefToLocalPath;
 		const int32 VecCount = InjectVectorImageFills(ParsedDocument.Children, ImagesDir, ImageRefToLocalPath);
-		const int32 RenderFallbackCount = 0;
 
 		TSet<FString> ImageRefs;
 		FFigmaParser::CollectImageRefs(ParsedDocument, ImageRefs);
@@ -526,8 +525,8 @@ namespace Design2UMGLocalFigmaImport
 			TEXT("LocalFigmaImport"));
 		const int32 LayerBlurDerivedCount = BakeLayerBlurImages(ParsedDocument.Children, ImageRefToLocalPath, SourceDocumentIdentity);
 
-		UE_LOG(LogDesign2UMG, Log, TEXT("LocalFigmaImport: %d image mappings (%d vec_*, %d render fallbacks, %d image fills, %d baked blend overlays, %d baked layer blurs)"),
-			ImageRefToLocalPath.Num(), VecCount, RenderFallbackCount, ImageRefToLocalPath.Num() - VecCount - RenderFallbackCount, BlendDerivedCount, LayerBlurDerivedCount);
+		UE_LOG(LogDesign2UMG, Log, TEXT("LocalFigmaImport: %d image mappings (%d vec_*, %d image fills, %d baked blend overlays, %d baked layer blurs)"),
+			ImageRefToLocalPath.Num(), VecCount, ImageRefToLocalPath.Num() - VecCount, BlendDerivedCount, LayerBlurDerivedCount);
 
 		FFigmaParser::ApplyImageUrls(ParsedDocument, ImageRefToLocalPath);
 		if (!FilterDocumentToTargetNode(ParsedDocument, TargetNodeId, OutDocument, OutError))

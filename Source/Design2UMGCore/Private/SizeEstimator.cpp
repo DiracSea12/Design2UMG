@@ -16,35 +16,6 @@ namespace
 		int32 PrecomputeDepth = 0;
 	};
 
-	struct FSizeEstimatorRecursionGuard
-	{
-		explicit FSizeEstimatorRecursionGuard(int32& InDepth, const TCHAR* InName)
-			: Depth(InDepth)
-			, bValid(InDepth < DesignTreeLimits::MaxNodeDepth)
-		{
-			if (bValid)
-			{
-				++Depth;
-			}
-			else
-			{
-				UE_LOG(LogDesign2UMG, Verbose, TEXT("%s: recursion depth exceeded (%d)"), InName, DesignTreeLimits::MaxNodeDepth);
-				UE_LOG(LogDesign2UMG, Error, TEXT("Design node nesting exceeded %d levels; a cyclic reference is likely present."), DesignTreeLimits::MaxNodeDepth);
-			}
-		}
-
-		~FSizeEstimatorRecursionGuard()
-		{
-			if (bValid)
-			{
-				--Depth;
-			}
-		}
-
-		int32& Depth;
-		bool bValid = false;
-	};
-
 	bool ShouldSkipNodeForSizing(const TSharedPtr<FDesignNode>& Node)
 	{
 		return Design2UMGCore::SharedSemantics::ShouldSkipNode(Node);
@@ -80,7 +51,7 @@ namespace
 		FSizeEstimatorState& State,
 		const SizeEstimator::FRefExpansionResolver* RefResolver = nullptr)
 	{
-		FSizeEstimatorRecursionGuard Guard(State.PrecomputeDepth, TEXT("PreComputeFitContentSizes"));
+		FDesignRecursionGuard Guard(State.PrecomputeDepth, TEXT("PreComputeFitContentSizes"));
 		if (!Guard.bValid)
 		{
 			return FVector2D::ZeroVector;
@@ -320,7 +291,7 @@ namespace
 {
 	FVector2D EstimateNodeSizeImpl(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth, FSizeEstimatorState& State)
 	{
-		FSizeEstimatorRecursionGuard Guard(State.EstimateDepth, TEXT("EstimateNodeSize"));
+		FDesignRecursionGuard Guard(State.EstimateDepth, TEXT("EstimateNodeSize"));
 		if (!Guard.bValid)
 		{
 			return FVector2D::ZeroVector;
@@ -370,7 +341,7 @@ namespace
 
 	FVector2D EstimateContentSizeImpl(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth, FSizeEstimatorState& State)
 	{
-		FSizeEstimatorRecursionGuard Guard(State.EstimateDepth, TEXT("EstimateContentSize"));
+		FDesignRecursionGuard Guard(State.EstimateDepth, TEXT("EstimateContentSize"));
 		if (!Guard.bValid)
 		{
 			return FVector2D::ZeroVector;

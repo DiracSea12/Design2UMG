@@ -173,5 +173,15 @@ public:
 
 	/** Resolve the class override for a node name, or return nullptr when no rule matches. */
 	UClass* FindClassOverride(const FString& NodeName) const;
+
+	/**
+	 * Single shared class-override matcher used by settings and the generation settings snapshot.
+	 * The optional cache memoizes node name -> resolved class (nullptr included) for the duration
+	 * of one widget-tree build so rule loading runs once per tree instead of once per node.
+	 */
+	static UClass* ResolveClassOverride(
+		const TArray<FWidgetClassOverride>& Rules,
+		const FString& NodeName,
+		TMap<FString, UClass*>* InOutNodeNameCache = nullptr);
 };
 
