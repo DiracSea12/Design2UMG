@@ -34,6 +34,8 @@ def main() -> None:
         exclude="",
         reference_cache="read-write",
         native_self_check="off",
+        ir_golden="",
+        geometry_golden="",
     )
     case_results = [
         {
@@ -151,9 +153,12 @@ def main() -> None:
                 mcp_server="",
                 pencil_app="",
                 pixel_tolerance=6,
+                no_regression_epsilon=1.25e-4,
                 game_output="",
                 effective_game_output_root=effective_root,
                 native_self_check="off",
+                ir_golden="",
+                geometry_golden="",
             ),
             {"mode": "pen", "source": "design.pen", "name": "pen_sample_card"},
         )
@@ -198,9 +203,12 @@ def main() -> None:
                 mcp_server="",
                 pencil_app="",
                 pixel_tolerance=6,
+                no_regression_epsilon=1.25e-4,
                 game_output=allowed_root,
                 effective_game_output_root=allowed_root,
                 native_self_check="off",
+                ir_golden="",
+                geometry_golden="",
             ),
             {"mode": "figma-source", "source": "design.json", "name": "figma_export_source"},
         )

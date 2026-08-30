@@ -3,6 +3,7 @@
 #include "DesignImportPipeline.h"
 #include "DesignImportDiagnosticReport.h"
 #include "DesignImportPlanning.h"
+#include "Automation/Design2UMGAutomationIrDump.h"
 #include "Design2UMGEditorDesignSourceRegistry.h"
 
 #include "Design2UMGLog.h"
@@ -96,6 +97,7 @@ namespace DesignImportPipeline
 		{
 			FArtifactGenerationResult Result;
 			FDesign2UMGGenerationOutput GenerationOutput;
+			Design2UMGAutomationIrDump::MaybeWriteIrDump(Data);
 			switch (Request.Generation.Mode)
 			{
 			case EDesignBlueprintGenerationMode::BlueprintOnly:

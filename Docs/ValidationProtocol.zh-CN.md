@@ -247,6 +247,22 @@ formal gate 执行纪律：
 
 `--editor-isolation shard` 适合批量执行和产物收集，但多个 shard / 编辑器生命周期可能共享或重置不同的 Slate 字体缓存、临时资产和渲染状态，导致 visual score 出现波动。shard 单次结果只作初筛；任何异常分数先用 `--editor-isolation case` 对受影响 case 独占、串行复跑，复跑结果稳定后再进入回归判断。报告同时记录 shard run 和 case recheck 的路径，shard 单次波动不直接当成视觉回退或改善。
 
+## 分层证据链（IR golden 与像素层）
+
+像素对比是其中一层裁判，不是全部。像素分数衡量的是与 Figma 光栅化参考 PNG 的相似度，渲染器固有差异（抗锯齿、纹理重采样、字体光栅化）永远混在数字里。分层证据链把每层真正能证明的东西分开：
+
+- **IR golden 层**（`Tools/design2umg_ir_golden.py` + 批量工具的 `--ir-golden <golden-root>`）：每个 case dump 转换后的 `FUMGWidgetData` typed 树（浮点 `%.9g` 无损、字节稳定），与冻结 golden 零容差对比。证明"转换行为没变"，任何数值漂移直接寻址到字段（如 `RootWidget...Brush.BrushColor.R: golden=0.108 dump=0.1098`），不需要图像实验。首版 golden（`ir-golden-20260830_01`）由 `ir-golden-bootstrap-full71-20260830_01` 自举，代码状态与基线指针关系见该目录的 `BOOTSTRAP.md`。golden 是 no-regression 口径，不是正确性口径。无 golden 的 case 记 `unavailable` 不算失败。
+- **像素层**：原样保留，端到端相似度，由容差管理。
+- **几何层**（规划中，未实现）：widget 运行时几何对比源稿 bounding box，布局保真，无光栅化噪音。
+
+像素层的评分逻辑统一在 `Tools/design2umg_scoring.py`（唯一归属地，批量工具只调用）。no-regression 容差已参数化：
+
+- `--no-regression-epsilon` 默认 `1.25e-4`，不传参时行为与历史完全一致。
+- 封板口径可显式传 `1e-6` 收紧。两个前置条件：Pencil reference cache 必须冻结（read-only 或核对 sha1，live 重渲染的 reference 漂移在 `1e-4` 量级，会被小容差误报成回退）；shard 模式不得使用收紧容差（shard 状态噪音同样在 `1e-4` 量级，小容差只用于 `--editor-isolation case` 的正式判定）。
+- 已有实证样例：对封板基线 `cmsr-strictfix-full71-20260828_01`，`stringround-colorlock-full71-20260830_01` run 在默认容差下 71/71 通过，在 `1e-6` 下恰好 6 个 case 翻 FAIL（figma-export2 / bubbo-gameplay / team09-start 各 local+source，delta 2.3e-6~7.5e-6——即量化收口漂移，IR 层已逐字段归因）。
+
+IR golden 失败目前报告在 `summary.ir_golden` 与每 case 的 `ir_golden_report.json`，暂不耦合 batch exit code。整 run 零 dump 时 `design2umg_ir_golden.py` 以 exit 2 报配置错误（例如 cvar 未开启），与单 case `unavailable` 区分。
+
 ## HostProject 和 Pencil MCP 边界
 
 HostProject fallback 不属于支持的验证 workflow。自动化脚本不能偷偷创建 runtime project、formal evidence root、HostProject fallback 或维护者本地路径。

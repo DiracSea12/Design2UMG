@@ -12,9 +12,14 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import design2umg_auto_verify as verify
+import design2umg_geometry_compare as geometry_golden
+import design2umg_ir_golden as ir_golden
 import design2umg_rebuild_admissible_best as rebuild_best
-import design2umg_render_rule as render_rule
 import design2umg_validate_run as validate_run_tool
+from design2umg_scoring import NO_REGRESSION_EPSILON
+from design2umg_scoring import STRUCTURE_BASELINE_METRICS
+from design2umg_scoring import assemble_structure_baseline
+from design2umg_scoring import evaluate_no_regression
 from design2umg_verify_lib import batch_discovery
 from design2umg_verify_lib import execution_shards
 from design2umg_verify_lib import reference_cache
@@ -24,20 +29,8 @@ from design2umg_verify_lib.editor_driver_writer import write_editor_driver_scrip
 from design2umg_verify_lib.run_history import write_historical_best_validation
 
 
-NO_REGRESSION_EPSILON = 1.25e-4
-NO_REGRESSION_METRICS = (
-    "stable_changed_ratio",
-    "changed_ratio",
-    "stable_mean_abs_error",
-    "mean_abs_error",
-)
-# Structure metrics compared against a baseline run for horizontal tracking only
-# (baseline average + per-case deviation); never gate pass/fail on them.
-STRUCTURE_BASELINE_METRICS = (
-    "expansion_ratio",
-    "structure_coverage_ratio",
-    "carrier_overhead_ratio",
-)
+# Summarize-only structure tracking constants; compared metric names live in
+# design2umg_scoring.STRUCTURE_BASELINE_METRICS.
 STRUCTURE_BASELINE_DELTA_EPSILON = 1e-4
 STRUCTURE_BASELINE_LOWER_IS_BETTER = {
     "expansion_ratio": True,
@@ -75,7 +68,35 @@ def parse_args():
     parser.add_argument("--include", default="", help="Only run discovered case names matching this regex")
     parser.add_argument("--exclude", default="", help="Skip discovered case names matching this regex")
     parser.add_argument("--log-cmds", default="", help="Optional Unreal -LogCmds payload, for example 'LogDesign2UMG Verbose'")
-    return parser.parse_args()
+    parser.add_argument(
+        "--no-regression-epsilon",
+        type=float,
+        default=NO_REGRESSION_EPSILON,
+        help="Tolerance for no_regression pass/fail. Default 1.25e-4 keeps the historical bar; formal seal runs may pass 1e-6 for a zero-drift bar. Avoid tight epsilons with unfrozen pen reference caches or shard-isolation runs whose font state can drift.",
+    )
+    parser.add_argument("--ir-golden", default="", help="Optional IR golden case root with per-case ir_dump.json. When set, generation specs request ir_dump.json and each case gets an ir_golden_report.json comparison (missing golden = unavailable, not a failure).")
+    parser.add_argument("--geometry-golden", default="", help="Optional geometry golden case root with per-case geometry_dump.json. When set, generation specs request geometry_dump.json plus the IR dump it derives expectations from, and each case gets a geometry_golden_report.json comparison (missing golden = unavailable, not a failure).")
+    args = parser.parse_args()
+    if args.ir_golden:
+        # -LogCmds only reaches log categories in UE, not console variables, so the
+        # IR dump cvar is delivered through the [ConsoleVariables] ini command line
+        # override via the existing editor extra-args hook (covers shard/case/step/retry).
+        extra_args = os.environ.get("DESIGN2UMG_EDITOR_EXTRA_ARGS", "").strip()
+        os.environ["DESIGN2UMG_EDITOR_EXTRA_ARGS"] = (
+            f"{extra_args} -ini:Engine:[ConsoleVariables]:design2umgAutomation.IrDump=1".strip()
+        )
+    if args.geometry_golden:
+        # The geometry layer derives expectations from ir_dump.json, so enabling it
+        # also requests the IR dump; same [ConsoleVariables] delivery mechanism.
+        # Skip the IrDump cvar when the --ir-golden branch already injected it.
+        extra_args = os.environ.get("DESIGN2UMG_EDITOR_EXTRA_ARGS", "").strip()
+        ir_dump_cvar = "-ini:Engine:[ConsoleVariables]:design2umgAutomation.IrDump=1"
+        if ir_dump_cvar not in extra_args:
+            extra_args = f"{extra_args} {ir_dump_cvar}".strip()
+        os.environ["DESIGN2UMG_EDITOR_EXTRA_ARGS"] = (
+            f"{extra_args} -ini:Engine:[ConsoleVariables]:design2umgAutomation.GeometryDump=1".strip()
+        )
+    return args
 
 
 def build_case_args(batch_args, case: dict) -> SimpleNamespace:
@@ -92,8 +113,11 @@ def build_case_args(batch_args, case: dict) -> SimpleNamespace:
         mcp_server=batch_args.mcp_server,
         pencil_app=batch_args.pencil_app,
         pixel_tolerance=batch_args.pixel_tolerance,
+        no_regression_epsilon=batch_args.no_regression_epsilon,
         game_output=build_case_game_output_root(effective_game_output_root, case.get("name", "")),
         native_self_check=batch_args.native_self_check,
+        ir_golden_root=batch_args.ir_golden or "",
+        geometry_golden_root=batch_args.geometry_golden or "",
     )
 
 
@@ -409,18 +433,23 @@ def build_case_specs(state: dict):
     else:
         bootstrap_candidate_path = verify.add_name_suffix(candidate_path, ".bootstrap")
         generate_result_path = output_dir / "ue_generate_result.json"
+        generation_spec = {
+            "mode": mode_map[case_args.mode],
+            "source_path": case_args.source,
+            "node_id": case_args.node,
+            "output_path": primary_game_output,
+            "render_png_path": str(bootstrap_candidate_path),
+            "result_json_path": str(generate_result_path),
+        }
+        if case_args.ir_golden_root or case_args.geometry_golden_root:
+            generation_spec["ir_dump_path"] = str(output_dir / ir_golden.DUMP_NAME)
+        if case_args.geometry_golden_root:
+            generation_spec["geometry_dump_path"] = str(output_dir / geometry_golden.DUMP_NAME)
         append_spec(
             state,
             "generation",
             "automation_generate_spec.json",
-            {
-                "mode": mode_map[case_args.mode],
-                "source_path": case_args.source,
-                "node_id": case_args.node,
-                "output_path": primary_game_output,
-                "render_png_path": str(bootstrap_candidate_path),
-                "result_json_path": str(generate_result_path),
-            },
+            generation_spec,
         )
         append_spec(
             state,
@@ -1068,161 +1097,6 @@ def write_render_failure_report(state: dict, ue_result: dict | None, render_chai
     return report_path
 
 
-def load_baseline_case_metrics(case_dir: Path | None, pixel_tolerance: int) -> dict:
-    if not case_dir or not case_dir.is_dir():
-        return {
-            "available": False,
-            "reason": "baseline_case_dir_missing",
-        }
-
-    report_path = case_dir / "compare_report.json"
-    report = verify.load_json_document(report_path) if report_path.is_file() else {}
-    baseline_rule = render_rule.evaluate_report_render_size_rule(report_path)
-    if not baseline_rule.get("compatible"):
-        return {
-            "available": False,
-            "reason": "baseline_render_size_rule_incompatible",
-            "render_size_rule": baseline_rule,
-            "case_dir": str(case_dir),
-            "report_path": str(report_path) if report_path.is_file() else "",
-        }
-
-    reference_png_path = Path(report.get("reference_png_path") or (case_dir / "reference.png"))
-    candidate_png_path = Path(report.get("candidate_png_path") or (case_dir / "candidate.png"))
-    report_metrics = verify.extract_compare_metrics(report)
-    if report_metrics:
-        changed_ratio = report_metrics.get("changed_ratio")
-        stable_changed_ratio = report_metrics.get("stable_changed_ratio")
-        mean_abs_error = report_metrics.get("mean_abs_error")
-        stable_mean_abs_error = report_metrics.get("stable_mean_abs_error")
-    else:
-        image_metrics = verify.compare_image_paths(reference_png_path, candidate_png_path, pixel_tolerance)
-        if image_metrics:
-            changed_ratio = image_metrics.get("changed_ratio")
-            stable_changed_ratio = image_metrics.get("stable_changed_ratio")
-            mean_abs_error = image_metrics.get("mean_abs_error")
-            stable_mean_abs_error = image_metrics.get("stable_mean_abs_error")
-        else:
-            changed_ratio = report.get("changed_ratio")
-            stable_changed_ratio = report.get("stable_changed_ratio")
-            mean_abs_error = report.get("mean_abs_error")
-            stable_mean_abs_error = report.get("stable_mean_abs_error")
-
-    metric_values = {
-        "changed_ratio": changed_ratio,
-        "stable_changed_ratio": stable_changed_ratio,
-        "mean_abs_error": mean_abs_error,
-        "stable_mean_abs_error": stable_mean_abs_error,
-    }
-    missing_metrics = [metric_name for metric_name in NO_REGRESSION_METRICS if metric_values[metric_name] is None]
-    available = not missing_metrics
-    if available:
-        reason = ""
-    elif len(missing_metrics) == len(NO_REGRESSION_METRICS):
-        reason = "baseline_metrics_unavailable"
-    else:
-        reason = "baseline_metrics_incomplete"
-    return {
-        "available": available,
-        "reason": reason,
-        "case_dir": str(case_dir),
-        "report_path": str(report_path) if report_path.is_file() else "",
-        "reference_png_path": str(reference_png_path) if reference_png_path.is_file() else "",
-        "candidate_png_path": str(candidate_png_path) if candidate_png_path.is_file() else "",
-        "changed_ratio": changed_ratio,
-        "stable_changed_ratio": stable_changed_ratio,
-        "mean_abs_error": mean_abs_error,
-        "stable_mean_abs_error": stable_mean_abs_error,
-    }
-
-
-def load_baseline_structure_metrics(case_dir: Path | None) -> dict:
-    if not case_dir or not case_dir.is_dir():
-        return {"available": False, "reason": "baseline_case_dir_missing"}
-
-    report_path = case_dir / "compare_report.json"
-    report = verify.load_json_document(report_path) if report_path.is_file() else {}
-    metrics = ((report.get("structure_validation") or {}).get("metrics")) or {}
-    values = {metric_name: metrics.get(metric_name) for metric_name in STRUCTURE_BASELINE_METRICS}
-    missing = [metric_name for metric_name, value in values.items() if value is None]
-    result = {"available": not missing, **values}
-    result["reason"] = "" if not missing else "baseline_structure_metrics_unavailable"
-    return result
-
-
-def evaluate_no_regression(report: dict, case_dir: Path | None, pixel_tolerance: int) -> dict:
-    baseline = load_baseline_case_metrics(case_dir, pixel_tolerance)
-    baseline_missing_metrics = [metric_name for metric_name in NO_REGRESSION_METRICS if baseline.get(metric_name) is None]
-    baseline_available = bool(baseline.get("available")) and not baseline_missing_metrics
-    result = {
-        "available": baseline_available,
-        "passed": False,
-        "baseline": baseline,
-        "current": {
-            "changed_ratio": report.get("changed_ratio"),
-            "stable_changed_ratio": report.get("stable_changed_ratio"),
-            "mean_abs_error": report.get("mean_abs_error"),
-            "stable_mean_abs_error": report.get("stable_mean_abs_error"),
-        },
-        "decisive_metric": "",
-        "decisive_delta": None,
-        "visual_regressed": False,
-        "structure_guard_passed": True,
-        "reasons": [],
-    }
-    if not baseline_available:
-        if baseline.get("available"):
-            reason = "baseline_metrics_unavailable" if len(baseline_missing_metrics) == len(NO_REGRESSION_METRICS) else "baseline_metrics_incomplete"
-        else:
-            reason = baseline.get("reason", "baseline_unavailable")
-        result["reasons"].append(reason)
-        return result
-
-    current_missing_metrics = [metric_name for metric_name in NO_REGRESSION_METRICS if result["current"].get(metric_name) is None]
-    if current_missing_metrics:
-        result["available"] = False
-        reason = "current_metrics_unavailable" if len(current_missing_metrics) == len(NO_REGRESSION_METRICS) else "current_metrics_incomplete"
-        result["reasons"].append(reason)
-        return result
-
-    first_metric = ""
-    first_delta = None
-    regressed_metric = ""
-    regressed_delta = None
-    for metric_name in NO_REGRESSION_METRICS:
-        current_value = result["current"].get(metric_name)
-        baseline_value = baseline.get(metric_name)
-        if current_value is None or baseline_value is None:
-            continue
-        delta = current_value - baseline_value
-        if not first_metric:
-            first_metric = metric_name
-            first_delta = delta
-        if delta > NO_REGRESSION_EPSILON and not regressed_metric:
-            regressed_metric = metric_name
-            regressed_delta = delta
-    if not first_metric:
-        result["reasons"].append("comparison_metric_unavailable")
-        return result
-
-    no_regression_metric_passed = not regressed_metric
-    decisive_metric = regressed_metric or first_metric
-    decisive_delta = regressed_delta if regressed_metric else first_delta
-
-    structure_validation = report.get("structure_validation") or {}
-    structure_guard_passed = structure_validation.get("passed") if structure_validation.get("required") else True
-    result["passed"] = no_regression_metric_passed and structure_guard_passed
-    result["decisive_metric"] = decisive_metric
-    result["decisive_delta"] = decisive_delta
-    result["visual_regressed"] = not no_regression_metric_passed
-    result["structure_guard_passed"] = structure_guard_passed
-    if not no_regression_metric_passed:
-        result["reasons"].append(f"visual_regressed:{decisive_metric}")
-    if not structure_guard_passed:
-        result["reasons"].append("structure_guard_failed")
-    return result
-
-
 def finalize_native_plan(state: dict, batch_exit_code: int, batch_log_path: Path):
     native_plan = dict(state["native_plan"])
     if not native_plan.get("available"):
@@ -1371,28 +1245,10 @@ def process_case_result(state: dict, batch_exit_code: int, batch_log_path: Path)
         render_chain,
     )
     report = verify.load_json_document(report_path)
-    no_regression = evaluate_no_regression(report, state.get("baseline_case_dir"), args.pixel_tolerance)
+    no_regression = evaluate_no_regression(report, state.get("baseline_case_dir"), args.pixel_tolerance, args.no_regression_epsilon)
     report["no_regression"] = no_regression
-    structure_current = dict.fromkeys(STRUCTURE_BASELINE_METRICS)
-    structure_metrics = ((report.get("structure_validation") or {}).get("metrics")) or {}
-    for metric_name in STRUCTURE_BASELINE_METRICS:
-        structure_current[metric_name] = structure_metrics.get(metric_name)
-    structure_baseline = load_baseline_structure_metrics(state.get("baseline_case_dir"))
-    structure_delta = {
-        metric_name: (
-            None
-            if structure_current[metric_name] is None or structure_baseline.get(metric_name) is None
-            else round(structure_current[metric_name] - structure_baseline[metric_name], 6)
-        )
-        for metric_name in STRUCTURE_BASELINE_METRICS
-    }
-    report["structure_baseline"] = {
-        "available": structure_baseline.get("available"),
-        "reason": structure_baseline.get("reason"),
-        "current": structure_current,
-        "baseline": {metric_name: structure_baseline.get(metric_name) for metric_name in STRUCTURE_BASELINE_METRICS},
-        "delta": structure_delta,
-    }
+    structure_report_block, structure_result_fields = assemble_structure_baseline(state.get("baseline_case_dir"), report)
+    report["structure_baseline"] = structure_report_block
     verify.write_json(Path(report_path), report)
     return {
         "name": state["case"]["name"],
@@ -1439,20 +1295,7 @@ def process_case_result(state: dict, batch_exit_code: int, batch_log_path: Path)
         ),
         "no_regression_decisive_metric": no_regression.get("decisive_metric"),
         "no_regression_decisive_delta": no_regression.get("decisive_delta"),
-        "structure_baseline": {
-            "available": structure_baseline.get("available"),
-            "current": structure_current,
-            "baseline": {metric_name: structure_baseline.get(metric_name) for metric_name in STRUCTURE_BASELINE_METRICS},
-            "delta": structure_delta,
-        },
-        "structure_baseline_available": structure_baseline.get("available"),
-        "structure_baseline_reason": structure_baseline.get("reason"),
-        "structure_expansion_ratio": structure_current["expansion_ratio"],
-        "structure_coverage_ratio": structure_current["structure_coverage_ratio"],
-        "structure_carrier_overhead_ratio": structure_current["carrier_overhead_ratio"],
-        "structure_expansion_ratio_delta": structure_delta["expansion_ratio"],
-        "structure_coverage_ratio_delta": structure_delta["structure_coverage_ratio"],
-        "structure_carrier_overhead_ratio_delta": structure_delta["carrier_overhead_ratio"],
+        **structure_result_fields,
         "source_signature": report.get("source_signature"),
         "provided_reference_signature": report.get("provided_reference_signature"),
         "effective_reference_signature": report.get("effective_reference_signature"),
@@ -1468,19 +1311,25 @@ def process_case_results(
     if not states:
         return []
     if worker_count <= 1:
-        return [process_case_result(state, batch_exit_code, batch_log_path) for state in states]
+        results = [process_case_result(state, batch_exit_code, batch_log_path) for state in states]
+    else:
+        ordered_results = [None] * len(states)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
+            future_to_index = {
+                executor.submit(process_case_result, state, batch_exit_code, batch_log_path): index
+                for index, state in enumerate(states)
+            }
+            for future in concurrent.futures.as_completed(future_to_index):
+                index = future_to_index[future]
+                ordered_results[index] = future.result()
+        results = [item for item in ordered_results if item is not None]
 
-    ordered_results = [None] * len(states)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
-        future_to_index = {
-            executor.submit(process_case_result, state, batch_exit_code, batch_log_path): index
-            for index, state in enumerate(states)
-        }
-        for future in concurrent.futures.as_completed(future_to_index):
-            index = future_to_index[future]
-            ordered_results[index] = future.result()
-
-    return [item for item in ordered_results if item is not None]
+    for state, result in zip(states, results):
+        if state["args"].ir_golden_root:
+            ir_golden.annotate_batch_case_result(result, state["args"].ir_golden_root, state["case"]["name"], state["output_dir"])
+        if state["args"].geometry_golden_root:
+            geometry_golden.annotate_batch_case_result(result, state["args"].geometry_golden_root, state["case"]["name"], state["output_dir"])
+    return results
 
 
 def summarize_structure_baseline(case_results: list[dict]) -> dict:
@@ -1596,6 +1445,15 @@ def build_batch_summary(
         if item.get("no_regression_required") and not item.get("no_regression_available")
     )
     blocked_cases = [item for item in case_results if item.get("blocked")]
+    ir_golden_cases = [item for item in case_results if item.get("ir_golden_available")]
+    ir_golden_passed = sum(1 for item in ir_golden_cases if item.get("ir_golden_passed"))
+    geometry_golden_cases = [item for item in case_results if item.get("geometry_golden_available")]
+    geometry_golden_passed = sum(1 for item in geometry_golden_cases if item.get("geometry_golden_passed"))
+    geometry_golden_coverage = [
+        item.get("geometry_golden_comparable_ratio")
+        for item in case_results
+        if isinstance(item.get("geometry_golden_comparable_ratio"), (int, float))
+    ]
     return {
         "total": len(case_results),
         "editor_exit_code": editor_exit_code,
@@ -1633,6 +1491,20 @@ def build_batch_summary(
             "available": len(no_regression_cases),
             "passed": no_regression_passed,
             "failed": len(no_regression_cases) - no_regression_passed + no_regression_required_unavailable,
+        },
+        "ir_golden": {
+            "enabled": bool(args.ir_golden),
+            "available": len(ir_golden_cases),
+            "passed": ir_golden_passed,
+            "failed": len(ir_golden_cases) - ir_golden_passed,
+        },
+        "geometry_golden": {
+            "enabled": bool(args.geometry_golden),
+            "available": len(geometry_golden_cases),
+            "passed": geometry_golden_passed,
+            "failed": len(geometry_golden_cases) - geometry_golden_passed,
+            "low_coverage_cases": sum(1 for item in case_results if item.get("geometry_golden_low_coverage")),
+            "avg_comparable_ratio": round(sum(geometry_golden_coverage) / len(geometry_golden_coverage), 4) if geometry_golden_coverage else 0.0,
         },
         "structure_metrics": summarize_structure_baseline(case_results),
         "tree_correspondence": summarize_tree_correspondence(case_results),

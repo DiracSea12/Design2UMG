@@ -2,6 +2,8 @@
 
 #include "Automation/Design2UMGAutomationRender.h"
 
+#include "Automation/Design2UMGAutomationGeometryDump.h"
+#include "Automation/Design2UMGAutomationIrDump.h"
 #include "Automation/Design2UMGAutomationStructureSnapshot.h"
 #include "Design2UMGLocalFigmaImport.h"
 #include "Design2UMGLog.h"
@@ -59,6 +61,8 @@ namespace
 		FString OutputPath;
 		FString RenderPngPath;
 		FString ResultJsonPath;
+		FString IrDumpPath;
+		FString GeometryDumpPath;
 		bool bForceReloadPackage = false;
 	};
 
@@ -120,6 +124,8 @@ namespace
 		Root->TryGetStringField(TEXT("output_path"), OutSpec.OutputPath);
 		Root->TryGetStringField(TEXT("render_png_path"), OutSpec.RenderPngPath);
 		Root->TryGetStringField(TEXT("result_json_path"), OutSpec.ResultJsonPath);
+		Root->TryGetStringField(TEXT("ir_dump_path"), OutSpec.IrDumpPath);
+		Root->TryGetStringField(TEXT("geometry_dump_path"), OutSpec.GeometryDumpPath);
 		Root->TryGetBoolField(TEXT("force_reload_package"), OutSpec.bForceReloadPackage);
 
 		if (OutSpec.Mode.IsEmpty())
@@ -660,6 +666,12 @@ namespace
 		const TGuardValue<FString> FontImportPathGuard(
 			GDesign2UMGAutomationFontImportPath,
 			ResolveAutomationFontImportPath(Spec.OutputPath));
+		const TGuardValue<FString> IrDumpPathGuard(
+			Design2UMGAutomationIrDump::GDesign2UMGAutomationIrDumpPath,
+			Spec.IrDumpPath);
+		const TGuardValue<FString> GeometryDumpPathGuard(
+			Design2UMGAutomationGeometryDump::GDesign2UMGAutomationGeometryDumpPath,
+			Spec.GeometryDumpPath);
 #endif
 		FDesign2UMGImportSettingsSnapshot AutomationSettingsSnapshot =
 			FDesign2UMGImportSettingsSnapshot::FromSettings(UDesign2UMGSettings::Get());

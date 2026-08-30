@@ -333,6 +333,22 @@ Formal gate execution discipline:
 
 `--editor-isolation shard` is suitable for batch execution and artifact collection, but multiple shard/editor lifecycles can share or reset Slate font caches, transient assets, and render state differently, which can make visual scores fluctuate. Treat a single shard result as screening evidence only; rerun every anomalous case exclusively and serially with `--editor-isolation case` before making a regression judgment. Record both the shard run and case-recheck paths in the report. A one-off shard fluctuation does not itself establish visual regression or improvement.
 
+## Layered Evidence Chain (IR golden and pixel layers)
+
+Pixel comparison is one layer, not the whole referee. The pixel score measures similarity against the Figma-rasterized reference PNG, so renderer-specific differences (antialiasing, texture resampling, font rasterization) are always mixed into the number. The layered chain separates what each layer can actually prove:
+
+- **IR golden layer** (`Tools/design2umg_ir_golden.py` + `--ir-golden <golden-root>` on the batch verifier): dumps the converted `FUMGWidgetData` typed tree per case with lossless `%.9g` floats and compares it against a frozen golden, byte-stable and zero-tolerance. It proves "conversion behavior did not change" and attributes any numeric drift directly to a field (`RootWidget...Brush.BrushColor.R: golden=0.108 dump=0.1098`), with no image experiment required. Its first golden (`ir-golden-20260830_01`) is bootstrapped from `ir-golden-bootstrap-full71-20260830_01`; see that directory's `BOOTSTRAP.md` for the code-state and baseline-pointer relationship. Golden is a no-regression oracle, not a correctness oracle. A case with no golden records `unavailable` and does not fail.
+- **Pixel layer**: unchanged, end-to-end similarity, managed by tolerance.
+- **Geometry layer** (planned, not yet implemented): runtime widget geometry versus source bounding boxes, layout fidelity without rasterization noise.
+
+Scoring for the pixel layer lives in `Tools/design2umg_scoring.py` (single home; the batch verifier only calls it). The no-regression tolerance is now a parameter:
+
+- `--no-regression-epsilon` defaults to `1.25e-4` and leaving it unset reproduces historical behavior exactly.
+- For a stricter seal-basis pass, pass `1e-6` explicitly. Two preconditions apply: the Pencil reference cache must be frozen (read-only or sha1-checked, because live re-rendered references drift at the `1e-4` scale and would be misreported as regression), and shard-mode runs must not use the tightened tolerance (shard state noise also lives at `1e-4`; small tolerances are for `--editor-isolation case` formal verdicts only).
+- Worked example already in evidence: against the sealed `cmsr-strictfix-full71-20260828_01` baseline, the `stringround-colorlock-full71-20260830_01` run passes 71/71 at the default tolerance, and at `1e-6` exactly six cases flip to FAIL (figma-export2 / bubbo-gameplay / team09-start, `local`+`source` each, deltas 2.3e-6~7.5e-6 — the quantization-removal drift, attributed field-by-field by the IR layer).
+
+IR-golden failures currently report in `summary.ir_golden` and per-case `ir_golden_report.json`; they do not gate the batch exit code yet. When a full run produces zero dumps, `design2umg_ir_golden.py` exits 2 as a configuration error (for example the console variable was not enabled), distinct from per-case `unavailable`.
+
 ## Pencil MCP App Alias Compatibility
 
 The old Pencil `visual_studio_code` / `vscode` app alias compatibility has been removed. If Pencil cannot connect because the editor app id is not registered as expected, record the real blocker in the validation evidence and stop; do not reintroduce alias-file repair, HostProject fallback, or any other compatibility patch to keep the run going.

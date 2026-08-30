@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGWidgetUtils.h"
+#include "Automation/Design2UMGAutomationGeometryDump.h"
 #include "Design2UMGLog.h"
 #include "DesignPathRasterizer.h"
 #include "ProceduralShapeGenerator.h"
@@ -447,6 +448,7 @@ bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8
 	if (!GUsingNullRHI) { FlushRenderingCommands(); }
 	Widget->ForceLayoutPrepass();
 	DumpWidgetVisualState(TEXT("compiled-after-draw"), Widget->WidgetTree, WidgetBP->GetPathName());
+	Design2UMGAutomationGeometryDump::MaybeWriteGeometryDump(Widget->WidgetTree);
 
 	FTextureRenderTargetResource* Resource = RT->GameThread_GetRenderTargetResource();
 	if (!Resource)

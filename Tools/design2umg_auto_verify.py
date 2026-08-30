@@ -3261,6 +3261,12 @@ def main():
             "output_path": primary_game_output,
             "render_png_path": str(bootstrap_candidate_path),
             "result_json_path": str(output_dir / "ue_generate_result.json"),
+            # IR golden layer: the dump is only written when the editor-side
+            # design2umgAutomation.IrDump cvar is also enabled at launch.
+            "ir_dump_path": str(output_dir / "ir_dump.json"),
+            # Geometry golden layer: written at the compiled-after-draw site when
+            # the design2umgAutomation.GeometryDump cvar is enabled at launch.
+            "geometry_dump_path": str(output_dir / "geometry_dump.json"),
         }
         generate_result = execute_automation_render(
             args,

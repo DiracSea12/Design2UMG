@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import design2umg_auto_verify as verify
 import design2umg_auto_verify_batch as batch_verify
 import design2umg_rebuild_admissible_best as rebuild_best
+import design2umg_scoring as scoring
 import design2umg_validate_run as validate_run
 from design2umg_verify_lib import batch_discovery
 from design2umg_verify_lib import evidence_contract
@@ -209,11 +210,11 @@ def test_semi_transparent_difference_still_counts() -> None:
 
 
 def test_evaluate_no_regression_checks_every_available_metric() -> None:
-    original_loader = batch_verify.load_baseline_case_metrics
+    original_loader = scoring.load_baseline_case_metrics
 
     def evaluate(baseline: dict, report: dict) -> dict:
-        batch_verify.load_baseline_case_metrics = lambda _case_dir, _pixel_tolerance: baseline
-        return batch_verify.evaluate_no_regression(report, None, 6)
+        scoring.load_baseline_case_metrics = lambda _case_dir, _pixel_tolerance: baseline
+        return scoring.evaluate_no_regression(report, None, 6)
 
     complete_baseline = {
         "available": True,
@@ -254,7 +255,7 @@ def test_evaluate_no_regression_checks_every_available_metric() -> None:
         within_tolerance = evaluate(
             complete_baseline,
             {
-                "stable_changed_ratio": 0.4 + batch_verify.NO_REGRESSION_EPSILON,
+                "stable_changed_ratio": 0.4 + scoring.NO_REGRESSION_EPSILON,
                 "changed_ratio": 0.3,
                 "stable_mean_abs_error": 4.0,
                 "mean_abs_error": 3.0,
@@ -264,7 +265,7 @@ def test_evaluate_no_regression_checks_every_available_metric() -> None:
         assert within_tolerance["passed"]
         assert not within_tolerance["visual_regressed"]
         assert_equal(within_tolerance["decisive_metric"], "stable_changed_ratio")
-        assert abs(within_tolerance["decisive_delta"] - batch_verify.NO_REGRESSION_EPSILON) < 1e-12
+        assert abs(within_tolerance["decisive_delta"] - scoring.NO_REGRESSION_EPSILON) < 1e-12
 
         incomplete_baseline = evaluate(
             {
@@ -311,13 +312,13 @@ def test_evaluate_no_regression_checks_every_available_metric() -> None:
         assert_equal(structure_regression["reasons"], ["structure_guard_failed"])
 
     finally:
-        batch_verify.load_baseline_case_metrics = original_loader
+        scoring.load_baseline_case_metrics = original_loader
 
 
 def test_load_baseline_case_metrics_rejects_incomplete_metrics() -> None:
-    original_render_rule = batch_verify.render_rule.evaluate_report_render_size_rule
+    original_render_rule = scoring.render_rule.evaluate_report_render_size_rule
     try:
-        batch_verify.render_rule.evaluate_report_render_size_rule = lambda _report_path: {"compatible": True}
+        scoring.render_rule.evaluate_report_render_size_rule = lambda _report_path: {"compatible": True}
         with tempfile.TemporaryDirectory() as temp_dir:
             case_dir = Path(temp_dir)
             verify.write_json(
@@ -330,12 +331,12 @@ def test_load_baseline_case_metrics_rejects_incomplete_metrics() -> None:
                 },
             )
 
-            baseline = batch_verify.load_baseline_case_metrics(case_dir, 6)
+            baseline = scoring.load_baseline_case_metrics(case_dir, 6)
 
         assert not baseline["available"]
         assert_equal(baseline["reason"], "baseline_metrics_incomplete")
     finally:
-        batch_verify.render_rule.evaluate_report_render_size_rule = original_render_rule
+        scoring.render_rule.evaluate_report_render_size_rule = original_render_rule
 
 
 def test_batch_summary_fails_required_unavailable_no_regression() -> None:
@@ -349,6 +350,8 @@ def test_batch_summary_fails_required_unavailable_no_regression() -> None:
         exclude="",
         reference_cache="read-write",
         native_self_check="off",
+        ir_golden="",
+        geometry_golden="",
     )
     case_results = [
         {
