@@ -31,7 +31,7 @@ Run automation tests:
 
 Use a real UE project you control. HostProject fallback is not a supported contributor or maintainer validation path.
 
-For pipeline extension points and verification expectations, see [Docs/Architecture.md](Docs/Architecture.md) and [Docs/CONTRIBUTING_INTERNALS.md](Docs/CONTRIBUTING_INTERNALS.md).
+For pipeline extension points and verification expectations, see [Docs/Architecture.md](Docs/Architecture.md).
 
 ## Validation Levels
 
