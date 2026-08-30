@@ -128,11 +128,13 @@ void FMCPHttpClient::Disconnect()
 	CancelRequests();
 	SessionId.Empty();
 	ServerEndpoint.Empty();
-	// JSON-RPC ids are per-session protocol state and restart cleanly.
-	// Tracking ids intentionally stay MONOTONIC across sessions: a late-arriving
-	// callback from an old session can then never collide with a new session's
-	// request id, and the slot's cancellation watermark keeps recognizing it as
-	// cancelled, so stale responses are never applied to the new session.
+	// JSON-RPC ids only need to be unique within one connection, so each
+	// connection gets its own id space and this counter restarts from 1 here.
+	// This is separate from the slot's tracking ids (FDesignHttpClientSlot),
+	// which do stay monotonic across sessions: a late-arriving callback from an
+	// old session can then never collide with a new session's tracking id, and
+	// the slot's cancellation watermark keeps recognizing it as cancelled, so
+	// stale responses are never applied to the new session.
 	NextRpcRequestId = 1;
 }
 

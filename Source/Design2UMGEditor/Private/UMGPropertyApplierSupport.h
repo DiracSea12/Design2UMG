@@ -36,23 +36,6 @@ namespace UMGPropertyApplierSupport
 			BackgroundColor.A);
 	}
 
-	inline bool TryParseVector4(const FString& Value, FVector4& OutVector)
-	{
-		TArray<FString> Parts;
-		Value.ParseIntoArray(Parts, TEXT(","));
-		if (Parts.Num() != 4)
-		{
-			return false;
-		}
-
-		OutVector = FVector4(
-			FCString::Atof(*Parts[0].TrimStartAndEnd()),
-			FCString::Atof(*Parts[1].TrimStartAndEnd()),
-			FCString::Atof(*Parts[2].TrimStartAndEnd()),
-			FCString::Atof(*Parts[3].TrimStartAndEnd()));
-		return true;
-	}
-
 	inline bool TryParseDrawAs(const FString& Value, ESlateBrushDrawType::Type& OutDrawAs)
 	{
 		return Design2UMGWidgetNodeAccess::TryParseDrawAs(Value, OutDrawAs);

@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "PenParserNodeExtensions.h"
+#include "DesignColorUtils.h"
 #include "DesignJsonUtils.h"
 #include "PenParserInternal.h"
 
@@ -471,7 +472,7 @@ void PenParserNodeExtensions::ParseNodeExtended(
 				TryGetResolvedNumberField(EffectObj, TEXT("blur"), Resolver, Effect.Shadow.Blur);
 				TryGetResolvedNumberField(EffectObj, TEXT("spread"), Resolver, Effect.Shadow.Spread);
 
-				FString ShadowColorStr = TEXT("#00000040");
+				FString ShadowColorStr = DesignColorUtils::DefaultShadowColorHex;
 				EffectObj->TryGetStringField(TEXT("color"), ShadowColorStr);
 				if (FDesignVariableResolver::IsVariableRef(ShadowColorStr))
 				{

@@ -15,19 +15,6 @@ namespace
 	{
 		return Mode.Equals(TEXT("Crop"), ESearchCase::CaseSensitive);
 	}
-
-	FUMGVisualBrushData::FImageTransformData NormalizeTypedImageTransform(
-		const FUMGVisualBrushData::FImageTransformData& Transform)
-	{
-		FUMGVisualBrushData::FImageTransformData NormalizedTransform;
-		if (Design2UMGWidgetNodeAccess::TryParseImageTransform(
-			Design2UMGWidgetNodeAccess::SerializeImageTransform(Transform),
-			NormalizedTransform))
-		{
-			return NormalizedTransform;
-		}
-		return Transform;
-	}
 }
 
 bool UMGImageCropUtils::TryBuildCropRequest(const FUMGWidgetNode& Node, FImageCropRequest& OutRequest)
@@ -40,7 +27,7 @@ bool UMGImageCropUtils::TryBuildCropRequest(const FUMGWidgetNode& Node, FImageCr
 
 	if (Node.Brush.Image.Transform.IsSet())
 	{
-		OutRequest.Transform = NormalizeTypedImageTransform(Node.Brush.Image.Transform.GetValue());
+		OutRequest.Transform = Node.Brush.Image.Transform.GetValue();
 	}
 	else if (Node.WidgetStyle.ImageTransform.IsSet()
 		&& Design2UMGWidgetNodeAccess::TryParseImageTransform(Node.WidgetStyle.ImageTransform.GetValue(), OutRequest.Transform))

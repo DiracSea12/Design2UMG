@@ -23,6 +23,5 @@ namespace FUMGValueParser
 	DESIGN2UMGCORE_API bool IsFillSizeRule(EUMGSlotSizeRule Value);
 	DESIGN2UMGCORE_API ESlateVisibility ParseVisibility(const FString& Str);
 	DESIGN2UMGCORE_API FVector2D ParseVector2D(const FString& Str, FVector2D Default = FVector2D::ZeroVector);
-	DESIGN2UMGCORE_API FMargin ParseMargin(const FString& Str);
 	DESIGN2UMGCORE_API bool IsNearlyEqualMargin(const FMargin& A, const FMargin& B);
 }

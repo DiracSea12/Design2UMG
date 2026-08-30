@@ -416,11 +416,13 @@ namespace DesignRemoteImageImporterInternal
 		}
 
 		FHttpManager& HttpManager = FHttpModule::Get().GetHttpManager();
+		// Both flags are read under the entry Mutex (bTimedOut is Mutex-guarded).
 		const auto CountPending = [&Pending]()
 		{
 			int32 StillPending = 0;
 			for (const FPendingRequest& Entry : Pending)
 			{
+				FScopeLock Lock(&Entry.State->Mutex);
 				if (!Entry.State->bDone && !Entry.State->bTimedOut)
 				{
 					++StillPending;
@@ -485,14 +487,24 @@ namespace DesignRemoteImageImporterInternal
 					bUserCancelled = true;
 					for (FPendingRequest& Entry : Pending)
 					{
-						if (Entry.State->bDone)
+						// Check bDone under the lock: a download completing in this
+						// window must keep its result instead of being overwritten
+						// with the cancel marker.
+						bool bNeedsCancel = false;
 						{
-							continue;
+							FScopeLock Lock(&Entry.State->Mutex);
+							if (Entry.State->bDone)
+							{
+								continue;
+							}
+							Entry.State->bCancelledByUser = true;
+							Entry.State->ErrorString = TEXT("cancelled by user");
+							bNeedsCancel = true;
 						}
-						FScopeLock Lock(&Entry.State->Mutex);
-						Entry.State->bCancelledByUser = true;
-						Entry.State->ErrorString = TEXT("cancelled by user");
-						Entry.Request->CancelRequest();
+						if (bNeedsCancel)
+						{
+							Entry.Request->CancelRequest();
+						}
 					}
 					break;
 				}

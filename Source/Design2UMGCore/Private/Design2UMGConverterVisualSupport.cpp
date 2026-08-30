@@ -3,10 +3,32 @@
 #include "Design2UMGConverterVisualSupport.h"
 
 #include "Design2UMGLog.h"
+#include "DesignColorUtils.h"
 #include "LayoutMapper.h"
 
 namespace
 {
+	// Placeholder surface tint tuning values. No derivation on record for any of
+	// these; each was fixed when the placeholder tint path was introduced and is
+	// kept to preserve the historical behavior.
+	// Neutral-color gate: alpha at or below the threshold, or an RGB channel
+	// spread (max - min) at or below the tolerance, reads as "neutral".
+	constexpr uint8 NeutralPlaceholderAlphaThreshold = 0x20;
+	constexpr uint8 NeutralPlaceholderChannelTolerance = 0x10;
+	// Semantic placeholder surfaces are tinted only from this size upwards.
+	constexpr float PlaceholderSurfaceMinWidth = 24.0f;
+	constexpr float PlaceholderSurfaceMinHeight = 12.0f;
+	// Fill alpha used when the placeholder falls back to its outline color.
+	constexpr uint8 PlaceholderFallbackFillAlpha = 0x33;
+	// Placeholder inset: min(upper bound, width * fraction, height * fraction),
+	// clamped to [min, upper bound].
+	constexpr int32 PlaceholderInsetMaxPx = 10;
+	constexpr int32 PlaceholderInsetMinPx = 1;
+	constexpr float PlaceholderInsetSizeFraction = 0.25f;
+
+	// Accept rule is unchanged from before the hex-literal consolidation: this
+	// call site checks only the '#' prefix plus the '#RGB'/'#RRGGBB'/'#RRGGBBAA'
+	// length whitelist, and deliberately skips hex-digit validation.
 	bool IsHexColorLiteral(const FString& ColorValue)
 	{
 		if (!ColorValue.StartsWith(TEXT("#")))
@@ -25,7 +47,7 @@ namespace
 			return FString();
 		}
 
-		FColor Parsed = FColor::FromHex(ColorValue);
+		FColor Parsed = DesignColorUtils::ParseHexColor(ColorValue);
 		Parsed.A = Alpha;
 		return FString::Printf(TEXT("#%02X%02X%02X%02X"), Parsed.R, Parsed.G, Parsed.B, Parsed.A);
 	}
@@ -37,10 +59,11 @@ namespace
 			return true;
 		}
 
-		const FColor Parsed = FColor::FromHex(ColorValue);
+		const FColor Parsed = DesignColorUtils::ParseHexColor(ColorValue);
 		const uint8 MaxChannel = FMath::Max3(Parsed.R, Parsed.G, Parsed.B);
 		const uint8 MinChannel = FMath::Min3(Parsed.R, Parsed.G, Parsed.B);
-		return (Parsed.A <= 0x20) || ((MaxChannel - MinChannel) <= 0x10);
+		return (Parsed.A <= NeutralPlaceholderAlphaThreshold)
+			|| ((MaxChannel - MinChannel) <= NeutralPlaceholderChannelTolerance);
 	}
 
 }
@@ -138,8 +161,8 @@ namespace Design2UMGConverterVisualSupport
 		// Tint only semantic empty surfaces; authored non-placeholder art should stay on the normal visual path.
 		const bool bUseSlotPlaceholderTint =
 			bIsLeafContainer
-			&& Node->Transform.Width.Value >= 24.0f
-			&& Node->Transform.Height.Value >= 12.0f
+			&& Node->Transform.Width.Value >= PlaceholderSurfaceMinWidth
+			&& Node->Transform.Height.Value >= PlaceholderSurfaceMinHeight
 			&& Node->LayoutData.bSemanticPlaceholderSurface;
 		if (!bUseSlotPlaceholderTint)
 		{
@@ -157,7 +180,7 @@ namespace Design2UMGConverterVisualSupport
 			(!FillColor.IsEmpty() && !IsNeutralPlaceholderColor(FillColor)) ? FillColor : DefaultPlaceholderFillColor;
 		if (PlaceholderFillColor.IsEmpty() && !PlaceholderOutlineColor.IsEmpty())
 		{
-			PlaceholderFillColor = BuildHexColorWithAlpha(PlaceholderOutlineColor, 0x33);
+			PlaceholderFillColor = BuildHexColorWithAlpha(PlaceholderOutlineColor, PlaceholderFallbackFillAlpha);
 		}
 		if (PlaceholderFillColor.IsEmpty() || PlaceholderOutlineColor.IsEmpty())
 		{
@@ -168,9 +191,12 @@ namespace Design2UMGConverterVisualSupport
 		Widget.Type = TEXT("Image");
 		Widget.Children.Empty();
 		const int32 InsetPx = FMath::Clamp(
-			FMath::RoundToInt(FMath::Min3(10.0f, Node->Transform.Width.Value * 0.25f, Node->Transform.Height.Value * 0.25f)),
-			1,
-			10);
+			FMath::RoundToInt(FMath::Min3(
+				static_cast<float>(PlaceholderInsetMaxPx),
+				Node->Transform.Width.Value * PlaceholderInsetSizeFraction,
+				Node->Transform.Height.Value * PlaceholderInsetSizeFraction)),
+			PlaceholderInsetMinPx,
+			PlaceholderInsetMaxPx);
 		Widget.Brush = FUMGVisualBrushData();
 		Widget.Brush.MaterialRef = TEXT("placeholdersurface");
 		Widget.Brush.MaterialParams = FString::Printf(

@@ -2,6 +2,7 @@
 
 #include "UMGValueParser.h"
 #include "Design2UMGLog.h"
+#include "DesignColorUtils.h"
 
 namespace
 {
@@ -65,14 +66,7 @@ namespace FUMGValueParser
 
 		if (Trimmed.StartsWith(TEXT("#")))
 		{
-			FString Hex = Trimmed.Mid(1);
-			if (Hex.Len() == 3)
-			{
-				Hex = FString::Printf(TEXT("%c%c%c%c%c%c"),
-					Hex[0], Hex[0], Hex[1], Hex[1], Hex[2], Hex[2]);
-				return FColor::FromHex(Hex);
-			}
-			return FColor::FromHex(Trimmed);
+			return DesignColorUtils::ParseHexColor(Trimmed);
 		}
 
 	if (const FLinearColor* Named = GetNamedColors().Find(Trimmed.ToLower()))
@@ -249,31 +243,6 @@ namespace FUMGValueParser
 				FCString::Atof(*Parts[1].TrimStartAndEnd()));
 		}
 		return Default;
-	}
-
-	FMargin ParseMargin(const FString& Str)
-	{
-		TArray<FString> Parts;
-		Str.ParseIntoArray(Parts, TEXT(","));
-		if (Parts.Num() == 1)
-		{
-			return FMargin(FCString::Atof(*Parts[0]));
-		}
-		if (Parts.Num() == 2)
-		{
-			const float H = FCString::Atof(*Parts[0].TrimStartAndEnd());
-			const float V = FCString::Atof(*Parts[1].TrimStartAndEnd());
-			return FMargin(H, V, H, V);
-		}
-		if (Parts.Num() == 4)
-		{
-			return FMargin(
-				FCString::Atof(*Parts[0].TrimStartAndEnd()),
-				FCString::Atof(*Parts[1].TrimStartAndEnd()),
-				FCString::Atof(*Parts[2].TrimStartAndEnd()),
-				FCString::Atof(*Parts[3].TrimStartAndEnd()));
-		}
-		return FMargin(0);
 	}
 
 	bool IsNearlyEqualMargin(const FMargin& A, const FMargin& B)

@@ -2,6 +2,7 @@
 
 #include "VisualMapper.h"
 #include "VisualMapperStrokeSupport.h"
+#include "DesignColorUtils.h"
 #include "ImageFillUtils.h"
 #include "LayoutMapper.h"
 #include "SharedCoreSemantics.h"
@@ -19,16 +20,33 @@ namespace
 	const TCHAR* RetainerInnerShadowEffectRef = TEXT("d2u.retainer.inner_shadow");
 	const TCHAR* MatRef_RoundedRect = TEXT("roundedrect");
 
+	// UV step fallback for an invalid node, where no size can be resolved.
+	// No derivation on record; fixed when the foreground-blur UV mapping
+	// was introduced.
+	constexpr float InvalidNodeBlurUVStepComponent = 1.0f / 512.0f;
+	// Blur strength floor and strength-to-UV-step scale. No derivation on
+	// record; fixed when the foreground-blur UV mapping was introduced.
+	constexpr float MinBlurStrengthForUVStep = 0.5f;
+	constexpr float BlurStrengthToUVStepScale = 0.35f;
+	// Export-chain sentinel: an exported uniform radius at or above this value
+	// means "pill" and is mapped to HalfHeightRadius on the UMG side (matching
+	// check in UMGBrushPropertyApplier.cpp, which owns the same-named constant).
+	// No derivation on record; fixed when the pill export path was introduced.
+	constexpr float CapsuleRadiusSentinel = 999.0f;
+	// With no resolved size, a uniform radius at or above this threshold is
+	// treated as a pill. Same provenance as the sentinel above.
+	constexpr float UnresolvedSizePillRadiusThreshold = 100.0f;
+
 	FVector2D ComputeForegroundBlurUVStep(const TSharedPtr<FDesignNode>& Node, float BlurStrength)
 	{
 		if (!Node.IsValid())
 		{
-			return FVector2D(1.0f / 512.0f, 1.0f / 512.0f);
+			return FVector2D(InvalidNodeBlurUVStepComponent, InvalidNodeBlurUVStepComponent);
 		}
 
 		const float Width = FMath::Max(1.0f, Node->Transform.Width.Value);
 		const float Height = FMath::Max(1.0f, Node->Transform.Height.Value);
-		const float EffectiveBlur = FMath::Max(0.5f, BlurStrength) * 0.35f;
+		const float EffectiveBlur = FMath::Max(MinBlurStrengthForUVStep, BlurStrength) * BlurStrengthToUVStepScale;
 		return FVector2D(EffectiveBlur / Width, EffectiveBlur / Height);
 	}
 
@@ -691,7 +709,7 @@ void VisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedPt
 				// TextBlock supports only one shadow in UE5, so later shadows override earlier ones.
 				Widget.Shadow.ShadowOffset = FVector2D(Effect.Shadow.OffsetX, Effect.Shadow.OffsetY);
 				Widget.Shadow.ShadowColorAndOpacity = FUMGValueParser::ParseColor(
-					Effect.Shadow.Color.IsEmpty() ? TEXT("#00000040") : Effect.Shadow.Color);
+					Effect.Shadow.Color.IsEmpty() ? DesignColorUtils::DefaultShadowColorHex : Effect.Shadow.Color);
 			}
 			else
 			{
@@ -700,7 +718,7 @@ void VisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedPt
 				Layer.Blur = Effect.Shadow.Blur;
 				Layer.Spread = Effect.Shadow.Spread;
 				Layer.Color = FUMGValueParser::ParseColor(
-					Effect.Shadow.Color.IsEmpty() ? TEXT("#00000040") : Effect.Shadow.Color);
+					Effect.Shadow.Color.IsEmpty() ? DesignColorUtils::DefaultShadowColorHex : Effect.Shadow.Color);
 				++ShadowCount;
 			}
 			break;
@@ -727,12 +745,12 @@ void VisualMapper::ApplyRoundedCorner(FUMGWidgetNode& Widget, const FDesignCorne
 			if (MinDim > 0.0f && Radius.Uniform >= (MinDim * 0.5f - KINDA_SMALL_NUMBER))
 			{
 				// Treat large uniform radius as pill to match design tools that clamp radius to half-height.
-				ExportRadius = 999.0f;
+				ExportRadius = CapsuleRadiusSentinel;
 			}
-			else if (!bHasResolvedSize && Radius.Uniform >= 100.0f)
+			else if (!bHasResolvedSize && Radius.Uniform >= UnresolvedSizePillRadiusThreshold)
 			{
 				// Height can be unresolved for fit-content nodes; large radii are typically intended as pill.
-				ExportRadius = 999.0f;
+				ExportRadius = CapsuleRadiusSentinel;
 			}
 			Widget.Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
 			Widget.Brush.OutlineCornerRadius = ExportRadius;
@@ -919,7 +937,7 @@ FUMGWidgetNode VisualMapper::WrapWithInnerShadow(FUMGWidgetNode&& Widget, const 
 	Retainer.Effect.EffectMaterial = RetainerInnerShadowEffectRef;
 	Retainer.Effect.TextureParameter = TEXT("Texture");
 	Retainer.Effect.EffectColor = FUMGValueParser::ParseColor(
-		Shadow.Color.IsEmpty() ? TEXT("#00000040") : Shadow.Color);
+		Shadow.Color.IsEmpty() ? DesignColorUtils::DefaultShadowColorHex : Shadow.Color);
 	Retainer.Effect.EffectOffset = ComputeEffectUVOffset(Node, Shadow.OffsetX, Shadow.OffsetY);
 	Retainer.Effect.EffectBlurUVStep = ComputeForegroundBlurUVStep(Node, Shadow.Blur);
 

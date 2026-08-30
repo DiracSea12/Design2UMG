@@ -6,7 +6,6 @@
 #include "DesignPathRasterizer.h"
 #include "DesignResourceResolver.h"
 #include "UMGImageCropUtils.h"
-#include "UMGPropertyApplierSupport.h"
 #include "UMGValueParsing.h"
 #include "UMGWidgetNodeAccess.h"
 #include "WidgetResourceBinder.h"
@@ -20,32 +19,20 @@
 
 namespace
 {
-	FMargin NormalizeSerializedWidgetMargin(const FMargin& Margin)
-	{
-		return FUMGValueParser::ParseMargin(
-			Design2UMGWidgetNodeAccess::SerializeWidgetMargin(Margin));
-	}
+	// Export-chain sentinel: a serialized uniform radius at or above this value
+	// means "pill" and maps to HalfHeightRadius. Written by VisualMapper.cpp,
+	// which owns the same-named constant (kept local per module on purpose).
+	constexpr float CapsuleRadiusSentinel = 999.0f;
 
-	FVector4 NormalizeSerializedWidgetVector4(const FVector4& Vector)
-	{
-		FVector4 ParsedVector = Vector;
-		UMGPropertyApplierSupport::TryParseVector4(
-			Design2UMGWidgetNodeAccess::SerializeWidgetVector4(Vector),
-			ParsedVector);
-		return ParsedVector;
-	}
-
+	// Intentionally kept as a serialized-protocol round trip: automation tests
+	// (WidgetResourceBinderTests border brush color, EffectsAndShadow retainer
+	// inner-shadow color) anchor these two consumers to the JSON-preview color
+	// value, so they must stay quantized instead of passing the typed payload
+	// through at full precision.
 	FLinearColor NormalizeTypedDescriptorColor(const FLinearColor& Color)
 	{
 		return FUMGValueParser::ParseColor(
 			Design2UMGWidgetNodeAccess::SerializeWidgetColor(Color));
-	}
-
-	TOptional<FLinearColor> NormalizeOptionalTypedDescriptorColor(const TOptional<FLinearColor>& Color)
-	{
-		return Color.IsSet()
-			? TOptional<FLinearColor>(NormalizeTypedDescriptorColor(Color.GetValue()))
-			: TOptional<FLinearColor>();
 	}
 
 	FString ResolveImageMode(const FUMGWidgetNode& Node)
@@ -102,16 +89,14 @@ namespace UMGBrushPropertyApplier
 	{
 		UImage* Image = CastChecked<UImage>(Widget);
 
-		FLinearColor ImageColor;
 		if (Node.Text.Color.IsSet())
 		{
-			ImageColor = NormalizeTypedDescriptorColor(Node.Text.Color.GetValue());
-			Image->SetColorAndOpacity(ImageColor);
+			Image->SetColorAndOpacity(Node.Text.Color.GetValue());
 		}
 
 		if (Node.Brush.BrushColor.IsSet())
 		{
-			Image->SetBrushTintColor(FSlateColor(NormalizeTypedDescriptorColor(Node.Brush.BrushColor.GetValue())));
+			Image->SetBrushTintColor(FSlateColor(Node.Brush.BrushColor.GetValue()));
 		}
 
 		const bool bExplicitEmptyMaterialRef = Node.Brush.MaterialRef.IsSet() && Node.Brush.MaterialRef.GetValue().IsEmpty();
@@ -133,8 +118,8 @@ namespace UMGBrushPropertyApplier
 		if (Node.Path.Geometry.IsSet())
 		{
 			const FString FillRule = Node.Path.FillRule.Get(DesignPathRasterDefaults::FillRule);
-			const TOptional<FLinearColor> FillColor = NormalizeOptionalTypedDescriptorColor(Node.Path.FillColor);
-			const TOptional<FLinearColor> StrokeColor = NormalizeOptionalTypedDescriptorColor(Node.Path.StrokeColor);
+			const TOptional<FLinearColor>& FillColor = Node.Path.FillColor;
+			const TOptional<FLinearColor>& StrokeColor = Node.Path.StrokeColor;
 			const float StrokeThickness = Node.Path.StrokeThickness.Get(0.0f);
 			const FString StrokeCap = Node.Path.StrokeCap.Get(DesignPathRasterDefaults::StrokeCap);
 			const FString StrokeJoin = Node.Path.StrokeJoin.Get(DesignPathRasterDefaults::StrokeJoin);
@@ -255,7 +240,7 @@ namespace UMGBrushPropertyApplier
 
 		if (bHasOutlineCornerRadius)
 		{
-			if (Node.Brush.OutlineCornerRadius.GetValue() >= 999.0f)
+			if (Node.Brush.OutlineCornerRadius.GetValue() >= CapsuleRadiusSentinel)
 			{
 				Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::HalfHeightRadius;
 			}
@@ -270,9 +255,9 @@ namespace UMGBrushPropertyApplier
 
 		if (bHasCornerRadii)
 		{
-			const FVector4 CornerRadii = NormalizeSerializedWidgetVector4(Node.Brush.CornerRadii.GetValue());
+			const FVector4& CornerRadii = Node.Brush.CornerRadii.GetValue();
 			const float MaxRadius = FMath::Max3(CornerRadii.X, CornerRadii.Y, FMath::Max(CornerRadii.Z, CornerRadii.W));
-			if (MaxRadius >= 999.0f)
+			if (MaxRadius >= CapsuleRadiusSentinel)
 			{
 				Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::HalfHeightRadius;
 			}
@@ -292,7 +277,7 @@ namespace UMGBrushPropertyApplier
 
 		if (Node.Brush.OutlineColor.IsSet())
 		{
-			Brush.OutlineSettings.Color = FSlateColor(NormalizeTypedDescriptorColor(Node.Brush.OutlineColor.GetValue()));
+			Brush.OutlineSettings.Color = FSlateColor(Node.Brush.OutlineColor.GetValue());
 			bBrushChanged = true;
 		}
 
@@ -333,13 +318,13 @@ namespace UMGBrushPropertyApplier
 
 		if (Node.WidgetStyle.Padding.IsSet())
 		{
-			Border->SetPadding(NormalizeSerializedWidgetMargin(Node.WidgetStyle.Padding.GetValue()));
+			Border->SetPadding(Node.WidgetStyle.Padding.GetValue());
 		}
 
 		if (Node.WidgetStyle.StrokePadding.IsSet())
 		{
 			const FMargin Current = Border->GetPadding();
-			const FMargin StrokePadding = NormalizeSerializedWidgetMargin(Node.WidgetStyle.StrokePadding.GetValue());
+			const FMargin StrokePadding = Node.WidgetStyle.StrokePadding.GetValue();
 			Border->SetPadding(FMargin(
 				Current.Left + StrokePadding.Left,
 				Current.Top + StrokePadding.Top,

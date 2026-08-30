@@ -2,24 +2,16 @@
 
 #include "Design2UMGSettings.h"
 
+#include "DesignColorUtils.h"
+
 namespace
 {
+	// Accept rule unchanged: this call site only takes #RRGGBB / #RRGGBBAA
+	// (no '#RGB' short form); digit validation lives in DesignColorUtils.
 	bool IsSettingsHexColorLiteral(const FString& InColor)
 	{
-		if (!InColor.StartsWith(TEXT("#")) || (InColor.Len() != 7 && InColor.Len() != 9))
-		{
-			return false;
-		}
-
-		for (int32 Index = 1; Index < InColor.Len(); ++Index)
-		{
-			if (!FChar::IsHexDigit(InColor[Index]))
-			{
-				return false;
-			}
-		}
-
-		return true;
+		return (InColor.Len() == 7 || InColor.Len() == 9)
+			&& DesignColorUtils::IsHexColorLiteral(InColor);
 	}
 
 	FString NormalizeSettingsFontFamilyKey(const FString& InFamily)

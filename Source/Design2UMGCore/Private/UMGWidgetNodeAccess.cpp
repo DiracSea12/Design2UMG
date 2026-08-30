@@ -8,58 +8,6 @@
 
 namespace
 {
-	FString SerializeWidgetFloat(const float Value)
-	{
-		return FString::SanitizeFloat(Value);
-	}
-
-	FString SerializeWidgetBool(const bool Value)
-	{
-		return Value ? TEXT("true") : TEXT("false");
-	}
-
-	FString SerializeWidgetVector4(const FVector4& Value)
-	{
-		return FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"), Value.X, Value.Y, Value.Z, Value.W);
-	}
-
-	FString GetGradientMaterialRef(const FUMGVisualBrushData::FGradientData& Gradient)
-	{
-		if (Gradient.Type.IsSet() && Gradient.Type.GetValue().Equals(TEXT("Radial"), ESearchCase::IgnoreCase))
-		{
-			return TEXT("radialgradient");
-		}
-		if (Gradient.Type.IsSet() && Gradient.Type.GetValue().Equals(TEXT("Angular"), ESearchCase::IgnoreCase))
-		{
-			return TEXT("angulargradient");
-		}
-		return TEXT("gradientlinear");
-	}
-
-	FString SerializeGradientMaterialParams(const FUMGVisualBrushData::FGradientData& Gradient)
-	{
-		if (Gradient.Stops.Num() == 0)
-		{
-			return FString();
-		}
-
-		Design2UMGGradientMaterialParams::FGradientParams Params;
-		Params.bRadial = Gradient.Type.IsSet() && Gradient.Type.GetValue().Equals(TEXT("Radial"), ESearchCase::IgnoreCase);
-		const bool bIsLinear = !Gradient.Type.IsSet()
-			|| Gradient.Type.GetValue().Equals(TEXT("Linear"), ESearchCase::IgnoreCase);
-		Params.bHasLinearEndpoints = bIsLinear && Gradient.StartPoint.IsSet() && Gradient.EndPoint.IsSet();
-		Params.StartPoint = Gradient.StartPoint.Get(FVector2D::ZeroVector);
-		Params.EndPoint = Gradient.EndPoint.Get(FVector2D(1.0f, 0.0f));
-		Params.Center = Gradient.Center.Get(FVector2D(0.5f, 0.5f));
-		Params.Size = Gradient.Size.Get(FVector2D(1.0f, 1.0f));
-		Params.Rotation = Gradient.Rotation.Get(0.0f);
-		for (const FUMGVisualBrushData::FGradientStopData& Stop : Gradient.Stops)
-		{
-			Params.Stops.Add({Stop.Position, Design2UMGWidgetNodeAccess::SerializeWidgetColor(Stop.Color)});
-		}
-		return Design2UMGGradientMaterialParams::BuildGradientMaterialParamsJson(Params);
-	}
-
 	void AppendVerboseProperty(FString& OutDump, const TCHAR* Key, const FString& Value)
 	{
 		if (Value.IsEmpty())
@@ -110,12 +58,12 @@ namespace
 
 FString Design2UMGWidgetNodeAccess::SerializeWidgetFloat(const float Value)
 {
-	return ::SerializeWidgetFloat(Value);
+	return FString::SanitizeFloat(Value);
 }
 
 FString Design2UMGWidgetNodeAccess::SerializeWidgetBool(const bool Value)
 {
-	return ::SerializeWidgetBool(Value);
+	return Value ? TEXT("true") : TEXT("false");
 }
 
 FString Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(const FVector2D& Value)
@@ -140,7 +88,7 @@ FString Design2UMGWidgetNodeAccess::SerializeWidgetColor(const FLinearColor& Val
 
 FString Design2UMGWidgetNodeAccess::SerializeWidgetVector4(const FVector4& Value)
 {
-	return ::SerializeWidgetVector4(Value);
+	return FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"), Value.X, Value.Y, Value.Z, Value.W);
 }
 
 FString Design2UMGWidgetNodeAccess::SerializeImageTransform(const FUMGVisualBrushData::FImageTransformData& Value)
@@ -175,12 +123,39 @@ bool Design2UMGWidgetNodeAccess::TryParseImageTransform(const FString& Value, FU
 
 FString Design2UMGWidgetNodeAccess::GetGradientMaterialRef(const FUMGVisualBrushData::FGradientData& Gradient)
 {
-	return ::GetGradientMaterialRef(Gradient);
+	if (Gradient.Type.IsSet() && Gradient.Type.GetValue().Equals(TEXT("Radial"), ESearchCase::IgnoreCase))
+	{
+		return TEXT("radialgradient");
+	}
+	if (Gradient.Type.IsSet() && Gradient.Type.GetValue().Equals(TEXT("Angular"), ESearchCase::IgnoreCase))
+	{
+		return TEXT("angulargradient");
+	}
+	return TEXT("gradientlinear");
 }
 
 FString Design2UMGWidgetNodeAccess::SerializeGradientMaterialParams(const FUMGVisualBrushData::FGradientData& Gradient)
 {
-	return ::SerializeGradientMaterialParams(Gradient);
+	if (Gradient.Stops.Num() == 0)
+	{
+		return FString();
+	}
+
+	Design2UMGGradientMaterialParams::FGradientParams Params;
+	Params.bRadial = Gradient.Type.IsSet() && Gradient.Type.GetValue().Equals(TEXT("Radial"), ESearchCase::IgnoreCase);
+	const bool bIsLinear = !Gradient.Type.IsSet()
+		|| Gradient.Type.GetValue().Equals(TEXT("Linear"), ESearchCase::IgnoreCase);
+	Params.bHasLinearEndpoints = bIsLinear && Gradient.StartPoint.IsSet() && Gradient.EndPoint.IsSet();
+	Params.StartPoint = Gradient.StartPoint.Get(FVector2D::ZeroVector);
+	Params.EndPoint = Gradient.EndPoint.Get(FVector2D(1.0f, 0.0f));
+	Params.Center = Gradient.Center.Get(FVector2D(0.5f, 0.5f));
+	Params.Size = Gradient.Size.Get(FVector2D(1.0f, 1.0f));
+	Params.Rotation = Gradient.Rotation.Get(0.0f);
+	for (const FUMGVisualBrushData::FGradientStopData& Stop : Gradient.Stops)
+	{
+		Params.Stops.Add({Stop.Position, Design2UMGWidgetNodeAccess::SerializeWidgetColor(Stop.Color)});
+	}
+	return Design2UMGGradientMaterialParams::BuildGradientMaterialParamsJson(Params);
 }
 
 FString Design2UMGWidgetNodeAccess::SerializeDrawAs(const ESlateBrushDrawType::Type DrawAs)

@@ -6,7 +6,6 @@
 #include "UMGPropertyApplierSupport.h"
 #include "UMGPropertyKeys.h"
 #include "UMGValueParsing.h"
-#include "UMGWidgetNodeAccess.h"
 #include "TextStyleUtils.h"
 
 #include "Brushes/SlateColorBrush.h"
@@ -176,8 +175,7 @@ namespace UMGTextStyleApplication
 
 		if (Node.WidgetStyle.Padding.IsSet())
 		{
-			TextWidget->SetMargin(FUMGValueParser::ParseMargin(
-				Design2UMGWidgetNodeAccess::SerializeWidgetMargin(Node.WidgetStyle.Padding.GetValue())));
+			TextWidget->SetMargin(Node.WidgetStyle.Padding.GetValue());
 		}
 	}
 
