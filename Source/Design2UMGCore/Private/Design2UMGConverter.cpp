@@ -3,6 +3,7 @@
 #include "Design2UMGConverter.h"
 #include "DesignComponentMapping.h"
 #include "DesignSchemaSourceExtensions.h"
+#include "Design2UMGGeneratedNameSuffixes.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
 #include "Design2UMGGridLayout.h"
@@ -99,16 +100,6 @@ namespace Design2UMGConverterPrivate
 		}
 	}
 
-	bool HasRenderableVisual(const TSharedPtr<FDesignNode>& Node)
-	{
-		return Design2UMGCore::SharedSemantics::HasRenderableVisual(Node);
-	}
-
-	bool ShouldSkipNode(const TSharedPtr<FDesignNode>& Node)
-	{
-		return Design2UMGCore::SharedSemantics::ShouldSkipNode(Node);
-	}
-
 	bool ShouldKeepStructuralLeafInFlow(const TSharedPtr<FDesignNode>& Node, EDesignLayout ParentLayout)
 	{
 		if (!Node.IsValid()
@@ -117,7 +108,7 @@ namespace Design2UMGConverterPrivate
 			return false;
 		}
 
-		if (Node->Children.Num() > 0 || HasRenderableVisual(Node))
+		if (Node->Children.Num() > 0 || Design2UMGCore::SharedSemantics::HasRenderableVisual(Node))
 		{
 			return false;
 		}
@@ -137,77 +128,12 @@ namespace Design2UMGConverterPrivate
 
 		for (const TSharedPtr<FDesignNode>& Child : Node->Children)
 		{
-			if (!ShouldSkipNode(Child) || ShouldKeepStructuralLeafInFlow(Child, Node->LayoutData.Layout))
+			if (!Design2UMGCore::SharedSemantics::ShouldSkipNode(Child) || ShouldKeepStructuralLeafInFlow(Child, Node->LayoutData.Layout))
 			{
 				OutVisibleChildren.Add(Child);
 			}
 		}
 	}
-
-	struct FNodeConversionOrchestrator;
-
-	struct FNodeChildAppender
-	{
-		FNodeChildAppender(
-			FUMGWidgetNode& InWidget,
-			const TSharedPtr<FDesignNode>& InNode,
-			const TArray<TSharedPtr<FDesignNode>>& InVisibleChildren,
-			const FConversionContext& InContext,
-			const Design2UMGConverterInternal::FFlowChildPreResolutionResolver& InPreResolutionResolver,
-			const FNodeConversionOrchestrator& InOrchestrator)
-			: Widget(InWidget)
-			, Node(InNode)
-			, VisibleChildren(InVisibleChildren)
-			, Context(InContext)
-			, PreResolutionResolver(InPreResolutionResolver)
-			, Orchestrator(InOrchestrator)
-		{
-		}
-
-		void AppendChildren() const;
-
-	private:
-		bool ShouldWrapChildWithSizeBox(
-			const TSharedPtr<FDesignNode>& ChildNode,
-			const FUMGWidgetNode& ChildWidget) const
-		{
-			const bool bHasFixedSize = ChildNode->Transform.Width.IsFixed() || ChildNode->Transform.Height.IsFixed();
-			const bool bHasMinSize = (ChildNode->Transform.Width.IsFit() && ChildNode->Transform.Width.Value > 0)
-				|| (ChildNode->Transform.Height.IsFit() && ChildNode->Transform.Height.Value > 0);
-			// SizeBox carries source-side measured constraints that panel slots cannot express on their own.
-			const bool bCanvasMixedAxis = Node->LayoutData.Layout == EDesignLayout::None
-				&& ((ChildNode->Transform.Width.IsFit() && ChildNode->Transform.Height.IsFixed())
-					|| (ChildNode->Transform.Height.IsFit() && ChildNode->Transform.Width.IsFixed()));
-			const bool bWrapOrGridMeasuredFill =
-				(Node->LayoutData.Layout == EDesignLayout::Wrap || Node->LayoutData.Layout == EDesignLayout::Grid)
-				&& ((ChildNode->Transform.Width.IsFill() && ChildNode->Transform.Width.Value > 0.0f)
-					|| (ChildNode->Transform.Height.IsFill() && ChildNode->Transform.Height.Value > 0.0f));
-			// Direct typed reads with descriptor-identical presence rules:
-			// Width/HeightOverride and PathGeometry are plain optionals, while
-			// MaterialRef presence also covers a gradient-owned brush and
-			// TexturePath lives on the canonical image owner.
-			const bool bWidgetOwnsDesiredSize =
-				Node->LayoutData.Layout != EDesignLayout::None
-				&& ChildWidget.Type == TEXT("Image")
-				&& ChildNode->Children.Num() == 0
-				&& (ChildWidget.WidgetStyle.WidthOverride.IsSet()
-					|| ChildWidget.WidgetStyle.HeightOverride.IsSet())
-				&& ((ChildWidget.Brush.Gradient.HasAny() || ChildWidget.Brush.MaterialRef.IsSet())
-					|| ChildWidget.Brush.Image.TexturePath.IsSet()
-					|| ChildWidget.Path.Geometry.IsSet());
-			// Images with their own brush size already produce the intended desired size; wrapping would double-apply it.
-			return Node->LayoutData.Layout == EDesignLayout::None
-				? bCanvasMixedAxis
-				: (bHasFixedSize || bHasMinSize || bWrapOrGridMeasuredFill) && !bWidgetOwnsDesiredSize;
-		}
-
-		FUMGWidgetNode& Widget;
-		const TSharedPtr<FDesignNode>& Node;
-		const TArray<TSharedPtr<FDesignNode>>& VisibleChildren;
-		const FConversionContext& Context;
-		const Design2UMGConverterInternal::FFlowChildPreResolutionResolver& PreResolutionResolver;
-		const FNodeConversionOrchestrator& Orchestrator;
-	};
 
 	struct FNodeConversionOrchestrator
 	{
@@ -256,7 +182,7 @@ namespace Design2UMGConverterPrivate
 
 			if (!bUsingRenderFallback)
 			{
-				ApplyNodeVisuals(Widget, Node);
+				VisualSupport::ApplyBaseVisualProperties(Widget, Node);
 				AppendChildWidgets(Widget, Node, ActiveContext, PreResolutionResolver);
 				ApplyLayoutFixup(Widget, Node, ActiveContext, ParentLayout);
 				Widget = WrapWithPrototypeNavigation(MoveTemp(Widget), Node, ActiveContext);
@@ -272,7 +198,7 @@ namespace Design2UMGConverterPrivate
 
 		bool ShouldConvertNode(const TSharedPtr<FDesignNode>& Node, const EDesignLayout ParentLayout) const
 		{
-			return !ShouldSkipNode(Node) || ShouldKeepStructuralLeafInFlow(Node, ParentLayout);
+			return !Design2UMGCore::SharedSemantics::ShouldSkipNode(Node) || ShouldKeepStructuralLeafInFlow(Node, ParentLayout);
 		}
 
 		Design2UMGConverterInternal::FFlowChildPreResolutionResolver BuildPreResolutionResolver(
@@ -316,13 +242,6 @@ namespace Design2UMGConverterPrivate
 				(int32)Node->LayoutData.Layout, Node->Children.Num());
 		}
 
-		void ApplyNodeVisuals(
-			FUMGWidgetNode& Widget,
-			const TSharedPtr<FDesignNode>& Node) const
-		{
-			VisualSupport::ApplyBaseVisualProperties(Widget, Node);
-		}
-
 		void AppendChildWidgets(
 			FUMGWidgetNode& Widget,
 			const TSharedPtr<FDesignNode>& Node,
@@ -337,10 +256,117 @@ namespace Design2UMGConverterPrivate
 				Widget.Type = TEXT("GridPanel");
 			}
 
-			const Design2UMGConverterInternal::FFlowChildPreResolution FlowChildPreResolution(PreResolutionResolver);
 			// Flow children are pre-resolved before appending so slot metrics are based on effective nodes, not raw refs.
-			FlowChildPreResolution.PreResolveFlowChildren(Node, Widget, VisibleChildren);
-			FNodeChildAppender(Widget, Node, VisibleChildren, Context, PreResolutionResolver, *this).AppendChildren();
+			PreResolutionResolver.PreResolveFlowChildren(Node, Widget, VisibleChildren);
+			AppendChildren(Widget, Node, VisibleChildren, Context, PreResolutionResolver);
+		}
+
+		bool ShouldWrapChildWithSizeBox(
+			const TSharedPtr<FDesignNode>& Node,
+			const TSharedPtr<FDesignNode>& ChildNode,
+			const FUMGWidgetNode& ChildWidget) const
+		{
+			const bool bHasFixedSize = ChildNode->Transform.Width.IsFixed() || ChildNode->Transform.Height.IsFixed();
+			const bool bHasMinSize = (ChildNode->Transform.Width.IsFit() && ChildNode->Transform.Width.Value > 0)
+				|| (ChildNode->Transform.Height.IsFit() && ChildNode->Transform.Height.Value > 0);
+			// SizeBox carries source-side measured constraints that panel slots cannot express on their own.
+			const bool bCanvasMixedAxis = Node->LayoutData.Layout == EDesignLayout::None
+				&& ((ChildNode->Transform.Width.IsFit() && ChildNode->Transform.Height.IsFixed())
+					|| (ChildNode->Transform.Height.IsFit() && ChildNode->Transform.Width.IsFixed()));
+			const bool bWrapOrGridMeasuredFill =
+				(Node->LayoutData.Layout == EDesignLayout::Wrap || Node->LayoutData.Layout == EDesignLayout::Grid)
+				&& ((ChildNode->Transform.Width.IsFill() && ChildNode->Transform.Width.Value > 0.0f)
+					|| (ChildNode->Transform.Height.IsFill() && ChildNode->Transform.Height.Value > 0.0f));
+			// Direct typed reads with descriptor-identical presence rules:
+			// Width/HeightOverride and PathGeometry are plain optionals, while
+			// MaterialRef presence also covers a gradient-owned brush and
+			// TexturePath lives on the canonical image owner.
+			const bool bWidgetOwnsDesiredSize =
+				Node->LayoutData.Layout != EDesignLayout::None
+				&& ChildWidget.Type == TEXT("Image")
+				&& ChildNode->Children.Num() == 0
+				&& (ChildWidget.WidgetStyle.WidthOverride.IsSet()
+					|| ChildWidget.WidgetStyle.HeightOverride.IsSet())
+				&& ((ChildWidget.Brush.Gradient.HasAny() || ChildWidget.Brush.MaterialRef.IsSet())
+					|| ChildWidget.Brush.Image.TexturePath.IsSet()
+					|| ChildWidget.Path.Geometry.IsSet());
+			// Images with their own brush size already produce the intended desired size; wrapping would double-apply it.
+			return Node->LayoutData.Layout == EDesignLayout::None
+				? bCanvasMixedAxis
+				: (bHasFixedSize || bHasMinSize || bWrapOrGridMeasuredFill) && !bWidgetOwnsDesiredSize;
+		}
+
+		void AppendChildren(
+			FUMGWidgetNode& Widget,
+			const TSharedPtr<FDesignNode>& Node,
+			const TArray<TSharedPtr<FDesignNode>>& VisibleChildren,
+			const FConversionContext& Context,
+			const Design2UMGConverterInternal::FFlowChildPreResolutionResolver& PreResolutionResolver) const
+		{
+			const bool bGridPanelParent =
+				Node.IsValid()
+				&& Node->LayoutData.Layout == EDesignLayout::Grid
+				&& Widget.Type.Equals(TEXT("GridPanel"), ESearchCase::CaseSensitive);
+			Design2UMGGridLayout::FGridPlacementState GridPlacementState;
+			if (bGridPanelParent)
+			{
+				GridPlacementState.ColumnCount = Design2UMGGridLayout::ResolveGridColumnCount(Node, VisibleChildren);
+				GridPlacementState.RowCount = Design2UMGGridLayout::ResolveGridRowCount(Node, VisibleChildren, GridPlacementState.ColumnCount);
+			}
+
+			for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
+			{
+				TSharedPtr<FDesignNode> EffectiveChild = PreResolutionResolver.ResolveExpandedChild(Child, true);
+				FUMGWidgetNode ChildWidget = ConvertChild(EffectiveChild, Context, Node->LayoutData.Layout);
+				if (ChildWidget.Type.IsEmpty())
+				{
+					UE_LOG(LogDesign2UMG, Verbose, TEXT("Converter: skipped child '%s' (id='%s') with empty widget type"),
+						*EffectiveChild->Name, *EffectiveChild->Id);
+					continue;
+				}
+
+				LayoutMapper::ApplySlotProperties(ChildWidget, EffectiveChild, Node->LayoutData.Layout);
+				LayoutMapper::ApplyAlignItems(ChildWidget, Node->LayoutData.AlignItems, Node->LayoutData.Layout);
+				if (Node->LayoutData.Layout == EDesignLayout::Grid)
+				{
+					if (bGridPanelParent)
+					{
+						Design2UMGGridLayout::ApplyGridPanelChildSlotData(ChildWidget, Node, EffectiveChild, GridPlacementState);
+					}
+					else
+					{
+						if (EffectiveChild->LayoutData.LayoutRow.IsSet())
+						{
+							ChildWidget.Slot.Row = FMath::Max(0, EffectiveChild->LayoutData.LayoutRow.GetValue());
+						}
+						if (EffectiveChild->LayoutData.LayoutColumn.IsSet())
+						{
+							ChildWidget.Slot.Column = FMath::Max(0, EffectiveChild->LayoutData.LayoutColumn.GetValue());
+						}
+						Design2UMGGridLayout::ApplyGridChildAlignmentOverrides(ChildWidget, Node, EffectiveChild);
+					}
+				}
+				if (Node->LayoutData.Layout != EDesignLayout::None && !EffectiveChild->LayoutData.bAbsoluteLayoutPositioning)
+				{
+					ChildWidget.Bounds.X = 0.0f;
+					ChildWidget.Bounds.Y = 0.0f;
+				}
+
+				const bool bWrapChildWithSizeBox = ShouldWrapChildWithSizeBox(Node, EffectiveChild, ChildWidget);
+				if (bWrapChildWithSizeBox)
+				{
+					const bool bHasFixedSize = EffectiveChild->Transform.Width.IsFixed() || EffectiveChild->Transform.Height.IsFixed();
+					const bool bHasMinSize = (EffectiveChild->Transform.Width.IsFit() && EffectiveChild->Transform.Width.Value > 0)
+						|| (EffectiveChild->Transform.Height.IsFit() && EffectiveChild->Transform.Height.Value > 0);
+					UE_LOG(LogDesign2UMG, Verbose, TEXT("  child '%s' → SizeBox wrap (fixed=%d min=%d w=%.1f h=%.1f)"),
+						*ChildWidget.Name, bHasFixedSize, bHasMinSize,
+						EffectiveChild->Transform.Width.Value, EffectiveChild->Transform.Height.Value);
+					Widget.Children.Add(LayoutMapper::WrapWithSizeBox(MoveTemp(ChildWidget), EffectiveChild, Node->LayoutData.Layout));
+					continue;
+				}
+
+				Widget.Children.Add(MoveTemp(ChildWidget));
+			}
 		}
 
 		void ApplyRenderFallbackVisuals(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node) const
@@ -368,6 +394,10 @@ namespace Design2UMGConverterPrivate
 				{
 					if (Widget.Type == TEXT("UniformGridPanel"))
 					{
+						// Uniform grid slots carry half the resolved gap on each side.
+						// With no resolved gaps the outer explicit gap becomes the
+						// uniform slot padding (the outer condition guarantees it is
+						// > 0 in that case, since bHasResolvedGridGap is false here).
 						const float ColumnGap = Design2UMGGridLayout::ResolveGridColumnGap(Node);
 						const float RowGap = Design2UMGGridLayout::ResolveGridRowGap(Node);
 						if (ColumnGap > KINDA_SMALL_NUMBER || RowGap > KINDA_SMALL_NUMBER)
@@ -377,20 +407,14 @@ namespace Design2UMGConverterPrivate
 						}
 						else
 						{
-							Widget.WidgetStyle.SlotPadding.Reset();
+							const float UniformGap = Node->LayoutData.ExplicitGap.Get(0.0f);
+							Widget.WidgetStyle.SlotPadding = FMargin(UniformGap, UniformGap, UniformGap, UniformGap);
 						}
 					}
 				}
 				else
 				{
 					LayoutMapper::ApplyGap(Widget.Children, Node->LayoutData.ExplicitGap.Get(0.0f), Node->LayoutData.Layout);
-				}
-
-				if (Node->LayoutData.Layout == EDesignLayout::Grid
-					&& Widget.Type == TEXT("UniformGridPanel")
-					&& !Widget.WidgetStyle.SlotPadding.IsSet())
-				{
-					Widget.WidgetStyle.SlotPadding = FMargin(Node->LayoutData.ExplicitGap.Get(0.0f), Node->LayoutData.ExplicitGap.Get(0.0f), Node->LayoutData.ExplicitGap.Get(0.0f), Node->LayoutData.ExplicitGap.Get(0.0f));
 				}
 			}
 
@@ -469,74 +493,6 @@ namespace Design2UMGConverterPrivate
 
 		const FConversionContext& RootContext;
 	};
-
-	void FNodeChildAppender::AppendChildren() const
-	{
-		const bool bGridPanelParent =
-			Node.IsValid()
-			&& Node->LayoutData.Layout == EDesignLayout::Grid
-			&& Widget.Type.Equals(TEXT("GridPanel"), ESearchCase::CaseSensitive);
-		Design2UMGGridLayout::FGridPlacementState GridPlacementState;
-		if (bGridPanelParent)
-		{
-			GridPlacementState.ColumnCount = Design2UMGGridLayout::ResolveGridColumnCount(Node, VisibleChildren);
-			GridPlacementState.RowCount = Design2UMGGridLayout::ResolveGridRowCount(Node, VisibleChildren, GridPlacementState.ColumnCount);
-		}
-
-		for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
-		{
-			TSharedPtr<FDesignNode> EffectiveChild = PreResolutionResolver.ResolveExpandedChild(Child, true);
-			FUMGWidgetNode ChildWidget = Orchestrator.ConvertChild(EffectiveChild, Context, Node->LayoutData.Layout);
-			if (ChildWidget.Type.IsEmpty())
-			{
-				UE_LOG(LogDesign2UMG, Verbose, TEXT("Converter: skipped child '%s' (id='%s') with empty widget type"),
-					*EffectiveChild->Name, *EffectiveChild->Id);
-				continue;
-			}
-
-			LayoutMapper::ApplySlotProperties(ChildWidget, EffectiveChild, Node->LayoutData.Layout);
-			LayoutMapper::ApplyAlignItems(ChildWidget, Node->LayoutData.AlignItems, Node->LayoutData.Layout);
-			if (Node->LayoutData.Layout == EDesignLayout::Grid)
-			{
-				if (bGridPanelParent)
-				{
-					Design2UMGGridLayout::ApplyGridPanelChildSlotData(ChildWidget, Node, EffectiveChild, GridPlacementState);
-				}
-				else
-				{
-					if (EffectiveChild->LayoutData.LayoutRow.IsSet())
-					{
-						ChildWidget.Slot.Row = FMath::Max(0, EffectiveChild->LayoutData.LayoutRow.GetValue());
-					}
-					if (EffectiveChild->LayoutData.LayoutColumn.IsSet())
-					{
-						ChildWidget.Slot.Column = FMath::Max(0, EffectiveChild->LayoutData.LayoutColumn.GetValue());
-					}
-					Design2UMGGridLayout::ApplyGridChildAlignmentOverrides(ChildWidget, Node, EffectiveChild);
-				}
-			}
-			if (Node->LayoutData.Layout != EDesignLayout::None && !EffectiveChild->LayoutData.bAbsoluteLayoutPositioning)
-			{
-				ChildWidget.Bounds.X = 0.0f;
-				ChildWidget.Bounds.Y = 0.0f;
-			}
-
-			const bool bWrapChildWithSizeBox = ShouldWrapChildWithSizeBox(EffectiveChild, ChildWidget);
-			if (bWrapChildWithSizeBox)
-			{
-				const bool bHasFixedSize = EffectiveChild->Transform.Width.IsFixed() || EffectiveChild->Transform.Height.IsFixed();
-				const bool bHasMinSize = (EffectiveChild->Transform.Width.IsFit() && EffectiveChild->Transform.Width.Value > 0)
-					|| (EffectiveChild->Transform.Height.IsFit() && EffectiveChild->Transform.Height.Value > 0);
-				UE_LOG(LogDesign2UMG, Verbose, TEXT("  child '%s' → SizeBox wrap (fixed=%d min=%d w=%.1f h=%.1f)"),
-					*ChildWidget.Name, bHasFixedSize, bHasMinSize,
-					EffectiveChild->Transform.Width.Value, EffectiveChild->Transform.Height.Value);
-				Widget.Children.Add(LayoutMapper::WrapWithSizeBox(MoveTemp(ChildWidget), EffectiveChild, Node->LayoutData.Layout));
-				continue;
-			}
-
-			Widget.Children.Add(MoveTemp(ChildWidget));
-		}
-	}
 } // namespace Design2UMGConverterPrivate
 
 FDesign2UMGConversionSettings FDesign2UMGConversionSettings::Defaults()
@@ -619,7 +575,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 	VisibleChildren.Reserve(Children.Num());
 	for (const auto& Child : Children)
 	{
-		if (!Design2UMGConverterPrivate::ShouldSkipNode(Child))
+		if (!Design2UMGCore::SharedSemantics::ShouldSkipNode(Child))
 		{
 			VisibleChildren.Add(Child);
 		}
@@ -641,7 +597,10 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 	{
 		if (!Child->bReusable && !Child->Name.IsEmpty())
 		{
-			Result.WidgetName = FString::Printf(TEXT("WBP_%s"), *Child->Name);
+			Result.WidgetName = FString::Printf(
+				TEXT("%s%s"),
+				Design2UMGGeneratedNameSuffixes::WidgetBlueprintPrefix(),
+				*Child->Name);
 			break;
 		}
 	}

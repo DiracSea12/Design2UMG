@@ -56,6 +56,82 @@ static void ParsePrototypeTransitionData(const TSharedPtr<FJsonObject>& Obj, FDe
 
 static void ParsePrototypeActions(const TSharedPtr<FJsonObject>& InteractionObj, TArray<FDesignPrototypeAction>& OutActions);
 
+// Keyword vocabulary for terminal prototype actions. Kept verbatim from the
+// former consumer-side matchers in Design2UMGPrototypeStepGraphAssembly; the
+// match results must stay identical.
+
+static bool IsPrototypeNavigateNavigation(const FString& Value)
+{
+	return Value.IsEmpty()
+		|| Value.Equals(TEXT("NAVIGATE"), ESearchCase::IgnoreCase)
+		|| Value.Equals(TEXT("SWAP"), ESearchCase::IgnoreCase);
+}
+
+static bool IsPrototypeOverlayKeyword(const FString& Value)
+{
+	return Value.Equals(TEXT("OVERLAY"), ESearchCase::IgnoreCase)
+		|| Value.Equals(TEXT("OPEN_OVERLAY"), ESearchCase::IgnoreCase)
+		|| Value.Equals(TEXT("SWAP_OVERLAY"), ESearchCase::IgnoreCase);
+}
+
+static bool IsPrototypeBackKeyword(const FString& Value)
+{
+	return Value.Equals(TEXT("BACK"), ESearchCase::IgnoreCase);
+}
+
+static bool IsPrototypeOpenLinkKeyword(const FString& Value)
+{
+	return Value.Equals(TEXT("URL"), ESearchCase::IgnoreCase)
+		|| Value.Equals(TEXT("OPEN_URL"), ESearchCase::IgnoreCase)
+		|| Value.Equals(TEXT("OPEN_LINK"), ESearchCase::IgnoreCase)
+		|| Value.Equals(TEXT("LINK"), ESearchCase::IgnoreCase);
+}
+
+static bool LooksLikeExternalPrototypeLink(const FString& Value)
+{
+	return Value.Contains(TEXT("://"))
+		|| Value.StartsWith(TEXT("mailto:"), ESearchCase::IgnoreCase)
+		|| Value.StartsWith(TEXT("tel:"), ESearchCase::IgnoreCase)
+		|| Value.StartsWith(TEXT("www."), ESearchCase::IgnoreCase);
+}
+
+// Collapses the raw Type/Navigation keyword pair (plus the external-link look
+// of DestinationId) into one terminal intent, applying the same precedence the
+// consumer's match chain used: Back, then OpenLink, then Overlay, then Navigate.
+static EDesignPrototypeActionIntent ResolvePrototypeActionIntent(const FDesignPrototypeAction& Action)
+{
+	if (IsPrototypeBackKeyword(Action.Type) || IsPrototypeBackKeyword(Action.Navigation))
+	{
+		return EDesignPrototypeActionIntent::Back;
+	}
+
+	if (IsPrototypeOpenLinkKeyword(Action.Type)
+		|| IsPrototypeOpenLinkKeyword(Action.Navigation)
+		|| LooksLikeExternalPrototypeLink(Action.DestinationId))
+	{
+		return EDesignPrototypeActionIntent::OpenLink;
+	}
+
+	const bool bOverlayKeyword =
+		IsPrototypeOverlayKeyword(Action.Navigation) || IsPrototypeOverlayKeyword(Action.Type);
+	const bool bNodeLike =
+		Action.Type.IsEmpty()
+		|| Action.Type.Equals(TEXT("NODE"), ESearchCase::IgnoreCase)
+		|| IsPrototypeOverlayKeyword(Action.Type);
+	if (bOverlayKeyword && bNodeLike)
+	{
+		return EDesignPrototypeActionIntent::Overlay;
+	}
+
+	if (Action.Type.Equals(TEXT("NODE"), ESearchCase::IgnoreCase)
+		&& IsPrototypeNavigateNavigation(Action.Navigation))
+	{
+		return EDesignPrototypeActionIntent::Navigate;
+	}
+
+	return EDesignPrototypeActionIntent::Unresolved;
+}
+
 static void ParsePrototypeConditionalBlocks(
 	const TSharedPtr<FJsonObject>& AObj,
 	TArray<FDesignPrototypeConditionalBlock>& OutBlocks)
@@ -139,6 +215,7 @@ static void ParsePrototypeActions(const TSharedPtr<FJsonObject>& InteractionObj,
 			Action.VariableModeId = VariableModeId;
 
 		ParsePrototypeConditionalBlocks(AObj, Action.ConditionalBlocks);
+		Action.Intent = ResolvePrototypeActionIntent(Action);
 		OutActions.Add(MoveTemp(Action));
 	}
 }

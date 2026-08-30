@@ -17,9 +17,11 @@ struct DESIGN2UMGCORE_API FDesign2UMGNotification
 	static void RegisterSuccessHandler(FDesign2UMGSuccessNotificationHandler InHandler);
 	static void RegisterWarningHandler(FDesign2UMGMessageNotificationHandler InHandler);
 	static void RegisterErrorHandler(FDesign2UMGMessageNotificationHandler InHandler);
+	static void RegisterInfoHandler(FDesign2UMGMessageNotificationHandler InHandler);
 	static void ResetHandlers();
 
 	static void Success(const FText& Message, const FString& AssetPath = TEXT(""));
 	static void Warning(const FText& Message);
 	static void Error(const FText& Message);
+	static void Info(const FText& Message);
 };

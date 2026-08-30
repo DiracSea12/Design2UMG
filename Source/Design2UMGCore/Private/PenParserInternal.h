@@ -1,12 +1,13 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #pragma once
 
+#include "DesignSchema.h"
 #include "DesignVariableResolver.h"
 #include "Misc/DefaultValueHelper.h"
 #include "Dom/JsonValue.h"
 #include "Dom/JsonObject.h"
 
-// Shared helpers used by PenParserStyling.cpp and PenParserNodeProperties.cpp.
+// Shared helpers used by the PenParser*.cpp translation units.
 // Not part of the public API; include only from PenParser*.cpp files.
 
 namespace FlexibleFieldParsing
@@ -135,3 +136,30 @@ using FlexibleFieldParsing::TryGetNumberFieldFlexible;
 using FlexibleFieldParsing::TryGetNumberValueFlexible;
 using FlexibleFieldParsing::TryGetResolvedBoolField;
 using FlexibleFieldParsing::TryGetResolvedNumberField;
+
+// Cross-translation-unit parse functions shared by the PenParser*.cpp files.
+// Defined in the .cpp file named per group below.
+namespace PenParser
+{
+	// PenParserEnums.cpp
+	EDesignNodeType ParseNodeType(const FString& Token);
+	EDesignLayout ParseLayout(const FString& Token);
+	EDesignTextAlignVertical ParseTextAlignVertical(const FString& Token);
+	EDesignTextGrowth ParseTextGrowth(const FString& Token);
+
+	// PenParserStyling.cpp
+	FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver);
+	FDesignPadding ParsePadding(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver);
+
+	// PenParserNodeProperties.cpp
+	void ApplyNodeBoxProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, EDesignNodeType SizeNodeType, const FDesignVariableResolver& Resolver);
+	void ApplyNodeLayoutProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver, bool bIncludeTextProperties);
+	void ApplyNodeTextStyleProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver);
+
+	// PenParser.cpp
+	FDesignSize ParseSize(const TSharedPtr<FJsonValue>& Value, EDesignNodeType NodeType, const FDesignVariableResolver& Resolver);
+	TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver);
+	void AppendParsedChildren(const TSharedPtr<FJsonValue>& ChildrenField, const FDesignVariableResolver& Resolver, TArray<TSharedPtr<FDesignNode>>& OutChildren);
+	void ParseNodeFillProperties(const TSharedPtr<FJsonValue>& Value, FDesignNode& OutNode, const FDesignVariableResolver& Resolver);
+	void ParseNodeStrokeProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver);
+}

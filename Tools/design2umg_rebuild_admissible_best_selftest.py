@@ -45,18 +45,18 @@ def binary_binding_payload() -> dict:
     return {
         "plugin_source_snapshot": "commit:test",
         "design2umg_core_dll": {
-            "path": "G:/UE5/FPSRoguelike/Binaries/Win64/UnrealEditor-Design2UMGCore.dll",
+            "path": "G:/SampleProject/Binaries/Win64/UnrealEditor-Design2UMGCore.dll",
             "sha256": "c" * 64,
             "size": 123,
             "mtime": "2026-06-08T00:00:00Z",
         },
         "design2umg_editor_dll": {
-            "path": "G:/UE5/FPSRoguelike/Binaries/Win64/UnrealEditor-Design2UMGEditor.dll",
+            "path": "G:/SampleProject/Binaries/Win64/UnrealEditor-Design2UMGEditor.dll",
             "sha256": "e" * 64,
             "size": 456,
             "mtime": "2026-06-08T00:00:00Z",
         },
-        "validation_project_path": "G:/UE5/FPSRoguelike/FPSRoguelike.uproject",
+        "validation_project_path": "G:/SampleProject/SampleProject.uproject",
         "engine_root": "G:/UE5/UnrealEngine",
     }
 
@@ -91,7 +91,7 @@ def make_run(
                 "formal_admissible_candidate": True,
                 "case_names": ["case_a"],
                 "include_pattern": include_pattern,
-                "validation_project_path": "G:/UE5/FPSRoguelike/FPSRoguelike.uproject",
+                "validation_project_path": "G:/SampleProject/SampleProject.uproject",
                 "case_inputs": [
                     {
                         "name": "case_a",
@@ -108,7 +108,7 @@ def make_run(
         report["effective_reference_signature"] = {"sha1": reference_hash}
     if missing_source_compare_field != "baseline_compare_report_hash":
         report["baseline_compare_report_hash"] = "baseline-a"
-    report["reference_root_case_path"] = "G:/UE5/FPSRoguelike/Saved/ReferenceRoot/case_a"
+    report["reference_root_case_path"] = "G:/SampleProject/Saved/ReferenceRoot/case_a"
     if binary_bound:
         report["binary_binding"] = binary_binding_payload()
     write_json(report_path, report)
@@ -226,7 +226,7 @@ def make_current_validation_run(
         report["effective_reference_signature"] = {"sha1": reference_hash}
     if missing_source_compare_field != "baseline_compare_report_hash":
         report["baseline_compare_report_hash"] = "baseline-a"
-    report["reference_root_case_path"] = "G:/UE5/FPSRoguelike/Saved/ReferenceRoot/case_a"
+    report["reference_root_case_path"] = "G:/SampleProject/Saved/ReferenceRoot/case_a"
     report_path = case_root / "compare_report.json"
     write_json(report_path, report)
     write_json(
@@ -235,7 +235,7 @@ def make_current_validation_run(
             "formal_admissible_candidate": True,
             "case_names": ["case_a"],
             "include_pattern": include_pattern,
-            "validation_project_path": "G:/UE5/FPSRoguelike/FPSRoguelike.uproject",
+            "validation_project_path": "G:/SampleProject/SampleProject.uproject",
             "case_inputs": [
                 {
                     "name": "case_a",

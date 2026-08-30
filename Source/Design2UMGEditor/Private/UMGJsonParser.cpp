@@ -405,7 +405,9 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 	{
 		double Val;
 		FString Str;
-		if ((*BrushObject)->TryGetNumberField(UMGPropertyKeys::OutlineCornerRadius, Val))
+		// Negative radius is the legacy "unset" encoding; keep it out of the
+		// optional so IsSet() preserves the old >= 0 consumer contract.
+		if ((*BrushObject)->TryGetNumberField(UMGPropertyKeys::OutlineCornerRadius, Val) && Val >= 0.0)
 			OutBrush.OutlineCornerRadius = (float)Val;
 		if ((*BrushObject)->TryGetNumberField(UMGPropertyKeys::OutlineThickness, Val))
 		{
@@ -449,9 +451,15 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 			Str.ParseIntoArray(Parts, TEXT(","));
 			if (Parts.Num() == 4)
 			{
-				OutBrush.CornerRadii = FVector4(
+				const FVector4 Radii(
 					FCString::Atof(*Parts[0]), FCString::Atof(*Parts[1]),
 					FCString::Atof(*Parts[2]), FCString::Atof(*Parts[3]));
+				// Legacy "unset" contract only tested the first component for
+				// negativity; keep that exact behavior for IsSet().
+				if (Radii.X >= 0.0f)
+				{
+					OutBrush.CornerRadii = Radii;
+				}
 			}
 		}
 		const TSharedPtr<FJsonObject>* ImageObject = nullptr;

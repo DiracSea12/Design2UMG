@@ -10,6 +10,7 @@
 #include "TextFontResolution.h"
 #include "TextMeasurementInternal.h"
 #include "TextStyleUtils.h"
+#include "UObject/StrongObjectPtr.h"
 
 namespace TextMeasurementRuntimeProbe
 {
@@ -99,8 +100,8 @@ namespace
 		Request.FontAssetPath = ResolvedFont.FontAssetPath;
 		Request.TypefaceName = ResolvedFont.TypefaceName;
 		Request.bRequiresResolvedFontAsset = ResolvedFont.bRequiresResolvedFontAsset;
-		Request.LetterSpacing = (Node->Text.LetterSpacing != 0.0f && FontSize > 0.0f)
-			? TextStyleUtils::ConvertLetterSpacingPxToTracking(Node->Text.LetterSpacing, Node->Text.FontSize, FontSize)
+		Request.LetterSpacing = (Node->Text.LetterSpacing.IsSet() && Node->Text.LetterSpacing.GetValue() != 0.0f && FontSize > 0.0f)
+			? TextStyleUtils::ConvertLetterSpacingPxToTracking(Node->Text.LetterSpacing.GetValue(), Node->Text.FontSize, FontSize)
 			: 0;
 		Request.TextAlign = Node->Text.TextAlign;
 		Request.bApplyExplicitLineHeight = LineHeightPercentageOverride.IsSet();
@@ -209,10 +210,14 @@ bool TextMeasurementRuntimeProbe::TryMeasureTextBlockDesiredSize(const FTextBloc
 		return false;
 	}
 
-	UTextBlock* ProbeTextBlock = NewObject<UTextBlock>();
-	if (!ProbeTextBlock)
+	// Reuse one rooted probe across measurements: every input the measurement reads
+	// (text, font, justification, line-height, wrap settings) is reassigned below and
+	// each STextBlock setter invalidates the cached text layout, so the desired size
+	// depends only on the current request instead of probe history.
+	static TStrongObjectPtr<UTextBlock> ProbeTextBlock;
+	if (!ProbeTextBlock.IsValid())
 	{
-		return false;
+		ProbeTextBlock = TStrongObjectPtr<UTextBlock>(NewObject<UTextBlock>());
 	}
 
 	ProbeTextBlock->SetText(FText::FromString(Request.Text));
@@ -224,7 +229,6 @@ bool TextMeasurementRuntimeProbe::TryMeasureTextBlockDesiredSize(const FTextBloc
 	ProbeTextBlock->SetWrapTextAt(Request.WrapTextAt);
 
 	TSharedRef<SWidget> SlateWidget = ProbeTextBlock->TakeWidget();
-	SlateWidget->SlatePrepass(1.0f);
 	SlateWidget->SlatePrepass(1.0f);
 
 	const FVector2D DesiredSize = SlateWidget->GetDesiredSize();

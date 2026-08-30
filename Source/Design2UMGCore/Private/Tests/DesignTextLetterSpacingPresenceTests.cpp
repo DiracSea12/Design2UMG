@@ -186,9 +186,9 @@ bool FFigmaTextLetterSpacingPresenceExplicitZeroVsUnsetTest::RunTest(const FStri
 
 	const TSharedPtr<FDesignNode>& ExplicitZeroNode = ExplicitZeroDocument.Children[0];
 	const TSharedPtr<FDesignNode>& UnsetNode = UnsetDocument.Children[0];
-	TestTrue(TEXT("Explicit-zero letter spacing keeps presence"), ExplicitZeroNode->Text.HasLetterSpacingValue());
-	TestTrue(TEXT("Explicit-zero letter spacing value stays zero"), FMath::IsNearlyZero(ExplicitZeroNode->Text.LetterSpacing));
-	TestFalse(TEXT("Unset letter spacing keeps absence"), UnsetNode->Text.HasLetterSpacingValue());
+	TestTrue(TEXT("Explicit-zero letter spacing keeps presence"), ExplicitZeroNode->Text.LetterSpacing.IsSet());
+	TestTrue(TEXT("Explicit-zero letter spacing value stays zero"), FMath::IsNearlyZero(ExplicitZeroNode->Text.LetterSpacing.GetValue()));
+	TestFalse(TEXT("Unset letter spacing keeps absence"), UnsetNode->Text.LetterSpacing.IsSet());
 
 	const FUMGWidgetData ExplicitZeroData = FDesign2UMGConverter::Convert(ExplicitZeroDocument, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetData UnsetData = FDesign2UMGConverter::Convert(UnsetDocument, FDesign2UMGConversionSettings::Defaults());

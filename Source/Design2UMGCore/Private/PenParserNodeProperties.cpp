@@ -5,15 +5,10 @@
 #include "DesignVariableResolver.h"
 #include "Dom/JsonValue.h"
 #include "Dom/JsonObject.h"
+#include "ParserSharedSemantics.h"
 
-// Forward declarations of functions defined in other PenParser*.cpp files.
-FDesignSize ParseSize(const TSharedPtr<FJsonValue>& Value, EDesignNodeType NodeType, const FDesignVariableResolver& Resolver);
-FDesignPadding ParsePadding(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver);
-EDesignJustifyContent ParseJustifyContent(const FString& S);
-EDesignAlignItems ParseAlignItems(const FString& S);
-EDesignTextAlign ParseTextAlign(const FString& S);
-EDesignTextGrowth ParseTextGrowth(const FString& S);
-
+namespace PenParser
+{
 void ApplyNodeBoxProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, EDesignNodeType SizeNodeType, const FDesignVariableResolver& Resolver)
 {
 	if (JsonObj->HasField(TEXT("width")))
@@ -65,10 +60,10 @@ void ApplyNodeLayoutProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNo
 		|| OutNode.LayoutData.Layout == EDesignLayout::Grid;
 	FString JustifyContent;
 	if (JsonObj->TryGetStringField(TEXT("justifyContent"), JustifyContent))
-		OutNode.LayoutData.JustifyContent = ParseJustifyContent(JustifyContent);
+		OutNode.LayoutData.JustifyContent = ParserSharedSemantics::ParseJustifyContentToken(JustifyContent);
 	FString AlignItems;
 	if (JsonObj->TryGetStringField(TEXT("alignItems"), AlignItems))
-		OutNode.LayoutData.AlignItems = ParseAlignItems(AlignItems);
+		OutNode.LayoutData.AlignItems = ParserSharedSemantics::ParseAlignItemsToken(AlignItems);
 	if (JsonObj->HasField(TEXT("clip")))
 	{
 		bool bClipValue = false;
@@ -81,7 +76,7 @@ void ApplyNodeLayoutProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNo
 		return;
 	FString TextAlign;
 	if (JsonObj->TryGetStringField(TEXT("textAlign"), TextAlign))
-		OutNode.Text.TextAlign = ParseTextAlign(TextAlign);
+		OutNode.Text.TextAlign = ParserSharedSemantics::ParseTextAlignToken(TextAlign);
 	float LineHeight = 0.0f;
 	if (TryGetResolvedNumberField(JsonObj, TEXT("lineHeight"), Resolver, LineHeight) && LineHeight > 0.0f)
 	{
@@ -109,4 +104,5 @@ void ApplyNodeTextStyleProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesig
 	TryGetResolvedBoolField(JsonObj, TEXT("underline"), Resolver, OutNode.Text.bUnderline);
 	TryGetResolvedBoolField(JsonObj, TEXT("strikethrough"), Resolver, OutNode.Text.bStrikethrough);
 	JsonObj->TryGetStringField(TEXT("href"), OutNode.Text.Href);
+}
 }

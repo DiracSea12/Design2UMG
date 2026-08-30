@@ -167,19 +167,20 @@ struct FUMGVisualBrushData
 		}
 	};
 
-	float OutlineCornerRadius = -1;  // -1 = unset
-	FVector4 CornerRadii = FVector4(-1, -1, -1, -1);
+	TOptional<float> OutlineCornerRadius;
+	TOptional<FVector4> CornerRadii;
 	TOptional<float> OutlineThickness;
 	TOptional<ESlateBrushDrawType::Type> DrawAs;
 	TOptional<FLinearColor> BrushColor;
 	TOptional<FLinearColor> OutlineColor;
 	TOptional<FString> MaterialRef;
 	TOptional<FString> MaterialParams;
+	// Legacy resolved asset path. Image.TexturePath holds the source-side reference
+	// (URL/path) and wins at import time; after resolution the importer migrates the
+	// resolved path into Image.TexturePath and clears this top-level field.
 	FString TexturePath;
 	FImageData Image;
 	FGradientData Gradient;
-
-	bool HasCornerRadii() const { return CornerRadii.X >= 0; }
 };
 
 /**

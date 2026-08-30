@@ -1382,7 +1382,7 @@
     }
   },
   "scope_run": "_full71_dashed_vector_20260801_01",
-  "scope_source": "G:/UE5/FPSRoguelike/Saved/Design2UMG/Automation/_full71_dashed_vector_20260801_01/run_scope.json",
+  "scope_source": "G:/SampleProject/Saved/Design2UMG/Automation/_full71_dashed_vector_20260801_01/run_scope.json",
   "scope_case_count": 71,
   "scope_migration_status": "formal_scope_updated_pending_71_case_historical_best",
   "scope_note": "The formal discovered set is now 71 cases (39 Pencil plus 32 Figma). The 47 metric entries below remain historical evidence until a 71-case historical-best manifest is rebuilt from comparable source/reference identities.",

@@ -3,6 +3,7 @@
 #include "FigmaParserStyling.h"
 #include "DesignColorUtils.h"
 #include "DesignJsonUtils.h"
+#include "ParserSharedSemantics.h"
 
 namespace FigmaParserInternal
 {
@@ -174,19 +175,12 @@ namespace
 			}
 
 			const TArray<TSharedPtr<FJsonValue>>* TransformArr = GetArray(FillObj, TEXT("imageTransform"));
-			if (TransformArr && TransformArr->Num() == 2)
+			if (TransformArr)
 			{
-				const TArray<TSharedPtr<FJsonValue>> Row0 = (*TransformArr)[0]->AsArray();
-				const TArray<TSharedPtr<FJsonValue>> Row1 = (*TransformArr)[1]->AsArray();
-				if (Row0.Num() == 3 && Row1.Num() == 3)
-				{
-					Result.Image.Transform.A = Row0[0]->AsNumber();
-					Result.Image.Transform.B = Row0[1]->AsNumber();
-					Result.Image.Transform.TX = Row0[2]->AsNumber();
-					Result.Image.Transform.C = Row1[0]->AsNumber();
-					Result.Image.Transform.D = Row1[1]->AsNumber();
-					Result.Image.Transform.TY = Row1[2]->AsNumber();
-				}
+				ParserSharedSemantics::TryParseImageTransformMatrix(
+					*TransformArr,
+					[](const TSharedPtr<FJsonValue>& Value, float& OutNumber) { OutNumber = static_cast<float>(Value->AsNumber()); },
+					Result.Image.Transform);
 			}
 
 			return Result;

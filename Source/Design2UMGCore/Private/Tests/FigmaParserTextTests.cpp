@@ -66,7 +66,7 @@ bool FFigmaParserTextStylePropertiesTest::RunTest(const FString&)
 	TestEqual(TEXT("Font style"), Node->Text.FontStyle, TEXT("Italic"));
 	TestEqual(TEXT("Font weight rounded to hundreds"), Node->Text.FontWeight, TEXT("500"));
 	TestTrue(TEXT("Line height stored as ratio"), FMath::IsNearlyEqual(Node->Text.LineHeight, 1.25f, 0.001f));
-	TestTrue(TEXT("Letter spacing preserved"), FMath::IsNearlyEqual(Node->Text.LetterSpacing, 1.5f, 0.001f));
+	TestTrue(TEXT("Letter spacing preserved"), FMath::IsNearlyEqual(Node->Text.LetterSpacing.GetValue(), 1.5f, 0.001f));
 	TestTrue(TEXT("Underline mapped"), Node->Text.bUnderline);
 	TestFalse(TEXT("Strikethrough remains false"), Node->Text.bStrikethrough);
 	TestEqual(TEXT("Hyperlink preserved"), Node->Text.Href, TEXT("https://example.com/docs"));

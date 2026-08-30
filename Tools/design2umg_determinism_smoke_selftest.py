@@ -121,7 +121,7 @@ def test_canonical_owner_and_regex() -> None:
 def test_missing_explicit_inputs_fail_closed() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
-        project_path = make_project(root / "FPSRoguelike.uproject")
+        project_path = make_project(root / "SampleProject.uproject")
         editor_path = make_editor(root / "UnrealEditor.exe")
         reference_root = root / "reference-root"
         reference_root.mkdir()

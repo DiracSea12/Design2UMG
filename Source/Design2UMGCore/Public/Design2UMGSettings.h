@@ -86,7 +86,7 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Remote Image Import", meta = (DisplayName = "Remote Image Import Path"))
 	FString RemoteImageImportPath = TEXT("/Game/Design2UMG/ImportedImages");
 
-	UPROPERTY(Config, EditAnywhere, Category = "Remote Image Import", meta = (DisplayName = "Remote Image Timeout (Seconds)", ClampMin = "1", ClampMax = "120"))
+	UPROPERTY(Config, EditAnywhere, Category = "Remote Image Import", meta = (DisplayName = "Remote Image Timeout (Seconds)", ToolTip = "Timeout budget per download request. Each remote image gets the full window; a large batch does not shrink the budget of later requests.", ClampMin = "1", ClampMax = "120"))
 	float RemoteImageTimeoutSeconds = 20.0f;
 
 	// ========== Pencil MCP Connection ==========

@@ -3,6 +3,7 @@
 #include "FigmaParserText.h"
 #include "DesignJsonUtils.h"
 #include "FontResolver.h"
+#include "ParserSharedSemantics.h"
 
 namespace FigmaParserInternal
 {
@@ -65,23 +66,7 @@ void ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& Ou
 		OutNode.Text.Href = GetString(HyperlinkObj, TEXT("url"));
 	}
 
-	const FString HAlign = GetString(Style, TEXT("textAlignHorizontal"), TEXT("LEFT"));
-	if (HAlign == TEXT("CENTER"))
-	{
-		OutNode.Text.TextAlign = EDesignTextAlign::Center;
-	}
-	else if (HAlign == TEXT("RIGHT"))
-	{
-		OutNode.Text.TextAlign = EDesignTextAlign::Right;
-	}
-	else if (HAlign == TEXT("JUSTIFIED"))
-	{
-		OutNode.Text.TextAlign = EDesignTextAlign::Justify;
-	}
-	else
-	{
-		OutNode.Text.TextAlign = EDesignTextAlign::Left;
-	}
+	OutNode.Text.TextAlign = ParserSharedSemantics::ParseTextAlignToken(GetString(Style, TEXT("textAlignHorizontal"), TEXT("LEFT")));
 
 	const FString VAlign = GetString(Style, TEXT("textAlignVertical"), TEXT("TOP"));
 	if (VAlign == TEXT("CENTER"))

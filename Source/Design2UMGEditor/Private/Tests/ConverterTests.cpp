@@ -8,43 +8,13 @@
 #include "PenParser.h"
 #include "UMGSchema.h"
 #include "UMGSchemaSourceExtensions.h"
+#include "Design2UMGTestNodes.h"
+#include "Design2UMGTestUtils.h"
 
 namespace
 {
-	TSharedPtr<FDesignNode> MakeNode(
-		const FString& Id,
-		const FString& Name,
-		const EDesignNodeType Type,
-		const float X,
-		const float Y,
-		const float Width,
-		const float Height)
-	{
-		const TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
-		Node->Id = Id;
-		Node->Name = Name;
-		Node->Type = Type;
-		Node->Transform.SetPosition(X, Y);
-		Node->Transform.SetWidthValue(FDesignSize::Fixed(Width));
-		Node->Transform.SetHeightValue(FDesignSize::Fixed(Height));
-		return Node;
-	}
-
-	const FUMGWidgetNode* FindWidgetById(const FUMGWidgetNode& Root, const FString& Id)
-	{
-		if (Root.Id == Id)
-		{
-			return &Root;
-		}
-		for (const FUMGWidgetNode& Child : Root.Children)
-		{
-			if (const FUMGWidgetNode* Found = FindWidgetById(Child, Id))
-			{
-				return Found;
-			}
-		}
-		return nullptr;
-	}
+	using Design2UMGEditorTests::MakeNode;
+	using Design2UMGTestUtils::FindWidgetById;
 
 	int32 CountWidgetsById(const FUMGWidgetNode& Root, const FString& Id)
 	{

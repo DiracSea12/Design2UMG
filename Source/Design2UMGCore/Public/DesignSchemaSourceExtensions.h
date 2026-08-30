@@ -48,6 +48,21 @@ struct FDesignPrototypeTransitionData
 };
 
 /**
+ * Terminal navigation intent for a prototype action, resolved once by the
+ * source parser from the raw Type/Navigation keyword strings (and the
+ * external-link look of DestinationId). "Unresolved" means no terminal
+ * keyword matched; consumers then leave the action unhandled.
+ */
+enum class EDesignPrototypeActionIntent : uint8
+{
+	Unresolved,
+	Navigate,
+	Overlay,
+	Back,
+	OpenLink
+};
+
+/**
  * One CONDITIONAL action block: the condensed condition expression plus the
  * nested actions to run when the condition holds. Blocks and actions are
  * mutually recursive, so both sides stay plain members (UE reflection rejects
@@ -80,6 +95,10 @@ struct FDesignPrototypeAction
 	// CONDITIONAL payload: one entry per conditionalBlock, each carrying the
 	// condensed condition JSON and the fully typed nested actions.
 	TArray<FDesignPrototypeConditionalBlock> ConditionalBlocks;
+
+	// Terminal intent normalized once at parse time (same non-reflected
+	// treatment as ConditionalBlocks above).
+	EDesignPrototypeActionIntent Intent = EDesignPrototypeActionIntent::Unresolved;
 };
 
 struct FDesignPrototypeConditionalBlock

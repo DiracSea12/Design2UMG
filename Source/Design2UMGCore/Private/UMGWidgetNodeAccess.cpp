@@ -398,13 +398,13 @@ FString Design2UMGWidgetNodeAccess::BuildWidgetNodeVerbosePropertyDump(const FUM
 	{
 		AppendVerboseProperty(Dump, UMGPropertyKeys::DrawAs, Design2UMGWidgetNodeAccess::SerializeDrawAs(Node.Brush.DrawAs.GetValue()));
 	}
-	if (Node.Brush.OutlineCornerRadius >= 0.0f)
+	if (Node.Brush.OutlineCornerRadius.IsSet())
 	{
-		AppendVerboseFloat(Dump, UMGPropertyKeys::OutlineCornerRadius, Node.Brush.OutlineCornerRadius);
+		AppendVerboseFloat(Dump, UMGPropertyKeys::OutlineCornerRadius, Node.Brush.OutlineCornerRadius.GetValue());
 	}
-	if (Node.Brush.HasCornerRadii())
+	if (Node.Brush.CornerRadii.IsSet())
 	{
-		AppendVerboseProperty(Dump, UMGPropertyKeys::CornerRadii, Design2UMGWidgetNodeAccess::SerializeWidgetVector4(Node.Brush.CornerRadii));
+		AppendVerboseProperty(Dump, UMGPropertyKeys::CornerRadii, Design2UMGWidgetNodeAccess::SerializeWidgetVector4(Node.Brush.CornerRadii.GetValue()));
 	}
 	if (Node.Brush.OutlineThickness.IsSet())
 	{

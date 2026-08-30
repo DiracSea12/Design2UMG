@@ -164,7 +164,7 @@ bool FParserNumberStringFlexibleTest::RunTest(const FString& Parameters)
 		return false;
 	TestEqual(TEXT("Text fontSize parsed from string"), Root->Children[0]->Text.FontSize, 16.0f);
 	TestEqual(TEXT("Text lineHeight parsed from string"), Root->Children[0]->Text.LineHeight, 1.5f);
-	TestEqual(TEXT("Text letterSpacing parsed from string"), Root->Children[0]->Text.LetterSpacing, 0.2f);
+	TestEqual(TEXT("Text letterSpacing parsed from string"), Root->Children[0]->Text.LetterSpacing.GetValue(), 0.2f);
 	TestEqual(TEXT("Icon weight parsed from string"), Root->Children[1]->Text.IconWeight, 500);
 	return true;
 }

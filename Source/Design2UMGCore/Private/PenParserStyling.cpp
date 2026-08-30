@@ -5,9 +5,27 @@
 #include "DesignVariableResolver.h"
 #include "Dom/JsonValue.h"
 #include "Dom/JsonObject.h"
+#include "ParserSharedSemantics.h"
 
-// Forward declarations of functions defined in other PenParser*.cpp files.
-FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver);
+namespace PenParser
+{
+namespace
+{
+	// Both Pencil gradient flavors parse stop colors the same way; they differ only
+	// in how a missing stop position is handled, which stays at the call sites.
+	FDesignGradientStop ParseGradientStopColor(const TSharedPtr<FJsonObject>& StopObj, const FDesignVariableResolver& Resolver)
+	{
+		FDesignGradientStop Stop;
+		FString StopColorStr;
+		if (StopObj->TryGetStringField(TEXT("color"), StopColorStr))
+		{
+			if (FDesignVariableResolver::IsVariableRef(StopColorStr))
+				Stop.SourceVar = StopColorStr;
+			Stop.Color = Resolver.ResolveColor(StopColorStr);
+		}
+		return Stop;
+	}
+}
 
 FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver)
 {
@@ -24,10 +42,10 @@ FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariable
 
 	if (Value->Type == EJson::Array)
 	{
-		const auto& Arr = Value->AsArray();
-		for (int32 i = Arr.Num() - 1; i >= 0; --i)
+		const auto& Values = Value->AsArray();
+		for (int32 i = Values.Num() - 1; i >= 0; --i)
 		{
-			FDesignFill Fill = ParseFill(Arr[i], Resolver);
+			FDesignFill Fill = ParseFill(Values[i], Resolver);
 			if (Fill.Type != EDesignFillType::None && Fill.bEnabled)
 				return Fill;
 		}
@@ -120,14 +138,7 @@ FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariable
 				const auto& StopObj = StopVal->AsObject();
 				if (!StopObj.IsValid())
 					continue;
-				FDesignGradientStop Stop;
-				FString StopColorStr;
-				if (StopObj->TryGetStringField(TEXT("color"), StopColorStr))
-				{
-					if (FDesignVariableResolver::IsVariableRef(StopColorStr))
-						Stop.SourceVar = StopColorStr;
-					Stop.Color = Resolver.ResolveColor(StopColorStr);
-				}
+				FDesignGradientStop Stop = ParseGradientStopColor(StopObj, Resolver);
 				TryGetResolvedNumberField(StopObj, TEXT("position"), Resolver, Stop.Position);
 				Result.Gradient.Colors.Add(Stop);
 			}
@@ -154,21 +165,10 @@ FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariable
 		const TSharedPtr<FJsonValue>& TransformField = Obj->TryGetField(TEXT("imageTransform"));
 		if (TransformField.IsValid() && TransformField->Type == EJson::Array)
 		{
-			const auto& TransformArr = TransformField->AsArray();
-			if (TransformArr.Num() == 2)
-			{
-				auto Row0 = TransformArr[0]->AsArray();
-				auto Row1 = TransformArr[1]->AsArray();
-				if (Row0.Num() == 3 && Row1.Num() == 3)
-				{
-					TryGetNumberValueFlexible(Row0[0], Result.Image.Transform.A);
-					TryGetNumberValueFlexible(Row0[1], Result.Image.Transform.B);
-					TryGetNumberValueFlexible(Row0[2], Result.Image.Transform.TX);
-					TryGetNumberValueFlexible(Row1[0], Result.Image.Transform.C);
-					TryGetNumberValueFlexible(Row1[1], Result.Image.Transform.D);
-					TryGetNumberValueFlexible(Row1[2], Result.Image.Transform.TY);
-				}
-			}
+			ParserSharedSemantics::TryParseImageTransformMatrix(
+				TransformField->AsArray(),
+				[](const TSharedPtr<FJsonValue>& Value, float& OutNumber) { TryGetNumberValueFlexible(Value, OutNumber); },
+				Result.Image.Transform);
 		}
 		return Result;
 	}
@@ -185,15 +185,7 @@ FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariable
 				if (!StopObj.IsValid())
 					continue;
 
-				FDesignGradientStop Stop;
-				FString StopColorStr;
-				if (StopObj->TryGetStringField(TEXT("color"), StopColorStr))
-				{
-					if (FDesignVariableResolver::IsVariableRef(StopColorStr))
-						Stop.SourceVar = StopColorStr;
-					Stop.Color = Resolver.ResolveColor(StopColorStr);
-				}
-
+				FDesignGradientStop Stop = ParseGradientStopColor(StopObj, Resolver);
 				if (!TryGetResolvedNumberField(StopObj, TEXT("position"), Resolver, Stop.Position))
 					Stop.Position = Result.Gradient.Colors.Num() > 0 ? 1.0f : 0.0f;
 				Result.Gradient.Colors.Add(Stop);
@@ -231,23 +223,24 @@ FDesignPadding ParsePadding(const TSharedPtr<FJsonValue>& Value, const FDesignVa
 	}
 	else if (Value->Type == EJson::Array)
 	{
-		const auto& Arr = Value->AsArray();
-		if (Arr.Num() == 2)
+		const auto& Values = Value->AsArray();
+		if (Values.Num() == 2)
 		{
 			float Vertical = 0.0f;
 			float Horizontal = 0.0f;
-			if (ResolvePaddingNumber(Arr[0], Vertical))
+			if (ResolvePaddingNumber(Values[0], Vertical))
 				Result.Top = Result.Bottom = Vertical;
-			if (ResolvePaddingNumber(Arr[1], Horizontal))
+			if (ResolvePaddingNumber(Values[1], Horizontal))
 				Result.Left = Result.Right = Horizontal;
 		}
-		else if (Arr.Num() >= 4)
+		else if (Values.Num() >= 4)
 		{
-			ResolvePaddingNumber(Arr[0], Result.Top);
-			ResolvePaddingNumber(Arr[1], Result.Right);
-			ResolvePaddingNumber(Arr[2], Result.Bottom);
-			ResolvePaddingNumber(Arr[3], Result.Left);
+			ResolvePaddingNumber(Values[0], Result.Top);
+			ResolvePaddingNumber(Values[1], Result.Right);
+			ResolvePaddingNumber(Values[2], Result.Bottom);
+			ResolvePaddingNumber(Values[3], Result.Left);
 		}
 	}
 	return Result;
+}
 }

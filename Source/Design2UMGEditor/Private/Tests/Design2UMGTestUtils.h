@@ -9,9 +9,11 @@
 
 #include "Engine/Texture2D.h"
 #include "Interfaces/IPluginManager.h"
+#include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "TextureResource.h"
+#include "UMGWidgetNodeProceduralResourceAccess.h"
 
 namespace Design2UMGTestUtils
 {
@@ -365,5 +367,42 @@ namespace Design2UMGTestUtils
 
 		Mip.BulkData.Unlock();
 		return OpaqueCount;
+	}
+
+	// Moved verbatim from Design2UMGTests.EffectsAndShadow.cpp: shared by the
+	// gradient and box-shadow fidelity test files.
+	inline FUMGProceduralResourceRequest BuildProceduralRequestForTest(FAutomationTestBase& Test, const FUMGWidgetNode& Node)
+	{
+		FUMGProceduralResourceRequest Request;
+		Test.TestTrue(
+			TEXT("Typed procedural resource request builds"),
+			Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Node, Request));
+		return Request;
+	}
+
+	inline bool ReadTexturePixel(UTexture2D* Texture, int32 X, int32 Y, FColor& OutPixel)
+	{
+		if (!Texture || !Texture->GetPlatformData() || Texture->GetPlatformData()->Mips.Num() <= 0)
+		{
+			return false;
+		}
+
+		FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
+		if (X < 0 || Y < 0 || X >= Mip.SizeX || Y >= Mip.SizeY)
+		{
+			return false;
+		}
+
+		const void* LockedData = Mip.BulkData.LockReadOnly();
+		if (!LockedData)
+		{
+			Mip.BulkData.Unlock();
+			return false;
+		}
+
+		const FColor* Pixels = static_cast<const FColor*>(LockedData);
+		OutPixel = Pixels[Y * Mip.SizeX + X];
+		Mip.BulkData.Unlock();
+		return true;
 	}
 }

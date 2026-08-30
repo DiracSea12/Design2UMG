@@ -5,6 +5,7 @@
 #include "DesignSchema.h"
 #include "DesignSchemaSourceExtensions.h"
 #include "UMGJsonSerializer.h"
+#include "../Design2UMGTestNodes.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/CanvasPanel.h"
@@ -229,32 +230,21 @@ namespace
 		SourceFont.Name = Variant.SourceFontName;
 		SourceFont.Url = Variant.SourceFilePath + TEXT("#font");
 
-		TSharedPtr<FDesignNode> Root = MakeShared<FDesignNode>();
-		Root->Id = Variant.RootId;
-		Root->Name = Variant.RootName;
-		Root->Type = EDesignNodeType::Frame;
-		Root->Transform.SetWidthValue(FDesignSize::Fixed(320.0f));
-		Root->Transform.SetHeightValue(FDesignSize::Fixed(160.0f));
+		TSharedPtr<FDesignNode> Root = Design2UMGEditorTests::MakeNode(
+			Variant.RootId, Variant.RootName, EDesignNodeType::Frame, 320.0f, 160.0f);
 		Root->LayoutData.Layout = EDesignLayout::Vertical;
 		Root->LayoutData.SetGap(8.0f);
 		Root->Metadata.Add(TEXT("qa.node_identity"), Variant.RootId);
 
-		TSharedPtr<FDesignNode> Label = MakeShared<FDesignNode>();
-		Label->Id = Variant.ChildId;
-		Label->Name = Variant.ChildName;
-		Label->Type = EDesignNodeType::Text;
-		Label->Transform.SetWidthValue(FDesignSize::Fixed(320.0f));
-		Label->Transform.SetHeightValue(FDesignSize::Fixed(32.0f));
+		TSharedPtr<FDesignNode> Label = Design2UMGEditorTests::MakeNode(
+			Variant.ChildId, Variant.ChildName, EDesignNodeType::Text, 320.0f, 32.0f);
 		Label->Text.Content = TEXT("Identity invariant content");
 		Label->Text.FontFamily = TEXT("Roboto");
 		Label->Text.FontSize = 16.0f;
 
-		TSharedPtr<FDesignNode> Icon = MakeShared<FDesignNode>();
-		Icon->Id = Variant.ChildId + TEXT("_icon");
-		Icon->Name = Variant.ChildName + TEXT("_Icon");
-		Icon->Type = EDesignNodeType::IconFont;
-		Icon->Transform.SetWidthValue(FDesignSize::Fixed(24.0f));
-		Icon->Transform.SetHeightValue(FDesignSize::Fixed(24.0f));
+		TSharedPtr<FDesignNode> Icon = Design2UMGEditorTests::MakeNode(
+			Variant.ChildId + TEXT("_icon"), Variant.ChildName + TEXT("_Icon"),
+			EDesignNodeType::IconFont, 24.0f, 24.0f);
 		Icon->Text.IconFontFamily = Variant.SourceFontName;
 		Icon->Text.IconFontName = TEXT("home");
 		Icon->Text.IconWeight = 400;
@@ -266,6 +256,8 @@ namespace
 		return Document;
 	}
 
+	// Deliberately local: unlike Design2UMGTestUtils::FindWidgetById (id match) this finds the
+	// first widget carrying an icon payload (Text.IconName set), which has no shared equivalent.
 	const FUMGWidgetNode* FindIconWidget(const FUMGWidgetNode& Node)
 	{
 		if (Node.Text.IconName.IsSet())

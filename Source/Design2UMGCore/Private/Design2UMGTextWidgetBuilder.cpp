@@ -103,9 +103,9 @@ namespace
 		}
 		// Preserve authored explicit-zero semantics on the design model, but avoid
 		// redundantly emitting runtime letter spacing when the effective value is zero.
-		if (Node->Text.LetterSpacing != 0)
+		if (Node->Text.LetterSpacing.IsSet() && Node->Text.LetterSpacing.GetValue() != 0.0f)
 		{
-			Widget.TextStyle.LetterSpacing = Node->Text.LetterSpacing;
+			Widget.TextStyle.LetterSpacing = Node->Text.LetterSpacing.GetValue();
 		}
 
 		if (Node->Text.bUnderline)
@@ -340,8 +340,8 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 		Result.bUnderline = bRunUnderline || !Result.Href.IsEmpty();
 
 		const bool bRunHasLetterSpacing = Run && Run->LetterSpacing.IsSet();
-		const float EffectiveLetterSpacing = bRunHasLetterSpacing ? Run->LetterSpacing.GetValue() : InNode->Text.LetterSpacing;
-		const bool bHasLetterSpacing = bRunHasLetterSpacing || InNode->Text.HasLetterSpacingValue();
+		const float EffectiveLetterSpacing = bRunHasLetterSpacing ? Run->LetterSpacing.GetValue() : InNode->Text.LetterSpacing.Get(0.0f);
+		const bool bHasLetterSpacing = bRunHasLetterSpacing || InNode->Text.LetterSpacing.IsSet();
 		if (bHasLetterSpacing)
 		{
 			Result.LetterSpacing = EffectiveLetterSpacing;

@@ -5,6 +5,8 @@
 namespace Design2UMGGeneratedNameSuffixes
 {
 
+const TCHAR* WidgetBlueprintPrefix() { return TEXT("WBP_"); }
+
 const TCHAR* FxBlur() { return TEXT("_fxblur"); }
 const TCHAR* GeometryMask() { return TEXT("_geometrymask"); }
 const TCHAR* InnerShadow() { return TEXT("_innershadow"); }

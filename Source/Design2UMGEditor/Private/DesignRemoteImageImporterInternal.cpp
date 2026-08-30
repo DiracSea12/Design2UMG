@@ -25,6 +25,9 @@ namespace DesignRemoteImageImporterInternal
 	{
 		constexpr int64 Bgra8BytesPerPixel = 4;
 		constexpr float HttpWaitTickSeconds = 0.01f;
+		// Resolve-report message cap. No derivation on record; fixed when the
+		// report was introduced to keep failure summaries bounded.
+		constexpr int32 MaxResolveReportMessages = 32;
 
 		bool TryAddWithinLimit(const uint64 Current, const uint64 Increment, const uint64 Limit, uint64& OutTotal)
 		{
@@ -142,7 +145,7 @@ namespace DesignRemoteImageImporterInternal
 
 	void FResolveReport::AddMessage(const FString& Message)
 	{
-		if (Messages.Num() < 32)
+			if (Messages.Num() < MaxResolveReportMessages)
 		{
 			Messages.Add(Message);
 		}
@@ -313,6 +316,8 @@ namespace DesignRemoteImageImporterInternal
 			TAtomic<bool> bPayloadLimitExceeded{ false };
 			/** Guarded by Mutex: set before cancelling a user-aborted download so its late HTTP callback keeps the cancel error. */
 			bool bCancelledByUser = false;
+			/** Guarded by Mutex: set when the wait loop cancels this request after its own per-request deadline; the late HTTP callback keeps the timeout error. */
+			bool bTimedOut = false;
 			bool bSuccess = false;
 			int32 ResponseCode = 0;
 			TArray<uint8> Downloaded;
@@ -323,10 +328,11 @@ namespace DesignRemoteImageImporterInternal
 			FString Url;
 			TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request;
 			TSharedRef<FDownloadState, ESPMode::ThreadSafe> State;
+			/** Per-request deadline: this request's start time plus TimeoutSeconds. */
+			double DeadlineSeconds = 0.0;
 		};
 
 		const float EffectiveTimeoutSeconds = FMath::Max(1.0f, TimeoutSeconds);
-		const double Deadline = FPlatformTime::Seconds() + EffectiveTimeoutSeconds;
 		TArray<FPendingRequest> Pending;
 
 		for (const FString& Url : Urls)
@@ -359,9 +365,10 @@ namespace DesignRemoteImageImporterInternal
 				[State, Limits](FHttpRequestPtr, FHttpResponsePtr Response, bool bWasSuccessful)
 				{
 					FScopeLock Lock(&State->Mutex);
-					if (State->bCancelledByUser)
+					if (State->bCancelledByUser || State->bTimedOut)
 					{
-						// Late callback for a user-cancelled download: keep the cancel error.
+						// Late callback for a request the wait loop already resolved
+						// (user cancel / per-request timeout): keep the recorded error.
 						State->bDone = true;
 						return;
 					}
@@ -405,7 +412,7 @@ namespace DesignRemoteImageImporterInternal
 				Result.Error = TEXT("Unable to start network request");
 				continue;
 			}
-			Pending.Add({ Url, Request, State });
+			Pending.Add({ Url, Request, State, FPlatformTime::Seconds() + EffectiveTimeoutSeconds });
 		}
 
 		FHttpManager& HttpManager = FHttpModule::Get().GetHttpManager();
@@ -414,12 +421,40 @@ namespace DesignRemoteImageImporterInternal
 			int32 StillPending = 0;
 			for (const FPendingRequest& Entry : Pending)
 			{
-				if (!Entry.State->bDone)
+				if (!Entry.State->bDone && !Entry.State->bTimedOut)
 				{
 					++StillPending;
 				}
 			}
 			return StillPending;
+		};
+		// Per-request budget: cancel any request whose own deadline elapsed. Once
+		// marked, CountPending stops waiting for it, so the wait loop always
+		// terminates even if a cancelled request's late callback never arrives.
+		const auto CancelExpiredRequests = [&Pending]()
+		{
+			const double Now = FPlatformTime::Seconds();
+			for (FPendingRequest& Entry : Pending)
+			{
+				if (Now < Entry.DeadlineSeconds)
+				{
+					continue;
+				}
+				bool bNeedsCancel = false;
+				{
+					FScopeLock Lock(&Entry.State->Mutex);
+					if (!Entry.State->bDone && !Entry.State->bTimedOut)
+					{
+						Entry.State->bTimedOut = true;
+						Entry.State->ErrorString = TEXT("Network request timed out");
+						bNeedsCancel = true;
+					}
+				}
+				if (bNeedsCancel)
+				{
+					Entry.Request->CancelRequest();
+				}
+			}
 		};
 
 		// Interactive sessions keep the editor responsive through a cancellable
@@ -434,7 +469,15 @@ namespace DesignRemoteImageImporterInternal
 		{
 			FScopedSlowTask SlowTask(static_cast<float>(Pending.Num()), NSLOCTEXT("Design2UMG", "DownloadingRemoteImages", "Downloading remote images..."), true);
 			SlowTask.MakeDialog(/*bShowCancelButton=*/true);
-			while (Remaining > 0 && FPlatformTime::Seconds() < Deadline)
+			// Baseline requests that finished before the dialog existed so the
+			// first EnterProgressFrame reports only this round's completions
+			// instead of jumping the progress bar forward.
+			Remaining = CountPending();
+			if (const int32 CompletedBeforeWait = Pending.Num() - Remaining; CompletedBeforeWait > 0)
+			{
+				SlowTask.EnterProgressFrame(static_cast<float>(CompletedBeforeWait));
+			}
+			while (Remaining > 0)
 			{
 				HttpManager.Tick(HttpWaitTickSeconds);
 				if (SlowTask.ShouldCancel())
@@ -453,6 +496,7 @@ namespace DesignRemoteImageImporterInternal
 					}
 					break;
 				}
+				CancelExpiredRequests();
 				const int32 CompletedThisRound = Remaining - CountPending();
 				Remaining -= CompletedThisRound;
 				SlowTask.EnterProgressFrame(static_cast<float>(CompletedThisRound));
@@ -460,10 +504,11 @@ namespace DesignRemoteImageImporterInternal
 		}
 		else
 		{
-			while (Remaining > 0 && FPlatformTime::Seconds() < Deadline)
+			while (Remaining > 0)
 			{
 				HttpManager.Tick(HttpWaitTickSeconds);
 				FPlatformProcess::Sleep(HttpWaitTickSeconds);
+				CancelExpiredRequests();
 				Remaining = CountPending();
 			}
 		}

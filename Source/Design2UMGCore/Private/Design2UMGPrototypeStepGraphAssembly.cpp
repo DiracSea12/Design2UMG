@@ -33,72 +33,6 @@ namespace Design2UMGPrototypeStepGraphAssembly
 		return Node.IsValid() ? Node->Source().Prototype.TransitionNodeId : FString();
 	}
 
-	bool IsPrototypeNavigateNavigation(const FString& Value)
-	{
-		return Value.IsEmpty()
-			|| Value.Equals(TEXT("NAVIGATE"), ESearchCase::IgnoreCase)
-			|| Value.Equals(TEXT("SWAP"), ESearchCase::IgnoreCase);
-	}
-
-	bool IsPrototypeOverlayKeyword(const FString& Value)
-	{
-		return Value.Equals(TEXT("OVERLAY"), ESearchCase::IgnoreCase)
-			|| Value.Equals(TEXT("OPEN_OVERLAY"), ESearchCase::IgnoreCase)
-			|| Value.Equals(TEXT("SWAP_OVERLAY"), ESearchCase::IgnoreCase);
-	}
-
-	bool IsPrototypeBackKeyword(const FString& Value)
-	{
-		return Value.Equals(TEXT("BACK"), ESearchCase::IgnoreCase);
-	}
-
-	bool IsPrototypeOpenLinkKeyword(const FString& Value)
-	{
-		return Value.Equals(TEXT("URL"), ESearchCase::IgnoreCase)
-			|| Value.Equals(TEXT("OPEN_URL"), ESearchCase::IgnoreCase)
-			|| Value.Equals(TEXT("OPEN_LINK"), ESearchCase::IgnoreCase)
-			|| Value.Equals(TEXT("LINK"), ESearchCase::IgnoreCase);
-	}
-
-	bool LooksLikeExternalPrototypeLink(const FString& Value)
-	{
-		return Value.Contains(TEXT("://"))
-			|| Value.StartsWith(TEXT("mailto:"), ESearchCase::IgnoreCase)
-			|| Value.StartsWith(TEXT("tel:"), ESearchCase::IgnoreCase)
-			|| Value.StartsWith(TEXT("www."), ESearchCase::IgnoreCase);
-	}
-
-	bool IsPrototypeNavigateAction(const FDesignPrototypeAction& Action)
-	{
-		return Action.Type.Equals(TEXT("NODE"), ESearchCase::IgnoreCase)
-			&& IsPrototypeNavigateNavigation(Action.Navigation);
-	}
-
-	bool IsPrototypeOverlayAction(const FDesignPrototypeAction& Action)
-	{
-		const bool bOverlayKeyword =
-			IsPrototypeOverlayKeyword(Action.Navigation) || IsPrototypeOverlayKeyword(Action.Type);
-		const bool bNodeLike =
-			Action.Type.IsEmpty()
-			|| Action.Type.Equals(TEXT("NODE"), ESearchCase::IgnoreCase)
-			|| IsPrototypeOverlayKeyword(Action.Type);
-		return bOverlayKeyword && bNodeLike;
-	}
-
-	bool IsPrototypeBackAction(const FDesignPrototypeAction& Action)
-	{
-		return IsPrototypeBackKeyword(Action.Type) || IsPrototypeBackKeyword(Action.Navigation);
-	}
-
-	bool IsPrototypeOpenLinkAction(
-		const FDesignPrototypeAction& Action,
-		const FString& DestinationId)
-	{
-		return IsPrototypeOpenLinkKeyword(Action.Type)
-			|| IsPrototypeOpenLinkKeyword(Action.Navigation)
-			|| LooksLikeExternalPrototypeLink(DestinationId);
-	}
-
 	const TCHAR* DescribePrototypeActionKind(const EUMGPrototypeNavigationAction Kind)
 	{
 		switch (Kind)
@@ -373,19 +307,22 @@ namespace Design2UMGPrototypeStepGraphAssembly
 		Step.Transition = BuildPrototypeTransition(Node, Action);
 
 		bool bMatched = false;
-		if (IsPrototypeBackAction(Action))
+		// Terminal kinds consume the intent normalized once by the source
+		// parser; destination emptiness stays a consumer-side concern.
+		if (Action.Intent == EDesignPrototypeActionIntent::Back)
 		{
 			Step.Kind = EUMGPrototypeNavigationStepKind::Back;
 			bMatched = true;
 		}
-		else if (IsPrototypeOpenLinkAction(Action, DirectDestinationId)
+		else if (Action.Intent == EDesignPrototypeActionIntent::OpenLink
 			&& !DirectDestinationId.IsEmpty())
 		{
 			Step.Kind = EUMGPrototypeNavigationStepKind::OpenLink;
 			Step.ExternalUrl = DirectDestinationId;
 			bMatched = true;
 		}
-		else if (IsPrototypeOverlayAction(Action) && !ResolvedNodeDestinationId.IsEmpty())
+		else if (Action.Intent == EDesignPrototypeActionIntent::Overlay
+			&& !ResolvedNodeDestinationId.IsEmpty())
 		{
 			Step.Kind = EUMGPrototypeNavigationStepKind::Overlay;
 			bMatched = ResolvePrototypePageTarget(
@@ -397,7 +334,8 @@ namespace Design2UMGPrototypeStepGraphAssembly
 				Step,
 				Warnings);
 		}
-		else if (IsPrototypeNavigateAction(Action) && !ResolvedNodeDestinationId.IsEmpty())
+		else if (Action.Intent == EDesignPrototypeActionIntent::Navigate
+			&& !ResolvedNodeDestinationId.IsEmpty())
 		{
 			Step.Kind = EUMGPrototypeNavigationStepKind::Navigate;
 			bMatched = ResolvePrototypePageTarget(

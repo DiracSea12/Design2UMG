@@ -14,6 +14,9 @@
  */
 namespace Design2UMGGeneratedNameSuffixes
 {
+	/** WidgetBlueprint asset-name prefix stamped on the converted root ("WBP_", FDesign2UMGConverter::Convert). */
+	DESIGN2UMGCORE_API const TCHAR* WidgetBlueprintPrefix();
+
 	/** RetainerBox foreground-blur wrapper suffix (VisualMapper::WrapWithForegroundBlur). */
 	DESIGN2UMGCORE_API const TCHAR* FxBlur();
 	/** RetainerBox geometry-mask wrapper suffix (VisualMapper::WrapWithGeometryMask). */

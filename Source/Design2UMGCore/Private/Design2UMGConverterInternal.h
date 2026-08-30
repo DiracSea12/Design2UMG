@@ -19,6 +19,12 @@ namespace Design2UMGConverterInternal
 	 * Per-conversion reference expansion storage.  Keeping this on conversion
 	 * state (rather than in RefExpander) makes expanded nodes reusable only for
 	 * the current conversion and keeps theme-specific results isolated.
+	 *
+	 * Lifetime invariant (caller-owned): the raw FDesignNode* key is only
+	 * valid while the source node tree that produced it stays alive and
+	 * unmodified. The cache lives on FConversionState and never outlives the
+	 * single conversion whose document + expansion working copies back those
+	 * pointers, so pointer identity is stable for the whole cache lifetime.
 	 */
 	struct FRefExpansionCacheKey
 	{

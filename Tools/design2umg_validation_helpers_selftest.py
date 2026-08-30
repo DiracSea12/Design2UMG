@@ -441,7 +441,7 @@ def test_evidence_contract_shared_by_manifest_and_run_validation() -> None:
         root = Path(temp_dir)
         report_path = root / "case-a" / "compare_report.json"
         run_scope = {
-            "validation_project_path": "G:/UE5/FPSRoguelike/FPSRoguelike.uproject",
+            "validation_project_path": "G:/SampleProject/SampleProject.uproject",
             "case_names": ["case-a"],
             "include_pattern": "case-a",
             "case_inputs": [
@@ -457,7 +457,7 @@ def test_evidence_contract_shared_by_manifest_and_run_validation() -> None:
         report = {
             "effective_reference_signature": {"sha256": "reference-hash"},
             "baseline_compare_report_hash": "baseline-hash",
-            "reference_root_case_path": "G:/UE5/FPSRoguelike/Saved/ReferenceRoot/case-a",
+            "reference_root_case_path": "G:/SampleProject/Saved/ReferenceRoot/case-a",
         }
 
         manifest_source = rebuild_best.collect_source_input(root, "case-a", run_scope, summary, report, report_path)
@@ -482,18 +482,18 @@ def test_binary_binding_contract_shared_by_manifest_production() -> None:
         "binary_binding": {
             "plugin_source_snapshot": "commit:test",
             "design2umg_core_dll": {
-                "path": "G:/UE5/FPSRoguelike/Binaries/Win64/UnrealEditor-Design2UMGCore.dll",
+                "path": "G:/SampleProject/Binaries/Win64/UnrealEditor-Design2UMGCore.dll",
                 "sha256": "c" * 64,
                 "size": 123,
                 "mtime": "2026-06-08T00:00:00Z",
             },
             "design2umg_editor_dll": {
-                "path": "G:/UE5/FPSRoguelike/Binaries/Win64/UnrealEditor-Design2UMGEditor.dll",
+                "path": "G:/SampleProject/Binaries/Win64/UnrealEditor-Design2UMGEditor.dll",
                 "sha256": "e" * 64,
                 "size": 456,
                 "mtime": "2026-06-08T00:00:00Z",
             },
-            "validation_project_path": "G:/UE5/FPSRoguelike/FPSRoguelike.uproject",
+            "validation_project_path": "G:/SampleProject/SampleProject.uproject",
             "engine_root": "G:/UE5/UnrealEngine",
         }
     }
@@ -616,7 +616,7 @@ def test_step_editor_isolation_runs_single_specs_in_dependency_order() -> None:
                     [state],
                     root,
                     "UnrealEditor.exe",
-                    "G:/UE5/FPSRoguelike/FPSRoguelike.uproject",
+                    "G:/SampleProject/SampleProject.uproject",
                     180,
                     60,
                     "",
@@ -660,7 +660,7 @@ def test_step_editor_isolation_uses_short_driver_script_names() -> None:
             batch_verify.run_editor_driver = fake_runner
             verify.ensure_clean_editor = lambda: None
             with redirect_stdout(StringIO()):
-                batch_verify.run_execution_steps([state], root, "UnrealEditor.exe", "G:/UE5/FPSRoguelike/FPSRoguelike.uproject", 180, 60, "")
+                batch_verify.run_execution_steps([state], root, "UnrealEditor.exe", "G:/SampleProject/SampleProject.uproject", 180, 60, "")
         finally:
             batch_verify.write_editor_driver_script = original_writer
             batch_verify.run_editor_driver = original_runner
@@ -705,7 +705,7 @@ def test_step_editor_isolation_retries_driver_start_once() -> None:
             verify.ensure_clean_editor = lambda: None
             batch_verify.EDITOR_STEP_DRIVER_START_ATTEMPTS = 2
             with redirect_stdout(StringIO()):
-                batch_verify.run_execution_steps([state], root, "UnrealEditor.exe", "G:/UE5/FPSRoguelike/FPSRoguelike.uproject", 180, 60, "")
+                batch_verify.run_execution_steps([state], root, "UnrealEditor.exe", "G:/SampleProject/SampleProject.uproject", 180, 60, "")
         finally:
             batch_verify.write_editor_driver_script = original_writer
             batch_verify.run_editor_driver = original_runner
@@ -733,7 +733,7 @@ def test_step_editor_isolation_blocks_asset_before_generation_result() -> None:
                     [state],
                     root,
                     "UnrealEditor.exe",
-                    "G:/UE5/FPSRoguelike/FPSRoguelike.uproject",
+                    "G:/SampleProject/SampleProject.uproject",
                     180,
                     60,
                     "",
@@ -776,7 +776,7 @@ def test_step_editor_isolation_reports_driver_never_started() -> None:
             try:
                 batch_verify.run_editor_driver(
                     "UnrealEditor.exe",
-                    "G:/UE5/FPSRoguelike/FPSRoguelike.uproject",
+                    "G:/SampleProject/SampleProject.uproject",
                     driver_path,
                     [result_path],
                     log_path,
@@ -829,7 +829,7 @@ def test_run_editor_driver_returns_after_clean_shutdown_result() -> None:
             batch_verify.subprocess.Popen = fake_popen
             exit_code = batch_verify.run_editor_driver(
                 "UnrealEditor.exe",
-                "G:/UE5/FPSRoguelike/FPSRoguelike.uproject",
+                "G:/SampleProject/SampleProject.uproject",
                 driver_path,
                 [result_path],
                 log_path,

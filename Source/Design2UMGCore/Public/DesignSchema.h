@@ -20,8 +20,7 @@ struct FDesignTextNodeData
 	FString FontWeight = TEXT("normal");
 	FString FontStyle = TEXT("normal");
 	float LineHeight = 0.0f;
-	float LetterSpacing = 0.0f;
-	bool bHasLetterSpacing = false;
+	TOptional<float> LetterSpacing;
 	EDesignTextAlign TextAlign = EDesignTextAlign::Left;
 	EDesignTextAlignVertical TextAlignVertical = EDesignTextAlignVertical::Top;
 	EDesignTextGrowth TextGrowth = EDesignTextGrowth::Auto;
@@ -37,18 +36,16 @@ struct FDesignTextNodeData
 	void SetLetterSpacingValue(const float InLetterSpacing)
 	{
 		LetterSpacing = InLetterSpacing;
-		bHasLetterSpacing = true;
 	}
 
 	void ClearLetterSpacingValue()
 	{
-		LetterSpacing = 0.0f;
-		bHasLetterSpacing = false;
+		LetterSpacing.Reset();
 	}
 
 	bool HasLetterSpacingValue() const
 	{
-		return bHasLetterSpacing || !FMath::IsNearlyZero(LetterSpacing);
+		return LetterSpacing.IsSet();
 	}
 };
 
@@ -154,8 +151,13 @@ struct FDesignShapeNodeData
  */
 struct FDesignTransformNodeData
 {
-	// Keep source-presence separate from explicit size: source width/height
-	// being present is not the same as a runtime explicit size contract.
+	/**
+	 * bHasWidth/bHasHeight record the explicit size contract after synthesis
+	 * (SetWidthValue/SetHeightValue set them together with bSourceHas*).
+	 * bSourceHasWidth/bSourceHasHeight record whether the source document
+	 * declared that dimension; SizeEstimator may clear them after estimating
+	 * fit-content, so they can legitimately diverge from bHas*.
+	 */
 	float X = 0.0f;
 	float Y = 0.0f;
 	TOptional<float> ExplicitX;

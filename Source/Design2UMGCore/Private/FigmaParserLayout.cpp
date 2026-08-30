@@ -6,6 +6,7 @@
 #include "DesignSchemaSourceExtensions.h"
 #include "FigmaParserLayoutBounds.h"
 #include "FigmaParserMetadata.h"
+#include "ParserSharedSemantics.h"
 #include "Dom/JsonValue.h"
 
 namespace FigmaParserInternal
@@ -353,37 +354,8 @@ void ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 		}
 	}
 
-	const FString Primary = GetString(NodeObj, TEXT("primaryAxisAlignItems"));
-	if (Primary == TEXT("CENTER"))
-	{
-		OutNode.LayoutData.JustifyContent = EDesignJustifyContent::Center;
-	}
-	else if (Primary == TEXT("MAX"))
-	{
-		OutNode.LayoutData.JustifyContent = EDesignJustifyContent::End;
-	}
-	else if (Primary == TEXT("SPACE_BETWEEN"))
-	{
-		OutNode.LayoutData.JustifyContent = EDesignJustifyContent::SpaceBetween;
-	}
-	else
-	{
-		OutNode.LayoutData.JustifyContent = EDesignJustifyContent::Start;
-	}
-
-	const FString Counter = GetString(NodeObj, TEXT("counterAxisAlignItems"));
-	if (Counter == TEXT("CENTER"))
-	{
-		OutNode.LayoutData.AlignItems = EDesignAlignItems::Center;
-	}
-	else if (Counter == TEXT("MAX"))
-	{
-		OutNode.LayoutData.AlignItems = EDesignAlignItems::End;
-	}
-	else
-	{
-		OutNode.LayoutData.AlignItems = EDesignAlignItems::Start;
-	}
+	OutNode.LayoutData.JustifyContent = ParserSharedSemantics::ParseJustifyContentToken(GetString(NodeObj, TEXT("primaryAxisAlignItems")));
+	OutNode.LayoutData.AlignItems = ParserSharedSemantics::ParseAlignItemsToken(GetString(NodeObj, TEXT("counterAxisAlignItems")));
 
 	OutNode.LayoutData.SetClipValue(GetBool(NodeObj, TEXT("clipsContent"), false));
 

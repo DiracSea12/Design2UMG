@@ -8,6 +8,7 @@
 #include "Design2UMGGenerationSettingsSnapshot.h"
 #include "ExternalServices/PenMCPBridge.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
+#include "Design2UMGTestNodes.h"
 #include "UMGGenerator.h"
 #include "UMGWidgetUtils.h"
 
@@ -50,38 +51,15 @@ namespace
 		return Node;
 	}
 
+	// Semantic-placeholder specialization of the shared MakeNode: fixed source sizes via
+	// SetWidthValue/SetHeightValue (same bHas*/bSourceHas* contract), no authored position,
+	// plus the placeholder-surface semantic flag.
 	TSharedPtr<FDesignNode> MakePlaceholderNode(const FString& NodeId)
 	{
-		TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
-		Node->Id = NodeId;
-		Node->Name = NodeId;
-		Node->Type = EDesignNodeType::Frame;
-		Node->Transform.Width = FDesignSize::Fixed(120.0f);
-		Node->Transform.Height = FDesignSize::Fixed(48.0f);
-		Node->Transform.bHasWidth = true;
-		Node->Transform.bHasHeight = true;
-		Node->Transform.bSourceHasWidth = true;
-		Node->Transform.bSourceHasHeight = true;
+		TSharedPtr<FDesignNode> Node = Design2UMGEditorTests::MakeNode(
+			NodeId, NodeId, EDesignNodeType::Frame, 120.0f, 48.0f);
 		Node->LayoutData.bSemanticPlaceholderSurface = true;
 		return Node;
-	}
-
-	const FUMGWidgetNode* FindWidgetNodeByName(const FUMGWidgetNode& Node, const FString& WidgetName)
-	{
-		if (Node.Name == WidgetName)
-		{
-			return &Node;
-		}
-
-		for (const FUMGWidgetNode& Child : Node.Children)
-		{
-			if (const FUMGWidgetNode* Match = FindWidgetNodeByName(Child, WidgetName))
-			{
-				return Match;
-			}
-		}
-
-		return nullptr;
 	}
 
 	const FUMGWidgetNode* FindWidgetNodeByMaterialParamFragment(

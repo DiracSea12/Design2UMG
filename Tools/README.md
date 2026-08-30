@@ -32,7 +32,6 @@ These files support release governance, historical-best validation, or internal 
 - `design2umg_validation_helpers_selftest.py`
 - `design2umg_pinned_baseline.json`
 - `Release/`
-- `Invoke-ClaudeWorker.ps1`
 
 ## Python dependencies
 
@@ -79,10 +78,10 @@ Example:
 
 ```powershell
 pwsh -NoProfile -File Tools/Run-Design2UMGDeterminismSmoke.ps1 `
-  -ProjectPath G:\UE5\FPSRoguelike\FPSRoguelike.uproject `
+  -ProjectPath <MaintainerRuntimeProject.uproject> `
   -EditorPath <UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe `
   -ReferenceRoot <TrustedReferenceRoot> `
-  -OutputRoot G:\UE5\FPSRoguelike\Saved\Design2UMG\Automation\_determinism_smoke_phase29
+  -OutputRoot <OutputRoot>
 ```
 
 This smoke is focused evidence only. It is not a replacement for the full formal 71-case no-regression closeout.

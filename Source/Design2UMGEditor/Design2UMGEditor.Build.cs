@@ -24,6 +24,7 @@ public class Design2UMGEditor : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"UnrealEd",
+			"EditorSubsystem",
 			"UMGEditor",
 			"Blutility",
 			"AssetTools",

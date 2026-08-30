@@ -3,7 +3,7 @@ param(
     [string]$EditorPath = "",
     [string]$LogPath = "",
     [string]$DesignerPngPath = "",
-    [string]$AssetObjectPath = "/Game/Design2UMG/PenConvert_Output/WBP_lunaris__design_system_components.WBP_lunaris__design_system_components",
+    [string]$AssetObjectPath = "",
     [string]$ResultJsonPath = "",
     [switch]$KeepExistingEditor,
     [switch]$ValidateOnly
@@ -28,14 +28,17 @@ function Set-D2UJsonContent {
 $ProjectPath = Resolve-D2URequiredProjectPath $ProjectPath
 $EditorPath = Resolve-D2URequiredEditorPath $EditorPath
 $ProjectRoot = Split-Path -Parent $ProjectPath
+if ([string]::IsNullOrWhiteSpace($AssetObjectPath)) {
+    throw "AssetObjectPath is required for designer snapshot validation. Pass -AssetObjectPath explicitly."
+}
 if ([string]::IsNullOrWhiteSpace($LogPath)) {
     $LogPath = Join-Path $ProjectRoot "Saved\Logs\$([System.IO.Path]::GetFileNameWithoutExtension($ProjectPath)).log"
 }
 if ([string]::IsNullOrWhiteSpace($DesignerPngPath)) {
-    $DesignerPngPath = Join-Path $ProjectRoot "Saved\Design2UMG\WBP_lunaris__design_system_components.designer.png"
+    throw "DesignerPngPath is required for designer snapshot validation. Pass -DesignerPngPath explicitly."
 }
 if ([string]::IsNullOrWhiteSpace($ResultJsonPath)) {
-    $ResultJsonPath = Join-Path $ProjectRoot "Saved\Design2UMG\WBP_lunaris__design_system_components.designer.result.json"
+    throw "ResultJsonPath is required for designer snapshot validation. Pass -ResultJsonPath explicitly."
 }
 
 if ($ValidateOnly) {

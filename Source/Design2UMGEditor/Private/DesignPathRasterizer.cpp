@@ -79,6 +79,12 @@ namespace
 	int32 GCacheHits = 0;
 	int32 GCacheMisses = 0;
 	bool bHasPendingTextureUpdates = false;
+	// Upper bound on cached path textures so repeated rasterization with varying shape
+	// parameters cannot grow the cache (and its rooted UTexture2Ds) without limit.
+	// EvictStale() first drops entries whose texture is already GC'd, then removes
+	// arbitrary map entries while over capacity - there is no recency tracking, so
+	// overflow eviction is unordered, only bounded. 256 is a fixed round capacity
+	// chosen when the cache was introduced, not a measured optimum.
 	constexpr int32 GMaxCacheEntries = 256;
 
 	int64 CountFilledPixels(const TArray<FColor>& Pixels)

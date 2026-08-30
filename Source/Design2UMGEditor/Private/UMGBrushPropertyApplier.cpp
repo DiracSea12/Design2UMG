@@ -244,8 +244,8 @@ namespace UMGBrushPropertyApplier
 			bBrushChanged = true;
 		}
 
-		const bool bHasOutlineCornerRadius = Node.Brush.OutlineCornerRadius >= 0.0f;
-		const bool bHasCornerRadii = Node.Brush.HasCornerRadii();
+		const bool bHasOutlineCornerRadius = Node.Brush.OutlineCornerRadius.IsSet();
+		const bool bHasCornerRadii = Node.Brush.CornerRadii.IsSet();
 		if (Brush.DrawAs == ESlateBrushDrawType::RoundedBox && !bHasOutlineCornerRadius && !bHasCornerRadii)
 		{
 			Brush.OutlineSettings.CornerRadii = FVector4(0, 0, 0, 0);
@@ -255,13 +255,13 @@ namespace UMGBrushPropertyApplier
 
 		if (bHasOutlineCornerRadius)
 		{
-			if (Node.Brush.OutlineCornerRadius >= 999.0f)
+			if (Node.Brush.OutlineCornerRadius.GetValue() >= 999.0f)
 			{
 				Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::HalfHeightRadius;
 			}
 			else
 			{
-				const float Radius = FMath::Max(0.0f, Node.Brush.OutlineCornerRadius);
+				const float Radius = FMath::Max(0.0f, Node.Brush.OutlineCornerRadius.GetValue());
 				Brush.OutlineSettings.CornerRadii = FVector4(Radius, Radius, Radius, Radius);
 				Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
 			}
@@ -270,7 +270,7 @@ namespace UMGBrushPropertyApplier
 
 		if (bHasCornerRadii)
 		{
-			const FVector4 CornerRadii = NormalizeSerializedWidgetVector4(Node.Brush.CornerRadii);
+			const FVector4 CornerRadii = NormalizeSerializedWidgetVector4(Node.Brush.CornerRadii.GetValue());
 			const float MaxRadius = FMath::Max3(CornerRadii.X, CornerRadii.Y, FMath::Max(CornerRadii.Z, CornerRadii.W));
 			if (MaxRadius >= 999.0f)
 			{

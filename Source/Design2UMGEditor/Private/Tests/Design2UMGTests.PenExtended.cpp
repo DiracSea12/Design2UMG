@@ -160,8 +160,8 @@ bool FPenRichTextConverterUsesRichTextBlockTest::RunTest(const FString& Paramete
 	FDesignDocument Doc;
 	TestTrue(TEXT("Pen rich text fixture parses"), FPenParser::ParseDocument(Json, Doc));
 	const TSharedPtr<FDesignNode>& ParsedRichTextNode = Doc.Children[0]->Children[0];
-	TestTrue(TEXT("Node-level explicit zero letter spacing remains present"), ParsedRichTextNode->Text.HasLetterSpacingValue());
-	TestEqual(TEXT("Node-level explicit zero letter spacing value"), ParsedRichTextNode->Text.LetterSpacing, 0.0f);
+	TestTrue(TEXT("Node-level explicit zero letter spacing remains present"), ParsedRichTextNode->Text.LetterSpacing.IsSet());
+	TestEqual(TEXT("Node-level explicit zero letter spacing value"), ParsedRichTextNode->Text.LetterSpacing.GetValue(), 0.0f);
 	TestEqual(TEXT("Rich text run count"), ParsedRichTextNode->Text.TextRuns.Num(), 2);
 	if (ParsedRichTextNode->Text.TextRuns.Num() == 2)
 	{

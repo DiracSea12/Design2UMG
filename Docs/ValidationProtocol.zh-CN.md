@@ -63,7 +63,7 @@ phase21 batch2 这次已经重新验证过：真正的问题是 automation 字�
 ### 1. 先构建
 
 ```text
-<UE5_Root>\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.exe FPSRoguelikeEditor Win64 Development "-Project=<MaintainerRuntimeProject.uproject>" -WaitMutex -FromMsBuild
+<UE5_Root>\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.exe SampleProjectEditor Win64 Development "-Project=<MaintainerRuntimeProject.uproject>" -WaitMutex -FromMsBuild
 ```
 
 ### 2. 运行聚焦自动化测试
@@ -98,8 +98,10 @@ Designer screenshot 是验证 UMG Designer 实际显示内容的直接路径。�
 首选 wrapper：
 
 ```text
-pwsh -NoProfile -File <PluginRoot>\Tools\Run-DesignerSnapshotValidation.ps1 -ProjectPath <MaintainerRuntimeProject.uproject> -EditorPath <UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe
+pwsh -NoProfile -File <PluginRoot>\Tools\Run-DesignerSnapshotValidation.ps1 -ProjectPath <MaintainerRuntimeProject.uproject> -EditorPath <UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe -AssetObjectPath <WidgetBlueprintObjectPath> -DesignerPngPath <PngPath> -ResultJsonPath <ResultJsonPath>
 ```
+
+`-AssetObjectPath`、`-DesignerPngPath`、`-ResultJsonPath` 为必填参数，wrapper 没有样例专属默认值。
 
 不要把 PowerShell 命令返回当成验证完成。必须等实际 `UnrealEditor.exe` 退出，或使用 wrapper 管理。
 

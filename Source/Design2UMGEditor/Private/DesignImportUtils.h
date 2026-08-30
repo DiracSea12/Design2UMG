@@ -26,6 +26,12 @@ namespace DesignImportUtils
 #endif
 
 	void ApplyPendingIconFontMappingChanges(const FUMGWidgetData& Data);
+	// Reloads the blueprint's package from disk for rendering. Skips the reload
+	// (and renders the in-memory version instead) when the package has unsaved
+	// changes, so a reload can never discard them. Exposed for direct testing.
+	UWidgetBlueprint* ReloadWidgetBlueprintForRender(
+		UWidgetBlueprint* WidgetBlueprint,
+		FString* OutAutomationPreparationError = nullptr);
 	UWidgetBlueprint* GenerateBlueprint(
 		const FUMGWidgetData& Data,
 		const FString& OutputPath,

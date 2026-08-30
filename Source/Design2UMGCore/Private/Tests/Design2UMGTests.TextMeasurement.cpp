@@ -248,7 +248,7 @@ bool FTextMeasurementWrappedLayoutContractTest::RunTest(const FString&)
 	Node->Text.LineHeight = 1.1f;
 	Node->Text.FontFamily = TEXT("Funnel Display");
 	Node->Text.FontWeight = TEXT("500");
-	Node->Text.LetterSpacing = -3.6f;
+	Node->Text.SetLetterSpacingValue(-3.6f);
 	Node->Transform.Width = FDesignSize::Fixed(630.0f);
 	Node->Transform.bSourceHasWidth = true;
 	const float PreferredFontSize = ExpectedExactPointSize(Node->Text.FontSize);
@@ -292,7 +292,7 @@ bool FTextMeasurementWrappedLayoutContractTest::RunTest(const FString&)
 	AuthoredBreakNode->Text.LineHeight = 1.4583333333333333f;
 	AuthoredBreakNode->Text.FontFamily = TEXT("Rubik");
 	AuthoredBreakNode->Text.FontWeight = TEXT("normal");
-	AuthoredBreakNode->Text.LetterSpacing = -1.44f;
+	AuthoredBreakNode->Text.SetLetterSpacingValue(-1.44f);
 	AuthoredBreakNode->Transform.Width = FDesignSize::Fixed(1469.0f);
 	AuthoredBreakNode->Transform.bSourceHasWidth = true;
 	TestEqual(

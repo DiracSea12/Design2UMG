@@ -164,8 +164,8 @@ namespace
 	bool HasExplicitStrokeSurfacePaint(const FUMGVisualBrushData& Brush)
 	{
 		return (Brush.BrushColor.IsSet() && Brush.BrushColor.GetValue().A > KINDA_SMALL_NUMBER)
-			|| Brush.OutlineCornerRadius >= 0.0f
-			|| Brush.HasCornerRadii()
+			|| Brush.OutlineCornerRadius.IsSet()
+			|| Brush.CornerRadii.IsSet()
 			|| Brush.OutlineThickness.IsSet()
 			|| Brush.OutlineColor.IsSet()
 			|| Brush.MaterialRef.IsSet()

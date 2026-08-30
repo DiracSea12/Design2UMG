@@ -8,10 +8,12 @@ namespace
 	FDesign2UMGSuccessNotificationHandler GSuccessHandler;
 	FDesign2UMGMessageNotificationHandler GWarningHandler;
 	FDesign2UMGMessageNotificationHandler GErrorHandler;
+	FDesign2UMGMessageNotificationHandler GInfoHandler;
 
 	enum class ENotificationFallbackVerbosity : uint8
 	{
 		Success,
+		Info,
 		Warning,
 		Error,
 	};
@@ -35,6 +37,7 @@ namespace
 			UE_LOG(LogDesign2UMG, Warning, TEXT("%s"), *Text);
 			break;
 		default:
+			// Info and Display share the fallback log verbosity.
 			UE_LOG(LogDesign2UMG, Display, TEXT("%s"), *Text);
 			break;
 		}
@@ -56,11 +59,17 @@ void FDesign2UMGNotification::RegisterErrorHandler(FDesign2UMGMessageNotificatio
 	GErrorHandler = MoveTemp(InHandler);
 }
 
+void FDesign2UMGNotification::RegisterInfoHandler(FDesign2UMGMessageNotificationHandler InHandler)
+{
+	GInfoHandler = MoveTemp(InHandler);
+}
+
 void FDesign2UMGNotification::ResetHandlers()
 {
 	GSuccessHandler.Unbind();
 	GWarningHandler.Unbind();
 	GErrorHandler.Unbind();
+	GInfoHandler.Unbind();
 }
 
 void FDesign2UMGNotification::Success(const FText& Message, const FString& AssetPath)
@@ -94,5 +103,16 @@ void FDesign2UMGNotification::Error(const FText& Message)
 	}
 
 	LogNotificationFallback(ENotificationFallbackVerbosity::Error, TEXT("Error: "), Message);
+}
+
+void FDesign2UMGNotification::Info(const FText& Message)
+{
+	if (GInfoHandler.IsBound())
+	{
+		GInfoHandler.Execute(Message);
+		return;
+	}
+
+	LogNotificationFallback(ENotificationFallbackVerbosity::Info, TEXT("Info: "), Message);
 }
 

@@ -5,6 +5,7 @@
 #include "Design2UMGConverter.h"
 #include "Design2UMGConverterFlowChildPreResolution.h"
 #include "Design2UMGConverterVisualSupport.h"
+#include "Design2UMGCoreTestNodes.h"
 #include "Design2UMGNodeWidgetFactory.h"
 #include "Design2UMGSettings.h"
 #include "Design2UMGSourceMetadata.h"
@@ -23,29 +24,9 @@
 #if WITH_AUTOMATION_WORKER
 namespace
 {
-	TSharedPtr<FDesignNode> MakeSharedSemanticsNode(
-		const FString& Id,
-		const EDesignNodeType Type,
-		const FDesignSize Width = FDesignSize::Fixed(120.0f),
-		const FDesignSize Height = FDesignSize::Fixed(40.0f))
-	{
-		TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
-		Node->Id = Id;
-		Node->Name = Id;
-		Node->Type = Type;
-		Node->Transform.Width = Width;
-		Node->Transform.Height = Height;
-		Node->Transform.bHasWidth = true;
-		Node->Transform.bHasHeight = true;
-		Node->Transform.bSourceHasWidth = true;
-		Node->Transform.bSourceHasHeight = true;
-		Node->Transform.bEnabled = true;
-		return Node;
-	}
-
 	TSharedPtr<FDesignNode> MakeWidthHintProbeTextNode(const FString& Id, const FDesignSize& Width)
 	{
-		TSharedPtr<FDesignNode> Node = MakeSharedSemanticsNode(Id, EDesignNodeType::Text, Width, FDesignSize::Fixed(36.0f));
+		TSharedPtr<FDesignNode> Node = Design2UMGCoreTests::MakeNode(Id, EDesignNodeType::Text, Width, FDesignSize::Fixed(36.0f));
 		Node->Text.Content = TEXT("Width hint should stay consistent between sizing and wrap logic.");
 		Node->Text.FontFamily = TEXT("Roboto");
 		Node->Text.FontWeight = TEXT("Regular");
@@ -60,7 +41,7 @@ namespace
 		const FDesignSize& Width,
 		const FDesignSize& Height)
 	{
-		TSharedPtr<FDesignNode> Node = MakeSharedSemanticsNode(Id, Type, Width, Height);
+		TSharedPtr<FDesignNode> Node = Design2UMGCoreTests::MakeNode(Id, Type, Width, Height);
 		Node->Text.Content = TEXT("Source text box probe content");
 		Node->Text.IconFontName = TEXT("source-text-box-probe-icon");
 		Node->Text.FontSize = 12.0f;
@@ -115,22 +96,22 @@ namespace
 	FSharedSemanticsVisibilityFixture MakeSharedSemanticsVisibilityFixture()
 	{
 		FSharedSemanticsVisibilityFixture Fixture;
-		Fixture.Root = MakeSharedSemanticsNode(TEXT("shared_semantics_root"), EDesignNodeType::Frame, FDesignSize::Fixed(640.0f), FDesignSize::Fixed(360.0f));
+		Fixture.Root = Design2UMGCoreTests::MakeNode(TEXT("shared_semantics_root"), EDesignNodeType::Frame, FDesignSize::Fixed(640.0f), FDesignSize::Fixed(360.0f));
 		Fixture.Root->LayoutData.Layout = EDesignLayout::Vertical;
 
-		Fixture.DisabledLeaf = MakeSharedSemanticsNode(TEXT("skip_disabled"), EDesignNodeType::Rectangle);
+		Fixture.DisabledLeaf = Design2UMGCoreTests::MakeNode(TEXT("skip_disabled"), EDesignNodeType::Rectangle);
 		Fixture.DisabledLeaf->Transform.bEnabled = false;
 
-		Fixture.DesignerOnlyLeaf = MakeSharedSemanticsNode(TEXT("skip_designer_only"), EDesignNodeType::Connection);
-		Fixture.NonRenderableLeaf = MakeSharedSemanticsNode(TEXT("skip_non_renderable"), EDesignNodeType::Rectangle);
+		Fixture.DesignerOnlyLeaf = Design2UMGCoreTests::MakeNode(TEXT("skip_designer_only"), EDesignNodeType::Connection);
+		Fixture.NonRenderableLeaf = Design2UMGCoreTests::MakeNode(TEXT("skip_non_renderable"), EDesignNodeType::Rectangle);
 
-		Fixture.FlowContainerLeaf = MakeSharedSemanticsNode(TEXT("keep_flow_container"), EDesignNodeType::Frame);
+		Fixture.FlowContainerLeaf = Design2UMGCoreTests::MakeNode(TEXT("keep_flow_container"), EDesignNodeType::Frame);
 		Fixture.FlowContainerLeaf->LayoutData.Layout = EDesignLayout::Horizontal;
 
-		Fixture.RenderableLeaf = MakeSharedSemanticsNode(TEXT("keep_renderable"), EDesignNodeType::Rectangle);
+		Fixture.RenderableLeaf = Design2UMGCoreTests::MakeNode(TEXT("keep_renderable"), EDesignNodeType::Rectangle);
 		Fixture.RenderableLeaf->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#2288CC")));
 
-		Fixture.TextLeaf = MakeSharedSemanticsNode(TEXT("keep_text"), EDesignNodeType::Text, FDesignSize::Fixed(220.0f), FDesignSize::Fixed(36.0f));
+		Fixture.TextLeaf = Design2UMGCoreTests::MakeNode(TEXT("keep_text"), EDesignNodeType::Text, FDesignSize::Fixed(220.0f), FDesignSize::Fixed(36.0f));
 		Fixture.TextLeaf->Text.Content = TEXT("Shared semantics consistency check");
 		Fixture.TextLeaf->Text.FontFamily = TEXT("Roboto");
 		Fixture.TextLeaf->Text.FontWeight = TEXT("Regular");
@@ -317,7 +298,7 @@ namespace
 	{
 		FDesignDocument Doc;
 
-		TSharedPtr<FDesignNode> ReusableCard = MakeSharedSemanticsNode(
+		TSharedPtr<FDesignNode> ReusableCard = Design2UMGCoreTests::MakeNode(
 			TEXT("reusable_card"),
 			EDesignNodeType::Rectangle,
 			FDesignSize::Fixed(60.0f),
@@ -326,7 +307,7 @@ namespace
 		ReusableCard->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#AA3344")));
 		Doc.Children.Add(ReusableCard);
 
-		TSharedPtr<FDesignNode> Screen = MakeSharedSemanticsNode(
+		TSharedPtr<FDesignNode> Screen = Design2UMGCoreTests::MakeNode(
 			TEXT("child_preparation_screen"),
 			EDesignNodeType::Frame,
 			FDesignSize::Fixed(200.0f),
@@ -340,7 +321,7 @@ namespace
 		RefChild->Type = EDesignNodeType::Ref;
 		RefChild->Ref = TEXT("reusable_card");
 
-		TSharedPtr<FDesignNode> FillChild = MakeSharedSemanticsNode(
+		TSharedPtr<FDesignNode> FillChild = Design2UMGCoreTests::MakeNode(
 			TEXT("fill_sibling"),
 			EDesignNodeType::Rectangle,
 			FDesignSize::Fill(0.0f),
@@ -389,9 +370,8 @@ namespace
 		FDesignDocument Doc;
 		const TMap<FString, FString> EmptyTheme;
 		Design2UMGConverterInternal::FFlowChildPreResolutionResolver Resolver(Doc, EmptyTheme);
-		Design2UMGConverterInternal::FFlowChildPreResolution PreResolution(Resolver);
 
-		TSharedPtr<FDesignNode> Parent = MakeSharedSemanticsNode(
+		TSharedPtr<FDesignNode> Parent = Design2UMGCoreTests::MakeNode(
 			TEXT("source_fill_parent"),
 			EDesignNodeType::Frame,
 			FDesignSize::Fixed(248.0f),
@@ -402,7 +382,7 @@ namespace
 		ParentPadding.Right = 16.0f;
 		Parent->LayoutData.SetPadding(ParentPadding);
 
-		TSharedPtr<FDesignNode> SourceFillText = MakeSharedSemanticsNode(
+		TSharedPtr<FDesignNode> SourceFillText = Design2UMGCoreTests::MakeNode(
 			TEXT("source_fill_text"),
 			EDesignNodeType::Text,
 			FDesignSize::Fill(0.0f),
@@ -424,7 +404,7 @@ namespace
 
 		TArray<TSharedPtr<FDesignNode>> VisibleChildren;
 		VisibleChildren.Add(SourceFillText);
-		PreResolution.PreResolveFlowChildren(Parent, ParentWidget, VisibleChildren);
+		Resolver.PreResolveFlowChildren(Parent, ParentWidget, VisibleChildren);
 
 		bool bAllPassed = true;
 		bAllPassed &= Test.TestTrue(TEXT("Source fill child resolves to parent content width"),
@@ -442,7 +422,7 @@ namespace
 	bool RunFlowRefExpansionSnapshotChecks(FAutomationTestBase& Test)
 	{
 		FDesignDocument Doc;
-		TSharedPtr<FDesignNode> NestedReusable = MakeSharedSemanticsNode(
+		TSharedPtr<FDesignNode> NestedReusable = Design2UMGCoreTests::MakeNode(
 			TEXT("snapshot_nested_reusable"),
 			EDesignNodeType::Rectangle,
 			FDesignSize::Fixed(12.0f),
@@ -450,7 +430,7 @@ namespace
 		NestedReusable->bReusable = true;
 		Doc.Children.Add(NestedReusable);
 
-		TSharedPtr<FDesignNode> Reusable = MakeSharedSemanticsNode(
+		TSharedPtr<FDesignNode> Reusable = Design2UMGCoreTests::MakeNode(
 			TEXT("snapshot_reusable"),
 			EDesignNodeType::Rectangle,
 			FDesignSize::Fit(24.0f),
@@ -678,18 +658,18 @@ bool FSharedSemanticsVisibleFillOwnerBoundaryTest::RunTest(const FString& Parame
 	FDesignFill EmptyFill;
 	TestFalse(TEXT("Shared visible-fill helper rejects empty fill"), Design2UMGCore::SharedSemantics::HasVisibleFill(EmptyFill));
 
-	TSharedPtr<FDesignNode> PrimaryVisibleNode = MakeSharedSemanticsNode(TEXT("primary_visible_fill"), EDesignNodeType::Rectangle);
+	TSharedPtr<FDesignNode> PrimaryVisibleNode = Design2UMGCoreTests::MakeNode(TEXT("primary_visible_fill"), EDesignNodeType::Rectangle);
 	PrimaryVisibleNode->Visual.Fills.Add(VisibleFill);
 	TestTrue(TEXT("Shared semantics keeps primary visible fill renderable"), Design2UMGCore::SharedSemantics::HasRenderableVisual(PrimaryVisibleNode));
 	TestTrue(TEXT("Converter visual support still sees primary visible fill"), Design2UMGConverterVisualSupport::HasVisualFill(PrimaryVisibleNode));
 
-	TSharedPtr<FDesignNode> SecondaryPresenceNode = MakeSharedSemanticsNode(TEXT("secondary_fill_presence"), EDesignNodeType::Rectangle);
+	TSharedPtr<FDesignNode> SecondaryPresenceNode = Design2UMGCoreTests::MakeNode(TEXT("secondary_fill_presence"), EDesignNodeType::Rectangle);
 	SecondaryPresenceNode->Visual.Fills.Add(EmptyFill);
 	SecondaryPresenceNode->Visual.Fills.Add(DisabledFill);
 	TestFalse(TEXT("Shared semantics does not treat disabled secondary fill as renderable"), Design2UMGCore::SharedSemantics::HasRenderableVisual(SecondaryPresenceNode));
 	TestTrue(TEXT("Converter visual support still treats secondary fill presence as visual fill"), Design2UMGConverterVisualSupport::HasVisualFill(SecondaryPresenceNode));
 
-	TSharedPtr<FDesignNode> EmptyNode = MakeSharedSemanticsNode(TEXT("empty_fill_read"), EDesignNodeType::Frame);
+	TSharedPtr<FDesignNode> EmptyNode = Design2UMGCoreTests::MakeNode(TEXT("empty_fill_read"), EDesignNodeType::Frame);
 	const FDesignFill& ReadFill = EmptyNode->Visual.TopmostFill();
 	TestEqual(TEXT("Reading an absent primary fill returns the empty value"), ReadFill.Type, EDesignFillType::None);
 	TestEqual(TEXT("Reading an absent primary fill does not create fill state"), EmptyNode->Visual.Fills.Num(), 0);
@@ -877,7 +857,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNodeWidgetFactoryGeometryFallbackDoesNotMutate
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FNodeWidgetFactoryGeometryFallbackDoesNotMutateInputTest::RunTest(const FString& Parameters)
 {
-	TSharedPtr<FDesignNode> EllipseNode = MakeSharedSemanticsNode(TEXT("ellipse_fallback"), EDesignNodeType::Ellipse, FDesignSize::Fixed(96.0f), FDesignSize::Fixed(48.0f));
+	TSharedPtr<FDesignNode> EllipseNode = Design2UMGCoreTests::MakeNode(TEXT("ellipse_fallback"), EDesignNodeType::Ellipse, FDesignSize::Fixed(96.0f), FDesignSize::Fixed(48.0f));
 	EllipseNode->Transform.SetPosition(12.0f, 34.0f);
 	EllipseNode->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#FFAA44")));
 	const FDesignTransformNodeData EllipseTransformBefore = EllipseNode->Transform;
@@ -888,7 +868,7 @@ bool FNodeWidgetFactoryGeometryFallbackDoesNotMutateInputTest::RunTest(const FSt
 	TestEqual(TEXT("Ellipse input Y remains untouched"), EllipseNode->Transform.Y, EllipseTransformBefore.Y);
 	TestTrue(TEXT("Ellipse fallback still builds widget geometry"), EllipseResult.Widget.Path.Geometry.IsSet() && !EllipseResult.Widget.Path.Geometry.GetValue().IsEmpty());
 
-	TSharedPtr<FDesignNode> RasterizedEllipseNode = MakeSharedSemanticsNode(TEXT("ellipse_raster"), EDesignNodeType::Ellipse, FDesignSize::Fixed(96.0f), FDesignSize::Fixed(48.0f));
+	TSharedPtr<FDesignNode> RasterizedEllipseNode = Design2UMGCoreTests::MakeNode(TEXT("ellipse_raster"), EDesignNodeType::Ellipse, FDesignSize::Fixed(96.0f), FDesignSize::Fixed(48.0f));
 	FDesignFill& RasterizedEllipseFill = RasterizedEllipseNode->Visual.Fills.AddDefaulted_GetRef();
 	RasterizedEllipseFill.Type = EDesignFillType::Image;
 	RasterizedEllipseFill.Image.Url = TEXT("/Game/Textures/T_EllipseCrop.T_EllipseCrop");
@@ -905,7 +885,7 @@ bool FNodeWidgetFactoryGeometryFallbackDoesNotMutateInputTest::RunTest(const FSt
 		ClippedRasterizedEllipseResult.Widget.Brush.Image.TexturePath.IsSet()
 		&& ClippedRasterizedEllipseResult.Widget.Brush.Image.TexturePath.GetValue() == TEXT("/Game/Textures/T_EllipseCrop.T_EllipseCrop"));
 
-	TSharedPtr<FDesignNode> LineNode = MakeSharedSemanticsNode(TEXT("line_fallback"), EDesignNodeType::Line, FDesignSize::Fixed(120.0f), FDesignSize::Fixed(6.0f));
+	TSharedPtr<FDesignNode> LineNode = Design2UMGCoreTests::MakeNode(TEXT("line_fallback"), EDesignNodeType::Line, FDesignSize::Fixed(120.0f), FDesignSize::Fixed(6.0f));
 	LineNode->Transform.SetPosition(6.0f, 18.0f);
 	LineNode->Visual.Stroke.Thickness.Uniform = 2.0f;
 	LineNode->Visual.Stroke.Fill = FDesignFill::FromColor(TEXT("#FFFFFFFF"));
@@ -929,7 +909,7 @@ bool FNodeWidgetFactoryGeometryFallbackDoesNotMutateInputTest::RunTest(const FSt
 		TestEqual(TEXT("Missing line stroke join uses the schema default"), LineResult.Widget.Path.StrokeJoin.GetValue(), FString(TEXT("miter")));
 	}
 
-	TSharedPtr<FDesignNode> DashedVectorNode = MakeSharedSemanticsNode(
+	TSharedPtr<FDesignNode> DashedVectorNode = Design2UMGCoreTests::MakeNode(
 		TEXT("dashed_vector_fallback"),
 		EDesignNodeType::Path,
 		FDesignSize::Fixed(27.2578f),
@@ -999,7 +979,7 @@ bool FConversionPlaceholderTintSettingsPayloadTest::RunTest(const FString& Param
 	}
 
 	FDesignDocument Doc;
-	TSharedPtr<FDesignNode> PlaceholderNode = MakeSharedSemanticsNode(
+	TSharedPtr<FDesignNode> PlaceholderNode = Design2UMGCoreTests::MakeNode(
 		TEXT("placeholder_payload_root"),
 		EDesignNodeType::Frame,
 		FDesignSize::Fixed(120.0f),
@@ -1049,7 +1029,7 @@ bool FConversionLuminosityOpacitySettingsPayloadTest::RunTest(const FString& Par
 	ImageFill.Image.Opacity = 0.6f;
 
 	FDesignDocument Doc;
-	TSharedPtr<FDesignNode> CardNode = MakeSharedSemanticsNode(
+	TSharedPtr<FDesignNode> CardNode = Design2UMGCoreTests::MakeNode(
 		TEXT("luminosity_payload_root"),
 		EDesignNodeType::Frame,
 		FDesignSize::Fixed(160.0f),
@@ -1085,7 +1065,7 @@ bool FTextWidgetBuilderSharedPathSettingsBoundaryTest::RunTest(const FString& Pa
 	Design2UMGTextWidgetBuilder::FIconFontSettingsSnapshot Snapshot;
 	Snapshot.MissingIconFontPlaceholder = TEXT("[snapshot-placeholder]");
 
-	TSharedPtr<FDesignNode> Node = MakeSharedSemanticsNode(TEXT("icon_font_boundary"), EDesignNodeType::IconFont, FDesignSize::Fixed(24.0f), FDesignSize::Fixed(24.0f));
+	TSharedPtr<FDesignNode> Node = Design2UMGCoreTests::MakeNode(TEXT("icon_font_boundary"), EDesignNodeType::IconFont, FDesignSize::Fixed(24.0f), FDesignSize::Fixed(24.0f));
 	Node->Text.IconFontFamily = TEXT("MissingFamily_BatchA");
 	Node->Text.IconFontName = TEXT("dashboard");
 	Node->Text.FontSize = 32.0f;

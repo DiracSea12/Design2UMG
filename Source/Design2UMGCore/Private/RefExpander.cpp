@@ -74,9 +74,9 @@ namespace
 		{
 			Target.Text.LineHeight = Override.Text.LineHeight;
 		}
-		if (Override.Text.HasLetterSpacingValue())
+		if (Override.Text.LetterSpacing.IsSet())
 		{
-			Target.Text.SetLetterSpacingValue(Override.Text.LetterSpacing);
+			Target.Text.LetterSpacing = Override.Text.LetterSpacing;
 		}
 	}
 

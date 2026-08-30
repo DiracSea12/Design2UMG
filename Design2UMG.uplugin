@@ -10,7 +10,7 @@
 	"DocsURL": "https://github.com/Diracsea12/Design2UMG",
 	"MarketplaceURL": "",
 	"SupportURL": "https://github.com/Diracsea12/Design2UMG/issues",
-	"EnabledByDefault": true,
+	"EnabledByDefault": false,
 	"CanContainContent": false,
 	"IsBetaVersion": false,
 	"Modules": [

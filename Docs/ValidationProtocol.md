@@ -63,7 +63,7 @@ These rules were reconfirmed during phase 21 batch 2: the real regression was ca
 ### 1. Build first
 
 ```text
-<UE5_Root>\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.exe FPSRoguelikeEditor Win64 Development "-Project=<MaintainerRuntimeProject.uproject>" -WaitMutex -FromMsBuild
+<UE5_Root>\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.exe <RuntimeProjectName>Editor Win64 Development "-Project=<MaintainerRuntimeProject.uproject>" -WaitMutex -FromMsBuild
 ```
 
 ### 2. Run focused automation tests
@@ -113,8 +113,10 @@ The current wrapper goes through `Design2UMG.AutomationRender` in `asset` mode a
 Preferred command:
 
 ```text
-pwsh -NoProfile -File <PluginRoot>\Tools\Run-DesignerSnapshotValidation.ps1 -ProjectPath <MaintainerRuntimeProject.uproject> -EditorPath <UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe
+pwsh -NoProfile -File <PluginRoot>\Tools\Run-DesignerSnapshotValidation.ps1 -ProjectPath <MaintainerRuntimeProject.uproject> -EditorPath <UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe -AssetObjectPath <WidgetBlueprintObjectPath> -DesignerPngPath <PngPath> -ResultJsonPath <ResultJsonPath>
 ```
+
+`-AssetObjectPath`, `-DesignerPngPath` and `-ResultJsonPath` are required; the wrapper has no sample-specific defaults.
 
 The wrapper now kills any existing `UnrealEditor.exe` / `UnrealEditor-Cmd.exe` process by default before launching the validation editor.
 Use `-KeepExistingEditor` only when you are intentionally debugging against an already-open editor session.
@@ -152,10 +154,12 @@ Example:
 Preferred wrapper:
 
 ```text
-pwsh -NoProfile -File <PluginRoot>\Tools\Run-LunarisStructureSnapshotValidation.ps1 -ProjectPath <MaintainerRuntimeProject.uproject> -EditorPath <UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe -SourcePath <MaintainerDesignRoot>\pencil-lunaris.pen
+pwsh -NoProfile -File <PluginRoot>\Tools\Run-LunarisStructureSnapshotValidation.ps1 -ProjectPath <MaintainerRuntimeProject.uproject> -EditorPath <UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe -SourcePath <MaintainerDesignRoot>\pencil-lunaris.pen -TargetNodeId <FrameNodeId> -OutputPath <ImportedAssetPath> -SavedPngPath <PngPath> -SourceJsonPath <SourceTreeJsonPath> -SavedJsonPath <SavedTreeJsonPath> -ResultJsonPath <ResultJsonPath>
 ```
 
-Expected output files:
+All snapshot-specific paths (`-TargetNodeId`, `-OutputPath`, `-SavedPngPath`, `-SourceJsonPath`, `-SavedJsonPath`, `-ResultJsonPath`) are required; the wrapper has no sample-specific defaults.
+
+Expected output files (whatever you passed for `-SourceJsonPath` / `-SavedJsonPath`):
 
 - `<MaintainerRuntimeProjectRoot>\Saved\Design2UMG\WBP_lunaris__design_system_components.source-tree.json`
 - `<MaintainerRuntimeProjectRoot>\Saved\Design2UMG\WBP_lunaris__design_system_components.saved-tree.json`

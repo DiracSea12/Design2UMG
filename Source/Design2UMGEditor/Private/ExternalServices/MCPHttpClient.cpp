@@ -14,6 +14,11 @@
 
 namespace
 {
+	// Per JSON-RPC request timeout. No derivation on record; fixed when the MCP
+	// transport was introduced. FigmaHttpClient intentionally raises its
+	// document fetch above this baseline (see FigmaHttpRequestTimeoutSeconds).
+	constexpr float McpHttpRequestTimeoutSeconds = 30.0f;
+
 	TSharedPtr<FJsonObject> BuildInitializeParams()
 	{
 		TSharedPtr<FJsonObject> Params = MakeShared<FJsonObject>();
@@ -63,7 +68,7 @@ namespace
 			HttpRequest->SetHeader(TEXT("Mcp-Session-Id"), SessionId);
 		}
 		HttpRequest->SetContentAsString(RequestBody);
-		HttpRequest->SetTimeout(30.0f);
+		HttpRequest->SetTimeout(McpHttpRequestTimeoutSeconds);
 		return HttpRequest;
 	}
 

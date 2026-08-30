@@ -78,9 +78,9 @@ bool TextMeasurement::ShouldApplyExplicitLineHeight(const TSharedPtr<FDesignNode
 
 	const float EffectiveProbeFontSize = ProbeFontSize > 0.0f ? ProbeFontSize : Node->Text.FontSize;
 	const int32 LetterSpacingTracking = (EffectiveProbeFontSize > 0.0f
-		&& Node->Text.HasLetterSpacingValue()
-		&& Node->Text.LetterSpacing != 0.0f)
-		? TextStyleUtils::ConvertLetterSpacingPxToTracking(Node->Text.LetterSpacing, Node->Text.FontSize, EffectiveProbeFontSize)
+		&& Node->Text.LetterSpacing.IsSet()
+		&& Node->Text.LetterSpacing.GetValue() != 0.0f)
+		? TextStyleUtils::ConvertLetterSpacingPxToTracking(Node->Text.LetterSpacing.GetValue(), Node->Text.FontSize, EffectiveProbeFontSize)
 		: 0;
 	const FVector2D UnwrappedSize = RuntimeProbe::MeasureTextSize(
 		Node->Text.Content,
@@ -168,8 +168,8 @@ FVector2D TextMeasurement::MeasureTextNodeSize(const TSharedPtr<FDesignNode>& No
 	{
 		return FVector2D::ZeroVector;
 	}
-	const int32 LetterSpacingTracking = (AppliedFontSize > 0.0f && Node->Text.HasLetterSpacingValue() && Node->Text.LetterSpacing != 0.0f)
-		? TextStyleUtils::ConvertLetterSpacingPxToTracking(Node->Text.LetterSpacing, Node->Text.FontSize, AppliedFontSize)
+	const int32 LetterSpacingTracking = (AppliedFontSize > 0.0f && Node->Text.LetterSpacing.IsSet() && Node->Text.LetterSpacing.GetValue() != 0.0f)
+		? TextStyleUtils::ConvertLetterSpacingPxToTracking(Node->Text.LetterSpacing.GetValue(), Node->Text.FontSize, AppliedFontSize)
 		: 0;
 	const FVector2D UnwrappedSize = RuntimeProbe::MeasureTextSize(
 		PrepareRuntimeTextContent(Node->Text.Content),

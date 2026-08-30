@@ -3,8 +3,8 @@ param(
     [string]$EditorPath = "",
     [string]$LogPath = "",
     [string]$SourcePath = "",
-    [string]$TargetNodeId = "frame-1761929672442",
-    [string]$OutputPath = "/Game/Design2UMG/Automation/validation_pencil-lunaris_lunaris-design-system-components",
+    [string]$TargetNodeId = "",
+    [string]$OutputPath = "",
     [string]$SavedPngPath = "",
     [string]$SourceJsonPath = "",
     [string]$SavedJsonPath = "",
@@ -38,20 +38,26 @@ if ([string]::IsNullOrWhiteSpace($SourcePath)) {
 if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
     throw "SourcePath not found: $SourcePath"
 }
+if ([string]::IsNullOrWhiteSpace($TargetNodeId)) {
+    throw "TargetNodeId is required for Lunaris structure validation. Pass -TargetNodeId explicitly."
+}
+if ([string]::IsNullOrWhiteSpace($OutputPath)) {
+    throw "OutputPath is required for Lunaris structure validation. Pass -OutputPath explicitly."
+}
 if ([string]::IsNullOrWhiteSpace($LogPath)) {
     $LogPath = Join-Path $ProjectRoot "Saved\Logs\$([System.IO.Path]::GetFileNameWithoutExtension($ProjectPath)).log"
 }
 if ([string]::IsNullOrWhiteSpace($SavedPngPath)) {
-    $SavedPngPath = Join-Path $ProjectRoot "Saved\Design2UMG\WBP_lunaris__design_system_components.png"
+    throw "SavedPngPath is required for Lunaris structure validation. Pass -SavedPngPath explicitly."
 }
 if ([string]::IsNullOrWhiteSpace($SourceJsonPath)) {
-    $SourceJsonPath = Join-Path $ProjectRoot "Saved\Design2UMG\WBP_lunaris__design_system_components.source-tree.json"
+    throw "SourceJsonPath is required for Lunaris structure validation. Pass -SourceJsonPath explicitly."
 }
 if ([string]::IsNullOrWhiteSpace($SavedJsonPath)) {
-    $SavedJsonPath = Join-Path $ProjectRoot "Saved\Design2UMG\WBP_lunaris__design_system_components.saved-tree.json"
+    throw "SavedJsonPath is required for Lunaris structure validation. Pass -SavedJsonPath explicitly."
 }
 if ([string]::IsNullOrWhiteSpace($ResultJsonPath)) {
-    $ResultJsonPath = Join-Path $ProjectRoot "Saved\Design2UMG\WBP_lunaris__design_system_components.structure.result.json"
+    throw "ResultJsonPath is required for Lunaris structure validation. Pass -ResultJsonPath explicitly."
 }
 
 if ($ValidateOnly) {

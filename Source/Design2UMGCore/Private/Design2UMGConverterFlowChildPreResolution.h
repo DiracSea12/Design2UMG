@@ -23,24 +23,14 @@ namespace Design2UMGConverterInternal
 		void MarkFitContentPrecomputed(const TSharedPtr<FDesignNode>& RefNode) const;
 		/** Return a mutable stage copy while keeping the cached expansion snapshot untouched. */
 		TSharedPtr<FDesignNode> MakeWorkingCopy(const TSharedPtr<FDesignNode>& RefNode) const;
-
-	private:
-		const FDesignDocument& Document;
-		const TMap<FString, FString>& ThemeContext;
-		TSharedPtr<FRefExpansionCache> ExpansionCache;
-	};
-
-	class FFlowChildPreResolution
-	{
-	public:
-		explicit FFlowChildPreResolution(const FFlowChildPreResolutionResolver& InPreResolutionResolver);
-
 		void PreResolveFlowChildren(
 			const TSharedPtr<FDesignNode>& Node,
 			const FUMGWidgetNode& Widget,
 			const TArray<TSharedPtr<FDesignNode>>& VisibleChildren) const;
 
 	private:
-		const FFlowChildPreResolutionResolver& PreResolutionResolver;
+		const FDesignDocument& Document;
+		const TMap<FString, FString>& ThemeContext;
+		TSharedPtr<FRefExpansionCache> ExpansionCache;
 	};
 }

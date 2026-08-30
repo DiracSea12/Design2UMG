@@ -27,9 +27,8 @@ from PIL import Image, ImageChops, ImageFilter, ImageStat
 # ---------------------------------------------------------------------------
 STAMP = time.strftime("%Y%m%d_%H%M%S")
 SCRIPT_DIR = Path(__file__).parent
-AUTOMATION_DIR = Path(r"G:\UE5\UnrealEngine\Engine\Plugins\Marketplace\Design2UMG\Saved\Design2UMG\Automation")
-DESIGN_ROOT = Path(r"H:\LetsGoDevelop\LetsGo\Content\Design2UMG")
-RUNTIME_PROJECT = Path(r"G:\UE5\FPSRoguelike\FPSRoguelike.uproject")
+AUTOMATION_DIR = SCRIPT_DIR.parent / "Saved" / "Design2UMG" / "Automation"
+RUNTIME_PROJECT_ENV_VAR = "DESIGN2UMG_RUNTIME_PROJECT"
 UE_ROOT = Path(r"G:\UE5\UnrealEngine")
 EDITOR = UE_ROOT / "Engine/Binaries/Win64/UnrealEditor.exe"
 
@@ -45,12 +44,12 @@ EDITOR_GRACEFUL_EXIT_DEADLINE_SEC = 30.0
 # Case selection: the current 71-case formal gate scope.  Read the frozen
 # run scope so this experiment cannot silently drift from batch discovery.
 # ---------------------------------------------------------------------------
-FORMAL_AUTOMATION_ROOT = Path(r"G:\UE5\FPSRoguelike\Saved\Design2UMG\Automation")
-FORMAL_SCOPE_POINTER = FORMAL_AUTOMATION_ROOT.parent / "ReferenceCache" / "CURRENT.json"
+def formal_scope_pointer(runtime_project: Path) -> Path:
+    return runtime_project.parent / "Saved" / "Design2UMG" / "ReferenceCache" / "CURRENT.json"
 
 
-def load_formal_case_scope():
-    pointer = json.loads(FORMAL_SCOPE_POINTER.read_text(encoding="utf-8-sig"))
+def load_formal_case_scope(runtime_project: Path):
+    pointer = json.loads(formal_scope_pointer(runtime_project).read_text(encoding="utf-8-sig"))
     scope_path = Path(pointer["current_formal_scope"]["run_scope"])
     if not scope_path.is_file():
         raise RuntimeError(f"Current formal run scope not found: {scope_path}")
@@ -74,14 +73,25 @@ def load_formal_case_scope():
     return cases
 
 
-EXPERIMENT_CASES = load_formal_case_scope()
-
-
 # ---------------------------------------------------------------------------
 # Low-level helpers
 # ---------------------------------------------------------------------------
 def plugin_root():
     return SCRIPT_DIR.parent
+
+
+def resolve_runtime_project(raw_project: str) -> Path:
+    candidate = (raw_project or "").strip() or os.environ.get(RUNTIME_PROJECT_ENV_VAR, "").strip()
+    if not candidate:
+        raise RuntimeError(
+            "Runtime project path not provided. "
+            f"Pass --project explicitly or set {RUNTIME_PROJECT_ENV_VAR}. "
+            "Hardcoded fallback is not supported."
+        )
+    project = Path(candidate)
+    if not project.is_file():
+        raise RuntimeError(f"Runtime project does not exist: {project}")
+    return project
 
 
 def ensure_clean_editor():
@@ -311,13 +321,14 @@ unreal.SystemLibrary.execute_console_command(world, "QUIT_EDITOR")
 # ---------------------------------------------------------------------------
 # Experiment runner
 # ---------------------------------------------------------------------------
-def run_experiment():
+def run_experiment(runtime_project: Path):
+    experiment_cases = load_formal_case_scope(runtime_project)
     print("=" * 60)
     print("Single-Session Isolation Experiment")
     print("=" * 60)
     print(f"Editor: {EDITOR}")
-    print(f"Project: {RUNTIME_PROJECT}")
-    print(f"Cases: {len(EXPERIMENT_CASES)}")
+    print(f"Project: {runtime_project}")
+    print(f"Cases: {len(experiment_cases)}")
     print()
 
     # Create output dirs
@@ -336,7 +347,7 @@ def run_experiment():
     step_results = []
     session_results = []
 
-    for i, (case_name, mode, source, node, ref) in enumerate(EXPERIMENT_CASES):
+    for i, (case_name, mode, source, node, ref) in enumerate(experiment_cases):
         case_dir_step = step_root / case_name
         case_dir_step.mkdir(exist_ok=True)
         png_step = case_dir_step / f"{case_name}.png"
@@ -369,20 +380,20 @@ def run_experiment():
     print(f"  Output: {step_root}")
     print()
 
-    for i, (case_name, _, _, _, _) in enumerate(EXPERIMENT_CASES):
+    for i, (case_name, _, _, _, _) in enumerate(experiment_cases):
         spec_path = step_specs[i]
         log_path = step_root / f"step_{case_name}.log"
         driver_script = step_root / f"driver_step_{i:02d}.py"
         write_step_driver(driver_script, spec_path, log_path)
 
-        print(f"  [{i+1}/{len(EXPERIMENT_CASES)}] {case_name} ... ", end="", flush=True)
+        print(f"  [{i+1}/{len(experiment_cases)}] {case_name} ... ", end="", flush=True)
         ensure_clean_editor()
 
         ec = None
         for attempt in range(1, STEP_DRIVER_START_ATTEMPTS + 1):
             try:
                 ec = run_editor_process(
-                    EDITOR, RUNTIME_PROJECT, driver_script,
+                    EDITOR, runtime_project, driver_script,
                     [step_results[i]], log_path,
                     STEP_IDLE_TIMEOUT, STEP_STARTUP_TIMEOUT
                 )
@@ -412,14 +423,14 @@ def run_experiment():
     session_driver = session_root / "driver_single_session.py"
     write_single_session_driver(session_driver, session_specs, session_log)
 
-    print(f"  Running {len(EXPERIMENT_CASES)} cases in single editor session...")
+    print(f"  Running {len(experiment_cases)} cases in single editor session...")
     ensure_clean_editor()
 
     try:
         ec = run_editor_process(
-            EDITOR, RUNTIME_PROJECT, session_driver,
+            EDITOR, runtime_project, session_driver,
             session_results, session_log,
-            STEP_IDLE_TIMEOUT * len(EXPERIMENT_CASES),  # longer timeout for all cases
+            STEP_IDLE_TIMEOUT * len(experiment_cases),  # longer timeout for all cases
             STEP_STARTUP_TIMEOUT
         )
         print(f"  Session exit code: {ec}")
@@ -434,7 +445,7 @@ def run_experiment():
 
     rows = []
     all_pass = True
-    for i, (case_name, _, _, _, _) in enumerate(EXPERIMENT_CASES):
+    for i, (case_name, _, _, _, _) in enumerate(experiment_cases):
         png_a = step_pngs[i]
         png_b = session_pngs[i]
 
@@ -493,8 +504,8 @@ def run_experiment():
         "step_root": str(step_root),
         "session_root": str(session_root),
         "pixel_tolerance": PIXEL_TOLERANCE,
-        "case_count": len(EXPERIMENT_CASES),
-        "cases": EXPERIMENT_CASES,
+        "case_count": len(experiment_cases),
+        "cases": experiment_cases,
         "results": rows,
         "overall_pass": all_pass,
     }
@@ -522,6 +533,16 @@ def run_experiment():
     return all_pass
 
 
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Design2UMG single-session isolation experiment")
+    parser.add_argument(
+        "--project",
+        default="",
+        help=f"Runtime project path. If omitted, {RUNTIME_PROJECT_ENV_VAR} is required.",
+    )
+    args = parser.parse_args()
+    return 0 if run_experiment(resolve_runtime_project(args.project)) else 1
+
+
 if __name__ == "__main__":
-    ok = run_experiment()
-    sys.exit(0 if ok else 1)
+    sys.exit(main())

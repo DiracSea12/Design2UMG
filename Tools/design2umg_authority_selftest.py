@@ -284,7 +284,7 @@ def test_discover_pencil_app_candidates_prefers_document_host_then_foreground():
                 "window_titles": [],
             },
         }
-        ordered = verify.discover_pencil_app_candidates("", r"G:\UE5\FPSRoguelike\Designs\pencil-shadcn.pen")
+        ordered = verify.discover_pencil_app_candidates("", r"G:\SampleProject\Designs\pencil-shadcn.pen")
     finally:
         verify.read_pencil_registered_apps = original_read
         verify.describe_pencil_app_runtime_observations = original_observations
@@ -362,20 +362,20 @@ def test_ensure_pencil_document_open_uses_current_contract():
     original_activate = verify.activate_pencil_document
     client = FakeClient([
         "pencil-new.pen",
-        r"G:/UE5/FPSRoguelike/Designs/pencil-nitro.pen",
+        r"G:/SampleProject/Designs/pencil-nitro.pen",
     ])
     activation_calls = []
     try:
         verify.activate_pencil_document = lambda app, path: activation_calls.append((app, path))
         verify.ensure_pencil_document_open(
             client,
-            r"G:\UE5\FPSRoguelike\Designs\pencil-nitro.pen",
+            r"G:\SampleProject\Designs\pencil-nitro.pen",
             timeout_sec=0.1,
             poll_interval=0.0,
         )
     finally:
         verify.activate_pencil_document = original_activate
-    assert_equal(activation_calls, [("cursor", r"G:\UE5\FPSRoguelike\Designs\pencil-nitro.pen")])
+    assert_equal(activation_calls, [("cursor", r"G:\SampleProject\Designs\pencil-nitro.pen")])
 
 
 def test_activate_pencil_document_uses_current_editor_command():
@@ -411,7 +411,7 @@ def test_ensure_pencil_document_open_tolerates_activation_error_only_after_switc
     original_activate = verify.activate_pencil_document
     client = FakeClient([
         "pencil-new.pen",
-        r"/g:/UE5/FPSRoguelike/Designs/pencil-nitro.pen",
+        r"/g:/SampleProject/Designs/pencil-nitro.pen",
     ])
     try:
         verify.activate_pencil_document = lambda _app, _path: (_ for _ in ()).throw(
@@ -419,7 +419,7 @@ def test_ensure_pencil_document_open_tolerates_activation_error_only_after_switc
         )
         verify.ensure_pencil_document_open(
             client,
-            r"G:\UE5\FPSRoguelike\Designs\pencil-nitro.pen",
+            r"G:\SampleProject\Designs\pencil-nitro.pen",
             timeout_sec=0.1,
             poll_interval=0.0,
         )
@@ -430,22 +430,22 @@ def test_ensure_pencil_document_open_tolerates_activation_error_only_after_switc
 def test_ensure_pencil_document_open_force_reopen_when_already_active():
     original_activate = verify.activate_pencil_document
     client = FakeClient([
-        r"G:\UE5\FPSRoguelike\Designs\pencil-nitro.pen",
-        r"G:\UE5\FPSRoguelike\Designs\pencil-nitro.pen",
+        r"G:\SampleProject\Designs\pencil-nitro.pen",
+        r"G:\SampleProject\Designs\pencil-nitro.pen",
     ])
     activation_calls = []
     try:
         verify.activate_pencil_document = lambda app, path: activation_calls.append((app, path))
         verify.ensure_pencil_document_open(
             client,
-            r"G:\UE5\FPSRoguelike\Designs\pencil-nitro.pen",
+            r"G:\SampleProject\Designs\pencil-nitro.pen",
             force_reopen=True,
             timeout_sec=0.1,
             poll_interval=0.0,
         )
     finally:
         verify.activate_pencil_document = original_activate
-    assert_equal(activation_calls, [("cursor", r"G:\UE5\FPSRoguelike\Designs\pencil-nitro.pen")])
+    assert_equal(activation_calls, [("cursor", r"G:\SampleProject\Designs\pencil-nitro.pen")])
 
 
 def test_ensure_pencil_document_open_fails_closed_when_switch_never_happens():
@@ -461,7 +461,7 @@ def test_ensure_pencil_document_open_fails_closed_when_switch_never_happens():
         try:
             verify.ensure_pencil_document_open(
                 client,
-                r"G:\UE5\FPSRoguelike\Designs\pencil-nitro.pen",
+                r"G:\SampleProject\Designs\pencil-nitro.pen",
                 timeout_sec=0.01,
                 poll_interval=0.0,
             )
@@ -481,14 +481,14 @@ def test_prepare_pen_authority_reference_fails_closed_on_switch_failure():
 
     def fail_attempt(*args, **kwargs):
         raise RuntimeError(
-            "Pencil did not switch to document: G:\\UE5\\FPSRoguelike\\Designs\\pencil-nitro.pen "
+            "Pencil did not switch to document: G:\\SampleProject\\Designs\\pencil-nitro.pen "
             "(active=<none>, app=cursor, activation_error=simulated switch failure)"
         )
 
     try:
         verify.run_pen_authority_reference_attempt = fail_attempt
         authority = verify.prepare_pen_authority_reference(
-            source_path=r"G:\UE5\FPSRoguelike\Designs\pencil-nitro.pen",
+            source_path=r"G:\SampleProject\Designs\pencil-nitro.pen",
             node_id="rgGjc",
             output_dir=Path("Saved/Design2UMG/Automation/_authority_selftest"),
             server_path="",
@@ -567,7 +567,7 @@ def test_prepare_pen_authority_reference_retries_with_fresh_attempt_after_export
         }
         verify.read_image_size = lambda _path: (1, 1)
         authority = verify.prepare_pen_authority_reference(
-            source_path=r"G:\UE5\FPSRoguelike\Designs\pencil-nitro.pen",
+            source_path=r"G:\SampleProject\Designs\pencil-nitro.pen",
             node_id="rgGjc",
             output_dir=Path("Saved/Design2UMG/Automation/_authority_selftest_retry"),
             server_path="",
@@ -618,7 +618,7 @@ def test_prepare_pen_authority_reference_uses_screenshot_fallback_when_export_ti
         }
         verify.read_image_size = lambda _path: (1, 1)
         authority = verify.prepare_pen_authority_reference(
-            source_path=r"G:\UE5\FPSRoguelike\Designs\pencil-nitro.pen",
+            source_path=r"G:\SampleProject\Designs\pencil-nitro.pen",
             node_id="rgGjc",
             output_dir=Path("Saved/Design2UMG/Automation/_authority_selftest_witness"),
             server_path="",

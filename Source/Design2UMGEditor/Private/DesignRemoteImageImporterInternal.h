@@ -88,9 +88,13 @@ namespace DesignRemoteImageImporterInternal
 			TArray<uint8>& OutData,
 			FString& OutError);
 		// Downloads all URLs concurrently: every request is started first, then a
-		// single deadline loop ticks the HttpManager until all requests complete.
-		// The deadline spans the whole batch (TimeoutSeconds measured from batch
-		// start, not per URL). Synchronous; fills one result per URL.
+		// single wait loop ticks the HttpManager until all requests complete.
+		// TimeoutSeconds is a per-request budget: each request gets the full
+		// window measured from its own start, and the wait loop cancels a request
+		// once its own deadline elapses (so a large batch no longer starves its
+		// tail requests). Batch duration stays bounded because requests run
+		// concurrently and the interactive slow task remains cancellable.
+		// Synchronous; fills one result per URL.
 		static void DownloadUrls(
 			const TArray<FString>& Urls,
 			float TimeoutSeconds,

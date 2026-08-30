@@ -17,7 +17,6 @@ CANONICAL_SENTINEL_CASES = (
     "pen_pencil-welcome_step-2-frame",
 )
 CANONICAL_SENTINEL_OWNER = "Tools/design2umg_determinism_smoke.py:CANONICAL_SENTINEL_CASES"
-DEFAULT_DESIGN_ROOT = Path(r"G:\UE5\FPSRoguelike\Designs")
 DETERMINISM_SUMMARY_FILENAME = "determinism_smoke_summary.json"
 ZERO_DRIFT_EPSILON = 1e-9
 STRUCTURE_COUNT_FIELDS = (
@@ -97,7 +96,7 @@ def resolve_reference_root(raw_reference_root: str) -> Path:
 
 
 def resolve_design_root(raw_design_root: str) -> Path:
-    candidate = Path((raw_design_root or "").strip() or str(DEFAULT_DESIGN_ROOT)).expanduser().resolve()
+    candidate = Path(require_explicit_value(raw_design_root, "--design-root")).expanduser().resolve()
     if not candidate.is_dir():
         raise RuntimeError(f"Determinism smoke design root does not exist: {candidate}")
     return candidate

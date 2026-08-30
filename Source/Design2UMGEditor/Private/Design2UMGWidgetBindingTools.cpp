@@ -142,7 +142,7 @@ namespace Design2UMGWidgetBindingTools
 		UWidgetBlueprint* WBP = LoadWidgetBlueprintByAssetPath(Args[0], Error);
 		if (!WBP)
 		{
-			UE_LOG(LogDesign2UMG, Error, TEXT("[FAIL] %s"), *Error);
+			UE_LOG(LogDesign2UMG, Error, TEXT("%s"), *Error);
 			return;
 		}
 
@@ -150,19 +150,19 @@ namespace Design2UMGWidgetBindingTools
 		{
 			if (!AddEventBinding(WBP, Args[2], Args[3], Args[4], Error))
 			{
-				UE_LOG(LogDesign2UMG, Error, TEXT("[FAIL] %s"), *Error);
+				UE_LOG(LogDesign2UMG, Error, TEXT("%s"), *Error);
 				return;
 			}
 			// Compile + save go through the same path as the generation chain (including compile-time binding validation); no generation manifest is written.
 			if (!FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr))
 			{
 				UE_LOG(LogDesign2UMG, Error,
-					TEXT("[FAIL] Binding '%s'.'%s' -> '%s' added but compile/save failed for %s"),
+					TEXT("Binding '%s'.'%s' -> '%s' added but compile/save failed for %s"),
 					*Args[2], *Args[3], *Args[4], *Args[0]);
 				return;
 			}
 			UE_LOG(LogDesign2UMG, Log,
-				TEXT("[OK] Binding added: '%s'.'%s' -> '%s' on %s"),
+				TEXT("Binding added: '%s'.'%s' -> '%s' on %s"),
 				*Args[2], *Args[3], *Args[4], *Args[0]);
 		}
 

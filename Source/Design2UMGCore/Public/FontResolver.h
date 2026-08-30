@@ -31,6 +31,14 @@ struct DESIGN2UMGCORE_API FFontResolutionDiagnostic
 	TArray<FString> IssueCodes;
 };
 
+/**
+ * Threading contract: the internal caches are guarded by FCriticalSections,
+ * so concurrent cache-map access cannot corrupt them. That does NOT make the
+ * public API any-thread safe: lookups also load UFont assets (LoadObject),
+ * query the Asset Registry, read the settings CDO (GetMutableDefault) and
+ * surface editor notifications. Call these functions from the game thread
+ * only; the locks exist for internal consistency, not for off-thread use.
+ */
 struct DESIGN2UMGCORE_API FFontResolver
 {
 	/** Scan document for all used font families, compare with project assets, return missing list */

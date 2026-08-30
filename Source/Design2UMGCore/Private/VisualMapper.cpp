@@ -88,8 +88,8 @@ namespace
 
 	bool HasVisualBrushPayload(const FUMGVisualBrushData& Brush)
 	{
-		return Brush.OutlineCornerRadius >= 0.0f
-			|| Brush.HasCornerRadii()
+		return Brush.OutlineCornerRadius.IsSet()
+			|| Brush.CornerRadii.IsSet()
 			|| Brush.OutlineThickness.IsSet()
 			|| Brush.DrawAs.IsSet()
 			|| Brush.BrushColor.IsSet()
@@ -316,11 +316,11 @@ namespace
 		{
 			Border.Brush.DrawAs = Widget.Brush.DrawAs.GetValue();
 		}
-		if (Border.Brush.OutlineCornerRadius < 0.0f && Widget.Brush.OutlineCornerRadius >= 0.0f)
+		if (!Border.Brush.OutlineCornerRadius.IsSet() && Widget.Brush.OutlineCornerRadius.IsSet())
 		{
 			Border.Brush.OutlineCornerRadius = Widget.Brush.OutlineCornerRadius;
 		}
-		if (!Border.Brush.HasCornerRadii() && Widget.Brush.HasCornerRadii())
+		if (!Border.Brush.CornerRadii.IsSet() && Widget.Brush.CornerRadii.IsSet())
 		{
 			Border.Brush.CornerRadii = Widget.Brush.CornerRadii;
 		}

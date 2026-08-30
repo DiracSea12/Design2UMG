@@ -2,6 +2,7 @@
 
 #include "DesignSchema.h"
 #include "Design2UMGConverter.h"
+#include "Design2UMGTestNodes.h"
 #include "Design2UMGTestUtils.h"
 #include "FigmaParser.h"
 #include "Misc/AutomationTest.h"
@@ -12,24 +13,8 @@
 
 namespace
 {
-	TSharedPtr<FDesignNode> MakeBatchCNode(
-		const FString& Id,
-		const FString& Name,
-		const EDesignNodeType Type,
-		const float X,
-		const float Y,
-		const float Width,
-		const float Height)
-	{
-		const TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
-		Node->Id = Id;
-		Node->Name = Name;
-		Node->Type = Type;
-		Node->Transform.SetPosition(X, Y);
-		Node->Transform.SetWidthValue(FDesignSize::Fixed(Width));
-		Node->Transform.SetHeightValue(FDesignSize::Fixed(Height));
-		return Node;
-	}
+	// Was a verbatim duplicate of the shared Design2UMGEditorTests::MakeNode.
+	using Design2UMGEditorTests::MakeNode;
 
 	bool TryReadBoolProperty(const UObject* Object, const TCHAR* PropertyName, bool& OutValue)
 	{
@@ -84,7 +69,7 @@ bool FBatchCFlowChildPreResolutionSmokeTest::RunTest(const FString& Parameters)
 	FDesignDocument Document;
 	Document.Version = TEXT("batch-c-converter-flow-smoke");
 
-	const TSharedPtr<FDesignNode> Reusable = MakeBatchCNode(
+	const TSharedPtr<FDesignNode> Reusable = MakeNode(
 		TEXT("batch_c_card"),
 		TEXT("BatchCCard"),
 		EDesignNodeType::Frame,
@@ -93,7 +78,7 @@ bool FBatchCFlowChildPreResolutionSmokeTest::RunTest(const FString& Parameters)
 		64.0f,
 		24.0f);
 	Reusable->bReusable = true;
-	Reusable->Children.Add(MakeBatchCNode(
+	Reusable->Children.Add(MakeNode(
 		TEXT("batch_c_card_fill"),
 		TEXT("BatchCCardFill"),
 		EDesignNodeType::Rectangle,
@@ -102,7 +87,7 @@ bool FBatchCFlowChildPreResolutionSmokeTest::RunTest(const FString& Parameters)
 		64.0f,
 		24.0f));
 
-	const TSharedPtr<FDesignNode> Screen = MakeBatchCNode(
+	const TSharedPtr<FDesignNode> Screen = MakeNode(
 		TEXT("batch_c_screen"),
 		TEXT("BatchCScreen"),
 		EDesignNodeType::Frame,
@@ -113,7 +98,7 @@ bool FBatchCFlowChildPreResolutionSmokeTest::RunTest(const FString& Parameters)
 	Screen->LayoutData.Layout = EDesignLayout::Horizontal;
 	Screen->LayoutData.SetGap(8.0f);
 
-	const TSharedPtr<FDesignNode> RefChild = MakeBatchCNode(
+	const TSharedPtr<FDesignNode> RefChild = MakeNode(
 		TEXT("batch_c_ref"),
 		TEXT("BatchCRef"),
 		EDesignNodeType::Ref,

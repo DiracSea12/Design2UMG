@@ -245,7 +245,7 @@ bool FImportDiagnosticReportStructureTest::RunTest(const FString& Parameters)
 		Data,
 		ImageReport,
 		TEXT("/Game/Design2UMG/_TestOutput/ImportReport"),
-		TEXT("G:/UE5/FPSRoguelike/Saved/Design2UMG/WBP_ImportReportFixture.png"),
+		TEXT("G:/SampleProject/Saved/Design2UMG/WBP_ImportReportFixture.png"),
 		TEXT("/Game/Design2UMG/_TestOutput/ImportReport/WBP_ImportReportFixture"));
 
 	TArray<FString> ReportsAfter;
@@ -1202,7 +1202,7 @@ bool FImportDiagnosticReportTypedSourcePathContractTest::RunTest(const FString& 
 		Data,
 		FString(),
 		TEXT("/Game/Design2UMG/_TestOutput/TypedSourcePath"),
-		TEXT("G:/UE5/FPSRoguelike/Saved/Design2UMG/WBP_TypedSourcePathFixture.png"),
+		TEXT("G:/SampleProject/Saved/Design2UMG/WBP_TypedSourcePathFixture.png"),
 		TEXT("/Game/Design2UMG/_TestOutput/TypedSourcePath/WBP_TypedSourcePathFixture"));
 
 	TArray<FString> ReportsAfter;

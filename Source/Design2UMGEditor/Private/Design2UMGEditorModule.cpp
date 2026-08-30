@@ -65,6 +65,13 @@ namespace
 		ShowEditorNotification(MoveTemp(Info), SNotificationItem::CS_None);
 	}
 
+	void ShowEditorInfoNotification(const FText& Message)
+	{
+		FNotificationInfo Info(Message);
+		Info.ExpireDuration = 5.0f;
+		ShowEditorNotification(MoveTemp(Info), SNotificationItem::CS_None);
+	}
+
 	void ShowEditorErrorNotification(const FText& Message)
 	{
 		FNotificationInfo Info(Message);
@@ -87,10 +94,16 @@ void FDesign2UMGEditorModule::StartupModule()
 		FDesign2UMGMessageNotificationHandler::CreateStatic(&ShowEditorWarningNotification));
 	FDesign2UMGNotification::RegisterErrorHandler(
 		FDesign2UMGMessageNotificationHandler::CreateStatic(&ShowEditorErrorNotification));
+	FDesign2UMGNotification::RegisterInfoHandler(
+		FDesign2UMGMessageNotificationHandler::CreateStatic(&ShowEditorInfoNotification));
 	Design2UMGEditorDesignSourceRegistry::RegisterBuiltInSources();
 	Design2UMGEditorCommandOwner::RegisterConsoleCommands();
 	ToolMenusStartupHandle = Design2UMGEditorMenuOwner::RegisterMenus();
 	IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+	// AddRaw assumes this module object outlives the AssetRegistry delegates: the editor
+	// module singleton stays loaded for the whole editor session (unloaded only at engine
+	// shutdown or hot reload), and ShutdownModule below removes all four handles again
+	// before the module can go away, so the raw pointer never dangles.
 	FontAssetAddedHandle = AssetRegistry.OnAssetAdded().AddRaw(this, &FDesign2UMGEditorModule::HandleFontAssetChanged);
 	FontAssetRemovedHandle = AssetRegistry.OnAssetRemoved().AddRaw(this, &FDesign2UMGEditorModule::HandleFontAssetChanged);
 	FontAssetRenamedHandle = AssetRegistry.OnAssetRenamed().AddRaw(this, &FDesign2UMGEditorModule::HandleFontAssetRenamed);

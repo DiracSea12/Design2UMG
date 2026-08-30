@@ -67,6 +67,14 @@ namespace
 		return Url;
 	}
 
+	// Single trim/is-remote/normalize gate shared by CollectRemoteUrls and ResolveTexturePath,
+	// so both sides agree on the exact key used to look up pre-downloaded URL payloads.
+	FString TryNormalizeRemoteUrl(const FString& InTexturePath)
+	{
+		const FString Trimmed = InTexturePath.TrimStartAndEnd();
+		return IsRemoteUrl(Trimmed) ? NormalizeUrl(Trimmed) : FString();
+	}
+
 	FString MakeUrlHash(const FString& InUrl)
 	{
 		const FTCHARToUTF8 Utf8(*InUrl);
@@ -96,22 +104,29 @@ namespace
 		return Safe.IsEmpty() ? TEXT("Image") : Safe;
 	}
 
+	// Texture asset-name truncation limits. No derivation on record; the values
+	// were fixed when each naming scheme was introduced to keep generated asset
+	// names bounded.
+	constexpr int32 MaxLegacyAssetNamePartChars = 24;
+	constexpr int32 MaxLegacySourceHashChars = 10;
+	constexpr int32 MaxSharedContentHashChars = 16;
+
 	FString BuildLegacyTextureAssetName(const FString& FrameName, const FString& WidgetName, const FString& WidgetId, const FString& SourceKey)
 	{
-		const FString SafeFrame = SanitizeAssetName(FrameName).Left(24);
+		const FString SafeFrame = SanitizeAssetName(FrameName).Left(MaxLegacyAssetNamePartChars);
 		FString NodeBase = WidgetName;
 		if (NodeBase.IsEmpty())
 		{
 			NodeBase = WidgetId;
 		}
-		const FString SafeNode = SanitizeAssetName(NodeBase).Left(24);
-		const FString SourceHash = MakeUrlHash(SourceKey).Left(10);
+		const FString SafeNode = SanitizeAssetName(NodeBase).Left(MaxLegacyAssetNamePartChars);
+		const FString SourceHash = MakeUrlHash(SourceKey).Left(MaxLegacySourceHashChars);
 		return FString::Printf(TEXT("T_%s_%s_%s_%s"), *SafeFrame, *SafeNode, *SourceHash, LegacyTextureImportVersion);
 	}
 
 	FString BuildSharedTextureAssetName(const FString& ContentHash)
 	{
-		const FString SafeHash = ContentHash.Left(16);
+		const FString SafeHash = ContentHash.Left(MaxSharedContentHashChars);
 		return FString::Printf(TEXT("T_D2U_%s_%s"), *SafeHash, SharedTextureImportVersion);
 	}
 
@@ -156,6 +171,7 @@ namespace
 
 	FString NormalizeImportPath(const FString& InPath)
 	{
+		constexpr TCHAR DefaultImportPath[] = TEXT("/Game/Design2UMG/ImportedImages");
 		FString Path = InPath.TrimStartAndEnd();
 		Path.ReplaceInline(TEXT("\\"), TEXT("/"));
 		while (Path.EndsWith(TEXT("/")))
@@ -165,17 +181,28 @@ namespace
 
 		if (Path.IsEmpty())
 		{
-			return TEXT("/Game/Design2UMG/ImportedImages");
+			UE_LOG(LogDesign2UMG, Warning,
+				TEXT("DesignRemoteImageImporter: empty RemoteImageImportPath; falling back to %s"),
+				DefaultImportPath);
+			return DefaultImportPath;
 		}
 
 		if (!Path.StartsWith(TEXT("/Game/"), ESearchCase::CaseSensitive))
 		{
-			return TEXT("/Game/Design2UMG/ImportedImages");
+			UE_LOG(LogDesign2UMG, Warning,
+				TEXT("DesignRemoteImageImporter: RemoteImageImportPath '%s' is not under /Game; falling back to %s"),
+				*Path,
+				DefaultImportPath);
+			return DefaultImportPath;
 		}
 
 		if (!FPackageName::IsValidLongPackageName(Path))
 		{
-			return TEXT("/Game/Design2UMG/ImportedImages");
+			UE_LOG(LogDesign2UMG, Warning,
+				TEXT("DesignRemoteImageImporter: RemoteImageImportPath '%s' is not a valid long package name; falling back to %s"),
+				*Path,
+				DefaultImportPath);
+			return DefaultImportPath;
 		}
 
 		return Path;
@@ -373,6 +400,159 @@ namespace
 		return true;
 	}
 
+	// Reuse an asset this run already resolved for the same source key.
+	bool TryReuseUrlCachedTexture(const FString& SourceKey, FString& InOutTexturePath, FResolveContext& Context)
+	{
+		if (const FString* CachedPath = Context.UrlToAssetPath.Find(SourceKey))
+		{
+			if (UTexture2D* CachedTexture = LoadObject<UTexture2D>(nullptr, **CachedPath))
+			{
+				EnsureUiTextureReady(CachedTexture, Context.bTextureResourceUpdatePending);
+			}
+			InOutTexturePath = *CachedPath;
+			++Context.Report.ReusedCount;
+			return true;
+		}
+		return false;
+	}
+
+	// Reuse a content-deduplicated asset recorded earlier in this run.
+	bool TryReuseContentKeyedTexture(
+		const FString& SourceKey,
+		const FString& ContentKey,
+		const TCHAR* ReusedMessagePrefix,
+		FString& InOutTexturePath,
+		FResolveContext& Context)
+	{
+		if (const FString* ExistingPath = Context.ContentHashToAsset.Find(ContentKey))
+		{
+			if (UTexture2D* CachedTexture = LoadObject<UTexture2D>(nullptr, **ExistingPath))
+			{
+				EnsureUiTextureReady(CachedTexture, Context.bTextureResourceUpdatePending);
+			}
+			InOutTexturePath = *ExistingPath;
+			++Context.Report.ReusedCount;
+			Context.UrlToAssetPath.Add(SourceKey, *ExistingPath);
+			if (ReusedMessagePrefix)
+			{
+				Context.Report.AddMessage(FString::Printf(TEXT("%s%s"), ReusedMessagePrefix, **ExistingPath));
+			}
+			return true;
+		}
+		return false;
+	}
+
+	// Adopt an existing texture for reuse: refresh it, point the widget at it and record
+	// it in both run caches.
+	void RegisterReusedTexture(
+		const FString& SourceKey,
+		const FString& ContentKey,
+		const FString& ObjectPath,
+		UTexture2D* Texture,
+		const TCHAR* ReusedMessagePrefix,
+		FString& InOutTexturePath,
+		FResolveContext& Context)
+	{
+		EnsureUiTextureReady(Texture, Context.bTextureResourceUpdatePending);
+		InOutTexturePath = ObjectPath;
+		++Context.Report.ReusedCount;
+		Context.UrlToAssetPath.Add(SourceKey, ObjectPath);
+		Context.ContentHashToAsset.Add(ContentKey, ObjectPath);
+		if (ReusedMessagePrefix)
+		{
+			Context.Report.AddMessage(FString::Printf(TEXT("%s%s"), ReusedMessagePrefix, *ObjectPath));
+		}
+	}
+
+	// Reuse a texture persisted by a previous run under {ImportPath}/_Shared/.
+	bool TryReusePersistedSharedTexture(
+		const FString& SourceKey,
+		const FString& ContentHash,
+		const FString& ContentKey,
+		FString& InOutTexturePath,
+		FResolveContext& Context)
+	{
+		const FString PersistedObjectPath = BuildObjectPathFromImport(
+			BuildSharedImportPath(Context.ImportPath),
+			BuildSharedTextureAssetName(ContentHash));
+		UTexture2D* PersistedTexture = LoadObject<UTexture2D>(nullptr, *PersistedObjectPath);
+		if (!PersistedTexture)
+		{
+			return false;
+		}
+
+		RegisterReusedTexture(
+			SourceKey,
+			ContentKey,
+			PersistedObjectPath,
+			PersistedTexture,
+			TEXT("Reused cross-run content: "),
+			InOutTexturePath,
+			Context);
+		return true;
+	}
+
+	// Local-only repair path: when a legacy ui4 texture exists but its pixels no longer match
+	// the source image (dimension mismatch or 1x1 placeholder), rewrite it in place.
+	void RepairLegacyTextureFromSource(
+		UTexture2D* Existing,
+		const TArray<uint8>& FileData,
+		const FString& ObjectPath,
+		const FString& WidgetName,
+		FResolveContext& Context)
+	{
+		int32 SourceWidth = 0;
+		int32 SourceHeight = 0;
+		TArray64<uint8> SourceRawBGRA;
+		FString SourceDecodeError;
+		if (!FImagePayloadIO::DecodeToBGRA8(FileData, Context.ImageLimits, SourceWidth, SourceHeight, SourceRawBGRA, SourceDecodeError, &Context.OperationBudget))
+		{
+			return;
+		}
+
+		const int32 ExistingWidth = Existing->GetSizeX();
+		const int32 ExistingHeight = Existing->GetSizeY();
+		const bool bDimensionMismatch = ExistingWidth != SourceWidth || ExistingHeight != SourceHeight;
+		const bool bLooksBroken = (ExistingWidth <= 1 || ExistingHeight <= 1) && (SourceWidth > 1 || SourceHeight > 1);
+		if (!bDimensionMismatch && !bLooksBroken)
+		{
+			return;
+		}
+
+		FString RewriteError;
+		if (RewriteTextureAsset(Existing, SourceRawBGRA, SourceWidth, SourceHeight, RewriteError))
+		{
+			++Context.Report.RepairedCount;
+			Context.Report.AddMessage(FString::Printf(TEXT("Repaired local texture: %s (%dx%d -> %dx%d)"),
+				*ObjectPath, ExistingWidth, ExistingHeight, SourceWidth, SourceHeight));
+		}
+		else
+		{
+			Context.Report.AddMessage(FString::Printf(TEXT("Texture repair failed for '%s': %s"), *WidgetName, *RewriteError));
+		}
+	}
+
+	// Adopt a freshly created shared texture: refresh it, point the widget at it and record
+	// it in both run caches.
+	void RegisterImportedTexture(
+		const FString& SourceKey,
+		const FString& ContentKey,
+		const FString& ImportedObjectPath,
+		const TCHAR* ImportedMessagePrefix,
+		FString& InOutTexturePath,
+		FResolveContext& Context)
+	{
+		if (UTexture2D* ImportedTexture = LoadObject<UTexture2D>(nullptr, *ImportedObjectPath))
+		{
+			EnsureUiTextureReady(ImportedTexture, Context.bTextureResourceUpdatePending);
+		}
+		InOutTexturePath = ImportedObjectPath;
+		++Context.Report.ImportedCount;
+		Context.UrlToAssetPath.Add(SourceKey, ImportedObjectPath);
+		Context.ContentHashToAsset.Add(ContentKey, ImportedObjectPath);
+		Context.Report.AddMessage(FString::Printf(TEXT("%s%s"), ImportedMessagePrefix, *ImportedObjectPath));
+	}
+
 	bool ResolveTexturePath(FString& InOutTexturePath, const FString& WidgetName, const FString& WidgetId, FResolveContext& Context)
 	{
 		InOutTexturePath = InOutTexturePath.TrimStartAndEnd();
@@ -392,14 +572,8 @@ namespace
 			const FString LocalPath = InOutTexturePath;
 			const FString LocalKey = BuildSourceKeyForLocal(LocalPath);
 
-			if (const FString* CachedPath = Context.UrlToAssetPath.Find(LocalKey))
+			if (TryReuseUrlCachedTexture(LocalKey, InOutTexturePath, Context))
 			{
-				if (UTexture2D* CachedTexture = LoadObject<UTexture2D>(nullptr, **CachedPath))
-				{
-					EnsureUiTextureReady(CachedTexture, Context.bTextureResourceUpdatePending);
-				}
-				InOutTexturePath = *CachedPath;
-				++Context.Report.ReusedCount;
 				return true;
 			}
 
@@ -420,69 +594,24 @@ namespace
 
 			const FString ContentHash = MakeContentHash(FileData);
 			const FString ContentKey = BuildSourceScopedContentKey(LocalKey, ContentHash);
-			if (const FString* ExistingPath = Context.ContentHashToAsset.Find(ContentKey))
+			if (TryReuseContentKeyedTexture(LocalKey, ContentKey, nullptr, InOutTexturePath, Context))
 			{
-				if (UTexture2D* CachedTexture = LoadObject<UTexture2D>(nullptr, **ExistingPath))
-				{
-					EnsureUiTextureReady(CachedTexture, Context.bTextureResourceUpdatePending);
-				}
-				InOutTexturePath = *ExistingPath;
-				++Context.Report.ReusedCount;
-				Context.UrlToAssetPath.Add(LocalKey, *ExistingPath);
+				return true;
+			}
+			if (TryReusePersistedSharedTexture(LocalKey, ContentHash, ContentKey, InOutTexturePath, Context))
+			{
 				return true;
 			}
 
 			const FString SharedAssetName = BuildSharedTextureAssetName(ContentHash);
-			const FString PersistedObjectPath = BuildObjectPathFromImport(BuildSharedImportPath(Context.ImportPath), SharedAssetName);
-			if (UTexture2D* PersistedTexture = LoadObject<UTexture2D>(nullptr, *PersistedObjectPath))
-			{
-				EnsureUiTextureReady(PersistedTexture, Context.bTextureResourceUpdatePending);
-				InOutTexturePath = PersistedObjectPath;
-				++Context.Report.ReusedCount;
-				Context.UrlToAssetPath.Add(LocalKey, PersistedObjectPath);
-				Context.ContentHashToAsset.Add(ContentKey, PersistedObjectPath);
-				Context.Report.AddMessage(FString::Printf(TEXT("Reused cross-run content: %s"), *PersistedObjectPath));
-				return true;
-			}
-
 			const FString SubDir = BuildSubImportPath(Context.ImportPath, Context.FrameName);
-			const FString VersionedSourceKey = BuildVersionedSourceKey(LocalKey, ContentHash);
-			const FString LegacyAssetName = BuildLegacyTextureAssetName(Context.FrameName, WidgetName, WidgetId, VersionedSourceKey);
-			const FString ObjectPath = BuildObjectPathFromImport(SubDir, LegacyAssetName);
-			if (UTexture2D* Existing = LoadObject<UTexture2D>(nullptr, *ObjectPath))
+			const FString LegacyAssetName = BuildLegacyTextureAssetName(
+				Context.FrameName, WidgetName, WidgetId, BuildVersionedSourceKey(LocalKey, ContentHash));
+			const FString LegacyObjectPath = BuildObjectPathFromImport(SubDir, LegacyAssetName);
+			if (UTexture2D* Existing = LoadObject<UTexture2D>(nullptr, *LegacyObjectPath))
 			{
-				int32 SourceWidth = 0;
-				int32 SourceHeight = 0;
-				TArray64<uint8> SourceRawBGRA;
-				FString SourceDecodeError;
-				const bool bDecoded = FImagePayloadIO::DecodeToBGRA8(FileData, Context.ImageLimits, SourceWidth, SourceHeight, SourceRawBGRA, SourceDecodeError, &Context.OperationBudget);
-				if (bDecoded)
-				{
-					const int32 ExistingWidth = Existing->GetSizeX();
-					const int32 ExistingHeight = Existing->GetSizeY();
-					const bool bDimensionMismatch = ExistingWidth != SourceWidth || ExistingHeight != SourceHeight;
-					const bool bLooksBroken = (ExistingWidth <= 1 || ExistingHeight <= 1) && (SourceWidth > 1 || SourceHeight > 1);
-					if (bDimensionMismatch || bLooksBroken)
-					{
-						FString RewriteError;
-						if (RewriteTextureAsset(Existing, SourceRawBGRA, SourceWidth, SourceHeight, RewriteError))
-						{
-							++Context.Report.RepairedCount;
-							Context.Report.AddMessage(FString::Printf(TEXT("Repaired local texture: %s (%dx%d -> %dx%d)"),
-								*ObjectPath, ExistingWidth, ExistingHeight, SourceWidth, SourceHeight));
-						}
-						else
-						{
-							Context.Report.AddMessage(FString::Printf(TEXT("Texture repair failed for '%s': %s"), *WidgetName, *RewriteError));
-						}
-					}
-				}
-
-				EnsureUiTextureReady(Existing, Context.bTextureResourceUpdatePending);
-				InOutTexturePath = ObjectPath;
-				++Context.Report.ReusedCount;
-				Context.UrlToAssetPath.Add(LocalKey, ObjectPath);
-				Context.ContentHashToAsset.Add(ContentKey, ObjectPath);
+				RepairLegacyTextureFromSource(Existing, FileData, LegacyObjectPath, WidgetName, Context);
+				RegisterReusedTexture(LocalKey, ContentKey, LegacyObjectPath, Existing, nullptr, InOutTexturePath, Context);
 				return true;
 			}
 
@@ -503,17 +632,7 @@ namespace
 				Context.Report.AddMessage(FString::Printf(TEXT("Local image import failed for '%s': %s"), *WidgetName, *ImportError));
 				return false;
 			}
-
-			if (UTexture2D* ImportedTexture = LoadObject<UTexture2D>(nullptr, *ImportedObjectPath))
-			{
-				EnsureUiTextureReady(ImportedTexture, Context.bTextureResourceUpdatePending);
-			}
-
-			InOutTexturePath = ImportedObjectPath;
-			++Context.Report.ImportedCount;
-			Context.UrlToAssetPath.Add(LocalKey, ImportedObjectPath);
-			Context.ContentHashToAsset.Add(ContentKey, ImportedObjectPath);
-			Context.Report.AddMessage(FString::Printf(TEXT("Imported local texture: %s"), *ImportedObjectPath));
+			RegisterImportedTexture(LocalKey, ContentKey, ImportedObjectPath, TEXT("Imported local texture: "), InOutTexturePath, Context);
 			return true;
 		}
 
@@ -529,23 +648,16 @@ namespace
 			return true;
 		}
 
-		const FString NormalizedUrl = NormalizeUrl(InOutTexturePath);
-		const FString SubDir = BuildSubImportPath(Context.ImportPath, Context.FrameName);
+		const FString NormalizedUrl = TryNormalizeRemoteUrl(InOutTexturePath);
 		const FString SourceKey = BuildSourceKeyForRemote(NormalizedUrl);
 
-		if (const FString* CachedPath = Context.UrlToAssetPath.Find(SourceKey))
+		if (TryReuseUrlCachedTexture(SourceKey, InOutTexturePath, Context))
 		{
-			if (UTexture2D* CachedTexture = LoadObject<UTexture2D>(nullptr, **CachedPath))
-			{
-				EnsureUiTextureReady(CachedTexture, Context.bTextureResourceUpdatePending);
-			}
-			InOutTexturePath = *CachedPath;
-			++Context.Report.ReusedCount;
 			return true;
 		}
 
 		// UrlDownloads is pre-populated by ResolveRemoteImages for every URL that
-		// CollectRemoteUrls gathered (same trim/is-remote/normalize logic as here).
+		// CollectRemoteUrls gathered (both sides normalize through TryNormalizeRemoteUrl).
 		const FUrlDownloadResult& Download = Context.UrlDownloads.FindChecked(NormalizedUrl);
 		if (!Download.bSuccess)
 		{
@@ -564,43 +676,23 @@ namespace
 
 		const FString ContentHash = MakeContentHash(CompressedData);
 		const FString ContentKey = BuildSourceScopedContentKey(SourceKey, ContentHash);
-		if (const FString* ExistingPath = Context.ContentHashToAsset.Find(ContentKey))
+		if (TryReuseContentKeyedTexture(SourceKey, ContentKey, TEXT("Reused deduplicated content: "), InOutTexturePath, Context))
 		{
-			if (UTexture2D* CachedTexture = LoadObject<UTexture2D>(nullptr, **ExistingPath))
-			{
-				EnsureUiTextureReady(CachedTexture, Context.bTextureResourceUpdatePending);
-			}
-			InOutTexturePath = *ExistingPath;
-			++Context.Report.ReusedCount;
-			Context.UrlToAssetPath.Add(SourceKey, *ExistingPath);
-			Context.Report.AddMessage(FString::Printf(TEXT("Reused deduplicated content: %s"), **ExistingPath));
+			return true;
+		}
+		if (TryReusePersistedSharedTexture(SourceKey, ContentHash, ContentKey, InOutTexturePath, Context))
+		{
 			return true;
 		}
 
 		const FString SharedAssetName = BuildSharedTextureAssetName(ContentHash);
-		const FString PersistedObjectPath = BuildObjectPathFromImport(BuildSharedImportPath(Context.ImportPath), SharedAssetName);
-		if (UTexture2D* PersistedTexture = LoadObject<UTexture2D>(nullptr, *PersistedObjectPath))
+		const FString SubDir = BuildSubImportPath(Context.ImportPath, Context.FrameName);
+		const FString LegacyAssetName = BuildLegacyTextureAssetName(
+			Context.FrameName, WidgetName, WidgetId, BuildVersionedSourceKey(SourceKey, ContentHash));
+		const FString LegacyObjectPath = BuildObjectPathFromImport(SubDir, LegacyAssetName);
+		if (UTexture2D* ExistingTexture = LoadObject<UTexture2D>(nullptr, *LegacyObjectPath))
 		{
-			EnsureUiTextureReady(PersistedTexture, Context.bTextureResourceUpdatePending);
-			InOutTexturePath = PersistedObjectPath;
-			++Context.Report.ReusedCount;
-			Context.UrlToAssetPath.Add(SourceKey, PersistedObjectPath);
-			Context.ContentHashToAsset.Add(ContentKey, PersistedObjectPath);
-			Context.Report.AddMessage(FString::Printf(TEXT("Reused cross-run content: %s"), *PersistedObjectPath));
-			return true;
-		}
-
-		const FString VersionedSourceKey = BuildVersionedSourceKey(SourceKey, ContentHash);
-		const FString LegacyAssetName = BuildLegacyTextureAssetName(Context.FrameName, WidgetName, WidgetId, VersionedSourceKey);
-		const FString ObjectPath = BuildObjectPathFromImport(SubDir, LegacyAssetName);
-		if (UTexture2D* ExistingTexture = LoadObject<UTexture2D>(nullptr, *ObjectPath))
-		{
-			EnsureUiTextureReady(ExistingTexture, Context.bTextureResourceUpdatePending);
-			InOutTexturePath = ObjectPath;
-			++Context.Report.ReusedCount;
-			Context.UrlToAssetPath.Add(SourceKey, ObjectPath);
-			Context.ContentHashToAsset.Add(ContentKey, ObjectPath);
-			Context.Report.AddMessage(FString::Printf(TEXT("Reused existing texture: %s"), *ObjectPath));
+			RegisterReusedTexture(SourceKey, ContentKey, LegacyObjectPath, ExistingTexture, TEXT("Reused existing texture: "), InOutTexturePath, Context);
 			return true;
 		}
 
@@ -623,17 +715,7 @@ namespace
 			Context.Report.AddMessage(FString::Printf(TEXT("Image '%s' import failed: %s (reason: %s)"), *WidgetName, *NormalizedUrl, *ImportError));
 			return false;
 		}
-
-		if (UTexture2D* ImportedTexture = LoadObject<UTexture2D>(nullptr, *ImportedObjectPath))
-		{
-			EnsureUiTextureReady(ImportedTexture, Context.bTextureResourceUpdatePending);
-		}
-
-		InOutTexturePath = ImportedObjectPath;
-		++Context.Report.ImportedCount;
-		Context.UrlToAssetPath.Add(SourceKey, ImportedObjectPath);
-		Context.ContentHashToAsset.Add(ContentKey, ImportedObjectPath);
-		Context.Report.AddMessage(FString::Printf(TEXT("Imported texture: %s"), *ImportedObjectPath));
+		RegisterImportedTexture(SourceKey, ContentKey, ImportedObjectPath, TEXT("Imported texture: "), InOutTexturePath, Context);
 		return true;
 	}
 
@@ -663,13 +745,10 @@ namespace
 	void CollectRemoteUrls(const FUMGWidgetNode& Node, TSet<FString>& OutUrls)
 	{
 		const FString TexturePath = Node.Brush.Image.TexturePath.Get(Node.Brush.TexturePath);
-		if (!TexturePath.IsEmpty())
+		const FString NormalizedUrl = TryNormalizeRemoteUrl(TexturePath);
+		if (!NormalizedUrl.IsEmpty())
 		{
-			const FString Trimmed = TexturePath.TrimStartAndEnd();
-			if (IsRemoteUrl(Trimmed))
-			{
-				OutUrls.Add(NormalizeUrl(Trimmed));
-			}
+			OutUrls.Add(NormalizedUrl);
 		}
 		for (const FUMGWidgetNode& Child : Node.Children)
 		{
@@ -678,6 +757,12 @@ namespace
 	}
 }
 
+// Partial-success contract: returns false as soon as any URL in the batch
+// fails, but every texture imported before that failure stays saved on disk
+// (CreateTextureAsset writes each package immediately). Callers must treat
+// false as "this run had failures; some assets may already be written", not
+// as an all-or-nothing rollback. A Warning with the failure count is logged
+// below. Generation continues so unaffected images are still resolved.
 bool FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, FString* OutReport)
 {
 	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();

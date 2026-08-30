@@ -426,20 +426,15 @@ namespace Design2UMGConverterInternal
 		return ExpandedChild == Child ? Child : MakeWorkingCopy(Child);
 	}
 
-	FFlowChildPreResolution::FFlowChildPreResolution(const FFlowChildPreResolutionResolver& InPreResolutionResolver)
-		: PreResolutionResolver(InPreResolutionResolver)
+void FFlowChildPreResolutionResolver::PreResolveFlowChildren(
+	const TSharedPtr<FDesignNode>& Node,
+	const FUMGWidgetNode& Widget,
+	const TArray<TSharedPtr<FDesignNode>>& VisibleChildren) const
+{
+	PreResolveLinearFlowFillChildren(Node, Widget, VisibleChildren, *this);
+	for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
 	{
+		PreResolveFlowFitChild(Node, Child, *this);
 	}
-
-	void FFlowChildPreResolution::PreResolveFlowChildren(
-		const TSharedPtr<FDesignNode>& Node,
-		const FUMGWidgetNode& Widget,
-		const TArray<TSharedPtr<FDesignNode>>& VisibleChildren) const
-	{
-		PreResolveLinearFlowFillChildren(Node, Widget, VisibleChildren, PreResolutionResolver);
-		for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
-		{
-			PreResolveFlowFitChild(Node, Child, PreResolutionResolver);
-		}
-	}
+}
 }

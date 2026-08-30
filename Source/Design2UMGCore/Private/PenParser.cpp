@@ -15,59 +15,39 @@
 #include "Misc/Paths.h"
 #include "PenParserInternal.h"
 #include "PenParserNodeExtensions.h"
+#include "ParserSharedSemantics.h"
 
 namespace
 {
-	struct FPenParserParseContext
-	{
-		bool bDepthExceeded = false;
-	};
+struct FPenParserParseContext
+{
+	bool bDepthExceeded = false;
+};
 
-	const PenParserNodeExtensions::FParseCallbacks& GetNodeExtensionCallbacks();
-}
-
+// TU-local pipeline functions defined below; cross-TU parse functions are declared in PenParserInternal.h.
 bool ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FDesignDocument& OutDocument);
 void ParseVariables(const TSharedPtr<FJsonObject>& JsonObj, TMap<FString, FDesignVariable>& OutVariables);
 bool ValidateNodeDepth(const TSharedPtr<FJsonObject>& JsonObj, FPenParserParseContext& ParseContext, int32 Depth);
 bool ValidateChildrenDepth(const TSharedPtr<FJsonValue>& ChildrenField, FPenParserParseContext& ParseContext, int32 Depth);
-TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver);
 TSharedPtr<FDesignNode> ParseNodeAtDepth(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver, FPenParserParseContext& ParseContext, int32 Depth);
-void AppendParsedChildren(const TSharedPtr<FJsonValue>& ChildrenField, const FDesignVariableResolver& Resolver, TArray<TSharedPtr<FDesignNode>>& OutChildren);
 void AppendParsedChildrenAtDepth(const TSharedPtr<FJsonValue>& ChildrenField, const FDesignVariableResolver& Resolver, TArray<TSharedPtr<FDesignNode>>& OutChildren, FPenParserParseContext& ParseContext, int32 Depth);
-void ParseNodeFillProperties(const TSharedPtr<FJsonValue>& Value, FDesignNode& OutNode, const FDesignVariableResolver& Resolver);
-void ParseNodeStrokeProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver);
-void ApplyNodeBoxProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, EDesignNodeType SizeNodeType, const FDesignVariableResolver& Resolver);
-void ApplyNodeLayoutProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver, bool bIncludeTextProperties);
-void ApplyNodeTextStyleProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver);
-FDesignSize ParseSize(const TSharedPtr<FJsonValue>& Value, EDesignNodeType NodeType, const FDesignVariableResolver& Resolver);
-FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver);
-FDesignPadding ParsePadding(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver);
-EDesignNodeType ParseNodeType(const FString& S);
-EDesignLayout ParseLayout(const FString& S);
-EDesignJustifyContent ParseJustifyContent(const FString& S);
-EDesignAlignItems ParseAlignItems(const FString& S);
-EDesignTextAlign ParseTextAlign(const FString& S);
-EDesignTextAlignVertical ParseTextAlignVertical(const FString& S);
-EDesignTextGrowth ParseTextGrowth(const FString& S);
 
-namespace
+const PenParserNodeExtensions::FParseCallbacks& GetNodeExtensionCallbacks()
 {
-	const PenParserNodeExtensions::FParseCallbacks& GetNodeExtensionCallbacks()
-	{
-		static const PenParserNodeExtensions::FParseCallbacks Callbacks{
-			&ParseNodeFillProperties,
-			&ParseNodeStrokeProperties,
-			&ApplyNodeBoxProperties,
-			&ApplyNodeLayoutProperties,
-			&ApplyNodeTextStyleProperties,
-			&ParseTextAlign,
-			&ParseTextAlignVertical,
-			&ParseTextGrowth,
-			&ParseNode,
-			&AppendParsedChildren
-		};
-		return Callbacks;
-	}
+	static const PenParserNodeExtensions::FParseCallbacks Callbacks{
+		&PenParser::ParseNodeFillProperties,
+		&PenParser::ParseNodeStrokeProperties,
+		&PenParser::ApplyNodeBoxProperties,
+		&PenParser::ApplyNodeLayoutProperties,
+		&PenParser::ApplyNodeTextStyleProperties,
+		&ParserSharedSemantics::ParseTextAlignToken,
+		&PenParser::ParseTextAlignVertical,
+		&PenParser::ParseTextGrowth,
+		&PenParser::ParseNode,
+		&PenParser::AppendParsedChildren
+	};
+	return Callbacks;
+}
 }
 
 bool FPenParser::ParseFromFile(const FString& FilePath, FDesignDocument& OutDocument)
@@ -106,6 +86,8 @@ bool FPenParser::ParseDocumentObject(const TSharedPtr<FJsonObject>& JsonObject, 
 	return ParseDocumentInternal(JsonObject, OutDocument);
 }
 
+namespace
+{
 bool ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FDesignDocument& OutDocument)
 {
 	if (!JsonObj.IsValid())
@@ -150,8 +132,8 @@ bool ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FDesignDocume
 			if (Pair.Value->Type != EJson::Array)
 				continue;
 			TArray<FString> Values;
-			const TArray<TSharedPtr<FJsonValue>>& Arr = Pair.Value->AsArray();
-			for (const auto& Val : Arr)
+			const TArray<TSharedPtr<FJsonValue>>& JsonValues = Pair.Value->AsArray();
+			for (const auto& Val : JsonValues)
 				Values.Add(Val->AsString());
 			OutDocument.Themes.Add(Pair.Key, Values);
 		}
@@ -217,10 +199,10 @@ void ParseVariables(const TSharedPtr<FJsonObject>& JsonObj, TMap<FString, FDesig
 		}
 		if (ValueField->Type == EJson::Array)
 		{
-			const TArray<TSharedPtr<FJsonValue>>& Arr = ValueField->AsArray();
-			for (int32 i = 0; i < Arr.Num(); ++i)
+			const TArray<TSharedPtr<FJsonValue>>& Values = ValueField->AsArray();
+			for (int32 i = 0; i < Values.Num(); ++i)
 			{
-				const TSharedPtr<FJsonObject>& EntryObj = Arr[i]->AsObject();
+				const TSharedPtr<FJsonObject>& EntryObj = Values[i]->AsObject();
 				if (!EntryObj.IsValid())
 					continue;
 
@@ -343,12 +325,6 @@ bool ValidateChildrenDepth(
 	return true;
 }
 
-TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver)
-{
-	FPenParserParseContext ParseContext;
-	return ParseNodeAtDepth(JsonObj, Resolver, ParseContext, 0);
-}
-
 TSharedPtr<FDesignNode> ParseNodeAtDepth(
 	const TSharedPtr<FJsonObject>& JsonObj,
 	const FDesignVariableResolver& Resolver,
@@ -381,7 +357,7 @@ TSharedPtr<FDesignNode> ParseNodeAtDepth(
 		UE_LOG(LogDesign2UMG, Warning, TEXT("Node '%s' is missing type metadata and was skipped."), *Node->Id);
 		return nullptr;
 	}
-	Node->Type = ParseNodeType(TypeStr);
+	Node->Type = PenParser::ParseNodeType(TypeStr);
 
 	// Node-level theme overrides for variable resolving.
 	const FDesignVariableResolver* ActiveResolver = &Resolver;
@@ -420,7 +396,7 @@ TSharedPtr<FDesignNode> ParseNodeAtDepth(
 		}
 	}
 
-	ApplyNodeBoxProperties(JsonObj, *Node, Node->Type, *ActiveResolver);
+	PenParser::ApplyNodeBoxProperties(JsonObj, *Node, Node->Type, *ActiveResolver);
 	TryGetResolvedNumberField(JsonObj, TEXT("rotation"), *ActiveResolver, Node->Transform.Rotation);
 
 	// Visibility.
@@ -432,11 +408,11 @@ TSharedPtr<FDesignNode> ParseNodeAtDepth(
 	{
 		FString LayoutStr;
 		if (JsonObj->TryGetStringField(TEXT("layout"), LayoutStr))
-			Node->LayoutData.Layout = ParseLayout(LayoutStr);
+			Node->LayoutData.Layout = PenParser::ParseLayout(LayoutStr);
 		else if (Node->Type == EDesignNodeType::Group)
 			Node->LayoutData.Layout = EDesignLayout::None;
 	}
-	ApplyNodeLayoutProperties(JsonObj, *Node, *ActiveResolver, false);
+	PenParser::ApplyNodeLayoutProperties(JsonObj, *Node, *ActiveResolver, false);
 	if (JsonObj->HasField(TEXT("layoutIncludeStroke")))
 	{
 		bool bLayoutIncludeStroke = false;
@@ -449,8 +425,8 @@ TSharedPtr<FDesignNode> ParseNodeAtDepth(
 
 	// Visual properties.
 	if (JsonObj->HasField(TEXT("fill")))
-		ParseNodeFillProperties(JsonObj->TryGetField(TEXT("fill")), *Node, *ActiveResolver);
-	ParseNodeStrokeProperties(JsonObj, *Node, *ActiveResolver);
+		PenParser::ParseNodeFillProperties(JsonObj->TryGetField(TEXT("fill")), *Node, *ActiveResolver);
+	PenParser::ParseNodeStrokeProperties(JsonObj, *Node, *ActiveResolver);
 	if (JsonObj->HasField(TEXT("cornerRadius")))
 		Node->Visual.CornerRadius = ActiveResolver->ResolveCornerRadius(JsonObj->TryGetField(TEXT("cornerRadius")));
 
@@ -462,15 +438,6 @@ TSharedPtr<FDesignNode> ParseNodeAtDepth(
 	PenParserNodeExtensions::ParsePenSemanticMetadata(JsonObj, *Node, *ActiveResolver);
 
 	return Node;
-}
-
-void AppendParsedChildren(
-	const TSharedPtr<FJsonValue>& ChildrenField,
-	const FDesignVariableResolver& Resolver,
-	TArray<TSharedPtr<FDesignNode>>& OutChildren)
-{
-	FPenParserParseContext ParseContext;
-	AppendParsedChildrenAtDepth(ChildrenField, Resolver, OutChildren, ParseContext, 0);
 }
 
 void AppendParsedChildrenAtDepth(
@@ -495,6 +462,24 @@ void AppendParsedChildrenAtDepth(
 		if (TSharedPtr<FDesignNode> Child = ParseNodeAtDepth(ChildVal->AsObject(), Resolver, ParseContext, Depth))
 			OutChildren.Add(Child);
 	}
+}
+}
+
+namespace PenParser
+{
+TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver)
+{
+	FPenParserParseContext ParseContext;
+	return ParseNodeAtDepth(JsonObj, Resolver, ParseContext, 0);
+}
+
+void AppendParsedChildren(
+	const TSharedPtr<FJsonValue>& ChildrenField,
+	const FDesignVariableResolver& Resolver,
+	TArray<TSharedPtr<FDesignNode>>& OutChildren)
+{
+	FPenParserParseContext ParseContext;
+	AppendParsedChildrenAtDepth(ChildrenField, Resolver, OutChildren, ParseContext, 0);
 }
 
 void ParseNodeFillProperties(const TSharedPtr<FJsonValue>& Value, FDesignNode& OutNode, const FDesignVariableResolver& Resolver)
@@ -653,7 +638,6 @@ void ParseNodeStrokeProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNo
 	}
 }
 
-
 FDesignSize ParseSize(const TSharedPtr<FJsonValue>& Value, EDesignNodeType NodeType, const FDesignVariableResolver& Resolver)
 {
 	if (!Value.IsValid())
@@ -726,8 +710,7 @@ FDesignSize ParseSize(const TSharedPtr<FJsonValue>& Value, EDesignNodeType NodeT
 
 	return FDesignSize::Fit();
 }
-
-
+}
 
 TArray<FDesignFrameInfo> ExtractTopFrames(const FDesignDocument& Document)
 {
@@ -746,8 +729,3 @@ TArray<FDesignFrameInfo> ExtractTopFrames(const FDesignDocument& Document)
 	}
 	return Result;
 }
-
-
-
-
-

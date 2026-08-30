@@ -186,7 +186,7 @@ namespace
 			&& !Widget.WidgetStyle.HasAny()
 			&& !HasMultiFillBorderPaintBeyondTransferredLayers(Widget.Brush)
 			&& !Widget.Brush.DrawAs.IsSet()
-			&& !Widget.Brush.HasCornerRadii()
+			&& !Widget.Brush.CornerRadii.IsSet()
 			&& Widget.TextStyle.FontSize == 0.0f
 			&& Widget.TextStyle.SourceFontSize == 0.0f
 			&& !Widget.TextStyle.LetterSpacing.IsSet()
