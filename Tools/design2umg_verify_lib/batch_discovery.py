@@ -24,6 +24,11 @@ DEFAULT_FIGMA_EXPORT_DIR_NAMES = (
     "figma_game_potions_levelselect",
     "figma_game_bubbo_gameplay",
     "figma_game_english_cycle",
+    "figma_font_olmoe",
+    "figma_font_digicurriculum",
+    "figma_font_rustlang",
+    "figma_font_typespecimen",
+    "figma_font_uswds",
 )
 
 

@@ -41,7 +41,7 @@ STRUCTURE_BASELINE_LOWER_IS_BETTER = {
 EDITOR_GRACEFUL_EXIT_DEADLINE_SEC = 30.0  # seconds to wait for editor results after process exits
 EDITOR_STEP_DRIVER_START_ATTEMPTS = 2
 AUTOMATION_GAME_OUTPUT_PREFIX = "/Game/Design2UMG/Automation"
-FORMAL_DISCOVERED_CASE_COUNT = 71
+FORMAL_DISCOVERED_CASE_COUNT = 81
 
 
 def parse_no_regression_epsilon(raw: str) -> float:
