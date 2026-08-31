@@ -41,6 +41,7 @@ namespace
 			Node->Text.FontFamily,
 			Node->Text.FontPostScriptName,
 			Node->Text.FontWeight,
+			Node->Text.FontStyle,
 			0);
 		const float SourceLineHeight = Node->Text.FontSize * Node->Text.LineHeight;
 		if (!IsFinitePositive(NaturalLineSize.Y) || !IsFinitePositive(SourceLineHeight))

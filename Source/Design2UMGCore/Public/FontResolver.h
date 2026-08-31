@@ -71,6 +71,10 @@ struct DESIGN2UMGCORE_API FFontResolver
 	/** Find an exact weight typeface inside an already resolved UFont asset. Returns empty when missing. */
 	static FString FindExactTypefaceForAssetPath(const FString& FontAssetPath, const FString& RequestedWeight);
 
+	/** Find an exact "<Weight> Italic" typeface inside an already resolved UFont asset. Returns empty when
+	  missing, after emitting one deduplicated Warning per (asset, typeface) so the caller falls back to roman. */
+	static FString FindItalicTypefaceForAssetPath(const FString& FontAssetPath, const FString& RequestedWeight, const FString& FontFamily);
+
 	/** Return true when the declaration is covered by an explicit settings mapping, even if the mapped asset is invalid. */
 	static bool HasExplicitFontMapping(const FString& FontFamily, const FString& PostScriptName = FString());
 

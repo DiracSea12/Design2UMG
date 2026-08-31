@@ -67,7 +67,8 @@ namespace
 		const TextFontResolution::FResolvedFontSelection ResolvedFont = TextFontResolution::Resolve(
 			Node->Text.FontFamily,
 			Node->Text.FontPostScriptName,
-			Node->Text.FontWeight);
+			Node->Text.FontWeight,
+			Node->Text.FontStyle);
 		if (!ResolvedFont.FontAssetPath.IsEmpty())
 		{
 			Widget.Text.FontFamily = ResolvedFont.FontAssetPath;
@@ -292,10 +293,12 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 				? Run->FontPostScriptName
 				: InNode->Text.FontPostScriptName;
 			const FString EffectiveFontWeight = (Run && !Run->FontWeight.IsEmpty()) ? Run->FontWeight : InNode->Text.FontWeight;
+			const FString EffectiveFontStyle = (Run && !Run->FontStyle.IsEmpty()) ? Run->FontStyle : InNode->Text.FontStyle;
 			const TextFontResolution::FResolvedFontSelection ResolvedFont = TextFontResolution::Resolve(
 				EffectiveFontFamily,
 				EffectivePostScriptName,
-				EffectiveFontWeight);
+				EffectiveFontWeight,
+				EffectiveFontStyle);
 			Result.FontFamily = ResolvedFont.FontAssetPath;
 			Result.TypefaceFontName = ResolvedFont.TypefaceName;
 		}
@@ -304,7 +307,8 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 			Result.TypefaceFontName = TextFontResolution::Resolve(
 				InNode->Text.FontFamily,
 				InNode->Text.FontPostScriptName,
-				Run->FontWeight).TypefaceName;
+				Run->FontWeight,
+				Run->FontStyle.IsEmpty() ? InNode->Text.FontStyle : Run->FontStyle).TypefaceName;
 		}
 
 		const bool bRunHasFontSize = Run && Run->FontSize.IsSet();

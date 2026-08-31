@@ -35,10 +35,17 @@ namespace TextFontResolution
 		bool bRequiresResolvedFontAsset = false;
 	};
 
+	/** Italic is declared as part of the source fontStyle string ("SemiBold Italic", "Italic", ...). */
+	inline bool IsItalicFontStyle(const FString& FontStyle)
+	{
+		return FontStyle.Contains(TEXT("italic"));
+	}
+
 	inline FResolvedFontSelection Resolve(
 		const FString& FontFamily,
 		const FString& FontPostScriptName,
-		const FString& FontWeight)
+		const FString& FontWeight,
+		const FString& FontStyle = FString())
 	{
 		FResolvedFontSelection Result;
 		Result.bRequiresResolvedFontAsset = FFontResolver::HasInvalidProjectFontAsset(FontFamily);
@@ -46,11 +53,21 @@ namespace TextFontResolution
 		const bool bExplicitMapping = FFontResolver::HasExplicitFontMapping(FontFamily, FontPostScriptName);
 		const FString EffectiveWeight = FontWeight.IsEmpty() ? TEXT("normal") : FontWeight;
 		const FString CandidateAssetPath = FFontResolver::FindFontAssetPath(FontFamily, FontPostScriptName);
+		const FString ItalicTypefaceName = (IsItalicFontStyle(FontStyle) && !FontWeight.IsEmpty())
+			? FFontResolver::FindItalicTypefaceForAssetPath(CandidateAssetPath, EffectiveWeight, FontFamily)
+			: FString();
 		if (bExplicitMapping)
 		{
 			if (FontWeight.IsEmpty())
 			{
 				Result.FontAssetPath = CandidateAssetPath;
+				return Result;
+			}
+
+			if (!ItalicTypefaceName.IsEmpty())
+			{
+				Result.FontAssetPath = CandidateAssetPath;
+				Result.TypefaceName = ItalicTypefaceName;
 				return Result;
 			}
 
@@ -67,6 +84,11 @@ namespace TextFontResolution
 		Result.FontAssetPath = CandidateAssetPath;
 		if (FontWeight.IsEmpty())
 		{
+			return Result;
+		}
+		if (!ItalicTypefaceName.IsEmpty())
+		{
+			Result.TypefaceName = ItalicTypefaceName;
 			return Result;
 		}
 		Result.TypefaceName = FFontResolver::FindBestTypefaceForAssetPath(Result.FontAssetPath, EffectiveWeight);

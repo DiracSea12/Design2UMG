@@ -63,10 +63,11 @@ namespace
 		const FString& FontFamily,
 		const FString& FontPostScriptName,
 		const FString& FontWeight,
+		const FString& FontStyle,
 		const int32 LetterSpacing)
 	{
 		const TextFontResolution::FResolvedFontSelection ResolvedFont =
-			TextFontResolution::Resolve(FontFamily, FontPostScriptName, FontWeight);
+			TextFontResolution::Resolve(FontFamily, FontPostScriptName, FontWeight, FontStyle);
 		TextMeasurementRuntimeProbe::FTextMeasureRequest Request;
 		Request.Text = Text;
 		Request.FontSize = FontSize;
@@ -94,7 +95,8 @@ namespace
 		const TextFontResolution::FResolvedFontSelection ResolvedFont = TextFontResolution::Resolve(
 			Node->Text.FontFamily,
 			Node->Text.FontPostScriptName,
-			Node->Text.FontWeight);
+			Node->Text.FontWeight,
+			Node->Text.FontStyle);
 		Request.Text = Text;
 		Request.FontSize = FontSize;
 		Request.FontAssetPath = ResolvedFont.FontAssetPath;
@@ -121,6 +123,7 @@ FVector2D MeasureTextSize(
 	const FString& FontFamily,
 	const FString& FontPostScriptName,
 	const FString& FontWeight,
+	const FString& FontStyle,
 	int32 LetterSpacing)
 {
 	if (!IsFinitePositive(FontSize))
@@ -131,7 +134,7 @@ FVector2D MeasureTextSize(
 	const FString RuntimeText = TextMeasurement::PrepareRuntimeTextContent(Text);
 	FVector2D MeasuredSize = FVector2D::ZeroVector;
 	const TextMeasurementRuntimeProbe::FTextMeasureRequest Request =
-		BuildTextMeasureRequest(RuntimeText, FontSize, FontFamily, FontPostScriptName, FontWeight, LetterSpacing);
+		BuildTextMeasureRequest(RuntimeText, FontSize, FontFamily, FontPostScriptName, FontWeight, FontStyle, LetterSpacing);
 	if (TextMeasurementRuntimeProbe::TryMeasureText(Request, MeasuredSize))
 	{
 		return MeasuredSize;

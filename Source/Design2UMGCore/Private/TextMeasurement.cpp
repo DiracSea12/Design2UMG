@@ -88,6 +88,7 @@ bool TextMeasurement::ShouldApplyExplicitLineHeight(const TSharedPtr<FDesignNode
 		Node->Text.FontFamily,
 		Node->Text.FontPostScriptName,
 		Node->Text.FontWeight,
+		Node->Text.FontStyle,
 		LetterSpacingTracking);
 	return UnwrappedSize.X > WidthLimit;
 }
@@ -177,6 +178,7 @@ FVector2D TextMeasurement::MeasureTextNodeSize(const TSharedPtr<FDesignNode>& No
 		Node->Text.FontFamily,
 		Node->Text.FontPostScriptName,
 		Node->Text.FontWeight,
+		Node->Text.FontStyle,
 		LetterSpacingTracking);
 
 	const float WrapTextAt = ResolvedLayout.WrapTextAt;

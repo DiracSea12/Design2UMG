@@ -277,6 +277,7 @@ namespace
 		TMap<FString, TArray<FString>> NormalizedProjectFontAssetIndex;
 		TMap<FString, TMap<FString, FString>> KnownIconGlyphCache;
 		TMap<FString, TMap<FString, FString>> KnownIconNameCache;
+		TSet<FString> WarnedMissingItalicTypefaces;
 		bool bProjectFontIndexBuilt = false;
 		FCriticalSection FontResolverCacheMutex;
 		FCriticalSection FontIndexMutex;
@@ -336,6 +337,19 @@ namespace
 			FontAssetCache.Empty();
 			KnownIconGlyphCache.Reset();
 			KnownIconNameCache.Reset();
+			WarnedMissingItalicTypefaces.Reset();
+		}
+
+		/** Returns true exactly once per dedup key so the italic fallback warning cannot spam the log. */
+		bool MarkMissingItalicTypefaceWarning(const FString& DedupKey)
+		{
+			FScopeLock Lock(&FontResolverCacheMutex);
+			const bool bAlreadyWarned = WarnedMissingItalicTypefaces.Contains(DedupKey);
+			if (!bAlreadyWarned)
+			{
+				WarnedMissingItalicTypefaces.Add(DedupKey);
+			}
+			return !bAlreadyWarned;
 		}
 
 		TArray<FString> GetIndexedFontAssetPathsSnapshot(const FString& NormalizedFamily)
@@ -1035,6 +1049,40 @@ FString FFontResolver::FindExactTypefaceForAssetPath(const FString& FontAssetPat
 		}
 	}
 
+	return FString();
+}
+
+FString FFontResolver::FindItalicTypefaceForAssetPath(const FString& FontAssetPath, const FString& RequestedWeight, const FString& FontFamily)
+{
+	const FString AssetPath = FontAssetPath.TrimStartAndEnd();
+	if (!IsProjectFontAssetPath(AssetPath) && !IsEngineFontAssetPath(AssetPath))
+	{
+		return FString();
+	}
+
+	UFont* Font = LoadObject<UFont>(nullptr, *AssetPath);
+	const FCompositeFont* Composite = Font ? Font->GetCompositeFont() : nullptr;
+	if (!Composite || Composite->DefaultTypeface.Fonts.Num() == 0)
+	{
+		return FString();
+	}
+
+	const FString DesiredName = TypefaceNameForWeightValue(ParseWeightValue(RequestedWeight)) + TEXT(" Italic");
+	for (const FTypefaceEntry& Entry : Composite->DefaultTypeface.Fonts)
+	{
+		if (Entry.Name.ToString().Equals(DesiredName, ESearchCase::IgnoreCase))
+		{
+			return Entry.Name.ToString();
+		}
+	}
+
+	if (GetFontResolverCache().MarkMissingItalicTypefaceWarning(AssetPath + TEXT("|") + DesiredName))
+	{
+		const FString FamilyLabel = FontFamily.TrimStartAndEnd().IsEmpty() ? AssetPath : FontFamily;
+		UE_LOG(LogDesign2UMG, Warning,
+			TEXT("Font '%s' has no italic typeface '%s'; falling back to roman"),
+			*FamilyLabel, *DesiredName);
+	}
 	return FString();
 }
 

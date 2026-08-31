@@ -28,6 +28,7 @@ namespace RuntimeProbe
 		const FString& FontFamily,
 		const FString& FontPostScriptName,
 		const FString& FontWeight,
+		const FString& FontStyle = FString(),
 		int32 LetterSpacing = 0);
 	FVector2D MeasureUMGTextBlockDesiredSize(
 		const TSharedPtr<FDesignNode>& Node,
