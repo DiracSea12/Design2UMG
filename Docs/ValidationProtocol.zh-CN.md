@@ -247,13 +247,13 @@ formal gate 执行纪律：
 
 `--editor-isolation shard` 适合批量执行和产物收集，但多个 shard / 编辑器生命周期可能共享或重置不同的 Slate 字体缓存、临时资产和渲染状态，导致 visual score 出现波动。shard 单次结果只作初筛；任何异常分数先用 `--editor-isolation case` 对受影响 case 独占、串行复跑，复跑结果稳定后再进入回归判断。报告同时记录 shard run 和 case recheck 的路径，shard 单次波动不直接当成视觉回退或改善。
 
-## 分层证据链（IR golden 与像素层）
+## 分层证据链（IR golden、几何与像素层）
 
 像素对比是其中一层裁判，不是全部。像素分数衡量的是与 Figma 光栅化参考 PNG 的相似度，渲染器固有差异（抗锯齿、纹理重采样、字体光栅化）永远混在数字里。分层证据链把每层真正能证明的东西分开：
 
 - **IR golden 层**（`Tools/design2umg_ir_golden.py` + 批量工具的 `--ir-golden <golden-root>`）：每个 case dump 转换后的 `FUMGWidgetData` typed 树（浮点 `%.9g` 无损、字节稳定），与冻结 golden 零容差对比。证明"转换行为没变"，任何数值漂移直接寻址到字段（如 `RootWidget...Brush.BrushColor.R: golden=0.108 dump=0.1098`），不需要图像实验。首版 golden（`ir-golden-20260830_01`）由 `ir-golden-bootstrap-full71-20260830_01` 自举，代码状态与基线指针关系见该目录的 `BOOTSTRAP.md`。golden 是 no-regression 口径，不是正确性口径。无 golden 的 case 记 `unavailable` 不算失败。
 - **像素层**：原样保留，端到端相似度，由容差管理。
-- **几何层**（规划中，未实现）：widget 运行时几何对比源稿 bounding box，布局保真，无光栅化噪音。
+- **几何层**（`Tools/design2umg_geometry_compare.py` + 批量工具的 `--geometry-golden <golden-root>`）：每 case 由编辑器在编译渲染后 dump 运行时 widget 几何（cached geometry），与冻结 golden 几何 dump 在同一组可比节点上对比，节点配对复用共享树对应（容忍 wrapper 插入导致的路径迁移）。case 判定是 stability——冻结 golden 对当前运行时、0.75px 容差、x/y 锚定最近配对祖先，插入了 wrapper 但绝对几何不变不算漂移；fidelity（IR 推导期望对运行时，坐标取 IR 父的运行时配对系）逐节点记录但不判 case 失败。无 golden 的 case 记 `unavailable` 不算失败。
 
 像素层的评分逻辑统一在 `Tools/design2umg_scoring.py`（唯一归属地，批量工具只调用）。no-regression 容差已参数化：
 

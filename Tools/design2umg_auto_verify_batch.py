@@ -2,6 +2,7 @@ import argparse
 import concurrent.futures
 import html
 import json
+import math
 import os
 import shutil
 import shlex
@@ -43,6 +44,19 @@ AUTOMATION_GAME_OUTPUT_PREFIX = "/Game/Design2UMG/Automation"
 FORMAL_DISCOVERED_CASE_COUNT = 71
 
 
+def parse_no_regression_epsilon(raw: str) -> float:
+    """argparse type for --no-regression-epsilon; float() alone accepts nan/inf."""
+    try:
+        value = float(raw)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid float value: {raw!r}") from None
+    if not math.isfinite(value) or value < 0:
+        raise argparse.ArgumentTypeError(
+            f"must be a finite non-negative float, got {raw!r} (nan/inf/negative would silently disable the gate)"
+        )
+    return value
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Batch Design2UMG verification from a design directory")
     parser.add_argument("--design-root", required=True, help="Directory containing .pen design files")
@@ -70,9 +84,9 @@ def parse_args():
     parser.add_argument("--log-cmds", default="", help="Optional Unreal -LogCmds payload, for example 'LogDesign2UMG Verbose'")
     parser.add_argument(
         "--no-regression-epsilon",
-        type=float,
+        type=parse_no_regression_epsilon,
         default=NO_REGRESSION_EPSILON,
-        help="Tolerance for no_regression pass/fail. Default 1.25e-4 keeps the historical bar; formal seal runs may pass 1e-6 for a zero-drift bar. Avoid tight epsilons with unfrozen pen reference caches or shard-isolation runs whose font state can drift.",
+        help="Tolerance for no_regression pass/fail. Must be a finite non-negative float. Default 1.25e-4 keeps the historical bar; formal seal runs may pass 1e-6 for a zero-drift bar. Avoid tight epsilons with unfrozen pen reference caches or shard-isolation runs whose font state can drift.",
     )
     parser.add_argument("--ir-golden", default="", help="Optional IR golden case root with per-case ir_dump.json. When set, generation specs request ir_dump.json and each case gets an ir_golden_report.json comparison (missing golden = unavailable, not a failure).")
     parser.add_argument("--geometry-golden", default="", help="Optional geometry golden case root with per-case geometry_dump.json. When set, generation specs request geometry_dump.json plus the IR dump it derives expectations from, and each case gets a geometry_golden_report.json comparison (missing golden = unavailable, not a failure).")

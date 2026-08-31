@@ -7,7 +7,10 @@ expectations derived from the same run's ir_dump.json plus a frozen golden dump.
   - fidelity: expected geometry is derived per node from IR Bounds/Slot/
     WidgetStyle using the v1 policy table (strict / derived / position_only /
     size_only / derived_size / exempt); runtime geometry is the widget's
-    cached geometry relative to its parent's origin. Tolerance 0.75px.
+    cached geometry anchored on the runtime pair of its IR parent (absolute
+    for the root) -- the same frame the expectation is derived in, so a
+    wrapper inserted between the IR parent and the node (absolute geometry
+    unchanged) is not a fidelity diff. Tolerance 0.75px.
   - stability: the frozen golden geometry_dump.json is compared against the
     current dump on the same comparable components (0.75px).
 
@@ -23,12 +26,24 @@ Usage:
 Semantics:
   - missing golden dump -> case verdict "unavailable" (fidelity still reported)
   - missing dump / missing ir_dump -> "unavailable" (no expectation source)
+  - directory mode enumerates golden ∪ run case dirs, so a case whose dump is
+    missing still appears as unavailable instead of vanishing
   - the case verdict is the regression signal: golden runtime vs current runtime
     on the comparable components; fidelity diffs (IR-derived expectation vs
     runtime) are reported as the fidelity record and do not fail the case,
     because a first-frozen golden legitimately contains long-standing
     fidelity drift that this layer exists to expose, not to gate on
-  - alignment matched ratio below 60% -> alignment_low_confidence (not a FAIL)
+  - alignment paired ratio below 60% -> alignment_low_confidence (not a FAIL)
+  - alignment pairs IR and runtime nodes via compute_tree_correspondence
+    (name + name_N + kind fallback, tolerating wrapper-inserted path
+    migration); IR nodes without a runtime counterpart and runtime-only nodes
+    (synthetic wrappers) are visible in the alignment block and do not FAIL;
+    stability FAILs come only from geometry drift beyond 0.75px and from
+    golden nodes absent from the current dump (nodes added after the freeze
+    are counted, not failed)
+  - stability x/y are anchored on the nearest golden-paired ancestor on both
+    sides (not the immediate parent), so a wrapper inserted into the runtime
+    tree that leaves absolute geometry unchanged is not drift
   - exempt share above 50% of matched nodes -> low_coverage (not a FAIL)
 Exit code: 0 = no failures, 1 = at least one case failed, 2 = usage/config
 error (bad paths, no dumps found under the run root, unreadable input files).
@@ -47,6 +62,8 @@ REPORT_NAME = "geometry_golden_report.json"
 DUMP_NAME = "geometry_dump.json"
 IR_DUMP_NAME = "ir_dump.json"
 TOLERANCE_PX = 0.75
+SOURCE_TEXT_TYPES = frozenset({"TextBlock", "IconFont"})
+RUNTIME_TEXT_CLASSES = frozenset({"TextBlock", "Design2UMGConstrainedTextBlock"})
 
 # Synthetic carrier wrappers (Design2UMGGeneratedNameSuffixes literals); their
 # geometry is generated structure, not source layout.
@@ -140,14 +157,6 @@ def slot_padding(slot: dict) -> dict:
         "right": fnum(padding.get("Right")) or 0.0,
         "bottom": fnum(padding.get("Bottom")) or 0.0,
     }
-
-
-def names_align(ir_name: str, widget_name: str) -> bool:
-    # Same rule as compute_tree_correspondence: exact name, then the converter's
-    # numeric uniqueness suffix (Card -> Card_1).
-    if ir_name == widget_name:
-        return True
-    return bool(re.fullmatch(rf"{re.escape(ir_name)}_[0-9]+", widget_name))
 
 
 def canvas_policy(entry: dict, parent_geo: dict) -> tuple[str, str, dict]:
@@ -311,11 +320,23 @@ def compute_policy(entry: dict, parent_entry: dict | None, parent_geo: dict | No
     return "exempt", f"uncovered_parent_{parent_class or 'unknown'}", {}
 
 
-def runtime_geometry(geo_node: dict, geo_by_path: dict) -> dict:
-    parent_path = geo_node["path"].rpartition("/")[0]
-    parent = geo_by_path.get(parent_path) if parent_path else None
-    origin_x = fnum(parent.get("abs_x")) if parent else 0.0
-    origin_y = fnum(parent.get("abs_y")) if parent else 0.0
+def nearest_paired_anchor(geo_node: dict, geo_by_path: dict, paired_geo_paths: set) -> dict | None:
+    """Nearest strict ancestor whose path has a golden pair; a node never
+    anchors itself. None means no paired ancestor exists above it, so the
+    caller compares in absolute coordinates."""
+    path = geo_node["path"].rpartition("/")[0]
+    while path:
+        if path in paired_geo_paths:
+            return geo_by_path[path]
+        path = path.rpartition("/")[0]
+    return None
+
+
+def anchored_runtime(geo_node: dict, anchor: dict | None) -> dict:
+    """x/y relative to the anchor's absolute origin (absolute when the anchor
+    is None); w/h are parent-independent and pass straight through."""
+    origin_x = fnum(anchor.get("abs_x")) if anchor is not None else 0.0
+    origin_y = fnum(anchor.get("abs_y")) if anchor is not None else 0.0
     abs_x = fnum(geo_node.get("abs_x"))
     abs_y = fnum(geo_node.get("abs_y"))
     return {
@@ -365,19 +386,47 @@ def evaluate_case(ir_doc: dict, geo_doc: dict, golden_doc: dict | None) -> dict:
         ir_children_by_path.setdefault(parent_path, []).append(node)
 
     geo_nodes = [node for node in geo_doc.get("nodes") or [] if isinstance(node, dict)]
-    geo_by_path = {node.get("path"): node for node in geo_nodes if node.get("path")}
+    # Runtime geometry derivation needs a path (parent-origin lookup), so only
+    # pathful nodes are comparable; the correspondence input must be this exact
+    # list because its asset indices point back into it.
+    geo_matchable = [node for node in geo_nodes if node.get("path")]
+    geo_by_path = {node.get("path"): node for node in geo_matchable}
 
-    matched = [
-        (node, geo_by_path[node["path"]])
-        for node in ir_nodes
-        if node["path"] in geo_by_path and names_align(node["match_name"], str(geo_by_path[node["path"]].get("name") or ""))
-    ]
+    def geo_structure_inputs(nodes: list) -> dict:
+        return {"structure_nodes": [
+            {
+                "path": node.get("path"),
+                "name": str(node.get("name") or ""),
+                "kind": "text" if str(node.get("class") or "") in RUNTIME_TEXT_CLASSES else "",
+                "class": str(node.get("class") or ""),
+            }
+            for node in nodes
+        ]}
 
-    # Alignment confidence reuses the structure-snapshot correspondence audit:
-    # a low matched ratio flags misalignment instead of fabricating geometry FAILs.
+    # Node pairing reuses the structure-snapshot correspondence (name + name_N
+    # + kind fallback), so wrapper-inserted path migration keeps nodes paired;
+    # unpaired nodes are alignment visibility, not per-node geometry FAILs.
     correspondence = verify.compute_tree_correspondence(
-        {"structure_nodes": [{"path": node["path"], "name": node["match_name"], "kind": "", "class": node["class"]} for node in ir_nodes]},
-        {"structure_nodes": [{"path": node.get("path"), "name": str(node.get("name") or ""), "kind": "", "class": str(node.get("class") or "")} for node in geo_nodes]},
+        {"structure_nodes": [
+            {
+                "path": node["path"],
+                "name": node["match_name"],
+                "kind": "text" if node["class"] in SOURCE_TEXT_TYPES else "",
+                "type": node["class"],
+                "class": node["class"],
+            }
+            for node in ir_nodes
+        ]},
+        geo_structure_inputs(geo_matchable),
+    )
+    pairs = correspondence.get("source_to_asset_indices") or []
+    matched = [(ir_nodes[source_index], geo_matchable[asset_index]) for source_index, asset_index in pairs]
+    geo_by_ir_path = {entry["path"]: geo_node for entry, geo_node in matched}
+    matched_ir_indices = {source_index for source_index, _ in pairs}
+    matched_geo_indices = {asset_index for _, asset_index in pairs}
+    ir_unmatched = [node for index, node in enumerate(ir_nodes) if index not in matched_ir_indices]
+    geo_unmatched_paths = sorted(
+        str(node.get("path")) for index, node in enumerate(geo_matchable) if index not in matched_geo_indices
     )
     alignment_low_confidence = bool(ir_nodes) and len(matched) < 0.6 * len(ir_nodes)
 
@@ -386,17 +435,42 @@ def evaluate_case(ir_doc: dict, geo_doc: dict, golden_doc: dict | None) -> dict:
     policy_counts: Counter = Counter()
     uncovered_forms: Counter = Counter()
     comparable_nodes = 0
-    comparable_paths: set[str] = set()
+    golden_uncovered_count = 0
 
-    golden_by_path = {}
+    golden_by_geo_path = {}
+    golden_unmatched = []
     if golden_doc is not None:
-        golden_by_path = {node.get("path"): node for node in golden_doc.get("nodes") or [] if isinstance(node, dict) and node.get("path")}
+        golden_nodes = [node for node in golden_doc.get("nodes") or [] if isinstance(node, dict) and node.get("path")]
+        # Golden lookup runs the same tree correspondence (golden as source,
+        # current dump as asset): a wrapper-migrated node keeps its frozen
+        # counterpart instead of path-matching into the wrapper placeholder.
+        golden_correspondence = verify.compute_tree_correspondence(
+            geo_structure_inputs(golden_nodes),
+            geo_structure_inputs(geo_matchable),
+        )
+        matched_golden_indices = set()
+        for source_index, asset_index in golden_correspondence.get("source_to_asset_indices") or []:
+            golden_by_geo_path[geo_matchable[asset_index].get("path")] = golden_nodes[source_index]
+            matched_golden_indices.add(source_index)
+        golden_unmatched = [node for index, node in enumerate(golden_nodes) if index not in matched_golden_indices]
 
     for entry, geo_node in matched:
         parent_path = entry["path"].rpartition("/")[0]
         parent_entry = ir_by_path.get(parent_path) if parent_path else None
-        parent_geo = geo_by_path.get(parent_path) if parent_path else None
         siblings = ir_children_by_path.get(parent_path, [])
+        # Fidelity and the layout policies share one frame: the expectation is
+        # derived in the IR parent's coordinates (slot anchors/offsets against
+        # the IR parent), so the runtime side must anchor on the IR parent's
+        # runtime-paired node. A wrapper the runtime inserts between the IR
+        # parent and this node leaves absolute geometry unchanged and is
+        # visibility in the alignment block (geo_unmatched), not a fidelity
+        # diff. When the IR parent itself did not pair (pathological edge),
+        # fall back to the immediate runtime parent (pre-existing behavior);
+        # the root node (no IR parent) stays None / absolute.
+        parent_geo = geo_by_ir_path.get(parent_path)
+        if parent_geo is None:
+            geo_parent_path = str(geo_node.get("path")).rpartition("/")[0]
+            parent_geo = geo_by_path.get(geo_parent_path) if geo_parent_path else None
         if not bool(geo_node.get("geometry_valid")):
             policy, detail = "exempt", "geometry_invalid"
             expected = {}
@@ -407,25 +481,35 @@ def evaluate_case(ir_doc: dict, geo_doc: dict, golden_doc: dict | None) -> dict:
             uncovered_forms[detail] += 1
 
         display_path = name_path_for(entry, ir_by_path)
-        runtime = runtime_geometry(geo_node, geo_by_path)
+        runtime = anchored_runtime(geo_node, parent_geo)
         axis_diffs(display_path, policy, expected, runtime, fidelity_diffs)
 
         if not expected:
             continue
         comparable_nodes += 1
-        comparable_paths.add(entry["path"])
-        golden_node = golden_by_path.get(entry["path"])
         if golden_doc is None:
             continue
+        golden_node = golden_by_geo_path.get(geo_node.get("path"))
         if golden_node is None:
-            stability_diffs.append(f"{display_path}: golden=<missing node> [policy={policy}]")
-        else:
-            golden_runtime = runtime_geometry(golden_node, golden_by_path)
-            axis_diffs(display_path, policy, expected_for_stability(expected, golden_runtime), runtime, stability_diffs)
+            # Node added after the freeze: visible via the counter, not a FAIL.
+            golden_uncovered_count += 1
+            continue
+        # Stability anchors both sides on the nearest golden-paired ancestor:
+        # a wrapper inserted above the node changes its local parent origin,
+        # not its absolute geometry, and must not read as drift. Fidelity
+        # above anchors on the IR parent's runtime pair for the same reason
+        # (the expectation itself is derived in IR-parent coordinates).
+        anchor = nearest_paired_anchor(geo_node, geo_by_path, golden_by_geo_path)
+        golden_anchor = golden_by_geo_path[anchor["path"]] if anchor is not None else None
+        golden_runtime = anchored_runtime(golden_node, golden_anchor)
+        axis_diffs(display_path, policy, expected_for_stability(expected, golden_runtime), anchored_runtime(geo_node, anchor), stability_diffs)
+
+    for node in ir_unmatched:
+        fidelity_diffs.append(f"{name_path_for(node, ir_by_path)}: unmatched IR node (no runtime counterpart)")
 
     if golden_doc is not None:
-        for path in sorted(set(golden_by_path) - comparable_paths - set(geo_by_path)):
-            stability_diffs.append(f"{golden_by_path[path].get('name') or path}: golden node absent from current dump")
+        for node in golden_unmatched:
+            stability_diffs.append(f"{node.get('name') or node.get('path')}: golden node absent from current dump")
 
     exempt_count = len(matched) - comparable_nodes
     return {
@@ -438,6 +522,7 @@ def evaluate_case(ir_doc: dict, geo_doc: dict, golden_doc: dict | None) -> dict:
             "compared_nodes": comparable_nodes,
             "failed_nodes": len(stability_diffs),
             "diffs": stability_diffs,
+            "golden_uncovered_count": golden_uncovered_count,
         },
         "alignment": {
             "ir_nodes": len(ir_nodes),
@@ -446,6 +531,10 @@ def evaluate_case(ir_doc: dict, geo_doc: dict, golden_doc: dict | None) -> dict:
             "matched_ratio": round(len(matched) / len(ir_nodes), 4) if ir_nodes else 0.0,
             "low_confidence": alignment_low_confidence,
             "correspondence_matched": correspondence.get("matched_source_nodes", 0),
+            "ir_unmatched_count": len(ir_unmatched),
+            "ir_unmatched_samples": [name_path_for(node, ir_by_path) for node in ir_unmatched[:10]],
+            "geo_unmatched_count": len(geo_unmatched_paths),
+            "geo_unmatched_samples": geo_unmatched_paths[:10],
         },
         "policy_counts": dict(policy_counts),
         "exempt_count": exempt_count,
@@ -540,17 +629,18 @@ def annotate_batch_case_result(case_result: dict, golden_root: str, case_name: s
     case_result["geometry_golden_low_coverage"] = result["low_coverage"]
 
 
-def discover_dump_cases(run_root: Path, include_regex: str) -> list[tuple[str, Path]]:
+def discover_dump_cases(golden_root: Path, run_root: Path, include_regex: str) -> list[tuple[str, Path]]:
     if (run_root / DUMP_NAME).is_file():
         return [(run_root.name, run_root)]
-    cases = []
-    for case_dir in sorted(entry for entry in run_root.iterdir() if entry.is_dir()):
-        if not (case_dir / DUMP_NAME).is_file():
-            continue
-        if include_regex and not re.search(include_regex, case_dir.name):
-            continue
-        cases.append((case_dir.name, case_dir))
-    return cases
+    # Directory mode enumerates the union of golden and run case dirs: a run case
+    # whose dump is missing shows up as unavailable instead of vanishing.
+    case_names = sorted(
+        {entry.name for entry in golden_root.iterdir() if entry.is_dir()}
+        | {entry.name for entry in run_root.iterdir() if entry.is_dir()}
+    )
+    if include_regex:
+        case_names = [name for name in case_names if re.search(include_regex, name)]
+    return [(name, run_root / name) for name in case_names]
 
 
 def print_result(result: dict, max_diffs: int) -> str:
@@ -583,8 +673,11 @@ def print_result(result: dict, max_diffs: int) -> str:
 
 
 def compare_run(golden_root: Path, run_root: Path, max_diffs: int, write_reports: bool, include_regex: str = "") -> int:
-    cases = discover_dump_cases(run_root, include_regex)
-    if not cases:
+    cases = discover_dump_cases(golden_root, run_root, include_regex)
+    has_run_dump = (run_root / DUMP_NAME).is_file() or any(
+        (entry / DUMP_NAME).is_file() for entry in run_root.iterdir() if entry.is_dir()
+    )
+    if not has_run_dump or not cases:
         print(
             f"[GEOMETRY-GOLDEN] config error: no {DUMP_NAME} found under {run_root}"
             " -- the geometry golden layer produced nothing for the whole run"

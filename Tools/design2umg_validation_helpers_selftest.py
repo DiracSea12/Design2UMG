@@ -1,4 +1,7 @@
+import argparse
+import json
 import os
+import subprocess
 import sys
 import tempfile
 from contextlib import redirect_stdout
@@ -8,6 +11,7 @@ from types import SimpleNamespace
 
 import design2umg_auto_verify as verify
 import design2umg_auto_verify_batch as batch_verify
+import design2umg_geometry_compare as geometry_compare
 import design2umg_rebuild_admissible_best as rebuild_best
 import design2umg_scoring as scoring
 import design2umg_validate_run as validate_run
@@ -391,6 +395,232 @@ def test_batch_summary_fails_required_unavailable_no_regression() -> None:
     )
 
     assert_equal(summary["no_regression"], {"available": 0, "passed": 0, "failed": 2})
+
+
+def test_no_regression_epsilon_rejects_non_finite_and_negative() -> None:
+    # epsilon=nan made `delta > nan` always False, so high-delta regressions passed vacuously.
+    for bad_epsilon in (float("nan"), float("inf"), float("-inf"), -1.0):
+        try:
+            scoring.evaluate_no_regression({}, None, 6, epsilon=bad_epsilon)
+        except ValueError as exc:
+            assert "finite" in str(exc)
+        else:
+            raise AssertionError(f"expected ValueError for epsilon={bad_epsilon!r}")
+    for raw in ("nan", "inf", "-inf", "-1"):
+        try:
+            batch_verify.parse_no_regression_epsilon(raw)
+        except argparse.ArgumentTypeError:
+            pass
+        else:
+            raise AssertionError(f"expected argparse rejection for epsilon {raw!r}")
+    assert batch_verify.parse_no_regression_epsilon("1e-6") == 1e-6
+
+
+def run_tool_cli(script_name: str, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(Path(__file__).parent / script_name), *[str(arg) for arg in args]],
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).parent),
+    )
+
+
+GEOMETRY_IR_ROOT_AB = (
+    # Real canvas slots: root Bounds 200x100; fixed (non-stretch) anchors with
+    # Offsets in position+size form, so canvas_policy derives A at (10, 10)
+    # sized 100x50 and B at (80, 10) sized 50x20 -- matching the runtime dumps.
+    '{"RootWidget": {"Name": "Root", "Type": "CanvasPanel", "Bounds": {"W": 200.0, "H": 100.0}, "Children": ['
+    '{"Name": "A", "Type": "TextBlock", "Slot": {"Anchors": {"Min": {"X": 0.0, "Y": 0.0}, "Max": {"X": 0.0, "Y": 0.0}},'
+    ' "Offsets": {"Left": 10.0, "Top": 10.0, "Right": 100.0, "Bottom": 50.0}, "Alignment": {"X": 0.0, "Y": 0.0}}},'
+    ' {"Name": "B", "Type": "TextBlock", "Slot": {"Anchors": {"Min": {"X": 0.0, "Y": 0.0}, "Max": {"X": 0.0, "Y": 0.0}},'
+    ' "Offsets": {"Left": 80.0, "Top": 10.0, "Right": 50.0, "Bottom": 20.0}, "Alignment": {"X": 0.0, "Y": 0.0}}}]}}'
+)
+
+
+def make_wrapper_migration_dumps(b_abs_x: float) -> tuple[str, str]:
+    """Current runtime inserts a SizeBox wrapper above B at (b_abs_x, 10); the
+    frozen golden has B directly under Root at the absolute spot (80, 10)."""
+    current = json.dumps({"nodes": [
+        {"path": "0", "name": "Root", "class": "CanvasPanel", "abs_x": 0.0, "abs_y": 0.0, "w": 200.0, "h": 100.0, "geometry_valid": True},
+        {"path": "0/0", "name": "A", "class": "TextBlock", "abs_x": 10.0, "abs_y": 10.0, "w": 100.0, "h": 50.0, "geometry_valid": True},
+        {"path": "0/1", "name": "wrapper", "class": "SizeBox", "abs_x": b_abs_x, "abs_y": 10.0, "w": 50.0, "h": 20.0, "geometry_valid": True},
+        {"path": "0/1/0", "name": "B", "class": "TextBlock", "abs_x": b_abs_x, "abs_y": 10.0, "w": 50.0, "h": 20.0, "geometry_valid": True}]})
+    golden = json.dumps({"nodes": [
+        {"path": "0", "name": "Root", "class": "CanvasPanel", "abs_x": 0.0, "abs_y": 0.0, "w": 200.0, "h": 100.0, "geometry_valid": True},
+        {"path": "0/0", "name": "A", "class": "TextBlock", "abs_x": 10.0, "abs_y": 10.0, "w": 100.0, "h": 50.0, "geometry_valid": True},
+        {"path": "0/1", "name": "B", "class": "TextBlock", "abs_x": 80.0, "abs_y": 10.0, "w": 50.0, "h": 20.0, "geometry_valid": True}]})
+    return current, golden
+
+
+def test_geometry_wrapper_migration_does_not_fail() -> None:
+    # Cross-version wrapper migration: the current runtime inserts a SizeBox
+    # the frozen golden never had, but B's absolute geometry is unchanged.
+    # Stability anchors on the nearest paired ancestor (Root); fidelity
+    # anchors on the IR parent's runtime pair (Root as well), so the IR slot
+    # expectation (80, 10) meets the runtime in the same frame and the
+    # wrapper insertion must not fail either record.
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        case_dir = root / "case-a"
+        write_text(case_dir / "ir_dump.json", GEOMETRY_IR_ROOT_AB)
+        current, golden = make_wrapper_migration_dumps(80.0)
+        write_text(case_dir / "geometry_dump.json", current)
+        golden_file = root / "golden_dump.json"
+        write_text(golden_file, golden)
+
+        proc = run_tool_cli("design2umg_geometry_compare.py", golden_file, case_dir)
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "PASS" in proc.stdout
+    assert "unmatched IR node" not in proc.stdout
+    assert "FAIL" not in proc.stdout
+    stability_lines = [line for line in proc.stdout.splitlines() if "stability:" in line]
+    assert stability_lines and "failed=0" in stability_lines[0], proc.stdout
+    fidelity_lines = [line for line in proc.stdout.splitlines() if "fidelity:" in line]
+    assert fidelity_lines and "failed=0" in fidelity_lines[0], proc.stdout
+    assert "Root/B: expected" not in proc.stdout, proc.stdout
+
+
+def test_geometry_wrapper_insertion_with_real_move_fails() -> None:
+    # Same wrapper insertion, but B's absolute x really moved (80 -> 130,
+    # delta 50 >> 0.75 tolerance): the anchored comparison must still gate it.
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        case_dir = root / "case-a"
+        write_text(case_dir / "ir_dump.json", GEOMETRY_IR_ROOT_AB)
+        current, golden = make_wrapper_migration_dumps(130.0)
+        write_text(case_dir / "geometry_dump.json", current)
+        golden_file = root / "golden_dump.json"
+        write_text(golden_file, golden)
+
+        proc = run_tool_cli("design2umg_geometry_compare.py", golden_file, case_dir)
+
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "Root/B: expected x=80 runtime x=130 delta=50" in proc.stdout
+
+
+def test_geometry_icon_font_typed_projection() -> None:
+    # IconFont source names may be replaced by the resolved glyph name in the
+    # runtime tree. Geometry must pass the source type and runtime text kind to
+    # the shared correspondence helper so the real counterpart remains paired.
+    ir_doc = {
+        "RootWidget": {
+            "Name": "Root",
+            "Type": "CanvasPanel",
+            "Bounds": {"W": 200.0, "H": 100.0},
+            "Children": [{
+                "Name": "IconFont_Widget",
+                "Type": "IconFont",
+                "Slot": {
+                    "Anchors": {"Min": {"X": 0.0, "Y": 0.0}, "Max": {"X": 0.0, "Y": 0.0}},
+                    "Offsets": {"Left": 10.0, "Top": 10.0, "Right": 20.0, "Bottom": 20.0},
+                    "Alignment": {"X": 0.0, "Y": 0.0},
+                },
+            }],
+        },
+    }
+    geo_doc = {"nodes": [
+        {"path": "0", "name": "Root", "class": "CanvasPanel", "abs_x": 0.0, "abs_y": 0.0, "w": 200.0, "h": 100.0, "geometry_valid": True},
+        {"path": "0/0", "name": "uJzgY", "class": "TextBlock", "abs_x": 10.0, "abs_y": 10.0, "w": 20.0, "h": 20.0, "geometry_valid": True},
+    ]}
+    report = geometry_compare.evaluate_case(ir_doc, geo_doc, geo_doc)
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        case_dir = root / "case-a"
+        write_text(case_dir / "ir_dump.json", json.dumps(ir_doc))
+        write_text(case_dir / "geometry_dump.json", json.dumps(geo_doc))
+        golden_file = root / "golden_dump.json"
+        write_text(golden_file, json.dumps(geo_doc))
+
+        proc = run_tool_cli("design2umg_geometry_compare.py", golden_file, case_dir)
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert report["alignment"]["matched_nodes"] == 2, report
+    assert report["alignment"]["ir_unmatched_count"] == 0, report
+    assert report["alignment"]["geo_unmatched_count"] == 0, report
+    assert "Root/IconFont_Widget: unmatched IR node" not in proc.stdout, proc.stdout
+    fidelity_lines = [line for line in proc.stdout.splitlines() if "fidelity:" in line]
+    assert fidelity_lines and "failed=0" in fidelity_lines[0], proc.stdout
+    stability_lines = [line for line in proc.stdout.splitlines() if "stability:" in line]
+    assert stability_lines and "failed=0" in stability_lines[0], proc.stdout
+
+
+def test_geometry_disappeared_node_fails() -> None:
+    # B vanished from the runtime dump while the frozen golden still has it:
+    # fidelity keeps the unmatched IR node visible, stability gates the absent
+    # golden node.
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        case_dir = root / "case-a"
+        write_text(case_dir / "ir_dump.json", GEOMETRY_IR_ROOT_AB)
+        write_text(case_dir / "geometry_dump.json", json.dumps({"nodes": [
+            {"path": "0", "name": "Root", "class": "CanvasPanel", "abs_x": 0.0, "abs_y": 0.0, "w": 200.0, "h": 100.0, "geometry_valid": True},
+            {"path": "0/0", "name": "A", "class": "TextBlock", "abs_x": 10.0, "abs_y": 10.0, "w": 100.0, "h": 50.0, "geometry_valid": True}]}))
+        golden_file = root / "golden_dump.json"
+        write_text(golden_file, json.dumps({"nodes": [
+            {"path": "0", "name": "Root", "class": "CanvasPanel", "abs_x": 0.0, "abs_y": 0.0, "w": 200.0, "h": 100.0, "geometry_valid": True},
+            {"path": "0/0", "name": "A", "class": "TextBlock", "abs_x": 10.0, "abs_y": 10.0, "w": 100.0, "h": 50.0, "geometry_valid": True},
+            {"path": "0/1", "name": "B", "class": "TextBlock", "abs_x": 10.0, "abs_y": 60.0, "w": 100.0, "h": 30.0, "geometry_valid": True}]}))
+
+        proc = run_tool_cli("design2umg_geometry_compare.py", golden_file, case_dir)
+
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "FAIL" in proc.stdout
+    assert "Root/B: unmatched IR node (no runtime counterpart)" in proc.stdout
+    assert "B: golden node absent from current dump" in proc.stdout
+
+
+def test_geometry_ir_unmatched_without_golden_drift_passes() -> None:
+    # B was already absent when the golden froze: the unmatched IR node stays
+    # visible in fidelity but must not gate stability (no golden drift).
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        case_dir = root / "case-a"
+        write_text(case_dir / "ir_dump.json", GEOMETRY_IR_ROOT_AB)
+        geo_doc = json.dumps({"nodes": [
+            {"path": "0", "name": "Root", "class": "CanvasPanel", "abs_x": 0.0, "abs_y": 0.0, "w": 200.0, "h": 100.0, "geometry_valid": True},
+            {"path": "0/0", "name": "A", "class": "TextBlock", "abs_x": 10.0, "abs_y": 10.0, "w": 100.0, "h": 50.0, "geometry_valid": True}]})
+        write_text(case_dir / "geometry_dump.json", geo_doc)
+        golden_file = root / "golden_dump.json"
+        write_text(golden_file, geo_doc)
+
+        proc = run_tool_cli("design2umg_geometry_compare.py", golden_file, case_dir)
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "PASS" in proc.stdout
+    assert "Root/B: unmatched IR node (no runtime counterpart)" in proc.stdout
+    stability_lines = [line for line in proc.stdout.splitlines() if "stability:" in line]
+    assert stability_lines and "failed=0" in stability_lines[0], proc.stdout
+
+
+def test_directory_mode_enumerates_golden_run_union() -> None:
+    # Golden has case-a + case-b but the run produced a dump only for case-a:
+    # case-b must appear as unavailable (dump_missing), not vanish from summary.
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        ir_golden, ir_run = root / "ir-golden", root / "ir-run"
+        for name in ("case-a", "case-b"):
+            write_text(ir_golden / name / "ir_dump.json", '{"RootWidget": {"Name": "Root"}}')
+        write_text(ir_run / "case-a" / "ir_dump.json", '{"RootWidget": {"Name": "Root"}}')
+        geo_doc = json.dumps({"nodes": [
+            {"path": "0", "name": "Root", "class": "CanvasPanel", "abs_x": 0.0, "abs_y": 0.0, "w": 200.0, "h": 100.0, "geometry_valid": True}]})
+        geo_golden, geo_run = root / "geo-golden", root / "geo-run"
+        for name in ("case-a", "case-b"):
+            write_text(geo_golden / name / "geometry_dump.json", geo_doc)
+        write_text(geo_run / "case-a" / "geometry_dump.json", geo_doc)
+        write_text(geo_run / "case-a" / "ir_dump.json", '{"RootWidget": {"Name": "Root", "Type": "CanvasPanel", "Children": []}}')
+
+        procs = (
+            run_tool_cli("design2umg_ir_golden.py", ir_golden, ir_run, "--no-reports"),
+            run_tool_cli("design2umg_geometry_compare.py", geo_golden, geo_run, "--no-reports"),
+        )
+
+    for proc in procs:
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert "cases=2" in proc.stdout
+        assert "unavailable=1" in proc.stdout
+        assert "UNAVAILABLE case-b" in proc.stdout
+        assert "dump_missing" in proc.stdout
 
 
 def make_state(name: str, spec_count: int) -> dict:
@@ -877,6 +1107,13 @@ def main() -> None:
     test_semi_transparent_difference_still_counts()
     test_evaluate_no_regression_checks_every_available_metric()
     test_load_baseline_case_metrics_rejects_incomplete_metrics()
+    test_no_regression_epsilon_rejects_non_finite_and_negative()
+    test_geometry_wrapper_migration_does_not_fail()
+    test_geometry_wrapper_insertion_with_real_move_fails()
+    test_geometry_icon_font_typed_projection()
+    test_geometry_disappeared_node_fails()
+    test_geometry_ir_unmatched_without_golden_drift_passes()
+    test_directory_mode_enumerates_golden_run_union()
     test_batch_summary_fails_required_unavailable_no_regression()
     test_execution_shards_contracts()
     test_evidence_contract_shared_by_manifest_and_run_validation()

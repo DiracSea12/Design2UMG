@@ -15,6 +15,8 @@ Usage:
 Semantics:
   - missing golden file  -> case verdict "unavailable" (not a failure)
   - missing dump file    -> case verdict "unavailable" (asset-only renders have no IR)
+  - directory mode enumerates golden ∪ run case dirs, so a case whose dump is
+    missing still appears as unavailable instead of vanishing
   - any field difference -> case verdict failed (strict zero drift, no epsilon)
   - a run root with no dumps at all is a config error (cvar never enabled), not
     a silent pass; an unreadable single-file input is reported the same way.
@@ -154,23 +156,26 @@ def annotate_batch_case_result(case_result: dict, golden_root: str, case_name: s
     case_result["ir_golden_diff_count"] = result["diff_count"]
 
 
-def discover_dump_cases(run_root: Path, include_regex: str) -> list[tuple[str, Path]]:
+def discover_dump_cases(golden_root: Path, run_root: Path, include_regex: str) -> list[tuple[str, Path]]:
     if (run_root / DUMP_NAME).is_file():
         return [(run_root.name, run_root / DUMP_NAME)]
-    cases = []
-    for case_dir in sorted(entry for entry in run_root.iterdir() if entry.is_dir()):
-        dump_path = case_dir / DUMP_NAME
-        if not dump_path.is_file():
-            continue
-        if include_regex and not re.search(include_regex, case_dir.name):
-            continue
-        cases.append((case_dir.name, dump_path))
-    return cases
+    # Directory mode enumerates the union of golden and run case dirs: a run case
+    # whose dump is missing shows up as unavailable instead of vanishing.
+    case_names = sorted(
+        {entry.name for entry in golden_root.iterdir() if entry.is_dir()}
+        | {entry.name for entry in run_root.iterdir() if entry.is_dir()}
+    )
+    if include_regex:
+        case_names = [name for name in case_names if re.search(include_regex, name)]
+    return [(name, run_root / name / DUMP_NAME) for name in case_names]
 
 
 def compare_run(golden_root: Path, run_root: Path, max_diffs: int, write_reports: bool, include_regex: str = "") -> int:
-    cases = discover_dump_cases(run_root, include_regex)
-    if not cases:
+    cases = discover_dump_cases(golden_root, run_root, include_regex)
+    has_run_dump = (run_root / DUMP_NAME).is_file() or any(
+        (entry / DUMP_NAME).is_file() for entry in run_root.iterdir() if entry.is_dir()
+    )
+    if not has_run_dump or not cases:
         print(
             f"[IR-GOLDEN] config error: no {DUMP_NAME} found under {run_root}"
             " -- the IR golden layer produced nothing for the whole run"

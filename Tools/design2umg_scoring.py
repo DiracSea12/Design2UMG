@@ -6,6 +6,7 @@ change add-layered-validation, Phase 1). Pixel-level metric computation
 this module only calls it.
 """
 
+import math
 from pathlib import Path
 
 import design2umg_auto_verify as verify
@@ -111,6 +112,11 @@ def load_baseline_structure_metrics(case_dir: Path | None) -> dict:
 
 
 def evaluate_no_regression(report: dict, case_dir: Path | None, pixel_tolerance: int, epsilon: float = NO_REGRESSION_EPSILON) -> dict:
+    # A non-finite or negative epsilon silently disables the regression gate
+    # (delta > nan is always False, delta > -1 is always True), so reject it
+    # loudly instead of letting every case pass vacuously.
+    if not math.isfinite(epsilon) or epsilon < 0:
+        raise ValueError(f"epsilon must be a finite non-negative number, got {epsilon!r}")
     baseline = load_baseline_case_metrics(case_dir, pixel_tolerance)
     baseline_missing_metrics = [metric_name for metric_name in NO_REGRESSION_METRICS if baseline.get(metric_name) is None]
     baseline_available = bool(baseline.get("available")) and not baseline_missing_metrics

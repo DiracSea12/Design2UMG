@@ -333,13 +333,13 @@ Formal gate execution discipline:
 
 `--editor-isolation shard` is suitable for batch execution and artifact collection, but multiple shard/editor lifecycles can share or reset Slate font caches, transient assets, and render state differently, which can make visual scores fluctuate. Treat a single shard result as screening evidence only; rerun every anomalous case exclusively and serially with `--editor-isolation case` before making a regression judgment. Record both the shard run and case-recheck paths in the report. A one-off shard fluctuation does not itself establish visual regression or improvement.
 
-## Layered Evidence Chain (IR golden and pixel layers)
+## Layered Evidence Chain (IR golden, geometry, and pixel layers)
 
 Pixel comparison is one layer, not the whole referee. The pixel score measures similarity against the Figma-rasterized reference PNG, so renderer-specific differences (antialiasing, texture resampling, font rasterization) are always mixed into the number. The layered chain separates what each layer can actually prove:
 
 - **IR golden layer** (`Tools/design2umg_ir_golden.py` + `--ir-golden <golden-root>` on the batch verifier): dumps the converted `FUMGWidgetData` typed tree per case with lossless `%.9g` floats and compares it against a frozen golden, byte-stable and zero-tolerance. It proves "conversion behavior did not change" and attributes any numeric drift directly to a field (`RootWidget...Brush.BrushColor.R: golden=0.108 dump=0.1098`), with no image experiment required. Its first golden (`ir-golden-20260830_01`) is bootstrapped from `ir-golden-bootstrap-full71-20260830_01`; see that directory's `BOOTSTRAP.md` for the code-state and baseline-pointer relationship. Golden is a no-regression oracle, not a correctness oracle. A case with no golden records `unavailable` and does not fail.
 - **Pixel layer**: unchanged, end-to-end similarity, managed by tolerance.
-- **Geometry layer** (planned, not yet implemented): runtime widget geometry versus source bounding boxes, layout fidelity without rasterization noise.
+- **Geometry layer** (`Tools/design2umg_geometry_compare.py` + `--geometry-golden <golden-root>` on the batch verifier): per case the editor dumps runtime widget geometry (cached geometry after the compiled render) and the tool compares it against a frozen golden geometry dump on the same comparable nodes, paired through the shared tree correspondence (tolerating wrapper-inserted path migration). The case verdict is stability -- frozen golden versus current runtime, 0.75px tolerance, x/y anchored on the nearest paired ancestor, so an inserted wrapper that leaves absolute geometry unchanged is not drift; fidelity (IR-derived expectation versus runtime, measured in the IR parent's paired frame) is reported per node but does not fail the case. A case with no golden records `unavailable` and does not fail.
 
 Scoring for the pixel layer lives in `Tools/design2umg_scoring.py` (single home; the batch verifier only calls it). The no-regression tolerance is now a parameter:
 

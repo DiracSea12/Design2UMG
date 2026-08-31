@@ -1761,6 +1761,11 @@ def compute_tree_correspondence(source_snapshot: dict | None, asset_snapshot: di
     source parent, while synthetic carriers are skipped when walking upward.
     This prevents repeated names such as ``Base``/``Line`` from being attached
     to a different branch by a global name-only greedy match.
+
+    ``source_to_asset_indices`` exposes the per-node pairing as
+    ``[[source_index, asset_index], ...]`` in ascending source order; the
+    indices point into the caller-supplied (dict-only) ``structure_nodes``
+    lists, so callers that need the node-level mapping use it.
     """
     source_nodes = [node for node in (source_snapshot or {}).get("structure_nodes") or [] if isinstance(node, dict)]
     asset_nodes = [node for node in (asset_snapshot or {}).get("structure_nodes") or [] if isinstance(node, dict)]
@@ -2045,6 +2050,9 @@ def compute_tree_correspondence(source_snapshot: dict | None, asset_snapshot: di
     result["semantic_kind_ratio"] = round(
         result["semantic_kind_matches"] / result["semantic_kind_compared"], 4
     ) if result["semantic_kind_compared"] else 0.0
+    result["source_to_asset_indices"] = [
+        [source_index, asset_index] for source_index, asset_index in sorted(source_to_asset.items())
+    ]
     return result
 
 
