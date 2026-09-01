@@ -245,7 +245,8 @@ bool FSizeEstimatorFitContentLeafMinimumGrowthTest::RunTest(const FString&)
 	TextNode->Transform.Height = FDesignSize::Fit(4.0f);
 
 	FDesignDocument EmptyDoc;
-	const FVector2D TextSize = SizeEstimator::PreComputeFitContentSizes(TextNode, EmptyDoc);
+	const FVector2D TextSize = SizeEstimator::PreComputeFitContentSizes(TextNode, EmptyDoc,
+		[&EmptyDoc](const TSharedPtr<FDesignNode>& RefNode) { return RefExpander::ExpandRef(RefNode, EmptyDoc); });
 	TestTrue(TEXT("Text fit width grows beyond its declared minimum"), TextSize.X > 4.0f);
 	TestTrue(TEXT("Text fit height grows beyond its declared minimum"), TextSize.Y > 4.0f);
 	TestTrue(TEXT("Text node stores the grown fit width"), TextNode->Transform.Width.Value > 4.0f);
@@ -261,7 +262,8 @@ bool FSizeEstimatorFitContentLeafMinimumGrowthTest::RunTest(const FString&)
 	IconNode->Transform.Width = FDesignSize::Fit(4.0f);
 	IconNode->Transform.Height = FDesignSize::Fit(4.0f);
 
-	const FVector2D IconSize = SizeEstimator::PreComputeFitContentSizes(IconNode, EmptyDoc);
+	const FVector2D IconSize = SizeEstimator::PreComputeFitContentSizes(IconNode, EmptyDoc,
+		[&EmptyDoc](const TSharedPtr<FDesignNode>& RefNode) { return RefExpander::ExpandRef(RefNode, EmptyDoc); });
 	TestEqual(TEXT("Icon fit width grows to its measured content"), IconSize.X, 32.0);
 	TestEqual(TEXT("Icon fit height grows to its measured content"), IconSize.Y, 32.0);
 	TestEqual(TEXT("Icon node stores the grown fit width"), IconNode->Transform.Width.Value, 32.0f);
@@ -546,7 +548,8 @@ bool FPenParserRefFitHeightPropagationTest::RunTest(const FString&)
 
 	const TSharedPtr<FDesignNode> Root = Doc.Children[3];
 	const TSharedPtr<FDesignNode> TableRef = Root->Children[0];
-	const FVector2D Precomputed = SizeEstimator::PreComputeFitContentSizes(Root, Doc);
+	const FVector2D Precomputed = SizeEstimator::PreComputeFitContentSizes(Root, Doc,
+		[&Doc](const TSharedPtr<FDesignNode>& RefNode) { return RefExpander::ExpandRef(RefNode, Doc); });
 	TestTrue(TEXT("Precompute sees the expanded table height"),
 		FMath::IsNearlyEqual(Precomputed.Y, 268.0f, KINDA_SMALL_NUMBER));
 	TestTrue(TEXT("Ref instance keeps the expanded table height"),
@@ -708,6 +711,60 @@ bool FPenParserSizeDSLErrorTest::RunTest(const FString&)
 		TestEqual(TEXT("Empty parens: one child"), Doc.Children.Num(), 1);
 		ExpectKeywordFallbackSize(*this, TEXT("fill_container() width"), Doc.Children[0]->Transform.Width, EDesignSizeMode::FillContainer);
 		ExpectKeywordFallbackSize(*this, TEXT("fit_content() height"), Doc.Children[0]->Transform.Height, EDesignSizeMode::FitContent);
+	}
+
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Gradient fills: CSS function strings and Pencil rotation convention
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FPenParserGradientFillsTest,
+	"Design2UMG.Unit.PenParser.GradientFills",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FPenParserGradientFillsTest::RunTest(const FString&)
+{
+	FDesignDocument Doc;
+	if (!LoadPenFixture(*this, TEXT("gradient_fills.json"), Doc))
+		return false;
+
+	TestEqual(TEXT("Two root children"), Doc.Children.Num(), 2);
+
+	// CSS gradient string -> typed gradient with endpoints, not a solid color.
+	{
+		const TSharedPtr<FDesignNode>& N = Doc.Children[0];
+		TestTrue(TEXT("css gradient node valid"), N.IsValid());
+		const FDesignFill& Fill = N->Visual.TopmostFill();
+		TestEqual(TEXT("css gradient fill type"), Fill.Type, EDesignFillType::Gradient);
+		TestTrue(TEXT("css gradient enabled"), Fill.bEnabled);
+		TestEqual(TEXT("css gradient stop count"), Fill.Gradient.Colors.Num(), 3);
+		TestEqual(TEXT("css gradient stop0"), Fill.Gradient.Colors[0].Color, FString(TEXT("#0F0F0F60")));
+		TestEqual(TEXT("css gradient stop0 position"), Fill.Gradient.Colors[0].Position, 0.0f);
+		TestEqual(TEXT("css gradient stop1 position"), Fill.Gradient.Colors[1].Position, 0.35f);
+		TestEqual(TEXT("css gradient stop2 position"), Fill.Gradient.Colors[2].Position, 1.0f);
+		TestTrue(TEXT("css gradient has start"), Fill.Gradient.StartPoint.IsSet());
+		TestTrue(TEXT("css gradient has end"), Fill.Gradient.EndPoint.IsSet());
+		if (Fill.Gradient.StartPoint.IsSet() && Fill.Gradient.EndPoint.IsSet())
+		{
+			TestEqual(TEXT("css gradient start x"), static_cast<float>(Fill.Gradient.StartPoint->X), 0.5f);
+			TestEqual(TEXT("css gradient start y"), static_cast<float>(Fill.Gradient.StartPoint->Y), 0.0f);
+			TestEqual(TEXT("css gradient end x"), static_cast<float>(Fill.Gradient.EndPoint->X), 0.5f);
+			TestEqual(TEXT("css gradient end y"), static_cast<float>(Fill.Gradient.EndPoint->Y), 1.0f);
+		}
+	}
+
+	// Structured linear gradient: Pencil rotation 225 maps to the y-down math
+	// angle -225-90 = -315, i.e. growth direction (cos, sin) = (+0.707, +0.707)
+	// toward the bottom-right with stop 0 in the top-left.
+	{
+		const TSharedPtr<FDesignNode>& N = Doc.Children[1];
+		TestTrue(TEXT("structured gradient node valid"), N.IsValid());
+		const FDesignFill& Fill = N->Visual.TopmostFill();
+		TestEqual(TEXT("structured gradient fill type"), Fill.Type, EDesignFillType::Gradient);
+		TestEqual(TEXT("structured gradient stop count"), Fill.Gradient.Colors.Num(), 2);
+		TestEqual(TEXT("pencil rotation 225 -> -315"), Fill.Gradient.Rotation, -315.0f);
 	}
 
 	return true;

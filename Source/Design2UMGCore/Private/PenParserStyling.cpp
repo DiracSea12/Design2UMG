@@ -25,6 +25,307 @@ namespace
 		}
 		return Stop;
 	}
+
+	// Splits "a, b(1, 2), c" on top-level commas only, keeping nested
+	// function calls such as rgb()/rgba() colors intact.
+	void SplitCssArgumentList(const FString& Args, TArray<FString>& OutParts)
+	{
+		int32 NestDepth = 0;
+		int32 PartStart = 0;
+		for (int32 Index = 0; Index < Args.Len(); ++Index)
+		{
+			const TCHAR Char = Args[Index];
+			if (Char == TEXT('('))
+			{
+				++NestDepth;
+			}
+			else if (Char == TEXT(')'))
+			{
+				NestDepth = FMath::Max(0, NestDepth - 1);
+			}
+			else if (Char == TEXT(',') && NestDepth == 0)
+			{
+				OutParts.Add(Args.Mid(PartStart, Index - PartStart).TrimStartAndEnd());
+				PartStart = Index + 1;
+			}
+		}
+		OutParts.Add(Args.Mid(PartStart).TrimStartAndEnd());
+	}
+
+	bool ParseCssAngleToDegrees(const FString& Token, float& OutDegrees)
+	{
+		float Value = 0.0f;
+		if (Token.EndsWith(TEXT("deg")))
+		{
+			Value = FCString::Atof(*Token);
+		}
+		else if (Token.EndsWith(TEXT("rad")))
+		{
+			Value = FCString::Atof(*Token) * 180.0f / PI;
+		}
+		else if (Token.EndsWith(TEXT("turn")))
+		{
+			Value = FCString::Atof(*Token) * 360.0f;
+		}
+		else
+		{
+			return false;
+		}
+		OutDegrees = Value;
+		return true;
+	}
+
+	// CSS linear-gradient direction -> normalized start/end points in design-space
+	// UVs (Y grows downward, stop 0 sits at the start point).
+	void ResolveCssLinearEndpoints(const FString& DirectionToken, FVector2D& OutStart, FVector2D& OutEnd)
+	{
+		const FString Lower = DirectionToken.ToLower();
+		const bool bHasTop = Lower.Contains(TEXT("top"));
+		const bool bHasBottom = Lower.Contains(TEXT("bottom"));
+		const bool bHasLeft = Lower.Contains(TEXT("left"));
+		const bool bHasRight = Lower.Contains(TEXT("right"));
+
+		if (bHasTop || bHasBottom || bHasLeft || bHasRight)
+		{
+			// "to <side>" lists the gradient destination; stop 0 sits opposite it.
+			FVector2D Direction = FVector2D::ZeroVector;
+			if (bHasTop)
+				Direction.Y -= 1.0f;
+			if (bHasBottom)
+				Direction.Y += 1.0f;
+			if (bHasLeft)
+				Direction.X -= 1.0f;
+			if (bHasRight)
+				Direction.X += 1.0f;
+			Direction = Direction.GetSafeNormal();
+			const float Half = (FMath::Abs(Direction.X) + FMath::Abs(Direction.Y)) * 0.5f;
+			OutStart = FVector2D(0.5f, 0.5f) - Direction * Half;
+			OutEnd = FVector2D(0.5f, 0.5f) + Direction * Half;
+			return;
+		}
+
+		float Degrees = 0.0f;
+		if (ParseCssAngleToDegrees(Lower, Degrees))
+		{
+			// CSS angle: 0deg points up, growing clockwise; design space has Y down.
+			const float Radians = FMath::DegreesToRadians(Degrees);
+			const FVector2D Direction(FMath::Sin(Radians), -FMath::Cos(Radians));
+			const float Half = (FMath::Abs(Direction.X) + FMath::Abs(Direction.Y)) * 0.5f;
+			OutStart = FVector2D(0.5f, 0.5f) - Direction * Half;
+			OutEnd = FVector2D(0.5f, 0.5f) + Direction * Half;
+			return;
+		}
+
+		// CSS default direction is "to bottom".
+		OutStart = FVector2D(0.5f, 0.0f);
+		OutEnd = FVector2D(0.5f, 1.0f);
+	}
+
+	bool LooksLikeCssColorToken(const FString& Token)
+	{
+		return Token.StartsWith(TEXT("#"))
+			|| Token.StartsWith(TEXT("$"))
+			|| Token.StartsWith(TEXT("rgb("))
+			|| Token.StartsWith(TEXT("rgba("))
+			|| Token.StartsWith(TEXT("hsl("))
+			|| Token.StartsWith(TEXT("hsla("));
+	}
+
+	// Parses one CSS gradient stop argument: "<color>", "<color> <pos>%", or
+	// "<pos>% <color>". Returns the color token; position stays -1 when absent.
+	FString ParseCssGradientStop(const FString& Token, float& OutPosition)
+	{
+		OutPosition = -1.0f;
+		FString Color = Token.TrimStartAndEnd();
+		if (Color.IsEmpty())
+		{
+			return FString();
+		}
+
+		int32 LastSpaceIndex = INDEX_NONE;
+		for (int32 Index = Color.Len() - 1; Index >= 0; --Index)
+		{
+			if (FChar::IsWhitespace(Color[Index]))
+			{
+				LastSpaceIndex = Index;
+				break;
+			}
+		}
+
+		auto TryParsePercent = [](const FString& Text, float& OutFraction) -> bool
+		{
+			if (!Text.EndsWith(TEXT("%")))
+			{
+				return false;
+			}
+			const FString Digits = Text.Mid(0, Text.Len() - 1).TrimStartAndEnd();
+			if (Digits.IsEmpty() || !Digits.IsNumeric())
+			{
+				return false;
+			}
+			OutFraction = FCString::Atof(*Digits) / 100.0f;
+			return true;
+		};
+
+		if (LastSpaceIndex == INDEX_NONE)
+		{
+			// A lone percentage is a CSS interpolation hint, not a color stop.
+			float IgnoredFraction = 0.0f;
+			return TryParsePercent(Color, IgnoredFraction) ? FString() : Color;
+		}
+
+		const FString Head = Color.Mid(0, LastSpaceIndex).TrimStartAndEnd();
+		const FString Tail = Color.Mid(LastSpaceIndex + 1).TrimStartAndEnd();
+		float Fraction = 0.0f;
+		if (TryParsePercent(Tail, Fraction))
+		{
+			OutPosition = Fraction;
+			return Head;
+		}
+		if (TryParsePercent(Head, Fraction))
+		{
+			OutPosition = Fraction;
+			return Tail;
+		}
+		return Color;
+	}
+
+	// Pencil stores gradients either as structured objects or as CSS function
+	// strings ("linear-gradient(to bottom, #00000060 0%, #000000 100%)").
+	// Parses the CSS flavor into the shared gradient fill; stops without an
+	// explicit position distribute evenly, per CSS.
+	bool TryParseCssGradientString(const FString& Value, const FDesignVariableResolver& Resolver, FDesignFill& OutFill)
+	{
+		const FString Trimmed = Value.TrimStartAndEnd();
+		const bool bLinear = Trimmed.StartsWith(TEXT("linear-gradient("), ESearchCase::IgnoreCase);
+		const bool bRadial = Trimmed.StartsWith(TEXT("radial-gradient("), ESearchCase::IgnoreCase);
+		if ((!bLinear && !bRadial) || !Trimmed.EndsWith(TEXT(")")))
+		{
+			return false;
+		}
+
+		const int32 OpenIndex = Trimmed.Find(TEXT("("), ESearchCase::CaseSensitive);
+		const FString Inner = Trimmed.Mid(OpenIndex + 1, Trimmed.Len() - OpenIndex - 2);
+		TArray<FString> Parts;
+		SplitCssArgumentList(Inner, Parts);
+		if (Parts.Num() == 0)
+		{
+			return false;
+		}
+
+		FDesignFill Result;
+		Result.bEnabled = true;
+		Result.Type = EDesignFillType::Gradient;
+		Result.Gradient.GradientType = bRadial ? EDesignGradientType::Radial : EDesignGradientType::Linear;
+
+		int32 FirstStopIndex = 0;
+		bool bHasLinearEndpoints = false;
+		if (bLinear)
+		{
+			if (Parts[0].StartsWith(TEXT("to "), ESearchCase::IgnoreCase))
+			{
+				FVector2D Start;
+				FVector2D End;
+				ResolveCssLinearEndpoints(Parts[0], Start, End);
+				Result.Gradient.StartPoint = Start;
+				Result.Gradient.EndPoint = End;
+				bHasLinearEndpoints = true;
+				FirstStopIndex = 1;
+			}
+			else if (!LooksLikeCssColorToken(Parts[0]))
+			{
+				float Degrees = 0.0f;
+				if (ParseCssAngleToDegrees(Parts[0].ToLower(), Degrees))
+				{
+					FVector2D Start;
+					FVector2D End;
+					ResolveCssLinearEndpoints(Parts[0], Start, End);
+					Result.Gradient.StartPoint = Start;
+					Result.Gradient.EndPoint = End;
+					bHasLinearEndpoints = true;
+					FirstStopIndex = 1;
+				}
+			}
+			if (!bHasLinearEndpoints)
+			{
+				Result.Gradient.StartPoint = FVector2D(0.5f, 0.0f);
+				Result.Gradient.EndPoint = FVector2D(0.5f, 1.0f);
+			}
+		}
+		else
+		{
+			// Shape/extent keywords ("circle", "closest-side", ...) carry no data the
+			// shared gradient IR needs; only "at <x>% <y>%" maps to the center.
+			for (int32 Index = 0; Index < Parts.Num(); ++Index)
+			{
+				const FString& Part = Parts[Index];
+				const int32 AtIndex = Part.Find(TEXT(" at "), ESearchCase::IgnoreCase);
+				if (AtIndex == INDEX_NONE)
+				{
+					if (LooksLikeCssColorToken(Part))
+					{
+						break;
+					}
+					continue;
+				}
+				const FString PositionText = Part.Mid(AtIndex + 4).TrimStartAndEnd();
+				TArray<FString> PositionParts;
+				PositionText.ParseIntoArray(PositionParts, TEXT(" "), true);
+				FVector2D Center = FVector2D(0.5f, 0.5f);
+				if (PositionParts.Num() >= 2
+					&& PositionParts[0].EndsWith(TEXT("%"))
+					&& PositionParts[1].EndsWith(TEXT("%")))
+				{
+					Center.X = FCString::Atof(*PositionParts[0]) / 100.0f;
+					Center.Y = FCString::Atof(*PositionParts[1]) / 100.0f;
+				}
+				Result.Gradient.Center = Center;
+				FirstStopIndex = Index + 1;
+				break;
+			}
+		}
+
+		TArray<FDesignGradientStop> Stops;
+		for (int32 Index = FirstStopIndex; Index < Parts.Num(); ++Index)
+		{
+			float Position = -1.0f;
+			const FString ColorToken = ParseCssGradientStop(Parts[Index], Position);
+			if (!LooksLikeCssColorToken(ColorToken) && !FDesignVariableResolver::IsVariableRef(ColorToken))
+			{
+				continue;
+			}
+			FDesignGradientStop Stop;
+			if (FDesignVariableResolver::IsVariableRef(ColorToken))
+			{
+				Stop.SourceVar = ColorToken;
+			}
+			Stop.Color = Resolver.ResolveColor(ColorToken);
+			Stop.Position = Position;
+			Stops.Add(Stop);
+		}
+
+		if (Stops.Num() < 2)
+		{
+			return false;
+		}
+
+		// Distribute stops that carry no explicit position evenly (CSS behavior).
+		for (int32 Index = 0; Index < Stops.Num(); ++Index)
+		{
+			if (Stops[Index].Position < 0.0f)
+			{
+				Stops[Index].Position = Stops.Num() > 1
+					? static_cast<float>(Index) / static_cast<float>(Stops.Num() - 1)
+					: 0.0f;
+			}
+		}
+		Stops[0].Position = 0.0f;
+		Stops.Last().Position = 1.0f;
+
+		Result.Gradient.Colors = MoveTemp(Stops);
+		OutFill = Result;
+		return true;
+	}
 }
 
 FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver)
@@ -56,6 +357,8 @@ FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariable
 	{
 		FString Str = Value->AsString();
 		if (Str == TEXT("transparent"))
+			return Result;
+		if (TryParseCssGradientString(Str, Resolver, Result))
 			return Result;
 		Result.Type = EDesignFillType::Color;
 		if (FDesignVariableResolver::IsVariableRef(Str))
@@ -102,7 +405,24 @@ FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariable
 			else if (GradType == TEXT("angular"))
 				Result.Gradient.GradientType = EDesignGradientType::Angular;
 		}
-		TryGetResolvedNumberField(Obj, TEXT("rotation"), Resolver, Result.Gradient.Rotation);
+		// Pencil stores the linear gradient rotation in its internal convention:
+		// the editor's own CSS-string parser maps a CSS angle A to rotation = -A
+		// (so rotation 0 == CSS 0deg, gradient grows toward screen-up). The shared
+		// IR plus GenerateGradientAngled instead read Rotation as a math angle in
+		// the y-down design space ((cos, sin) from +X). Convert with
+		// theta = -R - 90 so both conventions describe the same direction.
+		// Radial/angular rotations are left untouched: no calibration data on
+		// their Pencil semantics exists yet.
+		float PencilGradientRotation = 0.0f;
+		if (Result.Gradient.GradientType == EDesignGradientType::Linear
+			&& TryGetResolvedNumberField(Obj, TEXT("rotation"), Resolver, PencilGradientRotation))
+		{
+			Result.Gradient.Rotation = -PencilGradientRotation - 90.0f;
+		}
+		else
+		{
+			TryGetResolvedNumberField(Obj, TEXT("rotation"), Resolver, Result.Gradient.Rotation);
+		}
 
 		const TSharedPtr<FJsonValue>& CenterField = Obj->TryGetField(TEXT("center"));
 		if (CenterField.IsValid() && CenterField->Type == EJson::Object)

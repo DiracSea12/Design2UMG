@@ -2810,8 +2810,10 @@ def load_ue_result(path: Path) -> dict:
     with open(path, "r", encoding="utf-8-sig") as handle:
         result = json.load(handle)
 
+    # A failed render never produces its PNG; waiting for it would abort the
+    # whole run instead of letting the case be reported as render_failed.
     render_png_path = Path(result.get("render_png_path", "")).resolve() if result.get("render_png_path") else None
-    if render_png_path:
+    if render_png_path and result.get("success"):
         wait_for_file_stable(render_png_path)
     return result
 

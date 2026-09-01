@@ -423,6 +423,7 @@ namespace DesignImportPipeline
 		{
 			return Fail(FString::Printf(TEXT("Failed to parse filtered pen source: %s"), *FilePath));
 		}
+		FPenMCPBridge::PromoteSelectedNodeToRenderRoot(OutDocument, TargetNodeId);
 
 		const FString ResolvedSourceFilePath = FPaths::ConvertRelativePathToFull(FilePath);
 		OutDocument.MutableSourceDocument().SourceFilePath = ResolvedSourceFilePath;

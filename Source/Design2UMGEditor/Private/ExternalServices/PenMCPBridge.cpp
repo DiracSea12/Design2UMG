@@ -3,6 +3,7 @@
 #include "PenMCPBridge.h"
 #include "Design2UMGEditorDesignSourceRegistry.h"
 #include "DesignImportPipeline.h"
+#include "DesignSchema.h"
 #include "PenParser.h"
 #include "UMGSchema.h"
 #include "Serialization/JsonReader.h"
@@ -233,6 +234,7 @@ bool FPenMCPBridge::ConvertFromMCP(
 	{
 		return false;
 	}
+	PromoteSelectedNodeToRenderRoot(Document, TargetNodeId);
 
 	FImportAnalysisInput AnalysisInput;
 	AnalysisInput.bResolveImages = false;
@@ -265,5 +267,29 @@ bool FPenMCPBridge::BuildFilteredDocumentObject(
 
 	OutDocumentObject = BuildDocumentObject(DocObj, Children);
 	return OutDocumentObject.IsValid();
+}
+
+void FPenMCPBridge::PromoteSelectedNodeToRenderRoot(FDesignDocument& Document, const FString& TargetNodeId)
+{
+	if (TargetNodeId.IsEmpty())
+	{
+		return;
+	}
+
+	for (const TSharedPtr<FDesignNode>& Child : Document.Children)
+	{
+		if (!Child.IsValid() || !IsEquivalentNodeId(Child->Id, TargetNodeId))
+		{
+			continue;
+		}
+		if (Child->bReusable)
+		{
+			Child->bReusable = false;
+			UE_LOG(LogPenMCPBridge, Log,
+				TEXT("Selected node '%s' is a reusable component; treating it as the render root for this import."),
+				*Child->Id);
+		}
+		return;
+	}
 }
 

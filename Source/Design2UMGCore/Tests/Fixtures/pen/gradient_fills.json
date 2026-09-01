@@ -1,0 +1,31 @@
+{
+  "version": "2.17",
+  "children": [
+    {
+      "id": "css-grad",
+      "name": "CssGradient",
+      "type": "frame",
+      "width": 400,
+      "height": 300,
+      "fill": "linear-gradient(to bottom, #0F0F0F60 0%, #0F0F0FE6 35%, #0F0F0F 100%)"
+    },
+    {
+      "id": "struct-grad",
+      "name": "StructuredGradient",
+      "type": "frame",
+      "width": 400,
+      "height": 300,
+      "fill": {
+        "type": "gradient",
+        "gradientType": "linear",
+        "enabled": true,
+        "rotation": 225,
+        "size": { "height": 1 },
+        "colors": [
+          { "color": "#AAF0FA", "position": 0 },
+          { "color": "#58C8E8", "position": 1 }
+        ]
+      }
+    }
+  ]
+}

@@ -9,6 +9,7 @@
 #include "Tests/Design2UMGTestAssetCleanup.h"
 #include "FontResolver.h"
 #include "ExternalServices/PenMCPBridge.h"
+#include "PenParser.h"
 #include "Design2UMGTestUtils.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Dom/JsonObject.h"
@@ -313,6 +314,36 @@ bool FPenWelcomeBatchImportTest::RunTest(const FString& Parameters)
 	{
 		ObjectTools::ForceDeleteObjects(ObjectsToDelete, false);
 	}
+	return true;
+}
+
+// Selecting a reusable component as the import target must render that node
+// instead of dropping it as a pure component definition.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenReusableTargetImportWorkflowTest,
+	"Design2UMG.BatchImport.PenReusableTarget",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPenReusableTargetImportWorkflowTest::RunTest(const FString& Parameters)
+{
+	const FString Json =
+		TEXT("{")
+		TEXT("\"version\":\"2.17\",")
+		TEXT("\"children\":[")
+		TEXT("{\"id\":\"compA\",\"name\":\"CompA\",\"type\":\"frame\",\"reusable\":true,\"width\":80,\"height\":40,\"children\":[{\"id\":\"compAChild\",\"type\":\"text\",\"content\":\"A\"}]},")
+		TEXT("{\"id\":\"compB\",\"name\":\"CompB\",\"type\":\"frame\",\"reusable\":true,\"width\":50,\"height\":50},")
+		TEXT("{\"id\":\"screen1\",\"name\":\"Screen1\",\"type\":\"frame\",\"width\":200,\"height\":100}")
+		TEXT("]}");
+
+	FDesignDocument Document;
+	TestTrue(TEXT("Parse reusable fixture"), FPenParser::ParseDocument(Json, Document));
+	TestEqual(TEXT("Three top-level nodes"), Document.Children.Num(), 3);
+
+	FPenMCPBridge::PromoteSelectedNodeToRenderRoot(Document, TEXT("compA"));
+	TestFalse(TEXT("Selected reusable target stops being reusable"), Document.Children[0]->bReusable);
+	TestTrue(TEXT("Other reusable definitions stay reusable"), Document.Children[1]->bReusable);
+	TestFalse(TEXT("Plain frames stay non-reusable"), Document.Children[2]->bReusable);
+
+	FPenMCPBridge::PromoteSelectedNodeToRenderRoot(Document, TEXT("missing-id"));
+	TestFalse(TEXT("Missing target changes nothing"), Document.Children[0]->bReusable);
 	return true;
 }
 

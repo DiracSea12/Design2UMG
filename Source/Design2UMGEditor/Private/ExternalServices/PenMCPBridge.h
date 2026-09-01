@@ -6,6 +6,7 @@
 
 class FJsonObject;
 struct FDesign2UMGImportSettingsSnapshot;
+struct FDesignDocument;
 struct FUMGWidgetData;
 
 class FPenMCPBridge
@@ -27,5 +28,11 @@ public:
 		const TSharedPtr<FJsonObject>& DocObj,
 		TSharedPtr<FJsonObject>& OutDocumentObject,
 		const FString& TargetNodeId = TEXT(""));
+
+	// The user-selected target node is the render root of this import, not a
+	// reusable component definition: clear its reusable flag after parsing so the
+	// converter does not skip the whole page. Other reusable definitions stay in
+	// the document for ref expansion.
+	static void PromoteSelectedNodeToRenderRoot(FDesignDocument& Document, const FString& TargetNodeId);
 };
 
