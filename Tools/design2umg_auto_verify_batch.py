@@ -41,7 +41,6 @@ STRUCTURE_BASELINE_LOWER_IS_BETTER = {
 EDITOR_GRACEFUL_EXIT_DEADLINE_SEC = 30.0  # seconds to wait for editor results after process exits
 EDITOR_STEP_DRIVER_START_ATTEMPTS = 2
 AUTOMATION_GAME_OUTPUT_PREFIX = "/Game/Design2UMG/Automation"
-FORMAL_DISCOVERED_CASE_COUNT = 81
 
 
 def parse_no_regression_epsilon(raw: str) -> float:
@@ -60,7 +59,7 @@ def parse_no_regression_epsilon(raw: str) -> float:
 def parse_args():
     parser = argparse.ArgumentParser(description="Batch Design2UMG verification from a design directory")
     parser.add_argument("--design-root", required=True, help="Directory containing .pen design files")
-    parser.add_argument("--figma-export-root", action="append", default=[], help="Optional local Figma export directory containing design.json and a top-level reference PNG. Can be repeated.")
+    parser.add_argument("--figma-export-root", action="append", default=[], help="Optional local Figma export directory (design.json + top-level reference PNG) or a container folder whose direct subdirectories are export dirs (e.g. G:/UE5/FigmaExports). Can be repeated. Default scans FigmaExports/ found among the design root's ancestors.")
     parser.add_argument("--output-root", default="", help="Directory for batch outputs")
     parser.add_argument("--reference-root", default="", help="Optional directory containing per-case reference PNGs at <reference-root>/<case-name>/reference.png")
     parser.add_argument("--project", default="", help="Runtime project path. If omitted, DESIGN2UMG_RUNTIME_PROJECT is required. HostProject fallback and design-root inference are not supported.")
@@ -1669,11 +1668,8 @@ def main():
     cases.extend(batch_discovery.discover_figma_export_cases(effective_figma_export_roots, args.include, args.exclude))
     if not cases:
         raise RuntimeError(f"No eligible pen or figma export cases discovered under: {design_root}")
-    if not args.include and not args.exclude and len(cases) != FORMAL_DISCOVERED_CASE_COUNT:
-        raise RuntimeError(
-            f"Formal full discovery must produce {FORMAL_DISCOVERED_CASE_COUNT} cases; found {len(cases)}. "
-            "Check the Pencil design root and all configured Figma export roots."
-        )
+    if not args.include and not args.exclude:
+        print(f"formal full discovery (scan-driven): {len(cases)} cases from pen root {design_root} and {len(effective_figma_export_roots)} figma export roots")
     if args.game_output_explicit:
         validate_explicit_batch_game_output_root(args.effective_game_output_root, cases)
     verify.sync_project_plugin_build_id(args.editor, project_plugin_root)

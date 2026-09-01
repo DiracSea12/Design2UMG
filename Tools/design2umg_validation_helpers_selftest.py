@@ -77,13 +77,16 @@ def make_pen_fixture(design_root: Path) -> Path:
 
 
 def make_figma_export_fixture(workspace_root: Path) -> list[Path]:
+    container = workspace_root / "FigmaExports"
     roots = []
     for name, large_png_size in (("figma_export", 2), ("figma_export2", 3)):
-        export_root = workspace_root / name
+        export_root = container / name
         write_text(export_root / "design.json", '{"document":{"children":[]}}')
         write_bytes(export_root / "small.png", PNG_1X1)
         write_bytes(export_root / "large.png", PNG_1X1 * large_png_size)
         roots.append(export_root)
+    # subdirectory without design.json must be ignored by the container scan
+    write_text(container / "_diagnostics" / "notes.txt", "not a case")
     return roots
 
 
@@ -106,6 +109,9 @@ def test_discovery_and_run_scope_contracts() -> None:
         assert_equal(default_roots, [str(root.resolve()) for root in figma_roots])
         explicit_roots = batch_discovery.resolve_default_figma_export_roots(design_root, [str(figma_roots[1]), ""])
         assert_equal(explicit_roots, [str(figma_roots[1].resolve())])
+        container_roots = batch_discovery.resolve_default_figma_export_roots(
+            design_root, [str(figma_roots[0].parent)])
+        assert_equal(container_roots, [str(root.resolve()) for root in figma_roots])
 
         pen_cases = batch_discovery.discover_pen_cases(design_root, "", "")
         assert_equal(

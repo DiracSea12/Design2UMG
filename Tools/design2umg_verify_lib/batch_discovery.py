@@ -7,29 +7,7 @@ import design2umg_auto_verify as verify
 
 ROOT_MIN_SIZE = 8
 ROOT_CONTAINER_TYPES = {"frame", "group", "component", "ref"}
-DEFAULT_FIGMA_EXPORT_DIR_NAMES = (
-    "figma_export",
-    "figma_export1",
-    "figma_export2",
-    "figma_export3",
-    "figma_general_einsen_dashboard",
-    "figma_general_team20_analytics",
-    "figma_general_tutortrek_user_dash",
-    "figma_general_vristo_sales",
-    "figma_general_data_analytics",
-    "figma_general_employee_table",
-    "figma_general_course_builder",
-    "figma_game_team09_start",
-    "figma_game_party_home",
-    "figma_game_potions_levelselect",
-    "figma_game_bubbo_gameplay",
-    "figma_game_english_cycle",
-    "figma_font_olmoe",
-    "figma_font_digicurriculum",
-    "figma_font_rustlang",
-    "figma_font_typespecimen",
-    "figma_font_uswds",
-)
+DEFAULT_FIGMA_EXPORTS_CONTAINER_NAME = "FigmaExports"
 
 
 def default_output_root() -> Path:
@@ -37,20 +15,32 @@ def default_output_root() -> Path:
     return verify.plugin_root() / "Saved" / "Design2UMG" / "Automation" / f"batch_{stamp}_{Path.cwd().name}"
 
 
+def expand_figma_export_root(root: Path) -> list[str]:
+    """One --figma-export-root may be an export dir itself (has design.json)
+    or a container whose direct subdirectories are export dirs (e.g.
+    FigmaExports/). Nested helper folders (no design.json, like
+    _diagnostics/) are ignored by the direct-children scan."""
+    if (root / "design.json").is_file():
+        return [str(root)]
+    return [
+        str(child.resolve())
+        for child in sorted(root.iterdir())
+        if child.is_dir() and (child / "design.json").is_file()
+    ]
+
+
 def resolve_default_figma_export_roots(design_root: Path, explicit_roots: list[str]) -> list[str]:
-    if explicit_roots:
-        return [str(Path(root).resolve()) for root in explicit_roots if root]
-
-    for ancestor in design_root.parents:
-        resolved_roots = []
-        for directory_name in DEFAULT_FIGMA_EXPORT_DIR_NAMES:
-            candidate = ancestor / directory_name
+    resolved: list[str] = []
+    roots: list[Path] = [Path(root) for root in explicit_roots if root]
+    if not roots:
+        for ancestor in design_root.parents:
+            candidate = ancestor / DEFAULT_FIGMA_EXPORTS_CONTAINER_NAME
             if candidate.is_dir():
-                resolved_roots.append(str(candidate.resolve()))
-        if resolved_roots:
-            return resolved_roots
-
-    return []
+                roots = [candidate]
+                break
+    for root in roots:
+        resolved.extend(expand_figma_export_root(root.resolve()))
+    return resolved
 
 
 def sanitize_case_name(value: str) -> str:
