@@ -8,6 +8,7 @@
 #include "SharedCoreSemantics.h"
 #include "VisualMapperFillTransfer.h"
 #include "Design2UMGLog.h"
+#include "UMGPropertyKeys.h"
 #include "UMGWidgetNodeAccess.h"
 #include "UMGValueParser.h"
 #include "Design2UMGGeneratedNameSuffixes.h"
@@ -15,9 +16,6 @@
 namespace
 {
 	// Material reference identifier used as an internal ProceduralShapeGenerator key, not an asset path.
-	const TCHAR* RetainerForegroundBlurEffectRef = TEXT("d2u.retainer.foreground_blur");
-	const TCHAR* RetainerGeometryMaskEffectRef = TEXT("d2u.retainer.geometry_mask");
-	const TCHAR* RetainerInnerShadowEffectRef = TEXT("d2u.retainer.inner_shadow");
 	const TCHAR* MatRef_RoundedRect = TEXT("roundedrect");
 
 	// UV step fallback for an invalid node, where no size can be resolved.
@@ -28,13 +26,9 @@ namespace
 	// record; fixed when the foreground-blur UV mapping was introduced.
 	constexpr float MinBlurStrengthForUVStep = 0.5f;
 	constexpr float BlurStrengthToUVStepScale = 0.35f;
-	// Export-chain sentinel: an exported uniform radius at or above this value
-	// means "pill" and is mapped to HalfHeightRadius on the UMG side (matching
-	// check in UMGBrushPropertyApplier.cpp, which owns the same-named constant).
-	// No derivation on record; fixed when the pill export path was introduced.
-	constexpr float CapsuleRadiusSentinel = 999.0f;
+	// CapsuleRadiusSentinel lives in UMGPropertyKeys.h (cross-module contract).
 	// With no resolved size, a uniform radius at or above this threshold is
-	// treated as a pill. Same provenance as the sentinel above.
+	// treated as a pill. Same provenance as the sentinel.
 	constexpr float UnresolvedSizePillRadiusThreshold = 100.0f;
 
 	FVector2D ComputeForegroundBlurUVStep(const TSharedPtr<FDesignNode>& Node, float BlurStrength)
@@ -745,12 +739,12 @@ void VisualMapper::ApplyRoundedCorner(FUMGWidgetNode& Widget, const FDesignCorne
 			if (MinDim > 0.0f && Radius.Uniform >= (MinDim * 0.5f - KINDA_SMALL_NUMBER))
 			{
 				// Treat large uniform radius as pill to match design tools that clamp radius to half-height.
-				ExportRadius = CapsuleRadiusSentinel;
+				ExportRadius = UMGPropertyKeys::CapsuleRadiusSentinel;
 			}
 			else if (!bHasResolvedSize && Radius.Uniform >= UnresolvedSizePillRadiusThreshold)
 			{
 				// Height can be unresolved for fit-content nodes; large radii are typically intended as pill.
-				ExportRadius = CapsuleRadiusSentinel;
+				ExportRadius = UMGPropertyKeys::CapsuleRadiusSentinel;
 			}
 			Widget.Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
 			Widget.Brush.OutlineCornerRadius = ExportRadius;
@@ -888,7 +882,7 @@ FUMGWidgetNode VisualMapper::WrapWithForegroundBlur(FUMGWidgetNode&& Widget, con
 	Retainer.Bounds = Widget.Bounds;
 	Retainer.Slot = Widget.Slot;
 	Retainer.Effect.bRetainRendering = true;
-	Retainer.Effect.EffectMaterial = RetainerForegroundBlurEffectRef;
+	Retainer.Effect.EffectMaterial = UMGPropertyKeys::RetainerForegroundBlurEffectRef;
 	Retainer.Effect.TextureParameter = TEXT("Texture");
 
 	const FVector2D BlurUVStep = ComputeForegroundBlurUVStep(Node, BlurStrength);
@@ -909,7 +903,7 @@ FUMGWidgetNode VisualMapper::WrapWithGeometryMask(FUMGWidgetNode&& Widget, const
 	Retainer.Bounds = Widget.Bounds;
 	Retainer.Slot = Widget.Slot;
 	Retainer.Effect.bRetainRendering = true;
-	Retainer.Effect.EffectMaterial = RetainerGeometryMaskEffectRef;
+	Retainer.Effect.EffectMaterial = UMGPropertyKeys::RetainerGeometryMaskEffectRef;
 	Retainer.Effect.TextureParameter = TEXT("Texture");
 	Retainer.Effect.GeometryMaskShape = Node->Visual.GeometryMask.Shape == EDesignGeometryMaskShape::Ellipse
 		? EUMGGeometryMaskShape::Ellipse
@@ -934,7 +928,7 @@ FUMGWidgetNode VisualMapper::WrapWithInnerShadow(FUMGWidgetNode&& Widget, const 
 	Retainer.Bounds = Widget.Bounds;
 	Retainer.Slot = Widget.Slot;
 	Retainer.Effect.bRetainRendering = true;
-	Retainer.Effect.EffectMaterial = RetainerInnerShadowEffectRef;
+	Retainer.Effect.EffectMaterial = UMGPropertyKeys::RetainerInnerShadowEffectRef;
 	Retainer.Effect.TextureParameter = TEXT("Texture");
 	Retainer.Effect.EffectColor = FUMGValueParser::ParseColor(
 		Shadow.Color.IsEmpty() ? DesignColorUtils::DefaultShadowColorHex : Shadow.Color);

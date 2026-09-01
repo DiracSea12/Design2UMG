@@ -9,7 +9,6 @@ struct FDesign2UMGImportSettingsSnapshot;
 namespace Design2UMGAutomationRender
 {
 	bool IsAutomationRenderActive();
-	bool IsCaseLocalAutomationImportedFontPath(const FString& FontAssetPath);
 	bool PrepareGeneratedAssetForAutomationRender(
 		const FString& GeneratedAssetPath,
 		bool bForceReloadPackage,

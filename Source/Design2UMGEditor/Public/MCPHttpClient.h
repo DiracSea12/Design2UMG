@@ -46,11 +46,26 @@ public:
 	bool IsConnected() const { return !SessionId.IsEmpty(); }
 
 private:
+	/** Shared delivered-flag for the in-flight request's cancel-failure path. */
+	struct FInFlightCancelState
+	{
+		bool bDelivered = false;
+	};
+
 	FString ServerEndpoint;
 	FString SessionId;
 	/** JSON-RPC id embedded in outgoing request bodies (resets on Disconnect). */
 	int32 NextRpcRequestId = 1;
 	TSharedRef<class FDesignHttpClientSlot, ESPMode::ThreadSafe> State;
+	/**
+	 * Failure callback owed to the in-flight request when a new request
+	 * supersedes it: single-flight cancellation would otherwise never fire
+	 * the old callback. The shared state lets the real completion paths mark
+	 * it delivered, so the callback fires at most once. Cleared silently on
+	 * Disconnect.
+	 */
+	TSharedPtr<FInFlightCancelState, ESPMode::ThreadSafe> InFlightCancelState;
+	TFunction<void()> InFlightCancelFailure;
 
 	/**
 	 * Send one JSON-RPC request and track cancellation for it.

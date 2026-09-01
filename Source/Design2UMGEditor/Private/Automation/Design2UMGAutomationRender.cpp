@@ -939,14 +939,6 @@ namespace Design2UMGAutomationRender
 #endif
 	}
 
-	bool IsCaseLocalAutomationImportedFontPath(const FString& FontAssetPath)
-	{
-		const FString NormalizedPath = NormalizeAutomationPackagePath(FontAssetPath);
-		return IsAutomationImportedFontPath(NormalizedPath)
-			&& !NormalizedPath.Equals(TEXT("/Game/Design2UMG/Automation/ImportedFonts"), ESearchCase::CaseSensitive)
-			&& !NormalizedPath.StartsWith(TEXT("/Game/Design2UMG/Automation/ImportedFonts/"), ESearchCase::CaseSensitive);
-	}
-
 	bool PrepareGeneratedAssetForAutomationRender(
 		const FString& GeneratedAssetPath,
 		const bool bForceReloadPackage,
@@ -988,7 +980,7 @@ namespace Design2UMGAutomationRender
 		TArray<FString> FamiliesToRemove;
 		for (const TPair<FString, FString>& Pair : InOutSettingsSnapshot.ConversionSettings.IconFontAssetPaths)
 		{
-			if (IsCaseLocalAutomationImportedFontPath(Pair.Value))
+			if (DesignImportUtils::IsCaseLocalAutomationImportedFontPath(Pair.Value))
 			{
 				FamiliesToRemove.Add(Pair.Key);
 			}
@@ -999,7 +991,7 @@ namespace Design2UMGAutomationRender
 			InOutSettingsSnapshot.ConversionSettings.IconFontAssetPaths.Remove(Family);
 		}
 
-		if (IsCaseLocalAutomationImportedFontPath(InOutSettingsSnapshot.ConversionSettings.DefaultIconFontAssetPath))
+		if (DesignImportUtils::IsCaseLocalAutomationImportedFontPath(InOutSettingsSnapshot.ConversionSettings.DefaultIconFontAssetPath))
 		{
 			InOutSettingsSnapshot.ConversionSettings.DefaultIconFontAssetPath.Reset();
 		}

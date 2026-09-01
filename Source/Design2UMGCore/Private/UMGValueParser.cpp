@@ -78,16 +78,6 @@ namespace FUMGValueParser
 	return FLinearColor::White;
 }
 
-	EHorizontalAlignment ParseHAlign(const FString& Str)
-	{
-		return ToSlateHorizontalAlignment(ParseSlotHorizontalAlignment(Str));
-	}
-
-	EVerticalAlignment ParseVAlign(const FString& Str)
-	{
-		return ToSlateVerticalAlignment(ParseSlotVerticalAlignment(Str));
-	}
-
 	EUMGSlotHorizontalAlignment ParseSlotHorizontalAlignment(const FString& Str)
 	{
 		const FString Normalized = NormalizeSlotToken(Str);

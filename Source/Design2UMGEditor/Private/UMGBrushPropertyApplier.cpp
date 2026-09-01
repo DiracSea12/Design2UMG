@@ -6,6 +6,7 @@
 #include "DesignPathRasterizer.h"
 #include "DesignResourceResolver.h"
 #include "UMGImageCropUtils.h"
+#include "UMGPropertyKeys.h"
 #include "UMGValueParsing.h"
 #include "UMGWidgetNodeAccess.h"
 #include "WidgetResourceBinder.h"
@@ -19,11 +20,6 @@
 
 namespace
 {
-	// Export-chain sentinel: a serialized uniform radius at or above this value
-	// means "pill" and maps to HalfHeightRadius. Written by VisualMapper.cpp,
-	// which owns the same-named constant (kept local per module on purpose).
-	constexpr float CapsuleRadiusSentinel = 999.0f;
-
 	// Intentionally kept as a serialized-protocol round trip: automation tests
 	// (WidgetResourceBinderTests border brush color, EffectsAndShadow retainer
 	// inner-shadow color) anchor these two consumers to the JSON-preview color
@@ -240,7 +236,7 @@ namespace UMGBrushPropertyApplier
 
 		if (bHasOutlineCornerRadius)
 		{
-			if (Node.Brush.OutlineCornerRadius.GetValue() >= CapsuleRadiusSentinel)
+			if (Node.Brush.OutlineCornerRadius.GetValue() >= UMGPropertyKeys::CapsuleRadiusSentinel)
 			{
 				Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::HalfHeightRadius;
 			}
@@ -257,7 +253,7 @@ namespace UMGBrushPropertyApplier
 		{
 			const FVector4& CornerRadii = Node.Brush.CornerRadii.GetValue();
 			const float MaxRadius = FMath::Max3(CornerRadii.X, CornerRadii.Y, FMath::Max(CornerRadii.Z, CornerRadii.W));
-			if (MaxRadius >= CapsuleRadiusSentinel)
+			if (MaxRadius >= UMGPropertyKeys::CapsuleRadiusSentinel)
 			{
 				Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::HalfHeightRadius;
 			}
@@ -338,9 +334,9 @@ namespace UMGBrushPropertyApplier
 		const FUMGEffectData* Effect = nullptr)
 	{
 		if (EffectMaterialRef.IsEmpty()) return nullptr;
-		if (EffectMaterialRef.Equals(TEXT("d2u.retainer.foreground_blur"), ESearchCase::CaseSensitive))
+		if (EffectMaterialRef.Equals(UMGPropertyKeys::RetainerForegroundBlurEffectRef, ESearchCase::CaseSensitive))
 			return Design2UMGEffectMaterialBuilder::GetOrCreateForegroundBlurRetainerMaterial();
-		if (EffectMaterialRef.Equals(TEXT("d2u.retainer.geometry_mask"), ESearchCase::CaseSensitive))
+		if (EffectMaterialRef.Equals(UMGPropertyKeys::RetainerGeometryMaskEffectRef, ESearchCase::CaseSensitive))
 		{
 			if (Effect
 				&& Effect->GeometryMaskShape.IsSet()
@@ -354,7 +350,7 @@ namespace UMGBrushPropertyApplier
 			}
 			return Design2UMGEffectMaterialBuilder::GetOrCreateGeometryMaskRetainerMaterial();
 		}
-		if (EffectMaterialRef.Equals(TEXT("d2u.retainer.inner_shadow"), ESearchCase::CaseSensitive))
+		if (EffectMaterialRef.Equals(UMGPropertyKeys::RetainerInnerShadowEffectRef, ESearchCase::CaseSensitive))
 			return Design2UMGEffectMaterialBuilder::GetOrCreateInnerShadowRetainerMaterial();
 		if (UMaterialInterface* Loaded = LoadObject<UMaterialInterface>(nullptr, *EffectMaterialRef))
 			return Loaded;

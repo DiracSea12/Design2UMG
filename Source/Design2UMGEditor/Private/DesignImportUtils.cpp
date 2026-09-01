@@ -371,6 +371,26 @@ namespace
 			"GenerationCancelCompleted",
 			"Design2UMG: Cancel requested after asset creation; saved generated output to avoid partial state"));
 	}
+
+	FString NormalizeFontAssetPackagePath(const FString& PackagePath)
+	{
+		FString Normalized = PackagePath.TrimStartAndEnd();
+		Normalized.ReplaceInline(TEXT("\\"), TEXT("/"));
+		while (Normalized.EndsWith(TEXT("/")))
+		{
+			Normalized = Normalized.LeftChop(1);
+		}
+		return Normalized;
+	}
+}
+
+bool DesignImportUtils::IsCaseLocalAutomationImportedFontPath(const FString& FontAssetPath)
+{
+	const FString NormalizedPath = NormalizeFontAssetPackagePath(FontAssetPath);
+	return NormalizedPath.Contains(TEXT("/Design2UMG/Automation/"), ESearchCase::CaseSensitive)
+		&& NormalizedPath.Contains(TEXT("/ImportedFonts/"), ESearchCase::CaseSensitive)
+		&& !NormalizedPath.Equals(TEXT("/Game/Design2UMG/Automation/ImportedFonts"), ESearchCase::CaseSensitive)
+		&& !NormalizedPath.StartsWith(TEXT("/Game/Design2UMG/Automation/ImportedFonts/"), ESearchCase::CaseSensitive);
 }
 
 // Blueprint generation.
@@ -502,11 +522,11 @@ void DesignImportUtils::ApplyPendingIconFontMappingChanges(const FUMGWidgetData&
 			continue;
 		}
 
-		if (Design2UMGAutomationRender::IsCaseLocalAutomationImportedFontPath(Pair.Value))
+		if (DesignImportUtils::IsCaseLocalAutomationImportedFontPath(Pair.Value))
 		{
 			const TSoftObjectPtr<UFont>* ExistingTransient = Settings->IconFontAssetMap.Find(Pair.Key);
 			if (ExistingTransient
-				&& Design2UMGAutomationRender::IsCaseLocalAutomationImportedFontPath(ExistingTransient->ToString()))
+				&& DesignImportUtils::IsCaseLocalAutomationImportedFontPath(ExistingTransient->ToString()))
 			{
 				Settings->IconFontAssetMap.Remove(Pair.Key);
 				bModified = true;
@@ -848,8 +868,3 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 }
 
 #undef LOCTEXT_NAMESPACE
-
-
-
-
-

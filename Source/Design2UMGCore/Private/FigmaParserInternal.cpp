@@ -10,6 +10,7 @@
 #include "FigmaParserMetadata.h"
 #include "FigmaParserStyling.h"
 #include "FigmaParserText.h"
+#include "ParserSharedSemantics.h"
 #include "Design2UMGLog.h"
 #include "DesignJsonUtils.h"
 #include "Dom/JsonObject.h"
@@ -26,17 +27,6 @@ using DesignJsonUtils::GetBool;
 using DesignJsonUtils::GetNumber;
 using DesignJsonUtils::GetObject;
 using DesignJsonUtils::GetString;
-
-static void AddJsonExtensionIfPresent(const TSharedPtr<FJsonObject>& Obj, TMap<FString, FString>& Extensions, const FString& SourceKey, const FString& ExtKey)
-{
-	if (!Obj.IsValid())
-		return;
-	const TSharedPtr<FJsonValue> FieldValue = Obj->TryGetField(SourceKey);
-	if (!FieldValue.IsValid())
-		return;
-	Extensions.Add(ExtKey, DesignJsonUtils::ToPrettyString(FieldValue));
-}
-
 
 void Private::SetStringFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Key, FString& OutValue)
 {
@@ -645,28 +635,22 @@ static void CaptureFigmaStrokeMetadata(
 	const FString StrokeCap = GetString(NodeObj, TEXT("strokeCap"));
 	if (!StrokeCap.IsEmpty())
 	{
-		OutNode.Metadata.Add(TEXT("stroke.cap"), StrokeCap);
-		if (StrokeCap.Equals(TEXT("ROUND"), ESearchCase::IgnoreCase))
+		OutNode.Metadata.Add(ParserSharedSemantics::StrokeCapMetadataKey, StrokeCap);
+		EDesignStrokeCap ParsedCap;
+		if (ParserSharedSemantics::TryParseStrokeCapToken(StrokeCap, ParsedCap))
 		{
-			OutNode.Visual.Stroke.Cap = EDesignStrokeCap::Round;
-		}
-		else if (StrokeCap.Equals(TEXT("SQUARE"), ESearchCase::IgnoreCase))
-		{
-			OutNode.Visual.Stroke.Cap = EDesignStrokeCap::Square;
+			OutNode.Visual.Stroke.Cap = ParsedCap;
 		}
 	}
 
 	const FString StrokeJoin = GetString(NodeObj, TEXT("strokeJoin"));
 	if (!StrokeJoin.IsEmpty())
 	{
-		OutNode.Metadata.Add(TEXT("stroke.join"), StrokeJoin);
-		if (StrokeJoin.Equals(TEXT("ROUND"), ESearchCase::IgnoreCase))
+		OutNode.Metadata.Add(ParserSharedSemantics::StrokeJoinMetadataKey, StrokeJoin);
+		EDesignStrokeJoin ParsedJoin;
+		if (ParserSharedSemantics::TryParseStrokeJoinToken(StrokeJoin, ParsedJoin))
 		{
-			OutNode.Visual.Stroke.Join = EDesignStrokeJoin::Round;
-		}
-		else if (StrokeJoin.Equals(TEXT("BEVEL"), ESearchCase::IgnoreCase))
-		{
-			OutNode.Visual.Stroke.Join = EDesignStrokeJoin::Bevel;
+			OutNode.Visual.Stroke.Join = ParsedJoin;
 		}
 	}
 

@@ -5,6 +5,8 @@
 #include "DesignJsonUtils.h"
 #include "DesignSchema.h"
 #include "DesignSchemaSourceExtensions.h"
+#include "FigmaParserInternal.h"
+#include "ParserSharedSemantics.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Serialization/JsonReader.h"
@@ -13,7 +15,6 @@
 namespace
 {
 	using DesignJsonUtils::GetString;
-	using DesignJsonUtils::ToPrettyString;
 	using DesignJsonUtils::TryGetNumber;
 
 	void AddExtensionIfNonEmpty(TMap<FString, FString>& Extensions, const FString& Key, const FString& Value)
@@ -34,24 +35,6 @@ namespace
 		if (TryGetNumber(Obj, SourceKey, Value))
 		{
 			Extensions.Add(ExtKey, FString::SanitizeFloat(static_cast<float>(Value)));
-		}
-	}
-
-	void AddJsonExtensionIfPresent(
-		const TSharedPtr<FJsonObject>& Obj,
-		TMap<FString, FString>& Extensions,
-		const FString& SourceKey,
-		const FString& ExtKey)
-	{
-		if (!Obj.IsValid())
-		{
-			return;
-		}
-
-		const TSharedPtr<FJsonValue> FieldValue = Obj->TryGetField(SourceKey);
-		if (FieldValue.IsValid())
-		{
-			Extensions.Add(ExtKey, ToPrettyString(FieldValue));
 		}
 	}
 
@@ -220,7 +203,7 @@ namespace FigmaParserMetadata
 			 TEXT("componentPropertyDefinitions"), TEXT("variantGroupProperties"), TEXT("annotations"), TEXT("measurements"),
 			 TEXT("exportSettings"), TEXT("devStatus"), TEXT("branchData") })
 		{
-			AddJsonExtensionIfPresent(Obj, Extensions, Key, Key);
+			FigmaParserInternal::AddJsonExtensionIfPresent(Obj, Extensions, Key, Key);
 		}
 	}
 
@@ -249,7 +232,7 @@ namespace FigmaParserMetadata
 
 		for (const TCHAR* Key : { TEXT("componentProperties"), TEXT("variantProperties"), TEXT("overrides"), TEXT("exposedInstances") })
 		{
-			AddJsonExtensionIfPresent(Obj, Extensions, Key, Key);
+			FigmaParserInternal::AddJsonExtensionIfPresent(Obj, Extensions, Key, Key);
 		}
 
 		CaptureSharedMetadataExtensions(Obj, Extensions);
@@ -268,11 +251,11 @@ namespace FigmaParserMetadata
 		{
 			const int32 SlotCount = SlotField->AsArray().Num();
 			// Preserve source slot keys for source truth; only *.slot.empty is a supplementary explicit-empty hint.
-			Node.Metadata.Add(TEXT("source.slot.present"), TEXT("true"));
-			Node.Metadata.Add(TEXT("source.slot.count"), FString::FromInt(SlotCount));
+			Node.Metadata.Add(ParserSharedSemantics::SourceSlotPresentMetadataKey, TEXT("true"));
+			Node.Metadata.Add(ParserSharedSemantics::SourceSlotCountMetadataKey, FString::FromInt(SlotCount));
 			if (SlotCount == 0)
 			{
-				Node.Metadata.Add(TEXT("source.slot.empty"), TEXT("true"));
+				Node.Metadata.Add(ParserSharedSemantics::SourceSlotEmptyMetadataKey, TEXT("true"));
 			}
 		}
 

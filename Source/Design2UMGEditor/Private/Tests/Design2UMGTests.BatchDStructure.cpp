@@ -398,12 +398,15 @@ bool FBatchDMCPRequestIdSemanticsTest::RunTest(const FString& Parameters)
 		HookState->PendingByTrackingId.Num() == 0);
 
 	// Start request A, then replace it with request B before A completes.
-	bool bACallbackFired = false;
+	int32 ACallbackCount = 0;
+	bool bALastSuccess = false;
 	bool bBCallbackFired = false;
-	Client.CallToolAsync(TEXT("batch_get"), MakeShared<FJsonObject>(), [&bACallbackFired](bool, const FString&)
-	{
-		bACallbackFired = true;
-	});
+	Client.CallToolAsync(TEXT("batch_get"), MakeShared<FJsonObject>(),
+		[&ACallbackCount, &bALastSuccess](bool bSuccess, const FString&)
+		{
+			++ACallbackCount;
+			bALastSuccess = bSuccess;
+		});
 	const int32 RequestATrackingId = HookState->LastStartedTrackingId;
 	Client.CallToolAsync(TEXT("get_variables"), MakeShared<FJsonObject>(), [&bBCallbackFired](bool, const FString&)
 	{
@@ -415,13 +418,18 @@ bool FBatchDMCPRequestIdSemanticsTest::RunTest(const FString& Parameters)
 		HookState->CancelledIds.Contains(RequestATrackingId));
 	TestTrue(TEXT("Replacement uses a fresh tracking id"), RequestBTrackingId != RequestATrackingId);
 
-	// The stale callback for the cancelled request must be swallowed...
+	// Superseding the in-flight request owes it exactly one failure delivery...
+	TestEqual(TEXT("Superseded request receives exactly one callback"), ACallbackCount, 1);
+	TestFalse(TEXT("Superseded request callback reports failure"), bALastSuccess);
+
+	// ...while a late stale completion for the cancelled request must not
+	// fire it again.
 	HookState->PendingByTrackingId[RequestATrackingId](true,
 		TEXT("event: message\ndata: {\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"stale\"}]}}\n\n"),
 		200, TEXT(""));
-	TestFalse(TEXT("Stale cancelled callback does not fire"), bACallbackFired);
+	TestEqual(TEXT("Late stale completion does not re-fire the superseded callback"), ACallbackCount, 1);
 
-	// ...while the live replacement still delivers.
+	// The live replacement still delivers.
 	HookState->PendingByTrackingId[RequestBTrackingId](true,
 		TEXT("event: message\ndata: {\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"live\"}]}}\n\n"),
 		200, TEXT(""));

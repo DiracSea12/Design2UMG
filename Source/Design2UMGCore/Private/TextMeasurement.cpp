@@ -6,6 +6,7 @@
 
 #include "SharedCoreSemantics.h"
 #include "TextStyleUtils.h"
+#include "ParserSharedSemantics.h"
 
 namespace
 {
@@ -45,12 +46,8 @@ bool TextMeasurement::IsWrappingTextMode(const TSharedPtr<FDesignNode>& Node)
 		return false;
 	}
 
-	return Node->Text.TextGrowth == EDesignTextGrowth::FixedWidth
-		|| Node->Text.TextGrowth == EDesignTextGrowth::FixedWidthHeight
-		|| (Node->Text.TextGrowth == EDesignTextGrowth::Auto
-			&& Node->Transform.Width.IsFill()
-			&& Node->Transform.Width.Value > 0.0f)
-		|| Node->Text.TextAlign == EDesignTextAlign::Justify;
+	return ParserSharedSemantics::HasFixedWidthTextGrowth(*Node)
+		|| ParserSharedSemantics::HasFillWidthAutoTextGrowth(*Node);
 }
 
 bool TextMeasurement::ShouldApplyExplicitLineHeight(const TSharedPtr<FDesignNode>& Node, float ProbeFontSize, float ParentContentWidth)
@@ -124,14 +121,9 @@ float TextMeasurement::ResolveTextWrapAt(const TSharedPtr<FDesignNode>& Node, fl
 		return 0.0f;
 	}
 
-	const bool bNeedsExplicitWrap =
-		Node->Text.TextGrowth == EDesignTextGrowth::FixedWidth
-		|| Node->Text.TextGrowth == EDesignTextGrowth::FixedWidthHeight
-		|| (Node->Text.TextGrowth == EDesignTextGrowth::Auto
-			&& Node->Transform.Width.IsFill()
-			&& Node->Transform.Width.Value > 0.0f)
-		|| Node->Text.TextAlign == EDesignTextAlign::Justify
-		|| Node->Text.Content.Contains(TEXT("\n"));
+	const bool bNeedsExplicitWrap = ParserSharedSemantics::HasFixedWidthTextGrowth(*Node)
+		|| ParserSharedSemantics::HasFillWidthAutoTextGrowth(*Node)
+		|| ParserSharedSemantics::HasHardNewlineText(*Node);
 	return bNeedsExplicitWrap ? WidthLimit : 0.0f;
 }
 

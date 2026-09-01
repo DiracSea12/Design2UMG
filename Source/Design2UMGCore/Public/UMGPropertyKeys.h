@@ -123,4 +123,18 @@ namespace UMGPropertyKeys
 	inline constexpr const TCHAR* Width = TEXT("Width");
 	inline constexpr const TCHAR* WidthOverride = TEXT("WidthOverride");
 	inline constexpr const TCHAR* WrapTextAt = TEXT("WrapTextAt");
+
+	// Cross-module generation/matching contract constants: the Core visual
+	// mapper writes them and the Editor import/apply side matches them.
+	// Export-chain sentinel: a serialized uniform radius at or above this
+	// value means "pill" and maps to HalfHeightRadius on both sides. No
+	// derivation on record; fixed when the pill export path was introduced.
+	inline constexpr float CapsuleRadiusSentinel = 999.0f;
+	// Internal effect-material reference identifiers for the retainer
+	// pipeline (not asset paths), matched case-sensitively on the Editor side.
+	inline constexpr const TCHAR* RetainerForegroundBlurEffectRef = TEXT("d2u.retainer.foreground_blur");
+	inline constexpr const TCHAR* RetainerGeometryMaskEffectRef = TEXT("d2u.retainer.geometry_mask");
+	inline constexpr const TCHAR* RetainerInnerShadowEffectRef = TEXT("d2u.retainer.inner_shadow");
+	// Image-ref prefix marking synthetic vector-raster fills baked by local import.
+	inline constexpr const TCHAR* VectorRasterImageRefPrefix = TEXT("vec_");
 }

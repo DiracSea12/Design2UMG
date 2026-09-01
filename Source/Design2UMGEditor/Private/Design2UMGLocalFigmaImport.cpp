@@ -12,6 +12,7 @@
 #include "DesignImportUtils.h"
 #include "FigmaParser.h"
 #include "DesignReferenceExpansion.h"
+#include "UMGPropertyKeys.h"
 #include "UMGValueParsing.h"
 #include "UMGSchema.h"
 
@@ -23,7 +24,7 @@ namespace
 {
 	FString MakeVecKey(const FString& RawId)
 	{
-		return TEXT("vec_")
+		return FString(UMGPropertyKeys::VectorRasterImageRefPrefix)
 			+ RawId
 				.Replace(TEXT(":"), TEXT("_"))
 				.Replace(TEXT("/"), TEXT("_"));

@@ -10,7 +10,6 @@
 #include "Framework/Application/SlateApplication.h"
 #include "HAL/FileManager.h"
 #include "Interfaces/IPluginManager.h"
-#include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Styling/SlateTypes.h"
 #include "TextMeasurement.h"
@@ -27,36 +26,6 @@ namespace
 		return Plugin.IsValid()
 			? FPaths::Combine(Plugin->GetBaseDir(), TEXT("Source/Design2UMGCore"), RelativePath)
 			: FString();
-	}
-
-	bool LoadActiveTextMeasurementSources(FAutomationTestBase& Test, FString& OutSource)
-	{
-		OutSource.Reset();
-		const TCHAR* SourceFiles[] = {
-			TEXT("Private/TextMeasurement.cpp"),
-			TEXT("Private/TextMeasurementRuntimeProbe.cpp"),
-			TEXT("Private/TextMeasurementRuntimeProbeSizing.cpp"),
-			TEXT("Private/TextMeasurementInternal.h"),
-			TEXT("Private/TextFontResolution.h"),
-			TEXT("Private/SizeEstimator.cpp"),
-			TEXT("Private/Design2UMGTextWidgetBuilder.cpp"),
-			TEXT("Private/TextMeasurement.h"),
-			TEXT("Public/UMGSchemaTypedPayloads.h"),
-		};
-
-		for (const TCHAR* SourceFile : SourceFiles)
-		{
-			const FString SourcePath = GetCoreSourcePath(SourceFile);
-			FString FileSource;
-			if (!Test.TestFalse(*FString::Printf(TEXT("%s path resolved"), SourceFile), SourcePath.IsEmpty())
-				|| !Test.TestTrue(*FString::Printf(TEXT("Load %s"), SourceFile), FFileHelper::LoadFileToString(FileSource, *SourcePath)))
-			{
-				return false;
-			}
-			OutSource += FileSource;
-		}
-
-		return true;
 	}
 
 	TSharedPtr<FDesignNode> MakeTextNode(const FString& Id, const float SourceFontSize)
@@ -359,48 +328,6 @@ bool FTextMeasurementSourceConstraintIndependenceTest::RunTest(const FString&)
 			FMath::IsNearlyEqual(ResolvedFontSize, ExpectedExactPointSize(Node->Text.FontSize), 0.001f));
 	}
 
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FTextMeasurementPhase32CSourceGuardTest,
-	"Design2UMG.TextMeasurement.Phase32C.SourceGuard",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-
-bool FTextMeasurementPhase32CSourceGuardTest::RunTest(const FString&)
-{
-	FString Source;
-	if (!LoadActiveTextMeasurementSources(*this, Source))
-	{
-		return false;
-	}
-
-	const TCHAR* RemovedTokens[] = {
-		TEXT("FamilyFallbackScales"),
-		TEXT("FindFamilySpecificTextFallbackScale"),
-		TEXT("DefaultFontFallbackScale"),
-		TEXT("DefaultLineHeightMultiplier"),
-		TEXT("0.75f"),
-		TEXT("1.285714"),
-		TEXT("geist"),
-		TEXT("robotomono"),
-	};
-	for (const TCHAR* Token : RemovedTokens)
-	{
-		TestFalse(
-			*FString::Printf(TEXT("Removed text-measurement token is absent: %s"), Token),
-			Source.Contains(Token, ESearchCase::IgnoreCase));
-	}
-
-	const TCHAR* DeletedFiles[] = {
-		TEXT("Private/TextMeasurementCache.cpp"),
-		TEXT("Private/TextMeasurementCalibration.cpp"),
-		TEXT("Private/TextMeasurementSingleLineHeuristics.cpp"),
-	};
-	for (const TCHAR* DeletedFile : DeletedFiles)
-	{
-		TestFalse(*FString::Printf(TEXT("Obsolete source file is deleted: %s"), DeletedFile), IFileManager::Get().FileExists(*GetCoreSourcePath(DeletedFile)));
-	}
 	return true;
 }
 

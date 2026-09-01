@@ -10,6 +10,7 @@
 #include "Design2UMGSettings.h"
 #include "Design2UMGSourceMetadata.h"
 #include "Design2UMGTextWidgetBuilder.h"
+#include "DesignReferenceExpansion.h"
 #include "DesignSchemaSourceExtensions.h"
 #include "FigmaParser.h"
 #include "ImageFillUtils.h"
@@ -619,8 +620,12 @@ bool FSizeEstimatorSourceFlagsDoNotLockFitGrowthTest::RunTest(const FString& Par
 	UnflaggedNode->Transform.bSourceHasHeight = false;
 
 	FDesignDocument EmptyDocument;
-	const FVector2D SourceFlaggedSize = SizeEstimator::PreComputeFitContentSizes(SourceFlaggedNode, EmptyDocument);
-	const FVector2D UnflaggedSize = SizeEstimator::PreComputeFitContentSizes(UnflaggedNode, EmptyDocument);
+	const auto ExpandRefFromDoc = [&EmptyDocument](const TSharedPtr<FDesignNode>& RefNode)
+	{
+		return RefExpander::ExpandRef(RefNode, EmptyDocument);
+	};
+	const FVector2D SourceFlaggedSize = SizeEstimator::PreComputeFitContentSizes(SourceFlaggedNode, EmptyDocument, ExpandRefFromDoc);
+	const FVector2D UnflaggedSize = SizeEstimator::PreComputeFitContentSizes(UnflaggedNode, EmptyDocument, ExpandRefFromDoc);
 	TestEqual(TEXT("Source-flagged fit width grows to content"), SourceFlaggedSize.X, 32.0);
 	TestEqual(TEXT("Source-flagged fit height grows to content"), SourceFlaggedSize.Y, 32.0);
 	TestTrue(TEXT("Source flags do not change fit-content growth"), SourceFlaggedSize.Equals(UnflaggedSize));

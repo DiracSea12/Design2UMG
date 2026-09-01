@@ -4,6 +4,7 @@
 #include "Design2UMGLog.h"
 #include "DesignSchema.h"
 #include "DesignTypeMapper.h"
+#include "ParserSharedSemantics.h"
 #include "SharedCoreSemantics.h"
 #include "UMGSchemaSourceExtensions.h"
 
@@ -18,10 +19,12 @@ namespace
 
 		if (Node->Type == EDesignNodeType::Text)
 		{
-			return Node->Text.TextGrowth == EDesignTextGrowth::FixedWidth
-				|| Node->Text.TextGrowth == EDesignTextGrowth::FixedWidthHeight
-				|| Node->Text.TextAlign == EDesignTextAlign::Justify
-				|| Node->Text.Content.Contains(TEXT("\n"));
+			// Deliberately omits the Auto + fill-width growth term that
+			// TextMeasurement uses: preserving that difference keeps the
+			// existing conversion behavior; unifying it would need a full
+			// visual-regression gate first.
+			return ParserSharedSemantics::HasFixedWidthTextGrowth(*Node)
+				|| ParserSharedSemantics::HasHardNewlineText(*Node);
 		}
 
 		for (const TSharedPtr<FDesignNode>& Child : Node->Children)

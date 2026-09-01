@@ -31,23 +31,6 @@ bool ValidateNodeDepth(const TSharedPtr<FJsonObject>& JsonObj, FPenParserParseCo
 bool ValidateChildrenDepth(const TSharedPtr<FJsonValue>& ChildrenField, FPenParserParseContext& ParseContext, int32 Depth);
 TSharedPtr<FDesignNode> ParseNodeAtDepth(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver, FPenParserParseContext& ParseContext, int32 Depth);
 void AppendParsedChildrenAtDepth(const TSharedPtr<FJsonValue>& ChildrenField, const FDesignVariableResolver& Resolver, TArray<TSharedPtr<FDesignNode>>& OutChildren, FPenParserParseContext& ParseContext, int32 Depth);
-
-const PenParserNodeExtensions::FParseCallbacks& GetNodeExtensionCallbacks()
-{
-	static const PenParserNodeExtensions::FParseCallbacks Callbacks{
-		&PenParser::ParseNodeFillProperties,
-		&PenParser::ParseNodeStrokeProperties,
-		&PenParser::ApplyNodeBoxProperties,
-		&PenParser::ApplyNodeLayoutProperties,
-		&PenParser::ApplyNodeTextStyleProperties,
-		&ParserSharedSemantics::ParseTextAlignToken,
-		&PenParser::ParseTextAlignVertical,
-		&PenParser::ParseTextGrowth,
-		&PenParser::ParseNode,
-		&PenParser::AppendParsedChildren
-	};
-	return Callbacks;
-}
 }
 
 bool FPenParser::ParseFromFile(const FString& FilePath, FDesignDocument& OutDocument)
@@ -430,7 +413,7 @@ TSharedPtr<FDesignNode> ParseNodeAtDepth(
 	if (JsonObj->HasField(TEXT("cornerRadius")))
 		Node->Visual.CornerRadius = ActiveResolver->ResolveCornerRadius(JsonObj->TryGetField(TEXT("cornerRadius")));
 
-	PenParserNodeExtensions::ParseNodeExtended(JsonObj, Node, *ActiveResolver, GetNodeExtensionCallbacks());
+	PenParserNodeExtensions::ParseNodeExtended(JsonObj, Node, *ActiveResolver);
 
 	AppendParsedChildrenAtDepth(JsonObj->TryGetField(TEXT("children")), *ActiveResolver, Node->Children, ParseContext, Depth + 1);
 	PenParserNodeExtensions::FinalizePenPaddingRuntimeWrapPolicy(Node);
@@ -592,28 +575,22 @@ void ParseNodeStrokeProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNo
 	FString StrokeLinecap;
 	if (JsonObj->TryGetStringField(TEXT("strokeLinecap"), StrokeLinecap))
 	{
-		OutNode.Metadata.Add(TEXT("stroke.cap"), StrokeLinecap);
-		if (StrokeLinecap.Equals(TEXT("round"), ESearchCase::IgnoreCase))
+		OutNode.Metadata.Add(ParserSharedSemantics::StrokeCapMetadataKey, StrokeLinecap);
+		EDesignStrokeCap ParsedCap;
+		if (ParserSharedSemantics::TryParseStrokeCapToken(StrokeLinecap, ParsedCap))
 		{
-			Stroke.Cap = EDesignStrokeCap::Round;
-		}
-		else if (StrokeLinecap.Equals(TEXT("square"), ESearchCase::IgnoreCase))
-		{
-			Stroke.Cap = EDesignStrokeCap::Square;
+			Stroke.Cap = ParsedCap;
 		}
 	}
 
 	FString StrokeLinejoin;
 	if (JsonObj->TryGetStringField(TEXT("strokeLinejoin"), StrokeLinejoin))
 	{
-		OutNode.Metadata.Add(TEXT("stroke.join"), StrokeLinejoin);
-		if (StrokeLinejoin.Equals(TEXT("round"), ESearchCase::IgnoreCase))
+		OutNode.Metadata.Add(ParserSharedSemantics::StrokeJoinMetadataKey, StrokeLinejoin);
+		EDesignStrokeJoin ParsedJoin;
+		if (ParserSharedSemantics::TryParseStrokeJoinToken(StrokeLinejoin, ParsedJoin))
 		{
-			Stroke.Join = EDesignStrokeJoin::Round;
-		}
-		else if (StrokeLinejoin.Equals(TEXT("bevel"), ESearchCase::IgnoreCase))
-		{
-			Stroke.Join = EDesignStrokeJoin::Bevel;
+			Stroke.Join = ParsedJoin;
 		}
 	}
 

@@ -409,12 +409,6 @@ FVector2D SizeEstimator::EstimateContentSize(const TSharedPtr<FDesignNode>& Node
 	return EstimateContentSizeImpl(Node, ParentContentWidth, State);
 }
 
-FVector2D SizeEstimator::PreComputeFitContentSizes(const TSharedPtr<FDesignNode>& Node, const FDesignDocument& Doc)
-{
-	FSizeEstimatorState State;
-	return PreComputeFitContentSizesImpl(Node, Doc, 0.0f, State);
-}
-
 FVector2D SizeEstimator::PreComputeFitContentSizes(
 	const TSharedPtr<FDesignNode>& Node,
 	const FDesignDocument& Doc,

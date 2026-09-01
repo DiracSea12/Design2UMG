@@ -126,6 +126,10 @@ void FMCPHttpClient::ConnectAsync(const FString& Endpoint, TFunction<void(bool b
 void FMCPHttpClient::Disconnect()
 {
 	CancelRequests();
+	// Disconnect stays silent about the in-flight request: the client object
+	// is being torn down or reconnected, so no failure is owed here.
+	InFlightCancelState.Reset();
+	InFlightCancelFailure = nullptr;
 	SessionId.Empty();
 	ServerEndpoint.Empty();
 	// JSON-RPC ids only need to be unique within one connection, so each
@@ -151,64 +155,93 @@ void FMCPHttpClient::SendRequestAsync(
 	const FString& InLogLabel,
 	bool bLogTransportErrors)
 {
+	// A superseded in-flight request would otherwise never fire its callback;
+	// deliver the same failure shape the HTTP failure paths use (false with
+	// empty strings) exactly once before starting the new request.
+	if (InFlightCancelState.IsValid() && !InFlightCancelState->bDelivered && InFlightCancelFailure)
+	{
+		TFunction<void()> CancelFailure = MoveTemp(InFlightCancelFailure);
+		CancelFailure();
+	}
+	InFlightCancelState.Reset();
+	InFlightCancelFailure = nullptr;
 	CancelActiveRequest();
 
 	const FString LogLabel = InLogLabel.IsEmpty() ? Method : InLogLabel;
 	const FString RequestBody = BuildRpcRequestBody(Method, Params, &NextRpcRequestId);
 	const int32 RequestId = State->BeginRequest();
 
+	// Failure delivery owned by this request while it is in flight.
+	InFlightCancelState = MakeShared<FInFlightCancelState, ESPMode::ThreadSafe>();
+	TSharedPtr<FInFlightCancelState, ESPMode::ThreadSafe> CancelState = InFlightCancelState;
+	const FString CancelLogLabel = LogLabel;
+	InFlightCancelFailure = [CancelState, OnComplete, CancelLogLabel]()
+	{
+		CancelState->bDelivered = true;
+		UE_LOG(LogDesign2UMG, Warning,
+			TEXT("MCPHttpClient: Request cancelled before completion for %s"),
+			*CancelLogLabel);
+		if (OnComplete)
+		{
+			OnComplete(false, TEXT(""), TEXT(""));
+		}
+	};
+
 #if WITH_DEV_AUTOMATION_TESTS
 	if (DesignHttpClientSlot::HasAutomationTransport())
 	{
 		const bool bStarted = DesignHttpClientSlot::StartAutomationTransport(
 			RequestId,
-			[State = State, RequestId, OnComplete, LogLabel, bExpectResponse, bLogTransportErrors](
+			[State = State, RequestId, OnComplete, LogLabel, bExpectResponse, bLogTransportErrors, CancelState](
 				bool bConnectedSuccessfully,
 				const FString& ResponseBody,
 				int32 ResponseCode,
 				const FString& NewSessionId)
+		{
+			if (!State->ConsumeCompletion(RequestId))
 			{
-				if (!State->ConsumeCompletion(RequestId))
-				{
-					UE_LOG(LogDesign2UMG, Verbose, TEXT("MCPHttpClient: Request cancelled for %s"), *LogLabel);
-					return;
-				}
+				UE_LOG(LogDesign2UMG, Verbose, TEXT("MCPHttpClient: Request cancelled for %s"), *LogLabel);
+				return;
+			}
 
-				if (!bConnectedSuccessfully)
-				{
-					if (bLogTransportErrors)
-					{
-						UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: Connection failed for %s"), *LogLabel);
-					}
-					if (OnComplete)
-					{
-						OnComplete(false, TEXT(""), TEXT(""));
-					}
-					return;
-				}
+			CancelState->bDelivered = true;
 
-				if (ResponseCode < 200 || ResponseCode >= 300)
+			if (!bConnectedSuccessfully)
+			{
+				if (bLogTransportErrors)
 				{
-					if (bLogTransportErrors)
-					{
-						UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: HTTP %d for %s"), ResponseCode, *LogLabel);
-					}
-					if (OnComplete)
-					{
-						OnComplete(false, TEXT(""), TEXT(""));
-					}
-					return;
+					UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: Connection failed for %s"), *LogLabel);
 				}
-
 				if (OnComplete)
 				{
-					OnComplete(true, bExpectResponse ? ResponseBody : FString(), NewSessionId);
+					OnComplete(false, TEXT(""), TEXT(""));
 				}
-			});
+				return;
+			}
+
+			if (ResponseCode < 200 || ResponseCode >= 300)
+			{
+				if (bLogTransportErrors)
+				{
+					UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: HTTP %d for %s"), ResponseCode, *LogLabel);
+				}
+				if (OnComplete)
+				{
+					OnComplete(false, TEXT(""), TEXT(""));
+				}
+				return;
+			}
+
+			if (OnComplete)
+			{
+				OnComplete(true, bExpectResponse ? ResponseBody : FString(), NewSessionId);
+			}
+		});
 
 		if (!bStarted)
 		{
 			State->ClearActiveRequest(RequestId);
+			CancelState->bDelivered = true;
 			UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: ProcessRequest failed for %s"), *LogLabel);
 			if (OnComplete)
 			{
@@ -222,13 +255,15 @@ void FMCPHttpClient::SendRequestAsync(
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = CreatePostRequest(ServerEndpoint, SessionId, RequestBody);
 	State->BindActiveRequest(HttpRequest);
 	HttpRequest->OnProcessRequestComplete().BindLambda(
-		[State = State, RequestId, OnComplete, LogLabel, bExpectResponse, bLogTransportErrors](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnectedSuccessfully)
+		[State = State, RequestId, OnComplete, LogLabel, bExpectResponse, bLogTransportErrors, CancelState](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnectedSuccessfully)
 	{
 		if (!State->ConsumeCompletion(RequestId))
 		{
 			UE_LOG(LogDesign2UMG, Verbose, TEXT("MCPHttpClient: Request cancelled for %s"), *LogLabel);
 			return;
 		}
+
+		CancelState->bDelivered = true;
 
 		if (!bConnectedSuccessfully || !Response.IsValid())
 		{
@@ -262,6 +297,7 @@ void FMCPHttpClient::SendRequestAsync(
 	if (!HttpRequest->ProcessRequest())
 	{
 		State->ClearActiveRequest(RequestId);
+		CancelState->bDelivered = true;
 		UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: ProcessRequest failed for %s"), *LogLabel);
 		if (OnComplete)
 			OnComplete(false, TEXT(""), TEXT(""));
@@ -270,28 +306,43 @@ void FMCPHttpClient::SendRequestAsync(
 
 bool FMCPHttpClient::ParseSSEResponse(const FString& SSEBody, TSharedPtr<FJsonObject>& OutResult)
 {
-	// SSE format: "event: message\ndata: {json}\n\n"
-	// Extract the last "data:" line from the SSE payload.
-	FString JsonLine;
+	// SSE format: "event: message\ndata: {json}\n\n". Events are separated by
+	// blank lines; multiple "data:" lines inside one event are joined with
+	// newlines per the SSE spec. We keep the payload of the last event that
+	// actually carried data.
+	FString JsonPayload;
 	TArray<FString> Lines;
 	SSEBody.ParseIntoArrayLines(Lines);
 
-	for (int32 i = Lines.Num() - 1; i >= 0; --i)
+	TArray<FString> DataLines;
+	const auto FlushEvent = [&JsonPayload, &DataLines]()
 	{
-		if (Lines[i].StartsWith(TEXT("data:")))
+		if (DataLines.Num() > 0)
 		{
-			JsonLine = Lines[i].RightChop(5).TrimStart();
-			break;
+			JsonPayload = FString::Join(DataLines, TEXT("\n"));
+			DataLines.Reset();
+		}
+	};
+	for (const FString& Line : Lines)
+	{
+		if (Line.IsEmpty())
+		{
+			FlushEvent();
+		}
+		else if (Line.StartsWith(TEXT("data:")))
+		{
+			DataLines.Add(Line.RightChop(5).TrimStart());
 		}
 	}
+	FlushEvent();
 
-	if (JsonLine.IsEmpty())
+	if (JsonPayload.IsEmpty())
 	{
 		// This may not be SSE format, so try parsing the whole body directly.
-		JsonLine = SSEBody;
+		JsonPayload = SSEBody;
 	}
 
-	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonLine);
+	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonPayload);
 	TSharedPtr<FJsonObject> RpcObj;
 	if (!FJsonSerializer::Deserialize(Reader, RpcObj) || !RpcObj.IsValid())
 		return false;

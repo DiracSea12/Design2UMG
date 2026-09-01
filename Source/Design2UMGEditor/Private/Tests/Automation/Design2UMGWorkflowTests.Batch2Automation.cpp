@@ -15,16 +15,16 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAutomationCaseLocalIconFontPathClassifierTest,
 bool FAutomationCaseLocalIconFontPathClassifierTest::RunTest(const FString& Parameters)
 {
 	TestTrue(TEXT("Case-local automation imported font path should be detected"),
-		Design2UMGAutomationRender::IsCaseLocalAutomationImportedFontPath(
+		DesignImportUtils::IsCaseLocalAutomationImportedFontPath(
 			TEXT("/Game/Design2UMG/Automation/pen-pencil-demo-dashboard/ImportedFonts/lucide.lucide")));
 	TestTrue(TEXT("Nested case-local automation imported font path should be detected"),
-		Design2UMGAutomationRender::IsCaseLocalAutomationImportedFontPath(
+		DesignImportUtils::IsCaseLocalAutomationImportedFontPath(
 			TEXT("/Game/Design2UMG/Automation/figma-figma-export-local/primary/ImportedFonts/lucide.lucide")));
 	TestFalse(TEXT("Pinned global automation imported font path should stay reusable"),
-		Design2UMGAutomationRender::IsCaseLocalAutomationImportedFontPath(
+		DesignImportUtils::IsCaseLocalAutomationImportedFontPath(
 			TEXT("/Game/Design2UMG/Automation/ImportedFonts/lucide.lucide")));
 	TestFalse(TEXT("Normal project font path should not be treated as automation imported"),
-		Design2UMGAutomationRender::IsCaseLocalAutomationImportedFontPath(
+		DesignImportUtils::IsCaseLocalAutomationImportedFontPath(
 			TEXT("/Game/Design2UMG/Fonts/lucide.lucide")));
 	return true;
 }

@@ -5,6 +5,7 @@
 #include "DesignHttpClientSlot.h"
 
 #include "HttpModule.h"
+#include "PlatformHttp.h"
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
 
@@ -36,7 +37,15 @@ void FFigmaHttpClient::GetFileImages(const FString& FileKey, FOnComplete OnCompl
 
 void FFigmaHttpClient::ExportImages(const FString& FileKey, const TArray<FString>& NodeIds, FOnComplete OnComplete)
 {
-	FString Ids = FString::Join(NodeIds, TEXT(","));
+	// Figma node ids can contain characters that are not URL-safe (e.g. ':');
+	// encode each id but keep the ',' separator literal.
+	TArray<FString> EncodedIds;
+	EncodedIds.Reserve(NodeIds.Num());
+	for (const FString& NodeId : NodeIds)
+	{
+		EncodedIds.Add(FPlatformHttp::UrlEncode(NodeId));
+	}
+	const FString Ids = FString::Join(EncodedIds, TEXT(","));
 	SendGet(FString::Printf(TEXT("%s/v1/images/%s?ids=%s&format=png&scale=2"), *FigmaApiBase, *FileKey, *Ids), MoveTemp(OnComplete));
 }
 

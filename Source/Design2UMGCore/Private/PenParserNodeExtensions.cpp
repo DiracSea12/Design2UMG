@@ -3,6 +3,7 @@
 #include "PenParserNodeExtensions.h"
 #include "DesignColorUtils.h"
 #include "DesignJsonUtils.h"
+#include "ParserSharedSemantics.h"
 #include "PenParserInternal.h"
 
 namespace
@@ -57,11 +58,11 @@ namespace
 		}
 
 		// Preserve source slot keys for source truth (same key family as the Figma parser); only source.slot.empty is the supplementary explicit-empty hint.
-		Node.Metadata.Add(TEXT("source.slot.present"), TEXT("true"));
-		Node.Metadata.Add(TEXT("source.slot.count"), FString::FromInt(SlotMetadata.SlotNodeCount));
+		Node.Metadata.Add(ParserSharedSemantics::SourceSlotPresentMetadataKey, TEXT("true"));
+		Node.Metadata.Add(ParserSharedSemantics::SourceSlotCountMetadataKey, FString::FromInt(SlotMetadata.SlotNodeCount));
 		if (SlotMetadata.SlotNodeCount == 0)
 		{
-			Node.Metadata.Add(TEXT("source.slot.empty"), TEXT("true"));
+			Node.Metadata.Add(ParserSharedSemantics::SourceSlotEmptyMetadataKey, TEXT("true"));
 		}
 	}
 
@@ -220,8 +221,7 @@ namespace
 
 	TSharedPtr<FDesignNode> ParseDescendantOverrideNode(
 		const TSharedPtr<FJsonObject>& JsonObj,
-		const FDesignVariableResolver& Resolver,
-		const PenParserNodeExtensions::FParseCallbacks& Callbacks)
+		const FDesignVariableResolver& Resolver)
 	{
 		if (!JsonObj.IsValid())
 		{
@@ -237,17 +237,17 @@ namespace
 			Node->Text.Content = Resolver.ResolveString(RawContent);
 		}
 
-		Callbacks.ApplyNodeTextStyleProperties(JsonObj, *Node, Resolver);
+		PenParser::ApplyNodeTextStyleProperties(JsonObj, *Node, Resolver);
 		if (JsonObj->HasField(TEXT("fill")))
 		{
-			Callbacks.ParseNodeFillProperties(JsonObj->TryGetField(TEXT("fill")), *Node, Resolver);
+			PenParser::ParseNodeFillProperties(JsonObj->TryGetField(TEXT("fill")), *Node, Resolver);
 		}
-		Callbacks.ParseNodeStrokeProperties(JsonObj, *Node, Resolver);
-		Callbacks.ApplyNodeBoxProperties(JsonObj, *Node, EDesignNodeType::Frame, Resolver);
+		PenParser::ParseNodeStrokeProperties(JsonObj, *Node, Resolver);
+		PenParser::ApplyNodeBoxProperties(JsonObj, *Node, EDesignNodeType::Frame, Resolver);
 		TryGetResolvedBoolField(JsonObj, TEXT("enabled"), Resolver, Node->Transform.bEnabled);
-		Callbacks.ApplyNodeLayoutProperties(JsonObj, *Node, Resolver, true);
+		PenParser::ApplyNodeLayoutProperties(JsonObj, *Node, Resolver, true);
 		JsonObj->TryGetStringField(TEXT("name"), Node->Name);
-		Callbacks.AppendParsedChildren(JsonObj->TryGetField(TEXT("children")), Resolver, Node->Children);
+		PenParser::AppendParsedChildren(JsonObj->TryGetField(TEXT("children")), Resolver, Node->Children);
 		PenParserNodeExtensions::FinalizePenPaddingRuntimeWrapPolicy(Node);
 		PenParserNodeExtensions::ParsePenSemanticMetadata(JsonObj, *Node, Resolver);
 		return Node;
@@ -256,8 +256,7 @@ namespace
 	void ParseDescendants(
 		const TSharedPtr<FJsonObject>& JsonObj,
 		TSharedPtr<FDesignNode>& Node,
-		const FDesignVariableResolver& Resolver,
-		const PenParserNodeExtensions::FParseCallbacks& Callbacks)
+		const FDesignVariableResolver& Resolver)
 	{
 		const TSharedPtr<FJsonValue> DescField = JsonObj->TryGetField(TEXT("descendants"));
 		if (!DescField.IsValid() || DescField->Type != EJson::Object)
@@ -276,14 +275,14 @@ namespace
 			const TSharedPtr<FJsonObject>& OverrideObj = Pair.Value->AsObject();
 			if (OverrideObj->HasField(TEXT("type")))
 			{
-				if (TSharedPtr<FDesignNode> FullNode = Callbacks.ParseNode(OverrideObj, Resolver))
+				if (TSharedPtr<FDesignNode> FullNode = PenParser::ParseNode(OverrideObj, Resolver))
 				{
 					Node->Descendants.Add(Pair.Key, FullNode);
 				}
 				continue;
 			}
 
-			if (TSharedPtr<FDesignNode> DescNode = ParseDescendantOverrideNode(OverrideObj, Resolver, Callbacks))
+			if (TSharedPtr<FDesignNode> DescNode = ParseDescendantOverrideNode(OverrideObj, Resolver))
 			{
 				Node->Descendants.Add(Pair.Key, DescNode);
 			}
@@ -334,11 +333,10 @@ void PenParserNodeExtensions::ParsePenSemanticMetadata(
 void PenParserNodeExtensions::ParseNodeExtended(
 	const TSharedPtr<FJsonObject>& JsonObj,
 	TSharedPtr<FDesignNode>& Node,
-	const FDesignVariableResolver& Resolver,
-	const FParseCallbacks& Callbacks)
+	const FDesignVariableResolver& Resolver)
 {
 	ParseNodeContentField(JsonObj->TryGetField(TEXT("content")), Resolver, Node);
-	Callbacks.ApplyNodeTextStyleProperties(JsonObj, *Node, Resolver);
+	PenParser::ApplyNodeTextStyleProperties(JsonObj, *Node, Resolver);
 	float LineHeight = 0.0f;
 	if (TryGetResolvedNumberField(JsonObj, TEXT("lineHeight"), Resolver, LineHeight) && LineHeight > 0.0f)
 	{
@@ -359,21 +357,21 @@ void PenParserNodeExtensions::ParseNodeExtended(
 		FString TextAlign;
 		if (JsonObj->TryGetStringField(TEXT("textAlign"), TextAlign))
 		{
-			Node->Text.TextAlign = Callbacks.ParseTextAlign(TextAlign);
+			Node->Text.TextAlign = ParserSharedSemantics::ParseTextAlignToken(TextAlign);
 		}
 	}
 	{
 		FString TextAlignVertical;
 		if (JsonObj->TryGetStringField(TEXT("textAlignVertical"), TextAlignVertical))
 		{
-			Node->Text.TextAlignVertical = Callbacks.ParseTextAlignVertical(TextAlignVertical);
+			Node->Text.TextAlignVertical = PenParser::ParseTextAlignVertical(TextAlignVertical);
 		}
 	}
 	{
 		FString TextGrowth;
 		if (JsonObj->TryGetStringField(TEXT("textGrowth"), TextGrowth))
 		{
-			Node->Text.TextGrowth = Callbacks.ParseTextGrowth(TextGrowth);
+			Node->Text.TextGrowth = PenParser::ParseTextGrowth(TextGrowth);
 		}
 	}
 
@@ -487,5 +485,5 @@ void PenParserNodeExtensions::ParseNodeExtended(
 
 	JsonObj->TryGetStringField(TEXT("ref"), Node->Ref);
 	TryGetResolvedBoolField(JsonObj, TEXT("reusable"), Resolver, Node->bReusable);
-	ParseDescendants(JsonObj, Node, Resolver, Callbacks);
+	ParseDescendants(JsonObj, Node, Resolver);
 }

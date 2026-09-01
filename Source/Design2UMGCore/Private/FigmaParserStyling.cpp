@@ -4,6 +4,7 @@
 #include "DesignColorUtils.h"
 #include "DesignJsonUtils.h"
 #include "ParserSharedSemantics.h"
+#include "UMGPropertyKeys.h"
 
 namespace FigmaParserInternal
 {
@@ -38,7 +39,7 @@ namespace
 			return false;
 		}
 
-		return GetString(FillObj, TEXT("imageRef")).StartsWith(TEXT("vec_"));
+		return GetString(FillObj, TEXT("imageRef")).StartsWith(UMGPropertyKeys::VectorRasterImageRefPrefix);
 	}
 
 	FDesignFill ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)

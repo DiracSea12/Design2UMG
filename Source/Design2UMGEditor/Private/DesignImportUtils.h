@@ -26,6 +26,16 @@ namespace DesignImportUtils
 #endif
 
 	void ApplyPendingIconFontMappingChanges(const FUMGWidgetData& Data);
+
+	/**
+	 * True for automation-imported font assets under a per-case directory
+	 * (e.g. /Game/Design2UMG/Automation/<case>/ImportedFonts/...); the pinned
+	 * global /Game/Design2UMG/Automation/ImportedFonts package stays reusable.
+	 * Owned by the product side so import code does not depend on the
+	 * automation render harness.
+	 */
+	bool IsCaseLocalAutomationImportedFontPath(const FString& FontAssetPath);
+
 	// Reloads the blueprint's package from disk for rendering. Skips the reload
 	// (and renders the in-memory version instead) when the package has unsaved
 	// changes, so a reload can never discard them. Exposed for direct testing.

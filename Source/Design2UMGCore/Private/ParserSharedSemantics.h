@@ -4,14 +4,78 @@
 #include "DesignSchema.h"
 #include "Dom/JsonValue.h"
 
-// Parsing semantics shared by the Pencil and Figma parsers.
+// Parsing semantics shared by the Pencil and Figma parsers plus the text
+// measurement and layout mapping paths.
 // The two sources emit the same axis-alignment vocabulary up to letter case
 // (Pencil "space_between" vs Figma "SPACE_BETWEEN", Pencil "end" vs Figma "MAX"),
 // so the shared mappers compare case-insensitively and accept both vocabularies.
-// Not part of the public API; include only from parser .cpp files.
+// Not part of the public API.
 
 namespace ParserSharedSemantics
 {
+	// Node metadata keys shared by the Pencil and Figma parsers.
+	inline constexpr const TCHAR* StrokeCapMetadataKey = TEXT("stroke.cap");
+	inline constexpr const TCHAR* StrokeJoinMetadataKey = TEXT("stroke.join");
+	inline constexpr const TCHAR* SourceSlotPresentMetadataKey = TEXT("source.slot.present");
+	inline constexpr const TCHAR* SourceSlotCountMetadataKey = TEXT("source.slot.count");
+	inline constexpr const TCHAR* SourceSlotEmptyMetadataKey = TEXT("source.slot.empty");
+
+	// Wrapping-text vocabulary shared by the text measurement and layout paths.
+	// Each caller keeps its exact prior boolean expression by composing these
+	// terms; the terms themselves carry no null or node-type checks.
+	inline bool HasFixedWidthTextGrowth(const FDesignNode& Node)
+	{
+		return Node.Text.TextGrowth == EDesignTextGrowth::FixedWidth
+			|| Node.Text.TextGrowth == EDesignTextGrowth::FixedWidthHeight
+			|| Node.Text.TextAlign == EDesignTextAlign::Justify;
+	}
+
+	inline bool HasFillWidthAutoTextGrowth(const FDesignNode& Node)
+	{
+		return Node.Text.TextGrowth == EDesignTextGrowth::Auto
+			&& Node.Transform.Width.IsFill()
+			&& Node.Transform.Width.Value > 0.0f;
+	}
+
+	// Only meaningful for text-bearing nodes; callers guarantee that.
+	inline bool HasHardNewlineText(const FDesignNode& Node)
+	{
+		return Node.Text.Content.Contains(TEXT("\n"));
+	}
+
+	// Stroke cap/join tokens: Pencil emits lowercase, Figma uppercase, so the
+	// shared mappers compare case-insensitively. Unmatched tokens leave the
+	// caller's previous enum value untouched.
+	inline bool TryParseStrokeCapToken(const FString& Value, EDesignStrokeCap& OutCap)
+	{
+		if (Value.Equals(TEXT("ROUND"), ESearchCase::IgnoreCase))
+		{
+			OutCap = EDesignStrokeCap::Round;
+			return true;
+		}
+		if (Value.Equals(TEXT("SQUARE"), ESearchCase::IgnoreCase))
+		{
+			OutCap = EDesignStrokeCap::Square;
+			return true;
+		}
+		return false;
+	}
+
+	inline bool TryParseStrokeJoinToken(const FString& Value, EDesignStrokeJoin& OutJoin)
+	{
+		if (Value.Equals(TEXT("ROUND"), ESearchCase::IgnoreCase))
+		{
+			OutJoin = EDesignStrokeJoin::Round;
+			return true;
+		}
+		if (Value.Equals(TEXT("BEVEL"), ESearchCase::IgnoreCase))
+		{
+			OutJoin = EDesignStrokeJoin::Bevel;
+			return true;
+		}
+		return false;
+	}
+
 	inline EDesignJustifyContent ParseJustifyContentToken(const FString& Value)
 	{
 		if (Value.Equals(TEXT("CENTER"), ESearchCase::IgnoreCase))
