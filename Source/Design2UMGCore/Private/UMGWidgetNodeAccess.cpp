@@ -344,6 +344,10 @@ FString Design2UMGWidgetNodeAccess::BuildWidgetNodeVerbosePropertyDump(const FUM
 	{
 		AppendVerboseFloat(Dump, UMGPropertyKeys::LineHeightPercentage, Node.Text.LineHeightPercentage.GetValue());
 	}
+	if (Node.Text.LineHeightBaselineShift.IsSet())
+	{
+		AppendVerboseFloat(Dump, UMGPropertyKeys::LineHeightBaselineShift, Node.Text.LineHeightBaselineShift.GetValue());
+	}
 	if (Node.Text.bUnderline.IsSet())
 	{
 		AppendVerboseBool(Dump, UMGPropertyKeys::Underline, Node.Text.bUnderline.GetValue());

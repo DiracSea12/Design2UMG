@@ -7,8 +7,10 @@
 #include "Design2UMGTextWidgetBuilder.h"
 #include "Misc/AutomationTest.h"
 #include "DesignSchema.h"
+#include "Design2UMGSettings.h"
 #include "Dom/JsonObject.h"
 #include "Fonts/SlateFontInfo.h"
+#include "FontResolver.h"
 #include "TextMeasurementRuntimeProbe.h"
 #include "UMGSchema.h"
 #include "UMGPropertyKeys.h"
@@ -106,6 +108,111 @@ bool FTextMeasurementRuntimeProbeSubpointFontInfoContractTest::RunTest(const FSt
 	const FSlateFontInfo FontInfo = TextMeasurementRuntimeProbe::BuildFontInfo(Request);
 	TestTrue(TEXT("Runtime probe font info preserves 0.375 point sizes"),
 		FMath::IsNearlyEqual(FontInfo.Size, 0.375f, 0.001f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextWidgetBuilderOverflowClippingContractTest,
+	"Design2UMG.TextWidgetBuilder.OverflowClippingContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTextWidgetBuilderOverflowClippingContractTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
+	Node->Id = TEXT("overflow_clipping_contract");
+	Node->Name = TEXT("Overflow Clipping Contract");
+	Node->Type = EDesignNodeType::Text;
+	Node->Text.Content = TEXT("DATA ANALYTICS");
+	Node->Text.FontFamily = TEXT("Poppins");
+	Node->Text.FontSize = 64.0f;
+	Node->Text.TextGrowth = EDesignTextGrowth::FixedWidthHeight;
+
+	const FUMGWidgetNode Widget = Design2UMGTextWidgetBuilder::CreateTextWidget(Node);
+	TestFalse(TEXT("Fixed box without truncate stays unclipped (overflow is visible)"),
+		Widget.Render.Clipping.IsSet());
+
+	Node->Text.bTruncateOverflow = true;
+	const FUMGWidgetNode TruncatingWidget = Design2UMGTextWidgetBuilder::CreateTextWidget(Node);
+	TestEqual(TEXT("Truncate mode keeps clipping"),
+		TruncatingWidget.Render.Clipping.Get(FString()), FString(TEXT("ClipToBounds")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextWidgetBuilderLineHeightBaselineShiftContractTest,
+	"Design2UMG.TextWidgetBuilder.LineHeightBaselineShiftContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTextWidgetBuilderLineHeightBaselineShiftContractTest::RunTest(const FString& Parameters)
+{
+	FFontResolver::ClearCache();
+	UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+	if (!TestTrue(TEXT("Settings available"), Settings != nullptr))
+	{
+		return false;
+	}
+	const TMap<FString, TSoftObjectPtr<UFont>> SavedMappings = Settings->ExplicitFontMappings;
+	Settings->ExplicitFontMappings.Empty();
+
+	// Reuse the real project font asset: the baseline shift reads hhea metrics
+	// from the resolved font face, which only authored (asset-backed) faces carry.
+	UFont* Font = LoadObject<UFont>(nullptr, TEXT("/Game/Design2UMG/Fonts/Poppins.Poppins"));
+	if (!TestNotNull(TEXT("Baseline shift project font asset loaded"), Font))
+	{
+		Settings->ExplicitFontMappings = SavedMappings;
+		return false;
+	}
+	Settings->ExplicitFontMappings.Add(
+		TEXT("D2UBaselineShiftProbe"),
+		TSoftObjectPtr<UFont>(FSoftObjectPath(Font->GetPathName())));
+	FFontResolver::ClearCache();
+
+	TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
+	Node->Id = TEXT("baseline_shift_contract");
+	Node->Name = TEXT("Baseline Shift Contract");
+	Node->Type = EDesignNodeType::Text;
+	Node->Text.Content = TEXT("DATA\nANALYTICS");
+	Node->Text.FontFamily = TEXT("D2UBaselineShiftProbe");
+	Node->Text.FontSize = 64.0f;
+	Node->Text.LineHeight = 0.89f;
+	// Set by the Figma parser for its half-leading first-line placement.
+	Node->Text.bSourceHalfLeadingBaseline = true;
+	Node->Text.TextGrowth = EDesignTextGrowth::FixedWidthHeight;
+
+	const FUMGWidgetNode Widget = Design2UMGTextWidgetBuilder::CreateTextWidget(Node);
+	TestTrue(TEXT("Multi-line explicit line height applies the percentage"),
+		Widget.Text.LineHeightPercentage.IsSet());
+	const bool bMultiLineShift = Widget.Text.LineHeightBaselineShift.IsSet();
+	TestTrue(TEXT("Multi-line explicit line height applies the baseline shift"), bMultiLineShift);
+	if (bMultiLineShift)
+	{
+		TestTrue(TEXT("Baseline shift is finite"),
+			FMath::IsFinite(Widget.Text.LineHeightBaselineShift.GetValue()));
+	}
+
+	// The baseline difference is a placement fact of the first line, so the shift
+	// also applies to single-line labels whose line advance stays at the natural
+	// height (no LineHeightPercentage).
+	Node->Text.Content = TEXT("HOME");
+	const FUMGWidgetNode LabelWidget = Design2UMGTextWidgetBuilder::CreateTextWidget(Node);
+	TestFalse(TEXT("Single-line label keeps natural line advance"),
+		LabelWidget.Text.LineHeightPercentage.IsSet());
+	TestEqual(TEXT("Single-line label still gets the baseline shift"),
+		LabelWidget.Text.LineHeightBaselineShift.IsSet(), bMultiLineShift);
+
+	// Pencil keeps the natural ascent at the top of its line boxes, which already
+	// matches Slate, so its parser leaves the flag off and no shift is generated.
+	Node->Text.bSourceHalfLeadingBaseline = false;
+	const FUMGWidgetNode AscentTopWidget = Design2UMGTextWidgetBuilder::CreateTextWidget(Node);
+	TestFalse(TEXT("Ascent-top sources get no baseline shift"),
+		AscentTopWidget.Text.LineHeightBaselineShift.IsSet());
+
+	// A fallback font (no resolvable source asset) breaks the metric basis of the
+	// shift, so no shift is generated for it either.
+	Node->Text.bSourceHalfLeadingBaseline = true;
+	Node->Text.FontFamily = TEXT("D2UBaselineShiftUnmappedFamily");
+	const FUMGWidgetNode FallbackWidget = Design2UMGTextWidgetBuilder::CreateTextWidget(Node);
+	TestFalse(TEXT("Unresolvable font families get no baseline shift"),
+		FallbackWidget.Text.LineHeightBaselineShift.IsSet());
+
+	Settings->ExplicitFontMappings = SavedMappings;
+	FFontResolver::ClearCache();
 	return true;
 }
 

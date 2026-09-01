@@ -3,8 +3,12 @@
 #include "TextMeasurementRuntimeProbe.h"
 
 #include "Components/TextBlock.h"
+#include "Engine/Font.h"
+#include "Fonts/CompositeFont.h"
 #include "Fonts/FontMeasure.h"
 #include "Framework/Application/SlateApplication.h"
+#include "HAL/FileManager.h"
+#include "Misc/FileHelper.h"
 #include "Styling/SlateTypes.h"
 #include "TextMeasurement.h"
 #include "TextFontResolution.h"
@@ -45,6 +49,76 @@ namespace
 	bool IsFinitePositive(const float Value)
 	{
 		return FMath::IsFinite(Value) && Value > 0.0f;
+	}
+
+	uint32 ReadTableTag(const TArray<uint8>& Data, const int32 Pos)
+	{
+		return (static_cast<uint32>(Data[Pos]) << 24)
+			| (static_cast<uint32>(Data[Pos + 1]) << 16)
+			| (static_cast<uint32>(Data[Pos + 2]) << 8)
+			| static_cast<uint32>(Data[Pos + 3]);
+	}
+
+	int32 ReadUInt16(const TArray<uint8>& Data, const int32 Pos)
+	{
+		return (static_cast<int32>(Data[Pos]) << 8) | static_cast<int32>(Data[Pos + 1]);
+	}
+
+	bool FindTableOffset(const TArray<uint8>& Data, const uint32 Tag, int32& OutOffset)
+	{
+		if (Data.Num() < 12)
+		{
+			return false;
+		}
+
+		const int32 NumTables = ReadUInt16(Data, 4);
+		if (NumTables <= 0 || NumTables > 1024 || 12 + NumTables * 16 > Data.Num())
+		{
+			return false;
+		}
+
+		for (int32 Index = 0; Index < NumTables; ++Index)
+		{
+			const int32 Record = 12 + Index * 16;
+			if (ReadTableTag(Data, Record) == Tag)
+			{
+				const int32 Offset = (ReadUInt16(Data, Record + 8) << 16) | ReadUInt16(Data, Record + 10);
+				if (Offset < 0 || Offset + 2 > Data.Num())
+				{
+					return false;
+				}
+				OutOffset = Offset;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Parses unitsPerEm (head) and lineGap (hhea) out of a raw sfnt table set. */
+	bool TryParseHheaLineGapEm(const TArray<uint8>& Data, float& OutLineGapEm)
+	{
+		int32 HeadOffset = INDEX_NONE;
+		int32 HheaOffset = INDEX_NONE;
+		if (!FindTableOffset(Data, 0x68656164 /* head */, HeadOffset)
+			|| !FindTableOffset(Data, 0x68686561 /* hhea */, HheaOffset))
+		{
+			return false;
+		}
+
+		if (HeadOffset + 20 > Data.Num() || HheaOffset + 10 > Data.Num())
+		{
+			return false;
+		}
+
+		const int32 UnitsPerEm = ReadUInt16(Data, HeadOffset + 18);
+		if (UnitsPerEm <= 0)
+		{
+			return false;
+		}
+
+		const int16 LineGap = static_cast<int16>(ReadUInt16(Data, HheaOffset + 8));
+		OutLineGapEm = static_cast<float>(LineGap) / static_cast<float>(UnitsPerEm);
+		return true;
 	}
 
 	ETextJustify::Type ToSlateJustification(const EDesignTextAlign TextAlign)
@@ -242,4 +316,84 @@ bool TextMeasurementRuntimeProbe::TryMeasureTextBlockDesiredSize(const FTextBloc
 
 	OutSize = DesiredSize;
 	return true;
+}
+
+bool TextMeasurementRuntimeProbe::TryReadLineGapEm(const FString& FontAssetPath, const FString& TypefaceName, float& OutLineGapEm)
+{
+	OutLineGapEm = 0.0f;
+	if (FontAssetPath.IsEmpty())
+	{
+		return false;
+	}
+
+	// Font metrics never change during a process, so cache per (asset, typeface).
+	static TMap<FString, TOptional<float>> LineGapEmCache;
+	const FString CacheKey = TypefaceName.IsEmpty()
+		? FontAssetPath
+		: FontAssetPath + TEXT("|") + TypefaceName;
+	if (const TOptional<float>* Cached = LineGapEmCache.Find(CacheKey))
+	{
+		if (Cached->IsSet())
+		{
+			OutLineGapEm = Cached->GetValue();
+		}
+		return Cached->IsSet();
+	}
+
+	TOptional<float> Parsed;
+	const UFont* Font = LoadObject<UFont>(nullptr, *FontAssetPath);
+	if (Font)
+	{
+		// Same face-picking rule as the Slate composite font cache: exact typeface
+		// entry match, otherwise the primary (first) entry of the default typeface.
+		const FTypeface& DefaultTypeface = Font->CompositeFont.DefaultTypeface;
+		const FTypefaceEntry* SelectedEntry = nullptr;
+		if (!TypefaceName.IsEmpty())
+		{
+			SelectedEntry = DefaultTypeface.Fonts.FindByPredicate(
+				[&TypefaceName](const FTypefaceEntry& Entry)
+				{
+					return Entry.Name == FName(*TypefaceName);
+				});
+		}
+		if (!SelectedEntry && DefaultTypeface.Fonts.Num() > 0)
+		{
+			SelectedEntry = &DefaultTypeface.Fonts[0];
+		}
+
+		if (SelectedEntry)
+		{
+			// Asset-backed faces expose their data directly; filename-backed faces
+			// (the Slate composite font cache reads those from disk) are read from
+			// the same file here so both storage forms resolve identically.
+			const FFontFaceDataConstPtr FaceData = SelectedEntry->Font.GetFontFaceData();
+			if (FaceData.IsValid() && FaceData->HasData())
+			{
+				float LineGapEm = 0.0f;
+				if (TryParseHheaLineGapEm(FaceData->GetData(), LineGapEm))
+				{
+					Parsed = LineGapEm;
+				}
+			}
+			else
+			{
+				TArray<uint8> FontFileData;
+				if (FFileHelper::LoadFileToArray(FontFileData, *SelectedEntry->Font.GetFontFilename()))
+				{
+					float LineGapEm = 0.0f;
+					if (TryParseHheaLineGapEm(FontFileData, LineGapEm))
+					{
+						Parsed = LineGapEm;
+					}
+				}
+			}
+		}
+	}
+
+	LineGapEmCache.Add(CacheKey, Parsed);
+	if (Parsed.IsSet())
+	{
+		OutLineGapEm = Parsed.GetValue();
+	}
+	return Parsed.IsSet();
 }

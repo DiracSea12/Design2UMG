@@ -202,6 +202,7 @@ bool FFigmaLineHeightMappingTest::RunTest(const FString& Parameters)
 								"fontSize": 10,
 								"fontWeight": 400,
 								"lineHeightUnit": "FONT_SIZE_%",
+								"lineHeightPx": 14,
 								"lineHeightPercentFontSize": 140
 							},
 							"characters": "B",

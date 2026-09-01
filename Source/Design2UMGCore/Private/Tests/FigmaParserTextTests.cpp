@@ -39,6 +39,7 @@ bool FFigmaParserTextStylePropertiesTest::RunTest(const FString&)
         "textAutoResize": "TRUNCATE",
         "hyperlink": { "url": "https://example.com/docs" },
         "absoluteBoundingBox": { "x": 10, "y": 20, "width": 220, "height": 48 },
+        "absoluteRenderBounds": { "x": 10, "y": 22, "width": 160, "height": 31 },
         "fills": [{ "type": "SOLID", "visible": true, "color": { "r": 1, "g": 1, "b": 1, "a": 1 } }],
         "style": {
           "fontFamily": "Inter",
@@ -52,6 +53,22 @@ bool FFigmaParserTextStylePropertiesTest::RunTest(const FString&)
           "textAlignHorizontal": "JUSTIFIED",
           "textAlignVertical": "BOTTOM"
         }
+      }, {
+        "id": "0:3",
+        "name": "Intrinsic Label",
+        "type": "TEXT",
+        "visible": true,
+        "characters": "Intrinsic label",
+        "textAutoResize": "HEIGHT",
+        "absoluteBoundingBox": { "x": 40, "y": 100, "width": 210, "height": 19 },
+        "absoluteRenderBounds": { "x": 41, "y": 102, "width": 82.5, "height": 13.6 },
+        "fills": [{ "type": "SOLID", "visible": true, "color": { "r": 1, "g": 1, "b": 1, "a": 1 } }],
+        "style": {
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "lineHeightUnit": "INTRINSIC_%",
+          "lineHeightPx": 18.662
+        }
       }]
     }]
   }
@@ -60,8 +77,8 @@ bool FFigmaParserTextStylePropertiesTest::RunTest(const FString&)
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Figma text fixture parses"), FFigmaParser::ParseDocument(Json, Document));
-	TestEqual(TEXT("One parsed text node"), Document.Children.Num(), 1);
-	if (Document.Children.Num() != 1 || !Document.Children[0].IsValid())
+	TestEqual(TEXT("Two parsed text nodes"), Document.Children.Num(), 2);
+	if (Document.Children.Num() != 2 || !Document.Children[0].IsValid() || !Document.Children[1].IsValid())
 	{
 		return false;
 	}
@@ -84,6 +101,14 @@ bool FFigmaParserTextStylePropertiesTest::RunTest(const FString&)
 
 	const FString* TruncateFlag = Node->Metadata.Find(TEXT("source.text.truncate"));
 	TestTrue(TEXT("Truncate metadata recorded"), TruncateFlag != nullptr && *TruncateFlag == TEXT("true"));
+
+	const TSharedPtr<FDesignNode>& IntrinsicNode = Document.Children[1];
+	TestTrue(TEXT("Intrinsic line height normalized from lineHeightPx"),
+		FMath::IsNearlyEqual(IntrinsicNode->Text.LineHeight, 18.662f / 14.0f, 0.001f));
+	TestTrue(TEXT("Text node keeps the layout-box width instead of ink width"),
+		FMath::IsNearlyEqual(IntrinsicNode->Transform.Width.Value, 210.0f, 0.001f));
+	TestTrue(TEXT("Text node keeps the layout-box height instead of ink height"),
+		FMath::IsNearlyEqual(IntrinsicNode->Transform.Height.Value, 19.0f, 0.001f));
 	return true;
 }
 

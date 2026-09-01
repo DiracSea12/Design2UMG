@@ -11,6 +11,12 @@ struct FResolvedTextLayoutForUMG
 	float FontSize = 0.0f;
 	float WrapTextAt = 0.0f;
 	TOptional<float> LineHeightPercentage;
+	/**
+	 * Vertical render offset (px, negative = up) that aligns the Slate first-line
+	 * baseline placement with the source editor's half-leading placement when an
+	 * explicit line height is applied. See RuntimeProbeSizing for the derivation.
+	 */
+	TOptional<float> LineHeightBaselineShift;
 };
 
 namespace TextMeasurementInternal

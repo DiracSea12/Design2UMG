@@ -33,23 +33,18 @@ void ParseTextProperties(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& Ou
 	const FString LineHeightUnit = GetString(Style, TEXT("lineHeightUnit"));
 	if (LineHeightUnit != TEXT("AUTO"))
 	{
-		if (LineHeightUnit == TEXT("PIXELS"))
+		// Figma fills lineHeightPx for every non-auto unit (PIXELS, FONT_SIZE_%, INTRINSIC_%),
+		// while lineHeightPercentFontSize is only written for FONT_SIZE_%. Normalizing every
+		// unit through lineHeightPx/fontSize keeps intrinsic line heights on the same path.
+		const float LineHeightPx = GetNumber(Style, TEXT("lineHeightPx"));
+		if (LineHeightPx > 0.0f && OutNode.Text.FontSize > 0.0f)
 		{
-			const float LineHeightPx = GetNumber(Style, TEXT("lineHeightPx"));
-			if (LineHeightPx > 0.0f && OutNode.Text.FontSize > 0.0f)
-			{
-				OutNode.Text.LineHeight = LineHeightPx / OutNode.Text.FontSize;
-			}
-		}
-		else
-		{
-			const float Percent = GetNumber(Style, TEXT("lineHeightPercentFontSize"));
-			if (Percent > 0.0f)
-			{
-				OutNode.Text.LineHeight = Percent / 100.0f;
-			}
+			OutNode.Text.LineHeight = LineHeightPx / OutNode.Text.FontSize;
 		}
 	}
+	// Figma renders the first-line baseline half-leading style: the natural line
+	// box is centered inside the authored line height.
+	OutNode.Text.bSourceHalfLeadingBaseline = true;
 	if (Style->HasField(TEXT("letterSpacing")))
 	{
 		OutNode.Text.SetLetterSpacingValue(GetNumber(Style, TEXT("letterSpacing")));

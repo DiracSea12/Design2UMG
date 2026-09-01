@@ -20,6 +20,14 @@ struct FDesignTextNodeData
 	FString FontWeight = TEXT("normal");
 	FString FontStyle = TEXT("normal");
 	float LineHeight = 0.0f;
+	/**
+	 * Source renderers differ in how the first-line baseline sits inside the line
+	 * box: Figma centers the natural line box within the authored line height
+	 * (half-leading), while Pencil keeps the natural ascent at the top of the
+	 * line box. Set by the source parsers; drives the first-line baseline shift
+	 * resolved in RuntimeProbeSizing.
+	 */
+	bool bSourceHalfLeadingBaseline = false;
 	TOptional<float> LetterSpacing;
 	EDesignTextAlign TextAlign = EDesignTextAlign::Left;
 	EDesignTextAlignVertical TextAlignVertical = EDesignTextAlignVertical::Top;

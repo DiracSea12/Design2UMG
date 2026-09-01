@@ -300,6 +300,14 @@ namespace
 			RenderBounds.W + KINDA_SMALL_NUMBER < LayoutBounds.W
 			|| RenderBounds.H + KINDA_SMALL_NUMBER < LayoutBounds.H;
 
+		if (GetString(NodeObj, TEXT("type")) == TEXT("TEXT"))
+		{
+			// Text render bounds are the glyph ink box, which carries no wrapping slack.
+			// Both Figma wrapping and UMG AutoWrapText are driven by the layout box, so
+			// text geometry must stay in layout space regardless of ink expansion/shrink.
+			return true;
+		}
+
 		if (HasVisibleImageFill(NodeObj))
 		{
 			return true;

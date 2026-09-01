@@ -242,9 +242,17 @@ namespace
 		{
 			Widget->SetRenderScale(Node.Render.RenderTransformScale.GetValue());
 		}
-		if (Node.Render.RenderTranslation.IsSet())
+		if (Node.Render.RenderTranslation.IsSet() || Node.Text.LineHeightBaselineShift.IsSet())
 		{
-			Widget->SetRenderTranslation(Node.Render.RenderTranslation.GetValue());
+			FVector2D Translation = Node.Render.RenderTranslation.Get(FVector2D::ZeroVector);
+			if (Node.Text.LineHeightBaselineShift.IsSet())
+			{
+				// Explicit line-height baseline compensation travels with any authored
+				// render translation; it must not move wrapper backgrounds, so it is
+				// folded in here rather than going through the shared render channel.
+				Translation.Y += Node.Text.LineHeightBaselineShift.GetValue();
+			}
+			Widget->SetRenderTranslation(Translation);
 		}
 	}
 

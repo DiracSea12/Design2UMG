@@ -81,6 +81,9 @@ struct FUMGTextData
 	TOptional<bool> bAutoWrapText;
 	TOptional<float> WrapTextAt;
 	TOptional<float> LineHeightPercentage;
+	// Render-space Y offset (px) compensating the Slate vs source half-leading
+	// first-line baseline difference when an explicit line height is applied.
+	TOptional<float> LineHeightBaselineShift;
 	TOptional<bool> bUnderline;
 	TOptional<bool> bStrikethrough;
 	TOptional<FString> Href;
@@ -97,10 +100,11 @@ struct FUMGTextData
 			|| TypefaceFontName.IsSet()
 			|| FontStyle.IsSet()
 			|| Justification.IsSet()
-			|| bAutoWrapText.IsSet()
-			|| WrapTextAt.IsSet()
-			|| LineHeightPercentage.IsSet()
-			|| bUnderline.IsSet()
+		|| bAutoWrapText.IsSet()
+		|| WrapTextAt.IsSet()
+		|| LineHeightPercentage.IsSet()
+		|| LineHeightBaselineShift.IsSet()
+		|| bUnderline.IsSet()
 			|| bStrikethrough.IsSet()
 			|| Href.IsSet()
 			|| TextAlignVertical.IsSet()

@@ -254,6 +254,8 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeTextPayload(const FUMGTextD
 		TextObject->SetNumberField(UMGPropertyKeys::WrapTextAt, Text.WrapTextAt.GetValue());
 	if (Text.LineHeightPercentage.IsSet())
 		TextObject->SetNumberField(UMGPropertyKeys::LineHeightPercentage, Text.LineHeightPercentage.GetValue());
+	if (Text.LineHeightBaselineShift.IsSet())
+		TextObject->SetNumberField(UMGPropertyKeys::LineHeightBaselineShift, Text.LineHeightBaselineShift.GetValue());
 	if (Text.bUnderline.IsSet())
 		TextObject->SetBoolField(UMGPropertyKeys::Underline, Text.bUnderline.GetValue());
 	if (Text.bStrikethrough.IsSet())

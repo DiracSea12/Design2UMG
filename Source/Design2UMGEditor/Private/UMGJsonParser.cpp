@@ -370,6 +370,10 @@ void FUMGJsonParser::ParseTextPayload(const TSharedPtr<FJsonObject>& NodeObject,
 		{
 			OutText.LineHeightPercentage = (float)Val;
 		}
+		if ((*TextDataObject)->TryGetNumberField(UMGPropertyKeys::LineHeightBaselineShift, Val))
+		{
+			OutText.LineHeightBaselineShift = (float)Val;
+		}
 		if ((*TextDataObject)->TryGetBoolField(UMGPropertyKeys::Underline, BoolValue))
 		{
 			OutText.bUnderline = BoolValue;

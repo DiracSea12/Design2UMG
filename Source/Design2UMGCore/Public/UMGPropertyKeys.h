@@ -55,6 +55,7 @@ namespace UMGPropertyKeys
 	inline constexpr const TCHAR* IsReadOnly = TEXT("IsReadOnly");
 	inline constexpr const TCHAR* Justification = TEXT("Justification");
 	inline constexpr const TCHAR* LetterSpacing = TEXT("LetterSpacing");
+	inline constexpr const TCHAR* LineHeightBaselineShift = TEXT("LineHeightBaselineShift");
 	inline constexpr const TCHAR* LineHeightPercentage = TEXT("LineHeightPercentage");
 	inline constexpr const TCHAR* MaterialParams = TEXT("MaterialParams");
 	inline constexpr const TCHAR* MaterialRef = TEXT("MaterialRef");

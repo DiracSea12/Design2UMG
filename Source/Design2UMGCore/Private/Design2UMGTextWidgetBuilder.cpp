@@ -102,6 +102,10 @@ namespace
 		{
 			Widget.Text.LineHeightPercentage = ResolvedLayout.LineHeightPercentage.GetValue();
 		}
+		if (ResolvedLayout.LineHeightBaselineShift.IsSet())
+		{
+			Widget.Text.LineHeightBaselineShift = ResolvedLayout.LineHeightBaselineShift.GetValue();
+		}
 		// Preserve authored explicit-zero semantics on the design model, but avoid
 		// redundantly emitting runtime letter spacing when the effective value is zero.
 		if (Node->Text.LetterSpacing.IsSet() && Node->Text.LetterSpacing.GetValue() != 0.0f)
@@ -126,13 +130,9 @@ namespace
 		{
 		case EDesignTextGrowth::FixedWidth:
 		case EDesignTextGrowth::FixedWidthHeight:
+			// Only TRUNCATE clips in the source semantics. A NONE box is just a layout
+			// frame: overflowing text stays visible on the canvas, so no clipping here.
 			if (Node->Text.bTruncateOverflow)
-			{
-				Widget.Render.Clipping = TEXT("ClipToBounds");
-				break;
-			}
-
-			if (Node->Text.TextGrowth == EDesignTextGrowth::FixedWidthHeight)
 			{
 				Widget.Render.Clipping = TEXT("ClipToBounds");
 			}
