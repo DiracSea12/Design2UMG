@@ -634,6 +634,7 @@ def ensure_clean_editor():
         check=False,
         capture_output=True,
         text=True,
+        errors="replace",
     )
 
 
@@ -760,6 +761,7 @@ def is_windows_process_running(process_names: tuple[str, ...]) -> bool:
                 check=False,
                 capture_output=True,
                 text=True,
+                errors="replace",
             )
         except OSError:
             continue
@@ -2587,7 +2589,7 @@ def terminate_editor_process(process: subprocess.Popen) -> None:
     try:
         process.wait(timeout=10)
     except subprocess.TimeoutExpired:
-        subprocess.run(["taskkill", "/F", "/PID", str(process.pid)], check=False, capture_output=True, text=True)
+        subprocess.run(["taskkill", "/F", "/PID", str(process.pid)], check=False, capture_output=True, text=True, errors="replace")
         try:
             process.wait(timeout=10)
         except subprocess.TimeoutExpired:
