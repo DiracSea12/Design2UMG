@@ -79,3 +79,7 @@ Tools/FigmaExporter/node_modules/
 /Docs/TextFontStrategy.zh-CN.md
 /Docs/TextMeasurementResearchAndDirection.zh-CN.md
 /Tools/PYTHON_TOOLING_DIAGNOSTICS_LEDGER.md
+
+# Test design corpus lives in-repo but stays untracked (101MB of design JSON,
+# images and reference renders; open-source users bring or fetch their own)
+/FigmaExports/
