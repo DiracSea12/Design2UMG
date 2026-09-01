@@ -33,11 +33,17 @@ def resolve_default_figma_export_roots(design_root: Path, explicit_roots: list[s
     resolved: list[str] = []
     roots: list[Path] = [Path(root) for root in explicit_roots if root]
     if not roots:
+        # a FigmaExports/ container next to the design root's ancestors wins;
+        # the plugin-bundled corpus is the fallback (self-contained layout)
         for ancestor in design_root.parents:
             candidate = ancestor / DEFAULT_FIGMA_EXPORTS_CONTAINER_NAME
             if candidate.is_dir():
                 roots = [candidate]
                 break
+        if not roots:
+            plugin_corpus = verify.plugin_root() / DEFAULT_FIGMA_EXPORTS_CONTAINER_NAME
+            if plugin_corpus.is_dir():
+                roots = [plugin_corpus]
     for root in roots:
         resolved.extend(expand_figma_export_root(root.resolve()))
     return resolved
