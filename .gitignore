@@ -83,3 +83,7 @@ Tools/FigmaExporter/node_modules/
 # Test design corpus lives in-repo but stays untracked (101MB of design JSON,
 # images and reference renders; open-source users bring or fetch their own)
 /FigmaExports/
+
+# Pen design corpus slot: real folder for open-source users, directory
+# junction to the editing source on this machine (cannot be committed)
+/PenDesigns/

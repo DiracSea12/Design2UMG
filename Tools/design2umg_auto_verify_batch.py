@@ -58,7 +58,7 @@ def parse_no_regression_epsilon(raw: str) -> float:
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Batch Design2UMG verification from a design directory")
-    parser.add_argument("--design-root", required=True, help="Directory containing .pen design files")
+    parser.add_argument("--design-root", default="", help="Directory containing .pen design files. Default falls back to the plugin-bundled PenDesigns/ folder (open-source layout).")
     parser.add_argument("--figma-export-root", action="append", default=[], help="Optional local Figma export directory (design.json + top-level reference PNG) or a container folder whose direct subdirectories are export dirs (e.g. G:/UE5/FigmaExports). Can be repeated. Default scans FigmaExports/ found among the design root's ancestors.")
     parser.add_argument("--output-root", default="", help="Directory for batch outputs")
     parser.add_argument("--reference-root", default="", help="Optional directory containing per-case reference PNGs at <reference-root>/<case-name>/reference.png")
@@ -1630,7 +1630,10 @@ def main():
     batch_start_time = time.time()
     args = parse_args()
     args.editor = verify.resolve_unreal_editor_path(args.editor)
-    design_root = Path(args.design_root).resolve()
+    design_root_arg = Path(args.design_root) if args.design_root else verify.plugin_root() / "PenDesigns"
+    if not args.design_root and not design_root_arg.is_dir():
+        raise RuntimeError("No --design-root given and no plugin-bundled PenDesigns/ folder found")
+    design_root = design_root_arg.resolve()
     if not design_root.is_dir():
         raise RuntimeError(f"Design root not found: {design_root}")
     effective_figma_export_roots = batch_discovery.resolve_default_figma_export_roots(design_root, args.figma_export_root)
