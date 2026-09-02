@@ -1235,6 +1235,12 @@ def process_case_result(state: dict, batch_exit_code: int, batch_log_path: Path)
             }
 
     if not reference_validation["valid"]:
+        verdict = "invalid_reference"
+        if (
+            reference_validation.get("reason") == "reference_aspect_mismatch_design"
+            and verify.pen_node_lacks_declared_size(args.mode, args.source, args.node)
+        ):
+            verdict = "layout_divergence"
         report_path = verify.write_invalid_reference_report(
             state["output_dir"],
             args,
@@ -1245,12 +1251,13 @@ def process_case_result(state: dict, batch_exit_code: int, batch_log_path: Path)
             reference_validation,
             reference_context,
             render_chain,
+            verdict=verdict,
         )
         return {
             "name": state["case"]["name"],
             "blocked": True,
             "report_path": str(report_path),
-            "verdict": "invalid_reference",
+            "verdict": verdict,
             "verification_level": reference_authority.get("verification_level"),
             "canonical_source": reference_authority.get("canonical_source") or reference_context.get("canonical_source"),
             "reason": reference_validation.get("reason") or reference_authority.get("reason") or "invalid_reference",
