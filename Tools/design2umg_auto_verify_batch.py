@@ -347,17 +347,19 @@ def prepare_case_state(
     candidate_path = output_dir / "candidate.png"
     game_output_root = verify.build_automation_asset_root(output_dir, case_args.game_output, case.get("name", ""))
 
-    # Canvas calibration (pen only): rescue cases whose reference fails design
-    # validation (auto-sized roots, overflowing content, shadow padding) by pinning
-    # the asset re-render surface to the reference size. Cases that already pass
-    # validation keep the legacy compare pipeline untouched.
+    # Canvas calibration (pen only): request the override whenever the reference
+    # size differs from the declared design size; the asset render's second-stage
+    # check (design-time vs reference aspect) decides whether it actually applies,
+    # so cases that would pass the final reference validation stay on the legacy
+    # path while validation-failing ones (auto-sized roots, overflow, shadow
+    # padding) render on the authoritative reference canvas.
     state_render_size_override = None
     if (
         case_args.mode == "pen"
-        and reference_validation.get("valid") is False
         and reference_size
         and reference_size[0] > 1
         and reference_size[1] > 1
+        and tuple(reference_size) != tuple(expected_design_size or ())
     ):
         state_render_size_override = list(reference_size)
 
