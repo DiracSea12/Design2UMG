@@ -785,13 +785,33 @@ namespace
 		OutResult.GeneratedAssetPath = WidgetBlueprint->GetPathName();
 		OutResult.DesignTimeSize = ResolveBlueprintDesignTimeSize(WidgetBlueprint);
 		OutResult.AssetStructure = Design2UMGAutomationStructureSnapshot::BuildWidgetTreeStructureSnapshot(WidgetBlueprint->WidgetTree);
-		OutResult.bRenderSizeOverridden = Spec.RenderSizeOverride.IsSet();
+		// Second-stage calibration check: the blueprint's design-time extent is now
+		// known. When it is already aspect-compatible with the calibrated (reference)
+		// extent, the legacy pipeline compares fine on its own; skip the override to
+		// keep passing cases byte-identical to the non-calibrated path.
+		TOptional<FIntPoint> EffectiveRenderSizeOverride = Spec.RenderSizeOverride;
+		if (EffectiveRenderSizeOverride.IsSet() && OutResult.DesignTimeSize.X > 1 && OutResult.DesignTimeSize.Y > 1)
+		{
+			const FIntPoint OverrideSize = EffectiveRenderSizeOverride.GetValue();
+			const float DesignAspect = static_cast<float>(OutResult.DesignTimeSize.X) / OutResult.DesignTimeSize.Y;
+			const float OverrideAspect = static_cast<float>(OverrideSize.X) / static_cast<float>(OverrideSize.Y);
+			const float AspectDelta = FMath::Abs(DesignAspect - OverrideAspect) / FMath::Max(DesignAspect, OverrideAspect);
+			constexpr float ReferenceAspectCompatibilityThreshold = 0.08f;
+			if (AspectDelta <= ReferenceAspectCompatibilityThreshold)
+			{
+				EffectiveRenderSizeOverride.Reset();
+				UE_LOG(LogDesign2UMG, Log,
+					TEXT("AutomationRender: design-time %dx%d is aspect-compatible with calibration %dx%d; calibration skipped"),
+					OutResult.DesignTimeSize.X, OutResult.DesignTimeSize.Y, OverrideSize.X, OverrideSize.Y);
+			}
+		}
+		OutResult.bRenderSizeOverridden = EffectiveRenderSizeOverride.IsSet();
 		if (!DesignImportUtils::RenderCompiledBlueprintToPngFile(
-				WidgetBlueprint,
-				Spec.RenderPngPath,
-				&OutResult.RenderSize,
-				&OutResult.ErrorMessage,
-				Spec.RenderSizeOverride))
+			WidgetBlueprint,
+			Spec.RenderPngPath,
+			&OutResult.RenderSize,
+			&OutResult.ErrorMessage,
+			EffectiveRenderSizeOverride))
 			{
 				if (OutResult.ErrorMessage.IsEmpty())
 				{
