@@ -64,6 +64,7 @@ namespace
 		FString IrDumpPath;
 		FString GeometryDumpPath;
 		bool bForceReloadPackage = false;
+		TOptional<FIntPoint> RenderSizeOverride;
 	};
 
 	struct FAutomationRenderResult
@@ -76,6 +77,7 @@ namespace
 		FString ErrorMessage;
 		FIntPoint RenderSize = FIntPoint::ZeroValue;
 		FIntPoint DesignTimeSize = FIntPoint::ZeroValue;
+		bool bRenderSizeOverridden = false;
 		TSharedPtr<FJsonObject> SourceStructure;
 		TSharedPtr<FJsonObject> AssetStructure;
 	};
@@ -128,6 +130,21 @@ namespace
 		Root->TryGetStringField(TEXT("geometry_dump_path"), OutSpec.GeometryDumpPath);
 		Root->TryGetBoolField(TEXT("force_reload_package"), OutSpec.bForceReloadPackage);
 
+		// Optional canvas calibration: [width, height] pinning the render surface
+		// to the authoritative reference size (compare scope only).
+		const TSharedPtr<FJsonValue> RenderSizeField = Root->TryGetField(TEXT("render_size_override"));
+		if (RenderSizeField.IsValid() && RenderSizeField->Type == EJson::Array)
+		{
+			const TArray<TSharedPtr<FJsonValue>>& SizeValues = RenderSizeField->AsArray();
+			if (SizeValues.Num() == 2
+				&& SizeValues[0]->Type == EJson::Number && SizeValues[1]->Type == EJson::Number)
+			{
+				const int32 OverrideWidth = FMath::Max(1, FMath::RoundToInt(SizeValues[0]->AsNumber()));
+				const int32 OverrideHeight = FMath::Max(1, FMath::RoundToInt(SizeValues[1]->AsNumber()));
+				OutSpec.RenderSizeOverride = FIntPoint(OverrideWidth, OverrideHeight);
+			}
+		}
+
 		if (OutSpec.Mode.IsEmpty())
 		{
 			OutError = TEXT("Automation spec missing 'mode'");
@@ -171,7 +188,11 @@ namespace
 		Root->SetNumberField(TEXT("render_height"), Result.RenderSize.Y);
 		Root->SetNumberField(TEXT("design_time_width"), Result.DesignTimeSize.X);
 		Root->SetNumberField(TEXT("design_time_height"), Result.DesignTimeSize.Y);
-		Root->SetStringField(TEXT("render_size_authority"), TEXT("ue_blueprint_design_time_size"));
+		Root->SetStringField(
+			TEXT("render_size_authority"),
+			Result.bRenderSizeOverridden
+				? TEXT("reference_canvas_calibration")
+				: TEXT("ue_blueprint_design_time_size"));
 		Root->SetStringField(TEXT("pipeline_determinism_rule"), TEXT("source_pipeline_transient_state_v4"));
 		Root->SetStringField(TEXT("transient_state_authority"), TEXT("ue_automation_render_reset"));
 		Root->SetBoolField(TEXT("transient_state_reset_before_render"), true);
@@ -761,14 +782,16 @@ namespace
 				return false;
 			}
 
-			OutResult.GeneratedAssetPath = WidgetBlueprint->GetPathName();
-			OutResult.DesignTimeSize = ResolveBlueprintDesignTimeSize(WidgetBlueprint);
-			OutResult.AssetStructure = Design2UMGAutomationStructureSnapshot::BuildWidgetTreeStructureSnapshot(WidgetBlueprint->WidgetTree);
-			if (!DesignImportUtils::RenderCompiledBlueprintToPngFile(
+		OutResult.GeneratedAssetPath = WidgetBlueprint->GetPathName();
+		OutResult.DesignTimeSize = ResolveBlueprintDesignTimeSize(WidgetBlueprint);
+		OutResult.AssetStructure = Design2UMGAutomationStructureSnapshot::BuildWidgetTreeStructureSnapshot(WidgetBlueprint->WidgetTree);
+		OutResult.bRenderSizeOverridden = Spec.RenderSizeOverride.IsSet();
+		if (!DesignImportUtils::RenderCompiledBlueprintToPngFile(
 				WidgetBlueprint,
 				Spec.RenderPngPath,
 				&OutResult.RenderSize,
-				&OutResult.ErrorMessage))
+				&OutResult.ErrorMessage,
+				Spec.RenderSizeOverride))
 			{
 				if (OutResult.ErrorMessage.IsEmpty())
 				{

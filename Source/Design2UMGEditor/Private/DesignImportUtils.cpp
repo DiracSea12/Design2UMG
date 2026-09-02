@@ -724,7 +724,8 @@ bool DesignImportUtils::RenderCompiledBlueprintToPngFile(
 	UWidgetBlueprint* WidgetBlueprint,
 	const FString& OutputPngFilePath,
 	FIntPoint* OutRenderedSize,
-	FString* OutError)
+	FString* OutError,
+	const TOptional<FIntPoint>& RenderSizeOverride)
 {
 	if (!WidgetBlueprint)
 	{
@@ -732,9 +733,29 @@ bool DesignImportUtils::RenderCompiledBlueprintToPngFile(
 		return false;
 	}
 
+	// Canvas calibration: an explicit override pins the render surface to the
+	// authoritative reference size (compare-scope only); layout stays untouched.
+	FIntPoint ActualSize = FIntPoint::ZeroValue;
+	if (RenderSizeOverride.IsSet())
+	{
+		ActualSize = RenderSizeOverride.GetValue();
+		if (ActualSize.X <= 0 || ActualSize.Y <= 0)
+		{
+			if (OutError)
+			{
+				*OutError = FString::Printf(
+					TEXT("Render size override %dx%d is not positive"), ActualSize.X, ActualSize.Y);
+			}
+			return false;
+		}
+	}
+	else
+	{
+		ActualSize = ResolveOutputRenderSize(WidgetBlueprint);
+	}
+
 	TArray<uint8> PngData;
-	FIntPoint ActualSize = ResolveOutputRenderSize(WidgetBlueprint);
-	if (!FUMGWidgetUtils::RenderWidgetToPng(WidgetBlueprint, PngData, ActualSize, OutError))
+	if (!FUMGWidgetUtils::RenderWidgetToPng(WidgetBlueprint, PngData, ActualSize, OutError, RenderSizeOverride))
 	{
 		UE_LOG(LogDesign2UMG, Error,
 			TEXT("DesignImportUtils: RenderCompiledBlueprintToPngFile failed for %s"),

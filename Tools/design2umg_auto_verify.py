@@ -392,6 +392,13 @@ def validate_reference_against_design(reference_size: tuple[int, int], expected_
 
 def resolve_authoritative_design_size(ue_result: dict | None) -> tuple[int, int] | None:
     ue_result = ue_result or {}
+    # Canvas calibration: the render surface was pinned to the reference size, so
+    # the calibrated extent is the authoritative one for reference validation.
+    if ue_result.get("render_size_authority") == "reference_canvas_calibration":
+        width = parse_numeric_dimension(ue_result.get("render_width"))
+        height = parse_numeric_dimension(ue_result.get("render_height"))
+        if width and height and width > 1 and height > 1:
+            return math.ceil(width), math.ceil(height)
     width = parse_numeric_dimension(ue_result.get("design_time_width"))
     height = parse_numeric_dimension(ue_result.get("design_time_height"))
     if width and height and width > 1 and height > 1:

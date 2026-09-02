@@ -347,6 +347,14 @@ def prepare_case_state(
     candidate_path = output_dir / "candidate.png"
     game_output_root = verify.build_automation_asset_root(output_dir, case_args.game_output, case.get("name", ""))
 
+    # Canvas calibration (pen only): when the authoritative Pencil reference covers a
+    # different extent than the declared design size (auto-sized roots, overflowing
+    # content, shadow padding), pin the asset re-render surface to the reference size
+    # so the pixel compare stays meaningful. Identical sizes take the legacy path.
+    state_render_size_override = None
+    if case_args.mode == "pen" and reference_size and tuple(reference_size) != tuple(expected_design_size or ()):
+        state_render_size_override = list(reference_size)
+
     state = {
         "case": case,
         "args": case_args,
@@ -358,6 +366,7 @@ def prepare_case_state(
         "reference_validation": reference_validation,
         "expected_design_size": expected_design_size,
         "render_size": expected_design_size,
+        "render_size_override": state_render_size_override,
         "candidate_path": candidate_path,
         "game_output_root": game_output_root,
         "spec_paths": [],
@@ -429,19 +438,22 @@ def build_case_specs(state: dict):
     }
 
     if case_args.mode == "asset":
+        asset_render_spec = {
+            "mode": "asset",
+            "source_path": case_args.source,
+            "node_id": case_args.node,
+            "output_path": asset_only_output,
+            "render_png_path": str(candidate_path),
+            "result_json_path": str(output_dir / "ue_render_result.json"),
+            "force_reload_package": True,
+        }
+        if state.get("render_size_override"):
+            asset_render_spec["render_size_override"] = state["render_size_override"]
         append_spec(
             state,
             "asset_render",
             "automation_asset_spec.json",
-            {
-                "mode": "asset",
-                "source_path": case_args.source,
-                "node_id": case_args.node,
-                "output_path": asset_only_output,
-                "render_png_path": str(candidate_path),
-                "result_json_path": str(output_dir / "ue_render_result.json"),
-                "force_reload_package": True,
-            },
+            asset_render_spec,
         )
     else:
         bootstrap_candidate_path = verify.add_name_suffix(candidate_path, ".bootstrap")
@@ -464,19 +476,22 @@ def build_case_specs(state: dict):
             "automation_generate_spec.json",
             generation_spec,
         )
+        asset_render_spec = {
+            "mode": "asset",
+            "source_path": f"@generated_asset_from:{generate_result_path}",
+            "node_id": "",
+            "output_path": primary_game_output,
+            "render_png_path": str(candidate_path),
+            "result_json_path": str(output_dir / "ue_render_result.json"),
+            "force_reload_package": True,
+        }
+        if state.get("render_size_override"):
+            asset_render_spec["render_size_override"] = state["render_size_override"]
         append_spec(
             state,
             "asset_render",
             "automation_asset_spec.json",
-            {
-                "mode": "asset",
-                "source_path": f"@generated_asset_from:{generate_result_path}",
-                "node_id": "",
-                "output_path": primary_game_output,
-                "render_png_path": str(candidate_path),
-                "result_json_path": str(output_dir / "ue_render_result.json"),
-                "force_reload_package": True,
-            },
+            asset_render_spec,
         )
 
     if case_args.native_self_check == "off":

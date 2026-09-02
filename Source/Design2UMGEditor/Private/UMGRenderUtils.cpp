@@ -387,7 +387,7 @@ void FUMGWidgetUtils::DumpTextBlockFontStates(
 	});
 }
 
-bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8>& OutPngData, FIntPoint& OutSize, FString* OutError)
+bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8>& OutPngData, FIntPoint& OutSize, FString* OutError, const TOptional<FIntPoint>& RenderSizeOverride)
 {
 	if (OutError)
 	{
@@ -433,7 +433,9 @@ bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8
 		return false;
 	}
 
-	const FIntPoint SlateRenderSize = LayoutPixelSize;
+	// Canvas calibration: an explicit override pins the virtual window/RT extent;
+	// the widget tree keeps laying out against its own geometry.
+	const FIntPoint SlateRenderSize = RenderSizeOverride.IsSet() ? RenderSizeOverride.GetValue() : LayoutPixelSize;
 	if (!IsValidRenderSize(SlateRenderSize))
 	{
 		UE_LOG(LogDesign2UMG, Warning,
@@ -453,7 +455,18 @@ bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8
 		Widget->RemoveFromRoot();
 		return false;
 	}
+	// Canvas calibration centering: when the calibrated canvas extends beyond the
+	// layout on both axes (e.g. reference includes symmetric shadow padding), the
+	// authoritative render centers the content, mirroring how Pencil composes the
+	// content union box. One-axis overflow stays top-left anchored.
 	TSharedRef<SWidget> WindowContent = SlateWidget;
+	if (RenderSizeOverride.IsSet() && SlateRenderSize.X > LayoutPixelSize.X && SlateRenderSize.Y > LayoutPixelSize.Y)
+	{
+		WindowContent = SNew(SBox)
+			.HAlign(HAlign_Center)
+			.VAlign(VAlign_Center)
+			[SlateWidget];
+	}
 	TSharedRef<SVirtualWindow> Window = SNew(SVirtualWindow);
 	Window->SetContent(WindowContent);
 	FIntPoint EffectiveSize = ComputePreviewRenderSize(SlateRenderSize, Window);

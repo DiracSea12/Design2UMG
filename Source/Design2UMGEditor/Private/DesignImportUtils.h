@@ -67,6 +67,7 @@ namespace DesignImportUtils
 		UWidgetBlueprint* WidgetBlueprint,
 		const FString& OutputPngFilePath,
 		FIntPoint* OutRenderedSize = nullptr,
-		FString* OutError = nullptr);
+		FString* OutError = nullptr,
+		const TOptional<FIntPoint>& RenderSizeOverride = TOptional<FIntPoint>());
 }
 
