@@ -14,6 +14,7 @@
 #include "Design2UMGConverterVisualSupport.h"
 #include "Design2UMGSourceMetadata.h"
 #include "Design2UMGTextWidgetBuilder.h"
+#include "DesignVariableResolver.h"
 #include "ImageFillUtils.h"
 #include "LayoutMapper.h"
 #include "SizeEstimator.h"
@@ -610,7 +611,9 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 	// Pre-compute fit-content node sizes by recursively resolving child-driven bounds.
 	// Fit estimation works on stage copies of the per-conversion expansion
 	// snapshots, leaving the cached expansion data immutable for conversion.
-	const TMap<FString, FString> RootThemeContext;
+	// Ref expansions re-resolve SourceVar colors against the resolver, so the root
+	// context starts from the document-level active theme like the parser does.
+	const TMap<FString, FString> RootThemeContext = FDesignVariableResolver::BuildDocumentTheme(Document.Themes);
 	const Design2UMGConverterInternal::FFlowChildPreResolutionResolver RootPreResolutionResolver(
 		Document,
 		RootThemeContext,

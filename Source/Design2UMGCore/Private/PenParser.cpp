@@ -129,8 +129,14 @@ bool ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FDesignDocume
 		ParseVariables(VarsField->AsObject(), OutDocument.Variables);
 	}
 
-	// Build variable resolver.
+	// Build variable resolver with the document-level active theme (first value
+	// of each declared axis); node-level theme attributes override per-axis in ParseNode.
 	FDesignVariableResolver Resolver(OutDocument.Variables);
+	const TMap<FString, FString> DocumentTheme = FDesignVariableResolver::BuildDocumentTheme(OutDocument.Themes);
+	if (DocumentTheme.Num() > 0)
+	{
+		Resolver.SetThemeContext(DocumentTheme);
+	}
 
 	// Parse top-level children.
 	FPenParserParseContext ParseContext;
@@ -357,7 +363,7 @@ TSharedPtr<FDesignNode> ParseNodeAtDepth(
 		if (Node->Theme.Num() > 0)
 		{
 			ThemedResolver = Resolver;
-			ThemedResolver.SetThemeContext(Node->Theme);
+			ThemedResolver.PushThemeOverride(Node->Theme);
 			ActiveResolver = &ThemedResolver;
 		}
 	}

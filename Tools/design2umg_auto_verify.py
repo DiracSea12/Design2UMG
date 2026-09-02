@@ -302,6 +302,25 @@ def extract_declared_node_size(node: dict) -> tuple[int, int] | None:
     return None
 
 
+def pen_node_lacks_declared_size(mode: str, source_path: str, node_id: str) -> bool:
+    """True when the pen target node has no fully declared size (auto width/height).
+
+    Auto-sized nodes have no authoritative design-time extent; any reference
+    aspect mismatch then reflects layout-engine divergence, not a bad reference.
+    """
+    if mode != "pen":
+        return False
+    source = Path(source_path)
+    if not source.is_file() or source.suffix.lower() != ".pen":
+        return False
+    try:
+        document = load_json_document(source)
+    except EvidenceReadError:
+        return False
+    target_node = find_node_by_id(document.get("children", []), node_id)
+    return extract_declared_node_size(target_node) is None
+
+
 def get_expected_design_size(mode: str, source_path: str, node_id: str) -> tuple[int, int] | None:
     source = Path(source_path)
     if not source.is_file():
@@ -3366,6 +3385,12 @@ def main():
             sys.exit(2)
 
     if not reference_validation["valid"]:
+        verdict = "invalid_reference"
+        if (
+            reference_validation.get("reason") == "reference_aspect_mismatch_design"
+            and pen_node_lacks_declared_size(args.mode, args.source, args.node)
+        ):
+            verdict = "layout_divergence"
         report_path = write_invalid_reference_report(
             output_dir,
             args,
@@ -3376,9 +3401,10 @@ def main():
             reference_validation,
             reference_context,
             render_chain,
+            verdict=verdict,
         )
         finalize_single_run_history(output_dir, args, report_path)
-        print(f"[INVALID_REFERENCE] report={report_path}")
+        print(f"[{verdict.upper()}] report={report_path}")
         print(f"reference={reference_path}")
         print(f"candidate={candidate_path}")
         print(f"log={ue_log_path}")

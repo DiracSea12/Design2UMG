@@ -28,6 +28,15 @@ public:
 		ThemeContext = InTheme;
 	}
 
+	/** Merge per-axis theme overrides into the active context; unspecified axes keep their current value. */
+	void PushThemeOverride(const TMap<FString, FString>& InOverrides)
+	{
+		for (const auto& Pair : InOverrides)
+		{
+			ThemeContext.Add(Pair.Key, Pair.Value);
+		}
+	}
+
 	/** Resolve a string value with variable substitution. */
 	FString ResolveString(const FString& Value) const;
 
@@ -45,6 +54,9 @@ public:
 
 	/** Check whether a value is a variable reference. */
 	static bool IsVariableRef(const FString& Value);
+
+	/** Build the document-level active theme: the first declared value of each theme axis. */
+	static TMap<FString, FString> BuildDocumentTheme(const TMap<FString, TArray<FString>>& InThemes);
 
 private:
 	const TMap<FString, FDesignVariable>* Variables = nullptr;

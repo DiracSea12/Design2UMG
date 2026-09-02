@@ -14,10 +14,19 @@ namespace
 			return false;
 		}
 
-		for (int32 Index = 1; Index < Value.Len(); ++Index)
+		// Variable names may contain '/', '.' and '-' (e.g. "color/ink",
+		// "spacing-0.5", "--background") but never start with a digit, so literal
+		// dollar text like "$45.00" stays plain text.
+		const TCHAR FirstChar = Value[1];
+		if (!FChar::IsAlpha(FirstChar) && FirstChar != TEXT('_') && FirstChar != TEXT('-'))
+		{
+			return false;
+		}
+
+		for (int32 Index = 2; Index < Value.Len(); ++Index)
 		{
 			const TCHAR Char = Value[Index];
-			if (FChar::IsAlnum(Char) || Char == TEXT('_') || Char == TEXT('-'))
+			if (FChar::IsAlnum(Char) || Char == TEXT('_') || Char == TEXT('-') || Char == TEXT('/') || Char == TEXT('.'))
 			{
 				continue;
 			}
@@ -60,30 +69,45 @@ const FDesignVariable* FDesignVariableResolver::GetVariable(const FString& VarNa
 
 FString FDesignVariableResolver::ResolveThemedValue(const FDesignVariable& Var) const
 {
-	if (Var.ThemedValues.Num() == 0 || ThemeContext.Num() == 0)
-		return Var.Value;
-
-	// Select the first themed value whose theme axes match current context.
+	// Pencil resolves a variable's value list as an ordered cascade: unconditional
+	// entries always apply, themed entries apply only when every axis matches the
+	// active context, and the last applied entry wins. Var.Value holds the first
+	// entry's value as the initial state.
+	FString Current = Var.Value;
 	for (const FDesignThemeValue& TV : Var.ThemedValues)
 	{
-		if (TV.ThemeMatch.Num() == 0)
-			continue;
-
-		bool bMatch = true;
+		bool bApplies = true;
 		for (const auto& Pair : TV.ThemeMatch)
 		{
 			const FString* ContextVal = ThemeContext.Find(Pair.Key);
 			if (!ContextVal || *ContextVal != Pair.Value)
 			{
-				bMatch = false;
+				bApplies = false;
 				break;
 			}
 		}
-		if (bMatch)
-			return TV.Value;
+		if (bApplies)
+		{
+			Current = TV.Value;
+		}
 	}
 
-	return Var.Value;
+	return Current;
+}
+
+TMap<FString, FString> FDesignVariableResolver::BuildDocumentTheme(const TMap<FString, TArray<FString>>& InThemes)
+{
+	// The document-level active theme is the first declared value of each axis,
+	// matching the Pencil editor's default state when a node declares no theme.
+	TMap<FString, FString> DocTheme;
+	for (const auto& Pair : InThemes)
+	{
+		if (Pair.Value.Num() > 0)
+		{
+			DocTheme.Add(Pair.Key, Pair.Value[0]);
+		}
+	}
+	return DocTheme;
 }
 
 FString FDesignVariableResolver::ResolveString(const FString& Value) const

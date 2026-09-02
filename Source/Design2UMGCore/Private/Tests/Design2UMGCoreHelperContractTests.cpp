@@ -215,6 +215,108 @@ bool FVariableResolverLiteralDollarTextTest::RunTest(const FString& Parameters)
 		Resolver.ResolveString(TEXT("$45.00")),
 		FString(TEXT("$45.00")));
 	TestTrue(TEXT("$--font-primary remains a variable ref"), Resolver.IsVariableRef(TEXT("$--font-primary")));
+	TestTrue(TEXT("$color/ink with slash is a variable ref"), Resolver.IsVariableRef(TEXT("$color/ink")));
+	TestTrue(TEXT("$spacing-0.5 with dot is a variable ref"), Resolver.IsVariableRef(TEXT("$spacing-0.5")));
+	TestFalse(TEXT("$N:--background keeps namespace-prefixed form unresolved"), Resolver.IsVariableRef(TEXT("$N:--background")));
+	return true;
+}
+
+namespace
+{
+	FDesignVariable MakeCascadeVariable()
+	{
+		FDesignVariable Var;
+		Var.Name = TEXT("--background");
+		Var.Value = TEXT("#F2F3F0");
+
+		FDesignThemeValue UnconditionalFirst;
+		UnconditionalFirst.Value = TEXT("#F2F3F0");
+		Var.ThemedValues.Add(UnconditionalFirst);
+
+		FDesignThemeValue Dark;
+		Dark.Value = TEXT("#111111");
+		Dark.ThemeMatch.Add(TEXT("Mode"), TEXT("Dark"));
+		Var.ThemedValues.Add(Dark);
+		return Var;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVariableResolverCascadeSelectionTest,
+	"Design2UMG.Parser.ThemedValueCascadeSelection",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVariableResolverCascadeSelectionTest::RunTest(const FString& Parameters)
+{
+	TMap<FString, FDesignVariable> Variables;
+	Variables.Add(TEXT("--background"), MakeCascadeVariable());
+
+	// Empty context (no theme axes at all): unconditional entries still cascade.
+	{
+		FDesignVariableResolver Resolver(Variables);
+		TestEqual(TEXT("Empty context keeps first unconditional entry"),
+			Resolver.ResolveColor(TEXT("$--background")), FString(TEXT("#F2F3F0")));
+	}
+
+	// Document-level active theme Dark: themed entry applies over the unconditional one.
+	{
+		FDesignVariableResolver Resolver(Variables);
+		TMap<FString, FString> Theme;
+		Theme.Add(TEXT("Mode"), TEXT("Dark"));
+		Resolver.SetThemeContext(Theme);
+		TestEqual(TEXT("Dark context applies themed entry"),
+			Resolver.ResolveColor(TEXT("$--background")), FString(TEXT("#111111")));
+	}
+
+	// Later unconditional entries override earlier ones regardless of context.
+	{
+		FDesignVariable TelavathilStyle;
+		TelavathilStyle.Name = TEXT("bg-primary");
+		TelavathilStyle.Value = TEXT("#1C1C1E");
+		FDesignThemeValue First;
+		First.Value = TEXT("#1C1C1E");
+		TelavathilStyle.ThemedValues.Add(First);
+		FDesignThemeValue Second;
+		Second.Value = TEXT("#0E0E0E");
+		TelavathilStyle.ThemedValues.Add(Second);
+		TMap<FString, FDesignVariable> Vars;
+		Vars.Add(TEXT("bg-primary"), MoveTemp(TelavathilStyle));
+
+		FDesignVariableResolver Resolver(Vars);
+		TestEqual(TEXT("Trailing unconditional entry wins"),
+			Resolver.ResolveColor(TEXT("$bg-primary")), FString(TEXT("#0E0E0E")));
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVariableResolverDocumentThemeTest,
+	"Design2UMG.Parser.DocumentThemeAndOverride",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVariableResolverDocumentThemeTest::RunTest(const FString& Parameters)
+{
+	TMap<FString, TArray<FString>> Themes;
+	Themes.Add(TEXT("Mode"), TArray<FString>{TEXT("Light"), TEXT("Dark")});
+	Themes.Add(TEXT("Base"), TArray<FString>{TEXT("Neutral"), TEXT("Gray")});
+
+	const TMap<FString, FString> DocTheme = FDesignVariableResolver::BuildDocumentTheme(Themes);
+	TestEqual(TEXT("Mode axis takes first value"), DocTheme.FindRef(TEXT("Mode")), FString(TEXT("Light")));
+	TestEqual(TEXT("Base axis takes first value"), DocTheme.FindRef(TEXT("Base")), FString(TEXT("Neutral")));
+
+	TMap<FString, FDesignVariable> Variables;
+	Variables.Add(TEXT("--background"), MakeCascadeVariable());
+
+	// Document-level Light keeps the unconditional entry; per-axis override to Dark
+	// flips it while other axes (none here) would stay inherited.
+	FDesignVariableResolver Resolver(Variables);
+	Resolver.SetThemeContext(DocTheme);
+	TestEqual(TEXT("Document-level Light keeps default entry"),
+		Resolver.ResolveColor(TEXT("$--background")), FString(TEXT("#F2F3F0")));
+
+	TMap<FString, FString> NodeOverride;
+	NodeOverride.Add(TEXT("Mode"), TEXT("Dark"));
+	Resolver.PushThemeOverride(NodeOverride);
+	TestEqual(TEXT("Node override flips to Dark entry"),
+		Resolver.ResolveColor(TEXT("$--background")), FString(TEXT("#111111")));
+
 	return true;
 }
 
