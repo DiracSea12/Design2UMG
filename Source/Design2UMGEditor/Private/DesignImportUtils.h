@@ -61,10 +61,12 @@ namespace DesignImportUtils
 		FString* OutGeneratedAssetPath = nullptr,
 		FIntPoint* OutRenderedSize = nullptr,
 		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr,
-		FDesign2UMGGenerationOutput* OutGenerationOutput = nullptr);
+		FDesign2UMGGenerationOutput* OutGenerationOutput = nullptr,
+		FString* OutError = nullptr);
 	bool RenderCompiledBlueprintToPngFile(
 		UWidgetBlueprint* WidgetBlueprint,
 		const FString& OutputPngFilePath,
-		FIntPoint* OutRenderedSize = nullptr);
+		FIntPoint* OutRenderedSize = nullptr,
+		FString* OutError = nullptr);
 }
 

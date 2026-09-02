@@ -3315,7 +3315,9 @@ def main():
         }
 
     if not candidate_path.is_file():
-        raise RuntimeError(f"Candidate render png not found: {candidate_path}")
+        render_error = str(ue_result.get("error_message") or "")
+        detail = f" ({render_error})" if render_error else ""
+        raise RuntimeError(f"Candidate render png not found: {candidate_path}{detail}")
     bootstrap_candidate_path = add_name_suffix(candidate_path, ".bootstrap")
     render_chain["generation_vs_asset"] = compare_image_paths(bootstrap_candidate_path, candidate_path, args.pixel_tolerance)
     render_chain["generation_vs_asset_structure"] = compare_structure_snapshots(

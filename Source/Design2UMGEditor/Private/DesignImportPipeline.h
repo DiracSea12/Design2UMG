@@ -39,6 +39,8 @@ struct FImportAnalysisResult
 struct FArtifactGenerationResult
 {
 	bool bSucceeded = false;
+	/** Structured failure reason (e.g. render target size above the RHI texture limit); empty on success or unspecified failures. */
+	FString ErrorMessage;
 	FString GeneratedAssetPath;
 	FString RenderPngPath;
 	FIntPoint RenderedSize = FIntPoint::ZeroValue;
@@ -64,6 +66,8 @@ struct FDesignImportExecutionResult
 	bool bSucceeded = false;
 	bool bPreviewOpened = false;
 	UWidgetBlueprint* GeneratedBlueprint = nullptr;
+	/** Structured failure reason propagated from artifact generation; empty on success or unspecified failures. */
+	FString ErrorMessage;
 	FString GeneratedAssetPath;
 	FString RenderPngPath;
 	FIntPoint RenderedSize = FIntPoint::ZeroValue;

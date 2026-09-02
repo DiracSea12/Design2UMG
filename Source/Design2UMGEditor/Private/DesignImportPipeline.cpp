@@ -134,7 +134,8 @@ namespace DesignImportPipeline
 					&Result.GeneratedAssetPath,
 					&Result.RenderedSize,
 					GenerationSettings,
-					&GenerationOutput);
+					&GenerationOutput,
+					&Result.ErrorMessage);
 				if (Result.bSucceeded)
 				{
 					Result.RenderPngPath = Request.Generation.CompiledPngFilePath;
@@ -251,6 +252,7 @@ namespace DesignImportPipeline
 			const FArtifactGenerationResult GenerationResult =
 				GenerateArtifactsInternal(Data, GenerationRequest, GenerationSettings, &RuntimeResult);
 			Result.bSucceeded = GenerationResult.bSucceeded;
+			Result.ErrorMessage = GenerationResult.ErrorMessage;
 			Result.GeneratedBlueprint = RuntimeResult.GeneratedBlueprint;
 			Result.GeneratedAssetPath = GenerationResult.GeneratedAssetPath;
 			Result.RenderPngPath = GenerationResult.RenderPngPath;

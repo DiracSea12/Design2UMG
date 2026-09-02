@@ -696,6 +696,10 @@ namespace
 				? Spec.RenderPngPath
 				: ExecutionResult.RenderPngPath;
 			OutResult.RenderSize = ExecutionResult.RenderedSize;
+			if (!ExecutionResult.bSucceeded && !ExecutionResult.ErrorMessage.IsEmpty())
+			{
+				OutResult.ErrorMessage = ExecutionResult.ErrorMessage;
+			}
 			return ExecutionResult.bSucceeded;
 		};
 
@@ -706,6 +710,10 @@ namespace
 				? Spec.RenderPngPath
 				: GenerationResult.RenderPngPath;
 			OutResult.RenderSize = GenerationResult.RenderedSize;
+			if (!GenerationResult.bSucceeded && !GenerationResult.ErrorMessage.IsEmpty())
+			{
+				OutResult.ErrorMessage = GenerationResult.ErrorMessage;
+			}
 			return GenerationResult.bSucceeded;
 		};
 
@@ -759,9 +767,13 @@ namespace
 			if (!DesignImportUtils::RenderCompiledBlueprintToPngFile(
 				WidgetBlueprint,
 				Spec.RenderPngPath,
-				&OutResult.RenderSize))
+				&OutResult.RenderSize,
+				&OutResult.ErrorMessage))
 			{
-				OutResult.ErrorMessage = FString::Printf(TEXT("Failed to render compiled Widget Blueprint: %s"), *ObjectPath);
+				if (OutResult.ErrorMessage.IsEmpty())
+				{
+					OutResult.ErrorMessage = FString::Printf(TEXT("Failed to render compiled Widget Blueprint: %s"), *ObjectPath);
+				}
 				return false;
 			}
 
@@ -787,7 +799,10 @@ namespace
 			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: generating blueprint and compiled png"));
 			if (!ApplyExecutionResult(DesignImportPipeline::Execute(Document, MakeAutomationImportRequest(true))))
 			{
-				OutResult.ErrorMessage = FString::Printf(TEXT("Failed to generate compiled PNG for %s"), *Spec.SourcePath);
+				if (OutResult.ErrorMessage.IsEmpty())
+				{
+					OutResult.ErrorMessage = FString::Printf(TEXT("Failed to generate compiled PNG for %s"), *Spec.SourcePath);
+				}
 				return false;
 			}
 
@@ -858,7 +873,10 @@ namespace
 			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: generating blueprint and compiled png"));
 			if (!ApplyExecutionResult(DesignImportPipeline::Execute(SourceDocument, MakeAutomationImportRequest(true))))
 			{
-				OutResult.ErrorMessage = FString::Printf(TEXT("Failed to generate compiled PNG for %s"), *Spec.SourcePath);
+				if (OutResult.ErrorMessage.IsEmpty())
+				{
+					OutResult.ErrorMessage = FString::Printf(TEXT("Failed to generate compiled PNG for %s"), *Spec.SourcePath);
+				}
 				return false;
 			}
 
@@ -884,7 +902,10 @@ namespace
 			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: generating blueprint and compiled png"));
 			if (!ApplyExecutionResult(DesignImportPipeline::Execute(SourceDocument, MakeAutomationImportRequest(true))))
 			{
-				OutResult.ErrorMessage = FString::Printf(TEXT("Failed to generate compiled PNG for %s"), *Spec.SourcePath);
+				if (OutResult.ErrorMessage.IsEmpty())
+				{
+					OutResult.ErrorMessage = FString::Printf(TEXT("Failed to generate compiled PNG for %s"), *Spec.SourcePath);
+				}
 				return false;
 			}
 
@@ -917,7 +938,10 @@ namespace
 				GenerationRequest,
 				AutomationSettingsSnapshot.GenerationSettings)))
 		{
-			OutResult.ErrorMessage = FString::Printf(TEXT("Failed to generate compiled PNG for %s"), *Spec.SourcePath);
+			if (OutResult.ErrorMessage.IsEmpty())
+			{
+				OutResult.ErrorMessage = FString::Printf(TEXT("Failed to generate compiled PNG for %s"), *Spec.SourcePath);
+			}
 			return false;
 		}
 

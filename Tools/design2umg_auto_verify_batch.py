@@ -1075,12 +1075,13 @@ def ensure_driver_completed_all_steps(states: list[dict], batch_log_path: Path):
     )
 
 
-def write_render_failure_report(state: dict, ue_result: dict | None, render_chain: dict, verdict: str, message: str) -> Path:
+def write_render_failure_report(state: dict, ue_result: dict | None, render_chain: dict, verdict: str, message: str, failure_kind: str = "") -> Path:
     output_dir = state["output_dir"]
     report_path = output_dir / "compare_report.json"
     candidate_path = state["candidate_path"]
     report = {
         "verdict": verdict,
+        "failure_kind": failure_kind or None,
         "compare_skipped": True,
         "message": message,
         "reference_provider": state["args"].reference_provider,
@@ -1174,21 +1175,29 @@ def process_case_result(state: dict, batch_exit_code: int, batch_log_path: Path)
         }
 
     if not ue_result or not ue_result.get("success") or not candidate_path.is_file():
+        render_error = str((ue_result or {}).get("error_message") or "")
         failure_message = "Automation render did not produce a valid candidate image"
+        if render_error:
+            failure_message += f" | error_message={render_error}"
         if fallback_errors:
             failure_message += f" | fallback_errors={' ; '.join(fallback_errors)}"
+        # The editor reports a render-target size above the RHI texture limit as a
+        # structured failure; keep it in the report instead of retrying or aborting the run.
+        failure_kind = "unsupported_render_dimensions" if "exceeds max texture dimension" in render_error else ""
         report_path = write_render_failure_report(
             state,
             ue_result,
             render_chain,
             "render_failed",
             failure_message,
+            failure_kind,
         )
         return {
             "name": state["case"]["name"],
             "blocked": True,
             "report_path": str(report_path),
             "verdict": "render_failed",
+            **({"failure_kind": failure_kind} if failure_kind else {}),
         }
 
     reference_validation = verify.apply_render_size_authority(
@@ -1761,6 +1770,8 @@ def main():
         if result.get("blocked"):
             if result.get("verdict"):
                 line += f" verdict={result['verdict']}"
+            if result.get("failure_kind"):
+                line += f" failure_kind={result['failure_kind']}"
             if result.get("verification_level"):
                 line += f" verification_level={result['verification_level']}"
             if result.get("canonical_source"):

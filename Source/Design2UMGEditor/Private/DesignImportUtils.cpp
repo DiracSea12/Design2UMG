@@ -723,7 +723,8 @@ bool DesignImportUtils::GenerateBlueprintAndPng(
 bool DesignImportUtils::RenderCompiledBlueprintToPngFile(
 	UWidgetBlueprint* WidgetBlueprint,
 	const FString& OutputPngFilePath,
-	FIntPoint* OutRenderedSize)
+	FIntPoint* OutRenderedSize,
+	FString* OutError)
 {
 	if (!WidgetBlueprint)
 	{
@@ -733,7 +734,7 @@ bool DesignImportUtils::RenderCompiledBlueprintToPngFile(
 
 	TArray<uint8> PngData;
 	FIntPoint ActualSize = ResolveOutputRenderSize(WidgetBlueprint);
-	if (!FUMGWidgetUtils::RenderWidgetToPng(WidgetBlueprint, PngData, ActualSize))
+	if (!FUMGWidgetUtils::RenderWidgetToPng(WidgetBlueprint, PngData, ActualSize, OutError))
 	{
 		UE_LOG(LogDesign2UMG, Error,
 			TEXT("DesignImportUtils: RenderCompiledBlueprintToPngFile failed for %s"),
@@ -765,7 +766,8 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 	FString* OutGeneratedAssetPath,
 	FIntPoint* OutRenderedSize,
 	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings,
-	FDesign2UMGGenerationOutput* OutGenerationOutput)
+	FDesign2UMGGenerationOutput* OutGenerationOutput,
+	FString* OutError)
 {
 	if (OutGeneratedAssetPath)
 	{
@@ -775,7 +777,12 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 	{
 		*OutRenderedSize = FIntPoint::ZeroValue;
 	}
+	if (OutError)
+	{
+		OutError->Reset();
+	}
 
+	FString RenderError;
 	bool bCancelAfterMutation = false;
 	const bool bRendered = RunInteractiveGeneration(
 		TEXT("Compiled PNG"),
@@ -848,9 +855,14 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 			const bool bCompiledRendered = RenderCompiledBlueprintToPngFile(
 				WidgetBlueprint,
 				OutputPngFilePath,
-				OutRenderedSize);
+				OutRenderedSize,
+				&RenderError);
 			if (!bCompiledRendered)
 			{
+				if (OutError && !RenderError.IsEmpty())
+				{
+					*OutError = RenderError;
+				}
 				IFileManager::Get().Delete(*OutputPngFilePath, false, true);
 			}
 			else

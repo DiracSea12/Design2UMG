@@ -22,6 +22,7 @@
 #include "IImageWrapper.h"
 #include "IImageWrapperModule.h"
 #include "Input/HittestGrid.h"
+#include "RHIGlobals.h"
 #include "Slate/WidgetRenderer.h"
 #include "TextureResource.h"
 #include "RenderingThread.h"
@@ -280,6 +281,24 @@ namespace
 		return Size.X > 1 && Size.Y > 1;
 	}
 
+	// The render target must stay within the active RHI's max 2D texture dimension;
+	// exceeding it asserts inside the RHI (e.g. D3D12Texture) and kills the editor
+	// process. Fail the render structurally instead of submitting the oversized target.
+	bool IsRenderSizeWithinRHITextureLimits(const FIntPoint& Size)
+	{
+		const int32 MaxTextureDimension = static_cast<int32>(GetMax2DTextureDimension());
+		return Size.X <= MaxTextureDimension && Size.Y <= MaxTextureDimension;
+	}
+
+	FString RenderSizeExceedsRHITextureLimitMessage(const FIntPoint& Size)
+	{
+		return FString::Printf(
+			TEXT("render target exceeds max texture dimension: %dx%d (max %d)"),
+			Size.X,
+			Size.Y,
+			static_cast<int32>(GetMax2DTextureDimension()));
+	}
+
 	FIntPoint ComputePreviewRenderSize(const FIntPoint& FallbackSize, const TSharedRef<SVirtualWindow>& Window)
 	{
 		// Use the explicit layout size. Editor Designer preferences are preview-only.
@@ -368,8 +387,12 @@ void FUMGWidgetUtils::DumpTextBlockFontStates(
 	});
 }
 
-bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8>& OutPngData, FIntPoint& OutSize)
+bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8>& OutPngData, FIntPoint& OutSize, FString* OutError)
 {
+	if (OutError)
+	{
+		OutError->Reset();
+	}
 	if (!WidgetBP || !WidgetBP->GeneratedClass)
 	{
 		UE_LOG(LogDesign2UMG, Warning, TEXT("RenderWidgetToPng: invalid WidgetBP"));
@@ -416,6 +439,17 @@ bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8
 		UE_LOG(LogDesign2UMG, Warning,
 			TEXT("RenderWidgetToPng: invalid design/render size %dx%d"),
 			SlateRenderSize.X, SlateRenderSize.Y);
+		Widget->RemoveFromRoot();
+		return false;
+	}
+	if (!IsRenderSizeWithinRHITextureLimits(SlateRenderSize))
+	{
+		const FString Reason = RenderSizeExceedsRHITextureLimitMessage(SlateRenderSize);
+		UE_LOG(LogDesign2UMG, Error, TEXT("RenderWidgetToPng: %s"), *Reason);
+		if (OutError)
+		{
+			*OutError = Reason;
+		}
 		Widget->RemoveFromRoot();
 		return false;
 	}
@@ -487,6 +521,14 @@ namespace
 	{
 		if (!IsValidRenderSize(LayoutSize))
 		{
+			return false;
+		}
+
+		if (!IsRenderSizeWithinRHITextureLimits(LayoutSize))
+		{
+			UE_LOG(LogDesign2UMG, Error,
+				TEXT("RenderWidgetTreeToPng: %s"),
+				*RenderSizeExceedsRHITextureLimitMessage(LayoutSize));
 			return false;
 		}
 
