@@ -347,12 +347,18 @@ def prepare_case_state(
     candidate_path = output_dir / "candidate.png"
     game_output_root = verify.build_automation_asset_root(output_dir, case_args.game_output, case.get("name", ""))
 
-    # Canvas calibration (pen only): when the authoritative Pencil reference covers a
-    # different extent than the declared design size (auto-sized roots, overflowing
-    # content, shadow padding), pin the asset re-render surface to the reference size
-    # so the pixel compare stays meaningful. Identical sizes take the legacy path.
+    # Canvas calibration (pen only): rescue cases whose reference fails design
+    # validation (auto-sized roots, overflowing content, shadow padding) by pinning
+    # the asset re-render surface to the reference size. Cases that already pass
+    # validation keep the legacy compare pipeline untouched.
     state_render_size_override = None
-    if case_args.mode == "pen" and reference_size and tuple(reference_size) != tuple(expected_design_size or ()):
+    if (
+        case_args.mode == "pen"
+        and reference_validation.get("valid") is False
+        and reference_size
+        and reference_size[0] > 1
+        and reference_size[1] > 1
+    ):
         state_render_size_override = list(reference_size)
 
     state = {
