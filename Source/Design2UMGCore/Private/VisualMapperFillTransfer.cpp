@@ -351,7 +351,12 @@ namespace VisualMapperFillTransfer
 				return;
 			}
 
-			Widget.Brush.BrushColor = FUMGValueParser::ParseColor(PrimaryFill.SolidColor);
+			// Path-backed shapes bake the fill color into their rasterized texture;
+			// tinting the brush again would square the color and darken the render.
+			if (Node->Shape.Geometry.IsEmpty())
+			{
+				Widget.Brush.BrushColor = FUMGValueParser::ParseColor(PrimaryFill.SolidColor);
+			}
 			return;
 		}
 
