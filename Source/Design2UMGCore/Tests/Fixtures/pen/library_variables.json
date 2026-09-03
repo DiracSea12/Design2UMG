@@ -1,0 +1,26 @@
+{
+	"--primary": {
+		"type": "color",
+		"value": [
+			{ "value": "#171717" },
+			{ "value": "#e5e5e5", "theme": { "Mode": "Dark" } },
+			{ "value": "#e5e7eb", "theme": { "Mode": "Dark", "Base": "Gray" } },
+			{ "value": "#ea580c", "theme": { "Accent": "Orange" } }
+		]
+	},
+	"--muted-foreground": {
+		"type": "color",
+		"value": [
+			{ "value": "#737373" },
+			{ "value": "#a3a3a3", "theme": { "Mode": "Dark" } }
+		]
+	},
+	"--background": {
+		"type": "color",
+		"value": [
+			{ "value": "#fafafa" },
+			{ "value": "#0a0a0a", "theme": { "Mode": "Dark" } },
+			{ "value": "#030712", "theme": { "Mode": "Dark", "Base": "Gray" } }
+		]
+	}
+}

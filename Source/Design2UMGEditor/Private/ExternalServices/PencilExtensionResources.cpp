@@ -6,9 +6,11 @@
 #include "Design2UMGSettings.h"
 #include "DesignSchema.h"
 #include "FontResolver.h"
+#include "PenBundledLibraries.h"
 
 #include "Dom/JsonObject.h"
 #include "Framework/Notifications/NotificationManager.h"
+#include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
@@ -27,8 +29,12 @@ namespace
 		/** True after the extension icon index was located and parsed in this process. */
 		bool bIconIndexLoaded = false;
 
-		/** Detailed "resource not found" error log fires once per process; per-import warnings keep firing. */
+		/** True after at least one bundled library variables table was registered in this process. */
+		bool bLibrariesLoaded = false;
+
+		/** Detailed "resource not found" error logs fire once per process; per-import warnings keep firing. */
 		bool bLoggedMissingIconIndex = false;
+		bool bLoggedMissingLibraries = false;
 
 		/** The editor notification pops at most once per editor session. */
 		bool bNotifiedMissingResources = false;
@@ -36,6 +42,7 @@ namespace
 		FString IconIndexPath;
 		FString ExtensionVersion;
 		TArray<FString> LastTriedIconIndexPaths;
+		TArray<FString> LastTriedLibraryDirs;
 
 		/** Parsed tables kept in memory so registration can be restored after FFontResolver::ClearCache()
 		 * drains the resolver caches (it runs whenever a project font asset changes during imports). */
@@ -349,10 +356,167 @@ namespace PencilExtensionResources
 			State.GlyphsByFamily.Num());
 	}
 
+	void GetLibraryPenRelativeCandidates(TArray<FString>& OutRelativeDirs)
+	{
+		OutRelativeDirs = {
+			TEXT("node_modules/@ha/pencil-editor/data"),
+		};
+	}
+
+	bool ParseLibPenVariables(const FString& LibPenJson, FString& OutVariablesJson, FString& OutError)
+	{
+		OutVariablesJson.Reset();
+		OutError.Reset();
+
+		TSharedPtr<FJsonObject> Root;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(LibPenJson);
+		if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+		{
+			OutError = TEXT("lib.pen payload is not valid JSON");
+			return false;
+		}
+
+		const TSharedPtr<FJsonObject>* Variables = nullptr;
+		if (!Root->TryGetObjectField(TEXT("variables"), Variables) || !Variables->IsValid())
+		{
+			OutError = TEXT("lib.pen payload has no variables object");
+			return false;
+		}
+
+		const TSharedRef<FJsonObject> VariablesRef = (*Variables).ToSharedRef();
+		const TSharedRef<TJsonWriter<TCHAR>> Writer = TJsonWriterFactory<TCHAR>::Create(&OutVariablesJson);
+		if (!FJsonSerializer::Serialize(VariablesRef, Writer))
+		{
+			OutVariablesJson.Reset();
+			OutError = TEXT("lib.pen variables object could not be serialized");
+			return false;
+		}
+		return true;
+	}
+
+	bool TryDeriveLibraryNameFromFileName(const FString& FileName, FString& OutLibraryName)
+	{
+		constexpr int32 LibPenSuffixLen = 8; // ".lib.pen"
+		if (!FileName.EndsWith(TEXT(".lib.pen")) || FileName.Len() <= LibPenSuffixLen)
+		{
+			OutLibraryName.Reset();
+			return false;
+		}
+		OutLibraryName = FileName.LeftChop(LibPenSuffixLen);
+		return !OutLibraryName.IsEmpty();
+	}
+
+	int32 RegisterLibrariesFromDirectory(const FString& DataDir)
+	{
+		// "<name>.lib.pen" registers under "<name>"; the sorted order keeps registration deterministic.
+		TArray<FString> LibraryFiles;
+		IFileManager::Get().FindFiles(LibraryFiles, *(DataDir / TEXT("*.lib.pen")), true, false);
+		LibraryFiles.Sort();
+
+		int32 RegisteredCount = 0;
+		for (const FString& LibraryFile : LibraryFiles)
+		{
+			FString LibraryName;
+			if (!TryDeriveLibraryNameFromFileName(LibraryFile, LibraryName))
+			{
+				continue;
+			}
+			const FString LibraryPath = DataDir / LibraryFile;
+
+			FString LibPenJson;
+			FString VariablesJson;
+			FString ParseError;
+			if (!FFileHelper::LoadFileToString(LibPenJson, *LibraryPath)
+				|| !ParseLibPenVariables(LibPenJson, VariablesJson, ParseError))
+			{
+				UE_LOG(LogDesign2UMG, Warning,
+					TEXT("PencilExtensionResources: skipping library '%s': %s"), *LibraryPath,
+					ParseError.IsEmpty() ? TEXT("file could not be read") : *ParseError);
+				continue;
+			}
+
+			PenBundledLibraries::RegisterLibraryVariables(LibraryName, VariablesJson);
+			++RegisteredCount;
+		}
+		return RegisteredCount;
+	}
+
+	bool IsBundledLibrariesRegistered()
+	{
+		return GetResourceState().bLibrariesLoaded;
+	}
+
+	void EnsureBundledLibrariesRegistered()
+	{
+		FPencilResourceState& State = GetResourceState();
+		if (State.bLibrariesLoaded)
+		{
+			return;
+		}
+
+		TArray<PencilExtensionLocator::FExtensionRoot> Candidates;
+		TArray<FString> SearchedDirs;
+		PencilExtensionLocator::GetExtensionRootCandidates(Candidates, SearchedDirs);
+
+		TArray<FString> RelativeCandidates;
+		GetLibraryPenRelativeCandidates(RelativeCandidates);
+
+		TArray<FString> CandidateDirs;
+		for (const PencilExtensionLocator::FExtensionRoot& Candidate : Candidates)
+		{
+			for (const FString& RelativeDir : RelativeCandidates)
+			{
+				CandidateDirs.Add(Candidate.Directory / RelativeDir);
+			}
+		}
+		State.LastTriedLibraryDirs = CandidateDirs;
+
+		FString DataDir;
+		for (const FString& CandidateDir : CandidateDirs)
+		{
+			if (IFileManager::Get().DirectoryExists(*CandidateDir))
+			{
+				DataDir = CandidateDir;
+				break;
+			}
+		}
+
+		if (DataDir.IsEmpty())
+		{
+			if (!State.bLoggedMissingLibraries)
+			{
+				State.bLoggedMissingLibraries = true;
+				const FString TriedList = FString::Join(State.LastTriedLibraryDirs, TEXT("\n  "));
+				UE_LOG(LogDesign2UMG, Error,
+					TEXT("PencilExtensionResources: bundled library documents (*.lib.pen) directory not found; imported library variables will not resolve.\nInstall the Pencil VS Code extension or set the extension directory in the Design2UMG settings. Tried candidates:\n  %s"),
+					*TriedList);
+			}
+			return;
+		}
+
+		const int32 RegisteredCount = RegisterLibrariesFromDirectory(DataDir);
+		if (RegisteredCount == 0)
+		{
+			if (!State.bLoggedMissingLibraries)
+			{
+				State.bLoggedMissingLibraries = true;
+				UE_LOG(LogDesign2UMG, Error,
+					TEXT("PencilExtensionResources: no usable library documents (*.lib.pen) in '%s'; imported library variables will not resolve."),
+					*DataDir);
+			}
+			return;
+		}
+
+		State.bLibrariesLoaded = true;
+		UE_LOG(LogDesign2UMG, Display,
+			TEXT("PencilExtensionResources: registered %d library variable tables from '%s'"),
+			RegisteredCount, *DataDir);
+	}
+
 	void ReportPenResourceGaps(FDesignDocument& Document)
 	{
 		FPencilResourceState& State = GetResourceState();
-		if (State.bIconIndexLoaded)
+		if (State.bIconIndexLoaded && State.bLibrariesLoaded)
 		{
 			return;
 		}
@@ -364,19 +528,27 @@ namespace PencilExtensionResources
 			return;
 		}
 
+		TArray<FString> MissingKinds;
 		TArray<FString> UsedKinds;
-		if (bUsesIcons)
+		if (bUsesIcons && !State.bIconIndexLoaded)
 		{
+			MissingKinds.Add(TEXT("icon-index-missing"));
 			UsedKinds.Add(TEXT("icons"));
 		}
-		if (bUsesLibraryVariables)
+		if (bUsesLibraryVariables && !State.bLibrariesLoaded)
 		{
+			MissingKinds.Add(TEXT("libraries-missing"));
 			UsedKinds.Add(TEXT("library variables"));
 		}
+		if (MissingKinds.Num() == 0)
+		{
+			return;
+		}
+
 		UE_LOG(LogDesign2UMG, Warning,
-			TEXT("PencilExtensionResources: pen document uses %s but no Pencil extension icon index is registered; icons will render as icon-name text. Install the Pencil VS Code extension or set the extension directory in the Design2UMG settings."),
+			TEXT("PencilExtensionResources: pen document uses %s but the matching Pencil extension resources are not registered; icons will render as icon-name text and library variables may not resolve. Install the Pencil VS Code extension or set the extension directory in the Design2UMG settings."),
 			*FString::Join(UsedKinds, TEXT(" and ")));
-		Document.Metadata.Add(PenExtensionResourceGapMetadataKey, TEXT("icon-index-missing"));
+		Document.Metadata.Add(PenExtensionResourceGapMetadataKey, FString::Join(MissingKinds, TEXT(",")));
 
 		const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
 		if (State.bNotifiedMissingResources || (Settings && Settings->bSuppressPencilExtensionResourceWarning))

@@ -1,0 +1,30 @@
+{
+	"version": "2.8",
+	"themes": { "Mode": ["Light", "Dark"] },
+	"variables": {
+		"--primary": {
+			"type": "color",
+			"value": [
+				{ "value": "#171717" },
+				{ "value": "#e5e5e5", "theme": { "Mode": "Dark" } },
+				{ "value": "#ea580c", "theme": { "Accent": "Orange" } }
+			]
+		},
+		"--muted-foreground": { "type": "color", "value": [{ "value": "#737373" }] },
+		"--font-primary": { "type": "string", "value": "Inter" },
+		"--radius-pill": { "type": "number", "value": 999 }
+	},
+	"children": [
+		{
+			"type": "frame",
+			"id": "lib-root",
+			"name": "sample: design system components",
+			"theme": { "Mode": "Dark" },
+			"clip": true,
+			"width": 800,
+			"height": 600,
+			"fill": "$--primary",
+			"layout": "none"
+		}
+	]
+}

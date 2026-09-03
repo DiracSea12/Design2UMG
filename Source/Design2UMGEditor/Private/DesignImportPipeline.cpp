@@ -396,9 +396,12 @@ namespace DesignImportPipeline
 			return Fail(FString::Printf(TEXT("Failed to read pen source: %s"), *FilePath));
 		}
 
-		// Icon glyphs come from the Pencil extension's icon-index.json; make sure they are
-		// registered before any parse/conversion consumes them.
+		// Extension resources feed the parse that follows: the icon index provides icon
+		// codepoints, and the bundled library documents provide the variables tables that
+		// document imports ("pencil:shadcn.lib.pen") expand against. Register both before
+		// any parse/conversion consumes them.
 		PencilExtensionResources::EnsureIconGlyphsRegistered();
+		PencilExtensionResources::EnsureBundledLibrariesRegistered();
 
 		if (TargetNodeId.IsEmpty())
 		{

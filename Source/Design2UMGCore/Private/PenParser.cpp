@@ -255,7 +255,7 @@ bool ParsePencilLibraryId(const FString& ImportId, FString& OutLibraryName)
 {
 	// Built-in library import ids look like "pencil:shadcn.lib.pen". Anything
 	// else (relative paths such as "../design-system.lib.pen", other schemes)
-	// has no bundled table and keeps the unresolved-ref behavior.
+	// has no registered variables table and keeps the unresolved-ref behavior.
 	FString Rest;
 	constexpr int32 PencilPrefixLen = 7; // "pencil:"
 	constexpr int32 LibPenSuffixLen = 8; // ".lib.pen"
@@ -287,7 +287,7 @@ void ExpandImportedLibraryVariables(const TSharedPtr<FJsonObject>& ImportsObj, T
 		FString VariablesJson;
 		if (!PenBundledLibraries::TryGetVariablesJson(LibraryName, VariablesJson))
 		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("Import '%s' names library '%s' with no bundled variables table."), *Pair.Value->AsString(), *LibraryName);
+			UE_LOG(LogDesign2UMG, Warning, TEXT("Import '%s' names library '%s' with no registered variables table."), *Pair.Value->AsString(), *LibraryName);
 			continue;
 		}
 
@@ -295,7 +295,7 @@ void ExpandImportedLibraryVariables(const TSharedPtr<FJsonObject>& ImportsObj, T
 		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(VariablesJson);
 		if (!FJsonSerializer::Deserialize(Reader, VariablesObj) || !VariablesObj.IsValid())
 		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("Bundled variables table for library '%s' could not be parsed."), *LibraryName);
+			UE_LOG(LogDesign2UMG, Warning, TEXT("Variables table for library '%s' could not be parsed."), *LibraryName);
 			continue;
 		}
 

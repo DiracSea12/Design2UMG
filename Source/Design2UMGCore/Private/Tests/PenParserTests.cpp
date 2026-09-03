@@ -3,6 +3,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "PenBundledLibraries.h"
 #include "PenParser.h"
 #include "RefExpander.h"
 #include "DesignSchema.h"
@@ -773,7 +774,8 @@ bool FPenParserGradientFillsTest::RunTest(const FString&)
 // ---------------------------------------------------------------------------
 // Imported library variables: "$Y:--token" refs through the imports map with
 // node-level theme overrides (values verified against Pencil-rendered
-// references; see Tools/generate_pen_bundled_libraries.py).
+// references). The library table is registered from a fixture the same way the
+// editor-side loader registers real extension libraries.
 // ---------------------------------------------------------------------------
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FPenParserImportedVariablesTest,
@@ -784,6 +786,26 @@ bool FPenParserImportedVariablesTest::RunTest(const FString&)
 {
 	// The unknown-alias case intentionally logs one unresolved-variable warning.
 	AddExpectedError(TEXT("Variable not found: Z:--primary"), EAutomationExpectedErrorFlags::Contains, 1);
+
+	// Library variables come from the runtime registry (normally filled from the
+	// Pencil extension's *.lib.pen files); register the fixture library that the
+	// document's imports map references before parsing.
+	{
+		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(PluginName);
+		if (!Plugin.IsValid())
+		{
+			AddError(TEXT("Design2UMG plugin not found"));
+			return false;
+		}
+		const FString LibraryPath = FPaths::Combine(Plugin->GetBaseDir(), FixtureBase, TEXT("library_variables.json"));
+		FString LibraryVariablesJson;
+		if (!FFileHelper::LoadFileToString(LibraryVariablesJson, *LibraryPath))
+		{
+			AddError(FString::Printf(TEXT("Failed to load fixture: %s"), *LibraryPath));
+			return false;
+		}
+		PenBundledLibraries::RegisterLibraryVariables(TEXT("sample"), LibraryVariablesJson);
+	}
 
 	FDesignDocument Doc;
 	if (!LoadPenFixture(*this, TEXT("imported_variables.json"), Doc))

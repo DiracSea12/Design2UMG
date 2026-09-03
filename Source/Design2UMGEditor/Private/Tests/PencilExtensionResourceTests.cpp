@@ -6,11 +6,15 @@
 #include "ExternalServices/PencilExtensionLocator.h"
 #include "ExternalServices/PencilExtensionResources.h"
 #include "FontResolver.h"
+#include "PenBundledLibraries.h"
 
+#include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 
 namespace
 {
@@ -25,6 +29,26 @@ namespace
 		const FString FixturePath = FPaths::Combine(
 			Plugin->GetBaseDir(),
 			TEXT("Source/Design2UMGEditor/Private/Tests/Fixtures/icon_index_sample.json"));
+		FString Json;
+		if (!FFileHelper::LoadFileToString(Json, *FixturePath))
+		{
+			Test.AddError(FString::Printf(TEXT("Failed to load fixture: %s"), *FixturePath));
+			return FString();
+		}
+		return Json;
+	}
+
+	FString LoadSampleLibPenFixtureJson(FAutomationTestBase& Test)
+	{
+		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
+		if (!Plugin.IsValid())
+		{
+			Test.AddError(TEXT("Design2UMG plugin not found"));
+			return FString();
+		}
+		const FString FixturePath = FPaths::Combine(
+			Plugin->GetBaseDir(),
+			TEXT("Source/Design2UMGEditor/Private/Tests/Fixtures/sample.lib.pen"));
 		FString Json;
 		if (!FFileHelper::LoadFileToString(Json, *FixturePath))
 		{
@@ -269,6 +293,162 @@ bool FPencilExtensionRootCandidatesTest::RunTest(const FString&)
 	}
 
 	IFileManager::Get().DeleteDirectory(*ScratchDir, false, true);
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Bundled library documents (*.lib.pen): variables extraction and registry round trip
+// ---------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FPencilExtensionLibPenVariablesParserTest,
+	"Design2UMG.Unit.PencilExtensionResources.LibPenVariablesParser",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FPencilExtensionLibPenVariablesParserTest::RunTest(const FString&)
+{
+	const FString LibPenJson = LoadSampleLibPenFixtureJson(*this);
+	if (LibPenJson.IsEmpty())
+	{
+		return false;
+	}
+
+	// The extracted payload is exactly the lib.pen "variables" object.
+	FString VariablesJson;
+	FString Error;
+	TestTrue(TEXT("Fixture lib.pen parses"), PencilExtensionResources::ParseLibPenVariables(LibPenJson, VariablesJson, Error));
+	if (!Error.IsEmpty())
+	{
+		AddError(Error);
+	}
+
+	TSharedPtr<FJsonObject> Variables;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(VariablesJson);
+	TestTrue(TEXT("Extracted payload is valid JSON"), FJsonSerializer::Deserialize(Reader, Variables) && Variables.IsValid());
+	if (Variables.IsValid())
+	{
+		TestTrue(TEXT("variables keys carried over"), Variables->HasField(TEXT("--primary")));
+		TestTrue(TEXT("themed entries carried over"), Variables->HasField(TEXT("--muted-foreground")));
+		// Only the variables block survives extraction: siblings stay in the .lib.pen.
+		TestFalse(TEXT("document-level fields stay behind"), Variables->HasField(TEXT("version")));
+		TestFalse(TEXT("children stay behind"), Variables->HasField(TEXT("children")));
+	}
+
+	// Structural validation: non-JSON payloads and payloads without a variables object fail.
+	FString ThrowawayVariables;
+	TestFalse(TEXT("Invalid JSON rejected"),
+		PencilExtensionResources::ParseLibPenVariables(TEXT("not json"), ThrowawayVariables, Error));
+	TestTrue(TEXT("Invalid JSON error reported"), !Error.IsEmpty());
+	TestFalse(TEXT("Missing variables rejected"),
+		PencilExtensionResources::ParseLibPenVariables(TEXT("{\"version\":\"2.8\"}"), ThrowawayVariables, Error));
+
+	// The data directory candidate stays anchored to the extension package layout.
+	TArray<FString> RelativeDirs;
+	PencilExtensionResources::GetLibraryPenRelativeCandidates(RelativeDirs);
+	TestTrue(TEXT("Library data directory candidate known"),
+		RelativeDirs.Contains(TEXT("node_modules/@ha/pencil-editor/data")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FPencilExtensionLibrariesRegistryRoundTripTest,
+	"Design2UMG.Unit.PencilExtensionResources.LibrariesRegistryRoundTrip",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FPencilExtensionLibrariesRegistryRoundTripTest::RunTest(const FString&)
+{
+	const FString LibPenJson = LoadSampleLibPenFixtureJson(*this);
+	if (LibPenJson.IsEmpty())
+	{
+		return false;
+	}
+
+	FString VariablesJson;
+	FString Error;
+	if (!PencilExtensionResources::ParseLibPenVariables(LibPenJson, VariablesJson, Error))
+	{
+		AddError(FString::Printf(TEXT("Fixture lib.pen parse failed: %s"), *Error));
+		return false;
+	}
+
+	// Registration round trip: parse output registers under the library name and
+	// queries hit; unregistered libraries keep the empty-registry behavior.
+	PenBundledLibraries::RegisterLibraryVariables(TEXT("sample"), VariablesJson);
+
+	FString Registered;
+	TestTrue(TEXT("Registered library resolves"), PenBundledLibraries::TryGetVariablesJson(TEXT("sample"), Registered));
+	TestEqual(TEXT("Registered payload matches the parsed variables"), Registered, VariablesJson);
+
+	// Re-registration replaces the table (extension upgrades re-register the same names).
+	PenBundledLibraries::RegisterLibraryVariables(TEXT("sample"), TEXT("{}"));
+	TestTrue(TEXT("Replaced library resolves"), PenBundledLibraries::TryGetVariablesJson(TEXT("sample"), Registered));
+	TestEqual(TEXT("Replaced payload wins"), Registered, FString(TEXT("{}")));
+
+	FString Unregistered;
+	TestFalse(TEXT("Unregistered library misses"),
+		PenBundledLibraries::TryGetVariablesJson(TEXT("no-such-library"), Unregistered));
+	TestTrue(TEXT("Empty name never registers"),
+		PenBundledLibraries::TryGetVariablesJson(FString(), Unregistered) == false);
+
+	// Restore the fixture table so later tests in this process see useful data.
+	PenBundledLibraries::RegisterLibraryVariables(TEXT("sample"), VariablesJson);
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Bundled library documents (*.lib.pen): directory scan derives PenParser-compatible keys
+// ---------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FPencilExtensionLibrariesDirectoryScanTest,
+	"Design2UMG.Unit.PencilExtensionResources.LibrariesDirectoryScan",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FPencilExtensionLibrariesDirectoryScanTest::RunTest(const FString&)
+{
+	// The derivation must match the PenParser query key: "pencil:sample.lib.pen" imports
+	// query "sample", so the file name must strip the whole ".lib.pen" suffix.
+	FString Name;
+	TestTrue(TEXT("shadcn.lib.pen derives shadcn"),
+		PencilExtensionResources::TryDeriveLibraryNameFromFileName(TEXT("shadcn.lib.pen"), Name));
+	TestEqual(TEXT("Derived name"), Name, FString(TEXT("shadcn")));
+	TestTrue(TEXT("Bare suffix rejected"),
+		!PencilExtensionResources::TryDeriveLibraryNameFromFileName(TEXT(".lib.pen"), Name));
+	TestTrue(TEXT("Plain .pen rejected"),
+		!PencilExtensionResources::TryDeriveLibraryNameFromFileName(TEXT("design.pen"), Name));
+
+	// Production scan path: enumerate a directory -> derive library names -> register.
+	// The fixture dir holds exactly one document (sample.lib.pen); after the scan the
+	// query must hit under "sample" (a GetBaseFilename-style key like "sample.lib" is a bug).
+	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
+	if (!Plugin.IsValid())
+	{
+		AddError(TEXT("Design2UMG plugin not found"));
+		return false;
+	}
+	const FString FixtureDir = FPaths::Combine(
+		Plugin->GetBaseDir(), TEXT("Source/Design2UMGEditor/Private/Tests/Fixtures"));
+
+	TestEqual(TEXT("Fixture directory registers one library"),
+		PencilExtensionResources::RegisterLibrariesFromDirectory(FixtureDir), 1);
+
+	FString VariablesJson;
+	TestTrue(TEXT("Scan registers under the PenParser query key"),
+		PenBundledLibraries::TryGetVariablesJson(TEXT("sample"), VariablesJson));
+	TestFalse(TEXT("No leftover 'sample.lib' key"),
+		PenBundledLibraries::TryGetVariablesJson(TEXT("sample.lib"), VariablesJson));
+
+	// The registered payload is the fixture's variables object.
+	FString ExpectedVariables;
+	FString ParseError;
+	if (!PencilExtensionResources::ParseLibPenVariables(LoadSampleLibPenFixtureJson(*this), ExpectedVariables, ParseError))
+	{
+		AddError(FString::Printf(TEXT("Fixture lib.pen parse failed: %s"), *ParseError));
+		return false;
+	}
+	FString Registered;
+	PenBundledLibraries::TryGetVariablesJson(TEXT("sample"), Registered);
+	TestEqual(TEXT("Registered payload equals the parsed variables"), Registered, ExpectedVariables);
 	return true;
 }
 

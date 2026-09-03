@@ -13,6 +13,10 @@ struct FDesignDocument;
  * Pencil editor supports (lucide, Material Symbols variants, phosphor, feather, ...) onto
  * concrete font codepoints. Loading it once per process lets the converter render real
  * icon glyphs instead of ligature name text.
+ *
+ * The bundled library documents (data/*.lib.pen) carry the theme variables of the
+ * built-in design libraries (shadcn, lunaris, ...); their "variables" blocks are
+ * registered into PenBundledLibraries before pen documents parse their imports.
  */
 namespace PencilExtensionResources
 {
@@ -24,6 +28,32 @@ namespace PencilExtensionResources
 
 	/** Relative paths of the icon index inside an extension root, in priority order. */
 	void GetIconIndexRelativeCandidates(TArray<FString>& OutRelativePaths);
+
+	/** Locate the extension's bundled library documents (*.lib.pen), extract their variables, and register them into PenBundledLibraries. Idempotent per process. */
+	void EnsureBundledLibrariesRegistered();
+
+	/** True after at least one library variables table was registered in this process. */
+	bool IsBundledLibrariesRegistered();
+
+	/** Relative directories of the bundled library documents inside an extension root, in priority order. */
+	void GetLibraryPenRelativeCandidates(TArray<FString>& OutRelativeDirs);
+
+	/**
+	 * Derive the registry library name from a bundled document file name ("shadcn.lib.pen" ->
+	 * "shadcn"), matching the key PenParser::ParsePencilLibraryId queries for "pencil:<name>.lib.pen"
+	 * imports. Returns false when the name is not a *.lib.pen document.
+	 */
+	bool TryDeriveLibraryNameFromFileName(const FString& FileName, FString& OutLibraryName);
+
+	/** Register every *.lib.pen document in a directory into PenBundledLibraries; returns the number of registered tables. */
+	int32 RegisterLibrariesFromDirectory(const FString& DataDir);
+
+	/**
+	 * Extract a .lib.pen payload's top-level "variables" object and serialize it for
+	 * PenBundledLibraries::RegisterLibraryVariables. Returns false with OutError when the
+	 * payload is not valid JSON or has no "variables" object.
+	 */
+	bool ParseLibPenVariables(const FString& LibPenJson, FString& OutVariablesJson, FString& OutError);
 
 	/**
 	 * Parse an icon-index.json payload into per-family lookup tables.
@@ -39,9 +69,9 @@ namespace PencilExtensionResources
 
 	/**
 	 * After a pen document parses: when the document actually uses icon nodes or imported
-	 * library variables and the extension resources are missing, annotate the document
-	 * metadata, keep logging the gap for every import, and surface one editor notification
-	 * per session (suppressible through the plugin settings).
+	 * library variables and the matching extension resources are missing, annotate the
+	 * document metadata, keep logging the gap for every import, and surface one editor
+	 * notification per session (suppressible through the plugin settings).
 	 */
 	void ReportPenResourceGaps(FDesignDocument& Document);
 }

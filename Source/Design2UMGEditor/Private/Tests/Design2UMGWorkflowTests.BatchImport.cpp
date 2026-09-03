@@ -9,6 +9,8 @@
 #include "Tests/Design2UMGTestAssetCleanup.h"
 #include "FontResolver.h"
 #include "ExternalServices/PenMCPBridge.h"
+#include "ExternalServices/PencilExtensionResources.h"
+#include "PenBundledLibraries.h"
 #include "PenParser.h"
 #include "Design2UMGTestUtils.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -354,9 +356,36 @@ bool FPenFilteredDocImportsPassthroughTest::RunTest(const FString&)
 {
 	// Node-filtered pen imports rebuild the document object from the filtered
 	// subtree; the doc-level imports map must survive that rebuild so
-	// alias-qualified refs ("$Y:--primary") resolve against the bundled
-	// library variables.
-	const FString PenJson = TEXT(R"PENJSON({"imports":{"Y":"pencil:shadcn.lib.pen"},"children":[{"id":"page-1","name":"Page","type":"frame","theme":{"Y:Accent":"Orange"},"children":[{"id":"dot-1","name":"Dot","type":"ellipse","width":8,"height":8,"fill":"$Y:--primary"}]}]})PENJSON");
+	// alias-qualified refs ("$Y:--primary") resolve against the registered
+	// library variables. The library table is registered from a fixture lib.pen
+	// the same way EnsureBundledLibrariesRegistered registers real ones.
+	FString LibPenJson;
+	{
+		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
+		if (!Plugin.IsValid())
+		{
+			AddError(TEXT("Design2UMG plugin not found"));
+			return false;
+		}
+		const FString FixturePath = FPaths::Combine(
+			Plugin->GetBaseDir(),
+			TEXT("Source/Design2UMGEditor/Private/Tests/Fixtures/sample.lib.pen"));
+		if (!FFileHelper::LoadFileToString(LibPenJson, *FixturePath))
+		{
+			AddError(FString::Printf(TEXT("Failed to load fixture: %s"), *FixturePath));
+			return false;
+		}
+	}
+	FString VariablesJson;
+	FString ParseError;
+	if (!PencilExtensionResources::ParseLibPenVariables(LibPenJson, VariablesJson, ParseError))
+	{
+		AddError(FString::Printf(TEXT("Fixture lib.pen parse failed: %s"), *ParseError));
+		return false;
+	}
+	PenBundledLibraries::RegisterLibraryVariables(TEXT("sample"), VariablesJson);
+
+	const FString PenJson = TEXT(R"PENJSON({"imports":{"Y":"pencil:sample.lib.pen"},"children":[{"id":"page-1","name":"Page","type":"frame","theme":{"Y:Accent":"Orange"},"children":[{"id":"dot-1","name":"Dot","type":"ellipse","width":8,"height":8,"fill":"$Y:--primary"}]}]})PENJSON");
 
 	TSharedPtr<FJsonObject> RootObject;
 	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(PenJson);

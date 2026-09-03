@@ -3,7 +3,7 @@
 	"variables": {
 		"--brand": { "type": "color", "value": "#123456" }
 	},
-	"imports": { "Y": "pencil:shadcn.lib.pen" },
+	"imports": { "Y": "pencil:sample.lib.pen" },
 	"children": [
 		{
 			"id": "page-orange", "name": "Page Orange", "type": "frame",

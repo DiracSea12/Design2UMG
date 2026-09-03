@@ -229,8 +229,10 @@ bool FPenMCPBridge::ConvertFromMCP(
 	}
 
 	// Parse the assembled DOM directly (no DOM->string->DOM round trip), then run the
-	// same analysis the string-based source registry path performs.
+	// same analysis the string-based source registry path performs. Extension resources
+	// (icon codepoints, bundled library variables) must be registered pre-parse.
 	PencilExtensionResources::EnsureIconGlyphsRegistered();
+	PencilExtensionResources::EnsureBundledLibrariesRegistered();
 	FDesignDocument Document;
 	if (!FPenParser::ParseDocumentObject(DocumentObject, Document))
 	{
