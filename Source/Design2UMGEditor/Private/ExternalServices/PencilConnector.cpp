@@ -1,11 +1,11 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "PencilConnector.h"
+#include "PencilExtensionLocator.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
 
 #include "HAL/PlatformProcess.h"
-#include "HAL/FileManager.h"
 #include "Misc/Paths.h"
 #include "Containers/Ticker.h"
 #include "Sockets.h"
@@ -13,41 +13,6 @@
 
 namespace
 {
-	TArray<int32> ParseExtensionVersionParts(const FString& VersionText)
-	{
-		TArray<int32> Parts;
-		TArray<FString> Tokens;
-		VersionText.ParseIntoArray(Tokens, TEXT("."));
-		for (const FString& Token : Tokens)
-		{
-			Parts.Add(FCString::Atoi(*Token));
-		}
-		return Parts;
-	}
-
-	bool IsHigherExtensionVersion(const FString& CandidateVersion, const FString& CurrentBestVersion)
-	{
-		if (CurrentBestVersion.IsEmpty())
-		{
-			return true;
-		}
-
-		const TArray<int32> CandidateParts = ParseExtensionVersionParts(CandidateVersion);
-		const TArray<int32> CurrentParts = ParseExtensionVersionParts(CurrentBestVersion);
-		const int32 MaxParts = FMath::Max(CandidateParts.Num(), CurrentParts.Num());
-		for (int32 Index = 0; Index < MaxParts; ++Index)
-		{
-			const int32 CandidatePart = CandidateParts.IsValidIndex(Index) ? CandidateParts[Index] : 0;
-			const int32 CurrentPart = CurrentParts.IsValidIndex(Index) ? CurrentParts[Index] : 0;
-			if (CandidatePart != CurrentPart)
-			{
-				return CandidatePart > CurrentPart;
-			}
-		}
-
-		return false;
-	}
-
 	FString GetPencilAppsDir()
 	{
 #if PLATFORM_WINDOWS
@@ -114,41 +79,20 @@ FString FPencilConnector::DiscoverMCPServerPath()
 	const FString BinaryName = TEXT("mcp-server-linux-x64");
 #endif
 
-	// 2. Search VS Code extension directories first, then fall back to antigravity.
-#if PLATFORM_WINDOWS
-	const FString UserHome = FPlatformMisc::GetEnvironmentVariable(TEXT("USERPROFILE"));
-#else
-	const FString UserHome = FPlatformMisc::GetEnvironmentVariable(TEXT("HOME"));
-#endif
-	TArray<FString> SearchDirs;
-	SearchDirs.Add(UserHome / TEXT(".vscode/extensions"));
-	SearchDirs.Add(UserHome / TEXT(".antigravity/extensions"));
+	// 2. Scan VS Code extension directories first, then fall back to antigravity.
+	// Candidates are ordered per search directory (newest extension first), and the
+	// first candidate containing the server binary wins.
+	TArray<PencilExtensionLocator::FExtensionRoot> Candidates;
+	TArray<FString> SearchedDirs;
+	PencilExtensionLocator::GetExtensionRootCandidates(Candidates, SearchedDirs);
 
-	for (const FString& Dir : SearchDirs)
+	for (const PencilExtensionLocator::FExtensionRoot& Candidate : Candidates)
 	{
-		TArray<FString> ExtDirs;
-		IFileManager::Get().FindFiles(ExtDirs, *(Dir / TEXT("highagency.pencildev-*")), false, true);
-
-		FString BestPath;
-		FString BestVersion;
-		for (const FString& ExtDir : ExtDirs)
+		const FString FullPath = Candidate.Directory / TEXT("out") / BinaryName;
+		if (FPaths::FileExists(FullPath))
 		{
-			const FString FullPath = Dir / ExtDir / TEXT("out") / BinaryName;
-			if (FPaths::FileExists(FullPath))
-			{
-				const FString VersionText = ExtDir.RightChop(FString(TEXT("highagency.pencildev-")).Len());
-				if (IsHigherExtensionVersion(VersionText, BestVersion))
-				{
-					BestVersion = VersionText;
-					BestPath = FullPath;
-				}
-			}
-		}
-
-		if (!BestPath.IsEmpty())
-		{
-			UE_LOG(LogDesign2UMG, Log, TEXT("PencilConnector: Found MCP Server at %s (version %s)"), *BestPath, *BestVersion);
-			return BestPath;
+			UE_LOG(LogDesign2UMG, Log, TEXT("PencilConnector: Found MCP Server at %s (version %s)"), *FullPath, *Candidate.Version);
+			return FullPath;
 		}
 	}
 

@@ -5,6 +5,7 @@
 #include "DesignImportPipeline.h"
 #include "DesignSchema.h"
 #include "PenParser.h"
+#include "PencilExtensionResources.h"
 #include "UMGSchema.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -229,12 +230,14 @@ bool FPenMCPBridge::ConvertFromMCP(
 
 	// Parse the assembled DOM directly (no DOM->string->DOM round trip), then run the
 	// same analysis the string-based source registry path performs.
+	PencilExtensionResources::EnsureIconGlyphsRegistered();
 	FDesignDocument Document;
 	if (!FPenParser::ParseDocumentObject(DocumentObject, Document))
 	{
 		return false;
 	}
 	PromoteSelectedNodeToRenderRoot(Document, TargetNodeId);
+	PencilExtensionResources::ReportPenResourceGaps(Document);
 
 	FImportAnalysisInput AnalysisInput;
 	AnalysisInput.bResolveImages = false;

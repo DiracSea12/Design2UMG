@@ -331,6 +331,12 @@ namespace
 			KnownIconNameCache.Add(NormalizedFamily, IconNames);
 		}
 
+		bool HasAnyRegisteredIconGlyph()
+		{
+			FScopeLock Lock(&FontResolverCacheMutex);
+			return !KnownIconGlyphCache.IsEmpty();
+		}
+
 		void ClearResolverCaches()
 		{
 			FScopeLock Lock(&FontResolverCacheMutex);
@@ -910,6 +916,11 @@ void FFontResolver::RegisterFontAssetPath(const FString& FontFamily, const FStri
 	FFontResolverCache& Cache = GetFontResolverCache();
 	Cache.StoreFontAssetCachePath(NormalizedFamily, ObjectPath);
 	Cache.AddIndexedFontAssetPath(NormalizedFamily, ObjectPath);
+}
+
+bool FFontResolver::HasRegisteredIconGlyphs()
+{
+	return GetFontResolverCache().HasAnyRegisteredIconGlyph();
 }
 
 void FFontResolver::RegisterKnownIconGlyphs(

@@ -11,6 +11,7 @@
 #include "DesignImportUtils.h"
 #include "DesignSchemaSourceExtensions.h"
 #include "ExternalServices/PenMCPBridge.h"
+#include "ExternalServices/PencilExtensionResources.h"
 #include "PenParser.h"
 #include "UMGSchema.h"
 #include "Design2UMGSettings.h"
@@ -395,6 +396,10 @@ namespace DesignImportPipeline
 			return Fail(FString::Printf(TEXT("Failed to read pen source: %s"), *FilePath));
 		}
 
+		// Icon glyphs come from the Pencil extension's icon-index.json; make sure they are
+		// registered before any parse/conversion consumes them.
+		PencilExtensionResources::EnsureIconGlyphsRegistered();
+
 		if (TargetNodeId.IsEmpty())
 		{
 			if (!Design2UMGEditorDesignSourceRegistry::TryParseSourceDocument(TEXT("Pen"), JsonString, OutDocument))
@@ -405,6 +410,7 @@ namespace DesignImportPipeline
 			const FString ResolvedSourceFilePath = FPaths::ConvertRelativePathToFull(FilePath);
 			OutDocument.MutableSourceDocument().SourceFilePath = ResolvedSourceFilePath;
 			OutDocument.Metadata.Add(TEXT("design.sourceFilePath"), ResolvedSourceFilePath);
+			PencilExtensionResources::ReportPenResourceGaps(OutDocument);
 			return true;
 		}
 
@@ -430,6 +436,7 @@ namespace DesignImportPipeline
 		const FString ResolvedSourceFilePath = FPaths::ConvertRelativePathToFull(FilePath);
 		OutDocument.MutableSourceDocument().SourceFilePath = ResolvedSourceFilePath;
 		OutDocument.Metadata.Add(TEXT("design.sourceFilePath"), ResolvedSourceFilePath);
+		PencilExtensionResources::ReportPenResourceGaps(OutDocument);
 		return true;
 	}
 

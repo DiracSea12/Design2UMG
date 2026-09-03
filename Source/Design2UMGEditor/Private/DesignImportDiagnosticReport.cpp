@@ -693,6 +693,13 @@ namespace DesignImportDiagnosticReport
 		{
 			Resources->SetStringField(TEXT("imageImportSummary"), Artifacts.ImageReport);
 		}
+		if (const FString* PenExtensionResourceGap = Document.Metadata.Find(TEXT("design2umg.penExtensionResourceGap")))
+		{
+			Resources->SetStringField(TEXT("pencilExtensionResources"), *PenExtensionResourceGap);
+			AddUniqueRecommendation(
+				Recommendations,
+				TEXT("Install the Pencil VS Code extension (or set the Pencil extension directory in the Design2UMG settings) so icon codepoints and library theme variables resolve from the extension resources."));
+		}
 
 		TSharedRef<FJsonObject> Effects = MakeShared<FJsonObject>();
 		Effects->SetNumberField(TEXT("wrapperCount"), EffectWrapperValues.Num());

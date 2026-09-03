@@ -1,0 +1,31 @@
+{
+  "sets": [
+    {
+      "name": "Lucide",
+      "families": ["lucide"],
+      "icons": [
+        { "name": "activity", "codepoint": 57400 },
+        { "name": "ellipsis", "codepoint": 57526 },
+        { "name": "ellipsis-vertical", "codepoint": 57527 }
+      ]
+    },
+    {
+      "name": "Phosphor",
+      "families": ["phosphor"],
+      "icons": [
+        { "name": "check-circle", "codepoint": 62271 },
+        { "name": "activity-thin", "codepoint": 59906 }
+      ]
+    },
+    {
+      "name": "Material Symbols",
+      "families": ["Material Symbols Outlined", "Material Symbols Rounded", "Material Symbols Sharp"],
+      "variableWeights": true,
+      "icons": [
+        { "name": "search", "codepoint": 59574 },
+        { "name": "query_stats", "codepoint": 58620 },
+        { "name": "mood_heart", "codepoint": 1048500 }
+      ]
+    }
+  ]
+}

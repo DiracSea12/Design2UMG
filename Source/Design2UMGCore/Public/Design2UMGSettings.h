@@ -97,6 +97,12 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Pencil Connection", meta = (DisplayName = "App Name (Optional)", ToolTip = "Override -app parameter. Leave empty to auto-detect from ~/.pencil/apps and running IDE processes (for example visual_studio_code / antigravity)."))
 	FString PencilAppName;
 
+	UPROPERTY(Config, EditAnywhere, Category = "Pencil Connection", meta = (DisplayName = "Pencil Extension Directory (Optional)", ToolTip = "Override path to an installed Pencil VS Code extension directory (the highagency.pencildev-<version> folder). Used to load extension resources such as the icon codepoint index. Leave empty for auto-discovery."))
+	FString PencilExtensionDirectory;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Pencil Connection", meta = (DisplayName = "Suppress Missing Pencil Extension Resource Warning", ToolTip = "Hide the notification shown when a pen design uses icons or library variables but no Pencil extension resources were found. Uncheck to see the notification again."))
+	bool bSuppressPencilExtensionResourceWarning = false;
+
 	// ========== Font Resolution ==========
 
 	UPROPERTY(Config, EditAnywhere, Category = "Font Resolution", meta = (DisplayName = "Font Family → Font Asset", ToolTip = "Map design font family or PostScript name to an existing /Game UFont asset."))
