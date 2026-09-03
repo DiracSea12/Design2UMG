@@ -141,17 +141,19 @@ def normalize_game_output_path(value: str) -> str:
     return normalized
 
 
-def build_default_batch_game_output_root(output_root: Path, batch_start_time: float) -> str:
-    output_segment = verify.sanitize_case_name(output_root.name)
+def build_default_batch_game_output_root(batch_start_time: float) -> str:
+    # On disk this root gains /<case>/primary/D2U_PathTextures/<asset>.uasset; case names reach
+    # ~130 chars and Windows directory creation fails past ~248 path chars (LongPathsEnabled=0),
+    # so the run segment must stay short. stamp+pid already keep the root unique per run.
     stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(batch_start_time))
-    return f"{AUTOMATION_GAME_OUTPUT_PREFIX}/{output_segment}-{stamp}-{os.getpid()}"
+    return f"{AUTOMATION_GAME_OUTPUT_PREFIX}/run-{stamp}-{os.getpid()}"
 
 
-def resolve_effective_batch_game_output_root(raw_game_output: str, output_root: Path, batch_start_time: float) -> str:
+def resolve_effective_batch_game_output_root(raw_game_output: str, batch_start_time: float) -> str:
     explicit_root = normalize_game_output_path(raw_game_output)
     if explicit_root:
         return explicit_root
-    return build_default_batch_game_output_root(output_root, batch_start_time)
+    return build_default_batch_game_output_root(batch_start_time)
 
 
 def build_case_game_output_root(effective_game_output_root: str, case_name: str) -> str:
@@ -1702,7 +1704,6 @@ def main():
     args.game_output_explicit = bool(normalize_game_output_path(args.game_output))
     args.effective_game_output_root = resolve_effective_batch_game_output_root(
         args.game_output,
-        output_root,
         batch_start_time,
     )
 

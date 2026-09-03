@@ -140,10 +140,9 @@ def main() -> None:
         assert_true('src="case-a/candidate.png"' in visual_review, "candidate image should be linked")
         assert_true('src="case-a/diff_overlay.png"' in visual_review, "diff overlay should be linked")
 
-        output_root = automation_root / "batch_output"
-        effective_root = batch_verify.resolve_effective_batch_game_output_root("", output_root, 1780838795.0)
+        effective_root = batch_verify.resolve_effective_batch_game_output_root("", 1780838795.0)
         assert_true(
-            effective_root.startswith("/Game/Design2UMG/Automation/batch-output-"),
+            effective_root.startswith("/Game/Design2UMG/Automation/run-"),
             f"unexpected default game-output root: {effective_root}",
         )
         case_args = batch_verify.build_case_args(
