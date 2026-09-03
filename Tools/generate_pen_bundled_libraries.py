@@ -77,7 +77,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--designs-root",
-        default=r"G:/UE5/FPSRoguelike/Designs",
+        required=True,
         help="Directory holding the pencil-<lib>.pen library documents",
     )
     parser.add_argument(
