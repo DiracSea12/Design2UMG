@@ -351,9 +351,13 @@ namespace VisualMapperFillTransfer
 				return;
 			}
 
-			// Path-backed shapes bake the fill color into their rasterized texture;
-			// tinting the brush again would square the color and darken the render.
-			if (Node->Shape.Geometry.IsEmpty())
+			// Rasterized path widgets bake the fill color into their texture, so a
+			// brush tint would square the color; Widget.Path is set only on that
+			// raster branch and is the ground truth. Node.Shape.Geometry is not
+			// equivalent: Figma ellipses carry fillGeometry yet fall back to a
+			// tint-only Border when stroked, while pen ellipses rasterize through
+			// a side-effect-free clone whose geometry never reaches their node.
+			if (!Widget.Path.Geometry.IsSet())
 			{
 				Widget.Brush.BrushColor = FUMGValueParser::ParseColor(PrimaryFill.SolidColor);
 			}

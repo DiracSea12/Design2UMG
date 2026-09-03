@@ -13,6 +13,8 @@
 #include "UMGPropertyKeys.h"
 #include "UMGWidgetNodeProceduralResourceAccess.h"
 #include "VisualMapper.h"
+#include "VisualMapperFillTransfer.h"
+#include "UMGValueParser.h"
 #include "Design2UMGCoreTestHelpers.h"
 
 using namespace Design2UMGCoreTests;
@@ -562,6 +564,63 @@ bool FProceduralResourceAccessExplicitRefEquivalenceTest::RunTest(const FString&
 		Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(GradientPrecedenceNode, GradientRequest));
 	TestEqual(TEXT("Gradient takes precedence over explicit ref"),
 		GradientRequest.MaterialRef, FString(TEXT("radialgradient")));
+	return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FillTransferPathRasterTintGuardTest,
+	"Design2UMG.FillTransfer.PathRasterTintGuard",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FillTransferPathRasterTintGuardTest::RunTest(const FString& Parameters)
+{
+	const FString FillHex(TEXT("#D4916EFF"));
+	const FLinearColor Expected = FUMGValueParser::ParseColor(FillHex);
+
+	// Rasterized path widget: the fill is baked into its texture, so the brush
+	// tint must stay unset or the render would square the color.
+	TSharedPtr<FDesignNode> PathNode = MakeFixedNode(EDesignNodeType::Path, 24.0f, 24.0f);
+	PathNode->Visual.Fills.Add(FDesignFill::FromColor(FillHex));
+	FUMGWidgetNode RasterWidget;
+	RasterWidget.Type = TEXT("Image");
+	RasterWidget.Path.Geometry = TEXT("M0 0 L24 24");
+	VisualMapperFillTransfer::ApplyFillProperties(RasterWidget, PathNode);
+	TestFalse(TEXT("Raster path widget gets no brush tint"),
+		RasterWidget.Brush.BrushColor.IsSet());
+
+	// Pen ellipses rasterize through a side-effect-free clone: the widget is a
+	// raster path even though the caller-owned node never carries geometry.
+	TSharedPtr<FDesignNode> BareEllipseNode = MakeFixedNode(EDesignNodeType::Ellipse, 14.0f, 14.0f);
+	BareEllipseNode->Visual.Fills.Add(FDesignFill::FromColor(FillHex));
+	FUMGWidgetNode CloneRasterWidget;
+	CloneRasterWidget.Type = TEXT("Image");
+	CloneRasterWidget.Path.Geometry = TEXT("M7 0 A7 7 0 1 0 7 14");
+	VisualMapperFillTransfer::ApplyFillProperties(CloneRasterWidget, BareEllipseNode);
+	TestFalse(TEXT("Raster path widget without node geometry still gets no tint"),
+		CloneRasterWidget.Brush.BrushColor.IsSet());
+
+	// Stroked Figma ellipses carry fillGeometry but fall back to a Border with
+	// no texture; the tint is their only fill source and must survive.
+	TSharedPtr<FDesignNode> StrokedEllipseNode = MakeFixedNode(EDesignNodeType::Ellipse, 14.0f, 14.0f);
+	StrokedEllipseNode->Shape.Geometry = TEXT("M7 0 A7 7 0 1 0 7 14");
+	StrokedEllipseNode->Visual.Fills.Add(FDesignFill::FromColor(FillHex));
+	FUMGWidgetNode BorderWidget;
+	BorderWidget.Type = TEXT("Border");
+	VisualMapperFillTransfer::ApplyFillProperties(BorderWidget, StrokedEllipseNode);
+	TestTrue(TEXT("Non-raster widget with node geometry keeps the tint"),
+		BorderWidget.Brush.BrushColor.IsSet());
+	TestTrue(TEXT("Non-raster tint equals the fill color"),
+		BorderWidget.Brush.BrushColor.IsSet()
+			&& BorderWidget.Brush.BrushColor.GetValue().Equals(Expected));
+
+	// Plain color fill on a plain widget: tint carries the color.
+	TSharedPtr<FDesignNode> PlainNode = MakeFixedNode(EDesignNodeType::Rectangle, 24.0f, 24.0f);
+	PlainNode->Visual.Fills.Add(FDesignFill::FromColor(FillHex));
+	FUMGWidgetNode PlainWidget;
+	PlainWidget.Type = TEXT("Border");
+	VisualMapperFillTransfer::ApplyFillProperties(PlainWidget, PlainNode);
+	TestTrue(TEXT("Plain widget keeps the tint"),
+		PlainWidget.Brush.BrushColor.IsSet()
+			&& PlainWidget.Brush.BrushColor.GetValue().Equals(Expected));
 	return true;
 }
 

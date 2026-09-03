@@ -93,9 +93,14 @@ namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRenderGammaProbeSolidBorderTest,
 	"Design2UMG.Render.GammaProbeSolidBorder",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::SmokeFilter)
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FRenderGammaProbeSolidBorderTest::RunTest(const FString& Parameters)
 {
+	if (GUsingNullRHI)
+	{
+		AddInfo(TEXT("Gamma probe requires a real RHI; skipped under -nullrhi"));
+		return true;
+	}
 	// Known failure guard: this probe documents the screenshot chain's color
 	// behavior. A pure #5741BE vertex-color border must come back as the same
 	// bytes when the chain is byte-faithful.
@@ -120,9 +125,14 @@ bool FRenderGammaProbeSolidBorderTest::RunTest(const FString& Parameters)
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRenderGammaProbeTextureImageTest,
 	"Design2UMG.Render.GammaProbeTextureImage",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::SmokeFilter)
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FRenderGammaProbeTextureImageTest::RunTest(const FString& Parameters)
 {
+	if (GUsingNullRHI)
+	{
+		AddInfo(TEXT("Gamma probe requires a real RHI; skipped under -nullrhi"));
+		return true;
+	}
 	// A transient sRGB-flagged texture holding #5741BE bytes, drawn through an
 	// SImage on the same screenshot chain. Bytes must round-trip for the path
 	// raster pipeline (which writes sRGB bytes) to be faithful.
