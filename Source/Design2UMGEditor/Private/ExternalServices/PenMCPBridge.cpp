@@ -150,7 +150,7 @@ namespace
 		}
 		Doc->SetStringField(TEXT("version"), Version);
 
-		for (const TCHAR* Field : { TEXT("variables"), TEXT("themes"), TEXT("fonts") })
+		for (const TCHAR* Field : { TEXT("variables"), TEXT("themes"), TEXT("fonts"), TEXT("imports") })
 		{
 			if (SourceObj->HasField(Field))
 				Doc->SetField(Field, SourceObj->TryGetField(Field));

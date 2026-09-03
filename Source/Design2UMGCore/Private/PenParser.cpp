@@ -16,6 +16,7 @@
 #include "PenParserInternal.h"
 #include "PenParserNodeExtensions.h"
 #include "ParserSharedSemantics.h"
+#include "PenBundledLibraries.h"
 
 namespace
 {
@@ -27,6 +28,7 @@ struct FPenParserParseContext
 // TU-local pipeline functions defined below; cross-TU parse functions are declared in PenParserInternal.h.
 bool ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FDesignDocument& OutDocument);
 void ParseVariables(const TSharedPtr<FJsonObject>& JsonObj, TMap<FString, FDesignVariable>& OutVariables);
+void ExpandImportedLibraryVariables(const TSharedPtr<FJsonObject>& ImportsObj, TMap<FString, FDesignVariable>& InOutVariables);
 bool ValidateNodeDepth(const TSharedPtr<FJsonObject>& JsonObj, FPenParserParseContext& ParseContext, int32 Depth);
 bool ValidateChildrenDepth(const TSharedPtr<FJsonValue>& ChildrenField, FPenParserParseContext& ParseContext, int32 Depth);
 TSharedPtr<FDesignNode> ParseNodeAtDepth(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver, FPenParserParseContext& ParseContext, int32 Depth);
@@ -127,6 +129,14 @@ bool ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FDesignDocume
 	if (VarsField.IsValid() && VarsField->Type == EJson::Object)
 	{
 		ParseVariables(VarsField->AsObject(), OutDocument.Variables);
+	}
+
+	// Alias-qualified variable refs ("$Y:--primary") resolve against the bundled
+	// library variables named by the document's imports map.
+	const TSharedPtr<FJsonValue>& ImportsField = JsonObj->TryGetField(TEXT("imports"));
+	if (ImportsField.IsValid() && ImportsField->Type == EJson::Object)
+	{
+		ExpandImportedLibraryVariables(ImportsField->AsObject(), OutDocument.Variables);
 	}
 
 	// Build variable resolver with the document-level active theme (first value
@@ -238,6 +248,68 @@ void ParseVariables(const TSharedPtr<FJsonObject>& JsonObj, TMap<FString, FDesig
 		}
 
 		OutVariables.Add(Var.Name, Var);
+	}
+}
+
+bool ParsePencilLibraryId(const FString& ImportId, FString& OutLibraryName)
+{
+	// Built-in library import ids look like "pencil:shadcn.lib.pen". Anything
+	// else (relative paths such as "../design-system.lib.pen", other schemes)
+	// has no bundled table and keeps the unresolved-ref behavior.
+	FString Rest;
+	constexpr int32 PencilPrefixLen = 7; // "pencil:"
+	constexpr int32 LibPenSuffixLen = 8; // ".lib.pen"
+	if (!ImportId.StartsWith(TEXT("pencil:")) || !ImportId.EndsWith(TEXT(".lib.pen"))
+		|| ImportId.Len() <= PencilPrefixLen + LibPenSuffixLen)
+	{
+		return false;
+	}
+	Rest = ImportId.RightChop(PencilPrefixLen);
+	OutLibraryName = Rest.LeftChop(LibPenSuffixLen);
+	return !OutLibraryName.IsEmpty();
+}
+
+void ExpandImportedLibraryVariables(const TSharedPtr<FJsonObject>& ImportsObj, TMap<FString, FDesignVariable>& InOutVariables)
+{
+	for (const auto& Pair : ImportsObj->Values)
+	{
+		if (Pair.Value->Type != EJson::String)
+		{
+			continue;
+		}
+
+		FString LibraryName;
+		if (!ParsePencilLibraryId(Pair.Value->AsString(), LibraryName))
+		{
+			continue;
+		}
+
+		FString VariablesJson;
+		if (!PenBundledLibraries::TryGetVariablesJson(LibraryName, VariablesJson))
+		{
+			UE_LOG(LogDesign2UMG, Warning, TEXT("Import '%s' names library '%s' with no bundled variables table."), *Pair.Value->AsString(), *LibraryName);
+			continue;
+		}
+
+		TSharedPtr<FJsonObject> VariablesObj;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(VariablesJson);
+		if (!FJsonSerializer::Deserialize(Reader, VariablesObj) || !VariablesObj.IsValid())
+		{
+			UE_LOG(LogDesign2UMG, Warning, TEXT("Bundled variables table for library '%s' could not be parsed."), *LibraryName);
+			continue;
+		}
+
+		TMap<FString, FDesignVariable> LibraryVariables;
+		ParseVariables(VariablesObj, LibraryVariables);
+		for (auto& VarPair : LibraryVariables)
+		{
+			const FString QualifiedName = Pair.Key + TEXT(":") + VarPair.Key;
+			if (!InOutVariables.Contains(QualifiedName))
+			{
+				VarPair.Value.SourceAlias = Pair.Key;
+				InOutVariables.Add(QualifiedName, MoveTemp(VarPair.Value));
+			}
+		}
 	}
 }
 

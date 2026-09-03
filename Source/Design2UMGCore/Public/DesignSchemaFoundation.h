@@ -607,6 +607,10 @@ struct FDesignVariable
 	UPROPERTY()
 	FString Value;
 
+	/** Import alias this variable was namespaced under ("Y" for "$Y:--primary"); empty for document-declared variables. */
+	UPROPERTY()
+	FString SourceAlias;
+
 	UPROPERTY()
 	TArray<FDesignThemeValue> ThemedValues;
 };

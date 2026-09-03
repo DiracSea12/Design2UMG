@@ -770,4 +770,52 @@ bool FPenParserGradientFillsTest::RunTest(const FString&)
 	return true;
 }
 
+// ---------------------------------------------------------------------------
+// Imported library variables: "$Y:--token" refs through the imports map with
+// node-level theme overrides (values verified against Pencil-rendered
+// references; see Tools/generate_pen_bundled_libraries.py).
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FPenParserImportedVariablesTest,
+	"Design2UMG.Unit.PenParser.ImportedVariables",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FPenParserImportedVariablesTest::RunTest(const FString&)
+{
+	// The unknown-alias case intentionally logs one unresolved-variable warning.
+	AddExpectedError(TEXT("Variable not found: Z:--primary"), EAutomationExpectedErrorFlags::Contains, 1);
+
+	FDesignDocument Doc;
+	if (!LoadPenFixture(*this, TEXT("imported_variables.json"), Doc))
+		return false;
+
+	TestTrue(TEXT("Imported variable is namespaced under its alias"), Doc.Variables.Contains(TEXT("Y:--primary")));
+
+	// Alias-qualified accent override selects the themed library value.
+	{
+		const TSharedPtr<FDesignNode>& Page = Doc.Children[0];
+		TestEqual(TEXT("orange dot fill"), Page->Children[0]->Visual.TopmostFill().SolidColor, FString(TEXT("#EA580C")));
+		// --muted-foreground has no accent variants, so the default applies.
+		TestEqual(TEXT("muted text fill"), Page->Children[1]->Visual.TopmostFill().SolidColor, FString(TEXT("#737373")));
+	}
+
+	// Unprefixed axes apply to every library; the most specific matching entry wins.
+	{
+		const TSharedPtr<FDesignNode>& Page = Doc.Children[1];
+		TestEqual(TEXT("dark+gray background fill"), Page->Children[0]->Visual.TopmostFill().SolidColor, FString(TEXT("#030712")));
+		// --primary has a dedicated {Mode:Dark,Base:Gray} entry, which outranks {Mode:Dark}.
+		TestEqual(TEXT("dark+gray primary fill"), Page->Children[1]->Visual.TopmostFill().SolidColor, FString(TEXT("#E5E7EB")));
+	}
+
+	// Document-declared plain refs keep resolving; unknown aliases pass through
+	// unchanged instead of fabricating a color.
+	{
+		const TSharedPtr<FDesignNode>& Page = Doc.Children[2];
+		TestEqual(TEXT("document variable fill"), Page->Children[0]->Visual.TopmostFill().SolidColor, FString(TEXT("#123456")));
+		TestEqual(TEXT("unknown alias fill stays raw"), Page->Children[1]->Visual.TopmostFill().SolidColor, FString(TEXT("$Z:--primary")));
+	}
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

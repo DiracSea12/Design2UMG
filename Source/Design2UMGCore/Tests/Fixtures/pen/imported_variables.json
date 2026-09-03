@@ -1,0 +1,32 @@
+{
+	"version": "1",
+	"variables": {
+		"--brand": { "type": "color", "value": "#123456" }
+	},
+	"imports": { "Y": "pencil:shadcn.lib.pen" },
+	"children": [
+		{
+			"id": "page-orange", "name": "Page Orange", "type": "frame",
+			"theme": { "Y:Accent": "Orange" },
+			"children": [
+				{ "id": "dot-primary", "name": "Dot", "type": "ellipse", "width": 8, "height": 8, "fill": "$Y:--primary" },
+				{ "id": "text-muted", "name": "Text", "type": "text", "fill": "$Y:--muted-foreground" }
+			]
+		},
+		{
+			"id": "page-dark", "name": "Page Dark", "type": "frame",
+			"theme": { "Mode": "Dark", "Base": "Gray" },
+			"children": [
+				{ "id": "bg-dark", "name": "Bg", "type": "rectangle", "fill": "$Y:--background" },
+				{ "id": "dot-default", "name": "DotDefault", "type": "ellipse", "fill": "$Y:--primary" }
+			]
+		},
+		{
+			"id": "page-plain", "name": "Page Plain", "type": "frame",
+			"children": [
+				{ "id": "brand-fill", "name": "Brand", "type": "rectangle", "fill": "$--brand" },
+				{ "id": "unknown-alias", "name": "Unknown", "type": "rectangle", "fill": "$Z:--primary" }
+			]
+		}
+	]
+}

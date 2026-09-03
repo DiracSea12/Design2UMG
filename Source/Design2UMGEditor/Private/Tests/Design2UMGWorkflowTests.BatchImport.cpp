@@ -347,4 +347,37 @@ bool FPenReusableTargetImportWorkflowTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenFilteredDocImportsPassthroughTest,
+	"Design2UMG.BatchImport.FilteredDocKeepsImports",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPenFilteredDocImportsPassthroughTest::RunTest(const FString&)
+{
+	// Node-filtered pen imports rebuild the document object from the filtered
+	// subtree; the doc-level imports map must survive that rebuild so
+	// alias-qualified refs ("$Y:--primary") resolve against the bundled
+	// library variables.
+	const FString PenJson = TEXT(R"PENJSON({"imports":{"Y":"pencil:shadcn.lib.pen"},"children":[{"id":"page-1","name":"Page","type":"frame","theme":{"Y:Accent":"Orange"},"children":[{"id":"dot-1","name":"Dot","type":"ellipse","width":8,"height":8,"fill":"$Y:--primary"}]}]})PENJSON");
+
+	TSharedPtr<FJsonObject> RootObject;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(PenJson);
+	TestTrue(TEXT("fixture json parses"), FJsonSerializer::Deserialize(Reader, RootObject) && RootObject.IsValid());
+	if (!RootObject.IsValid())
+	{
+		return false;
+	}
+
+	TSharedPtr<FJsonObject> Filtered;
+	TestTrue(TEXT("filter succeeds"), FPenMCPBridge::BuildFilteredDocumentObject(RootObject, Filtered, TEXT("page-1")));
+	TestTrue(TEXT("filtered doc keeps imports"), Filtered.IsValid() && Filtered->HasField(TEXT("imports")));
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("filtered doc parses"), FPenParser::ParseDocumentObject(Filtered, Doc));
+	if (Doc.Children.Num() == 1 && Doc.Children[0]->Children.Num() == 1)
+	{
+		TestEqual(TEXT("orange primary fill"),
+			Doc.Children[0]->Children[0]->Visual.TopmostFill().SolidColor, FString(TEXT("#EA580C")));
+	}
+	return true;
+}
+
 #endif // WITH_AUTOMATION_WORKER

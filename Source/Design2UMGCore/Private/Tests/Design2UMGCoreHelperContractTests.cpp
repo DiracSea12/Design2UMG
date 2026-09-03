@@ -219,7 +219,7 @@ bool FVariableResolverLiteralDollarTextTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("$--font-primary remains a variable ref"), Resolver.IsVariableRef(TEXT("$--font-primary")));
 	TestTrue(TEXT("$color/ink with slash is a variable ref"), Resolver.IsVariableRef(TEXT("$color/ink")));
 	TestTrue(TEXT("$spacing-0.5 with dot is a variable ref"), Resolver.IsVariableRef(TEXT("$spacing-0.5")));
-	TestFalse(TEXT("$N:--background keeps namespace-prefixed form unresolved"), Resolver.IsVariableRef(TEXT("$N:--background")));
+	TestTrue(TEXT("$N:--background import-qualified ref is a variable ref"), Resolver.IsVariableRef(TEXT("$N:--background")));
 	return true;
 }
 

@@ -14,9 +14,9 @@ namespace
 			return false;
 		}
 
-		// Variable names may contain '/', '.' and '-' (e.g. "color/ink",
-		// "spacing-0.5", "--background") but never start with a digit, so literal
-		// dollar text like "$45.00" stays plain text.
+		// Variable names may contain '/', '.', '-' and ':' (e.g. "color/ink",
+		// "spacing-0.5", "--background", "Y:--primary") but never start with a
+		// digit, so literal dollar text like "$45.00" stays plain text.
 		const TCHAR FirstChar = Value[1];
 		if (!FChar::IsAlpha(FirstChar) && FirstChar != TEXT('_') && FirstChar != TEXT('-'))
 		{
@@ -26,7 +26,7 @@ namespace
 		for (int32 Index = 2; Index < Value.Len(); ++Index)
 		{
 			const TCHAR Char = Value[Index];
-			if (FChar::IsAlnum(Char) || Char == TEXT('_') || Char == TEXT('-') || Char == TEXT('/') || Char == TEXT('.'))
+			if (FChar::IsAlnum(Char) || Char == TEXT('_') || Char == TEXT('-') || Char == TEXT('/') || Char == TEXT('.') || Char == TEXT(':'))
 			{
 				continue;
 			}
@@ -73,13 +73,25 @@ FString FDesignVariableResolver::ResolveThemedValue(const FDesignVariable& Var) 
 	// entries always apply, themed entries apply only when every axis matches the
 	// active context, and the last applied entry wins. Var.Value holds the first
 	// entry's value as the initial state.
+	//
+	// For imported variables the active axis value comes from the alias-qualified
+	// override ("Y:Accent") when present, otherwise from the unprefixed axis that
+	// applies to every library.
 	FString Current = Var.Value;
 	for (const FDesignThemeValue& TV : Var.ThemedValues)
 	{
 		bool bApplies = true;
 		for (const auto& Pair : TV.ThemeMatch)
 		{
-			const FString* ContextVal = ThemeContext.Find(Pair.Key);
+			const FString* ContextVal = nullptr;
+			if (!Var.SourceAlias.IsEmpty())
+			{
+				ContextVal = ThemeContext.Find(Var.SourceAlias + TEXT(":") + Pair.Key);
+			}
+			if (!ContextVal)
+			{
+				ContextVal = ThemeContext.Find(Pair.Key);
+			}
 			if (!ContextVal || *ContextVal != Pair.Value)
 			{
 				bApplies = false;
