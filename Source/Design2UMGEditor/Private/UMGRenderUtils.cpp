@@ -27,6 +27,7 @@
 #include "TextureResource.h"
 #include "RenderingThread.h"
 #include "Styling/SlateBrush.h"
+#include "Widgets/Layout/SConstraintCanvas.h"
 #include "Widgets/SVirtualWindow.h"
 
 // ============================================================================
@@ -484,16 +485,36 @@ bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8
 		Widget->RemoveFromRoot();
 		return false;
 	}
-	// Canvas calibration centering: when the calibrated canvas extends beyond the
-	// layout on both axes (e.g. reference includes symmetric shadow padding), the
-	// authoritative render centers the content, mirroring how Pencil composes the
-	// content union box. One-axis overflow stays top-left anchored.
+	// Canvas calibration placement: the reference canvas is Pencil's rendered
+	// content union (auto-sized roots, overflowing children, shadow padding),
+	// while the layout keeps the blueprint's own design-time extent. Pencil
+	// paints the root fill only inside the node bounds and leaves the rest of
+	// the canvas transparent, so an overflow axis must not stretch the root
+	// widget (and its background brush) across the whole canvas:
+	// - both axes overflow (e.g. symmetric shadow padding): pin the root to
+	//   its design-time extent and center it, mirroring how Pencil composes
+	//   the content union box;
+	// - one axis overflows: pin the extent, top-left anchored;
+	// - no axis overflows: legacy behavior (root fills the canvas).
+	// Slot offsets are absolute (point anchors), so the pinned extent does not
+	// depend on the root widget's desired size.
 	TSharedRef<SWidget> WindowContent = SlateWidget;
-	if (RenderSizeOverride.IsSet() && SlateRenderSize.X > LayoutPixelSize.X && SlateRenderSize.Y > LayoutPixelSize.Y)
+	const bool bCalibrationXOverflow = SlateRenderSize.X > LayoutPixelSize.X;
+	const bool bCalibrationYOverflow = SlateRenderSize.Y > LayoutPixelSize.Y;
+	if (bCalibrationXOverflow || bCalibrationYOverflow)
 	{
-		WindowContent = SNew(SBox)
-			.HAlign(HAlign_Center)
-			.VAlign(VAlign_Center)
+		const float XOffset = bCalibrationXOverflow && bCalibrationYOverflow
+			? (SlateRenderSize.X - LayoutPixelSize.X) / 2.0f
+			: 0.0f;
+		const float YOffset = bCalibrationXOverflow && bCalibrationYOverflow
+			? (SlateRenderSize.Y - LayoutPixelSize.Y) / 2.0f
+			: 0.0f;
+		WindowContent = SNew(SConstraintCanvas)
+			+ SConstraintCanvas::Slot()
+			.Anchors(FAnchors(0.f, 0.f))
+			.Offset(FMargin(XOffset, YOffset, static_cast<float>(LayoutPixelSize.X), static_cast<float>(LayoutPixelSize.Y)))
+			.Alignment(FVector2D::ZeroVector)
+			.AutoSize(false)
 			[SlateWidget];
 	}
 	TSharedRef<SVirtualWindow> Window = SNew(SVirtualWindow);
