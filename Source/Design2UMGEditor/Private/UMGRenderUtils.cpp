@@ -269,6 +269,24 @@ namespace
 		return FVector2D::ZeroVector;
 	}
 
+	// Slate renders with premultiplied alpha: RGB bytes read back from the render
+	// target are already scaled against a transparent black base. Pencil/Figma
+	// references store straight alpha, so PNG candidates must be un-premultiplied
+	// before compression or every translucent pixel shows a systematic RGB shift.
+	uint8 UnpremultiplyChannel(uint8 Premultiplied, uint8 Alpha)
+	{
+		if (Alpha == 0)
+		{
+			return 0;
+		}
+		if (Alpha == 255)
+		{
+			return Premultiplied;
+		}
+		const uint32 Scaled = (static_cast<uint32>(Premultiplied) * 255u + Alpha / 2u) / Alpha;
+		return static_cast<uint8>(FMath::Min(Scaled, 255u));
+	}
+
 	FIntPoint ResolveDesignLayoutPixelSize(const FVector2D& DesignSize)
 	{
 		return FIntPoint(
@@ -342,6 +360,17 @@ namespace
 				TEXT("RenderWidgetToPng: cleared stale navigation on %d widget instances before TakeWidget"),
 				ClearedCount);
 		}
+	}
+}
+
+void FUMGWidgetUtils::UnpremultiplyPixels(TArray<FColor>& Pixels)
+{
+	for (FColor& Pixel : Pixels)
+	{
+		const uint8 Alpha = Pixel.A;
+		Pixel.R = UnpremultiplyChannel(Pixel.R, Alpha);
+		Pixel.G = UnpremultiplyChannel(Pixel.G, Alpha);
+		Pixel.B = UnpremultiplyChannel(Pixel.B, Alpha);
 	}
 }
 
@@ -508,6 +537,7 @@ bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8
 
 	TArray<FColor> Pixels;
 	Resource->ReadPixels(Pixels);
+	FUMGWidgetUtils::UnpremultiplyPixels(Pixels);
 	RT->ReleaseResource();
 	RT->MarkAsGarbage();
 	Widget->RemoveFromRoot();
@@ -581,6 +611,7 @@ namespace
 
 		TArray<FColor> Pixels;
 		Resource->ReadPixels(Pixels);
+		FUMGWidgetUtils::UnpremultiplyPixels(Pixels);
 		RT->ReleaseResource();
 		RT->MarkAsGarbage();
 

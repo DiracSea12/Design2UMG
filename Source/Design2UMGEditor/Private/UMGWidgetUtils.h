@@ -25,6 +25,15 @@ public:
 	static void ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNode& Node);
 	static bool RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8>& OutPngData, FIntPoint& OutSize, FString* OutError = nullptr, const TOptional<FIntPoint>& RenderSizeOverride = TOptional<FIntPoint>());
 	static bool RenderWidgetTreeToPng(UWidgetBlueprint* WidgetBP, TArray<uint8>& OutPngData, FIntPoint& OutSize);
+
+	/**
+	 * Slate render targets store premultiplied alpha (RGB scaled against a
+	 * transparent black base), while Pencil/Figma references use straight alpha.
+	 * Converts read-back pixels in place to straight alpha before PNG save:
+	 * A=255 pixels are untouched, A=0 pixels get RGB zeroed, partial alpha is
+	 * un-premultiplied as min(255, round(RGB * 255 / A)).
+	 */
+	static void UnpremultiplyPixels(TArray<FColor>& Pixels);
 	static FName SanitizeWidgetName(const FString& InName, const FString& FallbackPrefix);
 
 	/**
