@@ -137,6 +137,15 @@ namespace DesignImportPipeline
 		const FString& GeneratedAssetPath = FString(),
 		const FString& RenderPngPath = FString());
 	bool LoadPenDocument(const FString& FilePath, const FString& TargetNodeId, FDesignDocument& OutDocument, FString* OutError = nullptr);
+	/**
+	 * Anchors relative image-fill urls of a parsed Pen document to the .pen source directory
+	 * (Pencil's own relative-path semantics: sibling files of the .pen document). Only urls whose
+	 * anchored file exists are rewritten; broken links keep the original value so downstream skip
+	 * behavior matches Pencil opening the same document (missing image). Remote urls, asset paths,
+	 * and absolute paths pass through untouched. Shared by every LoadPenDocument entry point that
+	 * knows the .pen file location; MCP-sourced documents have no local directory and skip this.
+	 */
+	void AnchorRelativeImageFillUrls(FDesignDocument& Document, const FString& PenFilePath);
 	FDesignImportExecutionResult ExecutePenFile(const FString& FilePath, const FString& TargetNodeId, const FDesignImportRequest& Request);
 	bool LoadPenFrames(const FString& FilePath, TArray<FDesignFrameInfo>& OutFrames);
 }

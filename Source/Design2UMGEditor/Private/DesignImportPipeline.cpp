@@ -413,6 +413,7 @@ namespace DesignImportPipeline
 			const FString ResolvedSourceFilePath = FPaths::ConvertRelativePathToFull(FilePath);
 			OutDocument.MutableSourceDocument().SourceFilePath = ResolvedSourceFilePath;
 			OutDocument.Metadata.Add(TEXT("design.sourceFilePath"), ResolvedSourceFilePath);
+			AnchorRelativeImageFillUrls(OutDocument, ResolvedSourceFilePath);
 			PencilExtensionResources::ReportPenResourceGaps(OutDocument);
 			return true;
 		}
@@ -439,8 +440,68 @@ namespace DesignImportPipeline
 		const FString ResolvedSourceFilePath = FPaths::ConvertRelativePathToFull(FilePath);
 		OutDocument.MutableSourceDocument().SourceFilePath = ResolvedSourceFilePath;
 		OutDocument.Metadata.Add(TEXT("design.sourceFilePath"), ResolvedSourceFilePath);
+		AnchorRelativeImageFillUrls(OutDocument, ResolvedSourceFilePath);
 		PencilExtensionResources::ReportPenResourceGaps(OutDocument);
 		return true;
+	}
+
+	namespace
+	{
+		bool IsHttpUrl(const FString& Value)
+		{
+			return Value.StartsWith(TEXT("http://"), ESearchCase::IgnoreCase)
+				|| Value.StartsWith(TEXT("https://"), ESearchCase::IgnoreCase);
+		}
+
+		void AnchorRelativeImageFillUrlsInNode(FDesignNode& Node, const FString& PenDirectory)
+		{
+			for (FDesignFill& Fill : Node.Visual.Fills)
+			{
+				if (!Fill.IsImage())
+				{
+					continue;
+				}
+				FString& Url = Fill.Image.Url;
+				if (Url.IsEmpty() || IsHttpUrl(Url) || !FPaths::IsRelative(Url))
+				{
+					continue;
+				}
+				const FString Anchored = FPaths::ConvertRelativePathToFull(FPaths::Combine(PenDirectory, Url));
+				if (FPaths::FileExists(Anchored))
+				{
+					Url = Anchored;
+				}
+			}
+			// Ref-instance descendant override fragments carry fills that later merge into the
+			// expanded tree, so they need anchoring too; reusable component definitions already
+			// live in Children and are covered by the recursion below.
+			for (TPair<FString, TSharedPtr<FDesignNode>>& Pair : Node.Descendants)
+			{
+				if (Pair.Value.IsValid())
+				{
+					AnchorRelativeImageFillUrlsInNode(*Pair.Value, PenDirectory);
+				}
+			}
+			for (const TSharedPtr<FDesignNode>& Child : Node.Children)
+			{
+				if (Child.IsValid())
+				{
+					AnchorRelativeImageFillUrlsInNode(*Child, PenDirectory);
+				}
+			}
+		}
+	}
+
+	void AnchorRelativeImageFillUrls(FDesignDocument& Document, const FString& PenFilePath)
+	{
+		const FString PenDirectory = FPaths::GetPath(FPaths::ConvertRelativePathToFull(PenFilePath));
+		for (const TSharedPtr<FDesignNode>& Child : Document.Children)
+		{
+			if (Child.IsValid())
+			{
+				AnchorRelativeImageFillUrlsInNode(*Child, PenDirectory);
+			}
+		}
 	}
 
 	FDesignImportExecutionResult ExecutePenFile(
