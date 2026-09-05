@@ -281,5 +281,103 @@ bool FVisualMapperMultiFillKeepsPaddedBorderContentTest::RunTest(const FString& 
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperTranslucentStrokeCompositesOverSolidFillTest,
+	"Design2UMG.VisualMapper.TranslucentStrokeCompositesOverSolidFill",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperTranslucentStrokeCompositesOverSolidFillTest::RunTest(const FString& Parameters)
+{
+	// Pencil composites an inside stroke over the node fill at the edge band.
+	// The UMG RoundedBox outline instead REPLACES that band, so a translucent
+	// stroke over a dark fill must bake the composite into the outline color;
+	// otherwise the edge renders as a bare translucent stripe on transparency.
+	TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 64.0f, 48.0f);
+	Node->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#171F33")));
+	Node->Visual.Stroke.Thickness.bUniform = true;
+	Node->Visual.Stroke.Thickness.Uniform = 1.0f;
+	Node->Visual.Stroke.Fill = FDesignFill::FromColor(TEXT("#FFFFFF1A"));
+
+	FUMGWidgetNode Widget;
+	Widget.Type = TEXT("Border");
+	VisualMapper::ApplyVisualProperties(Widget, Node);
+
+	if (!TestTrue(TEXT("Stroke outline color is set"), Widget.Brush.OutlineColor.IsSet()))
+	{
+		return false;
+	}
+	// sRGB byte composite: 255*(26/255) + fill*(1-26/255) => (47, 54, 72).
+	const FLinearColor ExpectedComposited(FColor(47, 54, 72, 255));
+	const FLinearColor Actual = Widget.Brush.OutlineColor.GetValue();
+	TestTrue(TEXT("Translucent stroke bakes the over-fill composite into the outline color"),
+		FMath::Abs(Actual.R - ExpectedComposited.R) < 0.005f
+		&& FMath::Abs(Actual.G - ExpectedComposited.G) < 0.005f
+		&& FMath::Abs(Actual.B - ExpectedComposited.B) < 0.005f
+		&& FMath::Abs(Actual.A - 1.0f) < 0.005f);
+
+	// Opaque strokes must stay untouched (composite equals the stroke itself).
+	TSharedPtr<FDesignNode> OpaqueNode = MakeFixedNode(EDesignNodeType::Frame, 64.0f, 48.0f);
+	OpaqueNode->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#171F33")));
+	OpaqueNode->Visual.Stroke.Thickness.bUniform = true;
+	OpaqueNode->Visual.Stroke.Thickness.Uniform = 1.0f;
+	OpaqueNode->Visual.Stroke.Fill = FDesignFill::FromColor(TEXT("#FFAA00"));
+
+	FUMGWidgetNode OpaqueWidget;
+	OpaqueWidget.Type = TEXT("Border");
+	VisualMapper::ApplyVisualProperties(OpaqueWidget, OpaqueNode);
+	if (!TestTrue(TEXT("Opaque stroke outline color is set"), OpaqueWidget.Brush.OutlineColor.IsSet()))
+	{
+		return false;
+	}
+	const FLinearColor OpaqueExpected(FColor(255, 170, 0, 255));
+	const FLinearColor OpaqueActual = OpaqueWidget.Brush.OutlineColor.GetValue();
+	TestTrue(TEXT("Opaque stroke keeps its own color"),
+		FMath::Abs(OpaqueActual.R - OpaqueExpected.R) < 0.005f
+		&& FMath::Abs(OpaqueActual.G - OpaqueExpected.G) < 0.005f
+		&& FMath::Abs(OpaqueActual.B - OpaqueExpected.B) < 0.005f);
+
+	// Translucent stroke without a solid opaque fill stays as authored.
+	TSharedPtr<FDesignNode> BareNode = MakeFixedNode(EDesignNodeType::Frame, 64.0f, 48.0f);
+	BareNode->Visual.Stroke.Thickness.bUniform = true;
+	BareNode->Visual.Stroke.Thickness.Uniform = 1.0f;
+	BareNode->Visual.Stroke.Fill = FDesignFill::FromColor(TEXT("#FFFFFF1A"));
+
+	FUMGWidgetNode BareWidget;
+	BareWidget.Type = TEXT("Border");
+	VisualMapper::ApplyVisualProperties(BareWidget, BareNode);
+	if (TestTrue(TEXT("Bare translucent stroke outline color is set"), BareWidget.Brush.OutlineColor.IsSet()))
+	{
+		const FLinearColor BareActual = BareWidget.Brush.OutlineColor.GetValue();
+		TestTrue(TEXT("Bare translucent stroke keeps authored alpha"),
+			BareActual.A > 0.05f && BareActual.A < 0.2f);
+	}
+
+	// Center/Outside strokes do not overlay the node's own fill (ApplyStroke
+	// pushes their band off the body), so the composite must NOT be baked and
+	// the outline keeps the authored translucent stroke color untouched.
+	for (const EDesignStrokeAlign Align : { EDesignStrokeAlign::Center, EDesignStrokeAlign::Outside })
+	{
+		TSharedPtr<FDesignNode> AlignedNode = MakeFixedNode(EDesignNodeType::Frame, 64.0f, 48.0f);
+		AlignedNode->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#171F33")));
+		AlignedNode->Visual.Stroke.Align = Align;
+		AlignedNode->Visual.Stroke.Thickness.bUniform = true;
+		AlignedNode->Visual.Stroke.Thickness.Uniform = 1.0f;
+		AlignedNode->Visual.Stroke.Fill = FDesignFill::FromColor(TEXT("#FFFFFF1A"));
+
+		FUMGWidgetNode AlignedWidget;
+		AlignedWidget.Type = TEXT("Border");
+		VisualMapper::ApplyVisualProperties(AlignedWidget, AlignedNode);
+		if (TestTrue(TEXT("Non-inside stroke outline color is set"), AlignedWidget.Brush.OutlineColor.IsSet()))
+		{
+			const FLinearColor AlignedActual = AlignedWidget.Brush.OutlineColor.GetValue();
+			const FLinearColor Authored(FColor(255, 255, 255, 26));
+			TestTrue(TEXT("Non-inside translucent stroke is not composited over the fill"),
+				FMath::Abs(AlignedActual.R - Authored.R) < 0.005f
+				&& FMath::Abs(AlignedActual.G - Authored.G) < 0.005f
+				&& FMath::Abs(AlignedActual.B - Authored.B) < 0.005f
+				&& FMath::Abs(AlignedActual.A - Authored.A) < 0.005f);
+		}
+	}
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
 

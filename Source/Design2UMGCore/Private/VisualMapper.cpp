@@ -675,13 +675,68 @@ void VisualMapper::ApplyRenderTransformProperties(FUMGWidgetNode& Widget, const 
 	ApplyRenderTransformPropertiesInternal(Widget, Node);
 }
 
+namespace
+{
+	// Pencil composites an INSIDE stroke over the node fill at the edge band, while
+	// the UMG RoundedBox outline REPLACES that band with the stroke color alone.
+	// When the stroke is translucent and sits on an opaque solid fill, bake the
+	// "stroke over fill" composite into the outline color so the band carries the
+	// authored combination instead of a bare translucent stripe on transparency.
+	// Inside-only by geometry: ApplyStroke pushes Center/Outside strokes off the
+	// node body (negative margin / centered band), so their band does not overlay
+	// the node's own fill and compositing against it would be physically wrong.
+	FDesignStroke ResolveStrokeCompositedOverFill(const TSharedPtr<FDesignNode>& Node)
+	{
+		FDesignStroke Stroke = Node->Visual.Stroke;
+		if (Stroke.Align != EDesignStrokeAlign::Inside)
+		{
+			return Stroke;
+		}
+		if (!Stroke.Fill.IsSet() || Stroke.Fill->Type != EDesignFillType::Color || !Stroke.Fill->bEnabled)
+		{
+			return Stroke;
+		}
+
+		const FColor StrokeColor = DesignColorUtils::ParseHexColor(Stroke.Fill->SolidColor);
+		if (StrokeColor.A >= 255)
+		{
+			return Stroke;
+		}
+
+		const FDesignFill& UnderlayFill = Node->Visual.TopmostFill();
+		if (!UnderlayFill.bEnabled || UnderlayFill.Type != EDesignFillType::Color)
+		{
+			return Stroke;
+		}
+		const FColor FillColor = DesignColorUtils::ParseHexColor(UnderlayFill.SolidColor);
+		if (FillColor.A < 255)
+		{
+			return Stroke;
+		}
+
+		const float StrokeAlpha = StrokeColor.A / 255.0f;
+		const auto Mix = [StrokeAlpha](uint8 StrokeChannel, uint8 FillChannel)
+		{
+			return static_cast<uint8>(FMath::RoundToInt(StrokeChannel * StrokeAlpha + FillChannel * (1.0f - StrokeAlpha)));
+		};
+		const FColor Composited(
+			Mix(StrokeColor.R, FillColor.R),
+			Mix(StrokeColor.G, FillColor.G),
+			Mix(StrokeColor.B, FillColor.B),
+			255);
+		Stroke.Fill->SolidColor = FString::Printf(
+			TEXT("#%02X%02X%02XFF"), Composited.R, Composited.G, Composited.B);
+		return Stroke;
+	}
+}
+
 void VisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
 {
 	VisualMapperFillTransfer::ApplyFillProperties(Widget, Node);
 	ApplyRenderTransformPropertiesInternal(Widget, Node);
 
 	ApplyRoundedCorner(Widget, Node->Visual.CornerRadius, Node->Transform.Width.Value, Node->Transform.Height.Value);
-	ApplyStroke(Widget, Node->Visual.Stroke);
+	ApplyStroke(Widget, ResolveStrokeCompositedOverFill(Node));
 
 	int32 ShadowCount = 0;
 	for (const FDesignEffect& Effect : Node->Visual.Effects)

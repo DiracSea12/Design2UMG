@@ -787,8 +787,12 @@ namespace
 		OutResult.AssetStructure = Design2UMGAutomationStructureSnapshot::BuildWidgetTreeStructureSnapshot(WidgetBlueprint->WidgetTree);
 		// Second-stage calibration check: the blueprint's design-time extent is now
 		// known. When it is already aspect-compatible with the calibrated (reference)
-		// extent, the legacy pipeline compares fine on its own; skip the override to
-		// keep passing cases byte-identical to the non-calibrated path.
+		// extent and the calibration is not union-padded, the legacy pipeline compares
+		// fine on its own; skip the override to keep passing cases byte-identical to
+		// the non-calibrated path. A calibration canvas significantly larger than the
+		// design-time extent on any axis carries content-union padding (outer shadows,
+		// overflowing children) that the design-time canvas cannot host, so it applies
+		// even when the aspects match.
 		TOptional<FIntPoint> EffectiveRenderSizeOverride = Spec.RenderSizeOverride;
 		if (EffectiveRenderSizeOverride.IsSet() && OutResult.DesignTimeSize.X > 1 && OutResult.DesignTimeSize.Y > 1)
 		{
@@ -797,7 +801,12 @@ namespace
 			const float OverrideAspect = static_cast<float>(OverrideSize.X) / static_cast<float>(OverrideSize.Y);
 			const float AspectDelta = FMath::Abs(DesignAspect - OverrideAspect) / FMath::Max(DesignAspect, OverrideAspect);
 			constexpr float ReferenceAspectCompatibilityThreshold = 0.08f;
-			if (AspectDelta <= ReferenceAspectCompatibilityThreshold)
+			constexpr float ReferenceUnionPaddingScaleThreshold = 1.25f;
+			const bool bAspectCompatible = AspectDelta <= ReferenceAspectCompatibilityThreshold;
+			const bool bCalibrationCarriesUnionPadding =
+				OverrideSize.X > OutResult.DesignTimeSize.X * ReferenceUnionPaddingScaleThreshold
+				|| OverrideSize.Y > OutResult.DesignTimeSize.Y * ReferenceUnionPaddingScaleThreshold;
+			if (bAspectCompatible && !bCalibrationCarriesUnionPadding)
 			{
 				EffectiveRenderSizeOverride.Reset();
 				UE_LOG(LogDesign2UMG, Log,
