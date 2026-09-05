@@ -1,0 +1,37 @@
+{
+  "version": "1.0",
+  "children": [
+    {
+      "id": "wrap-1",
+      "name": "StickyWrap",
+      "type": "frame",
+      "x": 0, "y": 0, "width": 400, "height": 300,
+      "layout": "vertical",
+      "children": [
+        {
+          "id": "prompt-1",
+          "name": "Implementation Prompt",
+          "type": "prompt",
+          "width": "fill_container",
+          "height": 330,
+          "content": "Line one of the prompt.\nLine two of the prompt."
+        },
+        {
+          "id": "note-1",
+          "name": "Side Note",
+          "type": "note",
+          "width": 200,
+          "height": 0,
+          "content": "A short note body."
+        },
+        {
+          "id": "context-1",
+          "name": "Feature Context",
+          "type": "context",
+          "width": "fill_container",
+          "content": "Context body text."
+        }
+      ]
+    }
+  ]
+}

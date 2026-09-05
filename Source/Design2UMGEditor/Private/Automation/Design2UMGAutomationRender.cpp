@@ -94,9 +94,6 @@ namespace
 		switch (Node->Type)
 		{
 		case EDesignNodeType::Connection:
-		case EDesignNodeType::Note:
-		case EDesignNodeType::Prompt:
-		case EDesignNodeType::Context:
 			return true;
 		default:
 			return false;

@@ -20,10 +20,10 @@ namespace Design2UMGCore::SharedSemantics
 
 	bool IsDesignerOnlyNodeType(EDesignNodeType Type)
 	{
-		return Type == EDesignNodeType::Connection
-			|| Type == EDesignNodeType::Note
-			|| Type == EDesignNodeType::Prompt
-			|| Type == EDesignNodeType::Context;
+		// Note/Context/Prompt sticky nodes render as sticky cards on the Pencil
+		// canvas and are synthesized into card subtrees by the pen parser, so
+		// they must stay convertible; only canvas connections are chrome-only.
+		return Type == EDesignNodeType::Connection;
 	}
 
 	bool HasRenderableVisual(const TSharedPtr<FDesignNode>& Node)

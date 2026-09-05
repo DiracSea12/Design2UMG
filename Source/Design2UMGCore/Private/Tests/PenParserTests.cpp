@@ -840,4 +840,78 @@ bool FPenParserImportedVariablesTest::RunTest(const FString&)
 	return true;
 }
 
+// ---------------------------------------------------------------------------
+// Sticky nodes: prompt/note synthesize the Pencil sticky-card subtree
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FPenParserStickyNodesTest,
+	"Design2UMG.Unit.PenParser.StickyNodes",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FPenParserStickyNodesTest::RunTest(const FString&)
+{
+	FDesignDocument Doc;
+	if (!LoadPenFixture(*this, TEXT("sticky_nodes.json"), Doc))
+		return false;
+
+	const TSharedPtr<FDesignNode>& Wrap = Doc.Children[0];
+	TestEqual(TEXT("Wrap has 3 sticky children"), Wrap->Children.Num(), 3);
+
+	const TSharedPtr<FDesignNode>& Prompt = Wrap->Children[0];
+	TestEqual(TEXT("Prompt becomes a card frame"), Prompt->Type, EDesignNodeType::Frame);
+	TestEqual(TEXT("Prompt card layout"), Prompt->LayoutData.Layout, EDesignLayout::Vertical);
+	TestEqual(TEXT("Prompt card fill"), Prompt->Visual.TopmostFill().SolidColor, FString(TEXT("#E8F6FF")));
+	TestEqual(TEXT("Prompt card outline"), Prompt->Visual.Stroke.Fill->SolidColor, FString(TEXT("#009DFF")));
+	TestEqual(TEXT("Prompt card corner radius"), Prompt->Visual.CornerRadius.Uniform, 8.0f);
+	// Declared height is editor chrome state; the card always fits its content.
+	ExpectKeywordFallbackSize(*this, TEXT("Prompt card height"), Prompt->Transform.Height, EDesignSizeMode::FitContent);
+	TestTrue(TEXT("Prompt card keeps fill width"), Prompt->Transform.Width.IsFill());
+	TestEqual(TEXT("Prompt card has header/body/footer"), Prompt->Children.Num(), 3);
+
+	const TSharedPtr<FDesignNode>& Header = Prompt->Children[0];
+	TestEqual(TEXT("Header height"), Header->Transform.Height.Mode, EDesignSizeMode::Fixed);
+	TestEqual(TEXT("Header height value"), Header->Transform.Height.Value, 45.0f);
+	TestEqual(TEXT("Header fill"), Header->Visual.TopmostFill().SolidColor, FString(TEXT("#C3E8FF")));
+	TestEqual(TEXT("Header dash pattern"), Header->Visual.Stroke.DashPattern.Num(), 2);
+	const TSharedPtr<FDesignNode>& HeaderLabel = Header->Children[0];
+	TestEqual(TEXT("Header label text"), HeaderLabel->Text.Content, FString(TEXT("Prompt")));
+	TestEqual(TEXT("Header label color"), HeaderLabel->Visual.TopmostFill().SolidColor, FString(TEXT("#006CAF")));
+
+	const TSharedPtr<FDesignNode>& Body = Prompt->Children[1];
+	const TSharedPtr<FDesignNode>& ContentText = Body->Children[0];
+	TestEqual(TEXT("Sticky content preserved"), ContentText->Text.Content, FString(TEXT("Line one of the prompt.\nLine two of the prompt.")));
+	TestEqual(TEXT("Content text color"), ContentText->Visual.TopmostFill().SolidColor, FString(TEXT("#006CAF")));
+	TestEqual(TEXT("Content text growth"), ContentText->Text.TextGrowth, EDesignTextGrowth::FixedWidth);
+	TestEqual(TEXT("Content min height"), ContentText->Transform.Height.Value, 116.0f);
+
+	const TSharedPtr<FDesignNode>& Footer = Prompt->Children[2];
+	TestEqual(TEXT("Footer has spacer and copy button"), Footer->Children.Num(), 2);
+	const TSharedPtr<FDesignNode>& CopyButton = Footer->Children[1];
+	TestEqual(TEXT("Copy button fill"), CopyButton->Visual.TopmostFill().SolidColor, FString(TEXT("#006CAF")));
+	TestEqual(TEXT("Copy label text"), CopyButton->Children[0]->Text.Content, FString(TEXT("Copy")));
+	TestEqual(TEXT("Copy label color"), CopyButton->Children[0]->Visual.TopmostFill().SolidColor, FString(TEXT("#FFFFFF")));
+
+	const TSharedPtr<FDesignNode>& Note = Wrap->Children[1];
+	TestEqual(TEXT("Note becomes a card frame"), Note->Type, EDesignNodeType::Frame);
+	TestEqual(TEXT("Note card fill"), Note->Visual.TopmostFill().SolidColor, FString(TEXT("#FFF7E5")));
+	// Fixed widths below the sticky minimum are clamped up to it.
+	TestEqual(TEXT("Note card width mode"), Note->Transform.Width.Mode, EDesignSizeMode::Fixed);
+	TestEqual(TEXT("Note card clamped width"), Note->Transform.Width.Value, 250.0f);
+	TestEqual(TEXT("Note card has header/body only"), Note->Children.Num(), 2);
+	TestEqual(TEXT("Note content min height"), Note->Children[1]->Children[0]->Transform.Height.Value, 150.0f);
+
+	const TSharedPtr<FDesignNode>& Context = Wrap->Children[2];
+	TestEqual(TEXT("Context becomes a card frame"), Context->Type, EDesignNodeType::Frame);
+	TestEqual(TEXT("Context card fill"), Context->Visual.TopmostFill().SolidColor, FString(TEXT("#F0F0F0")));
+	TestEqual(TEXT("Context card outline"), Context->Visual.Stroke.Fill->SolidColor, FString(TEXT("#767676")));
+	TestEqual(TEXT("Context header fill"), Context->Children[0]->Visual.TopmostFill().SolidColor, FString(TEXT("#FFFFFF")));
+	TestEqual(TEXT("Context header label"), Context->Children[0]->Children[0]->Text.Content, FString(TEXT("Context")));
+	TestEqual(TEXT("Context label color"), Context->Children[0]->Children[0]->Visual.TopmostFill().SolidColor, FString(TEXT("#2C2C2C")));
+	TestTrue(TEXT("Context card keeps fill width"), Context->Transform.Width.IsFill());
+	TestEqual(TEXT("Context content min height"), Context->Children[1]->Children[0]->Transform.Height.Value, 150.0f);
+	TestEqual(TEXT("Context body text preserved"), Context->Children[1]->Children[0]->Text.Content, FString(TEXT("Context body text.")));
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

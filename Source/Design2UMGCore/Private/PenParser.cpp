@@ -492,6 +492,10 @@ TSharedPtr<FDesignNode> ParseNodeAtDepth(
 		Node->Visual.CornerRadius = ActiveResolver->ResolveCornerRadius(JsonObj->TryGetField(TEXT("cornerRadius")));
 
 	PenParserNodeExtensions::ParseNodeExtended(JsonObj, Node, *ActiveResolver);
+	if (Node->Type == EDesignNodeType::Note || Node->Type == EDesignNodeType::Context || Node->Type == EDesignNodeType::Prompt)
+	{
+		PenParserNodeExtensions::SynthesizeStickyCard(Node);
+	}
 
 	AppendParsedChildrenAtDepth(JsonObj->TryGetField(TEXT("children")), *ActiveResolver, Node->Children, ParseContext, Depth + 1);
 	PenParserNodeExtensions::FinalizePenPaddingRuntimeWrapPolicy(Node);
