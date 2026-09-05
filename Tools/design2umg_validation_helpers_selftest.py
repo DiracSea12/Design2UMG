@@ -828,7 +828,6 @@ def test_step_editor_isolation_runs_single_specs_in_dependency_order() -> None:
 
         original_writer = batch_verify.write_editor_driver_script
         original_runner = batch_verify.run_editor_driver
-        original_cleaner = verify.ensure_clean_editor
         try:
             def fake_writer(output_root: Path, spec_paths: list[Path], tag: str = "batch") -> Path:
                 assert_equal(len(spec_paths), 1)
@@ -849,7 +848,6 @@ def test_step_editor_isolation_runs_single_specs_in_dependency_order() -> None:
 
             batch_verify.write_editor_driver_script = fake_writer
             batch_verify.run_editor_driver = fake_runner
-            verify.ensure_clean_editor = lambda: None
             with redirect_stdout(StringIO()):
                 results = batch_verify.run_execution_steps(
                     [state],
@@ -863,7 +861,6 @@ def test_step_editor_isolation_runs_single_specs_in_dependency_order() -> None:
         finally:
             batch_verify.write_editor_driver_script = original_writer
             batch_verify.run_editor_driver = original_runner
-            verify.ensure_clean_editor = original_cleaner
 
         assert_equal(calls, ["automation_generate_spec.json", "automation_asset_spec.json"])
         assert_equal([item["spec_count"] for item in results], [1, 1])
@@ -880,7 +877,6 @@ def test_step_editor_isolation_uses_short_driver_script_names() -> None:
 
         original_writer = batch_verify.write_editor_driver_script
         original_runner = batch_verify.run_editor_driver
-        original_cleaner = verify.ensure_clean_editor
         try:
             def fake_writer(output_root: Path, spec_paths: list[Path], tag: str = "batch") -> Path:
                 driver_path = output_root / f"editor_driver_{tag}.py"
@@ -897,13 +893,11 @@ def test_step_editor_isolation_uses_short_driver_script_names() -> None:
 
             batch_verify.write_editor_driver_script = fake_writer
             batch_verify.run_editor_driver = fake_runner
-            verify.ensure_clean_editor = lambda: None
             with redirect_stdout(StringIO()):
                 batch_verify.run_execution_steps([state], root, "UnrealEditor.exe", "G:/SampleProject/SampleProject.uproject", 180, 60, "")
         finally:
             batch_verify.write_editor_driver_script = original_writer
             batch_verify.run_editor_driver = original_runner
-            verify.ensure_clean_editor = original_cleaner
 
         assert_equal([path.name for path in driver_paths], ["editor_driver_step-001.py", "editor_driver_step-002.py"])
         assert long_case_name not in " ".join(path.name for path in driver_paths)
@@ -918,7 +912,6 @@ def test_step_editor_isolation_retries_driver_start_once() -> None:
 
         original_writer = batch_verify.write_editor_driver_script
         original_runner = batch_verify.run_editor_driver
-        original_cleaner = verify.ensure_clean_editor
         original_attempts = batch_verify.EDITOR_STEP_DRIVER_START_ATTEMPTS
         try:
             def fake_writer(output_root: Path, spec_paths: list[Path], tag: str = "batch") -> Path:
@@ -941,14 +934,12 @@ def test_step_editor_isolation_retries_driver_start_once() -> None:
 
             batch_verify.write_editor_driver_script = fake_writer
             batch_verify.run_editor_driver = fake_runner
-            verify.ensure_clean_editor = lambda: None
             batch_verify.EDITOR_STEP_DRIVER_START_ATTEMPTS = 2
             with redirect_stdout(StringIO()):
                 batch_verify.run_execution_steps([state], root, "UnrealEditor.exe", "G:/SampleProject/SampleProject.uproject", 180, 60, "")
         finally:
             batch_verify.write_editor_driver_script = original_writer
             batch_verify.run_editor_driver = original_runner
-            verify.ensure_clean_editor = original_cleaner
             batch_verify.EDITOR_STEP_DRIVER_START_ATTEMPTS = original_attempts
 
         assert_equal(attempts, ["automation_generate_spec.json", "automation_generate_spec.json", "automation_asset_spec.json"])
@@ -1056,6 +1047,9 @@ def test_run_editor_driver_returns_after_clean_shutdown_result() -> None:
             def kill(self):
                 self.killed = True
 
+            def wait(self, timeout=None):
+                return 0
+
         fake_process = FakeProcess()
         original_popen = batch_verify.subprocess.Popen
         try:
@@ -1081,6 +1075,44 @@ def test_run_editor_driver_returns_after_clean_shutdown_result() -> None:
 
         assert_equal(exit_code, 0)
         assert fake_process.killed
+
+
+def test_terminate_owned_editor_process_targets_only_passed_process() -> None:
+    class FakeProcess:
+        def __init__(self, pid: int, wait_times_out: bool):
+            self.pid = pid
+            self.wait_times_out = wait_times_out
+            self.killed = False
+            self.wait_calls = 0
+
+        def kill(self):
+            self.killed = True
+
+        def wait(self, timeout=None):
+            self.wait_calls += 1
+            if self.wait_times_out and self.wait_calls == 1:
+                raise subprocess.TimeoutExpired("UnrealEditor.exe", timeout)
+            return 0
+
+    owned = FakeProcess(12345, wait_times_out=True)
+    unrelated = FakeProcess(54321, wait_times_out=False)
+    commands = []
+    original_run = verify.subprocess.run
+    try:
+        def fake_run(command, **kwargs):
+            commands.append(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        verify.subprocess.run = fake_run
+        verify.terminate_owned_editor_process(owned)
+    finally:
+        verify.subprocess.run = original_run
+
+    assert owned.killed
+    assert_equal(owned.wait_calls, 2)
+    assert not unrelated.killed
+    assert_equal(unrelated.wait_calls, 0)
+    assert_equal(commands, [["taskkill", "/F", "/PID", "12345"]])
 
 
 def test_extend_deadline_never_shortens_existing_wait() -> None:
@@ -1131,6 +1163,7 @@ def main() -> None:
     test_step_editor_isolation_blocks_asset_before_generation_result()
     test_step_editor_isolation_reports_driver_never_started()
     test_run_editor_driver_returns_after_clean_shutdown_result()
+    test_terminate_owned_editor_process_targets_only_passed_process()
     test_extend_deadline_never_shortens_existing_wait()
     test_runtime_project_fails_closed_without_explicit_input()
     print("validation helpers selftest passed")

@@ -651,7 +651,7 @@ def run_editor_driver(
                 last_progress_time = time.time()
                 observed_progress = True
             if current_result_count >= len(result_paths) and verify.log_indicates_clean_editor_shutdown(log_path):
-                process.kill()
+                verify.terminate_owned_editor_process(process)
                 return 0
 
             if editor_driver_started(driver_log_path):
@@ -668,7 +668,7 @@ def run_editor_driver(
                 observed_progress = True
 
             if not observed_progress and (time.time() - process_started_at > startup_timeout_sec):
-                process.kill()
+                verify.terminate_owned_editor_process(process)
                 raise TimeoutError(
                     f"Editor startup made no progress for {startup_timeout_sec}s. "
                     f"result_files={last_result_count}/{len(result_paths)} log={log_path}"
@@ -676,9 +676,9 @@ def run_editor_driver(
 
             if time.time() - last_progress_time > idle_timeout_sec:
                 if current_result_count >= len(result_paths) and verify.log_indicates_clean_editor_shutdown(log_path):
-                    process.kill()
+                    verify.terminate_owned_editor_process(process)
                     return 0
-                process.kill()
+                verify.terminate_owned_editor_process(process)
                 raise TimeoutError(
                     f"Editor made no progress for {idle_timeout_sec}s. "
                     f"result_files={last_result_count}/{len(result_paths)} log={log_path}"
@@ -830,7 +830,6 @@ def run_execution_cases(
             "result_paths": [step["result_json_path"] for step in state["steps"].values()],
         }
         print(f"[EDITOR_CASE] {case_name}", flush=True)
-        verify.ensure_clean_editor()
         result = run_execution_shard(
             case_shard,
             output_root,
@@ -897,7 +896,6 @@ def run_execution_steps(
             print(f"[EDITOR_STEP] {case_name}:{step_key} log={log_path}", flush=True)
             exit_code = 0
             for attempt in range(1, EDITOR_STEP_DRIVER_START_ATTEMPTS + 1):
-                verify.ensure_clean_editor()
                 try:
                     exit_code = run_editor_driver(
                         editor_path,
@@ -1041,7 +1039,6 @@ def rerun_missing_steps(
     retry_tag = "retry-missing"
     batch_log_path = output_root / "unreal_batch_retry_missing.log"
     driver_script_path = write_editor_driver_script(output_root, spec_paths, retry_tag)
-    verify.ensure_clean_editor()
     exit_code = run_editor_driver(
         editor_path,
         project_path,
@@ -1764,7 +1761,6 @@ def main():
     else:
         parallel_editors = execution_shards.resolve_parallel_editor_count(args.parallel_editors, len(states))
         shards = execution_shards.build_execution_shards(states, parallel_editors)
-        verify.ensure_clean_editor()
         shard_results = run_execution_shards(
             shards,
             output_root,

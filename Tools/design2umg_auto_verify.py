@@ -646,24 +646,6 @@ def seed_runtime_font_assets(project_path: str, source_paths: list[str]) -> dict
     return result
 
 
-def ensure_clean_editor():
-    # Only kill editors this automation launched: interactive user editors never
-    # carry the driver-script or test-exit command-line markers, so an
-    # image-wide taskkill would murder unrelated editor windows.
-    script = (
-        "Get-CimInstance Win32_Process -Filter \"Name='UnrealEditor.exe' OR Name='UnrealEditor-Cmd.exe'\" | "
-        "Where-Object { $_.CommandLine -like '*-ExecutePythonScript=*' -or $_.CommandLine -like '*-TestExit=*' } | "
-        "ForEach-Object { & taskkill /F /PID $_.ProcessId }"
-    )
-    subprocess.run(
-        ["powershell", "-NoProfile", "-Command", script],
-        check=False,
-        capture_output=True,
-        text=True,
-        errors="replace",
-    )
-
-
 def normalize_node_id(node_id: str) -> str:
     return node_id.replace("-", ":")
 
@@ -2610,7 +2592,8 @@ def build_visual_comparison(reference: Image.Image, candidate: Image.Image, pixe
     return comparison
 
 
-def terminate_editor_process(process: subprocess.Popen) -> None:
+def terminate_owned_editor_process(process: subprocess.Popen) -> None:
+    """Terminate the editor process created by this Python invocation."""
     process.kill()
     try:
         process.wait(timeout=10)
@@ -2680,7 +2663,7 @@ def run_editor(
                 observed_progress = True
 
             if not observed_progress and (time.time() - process_started_at > startup_timeout_sec):
-                terminate_editor_process(process)
+                terminate_owned_editor_process(process)
                 raise TimeoutError(
                     f"Editor startup made no progress for {startup_timeout_sec}s. "
                     f"result_file={'1/1' if result_seen else '0/1'} log={log_path}"
@@ -2688,9 +2671,9 @@ def run_editor(
 
             if time.time() - last_progress_time > idle_timeout_sec:
                 if result_seen and log_indicates_clean_editor_shutdown(log_path):
-                    terminate_editor_process(process)
+                    terminate_owned_editor_process(process)
                     return 0
-                terminate_editor_process(process)
+                terminate_owned_editor_process(process)
                 raise TimeoutError(
                     f"Editor made no progress for {idle_timeout_sec}s. "
                     f"result_file={'1/1' if result_seen else '0/1'} log={log_path}"
@@ -2904,7 +2887,6 @@ def execute_automation_render(args, spec_path: Path, log_path: Path, spec: dict)
     write_json(spec_path, spec)
     driver_script_path = write_single_editor_driver_script(spec_path.parent, spec_path)
     sync_project_plugin_build_id(args.editor, Path(args.project_plugin_root))
-    ensure_clean_editor()
     editor_exit_code = run_editor(
         args.editor,
         args.project,
