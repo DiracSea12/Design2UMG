@@ -187,23 +187,96 @@ namespace
 
 		const float PositiveSpread = FMath::Max(0.0f, Spread);
 		const float NegativeSpreadInset = FMath::Max(0.0f, -Spread);
-		const float ShadowTextureExtent = Blur + PositiveSpread;
-		const float ShapeWidth = FMath::Max(1.0f, Node->Transform.Width.Value - NegativeSpreadInset * 2.0f);
-		const float ShapeHeight = FMath::Max(1.0f, Node->Transform.Height.Value - NegativeSpreadInset * 2.0f);
+		// The precise layer geometry below is derived from the node's resolved
+		// size. Fixed sizes carry the authored extent and fit sizes carry the
+		// content estimate promoted by SizeEstimator — both usable. Fill sizes only
+		// carry their fallback/min hint (often 0), which is not the resolved
+		// wrapper extent: the wrapper is stretched at runtime, so an exact shadow
+		// texture cannot be pre-baked and the negative-padding rect would stretch a
+		// collapsed texture into a smeared ellipse. Fill-sized nodes keep the
+		// stretch-to-wrapper semantics instead: the shape fills the texture (no
+		// BlurPadding inset) and the layer simply tracks the wrapper rect.
+		auto HasUsableExtent = [](const FDesignSize& Size)
+		{
+			return !Size.IsFill() && Size.Value > 0.0f;
+		};
+		const bool bDeclaredShape = HasUsableExtent(Node->Transform.Width) && HasUsableExtent(Node->Transform.Height);
 		FUMGWidgetNode Shadow;
 		Shadow.Type = TEXT("Image");
 		const FString ShadowSuffix = BuildIndexedShadowSuffix(ShadowIndex);
 		Shadow.Id = SourceId + ShadowSuffix;
 		Shadow.Name = SourceName + ShadowSuffix;
 		Shadow.Brush.BrushColor = ShadowLayer.Color;
+		Shadow.Brush.MaterialRef = (Blur > 0.0f) ? TEXT("boxshadow") : MatRef_RoundedRect;
+		Shadow.Shadow.ShadowBlur = Blur;
 
-		// Shadow texture parameters.
+		if (bDeclaredShape)
+		{
+			// The gaussian kernel uses sigma = Blur * 0.5 with a 3-sigma radius, so the
+			// texture needs a 1.5 * Blur margin per side for the falloff to reach ~0.
+		const float BlurPaddingExtent = Blur * 1.5f;
+		// CSS shadow semantics: positive spread grows the shape around its center,
+		// negative spread shrinks it. The corner radius grows/shrinks with it.
+		const float ShapeWidth = FMath::Max(1.0f, Node->Transform.Width.Value - NegativeSpreadInset * 2.0f + PositiveSpread * 2.0f);
+		const float ShapeHeight = FMath::Max(1.0f, Node->Transform.Height.Value - NegativeSpreadInset * 2.0f + PositiveSpread * 2.0f);
+
+		// Shadow texture parameters: the shape sits centered inside the texture with
+		// a pure falloff margin, delivered through the "BlurPadding" material param.
+		const int32 TexW = RoundPositivePixelExtent(ShapeWidth + BlurPaddingExtent * 2.0f);
+		const int32 TexH = RoundPositivePixelExtent(ShapeHeight + BlurPaddingExtent * 2.0f);
+		Shadow.WidgetStyle.WidthOverride = TexW;
+		Shadow.WidgetStyle.HeightOverride = TexH;
+
+		// The centered shape (ShapeWidth x ShapeHeight) carries the radius; blur does
+		// not expand corners, spread does.
+		const float RadiusHalfMin = FMath::Min(ShapeWidth, ShapeHeight) * 0.5f;
+		auto NormalizeShadowRadius = [&](float SourceRadius)
+		{
+			const float EffectiveRadius = SourceRadius + PositiveSpread;
+			return (RadiusHalfMin > 0.0f) ? EffectiveRadius / RadiusHalfMin : 0.0f;
+		};
+		if (Node->Visual.CornerRadius.bUniform)
+		{
+			Shadow.Brush.MaterialParams = FString::Printf(
+				TEXT("{\"BlurPadding\":%.3f,\"Color\":\"%s\",\"CornerRadius\":%.3f}"),
+				BlurPaddingExtent,
+				*ShadowColor,
+				NormalizeShadowRadius(Node->Visual.CornerRadius.Uniform));
+		}
+		else
+		{
+			Shadow.Brush.MaterialParams = FString::Printf(
+				TEXT("{\"BlurPadding\":%.3f,\"Color\":\"%s\",\"CornerRadii\":[%.3f,%.3f,%.3f,%.3f]}"),
+				BlurPaddingExtent,
+				*ShadowColor,
+				NormalizeShadowRadius(Node->Visual.CornerRadius.TopLeft), NormalizeShadowRadius(Node->Visual.CornerRadius.TopRight),
+				NormalizeShadowRadius(Node->Visual.CornerRadius.BottomRight), NormalizeShadowRadius(Node->Visual.CornerRadius.BottomLeft));
+		}
+
+		// SOverlay clamps aligned (non-fill) children to the panel rect
+		// (AlignChild's bClampToParent), so a centered shadow image could never
+		// extend past the wrapper. A fill child with negative padding can: the
+		// fill branch has no clamp, and each -Extent margin side grows the
+		// allotted rect past the panel by that amount.
+		Shadow.Slot.Padding = FMargin(-BlurPaddingExtent);
+		// The padded fill rect is the texture rect centered on the wrapper; the
+		// shape is centered in the texture, so translating by the source offset
+		// lands the shape center exactly on (wrapper center + offset).
+		Shadow.Render.RenderTranslation = FVector2D(OffX, OffY);
+		}
+		else
+		{
+		// Stretch-to-wrapper fallback: the texture (and its shape) is stretched
+		// to the wrapper rect, so the shadow tracks whatever size the layout
+		// resolves. The blur falloff lives inside the texture and the layer is
+		// shifted so the shape edge sits at (wrapper edge + offset - extent).
+		const float ShadowTextureExtent = Blur + PositiveSpread;
+		const float ShapeWidth = FMath::Max(1.0f, Node->Transform.Width.Value - NegativeSpreadInset * 2.0f);
+		const float ShapeHeight = FMath::Max(1.0f, Node->Transform.Height.Value - NegativeSpreadInset * 2.0f);
 		const int32 TexW = RoundPositivePixelExtent(ShapeWidth + ShadowTextureExtent * 2.0f);
 		const int32 TexH = RoundPositivePixelExtent(ShapeHeight + ShadowTextureExtent * 2.0f);
 		Shadow.WidgetStyle.WidthOverride = TexW;
 		Shadow.WidgetStyle.HeightOverride = TexH;
-		Shadow.Brush.MaterialRef = (Blur > 0.0f) ? TEXT("boxshadow") : MatRef_RoundedRect;
-		Shadow.Shadow.ShadowBlur = Blur;
 
 		const float RadiusHalfMin = FMath::Min(TexW, TexH) * 0.5f;
 		auto NormalizeShadowRadius = [&](float SourceRadius)
@@ -227,11 +300,12 @@ namespace
 				NormalizeShadowRadius(Node->Visual.CornerRadius.BottomRight), NormalizeShadowRadius(Node->Visual.CornerRadius.BottomLeft));
 		}
 
-		Shadow.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
-		Shadow.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
 		Shadow.Render.RenderTranslation = FVector2D(
 			OffX - ShadowTextureExtent + NegativeSpreadInset,
 			OffY - ShadowTextureExtent + NegativeSpreadInset);
+		}
+		Shadow.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
+		Shadow.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
 		return Shadow;
 	}
 

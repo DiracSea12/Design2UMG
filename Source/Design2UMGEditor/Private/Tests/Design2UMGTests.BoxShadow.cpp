@@ -67,10 +67,12 @@ bool FBoxShadowBlurPaddingFidelityTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Box shadow remains a fill child"),
 		ShadowWidget->Slot.HorizontalAlignment == EUMGSlotHorizontalAlignment::Fill
 		&& ShadowWidget->Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Fill);
+	// The shape keeps the source size (spread is 0) and a 1.5*blur 3-sigma
+	// falloff margin is added per side: 40 + 24 = 64 wide, 24 + 24 = 48 tall.
 	TestTrue(TEXT("Box shadow width includes blur padding"),
-		FMath::IsNearlyEqual(FCString::Atof(*GetWidgetProperty(*ShadowWidget, TEXT("WidthOverride"))), 56.0f, 0.001f));
+		FMath::IsNearlyEqual(FCString::Atof(*GetWidgetProperty(*ShadowWidget, TEXT("WidthOverride"))), 64.0f, 0.001f));
 	TestTrue(TEXT("Box shadow height includes blur padding"),
-		FMath::IsNearlyEqual(FCString::Atof(*GetWidgetProperty(*ShadowWidget, TEXT("HeightOverride"))), 40.0f, 0.001f));
+		FMath::IsNearlyEqual(FCString::Atof(*GetWidgetProperty(*ShadowWidget, TEXT("HeightOverride"))), 48.0f, 0.001f));
 
 	UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(BuildProceduralRequestForTest(*this, *ShadowWidget),
 		GetTransientPackageAsObject());
@@ -83,7 +85,7 @@ bool FBoxShadowBlurPaddingFidelityTest::RunTest(const FString& Parameters)
 	FColor CornerPixel;
 	FColor CenterPixel;
 	TestTrue(TEXT("Box shadow corner pixel readable"), ReadTexturePixel(Texture, 0, 0, CornerPixel));
-	TestTrue(TEXT("Box shadow center pixel readable"), ReadTexturePixel(Texture, 28, 20, CenterPixel));
+	TestTrue(TEXT("Box shadow center pixel readable"), ReadTexturePixel(Texture, 32, 24, CenterPixel));
 
 	TestTrue(TEXT("Blur padding corner stays substantially softer than the core"), CornerPixel.A * 4 < CenterPixel.A);
 	TestTrue(TEXT("Shadow core stays opaque"), CenterPixel.A > 200);
@@ -179,7 +181,7 @@ bool FBoxShadowNegativeSpreadFidelityTest::RunTest(const FString& Parameters)
 		FMath::IsNearlyEqual(FCString::Atof(*GetWidgetProperty(*ShadowWidget, TEXT("HeightOverride"))), 28.0f, 0.001f));
 	TestTrue(TEXT("Negative spread keeps its source translation"),
 		ShadowWidget->Render.RenderTranslation.IsSet()
-		&& ShadowWidget->Render.RenderTranslation.GetValue().Equals(FVector2D(6.0f, 6.0f), 0.001f));
+		&& ShadowWidget->Render.RenderTranslation.GetValue().Equals(FVector2D(0.0f, 0.0f), 0.001f));
 
 	UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(BuildProceduralRequestForTest(*this, *ShadowWidget),
 		GetTransientPackageAsObject());

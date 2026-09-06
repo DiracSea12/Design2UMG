@@ -36,8 +36,10 @@ bool FVisualMapperBoxShadowTextureExtentClampTest::RunTest(const FString& Parame
 		return false;
 	}
 	TestEqual(TEXT("Unclipped shadow stays in the overlay layout contract"), NormalWrapped.Children[0].Type, FString(TEXT("Image")));
-	TestEqual(TEXT("Normal finite width keeps the rounded result"), NormalWrapped.Children[0].WidgetStyle.WidthOverride.Get(0), 20.0f);
-	TestEqual(TEXT("Normal finite height keeps the rounded result"), NormalWrapped.Children[0].WidgetStyle.HeightOverride.Get(0), 30.0f);
+	// Shape grows by spread on both sides (10 + 2*3), then a 3-sigma falloff margin
+	// (1.5 * 2 * 2) is added per side: 16 + 6 = 22 wide, 26 + 6 = 32 tall.
+	TestEqual(TEXT("Normal finite width keeps the rounded result"), NormalWrapped.Children[0].WidgetStyle.WidthOverride.Get(0), 22.0f);
+	TestEqual(TEXT("Normal finite height keeps the rounded result"), NormalWrapped.Children[0].WidgetStyle.HeightOverride.Get(0), 32.0f);
 
 	FUMGWidgetNode HugeWidget;
 	HugeWidget.Type = TEXT("Image");
@@ -104,15 +106,18 @@ bool FVisualMapperBoxShadowRenderOwnershipTest::RunTest(const FString& Parameter
 	TestTrue(TEXT("Shadow image retains the source brush colour"),
 		Shadow.Brush.BrushColor.IsSet()
 		&& Shadow.Brush.BrushColor.GetValue().Equals(FLinearColor::Black));
-	TestTrue(TEXT("Shadow remains a fill child and keeps its render offset"),
+	TestTrue(TEXT("Shadow fills with negative padding so it can extend past the wrapper, and keeps the raw source offset"),
 		Shadow.Slot.HorizontalAlignment == EUMGSlotHorizontalAlignment::Fill
-		&& Shadow.Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Fill
-		&& Shadow.Render.RenderTranslation.IsSet()
-		&& Shadow.Render.RenderTranslation.GetValue().Equals(FVector2D(-25.0f, -34.0f), 0.001f));
+			&& Shadow.Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Fill
+			&& Shadow.Slot.Padding == FMargin(-48.0f)
+			&& Shadow.Render.RenderTranslation.IsSet()
+			&& Shadow.Render.RenderTranslation.GetValue().Equals(FVector2D(4.0f, -5.0f), 0.001f));
 	TestEqual(TEXT("Source clipping moves to the layout wrapper"),
 		Wrapped.Render.Clipping.Get(FString()), FString(TEXT("ClipToBounds")));
-	TestTrue(TEXT("Non-uniform corners normalize against the shadow texture half-min"),
-		Shadow.Brush.MaterialParams.Get(FString()).Contains(TEXT("\"CornerRadii\":[0.580,0.638,0.696,0.754]")));
+	TestTrue(TEXT("Shadow texture carries the 3-sigma blur padding"),
+		Shadow.Brush.MaterialParams.Get(FString()).Contains(TEXT("\"BlurPadding\":48.000")));
+	TestTrue(TEXT("Non-uniform corners normalize against the spread-grown shape half-min"),
+		Shadow.Brush.MaterialParams.Get(FString()).Contains(TEXT("\"CornerRadii\":[0.216,0.324,0.432,0.541]")));
 
 	const FUMGWidgetNode& Content = Wrapped.Children[1];
 	TestTrue(TEXT("Content remains a fill child of the layout wrapper"),
@@ -132,8 +137,194 @@ bool FVisualMapperBoxShadowRenderOwnershipTest::RunTest(const FString& Parameter
 	UniformWidget.Id = TEXT("uniform_shadow_geometry_source");
 	UniformWidget.Name = TEXT("Uniform Shadow Geometry Source");
 	const FUMGWidgetNode UniformWrapped = VisualMapper::WrapWithBoxShadow(MoveTemp(UniformWidget), UniformNode, TArray<FUMGBoxShadowLayerData>{ ShadowLayer });
-	TestTrue(TEXT("Uniform corner radius normalizes against the shadow texture half-min"),
-		UniformWrapped.Children[0].Brush.MaterialParams.Get(FString()).Contains(TEXT("\"CornerRadius\":0.609")));
+	TestTrue(TEXT("Uniform corner radius normalizes against the spread-grown shape half-min"),
+		UniformWrapped.Children[0].Brush.MaterialParams.Get(FString()).Contains(TEXT("\"CornerRadius\":0.270")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperBoxShadowDesiredSizeContractTest,
+	"Design2UMG.VisualMapper.BoxShadowDesiredSizeContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperBoxShadowDesiredSizeContractTest::RunTest(const FString& Parameters)
+{
+	// Geometry contract of the shadow layer: the falloff must be able to extend
+	// beyond the wrapper, so the texture is bigger than the source shape and the
+	// slot stays Fill with negative margins — SOverlay clamps aligned children
+	// to the panel rect, so only the fill branch's unclamped negative-padding
+	// rect lets the image extend past the wrapper.
+	TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Rectangle, 139.0f, 39.0f);
+	Node->Visual.CornerRadius.bUniform = true;
+	Node->Visual.CornerRadius.Uniform = 12.0f;
+
+	FUMGWidgetNode Widget;
+	Widget.Type = TEXT("Image");
+	Widget.Id = TEXT("neumorphic_source");
+	Widget.Name = TEXT("NeumorphicSource");
+
+	FUMGBoxShadowLayerData ShadowLayer;
+	ShadowLayer.Color = FLinearColor::Gray;
+	ShadowLayer.Offset = FVector2D(5.0f, 5.0f);
+	ShadowLayer.Blur = 10.0f;
+	ShadowLayer.Spread = 5.0f;
+	const FUMGWidgetNode Wrapped = VisualMapper::WrapWithBoxShadow(MoveTemp(Widget), Node, TArray<FUMGBoxShadowLayerData>{ ShadowLayer });
+
+	TestEqual(TEXT("Neumorphic-style shadow has one overlay wrapper"), Wrapped.Children.Num(), 2);
+	if (Wrapped.Children.Num() != 2)
+	{
+		return false;
+	}
+
+	const FUMGWidgetNode& Shadow = Wrapped.Children[0];
+	// Shape grows by spread (139 + 10, 39 + 10), plus a 3-sigma falloff margin
+	// (1.5 * 10 * 2) per side: 149 + 30 = 179 wide, 49 + 30 = 79 tall.
+	TestEqual(TEXT("Shadow texture covers shape plus falloff on both axes"),
+		Shadow.WidgetStyle.WidthOverride.Get(0), 179.0f);
+	TestEqual(TEXT("Shadow texture height covers shape plus falloff"),
+		Shadow.WidgetStyle.HeightOverride.Get(0), 79.0f);
+	// The slot stays Fill but carries a negative padding: SOverlay clamps
+	// aligned children to the panel rect (AlignChild bClampToParent), so a
+	// centered image could never be larger than the wrapper. The fill branch
+	// has no clamp — the -15 margins grow the allotted rect to 179x79 centered
+	// on the 139x39 wrapper, letting the falloff render outside it.
+	TestTrue(TEXT("Shadow slot fills with negative blur-padding margins"),
+		Shadow.Slot.HorizontalAlignment == EUMGSlotHorizontalAlignment::Fill
+			&& Shadow.Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Fill
+			&& Shadow.Slot.Padding == FMargin(-15.0f));
+	// Translation is the raw source offset: the padded fill rect already
+	// centers the texture on the wrapper, so only the offset remains.
+	TestTrue(TEXT("Shadow translation carries the raw offset"),
+		Shadow.Render.RenderTranslation.IsSet()
+		&& Shadow.Render.RenderTranslation.GetValue().Equals(FVector2D(5.0f, 5.0f), 0.001f));
+	// The falloff margin travels inside the brush params so the generator can
+	// inset the shape by exactly that amount.
+	TestTrue(TEXT("Blur padding rides along in the material params"),
+		Shadow.Brush.MaterialParams.Get(FString()).Contains(TEXT("\"BlurPadding\":15.000")));
+	// Corner radius grows with spread, normalized against the shape half-min
+	// ((12 + 5) / (49 * 0.5)).
+	TestTrue(TEXT("Corner radius grows with spread"),
+		Shadow.Brush.MaterialParams.Get(FString()).Contains(TEXT("\"CornerRadius\":0.694")));
+
+	// A pure offset shadow (no blur, no spread) keeps the exact source size and
+	// a zero blur padding, so the generator draws a hard shape.
+	FUMGBoxShadowLayerData HardShadow;
+	HardShadow.Color = FLinearColor::Black;
+	HardShadow.Offset = FVector2D(-5.0f, -5.0f);
+	FUMGWidgetNode HardWidget;
+	HardWidget.Type = TEXT("Image");
+	HardWidget.Id = TEXT("hard_shadow_source");
+	HardWidget.Name = TEXT("Hard Shadow Source");
+	const FUMGWidgetNode HardWrapped = VisualMapper::WrapWithBoxShadow(MoveTemp(HardWidget), Node, TArray<FUMGBoxShadowLayerData>{ HardShadow });
+	TestEqual(TEXT("Hard shadow keeps the source width"),
+		HardWrapped.Children[0].WidgetStyle.WidthOverride.Get(0), 139.0f);
+	TestEqual(TEXT("Hard shadow keeps the source height"),
+		HardWrapped.Children[0].WidgetStyle.HeightOverride.Get(0), 39.0f);
+	TestTrue(TEXT("Hard shadow pads with zero"),
+		HardWrapped.Children[0].Brush.MaterialParams.Get(FString()).Contains(TEXT("\"BlurPadding\":0.000")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperBoxShadowAutoSizeStretchContractTest,
+	"Design2UMG.VisualMapper.BoxShadowAutoSizeStretchContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperBoxShadowAutoSizeStretchContractTest::RunTest(const FString& Parameters)
+{
+	// Fill/Fit sizing declares no extent: the wrapper is stretched at runtime,
+	// so an exact shadow texture cannot be pre-baked (the declared value is 0
+	// and the shape would collapse to a pixel, stretching into a smear). Those
+	// nodes keep the stretch-to-wrapper layer: no BlurPadding inset (the shape
+	// fills the texture), no negative margins, and the legacy translation.
+	TSharedPtr<FDesignNode> Node = Design2UMGCoreTests::MakeNode(
+		FString(), EDesignNodeType::Frame, FDesignSize::Fill(), FDesignSize::Fit());
+	Node->Visual.CornerRadius.bUniform = true;
+	Node->Visual.CornerRadius.Uniform = 20.0f;
+
+	FUMGWidgetNode Widget;
+	Widget.Type = TEXT("Image");
+	Widget.Id = TEXT("fill_card_source");
+	Widget.Name = TEXT("FillCardSource");
+
+	FUMGBoxShadowLayerData ShadowLayer;
+	ShadowLayer.Color = FLinearColor::Black;
+	ShadowLayer.Offset = FVector2D(0.0f, 4.0f);
+	ShadowLayer.Blur = 12.0f;
+	const FUMGWidgetNode Wrapped = VisualMapper::WrapWithBoxShadow(MoveTemp(Widget), Node, TArray<FUMGBoxShadowLayerData>{ ShadowLayer });
+
+	TestEqual(TEXT("Auto-size shadow keeps the overlay wrapper"), Wrapped.Children.Num(), 2);
+	if (Wrapped.Children.Num() != 2)
+	{
+		return false;
+	}
+
+	const FUMGWidgetNode& Shadow = Wrapped.Children[0];
+	// Collapsed declared shape (1x1) plus the legacy blur extent (12 * 2):
+	// the texture is a placeholder that stretches to the wrapper rect.
+	TestEqual(TEXT("Auto-size shadow texture uses the legacy extent width"),
+		Shadow.WidgetStyle.WidthOverride.Get(0), 25.0f);
+	TestEqual(TEXT("Auto-size shadow texture uses the legacy extent height"),
+		Shadow.WidgetStyle.HeightOverride.Get(0), 25.0f);
+	TestTrue(TEXT("Auto-size shadow fills without negative margins"),
+		Shadow.Slot.HorizontalAlignment == EUMGSlotHorizontalAlignment::Fill
+			&& Shadow.Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Fill
+			&& Shadow.Slot.Padding == FMargin(0.0f));
+	TestTrue(TEXT("Auto-size shadow keeps the legacy extent translation"),
+		Shadow.Render.RenderTranslation.IsSet()
+			&& Shadow.Render.RenderTranslation.GetValue().Equals(FVector2D(-12.0f, -8.0f), 0.001f));
+	// No BlurPadding key: the generator stretches the shape across the whole
+	// texture so the shadow tracks the wrapper.
+	TestFalse(TEXT("Auto-size shadow omits the blur padding inset"),
+		Shadow.Brush.MaterialParams.Get(FString()).Contains(TEXT("BlurPadding")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperBoxShadowFitEstimatePreciseContractTest,
+	"Design2UMG.VisualMapper.BoxShadowFitEstimatePreciseContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperBoxShadowFitEstimatePreciseContractTest::RunTest(const FString& Parameters)
+{
+	// Fit sizes whose Value was promoted by SizeEstimator carry the resolved
+	// content estimate (neumorphic's root lands here as Fit(139 x 39)), so they
+	// must take the precise geometry — gating on IsFixed() alone regressed that
+	// case back to baseline. The layer contract must match the Fixed path
+	// exactly: same texture, BlurPadding inset, negative margins and raw offset.
+	TSharedPtr<FDesignNode> Node = Design2UMGCoreTests::MakeNode(
+		FString(), EDesignNodeType::Rectangle, FDesignSize::Fit(139.0f), FDesignSize::Fit(39.0f));
+	Node->Visual.CornerRadius.bUniform = true;
+	Node->Visual.CornerRadius.Uniform = 12.0f;
+
+	FUMGWidgetNode Widget;
+	Widget.Type = TEXT("Image");
+	Widget.Id = TEXT("fit_estimate_source");
+	Widget.Name = TEXT("FitEstimateSource");
+
+	FUMGBoxShadowLayerData ShadowLayer;
+	ShadowLayer.Color = FLinearColor::Gray;
+	ShadowLayer.Offset = FVector2D(5.0f, 5.0f);
+	ShadowLayer.Blur = 10.0f;
+	ShadowLayer.Spread = 5.0f;
+	const FUMGWidgetNode Wrapped = VisualMapper::WrapWithBoxShadow(MoveTemp(Widget), Node, TArray<FUMGBoxShadowLayerData>{ ShadowLayer });
+
+	TestEqual(TEXT("Fit-estimate shadow keeps the overlay wrapper"), Wrapped.Children.Num(), 2);
+	if (Wrapped.Children.Num() != 2)
+	{
+		return false;
+	}
+
+	const FUMGWidgetNode& Shadow = Wrapped.Children[0];
+	// Identical to the Fixed-path numbers: shape 139 + 2*5 spread + 2*15 falloff
+	// = 179 wide, 39 + 10 + 30 = 79 tall.
+	TestEqual(TEXT("Fit-estimate shadow texture matches the precise path width"),
+		Shadow.WidgetStyle.WidthOverride.Get(0), 179.0f);
+	TestEqual(TEXT("Fit-estimate shadow texture matches the precise path height"),
+		Shadow.WidgetStyle.HeightOverride.Get(0), 79.0f);
+	TestTrue(TEXT("Fit-estimate shadow pads with negative falloff margins"),
+		Shadow.Slot.Padding == FMargin(-15.0f));
+	TestTrue(TEXT("Fit-estimate shadow translation carries the raw offset"),
+		Shadow.Render.RenderTranslation.IsSet()
+			&& Shadow.Render.RenderTranslation.GetValue().Equals(FVector2D(5.0f, 5.0f), 0.001f));
+	TestTrue(TEXT("Fit-estimate shadow carries the blur padding inset"),
+		Shadow.Brush.MaterialParams.Get(FString()).Contains(TEXT("\"BlurPadding\":15.000")));
+	TestTrue(TEXT("Fit-estimate corner radius matches the precise path"),
+		Shadow.Brush.MaterialParams.Get(FString()).Contains(TEXT("\"CornerRadius\":0.694")));
 	return true;
 }
 
