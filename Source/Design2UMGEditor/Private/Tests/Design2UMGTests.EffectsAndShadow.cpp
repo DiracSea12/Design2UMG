@@ -421,7 +421,10 @@ bool FFigmaDropShadowConvertsToBoxShadowWrapperTest::RunTest(const FString& Para
 		Shadow.Slot.HorizontalAlignment == EUMGSlotHorizontalAlignment::Fill
 		&& Shadow.Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Fill
 		&& Shadow.Render.RenderTranslation.IsSet()
-		&& Shadow.Render.RenderTranslation.GetValue().Equals(FVector2D(-6.0f, -8.0f), 0.001f));
+		// Declared-size shapes (3aa91b6) center the shadow texture on the wrapper
+		// via a negative-padding fill slot, so the translation is the raw source
+		// offset rather than the old extent-compensated value.
+		&& Shadow.Render.RenderTranslation.GetValue().Equals(FVector2D(6.0f, 4.0f), 0.001f));
 	TestEqual(TEXT("Figma outer shadow wrapper owns source clipping"),
 		Data.RootWidget.Render.Clipping.Get(FString()), TEXT("ClipToBounds"));
 	TestTrue(TEXT("Figma outer shadow content remains a fill child"),

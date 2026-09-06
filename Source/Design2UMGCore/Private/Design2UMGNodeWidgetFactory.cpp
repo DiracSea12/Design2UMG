@@ -220,16 +220,24 @@ namespace
 		Widget.Type = DesignTypeMapper::MapNodeTypeToWidget(Node->Type, Node->LayoutData.Layout);
 		if (Node.IsValid())
 		{
-			if (Node->LayoutData.Overflow == EDesignOverflow::VerticalScrolling)
+			if (Node->LayoutData.Overflow == EDesignOverflow::VerticalScrolling
+				|| Node->LayoutData.Overflow == EDesignOverflow::HorizontalScrolling)
 			{
+				// Figma's overflowDirection only marks which axis may scroll; an
+				// explicit auto-layout axis still owns child stacking, and the two
+				// can disagree in source data (e.g. a VERTICAL stack carrying
+				// HORIZONTAL_SCROLLING). Figma renders children stacked along the
+				// layout axis, so the ScrollBox stacking axis follows the explicit
+				// layout axis and falls back to the overflow axis only when the
+				// layout has no single stacking axis (None/Wrap/Grid).
+				const bool bHasExplicitLayoutAxis =
+					Node->LayoutData.Layout == EDesignLayout::Vertical
+					|| Node->LayoutData.Layout == EDesignLayout::Horizontal;
+				const bool bStacksVertically = bHasExplicitLayoutAxis
+					? Node->LayoutData.Layout == EDesignLayout::Vertical
+					: Node->LayoutData.Overflow == EDesignOverflow::VerticalScrolling;
 				Widget.Type = TEXT("ScrollBox");
-				Widget.ScrollBox.Orientation = TEXT("Vertical");
-				Widget.ScrollBox.ScrollBarVisibility = TEXT("Hidden");
-			}
-			else if (Node->LayoutData.Overflow == EDesignOverflow::HorizontalScrolling)
-			{
-				Widget.Type = TEXT("ScrollBox");
-				Widget.ScrollBox.Orientation = TEXT("Horizontal");
+				Widget.ScrollBox.Orientation = bStacksVertically ? TEXT("Vertical") : TEXT("Horizontal");
 				Widget.ScrollBox.ScrollBarVisibility = TEXT("Hidden");
 			}
 		}

@@ -7,6 +7,7 @@
 #include "DesignReferenceExpansion.h"
 #include "DesignTreeLimits.h"
 #include "DesignSchema.h"
+#include "Design2UMGConverter.h"
 #include "SizeEstimator.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
@@ -790,6 +791,98 @@ bool FFigmaParserExplicitGeometryMaskTest::RunTest(const FString&)
 	TestTrue(TEXT("Rounded rectangle radius preserved"),
 		FMath::IsNearlyEqual(Doc.Children[1]->Visual.GeometryMask.CornerRadius.Uniform, 12.0f));
 	TestEqual(TEXT("Mismatched mask is not approximated"), Doc.Children[2]->Visual.GeometryMask.Shape, EDesignGeometryMaskShape::None);
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Scroll container stacking axis: explicit auto-layout axis wins over overflow axis
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FFigmaScrollAxisLayoutWinsOverOverflowTest,
+	"Design2UMG.Unit.FigmaParser.ScrollAxisLayoutWinsOverOverflow",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFigmaScrollAxisLayoutWinsOverOverflowTest::RunTest(const FString&)
+{
+	const auto MakeFrameJson = [](bool bHasLayoutMode, const TCHAR* LayoutMode, const TCHAR* OverflowDirection) -> FString
+	{
+		FString LayoutField;
+		if (bHasLayoutMode)
+		{
+			LayoutField = FString::Printf(TEXT(",\"layoutMode\":\"%s\",\"itemSpacing\":12"), LayoutMode);
+		}
+		return FString::Printf(TEXT(R"({
+		"document": {"type": "DOCUMENT", "children": [{"type": "CANVAS", "children": [{
+			"id": "scroll-frame", "name": "Scroll Frame", "type": "FRAME", "clipsContent": true%s,
+			"overflowDirection": "%s",
+			"absoluteBoundingBox": {"x": 0, "y": 0, "width": 360, "height": 800},
+			"children": [
+				{"id": "c1", "name": "Card 1", "type": "FRAME",
+				 "absoluteBoundingBox": {"x": 0, "y": 0, "width": 328, "height": 378},
+				 "fills": [{"type": "SOLID", "color": {"r": 0, "g": 1, "b": 0, "a": 1}}]},
+				{"id": "c2", "name": "Card 2", "type": "FRAME",
+				 "absoluteBoundingBox": {"x": 0, "y": 390, "width": 328, "height": 378},
+				 "fills": [{"type": "SOLID", "color": {"r": 0, "g": 0, "b": 1, "a": 1}}]}
+			]
+		}]}]}
+	})"), *LayoutField, OverflowDirection);
+	};
+
+	struct FCase { bool bHasLayoutMode; const TCHAR* LayoutMode; const TCHAR* Overflow; const TCHAR* ExpectedOrientation; };
+	const FCase Cases[] = {
+		// Authored VERTICAL stack carrying a HORIZONTAL_SCROLLING overflow: children
+		// must keep stacking vertically (Figma renders the layout axis).
+		{true, TEXT("VERTICAL"), TEXT("HORIZONTAL_SCROLLING"), TEXT("Vertical")},
+		// Authored HORIZONTAL stack carrying a VERTICAL_SCROLLING overflow.
+		{true, TEXT("HORIZONTAL"), TEXT("VERTICAL_SCROLLING"), TEXT("Horizontal")},
+		// Agreeing axes stay unchanged.
+		{true, TEXT("VERTICAL"), TEXT("VERTICAL_SCROLLING"), TEXT("Vertical")},
+		{true, TEXT("HORIZONTAL"), TEXT("HORIZONTAL_SCROLLING"), TEXT("Horizontal")},
+		// Absolute (no auto-layout) containers keep following the overflow axis.
+		{false, nullptr, TEXT("HORIZONTAL_SCROLLING"), TEXT("Horizontal")},
+		{false, nullptr, TEXT("VERTICAL_SCROLLING"), TEXT("Vertical")},
+	};
+
+	for (const FCase& Case : Cases)
+	{
+		FDesignDocument Doc;
+		if (!TestTrue(TEXT("Scroll-axis fixture parses"),
+				FFigmaParser::ParseDocument(MakeFrameJson(Case.bHasLayoutMode, Case.LayoutMode, Case.Overflow), Doc))
+			|| Doc.Children.Num() != 1)
+		{
+			return false;
+		}
+		const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
+
+		const FUMGWidgetNode* ScrollBox = nullptr;
+		const auto Search = [&ScrollBox](const FUMGWidgetNode& Node, auto&& Self) -> void
+		{
+			if (ScrollBox)
+			{
+				return;
+			}
+			if (Node.Type == TEXT("ScrollBox"))
+			{
+				ScrollBox = &Node;
+				return;
+			}
+			for (const FUMGWidgetNode& Child : Node.Children)
+			{
+				Self(Child, Self);
+			}
+		};
+		Search(Data.RootWidget, Search);
+
+		const FString Label = FString::Printf(TEXT("layout=%s overflow=%s -> ScrollBox found"),
+			Case.bHasLayoutMode ? Case.LayoutMode : TEXT("none"), Case.Overflow);
+		if (!TestNotNull(Label, ScrollBox))
+		{
+			return false;
+		}
+		const FString OrientationLabel = FString::Printf(TEXT("layout=%s overflow=%s -> orientation"),
+			Case.bHasLayoutMode ? Case.LayoutMode : TEXT("none"), Case.Overflow);
+		TestEqual(OrientationLabel, ScrollBox->ScrollBox.Orientation.Get(FString()), FString(Case.ExpectedOrientation));
+	}
 	return true;
 }
 
