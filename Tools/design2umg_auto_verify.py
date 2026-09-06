@@ -1629,6 +1629,65 @@ def try_get_pen_node_name(source_path: str, node_id: str) -> str:
     return str(node.get("name") or "")
 
 
+def _pen_root_export_offset_from_node(node: dict) -> tuple[float, float] | None:
+    """Pencil's node-export canvas unions the node box with every outer shadow
+    box (node box expanded by spread + 1.5*blur per side, translated by the
+    shadow offset; 1.5*blur is the 3-sigma falloff band). Returns the node box
+    origin inside that export canvas, or None when no outer shadow extends it.
+
+    Mirrors the C++ schema reading in PenParserNodeExtensions (the schema
+    interpretation source of truth) for its JSON-native subset only: the
+    effect list lives under "effect" or "effects" (effect wins when both
+    exist), disabled effects are skipped, inner shadows (shadowType ==
+    "inner", or inner == true when shadowType is absent) do not extend the
+    union box, and the offset is read from the {x, y} object or the flat
+    offsetX/offsetY fields. The C++ string-boolean coercion and
+    variable-reference resolution are not mirrored here — only those native
+    JSON shapes."""
+    raw_effects = node["effect"] if "effect" in node else node.get("effects")
+    effects = raw_effects if isinstance(raw_effects, list) else (
+        [raw_effects] if isinstance(raw_effects, dict) else []
+    )
+    left = top = 0.0
+    for entry in effects:
+        if not isinstance(entry, dict) or entry.get("type") != "shadow":
+            continue
+        if entry.get("enabled") is False:
+            continue
+        shadow_type = entry.get("shadowType")
+        if shadow_type == "inner" or (shadow_type is None and entry.get("inner") is True):
+            continue
+        try:
+            blur = float(entry.get("blur") or 0)
+            spread = float(entry.get("spread") or 0)
+            offset = entry.get("offset")
+            if isinstance(offset, dict):
+                offset_x = float(offset.get("x") or 0)
+                offset_y = float(offset.get("y") or 0)
+            else:
+                offset_x = float(entry.get("offsetX") or 0)
+                offset_y = float(entry.get("offsetY") or 0)
+        except (TypeError, ValueError):
+            continue
+        half_extent = spread + 1.5 * blur
+        left = min(left, offset_x - half_extent)
+        top = min(top, offset_y - half_extent)
+    if left == 0.0 and top == 0.0:
+        return None
+    return (-left, -top)
+
+
+def compute_pen_root_export_offset(source_path: str, node_id: str) -> tuple[float, float] | None:
+    try:
+        document = load_json_document(Path(source_path))
+        node = find_node_by_id(document.get("children", []), node_id)
+    except EvidenceReadError:
+        return None
+    if not isinstance(node, dict):
+        return None
+    return _pen_root_export_offset_from_node(node)
+
+
 def normalize_structure_text(value: str) -> str:
     if not isinstance(value, str):
         return ""

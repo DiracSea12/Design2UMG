@@ -3,6 +3,7 @@
 #include "PenParserInternal.h"
 #include "DesignSchema.h"
 #include "DesignVariableResolver.h"
+#include "DesignColorUtils.h"
 #include "Dom/JsonValue.h"
 #include "Dom/JsonObject.h"
 #include "ParserSharedSemantics.h"
@@ -360,10 +361,30 @@ FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariable
 			return Result;
 		if (TryParseCssGradientString(Str, Resolver, Result))
 			return Result;
+		// Pencil drops a paint whose value it cannot resolve (e.g. an escaped
+		// literal like "\$token" that is plain text, not a variable ref) instead
+		// of painting it: the node renders with no fill and stays transparent.
+		// Hex-prefixed literals (well-formed or not) and unresolved variable
+		// refs keep the legacy pass-through so the renderer's fallback stays
+		// authoritative for them.
+		// Scope: this drop rule covers the string form only. The object form's
+		// "color" field keeps the legacy resolve pass-through; the live .pen
+		// corpus has no instance of an unresolvable object-form color (every
+		// occurrence is enabled:false with a legal value), so Pencil's actual
+		// behavior there is unverified — measure a real instance before
+		// extending the drop rule to it.
+		const FString Resolved = Resolver.ResolveColor(Str);
+		const bool bIsVariableRef = FDesignVariableResolver::IsVariableRef(Str);
+		if (!Resolved.StartsWith(TEXT("#"))
+			&& !bIsVariableRef
+			&& !DesignColorUtils::IsRenderableNamedColor(Resolved))
+		{
+			return Result;
+		}
 		Result.Type = EDesignFillType::Color;
-		if (FDesignVariableResolver::IsVariableRef(Str))
+		if (bIsVariableRef)
 			Result.SourceVar = Str;
-		Result.SolidColor = Resolver.ResolveColor(Str);
+		Result.SolidColor = Resolved;
 		return Result;
 	}
 

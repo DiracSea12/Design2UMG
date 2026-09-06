@@ -417,7 +417,7 @@ void FUMGWidgetUtils::DumpTextBlockFontStates(
 	});
 }
 
-bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8>& OutPngData, FIntPoint& OutSize, FString* OutError, const TOptional<FIntPoint>& RenderSizeOverride)
+bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8>& OutPngData, FIntPoint& OutSize, FString* OutError, const TOptional<FVector2D>& RenderSizeOverride, const TOptional<FVector2D>& RootExportOffset)
 {
 	if (OutError)
 	{
@@ -465,7 +465,9 @@ bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8
 
 	// Canvas calibration: an explicit override pins the virtual window/RT extent;
 	// the widget tree keeps laying out against its own geometry.
-	const FIntPoint SlateRenderSize = RenderSizeOverride.IsSet() ? RenderSizeOverride.GetValue() : LayoutPixelSize;
+	const FIntPoint SlateRenderSize = RenderSizeOverride.IsSet()
+		? FIntPoint(FMath::RoundToInt(RenderSizeOverride.GetValue().X), FMath::RoundToInt(RenderSizeOverride.GetValue().Y))
+		: LayoutPixelSize;
 	if (!IsValidRenderSize(SlateRenderSize))
 	{
 		UE_LOG(LogDesign2UMG, Warning,
@@ -491,8 +493,11 @@ bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8
 	// paints the root fill only inside the node bounds and leaves the rest of
 	// the canvas transparent, so an overflow axis must not stretch the root
 	// widget (and its background brush) across the whole canvas:
-	// - both axes overflow (e.g. symmetric shadow padding): pin the root to
-	//   its design-time extent and center it, mirroring how Pencil composes
+	// - a source-derived root export offset (node box position inside Pencil's
+	//   node-export canvas: node box united with its outer shadows) pins the
+	//   root exactly there, including asymmetric shadow offsets;
+	// - both axes overflow without an offset (symmetric padding): pin the root
+	//   to its design-time extent and center it, mirroring how Pencil composes
 	//   the content union box;
 	// - one axis overflows: pin the extent, top-left anchored;
 	// - no axis overflows: legacy behavior (root fills the canvas).
@@ -501,18 +506,23 @@ bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8
 	TSharedRef<SWidget> WindowContent = SlateWidget;
 	const bool bCalibrationXOverflow = SlateRenderSize.X > LayoutPixelSize.X;
 	const bool bCalibrationYOverflow = SlateRenderSize.Y > LayoutPixelSize.Y;
-	if (bCalibrationXOverflow || bCalibrationYOverflow)
+	if (RootExportOffset.IsSet() || bCalibrationXOverflow || bCalibrationYOverflow)
 	{
-		const float XOffset = bCalibrationXOverflow && bCalibrationYOverflow
-			? (SlateRenderSize.X - LayoutPixelSize.X) / 2.0f
-			: 0.0f;
-		const float YOffset = bCalibrationXOverflow && bCalibrationYOverflow
-			? (SlateRenderSize.Y - LayoutPixelSize.Y) / 2.0f
-			: 0.0f;
+		FVector2D Offset = FVector2D::ZeroVector;
+		if (RootExportOffset.IsSet())
+		{
+			Offset = RootExportOffset.GetValue();
+		}
+		else if (bCalibrationXOverflow && bCalibrationYOverflow)
+		{
+			Offset = FVector2D(
+				(SlateRenderSize.X - LayoutPixelSize.X) / 2.0f,
+				(SlateRenderSize.Y - LayoutPixelSize.Y) / 2.0f);
+		}
 		WindowContent = SNew(SConstraintCanvas)
 			+ SConstraintCanvas::Slot()
 			.Anchors(FAnchors(0.f, 0.f))
-			.Offset(FMargin(XOffset, YOffset, static_cast<float>(LayoutPixelSize.X), static_cast<float>(LayoutPixelSize.Y)))
+			.Offset(FMargin(Offset.X, Offset.Y, static_cast<float>(LayoutPixelSize.X), static_cast<float>(LayoutPixelSize.Y)))
 			.Alignment(FVector2D::ZeroVector)
 			.AutoSize(false)
 			[SlateWidget];

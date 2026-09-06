@@ -101,7 +101,7 @@ bool FDesign2UMGRenderCanvasOverflowBackgroundTest::RunTest(const FString& Param
 		return false;
 	}
 
-	const auto RenderAndRead = [this, &WidgetBP](const TCHAR* Label, const TOptional<FIntPoint>& Override, TArray<FColor>& OutPixels, int32& OutW, int32& OutH)
+	const auto RenderAndRead = [this, &WidgetBP](const TCHAR* Label, const TOptional<FVector2D>& Override, TArray<FColor>& OutPixels, int32& OutW, int32& OutH)
 	{
 		const FString PngPath = FPaths::CreateTempFilename(*FPaths::ProjectSavedDir(), TEXT("D2UCanvasOverflow"), TEXT(".png"));
 		FIntPoint RenderedSize = FIntPoint::ZeroValue;
@@ -135,7 +135,7 @@ bool FDesign2UMGRenderCanvasOverflowBackgroundTest::RunTest(const FString& Param
 		TArray<FColor> Pixels;
 		int32 W = 0;
 		int32 H = 0;
-		if (RenderAndRead(TEXT("both-axis overflow"), FIntPoint(200, 100), Pixels, W, H))
+		if (RenderAndRead(TEXT("both-axis overflow"), FVector2D(200, 100), Pixels, W, H))
 		{
 			TestTrue(TEXT("both-axis overflow: canvas is the calibrated extent"), W == 200 && H == 100);
 			// Centered placement of the 96x64 root on a 200x100 canvas: x[52,147] y[18,81].
@@ -150,7 +150,7 @@ bool FDesign2UMGRenderCanvasOverflowBackgroundTest::RunTest(const FString& Param
 		TArray<FColor> Pixels;
 		int32 W = 0;
 		int32 H = 0;
-		if (RenderAndRead(TEXT("single-axis overflow"), FIntPoint(200, 64), Pixels, W, H))
+		if (RenderAndRead(TEXT("single-axis overflow"), FVector2D(200, 64), Pixels, W, H))
 		{
 			TestTrue(TEXT("single-axis overflow: canvas is the calibrated extent"), W == 200 && H == 64);
 			// One-axis overflow keeps the top-left anchoring: root covers x[0,95] y[0,63].
@@ -166,7 +166,7 @@ bool FDesign2UMGRenderCanvasOverflowBackgroundTest::RunTest(const FString& Param
 		TArray<FColor> Pixels;
 		int32 W = 0;
 		int32 H = 0;
-		if (RenderAndRead(TEXT("no override"), TOptional<FIntPoint>(), Pixels, W, H))
+		if (RenderAndRead(TEXT("no override"), TOptional<FVector2D>(), Pixels, W, H))
 		{
 			TestTrue(TEXT("no override: render size is the design-time extent"), W == 96 && H == 64);
 			TestTrue(TEXT("no override: root fill covers the canvas"), IsFillColor(PixelAt(Pixels, W, 5, 5)) && IsFillColor(PixelAt(Pixels, W, 90, 60)));

@@ -40,22 +40,6 @@ namespace
 		};
 		return Map;
 	}
-
-	const TMap<FString, FLinearColor>& GetNamedColors()
-	{
-		static const TMap<FString, FLinearColor> Map = {
-			{TEXT("white"), FLinearColor::White},
-			{TEXT("black"), FLinearColor::Black},
-			{TEXT("red"), FLinearColor::Red},
-			{TEXT("green"), FLinearColor::Green},
-			{TEXT("blue"), FLinearColor::Blue},
-			{TEXT("yellow"), FLinearColor::Yellow},
-			{TEXT("gray"), FLinearColor::Gray},
-			{TEXT("grey"), FLinearColor::Gray},
-			{TEXT("transparent"), FLinearColor::Transparent}
-		};
-		return Map;
-	}
 }
 
 namespace FUMGValueParser
@@ -69,7 +53,7 @@ namespace FUMGValueParser
 			return DesignColorUtils::ParseHexColor(Trimmed);
 		}
 
-	if (const FLinearColor* Named = GetNamedColors().Find(Trimmed.ToLower()))
+	if (const FLinearColor* Named = DesignColorUtils::GetNamedColors().Find(Trimmed.ToLower()))
 	{
 		return *Named;
 	}

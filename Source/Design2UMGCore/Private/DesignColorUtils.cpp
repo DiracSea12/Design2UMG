@@ -4,6 +4,21 @@
 
 namespace DesignColorUtils
 {
+	const TMap<FString, FLinearColor>& GetNamedColors()
+	{
+		static const TMap<FString, FLinearColor> Map = {
+			{TEXT("white"), FLinearColor::White},
+			{TEXT("black"), FLinearColor::Black},
+			{TEXT("red"), FLinearColor::Red},
+			{TEXT("green"), FLinearColor::Green},
+			{TEXT("blue"), FLinearColor::Blue},
+			{TEXT("yellow"), FLinearColor::Yellow},
+			{TEXT("gray"), FLinearColor::Gray},
+			{TEXT("grey"), FLinearColor::Gray},
+			{TEXT("transparent"), FLinearColor::Transparent}
+		};
+		return Map;
+	}
 	FString FormatLiteral(const FColor& Color)
 	{
 		if (Color.A == 255)
@@ -61,5 +76,11 @@ namespace DesignColorUtils
 		}
 
 		return FormatLiteral(FColor::FromHex(Hex));
+	}
+
+	bool IsRenderableNamedColor(const FString& Value)
+	{
+		const FString Lower = Value.TrimStartAndEnd().ToLower();
+		return GetNamedColors().Contains(Lower);
 	}
 }

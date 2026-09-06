@@ -725,7 +725,8 @@ bool DesignImportUtils::RenderCompiledBlueprintToPngFile(
 	const FString& OutputPngFilePath,
 	FIntPoint* OutRenderedSize,
 	FString* OutError,
-	const TOptional<FIntPoint>& RenderSizeOverride)
+	const TOptional<FVector2D>& RenderSizeOverride,
+	const TOptional<FVector2D>& RootExportOffset)
 {
 	if (!WidgetBlueprint)
 	{
@@ -738,7 +739,8 @@ bool DesignImportUtils::RenderCompiledBlueprintToPngFile(
 	FIntPoint ActualSize = FIntPoint::ZeroValue;
 	if (RenderSizeOverride.IsSet())
 	{
-		ActualSize = RenderSizeOverride.GetValue();
+		const FVector2D OverrideSize = RenderSizeOverride.GetValue();
+		ActualSize = FIntPoint(FMath::RoundToInt(OverrideSize.X), FMath::RoundToInt(OverrideSize.Y));
 		if (ActualSize.X <= 0 || ActualSize.Y <= 0)
 		{
 			if (OutError)
@@ -755,7 +757,7 @@ bool DesignImportUtils::RenderCompiledBlueprintToPngFile(
 	}
 
 	TArray<uint8> PngData;
-	if (!FUMGWidgetUtils::RenderWidgetToPng(WidgetBlueprint, PngData, ActualSize, OutError, RenderSizeOverride))
+	if (!FUMGWidgetUtils::RenderWidgetToPng(WidgetBlueprint, PngData, ActualSize, OutError, RenderSizeOverride, RootExportOffset))
 	{
 		UE_LOG(LogDesign2UMG, Error,
 			TEXT("DesignImportUtils: RenderCompiledBlueprintToPngFile failed for %s"),

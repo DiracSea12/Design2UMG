@@ -365,6 +365,21 @@ def prepare_case_state(
     ):
         state_render_size_override = list(reference_size)
 
+    # Root export offset (pen only): Pencil's node-export canvas unions the node
+    # box with its outer shadows, so the node box sits at a source-derived
+    # offset inside the reference canvas. Forwarded to the asset render so the
+    # calibrated placement pins the root there instead of the centering
+    # heuristic; also proves the calibration carries union padding (shadow
+    # padding below the 1.25x scale heuristic must not skip the override).
+    # Gated on the size override being active: with no override the calibrated
+    # root would land in a clipping ConstraintCanvas (canvas stays at the
+    # design-time extent), so the narrow path keeps the legacy heuristic.
+    state_render_root_offset = None
+    if case_args.mode == "pen" and case_args.node and state_render_size_override:
+        state_render_root_offset = verify.compute_pen_root_export_offset(
+            case_args.source, case_args.node
+        )
+
     state = {
         "case": case,
         "args": case_args,
@@ -377,6 +392,7 @@ def prepare_case_state(
         "expected_design_size": expected_design_size,
         "render_size": expected_design_size,
         "render_size_override": state_render_size_override,
+        "render_root_offset": state_render_root_offset,
         "candidate_path": candidate_path,
         "game_output_root": game_output_root,
         "spec_paths": [],
@@ -459,6 +475,8 @@ def build_case_specs(state: dict):
         }
         if state.get("render_size_override"):
             asset_render_spec["render_size_override"] = state["render_size_override"]
+        if state.get("render_root_offset") is not None:
+            asset_render_spec["render_root_offset"] = list(state["render_root_offset"])
         append_spec(
             state,
             "asset_render",
@@ -497,6 +515,8 @@ def build_case_specs(state: dict):
         }
         if state.get("render_size_override"):
             asset_render_spec["render_size_override"] = state["render_size_override"]
+        if state.get("render_root_offset") is not None:
+            asset_render_spec["render_root_offset"] = list(state["render_root_offset"])
         append_spec(
             state,
             "asset_render",

@@ -29,4 +29,15 @@ namespace DesignColorUtils
 	// '#RGB' short form first. Other lengths or non-hex characters keep the
 	// engine's historical fallback behavior.
 	FColor ParseHexColor(const FString& Value);
+
+	// The named-color table the render pipeline resolves on its own (single
+	// source of truth; FUMGValueParser::ParseColor and the renderability check
+	// both consume it). "transparent" is a member on purpose: the table itself
+	// needs it, callers decide what a transparent paint means.
+	const TMap<FString, FLinearColor>& GetNamedColors();
+
+	// True when Value names a color the render pipeline resolves on its own
+	// (the named-color set above). Hex-prefixed literals are handled
+	// by their callers: even a malformed "#xyz" stays a pass-through literal.
+	bool IsRenderableNamedColor(const FString& Value);
 }

@@ -68,6 +68,7 @@ namespace DesignImportUtils
 		const FString& OutputPngFilePath,
 		FIntPoint* OutRenderedSize = nullptr,
 		FString* OutError = nullptr,
-		const TOptional<FIntPoint>& RenderSizeOverride = TOptional<FIntPoint>());
+		const TOptional<FVector2D>& RenderSizeOverride = TOptional<FVector2D>(),
+		const TOptional<FVector2D>& RootExportOffset = TOptional<FVector2D>());
 }
 

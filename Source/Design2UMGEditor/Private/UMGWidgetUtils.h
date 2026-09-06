@@ -23,7 +23,7 @@ public:
 	static UClass* ResolveWidgetClass(const FString& TypeName);
 	static void ApplySlotProperties(UPanelSlot* Slot, const FUMGSlotData& SlotData);
 	static void ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNode& Node);
-	static bool RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8>& OutPngData, FIntPoint& OutSize, FString* OutError = nullptr, const TOptional<FIntPoint>& RenderSizeOverride = TOptional<FIntPoint>());
+	static bool RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8>& OutPngData, FIntPoint& OutSize, FString* OutError = nullptr, const TOptional<FVector2D>& RenderSizeOverride = TOptional<FVector2D>(), const TOptional<FVector2D>& RootExportOffset = TOptional<FVector2D>());
 	static bool RenderWidgetTreeToPng(UWidgetBlueprint* WidgetBP, TArray<uint8>& OutPngData, FIntPoint& OutSize);
 
 	/**

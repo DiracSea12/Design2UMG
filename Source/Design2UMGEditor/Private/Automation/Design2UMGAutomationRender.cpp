@@ -64,7 +64,8 @@ namespace
 		FString IrDumpPath;
 		FString GeometryDumpPath;
 		bool bForceReloadPackage = false;
-		TOptional<FIntPoint> RenderSizeOverride;
+		TOptional<FVector2D> RenderSizeOverride;
+		TOptional<FVector2D> RootExportOffset;
 	};
 
 	struct FAutomationRenderResult
@@ -83,6 +84,26 @@ namespace
 	};
 
 	const TCHAR* GeneratedAssetFromResultPrefix = TEXT("@generated_asset_from:");
+
+	// Parses a [number, number] JSON field (render size override, root export
+	// offset); scalar validation stays with the helper, unit clamping with the
+	// caller that knows what the pair means.
+	bool TryGetNumberPairField(const TSharedPtr<FJsonObject>& Root, const TCHAR* Key, double& OutX, double& OutY)
+	{
+		const TSharedPtr<FJsonValue> Field = Root->TryGetField(Key);
+		if (!Field.IsValid() || Field->Type != EJson::Array)
+		{
+			return false;
+		}
+		const TArray<TSharedPtr<FJsonValue>>& Values = Field->AsArray();
+		if (Values.Num() != 2 || Values[0]->Type != EJson::Number || Values[1]->Type != EJson::Number)
+		{
+			return false;
+		}
+		OutX = Values[0]->AsNumber();
+		OutY = Values[1]->AsNumber();
+		return true;
+	}
 
 	bool ShouldSkipDesignerOnlyNodeForAutomationSnapshot(const TSharedPtr<FDesignNode>& Node)
 	{
@@ -129,17 +150,24 @@ namespace
 
 		// Optional canvas calibration: [width, height] pinning the render surface
 		// to the authoritative reference size (compare scope only).
-		const TSharedPtr<FJsonValue> RenderSizeField = Root->TryGetField(TEXT("render_size_override"));
-		if (RenderSizeField.IsValid() && RenderSizeField->Type == EJson::Array)
+		double OverrideWidth = 0.0;
+		double OverrideHeight = 0.0;
+		if (TryGetNumberPairField(Root, TEXT("render_size_override"), OverrideWidth, OverrideHeight))
 		{
-			const TArray<TSharedPtr<FJsonValue>>& SizeValues = RenderSizeField->AsArray();
-			if (SizeValues.Num() == 2
-				&& SizeValues[0]->Type == EJson::Number && SizeValues[1]->Type == EJson::Number)
-			{
-				const int32 OverrideWidth = FMath::Max(1, FMath::RoundToInt(SizeValues[0]->AsNumber()));
-				const int32 OverrideHeight = FMath::Max(1, FMath::RoundToInt(SizeValues[1]->AsNumber()));
-				OutSpec.RenderSizeOverride = FIntPoint(OverrideWidth, OverrideHeight);
-			}
+			OutSpec.RenderSizeOverride = FVector2D(
+				static_cast<float>(FMath::Max(1, FMath::RoundToInt(OverrideWidth))),
+				static_cast<float>(FMath::Max(1, FMath::RoundToInt(OverrideHeight))));
+		}
+
+		// Optional root export offset: [x, y] locating the node box inside
+		// Pencil's node-export canvas (union of the node box and its outer
+		// shadows). Pins the calibrated placement; also proves the calibration
+		// canvas carries union padding.
+		double OffsetX = 0.0;
+		double OffsetY = 0.0;
+		if (TryGetNumberPairField(Root, TEXT("render_root_offset"), OffsetX, OffsetY))
+		{
+			OutSpec.RootExportOffset = FVector2D(static_cast<float>(OffsetX), static_cast<float>(OffsetY));
 		}
 
 		if (OutSpec.Mode.IsEmpty())
@@ -790,25 +818,31 @@ namespace
 		// design-time extent on any axis carries content-union padding (outer shadows,
 		// overflowing children) that the design-time canvas cannot host, so it applies
 		// even when the aspects match.
-		TOptional<FIntPoint> EffectiveRenderSizeOverride = Spec.RenderSizeOverride;
+		TOptional<FVector2D> EffectiveRenderSizeOverride = Spec.RenderSizeOverride;
 		if (EffectiveRenderSizeOverride.IsSet() && OutResult.DesignTimeSize.X > 1 && OutResult.DesignTimeSize.Y > 1)
 		{
-			const FIntPoint OverrideSize = EffectiveRenderSizeOverride.GetValue();
+			const FVector2D OverrideSize = EffectiveRenderSizeOverride.GetValue();
+			const int32 OverrideWidth = FMath::RoundToInt(OverrideSize.X);
+			const int32 OverrideHeight = FMath::RoundToInt(OverrideSize.Y);
 			const float DesignAspect = static_cast<float>(OutResult.DesignTimeSize.X) / OutResult.DesignTimeSize.Y;
-			const float OverrideAspect = static_cast<float>(OverrideSize.X) / static_cast<float>(OverrideSize.Y);
+			const float OverrideAspect = OverrideSize.X / OverrideSize.Y;
 			const float AspectDelta = FMath::Abs(DesignAspect - OverrideAspect) / FMath::Max(DesignAspect, OverrideAspect);
 			constexpr float ReferenceAspectCompatibilityThreshold = 0.08f;
 			constexpr float ReferenceUnionPaddingScaleThreshold = 1.25f;
 			const bool bAspectCompatible = AspectDelta <= ReferenceAspectCompatibilityThreshold;
+			// A source-derived root export offset proves the reference canvas carries
+			// union padding (outer-shadow padding can stay far below the 1.25x scale
+			// heuristic), so the override applies even when aspects match.
 			const bool bCalibrationCarriesUnionPadding =
-				OverrideSize.X > OutResult.DesignTimeSize.X * ReferenceUnionPaddingScaleThreshold
+				Spec.RootExportOffset.IsSet()
+				|| OverrideSize.X > OutResult.DesignTimeSize.X * ReferenceUnionPaddingScaleThreshold
 				|| OverrideSize.Y > OutResult.DesignTimeSize.Y * ReferenceUnionPaddingScaleThreshold;
 			if (bAspectCompatible && !bCalibrationCarriesUnionPadding)
 			{
 				EffectiveRenderSizeOverride.Reset();
 				UE_LOG(LogDesign2UMG, Log,
 					TEXT("AutomationRender: design-time %dx%d is aspect-compatible with calibration %dx%d; calibration skipped"),
-					OutResult.DesignTimeSize.X, OutResult.DesignTimeSize.Y, OverrideSize.X, OverrideSize.Y);
+					OutResult.DesignTimeSize.X, OutResult.DesignTimeSize.Y, OverrideWidth, OverrideHeight);
 			}
 		}
 		OutResult.bRenderSizeOverridden = EffectiveRenderSizeOverride.IsSet();
@@ -817,7 +851,8 @@ namespace
 			Spec.RenderPngPath,
 			&OutResult.RenderSize,
 			&OutResult.ErrorMessage,
-			EffectiveRenderSizeOverride))
+			EffectiveRenderSizeOverride,
+			Spec.RootExportOffset))
 			{
 				if (OutResult.ErrorMessage.IsEmpty())
 				{

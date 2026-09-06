@@ -914,4 +914,89 @@ bool FPenParserStickyNodesTest::RunTest(const FString&)
 	return true;
 }
 
+// ---------------------------------------------------------------------------
+// Unresolvable paint literals: Pencil drops them instead of painting
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FPenParserUnresolvablePaintTest,
+	"Design2UMG.Unit.PenParser.UnresolvablePaint",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FPenParserUnresolvablePaintTest::RunTest(const FString&)
+{
+	// The escaped-literal node keeps the raw fill string in the source; the
+	// variable registry has no entry for it, mirroring the harvest documents.
+	// The trailing nodes cover the drop rule's remaining contracts: an escaped
+	// entry inside a fill array is skipped and the scan keeps looking for a
+	// legal entry; the empty string and a plain numeric string are dropped; the
+	// object form's legal hex keeps the legacy color behavior.
+	const FString Json =
+		TEXT("{")
+		TEXT("\"version\":\"1.0\",")
+		TEXT("\"variables\":{\"destructive\":{\"type\":\"color\",\"value\":\"#DC2626\"}},")
+		TEXT("\"children\":[")
+		TEXT("{\"id\":\"escaped\",\"name\":\"Escaped\",\"type\":\"frame\",\"width\":100,\"height\":40,")
+		TEXT("\"fill\":\"\\\\$destructive\"},")
+		TEXT("{\"id\":\"hexnode\",\"name\":\"HexNode\",\"type\":\"frame\",\"width\":100,\"height\":40,")
+		TEXT("\"fill\":\"#AABBCC\"},")
+		TEXT("{\"id\":\"namednode\",\"name\":\"NamedNode\",\"type\":\"frame\",\"width\":100,\"height\":40,")
+		TEXT("\"fill\":\"RED\"},")
+		TEXT("{\"id\":\"varnode\",\"name\":\"VarNode\",\"type\":\"frame\",\"width\":100,\"height\":40,")
+		TEXT("\"fill\":\"$destructive\"},")
+		TEXT("{\"id\":\"malformedhex\",\"name\":\"MalformedHex\",\"type\":\"frame\",\"width\":100,\"height\":40,")
+		TEXT("\"fill\":\"#xyz\"},")
+		TEXT("{\"id\":\"arrayfill\",\"name\":\"ArrayFill\",\"type\":\"frame\",\"width\":100,\"height\":40,")
+		TEXT("\"fill\":[\"#112233\",\"\\\\$destructive\"]},")
+		TEXT("{\"id\":\"emptyfill\",\"name\":\"EmptyFill\",\"type\":\"frame\",\"width\":100,\"height\":40,")
+		TEXT("\"fill\":\"\"},")
+		TEXT("{\"id\":\"numericfill\",\"name\":\"NumericFill\",\"type\":\"frame\",\"width\":100,\"height\":40,")
+		TEXT("\"fill\":\"123\"},")
+		TEXT("{\"id\":\"objfill\",\"name\":\"ObjFill\",\"type\":\"frame\",\"width\":100,\"height\":40,")
+		TEXT("\"fill\":{\"type\":\"color\",\"enabled\":true,\"color\":\"#ABCDEF\"}}")
+		TEXT("]}");
+	FDesignDocument Doc;
+	TestTrue(TEXT("Unresolvable paint document parses"), FPenParser::ParseDocument(Json, Doc));
+	TestEqual(TEXT("Nine root children"), Doc.Children.Num(), 9);
+
+	// Escaped literal "\$destructive" is plain text, not a variable ref, and no
+	// color literal: Pencil renders the node with no fill (stays transparent).
+	{
+		const FDesignFill& Fill = Doc.Children[0]->Visual.TopmostFill();
+		TestEqual(TEXT("escaped literal fill dropped"), Fill.Type, EDesignFillType::None);
+		TestTrue(TEXT("escaped literal has no source var"), Fill.SourceVar.IsEmpty());
+	}
+
+	// Hex and named literals keep producing a solid color fill.
+	TestEqual(TEXT("hex fill type"), Doc.Children[1]->Visual.TopmostFill().Type, EDesignFillType::Color);
+	TestEqual(TEXT("hex fill color"), Doc.Children[1]->Visual.TopmostFill().SolidColor, FString(TEXT("#AABBCC")));
+	TestEqual(TEXT("named fill type"), Doc.Children[2]->Visual.TopmostFill().Type, EDesignFillType::Color);
+	TestEqual(TEXT("named fill color"), Doc.Children[2]->Visual.TopmostFill().SolidColor, FString(TEXT("RED")));
+
+	// A real variable ref still resolves through the registry.
+	TestEqual(TEXT("variable fill type"), Doc.Children[3]->Visual.TopmostFill().Type, EDesignFillType::Color);
+	TestEqual(TEXT("variable fill color"), Doc.Children[3]->Visual.TopmostFill().SolidColor, FString(TEXT("#DC2626")));
+
+	// A malformed hex-prefixed literal keeps the legacy pass-through contract
+	// (renderer fallback stays authoritative), matching SharedCoreSemanticsTests.
+	TestEqual(TEXT("malformed hex fill type"), Doc.Children[4]->Visual.TopmostFill().Type, EDesignFillType::Color);
+	TestEqual(TEXT("malformed hex stays untouched"), Doc.Children[4]->Visual.TopmostFill().SolidColor, FString(TEXT("#xyz")));
+
+	// An escaped entry inside a fill array is dropped without aborting the
+	// scan; the next entry down (array scans from the tail) still wins.
+	TestEqual(TEXT("array fill type"), Doc.Children[5]->Visual.TopmostFill().Type, EDesignFillType::Color);
+	TestEqual(TEXT("array fill falls back to the legal entry"), Doc.Children[5]->Visual.TopmostFill().SolidColor, FString(TEXT("#112233")));
+
+	// The empty string and a plain numeric string are not paint values; Pencil
+	// leaves the node unfilled instead of painting them.
+	TestEqual(TEXT("empty string fill dropped"), Doc.Children[6]->Visual.TopmostFill().Type, EDesignFillType::None);
+	TestEqual(TEXT("numeric string fill dropped"), Doc.Children[7]->Visual.TopmostFill().Type, EDesignFillType::None);
+
+	// The object form's legal hex keeps the legacy color behavior (the drop
+	// rule is string-form only).
+	TestEqual(TEXT("object fill type"), Doc.Children[8]->Visual.TopmostFill().Type, EDesignFillType::Color);
+	TestEqual(TEXT("object fill color"), Doc.Children[8]->Visual.TopmostFill().SolidColor, FString(TEXT("#ABCDEF")));
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
