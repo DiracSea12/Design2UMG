@@ -277,14 +277,14 @@ namespace
 			{
 				if (TSharedPtr<FDesignNode> FullNode = PenParser::ParseNode(OverrideObj, Resolver))
 				{
-					Node->Descendants.Add(Pair.Key, FullNode);
+					Node->Descendants.Add(FString(*Pair.Key), FullNode);
 				}
 				continue;
 			}
 
 			if (TSharedPtr<FDesignNode> DescNode = ParseDescendantOverrideNode(OverrideObj, Resolver))
 			{
-				Node->Descendants.Add(Pair.Key, DescNode);
+				Node->Descendants.Add(FString(*Pair.Key), DescNode);
 			}
 		}
 	}

@@ -886,7 +886,7 @@ bool ParseDocument(const FString& FigmaJson, FDesignDocument& OutDocument)
 		const TSharedPtr<FJsonObject> NodesObj = GetObject(Root, TEXT("nodes"));
 		if (NodesObj.IsValid())
 		{
-			for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : NodesObj->Values)
+			for (const auto& Pair : NodesObj->Values)
 			{
 				const TSharedPtr<FJsonObject> NodeEntry = Pair.Value.IsValid() ? Pair.Value->AsObject() : nullptr;
 				if (!NodeEntry.IsValid())

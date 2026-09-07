@@ -7,6 +7,7 @@
 #include "Design2UMGConverter.h"
 #include "Design2UMGGenerationManifest.h"
 #include "Design2UMGGenerationSettingsSnapshot.h"
+#include "Design2UMGSidecarTestUtils.h"
 #include "Design2UMGTestUtils.h"
 #include "FigmaParser.h"
 #include "UMGGenerator.h"
@@ -138,29 +139,10 @@ namespace
 		});
 		return Match;
 	}
-
-	bool ReadSidecarJson(const FString& AssetPackageName, TSharedPtr<FJsonObject>& OutObject)
-	{
-		const FString SidecarPath = Design2UMGGenerationManifest::BuildSidecarPathForAsset(AssetPackageName);
-		FString Json;
-		if (!FFileHelper::LoadFileToString(Json, *SidecarPath))
-		{
-			return false;
-		}
-		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
-		return FJsonSerializer::Deserialize(Reader, OutObject) && OutObject.IsValid();
-	}
-
-	// Clear the output directory (including .d2u.json sidecars and leftover assets) so tests stay independent.
-	void DeleteOutputDirectory(const FString& OutputPath)
-	{
-		const FString OutputDir = FPackageName::LongPackageNameToFilename(OutputPath);
-		if (!OutputDir.IsEmpty())
-		{
-			IFileManager::Get().DeleteDirectory(*OutputDir, false, true);
-		}
-	}
 }
+
+using Design2UMGTestUtils::ReadSidecarJson;
+using Design2UMGTestUtils::DeleteOutputDirectory;
 
 // ---------------------------------------------------------------------------
 // Generated-asset assertions: mapped instances, unexpanded subtrees, inputs written, fallback and diagnostics, manifest

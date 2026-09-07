@@ -11,6 +11,10 @@
 #include "UMGWidgetNodeProceduralResourceAccess.h"
 #include "UMGWidgetNodeAccess.h"
 
+#include "Design2UMGCoreTestHelpers.h"
+
+using Design2UMGCoreTests::FindWidgetByIdRecursive;
+
 #if WITH_AUTOMATION_WORKER
 namespace
 {
@@ -44,24 +48,6 @@ namespace
 	private:
 		FString Captured;
 	};
-
-	const FUMGWidgetNode* FindWidgetByIdRecursive(const FUMGWidgetNode& Root, const FString& Id)
-	{
-		if (Root.Id == Id)
-		{
-			return &Root;
-		}
-
-		for (const FUMGWidgetNode& Child : Root.Children)
-		{
-			if (const FUMGWidgetNode* Match = FindWidgetByIdRecursive(Child, Id))
-			{
-				return Match;
-			}
-		}
-
-		return nullptr;
-	}
 
 }
 

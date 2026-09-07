@@ -29,7 +29,7 @@ STAMP = time.strftime("%Y%m%d_%H%M%S")
 SCRIPT_DIR = Path(__file__).parent
 AUTOMATION_DIR = SCRIPT_DIR.parent / "Saved" / "Design2UMG" / "Automation"
 RUNTIME_PROJECT_ENV_VAR = "DESIGN2UMG_RUNTIME_PROJECT"
-UE_ROOT = Path(r"G:\UE5\UnrealEngine")
+UE_ROOT = Path(os.environ.get("UE_ROOT", r"G:\UE5\UnrealEngine"))
 EDITOR = UE_ROOT / "Engine/Binaries/Win64/UnrealEditor.exe"
 
 PIXEL_TOLERANCE = 6

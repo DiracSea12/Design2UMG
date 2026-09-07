@@ -45,7 +45,7 @@ bool FMetadataCollectorExactSnapshotTest::RunTest(const FString& Parameters)
 			return Raw;
 		}
 		TArray<FString> Keys;
-		for (const auto& Pair : Obj->Values) { Keys.Add(Pair.Key); }
+		for (const auto& Pair : Obj->Values) { Keys.Add(FString(*Pair.Key)); }
 		Keys.Sort();
 		FString Out;
 		const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Out);

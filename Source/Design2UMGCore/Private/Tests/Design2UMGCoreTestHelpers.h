@@ -183,5 +183,25 @@ namespace Design2UMGCoreTests
 		return Design2UMGCoreTests::MakeNode(FString(), Type, FDesignSize::Fixed(Width), FDesignSize::Fixed(Height));
 	}
 
+	// Depth-first widget-node lookup by id, shared by Core tests (single copy so
+	// unity builds never merge two anonymous-namespace definitions).
+	inline const FUMGWidgetNode* FindWidgetByIdRecursive(const FUMGWidgetNode& Root, const FString& Id)
+	{
+		if (Root.Id == Id)
+		{
+			return &Root;
+		}
+
+		for (const FUMGWidgetNode& Child : Root.Children)
+		{
+			if (const FUMGWidgetNode* Match = FindWidgetByIdRecursive(Child, Id))
+			{
+				return Match;
+			}
+		}
+
+		return nullptr;
+	}
+
 }
 

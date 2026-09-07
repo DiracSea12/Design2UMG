@@ -348,7 +348,7 @@ void ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 	{
 		OutNode.Metadata.Add(TEXT("boundVariables"), ToPrettyString(BoundVarsField));
 		const TSharedPtr<FJsonObject> BoundVarsObj = BoundVarsField->AsObject();
-		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : BoundVarsObj->Values)
+		for (const auto& Pair : BoundVarsObj->Values)
 		{
 			OutNode.Metadata.Add(FString::Printf(TEXT("boundVariables.%s"), *Pair.Key), ToPrettyString(Pair.Value));
 		}

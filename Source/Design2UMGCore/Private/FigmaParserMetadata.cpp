@@ -94,9 +94,9 @@ namespace
 				return false;
 			}
 
-			for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : ObjectValue->Values)
+			for (const auto& Pair : ObjectValue->Values)
 			{
-				if (IsSemanticFieldName(Pair.Key) && ReadSemanticSignalField(Pair.Value))
+				if (IsSemanticFieldName(FString(*Pair.Key)) && ReadSemanticSignalField(Pair.Value))
 				{
 					return true;
 				}

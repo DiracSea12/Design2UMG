@@ -7,9 +7,12 @@
 #include "UMGSchemaFoundation.h"
 #include "UMGSchemaSourceExtensions.h"
 
+#include "Design2UMGAutomationDumpFormat.h"
 #include "HAL/IConsoleManager.h"
 #include "Math/UnrealMathUtility.h"
 #include "Misc/FileHelper.h"
+
+using Design2UMGAutomation::RenderFloat;
 
 namespace
 {
@@ -23,18 +26,6 @@ namespace
 	// Primitive rendering. Every float uses %.9g (float32 round-trip lossless);
 	// hex strings and %.1f/%.6f are forbidden by the IR golden layer contract.
 	// ---------------------------------------------------------------------------
-
-	FString RenderFloat(const float Value)
-	{
-		// NaN/Inf have no JSON literal; emit null so the dump stays parseable and
-		// the golden layer surfaces the anomaly as a plain field diff instead of
-		// a read_error that masks the whole case.
-		if (!FMath::IsFinite(Value))
-		{
-			return TEXT("null");
-		}
-		return FString::Printf(TEXT("%.9g"), Value);
-	}
 
 	FString RenderInt(const int32 Value)
 	{

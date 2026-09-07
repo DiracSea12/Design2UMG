@@ -69,7 +69,7 @@ void FFigmaImageExporter::ResolveImageRefs(
 				FString Url;
 				if (Pair.Value->TryGetString(Url) && !Url.IsEmpty())
 				{
-					RefToUrl.Add(Pair.Key, Url);
+					RefToUrl.Add(FString(*Pair.Key), Url);
 				}
 			}
 
@@ -166,7 +166,7 @@ void FFigmaImageExporter::ExportVectorNodes(
 			{
 				FString Url;
 				if (Pair.Value->TryGetString(Url) && !Url.IsEmpty())
-					IdToUrl.Add(Pair.Key, Url);
+					IdToUrl.Add(FString(*Pair.Key), Url);
 			}
 
 			UE_LOG(LogDesign2UMG, Log, TEXT("FigmaImageExporter: Exported %d vector nodes"), IdToUrl.Num());

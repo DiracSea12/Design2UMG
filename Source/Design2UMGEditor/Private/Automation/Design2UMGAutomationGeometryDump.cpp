@@ -8,10 +8,13 @@
 #include "Components/PanelWidget.h"
 #include "Components/Widget.h"
 #include "Design2UMGLog.h"
+#include "Design2UMGAutomationDumpFormat.h"
 
 #include "HAL/IConsoleManager.h"
 #include "Math/UnrealMathUtility.h"
 #include "Misc/FileHelper.h"
+
+using Design2UMGAutomation::RenderFloat;
 
 namespace
 {
@@ -20,17 +23,6 @@ namespace
 		false,
 		TEXT("Enables the geometry golden dump (geometry_dump.json) of the compiled widget tree during automation renders. Also requires a non-empty automation dump path in the render spec."),
 		ECVF_Default);
-
-	// Same float contract as the IR golden dump: %.9g round-trips float32 and
-	// non-finite values become null so the file stays parseable JSON.
-	FString RenderFloat(const float Value)
-	{
-		if (!FMath::IsFinite(Value))
-		{
-			return TEXT("null");
-		}
-		return FString::Printf(TEXT("%.9g"), Value);
-	}
 
 	FString EscapeGeometryDumpString(const FString& Value)
 	{

@@ -5,6 +5,7 @@
 #include "Design2UMGConverter.h"
 #include "Design2UMGConverterFlowChildPreResolution.h"
 #include "Design2UMGConverterVisualSupport.h"
+#include "Design2UMGCoreTestHelpers.h"
 #include "Design2UMGCoreTestNodes.h"
 #include "Design2UMGNodeWidgetFactory.h"
 #include "Design2UMGSettings.h"
@@ -22,6 +23,8 @@
 #include "UMGSchema.h"
 
 #include <limits>
+
+using Design2UMGCoreTests::FindWidgetByIdRecursive;
 
 #if WITH_AUTOMATION_WORKER
 namespace
@@ -51,24 +54,6 @@ namespace
 		Node->Transform.bSourceHasWidth = true;
 		Node->Transform.bSourceHasHeight = true;
 		return Node;
-	}
-
-	const FUMGWidgetNode* FindWidgetByIdRecursive(const FUMGWidgetNode& Root, const FString& Id)
-	{
-		if (Root.Id == Id)
-		{
-			return &Root;
-		}
-
-		for (const FUMGWidgetNode& Child : Root.Children)
-		{
-			if (const FUMGWidgetNode* Match = FindWidgetByIdRecursive(Child, Id))
-			{
-				return Match;
-			}
-		}
-
-		return nullptr;
 	}
 
 	TSet<FString> CollectNodeIds(const TArray<TSharedPtr<FDesignNode>>& Nodes)

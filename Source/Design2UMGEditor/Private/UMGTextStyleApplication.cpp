@@ -270,7 +270,7 @@ namespace UMGTextStyleApplication
 		StyleSet->RowStruct = FRichTextStyleRow::StaticStruct();
 
 		const FTextBlockStyle BaseStyle = ResolveRichTextBaseStyle(RichTextBlock);
-		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : RootObject->Values)
+		for (const auto& Pair : RootObject->Values)
 		{
 			if (!Pair.Value.IsValid() || Pair.Value->Type != EJson::Object)
 			{

@@ -6,6 +6,7 @@
 #include "Design2UMGConverter.h"
 #include "Design2UMGGenerationManifest.h"
 #include "Design2UMGPrototypeNavigationExtensions.h"
+#include "Design2UMGSidecarTestUtils.h"
 #include "DesignImportPipeline.h"
 #include "FigmaParser.h"
 #include "UMGGenerator.h"
@@ -34,6 +35,8 @@
 namespace
 {
 	using Design2UMGEditorTests::DeleteGeneratedAssetsAtPath;
+	using Design2UMGTestUtils::ReadSidecarJson;
+	using Design2UMGTestUtils::DeleteOutputDirectory;
 
 	const TCHAR* ReimportTestScope = TEXT("safe-reimport-file-key");
 	const TCHAR* MappedTestClassPath = TEXT("/Script/Design2UMGEditor.Design2UMGMappedComponentTestWidget");
@@ -204,27 +207,6 @@ namespace
 			Count += Diagnostic.Kind == Kind ? 1 : 0;
 		}
 		return Count;
-	}
-
-	bool ReadSidecarJson(const FString& AssetPackageName, TSharedPtr<FJsonObject>& OutObject)
-	{
-		const FString SidecarPath = Design2UMGGenerationManifest::BuildSidecarPathForAsset(AssetPackageName);
-		FString Json;
-		if (!FFileHelper::LoadFileToString(Json, *SidecarPath))
-		{
-			return false;
-		}
-		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
-		return FJsonSerializer::Deserialize(Reader, OutObject) && OutObject.IsValid();
-	}
-
-	void DeleteOutputDirectory(const FString& OutputPath)
-	{
-		const FString OutputDir = FPackageName::LongPackageNameToFilename(OutputPath);
-		if (!OutputDir.IsEmpty())
-		{
-			IFileManager::Get().DeleteDirectory(*OutputDir, false, true);
-		}
 	}
 
 	bool LoadManifestSidecar(const FString& AssetPackageName, FDesign2UMGGenerationManifestSidecar& OutSidecar)

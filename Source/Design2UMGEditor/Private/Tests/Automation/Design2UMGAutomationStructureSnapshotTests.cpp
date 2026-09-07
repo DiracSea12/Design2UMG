@@ -105,7 +105,7 @@ namespace
 		Object->RemoveField(TEXT("WidgetName"));
 		Object->RemoveField(TEXT("Id"));
 		Object->RemoveField(TEXT("Name"));
-		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Object->Values)
+		for (const auto& Pair : Object->Values)
 		{
 			StripGeneratedIdentityFieldsFromValue(Pair.Value);
 		}
@@ -191,10 +191,10 @@ namespace
 			return false;
 		}
 
-		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Left->Values)
+		for (const auto& Pair : Left->Values)
 		{
-			const TSharedPtr<FJsonValue>* RightValue = Right->Values.Find(Pair.Key);
-			if (!RightValue || !JsonValuesEqual(Pair.Value, *RightValue))
+			const TSharedPtr<FJsonValue> RightValue = Right->TryGetField(FString(*Pair.Key));
+			if (!RightValue || !JsonValuesEqual(Pair.Value, RightValue))
 			{
 				return false;
 			}

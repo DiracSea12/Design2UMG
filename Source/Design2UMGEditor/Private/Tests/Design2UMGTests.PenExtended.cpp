@@ -217,7 +217,7 @@ bool FPenRichTextConverterUsesRichTextBlockTest::RunTest(const FString& Paramete
 	TArray<FString> RowNames;
 	for (const auto& Pair : StyleRows->Values)
 	{
-		RowNames.Add(Pair.Key);
+		RowNames.Add(FString(*Pair.Key));
 	}
 	RowNames.Sort();
 

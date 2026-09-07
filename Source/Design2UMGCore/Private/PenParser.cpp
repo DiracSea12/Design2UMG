@@ -120,7 +120,7 @@ bool ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FDesignDocume
 			const TArray<TSharedPtr<FJsonValue>>& JsonValues = Pair.Value->AsArray();
 			for (const auto& Val : JsonValues)
 				Values.Add(Val->AsString());
-			OutDocument.Themes.Add(Pair.Key, Values);
+			OutDocument.Themes.Add(FString(*Pair.Key), Values);
 		}
 	}
 
@@ -172,7 +172,7 @@ void ParseVariables(const TSharedPtr<FJsonObject>& JsonObj, TMap<FString, FDesig
 	for (const auto& Pair : JsonObj->Values)
 	{
 		FDesignVariable Var;
-		Var.Name = Pair.Key;
+		Var.Name = FString(*Pair.Key);
 
 		const TSharedPtr<FJsonObject>& VarObj = Pair.Value->AsObject();
 		if (!VarObj.IsValid())
@@ -231,7 +231,7 @@ void ParseVariables(const TSharedPtr<FJsonObject>& JsonObj, TMap<FString, FDesig
 					for (const auto& TP : ThemeObj->Values)
 					{
 						if (TP.Value->Type == EJson::String)
-							TV.ThemeMatch.Add(TP.Key, TP.Value->AsString());
+							TV.ThemeMatch.Add(FString(*TP.Key), TP.Value->AsString());
 					}
 				}
 				Var.ThemedValues.Add(MoveTemp(TV));
@@ -303,10 +303,10 @@ void ExpandImportedLibraryVariables(const TSharedPtr<FJsonObject>& ImportsObj, T
 		ParseVariables(VariablesObj, LibraryVariables);
 		for (auto& VarPair : LibraryVariables)
 		{
-			const FString QualifiedName = Pair.Key + TEXT(":") + VarPair.Key;
+			const FString QualifiedName = FString(*Pair.Key) + TEXT(":") + VarPair.Key;
 			if (!InOutVariables.Contains(QualifiedName))
 			{
-				VarPair.Value.SourceAlias = Pair.Key;
+				VarPair.Value.SourceAlias = FString(*Pair.Key);
 				InOutVariables.Add(QualifiedName, MoveTemp(VarPair.Value));
 			}
 		}
@@ -430,7 +430,7 @@ TSharedPtr<FDesignNode> ParseNodeAtDepth(
 		for (const auto& Pair : ThemeObj->Values)
 		{
 			if (Pair.Value->Type == EJson::String)
-				Node->Theme.Add(Pair.Key, Pair.Value->AsString());
+				Node->Theme.Add(FString(*Pair.Key), Pair.Value->AsString());
 		}
 		if (Node->Theme.Num() > 0)
 		{
