@@ -5,6 +5,7 @@
 #include "Design2UMGLocalFigmaImport.h"
 #include "DesignImportPipeline.h"
 #include "FigmaParser.h"
+#include "FigmaTestDocBuilder.h"
 #include "Design2UMGTestUtils.h"
 #include "HAL/FileManager.h"
 #include "IImageWrapper.h"
@@ -14,6 +15,7 @@
 #include "Modules/ModuleManager.h"
 
 #if WITH_AUTOMATION_WORKER
+using namespace Design2UMGCoreTests;
 using namespace Design2UMGTestUtils;
 
 namespace
@@ -149,27 +151,9 @@ bool FFigmaLocalVectorExplicitClearWorkflowTest::RunTest(const FString& Paramete
 	Pixels.Init(FColor::White, 64);
 	TestTrue(TEXT("Write local vector image"), WriteTestPng(VectorPngPath, Pixels, 8, 8));
 
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [{
-					"id": "vector_clear",
-					"name": "Vector",
-					"type": "VECTOR",
-					"visible": true,
-					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 8, "height": 8},
-					"fills": [],
-					"children": []
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(
+		MakeLeafNode(TEXT("vector_clear"), TEXT("Vector"), TEXT("VECTOR"), 0, 0, 8, 8,
+			TEXT(",\"fills\":[]")));
 	TestTrue(TEXT("Write local vector json"), FFileHelper::SaveStringToFile(Json, *TempJsonPath));
 
 	FDesignDocument Document;
@@ -218,31 +202,14 @@ bool FFigmaLocalLuminosityBakeWorkflowTest::RunTest(const FString& Parameters)
 	};
 	TestTrue(TEXT("Write test png"), WriteTestPng(SourcePngPath, Pixels, 2, 2));
 
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [{
-					"id": "lum_node",
-					"name": "LumNode",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 80},
-					"absoluteRenderBounds": {"x": 0, "y": 0, "width": 120, "height": 80},
-					"fills": [
-						{"type": "SOLID", "visible": true, "blendMode": "NORMAL", "color": {"r": 0.9254902, "g": 0.9019608, "b": 0.94117647, "a": 1}},
-						{"type": "IMAGE", "visible": true, "blendMode": "LUMINOSITY", "imageRef": "img_lum", "scaleMode": "FIT", "scalingFactor": 0.5}
-					],
-					"children": []
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(
+		MakeContainerNode(TEXT("lum_node"), TEXT("LumNode"), TEXT("FRAME"), 0, 0, 120, 80, FString(),
+			FString::Printf(
+				TEXT(",\"absoluteRenderBounds\":%s,\"fills\":["
+					 "{\"type\":\"SOLID\",\"visible\":true,\"blendMode\":\"NORMAL\",\"color\":{\"r\":0.9254902,\"g\":0.9019608,\"b\":0.94117647,\"a\":1}},"
+					 "{\"type\":\"IMAGE\",\"visible\":true,\"blendMode\":\"LUMINOSITY\",\"imageRef\":\"img_lum\",\"scaleMode\":\"FIT\",\"scalingFactor\":0.5}"
+					 "]"),
+				*MakeBoundsJson(0, 0, 120, 80))));
 	TestTrue(TEXT("Write local figma json"), FFileHelper::SaveStringToFile(Json, *TempJsonPath));
 
 	FDesignDocument Document;
@@ -298,46 +265,21 @@ bool FFigmaLocalLuminosityBakeScalingFactorWorkflowTest::RunTest(const FString& 
 	};
 	TestTrue(TEXT("Write scaling test png"), WriteTestPng(SourcePngPath, Pixels, 2, 2));
 
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [
-					{
-						"id": "lum_half",
-						"name": "LumHalf",
-						"type": "FRAME",
-						"visible": true,
-						"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 80},
-						"absoluteRenderBounds": {"x": 0, "y": 0, "width": 120, "height": 80},
-						"fills": [
-							{"type": "SOLID", "visible": true, "blendMode": "NORMAL", "color": {"r": 0.9254902, "g": 0.9019608, "b": 0.94117647, "a": 1}},
-							{"type": "IMAGE", "visible": true, "blendMode": "LUMINOSITY", "imageRef": "img_lum", "scaleMode": "FIT", "scalingFactor": 0.5}
-						],
-						"children": []
-					},
-					{
-						"id": "lum_full",
-						"name": "LumFull",
-						"type": "FRAME",
-						"visible": true,
-						"absoluteBoundingBox": {"x": 140, "y": 0, "width": 120, "height": 80},
-						"absoluteRenderBounds": {"x": 140, "y": 0, "width": 120, "height": 80},
-						"fills": [
-							{"type": "SOLID", "visible": true, "blendMode": "NORMAL", "color": {"r": 0.9254902, "g": 0.9019608, "b": 0.94117647, "a": 1}},
-							{"type": "IMAGE", "visible": true, "blendMode": "LUMINOSITY", "imageRef": "img_lum", "scaleMode": "FIT", "scalingFactor": 1.0}
-						],
-						"children": []
-					}
-				]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(FString::Printf(TEXT("%s,%s"),
+		*MakeContainerNode(TEXT("lum_half"), TEXT("LumHalf"), TEXT("FRAME"), 0, 0, 120, 80, FString(),
+			FString::Printf(
+				TEXT(",\"absoluteRenderBounds\":%s,\"fills\":["
+					 "{\"type\":\"SOLID\",\"visible\":true,\"blendMode\":\"NORMAL\",\"color\":{\"r\":0.9254902,\"g\":0.9019608,\"b\":0.94117647,\"a\":1}},"
+					 "{\"type\":\"IMAGE\",\"visible\":true,\"blendMode\":\"LUMINOSITY\",\"imageRef\":\"img_lum\",\"scaleMode\":\"FIT\",\"scalingFactor\":0.5}"
+					 "]"),
+				*MakeBoundsJson(0, 0, 120, 80))),
+		*MakeContainerNode(TEXT("lum_full"), TEXT("LumFull"), TEXT("FRAME"), 140, 0, 120, 80, FString(),
+			FString::Printf(
+				TEXT(",\"absoluteRenderBounds\":%s,\"fills\":["
+					 "{\"type\":\"SOLID\",\"visible\":true,\"blendMode\":\"NORMAL\",\"color\":{\"r\":0.9254902,\"g\":0.9019608,\"b\":0.94117647,\"a\":1}},"
+					 "{\"type\":\"IMAGE\",\"visible\":true,\"blendMode\":\"LUMINOSITY\",\"imageRef\":\"img_lum\",\"scaleMode\":\"FIT\",\"scalingFactor\":1.0}"
+					 "]"),
+				*MakeBoundsJson(140, 0, 120, 80)))));
 	TestTrue(TEXT("Write scaling local figma json"), FFileHelper::SaveStringToFile(Json, *TempJsonPath));
 
 	FDesignDocument Document;
@@ -392,72 +334,21 @@ bool FFigmaLocalBlendModeBakeWorkflowTest::RunTest(const FString& Parameters)
 	};
 	TestTrue(TEXT("Write blend test png"), WriteTestPng(SourcePngPath, Pixels, 1, 1));
 
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [
-					{
-						"id": "mul_node",
-						"name": "Multiply",
-						"type": "FRAME",
-						"visible": true,
-						"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 80},
-						"absoluteRenderBounds": {"x": 0, "y": 0, "width": 120, "height": 80},
-						"fills": [
-							{"type": "SOLID", "visible": true, "blendMode": "NORMAL", "color": {"r": 0.2509804, "g": 0.2509804, "b": 0.2509804, "a": 1}},
-							{"type": "IMAGE", "visible": true, "blendMode": "MULTIPLY", "imageRef": "img_blend", "scaleMode": "FIT"}
-						],
-						"children": []
-					},
-					{
-						"id": "screen_node",
-						"name": "Screen",
-						"type": "FRAME",
-						"visible": true,
-						"absoluteBoundingBox": {"x": 140, "y": 0, "width": 120, "height": 80},
-						"absoluteRenderBounds": {"x": 140, "y": 0, "width": 120, "height": 80},
-						"fills": [
-							{"type": "SOLID", "visible": true, "blendMode": "NORMAL", "color": {"r": 0.2509804, "g": 0.2509804, "b": 0.2509804, "a": 1}},
-							{"type": "IMAGE", "visible": true, "blendMode": "SCREEN", "imageRef": "img_blend", "scaleMode": "FIT"}
-						],
-						"children": []
-					},
-					{
-						"id": "overlay_node",
-						"name": "Overlay",
-						"type": "FRAME",
-						"visible": true,
-						"absoluteBoundingBox": {"x": 280, "y": 0, "width": 120, "height": 80},
-						"absoluteRenderBounds": {"x": 280, "y": 0, "width": 120, "height": 80},
-						"fills": [
-							{"type": "SOLID", "visible": true, "blendMode": "NORMAL", "color": {"r": 0.2509804, "g": 0.2509804, "b": 0.2509804, "a": 1}},
-							{"type": "IMAGE", "visible": true, "blendMode": "OVERLAY", "imageRef": "img_blend", "scaleMode": "FIT"}
-						],
-						"children": []
-					},
-					{
-						"id": "stretch_screen_node",
-						"name": "Stretch Screen",
-						"type": "FRAME",
-						"visible": true,
-						"absoluteBoundingBox": {"x": 420, "y": 0, "width": 120, "height": 80},
-						"absoluteRenderBounds": {"x": 420, "y": 0, "width": 120, "height": 80},
-						"fills": [
-							{"type": "SOLID", "visible": true, "blendMode": "NORMAL", "color": {"r": 0.2509804, "g": 0.2509804, "b": 0.2509804, "a": 1}},
-							{"type": "IMAGE", "visible": true, "blendMode": "SCREEN", "imageRef": "img_blend", "scaleMode": "STRETCH"}
-						],
-						"children": []
-					}
-				]
-			}]
-		}
-	})");
+	const auto MakeBlendNodeJson = [](const TCHAR* Id, const TCHAR* Name, double X, const TCHAR* BlendMode, const TCHAR* ScaleMode)
+	{
+		return MakeContainerNode(Id, Name, TEXT("FRAME"), X, 0, 120, 80, FString(),
+			FString::Printf(
+				TEXT(",\"absoluteRenderBounds\":%s,\"fills\":["
+					 "{\"type\":\"SOLID\",\"visible\":true,\"blendMode\":\"NORMAL\",\"color\":{\"r\":0.2509804,\"g\":0.2509804,\"b\":0.2509804,\"a\":1}},"
+					 "{\"type\":\"IMAGE\",\"visible\":true,\"blendMode\":\"%s\",\"imageRef\":\"img_blend\",\"scaleMode\":\"%s\"}"
+					 "]"),
+				*MakeBoundsJson(X, 0, 120, 80), BlendMode, ScaleMode));
+	};
+	const FString Json = MakeFigmaDocJson(FString::Printf(TEXT("%s,%s,%s,%s"),
+		*MakeBlendNodeJson(TEXT("mul_node"), TEXT("Multiply"), 0, TEXT("MULTIPLY"), TEXT("FIT")),
+		*MakeBlendNodeJson(TEXT("screen_node"), TEXT("Screen"), 140, TEXT("SCREEN"), TEXT("FIT")),
+		*MakeBlendNodeJson(TEXT("overlay_node"), TEXT("Overlay"), 280, TEXT("OVERLAY"), TEXT("FIT")),
+		*MakeBlendNodeJson(TEXT("stretch_screen_node"), TEXT("Stretch Screen"), 420, TEXT("SCREEN"), TEXT("STRETCH"))));
 	TestTrue(TEXT("Write blend local figma json"), FFileHelper::SaveStringToFile(Json, *TempJsonPath));
 
 	FDesignDocument Document;
@@ -662,45 +553,16 @@ bool FFigmaLocalLayerBlurBakeWorkflowTest::RunTest(const FString& Parameters)
 	};
 	TestTrue(TEXT("Write blur test png"), WriteTestPng(SourcePngPath, Pixels, 2, 2));
 
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [{
-					"id": "root_frame",
-					"name": "RootFrame",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 160, "height": 120},
-					"absoluteRenderBounds": {"x": 0, "y": 0, "width": 160, "height": 120},
-					"children": [{
-						"id": "blur_avatar",
-						"name": "BlurAvatar",
-						"type": "ELLIPSE",
-						"visible": true,
-						"absoluteBoundingBox": {"x": 24, "y": 20, "width": 26, "height": 26},
-						"absoluteRenderBounds": {"x": 2.25, "y": -1.75, "width": 69.5, "height": 69.5},
-						"fills": [
-							{"type": "IMAGE", "visible": true, "blendMode": "NORMAL", "imageRef": "avatar", "scaleMode": "FIT"},
-							{"type": "IMAGE", "visible": true, "blendMode": "NORMAL", "imageRef": "avatar", "scaleMode": "FILL"}
-						],
-						"effects": [{
-							"type": "LAYER_BLUR",
-							"visible": true,
-							"blendMode": "NORMAL",
-							"radius": 21.75
-						}],
-						"children": []
-					}]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(
+		MakeContainerNode(TEXT("root_frame"), TEXT("RootFrame"), TEXT("FRAME"), 0, 0, 160, 120,
+			MakeLeafNode(TEXT("blur_avatar"), TEXT("BlurAvatar"), TEXT("ELLIPSE"), 24, 20, 26, 26,
+				FString::Printf(
+					TEXT(",\"absoluteRenderBounds\":%s,\"fills\":["
+						 "{\"type\":\"IMAGE\",\"visible\":true,\"blendMode\":\"NORMAL\",\"imageRef\":\"avatar\",\"scaleMode\":\"FIT\"},"
+						 "{\"type\":\"IMAGE\",\"visible\":true,\"blendMode\":\"NORMAL\",\"imageRef\":\"avatar\",\"scaleMode\":\"FILL\"}"
+						 "],\"effects\":[{\"type\":\"LAYER_BLUR\",\"visible\":true,\"blendMode\":\"NORMAL\",\"radius\":21.75}]"),
+					*MakeBoundsJson(2.25, -1.75, 69.5, 69.5))),
+			FString::Printf(TEXT(",\"absoluteRenderBounds\":%s"), *MakeBoundsJson(0, 0, 160, 120))));
 	TestTrue(TEXT("Write blur local figma json"), FFileHelper::SaveStringToFile(Json, *TempJsonPath));
 
 	FDesignDocument Document;

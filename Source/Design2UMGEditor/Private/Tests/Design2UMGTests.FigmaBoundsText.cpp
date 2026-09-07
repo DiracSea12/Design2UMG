@@ -4,10 +4,12 @@
 #include "Design2UMGConverter.h"
 #include "FontResolver.h"
 #include "FigmaParser.h"
+#include "FigmaTestDocBuilder.h"
 #include "Design2UMGTestUtils.h"
 
 #if WITH_AUTOMATION_WORKER
 using namespace Design2UMGTestUtils;
+using namespace Design2UMGCoreTests;
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaComplexParserTest,
 	"Design2UMG.FigmaParser.ComplexDashboard",
@@ -157,93 +159,21 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLineHeightMappingTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaLineHeightMappingTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page 1",
-				"type": "CANVAS",
-				"children": [{
-					"id": "0:2",
-					"name": "Root",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x":0,"y":0,"width":100,"height":100},
-					"children": [
-						{
-							"id": "0:3",
-							"name": "TextPx",
-							"type": "TEXT",
-							"visible": true,
-							"absoluteBoundingBox": {"x":1,"y":1,"width":30,"height":12},
-							"fills": [{"type":"SOLID","visible":true,"color":{"r":1,"g":1,"b":1,"a":1}}],
-							"style": {
-								"fontFamily": "Inter",
-								"fontSize": 10,
-								"fontWeight": 400,
-								"lineHeightUnit": "PIXELS",
-								"lineHeightPx": 15
-							},
-							"characters": "A",
-							"textAutoResize": "HEIGHT"
-						},
-						{
-							"id": "0:4",
-							"name": "TextPercent",
-							"type": "TEXT",
-							"visible": true,
-							"absoluteBoundingBox": {"x":1,"y":20,"width":30,"height":12},
-							"fills": [{"type":"SOLID","visible":true,"color":{"r":1,"g":1,"b":1,"a":1}}],
-							"style": {
-								"fontFamily": "Inter",
-								"fontSize": 10,
-								"fontWeight": 400,
-								"lineHeightUnit": "FONT_SIZE_%",
-								"lineHeightPx": 14,
-								"lineHeightPercentFontSize": 140
-							},
-							"characters": "B",
-							"textAutoResize": "HEIGHT"
-						},
-						{
-							"id": "0:5",
-							"name": "TextAuto",
-							"type": "TEXT",
-							"visible": true,
-							"absoluteBoundingBox": {"x":1,"y":40,"width":30,"height":12},
-							"fills": [{"type":"SOLID","visible":true,"color":{"r":1,"g":1,"b":1,"a":1}}],
-							"style": {
-								"fontFamily": "Inter",
-								"fontSize": 10,
-								"fontWeight": 400,
-								"lineHeightUnit": "AUTO"
-							},
-							"characters": "C",
-							"textAutoResize": "HEIGHT"
-						},
-						{
-							"id": "0:6",
-							"name": "TextMissing",
-							"type": "TEXT",
-							"visible": true,
-							"absoluteBoundingBox": {"x":1,"y":60,"width":30,"height":12},
-							"fills": [{"type":"SOLID","visible":true,"color":{"r":1,"g":1,"b":1,"a":1}}],
-							"style": {
-								"fontFamily": "Inter",
-								"fontSize": 10,
-								"fontWeight": 400
-							},
-							"characters": "D",
-							"textAutoResize": "HEIGHT"
-						}
-					]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 100, 100, FString::Printf(
+		TEXT("%s,%s,%s,%s"),
+		*MakeTextNode(TEXT("0:3"), TEXT("TextPx"), 1, 1, 30, 12, TEXT("A"),
+			TEXT("\"fontFamily\":\"Inter\",\"fontSize\":10,\"fontWeight\":400,\"lineHeightUnit\":\"PIXELS\",\"lineHeightPx\":15"),
+			FString::Printf(TEXT(",\"fills\":[%s],\"textAutoResize\":\"HEIGHT\""), *MakeSolidFillJson(1, 1, 1))),
+		*MakeTextNode(TEXT("0:4"), TEXT("TextPercent"), 1, 20, 30, 12, TEXT("B"),
+			TEXT("\"fontFamily\":\"Inter\",\"fontSize\":10,\"fontWeight\":400,\"lineHeightUnit\":\"FONT_SIZE_%\",\"lineHeightPx\":14,"
+				 "\"lineHeightPercentFontSize\":140"),
+			FString::Printf(TEXT(",\"fills\":[%s],\"textAutoResize\":\"HEIGHT\""), *MakeSolidFillJson(1, 1, 1))),
+		*MakeTextNode(TEXT("0:5"), TEXT("TextAuto"), 1, 40, 30, 12, TEXT("C"),
+			TEXT("\"fontFamily\":\"Inter\",\"fontSize\":10,\"fontWeight\":400,\"lineHeightUnit\":\"AUTO\""),
+			FString::Printf(TEXT(",\"fills\":[%s],\"textAutoResize\":\"HEIGHT\""), *MakeSolidFillJson(1, 1, 1))),
+		*MakeTextNode(TEXT("0:6"), TEXT("TextMissing"), 1, 60, 30, 12, TEXT("D"),
+			TEXT("\"fontFamily\":\"Inter\",\"fontSize\":10,\"fontWeight\":400"),
+			FString::Printf(TEXT(",\"fills\":[%s],\"textAutoResize\":\"HEIGHT\""), *MakeSolidFillJson(1, 1, 1))))));
 	FDesignDocument Doc;
 	TestTrue(TEXT("Figma parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
 	if (Doc.Children.Num() == 0 || Doc.Children[0]->Children.Num() < 4)
@@ -263,47 +193,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaStrokeVisibilityGateTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaStrokeVisibilityGateTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page 1",
-				"type": "CANVAS",
-				"children": [{
-					"id": "0:2",
-					"name": "Root",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x":0,"y":0,"width":400,"height":300},
-					"children": [
-						{
-							"id": "0:3",
-							"name": "NoVisibleStroke",
-							"type": "RECTANGLE",
-							"visible": true,
-							"absoluteBoundingBox": {"x":10,"y":10,"width":120,"height":40},
-							"strokeWeight": 3,
-							"strokeAlign": "CENTER",
-							"strokes": [{"type":"SOLID","visible":false,"color":{"r":1,"g":0,"b":0,"a":1}}]
-						},
-						{
-							"id": "0:4",
-							"name": "VisibleStroke",
-							"type": "RECTANGLE",
-							"visible": true,
-							"absoluteBoundingBox": {"x":10,"y":70,"width":120,"height":40},
-							"strokeWeight": 2,
-							"strokeAlign": "OUTSIDE",
-							"strokes": [{"type":"SOLID","visible":true,"color":{"r":0,"g":1,"b":0,"a":1}}]
-						}
-					]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 400, 300, FString::Printf(
+		TEXT("%s,%s"),
+		*MakeLeafNode(TEXT("0:3"), TEXT("NoVisibleStroke"), TEXT("RECTANGLE"), 10, 10, 120, 40,
+			TEXT(",\"strokeWeight\":3,\"strokeAlign\":\"CENTER\","
+				 "\"strokes\":[{\"type\":\"SOLID\",\"visible\":false,\"color\":{\"r\":1,\"g\":0,\"b\":0,\"a\":1}}]")),
+		*MakeLeafNode(TEXT("0:4"), TEXT("VisibleStroke"), TEXT("RECTANGLE"), 10, 70, 120, 40,
+			FString::Printf(TEXT(",\"strokeWeight\":2,\"strokeAlign\":\"OUTSIDE\",\"strokes\":[%s]"), *MakeSolidFillJson(0, 1, 0))))));
 	FDesignDocument Doc;
 	TestTrue(TEXT("Figma parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
 	if (Doc.Children.Num() == 0 || Doc.Children[0]->Children.Num() < 2)
@@ -321,44 +217,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaExpandedContainerRenderBoundsUseLayoutSpa
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaExpandedContainerRenderBoundsUseLayoutSpaceTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page 1",
-				"type": "CANVAS",
-				"children": [{
-					"id": "0:2",
-					"name": "Root",
-					"type": "FRAME",
-					"visible": true,
-					"clipsContent": true,
-					"absoluteBoundingBox": {"x":0,"y":0,"width":100,"height":80},
-					"absoluteRenderBounds": {"x":-8,"y":-8,"width":116,"height":96},
-					"effects": [{
-						"type": "DROP_SHADOW",
-						"visible": true,
-						"blendMode": "NORMAL",
-						"offset": {"x":0,"y":0},
-						"radius": 8,
-						"color": {"r":0,"g":0,"b":0,"a":0.25}
-					}],
-					"children": [{
-						"id": "0:3",
-						"name": "Child",
-						"type": "RECTANGLE",
-						"visible": true,
-						"absoluteBoundingBox": {"x":10,"y":12,"width":40,"height":20},
-						"absoluteRenderBounds": {"x":10,"y":12,"width":40,"height":20},
-						"fills": [{"type":"SOLID","visible":true,"color":{"r":1,"g":1,"b":1,"a":1}}]
-					}]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 100, 80,
+		MakeLeafNode(TEXT("0:3"), TEXT("Child"), TEXT("RECTANGLE"), 10, 12, 40, 20,
+			FString::Printf(TEXT(",\"absoluteRenderBounds\":%s,\"fills\":[%s]"),
+				*MakeBoundsJson(10, 12, 40, 20), *MakeSolidFillJson(1, 1, 1))),
+		TEXT(",\"clipsContent\":true,\"absoluteRenderBounds\":{\"x\":-8,\"y\":-8,\"width\":116,\"height\":96},"
+			 "\"effects\":[{\"type\":\"DROP_SHADOW\",\"visible\":true,\"blendMode\":\"NORMAL\",\"offset\":{\"x\":0,\"y\":0},"
+			 "\"radius\":8,\"color\":{\"r\":0,\"g\":0,\"b\":0,\"a\":0.25}}]")));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Figma parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
@@ -391,67 +256,23 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaClippedSyntheticVectorRasterUsesVisibleBo
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaClippedSyntheticVectorRasterUsesVisibleBoundsTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page 1",
-				"type": "CANVAS",
-				"children": [{
-					"id": "0:2",
-					"name": "Viewport",
-					"type": "FRAME",
-					"visible": true,
-					"clipsContent": true,
-					"absoluteBoundingBox": {"x":0,"y":0,"width":1600,"height":920},
-					"absoluteRenderBounds": {"x":0,"y":0,"width":1600,"height":920},
-					"children": [{
-						"id": "0:3",
-						"name": "ClippingFrame",
-						"type": "FRAME",
-						"visible": true,
-						"clipsContent": true,
-						"absoluteBoundingBox": {"x":0,"y":0,"width":1600,"height":1200},
-						"absoluteRenderBounds": {"x":0,"y":0,"width":1600,"height":920},
-						"children": [{
-							"id": "0:4",
-							"name": "BackgroundShape",
-							"type": "ELLIPSE",
-							"visible": true,
-							"absoluteBoundingBox": {"x":-701,"y":-148,"width":1700,"height":1700},
-							"absoluteRenderBounds": {"x":0,"y":0,"width":999,"height":920},
-							"fills": [{"type":"SOLID","visible":true,"color":{"r":0.5,"g":0.2,"b":1,"a":1}}]
-						}, {
-							"id": "0:5",
-							"name": "RasterizedBackgroundShape",
-							"type": "ELLIPSE",
-							"visible": true,
-							"absoluteBoundingBox": {"x":-701,"y":-148,"width":1700,"height":1700},
-							"absoluteRenderBounds": {"x":0,"y":0,"width":999,"height":920},
-							"fills": [
-								{"type":"GRADIENT_LINEAR","visible":true,"gradientStops":[
-									{"position":0,"color":{"r":0.8,"g":0.2,"b":1,"a":1}},
-									{"position":1,"color":{"r":0.5,"g":0.1,"b":1,"a":1}}
-								]},
-								{"type":"IMAGE","visible":true,"imageRef":"vec_clipped_shape","scaleMode":"FILL"}
-							]
-						}, {
-							"id": "0:6",
-							"name": "RasterizedStroke",
-							"type": "VECTOR",
-							"visible": true,
-							"absoluteBoundingBox": {"x":0,"y":100,"width":599,"height":1},
-							"absoluteRenderBounds": {"x":0,"y":100.15,"width":560,"height":0.7},
-							"fills": [{"type":"IMAGE","visible":true,"imageRef":"vec_unclipped_stroke","scaleMode":"FILL"}]
-						}]
-					}]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("0:2"), TEXT("Viewport"), TEXT("FRAME"), 0, 0, 1600, 920,
+		MakeContainerNode(TEXT("0:3"), TEXT("ClippingFrame"), TEXT("FRAME"), 0, 0, 1600, 1200, FString::Printf(
+			TEXT("%s,%s,%s"),
+			*MakeLeafNode(TEXT("0:4"), TEXT("BackgroundShape"), TEXT("ELLIPSE"), -701, -148, 1700, 1700,
+				FString::Printf(TEXT(",\"absoluteRenderBounds\":%s,\"fills\":[%s]"),
+					*MakeBoundsJson(0, 0, 999, 920), *MakeSolidFillJson(0.5, 0.2, 1))),
+			*MakeLeafNode(TEXT("0:5"), TEXT("RasterizedBackgroundShape"), TEXT("ELLIPSE"), -701, -148, 1700, 1700,
+				TEXT(",\"absoluteRenderBounds\":{\"x\":0,\"y\":0,\"width\":999,\"height\":920},\"fills\":["
+					 "{\"type\":\"GRADIENT_LINEAR\",\"visible\":true,\"gradientStops\":["
+					 "{\"position\":0,\"color\":{\"r\":0.8,\"g\":0.2,\"b\":1,\"a\":1}},"
+					 "{\"position\":1,\"color\":{\"r\":0.5,\"g\":0.1,\"b\":1,\"a\":1}}]},"
+					 "{\"type\":\"IMAGE\",\"visible\":true,\"imageRef\":\"vec_clipped_shape\",\"scaleMode\":\"FILL\"}]")),
+			*MakeLeafNode(TEXT("0:6"), TEXT("RasterizedStroke"), TEXT("VECTOR"), 0, 100, 599, 1,
+				TEXT(",\"absoluteRenderBounds\":{\"x\":0,\"y\":100.15,\"width\":560,\"height\":0.7},\"fills\":["
+					 "{\"type\":\"IMAGE\",\"visible\":true,\"imageRef\":\"vec_unclipped_stroke\",\"scaleMode\":\"FILL\"}]"))),
+		TEXT(",\"clipsContent\":true,\"absoluteRenderBounds\":{\"x\":0,\"y\":0,\"width\":1600,\"height\":920}")),
+		TEXT(",\"clipsContent\":true,\"absoluteRenderBounds\":{\"x\":0,\"y\":0,\"width\":1600,\"height\":920}")));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Clipped leaf parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
@@ -491,54 +312,18 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaClippedContainerOffsetsChildrenFromVisibl
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaClippedContainerOffsetsChildrenFromVisibleOriginTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page 1",
-				"type": "CANVAS",
-				"children": [{
-					"id": "root",
-					"name": "Viewport",
-					"type": "FRAME",
-					"clipsContent": true,
-					"absoluteBoundingBox": {"x":100,"y":200,"width":300,"height":200},
-					"absoluteRenderBounds": {"x":100,"y":200,"width":300,"height":200},
-					"children": [{
-						"id": "cropped",
-						"name": "CroppedContainer",
-						"type": "GROUP",
-						"absoluteBoundingBox": {"x":20,"y":140,"width":500,"height":400},
-						"absoluteRenderBounds": {"x":100,"y":200,"width":300,"height":200},
-						"children": [{
-							"id": "mask",
-							"name": "Mask",
-							"type": "VECTOR",
-							"isMask": true,
-							"absoluteBoundingBox": {"x":20,"y":140,"width":500,"height":400}
-						}, {
-							"id": "content",
-							"name": "Content",
-							"type": "INSTANCE",
-							"absoluteBoundingBox": {"x":80,"y":180,"width":360,"height":240},
-							"absoluteRenderBounds": {"x":100,"y":200,"width":300,"height":200},
-							"children": [{
-								"id": "tile",
-								"name": "VisibleTile",
-								"type": "RECTANGLE",
-								"absoluteBoundingBox": {"x":100,"y":200,"width":50,"height":50},
-								"absoluteRenderBounds": {"x":100,"y":200,"width":50,"height":50},
-								"fills": [{"type":"SOLID","color":{"r":0.2,"g":0.3,"b":0.5,"a":1}}]
-							}]
-						}]
-					}]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("root"), TEXT("Viewport"), TEXT("FRAME"), 100, 200, 300, 200,
+		MakeContainerNode(TEXT("cropped"), TEXT("CroppedContainer"), TEXT("GROUP"), 20, 140, 500, 400, FString::Printf(
+			TEXT("%s,%s"),
+			*MakeLeafNode(TEXT("mask"), TEXT("Mask"), TEXT("VECTOR"), 20, 140, 500, 400,
+				TEXT(",\"isMask\":true")),
+			*MakeContainerNode(TEXT("content"), TEXT("Content"), TEXT("INSTANCE"), 80, 180, 360, 240,
+				MakeLeafNode(TEXT("tile"), TEXT("VisibleTile"), TEXT("RECTANGLE"), 100, 200, 50, 50,
+					FString::Printf(TEXT(",\"absoluteRenderBounds\":%s,\"fills\":[%s]"),
+						*MakeBoundsJson(100, 200, 50, 50), *MakeSolidFillJson(0.2, 0.3, 0.5))),
+				TEXT(",\"absoluteRenderBounds\":{\"x\":100,\"y\":200,\"width\":300,\"height\":200}"))),
+			TEXT(",\"absoluteRenderBounds\":{\"x\":100,\"y\":200,\"width\":300,\"height\":200}")),
+		TEXT(",\"clipsContent\":true,\"absoluteRenderBounds\":{\"x\":100,\"y\":200,\"width\":300,\"height\":200}")));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Clipped container parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
@@ -567,45 +352,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLeafForegroundBlurUsesLayoutBoundsTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaLeafForegroundBlurUsesLayoutBoundsTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page 1",
-				"type": "CANVAS",
-				"children": [{
-					"id": "0:2",
-					"name": "Root",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x":0,"y":0,"width":160,"height":120},
-					"absoluteRenderBounds": {"x":0,"y":0,"width":160,"height":120},
-					"children": [{
-						"id": "blur_avatar",
-						"name": "BlurAvatar",
-						"type": "ELLIPSE",
-						"visible": true,
-						"absoluteBoundingBox": {"x":24,"y":20,"width":26,"height":26},
-						"absoluteRenderBounds": {"x":2.25,"y":-1.75,"width":69.5,"height":69.5},
-						"fills": [
-							{"type":"IMAGE","visible":true,"blendMode":"NORMAL","imageRef":"avatar","scaleMode":"FIT"},
-							{"type":"IMAGE","visible":true,"blendMode":"NORMAL","imageRef":"avatar_mask","scaleMode":"FILL"}
-						],
-						"effects": [{
-							"type":"LAYER_BLUR",
-							"visible":true,
-							"blendMode":"NORMAL",
-							"radius":21.75
-						}],
-						"children": []
-					}]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 160, 120,
+		MakeLeafNode(TEXT("blur_avatar"), TEXT("BlurAvatar"), TEXT("ELLIPSE"), 24, 20, 26, 26,
+			TEXT(",\"absoluteRenderBounds\":{\"x\":2.25,\"y\":-1.75,\"width\":69.5,\"height\":69.5},\"fills\":["
+				 "{\"type\":\"IMAGE\",\"visible\":true,\"blendMode\":\"NORMAL\",\"imageRef\":\"avatar\",\"scaleMode\":\"FIT\"},"
+				 "{\"type\":\"IMAGE\",\"visible\":true,\"blendMode\":\"NORMAL\",\"imageRef\":\"avatar_mask\",\"scaleMode\":\"FILL\"}],"
+				 "\"effects\":[{\"type\":\"LAYER_BLUR\",\"visible\":true,\"blendMode\":\"NORMAL\",\"radius\":21.75}]")),
+		TEXT(",\"absoluteRenderBounds\":{\"x\":0,\"y\":0,\"width\":160,\"height\":120}")));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Leaf blur parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
@@ -635,39 +388,12 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaShrunkenFilledFrameUsesLayoutBoundsTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaShrunkenFilledFrameUsesLayoutBoundsTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page 1",
-				"type": "CANVAS",
-				"children": [{
-					"id": "0:2",
-					"name": "Root",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x":0,"y":0,"width":320,"height":240},
-					"absoluteRenderBounds": {"x":0,"y":0,"width":320,"height":240},
-					"children": [{
-						"id": "0:3",
-						"name": "ImageCard",
-						"type": "FRAME",
-						"visible": true,
-						"absoluteBoundingBox": {"x":24,"y":16,"width":160,"height":160},
-						"absoluteRenderBounds": {"x":24,"y":16,"width":160,"height":100},
-						"fills": [
-							{"type":"SOLID","visible":true,"blendMode":"NORMAL","color":{"r":0.92,"g":0.90,"b":0.94,"a":1}},
-							{"type":"IMAGE","visible":true,"blendMode":"LUMINOSITY","imageRef":"img_card","scaleMode":"FIT"}
-						],
-						"children": []
-					}]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 320, 240,
+		MakeContainerNode(TEXT("0:3"), TEXT("ImageCard"), TEXT("FRAME"), 24, 16, 160, 160, FString(),
+			TEXT(",\"absoluteRenderBounds\":{\"x\":24,\"y\":16,\"width\":160,\"height\":100},\"fills\":["
+				 "{\"type\":\"SOLID\",\"visible\":true,\"blendMode\":\"NORMAL\",\"color\":{\"r\":0.92,\"g\":0.90,\"b\":0.94,\"a\":1}},"
+				 "{\"type\":\"IMAGE\",\"visible\":true,\"blendMode\":\"LUMINOSITY\",\"imageRef\":\"img_card\",\"scaleMode\":\"FIT\"}]")),
+		TEXT(",\"absoluteRenderBounds\":{\"x\":0,\"y\":0,\"width\":320,\"height\":240}")));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Shrunken filled frame parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
@@ -693,61 +419,17 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaFilledAutoLayoutContainerUsesLayoutBounds
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaFilledAutoLayoutContainerUsesLayoutBoundsTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page 1",
-				"type": "CANVAS",
-				"children": [{
-					"id": "0:2",
-					"name": "Root",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x":0,"y":0,"width":400,"height":300},
-					"absoluteRenderBounds": {"x":0,"y":0,"width":400,"height":300},
-					"children": [{
-						"id":"content",
-						"name":"Content",
-						"type":"FRAME",
-						"visible":true,
-						"layoutMode":"VERTICAL",
-						"absoluteBoundingBox":{"x":20,"y":20,"width":300,"height":200},
-						"absoluteRenderBounds":{"x":20,"y":20,"width":300,"height":136},
-						"fills":[{"type":"SOLID","visible":true,"blendMode":"NORMAL","color":{"r":1,"g":1,"b":1,"a":1}}],
-						"children":[
-							{
-								"id":"headline",
-								"name":"Headline",
-								"type":"TEXT",
-								"visible":true,
-								"layoutSizingHorizontal":"FILL",
-								"layoutSizingVertical":"HUG",
-								"absoluteBoundingBox":{"x":36,"y":36,"width":268,"height":48},
-								"absoluteRenderBounds":{"x":38,"y":41,"width":240,"height":33.27},
-								"characters":"Label",
-								"style":{
-									"fontFamily":"Roboto",
-									"fontWeight":700,
-									"fontSize":32,
-									"textAlignHorizontal":"LEFT",
-									"textAlignVertical":"TOP",
-									"textCase":"ORIGINAL",
-									"textDecoration":"NONE",
-									"letterSpacing":0,
-									"lineHeightUnit":"PIXELS",
-									"lineHeightPx":48
-								}
-							}
-						]
-					}]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 400, 300,
+		MakeContainerNode(TEXT("content"), TEXT("Content"), TEXT("FRAME"), 20, 20, 300, 200,
+			MakeTextNode(TEXT("headline"), TEXT("Headline"), 36, 36, 268, 48, TEXT("Label"),
+				TEXT("\"fontFamily\":\"Roboto\",\"fontWeight\":700,\"fontSize\":32,\"textAlignHorizontal\":\"LEFT\","
+					 "\"textAlignVertical\":\"TOP\",\"textCase\":\"ORIGINAL\",\"textDecoration\":\"NONE\","
+					 "\"letterSpacing\":0,\"lineHeightUnit\":\"PIXELS\",\"lineHeightPx\":48"),
+				TEXT(",\"layoutSizingHorizontal\":\"FILL\",\"layoutSizingVertical\":\"HUG\","
+					 "\"absoluteRenderBounds\":{\"x\":38,\"y\":41,\"width\":240,\"height\":33.27}")),
+			TEXT(",\"layoutMode\":\"VERTICAL\",\"absoluteRenderBounds\":{\"x\":20,\"y\":20,\"width\":300,\"height\":136},"
+				 "\"fills\":[{\"type\":\"SOLID\",\"visible\":true,\"blendMode\":\"NORMAL\",\"color\":{\"r\":1,\"g\":1,\"b\":1,\"a\":1}}]")),
+		TEXT(",\"absoluteRenderBounds\":{\"x\":0,\"y\":0,\"width\":400,\"height\":300}")));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Filled auto-layout container parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
@@ -774,55 +456,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaExplicitGroupMaskLeafSkippedTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaExplicitGroupMaskLeafSkippedTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [{
-					"id": "masked_group",
-					"name": "MaskedGroup",
-					"type": "GROUP",
-					"visible": true,
-					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 120},
-					"children": [
-						{
-							"id": "mask_rect",
-							"name": "Mask Shape",
-							"type": "RECTANGLE",
-							"visible": true,
-							"isMask": true,
-							"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 120},
-							"fills": [{
-								"type": "SOLID",
-								"visible": true,
-								"color": {"r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}
-							}]
-						},
-						{
-							"id": "label",
-							"name": "Label",
-							"type": "TEXT",
-							"visible": true,
-							"absoluteBoundingBox": {"x": 10, "y": 10, "width": 80, "height": 20},
-							"characters": "Visible",
-							"style": {
-								"fontFamily": "Inter",
-								"fontSize": 16,
-								"fontWeight": 400,
-								"textAlignHorizontal": "LEFT",
-								"textAlignVertical": "TOP"
-							}
-						}
-					]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("masked_group"), TEXT("MaskedGroup"), TEXT("GROUP"), 0, 0, 120, 120, FString::Printf(
+		TEXT("%s,%s"),
+		*MakeLeafNode(TEXT("mask_rect"), TEXT("Mask Shape"), TEXT("RECTANGLE"), 0, 0, 120, 120,
+			FString::Printf(TEXT(",\"isMask\":true,\"fills\":[%s]"), *MakeSolidFillJson(0, 0, 0))),
+		*MakeTextNode(TEXT("label"), TEXT("Label"), 10, 10, 80, 20, TEXT("Visible"),
+			TEXT("\"fontFamily\":\"Inter\",\"fontSize\":16,\"fontWeight\":400,"
+				 "\"textAlignHorizontal\":\"LEFT\",\"textAlignVertical\":\"TOP\"")))));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Explicit group mask fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
@@ -846,52 +486,12 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaImplicitGroupMaskLeafStackSkippedTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaImplicitGroupMaskLeafStackSkippedTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [{
-					"id": "masked_group",
-					"name": "MaskedGroup",
-					"type": "GROUP",
-					"visible": true,
-					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 120},
-					"children": [
-						{
-							"id": "implicit_mask",
-							"name": "Shape",
-							"type": "RECTANGLE",
-							"visible": true,
-							"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 120},
-							"fills": [{
-								"type": "SOLID",
-								"visible": true,
-								"color": {"r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0}
-							}]
-						},
-						{
-							"id": "masked_image",
-							"name": "Image",
-							"type": "RECTANGLE",
-							"visible": true,
-							"absoluteBoundingBox": {"x": -10, "y": -10, "width": 140, "height": 140},
-							"fills": [{
-								"type": "IMAGE",
-								"visible": true,
-								"imageRef": "masked_image_ref",
-								"scaleMode": "FILL"
-							}]
-						}
-					]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("masked_group"), TEXT("MaskedGroup"), TEXT("GROUP"), 0, 0, 120, 120, FString::Printf(
+		TEXT("%s,%s"),
+		*MakeLeafNode(TEXT("implicit_mask"), TEXT("Shape"), TEXT("RECTANGLE"), 0, 0, 120, 120,
+			FString::Printf(TEXT(",\"fills\":[%s]"), *MakeSolidFillJson(1, 1, 1))),
+		*MakeLeafNode(TEXT("masked_image"), TEXT("Image"), TEXT("RECTANGLE"), -10, -10, 140, 140,
+			TEXT(",\"fills\":[{\"type\":\"IMAGE\",\"visible\":true,\"imageRef\":\"masked_image_ref\",\"scaleMode\":\"FILL\"}]")))));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Implicit group mask stack fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
@@ -915,62 +515,14 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaImplicitGroupMaskGraphicalSubtreeSkippedT
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaImplicitGroupMaskGraphicalSubtreeSkippedTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [{
-					"id": "masked_group",
-					"name": "MaskedGroup",
-					"type": "GROUP",
-					"visible": true,
-					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 48, "height": 48},
-					"children": [
-						{
-							"id": "implicit_mask",
-							"name": "Shape",
-							"type": "ELLIPSE",
-							"visible": true,
-							"absoluteBoundingBox": {"x": 0, "y": 0, "width": 48, "height": 48},
-							"fills": [{
-								"type": "SOLID",
-								"visible": true,
-								"color": {"r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0}
-							}]
-						},
-						{
-							"id": "grouped_artwork",
-							"name": "Artwork",
-							"type": "GROUP",
-							"visible": true,
-							"absoluteBoundingBox": {"x": -4, "y": -4, "width": 56, "height": 56},
-							"children": [
-								{
-									"id": "art_circle",
-									"name": "Circle",
-									"type": "ELLIPSE",
-									"visible": true,
-									"absoluteBoundingBox": {"x": -4, "y": -4, "width": 56, "height": 56}
-								},
-								{
-									"id": "art_vector",
-									"name": "Detail",
-									"type": "VECTOR",
-									"visible": true,
-									"absoluteBoundingBox": {"x": 12, "y": 12, "width": 24, "height": 24}
-								}
-							]
-						}
-					]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("masked_group"), TEXT("MaskedGroup"), TEXT("GROUP"), 0, 0, 48, 48, FString::Printf(
+		TEXT("%s,%s"),
+		*MakeLeafNode(TEXT("implicit_mask"), TEXT("Shape"), TEXT("ELLIPSE"), 0, 0, 48, 48,
+			FString::Printf(TEXT(",\"fills\":[%s]"), *MakeSolidFillJson(1, 1, 1))),
+		*MakeContainerNode(TEXT("grouped_artwork"), TEXT("Artwork"), TEXT("GROUP"), -4, -4, 56, 56, FString::Printf(
+			TEXT("%s,%s"),
+			*MakeLeafNode(TEXT("art_circle"), TEXT("Circle"), TEXT("ELLIPSE"), -4, -4, 56, 56),
+			*MakeLeafNode(TEXT("art_vector"), TEXT("Detail"), TEXT("VECTOR"), 12, 12, 24, 24))))));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Implicit graphical subtree mask fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
@@ -994,33 +546,14 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaFullBoundsGraphicalBackgroundKeptWithoutC
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaFullBoundsGraphicalBackgroundKeptWithoutClipEvidenceTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0", "name": "Doc", "type": "DOCUMENT", "children": [{
-				"id": "0:1", "name": "Page", "type": "CANVAS", "children": [{
-					"id": "decorated_background", "name": "DecoratedBackground", "type": "GROUP",
-					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 120},
-					"children": [
-						{
-							"id": "background", "name": "Background", "type": "RECTANGLE",
-							"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 120},
-							"fills": [{"type": "SOLID", "color": {"r": 0.1, "g": 0.2, "b": 0.3, "a": 1}}]
-						},
-						{
-							"id": "dot_a", "name": "DotA", "type": "ELLIPSE",
-							"absoluteBoundingBox": {"x": 16, "y": 16, "width": 12, "height": 12},
-							"fills": [{"type": "SOLID", "color": {"r": 0.4, "g": 0.5, "b": 0.6, "a": 1}}]
-						},
-						{
-							"id": "dot_b", "name": "DotB", "type": "ELLIPSE",
-							"absoluteBoundingBox": {"x": 84, "y": 84, "width": 12, "height": 12},
-							"fills": [{"type": "SOLID", "color": {"r": 0.4, "g": 0.5, "b": 0.6, "a": 1}}]
-						}
-					]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("decorated_background"), TEXT("DecoratedBackground"), TEXT("GROUP"), 0, 0, 120, 120, FString::Printf(
+		TEXT("%s,%s,%s"),
+		*MakeLeafNode(TEXT("background"), TEXT("Background"), TEXT("RECTANGLE"), 0, 0, 120, 120,
+			FString::Printf(TEXT(",\"fills\":[%s]"), *MakeSolidFillJson(0.1, 0.2, 0.3))),
+		*MakeLeafNode(TEXT("dot_a"), TEXT("DotA"), TEXT("ELLIPSE"), 16, 16, 12, 12,
+			FString::Printf(TEXT(",\"fills\":[%s]"), *MakeSolidFillJson(0.4, 0.5, 0.6))),
+		*MakeLeafNode(TEXT("dot_b"), TEXT("DotB"), TEXT("ELLIPSE"), 84, 84, 12, 12,
+			FString::Printf(TEXT(",\"fills\":[%s]"), *MakeSolidFillJson(0.4, 0.5, 0.6))))));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Decorated graphical background fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
@@ -1039,54 +572,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaFullBoundsGroupBackgroundKeptWithoutMaskF
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaFullBoundsGroupBackgroundKeptWithoutMaskFlagTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [{
-					"id": "background_group",
-					"name": "BackgroundGroup",
-					"type": "GROUP",
-					"visible": true,
-					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 120},
-					"children": [
-						{
-							"id": "background_rect",
-							"name": "Background",
-							"type": "RECTANGLE",
-							"visible": true,
-							"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 120},
-							"fills": [{
-								"type": "SOLID",
-								"visible": true,
-								"color": {"r": 0.1, "g": 0.2, "b": 0.3, "a": 1.0}
-							}]
-						},
-						{
-							"id": "label",
-							"name": "Label",
-							"type": "TEXT",
-							"visible": true,
-							"absoluteBoundingBox": {"x": 10, "y": 10, "width": 80, "height": 20},
-							"characters": "Visible",
-							"style": {
-								"fontFamily": "Inter",
-								"fontSize": 16,
-								"fontWeight": 400,
-								"textAlignHorizontal": "LEFT",
-								"textAlignVertical": "TOP"
-							}
-						}
-					]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("background_group"), TEXT("BackgroundGroup"), TEXT("GROUP"), 0, 0, 120, 120, FString::Printf(
+		TEXT("%s,%s"),
+		*MakeLeafNode(TEXT("background_rect"), TEXT("Background"), TEXT("RECTANGLE"), 0, 0, 120, 120,
+			FString::Printf(TEXT(",\"fills\":[%s]"), *MakeSolidFillJson(0.1, 0.2, 0.3))),
+		*MakeTextNode(TEXT("label"), TEXT("Label"), 10, 10, 80, 20, TEXT("Visible"),
+			TEXT("\"fontFamily\":\"Inter\",\"fontSize\":16,\"fontWeight\":400,"
+				 "\"textAlignHorizontal\":\"LEFT\",\"textAlignVertical\":\"TOP\"")))));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Full-bounds group background fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
@@ -1111,63 +603,14 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaImplicitMaskLeafKeepsMultiFillGeometryTes
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaImplicitMaskLeafKeepsMultiFillGeometryTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [{
-					"id": "logo_group",
-					"name": "LogoGroup",
-					"type": "GROUP",
-					"visible": true,
-					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 48, "height": 48},
-					"children": [
-						{
-							"id": "logo_backplate",
-							"name": "Logo Backplate",
-							"type": "ELLIPSE",
-							"visible": true,
-							"absoluteBoundingBox": {"x": 0, "y": 0, "width": 48, "height": 48},
-							"fills": [
-								{
-									"type": "SOLID",
-									"visible": true,
-									"color": {"r": 0.15, "g": 0.2, "b": 0.7, "a": 1.0}
-								},
-								{
-									"type": "IMAGE",
-									"visible": true,
-									"imageRef": "img_logo",
-									"scaleMode": "FILL"
-								}
-							]
-						},
-						{
-							"id": "logo_foreground",
-							"name": "Foreground",
-							"type": "VECTOR",
-							"visible": true,
-							"absoluteBoundingBox": {"x": 12, "y": 12, "width": 24, "height": 24},
-							"fillGeometry": [{
-								"path": "M 0 0 L 24 0 L 12 24 Z",
-								"windingRule": "NONZERO"
-							}],
-							"fills": [{
-								"type": "SOLID",
-								"visible": true,
-								"color": {"r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0}
-							}]
-						}
-					]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("logo_group"), TEXT("LogoGroup"), TEXT("GROUP"), 0, 0, 48, 48, FString::Printf(
+		TEXT("%s,%s"),
+		*MakeLeafNode(TEXT("logo_backplate"), TEXT("Logo Backplate"), TEXT("ELLIPSE"), 0, 0, 48, 48,
+			FString::Printf(TEXT(",\"fills\":[%s,{\"type\":\"IMAGE\",\"visible\":true,\"imageRef\":\"img_logo\",\"scaleMode\":\"FILL\"}]"),
+				*MakeSolidFillJson(0.15, 0.2, 0.7))),
+		*MakeLeafNode(TEXT("logo_foreground"), TEXT("Foreground"), TEXT("VECTOR"), 12, 12, 24, 24,
+			FString::Printf(TEXT(",\"fillGeometry\":[{\"path\":\"M 0 0 L 24 0 L 12 24 Z\",\"windingRule\":\"NONZERO\"}],\"fills\":[%s]"),
+				*MakeSolidFillJson(1, 1, 1))))));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Multi-fill logo fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
@@ -1192,55 +635,14 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaFullBoundsFrameRectangleKeptWithoutMaskFl
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaFullBoundsFrameRectangleKeptWithoutMaskFlagTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [{
-					"id": "frame_root",
-					"name": "FrameRoot",
-					"type": "FRAME",
-					"visible": true,
-					"clipsContent": true,
-					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 120},
-					"children": [
-						{
-							"id": "bg_rect",
-							"name": "Rectangle",
-							"type": "RECTANGLE",
-							"visible": true,
-							"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 120},
-							"fills": [{
-								"type": "SOLID",
-								"visible": true,
-								"color": {"r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}
-							}]
-						},
-						{
-							"id": "fg_label",
-							"name": "Foreground",
-							"type": "TEXT",
-							"visible": true,
-							"absoluteBoundingBox": {"x": 12, "y": 12, "width": 60, "height": 20},
-							"characters": "Keep",
-							"style": {
-								"fontFamily": "Inter",
-								"fontSize": 16,
-								"fontWeight": 400,
-								"textAlignHorizontal": "LEFT",
-								"textAlignVertical": "TOP"
-							}
-						}
-					]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("frame_root"), TEXT("FrameRoot"), TEXT("FRAME"), 0, 0, 120, 120, FString::Printf(
+		TEXT("%s,%s"),
+		*MakeLeafNode(TEXT("bg_rect"), TEXT("Rectangle"), TEXT("RECTANGLE"), 0, 0, 120, 120,
+			FString::Printf(TEXT(",\"fills\":[%s]"), *MakeSolidFillJson(0, 0, 0))),
+		*MakeTextNode(TEXT("fg_label"), TEXT("Foreground"), 12, 12, 60, 20, TEXT("Keep"),
+			TEXT("\"fontFamily\":\"Inter\",\"fontSize\":16,\"fontWeight\":400,"
+				 "\"textAlignHorizontal\":\"LEFT\",\"textAlignVertical\":\"TOP\""))),
+		TEXT(",\"clipsContent\":true")));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Full-bounds frame rectangle fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
@@ -1265,43 +667,12 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaCornerRadiusNormalizationTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaCornerRadiusNormalizationTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page 1",
-				"type": "CANVAS",
-				"children": [{
-					"id": "0:2",
-					"name": "Root",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x":0,"y":0,"width":400,"height":300},
-					"children": [
-						{
-							"id": "0:3",
-							"name": "UniformRadius",
-							"type": "RECTANGLE",
-							"visible": true,
-							"absoluteBoundingBox": {"x":10,"y":10,"width":120,"height":40},
-							"rectangleCornerRadii": [100,100,100,100]
-						},
-						{
-							"id": "0:4",
-							"name": "NonUniformRadius",
-							"type": "RECTANGLE",
-							"visible": true,
-							"absoluteBoundingBox": {"x":10,"y":70,"width":120,"height":40},
-							"rectangleCornerRadii": [8,12,8,12]
-						}
-					]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 400, 300, FString::Printf(
+		TEXT("%s,%s"),
+		*MakeLeafNode(TEXT("0:3"), TEXT("UniformRadius"), TEXT("RECTANGLE"), 10, 10, 120, 40,
+			TEXT(",\"rectangleCornerRadii\":[100,100,100,100]")),
+		*MakeLeafNode(TEXT("0:4"), TEXT("NonUniformRadius"), TEXT("RECTANGLE"), 10, 70, 120, 40,
+			TEXT(",\"rectangleCornerRadii\":[8,12,8,12]")))));
 	FDesignDocument Doc;
 	TestTrue(TEXT("Figma parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
 	if (Doc.Children.Num() == 0 || Doc.Children[0]->Children.Num() < 2)
@@ -1318,60 +689,17 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaTextFitUsesAuthoredMinimumSizeTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaTextFitUsesAuthoredMinimumSizeTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page 1",
-				"type": "CANVAS",
-				"children": [{
-					"id": "0:2",
-					"name": "Root",
-					"type": "FRAME",
-					"visible": true,
-					"layoutMode": "VERTICAL",
-					"absoluteBoundingBox": {"x":0,"y":0,"width":500,"height":200},
-					"children": [
-						{
-							"id": "0:3",
-							"name": "ButtonLabelInter",
-							"type": "TEXT",
-							"visible": true,
-							"layoutSizingHorizontal": "HUG",
-							"layoutSizingVertical": "HUG",
-							"absoluteBoundingBox": {"x":20,"y":20,"width":63,"height":20},
-							"fills": [{"type":"SOLID","visible":true,"color":{"r":1,"g":1,"b":1,"a":1}}],
-							"style": {
-								"fontFamily": "Inter",
-								"fontSize": 18,
-								"fontWeight": 600
-							},
-							"characters": "Download"
-						},
-						{
-							"id": "0:4",
-							"name": "ButtonLabelRoboto",
-							"type": "TEXT",
-							"visible": true,
-							"layoutSizingHorizontal": "HUG",
-							"layoutSizingVertical": "HUG",
-							"absoluteBoundingBox": {"x":20,"y":56,"width":35,"height":20},
-							"fills": [{"type":"SOLID","visible":true,"color":{"r":1,"g":1,"b":1,"a":1}}],
-							"style": {
-								"fontFamily": "Roboto",
-								"fontSize": 14,
-								"fontWeight": 400
-							},
-							"characters": "Label"
-						}
-					]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 500, 200, FString::Printf(
+		TEXT("%s,%s"),
+		*MakeTextNode(TEXT("0:3"), TEXT("ButtonLabelInter"), 20, 20, 63, 20, TEXT("Download"),
+			TEXT("\"fontFamily\":\"Inter\",\"fontSize\":18,\"fontWeight\":600"),
+			FString::Printf(TEXT(",\"layoutSizingHorizontal\":\"HUG\",\"layoutSizingVertical\":\"HUG\",\"fills\":[%s]"),
+				*MakeSolidFillJson(1, 1, 1))),
+		*MakeTextNode(TEXT("0:4"), TEXT("ButtonLabelRoboto"), 20, 56, 35, 20, TEXT("Label"),
+			TEXT("\"fontFamily\":\"Roboto\",\"fontSize\":14,\"fontWeight\":400"),
+			FString::Printf(TEXT(",\"layoutSizingHorizontal\":\"HUG\",\"layoutSizingVertical\":\"HUG\",\"fills\":[%s]"),
+				*MakeSolidFillJson(1, 1, 1)))),
+		TEXT(",\"layoutMode\":\"VERTICAL\"")));
 	FDesignDocument Doc;
 	TestTrue(TEXT("Figma parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
 	if (Doc.Children.Num() == 0)

@@ -15,6 +15,7 @@
 #include "Design2UMGGenerationManifest.h"
 #include "Design2UMGGenerationSettingsSnapshot.h"
 #include "FigmaParser.h"
+#include "FigmaTestDocBuilder.h"
 #include "UMGGenerator.h"
 #include "UMGSchema.h"
 
@@ -30,25 +31,17 @@
 namespace
 {
 	using Design2UMGEditorTests::DeleteGeneratedAssetsAtPath;
+	using namespace Design2UMGCoreTests;
 
 	FString MakeQANormalImportFigmaJson()
 	{
-		return TEXT(R"({
-			"fileKey":"qa-normal-import-key",
-			"document":{"id":"0:0","name":"Doc","type":"DOCUMENT","children":[
-				{"id":"0:1","name":"Page","type":"CANVAS","children":[
-					{"id":"qa_root","name":"QANormalPage","type":"FRAME",
-					 "absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":200},"children":[
-						{"id":"qa_card","name":"Card","type":"FRAME",
-						 "absoluteBoundingBox":{"x":24,"y":24,"width":140,"height":100},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.9,"g":0.9,"b":0.9,"a":1}}],
-						 "children":[{"id":"qa_card_text","name":"Caption","type":"TEXT",
-							"absoluteBoundingBox":{"x":32,"y":32,"width":100,"height":20},"characters":"No mapping here",
-							"style":{"fontFamily":"Inter","fontSize":14,"fontWeight":400,"textAlignHorizontal":"LEFT","textAlignVertical":"TOP","textDecoration":"NONE","letterSpacing":0,"lineHeightUnit":"AUTO","lineHeightPx":0}}]}
-					]}
-				]}
-			]}
-		})");
+		return MakeFigmaDocJson(
+			MakeContainerNode(TEXT("qa_root"), TEXT("QANormalPage"), TEXT("FRAME"), 0, 0, 360, 200,
+				MakeContainerNode(TEXT("qa_card"), TEXT("Card"), TEXT("FRAME"), 24, 24, 140, 100,
+					MakeTextNode(TEXT("qa_card_text"), TEXT("Caption"), 32, 32, 100, 20, TEXT("No mapping here"),
+						TEXT("\"fontFamily\":\"Inter\",\"fontSize\":14,\"fontWeight\":400,\"textAlignHorizontal\":\"LEFT\",\"textAlignVertical\":\"TOP\",\"textDecoration\":\"NONE\",\"letterSpacing\":0,\"lineHeightUnit\":\"AUTO\",\"lineHeightPx\":0")),
+					FString::Printf(TEXT(",\"fills\":[%s]"), *MakeSolidFillJson(0.9, 0.9, 0.9)))),
+			TEXT(",\"fileKey\":\"qa-normal-import-key\""));
 	}
 
 	void DeleteQATestOutputDir(const FString& OutputPath)

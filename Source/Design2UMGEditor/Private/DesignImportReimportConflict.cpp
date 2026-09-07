@@ -249,7 +249,7 @@ namespace DesignImportPipeline
 		const FString TargetPackage = FPackageName::ObjectPathToPackageName(Session.Request.TargetAssetPath);
 		AddReimportDiagnostic(
 			Result.Diagnostics,
-			TEXT("reimport_full_conflict"),
+			ReimportDiagnosticKinds::FullConflict,
 			FString::Printf(
 				TEXT("Target %s preserved untouched: %s"),
 				*TargetPackage,
@@ -271,7 +271,7 @@ namespace DesignImportPipeline
 		{
 			AddReimportDiagnostic(
 				Result.Diagnostics,
-				TEXT("reimport_resolution_copy"),
+				ReimportDiagnosticKinds::ResolutionCopy,
 				FString::Printf(
 					TEXT("Resolution copy skipped: %s already exists"),
 					*(PackageDir / CopyName)));
@@ -289,7 +289,7 @@ namespace DesignImportPipeline
 			Result.ResolutionCopyPath = CopyBlueprint->GetPathName();
 			AddReimportDiagnostic(
 				Result.Diagnostics,
-				TEXT("reimport_resolution_copy"),
+				ReimportDiagnosticKinds::ResolutionCopy,
 				FString::Printf(
 					TEXT("Resolution copy generated at %s (original untouched); reason: %s"),
 					*Result.ResolutionCopyPath,
@@ -299,7 +299,7 @@ namespace DesignImportPipeline
 		{
 			AddReimportDiagnostic(
 				Result.Diagnostics,
-				TEXT("reimport_resolution_copy"),
+				ReimportDiagnosticKinds::ResolutionCopy,
 				FString::Printf(TEXT("Resolution copy generation failed for %s"), *(PackageDir / CopyName)));
 		}
 		// The copy-generation chain's mapping diagnostics (ini validation, hits, the copy's own sidecar write failure) land in the report.

@@ -7,6 +7,7 @@
 #include "FontResolver.h"
 #include "PenParser.h"
 #include "FigmaParser.h"
+#include "FigmaTestDocBuilder.h"
 #include "Design2UMGTestUtils.h"
 #include "Components/TextBlock.h"
 #include "Dom/JsonObject.h"
@@ -17,6 +18,7 @@
 
 #if WITH_AUTOMATION_WORKER
 using namespace Design2UMGTestUtils;
+using namespace Design2UMGCoreTests;
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIconFontNoMappingFallbackTest,
 	"Design2UMG.Unit.IconFont.NoMappingFallback",
@@ -821,47 +823,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMultiParagraphFixedWidthTextKeepsDeclaredFontS
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FMultiParagraphFixedWidthTextKeepsDeclaredFontSizeTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"JSON({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page 1",
-				"type": "CANVAS",
-				"children": [{
-					"id": "0:2",
-					"name": "Root",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x":0,"y":0,"width":1400,"height":200},
-					"children": [{
-						"id": "body",
-						"name": "Supporting text",
-						"type": "TEXT",
-						"visible": true,
-						"absoluteBoundingBox": {"x":0,"y":0,"width":1325,"height":80},
-						"style": {
-							"fontFamily": "Roboto",
-							"fontWeight": 400,
-							"fontSize": 14,
-							"textAlignHorizontal": "LEFT",
-							"textAlignVertical": "TOP",
-							"letterSpacing": 0.25,
-							"lineHeightUnit": "PIXELS",
-							"lineHeightPx": 20
-						},
-						"layoutSizingHorizontal": "FILL",
-						"layoutSizingVertical": "HUG",
-						"layoutPositioning": "AUTO",
-						"textAutoResize": "HEIGHT",
-						"characters": "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.\n\nDuis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum."
-					}]
-				}]
-			}]
-		}
-	})JSON");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 1400, 200,
+		MakeTextNode(TEXT("body"), TEXT("Supporting text"), 0, 0, 1325, 80,
+			TEXT("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.\\n\\nDuis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum."),
+			TEXT("\"fontFamily\":\"Roboto\",\"fontWeight\":400,\"fontSize\":14,\"textAlignHorizontal\":\"LEFT\","
+				 "\"textAlignVertical\":\"TOP\",\"letterSpacing\":0.25,\"lineHeightUnit\":\"PIXELS\",\"lineHeightPx\":20"),
+			TEXT(",\"layoutSizingHorizontal\":\"FILL\",\"layoutSizingVertical\":\"HUG\","
+				 "\"layoutPositioning\":\"AUTO\",\"textAutoResize\":\"HEIGHT\""))));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Figma multi-paragraph fixture parses"), FFigmaParser::ParseDocument(Json, Doc));

@@ -33,35 +33,35 @@ $ProjectPath = Resolve-D2URequiredProjectPath $ProjectPath
 $EditorPath = Resolve-D2URequiredEditorPath $EditorPath
 $ProjectRoot = Split-Path -Parent $ProjectPath
 if ([string]::IsNullOrWhiteSpace($SourcePath)) {
-    throw "SourcePath is required for Lunaris structure validation. Pass -SourcePath explicitly."
+    throw "SourcePath is required for structure snapshot validation. Pass -SourcePath explicitly."
 }
 if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
     throw "SourcePath not found: $SourcePath"
 }
 if ([string]::IsNullOrWhiteSpace($TargetNodeId)) {
-    throw "TargetNodeId is required for Lunaris structure validation. Pass -TargetNodeId explicitly."
+    throw "TargetNodeId is required for structure snapshot validation. Pass -TargetNodeId explicitly."
 }
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {
-    throw "OutputPath is required for Lunaris structure validation. Pass -OutputPath explicitly."
+    throw "OutputPath is required for structure snapshot validation. Pass -OutputPath explicitly."
 }
 if ([string]::IsNullOrWhiteSpace($LogPath)) {
     $LogPath = Join-Path $ProjectRoot "Saved\Logs\$([System.IO.Path]::GetFileNameWithoutExtension($ProjectPath)).log"
 }
 if ([string]::IsNullOrWhiteSpace($SavedPngPath)) {
-    throw "SavedPngPath is required for Lunaris structure validation. Pass -SavedPngPath explicitly."
+    throw "SavedPngPath is required for structure snapshot validation. Pass -SavedPngPath explicitly."
 }
 if ([string]::IsNullOrWhiteSpace($SourceJsonPath)) {
-    throw "SourceJsonPath is required for Lunaris structure validation. Pass -SourceJsonPath explicitly."
+    throw "SourceJsonPath is required for structure snapshot validation. Pass -SourceJsonPath explicitly."
 }
 if ([string]::IsNullOrWhiteSpace($SavedJsonPath)) {
-    throw "SavedJsonPath is required for Lunaris structure validation. Pass -SavedJsonPath explicitly."
+    throw "SavedJsonPath is required for structure snapshot validation. Pass -SavedJsonPath explicitly."
 }
 if ([string]::IsNullOrWhiteSpace($ResultJsonPath)) {
-    throw "ResultJsonPath is required for Lunaris structure validation. Pass -ResultJsonPath explicitly."
+    throw "ResultJsonPath is required for structure snapshot validation. Pass -ResultJsonPath explicitly."
 }
 
 if ($ValidateOnly) {
-    Write-Host "[OK] Lunaris structure validation paths resolved."
+    Write-Host "[OK] Structure snapshot validation paths resolved."
     Write-Host "ProjectPath    : $ProjectPath"
     Write-Host "EditorPath     : $EditorPath"
     Write-Host "SourcePath     : $SourcePath"
@@ -80,7 +80,7 @@ New-D2UDirectoryForPath $SavedPngPath
 New-D2UDirectoryForPath $ResultJsonPath
 $savedDir = Split-Path -Parent $SavedPngPath
 
-$specPath = Join-Path $savedDir "lunaris-structure-validation.spec.json"
+$specPath = Join-Path $savedDir "structure-validation.spec.json"
 $spec = [ordered]@{
     mode = "pen"
     source_path = $SourcePath
@@ -138,7 +138,7 @@ if ($editorExitCode -ne 0) {
     Write-Warning "UnrealEditor exited with code $editorExitCode, but fresh structure outputs were generated and AutomationRender reported success."
 }
 
-Write-Host "Lunaris structure snapshot validation succeeded."
+Write-Host "Structure snapshot validation succeeded."
 foreach ($path in $requiredFiles) {
     $item = Get-Item $path
     Write-Host "$path | $($item.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss'))"

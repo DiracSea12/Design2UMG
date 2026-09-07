@@ -6,9 +6,11 @@
 #include "Design2UMGTestUtils.h"
 #include "Design2UMGConverter.h"
 #include "FigmaParser.h"
+#include "FigmaTestDocBuilder.h"
 
 #if WITH_AUTOMATION_WORKER
 
+using namespace Design2UMGCoreTests;
 using namespace Design2UMGTestUtils;
 
 
@@ -17,41 +19,17 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaVectorRasterFallbackTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaVectorRasterFallbackTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [{
-					"id": "0:2",
-					"name": "Root",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 400, "height": 400},
-					"children": [{
-						"id": "ellipse_grad",
-						"name": "Ellipse Gradient",
-						"type": "ELLIPSE",
-						"visible": true,
-						"absoluteBoundingBox": {"x": 20, "y": 20, "width": 320, "height": 320},
-						"fillGeometry": [{"path":"M0 160C0 71.6 71.6 0 160 0C248.4 0 320 71.6 320 160C320 248.4 248.4 320 160 320C71.6 320 0 248.4 0 160Z","windingRule":"NONZERO"}],
-						"fills": [
-							{"type":"GRADIENT_LINEAR","visible":true,"gradientStops":[
-								{"position":0.0,"color":{"r":1,"g":0,"b":0,"a":1}},
-								{"position":1.0,"color":{"r":0,"g":0,"b":1,"a":1}}
-							],"gradientHandlePositions":[{"x":0,"y":0.5},{"x":1,"y":0.5}]},
-							{"type":"IMAGE","visible":true,"imageRef":"vec_grad_1","scaleMode":"FILL"}
-						],
-						"children": []
-					}]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(
+		MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 400, 400,
+			MakeLeafNode(TEXT("ellipse_grad"), TEXT("Ellipse Gradient"), TEXT("ELLIPSE"), 20, 20, 320, 320,
+				TEXT(",\"fillGeometry\":[{\"path\":\"M0 160C0 71.6 71.6 0 160 0C248.4 0 320 71.6 320 160C320 248.4 248.4 320 160 320C71.6 320 0 248.4 0 160Z\",\"windingRule\":\"NONZERO\"}],"
+					 "\"fills\":["
+					 "{\"type\":\"GRADIENT_LINEAR\",\"visible\":true,\"gradientStops\":["
+					 "{\"position\":0.0,\"color\":{\"r\":1,\"g\":0,\"b\":0,\"a\":1}},"
+					 "{\"position\":1.0,\"color\":{\"r\":0,\"g\":0,\"b\":1,\"a\":1}}"
+					 "],\"gradientHandlePositions\":[{\"x\":0,\"y\":0.5},{\"x\":1,\"y\":0.5}]},"
+					 "{\"type\":\"IMAGE\",\"visible\":true,\"imageRef\":\"vec_grad_1\",\"scaleMode\":\"FILL\"}"
+					 "]"))));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Figma vector fallback parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
@@ -90,43 +68,20 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaRenderFallbackMetadataRoundTripTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaRenderFallbackMetadataRoundTripTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [{
-					"id": "0:2",
-					"name": "Root",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 300, "height": 200},
-					"children": [{
-						"id": "render_leaf",
-						"name": "Image Tile",
-						"type": "FRAME",
-						"visible": true,
-						"absoluteBoundingBox": {"x": 24, "y": 16, "width": 160, "height": 96},
-						"absoluteRenderBounds": {"x": 24, "y": 16, "width": 160, "height": 96},
-						"fills": [
-							{"type":"SOLID","visible":true,"blendMode":"NORMAL","color":{"r":0.2,"g":0.2,"b":0.2,"a":1}},
-							{"type":"IMAGE","visible":true,"blendMode":"LUMINOSITY","imageRef":"img_orig","scaleMode":"FIT","filters":{"contrast":0.25}}
-						],
-						"design2umgRenderFallbackImageRef": "render_202_5356",
-						"design2umgRenderFallbackScope": "full",
-						"design2umgRenderFallbackSource": "figma_render_png",
-						"design2umgRenderFallbackReason": "image_filters+image_blend_luminosity",
-						"interactions": {"unexpected":"object"},
-						"children": []
-					}]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(
+		MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 300, 200,
+			MakeContainerNode(TEXT("render_leaf"), TEXT("Image Tile"), TEXT("FRAME"), 24, 16, 160, 96, FString(),
+				FString::Printf(
+					TEXT(",\"absoluteRenderBounds\":%s,\"fills\":["
+						 "{\"type\":\"SOLID\",\"visible\":true,\"blendMode\":\"NORMAL\",\"color\":{\"r\":0.2,\"g\":0.2,\"b\":0.2,\"a\":1}},"
+						 "{\"type\":\"IMAGE\",\"visible\":true,\"blendMode\":\"LUMINOSITY\",\"imageRef\":\"img_orig\",\"scaleMode\":\"FIT\",\"filters\":{\"contrast\":0.25}}"
+						 "],"
+						 "\"design2umgRenderFallbackImageRef\":\"render_202_5356\","
+						 "\"design2umgRenderFallbackScope\":\"full\","
+						 "\"design2umgRenderFallbackSource\":\"figma_render_png\","
+						 "\"design2umgRenderFallbackReason\":\"image_filters+image_blend_luminosity\","
+						 "\"interactions\":{\"unexpected\":\"object\"}"),
+					*MakeBoundsJson(24, 16, 160, 96)))));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Render fallback parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
@@ -279,54 +234,21 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaRenderFallbackKeepsChildTreeTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaRenderFallbackKeepsChildTreeTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [{
-					"id": "render_parent",
-					"name": "Card",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 260, "height": 160},
-					"absoluteRenderBounds": {"x": 0, "y": 0, "width": 260, "height": 160},
-					"fills": [
-						{"type":"SOLID","visible":true,"blendMode":"NORMAL","color":{"r":0.2,"g":0.2,"b":0.2,"a":1}},
-						{"type":"IMAGE","visible":true,"blendMode":"LUMINOSITY","imageRef":"img_orig","scaleMode":"FIT","filters":{"contrast":0.25}}
-					],
-					"design2umgRenderFallbackImageRef": "/Game/Transient/T_render_parent.T_render_parent",
-					"design2umgRenderFallbackScope": "full",
-					"design2umgRenderFallbackSource": "figma_render_png",
-					"design2umgRenderFallbackReason": "image_filters+image_blend_luminosity",
-					"children": [{
-						"id": "render_child",
-						"name": "Title",
-						"type": "TEXT",
-						"visible": true,
-						"absoluteBoundingBox": {"x": 20, "y": 18, "width": 80, "height": 24},
-						"characters": "Hello",
-						"style": {
-							"fontFamily": "Inter",
-							"fontSize": 16,
-							"fontWeight": 400,
-							"textAlignHorizontal": "LEFT",
-							"textAlignVertical": "TOP",
-							"textCase": "ORIGINAL",
-							"textDecoration": "NONE",
-							"letterSpacing": 0,
-							"lineHeightUnit": "AUTO",
-							"lineHeightPx": 0
-						}
-					}]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(
+		MakeContainerNode(TEXT("render_parent"), TEXT("Card"), TEXT("FRAME"), 0, 0, 260, 160,
+			MakeTextNode(TEXT("render_child"), TEXT("Title"), 20, 18, 80, 24, TEXT("Hello"),
+				TEXT("\"fontFamily\":\"Inter\",\"fontSize\":16,\"fontWeight\":400,\"textAlignHorizontal\":\"LEFT\",\"textAlignVertical\":\"TOP\","
+					 "\"textCase\":\"ORIGINAL\",\"textDecoration\":\"NONE\",\"letterSpacing\":0,\"lineHeightUnit\":\"AUTO\",\"lineHeightPx\":0")),
+			FString::Printf(
+				TEXT(",\"absoluteRenderBounds\":%s,\"fills\":["
+					 "{\"type\":\"SOLID\",\"visible\":true,\"blendMode\":\"NORMAL\",\"color\":{\"r\":0.2,\"g\":0.2,\"b\":0.2,\"a\":1}},"
+					 "{\"type\":\"IMAGE\",\"visible\":true,\"blendMode\":\"LUMINOSITY\",\"imageRef\":\"img_orig\",\"scaleMode\":\"FIT\",\"filters\":{\"contrast\":0.25}}"
+					 "],"
+					 "\"design2umgRenderFallbackImageRef\":\"/Game/Transient/T_render_parent.T_render_parent\","
+					 "\"design2umgRenderFallbackScope\":\"full\","
+					 "\"design2umgRenderFallbackSource\":\"figma_render_png\","
+					 "\"design2umgRenderFallbackReason\":\"image_filters+image_blend_luminosity\""),
+				*MakeBoundsJson(0, 0, 260, 160))));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Render fallback parent parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));

@@ -2,6 +2,7 @@
 
 #include "UMGJsonSerializer.h"
 #include "UMGWidgetNodeAccess.h"
+#include "UMGJsonKeys.h"
 #include "UMGPropertyKeys.h"
 #include "UMGSchema.h"
 #include "UMGValueParsing.h"
@@ -9,23 +10,6 @@
 #include "Serialization/JsonWriter.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
-
-namespace
-{
-	constexpr TCHAR JsonTypeKey[] = TEXT("Type");
-	constexpr TCHAR JsonModeKey[] = TEXT("Mode");
-	constexpr TCHAR JsonTransformKey[] = TEXT("Transform");
-	constexpr TCHAR JsonRotationKey[] = TEXT("Rotation");
-	constexpr TCHAR JsonStartPointKey[] = TEXT("StartPoint");
-	constexpr TCHAR JsonEndPointKey[] = TEXT("EndPoint");
-	constexpr TCHAR JsonCenterKey[] = TEXT("Center");
-	constexpr TCHAR JsonSizeKey[] = TEXT("Size");
-	constexpr TCHAR JsonPositionKey[] = TEXT("Position");
-	constexpr TCHAR JsonOffsetKey[] = TEXT("Offset");
-	constexpr TCHAR JsonBlurKey[] = TEXT("Blur");
-	constexpr TCHAR JsonSpreadKey[] = TEXT("Spread");
-	constexpr TCHAR JsonBoxShadowsKey[] = TEXT("BoxShadows");
-}
 
 TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeAnchor(const FUMGAnchorData& Anchor)
 {
@@ -67,7 +51,7 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeSlot(const FUMGSlotData& Sl
 		!FMath::IsNearlyEqual(Slot.Padding.Bottom, 0.0f);
 	if (bHasPadding)
 	{
-		J->SetStringField(TEXT("Padding"), FString::Printf(
+		J->SetStringField(UMGPropertyKeys::Padding, FString::Printf(
 			TEXT("%.2f,%.2f,%.2f,%.2f"),
 			Slot.Padding.Left, Slot.Padding.Top, Slot.Padding.Right, Slot.Padding.Bottom));
 	}
@@ -107,7 +91,7 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeBounds(const FDesignPixelBo
 TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeWidgetNode(const FUMGWidgetNode& Node)
 {
 	TSharedRef<FJsonObject> J = MakeShared<FJsonObject>();
-	J->SetStringField(JsonTypeKey, Node.Type);
+	J->SetStringField(UMGJsonKeys::Type, Node.Type);
 	if (!Node.Id.IsEmpty())
 		J->SetStringField(TEXT("Id"), Node.Id);
 	J->SetStringField(TEXT("Name"), Node.Name);
@@ -165,7 +149,7 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeTextStylePayload(const FUMG
 		if (TextStyle.FontSize > 0)
 			TS->SetNumberField(UMGPropertyKeys::FontSize, TextStyle.FontSize);
 		if (TextStyle.SourceFontSize > 0)
-			TS->SetNumberField(TEXT("SourceFontSize"), TextStyle.SourceFontSize);
+			TS->SetNumberField(UMGJsonKeys::SourceFontSize, TextStyle.SourceFontSize);
 		if (TextStyle.LetterSpacing.IsSet())
 			TS->SetNumberField(UMGPropertyKeys::LetterSpacing, TextStyle.LetterSpacing.GetValue());
 		return TS;
@@ -198,7 +182,7 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeWidgetStylePayload(const FU
 	if (Style.StrokePadding.IsSet())
 		StyleObject->SetStringField(UMGPropertyKeys::StrokePadding, Design2UMGWidgetNodeAccess::SerializeWidgetMargin(Style.StrokePadding.GetValue()));
 	if (Style.StrokeMargin.IsSet())
-		StyleObject->SetStringField(TEXT("StrokeMargin"), Design2UMGWidgetNodeAccess::SerializeWidgetMargin(Style.StrokeMargin.GetValue()));
+		StyleObject->SetStringField(UMGPropertyKeys::StrokeMargin, Design2UMGWidgetNodeAccess::SerializeWidgetMargin(Style.StrokeMargin.GetValue()));
 	if (Style.ImageMode.IsSet())
 		StyleObject->SetStringField(UMGPropertyKeys::ImageMode, Style.ImageMode.GetValue());
 	if (Style.ImageTransform.IsSet())
@@ -245,7 +229,7 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeTextPayload(const FUMGTextD
 	if (Text.TypefaceFontName.IsSet())
 		TextObject->SetStringField(UMGPropertyKeys::TypefaceFontName, Text.TypefaceFontName.GetValue());
 	if (Text.FontStyle.IsSet())
-		TextObject->SetStringField(TEXT("FontStyle"), Text.FontStyle.GetValue());
+		TextObject->SetStringField(UMGPropertyKeys::FontStyle, Text.FontStyle.GetValue());
 	if (Text.Justification.IsSet())
 		TextObject->SetStringField(UMGPropertyKeys::Justification, Text.Justification.GetValue());
 	if (Text.bAutoWrapText.IsSet())
@@ -293,9 +277,9 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeBrushPayload(const FUMGVisu
 		if (B.Image.TexturePath.IsSet())
 			ImageObject->SetStringField(UMGPropertyKeys::TexturePath, B.Image.TexturePath.GetValue());
 		if (B.Image.Mode.IsSet())
-			ImageObject->SetStringField(JsonModeKey, B.Image.Mode.GetValue());
+			ImageObject->SetStringField(UMGJsonKeys::Mode, B.Image.Mode.GetValue());
 		if (B.Image.Transform.IsSet())
-			ImageObject->SetStringField(JsonTransformKey, Design2UMGWidgetNodeAccess::SerializeImageTransform(B.Image.Transform.GetValue()));
+			ImageObject->SetStringField(UMGJsonKeys::Transform, Design2UMGWidgetNodeAccess::SerializeImageTransform(B.Image.Transform.GetValue()));
 		BJ->SetObjectField(TEXT("Image"), ImageObject);
 		bHasAny = true;
 	}
@@ -303,17 +287,17 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeBrushPayload(const FUMGVisu
 	{
 		TSharedRef<FJsonObject> GradientObject = MakeShared<FJsonObject>();
 		if (B.Gradient.Type.IsSet())
-			GradientObject->SetStringField(JsonTypeKey, B.Gradient.Type.GetValue());
+			GradientObject->SetStringField(UMGJsonKeys::Type, B.Gradient.Type.GetValue());
 		if (B.Gradient.Rotation.IsSet())
-			GradientObject->SetNumberField(JsonRotationKey, B.Gradient.Rotation.GetValue());
+			GradientObject->SetNumberField(UMGJsonKeys::Rotation, B.Gradient.Rotation.GetValue());
 		if (B.Gradient.StartPoint.IsSet())
-			GradientObject->SetStringField(JsonStartPointKey, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(B.Gradient.StartPoint.GetValue()));
+			GradientObject->SetStringField(UMGJsonKeys::StartPoint, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(B.Gradient.StartPoint.GetValue()));
 		if (B.Gradient.EndPoint.IsSet())
-			GradientObject->SetStringField(JsonEndPointKey, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(B.Gradient.EndPoint.GetValue()));
+			GradientObject->SetStringField(UMGJsonKeys::EndPoint, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(B.Gradient.EndPoint.GetValue()));
 		if (B.Gradient.Center.IsSet())
-			GradientObject->SetStringField(JsonCenterKey, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(B.Gradient.Center.GetValue()));
+			GradientObject->SetStringField(UMGJsonKeys::Center, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(B.Gradient.Center.GetValue()));
 		if (B.Gradient.Size.IsSet())
-			GradientObject->SetStringField(JsonSizeKey, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(B.Gradient.Size.GetValue()));
+			GradientObject->SetStringField(UMGJsonKeys::Size, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(B.Gradient.Size.GetValue()));
 		if (B.Gradient.Stops.Num() > 0)
 		{
 			TArray<TSharedPtr<FJsonValue>> StopArray;
@@ -322,10 +306,10 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeBrushPayload(const FUMGVisu
 			{
 				TSharedRef<FJsonObject> StopObject = MakeShared<FJsonObject>();
 				StopObject->SetStringField(UMGPropertyKeys::Color, Design2UMGWidgetNodeAccess::SerializeWidgetColor(Stop.Color));
-				StopObject->SetNumberField(JsonPositionKey, Stop.Position);
+				StopObject->SetNumberField(UMGJsonKeys::Position, Stop.Position);
 				StopArray.Add(MakeShared<FJsonValueObject>(StopObject));
 			}
-			GradientObject->SetArrayField(TEXT("Stops"), StopArray);
+			GradientObject->SetArrayField(UMGJsonKeys::Stops, StopArray);
 		}
 		BJ->SetObjectField(TEXT("Gradient"), GradientObject);
 		bHasAny = true;
@@ -447,13 +431,13 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeShadowPayload(const FUMGSha
 		for (const FUMGBoxShadowLayerData& Layer : Shadow.BoxShadows)
 		{
 			TSharedRef<FJsonObject> LayerObject = MakeShared<FJsonObject>();
-			LayerObject->SetStringField(JsonOffsetKey, FString::Printf(TEXT("%.6f,%.6f"), Layer.Offset.X, Layer.Offset.Y));
-			LayerObject->SetNumberField(JsonBlurKey, Layer.Blur);
-			LayerObject->SetNumberField(JsonSpreadKey, Layer.Spread);
+			LayerObject->SetStringField(UMGJsonKeys::Offset, FString::Printf(TEXT("%.6f,%.6f"), Layer.Offset.X, Layer.Offset.Y));
+			LayerObject->SetNumberField(UMGJsonKeys::Blur, Layer.Blur);
+			LayerObject->SetNumberField(UMGJsonKeys::Spread, Layer.Spread);
 			LayerObject->SetStringField(UMGPropertyKeys::Color, Design2UMGWidgetNodeAccess::SerializeWidgetColor(Layer.Color));
 			BoxShadowArray.Add(MakeShared<FJsonValueObject>(LayerObject));
 		}
-		ShadowObject->SetArrayField(JsonBoxShadowsKey, BoxShadowArray);
+		ShadowObject->SetArrayField(UMGJsonKeys::BoxShadows, BoxShadowArray);
 	}
 	return ShadowObject;
 }

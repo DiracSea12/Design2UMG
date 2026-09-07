@@ -30,7 +30,7 @@ namespace DesignImportPipeline
 	// Apply stage
 	// ---------------------------------------------------------------------------
 
-	void ApplySlotForNode(UWidget* Widget, const FUMGWidgetNode& Node, const FReimportApplyContext& Ctx)
+	void ApplySlotForNode(UWidget* Widget, const FUMGWidgetNode& Node, const FReimportApplySharedState& Shared)
 	{
 		if (!Widget || !Widget->Slot)
 		{
@@ -41,7 +41,7 @@ namespace DesignImportPipeline
 			ParentPanel->Modify();
 			Widget->Slot->Modify();
 			const FUMGSlotData SlotData = FWidgetLayoutAdapter::Resolve(
-				Node, ParentPanel, Ctx.WidgetTree, Ctx.DesignSize, false);
+				Node, ParentPanel, Shared.WidgetTree, Shared.DesignSize, false);
 			FUMGWidgetUtils::ApplySlotProperties(Widget->Slot, SlotData);
 		}
 	}
@@ -106,7 +106,7 @@ namespace DesignImportPipeline
 
 			if (Divergences.Num() > 0)
 			{
-				AddReimportDiagnostic(Diagnostics, TEXT("reimport_mapped_attr_kept"),
+				AddReimportDiagnostic(Diagnostics, ReimportDiagnosticKinds::MappedAttrKept,
 					FString::Printf(
 						TEXT("Mapped instance '%s' (%s) own visual attributes kept as project-side, not refreshed: %s"),
 						*Instance->GetName(), *GetDesignNodeId(Node), *FString::Join(Divergences, TEXT("; "))));
@@ -116,17 +116,17 @@ namespace DesignImportPipeline
 		void RefreshMappedInstance(
 			UUserWidget* Instance,
 			const FUMGWidgetNode& Node,
-			FReimportApplyContext& Ctx)
+			const FReimportApplySharedState& Shared)
 		{
 			// Walk-side guard for the Mapped Class change conflict: if the manifest-recorded mapped instance's class
 			// mismatches the record, or the mapping now points at another class, do not refresh (the 4.4 conflict
 			// semantics are owned by the plan stage's reimport_mapped_class_conflict diagnostic; staying silent here avoids duplicate diagnostics).
 			if (const FDesign2UMGGenerationManifestSidecar::FInstanceRecord* const* RecordPtr =
-				Ctx.InstancesById->Find(GetDesignNodeId(Node)))
+				Shared.InstancesById->Find(GetDesignNodeId(Node)))
 			{
 				const FDesign2UMGGenerationManifestSidecar::FInstanceRecord* Record = *RecordPtr;
 				const DesignComponentMapping::FComponentMappingEntry* CurrentEntry =
-					Ctx.MappingBuildState->FindEntryForKey(Node.Source().MappedComponentKey);
+					Shared.MappingBuildState->FindEntryForKey(Node.Source().MappedComponentKey);
 				const FString CurrentMappedClass = CurrentEntry ? CurrentEntry->WidgetClass : FString();
 				if (Record->Kind == Design2UMGManifestKinds::Mapped
 					&& IsMappedClassConflict(Instance, Record, CurrentMappedClass))
@@ -141,7 +141,7 @@ namespace DesignImportPipeline
 			// duplicate mapping_input_applied diagnostics (the manifest records one entry, one refresh diagnostic).
 			const FString ProspectiveDesignNodeId = GetDesignNodeId(Node);
 			const FString ProspectiveWidgetName = Instance->GetFName().ToString();
-			if (Ctx.UpdatedMappedRecords->ContainsByPredicate(
+			if (Shared.UpdatedMappedRecords->ContainsByPredicate(
 				[&ProspectiveDesignNodeId, &ProspectiveWidgetName](const FDesign2UMGMappedInstanceRecord& Existing)
 				{
 					return Existing.DesignNodeId == ProspectiveDesignNodeId
@@ -153,14 +153,14 @@ namespace DesignImportPipeline
 
 			// mapped instances update only the outer layout + explicit inputs (direct overwrite); the interior is untouched.
 			Instance->Modify();
-			ApplySlotForNode(Instance, Node, Ctx);
+			ApplySlotForNode(Instance, Node, Shared);
 
 			const DesignComponentMapping::FComponentMappingEntry* Entry =
-				Ctx.MappingBuildState->FindEntryForKey(Node.Source().MappedComponentKey);
+				Shared.MappingBuildState->FindEntryForKey(Node.Source().MappedComponentKey);
 			if (!Entry)
 			{
 				AddReimportDiagnostic(
-					*Ctx.Diagnostics, TEXT("reimport_input_skipped"),
+					*Shared.Diagnostics, ReimportDiagnosticKinds::InputSkipped,
 					FString::Printf(
 						TEXT("Mapping entry for key '%s' disappeared on reimport; inputs of '%s' left as-is"),
 						*Node.Source().MappedComponentKey,
@@ -170,22 +170,22 @@ namespace DesignImportPipeline
 
 			TArray<FDesign2UMGMappedInputRecord> InputRecords;
 			Design2UMGComponentMappingGeneration::ApplyMappedComponentInputsToInstance(
-				Instance, Node, *Entry, &InputRecords, *Ctx.Diagnostics);
+				Instance, Node, *Entry, &InputRecords, *Shared.Diagnostics);
 
-			ReportMappedOwnAttrDivergence(Instance, Node, InputRecords, *Ctx.Diagnostics);
+			ReportMappedOwnAttrDivergence(Instance, Node, InputRecords, *Shared.Diagnostics);
 
 			FDesign2UMGMappedInstanceRecord Record;
 			Record.DesignNodeId = ProspectiveDesignNodeId;
 			Record.WidgetName = ProspectiveWidgetName;
 			Record.MappedKey = Entry->Key;
 			Record.MappedClass = Entry->WidgetClass;
-			Record.bMatchedAtSetLevel = Ctx.MappingBuildState->IsMappedAtSetLevel(Node.Id);
+			Record.bMatchedAtSetLevel = Shared.MappingBuildState->IsMappedAtSetLevel(Node.Id);
 			Record.Inputs = MoveTemp(InputRecords);
 
-			Ctx.UpdatedMappedRecords->Add(MoveTemp(Record));
+			Shared.UpdatedMappedRecords->Add(MoveTemp(Record));
 
 			AddReimportDiagnostic(
-				*Ctx.Diagnostics, TEXT("reimport_updated"),
+				*Shared.Diagnostics, ReimportDiagnosticKinds::Updated,
 				FString::Printf(
 					TEXT("Mapped instance '%s' (%s) refreshed: outer layout + declared inputs only; internals untouched"),
 					*ProspectiveWidgetName, *ProspectiveDesignNodeId));
@@ -199,19 +199,19 @@ namespace DesignImportPipeline
 	 *    under a project container has taken it over; moving it away would break the project-side structure;
 	 * 2) the source subtree must be purely D2U-owned (list check + binding check, the same rule as the top-level safe delete).
 	 */
-	bool IsMoveSourceOwned(const FReimportApplyContext& Ctx, UWidget* MoveSource, FString& OutReason)
+	bool IsMoveSourceOwned(const FReimportApplySharedState& Shared, UWidget* MoveSource, FString& OutReason)
 	{
 		UPanelWidget* SourceParent = MoveSource->GetParent();
 		if (!SourceParent
-			|| (SourceParent != Ctx.HostPanel
-				&& !Ctx.OwnedNames->Contains(SourceParent->GetFName().ToString())))
+			|| (SourceParent != Shared.HostPanel
+				&& !Shared.OwnedNames->Contains(SourceParent->GetFName().ToString())))
 		{
 			OutReason = FString::Printf(
 				TEXT("source sits under project-side container '%s'"),
 				SourceParent ? *SourceParent->GetName() : TEXT("(none)"));
 			return false;
 		}
-		return IsSubtreePurelyD2UOwned(Ctx.WBP, MoveSource, *Ctx.OwnedNames, OutReason);
+		return IsSubtreePurelyD2UOwned(Shared.WBP, MoveSource, *Shared.OwnedNames, OutReason);
 	}
 
 	namespace
@@ -251,43 +251,55 @@ namespace DesignImportPipeline
 				&& GetDesignNodeId(Node) == GetDesignNodeId(Node.Children[0]);
 		}
 
+		/** Outcome of TryMatchChildByManifestRecord (see the function comment for the three states). */
+		enum class EManifestMatchOutcome : uint8
+		{
+			/** No usable record here: the caller falls through to same-base-name matching. */
+			Unhandled,
+			/** The recorded widget hangs under another parent: the reparent stage owns this child; no base-name attempt. */
+			HandledElsewhere,
+			/** Paired with the design child. */
+			Matched,
+		};
+
 		/**
 		 * Manifest instances pair directly by record first (a single-child attempt within one MatchNestedChildren round):
 		 * the mapped instance's widget name comes from the import-time design name, but the same-named node on the
 		 * reimport-time IR side may be a wrapper form whose name the converter rewrote (e.g. trigger nodes named by id
 		 * under a switcher document) - same-name matching fails. Identity must be decided by the manifest record, or
-		 * an existing instance gets mistaken for an addition and rebuilt. Returns true = terminally handled (paired, or
-		 * the recorded widget hangs under another parent and the reparent stage takes over); returns false = no usable record, fall to same-base-name matching.
+		 * an existing instance gets mistaken for an addition and rebuilt. Returns the three-state outcome: Matched =
+		 * paired; HandledElsewhere = the recorded widget hangs under another parent and the reparent stage takes over;
+		 * Unhandled = no usable record, fall to same-base-name matching.
 		 */
-		bool TryMatchChildByManifestRecord(
+		EManifestMatchOutcome TryMatchChildByManifestRecord(
 			const FUMGWidgetNode& Child,
 			UPanelWidget* Panel,
-			const FReimportApplyContext& Ctx,
+			const FReimportApplySharedState& Shared,
 			TArray<UWidget*>& OwnedChildren,
 			FNestedChildrenMatch& Out)
 		{
 			const FDesign2UMGGenerationManifestSidecar::FInstanceRecord* const* RecordPtr =
-				Ctx.InstancesById->Find(GetDesignNodeId(Child));
+				Shared.InstancesById->Find(GetDesignNodeId(Child));
 			if (!RecordPtr)
 			{
-				return false;
+				return EManifestMatchOutcome::Unhandled;
 			}
-			UWidget* Existing = Ctx.WidgetTree->FindWidget(FName(*(*RecordPtr)->WidgetName));
+			UWidget* Existing = Shared.WidgetTree->FindWidget(FName(*(*RecordPtr)->WidgetName));
 			if (!Existing)
 			{
-				return false;
+				return EManifestMatchOutcome::Unhandled;
 			}
 			if (Existing->GetParent() != Panel)
 			{
-				return true;
+				return EManifestMatchOutcome::HandledElsewhere;
 			}
 			if (OwnedChildren.Contains(Existing))
 			{
 				Out.Matched.Add({ &Child, Existing });
 				OwnedChildren.RemoveSingle(Existing);
-				return true;
+				return EManifestMatchOutcome::Matched;
 			}
-			return false;
+			return EManifestMatchOutcome::Unhandled;
 		}
 
 		/**
@@ -333,7 +345,7 @@ namespace DesignImportPipeline
 		 * Deterministic same-name pairing of the container subtree (count only, no mutation). The executing walk
 		 * (RefreshChildWidgets) and the pre-scan (CollectExpectedNestedNames) share this one computation so both passes decide identically.
 		 */
-		FNestedChildrenMatch MatchNestedChildren(const FUMGWidgetNode& Node, UPanelWidget* Panel, const FReimportApplyContext& Ctx)
+		FNestedChildrenMatch MatchNestedChildren(const FUMGWidgetNode& Node, UPanelWidget* Panel, const FReimportApplySharedState& Shared)
 		{
 			FNestedChildrenMatch Out;
 
@@ -343,7 +355,7 @@ namespace DesignImportPipeline
 			{
 				if (UWidget* Child = Panel->GetChildAt(Index))
 				{
-					if (Ctx.OwnedNames->Contains(Child->GetFName().ToString()))
+					if (Shared.OwnedNames->Contains(Child->GetFName().ToString()))
 					{
 						OwnedChildren.Add(Child);
 					}
@@ -365,7 +377,7 @@ namespace DesignImportPipeline
 				TMap<FString, int32> BaseConsumed;
 				for (const FUMGWidgetNode* Child : PendingChildren)
 				{
-					if (!TryMatchChildByManifestRecord(*Child, Panel, Ctx, OwnedChildren, Out)
+					if (TryMatchChildByManifestRecord(*Child, Panel, Shared, OwnedChildren, Out) == EManifestMatchOutcome::Unhandled
 						&& !TryMatchChildByBaseName(*Child, BaseConsumed, OwnedChildren, Out))
 					{
 						RoundUnmatched.Add(Child);
@@ -411,10 +423,10 @@ namespace DesignImportPipeline
 	void CollectExpectedNestedNames(
 		const FUMGWidgetNode& Node,
 		UPanelWidget* Panel,
-		const FReimportApplyContext& Ctx,
+		const FReimportApplySharedState& Shared,
 		TSet<FString>& OutExpected)
 	{
-		const FNestedChildrenMatch Match = MatchNestedChildren(Node, Panel, Ctx);
+		const FNestedChildrenMatch Match = MatchNestedChildren(Node, Panel, Shared);
 		for (const FNestedChildrenMatch::FMatchedPair& Pair : Match.Matched)
 		{
 			OutExpected.Add(Pair.Widget->GetFName().ToString());
@@ -423,7 +435,7 @@ namespace DesignImportPipeline
 			{
 				if (UPanelWidget* ChildPanel = Cast<UPanelWidget>(Pair.Widget))
 				{
-					CollectExpectedNestedNames(*Pair.Child, ChildPanel, Ctx, OutExpected);
+					CollectExpectedNestedNames(*Pair.Child, ChildPanel, Shared, OutExpected);
 				}
 			}
 		}
@@ -443,18 +455,20 @@ namespace DesignImportPipeline
 			const FString& BaseName,
 			UPanelWidget* Panel,
 			UWidget* ParentWidget,
-			FReimportApplyContext& Ctx)
+			const FReimportApplySharedState& Shared,
+			TArray<UWidget*>& NestedMoveCandidates,
+			TMap<FString, UWidget*>& NewlyCreatedWidgets)
 		{
 			UWidget* MoveSource = nullptr;
-			if (!IsMappedCandidateNode(Child) && Ctx.NestedMoveCandidates)
+			if (!IsMappedCandidateNode(Child))
 			{
-				for (int32 Index = 0; Index < Ctx.NestedMoveCandidates->Num(); ++Index)
+				for (int32 Index = 0; Index < NestedMoveCandidates.Num(); ++Index)
 				{
-					UWidget* Candidate = (*Ctx.NestedMoveCandidates)[Index];
+					UWidget* Candidate = NestedMoveCandidates[Index];
 					if (FUMGWidgetUtils::MatchesWidgetBaseName(Candidate->GetFName().ToString(), BaseName))
 					{
 						MoveSource = Candidate;
-						Ctx.NestedMoveCandidates->RemoveAt(Index);
+						NestedMoveCandidates.RemoveAt(Index);
 						break;
 					}
 				}
@@ -465,10 +479,10 @@ namespace DesignImportPipeline
 			}
 
 			FString ConflictReason;
-			if (!IsMoveSourceOwned(Ctx, MoveSource, ConflictReason))
+			if (!IsMoveSourceOwned(Shared, MoveSource, ConflictReason))
 			{
 				AddReimportDiagnostic(
-					*Ctx.Diagnostics, TEXT("reimport_move_conflict"),
+					*Shared.Diagnostics, ReimportDiagnosticKinds::MoveConflict,
 					FString::Printf(
 						TEXT("Nested move of '%s' into '%s' skipped: %s; widget kept in place, no copy created"),
 						*MoveSource->GetName(), *ParentWidget->GetName(), *ConflictReason));
@@ -482,13 +496,13 @@ namespace DesignImportPipeline
 			}
 			MoveSource->Modify();
 			Panel->Modify();
-			Ctx.WidgetTree->RemoveWidget(MoveSource);
+			Shared.WidgetTree->RemoveWidget(MoveSource);
 			if (Panel->AddChild(MoveSource))
 			{
 				// After the move, refresh properties/slots and the whole subtree per the new design node (including nested diagnostics).
-				RefreshNodeByKind(Child, MoveSource, Ctx);
+				RefreshNodeByKind(Child, MoveSource, Shared, NestedMoveCandidates, NewlyCreatedWidgets);
 				AddReimportDiagnostic(
-					*Ctx.Diagnostics, TEXT("reimport_moved"),
+					*Shared.Diagnostics, ReimportDiagnosticKinds::Moved,
 					FString::Printf(
 						TEXT("Widget '%s' moved from '%s' under '%s' (nested, both endpoints D2U-owned); widget identity preserved"),
 						*MoveSource->GetName(),
@@ -502,12 +516,12 @@ namespace DesignImportPipeline
 				{
 					OldParent->AddChild(MoveSource);
 				}
-				else if (Ctx.HostPanel)
+				else if (Shared.HostPanel)
 				{
-					Ctx.HostPanel->AddChild(MoveSource);
+					Shared.HostPanel->AddChild(MoveSource);
 				}
 				AddReimportDiagnostic(
-					*Ctx.Diagnostics, TEXT("reimport_move_conflict"),
+					*Shared.Diagnostics, ReimportDiagnosticKinds::MoveConflict,
 					FString::Printf(
 						TEXT("Nested move of '%s' into '%s' failed to attach; widget restored under its previous parent"),
 						*MoveSource->GetName(), *ParentWidget->GetName()));
@@ -524,20 +538,18 @@ namespace DesignImportPipeline
 			const FUMGWidgetNode& Child,
 			UPanelWidget* Panel,
 			UWidget* ParentWidget,
-			FReimportApplyContext& Ctx)
+			const FReimportApplySharedState& Shared,
+			TMap<FString, UWidget*>& NewlyCreatedWidgets)
 		{
 			FUMGWidgetNode PrunedChild = Child;
-			PruneManifestInstanceChildren(PrunedChild, *Ctx.InstancesById);
+			PruneManifestInstanceChildren(PrunedChild, *Shared.InstancesById);
 			UWidget* CreatedWidget = FUMGWidgetUtils::CreateWidgetRecursive(
-				Ctx.WidgetTree, PrunedChild, Panel, nullptr, nullptr, &Ctx.DesignSize, Ctx.MappingBuildState);
+				Shared.WidgetTree, PrunedChild, Panel, nullptr, nullptr, &Shared.DesignSize, Shared.MappingBuildState);
 			if (CreatedWidget)
 			{
-				if (Ctx.NewlyCreatedWidgets)
-				{
-					Ctx.NewlyCreatedWidgets->Add(GetDesignNodeId(Child), CreatedWidget);
-				}
+				NewlyCreatedWidgets.Add(GetDesignNodeId(Child), CreatedWidget);
 				AddReimportDiagnostic(
-					*Ctx.Diagnostics, TEXT("reimport_added"),
+					*Shared.Diagnostics, ReimportDiagnosticKinds::Added,
 					FString::Printf(
 						TEXT("New design node '%s' (%s) added under '%s'"),
 						*Child.Name, *GetDesignNodeId(Child), *ParentWidget->GetName()));
@@ -552,7 +564,12 @@ namespace DesignImportPipeline
 		 * design-added nested nodes first consult the nested move candidates (spec R3: move the widget and preserve
 		 * identity when both endpoints are D2U-owned; conflict and no copy when the source side holds project content); only then does the generation chain rebuild.
 		 */
-		void RefreshChildWidgets(const FUMGWidgetNode& Node, UWidget* Widget, FReimportApplyContext& Ctx)
+		void RefreshChildWidgets(
+			const FUMGWidgetNode& Node,
+			UWidget* Widget,
+			const FReimportApplySharedState& Shared,
+			TArray<UWidget*>& NestedMoveCandidates,
+			TMap<FString, UWidget*>& NewlyCreatedWidgets)
 		{
 			UPanelWidget* Panel = Cast<UPanelWidget>(Widget);
 			if (!Panel)
@@ -560,54 +577,59 @@ namespace DesignImportPipeline
 				return;
 			}
 
-			const FNestedChildrenMatch Match = MatchNestedChildren(Node, Panel, Ctx);
+			const FNestedChildrenMatch Match = MatchNestedChildren(Node, Panel, Shared);
 			for (const FNestedChildrenMatch::FMatchedPair& Pair : Match.Matched)
 			{
-				RefreshNodeByKind(*Pair.Child, Pair.Widget, Ctx);
+				RefreshNodeByKind(*Pair.Child, Pair.Widget, Shared, NestedMoveCandidates, NewlyCreatedWidgets);
 			}
 
 			for (const FUMGWidgetNode* Child : Match.UnmatchedDesignChildren)
 			{
 				const FString BaseName = FUMGWidgetUtils::SanitizeWidgetName(Child->Name, Child->Type).ToString();
-				if (!TryNestedMoveChild(*Child, BaseName, Panel, Widget, Ctx))
+				if (!TryNestedMoveChild(*Child, BaseName, Panel, Widget, Shared, NestedMoveCandidates, NewlyCreatedWidgets))
 				{
-					CreateNestedChildWidget(*Child, Panel, Widget, Ctx);
+					CreateNestedChildWidget(*Child, Panel, Widget, Shared, NewlyCreatedWidgets);
 				}
 			}
 		}
 	}
 
-	void RefreshNodeByKind(const FUMGWidgetNode& Node, UWidget* Widget, FReimportApplyContext& Ctx)
+	void RefreshNodeByKind(
+		const FUMGWidgetNode& Node,
+		UWidget* Widget,
+		const FReimportApplySharedState& Shared,
+		TArray<UWidget*>& NestedMoveCandidates,
+		TMap<FString, UWidget*>& NewlyCreatedWidgets)
 	{
 		if (IsMappedCandidateNode(Node))
 		{
 			if (UUserWidget* MappedInstance = Cast<UUserWidget>(Widget))
 			{
-				RefreshMappedInstance(MappedInstance, Node, Ctx);
+				RefreshMappedInstance(MappedInstance, Node, Shared);
 				return;
 			}
 		}
 
 		Widget->Modify();
-		ApplySlotForNode(Widget, Node, Ctx);
+		ApplySlotForNode(Widget, Node, Shared);
 		FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node);
 		if (UImage* ImageWidget = Cast<UImage>(Widget))
 		{
 			FWidgetResourceBinder::BindImageResource(ImageWidget, Node, nullptr);
 		}
-		RefreshChildWidgets(Node, Widget, Ctx);
+		RefreshChildWidgets(Node, Widget, Shared, NestedMoveCandidates, NewlyCreatedWidgets);
 
 		// Only top-level generation relations (hung under the host root) enter the manifest instances; nested nodes only refresh properties.
-		if (Ctx.HostPanel && Widget->GetParent() == Ctx.HostPanel)
+		if (Shared.HostPanel && Widget->GetParent() == Shared.HostPanel)
 		{
 			FDesign2UMGGeneratedInstanceRecord Record;
 			Record.DesignNodeId = GetDesignNodeId(Node);
 			Record.WidgetName = Widget->GetFName().ToString();
-			Ctx.UpdatedGeneratedRecords->Add(MoveTemp(Record));
+			Shared.UpdatedGeneratedRecords->Add(MoveTemp(Record));
 		}
 		// Property-refresh diagnostics are as granular as the top level: nested D2U-owned node refreshes are also named per node.
 		AddReimportDiagnostic(
-			*Ctx.Diagnostics, TEXT("reimport_updated"),
+			*Shared.Diagnostics, ReimportDiagnosticKinds::Updated,
 			FString::Printf(
 				TEXT("D2U-owned node '%s' (%s) refreshed from design (layout/slot/visual/text)"),
 				*Node.Name, *GetDesignNodeId(Node)));
@@ -616,7 +638,7 @@ namespace DesignImportPipeline
 	void ApplyPrototypeRefresh(
 		FUMGWidgetData& Data,
 		const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings,
-		FReimportApplyContext& Ctx)
+		const FReimportApplySharedState& Shared)
 	{
 		if (GenerationSettings.PrototypeNavigationGenerationMode == EDesign2UMGPrototypeNavigationGenerationMode::Disabled
 			|| !Data.HasPrototypeNavigationData())
@@ -630,10 +652,10 @@ namespace DesignImportPipeline
 		TArray<FUMGPrototypeNavigationBinding> KeptBindings;
 		for (const FUMGPrototypeNavigationBinding& Binding : FilteredNavigationData.ClickBindings)
 		{
-			if (HasProjectBindingForInteraction(Ctx.WBP, Binding))
+			if (HasProjectBindingForInteraction(Shared.WBP, Binding))
 			{
 				AddReimportDiagnostic(
-					*Ctx.Diagnostics, TEXT("reimport_prototype_conflict"),
+					*Shared.Diagnostics, ReimportDiagnosticKinds::PrototypeConflict,
 					FString::Printf(
 						TEXT("Interaction (trigger '%s', type '%s') already bound by the project; project behavior kept, D2U prototype binding yields"),
 						*Binding.TriggerWidgetName,
@@ -650,22 +672,22 @@ namespace DesignImportPipeline
 		// here they go into BuildState only, the out-param is nullptr, and the main flow later collects BuildState
 		// diagnostics into Result.ComponentMappingDiagnostics - never into the reimport section.
 		Design2UMGComponentMappingGeneration::ReportInertPrototypeBindings(
-			FilteredNavigationData, *Ctx.MappingBuildState, nullptr);
+			FilteredNavigationData, *Shared.MappingBuildState, nullptr);
 
 		switch (GenerationSettings.PrototypeNavigationGenerationMode)
 		{
 		case EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension:
 			// Refresh binding data only; do not rebuild transition-animation assets (avoid copying one animation per reimport).
-			UMGPrototypeAnimationBuilder::ConfigureNavigationExtension(Ctx.WBP, FilteredNavigationData);
+			UMGPrototypeAnimationBuilder::ConfigureNavigationExtension(Shared.WBP, FilteredNavigationData);
 			break;
 		case EDesign2UMGPrototypeNavigationGenerationMode::TagHelper:
-			Design2UMGPrototypeNavigationTagHelper::ConfigureMetadata(Ctx.WBP, FilteredNavigationData);
+			Design2UMGPrototypeNavigationTagHelper::ConfigureMetadata(Shared.WBP, FilteredNavigationData);
 			break;
 		default:
 			break;
 		}
 		AddReimportDiagnostic(
-			*Ctx.Diagnostics, TEXT("reimport_prototype_refreshed"),
+			*Shared.Diagnostics, ReimportDiagnosticKinds::PrototypeRefreshed,
 			FString::Printf(
 				TEXT("D2U prototype bindings refreshed by stable design identity (%d binding(s) active)"),
 				FilteredNavigationData.ClickBindings.Num()));

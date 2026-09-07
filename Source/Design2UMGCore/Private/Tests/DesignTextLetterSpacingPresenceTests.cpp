@@ -5,6 +5,7 @@
 #include "Design2UMGLog.h"
 #include "Design2UMGConverter.h"
 #include "FigmaParser.h"
+#include "FigmaTestDocBuilder.h"
 #include "PenParser.h"
 #include "Misc/OutputDevice.h"
 #include "UMGWidgetNodeProceduralResourceAccess.h"
@@ -116,64 +117,15 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaTextLetterSpacingPresenceExplicitZeroVsUnsetTest::RunTest(const FString& Parameters)
 {
-	const FString ExplicitZeroJson = TEXT(R"JSON(
-{
-  "document": {
-    "id": "0:0",
-    "name": "Doc",
-    "type": "DOCUMENT",
-    "children": [{
-      "id": "0:1",
-      "name": "Page 1",
-      "type": "CANVAS",
-      "children": [{
-        "id": "explicit_zero",
-        "name": "Explicit Zero",
-        "type": "TEXT",
-        "visible": true,
-        "characters": "Spacing",
-        "absoluteBoundingBox": { "x": 10, "y": 20, "width": 220, "height": 48 },
-        "fills": [{ "type": "SOLID", "visible": true, "color": { "r": 1, "g": 1, "b": 1, "a": 1 } }],
-        "style": {
-          "fontFamily": "Inter",
-          "fontSize": 24,
-          "fontWeight": 400,
-          "letterSpacing": 0
-        }
-      }]
-    }]
-  }
-}
-)JSON");
+	const FString ExplicitZeroJson = Design2UMGCoreTests::MakeFigmaDocJson(Design2UMGCoreTests::MakeTextNode(
+		TEXT("explicit_zero"), TEXT("Explicit Zero"), 10, 20, 220, 48, TEXT("Spacing"),
+		TEXT("\"fontFamily\":\"Inter\",\"fontSize\":24,\"fontWeight\":400,\"letterSpacing\":0"),
+		FString::Printf(TEXT(",\"fills\":[%s]"), *Design2UMGCoreTests::MakeSolidFillJson(1, 1, 1))));
 
-	const FString UnsetJson = TEXT(R"JSON(
-{
-  "document": {
-    "id": "0:0",
-    "name": "Doc",
-    "type": "DOCUMENT",
-    "children": [{
-      "id": "0:1",
-      "name": "Page 1",
-      "type": "CANVAS",
-      "children": [{
-        "id": "unset_spacing",
-        "name": "Unset Spacing",
-        "type": "TEXT",
-        "visible": true,
-        "characters": "Spacing",
-        "absoluteBoundingBox": { "x": 10, "y": 20, "width": 220, "height": 48 },
-        "fills": [{ "type": "SOLID", "visible": true, "color": { "r": 1, "g": 1, "b": 1, "a": 1 } }],
-        "style": {
-          "fontFamily": "Inter",
-          "fontSize": 24,
-          "fontWeight": 400
-        }
-      }]
-    }]
-  }
-}
-)JSON");
+	const FString UnsetJson = Design2UMGCoreTests::MakeFigmaDocJson(Design2UMGCoreTests::MakeTextNode(
+		TEXT("unset_spacing"), TEXT("Unset Spacing"), 10, 20, 220, 48, TEXT("Spacing"),
+		TEXT("\"fontFamily\":\"Inter\",\"fontSize\":24,\"fontWeight\":400"),
+		FString::Printf(TEXT(",\"fills\":[%s]"), *Design2UMGCoreTests::MakeSolidFillJson(1, 1, 1))));
 
 	FDesignDocument ExplicitZeroDocument;
 	FDesignDocument UnsetDocument;

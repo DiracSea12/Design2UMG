@@ -39,9 +39,9 @@ namespace DesignImportPipeline
 
 	/**
 	 * Reimport session state shared across stages: the common parameter carrier of the early-exit functions and
-	 * HandleFullConflict (mirroring the apply-stage FReimportApplyContext so the Document/Request/
-	 * Data/GenerationSettings quartet is not repeated verbatim in every early-exit signature and every
-	 * HandleFullConflict call site). GenerationSettings is available after settings-snapshot resolution (step 1).
+	 * HandleFullConflict (so the Document/Request/Data/GenerationSettings quartet is not repeated verbatim in every
+	 * early-exit signature and every HandleFullConflict call site). GenerationSettings is available after
+	 * settings-snapshot resolution (step 1).
 	 */
 	struct FReimportSession
 	{
@@ -51,7 +51,46 @@ namespace DesignImportPipeline
 		const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings;
 	};
 
-	struct FReimportApplyContext
+	/**
+	 * Reimport diagnostic kind values (the reimport report JSON contract). Tests assert these strings as protocol
+	 * anchors; changing any value breaks report consumers - keep them byte-identical.
+	 */
+	namespace ReimportDiagnosticKinds
+	{
+		inline constexpr const TCHAR* Added = TEXT("reimport_added");
+		inline constexpr const TCHAR* Completed = TEXT("reimport_completed");
+		inline constexpr const TCHAR* FullConflict = TEXT("reimport_full_conflict");
+		inline constexpr const TCHAR* InputSkipped = TEXT("reimport_input_skipped");
+		inline constexpr const TCHAR* KindChanged = TEXT("reimport_kind_changed");
+		inline constexpr const TCHAR* KindConflict = TEXT("reimport_kind_conflict");
+		inline constexpr const TCHAR* MappedAttrKept = TEXT("reimport_mapped_attr_kept");
+		inline constexpr const TCHAR* MappedClassConflict = TEXT("reimport_mapped_class_conflict");
+		inline constexpr const TCHAR* MoveConflict = TEXT("reimport_move_conflict");
+		inline constexpr const TCHAR* Moved = TEXT("reimport_moved");
+		inline constexpr const TCHAR* NodeMissing = TEXT("reimport_node_missing");
+		inline constexpr const TCHAR* PrototypeConflict = TEXT("reimport_prototype_conflict");
+		inline constexpr const TCHAR* PrototypeHostContinued = TEXT("reimport_prototype_host_continued");
+		inline constexpr const TCHAR* PrototypeRefreshed = TEXT("reimport_prototype_refreshed");
+		inline constexpr const TCHAR* RemoveConflict = TEXT("reimport_remove_conflict");
+		inline constexpr const TCHAR* Removed = TEXT("reimport_removed");
+		inline constexpr const TCHAR* ResolutionCopy = TEXT("reimport_resolution_copy");
+		inline constexpr const TCHAR* SaveFailed = TEXT("reimport_save_failed");
+		inline constexpr const TCHAR* ScopeMatched = TEXT("reimport_scope_matched");
+		inline constexpr const TCHAR* Updated = TEXT("reimport_updated");
+	}
+
+	/**
+	 * Apply-stage shared session state, constructed complete before the 9a) plan stages run:
+	 * - read-only bindings: the asset/tree snapshot (WBP/WidgetTree/HostPanel/DesignSize) and the manifest lookup
+	 *   tables (OwnedNames/InstancesById/AliveInstanceWidgetNames);
+	 * - append-only sinks bound once at construction (diagnostics, the updated manifest record accumulators, the
+	 *   mapping BuildState) - pointers never get rebound mid-flow.
+	 * Mutable cross-stage channels deliberately do NOT live here: UpdatedD2UOwned / KeepAsIsWidgetNames /
+	 * NewlyCreatedWidgets / NestedMoveCandidates travel as explicit stage parameters, so each stage signature
+	 * states what it consumes and what it produces (the previous late-bound FReimportApplyContext pointers made the
+	 * stage ordering an implicit comment-only contract).
+	 */
+	struct FReimportApplySharedState
 	{
 		UWidgetBlueprint* WBP = nullptr;
 		UWidgetTree* WidgetTree = nullptr;
@@ -64,18 +103,6 @@ namespace DesignImportPipeline
 		TArray<FDesign2UMGMappingDiagnostic>* Diagnostics = nullptr;
 		TArray<FDesign2UMGMappedInstanceRecord>* UpdatedMappedRecords = nullptr;
 		TArray<FDesign2UMGGeneratedInstanceRecord>* UpdatedGeneratedRecords = nullptr;
-		/** Widgets newly created this round (designNodeId -> widget); referenced when resolving reparent targets. */
-		TMap<FString, UWidget*>* NewlyCreatedWidgets = nullptr;
-		/**
-		 * Move-candidate pool of the nested-structure diff (collected by the main-flow pre-scan): widgets inside the owned
-		 * list, not manifest instances, and no longer expected by the new design to stay in their original container.
-		 * The container-subtree diff consumes move sources from the pool by deterministic same-name; unconsumed ones go to leftover-deletion diagnostics (pure-D2U silently kept).
-		 */
-		TArray<UWidget*>* NestedMoveCandidates = nullptr;
-		/** The 9a-10 shared owned-list evolution (initial = manifest.d2uOwned, updated as deletions/additions happen). */
-		TSet<FString>* UpdatedD2UOwned = nullptr;
-		/** Conflict-kept list (9a/9b keeps; 10 backfills manifest records). */
-		TArray<FString>* KeepAsIsWidgetNames = nullptr;
 		/** Manifest instance widget names still alive in this round's update plan (the second gate of the 9a/9b whole delete). */
 		const TSet<FString>* AliveInstanceWidgetNames = nullptr;
 	};
@@ -117,47 +144,64 @@ namespace DesignImportPipeline
 		TArray<FDesign2UMGMappingDiagnostic>&& PriorDiagnostics);
 
 	// DesignImportReimportApply.cpp
-	void ApplySlotForNode(UWidget* Widget, const FUMGWidgetNode& Node, const FReimportApplyContext& Ctx);
+	void ApplySlotForNode(UWidget* Widget, const FUMGWidgetNode& Node, const FReimportApplySharedState& Shared);
 	bool IsMappedClassConflict(
 		const UWidget* Instance,
 		const FDesign2UMGGenerationManifestSidecar::FInstanceRecord* Record,
 		const FString& CurrentMappedClass);
-	bool IsMoveSourceOwned(const FReimportApplyContext& Ctx, UWidget* MoveSource, FString& OutReason);
+	bool IsMoveSourceOwned(const FReimportApplySharedState& Shared, UWidget* MoveSource, FString& OutReason);
 	void CollectExpectedNestedNames(
 		const FUMGWidgetNode& Node,
 		UPanelWidget* Panel,
-		const FReimportApplyContext& Ctx,
+		const FReimportApplySharedState& Shared,
 		TSet<FString>& OutExpected);
-	void RefreshNodeByKind(const FUMGWidgetNode& Node, UWidget* Widget, FReimportApplyContext& Ctx);
+	void RefreshNodeByKind(
+		const FUMGWidgetNode& Node,
+		UWidget* Widget,
+		const FReimportApplySharedState& Shared,
+		TArray<UWidget*>& NestedMoveCandidates,
+		TMap<FString, UWidget*>& NewlyCreatedWidgets);
 	void ApplyPrototypeRefresh(
 		FUMGWidgetData& Data,
 		const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings,
-		FReimportApplyContext& Ctx);
+		const FReimportApplySharedState& Shared);
 
 	// DesignImportReimportStages.cpp
 	FDesign2UMGMappedInstanceRecord ManifestRecordToMappedRecord(
 		const FDesign2UMGGenerationManifestSidecar::FInstanceRecord& Record);
 	void ApplyRemovedPlanEntries(
 		const TArray<FReimportPlanEntry>& Plan,
-		FReimportApplyContext& Ctx);
+		const FReimportApplySharedState& Shared,
+		TSet<FString>& UpdatedD2UOwned,
+		TArray<FString>& KeepAsIsWidgetNames);
 	void ApplyKindChangedPlanEntries(
 		const TArray<FReimportPlanEntry>& Plan,
-		FReimportApplyContext& Ctx);
+		const FReimportApplySharedState& Shared,
+		TSet<FString>& UpdatedD2UOwned,
+		TArray<FString>& KeepAsIsWidgetNames,
+		TMap<FString, UWidget*>& NewlyCreatedWidgets);
 	void ApplyAddedTopLevelNodes(
 		const FUMGWidgetNode& PreparedScopeRoot,
-		FReimportApplyContext& Ctx);
+		const FReimportApplySharedState& Shared,
+		TMap<FString, UWidget*>& NewlyCreatedWidgets);
 	void ApplyReparentPlanEntries(
 		const TArray<FReimportPlanEntry>& Plan,
 		const FUMGWidgetNode& PreparedScopeRoot,
-		FReimportApplyContext& Ctx);
+		const FReimportApplySharedState& Shared,
+		TArray<FString>& KeepAsIsWidgetNames,
+		TMap<FString, UWidget*>& NewlyCreatedWidgets);
 	TArray<UWidget*> CollectNestedMoveCandidates(
 		const FUMGWidgetNode& PreparedScopeRoot,
-		FReimportApplyContext& Ctx);
+		const FReimportApplySharedState& Shared);
 	void ApplyMatchedPlanEntries(
 		const TArray<FReimportPlanEntry>& Plan,
-		FReimportApplyContext& Ctx,
-		const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings);
-	void ReportNestedRemovalLeftovers(FReimportApplyContext& Ctx);
+		const FReimportApplySharedState& Shared,
+		const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings,
+		TArray<UWidget*>& NestedMoveCandidates,
+		TMap<FString, UWidget*>& NewlyCreatedWidgets);
+	void ReportNestedRemovalLeftovers(
+		const FReimportApplySharedState& Shared,
+		const TArray<UWidget*>& NestedMoveCandidates);
 
 	// DesignImportReimportPersist.cpp
 	TOptional<FDesignReimportResult> ResolveReimportSourceAndManifest(
@@ -197,8 +241,10 @@ namespace DesignImportPipeline
 		const FDesign2UMGGenerationManifestSidecar& Manifest,
 		bool bPrototypeHostContinued,
 		const FUMGWidgetData& Data,
-		FReimportApplyContext& Ctx);
-	void FinalizeReimportedAssetState(FReimportApplyContext& Ctx);
+		const FReimportApplySharedState& Shared,
+		TSet<FString>& UpdatedD2UOwned,
+		const TArray<FString>& KeepAsIsWidgetNames);
+	void FinalizeReimportedAssetState(UWidgetBlueprint* WBP, FIntPoint DesignSize);
 	FDesignReimportResult SaveReimportedAsset(
 		const FReimportSession& Session,
 		const FString& TargetPackage,

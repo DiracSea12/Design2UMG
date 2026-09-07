@@ -9,7 +9,7 @@ These scripts are intended for contributors who want to run local validation or 
 - `Run-Design2UMGAutomationTests.ps1`
 - `Run-Design2UMGDeterminismSmoke.ps1`
 - `Run-DesignerSnapshotValidation.ps1`
-- `Run-LunarisStructureSnapshotValidation.ps1`
+- `Run-StructureSnapshotValidation.ps1`
 
 ## Maintainer-only workflows
 

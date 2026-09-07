@@ -20,11 +20,14 @@
 
 namespace
 {
-	// Intentionally kept as a serialized-protocol round trip: automation tests
-	// (WidgetResourceBinderTests border brush color, EffectsAndShadow retainer
-	// inner-shadow color) anchor these two consumers to the JSON-preview color
-	// value, so they must stay quantized instead of passing the typed payload
-	// through at full precision.
+	// Intentionally kept as a serialized-protocol round trip: the per-case
+	// no_regression gate pins each case's pixel score to the quantized output,
+	// so removal requires a gate-scope change or renewed gate consensus. The
+	// 2026-09-02 removal experiment was fidelity-neutral: of 240,390 changed
+	// pixels, 112,376 moved closer to the reference, 127,414 moved farther,
+	// and 600 kept their distance; shadow/AA boundary pixels merely flip under
+	// the +/-1/255 bias shift (deltas up to +/-211/255). It was vetoed only by
+	// stable_changed_ratio upticks (+2.5e-4..+8.5e-4 on 6 figma cases).
 	FLinearColor NormalizeTypedDescriptorColor(const FLinearColor& Color)
 	{
 		return FUMGValueParser::ParseColor(

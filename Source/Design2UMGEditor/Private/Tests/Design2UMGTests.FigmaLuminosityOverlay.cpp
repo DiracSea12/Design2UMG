@@ -7,13 +7,38 @@
 #include "Design2UMGConverter.h"
 #include "Design2UMGSettings.h"
 #include "FigmaParser.h"
+#include "FigmaTestDocBuilder.h"
 
 #if WITH_AUTOMATION_WORKER
 
+using namespace Design2UMGCoreTests;
 using namespace Design2UMGTestUtils;
 
 namespace
 {
+	struct FLuminosityOverlayNodeSpec
+	{
+		const TCHAR* Id;
+		const TCHAR* Name;
+		double Width;
+		double Height;
+		const TCHAR* ImageRef;
+		// Extra IMAGE-fill fields, e.g. ",\"scalingFactor\":0.5" or ",\"imageTransform\":[[1,0,0],[0,1,0]]".
+		const TCHAR* ImageExtraFields;
+	};
+
+	FString MakeLuminosityOverlayDocJson(const FLuminosityOverlayNodeSpec& Spec)
+	{
+		return MakeFigmaDocJson(
+			MakeContainerNode(Spec.Id, Spec.Name, TEXT("FRAME"), 0, 0, Spec.Width, Spec.Height, FString(),
+				FString::Printf(
+					TEXT(",\"absoluteRenderBounds\":%s,\"fills\":["
+						 "{\"type\":\"SOLID\",\"visible\":true,\"blendMode\":\"NORMAL\",\"color\":{\"r\":0.9254902,\"g\":0.9019608,\"b\":0.94117647,\"a\":1}},"
+						 "{\"type\":\"IMAGE\",\"visible\":true,\"blendMode\":\"LUMINOSITY\",\"imageRef\":\"%s\",\"scaleMode\":\"FIT\"%s}"
+						 "]"),
+					*MakeBoundsJson(0, 0, Spec.Width, Spec.Height), Spec.ImageRef, Spec.ImageExtraFields)));
+	}
+
 	struct FLuminosityOpacityCapScope
 	{
 		explicit FLuminosityOpacityCapScope(const float NewValue, const bool bEnableOverride = true)
@@ -51,31 +76,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLuminosityImageOverlayTest,
 bool FFigmaLuminosityImageOverlayTest::RunTest(const FString& Parameters)
 {
 	FLuminosityOpacityCapScope LuminosityOpacityCapScope(0.15f);
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [{
-					"id": "node_lum",
-					"name": "LumCard",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 80},
-					"absoluteRenderBounds": {"x": 0, "y": 0, "width": 120, "height": 80},
-					"fills": [
-						{"type": "SOLID", "visible": true, "blendMode": "NORMAL", "color": {"r": 0.9254902, "g": 0.9019608, "b": 0.94117647, "a": 1}},
-						{"type": "IMAGE", "visible": true, "blendMode": "LUMINOSITY", "imageRef": "img_lum", "scaleMode": "FIT", "scalingFactor": 0.5}
-					],
-					"children": []
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeLuminosityOverlayDocJson({
+		TEXT("node_lum"), TEXT("LumCard"), 120, 80, TEXT("img_lum"), TEXT(",\"scalingFactor\":0.5")});
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Figma parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
@@ -135,31 +137,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaWideLuminosityImageOverlayTest,
 bool FFigmaWideLuminosityImageOverlayTest::RunTest(const FString& Parameters)
 {
 	FLuminosityOpacityCapScope LuminosityOpacityCapScope(0.15f);
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [{
-					"id": "overlay_wide",
-					"name": "OverlayWide",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 220, "height": 120},
-					"absoluteRenderBounds": {"x": 0, "y": 0, "width": 220, "height": 120},
-					"fills": [
-						{"type": "SOLID", "visible": true, "blendMode": "NORMAL", "color": {"r": 0.9254902, "g": 0.9019608, "b": 0.94117647, "a": 1}},
-						{"type": "IMAGE", "visible": true, "blendMode": "LUMINOSITY", "imageRef": "img_lum_wide", "scaleMode": "FIT", "scalingFactor": 0.5}
-					],
-					"children": []
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeLuminosityOverlayDocJson({
+		TEXT("overlay_wide"), TEXT("OverlayWide"), 220, 120, TEXT("img_lum_wide"), TEXT(",\"scalingFactor\":0.5")});
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Wide luminosity parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
@@ -200,31 +179,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaSquareLuminosityImageOverlayTest,
 bool FFigmaSquareLuminosityImageOverlayTest::RunTest(const FString& Parameters)
 {
 	FLuminosityOpacityCapScope LuminosityOpacityCapScope(0.15f);
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [{
-					"id": "overlay_square",
-					"name": "OverlaySquare",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 120},
-					"absoluteRenderBounds": {"x": 0, "y": 0, "width": 120, "height": 120},
-					"fills": [
-						{"type": "SOLID", "visible": true, "blendMode": "NORMAL", "color": {"r": 0.9254902, "g": 0.9019608, "b": 0.94117647, "a": 1}},
-						{"type": "IMAGE", "visible": true, "blendMode": "LUMINOSITY", "imageRef": "img_lum_square", "scaleMode": "FIT", "imageTransform": [[1,0,0],[0,1,0]]}
-					],
-					"children": []
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeLuminosityOverlayDocJson({
+		TEXT("overlay_square"), TEXT("OverlaySquare"), 120, 120, TEXT("img_lum_square"), TEXT(",\"imageTransform\":[[1,0,0],[0,1,0]]")});
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Square luminosity parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
@@ -271,31 +227,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLuminosityIdentityTransformOverlayTest,
 bool FFigmaLuminosityIdentityTransformOverlayTest::RunTest(const FString& Parameters)
 {
 	FLuminosityOpacityCapScope LuminosityOpacityCapScope(0.15f);
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [{
-					"id": "overlay_id",
-					"name": "OverlayIdentity",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 80},
-					"absoluteRenderBounds": {"x": 0, "y": 0, "width": 120, "height": 80},
-					"fills": [
-						{"type": "SOLID", "visible": true, "blendMode": "NORMAL", "color": {"r": 0.9254902, "g": 0.9019608, "b": 0.94117647, "a": 1}},
-						{"type": "IMAGE", "visible": true, "blendMode": "LUMINOSITY", "imageRef": "img_lum_id", "scaleMode": "FIT", "imageTransform": [[1,0,0],[0,1,0]]}
-					],
-					"children": []
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeLuminosityOverlayDocJson({
+		TEXT("overlay_id"), TEXT("OverlayIdentity"), 120, 80, TEXT("img_lum_id"), TEXT(",\"imageTransform\":[[1,0,0],[0,1,0]]")});
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Figma parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));

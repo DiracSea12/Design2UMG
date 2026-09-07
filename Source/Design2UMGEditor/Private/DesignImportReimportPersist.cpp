@@ -201,7 +201,7 @@ namespace DesignImportPipeline
 		{
 			ScopeRoot = &Data.RootWidget;
 			AddReimportDiagnostic(
-				Result.Diagnostics, TEXT("reimport_prototype_host_continued"),
+				Result.Diagnostics, ReimportDiagnosticKinds::PrototypeHostContinued,
 				FString::Printf(
 					TEXT("Prototype host root identity renewed: recorded '%s' not found in the new source (page-set content fingerprint changed); provider/scope still match and the new source remains a multi-page prototype, continuing on the new host root '%s'"),
 					*Manifest.SourceRootNodeId, *GetDesignNodeId(Data.RootWidget)));
@@ -216,7 +216,7 @@ namespace DesignImportPipeline
 		}
 
 		AddReimportDiagnostic(
-			Result.Diagnostics, TEXT("reimport_scope_matched"),
+			Result.Diagnostics, ReimportDiagnosticKinds::ScopeMatched,
 			FString::Printf(
 				TEXT("Source matched: provider=%s documentScope=%s sourceRoot=%s"),
 				*Manifest.Provider, *Manifest.DocumentScope, *Manifest.SourceRootNodeId));
@@ -354,7 +354,9 @@ namespace DesignImportPipeline
 		const FDesign2UMGGenerationManifestSidecar& Manifest,
 		bool bPrototypeHostContinued,
 		const FUMGWidgetData& Data,
-		FReimportApplyContext& Ctx)
+		const FReimportApplySharedState& Shared,
+		TSet<FString>& UpdatedD2UOwned,
+		const TArray<FString>& KeepAsIsWidgetNames)
 	{
 		// 10) Assemble the post-reimport manifest payload.
 		FDesign2UMGGenerationOutput GenerationOutput;
@@ -368,13 +370,13 @@ namespace DesignImportPipeline
 		GenerationOutput.Manifest.SourceRootName = bPrototypeHostContinued
 			? Data.RootWidget.Name
 			: Manifest.SourceRootName;
-		GenerationOutput.Manifest.MappedInstances = MoveTemp(*Ctx.UpdatedMappedRecords);
-		GenerationOutput.Manifest.TopLevelGenerated = MoveTemp(*Ctx.UpdatedGeneratedRecords);
+		GenerationOutput.Manifest.MappedInstances = MoveTemp(*Shared.UpdatedMappedRecords);
+		GenerationOutput.Manifest.TopLevelGenerated = MoveTemp(*Shared.UpdatedGeneratedRecords);
 
 		// Instances kept as-is (conflicts/location failures): backfill their original records into the new manifest.
 		for (const FDesign2UMGGenerationManifestSidecar::FInstanceRecord& Record : Manifest.Instances)
 		{
-			if (!Ctx.KeepAsIsWidgetNames->Contains(Record.WidgetName))
+			if (!KeepAsIsWidgetNames.Contains(Record.WidgetName))
 			{
 				continue;
 			}
@@ -392,7 +394,7 @@ namespace DesignImportPipeline
 		}
 
 		// Instances newly created by this round's generation chain (top-level added / kind-changed new forms / nested new mapped) enter the new manifest.
-		for (const FDesign2UMGMappedInstanceRecord& NewMapped : Ctx.MappingBuildState->GetMappedInstances())
+		for (const FDesign2UMGMappedInstanceRecord& NewMapped : Shared.MappingBuildState->GetMappedInstances())
 		{
 			if (!GenerationOutput.Manifest.MappedInstances.ContainsByPredicate(
 				[&NewMapped](const FDesign2UMGMappedInstanceRecord& M) { return M.WidgetName == NewMapped.WidgetName; }))
@@ -400,7 +402,7 @@ namespace DesignImportPipeline
 				GenerationOutput.Manifest.MappedInstances.Add(NewMapped);
 			}
 		}
-		for (const FDesign2UMGGeneratedInstanceRecord& NewGenerated : Ctx.MappingBuildState->GetTopLevelGenerated())
+		for (const FDesign2UMGGeneratedInstanceRecord& NewGenerated : Shared.MappingBuildState->GetTopLevelGenerated())
 		{
 			if (!GenerationOutput.Manifest.TopLevelGenerated.ContainsByPredicate(
 				[&NewGenerated](const FDesign2UMGGeneratedInstanceRecord& G) { return G.WidgetName == NewGenerated.WidgetName; }))
@@ -410,21 +412,21 @@ namespace DesignImportPipeline
 		}
 
 		// New d2uOwned = (old set - deleted names) U names created this round; then drop names no longer present in the tree.
-		for (const FString& CreatedName : Ctx.MappingBuildState->GetCreatedWidgetNames())
+		for (const FString& CreatedName : Shared.MappingBuildState->GetCreatedWidgetNames())
 		{
-			(*Ctx.UpdatedD2UOwned).Add(CreatedName);
+			UpdatedD2UOwned.Add(CreatedName);
 		}
-		if (Ctx.WBP->WidgetTree)
+		if (Shared.WBP->WidgetTree)
 		{
-			for (const FString& OwnedName : (*Ctx.UpdatedD2UOwned).Array())
+			for (const FString& OwnedName : UpdatedD2UOwned.Array())
 			{
-				if (!Ctx.WBP->WidgetTree->FindWidget(FName(*OwnedName)))
+				if (!Shared.WBP->WidgetTree->FindWidget(FName(*OwnedName)))
 				{
-					(*Ctx.UpdatedD2UOwned).Remove(OwnedName);
+					UpdatedD2UOwned.Remove(OwnedName);
 				}
 			}
 		}
-		GenerationOutput.Manifest.D2UOwnedNames = (*Ctx.UpdatedD2UOwned).Array();
+		GenerationOutput.Manifest.D2UOwnedNames = UpdatedD2UOwned.Array();
 		GenerationOutput.Manifest.D2UOwnedNames.Sort();
 
 		return GenerationOutput;
@@ -435,16 +437,16 @@ namespace DesignImportPipeline
 	 * refresh the CDO preview size when the design root size changed (written back by SaveWidgetBlueprint after compiling);
 	 * backfill missing variable GUIDs of generation-chain-created widgets with the compiler's own deterministic rule.
 	 */
-	void FinalizeReimportedAssetState(FReimportApplyContext& Ctx)
+	void FinalizeReimportedAssetState(UWidgetBlueprint* WBP, FIntPoint DesignSize)
 	{
 		if (UUserWidget* CDO = Cast<UUserWidget>(
-			Ctx.WBP->GeneratedClass ? Ctx.WBP->GeneratedClass->GetDefaultObject() : nullptr))
+			WBP->GeneratedClass ? WBP->GeneratedClass->GetDefaultObject() : nullptr))
 		{
 			// The CDO lacks RF_Transactional by default (the WidgetTree got it above; same reasoning here):
 			// without the flag, Modify never enters the transaction buffer, and a save-failure rollback / user undo would leave the preview size at the new value.
 			CDO->SetFlags(RF_Transactional);
 			CDO->Modify();
-			CDO->DesignTimeSize = FVector2D(Ctx.DesignSize.X, Ctx.DesignSize.Y);
+			CDO->DesignTimeSize = FVector2D(DesignSize.X, DesignSize.Y);
 			CDO->DesignSizeMode = EDesignPreviewSizeMode::Custom;
 		}
 
@@ -452,15 +454,15 @@ namespace DesignImportPipeline
 		// variable GUID, and the compiler ensures on missing entries. Backfill with the compiler's own deterministic
 		// rule; existing GUIDs stay untouched. Modify first to capture the GUID map's pre-transaction state: on a
 		// save-failure rollback the map restores with the asset, or the post-rollback recompile would trip the compiler's ensure on a "deleted widget's leftover GUID".
-		if (Ctx.WBP->WidgetTree)
+		if (WBP->WidgetTree)
 		{
-			Ctx.WBP->Modify();
-			Ctx.WBP->WidgetTree->ForEachWidget([&Ctx](UWidget* TreeWidget)
+			WBP->Modify();
+			WBP->WidgetTree->ForEachWidget([WBP](UWidget* TreeWidget)
 			{
 				const FName WidgetName = TreeWidget->GetFName();
-				if (!Ctx.WBP->WidgetVariableNameToGuidMap.Contains(WidgetName))
+				if (!WBP->WidgetVariableNameToGuidMap.Contains(WidgetName))
 				{
-					Ctx.WBP->WidgetVariableNameToGuidMap.Add(
+					WBP->WidgetVariableNameToGuidMap.Add(
 						WidgetName, FGuid::NewDeterministicGuid(TreeWidget->GetPathName()));
 				}
 			});
@@ -493,7 +495,7 @@ namespace DesignImportPipeline
 			{
 				RollbackNote = TEXT("; save not completed and no reimport-owned editor transaction was open (transacting unavailable or nested inside an active transaction); asset on disk keeps its previous state, in-memory changes remain, manifest not updated");
 			}
-			AddReimportDiagnostic(Result.Diagnostics, TEXT("reimport_save_failed"), Reason + RollbackNote);
+			AddReimportDiagnostic(Result.Diagnostics, ReimportDiagnosticKinds::SaveFailed, Reason + RollbackNote);
 			// The rollback restores only the template tree; class objects produced by compiling do not roll back with it -
 			// one recompile pulls the generated class back into the state of the (restored) template tree.
 			FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WBP);
@@ -571,7 +573,7 @@ namespace DesignImportPipeline
 				GEditor->EndTransaction();
 			}
 			AddReimportDiagnostic(
-				Result.Diagnostics, TEXT("reimport_save_failed"),
+				Result.Diagnostics, ReimportDiagnosticKinds::SaveFailed,
 				FString::Printf(
 					TEXT("Asset %s was saved but its generation manifest could not be written; the asset and the manifest may be inconsistent"),
 					*TargetPackage));
@@ -589,7 +591,7 @@ namespace DesignImportPipeline
 		Result.UpdatedBlueprint = WBP;
 		Result.bSucceeded = true;
 		AddReimportDiagnostic(
-			Result.Diagnostics, TEXT("reimport_completed"),
+			Result.Diagnostics, ReimportDiagnosticKinds::Completed,
 			FString::Printf(
 				TEXT("Reimport of %s applied (manifest updated)"),
 				*TargetPackage));

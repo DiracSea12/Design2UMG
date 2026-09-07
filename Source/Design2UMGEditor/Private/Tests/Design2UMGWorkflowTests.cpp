@@ -8,6 +8,7 @@
 #include "Tests/Design2UMGTestAssetCleanup.h"
 #include "FontResolver.h"
 #include "FigmaParser.h"
+#include "FigmaTestDocBuilder.h"
 #include "PenParser.h"
 #include "UMGGenerator.h"
 #include "PreBuildResourceNormalizer.h"
@@ -23,6 +24,7 @@
 #include "RHI.h"
 #include "Engine/Texture2D.h"
 #if WITH_AUTOMATION_WORKER
+using namespace Design2UMGCoreTests;
 using namespace Design2UMGTestUtils;
 using Design2UMGEditorTests::DeleteGeneratedAssetsAtPath;
 
@@ -146,30 +148,19 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaInstanceMetadataWorkflowTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaInstanceMetadataWorkflowTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id":"0:0",
-			"name":"Doc",
-			"type":"DOCUMENT",
-			"children":[
-				{"id":"0:1","name":"Page","type":"CANVAS","children":[
-					{"id":"inst1","name":"InstanceParity","type":"INSTANCE","componentId":"12:34","componentSetId":"56:78","mainComponentKey":"component-key-1","visible":true,
-					 "componentProperties":{"title":{"type":"TEXT","value":"Hello"}},
-					 "variantProperties":{"Active":"True","Size":"Small"},
-					 "overrides":[{"id":"inst1_txt","path":["characters"],"value":"Override"}],
-					 "isExposedInstance":true,
-					 "absoluteBoundingBox":{"x":16,"y":24,"width":160,"height":64},
-					 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.18,"g":0.35,"b":0.95,"a":1}}],
-					 "children":[{"id":"inst1_txt","name":"Label","type":"TEXT","visible":true,
-						"absoluteBoundingBox":{"x":28,"y":40,"width":120,"height":24},
-						"characters":"Instance text",
-						"style":{"fontFamily":"Inter","fontSize":16,"fontWeight":500,"textAlignHorizontal":"LEFT","textAlignVertical":"TOP","textDecoration":"NONE","letterSpacing":0,"lineHeightUnit":"AUTO","lineHeightPx":0}}]}
-				]}
-			]
-		},
-		"components":{"12:34":{"key":"nav_item_component","name":"NavItem","componentPropertyDefinitions":{"title":{"type":"TEXT"}}}},
-		"componentSets":{"56:78":{"key":"nav_item_variants","name":"NavItemVariants","variantGroupProperties":{"Active":{"values":["True","False"]}}}}
-	})");
+	const FString Json = MakeFigmaDocJson(
+		MakeContainerNode(TEXT("inst1"), TEXT("InstanceParity"), TEXT("INSTANCE"), 16, 24, 160, 64,
+			MakeTextNode(TEXT("inst1_txt"), TEXT("Label"), 28, 40, 120, 24, TEXT("Instance text"),
+				TEXT("\"fontFamily\":\"Inter\",\"fontSize\":16,\"fontWeight\":500,\"textAlignHorizontal\":\"LEFT\",\"textAlignVertical\":\"TOP\",\"textDecoration\":\"NONE\",\"letterSpacing\":0,\"lineHeightUnit\":\"AUTO\",\"lineHeightPx\":0")),
+			FString::Printf(
+				TEXT(",\"componentId\":\"12:34\",\"componentSetId\":\"56:78\",\"mainComponentKey\":\"component-key-1\","
+					 "\"componentProperties\":{\"title\":{\"type\":\"TEXT\",\"value\":\"Hello\"}},"
+					 "\"variantProperties\":{\"Active\":\"True\",\"Size\":\"Small\"},"
+					 "\"overrides\":[{\"id\":\"inst1_txt\",\"path\":[\"characters\"],\"value\":\"Override\"}],"
+					 "\"isExposedInstance\":true,\"fills\":[%s]"),
+				*MakeSolidFillJson(0.18, 0.35, 0.95))),
+		TEXT(",\"components\":{\"12:34\":{\"key\":\"nav_item_component\",\"name\":\"NavItem\",\"componentPropertyDefinitions\":{\"title\":{\"type\":\"TEXT\"}}}},"
+			 "\"componentSets\":{\"56:78\":{\"key\":\"nav_item_variants\",\"name\":\"NavItemVariants\",\"variantGroupProperties\":{\"Active\":{\"values\":[\"True\",\"False\"]}}}}"));
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse figma instance metadata fixture"), FFigmaParser::ParseDocument(Json, Document));
@@ -331,24 +322,14 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaOverflowDirectionRuntimeWorkflowTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaOverflowDirectionRuntimeWorkflowTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id":"0:0",
-			"name":"Doc",
-			"type":"DOCUMENT",
-			"children":[
-				{"id":"0:1","name":"Page","type":"CANVAS","children":[
-					{"id":"scroll_frame","name":"ScrollFrame","type":"FRAME","visible":true,
-					 "layoutMode":"VERTICAL","itemSpacing":12,"overflowDirection":"VERTICAL_SCROLLING",
-					 "absoluteBoundingBox":{"x":0,"y":0,"width":320,"height":240},
-					 "children":[
-						{"id":"row1","name":"Row1","type":"RECTANGLE","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":320,"height":80},"fills":[{"type":"SOLID","visible":true,"color":{"r":0.2,"g":0.3,"b":0.4,"a":1}}]},
-						{"id":"row2","name":"Row2","type":"RECTANGLE","visible":true,"absoluteBoundingBox":{"x":0,"y":92,"width":320,"height":80},"fills":[{"type":"SOLID","visible":true,"color":{"r":0.4,"g":0.3,"b":0.2,"a":1}}]}
-					 ]}
-				]}
-			]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(
+		MakeContainerNode(TEXT("scroll_frame"), TEXT("ScrollFrame"), TEXT("FRAME"), 0, 0, 320, 240,
+			FString::Printf(TEXT("%s,%s"),
+				*MakeLeafNode(TEXT("row1"), TEXT("Row1"), TEXT("RECTANGLE"), 0, 0, 320, 80,
+					FString::Printf(TEXT(",\"fills\":[%s]"), *MakeSolidFillJson(0.2, 0.3, 0.4))),
+				*MakeLeafNode(TEXT("row2"), TEXT("Row2"), TEXT("RECTANGLE"), 0, 92, 320, 80,
+					FString::Printf(TEXT(",\"fills\":[%s]"), *MakeSolidFillJson(0.4, 0.3, 0.2)))),
+			TEXT(",\"layoutMode\":\"VERTICAL\",\"itemSpacing\":12,\"overflowDirection\":\"VERTICAL_SCROLLING\"")));
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse scrollable figma workflow fixture"), FFigmaParser::ParseDocument(Json, Document));
@@ -406,35 +387,17 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaGridSlotSemanticsRuntimeWorkflowTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaGridSlotSemanticsRuntimeWorkflowTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id":"0:0",
-			"name":"Doc",
-			"type":"DOCUMENT",
-			"children":[
-				{"id":"0:1","name":"Page","type":"CANVAS","children":[
-					{"id":"grid_frame","name":"grid_frame","type":"FRAME","visible":true,
-					 "layoutMode":"GRID","gridRowCount":2,"gridColumnCount":2,"gridRowGap":24,"gridColumnGap":12,
-					 "gridChildHorizontalAlign":"CENTER","gridChildVerticalAlign":"MAX",
-					 "absoluteBoundingBox":{"x":0,"y":0,"width":320,"height":240},
-					 "children":[
-						{"id":"head_card","name":"head_card","type":"RECTANGLE","visible":true,
-						 "gridRowAnchorIndex":0,"gridColumnAnchorIndex":0,
-						 "absoluteBoundingBox":{"x":0,"y":0,"width":100,"height":40},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.2,"g":0.3,"b":0.4,"a":1}}]},
-						{"id":"tail_card","name":"tail_card","type":"RECTANGLE","visible":true,
-						 "gridRowAnchorIndex":0,"gridColumnAnchorIndex":1,
-						 "absoluteBoundingBox":{"x":116,"y":0,"width":100,"height":40},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.4,"g":0.3,"b":0.2,"a":1}}]},
-						{"id":"hero_card","name":"hero_card","type":"RECTANGLE","visible":true,
-						 "gridRowAnchorIndex":1,"gridColumnAnchorIndex":0,"gridColumnSpan":2,
-						 "absoluteBoundingBox":{"x":0,"y":64,"width":216,"height":40},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.1,"g":0.6,"b":0.5,"a":1}}]}
-					 ]}
-				]}
-			]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(
+		MakeContainerNode(TEXT("grid_frame"), TEXT("grid_frame"), TEXT("FRAME"), 0, 0, 320, 240,
+			FString::Printf(TEXT("%s,%s,%s"),
+				*MakeLeafNode(TEXT("head_card"), TEXT("head_card"), TEXT("RECTANGLE"), 0, 0, 100, 40,
+					FString::Printf(TEXT(",\"gridRowAnchorIndex\":0,\"gridColumnAnchorIndex\":0,\"fills\":[%s]"), *MakeSolidFillJson(0.2, 0.3, 0.4))),
+				*MakeLeafNode(TEXT("tail_card"), TEXT("tail_card"), TEXT("RECTANGLE"), 116, 0, 100, 40,
+					FString::Printf(TEXT(",\"gridRowAnchorIndex\":0,\"gridColumnAnchorIndex\":1,\"fills\":[%s]"), *MakeSolidFillJson(0.4, 0.3, 0.2))),
+				*MakeLeafNode(TEXT("hero_card"), TEXT("hero_card"), TEXT("RECTANGLE"), 0, 64, 216, 40,
+					FString::Printf(TEXT(",\"gridRowAnchorIndex\":1,\"gridColumnAnchorIndex\":0,\"gridColumnSpan\":2,\"fills\":[%s]"), *MakeSolidFillJson(0.1, 0.6, 0.5)))),
+			TEXT(",\"layoutMode\":\"GRID\",\"gridRowCount\":2,\"gridColumnCount\":2,\"gridRowGap\":24,\"gridColumnGap\":12,"
+				 "\"gridChildHorizontalAlign\":\"CENTER\",\"gridChildVerticalAlign\":\"MAX\"")));
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse figma grid runtime fixture"), FFigmaParser::ParseDocument(Json, Document));

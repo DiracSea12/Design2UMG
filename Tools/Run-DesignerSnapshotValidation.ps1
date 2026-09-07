@@ -58,7 +58,7 @@ New-D2UDirectoryForPath $DesignerPngPath
 New-D2UDirectoryForPath $ResultJsonPath
 $designerDir = Split-Path -Parent $DesignerPngPath
 
-$specPath = Join-Path $designerDir "lunaris-designer-validation.spec.json"
+$specPath = Join-Path $designerDir "designer-validation.spec.json"
 $spec = [ordered]@{
     mode = "asset"
     source_path = $AssetObjectPath

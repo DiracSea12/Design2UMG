@@ -6,10 +6,12 @@
 #include "Design2UMGTestUtils.h"
 #include "Design2UMGConverter.h"
 #include "FigmaParser.h"
+#include "FigmaTestDocBuilder.h"
 #include "FigmaImageExporter.h"
 
 #if WITH_AUTOMATION_WORKER
 
+using namespace Design2UMGCoreTests;
 using namespace Design2UMGTestUtils;
 
 
@@ -18,44 +20,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaTransformGroupPreservedTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaTransformGroupPreservedTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [{
-					"id": "root",
-					"name": "Root",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 300, "height": 200},
-					"children": [{
-						"id": "tg1",
-						"name": "Transform Group",
-						"type": "TRANSFORM_GROUP",
-						"visible": true,
-						"absoluteBoundingBox": {"x": 24, "y": 16, "width": 120, "height": 48},
-						"children": [{
-							"id": "rect1",
-							"name": "Card",
-							"type": "RECTANGLE",
-							"visible": true,
-							"absoluteBoundingBox": {"x": 24, "y": 16, "width": 120, "height": 48},
-							"fills": [{
-								"type": "SOLID",
-								"visible": true,
-								"color": {"r": 0.2, "g": 0.3, "b": 0.8, "a": 1.0}
-							}]
-						}]
-					}]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(
+		MakeContainerNode(TEXT("root"), TEXT("Root"), TEXT("FRAME"), 0, 0, 300, 200,
+			MakeContainerNode(TEXT("tg1"), TEXT("Transform Group"), TEXT("TRANSFORM_GROUP"), 24, 16, 120, 48,
+				MakeLeafNode(TEXT("rect1"), TEXT("Card"), TEXT("RECTANGLE"), 24, 16, 120, 48,
+					FString::Printf(TEXT(",\"fills\":[%s]"), *MakeSolidFillJson(0.2, 0.3, 0.8))))));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Transform group parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
@@ -88,46 +57,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaTextPathFallbackTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaTextPathFallbackTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [{
-					"id": "root",
-					"name": "Root",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 320, "height": 200},
-					"children": [{
-						"id": "text_path_1",
-						"name": "Curved Label",
-						"type": "TEXT_PATH",
-						"visible": true,
-						"absoluteBoundingBox": {"x": 32, "y": 24, "width": 180, "height": 40},
-						"characters": "Curved Title",
-						"fills": [{
-							"type": "SOLID",
-							"visible": true,
-							"color": {"r": 0.9, "g": 0.9, "b": 0.95, "a": 1.0}
-						}],
-						"style": {
-							"fontFamily": "Inter",
-							"fontSize": 18,
-							"fontWeight": 400,
-							"textAlignHorizontal": "CENTER",
-							"textAlignVertical": "TOP",
-							"lineHeightPx": 20
-						}
-					}]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(
+		MakeContainerNode(TEXT("root"), TEXT("Root"), TEXT("FRAME"), 0, 0, 320, 200,
+			MakeLeafNode(TEXT("text_path_1"), TEXT("Curved Label"), TEXT("TEXT_PATH"), 32, 24, 180, 40,
+				FString::Printf(
+					TEXT(",\"characters\":\"Curved Title\",\"fills\":[%s],"
+						 "\"style\":{\"fontFamily\":\"Inter\",\"fontSize\":18,\"fontWeight\":400,\"textAlignHorizontal\":\"CENTER\",\"textAlignVertical\":\"TOP\",\"lineHeightPx\":20}"),
+					*MakeSolidFillJson(0.9, 0.9, 0.95)))));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("TEXT_PATH parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
@@ -170,54 +106,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaSkipDesignOnlyNodesTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaSkipDesignOnlyNodesTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [{
-					"id": "root",
-					"name": "Root",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x": 0, "y": 0, "width": 320, "height": 200},
-					"children": [
-						{
-							"id": "slice1",
-							"name": "Export Slice",
-							"type": "SLICE",
-							"visible": true,
-							"absoluteBoundingBox": {"x": 10, "y": 10, "width": 120, "height": 80}
-						},
-						{
-							"id": "sticky1",
-							"name": "FigJam Sticky",
-							"type": "STICKY",
-							"visible": true,
-							"absoluteBoundingBox": {"x": 20, "y": 20, "width": 100, "height": 60}
-						},
-						{
-							"id": "keep_text",
-							"name": "Keep Text",
-							"type": "TEXT",
-							"visible": true,
-							"absoluteBoundingBox": {"x": 32, "y": 24, "width": 90, "height": 24},
-							"characters": "Keep me",
-							"style": {
-								"fontFamily": "Inter",
-								"fontSize": 16,
-								"fontWeight": 400
-							}
-						}
-					]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(
+		MakeContainerNode(TEXT("root"), TEXT("Root"), TEXT("FRAME"), 0, 0, 320, 200,
+			FString::Printf(TEXT("%s,%s,%s"),
+				*MakeLeafNode(TEXT("slice1"), TEXT("Export Slice"), TEXT("SLICE"), 10, 10, 120, 80),
+				*MakeLeafNode(TEXT("sticky1"), TEXT("FigJam Sticky"), TEXT("STICKY"), 20, 20, 100, 60),
+				*MakeTextNode(TEXT("keep_text"), TEXT("Keep Text"), 32, 24, 90, 24, TEXT("Keep me"),
+					TEXT("\"fontFamily\":\"Inter\",\"fontSize\":16,\"fontWeight\":400")))));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Design-only node fixture parses"), FFigmaParser::ParseDocument(Json, Doc));

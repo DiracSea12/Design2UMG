@@ -9,9 +9,12 @@
 #include "FontResolver.h"
 #include "TextFontResolution.h"
 #include "Engine/Font.h"
+#include "FigmaTestDocBuilder.h"
 #include "Misc/Paths.h"
 #include "UObject/SoftObjectPath.h"
 #include "UObject/UObjectGlobals.h"
+
+using namespace Design2UMGCoreTests;
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FFigmaParserTextStylePropertiesTest,
@@ -20,60 +23,23 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FFigmaParserTextStylePropertiesTest::RunTest(const FString&)
 {
-	const FString Json = TEXT(R"JSON(
-{
-  "document": {
-    "id": "0:0",
-    "name": "Doc",
-    "type": "DOCUMENT",
-    "children": [{
-      "id": "0:1",
-      "name": "Page 1",
-      "type": "CANVAS",
-      "children": [{
-        "id": "0:2",
-        "name": "Headline",
-        "type": "TEXT",
-        "visible": true,
-        "characters": "Parser text",
-        "textAutoResize": "TRUNCATE",
-        "hyperlink": { "url": "https://example.com/docs" },
-        "absoluteBoundingBox": { "x": 10, "y": 20, "width": 220, "height": 48 },
-        "absoluteRenderBounds": { "x": 10, "y": 22, "width": 160, "height": 31 },
-        "fills": [{ "type": "SOLID", "visible": true, "color": { "r": 1, "g": 1, "b": 1, "a": 1 } }],
-        "style": {
-          "fontFamily": "Inter",
-          "fontSize": 24,
-          "fontStyle": "Italic",
-          "fontWeight": 510,
-          "lineHeightUnit": "PIXELS",
-          "lineHeightPx": 30,
-          "letterSpacing": 1.5,
-          "textDecoration": "UNDERLINE",
-          "textAlignHorizontal": "JUSTIFIED",
-          "textAlignVertical": "BOTTOM"
-        }
-      }, {
-        "id": "0:3",
-        "name": "Intrinsic Label",
-        "type": "TEXT",
-        "visible": true,
-        "characters": "Intrinsic label",
-        "textAutoResize": "HEIGHT",
-        "absoluteBoundingBox": { "x": 40, "y": 100, "width": 210, "height": 19 },
-        "absoluteRenderBounds": { "x": 41, "y": 102, "width": 82.5, "height": 13.6 },
-        "fills": [{ "type": "SOLID", "visible": true, "color": { "r": 1, "g": 1, "b": 1, "a": 1 } }],
-        "style": {
-          "fontFamily": "Inter",
-          "fontSize": 14,
-          "lineHeightUnit": "INTRINSIC_%",
-          "lineHeightPx": 18.662
-        }
-      }]
-    }]
-  }
-}
-)JSON");
+	const FString Json = MakeFigmaDocJson(FString::Printf(
+		TEXT("%s,%s"),
+		*MakeTextNode(TEXT("0:2"), TEXT("Headline"), 10, 20, 220, 48, TEXT("Parser text"),
+			TEXT("\"fontFamily\":\"Inter\",\"fontSize\":24,\"fontStyle\":\"Italic\",\"fontWeight\":510,"
+				 "\"lineHeightUnit\":\"PIXELS\",\"lineHeightPx\":30,\"letterSpacing\":1.5,"
+				 "\"textDecoration\":\"UNDERLINE\",\"textAlignHorizontal\":\"JUSTIFIED\",\"textAlignVertical\":\"BOTTOM\""),
+			FString::Printf(
+				TEXT(",\"textAutoResize\":\"TRUNCATE\","
+					 "\"hyperlink\":{\"url\":\"https://example.com/docs\"},"
+					 "\"absoluteRenderBounds\":%s,"
+					 "\"fills\":[%s]"),
+				*MakeBoundsJson(10, 22, 160, 31), *MakeSolidFillJson(1, 1, 1))),
+		*MakeTextNode(TEXT("0:3"), TEXT("Intrinsic Label"), 40, 100, 210, 19, TEXT("Intrinsic label"),
+			TEXT("\"fontFamily\":\"Inter\",\"fontSize\":14,\"lineHeightUnit\":\"INTRINSIC_%\",\"lineHeightPx\":18.662"),
+			FString::Printf(
+				TEXT(",\"textAutoResize\":\"HEIGHT\",\"absoluteRenderBounds\":%s,\"fills\":[%s]"),
+				*MakeBoundsJson(41, 102, 82.5, 13.6), *MakeSolidFillJson(1, 1, 1)))));
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Figma text fixture parses"), FFigmaParser::ParseDocument(Json, Document));
@@ -170,33 +136,10 @@ bool FFigmaParserTextItalicTypefaceTest::RunTest(const FString&)
 		TSoftObjectPtr<UFont>(FSoftObjectPath(Font->GetPathName())));
 	FFontResolver::ClearCache();
 
-	const FString Json = TEXT(R"JSON({
-  "document": {
-    "id": "0:0",
-    "name": "Doc",
-    "type": "DOCUMENT",
-    "children": [{
-      "id": "0:1",
-      "name": "Page 1",
-      "type": "CANVAS",
-      "children": [{
-        "id": "0:2",
-        "name": "Caption",
-        "type": "TEXT",
-        "characters": "Italic probe",
-        "absoluteBoundingBox": { "x": 0, "y": 0, "width": 120, "height": 24 },
-        "style": {
-          "fontFamily": "D2UFigmaItalicProbe",
-          "fontPostScriptName": "D2UFigmaItalicProbe-SemiBoldItalic",
-          "fontSize": 16,
-          "fontStyle": "Semi Bold Italic",
-          "fontWeight": 600
-        }
-      }]
-    }]
-  }
-}
-)JSON");
+	const FString Json = MakeFigmaDocJson(
+		MakeTextNode(TEXT("0:2"), TEXT("Caption"), 0, 0, 120, 24, TEXT("Italic probe"),
+			TEXT("\"fontFamily\":\"D2UFigmaItalicProbe\",\"fontPostScriptName\":\"D2UFigmaItalicProbe-SemiBoldItalic\","
+				 "\"fontSize\":16,\"fontStyle\":\"Semi Bold Italic\",\"fontWeight\":600")));
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Figma italic fixture parses"), FFigmaParser::ParseDocument(Json, Document));

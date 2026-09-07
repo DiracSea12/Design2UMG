@@ -5,6 +5,7 @@
 #include "Design2UMGPrototypeRuntimeValueResolver.h"
 #include "Design2UMGTestUtils.h"
 #include "FigmaParser.h"
+#include "FigmaTestDocBuilder.h"
 #include "UMGPropertyKeys.h"
 #include "UMGSchemaSourceExtensions.h"
 #include "UMGWidgetNodeAccess.h"
@@ -12,6 +13,7 @@
 #if WITH_AUTOMATION_WORKER
 
 using namespace Design2UMGTestUtils;
+using namespace Design2UMGCoreTests;
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPrototypeRuntimeValueResolverTypeDomainCompatibilityTest,
 	"Design2UMG.Unit.PrototypeRuntimeValueResolver.TypeDomainCompatibility",
@@ -86,31 +88,20 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeNavigationConverterTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaPrototypeNavigationConverterTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id":"0:0",
-			"name":"Doc",
-			"type":"DOCUMENT",
-			"prototypeStartNodeID":"2:1",
-			"children":[
-				{"id":"0:1","name":"Page","type":"CANVAS","children":[
-					{"id":"1:1","name":"PageOne","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"cta_button","name":"CTA","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":40,"y":60,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.1,"g":0.4,"b":0.9,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"NAVIGATE","transition":{"type":"DISSOLVE","duration":180,"easing":{"type":"EASE_IN_AND_OUT"}}}]}],
-						 "children":[]}
-					]},
-					{"id":"2:1","name":"PageTwo","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"page2_title","name":"Done","type":"TEXT","visible":true,
-						 "absoluteBoundingBox":{"x":32,"y":48,"width":120,"height":32},
-						 "characters":"Done",
-						 "style":{"fontFamily":"Inter","fontSize":24,"fontWeight":600,"textAlignHorizontal":"LEFT","textAlignVertical":"TOP","textDecoration":"NONE","letterSpacing":0,"lineHeightUnit":"AUTO","lineHeightPx":0}}
-					]}
-				]}
-			]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(FString::Printf(
+		TEXT("%s,%s"),
+		*MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240,
+			MakeLeafNode(TEXT("cta_button"), TEXT("CTA"), TEXT("RECTANGLE"), 40, 60, 120, 44,
+				FString::Printf(TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},"
+					 "\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"NAVIGATE\","
+					 "\"transition\":{\"type\":\"DISSOLVE\",\"duration\":180,\"easing\":{\"type\":\"EASE_IN_AND_OUT\"}}}]}]"),
+					*MakeSolidFillJson(0.1, 0.4, 0.9)))),
+		*MakeContainerNode(TEXT("2:1"), TEXT("PageTwo"), TEXT("FRAME"), 0, 0, 360, 240,
+			MakeTextNode(TEXT("page2_title"), TEXT("Done"), 32, 48, 120, 32, TEXT("Done"),
+				TEXT("\"fontFamily\":\"Inter\",\"fontSize\":24,\"fontWeight\":600,\"textAlignHorizontal\":\"LEFT\","
+					 "\"textAlignVertical\":\"TOP\",\"textDecoration\":\"NONE\",\"letterSpacing\":0,"
+					 "\"lineHeightUnit\":\"AUTO\",\"lineHeightPx\":0")))),
+		TEXT(",\"prototypeStartNodeID\":\"2:1\""));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Figma prototype navigation parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
@@ -158,37 +149,25 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeSpecialActionsConverterTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaPrototypeSpecialActionsConverterTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id":"0:0",
-			"name":"Doc",
-			"type":"DOCUMENT",
-			"prototypeStartNodeID":"1:1",
-			"children":[
-				{"id":"0:1","name":"Page","type":"CANVAS","children":[
-					{"id":"1:1","name":"PageOne","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"overlay_button","name":"Overlay","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":40,"y":60,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.1,"g":0.4,"b":0.9,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"OPEN_OVERLAY","transition":{"type":"DISSOLVE","duration":150}}]}],
-						 "children":[]},
-						{"id":"link_button","name":"Link","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":40,"y":120,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.2,"g":0.7,"b":0.5,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"OPEN_URL","url":"https://example.com/help"}]}],
-						 "children":[]}
-					]},
-					{"id":"2:1","name":"OverlayPage","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"back_button","name":"Back","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":40,"y":60,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.8,"g":0.3,"b":0.2,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"BACK","transition":{"type":"DISSOLVE","duration":90}}]}],
-						 "children":[]}
-					]}
-				]}
-			]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(FString::Printf(
+		TEXT("%s,%s"),
+		*MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240, FString::Printf(
+			TEXT("%s,%s"),
+			*MakeLeafNode(TEXT("overlay_button"), TEXT("Overlay"), TEXT("RECTANGLE"), 40, 60, 120, 44,
+				FString::Printf(TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},"
+					 "\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"OPEN_OVERLAY\","
+					 "\"transition\":{\"type\":\"DISSOLVE\",\"duration\":150}}]}]"),
+					*MakeSolidFillJson(0.1, 0.4, 0.9))),
+			*MakeLeafNode(TEXT("link_button"), TEXT("Link"), TEXT("RECTANGLE"), 40, 120, 120, 44,
+				FString::Printf(TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},"
+					 "\"actions\":[{\"type\":\"OPEN_URL\",\"url\":\"https://example.com/help\"}]}]"),
+					*MakeSolidFillJson(0.2, 0.7, 0.5))))),
+		*MakeContainerNode(TEXT("2:1"), TEXT("OverlayPage"), TEXT("FRAME"), 0, 0, 360, 240,
+			MakeLeafNode(TEXT("back_button"), TEXT("Back"), TEXT("RECTANGLE"), 40, 60, 120, 44,
+				FString::Printf(TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},"
+					 "\"actions\":[{\"type\":\"BACK\",\"transition\":{\"type\":\"DISSOLVE\",\"duration\":90}}]}]"),
+					*MakeSolidFillJson(0.8, 0.3, 0.2))))),
+		TEXT(",\"prototypeStartNodeID\":\"1:1\""));
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Figma prototype special actions parse succeeds"), FFigmaParser::ParseDocument(Json, Document));
@@ -257,37 +236,24 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeHoverAndPressConverterTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaPrototypeHoverAndPressConverterTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id":"0:0",
-			"name":"Doc",
-			"type":"DOCUMENT",
-			"prototypeStartNodeID":"1:1",
-			"children":[
-				{"id":"0:1","name":"Page","type":"CANVAS","children":[
-					{"id":"1:1","name":"PageOne","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"hover_button","name":"HoverCTA","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":40,"y":60,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.1,"g":0.4,"b":0.9,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_HOVER"},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"NAVIGATE"}]}],
-						 "children":[]},
-						{"id":"drag_button","name":"DragCTA","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":40,"y":120,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.2,"g":0.7,"b":0.5,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_DRAG"},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"NAVIGATE"}]}],
-						 "children":[]}
-					]},
-					{"id":"2:1","name":"PageTwo","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"press_button","name":"PressBack","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":40,"y":60,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.8,"g":0.3,"b":0.2,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_PRESS"},"actions":[{"type":"BACK"}]}],
-						 "children":[]}
-					]}
-				]}
-			]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(FString::Printf(
+		TEXT("%s,%s"),
+		*MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240, FString::Printf(
+			TEXT("%s,%s"),
+			*MakeLeafNode(TEXT("hover_button"), TEXT("HoverCTA"), TEXT("RECTANGLE"), 40, 60, 120, 44,
+				FString::Printf(TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_HOVER\"},"
+					 "\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"NAVIGATE\"}]}]"),
+					*MakeSolidFillJson(0.1, 0.4, 0.9))),
+			*MakeLeafNode(TEXT("drag_button"), TEXT("DragCTA"), TEXT("RECTANGLE"), 40, 120, 120, 44,
+				FString::Printf(TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_DRAG\"},"
+					 "\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"NAVIGATE\"}]}]"),
+					*MakeSolidFillJson(0.2, 0.7, 0.5))))),
+		*MakeContainerNode(TEXT("2:1"), TEXT("PageTwo"), TEXT("FRAME"), 0, 0, 360, 240,
+			MakeLeafNode(TEXT("press_button"), TEXT("PressBack"), TEXT("RECTANGLE"), 40, 60, 120, 44,
+				FString::Printf(TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_PRESS\"},"
+					 "\"actions\":[{\"type\":\"BACK\"}]}]"),
+					*MakeSolidFillJson(0.8, 0.3, 0.2))))),
+		TEXT(",\"prototypeStartNodeID\":\"1:1\""));
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Figma prototype hover/press parse succeeds"), FFigmaParser::ParseDocument(Json, Document));
@@ -358,48 +324,33 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeKeyboardAndConditionalConverterT
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaPrototypeKeyboardAndConditionalConverterTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id":"0:0",
-			"name":"Doc",
-			"type":"DOCUMENT",
-			"prototypeStartNodeID":"1:1",
-			"children":[
-				{"id":"0:1","name":"Page","type":"CANVAS","children":[
-					{"id":"1:1","name":"PageOne","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"key_down_hotspot","name":"KeyDownHotspot","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":32,"y":40,"width":100,"height":40},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.3,"g":0.3,"b":0.8,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_KEY_DOWN","keyCodes":["ENTER"]},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"NAVIGATE"}]}],
-						 "children":[]},
-						{"id":"conditional_button","name":"ConditionalCTA","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":32,"y":104,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.8,"g":0.4,"b":0.1,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[
-							{"type":"SET_VARIABLE","variableId":"var:isPrimary","variableValue":{"resolvedType":"BOOLEAN","value":true}},
-							{"type":"CONDITIONAL","conditionalBlocks":[
-								{"condition":{"type":"VARIABLE_ALIAS","id":"var:isPrimary"},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"NAVIGATE"}]},
-								{"condition":{"resolvedType":"BOOLEAN","value":true},"actions":[{"type":"NODE","destinationId":"3:1","navigation":"NAVIGATE"}]}
-							]}
-						 ]}],
-						 "children":[]}
-					]},
-					{"id":"2:1","name":"PageTwo","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"key_up_hotspot","name":"KeyUpHotspot","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":32,"y":40,"width":100,"height":40},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.2,"g":0.7,"b":0.4,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_KEY_UP","keyCodes":["ESCAPE"]},"actions":[{"type":"BACK"}]}],
-						 "children":[]}
-					]},
-					{"id":"3:1","name":"PageThree","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"page_three_title","name":"Fallback","type":"TEXT","visible":true,
-						 "absoluteBoundingBox":{"x":24,"y":32,"width":120,"height":28},
-						 "characters":"Fallback","style":{"fontSize":20}}
-					]}
-				]}
-			]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(FString::Printf(
+		TEXT("%s,%s,%s"),
+		*MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240, FString::Printf(
+			TEXT("%s,%s"),
+			*MakeLeafNode(TEXT("key_down_hotspot"), TEXT("KeyDownHotspot"), TEXT("RECTANGLE"), 32, 40, 100, 40,
+				FString::Printf(TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_KEY_DOWN\",\"keyCodes\":[\"ENTER\"]},"
+					 "\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"NAVIGATE\"}]}]"),
+					*MakeSolidFillJson(0.3, 0.3, 0.8))),
+			*MakeLeafNode(TEXT("conditional_button"), TEXT("ConditionalCTA"), TEXT("RECTANGLE"), 32, 104, 120, 44,
+				FString::Printf(TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":["
+					 "{\"type\":\"SET_VARIABLE\",\"variableId\":\"var:isPrimary\","
+					 "\"variableValue\":{\"resolvedType\":\"BOOLEAN\",\"value\":true}},"
+					 "{\"type\":\"CONDITIONAL\",\"conditionalBlocks\":["
+					 "{\"condition\":{\"type\":\"VARIABLE_ALIAS\",\"id\":\"var:isPrimary\"},"
+					 "\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"NAVIGATE\"}]},"
+					 "{\"condition\":{\"resolvedType\":\"BOOLEAN\",\"value\":true},"
+					 "\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"3:1\",\"navigation\":\"NAVIGATE\"}]}]}]}]"),
+					*MakeSolidFillJson(0.8, 0.4, 0.1))))),
+		*MakeContainerNode(TEXT("2:1"), TEXT("PageTwo"), TEXT("FRAME"), 0, 0, 360, 240,
+			MakeLeafNode(TEXT("key_up_hotspot"), TEXT("KeyUpHotspot"), TEXT("RECTANGLE"), 32, 40, 100, 40,
+				FString::Printf(TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_KEY_UP\",\"keyCodes\":[\"ESCAPE\"]},"
+					 "\"actions\":[{\"type\":\"BACK\"}]}]"),
+					*MakeSolidFillJson(0.2, 0.7, 0.4)))),
+		*MakeContainerNode(TEXT("3:1"), TEXT("PageThree"), TEXT("FRAME"), 0, 0, 360, 240,
+			MakeTextNode(TEXT("page_three_title"), TEXT("Fallback"), 24, 32, 120, 28, TEXT("Fallback"),
+				TEXT("\"fontSize\":20")))),
+		TEXT(",\"prototypeStartNodeID\":\"1:1\""));
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Figma prototype keyboard/conditional parse succeeds"), FFigmaParser::ParseDocument(Json, Document));
@@ -471,24 +422,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaOverflowDirectionMapsToScrollBoxTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaOverflowDirectionMapsToScrollBoxTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id":"0:0",
-			"name":"Doc",
-			"type":"DOCUMENT",
-			"children":[
-				{"id":"0:1","name":"Page","type":"CANVAS","children":[
-					{"id":"scroll_frame","name":"ScrollFrame","type":"FRAME","visible":true,
-					 "layoutMode":"VERTICAL","itemSpacing":12,"overflowDirection":"VERTICAL_SCROLLING",
-					 "absoluteBoundingBox":{"x":0,"y":0,"width":320,"height":240},
-					 "children":[
-						{"id":"row1","name":"Row1","type":"RECTANGLE","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":320,"height":80},"fills":[{"type":"SOLID","visible":true,"color":{"r":0.2,"g":0.3,"b":0.4,"a":1}}]},
-						{"id":"row2","name":"Row2","type":"RECTANGLE","visible":true,"absoluteBoundingBox":{"x":0,"y":92,"width":320,"height":80},"fills":[{"type":"SOLID","visible":true,"color":{"r":0.4,"g":0.3,"b":0.2,"a":1}}]}
-					 ]}
-				]}
-			]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("scroll_frame"), TEXT("ScrollFrame"), TEXT("FRAME"), 0, 0, 320, 240, FString::Printf(
+		TEXT("%s,%s"),
+		*MakeLeafNode(TEXT("row1"), TEXT("Row1"), TEXT("RECTANGLE"), 0, 0, 320, 80,
+			FString::Printf(TEXT(",\"fills\":[%s]"), *MakeSolidFillJson(0.2, 0.3, 0.4))),
+		*MakeLeafNode(TEXT("row2"), TEXT("Row2"), TEXT("RECTANGLE"), 0, 92, 320, 80,
+			FString::Printf(TEXT(",\"fills\":[%s]"), *MakeSolidFillJson(0.4, 0.3, 0.2)))),
+		TEXT(",\"layoutMode\":\"VERTICAL\",\"itemSpacing\":12,\"overflowDirection\":\"VERTICAL_SCROLLING\"")));
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse scrollable figma fixture"), FFigmaParser::ParseDocument(Json, Document));
@@ -517,35 +457,19 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaGridSlotSemanticsConverterTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaGridSlotSemanticsConverterTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id":"0:0",
-			"name":"Doc",
-			"type":"DOCUMENT",
-			"children":[
-				{"id":"0:1","name":"Page","type":"CANVAS","children":[
-					{"id":"grid_frame","name":"grid_frame","type":"FRAME","visible":true,
-					 "layoutMode":"GRID","gridRowCount":2,"gridColumnCount":2,"gridRowGap":24,"gridColumnGap":12,
-					 "gridChildHorizontalAlign":"CENTER","gridChildVerticalAlign":"MAX",
-					 "absoluteBoundingBox":{"x":0,"y":0,"width":320,"height":240},
-					 "children":[
-						{"id":"head_card","name":"head_card","type":"RECTANGLE","visible":true,
-						 "gridRowAnchorIndex":0,"gridColumnAnchorIndex":0,
-						 "absoluteBoundingBox":{"x":0,"y":0,"width":100,"height":40},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.2,"g":0.3,"b":0.4,"a":1}}]},
-						{"id":"tail_card","name":"tail_card","type":"RECTANGLE","visible":true,
-						 "gridRowAnchorIndex":0,"gridColumnAnchorIndex":1,
-						 "absoluteBoundingBox":{"x":116,"y":0,"width":100,"height":40},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.4,"g":0.3,"b":0.2,"a":1}}]},
-						{"id":"hero_card","name":"hero_card","type":"RECTANGLE","visible":true,
-						 "gridRowAnchorIndex":1,"gridColumnAnchorIndex":0,"gridColumnSpan":2,
-						 "absoluteBoundingBox":{"x":0,"y":64,"width":216,"height":40},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.1,"g":0.6,"b":0.5,"a":1}}]}
-					 ]}
-				]}
-			]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("grid_frame"), TEXT("grid_frame"), TEXT("FRAME"), 0, 0, 320, 240, FString::Printf(
+		TEXT("%s,%s,%s"),
+		*MakeLeafNode(TEXT("head_card"), TEXT("head_card"), TEXT("RECTANGLE"), 0, 0, 100, 40,
+			FString::Printf(TEXT(",\"gridRowAnchorIndex\":0,\"gridColumnAnchorIndex\":0,\"fills\":[%s]"),
+				*MakeSolidFillJson(0.2, 0.3, 0.4))),
+		*MakeLeafNode(TEXT("tail_card"), TEXT("tail_card"), TEXT("RECTANGLE"), 116, 0, 100, 40,
+			FString::Printf(TEXT(",\"gridRowAnchorIndex\":0,\"gridColumnAnchorIndex\":1,\"fills\":[%s]"),
+				*MakeSolidFillJson(0.4, 0.3, 0.2))),
+		*MakeLeafNode(TEXT("hero_card"), TEXT("hero_card"), TEXT("RECTANGLE"), 0, 64, 216, 40,
+			FString::Printf(TEXT(",\"gridRowAnchorIndex\":1,\"gridColumnAnchorIndex\":0,\"gridColumnSpan\":2,\"fills\":[%s]"),
+				*MakeSolidFillJson(0.1, 0.6, 0.5)))),
+		TEXT(",\"layoutMode\":\"GRID\",\"gridRowCount\":2,\"gridColumnCount\":2,\"gridRowGap\":24,\"gridColumnGap\":12,"
+			 "\"gridChildHorizontalAlign\":\"CENTER\",\"gridChildVerticalAlign\":\"MAX\"")));
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse figma grid slot semantics fixture"), FFigmaParser::ParseDocument(Json, Document));

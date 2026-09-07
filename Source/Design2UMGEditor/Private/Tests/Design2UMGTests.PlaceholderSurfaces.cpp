@@ -8,9 +8,11 @@
 #include "Design2UMGSettings.h"
 #include "PenParser.h"
 #include "FigmaParser.h"
+#include "FigmaTestDocBuilder.h"
 
 #if WITH_AUTOMATION_WORKER
 
+using namespace Design2UMGCoreTests;
 using namespace Design2UMGTestUtils;
 
 namespace
@@ -108,51 +110,15 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaEmptySlotSemanticHintTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaEmptySlotSemanticHintTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [{
-					"id": "root",
-					"name": "Root",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x":0,"y":0,"width":300,"height":200},
-					"children": [
-						{
-							"id":"e1",
-							"name":"Card Header",
-							"type":"FRAME",
-							"visible": true,
-							"slot": [],
-							"absoluteBoundingBox": {"x":10,"y":10,"width":80,"height":20}
-						},
-						{
-							"id":"e2",
-							"name":"Page Numbers",
-							"type":"FRAME",
-							"visible": true,
-							"slot": ["s1"],
-							"absoluteBoundingBox": {"x":10,"y":40,"width":80,"height":20}
-						},
-						{
-							"id":"e3",
-							"name":"Any",
-							"type":"FRAME",
-							"visible": true,
-							"placeholder": true,
-							"absoluteBoundingBox": {"x":10,"y":70,"width":80,"height":20}
-						}
-					]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(
+		MakeContainerNode(TEXT("root"), TEXT("Root"), TEXT("FRAME"), 0, 0, 300, 200,
+			FString::Printf(TEXT("%s,%s,%s"),
+				*MakeLeafNode(TEXT("e1"), TEXT("Card Header"), TEXT("FRAME"), 10, 10, 80, 20,
+					TEXT(",\"slot\":[]")),
+				*MakeLeafNode(TEXT("e2"), TEXT("Page Numbers"), TEXT("FRAME"), 10, 40, 80, 20,
+					TEXT(",\"slot\":[\"s1\"]")),
+				*MakeLeafNode(TEXT("e3"), TEXT("Any"), TEXT("FRAME"), 10, 70, 80, 20,
+					TEXT(",\"placeholder\":true")))));
 	FDesignDocument Doc;
 	TestTrue(TEXT("Figma parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
 	if (Doc.Children.Num() == 0 || Doc.Children[0]->Children.Num() < 3)

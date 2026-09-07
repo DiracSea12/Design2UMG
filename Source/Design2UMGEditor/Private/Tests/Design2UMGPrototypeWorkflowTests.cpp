@@ -8,6 +8,7 @@
 #include "Design2UMGTestUtils.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 #include "FigmaParser.h"
+#include "FigmaTestDocBuilder.h"
 #include "UMGGenerator.h"
 #include "UMGSchemaSourceExtensions.h"
 #include "Animation/WidgetAnimation.h"
@@ -24,6 +25,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+using namespace Design2UMGCoreTests;
 using namespace Design2UMGTestUtils;
 using Design2UMGEditorTests::DeleteGeneratedAssetsAtPath;
 
@@ -78,33 +80,19 @@ namespace
 			EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension;
 	};
 
-	const TCHAR* BasicPrototypeNavigationJson()
+	const FString BasicPrototypeNavigationJson()
 	{
-		return TEXT(R"({
-			"document": {
-				"id":"0:0",
-				"name":"Doc",
-				"type":"DOCUMENT",
-				"prototypeStartNodeID":"1:1",
-				"children":[
-					{"id":"0:1","name":"Page","type":"CANVAS","children":[
-						{"id":"1:1","name":"PageOne","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-							{"id":"cta_button","name":"CTA","type":"RECTANGLE","visible":true,
-							 "absoluteBoundingBox":{"x":40,"y":60,"width":120,"height":44},
-							 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.1,"g":0.4,"b":0.9,"a":1}}],
-							 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"NAVIGATE","transition":{"type":"DISSOLVE","duration":120,"easing":{"type":"EASE_IN_AND_OUT"}}}]}],
-							 "children":[]}
-						]},
-						{"id":"2:1","name":"PageTwo","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-							{"id":"page2_title","name":"Done","type":"TEXT","visible":true,
-							 "absoluteBoundingBox":{"x":32,"y":48,"width":120,"height":32},
-							 "characters":"Done",
-							 "style":{"fontFamily":"Inter","fontSize":24,"fontWeight":600,"textAlignHorizontal":"LEFT","textAlignVertical":"TOP","textDecoration":"NONE","letterSpacing":0,"lineHeightUnit":"AUTO","lineHeightPx":0}}
-						]}
-					]}
-				]
-			}
-		})");
+		const FString CtaButtonJson = MakeLeafNode(TEXT("cta_button"), TEXT("CTA"), TEXT("RECTANGLE"), 40, 60, 120, 44, FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"NAVIGATE\",\"transition\":{\"type\":\"DISSOLVE\",\"duration\":120,\"easing\":{\"type\":\"EASE_IN_AND_OUT\"}}}]}]"),
+			*MakeSolidFillJson(0.1, 0.4, 0.9)));
+		const FString PageTwoJson = MakeContainerNode(TEXT("2:1"), TEXT("PageTwo"), TEXT("FRAME"), 0, 0, 360, 240,
+			MakeTextNode(TEXT("page2_title"), TEXT("Done"), 32, 48, 120, 32, TEXT("Done"),
+				TEXT("\"fontFamily\":\"Inter\",\"fontSize\":24,\"fontWeight\":600,\"textAlignHorizontal\":\"LEFT\",\"textAlignVertical\":\"TOP\",\"textDecoration\":\"NONE\",\"letterSpacing\":0,\"lineHeightUnit\":\"AUTO\",\"lineHeightPx\":0")));
+		return MakeFigmaDocJson(
+			FString::Printf(TEXT("%s,%s"),
+				*MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240, CtaButtonJson),
+				*PageTwoJson),
+			TEXT(",\"prototypeStartNodeID\":\"1:1\""));
 	}
 
 	UWidgetSwitcher* FindPrototypeSwitcherWidget(UUserWidget* WidgetInstance, const FUMGWidgetData& Data)
@@ -190,31 +178,7 @@ bool FFigmaPrototypeNavigationRuntimeWorkflowTest::RunTest(const FString& Parame
 	FScopedPrototypeNavigationGenerationMode ScopedMode(
 		EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
 
-	const FString Json = TEXT(R"({
-		"document": {
-			"id":"0:0",
-			"name":"Doc",
-			"type":"DOCUMENT",
-			"prototypeStartNodeID":"1:1",
-			"children":[
-				{"id":"0:1","name":"Page","type":"CANVAS","children":[
-					{"id":"1:1","name":"PageOne","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"cta_button","name":"CTA","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":40,"y":60,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.1,"g":0.4,"b":0.9,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"NAVIGATE","transition":{"type":"DISSOLVE","duration":120,"easing":{"type":"EASE_IN_AND_OUT"}}}]}],
-						 "children":[]}
-					]},
-					{"id":"2:1","name":"PageTwo","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"page2_title","name":"Done","type":"TEXT","visible":true,
-						 "absoluteBoundingBox":{"x":32,"y":48,"width":120,"height":32},
-						 "characters":"Done",
-						 "style":{"fontFamily":"Inter","fontSize":24,"fontWeight":600,"textAlignHorizontal":"LEFT","textAlignVertical":"TOP","textDecoration":"NONE","letterSpacing":0,"lineHeightUnit":"AUTO","lineHeightPx":0}}
-					]}
-				]}
-			]
-		}
-	})");
+	const FString Json = BasicPrototypeNavigationJson();
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse prototype navigation fixture"), FFigmaParser::ParseDocument(Json, Document));
@@ -456,24 +420,11 @@ bool FFigmaPrototypeTagHelperOpenLinkNoMetadataWorkflowTest::RunTest(const FStri
 	FScopedPrototypeNavigationGenerationMode ScopedMode(
 		EDesign2UMGPrototypeNavigationGenerationMode::TagHelper);
 
-	const FString Json = TEXT(R"({
-		"document": {
-			"id":"0:0",
-			"name":"Doc",
-			"type":"DOCUMENT",
-			"children":[
-				{"id":"0:1","name":"Page","type":"CANVAS","children":[
-					{"id":"1:1","name":"PageOne","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"link_button","name":"Link","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":40,"y":120,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.2,"g":0.7,"b":0.5,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"URL","url":"https://example.com/tag-helper"}]}],
-						 "children":[]}
-					]}
-				]}
-			]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(
+		MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240,
+			MakeLeafNode(TEXT("link_button"), TEXT("Link"), TEXT("RECTANGLE"), 40, 120, 120, 44, FString::Printf(
+				TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"URL\",\"url\":\"https://example.com/tag-helper\"}]}]"),
+				*MakeSolidFillJson(0.2, 0.7, 0.5)))));
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse TagHelper open-link fixture"), FFigmaParser::ParseDocument(Json, Document));
@@ -519,37 +470,21 @@ bool FFigmaPrototypeSpecialActionsRuntimeWorkflowTest::RunTest(const FString& Pa
 		EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
 	FScopedPrototypeOpenUrlCapture OpenUrlCapture;
 
-	const FString Json = TEXT(R"({
-		"document": {
-			"id":"0:0",
-			"name":"Doc",
-			"type":"DOCUMENT",
-			"prototypeStartNodeID":"1:1",
-			"children":[
-				{"id":"0:1","name":"Page","type":"CANVAS","children":[
-					{"id":"1:1","name":"PageOne","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"overlay_button","name":"Overlay","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":40,"y":60,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.1,"g":0.4,"b":0.9,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"OVERLAY","transition":{"type":"DISSOLVE","duration":120,"easing":{"type":"EASE_IN_AND_OUT"}}}]}],
-						 "children":[]},
-						{"id":"link_button","name":"Link","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":40,"y":120,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.2,"g":0.7,"b":0.5,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"URL","url":"https://example.com/help"}]}],
-						 "children":[]}
-					]},
-					{"id":"2:1","name":"OverlayPage","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"back_button","name":"Back","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":40,"y":60,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.8,"g":0.3,"b":0.2,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"BACK"}]}],
-						 "children":[]}
-					]}
-				]}
-			]
-		}
-	})");
+	const FString OverlayButtonJson = MakeLeafNode(TEXT("overlay_button"), TEXT("Overlay"), TEXT("RECTANGLE"), 40, 60, 120, 44, FString::Printf(
+		TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"OVERLAY\",\"transition\":{\"type\":\"DISSOLVE\",\"duration\":120,\"easing\":{\"type\":\"EASE_IN_AND_OUT\"}}}]}]"),
+		*MakeSolidFillJson(0.1, 0.4, 0.9)));
+	const FString HelpLinkButtonJson = MakeLeafNode(TEXT("link_button"), TEXT("Link"), TEXT("RECTANGLE"), 40, 120, 120, 44, FString::Printf(
+		TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"URL\",\"url\":\"https://example.com/help\"}]}]"),
+		*MakeSolidFillJson(0.2, 0.7, 0.5)));
+	const FString Json = MakeFigmaDocJson(
+		FString::Printf(TEXT("%s,%s"),
+			*MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240,
+				FString::Printf(TEXT("%s,%s"), *OverlayButtonJson, *HelpLinkButtonJson)),
+			*MakeContainerNode(TEXT("2:1"), TEXT("OverlayPage"), TEXT("FRAME"), 0, 0, 360, 240,
+				MakeLeafNode(TEXT("back_button"), TEXT("Back"), TEXT("RECTANGLE"), 40, 60, 120, 44, FString::Printf(
+					TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"BACK\"}]}]"),
+					*MakeSolidFillJson(0.8, 0.3, 0.2))))),
+		TEXT(",\"prototypeStartNodeID\":\"1:1\""));
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse prototype special actions fixture"), FFigmaParser::ParseDocument(Json, Document));
@@ -670,32 +605,17 @@ bool FFigmaPrototypeHoverAndPressRuntimeWorkflowTest::RunTest(const FString& Par
 	FScopedPrototypeNavigationGenerationMode ScopedMode(
 		EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
 
-	const FString Json = TEXT(R"({
-		"document": {
-			"id":"0:0",
-			"name":"Doc",
-			"type":"DOCUMENT",
-			"prototypeStartNodeID":"1:1",
-			"children":[
-				{"id":"0:1","name":"Page","type":"CANVAS","children":[
-					{"id":"1:1","name":"PageOne","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"hover_button","name":"HoverCTA","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":40,"y":60,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.1,"g":0.4,"b":0.9,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_HOVER"},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"NAVIGATE"}]}],
-						 "children":[]}
-					]},
-					{"id":"2:1","name":"PageTwo","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"press_button","name":"PressBack","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":40,"y":60,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.8,"g":0.3,"b":0.2,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_PRESS"},"actions":[{"type":"BACK"}]}],
-						 "children":[]}
-					]}
-				]}
-			]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(
+		FString::Printf(TEXT("%s,%s"),
+			*MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240,
+				MakeLeafNode(TEXT("hover_button"), TEXT("HoverCTA"), TEXT("RECTANGLE"), 40, 60, 120, 44, FString::Printf(
+					TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_HOVER\"},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"NAVIGATE\"}]}]"),
+					*MakeSolidFillJson(0.1, 0.4, 0.9)))),
+			*MakeContainerNode(TEXT("2:1"), TEXT("PageTwo"), TEXT("FRAME"), 0, 0, 360, 240,
+				MakeLeafNode(TEXT("press_button"), TEXT("PressBack"), TEXT("RECTANGLE"), 40, 60, 120, 44, FString::Printf(
+					TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_PRESS\"},\"actions\":[{\"type\":\"BACK\"}]}]"),
+					*MakeSolidFillJson(0.8, 0.3, 0.2))))),
+		TEXT(",\"prototypeStartNodeID\":\"1:1\""));
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse prototype hover/press fixture"), FFigmaParser::ParseDocument(Json, Document));
@@ -770,53 +690,32 @@ bool FFigmaPrototypeAdvancedTriggersRuntimeWorkflowTest::RunTest(const FString& 
 	FScopedPrototypeNavigationGenerationMode ScopedMode(
 		EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
 
-	const FString Json = TEXT(R"({
-		"document": {
-			"id":"0:0",
-			"name":"Doc",
-			"type":"DOCUMENT",
-			"prototypeStartNodeID":"1:1",
-			"children":[
-				{"id":"0:1","name":"Page","type":"CANVAS","children":[
-					{"id":"1:1","name":"PageOne","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"drag_button","name":"DragCTA","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":32,"y":40,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.2,"g":0.7,"b":0.5,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_DRAG"},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"NAVIGATE"}]}],
-						 "children":[]},
-						{"id":"key_down_hotspot","name":"KeyDownHotspot","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":32,"y":104,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.3,"g":0.3,"b":0.8,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_KEY_DOWN","keyCodes":["ENTER"]},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"NAVIGATE"}]}],
-						 "children":[]},
-						{"id":"conditional_false_button","name":"ConditionalFalse","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":32,"y":168,"width":140,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.8,"g":0.4,"b":0.1,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[
-							{"type":"SET_VARIABLE","variableId":"var:isPrimary","variableValue":{"resolvedType":"BOOLEAN","value":false}},
-							{"type":"CONDITIONAL","conditionalBlocks":[
-								{"condition":{"type":"VARIABLE_ALIAS","id":"var:isPrimary"},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"NAVIGATE"}]},
-								{"condition":{"resolvedType":"BOOLEAN","value":true},"actions":[{"type":"NODE","destinationId":"3:1","navigation":"NAVIGATE"}]}
-							]}
-						 ]}],
-						 "children":[]}
-					]},
-					{"id":"2:1","name":"PageTwo","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"key_up_hotspot","name":"KeyUpHotspot","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":32,"y":40,"width":100,"height":40},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.2,"g":0.7,"b":0.4,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_KEY_UP","keyCodes":["ESCAPE"]},"actions":[{"type":"BACK"}]}],
-						 "children":[]}
-					]},
-					{"id":"3:1","name":"PageThree","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"page_three_title","name":"PageThreeTitle","type":"TEXT","visible":true,
-						 "absoluteBoundingBox":{"x":24,"y":32,"width":140,"height":28},
-						 "characters":"Fallback","style":{"fontSize":20}}
-					]}
-				]}
-			]
-		}
-	})");
+	const FString PageOneChildrenJson = FString::Printf(TEXT("%s,%s,%s"),
+		*MakeLeafNode(TEXT("drag_button"), TEXT("DragCTA"), TEXT("RECTANGLE"), 32, 40, 120, 44, FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_DRAG\"},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"NAVIGATE\"}]}]"),
+			*MakeSolidFillJson(0.2, 0.7, 0.5))),
+		*MakeLeafNode(TEXT("key_down_hotspot"), TEXT("KeyDownHotspot"), TEXT("RECTANGLE"), 32, 104, 120, 44, FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_KEY_DOWN\",\"keyCodes\":[\"ENTER\"]},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"NAVIGATE\"}]}]"),
+			*MakeSolidFillJson(0.3, 0.3, 0.8))),
+		*MakeLeafNode(TEXT("conditional_false_button"), TEXT("ConditionalFalse"), TEXT("RECTANGLE"), 32, 168, 140, 44, FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":["
+				 "{\"type\":\"SET_VARIABLE\",\"variableId\":\"var:isPrimary\",\"variableValue\":{\"resolvedType\":\"BOOLEAN\",\"value\":false}},"
+				 "{\"type\":\"CONDITIONAL\",\"conditionalBlocks\":["
+				 "{\"condition\":{\"type\":\"VARIABLE_ALIAS\",\"id\":\"var:isPrimary\"},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"NAVIGATE\"}]},"
+				 "{\"condition\":{\"resolvedType\":\"BOOLEAN\",\"value\":true},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"3:1\",\"navigation\":\"NAVIGATE\"}]}"
+					 "]}]}]"),
+			*MakeSolidFillJson(0.8, 0.4, 0.1))));
+	const FString Json = MakeFigmaDocJson(
+		FString::Printf(TEXT("%s,%s,%s"),
+			*MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240, PageOneChildrenJson),
+			*MakeContainerNode(TEXT("2:1"), TEXT("PageTwo"), TEXT("FRAME"), 0, 0, 360, 240,
+				MakeLeafNode(TEXT("key_up_hotspot"), TEXT("KeyUpHotspot"), TEXT("RECTANGLE"), 32, 40, 100, 40, FString::Printf(
+					TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_KEY_UP\",\"keyCodes\":[\"ESCAPE\"]},\"actions\":[{\"type\":\"BACK\"}]}]"),
+					*MakeSolidFillJson(0.2, 0.7, 0.4)))),
+			*MakeContainerNode(TEXT("3:1"), TEXT("PageThree"), TEXT("FRAME"), 0, 0, 360, 240,
+				MakeTextNode(TEXT("page_three_title"), TEXT("PageThreeTitle"), 24, 32, 140, 28, TEXT("Fallback"),
+					TEXT("\"fontSize\":20")))),
+		TEXT(",\"prototypeStartNodeID\":\"1:1\""));
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse prototype advanced trigger fixture"), FFigmaParser::ParseDocument(Json, Document));
@@ -922,24 +821,11 @@ bool FFigmaPrototypeSinglePageOpenLinkRuntimeWorkflowTest::RunTest(const FString
 		EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
 	FScopedPrototypeOpenUrlCapture OpenUrlCapture;
 
-	const FString Json = TEXT(R"({
-		"document": {
-			"id":"0:0",
-			"name":"Doc",
-			"type":"DOCUMENT",
-			"children":[
-				{"id":"0:1","name":"Page","type":"CANVAS","children":[
-					{"id":"1:1","name":"PageOne","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"link_button","name":"Link","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":40,"y":120,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.2,"g":0.7,"b":0.5,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"URL","url":"https://example.com/single"}]}],
-						 "children":[]}
-					]}
-				]}
-			]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(
+		MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240,
+			MakeLeafNode(TEXT("link_button"), TEXT("Link"), TEXT("RECTANGLE"), 40, 120, 120, 44, FString::Printf(
+				TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"URL\",\"url\":\"https://example.com/single\"}]}]"),
+				*MakeSolidFillJson(0.2, 0.7, 0.5)))));
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse single-page open-link fixture"), FFigmaParser::ParseDocument(Json, Document));
@@ -1012,31 +898,17 @@ bool FFigmaPrototypeSlideTransitionRuntimeWorkflowTest::RunTest(const FString& P
 	FScopedPrototypeNavigationGenerationMode ScopedMode(
 		EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
 
-	const FString Json = TEXT(R"({
-		"document": {
-			"id":"0:0",
-			"name":"Doc",
-			"type":"DOCUMENT",
-			"prototypeStartNodeID":"1:1",
-			"children":[
-				{"id":"0:1","name":"Page","type":"CANVAS","children":[
-					{"id":"1:1","name":"PageOne","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"cta_button","name":"CTA","type":"RECTANGLE","visible":true,
-						 "absoluteBoundingBox":{"x":40,"y":60,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.1,"g":0.4,"b":0.9,"a":1}}],
-						 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"NODE","destinationId":"2:1","navigation":"NAVIGATE","transition":{"type":"PUSH","direction":"LEFT","duration":160,"easing":{"type":"EASE_OUT"}}}]}],
-						 "children":[]}
-					]},
-					{"id":"2:1","name":"PageTwo","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":240},"children":[
-						{"id":"page2_title","name":"Done","type":"TEXT","visible":true,
-						 "absoluteBoundingBox":{"x":32,"y":48,"width":120,"height":32},
-						 "characters":"Done",
-						 "style":{"fontFamily":"Inter","fontSize":24,"fontWeight":600,"textAlignHorizontal":"LEFT","textAlignVertical":"TOP","textDecoration":"NONE","letterSpacing":0,"lineHeightUnit":"AUTO","lineHeightPx":0}}
-					]}
-				]}
-			]
-		}
-	})");
+	const FString CtaButtonJson = MakeLeafNode(TEXT("cta_button"), TEXT("CTA"), TEXT("RECTANGLE"), 40, 60, 120, 44, FString::Printf(
+		TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"NAVIGATE\",\"transition\":{\"type\":\"PUSH\",\"direction\":\"LEFT\",\"duration\":160,\"easing\":{\"type\":\"EASE_OUT\"}}}]}]"),
+		*MakeSolidFillJson(0.1, 0.4, 0.9)));
+	const FString PageTwoJson = MakeContainerNode(TEXT("2:1"), TEXT("PageTwo"), TEXT("FRAME"), 0, 0, 360, 240,
+		MakeTextNode(TEXT("page2_title"), TEXT("Done"), 32, 48, 120, 32, TEXT("Done"),
+			TEXT("\"fontFamily\":\"Inter\",\"fontSize\":24,\"fontWeight\":600,\"textAlignHorizontal\":\"LEFT\",\"textAlignVertical\":\"TOP\",\"textDecoration\":\"NONE\",\"letterSpacing\":0,\"lineHeightUnit\":\"AUTO\",\"lineHeightPx\":0")));
+	const FString Json = MakeFigmaDocJson(
+		FString::Printf(TEXT("%s,%s"),
+			*MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240, CtaButtonJson),
+			*PageTwoJson),
+		TEXT(",\"prototypeStartNodeID\":\"1:1\""));
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse prototype slide fixture"), FFigmaParser::ParseDocument(Json, Document));

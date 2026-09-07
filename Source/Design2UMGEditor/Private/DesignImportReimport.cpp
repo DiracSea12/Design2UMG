@@ -66,38 +66,39 @@ namespace DesignImportPipeline
 		// new containers (design-added nodes) are also clearly D2U-owned.
 		TMap<FString, UWidget*> NewlyCreatedWidgets;
 
-		FReimportApplyContext Ctx;
-		Ctx.WBP = WBP;
-		Ctx.WidgetTree = WBP->WidgetTree;
-		Ctx.HostPanel = Cast<UPanelWidget>(WBP->WidgetTree->RootWidget);
-		Ctx.DesignSize = DesignSize;
-		Ctx.OwnedNames = &ManifestOwnedNames;
-		Ctx.InstancesById = &InstancesById;
-		Ctx.MappingBuildState = &MappingBuildState;
-		Ctx.Diagnostics = &Result.Diagnostics;
-		Ctx.UpdatedMappedRecords = &FinalMappedRecords;
-		Ctx.UpdatedGeneratedRecords = &FinalGeneratedRecords;
-		Ctx.NewlyCreatedWidgets = &NewlyCreatedWidgets;
-		Ctx.UpdatedD2UOwned = &UpdatedD2UOwned;
-		Ctx.KeepAsIsWidgetNames = &KeepAsIsWidgetNames;
-		Ctx.AliveInstanceWidgetNames = &AliveInstanceWidgetNames;
+		FReimportApplySharedState Shared;
+		Shared.WBP = WBP;
+		Shared.WidgetTree = WBP->WidgetTree;
+		Shared.HostPanel = Cast<UPanelWidget>(WBP->WidgetTree->RootWidget);
+		Shared.DesignSize = DesignSize;
+		Shared.OwnedNames = &ManifestOwnedNames;
+		Shared.InstancesById = &InstancesById;
+		Shared.MappingBuildState = &MappingBuildState;
+		Shared.Diagnostics = &Result.Diagnostics;
+		Shared.UpdatedMappedRecords = &FinalMappedRecords;
+		Shared.UpdatedGeneratedRecords = &FinalGeneratedRecords;
+		Shared.AliveInstanceWidgetNames = &AliveInstanceWidgetNames;
 		MappingBuildState.SetRootWidget(WBP->WidgetTree->RootWidget);
 
-		// 9a)-9d) removed / kind-changed / added / reparent。
-		ApplyRemovedPlanEntries(Plan, Ctx);
-		ApplyKindChangedPlanEntries(Plan, Ctx);
-		ApplyAddedTopLevelNodes(PreparedScopeRoot, Ctx);
-		ApplyReparentPlanEntries(Plan, PreparedScopeRoot, Ctx);
+		// 9a)-9d) removed / kind-changed / added / reparent。The mutable cross-stage channels
+		// (UpdatedD2UOwned / KeepAsIsWidgetNames / NewlyCreatedWidgets) flow through the stage
+		// signatures: 9a/9b delete names out of the owned list and record conflict keeps; 9b/9c
+		// register newly created widgets; 9d reparent resolves its targets from that registry.
+		ApplyRemovedPlanEntries(Plan, Shared, UpdatedD2UOwned, KeepAsIsWidgetNames);
+		ApplyKindChangedPlanEntries(Plan, Shared, UpdatedD2UOwned, KeepAsIsWidgetNames, NewlyCreatedWidgets);
+		ApplyAddedTopLevelNodes(PreparedScopeRoot, Shared, NewlyCreatedWidgets);
+		ApplyReparentPlanEntries(Plan, PreparedScopeRoot, Shared, KeepAsIsWidgetNames, NewlyCreatedWidgets);
 
-		// 9d-2) Nested-structure diff pre-scan (the move-candidate pool).
-		TArray<UWidget*> NestedMoveCandidates = CollectNestedMoveCandidates(PreparedScopeRoot, Ctx);
-		Ctx.NestedMoveCandidates = &NestedMoveCandidates;
+		// 9d-2) Nested-structure diff pre-scan (the move-candidate pool). Must run after 9c created the
+		// new widgets and 9a/9b deleted the stale ones - expressed here by the stage ordering itself:
+		// the pool returned here is the input of the 9e refresh and the 9g leftover diagnostics below.
+		TArray<UWidget*> NestedMoveCandidates = CollectNestedMoveCandidates(PreparedScopeRoot, Shared);
 
 		// 9e)-9g) Property updates / nested-delete leftover diagnostics (step comments live with their functions).
-		ApplyMatchedPlanEntries(Plan, Ctx, GenerationSettings);
+		ApplyMatchedPlanEntries(Plan, Shared, GenerationSettings, NestedMoveCandidates, NewlyCreatedWidgets);
 		// 9f) Prototype binding refresh (ordinary generated widgets, by stable design identity; double-trigger yields).
-		ApplyPrototypeRefresh(Data, GenerationSettings, Ctx);
-		ReportNestedRemovalLeftovers(Ctx);
+		ApplyPrototypeRefresh(Data, GenerationSettings, Shared);
+		ReportNestedRemovalLeftovers(Shared, NestedMoveCandidates);
 
 		// Mapping diagnostics exit (aligned with the import path's UMGGenerator assembly): the ini validation
 		// diagnostics + this round's BuildState-collected match/fallback diagnostics go into
@@ -107,8 +108,8 @@ namespace DesignImportPipeline
 
 		// 10) Assemble the post-reimport manifest payload + asset finalization (CDO preview size, variable GUIDs).
 		FDesign2UMGGenerationOutput GenerationOutput = BuildReimportManifestPayload(
-			Manifest, bPrototypeHostContinued, Data, Ctx);
-		FinalizeReimportedAssetState(Ctx);
+			Manifest, bPrototypeHostContinued, Data, Shared, UpdatedD2UOwned, KeepAsIsWidgetNames);
+		FinalizeReimportedAssetState(WBP, DesignSize);
 
 		// 11) Writability pre-check + save + FailSaveWithRollback.
 		return SaveReimportedAsset(Session, TargetPackage, WBP, GenerationOutput, TransactionIndex, Result);

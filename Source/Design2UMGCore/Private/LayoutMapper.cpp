@@ -20,9 +20,14 @@ namespace
 		if (Node->Type == EDesignNodeType::Text)
 		{
 			// Deliberately omits the Auto + fill-width growth term that
-			// TextMeasurement uses: preserving that difference keeps the
-			// existing conversion behavior; unifying it would need a full
-			// visual-regression gate first.
+			// TextMeasurement::IsWrappingTextMode uses. This predicate feeds
+			// only ShouldUseFitOverride, i.e. the SizeBox WidthOverride-vs-
+			// MinDesired switch for fit-sized children in WrapWithSizeBox.
+			// A fill-width auto text wraps at the width its parent's layout
+			// grants it (slot fill plus ShouldPreserveMeasuredFillSize and
+			// TextMeasurement's parent width hint already carry that), so
+			// counting it here would double-process the same signal. Unifying
+			// the terms would still need a full visual-regression gate.
 			return ParserSharedSemantics::HasFixedWidthTextGrowth(*Node)
 				|| ParserSharedSemantics::HasHardNewlineText(*Node);
 		}

@@ -154,7 +154,7 @@ Example:
 Preferred wrapper:
 
 ```text
-pwsh -NoProfile -File <PluginRoot>\Tools\Run-LunarisStructureSnapshotValidation.ps1 -ProjectPath <MaintainerRuntimeProject.uproject> -EditorPath <UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe -SourcePath <MaintainerDesignRoot>\pencil-lunaris.pen -TargetNodeId <FrameNodeId> -OutputPath <ImportedAssetPath> -SavedPngPath <PngPath> -SourceJsonPath <SourceTreeJsonPath> -SavedJsonPath <SavedTreeJsonPath> -ResultJsonPath <ResultJsonPath>
+pwsh -NoProfile -File <PluginRoot>\Tools\Run-StructureSnapshotValidation.ps1 -ProjectPath <MaintainerRuntimeProject.uproject> -EditorPath <UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe -SourcePath <MaintainerDesignRoot>\pencil-lunaris.pen -TargetNodeId <FrameNodeId> -OutputPath <ImportedAssetPath> -SavedPngPath <PngPath> -SourceJsonPath <SourceTreeJsonPath> -SavedJsonPath <SavedTreeJsonPath> -ResultJsonPath <ResultJsonPath>
 ```
 
 All snapshot-specific paths (`-TargetNodeId`, `-OutputPath`, `-SavedPngPath`, `-SourceJsonPath`, `-SavedJsonPath`, `-ResultJsonPath`) are required; the wrapper has no sample-specific defaults.

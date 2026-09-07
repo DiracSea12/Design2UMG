@@ -7,6 +7,7 @@
 #include "Design2UMGConverter.h"
 #include "Design2UMGTestUtils.h"
 #include "FigmaParser.h"
+#include "FigmaTestDocBuilder.h"
 #include "UMGSchema.h"
 #include "UMGSchemaSourceExtensions.h"
 #include "Tests/Design2UMGMappedComponentTestWidget.h"
@@ -29,38 +30,29 @@ namespace
 	// A design with two instances (same component definition) + one unmapped ordinary node.
 	FString MakeMappingTestFigmaJson()
 	{
-		return TEXT(R"({
-			"fileKey":"mapping-test-file-key",
-			"document":{"id":"0:0","name":"Doc","type":"DOCUMENT","children":[
-				{"id":"0:1","name":"Page","type":"CANVAS","children":[
-					{"id":"page_root","name":"MappingPage","type":"FRAME",
-					 "absoluteBoundingBox":{"x":0,"y":0,"width":360,"height":200},"children":[
-						{"id":"btn_inst_1","name":"PrimaryButton","type":"INSTANCE",
-						 "componentId":"12:34","componentSetId":"56:78","mainComponentKey":"component-key-primary",
-						 "componentProperties":{"label":{"type":"TEXT","value":"Checkout"}},
-						 "absoluteBoundingBox":{"x":24,"y":24,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.1,"g":0.4,"b":0.9,"a":1}}],
-						 "children":[{"id":"btn_inst_1_label","name":"Label","type":"TEXT",
-							"absoluteBoundingBox":{"x":32,"y":32,"width":80,"height":20},"characters":"Checkout",
-							"style":{"fontFamily":"Inter","fontSize":16,"fontWeight":500,"textAlignHorizontal":"LEFT","textAlignVertical":"TOP","textDecoration":"NONE","letterSpacing":0,"lineHeightUnit":"AUTO","lineHeightPx":0}}]},
-						{"id":"btn_inst_2","name":"PrimaryButton","type":"INSTANCE",
-						 "componentId":"12:34","componentSetId":"56:78","mainComponentKey":"component-key-primary",
-						 "componentProperties":{"label":{"type":"TEXT","value":"Pay Now"}},
-						 "absoluteBoundingBox":{"x":24,"y":88,"width":120,"height":44},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.1,"g":0.4,"b":0.9,"a":1}}],
-						 "children":[{"id":"btn_inst_2_label","name":"Label","type":"TEXT",
-							"absoluteBoundingBox":{"x":32,"y":96,"width":80,"height":20},"characters":"Pay Now",
-							"style":{"fontFamily":"Inter","fontSize":16,"fontWeight":500,"textAlignHorizontal":"LEFT","textAlignVertical":"TOP","textDecoration":"NONE","letterSpacing":0,"lineHeightUnit":"AUTO","lineHeightPx":0}}]},
-						{"id":"plain_card","name":"PlainCard","type":"FRAME",
-						 "absoluteBoundingBox":{"x":180,"y":24,"width":140,"height":108},
-						 "fills":[{"type":"SOLID","visible":true,"color":{"r":0.9,"g":0.9,"b":0.9,"a":1}}],
-						 "children":[{"id":"plain_card_text","name":"Caption","type":"TEXT",
-							"absoluteBoundingBox":{"x":188,"y":32,"width":100,"height":20},"characters":"Not mapped",
-							"style":{"fontFamily":"Inter","fontSize":14,"fontWeight":400,"textAlignHorizontal":"LEFT","textAlignVertical":"TOP","textDecoration":"NONE","letterSpacing":0,"lineHeightUnit":"AUTO","lineHeightPx":0}}]}
-					]}
-				]}
-			]}
-		})");
+		using namespace Design2UMGCoreTests;
+		const FString ButtonStyleJson =
+			TEXT("\"fontFamily\":\"Inter\",\"fontSize\":16,\"fontWeight\":500,\"textAlignHorizontal\":\"LEFT\",\"textAlignVertical\":\"TOP\",\"textDecoration\":\"NONE\",\"letterSpacing\":0,\"lineHeightUnit\":\"AUTO\",\"lineHeightPx\":0");
+		const FString InstanceOneJson = MakeContainerNode(TEXT("btn_inst_1"), TEXT("PrimaryButton"), TEXT("INSTANCE"), 24, 24, 120, 44,
+			MakeTextNode(TEXT("btn_inst_1_label"), TEXT("Label"), 32, 32, 80, 20, TEXT("Checkout"), ButtonStyleJson),
+			FString::Printf(
+				TEXT(",\"componentId\":\"12:34\",\"componentSetId\":\"56:78\",\"mainComponentKey\":\"component-key-primary\","
+					 "\"componentProperties\":{\"label\":{\"type\":\"TEXT\",\"value\":\"Checkout\"}},\"fills\":[%s]"),
+				*MakeSolidFillJson(0.1, 0.4, 0.9)));
+		const FString InstanceTwoJson = MakeContainerNode(TEXT("btn_inst_2"), TEXT("PrimaryButton"), TEXT("INSTANCE"), 24, 88, 120, 44,
+			MakeTextNode(TEXT("btn_inst_2_label"), TEXT("Label"), 32, 96, 80, 20, TEXT("Pay Now"), ButtonStyleJson),
+			FString::Printf(
+				TEXT(",\"componentId\":\"12:34\",\"componentSetId\":\"56:78\",\"mainComponentKey\":\"component-key-primary\","
+					 "\"componentProperties\":{\"label\":{\"type\":\"TEXT\",\"value\":\"Pay Now\"}},\"fills\":[%s]"),
+				*MakeSolidFillJson(0.1, 0.4, 0.9)));
+		const FString PlainCardJson = MakeContainerNode(TEXT("plain_card"), TEXT("PlainCard"), TEXT("FRAME"), 180, 24, 140, 108,
+			MakeTextNode(TEXT("plain_card_text"), TEXT("Caption"), 188, 32, 100, 20, TEXT("Not mapped"),
+				TEXT("\"fontFamily\":\"Inter\",\"fontSize\":14,\"fontWeight\":400,\"textAlignHorizontal\":\"LEFT\",\"textAlignVertical\":\"TOP\",\"textDecoration\":\"NONE\",\"letterSpacing\":0,\"lineHeightUnit\":\"AUTO\",\"lineHeightPx\":0")),
+			FString::Printf(TEXT(",\"fills\":[%s]"), *MakeSolidFillJson(0.9, 0.9, 0.9)));
+		return MakeFigmaDocJson(
+			MakeContainerNode(TEXT("page_root"), TEXT("MappingPage"), TEXT("FRAME"), 0, 0, 360, 200,
+				FString::Printf(TEXT("%s,%s,%s"), *InstanceOneJson, *InstanceTwoJson, *PlainCardJson)),
+			TEXT(",\"fileKey\":\"mapping-test-file-key\""));
 	}
 
 	FDesign2UMGComponentMappingConfig MakeDirectMappingConfig(const FString& WidgetClassPath)

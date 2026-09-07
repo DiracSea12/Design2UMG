@@ -101,20 +101,20 @@ bool FSlotJsonTypedCompatibilityTest::RunTest(const FString& Parameters)
 
 	FUMGWidgetData Parsed;
 	FString ParseError;
-	TestTrue(TEXT("UMGJsonParser parses slot aliases"), FUMGJsonParser::ParseJson(Json, Parsed, &ParseError));
+	TestTrue(TEXT("UMGJsonParser parses slot payload"), FUMGJsonParser::ParseJson(Json, Parsed, &ParseError));
 	if (!ParseError.IsEmpty())
 	{
 		AddError(ParseError);
 	}
 
 	const FUMGSlotData& Slot = Parsed.RootWidget.Slot;
-	TestTrue(TEXT("HAlign alias wins over HorizontalAlignment"), Slot.HorizontalAlignment == EUMGSlotHorizontalAlignment::Center);
-	TestTrue(TEXT("VAlign alias wins over VerticalAlignment"), Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Bottom);
+	TestTrue(TEXT("HAlign short key is ignored; HorizontalAlignment wins"), Slot.HorizontalAlignment == EUMGSlotHorizontalAlignment::Left);
+	TestTrue(TEXT("VAlign short key is ignored; VerticalAlignment wins"), Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Top);
 	TestTrue(TEXT("Lowercase SizeRule parses as Fill"), Slot.SizeRule == EUMGSlotSizeRule::Fill);
 
 	const FString RoundTripJson = FUMGJsonSerializer::Serialize(Parsed);
-	TestTrue(TEXT("Serializer keeps canonical horizontal alignment"), RoundTripJson.Contains(TEXT("\"HorizontalAlignment\": \"Center\"")));
-	TestTrue(TEXT("Serializer keeps canonical vertical alignment"), RoundTripJson.Contains(TEXT("\"VerticalAlignment\": \"Bottom\"")));
+	TestTrue(TEXT("Serializer keeps canonical horizontal alignment"), RoundTripJson.Contains(TEXT("\"HorizontalAlignment\": \"Left\"")));
+	TestTrue(TEXT("Serializer keeps canonical vertical alignment"), RoundTripJson.Contains(TEXT("\"VerticalAlignment\": \"Top\"")));
 	TestTrue(TEXT("Serializer keeps canonical size rule"), RoundTripJson.Contains(TEXT("\"SizeRule\": \"Fill\"")));
 
 	FUMGSlotData UnknownAlignmentSlot;

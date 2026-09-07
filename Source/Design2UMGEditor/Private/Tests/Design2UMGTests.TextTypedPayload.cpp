@@ -27,6 +27,216 @@
 
 using namespace Design2UMGTestUtils;
 
+namespace
+{
+	// Shared creation/reading/assertion vocabulary for the typed-text-payload family tests.
+
+	template <typename T>
+	T* NewTextFamilyWidget(FAutomationTestBase& Test, const TCHAR* CreationLabel)
+	{
+		T* Widget = NewObject<T>(GetTransientPackageAsObject());
+		Test.TestNotNull(CreationLabel, Widget);
+		return Widget;
+	}
+
+	// UTextLayoutWidget reflected layout properties shared by the parity/round-trip tests.
+	// UEditableText/UEditableTextBox shadow the base-class Justification with their own property,
+	// so only the multi-line family reads justification through this reflection set; the
+	// single-line family keeps its getter-based reads (see the state readers below).
+	struct FTextLayoutProperties
+	{
+		const FStructProperty* Margin = nullptr;
+		const FFloatProperty* LineHeight = nullptr;
+		const FByteProperty* Justification = nullptr;
+		const FStructProperty* ShapedTextOptions = nullptr;
+
+		bool IsValid() const
+		{
+			return Margin && LineHeight && Justification && ShapedTextOptions;
+		}
+	};
+
+	bool FindTextLayoutProperties(FAutomationTestBase& Test, FTextLayoutProperties& OutProperties)
+	{
+		OutProperties.Margin = FindFProperty<FStructProperty>(UTextLayoutWidget::StaticClass(), TEXT("Margin"));
+		OutProperties.LineHeight = FindFProperty<FFloatProperty>(UTextLayoutWidget::StaticClass(), TEXT("LineHeightPercentage"));
+		OutProperties.Justification = FindFProperty<FByteProperty>(UTextLayoutWidget::StaticClass(), TEXT("Justification"));
+		OutProperties.ShapedTextOptions = FindFProperty<FStructProperty>(UTextLayoutWidget::StaticClass(), TEXT("ShapedTextOptions"));
+		Test.TestNotNull(TEXT("Text layout margin property exists"), OutProperties.Margin);
+		Test.TestNotNull(TEXT("Text layout line-height property exists"), OutProperties.LineHeight);
+		Test.TestNotNull(TEXT("Text layout justification property exists"), OutProperties.Justification);
+		Test.TestNotNull(TEXT("Text layout shaped-text property exists"), OutProperties.ShapedTextOptions);
+		return OutProperties.IsValid();
+	}
+
+	void ReadTextLayoutState(
+		const FTextLayoutProperties& Properties,
+		UTextLayoutWidget* Widget,
+		FMargin& OutMargin,
+		float& OutLineHeight,
+		ETextJustify::Type& OutJustification,
+		FShapedTextOptions& OutShaping)
+	{
+		const FMargin* MarginValue = Properties.Margin->ContainerPtrToValuePtr<FMargin>(Widget);
+		OutMargin = MarginValue ? *MarginValue : FMargin();
+		OutLineHeight = Properties.LineHeight->GetPropertyValue_InContainer(Widget);
+		OutJustification = static_cast<ETextJustify::Type>(
+			Properties.Justification->GetUnsignedIntPropertyValue(Properties.Justification->ContainerPtrToValuePtr<void>(Widget)));
+		const FShapedTextOptions* ShapingValue = Properties.ShapedTextOptions->ContainerPtrToValuePtr<FShapedTextOptions>(Widget);
+		OutShaping = ShapingValue ? *ShapingValue : FShapedTextOptions();
+	}
+
+	// Comparable runtime state of one editable-text-family widget after property application.
+	struct FTextFamilyWidgetState
+	{
+		FString Text;
+		FString Hint;
+		float FontSize = 0.0f;
+		FString TypefaceFontName;
+		float LetterSpacing = 0.0f;
+		FString FontObjectPath;
+		FLinearColor StyleTextColor = FLinearColor::White;
+		FLinearColor ForegroundColor = FLinearColor::White;
+		bool bAutoWrap = false;
+		float WrapTextAt = 0.0f;
+		float LineHeight = 0.0f;
+		FMargin Margin;
+		ETextJustify::Type Justification = ETextJustify::Left;
+		FShapedTextOptions Shaping;
+	};
+
+	FTextFamilyWidgetState ReadEditableTextBoxState(UEditableTextBox* Widget)
+	{
+		FTextFamilyWidgetState State;
+		State.Text = Widget->GetText().ToString();
+		State.Hint = Widget->GetHintText().ToString();
+		const FEditableTextBoxStyle& Style = Widget->GetWidgetStyle();
+		State.FontSize = Style.TextStyle.Font.Size;
+		State.TypefaceFontName = Style.TextStyle.Font.TypefaceFontName.ToString();
+		State.LetterSpacing = Style.TextStyle.Font.LetterSpacing;
+		State.FontObjectPath = Style.TextStyle.Font.FontObject ? Style.TextStyle.Font.FontObject->GetPathName() : FString();
+		State.StyleTextColor = Style.TextStyle.ColorAndOpacity.GetSpecifiedColor();
+		State.ForegroundColor = Style.ForegroundColor.GetSpecifiedColor();
+		State.Justification = Widget->GetJustification();
+		State.Shaping = Widget->ShapedTextOptions;
+		return State;
+	}
+
+	FTextFamilyWidgetState ReadEditableTextState(UEditableText* Widget)
+	{
+		FTextFamilyWidgetState State;
+		State.Text = Widget->GetText().ToString();
+		State.Hint = Widget->GetHintText().ToString();
+		const FSlateFontInfo Font = Widget->GetFont();
+		State.FontSize = Font.Size;
+		State.TypefaceFontName = Font.TypefaceFontName.ToString();
+		State.LetterSpacing = Font.LetterSpacing;
+		State.FontObjectPath = Font.FontObject ? Font.FontObject->GetPathName() : FString();
+		State.StyleTextColor = Widget->WidgetStyle.ColorAndOpacity.GetSpecifiedColor();
+		State.Justification = Widget->GetJustification();
+		State.Shaping = Widget->ShapedTextOptions;
+		return State;
+	}
+
+	// Multi-line readers mirror the single-line font/color reads through each widget's own API
+	// (WidgetStyle property / GetFont), then take the wrap/margin/line-height/justification/
+	// shaping state from the reflected UTextLayoutWidget fields.
+	FTextFamilyWidgetState ReadMultiLineTextBoxState(const FTextLayoutProperties& Properties, UMultiLineEditableTextBox* Widget)
+	{
+		FTextFamilyWidgetState State;
+		State.Text = Widget->GetText().ToString();
+		State.Hint = Widget->GetHintText().ToString();
+		const FEditableTextBoxStyle& Style = Widget->WidgetStyle;
+		State.FontSize = Style.TextStyle.Font.Size;
+		State.TypefaceFontName = Style.TextStyle.Font.TypefaceFontName.ToString();
+		State.LetterSpacing = Style.TextStyle.Font.LetterSpacing;
+		State.FontObjectPath = Style.TextStyle.Font.FontObject ? Style.TextStyle.Font.FontObject->GetPathName() : FString();
+		State.StyleTextColor = Style.TextStyle.ColorAndOpacity.GetSpecifiedColor();
+		State.ForegroundColor = Style.ForegroundColor.GetSpecifiedColor();
+		State.bAutoWrap = Widget->GetAutoWrapText();
+		State.WrapTextAt = Widget->GetWrapTextAt();
+		ReadTextLayoutState(Properties, Widget, State.Margin, State.LineHeight, State.Justification, State.Shaping);
+		return State;
+	}
+
+	FTextFamilyWidgetState ReadMultiLineEditableTextState(const FTextLayoutProperties& Properties, UMultiLineEditableText* Widget)
+	{
+		FTextFamilyWidgetState State;
+		State.Text = Widget->GetText().ToString();
+		State.Hint = Widget->GetHintText().ToString();
+		const FSlateFontInfo Font = Widget->GetFont();
+		State.FontSize = Font.Size;
+		State.TypefaceFontName = Font.TypefaceFontName.ToString();
+		State.LetterSpacing = Font.LetterSpacing;
+		State.FontObjectPath = Font.FontObject ? Font.FontObject->GetPathName() : FString();
+		State.StyleTextColor = Widget->WidgetStyle.ColorAndOpacity.GetSpecifiedColor();
+		State.bAutoWrap = Widget->GetAutoWrapText();
+		State.WrapTextAt = Widget->GetWrapTextAt();
+		ReadTextLayoutState(Properties, Widget, State.Margin, State.LineHeight, State.Justification, State.Shaping);
+		return State;
+	}
+
+	// Shared typed/legacy parity assertions for the editable-text family. Profile flags select the
+	// assertion groups each family carries: bTextBoxStyle adds the editable-text-box foreground
+	// color pair; bWrapLayout adds the multi-line auto-wrap/wrap-width/line-height/margin group.
+	// Labels and assertion order match the original per-widget blocks.
+	void AssertTextFamilyParity(
+		FAutomationTestBase& Test,
+		const TCHAR* WidgetLabel,
+		bool bTextBoxStyle,
+		bool bWrapLayout,
+		const FTextFamilyWidgetState& Typed,
+		const FTextFamilyWidgetState& Legacy,
+		const FLinearColor& ExpectedTextColor)
+	{
+		Test.TestEqual(FString::Printf(TEXT("%s typed and legacy text match"), WidgetLabel), Typed.Text, Legacy.Text);
+		Test.TestEqual(FString::Printf(TEXT("%s typed and legacy hint match"), WidgetLabel), Typed.Hint, Legacy.Hint);
+		Test.TestEqual(FString::Printf(TEXT("%s typed and legacy font size match"), WidgetLabel), Typed.FontSize, Legacy.FontSize);
+		Test.TestEqual(FString::Printf(TEXT("%s typed and legacy typeface match"), WidgetLabel), Typed.TypefaceFontName, Legacy.TypefaceFontName);
+		Test.TestEqual(FString::Printf(TEXT("%s typed and legacy letter spacing match"), WidgetLabel), Typed.LetterSpacing, Legacy.LetterSpacing);
+		Test.TestEqual(FString::Printf(TEXT("%s typed and legacy font object path match"), WidgetLabel), Typed.FontObjectPath, Legacy.FontObjectPath);
+		if (bTextBoxStyle)
+		{
+			Test.TestTrue(FString::Printf(TEXT("%s typed text color follows normalized typed node color"), WidgetLabel),
+				Typed.StyleTextColor.Equals(ExpectedTextColor, 0.0001f));
+			Test.TestTrue(FString::Printf(TEXT("%s typed foreground color follows normalized typed node color"), WidgetLabel),
+				Typed.ForegroundColor.Equals(ExpectedTextColor, 0.0001f));
+			Test.TestTrue(FString::Printf(TEXT("Second %s text color follows normalized typed node color"), WidgetLabel),
+				Legacy.StyleTextColor.Equals(ExpectedTextColor, 0.0001f));
+			Test.TestTrue(FString::Printf(TEXT("Second %s foreground color follows normalized typed node color"), WidgetLabel),
+				Legacy.ForegroundColor.Equals(ExpectedTextColor, 0.0001f));
+		}
+		else
+		{
+			Test.TestTrue(FString::Printf(TEXT("%s typed color follows normalized typed node color"), WidgetLabel),
+				Typed.StyleTextColor.Equals(ExpectedTextColor, 0.0001f));
+			Test.TestTrue(FString::Printf(TEXT("Second %s color follows normalized typed node color"), WidgetLabel),
+				Legacy.StyleTextColor.Equals(ExpectedTextColor, 0.0001f));
+		}
+		if (bWrapLayout)
+		{
+			Test.TestTrue(FString::Printf(TEXT("%s typed and legacy auto-wrap match"), WidgetLabel),
+				Typed.bAutoWrap == Legacy.bAutoWrap);
+			Test.TestTrue(FString::Printf(TEXT("%s typed and legacy wrap width match"), WidgetLabel),
+				FMath::IsNearlyEqual(Typed.WrapTextAt, Legacy.WrapTextAt, 0.001f));
+			Test.TestTrue(FString::Printf(TEXT("%s typed and legacy line height match"), WidgetLabel),
+				FMath::IsNearlyEqual(Typed.LineHeight, Legacy.LineHeight, 0.001f));
+		}
+		Test.TestEqual(FString::Printf(TEXT("%s typed and legacy justification match"), WidgetLabel),
+			Typed.Justification, Legacy.Justification);
+		if (bWrapLayout)
+		{
+			Test.TestTrue(FString::Printf(TEXT("%s typed and legacy margin match"), WidgetLabel),
+				FMath::IsNearlyEqual(Typed.Margin.Left, Legacy.Margin.Left, 0.001f)
+				&& FMath::IsNearlyEqual(Typed.Margin.Top, Legacy.Margin.Top, 0.001f)
+				&& FMath::IsNearlyEqual(Typed.Margin.Right, Legacy.Margin.Right, 0.001f)
+				&& FMath::IsNearlyEqual(Typed.Margin.Bottom, Legacy.Margin.Bottom, 0.001f));
+		}
+		Test.TestTrue(FString::Printf(TEXT("%s typed and legacy icon shaping match"), WidgetLabel),
+			Typed.Shaping == Legacy.Shaping);
+	}
+}
+
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextBlockUsesTypedTextPayloadParityTest,
 	"Design2UMG.PropertyApplier.TextBlockUsesTypedTextPayload",
@@ -64,18 +274,15 @@ bool FTextBlockUsesTypedTextPayloadParityTest::RunTest(const FString& Parameters
 	FUMGWidgetUtils::ApplyWidgetProperties(TypedWidget, Node);
 	FUMGWidgetUtils::ApplyWidgetProperties(LegacyWidget, Node);
 
-	const FStructProperty* MarginProperty = FindFProperty<FStructProperty>(UTextLayoutWidget::StaticClass(), TEXT("Margin"));
-	const FFloatProperty* LineHeightProperty = FindFProperty<FFloatProperty>(UTextLayoutWidget::StaticClass(), TEXT("LineHeightPercentage"));
-	const FByteProperty* JustificationProperty = FindFProperty<FByteProperty>(UTextLayoutWidget::StaticClass(), TEXT("Justification"));
-	const FStructProperty* ShapedTextOptionsProperty = FindFProperty<FStructProperty>(UTextLayoutWidget::StaticClass(), TEXT("ShapedTextOptions"));
-	TestNotNull(TEXT("Text layout margin property exists"), MarginProperty);
-	TestNotNull(TEXT("Text layout line-height property exists"), LineHeightProperty);
-	TestNotNull(TEXT("Text layout justification property exists"), JustificationProperty);
-	TestNotNull(TEXT("Text layout shaped-text property exists"), ShapedTextOptionsProperty);
-	if (!MarginProperty || !LineHeightProperty || !JustificationProperty || !ShapedTextOptionsProperty)
+	FTextLayoutProperties LayoutProperties;
+	if (!FindTextLayoutProperties(*this, LayoutProperties))
 	{
 		return false;
 	}
+	const FStructProperty* MarginProperty = LayoutProperties.Margin;
+	const FFloatProperty* LineHeightProperty = LayoutProperties.LineHeight;
+	const FByteProperty* JustificationProperty = LayoutProperties.Justification;
+	const FStructProperty* ShapedTextOptionsProperty = LayoutProperties.ShapedTextOptions;
 
 	const FMargin* TypedMargin = MarginProperty->ContainerPtrToValuePtr<FMargin>(TypedWidget);
 	const FMargin* LegacyMargin = MarginProperty->ContainerPtrToValuePtr<FMargin>(LegacyWidget);
@@ -150,10 +357,8 @@ bool FEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const FString& P
 	Node.TextStyle.LetterSpacing = 1.25f;
 	Node.WidgetStyle.MinDesiredWidth = 123.5f;
 
-	UEditableTextBox* TypedTextBox = NewObject<UEditableTextBox>(GetTransientPackageAsObject());
-	UEditableTextBox* LegacyTextBox = NewObject<UEditableTextBox>(GetTransientPackageAsObject());
-	TestNotNull(TEXT("Typed editable text box created"), TypedTextBox);
-	TestNotNull(TEXT("Legacy editable text box created"), LegacyTextBox);
+	UEditableTextBox* TypedTextBox = NewTextFamilyWidget<UEditableTextBox>(*this, TEXT("Typed editable text box created"));
+	UEditableTextBox* LegacyTextBox = NewTextFamilyWidget<UEditableTextBox>(*this, TEXT("Legacy editable text box created"));
 	if (!TypedTextBox || !LegacyTextBox)
 	{
 		return false;
@@ -161,34 +366,12 @@ bool FEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const FString& P
 
 	FUMGWidgetUtils::ApplyWidgetProperties(TypedTextBox, Node);
 	FUMGWidgetUtils::ApplyWidgetProperties(LegacyTextBox, Node);
-
-	const FEditableTextBoxStyle& TypedTextBoxStyle = TypedTextBox->GetWidgetStyle();
-	const FEditableTextBoxStyle& LegacyTextBoxStyle = LegacyTextBox->GetWidgetStyle();
-	TestEqual(TEXT("EditableTextBox typed and legacy text match"), TypedTextBox->GetText().ToString(), LegacyTextBox->GetText().ToString());
-	TestEqual(TEXT("EditableTextBox typed and legacy hint match"), TypedTextBox->GetHintText().ToString(), LegacyTextBox->GetHintText().ToString());
-	TestEqual(TEXT("EditableTextBox typed and legacy font size match"), TypedTextBoxStyle.TextStyle.Font.Size, LegacyTextBoxStyle.TextStyle.Font.Size);
-	TestEqual(TEXT("EditableTextBox typed and legacy typeface match"), TypedTextBoxStyle.TextStyle.Font.TypefaceFontName, LegacyTextBoxStyle.TextStyle.Font.TypefaceFontName);
-	TestEqual(TEXT("EditableTextBox typed and legacy letter spacing match"), TypedTextBoxStyle.TextStyle.Font.LetterSpacing, LegacyTextBoxStyle.TextStyle.Font.LetterSpacing);
-	TestEqual(TEXT("EditableTextBox typed and legacy font object path match"),
-		TypedTextBoxStyle.TextStyle.Font.FontObject ? TypedTextBoxStyle.TextStyle.Font.FontObject->GetPathName() : FString(),
-		LegacyTextBoxStyle.TextStyle.Font.FontObject ? LegacyTextBoxStyle.TextStyle.Font.FontObject->GetPathName() : FString());
 	const FLinearColor ExpectedTextColor = UMGTextStyleApplication::NormalizeTypedTextColor(Node.Text.Color.GetValue());
-	TestTrue(TEXT("EditableTextBox typed text color follows normalized typed node color"),
-		TypedTextBoxStyle.TextStyle.ColorAndOpacity.GetSpecifiedColor().Equals(ExpectedTextColor, 0.0001f));
-	TestTrue(TEXT("EditableTextBox typed foreground color follows normalized typed node color"),
-		TypedTextBoxStyle.ForegroundColor.GetSpecifiedColor().Equals(ExpectedTextColor, 0.0001f));
-	TestTrue(TEXT("Second EditableTextBox text color follows normalized typed node color"),
-		LegacyTextBoxStyle.TextStyle.ColorAndOpacity.GetSpecifiedColor().Equals(ExpectedTextColor, 0.0001f));
-	TestTrue(TEXT("Second EditableTextBox foreground color follows normalized typed node color"),
-		LegacyTextBoxStyle.ForegroundColor.GetSpecifiedColor().Equals(ExpectedTextColor, 0.0001f));
-	TestEqual(TEXT("EditableTextBox typed and legacy justification match"), TypedTextBox->GetJustification(), LegacyTextBox->GetJustification());
-	TestTrue(TEXT("EditableTextBox typed and legacy icon shaping match"),
-		TypedTextBox->ShapedTextOptions == LegacyTextBox->ShapedTextOptions);
+	AssertTextFamilyParity(*this, TEXT("EditableTextBox"), /*bTextBoxStyle=*/true, /*bWrapLayout=*/false,
+		ReadEditableTextBoxState(TypedTextBox), ReadEditableTextBoxState(LegacyTextBox), ExpectedTextColor);
 
-	UEditableText* TypedEditableText = NewObject<UEditableText>(GetTransientPackageAsObject());
-	UEditableText* LegacyEditableText = NewObject<UEditableText>(GetTransientPackageAsObject());
-	TestNotNull(TEXT("Typed editable text created"), TypedEditableText);
-	TestNotNull(TEXT("Legacy editable text created"), LegacyEditableText);
+	UEditableText* TypedEditableText = NewTextFamilyWidget<UEditableText>(*this, TEXT("Typed editable text created"));
+	UEditableText* LegacyEditableText = NewTextFamilyWidget<UEditableText>(*this, TEXT("Legacy editable text created"));
 	if (!TypedEditableText || !LegacyEditableText)
 	{
 		return false;
@@ -196,27 +379,11 @@ bool FEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const FString& P
 
 	FUMGWidgetUtils::ApplyWidgetProperties(TypedEditableText, Node);
 	FUMGWidgetUtils::ApplyWidgetProperties(LegacyEditableText, Node);
+	AssertTextFamilyParity(*this, TEXT("EditableText"), /*bTextBoxStyle=*/false, /*bWrapLayout=*/false,
+		ReadEditableTextState(TypedEditableText), ReadEditableTextState(LegacyEditableText), ExpectedTextColor);
 
-	TestEqual(TEXT("EditableText typed and legacy text match"), TypedEditableText->GetText().ToString(), LegacyEditableText->GetText().ToString());
-	TestEqual(TEXT("EditableText typed and legacy hint match"), TypedEditableText->GetHintText().ToString(), LegacyEditableText->GetHintText().ToString());
-	TestEqual(TEXT("EditableText typed and legacy font size match"), TypedEditableText->GetFont().Size, LegacyEditableText->GetFont().Size);
-	TestEqual(TEXT("EditableText typed and legacy typeface match"), TypedEditableText->GetFont().TypefaceFontName, LegacyEditableText->GetFont().TypefaceFontName);
-	TestEqual(TEXT("EditableText typed and legacy letter spacing match"), TypedEditableText->GetFont().LetterSpacing, LegacyEditableText->GetFont().LetterSpacing);
-	TestEqual(TEXT("EditableText typed and legacy font object path match"),
-		TypedEditableText->GetFont().FontObject ? TypedEditableText->GetFont().FontObject->GetPathName() : FString(),
-		LegacyEditableText->GetFont().FontObject ? LegacyEditableText->GetFont().FontObject->GetPathName() : FString());
-	TestTrue(TEXT("EditableText typed color follows normalized typed node color"),
-		TypedEditableText->WidgetStyle.ColorAndOpacity.GetSpecifiedColor().Equals(ExpectedTextColor, 0.0001f));
-	TestTrue(TEXT("Second EditableText color follows normalized typed node color"),
-		LegacyEditableText->WidgetStyle.ColorAndOpacity.GetSpecifiedColor().Equals(ExpectedTextColor, 0.0001f));
-	TestEqual(TEXT("EditableText typed and legacy justification match"), TypedEditableText->GetJustification(), LegacyEditableText->GetJustification());
-	TestTrue(TEXT("EditableText typed and legacy icon shaping match"),
-		TypedEditableText->ShapedTextOptions == LegacyEditableText->ShapedTextOptions);
-
-	UEditableTextBox* TypedBehaviorTextBox = NewObject<UEditableTextBox>(GetTransientPackageAsObject());
-	UEditableText* TypedBehaviorEditableText = NewObject<UEditableText>(GetTransientPackageAsObject());
-	TestNotNull(TEXT("Typed behavior editable text box created"), TypedBehaviorTextBox);
-	TestNotNull(TEXT("Typed behavior editable text created"), TypedBehaviorEditableText);
+	UEditableTextBox* TypedBehaviorTextBox = NewTextFamilyWidget<UEditableTextBox>(*this, TEXT("Typed behavior editable text box created"));
+	UEditableText* TypedBehaviorEditableText = NewTextFamilyWidget<UEditableText>(*this, TEXT("Typed behavior editable text created"));
 	if (!TypedBehaviorTextBox || !TypedBehaviorEditableText)
 	{
 		return false;
@@ -245,10 +412,8 @@ bool FEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const FString& P
 	TestTrue(TEXT("Typed empty hint is retained instead of dropped"),
 		EmptyTypedNode.Text.HintText.IsSet() && EmptyTypedNode.Text.HintText.GetValue().IsEmpty());
 
-	UEditableTextBox* EmptyTypedTextBox = NewObject<UEditableTextBox>(GetTransientPackageAsObject());
-	UEditableText* EmptyTypedEditableText = NewObject<UEditableText>(GetTransientPackageAsObject());
-	TestNotNull(TEXT("Typed empty editable text box created"), EmptyTypedTextBox);
-	TestNotNull(TEXT("Typed empty editable text created"), EmptyTypedEditableText);
+	UEditableTextBox* EmptyTypedTextBox = NewTextFamilyWidget<UEditableTextBox>(*this, TEXT("Typed empty editable text box created"));
+	UEditableText* EmptyTypedEditableText = NewTextFamilyWidget<UEditableText>(*this, TEXT("Typed empty editable text created"));
 	if (!EmptyTypedTextBox || !EmptyTypedEditableText)
 	{
 		return false;
@@ -311,19 +476,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMultiLineEditableTextFamilyUsesTypedTextPayloa
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FMultiLineEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const FString& Parameters)
 {
-	const FStructProperty* MarginProperty = FindFProperty<FStructProperty>(UTextLayoutWidget::StaticClass(), TEXT("Margin"));
-	const FFloatProperty* LineHeightProperty = FindFProperty<FFloatProperty>(UTextLayoutWidget::StaticClass(), TEXT("LineHeightPercentage"));
-	const FByteProperty* JustificationProperty = FindFProperty<FByteProperty>(UTextLayoutWidget::StaticClass(), TEXT("Justification"));
-	const FStructProperty* ShapedTextOptionsProperty = FindFProperty<FStructProperty>(UTextLayoutWidget::StaticClass(), TEXT("ShapedTextOptions"));
-	TestNotNull(TEXT("Text layout margin property exists"), MarginProperty);
-	TestNotNull(TEXT("Text layout line-height property exists"), LineHeightProperty);
-	TestNotNull(TEXT("Text layout justification property exists"), JustificationProperty);
-	TestNotNull(TEXT("Text layout shaped-text property exists"), ShapedTextOptionsProperty);
-	if (!MarginProperty || !LineHeightProperty || !JustificationProperty || !ShapedTextOptionsProperty)
+	FTextLayoutProperties LayoutProperties;
+	if (!FindTextLayoutProperties(*this, LayoutProperties))
 	{
 		return false;
 	}
-
 	FUMGWidgetNode Node;
 	Node.Text.Text = TEXT("Multi-line editable text");
 	Node.Text.HintText = TEXT("Multi-line hint");
@@ -340,21 +497,10 @@ bool FMultiLineEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const F
 	Node.TextStyle.LetterSpacing = 0.75f;
 	Node.WidgetStyle.Padding = FMargin(4.0f, 5.0f, 6.0f, 7.0f);
 
-	auto ReadLayoutState = [&](UTextLayoutWidget* Widget, FMargin& OutMargin, float& OutLineHeight, ETextJustify::Type& OutJustification, FShapedTextOptions& OutShaping)
-	{
-		const FMargin* MarginValue = MarginProperty->ContainerPtrToValuePtr<FMargin>(Widget);
-		OutMargin = MarginValue ? *MarginValue : FMargin();
-		OutLineHeight = LineHeightProperty->GetPropertyValue_InContainer(Widget);
-		OutJustification = static_cast<ETextJustify::Type>(
-			JustificationProperty->GetUnsignedIntPropertyValue(JustificationProperty->ContainerPtrToValuePtr<void>(Widget)));
-		const FShapedTextOptions* ShapingValue = ShapedTextOptionsProperty->ContainerPtrToValuePtr<FShapedTextOptions>(Widget);
-		OutShaping = ShapingValue ? *ShapingValue : FShapedTextOptions();
-	};
+	const FLinearColor ExpectedTextColor = UMGTextStyleApplication::NormalizeTypedTextColor(Node.Text.Color.GetValue());
 
-	UMultiLineEditableTextBox* TypedTextBox = NewObject<UMultiLineEditableTextBox>(GetTransientPackageAsObject());
-	UMultiLineEditableTextBox* LegacyTextBox = NewObject<UMultiLineEditableTextBox>(GetTransientPackageAsObject());
-	TestNotNull(TEXT("Typed multi-line editable text box created"), TypedTextBox);
-	TestNotNull(TEXT("Legacy multi-line editable text box created"), LegacyTextBox);
+	UMultiLineEditableTextBox* TypedTextBox = NewTextFamilyWidget<UMultiLineEditableTextBox>(*this, TEXT("Typed multi-line editable text box created"));
+	UMultiLineEditableTextBox* LegacyTextBox = NewTextFamilyWidget<UMultiLineEditableTextBox>(*this, TEXT("Legacy multi-line editable text box created"));
 	if (!TypedTextBox || !LegacyTextBox)
 	{
 		return false;
@@ -362,50 +508,11 @@ bool FMultiLineEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const F
 
 	FUMGWidgetUtils::ApplyWidgetProperties(TypedTextBox, Node);
 	FUMGWidgetUtils::ApplyWidgetProperties(LegacyTextBox, Node);
+	AssertTextFamilyParity(*this, TEXT("MultiLineEditableTextBox"), /*bTextBoxStyle=*/true, /*bWrapLayout=*/true,
+		ReadMultiLineTextBoxState(LayoutProperties, TypedTextBox), ReadMultiLineTextBoxState(LayoutProperties, LegacyTextBox), ExpectedTextColor);
 
-	FMargin TypedTextBoxMargin;
-	FMargin LegacyTextBoxMargin;
-	float TypedTextBoxLineHeight = 0.0f;
-	float LegacyTextBoxLineHeight = 0.0f;
-	ETextJustify::Type TypedTextBoxJustification = ETextJustify::Left;
-	ETextJustify::Type LegacyTextBoxJustification = ETextJustify::Left;
-	FShapedTextOptions TypedTextBoxShaping;
-	FShapedTextOptions LegacyTextBoxShaping;
-	ReadLayoutState(TypedTextBox, TypedTextBoxMargin, TypedTextBoxLineHeight, TypedTextBoxJustification, TypedTextBoxShaping);
-	ReadLayoutState(LegacyTextBox, LegacyTextBoxMargin, LegacyTextBoxLineHeight, LegacyTextBoxJustification, LegacyTextBoxShaping);
-
-	TestEqual(TEXT("MultiLineEditableTextBox typed and legacy text match"), TypedTextBox->GetText().ToString(), LegacyTextBox->GetText().ToString());
-	TestEqual(TEXT("MultiLineEditableTextBox typed and legacy hint match"), TypedTextBox->GetHintText().ToString(), LegacyTextBox->GetHintText().ToString());
-	TestEqual(TEXT("MultiLineEditableTextBox typed and legacy font size match"), TypedTextBox->WidgetStyle.TextStyle.Font.Size, LegacyTextBox->WidgetStyle.TextStyle.Font.Size);
-	TestEqual(TEXT("MultiLineEditableTextBox typed and legacy typeface match"), TypedTextBox->WidgetStyle.TextStyle.Font.TypefaceFontName, LegacyTextBox->WidgetStyle.TextStyle.Font.TypefaceFontName);
-	TestEqual(TEXT("MultiLineEditableTextBox typed and legacy letter spacing match"), TypedTextBox->WidgetStyle.TextStyle.Font.LetterSpacing, LegacyTextBox->WidgetStyle.TextStyle.Font.LetterSpacing);
-	TestEqual(TEXT("MultiLineEditableTextBox typed and legacy font object path match"),
-		TypedTextBox->WidgetStyle.TextStyle.Font.FontObject ? TypedTextBox->WidgetStyle.TextStyle.Font.FontObject->GetPathName() : FString(),
-		LegacyTextBox->WidgetStyle.TextStyle.Font.FontObject ? LegacyTextBox->WidgetStyle.TextStyle.Font.FontObject->GetPathName() : FString());
-	const FLinearColor ExpectedTextColor = UMGTextStyleApplication::NormalizeTypedTextColor(Node.Text.Color.GetValue());
-	TestTrue(TEXT("MultiLineEditableTextBox typed text color follows normalized typed node color"),
-		TypedTextBox->WidgetStyle.TextStyle.ColorAndOpacity.GetSpecifiedColor().Equals(ExpectedTextColor, 0.0001f));
-	TestTrue(TEXT("MultiLineEditableTextBox typed foreground color follows normalized typed node color"),
-		TypedTextBox->WidgetStyle.ForegroundColor.GetSpecifiedColor().Equals(ExpectedTextColor, 0.0001f));
-	TestTrue(TEXT("Second MultiLineEditableTextBox text color follows normalized typed node color"),
-		LegacyTextBox->WidgetStyle.TextStyle.ColorAndOpacity.GetSpecifiedColor().Equals(ExpectedTextColor, 0.0001f));
-	TestTrue(TEXT("Second MultiLineEditableTextBox foreground color follows normalized typed node color"),
-		LegacyTextBox->WidgetStyle.ForegroundColor.GetSpecifiedColor().Equals(ExpectedTextColor, 0.0001f));
-	TestTrue(TEXT("MultiLineEditableTextBox typed and legacy auto-wrap match"), TypedTextBox->GetAutoWrapText() == LegacyTextBox->GetAutoWrapText());
-	TestTrue(TEXT("MultiLineEditableTextBox typed and legacy wrap width match"), FMath::IsNearlyEqual(TypedTextBox->GetWrapTextAt(), LegacyTextBox->GetWrapTextAt(), 0.001f));
-	TestTrue(TEXT("MultiLineEditableTextBox typed and legacy line height match"), FMath::IsNearlyEqual(TypedTextBoxLineHeight, LegacyTextBoxLineHeight, 0.001f));
-	TestEqual(TEXT("MultiLineEditableTextBox typed and legacy justification match"), TypedTextBoxJustification, LegacyTextBoxJustification);
-	TestTrue(TEXT("MultiLineEditableTextBox typed and legacy margin match"),
-		FMath::IsNearlyEqual(TypedTextBoxMargin.Left, LegacyTextBoxMargin.Left, 0.001f)
-		&& FMath::IsNearlyEqual(TypedTextBoxMargin.Top, LegacyTextBoxMargin.Top, 0.001f)
-		&& FMath::IsNearlyEqual(TypedTextBoxMargin.Right, LegacyTextBoxMargin.Right, 0.001f)
-		&& FMath::IsNearlyEqual(TypedTextBoxMargin.Bottom, LegacyTextBoxMargin.Bottom, 0.001f));
-	TestTrue(TEXT("MultiLineEditableTextBox typed and legacy icon shaping match"), TypedTextBoxShaping == LegacyTextBoxShaping);
-
-	UMultiLineEditableText* TypedEditableText = NewObject<UMultiLineEditableText>(GetTransientPackageAsObject());
-	UMultiLineEditableText* LegacyEditableText = NewObject<UMultiLineEditableText>(GetTransientPackageAsObject());
-	TestNotNull(TEXT("Typed multi-line editable text created"), TypedEditableText);
-	TestNotNull(TEXT("Legacy multi-line editable text created"), LegacyEditableText);
+	UMultiLineEditableText* TypedEditableText = NewTextFamilyWidget<UMultiLineEditableText>(*this, TEXT("Typed multi-line editable text created"));
+	UMultiLineEditableText* LegacyEditableText = NewTextFamilyWidget<UMultiLineEditableText>(*this, TEXT("Legacy multi-line editable text created"));
 	if (!TypedEditableText || !LegacyEditableText)
 	{
 		return false;
@@ -413,40 +520,8 @@ bool FMultiLineEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const F
 
 	FUMGWidgetUtils::ApplyWidgetProperties(TypedEditableText, Node);
 	FUMGWidgetUtils::ApplyWidgetProperties(LegacyEditableText, Node);
-
-	FMargin TypedEditableTextMargin;
-	FMargin LegacyEditableTextMargin;
-	float TypedEditableTextLineHeight = 0.0f;
-	float LegacyEditableTextLineHeight = 0.0f;
-	ETextJustify::Type TypedEditableTextJustification = ETextJustify::Left;
-	ETextJustify::Type LegacyEditableTextJustification = ETextJustify::Left;
-	FShapedTextOptions TypedEditableTextShaping;
-	FShapedTextOptions LegacyEditableTextShaping;
-	ReadLayoutState(TypedEditableText, TypedEditableTextMargin, TypedEditableTextLineHeight, TypedEditableTextJustification, TypedEditableTextShaping);
-	ReadLayoutState(LegacyEditableText, LegacyEditableTextMargin, LegacyEditableTextLineHeight, LegacyEditableTextJustification, LegacyEditableTextShaping);
-
-	TestEqual(TEXT("MultiLineEditableText typed and legacy text match"), TypedEditableText->GetText().ToString(), LegacyEditableText->GetText().ToString());
-	TestEqual(TEXT("MultiLineEditableText typed and legacy hint match"), TypedEditableText->GetHintText().ToString(), LegacyEditableText->GetHintText().ToString());
-	TestEqual(TEXT("MultiLineEditableText typed and legacy font size match"), TypedEditableText->GetFont().Size, LegacyEditableText->GetFont().Size);
-	TestEqual(TEXT("MultiLineEditableText typed and legacy typeface match"), TypedEditableText->GetFont().TypefaceFontName, LegacyEditableText->GetFont().TypefaceFontName);
-	TestEqual(TEXT("MultiLineEditableText typed and legacy letter spacing match"), TypedEditableText->GetFont().LetterSpacing, LegacyEditableText->GetFont().LetterSpacing);
-	TestEqual(TEXT("MultiLineEditableText typed and legacy font object path match"),
-		TypedEditableText->GetFont().FontObject ? TypedEditableText->GetFont().FontObject->GetPathName() : FString(),
-		LegacyEditableText->GetFont().FontObject ? LegacyEditableText->GetFont().FontObject->GetPathName() : FString());
-	TestTrue(TEXT("MultiLineEditableText typed color follows normalized typed node color"),
-		TypedEditableText->WidgetStyle.ColorAndOpacity.GetSpecifiedColor().Equals(ExpectedTextColor, 0.0001f));
-	TestTrue(TEXT("Second MultiLineEditableText color follows normalized typed node color"),
-		LegacyEditableText->WidgetStyle.ColorAndOpacity.GetSpecifiedColor().Equals(ExpectedTextColor, 0.0001f));
-	TestTrue(TEXT("MultiLineEditableText typed and legacy auto-wrap match"), TypedEditableText->GetAutoWrapText() == LegacyEditableText->GetAutoWrapText());
-	TestTrue(TEXT("MultiLineEditableText typed and legacy wrap width match"), FMath::IsNearlyEqual(TypedEditableText->GetWrapTextAt(), LegacyEditableText->GetWrapTextAt(), 0.001f));
-	TestTrue(TEXT("MultiLineEditableText typed and legacy line height match"), FMath::IsNearlyEqual(TypedEditableTextLineHeight, LegacyEditableTextLineHeight, 0.001f));
-	TestEqual(TEXT("MultiLineEditableText typed and legacy justification match"), TypedEditableTextJustification, LegacyEditableTextJustification);
-	TestTrue(TEXT("MultiLineEditableText typed and legacy margin match"),
-		FMath::IsNearlyEqual(TypedEditableTextMargin.Left, LegacyEditableTextMargin.Left, 0.001f)
-		&& FMath::IsNearlyEqual(TypedEditableTextMargin.Top, LegacyEditableTextMargin.Top, 0.001f)
-		&& FMath::IsNearlyEqual(TypedEditableTextMargin.Right, LegacyEditableTextMargin.Right, 0.001f)
-		&& FMath::IsNearlyEqual(TypedEditableTextMargin.Bottom, LegacyEditableTextMargin.Bottom, 0.001f));
-	TestTrue(TEXT("MultiLineEditableText typed and legacy icon shaping match"), TypedEditableTextShaping == LegacyEditableTextShaping);
+	AssertTextFamilyParity(*this, TEXT("MultiLineEditableText"), /*bTextBoxStyle=*/false, /*bWrapLayout=*/true,
+		ReadMultiLineEditableTextState(LayoutProperties, TypedEditableText), ReadMultiLineEditableTextState(LayoutProperties, LegacyEditableText), ExpectedTextColor);
 	return true;
 }
 
@@ -622,15 +697,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextFamilyTypedJsonRoundTripTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FTextFamilyTypedJsonRoundTripTest::RunTest(const FString& Parameters)
 {
-	const FStructProperty* MarginProperty = FindFProperty<FStructProperty>(UTextLayoutWidget::StaticClass(), TEXT("Margin"));
-	const FFloatProperty* LineHeightProperty = FindFProperty<FFloatProperty>(UTextLayoutWidget::StaticClass(), TEXT("LineHeightPercentage"));
-	const FByteProperty* JustificationProperty = FindFProperty<FByteProperty>(UTextLayoutWidget::StaticClass(), TEXT("Justification"));
-	const FStructProperty* ShapedTextOptionsProperty = FindFProperty<FStructProperty>(UTextLayoutWidget::StaticClass(), TEXT("ShapedTextOptions"));
-	TestNotNull(TEXT("Text layout margin property exists"), MarginProperty);
-	TestNotNull(TEXT("Text layout line-height property exists"), LineHeightProperty);
-	TestNotNull(TEXT("Text layout justification property exists"), JustificationProperty);
-	TestNotNull(TEXT("Text layout shaped-text property exists"), ShapedTextOptionsProperty);
-	if (!MarginProperty || !LineHeightProperty || !JustificationProperty || !ShapedTextOptionsProperty)
+	FTextLayoutProperties LayoutProperties;
+	if (!FindTextLayoutProperties(*this, LayoutProperties))
 	{
 		return false;
 	}
@@ -702,21 +770,8 @@ bool FTextFamilyTypedJsonRoundTripTest::RunTest(const FString& Parameters)
 		&& FMath::IsNearlyEqual(ParsedNode->WidgetStyle.Padding->Right, SourceNode.WidgetStyle.Padding->Right, 0.001f)
 		&& FMath::IsNearlyEqual(ParsedNode->WidgetStyle.Padding->Bottom, SourceNode.WidgetStyle.Padding->Bottom, 0.001f));
 
-	auto ReadLayoutState = [&](UTextLayoutWidget* Widget, FMargin& OutMargin, float& OutLineHeight, ETextJustify::Type& OutJustification, FShapedTextOptions& OutShaping)
-	{
-		const FMargin* MarginValue = MarginProperty->ContainerPtrToValuePtr<FMargin>(Widget);
-		OutMargin = MarginValue ? *MarginValue : FMargin();
-		OutLineHeight = LineHeightProperty->GetPropertyValue_InContainer(Widget);
-		OutJustification = static_cast<ETextJustify::Type>(
-			JustificationProperty->GetUnsignedIntPropertyValue(JustificationProperty->ContainerPtrToValuePtr<void>(Widget)));
-		const FShapedTextOptions* ShapingValue = ShapedTextOptionsProperty->ContainerPtrToValuePtr<FShapedTextOptions>(Widget);
-		OutShaping = ShapingValue ? *ShapingValue : FShapedTextOptions();
-	};
-
-	UMultiLineEditableTextBox* SourceWidget = NewObject<UMultiLineEditableTextBox>(GetTransientPackageAsObject());
-	UMultiLineEditableTextBox* ParsedWidget = NewObject<UMultiLineEditableTextBox>(GetTransientPackageAsObject());
-	TestNotNull(TEXT("Source text family widget created"), SourceWidget);
-	TestNotNull(TEXT("Parsed text family widget created"), ParsedWidget);
+	UMultiLineEditableTextBox* SourceWidget = NewTextFamilyWidget<UMultiLineEditableTextBox>(*this, TEXT("Source text family widget created"));
+	UMultiLineEditableTextBox* ParsedWidget = NewTextFamilyWidget<UMultiLineEditableTextBox>(*this, TEXT("Parsed text family widget created"));
 	if (!SourceWidget || !ParsedWidget)
 	{
 		return false;
@@ -733,8 +788,8 @@ bool FTextFamilyTypedJsonRoundTripTest::RunTest(const FString& Parameters)
 	ETextJustify::Type ParsedJustification = ETextJustify::Left;
 	FShapedTextOptions SourceShaping;
 	FShapedTextOptions ParsedShaping;
-	ReadLayoutState(SourceWidget, SourceMargin, SourceLineHeight, SourceJustification, SourceShaping);
-	ReadLayoutState(ParsedWidget, ParsedMargin, ParsedLineHeight, ParsedJustification, ParsedShaping);
+	ReadTextLayoutState(LayoutProperties, SourceWidget, SourceMargin, SourceLineHeight, SourceJustification, SourceShaping);
+	ReadTextLayoutState(LayoutProperties, ParsedWidget, ParsedMargin, ParsedLineHeight, ParsedJustification, ParsedShaping);
 
 	TestEqual(TEXT("Round-trip widget text matches"), ParsedWidget->GetText().ToString(), SourceWidget->GetText().ToString());
 	TestEqual(TEXT("Round-trip widget hint matches"), ParsedWidget->GetHintText().ToString(), SourceWidget->GetHintText().ToString());
@@ -871,8 +926,7 @@ bool FTextStyleLetterSpacingOptionalSemanticsTest::RunTest(const FString& Parame
 		ExplicitZeroNode.TextStyle.LetterSpacing.IsSet()
 		&& FMath::IsNearlyZero(ExplicitZeroNode.TextStyle.LetterSpacing.GetValue()));
 
-	UTextBlock* ExplicitZeroWidget = NewObject<UTextBlock>(GetTransientPackageAsObject());
-	TestNotNull(TEXT("Explicit zero widget created"), ExplicitZeroWidget);
+	UTextBlock* ExplicitZeroWidget = NewTextFamilyWidget<UTextBlock>(*this, TEXT("Explicit zero widget created"));
 	if (ExplicitZeroWidget)
 	{
 		FSlateFontInfo FontInfo = ExplicitZeroWidget->GetFont();
@@ -894,8 +948,7 @@ bool FTextStyleLetterSpacingOptionalSemanticsTest::RunTest(const FString& Parame
 		&& ParsedNonZeroNode->TextStyle.LetterSpacing.IsSet()
 		&& FMath::IsNearlyEqual(ParsedNonZeroNode->TextStyle.LetterSpacing.GetValue(), 1.25f, 0.001f));
 
-	UTextBlock* NonZeroWidget = NewObject<UTextBlock>(GetTransientPackageAsObject());
-	TestNotNull(TEXT("Non-zero widget created"), NonZeroWidget);
+	UTextBlock* NonZeroWidget = NewTextFamilyWidget<UTextBlock>(*this, TEXT("Non-zero widget created"));
 	if (NonZeroWidget && ParsedNonZeroNode)
 	{
 		FUMGWidgetUtils::ApplyWidgetProperties(NonZeroWidget, *ParsedNonZeroNode);
@@ -906,16 +959,14 @@ bool FTextStyleLetterSpacingOptionalSemanticsTest::RunTest(const FString& Parame
 	ScaledNegativeNode.TextStyle.FontSize = 12.0f;
 	ScaledNegativeNode.TextStyle.SourceFontSize = 20.0f;
 	ScaledNegativeNode.TextStyle.LetterSpacing = -1.25f;
-	UTextBlock* ScaledNegativeWidget = NewObject<UTextBlock>(GetTransientPackageAsObject());
-	TestNotNull(TEXT("Scaled negative-spacing widget created"), ScaledNegativeWidget);
+	UTextBlock* ScaledNegativeWidget = NewTextFamilyWidget<UTextBlock>(*this, TEXT("Scaled negative-spacing widget created"));
 	if (ScaledNegativeWidget)
 	{
 		FUMGWidgetUtils::ApplyWidgetProperties(ScaledNegativeWidget, ScaledNegativeNode);
 		TestEqual(TEXT("Design font size owns scaled negative letter-spacing conversion"), ScaledNegativeWidget->GetFont().LetterSpacing, -62);
 	}
 
-	URichTextBlock* RichTextWidget = NewObject<URichTextBlock>(GetTransientPackageAsObject());
-	TestNotNull(TEXT("Rich text spacing widget created"), RichTextWidget);
+	URichTextBlock* RichTextWidget = NewTextFamilyWidget<URichTextBlock>(*this, TEXT("Rich text spacing widget created"));
 	if (RichTextWidget)
 	{
 		UMGTextStyleApplication::ApplyRichTextStyleRows(
@@ -944,8 +995,7 @@ bool FTextStyleLetterSpacingOptionalSemanticsTest::RunTest(const FString& Parame
 
 	TestFalse(TEXT("Typed payload omits unset letter spacing"), UnsetNode.TextStyle.LetterSpacing.IsSet());
 
-	UTextBlock* UnsetWidget = NewObject<UTextBlock>(GetTransientPackageAsObject());
-	TestNotNull(TEXT("Unset widget created"), UnsetWidget);
+	UTextBlock* UnsetWidget = NewTextFamilyWidget<UTextBlock>(*this, TEXT("Unset widget created"));
 	if (UnsetWidget)
 	{
 		FSlateFontInfo FontInfo = UnsetWidget->GetFont();
@@ -1043,10 +1093,8 @@ bool FRichTextTypedJsonRoundTripTest::RunTest(const FString& Parameters)
 			static_cast<int32>(LinkRow->TextStyle.UnderlineBrush.DrawAs));
 	};
 
-	URichTextBlock* SourceWidget = NewObject<URichTextBlock>(GetTransientPackageAsObject());
-	URichTextBlock* ParsedWidget = NewObject<URichTextBlock>(GetTransientPackageAsObject());
-	TestNotNull(TEXT("Source rich text widget created"), SourceWidget);
-	TestNotNull(TEXT("Parsed rich text widget created"), ParsedWidget);
+	URichTextBlock* SourceWidget = NewTextFamilyWidget<URichTextBlock>(*this, TEXT("Source rich text widget created"));
+	URichTextBlock* ParsedWidget = NewTextFamilyWidget<URichTextBlock>(*this, TEXT("Parsed rich text widget created"));
 	if (!SourceWidget || !ParsedWidget)
 	{
 		return false;

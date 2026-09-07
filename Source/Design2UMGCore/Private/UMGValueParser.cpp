@@ -6,20 +6,20 @@
 
 namespace
 {
-	const TMap<FString, EHorizontalAlignment>& GetHAlignMap()
+	const TMap<FString, EUMGSlotHorizontalAlignment>& GetHAlignMap()
 	{
-		static const TMap<FString, EHorizontalAlignment> Map = {
-			{TEXT("left"), HAlign_Left}, {TEXT("center"), HAlign_Center},
-			{TEXT("right"), HAlign_Right}, {TEXT("fill"), HAlign_Fill}
+		static const TMap<FString, EUMGSlotHorizontalAlignment> Map = {
+			{TEXT("left"), EUMGSlotHorizontalAlignment::Left}, {TEXT("center"), EUMGSlotHorizontalAlignment::Center},
+			{TEXT("right"), EUMGSlotHorizontalAlignment::Right}, {TEXT("fill"), EUMGSlotHorizontalAlignment::Fill}
 		};
 		return Map;
 	}
 
-	const TMap<FString, EVerticalAlignment>& GetVAlignMap()
+	const TMap<FString, EUMGSlotVerticalAlignment>& GetVAlignMap()
 	{
-		static const TMap<FString, EVerticalAlignment> Map = {
-			{TEXT("top"), VAlign_Top}, {TEXT("center"), VAlign_Center},
-			{TEXT("bottom"), VAlign_Bottom}, {TEXT("fill"), VAlign_Fill}
+		static const TMap<FString, EUMGSlotVerticalAlignment> Map = {
+			{TEXT("top"), EUMGSlotVerticalAlignment::Top}, {TEXT("center"), EUMGSlotVerticalAlignment::Center},
+			{TEXT("bottom"), EUMGSlotVerticalAlignment::Bottom}, {TEXT("fill"), EUMGSlotVerticalAlignment::Fill}
 		};
 		return Map;
 	}
@@ -65,49 +65,25 @@ namespace FUMGValueParser
 	EUMGSlotHorizontalAlignment ParseSlotHorizontalAlignment(const FString& Str)
 	{
 		const FString Normalized = NormalizeSlotToken(Str);
-		const EHorizontalAlignment* Found = GetHAlignMap().Find(Normalized);
+		const EUMGSlotHorizontalAlignment* Found = GetHAlignMap().Find(Normalized);
 		if (!Found)
 		{
 			UE_LOG(LogDesign2UMG, Warning, TEXT("Unknown slot horizontal alignment '%s'; defaulting to Fill."), *Str);
 			return EUMGSlotHorizontalAlignment::Fill;
 		}
-
-		switch (*Found)
-		{
-		case HAlign_Left:
-			return EUMGSlotHorizontalAlignment::Left;
-		case HAlign_Center:
-			return EUMGSlotHorizontalAlignment::Center;
-		case HAlign_Right:
-			return EUMGSlotHorizontalAlignment::Right;
-		case HAlign_Fill:
-		default:
-			return EUMGSlotHorizontalAlignment::Fill;
-		}
+		return *Found;
 	}
 
 	EUMGSlotVerticalAlignment ParseSlotVerticalAlignment(const FString& Str)
 	{
 		const FString Normalized = NormalizeSlotToken(Str);
-		const EVerticalAlignment* Found = GetVAlignMap().Find(Normalized);
+		const EUMGSlotVerticalAlignment* Found = GetVAlignMap().Find(Normalized);
 		if (!Found)
 		{
 			UE_LOG(LogDesign2UMG, Warning, TEXT("Unknown slot vertical alignment '%s'; defaulting to Fill."), *Str);
 			return EUMGSlotVerticalAlignment::Fill;
 		}
-
-		switch (*Found)
-		{
-		case VAlign_Top:
-			return EUMGSlotVerticalAlignment::Top;
-		case VAlign_Center:
-			return EUMGSlotVerticalAlignment::Center;
-		case VAlign_Bottom:
-			return EUMGSlotVerticalAlignment::Bottom;
-		case VAlign_Fill:
-		default:
-			return EUMGSlotVerticalAlignment::Fill;
-		}
+		return *Found;
 	}
 
 	EUMGSlotSizeRule ParseSlotSizeRule(const FString& Str)

@@ -7,6 +7,7 @@
 #include "Design2UMGConverter.h"
 #include "PenParser.h"
 #include "FigmaParser.h"
+#include "FigmaTestDocBuilder.h"
 #include "UMGJsonParser.h"
 #include "UMGJsonSerializer.h"
 #include "UMGValueParsing.h"
@@ -23,6 +24,7 @@
 
 #if WITH_AUTOMATION_WORKER
 
+using namespace Design2UMGCoreTests;
 using namespace Design2UMGTestUtils;
 
 
@@ -190,50 +192,16 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaEffectsConvertToTypedWrappersTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaEffectsConvertToTypedWrappersTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [{
-					"id": "1:1",
-					"name": "EffectCard",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x":0,"y":0,"width":180,"height":96},
-					"absoluteRenderBounds": {"x":0,"y":0,"width":180,"height":96},
-					"effects": [
-						{
-							"type": "INNER_SHADOW",
-							"visible": true,
-							"blendMode": "NORMAL",
-							"offset": {"x":4,"y":-2},
-							"radius": 12,
-							"color": {"r":0,"g":0,"b":0,"a":0.3}
-						},
-						{
-							"type": "BACKGROUND_BLUR",
-							"visible": true,
-							"radius": 16
-						}
-					],
-					"children": [{
-						"id": "1:2",
-						"name": "Title",
-						"type": "TEXT",
-						"visible": true,
-						"absoluteBoundingBox": {"x":16,"y":20,"width":80,"height":24},
-						"characters": "Fx",
-						"style": {"fontFamily":"Inter","fontSize":20,"fontWeight":500,"textAlignHorizontal":"LEFT","textAlignVertical":"TOP","textDecoration":"NONE","letterSpacing":0,"lineHeightUnit":"AUTO","lineHeightPx":0}
-					}]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(
+		MakeContainerNode(TEXT("1:1"), TEXT("EffectCard"), TEXT("FRAME"), 0, 0, 180, 96,
+			MakeTextNode(TEXT("1:2"), TEXT("Title"), 16, 20, 80, 24, TEXT("Fx"),
+				TEXT("\"fontFamily\":\"Inter\",\"fontSize\":20,\"fontWeight\":500,\"textAlignHorizontal\":\"LEFT\",\"textAlignVertical\":\"TOP\",\"textDecoration\":\"NONE\",\"letterSpacing\":0,\"lineHeightUnit\":\"AUTO\",\"lineHeightPx\":0")),
+			FString::Printf(
+				TEXT(",\"absoluteRenderBounds\":%s,\"effects\":["
+					 "{\"type\":\"INNER_SHADOW\",\"visible\":true,\"blendMode\":\"NORMAL\",\"offset\":{\"x\":4,\"y\":-2},\"radius\":12,\"color\":{\"r\":0,\"g\":0,\"b\":0,\"a\":0.3}},"
+					 "{\"type\":\"BACKGROUND_BLUR\",\"visible\":true,\"radius\":16}"
+					 "]"),
+				*MakeBoundsJson(0, 0, 180, 96))));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Figma effect wrapper fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
@@ -261,40 +229,14 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaGeometryMaskConvertsBeforeInnerShadowTest
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaGeometryMaskConvertsBeforeInnerShadowTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"type": "DOCUMENT",
-			"children": [{
-				"type": "CANVAS",
-				"children": [{
-					"id": "shape-group",
-					"name": "Shape Group",
-					"type": "GROUP",
-					"absoluteBoundingBox": {"x":0,"y":0,"width":100,"height":80},
-					"effects": [{
-						"type": "INNER_SHADOW",
-						"visible": true,
-						"offset": {"x":2,"y":2},
-						"radius": 4,
-						"color": {"r":0,"g":0,"b":0,"a":0.25}
-					}],
-					"children": [{
-						"id": "shape-mask",
-						"name": "Clip Shape",
-						"type": "ELLIPSE",
-						"isMask": true,
-						"absoluteBoundingBox": {"x":0,"y":0,"width":100,"height":80}
-					}, {
-						"id": "shape-content",
-						"name": "Color Layer",
-						"type": "RECTANGLE",
-						"absoluteBoundingBox": {"x":0,"y":0,"width":100,"height":80},
-						"fills": [{"type":"SOLID","color":{"r":0.2,"g":0.4,"b":0.8,"a":1}}]
-					}]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(
+		MakeContainerNode(TEXT("shape-group"), TEXT("Shape Group"), TEXT("GROUP"), 0, 0, 100, 80,
+			FString::Printf(TEXT("%s,%s"),
+				*MakeLeafNode(TEXT("shape-mask"), TEXT("Clip Shape"), TEXT("ELLIPSE"), 0, 0, 100, 80,
+					TEXT(",\"isMask\":true")),
+				*MakeLeafNode(TEXT("shape-content"), TEXT("Color Layer"), TEXT("RECTANGLE"), 0, 0, 100, 80,
+					FString::Printf(TEXT(",\"fills\":[%s]"), *MakeSolidFillJson(0.2, 0.4, 0.8)))),
+			TEXT(",\"effects\":[{\"type\":\"INNER_SHADOW\",\"visible\":true,\"offset\":{\"x\":2,\"y\":2},\"radius\":4,\"color\":{\"r\":0,\"g\":0,\"b\":0,\"a\":0.25}}]")));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Geometry mask fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
@@ -324,32 +266,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLayerBlurConvertsToForegroundBlurWrapperT
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaLayerBlurConvertsToForegroundBlurWrapperTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [{
-					"id": "1:1",
-					"name": "BlurCard",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x":0,"y":0,"width":160,"height":80},
-					"absoluteRenderBounds": {"x":0,"y":0,"width":160,"height":80},
-					"effects": [{
-						"type": "LAYER_BLUR",
-						"visible": true,
-						"radius": 14
-					}],
-					"children": []
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(
+		MakeContainerNode(TEXT("1:1"), TEXT("BlurCard"), TEXT("FRAME"), 0, 0, 160, 80, FString(),
+			FString::Printf(
+				TEXT(",\"absoluteRenderBounds\":%s,\"effects\":[{\"type\":\"LAYER_BLUR\",\"visible\":true,\"radius\":14}]"),
+				*MakeBoundsJson(0, 0, 160, 80))));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Figma layer blur fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
@@ -367,38 +288,12 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaDropShadowConvertsToBoxShadowWrapperTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaDropShadowConvertsToBoxShadowWrapperTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page",
-				"type": "CANVAS",
-				"children": [{
-					"id": "1:1",
-					"name": "ShadowCard",
-					"type": "RECTANGLE",
-					"visible": true,
-					"clipsContent": true,
-					"absoluteBoundingBox": {"x":0,"y":0,"width":160,"height":80},
-					"absoluteRenderBounds": {"x":0,"y":0,"width":160,"height":80},
-					"fills": [{"type":"SOLID","visible":true,"color":{"r":1,"g":1,"b":1,"a":1}}],
-					"effects": [{
-						"type": "DROP_SHADOW",
-						"visible": true,
-						"blendMode": "NORMAL",
-						"offset": {"x":6,"y":4},
-						"radius": 10,
-						"spread": 2,
-						"color": {"r":0,"g":0,"b":0,"a":0.2}
-					}],
-					"children": []
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(
+		MakeLeafNode(TEXT("1:1"), TEXT("ShadowCard"), TEXT("RECTANGLE"), 0, 0, 160, 80,
+			FString::Printf(
+				TEXT(",\"clipsContent\":true,\"absoluteRenderBounds\":%s,\"fills\":[%s],"
+					 "\"effects\":[{\"type\":\"DROP_SHADOW\",\"visible\":true,\"blendMode\":\"NORMAL\",\"offset\":{\"x\":6,\"y\":4},\"radius\":10,\"spread\":2,\"color\":{\"r\":0,\"g\":0,\"b\":0,\"a\":0.2}}]"),
+				*MakeBoundsJson(0, 0, 160, 80), *MakeSolidFillJson(1, 1, 1))));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Figma drop shadow fixture parses"), FFigmaParser::ParseDocument(Json, Doc));

@@ -7,10 +7,12 @@
 #include "Design2UMGConverter.h"
 #include "PenParser.h"
 #include "FigmaParser.h"
+#include "FigmaTestDocBuilder.h"
 #include "UMGSchemaSourceExtensions.h"
 
 #if WITH_AUTOMATION_WORKER
 
+using namespace Design2UMGCoreTests;
 using namespace Design2UMGTestUtils;
 
 
@@ -133,57 +135,53 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaOfficialFieldParityTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaOfficialFieldParityTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"components":{"12:34":{"key":"component-key-1","name":"Sidebar Item Active?=True","description":"","remote":true,"componentSetId":"56:78","componentPropertyDefinitions":{"title":{"type":"TEXT","defaultValue":"Hello"}},"documentationLinks":[{"uri":"https://example.com/component"}]}},
-		"componentSets":{"56:78":{"key":"component-set-key-1","name":"Sidebar Item","description":"","remote":true,"componentPropertyDefinitions":{"Active":{"type":"BOOLEAN","defaultValue":true}},"variantGroupProperties":{"Active":{"values":["True","False"]}}}},
-		"document": {"id":"0:0","name":"Doc","type":"DOCUMENT","prototypeStartNodeID":"0:2","prototypeDevice":{"type":"PRESET","size":"DESKTOP"},"flowStartingPoints":[{"nodeId":"0:2","name":"Doc Flow"}],"children":[
-			{"id":"0:1","name":"Page","type":"CANVAS","children":[
-				{"id":"0:2","name":"Root","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":800,"height":600},"children":[
-					{"id":"gridp","name":"GridParity","type":"FRAME","visible":true,"layoutMode":"GRID","layoutWrap":"WRAP","itemSpacing":8,
-					 "paddingLeft":1,"paddingRight":2,"paddingTop":3,"paddingBottom":4,
-					 "counterAxisAlignContent":"SPACE_BETWEEN","counterAxisSpacing":6,
-					 "layoutPositioning":"ABSOLUTE","layoutAlign":"STRETCH",
-					 "overflowDirection":"HORIZONTAL_SCROLLING",
-					 "transitionNodeID":"1:3",
-					 "transitionDuration":420,
-					 "transitionEasing":{"type":"EASE_OUT"},
-					 "primaryAxisSizingMode":"AUTO","counterAxisSizingMode":"FIXED",
-					 "itemReverseZIndex":true,"strokesIncludedInLayout":false,
-					 "minWidth":100,"maxWidth":300,"minHeight":50,"maxHeight":200,
-					 "gridRowCount":2,"gridColumnCount":3,"gridRowGap":10,"gridColumnGap":12,
-					 "gridRowsSizing":"AUTO","gridColumnsSizing":"FIXED",
-					 "gridChildHorizontalAlign":"CENTER","gridChildVerticalAlign":"MAX",
-					 "gridRowSpan":2,"gridColumnSpan":1,"gridColumnAnchorIndex":0,"gridRowAnchorIndex":1,
-					 "layoutGrids":[{"pattern":"GRID","sectionSize":8,"visible":true}],
-					 "interactions":[{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"NODE","destinationId":"1:2","navigation":"NAVIGATE","transition":{"type":"SMART_ANIMATE","duration":180,"direction":"LEFT","easing":{"type":"EASE_IN_AND_OUT"},"matchLayers":true}}]}],
-					 "flowStartingPoints":[{"nodeId":"0:2","name":"Flow 1"}],
-					 "componentPropertyReferences":{"width":"123:1"},
-					 "explicitVariableModes":{"1":"2:3"},
-					 "resolvedVariableModes":{"1":"2:3"},
-					 "annotations":[{"label":"todo","properties":{}}],
-					 "measurements":[{"label":"w","value":320}],
-					 "exportSettings":[{"suffix":"@2x","format":"PNG"}],
-					 "devStatus":{"type":"READY_FOR_DEV"},
-					 "branchData":{"mainFileKey":"main1","branchKey":"branch1"},
-					 "boundVariables":{"itemSpacing":{"type":"VARIABLE_ALIAS","id":"VariableID:1:2"}},
-					 "absoluteBoundingBox":{"x":10,"y":10,"width":320,"height":240},"children":[]},
-					{"id":"paint1","name":"PaintParity","type":"RECTANGLE","visible":true,
-					 "absoluteBoundingBox":{"x":400,"y":10,"width":120,"height":80},
-					 "fills":[{"type":"SOLID","visible":true,"opacity":0.5,"blendMode":"MULTIPLY","color":{"r":1,"g":0,"b":0}}],
-					 "effects":[{"type":"DROP_SHADOW","visible":true,"blendMode":"SCREEN","offset":{"x":1,"y":2},"radius":3,"spread":0.5,"opacity":0.6,"color":{"r":0,"g":0,"b":0}}]},
-					{"id":"inst1","name":"InstanceParity","type":"INSTANCE","componentId":"12:34","componentSetId":"56:78","mainComponentKey":"component-key-1","visible":true,
-					 "componentProperties":{"title":{"type":"TEXT","value":"Hello"}},
-					 "variantProperties":{"Active":"True","Size":"Small"},
-					 "overrides":[{"id":"inst1_txt","path":["characters"],"value":"Override"}],
-					 "isExposedInstance":true,
-					 "absoluteBoundingBox":{"x":560,"y":10,"width":120,"height":80},
-					 "children":[{"id":"inst1_txt","name":"Label","type":"TEXT","visible":true,
-						"absoluteBoundingBox":{"x":570,"y":20,"width":100,"height":24},
-						"characters":"Instance text","style":{"fontSize":16}}]}
-				]}
-			]}
-		]}
-	})");
+	const FString Json = MakeFigmaDocJson(
+		MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 800, 600,
+			FString::Printf(TEXT("%s,%s,%s"),
+				*MakeContainerNode(TEXT("gridp"), TEXT("GridParity"), TEXT("FRAME"), 10, 10, 320, 240, FString(),
+					TEXT(",\"layoutMode\":\"GRID\",\"layoutWrap\":\"WRAP\",\"itemSpacing\":8,"
+						 "\"paddingLeft\":1,\"paddingRight\":2,\"paddingTop\":3,\"paddingBottom\":4,"
+						 "\"counterAxisAlignContent\":\"SPACE_BETWEEN\",\"counterAxisSpacing\":6,"
+						 "\"layoutPositioning\":\"ABSOLUTE\",\"layoutAlign\":\"STRETCH\","
+						 "\"overflowDirection\":\"HORIZONTAL_SCROLLING\","
+						 "\"transitionNodeID\":\"1:3\","
+						 "\"transitionDuration\":420,"
+						 "\"transitionEasing\":{\"type\":\"EASE_OUT\"},"
+						 "\"primaryAxisSizingMode\":\"AUTO\",\"counterAxisSizingMode\":\"FIXED\","
+						 "\"itemReverseZIndex\":true,\"strokesIncludedInLayout\":false,"
+						 "\"minWidth\":100,\"maxWidth\":300,\"minHeight\":50,\"maxHeight\":200,"
+						 "\"gridRowCount\":2,\"gridColumnCount\":3,\"gridRowGap\":10,\"gridColumnGap\":12,"
+						 "\"gridRowsSizing\":\"AUTO\",\"gridColumnsSizing\":\"FIXED\","
+						 "\"gridChildHorizontalAlign\":\"CENTER\",\"gridChildVerticalAlign\":\"MAX\","
+						 "\"gridRowSpan\":2,\"gridColumnSpan\":1,\"gridColumnAnchorIndex\":0,\"gridRowAnchorIndex\":1,"
+						 "\"layoutGrids\":[{\"pattern\":\"GRID\",\"sectionSize\":8,\"visible\":true}],"
+						 "\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"1:2\",\"navigation\":\"NAVIGATE\",\"transition\":{\"type\":\"SMART_ANIMATE\",\"duration\":180,\"direction\":\"LEFT\",\"easing\":{\"type\":\"EASE_IN_AND_OUT\"},\"matchLayers\":true}}]}],"
+						 "\"flowStartingPoints\":[{\"nodeId\":\"0:2\",\"name\":\"Flow 1\"}],"
+						 "\"componentPropertyReferences\":{\"width\":\"123:1\"},"
+						 "\"explicitVariableModes\":{\"1\":\"2:3\"},"
+						 "\"resolvedVariableModes\":{\"1\":\"2:3\"},"
+						 "\"annotations\":[{\"label\":\"todo\",\"properties\":{}}],"
+						 "\"measurements\":[{\"label\":\"w\",\"value\":320}],"
+						 "\"exportSettings\":[{\"suffix\":\"@2x\",\"format\":\"PNG\"}],"
+						 "\"devStatus\":{\"type\":\"READY_FOR_DEV\"},"
+						 "\"branchData\":{\"mainFileKey\":\"main1\",\"branchKey\":\"branch1\"},"
+							 "\"boundVariables\":{\"itemSpacing\":{\"type\":\"VARIABLE_ALIAS\",\"id\":\"VariableID:1:2\"}}")),
+				*MakeLeafNode(TEXT("paint1"), TEXT("PaintParity"), TEXT("RECTANGLE"), 400, 10, 120, 80,
+					TEXT(",\"fills\":[{\"type\":\"SOLID\",\"visible\":true,\"opacity\":0.5,\"blendMode\":\"MULTIPLY\",\"color\":{\"r\":1,\"g\":0,\"b\":0}}],"
+						 "\"effects\":[{\"type\":\"DROP_SHADOW\",\"visible\":true,\"blendMode\":\"SCREEN\",\"offset\":{\"x\":1,\"y\":2},\"radius\":3,\"spread\":0.5,\"opacity\":0.6,\"color\":{\"r\":0,\"g\":0,\"b\":0}}]")),
+				*MakeContainerNode(TEXT("inst1"), TEXT("InstanceParity"), TEXT("INSTANCE"), 560, 10, 120, 80,
+					MakeTextNode(TEXT("inst1_txt"), TEXT("Label"), 570, 20, 100, 24, TEXT("Instance text"),
+						TEXT("\"fontSize\":16")),
+					TEXT(",\"componentId\":\"12:34\",\"componentSetId\":\"56:78\",\"mainComponentKey\":\"component-key-1\","
+						 "\"componentProperties\":{\"title\":{\"type\":\"TEXT\",\"value\":\"Hello\"}},"
+						 "\"variantProperties\":{\"Active\":\"True\",\"Size\":\"Small\"},"
+						 "\"overrides\":[{\"id\":\"inst1_txt\",\"path\":[\"characters\"],\"value\":\"Override\"}],"
+						 "\"isExposedInstance\":true")))),
+		TEXT(",\"components\":{\"12:34\":{\"key\":\"component-key-1\",\"name\":\"Sidebar Item Active?=True\",\"description\":\"\",\"remote\":true,\"componentSetId\":\"56:78\",\"componentPropertyDefinitions\":{\"title\":{\"type\":\"TEXT\",\"defaultValue\":\"Hello\"}},\"documentationLinks\":[{\"uri\":\"https://example.com/component\"}]}},"
+			 "\"componentSets\":{\"56:78\":{\"key\":\"component-set-key-1\",\"name\":\"Sidebar Item\",\"description\":\"\",\"remote\":true,\"componentPropertyDefinitions\":{\"Active\":{\"type\":\"BOOLEAN\",\"defaultValue\":true}},\"variantGroupProperties\":{\"Active\":{\"values\":[\"True\",\"False\"]}}}},"
+			 "\"prototypeStartNodeID\":\"0:2\","
+			 "\"prototypeDevice\":{\"type\":\"PRESET\",\"size\":\"DESKTOP\"},"
+			 "\"flowStartingPoints\":[{\"nodeId\":\"0:2\",\"name\":\"Doc Flow\"}]"));
 	FDesignDocument Doc;
 	TestTrue(TEXT("Figma official parity parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
 	if (Doc.Children.Num() == 0 || Doc.Children[0]->Children.Num() < 3)

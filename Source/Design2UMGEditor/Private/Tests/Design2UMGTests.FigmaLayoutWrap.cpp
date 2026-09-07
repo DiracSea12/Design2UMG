@@ -6,10 +6,12 @@
 #include "Design2UMGTestUtils.h"
 #include "Design2UMGConverter.h"
 #include "FigmaParser.h"
+#include "FigmaTestDocBuilder.h"
 
 #if WITH_AUTOMATION_WORKER
 
 using namespace Design2UMGTestUtils;
+using namespace Design2UMGCoreTests;
 
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaGridWrapMetadataTest,
@@ -17,83 +19,22 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaGridWrapMetadataTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaGridWrapMetadataTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page 1",
-				"type": "CANVAS",
-				"children": [{
-					"id": "0:2",
-					"name": "Root",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x":0,"y":0,"width":900,"height":600},
-					"children": [
-						{
-							"id": "grid1",
-							"name": "GridContainer",
-							"type": "FRAME",
-							"visible": true,
-							"layoutMode": "GRID",
-							"itemSpacing": 12,
-							"paddingLeft": 10,
-							"paddingRight": 20,
-							"paddingTop": 30,
-							"paddingBottom": 40,
-							"counterAxisSpacing": 6,
-							"counterAxisAlignContent": "SPACE_BETWEEN",
-							"layoutPositioning": "ABSOLUTE",
-							"layoutAlign": "STRETCH",
-							"primaryAxisSizingMode": "AUTO",
-							"counterAxisSizingMode": "FIXED",
-							"minWidth": 100,
-							"maxWidth": 500,
-							"minHeight": 80,
-							"maxHeight": 400,
-							"gridRowCount": 2,
-							"gridColumnCount": 3,
-							"gridRowGap": 14,
-							"gridColumnGap": 16,
-							"gridRowsSizing": "AUTO",
-							"gridColumnsSizing": "FIXED",
-							"gridChildHorizontalAlign": "CENTER",
-							"gridChildVerticalAlign": "MIN",
-							"gridRowSpan": 2,
-							"gridColumnSpan": 3,
-							"gridColumnAnchorIndex": 1,
-							"gridRowAnchorIndex": 0,
-							"itemReverseZIndex": true,
-							"strokesIncludedInLayout": true,
-							"boundVariables": {
-								"itemSpacing": {"type": "VARIABLE_ALIAS", "id": "VariableID:1:2"}
-							},
-							"absoluteBoundingBox": {"x":20,"y":20,"width":300,"height":200},
-							"children": []
-						},
-						{
-							"id": "wrap1",
-							"name": "WrapContainer",
-							"type": "FRAME",
-							"visible": true,
-							"layoutMode": "HORIZONTAL",
-							"layoutWrap": "WRAP",
-							"itemSpacing": 8,
-							"paddingLeft": 5,
-							"paddingRight": 6,
-							"paddingTop": 7,
-							"paddingBottom": 9,
-							"absoluteBoundingBox": {"x":20,"y":260,"width":400,"height":200},
-							"children": []
-						}
-					]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 900, 600, FString::Printf(
+		TEXT("%s,%s"),
+		*MakeContainerNode(TEXT("grid1"), TEXT("GridContainer"), TEXT("FRAME"), 20, 20, 300, 200, FString(),
+			TEXT(",\"layoutMode\":\"GRID\",\"itemSpacing\":12,\"paddingLeft\":10,\"paddingRight\":20,\"paddingTop\":30,"
+				 "\"paddingBottom\":40,\"counterAxisSpacing\":6,\"counterAxisAlignContent\":\"SPACE_BETWEEN\","
+				 "\"layoutPositioning\":\"ABSOLUTE\",\"layoutAlign\":\"STRETCH\",\"primaryAxisSizingMode\":\"AUTO\","
+				 "\"counterAxisSizingMode\":\"FIXED\",\"minWidth\":100,\"maxWidth\":500,\"minHeight\":80,\"maxHeight\":400,"
+				 "\"gridRowCount\":2,\"gridColumnCount\":3,\"gridRowGap\":14,\"gridColumnGap\":16,"
+				 "\"gridRowsSizing\":\"AUTO\",\"gridColumnsSizing\":\"FIXED\",\"gridChildHorizontalAlign\":\"CENTER\","
+				 "\"gridChildVerticalAlign\":\"MIN\",\"gridRowSpan\":2,\"gridColumnSpan\":3,"
+				 "\"gridColumnAnchorIndex\":1,\"gridRowAnchorIndex\":0,\"itemReverseZIndex\":true,"
+				 "\"strokesIncludedInLayout\":true,"
+				 "\"boundVariables\":{\"itemSpacing\":{\"type\":\"VARIABLE_ALIAS\",\"id\":\"VariableID:1:2\"}}")),
+		*MakeContainerNode(TEXT("wrap1"), TEXT("WrapContainer"), TEXT("FRAME"), 20, 260, 400, 200, FString(),
+				TEXT(",\"layoutMode\":\"HORIZONTAL\",\"layoutWrap\":\"WRAP\",\"itemSpacing\":8,"
+					 "\"paddingLeft\":5,\"paddingRight\":6,\"paddingTop\":7,\"paddingBottom\":9")))));
 	FDesignDocument Doc;
 	TestTrue(TEXT("Figma parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
 	if (Doc.Children.Num() == 0 || Doc.Children[0]->Children.Num() < 2)
@@ -142,40 +83,12 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWrapGapUsesInnerSlotPaddingOnlyTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FWrapGapUsesInnerSlotPaddingOnlyTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page 1",
-				"type": "CANVAS",
-				"children": [{
-					"id": "0:2",
-					"name": "Root",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x":0,"y":0,"width":400,"height":300},
-					"children": [{
-						"id": "wrap1",
-						"name": "Wrap",
-						"type": "FRAME",
-						"visible": true,
-						"layoutMode": "HORIZONTAL",
-						"layoutWrap": "WRAP",
-						"itemSpacing": 24,
-						"counterAxisSpacing": 16,
-						"absoluteBoundingBox": {"x":0,"y":0,"width":300,"height":200},
-						"children": [
-							{"id":"c1","name":"Card1","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":100,"height":50}},
-							{"id":"c2","name":"Card2","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":100,"y":0,"width":100,"height":50}}
-						]
-					}]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 400, 300,
+		MakeContainerNode(TEXT("wrap1"), TEXT("Wrap"), TEXT("FRAME"), 0, 0, 300, 200, FString::Printf(
+			TEXT("%s,%s"),
+			*MakeContainerNode(TEXT("c1"), TEXT("Card1"), TEXT("FRAME"), 0, 0, 100, 50, FString()),
+			*MakeContainerNode(TEXT("c2"), TEXT("Card2"), TEXT("FRAME"), 100, 0, 100, 50, FString())),
+		TEXT(",\"layoutMode\":\"HORIZONTAL\",\"layoutWrap\":\"WRAP\",\"itemSpacing\":24,\"counterAxisSpacing\":16"))));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Wrap gap parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
@@ -198,84 +111,22 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaWrapFillChildPreservesMeasuredSizeTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaWrapFillChildPreservesMeasuredSizeTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page 1",
-				"type": "CANVAS",
-				"children": [{
-					"id": "0:2",
-					"name": "Root",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x":0,"y":0,"width":400,"height":300},
-					"children": [{
-						"id": "wrap1",
-						"name": "Wrap",
-						"type": "FRAME",
-						"visible": true,
-						"layoutMode": "HORIZONTAL",
-						"layoutWrap": "WRAP",
-						"itemSpacing": 24,
-						"counterAxisSpacing": 16,
-						"absoluteBoundingBox": {"x":0,"y":0,"width":300,"height":200},
-						"children": [
-							{
-								"id":"card1",
-								"name":"Card1",
-								"type":"FRAME",
-								"visible":true,
-								"layoutMode":"VERTICAL",
-								"layoutSizingHorizontal":"FILL",
-								"layoutSizingVertical":"FIXED",
-								"layoutGrow":1,
-								"absoluteBoundingBox":{"x":0,"y":0,"width":100,"height":60},
-								"children":[
-									{
-										"id":"img1",
-										"name":"Image1",
-										"type":"RECTANGLE",
-										"visible":true,
-										"layoutSizingHorizontal":"FILL",
-										"layoutSizingVertical":"FIXED",
-										"absoluteBoundingBox":{"x":0,"y":0,"width":100,"height":40},
-										"fills":[{"type":"SOLID","visible":true,"color":{"r":1,"g":1,"b":1,"a":1}}]
-									}
-								]
-							},
-							{
-								"id":"card2",
-								"name":"Card2",
-								"type":"FRAME",
-								"visible":true,
-								"layoutMode":"VERTICAL",
-								"layoutSizingHorizontal":"FILL",
-								"layoutSizingVertical":"FIXED",
-								"layoutGrow":1,
-								"absoluteBoundingBox":{"x":124,"y":0,"width":100,"height":60},
-								"children":[
-									{
-										"id":"img2",
-										"name":"Image2",
-										"type":"RECTANGLE",
-										"visible":true,
-										"layoutSizingHorizontal":"FILL",
-										"layoutSizingVertical":"FIXED",
-										"absoluteBoundingBox":{"x":124,"y":0,"width":100,"height":40},
-										"fills":[{"type":"SOLID","visible":true,"color":{"r":1,"g":1,"b":1,"a":1}}]
-									}
-								]
-							}
-						]
-					}]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 400, 300,
+		MakeContainerNode(TEXT("wrap1"), TEXT("Wrap"), TEXT("FRAME"), 0, 0, 300, 200, FString::Printf(
+			TEXT("%s,%s"),
+			*MakeContainerNode(TEXT("card1"), TEXT("Card1"), TEXT("FRAME"), 0, 0, 100, 60,
+				MakeLeafNode(TEXT("img1"), TEXT("Image1"), TEXT("RECTANGLE"), 0, 0, 100, 40,
+					FString::Printf(TEXT(",\"layoutSizingHorizontal\":\"FILL\",\"layoutSizingVertical\":\"FIXED\",\"fills\":[%s]"),
+						*MakeSolidFillJson(1, 1, 1))),
+				TEXT(",\"layoutMode\":\"VERTICAL\",\"layoutSizingHorizontal\":\"FILL\",\"layoutSizingVertical\":\"FIXED\","
+					 "\"layoutGrow\":1")),
+			*MakeContainerNode(TEXT("card2"), TEXT("Card2"), TEXT("FRAME"), 124, 0, 100, 60,
+				MakeLeafNode(TEXT("img2"), TEXT("Image2"), TEXT("RECTANGLE"), 124, 0, 100, 40,
+					FString::Printf(TEXT(",\"layoutSizingHorizontal\":\"FILL\",\"layoutSizingVertical\":\"FIXED\",\"fills\":[%s]"),
+						*MakeSolidFillJson(1, 1, 1))),
+				TEXT(",\"layoutMode\":\"VERTICAL\",\"layoutSizingHorizontal\":\"FILL\",\"layoutSizingVertical\":\"FIXED\","
+					 "\"layoutGrow\":1"))),
+		TEXT(",\"layoutMode\":\"HORIZONTAL\",\"layoutWrap\":\"WRAP\",\"itemSpacing\":24,\"counterAxisSpacing\":16"))));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Wrap fill parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
@@ -300,60 +151,15 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaCenteredFlowFillTextKeepsMeasuredWidthTes
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaCenteredFlowFillTextKeepsMeasuredWidthTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page 1",
-				"type": "CANVAS",
-				"children": [{
-					"id": "0:2",
-					"name": "Root",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x":0,"y":0,"width":200,"height":120},
-					"children": [{
-						"id":"nav",
-						"name":"Nav",
-						"type":"FRAME",
-						"visible":true,
-						"layoutMode":"VERTICAL",
-						"counterAxisSizingMode":"FIXED",
-						"primaryAxisSizingMode":"FIXED",
-						"absoluteBoundingBox":{"x":0,"y":0,"width":72,"height":40},
-						"children":[
-							{
-								"id":"nav_label",
-								"name":"Label",
-								"type":"TEXT",
-								"visible":true,
-								"layoutSizingHorizontal":"FILL",
-								"layoutSizingVertical":"HUG",
-								"absoluteBoundingBox":{"x":0,"y":0,"width":72,"height":16},
-								"absoluteRenderBounds":{"x":21.2,"y":3,"width":29.5,"height":9.1},
-								"characters":"Label",
-								"style":{
-									"fontFamily":"Roboto",
-									"fontWeight":500,
-									"fontSize":12,
-									"textAlignHorizontal":"CENTER",
-									"textAlignVertical":"TOP",
-									"textCase":"ORIGINAL",
-									"textDecoration":"NONE",
-									"letterSpacing":0.5,
-									"lineHeightUnit":"PIXELS",
-									"lineHeightPx":16
-								}
-							}
-						]
-					}]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 200, 120,
+		MakeContainerNode(TEXT("nav"), TEXT("Nav"), TEXT("FRAME"), 0, 0, 72, 40,
+			MakeTextNode(TEXT("nav_label"), TEXT("Label"), 0, 0, 72, 16, TEXT("Label"),
+				TEXT("\"fontFamily\":\"Roboto\",\"fontWeight\":500,\"fontSize\":12,\"textAlignHorizontal\":\"CENTER\","
+					 "\"textAlignVertical\":\"TOP\",\"textCase\":\"ORIGINAL\",\"textDecoration\":\"NONE\","
+					 "\"letterSpacing\":0.5,\"lineHeightUnit\":\"PIXELS\",\"lineHeightPx\":16"),
+				TEXT(",\"layoutSizingHorizontal\":\"FILL\",\"layoutSizingVertical\":\"HUG\","
+					 "\"absoluteRenderBounds\":{\"x\":21.2,\"y\":3,\"width\":29.5,\"height\":9.1}")),
+			TEXT(",\"layoutMode\":\"VERTICAL\",\"counterAxisSizingMode\":\"FIXED\",\"primaryAxisSizingMode\":\"FIXED\""))));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Centered flow fill text parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
@@ -380,44 +186,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaWrapPaddingUsesBorderWrapperTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaWrapPaddingUsesBorderWrapperTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page 1",
-				"type": "CANVAS",
-				"children": [{
-					"id": "0:2",
-					"name": "Root",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x":0,"y":0,"width":400,"height":300},
-					"children": [{
-						"id": "wrap_pad",
-						"name": "WrapPad",
-						"type": "FRAME",
-						"visible": true,
-						"layoutMode": "HORIZONTAL",
-						"layoutWrap": "WRAP",
-						"itemSpacing": 24,
-						"counterAxisSpacing": 16,
-						"paddingLeft": 24,
-						"paddingRight": 24,
-						"paddingTop": 8,
-						"paddingBottom": 32,
-						"absoluteBoundingBox": {"x":0,"y":0,"width":300,"height":200},
-						"children": [
-							{"id":"c1","name":"Card1","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":100,"height":50}},
-							{"id":"c2","name":"Card2","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":100,"y":0,"width":100,"height":50}}
-						]
-					}]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 400, 300,
+		MakeContainerNode(TEXT("wrap_pad"), TEXT("WrapPad"), TEXT("FRAME"), 0, 0, 300, 200, FString::Printf(
+			TEXT("%s,%s"),
+			*MakeContainerNode(TEXT("c1"), TEXT("Card1"), TEXT("FRAME"), 0, 0, 100, 50, FString()),
+			*MakeContainerNode(TEXT("c2"), TEXT("Card2"), TEXT("FRAME"), 100, 0, 100, 50, FString())),
+		TEXT(",\"layoutMode\":\"HORIZONTAL\",\"layoutWrap\":\"WRAP\",\"itemSpacing\":24,\"counterAxisSpacing\":16,"
+			 "\"paddingLeft\":24,\"paddingRight\":24,\"paddingTop\":8,\"paddingBottom\":32"))));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Wrap padding parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
@@ -440,42 +215,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaFlowPaddingUsesBorderWrapperTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaFlowPaddingUsesBorderWrapperTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page 1",
-				"type": "CANVAS",
-				"children": [{
-					"id": "0:2",
-					"name": "Root",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x":0,"y":0,"width":400,"height":300},
-					"children": [{
-						"id": "flow_pad",
-						"name": "FlowPad",
-						"type": "FRAME",
-						"visible": true,
-						"layoutMode": "HORIZONTAL",
-						"itemSpacing": 24,
-						"paddingLeft": 24,
-						"paddingRight": 12,
-						"paddingTop": 8,
-						"paddingBottom": 16,
-						"absoluteBoundingBox": {"x":0,"y":0,"width":300,"height":120},
-						"children": [
-							{"id":"c1","name":"Card1","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":24,"y":8,"width":100,"height":50}},
-							{"id":"c2","name":"Card2","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":148,"y":8,"width":100,"height":50}}
-						]
-					}]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 400, 300,
+		MakeContainerNode(TEXT("flow_pad"), TEXT("FlowPad"), TEXT("FRAME"), 0, 0, 300, 120, FString::Printf(
+			TEXT("%s,%s"),
+			*MakeContainerNode(TEXT("c1"), TEXT("Card1"), TEXT("FRAME"), 24, 8, 100, 50, FString()),
+			*MakeContainerNode(TEXT("c2"), TEXT("Card2"), TEXT("FRAME"), 148, 8, 100, 50, FString())),
+		TEXT(",\"layoutMode\":\"HORIZONTAL\",\"itemSpacing\":24,"
+			 "\"paddingLeft\":24,\"paddingRight\":12,\"paddingTop\":8,\"paddingBottom\":16"))));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Flow padding parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
@@ -498,50 +244,15 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaInstanceSubtreePaddingSkipsBorderWrapperT
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaInstanceSubtreePaddingSkipsBorderWrapperTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page 1",
-				"type": "CANVAS",
-				"children": [{
-					"id": "0:2",
-					"name": "Root",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x":0,"y":0,"width":400,"height":300},
-					"children": [{
-						"id": "inst_root",
-						"name": "Card Instance",
-						"type": "INSTANCE",
-						"visible": true,
-						"componentId": "card_component",
-						"absoluteBoundingBox": {"x":0,"y":0,"width":300,"height":120},
-						"children": [{
-							"id": "flow_in_instance",
-							"name": "Flow In Instance",
-							"type": "FRAME",
-							"visible": true,
-							"layoutMode": "HORIZONTAL",
-							"itemSpacing": 24,
-							"paddingLeft": 24,
-							"paddingRight": 12,
-							"paddingTop": 8,
-							"paddingBottom": 16,
-							"absoluteBoundingBox": {"x":0,"y":0,"width":300,"height":120},
-							"children": [
-								{"id":"c1","name":"Card1","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":24,"y":8,"width":100,"height":50}},
-								{"id":"c2","name":"Card2","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":148,"y":8,"width":100,"height":50}}
-							]
-						}]
-					}]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 400, 300,
+		MakeContainerNode(TEXT("inst_root"), TEXT("Card Instance"), TEXT("INSTANCE"), 0, 0, 300, 120,
+			MakeContainerNode(TEXT("flow_in_instance"), TEXT("Flow In Instance"), TEXT("FRAME"), 0, 0, 300, 120, FString::Printf(
+				TEXT("%s,%s"),
+				*MakeContainerNode(TEXT("c1"), TEXT("Card1"), TEXT("FRAME"), 24, 8, 100, 50, FString()),
+				*MakeContainerNode(TEXT("c2"), TEXT("Card2"), TEXT("FRAME"), 148, 8, 100, 50, FString())),
+			TEXT(",\"layoutMode\":\"HORIZONTAL\",\"itemSpacing\":24,"
+				 "\"paddingLeft\":24,\"paddingRight\":12,\"paddingTop\":8,\"paddingBottom\":16")),
+			TEXT(",\"componentId\":\"card_component\""))));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Instance subtree parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
@@ -563,72 +274,24 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaTopLevelInstanceMixedStretchPaddingUsesBo
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaTopLevelInstanceMixedStretchPaddingUsesBorderWrapperTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page 1",
-				"type": "CANVAS",
-				"children": [{
-					"id": "0:2",
-					"name": "Root",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x":0,"y":0,"width":400,"height":320},
-					"children": [{
-						"id": "inst_nav_root",
-						"name": "Navigation Rail",
-						"type": "INSTANCE",
-						"visible": true,
-						"componentId": "nav_component",
-						"layoutMode": "VERTICAL",
-						"itemSpacing": 40,
-						"paddingLeft": 0,
-						"paddingTop": 44,
-						"paddingRight": 0,
-						"paddingBottom": 56,
-						"absoluteBoundingBox": {"x":0,"y":0,"width":72,"height":300},
-						"children": [
-							{
-								"id": "menu_block",
-								"name": "Menu & Fab",
-								"type": "FRAME",
-								"visible": true,
-								"layoutMode": "VERTICAL",
-								"layoutAlign": "INHERIT",
-								"layoutSizingHorizontal": "HUG",
-								"layoutSizingVertical": "HUG",
-								"absoluteBoundingBox": {"x":8,"y":44,"width":56,"height":116},
-								"children": [
-									{"id":"fab","name":"Fab","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":8,"y":44,"width":56,"height":56}},
-									{"id":"menu","name":"Menu","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":8,"y":104,"width":56,"height":56}}
-								]
-							},
-							{
-								"id": "segments_block",
-								"name": "Segments",
-								"type": "FRAME",
-								"visible": true,
-								"layoutMode": "VERTICAL",
-								"layoutAlign": "STRETCH",
-								"layoutSizingHorizontal": "FILL",
-								"layoutSizingVertical": "HUG",
-								"absoluteBoundingBox": {"x":0,"y":200,"width":72,"height":100},
-								"children": [
-									{"id":"seg1","name":"Seg1","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":200,"width":72,"height":24}},
-									{"id":"seg2","name":"Seg2","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":228,"width":72,"height":24}},
-									{"id":"seg3","name":"Seg3","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":256,"width":72,"height":24}}
-								]
-							}
-						]
-					}]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 400, 320,
+		MakeContainerNode(TEXT("inst_nav_root"), TEXT("Navigation Rail"), TEXT("INSTANCE"), 0, 0, 72, 300, FString::Printf(
+			TEXT("%s,%s"),
+			*MakeContainerNode(TEXT("menu_block"), TEXT("Menu & Fab"), TEXT("FRAME"), 8, 44, 56, 116, FString::Printf(
+				TEXT("%s,%s"),
+				*MakeContainerNode(TEXT("fab"), TEXT("Fab"), TEXT("FRAME"), 8, 44, 56, 56, FString()),
+				*MakeContainerNode(TEXT("menu"), TEXT("Menu"), TEXT("FRAME"), 8, 104, 56, 56, FString())),
+				TEXT(",\"layoutMode\":\"VERTICAL\",\"layoutAlign\":\"INHERIT\","
+					 "\"layoutSizingHorizontal\":\"HUG\",\"layoutSizingVertical\":\"HUG\"")),
+			*MakeContainerNode(TEXT("segments_block"), TEXT("Segments"), TEXT("FRAME"), 0, 200, 72, 100, FString::Printf(
+				TEXT("%s,%s,%s"),
+				*MakeContainerNode(TEXT("seg1"), TEXT("Seg1"), TEXT("FRAME"), 0, 200, 72, 24, FString()),
+				*MakeContainerNode(TEXT("seg2"), TEXT("Seg2"), TEXT("FRAME"), 0, 228, 72, 24, FString()),
+				*MakeContainerNode(TEXT("seg3"), TEXT("Seg3"), TEXT("FRAME"), 0, 256, 72, 24, FString())),
+				TEXT(",\"layoutMode\":\"VERTICAL\",\"layoutAlign\":\"STRETCH\","
+					 "\"layoutSizingHorizontal\":\"FILL\",\"layoutSizingVertical\":\"HUG\""))),
+		TEXT(",\"componentId\":\"nav_component\",\"layoutMode\":\"VERTICAL\",\"itemSpacing\":40,"
+			 "\"paddingLeft\":0,\"paddingTop\":44,\"paddingRight\":0,\"paddingBottom\":56"))));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Top-level instance mixed stretch parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
@@ -652,73 +315,23 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaTopLevelInstanceUniformStretchPaddingSkip
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaTopLevelInstanceUniformStretchPaddingSkipsBorderWrapperTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page 1",
-				"type": "CANVAS",
-				"children": [{
-					"id": "0:2",
-					"name": "Root",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x":0,"y":0,"width":400,"height":320},
-					"children": [{
-						"id": "inst_app_root",
-						"name": "App bar",
-						"type": "INSTANCE",
-						"visible": true,
-						"componentId": "app_component",
-						"layoutMode": "VERTICAL",
-						"itemSpacing": 8,
-						"primaryAxisSizingMode": "AUTO",
-						"counterAxisSizingMode": "FIXED",
-						"paddingLeft": 0,
-						"paddingTop": 0,
-						"paddingRight": 0,
-						"paddingBottom": 12,
-						"absoluteBoundingBox": {"x":0,"y":0,"width":320,"height":112},
-						"children": [
-							{
-								"id": "icons_row",
-								"name": "Leading & Trailing icons",
-								"type": "FRAME",
-								"visible": true,
-								"layoutMode": "HORIZONTAL",
-								"layoutAlign": "STRETCH",
-								"layoutSizingHorizontal": "FILL",
-								"layoutSizingVertical": "FIXED",
-								"absoluteBoundingBox": {"x":0,"y":0,"width":320,"height":56},
-								"children": [
-									{"id":"left_icon","name":"LeftIcon","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":0,"y":0,"width":24,"height":24}},
-									{"id":"right_icon","name":"RightIcon","type":"FRAME","visible":true,"absoluteBoundingBox":{"x":296,"y":0,"width":24,"height":24}}
-								]
-							},
-							{
-								"id": "title_block",
-								"name": "Text content",
-								"type": "INSTANCE",
-								"visible": true,
-								"componentId": "title_component",
-								"layoutMode": "VERTICAL",
-								"layoutAlign": "STRETCH",
-								"layoutSizingHorizontal": "FILL",
-								"layoutSizingVertical": "HUG",
-								"absoluteBoundingBox": {"x":0,"y":64,"width":320,"height":36},
-								"children": [
-									{"id":"title_line","name":"TitleLine","type":"TEXT","visible":true,"characters":"Title","style":{"fontSize":16},"absoluteBoundingBox":{"x":0,"y":64,"width":64,"height":20}}
-								]
-							}
-						]
-					}]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 400, 320,
+		MakeContainerNode(TEXT("inst_app_root"), TEXT("App bar"), TEXT("INSTANCE"), 0, 0, 320, 112, FString::Printf(
+			TEXT("%s,%s"),
+			*MakeContainerNode(TEXT("icons_row"), TEXT("Leading & Trailing icons"), TEXT("FRAME"), 0, 0, 320, 56, FString::Printf(
+				TEXT("%s,%s"),
+				*MakeContainerNode(TEXT("left_icon"), TEXT("LeftIcon"), TEXT("FRAME"), 0, 0, 24, 24, FString()),
+				*MakeContainerNode(TEXT("right_icon"), TEXT("RightIcon"), TEXT("FRAME"), 296, 0, 24, 24, FString())),
+				TEXT(",\"layoutMode\":\"HORIZONTAL\",\"layoutAlign\":\"STRETCH\","
+					 "\"layoutSizingHorizontal\":\"FILL\",\"layoutSizingVertical\":\"FIXED\"")),
+			*MakeContainerNode(TEXT("title_block"), TEXT("Text content"), TEXT("INSTANCE"), 0, 64, 320, 36,
+				MakeTextNode(TEXT("title_line"), TEXT("TitleLine"), 0, 64, 64, 20, TEXT("Title"),
+					TEXT("\"fontSize\":16")),
+				TEXT(",\"componentId\":\"title_component\",\"layoutMode\":\"VERTICAL\",\"layoutAlign\":\"STRETCH\","
+					 "\"layoutSizingHorizontal\":\"FILL\",\"layoutSizingVertical\":\"HUG\""))),
+			TEXT(",\"componentId\":\"app_component\",\"layoutMode\":\"VERTICAL\",\"itemSpacing\":8,"
+				 "\"primaryAxisSizingMode\":\"AUTO\",\"counterAxisSizingMode\":\"FIXED\","
+				 "\"paddingLeft\":0,\"paddingTop\":0,\"paddingRight\":0,\"paddingBottom\":12"))));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Top-level instance uniform stretch parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));

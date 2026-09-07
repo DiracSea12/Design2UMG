@@ -65,6 +65,10 @@ test_import.py
 verify_coords.py
 verify_design_size.py
 
+# Local tooling outputs
+.mimosa/
+Temp/
+
 # Script caches / local dependencies
 __pycache__/
 *.pyc

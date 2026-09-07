@@ -13,6 +13,7 @@
 #include "DesignReferenceExpansion.h"
 #include "DesignSchemaSourceExtensions.h"
 #include "FigmaParser.h"
+#include "FigmaTestDocBuilder.h"
 #include "ImageFillUtils.h"
 #include "PenParser.h"
 #include "SharedCoreSemantics.h"
@@ -686,36 +687,14 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSharedSourceParserSemanticParityTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FSharedSourceParserSemanticParityTest::RunTest(const FString& Parameters)
 {
-	const FString FigmaJson = TEXT(R"JSON(
-{
-  "document": {
-    "type": "DOCUMENT",
-    "children": [{
-      "type": "CANVAS",
-      "children": [{
-        "id": "figma-root",
-        "name": "Root",
-        "type": "FRAME",
-        "layoutMode": "HORIZONTAL",
-        "itemSpacing": 6,
-        "paddingTop": 4,
-        "paddingRight": 8,
-        "paddingBottom": 4,
-        "paddingLeft": 8,
-        "counterAxisAlignItems": "CENTER",
-        "absoluteBoundingBox": {"x": 0, "y": 0, "width": 160, "height": 48},
-        "fills": [{"type": "SOLID", "visible": true, "color": {"r": 1, "g": 1, "b": 1}, "opacity": 1}],
-        "children": [{
-          "id": "figma-clear",
-          "name": "Clear",
-          "type": "RECTANGLE",
-          "absoluteBoundingBox": {"x": 8, "y": 4, "width": 24, "height": 24},
-          "fills": []
-        }]
-      }]
-    }]
-  }
-})JSON");
+	const FString FigmaJson = Design2UMGCoreTests::MakeFigmaDocJson(Design2UMGCoreTests::MakeContainerNode(
+		TEXT("figma-root"), TEXT("Root"), TEXT("FRAME"), 0, 0, 160, 48,
+		Design2UMGCoreTests::MakeLeafNode(
+			TEXT("figma-clear"), TEXT("Clear"), TEXT("RECTANGLE"), 8, 4, 24, 24, TEXT(",\"fills\":[]")),
+		FString::Printf(
+			TEXT(",\"layoutMode\":\"HORIZONTAL\",\"itemSpacing\":6,\"paddingTop\":4,\"paddingRight\":8,"
+				 "\"paddingBottom\":4,\"paddingLeft\":8,\"counterAxisAlignItems\":\"CENTER\",\"fills\":[%s]"),
+			*Design2UMGCoreTests::MakeSolidFillJson(1, 1, 1))));
 
 	const FString PenJson = TEXT(R"JSON(
 {

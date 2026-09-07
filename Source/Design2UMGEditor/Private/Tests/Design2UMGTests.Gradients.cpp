@@ -7,6 +7,7 @@
 #include "Design2UMGConverter.h"
 #include "PenParser.h"
 #include "FigmaParser.h"
+#include "FigmaTestDocBuilder.h"
 #include "ProceduralShapeGenerator.h"
 #include "UMGPropertyKeys.h"
 #include "Materials/Material.h"
@@ -16,6 +17,7 @@
 
 #if WITH_AUTOMATION_WORKER
 
+using namespace Design2UMGCoreTests;
 using namespace Design2UMGTestUtils;
 
 
@@ -179,45 +181,16 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaRadialGradientHandleFidelityTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaRadialGradientHandleFidelityTest::RunTest(const FString& Parameters)
 {
-	const FString Json = TEXT(R"({
-		"document": {
-			"id": "0:0",
-			"name": "Doc",
-			"type": "DOCUMENT",
-			"children": [{
-				"id": "0:1",
-				"name": "Page 1",
-				"type": "CANVAS",
-				"children": [{
-					"id": "0:2",
-					"name": "Root",
-					"type": "FRAME",
-					"visible": true,
-					"absoluteBoundingBox": {"x":0,"y":0,"width":64,"height":64},
-					"children": [{
-						"id": "grad_figma",
-						"name": "Figma Radial",
-						"type": "RECTANGLE",
-						"visible": true,
-						"absoluteBoundingBox": {"x":0,"y":0,"width":64,"height":64},
-						"fills": [{
-							"type": "GRADIENT_RADIAL",
-							"visible": true,
-							"gradientHandlePositions": [
-								{"x":0.25,"y":0.75},
-								{"x":0.25,"y":0.875},
-								{"x":0.75,"y":0.75}
-							],
-							"gradientStops": [
-								{"position":0.0,"color":{"r":1.0,"g":0.0,"b":0.0,"a":1.0}},
-								{"position":1.0,"color":{"r":0.0,"g":0.0,"b":1.0,"a":1.0}}
-							]
-						}]
-					}]
-				}]
-			}]
-		}
-	})");
+	const FString Json = MakeFigmaDocJson(
+		MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 64, 64,
+			MakeLeafNode(TEXT("grad_figma"), TEXT("Figma Radial"), TEXT("RECTANGLE"), 0, 0, 64, 64,
+				TEXT(",\"fills\":[{"
+					 "\"type\":\"GRADIENT_RADIAL\",\"visible\":true,"
+					 "\"gradientHandlePositions\":[{\"x\":0.25,\"y\":0.75},{\"x\":0.25,\"y\":0.875},{\"x\":0.75,\"y\":0.75}],"
+					 "\"gradientStops\":["
+					 "{\"position\":0.0,\"color\":{\"r\":1.0,\"g\":0.0,\"b\":0.0,\"a\":1.0}},"
+					 "{\"position\":1.0,\"color\":{\"r\":0.0,\"g\":0.0,\"b\":1.0,\"a\":1.0}}"
+					 "]}]"))));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Figma radial handle fixture parses"), FFigmaParser::ParseDocument(Json, Doc));
