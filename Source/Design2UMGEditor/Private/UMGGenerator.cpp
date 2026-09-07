@@ -217,9 +217,22 @@ namespace
 			}
 		}
 
-		return FIntPoint::ZeroValue;
-	}
+	return FIntPoint::ZeroValue;
+}
 
+// Select the caller-provided snapshot when present; otherwise derive one from
+// the settings CDO into OutFallback and select that.
+const FDesign2UMGGenerationSettingsSnapshot& ResolveGenerationSettingsSnapshot(
+	const FDesign2UMGGenerationSettingsSnapshot* Requested,
+	FDesign2UMGGenerationSettingsSnapshot& OutFallback)
+{
+	if (Requested)
+	{
+		return *Requested;
+	}
+	OutFallback = FDesign2UMGGenerationSettingsSnapshot::FromSettings(*UDesign2UMGSettings::Get());
+	return OutFallback;
+}
 
 }
 
@@ -324,12 +337,9 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 	WBP->WidgetTree->Modify();
 
 	FUMGPrototypeNavigationData NavigationData = WidgetData.PrototypeNavigation();
-	const FDesign2UMGGenerationSettingsSnapshot FallbackGenerationSettings =
-		GenerationSettings
-			? FDesign2UMGGenerationSettingsSnapshot()
-			: FDesign2UMGGenerationSettingsSnapshot::FromSettings(*UDesign2UMGSettings::Get());
+	FDesign2UMGGenerationSettingsSnapshot FallbackGenerationSettings;
 	const FDesign2UMGGenerationSettingsSnapshot& EffectiveGenerationSettings =
-		GenerationSettings ? *GenerationSettings : FallbackGenerationSettings;
+		ResolveGenerationSettingsSnapshot(GenerationSettings, FallbackGenerationSettings);
 	const Design2UMGGenerationSettingsContext::FScopedSettingsSnapshot ScopedGenerationSettings(EffectiveGenerationSettings);
 
 	// Non-const: Component Mapping matching writes the hit Key into this root-node copy (affects this generation only).

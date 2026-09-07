@@ -22,7 +22,4 @@ namespace PenBundledLibraries
 
 	/** Returns the serialized "variables" JSON of a registered library (e.g. "shadcn"). */
 	DESIGN2UMGCORE_API bool TryGetVariablesJson(const FString& LibraryName, FString& OutJson);
-
-	/** Number of registered libraries. */
-	DESIGN2UMGCORE_API int32 NumRegisteredLibraries();
 }

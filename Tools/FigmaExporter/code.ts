@@ -1,4 +1,4 @@
-﻿// Design2UMG Figma Exporter - Plugin Code
+// Design2UMG Figma Exporter - Plugin Code
 // Traverses selected frame, serializes to REST API compatible JSON, exports images
 
 // ── Types ──

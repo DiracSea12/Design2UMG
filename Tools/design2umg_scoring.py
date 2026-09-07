@@ -37,7 +37,7 @@ def load_baseline_case_metrics(case_dir: Path | None, pixel_tolerance: int) -> d
         }
 
     report_path = case_dir / "compare_report.json"
-    report = verify.load_json_document(report_path) if report_path.is_file() else {}
+    report = verify.helper_load_json(report_path) if report_path.is_file() else {}
     baseline_rule = render_rule.evaluate_report_render_size_rule(report_path)
     if not baseline_rule.get("compatible"):
         return {
@@ -102,7 +102,7 @@ def load_baseline_structure_metrics(case_dir: Path | None) -> dict:
         return {"available": False, "reason": "baseline_case_dir_missing"}
 
     report_path = case_dir / "compare_report.json"
-    report = verify.load_json_document(report_path) if report_path.is_file() else {}
+    report = verify.helper_load_json(report_path) if report_path.is_file() else {}
     metrics = ((report.get("structure_validation") or {}).get("metrics")) or {}
     values = {metric_name: metrics.get(metric_name) for metric_name in STRUCTURE_BASELINE_METRICS}
     missing = [metric_name for metric_name, value in values.items() if value is None]

@@ -4,7 +4,7 @@
 #include "TextMeasurementInternal.h"
 #include "DesignSchema.h"
 
-#include "SharedCoreSemantics.h"
+#include "DesignNodeSemantics.h"
 #include "TextStyleUtils.h"
 #include "ParserSharedSemantics.h"
 
@@ -12,7 +12,7 @@ namespace
 {
 	float ResolveTextWidthHint(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth)
 	{
-		return Design2UMGCore::SharedSemantics::ResolveWidthHint(Node, ParentContentWidth);
+		return Design2UMGCore::DesignNodeSemantics::ResolveWidthHint(Node, ParentContentWidth);
 	}
 
 	bool IsTruncateTextNode(const TSharedPtr<FDesignNode>& Node)

@@ -17,7 +17,7 @@
 #include "FigmaTestDocBuilder.h"
 #include "ImageFillUtils.h"
 #include "PenParser.h"
-#include "SharedCoreSemantics.h"
+#include "DesignNodeSemantics.h"
 #include "SizeEstimator.h"
 #include "TextMeasurement.h"
 #include "UMGSchema.h"
@@ -69,7 +69,7 @@ namespace
 		return Ids;
 	}
 
-	struct FSharedSemanticsVisibilityFixture
+	struct FDesignNodeSemanticsVisibilityFixture
 	{
 		TSharedPtr<FDesignNode> Root;
 		TSharedPtr<FDesignNode> DisabledLeaf;
@@ -80,9 +80,9 @@ namespace
 		TSharedPtr<FDesignNode> TextLeaf;
 	};
 
-	FSharedSemanticsVisibilityFixture MakeSharedSemanticsVisibilityFixture()
+	FDesignNodeSemanticsVisibilityFixture MakeDesignNodeSemanticsVisibilityFixture()
 	{
-		FSharedSemanticsVisibilityFixture Fixture;
+		FDesignNodeSemanticsVisibilityFixture Fixture;
 		Fixture.Root = Design2UMGCoreTests::MakeNode(TEXT("shared_semantics_root"), EDesignNodeType::Frame, FDesignSize::Fixed(640.0f), FDesignSize::Fixed(360.0f));
 		Fixture.Root->LayoutData.Layout = EDesignLayout::Vertical;
 
@@ -117,10 +117,10 @@ namespace
 		return Fixture;
 	}
 
-	bool RunSharedSemanticsSkipParityChecks(FAutomationTestBase& Test)
+	bool RunDesignNodeSemanticsSkipParityChecks(FAutomationTestBase& Test)
 	{
 		bool bAllPassed = true;
-		const FSharedSemanticsVisibilityFixture Fixture = MakeSharedSemanticsVisibilityFixture();
+		const FDesignNodeSemanticsVisibilityFixture Fixture = MakeDesignNodeSemanticsVisibilityFixture();
 
 		struct FSkipExpectation
 		{
@@ -144,7 +144,7 @@ namespace
 		{
 			bAllPassed &= Test.TestEqual(
 				*FString::Printf(TEXT("%s shared helper skip contract"), Expectation.Label),
-				Design2UMGCore::SharedSemantics::ShouldSkipNode(Expectation.Node),
+				Design2UMGCore::DesignNodeSemantics::ShouldSkipNode(Expectation.Node),
 				Expectation.bShouldSkip);
 		}
 
@@ -176,7 +176,7 @@ namespace
 		return bAllPassed;
 	}
 
-	bool RunSharedSemanticsWidthHintChecks(FAutomationTestBase& Test)
+	bool RunDesignNodeSemanticsWidthHintChecks(FAutomationTestBase& Test)
 	{
 		bool bAllPassed = true;
 
@@ -196,7 +196,7 @@ namespace
 
 		for (const FWidthHintProbeCase& ProbeCase : Cases)
 		{
-			const float CanonicalWidth = Design2UMGCore::SharedSemantics::ResolveWidthHint(ProbeCase.Node, ParentContentWidth);
+			const float CanonicalWidth = Design2UMGCore::DesignNodeSemantics::ResolveWidthHint(ProbeCase.Node, ParentContentWidth);
 			const float EstimatedWidth = SizeEstimator::EstimateNodeSize(ProbeCase.Node, ParentContentWidth).X;
 			const float WrapAt = TextMeasurement::ResolveTextWrapAt(ProbeCase.Node, ParentContentWidth);
 
@@ -214,11 +214,11 @@ namespace
 		return bAllPassed;
 	}
 
-	bool RunSharedSemanticsExecutableReplacementChecks(FAutomationTestBase& Test)
+	bool RunDesignNodeSemanticsExecutableReplacementChecks(FAutomationTestBase& Test)
 	{
 		bool bAllPassed = true;
-		bAllPassed &= RunSharedSemanticsSkipParityChecks(Test);
-		bAllPassed &= RunSharedSemanticsWidthHintChecks(Test);
+		bAllPassed &= RunDesignNodeSemanticsSkipParityChecks(Test);
+		bAllPassed &= RunDesignNodeSemanticsWidthHintChecks(Test);
 		return bAllPassed;
 	}
 
@@ -266,14 +266,14 @@ namespace
 			float ProbeHeight = 0.0f;
 			bAllPassed &= Test.TestEqual(
 				*FString::Printf(TEXT("%s concrete source textbox authority"), Probe.Label),
-				Design2UMGCore::SharedSemantics::TryGetConcreteSourceTextBoxSize(Probe.Node, ProbeWidth, ProbeHeight),
+				Design2UMGCore::DesignNodeSemantics::TryGetConcreteSourceTextBoxSize(Probe.Node, ProbeWidth, ProbeHeight),
 				Probe.bExpectedAuthority);
 		}
 
 		float SourceWidth = 0.0f;
 		float SourceHeight = 0.0f;
 		bAllPassed &= Test.TestTrue(TEXT("Fixed source textbox size resolves"),
-			Design2UMGCore::SharedSemantics::TryGetConcreteSourceTextBoxSize(FixedSourceText, SourceWidth, SourceHeight));
+			Design2UMGCore::DesignNodeSemantics::TryGetConcreteSourceTextBoxSize(FixedSourceText, SourceWidth, SourceHeight));
 		bAllPassed &= Test.TestTrue(TEXT("Fixed source textbox width resolves"),
 			FMath::IsNearlyEqual(SourceWidth, 180.0f, KINDA_SMALL_NUMBER));
 		bAllPassed &= Test.TestTrue(TEXT("Fixed source textbox height resolves"),
@@ -564,20 +564,20 @@ namespace
 
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSharedSemanticsSkipRenderableParityTest,
-	"Design2UMG.SharedSemantics.SkipRenderableParity",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDesignNodeSemanticsSkipRenderableParityTest,
+	"Design2UMG.DesignNodeSemantics.SkipRenderableParity",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FSharedSemanticsSkipRenderableParityTest::RunTest(const FString& Parameters)
+bool FDesignNodeSemanticsSkipRenderableParityTest::RunTest(const FString& Parameters)
 {
-	return RunSharedSemanticsSkipParityChecks(*this);
+	return RunDesignNodeSemanticsSkipParityChecks(*this);
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSharedSemanticsWidthHintParityTest,
-	"Design2UMG.SharedSemantics.WidthHintParity",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDesignNodeSemanticsWidthHintParityTest,
+	"Design2UMG.DesignNodeSemantics.WidthHintParity",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FSharedSemanticsWidthHintParityTest::RunTest(const FString& Parameters)
+bool FDesignNodeSemanticsWidthHintParityTest::RunTest(const FString& Parameters)
 {
-	return RunSharedSemanticsWidthHintChecks(*this);
+	return RunDesignNodeSemanticsWidthHintChecks(*this);
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSourceTextBoxAuthorityTest,
@@ -619,7 +619,7 @@ bool FSizeEstimatorSourceFlagsDoNotLockFitGrowthTest::RunTest(const FString& Par
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSourceFillWidthPreResolutionKeepsSourceSignalTest,
-	"Design2UMG.SharedSemantics.SourceFillWidthPreResolutionKeepsSourceSignal",
+	"Design2UMG.DesignNodeSemantics.SourceFillWidthPreResolutionKeepsSourceSignal",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FSourceFillWidthPreResolutionKeepsSourceSignalTest::RunTest(const FString& Parameters)
 {
@@ -634,30 +634,30 @@ bool FFlowRefExpansionSnapshotReuseTest::RunTest(const FString& Parameters)
 	return RunFlowRefExpansionSnapshotChecks(*this);
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSharedSemanticsVisibleFillOwnerBoundaryTest,
-	"Design2UMG.SharedSemantics.VisibleFillOwnerBoundary",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDesignNodeSemanticsVisibleFillOwnerBoundaryTest,
+	"Design2UMG.DesignNodeSemantics.VisibleFillOwnerBoundary",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FSharedSemanticsVisibleFillOwnerBoundaryTest::RunTest(const FString& Parameters)
+bool FDesignNodeSemanticsVisibleFillOwnerBoundaryTest::RunTest(const FString& Parameters)
 {
 	FDesignFill VisibleFill = FDesignFill::FromColor(TEXT("#2288CC"));
-	TestTrue(TEXT("Shared visible-fill helper accepts enabled color fill"), Design2UMGCore::SharedSemantics::HasVisibleFill(VisibleFill));
+	TestTrue(TEXT("Shared visible-fill helper accepts enabled color fill"), Design2UMGCore::DesignNodeSemantics::HasVisibleFill(VisibleFill));
 
 	FDesignFill DisabledFill = FDesignFill::FromColor(TEXT("#2288CC"));
 	DisabledFill.bEnabled = false;
-	TestFalse(TEXT("Shared visible-fill helper rejects disabled color fill"), Design2UMGCore::SharedSemantics::HasVisibleFill(DisabledFill));
+	TestFalse(TEXT("Shared visible-fill helper rejects disabled color fill"), Design2UMGCore::DesignNodeSemantics::HasVisibleFill(DisabledFill));
 
 	FDesignFill EmptyFill;
-	TestFalse(TEXT("Shared visible-fill helper rejects empty fill"), Design2UMGCore::SharedSemantics::HasVisibleFill(EmptyFill));
+	TestFalse(TEXT("Shared visible-fill helper rejects empty fill"), Design2UMGCore::DesignNodeSemantics::HasVisibleFill(EmptyFill));
 
 	TSharedPtr<FDesignNode> PrimaryVisibleNode = Design2UMGCoreTests::MakeNode(TEXT("primary_visible_fill"), EDesignNodeType::Rectangle);
 	PrimaryVisibleNode->Visual.Fills.Add(VisibleFill);
-	TestTrue(TEXT("Shared semantics keeps primary visible fill renderable"), Design2UMGCore::SharedSemantics::HasRenderableVisual(PrimaryVisibleNode));
+	TestTrue(TEXT("Shared semantics keeps primary visible fill renderable"), Design2UMGCore::DesignNodeSemantics::HasRenderableVisual(PrimaryVisibleNode));
 	TestTrue(TEXT("Converter visual support still sees primary visible fill"), Design2UMGConverterVisualSupport::HasVisualFill(PrimaryVisibleNode));
 
 	TSharedPtr<FDesignNode> SecondaryPresenceNode = Design2UMGCoreTests::MakeNode(TEXT("secondary_fill_presence"), EDesignNodeType::Rectangle);
 	SecondaryPresenceNode->Visual.Fills.Add(EmptyFill);
 	SecondaryPresenceNode->Visual.Fills.Add(DisabledFill);
-	TestFalse(TEXT("Shared semantics does not treat disabled secondary fill as renderable"), Design2UMGCore::SharedSemantics::HasRenderableVisual(SecondaryPresenceNode));
+	TestFalse(TEXT("Shared semantics does not treat disabled secondary fill as renderable"), Design2UMGCore::DesignNodeSemantics::HasRenderableVisual(SecondaryPresenceNode));
 	TestTrue(TEXT("Converter visual support still treats secondary fill presence as visual fill"), Design2UMGConverterVisualSupport::HasVisualFill(SecondaryPresenceNode));
 
 	TSharedPtr<FDesignNode> EmptyNode = Design2UMGCoreTests::MakeNode(TEXT("empty_fill_read"), EDesignNodeType::Frame);
@@ -668,7 +668,7 @@ bool FSharedSemanticsVisibleFillOwnerBoundaryTest::RunTest(const FString& Parame
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSharedSourceParserSemanticParityTest,
-	"Design2UMG.SharedSemantics.SourceParserParity",
+	"Design2UMG.DesignNodeSemantics.SourceParserParity",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FSharedSourceParserSemanticParityTest::RunTest(const FString& Parameters)
 {
@@ -754,7 +754,7 @@ bool FSharedSourceParserSemanticParityTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSharedColorLiteralNormalizationTest,
-	"Design2UMG.SharedSemantics.ColorLiteralNormalization",
+	"Design2UMG.DesignNodeSemantics.ColorLiteralNormalization",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FSharedColorLiteralNormalizationTest::RunTest(const FString& Parameters)
 {
@@ -789,7 +789,7 @@ bool FSharedColorLiteralNormalizationTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImageFillTransformModeIndependenceTest,
-	"Design2UMG.SharedSemantics.ImageFillTransformModeIndependence",
+	"Design2UMG.DesignNodeSemantics.ImageFillTransformModeIndependence",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FImageFillTransformModeIndependenceTest::RunTest(const FString& Parameters)
 {
@@ -899,12 +899,12 @@ bool FNodeWidgetFactoryGeometryFallbackDoesNotMutateInputTest::RunTest(const FSt
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSharedSemanticsExecutableGuardReplacementTest,
-	"Design2UMG.SharedSemantics.ExecutableGuardReplacement",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDesignNodeSemanticsExecutableGuardReplacementTest,
+	"Design2UMG.DesignNodeSemantics.ExecutableGuardReplacement",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FSharedSemanticsExecutableGuardReplacementTest::RunTest(const FString& Parameters)
+bool FDesignNodeSemanticsExecutableGuardReplacementTest::RunTest(const FString& Parameters)
 {
-	return RunSharedSemanticsExecutableReplacementChecks(*this);
+	return RunDesignNodeSemanticsExecutableReplacementChecks(*this);
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPublicSurfacePostReviewFixesGuardTest,
@@ -919,7 +919,7 @@ bool FPublicSurfacePostReviewFixesGuardTest::RunTest(const FString& Parameters)
 	LayoutData.LayoutColumnGap = 16.0f;
 	LayoutData.LayoutChildHorizontalAlign = EDesignAxisAlignment::Center;
 
-	TestTrue(TEXT("Public grid row flag still drives explicit grid position"), LayoutData.HasExplicitGridPosition());
+	TestTrue(TEXT("Public grid row flag still drives explicit grid position"), LayoutData.LayoutRow.IsSet() || LayoutData.LayoutColumn.IsSet());
 	TestTrue(TEXT("Direct optional row storage is set"), LayoutData.LayoutRow.IsSet());
 	TestEqual(TEXT("Direct optional returns public row value"), LayoutData.LayoutRow.Get(-1), 3);
 	TestEqual(TEXT("Direct optional returns public column value"), LayoutData.LayoutColumn.Get(-1), 1);

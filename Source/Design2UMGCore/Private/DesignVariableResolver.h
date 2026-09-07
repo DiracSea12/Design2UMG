@@ -43,9 +43,6 @@ public:
 	/** Resolve a numeric value with variable substitution. */
 	float ResolveNumber(const FString& Value) const;
 
-	/** Resolve a boolean value with variable substitution. */
-	bool ResolveBoolean(const FString& Value) const;
-
 	/** Resolve a color value with variable substitution. */
 	FString ResolveColor(const FString& Value) const;
 

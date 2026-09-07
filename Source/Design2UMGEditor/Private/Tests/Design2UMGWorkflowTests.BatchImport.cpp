@@ -2,7 +2,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "DesignSchema.h"
-#include "Design2UMGEditorDesignSourceRegistry.h"
+#include "FigmaParser.h"
 #include "Design2UMGLocalFigmaImport.h"
 #include "DesignImportPipeline.h"
 #include "DesignImportUtils.h"
@@ -225,8 +225,7 @@ bool FFigmaSourceImportWorkflowTest::RunTest(const FString& Parameters)
 	}
 
 	FDesignDocument Document;
-	TestTrue(TEXT("Parse raw Figma json through source registry"),
-		Design2UMGEditorDesignSourceRegistry::TryParseSourceDocument(TEXT("Figma"), RawJson, Document));
+	TestTrue(TEXT("Parse raw Figma json"), FFigmaParser::ParseDocument(RawJson, Document));
 	TestTrue(TEXT("Parsed Figma source should contain children"), Document.Children.Num() > 0);
 
 	FUMGWidgetData Data = DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{false}).Data;

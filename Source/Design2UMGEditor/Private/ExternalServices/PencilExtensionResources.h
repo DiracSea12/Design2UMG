@@ -23,17 +23,11 @@ namespace PencilExtensionResources
 	/** Locate icon-index.json inside the installed extension, parse it, and register the per-family glyph tables into FFontResolver. Idempotent per process. */
 	void EnsureIconGlyphsRegistered();
 
-	/** True after a successful icon-index registration in this process. */
-	bool IsIconIndexRegistered();
-
 	/** Relative paths of the icon index inside an extension root, in priority order. */
 	void GetIconIndexRelativeCandidates(TArray<FString>& OutRelativePaths);
 
 	/** Locate the extension's bundled library documents (*.lib.pen), extract their variables, and register them into PenBundledLibraries. Idempotent per process. */
 	void EnsureBundledLibrariesRegistered();
-
-	/** True after at least one library variables table was registered in this process. */
-	bool IsBundledLibrariesRegistered();
 
 	/** Relative directories of the bundled library documents inside an extension root, in priority order. */
 	void GetLibraryPenRelativeCandidates(TArray<FString>& OutRelativeDirs);

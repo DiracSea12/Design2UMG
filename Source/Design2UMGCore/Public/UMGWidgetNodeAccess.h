@@ -17,8 +17,14 @@ namespace Design2UMGWidgetNodeAccess
 	DESIGN2UMGCORE_API FString SerializeWidgetVector2D(const FVector2D& Value);
 	DESIGN2UMGCORE_API FString SerializeWidgetCompactVector2D(const FVector2D& Value);
 	DESIGN2UMGCORE_API FString SerializeWidgetMargin(const FMargin& Value);
+	// Precision variant for call sites whose historical wire format used a
+	// precision other than the canonical serializer above.
+	DESIGN2UMGCORE_API FString SerializeWidgetMargin(const FMargin& Value, int32 Precision);
 	DESIGN2UMGCORE_API FString SerializeWidgetColor(const FLinearColor& Value);
 	DESIGN2UMGCORE_API FString SerializeWidgetVector4(const FVector4& Value);
+	// Precision variant for call sites whose historical wire format used a
+	// precision other than the canonical serializer above.
+	DESIGN2UMGCORE_API FString SerializeWidgetVector4(const FVector4& Value, int32 Precision);
 	DESIGN2UMGCORE_API FString SerializeImageTransform(const FUMGVisualBrushData::FImageTransformData& Value);
 	DESIGN2UMGCORE_API bool TryParseImageTransform(const FString& Value, FUMGVisualBrushData::FImageTransformData& OutTransform);
 	DESIGN2UMGCORE_API FString SerializeDrawAs(const ESlateBrushDrawType::Type DrawAs);

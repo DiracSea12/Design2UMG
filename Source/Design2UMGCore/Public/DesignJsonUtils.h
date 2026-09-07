@@ -28,6 +28,34 @@ namespace DesignJsonUtils
 		return Object && Object->TryGetNumberField(Key, OutValue);
 	}
 
+	inline bool TryGetString(const TSharedPtr<FJsonObject>& Object, const FString& Key, FString& OutValue)
+	{
+		return Object && Object->TryGetStringField(Key, OutValue);
+	}
+
+	inline bool TryGetBool(const TSharedPtr<FJsonObject>& Object, const FString& Key, bool& OutValue)
+	{
+		return Object && Object->TryGetBoolField(Key, OutValue);
+	}
+
+	inline bool TryGetObject(const TSharedPtr<FJsonObject>& Object, const FString& Key, const TSharedPtr<FJsonObject>*& OutValue)
+	{
+		return Object && Object->TryGetObjectField(Key, OutValue);
+	}
+
+	// Numeric existence reads delegate to the FJsonObject overloads so conversion
+	// semantics (float narrowing, int32 range check + round-half-from-zero) stay
+	// engine-defined instead of being re-implemented here.
+	inline bool TryGetFloat(const TSharedPtr<FJsonObject>& Object, const FString& Key, float& OutValue)
+	{
+		return Object && Object->TryGetNumberField(Key, OutValue);
+	}
+
+	inline bool TryGetInt32(const TSharedPtr<FJsonObject>& Object, const FString& Key, int32& OutValue)
+	{
+		return Object && Object->TryGetNumberField(Key, OutValue);
+	}
+
 	inline bool GetBool(const TSharedPtr<FJsonObject>& Object, const FString& Key, bool DefaultValue = true)
 	{
 		bool Value = false;

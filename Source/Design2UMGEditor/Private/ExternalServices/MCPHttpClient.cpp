@@ -87,10 +87,12 @@ FMCPHttpClient::~FMCPHttpClient()
 void FMCPHttpClient::ConnectAsync(const FString& Endpoint, TFunction<void(bool bSuccess)> OnComplete)
 {
 	Disconnect();
-	ServerEndpoint = Endpoint;
+	Session = MakeShared<FConnectSession, ESPMode::ThreadSafe>();
+	Session->ServerEndpoint = Endpoint;
+	const TSharedPtr<FConnectSession, ESPMode::ThreadSafe> Conn = Session;
 
-	SendRequestAsync(TEXT("initialize"), BuildInitializeParams(), true,
-		[this, OnComplete](bool bInitOk, const FString&, const FString& NewSessionId)
+	SendRequestAsync(State, Conn, TEXT("initialize"), BuildInitializeParams(), true,
+		[State = State, Conn, OnComplete](bool bInitOk, const FString&, const FString& NewSessionId)
 	{
 		if (!bInitOk)
 		{
@@ -108,15 +110,15 @@ void FMCPHttpClient::ConnectAsync(const FString& Endpoint, TFunction<void(bool b
 			return;
 		}
 
-		SessionId = NewSessionId;
+		Conn->SessionId = NewSessionId;
 
-		SendRequestAsync(TEXT("notifications/initialized"), nullptr, false,
-			[this, OnComplete](bool bNotifyOk, const FString&, const FString&)
+		SendRequestAsync(State, Conn, TEXT("notifications/initialized"), nullptr, false,
+			[Conn, OnComplete](bool bNotifyOk, const FString&, const FString&)
 		{
 			if (!bNotifyOk)
 				UE_LOG(LogDesign2UMG, Warning, TEXT("MCPHttpClient: notifications/initialized failed after async initialize"));
 
-			UE_LOG(LogDesign2UMG, Log, TEXT("MCPHttpClient: Connected to %s"), *ServerEndpoint);
+			UE_LOG(LogDesign2UMG, Log, TEXT("MCPHttpClient: Connected to %s"), *Conn->ServerEndpoint);
 			if (OnComplete)
 				OnComplete(true);
 		});
@@ -128,18 +130,16 @@ void FMCPHttpClient::Disconnect()
 	CancelRequests();
 	// Disconnect stays silent about the in-flight request: the client object
 	// is being torn down or reconnected, so no failure is owed here.
-	InFlightCancelState.Reset();
-	InFlightCancelFailure = nullptr;
-	SessionId.Empty();
-	ServerEndpoint.Empty();
-	// JSON-RPC ids only need to be unique within one connection, so each
-	// connection gets its own id space and this counter restarts from 1 here.
+	// Dropping the session object resets every per-connection field it owns
+	// (endpoint, session id, in-flight cancel bookkeeping); the next
+	// ConnectAsync builds a fresh one. JSON-RPC ids only need to be unique
+	// within one connection, so each session restarts its id space from 1.
 	// This is separate from the slot's tracking ids (FDesignHttpClientSlot),
 	// which do stay monotonic across sessions: a late-arriving callback from an
 	// old session can then never collide with a new session's tracking id, and
 	// the slot's cancellation watermark keeps recognizing it as cancelled, so
 	// stale responses are never applied to the new session.
-	NextRpcRequestId = 1;
+	Session.Reset();
 }
 
 void FMCPHttpClient::CancelActiveRequest()
@@ -148,6 +148,8 @@ void FMCPHttpClient::CancelActiveRequest()
 }
 
 void FMCPHttpClient::SendRequestAsync(
+	const TSharedRef<FDesignHttpClientSlot, ESPMode::ThreadSafe>& State,
+	const TSharedPtr<FConnectSession, ESPMode::ThreadSafe>& Session,
 	const FString& Method,
 	const TSharedPtr<FJsonObject>& Params,
 	bool bExpectResponse,
@@ -158,24 +160,29 @@ void FMCPHttpClient::SendRequestAsync(
 	// A superseded in-flight request would otherwise never fire its callback;
 	// deliver the same failure shape the HTTP failure paths use (false with
 	// empty strings) exactly once before starting the new request.
-	if (InFlightCancelState.IsValid() && !InFlightCancelState->bDelivered && InFlightCancelFailure)
+	// Delivery invariant: the slot's cancellation watermark swallows late
+	// engine completions for cancelled requests, while the delivered-flag plus
+	// this stored failure ensure a superseded request whose completion never
+	// arrives still gets exactly one failure delivery; each guard covers a
+	// scenario the other cannot, so both stay.
+	if (Session->InFlightCancelState.IsValid() && !Session->InFlightCancelState->bDelivered && Session->InFlightCancelFailure)
 	{
-		TFunction<void()> CancelFailure = MoveTemp(InFlightCancelFailure);
+		TFunction<void()> CancelFailure = MoveTemp(Session->InFlightCancelFailure);
 		CancelFailure();
 	}
-	InFlightCancelState.Reset();
-	InFlightCancelFailure = nullptr;
-	CancelActiveRequest();
+	Session->InFlightCancelState.Reset();
+	Session->InFlightCancelFailure = nullptr;
+	State->CancelActiveRequest();
 
 	const FString LogLabel = InLogLabel.IsEmpty() ? Method : InLogLabel;
-	const FString RequestBody = BuildRpcRequestBody(Method, Params, &NextRpcRequestId);
+	const FString RequestBody = BuildRpcRequestBody(Method, Params, &Session->NextRpcRequestId);
 	const int32 RequestId = State->BeginRequest();
 
 	// Failure delivery owned by this request while it is in flight.
-	InFlightCancelState = MakeShared<FInFlightCancelState, ESPMode::ThreadSafe>();
-	TSharedPtr<FInFlightCancelState, ESPMode::ThreadSafe> CancelState = InFlightCancelState;
+	Session->InFlightCancelState = MakeShared<FInFlightCancelState, ESPMode::ThreadSafe>();
+	TSharedPtr<FInFlightCancelState, ESPMode::ThreadSafe> CancelState = Session->InFlightCancelState;
 	const FString CancelLogLabel = LogLabel;
-	InFlightCancelFailure = [CancelState, OnComplete, CancelLogLabel]()
+	Session->InFlightCancelFailure = [CancelState, OnComplete, CancelLogLabel]()
 	{
 		CancelState->bDelivered = true;
 		UE_LOG(LogDesign2UMG, Warning,
@@ -252,7 +259,7 @@ void FMCPHttpClient::SendRequestAsync(
 	}
 #endif
 
-	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = CreatePostRequest(ServerEndpoint, SessionId, RequestBody);
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = CreatePostRequest(Session->ServerEndpoint, Session->SessionId, RequestBody);
 	State->BindActiveRequest(HttpRequest);
 	HttpRequest->OnProcessRequestComplete().BindLambda(
 		[State = State, RequestId, OnComplete, LogLabel, bExpectResponse, bLogTransportErrors, CancelState](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnectedSuccessfully)
@@ -395,7 +402,7 @@ void FMCPHttpClient::CallToolAsync(const FString& ToolName,
 	// Transport failures are reported through OnComplete only: the original
 	// tools/call path never logged connection/HTTP errors itself, so it passes
 	// bLogTransportErrors=false and keeps its own parse-failure log below.
-	SendRequestAsync(TEXT("tools/call"), Params, true,
+	SendRequestAsync(State, Session, TEXT("tools/call"), Params, true,
 		[OnComplete, ToolName](bool bSuccess, const FString& ResponseBody, const FString&)
 		{
 			if (!bSuccess)

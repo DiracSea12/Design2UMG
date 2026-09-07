@@ -2,7 +2,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "DesignImportPipeline.h"
-#include "Design2UMGEditorDesignSourceRegistry.h"
+#include "PenParser.h"
 #include "Design2UMGSettings.h"
 #include "DesignPreviewMaterializationService.h"
 #include "Design2UMGGenerationSettingsSnapshot.h"
@@ -368,8 +368,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenBridgeImportUsesSingleExplicitSettingsSnaps
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FPenBridgeImportUsesSingleExplicitSettingsSnapshotTest::RunTest(const FString& Parameters)
 {
-	Design2UMGEditorDesignSourceRegistry::RegisterBuiltInSources();
-
 	const FString PenSourceJson = LoadPenSourceImportFixtureJson();
 	TestFalse(TEXT("Pen fixture json is available"), PenSourceJson.IsEmpty());
 	if (PenSourceJson.IsEmpty())
@@ -391,12 +389,16 @@ bool FPenBridgeImportUsesSingleExplicitSettingsSnapshotTest::RunTest(const FStri
 	SnapshotOverride.WidgetClass = UBackgroundBlur::StaticClass();
 
 	FUMGWidgetData Data;
-	TestTrue(TEXT("Registered pen source converts using explicit snapshot"),
-		Design2UMGEditorDesignSourceRegistry::TryConvertSource(
-			TEXT("Pen"),
-			PenSourceJson,
-			SettingsSnapshot,
-			Data));
+	FDesignDocument Document;
+	const bool bParsed = FPenParser::ParseDocument(PenSourceJson, Document);
+	if (bParsed)
+	{
+		FImportAnalysisInput AnalysisInput;
+		AnalysisInput.bResolveImages = false;
+		AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
+		Data = DesignImportPipeline::AnalyzeImport(Document, AnalysisInput).Data;
+	}
+	TestTrue(TEXT("Pen source converts using explicit snapshot"), bParsed);
 
 	const FUMGWidgetNode* PlaceholderNode =
 		FindWidgetNodeByMaterialParamFragment(Data.RootWidget, TEXT("\"Color\":\"#123456\""));

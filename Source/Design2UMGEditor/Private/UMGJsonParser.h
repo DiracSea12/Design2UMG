@@ -11,7 +11,6 @@ struct FUMGWidgetNode;
 
 /**
  * Editor-facing JSON parse bridge for preview, import, and debugging workflows.
- * Kept public for source compatibility; this is not a runtime module API promise.
  */
 class DESIGN2UMGEDITOR_API FUMGJsonParser
 {

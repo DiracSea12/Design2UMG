@@ -51,9 +51,7 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeSlot(const FUMGSlotData& Sl
 		!FMath::IsNearlyEqual(Slot.Padding.Bottom, 0.0f);
 	if (bHasPadding)
 	{
-		J->SetStringField(UMGPropertyKeys::Padding, FString::Printf(
-			TEXT("%.2f,%.2f,%.2f,%.2f"),
-			Slot.Padding.Left, Slot.Padding.Top, Slot.Padding.Right, Slot.Padding.Bottom));
+		J->SetStringField(UMGPropertyKeys::Padding, Design2UMGWidgetNodeAccess::SerializeWidgetMargin(Slot.Padding, 2));
 	}
 
 	if (Slot.HorizontalAlignment != EUMGSlotHorizontalAlignment::Fill)
@@ -264,7 +262,7 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeBrushPayload(const FUMGVisu
 	TSharedRef<FJsonObject> BJ = MakeShared<FJsonObject>();
 	bool bHasAny = false;
 	if (B.OutlineCornerRadius.IsSet())   { BJ->SetNumberField(UMGPropertyKeys::OutlineCornerRadius, B.OutlineCornerRadius.GetValue()); bHasAny = true; }
-	if (B.CornerRadii.IsSet())           { const FVector4& R = B.CornerRadii.GetValue(); BJ->SetStringField(UMGPropertyKeys::CornerRadii, FString::Printf(TEXT("%.2f,%.2f,%.2f,%.2f"), R.X, R.Y, R.Z, R.W)); bHasAny = true; }
+	if (B.CornerRadii.IsSet())           { BJ->SetStringField(UMGPropertyKeys::CornerRadii, Design2UMGWidgetNodeAccess::SerializeWidgetVector4(B.CornerRadii.GetValue(), 2)); bHasAny = true; }
 	if (B.OutlineThickness.IsSet())    { BJ->SetNumberField(UMGPropertyKeys::OutlineThickness, B.OutlineThickness.GetValue()); bHasAny = true; }
 	if (B.DrawAs.IsSet())              { BJ->SetStringField(UMGPropertyKeys::DrawAs, Design2UMGWidgetNodeAccess::SerializeDrawAs(B.DrawAs.GetValue())); bHasAny = true; }
 	if (B.BrushColor.IsSet())          { BJ->SetStringField(UMGPropertyKeys::BrushColor, Design2UMGWidgetNodeAccess::SerializeWidgetColor(B.BrushColor.GetValue())); bHasAny = true; }
@@ -340,19 +338,17 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeEffectPayload(const FUMGEff
 		EJ->SetStringField(UMGPropertyKeys::TextureParameter, E.TextureParameter.GetValue());
 	if (E.EffectBlurUVStep.IsSet())
 	{
-		const FVector2D& EffectBlurUVStep = E.EffectBlurUVStep.GetValue();
 		EJ->SetStringField(
 			UMGPropertyKeys::EffectBlurUVStep,
-			FString::Printf(TEXT("%.6f,%.6f"), EffectBlurUVStep.X, EffectBlurUVStep.Y));
+			Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(E.EffectBlurUVStep.GetValue()));
 	}
 	if (E.EffectColor.IsSet())
 		EJ->SetStringField(UMGPropertyKeys::EffectColor, Design2UMGWidgetNodeAccess::SerializeWidgetColor(E.EffectColor.GetValue()));
 	if (E.EffectOffset.IsSet())
 	{
-		const FVector2D& EffectOffset = E.EffectOffset.GetValue();
 		EJ->SetStringField(
 			UMGPropertyKeys::EffectOffset,
-			FString::Printf(TEXT("%.6f,%.6f"), EffectOffset.X, EffectOffset.Y));
+			Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(E.EffectOffset.GetValue()));
 	}
 	if (E.GeometryMaskShape.IsSet())
 	{
@@ -364,17 +360,15 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeEffectPayload(const FUMGEff
 	}
 	if (E.GeometryMaskSize.IsSet())
 	{
-		const FVector2D& GeometryMaskSize = E.GeometryMaskSize.GetValue();
 		EJ->SetStringField(
 			UMGPropertyKeys::GeometryMaskSize,
-			FString::Printf(TEXT("%.6f,%.6f"), GeometryMaskSize.X, GeometryMaskSize.Y));
+			Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(E.GeometryMaskSize.GetValue()));
 	}
 	if (E.GeometryMaskCornerRadii.IsSet())
 	{
-		const FVector4& Radii = E.GeometryMaskCornerRadii.GetValue();
 		EJ->SetStringField(
 			UMGPropertyKeys::GeometryMaskCornerRadii,
-			FString::Printf(TEXT("%.6f,%.6f,%.6f,%.6f"), Radii.X, Radii.Y, Radii.Z, Radii.W));
+			Design2UMGWidgetNodeAccess::SerializeWidgetVector4(E.GeometryMaskCornerRadii.GetValue(), 6));
 	}
 	if (E.RenderingPhase.IsSet())
 	{
@@ -419,7 +413,7 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeShadowPayload(const FUMGSha
 
 	TSharedRef<FJsonObject> ShadowObject = MakeShared<FJsonObject>();
 	if (Shadow.ShadowOffset.IsSet())
-		ShadowObject->SetStringField(UMGPropertyKeys::ShadowOffset, FString::Printf(TEXT("%.1f,%.1f"), Shadow.ShadowOffset.GetValue().X, Shadow.ShadowOffset.GetValue().Y));
+		ShadowObject->SetStringField(UMGPropertyKeys::ShadowOffset, Design2UMGWidgetNodeAccess::SerializeWidgetCompactVector2D(Shadow.ShadowOffset.GetValue()));
 	if (Shadow.ShadowColorAndOpacity.IsSet())
 		ShadowObject->SetStringField(UMGPropertyKeys::ShadowColorAndOpacity, Design2UMGWidgetNodeAccess::SerializeWidgetColor(Shadow.ShadowColorAndOpacity.GetValue()));
 	if (Shadow.ShadowBlur.IsSet())
@@ -431,7 +425,7 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeShadowPayload(const FUMGSha
 		for (const FUMGBoxShadowLayerData& Layer : Shadow.BoxShadows)
 		{
 			TSharedRef<FJsonObject> LayerObject = MakeShared<FJsonObject>();
-			LayerObject->SetStringField(UMGJsonKeys::Offset, FString::Printf(TEXT("%.6f,%.6f"), Layer.Offset.X, Layer.Offset.Y));
+			LayerObject->SetStringField(UMGJsonKeys::Offset, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Layer.Offset));
 			LayerObject->SetNumberField(UMGJsonKeys::Blur, Layer.Blur);
 			LayerObject->SetNumberField(UMGJsonKeys::Spread, Layer.Spread);
 			LayerObject->SetStringField(UMGPropertyKeys::Color, Design2UMGWidgetNodeAccess::SerializeWidgetColor(Layer.Color));
@@ -465,24 +459,21 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeRenderPayload(const FUMGRen
 	}
 	if (Render.RenderTransformPivot.IsSet())
 	{
-		const FVector2D& RenderTransformPivot = Render.RenderTransformPivot.GetValue();
 		RenderObject->SetStringField(
 			UMGPropertyKeys::RenderTransformPivot,
-			FString::Printf(TEXT("%.6f,%.6f"), RenderTransformPivot.X, RenderTransformPivot.Y));
+			Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Render.RenderTransformPivot.GetValue()));
 	}
 	if (Render.RenderTransformScale.IsSet())
 	{
-		const FVector2D& RenderTransformScale = Render.RenderTransformScale.GetValue();
 		RenderObject->SetStringField(
 			UMGPropertyKeys::RenderTransformScale,
-			FString::Printf(TEXT("%.6f,%.6f"), RenderTransformScale.X, RenderTransformScale.Y));
+			Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Render.RenderTransformScale.GetValue()));
 	}
 	if (Render.RenderTranslation.IsSet())
 	{
-		const FVector2D& RenderTranslation = Render.RenderTranslation.GetValue();
 		RenderObject->SetStringField(
 			UMGPropertyKeys::RenderTranslation,
-			FString::Printf(TEXT("%.6f,%.6f"), RenderTranslation.X, RenderTranslation.Y));
+			Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Render.RenderTranslation.GetValue()));
 	}
 	return RenderObject;
 }

@@ -4,6 +4,13 @@
 
 namespace
 {
+	// Tuning thresholds for 9-grid anchor selection, hysteresis, edge snap, and stretch.
+	constexpr float AnchorThresholdL = 0.33f;
+	constexpr float AnchorThresholdR = 0.67f;
+	constexpr float HysteresisBuffer = 0.05f;
+	constexpr float EdgeSnapThreshold = 0.05f;
+	constexpr float StretchThreshold = 0.60f;
+
 	struct FAxisResult
 	{
 		float AnchorMin = 0.f;
@@ -16,18 +23,13 @@ namespace
 
 float SelectAnchorWithHysteresis(
 	float Center,
-	TOptional<float> OldAnchor,
-	const FLayoutPreset& Preset)
+	TOptional<float> OldAnchor)
 {
-	const float Threshold_L = Preset.AnchorThresholdL;
-	const float Threshold_R = Preset.AnchorThresholdR;
-	const float Buffer = Preset.HysteresisBuffer;
-
 	// If there is no previous anchor, use the standard 9-grid selection.
-	if (!Preset.bEnableHysteresis || !OldAnchor.IsSet())
+	if (!OldAnchor.IsSet())
 	{
-		if (Center < Threshold_L) return 0.0f;
-		else if (Center < Threshold_R) return 0.5f;
+		if (Center < AnchorThresholdL) return 0.0f;
+		else if (Center < AnchorThresholdR) return 0.5f;
 		else return 1.0f;
 	}
 
@@ -36,58 +38,48 @@ float SelectAnchorWithHysteresis(
 	// Hysteresis: switch only after crossing the threshold plus buffer by a clear margin.
 	if (FMath::IsNearlyEqual(Old, 0.0f))
 	{
-		return (Center > Threshold_L + Buffer) ? 0.5f : 0.0f;
+		return (Center > AnchorThresholdL + HysteresisBuffer) ? 0.5f : 0.0f;
 	}
 	else if (FMath::IsNearlyEqual(Old, 0.5f))
 	{
-		if (Center < Threshold_L - Buffer) return 0.0f;
-		else if (Center > Threshold_R + Buffer) return 1.0f;
+		if (Center < AnchorThresholdL - HysteresisBuffer) return 0.0f;
+		else if (Center > AnchorThresholdR + HysteresisBuffer) return 1.0f;
 		else return 0.5f;
 	}
 	else // Old == 1.0f
 	{
-		return (Center < Threshold_R - Buffer) ? 0.5f : 1.0f;
+		return (Center < AnchorThresholdR - HysteresisBuffer) ? 0.5f : 1.0f;
 	}
 }
 
 bool ShouldSnapToEdge(
 	float Position,
 	float Size,
-	float EdgeThreshold,
 	bool& bSnapToStart,
 	bool& bSnapToEnd)
 {
-	bSnapToStart = (Position < EdgeThreshold);
-	bSnapToEnd = ((1.0f - Position - Size) < EdgeThreshold);
+	bSnapToStart = (Position < EdgeSnapThreshold);
+	bSnapToEnd = ((1.0f - Position - Size) < EdgeSnapThreshold);
 	return bSnapToStart || bSnapToEnd;
 }
 
-bool ShouldUseStretchAnchors(float Size, float StretchThreshold)
+bool ShouldUseStretchAnchors(float Size)
 {
 	return Size > StretchThreshold;
 }
 
 FAxisResult CalculateAxis(
-	float Pos, float Size, int32 CanvasSize, TOptional<float> OldAnchor, const FLayoutPreset& Preset)
+	float Pos, float Size, int32 CanvasSize, TOptional<float> OldAnchor)
 {
 	FAxisResult R;
 	const float End = Pos + Size;
 
-	bool bSnapStart = false, bSnapEnd = false;
 	bool bNearStart = false, bNearEnd = false;
-	if (Preset.bEnableEdgeSnap || Preset.bEnableStretchAnchors)
-	{
-		ShouldSnapToEdge(Pos, Size, Preset.EdgeSnapThreshold, bNearStart, bNearEnd);
-		if (Preset.bEnableEdgeSnap)
-		{
-			bSnapStart = bNearStart;
-			bSnapEnd = bNearEnd;
-		}
-	}
+	ShouldSnapToEdge(Pos, Size, bNearStart, bNearEnd);
+	const bool bSnapStart = bNearStart;
+	const bool bSnapEnd = bNearEnd;
 
-	bool bStretch = Preset.bEnableStretchAnchors
-		&& ShouldUseStretchAnchors(Size, Preset.StretchThreshold)
-		&& bNearStart && bNearEnd;
+	bool bStretch = ShouldUseStretchAnchors(Size) && bNearStart && bNearEnd;
 
 	if (bStretch)
 	{
@@ -114,9 +106,7 @@ FAxisResult CalculateAxis(
 	else
 	{
 		const float Center = Pos + Size * 0.5f;
-		const float Anchor = Preset.bEnableNineGrid
-			? SelectAnchorWithHysteresis(Center, OldAnchor, Preset)
-			: 0.0f;
+		const float Anchor = SelectAnchorWithHysteresis(Center, OldAnchor);
 
 		R.AnchorMin = R.AnchorMax = Anchor;
 		R.Alignment = Anchor;
@@ -135,7 +125,6 @@ FUMGSlotData LayoutCalculator::CalculateSlot(const FDesignPixelBounds& Bounds, c
 	// v2.2: Validate DesignSize.
 	const int32 CanvasW = FMath::Max(1, Context.DesignSize.X);
 	const int32 CanvasH = FMath::Max(1, Context.DesignSize.Y);
-	const FLayoutPreset& Preset = Context.Preset;
 
 	// Do not force nodes that exceed the design size into [0,1].
 	// Designs often contain nodes that partially extend outside the canvas, such as scroll regions, shadows, or pagination.
@@ -149,7 +138,7 @@ FUMGSlotData LayoutCalculator::CalculateSlot(const FDesignPixelBounds& Bounds, c
 	FUMGSlotData Slot;
 
 	// Horizontal axis.
-	FAxisResult H = CalculateAxis(SafeBounds.X, SafeBounds.W, CanvasW, Context.OldAnchorX, Preset);
+	FAxisResult H = CalculateAxis(SafeBounds.X, SafeBounds.W, CanvasW, Context.OldAnchorX);
 	Slot.Anchors.Min.X = H.AnchorMin;
 	Slot.Anchors.Max.X = H.AnchorMax;
 	Slot.Alignment.X = H.Alignment;
@@ -157,7 +146,7 @@ FUMGSlotData LayoutCalculator::CalculateSlot(const FDesignPixelBounds& Bounds, c
 	Slot.Offsets.Right = H.OffsetEnd;
 
 	// Vertical axis.
-	FAxisResult V = CalculateAxis(SafeBounds.Y, SafeBounds.H, CanvasH, Context.OldAnchorY, Preset);
+	FAxisResult V = CalculateAxis(SafeBounds.Y, SafeBounds.H, CanvasH, Context.OldAnchorY);
 	Slot.Anchors.Min.Y = V.AnchorMin;
 	Slot.Anchors.Max.Y = V.AnchorMax;
 	Slot.Alignment.Y = V.Alignment;

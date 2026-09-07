@@ -3,7 +3,6 @@
 #include "Design2UMGEditorCommandOwner.h"
 
 #include "Automation/Design2UMGAutomationRender.h"
-#include "Design2UMGEditorDesignSourceRegistry.h"
 #include "Design2UMGEditorImportOrchestrator.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGWidgetBindingTools.h"
@@ -13,6 +12,11 @@
 namespace
 {
 	using namespace Design2UMGEditorImportOrchestrator;
+
+	// Built-in design sources accepted by Design2UMG.ImportSource, in the order
+	// they used to be registered. Mirrors the direct parser dispatch in
+	// RunRegisteredSourceImport ("Pen" -> FPenParser, "Figma" -> FFigmaParser).
+	const TCHAR* const GImportSourceIds[] = { TEXT("Pen"), TEXT("Figma") };
 
 	void ApplyOutputPreviewArg(const FString& Arg, FString& OutputPath, bool& bUsePreview)
 	{
@@ -126,13 +130,11 @@ namespace Design2UMGEditorCommandOwner
 			{
 				if (Args.Num() < 1)
 				{
-					TArray<FName> Sources;
-					Design2UMGEditorDesignSourceRegistry::GetRegisteredSourceIds(Sources);
 					UE_LOG(LogDesign2UMG, Log, TEXT("Usage: Design2UMG.ImportSource <SourceId> <json_file> [--out=/Game/Path] [--no-preview]"));
-					UE_LOG(LogDesign2UMG, Log, TEXT("Registered sources (%d):"), Sources.Num());
-					for (const FName& Source : Sources)
+					UE_LOG(LogDesign2UMG, Log, TEXT("Registered sources (%d):"), (int32)UE_ARRAY_COUNT(GImportSourceIds));
+					for (const TCHAR* const SourceId : GImportSourceIds)
 					{
-						UE_LOG(LogDesign2UMG, Log, TEXT("  - %s"), *Source.ToString());
+						UE_LOG(LogDesign2UMG, Log, TEXT("  - %s"), SourceId);
 					}
 					return;
 				}

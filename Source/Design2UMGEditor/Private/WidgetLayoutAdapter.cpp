@@ -88,7 +88,6 @@ FUMGSlotData FWidgetLayoutAdapter::Resolve(
 
 	FLayoutContext Context;
 	Context.DesignSize = DesignSize;
-	Context.Preset = FLayoutPreset::GetStandardHUDPreset();
 
 	if (HasValidSlotHistory(Node.Slot))
 	{

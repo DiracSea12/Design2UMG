@@ -72,7 +72,7 @@ def restore_reference_from_cache(
     if not meta_path.is_file() or not cached_reference_path.is_file():
         return None
 
-    metadata = verify.load_json_document(meta_path)
+    metadata = verify.helper_load_json(meta_path)
     if metadata.get("schema") != REFERENCE_CACHE_SCHEMA_VERSION:
         return None
     if metadata.get("mode") != case_args.mode:
@@ -96,7 +96,7 @@ def restore_reference_from_cache(
     cached_structure_path = cache_dir / "source_structure_live.json"
     if cached_structure_path.is_file():
         try:
-            reference_context["source_structure_live"] = verify.load_json_document(cached_structure_path)
+            reference_context["source_structure_live"] = verify.helper_load_json(cached_structure_path)
             reference_context["source_structure_live_path"] = str(cached_structure_path)
         except EvidenceReadError as exc:
             reference_context["source_structure_live_unavailable"] = {

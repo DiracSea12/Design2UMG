@@ -44,10 +44,6 @@ def parse_numeric_dimension(value):
     return None
 
 
-def load_json_document(path: Path):
-    return helper_load_json(path)
-
-
 _COMPARE_IMAGE_CACHE: dict[tuple, dict] = {}
 
 
@@ -314,7 +310,7 @@ def pen_node_lacks_declared_size(mode: str, source_path: str, node_id: str) -> b
     if not source.is_file() or source.suffix.lower() != ".pen":
         return False
     try:
-        document = load_json_document(source)
+        document = helper_load_json(source)
     except EvidenceReadError:
         return False
     target_node = find_node_by_id(document.get("children", []), node_id)
@@ -326,7 +322,7 @@ def get_expected_design_size(mode: str, source_path: str, node_id: str) -> tuple
     if not source.is_file():
         return None
     try:
-        document = load_json_document(source)
+        document = helper_load_json(source)
     except EvidenceReadError as exc:
         emit_diagnostic("warning", "expected_design_size_source_unreadable", exc.path, exc.detail)
         return None
@@ -1619,7 +1615,7 @@ def try_fetch_pencil_source_structure_snapshot(
 
 def try_get_pen_node_name(source_path: str, node_id: str) -> str:
     try:
-        document = load_json_document(Path(source_path))
+        document = helper_load_json(Path(source_path))
     except EvidenceReadError as exc:
         emit_diagnostic("warning", "pen_node_name_source_unreadable", exc.path, exc.detail)
         return ""
@@ -1679,7 +1675,7 @@ def _pen_root_export_offset_from_node(node: dict) -> tuple[float, float] | None:
 
 def compute_pen_root_export_offset(source_path: str, node_id: str) -> tuple[float, float] | None:
     try:
-        document = load_json_document(Path(source_path))
+        document = helper_load_json(Path(source_path))
         node = find_node_by_id(document.get("children", []), node_id)
     except EvidenceReadError:
         return None
@@ -2782,7 +2778,7 @@ def infer_single_case_name(args, output_dir: Path) -> str:
 
 
 def build_single_case_summary_entry(case_name: str, report_path: Path) -> dict:
-    report = load_json_document(report_path)
+    report = helper_load_json(report_path)
     structure_validation = report.get("structure_validation") or {}
     generation_vs_asset = ((report.get("render_chain") or {}).get("generation_vs_asset") or {})
     reference_authority = ((report.get("reference_context") or {}).get("reference_authority") or {})
@@ -2843,7 +2839,7 @@ def finalize_single_run_history(output_dir: Path, args, report_path: Path) -> No
     summary_case = build_single_case_summary_entry(case_name, report_path)
     summary = {
         "total": 1,
-        "editor_exit_code": load_json_document(report_path).get("editor_exit_code"),
+        "editor_exit_code": helper_load_json(report_path).get("editor_exit_code"),
         "design_root": str(Path(args.source).resolve().parent),
         "output_root": str(output_dir.resolve()),
         "run_scope_path": str(run_scope_path),
@@ -3470,7 +3466,7 @@ def main():
     )
     finalize_single_run_history(output_dir, args, report_path)
 
-    report = load_json_document(report_path)
+    report = helper_load_json(report_path)
     structure_validation = report.get("structure_validation") or {}
     structure_passed = structure_validation.get("passed") if structure_validation.get("required") else True
     status = "STRUCTURE_OK" if structure_passed else "STRUCTURE_MISMATCH"

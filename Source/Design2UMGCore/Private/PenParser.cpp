@@ -8,9 +8,7 @@
 #include "DesignVariableResolver.h"
 #include "DesignJsonUtils.h"
 #include "DesignTreeLimits.h"
-#include "Misc/FileHelper.h"
 #include "Misc/DefaultValueHelper.h"
-#include "Misc/Paths.h"
 #include "PenParserInternal.h"
 #include "PenParserNodeExtensions.h"
 #include "ParserSharedSemantics.h"
@@ -31,25 +29,6 @@ bool ValidateNodeDepth(const TSharedPtr<FJsonObject>& JsonObj, FPenParserParseCo
 bool ValidateChildrenDepth(const TSharedPtr<FJsonValue>& ChildrenField, FPenParserParseContext& ParseContext, int32 Depth);
 TSharedPtr<FDesignNode> ParseNodeAtDepth(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver, FPenParserParseContext& ParseContext, int32 Depth);
 void AppendParsedChildrenAtDepth(const TSharedPtr<FJsonValue>& ChildrenField, const FDesignVariableResolver& Resolver, TArray<TSharedPtr<FDesignNode>>& OutChildren, FPenParserParseContext& ParseContext, int32 Depth);
-}
-
-bool FPenParser::ParseFromFile(const FString& FilePath, FDesignDocument& OutDocument)
-{
-	FString JsonString;
-	if (!FFileHelper::LoadFileToString(JsonString, *FilePath))
-	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to read design file. Verify the path is valid and not locked: %s"), *FilePath);
-		return false;
-	}
-	const bool bSuccess = ParseDocument(JsonString, OutDocument);
-	if (bSuccess)
-	{
-		const FString ResolvedFilePath = FPaths::ConvertRelativePathToFull(FilePath);
-		OutDocument.MutableSourceDocument().SourceFilePath = ResolvedFilePath;
-		OutDocument.Metadata.FindOrAdd(TEXT("design.sourceFilePath")) = ResolvedFilePath;
-		OutDocument.Metadata.FindOrAdd(TEXT("source.filePath")) = ResolvedFilePath;
-	}
-	return bSuccess;
 }
 
 bool FPenParser::ParseDocument(const FString& JsonString, FDesignDocument& OutDocument)

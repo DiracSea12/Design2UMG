@@ -4,7 +4,6 @@
 #include "DesignImportDiagnosticReport.h"
 #include "DesignImportPlanning.h"
 #include "Automation/Design2UMGAutomationIrDump.h"
-#include "Design2UMGEditorDesignSourceRegistry.h"
 
 #include "Design2UMGLog.h"
 #include "DesignImportDialogs.h"
@@ -404,36 +403,31 @@ namespace DesignImportPipeline
 
 		if (TargetNodeId.IsEmpty())
 		{
-			if (!Design2UMGEditorDesignSourceRegistry::TryParseSourceDocument(TEXT("Pen"), JsonString, OutDocument))
+			if (!FPenParser::ParseDocument(JsonString, OutDocument))
 			{
 				return Fail(FString::Printf(TEXT("Failed to parse pen source: %s"), *FilePath));
 			}
-
-			const FString ResolvedSourceFilePath = FPaths::ConvertRelativePathToFull(FilePath);
-			OutDocument.MutableSourceDocument().SourceFilePath = ResolvedSourceFilePath;
-			OutDocument.Metadata.Add(TEXT("design.sourceFilePath"), ResolvedSourceFilePath);
-			AnchorRelativeImageFillUrls(OutDocument, ResolvedSourceFilePath);
-			PencilExtensionResources::ReportPenResourceGaps(OutDocument);
-			return true;
 		}
-
-		TSharedPtr<FJsonObject> RootObject;
-		if (!DesignJsonUtils::TryParseObject(JsonString, RootObject))
+		else
 		{
-			return Fail(FString::Printf(TEXT("Failed to parse pen source JSON: %s"), *FilePath));
-		}
+			TSharedPtr<FJsonObject> RootObject;
+			if (!DesignJsonUtils::TryParseObject(JsonString, RootObject))
+			{
+				return Fail(FString::Printf(TEXT("Failed to parse pen source JSON: %s"), *FilePath));
+			}
 
-		TSharedPtr<FJsonObject> FilteredDocumentObject;
-		if (!FPenMCPBridge::BuildFilteredDocumentObject(RootObject, FilteredDocumentObject, TargetNodeId))
-		{
-			return Fail(FString::Printf(TEXT("Failed to filter pen source for target node '%s'"), *TargetNodeId));
-		}
+			TSharedPtr<FJsonObject> FilteredDocumentObject;
+			if (!FPenMCPBridge::BuildFilteredDocumentObject(RootObject, FilteredDocumentObject, TargetNodeId))
+			{
+				return Fail(FString::Printf(TEXT("Failed to filter pen source for target node '%s'"), *TargetNodeId));
+			}
 
-		if (!FPenParser::ParseDocumentObject(FilteredDocumentObject, OutDocument))
-		{
-			return Fail(FString::Printf(TEXT("Failed to parse filtered pen source: %s"), *FilePath));
+			if (!FPenParser::ParseDocumentObject(FilteredDocumentObject, OutDocument))
+			{
+				return Fail(FString::Printf(TEXT("Failed to parse filtered pen source: %s"), *FilePath));
+			}
+			FPenMCPBridge::PromoteSelectedNodeToRenderRoot(OutDocument, TargetNodeId);
 		}
-		FPenMCPBridge::PromoteSelectedNodeToRenderRoot(OutDocument, TargetNodeId);
 
 		const FString ResolvedSourceFilePath = FPaths::ConvertRelativePathToFull(FilePath);
 		OutDocument.MutableSourceDocument().SourceFilePath = ResolvedSourceFilePath;

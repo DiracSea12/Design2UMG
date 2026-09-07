@@ -262,11 +262,6 @@ namespace PencilExtensionResources
 		return true;
 	}
 
-	bool IsIconIndexRegistered()
-	{
-		return GetResourceState().bIconIndexLoaded;
-	}
-
 	void EnsureIconGlyphsRegistered()
 	{
 		FPencilResourceState& State = GetResourceState();
@@ -439,11 +434,6 @@ namespace PencilExtensionResources
 			++RegisteredCount;
 		}
 		return RegisteredCount;
-	}
-
-	bool IsBundledLibrariesRegistered()
-	{
-		return GetResourceState().bLibrariesLoaded;
 	}
 
 	void EnsureBundledLibrariesRegistered()

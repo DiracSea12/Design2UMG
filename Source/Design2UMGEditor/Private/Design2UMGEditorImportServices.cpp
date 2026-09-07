@@ -2,7 +2,6 @@
 
 #include "Design2UMGEditorImportServices.h"
 
-#include "Design2UMGEditorDesignSourceRegistry.h"
 #include "Design2UMGEditorImportOrchestrator.h"
 #include "Design2UMGEditorImportRequestSetup.h"
 #include "Design2UMGEditorImportSupport.h"
@@ -10,6 +9,7 @@
 #include "Design2UMGEditorUnattendedExit.h"
 #include "Design2UMGLog.h"
 #include "FigmaImageExporter.h"
+#include "FigmaParser.h"
 #include "Misc/App.h"
 #include "Widgets/Notifications/SNotificationList.h"
 
@@ -152,7 +152,7 @@ namespace Design2UMGEditorImportServices
 		}
 
 		FDesignDocument ParsedDocument;
-		if (!Design2UMGEditorDesignSourceRegistry::TryParseSourceDocument(TEXT("Figma"), Body, ParsedDocument))
+		if (!FFigmaParser::ParseDocument(Body, ParsedDocument))
 		{
 			Design2UMGEditorImportSupport::ShowNotification(LOCTEXT("FigmaParseFailed", "Design2UMG: Failed to parse Figma file"), SNotificationItem::CS_Fail);
 			Design2UMGEditorUnattendedExit::ExitUnattendedWithStatus(false, TEXT("Unattended mode: figma parse failed; exiting with status 1"));

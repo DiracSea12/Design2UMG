@@ -1,7 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "PenMCPBridge.h"
-#include "Design2UMGEditorDesignSourceRegistry.h"
 #include "DesignImportPipeline.h"
 #include "DesignJsonUtils.h"
 #include "DesignSchema.h"

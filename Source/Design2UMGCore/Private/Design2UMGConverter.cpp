@@ -18,7 +18,7 @@
 #include "ImageFillUtils.h"
 #include "LayoutMapper.h"
 #include "SizeEstimator.h"
-#include "SharedCoreSemantics.h"
+#include "DesignNodeSemantics.h"
 #include "TextMeasurement.h"
 #include "RefExpander.h"
 
@@ -109,7 +109,7 @@ namespace Design2UMGConverterPrivate
 			return false;
 		}
 
-		if (Node->Children.Num() > 0 || Design2UMGCore::SharedSemantics::HasRenderableVisual(Node))
+		if (Node->Children.Num() > 0 || Design2UMGCore::DesignNodeSemantics::HasRenderableVisual(Node))
 		{
 			return false;
 		}
@@ -129,7 +129,7 @@ namespace Design2UMGConverterPrivate
 
 		for (const TSharedPtr<FDesignNode>& Child : Node->Children)
 		{
-			if (!Design2UMGCore::SharedSemantics::ShouldSkipNode(Child) || ShouldKeepStructuralLeafInFlow(Child, Node->LayoutData.Layout))
+			if (!Design2UMGCore::DesignNodeSemantics::ShouldSkipNode(Child) || ShouldKeepStructuralLeafInFlow(Child, Node->LayoutData.Layout))
 			{
 				OutVisibleChildren.Add(Child);
 			}
@@ -178,7 +178,7 @@ namespace Design2UMGConverterPrivate
 			}
 
 			const bool bUsingRenderFallback = Design2UMGConverterVisualSupport::ShouldUseRenderFallback(Node);
-			FUMGWidgetNode Widget = CreateBaseWidgetForNode(Node, Context.State);
+			FUMGWidgetNode Widget = CreateBaseWidgetForNode(Node, Context.State, bUsingRenderFallback);
 			LogCreatedWidget(Widget, Node);
 
 			if (!bUsingRenderFallback)
@@ -199,7 +199,7 @@ namespace Design2UMGConverterPrivate
 
 		bool ShouldConvertNode(const TSharedPtr<FDesignNode>& Node, const EDesignLayout ParentLayout) const
 		{
-			return !Design2UMGCore::SharedSemantics::ShouldSkipNode(Node) || ShouldKeepStructuralLeafInFlow(Node, ParentLayout);
+			return !Design2UMGCore::DesignNodeSemantics::ShouldSkipNode(Node) || ShouldKeepStructuralLeafInFlow(Node, ParentLayout);
 		}
 
 		Design2UMGConverterInternal::FFlowChildPreResolutionResolver BuildPreResolutionResolver(
@@ -460,9 +460,9 @@ namespace Design2UMGConverterPrivate
 			return MoveTemp(Widget);
 		}
 
-		FUMGWidgetNode CreateBaseWidgetForNode(const TSharedPtr<FDesignNode>& Node, FConversionState& State) const
+		FUMGWidgetNode CreateBaseWidgetForNode(const TSharedPtr<FDesignNode>& Node, FConversionState& State, const bool bUsingRenderFallback) const
 		{
-			if (Design2UMGConverterVisualSupport::ShouldUseRenderFallback(Node))
+			if (bUsingRenderFallback)
 			{
 				return Design2UMGConverterInternal::CreateFallbackBranchWidget(Node);
 			}
@@ -576,7 +576,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 	VisibleChildren.Reserve(Children.Num());
 	for (const auto& Child : Children)
 	{
-		if (!Design2UMGCore::SharedSemantics::ShouldSkipNode(Child))
+		if (!Design2UMGCore::DesignNodeSemantics::ShouldSkipNode(Child))
 		{
 			VisibleChildren.Add(Child);
 		}

@@ -2,7 +2,6 @@
 
 #include "Design2UMGEditorImportOrchestrator.h"
 
-#include "Design2UMGEditorDesignSourceRegistry.h"
 #include "Design2UMGEditorImportFrameSelection.h"
 #include "Design2UMGEditorImportRequestSetup.h"
 #include "Design2UMGEditorImportStateSubsystem.h"
@@ -17,12 +16,48 @@
 #include "FontResolver.h"
 #include "Misc/DateTime.h"
 #include "Misc/Paths.h"
+#include "PenParser.h"
 #include "ProceduralShapeGenerator.h"
 
 #define LOCTEXT_NAMESPACE "FDesign2UMGEditorModule"
 
 namespace
 {
+	// Design2UMG.ImportSource dispatch: "Pen" parses with FPenParser, "Figma"
+	// with FFigmaParser; any other source id fails (no silent fallback).
+	bool ConvertRegisteredSource(
+		const FName SourceId,
+		const FString& JsonContents,
+		const FDesign2UMGImportSettingsSnapshot& SettingsSnapshot,
+		FUMGWidgetData& OutData)
+	{
+		FDesignDocument Document;
+		if (SourceId == TEXT("Pen"))
+		{
+			if (!FPenParser::ParseDocument(JsonContents, Document))
+			{
+				return false;
+			}
+		}
+		else if (SourceId == TEXT("Figma"))
+		{
+			if (!FFigmaParser::ParseDocument(JsonContents, Document))
+			{
+				return false;
+			}
+		}
+		else
+		{
+			return false;
+		}
+
+		FImportAnalysisInput AnalysisInput;
+		AnalysisInput.bResolveImages = false;
+		AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
+		OutData = DesignImportPipeline::AnalyzeImport(Document, AnalysisInput).Data;
+		return true;
+	}
+
 	void ImportPenFileWithFrameSelection(
 		const Design2UMGEditorImportOrchestrator::FPenImportRequest& Request,
 		const FDesign2UMGImportSettingsSnapshot& SettingsSnapshot)
@@ -157,7 +192,7 @@ namespace Design2UMGEditorImportOrchestrator
 		{
 			const FDesign2UMGImportSettingsSnapshot SettingsSnapshot =
 				Design2UMGEditorImportRequestSetup::CaptureSettingsSnapshot();
-			if (!Design2UMGEditorDesignSourceRegistry::TryConvertSource(
+			if (!ConvertRegisteredSource(
 				Request.SourceId,
 				JsonContents,
 				SettingsSnapshot,

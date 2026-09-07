@@ -1,4 +1,4 @@
-﻿# Requires: PowerShell 5.1+
+# Requires: PowerShell 5.1+
 param(
     [string]$RepoRoot = (Get-Location).Path,
     [ValidateSet('SourceWorkspace', 'Package', 'ExportWorkspace')]

@@ -65,24 +65,6 @@ namespace FlexibleFieldParsing
 	}
 
 	template <typename NumberType>
-	bool TryGetNumberFieldFlexible(
-		const TSharedPtr<FJsonObject>& Obj,
-		const FString& FieldName,
-		NumberType& OutValue)
-	{
-		if (!Obj.IsValid() || !Obj->HasField(FieldName))
-			return false;
-		const TSharedPtr<FJsonValue> FieldValue = Obj->TryGetField(FieldName);
-		if (!FieldValue.IsValid())
-			return false;
-		double Parsed = 0.0;
-		if (!TryGetNumberValueFlexible(FieldValue, Parsed))
-			return false;
-		OutValue = static_cast<NumberType>(Parsed);
-		return true;
-	}
-
-	template <typename NumberType>
 	bool TryGetResolvedNumberField(
 		const TSharedPtr<FJsonObject>& Obj,
 		const FString& FieldName,
@@ -132,7 +114,6 @@ namespace FlexibleFieldParsing
 	}
 }
 
-using FlexibleFieldParsing::TryGetNumberFieldFlexible;
 using FlexibleFieldParsing::TryGetNumberValueFlexible;
 using FlexibleFieldParsing::TryGetResolvedBoolField;
 using FlexibleFieldParsing::TryGetResolvedNumberField;

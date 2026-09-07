@@ -977,7 +977,7 @@ bool FPenParserUnresolvablePaintTest::RunTest(const FString&)
 	TestEqual(TEXT("variable fill color"), Doc.Children[3]->Visual.TopmostFill().SolidColor, FString(TEXT("#DC2626")));
 
 	// A malformed hex-prefixed literal keeps the legacy pass-through contract
-	// (renderer fallback stays authoritative), matching SharedCoreSemanticsTests.
+	// (renderer fallback stays authoritative), matching DesignNodeSemanticsTests.
 	TestEqual(TEXT("malformed hex fill type"), Doc.Children[4]->Visual.TopmostFill().Type, EDesignFillType::Color);
 	TestEqual(TEXT("malformed hex stays untouched"), Doc.Children[4]->Visual.TopmostFill().SolidColor, FString(TEXT("#xyz")));
 

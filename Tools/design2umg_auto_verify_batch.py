@@ -215,7 +215,7 @@ def validate_explicit_batch_game_output_root(game_output_root: str, cases: list[
 
 
 def record_effective_game_output_root(run_scope_path: Path, args) -> None:
-    run_scope = verify.load_json_document(run_scope_path)
+    run_scope = verify.helper_load_json(run_scope_path)
     run_scope["game_output"] = {
         "explicit": bool(getattr(args, "game_output_explicit", False)),
         "effective_root": getattr(args, "effective_game_output_root", getattr(args, "game_output", "")),
@@ -250,7 +250,7 @@ def prepare_external_reference(case_args, case: dict, reference_root: Path, outp
     }
     if source_structure_path.is_file():
         try:
-            reference_context["source_structure_live"] = verify.load_json_document(source_structure_path)
+            reference_context["source_structure_live"] = verify.helper_load_json(source_structure_path)
             reference_context["source_structure_live_path"] = str(source_structure_path)
         except EvidenceReadError as exc:
             reference_context["source_structure_live_unavailable"] = {
@@ -866,7 +866,7 @@ def run_execution_cases(
 
 
 def load_step_spec(step: dict) -> dict:
-    return verify.load_json_document(step["spec_path"])
+    return verify.helper_load_json(step["spec_path"])
 
 
 def ensure_step_dependencies_ready(case_name: str, step_key: str, step: dict) -> None:
@@ -882,7 +882,7 @@ def ensure_step_dependencies_ready(case_name: str, step_key: str, step: dict) ->
             f"{case_name}:{step_key} missing generated asset dependency result {dependency_path}"
         )
 
-    dependency_result = verify.load_json_document(dependency_path)
+    dependency_result = verify.helper_load_json(dependency_path)
     generated_asset_path = str(dependency_result.get("generated_asset_path", "")).strip()
     if not dependency_result.get("success") or not generated_asset_path:
         raise RuntimeError(
@@ -1315,7 +1315,7 @@ def process_case_result(state: dict, batch_exit_code: int, batch_log_path: Path)
         reference_context,
         render_chain,
     )
-    report = verify.load_json_document(report_path)
+    report = verify.helper_load_json(report_path)
     no_regression = evaluate_no_regression(report, state.get("baseline_case_dir"), args.pixel_tolerance, args.no_regression_epsilon)
     report["no_regression"] = no_regression
     structure_report_block, structure_result_fields = assemble_structure_baseline(state.get("baseline_case_dir"), report)

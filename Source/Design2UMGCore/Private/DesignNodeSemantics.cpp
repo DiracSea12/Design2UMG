@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
-#include "SharedCoreSemantics.h"
+#include "DesignNodeSemantics.h"
 
-namespace Design2UMGCore::SharedSemantics
+namespace Design2UMGCore::DesignNodeSemantics
 {
 	namespace
 	{

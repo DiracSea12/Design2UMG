@@ -3,7 +3,6 @@
 #include "Design2UMGTextWidgetBuilder.h"
 
 #include "Design2UMGLog.h"
-#include "Design2UMGSettings.h"
 #include "DesignTypeMapper.h"
 #include "FontResolver.h"
 #include "TextMeasurement.h"
@@ -11,6 +10,7 @@
 #include "TextFontResolution.h"
 #include "UMGValueParser.h"
 #include "UMGWidgetNodeAccess.h"
+#include "Engine/Font.h"
 #include "Misc/PackageName.h"
 #include "RichTextStyleRowSerializer.h"
 
@@ -197,28 +197,6 @@ FString Design2UMGTextWidgetBuilder::FIconFontSettingsSnapshot::FindIconFontAsse
 	}
 
 	return FString();
-}
-
-Design2UMGTextWidgetBuilder::FIconFontSettingsSnapshot Design2UMGTextWidgetBuilder::BuildIconFontSettingsSnapshot(const UDesign2UMGSettings* Settings)
-{
-	FIconFontSettingsSnapshot Snapshot;
-	if (!Settings)
-	{
-		return Snapshot;
-	}
-
-	Snapshot.DefaultIconFontAssetPath = Settings->DefaultIconFontAssetPath;
-	Snapshot.MissingIconFontPlaceholder = Settings->MissingIconFontPlaceholder;
-	for (const TPair<FString, TSoftObjectPtr<UFont>>& Pair : Settings->IconFontAssetMap)
-	{
-		const FSoftObjectPath AssetPath = Pair.Value.ToSoftObjectPath();
-		if (!AssetPath.IsNull())
-		{
-			Snapshot.IconFontAssetPaths.Add(Pair.Key, AssetPath.ToString());
-		}
-	}
-
-	return Snapshot;
 }
 
 FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FDesignNode>& Node)

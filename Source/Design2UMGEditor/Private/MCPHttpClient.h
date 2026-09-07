@@ -43,7 +43,7 @@ public:
 	void CancelActiveRequest();
 	void CancelRequests() { CancelActiveRequest(); }
 
-	bool IsConnected() const { return !SessionId.IsEmpty(); }
+	bool IsConnected() const { return Session.IsValid() && !Session->SessionId.IsEmpty(); }
 
 private:
 	/** Shared delivered-flag for the in-flight request's cancel-failure path. */
@@ -52,29 +52,47 @@ private:
 		bool bDelivered = false;
 	};
 
-	FString ServerEndpoint;
-	FString SessionId;
-	/** JSON-RPC id embedded in outgoing request bodies (resets on Disconnect). */
-	int32 NextRpcRequestId = 1;
-	TSharedRef<class FDesignHttpClientSlot, ESPMode::ThreadSafe> State;
 	/**
-	 * Failure callback owed to the in-flight request when a new request
-	 * supersedes it: single-flight cancellation would otherwise never fire
-	 * the old callback. The shared state lets the real completion paths mark
-	 * it delivered, so the callback fires at most once. Cleared silently on
-	 * Disconnect.
+	 * Shared connection-session state. Async callbacks (handshake hops, HTTP
+	 * completions) capture a shared pointer to this instead of the client
+	 * object, so a late callback never dereferences a destroyed client.
+	 * Replaced wholesale by each ConnectAsync after Disconnect.
 	 */
-	TSharedPtr<FInFlightCancelState, ESPMode::ThreadSafe> InFlightCancelState;
-	TFunction<void()> InFlightCancelFailure;
+	struct FConnectSession
+	{
+		FString ServerEndpoint;
+		FString SessionId;
+		/** JSON-RPC id embedded in outgoing request bodies (fresh per session). */
+		int32 NextRpcRequestId = 1;
+		/**
+		 * Failure callback owed to the in-flight request when a new request
+		 * supersedes it: single-flight cancellation would otherwise never fire
+		 * the old callback. The shared state lets the real completion paths mark
+		 * it delivered, so the callback fires at most once. Cleared silently on
+		 * Disconnect.
+		 */
+		TSharedPtr<FInFlightCancelState, ESPMode::ThreadSafe> InFlightCancelState;
+		TFunction<void()> InFlightCancelFailure;
+	};
+
+	/** Client-lifetime request slot; its tracking ids stay monotonic across sessions. */
+	TSharedRef<class FDesignHttpClientSlot, ESPMode::ThreadSafe> State;
+	/** Current connection session; null while disconnected. */
+	TSharedPtr<FConnectSession, ESPMode::ThreadSafe> Session;
 
 	/**
 	 * Send one JSON-RPC request and track cancellation for it.
+	 * Static on purpose: every piece of state it touches is shared (the
+	 * client-lifetime slot plus the connection session), so async callbacks
+	 * can invoke it without capturing the client object.
 	 * @param LogLabel              Label used in log lines; defaults to Method when empty.
 	 * @param bLogTransportErrors   When false, connection/HTTP failures are reported to
 	 *                              OnComplete without the transport Error log lines
 	 *                              (tools/call callers own their failure reporting).
 	 */
-	void SendRequestAsync(
+	static void SendRequestAsync(
+		const TSharedRef<class FDesignHttpClientSlot, ESPMode::ThreadSafe>& State,
+		const TSharedPtr<FConnectSession, ESPMode::ThreadSafe>& Session,
 		const FString& Method,
 		const TSharedPtr<FJsonObject>& Params,
 		bool bExpectResponse,

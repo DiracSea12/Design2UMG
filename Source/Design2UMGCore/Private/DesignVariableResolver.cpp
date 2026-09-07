@@ -145,19 +145,6 @@ float FDesignVariableResolver::ResolveNumber(const FString& Value) const
 	return FCString::Atof(*Value);
 }
 
-bool FDesignVariableResolver::ResolveBoolean(const FString& Value) const
-{
-	FString Resolved = IsVariableRef(Value) ? ResolveString(Value) : Value;
-	Resolved = Resolved.TrimStartAndEnd().ToLower();
-
-	if (Resolved == TEXT("true") || Resolved == TEXT("1") || Resolved == TEXT("yes") || Resolved == TEXT("on"))
-		return true;
-	if (Resolved == TEXT("false") || Resolved == TEXT("0") || Resolved == TEXT("no") || Resolved == TEXT("off"))
-		return false;
-
-	return false;
-}
-
 FString FDesignVariableResolver::ResolveColor(const FString& Value) const
 {
 	return DesignColorUtils::NormalizeLiteral(ResolveString(Value));

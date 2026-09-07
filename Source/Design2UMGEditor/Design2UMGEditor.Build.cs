@@ -9,7 +9,9 @@ public class Design2UMGEditor : ModuleRules
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
 		// Public dependencies are limited to types exposed by Public/*.h:
-		// preview Slate widgets, UUserWidget surfaces, and Design2UMGCore data contracts.
+		// module entrypoint, preview contracts, UUserWidget surfaces, and
+		// Design2UMGCore data contracts. Preview Slate widgets and connector
+		// clients live under Private/.
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
 			"Core",

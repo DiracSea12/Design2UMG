@@ -80,6 +80,11 @@ namespace
 		}
 	}
 
+	// Known limitation: "unset" is detected by comparing against each field's default
+	// value (e.g. JustifyContent != Start), so a default-valued override is
+	// indistinguishable from an unset one and an instance cannot override a component
+	// property back to its enum default. Migrating these fields to TOptional is the
+	// known follow-up.
 	void ApplyOverrideProperties(FDesignNode& Target, const FDesignNode& Override)
 	{
 		ApplyCommonOverrideProperties(Target, Override);

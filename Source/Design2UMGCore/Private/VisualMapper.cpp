@@ -5,7 +5,7 @@
 #include "DesignColorUtils.h"
 #include "ImageFillUtils.h"
 #include "LayoutMapper.h"
-#include "SharedCoreSemantics.h"
+#include "DesignNodeSemantics.h"
 #include "VisualMapperFillTransfer.h"
 #include "Design2UMGLog.h"
 #include "UMGPropertyKeys.h"
@@ -557,7 +557,7 @@ namespace
 			{
 				for (const TSharedPtr<FDesignNode>& Child : Node->Children)
 				{
-					if (!Design2UMGCore::SharedSemantics::ShouldSkipNode(Child))
+					if (!Design2UMGCore::DesignNodeSemantics::ShouldSkipNode(Child))
 					{
 						VisibleChildren.Add(Child);
 					}

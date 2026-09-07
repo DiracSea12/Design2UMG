@@ -6,8 +6,6 @@
 #include "DesignSchema.h"
 #include "UMGSchema.h"
 
-class UDesign2UMGSettings;
-
 namespace Design2UMGTextWidgetBuilder
 {
 	struct FIconFontSettingsSnapshot
@@ -18,8 +16,6 @@ namespace Design2UMGTextWidgetBuilder
 
 		FString FindIconFontAssetPath(const FString& FontFamily) const;
 	};
-
-	FIconFontSettingsSnapshot BuildIconFontSettingsSnapshot(const UDesign2UMGSettings* Settings = nullptr);
 
 	struct FIconFontBuildArgs
 	{

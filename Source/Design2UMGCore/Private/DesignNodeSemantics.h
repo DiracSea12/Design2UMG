@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "DesignSchema.h"
 
-namespace Design2UMGCore::SharedSemantics
+namespace Design2UMGCore::DesignNodeSemantics
 {
 	bool HasVisibleFill(const FDesignFill& Fill);
 	bool IsDesignerOnlyNodeType(EDesignNodeType Type);

@@ -3,7 +3,6 @@
 #include "Design2UMGEditorModule.h"
 
 #include "Design2UMGEditorCommandOwner.h"
-#include "Design2UMGEditorDesignSourceRegistry.h"
 #include "Design2UMGEditorImportOrchestrator.h"
 #include "Design2UMGEditorMenuOwner.h"
 #include "Design2UMGLog.h"
@@ -96,7 +95,6 @@ void FDesign2UMGEditorModule::StartupModule()
 		FDesign2UMGMessageNotificationHandler::CreateStatic(&ShowEditorErrorNotification));
 	FDesign2UMGNotification::RegisterInfoHandler(
 		FDesign2UMGMessageNotificationHandler::CreateStatic(&ShowEditorInfoNotification));
-	Design2UMGEditorDesignSourceRegistry::RegisterBuiltInSources();
 	Design2UMGEditorCommandOwner::RegisterConsoleCommands();
 	ToolMenusStartupHandle = Design2UMGEditorMenuOwner::RegisterMenus();
 	IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
@@ -129,7 +127,6 @@ void FDesign2UMGEditorModule::ShutdownModule()
 	Design2UMGEditorImportOrchestrator::ShutdownTransientState();
 	Design2UMGEditorMenuOwner::UnregisterMenus(ToolMenusStartupHandle, this);
 	Design2UMGEditorCommandOwner::UnregisterConsoleCommands();
-	Design2UMGEditorDesignSourceRegistry::UnregisterBuiltInSources();
 }
 
 void FDesign2UMGEditorModule::HandleFontAssetChanged(const FAssetData& AssetData)

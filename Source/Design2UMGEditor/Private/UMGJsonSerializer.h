@@ -12,7 +12,6 @@ struct FUMGWidgetNode;
 
 /**
  * Editor-facing JSON serialize bridge/debug utility for preview and import workflows.
- * Kept public for source compatibility; this is not a runtime module API promise.
  */
 class DESIGN2UMGEDITOR_API FUMGJsonSerializer
 {

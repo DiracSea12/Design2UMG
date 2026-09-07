@@ -5,7 +5,7 @@
 #include "DesignSchema.h"
 #include "DesignTypeMapper.h"
 #include "ParserSharedSemantics.h"
-#include "SharedCoreSemantics.h"
+#include "DesignNodeSemantics.h"
 #include "UMGSchemaSourceExtensions.h"
 
 namespace
@@ -323,7 +323,7 @@ FUMGWidgetNode LayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, const
 	float SourceTextBoxWidth = 0.0f;
 	float SourceTextBoxHeight = 0.0f;
 	const bool bHasConcreteSourceTextBoxSize =
-		Design2UMGCore::SharedSemantics::TryGetConcreteSourceTextBoxSize(ChildNode, SourceTextBoxWidth, SourceTextBoxHeight);
+		Design2UMGCore::DesignNodeSemantics::TryGetConcreteSourceTextBoxSize(ChildNode, SourceTextBoxWidth, SourceTextBoxHeight);
 
 	if (bHasConcreteSourceTextBoxSize)
 	{

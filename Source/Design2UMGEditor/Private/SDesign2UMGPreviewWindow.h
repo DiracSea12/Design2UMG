@@ -16,7 +16,6 @@ DECLARE_DELEGATE(FOnPreviewCancelled);
 
 /**
  * Editor preview UI contract for Design2UMG preview workflows.
- * Public for editor composition only; this is not a runtime extensibility promise.
  */
 class DESIGN2UMGEDITOR_API SDesign2UMGPreviewWindow : public SCompoundWidget
 {

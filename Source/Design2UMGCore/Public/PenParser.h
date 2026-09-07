@@ -28,13 +28,5 @@ public:
 	 * @return `true` when parsing succeeds.
 	 */
 	static bool ParseDocumentObject(const TSharedPtr<FJsonObject>& JsonObject, FDesignDocument& OutDocument);
-
-	/**
-	 * Load and parse a Pencil `.pen` file from disk.
-	 * @param FilePath Absolute or project-relative file path.
-	 * @param OutDocument Parsed document on success.
-	 * @return `true` when the file loads and parses successfully.
-	 */
-	static bool ParseFromFile(const FString& FilePath, FDesignDocument& OutDocument);
 };
 

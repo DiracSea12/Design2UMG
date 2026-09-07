@@ -81,6 +81,11 @@ FString Design2UMGWidgetNodeAccess::SerializeWidgetMargin(const FMargin& Value)
 	return FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"), Value.Left, Value.Top, Value.Right, Value.Bottom);
 }
 
+FString Design2UMGWidgetNodeAccess::SerializeWidgetMargin(const FMargin& Value, const int32 Precision)
+{
+	return FString::Printf(TEXT("%.*f,%.*f,%.*f,%.*f"), Precision, Value.Left, Precision, Value.Top, Precision, Value.Right, Precision, Value.Bottom);
+}
+
 FString Design2UMGWidgetNodeAccess::SerializeWidgetColor(const FLinearColor& Value)
 {
 	return FString::Printf(TEXT("#%s"), *Value.ToFColor(true).ToHex());
@@ -89,6 +94,11 @@ FString Design2UMGWidgetNodeAccess::SerializeWidgetColor(const FLinearColor& Val
 FString Design2UMGWidgetNodeAccess::SerializeWidgetVector4(const FVector4& Value)
 {
 	return FString::Printf(TEXT("%.1f,%.1f,%.1f,%.1f"), Value.X, Value.Y, Value.Z, Value.W);
+}
+
+FString Design2UMGWidgetNodeAccess::SerializeWidgetVector4(const FVector4& Value, const int32 Precision)
+{
+	return FString::Printf(TEXT("%.*f,%.*f,%.*f,%.*f"), Precision, Value.X, Precision, Value.Y, Precision, Value.Z, Precision, Value.W);
 }
 
 FString Design2UMGWidgetNodeAccess::SerializeImageTransform(const FUMGVisualBrushData::FImageTransformData& Value)

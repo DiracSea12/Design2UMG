@@ -33,9 +33,4 @@ namespace PenBundledLibraries
 		}
 		return false;
 	}
-
-	int32 NumRegisteredLibraries()
-	{
-		return GetRegistry().Num();
-	}
 }

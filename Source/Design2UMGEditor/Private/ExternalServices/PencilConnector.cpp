@@ -50,6 +50,16 @@ namespace
 			*OnComplete = nullptr;
 		}
 	}
+
+	/** (Re)arm a shared retry ticker handle; the only place that schedules retry tickers. */
+	void ScheduleTickerOnHandle(const TSharedPtr<FTSTicker::FDelegateHandle>& Handle, FTickerDelegate&& RetryDelegate, const float DelaySeconds)
+	{
+		if (Handle->IsValid())
+		{
+			FTSTicker::GetCoreTicker().RemoveTicker(*Handle);
+		}
+		*Handle = FTSTicker::GetCoreTicker().AddTicker(MoveTemp(RetryDelegate), DelaySeconds);
+	}
 }
 
 FPencilConnector::~FPencilConnector()
@@ -161,7 +171,7 @@ int32 FPencilConnector::FindAvailablePort(int32 StartPort)
 void FPencilConnector::LaunchAsync(int32 Port, TFunction<void(bool bSuccess)> OnComplete)
 {
 	Shutdown();
-	const int32 LaunchToken = ++ActiveLaunchToken;
+	RetryTickerHandle = MakeShared<FTSTicker::FDelegateHandle>();
 	const TSharedRef<TFunction<void(bool bSuccess)>> SharedComplete =
 		MakeShared<TFunction<void(bool bSuccess)>>(MoveTemp(OnComplete));
 
@@ -174,52 +184,64 @@ void FPencilConnector::LaunchAsync(int32 Port, TFunction<void(bool bSuccess)> On
 	}
 
 	const FString AppName = DetectAppName();
-	ServerPort = (Port > 0) ? Port : FindAvailablePort();
+	const int32 ServerPort = (Port > 0) ? Port : FindAvailablePort();
 
 	const FString Args = FString::Printf(TEXT("-app %s -http -http-port %d"), *AppName, ServerPort);
 	UE_LOG(LogDesign2UMG, Log, TEXT("PencilConnector: Launching %s %s"), *ServerPath, *Args);
 
-	ServerProcess = FPlatformProcess::CreateProc(
+	const FProcHandle Process = FPlatformProcess::CreateProc(
 		*ServerPath, *Args,
 		false, true, true,
 		nullptr, 0, nullptr, nullptr);
 
-	if (!ServerProcess.IsValid())
+	if (!Process.IsValid())
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("PencilConnector: Failed to launch MCP Server"));
 		CompleteLaunchOnce(SharedComplete, false);
 		return;
 	}
 
+	const TSharedPtr<FLaunchSession, ESPMode::ThreadSafe> Session = MakeShared<FLaunchSession, ESPMode::ThreadSafe>(Client);
+	Session->ServerProcess = Process;
+	Session->TickerHandle = RetryTickerHandle;
+	ActiveLaunchSession = Session;
+
 	const FString Endpoint = FString::Printf(TEXT("http://localhost:%d/mcp"), ServerPort);
 	constexpr double MaxWaitSeconds = 10.0;
 	const double DeadlineSeconds = FPlatformTime::Seconds() + MaxWaitSeconds;
-	TryConnectAsync(Endpoint, DeadlineSeconds, LaunchToken, SharedComplete);
+	TryConnectAsync(Session, Endpoint, DeadlineSeconds, SharedComplete);
 }
 
+// Re-entry guard invariant, kept in full because each layer covers a case the
+// others cannot: (1) the shared session's cancelled flag rejects callbacks
+// from a superseded or shut-down launch, (2) CompleteLaunchOnce nulls the
+// shared callback so one launch completes at most once, (3) Shutdown removes
+// a queued retry ticker, and (4) the destructor calls Shutdown so nothing
+// queued outlives the connector. Callbacks also hold shared state only, so
+// even if a guard missed, nothing dereferences the connector.
 void FPencilConnector::TryConnectAsync(
+	const TSharedPtr<FLaunchSession, ESPMode::ThreadSafe>& Session,
 	const FString& Endpoint,
 	double DeadlineSeconds,
-	int32 LaunchToken,
 	const TSharedRef<TFunction<void(bool bSuccess)>>& OnComplete)
 {
-	if (LaunchToken != ActiveLaunchToken)
+	if (Session->bCancelled)
 	{
 		CompleteLaunchOnce(OnComplete, false);
 		return;
 	}
 
-	if (!ServerProcess.IsValid() || !FPlatformProcess::IsProcRunning(ServerProcess))
+	if (!Session->ServerProcess.IsValid() || !FPlatformProcess::IsProcRunning(Session->ServerProcess))
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("PencilConnector: MCP Server process exited prematurely"));
-		Shutdown();
+		ShutdownLaunchSession(Session);
 		CompleteLaunchOnce(OnComplete, false);
 		return;
 	}
 
-	Client.ConnectAsync(Endpoint, [this, Endpoint, DeadlineSeconds, LaunchToken, OnComplete](bool bConnected)
+	Session->Client->ConnectAsync(Endpoint, [Session, Endpoint, DeadlineSeconds, OnComplete](bool bConnected)
 	{
-		if (LaunchToken != ActiveLaunchToken)
+		if (Session->bCancelled)
 		{
 			CompleteLaunchOnce(OnComplete, false);
 			return;
@@ -235,16 +257,16 @@ void FPencilConnector::TryConnectAsync(
 		if (FPlatformTime::Seconds() >= DeadlineSeconds)
 		{
 			UE_LOG(LogDesign2UMG, Error, TEXT("PencilConnector: Timed out waiting for %s"), *Endpoint);
-			Shutdown();
+			ShutdownLaunchSession(Session);
 			CompleteLaunchOnce(OnComplete, false);
 			return;
 		}
 
-		ScheduleRetry(
-			FTickerDelegate::CreateLambda([this, Endpoint, DeadlineSeconds, LaunchToken, OnComplete](float)
+		ScheduleTickerOnHandle(Session->TickerHandle,
+			FTickerDelegate::CreateLambda([Session, Endpoint, DeadlineSeconds, OnComplete](float)
 			{
-				RetryTickerHandle.Reset();
-				TryConnectAsync(Endpoint, DeadlineSeconds, LaunchToken, OnComplete);
+				Session->TickerHandle->Reset();
+				TryConnectAsync(Session, Endpoint, DeadlineSeconds, OnComplete);
 				return false;
 			}),
 			0.2f);
@@ -253,36 +275,45 @@ void FPencilConnector::TryConnectAsync(
 
 void FPencilConnector::ScheduleRetry(FTickerDelegate&& RetryDelegate, const float DelaySeconds)
 {
-	if (RetryTickerHandle.IsValid())
+	ScheduleTickerOnHandle(RetryTickerHandle, MoveTemp(RetryDelegate), DelaySeconds);
+}
+
+void FPencilConnector::ShutdownLaunchSession(const TSharedPtr<FLaunchSession, ESPMode::ThreadSafe>& Session)
+{
+	Session->bCancelled = true;
+	if (Session->TickerHandle->IsValid())
 	{
-		FTSTicker::GetCoreTicker().RemoveTicker(RetryTickerHandle);
+		FTSTicker::GetCoreTicker().RemoveTicker(*Session->TickerHandle);
+		Session->TickerHandle->Reset();
 	}
-	RetryTickerHandle = FTSTicker::GetCoreTicker().AddTicker(MoveTemp(RetryDelegate), DelaySeconds);
+	Session->Client->Disconnect();
+
+	if (Session->ServerProcess.IsValid())
+	{
+		FPlatformProcess::TerminateProc(Session->ServerProcess, true);
+		FPlatformProcess::CloseProc(Session->ServerProcess);
+		Session->ServerProcess.Reset();
+	}
 }
 
 void FPencilConnector::Shutdown()
 {
-	++ActiveLaunchToken;
-	if (RetryTickerHandle.IsValid())
+	if (ActiveLaunchSession.IsValid())
 	{
-		FTSTicker::GetCoreTicker().RemoveTicker(RetryTickerHandle);
-		RetryTickerHandle.Reset();
+		ShutdownLaunchSession(ActiveLaunchSession);
+		ActiveLaunchSession.Reset();
 	}
-	Client.Disconnect();
-
-	if (ServerProcess.IsValid())
+	if (RetryTickerHandle.IsValid() && RetryTickerHandle->IsValid())
 	{
-		FPlatformProcess::TerminateProc(ServerProcess, true);
-		FPlatformProcess::CloseProc(ServerProcess);
-		ServerProcess.Reset();
+		FTSTicker::GetCoreTicker().RemoveTicker(*RetryTickerHandle);
 	}
-
-	ServerPort = 0;
+	RetryTickerHandle.Reset();
 }
 
 bool FPencilConnector::IsRunning() const
 {
-	return ServerProcess.IsValid()
-		&& FPlatformProcess::IsProcRunning(ServerProcess)
-		&& Client.IsConnected();
+	return ActiveLaunchSession.IsValid()
+		&& ActiveLaunchSession->ServerProcess.IsValid()
+		&& FPlatformProcess::IsProcRunning(ActiveLaunchSession->ServerProcess)
+		&& Client->IsConnected();
 }

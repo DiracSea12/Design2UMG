@@ -141,7 +141,7 @@ def test_discovery_and_run_scope_contracts() -> None:
         args = SimpleNamespace(include="figma", exclude="")
         all_cases = [pen_cases[0], figma_cases[0]]
         run_scope_path = batch_discovery.write_run_scope(output_root, args, all_cases, default_roots)
-        run_scope = verify.load_json_document(run_scope_path)
+        run_scope = verify.helper_load_json(run_scope_path)
         assert_equal(run_scope["scope"], "focus")
         assert_equal(run_scope["formal_admissible_candidate"], False)
         assert_equal(run_scope["discovered_total"], 2)
@@ -838,7 +838,7 @@ def test_step_editor_isolation_runs_single_specs_in_dependency_order() -> None:
             def fake_runner(editor_path, project_path, driver_script_path, result_paths, log_path, idle_timeout_sec, startup_timeout_sec, log_cmds="") -> int:
                 spec_path = driver_specs[driver_script_path][0]
                 calls.append(spec_path.name)
-                spec = verify.load_json_document(spec_path)
+                spec = verify.helper_load_json(spec_path)
                 result_path = Path(spec["result_json_path"])
                 if spec["mode"] == "pen":
                     verify.write_json(result_path, {"success": True, "generated_asset_path": "/Game/Generated.CaseA"})
@@ -884,7 +884,7 @@ def test_step_editor_isolation_uses_short_driver_script_names() -> None:
                 return driver_path
 
             def fake_runner(editor_path, project_path, driver_script_path, result_paths, log_path, idle_timeout_sec, startup_timeout_sec, log_cmds="") -> int:
-                spec = verify.load_json_document(Path(result_paths[0]).with_name("automation_generate_spec.json")) if "generate" in str(result_paths[0]) else None
+                spec = verify.helper_load_json(Path(result_paths[0]).with_name("automation_generate_spec.json")) if "generate" in str(result_paths[0]) else None
                 if Path(result_paths[0]).name == "ue_generate_result.json":
                     verify.write_json(result_paths[0], {"success": True, "generated_asset_path": "/Game/Generated.CaseA"})
                 else:
@@ -924,7 +924,7 @@ def test_step_editor_isolation_retries_driver_start_once() -> None:
                 attempts.append(spec_path.name)
                 if spec_path.name == "automation_generate_spec.json" and attempts.count(spec_path.name) == 1:
                     raise batch_verify.EditorDriverStartError("driver did not start")
-                spec = verify.load_json_document(spec_path)
+                spec = verify.helper_load_json(spec_path)
                 result_path = Path(spec["result_json_path"])
                 if spec["mode"] == "pen":
                     verify.write_json(result_path, {"success": True, "generated_asset_path": "/Game/Generated.CaseA"})

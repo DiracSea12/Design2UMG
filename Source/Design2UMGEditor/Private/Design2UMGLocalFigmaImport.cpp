@@ -1,7 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGLocalFigmaImport.h"
-#include "Design2UMGEditorDesignSourceRegistry.h"
 #include "DesignSchemaSourceExtensions.h"
 
 #include "Design2UMGConverter.h"
@@ -490,7 +489,7 @@ namespace Design2UMGLocalFigmaImport
 			return false;
 		}
 
-		if (!Design2UMGEditorDesignSourceRegistry::TryParseSourceDocument(TEXT("Figma"), JsonStr, ParsedDocument))
+		if (!FFigmaParser::ParseDocument(JsonStr, ParsedDocument))
 		{
 			OutError = FString::Printf(TEXT("Failed to parse Figma JSON: %s"), *JsonFilePath);
 			return false;

@@ -5,7 +5,7 @@
 
 #include "Design2UMGLog.h"
 #include "RefExpander.h"
-#include "SharedCoreSemantics.h"
+#include "DesignNodeSemantics.h"
 #include "TextMeasurement.h"
 
 namespace
@@ -18,7 +18,7 @@ namespace
 
 	bool ShouldSkipNodeForSizing(const TSharedPtr<FDesignNode>& Node)
 	{
-		return Design2UMGCore::SharedSemantics::ShouldSkipNode(Node);
+		return Design2UMGCore::DesignNodeSemantics::ShouldSkipNode(Node);
 	}
 
 	void MergeEstimatedDimension(float& CurrentValue, const FDesignSize& Size, float Estimate, bool bForceEstimate = false)
@@ -95,7 +95,7 @@ namespace
 			float H = Node->Transform.Height.Value;
 			if (Node->Transform.Width.IsFill())
 			{
-				const float FillWidth = Design2UMGCore::SharedSemantics::ResolveWidthHint(Node, ParentContentWidth);
+				const float FillWidth = Design2UMGCore::DesignNodeSemantics::ResolveWidthHint(Node, ParentContentWidth);
 				if (FillWidth > 0.0f)
 				{
 					W = FMath::Max(W, FillWidth);
@@ -214,7 +214,7 @@ float SizeEstimator::ComputeChildContentWidthHint(const TSharedPtr<FDesignNode>&
 		return 0.0f;
 	}
 
-	const float ResolvedWidth = Design2UMGCore::SharedSemantics::ResolveWidthHint(Node, ParentContentWidth);
+	const float ResolvedWidth = Design2UMGCore::DesignNodeSemantics::ResolveWidthHint(Node, ParentContentWidth);
 	if (ResolvedWidth <= 0.0f)
 	{
 		return 0.0f;
@@ -241,7 +241,7 @@ float SizeEstimator::ComputeChildContentWidthHint(const TSharedPtr<FDesignNode>&
 			continue;
 		}
 
-		RemainingWidth -= Design2UMGCore::SharedSemantics::ResolveWidthHint(VisibleChild, 0.0f);
+		RemainingWidth -= Design2UMGCore::DesignNodeSemantics::ResolveWidthHint(VisibleChild, 0.0f);
 	}
 
 	if (!Child->Transform.Width.IsFill() || FillChildCount <= 0 || RemainingWidth <= 0.0f)
@@ -301,7 +301,7 @@ namespace
 		float H = Node->Transform.Height.Value;
 		if (Node->Transform.Width.IsFill())
 		{
-			const float FillWidth = Design2UMGCore::SharedSemantics::ResolveWidthHint(Node, ParentContentWidth);
+			const float FillWidth = Design2UMGCore::DesignNodeSemantics::ResolveWidthHint(Node, ParentContentWidth);
 			if (FillWidth > 0.0f)
 			{
 				W = FMath::Max(W, FillWidth);

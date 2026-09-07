@@ -80,7 +80,7 @@ bool FUMGJsonParser::ParseJson(const FString& JsonString, FUMGWidgetData& OutWid
 
 	// Parse RootWidget.
 	const TSharedPtr<FJsonObject>* RootWidget;
-	if (!Root->TryGetObjectField(TEXT("RootWidget"), RootWidget) || !ParseWidgetNode(*RootWidget, OutWidgetData.RootWidget))
+	if (!DesignJsonUtils::TryGetObject(Root, TEXT("RootWidget"), RootWidget) || !ParseWidgetNode(*RootWidget, OutWidgetData.RootWidget))
 	{
 		if (OutError) *OutError = TEXT("Invalid UI structure");
 		return false;
@@ -101,7 +101,7 @@ bool FUMGJsonParser::ParseJson(const FString& JsonString, FUMGWidgetData& OutWid
 		return false;
 	}
 
-	Root->TryGetStringField(TEXT("WidgetName"), OutWidgetData.WidgetName);
+	DesignJsonUtils::TryGetString(Root, TEXT("WidgetName"), OutWidgetData.WidgetName);
 	if (OutWidgetData.WidgetName.IsEmpty()) OutWidgetData.WidgetName = TEXT("WBP_Generated");
 
 	return true;
@@ -115,38 +115,38 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 	}
 
 	// Parse required fields without crashing on missing keys.
-	if (!JsonObject->TryGetStringField(UMGJsonKeys::Type, OutNode.Type) || OutNode.Type.IsEmpty())
+	if (!DesignJsonUtils::TryGetString(JsonObject, UMGJsonKeys::Type, OutNode.Type) || OutNode.Type.IsEmpty())
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("FUMGJsonParser: Widget node missing Type field"));
 		return false;
 	}
 
 	// Name is optional; synthesize one when absent.
-	if (!JsonObject->TryGetStringField(TEXT("Name"), OutNode.Name) || OutNode.Name.IsEmpty())
+	if (!DesignJsonUtils::TryGetString(JsonObject, TEXT("Name"), OutNode.Name) || OutNode.Name.IsEmpty())
 	{
 		OutNode.Name = FString::Printf(TEXT("%s_%s"), *OutNode.Type, *FGuid::NewGuid().ToString(EGuidFormats::Short));
 	}
 
 	// Parse v2.2 path-based stable id.
-	JsonObject->TryGetStringField(TEXT("Id"), OutNode.Id);
+	DesignJsonUtils::TryGetString(JsonObject, TEXT("Id"), OutNode.Id);
 
 	// Parse the LayoutMapper justify-spacer marker (absent in older JSON means false).
-	JsonObject->TryGetBoolField(TEXT("SyntheticJustifySpacer"), OutNode.bSyntheticJustifySpacer);
+	DesignJsonUtils::TryGetBool(JsonObject, TEXT("SyntheticJustifySpacer"), OutNode.bSyntheticJustifySpacer);
 
 	// Parse Bounds, added in v2.2 for normalized coordinates.
 	const TSharedPtr<FJsonObject>* BoundsObject;
-	if (JsonObject->TryGetObjectField(TEXT("Bounds"), BoundsObject))
+	if (DesignJsonUtils::TryGetObject(JsonObject, TEXT("Bounds"), BoundsObject))
 	{
-		double Val;
-		if ((*BoundsObject)->TryGetNumberField(TEXT("X"), Val)) OutNode.Bounds.X = (float)Val;
-		if ((*BoundsObject)->TryGetNumberField(TEXT("Y"), Val)) OutNode.Bounds.Y = (float)Val;
-		if ((*BoundsObject)->TryGetNumberField(TEXT("W"), Val)) OutNode.Bounds.W = (float)Val;
-		if ((*BoundsObject)->TryGetNumberField(TEXT("H"), Val)) OutNode.Bounds.H = (float)Val;
+		float Val;
+		if (DesignJsonUtils::TryGetFloat(*BoundsObject, TEXT("X"), Val)) OutNode.Bounds.X = Val;
+		if (DesignJsonUtils::TryGetFloat(*BoundsObject, TEXT("Y"), Val)) OutNode.Bounds.Y = Val;
+		if (DesignJsonUtils::TryGetFloat(*BoundsObject, TEXT("W"), Val)) OutNode.Bounds.W = Val;
+		if (DesignJsonUtils::TryGetFloat(*BoundsObject, TEXT("H"), Val)) OutNode.Bounds.H = Val;
 	}
 
 	// Parse Slot data.
 	const TSharedPtr<FJsonObject>* SlotObject;
-	if (JsonObject->TryGetObjectField(TEXT("Slot"), SlotObject))
+	if (DesignJsonUtils::TryGetObject(JsonObject, TEXT("Slot"), SlotObject))
 	{
 		ParseSlotData(*SlotObject, OutNode.Slot);
 	}
@@ -164,8 +164,7 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 	ParseScrollBoxPayload(JsonObject, OutNode.ScrollBox);
 
 	// Parse Children in the standard format.
-	const TArray<TSharedPtr<FJsonValue>>* ChildrenArray;
-	if (JsonObject->TryGetArrayField(TEXT("Children"), ChildrenArray))
+	if (const TArray<TSharedPtr<FJsonValue>>* ChildrenArray = DesignJsonUtils::GetArray(JsonObject, TEXT("Children")))
 	{
 		for (const TSharedPtr<FJsonValue>& ChildValue : *ChildrenArray)
 		{
@@ -188,16 +187,16 @@ void FUMGJsonParser::ParseTextStylePayload(const TSharedPtr<FJsonObject>& NodeOb
 {
 	// Parse TextStyle (v2.4).
 	const TSharedPtr<FJsonObject>* TSObject;
-	if (NodeObject->TryGetObjectField(TEXT("TextStyle"), TSObject))
+	if (DesignJsonUtils::TryGetObject(NodeObject, TEXT("TextStyle"), TSObject))
 	{
-		double Val;
-		if ((*TSObject)->TryGetNumberField(UMGPropertyKeys::FontSize, Val))
-			OutTextStyle.FontSize = (float)Val;
-		if ((*TSObject)->TryGetNumberField(UMGJsonKeys::SourceFontSize, Val))
-			OutTextStyle.SourceFontSize = (float)Val;
-		if ((*TSObject)->TryGetNumberField(UMGPropertyKeys::LetterSpacing, Val))
+		float Val;
+		if (DesignJsonUtils::TryGetFloat(*TSObject, UMGPropertyKeys::FontSize, Val))
+			OutTextStyle.FontSize = Val;
+		if (DesignJsonUtils::TryGetFloat(*TSObject, UMGJsonKeys::SourceFontSize, Val))
+			OutTextStyle.SourceFontSize = Val;
+		if (DesignJsonUtils::TryGetFloat(*TSObject, UMGPropertyKeys::LetterSpacing, Val))
 		{
-			OutTextStyle.LetterSpacing = (float)Val;
+			OutTextStyle.LetterSpacing = Val;
 		}
 	}
 }
@@ -206,92 +205,92 @@ void FUMGJsonParser::ParseWidgetStylePayload(const TSharedPtr<FJsonObject>& Node
 {
 	// Parse WidgetStyle
 	const TSharedPtr<FJsonObject>* WidgetStyleObject;
-	if (NodeObject->TryGetObjectField(TEXT("WidgetStyle"), WidgetStyleObject))
+	if (DesignJsonUtils::TryGetObject(NodeObject, TEXT("WidgetStyle"), WidgetStyleObject))
 	{
-		double Val = 0.0;
+		float Val = 0.0f;
 		FString Str;
-		if ((*WidgetStyleObject)->TryGetNumberField(UMGPropertyKeys::WidthOverride, Val))
+		if (DesignJsonUtils::TryGetFloat(*WidgetStyleObject, UMGPropertyKeys::WidthOverride, Val))
 		{
-			OutWidgetStyle.WidthOverride = (float)Val;
+			OutWidgetStyle.WidthOverride = Val;
 		}
-		if ((*WidgetStyleObject)->TryGetNumberField(UMGPropertyKeys::HeightOverride, Val))
+		if (DesignJsonUtils::TryGetFloat(*WidgetStyleObject, UMGPropertyKeys::HeightOverride, Val))
 		{
-			OutWidgetStyle.HeightOverride = (float)Val;
+			OutWidgetStyle.HeightOverride = Val;
 		}
-		if ((*WidgetStyleObject)->TryGetNumberField(UMGPropertyKeys::MinDesiredWidth, Val))
+		if (DesignJsonUtils::TryGetFloat(*WidgetStyleObject, UMGPropertyKeys::MinDesiredWidth, Val))
 		{
-			OutWidgetStyle.MinDesiredWidth = (float)Val;
+			OutWidgetStyle.MinDesiredWidth = Val;
 		}
-		if ((*WidgetStyleObject)->TryGetNumberField(UMGPropertyKeys::MinDesiredHeight, Val))
+		if (DesignJsonUtils::TryGetFloat(*WidgetStyleObject, UMGPropertyKeys::MinDesiredHeight, Val))
 		{
-			OutWidgetStyle.MinDesiredHeight = (float)Val;
+			OutWidgetStyle.MinDesiredHeight = Val;
 		}
-		if (const TSharedPtr<FJsonValue> JsonValue = (*WidgetStyleObject)->TryGetField(UMGPropertyKeys::Padding); JsonValue.IsValid())
+		if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*WidgetStyleObject, UMGPropertyKeys::Padding); JsonValue.IsValid())
 		{
 			OutWidgetStyle.Padding = ParsePaddingValue(JsonValue);
 		}
-		if ((*WidgetStyleObject)->TryGetStringField(UMGPropertyKeys::InnerSlotPadding, Str))
+		if (DesignJsonUtils::TryGetString(*WidgetStyleObject, UMGPropertyKeys::InnerSlotPadding, Str))
 		{
 			OutWidgetStyle.InnerSlotPadding = FUMGValueParser::ParseVector2D(Str);
 		}
-		if (const TSharedPtr<FJsonValue> JsonValue = (*WidgetStyleObject)->TryGetField(UMGPropertyKeys::SlotPadding); JsonValue.IsValid())
+		if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*WidgetStyleObject, UMGPropertyKeys::SlotPadding); JsonValue.IsValid())
 		{
 			OutWidgetStyle.SlotPadding = ParsePaddingValue(JsonValue);
 		}
-		if (const TSharedPtr<FJsonValue> JsonValue = (*WidgetStyleObject)->TryGetField(UMGPropertyKeys::StrokePadding); JsonValue.IsValid())
+		if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*WidgetStyleObject, UMGPropertyKeys::StrokePadding); JsonValue.IsValid())
 		{
 			OutWidgetStyle.StrokePadding = ParsePaddingValue(JsonValue);
 		}
-		if (const TSharedPtr<FJsonValue> JsonValue = (*WidgetStyleObject)->TryGetField(UMGPropertyKeys::StrokeMargin); JsonValue.IsValid())
+		if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*WidgetStyleObject, UMGPropertyKeys::StrokeMargin); JsonValue.IsValid())
 		{
 			OutWidgetStyle.StrokeMargin = ParsePaddingValue(JsonValue);
 		}
-		if ((*WidgetStyleObject)->TryGetStringField(UMGPropertyKeys::ImageMode, Str))
+		if (DesignJsonUtils::TryGetString(*WidgetStyleObject, UMGPropertyKeys::ImageMode, Str))
 		{
 			OutWidgetStyle.ImageMode = Str;
 		}
-		if ((*WidgetStyleObject)->TryGetStringField(UMGPropertyKeys::ImageTransform, Str))
+		if (DesignJsonUtils::TryGetString(*WidgetStyleObject, UMGPropertyKeys::ImageTransform, Str))
 		{
 			OutWidgetStyle.ImageTransform = Str;
 		}
-		if ((*WidgetStyleObject)->TryGetStringField(UMGPropertyKeys::Stretch, Str))
+		if (DesignJsonUtils::TryGetString(*WidgetStyleObject, UMGPropertyKeys::Stretch, Str))
 		{
 			OutWidgetStyle.Stretch = Str;
 		}
-		if ((*WidgetStyleObject)->TryGetStringField(UMGPropertyKeys::StretchDirection, Str))
+		if (DesignJsonUtils::TryGetString(*WidgetStyleObject, UMGPropertyKeys::StretchDirection, Str))
 		{
 			OutWidgetStyle.StretchDirection = Str;
 		}
-		if ((*WidgetStyleObject)->TryGetStringField(UMGPropertyKeys::BackgroundColor, Str))
+		if (DesignJsonUtils::TryGetString(*WidgetStyleObject, UMGPropertyKeys::BackgroundColor, Str))
 		{
 			OutWidgetStyle.BackgroundColor = FUMGValueParser::ParseColor(Str);
 		}
-		if ((*WidgetStyleObject)->TryGetStringField(UMGPropertyKeys::HoveredColor, Str))
+		if (DesignJsonUtils::TryGetString(*WidgetStyleObject, UMGPropertyKeys::HoveredColor, Str))
 		{
 			OutWidgetStyle.HoveredColor = FUMGValueParser::ParseColor(Str);
 		}
-		if ((*WidgetStyleObject)->TryGetStringField(UMGPropertyKeys::PressedColor, Str))
+		if (DesignJsonUtils::TryGetString(*WidgetStyleObject, UMGPropertyKeys::PressedColor, Str))
 		{
 			OutWidgetStyle.PressedColor = FUMGValueParser::ParseColor(Str);
 		}
-		if ((*WidgetStyleObject)->TryGetStringField(UMGPropertyKeys::NamedSlot, Str))
+		if (DesignJsonUtils::TryGetString(*WidgetStyleObject, UMGPropertyKeys::NamedSlot, Str))
 		{
 			OutWidgetStyle.NamedSlot = Str;
 		}
-		if ((*WidgetStyleObject)->TryGetStringField(UMGPropertyKeys::SlotName, Str))
+		if (DesignJsonUtils::TryGetString(*WidgetStyleObject, UMGPropertyKeys::SlotName, Str))
 		{
 			OutWidgetStyle.SlotName = Str;
 		}
-		if ((*WidgetStyleObject)->TryGetStringField(UMGPropertyKeys::Visibility, Str))
+		if (DesignJsonUtils::TryGetString(*WidgetStyleObject, UMGPropertyKeys::Visibility, Str))
 		{
 			OutWidgetStyle.Visibility = Str;
 		}
-		if ((*WidgetStyleObject)->TryGetStringField(UMGPropertyKeys::ToolTipText, Str))
+		if (DesignJsonUtils::TryGetString(*WidgetStyleObject, UMGPropertyKeys::ToolTipText, Str))
 		{
 			OutWidgetStyle.ToolTipText = Str;
 		}
 		bool BoolValue = false;
-		if ((*WidgetStyleObject)->TryGetBoolField(UMGPropertyKeys::IsEnabled, BoolValue))
+		if (DesignJsonUtils::TryGetBool(*WidgetStyleObject, UMGPropertyKeys::IsEnabled, BoolValue))
 		{
 			OutWidgetStyle.IsEnabled = BoolValue;
 		}
@@ -302,77 +301,77 @@ void FUMGJsonParser::ParseTextPayload(const TSharedPtr<FJsonObject>& NodeObject,
 {
 	// Parse TextData
 	const TSharedPtr<FJsonObject>* TextDataObject;
-	if (NodeObject->TryGetObjectField(TEXT("TextData"), TextDataObject))
+	if (DesignJsonUtils::TryGetObject(NodeObject, TEXT("TextData"), TextDataObject))
 	{
-		double Val = 0.0;
+		float Val = 0.0f;
 		FString Str;
 		bool BoolValue = false;
 
-		if ((*TextDataObject)->TryGetStringField(UMGPropertyKeys::Text, Str))
+		if (DesignJsonUtils::TryGetString(*TextDataObject, UMGPropertyKeys::Text, Str))
 		{
 			OutText.Text = Str;
 		}
-		if ((*TextDataObject)->TryGetStringField(UMGPropertyKeys::RichTextStyleRows, Str))
+		if (DesignJsonUtils::TryGetString(*TextDataObject, UMGPropertyKeys::RichTextStyleRows, Str))
 		{
 			OutText.RichTextStyleRowsJson = Str;
 		}
-		if ((*TextDataObject)->TryGetStringField(UMGPropertyKeys::HintText, Str))
+		if (DesignJsonUtils::TryGetString(*TextDataObject, UMGPropertyKeys::HintText, Str))
 		{
 			OutText.HintText = Str;
 		}
-		if ((*TextDataObject)->TryGetStringField(UMGPropertyKeys::FontFamily, Str))
+		if (DesignJsonUtils::TryGetString(*TextDataObject, UMGPropertyKeys::FontFamily, Str))
 		{
 			OutText.FontFamily = Str;
 		}
-		if ((*TextDataObject)->TryGetStringField(UMGPropertyKeys::TypefaceFontName, Str))
+		if (DesignJsonUtils::TryGetString(*TextDataObject, UMGPropertyKeys::TypefaceFontName, Str))
 		{
 			OutText.TypefaceFontName = Str;
 		}
-		if ((*TextDataObject)->TryGetStringField(UMGPropertyKeys::FontStyle, Str))
+		if (DesignJsonUtils::TryGetString(*TextDataObject, UMGPropertyKeys::FontStyle, Str))
 		{
 			OutText.FontStyle = Str;
 		}
-		if ((*TextDataObject)->TryGetStringField(UMGPropertyKeys::Justification, Str))
+		if (DesignJsonUtils::TryGetString(*TextDataObject, UMGPropertyKeys::Justification, Str))
 		{
 			OutText.Justification = Str;
 		}
-		if ((*TextDataObject)->TryGetBoolField(UMGPropertyKeys::AutoWrapText, BoolValue))
+		if (DesignJsonUtils::TryGetBool(*TextDataObject, UMGPropertyKeys::AutoWrapText, BoolValue))
 		{
 			OutText.bAutoWrapText = BoolValue;
 		}
-		if ((*TextDataObject)->TryGetNumberField(UMGPropertyKeys::WrapTextAt, Val))
+		if (DesignJsonUtils::TryGetFloat(*TextDataObject, UMGPropertyKeys::WrapTextAt, Val))
 		{
-			OutText.WrapTextAt = (float)Val;
+			OutText.WrapTextAt = Val;
 		}
-		if ((*TextDataObject)->TryGetNumberField(UMGPropertyKeys::LineHeightPercentage, Val))
+		if (DesignJsonUtils::TryGetFloat(*TextDataObject, UMGPropertyKeys::LineHeightPercentage, Val))
 		{
-			OutText.LineHeightPercentage = (float)Val;
+			OutText.LineHeightPercentage = Val;
 		}
-		if ((*TextDataObject)->TryGetNumberField(UMGPropertyKeys::LineHeightBaselineShift, Val))
+		if (DesignJsonUtils::TryGetFloat(*TextDataObject, UMGPropertyKeys::LineHeightBaselineShift, Val))
 		{
-			OutText.LineHeightBaselineShift = (float)Val;
+			OutText.LineHeightBaselineShift = Val;
 		}
-		if ((*TextDataObject)->TryGetBoolField(UMGPropertyKeys::Underline, BoolValue))
+		if (DesignJsonUtils::TryGetBool(*TextDataObject, UMGPropertyKeys::Underline, BoolValue))
 		{
 			OutText.bUnderline = BoolValue;
 		}
-		if ((*TextDataObject)->TryGetBoolField(UMGPropertyKeys::Strikethrough, BoolValue))
+		if (DesignJsonUtils::TryGetBool(*TextDataObject, UMGPropertyKeys::Strikethrough, BoolValue))
 		{
 			OutText.bStrikethrough = BoolValue;
 		}
-		if ((*TextDataObject)->TryGetStringField(UMGPropertyKeys::Href, Str))
+		if (DesignJsonUtils::TryGetString(*TextDataObject, UMGPropertyKeys::Href, Str))
 		{
 			OutText.Href = Str;
 		}
-		if ((*TextDataObject)->TryGetStringField(UMGPropertyKeys::TextAlignVertical, Str))
+		if (DesignJsonUtils::TryGetString(*TextDataObject, UMGPropertyKeys::TextAlignVertical, Str))
 		{
 			OutText.TextAlignVertical = Str;
 		}
-		if ((*TextDataObject)->TryGetStringField(UMGPropertyKeys::IconName, Str))
+		if (DesignJsonUtils::TryGetString(*TextDataObject, UMGPropertyKeys::IconName, Str))
 		{
 			OutText.IconName = Str;
 		}
-		if ((*TextDataObject)->TryGetStringField(UMGPropertyKeys::Color, Str))
+		if (DesignJsonUtils::TryGetString(*TextDataObject, UMGPropertyKeys::Color, Str))
 		{
 			OutText.Color = FUMGValueParser::ParseColor(Str);
 		}
@@ -383,19 +382,22 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 {
 	// Parse Brush (v2.4).
 	const TSharedPtr<FJsonObject>* BrushObject;
-	if (NodeObject->TryGetObjectField(TEXT("Brush"), BrushObject))
+	if (DesignJsonUtils::TryGetObject(NodeObject, TEXT("Brush"), BrushObject))
 	{
+		// OutlineCornerRadius keeps the double read: the legacy >= 0 "unset" check
+		// must run before any float narrowing.
 		double Val;
+		float FloatVal;
 		FString Str;
 		// Negative radius is the legacy "unset" encoding; keep it out of the
 		// optional so IsSet() preserves the old >= 0 consumer contract.
-		if ((*BrushObject)->TryGetNumberField(UMGPropertyKeys::OutlineCornerRadius, Val) && Val >= 0.0)
+		if (DesignJsonUtils::TryGetNumber(*BrushObject, UMGPropertyKeys::OutlineCornerRadius, Val) && Val >= 0.0)
 			OutBrush.OutlineCornerRadius = (float)Val;
-		if ((*BrushObject)->TryGetNumberField(UMGPropertyKeys::OutlineThickness, Val))
+		if (DesignJsonUtils::TryGetFloat(*BrushObject, UMGPropertyKeys::OutlineThickness, FloatVal))
 		{
-			OutBrush.OutlineThickness = (float)Val;
+			OutBrush.OutlineThickness = FloatVal;
 		}
-		if ((*BrushObject)->TryGetStringField(UMGPropertyKeys::DrawAs, Str))
+		if (DesignJsonUtils::TryGetString(*BrushObject, UMGPropertyKeys::DrawAs, Str))
 		{
 			ESlateBrushDrawType::Type DrawAs = ESlateBrushDrawType::NoDrawType;
 			if (Design2UMGWidgetNodeAccess::TryParseDrawAs(Str, DrawAs))
@@ -403,27 +405,27 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 				OutBrush.DrawAs = DrawAs;
 			}
 		}
-		if ((*BrushObject)->TryGetStringField(UMGPropertyKeys::BrushColor, Str))
+		if (DesignJsonUtils::TryGetString(*BrushObject, UMGPropertyKeys::BrushColor, Str))
 		{
 			OutBrush.BrushColor = FUMGValueParser::ParseColor(Str);
 		}
-		if ((*BrushObject)->TryGetStringField(UMGPropertyKeys::OutlineColor, Str))
+		if (DesignJsonUtils::TryGetString(*BrushObject, UMGPropertyKeys::OutlineColor, Str))
 		{
 			OutBrush.OutlineColor = FUMGValueParser::ParseColor(Str);
 		}
-		if ((*BrushObject)->TryGetStringField(UMGPropertyKeys::MaterialRef, Str))
+		if (DesignJsonUtils::TryGetString(*BrushObject, UMGPropertyKeys::MaterialRef, Str))
 		{
 			OutBrush.MaterialRef = Str;
 		}
-		if ((*BrushObject)->TryGetStringField(UMGPropertyKeys::MaterialParams, Str))
+		if (DesignJsonUtils::TryGetString(*BrushObject, UMGPropertyKeys::MaterialParams, Str))
 		{
 			OutBrush.MaterialParams = Str;
 		}
-		if ((*BrushObject)->TryGetStringField(UMGPropertyKeys::TexturePath, Str))
+		if (DesignJsonUtils::TryGetString(*BrushObject, UMGPropertyKeys::TexturePath, Str))
 		{
 			OutBrush.TexturePath = Str;
 		}
-		if ((*BrushObject)->TryGetStringField(UMGPropertyKeys::CornerRadii, Str))
+		if (DesignJsonUtils::TryGetString(*BrushObject, UMGPropertyKeys::CornerRadii, Str))
 		{
 			TArray<FString> Parts;
 			Str.ParseIntoArray(Parts, TEXT(","));
@@ -441,17 +443,17 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 			}
 		}
 		const TSharedPtr<FJsonObject>* ImageObject = nullptr;
-		if ((*BrushObject)->TryGetObjectField(TEXT("Image"), ImageObject))
+		if (DesignJsonUtils::TryGetObject(*BrushObject, TEXT("Image"), ImageObject))
 		{
-			if ((*ImageObject)->TryGetStringField(UMGPropertyKeys::TexturePath, Str))
+			if (DesignJsonUtils::TryGetString(*ImageObject, UMGPropertyKeys::TexturePath, Str))
 			{
 				OutBrush.Image.TexturePath = Str;
 			}
-			if ((*ImageObject)->TryGetStringField(UMGJsonKeys::Mode, Str))
+			if (DesignJsonUtils::TryGetString(*ImageObject, UMGJsonKeys::Mode, Str))
 			{
 				OutBrush.Image.Mode = Str;
 			}
-			if ((*ImageObject)->TryGetStringField(UMGJsonKeys::Transform, Str)
+			if (DesignJsonUtils::TryGetString(*ImageObject, UMGJsonKeys::Transform, Str)
 				&& [&]()
 				{
 					FUMGVisualBrushData::FImageTransformData Transform;
@@ -472,34 +474,33 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 			UE_LOG(LogDesign2UMG, Warning, TEXT("FUMGJsonParser: %s"), *BrushTextureDiagnostic);
 		}
 		const TSharedPtr<FJsonObject>* GradientObject = nullptr;
-		if ((*BrushObject)->TryGetObjectField(TEXT("Gradient"), GradientObject))
+		if (DesignJsonUtils::TryGetObject(*BrushObject, TEXT("Gradient"), GradientObject))
 		{
-			if ((*GradientObject)->TryGetStringField(UMGJsonKeys::Type, Str))
+			if (DesignJsonUtils::TryGetString(*GradientObject, UMGJsonKeys::Type, Str))
 			{
 				OutBrush.Gradient.Type = Str;
 			}
-			if ((*GradientObject)->TryGetNumberField(UMGJsonKeys::Rotation, Val))
+			if (DesignJsonUtils::TryGetFloat(*GradientObject, UMGJsonKeys::Rotation, FloatVal))
 			{
-				OutBrush.Gradient.Rotation = (float)Val;
+				OutBrush.Gradient.Rotation = FloatVal;
 			}
-			if ((*GradientObject)->TryGetStringField(UMGJsonKeys::StartPoint, Str))
+			if (DesignJsonUtils::TryGetString(*GradientObject, UMGJsonKeys::StartPoint, Str))
 			{
 				OutBrush.Gradient.StartPoint = FUMGValueParser::ParseVector2D(Str, FVector2D::ZeroVector);
 			}
-			if ((*GradientObject)->TryGetStringField(UMGJsonKeys::EndPoint, Str))
+			if (DesignJsonUtils::TryGetString(*GradientObject, UMGJsonKeys::EndPoint, Str))
 			{
 				OutBrush.Gradient.EndPoint = FUMGValueParser::ParseVector2D(Str, FVector2D(1.0f, 0.0f));
 			}
-			if ((*GradientObject)->TryGetStringField(UMGJsonKeys::Center, Str))
+			if (DesignJsonUtils::TryGetString(*GradientObject, UMGJsonKeys::Center, Str))
 			{
 				OutBrush.Gradient.Center = FUMGValueParser::ParseVector2D(Str, FVector2D(0.5f, 0.5f));
 			}
-			if ((*GradientObject)->TryGetStringField(UMGJsonKeys::Size, Str))
+			if (DesignJsonUtils::TryGetString(*GradientObject, UMGJsonKeys::Size, Str))
 			{
 				OutBrush.Gradient.Size = FUMGValueParser::ParseVector2D(Str, FVector2D(1.0f, 1.0f));
 			}
-			const TArray<TSharedPtr<FJsonValue>>* StopArray = nullptr;
-			if ((*GradientObject)->TryGetArrayField(UMGJsonKeys::Stops, StopArray))
+			if (const TArray<TSharedPtr<FJsonValue>>* StopArray = DesignJsonUtils::GetArray(*GradientObject, UMGJsonKeys::Stops))
 			{
 				for (const TSharedPtr<FJsonValue>& StopValue : *StopArray)
 				{
@@ -510,13 +511,13 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 					}
 
 					FUMGVisualBrushData::FGradientStopData& Stop = OutBrush.Gradient.Stops.AddDefaulted_GetRef();
-					if ((*StopObject)->TryGetStringField(UMGPropertyKeys::Color, Str))
+					if (DesignJsonUtils::TryGetString(*StopObject, UMGPropertyKeys::Color, Str))
 					{
 						Stop.Color = FUMGValueParser::ParseColor(Str);
 					}
-					if ((*StopObject)->TryGetNumberField(UMGJsonKeys::Position, Val))
+					if (DesignJsonUtils::TryGetFloat(*StopObject, UMGJsonKeys::Position, FloatVal))
 					{
-						Stop.Position = (float)Val;
+						Stop.Position = FloatVal;
 					}
 				}
 			}
@@ -528,40 +529,44 @@ void FUMGJsonParser::ParseEffectPayload(const TSharedPtr<FJsonObject>& NodeObjec
 {
 	// Parse Effect (v2.5)
 	const TSharedPtr<FJsonObject>* EffectObject;
-	if (NodeObject->TryGetObjectField(TEXT("Effect"), EffectObject))
+	if (DesignJsonUtils::TryGetObject(NodeObject, TEXT("Effect"), EffectObject))
 	{
+		// Phase/PhaseCount keep the double read: their historical (int32) casts
+		// truncate, which differs from the engine int32 field overload's
+		// range-check + round-half-from-zero conversion.
 		double Val;
+		float FloatVal;
 		FString Str;
 		bool BoolValue = false;
-		if ((*EffectObject)->TryGetNumberField(UMGPropertyKeys::BlurStrength, Val))
+		if (DesignJsonUtils::TryGetFloat(*EffectObject, UMGPropertyKeys::BlurStrength, FloatVal))
 		{
-			OutEffect.BlurStrength = (float)Val;
+			OutEffect.BlurStrength = FloatVal;
 		}
-		if ((*EffectObject)->TryGetBoolField(UMGPropertyKeys::RetainRendering, BoolValue))
+		if (DesignJsonUtils::TryGetBool(*EffectObject, UMGPropertyKeys::RetainRendering, BoolValue))
 		{
 			OutEffect.bRetainRendering = BoolValue;
 		}
-		if ((*EffectObject)->TryGetStringField(UMGPropertyKeys::EffectMaterial, Str))
+		if (DesignJsonUtils::TryGetString(*EffectObject, UMGPropertyKeys::EffectMaterial, Str))
 		{
 			OutEffect.EffectMaterial = Str;
 		}
-		if ((*EffectObject)->TryGetStringField(UMGPropertyKeys::TextureParameter, Str))
+		if (DesignJsonUtils::TryGetString(*EffectObject, UMGPropertyKeys::TextureParameter, Str))
 		{
 			OutEffect.TextureParameter = Str;
 		}
-		if ((*EffectObject)->TryGetStringField(UMGPropertyKeys::EffectBlurUVStep, Str))
+		if (DesignJsonUtils::TryGetString(*EffectObject, UMGPropertyKeys::EffectBlurUVStep, Str))
 		{
 			OutEffect.EffectBlurUVStep = FUMGValueParser::ParseVector2D(Str);
 		}
-		if ((*EffectObject)->TryGetStringField(UMGPropertyKeys::EffectColor, Str))
+		if (DesignJsonUtils::TryGetString(*EffectObject, UMGPropertyKeys::EffectColor, Str))
 		{
 			OutEffect.EffectColor = FUMGValueParser::ParseColor(Str);
 		}
-		if ((*EffectObject)->TryGetStringField(UMGPropertyKeys::EffectOffset, Str))
+		if (DesignJsonUtils::TryGetString(*EffectObject, UMGPropertyKeys::EffectOffset, Str))
 		{
 			OutEffect.EffectOffset = FUMGValueParser::ParseVector2D(Str);
 		}
-		if ((*EffectObject)->TryGetStringField(UMGPropertyKeys::GeometryMaskShape, Str))
+		if (DesignJsonUtils::TryGetString(*EffectObject, UMGPropertyKeys::GeometryMaskShape, Str))
 		{
 			if (Str.Equals(TEXT("Ellipse"), ESearchCase::IgnoreCase))
 			{
@@ -572,11 +577,11 @@ void FUMGJsonParser::ParseEffectPayload(const TSharedPtr<FJsonObject>& NodeObjec
 				OutEffect.GeometryMaskShape = EUMGGeometryMaskShape::RoundedRectangle;
 			}
 		}
-		if ((*EffectObject)->TryGetStringField(UMGPropertyKeys::GeometryMaskSize, Str))
+		if (DesignJsonUtils::TryGetString(*EffectObject, UMGPropertyKeys::GeometryMaskSize, Str))
 		{
 			OutEffect.GeometryMaskSize = FUMGValueParser::ParseVector2D(Str);
 		}
-		if ((*EffectObject)->TryGetStringField(UMGPropertyKeys::GeometryMaskCornerRadii, Str))
+		if (DesignJsonUtils::TryGetString(*EffectObject, UMGPropertyKeys::GeometryMaskCornerRadii, Str))
 		{
 			FVector4 Radii;
 			if (TryParseVector4(Str, Radii))
@@ -586,12 +591,12 @@ void FUMGJsonParser::ParseEffectPayload(const TSharedPtr<FJsonObject>& NodeObjec
 		}
 		FUMGEffectData::FRenderingPhaseData RenderingPhase = OutEffect.RenderingPhase.Get(FUMGEffectData::FRenderingPhaseData());
 		bool bRenderingPhaseSet = false;
-		if ((*EffectObject)->TryGetNumberField(UMGPropertyKeys::Phase, Val))
+		if (DesignJsonUtils::TryGetNumber(*EffectObject, UMGPropertyKeys::Phase, Val))
 		{
 			RenderingPhase.Phase = (int32)Val;
 			bRenderingPhaseSet = true;
 		}
-		if ((*EffectObject)->TryGetNumberField(UMGPropertyKeys::PhaseCount, Val))
+		if (DesignJsonUtils::TryGetNumber(*EffectObject, UMGPropertyKeys::PhaseCount, Val))
 		{
 			RenderingPhase.PhaseCount = FMath::Max(1, (int32)Val);
 			bRenderingPhaseSet = true;
@@ -607,36 +612,36 @@ void FUMGJsonParser::ParsePathPayload(const TSharedPtr<FJsonObject>& NodeObject,
 {
 	// Parse PathData
 	const TSharedPtr<FJsonObject>* PathDataObject;
-	if (NodeObject->TryGetObjectField(TEXT("PathData"), PathDataObject))
+	if (DesignJsonUtils::TryGetObject(NodeObject, TEXT("PathData"), PathDataObject))
 	{
-		double Val = 0.0;
+		float Val = 0.0f;
 		FString Str;
 
-		if ((*PathDataObject)->TryGetStringField(UMGPropertyKeys::PathGeometry, Str))
+		if (DesignJsonUtils::TryGetString(*PathDataObject, UMGPropertyKeys::PathGeometry, Str))
 		{
 			OutPath.Geometry = Str;
 		}
-		if ((*PathDataObject)->TryGetStringField(UMGPropertyKeys::PathFillRule, Str))
+		if (DesignJsonUtils::TryGetString(*PathDataObject, UMGPropertyKeys::PathFillRule, Str))
 		{
 			OutPath.FillRule = Str;
 		}
-		if ((*PathDataObject)->TryGetStringField(UMGPropertyKeys::PathFillColor, Str))
+		if (DesignJsonUtils::TryGetString(*PathDataObject, UMGPropertyKeys::PathFillColor, Str))
 		{
 			OutPath.FillColor = FUMGValueParser::ParseColor(Str);
 		}
-		if ((*PathDataObject)->TryGetStringField(UMGPropertyKeys::PathStrokeColor, Str))
+		if (DesignJsonUtils::TryGetString(*PathDataObject, UMGPropertyKeys::PathStrokeColor, Str))
 		{
 			OutPath.StrokeColor = FUMGValueParser::ParseColor(Str);
 		}
-		if ((*PathDataObject)->TryGetNumberField(UMGPropertyKeys::PathStrokeThickness, Val))
+		if (DesignJsonUtils::TryGetFloat(*PathDataObject, UMGPropertyKeys::PathStrokeThickness, Val))
 		{
-			OutPath.StrokeThickness = (float)Val;
+			OutPath.StrokeThickness = Val;
 		}
-		if ((*PathDataObject)->TryGetStringField(UMGPropertyKeys::PathStrokeCap, Str))
+		if (DesignJsonUtils::TryGetString(*PathDataObject, UMGPropertyKeys::PathStrokeCap, Str))
 		{
 			OutPath.StrokeCap = Str;
 		}
-		if ((*PathDataObject)->TryGetStringField(UMGPropertyKeys::PathStrokeJoin, Str))
+		if (DesignJsonUtils::TryGetString(*PathDataObject, UMGPropertyKeys::PathStrokeJoin, Str))
 		{
 			OutPath.StrokeJoin = Str;
 		}
@@ -647,25 +652,24 @@ void FUMGJsonParser::ParseShadowPayload(const TSharedPtr<FJsonObject>& NodeObjec
 {
 	// Parse ShadowData
 	const TSharedPtr<FJsonObject>* ShadowDataObject;
-	if (NodeObject->TryGetObjectField(TEXT("ShadowData"), ShadowDataObject))
+	if (DesignJsonUtils::TryGetObject(NodeObject, TEXT("ShadowData"), ShadowDataObject))
 	{
-		double Val = 0.0;
+		float Val = 0.0f;
 		FString Str;
-		const TArray<TSharedPtr<FJsonValue>>* BoxShadowArray = nullptr;
 
-		if ((*ShadowDataObject)->TryGetStringField(UMGPropertyKeys::ShadowOffset, Str))
+		if (DesignJsonUtils::TryGetString(*ShadowDataObject, UMGPropertyKeys::ShadowOffset, Str))
 		{
 			OutShadow.ShadowOffset = FUMGValueParser::ParseVector2D(Str);
 		}
-		if ((*ShadowDataObject)->TryGetStringField(UMGPropertyKeys::ShadowColorAndOpacity, Str))
+		if (DesignJsonUtils::TryGetString(*ShadowDataObject, UMGPropertyKeys::ShadowColorAndOpacity, Str))
 		{
 			OutShadow.ShadowColorAndOpacity = FUMGValueParser::ParseColor(Str);
 		}
-		if ((*ShadowDataObject)->TryGetNumberField(UMGPropertyKeys::ShadowBlur, Val))
+		if (DesignJsonUtils::TryGetFloat(*ShadowDataObject, UMGPropertyKeys::ShadowBlur, Val))
 		{
-			OutShadow.ShadowBlur = (float)Val;
+			OutShadow.ShadowBlur = Val;
 		}
-		if ((*ShadowDataObject)->TryGetArrayField(UMGJsonKeys::BoxShadows, BoxShadowArray))
+		if (const TArray<TSharedPtr<FJsonValue>>* BoxShadowArray = DesignJsonUtils::GetArray(*ShadowDataObject, UMGJsonKeys::BoxShadows))
 		{
 			for (const TSharedPtr<FJsonValue>& LayerValue : *BoxShadowArray)
 			{
@@ -676,19 +680,19 @@ void FUMGJsonParser::ParseShadowPayload(const TSharedPtr<FJsonObject>& NodeObjec
 				}
 
 				FUMGBoxShadowLayerData Layer;
-				if ((*LayerObject)->TryGetStringField(UMGJsonKeys::Offset, Str))
+				if (DesignJsonUtils::TryGetString(*LayerObject, UMGJsonKeys::Offset, Str))
 				{
 					Layer.Offset = FUMGValueParser::ParseVector2D(Str);
 				}
-				if ((*LayerObject)->TryGetNumberField(UMGJsonKeys::Blur, Val))
+				if (DesignJsonUtils::TryGetFloat(*LayerObject, UMGJsonKeys::Blur, Val))
 				{
-					Layer.Blur = (float)Val;
+					Layer.Blur = Val;
 				}
-				if ((*LayerObject)->TryGetNumberField(UMGJsonKeys::Spread, Val))
+				if (DesignJsonUtils::TryGetFloat(*LayerObject, UMGJsonKeys::Spread, Val))
 				{
-					Layer.Spread = (float)Val;
+					Layer.Spread = Val;
 				}
-				if ((*LayerObject)->TryGetStringField(UMGPropertyKeys::Color, Str))
+				if (DesignJsonUtils::TryGetString(*LayerObject, UMGPropertyKeys::Color, Str))
 				{
 					Layer.Color = FUMGValueParser::ParseColor(Str);
 				}
@@ -702,31 +706,31 @@ void FUMGJsonParser::ParseRenderPayload(const TSharedPtr<FJsonObject>& NodeObjec
 {
 	// Parse Render (v2.7)
 	const TSharedPtr<FJsonObject>* RenderObject;
-	if (NodeObject->TryGetObjectField(TEXT("Render"), RenderObject))
+	if (DesignJsonUtils::TryGetObject(NodeObject, TEXT("Render"), RenderObject))
 	{
-		double Val;
+		float Val;
 		FString Str;
-		if ((*RenderObject)->TryGetStringField(UMGPropertyKeys::Clipping, Str))
+		if (DesignJsonUtils::TryGetString(*RenderObject, UMGPropertyKeys::Clipping, Str))
 		{
 			OutRender.Clipping = Str;
 		}
-		if ((*RenderObject)->TryGetNumberField(UMGPropertyKeys::RenderOpacity, Val))
+		if (DesignJsonUtils::TryGetFloat(*RenderObject, UMGPropertyKeys::RenderOpacity, Val))
 		{
-			OutRender.RenderOpacity = (float)Val;
+			OutRender.RenderOpacity = Val;
 		}
-		if ((*RenderObject)->TryGetNumberField(UMGPropertyKeys::RenderAngle, Val))
+		if (DesignJsonUtils::TryGetFloat(*RenderObject, UMGPropertyKeys::RenderAngle, Val))
 		{
-			OutRender.RenderAngle = (float)Val;
+			OutRender.RenderAngle = Val;
 		}
-		if ((*RenderObject)->TryGetStringField(UMGPropertyKeys::RenderTransformPivot, Str))
+		if (DesignJsonUtils::TryGetString(*RenderObject, UMGPropertyKeys::RenderTransformPivot, Str))
 		{
 			OutRender.RenderTransformPivot = FUMGValueParser::ParseVector2D(Str, FVector2D(0.5f, 0.5f));
 		}
-		if ((*RenderObject)->TryGetStringField(UMGPropertyKeys::RenderTransformScale, Str))
+		if (DesignJsonUtils::TryGetString(*RenderObject, UMGPropertyKeys::RenderTransformScale, Str))
 		{
 			OutRender.RenderTransformScale = FUMGValueParser::ParseVector2D(Str);
 		}
-		if ((*RenderObject)->TryGetStringField(UMGPropertyKeys::RenderTranslation, Str))
+		if (DesignJsonUtils::TryGetString(*RenderObject, UMGPropertyKeys::RenderTranslation, Str))
 		{
 			OutRender.RenderTranslation = FUMGValueParser::ParseVector2D(Str);
 		}
@@ -737,10 +741,13 @@ void FUMGJsonParser::ParseWidgetStatePayload(const TSharedPtr<FJsonObject>& Node
 {
 	// Parse WidgetState (v2.6)
 	const TSharedPtr<FJsonObject>* WidgetStateObject;
-	if (NodeObject->TryGetObjectField(TEXT("WidgetState"), WidgetStateObject))
+	if (DesignJsonUtils::TryGetObject(NodeObject, TEXT("WidgetState"), WidgetStateObject))
 	{
+		// ActiveWidgetIndex keeps the double read: the historical static_cast<int32>
+		// truncates, which differs from the engine int32 field overload's
+		// range-check + round-half-from-zero conversion.
 		double Val;
-		if ((*WidgetStateObject)->TryGetNumberField(UMGPropertyKeys::ActiveWidgetIndex, Val))
+		if (DesignJsonUtils::TryGetNumber(*WidgetStateObject, UMGPropertyKeys::ActiveWidgetIndex, Val))
 		{
 			OutWidgetState.ActiveWidgetIndex = static_cast<int32>(Val);
 		}
@@ -751,14 +758,14 @@ void FUMGJsonParser::ParseScrollBoxPayload(const TSharedPtr<FJsonObject>& NodeOb
 {
 	// Parse ScrollBox (v2.6)
 	const TSharedPtr<FJsonObject>* ScrollBoxObject;
-	if (NodeObject->TryGetObjectField(TEXT("ScrollBox"), ScrollBoxObject))
+	if (DesignJsonUtils::TryGetObject(NodeObject, TEXT("ScrollBox"), ScrollBoxObject))
 	{
 		FString Str;
-		if ((*ScrollBoxObject)->TryGetStringField(UMGPropertyKeys::Orientation, Str))
+		if (DesignJsonUtils::TryGetString(*ScrollBoxObject, UMGPropertyKeys::Orientation, Str))
 		{
 			OutScrollBox.Orientation = Str;
 		}
-		if ((*ScrollBoxObject)->TryGetStringField(UMGPropertyKeys::ScrollBarVisibility, Str))
+		if (DesignJsonUtils::TryGetString(*ScrollBoxObject, UMGPropertyKeys::ScrollBarVisibility, Str))
 		{
 			OutScrollBox.ScrollBarVisibility = Str;
 		}
@@ -774,72 +781,68 @@ void FUMGJsonParser::ParseSlotData(const TSharedPtr<FJsonObject>& JsonObject, FU
 
 	// Parse Anchors (CanvasPanel).
 	const TSharedPtr<FJsonObject>* AnchorsObject;
-	if (JsonObject->TryGetObjectField(TEXT("Anchors"), AnchorsObject))
+	if (DesignJsonUtils::TryGetObject(JsonObject, TEXT("Anchors"), AnchorsObject))
 	{
 		ParseAnchorsData(*AnchorsObject, OutSlot.Anchors);
 	}
 
 	// Parse Alignment in object form.
-	if (JsonObject->HasField(TEXT("Alignment")))
+	if (const TSharedPtr<FJsonValue> AlignValue = DesignJsonUtils::TryGetField(JsonObject, TEXT("Alignment")); AlignValue.IsValid() && AlignValue->Type == EJson::Object)
 	{
-		const TSharedPtr<FJsonValue>& AlignValue = JsonObject->Values.FindRef(TEXT("Alignment"));
-		if (AlignValue->Type == EJson::Object)
-		{
-			ParseAnchorData(AlignValue->AsObject(), OutSlot.Alignment);
-		}
+		ParseAnchorData(AlignValue->AsObject(), OutSlot.Alignment);
 	}
 
 	// Parse Offsets (CanvasPanel).
 	const TSharedPtr<FJsonObject>* OffsetsObject;
-	if (JsonObject->TryGetObjectField(TEXT("Offsets"), OffsetsObject))
+	if (DesignJsonUtils::TryGetObject(JsonObject, TEXT("Offsets"), OffsetsObject))
 	{
 		ParseOffsetsData(*OffsetsObject, OutSlot.Offsets);
 	}
 
 	// Parse Padding.
-	if (JsonObject->HasField(UMGPropertyKeys::Padding))
+	if (const TSharedPtr<FJsonValue> PaddingValue = DesignJsonUtils::TryGetField(JsonObject, UMGPropertyKeys::Padding); PaddingValue.IsValid())
 	{
-		OutSlot.Padding = ParsePaddingValue(JsonObject->Values.FindRef(UMGPropertyKeys::Padding));
+		OutSlot.Padding = ParsePaddingValue(PaddingValue);
 	}
 
 	// Parse HorizontalAlignment (VerticalBox/HorizontalBox/Overlay).
 	FString HAlign;
-	if (JsonObject->TryGetStringField(TEXT("HorizontalAlignment"), HAlign))
+	if (DesignJsonUtils::TryGetString(JsonObject, TEXT("HorizontalAlignment"), HAlign))
 	{
 		OutSlot.HorizontalAlignment = FUMGValueParser::ParseSlotHorizontalAlignment(HAlign);
 	}
 
 	// Parse VerticalAlignment.
 	FString VAlign;
-	if (JsonObject->TryGetStringField(TEXT("VerticalAlignment"), VAlign))
+	if (DesignJsonUtils::TryGetString(JsonObject, TEXT("VerticalAlignment"), VAlign))
 	{
 		OutSlot.VerticalAlignment = FUMGValueParser::ParseSlotVerticalAlignment(VAlign);
 	}
 
 	// Parse SizeRule (Auto/Fill).
 	FString SizeRule;
-	if (JsonObject->TryGetStringField(TEXT("SizeRule"), SizeRule))
+	if (DesignJsonUtils::TryGetString(JsonObject, TEXT("SizeRule"), SizeRule))
 	{
 		OutSlot.SizeRule = FUMGValueParser::ParseSlotSizeRule(SizeRule);
 	}
 
 	// Parse FillWeight.
-	double FillWeight;
-	if (JsonObject->TryGetNumberField(TEXT("FillWeight"), FillWeight))
+	float FillWeight;
+	if (DesignJsonUtils::TryGetFloat(JsonObject, TEXT("FillWeight"), FillWeight))
 	{
-		OutSlot.FillWeight = static_cast<float>(FillWeight);
+		OutSlot.FillWeight = FillWeight;
 	}
 
 	// Parse Grid-related fields.
 	int32 IntValue;
-	if (JsonObject->TryGetNumberField(TEXT("Row"), IntValue)) OutSlot.Row = IntValue;
-	if (JsonObject->TryGetNumberField(TEXT("Column"), IntValue)) OutSlot.Column = IntValue;
-	if (JsonObject->TryGetNumberField(TEXT("RowSpan"), IntValue)) OutSlot.RowSpan = IntValue;
-	if (JsonObject->TryGetNumberField(TEXT("ColumnSpan"), IntValue)) OutSlot.ColumnSpan = IntValue;
+	if (DesignJsonUtils::TryGetInt32(JsonObject, TEXT("Row"), IntValue)) OutSlot.Row = IntValue;
+	if (DesignJsonUtils::TryGetInt32(JsonObject, TEXT("Column"), IntValue)) OutSlot.Column = IntValue;
+	if (DesignJsonUtils::TryGetInt32(JsonObject, TEXT("RowSpan"), IntValue)) OutSlot.RowSpan = IntValue;
+	if (DesignJsonUtils::TryGetInt32(JsonObject, TEXT("ColumnSpan"), IntValue)) OutSlot.ColumnSpan = IntValue;
 
 	// Parse bAutoSize (Size To Content).
 	bool bAutoSize = false;
-	if (JsonObject->TryGetBoolField(TEXT("bAutoSize"), bAutoSize))
+	if (DesignJsonUtils::TryGetBool(JsonObject, TEXT("bAutoSize"), bAutoSize))
 	{
 		OutSlot.bAutoSize = bAutoSize;
 	}
@@ -853,23 +856,15 @@ void FUMGJsonParser::ParseAnchorsData(const TSharedPtr<FJsonObject>& JsonObject,
 	}
 
 	// Parse Min in object form.
-	if (JsonObject->HasField(TEXT("Min")))
+	if (const TSharedPtr<FJsonValue> Value = DesignJsonUtils::TryGetField(JsonObject, TEXT("Min")); Value.IsValid() && Value->Type == EJson::Object)
 	{
-		const TSharedPtr<FJsonValue>& Value = JsonObject->Values.FindRef(TEXT("Min"));
-		if (Value->Type == EJson::Object)
-		{
-			ParseAnchorData(Value->AsObject(), OutAnchors.Min);
-		}
+		ParseAnchorData(Value->AsObject(), OutAnchors.Min);
 	}
 
 	// Parse Max in object form.
-	if (JsonObject->HasField(TEXT("Max")))
+	if (const TSharedPtr<FJsonValue> Value = DesignJsonUtils::TryGetField(JsonObject, TEXT("Max")); Value.IsValid() && Value->Type == EJson::Object)
 	{
-		const TSharedPtr<FJsonValue>& Value = JsonObject->Values.FindRef(TEXT("Max"));
-		if (Value->Type == EJson::Object)
-		{
-			ParseAnchorData(Value->AsObject(), OutAnchors.Max);
-		}
+		ParseAnchorData(Value->AsObject(), OutAnchors.Max);
 	}
 }
 
@@ -880,8 +875,8 @@ void FUMGJsonParser::ParseAnchorData(const TSharedPtr<FJsonObject>& JsonObject, 
 		return;
 	}
 
-	JsonObject->TryGetNumberField(TEXT("X"), OutAnchor.X);
-	JsonObject->TryGetNumberField(TEXT("Y"), OutAnchor.Y);
+	DesignJsonUtils::TryGetFloat(JsonObject, TEXT("X"), OutAnchor.X);
+	DesignJsonUtils::TryGetFloat(JsonObject, TEXT("Y"), OutAnchor.Y);
 }
 
 void FUMGJsonParser::ParseOffsetsData(const TSharedPtr<FJsonObject>& JsonObject, FUMGOffsetsData& OutOffsets)
@@ -891,8 +886,8 @@ void FUMGJsonParser::ParseOffsetsData(const TSharedPtr<FJsonObject>& JsonObject,
 		return;
 	}
 
-	JsonObject->TryGetNumberField(TEXT("Left"), OutOffsets.Left);
-	JsonObject->TryGetNumberField(TEXT("Top"), OutOffsets.Top);
-	JsonObject->TryGetNumberField(TEXT("Right"), OutOffsets.Right);
-	JsonObject->TryGetNumberField(TEXT("Bottom"), OutOffsets.Bottom);
+	DesignJsonUtils::TryGetFloat(JsonObject, TEXT("Left"), OutOffsets.Left);
+	DesignJsonUtils::TryGetFloat(JsonObject, TEXT("Top"), OutOffsets.Top);
+	DesignJsonUtils::TryGetFloat(JsonObject, TEXT("Right"), OutOffsets.Right);
+	DesignJsonUtils::TryGetFloat(JsonObject, TEXT("Bottom"), OutOffsets.Bottom);
 }

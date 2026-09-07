@@ -50,11 +50,6 @@ struct FDesignTextNodeData
 	{
 		LetterSpacing.Reset();
 	}
-
-	bool HasLetterSpacingValue() const
-	{
-		return LetterSpacing.IsSet();
-	}
 };
 
 /**
@@ -104,11 +99,6 @@ struct FDesignLayoutNodeData
 	bool HasExplicitGap() const      { return ExplicitGap.IsSet(); }
 	bool HasExplicitPadding() const  { return ExplicitPadding.IsSet(); }
 	bool HasExplicitClip() const     { return ExplicitClip.IsSet(); }
-
-	bool HasExplicitGridPosition() const
-	{
-		return LayoutRow.IsSet() || LayoutColumn.IsSet();
-	}
 };
 
 struct FDesignRenderFallbackData
