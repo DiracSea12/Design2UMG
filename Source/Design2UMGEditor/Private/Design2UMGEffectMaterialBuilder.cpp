@@ -33,6 +33,10 @@ namespace
 	// ledger lets the generator drop it once the owning asset save completed.
 	TArray<TWeakObjectPtr<UMaterialInstanceConstant>> GRootedGeometryMaskInstances;
 
+	// Fallback UV step for the retainer blur when no node size can be resolved at bind time.
+	// Same value and provenance as InvalidNodeBlurUVStepComponent in VisualMapper.cpp.
+	constexpr float BlurUVStepFallbackComponent = 1.0f / 512.0f;
+
 	int32 QuantizeMaterialValue(float Value)
 	{
 		return FMath::RoundToInt(Value * 1000.0f);
@@ -64,7 +68,7 @@ namespace
 	void SetupExpression(UMaterialExpressionVectorParameter* Expression, const FName& Name)
 	{
 		Expression->ParameterName = Name;
-		Expression->DefaultValue = FLinearColor(1.0f / 512.0f, 1.0f / 512.0f, 0.0f, 0.0f);
+		Expression->DefaultValue = FLinearColor(BlurUVStepFallbackComponent, BlurUVStepFallbackComponent, 0.0f, 0.0f);
 	}
 
 	void SetupExpression(UMaterialExpressionTextureCoordinate* Expression, const FName& Name)
@@ -143,12 +147,13 @@ UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateForegroundBlurRe
 	UMaterialExpressionCustom* BlurNode = NewObject<UMaterialExpressionCustom>(Material);
 	BlurNode->OutputType = ECustomMaterialOutputType::CMOT_Float4;
 	BlurNode->Code = TEXT(R"(
+// Cross-shaped 5-tap blur: center 75/255 plus four taps at 45/255 each (sum = 1).
 float2 Step = max(BlurUVStep.rg, float2(0.00001, 0.00001));
-float4 Result = Texture.SampleLevel(TextureSampler, UV, 0) * 0.29411765;
-Result += Texture.SampleLevel(TextureSampler, UV + float2(Step.x, 0.0), 0) * 0.17647059;
-Result += Texture.SampleLevel(TextureSampler, UV - float2(Step.x, 0.0), 0) * 0.17647059;
-Result += Texture.SampleLevel(TextureSampler, UV + float2(0.0, Step.y), 0) * 0.17647059;
-Result += Texture.SampleLevel(TextureSampler, UV - float2(0.0, Step.y), 0) * 0.17647059;
+float4 Result = Texture.SampleLevel(TextureSampler, UV, 0) * (75.0 / 255.0);
+Result += Texture.SampleLevel(TextureSampler, UV + float2(Step.x, 0.0), 0) * (45.0 / 255.0);
+Result += Texture.SampleLevel(TextureSampler, UV - float2(Step.x, 0.0), 0) * (45.0 / 255.0);
+Result += Texture.SampleLevel(TextureSampler, UV + float2(0.0, Step.y), 0) * (45.0 / 255.0);
+Result += Texture.SampleLevel(TextureSampler, UV - float2(0.0, Step.y), 0) * (45.0 / 255.0);
 return Result;
 )");
 	Material->GetExpressionCollection().AddExpression(BlurNode);
@@ -205,14 +210,15 @@ UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateInnerShadowRetai
 	UMaterialExpressionCustom* InnerShadowNode = NewObject<UMaterialExpressionCustom>(Material);
 	InnerShadowNode->OutputType = ECustomMaterialOutputType::CMOT_Float4;
 	InnerShadowNode->Code = TEXT(R"(
+// Cross-shaped 5-tap alpha blur: center 75/255 plus four taps at 45/255 each (sum = 1).
 float2 Step = max(BlurUVStep.rg, float2(0.00001, 0.00001));
 float2 Offset = InnerShadowOffset.rg;
 float4 Base = Texture.SampleLevel(TextureSampler, UV, 0);
-float ShiftedAlpha = Texture.SampleLevel(TextureSampler, UV - Offset, 0).a * 0.29411765;
-ShiftedAlpha += Texture.SampleLevel(TextureSampler, UV - Offset + float2(Step.x, 0.0), 0).a * 0.17647059;
-ShiftedAlpha += Texture.SampleLevel(TextureSampler, UV - Offset - float2(Step.x, 0.0), 0).a * 0.17647059;
-ShiftedAlpha += Texture.SampleLevel(TextureSampler, UV - Offset + float2(0.0, Step.y), 0).a * 0.17647059;
-ShiftedAlpha += Texture.SampleLevel(TextureSampler, UV - Offset - float2(0.0, Step.y), 0).a * 0.17647059;
+float ShiftedAlpha = Texture.SampleLevel(TextureSampler, UV - Offset, 0).a * (75.0 / 255.0);
+ShiftedAlpha += Texture.SampleLevel(TextureSampler, UV - Offset + float2(Step.x, 0.0), 0).a * (45.0 / 255.0);
+ShiftedAlpha += Texture.SampleLevel(TextureSampler, UV - Offset - float2(Step.x, 0.0), 0).a * (45.0 / 255.0);
+ShiftedAlpha += Texture.SampleLevel(TextureSampler, UV - Offset + float2(0.0, Step.y), 0).a * (45.0 / 255.0);
+ShiftedAlpha += Texture.SampleLevel(TextureSampler, UV - Offset - float2(0.0, Step.y), 0).a * (45.0 / 255.0);
 float ShadowMask = saturate((Base.a - ShiftedAlpha) * 4.0) * saturate(InnerShadowStrength);
 float3 OutRgb = lerp(Base.rgb, InnerShadowColor.rgb, ShadowMask);
 return float4(OutRgb, Base.a);
@@ -223,7 +229,7 @@ return float4(OutRgb, Base.a);
 	AddCustomInput<UMaterialExpressionTextureCoordinate>(Material, InnerShadowNode, TEXT("UV"));
 	UMaterialExpressionVectorParameter* BlurStepParam =
 		AddCustomInput<UMaterialExpressionVectorParameter>(Material, InnerShadowNode, TEXT("BlurUVStep"));
-	BlurStepParam->DefaultValue = FLinearColor(1.0f / 512.0f, 1.0f / 512.0f, 0.0f, 0.0f);
+	BlurStepParam->DefaultValue = FLinearColor(BlurUVStepFallbackComponent, BlurUVStepFallbackComponent, 0.0f, 0.0f);
 	UMaterialExpressionVectorParameter* ShadowColorParam =
 		AddCustomInput<UMaterialExpressionVectorParameter>(Material, InnerShadowNode, TEXT("InnerShadowColor"));
 	ShadowColorParam->DefaultValue = FLinearColor(0.0f, 0.0f, 0.0f, 0.5f);

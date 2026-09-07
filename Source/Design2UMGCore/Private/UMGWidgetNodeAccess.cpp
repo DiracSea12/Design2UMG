@@ -230,24 +230,27 @@ bool Design2UMGWidgetNodeAccess::NormalizeBrushTexturePathOwner(FUMGVisualBrushD
 	return true;
 }
 
-FString Design2UMGWidgetNodeAccess::BuildWidgetNodeVerbosePropertyDump(const FUMGWidgetNode& Node)
+namespace
 {
-	FString Dump;
-
+	void AppendTextStyleVerboseDump(FString& Dump, const FUMGTextStyleData& TextStyle)
+	{
 	// Text style.
-	if (Node.TextStyle.FontSize > 0.0f)
+	if (TextStyle.FontSize > 0.0f)
 	{
-		AppendVerboseFloat(Dump, UMGPropertyKeys::FontSize, Node.TextStyle.FontSize);
+		AppendVerboseFloat(Dump, UMGPropertyKeys::FontSize, TextStyle.FontSize);
 	}
-	if (Node.TextStyle.SourceFontSize > 0.0f)
+	if (TextStyle.SourceFontSize > 0.0f)
 	{
-		AppendVerboseFloat(Dump, UMGPropertyKeys::DesignFontSize, Node.TextStyle.SourceFontSize);
+		AppendVerboseFloat(Dump, UMGPropertyKeys::DesignFontSize, TextStyle.SourceFontSize);
 	}
-	if (Node.TextStyle.LetterSpacing.IsSet())
+	if (TextStyle.LetterSpacing.IsSet())
 	{
-		AppendVerboseFloat(Dump, UMGPropertyKeys::LetterSpacing, Node.TextStyle.LetterSpacing.GetValue());
+		AppendVerboseFloat(Dump, UMGPropertyKeys::LetterSpacing, TextStyle.LetterSpacing.GetValue());
+	}
 	}
 
+	void AppendWidgetStyleVerboseDump(FString& Dump, const FUMGWidgetNode& Node)
+	{
 	// Widget style. ImageMode/ImageTransform prefer the widget style payload
 	// and fall back to the brush image payload, mirroring the old key lookup order.
 	if (Node.WidgetStyle.WidthOverride.IsSet())
@@ -323,180 +326,221 @@ FString Design2UMGWidgetNodeAccess::BuildWidgetNodeVerbosePropertyDump(const FUM
 	{
 		AppendVerboseBool(Dump, UMGPropertyKeys::IsEnabled, Node.WidgetStyle.IsEnabled.GetValue());
 	}
+	}
 
+	void AppendTextVerboseDump(FString& Dump, const FUMGTextData& Text)
+	{
 	// Text.
-	AppendVerboseProperty(Dump, UMGPropertyKeys::Text, Node.Text.Text);
-	AppendVerboseProperty(Dump, UMGPropertyKeys::RichTextStyleRows, Node.Text.RichTextStyleRowsJson);
-	AppendVerboseProperty(Dump, UMGPropertyKeys::HintText, Node.Text.HintText);
-	AppendVerboseProperty(Dump, UMGPropertyKeys::FontFamily, Node.Text.FontFamily);
-	AppendVerboseProperty(Dump, UMGPropertyKeys::TypefaceFontName, Node.Text.TypefaceFontName);
-	AppendVerboseProperty(Dump, UMGPropertyKeys::FontStyle, Node.Text.FontStyle);
-	AppendVerboseProperty(Dump, UMGPropertyKeys::Justification, Node.Text.Justification);
-	if (Node.Text.bAutoWrapText.IsSet())
+	AppendVerboseProperty(Dump, UMGPropertyKeys::Text, Text.Text);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::RichTextStyleRows, Text.RichTextStyleRowsJson);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::HintText, Text.HintText);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::FontFamily, Text.FontFamily);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::TypefaceFontName, Text.TypefaceFontName);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::FontStyle, Text.FontStyle);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::Justification, Text.Justification);
+	if (Text.bAutoWrapText.IsSet())
 	{
-		AppendVerboseBool(Dump, UMGPropertyKeys::AutoWrapText, Node.Text.bAutoWrapText.GetValue());
+		AppendVerboseBool(Dump, UMGPropertyKeys::AutoWrapText, Text.bAutoWrapText.GetValue());
 	}
-	if (Node.Text.WrapTextAt.IsSet())
+	if (Text.WrapTextAt.IsSet())
 	{
-		AppendVerboseFloat(Dump, UMGPropertyKeys::WrapTextAt, Node.Text.WrapTextAt.GetValue());
+		AppendVerboseFloat(Dump, UMGPropertyKeys::WrapTextAt, Text.WrapTextAt.GetValue());
 	}
-	if (Node.Text.LineHeightPercentage.IsSet())
+	if (Text.LineHeightPercentage.IsSet())
 	{
-		AppendVerboseFloat(Dump, UMGPropertyKeys::LineHeightPercentage, Node.Text.LineHeightPercentage.GetValue());
+		AppendVerboseFloat(Dump, UMGPropertyKeys::LineHeightPercentage, Text.LineHeightPercentage.GetValue());
 	}
-	if (Node.Text.LineHeightBaselineShift.IsSet())
+	if (Text.LineHeightBaselineShift.IsSet())
 	{
-		AppendVerboseFloat(Dump, UMGPropertyKeys::LineHeightBaselineShift, Node.Text.LineHeightBaselineShift.GetValue());
+		AppendVerboseFloat(Dump, UMGPropertyKeys::LineHeightBaselineShift, Text.LineHeightBaselineShift.GetValue());
 	}
-	if (Node.Text.bUnderline.IsSet())
+	if (Text.bUnderline.IsSet())
 	{
-		AppendVerboseBool(Dump, UMGPropertyKeys::Underline, Node.Text.bUnderline.GetValue());
+		AppendVerboseBool(Dump, UMGPropertyKeys::Underline, Text.bUnderline.GetValue());
 	}
-	if (Node.Text.bStrikethrough.IsSet())
+	if (Text.bStrikethrough.IsSet())
 	{
-		AppendVerboseBool(Dump, UMGPropertyKeys::Strikethrough, Node.Text.bStrikethrough.GetValue());
+		AppendVerboseBool(Dump, UMGPropertyKeys::Strikethrough, Text.bStrikethrough.GetValue());
 	}
-	AppendVerboseProperty(Dump, UMGPropertyKeys::Href, Node.Text.Href);
-	AppendVerboseProperty(Dump, UMGPropertyKeys::TextAlignVertical, Node.Text.TextAlignVertical);
-	AppendVerboseProperty(Dump, UMGPropertyKeys::IconName, Node.Text.IconName);
-	if (Node.Text.Color.IsSet())
+	AppendVerboseProperty(Dump, UMGPropertyKeys::Href, Text.Href);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::TextAlignVertical, Text.TextAlignVertical);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::IconName, Text.IconName);
+	if (Text.Color.IsSet())
 	{
-		AppendVerboseColor(Dump, UMGPropertyKeys::Color, Node.Text.Color.GetValue());
+		AppendVerboseColor(Dump, UMGPropertyKeys::Color, Text.Color.GetValue());
+	}
 	}
 
+	void AppendBrushVerboseDump(FString& Dump, const FUMGVisualBrushData& Brush)
+	{
 	// Brush. MaterialParams and PathGeometry stay out of the dump (payload noise).
-	if (Node.Brush.BrushColor.IsSet())
+	if (Brush.BrushColor.IsSet())
 	{
-		AppendVerboseColor(Dump, UMGPropertyKeys::BrushColor, Node.Brush.BrushColor.GetValue());
+		AppendVerboseColor(Dump, UMGPropertyKeys::BrushColor, Brush.BrushColor.GetValue());
 	}
-	if (Node.Brush.OutlineColor.IsSet())
+	if (Brush.OutlineColor.IsSet())
 	{
-		AppendVerboseColor(Dump, UMGPropertyKeys::OutlineColor, Node.Brush.OutlineColor.GetValue());
+		AppendVerboseColor(Dump, UMGPropertyKeys::OutlineColor, Brush.OutlineColor.GetValue());
 	}
-	if (Node.Brush.DrawAs.IsSet())
+	if (Brush.DrawAs.IsSet())
 	{
-		AppendVerboseProperty(Dump, UMGPropertyKeys::DrawAs, Design2UMGWidgetNodeAccess::SerializeDrawAs(Node.Brush.DrawAs.GetValue()));
+		AppendVerboseProperty(Dump, UMGPropertyKeys::DrawAs, Design2UMGWidgetNodeAccess::SerializeDrawAs(Brush.DrawAs.GetValue()));
 	}
-	if (Node.Brush.OutlineCornerRadius.IsSet())
+	if (Brush.OutlineCornerRadius.IsSet())
 	{
-		AppendVerboseFloat(Dump, UMGPropertyKeys::OutlineCornerRadius, Node.Brush.OutlineCornerRadius.GetValue());
+		AppendVerboseFloat(Dump, UMGPropertyKeys::OutlineCornerRadius, Brush.OutlineCornerRadius.GetValue());
 	}
-	if (Node.Brush.CornerRadii.IsSet())
+	if (Brush.CornerRadii.IsSet())
 	{
-		AppendVerboseProperty(Dump, UMGPropertyKeys::CornerRadii, Design2UMGWidgetNodeAccess::SerializeWidgetVector4(Node.Brush.CornerRadii.GetValue()));
+		AppendVerboseProperty(Dump, UMGPropertyKeys::CornerRadii, Design2UMGWidgetNodeAccess::SerializeWidgetVector4(Brush.CornerRadii.GetValue()));
 	}
-	if (Node.Brush.OutlineThickness.IsSet())
+	if (Brush.OutlineThickness.IsSet())
 	{
-		AppendVerboseFloat(Dump, UMGPropertyKeys::OutlineThickness, Node.Brush.OutlineThickness.GetValue());
+		AppendVerboseFloat(Dump, UMGPropertyKeys::OutlineThickness, Brush.OutlineThickness.GetValue());
 	}
-	if (Node.Brush.Gradient.HasAny())
+	if (Brush.Gradient.HasAny())
 	{
-		AppendVerboseProperty(Dump, UMGPropertyKeys::MaterialRef, Design2UMGWidgetNodeAccess::GetGradientMaterialRef(Node.Brush.Gradient));
+		AppendVerboseProperty(Dump, UMGPropertyKeys::MaterialRef, Design2UMGWidgetNodeAccess::GetGradientMaterialRef(Brush.Gradient));
 	}
-	else if (Node.Brush.MaterialRef.IsSet())
+	else if (Brush.MaterialRef.IsSet())
 	{
-		AppendVerboseProperty(Dump, UMGPropertyKeys::MaterialRef, Node.Brush.MaterialRef.GetValue());
+		AppendVerboseProperty(Dump, UMGPropertyKeys::MaterialRef, Brush.MaterialRef.GetValue());
 	}
-	AppendVerboseProperty(Dump, UMGPropertyKeys::TexturePath, Node.Brush.Image.TexturePath);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::TexturePath, Brush.Image.TexturePath);
+	}
 
+	void AppendEffectVerboseDump(FString& Dump, const FUMGEffectData& Effect)
+	{
 	// Effect.
-	if (Node.Effect.BlurStrength.IsSet())
+	if (Effect.BlurStrength.IsSet())
 	{
-		AppendVerboseFloat(Dump, UMGPropertyKeys::BlurStrength, Node.Effect.BlurStrength.GetValue());
+		AppendVerboseFloat(Dump, UMGPropertyKeys::BlurStrength, Effect.BlurStrength.GetValue());
 	}
-	if (Node.Effect.bRetainRendering.IsSet())
+	if (Effect.bRetainRendering.IsSet())
 	{
-		AppendVerboseBool(Dump, UMGPropertyKeys::RetainRendering, Node.Effect.bRetainRendering.GetValue());
+		AppendVerboseBool(Dump, UMGPropertyKeys::RetainRendering, Effect.bRetainRendering.GetValue());
 	}
-	AppendVerboseProperty(Dump, UMGPropertyKeys::EffectMaterial, Node.Effect.EffectMaterial);
-	AppendVerboseProperty(Dump, UMGPropertyKeys::TextureParameter, Node.Effect.TextureParameter);
-	if (Node.Effect.EffectBlurUVStep.IsSet())
+	AppendVerboseProperty(Dump, UMGPropertyKeys::EffectMaterial, Effect.EffectMaterial);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::TextureParameter, Effect.TextureParameter);
+	if (Effect.EffectBlurUVStep.IsSet())
 	{
-		AppendVerboseVector2D(Dump, UMGPropertyKeys::EffectBlurUVStep, Node.Effect.EffectBlurUVStep.GetValue());
+		AppendVerboseVector2D(Dump, UMGPropertyKeys::EffectBlurUVStep, Effect.EffectBlurUVStep.GetValue());
 	}
-	if (Node.Effect.EffectColor.IsSet())
+	if (Effect.EffectColor.IsSet())
 	{
-		AppendVerboseColor(Dump, UMGPropertyKeys::EffectColor, Node.Effect.EffectColor.GetValue());
+		AppendVerboseColor(Dump, UMGPropertyKeys::EffectColor, Effect.EffectColor.GetValue());
 	}
-	if (Node.Effect.EffectOffset.IsSet())
+	if (Effect.EffectOffset.IsSet())
 	{
-		AppendVerboseVector2D(Dump, UMGPropertyKeys::EffectOffset, Node.Effect.EffectOffset.GetValue());
+		AppendVerboseVector2D(Dump, UMGPropertyKeys::EffectOffset, Effect.EffectOffset.GetValue());
 	}
-	if (Node.Effect.RenderingPhase.IsSet())
+	if (Effect.RenderingPhase.IsSet())
 	{
-		AppendVerboseInt(Dump, UMGPropertyKeys::Phase, Node.Effect.RenderingPhase.GetValue().Phase);
-		AppendVerboseInt(Dump, UMGPropertyKeys::PhaseCount, Node.Effect.RenderingPhase.GetValue().PhaseCount);
+		AppendVerboseInt(Dump, UMGPropertyKeys::Phase, Effect.RenderingPhase.GetValue().Phase);
+		AppendVerboseInt(Dump, UMGPropertyKeys::PhaseCount, Effect.RenderingPhase.GetValue().PhaseCount);
+	}
 	}
 
+	void AppendPathVerboseDump(FString& Dump, const FUMGPathData& Path)
+	{
 	// Path (geometry payload excluded: same dump filter as before).
-	AppendVerboseProperty(Dump, UMGPropertyKeys::PathFillRule, Node.Path.FillRule);
-	if (Node.Path.FillColor.IsSet())
+	AppendVerboseProperty(Dump, UMGPropertyKeys::PathFillRule, Path.FillRule);
+	if (Path.FillColor.IsSet())
 	{
-		AppendVerboseColor(Dump, UMGPropertyKeys::PathFillColor, Node.Path.FillColor.GetValue());
+		AppendVerboseColor(Dump, UMGPropertyKeys::PathFillColor, Path.FillColor.GetValue());
 	}
-	if (Node.Path.StrokeColor.IsSet())
+	if (Path.StrokeColor.IsSet())
 	{
-		AppendVerboseColor(Dump, UMGPropertyKeys::PathStrokeColor, Node.Path.StrokeColor.GetValue());
+		AppendVerboseColor(Dump, UMGPropertyKeys::PathStrokeColor, Path.StrokeColor.GetValue());
 	}
-	if (Node.Path.StrokeThickness.IsSet())
+	if (Path.StrokeThickness.IsSet())
 	{
-		AppendVerboseFloat(Dump, UMGPropertyKeys::PathStrokeThickness, Node.Path.StrokeThickness.GetValue());
+		AppendVerboseFloat(Dump, UMGPropertyKeys::PathStrokeThickness, Path.StrokeThickness.GetValue());
 	}
-	AppendVerboseProperty(Dump, UMGPropertyKeys::PathStrokeCap, Node.Path.StrokeCap);
-	AppendVerboseProperty(Dump, UMGPropertyKeys::PathStrokeJoin, Node.Path.StrokeJoin);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::PathStrokeCap, Path.StrokeCap);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::PathStrokeJoin, Path.StrokeJoin);
+	}
 
+	void AppendShadowVerboseDump(FString& Dump, const FUMGShadowData& Shadow)
+	{
 	// Shadow.
-	if (Node.Shadow.ShadowOffset.IsSet())
+	if (Shadow.ShadowOffset.IsSet())
 	{
 		AppendVerboseProperty(
 			Dump, UMGPropertyKeys::ShadowOffset,
-			Design2UMGWidgetNodeAccess::SerializeWidgetCompactVector2D(Node.Shadow.ShadowOffset.GetValue()));
+			Design2UMGWidgetNodeAccess::SerializeWidgetCompactVector2D(Shadow.ShadowOffset.GetValue()));
 	}
-	if (Node.Shadow.ShadowColorAndOpacity.IsSet())
+	if (Shadow.ShadowColorAndOpacity.IsSet())
 	{
-		AppendVerboseColor(Dump, UMGPropertyKeys::ShadowColorAndOpacity, Node.Shadow.ShadowColorAndOpacity.GetValue());
+		AppendVerboseColor(Dump, UMGPropertyKeys::ShadowColorAndOpacity, Shadow.ShadowColorAndOpacity.GetValue());
 	}
-	if (Node.Shadow.ShadowBlur.IsSet())
+	if (Shadow.ShadowBlur.IsSet())
 	{
-		AppendVerboseFloat(Dump, UMGPropertyKeys::ShadowBlur, Node.Shadow.ShadowBlur.GetValue());
+		AppendVerboseFloat(Dump, UMGPropertyKeys::ShadowBlur, Shadow.ShadowBlur.GetValue());
 	}
-	if (Node.Shadow.BoxShadows.Num() > 0)
+	if (Shadow.BoxShadows.Num() > 0)
 	{
-		AppendVerboseInt(Dump, UMGPropertyKeys::BoxShadowCount, Node.Shadow.BoxShadows.Num());
+		AppendVerboseInt(Dump, UMGPropertyKeys::BoxShadowCount, Shadow.BoxShadows.Num());
+	}
 	}
 
+	void AppendRenderVerboseDump(FString& Dump, const FUMGRenderStyleData& Render)
+	{
 	// Render.
-	AppendVerboseProperty(Dump, UMGPropertyKeys::Clipping, Node.Render.Clipping);
-	if (Node.Render.RenderOpacity.IsSet())
+	AppendVerboseProperty(Dump, UMGPropertyKeys::Clipping, Render.Clipping);
+	if (Render.RenderOpacity.IsSet())
 	{
-		AppendVerboseFloat(Dump, UMGPropertyKeys::RenderOpacity, Node.Render.RenderOpacity.GetValue());
+		AppendVerboseFloat(Dump, UMGPropertyKeys::RenderOpacity, Render.RenderOpacity.GetValue());
 	}
-	if (Node.Render.RenderAngle.IsSet())
+	if (Render.RenderAngle.IsSet())
 	{
-		AppendVerboseFloat(Dump, UMGPropertyKeys::RenderAngle, Node.Render.RenderAngle.GetValue());
+		AppendVerboseFloat(Dump, UMGPropertyKeys::RenderAngle, Render.RenderAngle.GetValue());
 	}
-	if (Node.Render.RenderTransformScale.IsSet())
+	if (Render.RenderTransformScale.IsSet())
 	{
-		AppendVerboseVector2D(Dump, UMGPropertyKeys::RenderTransformScale, Node.Render.RenderTransformScale.GetValue());
+		AppendVerboseVector2D(Dump, UMGPropertyKeys::RenderTransformScale, Render.RenderTransformScale.GetValue());
 	}
-	if (Node.Render.RenderTransformPivot.IsSet())
+	if (Render.RenderTransformPivot.IsSet())
 	{
-		AppendVerboseVector2D(Dump, UMGPropertyKeys::RenderTransformPivot, Node.Render.RenderTransformPivot.GetValue());
+		AppendVerboseVector2D(Dump, UMGPropertyKeys::RenderTransformPivot, Render.RenderTransformPivot.GetValue());
 	}
-	if (Node.Render.RenderTranslation.IsSet())
+	if (Render.RenderTranslation.IsSet())
 	{
-		AppendVerboseVector2D(Dump, UMGPropertyKeys::RenderTranslation, Node.Render.RenderTranslation.GetValue());
+		AppendVerboseVector2D(Dump, UMGPropertyKeys::RenderTranslation, Render.RenderTranslation.GetValue());
+	}
 	}
 
+	void AppendWidgetStateVerboseDump(FString& Dump, const FUMGWidgetStateData& WidgetState)
+	{
 	// Widget state.
-	if (Node.WidgetState.ActiveWidgetIndex.IsSet())
+	if (WidgetState.ActiveWidgetIndex.IsSet())
 	{
-		AppendVerboseInt(Dump, UMGPropertyKeys::ActiveWidgetIndex, Node.WidgetState.ActiveWidgetIndex.GetValue());
+		AppendVerboseInt(Dump, UMGPropertyKeys::ActiveWidgetIndex, WidgetState.ActiveWidgetIndex.GetValue());
+	}
 	}
 
+	void AppendScrollBoxVerboseDump(FString& Dump, const FUMGScrollBoxData& ScrollBox)
+	{
 	// Scroll box.
-	AppendVerboseProperty(Dump, UMGPropertyKeys::Orientation, Node.ScrollBox.Orientation);
-	AppendVerboseProperty(Dump, UMGPropertyKeys::ScrollBarVisibility, Node.ScrollBox.ScrollBarVisibility);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::Orientation, ScrollBox.Orientation);
+	AppendVerboseProperty(Dump, UMGPropertyKeys::ScrollBarVisibility, ScrollBox.ScrollBarVisibility);
+	}
+}
+
+FString Design2UMGWidgetNodeAccess::BuildWidgetNodeVerbosePropertyDump(const FUMGWidgetNode& Node)
+{
+	FString Dump;
+
+	AppendTextStyleVerboseDump(Dump, Node.TextStyle);
+	AppendWidgetStyleVerboseDump(Dump, Node);
+	AppendTextVerboseDump(Dump, Node.Text);
+	AppendBrushVerboseDump(Dump, Node.Brush);
+	AppendEffectVerboseDump(Dump, Node.Effect);
+	AppendPathVerboseDump(Dump, Node.Path);
+	AppendShadowVerboseDump(Dump, Node.Shadow);
+	AppendRenderVerboseDump(Dump, Node.Render);
+	AppendWidgetStateVerboseDump(Dump, Node.WidgetState);
+	AppendScrollBoxVerboseDump(Dump, Node.ScrollBox);
 
 	return Dump;
 }

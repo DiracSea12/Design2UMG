@@ -2,14 +2,13 @@
 
 #include "UMGJsonParser.h"
 #include "Design2UMGLog.h"
+#include "DesignJsonUtils.h"
 #include "UMGJsonKeys.h"
 #include "UMGPropertyKeys.h"
 #include "UMGSchema.h"
 #include "UMGWidgetNodeAccess.h"
 #include "UMGValueParsing.h"
 #include "Dom/JsonObject.h"
-#include "Serialization/JsonReader.h"
-#include "Serialization/JsonSerializer.h"
 #include "Misc/Guid.h"
 
 // ============================================================================
@@ -73,9 +72,7 @@ namespace
 bool FUMGJsonParser::ParseJson(const FString& JsonString, FUMGWidgetData& OutWidgetData, FString* OutError)
 {
 	TSharedPtr<FJsonObject> Root;
-	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonString);
-
-	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+	if (!DesignJsonUtils::TryParseObject(JsonString, Root))
 	{
 		if (OutError) *OutError = TEXT("Invalid JSON");
 		return false;

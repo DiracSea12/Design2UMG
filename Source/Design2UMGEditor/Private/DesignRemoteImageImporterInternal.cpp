@@ -302,13 +302,9 @@ namespace DesignRemoteImageImporterInternal
 		return true;
 	}
 
-	void FImagePayloadIO::DownloadUrls(
-		const TArray<FString>& Urls,
-		const float TimeoutSeconds,
-		const bool bAllowUnsafeRemoteUrls,
-		const FImageResourceLimits& Limits,
-		TMap<FString, FUrlDownloadResult>& OutResults)
+	namespace
 	{
+		/** Shared per-download outcome state: written by the HTTP completion callback, polled by the wait loop. */
 		struct FDownloadState
 		{
 			FCriticalSection Mutex;
@@ -323,6 +319,62 @@ namespace DesignRemoteImageImporterInternal
 			TArray<uint8> Downloaded;
 			FString ErrorString;
 		};
+
+		/**
+		 * Records the outcome of a finished HTTP response on the state. Callers hold
+		 * the state mutex; the early-return chain replaces the previous else-if nesting.
+		 */
+		void ResolveDownloadOutcome(
+			const TSharedRef<FDownloadState, ESPMode::ThreadSafe>& State,
+			const FHttpResponsePtr& Response,
+			const bool bWasSuccessful,
+			const FImageResourceLimits& Limits)
+		{
+			if (State->bPayloadLimitExceeded)
+			{
+				State->ErrorString = TEXT("Image payload exceeded the byte limit during download");
+				return;
+			}
+			if (!bWasSuccessful || !Response.IsValid())
+			{
+				State->ErrorString = TEXT("Network request failed");
+				return;
+			}
+
+			State->ResponseCode = Response->GetResponseCode();
+			if (State->ResponseCode < 200 || State->ResponseCode >= 300)
+			{
+				State->ErrorString = FString::Printf(TEXT("Server returned an error (HTTP %d)"), State->ResponseCode);
+				return;
+			}
+			if (!FImagePayloadIO::ValidateCompressedByteCount(Response->GetContentLength(), Limits, State->ErrorString))
+			{
+				return;
+			}
+
+			const TArray<uint8>& ResponseContent = Response->GetContent();
+			if (!FImagePayloadIO::ValidateCompressedByteCount(static_cast<uint64>(ResponseContent.Num()), Limits, State->ErrorString))
+			{
+				return;
+			}
+
+			State->Downloaded = ResponseContent;
+			if (State->Downloaded.Num() == 0)
+			{
+				State->ErrorString = TEXT("Server returned an empty response");
+				return;
+			}
+			State->bSuccess = true;
+		}
+	}
+
+	void FImagePayloadIO::DownloadUrls(
+		const TArray<FString>& Urls,
+		const float TimeoutSeconds,
+		const bool bAllowUnsafeRemoteUrls,
+		const FImageResourceLimits& Limits,
+		TMap<FString, FUrlDownloadResult>& OutResults)
+	{
 		struct FPendingRequest
 		{
 			FString Url;
@@ -372,38 +424,7 @@ namespace DesignRemoteImageImporterInternal
 						State->bDone = true;
 						return;
 					}
-					if (State->bPayloadLimitExceeded)
-					{
-						State->ErrorString = TEXT("Image payload exceeded the byte limit during download");
-					}
-					else if (!bWasSuccessful || !Response.IsValid())
-					{
-						State->ErrorString = TEXT("Network request failed");
-					}
-					else
-					{
-						State->ResponseCode = Response->GetResponseCode();
-						if (State->ResponseCode < 200 || State->ResponseCode >= 300)
-						{
-							State->ErrorString = FString::Printf(TEXT("Server returned an error (HTTP %d)"), State->ResponseCode);
-						}
-						else if (ValidateCompressedByteCount(Response->GetContentLength(), Limits, State->ErrorString))
-						{
-							const TArray<uint8>& ResponseContent = Response->GetContent();
-							if (ValidateCompressedByteCount(static_cast<uint64>(ResponseContent.Num()), Limits, State->ErrorString))
-							{
-								State->Downloaded = ResponseContent;
-								if (State->Downloaded.Num() == 0)
-								{
-									State->ErrorString = TEXT("Server returned an empty response");
-								}
-								else
-								{
-									State->bSuccess = true;
-								}
-							}
-						}
-					}
+					ResolveDownloadOutcome(State, Response, bWasSuccessful, Limits);
 					State->bDone = true;
 				});
 

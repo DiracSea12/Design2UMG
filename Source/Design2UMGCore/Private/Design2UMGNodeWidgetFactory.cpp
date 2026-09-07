@@ -167,11 +167,13 @@ namespace
 		}
 
 		const bool bRoundCap = Node->Visual.Stroke.Cap == EDesignStrokeCap::Round;
+		// Loop guard for degenerate dash patterns (near-zero lengths that never advance the cursor).
+		constexpr int32 MaxDashedStrokeSegments = 4096;
 		FString Geometry;
 		float Cursor = 0.0f;
 		int32 PatternIndex = 0;
 		bool bDrawSegment = true;
-		for (int32 SegmentIndex = 0; Cursor < MajorExtent && SegmentIndex < 4096; ++SegmentIndex)
+		for (int32 SegmentIndex = 0; Cursor < MajorExtent && SegmentIndex < MaxDashedStrokeSegments; ++SegmentIndex)
 		{
 			const float PatternLength = DashPattern[PatternIndex] * DashScale;
 			const float SegmentEnd = FMath::Min(MajorExtent, Cursor + PatternLength);

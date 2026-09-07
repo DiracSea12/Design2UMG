@@ -3,6 +3,7 @@
 #include "UMGTextStyleApplication.h"
 
 #include "DesignResourceResolver.h"
+#include "DesignJsonUtils.h"
 #include "UMGPropertyApplierSupport.h"
 #include "UMGPropertyKeys.h"
 #include "UMGValueParsing.h"
@@ -14,8 +15,6 @@
 #include "Components/TextWidgetTypes.h"
 #include "Dom/JsonObject.h"
 #include "Engine/DataTable.h"
-#include "Serialization/JsonReader.h"
-#include "Serialization/JsonSerializer.h"
 
 namespace UMGTextStyleApplication
 {
@@ -249,8 +248,7 @@ namespace UMGTextStyleApplication
 		}
 
 		TSharedPtr<FJsonObject> RootObject;
-		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(StyleRowsJson);
-		if (!FJsonSerializer::Deserialize(Reader, RootObject) || !RootObject.IsValid())
+		if (!DesignJsonUtils::TryParseObject(StyleRowsJson, RootObject))
 		{
 			return;
 		}

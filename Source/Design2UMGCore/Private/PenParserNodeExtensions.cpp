@@ -531,12 +531,15 @@ void PenParserNodeExtensions::SynthesizeStickyCard(const TSharedPtr<FDesignNode>
 	}
 
 	const FString StickyTextContent = Node->Text.Content;
+	// Sticky-card geometry replicated from the Pencil canvas StickyNode view:
+	// 14px body text on a 1.5em line advance, a 45px header band with 12px inner
+	// padding and a 16px chevron, and a 1px dashed (4px on / 4px off) outline.
 	constexpr float StickyFontSize = 14.0f;
-	// Pencil renders sticky text at 14px with a 21px line advance (18px for
-	// the footer label at 12px), both = 1.5em in the schema's multiplier units.
 	constexpr float StickyLineHeight = 1.5f;
 	constexpr float HeaderHeight = 45.0f;
 	constexpr float StickyMinWidth = 250.0f;
+	constexpr float HeaderPaddingPx = 12.0f;
+	constexpr float ChevronIconSize = 16.0f;
 
 	const auto MakeStyledText = [](const FString& InId, const FString& InName, const FString& InContent,
 		const TCHAR* InFontWeight, const float InFontSize, const TCHAR* InColorHex) -> TSharedPtr<FDesignNode>
@@ -566,7 +569,7 @@ void PenParserNodeExtensions::SynthesizeStickyCard(const TSharedPtr<FDesignNode>
 		Header->LayoutData.AlignItems = EDesignAlignItems::Center;
 		Header->LayoutData.SetGap(2.0f);
 		FDesignPadding HeaderPadding;
-		HeaderPadding.Top = HeaderPadding.Right = HeaderPadding.Bottom = HeaderPadding.Left = 12.0f;
+		HeaderPadding.Top = HeaderPadding.Right = HeaderPadding.Bottom = HeaderPadding.Left = HeaderPaddingPx;
 		Header->LayoutData.SetPadding(HeaderPadding);
 		Header->Visual.Fills.Add(FDesignFill::FromColor(Theme->HeaderBackground));
 		Header->Visual.Stroke.Align = EDesignStrokeAlign::Inside;
@@ -583,8 +586,8 @@ void PenParserNodeExtensions::SynthesizeStickyCard(const TSharedPtr<FDesignNode>
 		Chevron->Id = Node->Id + TEXT("-sticky-header-chevron");
 		Chevron->Name = TEXT("Sticky Header Chevron");
 		Chevron->Type = EDesignNodeType::IconFont;
-		Chevron->Transform.SetWidthValue(FDesignSize::Fixed(16.0f));
-		Chevron->Transform.SetHeightValue(FDesignSize::Fixed(16.0f));
+		Chevron->Transform.SetWidthValue(FDesignSize::Fixed(ChevronIconSize));
+		Chevron->Transform.SetHeightValue(FDesignSize::Fixed(ChevronIconSize));
 		Chevron->Text.IconFontName = TEXT("chevron-down");
 		Chevron->Text.IconFontFamily = TEXT("lucide");
 		Chevron->Visual.Fills.Add(FDesignFill::FromColor(Theme->TextColor));

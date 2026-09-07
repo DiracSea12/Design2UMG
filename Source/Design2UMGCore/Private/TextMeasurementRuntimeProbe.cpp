@@ -66,20 +66,26 @@ namespace
 
 	bool FindTableOffset(const TArray<uint8>& Data, const uint32 Tag, int32& OutOffset)
 	{
-		if (Data.Num() < 12)
+		// TrueType sfnt layout: 12-byte offset table header, then 16-byte table records;
+		// the table count lives at byte offset 4. 1024 tables is a sanity cap against corrupt data.
+		constexpr int32 SfntHeaderSize = 12;
+		constexpr int32 SfntTableRecordSize = 16;
+		constexpr int32 MaxSfntTables = 1024;
+
+		if (Data.Num() < SfntHeaderSize)
 		{
 			return false;
 		}
 
 		const int32 NumTables = ReadUInt16(Data, 4);
-		if (NumTables <= 0 || NumTables > 1024 || 12 + NumTables * 16 > Data.Num())
+		if (NumTables <= 0 || NumTables > MaxSfntTables || SfntHeaderSize + NumTables * SfntTableRecordSize > Data.Num())
 		{
 			return false;
 		}
 
 		for (int32 Index = 0; Index < NumTables; ++Index)
 		{
-			const int32 Record = 12 + Index * 16;
+			const int32 Record = SfntHeaderSize + Index * SfntTableRecordSize;
 			if (ReadTableTag(Data, Record) == Tag)
 			{
 				const int32 Offset = (ReadUInt16(Data, Record + 8) << 16) | ReadUInt16(Data, Record + 10);

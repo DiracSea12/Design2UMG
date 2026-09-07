@@ -4,6 +4,7 @@
 #include "PencilExtensionLocator.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
+#include "DesignJsonUtils.h"
 #include "DesignSchema.h"
 #include "FontResolver.h"
 #include "PenBundledLibraries.h"
@@ -13,7 +14,6 @@
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
-#include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Widgets/Notifications/SNotificationList.h"
 
@@ -118,6 +118,8 @@ namespace
 		FNotificationInfo Info(LOCTEXT(
 			"PencilExtensionResourcesMissing",
 			"Pencil extension resources not found (icon codepoint table / library variables). Icons in this design will fall back to icon-name text, and library variables may not resolve. Install the Pencil VS Code extension, or set the Pencil extension directory in the Design2UMG settings."));
+		// Pinned (bFireAndForget=false) but auto-expires so an unattended import
+		// session is not left with a permanent notification.
 		Info.ExpireDuration = 12.0f;
 		Info.bFireAndForget = false;
 		Info.bUseSuccessFailIcons = true;
@@ -161,8 +163,7 @@ namespace PencilExtensionResources
 		OutError.Reset();
 
 		TSharedPtr<FJsonObject> Root;
-		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
-		if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+		if (!DesignJsonUtils::TryParseObject(Json, Root))
 		{
 			OutError = TEXT("icon-index payload is not valid JSON");
 			return false;
@@ -369,8 +370,7 @@ namespace PencilExtensionResources
 		OutError.Reset();
 
 		TSharedPtr<FJsonObject> Root;
-		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(LibPenJson);
-		if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+		if (!DesignJsonUtils::TryParseObject(LibPenJson, Root))
 		{
 			OutError = TEXT("lib.pen payload is not valid JSON");
 			return false;

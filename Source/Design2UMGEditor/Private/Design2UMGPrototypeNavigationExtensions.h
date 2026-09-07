@@ -42,7 +42,7 @@ struct FDesign2UMGPrototypeOverlayEntry
 };
 
 UCLASS()
-class DESIGN2UMGEDITOR_API UDesign2UMGPrototypeNavigationTriggerProxy : public UObject
+class UDesign2UMGPrototypeNavigationTriggerProxy : public UObject
 {
 	GENERATED_BODY()
 
@@ -71,7 +71,7 @@ private:
 };
 
 UCLASS()
-class DESIGN2UMGEDITOR_API UDesign2UMGPrototypeNavigationUserWidgetExtension : public UUserWidgetExtension
+class UDesign2UMGPrototypeNavigationUserWidgetExtension : public UUserWidgetExtension
 {
 	GENERATED_BODY()
 
@@ -156,7 +156,7 @@ private:
 };
 
 UCLASS()
-class DESIGN2UMGEDITOR_API UDesign2UMGPrototypeNavigationClassExtension : public UWidgetBlueprintGeneratedClassExtension
+class UDesign2UMGPrototypeNavigationClassExtension : public UWidgetBlueprintGeneratedClassExtension
 {
 	GENERATED_BODY()
 
@@ -183,7 +183,7 @@ private:
 };
 
 UCLASS(Within = WidgetBlueprint)
-class DESIGN2UMGEDITOR_API UDesign2UMGPrototypeNavigationBlueprintExtension : public UWidgetBlueprintExtension
+class UDesign2UMGPrototypeNavigationBlueprintExtension : public UWidgetBlueprintExtension
 {
 	GENERATED_BODY()
 

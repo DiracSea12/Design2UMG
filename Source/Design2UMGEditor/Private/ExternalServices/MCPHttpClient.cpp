@@ -3,12 +3,12 @@
 #include "MCPHttpClient.h"
 #include "Design2UMGLog.h"
 #include "DesignHttpClientSlot.h"
+#include "DesignJsonUtils.h"
 
 #include "HttpModule.h"
 #include "HttpManager.h"
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
-#include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 
@@ -342,9 +342,8 @@ bool FMCPHttpClient::ParseSSEResponse(const FString& SSEBody, TSharedPtr<FJsonOb
 		JsonPayload = SSEBody;
 	}
 
-	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonPayload);
 	TSharedPtr<FJsonObject> RpcObj;
-	if (!FJsonSerializer::Deserialize(Reader, RpcObj) || !RpcObj.IsValid())
+	if (!DesignJsonUtils::TryParseObject(JsonPayload, RpcObj))
 		return false;
 
 	OutResult = RpcObj->GetObjectField(TEXT("result"));

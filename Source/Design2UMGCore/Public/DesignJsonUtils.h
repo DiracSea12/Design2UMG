@@ -141,4 +141,16 @@ namespace DesignJsonUtils
 		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
 		return FJsonSerializer::Deserialize(Reader, OutValue) && OutValue.IsValid();
 	}
+
+	inline bool TryParseArray(const FString& Json, TArray<TSharedPtr<FJsonValue>>& OutArray)
+	{
+		OutArray.Reset();
+		if (Json.IsEmpty())
+		{
+			return false;
+		}
+
+		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
+		return FJsonSerializer::Deserialize(Reader, OutArray);
+	}
 }

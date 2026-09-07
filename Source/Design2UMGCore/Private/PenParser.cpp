@@ -6,10 +6,8 @@
 #include "DesignImportTypes.h"
 #include "DesignSchema.h"
 #include "DesignVariableResolver.h"
+#include "DesignJsonUtils.h"
 #include "DesignTreeLimits.h"
-#include "Serialization/JsonReader.h"
-#include "Serialization/JsonSerializer.h"
-#include "Serialization/JsonWriter.h"
 #include "Misc/FileHelper.h"
 #include "Misc/DefaultValueHelper.h"
 #include "Misc/Paths.h"
@@ -57,8 +55,7 @@ bool FPenParser::ParseFromFile(const FString& FilePath, FDesignDocument& OutDocu
 bool FPenParser::ParseDocument(const FString& JsonString, FDesignDocument& OutDocument)
 {
 	TSharedPtr<FJsonObject> JsonObj;
-	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonString);
-	if (!FJsonSerializer::Deserialize(Reader, JsonObj) || !JsonObj.IsValid())
+	if (!DesignJsonUtils::TryParseObject(JsonString, JsonObj))
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("Invalid design file format. Please verify this is a valid .pen file."));
 		return false;
@@ -292,8 +289,7 @@ void ExpandImportedLibraryVariables(const TSharedPtr<FJsonObject>& ImportsObj, T
 		}
 
 		TSharedPtr<FJsonObject> VariablesObj;
-		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(VariablesJson);
-		if (!FJsonSerializer::Deserialize(Reader, VariablesObj) || !VariablesObj.IsValid())
+		if (!DesignJsonUtils::TryParseObject(VariablesJson, VariablesObj))
 		{
 			UE_LOG(LogDesign2UMG, Warning, TEXT("Variables table for library '%s' could not be parsed."), *LibraryName);
 			continue;

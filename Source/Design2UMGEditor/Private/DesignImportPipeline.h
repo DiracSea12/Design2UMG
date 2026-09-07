@@ -13,6 +13,13 @@
 class UWidgetBlueprint;
 class UDesign2UMGSettings;
 
+/**
+ * Immutable point-in-time capture of the import/generation settings for one import run.
+ * Module-internal pipeline contract (Editor module only; not part of the Public API).
+ * Naming convention for this contract family: "Snapshot" types capture immutable
+ * settings copies, while "State" types (BuildState, ImportStateSubsystem) track
+ * mutable progress during a run.
+ */
 struct FDesign2UMGImportSettingsSnapshot
 {
 	FDesign2UMGConversionSettings ConversionSettings;

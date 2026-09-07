@@ -939,6 +939,10 @@ void FFontResolver::RegisterKnownIconGlyphs(
 
 int32 FFontResolver::ParseWeightValue(const FString& Weight)
 {
+	// CSS font-weight scale: 100..900 in steps of 100 (https://drafts.csswg.org/css-fonts-4/#font-weight-numeric-values).
+	constexpr int32 MinCssFontWeight = 100;
+	constexpr int32 MaxCssFontWeight = 900;
+
 	FString W = Weight.ToLower().TrimStartAndEnd();
 	if (W == TEXT("thin"))       return 100;
 	if (W == TEXT("extralight") || W == TEXT("ultralight")) return 200;
@@ -951,8 +955,8 @@ int32 FFontResolver::ParseWeightValue(const FString& Weight)
 	if (W == TEXT("black") || W == TEXT("heavy")) return 900;
 
 	int32 Num = FCString::Atoi(*W);
-	if (Num >= 100 && Num <= 900)
-		return FMath::Clamp(FMath::RoundToInt(Num / 100.0f) * 100, 100, 900);
+	if (Num >= MinCssFontWeight && Num <= MaxCssFontWeight)
+		return FMath::Clamp(FMath::RoundToInt(Num / 100.0f) * 100, MinCssFontWeight, MaxCssFontWeight);
 
 	return 400;
 }

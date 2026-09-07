@@ -33,7 +33,7 @@ struct FDesign2UMGFigmaWidgetMetadataRecord
 };
 
 UCLASS()
-class DESIGN2UMGEDITOR_API UDesign2UMGFigmaMetadataClassExtension
+class UDesign2UMGFigmaMetadataClassExtension
 	: public UWidgetBlueprintGeneratedClassExtension
 {
 	GENERATED_BODY()
@@ -60,7 +60,7 @@ private:
 };
 
 UCLASS(Within = WidgetBlueprint)
-class DESIGN2UMGEDITOR_API UDesign2UMGFigmaMetadataBlueprintExtension
+class UDesign2UMGFigmaMetadataBlueprintExtension
 	: public UWidgetBlueprintExtension
 {
 	GENERATED_BODY()

@@ -3,12 +3,12 @@
 #include "Design2UMGGenerationManifest.h"
 
 #include "Design2UMGLog.h"
+#include "DesignJsonUtils.h"
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
-#include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 
@@ -163,8 +163,7 @@ namespace Design2UMGGenerationManifest
 		}
 
 		TSharedPtr<FJsonObject> Root;
-		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
-		if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+		if (!DesignJsonUtils::TryParseObject(Json, Root))
 		{
 			OutError = FString::Printf(TEXT("generation manifest sidecar is not valid JSON: %s"), *SidecarPath);
 			return false;

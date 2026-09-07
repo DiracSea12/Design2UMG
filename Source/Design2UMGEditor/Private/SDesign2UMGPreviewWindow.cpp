@@ -19,7 +19,6 @@
 #include "Widgets/SBoxPanel.h"
 #include "Styling/AppStyle.h"
 #include "Dom/JsonObject.h"
-#include "Serialization/JsonReader.h"
 #include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
 #include "Framework/Application/SlateApplication.h"
@@ -427,9 +426,7 @@ bool SDesign2UMGPreviewWindow::ValidateJson(const FString& JsonString, FString& 
 FString SDesign2UMGPreviewWindow::FormatJson(const FString& JsonString)
 {
 	TSharedPtr<FJsonObject> JsonObject;
-	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonString);
-
-	if (FJsonSerializer::Deserialize(Reader, JsonObject) && JsonObject.IsValid())
+	if (DesignJsonUtils::TryParseObject(JsonString, JsonObject))
 	{
 		FString FormattedJson;
 		TSharedRef<TJsonWriter<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>> Writer =

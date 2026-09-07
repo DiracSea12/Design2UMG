@@ -4,10 +4,8 @@
 #include "FigmaParser.h"
 #include "FigmaHttpClient.h"
 #include "Design2UMGLog.h"
+#include "DesignJsonUtils.h"
 #include "DesignSchema.h"
-
-#include "Serialization/JsonReader.h"
-#include "Serialization/JsonSerializer.h"
 
 void FFigmaImageExporter::ResolveImageRefs(
 	FFigmaHttpClient& Client,
@@ -39,8 +37,7 @@ void FFigmaImageExporter::ResolveImageRefs(
 			}
 
 			TSharedPtr<FJsonObject> Root;
-			TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Body);
-			if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+			if (!DesignJsonUtils::TryParseObject(Body, Root))
 			{
 				UE_LOG(LogDesign2UMG, Error, TEXT("FigmaImageExporter: Failed to parse images response"));
 				if (OnComplete) OnComplete(false);
@@ -145,8 +142,7 @@ void FFigmaImageExporter::ExportVectorNodes(
 			}
 
 			TSharedPtr<FJsonObject> Root;
-			TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Body);
-			if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+			if (!DesignJsonUtils::TryParseObject(Body, Root))
 			{
 				UE_LOG(LogDesign2UMG, Warning, TEXT("FigmaImageExporter: Failed to parse export response"));
 				if (OnComplete) OnComplete(false, {});

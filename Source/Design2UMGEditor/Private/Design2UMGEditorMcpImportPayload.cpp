@@ -8,8 +8,8 @@
 #include "Design2UMGEditorImportSupport.h"
 #include "Design2UMGLog.h"
 #include "DesignImportTypes.h"
+#include "DesignJsonUtils.h"
 #include "ExternalServices/PenMCPBridge.h"
-#include "Serialization/JsonSerializer.h"
 #include "Widgets/Notifications/SNotificationList.h"
 
 // Same LOCTEXT namespace string as the pre-split orchestrator, so the moved keys keep their identity.
@@ -19,14 +19,13 @@ namespace
 {
 	TArray<FDesignFrameInfo> ExtractFramesFromMCPResult(const FString& NodesJson)
 	{
-		TArray<FDesignFrameInfo> Result;
-		TArray<TSharedPtr<FJsonValue>> Array;
-		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(NodesJson);
-		if (!FJsonSerializer::Deserialize(Reader, Array))
-		{
-			UE_LOG(LogDesign2UMG, Error, TEXT("ExtractFramesFromMCPResult: JSON deserialization failed (length=%d)"), NodesJson.Len());
-			return Result;
-		}
+	TArray<FDesignFrameInfo> Result;
+	TArray<TSharedPtr<FJsonValue>> Array;
+	if (!DesignJsonUtils::TryParseArray(NodesJson, Array))
+	{
+		UE_LOG(LogDesign2UMG, Error, TEXT("ExtractFramesFromMCPResult: JSON deserialization failed (length=%d)"), NodesJson.Len());
+		return Result;
+	}
 
 		for (const TSharedPtr<FJsonValue>& Value : Array)
 		{

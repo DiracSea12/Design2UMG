@@ -104,8 +104,13 @@ bool FRenderGammaProbeSolidBorderTest::RunTest(const FString& Parameters)
 	// Known failure guard: this probe documents the screenshot chain's color
 	// behavior. A pure #5741BE vertex-color border must come back as the same
 	// bytes when the chain is byte-faithful.
+	// The border owns a deterministic solid brush: SBorder's default "Border" style
+	// brush is a themed image whose fill is not guaranteed to be drawable headless,
+	// while BorderBackgroundColor tints via the vertex-color path this probe guards.
 	const FColor Source(0x57, 0x41, 0xBE, 0xFF);
+	const FSlateColorBrush SolidBrush(FLinearColor::White);
 	TSharedRef<SBorder> Border = SNew(SBorder)
+		.BorderImage(&SolidBrush)
 		.BorderBackgroundColor(FLinearColor(Source))
 		.HAlign(HAlign_Fill)
 		.VAlign(VAlign_Fill);

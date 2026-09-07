@@ -9,8 +9,6 @@
 #include "ParserSharedSemantics.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
-#include "Serialization/JsonReader.h"
-#include "Serialization/JsonSerializer.h"
 
 namespace
 {
@@ -129,8 +127,7 @@ namespace
 			}
 
 			TSharedPtr<FJsonObject> JsonObject;
-			const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(StringValue);
-			if (FJsonSerializer::Deserialize(Reader, JsonObject) && JsonObject.IsValid())
+			if (DesignJsonUtils::TryParseObject(StringValue, JsonObject))
 			{
 				return TryReadSemanticHintFromJsonValue(MakeShared<FJsonValueObject>(JsonObject));
 			}

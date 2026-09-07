@@ -11,6 +11,7 @@
 #include "Design2UMGSettings.h"
 #include "DesignImportPipeline.h"
 #include "DesignImportUtils.h"
+#include "DesignJsonUtils.h"
 #include "DesignPathRasterizer.h"
 #include "DesignSchema.h"
 #include "FigmaParser.h"
@@ -131,8 +132,7 @@ namespace
 		}
 
 		TSharedPtr<FJsonObject> Root;
-		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonStr);
-		if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+		if (!DesignJsonUtils::TryParseObject(JsonStr, Root))
 		{
 			OutError = FString::Printf(TEXT("Failed to parse automation spec JSON: %s"), *SpecPath);
 			return false;
@@ -270,8 +270,7 @@ namespace
 		}
 
 		TSharedPtr<FJsonObject> Root;
-		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonStr);
-		if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+		if (!DesignJsonUtils::TryParseObject(JsonStr, Root))
 		{
 			OutError = FString::Printf(TEXT("Failed to parse upstream result json: %s"), *ResultJsonPath);
 			return false;
@@ -299,8 +298,7 @@ namespace
 		}
 
 		TSharedPtr<FJsonObject> RootObject;
-		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(PenJson);
-		if (!FJsonSerializer::Deserialize(Reader, RootObject) || !RootObject.IsValid())
+		if (!DesignJsonUtils::TryParseObject(PenJson, RootObject))
 		{
 			OutError = FString::Printf(TEXT("Failed to parse .pen JSON: %s"), *PenFilePath);
 			return false;

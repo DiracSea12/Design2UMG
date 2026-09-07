@@ -9,6 +9,7 @@
 #include "Design2UMGLog.h"
 #include "DesignImportDialogs.h"
 #include "DesignImportUtils.h"
+#include "DesignJsonUtils.h"
 #include "DesignSchemaSourceExtensions.h"
 #include "ExternalServices/PenMCPBridge.h"
 #include "ExternalServices/PencilExtensionResources.h"
@@ -20,8 +21,6 @@
 #include "Dom/JsonObject.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
-#include "Serialization/JsonReader.h"
-#include "Serialization/JsonSerializer.h"
 
 FDesign2UMGImportSettingsSnapshot FDesign2UMGImportSettingsSnapshot::FromSettings(const UDesign2UMGSettings* Settings)
 {
@@ -419,8 +418,7 @@ namespace DesignImportPipeline
 		}
 
 		TSharedPtr<FJsonObject> RootObject;
-		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonString);
-		if (!FJsonSerializer::Deserialize(Reader, RootObject) || !RootObject.IsValid())
+		if (!DesignJsonUtils::TryParseObject(JsonString, RootObject))
 		{
 			return Fail(FString::Printf(TEXT("Failed to parse pen source JSON: %s"), *FilePath));
 		}

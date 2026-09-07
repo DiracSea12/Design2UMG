@@ -9,6 +9,9 @@
 
 namespace
 {
+	// Editor-main-thread-only state: generated gradient/shape textures are rooted
+	// (AddToRoot) here until their owning assets are saved, then released in one
+	// flush. Weak pointers keep the ledger from resurrecting GC'd textures.
 	TArray<TWeakObjectPtr<UTexture2D>> GRootedTextures;
 	bool GbHasPendingTextureUpdates = false;
 

@@ -19,15 +19,15 @@ struct FVisualMapperOptions
  */
 namespace VisualMapper
 {
-	DESIGN2UMGCORE_API void ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node);
-	DESIGN2UMGCORE_API void ApplyRenderTransformProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node);
-	DESIGN2UMGCORE_API void ApplyRoundedCorner(FUMGWidgetNode& Widget, const FDesignCornerRadius& Radius, float Width = -1.0f, float Height = -1.0f);
-	DESIGN2UMGCORE_API void ApplyStroke(FUMGWidgetNode& Widget, const FDesignStroke& Stroke);
-	DESIGN2UMGCORE_API FUMGWidgetNode WrapWithBorder(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node);
-	DESIGN2UMGCORE_API FUMGWidgetNode WrapWithBackgroundBlur(FUMGWidgetNode&& Widget, float BlurStrength);
-	DESIGN2UMGCORE_API FUMGWidgetNode WrapWithForegroundBlur(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, float BlurStrength);
-	DESIGN2UMGCORE_API FUMGWidgetNode WrapWithGeometryMask(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node);
-	DESIGN2UMGCORE_API FUMGWidgetNode WrapWithInnerShadow(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, const FDesignShadow& Shadow);
-	DESIGN2UMGCORE_API FUMGWidgetNode WrapWithBoxShadow(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, const TArray<FUMGBoxShadowLayerData>& ShadowLayers);
-	DESIGN2UMGCORE_API FUMGWidgetNode WrapWithMultiFill(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, const FVisualMapperOptions& Options);
+	void ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node);
+	void ApplyRenderTransformProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node);
+	void ApplyRoundedCorner(FUMGWidgetNode& Widget, const FDesignCornerRadius& Radius, float Width = -1.0f, float Height = -1.0f);
+	void ApplyStroke(FUMGWidgetNode& Widget, const FDesignStroke& Stroke);
+	FUMGWidgetNode WrapWithBorder(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node);
+	FUMGWidgetNode WrapWithBackgroundBlur(FUMGWidgetNode&& Widget, float BlurStrength);
+	FUMGWidgetNode WrapWithForegroundBlur(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, float BlurStrength);
+	FUMGWidgetNode WrapWithGeometryMask(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node);
+	FUMGWidgetNode WrapWithInnerShadow(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, const FDesignShadow& Shadow);
+	FUMGWidgetNode WrapWithBoxShadow(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, const TArray<FUMGBoxShadowLayerData>& ShadowLayers);
+	FUMGWidgetNode WrapWithMultiFill(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, const FVisualMapperOptions& Options);
 }

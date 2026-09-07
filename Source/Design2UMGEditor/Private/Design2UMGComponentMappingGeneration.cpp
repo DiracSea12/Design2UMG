@@ -5,9 +5,8 @@
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Widget.h"
+#include "DesignJsonUtils.h"
 #include "Dom/JsonObject.h"
-#include "Serialization/JsonReader.h"
-#include "Serialization/JsonSerializer.h"
 #include "UMGSchemaSourceExtensions.h"
 #include "UObject/UnrealType.h"
 
@@ -87,14 +86,8 @@ namespace
 	// Take the value field of the Source key from the componentProperties JSON ({name:{type,value}}).
 	bool TryGetComponentPropertyValue(const FString& PropertiesJson, const FString& SourceKey, FString& OutValue)
 	{
-		if (PropertiesJson.IsEmpty())
-		{
-			return false;
-		}
-
 		TSharedPtr<FJsonObject> PropertiesObject;
-		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(PropertiesJson);
-		if (!FJsonSerializer::Deserialize(Reader, PropertiesObject) || !PropertiesObject.IsValid())
+		if (!DesignJsonUtils::TryParseObject(PropertiesJson, PropertiesObject))
 		{
 			return false;
 		}
@@ -127,14 +120,8 @@ namespace
 	// Variant values of component-set instances live in variantProperties (a flat {name:value-string} map), the same component-property source.
 	bool TryGetVariantPropertyValue(const FString& VariantPropertiesJson, const FString& SourceKey, FString& OutValue)
 	{
-		if (VariantPropertiesJson.IsEmpty())
-		{
-			return false;
-		}
-
 		TSharedPtr<FJsonObject> PropertiesObject;
-		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(VariantPropertiesJson);
-		if (!FJsonSerializer::Deserialize(Reader, PropertiesObject) || !PropertiesObject.IsValid())
+		if (!DesignJsonUtils::TryParseObject(VariantPropertiesJson, PropertiesObject))
 		{
 			return false;
 		}

@@ -813,6 +813,7 @@ void VisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedPt
 	ApplyStroke(Widget, ResolveStrokeCompositedOverFill(Node));
 
 	int32 ShadowCount = 0;
+	bool bTextShadowAssigned = false;
 	for (const FDesignEffect& Effect : Node->Visual.Effects)
 	{
 		if (!Effect.bEnabled)
@@ -830,6 +831,13 @@ void VisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedPt
 			if (Node->Type == EDesignNodeType::Text)
 			{
 				// TextBlock supports only one shadow in UE5, so later shadows override earlier ones.
+				if (bTextShadowAssigned)
+				{
+					UE_LOG(LogDesign2UMG, Verbose,
+						TEXT("VisualMapper: text node '%s' has multiple drop shadows; the last enabled one wins (UMG TextBlock supports one)"),
+						*Node->Name);
+				}
+				bTextShadowAssigned = true;
 				Widget.Shadow.ShadowOffset = FVector2D(Effect.Shadow.OffsetX, Effect.Shadow.OffsetY);
 				Widget.Shadow.ShadowColorAndOpacity = FUMGValueParser::ParseColor(
 					Effect.Shadow.Color.IsEmpty() ? DesignColorUtils::DefaultShadowColorHex : Effect.Shadow.Color);
@@ -953,12 +961,18 @@ FUMGWidgetNode VisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TShar
 		CanPromoteSingleChildFlowContent(Widget, Node, PromotedContentIndex);
 	if (bPromoteSingleChildFlowContent)
 	{
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("VisualMapper: '%s' → promote single flow child into border"), *Widget.Name);
 		FUMGWidgetNode PromotedContent = MoveTemp(Widget.Children[PromotedContentIndex]);
 		Widget.Children.Reset();
 		PreparePromotedBorderContent(PromotedContent, Node->LayoutData.Layout, Node->LayoutData.JustifyContent);
 		Border.Children.Add(MoveTemp(PromotedContent));
 	}
-	else if (!CanElideEmptyWrappedPanel(Widget, Node))
+	else if (CanElideEmptyWrappedPanel(Widget, Node))
+	{
+		// The wrapped panel has no children and no source identity, so it can vanish without a trace.
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("VisualMapper: '%s' → elide empty wrapped panel"), *Widget.Name);
+	}
+	else
 	{
 		PrepareWrappedContentWidget(Widget);
 		Border.Children.Add(MoveTemp(Widget));

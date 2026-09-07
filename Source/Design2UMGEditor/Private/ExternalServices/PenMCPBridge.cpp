@@ -3,12 +3,11 @@
 #include "PenMCPBridge.h"
 #include "Design2UMGEditorDesignSourceRegistry.h"
 #include "DesignImportPipeline.h"
+#include "DesignJsonUtils.h"
 #include "DesignSchema.h"
 #include "PenParser.h"
 #include "PencilExtensionResources.h"
 #include "UMGSchema.h"
-#include "Serialization/JsonReader.h"
-#include "Serialization/JsonSerializer.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogPenMCPBridge, Log, All);
 
@@ -170,16 +169,14 @@ namespace
 		OutDocumentObject.Reset();
 
 		TArray<TSharedPtr<FJsonValue>> NodesArr;
-		TSharedRef<TJsonReader<>> NodesReader = TJsonReaderFactory<>::Create(NodesJson);
-		if (!FJsonSerializer::Deserialize(NodesReader, NodesArr))
+		if (!DesignJsonUtils::TryParseArray(NodesJson, NodesArr))
 		{
 			UE_LOG(LogPenMCPBridge, Error, TEXT("Failed to parse NodesJson"));
 			return false;
 		}
 
 		TSharedPtr<FJsonObject> VarsObj;
-		TSharedRef<TJsonReader<>> VarsReader = TJsonReaderFactory<>::Create(VariablesJson);
-		if (!FJsonSerializer::Deserialize(VarsReader, VarsObj) || !VarsObj.IsValid())
+		if (!DesignJsonUtils::TryParseObject(VariablesJson, VarsObj))
 		{
 			UE_LOG(LogPenMCPBridge, Warning, TEXT("VariablesJson parse failed or empty, using defaults"));
 			VarsObj = MakeShared<FJsonObject>();

@@ -35,7 +35,7 @@ struct FDesign2UMGPrototypeNavigationTagHelperBinding
 };
 
 UCLASS()
-class DESIGN2UMGEDITOR_API UDesign2UMGPrototypeNavigationTagHelperClassExtension
+class UDesign2UMGPrototypeNavigationTagHelperClassExtension
 	: public UWidgetBlueprintGeneratedClassExtension
 {
 	GENERATED_BODY()
@@ -68,7 +68,7 @@ private:
 };
 
 UCLASS(Within = WidgetBlueprint)
-class DESIGN2UMGEDITOR_API UDesign2UMGPrototypeNavigationTagHelperBlueprintExtension
+class UDesign2UMGPrototypeNavigationTagHelperBlueprintExtension
 	: public UWidgetBlueprintExtension
 {
 	GENERATED_BODY()
@@ -92,7 +92,7 @@ private:
 };
 
 UCLASS()
-class DESIGN2UMGEDITOR_API UDesign2UMGPrototypeNavigationTagProxy : public UObject
+class UDesign2UMGPrototypeNavigationTagProxy : public UObject
 {
 	GENERATED_BODY()
 
@@ -111,7 +111,7 @@ private:
 };
 
 UCLASS()
-class DESIGN2UMGEDITOR_API UDesign2UMGPrototypeNavigationTagHelperExtension : public UUserWidgetExtension
+class UDesign2UMGPrototypeNavigationTagHelperExtension : public UUserWidgetExtension
 {
 	GENERATED_BODY()
 
@@ -125,7 +125,7 @@ private:
 };
 
 UCLASS()
-class DESIGN2UMGEDITOR_API UDesign2UMGPrototypeNavigationTagHelper : public UObject
+class UDesign2UMGPrototypeNavigationTagHelper : public UObject
 {
 	GENERATED_BODY()
 

@@ -308,6 +308,9 @@ UClass* FUMGWidgetUtils::ResolveWidgetClass(const FString& TypeName)
 		return *Found;
 	}
 
+	// Editor-main-thread-only cache (widget class resolution is called during
+	// generation and preview materialization, never off-thread). Weak pointers
+	// let classes unloaded by asset GC drop out of the cache naturally.
 	static TMap<FString, TWeakObjectPtr<UClass>> DynamicClassCache;
 	if (TWeakObjectPtr<UClass>* Cached = DynamicClassCache.Find(TypeName))
 	{

@@ -12,16 +12,16 @@
 namespace DesignTypeMapper
 {
 	/** Map a design node type to the target UMG widget type. */
-	DESIGN2UMGCORE_API FString MapNodeTypeToWidget(EDesignNodeType Type, EDesignLayout Layout);
+	FString MapNodeTypeToWidget(EDesignNodeType Type, EDesignLayout Layout);
 
 	/** fontWeight TypefaceFontName */
-	DESIGN2UMGCORE_API FName MapFontWeight(const FString& Weight);
+	FName MapFontWeight(const FString& Weight);
 
 	/** Map alignItems to horizontal alignment for vertical layouts. */
-	DESIGN2UMGCORE_API EHorizontalAlignment MapAlignItemsH(EDesignAlignItems Align);
+	EHorizontalAlignment MapAlignItemsH(EDesignAlignItems Align);
 
 	/** Map alignItems to vertical alignment for horizontal layouts. */
-	DESIGN2UMGCORE_API EVerticalAlignment MapAlignItemsV(EDesignAlignItems Align);
+	EVerticalAlignment MapAlignItemsV(EDesignAlignItems Align);
 }
 
 
