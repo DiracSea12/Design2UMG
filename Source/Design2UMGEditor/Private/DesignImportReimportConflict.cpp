@@ -5,6 +5,7 @@
 #include "DesignImportDiagnosticReport.h"
 #include "UMGSchemaSourceExtensions.h"
 #include "UMGWidgetUtils.h"
+#include "UMGWidgetTypes.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Blueprint/WidgetTree.h"
@@ -52,7 +53,7 @@ namespace DesignImportPipeline
 		// handles digit prefixes); the raw node id (real Figma ids contain ':' etc.) cannot be compared directly;
 		// derive the base name with the same cleaning rules and match on it, consistent with the nested same-name semantics.
 		const FString TriggerBaseName = FUMGWidgetUtils::SanitizeWidgetName(
-			Binding.TriggerWidgetName, TEXT("Button")).ToString();
+			Binding.TriggerWidgetName, UMGWidgetTypes::Button).ToString();
 		for (const FDelegateEditorBinding& EditorBinding : WBP->Bindings)
 		{
 			if (Binding.UsesKeyboardTrigger())

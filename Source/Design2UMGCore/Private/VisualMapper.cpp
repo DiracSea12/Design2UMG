@@ -11,6 +11,7 @@
 #include "UMGPropertyKeys.h"
 #include "UMGWidgetNodeAccess.h"
 #include "UMGValueParser.h"
+#include "UMGWidgetTypes.h"
 #include "Design2UMGGeneratedNameSuffixes.h"
 
 namespace
@@ -88,14 +89,11 @@ namespace
 		return false;
 	}
 
+	// Shared vocabulary predicate (UMGWidgetTypes.h); kept as a local alias so
+	// the elide path reads naturally next to its sibling CanElideEmptyWrappedPanel.
 	bool IsLayoutPanelType(const FString& Type)
 	{
-		return Type == TEXT("CanvasPanel")
-			|| Type == TEXT("VerticalBox")
-			|| Type == TEXT("HorizontalBox")
-			|| Type == TEXT("WrapBox")
-			|| Type == TEXT("UniformGridPanel")
-			|| Type == TEXT("GridPanel");
+		return UMGWidgetTypes::IsLayoutPanel(Type);
 	}
 
 	bool HasVisualBrushPayload(const FUMGVisualBrushData& Brush)
@@ -202,7 +200,7 @@ namespace
 		};
 		const bool bDeclaredShape = HasUsableExtent(Node->Transform.Width) && HasUsableExtent(Node->Transform.Height);
 		FUMGWidgetNode Shadow;
-		Shadow.Type = TEXT("Image");
+		Shadow.Type = UMGWidgetTypes::Image;
 		const FString ShadowSuffix = BuildIndexedShadowSuffix(ShadowIndex);
 		Shadow.Id = SourceId + ShadowSuffix;
 		Shadow.Name = SourceName + ShadowSuffix;
@@ -522,8 +520,8 @@ namespace
 
 	bool IsPromotableFlowPanelType(const FString& Type)
 	{
-		return Type == TEXT("HorizontalBox")
-			|| Type == TEXT("VerticalBox");
+		return Type == UMGWidgetTypes::HorizontalBox
+			|| Type == UMGWidgetTypes::VerticalBox;
 	}
 
 	bool HasEnabledInnerShadow(const FDesignNode& Node)
@@ -934,7 +932,7 @@ void VisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FDesignStroke& Stro
 FUMGWidgetNode VisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node)
 {
 	FUMGWidgetNode Border;
-	Border.Type = TEXT("Border");
+	Border.Type = UMGWidgetTypes::Border;
 	Border.Id = Widget.Id;
 	Border.Name = Widget.Name;
 	Border.Bounds = Widget.Bounds;
@@ -1000,7 +998,7 @@ FUMGWidgetNode VisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TShar
 FUMGWidgetNode VisualMapper::WrapWithBackgroundBlur(FUMGWidgetNode&& Widget, float BlurStrength)
 {
 	FUMGWidgetNode Blur;
-	Blur.Type = TEXT("BackgroundBlur");
+	Blur.Type = UMGWidgetTypes::BackgroundBlur;
 	Blur.Id = Widget.Id + TEXT("_blur");
 	Blur.Name = Widget.Name + TEXT("_blur");
 	Blur.Bounds = Widget.Bounds;
@@ -1019,7 +1017,7 @@ FUMGWidgetNode VisualMapper::WrapWithBackgroundBlur(FUMGWidgetNode&& Widget, flo
 FUMGWidgetNode VisualMapper::WrapWithForegroundBlur(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, float BlurStrength)
 {
 	FUMGWidgetNode Retainer;
-	Retainer.Type = TEXT("RetainerBox");
+	Retainer.Type = UMGWidgetTypes::RetainerBox;
 	Retainer.Id = BuildWidgetIdOrNameWithSuffix(Widget.Id, Design2UMGGeneratedNameSuffixes::FxBlur());
 	Retainer.Name = BuildWidgetIdOrNameWithSuffix(Widget.Name, Design2UMGGeneratedNameSuffixes::FxBlur());
 	Retainer.Bounds = Widget.Bounds;
@@ -1040,7 +1038,7 @@ FUMGWidgetNode VisualMapper::WrapWithForegroundBlur(FUMGWidgetNode&& Widget, con
 FUMGWidgetNode VisualMapper::WrapWithGeometryMask(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node)
 {
 	FUMGWidgetNode Retainer;
-	Retainer.Type = TEXT("RetainerBox");
+	Retainer.Type = UMGWidgetTypes::RetainerBox;
 	Retainer.Id = BuildWidgetIdOrNameWithSuffix(Widget.Id, Design2UMGGeneratedNameSuffixes::GeometryMask());
 	Retainer.Name = BuildWidgetIdOrNameWithSuffix(Widget.Name, Design2UMGGeneratedNameSuffixes::GeometryMask());
 	Retainer.Bounds = Widget.Bounds;
@@ -1065,7 +1063,7 @@ FUMGWidgetNode VisualMapper::WrapWithGeometryMask(FUMGWidgetNode&& Widget, const
 FUMGWidgetNode VisualMapper::WrapWithInnerShadow(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, const FDesignShadow& Shadow)
 {
 	FUMGWidgetNode Retainer;
-	Retainer.Type = TEXT("RetainerBox");
+	Retainer.Type = UMGWidgetTypes::RetainerBox;
 	Retainer.Id = BuildWidgetIdOrNameWithSuffix(Widget.Id, Design2UMGGeneratedNameSuffixes::InnerShadow());
 	Retainer.Name = BuildWidgetIdOrNameWithSuffix(Widget.Name, Design2UMGGeneratedNameSuffixes::InnerShadow());
 	Retainer.Bounds = Widget.Bounds;
@@ -1092,7 +1090,7 @@ FUMGWidgetNode VisualMapper::WrapWithBoxShadow(
 	FUMGWidgetNode Wrapper;
 	// Keep the wrapper in the parent's established layout flow. It owns the
 	// source render properties so the shadows and content share one render space.
-	Wrapper.Type = TEXT("Overlay");
+	Wrapper.Type = UMGWidgetTypes::Overlay;
 	Wrapper.Id = Widget.Id;
 	Wrapper.Name = Widget.Name;
 	Wrapper.Bounds = Widget.Bounds;

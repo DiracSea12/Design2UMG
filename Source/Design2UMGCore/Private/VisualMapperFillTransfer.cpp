@@ -7,6 +7,7 @@
 #include "ImageFillUtils.h"
 #include "UMGValueParser.h"
 #include "UMGWidgetNodeAccess.h"
+#include "UMGWidgetTypes.h"
 
 namespace
 {
@@ -113,7 +114,7 @@ namespace
 	FUMGWidgetNode MakeMultiFillOverlayShell(const FUMGWidgetNode& Widget)
 	{
 		FUMGWidgetNode Overlay;
-		Overlay.Type = TEXT("Overlay");
+		Overlay.Type = UMGWidgetTypes::Overlay;
 		Overlay.Id = Widget.Id;
 		Overlay.Name = Widget.Name;
 		Overlay.Bounds = Widget.Bounds;
@@ -161,7 +162,7 @@ namespace
 		const TSharedPtr<FDesignNode>& Node)
 	{
 		return Node.IsValid()
-			&& Widget.Type == TEXT("Border")
+			&& Widget.Type == UMGWidgetTypes::Border
 			&& Widget.Children.Num() <= 1
 			&& !Node->Visual.Stroke.HasStroke()
 			&& !Widget.HasSourceData()
@@ -258,14 +259,14 @@ namespace
 
 		if (Fill.Type == EDesignFillType::Color)
 		{
-			Layer.Type = TEXT("Border");
+			Layer.Type = UMGWidgetTypes::Border;
 			Layer.Brush.BrushColor = FUMGValueParser::ParseColor(Fill.SolidColor);
 			return true;
 		}
 
 		if (Fill.Type == EDesignFillType::Gradient && Fill.Gradient.Colors.Num() > 0)
 		{
-			Layer.Type = TEXT("Image");
+			Layer.Type = UMGWidgetTypes::Image;
 			Layer.Brush.MaterialRef = GradientHelpers::ResolveGradientMaterialRef(Fill.Gradient);
 			GradientHelpers::ApplyTypedGradientBrushData(Layer.Brush, Fill.Gradient);
 			const FString MaterialParams = GradientHelpers::BuildGradientMaterialParams(Fill.Gradient);
@@ -288,12 +289,12 @@ namespace
 			&& FMath::IsNearlyEqual(Node->Transform.Width.Value, Node->Transform.Height.Value, 1.0f);
 		if (Fill.Image.Mode == EDesignImageMode::Fit)
 		{
-			Layer.Type = TEXT("ScaleBox");
+			Layer.Type = UMGWidgetTypes::ScaleBox;
 			Layer.WidgetStyle.Stretch = TEXT("ScaleToFit");
 			Layer.WidgetStyle.StretchDirection = TEXT("Both");
 
 			FUMGWidgetNode ImageChild;
-			ImageChild.Type = TEXT("Image");
+			ImageChild.Type = UMGWidgetTypes::Image;
 			const FString FillImageSuffix = Design2UMGGeneratedNameSuffixes::FillImage(FillIndex);
 			ImageChild.Id = Widget.Id + FillImageSuffix;
 			ImageChild.Name = Widget.Name + FillImageSuffix;
@@ -307,7 +308,7 @@ namespace
 			return true;
 		}
 
-		Layer.Type = TEXT("Image");
+		Layer.Type = UMGWidgetTypes::Image;
 		Layer.Brush.Image.TexturePath = Fill.Image.Url;
 		ImageFillUtils::ApplyImageFillProperties(Layer, Fill.Image);
 		AddTextureSizeHints(Layer, Node);

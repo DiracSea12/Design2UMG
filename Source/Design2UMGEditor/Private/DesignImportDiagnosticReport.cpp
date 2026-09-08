@@ -4,6 +4,7 @@
 
 #include "Design2UMGComponentMappingConfig.h"
 #include "Design2UMGLog.h"
+#include "UMGWidgetTypes.h"
 #include "DesignImageBakeUtils.h"
 #include "DesignSchema.h"
 #include "DesignSchemaSourceExtensions.h"
@@ -222,12 +223,12 @@ namespace DesignImportDiagnosticReport
 
 		FString InferEffectWrapperReason(const FUMGWidgetNode& Widget)
 		{
-			if (Widget.Type.Equals(TEXT("BackgroundBlur"), ESearchCase::IgnoreCase))
+			if (Widget.Type.Equals(UMGWidgetTypes::BackgroundBlur, ESearchCase::IgnoreCase))
 			{
 				return TEXT("background_blur");
 			}
 
-			if (Widget.Type.Equals(TEXT("RetainerBox"), ESearchCase::IgnoreCase))
+			if (Widget.Type.Equals(UMGWidgetTypes::RetainerBox, ESearchCase::IgnoreCase))
 			{
 				const FString EffectMaterial = Widget.Effect.EffectMaterial.Get(FString());
 				if (EffectMaterial.Contains(TEXT("inner_shadow"), ESearchCase::IgnoreCase))
@@ -249,8 +250,8 @@ namespace DesignImportDiagnosticReport
 			TArray<TSharedPtr<FJsonValue>>& OutValues,
 			TArray<FString>& InOutRecommendations)
 		{
-			const bool bIsBackgroundBlur = Widget.Type.Equals(TEXT("BackgroundBlur"), ESearchCase::IgnoreCase);
-			const bool bIsRetainerBox = Widget.Type.Equals(TEXT("RetainerBox"), ESearchCase::IgnoreCase);
+			const bool bIsBackgroundBlur = Widget.Type.Equals(UMGWidgetTypes::BackgroundBlur, ESearchCase::IgnoreCase);
+			const bool bIsRetainerBox = Widget.Type.Equals(UMGWidgetTypes::RetainerBox, ESearchCase::IgnoreCase);
 			if (bIsBackgroundBlur || bIsRetainerBox)
 			{
 				TSharedRef<FJsonObject> Entry = MakeShared<FJsonObject>();

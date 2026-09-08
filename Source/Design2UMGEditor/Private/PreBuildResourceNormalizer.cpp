@@ -5,6 +5,7 @@
 #include "UMGPropertyKeys.h"
 #include "UMGValueParsing.h"
 #include "UMGWidgetNodeProceduralResourceAccess.h"
+#include "UMGWidgetTypes.h"
 #include "UMGImageCropUtils.h"
 #include "Design2UMGLog.h"
 #include "DesignPathRasterDefaults.h"
@@ -234,7 +235,7 @@ namespace
 		FTextureMaterializationPlan& OutPlan)
 	{
 		const FString Geometry = Node.Path.Geometry.Get(FString());
-		if (Node.Type != TEXT("Image") || Geometry.IsEmpty())
+		if (Node.Type != UMGWidgetTypes::Image || Geometry.IsEmpty())
 		{
 			return false;
 		}

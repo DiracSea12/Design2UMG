@@ -17,6 +17,7 @@
 #include "DesignVariableResolver.h"
 #include "ImageFillUtils.h"
 #include "LayoutMapper.h"
+#include "UMGWidgetTypes.h"
 #include "SizeEstimator.h"
 #include "DesignNodeSemantics.h"
 #include "TextMeasurement.h"
@@ -254,7 +255,7 @@ namespace Design2UMGConverterPrivate
 			// Grid selection and flow prep must see the same filtered child list to avoid layout drift.
 			if (Node->LayoutData.Layout == EDesignLayout::Grid && Design2UMGGridLayout::NeedsGridPanel(VisibleChildren))
 			{
-				Widget.Type = TEXT("GridPanel");
+				Widget.Type = UMGWidgetTypes::GridPanel;
 			}
 
 			// Flow children are pre-resolved before appending so slot metrics are based on effective nodes, not raw refs.
@@ -284,7 +285,7 @@ namespace Design2UMGConverterPrivate
 			// TexturePath lives on the canonical image owner.
 			const bool bWidgetOwnsDesiredSize =
 				Node->LayoutData.Layout != EDesignLayout::None
-				&& ChildWidget.Type == TEXT("Image")
+				&& ChildWidget.Type == UMGWidgetTypes::Image
 				&& ChildNode->Children.Num() == 0
 				&& (ChildWidget.WidgetStyle.WidthOverride.IsSet()
 					|| ChildWidget.WidgetStyle.HeightOverride.IsSet())
@@ -307,7 +308,7 @@ namespace Design2UMGConverterPrivate
 			const bool bGridPanelParent =
 				Node.IsValid()
 				&& Node->LayoutData.Layout == EDesignLayout::Grid
-				&& Widget.Type.Equals(TEXT("GridPanel"), ESearchCase::CaseSensitive);
+				&& Widget.Type.Equals(UMGWidgetTypes::GridPanel, ESearchCase::CaseSensitive);
 			Design2UMGGridLayout::FGridPlacementState GridPlacementState;
 			if (bGridPanelParent)
 			{
@@ -393,7 +394,7 @@ namespace Design2UMGConverterPrivate
 				}
 				else if (Node->LayoutData.Layout == EDesignLayout::Grid)
 				{
-					if (Widget.Type == TEXT("UniformGridPanel"))
+					if (Widget.Type == UMGWidgetTypes::UniformGridPanel)
 					{
 						// Uniform grid slots carry half the resolved gap on each side.
 						// With no resolved gaps the outer explicit gap becomes the
@@ -664,7 +665,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 	}
 
 	UE_LOG(LogDesign2UMG, Log, TEXT("Convert: %d top-level widgets → CanvasPanel root"), RenderWidgets.Num());
-	Result.RootWidget.Type = TEXT("CanvasPanel");
+	Result.RootWidget.Type = UMGWidgetTypes::CanvasPanel;
 	Result.RootWidget.Name = TEXT("Root");
 	Result.RootWidget.Id = TEXT("Root");
 	for (auto& W : RenderWidgets)

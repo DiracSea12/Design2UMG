@@ -8,6 +8,7 @@
 #include "DesignTypeMapper.h"
 #include "PathWidgetBuilder.h"
 #include "VisualMapper.h"
+#include "UMGWidgetTypes.h"
 
 namespace
 {
@@ -238,7 +239,7 @@ namespace
 				const bool bStacksVertically = bHasExplicitLayoutAxis
 					? Node->LayoutData.Layout == EDesignLayout::Vertical
 					: Node->LayoutData.Overflow == EDesignOverflow::VerticalScrolling;
-				Widget.Type = TEXT("ScrollBox");
+				Widget.Type = UMGWidgetTypes::ScrollBox;
 				Widget.ScrollBox.Orientation = bStacksVertically ? TEXT("Vertical") : TEXT("Horizontal");
 				Widget.ScrollBox.ScrollBarVisibility = TEXT("Hidden");
 			}

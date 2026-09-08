@@ -12,6 +12,7 @@
 #include "WidgetLayoutAdapter.h"
 #include "UMGPropertyKeys.h"
 #include "UMGWidgetNodeAccess.h"
+#include "UMGWidgetTypes.h"
 #include "UMGValueParsing.h"
 #include "Design2UMGConstrainedWidgets.h"
 
@@ -132,8 +133,8 @@ namespace
 			REG(MenuAnchor); REG(EditableText); REG(MultiLineEditableText);
 			#undef REG
 			// Aliases.
-			M.Add(TEXT("ComboBox"), UComboBoxString::StaticClass());
-			M.Add(TEXT("ComboBoxString"), UComboBoxString::StaticClass());
+			M.Add(UMGWidgetTypes::ComboBox, UComboBoxString::StaticClass());
+			M.Add(UMGWidgetTypes::ComboBoxString, UComboBoxString::StaticClass());
 			return M;
 		}();
 		return Map;

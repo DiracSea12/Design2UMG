@@ -2,6 +2,7 @@
 
 #include "DesignTypeMapper.h"
 #include "FontResolver.h"
+#include "UMGWidgetTypes.h"
 
 namespace
 {
@@ -10,15 +11,15 @@ namespace
 		switch (Layout)
 		{
 		case EDesignLayout::Vertical:
-			return TEXT("VerticalBox");
+			return UMGWidgetTypes::VerticalBox;
 		case EDesignLayout::Horizontal:
-			return TEXT("HorizontalBox");
+			return UMGWidgetTypes::HorizontalBox;
 		case EDesignLayout::Wrap:
-			return TEXT("WrapBox");
+			return UMGWidgetTypes::WrapBox;
 		case EDesignLayout::Grid:
-			return TEXT("UniformGridPanel");
+			return UMGWidgetTypes::UniformGridPanel;
 		default:
-			return TEXT("CanvasPanel");
+			return UMGWidgetTypes::CanvasPanel;
 		}
 	}
 }
@@ -35,20 +36,20 @@ FString DesignTypeMapper::MapNodeTypeToWidget(EDesignNodeType Type, EDesignLayou
 	case EDesignNodeType::Ellipse:
 	case EDesignNodeType::Polygon:
 	case EDesignNodeType::Path:
-		return TEXT("Border");
+		return UMGWidgetTypes::Border;
 
 	case EDesignNodeType::Text:
 	case EDesignNodeType::IconFont:
-		return TEXT("TextBlock");
+		return UMGWidgetTypes::TextBlock;
 
 	case EDesignNodeType::Line:
-		return TEXT("Image");
+		return UMGWidgetTypes::Image;
 
 	case EDesignNodeType::Group:
-		return TEXT("CanvasPanel");
+		return UMGWidgetTypes::CanvasPanel;
 
 	default:
-		return TEXT("CanvasPanel");
+		return UMGWidgetTypes::CanvasPanel;
 	}
 }
 

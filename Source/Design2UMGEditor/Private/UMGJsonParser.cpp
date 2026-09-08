@@ -7,6 +7,7 @@
 #include "UMGPropertyKeys.h"
 #include "UMGSchema.h"
 #include "UMGWidgetNodeAccess.h"
+#include "UMGWidgetTypes.h"
 #include "UMGValueParsing.h"
 #include "Dom/JsonObject.h"
 #include "Misc/Guid.h"
@@ -88,14 +89,8 @@ bool FUMGJsonParser::ParseJson(const FString& JsonString, FUMGWidgetData& OutWid
 
 	// Treat an empty pure-layout container as an invalid result.
 	// Interactive widgets such as CheckBox can also derive from panel types, so keep this allowlist narrow.
-	static const TSet<FString> ContainerTypes = {
-		TEXT("CanvasPanel"), TEXT("VerticalBox"), TEXT("HorizontalBox"),
-		TEXT("Overlay"), TEXT("ScrollBox"), TEXT("GridPanel"),
-		TEXT("UniformGridPanel"), TEXT("WrapBox"), TEXT("WidgetSwitcher"),
-		TEXT("SafeZone")
-	};
 	if (OutWidgetData.RootWidget.Children.Num() == 0 &&
-		ContainerTypes.Contains(OutWidgetData.RootWidget.Type))
+		UMGWidgetTypes::IsPureLayoutContainer(OutWidgetData.RootWidget.Type))
 	{
 		if (OutError) *OutError = TEXT("Empty UI result");
 		return false;

@@ -5,6 +5,7 @@
 #include "Design2UMGLog.h"
 #include "DesignColorUtils.h"
 #include "LayoutMapper.h"
+#include "UMGWidgetTypes.h"
 
 namespace
 {
@@ -99,7 +100,7 @@ namespace Design2UMGConverterVisualSupport
 	FUMGWidgetNode CreateRenderFallbackWidget(const TSharedPtr<FDesignNode>& Node)
 	{
 		FUMGWidgetNode Widget;
-		Widget.Type = TEXT("Image");
+		Widget.Type = UMGWidgetTypes::Image;
 		Widget.Brush.Image.TexturePath = Node->Visual.RenderFallback.ImageRef;
 		if (Node->Transform.Width.Value > 0.0f)
 		{
@@ -125,7 +126,7 @@ namespace Design2UMGConverterVisualSupport
 			|| Widget.Brush.Image.TexturePath.IsSet()
 			|| Widget.Brush.Gradient.HasAny()
 			|| Widget.Brush.MaterialRef.IsSet();
-		if (Widget.Type == TEXT("Border") && !bHasBorderBackground)
+		if (Widget.Type == UMGWidgetTypes::Border && !bHasBorderBackground)
 		{
 			Widget.Brush.BrushColor = FLinearColor::Transparent;
 			if (Widget.Brush.OutlineThickness.IsSet())
@@ -188,7 +189,7 @@ namespace Design2UMGConverterVisualSupport
 		}
 
 		UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: applying placeholder surface tint to '%s'"), *Node->Name);
-		Widget.Type = TEXT("Image");
+		Widget.Type = UMGWidgetTypes::Image;
 		Widget.Children.Empty();
 		const int32 InsetPx = FMath::Clamp(
 			FMath::RoundToInt(FMath::Min3(

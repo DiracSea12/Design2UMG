@@ -6,6 +6,7 @@
 #include "DesignTypeMapper.h"
 #include "ImageFillUtils.h"
 #include "UMGValueParser.h"
+#include "UMGWidgetTypes.h"
 
 namespace
 {
@@ -142,7 +143,7 @@ FUMGWidgetNode PathWidgetBuilder::CreatePathWidget(const TSharedPtr<FDesignNode>
 
 	if (const FString VectorRasterFallback = GetVectorRasterFallbackTexturePath(Node); !VectorRasterFallback.IsEmpty())
 	{
-		Widget.Type = TEXT("Image");
+		Widget.Type = UMGWidgetTypes::Image;
 		Widget.Brush.Image.TexturePath = VectorRasterFallback;
 		ApplyPathSizeOverrides(Widget, Node);
 		return Widget;
@@ -151,7 +152,7 @@ FUMGWidgetNode PathWidgetBuilder::CreatePathWidget(const TSharedPtr<FDesignNode>
 	const FDesignFill& PrimaryFill = Node->Visual.TopmostFill();
 	if (PrimaryFill.Type == EDesignFillType::Image && !PrimaryFill.Image.Url.IsEmpty())
 	{
-		Widget.Type = TEXT("Image");
+		Widget.Type = UMGWidgetTypes::Image;
 		Widget.Brush.Image.TexturePath = PrimaryFill.Image.Url;
 		ImageFillUtils::ApplyImageFillProperties(Widget, PrimaryFill.Image);
 		ApplyPathSizeOverrides(Widget, Node);
@@ -173,7 +174,7 @@ FUMGWidgetNode PathWidgetBuilder::CreatePathWidget(const TSharedPtr<FDesignNode>
 				FillColor.IsEmpty() ? 0 : 1,
 				StrokeThickness);
 
-			Widget.Type = TEXT("Image");
+			Widget.Type = UMGWidgetTypes::Image;
 			Widget.Path.Geometry = Node->Shape.Geometry;
 			Widget.Path.FillRule = Node->Shape.FillRule;
 			if (!FillColor.IsEmpty())

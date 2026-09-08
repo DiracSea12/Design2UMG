@@ -32,23 +32,15 @@ namespace
 
 	void CollectFontFamilies(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSet<FString>& OutFamilies);
 
-	FString NormalizeCompactResolverKey(const FString& InValue)
+	// Single normalization for every font lookup key (family, PostScript name,
+	// asset name): lowercase, trimmed, spaces/dashes/underscores removed.
+	FString NormalizeFontLookupKey(const FString& InValue)
 	{
 		FString Key = InValue.ToLower().TrimStartAndEnd();
 		Key.ReplaceInline(TEXT(" "), TEXT(""));
 		Key.ReplaceInline(TEXT("-"), TEXT(""));
 		Key.ReplaceInline(TEXT("_"), TEXT(""));
 		return Key;
-	}
-
-	FString NormalizeFontFamilyKeyForResolver(const FString& InFamily)
-	{
-		return NormalizeCompactResolverKey(InFamily);
-	}
-
-	FString BuildFontFamilyLookupKey(const FString& FontFamily)
-	{
-		return NormalizeFontFamilyKeyForResolver(FontFamily);
 	}
 
 	FString NormalizeIconNameKeyForResolver(const FString& InName)
@@ -138,7 +130,7 @@ namespace
 				continue;
 			}
 
-			if (NormalizeFontFamilyKeyForResolver(Asset.AssetName.ToString()) != NormalizedFamily)
+			if (NormalizeFontLookupKey(Asset.AssetName.ToString()) != NormalizedFamily)
 			{
 				continue;
 			}
@@ -407,7 +399,7 @@ namespace
 		/** Caller must hold FontIndexMutex. */
 		void AddIndexedFontAssetName(const FString& AssetName, const FString& ObjectPath)
 		{
-			const FString Normalized = NormalizeFontFamilyKeyForResolver(AssetName);
+			const FString Normalized = NormalizeFontLookupKey(AssetName);
 			if (!Normalized.IsEmpty() && IsProjectFontAssetPath(ObjectPath))
 			{
 				NormalizedProjectFontAssetIndex.FindOrAdd(Normalized).AddUnique(ObjectPath);
@@ -439,7 +431,7 @@ namespace
 
 	bool TryGetSingleLoadableProjectFontAssetPath(const FString& FontFamily, FString& OutPath)
 	{
-		const FString LookupKey = BuildFontFamilyLookupKey(FontFamily);
+		const FString LookupKey = NormalizeFontLookupKey(FontFamily);
 		if (LookupKey.IsEmpty())
 		{
 			return false;
@@ -454,7 +446,7 @@ namespace
 	// FindFontAssetPath overloads call this after their explicit-mapping pass.
 	FString FindFontAssetPathByFamilyLookup(const FString& FontFamily)
 	{
-		const FString NormalizedFamily = NormalizeFontFamilyKeyForResolver(FontFamily);
+		const FString NormalizedFamily = NormalizeFontLookupKey(FontFamily);
 		FFontResolverCache& Cache = GetFontResolverCache();
 
 		FString CachedPath;
@@ -508,10 +500,10 @@ namespace
 	{
 		const FString FamilyKey = Family.TrimStartAndEnd().IsEmpty()
 			? TEXT("unknown-family")
-			: NormalizeCompactResolverKey(Family);
+			: NormalizeFontLookupKey(Family);
 		const FString PostScriptKey = PostScriptName.TrimStartAndEnd().IsEmpty()
 			? TEXT("none")
-			: NormalizeCompactResolverKey(PostScriptName);
+			: NormalizeFontLookupKey(PostScriptName);
 		const FString WeightKey = Weight.IsEmpty()
 			? TEXT("none")
 			: FString::FromInt(FFontResolver::ParseWeightValue(Weight));
@@ -543,7 +535,7 @@ namespace
 
 	int32 CountProjectFontAssetCandidates(const FString& Family)
 	{
-		const FString NormalizedFamily = NormalizeCompactResolverKey(Family);
+		const FString NormalizedFamily = NormalizeFontLookupKey(Family);
 		if (NormalizedFamily.IsEmpty() || NormalizedFamily == TEXT("unknown-family"))
 		{
 			return 0;
@@ -558,7 +550,7 @@ namespace
 		{
 			const FString ObjectPath = Asset.GetObjectPathString();
 			if (IsProjectFontAssetPath(ObjectPath)
-				&& NormalizeCompactResolverKey(Asset.AssetName.ToString()) == NormalizedFamily)
+				&& NormalizeFontLookupKey(Asset.AssetName.ToString()) == NormalizedFamily)
 			{
 				MatchingObjectPaths.Add(ObjectPath);
 			}
@@ -857,7 +849,7 @@ bool FFontResolver::HasExplicitFontMapping(const FString& FontFamily, const FStr
 
 bool FFontResolver::HasInvalidProjectFontAsset(const FString& FontFamily)
 {
-	const FString LookupKey = BuildFontFamilyLookupKey(FontFamily);
+	const FString LookupKey = NormalizeFontLookupKey(FontFamily);
 	if (LookupKey.IsEmpty())
 	{
 		return false;
@@ -1015,7 +1007,7 @@ FString FFontResolver::FindKnownIconGlyph(const FString& FontFamily, const FStri
 		return FString();
 	}
 
-	const FString NormalizedFamily = NormalizeFontFamilyKeyForResolver(FontFamily);
+	const FString NormalizedFamily = NormalizeFontLookupKey(FontFamily);
 	const FString NormalizedIcon = NormalizeIconNameKeyForResolver(IconName);
 	if (NormalizedIcon.IsEmpty())
 	{
@@ -1038,7 +1030,7 @@ FString FFontResolver::FindKnownIconNameByGlyph(const FString& FontFamily, const
 		return FString();
 	}
 
-	const FString NormalizedFamily = NormalizeFontFamilyKeyForResolver(FontFamily);
+	const FString NormalizedFamily = NormalizeFontLookupKey(FontFamily);
 	FString IconName;
 	if (GetFontResolverCache().TryGetKnownIconCacheValue(EKnownIconCache::NameByGlyph, NormalizedFamily, Glyph, IconName))
 	{
@@ -1057,7 +1049,7 @@ void FFontResolver::ClearCache()
 
 void FFontResolver::RegisterFontAssetPath(const FString& FontFamily, const FString& ObjectPath)
 {
-	const FString NormalizedFamily = NormalizeFontFamilyKeyForResolver(FontFamily);
+	const FString NormalizedFamily = NormalizeFontLookupKey(FontFamily);
 	if (NormalizedFamily.IsEmpty() || ObjectPath.IsEmpty())
 	{
 		return;
@@ -1083,7 +1075,7 @@ void FFontResolver::RegisterKnownIconGlyphs(
 	const TMap<FString, FString>& Glyphs,
 	const TMap<FString, FString>& IconNames)
 {
-	const FString NormalizedFamily = NormalizeFontFamilyKeyForResolver(FontFamily);
+	const FString NormalizedFamily = NormalizeFontLookupKey(FontFamily);
 	if (NormalizedFamily.IsEmpty())
 	{
 		return;
@@ -1283,7 +1275,7 @@ TArray<FString> FFontResolver::FindMissingFonts(const FDesignDocument& Document)
 			Missing.Add(Family);
 			FFontResolverCache& Cache = GetFontResolverCache();
 			Cache.BuildProjectFontAssetIndexIfNeeded();
-			const FString LookupKey = BuildFontFamilyLookupKey(Family);
+			const FString LookupKey = NormalizeFontLookupKey(Family);
 			if (!LookupKey.IsEmpty())
 			{
 				for (const FString& IndexedPath : Cache.GetIndexedFontAssetPathsSnapshot(LookupKey))

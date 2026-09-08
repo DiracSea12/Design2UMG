@@ -10,6 +10,7 @@
 #include "TextFontResolution.h"
 #include "UMGValueParser.h"
 #include "UMGWidgetNodeAccess.h"
+#include "UMGWidgetTypes.h"
 #include "Engine/Font.h"
 #include "Misc/PackageName.h"
 #include "RichTextStyleRowSerializer.h"
@@ -387,7 +388,7 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 
 	const bool bUseRichTextBlock = ShouldUseRichTextBlock(Node);
 	const FGeneratedRichTextContent RichTextContent = bUseRichTextBlock ? BuildRichTextContent(Node) : FGeneratedRichTextContent();
-	Widget.Type = bUseRichTextBlock ? TEXT("RichTextBlock") : TEXT("TextBlock");
+	Widget.Type = bUseRichTextBlock ? UMGWidgetTypes::RichTextBlock : UMGWidgetTypes::TextBlock;
 	Widget.Text.Text = bUseRichTextBlock ? RichTextContent.Markup : TextMeasurement::PrepareRuntimeTextContent(Node->Text.Content);
 	ApplyTextProperties(Widget, Node);
 	if (bUseRichTextBlock && RichTextContent.bHasStyleRows)
@@ -422,7 +423,7 @@ Design2UMGTextWidgetBuilder::FIconFontBuildResult Design2UMGTextWidgetBuilder::C
 	}
 
 	FUMGWidgetNode& Widget = Result.Widget;
-	Widget.Type = TEXT("TextBlock");
+	Widget.Type = UMGWidgetTypes::TextBlock;
 	const FIconFontSettingsSnapshot& SettingsSnapshot = *Args.SettingsSnapshot;
 
 	const auto ResolveIconTypefaceWeightToken = [](const TSharedPtr<FDesignNode>& InNode, bool bUsingFallbackFontAsset)

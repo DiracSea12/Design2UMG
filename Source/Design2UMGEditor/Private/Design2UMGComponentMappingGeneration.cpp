@@ -8,6 +8,7 @@
 #include "DesignJsonUtils.h"
 #include "Dom/JsonObject.h"
 #include "UMGSchemaSourceExtensions.h"
+#include "UMGWidgetTypes.h"
 #include "UObject/UnrealType.h"
 
 namespace
@@ -134,7 +135,7 @@ namespace
 	{
 		for (const FUMGWidgetNode& Child : Node.Children)
 		{
-			if (Child.Type == TEXT("TextBlock"))
+			if (Child.Type == UMGWidgetTypes::TextBlock)
 			{
 				const FString ChildText = Child.Text.Text.Get(FString());
 				if (!ChildText.IsEmpty())

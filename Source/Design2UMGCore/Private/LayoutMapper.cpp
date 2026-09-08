@@ -7,6 +7,7 @@
 #include "ParserSharedSemantics.h"
 #include "DesignNodeSemantics.h"
 #include "UMGSchemaSourceExtensions.h"
+#include "UMGWidgetTypes.h"
 
 namespace
 {
@@ -217,7 +218,7 @@ void LayoutMapper::ApplyJustifyContent(TArray<FUMGWidgetNode>& Children, EDesign
 
 	auto CreateSpacer = [](float FillWeight = 1.0f) -> FUMGWidgetNode {
 		FUMGWidgetNode Spacer;
-		Spacer.Type = TEXT("Spacer");
+		Spacer.Type = UMGWidgetTypes::Spacer;
 		Spacer.bSyntheticJustifySpacer = true;
 		Spacer.Slot.SizeRule = EUMGSlotSizeRule::Fill;
 		if (!FMath::IsNearlyEqual(FillWeight, 1.0f))
@@ -284,15 +285,15 @@ bool LayoutMapper::HasPadding(const TSharedPtr<FDesignNode>& Node)
 bool LayoutMapper::TryFuseSizeConstraints(FUMGWidgetNode& ChildWidget, const FUMGWidgetNode& SizeBoxWidget)
 {
 	static const TSet<FString> SupportedWidgetTypes = {
-		TEXT("Border"),
-		TEXT("CanvasPanel"),
-		TEXT("HorizontalBox"),
-		TEXT("Image"),
-		TEXT("Overlay"),
-		TEXT("RetainerBox"),
-		TEXT("TextBlock"),
-		TEXT("VerticalBox"),
-		TEXT("WrapBox")
+		UMGWidgetTypes::Border,
+		UMGWidgetTypes::CanvasPanel,
+		UMGWidgetTypes::HorizontalBox,
+		UMGWidgetTypes::Image,
+		UMGWidgetTypes::Overlay,
+		UMGWidgetTypes::RetainerBox,
+		UMGWidgetTypes::TextBlock,
+		UMGWidgetTypes::VerticalBox,
+		UMGWidgetTypes::WrapBox
 	};
 
 	if (!SupportedWidgetTypes.Contains(ChildWidget.Type)
@@ -304,7 +305,7 @@ bool LayoutMapper::TryFuseSizeConstraints(FUMGWidgetNode& ChildWidget, const FUM
 		return false;
 	}
 
-	ChildWidget.Type = TEXT("Design2UMGConstrained") + ChildWidget.Type;
+	ChildWidget.Type = UMGWidgetTypes::MakeConstrainedTypeName(ChildWidget.Type);
 	ChildWidget.WidgetStyle.WidthOverride = SizeBoxWidget.WidgetStyle.WidthOverride;
 	ChildWidget.WidgetStyle.HeightOverride = SizeBoxWidget.WidgetStyle.HeightOverride;
 	ChildWidget.WidgetStyle.MinDesiredWidth = SizeBoxWidget.WidgetStyle.MinDesiredWidth;
@@ -315,7 +316,7 @@ bool LayoutMapper::TryFuseSizeConstraints(FUMGWidgetNode& ChildWidget, const FUM
 FUMGWidgetNode LayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, const TSharedPtr<FDesignNode>& ChildNode, EDesignLayout ParentLayout)
 {
 	FUMGWidgetNode SizeBox;
-	SizeBox.Type = TEXT("SizeBox");
+	SizeBox.Type = UMGWidgetTypes::SizeBox;
 	SizeBox.Id = ChildWidget.Id + TEXT("_sz");
 	SizeBox.Name = ChildWidget.Name + TEXT("_sz");
 	const bool bUseFitOverride = ShouldUseFitOverride(ChildNode);

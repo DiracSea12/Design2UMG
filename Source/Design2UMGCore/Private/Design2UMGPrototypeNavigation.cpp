@@ -6,6 +6,7 @@
 #include "Design2UMGPrototypeStepGraph.h"
 #include "UMGSchema.h"
 #include "UMGSchemaSourceExtensions.h"
+#include "UMGWidgetTypes.h"
 
 namespace
 {
@@ -22,7 +23,7 @@ namespace
 		const FUMGPrototypeNavigationData& NavigationData)
 	{
 		FUMGWidgetNode Switcher;
-		Switcher.Type = TEXT("WidgetSwitcher");
+		Switcher.Type = UMGWidgetTypes::WidgetSwitcher;
 		Switcher.Id = NavigationData.SwitcherWidgetId;
 		Switcher.Name = NavigationData.SwitcherWidgetName;
 		Switcher.WidgetState.ActiveWidgetIndex = NavigationData.InitialPageIndex;
@@ -69,7 +70,7 @@ namespace Design2UMGPrototypeNavigation
 	FUMGWidgetNode WrapWithButton(FUMGWidgetNode Widget, const TSharedPtr<FDesignNode>& Node)
 	{
 		FUMGWidgetNode Button;
-		Button.Type = TEXT("Button");
+		Button.Type = UMGWidgetTypes::Button;
 		Button.Id = Node->Id;
 		Button.Name = Node->Id.IsEmpty() ? TEXT("PrototypeButton") : Node->Id;
 		Button.Bounds = Widget.Bounds;
@@ -98,7 +99,7 @@ namespace Design2UMGPrototypeNavigation
 		}
 
 		FUMGWidgetNode OverlayHost;
-		OverlayHost.Type = TEXT("Overlay");
+		OverlayHost.Type = UMGWidgetTypes::Overlay;
 		OverlayHost.Id = NavigationData.OverlayHostWidgetId;
 		OverlayHost.Name = NavigationData.OverlayHostWidgetName;
 		OverlayHost.Bounds = BaseSwitcher.Bounds;
@@ -112,7 +113,7 @@ namespace Design2UMGPrototypeNavigation
 		BaseSwitcher.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
 
 		FUMGWidgetNode Root;
-		Root.Type = TEXT("Overlay");
+		Root.Type = UMGWidgetTypes::Overlay;
 		Root.Id = NavigationData.SwitcherWidgetId.IsEmpty()
 			? TEXT("__d2u_prototype_root")
 			: NavigationData.SwitcherWidgetId + Design2UMGPrototypeTokens::OverlayRootSuffix();

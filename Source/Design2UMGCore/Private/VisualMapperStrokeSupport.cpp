@@ -7,6 +7,7 @@
 #include "UMGPropertyKeys.h"
 #include "UMGValueParser.h"
 #include "UMGWidgetNodeAccess.h"
+#include "UMGWidgetTypes.h"
 
 namespace
 {
@@ -156,9 +157,9 @@ namespace
 
 	bool IsPromotableStrokeContentType(const FString& Type)
 	{
-		return Type == TEXT("CanvasPanel")
-			|| Type == TEXT("HorizontalBox")
-			|| Type == TEXT("VerticalBox");
+		return Type == UMGWidgetTypes::CanvasPanel
+			|| Type == UMGWidgetTypes::HorizontalBox
+			|| Type == UMGWidgetTypes::VerticalBox;
 	}
 
 	bool HasExplicitStrokeSurfacePaint(const FUMGVisualBrushData& Brush)
@@ -182,7 +183,7 @@ namespace
 		if (!Node.IsValid()
 			|| Node->Visual.Fills.Num() > 0
 			|| Node->Visual.CornerRadius.HasRadius()
-			|| BorderSurface.Type != TEXT("Border")
+			|| BorderSurface.Type != UMGWidgetTypes::Border
 			|| BorderSurface.Children.Num() != 1
 			|| !IsPromotableStrokeContentType(BorderSurface.Children[0].Type)
 			|| BorderSurface.HasSourceData()
@@ -232,7 +233,7 @@ namespace
 		const EUMGSlotVerticalAlignment VerticalAlignment)
 	{
 		FUMGWidgetNode Line;
-		Line.Type = TEXT("Image");
+		Line.Type = UMGWidgetTypes::Image;
 		Line.Id = Id;
 		Line.Name = Name;
 		Line.Brush.Image.TexturePath = TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture");
@@ -325,7 +326,7 @@ namespace VisualMapperStrokeSupport
 		}
 
 		FUMGWidgetNode Overlay;
-		Overlay.Type = TEXT("Overlay");
+		Overlay.Type = UMGWidgetTypes::Overlay;
 		Overlay.Id = Border.Id;
 		Overlay.Name = Border.Name;
 		Overlay.Bounds = Border.Bounds;
