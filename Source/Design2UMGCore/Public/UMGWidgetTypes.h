@@ -87,27 +87,4 @@ namespace UMGWidgetTypes
 			|| Type == WidgetSwitcher
 			|| Type == SafeZone;
 	}
-
-	/** Type prefix applied by LayoutMapper size-constraint fusion; resolved to the UDesign2UMGConstrained* classes in the editor class map. */
-	inline constexpr const TCHAR* ConstrainedTypePrefix = TEXT("Design2UMGConstrained");
-
-	inline FString MakeConstrainedTypeName(const FString& BaseWidgetType)
-	{
-		return FString(ConstrainedTypePrefix) + BaseWidgetType;
-	}
-
-	inline bool IsConstrainedTypeName(const FString& Type)
-	{
-		return Type.StartsWith(ConstrainedTypePrefix);
-	}
-
-	/** Base type without the fusion prefix; returns the input unchanged when not fused. */
-	inline FString StripConstrainedTypeName(const FString& Type)
-	{
-		if (IsConstrainedTypeName(Type))
-		{
-			return Type.RightChop(FString(ConstrainedTypePrefix).Len());
-		}
-		return Type;
-	}
 }

@@ -146,6 +146,12 @@ namespace
 	{
 		FDesign2UMGImportSettingsSnapshot Snapshot;
 		Snapshot.ConversionSettings = FDesign2UMGConversionSettings::Defaults();
+		// Mirror the product flow: generation follows the live project setting for
+		// prototype navigation (QA cases pin it via FScopedPrototypeNavigationGenerationMode).
+		if (const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get())
+		{
+			Snapshot.GenerationSettings.PrototypeNavigationGenerationMode = Settings->PrototypeNavigationGenerationMode;
+		}
 		if (MappedClassPath)
 		{
 			DesignComponentMapping::FComponentMappingEntry& Entry =
@@ -626,6 +632,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportConflictTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FSafeReimportConflictTest::RunTest(const FString&)
 {
+	// Pin the opt-in navigation mode: this QA case verifies the prototype extension itself (default is Disabled).
+	const Design2UMGTestUtils::FScopedPrototypeNavigationGenerationMode ScopedNavMode(EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
+
 	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/SafeReimportConflict");
 
 	const FString V1 = MakeReimportDoc(FString::Printf(

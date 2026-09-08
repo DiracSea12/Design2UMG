@@ -30,6 +30,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAPrototypeRefreshTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FSafeReimportQAPrototypeRefreshTest::RunTest(const FString&)
 {
+	// Pin the opt-in navigation mode: this QA case verifies the prototype extension itself (default is Disabled).
+	const FScopedPrototypeNavigationGenerationMode ScopedNavMode(EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
+
 	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/QAReimportPrototypeRefresh");
 
 	const FString V1 = MakeQADoc(FString::Printf(
@@ -95,6 +98,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAPrototypeHoverConflictTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FSafeReimportQAPrototypeHoverConflictTest::RunTest(const FString&)
 {
+	// Pin the opt-in navigation mode: this QA case verifies the prototype extension itself (default is Disabled).
+	const FScopedPrototypeNavigationGenerationMode ScopedNavMode(EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
+
 	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/QAReimportPrototypeHover");
 
 	const FString V1 = MakeQADoc(FString::Printf(
@@ -165,6 +171,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAPrototypeConflictFigmaIdTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FSafeReimportQAPrototypeConflictFigmaIdTest::RunTest(const FString&)
 {
+	// Pin the opt-in navigation mode: this QA case verifies the prototype extension itself (default is Disabled).
+	const FScopedPrototypeNavigationGenerationMode ScopedNavMode(EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
+
 	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/QAReimportProtoFigmaId");
 
 	const FString V1 = MakeQADoc(

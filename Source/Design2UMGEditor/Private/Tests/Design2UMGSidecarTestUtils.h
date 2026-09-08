@@ -6,6 +6,7 @@
 // (single copy so unity builds never merge two anonymous-namespace definitions).
 
 #include "Design2UMGGenerationManifest.h"
+#include "Design2UMGSettings.h"
 
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
@@ -16,6 +17,34 @@
 
 namespace Design2UMGTestUtils
 {
+	// Prototype-navigation QA cases pin the opt-in RuntimeExtension mode because the
+	// product default is Disabled (editor-preview-only; packaging strips those classes).
+	struct FScopedPrototypeNavigationGenerationMode
+	{
+		explicit FScopedPrototypeNavigationGenerationMode(
+			EDesign2UMGPrototypeNavigationGenerationMode InMode)
+		{
+			Settings = UDesign2UMGSettings::Get();
+			if (Settings)
+			{
+				SavedMode = Settings->PrototypeNavigationGenerationMode;
+				Settings->PrototypeNavigationGenerationMode = InMode;
+			}
+		}
+
+		~FScopedPrototypeNavigationGenerationMode()
+		{
+			if (Settings)
+			{
+				Settings->PrototypeNavigationGenerationMode = SavedMode;
+			}
+		}
+
+		TObjectPtr<UDesign2UMGSettings> Settings;
+		EDesign2UMGPrototypeNavigationGenerationMode SavedMode =
+			EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension;
+	};
+
 	inline bool ReadSidecarJson(const FString& AssetPackageName, TSharedPtr<FJsonObject>& OutObject)
 	{
 		const FString SidecarPath = Design2UMGGenerationManifest::BuildSidecarPathForAsset(AssetPackageName);

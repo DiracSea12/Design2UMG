@@ -487,7 +487,7 @@ bool FPreviewMaterializationSnapshotCopyBoundaryTest::RunTest(const FString& Par
 	TestEqual(TEXT("Round-tripped snapshot carries the override"),
 		RoundTripped.ClassOverrides.Num(), 1);
 	TestTrue(TEXT("Round-tripped navigation mode returns to default (preview does not own it)"),
-		RoundTripped.PrototypeNavigationGenerationMode == EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
+		RoundTripped.PrototypeNavigationGenerationMode == EDesign2UMGPrototypeNavigationGenerationMode::Disabled);
 
 	// Unset materialization snapshot -> default-constructed generation settings.
 	const FDesign2UMGGenerationSettingsSnapshot Defaulted =

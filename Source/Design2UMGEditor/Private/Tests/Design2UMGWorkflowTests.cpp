@@ -437,17 +437,22 @@ bool FFigmaGridSlotSemanticsRuntimeWorkflowTest::RunTest(const FString& Paramete
 	UGridPanel* GridPanel = Cast<UGridPanel>(WidgetInstance->WidgetTree->FindWidget(TEXT("grid_frame")));
 	UWidget* TailCard = WidgetInstance->WidgetTree->FindWidget(TEXT("tail_card"));
 	UWidget* HeroCard = WidgetInstance->WidgetTree->FindWidget(TEXT("hero_card"));
+	// The SizeBox wrapper carries the grid slot for each wrapped card.
+	UWidget* TailWrapper = WidgetInstance->WidgetTree->FindWidget(TEXT("tail_card_sz"));
+	UWidget* HeroWrapper = WidgetInstance->WidgetTree->FindWidget(TEXT("hero_card_sz"));
 	TestTrue(TEXT("Grid frame instantiates as GridPanel"), GridPanel != nullptr);
-	TestTrue(TEXT("Tail card fused runtime widget exists"), TailCard != nullptr);
-	TestTrue(TEXT("Hero card fused runtime widget exists"), HeroCard != nullptr);
-	if (!GridPanel || !TailCard || !HeroCard)
+	TestTrue(TEXT("Tail card runtime widget exists"), TailCard != nullptr);
+	TestTrue(TEXT("Hero card runtime widget exists"), HeroCard != nullptr);
+	TestTrue(TEXT("Tail card is wrapped in a runtime SizeBox"), TailWrapper != nullptr);
+	TestTrue(TEXT("Hero card is wrapped in a runtime SizeBox"), HeroWrapper != nullptr);
+	if (!GridPanel || !TailCard || !HeroCard || !TailWrapper || !HeroWrapper)
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
 	}
 
-	UGridSlot* TailSlot = Cast<UGridSlot>(TailCard->Slot);
-	UGridSlot* HeroSlot = Cast<UGridSlot>(HeroCard->Slot);
+	UGridSlot* TailSlot = Cast<UGridSlot>(TailWrapper->Slot);
+	UGridSlot* HeroSlot = Cast<UGridSlot>(HeroWrapper->Slot);
 	TestTrue(TEXT("Tail slot is UGridSlot"), TailSlot != nullptr);
 	TestTrue(TEXT("Hero slot is UGridSlot"), HeroSlot != nullptr);
 	if (!TailSlot || !HeroSlot)
@@ -516,9 +521,9 @@ bool FFitContentMinimumExpandsToContentTest::RunTest(const FString& Parameters)
 	Doc.Children.Add(Root);
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* RootWidget = FindWidgetById(Data.RootWidget, TEXT("fit-min-root"));
-	const FUMGWidgetNode* RowWidget = FindWidgetById(Data.RootWidget, TEXT("fit-min-row"));
+	const FUMGWidgetNode* RowWidget = FindWidgetById(Data.RootWidget, TEXT("fit-min-row_sz"));
 	TestTrue(TEXT("Find fit-content minimum root widget"), RootWidget != nullptr);
-	TestTrue(TEXT("Find fit-content minimum row fused widget"), RowWidget != nullptr);
+	TestTrue(TEXT("Find fit-content minimum row SizeBox wrapper"), RowWidget != nullptr);
 	if (!RootWidget || !RowWidget)
 	{
 		return false;
@@ -588,9 +593,9 @@ bool FFillWidthSingleLineTextDoesNotInflateFitHeightTest::RunTest(const FString&
 	Doc.Children.Add(Root);
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* RootWidget = FindWidgetById(Data.RootWidget, TEXT("text-fit-root"));
-	const FUMGWidgetNode* HeaderCellWidget = FindWidgetById(Data.RootWidget, TEXT("header-cell"));
+	const FUMGWidgetNode* HeaderCellWidget = FindWidgetById(Data.RootWidget, TEXT("header-cell_sz"));
 	TestTrue(TEXT("Find single-line text fit root widget"), RootWidget != nullptr);
-	TestTrue(TEXT("Find header cell fused widget"), HeaderCellWidget != nullptr);
+	TestTrue(TEXT("Find header cell SizeBox wrapper"), HeaderCellWidget != nullptr);
 	if (!RootWidget || !HeaderCellWidget)
 	{
 		return false;

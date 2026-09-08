@@ -44,14 +44,17 @@ bool FConverterTextAlignVerticalDoesNotMoveSlotTest::RunTest(const FString& Para
 	TestTrue(TEXT("ParseDocument succeeds"), FPenParser::ParseDocument(Json, Doc));
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* Label = FindWidgetById(Data.RootWidget, TEXT("label"));
+	const FUMGWidgetNode* LabelWrapper = FindWidgetById(Data.RootWidget, TEXT("label_sz"));
 	TestNotNull(TEXT("Converted label exists"), Label);
-	if (!Label)
+	TestNotNull(TEXT("Converted label SizeBox wrapper exists"), LabelWrapper);
+	if (!Label || !LabelWrapper)
 	{
 		return false;
 	}
-	TestEqual(TEXT("Auto-height label uses fused type"), Label->Type, TEXT("Design2UMGConstrainedTextBlock"));
+	TestEqual(TEXT("Auto-height label keeps standard type"), Label->Type, TEXT("TextBlock"));
+	TestEqual(TEXT("Auto-height label wrapper is a SizeBox"), LabelWrapper->Type, TEXT("SizeBox"));
 	TestEqual(TEXT("textAlignVertical kept as metadata"), GetWidgetProperty(*Label, TEXT("TextAlignVertical")), TEXT("Center"));
-	TestTrue(TEXT("Fused label slot stays top-aligned"), Label->Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Top);
+	TestTrue(TEXT("Auto-height label slot stays top-aligned on the wrapper"), LabelWrapper->Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Top);
 	TestFalse(TEXT("Auto-height text does not synthesize internal padding"),
 		Label->WidgetStyle.Padding.IsSet());
 	return true;
@@ -91,15 +94,18 @@ bool FConverterTextAlignVerticalUsesInternalPaddingWhenHeightFixedTest::RunTest(
 	TestTrue(TEXT("ParseDocument succeeds"), FPenParser::ParseDocument(Json, Doc));
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* Label = FindWidgetById(Data.RootWidget, TEXT("label"));
+	const FUMGWidgetNode* LabelWrapper = FindWidgetById(Data.RootWidget, TEXT("label_sz"));
 	TestNotNull(TEXT("Converted fixed-height label exists"), Label);
-	if (!Label)
+	TestNotNull(TEXT("Converted fixed-height label wrapper exists"), LabelWrapper);
+	if (!Label || !LabelWrapper)
 	{
 		return false;
 	}
-	TestEqual(TEXT("Fixed-height label uses fused type"), Label->Type, TEXT("Design2UMGConstrainedTextBlock"));
+	TestEqual(TEXT("Fixed-height label keeps standard type"), Label->Type, TEXT("TextBlock"));
+	TestEqual(TEXT("Fixed-height label wrapper is a SizeBox"), LabelWrapper->Type, TEXT("SizeBox"));
 
 	TestEqual(TEXT("Fixed-height textAlignVertical kept as metadata"), GetWidgetProperty(*Label, TEXT("TextAlignVertical")), TEXT("Center"));
-	TestTrue(TEXT("Fixed-height fused label slot stays top-aligned"), Label->Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Top);
+	TestTrue(TEXT("Fixed-height label slot stays top-aligned on the wrapper"), LabelWrapper->Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Top);
 	TestTrue(TEXT("Fixed-height text synthesizes internal padding"),
 		Label->WidgetStyle.Padding.IsSet());
 	const FMargin Padding = Label->WidgetStyle.Padding.GetValue();

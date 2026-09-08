@@ -133,16 +133,19 @@ bool FFigmaWrapFillChildPreservesMeasuredSizeTest::RunTest(const FString& Parame
 	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* WrapWidget = FindWidgetById(Data.RootWidget, TEXT("wrap1"));
 	const FUMGWidgetNode* Card1 = FindWidgetById(Data.RootWidget, TEXT("card1"));
+	const FUMGWidgetNode* Card1Wrapper = FindWidgetById(Data.RootWidget, TEXT("card1_sz"));
 	TestTrue(TEXT("Wrap widget exists"), WrapWidget != nullptr);
-	TestTrue(TEXT("Wrap fill child gets fused size constraints"), Card1 != nullptr);
-	if (!WrapWidget || !Card1)
+	TestTrue(TEXT("Wrap fill child exists"), Card1 != nullptr);
+	TestTrue(TEXT("Wrap fill child is wrapped in a SizeBox"), Card1Wrapper != nullptr);
+	if (!WrapWidget || !Card1 || !Card1Wrapper)
 	{
 		return false;
 	}
 
-	TestEqual(TEXT("Wrap child fused type"), Card1->Type, TEXT("Design2UMGConstrainedVerticalBox"));
-	TestEqual(TEXT("Wrap fill child preserves measured width"), GetWidgetProperty(*Card1, TEXT("WidthOverride")), TEXT("100.0"));
-	TestEqual(TEXT("Wrap fill child preserves measured height"), GetWidgetProperty(*Card1, TEXT("HeightOverride")), TEXT("60.0"));
+	TestEqual(TEXT("Wrap child keeps standard type"), Card1->Type, TEXT("VerticalBox"));
+	TestEqual(TEXT("Wrap child wrapper is a SizeBox"), Card1Wrapper->Type, TEXT("SizeBox"));
+	TestEqual(TEXT("Wrap fill child preserves measured width"), GetWidgetProperty(*Card1Wrapper, TEXT("WidthOverride")), TEXT("100.0"));
+	TestEqual(TEXT("Wrap fill child preserves measured height"), GetWidgetProperty(*Card1Wrapper, TEXT("HeightOverride")), TEXT("60.0"));
 	return true;
 }
 
@@ -165,16 +168,19 @@ bool FFigmaCenteredFlowFillTextKeepsMeasuredWidthTest::RunTest(const FString& Pa
 	TestTrue(TEXT("Centered flow fill text parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
 	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* Label = FindWidgetById(Data.RootWidget, TEXT("nav_label"));
-	TestTrue(TEXT("Centered flow fill text gets fused size constraints"), Label != nullptr);
-	if (!Label)
+	const FUMGWidgetNode* LabelWrapper = FindWidgetById(Data.RootWidget, TEXT("nav_label_sz"));
+	TestTrue(TEXT("Centered flow fill text exists"), Label != nullptr);
+	TestTrue(TEXT("Centered flow fill text is wrapped in a SizeBox"), LabelWrapper != nullptr);
+	if (!Label || !LabelWrapper)
 	{
 		return false;
 	}
 
-	TestEqual(TEXT("Centered flow fill text uses fused type"), Label->Type, TEXT("Design2UMGConstrainedTextBlock"));
-	TestEqual(TEXT("Centered flow fill text preserves measured width"), GetWidgetProperty(*Label, TEXT("WidthOverride")), TEXT("72.0"));
-	const FString HeightOverride = GetWidgetProperty(*Label, TEXT("HeightOverride"));
-	const FString MinDesiredHeight = GetWidgetProperty(*Label, TEXT("MinDesiredHeight"));
+	TestEqual(TEXT("Centered flow fill text keeps standard type"), Label->Type, TEXT("TextBlock"));
+	TestEqual(TEXT("Centered flow fill text wrapper is a SizeBox"), LabelWrapper->Type, TEXT("SizeBox"));
+	TestEqual(TEXT("Centered flow fill text preserves measured width"), GetWidgetProperty(*LabelWrapper, TEXT("WidthOverride")), TEXT("72.0"));
+	const FString HeightOverride = GetWidgetProperty(*LabelWrapper, TEXT("HeightOverride"));
+	const FString MinDesiredHeight = GetWidgetProperty(*LabelWrapper, TEXT("MinDesiredHeight"));
 	TestTrue(
 		TEXT("Centered flow fill text preserves measured height"),
 		HeightOverride == TEXT("16.0") || MinDesiredHeight == TEXT("16.0"));

@@ -37,6 +37,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAContinuousLifecycleBindingsTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FSafeReimportQAContinuousLifecycleBindingsTest::RunTest(const FString&)
 {
+	// Pin the opt-in navigation mode: this QA case verifies the prototype extension itself (default is Disabled).
+	const FScopedPrototypeNavigationGenerationMode ScopedNavMode(EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
+
 	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/QAReimportLifecycleBindings");
 
 	const auto MakeLifeDoc = [](const TCHAR* ButtonLabel, const TCHAR* HeadText)

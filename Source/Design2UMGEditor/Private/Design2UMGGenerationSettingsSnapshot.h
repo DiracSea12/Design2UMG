@@ -11,8 +11,9 @@ struct FDesignPreviewMaterializationSettingsSnapshot;
 
 struct FDesign2UMGGenerationSettingsSnapshot
 {
+	// Keep in sync with UDesign2UMGSettings::PrototypeNavigationGenerationMode (default Disabled).
 	EDesign2UMGPrototypeNavigationGenerationMode PrototypeNavigationGenerationMode =
-		EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension;
+		EDesign2UMGPrototypeNavigationGenerationMode::Disabled;
 	TArray<FWidgetClassOverride> ClassOverrides;
 
 	/**

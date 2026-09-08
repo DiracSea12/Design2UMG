@@ -10,6 +10,7 @@
 #include "Design2UMGComponentMappingGeneration.h"
 #include "Design2UMGConverter.h"
 #include "Design2UMGGenerationManifest.h"
+#include "Design2UMGSettings.h"
 #include "DesignImportPipeline.h"
 #include "FigmaParser.h"
 #include "UMGGenerator.h"
@@ -32,6 +33,34 @@
 namespace Design2UMGReimportQA
 {
 	using Design2UMGEditorTests::DeleteGeneratedAssetsAtPath;
+
+	// Prototype-navigation QA cases pin the opt-in RuntimeExtension mode because the
+	// product default is Disabled (editor-preview-only; packaging strips those classes).
+	struct FScopedPrototypeNavigationGenerationMode
+	{
+		explicit FScopedPrototypeNavigationGenerationMode(
+			EDesign2UMGPrototypeNavigationGenerationMode InMode)
+		{
+			Settings = UDesign2UMGSettings::Get();
+			if (Settings)
+			{
+				SavedMode = Settings->PrototypeNavigationGenerationMode;
+				Settings->PrototypeNavigationGenerationMode = InMode;
+			}
+		}
+
+		~FScopedPrototypeNavigationGenerationMode()
+		{
+			if (Settings)
+			{
+				Settings->PrototypeNavigationGenerationMode = SavedMode;
+			}
+		}
+
+		TObjectPtr<UDesign2UMGSettings> Settings;
+		EDesign2UMGPrototypeNavigationGenerationMode SavedMode =
+			EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension;
+	};
 
 	// Fixture identities private to this QA file: scopes / component keys / mapped stand-in classes are not shared with the in-delivery dev tests.
 	inline const TCHAR* QAReimportScope = TEXT("qa-reimport-doc-9f31");
@@ -113,6 +142,12 @@ namespace Design2UMGReimportQA
 	{
 		FDesign2UMGImportSettingsSnapshot Snapshot;
 		Snapshot.ConversionSettings = FDesign2UMGConversionSettings::Defaults();
+		// Mirror the product flow: generation follows the live project setting for
+		// prototype navigation (QA cases pin it via FScopedPrototypeNavigationGenerationMode).
+		if (const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get())
+		{
+			Snapshot.GenerationSettings.PrototypeNavigationGenerationMode = Settings->PrototypeNavigationGenerationMode;
+		}
 		if (MappedClassPath)
 		{
 			DesignComponentMapping::FComponentMappingEntry& Entry =

@@ -103,6 +103,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAMappedInteractionInertTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FSafeReimportQAMappedInteractionInertTest::RunTest(const FString&)
 {
+	// Pin the opt-in navigation mode: this QA case verifies the prototype extension itself (default is Disabled).
+	const FScopedPrototypeNavigationGenerationMode ScopedNavMode(EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
+
 	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/QAReimportMappedInert");
 
 	// A mapped button + an ON_CLICK design interaction (attached to the mapped instance body).

@@ -168,9 +168,11 @@ public:
 
 	// ========== Prototype Navigation ==========
 
-	UPROPERTY(Config, EditAnywhere, Category = "Prototype Navigation", meta = (DisplayName = "Generation Mode", ToolTip = "RuntimeExtension keeps the current generated runtime binding. TagHelper writes stable helper metadata for an optional setup call. Disabled emits no prototype navigation runtime binding."))
+	// Default is Disabled: RuntimeExtension bakes editor-module classes into generated
+	// widgets, which cook strips from packaged builds. Enable it only for editor preview.
+	UPROPERTY(Config, EditAnywhere, Category = "Prototype Navigation", meta = (DisplayName = "Generation Mode", ToolTip = "Disabled emits no prototype navigation binding. TagHelper writes stable helper metadata for an optional setup call. RuntimeExtension bakes editor-module navigation classes into the widget blueprint for editor preview only; packaged games cannot load them, so packaged widgets lose prototype navigation."))
 	EDesign2UMGPrototypeNavigationGenerationMode PrototypeNavigationGenerationMode =
-		EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension;
+		EDesign2UMGPrototypeNavigationGenerationMode::Disabled;
 
 	// ========== Widget Class Overrides ==========
 

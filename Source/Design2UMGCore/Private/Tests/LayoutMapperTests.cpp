@@ -189,17 +189,19 @@ bool FLayoutMapperSourceTextBoxUsesStrictSizeBoxTest::RunTest(const FString&)
 	Node->Transform.bSourceHasWidth = true;
 	Node->Transform.bSourceHasHeight = true;
 
-	const FUMGWidgetNode ConstrainedText = LayoutMapper::WrapWithSizeBox(MoveTemp(TextWidget), Node, EDesignLayout::Horizontal);
+	const FUMGWidgetNode Wrapper = LayoutMapper::WrapWithSizeBox(MoveTemp(TextWidget), Node, EDesignLayout::Horizontal);
 
-	TestEqual(TEXT("Source textbox uses constrained TextBlock"), ConstrainedText.Type, FString(TEXT("Design2UMGConstrainedTextBlock")));
-	TestTrue(TEXT("Source textbox width uses source textbox width"),
-		FMath::IsNearlyEqual(ConstrainedText.Bounds.W, 188.16f, 0.001f));
-	TestTrue(TEXT("Source textbox height uses source textbox height"),
-		FMath::IsNearlyEqual(ConstrainedText.Bounds.H, 42.0f, 0.001f));
-	TestTrue(TEXT("Source textbox WidthOverride remains source textbox width"),
-		FMath::IsNearlyEqual(ConstrainedText.WidgetStyle.WidthOverride.Get(0.0f), 188.16f, 0.001f));
-	TestTrue(TEXT("Source textbox HeightOverride remains source textbox height"),
-		FMath::IsNearlyEqual(ConstrainedText.WidgetStyle.HeightOverride.Get(0.0f), 42.0f, 0.001f));
+	TestEqual(TEXT("Source textbox is wrapped in a SizeBox"), Wrapper.Type, FString(TEXT("SizeBox")));
+	TestTrue(TEXT("Wrapper width uses source textbox width"),
+		FMath::IsNearlyEqual(Wrapper.Bounds.W, 188.16f, 0.001f));
+	TestTrue(TEXT("Wrapper height uses source textbox height"),
+		FMath::IsNearlyEqual(Wrapper.Bounds.H, 42.0f, 0.001f));
+	TestTrue(TEXT("Wrapper WidthOverride uses source textbox width"),
+		FMath::IsNearlyEqual(Wrapper.WidgetStyle.WidthOverride.Get(0.0f), 188.16f, 0.001f));
+	TestTrue(TEXT("Wrapper HeightOverride uses source textbox height"),
+		FMath::IsNearlyEqual(Wrapper.WidgetStyle.HeightOverride.Get(0.0f), 42.0f, 0.001f));
+	TestEqual(TEXT("Wrapped child keeps standard TextBlock type"), Wrapper.Children[0].Type, FString(TEXT("TextBlock")));
+	TestEqual(TEXT("Wrapped child keeps id"), Wrapper.Children[0].Id, FString(TEXT("text")));
 
 	return true;
 }

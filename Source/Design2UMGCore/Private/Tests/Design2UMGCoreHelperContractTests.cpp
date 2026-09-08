@@ -422,38 +422,6 @@ bool FGradientTypedPayloadMaterialParamsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLayoutMapperSizeConstraintFusionTest,
-	"Design2UMG.LayoutMapper.SizeConstraintFusion",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FLayoutMapperSizeConstraintFusionTest::RunTest(const FString& Parameters)
-{
-	FUMGWidgetNode Child;
-	Child.Type = TEXT("Border");
-	Child.Id = TEXT("card");
-	Child.Name = TEXT("Card");
-
-	FUMGWidgetNode SizeBox;
-	SizeBox.Type = TEXT("SizeBox");
-	SizeBox.WidgetStyle.WidthOverride = 320.0f;
-	SizeBox.WidgetStyle.MinDesiredHeight = 48.0f;
-
-	TestTrue(TEXT("Border supports size constraint fusion"), LayoutMapper::TryFuseSizeConstraints(Child, SizeBox));
-	TestEqual(TEXT("Fused Border type"), Child.Type, FString(TEXT("Design2UMGConstrainedBorder")));
-	TestEqual(TEXT("Fused Border keeps id"), Child.Id, FString(TEXT("card")));
-	TestEqual(TEXT("Fused Border keeps name"), Child.Name, FString(TEXT("Card")));
-	TestTrue(TEXT("Fused width override is preserved"), Child.WidgetStyle.WidthOverride.IsSet());
-	TestTrue(TEXT("Fused minimum height is preserved"), Child.WidgetStyle.MinDesiredHeight.IsSet());
-	TestEqual(TEXT("Fused width override value"), Child.WidgetStyle.WidthOverride.Get(0.0f), 320.0f);
-	TestEqual(TEXT("Fused minimum height value"), Child.WidgetStyle.MinDesiredHeight.Get(0.0f), 48.0f);
-
-	FUMGWidgetNode Unsupported;
-	Unsupported.Type = TEXT("EditableTextBox");
-	TestFalse(TEXT("Unsupported widget stays wrapped"), LayoutMapper::TryFuseSizeConstraints(Unsupported, SizeBox));
-	TestEqual(TEXT("Unsupported type is unchanged"), Unsupported.Type, FString(TEXT("EditableTextBox")));
-
-	return true;
-}
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperTypedDirectReadEquivalenceTest,
 	"Design2UMG.VisualMapper.TypedDirectReadEquivalence",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)

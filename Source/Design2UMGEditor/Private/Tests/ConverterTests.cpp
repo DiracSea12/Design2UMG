@@ -195,12 +195,14 @@ bool FConverterNestedNodesTest::RunTest(const FString&)
 		FDesign2UMGConversionSettings::Defaults());
 	TestEqual(TEXT("Root widget name"), Data.RootWidget.Name, FString(TEXT("ParentFrame")));
 	TestEqual(TEXT("Parent has nested children"), Data.RootWidget.Children.Num(), 2);
-	TestEqual(TEXT("First child fuses SizeBox constraints into Border"), Data.RootWidget.Children[0].Name, FString(TEXT("ChildRect")));
-	TestEqual(TEXT("First child uses constrained Border"), Data.RootWidget.Children[0].Type, FString(TEXT("Design2UMGConstrainedBorder")));
-	TestEqual(TEXT("Second child fuses SizeBox constraints into TextBlock"), Data.RootWidget.Children[1].Name, FString(TEXT("ChildText")));
-	TestEqual(TEXT("Second child uses constrained TextBlock"), Data.RootWidget.Children[1].Type, FString(TEXT("Design2UMGConstrainedTextBlock")));
-	TestTrue(TEXT("Fused text widget keeps text payload"), Data.RootWidget.Children[1].Text.Text.IsSet());
-	TestEqual(TEXT("Fused text content"), Data.RootWidget.Children[1].Text.Text.GetValue(), FString(TEXT("Nested text")));
+	TestEqual(TEXT("First child is wrapped in a SizeBox"), Data.RootWidget.Children[0].Name, FString(TEXT("ChildRect_sz")));
+	TestEqual(TEXT("First child wrapper is a SizeBox"), Data.RootWidget.Children[0].Type, FString(TEXT("SizeBox")));
+	TestEqual(TEXT("First child keeps standard Border type"), Data.RootWidget.Children[0].Children[0].Type, FString(TEXT("Border")));
+	TestEqual(TEXT("Second child is wrapped in a SizeBox"), Data.RootWidget.Children[1].Name, FString(TEXT("ChildText_sz")));
+	TestEqual(TEXT("Second child wrapper is a SizeBox"), Data.RootWidget.Children[1].Type, FString(TEXT("SizeBox")));
+	TestEqual(TEXT("Second child keeps standard TextBlock type"), Data.RootWidget.Children[1].Children[0].Type, FString(TEXT("TextBlock")));
+	TestTrue(TEXT("Wrapped text widget keeps text payload"), Data.RootWidget.Children[1].Children[0].Text.Text.IsSet());
+	TestEqual(TEXT("Wrapped text content"), Data.RootWidget.Children[1].Children[0].Text.Text.GetValue(), FString(TEXT("Nested text")));
 
 	return true;
 }
@@ -264,19 +266,22 @@ bool FConverterPenAuthoredTextBoxOwnerTest::RunTest(const FString&)
 
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* Owner = FindWidgetById(Data.RootWidget, TEXT("estimated-text"));
+	const FUMGWidgetNode* OwnerWrapper = FindWidgetById(Data.RootWidget, TEXT("estimated-text_sz"));
 	const FUMGWidgetNode* Placeholder = FindWidgetById(Data.RootWidget, TEXT("estimated-text_source_textbox_placeholder"));
-	TestTrue(TEXT("Find Pen authored constrained text widget"), Owner != nullptr);
+	TestTrue(TEXT("Find Pen authored text widget"), Owner != nullptr);
+	TestTrue(TEXT("Pen authored text is wrapped in a SizeBox"), OwnerWrapper != nullptr);
 	TestTrue(TEXT("Pen authored text does not create flow placeholder"), Placeholder == nullptr);
-	if (!Owner)
+	if (!Owner || !OwnerWrapper)
 	{
 		return false;
 	}
 
-	TestEqual(TEXT("Pen authored text uses constrained TextBlock"), Owner->Type, FString(TEXT("Design2UMGConstrainedTextBlock")));
-	TestTrue(TEXT("Pen authored text owner width is constrained"), Owner->WidgetStyle.WidthOverride.IsSet());
-	TestTrue(TEXT("Pen authored text owner height is constrained"), Owner->WidgetStyle.HeightOverride.IsSet());
-	TestEqual(TEXT("Pen authored text owner width"), Owner->WidgetStyle.WidthOverride.Get(0.0f), 44.8f);
-	TestEqual(TEXT("Pen authored text owner height"), Owner->WidgetStyle.HeightOverride.Get(0.0f), 28.0f);
+	TestEqual(TEXT("Pen authored text keeps standard TextBlock type"), Owner->Type, FString(TEXT("TextBlock")));
+	TestEqual(TEXT("Pen authored text wrapper is a SizeBox"), OwnerWrapper->Type, FString(TEXT("SizeBox")));
+	TestTrue(TEXT("Pen authored text owner width is constrained"), OwnerWrapper->WidgetStyle.WidthOverride.IsSet());
+	TestTrue(TEXT("Pen authored text owner height is constrained"), OwnerWrapper->WidgetStyle.HeightOverride.IsSet());
+	TestEqual(TEXT("Pen authored text owner width"), OwnerWrapper->WidgetStyle.WidthOverride.Get(0.0f), 44.8f);
+	TestEqual(TEXT("Pen authored text owner height"), OwnerWrapper->WidgetStyle.HeightOverride.Get(0.0f), 28.0f);
 	TestEqual(TEXT("Pen authored text owner source id"), Owner->Source().SourceNodeId, FString(TEXT("estimated-text")));
 	TestEqual(TEXT("Pen authored text appears once"), CountWidgetsById(Data.RootWidget, TEXT("estimated-text")), 1);
 	return true;
@@ -313,10 +318,11 @@ bool FConverterRefExpandTest::RunTest(const FString&)
 		FDesign2UMGConversionSettings::Defaults());
 	TestEqual(TEXT("Reusable root is skipped from render tree"), Data.RootWidget.Name, FString(TEXT("HostFrame")));
 	TestEqual(TEXT("Host frame child count"), Data.RootWidget.Children.Num(), 1);
-	TestEqual(TEXT("Expanded child keeps instance name"), Data.RootWidget.Children[0].Name, FString(TEXT("RefNode")));
-	TestEqual(TEXT("Expanded child keeps instance id"), Data.RootWidget.Children[0].Id, FString(TEXT("ref-1")));
-	TestFalse(TEXT("Expanded child has concrete runtime type"), Data.RootWidget.Children[0].Type.IsEmpty());
-	TestNotEqual(TEXT("Expanded child is not a raw ref node"), Data.RootWidget.Children[0].Type, FString(TEXT("Ref")));
+	TestEqual(TEXT("Expanded child is wrapped in a SizeBox"), Data.RootWidget.Children[0].Type, FString(TEXT("SizeBox")));
+	TestEqual(TEXT("Expanded child keeps instance name"), Data.RootWidget.Children[0].Children[0].Name, FString(TEXT("RefNode")));
+	TestEqual(TEXT("Expanded child keeps instance id"), Data.RootWidget.Children[0].Children[0].Id, FString(TEXT("ref-1")));
+	TestFalse(TEXT("Expanded child has concrete runtime type"), Data.RootWidget.Children[0].Children[0].Type.IsEmpty());
+	TestNotEqual(TEXT("Expanded child is not a raw ref node"), Data.RootWidget.Children[0].Children[0].Type, FString(TEXT("Ref")));
 
 	return true;
 }
