@@ -3,6 +3,7 @@
 #include "Design2UMGConverter.h"
 #include "DesignComponentMapping.h"
 #include "DesignSchemaSourceExtensions.h"
+#include "Design2UMGCanvasFlattening.h"
 #include "Design2UMGGeneratedNameSuffixes.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
@@ -553,6 +554,13 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 	Design2UMGConverterInternal::FConversionState State(Document, Result.Warnings, SettingsSnapshot);
 	auto FinalizeResult = [&Result, &State, &Document]()
 	{
+		Design2UMGCanvasFlattening::FFlattenStats FlattenStats;
+		Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Result.RootWidget, FlattenStats);
+		if (FlattenStats.MergedNestedCanvasCount > 0 || FlattenStats.RemovedEmptyCanvasCount > 0)
+		{
+			UE_LOG(LogDesign2UMG, Log, TEXT("Convert: flattened %d nested bare canvas panels, removed %d empty canvas panels"),
+				FlattenStats.MergedNestedCanvasCount, FlattenStats.RemovedEmptyCanvasCount);
+		}
 		Result.IconFontMappingChanges.Upserts = MoveTemp(State.PendingIconFontMappings);
 		Result.IconFontMappingChanges.Removals = MoveTemp(State.PrunedInvalidMappings);
 		Design2UMGConverterPrivate::StampDocumentComponentIdentity(Document, Result);

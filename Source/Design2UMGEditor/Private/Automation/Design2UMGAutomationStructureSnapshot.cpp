@@ -541,6 +541,18 @@ namespace Design2UMGAutomationStructureSnapshot
 			return false;
 		}
 
+		// UMG uniquifies duplicate widget names as Name_1, Name_2, ...; strip that numeric tail
+		// before matching generated suffixes so renamed wrappers stay classifiable.
+		FString StripTrailingUniquifierIndex(const FString& Name)
+		{
+			const int32 LastUnderscore = Name.Find(TEXT("_"), ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+			if (LastUnderscore != INDEX_NONE && Name.Mid(LastUnderscore + 1).IsNumeric())
+			{
+				return Name.Left(LastUnderscore);
+			}
+			return Name;
+		}
+
 		FString ClassifyCarrierReason(UWidget* Widget, const TArray<UWidget*>& Children)
 		{
 			if (Cast<USizeBox>(Widget))
@@ -553,7 +565,7 @@ namespace Design2UMGAutomationStructureSnapshot
 			}
 			if (Cast<URetainerBox>(Widget))
 			{
-				const FString Name = Widget->GetName();
+				const FString Name = StripTrailingUniquifierIndex(Widget->GetName());
 				if (Name.EndsWith(Design2UMGGeneratedNameSuffixes::FxBlur()))
 				{
 					return TEXT("RetainerBox.foreground_blur");
@@ -570,7 +582,7 @@ namespace Design2UMGAutomationStructureSnapshot
 			}
 			if (Cast<UBorder>(Widget))
 			{
-				const FString Name = Widget->GetName();
+				const FString Name = StripTrailingUniquifierIndex(Widget->GetName());
 				if (Name.EndsWith(Design2UMGGeneratedNameSuffixes::Surface()))
 				{
 					return TEXT("Border.explicit_stroke_surface");
@@ -585,7 +597,7 @@ namespace Design2UMGAutomationStructureSnapshot
 			{
 				for (const UWidget* Child : Children)
 				{
-					const FString Name = Child ? Child->GetName() : FString();
+					const FString Name = Child ? StripTrailingUniquifierIndex(Child->GetName()) : FString();
 					if (Name.EndsWith(Design2UMGGeneratedNameSuffixes::StrokeTop())
 						|| Name.EndsWith(Design2UMGGeneratedNameSuffixes::StrokeRight())
 						|| Name.EndsWith(Design2UMGGeneratedNameSuffixes::StrokeBottom())

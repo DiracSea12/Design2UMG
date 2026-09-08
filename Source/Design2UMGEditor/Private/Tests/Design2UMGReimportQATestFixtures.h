@@ -54,6 +54,10 @@ namespace Design2UMGReimportQA
 			if (Settings)
 			{
 				Settings->PrototypeNavigationGenerationMode = SavedMode;
+				// Imports during QA runs can persist settings (icon-font mapping saves call
+				// SaveConfig), snapshotting the pinned mode into the per-project ini. Write
+				// the restored value back so the pin cannot leak into later runs.
+				Settings->SaveConfig();
 			}
 		}
 

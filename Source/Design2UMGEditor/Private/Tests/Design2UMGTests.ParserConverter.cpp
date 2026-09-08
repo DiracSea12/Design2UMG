@@ -507,6 +507,8 @@ bool FRefInstanceNoPositionUsesLocalOriginTest::RunTest(const FString& Parameter
 	TestTrue(TEXT("Ref instance local-origin parse succeeds"), FPenParser::ParseDocument(Json, Doc));
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* Instance = FindWidgetById(Data.RootWidget, TEXT("instance"));
+	// The ref instance sits directly under the document root (inside the flattening pass's
+	// preserved depth) and keeps its local-origin placement.
 	TestTrue(TEXT("instance widget exists"), Instance != nullptr);
 	if (Instance)
 	{

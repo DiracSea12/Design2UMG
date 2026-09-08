@@ -37,6 +37,8 @@ namespace Design2UMGTestUtils
 			if (Settings)
 			{
 				Settings->PrototypeNavigationGenerationMode = SavedMode;
+				// Same ini-leak guard as the reimport QA fixtures scope.
+				Settings->SaveConfig();
 			}
 		}
 

@@ -194,6 +194,29 @@ UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWid
 		}
 	}
 
+	// FName property lookup is case-insensitive: a widget named e.g. TooltipText collides
+	// with UWidget::ToolTipText and aborts blueprint compilation when member variables are
+	// created. Uniquify against the UWidget base properties (the only collisions ever
+	// observed) and against existing tree names before construction.
+	const FName CollidingName = WidgetName;
+	const auto IsNameFree = [&WidgetTree](const FName& Candidate)
+	{
+		return !UWidget::StaticClass()->FindPropertyByName(Candidate)
+			&& !FindObject<UObject>(WidgetTree, *Candidate.ToString());
+	};
+	if (WidgetClass && UWidget::StaticClass()->FindPropertyByName(WidgetName))
+	{
+		for (int32 Suffix = 1; Suffix < 1000; ++Suffix)
+		{
+			const FName Candidate = FName(*FString::Printf(TEXT("%s_%d"), *CollidingName.ToString(), Suffix));
+			if (IsNameFree(Candidate))
+			{
+				WidgetName = Candidate;
+				break;
+			}
+		}
+	}
+
 	if (!WidgetClass)
 	{
 		int32 ChildCount = Node.Children.Num();

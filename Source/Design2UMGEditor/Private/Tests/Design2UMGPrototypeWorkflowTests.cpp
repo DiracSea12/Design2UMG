@@ -157,16 +157,24 @@ namespace
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPrototypeNavigationGenerationModeDefaultTest,
-	"Design2UMG.Unit.PrototypeNavigationGenerationMode.DefaultRuntimeExtension",
+	"Design2UMG.Unit.PrototypeNavigationGenerationMode.DefaultDisabled",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FPrototypeNavigationGenerationModeDefaultTest::RunTest(const FString& Parameters)
 {
+	// The product default is Disabled: runtime-extension classes are editor-module types
+	// that cook strips from packaged games. A NewObject instance only carries this default
+	// when the CDO has not been overridden by the editor's per-project ini, so pin the CDO
+	// around the check to keep the assertion independent of local config state.
+	UDesign2UMGSettings* SettingsCDO = UDesign2UMGSettings::Get();
+	const EDesign2UMGPrototypeNavigationGenerationMode SavedMode = SettingsCDO->PrototypeNavigationGenerationMode;
+	SettingsCDO->PrototypeNavigationGenerationMode = EDesign2UMGPrototypeNavigationGenerationMode::Disabled;
 	const UDesign2UMGSettings* FreshSettings =
 		NewObject<UDesign2UMGSettings>(GetTransientPackage());
 	TestEqual(
-		TEXT("Prototype navigation generation defaults to runtime extension"),
+		TEXT("Prototype navigation generation defaults to disabled"),
 		FreshSettings->PrototypeNavigationGenerationMode,
-		EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
+		EDesign2UMGPrototypeNavigationGenerationMode::Disabled);
+	SettingsCDO->PrototypeNavigationGenerationMode = SavedMode;
 	return true;
 }
 

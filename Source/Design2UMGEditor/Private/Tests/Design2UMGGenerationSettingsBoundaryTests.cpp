@@ -40,6 +40,37 @@ namespace
 		return Blueprint->WidgetTree;
 	}
 
+	// Pins the prototype navigation mode so the snapshot captured below is independent of
+	// the editor's per-project ini: the pen welcome fixture contains reusable prototype
+	// components whose generated shape (and therefore the reusable WBP compile path)
+	// differs between RuntimeExtension and Disabled.
+	struct FScopedPrototypeNavigationMode
+	{
+		explicit FScopedPrototypeNavigationMode(EDesign2UMGPrototypeNavigationGenerationMode InMode)
+		{
+			Settings = UDesign2UMGSettings::Get();
+			if (Settings)
+			{
+				SavedMode = Settings->PrototypeNavigationGenerationMode;
+				Settings->PrototypeNavigationGenerationMode = InMode;
+			}
+		}
+
+		~FScopedPrototypeNavigationMode()
+		{
+			if (Settings)
+			{
+				Settings->PrototypeNavigationGenerationMode = SavedMode;
+				// Same ini-leak guard as the placeholder hatch scope above.
+				Settings->SaveConfig();
+			}
+		}
+
+		UDesign2UMGSettings* Settings = nullptr;
+		EDesign2UMGPrototypeNavigationGenerationMode SavedMode =
+			EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension;
+	};
+
 	FUMGWidgetNode MakeSimpleTextNode(const FString& NodeName)
 	{
 		FUMGWidgetNode Node;
@@ -129,6 +160,8 @@ namespace
 			if (Settings)
 			{
 				Settings->ClassOverrides = SavedOverrides;
+				// Same ini-leak guard as the placeholder hatch scope above.
+				Settings->SaveConfig();
 			}
 		}
 
@@ -175,6 +208,10 @@ namespace
 			Settings->PlaceholderHatchStripeColor = SavedBaseStripeColor;
 			Settings->PlaceholderHatchStripeWidth = SavedStripeWidth;
 			Settings->PlaceholderHatchStripeGap = SavedStripeGap;
+			// Imports during the test can persist settings (e.g. icon-font mappings call
+			// SaveConfig), which snapshots the drifted hatch values into the per-project
+			// ini. Write the restored values back so the drift cannot leak into later runs.
+			Settings->SaveConfig();
 		}
 
 		UDesign2UMGSettings* Settings = nullptr;
@@ -375,6 +412,9 @@ bool FPenBridgeImportUsesSingleExplicitSettingsSnapshotTest::RunTest(const FStri
 		return false;
 	}
 
+	const FScopedPrototypeNavigationMode ScopedNavMode(
+		EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
+
 	FScopedPlaceholderHatchSettings SnapshotPlaceholderSettings(TEXT("#123456"), TEXT("#ABCDEF"), 7, 11);
 	TestNotNull(TEXT("Snapshot placeholder settings available"), SnapshotPlaceholderSettings.Settings);
 	if (!SnapshotPlaceholderSettings.Settings)
@@ -443,8 +483,11 @@ bool FPenBridgeImportUsesSingleExplicitSettingsSnapshotTest::RunTest(const FStri
 		return false;
 	}
 
+	// The IR name "Tooltip Text" compiles to widget name TooltipText, which collides with
+	// UWidget::ToolTipText (case-insensitive) and is uniquified to TooltipText_1 during
+	// tree construction; the class override itself still matches the IR node name.
 	UWidget* OverriddenWidget =
-		Result.GeneratedBlueprint->WidgetTree->FindWidget(FName(TEXT("TooltipText")));
+		Result.GeneratedBlueprint->WidgetTree->FindWidget(FName(TEXT("TooltipText_1")));
 	TestNotNull(TEXT("Generated override widget exists"), OverriddenWidget);
 	const bool bUsesCapturedClassOverride = OverriddenWidget && OverriddenWidget->IsA<UBackgroundBlur>();
 	const bool bLateReadLiveClassOverride = OverriddenWidget && OverriddenWidget->IsA<UButton>();

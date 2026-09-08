@@ -41,6 +41,8 @@ bool FFigmaTransformGroupPreservedTest::RunTest(const FString& Parameters)
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* GroupWidget = FindWidgetById(Data.RootWidget, TEXT("tg1"));
 	const FUMGWidgetNode* RectWidget = FindWidgetById(Data.RootWidget, TEXT("rect1"));
+	// The transform group is a direct child of the document root, inside the flattening
+	// pass's preserved depth, so it survives as its own container widget.
 	TestTrue(TEXT("Transform group widget exists"), GroupWidget != nullptr);
 	TestTrue(TEXT("Transform group child widget exists"), RectWidget != nullptr);
 	if (!GroupWidget || !RectWidget)
