@@ -52,6 +52,31 @@ namespace
 		return true;
 	}
 
+	bool HasNonTranslatableRenderPayload(const FUMGWidgetNode& Node)
+	{
+		// Rotation, scale, pivot and render translation compose around the widget's own
+		// transform origin, which a slot translation cannot reproduce; clipping rectangles
+		// are scoped to the widget. Any of these on the canvas keeps it alive. Opacity is
+		// exempt: it multiplies through the subtree and is pushed down instead.
+		const FUMGRenderStyleData& Render = Node.Render;
+		return Render.RenderAngle.IsSet()
+			|| Render.RenderTransformScale.IsSet()
+			|| Render.RenderTransformPivot.IsSet()
+			|| Render.RenderTranslation.IsSet()
+			|| Render.Clipping.IsSet();
+	}
+
+	// The removed canvas multiplied its opacity into every descendant's vertex tint
+	// (SWidget OnPaint blends RenderOpacity down the chain); folding the product into
+	// each grandchild's own opacity reproduces the same tint without the wrapper.
+	void PropagateCanvasOpacity(float CanvasOpacity, FUMGWidgetNode& GrandChild)
+	{
+		if (CanvasOpacity < 1.0f)
+		{
+			GrandChild.Render.RenderOpacity = CanvasOpacity * GrandChild.Render.RenderOpacity.Get(1.0f);
+		}
+	}
+
 	void FlattenNode(FUMGWidgetNode& Parent, const int32 Depth, Design2UMGCanvasFlattening::FFlattenStats& OutStats)
 	{
 		for (int32 ChildIndex = 0; ChildIndex < Parent.Children.Num(); )
@@ -74,10 +99,11 @@ namespace
 					continue;
 				}
 
-				if (CanTranslateIntoParent(Child))
+				if (!HasNonTranslatableRenderPayload(Child) && CanTranslateIntoParent(Child))
 				{
 					const float OffsetX = Child.Slot.Offsets.Left;
 					const float OffsetY = Child.Slot.Offsets.Top;
+					const float CanvasOpacity = Child.Render.RenderOpacity.Get(1.0f);
 					// Detach grandchildren before splicing: inserting into Parent.Children reallocates
 					// it and would dangle the Child reference into the parent array.
 					TArray<FUMGWidgetNode> GrandChildren = MoveTemp(Child.Children);
@@ -87,6 +113,7 @@ namespace
 						GrandChild.Slot.Offsets.Top += OffsetY;
 						GrandChild.Bounds.X += OffsetX;
 						GrandChild.Bounds.Y += OffsetY;
+						PropagateCanvasOpacity(CanvasOpacity, GrandChild);
 					}
 					UE_LOG(LogDesign2UMG, Verbose, TEXT("CanvasFlattening: merged nested canvas '%s' (%d children, offset %.1f,%.1f)"),
 						*Child.Name, GrandChildren.Num(), OffsetX, OffsetY);

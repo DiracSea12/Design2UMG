@@ -232,6 +232,67 @@ bool FCanvasFlatteningBlocksUnsafeMergeTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
+// The removed canvas's opacity multiplies into each spliced grandchild
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCanvasFlatteningPropagatesCanvasOpacityTest,
+	"Design2UMG.Unit.CanvasFlattening.PropagatesCanvasOpacity",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FCanvasFlatteningPropagatesCanvasOpacityTest::RunTest(const FString&)
+{
+	TArray<FUMGWidgetNode> MidChildren;
+	FUMGWidgetNode Inner = MakeCanvas(TEXT("inner"), 20.0f, 30.0f);
+	Inner.Render.RenderOpacity = 0.4f;
+	Inner.Children.Add(MakeLeaf(TEXT("plain"), 0.0f, 0.0f));
+	FUMGWidgetNode OpaqueLeaf = MakeLeaf(TEXT("opaque"), 0.0f, 0.0f);
+	OpaqueLeaf.Render.RenderOpacity = 0.5f;
+	Inner.Children.Add(MoveTemp(OpaqueLeaf));
+	MidChildren.Add(MoveTemp(Inner));
+	FUMGWidgetNode Root = MakeScene(MoveTemp(MidChildren));
+
+	Design2UMGCanvasFlattening::FFlattenStats Stats;
+	Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Root, Stats);
+
+	TestEqual(TEXT("canvas merged"), Stats.MergedNestedCanvasCount, 1);
+	const FUMGWidgetNode& Mid = Root.Children[0].Children[0];
+	TestTrue(TEXT("plain grandchild gets canvas opacity"),
+		Mid.Children[0].Render.RenderOpacity.IsSet() && FMath::IsNearlyEqual(Mid.Children[0].Render.RenderOpacity.GetValue(), 0.4f));
+	TestTrue(TEXT("grandchild opacity composes with its own"),
+		Mid.Children[1].Render.RenderOpacity.IsSet() && FMath::IsNearlyEqual(Mid.Children[1].Render.RenderOpacity.GetValue(), 0.2f));
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Non-translatable render payload on the canvas keeps the wrapper alive
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCanvasFlatteningBlocksNonTranslatableRenderTest,
+	"Design2UMG.Unit.CanvasFlattening.BlocksNonTranslatableRender",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FCanvasFlatteningBlocksNonTranslatableRenderTest::RunTest(const FString&)
+{
+	TArray<FUMGWidgetNode> MidChildren;
+	FUMGWidgetNode Rotated = MakeCanvas(TEXT("rotated"), 0.0f, 0.0f);
+	Rotated.Render.RenderAngle = 15.0f;
+	Rotated.Children.Add(MakeLeaf(TEXT("a"), 0.0f, 0.0f));
+	MidChildren.Add(MoveTemp(Rotated));
+	FUMGWidgetNode Clipped = MakeCanvas(TEXT("clipped"), 0.0f, 0.0f);
+	Clipped.Render.Clipping = TEXT("ClipToBounds");
+	Clipped.Children.Add(MakeLeaf(TEXT("b"), 0.0f, 0.0f));
+	MidChildren.Add(MoveTemp(Clipped));
+	FUMGWidgetNode Root = MakeScene(MoveTemp(MidChildren));
+
+	Design2UMGCanvasFlattening::FFlattenStats Stats;
+	Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Root, Stats);
+
+	TestEqual(TEXT("rotated canvas kept"), Stats.MergedNestedCanvasCount, 0);
+	TestEqual(TEXT("both wrappers kept"), Root.Children[0].Children[0].Children.Num(), 2);
+	return true;
+}
+
+// ---------------------------------------------------------------------------
 // Childless bare canvases below top level render nothing and are removed
 // ---------------------------------------------------------------------------
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
