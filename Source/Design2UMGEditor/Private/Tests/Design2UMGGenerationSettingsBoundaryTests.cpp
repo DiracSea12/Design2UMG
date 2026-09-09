@@ -484,10 +484,11 @@ bool FPenBridgeImportUsesSingleExplicitSettingsSnapshotTest::RunTest(const FStri
 	}
 
 	// The IR name "Tooltip Text" compiles to widget name TooltipText, which collides with
-	// UWidget::ToolTipText (case-insensitive) and is uniquified to TooltipText_1 during
-	// tree construction; the class override itself still matches the IR node name.
+	// UWidget::ToolTipText (case-insensitive) and is uniquified during tree construction.
+	// The uniquifier uses a "_wN" tail so it can never collide with the tree's own
+	// numeric "_N" uniquifier chain; the class override itself still matches the IR node name.
 	UWidget* OverriddenWidget =
-		Result.GeneratedBlueprint->WidgetTree->FindWidget(FName(TEXT("TooltipText_1")));
+		Result.GeneratedBlueprint->WidgetTree->FindWidget(FName(TEXT("TooltipText_w1")));
 	TestNotNull(TEXT("Generated override widget exists"), OverriddenWidget);
 	const bool bUsesCapturedClassOverride = OverriddenWidget && OverriddenWidget->IsA<UBackgroundBlur>();
 	const bool bLateReadLiveClassOverride = OverriddenWidget && OverriddenWidget->IsA<UButton>();
