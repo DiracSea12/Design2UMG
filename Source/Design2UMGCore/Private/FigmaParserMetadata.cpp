@@ -2,6 +2,7 @@
 
 #include "FigmaParserMetadata.h"
 
+#include "Design2UMGLog.h"
 #include "DesignJsonUtils.h"
 #include "DesignSchema.h"
 #include "DesignSchemaSourceExtensions.h"
@@ -77,10 +78,25 @@ namespace
 		}
 	}
 
-	bool TryReadSemanticHintFromJsonValue(const TSharedPtr<FJsonValue>& Value)
+	// Depth cap for scanning untrusted pluginData/sharedPluginData JSON for semantic
+	// hints. This recursion runs outside the parser's FDesignParserBudget, so it carries
+	// its own bound, styled after DesignTreeLimits' named limits; real pluginData values
+	// nest only a handful of levels, so 32 is a generous fixed ceiling, not a measured
+	// optimum.
+	constexpr int32 MaxPluginDataHintScanDepth = 32;
+
+	bool TryReadSemanticHintFromJsonValue(const TSharedPtr<FJsonValue>& Value, int32 Depth = 0)
 	{
 		if (!Value.IsValid())
 		{
+			return false;
+		}
+
+		if (Depth >= MaxPluginDataHintScanDepth)
+		{
+			UE_LOG(LogDesign2UMG, Verbose,
+				TEXT("FigmaParserMetadata: pluginData semantic-hint scan stopped at depth cap (%d)"),
+				MaxPluginDataHintScanDepth);
 			return false;
 		}
 
@@ -98,7 +114,7 @@ namespace
 				{
 					return true;
 				}
-				if (TryReadSemanticHintFromJsonValue(Pair.Value))
+				if (TryReadSemanticHintFromJsonValue(Pair.Value, Depth + 1))
 				{
 					return true;
 				}
@@ -110,7 +126,7 @@ namespace
 		{
 			for (const TSharedPtr<FJsonValue>& ChildValue : Value->AsArray())
 			{
-				if (TryReadSemanticHintFromJsonValue(ChildValue))
+				if (TryReadSemanticHintFromJsonValue(ChildValue, Depth + 1))
 				{
 					return true;
 				}
@@ -129,7 +145,7 @@ namespace
 			TSharedPtr<FJsonObject> JsonObject;
 			if (DesignJsonUtils::TryParseObject(StringValue, JsonObject))
 			{
-				return TryReadSemanticHintFromJsonValue(MakeShared<FJsonValueObject>(JsonObject));
+				return TryReadSemanticHintFromJsonValue(MakeShared<FJsonValueObject>(JsonObject), Depth + 1);
 			}
 
 			return IsSemanticFieldName(StringValue);

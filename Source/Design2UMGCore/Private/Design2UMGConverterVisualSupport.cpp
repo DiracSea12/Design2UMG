@@ -27,10 +27,12 @@ namespace
 	constexpr int32 PlaceholderInsetMinPx = 1;
 	constexpr float PlaceholderInsetSizeFraction = 0.25f;
 
-	// Accept rule is unchanged from before the hex-literal consolidation: this
-	// call site checks only the '#' prefix plus the '#RGB'/'#RRGGBB'/'#RRGGBBAA'
-	// length whitelist, and deliberately skips hex-digit validation.
-	bool IsHexColorLiteral(const FString& ColorValue)
+	// Accept rule is unchanged from before the hex-literal consolidation: unlike
+	// DesignColorUtils::IsHexColorLiteral (which validates every char is a hex
+	// digit), this shape check only tests the '#' prefix plus the
+	// '#RGB'/'#RRGGBB'/'#RRGGBBAA' length whitelist, and deliberately skips
+	// hex-digit validation.
+	bool MatchesHexColorShape(const FString& ColorValue)
 	{
 		if (!ColorValue.StartsWith(TEXT("#")))
 		{
@@ -43,7 +45,7 @@ namespace
 
 	FString BuildHexColorWithAlpha(const FString& ColorValue, uint8 Alpha)
 	{
-		if (!IsHexColorLiteral(ColorValue))
+		if (!MatchesHexColorShape(ColorValue))
 		{
 			return FString();
 		}
@@ -55,7 +57,7 @@ namespace
 
 	bool IsNeutralPlaceholderColor(const FString& ColorValue)
 	{
-		if (!IsHexColorLiteral(ColorValue))
+		if (!MatchesHexColorShape(ColorValue))
 		{
 			return true;
 		}
@@ -171,8 +173,8 @@ namespace Design2UMGConverterVisualSupport
 		}
 
 		const FDesignFill& PrimaryFill = Node->Visual.TopmostFill();
-		const FString FillColor = IsHexColorLiteral(PrimaryFill.SolidColor) ? PrimaryFill.SolidColor : FString();
-		const FString StrokeColor = (Node->Visual.Stroke.Fill.IsSet() && IsHexColorLiteral(Node->Visual.Stroke.Fill.GetValue().SolidColor))
+		const FString FillColor = MatchesHexColorShape(PrimaryFill.SolidColor) ? PrimaryFill.SolidColor : FString();
+		const FString StrokeColor = (Node->Visual.Stroke.Fill.IsSet() && MatchesHexColorShape(Node->Visual.Stroke.Fill.GetValue().SolidColor))
 			? Node->Visual.Stroke.Fill.GetValue().SolidColor
 			: FString();
 		const FString PlaceholderOutlineColor =

@@ -247,7 +247,10 @@ namespace
 			if (bRoundJoin)
 			{
 				const int32 JoinStartIndex = bClosed ? 0 : 1;
-				const int32 JoinEndIndex = bClosed ? LastPointIndex - 1 : LastPointIndex - 1;
+				// Closed paths duplicate the first point as their last entry (see IsClosedPath),
+				// so all distinct vertices are already covered by 0..Last-1 and the end index
+				// needs no closed/open distinction.
+				const int32 JoinEndIndex = LastPointIndex - 1;
 				for (int32 Index = JoinStartIndex; Index <= JoinEndIndex; ++Index)
 				{
 					DrawFilledCircle(
@@ -298,15 +301,8 @@ namespace
 		TEXT("Clear path rasterization cache"),
 		FConsoleCommandDelegate::CreateLambda([]()
 		{
-		for (auto& Pair : GPathCache)
-		{
-			if (UTexture2D* Tex = Pair.Value.Texture.Get())
-				Tex->RemoveFromRoot();
-		}
-		GPathCache.Empty();
-		GCacheHits = GCacheMisses = 0;
-		bHasPendingTextureUpdates = false;
-		UE_LOG(LogDesign2UMG, Log, TEXT("DesignPathRasterizer: cache cleared"));
+			FDesignPathRasterizer::ClearCache();
+			UE_LOG(LogDesign2UMG, Log, TEXT("DesignPathRasterizer: cache cleared"));
 		}));
 }
 

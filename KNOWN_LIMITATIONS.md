@@ -73,6 +73,7 @@ This document tracks current limitations that are known and accepted for now.
 - `OPEN_LINK` currently launches the external URL at runtime and does not participate in page switching.
 - Prototype variables currently exist only inside the generated runtime contract for trigger/conditional execution; they are not yet a broader cross-format variable/state system.
 - Generated prototype transition animations currently fall back to the core-ticker transition path outside real game worlds (for example editor-only preview/automation contexts).
+- Prototype navigation's `RuntimeExtension` mode is opt-in (default `Disabled`) and its extension classes live in the plugin's editor-only module; assets generated with that mode enabled are editor-preview assets not intended for cooked/packaged builds.
 - Prototype transitions now generate minimal two-stage `UWidgetAnimation` assets for fade / slide switcher transitions, but they still do not provide full Smart Animate layer matching or generalized animation authoring.
 
 ## Explicit Non-Goals For This Round

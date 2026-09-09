@@ -28,6 +28,13 @@ namespace DesignImportUtils
 	void ApplyPendingIconFontMappingChanges(const FUMGWidgetData& Data);
 
 	/**
+	 * True when the string starts with an http:// or https:// scheme prefix
+	 * (case-insensitive). Single shared predicate for the importer, pipeline,
+	 * and diagnostic-report URL checks so the scheme set cannot drift between them.
+	 */
+	bool IsHttpUrl(const FString& Value);
+
+	/**
 	 * True for automation-imported font assets under a per-case directory
 	 * (e.g. /Game/Design2UMG/Automation/<case>/ImportedFonts/...); the pinned
 	 * global /Game/Design2UMG/Automation/ImportedFonts package stays reusable.

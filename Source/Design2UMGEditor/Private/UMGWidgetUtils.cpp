@@ -351,6 +351,22 @@ UClass* FUMGWidgetUtils::ResolveWidgetClass(const FString& TypeName)
 	return nullptr;
 }
 
+TOptional<FVector2D> FUMGWidgetUtils::GetBlueprintDesignTimeSize(UWidgetBlueprint* WidgetBlueprint)
+{
+	if (WidgetBlueprint && WidgetBlueprint->GeneratedClass)
+	{
+		if (const UUserWidget* CDO = Cast<UUserWidget>(WidgetBlueprint->GeneratedClass->GetDefaultObject()))
+		{
+			if (CDO->DesignTimeSize.X > 1.0f && CDO->DesignTimeSize.Y > 1.0f)
+			{
+				return CDO->DesignTimeSize;
+			}
+		}
+	}
+
+	return TOptional<FVector2D>();
+}
+
 void FUMGWidgetUtils::ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNode& Node)
 {
 	if (!Widget)

@@ -201,24 +201,16 @@ namespace
 
 	FIntPoint ReadDesignPreviewSize(UWidgetBlueprint* WBP)
 	{
-		if (!WBP || !WBP->GeneratedClass)
+		const TOptional<FVector2D> CurrentSize = FUMGWidgetUtils::GetBlueprintDesignTimeSize(WBP);
+		if (CurrentSize.IsSet())
 		{
-			return FIntPoint::ZeroValue;
+			return FIntPoint(
+				FMath::CeilToInt(CurrentSize->X),
+				FMath::CeilToInt(CurrentSize->Y));
 		}
 
-		if (UUserWidget* CDO = Cast<UUserWidget>(WBP->GeneratedClass->GetDefaultObject()))
-		{
-			const FVector2D CurrentSize = CDO->DesignTimeSize;
-			if (CurrentSize.X > 1.0f && CurrentSize.Y > 1.0f)
-			{
-				return FIntPoint(
-					FMath::CeilToInt(CurrentSize.X),
-					FMath::CeilToInt(CurrentSize.Y));
-			}
-		}
-
-	return FIntPoint::ZeroValue;
-}
+		return FIntPoint::ZeroValue;
+	}
 
 // Select the caller-provided snapshot when present; otherwise derive one from
 // the settings CDO into OutFallback and select that.

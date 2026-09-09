@@ -34,19 +34,12 @@ namespace
 
 	FIntPoint ResolveOutputRenderSize(UWidgetBlueprint* WidgetBlueprint)
 	{
-		if (WidgetBlueprint && WidgetBlueprint->GeneratedClass)
+		const TOptional<FVector2D> DesignTimeSize = FUMGWidgetUtils::GetBlueprintDesignTimeSize(WidgetBlueprint);
+		if (DesignTimeSize.IsSet())
 		{
-			if (const UUserWidget* CDO = Cast<UUserWidget>(WidgetBlueprint->GeneratedClass->GetDefaultObject()))
-			{
-				const FVector2D DesignTimeSize = CDO->DesignTimeSize;
-				if (DesignTimeSize.X > 1.0f && DesignTimeSize.Y > 1.0f)
-				{
-					const FIntPoint DesignRenderSize(
-						FMath::CeilToInt(DesignTimeSize.X),
-						FMath::CeilToInt(DesignTimeSize.Y));
-					return DesignRenderSize;
-				}
-			}
+			return FIntPoint(
+				FMath::CeilToInt(DesignTimeSize->X),
+				FMath::CeilToInt(DesignTimeSize->Y));
 		}
 
 		UE_LOG(LogDesign2UMG, Error,
@@ -588,6 +581,12 @@ namespace
 		}
 		return Normalized;
 	}
+}
+
+bool DesignImportUtils::IsHttpUrl(const FString& Value)
+{
+	return Value.StartsWith(TEXT("http://"), ESearchCase::IgnoreCase)
+		|| Value.StartsWith(TEXT("https://"), ESearchCase::IgnoreCase);
 }
 
 bool DesignImportUtils::IsCaseLocalAutomationImportedFontPath(const FString& FontAssetPath)

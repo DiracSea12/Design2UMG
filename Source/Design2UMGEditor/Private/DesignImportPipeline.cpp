@@ -439,12 +439,6 @@ namespace DesignImportPipeline
 
 	namespace
 	{
-		bool IsHttpUrl(const FString& Value)
-		{
-			return Value.StartsWith(TEXT("http://"), ESearchCase::IgnoreCase)
-				|| Value.StartsWith(TEXT("https://"), ESearchCase::IgnoreCase);
-		}
-
 		void AnchorRelativeImageFillUrlsInNode(FDesignNode& Node, const FString& PenDirectory)
 		{
 			for (FDesignFill& Fill : Node.Visual.Fills)
@@ -454,7 +448,7 @@ namespace DesignImportPipeline
 					continue;
 				}
 				FString& Url = Fill.Image.Url;
-				if (Url.IsEmpty() || IsHttpUrl(Url) || !FPaths::IsRelative(Url))
+				if (Url.IsEmpty() || DesignImportUtils::IsHttpUrl(Url) || !FPaths::IsRelative(Url))
 				{
 					continue;
 				}

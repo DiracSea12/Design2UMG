@@ -688,17 +688,12 @@ namespace
 
 	FIntPoint ResolveBlueprintDesignTimeSize(UWidgetBlueprint* WidgetBlueprint)
 	{
-		if (WidgetBlueprint && WidgetBlueprint->GeneratedClass)
+		const TOptional<FVector2D> DesignTimeSize = FUMGWidgetUtils::GetBlueprintDesignTimeSize(WidgetBlueprint);
+		if (DesignTimeSize.IsSet())
 		{
-			if (const UUserWidget* CDO = Cast<UUserWidget>(WidgetBlueprint->GeneratedClass->GetDefaultObject()))
-			{
-				if (CDO->DesignTimeSize.X > 1.0f && CDO->DesignTimeSize.Y > 1.0f)
-				{
-					return FIntPoint(
-						FMath::CeilToInt(CDO->DesignTimeSize.X),
-						FMath::CeilToInt(CDO->DesignTimeSize.Y));
-				}
-			}
+			return FIntPoint(
+				FMath::CeilToInt(DesignTimeSize->X),
+				FMath::CeilToInt(DesignTimeSize->Y));
 		}
 
 		return FIntPoint::ZeroValue;

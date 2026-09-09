@@ -488,6 +488,30 @@ void PenParserNodeExtensions::ParseNodeExtended(
 	ParseDescendants(JsonObj, Node, Resolver);
 }
 
+// These replicate the Pencil editor's built-in sticky-note widget chrome
+// verbatim (font family, icon set, palette) and are intentionally not
+// user-configurable.
+namespace PenStickyChrome
+{
+	const TCHAR* const StickyFontFamily = TEXT("JetBrains Mono");
+	const TCHAR* const ChevronIconSet = TEXT("lucide");
+
+	const TCHAR* const NoteHeaderBackgroundHex = TEXT("#FFF1D6");
+	const TCHAR* const NoteBackgroundHex = TEXT("#FFF7E5");
+	const TCHAR* const NoteOutlineHex = TEXT("#8B6311");
+	const TCHAR* const NoteTextHex = TEXT("#664500");
+
+	const TCHAR* const ContextHeaderBackgroundHex = TEXT("#FFFFFF");
+	const TCHAR* const ContextBackgroundHex = TEXT("#F0F0F0");
+	const TCHAR* const ContextOutlineHex = TEXT("#767676");
+	const TCHAR* const ContextTextHex = TEXT("#2C2C2C");
+
+	const TCHAR* const PromptHeaderBackgroundHex = TEXT("#C3E8FF");
+	const TCHAR* const PromptBackgroundHex = TEXT("#E8F6FF");
+	const TCHAR* const PromptOutlineHex = TEXT("#009DFF");
+	const TCHAR* const PromptTextHex = TEXT("#006CAF");
+}
+
 void PenParserNodeExtensions::SynthesizeStickyCard(const TSharedPtr<FDesignNode>& Node)
 {
 	if (!Node.IsValid())
@@ -512,17 +536,17 @@ void PenParserNodeExtensions::SynthesizeStickyCard(const TSharedPtr<FDesignNode>
 	const FStickyTheme* Theme = nullptr;
 	if (Node->Type == EDesignNodeType::Note)
 	{
-		static const FStickyTheme NoteTheme = { TEXT("Note"), TEXT("#FFF1D6"), TEXT("#FFF7E5"), TEXT("#8B6311"), TEXT("#664500"), 150.0f, false };
+		static const FStickyTheme NoteTheme = { TEXT("Note"), PenStickyChrome::NoteHeaderBackgroundHex, PenStickyChrome::NoteBackgroundHex, PenStickyChrome::NoteOutlineHex, PenStickyChrome::NoteTextHex, 150.0f, false };
 		Theme = &NoteTheme;
 	}
 	else if (Node->Type == EDesignNodeType::Context)
 	{
-		static const FStickyTheme ContextTheme = { TEXT("Context"), TEXT("#FFFFFF"), TEXT("#F0F0F0"), TEXT("#767676"), TEXT("#2C2C2C"), 150.0f, false };
+		static const FStickyTheme ContextTheme = { TEXT("Context"), PenStickyChrome::ContextHeaderBackgroundHex, PenStickyChrome::ContextBackgroundHex, PenStickyChrome::ContextOutlineHex, PenStickyChrome::ContextTextHex, 150.0f, false };
 		Theme = &ContextTheme;
 	}
 	else if (Node->Type == EDesignNodeType::Prompt)
 	{
-		static const FStickyTheme PromptTheme = { TEXT("Prompt"), TEXT("#C3E8FF"), TEXT("#E8F6FF"), TEXT("#009DFF"), TEXT("#006CAF"), 116.0f, true };
+		static const FStickyTheme PromptTheme = { TEXT("Prompt"), PenStickyChrome::PromptHeaderBackgroundHex, PenStickyChrome::PromptBackgroundHex, PenStickyChrome::PromptOutlineHex, PenStickyChrome::PromptTextHex, 116.0f, true };
 		Theme = &PromptTheme;
 	}
 	if (!Theme)
@@ -549,7 +573,7 @@ void PenParserNodeExtensions::SynthesizeStickyCard(const TSharedPtr<FDesignNode>
 		Text->Name = InName;
 		Text->Type = EDesignNodeType::Text;
 		Text->Text.Content = InContent;
-		Text->Text.FontFamily = TEXT("JetBrains Mono");
+		Text->Text.FontFamily = PenStickyChrome::StickyFontFamily;
 		Text->Text.FontSize = InFontSize;
 		Text->Text.FontWeight = InFontWeight;
 		Text->Text.LineHeight = StickyLineHeight;
@@ -589,7 +613,7 @@ void PenParserNodeExtensions::SynthesizeStickyCard(const TSharedPtr<FDesignNode>
 		Chevron->Transform.SetWidthValue(FDesignSize::Fixed(ChevronIconSize));
 		Chevron->Transform.SetHeightValue(FDesignSize::Fixed(ChevronIconSize));
 		Chevron->Text.IconFontName = TEXT("chevron-down");
-		Chevron->Text.IconFontFamily = TEXT("lucide");
+		Chevron->Text.IconFontFamily = PenStickyChrome::ChevronIconSet;
 		Chevron->Visual.Fills.Add(FDesignFill::FromColor(Theme->TextColor));
 		Header->Children.Add(MoveTemp(Chevron));
 		return Header;

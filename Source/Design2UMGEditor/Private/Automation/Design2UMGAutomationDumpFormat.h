@@ -23,4 +23,34 @@ namespace Design2UMGAutomation
 		}
 		return FString::Printf(TEXT("%.9g"), Value);
 	}
+
+	// Single shared JSON string escaper for golden dump files (single copy so
+	// unity builds never merge two anonymous-namespace definitions).
+	inline FString EscapeJsonString(const FString& Value)
+	{
+		FString Out;
+		Out.Reserve(Value.Len() + 8);
+		for (const TCHAR Char : Value)
+		{
+			switch (Char)
+			{
+			case TEXT('"'): Out += TEXT("\\\""); break;
+			case TEXT('\\'): Out += TEXT("\\\\"); break;
+			case TEXT('\n'): Out += TEXT("\\n"); break;
+			case TEXT('\r'): Out += TEXT("\\r"); break;
+			case TEXT('\t'): Out += TEXT("\\t"); break;
+			default:
+				if (Char < 0x20)
+				{
+					Out += FString::Printf(TEXT("\\u%04x"), static_cast<int32>(Char));
+				}
+				else
+				{
+					Out += Char;
+				}
+				break;
+			}
+		}
+		return Out;
+	}
 }

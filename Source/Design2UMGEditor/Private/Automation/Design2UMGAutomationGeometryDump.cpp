@@ -24,34 +24,6 @@ namespace
 		TEXT("Enables the geometry golden dump (geometry_dump.json) of the compiled widget tree during automation renders. Also requires a non-empty automation dump path in the render spec."),
 		ECVF_Default);
 
-	FString EscapeGeometryDumpString(const FString& Value)
-	{
-		FString Out;
-		Out.Reserve(Value.Len() + 8);
-		for (const TCHAR Char : Value)
-		{
-			switch (Char)
-			{
-			case TEXT('"'): Out += TEXT("\\\""); break;
-			case TEXT('\\'): Out += TEXT("\\\\"); break;
-			case TEXT('\n'): Out += TEXT("\\n"); break;
-			case TEXT('\r'): Out += TEXT("\\r"); break;
-			case TEXT('\t'): Out += TEXT("\\t"); break;
-			default:
-				if (Char < 0x20)
-				{
-					Out += FString::Printf(TEXT("\\u%04x"), static_cast<int32>(Char));
-				}
-				else
-				{
-					Out += Char;
-				}
-				break;
-			}
-		}
-		return Out;
-	}
-
 	// Child walk mirrors the structure snapshot's widget-tree walk (UserWidget
 	// root, then panel children, then single-content widget) with the same seen-set
 	// guard, but without the visibility filter: hidden widgets stay in the dump and
@@ -120,11 +92,11 @@ namespace
 			TEXT("}"),
 			*RenderFloat(AbsolutePosition.X),
 			*RenderFloat(AbsolutePosition.Y),
-			*EscapeGeometryDumpString(Widget->GetClass()->GetName()),
+			*Design2UMGAutomation::EscapeJsonString(Widget->GetClass()->GetName()),
 			bGeometryValid ? TEXT("true") : TEXT("false"),
 			*RenderFloat(LocalSize.Y),
-			*EscapeGeometryDumpString(Widget->GetName()),
-			*EscapeGeometryDumpString(Path),
+			*Design2UMGAutomation::EscapeJsonString(Widget->GetName()),
+			*Design2UMGAutomation::EscapeJsonString(Path),
 			*RenderFloat(LocalSize.X)));
 	}
 

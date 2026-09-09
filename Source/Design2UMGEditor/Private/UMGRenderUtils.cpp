@@ -254,20 +254,7 @@ namespace
 
 	FVector2D GetBlueprintDesignSize(UWidgetBlueprint* WidgetBP)
 	{
-		if (!WidgetBP || !WidgetBP->GeneratedClass)
-		{
-			return FVector2D::ZeroVector;
-		}
-
-		if (const UUserWidget* CDO = Cast<UUserWidget>(WidgetBP->GeneratedClass->GetDefaultObject()))
-		{
-			if (CDO->DesignTimeSize.X > 1.0f && CDO->DesignTimeSize.Y > 1.0f)
-			{
-				return CDO->DesignTimeSize;
-			}
-		}
-
-		return FVector2D::ZeroVector;
+		return FUMGWidgetUtils::GetBlueprintDesignTimeSize(WidgetBP).Get(FVector2D::ZeroVector);
 	}
 
 	// Slate renders with premultiplied alpha: RGB bytes read back from the render

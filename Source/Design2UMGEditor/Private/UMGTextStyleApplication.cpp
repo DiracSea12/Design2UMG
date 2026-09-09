@@ -103,6 +103,9 @@ namespace UMGTextStyleApplication
 		return HasTypedTextValue(Node.Text.IconName);
 	}
 
+	// Normalization seam for typed text colors: identity today by design. Tests
+	// mirror their expected values through this same function, so any future
+	// normalization stays in sync with every call site.
 	FLinearColor NormalizeTypedTextColor(const FLinearColor& Color)
 	{
 		return Color;

@@ -6,6 +6,7 @@
 #include "Design2UMGLog.h"
 #include "UMGWidgetTypes.h"
 #include "DesignImageBakeUtils.h"
+#include "DesignImportUtils.h"
 #include "DesignSchema.h"
 #include "DesignSchemaSourceExtensions.h"
 #include "FontResolver.h"
@@ -356,8 +357,7 @@ namespace DesignImportDiagnosticReport
 				return false;
 			}
 
-			if (Trimmed.StartsWith(TEXT("http://"), ESearchCase::IgnoreCase)
-				|| Trimmed.StartsWith(TEXT("https://"), ESearchCase::IgnoreCase))
+			if (DesignImportUtils::IsHttpUrl(Trimmed))
 			{
 				return true;
 			}
@@ -373,9 +373,7 @@ namespace DesignImportDiagnosticReport
 
 		bool IsFontUrlSource(const FString& Source)
 		{
-			const FString Trimmed = Source.TrimStartAndEnd();
-			return Trimmed.StartsWith(TEXT("http://"), ESearchCase::IgnoreCase)
-				|| Trimmed.StartsWith(TEXT("https://"), ESearchCase::IgnoreCase);
+			return DesignImportUtils::IsHttpUrl(Source.TrimStartAndEnd());
 		}
 
 		bool IsUnsupportedFontFileSource(const FString& Source)

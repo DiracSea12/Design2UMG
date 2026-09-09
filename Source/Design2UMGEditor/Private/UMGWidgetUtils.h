@@ -23,6 +23,14 @@ public:
 	static UClass* ResolveWidgetClass(const FString& TypeName);
 	static void ApplySlotProperties(UPanelSlot* Slot, const FUMGSlotData& SlotData);
 	static void ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNode& Node);
+
+	/**
+	 * Single shared reader for a widget blueprint's UUserWidget CDO DesignTimeSize:
+	 * returns the raw size when both axes exceed 1.0f, unset otherwise. Callers keep
+	 * their own fallbacks/logging and any ceil-to-FIntPoint conversion.
+	 */
+	static TOptional<FVector2D> GetBlueprintDesignTimeSize(UWidgetBlueprint* WidgetBlueprint);
+
 	static bool RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8>& OutPngData, FIntPoint& OutSize, FString* OutError = nullptr, const TOptional<FVector2D>& RenderSizeOverride = TOptional<FVector2D>(), const TOptional<FVector2D>& RootExportOffset = TOptional<FVector2D>());
 	static bool RenderWidgetTreeToPng(UWidgetBlueprint* WidgetBP, TArray<uint8>& OutPngData, FIntPoint& OutSize);
 

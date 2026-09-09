@@ -5,6 +5,7 @@
 
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
+#include "DesignImportUtils.h"
 #include "GeneratedAssetLifecycle.h"
 
 #include "Engine/Texture.h"
@@ -41,12 +42,6 @@ namespace
 	constexpr TCHAR LegacyTextureImportVersion[] = TEXT("ui4");
 	constexpr TCHAR SharedTextureImportVersion[] = TEXT("ui5");
 
-	bool IsRemoteUrl(const FString& Value)
-	{
-		return Value.StartsWith(TEXT("http://"), ESearchCase::IgnoreCase)
-			|| Value.StartsWith(TEXT("https://"), ESearchCase::IgnoreCase);
-	}
-
 	bool IsAssetPath(const FString& Value)
 	{
 		return Value.StartsWith(TEXT("/Game/"), ESearchCase::CaseSensitive)
@@ -72,7 +67,7 @@ namespace
 	FString TryNormalizeRemoteUrl(const FString& InTexturePath)
 	{
 		const FString Trimmed = InTexturePath.TrimStartAndEnd();
-		return IsRemoteUrl(Trimmed) ? NormalizeUrl(Trimmed) : FString();
+		return DesignImportUtils::IsHttpUrl(Trimmed) ? NormalizeUrl(Trimmed) : FString();
 	}
 
 	FString MakeUrlHash(const FString& InUrl)
@@ -567,7 +562,7 @@ namespace
 		}
 
 		// Local file path: read directly and create a texture asset.
-		if (!IsRemoteUrl(InOutTexturePath) && FPaths::FileExists(InOutTexturePath))
+		if (!DesignImportUtils::IsHttpUrl(InOutTexturePath) && FPaths::FileExists(InOutTexturePath))
 		{
 			const FString LocalPath = InOutTexturePath;
 			const FString LocalKey = BuildSourceKeyForLocal(LocalPath);
@@ -636,7 +631,7 @@ namespace
 			return true;
 		}
 
-		if (!IsRemoteUrl(InOutTexturePath))
+		if (!DesignImportUtils::IsHttpUrl(InOutTexturePath))
 		{
 			Context.Report.AddMessage(FString::Printf(TEXT("Skipped non-asset path for '%s': %s"), *WidgetName, *InOutTexturePath));
 			return true;
