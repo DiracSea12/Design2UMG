@@ -8,6 +8,7 @@
 #include "UMGSchema.h"
 
 class UWidgetBlueprint;
+struct FUMGPrototypeNavigationData;
 
 /** Structured output of one generation: the manifest payload (sidecar written after a successful save) + Component Mapping diagnostics. */
 struct FDesign2UMGGenerationOutput
@@ -35,10 +36,15 @@ public:
 	 * Save failure writes no manifest (never a half-updated asset + new manifest combination);
 	 * if the asset saved but the sidecar failed, the import still counts as success; the write failure is appended
 	 * to GenerationOutput->MappingDiagnostics as a structured diagnostic (reaching the import report).
+	 *
+	 * PrototypeNavigation: when provided (even when it carries no bindings), the save re-authors the engine-standard
+	 * graph wiring for the blueprint's prototype navigation before compiling - first clearing nodes from a previous
+	 * generation, so re-imports and regenerates never accumulate. Null leaves the graph untouched.
 	 */
 	static bool SaveWidgetBlueprint(
 		UWidgetBlueprint* WBP,
-		FDesign2UMGGenerationOutput* GenerationOutput = nullptr);
+		FDesign2UMGGenerationOutput* GenerationOutput = nullptr,
+		const FUMGPrototypeNavigationData* PrototypeNavigation = nullptr);
 
 #if WITH_DEV_AUTOMATION_TESTS
 	/**

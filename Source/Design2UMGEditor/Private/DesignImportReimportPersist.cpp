@@ -543,7 +543,9 @@ namespace DesignImportPipeline
 		}
 
 		// 11b) Compile + save + write the new manifest; failure = transaction rollback, asset keeps its original state, manifest not updated.
-		if (!FUMGGenerator::SaveWidgetBlueprint(WBP, &GenerationOutput))
+		// The new source's prototype navigation re-authors the graph wiring (the pre-apply clear in
+		// Reimport() removed the previous generation's nodes inside this same transaction).
+		if (!FUMGGenerator::SaveWidgetBlueprint(WBP, &GenerationOutput, &Session.Data.PrototypeNavigation()))
 		{
 			FailSaveWithRollback(FString::Printf(
 				TEXT("Save/compile failed for %s"),

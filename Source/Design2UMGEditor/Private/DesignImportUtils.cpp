@@ -6,6 +6,7 @@
 #include "Automation/Design2UMGAutomationRender.h"
 #include "Design2UMGEditorImportOrchestrator.h"
 #include "UMGGenerator.h"
+#include "UMGSchemaSourceExtensions.h"
 #include "UMGWidgetUtils.h"
 #include "Design2UMGSettings.h"
 
@@ -366,11 +367,13 @@ namespace
 	}
 
 	// Build-stage output handed to a pipeline stage: the unsaved blueprint plus
-	// its generation output (manifest payload + mapping diagnostics).
+	// its generation output (manifest payload + mapping diagnostics) and the source
+	// prototype navigation data (stages hand it to SaveWidgetBlueprint for graph wiring).
 	struct FBuiltBlueprint
 	{
 		UWidgetBlueprint* WidgetBlueprint = nullptr;
 		FDesign2UMGGenerationOutput GenerationOutput;
+		FUMGPrototypeNavigationData PrototypeNavigation;
 	};
 
 	// Differentiated stage of GenerateBlueprintAndPng: render the PNG from the
@@ -398,7 +401,7 @@ namespace
 			IFileManager::Get().Delete(*OutPng, false, true);
 			UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget PNG render failed"));
 			// Save the Blueprint even when rendering fails so the issue can be inspected.
-			if (FUMGGenerator::SaveWidgetBlueprint(WBP, &GenerationOutput) && OutGeneratedAssetPath)
+			if (FUMGGenerator::SaveWidgetBlueprint(WBP, &GenerationOutput, &Data.PrototypeNavigation()) && OutGeneratedAssetPath)
 			{
 				*OutGeneratedAssetPath = WBP->GetPathName();
 			}
@@ -413,7 +416,7 @@ namespace
 
 		// Save the Blueprint after successful rendering.
 		Progress.AdvanceAfterMutation(0.5f, LOCTEXT("GenerateProgressSave", "Saving generated assets"));
-		if (!FUMGGenerator::SaveWidgetBlueprint(WBP, &GenerationOutput))
+		if (!FUMGGenerator::SaveWidgetBlueprint(WBP, &GenerationOutput, &Data.PrototypeNavigation()))
 		{
 			IFileManager::Get().Delete(*OutPng, false, true);
 			UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint compile or save failed after PNG render"));
@@ -452,7 +455,7 @@ namespace
 		FDesign2UMGGenerationOutput GenerationOutput = MoveTemp(Built.GenerationOutput);
 
 		Progress.AdvanceAfterMutation(0.5f, LOCTEXT("GenerateProgressSave", "Saving generated assets"));
-		if (!FUMGGenerator::SaveWidgetBlueprint(WidgetBlueprint, &GenerationOutput))
+		if (!FUMGGenerator::SaveWidgetBlueprint(WidgetBlueprint, &GenerationOutput, &Built.PrototypeNavigation))
 		{
 			// Build-time diagnostics (mapping validation/hits) move out with GenerationOutput; they are not lost on the failure path.
 			if (OutGenerationOutput)
@@ -552,6 +555,7 @@ namespace
 				DesignImportUtils::ApplyPendingIconFontMappingChanges(Data);
 				FBuiltBlueprint Built;
 				Built.WidgetBlueprint = FUMGGenerator::BuildWidgetBlueprint(Data, FinalPath, GenerationSettings, &Built.GenerationOutput);
+				Built.PrototypeNavigation = Data.PrototypeNavigation();
 				if (!Built.WidgetBlueprint)
 				{
 					if (bLogBuildFailure)
@@ -799,7 +803,7 @@ UWidgetBlueprint* DesignImportUtils::GenerateBlueprint(
 			}
 
 			Progress.AdvanceAfterMutation(1.0f, LOCTEXT("GenerateProgressSave", "Saving generated assets"));
-			if (!FUMGGenerator::SaveWidgetBlueprint(BuiltWBP, &GenerationOutput))
+			if (!FUMGGenerator::SaveWidgetBlueprint(BuiltWBP, &GenerationOutput, &Data.PrototypeNavigation()))
 			{
 				UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint compile or save failed"));
 				FDesign2UMGNotification::Error(LOCTEXT("SaveFailed", "Design2UMG: Widget Blueprint compile or save failed"));

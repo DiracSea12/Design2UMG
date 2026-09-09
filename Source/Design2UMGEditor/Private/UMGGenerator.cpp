@@ -4,6 +4,7 @@
 #include "Design2UMGGenerationSettingsSnapshot.h"
 #include "Design2UMGComponentMappingGeneration.h"
 #include "Design2UMGGenerationManifest.h"
+#include "Design2UMGPrototypeGraphWiring.h"
 #include "UMGGeneratorRootHandoff.h"
 #include "UMGWidgetNodeAccess.h"
 #include "UMGValueParsing.h"
@@ -209,7 +210,7 @@ UWidgetBlueprint* FUMGGenerator::GenerateWidgetBlueprint(
 {
 	FDesign2UMGGenerationOutput GenerationOutput;
 	UWidgetBlueprint* WBP = BuildWidgetBlueprint(WidgetData, PackagePath, GenerationSettings, &GenerationOutput);
-	if (WBP && !SaveWidgetBlueprint(WBP, &GenerationOutput))
+	if (WBP && !SaveWidgetBlueprint(WBP, &GenerationOutput, &WidgetData.PrototypeNavigation()))
 	{
 		return nullptr;
 	}
@@ -423,7 +424,10 @@ namespace
 }
 #endif
 
-bool FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP, FDesign2UMGGenerationOutput* GenerationOutput)
+bool FUMGGenerator::SaveWidgetBlueprint(
+	UWidgetBlueprint* WBP,
+	FDesign2UMGGenerationOutput* GenerationOutput,
+	const FUMGPrototypeNavigationData* PrototypeNavigation)
 {
 	if (!WBP)
 	{
@@ -468,6 +472,17 @@ bool FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP, FDesign2UMGGenera
 	WBP->Modify();
 	WBP->WidgetVariableNameToGuidMap.Empty();
 	ClearGeneratedWidgetNavigationState(WBP);
+
+	// The structural mark above synchronously regenerated the skeleton class, so the tree
+	// widgets' properties now exist: the wiring resolves real properties for its nodes.
+	// Runs strictly before the final full compile below, which registers the delegate
+	// bindings from the authored source nodes and emits the bound functions.
+	if (PrototypeNavigation)
+	{
+		TArray<FString> WiringWarnings;
+		Design2UMGPrototypeGraphWiring::WireSimplePrototypeBindings(WBP, *PrototypeNavigation, WiringWarnings);
+	}
+
 	const EBlueprintCompileOptions CompileOptions =
 		EBlueprintCompileOptions::SkipDefaultObjectValidation |
 		EBlueprintCompileOptions::SkipFiBSearchMetaUpdate;

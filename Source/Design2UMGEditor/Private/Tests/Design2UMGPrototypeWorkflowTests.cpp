@@ -69,32 +69,32 @@ namespace
 	}
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeDisabledRuntimeWorkflowTest,
-	"Design2UMG.WidgetBlueprint.FigmaPrototypeDisabledRuntime",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeGraphNavigationWorkflowTest,
+	"Design2UMG.WidgetBlueprint.FigmaPrototypeGraphNavigation",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaPrototypeDisabledRuntimeWorkflowTest::RunTest(const FString& Parameters)
+bool FFigmaPrototypeGraphNavigationWorkflowTest::RunTest(const FString& Parameters)
 {
 	FDesignDocument Document;
-	TestTrue(TEXT("Parse prototype disabled fixture"),
+	TestTrue(TEXT("Parse prototype navigation fixture"),
 		FFigmaParser::ParseDocument(BasicPrototypeNavigationJson(), Document));
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
-	TestTrue(TEXT("Prototype disabled mode still converts navigation data"), Data.PrototypeNavigation().IsValid());
+	TestTrue(TEXT("Prototype navigation data converts"), Data.PrototypeNavigation().IsValid());
 	if (!Data.PrototypeNavigation().IsValid())
 	{
 		return false;
 	}
 
-	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/FigmaPrototypeDisabled");
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/FigmaPrototypeGraphNav");
 	DeleteGeneratedAssetsAtPath(OutputPath);
 
 	UWidgetBlueprint* Blueprint = FUMGGenerator::BuildWidgetBlueprint(Data, OutputPath);
-	TestTrue(TEXT("Build prototype disabled widget blueprint"), Blueprint != nullptr);
+	TestTrue(TEXT("Build prototype navigation widget blueprint"), Blueprint != nullptr);
 	if (!Blueprint)
 	{
 		return false;
 	}
 
-	FUMGGenerator::SaveWidgetBlueprint(Blueprint);
+	FUMGGenerator::SaveWidgetBlueprint(Blueprint, nullptr, &Data.PrototypeNavigation());
 	UWidgetBlueprintGeneratedClass* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(Blueprint->GeneratedClass);
 	TestTrue(TEXT("Generated class exists"), GeneratedClass != nullptr);
 	if (!GeneratedClass)
@@ -110,7 +110,7 @@ bool FFigmaPrototypeDisabledRuntimeWorkflowTest::RunTest(const FString& Paramete
 
 	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
 	UUserWidget* WidgetInstance = World ? CreateWidget<UUserWidget>(World, GeneratedClass) : nullptr;
-	TestTrue(TEXT("Prototype disabled widget instance created"), WidgetInstance != nullptr);
+	TestTrue(TEXT("Prototype navigation widget instance created"), WidgetInstance != nullptr);
 	if (!WidgetInstance || !WidgetInstance->WidgetTree)
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
@@ -120,17 +120,17 @@ bool FFigmaPrototypeDisabledRuntimeWorkflowTest::RunTest(const FString& Paramete
 	WidgetInstance->TakeWidget();
 	UWidgetSwitcher* Switcher = FindPrototypeSwitcherWidget(WidgetInstance, Data);
 	UButton* TriggerButton = Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("cta_button")));
-	TestTrue(TEXT("Disabled switcher exists"), Switcher != nullptr);
-	TestTrue(TEXT("Disabled trigger button exists"), TriggerButton != nullptr);
+	TestTrue(TEXT("Navigation switcher exists"), Switcher != nullptr);
+	TestTrue(TEXT("Navigation trigger button exists"), TriggerButton != nullptr);
 	if (!Switcher || !TriggerButton)
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
 	}
 
-	TestEqual(TEXT("Disabled initial page index"), Switcher->GetActiveWidgetIndex(), 0);
+	TestEqual(TEXT("Navigation initial page index"), Switcher->GetActiveWidgetIndex(), 0);
 	TriggerButton->OnClicked.Broadcast();
-	TestEqual(TEXT("Disabled click does not switch page"), Switcher->GetActiveWidgetIndex(), 0);
+	TestEqual(TEXT("Wired click switches to the bound page"), Switcher->GetActiveWidgetIndex(), 1);
 
 	WidgetInstance->RemoveFromParent();
 	DeleteGeneratedAssetsAtPath(OutputPath);

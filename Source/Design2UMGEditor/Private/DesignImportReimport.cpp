@@ -2,6 +2,8 @@
 
 #include "DesignImportReimportInternal.h"
 
+#include "Design2UMGPrototypeGraphWiring.h"
+
 #include "Blueprint/WidgetTree.h"
 #include "Components/PanelWidget.h"
 #include "WidgetBlueprint.h"
@@ -57,6 +59,11 @@ namespace DesignImportPipeline
 
 		// 9) Apply the update plan inside an editor transaction.
 		const int32 TransactionIndex = BeginReimportApplyTransaction(WBP);
+
+		// Generated prototype navigation wiring is plugin-owned transient content, re-authored by the
+		// save (step 11) from the new source. Clear it before the tree updates so the safe-delete /
+		// identity-conversion gates ("referenced by blueprint graphs") only ever see user-authored nodes.
+		Design2UMGPrototypeGraphWiring::ClearGeneratedBindings(WBP);
 		TArray<FDesign2UMGMappedInstanceRecord> FinalMappedRecords;
 		TArray<FDesign2UMGGeneratedInstanceRecord> FinalGeneratedRecords;
 		TSet<FString> UpdatedD2UOwned(Manifest.D2UOwned);
