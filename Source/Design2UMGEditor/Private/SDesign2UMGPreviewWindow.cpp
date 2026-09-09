@@ -1,7 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "SDesign2UMGPreviewWindow.h"
-#include "Design2UMGGenerationSettingsSnapshot.h"
 #include "DesignImportPipeline.h"
 #include "DesignJsonUtils.h"
 #include "DesignPreviewMaterializationService.h"
@@ -289,14 +288,12 @@ SDesign2UMGPreviewWindow::~SDesign2UMGPreviewWindow()
 TOptional<FDesignPreviewMaterializationSettingsSnapshot>
 SDesign2UMGPreviewWindow::ResolveMaterializationSettingsSnapshot()
 {
-	if (const FDesign2UMGGenerationSettingsSnapshot* CurrentGenerationSettings =
-		Design2UMGGenerationSettingsContext::GetCurrent())
-	{
-		CachedMaterializationSettingsSnapshot =
-			FDesignPreviewMaterializationSettingsSnapshot::FromGenerationSettings(*CurrentGenerationSettings);
-		return CachedMaterializationSettingsSnapshot;
-	}
-
+	// No ambient generation-settings read here: the only caller is DoRefreshPreview, which runs
+	// from a queued AsyncTask(GameThread) after every settings-snapshot RAII scope on the
+	// launching stack has popped (the engine task graph only queues game-thread tasks, it never
+	// executes them inline). The effective priority chain is therefore: the latest approved
+	// snapshot, else the cached one seeded at window construction from the import flow's
+	// narrowed snapshot - exactly the values this window materialized with before.
 	if (LatestApprovedSnapshot.IsSet() && LatestApprovedSnapshot->MaterializationSettingsSnapshot.IsSet())
 	{
 		CachedMaterializationSettingsSnapshot =

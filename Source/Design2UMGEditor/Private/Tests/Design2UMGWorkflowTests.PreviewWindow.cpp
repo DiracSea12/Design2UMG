@@ -859,16 +859,13 @@ bool FPreviewWindowCarriesExplicitMaterializationSnapshotTest::RunTest(const FSt
 	FDesignPreviewMaterializationSettingsSnapshot MaterializationSnapshot;
 	MaterializationSnapshot.ClassOverrides = GenerationSnapshot.ClassOverrides;
 
-	{
-		const Design2UMGGenerationSettingsContext::FScopedSettingsSnapshot ScopedSnapshot(GenerationSnapshot);
-		TestTrue(TEXT("Preview harness opens window with explicit initial snapshot"),
-			Harness.Open(
-				MakePreviewHarnessJson(TEXT("Snapshot Original")),
-				TEXT("/Game/Design2UMG/_TestOutput/PreviewHarnessSnapshot"),
-				TArray<FString>(),
-				MaterializationSnapshot,
-				false));
-	}
+	TestTrue(TEXT("Preview harness opens window with explicit initial snapshot"),
+		Harness.Open(
+			MakePreviewHarnessJson(TEXT("Snapshot Original")),
+			TEXT("/Game/Design2UMG/_TestOutput/PreviewHarnessSnapshot"),
+			TArray<FString>(),
+			MaterializationSnapshot,
+			false));
 	Harness.PumpSlate();
 
 	if (!Harness.PreviewWindow.IsValid())

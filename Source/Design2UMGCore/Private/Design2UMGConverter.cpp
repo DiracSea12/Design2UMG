@@ -232,7 +232,7 @@ namespace Design2UMGConverterPrivate
 					PreResolutionResolver.MarkFitContentPrecomputed(RefNode);
 					return ExpandedRef;
 				};
-			SizeEstimator::PreComputeFitContentSizes(Expanded, ActiveContext.State.Document, RefResolver);
+			SizeEstimator::PromoteFitContentSizes(Expanded, ActiveContext.State.Document, RefResolver);
 			PreResolutionResolver.MarkFitContentPrecomputed(Node);
 			return ConvertNode(Expanded, ActiveContext, ParentLayout);
 		}
@@ -636,7 +636,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 		};
 	for (const auto& Child : VisibleChildren)
 	{
-		SizeEstimator::PreComputeFitContentSizes(Child, Document, RefResolver);
+		SizeEstimator::PromoteFitContentSizes(Child, Document, RefResolver);
 	}
 
 	TArray<FUMGWidgetNode> RenderWidgets;

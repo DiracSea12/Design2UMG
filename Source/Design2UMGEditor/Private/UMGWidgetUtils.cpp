@@ -136,7 +136,7 @@ namespace
 
 }
 
-UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords, const FIntPoint* ExplicitDesignSize, FDesign2UMGComponentMappingBuildState* ComponentMappingState, TMap<FString, UClass*>* ClassOverrideCache)
+UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords, const FIntPoint* ExplicitDesignSize, FDesign2UMGComponentMappingBuildState* ComponentMappingState, TMap<FString, UClass*>* ClassOverrideCache, const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
 {
 	// Class-override lookups are cached per tree: each root call owns the cache; recursive
 	// BuildWidgetTree/CreateWidgetRecursive entries reuse the same map so rule loading
@@ -185,7 +185,7 @@ UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWid
 	}
 
 	UClass* WidgetClass = ResolveWidgetClass(Node.Type);
-	if (const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = Design2UMGGenerationSettingsContext::GetCurrent())
+	if (GenerationSettings)
 	{
 		// Name-based ClassOverride applies only to ordinary nodes that did not hit a Component Mapping.
 		if (UClass* Override = GenerationSettings->FindClassOverride(Node.Name, ClassOverrideCache))
@@ -254,18 +254,19 @@ UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWid
 		FigmaMetadataRecords,
 		ExplicitDesignSize,
 		ComponentMappingState,
-		ClassOverrideCache
+		ClassOverrideCache,
+		GenerationSettings
 	};
 	FWidgetTreeChildBuilder::BuildChildren(WidgetTree, NewWidget, Node, Context);
 
 	return NewWidget;
 }
 
-UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords, const FIntPoint* ExplicitDesignSize, FDesign2UMGComponentMappingBuildState* ComponentMappingState, TMap<FString, UClass*>* ClassOverrideCache)
+UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords, const FIntPoint* ExplicitDesignSize, FDesign2UMGComponentMappingBuildState* ComponentMappingState, TMap<FString, UClass*>* ClassOverrideCache, const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
 {
 	const FIntPoint EffectiveDesignSize = ResolveEffectiveDesignSize(Node, ExplicitDesignSize);
 
-	UWidget* NewWidget = BuildWidgetTree(WidgetTree, Node, TextureMap, FigmaMetadataRecords, &EffectiveDesignSize, ComponentMappingState, ClassOverrideCache);
+	UWidget* NewWidget = BuildWidgetTree(WidgetTree, Node, TextureMap, FigmaMetadataRecords, &EffectiveDesignSize, ComponentMappingState, ClassOverrideCache, GenerationSettings);
 	if (!NewWidget)
 	{
 		return nullptr;

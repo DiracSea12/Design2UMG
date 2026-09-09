@@ -185,7 +185,8 @@ namespace
 			Context.FigmaMetadataRecords,
 			Context.ExplicitDesignSize,
 			Context.ComponentMappingState,
-			Context.ClassOverrideCache);
+			Context.ClassOverrideCache,
+			Context.GenerationSettings);
 	}
 
 	void BuildPanelChildren(

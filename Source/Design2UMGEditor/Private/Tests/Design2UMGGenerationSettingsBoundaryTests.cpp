@@ -236,10 +236,16 @@ bool FWidgetClassOverrideDefaultSnapshotTest::RunTest(const FString& Parameters)
 	}
 
 	const FDesign2UMGGenerationSettingsSnapshot EmptySnapshot;
-	const Design2UMGGenerationSettingsContext::FScopedSettingsSnapshot ScopedSnapshot(EmptySnapshot);
 	UWidget* Widget = FUMGWidgetUtils::CreateWidgetRecursive(
 		WidgetTree,
-		MakeSimpleTextNode(TEXT("DefaultClassNode")));
+		MakeSimpleTextNode(TEXT("DefaultClassNode")),
+		nullptr,
+		nullptr,
+		nullptr,
+		nullptr,
+		nullptr,
+		nullptr,
+		&EmptySnapshot);
 	TestNotNull(TEXT("Widget created with default snapshot"), Widget);
 	TestTrue(TEXT("Default snapshot keeps resolved TextBlock class"), Widget && Widget->IsA<UTextBlock>());
 	return Widget && Widget->IsA<UTextBlock>();
@@ -262,10 +268,16 @@ bool FWidgetClassOverrideCustomSnapshotTest::RunTest(const FString& Parameters)
 	OverrideRule.NamePattern = TEXT("OverrideNode");
 	OverrideRule.WidgetClass = UBorder::StaticClass();
 
-	const Design2UMGGenerationSettingsContext::FScopedSettingsSnapshot ScopedSnapshot(OverrideSnapshot);
 	UWidget* Widget = FUMGWidgetUtils::CreateWidgetRecursive(
 		WidgetTree,
-		MakeSimpleTextNode(TEXT("OverrideNode_Content")));
+		MakeSimpleTextNode(TEXT("OverrideNode_Content")),
+		nullptr,
+		nullptr,
+		nullptr,
+		nullptr,
+		nullptr,
+		nullptr,
+		&OverrideSnapshot);
 	TestNotNull(TEXT("Widget created with override snapshot"), Widget);
 	TestTrue(TEXT("Custom snapshot applies widget class override"), Widget && Widget->IsA<UBorder>());
 	return Widget && Widget->IsA<UBorder>();

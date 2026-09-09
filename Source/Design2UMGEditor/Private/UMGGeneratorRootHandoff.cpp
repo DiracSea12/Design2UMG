@@ -45,7 +45,8 @@ namespace UMGGeneratorRootHandoff
 		UWidgetBlueprint* WidgetBlueprint,
 		const FPreparedRoot& PreparedRoot,
 		TArray<FDesign2UMGFigmaWidgetMetadataRecord>& OutFigmaMetadataRecords,
-		FDesign2UMGComponentMappingBuildState* ComponentMappingState)
+		FDesign2UMGComponentMappingBuildState* ComponentMappingState,
+		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
 	{
 		if (!WidgetBlueprint || !WidgetBlueprint->WidgetTree)
 		{
@@ -66,7 +67,9 @@ namespace UMGGeneratorRootHandoff
 			nullptr,
 			&OutFigmaMetadataRecords,
 			&PreparedRoot.DesignSize,
-			ComponentMappingState);
+			ComponentMappingState,
+			nullptr,
+			GenerationSettings);
 		return RootWidget;
 	}
 }

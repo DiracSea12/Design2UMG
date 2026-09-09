@@ -9,6 +9,7 @@
 class UWidget;
 class UWidgetBlueprint;
 class FDesign2UMGComponentMappingBuildState;
+struct FDesign2UMGGenerationSettingsSnapshot;
 
 namespace UMGGeneratorRootHandoff
 {
@@ -27,5 +28,6 @@ namespace UMGGeneratorRootHandoff
 		UWidgetBlueprint* WidgetBlueprint,
 		const FPreparedRoot& PreparedRoot,
 		TArray<FDesign2UMGFigmaWidgetMetadataRecord>& OutFigmaMetadataRecords,
-		FDesign2UMGComponentMappingBuildState* ComponentMappingState = nullptr);
+		FDesign2UMGComponentMappingBuildState* ComponentMappingState = nullptr,
+		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr);
 }

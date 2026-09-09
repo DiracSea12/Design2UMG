@@ -127,7 +127,6 @@ UUserWidget* FDesignPreviewMaterializationService::CreatePreviewWidget(
 			? FDesign2UMGGenerationSettingsSnapshot::FromMaterializationSettings(
 				ApprovedSnapshot.MaterializationSettingsSnapshot.GetValue())
 			: FDesign2UMGGenerationSettingsSnapshot();
-	const Design2UMGGenerationSettingsContext::FScopedSettingsSnapshot ScopedGenerationSettings(GenerationSettings);
 
 	UWidget* RootWidget = FUMGWidgetUtils::CreateWidgetRecursive(
 		TempWidget->WidgetTree,
@@ -135,7 +134,10 @@ UUserWidget* FDesignPreviewMaterializationService::CreatePreviewWidget(
 		nullptr,
 		&TransientTextureMap,
 		nullptr,
-		&DesignSize);
+		&DesignSize,
+		nullptr,
+		nullptr,
+		&GenerationSettings);
 	if (!RootWidget)
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create root widget of type: %s"), *ApprovedSnapshot.Data.RootWidget.Type);

@@ -332,7 +332,6 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 	FDesign2UMGGenerationSettingsSnapshot FallbackGenerationSettings;
 	const FDesign2UMGGenerationSettingsSnapshot& EffectiveGenerationSettings =
 		ResolveGenerationSettingsSnapshot(GenerationSettings, FallbackGenerationSettings);
-	const Design2UMGGenerationSettingsContext::FScopedSettingsSnapshot ScopedGenerationSettings(EffectiveGenerationSettings);
 
 	// Non-const: Component Mapping matching writes the hit Key into this root-node copy (affects this generation only).
 	UMGGeneratorRootHandoff::FPreparedRoot PreparedRoot =
@@ -392,7 +391,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 	// Use the shared widget creation path.
 	TArray<FDesign2UMGFigmaWidgetMetadataRecord> FigmaMetadataRecords;
 	UWidget* Root = UMGGeneratorRootHandoff::CreateRootWidget(
-		WBP, PreparedRoot, FigmaMetadataRecords, &MappingBuildState);
+		WBP, PreparedRoot, FigmaMetadataRecords, &MappingBuildState, &EffectiveGenerationSettings);
 	if (!Root)
 	{
 		UE_LOG(LogDesign2UMG, Error,

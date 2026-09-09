@@ -34,19 +34,3 @@ struct FDesign2UMGGenerationSettingsSnapshot
 	 */
 	UClass* FindClassOverride(const FString& NodeName, TMap<FString, UClass*>* InOutNodeNameCache = nullptr) const;
 };
-
-namespace Design2UMGGenerationSettingsContext
-{
-	const FDesign2UMGGenerationSettingsSnapshot* GetCurrent();
-
-	class FScopedSettingsSnapshot
-	{
-	public:
-		explicit FScopedSettingsSnapshot(const FDesign2UMGGenerationSettingsSnapshot& InSnapshot);
-		~FScopedSettingsSnapshot();
-
-	private:
-		const FDesign2UMGGenerationSettingsSnapshot* PreviousSnapshot = nullptr;
-		const FDesign2UMGGenerationSettingsSnapshot& Snapshot;
-	};
-}

@@ -5,11 +5,6 @@
 #include "Components/Widget.h"
 #include "DesignPreviewContracts.h"
 
-namespace
-{
-	thread_local const FDesign2UMGGenerationSettingsSnapshot* GCurrentSnapshot = nullptr;
-}
-
 FDesign2UMGGenerationSettingsSnapshot FDesign2UMGGenerationSettingsSnapshot::FromSettings(const UDesign2UMGSettings& Settings)
 {
 	FDesign2UMGGenerationSettingsSnapshot Snapshot;
@@ -46,24 +41,4 @@ UClass* FDesign2UMGGenerationSettingsSnapshot::FindClassOverride(
 	TMap<FString, UClass*>* InOutNodeNameCache) const
 {
 	return UDesign2UMGSettings::ResolveClassOverride(ClassOverrides, NodeName, InOutNodeNameCache);
-}
-
-namespace Design2UMGGenerationSettingsContext
-{
-	const FDesign2UMGGenerationSettingsSnapshot* GetCurrent()
-	{
-		return GCurrentSnapshot;
-	}
-
-	FScopedSettingsSnapshot::FScopedSettingsSnapshot(const FDesign2UMGGenerationSettingsSnapshot& InSnapshot)
-		: PreviousSnapshot(GCurrentSnapshot)
-		, Snapshot(InSnapshot)
-	{
-		GCurrentSnapshot = &Snapshot;
-	}
-
-	FScopedSettingsSnapshot::~FScopedSettingsSnapshot()
-	{
-		GCurrentSnapshot = PreviousSnapshot;
-	}
 }

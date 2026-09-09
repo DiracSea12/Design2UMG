@@ -193,6 +193,39 @@ namespace
 		return Request;
 	}
 
+	/**
+	 * Module-owned probe lifecycle: the rooted UTextBlock is lazily created on first
+	 * measurement and explicitly released by FDesign2UMGCoreModule on shutdown, so the
+	 * GC root never outlives the module (hot-reload included).
+	 */
+	struct FTextBlockProbeOwner
+	{
+		TStrongObjectPtr<UTextBlock> ProbeTextBlock;
+
+		UTextBlock& Acquire()
+		{
+			if (!ProbeTextBlock.IsValid())
+			{
+				ProbeTextBlock = TStrongObjectPtr<UTextBlock>(NewObject<UTextBlock>());
+			}
+			return *ProbeTextBlock;
+		}
+
+		void ResetForModuleShutdown()
+		{
+			ProbeTextBlock.Reset();
+		}
+	};
+
+	FTextBlockProbeOwner GTextBlockProbe;
+
+	/**
+	 * Cache contract: entries stay valid until the backing font asset is reimported
+	 * (FDesign2UMGCoreModule clears the whole map on any UFont reimport) or the module
+	 * shuts down; both paths repopulate lazily on the next read.
+	 */
+	TMap<FString, TOptional<float>> GLineGapEmCache;
+
 }
 
 namespace RuntimeProbe
@@ -297,21 +330,17 @@ bool TextMeasurementRuntimeProbe::TryMeasureTextBlockDesiredSize(const FTextBloc
 	// (text, font, justification, line-height, wrap settings) is reassigned below and
 	// each STextBlock setter invalidates the cached text layout, so the desired size
 	// depends only on the current request instead of probe history.
-	static TStrongObjectPtr<UTextBlock> ProbeTextBlock;
-	if (!ProbeTextBlock.IsValid())
-	{
-		ProbeTextBlock = TStrongObjectPtr<UTextBlock>(NewObject<UTextBlock>());
-	}
+	UTextBlock& ProbeTextBlock = GTextBlockProbe.Acquire();
 
-	ProbeTextBlock->SetText(FText::FromString(Request.Text));
-	ProbeTextBlock->SetFont(BuildFontInfo(Request));
-	ProbeTextBlock->SetJustification(ToSlateJustification(Request.TextAlign));
-	ProbeTextBlock->SetLineHeightPercentage(Request.LineHeightPercentage);
-	ProbeTextBlock->SetApplyLineHeightToBottomLine(Request.bApplyExplicitLineHeight);
-	ProbeTextBlock->SetAutoWrapText(Request.bAutoWrapText);
-	ProbeTextBlock->SetWrapTextAt(Request.WrapTextAt);
+	ProbeTextBlock.SetText(FText::FromString(Request.Text));
+	ProbeTextBlock.SetFont(BuildFontInfo(Request));
+	ProbeTextBlock.SetJustification(ToSlateJustification(Request.TextAlign));
+	ProbeTextBlock.SetLineHeightPercentage(Request.LineHeightPercentage);
+	ProbeTextBlock.SetApplyLineHeightToBottomLine(Request.bApplyExplicitLineHeight);
+	ProbeTextBlock.SetAutoWrapText(Request.bAutoWrapText);
+	ProbeTextBlock.SetWrapTextAt(Request.WrapTextAt);
 
-	TSharedRef<SWidget> SlateWidget = ProbeTextBlock->TakeWidget();
+	TSharedRef<SWidget> SlateWidget = ProbeTextBlock.TakeWidget();
 	SlateWidget->SlatePrepass(1.0f);
 
 	const FVector2D DesiredSize = SlateWidget->GetDesiredSize();
@@ -332,12 +361,12 @@ bool TextMeasurementRuntimeProbe::TryReadLineGapEm(const FString& FontAssetPath,
 		return false;
 	}
 
-	// Font metrics never change during a process, so cache per (asset, typeface).
-	static TMap<FString, TOptional<float>> LineGapEmCache;
+	// Cached per (asset, typeface); invalidated on font reimport or module shutdown
+	// (see the cache contract at GLineGapEmCache above).
 	const FString CacheKey = TypefaceName.IsEmpty()
 		? FontAssetPath
 		: FontAssetPath + TEXT("|") + TypefaceName;
-	if (const TOptional<float>* Cached = LineGapEmCache.Find(CacheKey))
+	if (const TOptional<float>* Cached = GLineGapEmCache.Find(CacheKey))
 	{
 		if (Cached->IsSet())
 		{
@@ -396,10 +425,20 @@ bool TextMeasurementRuntimeProbe::TryReadLineGapEm(const FString& FontAssetPath,
 		}
 	}
 
-	LineGapEmCache.Add(CacheKey, Parsed);
+	GLineGapEmCache.Add(CacheKey, Parsed);
 	if (Parsed.IsSet())
 	{
 		OutLineGapEm = Parsed.GetValue();
 	}
 	return Parsed.IsSet();
+}
+
+void TextMeasurementRuntimeProbe::ResetProbeForModuleShutdown()
+{
+	GTextBlockProbe.ResetForModuleShutdown();
+}
+
+void TextMeasurementRuntimeProbe::ClearLineGapEmCache()
+{
+	GLineGapEmCache.Empty();
 }

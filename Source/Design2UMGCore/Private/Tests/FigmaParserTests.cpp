@@ -157,7 +157,7 @@ bool FFigmaParserHugSizingOutsideAutoLayoutParentTest::RunTest(const FString&)
 	TestEqual(TEXT("Stale HUG width is not retained as a minimum"), HugNode->Transform.Width.Value, 0.0f);
 	TestEqual(TEXT("Stale HUG height is not retained as a minimum"), HugNode->Transform.Height.Value, 0.0f);
 
-	const FVector2D ResolvedHugSize = SizeEstimator::PreComputeFitContentSizes(HugNode, Doc,
+	const FVector2D ResolvedHugSize = SizeEstimator::PromoteFitContentSizes(HugNode, Doc,
 		[&Doc](const TSharedPtr<FDesignNode>& RefNode) { return RefExpander::ExpandRef(RefNode, Doc); });
 	TestEqual(TEXT("HUG width resolves from child and padding"), ResolvedHugSize.X, 124.0);
 	TestEqual(TEXT("HUG height resolves from child and padding"), ResolvedHugSize.Y, 56.0);

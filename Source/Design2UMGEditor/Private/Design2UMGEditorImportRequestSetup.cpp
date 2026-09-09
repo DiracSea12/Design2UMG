@@ -50,31 +50,11 @@ namespace Design2UMGEditorImportRequestSetup
 			SettingsSnapshot);
 	}
 
-	template<typename TInvoke>
-	FDesignImportExecutionResult ExecuteWithCapturedSettings(
-		const FDesignImportRequest& Request,
-		TInvoke&& Invoke)
-	{
-		if (Request.SettingsSnapshot.IsSet())
-		{
-			const Design2UMGGenerationSettingsContext::FScopedSettingsSnapshot ScopedGenerationSettings(
-				Request.SettingsSnapshot->GenerationSettings);
-			return Invoke();
-		}
-
-		return Invoke();
-	}
-
 	FDesignImportExecutionResult ExecuteImportWithSettings(
 		FUMGWidgetData& Data,
 		const FDesignImportRequest& Request)
 	{
-		return ExecuteWithCapturedSettings(
-			Request,
-			[&Data, &Request]()
-		{
-			return DesignImportPipeline::Execute(Data, Request);
-		});
+		return DesignImportPipeline::Execute(Data, Request);
 	}
 
 	FDesignImportExecutionResult ExecuteImportWithSettings(
@@ -82,12 +62,7 @@ namespace Design2UMGEditorImportRequestSetup
 		const FDesignImportRequest& Request,
 		const FImportAnalysisResult* PrecomputedAnalysis)
 	{
-		return ExecuteWithCapturedSettings(
-			Request,
-			[&Document, &Request, PrecomputedAnalysis]()
-		{
-			return DesignImportPipeline::Execute(Document, Request, PrecomputedAnalysis);
-		});
+		return DesignImportPipeline::Execute(Document, Request, PrecomputedAnalysis);
 	}
 
 	FDesignImportExecutionResult ExecutePenFileImportWithSettings(
@@ -95,12 +70,7 @@ namespace Design2UMGEditorImportRequestSetup
 		const FString& TargetNodeId,
 		const FDesignImportRequest& Request)
 	{
-		return ExecuteWithCapturedSettings(
-			Request,
-			[&FilePath, &TargetNodeId, &Request]()
-		{
-			return DesignImportPipeline::ExecutePenFile(FilePath, TargetNodeId, Request);
-		});
+		return DesignImportPipeline::ExecutePenFile(FilePath, TargetNodeId, Request);
 	}
 
 	TSharedPtr<FJsonObject> MakePencilBatchGetArgs()

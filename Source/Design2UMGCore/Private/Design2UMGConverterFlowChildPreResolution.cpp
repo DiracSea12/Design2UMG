@@ -418,7 +418,7 @@ namespace Design2UMGConverterInternal
 			// available parent width), so reuse the Expanded snapshot but let
 			// each caller measure it for its own context.
 			TSharedPtr<FDesignNode> WorkingExpanded = MakeWorkingCopy(Child);
-			SizeEstimator::PreComputeFitContentSizes(WorkingExpanded, Document, RefResolver);
+			SizeEstimator::PromoteFitContentSizes(WorkingExpanded, Document, RefResolver);
 			MarkFitContentPrecomputed(Child);
 			return WorkingExpanded;
 		}

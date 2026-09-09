@@ -246,7 +246,7 @@ bool FSizeEstimatorFitContentLeafMinimumGrowthTest::RunTest(const FString&)
 	TextNode->Transform.Height = FDesignSize::Fit(4.0f);
 
 	FDesignDocument EmptyDoc;
-	const FVector2D TextSize = SizeEstimator::PreComputeFitContentSizes(TextNode, EmptyDoc,
+	const FVector2D TextSize = SizeEstimator::PromoteFitContentSizes(TextNode, EmptyDoc,
 		[&EmptyDoc](const TSharedPtr<FDesignNode>& RefNode) { return RefExpander::ExpandRef(RefNode, EmptyDoc); });
 	TestTrue(TEXT("Text fit width grows beyond its declared minimum"), TextSize.X > 4.0f);
 	TestTrue(TEXT("Text fit height grows beyond its declared minimum"), TextSize.Y > 4.0f);
@@ -263,7 +263,7 @@ bool FSizeEstimatorFitContentLeafMinimumGrowthTest::RunTest(const FString&)
 	IconNode->Transform.Width = FDesignSize::Fit(4.0f);
 	IconNode->Transform.Height = FDesignSize::Fit(4.0f);
 
-	const FVector2D IconSize = SizeEstimator::PreComputeFitContentSizes(IconNode, EmptyDoc,
+	const FVector2D IconSize = SizeEstimator::PromoteFitContentSizes(IconNode, EmptyDoc,
 		[&EmptyDoc](const TSharedPtr<FDesignNode>& RefNode) { return RefExpander::ExpandRef(RefNode, EmptyDoc); });
 	TestEqual(TEXT("Icon fit width grows to its measured content"), IconSize.X, 32.0);
 	TestEqual(TEXT("Icon fit height grows to its measured content"), IconSize.Y, 32.0);
@@ -549,7 +549,7 @@ bool FPenParserRefFitHeightPropagationTest::RunTest(const FString&)
 
 	const TSharedPtr<FDesignNode> Root = Doc.Children[3];
 	const TSharedPtr<FDesignNode> TableRef = Root->Children[0];
-	const FVector2D Precomputed = SizeEstimator::PreComputeFitContentSizes(Root, Doc,
+	const FVector2D Precomputed = SizeEstimator::PromoteFitContentSizes(Root, Doc,
 		[&Doc](const TSharedPtr<FDesignNode>& RefNode) { return RefExpander::ExpandRef(RefNode, Doc); });
 	TestTrue(TEXT("Precompute sees the expanded table height"),
 		FMath::IsNearlyEqual(Precomputed.Y, 268.0f, KINDA_SMALL_NUMBER));

@@ -40,4 +40,12 @@ namespace TextMeasurementRuntimeProbe
 	 * font asset or its TTF bytes cannot be loaded.
 	 */
 	bool TryReadLineGapEm(const FString& FontAssetPath, const FString& TypefaceName, float& OutLineGapEm);
+
+	/**
+	 * Module-lifecycle hooks owned by FDesign2UMGCoreModule: release the rooted probe
+	 * text block and drain the lineGap cache so no probe UObject or stale font metric
+	 * outlives module shutdown / hot-reload.
+	 */
+	void ResetProbeForModuleShutdown();
+	void ClearLineGapEmCache();
 }

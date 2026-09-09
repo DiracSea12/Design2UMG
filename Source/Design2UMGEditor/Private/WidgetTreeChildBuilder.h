@@ -10,6 +10,7 @@ class UWidget;
 class UWidgetTree;
 class UClass;
 class FDesign2UMGComponentMappingBuildState;
+struct FDesign2UMGGenerationSettingsSnapshot;
 
 struct FWidgetTreeChildBuildContext
 {
@@ -19,6 +20,8 @@ struct FWidgetTreeChildBuildContext
 	FDesign2UMGComponentMappingBuildState* ComponentMappingState = nullptr;
 	/** Per-tree class-override resolution cache; owned by the root BuildWidgetTree call. */
 	TMap<FString, UClass*>* ClassOverrideCache = nullptr;
+	/** Generation settings for name-based class overrides; null skips the override block like the caller had none. */
+	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr;
 };
 
 namespace FWidgetTreeChildBuilder

@@ -610,8 +610,8 @@ bool FSizeEstimatorSourceFlagsDoNotLockFitGrowthTest::RunTest(const FString& Par
 	{
 		return RefExpander::ExpandRef(RefNode, EmptyDocument);
 	};
-	const FVector2D SourceFlaggedSize = SizeEstimator::PreComputeFitContentSizes(SourceFlaggedNode, EmptyDocument, ExpandRefFromDoc);
-	const FVector2D UnflaggedSize = SizeEstimator::PreComputeFitContentSizes(UnflaggedNode, EmptyDocument, ExpandRefFromDoc);
+	const FVector2D SourceFlaggedSize = SizeEstimator::PromoteFitContentSizes(SourceFlaggedNode, EmptyDocument, ExpandRefFromDoc);
+	const FVector2D UnflaggedSize = SizeEstimator::PromoteFitContentSizes(UnflaggedNode, EmptyDocument, ExpandRefFromDoc);
 	TestEqual(TEXT("Source-flagged fit width grows to content"), SourceFlaggedSize.X, 32.0);
 	TestEqual(TEXT("Source-flagged fit height grows to content"), SourceFlaggedSize.Y, 32.0);
 	TestTrue(TEXT("Source flags do not change fit-content growth"), SourceFlaggedSize.Equals(UnflaggedSize));
