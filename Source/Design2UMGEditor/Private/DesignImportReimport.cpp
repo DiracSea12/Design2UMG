@@ -96,8 +96,6 @@ namespace DesignImportPipeline
 
 		// 9e)-9g) Property updates / nested-delete leftover diagnostics (step comments live with their functions).
 		ApplyMatchedPlanEntries(Plan, Shared, GenerationSettings, NestedMoveCandidates, NewlyCreatedWidgets);
-		// 9f) Prototype binding refresh (ordinary generated widgets, by stable design identity; double-trigger yields).
-		ApplyPrototypeRefresh(Data, GenerationSettings, Shared);
 		ReportNestedRemovalLeftovers(Shared, NestedMoveCandidates);
 
 		// Mapping diagnostics exit (aligned with the import path's UMGGenerator assembly): the ini validation

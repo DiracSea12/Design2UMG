@@ -37,9 +37,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAContinuousLifecycleBindingsTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FSafeReimportQAContinuousLifecycleBindingsTest::RunTest(const FString&)
 {
-	// Pin the opt-in navigation mode: this QA case verifies the prototype extension itself (default is Disabled).
-	const FScopedPrototypeNavigationGenerationMode ScopedNavMode(EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
-
 	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/QAReimportLifecycleBindings");
 
 	const auto MakeLifeDoc = [](const TCHAR* ButtonLabel, const TCHAR* HeadText)
@@ -101,7 +98,8 @@ bool FSafeReimportQAContinuousLifecycleBindingsTest::RunTest(const FString&)
 		InfoPanel->AddChild(ProjectNote);
 	}
 
-	// v2 reimport: design values updated + project logic kept + double-trigger yields.
+	// v2 reimport: design values updated + project logic kept + the project event binding keeps
+	// exclusive ownership of the trigger (no D2U runtime binding competes for it anymore).
 	const FDesignReimportResult ResultV2 = QAReimport(MakeLifeDoc(TEXT("life-v2"), TEXT("head-v2")), QAMappedClassPath, TargetPackage);
 	TestTrue(TEXT("v2 reimport succeeds"), ResultV2.bSucceeded);
 
@@ -115,9 +113,6 @@ bool FSafeReimportQAContinuousLifecycleBindingsTest::RunTest(const FString&)
 	TestNotNull(TEXT("DevHandler function still resolvable"),
 		WBP->SkeletonGeneratedClass ? WBP->SkeletonGeneratedClass->FindFunctionByName(TEXT("DevHandler")) : nullptr);
 	TestNotNull(TEXT("project-added child preserved"), WBP->WidgetTree->FindWidget(TEXT("ProjectNote")));
-	TestTrue(TEXT("D2U click binding yields to the project binding (dual trigger)"),
-		QAHasMessageWithAll(ResultV2, TEXT("reimport_prototype_conflict"),
-			{ TEXT("trigger 'qa_link'"), TEXT("project behavior kept") }));
 	if (UDesign2UMGMappingQAWidget* MappedV2 = Cast<UDesign2UMGMappingQAWidget>(MappedWeak.Get()))
 	{
 		TestTrue(TEXT("mapped identity preserved across v2"), MappedV2 == MappedBefore);

@@ -3,9 +3,6 @@
 #include "DesignImportReimportInternal.h"
 
 #include "DesignImportDiagnosticReport.h"
-#include "UMGSchemaSourceExtensions.h"
-#include "UMGWidgetUtils.h"
-#include "UMGWidgetTypes.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Blueprint/WidgetTree.h"
@@ -17,61 +14,6 @@
 
 namespace DesignImportPipeline
 {
-	namespace
-	{
-		/** Project binding signature: interaction trigger type -> UWidget delegate property name (same runtime delegates the generation chain binds). */
-		FName GetInteractionDelegateProperty(const FUMGPrototypeNavigationBinding& Binding)
-		{
-			if (Binding.UsesDragTrigger())
-			{
-				return TEXT("OnButtonDragDetected");
-			}
-			if (Binding.UsesHoverTrigger())
-			{
-				return TEXT("OnHovered");
-			}
-			if (Binding.UsesPressTrigger())
-			{
-				return TEXT("OnPressed");
-			}
-			if (Binding.UsesKeyboardTrigger())
-			{
-				// Keyboard interactions are taken over by the D2U extension at the UserWidget level; any existing keyboard event binding on the project side counts as occupied.
-				return Binding.UsesKeyUpTrigger() ? TEXT("OnKeyUp") : TEXT("OnKeyDown");
-			}
-			return TEXT("OnClicked");
-		}
-	}
-
-	/** Whether the interaction is already project-bound (the WBP Bindings carry a function). Keyboard triggers match any object's keyboard event binding. */
-	bool HasProjectBindingForInteraction(
-		const UWidgetBlueprint* WBP,
-		const FUMGPrototypeNavigationBinding& Binding)
-	{
-		const FName PropertyName = GetInteractionDelegateProperty(Binding);
-		// The trigger control is registered in Bindings by widget FName (the generation chain slug-cleans node ids and
-		// handles digit prefixes); the raw node id (real Figma ids contain ':' etc.) cannot be compared directly;
-		// derive the base name with the same cleaning rules and match on it, consistent with the nested same-name semantics.
-		const FString TriggerBaseName = FUMGWidgetUtils::SanitizeWidgetName(
-			Binding.TriggerWidgetName, UMGWidgetTypes::Button).ToString();
-		for (const FDelegateEditorBinding& EditorBinding : WBP->Bindings)
-		{
-			if (Binding.UsesKeyboardTrigger())
-			{
-				if (EditorBinding.PropertyName == PropertyName)
-				{
-					return true;
-				}
-			}
-			else if (FUMGWidgetUtils::MatchesWidgetBaseName(EditorBinding.ObjectName, TriggerBaseName)
-				&& EditorBinding.PropertyName == PropertyName)
-			{
-				return true;
-			}
-		}
-		return false;
-	}
-
 	namespace
 	{
 		void CollectSubtreeWidgets(UWidget* SubtreeRoot, TFunctionRef<void(UWidget*)> Visitor)

@@ -4,11 +4,11 @@
 #include "Design2UMGGenerationSettingsSnapshot.h"
 #include "Design2UMGComponentMappingGeneration.h"
 #include "WidgetTreeChildBuilder.h"
-#include "WidgetMetadataCollector.h"
 #include "WidgetResourceBinder.h"
 #include "Design2UMGLog.h"
 #include "UMGLayoutProjection.h"
 #include "UMGPropertyApplierInternal.h"
+#include "UMGSchemaSourceExtensions.h"
 #include "WidgetLayoutAdapter.h"
 #include "UMGPropertyKeys.h"
 #include "UMGWidgetNodeAccess.h"
@@ -136,7 +136,7 @@ namespace
 
 }
 
-UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords, const FIntPoint* ExplicitDesignSize, FDesign2UMGComponentMappingBuildState* ComponentMappingState, TMap<FString, UClass*>* ClassOverrideCache, const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
+UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, const FIntPoint* ExplicitDesignSize, FDesign2UMGComponentMappingBuildState* ComponentMappingState, TMap<FString, UClass*>* ClassOverrideCache, const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
 {
 	// Class-override lookups are cached per tree: each root call owns the cache; recursive
 	// BuildWidgetTree/CreateWidgetRecursive entries reuse the same map so rule loading
@@ -251,7 +251,6 @@ UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWid
 
 	const FWidgetTreeChildBuildContext Context{
 		TextureMap,
-		FigmaMetadataRecords,
 		ExplicitDesignSize,
 		ComponentMappingState,
 		ClassOverrideCache,
@@ -262,11 +261,11 @@ UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWid
 	return NewWidget;
 }
 
-UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget, const TMap<FString, UTexture2D*>* TextureMap, TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords, const FIntPoint* ExplicitDesignSize, FDesign2UMGComponentMappingBuildState* ComponentMappingState, TMap<FString, UClass*>* ClassOverrideCache, const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
+UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget, const TMap<FString, UTexture2D*>* TextureMap, const FIntPoint* ExplicitDesignSize, FDesign2UMGComponentMappingBuildState* ComponentMappingState, TMap<FString, UClass*>* ClassOverrideCache, const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
 {
 	const FIntPoint EffectiveDesignSize = ResolveEffectiveDesignSize(Node, ExplicitDesignSize);
 
-	UWidget* NewWidget = BuildWidgetTree(WidgetTree, Node, TextureMap, FigmaMetadataRecords, &EffectiveDesignSize, ComponentMappingState, ClassOverrideCache, GenerationSettings);
+	UWidget* NewWidget = BuildWidgetTree(WidgetTree, Node, TextureMap, &EffectiveDesignSize, ComponentMappingState, ClassOverrideCache, GenerationSettings);
 	if (!NewWidget)
 	{
 		return nullptr;
@@ -292,7 +291,6 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 	}
 
 	ApplyWidgetProperties(NewWidget, Node);
-	FWidgetMetadataCollector::TryAppend(NewWidget, Node, FigmaMetadataRecords);
 
 	// mapped instances: explicit design-facing inputs are written after generic properties (declared values win over design defaults).
 	if (ComponentMappingState

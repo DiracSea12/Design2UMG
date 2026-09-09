@@ -182,7 +182,6 @@ namespace
 			ChildNode,
 			ParentWidget,
 			Context.TextureMap,
-			Context.FigmaMetadataRecords,
 			Context.ExplicitDesignSize,
 			Context.ComponentMappingState,
 			Context.ClassOverrideCache,

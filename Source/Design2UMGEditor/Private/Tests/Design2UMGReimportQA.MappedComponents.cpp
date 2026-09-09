@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
-// Safe Reimport QA: mapped component boundaries (class change, inert interactions, switcher host duplicates, mapping diagnostics, own-attribute divergence).
+// Safe Reimport QA: mapped component boundaries (class change, switcher host duplicates, mapping diagnostics, own-attribute divergence).
 
 #include "Misc/AutomationTest.h"
 
@@ -87,62 +87,6 @@ bool FSafeReimportQAMappedClassChangeTest::RunTest(const FString&)
 			TestEqual(TEXT("manifest keeps the old mapped class"), Record->MappedClass, FString(QAMappedClassPath));
 		}
 	}
-
-	QAWipeOutput(OutputDir);
-	return true;
-}
-
-// ---------------------------------------------------------------------------
-// Case 30 (integration, S4 dedicated mapped-interaction diagnostic): a design interaction attached to a mapped
-// component also emits a dedicated "inert" entry at reimport (mapping_prototype_inert, naming the trigger
-// and type), not just the generic mapped-refresh entry.
-// ---------------------------------------------------------------------------
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAMappedInteractionInertTest,
-	"Design2UMG.SafeReimportQA.MappedInteractionInertDiagnostic",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FSafeReimportQAMappedInteractionInertTest::RunTest(const FString&)
-{
-	// Pin the opt-in navigation mode: this QA case verifies the prototype extension itself (default is Disabled).
-	const FScopedPrototypeNavigationGenerationMode ScopedNavMode(EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
-
-	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/QAReimportMappedInert");
-
-	// A mapped button + an ON_CLICK design interaction (attached to the mapped instance body).
-	const auto BuildDoc = [](const TCHAR* Label)
-	{
-		return FString::Printf(
-			TEXT("{\"fileKey\":\"%s\",\"document\":{\"id\":\"0:0\",\"name\":\"QADoc\",\"type\":\"DOCUMENT\",\"children\":["
-				 "{\"id\":\"0:1\",\"name\":\"Page\",\"type\":\"CANVAS\",\"children\":["
-				 "{\"id\":\"qa_root\",\"name\":\"QAPage\",\"type\":\"FRAME\","
-				 "\"absoluteBoundingBox\":{\"x\":0,\"y\":0,\"width\":360,\"height\":240},\"children\":["
-				 "{\"id\":\"qa_mib\",\"name\":\"HeroButton\",\"type\":\"INSTANCE\","
-				 "\"componentId\":\"77:88\",\"componentSetId\":\"99:00\",\"mainComponentKey\":\"%s\","
-				 "\"componentProperties\":{\"label\":{\"type\":\"TEXT\",\"value\":\"%s\"}},"
-				 "\"absoluteBoundingBox\":{\"x\":24,\"y\":24,\"width\":120,\"height\":44},"
-				 "\"fills\":[{\"type\":\"SOLID\",\"visible\":true,\"color\":{\"r\":0.2,\"g\":0.5,\"b\":0.8,\"a\":1}}],"
-				 "\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"URL\",\"url\":\"https://qa.example/inert\"}]}],"
-				 "\"children\":[{\"id\":\"qa_mib_label\",\"name\":\"InnerLabel\",\"type\":\"TEXT\","
-				 "\"absoluteBoundingBox\":{\"x\":32,\"y\":36,\"width\":80,\"height\":18},\"characters\":\"%s\",%s}]}"
-				 "]}]}]}}"),
-			QAReimportScope, QAReimportComponentKey, Label, Label, *QATextStyle());
-	};
-
-	UWidgetBlueprint* WBP = QAImport(BuildDoc(TEXT("Checkout")), QAMappedClassPath, OutputDir);
-	if (!TestTrue(TEXT("v1 import generates"), WBP != nullptr)
-		|| !TestNotNull(TEXT("mapped instance generated"), QAFindMappedInstance(WBP)))
-	{
-		QAWipeOutput(OutputDir);
-		return false;
-	}
-	const FString TargetPackage = WBP->GetOutermost()->GetName();
-
-	const FDesignReimportResult Result = QAReimport(BuildDoc(TEXT("Pay Now")), QAMappedClassPath, TargetPackage);
-	TestTrue(TEXT("reimport succeeds"), Result.bSucceeded);
-
-	TestTrue(TEXT("dedicated inert diagnostic present and names trigger + type"),
-		QAHasMappingMessageWithAll(Result, TEXT("mapping_prototype_inert"),
-			{ TEXT("qa_mib"), TEXT("ON_CLICK"), TEXT("mapped WBP interactions are project-owned") }));
 
 	QAWipeOutput(OutputDir);
 	return true;

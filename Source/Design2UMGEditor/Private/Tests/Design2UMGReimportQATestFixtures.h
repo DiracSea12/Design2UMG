@@ -10,7 +10,6 @@
 #include "Design2UMGComponentMappingGeneration.h"
 #include "Design2UMGConverter.h"
 #include "Design2UMGGenerationManifest.h"
-#include "Design2UMGSettings.h"
 #include "DesignImportPipeline.h"
 #include "FigmaParser.h"
 #include "UMGGenerator.h"
@@ -33,38 +32,6 @@
 namespace Design2UMGReimportQA
 {
 	using Design2UMGEditorTests::DeleteGeneratedAssetsAtPath;
-
-	// Prototype-navigation QA cases pin the opt-in RuntimeExtension mode because the
-	// product default is Disabled (editor-preview-only; packaging strips those classes).
-	struct FScopedPrototypeNavigationGenerationMode
-	{
-		explicit FScopedPrototypeNavigationGenerationMode(
-			EDesign2UMGPrototypeNavigationGenerationMode InMode)
-		{
-			Settings = UDesign2UMGSettings::Get();
-			if (Settings)
-			{
-				SavedMode = Settings->PrototypeNavigationGenerationMode;
-				Settings->PrototypeNavigationGenerationMode = InMode;
-			}
-		}
-
-		~FScopedPrototypeNavigationGenerationMode()
-		{
-			if (Settings)
-			{
-				Settings->PrototypeNavigationGenerationMode = SavedMode;
-				// Imports during QA runs can persist settings (icon-font mapping saves call
-				// SaveConfig), snapshotting the pinned mode into the per-project ini. Write
-				// the restored value back so the pin cannot leak into later runs.
-				Settings->SaveConfig();
-			}
-		}
-
-		TObjectPtr<UDesign2UMGSettings> Settings;
-		EDesign2UMGPrototypeNavigationGenerationMode SavedMode =
-			EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension;
-	};
 
 	// Fixture identities private to this QA file: scopes / component keys / mapped stand-in classes are not shared with the in-delivery dev tests.
 	inline const TCHAR* QAReimportScope = TEXT("qa-reimport-doc-9f31");
@@ -146,12 +113,6 @@ namespace Design2UMGReimportQA
 	{
 		FDesign2UMGImportSettingsSnapshot Snapshot;
 		Snapshot.ConversionSettings = FDesign2UMGConversionSettings::Defaults();
-		// Mirror the product flow: generation follows the live project setting for
-		// prototype navigation (QA cases pin it via FScopedPrototypeNavigationGenerationMode).
-		if (const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get())
-		{
-			Snapshot.GenerationSettings.PrototypeNavigationGenerationMode = Settings->PrototypeNavigationGenerationMode;
-		}
 		if (MappedClassPath)
 		{
 			DesignComponentMapping::FComponentMappingEntry& Entry =
@@ -233,28 +194,6 @@ namespace Design2UMGReimportQA
 	inline bool QAHasMessageWithAll(const FDesignReimportResult& Result, const TCHAR* Kind, std::initializer_list<const TCHAR*> Substrings)
 	{
 		for (const FDesign2UMGMappingDiagnostic& Diagnostic : Result.Diagnostics)
-		{
-			if (Diagnostic.Kind != Kind)
-			{
-				continue;
-			}
-			bool bAll = true;
-			for (const TCHAR* Substring : Substrings)
-			{
-				bAll = bAll && Diagnostic.Message.Contains(Substring);
-			}
-			if (bAll)
-			{
-				return true;
-			}
-		}
-		return false;
-	}
-
-	/** mapping_-prefixed diagnostics belong solely to the componentMapping section: classification assertions check ComponentMappingDiagnostics. */
-	inline bool QAHasMappingMessageWithAll(const FDesignReimportResult& Result, const TCHAR* Kind, std::initializer_list<const TCHAR*> Substrings)
-	{
-		for (const FDesign2UMGMappingDiagnostic& Diagnostic : Result.ComponentMappingDiagnostics)
 		{
 			if (Diagnostic.Kind != Kind)
 			{

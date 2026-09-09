@@ -8,7 +8,6 @@
 FDesign2UMGGenerationSettingsSnapshot FDesign2UMGGenerationSettingsSnapshot::FromSettings(const UDesign2UMGSettings& Settings)
 {
 	FDesign2UMGGenerationSettingsSnapshot Snapshot;
-	Snapshot.PrototypeNavigationGenerationMode = Settings.PrototypeNavigationGenerationMode;
 	Snapshot.ClassOverrides = Settings.ClassOverrides;
 	// Read the project-level Component Mapping ini once per import request when building the snapshot; it flows into the generation chain with the snapshot.
 	Snapshot.ComponentMapping = Design2UMGComponentMappingConfig::Load();

@@ -26,14 +26,6 @@ struct FWidgetClassOverride
 	TSoftClassPtr<UWidget> WidgetClass;
 };
 
-UENUM()
-enum class EDesign2UMGPrototypeNavigationGenerationMode : uint8
-{
-	RuntimeExtension,
-	TagHelper,
-	Disabled
-};
-
 /**
  * Design2UMG plugin settings.
  * Stored in Editor Preferences as user-scoped settings rather than source-controlled config.
@@ -165,14 +157,6 @@ public:
 	/** Maximum overlay opacity allowed by the FIT + LUMINOSITY runtime approximation. */
 	UPROPERTY(Config, EditAnywhere, Category = "Image Blend Approximation", meta = (DisplayName = "FIT Luminosity Opacity Cap", ClampMin = "0.0", ClampMax = "1.0", ToolTip = "Upper bound used when approximating FIT + LUMINOSITY image overlays without a baked texture."))
 	float LuminosityFitOpacityCap = 0.15f;
-
-	// ========== Prototype Navigation ==========
-
-	// Default is Disabled: RuntimeExtension bakes editor-module classes into generated
-	// widgets, which cook strips from packaged builds. Enable it only for editor preview.
-	UPROPERTY(Config, EditAnywhere, Category = "Prototype Navigation", meta = (DisplayName = "Generation Mode", ToolTip = "Disabled emits no prototype navigation binding. TagHelper writes stable helper metadata for an optional setup call. RuntimeExtension bakes editor-module navigation classes into the widget blueprint for editor preview only; packaged games cannot load them, so packaged widgets lose prototype navigation."))
-	EDesign2UMGPrototypeNavigationGenerationMode PrototypeNavigationGenerationMode =
-		EDesign2UMGPrototypeNavigationGenerationMode::Disabled;
 
 	// ========== Widget Class Overrides ==========
 

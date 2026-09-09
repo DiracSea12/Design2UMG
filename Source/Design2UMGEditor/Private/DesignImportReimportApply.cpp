@@ -2,9 +2,7 @@
 
 #include "DesignImportReimportInternal.h"
 
-#include "Design2UMGPrototypeNavigationTagHelper.h"
 #include "Design2UMGSettings.h"
-#include "UMGPrototypeAnimationBuilder.h"
 #include "UMGSchemaSourceExtensions.h"
 #include "UMGValueParsing.h"
 #include "UMGWidgetUtils.h"
@@ -544,7 +542,7 @@ namespace DesignImportPipeline
 			FUMGWidgetNode PrunedChild = Child;
 			PruneManifestInstanceChildren(PrunedChild, *Shared.InstancesById);
 			UWidget* CreatedWidget = FUMGWidgetUtils::CreateWidgetRecursive(
-				Shared.WidgetTree, PrunedChild, Panel, nullptr, nullptr, &Shared.DesignSize, Shared.MappingBuildState);
+				Shared.WidgetTree, PrunedChild, Panel, nullptr, &Shared.DesignSize, Shared.MappingBuildState);
 			if (CreatedWidget)
 			{
 				NewlyCreatedWidgets.Add(GetDesignNodeId(Child), CreatedWidget);
@@ -633,63 +631,5 @@ namespace DesignImportPipeline
 			FString::Printf(
 				TEXT("D2U-owned node '%s' (%s) refreshed from design (layout/slot/visual/text)"),
 				*Node.Name, *GetDesignNodeId(Node)));
-	}
-
-	void ApplyPrototypeRefresh(
-		FUMGWidgetData& Data,
-		const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings,
-		const FReimportApplySharedState& Shared)
-	{
-		if (GenerationSettings.PrototypeNavigationGenerationMode == EDesign2UMGPrototypeNavigationGenerationMode::Disabled
-			|| !Data.HasPrototypeNavigationData())
-		{
-			return;
-		}
-
-		FUMGPrototypeNavigationData FilteredNavigationData = Data.PrototypeNavigation();
-
-		// Double-trigger conflict detection (update-plan stage): the same interaction already has a project binding -> the D2U binding yields; the project behavior stays.
-		TArray<FUMGPrototypeNavigationBinding> KeptBindings;
-		for (const FUMGPrototypeNavigationBinding& Binding : FilteredNavigationData.ClickBindings)
-		{
-			if (HasProjectBindingForInteraction(Shared.WBP, Binding))
-			{
-				AddReimportDiagnostic(
-					*Shared.Diagnostics, ReimportDiagnosticKinds::PrototypeConflict,
-					FString::Printf(
-						TEXT("Interaction (trigger '%s', type '%s') already bound by the project; project behavior kept, D2U prototype binding yields"),
-						*Binding.TriggerWidgetName,
-						*Binding.TriggerType));
-				continue;
-			}
-			KeptBindings.Add(Binding);
-		}
-		FilteredNavigationData.ClickBindings = MoveTemp(KeptBindings);
-
-		// Design interactions on a mapped identity are inert (the same boundary rule as at import); the specific entries also
-		// reach the reimport report (reimport does not read BuildState's generation-time diagnostics; they must be carried out explicitly).
-		// mapping_-prefixed diagnostics belong solely to the componentMapping section (the QA classification contract):
-		// here they go into BuildState only, the out-param is nullptr, and the main flow later collects BuildState
-		// diagnostics into Result.ComponentMappingDiagnostics - never into the reimport section.
-		Design2UMGComponentMappingGeneration::ReportInertPrototypeBindings(
-			FilteredNavigationData, *Shared.MappingBuildState, nullptr);
-
-		switch (GenerationSettings.PrototypeNavigationGenerationMode)
-		{
-		case EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension:
-			// Refresh binding data only; do not rebuild transition-animation assets (avoid copying one animation per reimport).
-			UMGPrototypeAnimationBuilder::ConfigureNavigationExtension(Shared.WBP, FilteredNavigationData);
-			break;
-		case EDesign2UMGPrototypeNavigationGenerationMode::TagHelper:
-			Design2UMGPrototypeNavigationTagHelper::ConfigureMetadata(Shared.WBP, FilteredNavigationData);
-			break;
-		default:
-			break;
-		}
-		AddReimportDiagnostic(
-			*Shared.Diagnostics, ReimportDiagnosticKinds::PrototypeRefreshed,
-			FString::Printf(
-				TEXT("D2U prototype bindings refreshed by stable design identity (%d binding(s) active)"),
-				FilteredNavigationData.ClickBindings.Num()));
 	}
 }

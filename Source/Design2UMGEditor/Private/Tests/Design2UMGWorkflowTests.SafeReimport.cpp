@@ -5,7 +5,6 @@
 #include "Design2UMGComponentMappingConfig.h"
 #include "Design2UMGConverter.h"
 #include "Design2UMGGenerationManifest.h"
-#include "Design2UMGPrototypeNavigationExtensions.h"
 #include "Design2UMGSidecarTestUtils.h"
 #include "DesignImportPipeline.h"
 #include "FigmaParser.h"
@@ -14,7 +13,6 @@
 #include "Tests/Design2UMGTestAssetCleanup.h"
 
 #include "Blueprint/UserWidget.h"
-#include "Blueprint/WidgetBlueprintGeneratedClass.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/PanelWidget.h"
@@ -146,12 +144,6 @@ namespace
 	{
 		FDesign2UMGImportSettingsSnapshot Snapshot;
 		Snapshot.ConversionSettings = FDesign2UMGConversionSettings::Defaults();
-		// Mirror the product flow: generation follows the live project setting for
-		// prototype navigation (QA cases pin it via FScopedPrototypeNavigationGenerationMode).
-		if (const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get())
-		{
-			Snapshot.GenerationSettings.PrototypeNavigationGenerationMode = Settings->PrototypeNavigationGenerationMode;
-		}
 		if (MappedClassPath)
 		{
 			DesignComponentMapping::FComponentMappingEntry& Entry =
@@ -623,8 +615,8 @@ bool FSafeReimportKindChangedTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// Conflicts (tasks 4.4/4.5): a Mapped Class change never replaces; when the same interaction already has a
-// project binding, the D2U Prototype binding yields. (The remove-with-project-content conflict is in SafeReimportRemoveConflict.)
+// Conflicts (tasks 4.4/4.5): a Mapped Class change never replaces.
+// (The remove-with-project-content conflict is in SafeReimportRemoveConflict.)
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportConflictTest,
@@ -632,9 +624,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportConflictTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FSafeReimportConflictTest::RunTest(const FString&)
 {
-	// Pin the opt-in navigation mode: this QA case verifies the prototype extension itself (default is Disabled).
-	const Design2UMGTestUtils::FScopedPrototypeNavigationGenerationMode ScopedNavMode(EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
-
 	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/SafeReimportConflict");
 
 	const FString V1 = MakeReimportDoc(FString::Printf(
@@ -693,24 +682,8 @@ bool FSafeReimportConflictTest::RunTest(const FString&)
 	}
 	TestTrue(TEXT("Mapped class conflict diagnosed"), CountReimportDiagnostics(Result, TEXT("reimport_mapped_class_conflict")) == 1);
 
-	// Conflict 2: double trigger -> the project binding stays; the D2U binding yields (only the non-conflicting second one remains).
-	TestTrue(TEXT("Dual-trigger conflict diagnosed"), CountReimportDiagnostics(Result, TEXT("reimport_prototype_conflict")) == 1);
+	// Conflict 2: the project binding on the trigger survives the reimport untouched.
 	TestTrue(TEXT("Project binding kept in WBP"), WBP->Bindings.Contains(ProjectBinding));
-	if (UWidgetBlueprintGeneratedClass* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(WBP->GeneratedClass))
-	{
-		const UDesign2UMGPrototypeNavigationClassExtension* RuntimeExtension =
-			GeneratedClass->GetExtension<UDesign2UMGPrototypeNavigationClassExtension>();
-		if (TestNotNull(TEXT("Prototype class extension present after reimport"), RuntimeExtension))
-		{
-			const FUMGPrototypeNavigationData& NavData = RuntimeExtension->GetNavigationDataForTest();
-			TestEqual(TEXT("D2U binding yields to project binding"), NavData.ClickBindings.Num(), 1);
-			if (NavData.ClickBindings.Num() == 1)
-			{
-				TestEqual(TEXT("Remaining binding is the unconflicted one"),
-					NavData.ClickBindings[0].TriggerWidgetName, FString(TEXT("re_link_btn2")));
-			}
-		}
-	}
 
 	DeleteGeneratedAssetsAtPath(OutputPath);
 	DeleteOutputDirectory(OutputPath);

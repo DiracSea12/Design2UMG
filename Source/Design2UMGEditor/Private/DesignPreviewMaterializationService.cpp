@@ -133,7 +133,6 @@ UUserWidget* FDesignPreviewMaterializationService::CreatePreviewWidget(
 		FixedRoot,
 		nullptr,
 		&TransientTextureMap,
-		nullptr,
 		&DesignSize,
 		nullptr,
 		nullptr,

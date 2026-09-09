@@ -65,22 +65,15 @@ This document tracks current limitations that are known and accepted for now.
 
 ## Interaction and Animation
 
-- `Prototype Basic` is a shipped supported capability: page-switching prototype flows, typed trigger/action bindings, lightweight `OVERLAY/BACK/OPEN_LINK`, and basic fade / slide transition approximation are in scope.
-- The limitations below describe the intentionally unsupported or approximate parts of prototype export; they do not mean prototype support is purely experimental.
-- Top-level Figma prototype page navigation now covers `ON_CLICK/ON_HOVER/ON_PRESS/ON_DRAG/ON_KEY_DOWN/ON_KEY_UP + NAVIGATE/SWAP/OVERLAY/BACK/OPEN_LINK`, and conditional flows run through a typed step program with session-local variable storage.
-- `OVERLAY` now uses a dedicated overlay host layered over the base switcher, but it still does not provide a full floating-layer system with anchor, outside-click dismiss, or generalized overlay layout semantics.
-- `BACK` currently replays the generated runtime history stack plus overlay stack, not a generalized graph state machine.
-- `OPEN_LINK` currently launches the external URL at runtime and does not participate in page switching.
-- Prototype variables currently exist only inside the generated runtime contract for trigger/conditional execution; they are not yet a broader cross-format variable/state system.
-- Generated prototype transition animations currently fall back to the core-ticker transition path outside real game worlds (for example editor-only preview/automation contexts).
-- Prototype navigation's `RuntimeExtension` mode is opt-in (default `Disabled`) and its extension classes live in the plugin's editor-only module; assets generated with that mode enabled are editor-preview assets not intended for cooked/packaged builds.
-- Prototype transitions now generate minimal two-stage `UWidgetAnimation` assets for fade / slide switcher transitions, but they still do not provide full Smart Animate layer matching or generalized animation authoring.
+- Prototype export still produces typed navigation IR: synthesized switcher roots for multi-page flows, button-wrapped trigger nodes, typed trigger/action bindings, and conditional step programs (`ON_CLICK/ON_HOVER/ON_PRESS/ON_DRAG/ON_KEY_DOWN/ON_KEY_UP + NAVIGATE/SWAP/OVERLAY/BACK/OPEN_LINK`).
+- Generated widget blueprints bake no runtime navigation: the former opt-in `RuntimeExtension` / `TagHelper` generation modes are gone, generated assets structurally contain only standard UMG classes, and no transition `UWidgetAnimation` assets are generated.
+- Wiring click navigation, overlay show/hide, history/back, open-link, and transition playback in an actual game world is intentionally left to the project side.
 
 ## Explicit Non-Goals For This Round
 
 - Full `TEXT_PATH` reproduction is still out of scope because the current runtime tree has no text-on-path shaping / geometry rendering path.
 - Full semantic blur / inner-shadow parity is still out of scope because the current effect pipeline is built on `RetainerBox + EffectMaterial` / `UBackgroundBlur`, not custom multi-pass Slate rendering.
-- Full prototype overlay layer semantics / generalized interaction graph generation is still out of scope because the current runtime contract is centered on `WidgetSwitcher` page transitions plus a lightweight overlay host, not a generic state machine / event graph compiler.
+- Full prototype overlay layer semantics / generalized interaction graph generation is still out of scope because the current export stops at typed navigation IR over `WidgetSwitcher` page structure plus a lightweight overlay host, not a generic state machine / event graph compiler.
 
 ## Verification Boundary
 

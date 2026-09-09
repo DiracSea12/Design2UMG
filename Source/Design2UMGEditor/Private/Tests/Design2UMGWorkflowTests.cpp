@@ -2,7 +2,6 @@
 #include "Misc/AutomationTest.h"
 #include "Design2UMGConverter.h"
 #include "DesignSchema.h"
-#include "Design2UMGFigmaMetadataExtensions.h"
 #include "Design2UMGTestUtils.h"
 #include "DesignImportPipeline.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
@@ -11,6 +10,7 @@
 #include "FigmaTestDocBuilder.h"
 #include "PenParser.h"
 #include "UMGGenerator.h"
+#include "UMGSchemaSourceExtensions.h"
 #include "PreBuildResourceNormalizer.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetBlueprintGeneratedClass.h"
@@ -20,9 +20,11 @@
 #include "Components/GridSlot.h"
 #include "Components/ScrollBox.h"
 #include "Components/TextBlock.h"
+#include "Extensions/WidgetBlueprintGeneratedClassExtension.h"
 #include "Misc/Paths.h"
 #include "RHI.h"
 #include "Engine/Texture2D.h"
+#include "WidgetBlueprintExtension.h"
 #if WITH_AUTOMATION_WORKER
 using namespace Design2UMGCoreTests;
 using namespace Design2UMGTestUtils;
@@ -30,6 +32,22 @@ using Design2UMGEditorTests::DeleteGeneratedAssetsAtPath;
 
 namespace
 {
+	/** Structural purity contract: no plugin-custom (Design2UMG*) extension may be baked into a generated asset. */
+	template <typename TContainer>
+	int32 CountDesign2UMGPrefixedExtensions(const TContainer& Extensions)
+	{
+		int32 Count = 0;
+		for (const auto& Extension : Extensions)
+		{
+			const UObject* ExtensionObject = Extension;
+			if (ExtensionObject && ExtensionObject->GetClass()->GetName().StartsWith(TEXT("Design2UMG")))
+			{
+				++Count;
+			}
+		}
+		return Count;
+	}
+
 	FMargin ReadTextWidgetMargin(const UTextBlock* TextBlock)
 	{
 		if (!TextBlock)
@@ -186,36 +204,13 @@ bool FFigmaInstanceMetadataWorkflowTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	const UDesign2UMGFigmaMetadataClassExtension* MetadataExtension =
-		GeneratedClass->GetExtension<UDesign2UMGFigmaMetadataClassExtension>();
-	TestNotNull(TEXT("Generated class carries Figma metadata extension"), MetadataExtension);
-	if (!MetadataExtension)
-	{
-		DeleteGeneratedAssetsAtPath(OutputPath);
-		return false;
-	}
-
-	TestTrue(TEXT("Generated class keeps components catalog"),
-		MetadataExtension->GetDocumentData().ComponentsJson.Contains(TEXT("nav_item_component")));
-	TestTrue(TEXT("Generated class keeps componentSets catalog"),
-		MetadataExtension->GetDocumentData().ComponentSetsJson.Contains(TEXT("variantGroupProperties")));
-
-	const FDesign2UMGFigmaWidgetMetadataRecord* InstanceRecord =
-		MetadataExtension->FindRecordBySourceNodeId(TEXT("inst1"));
-	TestNotNull(TEXT("Instance widget metadata record exported"), InstanceRecord);
-	if (!InstanceRecord)
-	{
-		DeleteGeneratedAssetsAtPath(OutputPath);
-		return false;
-	}
-
-	TestEqual(TEXT("Instance record widget id preserved"), InstanceRecord->WidgetId, TEXT("inst1"));
-	TestEqual(TEXT("Instance record source node type preserved"), InstanceRecord->SourceNode.SourceNodeType, TEXT("INSTANCE"));
-	TestEqual(TEXT("Instance record componentId preserved"), InstanceRecord->SourceNode.ComponentId, TEXT("12:34"));
-	TestEqual(TEXT("Instance record componentSetId preserved"), InstanceRecord->SourceNode.ComponentSetId, TEXT("56:78"));
-	TestTrue(TEXT("Instance record variant properties preserved"), !InstanceRecord->SourceNode.VariantPropertiesJson.IsEmpty());
-	TestTrue(TEXT("Template widget exists for exported record"),
-		GeneratedClass->GetWidgetTreeArchetype() && GeneratedClass->GetWidgetTreeArchetype()->FindWidget(InstanceRecord->WidgetName) != nullptr);
+	// The component catalog lives in the IR SourceDocument (conversion-level contract); the generated asset
+	// itself must stay structurally pure: no plugin-custom (Design2UMG*) extension is baked in, and the former
+	// Figma widget-metadata records are no longer collected.
+	TestEqual(TEXT("Generated class carries no plugin-custom extensions"),
+		CountDesign2UMGPrefixedExtensions(GeneratedClass->GetExtensions(UWidgetBlueprintGeneratedClassExtension::StaticClass())), 0);
+	TestEqual(TEXT("Widget blueprint carries no plugin-custom extensions"),
+		CountDesign2UMGPrefixedExtensions(UWidgetBlueprintExtension::GetExtensions(Blueprint)), 0);
 
 	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
 	TestTrue(TEXT("Editor world exists"), World != nullptr);
@@ -227,8 +222,8 @@ bool FFigmaInstanceMetadataWorkflowTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	TestTrue(TEXT("Runtime widget tree can resolve exported widget name"),
-		WidgetInstance->WidgetTree->FindWidget(InstanceRecord->WidgetName) != nullptr);
+	TestTrue(TEXT("Runtime widget tree still resolves the instance widget name"),
+		WidgetInstance->WidgetTree->FindWidget(TEXT("InstanceParity")) != nullptr);
 	DeleteGeneratedAssetsAtPath(OutputPath);
 	return true;
 }

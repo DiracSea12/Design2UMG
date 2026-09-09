@@ -7,6 +7,7 @@
 #include "PreBuildResourceNormalizer.h"
 #include "UMGWidgetUtils.h"
 #include "Blueprint/WidgetTree.h"
+#include "WidgetBlueprint.h"
 
 namespace UMGGeneratorRootHandoff
 {
@@ -44,7 +45,6 @@ namespace UMGGeneratorRootHandoff
 	UWidget* CreateRootWidget(
 		UWidgetBlueprint* WidgetBlueprint,
 		const FPreparedRoot& PreparedRoot,
-		TArray<FDesign2UMGFigmaWidgetMetadataRecord>& OutFigmaMetadataRecords,
 		FDesign2UMGComponentMappingBuildState* ComponentMappingState,
 		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
 	{
@@ -65,7 +65,6 @@ namespace UMGGeneratorRootHandoff
 			PreparedRoot.Root,
 			nullptr,
 			nullptr,
-			&OutFigmaMetadataRecords,
 			&PreparedRoot.DesignSize,
 			ComponentMappingState,
 			nullptr,

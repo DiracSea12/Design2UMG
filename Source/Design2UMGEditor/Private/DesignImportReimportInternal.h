@@ -9,7 +9,6 @@
 #include "UMGGenerator.h"
 
 struct FDesignDocument;
-struct FUMGPrototypeNavigationBinding;
 
 class UPanelWidget;
 class UWidget;
@@ -68,9 +67,7 @@ namespace DesignImportPipeline
 		inline constexpr const TCHAR* MoveConflict = TEXT("reimport_move_conflict");
 		inline constexpr const TCHAR* Moved = TEXT("reimport_moved");
 		inline constexpr const TCHAR* NodeMissing = TEXT("reimport_node_missing");
-		inline constexpr const TCHAR* PrototypeConflict = TEXT("reimport_prototype_conflict");
 		inline constexpr const TCHAR* PrototypeHostContinued = TEXT("reimport_prototype_host_continued");
-		inline constexpr const TCHAR* PrototypeRefreshed = TEXT("reimport_prototype_refreshed");
 		inline constexpr const TCHAR* RemoveConflict = TEXT("reimport_remove_conflict");
 		inline constexpr const TCHAR* Removed = TEXT("reimport_removed");
 		inline constexpr const TCHAR* ResolutionCopy = TEXT("reimport_resolution_copy");
@@ -123,9 +120,6 @@ namespace DesignImportPipeline
 		const TMap<FString, const FDesign2UMGGenerationManifestSidecar::FInstanceRecord*>& InstancesById);
 
 	// DesignImportReimportConflict.cpp
-	bool HasProjectBindingForInteraction(
-		const UWidgetBlueprint* WBP,
-		const FUMGPrototypeNavigationBinding& Binding);
 	bool IsSubtreePurelyD2UOwned(
 		const UWidgetBlueprint* WBP,
 		UWidget* SubtreeRoot,
@@ -161,10 +155,6 @@ namespace DesignImportPipeline
 		const FReimportApplySharedState& Shared,
 		TArray<UWidget*>& NestedMoveCandidates,
 		TMap<FString, UWidget*>& NewlyCreatedWidgets);
-	void ApplyPrototypeRefresh(
-		FUMGWidgetData& Data,
-		const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings,
-		const FReimportApplySharedState& Shared);
 
 	// DesignImportReimportStages.cpp
 	FDesign2UMGMappedInstanceRecord ManifestRecordToMappedRecord(

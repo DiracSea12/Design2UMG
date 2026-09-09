@@ -204,7 +204,7 @@ namespace DesignImportPipeline
 			FUMGWidgetNode PrunedNewForm = *Entry.NewNode;
 			PruneManifestInstanceChildren(PrunedNewForm, *Shared.InstancesById);
 			UWidget* NewWidget = FUMGWidgetUtils::CreateWidgetRecursive(
-				Shared.WidgetTree, PrunedNewForm, ParentPanel, nullptr, nullptr, &Shared.DesignSize, Shared.MappingBuildState);
+				Shared.WidgetTree, PrunedNewForm, ParentPanel, nullptr, &Shared.DesignSize, Shared.MappingBuildState);
 			if (NewWidget)
 			{
 				ApplySlotForNode(NewWidget, PrunedNewForm, Shared);
@@ -244,7 +244,7 @@ namespace DesignImportPipeline
 				FUMGWidgetNode PrunedChild = Child;
 				PruneManifestInstanceChildren(PrunedChild, *Shared.InstancesById);
 				UWidget* NewWidget = FUMGWidgetUtils::CreateWidgetRecursive(
-					Shared.WidgetTree, PrunedChild, Shared.HostPanel, nullptr, nullptr, &Shared.DesignSize, Shared.MappingBuildState);
+					Shared.WidgetTree, PrunedChild, Shared.HostPanel, nullptr, &Shared.DesignSize, Shared.MappingBuildState);
 				if (NewWidget)
 				{
 					NewlyCreatedWidgets.Add(GetDesignNodeId(Child), NewWidget);

@@ -40,37 +40,6 @@ namespace
 		return Blueprint->WidgetTree;
 	}
 
-	// Pins the prototype navigation mode so the snapshot captured below is independent of
-	// the editor's per-project ini: the pen welcome fixture contains reusable prototype
-	// components whose generated shape (and therefore the reusable WBP compile path)
-	// differs between RuntimeExtension and Disabled.
-	struct FScopedPrototypeNavigationMode
-	{
-		explicit FScopedPrototypeNavigationMode(EDesign2UMGPrototypeNavigationGenerationMode InMode)
-		{
-			Settings = UDesign2UMGSettings::Get();
-			if (Settings)
-			{
-				SavedMode = Settings->PrototypeNavigationGenerationMode;
-				Settings->PrototypeNavigationGenerationMode = InMode;
-			}
-		}
-
-		~FScopedPrototypeNavigationMode()
-		{
-			if (Settings)
-			{
-				Settings->PrototypeNavigationGenerationMode = SavedMode;
-				// Same ini-leak guard as the placeholder hatch scope above.
-				Settings->SaveConfig();
-			}
-		}
-
-		UDesign2UMGSettings* Settings = nullptr;
-		EDesign2UMGPrototypeNavigationGenerationMode SavedMode =
-			EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension;
-	};
-
 	FUMGWidgetNode MakeSimpleTextNode(const FString& NodeName)
 	{
 		FUMGWidgetNode Node;
@@ -244,7 +213,6 @@ bool FWidgetClassOverrideDefaultSnapshotTest::RunTest(const FString& Parameters)
 		nullptr,
 		nullptr,
 		nullptr,
-		nullptr,
 		&EmptySnapshot);
 	TestNotNull(TEXT("Widget created with default snapshot"), Widget);
 	TestTrue(TEXT("Default snapshot keeps resolved TextBlock class"), Widget && Widget->IsA<UTextBlock>());
@@ -271,7 +239,6 @@ bool FWidgetClassOverrideCustomSnapshotTest::RunTest(const FString& Parameters)
 	UWidget* Widget = FUMGWidgetUtils::CreateWidgetRecursive(
 		WidgetTree,
 		MakeSimpleTextNode(TEXT("OverrideNode_Content")),
-		nullptr,
 		nullptr,
 		nullptr,
 		nullptr,
@@ -424,9 +391,6 @@ bool FPenBridgeImportUsesSingleExplicitSettingsSnapshotTest::RunTest(const FStri
 		return false;
 	}
 
-	const FScopedPrototypeNavigationMode ScopedNavMode(
-		EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension);
-
 	FScopedPlaceholderHatchSettings SnapshotPlaceholderSettings(TEXT("#123456"), TEXT("#ABCDEF"), 7, 11);
 	TestNotNull(TEXT("Snapshot placeholder settings available"), SnapshotPlaceholderSettings.Settings);
 	if (!SnapshotPlaceholderSettings.Settings)
@@ -520,8 +484,6 @@ bool FPreviewMaterializationSnapshotCopyBoundaryTest::RunTest(const FString& Par
 {
 	// Forward boundary: generation -> preview materialization carries overrides.
 	FDesign2UMGGenerationSettingsSnapshot GenerationSnapshot;
-	GenerationSnapshot.PrototypeNavigationGenerationMode =
-		EDesign2UMGPrototypeNavigationGenerationMode::TagHelper;
 	FWidgetClassOverride& Override = GenerationSnapshot.ClassOverrides.AddDefaulted_GetRef();
 	Override.NamePattern = TEXT("CopyBoundaryNode");
 	Override.WidgetClass = UBorder::StaticClass();
@@ -542,8 +504,6 @@ bool FPreviewMaterializationSnapshotCopyBoundaryTest::RunTest(const FString& Par
 		FDesign2UMGGenerationSettingsSnapshot::FromMaterializationSettings(MaterializationSnapshot);
 	TestEqual(TEXT("Round-tripped snapshot carries the override"),
 		RoundTripped.ClassOverrides.Num(), 1);
-	TestTrue(TEXT("Round-tripped navigation mode returns to default (preview does not own it)"),
-		RoundTripped.PrototypeNavigationGenerationMode == EDesign2UMGPrototypeNavigationGenerationMode::Disabled);
 
 	// Unset materialization snapshot -> default-constructed generation settings.
 	const FDesign2UMGGenerationSettingsSnapshot Defaulted =

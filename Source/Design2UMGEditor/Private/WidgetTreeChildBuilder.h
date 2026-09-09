@@ -2,7 +2,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Design2UMGFigmaMetadataExtensions.h"
 #include "UMGSchema.h"
 
 class UTexture2D;
@@ -15,7 +14,6 @@ struct FDesign2UMGGenerationSettingsSnapshot;
 struct FWidgetTreeChildBuildContext
 {
 	const TMap<FString, UTexture2D*>* TextureMap = nullptr;
-	TArray<FDesign2UMGFigmaWidgetMetadataRecord>* FigmaMetadataRecords = nullptr;
 	const FIntPoint* ExplicitDesignSize = nullptr;
 	FDesign2UMGComponentMappingBuildState* ComponentMappingState = nullptr;
 	/** Per-tree class-override resolution cache; owned by the root BuildWidgetTree call. */

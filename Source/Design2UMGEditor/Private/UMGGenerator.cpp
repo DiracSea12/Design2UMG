@@ -4,14 +4,12 @@
 #include "Design2UMGGenerationSettingsSnapshot.h"
 #include "Design2UMGComponentMappingGeneration.h"
 #include "Design2UMGGenerationManifest.h"
-#include "UMGPrototypeAnimationBuilder.h"
 #include "UMGGeneratorRootHandoff.h"
 #include "UMGWidgetNodeAccess.h"
 #include "UMGValueParsing.h"
 #include "UMGWidgetUtils.h"
-#include "Design2UMGPrototypeNavigationTagHelper.h"
+#include "UMGSchemaSourceExtensions.h"
 #include "UObject/SavePackage.h"
-#include "Design2UMGFigmaMetadataExtensions.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
 #include "GeneratedAssetLifecycle.h"
@@ -37,31 +35,6 @@ namespace
 		if (bWasNewlyCreated)
 		{
 			GeneratedAssetLifecycle::DiscardUnsavedAsset(Asset);
-		}
-	}
-
-	void ConfigureFigmaMetadataExtension(
-		UWidgetBlueprint* WidgetBlueprint,
-		const FUMGSourceDocumentData& DocumentData,
-		const TArray<FDesign2UMGFigmaWidgetMetadataRecord>& WidgetRecords)
-	{
-		if (!WidgetBlueprint)
-		{
-			return;
-		}
-
-		if (DocumentData.HasAnyComponentCatalog() || WidgetRecords.Num() > 0)
-		{
-			UDesign2UMGFigmaMetadataBlueprintExtension* Extension =
-				UWidgetBlueprintExtension::RequestExtension<UDesign2UMGFigmaMetadataBlueprintExtension>(WidgetBlueprint);
-			Extension->SetMetadata(DocumentData, WidgetRecords);
-			return;
-		}
-
-		if (UDesign2UMGFigmaMetadataBlueprintExtension* ExistingExtension =
-			UWidgetBlueprintExtension::GetExtension<UDesign2UMGFigmaMetadataBlueprintExtension>(WidgetBlueprint))
-		{
-			WidgetBlueprint->RemoveExtension(ExistingExtension);
 		}
 	}
 
@@ -389,9 +362,8 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 	}
 
 	// Use the shared widget creation path.
-	TArray<FDesign2UMGFigmaWidgetMetadataRecord> FigmaMetadataRecords;
 	UWidget* Root = UMGGeneratorRootHandoff::CreateRootWidget(
-		WBP, PreparedRoot, FigmaMetadataRecords, &MappingBuildState, &EffectiveGenerationSettings);
+		WBP, PreparedRoot, &MappingBuildState, &EffectiveGenerationSettings);
 	if (!Root)
 	{
 		UE_LOG(LogDesign2UMG, Error,
@@ -407,23 +379,8 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 		return nullptr;
 	}
 	WBP->WidgetTree->RootWidget = Root;
-	switch (EffectiveGenerationSettings.PrototypeNavigationGenerationMode)
-	{
-	case EDesign2UMGPrototypeNavigationGenerationMode::RuntimeExtension:
-		UMGPrototypeAnimationBuilder::GenerateNavigationAnimations(WBP, PreparedRootRef, NavigationData);
-		UMGPrototypeAnimationBuilder::ConfigureNavigationExtension(WBP, NavigationData);
-		break;
-	case EDesign2UMGPrototypeNavigationGenerationMode::TagHelper:
-		Design2UMGPrototypeNavigationTagHelper::ConfigureMetadata(WBP, NavigationData);
-		break;
-	case EDesign2UMGPrototypeNavigationGenerationMode::Disabled:
-		break;
-	default:
-		break;
-	}
 	// mapped nodes get no Prototype bindings: design interactions attached to a mapped identity produce an "inert" diagnostic.
 	Design2UMGComponentMappingGeneration::ReportInertPrototypeBindings(NavigationData, MappingBuildState);
-	ConfigureFigmaMetadataExtension(WBP, WidgetData.SourceDocument(), FigmaMetadataRecords);
 	ClearGeneratedWidgetNavigationState(WBP);
 	DumpTemplateTextBlockFontState(TEXT("template-precompile"), WBP);
 

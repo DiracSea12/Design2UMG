@@ -3,7 +3,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Design2UMGFigmaMetadataExtensions.h"
 #include "UMGSchema.h"
 
 class UWidget;
@@ -27,7 +26,6 @@ namespace UMGGeneratorRootHandoff
 	UWidget* CreateRootWidget(
 		UWidgetBlueprint* WidgetBlueprint,
 		const FPreparedRoot& PreparedRoot,
-		TArray<FDesign2UMGFigmaWidgetMetadataRecord>& OutFigmaMetadataRecords,
 		FDesign2UMGComponentMappingBuildState* ComponentMappingState = nullptr,
 		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr);
 }

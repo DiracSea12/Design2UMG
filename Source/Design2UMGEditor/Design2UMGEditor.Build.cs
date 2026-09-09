@@ -36,8 +36,6 @@ public class Design2UMGEditor : ModuleRules
 			"BlueprintGraph",
 			"Kismet",
 			"InputCore",
-			"MovieScene",
-			"MovieSceneTracks",
 			"ImageCore",
 			"ImageWrapper",
 			"HTTP",
