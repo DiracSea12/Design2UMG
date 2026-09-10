@@ -14,6 +14,7 @@
 
 #include "Animation/MovieScene2DTransformSection.h"
 #include "Animation/MovieScene2DTransformTrack.h"
+#include "Animation/UMGSequenceTickManager.h"
 #include "Animation/WidgetAnimation.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetBlueprintGeneratedClass.h"
@@ -32,6 +33,7 @@
 #include "Engine/DynamicBlueprintBinding.h"
 #include "Engine/LatentActionManager.h"
 #include "Engine/MemberReference.h"
+#include "Framework/Application/SlateApplication.h"
 #include "InputCoreTypes.h"
 #include "K2Node_CallArrayFunction.h"
 #include "K2Node_CallFunction.h"
@@ -199,6 +201,77 @@ namespace
 			TEXT(",\"prototypeStartNodeID\":\"1:1\""));
 	}
 
+	// Dual-target page: "2:1" is BOTH the Navigate target and the Overlay target of different
+	// buttons on page one. The page must stay a switcher child (the switcher owns the page flow),
+	// so the overlay binding takes the swap encoding: the Navigate chain (history push + switch).
+	const FString DualTargetOverlayPrototypeJson()
+	{
+		const FString NavButtonJson = MakeLeafNode(TEXT("nav_button"), TEXT("Next"), TEXT("RECTANGLE"), 20, 60, 120, 44, FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"NAVIGATE\"}]}]"),
+			*MakeSolidFillJson(0.1, 0.4, 0.9)));
+		const FString OverlayButtonJson = MakeLeafNode(TEXT("overlay_button"), TEXT("Overlay"), TEXT("RECTANGLE"), 20, 120, 120, 44, FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"OPEN_OVERLAY\"}]}]"),
+			*MakeSolidFillJson(0.2, 0.7, 0.5)));
+		const FString PageTwoJson = MakeContainerNode(TEXT("2:1"), TEXT("PageTwo"), TEXT("FRAME"), 0, 0, 360, 240,
+			MakeLeafNode(TEXT("back_button"), TEXT("Back"), TEXT("RECTANGLE"), 40, 60, 120, 44, FString::Printf(
+				TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"BACK\"}]}]"),
+				*MakeSolidFillJson(0.8, 0.3, 0.2))));
+		return MakeFigmaDocJson(
+			FString::Printf(TEXT("%s,%s"),
+				*MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240,
+					FString::Printf(TEXT("%s,%s"), *NavButtonJson, *OverlayButtonJson)),
+				*PageTwoJson),
+			TEXT(",\"prototypeStartNodeID\":\"1:1\""));
+	}
+
+	// Initial-page overlay: the startup page "1:1" is the OPEN_OVERLAY target of a button on the
+	// second page. The initial page must stay a switcher child (InitialPageIndex keeps pointing at
+	// it, no remap), so its overlay binding takes the swap encoding as well.
+	const FString InitialPageOverlayPrototypeJson()
+	{
+		const FString NavButtonJson = MakeLeafNode(TEXT("nav_button"), TEXT("Next"), TEXT("RECTANGLE"), 40, 60, 120, 44, FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"NAVIGATE\"}]}]"),
+			*MakeSolidFillJson(0.1, 0.4, 0.9)));
+		const FString OverlayButtonJson = MakeLeafNode(TEXT("open_overlay_button"), TEXT("HomeOverlay"), TEXT("RECTANGLE"), 40, 120, 120, 44, FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"1:1\",\"navigation\":\"OPEN_OVERLAY\"}]}]"),
+			*MakeSolidFillJson(0.2, 0.7, 0.5)));
+		const FString BackButtonJson = MakeLeafNode(TEXT("back_button"), TEXT("Back"), TEXT("RECTANGLE"), 40, 180, 120, 44, FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"BACK\"}]}]"),
+			*MakeSolidFillJson(0.8, 0.3, 0.2)));
+		return MakeFigmaDocJson(
+			FString::Printf(TEXT("%s,%s"),
+				*MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240, NavButtonJson),
+				*MakeContainerNode(TEXT("2:1"), TEXT("PageTwo"), TEXT("FRAME"), 0, 0, 360, 240,
+					FString::Printf(TEXT("%s,%s"), *OverlayButtonJson, *BackButtonJson))),
+			TEXT(",\"prototypeStartNodeID\":\"1:1\""));
+	}
+
+	// Navigate + overlay + back: page one navigates to page two and opens page three as a pure
+	// overlay (layered on top, the active page stays). Back must close the open overlay first
+	// WITHOUT popping the history; only a second Back returns to page one.
+	const FString NavigateOverlayBackPrototypeJson()
+	{
+		const FString NavButtonJson = MakeLeafNode(TEXT("nav_button"), TEXT("Next"), TEXT("RECTANGLE"), 20, 60, 120, 44, FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"NAVIGATE\"}]}]"),
+			*MakeSolidFillJson(0.1, 0.4, 0.9)));
+		const FString OverlayButtonJson = MakeLeafNode(TEXT("overlay_button"), TEXT("Overlay"), TEXT("RECTANGLE"), 20, 120, 120, 44, FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"3:1\",\"navigation\":\"OPEN_OVERLAY\"}]}]"),
+			*MakeSolidFillJson(0.2, 0.7, 0.5)));
+		const FString BackButtonJson = MakeLeafNode(TEXT("back_button"), TEXT("Back"), TEXT("RECTANGLE"), 40, 60, 120, 44, FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"BACK\"}]}]"),
+			*MakeSolidFillJson(0.8, 0.3, 0.2)));
+		const FString PageThreeJson = MakeContainerNode(TEXT("3:1"), TEXT("PageThree"), TEXT("FRAME"), 0, 0, 360, 240,
+			MakeTextNode(TEXT("page3_title"), TEXT("Layer"), 32, 48, 120, 32, TEXT("Layer"),
+				TEXT("\"fontFamily\":\"Inter\",\"fontSize\":24,\"fontWeight\":600,\"textAlignHorizontal\":\"LEFT\",\"textAlignVertical\":\"TOP\",\"textDecoration\":\"NONE\",\"letterSpacing\":0,\"lineHeightUnit\":\"AUTO\",\"lineHeightPx\":0")));
+		return MakeFigmaDocJson(
+			FString::Printf(TEXT("%s,%s,%s"),
+				*MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240,
+					FString::Printf(TEXT("%s,%s"), *NavButtonJson, *OverlayButtonJson)),
+				*MakeContainerNode(TEXT("2:1"), TEXT("PageTwo"), TEXT("FRAME"), 0, 0, 360, 240, BackButtonJson),
+				*PageThreeJson),
+			TEXT(",\"prototypeStartNodeID\":\"1:1\""));
+	}
+
 	const FString KeyboardNavigatePrototypeJson()
 	{
 		// Two keyboard interactions on one node: N down navigates forward, M up navigates back.
@@ -296,8 +369,9 @@ namespace
 		{
 			return Tracks;
 		}
-		Tracks.Append(Animation->MovieScene->GetTracks());
-		for (const FMovieSceneBinding& Binding : Animation->MovieScene->GetBindings())
+		const UMovieScene* MovieScene = Animation->MovieScene;
+		Tracks.Append(MovieScene->GetTracks());
+		for (const FMovieSceneBinding& Binding : MovieScene->GetBindings())
 		{
 			for (const UMovieSceneTrack* Track : Binding.GetTracks())
 			{
@@ -1723,10 +1797,286 @@ bool FFigmaPrototypeOverlayRuntimeSmokeTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// MOVE_OUT runtime smoke: outgoing-only slide transitions have no incoming animation to restore
-// the switcher's render transform, so the chain must explicitly reset it after the switch. The
-// translation is pre-set (simulating the finished outgoing slide, which the test harness never
-// ticks) so a missing reset node leaves it non-zero and fails the test.
+// Dual-target overlay runtime smoke: a page that is both a Navigate target and an Overlay target
+// stays a switcher child; its overlay binding takes the swap encoding (exactly the Navigate chain:
+// push the current index onto the history, then switch). The page content genuinely displays and
+// Back returns through the history pop.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeDualTargetOverlaySwapRuntimeSmokeTest,
+	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.DualTargetOverlaySwapRuntimeSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaPrototypeDualTargetOverlaySwapRuntimeSmokeTest::RunTest(const FString& Parameters)
+{
+	FDesignDocument Document;
+	FUMGWidgetData Data;
+	if (!TestTrue(TEXT("Convert dual-target overlay prototype fixture"), ConvertPrototype(DualTargetOverlayPrototypeJson(), Document, Data)))
+	{
+		return false;
+	}
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/ProtoNavWiringDualTargetOverlay");
+	DeleteGeneratedAssetsAtPath(OutputPath);
+
+	FUMGPrototypeNavigationData NavigationData;
+	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(
+		Data, OutputPath, nullptr, nullptr, &NavigationData);
+	if (!TestTrue(TEXT("Build dual-target overlay widget blueprint"), WBP != nullptr)
+		|| !TestTrue(TEXT("Save dual-target overlay widget blueprint"),
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	UWidgetBlueprintGeneratedClass* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(WBP->GeneratedClass);
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	UUserWidget* WidgetInstance = GeneratedClass && World ? CreateWidget<UUserWidget>(World, GeneratedClass) : nullptr;
+	if (!TestTrue(TEXT("Widget instance created"), WidgetInstance != nullptr))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	WidgetInstance->TakeWidget();
+
+	UWidgetSwitcher* Switcher = Cast<UWidgetSwitcher>(
+		WidgetInstance->WidgetTree ? WidgetInstance->WidgetTree->FindWidget(FName(*NavigationData.SwitcherWidgetName)) : nullptr);
+	UButton* OverlayButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("overlay_button"))) : nullptr;
+	UButton* BackButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("back_button"))) : nullptr;
+	if (!TestTrue(TEXT("Switcher exists"), Switcher != nullptr)
+		|| !TestTrue(TEXT("Overlay button exists"), OverlayButton != nullptr)
+		|| !TestTrue(TEXT("Back button exists"), BackButton != nullptr))
+	{
+		WidgetInstance->RemoveFromParent();
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	FArrayProperty* HistoryProperty = FindFProperty<FArrayProperty>(
+		GeneratedClass, FName(Design2UMGPrototypeGraphWiring::NavHistoryVariableName));
+	const auto HistoryNum = [HistoryProperty, WidgetInstance]()
+	{
+		return HistoryProperty ? FScriptArrayHelper(HistoryProperty, HistoryProperty->ContainerPtrToValuePtr<void>(WidgetInstance)).Num() : -1;
+	};
+
+	// The dual-target page stays in the switcher alongside the flow page (placement rule), so the
+	// startup page is page 0 and the overlay target is reachable as page 1.
+	TestEqual(TEXT("Dual-target page stays a switcher child"), Switcher->GetChildrenCount(), 2);
+	TestEqual(TEXT("Initial active page"), Switcher->GetActiveWidgetIndex(), 0);
+	TestEqual(TEXT("History starts empty"), HistoryNum(), 0);
+
+	// Swap-encoded overlay open: the switcher switches to the target page and records the page
+	// that was left, exactly like a Navigate.
+	OverlayButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Overlay trigger switches to the dual-target page"), Switcher->GetActiveWidgetIndex(), 1);
+	TestEqual(TEXT("Overlay trigger pushed the left page onto the history"), HistoryNum(), 1);
+	if (HistoryProperty)
+	{
+		FScriptArrayHelper Helper(HistoryProperty, HistoryProperty->ContainerPtrToValuePtr<void>(WidgetInstance));
+		TestEqual(TEXT("Pushed history value is the page that was left"),
+			Helper.Num() == 1 ? *reinterpret_cast<int32*>(Helper.GetRawPtr(0)) : INDEX_NONE, 0);
+	}
+
+	// Back returns to the previous page through the history pop.
+	BackButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Back returns to the first page"), Switcher->GetActiveWidgetIndex(), 0);
+	TestEqual(TEXT("Back popped the history entry"), HistoryNum(), 0);
+
+	WidgetInstance->RemoveFromParent();
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
+// Initial-page overlay runtime smoke: when the INITIAL page is an overlay target it stays a
+// switcher child - the startup active index keeps pointing at it (no remap, no fallback) - and its
+// overlay binding takes the swap encoding like any dual-target page.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeInitialPageOverlaySwapRuntimeSmokeTest,
+	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.InitialPageOverlaySwapRuntimeSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaPrototypeInitialPageOverlaySwapRuntimeSmokeTest::RunTest(const FString& Parameters)
+{
+	FDesignDocument Document;
+	FUMGWidgetData Data;
+	if (!TestTrue(TEXT("Convert initial-page overlay prototype fixture"), ConvertPrototype(InitialPageOverlayPrototypeJson(), Document, Data)))
+	{
+		return false;
+	}
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/ProtoNavWiringInitialPageOverlay");
+	DeleteGeneratedAssetsAtPath(OutputPath);
+
+	FUMGPrototypeNavigationData NavigationData;
+	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(
+		Data, OutputPath, nullptr, nullptr, &NavigationData);
+	if (!TestTrue(TEXT("Build initial-page overlay widget blueprint"), WBP != nullptr)
+		|| !TestTrue(TEXT("Save initial-page overlay widget blueprint"),
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	UWidgetBlueprintGeneratedClass* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(WBP->GeneratedClass);
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	UUserWidget* WidgetInstance = GeneratedClass && World ? CreateWidget<UUserWidget>(World, GeneratedClass) : nullptr;
+	if (!TestTrue(TEXT("Widget instance created"), WidgetInstance != nullptr))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	WidgetInstance->TakeWidget();
+
+	UWidgetSwitcher* Switcher = Cast<UWidgetSwitcher>(
+		WidgetInstance->WidgetTree ? WidgetInstance->WidgetTree->FindWidget(FName(*NavigationData.SwitcherWidgetName)) : nullptr);
+	UButton* NavButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("nav_button"))) : nullptr;
+	UButton* OverlayButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("open_overlay_button"))) : nullptr;
+	UButton* BackButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("back_button"))) : nullptr;
+	if (!TestTrue(TEXT("Switcher exists"), Switcher != nullptr)
+		|| !TestTrue(TEXT("Navigate button exists"), NavButton != nullptr)
+		|| !TestTrue(TEXT("Overlay button exists"), OverlayButton != nullptr)
+		|| !TestTrue(TEXT("Back button exists"), BackButton != nullptr))
+	{
+		WidgetInstance->RemoveFromParent();
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	FArrayProperty* HistoryProperty = FindFProperty<FArrayProperty>(
+		GeneratedClass, FName(Design2UMGPrototypeGraphWiring::NavHistoryVariableName));
+	const auto HistoryNum = [HistoryProperty, WidgetInstance]()
+	{
+		return HistoryProperty ? FScriptArrayHelper(HistoryProperty, HistoryProperty->ContainerPtrToValuePtr<void>(WidgetInstance)).Num() : -1;
+	};
+
+	// The startup page IS the overlay target and it must still be the active switcher child: the
+	// index stays 0 and the shown widget is the initial page itself, not a remapped fallback.
+	TestEqual(TEXT("Initial page stays a switcher child"), Switcher->GetChildrenCount(), 2);
+	TestEqual(TEXT("Startup active index is unchanged"), Switcher->GetActiveWidgetIndex(), 0);
+	TestTrue(TEXT("Startup page shown is the initial page"),
+		Switcher->GetActiveWidget() && FUMGWidgetUtils::MatchesWidgetBaseName(
+			Switcher->GetActiveWidget()->GetName(),
+			FUMGWidgetUtils::SanitizeWidgetName(TEXT("1:1"), TEXT("CanvasPanel")).ToString()));
+
+	// Leave the initial page, then trigger the overlay targeting it: the swap encoding switches
+	// back to it while recording the page that was left.
+	NavButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Navigate leaves the initial page"), Switcher->GetActiveWidgetIndex(), 1);
+	TestEqual(TEXT("History after navigate"), HistoryNum(), 1);
+	OverlayButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Overlay trigger switches back to the initial page"), Switcher->GetActiveWidgetIndex(), 0);
+	TestEqual(TEXT("Overlay trigger pushed the left page onto the history"), HistoryNum(), 2);
+
+	// Back returns to the page recorded last.
+	BackButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Back returns to the second page"), Switcher->GetActiveWidgetIndex(), 1);
+	TestEqual(TEXT("Back popped one history entry"), HistoryNum(), 1);
+
+	WidgetInstance->RemoveFromParent();
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
+// Back-closes-overlay runtime smoke: A -> B -> open overlay -> Back must stay on B (the overlay
+// host and its hosted page collapse, the history is NOT popped); only a second Back pops the
+// history and returns to A.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeBackClosesOverlayRuntimeSmokeTest,
+	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.BackClosesOverlayRuntimeSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaPrototypeBackClosesOverlayRuntimeSmokeTest::RunTest(const FString& Parameters)
+{
+	FDesignDocument Document;
+	FUMGWidgetData Data;
+	if (!TestTrue(TEXT("Convert navigate+overlay+back prototype fixture"), ConvertPrototype(NavigateOverlayBackPrototypeJson(), Document, Data)))
+	{
+		return false;
+	}
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/ProtoNavWiringBackClosesOverlay");
+	DeleteGeneratedAssetsAtPath(OutputPath);
+
+	FUMGPrototypeNavigationData NavigationData;
+	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(
+		Data, OutputPath, nullptr, nullptr, &NavigationData);
+	if (!TestTrue(TEXT("Build navigate+overlay+back widget blueprint"), WBP != nullptr)
+		|| !TestTrue(TEXT("Save navigate+overlay+back widget blueprint"),
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	UWidgetBlueprintGeneratedClass* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(WBP->GeneratedClass);
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	UUserWidget* WidgetInstance = GeneratedClass && World ? CreateWidget<UUserWidget>(World, GeneratedClass) : nullptr;
+	if (!TestTrue(TEXT("Widget instance created"), WidgetInstance != nullptr))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	WidgetInstance->TakeWidget();
+
+	UWidgetSwitcher* Switcher = Cast<UWidgetSwitcher>(
+		WidgetInstance->WidgetTree ? WidgetInstance->WidgetTree->FindWidget(FName(*NavigationData.SwitcherWidgetName)) : nullptr);
+	UOverlay* Host = WidgetInstance->WidgetTree
+		? Cast<UOverlay>(WidgetInstance->WidgetTree->FindWidget(FName(*NavigationData.OverlayHostWidgetName)))
+		: nullptr;
+	UButton* NavButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("nav_button"))) : nullptr;
+	UButton* OverlayButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("overlay_button"))) : nullptr;
+	UButton* BackButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("back_button"))) : nullptr;
+	UWidget* HostedPage = Host && Host->GetChildrenCount() > 0 ? Host->GetChildAt(0) : nullptr;
+	if (!TestTrue(TEXT("Switcher exists"), Switcher != nullptr)
+		|| !TestTrue(TEXT("Overlay host exists"), Host != nullptr)
+		|| !TestTrue(TEXT("Hosted overlay page exists"), HostedPage != nullptr)
+		|| !TestTrue(TEXT("Navigate button exists"), NavButton != nullptr)
+		|| !TestTrue(TEXT("Overlay button exists"), OverlayButton != nullptr)
+		|| !TestTrue(TEXT("Back button exists"), BackButton != nullptr))
+	{
+		WidgetInstance->RemoveFromParent();
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	FArrayProperty* HistoryProperty = FindFProperty<FArrayProperty>(
+		GeneratedClass, FName(Design2UMGPrototypeGraphWiring::NavHistoryVariableName));
+	const auto HistoryNum = [HistoryProperty, WidgetInstance]()
+	{
+		return HistoryProperty ? FScriptArrayHelper(HistoryProperty, HistoryProperty->ContainerPtrToValuePtr<void>(WidgetInstance)).Num() : -1;
+	};
+
+	// A -> B.
+	NavButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Navigate switches to page B"), Switcher->GetActiveWidgetIndex(), 1);
+	TestEqual(TEXT("History holds the left page"), HistoryNum(), 1);
+
+	// Open the overlay on top of B.
+	OverlayButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Overlay open shows the host"), Host->GetVisibility(), ESlateVisibility::SelfHitTestInvisible);
+	TestEqual(TEXT("Overlay open shows the hosted page"), HostedPage->GetVisibility(), ESlateVisibility::SelfHitTestInvisible);
+	TestEqual(TEXT("Overlay keeps page B active"), Switcher->GetActiveWidgetIndex(), 1);
+
+	// Back with an open overlay: closes the overlay only - page B stays active and the history
+	// is untouched (the old chain popped here and wrongly returned to A).
+	BackButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Back closes the overlay host"), Host->GetVisibility(), ESlateVisibility::Collapsed);
+	TestEqual(TEXT("Back collapses the hosted page"), HostedPage->GetVisibility(), ESlateVisibility::Collapsed);
+	TestEqual(TEXT("Back with an open overlay stays on page B"), Switcher->GetActiveWidgetIndex(), 1);
+	TestEqual(TEXT("Back with an open overlay keeps the history"), HistoryNum(), 1);
+
+	// Back again (overlay closed): pops the history and returns to A.
+	BackButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Second back returns to page A"), Switcher->GetActiveWidgetIndex(), 0);
+	TestEqual(TEXT("Second back popped the history"), HistoryNum(), 0);
+
+	WidgetInstance->RemoveFromParent();
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
+// MOVE_OUT runtime smoke with the REAL generated animation playing. The test broadcasts the global
+// Slate PreTick/PostTick delegates, which drives UUMGSequenceTickManager::TickWidgetAnimations (the
+// production per-frame tick) and the end-of-frame MovieScene flush; the latent manager is pumped in
+// between exactly like NativeTick. The click frame advances only the latent Delay, so with the 59 Hz
+// frame delta the delay resumes while the outgoing animation is still playing - the ordering in
+// which an unprotected chain lets the final off-screen key re-overwrite the reset during the
+// following frames. Removing the StopAnimation node makes this test fail on the final translation.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeMoveOutTransitionRuntimeSmokeTest,
 	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.MoveOutRuntimeSmoke",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -1766,7 +2116,10 @@ bool FFigmaPrototypeMoveOutTransitionRuntimeSmokeTest::RunTest(const FString& Pa
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
 	}
-	WidgetInstance->TakeWidget();
+	// Keep the Slate widget alive: a discarded TakeWidget() result lets the weak MyGCWidget expire,
+	// which makes UUserWidget::IsVisible() false and stops the sequence tick manager from ticking.
+	const TSharedRef<SWidget> WidgetSlate = WidgetInstance->TakeWidget();
+	(void)WidgetSlate; // Holds the Slate subtree alive for the whole test (a discarded result lets MyGCWidget expire).
 
 	UWidgetSwitcher* Switcher = Cast<UWidgetSwitcher>(
 		WidgetInstance->WidgetTree ? WidgetInstance->WidgetTree->FindWidget(FName(*NavigationData.SwitcherWidgetName)) : nullptr);
@@ -1779,8 +2132,8 @@ bool FFigmaPrototypeMoveOutTransitionRuntimeSmokeTest::RunTest(const FString& Pa
 		return false;
 	}
 
-	// Stand in for the finished outgoing slide: the switcher is left translated off-screen.
-	Switcher->SetRenderTranslation(FVector2D(360.0f, 0.0f));
+	TestTrue(TEXT("Switcher translation starts at the origin"),
+		Switcher->GetRenderTransform().Translation.Equals(FVector2D::ZeroVector));
 
 	TriggerButton->OnClicked.Broadcast();
 	TestEqual(TEXT("Page switch waits for the outgoing delay"), Switcher->GetActiveWidgetIndex(), 0);
@@ -1790,14 +2143,75 @@ bool FFigmaPrototypeMoveOutTransitionRuntimeSmokeTest::RunTest(const FString& Pa
 		? Cast<UWidgetAnimation>(OutgoingAnimationProperty->GetObjectPropertyValue_InContainer(WidgetInstance))
 		: nullptr;
 	TestTrue(TEXT("Outgoing slide animation is playing"), OutgoingAnimation && WidgetInstance->IsAnimationPlaying(OutgoingAnimation));
-
-	if (World)
+	if (!OutgoingAnimation || !World)
 	{
-		World->GetLatentActionManager().ProcessLatentActions(WidgetInstance, 0.5f);
+		WidgetInstance->RemoveFromParent();
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
 	}
+	// Drive the real generated animation through the engine's own frame path: Slate PreTick ticks
+	// the active UMG animation and force-flushes queued movie-scene evaluation, then the widget's
+	// latent Delay pump runs, then the post-tick flush drains anything the chain queued. The public
+	// test surface cannot call UUserWidget::TickActionsAndAnimation directly, so the test drives the
+	// registered UUMGSequenceTickManager delegates exactly as Slate does in a running game.
+	UUMGSequenceTickManager* AnimationTickManager = UUMGSequenceTickManager::Get(WidgetInstance);
+	const bool bCanDriveRealAnimationTicks = FSlateApplication::IsInitialized() && AnimationTickManager != nullptr;
+	if (!TestTrue(TEXT("Slate/UMG sequence tick path is available"), bCanDriveRealAnimationTicks))
+	{
+		WidgetInstance->RemoveFromParent();
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	// 59 Hz is a deterministic, plausible frame delta: it keeps the latent Delay one frame ahead
+	// of the animation's Slate PreTick, so the delay resumes while the outgoing animation is still
+	// playing. At exactly 60 Hz the float alignment can make both finish on the same frame, which
+	// would let a broken chain pass because the final key lands before the reset.
+	constexpr float FrameSeconds = 1.0f / 59.0f;
+
+	auto RunFrame = [&](bool bAdvanceAnimation)
+	{
+		if (bAdvanceAnimation)
+		{
+			// NativeTick marks the widget ticking each frame; TickWidgetAnimations skips widgets
+			// that did not announce themselves in the previous frame.
+			AnimationTickManager->OnWidgetTicked(WidgetInstance);
+			FSlateApplication::Get().OnPreTick().Broadcast(FrameSeconds);
+		}
+		// A real world ticks BeginFrame once per frame; FLatentActionManager processes each object
+		// at most once per frame, so the harness must mirror that or only frame 0 advances.
+		World->GetLatentActionManager().BeginFrame();
+		World->GetLatentActionManager().ProcessLatentActions(WidgetInstance, FrameSeconds);
+		FSlateApplication::Get().OnPostTick().Broadcast(FrameSeconds);
+	};
+
+	// The click frame (FrameIndex 0) advances the latent delay only: the animation has not had its
+	// first Slate PreTick yet, which is exactly the ordering that can leave the outgoing
+	// animation's final evaluation pending when the delay resumes.
+	bool bChainCompleted = false;
+	for (int32 FrameIndex = 0; FrameIndex < 60 && !bChainCompleted; ++FrameIndex)
+	{
+		RunFrame(FrameIndex > 0);
+		bChainCompleted = Switcher->GetActiveWidgetIndex() == 1;
+	}
+	if (!TestTrue(TEXT("MOVE_OUT chain completes within the frame loop"), bChainCompleted))
+	{
+		WidgetInstance->RemoveFromParent();
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	// Continue several full frames after the chain completed, so the animation must play through
+	// its natural end and any late evaluation cannot overwrite the reset translation.
+	for (int32 ExtraFrame = 0; ExtraFrame < 6; ++ExtraFrame)
+	{
+		RunFrame(true);
+	}
+
 	TestEqual(TEXT("MOVE_OUT completes the page switch"), Switcher->GetActiveWidgetIndex(), 1);
-	TestTrue(TEXT("MOVE_OUT resets the switcher translation to the origin"),
+	TestTrue(TEXT("MOVE_OUT keeps the switcher translation at the origin after residual animation frames"),
 		Switcher->GetRenderTransform().Translation.Equals(FVector2D::ZeroVector));
+	TestFalse(TEXT("Outgoing animation is no longer playing at the end"),
+		WidgetInstance->IsAnimationPlaying(OutgoingAnimation));
 
 	WidgetInstance->RemoveFromParent();
 	DeleteGeneratedAssetsAtPath(OutputPath);

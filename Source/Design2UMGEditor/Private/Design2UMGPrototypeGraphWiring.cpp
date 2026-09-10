@@ -23,6 +23,7 @@
 #include "K2Node_CallArrayFunction.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_ComponentBoundEvent.h"
+#include "K2Node_EnumEquality.h"
 #include "K2Node_FunctionEntry.h"
 #include "K2Node_FunctionResult.h"
 #include "K2Node_IfThenElse.h"
@@ -277,8 +278,11 @@ namespace
 		UFunction* GetActiveWidgetIndex = nullptr;
 		UFunction* LaunchURL = nullptr;
 		UFunction* PlayAnimation = nullptr;
+		UFunction* StopAnimation = nullptr;
 		UFunction* Delay = nullptr;
 		UFunction* SetVisibility = nullptr;
+		UFunction* GetVisibility = nullptr;
+		UFunction* Not_PreBool = nullptr;
 		UFunction* SetRenderTranslation = nullptr;
 		UFunction* MakeVector2D = nullptr;
 		UFunction* ArrayAdd = nullptr;
@@ -296,8 +300,11 @@ namespace
 			GetActiveWidgetIndex = UWidgetSwitcher::StaticClass()->FindFunctionByName(TEXT("GetActiveWidgetIndex"));
 			LaunchURL = UKismetSystemLibrary::StaticClass()->FindFunctionByName(TEXT("LaunchURL"));
 			PlayAnimation = UUserWidget::StaticClass()->FindFunctionByName(TEXT("PlayAnimation"));
+			StopAnimation = UUserWidget::StaticClass()->FindFunctionByName(TEXT("StopAnimation"));
 			Delay = UKismetSystemLibrary::StaticClass()->FindFunctionByName(TEXT("Delay"));
 			SetVisibility = UWidget::StaticClass()->FindFunctionByName(TEXT("SetVisibility"));
+			GetVisibility = UWidget::StaticClass()->FindFunctionByName(TEXT("GetVisibility"));
+			Not_PreBool = UKismetMathLibrary::StaticClass()->FindFunctionByName(TEXT("Not_PreBool"));
 			SetRenderTranslation = UWidget::StaticClass()->FindFunctionByName(TEXT("SetRenderTranslation"));
 			MakeVector2D = UKismetMathLibrary::StaticClass()->FindFunctionByName(TEXT("MakeVector2D"));
 			ArrayAdd = UKismetArrayLibrary::StaticClass()->FindFunctionByName(TEXT("Array_Add"));
@@ -440,6 +447,46 @@ namespace
 		return true;
 	}
 
+	/**
+	 * Appends UUserWidget::StopAnimation(out) fed by the animation's class property, immediately
+	 * before the outgoing-only translation reset. PlayAnimation(out) and the Delay share the same
+	 * duration and start on the same exec tick, and the animation only starts advancing on the next
+	 * frame while the latent manager advances on the click frame already - so the animation's final
+	 * evaluation (the off-screen key) lands after the reset and re-overwrites the translation.
+	 * StopAnimation parks the animation state so no further evaluation can fight the reset (stopping
+	 * an already finished animation is a no-op).
+	 */
+	bool AppendStopAnimationCall(
+		UEdGraph* Graph,
+		UWidgetBlueprint* WBP,
+		const FEngineFunctions& Functions,
+		const FName AnimationPropertyName,
+		FChainLayout& Layout)
+	{
+		if (!Functions.StopAnimation)
+		{
+			return false;
+		}
+		FObjectProperty* AnimationProperty = FindFProperty<FObjectProperty>(
+			WBP->SkeletonGeneratedClass, AnimationPropertyName);
+		if (!AnimationProperty)
+		{
+			return false;
+		}
+		UK2Node_VariableGet* AnimationGet = Layout.PlacePure(CreateVariableGet(Graph, WBP, AnimationProperty));
+		UK2Node_CallFunction* StopNode = CreateMarkerNode<UK2Node_CallFunction>(Graph,
+			[&Functions](UK2Node_CallFunction* Node)
+			{
+				Node->SetFromFunction(Functions.StopAnimation);
+			});
+		Layout.PlaceExec(StopNode);
+		if (UEdGraphPin* AnimationPin = StopNode->FindPin(TEXT("InAnimation"), EGPD_Input))
+		{
+			AnimationGet->GetValuePin()->MakeLinkTo(AnimationPin);
+		}
+		return true;
+	}
+
 	/** Appends the shared OpenLink tail: LaunchURL(url literal). */
 	bool AppendOpenLinkTail(
 		UEdGraph* Graph,
@@ -507,8 +554,9 @@ namespace
 
 	/**
 	 * Unique direct child of the overlay host matching the page base name. BuildRoot parents the
-	 * overlay-target pages under the host at build time, so the overlay binding's page and the Back
-	 * reset list both resolve here (pages still living in the switcher are not overlay resolvable).
+	 * overlay-only pages under the host at build time, so the overlay binding's page and the Back
+	 * reset list both resolve here. Pages still living in the switcher (dual-target or the initial
+	 * page) do not resolve here; their overlay bindings take the swap encoding instead.
 	 */
 	UWidget* FindOverlayHostPage(const UOverlay* OverlayHost, const FString& PageBaseName)
 	{
@@ -633,6 +681,9 @@ void WireSimplePrototypeBindings(
 		FName IncomingAnimationName;
 		/** Overlay bindings act on the target page BuildRoot parented under the overlay host. */
 		FName OverlayPageWidgetName;
+		/** Overlay binding whose page stayed in the switcher (dual-target or initial page): the
+		 * binding wires the Navigate chain (history push + switch) instead of host visibility. */
+		bool bOverlaySwapChain = false;
 		int32 TargetPageIndex = INDEX_NONE;
 		float DelaySeconds = 0.0f;
 		bool bTransitionChain = false;
@@ -693,18 +744,37 @@ void WireSimplePrototypeBindings(
 		}
 		else if (Step.Kind == EUMGPrototypeNavigationStepKind::Overlay)
 		{
-			// BuildRoot parents overlay-target pages under the host at build time; the binding
-			// toggles that page's visibility, so it must resolve as a unique hosted child.
+			// BuildRoot parents overlay-only pages under the host at build time; that binding toggles
+			// the page's visibility, so it must resolve as a unique hosted child. A page that stayed
+			// in the switcher (it is also a Navigate target, or it is the initial page) cannot become
+			// a hosted child because the tree is single-parent - the binding falls through to the
+			// swap encoding below, presented as a page rather than a layered overlay.
 			const UWidget* OverlayPage = FindOverlayHostPage(OverlayHost, FUMGWidgetUtils::SanitizeWidgetName(
 				Step.TargetPageId, TEXT("CanvasPanel")).ToString());
-			if (!OverlayPage)
+			if (OverlayPage)
+			{
+				Resolved.OverlayPageWidgetName = OverlayPage->GetFName();
+			}
+			else if (!Switcher || !Functions.SetActiveWidgetIndex)
 			{
 				SkipBinding(OutWarnings, FString::Printf(
-					TEXT("trigger '%s': overlay target page '%s' not uniquely locatable under overlay host '%s' (a page kept in the switcher by a Navigate binding cannot also be an overlay target)"),
-					*Binding.TriggerWidgetId, *Step.TargetPageId, *OverlayHost->GetName()));
+					TEXT("trigger '%s': overlay target page '%s' resolved under neither the overlay host nor the switcher"),
+					*Binding.TriggerWidgetId, *Step.TargetPageId));
 				continue;
 			}
-			Resolved.OverlayPageWidgetName = OverlayPage->GetFName();
+			else
+			{
+				Resolved.TargetPageIndex = FindSwitcherPageIndex(Switcher,
+					FUMGWidgetUtils::SanitizeWidgetName(Step.TargetPageId, TEXT("CanvasPanel")).ToString());
+				if (Resolved.TargetPageIndex == INDEX_NONE)
+				{
+					SkipBinding(OutWarnings, FString::Printf(
+						TEXT("trigger '%s': overlay target page '%s' not uniquely locatable under overlay host '%s' or switcher '%s'"),
+						*Binding.TriggerWidgetId, *Step.TargetPageId, *OverlayHost->GetName(), *Switcher->GetName()));
+					continue;
+				}
+				Resolved.bOverlaySwapChain = true;
+			}
 		}
 
 		if (bMouse)
@@ -816,7 +886,9 @@ void WireSimplePrototypeBindings(
 	{
 		const EUMGPrototypeNavigationStepKind Kind = BindingKind(Resolved);
 		return Kind == EUMGPrototypeNavigationStepKind::Navigate
-			|| Kind == EUMGPrototypeNavigationStepKind::Back;
+			|| Kind == EUMGPrototypeNavigationStepKind::Back
+			// Swap-encoded overlays are exactly the Navigate chain, history push included.
+			|| (Kind == EUMGPrototypeNavigationStepKind::Overlay && Resolved.bOverlaySwapChain);
 	};
 	const auto ReachesOverlayHost = [&BindingKind](const FResolvedBinding& Resolved)
 	{
@@ -951,6 +1023,26 @@ void WireSimplePrototypeBindings(
 		{
 		case EUMGPrototypeNavigationStepKind::Overlay:
 		{
+			// Swap encoding: the target page stayed in the switcher (it is also a Navigate target
+			// or it is the initial page), so the overlay is presented as a page rather than a layered
+			// overlay - the widget tree is single-parent and the page must stay reachable by Navigate
+			// (or stay the startup page). The chain is exactly the Navigate chain: push the current
+			// index onto the history, then switch; Back returns through the history pop like any page.
+			if (Resolved.bOverlaySwapChain)
+			{
+				if (!Switcher || !SwitcherProperty)
+				{
+					bChainValid = false;
+					SkipBinding(OutWarnings, FString::Printf(
+						TEXT("trigger '%s': no unique switcher widget '%s' with a class property for the overlay swap chain"),
+						*Binding.TriggerWidgetId, *SwitcherBaseName));
+					break;
+				}
+				bChainValid = AppendNavigateTail(Ubergraph, WBP, Functions,
+					SwitcherProperty, HistoryProperty, Resolved.TargetPageIndex, Layout)
+					&& LinkExecChain(Layout.ExecChain);
+				break;
+			}
 			// Host + page visibility: show the host, then the hosted target page (both layers must
 			// switch to SelfHitTestInvisible; a visible page under a collapsed host stays hidden).
 			FObjectProperty* OverlayPageProperty = FindFProperty<FObjectProperty>(
@@ -973,23 +1065,95 @@ void WireSimplePrototypeBindings(
 
 		case EUMGPrototypeNavigationStepKind::Back:
 		{
-			// Overlay host first: Back always collapses it before touching history; every hosted
-			// page collapses with it so a later different overlay opens clean.
+			// Back first asks whether an overlay is open: GetVisibility() is the widget's own UMG
+			// property, so this is correct even before the Slate tree caches the widget. Any
+			// non-Collapsed host counts as open (the generated open chain uses SelfHitTestInvisible);
+			// TRUE (overlay open): collapse the host and every hosted page, then STOP - no history
+			// pop and the active page is unchanged, so A->B->open overlay->Back stays on B. FALSE:
+			// the history pop chain runs (empty-history guard unchanged). Without a host the pop
+			// chain runs directly off the event.
+			UK2Node_IfThenElse* HostBranchNode = nullptr;
 			if (OverlayHost && OverlayHostProperty)
 			{
-				bChainValid = AppendSetVisibilityCall(Ubergraph, WBP, Functions,
-					OverlayHostProperty, ESlateVisibility::Collapsed, Layout);
-			}
-			if (bChainValid)
-			{
-				for (UWidget* HostedPage : OverlayHostPages)
+				if (!Functions.GetVisibility || !Functions.Not_PreBool)
 				{
-					if (FObjectProperty* PageProperty = FindFProperty<FObjectProperty>(
-							WBP->SkeletonGeneratedClass, HostedPage->GetFName()))
+					bChainValid = false;
+					SkipBinding(OutWarnings, FString::Printf(
+						TEXT("trigger '%s': UWidget::GetVisibility/Not_PreBool not found for Back wiring"),
+						*Binding.TriggerWidgetId));
+					break;
+				}
+				UK2Node_VariableGet* HostGet = Layout.PlacePure(CreateVariableGet(Ubergraph, WBP, OverlayHostProperty));
+				UK2Node_CallFunction* GetVisibilityNode = CreateMarkerNode<UK2Node_CallFunction>(Ubergraph,
+					[&Functions](UK2Node_CallFunction* Node)
 					{
-						bChainValid = AppendSetVisibilityCall(Ubergraph, WBP, Functions,
-							PageProperty, ESlateVisibility::Collapsed, Layout) && bChainValid;
+						Node->SetFromFunction(Functions.GetVisibility);
+					});
+				Layout.PlacePure(GetVisibilityNode);
+				if (UEdGraphPin* SelfPin = GetVisibilityNode->FindPin(UEdGraphSchema_K2::PN_Self, EGPD_Input))
+				{
+					HostGet->GetValuePin()->MakeLinkTo(SelfPin);
+				}
+				else
+				{
+					bChainValid = false;
+				}
+
+				UK2Node_EnumEquality* VisibilityIsCollapsed = CreateMarkerNode<UK2Node_EnumEquality>(Ubergraph,
+					[](UK2Node_EnumEquality*) {});
+				Layout.PlacePure(VisibilityIsCollapsed);
+				if (bChainValid)
+				{
+					if (UEdGraphPin* VisibilityPin = GetVisibilityNode->FindPin(UEdGraphSchema_K2::PN_ReturnValue, EGPD_Output))
+					{
+						// TryCreateConnection (not MakeLinkTo): the enum-equality inputs are wildcards
+						// until a connection propagates ESlateVisibility to both A and B.
+						bChainValid = Ubergraph->GetSchema()->TryCreateConnection(
+							VisibilityPin, VisibilityIsCollapsed->GetInput1Pin());
 					}
+					else
+					{
+						bChainValid = false;
+					}
+				}
+				if (bChainValid)
+				{
+					UEdGraphPin* ComparePin = VisibilityIsCollapsed->GetInput2Pin();
+					const UEnum* VisibilityEnum = StaticEnum<ESlateVisibility>();
+					if (ComparePin && VisibilityEnum)
+					{
+						ComparePin->DefaultValue = VisibilityEnum->GetNameStringByValue(
+							static_cast<int64>(ESlateVisibility::Collapsed));
+					}
+					else
+					{
+						bChainValid = false;
+					}
+				}
+
+				UK2Node_CallFunction* NotNode = CreateMarkerNode<UK2Node_CallFunction>(Ubergraph,
+					[&Functions](UK2Node_CallFunction* Node)
+					{
+						Node->SetFromFunction(Functions.Not_PreBool);
+					});
+				Layout.PlacePure(NotNode);
+				if (bChainValid)
+				{
+					UEdGraphPin* EqualityPin = VisibilityIsCollapsed->GetReturnValuePin();
+					UEdGraphPin* NotInputPin = NotNode->FindPin(TEXT("A"), EGPD_Input);
+					bChainValid = EqualityPin && NotInputPin
+						&& Ubergraph->GetSchema()->TryCreateConnection(EqualityPin, NotInputPin);
+				}
+
+				HostBranchNode = CreateMarkerNode<UK2Node_IfThenElse>(Ubergraph,
+					[](UK2Node_IfThenElse*) {});
+				Layout.PlaceExec(HostBranchNode);
+				if (bChainValid)
+				{
+					UEdGraphPin* ConditionPin = HostBranchNode->FindPin(UEdGraphSchema_K2::PN_Condition, EGPD_Input);
+					UEdGraphPin* NotReturnPin = NotNode->FindPin(UEdGraphSchema_K2::PN_ReturnValue, EGPD_Output);
+					bChainValid = ConditionPin && NotReturnPin
+						&& Ubergraph->GetSchema()->TryCreateConnection(NotReturnPin, ConditionPin);
 				}
 			}
 			if (bChainValid && (!Switcher || !SwitcherProperty || !Functions.ArrayIsEmpty
@@ -999,6 +1163,44 @@ void WireSimplePrototypeBindings(
 				SkipBinding(OutWarnings, FString::Printf(
 					TEXT("trigger '%s': switcher or array engine functions unavailable for Back wiring"),
 					*Binding.TriggerWidgetId));
+			}
+			if (bChainValid && HostBranchNode)
+			{
+				// TRUE (overlay open): the collapse chain ends the branch - the history pop below
+				// stays unreached, and every hosted page collapses with the host so a later
+				// different overlay opens clean.
+				FChainLayout CollapseLayout;
+				CollapseLayout.RowY = Layout.RowY;
+				CollapseLayout.NextColumn = Layout.NextColumn;
+				bChainValid = AppendSetVisibilityCall(Ubergraph, WBP, Functions,
+					OverlayHostProperty, ESlateVisibility::Collapsed, CollapseLayout);
+				for (UWidget* HostedPage : OverlayHostPages)
+				{
+					if (FObjectProperty* PageProperty = FindFProperty<FObjectProperty>(
+							WBP->SkeletonGeneratedClass, HostedPage->GetFName()))
+					{
+						bChainValid = AppendSetVisibilityCall(Ubergraph, WBP, Functions,
+							PageProperty, ESlateVisibility::Collapsed, CollapseLayout) && bChainValid;
+					}
+				}
+				Layout.NextColumn = FMath::Max(Layout.NextColumn, CollapseLayout.NextColumn);
+				if (bChainValid)
+				{
+					bChainValid = LinkExecChain(CollapseLayout.ExecChain);
+				}
+				if (bChainValid)
+				{
+					UEdGraphPin* ThenPin = HostBranchNode->FindPin(UEdGraphSchema_K2::PN_Then, EGPD_Output);
+					UEdGraphPin* CollapseExecPin = CollapseLayout.ExecChain[0]->FindPin(UEdGraphSchema_K2::PN_Execute, EGPD_Input);
+					if (ThenPin && CollapseExecPin)
+					{
+						ThenPin->MakeLinkTo(CollapseExecPin);
+					}
+					else
+					{
+						bChainValid = false;
+					}
+				}
 			}
 			if (bChainValid)
 			{
@@ -1011,9 +1213,14 @@ void WireSimplePrototypeBindings(
 					LinkArrayPin(Ubergraph, HistoryGet->GetValuePin(), TargetArrayPin);
 				}
 
+				// The empty-history Branch is the entry of the false side: it hangs off the host
+				// branch's FALSE pin (overlay closed) or directly off the event when no host exists.
+				// It is placed manually (like the pop chain below) so the linear exec chain does not
+				// chain it behind the host branch's TRUE path.
 				UK2Node_IfThenElse* BranchNode = CreateMarkerNode<UK2Node_IfThenElse>(Ubergraph,
 					[](UK2Node_IfThenElse*) {});
-				Layout.PlaceExec(BranchNode);
+				BranchNode->NodePosX = Layout.NextColumn++ * NodeColumnStep;
+				BranchNode->NodePosY = Layout.RowY;
 				if (UEdGraphPin* ConditionPin = BranchNode->FindPin(UEdGraphSchema_K2::PN_Condition, EGPD_Input))
 				{
 					if (UEdGraphPin* IsEmptyPin = IsEmptyNode->FindPin(TEXT("ReturnValue"), EGPD_Output))
@@ -1093,7 +1300,24 @@ void WireSimplePrototypeBindings(
 					}
 				}
 
+				// The main exec chain ends at the host visibility branch (or at the event when no
+				// host exists); the empty-history Branch hangs off the FALSE side as wired below.
 				bChainValid = LinkExecChain(Layout.ExecChain);
+				if (bChainValid)
+				{
+					UEdGraphPin* HistoryEntryExecPin = BranchNode->FindPin(UEdGraphSchema_K2::PN_Execute, EGPD_Input);
+					UEdGraphPin* EntrySourcePin = HostBranchNode
+						? HostBranchNode->FindPin(UEdGraphSchema_K2::PN_Else, EGPD_Output)
+						: Layout.ExecChain[0]->FindPin(UEdGraphSchema_K2::PN_Then, EGPD_Output);
+					if (HistoryEntryExecPin && EntrySourcePin)
+					{
+						EntrySourcePin->MakeLinkTo(HistoryEntryExecPin);
+					}
+					else
+					{
+						bChainValid = false;
+					}
+				}
 				if (bChainValid)
 				{
 					UEdGraphPin* ElsePin = BranchNode->FindPin(UEdGraphSchema_K2::PN_Else, EGPD_Output);
@@ -1125,8 +1349,12 @@ void WireSimplePrototypeBindings(
 			// Chain shape by which transition animations resolved (the animation builder generates
 			// out-only for MOVE_OUT, in-only for MOVE_IN, both otherwise):
 			// - both: out -> delay -> switch -> in (bidirectional/fade keep the classic chain);
-			// - out only: out -> delay -> switch -> reset translation (no incoming animation exists
-			//   to restore the slide, so the switcher would stay translated off-screen);
+			// - out only: out -> delay -> switch -> stop(out) -> reset translation. The stop runs
+			//   immediately before the reset because the outgoing animation can still have its
+			//   final evaluation pending when the latent delay resumes (the animation only starts
+			//   advancing on the next frame while the latent manager advances on the click frame);
+			//   without the stop, that residual evaluation re-overwrites the reset with the final
+			//   off-screen key. Stopping an already finished animation is a no-op;
 			// - in only: switch -> in (switch first; a pre-switch delay would be dead time).
 			const bool bHasOutgoing = Resolved.bTransitionChain && Resolved.OutgoingAnimationName != NAME_None;
 			const bool bHasIncoming = Resolved.bTransitionChain && Resolved.IncomingAnimationName != NAME_None;
@@ -1157,7 +1385,9 @@ void WireSimplePrototypeBindings(
 			}
 			if (bChainValid && bHasOutgoing && !bHasIncoming)
 			{
-				bChainValid = AppendSetRenderTranslationReset(Ubergraph, WBP, Functions, SwitcherProperty, Layout);
+				bChainValid = AppendStopAnimationCall(Ubergraph, WBP, Functions,
+					Resolved.OutgoingAnimationName, Layout)
+					&& AppendSetRenderTranslationReset(Ubergraph, WBP, Functions, SwitcherProperty, Layout);
 			}
 			if (bChainValid)
 			{

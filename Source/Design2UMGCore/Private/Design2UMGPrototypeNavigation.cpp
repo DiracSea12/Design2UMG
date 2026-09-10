@@ -3,7 +3,6 @@
 #include "Design2UMGPrototypeNavigation.h"
 
 #include "Design2UMGGeneratedNameSuffixes.h"
-#include "Design2UMGLog.h"
 #include "Design2UMGPrototypeStepGraph.h"
 #include "UMGSchema.h"
 #include "UMGSchemaSourceExtensions.h"
@@ -101,8 +100,9 @@ namespace Design2UMGPrototypeNavigation
 	{
 		// Overlay-target pages are parented under the overlay host at build time (Collapsed, Fill):
 		// the runtime wiring then only toggles visibility, never reparents. A page that is also a
-		// Navigate target must stay a switcher child (the switcher owns the page flow); the wiring
-		// drops that page's overlay binding with a warning instead of breaking the navigate flow.
+		// Navigate target must stay a switcher child (the switcher owns the page flow), and the
+		// initial page must stay a switcher child too (InitialPageIndex keeps pointing at it); the
+		// wiring presents such overlays as a page swap through the Navigate chain instead.
 		const TSet<FString> OverlayPageIds = CollectActionTargetPageIds(
 			NavigationData, EUMGPrototypeNavigationStepKind::Overlay);
 		const TSet<FString> NavigatePageIds = CollectActionTargetPageIds(
@@ -116,7 +116,6 @@ namespace Design2UMGPrototypeNavigation
 		float MaxWidth = 0.0f;
 		float MaxHeight = 0.0f;
 		int32 SwitcherChildCount = 0;
-		bool bInitialPageIsOverlay = false;
 		TArray<FUMGWidgetNode> OverlayPages;
 		const int32 InitialPagePosition = NavigationData.InitialPageIndex;
 		for (int32 PageIndex = 0; PageIndex < PageWidgets.Num(); ++PageIndex)
@@ -129,8 +128,8 @@ namespace Design2UMGPrototypeNavigation
 			MaxHeight = FMath::Max(MaxHeight, PageWidget.Bounds.H);
 
 			const bool bOverlayPage = OverlayPageIds.Contains(PageWidget.Id)
-				&& !NavigatePageIds.Contains(PageWidget.Id);
-			bInitialPageIsOverlay |= bOverlayPage && PageIndex == InitialPagePosition;
+				&& !NavigatePageIds.Contains(PageWidget.Id)
+				&& PageIndex != InitialPagePosition;
 			if (bOverlayPage)
 			{
 				PageWidget.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
@@ -145,16 +144,6 @@ namespace Design2UMGPrototypeNavigation
 			}
 			++SwitcherChildCount;
 			BaseSwitcher.Children.Add(MoveTemp(PageWidget));
-		}
-		if (bInitialPageIsOverlay)
-		{
-			// The switcher only renders flow pages, so an overlay-target start page falls back to
-			// the first flow page (ActiveWidgetIndex stays unset = engine default 0).
-			UE_LOG(LogDesign2UMG, Warning,
-				TEXT("PrototypeNavigation: the initial page is an overlay target ('%s'); the switcher starts on the first non-overlay page instead"),
-				InitialPagePosition >= 0 && InitialPagePosition < NavigationData.PageIds.Num()
-					? *NavigationData.PageIds[InitialPagePosition]
-					: TEXT("(unknown)"));
 		}
 
 		BaseSwitcher.Bounds.W = MaxWidth;
