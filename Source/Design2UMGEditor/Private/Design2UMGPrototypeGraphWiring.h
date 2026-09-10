@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 
 class UWidgetBlueprint;
+struct FUMGPrototypeNavigationBinding;
 struct FUMGPrototypeNavigationData;
 
 /**
@@ -19,6 +20,13 @@ namespace Design2UMGPrototypeGraphWiring
 	extern const TCHAR NodeMarkerComment[];
 
 	/**
+	 * Phase 1 eligibility: mouse trigger (Click/Hover/Press) plus exactly one simple Navigate or
+	 * OpenLink step. Shared with the transition animation builder so only bindings the wiring
+	 * actually wires get animations authored for them.
+	 */
+	bool IsSimpleMouseActionBinding(const FUMGPrototypeNavigationBinding& Binding);
+
+	/**
 	 * Destroys every node previously authored by this wiring (identified via the shared node comment).
 	 * Reimport calls this before applying the update plan: generated wiring is plugin-owned transient
 	 * content that the save re-authors, and it must not feed reimport's "referenced by blueprint graphs"
@@ -29,8 +37,12 @@ namespace Design2UMGPrototypeGraphWiring
 	/**
 	 * Clears previously generated prototype navigation nodes, then wires Phase 1 eligible bindings:
 	 * Click/Hover/Press on a wrapped UButton with exactly one Navigate or OpenLink step.
-	 *   - Navigate: bound event -> VariableGet(switcher) -> UWidgetSwitcher::SetActiveWidgetIndex(resolved page index).
 	 *   - OpenLink: bound event -> UKismetSystemLibrary::LaunchURL(url literal).
+	 *   - Navigate without transition: bound event -> VariableGet(switcher) -> UWidgetSwitcher::SetActiveWidgetIndex(resolved page index).
+	 *   - Navigate with generated transition animations (the animation builder filled the transition's
+	 *     Outgoing/IncomingAnimationName): bound event -> VariableGet(outgoing animation) ->
+	 *     UUserWidget::PlayAnimation -> UKismetSystemLibrary::Delay(phase duration literal) ->
+	 *     VariableGet(switcher) -> SetActiveWidgetIndex -> VariableGet(incoming animation) -> PlayAnimation.
 	 * All other bindings (steps programs, Overlay/Back/SetVariable/SetVariableMode, drag/key triggers)
 	 * are skipped with one Verbose log + OutWarnings entry each.
 	 *

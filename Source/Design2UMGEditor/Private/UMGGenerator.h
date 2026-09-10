@@ -25,11 +25,17 @@ public:
 		const FString& PackagePath,
 		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr,
 		FDesign2UMGGenerationOutput* OutGenerationOutput = nullptr);
+	/**
+	 * Assembles the unsaved widget blueprint (widget tree + generated transition animations).
+	 * OutNavigationData: receives the navigation IR copy enriched with the generated transition
+	 * animation names; hand that same data to SaveWidgetBlueprint so the graph wiring plays them.
+	 */
 	static UWidgetBlueprint* BuildWidgetBlueprint(
 		const FUMGWidgetData& WidgetData,
 		const FString& PackagePath,
 		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr,
-		FDesign2UMGGenerationOutput* OutGenerationOutput = nullptr);
+		FDesign2UMGGenerationOutput* OutGenerationOutput = nullptr,
+		FUMGPrototypeNavigationData* OutNavigationData = nullptr);
 
 	/**
 	 * Compile and save the WBP; when a generation output is passed in, atomically write the manifest sidecar next to the asset after a successful save.
@@ -39,7 +45,9 @@ public:
 	 *
 	 * PrototypeNavigation: when provided (even when it carries no bindings), the save re-authors the engine-standard
 	 * graph wiring for the blueprint's prototype navigation before compiling - first clearing nodes from a previous
-	 * generation, so re-imports and regenerates never accumulate. Null leaves the graph untouched.
+	 * generation, so re-imports and regenerates never accumulate. Null leaves the graph untouched. Pass the
+	 * navigation data BuildWidgetBlueprint exported through OutNavigationData so the wiring sees the generated
+	 * transition animation names.
 	 */
 	static bool SaveWidgetBlueprint(
 		UWidgetBlueprint* WBP,

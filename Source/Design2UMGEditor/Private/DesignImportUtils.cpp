@@ -401,7 +401,7 @@ namespace
 			IFileManager::Get().Delete(*OutPng, false, true);
 			UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget PNG render failed"));
 			// Save the Blueprint even when rendering fails so the issue can be inspected.
-			if (FUMGGenerator::SaveWidgetBlueprint(WBP, &GenerationOutput, &Data.PrototypeNavigation()) && OutGeneratedAssetPath)
+			if (FUMGGenerator::SaveWidgetBlueprint(WBP, &GenerationOutput, &Built.PrototypeNavigation) && OutGeneratedAssetPath)
 			{
 				*OutGeneratedAssetPath = WBP->GetPathName();
 			}
@@ -416,7 +416,7 @@ namespace
 
 		// Save the Blueprint after successful rendering.
 		Progress.AdvanceAfterMutation(0.5f, LOCTEXT("GenerateProgressSave", "Saving generated assets"));
-		if (!FUMGGenerator::SaveWidgetBlueprint(WBP, &GenerationOutput, &Data.PrototypeNavigation()))
+		if (!FUMGGenerator::SaveWidgetBlueprint(WBP, &GenerationOutput, &Built.PrototypeNavigation))
 		{
 			IFileManager::Get().Delete(*OutPng, false, true);
 			UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint compile or save failed after PNG render"));
@@ -554,8 +554,8 @@ namespace
 				const FString FinalPath = ResolveImportOutputPath(OutputPath);
 				DesignImportUtils::ApplyPendingIconFontMappingChanges(Data);
 				FBuiltBlueprint Built;
-				Built.WidgetBlueprint = FUMGGenerator::BuildWidgetBlueprint(Data, FinalPath, GenerationSettings, &Built.GenerationOutput);
-				Built.PrototypeNavigation = Data.PrototypeNavigation();
+				Built.WidgetBlueprint = FUMGGenerator::BuildWidgetBlueprint(
+					Data, FinalPath, GenerationSettings, &Built.GenerationOutput, &Built.PrototypeNavigation);
 				if (!Built.WidgetBlueprint)
 				{
 					if (bLogBuildFailure)
@@ -794,7 +794,9 @@ UWidgetBlueprint* DesignImportUtils::GenerateBlueprint(
 			}
 			ApplyPendingIconFontMappingChanges(Data);
 			FDesign2UMGGenerationOutput GenerationOutput;
-			UWidgetBlueprint* BuiltWBP = FUMGGenerator::BuildWidgetBlueprint(Data, FinalPath, GenerationSettings, &GenerationOutput);
+			FUMGPrototypeNavigationData NavigationData;
+			UWidgetBlueprint* BuiltWBP = FUMGGenerator::BuildWidgetBlueprint(
+				Data, FinalPath, GenerationSettings, &GenerationOutput, &NavigationData);
 			if (!BuiltWBP)
 			{
 				UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint build failed"));
@@ -803,7 +805,7 @@ UWidgetBlueprint* DesignImportUtils::GenerateBlueprint(
 			}
 
 			Progress.AdvanceAfterMutation(1.0f, LOCTEXT("GenerateProgressSave", "Saving generated assets"));
-			if (!FUMGGenerator::SaveWidgetBlueprint(BuiltWBP, &GenerationOutput, &Data.PrototypeNavigation()))
+			if (!FUMGGenerator::SaveWidgetBlueprint(BuiltWBP, &GenerationOutput, &NavigationData))
 			{
 				UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint compile or save failed"));
 				FDesign2UMGNotification::Error(LOCTEXT("SaveFailed", "Design2UMG: Widget Blueprint compile or save failed"));

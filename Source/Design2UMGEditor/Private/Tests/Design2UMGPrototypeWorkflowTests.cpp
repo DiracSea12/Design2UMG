@@ -8,13 +8,16 @@
 #include "FigmaTestDocBuilder.h"
 #include "UMGGenerator.h"
 #include "UMGSchemaSourceExtensions.h"
+#include "Animation/WidgetAnimation.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetBlueprintGeneratedClass.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Button.h"
 #include "Components/WidgetSwitcher.h"
 #include "Editor.h"
+#include "Engine/LatentActionManager.h"
 #include "Extensions/WidgetBlueprintGeneratedClassExtension.h"
+#include "UObject/UnrealType.h"
 #include "WidgetBlueprint.h"
 #include "WidgetBlueprintExtension.h"
 
@@ -87,14 +90,16 @@ bool FFigmaPrototypeGraphNavigationWorkflowTest::RunTest(const FString& Paramete
 	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/FigmaPrototypeGraphNav");
 	DeleteGeneratedAssetsAtPath(OutputPath);
 
-	UWidgetBlueprint* Blueprint = FUMGGenerator::BuildWidgetBlueprint(Data, OutputPath);
+	FUMGPrototypeNavigationData NavigationData;
+	UWidgetBlueprint* Blueprint = FUMGGenerator::BuildWidgetBlueprint(
+		Data, OutputPath, nullptr, nullptr, &NavigationData);
 	TestTrue(TEXT("Build prototype navigation widget blueprint"), Blueprint != nullptr);
 	if (!Blueprint)
 	{
 		return false;
 	}
 
-	FUMGGenerator::SaveWidgetBlueprint(Blueprint, nullptr, &Data.PrototypeNavigation());
+	FUMGGenerator::SaveWidgetBlueprint(Blueprint, nullptr, &NavigationData);
 	UWidgetBlueprintGeneratedClass* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(Blueprint->GeneratedClass);
 	TestTrue(TEXT("Generated class exists"), GeneratedClass != nullptr);
 	if (!GeneratedClass)
@@ -130,7 +135,30 @@ bool FFigmaPrototypeGraphNavigationWorkflowTest::RunTest(const FString& Paramete
 
 	TestEqual(TEXT("Navigation initial page index"), Switcher->GetActiveWidgetIndex(), 0);
 	TriggerButton->OnClicked.Broadcast();
-	TestEqual(TEXT("Wired click switches to the bound page"), Switcher->GetActiveWidgetIndex(), 1);
+	// The wired chain plays the outgoing fade first; the page switch sits behind the latent Delay,
+	// so right after the broadcast the switcher must still show the initial page.
+	TestEqual(TEXT("Page switch waits for the transition delay"), Switcher->GetActiveWidgetIndex(), 0);
+
+	// Pump the latent action manager past the phase duration (the same clock the world tick would
+	// advance): the Delay fires, the resume runs SetActiveWidgetIndex + PlayAnimation(in) inline.
+	if (World)
+	{
+		World->GetLatentActionManager().ProcessLatentActions(WidgetInstance, 0.5f);
+	}
+	TestEqual(TEXT("Wired click switches to the bound page after the transition delay"),
+		Switcher->GetActiveWidgetIndex(), 1);
+
+	// The compiled class exposes each generated animation as a named object property whose value is
+	// the compiled *_INST clone the widget actually plays; read it back from the live instance to
+	// prove both the property wiring and the playing state.
+	const FObjectProperty* IncomingAnimationProperty = FindFProperty<FObjectProperty>(
+		GeneratedClass, FName(TEXT("__d2u_nav_anim_000_in")));
+	UWidgetAnimation* IncomingAnimation = IncomingAnimationProperty
+		? Cast<UWidgetAnimation>(IncomingAnimationProperty->GetObjectPropertyValue_InContainer(WidgetInstance))
+		: nullptr;
+	TestNotNull(TEXT("Instance carries the incoming animation property"), IncomingAnimation);
+	TestTrue(TEXT("Incoming fade animation is playing after the switch"),
+		IncomingAnimation && WidgetInstance->IsAnimationPlaying(IncomingAnimation));
 
 	WidgetInstance->RemoveFromParent();
 	DeleteGeneratedAssetsAtPath(OutputPath);

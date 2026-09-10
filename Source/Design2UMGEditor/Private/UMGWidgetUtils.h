@@ -5,12 +5,13 @@
 #include "CoreMinimal.h"
 #include "UMGSchema.h"
 
+#include "Blueprint/WidgetTree.h"
+#include "Components/Widget.h"
+
 class UPanelSlot;
 class UPanelWidget;
 class UTexture2D;
-class UWidget;
 class UWidgetBlueprint;
-class UWidgetTree;
 class FDesign2UMGComponentMappingBuildState;
 struct FDesign2UMGGenerationSettingsSnapshot;
 
@@ -63,6 +64,32 @@ public:
 	 */
 	static bool MatchesWidgetBaseName(const FString& WidgetName, const FString& BaseName);
 	static int32 GetWidgetNameSuffixRank(const FString& WidgetName, const FString& BaseName);
+
+	/**
+	 * Resolves a widget in the built tree by its sanitized base name, tolerating the tree builder's
+	 * numeric dedup tail ("name" vs "name_2") but nothing else. Returns the widget only when exactly
+	 * one tree widget of the requested class matches. Shared by the navigation graph wiring and the
+	 * transition animation builder so both resolve the same final tree widget.
+	 */
+	template <typename WidgetType>
+	static WidgetType* FindUniqueTreeWidget(const UWidgetTree* WidgetTree, const FString& BaseName)
+	{
+		if (!WidgetTree || BaseName.IsEmpty())
+		{
+			return nullptr;
+		}
+
+		TArray<WidgetType*> Matches;
+		WidgetTree->ForEachWidget([&BaseName, &Matches](UWidget* Widget)
+		{
+			WidgetType* Candidate = Cast<WidgetType>(Widget);
+			if (Candidate && MatchesWidgetBaseName(Widget->GetName(), BaseName))
+			{
+				Matches.Add(Candidate);
+			}
+		});
+		return Matches.Num() == 1 ? Matches[0] : nullptr;
+	}
 
 };
 

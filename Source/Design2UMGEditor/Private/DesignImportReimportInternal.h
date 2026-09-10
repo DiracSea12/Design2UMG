@@ -240,6 +240,7 @@ namespace DesignImportPipeline
 		const FString& TargetPackage,
 		UWidgetBlueprint* WBP,
 		FDesign2UMGGenerationOutput& GenerationOutput,
+		const FUMGPrototypeNavigationData& PrototypeNavigation,
 		int32 TransactionIndex,
 		FDesignReimportResult& Result);
 }

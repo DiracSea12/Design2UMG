@@ -3,9 +3,11 @@
 #include "Design2UMGPrototypeGraphWiring.h"
 
 #include "Design2UMGLog.h"
+#include "UMGPrototypeAnimationBuilder.h"
 #include "UMGSchemaSourceExtensions.h"
 #include "UMGWidgetUtils.h"
 
+#include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Button.h"
 #include "Components/PanelWidget.h"
@@ -59,6 +61,21 @@ void ClearGeneratedBindings(UWidgetBlueprint* WBP)
 	}
 }
 
+bool IsSimpleMouseActionBinding(const FUMGPrototypeNavigationBinding& Binding)
+{
+	if (!Binding.UsesClickTrigger() && !Binding.UsesHoverTrigger() && !Binding.UsesPressTrigger())
+	{
+		return false;
+	}
+	if (Binding.Steps.Num() != 1)
+	{
+		return false;
+	}
+	const EUMGPrototypeNavigationStepKind Kind = Binding.Steps[0].Kind;
+	return Kind == EUMGPrototypeNavigationStepKind::Navigate
+		|| Kind == EUMGPrototypeNavigationStepKind::OpenLink;
+}
+
 namespace
 {
 	constexpr int32 NodeColumnStep = 320;
@@ -74,47 +91,6 @@ namespace
 			return GET_MEMBER_NAME_CHECKED(UButton, OnPressed);
 		}
 		return GET_MEMBER_NAME_CHECKED(UButton, OnClicked);
-	}
-
-	/** Phase 1 eligibility: mouse trigger on the wrapped button plus exactly one simple Navigate/OpenLink step. */
-	bool IsSimplePhase1Binding(const FUMGPrototypeNavigationBinding& Binding)
-	{
-		if (!Binding.UsesClickTrigger() && !Binding.UsesHoverTrigger() && !Binding.UsesPressTrigger())
-		{
-			return false;
-		}
-		if (Binding.Steps.Num() != 1)
-		{
-			return false;
-		}
-		const EUMGPrototypeNavigationStepKind Kind = Binding.Steps[0].Kind;
-		return Kind == EUMGPrototypeNavigationStepKind::Navigate
-			|| Kind == EUMGPrototypeNavigationStepKind::OpenLink;
-	}
-
-	/**
-	 * Resolves a widget in the built tree by its sanitized base name, tolerating the tree builder's
-	 * numeric dedup tail ("name" vs "name_2") but nothing else. Returns the widget only when exactly
-	 * one tree widget of the requested class matches.
-	 */
-	template <typename WidgetType>
-	WidgetType* FindUniqueTreeWidget(const UWidgetTree* WidgetTree, const FString& BaseName)
-	{
-		if (!WidgetTree || BaseName.IsEmpty())
-		{
-			return nullptr;
-		}
-
-		TArray<WidgetType*> Matches;
-		WidgetTree->ForEachWidget([&BaseName, &Matches](UWidget* Widget)
-		{
-			WidgetType* Candidate = Cast<WidgetType>(Widget);
-			if (Candidate && FUMGWidgetUtils::MatchesWidgetBaseName(Widget->GetName(), BaseName))
-			{
-				Matches.Add(Candidate);
-			}
-		});
-		return Matches.Num() == 1 ? Matches[0] : nullptr;
 	}
 
 	/** Index of the page widget (by sanitized page id) among the switcher's children; INDEX_NONE unless the match is unique. */
@@ -194,22 +170,27 @@ void WireSimplePrototypeBindings(
 	// Shared resolution for every Navigate binding: the switcher and its class property.
 	const FString SwitcherBaseName = FUMGWidgetUtils::SanitizeWidgetName(
 		NavigationData.SwitcherWidgetName, TEXT("WidgetSwitcher")).ToString();
-	UWidgetSwitcher* Switcher = FindUniqueTreeWidget<UWidgetSwitcher>(WBP->WidgetTree, SwitcherBaseName);
+	UWidgetSwitcher* Switcher = FUMGWidgetUtils::FindUniqueTreeWidget<UWidgetSwitcher>(
+		WBP->WidgetTree, SwitcherBaseName);
 	FObjectProperty* SwitcherProperty = Switcher
 		? FindFProperty<FObjectProperty>(WBP->SkeletonGeneratedClass, Switcher->GetFName())
 		: nullptr;
 
-	// GET_MEMBER_NAME_CHECKED only resolves member variables; both call targets are UFUNCTIONs, so
+	// GET_MEMBER_NAME_CHECKED only resolves member variables; all call targets are UFUNCTIONs, so
 	// their stable engine names are used directly.
 	UFunction* SetActiveWidgetIndexFunction = UWidgetSwitcher::StaticClass()->FindFunctionByName(
 		TEXT("SetActiveWidgetIndex"));
 	UFunction* LaunchURLFunction = UKismetSystemLibrary::StaticClass()->FindFunctionByName(
 		TEXT("LaunchURL"));
+	UFunction* PlayAnimationFunction = UUserWidget::StaticClass()->FindFunctionByName(
+		TEXT("PlayAnimation"));
+	UFunction* DelayFunction = UKismetSystemLibrary::StaticClass()->FindFunctionByName(
+		TEXT("Delay"));
 
 	int32 WiredCount = 0;
 	for (const FUMGPrototypeNavigationBinding& Binding : NavigationData.ClickBindings)
 	{
-		if (!IsSimplePhase1Binding(Binding))
+		if (!IsSimpleMouseActionBinding(Binding))
 		{
 			SkipBinding(OutWarnings, FString::Printf(
 				TEXT("trigger '%s' (%s): binding is not a simple single-action Click/Hover/Press Navigate or OpenLink (Phase 2)"),
@@ -221,7 +202,7 @@ void WireSimplePrototypeBindings(
 
 		// Resolve the trigger button in the built tree, then read its class property; node params must
 		// come from the built tree, never from the IR names, to stay immune to name drift.
-		UButton* TriggerButton = FindUniqueTreeWidget<UButton>(WBP->WidgetTree,
+		UButton* TriggerButton = FUMGWidgetUtils::FindUniqueTreeWidget<UButton>(WBP->WidgetTree,
 			FUMGWidgetUtils::SanitizeWidgetName(Binding.TriggerWidgetId, TEXT("Button")).ToString());
 		if (!TriggerButton)
 		{
@@ -287,6 +268,42 @@ void WireSimplePrototypeBindings(
 			continue;
 		}
 
+		// Phase 2: a Navigate binding whose transition produced generated animations plays them
+		// around the page switch (out -> wait one phase -> switch -> in). Missing engine functions or
+		// unresolved animation class properties degrade to the Phase 1 direct wiring with a warning.
+		bool bUseTransitionChain = false;
+		FObjectProperty* OutgoingAnimationProperty = nullptr;
+		FObjectProperty* IncomingAnimationProperty = nullptr;
+		if (bNavigate && Binding.Transition.HasGeneratedAnimations())
+		{
+			if (!PlayAnimationFunction || !DelayFunction)
+			{
+				SkipBinding(OutWarnings, FString::Printf(
+					TEXT("trigger '%s': PlayAnimation/Delay engine functions not found; wiring the switch without transition"),
+					*Binding.TriggerWidgetId));
+			}
+			else
+			{
+				OutgoingAnimationProperty = Binding.Transition.OutgoingAnimationName.IsEmpty()
+					? nullptr
+					: FindFProperty<FObjectProperty>(WBP->SkeletonGeneratedClass, FName(*Binding.Transition.OutgoingAnimationName));
+				IncomingAnimationProperty = Binding.Transition.IncomingAnimationName.IsEmpty()
+					? nullptr
+					: FindFProperty<FObjectProperty>(WBP->SkeletonGeneratedClass, FName(*Binding.Transition.IncomingAnimationName));
+				if (!OutgoingAnimationProperty && !IncomingAnimationProperty)
+				{
+					SkipBinding(OutWarnings, FString::Printf(
+						TEXT("trigger '%s': transition animations '%s'/'%s' have no skeleton class properties; wiring the switch without transition"),
+						*Binding.TriggerWidgetId,
+						*Binding.Transition.OutgoingAnimationName, *Binding.Transition.IncomingAnimationName));
+				}
+				else
+				{
+					bUseTransitionChain = true;
+				}
+			}
+		}
+
 		const int32 RowY = WiredCount * NodeRowStep;
 
 		UK2Node_ComponentBoundEvent* EventNode = CreateMarkerNode<UK2Node_ComponentBoundEvent>(Ubergraph,
@@ -297,6 +314,69 @@ void WireSimplePrototypeBindings(
 		EventNode->NodePosX = 0;
 		EventNode->NodePosY = RowY;
 
+		// Exec chain after the bound event, linked front-to-back at the end; pure variable gets sit
+		// between their producer and consumer, one column each (Phase 1 layout: event 0, get 1, call 2).
+		TArray<UEdGraphNode*> ExecChain;
+		ExecChain.Add(EventNode);
+		int32 NextColumn = 1;
+		const auto PlaceExecNode = [&ExecChain, &NextColumn, RowY](UEdGraphNode* Node)
+		{
+			Node->NodePosX = NextColumn++ * NodeColumnStep;
+			Node->NodePosY = RowY;
+			ExecChain.Add(Node);
+		};
+		const auto PlacePureGet = [&NextColumn, RowY](UK2Node_VariableGet* Node)
+		{
+			Node->NodePosX = NextColumn++ * NodeColumnStep;
+			Node->NodePosY = RowY + 16;
+		};
+
+		// Authors a PlayAnimation call fed by the animation's class property (animations become named
+		// object properties on the compiled widget class, same VariableGet recipe as widget variables).
+		const auto AddPlayAnimationCall = [&](FObjectProperty* AnimationProperty)
+		{
+			UK2Node_VariableGet* AnimationGetNode = CreateMarkerNode<UK2Node_VariableGet>(Ubergraph,
+				[AnimationProperty, WBP](UK2Node_VariableGet* Node)
+				{
+					Node->SetFromProperty(AnimationProperty, /*bSelfContext=*/true, WBP->SkeletonGeneratedClass);
+				});
+			PlacePureGet(AnimationGetNode);
+
+			UK2Node_CallFunction* PlayNode = CreateMarkerNode<UK2Node_CallFunction>(Ubergraph,
+				[PlayAnimationFunction](UK2Node_CallFunction* Node)
+				{
+					Node->SetFromFunction(PlayAnimationFunction);
+				});
+			PlaceExecNode(PlayNode);
+			// PlayAnimation runs on the UserWidget self; only the animation pin needs an explicit link.
+			if (UEdGraphPin* AnimationPin = PlayNode->FindPin(TEXT("InAnimation"), EGPD_Input))
+			{
+				AnimationGetNode->GetValuePin()->MakeLinkTo(AnimationPin);
+			}
+		};
+
+		if (bUseTransitionChain)
+		{
+			if (OutgoingAnimationProperty)
+			{
+				AddPlayAnimationCall(OutgoingAnimationProperty);
+			}
+
+			UK2Node_CallFunction* DelayNode = CreateMarkerNode<UK2Node_CallFunction>(Ubergraph,
+				[DelayFunction](UK2Node_CallFunction* Node)
+				{
+					Node->SetFromFunction(DelayFunction);
+				});
+			PlaceExecNode(DelayNode);
+			if (UEdGraphPin* DurationPin = DelayNode->FindPin(TEXT("Duration"), EGPD_Input))
+			{
+				// Same single phase-duration rule the animation builder sampled its keys with, so the
+				// latent wait ends exactly when the outgoing animation does.
+				DurationPin->DefaultValue = FString::SanitizeFloat(
+					UMGPrototypeAnimationBuilder::ResolvePhaseDurationSeconds(Binding.Transition));
+			}
+		}
+
 		UK2Node_VariableGet* SwitcherGetNode = nullptr;
 		if (bNavigate)
 		{
@@ -305,8 +385,7 @@ void WireSimplePrototypeBindings(
 				{
 					Node->SetFromProperty(SwitcherProperty, /*bSelfContext=*/true, WBP->SkeletonGeneratedClass);
 				});
-			SwitcherGetNode->NodePosX = NodeColumnStep;
-			SwitcherGetNode->NodePosY = RowY + 16;
+			PlacePureGet(SwitcherGetNode);
 		}
 
 		UK2Node_CallFunction* CallNode = CreateMarkerNode<UK2Node_CallFunction>(Ubergraph,
@@ -314,8 +393,7 @@ void WireSimplePrototypeBindings(
 			{
 				Node->SetFromFunction(bNavigate ? SetActiveWidgetIndexFunction : LaunchURLFunction);
 			});
-		CallNode->NodePosX = 2 * NodeColumnStep;
-		CallNode->NodePosY = RowY;
+		PlaceExecNode(CallNode);
 
 		if (bNavigate)
 		{
@@ -337,13 +415,26 @@ void WireSimplePrototypeBindings(
 			}
 		}
 
-		UEdGraphPin* ThenPin = EventNode->FindPin(UEdGraphSchema_K2::PN_Then, EGPD_Output);
-		UEdGraphPin* ExecPin = CallNode->FindPin(UEdGraphSchema_K2::PN_Execute, EGPD_Input);
-		if (ThenPin && ExecPin)
+		if (bUseTransitionChain && IncomingAnimationProperty)
 		{
-			ThenPin->MakeLinkTo(ExecPin);
+			AddPlayAnimationCall(IncomingAnimationProperty);
 		}
-		else
+
+		bool bExecChainLinked = true;
+		for (int32 ChainIndex = 0; ChainIndex + 1 < ExecChain.Num(); ++ChainIndex)
+		{
+			UEdGraphPin* ThenPin = ExecChain[ChainIndex]->FindPin(UEdGraphSchema_K2::PN_Then, EGPD_Output);
+			UEdGraphPin* ExecPin = ExecChain[ChainIndex + 1]->FindPin(UEdGraphSchema_K2::PN_Execute, EGPD_Input);
+			if (ThenPin && ExecPin)
+			{
+				ThenPin->MakeLinkTo(ExecPin);
+			}
+			else
+			{
+				bExecChainLinked = false;
+			}
+		}
+		if (!bExecChainLinked)
 		{
 			SkipBinding(OutWarnings, FString::Printf(
 				TEXT("trigger '%s': generated nodes missing exec pins (engine contract changed)"),

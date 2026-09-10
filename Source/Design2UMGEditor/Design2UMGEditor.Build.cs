@@ -36,6 +36,10 @@ public class Design2UMGEditor : ModuleRules
 			"BlueprintGraph",
 			"Kismet",
 			"InputCore",
+			// Standard-asset transition animations (UWidgetAnimation + UMovieScene subobjects with
+			// float/2D-transform tracks) for wired Navigate bindings.
+			"MovieScene",
+			"MovieSceneTracks",
 			"ImageCore",
 			"ImageWrapper",
 			"HTTP",

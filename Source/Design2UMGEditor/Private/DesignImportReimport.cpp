@@ -3,6 +3,8 @@
 #include "DesignImportReimportInternal.h"
 
 #include "Design2UMGPrototypeGraphWiring.h"
+#include "UMGPrototypeAnimationBuilder.h"
+#include "UMGSchemaSourceExtensions.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/PanelWidget.h"
@@ -105,6 +107,12 @@ namespace DesignImportPipeline
 		ApplyMatchedPlanEntries(Plan, Shared, GenerationSettings, NestedMoveCandidates, NewlyCreatedWidgets);
 		ReportNestedRemovalLeftovers(Shared, NestedMoveCandidates);
 
+		// 9h) Re-author the generated transition animations for the updated tree (name-prefix purge inside
+		// keeps regenerates from accumulating); the enriched navigation copy carries the animation names
+		// into the save, whose wiring plays them around the page switch.
+		FUMGPrototypeNavigationData ReimportNavigation = Session.Data.PrototypeNavigation();
+		UMGPrototypeAnimationBuilder::GenerateNavigationAnimations(WBP, PreparedScopeRoot, ReimportNavigation);
+
 		// Mapping diagnostics exit (aligned with the import path's UMGGenerator assembly): the ini validation
 		// diagnostics + this round's BuildState-collected match/fallback diagnostics go into
 		// ComponentMappingDiagnostics, written by the report into the componentMapping section; previously the reimport report lacked this exit, hiding config errors like class-load failures.
@@ -117,6 +125,7 @@ namespace DesignImportPipeline
 		FinalizeReimportedAssetState(WBP, DesignSize);
 
 		// 11) Writability pre-check + save + FailSaveWithRollback.
-		return SaveReimportedAsset(Session, TargetPackage, WBP, GenerationOutput, TransactionIndex, Result);
+		return SaveReimportedAsset(
+			Session, TargetPackage, WBP, GenerationOutput, ReimportNavigation, TransactionIndex, Result);
 	}
 }

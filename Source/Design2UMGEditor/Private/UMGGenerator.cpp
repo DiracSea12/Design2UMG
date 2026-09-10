@@ -6,6 +6,7 @@
 #include "Design2UMGGenerationManifest.h"
 #include "Design2UMGPrototypeGraphWiring.h"
 #include "UMGGeneratorRootHandoff.h"
+#include "UMGPrototypeAnimationBuilder.h"
 #include "UMGWidgetNodeAccess.h"
 #include "UMGValueParsing.h"
 #include "UMGWidgetUtils.h"
@@ -209,8 +210,10 @@ UWidgetBlueprint* FUMGGenerator::GenerateWidgetBlueprint(
 	FDesign2UMGGenerationOutput* OutGenerationOutput)
 {
 	FDesign2UMGGenerationOutput GenerationOutput;
-	UWidgetBlueprint* WBP = BuildWidgetBlueprint(WidgetData, PackagePath, GenerationSettings, &GenerationOutput);
-	if (WBP && !SaveWidgetBlueprint(WBP, &GenerationOutput, &WidgetData.PrototypeNavigation()))
+	FUMGPrototypeNavigationData NavigationData;
+	UWidgetBlueprint* WBP = BuildWidgetBlueprint(
+		WidgetData, PackagePath, GenerationSettings, &GenerationOutput, &NavigationData);
+	if (WBP && !SaveWidgetBlueprint(WBP, &GenerationOutput, &NavigationData))
 	{
 		return nullptr;
 	}
@@ -225,7 +228,8 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 	const FUMGWidgetData& WidgetData,
 	const FString& PackagePath,
 	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings,
-	FDesign2UMGGenerationOutput* OutGenerationOutput)
+	FDesign2UMGGenerationOutput* OutGenerationOutput,
+	FUMGPrototypeNavigationData* OutNavigationData)
 {
 	FString AssetName = ObjectTools::SanitizeObjectName(WidgetData.WidgetName);
 	FString FullPath = PackagePath / AssetName;
@@ -380,6 +384,10 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 		return nullptr;
 	}
 	WBP->WidgetTree->RootWidget = Root;
+	// Phase 2 transition animations: author the standard UWidgetAnimation assets here (post-tree-build,
+	// pre-save) while the local navigation IR is still mutable. The save's skeleton regen then turns the
+	// animations into class properties, and SaveWidgetBlueprint's wiring plays them by name.
+	UMGPrototypeAnimationBuilder::GenerateNavigationAnimations(WBP, PreparedRootRef, NavigationData);
 	// mapped nodes get no Prototype bindings: design interactions attached to a mapped identity produce an "inert" diagnostic.
 	Design2UMGComponentMappingGeneration::ReportInertPrototypeBindings(NavigationData, MappingBuildState);
 	ClearGeneratedWidgetNavigationState(WBP);
@@ -413,6 +421,10 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 	}
 
 	UE_LOG(LogDesign2UMG, Log, TEXT("Built Widget Blueprint at %s (not yet compiled/saved)"), *FullPath);
+	if (OutNavigationData)
+	{
+		*OutNavigationData = MoveTemp(NavigationData);
+	}
 	return WBP;
 }
 

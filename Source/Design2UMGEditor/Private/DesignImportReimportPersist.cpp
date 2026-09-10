@@ -9,6 +9,7 @@
 
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"
+#include "Animation/WidgetAnimation.h"
 #include "Editor.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformFileManager.h"
@@ -467,6 +468,19 @@ namespace DesignImportPipeline
 				}
 			});
 		}
+
+		// Generated transition animations follow the same rule as widgets: a non-empty GUID map makes the
+		// compiler ensure on animations missing from it, so backfill them deterministically too (same
+		// formula as the compiler's own empty-map path, keeping GUIDs stable across regenerates).
+		WBP->Modify();
+		for (const TObjectPtr<UWidgetAnimation>& Animation : WBP->Animations)
+		{
+			if (Animation && !WBP->WidgetVariableNameToGuidMap.Contains(Animation->GetFName()))
+			{
+				WBP->WidgetVariableNameToGuidMap.Add(
+					Animation->GetFName(), FGuid::NewDeterministicGuid(Animation->GetPathName()));
+			}
+		}
 	}
 
 	/** Step 11): writability pre-check + compile & save + failure rollback (FailSaveWithRollback moved with this block). */
@@ -475,6 +489,7 @@ namespace DesignImportPipeline
 		const FString& TargetPackage,
 		UWidgetBlueprint* WBP,
 		FDesign2UMGGenerationOutput& GenerationOutput,
+		const FUMGPrototypeNavigationData& PrototypeNavigation,
 		int32 TransactionIndex,
 		FDesignReimportResult& Result)
 	{
@@ -543,9 +558,10 @@ namespace DesignImportPipeline
 		}
 
 		// 11b) Compile + save + write the new manifest; failure = transaction rollback, asset keeps its original state, manifest not updated.
-		// The new source's prototype navigation re-authors the graph wiring (the pre-apply clear in
-		// Reimport() removed the previous generation's nodes inside this same transaction).
-		if (!FUMGGenerator::SaveWidgetBlueprint(WBP, &GenerationOutput, &Session.Data.PrototypeNavigation()))
+		// The new source's prototype navigation (with the re-authored transition animation names) re-authors
+		// the graph wiring (the pre-apply clear in Reimport() removed the previous generation's nodes inside
+		// this same transaction).
+		if (!FUMGGenerator::SaveWidgetBlueprint(WBP, &GenerationOutput, &PrototypeNavigation))
 		{
 			FailSaveWithRollback(FString::Printf(
 				TEXT("Save/compile failed for %s"),
