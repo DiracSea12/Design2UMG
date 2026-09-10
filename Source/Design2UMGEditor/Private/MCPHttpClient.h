@@ -12,6 +12,10 @@ class FJsonObject;
  */
 class DESIGN2UMGEDITOR_API FMCPHttpClient
 {
+private:
+	struct FInFlightCancelState;
+	struct FConnectSession;
+
 public:
 	FMCPHttpClient();
 	~FMCPHttpClient();
@@ -44,6 +48,11 @@ public:
 	void CancelRequests() { CancelActiveRequest(); }
 
 	bool IsConnected() const { return Session.IsValid() && !Session->SessionId.IsEmpty(); }
+
+#if WITH_DEV_AUTOMATION_TESTS
+	/** Test-only weak handle: proves Disconnect/complete releases the session self-reference. */
+	TWeakPtr<FConnectSession, ESPMode::ThreadSafe> GetSessionWeakForTests() const { return Session; }
+#endif
 
 private:
 	/** Shared delivered-flag for the in-flight request's cancel-failure path. */
@@ -99,6 +108,16 @@ private:
 		TFunction<void(bool bSuccess, const FString& ResponseBody, const FString& NewSessionId)> OnComplete,
 		const FString& LogLabel = FString(),
 		bool bLogTransportErrors = true);
+
+	/**
+	 * Marks the current request delivered and, when it is still the session's current
+	 * request, drops the session-owned cancel callback. The callback capture often owns
+	 * the session itself (ConnectAsync handshake callbacks capture Conn), so clearing it
+	 * here is what keeps the session from becoming a self-referencing cycle.
+	 */
+	static void FinishInFlightRequest(
+		const TWeakPtr<FConnectSession, ESPMode::ThreadSafe>& Session,
+		const TSharedPtr<FInFlightCancelState, ESPMode::ThreadSafe>& CancelState);
 
 	/** Parse the JSON-RPC result out of an SSE response body. */
 	static bool ParseSSEResponse(const FString& SSEBody, TSharedPtr<FJsonObject>& OutResult);

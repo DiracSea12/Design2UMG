@@ -81,7 +81,9 @@ FMCPHttpClient::FMCPHttpClient()
 
 FMCPHttpClient::~FMCPHttpClient()
 {
-	CancelRequests();
+	// Must go through Disconnect: the session can own its own cancel callback (ConnectAsync
+	// handshake callbacks capture Conn), so dropping only the member reference would leak it.
+	Disconnect();
 }
 
 void FMCPHttpClient::ConnectAsync(const FString& Endpoint, TFunction<void(bool bSuccess)> OnComplete)
@@ -130,16 +132,42 @@ void FMCPHttpClient::Disconnect()
 	CancelRequests();
 	// Disconnect stays silent about the in-flight request: the client object
 	// is being torn down or reconnected, so no failure is owed here.
-	// Dropping the session object resets every per-connection field it owns
-	// (endpoint, session id, in-flight cancel bookkeeping); the next
-	// ConnectAsync builds a fresh one. JSON-RPC ids only need to be unique
-	// within one connection, so each session restarts its id space from 1.
+	// Clear the session-owned callback BEFORE dropping the member reference:
+	// ConnectAsync handshake callbacks capture Conn, and storing that callback
+	// inside the session it captures would otherwise keep the session alive as a
+	// self-referencing cycle after this reset. JSON-RPC ids only need to be
+	// unique within one connection, so each session restarts its id space from 1.
 	// This is separate from the slot's tracking ids (FDesignHttpClientSlot),
 	// which do stay monotonic across sessions: a late-arriving callback from an
 	// old session can then never collide with a new session's tracking id, and
 	// the slot's cancellation watermark keeps recognizing it as cancelled, so
 	// stale responses are never applied to the new session.
+	if (Session.IsValid())
+	{
+		Session->InFlightCancelState.Reset();
+		Session->InFlightCancelFailure = nullptr;
+	}
 	Session.Reset();
+}
+
+void FMCPHttpClient::FinishInFlightRequest(
+	const TWeakPtr<FConnectSession, ESPMode::ThreadSafe>& Session,
+	const TSharedPtr<FInFlightCancelState, ESPMode::ThreadSafe>& CancelState)
+{
+	if (CancelState.IsValid())
+	{
+		CancelState->bDelivered = true;
+	}
+	// Only clear when the callback still belongs to this request: a completion
+	// belonging to a superseded request must never destroy the new request's state.
+	if (TSharedPtr<FConnectSession, ESPMode::ThreadSafe> PinnedSession = Session.Pin())
+	{
+		if (PinnedSession->InFlightCancelState == CancelState)
+		{
+			PinnedSession->InFlightCancelState.Reset();
+			PinnedSession->InFlightCancelFailure = nullptr;
+		}
+	}
 }
 
 void FMCPHttpClient::CancelActiveRequest()
@@ -182,6 +210,7 @@ void FMCPHttpClient::SendRequestAsync(
 	Session->InFlightCancelState = MakeShared<FInFlightCancelState, ESPMode::ThreadSafe>();
 	TSharedPtr<FInFlightCancelState, ESPMode::ThreadSafe> CancelState = Session->InFlightCancelState;
 	const FString CancelLogLabel = LogLabel;
+	const TWeakPtr<FConnectSession, ESPMode::ThreadSafe> WeakSession = Session;
 	Session->InFlightCancelFailure = [CancelState, OnComplete, CancelLogLabel]()
 	{
 		CancelState->bDelivered = true;
@@ -199,7 +228,7 @@ void FMCPHttpClient::SendRequestAsync(
 	{
 		const bool bStarted = DesignHttpClientSlot::StartAutomationTransport(
 			RequestId,
-			[State = State, RequestId, OnComplete, LogLabel, bExpectResponse, bLogTransportErrors, CancelState](
+			[State = State, RequestId, OnComplete, LogLabel, bExpectResponse, bLogTransportErrors, CancelState, WeakSession](
 				bool bConnectedSuccessfully,
 				const FString& ResponseBody,
 				int32 ResponseCode,
@@ -211,7 +240,7 @@ void FMCPHttpClient::SendRequestAsync(
 				return;
 			}
 
-			CancelState->bDelivered = true;
+			FinishInFlightRequest(WeakSession, CancelState);
 
 			if (!bConnectedSuccessfully)
 			{
@@ -248,7 +277,7 @@ void FMCPHttpClient::SendRequestAsync(
 		if (!bStarted)
 		{
 			State->ClearActiveRequest(RequestId);
-			CancelState->bDelivered = true;
+			FinishInFlightRequest(Session, CancelState);
 			UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: ProcessRequest failed for %s"), *LogLabel);
 			if (OnComplete)
 			{
@@ -262,7 +291,7 @@ void FMCPHttpClient::SendRequestAsync(
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = CreatePostRequest(Session->ServerEndpoint, Session->SessionId, RequestBody);
 	State->BindActiveRequest(HttpRequest);
 	HttpRequest->OnProcessRequestComplete().BindLambda(
-		[State = State, RequestId, OnComplete, LogLabel, bExpectResponse, bLogTransportErrors, CancelState](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnectedSuccessfully)
+		[State = State, RequestId, OnComplete, LogLabel, bExpectResponse, bLogTransportErrors, CancelState, WeakSession](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnectedSuccessfully)
 	{
 		if (!State->ConsumeCompletion(RequestId))
 		{
@@ -270,7 +299,7 @@ void FMCPHttpClient::SendRequestAsync(
 			return;
 		}
 
-		CancelState->bDelivered = true;
+		FinishInFlightRequest(WeakSession, CancelState);
 
 		if (!bConnectedSuccessfully || !Response.IsValid())
 		{
@@ -304,7 +333,7 @@ void FMCPHttpClient::SendRequestAsync(
 	if (!HttpRequest->ProcessRequest())
 	{
 		State->ClearActiveRequest(RequestId);
-		CancelState->bDelivered = true;
+		FinishInFlightRequest(Session, CancelState);
 		UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: ProcessRequest failed for %s"), *LogLabel);
 		if (OnComplete)
 			OnComplete(false, TEXT(""), TEXT(""));

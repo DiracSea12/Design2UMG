@@ -283,6 +283,77 @@ bool FBatchDMCPHttpCancellationBehaviorTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDMCPHttpClientSessionCycleReleaseTest,
+	"Design2UMG.BatchD.MCPHttpClientSessionCycleRelease",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FBatchDMCPHttpClientSessionCycleReleaseTest::RunTest(const FString& Parameters)
+{
+	struct FHookState
+	{
+		TMap<int32, FDesignHttpClientSlotSimulatedCompletion> PendingByTrackingId;
+		int32 LastStartedTrackingId = 0;
+	};
+
+	TSharedRef<FHookState> HookState = MakeShared<FHookState>();
+	TSharedRef<FDesignHttpClientSlotAutomationHooks> Hooks = MakeShared<FDesignHttpClientSlotAutomationHooks>();
+	Hooks->StartRequest =
+		[HookState](int32 TrackingId, FDesignHttpClientSlotSimulatedCompletion OnComplete)
+		{
+			HookState->PendingByTrackingId.Add(TrackingId, MoveTemp(OnComplete));
+			HookState->LastStartedTrackingId = TrackingId;
+			return true;
+		};
+	Hooks->CancelRequest = [](int32) {};
+	SetDesignHttpClientSlotAutomationHooks(Hooks);
+
+	FMCPHttpClient Client;
+	bool bConnected = false;
+	Client.ConnectAsync(TEXT("http://phase24.test"), [&bConnected](bool bSuccess)
+	{
+		bConnected = bSuccess;
+	});
+	const auto WeakSession = Client.GetSessionWeakForTests();
+	if (!TestTrue(TEXT("Session exists after ConnectAsync"), WeakSession.IsValid()))
+	{
+		ResetDesignHttpClientSlotAutomationHooks();
+		return false;
+	}
+
+	// Complete both handshake hops: initialize -> notifications/initialized. The notification
+	// completion leaves a delivered callback stored in the session; that stored copy is exactly
+	// the self-reference the release fix must clear before Disconnect drops the member reference.
+	int32 CompletedHandshakeSteps = 0;
+	for (int32 Step = 0; Step < 2 && !bConnected; ++Step)
+	{
+		TArray<FDesignHttpClientSlotSimulatedCompletion> Callbacks;
+		for (const TPair<int32, FDesignHttpClientSlotSimulatedCompletion>& Pair : HookState->PendingByTrackingId)
+		{
+			Callbacks.Add(Pair.Value);
+		}
+		HookState->PendingByTrackingId.Reset();
+		if (Callbacks.IsEmpty())
+		{
+			break;
+		}
+		for (const FDesignHttpClientSlotSimulatedCompletion& Callback : Callbacks)
+		{
+			Callback(true, TEXT("{}"), 200, TEXT("phase24-session"));
+			++CompletedHandshakeSteps;
+		}
+	}
+	TestTrue(TEXT("MCP handshake completes"), bConnected);
+	TestEqual(TEXT("Both handshake steps completed"), CompletedHandshakeSteps, 2);
+
+	// Drop every external callback holder, then disconnect: a self-referencing session would
+	// survive the member reset and keep the weak handle valid.
+	HookState->PendingByTrackingId.Reset();
+	ResetDesignHttpClientSlotAutomationHooks();
+	TestTrue(TEXT("Client still owns the connected session before Disconnect"), WeakSession.IsValid());
+	Client.Disconnect();
+	TestFalse(TEXT("Disconnect releases the connected session"), WeakSession.IsValid());
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDGenerationCancelBoundaryBehaviorTest,
 	"Design2UMG.BatchD.GenerationCancelBoundaryBehavior",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
