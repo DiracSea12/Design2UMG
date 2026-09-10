@@ -93,6 +93,8 @@ namespace DesignImportPipeline
 		UWidgetTree* WidgetTree = nullptr;
 		UPanelWidget* HostPanel = nullptr;
 		FIntPoint DesignSize = FIntPoint::ZeroValue;
+		/** Captured generation settings (class overrides et al.): every rebuild path must thread them, matching the import-time generation chain. */
+		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr;
 		/** Set view of the manifest.d2uOwned list (data source of the delete/move ownership decisions). */
 		const TSet<FString>* OwnedNames = nullptr;
 		const TMap<FString, const FDesign2UMGGenerationManifestSidecar::FInstanceRecord*>* InstancesById = nullptr;

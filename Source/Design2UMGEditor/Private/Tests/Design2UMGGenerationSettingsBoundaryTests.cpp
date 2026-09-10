@@ -2,6 +2,8 @@
 
 #include "Misc/AutomationTest.h"
 #include "DesignImportPipeline.h"
+#include "Design2UMGConverter.h"
+#include "FigmaParser.h"
 #include "PenParser.h"
 #include "Design2UMGSettings.h"
 #include "DesignPreviewMaterializationService.h"
@@ -512,6 +514,111 @@ bool FPreviewMaterializationSnapshotCopyBoundaryTest::RunTest(const FString& Par
 	TestEqual(TEXT("Empty materialization produces empty overrides"), Defaulted.ClassOverrides.Num(), 0);
 
 	return true;
+}
+
+// Reimport rebuilds added subtrees through the widget generation chain; those rebuilds must honor
+// the captured generation settings exactly like the import path. User-visible outcome: a Widget
+// Class Override rule applies to nodes added by a MODIFIED design on reimport, not only on import.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FReimportAddedNodesUseGenerationSettingsTest,
+	"Design2UMG.Unit.GenerationSettings.ReimportAddedNodesUseClassOverrides",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FReimportAddedNodesUseGenerationSettingsTest::RunTest(const FString& Parameters)
+{
+	FDesign2UMGImportSettingsSnapshot SettingsSnapshot;
+	FWidgetClassOverride& OverrideRule = SettingsSnapshot.GenerationSettings.ClassOverrides.AddDefaulted_GetRef();
+	OverrideRule.NamePattern = TEXT("Badge");
+	OverrideRule.WidgetClass = UBorder::StaticClass();
+
+	// Plain single-frame document (no prototype): root frame with an inner container and one leaf.
+	const auto MakeNodeJson = [](const TCHAR* Id, const TCHAR* Name, int32 X, int32 Y)
+	{
+		return FString::Printf(
+			TEXT("{\"id\":\"%s\",\"name\":\"%s\",\"type\":\"RECTANGLE\","
+				 "\"absoluteBoundingBox\":{\"x\":%d,\"y\":%d,\"width\":60,\"height\":24},"
+				 "\"fills\":[{\"type\":\"SOLID\",\"visible\":true,\"color\":{\"r\":0.2,\"g\":0.5,\"b\":0.3,\"a\":1}}]}"),
+			Id, Name, X, Y);
+	};
+	const auto MakeContainerJson = [](const TCHAR* Id, const TCHAR* Name, int32 X, int32 Y, const FString& ChildrenJson)
+	{
+		return FString::Printf(
+			TEXT("{\"id\":\"%s\",\"name\":\"%s\",\"type\":\"FRAME\","
+				 "\"absoluteBoundingBox\":{\"x\":%d,\"y\":%d,\"width\":200,\"height\":120},\"children\":[%s]}"),
+			Id, Name, X, Y, *ChildrenJson);
+	};
+	const auto MakeDocJson = [&MakeContainerJson](const FString& RootChildrenJson)
+	{
+		return FString::Printf(
+			TEXT("{\"fileKey\":\"reimport-override-scope-7d41\",\"document\":{\"id\":\"0:0\",\"name\":\"Doc\",\"type\":\"DOCUMENT\",\"children\":["
+				 "{\"id\":\"0:1\",\"name\":\"Page\",\"type\":\"CANVAS\",\"children\":[%s]}]}}"),
+			*MakeContainerJson(TEXT("ovr_root"), TEXT("RootFrame"), 0, 0, RootChildrenJson));
+	};
+
+	const FString V1 = MakeDocJson(FString::Printf(TEXT("%s,%s"),
+		*MakeContainerJson(TEXT("ovr_card"), TEXT("Card"), 12, 12,
+			MakeNodeJson(TEXT("ovr_card_text"), TEXT("card_text"), 0, 0)),
+		*MakeNodeJson(TEXT("ovr_badge"), TEXT("ovr_badge"), 140, 12)));
+
+	FDesignDocument DocV1;
+	if (!TestTrue(TEXT("v1 parse succeeds"), FFigmaParser::ParseDocument(V1, DocV1)))
+	{
+		return false;
+	}
+	FUMGWidgetData DataV1 = FDesign2UMGConverter::Convert(DocV1, SettingsSnapshot.ConversionSettings);
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/ReimportOverrideSettings");
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	UWidgetBlueprint* WBP = FUMGGenerator::GenerateWidgetBlueprint(DataV1, OutputPath, &SettingsSnapshot.GenerationSettings);
+	if (!TestTrue(TEXT("v1 import generates"), WBP != nullptr && WBP->WidgetTree != nullptr))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	UWidget* ImportedBadge = WBP->WidgetTree->FindWidget(TEXT("ovr_badge"));
+	if (!TestNotNull(TEXT("Imported badge node exists"), ImportedBadge))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	TestTrue(TEXT("Import applies the class override"), ImportedBadge->IsA<UBorder>());
+
+	// v2 adds a new nested node (inside the card container) and a new top-level node, both named
+	// to match the same override rule.
+	const FString V2 = MakeDocJson(FString::Printf(TEXT("%s,%s,%s"),
+		*MakeContainerJson(TEXT("ovr_card"), TEXT("Card"), 12, 12, FString::Printf(TEXT("%s,%s"),
+			*MakeNodeJson(TEXT("ovr_card_text"), TEXT("card_text"), 0, 0),
+			*MakeNodeJson(TEXT("ovr_card_badge"), TEXT("ovr_card_badge"), 0, 40))),
+		*MakeNodeJson(TEXT("ovr_badge"), TEXT("ovr_badge"), 140, 12),
+		*MakeNodeJson(TEXT("ovr_badge_top"), TEXT("ovr_badge_top"), 140, 60)));
+
+	FDesignDocument DocV2;
+	if (!TestTrue(TEXT("v2 parse succeeds"), FFigmaParser::ParseDocument(V2, DocV2)))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	FDesignReimportRequest Request;
+	Request.TargetAssetPath = WBP->GetOutermost()->GetName();
+	Request.SettingsSnapshot = SettingsSnapshot;
+	const FDesignReimportResult Result = DesignImportPipeline::Reimport(DocV2, Request);
+	TestTrue(TEXT("Reimport succeeds"), Result.bSucceeded);
+	TestFalse(TEXT("Reimport is not a full conflict"), Result.bFullConflict);
+
+	UWidget* NestedAddedBadge = WBP->WidgetTree->FindWidget(TEXT("ovr_card_badge"));
+	UWidget* TopLevelAddedBadge = WBP->WidgetTree->FindWidget(TEXT("ovr_badge_top"));
+	if (!TestNotNull(TEXT("Nested added node exists after reimport"), NestedAddedBadge)
+		|| !TestNotNull(TEXT("Top-level added node exists after reimport"), TopLevelAddedBadge))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	const bool bNestedUsesOverride = NestedAddedBadge->IsA<UBorder>();
+	const bool bTopLevelUsesOverride = TopLevelAddedBadge->IsA<UBorder>();
+	TestTrue(TEXT("Reimport applies the class override to a nested added node"), bNestedUsesOverride);
+	TestTrue(TEXT("Reimport applies the class override to a top-level added node"), bTopLevelUsesOverride);
+
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	return bNestedUsesOverride && bTopLevelUsesOverride;
 }
 
 #endif

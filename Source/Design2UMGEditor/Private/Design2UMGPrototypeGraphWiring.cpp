@@ -29,6 +29,7 @@
 #include "K2Node_VariableGet.h"
 #include "Kismet/KismetArrayLibrary.h"
 #include "Kismet/KismetInputLibrary.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
@@ -278,9 +279,12 @@ namespace
 		UFunction* PlayAnimation = nullptr;
 		UFunction* Delay = nullptr;
 		UFunction* SetVisibility = nullptr;
+		UFunction* SetRenderTranslation = nullptr;
+		UFunction* MakeVector2D = nullptr;
 		UFunction* ArrayAdd = nullptr;
 		UFunction* ArrayIsEmpty = nullptr;
 		UFunction* ArrayLastIndex = nullptr;
+		UFunction* ArrayGet = nullptr;
 		UFunction* ArrayRemove = nullptr;
 		UFunction* GetKeyEventKey = nullptr;
 		UFunction* EqualKeyKey = nullptr;
@@ -294,9 +298,12 @@ namespace
 			PlayAnimation = UUserWidget::StaticClass()->FindFunctionByName(TEXT("PlayAnimation"));
 			Delay = UKismetSystemLibrary::StaticClass()->FindFunctionByName(TEXT("Delay"));
 			SetVisibility = UWidget::StaticClass()->FindFunctionByName(TEXT("SetVisibility"));
+			SetRenderTranslation = UWidget::StaticClass()->FindFunctionByName(TEXT("SetRenderTranslation"));
+			MakeVector2D = UKismetMathLibrary::StaticClass()->FindFunctionByName(TEXT("MakeVector2D"));
 			ArrayAdd = UKismetArrayLibrary::StaticClass()->FindFunctionByName(TEXT("Array_Add"));
 			ArrayIsEmpty = UKismetArrayLibrary::StaticClass()->FindFunctionByName(TEXT("Array_IsEmpty"));
 			ArrayLastIndex = UKismetArrayLibrary::StaticClass()->FindFunctionByName(TEXT("Array_LastIndex"));
+			ArrayGet = UKismetArrayLibrary::StaticClass()->FindFunctionByName(TEXT("Array_Get"));
 			ArrayRemove = UKismetArrayLibrary::StaticClass()->FindFunctionByName(TEXT("Array_Remove"));
 			GetKeyEventKey = UKismetInputLibrary::StaticClass()->FindFunctionByName(TEXT("GetKey"));
 			EqualKeyKey = UKismetInputLibrary::StaticClass()->FindFunctionByName(TEXT("EqualEqual_KeyKey"));
@@ -458,11 +465,10 @@ namespace
 	}
 
 	/**
-	 * Appends a UWidget::SetVisibility call on a widget variable get. The old runtime's overlay
-	 * semantics (reparenting the overlay page into the host) cannot be expressed with standard
-	 * nodes; showing/collapsing the host is the decided encoding. Back always collapses the host
-	 * (simplification: the old runtime popped the overlay before history only when one was open,
-	 * which standard nodes cannot observe).
+	 * Appends a UWidget::SetVisibility call on a widget variable get. The overlay encoding is
+	 * host + page visibility: BuildRoot parents the overlay-target pages under the host (Collapsed),
+	 * so opening shows the host then the page (both SelfHitTestInvisible) and Back collapses the host
+	 * plus every hosted page (a later different overlay then opens clean).
 	 */
 	bool AppendSetVisibilityCall(
 		UEdGraph* Graph,
@@ -495,6 +501,83 @@ namespace
 			VisibilityPin->DefaultValue = VisibilityEnum
 				? VisibilityEnum->GetNameStringByValue(static_cast<int64>(Visibility))
 				: TEXT("");
+		}
+		return true;
+	}
+
+	/**
+	 * Unique direct child of the overlay host matching the page base name. BuildRoot parents the
+	 * overlay-target pages under the host at build time, so the overlay binding's page and the Back
+	 * reset list both resolve here (pages still living in the switcher are not overlay resolvable).
+	 */
+	UWidget* FindOverlayHostPage(const UOverlay* OverlayHost, const FString& PageBaseName)
+	{
+		if (!OverlayHost || PageBaseName.IsEmpty())
+		{
+			return nullptr;
+		}
+		int32 MatchCount = 0;
+		UWidget* Matched = nullptr;
+		for (int32 ChildIndex = 0; ChildIndex < OverlayHost->GetChildrenCount(); ++ChildIndex)
+		{
+			UWidget* Child = OverlayHost->GetChildAt(ChildIndex);
+			if (Child && FUMGWidgetUtils::MatchesWidgetBaseName(Child->GetName(), PageBaseName))
+			{
+				++MatchCount;
+				Matched = Child;
+			}
+		}
+		return MatchCount == 1 ? Matched : nullptr;
+	}
+
+	/**
+	 * Appends UWidget::SetRenderTranslation(MakeVector2D(0,0)) on the switcher: the outgoing-only
+	 * slide chain leaves the switcher translated off-screen after the switch (no incoming animation
+	 * exists to restore the transform), so the chain resets it explicitly. MakeVector2D's untouched
+	 * X/Y literals carry the zeros; a raw struct-pin literal would depend on the pin's export format.
+	 */
+	bool AppendSetRenderTranslationReset(
+		UEdGraph* Graph,
+		UWidgetBlueprint* WBP,
+		const FEngineFunctions& Functions,
+		FObjectProperty* SwitcherProperty,
+		FChainLayout& Layout)
+	{
+		if (!Functions.SetRenderTranslation || !Functions.MakeVector2D || !SwitcherProperty)
+		{
+			return false;
+		}
+		UK2Node_VariableGet* SwitcherGet = Layout.PlacePure(CreateVariableGet(Graph, WBP, SwitcherProperty));
+		UK2Node_CallFunction* TranslationNode = CreateMarkerNode<UK2Node_CallFunction>(Graph,
+			[&Functions](UK2Node_CallFunction* Node)
+			{
+				Node->SetFromFunction(Functions.SetRenderTranslation);
+			});
+		Layout.PlaceExec(TranslationNode);
+		if (UEdGraphPin* SelfPin = TranslationNode->FindPin(UEdGraphSchema_K2::PN_Self, EGPD_Input))
+		{
+			SwitcherGet->GetValuePin()->MakeLinkTo(SelfPin);
+		}
+		if (UEdGraphPin* TranslationPin = TranslationNode->FindPin(TEXT("Translation"), EGPD_Input))
+		{
+			UK2Node_CallFunction* MakeVectorNode = CreateMarkerNode<UK2Node_CallFunction>(Graph,
+				[&Functions](UK2Node_CallFunction* Node)
+				{
+					Node->SetFromFunction(Functions.MakeVector2D);
+				});
+			Layout.PlacePure(MakeVectorNode);
+			if (UEdGraphPin* XPin = MakeVectorNode->FindPin(TEXT("X"), EGPD_Input))
+			{
+				XPin->DefaultValue = TEXT("0.0");
+			}
+			if (UEdGraphPin* YPin = MakeVectorNode->FindPin(TEXT("Y"), EGPD_Input))
+			{
+				YPin->DefaultValue = TEXT("0.0");
+			}
+			if (UEdGraphPin* ReturnValuePin = MakeVectorNode->FindPin(UEdGraphSchema_K2::PN_ReturnValue, EGPD_Output))
+			{
+				ReturnValuePin->MakeLinkTo(TranslationPin);
+			}
 		}
 		return true;
 	}
@@ -548,6 +631,8 @@ void WireSimplePrototypeBindings(
 		FName TriggerWidgetName;
 		FName OutgoingAnimationName;
 		FName IncomingAnimationName;
+		/** Overlay bindings act on the target page BuildRoot parented under the overlay host. */
+		FName OverlayPageWidgetName;
 		int32 TargetPageIndex = INDEX_NONE;
 		float DelaySeconds = 0.0f;
 		bool bTransitionChain = false;
@@ -605,6 +690,21 @@ void WireSimplePrototypeBindings(
 				TEXT("trigger '%s': no unique overlay host widget '%s' in the built tree"),
 				*Binding.TriggerWidgetId, *NavigationData.OverlayHostWidgetName));
 			continue;
+		}
+		else if (Step.Kind == EUMGPrototypeNavigationStepKind::Overlay)
+		{
+			// BuildRoot parents overlay-target pages under the host at build time; the binding
+			// toggles that page's visibility, so it must resolve as a unique hosted child.
+			const UWidget* OverlayPage = FindOverlayHostPage(OverlayHost, FUMGWidgetUtils::SanitizeWidgetName(
+				Step.TargetPageId, TEXT("CanvasPanel")).ToString());
+			if (!OverlayPage)
+			{
+				SkipBinding(OutWarnings, FString::Printf(
+					TEXT("trigger '%s': overlay target page '%s' not uniquely locatable under overlay host '%s' (a page kept in the switcher by a Navigate binding cannot also be an overlay target)"),
+					*Binding.TriggerWidgetId, *Step.TargetPageId, *OverlayHost->GetName()));
+				continue;
+			}
+			Resolved.OverlayPageWidgetName = OverlayPage->GetFName();
 		}
 
 		if (bMouse)
@@ -700,8 +800,9 @@ void WireSimplePrototypeBindings(
 
 	// Pass 2 - structural preparation, all in one place because each mutation needs the same
 	// skeleton refresh (which recreates the class properties, so it must precede pass 3's caching):
-	//   1. The overlay host must be exposed as a variable: UOverlay defaults bIsVariable=false
-	//      (unlike UButton/UWidgetSwitcher), so synthesized hosts never become class properties
+	//   1. The overlay host and its hosted pages must be exposed as variables: UOverlay and the
+	//      hosted page types (e.g. UCanvasPanel) default bIsVariable=false (unlike
+	//      UButton/UWidgetSwitcher), so synthesized hosts/pages never become class properties
 	//      otherwise.
 	//   2. The generated TArray<int32> history member variable, needed by any resolved Navigate
 	//      (push) or Back (pop) wiring. AddMemberVariable refuses to duplicate an existing name,
@@ -724,13 +825,39 @@ void WireSimplePrototypeBindings(
 			|| Kind == EUMGPrototypeNavigationStepKind::Back;
 	};
 
-	bool bNeedsSkeletonRefresh = false;
-	if (OverlayHost
-		&& MouseBindings.ContainsByPredicate(ReachesOverlayHost)
-		&& !FindFProperty<FObjectProperty>(WBP->SkeletonGeneratedClass, OverlayHost->GetFName()))
+	// The hosted pages are the Back reset list; the overlay chains address them by class property.
+	TArray<UWidget*> OverlayHostPages;
+	if (OverlayHost)
 	{
-		OverlayHost->bIsVariable = true;
-		bNeedsSkeletonRefresh = true;
+		for (int32 ChildIndex = 0; ChildIndex < OverlayHost->GetChildrenCount(); ++ChildIndex)
+		{
+			if (UWidget* HostedPage = OverlayHost->GetChildAt(ChildIndex))
+			{
+				OverlayHostPages.Add(HostedPage);
+			}
+		}
+	}
+
+	bool bNeedsSkeletonRefresh = false;
+	if (OverlayHost && MouseBindings.ContainsByPredicate(ReachesOverlayHost))
+	{
+		TArray<UWidget*> OverlayVariableTargets;
+		if (!FindFProperty<FObjectProperty>(WBP->SkeletonGeneratedClass, OverlayHost->GetFName()))
+		{
+			OverlayVariableTargets.Add(OverlayHost);
+		}
+		for (UWidget* HostedPage : OverlayHostPages)
+		{
+			if (!FindFProperty<FObjectProperty>(WBP->SkeletonGeneratedClass, HostedPage->GetFName()))
+			{
+				OverlayVariableTargets.Add(HostedPage);
+			}
+		}
+		for (UWidget* Widget : OverlayVariableTargets)
+		{
+			Widget->bIsVariable = true;
+			bNeedsSkeletonRefresh = true;
+		}
 	}
 
 	const FName HistoryName(NavHistoryVariableName);
@@ -823,22 +950,50 @@ void WireSimplePrototypeBindings(
 		switch (Step.Kind)
 		{
 		case EUMGPrototypeNavigationStepKind::Overlay:
+		{
+			// Host + page visibility: show the host, then the hosted target page (both layers must
+			// switch to SelfHitTestInvisible; a visible page under a collapsed host stays hidden).
+			FObjectProperty* OverlayPageProperty = FindFProperty<FObjectProperty>(
+				WBP->SkeletonGeneratedClass, Resolved.OverlayPageWidgetName);
+			if (!OverlayPageProperty)
+			{
+				SkipBinding(OutWarnings, FString::Printf(
+					TEXT("trigger '%s': overlay page '%s' has no skeleton class property after refresh"),
+					*Binding.TriggerWidgetId, *Resolved.OverlayPageWidgetName.ToString()));
+				bChainValid = false;
+				break;
+			}
 			bChainValid = AppendSetVisibilityCall(Ubergraph, WBP, Functions,
 				OverlayHostProperty, ESlateVisibility::SelfHitTestInvisible, Layout)
+				&& AppendSetVisibilityCall(Ubergraph, WBP, Functions,
+					OverlayPageProperty, ESlateVisibility::SelfHitTestInvisible, Layout)
 				&& LinkExecChain(Layout.ExecChain);
 			break;
+		}
 
 		case EUMGPrototypeNavigationStepKind::Back:
 		{
-			// Overlay host first: Back always collapses it before touching history (see
-			// AppendSetVisibilityCall for the simplification note).
+			// Overlay host first: Back always collapses it before touching history; every hosted
+			// page collapses with it so a later different overlay opens clean.
 			if (OverlayHost && OverlayHostProperty)
 			{
 				bChainValid = AppendSetVisibilityCall(Ubergraph, WBP, Functions,
 					OverlayHostProperty, ESlateVisibility::Collapsed, Layout);
 			}
+			if (bChainValid)
+			{
+				for (UWidget* HostedPage : OverlayHostPages)
+				{
+					if (FObjectProperty* PageProperty = FindFProperty<FObjectProperty>(
+							WBP->SkeletonGeneratedClass, HostedPage->GetFName()))
+					{
+						bChainValid = AppendSetVisibilityCall(Ubergraph, WBP, Functions,
+							PageProperty, ESlateVisibility::Collapsed, Layout) && bChainValid;
+					}
+				}
+			}
 			if (bChainValid && (!Switcher || !SwitcherProperty || !Functions.ArrayIsEmpty
-				|| !Functions.ArrayLastIndex || !Functions.ArrayRemove))
+				|| !Functions.ArrayLastIndex || !Functions.ArrayGet || !Functions.ArrayRemove))
 			{
 				bChainValid = false;
 				SkipBinding(OutWarnings, FString::Printf(
@@ -874,6 +1029,24 @@ void WireSimplePrototypeBindings(
 					LinkArrayPin(Ubergraph, HistoryGet->GetValuePin(), TargetArrayPin);
 				}
 
+				// The history stores VALUES (the page that was left), not positions in this array:
+				// the pop must read history[last index] through Array_Get. Feeding LastIndex's
+				// return straight into SetActiveWidgetIndex only works while every entry equals
+				// its own index (single-step history); [0,2] would otherwise jump to page 1.
+				UK2Node_CallArrayFunction* LastValueNode = CreateArrayCallNode(Ubergraph, Functions.ArrayGet);
+				Layout.PlacePure(LastValueNode); // BlueprintPure
+				if (UEdGraphPin* TargetArrayPin = LastValueNode->FindPin(TEXT("TargetArray"), EGPD_Input))
+				{
+					LinkArrayPin(Ubergraph, HistoryGet->GetValuePin(), TargetArrayPin);
+				}
+				if (UEdGraphPin* GetIndexPin = LastValueNode->FindPin(TEXT("Index"), EGPD_Input))
+				{
+					if (UEdGraphPin* LastIndexPin = LastIndexNode->FindPin(TEXT("ReturnValue"), EGPD_Output))
+					{
+						LastIndexPin->MakeLinkTo(GetIndexPin);
+					}
+				}
+
 				// False path (history non-empty): jump to the recorded page, then drop that entry.
 				// The true path (empty history) is an intentional no-op end.
 				TArray<UEdGraphNode*> PopChain;
@@ -894,9 +1067,11 @@ void WireSimplePrototypeBindings(
 				PlacePopExec(SwitchNode);
 				if (UEdGraphPin* IndexPin = SwitchNode->FindPin(TEXT("Index"), EGPD_Input))
 				{
-					if (UEdGraphPin* LastIndexPin = LastIndexNode->FindPin(TEXT("ReturnValue"), EGPD_Output))
+					// Array_Get returns its value through the "Item" out-param (BlueprintInternalUseOnly
+					// array helper; the engine's own Get node uses the same UK2Node_CallArrayFunction).
+					if (UEdGraphPin* LastValuePin = LastValueNode->FindPin(TEXT("Item"), EGPD_Output))
 					{
-						LastIndexPin->MakeLinkTo(IndexPin);
+						LastValuePin->MakeLinkTo(IndexPin);
 					}
 				}
 				if (UEdGraphPin* SelfPin = SwitchNode->FindPin(UEdGraphSchema_K2::PN_Self, EGPD_Input))
@@ -947,11 +1122,19 @@ void WireSimplePrototypeBindings(
 					*Binding.TriggerWidgetId, *SwitcherBaseName));
 				break;
 			}
-			if (Resolved.bTransitionChain && Resolved.OutgoingAnimationName != NAME_None)
+			// Chain shape by which transition animations resolved (the animation builder generates
+			// out-only for MOVE_OUT, in-only for MOVE_IN, both otherwise):
+			// - both: out -> delay -> switch -> in (bidirectional/fade keep the classic chain);
+			// - out only: out -> delay -> switch -> reset translation (no incoming animation exists
+			//   to restore the slide, so the switcher would stay translated off-screen);
+			// - in only: switch -> in (switch first; a pre-switch delay would be dead time).
+			const bool bHasOutgoing = Resolved.bTransitionChain && Resolved.OutgoingAnimationName != NAME_None;
+			const bool bHasIncoming = Resolved.bTransitionChain && Resolved.IncomingAnimationName != NAME_None;
+			if (bHasOutgoing)
 			{
 				AppendPlayAnimationCall(Ubergraph, WBP, Functions, Resolved.OutgoingAnimationName, Layout);
 			}
-			if (Resolved.bTransitionChain)
+			if (bHasOutgoing)
 			{
 				UK2Node_CallFunction* DelayNode = CreateMarkerNode<UK2Node_CallFunction>(Ubergraph,
 					[&Functions](UK2Node_CallFunction* Node)
@@ -968,9 +1151,13 @@ void WireSimplePrototypeBindings(
 			}
 			bChainValid = AppendNavigateTail(Ubergraph, WBP, Functions,
 				SwitcherProperty, HistoryProperty, Resolved.TargetPageIndex, Layout);
-			if (bChainValid && Resolved.bTransitionChain && Resolved.IncomingAnimationName != NAME_None)
+			if (bChainValid && bHasIncoming)
 			{
 				AppendPlayAnimationCall(Ubergraph, WBP, Functions, Resolved.IncomingAnimationName, Layout);
+			}
+			if (bChainValid && bHasOutgoing && !bHasIncoming)
+			{
+				bChainValid = AppendSetRenderTranslationReset(Ubergraph, WBP, Functions, SwitcherProperty, Layout);
 			}
 			if (bChainValid)
 			{

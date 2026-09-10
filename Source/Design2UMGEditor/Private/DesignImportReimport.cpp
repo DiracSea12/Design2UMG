@@ -80,6 +80,7 @@ namespace DesignImportPipeline
 		Shared.WidgetTree = WBP->WidgetTree;
 		Shared.HostPanel = Cast<UPanelWidget>(WBP->WidgetTree->RootWidget);
 		Shared.DesignSize = DesignSize;
+		Shared.GenerationSettings = &GenerationSettings;
 		Shared.OwnedNames = &ManifestOwnedNames;
 		Shared.InstancesById = &InstancesById;
 		Shared.MappingBuildState = &MappingBuildState;

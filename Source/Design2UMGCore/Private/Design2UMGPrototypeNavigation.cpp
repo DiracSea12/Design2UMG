@@ -3,6 +3,7 @@
 #include "Design2UMGPrototypeNavigation.h"
 
 #include "Design2UMGGeneratedNameSuffixes.h"
+#include "Design2UMGLog.h"
 #include "Design2UMGPrototypeStepGraph.h"
 #include "UMGSchema.h"
 #include "UMGSchemaSourceExtensions.h"
@@ -18,29 +19,35 @@ namespace
 		PageWidget.Slot = FUMGSlotData();
 	}
 
-	FUMGWidgetNode BuildPrototypeSwitcherRoot(
-		TArray<FUMGWidgetNode>&& PageWidgets,
-		const FUMGPrototypeNavigationData& NavigationData)
+	/** TargetPageId set of one action kind across all bindings (steps are the executable shape; the binding-level fields cover the legacy no-steps export). */
+	TSet<FString> CollectActionTargetPageIds(
+		const FUMGPrototypeNavigationData& NavigationData,
+		EUMGPrototypeNavigationStepKind Kind)
 	{
-		FUMGWidgetNode Switcher;
-		Switcher.Type = UMGWidgetTypes::WidgetSwitcher;
-		Switcher.Id = NavigationData.SwitcherWidgetId;
-		Switcher.Name = NavigationData.SwitcherWidgetName;
-		Switcher.WidgetState.ActiveWidgetIndex = NavigationData.InitialPageIndex;
+		const EUMGPrototypeNavigationAction LegacyAction =
+			Kind == EUMGPrototypeNavigationStepKind::Overlay
+				? EUMGPrototypeNavigationAction::Overlay
+				: EUMGPrototypeNavigationAction::Navigate;
 
-		float MaxWidth = 0.0f;
-		float MaxHeight = 0.0f;
-		for (FUMGWidgetNode& PageWidget : PageWidgets)
+		TSet<FString> Targets;
+		for (const FUMGPrototypeNavigationBinding& Binding : NavigationData.ClickBindings)
 		{
-			ResetPrototypePageForSwitcher(PageWidget);
-			MaxWidth = FMath::Max(MaxWidth, PageWidget.Bounds.W);
-			MaxHeight = FMath::Max(MaxHeight, PageWidget.Bounds.H);
-			Switcher.Children.Add(MoveTemp(PageWidget));
+			if (Binding.Steps.Num() > 0)
+			{
+				for (const FUMGPrototypeNavigationStep& Step : Binding.Steps)
+				{
+					if (Step.Kind == Kind)
+					{
+						Targets.Add(Step.TargetPageId);
+					}
+				}
+			}
+			else if (Binding.Action == LegacyAction)
+			{
+				Targets.Add(Binding.TargetPageId);
+			}
 		}
-
-		Switcher.Bounds.W = MaxWidth;
-		Switcher.Bounds.H = MaxHeight;
-		return Switcher;
+		return Targets;
 	}
 }
 
@@ -92,7 +99,66 @@ namespace Design2UMGPrototypeNavigation
 		TArray<FUMGWidgetNode>&& PageWidgets,
 		const FUMGPrototypeNavigationData& NavigationData)
 	{
-		FUMGWidgetNode BaseSwitcher = BuildPrototypeSwitcherRoot(MoveTemp(PageWidgets), NavigationData);
+		// Overlay-target pages are parented under the overlay host at build time (Collapsed, Fill):
+		// the runtime wiring then only toggles visibility, never reparents. A page that is also a
+		// Navigate target must stay a switcher child (the switcher owns the page flow); the wiring
+		// drops that page's overlay binding with a warning instead of breaking the navigate flow.
+		const TSet<FString> OverlayPageIds = CollectActionTargetPageIds(
+			NavigationData, EUMGPrototypeNavigationStepKind::Overlay);
+		const TSet<FString> NavigatePageIds = CollectActionTargetPageIds(
+			NavigationData, EUMGPrototypeNavigationStepKind::Navigate);
+
+		FUMGWidgetNode BaseSwitcher;
+		BaseSwitcher.Type = UMGWidgetTypes::WidgetSwitcher;
+		BaseSwitcher.Id = NavigationData.SwitcherWidgetId;
+		BaseSwitcher.Name = NavigationData.SwitcherWidgetName;
+
+		float MaxWidth = 0.0f;
+		float MaxHeight = 0.0f;
+		int32 SwitcherChildCount = 0;
+		bool bInitialPageIsOverlay = false;
+		TArray<FUMGWidgetNode> OverlayPages;
+		const int32 InitialPagePosition = NavigationData.InitialPageIndex;
+		for (int32 PageIndex = 0; PageIndex < PageWidgets.Num(); ++PageIndex)
+		{
+			FUMGWidgetNode& PageWidget = PageWidgets[PageIndex];
+			ResetPrototypePageForSwitcher(PageWidget);
+			// The design size is the max over ALL pages: an overlay page larger than the flow
+			// pages must not shrink the switcher by moving under the host.
+			MaxWidth = FMath::Max(MaxWidth, PageWidget.Bounds.W);
+			MaxHeight = FMath::Max(MaxHeight, PageWidget.Bounds.H);
+
+			const bool bOverlayPage = OverlayPageIds.Contains(PageWidget.Id)
+				&& !NavigatePageIds.Contains(PageWidget.Id);
+			bInitialPageIsOverlay |= bOverlayPage && PageIndex == InitialPagePosition;
+			if (bOverlayPage)
+			{
+				PageWidget.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
+				PageWidget.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
+				PageWidget.WidgetStyle.Visibility = TEXT("Collapsed");
+				OverlayPages.Add(MoveTemp(PageWidget));
+				continue;
+			}
+			if (PageIndex == InitialPagePosition)
+			{
+				BaseSwitcher.WidgetState.ActiveWidgetIndex = SwitcherChildCount;
+			}
+			++SwitcherChildCount;
+			BaseSwitcher.Children.Add(MoveTemp(PageWidget));
+		}
+		if (bInitialPageIsOverlay)
+		{
+			// The switcher only renders flow pages, so an overlay-target start page falls back to
+			// the first flow page (ActiveWidgetIndex stays unset = engine default 0).
+			UE_LOG(LogDesign2UMG, Warning,
+				TEXT("PrototypeNavigation: the initial page is an overlay target ('%s'); the switcher starts on the first non-overlay page instead"),
+				InitialPagePosition >= 0 && InitialPagePosition < NavigationData.PageIds.Num()
+					? *NavigationData.PageIds[InitialPagePosition]
+					: TEXT("(unknown)"));
+		}
+
+		BaseSwitcher.Bounds.W = MaxWidth;
+		BaseSwitcher.Bounds.H = MaxHeight;
 		if (!NavigationData.HasOverlayBindings())
 		{
 			return BaseSwitcher;
@@ -105,6 +171,7 @@ namespace Design2UMGPrototypeNavigation
 		OverlayHost.Bounds = BaseSwitcher.Bounds;
 		OverlayHost.Slot = FUMGSlotData();
 		OverlayHost.WidgetStyle.Visibility = TEXT("Collapsed");
+		OverlayHost.Children = MoveTemp(OverlayPages);
 
 		BaseSwitcher.Bounds.X = 0.0f;
 		BaseSwitcher.Bounds.Y = 0.0f;

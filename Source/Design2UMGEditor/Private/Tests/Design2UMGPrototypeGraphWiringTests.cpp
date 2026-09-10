@@ -10,6 +10,7 @@
 #include "UMGGenerator.h"
 #include "UMGPrototypeAnimationBuilder.h"
 #include "UMGSchemaSourceExtensions.h"
+#include "UMGWidgetUtils.h"
 
 #include "Animation/MovieScene2DTransformSection.h"
 #include "Animation/MovieScene2DTransformTrack.h"
@@ -29,6 +30,7 @@
 #include "Engine/Blueprint.h"
 #include "Engine/ComponentDelegateBinding.h"
 #include "Engine/DynamicBlueprintBinding.h"
+#include "Engine/LatentActionManager.h"
 #include "Engine/MemberReference.h"
 #include "InputCoreTypes.h"
 #include "K2Node_CallArrayFunction.h"
@@ -141,6 +143,58 @@ namespace
 		return MakeFigmaDocJson(
 			FString::Printf(TEXT("%s,%s"),
 				*MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240, NavButtonJson),
+				*PageTwoJson),
+			TEXT(",\"prototypeStartNodeID\":\"1:1\""));
+	}
+
+	// Three pages in document order (indices 0,1,2): 0 navigates to 2, 2 navigates to 1, 1 has Back.
+	// The multi-step history [0,2] pins the pop semantics: Back must return to page 2 (the last
+	// VALUE), not page 1 (the last INDEX).
+	const FString MultiStepNavigateBackPrototypeJson()
+	{
+		const FString FirstNavJson = MakeLeafNode(TEXT("nav_first"), TEXT("ToThree"), TEXT("RECTANGLE"), 40, 40, 120, 44, FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"3:1\",\"navigation\":\"NAVIGATE\"}]}]"),
+			*MakeSolidFillJson(0.1, 0.4, 0.9)));
+		const FString SecondNavJson = MakeLeafNode(TEXT("nav_second"), TEXT("ToTwo"), TEXT("RECTANGLE"), 40, 40, 120, 44, FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"NAVIGATE\"}]}]"),
+			*MakeSolidFillJson(0.2, 0.6, 0.8)));
+		const FString BackJson = MakeLeafNode(TEXT("back_button"), TEXT("Back"), TEXT("RECTANGLE"), 40, 40, 120, 44, FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"BACK\"}]}]"),
+			*MakeSolidFillJson(0.8, 0.3, 0.2)));
+		return MakeFigmaDocJson(
+			FString::Printf(TEXT("%s,%s,%s"),
+				*MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240, FirstNavJson),
+				*MakeContainerNode(TEXT("2:1"), TEXT("PageTwo"), TEXT("FRAME"), 0, 0, 360, 240, BackJson),
+				*MakeContainerNode(TEXT("3:1"), TEXT("PageThree"), TEXT("FRAME"), 0, 0, 360, 240, SecondNavJson)),
+			TEXT(",\"prototypeStartNodeID\":\"1:1\""));
+	}
+
+	const FString MoveOutNavigatePrototypeJson()
+	{
+		const FString CtaButtonJson = MakeLeafNode(TEXT("cta_button"), TEXT("CTA"), TEXT("RECTANGLE"), 40, 60, 120, 44, FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"NAVIGATE\",\"transition\":{\"type\":\"MOVE_OUT\",\"direction\":\"LEFT\",\"duration\":200,\"easing\":{\"type\":\"EASE_IN_AND_OUT\"}}}]}]"),
+			*MakeSolidFillJson(0.1, 0.4, 0.9)));
+		const FString PageTwoJson = MakeContainerNode(TEXT("2:1"), TEXT("PageTwo"), TEXT("FRAME"), 0, 0, 360, 240,
+			MakeTextNode(TEXT("page2_title"), TEXT("Done"), 32, 48, 120, 32, TEXT("Done"),
+				TEXT("\"fontFamily\":\"Inter\",\"fontSize\":24,\"fontWeight\":600,\"textAlignHorizontal\":\"LEFT\",\"textAlignVertical\":\"TOP\",\"textDecoration\":\"NONE\",\"letterSpacing\":0,\"lineHeightUnit\":\"AUTO\",\"lineHeightPx\":0")));
+		return MakeFigmaDocJson(
+			FString::Printf(TEXT("%s,%s"),
+				*MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240, CtaButtonJson),
+				*PageTwoJson),
+			TEXT(",\"prototypeStartNodeID\":\"1:1\""));
+	}
+
+	const FString MoveInNavigatePrototypeJson()
+	{
+		const FString CtaButtonJson = MakeLeafNode(TEXT("cta_button"), TEXT("CTA"), TEXT("RECTANGLE"), 40, 60, 120, 44, FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"NAVIGATE\",\"transition\":{\"type\":\"MOVE_IN\",\"direction\":\"LEFT\",\"duration\":200,\"easing\":{\"type\":\"EASE_IN_AND_OUT\"}}}]}]"),
+			*MakeSolidFillJson(0.1, 0.4, 0.9)));
+		const FString PageTwoJson = MakeContainerNode(TEXT("2:1"), TEXT("PageTwo"), TEXT("FRAME"), 0, 0, 360, 240,
+			MakeTextNode(TEXT("page2_title"), TEXT("Done"), 32, 48, 120, 32, TEXT("Done"),
+				TEXT("\"fontFamily\":\"Inter\",\"fontSize\":24,\"fontWeight\":600,\"textAlignHorizontal\":\"LEFT\",\"textAlignVertical\":\"TOP\",\"textDecoration\":\"NONE\",\"letterSpacing\":0,\"lineHeightUnit\":\"AUTO\",\"lineHeightPx\":0")));
+		return MakeFigmaDocJson(
+			FString::Printf(TEXT("%s,%s"),
+				*MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240, CtaButtonJson),
 				*PageTwoJson),
 			TEXT(",\"prototypeStartNodeID\":\"1:1\""));
 	}
@@ -1073,8 +1127,9 @@ bool FFigmaPrototypeOverlayGraphWiringTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Phase 3 Back wiring: Branch on Array_IsEmpty(history) guarding SetActiveWidgetIndex(Array_LastIndex)
-// -> Array_Remove, with the overlay host collapsed first when one exists.
+// Phase 3 Back wiring: Branch on Array_IsEmpty(history) guarding SetActiveWidgetIndex(Array_Get at
+// Array_LastIndex) -> Array_Remove (still at Array_LastIndex: history stores values, not positions),
+// with the overlay host and every hosted page collapsed first when they exist.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeBackGraphWiringTest,
 	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.Back",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -1146,11 +1201,22 @@ bool FFigmaPrototypeBackGraphWiringTest::RunTest(const FString& Parameters)
 		return false;
 	}
 	const UEdGraphPin* IndexPin = SwitchNode->FindPin(TEXT("Index"), EGPD_Input);
-	TestTrue(TEXT("Pop index comes from Array_LastIndex"),
+	TestTrue(TEXT("Pop index comes from Array_Get"),
 		IndexPin && IndexPin->LinkedTo.Num() == 1
 		&& IndexPin->LinkedTo[0]->GetOwningNode()->GetClass() == UK2Node_CallArrayFunction::StaticClass()
 		&& static_cast<const UK2Node_CallFunction*>(IndexPin->LinkedTo[0]->GetOwningNode())
-			->FunctionReference.GetMemberName() == TEXT("Array_LastIndex"));
+			->FunctionReference.GetMemberName() == TEXT("Array_Get"));
+	TestTrue(TEXT("Array_Get reads the history at Array_LastIndex"),
+		IndexPin && [&]()
+		{
+			const UEdGraphPin* GetIndexPin = IndexPin->LinkedTo.Num() == 1
+				? IndexPin->LinkedTo[0]->GetOwningNode()->FindPin(TEXT("Index"), EGPD_Input)
+				: nullptr;
+			return GetIndexPin && GetIndexPin->LinkedTo.Num() == 1
+				&& GetIndexPin->LinkedTo[0]->GetOwningNode()->GetClass() == UK2Node_CallArrayFunction::StaticClass()
+				&& static_cast<const UK2Node_CallFunction*>(GetIndexPin->LinkedTo[0]->GetOwningNode())
+					->FunctionReference.GetMemberName() == TEXT("Array_LastIndex");
+		}());
 
 	const UK2Node_CallFunction* RemoveNode = NextExecCall(SwitchNode);
 	TestTrue(TEXT("Pop continues into Array_Remove"),
@@ -1473,6 +1539,337 @@ bool FFigmaPrototypeKeyDownOverrideSpikeTest::RunTest(const FString& Parameters)
 			? Cast<UWidgetBlueprintGeneratedClass>(WBP->GeneratedClass)->FindFunctionByName(TEXT("OnKeyDown"))
 			: nullptr);
 
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
+// Multi-step Back runtime smoke: history stores the VALUES of the left pages, so popping [0,2]
+// must land on page 2 (the last value), not page 1 (the last index). Empty history stays a no-op.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeBackMultiStepRuntimeSmokeTest,
+	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.BackMultiStepRuntimeSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaPrototypeBackMultiStepRuntimeSmokeTest::RunTest(const FString& Parameters)
+{
+	FDesignDocument Document;
+	FUMGWidgetData Data;
+	if (!TestTrue(TEXT("Convert multi-step navigate+back prototype fixture"), ConvertPrototype(MultiStepNavigateBackPrototypeJson(), Document, Data)))
+	{
+		return false;
+	}
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/ProtoNavWiringBackMultiStep");
+	DeleteGeneratedAssetsAtPath(OutputPath);
+
+	FUMGPrototypeNavigationData NavigationData;
+	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(
+		Data, OutputPath, nullptr, nullptr, &NavigationData);
+	if (!TestTrue(TEXT("Build multi-step navigate+back widget blueprint"), WBP != nullptr)
+		|| !TestTrue(TEXT("Save multi-step navigate+back widget blueprint"),
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	UWidgetBlueprintGeneratedClass* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(WBP->GeneratedClass);
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	UUserWidget* WidgetInstance = GeneratedClass && World ? CreateWidget<UUserWidget>(World, GeneratedClass) : nullptr;
+	if (!TestTrue(TEXT("Widget instance created"), WidgetInstance != nullptr))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	WidgetInstance->TakeWidget();
+
+	UWidgetSwitcher* Switcher = Cast<UWidgetSwitcher>(
+		WidgetInstance->WidgetTree ? WidgetInstance->WidgetTree->FindWidget(FName(*NavigationData.SwitcherWidgetName)) : nullptr);
+	UButton* FirstNavButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("nav_first"))) : nullptr;
+	UButton* SecondNavButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("nav_second"))) : nullptr;
+	UButton* BackButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("back_button"))) : nullptr;
+	if (!TestTrue(TEXT("Switcher exists"), Switcher != nullptr)
+		|| !TestTrue(TEXT("First navigate button exists"), FirstNavButton != nullptr)
+		|| !TestTrue(TEXT("Second navigate button exists"), SecondNavButton != nullptr)
+		|| !TestTrue(TEXT("Back button exists"), BackButton != nullptr))
+	{
+		WidgetInstance->RemoveFromParent();
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	TestEqual(TEXT("Initial active page"), Switcher->GetActiveWidgetIndex(), 0);
+
+	// 0 -> 2 -> 1 builds the history [0, 2]: page indices do not equal their own positions.
+	FirstNavButton->OnClicked.Broadcast();
+	TestEqual(TEXT("First navigate switches to page 2"), Switcher->GetActiveWidgetIndex(), 2);
+	SecondNavButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Second navigate switches to page 1"), Switcher->GetActiveWidgetIndex(), 1);
+
+	// Back over history [0, 2]: the last VALUE is 2. Reading the last INDEX instead would switch
+	// to page 1 (a visible no-move) - exactly the regression this test pins.
+	BackButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Back returns to the last recorded page value (2), not the last index (1)"),
+		Switcher->GetActiveWidgetIndex(), 2);
+	BackButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Second back unwinds to the first recorded page"), Switcher->GetActiveWidgetIndex(), 0);
+
+	// Empty history: Back must not move the page.
+	BackButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Back on empty history is a no-op"), Switcher->GetActiveWidgetIndex(), 0);
+
+	WidgetInstance->RemoveFromParent();
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
+// Overlay runtime smoke: the overlay-target page is parented under the host at build time
+// (Collapsed), the open chain shows host + page while the switcher page stays active, and Back
+// collapses both layers again.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeOverlayRuntimeSmokeTest,
+	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.OverlayRuntimeSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaPrototypeOverlayRuntimeSmokeTest::RunTest(const FString& Parameters)
+{
+	FDesignDocument Document;
+	FUMGWidgetData Data;
+	if (!TestTrue(TEXT("Convert overlay prototype fixture"), ConvertPrototype(OverlayBackPrototypeJson(), Document, Data)))
+	{
+		return false;
+	}
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/ProtoNavWiringOverlaySmoke");
+	DeleteGeneratedAssetsAtPath(OutputPath);
+
+	FUMGPrototypeNavigationData NavigationData;
+	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(
+		Data, OutputPath, nullptr, nullptr, &NavigationData);
+	if (!TestTrue(TEXT("Build overlay widget blueprint"), WBP != nullptr)
+		|| !TestTrue(TEXT("Save overlay widget blueprint"),
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	// Structural contract of the built tree: the overlay-target page lives under the host
+	// (Collapsed by default) and is NOT a switcher child; the flow page stays in the switcher.
+	UOverlay* HostTemplate = WBP->WidgetTree
+		? Cast<UOverlay>(WBP->WidgetTree->FindWidget(FName(*NavigationData.OverlayHostWidgetName)))
+		: nullptr;
+	UWidgetSwitcher* SwitcherTemplate = WBP->WidgetTree
+		? Cast<UWidgetSwitcher>(WBP->WidgetTree->FindWidget(FName(*NavigationData.SwitcherWidgetName)))
+		: nullptr;
+	if (!TestNotNull(TEXT("Overlay host exists in the built tree"), HostTemplate)
+		|| !TestNotNull(TEXT("Switcher exists in the built tree"), SwitcherTemplate))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	TestEqual(TEXT("Overlay host starts collapsed"), HostTemplate->GetVisibility(), ESlateVisibility::Collapsed);
+	TestEqual(TEXT("Overlay-target page is parented under the host"), HostTemplate->GetChildrenCount(), 1);
+	UWidget* HostedPageTemplate = HostTemplate->GetChildAt(0);
+	TestTrue(TEXT("Hosted page is the overlay target (2:1)"),
+		HostedPageTemplate && FUMGWidgetUtils::MatchesWidgetBaseName(
+			HostedPageTemplate->GetName(), FUMGWidgetUtils::SanitizeWidgetName(TEXT("2:1"), TEXT("CanvasPanel")).ToString()));
+	TestEqual(TEXT("Hosted page defaults to collapsed"), HostedPageTemplate->GetVisibility(), ESlateVisibility::Collapsed);
+	TestEqual(TEXT("Switcher keeps only the non-overlay flow page"), SwitcherTemplate->GetChildrenCount(), 1);
+
+	UWidgetBlueprintGeneratedClass* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(WBP->GeneratedClass);
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	UUserWidget* WidgetInstance = GeneratedClass && World ? CreateWidget<UUserWidget>(World, GeneratedClass) : nullptr;
+	if (!TestTrue(TEXT("Widget instance created"), WidgetInstance != nullptr))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	WidgetInstance->TakeWidget();
+
+	UWidgetSwitcher* Switcher = Cast<UWidgetSwitcher>(
+		WidgetInstance->WidgetTree ? WidgetInstance->WidgetTree->FindWidget(FName(*NavigationData.SwitcherWidgetName)) : nullptr);
+	UOverlay* Host = WidgetInstance->WidgetTree
+		? Cast<UOverlay>(WidgetInstance->WidgetTree->FindWidget(FName(*NavigationData.OverlayHostWidgetName)))
+		: nullptr;
+	UButton* OverlayButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("overlay_button"))) : nullptr;
+	UButton* BackButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("back_button"))) : nullptr;
+	UWidget* HostedPage = Host ? Host->GetChildAt(0) : nullptr;
+	if (!TestTrue(TEXT("Runtime switcher exists"), Switcher != nullptr)
+		|| !TestTrue(TEXT("Runtime overlay host exists"), Host != nullptr)
+		|| !TestTrue(TEXT("Runtime hosted page exists"), HostedPage != nullptr)
+		|| !TestTrue(TEXT("Overlay button exists"), OverlayButton != nullptr)
+		|| !TestTrue(TEXT("Back button exists"), BackButton != nullptr))
+	{
+		WidgetInstance->RemoveFromParent();
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	TestEqual(TEXT("Overlay content starts hidden"), HostedPage->GetVisibility(), ESlateVisibility::Collapsed);
+	TestEqual(TEXT("Initial active page"), Switcher->GetActiveWidgetIndex(), 0);
+
+	// Open: both the host and the hosted page turn visible; the switcher page stays active
+	// (an overlay rides on top, it does not navigate).
+	OverlayButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Overlay open shows the host"), Host->GetVisibility(), ESlateVisibility::SelfHitTestInvisible);
+	TestEqual(TEXT("Overlay open shows the hosted page"), HostedPage->GetVisibility(), ESlateVisibility::SelfHitTestInvisible);
+	TestEqual(TEXT("Overlay keeps the active switcher page unchanged"), Switcher->GetActiveWidgetIndex(), 0);
+
+	// Back: both layers collapse again (the page reset keeps a later different overlay clean).
+	BackButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Back collapses the host"), Host->GetVisibility(), ESlateVisibility::Collapsed);
+	TestEqual(TEXT("Back collapses the hosted page"), HostedPage->GetVisibility(), ESlateVisibility::Collapsed);
+	TestEqual(TEXT("Back leaves the empty-history page alone"), Switcher->GetActiveWidgetIndex(), 0);
+
+	WidgetInstance->RemoveFromParent();
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
+// MOVE_OUT runtime smoke: outgoing-only slide transitions have no incoming animation to restore
+// the switcher's render transform, so the chain must explicitly reset it after the switch. The
+// translation is pre-set (simulating the finished outgoing slide, which the test harness never
+// ticks) so a missing reset node leaves it non-zero and fails the test.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeMoveOutTransitionRuntimeSmokeTest,
+	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.MoveOutRuntimeSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaPrototypeMoveOutTransitionRuntimeSmokeTest::RunTest(const FString& Parameters)
+{
+	FDesignDocument Document;
+	FUMGWidgetData Data;
+	if (!TestTrue(TEXT("Convert MOVE_OUT navigate prototype fixture"), ConvertPrototype(MoveOutNavigatePrototypeJson(), Document, Data)))
+	{
+		return false;
+	}
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/ProtoNavWiringMoveOut");
+	DeleteGeneratedAssetsAtPath(OutputPath);
+
+	FUMGPrototypeNavigationData NavigationData;
+	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(
+		Data, OutputPath, nullptr, nullptr, &NavigationData);
+	if (!TestTrue(TEXT("Build MOVE_OUT widget blueprint"), WBP != nullptr)
+		|| !TestTrue(TEXT("Save MOVE_OUT widget blueprint"),
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	// MOVE_OUT generates exactly the outgoing slide; no incoming animation exists.
+	TestEqual(TEXT("MOVE_OUT generates only the outgoing animation"), WBP->Animations.Num(), 1);
+	TestNotNull(TEXT("Outgoing animation generated"), FindGeneratedAnimation(WBP, TEXT("__d2u_nav_anim_000_out")));
+	TestNull(TEXT("No incoming animation for MOVE_OUT"), FindGeneratedAnimation(WBP, TEXT("__d2u_nav_anim_000_in")));
+
+	UWidgetBlueprintGeneratedClass* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(WBP->GeneratedClass);
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	UUserWidget* WidgetInstance = GeneratedClass && World ? CreateWidget<UUserWidget>(World, GeneratedClass) : nullptr;
+	if (!TestTrue(TEXT("Widget instance created"), WidgetInstance != nullptr))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	WidgetInstance->TakeWidget();
+
+	UWidgetSwitcher* Switcher = Cast<UWidgetSwitcher>(
+		WidgetInstance->WidgetTree ? WidgetInstance->WidgetTree->FindWidget(FName(*NavigationData.SwitcherWidgetName)) : nullptr);
+	UButton* TriggerButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("cta_button"))) : nullptr;
+	if (!TestTrue(TEXT("Switcher exists"), Switcher != nullptr)
+		|| !TestTrue(TEXT("Trigger button exists"), TriggerButton != nullptr))
+	{
+		WidgetInstance->RemoveFromParent();
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	// Stand in for the finished outgoing slide: the switcher is left translated off-screen.
+	Switcher->SetRenderTranslation(FVector2D(360.0f, 0.0f));
+
+	TriggerButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Page switch waits for the outgoing delay"), Switcher->GetActiveWidgetIndex(), 0);
+	const FObjectProperty* OutgoingAnimationProperty = FindFProperty<FObjectProperty>(
+		GeneratedClass, FName(TEXT("__d2u_nav_anim_000_out")));
+	UWidgetAnimation* OutgoingAnimation = OutgoingAnimationProperty
+		? Cast<UWidgetAnimation>(OutgoingAnimationProperty->GetObjectPropertyValue_InContainer(WidgetInstance))
+		: nullptr;
+	TestTrue(TEXT("Outgoing slide animation is playing"), OutgoingAnimation && WidgetInstance->IsAnimationPlaying(OutgoingAnimation));
+
+	if (World)
+	{
+		World->GetLatentActionManager().ProcessLatentActions(WidgetInstance, 0.5f);
+	}
+	TestEqual(TEXT("MOVE_OUT completes the page switch"), Switcher->GetActiveWidgetIndex(), 1);
+	TestTrue(TEXT("MOVE_OUT resets the switcher translation to the origin"),
+		Switcher->GetRenderTransform().Translation.Equals(FVector2D::ZeroVector));
+
+	WidgetInstance->RemoveFromParent();
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
+// MOVE_IN runtime smoke: incoming-only slide transitions switch FIRST and then play the
+// in-animation; the old chain sat behind a pre-switch delay (dead time with nothing playing).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeMoveInTransitionRuntimeSmokeTest,
+	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.MoveInRuntimeSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaPrototypeMoveInTransitionRuntimeSmokeTest::RunTest(const FString& Parameters)
+{
+	FDesignDocument Document;
+	FUMGWidgetData Data;
+	if (!TestTrue(TEXT("Convert MOVE_IN navigate prototype fixture"), ConvertPrototype(MoveInNavigatePrototypeJson(), Document, Data)))
+	{
+		return false;
+	}
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/ProtoNavWiringMoveIn");
+	DeleteGeneratedAssetsAtPath(OutputPath);
+
+	FUMGPrototypeNavigationData NavigationData;
+	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(
+		Data, OutputPath, nullptr, nullptr, &NavigationData);
+	if (!TestTrue(TEXT("Build MOVE_IN widget blueprint"), WBP != nullptr)
+		|| !TestTrue(TEXT("Save MOVE_IN widget blueprint"),
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	// MOVE_IN generates exactly the incoming slide; no outgoing animation exists.
+	TestEqual(TEXT("MOVE_IN generates only the incoming animation"), WBP->Animations.Num(), 1);
+	TestNull(TEXT("No outgoing animation for MOVE_IN"), FindGeneratedAnimation(WBP, TEXT("__d2u_nav_anim_000_out")));
+	TestNotNull(TEXT("Incoming animation generated"), FindGeneratedAnimation(WBP, TEXT("__d2u_nav_anim_000_in")));
+
+	UWidgetBlueprintGeneratedClass* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(WBP->GeneratedClass);
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	UUserWidget* WidgetInstance = GeneratedClass && World ? CreateWidget<UUserWidget>(World, GeneratedClass) : nullptr;
+	if (!TestTrue(TEXT("Widget instance created"), WidgetInstance != nullptr))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	WidgetInstance->TakeWidget();
+
+	UWidgetSwitcher* Switcher = Cast<UWidgetSwitcher>(
+		WidgetInstance->WidgetTree ? WidgetInstance->WidgetTree->FindWidget(FName(*NavigationData.SwitcherWidgetName)) : nullptr);
+	UButton* TriggerButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("cta_button"))) : nullptr;
+	if (!TestTrue(TEXT("Switcher exists"), Switcher != nullptr)
+		|| !TestTrue(TEXT("Trigger button exists"), TriggerButton != nullptr))
+	{
+		WidgetInstance->RemoveFromParent();
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	// Switch-first chain: the page changes immediately on the click (no pre-switch dead delay).
+	TriggerButton->OnClicked.Broadcast();
+	TestEqual(TEXT("MOVE_IN switches immediately (no pre-switch delay)"), Switcher->GetActiveWidgetIndex(), 1);
+	const FObjectProperty* IncomingAnimationProperty = FindFProperty<FObjectProperty>(
+		GeneratedClass, FName(TEXT("__d2u_nav_anim_000_in")));
+	UWidgetAnimation* IncomingAnimation = IncomingAnimationProperty
+		? Cast<UWidgetAnimation>(IncomingAnimationProperty->GetObjectPropertyValue_InContainer(WidgetInstance))
+		: nullptr;
+	TestTrue(TEXT("Incoming slide animation is playing after the switch"),
+		IncomingAnimation && WidgetInstance->IsAnimationPlaying(IncomingAnimation));
+
+	WidgetInstance->RemoveFromParent();
 	DeleteGeneratedAssetsAtPath(OutputPath);
 	return true;
 }

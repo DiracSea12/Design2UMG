@@ -539,10 +539,11 @@ namespace DesignImportPipeline
 			const FReimportApplySharedState& Shared,
 			TMap<FString, UWidget*>& NewlyCreatedWidgets)
 		{
-			FUMGWidgetNode PrunedChild = Child;
-			PruneManifestInstanceChildren(PrunedChild, *Shared.InstancesById);
-			UWidget* CreatedWidget = FUMGWidgetUtils::CreateWidgetRecursive(
-				Shared.WidgetTree, PrunedChild, Panel, nullptr, &Shared.DesignSize, Shared.MappingBuildState);
+		FUMGWidgetNode PrunedChild = Child;
+		PruneManifestInstanceChildren(PrunedChild, *Shared.InstancesById);
+		UWidget* CreatedWidget = FUMGWidgetUtils::CreateWidgetRecursive(
+			Shared.WidgetTree, PrunedChild, Panel, nullptr, &Shared.DesignSize, Shared.MappingBuildState,
+			nullptr, Shared.GenerationSettings);
 			if (CreatedWidget)
 			{
 				NewlyCreatedWidgets.Add(GetDesignNodeId(Child), CreatedWidget);
