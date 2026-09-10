@@ -553,10 +553,40 @@ namespace
 	}
 
 	/**
-	 * Unique direct child of the overlay host matching the page base name. BuildRoot parents the
-	 * overlay-only pages under the host at build time, so the overlay binding's page and the Back
-	 * reset list both resolve here. Pages still living in the switcher (dual-target or the initial
-	 * page) do not resolve here; their overlay bindings take the swap encoding instead.
+	 * Overlay-exit sequence shared by the Back TRUE branch and the mirror-trigger Navigate chain:
+	 * collapse the host, then every hosted page (a later different overlay then opens clean).
+	 */
+	bool AppendOverlayExitCollapse(
+		UEdGraph* Graph,
+		UWidgetBlueprint* WBP,
+		const FEngineFunctions& Functions,
+		FObjectProperty* OverlayHostProperty,
+		const TArray<UWidget*>& OverlayHostPages,
+		FChainLayout& Layout)
+	{
+		if (!AppendSetVisibilityCall(Graph, WBP, Functions,
+			OverlayHostProperty, ESlateVisibility::Collapsed, Layout))
+		{
+			return false;
+		}
+		bool bValid = true;
+		for (UWidget* HostedPage : OverlayHostPages)
+		{
+			if (FObjectProperty* PageProperty = FindFProperty<FObjectProperty>(
+				WBP->SkeletonGeneratedClass, HostedPage->GetFName()))
+			{
+				bValid = AppendSetVisibilityCall(Graph, WBP, Functions,
+					PageProperty, ESlateVisibility::Collapsed, Layout) && bValid;
+			}
+		}
+		return bValid;
+	}
+
+	/**
+	 * Unique direct child of the overlay host matching the page base name. BuildRoot parents every
+	 * overlay-target page under the host at build time - overlay-only pages under their base name,
+	 * dual-target/initial pages as a mirror copy under base name + OverlayMirrorSuffix - so the
+	 * overlay binding's page and the Back reset list both resolve here.
 	 */
 	UWidget* FindOverlayHostPage(const UOverlay* OverlayHost, const FString& PageBaseName)
 	{
@@ -681,9 +711,10 @@ void WireSimplePrototypeBindings(
 		FName IncomingAnimationName;
 		/** Overlay bindings act on the target page BuildRoot parented under the overlay host. */
 		FName OverlayPageWidgetName;
-		/** Overlay binding whose page stayed in the switcher (dual-target or initial page): the
-		 * binding wires the Navigate chain (history push + switch) instead of host visibility. */
-		bool bOverlaySwapChain = false;
+		/** Overlay-mirror twin of the trigger (dual-target/initial overlay pages only): the visible
+		 *  button inside the open overlay gets its own bound-event chain; NAME_None when the page
+		 *  has no mirror or the twin is not authorable. */
+		FName MirrorTriggerWidgetName;
 		int32 TargetPageIndex = INDEX_NONE;
 		float DelaySeconds = 0.0f;
 		bool bTransitionChain = false;
@@ -744,37 +775,29 @@ void WireSimplePrototypeBindings(
 		}
 		else if (Step.Kind == EUMGPrototypeNavigationStepKind::Overlay)
 		{
-			// BuildRoot parents overlay-only pages under the host at build time; that binding toggles
-			// the page's visibility, so it must resolve as a unique hosted child. A page that stayed
-			// in the switcher (it is also a Navigate target, or it is the initial page) cannot become
-			// a hosted child because the tree is single-parent - the binding falls through to the
-			// swap encoding below, presented as a page rather than a layered overlay.
-			const UWidget* OverlayPage = FindOverlayHostPage(OverlayHost, FUMGWidgetUtils::SanitizeWidgetName(
-				Step.TargetPageId, TEXT("CanvasPanel")).ToString());
-			if (OverlayPage)
+			// BuildRoot parents every overlay-target page under the host at build time: overlay-only
+			// pages by their base name, dual-target/initial pages as a mirror copy named by the base
+			// name + OverlayMirrorSuffix (deterministic by construction). Try the base name first,
+			// then the mirrored name; the suffix is non-numeric, so the two lookups cannot both hit,
+			// and FindOverlayHostPage requires exactly one match either way.
+			const FString PageBaseName = FUMGWidgetUtils::SanitizeWidgetName(
+				Step.TargetPageId, TEXT("CanvasPanel")).ToString();
+			const UWidget* OverlayPage = FindOverlayHostPage(OverlayHost, PageBaseName);
+			if (!OverlayPage)
 			{
-				Resolved.OverlayPageWidgetName = OverlayPage->GetFName();
+				OverlayPage = FindOverlayHostPage(OverlayHost,
+					FUMGWidgetUtils::SanitizeWidgetName(
+						Step.TargetPageId + Design2UMGPrototypeTokens::OverlayMirrorSuffix(),
+						TEXT("CanvasPanel")).ToString());
 			}
-			else if (!Switcher || !Functions.SetActiveWidgetIndex)
+			if (!OverlayPage)
 			{
 				SkipBinding(OutWarnings, FString::Printf(
-					TEXT("trigger '%s': overlay target page '%s' resolved under neither the overlay host nor the switcher"),
-					*Binding.TriggerWidgetId, *Step.TargetPageId));
+					TEXT("trigger '%s': overlay target page '%s' not uniquely locatable under overlay host '%s'"),
+					*Binding.TriggerWidgetId, *Step.TargetPageId, *OverlayHost->GetName()));
 				continue;
 			}
-			else
-			{
-				Resolved.TargetPageIndex = FindSwitcherPageIndex(Switcher,
-					FUMGWidgetUtils::SanitizeWidgetName(Step.TargetPageId, TEXT("CanvasPanel")).ToString());
-				if (Resolved.TargetPageIndex == INDEX_NONE)
-				{
-					SkipBinding(OutWarnings, FString::Printf(
-						TEXT("trigger '%s': overlay target page '%s' not uniquely locatable under overlay host '%s' or switcher '%s'"),
-						*Binding.TriggerWidgetId, *Step.TargetPageId, *OverlayHost->GetName(), *Switcher->GetName()));
-					continue;
-				}
-				Resolved.bOverlaySwapChain = true;
-			}
+			Resolved.OverlayPageWidgetName = OverlayPage->GetFName();
 		}
 
 		if (bMouse)
@@ -815,6 +838,24 @@ void WireSimplePrototypeBindings(
 					TEXT("trigger '%s': an event is already bound to %s on button '%s'"),
 					*Binding.TriggerWidgetId, *Resolved.DelegateName.ToString(), *TriggerButton->GetName()));
 				continue;
+			}
+
+			// Mirror-trigger resolution: when the trigger lives on a dual-target/initial overlay page,
+			// BuildRoot also synthesized a mirror copy of that page under the overlay host, and while
+			// the overlay is open the mirror's button is the VISIBLE one - it needs its own chain
+			// (overlay-context semantics, authored in pass 3). The mirror is optional: no twin in the
+			// tree (flow pages, overlay-only pages) or an unusable twin (no class property, or a
+			// non-generated event already bound to it - user content, never masked) leaves the
+			// original binding exactly as it is today.
+			UButton* MirrorTriggerButton = FUMGWidgetUtils::FindUniqueTreeWidget<UButton>(WBP->WidgetTree,
+				FUMGWidgetUtils::SanitizeWidgetName(
+					Binding.TriggerWidgetId + Design2UMGPrototypeTokens::OverlayMirrorSuffix(),
+					TEXT("Button")).ToString());
+			if (MirrorTriggerButton
+				&& FindFProperty<FObjectProperty>(WBP->SkeletonGeneratedClass, MirrorTriggerButton->GetFName())
+				&& !FKismetEditorUtilities::FindBoundEventForComponent(WBP, Resolved.DelegateName, MirrorTriggerButton->GetFName()))
+			{
+				Resolved.MirrorTriggerWidgetName = MirrorTriggerButton->GetFName();
 			}
 
 			// Phase 2: a Navigate binding whose transition produced generated animations plays them
@@ -886,9 +927,7 @@ void WireSimplePrototypeBindings(
 	{
 		const EUMGPrototypeNavigationStepKind Kind = BindingKind(Resolved);
 		return Kind == EUMGPrototypeNavigationStepKind::Navigate
-			|| Kind == EUMGPrototypeNavigationStepKind::Back
-			// Swap-encoded overlays are exactly the Navigate chain, history push included.
-			|| (Kind == EUMGPrototypeNavigationStepKind::Overlay && Resolved.bOverlaySwapChain);
+			|| Kind == EUMGPrototypeNavigationStepKind::Back;
 	};
 	const auto ReachesOverlayHost = [&BindingKind](const FResolvedBinding& Resolved)
 	{
@@ -991,22 +1030,28 @@ void WireSimplePrototypeBindings(
 		: nullptr;
 
 	int32 WiredCount = 0;
-	for (const FResolvedBinding& Resolved : MouseBindings)
+
+	// One bound-event + action chain for one trigger of a resolved binding. The mirror twin of a
+	// mirrored-page trigger (bMirrorTrigger) reuses the same authoring with overlay-context
+	// semantics: Navigate prepends the overlay-exit collapse (Figma semantics: navigate replaces
+	// the current screen, overlay included) and skips the transition animations (the overlay layer
+	// is closing, not animating the switcher underneath); Back/Overlay/OpenLink are the same chain.
+	const auto AuthorTriggerChain = [&](const FResolvedBinding& Resolved, const FName TriggerWidgetName,
+		const bool bMirrorTrigger, FChainLayout& Layout) -> bool
 	{
 		const FUMGPrototypeNavigationBinding& Binding = NavigationData.ClickBindings[Resolved.BindingIndex];
 		const FUMGPrototypeNavigationStep& Step = Binding.Steps[0];
-		const int32 RowY = WiredCount * NodeRowStep;
 
 		FObjectProperty* ButtonProperty = FindFProperty<FObjectProperty>(
-			WBP->SkeletonGeneratedClass, Resolved.TriggerWidgetName);
+			WBP->SkeletonGeneratedClass, TriggerWidgetName);
 		FMulticastDelegateProperty* DelegateProperty = FindFProperty<FMulticastDelegateProperty>(
 			UButton::StaticClass(), Resolved.DelegateName);
 		if (!ButtonProperty || !DelegateProperty)
 		{
 			SkipBinding(OutWarnings, FString::Printf(
-				TEXT("trigger '%s': button/delegate property missing after skeleton refresh"),
-				*Binding.TriggerWidgetId));
-			continue;
+				TEXT("trigger '%s'%s: button/delegate property missing after skeleton refresh"),
+				*Binding.TriggerWidgetId, bMirrorTrigger ? TEXT(" (mirror)") : TEXT("")));
+			return false;
 		}
 
 		UK2Node_ComponentBoundEvent* EventNode = CreateMarkerNode<UK2Node_ComponentBoundEvent>(Ubergraph,
@@ -1014,8 +1059,6 @@ void WireSimplePrototypeBindings(
 			{
 				Node->InitializeComponentBoundEventParams(ButtonProperty, DelegateProperty);
 			});
-		FChainLayout Layout;
-		Layout.RowY = RowY;
 		Layout.PlaceExec(EventNode);
 
 		bool bChainValid = true;
@@ -1023,28 +1066,11 @@ void WireSimplePrototypeBindings(
 		{
 		case EUMGPrototypeNavigationStepKind::Overlay:
 		{
-			// Swap encoding: the target page stayed in the switcher (it is also a Navigate target
-			// or it is the initial page), so the overlay is presented as a page rather than a layered
-			// overlay - the widget tree is single-parent and the page must stay reachable by Navigate
-			// (or stay the startup page). The chain is exactly the Navigate chain: push the current
-			// index onto the history, then switch; Back returns through the history pop like any page.
-			if (Resolved.bOverlaySwapChain)
-			{
-				if (!Switcher || !SwitcherProperty)
-				{
-					bChainValid = false;
-					SkipBinding(OutWarnings, FString::Printf(
-						TEXT("trigger '%s': no unique switcher widget '%s' with a class property for the overlay swap chain"),
-						*Binding.TriggerWidgetId, *SwitcherBaseName));
-					break;
-				}
-				bChainValid = AppendNavigateTail(Ubergraph, WBP, Functions,
-					SwitcherProperty, HistoryProperty, Resolved.TargetPageIndex, Layout)
-					&& LinkExecChain(Layout.ExecChain);
-				break;
-			}
-			// Host + page visibility: show the host, then the hosted target page (both layers must
-			// switch to SelfHitTestInvisible; a visible page under a collapsed host stays hidden).
+			// Host + page visibility: show the host, then the hosted target page - the plain page for
+			// an overlay-only target, the mirror copy for a dual-target/initial page (both layers must
+			// switch to SelfHitTestInvisible; a visible page under a collapsed host stays hidden). The
+			// chain never touches the switcher or the history: the overlay is a layered display over
+			// the current page.
 			FObjectProperty* OverlayPageProperty = FindFProperty<FObjectProperty>(
 				WBP->SkeletonGeneratedClass, Resolved.OverlayPageWidgetName);
 			if (!OverlayPageProperty)
@@ -1167,22 +1193,12 @@ void WireSimplePrototypeBindings(
 			if (bChainValid && HostBranchNode)
 			{
 				// TRUE (overlay open): the collapse chain ends the branch - the history pop below
-				// stays unreached, and every hosted page collapses with the host so a later
-				// different overlay opens clean.
+				// stays unreached (shared overlay-exit sequence).
 				FChainLayout CollapseLayout;
 				CollapseLayout.RowY = Layout.RowY;
 				CollapseLayout.NextColumn = Layout.NextColumn;
-				bChainValid = AppendSetVisibilityCall(Ubergraph, WBP, Functions,
-					OverlayHostProperty, ESlateVisibility::Collapsed, CollapseLayout);
-				for (UWidget* HostedPage : OverlayHostPages)
-				{
-					if (FObjectProperty* PageProperty = FindFProperty<FObjectProperty>(
-							WBP->SkeletonGeneratedClass, HostedPage->GetFName()))
-					{
-						bChainValid = AppendSetVisibilityCall(Ubergraph, WBP, Functions,
-							PageProperty, ESlateVisibility::Collapsed, CollapseLayout) && bChainValid;
-					}
-				}
+				bChainValid = AppendOverlayExitCollapse(Ubergraph, WBP, Functions,
+					OverlayHostProperty, OverlayHostPages, CollapseLayout);
 				Layout.NextColumn = FMath::Max(Layout.NextColumn, CollapseLayout.NextColumn);
 				if (bChainValid)
 				{
@@ -1346,6 +1362,20 @@ void WireSimplePrototypeBindings(
 					*Binding.TriggerWidgetId, *SwitcherBaseName));
 				break;
 			}
+			if (bMirrorTrigger)
+			{
+				// Mirror-trigger Navigate (fired from inside the open overlay): exit the
+				// overlay first - the shared Back TRUE-branch collapse - then the standard
+				// navigate tail. Figma semantics: navigate replaces the current screen, overlay
+				// included. No transition animations: the overlay layer is closing, not
+				// animating the switcher underneath.
+				bChainValid = AppendOverlayExitCollapse(Ubergraph, WBP, Functions,
+					OverlayHostProperty, OverlayHostPages, Layout)
+					&& AppendNavigateTail(Ubergraph, WBP, Functions,
+						SwitcherProperty, HistoryProperty, Resolved.TargetPageIndex, Layout)
+					&& LinkExecChain(Layout.ExecChain);
+				break;
+			}
 			// Chain shape by which transition animations resolved (the animation builder generates
 			// out-only for MOVE_OUT, in-only for MOVE_IN, both otherwise):
 			// - both: out -> delay -> switch -> in (bidirectional/fade keep the classic chain);
@@ -1406,13 +1436,36 @@ void WireSimplePrototypeBindings(
 			break;
 		}
 
-		if (!bChainValid)
+		return bChainValid;
+	};
+
+	for (const FResolvedBinding& Resolved : MouseBindings)
+	{
+		const FUMGPrototypeNavigationBinding& Binding = NavigationData.ClickBindings[Resolved.BindingIndex];
+		FChainLayout Layout;
+		Layout.RowY = WiredCount * NodeRowStep;
+		if (!AuthorTriggerChain(Resolved, Resolved.TriggerWidgetName, /*bMirrorTrigger=*/false, Layout))
 		{
 			SkipBinding(OutWarnings, FString::Printf(
 				TEXT("trigger '%s': generated nodes missing engine pins (engine contract changed)"),
 				*Binding.TriggerWidgetId));
 		}
 		++WiredCount;
+
+		// The mirror twin (resolved in pass 1) gets its own chain on its own row: same authored set,
+		// same marker lifecycle - cleared and re-authored together on regeneration.
+		if (Resolved.MirrorTriggerWidgetName != NAME_None)
+		{
+			FChainLayout MirrorLayout;
+			MirrorLayout.RowY = WiredCount * NodeRowStep;
+			if (!AuthorTriggerChain(Resolved, Resolved.MirrorTriggerWidgetName, /*bMirrorTrigger=*/true, MirrorLayout))
+			{
+				SkipBinding(OutWarnings, FString::Printf(
+					TEXT("trigger '%s': mirror trigger '%s' generated nodes missing engine pins (engine contract changed)"),
+					*Binding.TriggerWidgetId, *Resolved.MirrorTriggerWidgetName.ToString()));
+			}
+			++WiredCount;
+		}
 	}
 
 	// Keyboard wiring: one generated function-graph override per event kind. OnKeyDown/OnKeyUp are

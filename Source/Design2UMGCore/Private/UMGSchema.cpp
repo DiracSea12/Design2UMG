@@ -89,6 +89,14 @@ FUMGSourceNodeData& FUMGWidgetNode::MutableSource()
 	return *SourceData;
 }
 
+void FUMGWidgetNode::ClearSourceDesignIdentity()
+{
+	if (SourceData)
+	{
+		SourceData->SourceNodeId.Reset();
+	}
+}
+
 FString FUMGWidgetNode::GetStableDesignNodeId() const
 {
 	return HasSourceData() && !Source().SourceNodeId.IsEmpty()

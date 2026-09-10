@@ -2,8 +2,10 @@
 
 #include "Misc/AutomationTest.h"
 #include "Design2UMGConverter.h"
+#include "Design2UMGGenerationSettingsSnapshot.h"
 #include "Design2UMGPrototypeGraphWiring.h"
 #include "Design2UMGTestUtils.h"
+#include "Tests/Design2UMGMappedComponentTestWidget.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 #include "FigmaParser.h"
 #include "FigmaTestDocBuilder.h"
@@ -203,7 +205,9 @@ namespace
 
 	// Dual-target page: "2:1" is BOTH the Navigate target and the Overlay target of different
 	// buttons on page one. The page must stay a switcher child (the switcher owns the page flow),
-	// so the overlay binding takes the swap encoding: the Navigate chain (history push + switch).
+	// so BuildRoot synthesizes a mirror copy of it under the overlay host: the overlay binding
+	// toggles the mirror (layered display), never the switcher or the history. The mirror's own
+	// buttons (back_button, mirror_nav_button) are the VISIBLE ones while the overlay is open.
 	const FString DualTargetOverlayPrototypeJson()
 	{
 		const FString NavButtonJson = MakeLeafNode(TEXT("nav_button"), TEXT("Next"), TEXT("RECTANGLE"), 20, 60, 120, 44, FString::Printf(
@@ -212,10 +216,14 @@ namespace
 		const FString OverlayButtonJson = MakeLeafNode(TEXT("overlay_button"), TEXT("Overlay"), TEXT("RECTANGLE"), 20, 120, 120, 44, FString::Printf(
 			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"OPEN_OVERLAY\"}]}]"),
 			*MakeSolidFillJson(0.2, 0.7, 0.5)));
+		const FString BackButtonJson = MakeLeafNode(TEXT("back_button"), TEXT("Back"), TEXT("RECTANGLE"), 40, 60, 120, 44, FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"BACK\"}]}]"),
+			*MakeSolidFillJson(0.8, 0.3, 0.2)));
+		const FString MirrorNavButtonJson = MakeLeafNode(TEXT("mirror_nav_button"), TEXT("Home"), TEXT("RECTANGLE"), 40, 120, 120, 44, FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"1:1\",\"navigation\":\"NAVIGATE\"}]}]"),
+			*MakeSolidFillJson(0.5, 0.5, 0.8)));
 		const FString PageTwoJson = MakeContainerNode(TEXT("2:1"), TEXT("PageTwo"), TEXT("FRAME"), 0, 0, 360, 240,
-			MakeLeafNode(TEXT("back_button"), TEXT("Back"), TEXT("RECTANGLE"), 40, 60, 120, 44, FString::Printf(
-				TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"BACK\"}]}]"),
-				*MakeSolidFillJson(0.8, 0.3, 0.2))));
+			FString::Printf(TEXT("%s,%s"), *BackButtonJson, *MirrorNavButtonJson));
 		return MakeFigmaDocJson(
 			FString::Printf(TEXT("%s,%s"),
 				*MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240,
@@ -224,9 +232,39 @@ namespace
 			TEXT(",\"prototypeStartNodeID\":\"1:1\""));
 	}
 
+	// Dual-target page carrying a mapped Figma component instance: the mirror copy under the
+	// overlay host must keep the component-mapping sidecar fields (candidate marker + component
+	// identity) while its design identity stays cleared, so the mirror resolves the SAME mapped
+	// project widget class as the original.
+	const FString DualTargetOverlayMappedComponentPrototypeJson()
+	{
+		const FString NavButtonJson = MakeLeafNode(TEXT("nav_button"), TEXT("Next"), TEXT("RECTANGLE"), 20, 60, 120, 44, FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"NAVIGATE\"}]}]"),
+			*MakeSolidFillJson(0.1, 0.4, 0.9)));
+		const FString OverlayButtonJson = MakeLeafNode(TEXT("overlay_button"), TEXT("Overlay"), TEXT("RECTANGLE"), 20, 120, 120, 44, FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"OPEN_OVERLAY\"}]}]"),
+			*MakeSolidFillJson(0.2, 0.7, 0.5)));
+		const FString ButtonStyleJson =
+			TEXT("\"fontFamily\":\"Inter\",\"fontSize\":16,\"fontWeight\":500,\"textAlignHorizontal\":\"LEFT\",\"textAlignVertical\":\"TOP\",\"textDecoration\":\"NONE\",\"letterSpacing\":0,\"lineHeightUnit\":\"AUTO\",\"lineHeightPx\":0");
+		const FString InstanceJson = MakeContainerNode(TEXT("mapped_btn"), TEXT("MappedButton"), TEXT("INSTANCE"), 160, 60, 120, 44,
+			MakeTextNode(TEXT("mapped_btn_label"), TEXT("Label"), 168, 70, 80, 20, TEXT("Checkout"), ButtonStyleJson),
+			FString::Printf(
+				TEXT(",\"componentId\":\"12:34\",\"mainComponentKey\":\"component-key-primary\","
+					 "\"componentProperties\":{\"label\":{\"type\":\"TEXT\",\"value\":\"Checkout\"}},\"fills\":[%s]"),
+				*MakeSolidFillJson(0.1, 0.4, 0.9)));
+		const FString PageTwoJson = MakeContainerNode(TEXT("2:1"), TEXT("PageTwo"), TEXT("FRAME"), 0, 0, 360, 240, InstanceJson);
+		return MakeFigmaDocJson(
+			FString::Printf(TEXT("%s,%s"),
+				*MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240,
+					FString::Printf(TEXT("%s,%s"), *NavButtonJson, *OverlayButtonJson)),
+				*PageTwoJson),
+			TEXT(",\"fileKey\":\"mirror-mapping-file-key\",\"prototypeStartNodeID\":\"1:1\""));
+	}
+
 	// Initial-page overlay: the startup page "1:1" is the OPEN_OVERLAY target of a button on the
 	// second page. The initial page must stay a switcher child (InitialPageIndex keeps pointing at
-	// it, no remap), so its overlay binding takes the swap encoding as well.
+	// it, no remap); BuildRoot synthesizes a mirror copy under the overlay host so the binding is a
+	// layered display, like any dual-target page.
 	const FString InitialPageOverlayPrototypeJson()
 	{
 		const FString NavButtonJson = MakeLeafNode(TEXT("nav_button"), TEXT("Next"), TEXT("RECTANGLE"), 40, 60, 120, 44, FString::Printf(
@@ -299,6 +337,41 @@ namespace
 		}
 		OutData = FDesign2UMGConverter::Convert(OutDocument, FDesign2UMGConversionSettings::Defaults());
 		return OutData.PrototypeNavigation().ClickBindings.Num() > 0;
+	}
+
+	// Mirror purity contract: every node of a synthesized overlay mirror subtree must carry NO design
+	// identity (empty SourceNodeId; reimport must never manifest-match a mirror) while the rest of
+	// the sidecar may survive (component-mapping fields included), and must carry the
+	// OverlayMirrorSuffix on its name (synthesized chrome, not design nodes).
+	void CollectOverlayMirrorPurityViolations(const FUMGWidgetNode& Node, TArray<FString>& OutViolations)
+	{
+		if ((Node.HasSourceData() && !Node.Source().SourceNodeId.IsEmpty())
+			|| !Node.Name.EndsWith(Design2UMGPrototypeTokens::OverlayMirrorSuffix()))
+		{
+			OutViolations.Add(Node.Name);
+		}
+		for (const FUMGWidgetNode& Child : Node.Children)
+		{
+			CollectOverlayMirrorPurityViolations(Child, OutViolations);
+		}
+	}
+
+	// Depth-first IR node lookup by widget name (the wiring tests address page content by name;
+	// mirror names are the original names + OverlayMirrorSuffix by construction).
+	const FUMGWidgetNode* FindWidgetNodeByName(const FUMGWidgetNode& Node, const FString& TargetName)
+	{
+		if (Node.Name == TargetName)
+		{
+			return &Node;
+		}
+		for (const FUMGWidgetNode& Child : Node.Children)
+		{
+			if (const FUMGWidgetNode* Found = FindWidgetNodeByName(Child, TargetName))
+			{
+				return Found;
+			}
+		}
+		return nullptr;
 	}
 
 	TArray<UK2Node_ComponentBoundEvent*> CollectBoundEvents(const UWidgetBlueprint* WBP)
@@ -1798,13 +1871,17 @@ bool FFigmaPrototypeOverlayRuntimeSmokeTest::RunTest(const FString& Parameters)
 }
 
 // Dual-target overlay runtime smoke: a page that is both a Navigate target and an Overlay target
-// stays a switcher child; its overlay binding takes the swap encoding (exactly the Navigate chain:
-// push the current index onto the history, then switch). The page content genuinely displays and
-// Back returns through the history pop.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeDualTargetOverlaySwapRuntimeSmokeTest,
-	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.DualTargetOverlaySwapRuntimeSmoke",
+// stays a switcher child AND gets a synthesized mirror copy under the overlay host. The Navigate
+// binding switches to the switcher instance; the overlay binding opens the mirror as a layered
+// display (switcher active index and history untouched); the MIRROR's buttons carry their own
+// bindings (the visible buttons inside the overlay): mirror Back collapses the mirror and the
+// host without touching the page flow, mirror Navigate closes the overlay then navigates. Also
+// locks the mirror purity contract: the mirror subtree carries no design identity (synthesized
+// chrome, not design nodes) and its widget names land in the manifest's D2U-owned set.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeDualTargetOverlayMirrorRuntimeSmokeTest,
+	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.DualTargetOverlayMirrorRuntimeSmoke",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaPrototypeDualTargetOverlaySwapRuntimeSmokeTest::RunTest(const FString& Parameters)
+bool FFigmaPrototypeDualTargetOverlayMirrorRuntimeSmokeTest::RunTest(const FString& Parameters)
 {
 	FDesignDocument Document;
 	FUMGWidgetData Data;
@@ -1817,8 +1894,9 @@ bool FFigmaPrototypeDualTargetOverlaySwapRuntimeSmokeTest::RunTest(const FString
 	DeleteGeneratedAssetsAtPath(OutputPath);
 
 	FUMGPrototypeNavigationData NavigationData;
+	FDesign2UMGGenerationOutput GenerationOutput;
 	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(
-		Data, OutputPath, nullptr, nullptr, &NavigationData);
+		Data, OutputPath, nullptr, &GenerationOutput, &NavigationData);
 	if (!TestTrue(TEXT("Build dual-target overlay widget blueprint"), WBP != nullptr)
 		|| !TestTrue(TEXT("Save dual-target overlay widget blueprint"),
 			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
@@ -1826,6 +1904,40 @@ bool FFigmaPrototypeDualTargetOverlaySwapRuntimeSmokeTest::RunTest(const FString
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
 	}
+
+	// IR purity: the hosted mirror of the dual-target page has the suffixed name on every node and
+	// no design identity anywhere in its subtree (root overlay -> [switcher, overlay host]).
+	const FUMGWidgetNode* MirrorRootNode = nullptr;
+	if (Data.RootWidget.Children.Num() == 2)
+	{
+		const FString MirrorName = FString(TEXT("2:1")) + Design2UMGPrototypeTokens::OverlayMirrorSuffix();
+		for (const FUMGWidgetNode& HostChild : Data.RootWidget.Children[1].Children)
+		{
+			if (HostChild.Name == MirrorName)
+			{
+				MirrorRootNode = &HostChild;
+			}
+		}
+	}
+	if (!TestNotNull(TEXT("Mirror copy of the dual-target page exists under the host in the IR"), MirrorRootNode))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	TArray<FString> PurityViolations;
+	CollectOverlayMirrorPurityViolations(*MirrorRootNode, PurityViolations);
+	TestEqual(TEXT("Mirror subtree carries no design identity and is fully suffixed"), PurityViolations.Num(), 0);
+
+	// Manifest ownership: the mirror widgets are D2U-owned regenerated chrome, recorded by their
+	// constructed (sanitized) names.
+	const FString MirrorPageWidgetName = FUMGWidgetUtils::SanitizeWidgetName(
+		FString(TEXT("2:1")) + Design2UMGPrototypeTokens::OverlayMirrorSuffix(), TEXT("CanvasPanel")).ToString();
+	const FString MirrorBackButtonName = FUMGWidgetUtils::SanitizeWidgetName(
+		FString(TEXT("back_button")) + Design2UMGPrototypeTokens::OverlayMirrorSuffix(), TEXT("Button")).ToString();
+	TestTrue(TEXT("Mirror page name lands in the manifest D2U-owned set"),
+		GenerationOutput.Manifest.D2UOwnedNames.Contains(MirrorPageWidgetName));
+	TestTrue(TEXT("Mirror child name lands in the manifest D2U-owned set"),
+		GenerationOutput.Manifest.D2UOwnedNames.Contains(MirrorBackButtonName));
 
 	UWidgetBlueprintGeneratedClass* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(WBP->GeneratedClass);
 	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
@@ -1839,11 +1951,29 @@ bool FFigmaPrototypeDualTargetOverlaySwapRuntimeSmokeTest::RunTest(const FString
 
 	UWidgetSwitcher* Switcher = Cast<UWidgetSwitcher>(
 		WidgetInstance->WidgetTree ? WidgetInstance->WidgetTree->FindWidget(FName(*NavigationData.SwitcherWidgetName)) : nullptr);
+	UOverlay* Host = WidgetInstance->WidgetTree
+		? Cast<UOverlay>(WidgetInstance->WidgetTree->FindWidget(FName(*NavigationData.OverlayHostWidgetName)))
+		: nullptr;
+	UButton* NavButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("nav_button"))) : nullptr;
 	UButton* OverlayButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("overlay_button"))) : nullptr;
 	UButton* BackButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("back_button"))) : nullptr;
+	const FString MirrorNavButtonName = FUMGWidgetUtils::SanitizeWidgetName(
+		FString(TEXT("mirror_nav_button")) + Design2UMGPrototypeTokens::OverlayMirrorSuffix(), TEXT("Button")).ToString();
+	UButton* MirrorBackButton = WidgetInstance->WidgetTree
+		? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(FName(*MirrorBackButtonName))) : nullptr;
+	UButton* MirrorNavButton = WidgetInstance->WidgetTree
+		? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(FName(*MirrorNavButtonName))) : nullptr;
+	UWidget* MirrorPage = Host && Host->GetChildrenCount() == 1 ? Host->GetChildAt(0) : nullptr;
 	if (!TestTrue(TEXT("Switcher exists"), Switcher != nullptr)
+		|| !TestTrue(TEXT("Overlay host exists"), Host != nullptr)
+		|| !TestTrue(TEXT("Hosted mirror page exists"), MirrorPage != nullptr)
+		|| !TestTrue(TEXT("Hosted page carries the mirror name"),
+			MirrorPage && MirrorPage->GetName() == MirrorPageWidgetName)
+		|| !TestTrue(TEXT("Navigate button exists"), NavButton != nullptr)
 		|| !TestTrue(TEXT("Overlay button exists"), OverlayButton != nullptr)
-		|| !TestTrue(TEXT("Back button exists"), BackButton != nullptr))
+		|| !TestTrue(TEXT("Back button exists"), BackButton != nullptr)
+		|| !TestTrue(TEXT("Mirror back button exists"), MirrorBackButton != nullptr)
+		|| !TestTrue(TEXT("Mirror navigate button exists"), MirrorNavButton != nullptr))
 	{
 		WidgetInstance->RemoveFromParent();
 		DeleteGeneratedAssetsAtPath(OutputPath);
@@ -1857,28 +1987,47 @@ bool FFigmaPrototypeDualTargetOverlaySwapRuntimeSmokeTest::RunTest(const FString
 		return HistoryProperty ? FScriptArrayHelper(HistoryProperty, HistoryProperty->ContainerPtrToValuePtr<void>(WidgetInstance)).Num() : -1;
 	};
 
-	// The dual-target page stays in the switcher alongside the flow page (placement rule), so the
-	// startup page is page 0 and the overlay target is reachable as page 1.
+	// The dual-target page stays in the switcher alongside the flow page (placement rule); the
+	// host carries only the synthesized mirror.
 	TestEqual(TEXT("Dual-target page stays a switcher child"), Switcher->GetChildrenCount(), 2);
+	TestEqual(TEXT("Host carries only the mirror copy"), Host->GetChildrenCount(), 1);
 	TestEqual(TEXT("Initial active page"), Switcher->GetActiveWidgetIndex(), 0);
 	TestEqual(TEXT("History starts empty"), HistoryNum(), 0);
+	TestEqual(TEXT("Mirror starts collapsed"), MirrorPage->GetVisibility(), ESlateVisibility::Collapsed);
 
-	// Swap-encoded overlay open: the switcher switches to the target page and records the page
-	// that was left, exactly like a Navigate.
+	// (a) The Navigate binding switches to the switcher instance of the dual-target page.
+	NavButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Navigate switches to the dual-target page"), Switcher->GetActiveWidgetIndex(), 1);
+	TestEqual(TEXT("Navigate pushed the left page onto the history"), HistoryNum(), 1);
+
+	// (b) The overlay binding opens the mirror layered on top: the mirror and the host turn
+	// visible while the active page and the history stay untouched.
 	OverlayButton->OnClicked.Broadcast();
-	TestEqual(TEXT("Overlay trigger switches to the dual-target page"), Switcher->GetActiveWidgetIndex(), 1);
-	TestEqual(TEXT("Overlay trigger pushed the left page onto the history"), HistoryNum(), 1);
-	if (HistoryProperty)
-	{
-		FScriptArrayHelper Helper(HistoryProperty, HistoryProperty->ContainerPtrToValuePtr<void>(WidgetInstance));
-		TestEqual(TEXT("Pushed history value is the page that was left"),
-			Helper.Num() == 1 ? *reinterpret_cast<int32*>(Helper.GetRawPtr(0)) : INDEX_NONE, 0);
-	}
+	TestEqual(TEXT("Overlay open shows the host"), Host->GetVisibility(), ESlateVisibility::SelfHitTestInvisible);
+	TestEqual(TEXT("Overlay open shows the mirror page"), MirrorPage->GetVisibility(), ESlateVisibility::SelfHitTestInvisible);
+	TestEqual(TEXT("Overlay keeps the active switcher page unchanged"), Switcher->GetActiveWidgetIndex(), 1);
+	TestEqual(TEXT("Overlay keeps the history unchanged"), HistoryNum(), 1);
 
-	// Back returns to the previous page through the history pop.
-	BackButton->OnClicked.Broadcast();
-	TestEqual(TEXT("Back returns to the first page"), Switcher->GetActiveWidgetIndex(), 0);
-	TestEqual(TEXT("Back popped the history entry"), HistoryNum(), 0);
+	// (c) The MIRROR's back button is the visible button inside the open overlay: its chain
+	// collapses the mirror and the host only - the page flow and the history are exactly as the
+	// overlay left them.
+	MirrorBackButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Mirror back collapses the host"), Host->GetVisibility(), ESlateVisibility::Collapsed);
+	TestEqual(TEXT("Mirror back collapses the mirror page"), MirrorPage->GetVisibility(), ESlateVisibility::Collapsed);
+	TestEqual(TEXT("Mirror back keeps the active page unchanged"), Switcher->GetActiveWidgetIndex(), 1);
+	TestEqual(TEXT("Mirror back keeps the history unchanged"), HistoryNum(), 1);
+
+	// (d) Re-open the overlay, then trigger the MIRROR's navigate button (visible only inside the
+	// overlay): its chain closes the overlay first, then runs the standard navigate tail - the
+	// switcher navigates to "1:1" and the history gains exactly one entry.
+	OverlayButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Overlay re-open shows the host"), Host->GetVisibility(), ESlateVisibility::SelfHitTestInvisible);
+	TestEqual(TEXT("Overlay re-open shows the mirror page"), MirrorPage->GetVisibility(), ESlateVisibility::SelfHitTestInvisible);
+	MirrorNavButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Mirror navigate closes the overlay host"), Host->GetVisibility(), ESlateVisibility::Collapsed);
+	TestEqual(TEXT("Mirror navigate collapses the mirror page"), MirrorPage->GetVisibility(), ESlateVisibility::Collapsed);
+	TestEqual(TEXT("Mirror navigate switches to page 1:1"), Switcher->GetActiveWidgetIndex(), 0);
+	TestEqual(TEXT("Mirror navigate pushed exactly one history entry"), HistoryNum(), 2);
 
 	WidgetInstance->RemoveFromParent();
 	DeleteGeneratedAssetsAtPath(OutputPath);
@@ -1886,12 +2035,15 @@ bool FFigmaPrototypeDualTargetOverlaySwapRuntimeSmokeTest::RunTest(const FString
 }
 
 // Initial-page overlay runtime smoke: when the INITIAL page is an overlay target it stays a
-// switcher child - the startup active index keeps pointing at it (no remap, no fallback) - and its
-// overlay binding takes the swap encoding like any dual-target page.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeInitialPageOverlaySwapRuntimeSmokeTest,
-	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.InitialPageOverlaySwapRuntimeSmoke",
+// switcher child - the startup active index keeps pointing at it (no remap, no fallback) - and
+// BuildRoot synthesizes a mirror copy under the overlay host. Right at startup the overlay opens
+// the mirror as a layered display (active page and history untouched); the MIRROR's nav button
+// (the visible one inside the overlay) closes the overlay and navigates; the ORIGINAL back button
+// closes a reopened overlay without popping the history, and a second Back pops it.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeInitialPageOverlayMirrorRuntimeSmokeTest,
+	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.InitialPageOverlayMirrorRuntimeSmoke",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaPrototypeInitialPageOverlaySwapRuntimeSmokeTest::RunTest(const FString& Parameters)
+bool FFigmaPrototypeInitialPageOverlayMirrorRuntimeSmokeTest::RunTest(const FString& Parameters)
 {
 	FDesignDocument Document;
 	FUMGWidgetData Data;
@@ -1926,13 +2078,28 @@ bool FFigmaPrototypeInitialPageOverlaySwapRuntimeSmokeTest::RunTest(const FStrin
 
 	UWidgetSwitcher* Switcher = Cast<UWidgetSwitcher>(
 		WidgetInstance->WidgetTree ? WidgetInstance->WidgetTree->FindWidget(FName(*NavigationData.SwitcherWidgetName)) : nullptr);
+	UOverlay* Host = WidgetInstance->WidgetTree
+		? Cast<UOverlay>(WidgetInstance->WidgetTree->FindWidget(FName(*NavigationData.OverlayHostWidgetName)))
+		: nullptr;
 	UButton* NavButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("nav_button"))) : nullptr;
 	UButton* OverlayButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("open_overlay_button"))) : nullptr;
 	UButton* BackButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("back_button"))) : nullptr;
+	const FString MirrorPageWidgetName = FUMGWidgetUtils::SanitizeWidgetName(
+		FString(TEXT("1:1")) + Design2UMGPrototypeTokens::OverlayMirrorSuffix(), TEXT("CanvasPanel")).ToString();
+	const FString MirrorNavButtonName = FUMGWidgetUtils::SanitizeWidgetName(
+		FString(TEXT("nav_button")) + Design2UMGPrototypeTokens::OverlayMirrorSuffix(), TEXT("Button")).ToString();
+	UButton* MirrorNavButton = WidgetInstance->WidgetTree
+		? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(FName(*MirrorNavButtonName))) : nullptr;
+	UWidget* MirrorPage = Host && Host->GetChildrenCount() == 1 ? Host->GetChildAt(0) : nullptr;
 	if (!TestTrue(TEXT("Switcher exists"), Switcher != nullptr)
+		|| !TestTrue(TEXT("Overlay host exists"), Host != nullptr)
+		|| !TestTrue(TEXT("Hosted mirror of the initial page exists"), MirrorPage != nullptr)
+		|| !TestTrue(TEXT("Hosted page carries the mirror name"),
+			MirrorPage && MirrorPage->GetName() == MirrorPageWidgetName)
 		|| !TestTrue(TEXT("Navigate button exists"), NavButton != nullptr)
 		|| !TestTrue(TEXT("Overlay button exists"), OverlayButton != nullptr)
-		|| !TestTrue(TEXT("Back button exists"), BackButton != nullptr))
+		|| !TestTrue(TEXT("Back button exists"), BackButton != nullptr)
+		|| !TestTrue(TEXT("Mirror navigate button exists"), MirrorNavButton != nullptr))
 	{
 		WidgetInstance->RemoveFromParent();
 		DeleteGeneratedAssetsAtPath(OutputPath);
@@ -1947,29 +2114,134 @@ bool FFigmaPrototypeInitialPageOverlaySwapRuntimeSmokeTest::RunTest(const FStrin
 	};
 
 	// The startup page IS the overlay target and it must still be the active switcher child: the
-	// index stays 0 and the shown widget is the initial page itself, not a remapped fallback.
+	// index stays 0 and the shown widget is the initial page itself, not a remapped fallback. The
+	// host carries only the synthesized mirror copy.
 	TestEqual(TEXT("Initial page stays a switcher child"), Switcher->GetChildrenCount(), 2);
+	TestEqual(TEXT("Host carries only the mirror copy"), Host->GetChildrenCount(), 1);
 	TestEqual(TEXT("Startup active index is unchanged"), Switcher->GetActiveWidgetIndex(), 0);
 	TestTrue(TEXT("Startup page shown is the initial page"),
 		Switcher->GetActiveWidget() && FUMGWidgetUtils::MatchesWidgetBaseName(
 			Switcher->GetActiveWidget()->GetName(),
 			FUMGWidgetUtils::SanitizeWidgetName(TEXT("1:1"), TEXT("CanvasPanel")).ToString()));
+	TestEqual(TEXT("Mirror starts collapsed"), MirrorPage->GetVisibility(), ESlateVisibility::Collapsed);
+	TestEqual(TEXT("History starts empty"), HistoryNum(), 0);
 
-	// Leave the initial page, then trigger the overlay targeting it: the swap encoding switches
-	// back to it while recording the page that was left.
-	NavButton->OnClicked.Broadcast();
-	TestEqual(TEXT("Navigate leaves the initial page"), Switcher->GetActiveWidgetIndex(), 1);
-	TestEqual(TEXT("History after navigate"), HistoryNum(), 1);
+	// Right at startup (before any navigate): opening the overlay targeting the initial page
+	// shows the mirror layered on top - the active page and the history stay untouched.
 	OverlayButton->OnClicked.Broadcast();
-	TestEqual(TEXT("Overlay trigger switches back to the initial page"), Switcher->GetActiveWidgetIndex(), 0);
-	TestEqual(TEXT("Overlay trigger pushed the left page onto the history"), HistoryNum(), 2);
+	TestEqual(TEXT("Startup overlay open shows the host"), Host->GetVisibility(), ESlateVisibility::SelfHitTestInvisible);
+	TestEqual(TEXT("Startup overlay open shows the initial-page mirror"), MirrorPage->GetVisibility(), ESlateVisibility::SelfHitTestInvisible);
+	TestEqual(TEXT("Startup overlay keeps the active page unchanged"), Switcher->GetActiveWidgetIndex(), 0);
+	TestEqual(TEXT("Startup overlay keeps the history empty"), HistoryNum(), 0);
 
-	// Back returns to the page recorded last.
+	// The MIRROR's nav button (nav_button lives on the initial page, so its mirror is the visible
+	// one inside the overlay): its chain closes the overlay, then runs the standard navigate
+	// tail - the history gains the left page and the switcher moves to page two.
+	MirrorNavButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Mirror navigate closes the overlay host"), Host->GetVisibility(), ESlateVisibility::Collapsed);
+	TestEqual(TEXT("Mirror navigate collapses the mirror"), MirrorPage->GetVisibility(), ESlateVisibility::Collapsed);
+	TestEqual(TEXT("Mirror navigate switches to page two"), Switcher->GetActiveWidgetIndex(), 1);
+	TestEqual(TEXT("Mirror navigate pushed exactly one history entry"), HistoryNum(), 1);
+
+	// Re-open the overlay on top of page two: layered display, page flow untouched.
+	OverlayButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Overlay re-open shows the host"), Host->GetVisibility(), ESlateVisibility::SelfHitTestInvisible);
+	TestEqual(TEXT("Overlay re-open shows the initial-page mirror"), MirrorPage->GetVisibility(), ESlateVisibility::SelfHitTestInvisible);
+	TestEqual(TEXT("Overlay re-open keeps the active page unchanged"), Switcher->GetActiveWidgetIndex(), 1);
+	TestEqual(TEXT("Overlay re-open keeps the history unchanged"), HistoryNum(), 1);
+
+	// The ORIGINAL back button closes the overlay without popping the history; the recorded
+	// history still returns to the initial page on a second Back.
 	BackButton->OnClicked.Broadcast();
-	TestEqual(TEXT("Back returns to the second page"), Switcher->GetActiveWidgetIndex(), 1);
-	TestEqual(TEXT("Back popped one history entry"), HistoryNum(), 1);
+	TestEqual(TEXT("Back collapses the host"), Host->GetVisibility(), ESlateVisibility::Collapsed);
+	TestEqual(TEXT("Back collapses the mirror"), MirrorPage->GetVisibility(), ESlateVisibility::Collapsed);
+	TestEqual(TEXT("Back keeps the active page unchanged"), Switcher->GetActiveWidgetIndex(), 1);
+	TestEqual(TEXT("Back keeps the history unchanged"), HistoryNum(), 1);
+
+	BackButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Second back returns to the initial page"), Switcher->GetActiveWidgetIndex(), 0);
+	TestEqual(TEXT("Second back popped the history"), HistoryNum(), 0);
 
 	WidgetInstance->RemoveFromParent();
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
+// Mapped-component overlay test: the dual-target page carries a mapped Figma component instance.
+// The mirror copy under the overlay host keeps the component-mapping sidecar fields while its
+// design identity stays cleared, and generation resolves the mirror's node to the SAME mapped
+// project widget class as the original - mirrors do not degrade mapped components to plain widgets.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeDualTargetOverlayMappedComponentTest,
+	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.DualTargetOverlayMappedComponent",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaPrototypeDualTargetOverlayMappedComponentTest::RunTest(const FString& Parameters)
+{
+	FDesignDocument Document;
+	FUMGWidgetData Data;
+	if (!TestTrue(TEXT("Convert dual-target mapped-component overlay fixture"),
+		ConvertPrototype(DualTargetOverlayMappedComponentPrototypeJson(), Document, Data)))
+	{
+		return false;
+	}
+
+	// IR contract: the mirror node kept the mapping sidecar (candidate marker; component identity
+	// fields feed the match) with SourceNodeId cleared, while the original node keeps its design
+	// identity too.
+	const FString MirrorInstanceName = FString(TEXT("MappedButton")) + Design2UMGPrototypeTokens::OverlayMirrorSuffix();
+	const FUMGWidgetNode* OriginalInstanceNode = FindWidgetNodeByName(Data.RootWidget, TEXT("MappedButton"));
+	const FUMGWidgetNode* MirrorInstanceNode = FindWidgetNodeByName(Data.RootWidget, MirrorInstanceName);
+	if (!TestNotNull(TEXT("Original instance node exists in the IR"), OriginalInstanceNode)
+		|| !TestNotNull(TEXT("Mirror instance node exists in the IR"), MirrorInstanceNode))
+	{
+		return false;
+	}
+	TestTrue(TEXT("Original instance keeps its design identity"),
+		OriginalInstanceNode->HasSourceData() && !OriginalInstanceNode->Source().SourceNodeId.IsEmpty());
+	TestTrue(TEXT("Mirror instance cleared its design identity"),
+		MirrorInstanceNode->HasSourceData() && MirrorInstanceNode->Source().SourceNodeId.IsEmpty());
+	TestTrue(TEXT("Original instance is a mapped candidate"),
+		OriginalInstanceNode->Source().bMappedComponentCandidate);
+	TestTrue(TEXT("Mirror instance kept the mapped-candidate marker"),
+		MirrorInstanceNode->Source().bMappedComponentCandidate);
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/ProtoNavWiringDualTargetOverlayMapped");
+	DeleteGeneratedAssetsAtPath(OutputPath);
+
+	FDesign2UMGGenerationSettingsSnapshot Settings;
+	DesignComponentMapping::FComponentMappingEntry& Entry =
+		Settings.ComponentMapping.Table.Entries.AddDefaulted_GetRef();
+	Entry.Key = TEXT("figma|mirror-mapping-file-key|component-key-primary");
+	Entry.Provider = TEXT("figma");
+	Entry.DocumentScope = TEXT("mirror-mapping-file-key");
+	Entry.ComponentKey = TEXT("component-key-primary");
+	Entry.WidgetClass = TEXT("/Script/Design2UMGEditor.Design2UMGMappedComponentTestWidget");
+
+	FUMGPrototypeNavigationData NavigationData;
+	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(
+		Data, OutputPath, &Settings, nullptr, &NavigationData);
+	if (!TestTrue(TEXT("Build dual-target mapped-component widget blueprint"), WBP != nullptr)
+		|| !TestTrue(TEXT("Save dual-target mapped-component widget blueprint"),
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	// Built tree: BOTH the original (inside the switcher page) and the mirror (inside the hosted
+	// mirror page) resolved to the mapped project widget class.
+	UDesign2UMGMappedComponentTestWidget* OriginalInstance = WBP->WidgetTree
+		? Cast<UDesign2UMGMappedComponentTestWidget>(WBP->WidgetTree->FindWidget(TEXT("MappedButton"))) : nullptr;
+	UDesign2UMGMappedComponentTestWidget* MirrorInstance = WBP->WidgetTree
+		? Cast<UDesign2UMGMappedComponentTestWidget>(WBP->WidgetTree->FindWidget(FName(*MirrorInstanceName))) : nullptr;
+	if (!TestTrue(TEXT("Original instance resolved to the mapped project class"), OriginalInstance != nullptr)
+		|| !TestTrue(TEXT("Mirror instance resolved to the mapped project class"), MirrorInstance != nullptr))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	TestTrue(TEXT("Mirror maps to the same widget class as the original"),
+		MirrorInstance->GetClass() == OriginalInstance->GetClass());
+
 	DeleteGeneratedAssetsAtPath(OutputPath);
 	return true;
 }

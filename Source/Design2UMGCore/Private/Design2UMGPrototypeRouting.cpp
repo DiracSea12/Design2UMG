@@ -30,6 +30,12 @@ namespace Design2UMGPrototypeTokens
 		static const TCHAR* Value = TEXT("_root");
 		return Value;
 	}
+
+	const TCHAR* OverlayMirrorSuffix()
+	{
+		static const TCHAR* Value = TEXT("__d2u_ov");
+		return Value;
+	}
 }
 
 namespace Design2UMGPrototypeRouting

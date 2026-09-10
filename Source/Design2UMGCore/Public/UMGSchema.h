@@ -86,6 +86,8 @@ struct DESIGN2UMGCORE_API FUMGWidgetNode
 	bool HasSourceData() const;
 	const FUMGSourceNodeData& Source() const;
 	FUMGSourceNodeData& MutableSource();
+	/** Clears the design identity only (SourceNodeId): the node stops manifest/reimport-matching as a design instance while the rest of the source sidecar (component-mapping fields included) survives. */
+	void ClearSourceDesignIdentity();
 
 	/** Design identity key (the single rule for manifest/reimport reconciliation): prefer the source node id; wrapper nodes fall back to the deterministic IR Id. */
 	FString GetStableDesignNodeId() const;

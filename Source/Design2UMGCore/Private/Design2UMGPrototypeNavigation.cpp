@@ -18,6 +18,34 @@ namespace
 		PageWidget.Slot = FUMGSlotData();
 	}
 
+	/** Hosted-page conventions for a page parented under the overlay host at build time. */
+	void ApplyHostedPageConventions(FUMGWidgetNode& PageWidget)
+	{
+		PageWidget.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
+		PageWidget.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
+		PageWidget.WidgetStyle.Visibility = TEXT("Collapsed");
+	}
+
+	/**
+	 * Deep-copies the page subtree as a build-time overlay mirror: every node clears its design
+	 * identity (SourceNodeId; the copy is synthesized chrome, not a second design instance) and gets
+	 * the non-numeric OverlayMirrorSuffix on id and name, so base-name resolution
+	 * (MatchesWidgetBaseName tolerates numeric tails only) never sees the mirror and the wiring can
+	 * address it deterministically by sanitize(pageId + suffix). The rest of the source sidecar
+	 * survives (component-mapping fields included): mirrors resolve mapped components exactly like
+	 * the originals.
+	 */
+	void MirrorWidgetSubtreeForOverlay(FUMGWidgetNode& Node)
+	{
+		Node.ClearSourceDesignIdentity();
+		Node.Id += Design2UMGPrototypeTokens::OverlayMirrorSuffix();
+		Node.Name += Design2UMGPrototypeTokens::OverlayMirrorSuffix();
+		for (FUMGWidgetNode& Child : Node.Children)
+		{
+			MirrorWidgetSubtreeForOverlay(Child);
+		}
+	}
+
 	/** TargetPageId set of one action kind across all bindings (steps are the executable shape; the binding-level fields cover the legacy no-steps export). */
 	TSet<FString> CollectActionTargetPageIds(
 		const FUMGPrototypeNavigationData& NavigationData,
@@ -100,9 +128,10 @@ namespace Design2UMGPrototypeNavigation
 	{
 		// Overlay-target pages are parented under the overlay host at build time (Collapsed, Fill):
 		// the runtime wiring then only toggles visibility, never reparents. A page that is also a
-		// Navigate target must stay a switcher child (the switcher owns the page flow), and the
-		// initial page must stay a switcher child too (InitialPageIndex keeps pointing at it); the
-		// wiring presents such overlays as a page swap through the Navigate chain instead.
+		// Navigate target must stay a switcher child (the switcher owns the page flow), and the initial
+		// page must stay a switcher child too (InitialPageIndex keeps pointing at it); such pages get a
+		// synthesized mirror copy under the host instead, so the overlay binding stays a layered display
+		// over the current page and never disturbs the page flow or the history.
 		const TSet<FString> OverlayPageIds = CollectActionTargetPageIds(
 			NavigationData, EUMGPrototypeNavigationStepKind::Overlay);
 		const TSet<FString> NavigatePageIds = CollectActionTargetPageIds(
@@ -127,14 +156,13 @@ namespace Design2UMGPrototypeNavigation
 			MaxWidth = FMath::Max(MaxWidth, PageWidget.Bounds.W);
 			MaxHeight = FMath::Max(MaxHeight, PageWidget.Bounds.H);
 
-			const bool bOverlayPage = OverlayPageIds.Contains(PageWidget.Id)
+			const bool bOverlayTargetPage = OverlayPageIds.Contains(PageWidget.Id);
+			const bool bOverlayOnlyPage = bOverlayTargetPage
 				&& !NavigatePageIds.Contains(PageWidget.Id)
 				&& PageIndex != InitialPagePosition;
-			if (bOverlayPage)
+			if (bOverlayOnlyPage)
 			{
-				PageWidget.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
-				PageWidget.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
-				PageWidget.WidgetStyle.Visibility = TEXT("Collapsed");
+				ApplyHostedPageConventions(PageWidget);
 				OverlayPages.Add(MoveTemp(PageWidget));
 				continue;
 			}
@@ -143,6 +171,13 @@ namespace Design2UMGPrototypeNavigation
 				BaseSwitcher.WidgetState.ActiveWidgetIndex = SwitcherChildCount;
 			}
 			++SwitcherChildCount;
+			if (bOverlayTargetPage)
+			{
+				FUMGWidgetNode Mirror = PageWidget; // deep copy; children are value types
+				ApplyHostedPageConventions(Mirror);
+				MirrorWidgetSubtreeForOverlay(Mirror);
+				OverlayPages.Add(MoveTemp(Mirror));
+			}
 			BaseSwitcher.Children.Add(MoveTemp(PageWidget));
 		}
 
