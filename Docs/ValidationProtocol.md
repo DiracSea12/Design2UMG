@@ -269,7 +269,7 @@ Sentinel maintenance rule:
 
 ## Current Formal Gate
 
-The current formal admissible gate is the 71-case discovered admissible set: 39 Pencil cases plus 16 Figma export roots represented by `local` and `source` paths (32 Figma cases). The locked scope is recorded by the latest full-run `run_scope.json`; a run is not a formal full run when it discovers fewer than 71 cases.
+The current formal admissible gate is the 81-case discovered admissible set: 39 Pencil cases plus 21 Figma export roots represented by `local` and `source` paths (42 Figma cases). The locked scope is recorded by the latest full-run `run_scope.json`; a run is not a formal full run when it discovers fewer than 81 cases. The sealed baseline for this scope is `d4-seal81-20260906_01`.
 
 That means:
 - do not run the formal full gate with an exclude pattern

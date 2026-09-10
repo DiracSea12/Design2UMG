@@ -188,7 +188,7 @@ pwsh -NoProfile -File <PluginRoot>\Tools\Run-Design2UMGDeterminismSmoke.ps1 -Pro
 - 缺 run root、缺 sentinel case、缺 compare report、缺 `generation_vs_asset`、缺 `generation_vs_asset_structure`、证据 stale / unreadable / mismatch，都必须 fail closed。
 - 通过时，每个 sentinel 的 `generation_vs_asset.changed_ratio` 和 `generation_vs_asset.stable_changed_ratio` 都必须是 `0.0`。
 - 通过时，每个 sentinel 的 `generation_vs_asset_structure.available` 也必须是 `true`，并且结构/文本 parity 不能坏。
-- 这一步通过，只代表 bootstrap-vs-asset parity 这条路径当前还值得继续跑 formal gate；它不是 formal 71-case 的替代品。
+- 这一步通过，只代表 bootstrap-vs-asset parity 这条路径当前还值得继续跑 formal gate；它不是 formal 81-case 的替代品。
 
 sentinel 维护规则：
 
@@ -196,7 +196,7 @@ sentinel 维护规则：
 
 ## 当前 formal gate
 
-当前 formal admissible gate 是 71 个 discovered admissible case：39 个 Pencil，加上 16 个 Figma export root 各自的 `local` 与 `source` 两条路径（共 32 个 Figma case）。锁定口径以最新 full-run 的 `run_scope.json` 为准；发现数少于 71 的 run 不算正式 full run。
+当前 formal admissible gate 是 81 个 discovered admissible case：39 个 Pencil，加上 21 个 Figma export root 各自的 `local` 与 `source` 两条路径（共 42 个 Figma case）。锁定口径以最新 full-run 的 `run_scope.json` 为准；发现数少于 81 的 run 不算正式 full run。该口径的封板基线是 `d4-seal81-20260906_01`。
 
 这意味着：
 

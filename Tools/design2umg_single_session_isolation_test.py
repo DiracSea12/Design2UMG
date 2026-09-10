@@ -7,7 +7,7 @@ Compares rendering outputs between:
   B) single-session mode - all cases run in ONE UnrealEditor process
 
 If B produces identical (or within tolerance) images to A, then single-session
-is safe for the 71-case full gate.
+is safe for the full formal gate.
 """
 import argparse
 import base64
@@ -41,7 +41,7 @@ EDITOR_GRACEFUL_EXIT_DEADLINE_SEC = 30.0
 
 
 # ---------------------------------------------------------------------------
-# Case selection: the current 71-case formal gate scope.  Read the frozen
+# Case selection: the current formal gate scope.  Read the frozen
 # run scope so this experiment cannot silently drift from batch discovery.
 # ---------------------------------------------------------------------------
 def formal_scope_pointer(runtime_project: Path) -> Path:
@@ -68,8 +68,12 @@ def load_formal_case_scope(runtime_project: Path):
             item.get("node", ""),
             "",
         ))
-    if len(cases) != 71:
-        raise RuntimeError(f"Expected the current 71-case scope, found {len(cases)} cases")
+    # The expected count comes from the pointer's own scope record, so this
+    # experiment cannot silently keep a stale hardcoded case count.
+    expected = pointer["current_formal_scope"].get("case_count")
+    if expected is not None and len(cases) != expected:
+        raise RuntimeError(
+            f"Expected the current {expected}-case scope, found {len(cases)} cases")
     return cases
 
 
@@ -515,7 +519,7 @@ def run_experiment(runtime_project: Path):
     print("=" * 60)
     if all_pass:
         print("RESULT: PASS - Single-session produces identical outputs")
-        print("  -> 71 cases CAN run in a single editor session without contamination")
+        print(f"  -> {len(experiment_cases)} cases CAN run in a single editor session without contamination")
     else:
         diff_cases = [r["case"] for r in rows if r["status"] not in ("PASS", "STEP_NO_OUTPUT", "SESSION_NO_OUTPUT")]
         print(f"RESULT: FAIL - {len(diff_cases)} case(s) show differences")

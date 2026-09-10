@@ -2,7 +2,7 @@
   "generated_at": "2026-04-15T11:33:21Z",
   "automation_root": "Saved\\Design2UMG\\Automation",
   "admissible_run_count": 1,
-  "case_count": 71,
+  "case_count": 81,
   "metric_case_count": 47,
   "runs": [
     "_formal_full_47_20260415_shared_semantics_refroot"
@@ -1381,11 +1381,11 @@
       "case": "figma_figma-export3_source"
     }
   },
-  "scope_run": "_full71_dashed_vector_20260801_01",
-  "scope_source": "G:/SampleProject/Saved/Design2UMG/Automation/_full71_dashed_vector_20260801_01/run_scope.json",
-  "scope_case_count": 71,
-  "scope_migration_status": "formal_scope_updated_pending_71_case_historical_best",
-  "scope_note": "The formal discovered set is now 71 cases (39 Pencil plus 32 Figma). The 47 metric entries below remain historical evidence until a 71-case historical-best manifest is rebuilt from comparable source/reference identities.",
+  "scope_run": "d4-seal81-20260906_01",
+  "scope_source": "G:/UE5/FPSRoguelike/Saved/Design2UMG/Automation/d4-seal81-20260906_01/run_scope.json",
+  "scope_case_count": 81,
+  "scope_migration_status": "formal_scope_sealed_at_81_case",
+  "scope_note": "The formal discovered set is 81 cases (39 Pencil plus 42 Figma), sealed by d4-seal81-20260906_01. The 47 metric entries below remain historical evidence until an 81-case historical-best manifest is rebuilt from comparable source/reference identities.",
   "scope_pencil_case_count": 39,
   "scope_figma_root_count": 16,
   "scope_figma_case_count": 32

@@ -60,7 +60,7 @@ It covers batch case discovery, default Figma export root resolution, run-scope 
 
 ## Determinism smoke
 
-`Run-Design2UMGDeterminismSmoke.ps1` is the focused pre-gate for automation-render parity work. Use it after touching automation render, package reload preparation, transient reset, automation font refresh, or bootstrap render preparation, and before spending a full 71-case formal run.
+`Run-Design2UMGDeterminismSmoke.ps1` is the focused pre-gate for automation-render parity work. Use it after touching automation render, package reload preparation, transient reset, automation font refresh, or bootstrap render preparation, and before spending a full 81-case formal run.
 
 The canonical sentinel owner lives in `Tools/design2umg_determinism_smoke.py:CANONICAL_SENTINEL_CASES`. Do not hand-maintain a second list in the wrapper or selftest; inspect the current pair with:
 
@@ -84,7 +84,7 @@ pwsh -NoProfile -File Tools/Run-Design2UMGDeterminismSmoke.ps1 `
   -OutputRoot <OutputRoot>
 ```
 
-This smoke is focused evidence only. It is not a replacement for the full formal 71-case no-regression closeout.
+This smoke is focused evidence only. It is not a replacement for the full formal 81-case no-regression closeout.
 
 The batch verifier also appends batch-level timing drift history to `Saved/Design2UMG/Automation/batch_timing_history.jsonl`. This is an inspection aid for maintainers, not a release gate by itself.
 
