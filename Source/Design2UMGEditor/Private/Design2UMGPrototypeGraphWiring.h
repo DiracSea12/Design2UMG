@@ -35,12 +35,15 @@ namespace Design2UMGPrototypeGraphWiring
 
 	/**
 	 * Destroys every node previously authored by this wiring (identified via the shared node comment),
-	 * including whole generated keyboard-override function graphs carrying marker nodes. Reimport
-	 * calls this before applying the update plan: generated wiring is plugin-owned transient
+	 * including whole generated keyboard-override function graphs carrying marker nodes. A function
+	 * graph that contains both marker nodes and unmarked nodes is user-modified: it is preserved as a
+	 * whole (regeneration for that keyboard event is skipped so the graph can neither be deleted nor
+	 * masked), and the graph name is optionally reported through OutPreservedMixedGraphs.
+	 * Reimport calls this before applying the update plan: generated wiring is plugin-owned transient
 	 * content that the save re-authors, and it must not feed reimport's "referenced by blueprint graphs"
 	 * safety gates (those protect genuinely user-authored nodes only).
 	 */
-	void ClearGeneratedBindings(UWidgetBlueprint* WBP);
+	void ClearGeneratedBindings(UWidgetBlueprint* WBP, TArray<FString>* OutPreservedMixedGraphs = nullptr);
 
 	/**
 	 * Clears previously generated prototype navigation nodes, then wires eligible bindings:

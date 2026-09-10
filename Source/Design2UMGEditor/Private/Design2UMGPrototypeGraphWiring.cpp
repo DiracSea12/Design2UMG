@@ -43,7 +43,7 @@ namespace Design2UMGPrototypeGraphWiring
 const TCHAR NodeMarkerComment[] = TEXT("Design2UMG Prototype Navigation");
 const TCHAR NavHistoryVariableName[] = TEXT("__d2u_nav_history");
 
-void ClearGeneratedBindings(UWidgetBlueprint* WBP)
+void ClearGeneratedBindings(UWidgetBlueprint* WBP, TArray<FString>* OutPreservedMixedGraphs)
 {
 	if (!WBP)
 	{
@@ -74,8 +74,10 @@ void ClearGeneratedBindings(UWidgetBlueprint* WBP)
 	}
 
 	// Keyboard wiring lives in generated function graphs (UUserWidget::OnKeyDown/OnKeyUp overrides,
-	// which return FEventReply and therefore cannot be ubergraph event nodes). A function graph
-	// carrying marker nodes is plugin-generated content and is removed whole.
+	// which return FEventReply and therefore cannot be ubergraph event nodes). A function graph whose
+	// nodes are ALL marker nodes is plugin-generated content and is removed whole. A graph that also
+	// contains unmarked nodes is user-modified: preserve it as a whole and let WireSimplePrototypeBindings
+	// skip regenerating that event, so user logic can never be deleted by a reimport.
 	TArray<UEdGraph*> GeneratedGraphs;
 	for (UEdGraph* FunctionGraph : WBP->FunctionGraphs)
 	{
@@ -83,13 +85,40 @@ void ClearGeneratedBindings(UWidgetBlueprint* WBP)
 		{
 			continue;
 		}
+		bool bHasMarkerNode = false;
+		bool bHasUnmarkedNode = false;
 		for (const UEdGraphNode* Node : FunctionGraph->Nodes)
 		{
-			if (Node && Node->NodeComment.Equals(NodeMarkerComment, ESearchCase::CaseSensitive))
+			if (!Node)
 			{
-				GeneratedGraphs.Add(FunctionGraph);
+				continue;
+			}
+			if (Node->NodeComment.Equals(NodeMarkerComment, ESearchCase::CaseSensitive))
+			{
+				bHasMarkerNode = true;
+			}
+			else
+			{
+				bHasUnmarkedNode = true;
+			}
+			if (bHasMarkerNode && bHasUnmarkedNode)
+			{
 				break;
 			}
+		}
+		if (bHasMarkerNode && !bHasUnmarkedNode)
+		{
+			GeneratedGraphs.Add(FunctionGraph);
+		}
+		else if (bHasMarkerNode && bHasUnmarkedNode)
+		{
+			if (OutPreservedMixedGraphs)
+			{
+				OutPreservedMixedGraphs->Add(FunctionGraph->GetName());
+			}
+			UE_LOG(LogDesign2UMG, Warning,
+				TEXT("Prototype graph '%s' contains user-authored nodes; preserving the whole graph and skipping keyboard regeneration for it"),
+				*FunctionGraph->GetName());
 		}
 	}
 	for (UEdGraph* Graph : GeneratedGraphs)
@@ -174,6 +203,19 @@ namespace
 			}
 		}
 		return MatchCount == 1 ? MatchedIndex : INDEX_NONE;
+	}
+
+	/** True when Widget is Ancestor or sits in its subtree; both are tree widgets (same WidgetTree). */
+	bool IsWidgetInsideWidget(const UWidget* Widget, const UWidget* Ancestor)
+	{
+		for (const UWidget* Current = Widget; Current; Current = Current->GetParent())
+		{
+			if (Current == Ancestor)
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
@@ -292,6 +334,9 @@ namespace
 		UFunction* ArrayRemove = nullptr;
 		UFunction* GetKeyEventKey = nullptr;
 		UFunction* EqualKeyKey = nullptr;
+		UFunction* EqualEqual_IntInt = nullptr;
+		UFunction* BooleanAND = nullptr;
+		UFunction* BooleanOR = nullptr;
 		UFunction* UnhandledReply = nullptr;
 
 		FEngineFunctions()
@@ -314,6 +359,9 @@ namespace
 			ArrayRemove = UKismetArrayLibrary::StaticClass()->FindFunctionByName(TEXT("Array_Remove"));
 			GetKeyEventKey = UKismetInputLibrary::StaticClass()->FindFunctionByName(TEXT("GetKey"));
 			EqualKeyKey = UKismetInputLibrary::StaticClass()->FindFunctionByName(TEXT("EqualEqual_KeyKey"));
+			EqualEqual_IntInt = UKismetMathLibrary::StaticClass()->FindFunctionByName(TEXT("EqualEqual_IntInt"));
+			BooleanAND = UKismetMathLibrary::StaticClass()->FindFunctionByName(TEXT("BooleanAND"));
+			BooleanOR = UKismetMathLibrary::StaticClass()->FindFunctionByName(TEXT("BooleanOR"));
 			UnhandledReply = UWidgetBlueprintLibrary::StaticClass()->FindFunctionByName(TEXT("Unhandled"));
 		}
 	};
@@ -715,6 +763,12 @@ void WireSimplePrototypeBindings(
 		 *  button inside the open overlay gets its own bound-event chain; NAME_None when the page
 		 *  has no mirror or the twin is not authorable. */
 		FName MirrorTriggerWidgetName;
+		/** Source-page context for keyboard gating: empty for legacy/manual data (no gate). */
+		FString SourcePageId;
+		/** Index of the source page among the switcher children when it is a switcher child. */
+		int32 SourceSwitcherPageIndex = INDEX_NONE;
+		/** Hosted page/mirror widget name under the overlay host when the source page is displayed there. */
+		FName SourceHostedPageWidgetName;
 		int32 TargetPageIndex = INDEX_NONE;
 		float DelaySeconds = 0.0f;
 		bool bTransitionChain = false;
@@ -903,8 +957,35 @@ void WireSimplePrototypeBindings(
 		}
 		else
 		{
-			// Keyboard: the key itself is the trigger, so there is no button to resolve; key codes
-			// resolve to FKey names at authoring time below.
+			// Keyboard: the key itself is the trigger, so there is no button to resolve. Resolve the
+			// owning page now so each generated key branch can be gated to that page. A page that is
+			// in the switcher is matched by active index; a page shown under the overlay host (plain
+			// overlay target or the dual-target/initial mirror copy) is matched by its visibility.
+			Resolved.SourcePageId = Binding.SourcePageId;
+			if (!Binding.SourcePageId.IsEmpty())
+			{
+				const FString SourcePageBaseName = FUMGWidgetUtils::SanitizeWidgetName(
+					Binding.SourcePageId, TEXT("CanvasPanel")).ToString();
+				if (Switcher)
+				{
+					Resolved.SourceSwitcherPageIndex = FindSwitcherPageIndex(Switcher, SourcePageBaseName);
+				}
+				if (OverlayHost)
+				{
+					const UWidget* HostedPage = FindOverlayHostPage(OverlayHost, SourcePageBaseName);
+					if (!HostedPage)
+					{
+						HostedPage = FindOverlayHostPage(OverlayHost,
+							FUMGWidgetUtils::SanitizeWidgetName(
+								Binding.SourcePageId + Design2UMGPrototypeTokens::OverlayMirrorSuffix(),
+								TEXT("CanvasPanel")).ToString());
+					}
+					if (HostedPage)
+					{
+						Resolved.SourceHostedPageWidgetName = HostedPage->GetFName();
+					}
+				}
+			}
 			KeyboardBindings.Add(Resolved);
 		}
 	}
@@ -949,8 +1030,13 @@ void WireSimplePrototypeBindings(
 		}
 	}
 
+	const auto NeedsOverlayHostedPageVariable = [](const FResolvedBinding& Resolved)
+	{
+		return Resolved.SourceHostedPageWidgetName != NAME_None;
+	};
 	bool bNeedsSkeletonRefresh = false;
-	if (OverlayHost && MouseBindings.ContainsByPredicate(ReachesOverlayHost))
+	if (OverlayHost && (MouseBindings.ContainsByPredicate(ReachesOverlayHost)
+		|| KeyboardBindings.ContainsByPredicate(NeedsOverlayHostedPageVariable)))
 	{
 		TArray<UWidget*> OverlayVariableTargets;
 		if (!FindFProperty<FObjectProperty>(WBP->SkeletonGeneratedClass, OverlayHost->GetFName()))
@@ -1031,16 +1117,21 @@ void WireSimplePrototypeBindings(
 
 	int32 WiredCount = 0;
 
-	// One bound-event + action chain for one trigger of a resolved binding. The mirror twin of a
-	// mirrored-page trigger (bMirrorTrigger) reuses the same authoring with overlay-context
-	// semantics: Navigate prepends the overlay-exit collapse (Figma semantics: navigate replaces
-	// the current screen, overlay included) and skips the transition animations (the overlay layer
-	// is closing, not animating the switcher underneath); Back/Overlay/OpenLink are the same chain.
+	// One bound-event + action chain for one trigger of a resolved binding. A trigger whose widget
+	// physically sits inside the overlay host (the dual-target/initial mirror copy, or a plain
+	// overlay-target page) reuses the same authoring with overlay-context semantics: Navigate
+	// prepends the overlay-exit collapse (Figma semantics: navigate replaces the current screen,
+	// overlay included) and skips the transition animations (the overlay layer is closing, not
+	// animating the switcher underneath); Back/Overlay/OpenLink are the same chain. The copy type
+	// is deliberately not the discriminator: an overlay-only page has no mirror twin at all.
 	const auto AuthorTriggerChain = [&](const FResolvedBinding& Resolved, const FName TriggerWidgetName,
 		const bool bMirrorTrigger, FChainLayout& Layout) -> bool
 	{
 		const FUMGPrototypeNavigationBinding& Binding = NavigationData.ClickBindings[Resolved.BindingIndex];
 		const FUMGPrototypeNavigationStep& Step = Binding.Steps[0];
+		const UWidget* TriggerWidget = WBP->WidgetTree ? WBP->WidgetTree->FindWidget(TriggerWidgetName) : nullptr;
+		const bool bTriggerInsideOverlayHost = OverlayHost && TriggerWidget
+			&& IsWidgetInsideWidget(TriggerWidget, OverlayHost);
 
 		FObjectProperty* ButtonProperty = FindFProperty<FObjectProperty>(
 			WBP->SkeletonGeneratedClass, TriggerWidgetName);
@@ -1362,9 +1453,9 @@ void WireSimplePrototypeBindings(
 					*Binding.TriggerWidgetId, *SwitcherBaseName));
 				break;
 			}
-			if (bMirrorTrigger)
+			if (bTriggerInsideOverlayHost)
 			{
-				// Mirror-trigger Navigate (fired from inside the open overlay): exit the
+				// Overlay-context Navigate (fired from inside the open overlay): exit the
 				// overlay first - the shared Back TRUE-branch collapse - then the standard
 				// navigate tail. Figma semantics: navigate replaces the current screen, overlay
 				// included. No transition animations: the overlay layer is closing, not
@@ -1472,6 +1563,172 @@ void WireSimplePrototypeBindings(
 	// BlueprintImplementableEvents returning FEventReply, so they cannot live in the ubergraph; the
 	// engine-standard encoding is an override function graph (the editor's own path for such
 	// functions), with one key-equality Branch per (binding, key code) guarding the step chain.
+	/**
+	 * Pure boolean used as a keyboard branch guard: whether the binding source page is
+	 * currently the active switcher page and/or a visible overlay-hosted page. Switcher pages
+	 * use the active index (visibility alone cannot distinguish hidden switcher children);
+	 * overlay-only pages and dual-target page mirrors use the hosted page's own visibility.
+	 * OutConditionPin stays null for a legitimately page-less (single-page/legacy) binding.
+	 */
+	const auto BuildPageContextCondition = [&](UEdGraph* Graph, const FResolvedBinding& Resolved,
+		FChainLayout& Layout, UEdGraphPin*& OutConditionPin) -> bool
+	{
+		OutConditionPin = nullptr;
+		if (Resolved.SourcePageId.IsEmpty())
+		{
+			return true;
+		}
+		const bool bNeedsSwitcherGate = Resolved.SourceSwitcherPageIndex != INDEX_NONE;
+		const bool bNeedsOverlayGate = Resolved.SourceHostedPageWidgetName != NAME_None;
+		if (!bNeedsSwitcherGate && !bNeedsOverlayGate)
+		{
+			// Legacy/manual data with a source page but neither tree home: only a true
+			// single-page blueprint (no switcher, no overlay host) may run ungated.
+			return Switcher == nullptr && OverlayHost == nullptr;
+		}
+		if (!Functions.BooleanAND)
+		{
+			return false;
+		}
+
+		UEdGraphPin* SwitcherConditionPin = nullptr;
+		if (bNeedsSwitcherGate)
+		{
+			if (!SwitcherProperty || !Functions.GetActiveWidgetIndex || !Functions.EqualEqual_IntInt)
+			{
+				return false;
+			}
+			UK2Node_VariableGet* SwitcherGet = Layout.PlacePure(CreateVariableGet(Graph, WBP, SwitcherProperty));
+			UK2Node_CallFunction* ActiveIndexNode = CreateMarkerNode<UK2Node_CallFunction>(Graph,
+				[&Functions](UK2Node_CallFunction* Node)
+				{
+					Node->SetFromFunction(Functions.GetActiveWidgetIndex);
+				});
+			Layout.PlacePure(ActiveIndexNode); // BlueprintGetter => BlueprintPure
+			UEdGraphPin* IndexSelfPin = ActiveIndexNode->FindPin(UEdGraphSchema_K2::PN_Self, EGPD_Input);
+			if (!IndexSelfPin)
+			{
+				return false;
+			}
+			SwitcherGet->GetValuePin()->MakeLinkTo(IndexSelfPin);
+
+			UK2Node_CallFunction* IndexEqualsNode = CreateMarkerNode<UK2Node_CallFunction>(Graph,
+				[&Functions](UK2Node_CallFunction* Node)
+				{
+					Node->SetFromFunction(Functions.EqualEqual_IntInt);
+				});
+			Layout.PlacePure(IndexEqualsNode); // BlueprintPure
+			UEdGraphPin* IndexAPin = IndexEqualsNode->FindPin(TEXT("A"), EGPD_Input);
+			UEdGraphPin* IndexBPin = IndexEqualsNode->FindPin(TEXT("B"), EGPD_Input);
+			UEdGraphPin* ActiveIndexPin = ActiveIndexNode->FindPin(UEdGraphSchema_K2::PN_ReturnValue, EGPD_Output);
+			if (!IndexAPin || !IndexBPin || !ActiveIndexPin)
+			{
+				return false;
+			}
+			ActiveIndexPin->MakeLinkTo(IndexAPin);
+			IndexBPin->DefaultValue = FString::FromInt(Resolved.SourceSwitcherPageIndex);
+			SwitcherConditionPin = IndexEqualsNode->FindPin(UEdGraphSchema_K2::PN_ReturnValue, EGPD_Output);
+			if (!SwitcherConditionPin)
+			{
+				return false;
+			}
+		}
+
+		UEdGraphPin* OverlayConditionPin = nullptr;
+		if (bNeedsOverlayGate)
+		{
+			if (!Functions.GetVisibility || !Functions.Not_PreBool || !WBP->SkeletonGeneratedClass)
+			{
+				return false;
+			}
+			FObjectProperty* HostedPageProperty = FindFProperty<FObjectProperty>(
+				WBP->SkeletonGeneratedClass, Resolved.SourceHostedPageWidgetName);
+			if (!HostedPageProperty)
+			{
+				return false;
+			}
+			UK2Node_VariableGet* HostedPageGet = Layout.PlacePure(CreateVariableGet(Graph, WBP, HostedPageProperty));
+			UK2Node_CallFunction* GetVisibilityNode = CreateMarkerNode<UK2Node_CallFunction>(Graph,
+				[&Functions](UK2Node_CallFunction* Node)
+				{
+					Node->SetFromFunction(Functions.GetVisibility);
+				});
+			Layout.PlacePure(GetVisibilityNode); // BlueprintGetter => BlueprintPure
+			UEdGraphPin* VisibilitySelfPin = GetVisibilityNode->FindPin(UEdGraphSchema_K2::PN_Self, EGPD_Input);
+			if (!VisibilitySelfPin)
+			{
+				return false;
+			}
+			HostedPageGet->GetValuePin()->MakeLinkTo(VisibilitySelfPin);
+
+			UK2Node_EnumEquality* VisibilityIsCollapsed = CreateMarkerNode<UK2Node_EnumEquality>(Graph,
+				[](UK2Node_EnumEquality*) {});
+			Layout.PlacePure(VisibilityIsCollapsed);
+			UEdGraphPin* VisibilityPin = GetVisibilityNode->FindPin(UEdGraphSchema_K2::PN_ReturnValue, EGPD_Output);
+			if (!VisibilityPin
+				|| !Graph->GetSchema()->TryCreateConnection(VisibilityPin, VisibilityIsCollapsed->GetInput1Pin()))
+			{
+				return false;
+			}
+			const UEnum* VisibilityEnum = StaticEnum<ESlateVisibility>();
+			UEdGraphPin* ComparePin = VisibilityIsCollapsed->GetInput2Pin();
+			if (!ComparePin || !VisibilityEnum)
+			{
+				return false;
+			}
+			ComparePin->DefaultValue = VisibilityEnum->GetNameStringByValue(
+				static_cast<int64>(ESlateVisibility::Collapsed));
+
+			UK2Node_CallFunction* NotCollapsedNode = CreateMarkerNode<UK2Node_CallFunction>(Graph,
+				[&Functions](UK2Node_CallFunction* Node)
+				{
+					Node->SetFromFunction(Functions.Not_PreBool);
+				});
+			Layout.PlacePure(NotCollapsedNode); // BlueprintPure
+			UEdGraphPin* CollapsedPin = VisibilityIsCollapsed->GetReturnValuePin();
+			UEdGraphPin* NotInputPin = NotCollapsedNode->FindPin(TEXT("A"), EGPD_Input);
+			if (!CollapsedPin || !NotInputPin
+				|| !Graph->GetSchema()->TryCreateConnection(CollapsedPin, NotInputPin))
+			{
+				return false;
+			}
+			OverlayConditionPin = NotCollapsedNode->FindPin(UEdGraphSchema_K2::PN_ReturnValue, EGPD_Output);
+			if (!OverlayConditionPin)
+			{
+				return false;
+			}
+		}
+
+		if (SwitcherConditionPin && OverlayConditionPin)
+		{
+			if (!Functions.BooleanOR)
+			{
+				return false;
+			}
+			UK2Node_CallFunction* OrNode = CreateMarkerNode<UK2Node_CallFunction>(Graph,
+				[&Functions](UK2Node_CallFunction* Node)
+				{
+					Node->SetFromFunction(Functions.BooleanOR);
+				});
+			Layout.PlacePure(OrNode); // BlueprintPure
+			UEdGraphPin* A = OrNode->FindPin(TEXT("A"), EGPD_Input);
+			UEdGraphPin* B = OrNode->FindPin(TEXT("B"), EGPD_Input);
+			UEdGraphPin* OrReturn = OrNode->FindPin(UEdGraphSchema_K2::PN_ReturnValue, EGPD_Output);
+			if (!A || !B || !OrReturn)
+			{
+				return false;
+			}
+			SwitcherConditionPin->MakeLinkTo(A);
+			OverlayConditionPin->MakeLinkTo(B);
+			OutConditionPin = OrReturn;
+		}
+		else
+		{
+			OutConditionPin = SwitcherConditionPin ? SwitcherConditionPin : OverlayConditionPin;
+		}
+		return OutConditionPin != nullptr;
+	};
+
 	bool bKeyboardWired = false;
 	struct FEventKind { bool bKeyDown; FName EventName; };
 	const FEventKind EventKinds[] = {
@@ -1504,7 +1761,7 @@ void WireSimplePrototypeBindings(
 		if (bUserOverrideExists)
 		{
 			SkipBinding(OutWarnings, FString::Printf(
-				TEXT("keyboard event %s: a non-generated override graph already exists; keyboard wiring skipped"),
+				TEXT("keyboard event %s: a same-named override graph already exists; keyboard wiring skipped to preserve it"),
 				*EventKind.EventName.ToString()));
 			continue;
 		}
@@ -1631,15 +1888,48 @@ void WireSimplePrototypeBindings(
 					BPin->DefaultValue = KeyName.ToString();
 				}
 
+				// The branch fires only when the key matches AND the binding's own page is
+				// active/visible: page A and page B may bind the same key to different actions,
+				// and a hidden page's keyboard action must never run.
+				UEdGraphPin* BranchConditionPin = KeyEqualsNode->FindPin(TEXT("ReturnValue"), EGPD_Output);
+				UEdGraphPin* PageConditionPin = nullptr;
+				if (!BranchConditionPin
+					|| !BuildPageContextCondition(KeyGraph, Resolved, Layout, PageConditionPin))
+				{
+					SkipBinding(OutWarnings, FString::Printf(
+						TEXT("trigger '%s': keyboard page-context guard unavailable; key branch skipped"),
+						*Binding.TriggerWidgetId));
+					continue;
+				}
+				if (PageConditionPin)
+				{
+					UK2Node_CallFunction* AndNode = CreateMarkerNode<UK2Node_CallFunction>(KeyGraph,
+						[&Functions](UK2Node_CallFunction* Node)
+						{
+							Node->SetFromFunction(Functions.BooleanAND);
+						});
+					Layout.PlacePure(AndNode); // BlueprintPure
+					UEdGraphPin* AndAPin = AndNode->FindPin(TEXT("A"), EGPD_Input);
+					UEdGraphPin* AndBPin = AndNode->FindPin(TEXT("B"), EGPD_Input);
+					UEdGraphPin* AndReturnPin = AndNode->FindPin(UEdGraphSchema_K2::PN_ReturnValue, EGPD_Output);
+					if (!AndAPin || !AndBPin || !AndReturnPin)
+					{
+						SkipBinding(OutWarnings, FString::Printf(
+							TEXT("trigger '%s': keyboard page-context AND pins missing"),
+							*Binding.TriggerWidgetId));
+						continue;
+					}
+					BranchConditionPin->MakeLinkTo(AndAPin);
+					PageConditionPin->MakeLinkTo(AndBPin);
+					BranchConditionPin = AndReturnPin;
+				}
+
 				UK2Node_IfThenElse* BranchNode = CreateMarkerNode<UK2Node_IfThenElse>(KeyGraph,
 					[](UK2Node_IfThenElse*) {});
 				Layout.PlaceExec(BranchNode);
 				if (UEdGraphPin* ConditionPin = BranchNode->FindPin(UEdGraphSchema_K2::PN_Condition, EGPD_Input))
 				{
-					if (UEdGraphPin* EqualsPin = KeyEqualsNode->FindPin(TEXT("ReturnValue"), EGPD_Output))
-					{
-						EqualsPin->MakeLinkTo(ConditionPin);
-					}
+					BranchConditionPin->MakeLinkTo(ConditionPin);
 				}
 
 				bool bTailValid = false;

@@ -541,6 +541,10 @@ namespace Design2UMGPrototypeStepGraphAssembly
 			FUMGPrototypeNavigationBinding Binding;
 			Binding.TriggerWidgetId = Node->Id;
 			Binding.TriggerWidgetName = Node->Id;
+			if (const FString* SourcePageId = NodeToPageId.Find(Node->Id))
+			{
+				Binding.SourcePageId = *SourcePageId;
+			}
 			Binding.TriggerType = NormalizedTriggerType;
 			Binding.TriggerJson = Interaction.TriggerJson;
 			Binding.TriggerKeyCodes = ParsePrototypeTriggerKeyCodes(Interaction.TriggerJson);

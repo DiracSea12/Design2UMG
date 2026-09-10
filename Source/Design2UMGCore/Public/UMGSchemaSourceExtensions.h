@@ -179,6 +179,8 @@ struct FUMGPrototypeNavigationBinding
 
 	UPROPERTY() FString TriggerWidgetId;
 	UPROPERTY() FString TriggerWidgetName;
+	/** Top-level page id containing the trigger node (empty for legacy/manual data); keyboard wiring uses it to gate the binding to its own page. */
+	UPROPERTY() FString SourcePageId;
 	UPROPERTY() FString TriggerType;
 	UPROPERTY() FString TriggerJson;
 	UPROPERTY() TArray<FString> TriggerKeyCodes;
@@ -281,8 +283,8 @@ namespace Design2UMGPrototypeTokens
 	/** Overlay wrapper root id = switcher body root id + this suffix (assembled by Design2UMGPrototypeNavigation). */
 	DESIGN2UMGCORE_API const TCHAR* OverlayRootSuffix();
 	/** Non-numeric tail appended to every widget name/id of an overlay mirror copy (BuildRoot synthesizes one for a
-	 *  dual-purpose/initial overlay-target page). MatchesWidgetBaseName only tolerates numeric tails, so mirrored
-	 *  names stay invisible to the wiring's base-name trigger/page resolution; the wiring finds the mirror by
-	 *  sanitize(targetPageId + this suffix), which equals the generator's sanitize of the mirrored IR name. */
+	 *  dual-purpose/initial overlay-target page). MatchesWidgetBaseName only tolerates the generator's `_N`/`_wN`
+	 *  tails, so mirrored names stay invisible to the wiring's base-name trigger/page resolution; the wiring finds
+	 *  the mirror by sanitize(targetPageId + this suffix), which equals the generator's sanitize of the mirrored IR name. */
 	DESIGN2UMGCORE_API const TCHAR* OverlayMirrorSuffix();
 }

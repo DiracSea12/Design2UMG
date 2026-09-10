@@ -65,7 +65,17 @@ namespace DesignImportPipeline
 		// Generated prototype navigation wiring is plugin-owned transient content, re-authored by the
 		// save (step 11) from the new source. Clear it before the tree updates so the safe-delete /
 		// identity-conversion gates ("referenced by blueprint graphs") only ever see user-authored nodes.
-		Design2UMGPrototypeGraphWiring::ClearGeneratedBindings(WBP);
+		// Mixed generated/user keyboard graphs are preserved; each one gets a conflict diagnostic below.
+		TArray<FString> PreservedMixedGraphs;
+		Design2UMGPrototypeGraphWiring::ClearGeneratedBindings(WBP, &PreservedMixedGraphs);
+		for (const FString& GraphName : PreservedMixedGraphs)
+		{
+			AddReimportDiagnostic(
+				Result.Diagnostics, ReimportDiagnosticKinds::PrototypeGraphConflict,
+				FString::Printf(
+					TEXT("Keyboard override '%s' contains user-authored nodes; graph preserved and keyboard regeneration skipped"),
+					*GraphName));
+		}
 		TArray<FDesign2UMGMappedInstanceRecord> FinalMappedRecords;
 		TArray<FDesign2UMGGeneratedInstanceRecord> FinalGeneratedRecords;
 		TSet<FString> UpdatedD2UOwned(Manifest.D2UOwned);

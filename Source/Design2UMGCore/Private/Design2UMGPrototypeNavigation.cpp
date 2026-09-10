@@ -29,9 +29,9 @@ namespace
 	/**
 	 * Deep-copies the page subtree as a build-time overlay mirror: every node clears its design
 	 * identity (SourceNodeId; the copy is synthesized chrome, not a second design instance) and gets
-	 * the non-numeric OverlayMirrorSuffix on id and name, so base-name resolution
-	 * (MatchesWidgetBaseName tolerates numeric tails only) never sees the mirror and the wiring can
-	 * address it deterministically by sanitize(pageId + suffix). The rest of the source sidecar
+	 * the non-numeric OverlayMirrorSuffix on id and name, so base-name resolution (which tolerates
+	 * only the generator's `_N`/`_wN` tails) never sees the mirror and the wiring can address it
+	 * deterministically by sanitize(pageId + suffix). The rest of the source sidecar
 	 * survives (component-mapping fields included): mirrors resolve mapped components exactly like
 	 * the originals.
 	 */

@@ -68,6 +68,7 @@ namespace DesignImportPipeline
 		inline constexpr const TCHAR* Moved = TEXT("reimport_moved");
 		inline constexpr const TCHAR* NodeMissing = TEXT("reimport_node_missing");
 		inline constexpr const TCHAR* PrototypeHostContinued = TEXT("reimport_prototype_host_continued");
+		inline constexpr const TCHAR* PrototypeGraphConflict = TEXT("reimport_prototype_graph_conflict");
 		inline constexpr const TCHAR* RemoveConflict = TEXT("reimport_remove_conflict");
 		inline constexpr const TCHAR* Removed = TEXT("reimport_removed");
 		inline constexpr const TCHAR* ResolutionCopy = TEXT("reimport_resolution_copy");

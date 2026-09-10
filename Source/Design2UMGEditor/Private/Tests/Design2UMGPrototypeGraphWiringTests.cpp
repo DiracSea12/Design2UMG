@@ -2,6 +2,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "Design2UMGConverter.h"
+#include "DesignImportPipeline.h"
 #include "Design2UMGGenerationSettingsSnapshot.h"
 #include "Design2UMGPrototypeGraphWiring.h"
 #include "Design2UMGTestUtils.h"
@@ -312,20 +313,51 @@ namespace
 
 	const FString KeyboardNavigatePrototypeJson()
 	{
-		// Two keyboard interactions on one node: N down navigates forward, M up navigates back.
+		// Page one binds N down (forward) and M up (back); page two binds the SAME N key
+		// (back). Keyboard branches must be gated by the source page: hidden-page M must
+		// not fire while page two is active, and the two N actions must not steal from
+		// each other when the pages switch.
 		const FString KeyTriggerJson = FString::Printf(
 			TEXT(",\"fills\":[%s],\"interactions\":["
 				"{\"trigger\":{\"type\":\"ON_KEY_DOWN\",\"keyCodes\":[\"n\"]},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"NAVIGATE\"}]},"
 				"{\"trigger\":{\"type\":\"ON_KEY_UP\",\"keyCodes\":[\"m\"]},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"1:1\",\"navigation\":\"NAVIGATE\"}]}]"),
 			*MakeSolidFillJson(0.1, 0.4, 0.9));
 		const FString KeyNodeJson = MakeLeafNode(TEXT("key_pad"), TEXT("KeyPad"), TEXT("RECTANGLE"), 40, 60, 120, 44, KeyTriggerJson);
+		const FString PageTwoKeyTriggerJson = FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":["
+				"{\"trigger\":{\"type\":\"ON_KEY_DOWN\",\"keyCodes\":[\"n\"]},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"1:1\",\"navigation\":\"NAVIGATE\"}]}]"),
+			*MakeSolidFillJson(0.7, 0.4, 0.2));
+		const FString PageTwoKeyNodeJson = MakeLeafNode(
+			TEXT("page2_key"), TEXT("PageTwoKey"), TEXT("RECTANGLE"), 40, 60, 120, 44, PageTwoKeyTriggerJson);
 		const FString PageTwoJson = MakeContainerNode(TEXT("2:1"), TEXT("PageTwo"), TEXT("FRAME"), 0, 0, 360, 240,
-			MakeTextNode(TEXT("page2_title"), TEXT("Done"), 32, 48, 120, 32, TEXT("Done"),
-				TEXT("\"fontFamily\":\"Inter\",\"fontSize\":24,\"fontWeight\":600,\"textAlignHorizontal\":\"LEFT\",\"textAlignVertical\":\"TOP\",\"textDecoration\":\"NONE\",\"letterSpacing\":0,\"lineHeightUnit\":\"AUTO\",\"lineHeightPx\":0")));
+			FString::Printf(TEXT("%s,%s"), *PageTwoKeyNodeJson,
+				*MakeTextNode(TEXT("page2_title"), TEXT("Done"), 32, 120, 120, 32, TEXT("Done"),
+					TEXT("\"fontFamily\":\"Inter\",\"fontSize\":24,\"fontWeight\":600,\"textAlignHorizontal\":\"LEFT\",\"textAlignVertical\":\"TOP\",\"textDecoration\":\"NONE\",\"letterSpacing\":0,\"lineHeightUnit\":\"AUTO\",\"lineHeightPx\":0"))));
 		return MakeFigmaDocJson(
 			FString::Printf(TEXT("%s,%s"),
 				*MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240, KeyNodeJson),
 				*PageTwoJson),
+			TEXT(",\"prototypeStartNodeID\":\"1:1\",\"fileKey\":\"proto-nav-wiring-key\""));
+	}
+
+	// Plain overlay-only page (not a Navigate target, not the initial page): its content is
+	// parented directly under the overlay host (no synthesized mirror), so its visible Navigate
+	// button must still close the overlay before switching the page underneath.
+	const FString OverlayOnlyPageNavigatePrototypeJson()
+	{
+		const FString OverlayButtonJson = MakeLeafNode(TEXT("overlay_button"), TEXT("Overlay"), TEXT("RECTANGLE"), 20, 60, 120, 44, FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"OPEN_OVERLAY\"}]}]"),
+			*MakeSolidFillJson(0.2, 0.7, 0.5)));
+		const FString NavButtonJson = MakeLeafNode(TEXT("nav_button"), TEXT("Next"), TEXT("RECTANGLE"), 20, 60, 120, 44, FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"3:1\",\"navigation\":\"NAVIGATE\"}]}]"),
+			*MakeSolidFillJson(0.1, 0.4, 0.9)));
+		const FString PageOneJson = MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240, OverlayButtonJson);
+		const FString PageTwoJson = MakeContainerNode(TEXT("2:1"), TEXT("PageTwo"), TEXT("FRAME"), 0, 0, 360, 240, NavButtonJson);
+		const FString PageThreeJson = MakeContainerNode(TEXT("3:1"), TEXT("PageThree"), TEXT("FRAME"), 0, 0, 360, 240,
+			MakeTextNode(TEXT("page3_title"), TEXT("PageThreeTitle"), 32, 48, 120, 32, TEXT("Page three"),
+				TEXT("\"fontFamily\":\"Inter\",\"fontSize\":24,\"fontWeight\":600,\"textAlignHorizontal\":\"LEFT\",\"textAlignVertical\":\"TOP\",\"textDecoration\":\"NONE\",\"letterSpacing\":0,\"lineHeightUnit\":\"AUTO\",\"lineHeightPx\":0")));
+		return MakeFigmaDocJson(
+			FString::Printf(TEXT("%s,%s,%s"), *PageOneJson, *PageTwoJson, *PageThreeJson),
 			TEXT(",\"prototypeStartNodeID\":\"1:1\""));
 	}
 
@@ -1615,11 +1647,177 @@ bool FFigmaPrototypeKeyboardGraphWiringTest::RunTest(const FString& Parameters)
 		}
 	};
 	ProcessKeyEvent(EKeys::N, TEXT("OnKeyDown"));
-	TestEqual(TEXT("Key N down switches to page 1"), Switcher->GetActiveWidgetIndex(), 1);
+	TestEqual(TEXT("Page one N switches to page two"), Switcher->GetActiveWidgetIndex(), 1);
 	ProcessKeyEvent(EKeys::M, TEXT("OnKeyUp"));
-	TestEqual(TEXT("Key M up switches back to page 0"), Switcher->GetActiveWidgetIndex(), 0);
+	TestEqual(TEXT("Page one M is gated out while page two is active"), Switcher->GetActiveWidgetIndex(), 1);
+	ProcessKeyEvent(EKeys::N, TEXT("OnKeyDown"));
+	TestEqual(TEXT("Page two N switches back to page one"), Switcher->GetActiveWidgetIndex(), 0);
 
 	WidgetInstance->RemoveFromParent();
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
+// Mixed generated/user keyboard override: once a user node sits in the generated OnKeyDown graph,
+// ClearGeneratedBindings must preserve the whole graph (and its generated nodes) instead of deleting
+// the user logic with it; re-authoring must skip that event graph rather than mask it.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeKeyboardMixedGraphPreservedTest,
+	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.KeyboardMixedGraphPreserved",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaPrototypeKeyboardMixedGraphPreservedTest::RunTest(const FString& Parameters)
+{
+	FDesignDocument Document;
+	FUMGWidgetData Data;
+	if (!TestTrue(TEXT("Convert keyboard prototype fixture"), ConvertPrototype(KeyboardNavigatePrototypeJson(), Document, Data)))
+	{
+		return false;
+	}
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/ProtoNavWiringKeyboardMixedGraph");
+	DeleteGeneratedAssetsAtPath(OutputPath);
+
+	FUMGPrototypeNavigationData NavigationData;
+	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(
+		Data, OutputPath, nullptr, nullptr, &NavigationData);
+	if (!TestTrue(TEXT("Build keyboard widget blueprint"), WBP != nullptr)
+		|| !TestTrue(TEXT("Save keyboard widget blueprint"),
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	UEdGraph* KeyDownGraph = nullptr;
+	for (UEdGraph* Graph : WBP->FunctionGraphs)
+	{
+		if (Graph && Graph->GetFName() == FName(TEXT("OnKeyDown")))
+		{
+			KeyDownGraph = Graph;
+		}
+	}
+	if (!TestNotNull(TEXT("Generated OnKeyDown graph exists"), KeyDownGraph))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	UFunction* PrintFunction = UKismetSystemLibrary::StaticClass()->FindFunctionByName(
+		GET_FUNCTION_NAME_CHECKED(UKismetSystemLibrary, PrintString));
+	if (!TestNotNull(TEXT("PrintString exists for the user node"), PrintFunction))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	UK2Node_CallFunction* UserNode = NewObject<UK2Node_CallFunction>(KeyDownGraph);
+	UserNode->SetFromFunction(PrintFunction);
+	KeyDownGraph->AddNode(UserNode, /*bUserAction=*/true, /*bNotify=*/false);
+	UserNode->CreateNewGuid();
+	UserNode->PostPlacedNewNode();
+	UserNode->AllocateDefaultPins();
+
+	TArray<FString> PreservedMixedGraphs;
+	Design2UMGPrototypeGraphWiring::ClearGeneratedBindings(WBP, &PreservedMixedGraphs);
+	TestTrue(TEXT("Mixed OnKeyDown graph reported as preserved"),
+		PreservedMixedGraphs.Contains(TEXT("OnKeyDown")));
+	TestTrue(TEXT("Mixed graph itself survives the clear"),
+		WBP->FunctionGraphs.Contains(KeyDownGraph));
+	TestTrue(TEXT("User node inside the mixed graph survives the clear"),
+		KeyDownGraph->Nodes.Contains(UserNode));
+
+	TArray<FString> WiringWarnings;
+	Design2UMGPrototypeGraphWiring::WireSimplePrototypeBindings(WBP, NavigationData, WiringWarnings);
+	TestTrue(TEXT("Re-authoring preserves the mixed graph"),
+		WBP->FunctionGraphs.Contains(KeyDownGraph));
+	TestTrue(TEXT("Re-authoring preserves the user node"),
+		KeyDownGraph->Nodes.Contains(UserNode));
+	TestTrue(TEXT("Re-authoring reports the skipped OnKeyDown override"),
+		WiringWarnings.ContainsByPredicate([](const FString& Warning)
+		{
+			return Warning.Contains(TEXT("OnKeyDown")) && Warning.Contains(TEXT("already exists"));
+		}));
+
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
+// Full reimport path for a mixed keyboard override: ClearGeneratedBindings is called before the
+// tree update and would previously delete the graph; the reimport must keep the user node and
+// surface a conflict diagnostic instead of silently discarding user logic.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeKeyboardMixedGraphReimportPreservedTest,
+	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.KeyboardMixedGraphReimportPreserved",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaPrototypeKeyboardMixedGraphReimportPreservedTest::RunTest(const FString& Parameters)
+{
+	FDesignDocument Document;
+	FUMGWidgetData Data;
+	if (!TestTrue(TEXT("Convert keyboard prototype fixture"), ConvertPrototype(KeyboardNavigatePrototypeJson(), Document, Data)))
+	{
+		return false;
+	}
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/ProtoNavWiringKeyboardMixedGraphReimport");
+	DeleteGeneratedAssetsAtPath(OutputPath);
+
+	FDesign2UMGGenerationOutput GenerationOutput;
+	UWidgetBlueprint* WBP = FUMGGenerator::GenerateWidgetBlueprint(Data, OutputPath, nullptr, &GenerationOutput);
+	if (!TestTrue(TEXT("Generate keyboard widget blueprint with manifest"), WBP != nullptr))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	const FString TargetPackage = WBP->GetOutermost()->GetName();
+
+	UEdGraph* KeyDownGraph = nullptr;
+	for (UEdGraph* Graph : WBP->FunctionGraphs)
+	{
+		if (Graph && Graph->GetFName() == FName(TEXT("OnKeyDown")))
+		{
+			KeyDownGraph = Graph;
+		}
+	}
+	UFunction* PrintFunction = UKismetSystemLibrary::StaticClass()->FindFunctionByName(
+		GET_FUNCTION_NAME_CHECKED(UKismetSystemLibrary, PrintString));
+	if (!TestNotNull(TEXT("Generated OnKeyDown graph exists"), KeyDownGraph)
+		|| !TestNotNull(TEXT("PrintString exists for the user node"), PrintFunction))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	UK2Node_CallFunction* UserNode = NewObject<UK2Node_CallFunction>(KeyDownGraph);
+	UserNode->SetFromFunction(PrintFunction);
+	KeyDownGraph->AddNode(UserNode, /*bUserAction=*/true, /*bNotify=*/false);
+	UserNode->CreateNewGuid();
+	UserNode->PostPlacedNewNode();
+	UserNode->AllocateDefaultPins();
+
+	FDesignReimportRequest Request;
+	Request.TargetAssetPath = TargetPackage;
+	const FDesignReimportResult Result = DesignImportPipeline::Reimport(Document, Request);
+	TestTrue(TEXT("Reimport with a mixed keyboard graph succeeds"), Result.bSucceeded);
+
+	UEdGraph* KeyDownGraphAfter = nullptr;
+	for (UEdGraph* Graph : WBP->FunctionGraphs)
+	{
+		if (Graph && Graph->GetFName() == FName(TEXT("OnKeyDown")))
+		{
+			KeyDownGraphAfter = Graph;
+		}
+	}
+	TestNotNull(TEXT("Mixed OnKeyDown graph survives the full reimport"), KeyDownGraphAfter);
+	TestTrue(TEXT("User node survives the full reimport"),
+		KeyDownGraphAfter && KeyDownGraphAfter->Nodes.Contains(UserNode));
+
+	bool bConflictDiagnosed = false;
+	for (const FDesign2UMGMappingDiagnostic& Diagnostic : Result.Diagnostics)
+	{
+		if (Diagnostic.Kind == TEXT("reimport_prototype_graph_conflict")
+			&& Diagnostic.Message.Contains(TEXT("OnKeyDown")))
+		{
+			bConflictDiagnosed = true;
+		}
+	}
+	TestTrue(TEXT("Reimport reports the preserved mixed graph conflict"), bConflictDiagnosed);
+
 	DeleteGeneratedAssetsAtPath(OutputPath);
 	return true;
 }
@@ -1864,6 +2062,83 @@ bool FFigmaPrototypeOverlayRuntimeSmokeTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Back collapses the host"), Host->GetVisibility(), ESlateVisibility::Collapsed);
 	TestEqual(TEXT("Back collapses the hosted page"), HostedPage->GetVisibility(), ESlateVisibility::Collapsed);
 	TestEqual(TEXT("Back leaves the empty-history page alone"), Switcher->GetActiveWidgetIndex(), 0);
+
+	WidgetInstance->RemoveFromParent();
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
+// Plain overlay-only page runtime smoke: its Navigate button lives in the visible hosted page, not in
+// a mirror copy. Clicking it must exit the overlay (host + hosted page collapse) before switching the
+// underlying switcher; otherwise the overlay keeps covering the destination page.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeOverlayOnlyPageNavigateRuntimeSmokeTest,
+	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.OverlayOnlyPageNavigateRuntimeSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaPrototypeOverlayOnlyPageNavigateRuntimeSmokeTest::RunTest(const FString& Parameters)
+{
+	FDesignDocument Document;
+	FUMGWidgetData Data;
+	if (!TestTrue(TEXT("Convert overlay-only navigate prototype fixture"), ConvertPrototype(OverlayOnlyPageNavigatePrototypeJson(), Document, Data)))
+	{
+		return false;
+	}
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/ProtoNavWiringOverlayOnlyNavigate");
+	DeleteGeneratedAssetsAtPath(OutputPath);
+
+	FUMGPrototypeNavigationData NavigationData;
+	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(
+		Data, OutputPath, nullptr, nullptr, &NavigationData);
+	if (!TestTrue(TEXT("Build overlay-only navigate widget blueprint"), WBP != nullptr)
+		|| !TestTrue(TEXT("Save overlay-only navigate widget blueprint"),
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	UWidgetBlueprintGeneratedClass* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(WBP->GeneratedClass);
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	UUserWidget* WidgetInstance = GeneratedClass && World ? CreateWidget<UUserWidget>(World, GeneratedClass) : nullptr;
+	if (!TestTrue(TEXT("Widget instance created"), WidgetInstance != nullptr))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	WidgetInstance->TakeWidget();
+
+	UWidgetSwitcher* Switcher = Cast<UWidgetSwitcher>(
+		WidgetInstance->WidgetTree ? WidgetInstance->WidgetTree->FindWidget(FName(*NavigationData.SwitcherWidgetName)) : nullptr);
+	UOverlay* Host = WidgetInstance->WidgetTree
+		? Cast<UOverlay>(WidgetInstance->WidgetTree->FindWidget(FName(*NavigationData.OverlayHostWidgetName)))
+		: nullptr;
+	UButton* OverlayButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("overlay_button"))) : nullptr;
+	UButton* NavButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("nav_button"))) : nullptr;
+	UWidget* HostedPage = Host ? Host->GetChildAt(0) : nullptr;
+	if (!TestTrue(TEXT("Switcher exists"), Switcher != nullptr)
+		|| !TestTrue(TEXT("Overlay host exists"), Host != nullptr)
+		|| !TestTrue(TEXT("Hosted overlay-only page exists"), HostedPage != nullptr)
+		|| !TestTrue(TEXT("Overlay button exists"), OverlayButton != nullptr)
+		|| !TestTrue(TEXT("Hosted navigate button exists"), NavButton != nullptr))
+	{
+		WidgetInstance->RemoveFromParent();
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	TestEqual(TEXT("Initial active page"), Switcher->GetActiveWidgetIndex(), 0);
+	TestEqual(TEXT("Overlay host starts collapsed"), Host->GetVisibility(), ESlateVisibility::Collapsed);
+	TestEqual(TEXT("Hosted page starts collapsed"), HostedPage->GetVisibility(), ESlateVisibility::Collapsed);
+
+	OverlayButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Overlay open shows the host"), Host->GetVisibility(), ESlateVisibility::SelfHitTestInvisible);
+	TestEqual(TEXT("Overlay open shows the hosted page"), HostedPage->GetVisibility(), ESlateVisibility::SelfHitTestInvisible);
+	TestEqual(TEXT("Overlay keeps the active page unchanged"), Switcher->GetActiveWidgetIndex(), 0);
+
+	NavButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Navigate collapses the overlay host"), Host->GetVisibility(), ESlateVisibility::Collapsed);
+	TestEqual(TEXT("Navigate collapses the hosted page"), HostedPage->GetVisibility(), ESlateVisibility::Collapsed);
+	TestEqual(TEXT("Navigate switches to the target page"), Switcher->GetActiveWidgetIndex(), 1);
 
 	WidgetInstance->RemoveFromParent();
 	DeleteGeneratedAssetsAtPath(OutputPath);
