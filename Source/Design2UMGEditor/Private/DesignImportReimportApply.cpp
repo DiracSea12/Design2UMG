@@ -303,7 +303,9 @@ namespace DesignImportPipeline
 		/**
 		 * Same-base-name matching (a single-child attempt within one MatchNestedChildren round): the k-th same-named
 		 * (base name) design child pairs with the k-th suffixed existing widget, consistent with the import-time
-		 * SanitizeWidgetName + _N dedup generation order. Returns whether pairing succeeded;
+		 * SanitizeWidgetName + _N dedup generation order. Candidates sort by the generator-tail rank, which is a
+		 * total order over both generated shapes (see FUMGWidgetUtils::GetWidgetNameSuffixRank), so the pairing
+		 * order stays deterministic. Returns whether pairing succeeded;
 		 * exhausted candidates are classified as unmatched by the caller.
 		 */
 		bool TryMatchChildByBaseName(

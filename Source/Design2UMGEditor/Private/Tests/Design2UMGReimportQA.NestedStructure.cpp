@@ -97,6 +97,56 @@ bool FSafeReimportQANestedStructureBoundaryTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
+// Property-collision name round-trip (R2): a nested widget whose sanitized name collides with a
+// UWidget base property is stored as Base_w<N> by the generator. Reimport must recognize that
+// generated tail under its base name and refresh the existing widget in place; rebuilding it as
+// a second widget would leave the old _w1 behind and create _w2 (duplicate content).
+// ---------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAPropertyCollisionNestedIdentityTest,
+	"Design2UMG.SafeReimportQA.NestedPropertyCollisionIdentity",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FSafeReimportQAPropertyCollisionNestedIdentityTest::RunTest(const FString&)
+{
+	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/QAReimportNestedPropertyCollision");
+
+	const auto BuildDoc = [](const TCHAR* Text)
+	{
+		return MakeQADoc(MakeQAPanel(TEXT("qa_panel"), TEXT("InfoPanel"), 24, 24,
+			MakeQAText(TEXT("qa_tip"), TEXT("Tooltip Text"), 32, 32, Text)));
+	};
+
+	UWidgetBlueprint* WBP = QAImport(BuildDoc(TEXT("first")), nullptr, OutputDir);
+	if (!TestTrue(TEXT("v1 import generates"), WBP != nullptr))
+	{
+		QAWipeOutput(OutputDir);
+		return false;
+	}
+	const FString TargetPackage = WBP->GetOutermost()->GetName();
+
+	UTextBlock* TipBefore = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("TooltipText_w1")));
+	if (!TestNotNull(TEXT("property-collision widget is stored with the _w1 tail"), TipBefore))
+	{
+		QAWipeOutput(OutputDir);
+		return false;
+	}
+	TestEqual(TEXT("v1 text applied"), TipBefore->GetText().ToString(), FString(TEXT("first")));
+
+	const FDesignReimportResult Result = QAReimport(BuildDoc(TEXT("second")), nullptr, TargetPackage);
+	TestTrue(TEXT("reimport succeeds"), Result.bSucceeded);
+
+	UTextBlock* TipAfter = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("TooltipText_w1")));
+	TestTrue(TEXT("existing _w1 widget is kept by identity"), TipAfter == TipBefore);
+	TestEqual(TEXT("existing _w1 widget is refreshed in place"),
+		TipAfter ? TipAfter->GetText().ToString() : FString(), FString(TEXT("second")));
+	TestNull(TEXT("no duplicate _w2 widget is created"), WBP->WidgetTree->FindWidget(TEXT("TooltipText_w2")));
+	TestEqual(TEXT("no removal conflict was reported"), QACountKind(Result, TEXT("reimport_remove_conflict")), 0);
+
+	QAWipeOutput(OutputDir);
+	return true;
+}
+
+// ---------------------------------------------------------------------------
 // Case 23 (integration, R2): when a nested mapped instance's IR parent is a non-instance nested container
 // (SidePanel>InnerZone>Button) and the structure is unchanged, reimport must not emit a misleading
 // reimport_move_conflict (a diagnostic must mean a structural change was really skipped); the instance refreshes as usual.

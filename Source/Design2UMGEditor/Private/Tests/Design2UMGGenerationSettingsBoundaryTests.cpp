@@ -621,4 +621,69 @@ bool FReimportAddedNodesUseGenerationSettingsTest::RunTest(const FString& Parame
 	return bNestedUsesOverride && bTopLevelUsesOverride;
 }
 
+// ---------------------------------------------------------------------------
+// Generator widget-name tail contract: reimport's same-name reconciliation parses both
+// generator-produced shapes (Base_<N> from the duplicate-name probe, Base_w<N> from the
+// UWidget-property-collision uniquifier) and must reject everything else, including the
+// overlay mirror suffix. The rank feeding the candidate sort has to be a total order, or
+// the comparison stops being transitive and pairing order becomes unspecified.
+// ---------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGeneratedWidgetSuffixContractTest,
+	"Design2UMG.PureLogic.GeneratedWidgetSuffixContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FGeneratedWidgetSuffixContractTest::RunTest(const FString&)
+{
+	const FString Base = TEXT("TooltipText");
+
+	// Accepted generated shapes.
+	TestTrue(TEXT("bare base name matches"), FUMGWidgetUtils::MatchesWidgetBaseName(Base, Base));
+	TestTrue(TEXT("numeric dedup tail matches"), FUMGWidgetUtils::MatchesWidgetBaseName(TEXT("TooltipText_1"), Base));
+	TestTrue(TEXT("high numeric dedup tail matches"), FUMGWidgetUtils::MatchesWidgetBaseName(TEXT("TooltipText_42"), Base));
+	TestTrue(TEXT("property-collision tail matches"), FUMGWidgetUtils::MatchesWidgetBaseName(TEXT("TooltipText_w1"), Base));
+	TestTrue(TEXT("uppercase W tail matches"), FUMGWidgetUtils::MatchesWidgetBaseName(TEXT("TooltipText_W2"), Base));
+
+	// Rejected: mirror suffix, zero ordinals, non-numeric tails, other bases.
+	TestFalse(TEXT("overlay mirror suffix never matches a base name"),
+		FUMGWidgetUtils::MatchesWidgetBaseName(TEXT("TooltipText__d2u_ov"), Base));
+	TestFalse(TEXT("zero numeric ordinal is rejected"),
+		FUMGWidgetUtils::MatchesWidgetBaseName(TEXT("TooltipText_0"), Base));
+	TestFalse(TEXT("zero w-ordinal is rejected"),
+		FUMGWidgetUtils::MatchesWidgetBaseName(TEXT("TooltipText_w0"), Base));
+	TestFalse(TEXT("bare w with no digits is rejected"),
+		FUMGWidgetUtils::MatchesWidgetBaseName(TEXT("TooltipText_w"), Base));
+	TestFalse(TEXT("word tail starting with w is rejected"),
+		FUMGWidgetUtils::MatchesWidgetBaseName(TEXT("TooltipText_widget"), Base));
+	TestFalse(TEXT("different base does not match"),
+		FUMGWidgetUtils::MatchesWidgetBaseName(TEXT("TooltipTextX_1"), Base));
+	TestFalse(TEXT("missing separator does not match"),
+		FUMGWidgetUtils::MatchesWidgetBaseName(TEXT("TooltipText1"), Base));
+
+	const int32 RankBase = FUMGWidgetUtils::GetWidgetNameSuffixRank(Base, Base);
+	const int32 RankNumeric1 = FUMGWidgetUtils::GetWidgetNameSuffixRank(TEXT("TooltipText_1"), Base);
+	const int32 RankProperty1 = FUMGWidgetUtils::GetWidgetNameSuffixRank(TEXT("TooltipText_w1"), Base);
+	const int32 RankNumeric2 = FUMGWidgetUtils::GetWidgetNameSuffixRank(TEXT("TooltipText_2"), Base);
+	const int32 RankProperty2 = FUMGWidgetUtils::GetWidgetNameSuffixRank(TEXT("TooltipText_w2"), Base);
+	const int32 RankUnmatched = FUMGWidgetUtils::GetWidgetNameSuffixRank(TEXT("TooltipText__d2u_ov"), Base);
+
+	TestEqual(TEXT("base name ranks first"), RankBase, 0);
+	TestEqual(TEXT("non-generated names rank last"), RankUnmatched, MAX_int32);
+	TestTrue(TEXT("every generated shape outranks a non-match"),
+		RankNumeric2 < RankUnmatched && RankProperty2 < RankUnmatched);
+
+	// The two tail shapes must stay disjoint: Base_1 and Base_w1 sharing one rank was the
+	// original defect (the pairing sort then stopped being a strict weak order).
+	TSet<int32> DistinctRanks;
+	DistinctRanks.Add(RankBase);
+	DistinctRanks.Add(RankNumeric1);
+	DistinctRanks.Add(RankProperty1);
+	DistinctRanks.Add(RankNumeric2);
+	DistinctRanks.Add(RankProperty2);
+	TestEqual(TEXT("all five generated shapes rank distinctly"), DistinctRanks.Num(), 5);
+	TestTrue(TEXT("numeric tail ranks before the property tail of the same ordinal"), RankNumeric1 < RankProperty1);
+	TestTrue(TEXT("ordinals still increase across shapes"), RankProperty1 < RankNumeric2);
+
+	return true;
+}
+
 #endif

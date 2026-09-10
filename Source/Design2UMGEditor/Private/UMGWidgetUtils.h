@@ -58,9 +58,17 @@ public:
 		const FString& OwnerValue);
 
 	/**
-	 * Widget name dedup contract (same source as BuildWidgetTree's base_N dedup rule):
-	 * generation-side SanitizeWidgetName+Suffix probing produces base / base_<number>; reimport-side
-	 * same-name reconciliation parses with these two predicates. Anchored in one class: changing the dedup rule must update this in sync.
+	 * Widget name dedup contract (same source as BuildWidgetTree's name generation):
+	 * generation-side SanitizeWidgetName+Suffix probing produces base / base_<number>, and the
+	 * UWidget-property-collision uniquifier produces base_w<number>; reimport-side same-name
+	 * reconciliation parses both shapes with these two predicates. Anchored in one class: changing
+	 * either generation tail must update this in sync.
+	 *
+	 * GetWidgetNameSuffixRank returns a total, collision-free rank for the same-name pairing sort:
+	 * base -> 0, base_<N> -> 2N-1, base_w<N> -> 2N, and MAX_int32 when the name is not a generated
+	 * shape (so non-matches sort last). The two tail shapes deliberately interleave rather than
+	 * share a raw number: base_1 and base_w1 would otherwise both rank 1 and the comparison would
+	 * stop being a strict weak order.
 	 */
 	static bool MatchesWidgetBaseName(const FString& WidgetName, const FString& BaseName);
 	static int32 GetWidgetNameSuffixRank(const FString& WidgetName, const FString& BaseName);

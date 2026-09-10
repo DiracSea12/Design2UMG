@@ -81,6 +81,62 @@ namespace
 			FMath::Max(1, InSize.Y));
 	}
 
+	/**
+	 * Generation-side widget-name tails: SanitizeWidgetName + the duplicate-name probe produce
+	 * Base / Base_<N>, and the UWidget-property-collision uniquifier adds Base_w<N>. Both are
+	 * generator-produced determinism shapes and must round-trip through reimport's same-name
+	 * reconciliation. The overlay mirror suffix (__d2u_ov) is deliberately non-numeric and
+	 * non-wN, so mirror copies never match a base name.
+	 * Returns false for every other name (including the mirror suffix).
+	 *
+	 * OutRank is a total, collision-free encoding of the two tail shapes, not the raw numeric
+	 * tail: Base -> 0, Base_<N> -> 2N-1, Base_w<N> -> 2N. Keep the shapes disjoint this way.
+	 * GetWidgetNameSuffixRank feeds this value into a candidate sort, and two distinct widgets
+	 * sharing one rank would make that comparison non-transitive (TArray::Sort is introsort,
+	 * not stable), leaving their pairing order unspecified. A raw numeric tail would collide
+	 * exactly there: Base_1 and Base_w1 both parse to 1.
+	 */
+	bool TryParseGeneratedWidgetSuffix(const FString& WidgetName, const FString& BaseName, int32& OutRank)
+	{
+		OutRank = 0;
+		if (WidgetName == BaseName)
+		{
+			return true;
+		}
+		if (!WidgetName.StartsWith(BaseName + TEXT("_")))
+		{
+			return false;
+		}
+
+		const FString Tail = WidgetName.RightChop(BaseName.Len() + 1);
+		if (Tail.IsNumeric())
+		{
+			const int32 SuffixOrdinal = FCString::Atoi(*Tail);
+			if (SuffixOrdinal <= 0)
+			{
+				return false;
+			}
+			OutRank = 2 * SuffixOrdinal - 1;
+			return true;
+		}
+
+		if (Tail.Len() > 1 && FChar::ToLower(Tail[0]) == TCHAR('w'))
+		{
+			const FString Digits = Tail.RightChop(1);
+			if (Digits.IsNumeric())
+			{
+				const int32 SuffixOrdinal = FCString::Atoi(*Digits);
+				if (SuffixOrdinal <= 0)
+				{
+					return false;
+				}
+				OutRank = 2 * SuffixOrdinal;
+				return true;
+			}
+		}
+		return false;
+	}
+
 	FIntPoint ResolveEffectiveDesignSize(const FUMGWidgetNode& SourceNode, const FIntPoint* ExplicitDesignSize)
 	{
 		if (ExplicitDesignSize && IsValidEffectiveDesignSize(*ExplicitDesignSize))
@@ -397,21 +453,13 @@ FName FUMGWidgetUtils::SanitizeWidgetName(const FString& InName, const FString& 
 
 bool FUMGWidgetUtils::MatchesWidgetBaseName(const FString& WidgetName, const FString& BaseName)
 {
-	if (WidgetName == BaseName)
-	{
-		return true;
-	}
-	return WidgetName.StartsWith(BaseName + TEXT("_"))
-		&& WidgetName.Len() > BaseName.Len() + 1
-		&& WidgetName.RightChop(BaseName.Len() + 1).IsNumeric();
+	int32 Rank = 0;
+	return TryParseGeneratedWidgetSuffix(WidgetName, BaseName, Rank);
 }
 
 int32 FUMGWidgetUtils::GetWidgetNameSuffixRank(const FString& WidgetName, const FString& BaseName)
 {
-	if (WidgetName == BaseName)
-	{
-		return 0;
-	}
-	return FCString::Atoi(*WidgetName.RightChop(BaseName.Len() + 1));
+	int32 Rank = 0;
+	return TryParseGeneratedWidgetSuffix(WidgetName, BaseName, Rank) ? Rank : MAX_int32;
 }
 
