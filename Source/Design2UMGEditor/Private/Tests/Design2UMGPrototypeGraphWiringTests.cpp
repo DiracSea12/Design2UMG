@@ -19,19 +19,30 @@
 #include "Blueprint/WidgetTree.h"
 #include "Channels/MovieSceneFloatChannel.h"
 #include "Components/Button.h"
+#include "Components/Overlay.h"
+#include "Components/SlateWrapperTypes.h"
 #include "Components/WidgetSwitcher.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphPin.h"
 #include "EdGraphSchema_K2.h"
+#include "Editor.h"
 #include "Engine/Blueprint.h"
 #include "Engine/ComponentDelegateBinding.h"
 #include "Engine/DynamicBlueprintBinding.h"
 #include "Engine/MemberReference.h"
+#include "InputCoreTypes.h"
+#include "K2Node_CallArrayFunction.h"
 #include "K2Node_CallFunction.h"
-#include "K2Node_Event.h"
 #include "K2Node_ComponentBoundEvent.h"
+#include "K2Node_Event.h"
+#include "K2Node_FunctionEntry.h"
+#include "K2Node_FunctionResult.h"
+#include "K2Node_IfThenElse.h"
 #include "K2Node_VariableGet.h"
+#include "Kismet/KismetArrayLibrary.h"
 #include "Kismet/KismetSystemLibrary.h"
+#include "Kismet2/BlueprintEditorUtils.h"
+#include "Kismet2/KismetEditorUtilities.h"
 #include "MovieScene.h"
 #include "MovieSceneBinding.h"
 #include "Sections/MovieSceneFloatSection.h"
@@ -99,6 +110,57 @@ namespace
 			*MakeSolidFillJson(0.2, 0.7, 0.5)));
 		return MakeFigmaDocJson(
 			MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240, LinkButtonJson),
+			TEXT(",\"prototypeStartNodeID\":\"1:1\""));
+	}
+
+	const FString OverlayBackPrototypeJson()
+	{
+		const FString OverlayButtonJson = MakeLeafNode(TEXT("overlay_button"), TEXT("Overlay"), TEXT("RECTANGLE"), 40, 60, 120, 44, FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"OPEN_OVERLAY\"}]}]"),
+			*MakeSolidFillJson(0.1, 0.4, 0.9)));
+		const FString PageTwoJson = MakeContainerNode(TEXT("2:1"), TEXT("PageTwo"), TEXT("FRAME"), 0, 0, 360, 240,
+			MakeLeafNode(TEXT("back_button"), TEXT("Back"), TEXT("RECTANGLE"), 40, 60, 120, 44, FString::Printf(
+				TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"BACK\"}]}]"),
+				*MakeSolidFillJson(0.8, 0.3, 0.2))));
+		return MakeFigmaDocJson(
+			FString::Printf(TEXT("%s,%s"),
+				*MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240, OverlayButtonJson),
+				*PageTwoJson),
+			TEXT(",\"prototypeStartNodeID\":\"1:1\""));
+	}
+
+	const FString NavigateBackPrototypeJson()
+	{
+		const FString NavButtonJson = MakeLeafNode(TEXT("nav_button"), TEXT("Next"), TEXT("RECTANGLE"), 40, 60, 120, 44, FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"NAVIGATE\"}]}]"),
+			*MakeSolidFillJson(0.1, 0.4, 0.9)));
+		const FString PageTwoJson = MakeContainerNode(TEXT("2:1"), TEXT("PageTwo"), TEXT("FRAME"), 0, 0, 360, 240,
+			MakeLeafNode(TEXT("back_button"), TEXT("Back"), TEXT("RECTANGLE"), 40, 60, 120, 44, FString::Printf(
+				TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"BACK\"}]}]"),
+				*MakeSolidFillJson(0.8, 0.3, 0.2))));
+		return MakeFigmaDocJson(
+			FString::Printf(TEXT("%s,%s"),
+				*MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240, NavButtonJson),
+				*PageTwoJson),
+			TEXT(",\"prototypeStartNodeID\":\"1:1\""));
+	}
+
+	const FString KeyboardNavigatePrototypeJson()
+	{
+		// Two keyboard interactions on one node: N down navigates forward, M up navigates back.
+		const FString KeyTriggerJson = FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":["
+				"{\"trigger\":{\"type\":\"ON_KEY_DOWN\",\"keyCodes\":[\"n\"]},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"NAVIGATE\"}]},"
+				"{\"trigger\":{\"type\":\"ON_KEY_UP\",\"keyCodes\":[\"m\"]},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"1:1\",\"navigation\":\"NAVIGATE\"}]}]"),
+			*MakeSolidFillJson(0.1, 0.4, 0.9));
+		const FString KeyNodeJson = MakeLeafNode(TEXT("key_pad"), TEXT("KeyPad"), TEXT("RECTANGLE"), 40, 60, 120, 44, KeyTriggerJson);
+		const FString PageTwoJson = MakeContainerNode(TEXT("2:1"), TEXT("PageTwo"), TEXT("FRAME"), 0, 0, 360, 240,
+			MakeTextNode(TEXT("page2_title"), TEXT("Done"), 32, 48, 120, 32, TEXT("Done"),
+				TEXT("\"fontFamily\":\"Inter\",\"fontSize\":24,\"fontWeight\":600,\"textAlignHorizontal\":\"LEFT\",\"textAlignVertical\":\"TOP\",\"textDecoration\":\"NONE\",\"letterSpacing\":0,\"lineHeightUnit\":\"AUTO\",\"lineHeightPx\":0")));
+		return MakeFigmaDocJson(
+			FString::Printf(TEXT("%s,%s"),
+				*MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240, KeyNodeJson),
+				*PageTwoJson),
 			TEXT(",\"prototypeStartNodeID\":\"1:1\""));
 	}
 
@@ -375,6 +437,13 @@ bool FFigmaPrototypeNavigateGraphWiringTest::RunTest(const FString& Parameters)
 		DurationPin->DefaultValue, FString::SanitizeFloat(FMath::Max(0.12f * 0.5f, 1.0f / 120.0f)));
 
 	UK2Node_CallFunction* CallNode = NextExecCall(DelayNode);
+	if (!TestNotNull(TEXT("Chain reaches the history push after the delay"), CallNode))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	TestEqual(TEXT("Call after the delay is the history push Array_Add"), CallNode->FunctionReference.GetMemberName().ToString(), TEXT("Array_Add"));
+	CallNode = NextExecCall(CallNode);
 	if (!TestNotNull(TEXT("Chain reaches the page switch call"), CallNode))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
@@ -397,6 +466,47 @@ bool FFigmaPrototypeNavigateGraphWiringTest::RunTest(const FString& Parameters)
 		SelfPin && SelfPin->LinkedTo.Num() == 1
 		&& Cast<UK2Node_VariableGet>(SelfPin->LinkedTo[0]->GetOwningNode())
 		&& Cast<UK2Node_VariableGet>(SelfPin->LinkedTo[0]->GetOwningNode())->GetVarName() == Switcher->GetFName());
+
+	// Phase 3: the switch call is preceded by the history push segment. The chain between the
+	// Delay and the switch is GetActiveWidgetIndex -> Array_Add(history, index).
+	UK2Node_CallFunction* PushNode = nullptr;
+	for (UEdGraphNode* Node : WBP->UbergraphPages[0]->Nodes)
+	{
+		if (UK2Node_CallFunction* Candidate = Cast<UK2Node_CallFunction>(Node))
+		{
+			if (Candidate->FunctionReference.GetMemberName() == TEXT("Array_Add"))
+			{
+				PushNode = Candidate;
+			}
+		}
+	}
+	if (!TestNotNull(TEXT("History push Array_Add node authored"), PushNode))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	TestTrue(TEXT("Array_Add resolves on UKismetArrayLibrary"),
+		PushNode->FunctionReference.GetMemberParentClass() == UKismetArrayLibrary::StaticClass());
+	const UEdGraphPin* PushTargetArrayPin = PushNode->FindPin(TEXT("TargetArray"), EGPD_Input);
+	TestTrue(TEXT("Array_Add reads the generated history variable"),
+		PushTargetArrayPin && PushTargetArrayPin->LinkedTo.Num() == 1
+		&& Cast<UK2Node_VariableGet>(PushTargetArrayPin->LinkedTo[0]->GetOwningNode())
+		&& Cast<UK2Node_VariableGet>(PushTargetArrayPin->LinkedTo[0]->GetOwningNode())->GetVarName()
+			== FName(Design2UMGPrototypeGraphWiring::NavHistoryVariableName));
+	const UEdGraphPin* PushNewItemPin = PushNode->FindPin(TEXT("NewItem"), EGPD_Input);
+	TestTrue(TEXT("Array_Add item comes from GetActiveWidgetIndex"),
+		PushNewItemPin && PushNewItemPin->LinkedTo.Num() == 1
+		&& PushNewItemPin->LinkedTo[0]->GetOwningNode()->GetClass() == UK2Node_CallFunction::StaticClass()
+		&& static_cast<UK2Node_CallFunction*>(PushNewItemPin->LinkedTo[0]->GetOwningNode())
+			->FunctionReference.GetMemberName() == TEXT("GetActiveWidgetIndex"));
+
+	// The compiled class carries the generated member variable with the expected type.
+	const UWidgetBlueprintGeneratedClass* NavigateGeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(WBP->GeneratedClass);
+	const FArrayProperty* HistoryProperty = NavigateGeneratedClass
+		? FindFProperty<FArrayProperty>(NavigateGeneratedClass, FName(Design2UMGPrototypeGraphWiring::NavHistoryVariableName))
+		: nullptr;
+	TestTrue(TEXT("Compiled class exposes the history array variable"),
+		HistoryProperty && CastField<FIntProperty>(HistoryProperty->Inner));
 
 	if (!AssertPlayAnimationNode(NextExecCall(CallNode), TEXT("__d2u_nav_anim_000_in")))
 	{
@@ -591,10 +701,11 @@ bool FFigmaPrototypeWiringRegenerateIsIdempotentTest::RunTest(const FString& Par
 		return Count;
 	};
 	const int32 NodeCountAfterSave = Ubergraph->Nodes.Num();
-	// The fade transition chain authors the marker octet (event, out get, PlayAnimation, Delay,
-	// switcher get, SetActiveWidgetIndex, in get, PlayAnimation); the total count also pins the
+	// The fade transition chain with the Phase 3 history push authors twelve marker nodes (event,
+	// out get, PlayAnimation, Delay, switcher get, GetActiveWidgetIndex, history get, Array_Add,
+	// SetActiveWidgetIndex, switcher get, in get, PlayAnimation); the total count also pins the
 	// baseline the regenerate below must hold.
-	TestEqual(TEXT("Initial wiring authors the marker transition chain"), CountMarkerNodes(), 8);
+	TestEqual(TEXT("Initial wiring authors the marker transition chain"), CountMarkerNodes(), 12);
 	TestEqual(TEXT("Initial wiring authors two transition animations"), WBP->Animations.Num(), 2);
 	if (!TestEqual(TEXT("Initial wiring authors one bound event"), CollectBoundEvents(WBP).Num(), 1))
 	{
@@ -603,7 +714,7 @@ bool FFigmaPrototypeWiringRegenerateIsIdempotentTest::RunTest(const FString& Par
 	}
 
 	// Regenerate: re-run the animation builder (name-prefix purge inside) and the wiring over the
-	// same blueprint; neither animations nor nodes may accumulate.
+	// same blueprint; neither animations, nodes nor the generated member variable may accumulate.
 	UMGPrototypeAnimationBuilder::GenerateNavigationAnimations(
 		WBP, Data.RootWidget, NavigationData);
 	TestEqual(TEXT("Regenerated animations stay at two"), WBP->Animations.Num(), 2);
@@ -612,7 +723,13 @@ bool FFigmaPrototypeWiringRegenerateIsIdempotentTest::RunTest(const FString& Par
 	Design2UMGPrototypeGraphWiring::WireSimplePrototypeBindings(WBP, NavigationData, WiringWarnings);
 	TestEqual(TEXT("Fully eligible fixture re-wires without skips"), WiringWarnings.Num(), 0);
 	TestEqual(TEXT("Re-wiring keeps the node count stable"), Ubergraph->Nodes.Num(), NodeCountAfterSave);
-	TestEqual(TEXT("Re-wiring keeps exactly the marker transition chain"), CountMarkerNodes(), 8);
+	TestEqual(TEXT("Re-wiring keeps exactly the marker transition chain"), CountMarkerNodes(), 12);
+	int32 HistoryVariableDescriptions = 0;
+	for (const FBPVariableDescription& Variable : WBP->NewVariables)
+	{
+		HistoryVariableDescriptions += Variable.VarName == FName(Design2UMGPrototypeGraphWiring::NavHistoryVariableName) ? 1 : 0;
+	}
+	TestEqual(TEXT("Re-wiring does not duplicate the history member variable"), HistoryVariableDescriptions, 1);
 	const TArray<UK2Node_ComponentBoundEvent*> Events = CollectBoundEvents(WBP);
 	if (!TestEqual(TEXT("Re-wiring still has exactly one bound event"), Events.Num(), 1))
 	{
@@ -664,9 +781,28 @@ bool FFigmaPrototypeWiringGraphPurityTest::RunTest(const FString& Parameters)
 			*FString::Printf(TEXT("Node class %s is an engine-standard node kind"), *NodeClass->GetName()),
 			NodeClass == UK2Node_ComponentBoundEvent::StaticClass()
 			|| NodeClass == UK2Node_CallFunction::StaticClass()
+			|| NodeClass == UK2Node_CallArrayFunction::StaticClass()
 			|| NodeClass == UK2Node_VariableGet::StaticClass()
+			|| NodeClass == UK2Node_IfThenElse::StaticClass()
+			|| NodeClass == UK2Node_FunctionEntry::StaticClass()
+			|| NodeClass == UK2Node_FunctionResult::StaticClass()
 			|| NodeClass == UK2Node_Event::StaticClass());
 	}
+
+	// Engine-standard variable content only: the generated history variable must be the single
+	// plugin-owned member variable and resolve to an engine FArrayProperty of int32.
+	int32 HistoryVariableCount = 0;
+	for (const FBPVariableDescription& Variable : WBP->NewVariables)
+	{
+		HistoryVariableCount += Variable.VarName == FName(Design2UMGPrototypeGraphWiring::NavHistoryVariableName) ? 1 : 0;
+	}
+	TestEqual(TEXT("Exactly one generated history member variable"), HistoryVariableCount, 1);
+	const UWidgetBlueprintGeneratedClass* PurityGeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(WBP->GeneratedClass);
+	const FArrayProperty* PurityHistoryProperty = PurityGeneratedClass
+		? FindFProperty<FArrayProperty>(PurityGeneratedClass, FName(Design2UMGPrototypeGraphWiring::NavHistoryVariableName))
+		: nullptr;
+	TestTrue(TEXT("History member variable compiles to an engine FArrayProperty of int32"),
+		PurityHistoryProperty && CastField<FIntProperty>(PurityHistoryProperty->Inner));
 
 	// Engine-standard animation content only: the animation, its MovieScene and its tracks must all
 	// be native engine classes (no plugin UObjects baked into the generated asset).
@@ -806,8 +942,8 @@ bool FFigmaPrototypeNavigateNoTransitionDirectWiringTest::RunTest(const FString&
 		return false;
 	}
 
-	// No transition: no animations are authored and the binding keeps the Phase 1 direct wiring
-	// (bound event -> SetActiveWidgetIndex, nothing in between).
+	// No transition: no animations are authored and the binding keeps the direct wiring with the
+	// Phase 3 history push (bound event -> GetActiveWidgetIndex -> Array_Add -> SetActiveWidgetIndex).
 	TestEqual(TEXT("No transition animations are generated"), WBP->Animations.Num(), 0);
 	TestFalse(TEXT("No transition animation names are written into the IR"),
 		NavigationData.ClickBindings[0].Transition.HasGeneratedAnimations());
@@ -818,14 +954,23 @@ bool FFigmaPrototypeNavigateNoTransitionDirectWiringTest::RunTest(const FString&
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
 	}
-	UK2Node_CallFunction* CallNode = FindExecChainCall(Events[0]);
-	if (!TestNotNull(TEXT("Event exec chain reaches a call node"), CallNode))
+	// Direct chain: event -> Array_Add(history, pure GetActiveWidgetIndex) -> SetActiveWidgetIndex.
+	UK2Node_CallFunction* PushNode = FindExecChainCall(Events[0]);
+	if (!TestNotNull(TEXT("Event exec chain reaches the history push"), PushNode))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	TestEqual(TEXT("First call target is Array_Add"), PushNode->FunctionReference.GetMemberName().ToString(), TEXT("Array_Add"));
+
+	UK2Node_CallFunction* CallNode = NextExecCall(PushNode);
+	if (!TestNotNull(TEXT("Chain reaches the page switch call"), CallNode))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
 	}
 	TestEqual(TEXT("Direct call target is SetActiveWidgetIndex"), CallNode->FunctionReference.GetMemberName().ToString(), TEXT("SetActiveWidgetIndex"));
-	TestNull(TEXT("No Delay node sits in the chain"), NextExecCall(CallNode));
+	TestNull(TEXT("No further node sits in the chain"), NextExecCall(CallNode));
 
 	int32 MarkerNodeCount = 0;
 	for (const UEdGraphNode* Node : WBP->UbergraphPages[0]->Nodes)
@@ -833,7 +978,500 @@ bool FFigmaPrototypeNavigateNoTransitionDirectWiringTest::RunTest(const FString&
 		MarkerNodeCount += Node && Node->NodeComment.Equals(
 			Design2UMGPrototypeGraphWiring::NodeMarkerComment, ESearchCase::CaseSensitive) ? 1 : 0;
 	}
-	TestEqual(TEXT("Direct wiring authors the Phase 1 marker triple"), MarkerNodeCount, 3);
+	TestEqual(TEXT("Direct wiring authors the marker set (event, two gets, three calls, history get)"), MarkerNodeCount, 7);
+
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
+// Phase 3 Overlay wiring: a single Overlay step on a click trigger shows the generated overlay host.
+// The old runtime reparented the overlay page into the host (not expressible with standard nodes);
+// the decided encoding is host SetVisibility(SelfHitTestInvisible) via a numeric enum literal.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeOverlayGraphWiringTest,
+	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.Overlay",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaPrototypeOverlayGraphWiringTest::RunTest(const FString& Parameters)
+{
+	FDesignDocument Document;
+	FUMGWidgetData Data;
+	if (!TestTrue(TEXT("Convert overlay prototype fixture"), ConvertPrototype(OverlayBackPrototypeJson(), Document, Data)))
+	{
+		return false;
+	}
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/ProtoNavWiringOverlay");
+	DeleteGeneratedAssetsAtPath(OutputPath);
+
+	FUMGPrototypeNavigationData NavigationData;
+	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(
+		Data, OutputPath, nullptr, nullptr, &NavigationData);
+	if (!TestTrue(TEXT("Build overlay widget blueprint"), WBP != nullptr)
+		|| !TestTrue(TEXT("Save overlay widget blueprint"),
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	// BuildRoot synthesized the host as a Collapsed overlay child of the wrapping root overlay.
+	UOverlay* OverlayHost = WBP->WidgetTree
+		? Cast<UOverlay>(WBP->WidgetTree->FindWidget(FName(*NavigationData.OverlayHostWidgetName)))
+		: nullptr;
+	if (!TestNotNull(TEXT("Overlay host widget exists in the tree"), OverlayHost))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	TestEqual(TEXT("Overlay host starts collapsed"), OverlayHost->GetVisibility(), ESlateVisibility::Collapsed);
+
+	// The fixture wires two bindings (overlay open + back); isolate the overlay trigger's event.
+	const TArray<UK2Node_ComponentBoundEvent*> Events = CollectBoundEvents(WBP);
+	const UK2Node_ComponentBoundEvent* OverlayEvent = nullptr;
+	for (const UK2Node_ComponentBoundEvent* Event : Events)
+	{
+		if (Event && Event->ComponentPropertyName == FName(TEXT("overlay_button")))
+		{
+			OverlayEvent = Event;
+		}
+	}
+	if (!TestEqual(TEXT("Both bindings wired (overlay + back)"), Events.Num(), 2)
+		|| !TestNotNull(TEXT("Overlay bound event found"), OverlayEvent))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	UK2Node_CallFunction* CallNode = FindExecChainCall(OverlayEvent);
+	if (!TestNotNull(TEXT("Overlay chain reaches a call node"), CallNode))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	TestEqual(TEXT("Call target is SetVisibility"), CallNode->FunctionReference.GetMemberName().ToString(), TEXT("SetVisibility"));
+	// Self-context call inside the widget's own ubergraph (UUserWidget inherits UWidget::SetVisibility):
+	// the member reference stores no parent class, so prove the engine target instead.
+	TestTrue(TEXT("SetVisibility call is self-context and UWidget exposes the function"),
+		CallNode->FunctionReference.IsSelfContext()
+		&& UWidget::StaticClass()->FindFunctionByName(TEXT("SetVisibility")) != nullptr);
+
+	const UEdGraphPin* VisibilityPin = CallNode->FindPin(TEXT("InVisibility"), EGPD_Input);
+	if (!TestNotNull(TEXT("Visibility pin exists"), VisibilityPin))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	TestEqual(TEXT("Visibility literal is SelfHitTestInvisible (enumerant-name default)"),
+		VisibilityPin->DefaultValue,
+		StaticEnum<ESlateVisibility>()->GetNameStringByValue(static_cast<int64>(ESlateVisibility::SelfHitTestInvisible)));
+
+	const UEdGraphPin* SelfPin = CallNode->FindPin(UEdGraphSchema_K2::PN_Self, EGPD_Input);
+	TestTrue(TEXT("Overlay host variable get feeds the visibility target"),
+		SelfPin && SelfPin->LinkedTo.Num() == 1
+		&& Cast<UK2Node_VariableGet>(SelfPin->LinkedTo[0]->GetOwningNode())
+		&& Cast<UK2Node_VariableGet>(SelfPin->LinkedTo[0]->GetOwningNode())->GetVarName() == OverlayHost->GetFName());
+
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
+// Phase 3 Back wiring: Branch on Array_IsEmpty(history) guarding SetActiveWidgetIndex(Array_LastIndex)
+// -> Array_Remove, with the overlay host collapsed first when one exists.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeBackGraphWiringTest,
+	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.Back",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaPrototypeBackGraphWiringTest::RunTest(const FString& Parameters)
+{
+	FDesignDocument Document;
+	FUMGWidgetData Data;
+	if (!TestTrue(TEXT("Convert navigate+back prototype fixture"), ConvertPrototype(NavigateBackPrototypeJson(), Document, Data)))
+	{
+		return false;
+	}
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/ProtoNavWiringBack");
+	DeleteGeneratedAssetsAtPath(OutputPath);
+
+	FUMGPrototypeNavigationData NavigationData;
+	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(
+		Data, OutputPath, nullptr, nullptr, &NavigationData);
+	if (!TestTrue(TEXT("Build navigate+back widget blueprint"), WBP != nullptr)
+		|| !TestTrue(TEXT("Save navigate+back widget blueprint"),
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	const TArray<UK2Node_ComponentBoundEvent*> Events = CollectBoundEvents(WBP);
+	if (!TestEqual(TEXT("Two component-bound events are authored (navigate + back)"), Events.Num(), 2))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	const UK2Node_ComponentBoundEvent* BackEvent = Events[0]->ComponentPropertyName == FName(TEXT("back_button"))
+		? Events[0]
+		: (Events[1]->ComponentPropertyName == FName(TEXT("back_button")) ? Events[1] : nullptr);
+	if (!TestNotNull(TEXT("Back bound event found"), BackEvent))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	// Event -> Branch; condition is the pure empty-history guard.
+	const UEdGraphPin* BackThenPin = BackEvent->FindPin(UEdGraphSchema_K2::PN_Then, EGPD_Output);
+	const UK2Node_IfThenElse* BranchNode = BackThenPin && BackThenPin->LinkedTo.Num() == 1
+		? Cast<UK2Node_IfThenElse>(BackThenPin->LinkedTo[0]->GetOwningNode())
+		: nullptr;
+	if (!TestNotNull(TEXT("Back chain guards with a Branch node"), BranchNode))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	const UEdGraphPin* ConditionPin = BranchNode->FindPin(UEdGraphSchema_K2::PN_Condition, EGPD_Input);
+	TestTrue(TEXT("Branch condition comes from Array_IsEmpty"),
+		ConditionPin && ConditionPin->LinkedTo.Num() == 1
+		&& ConditionPin->LinkedTo[0]->GetOwningNode()->GetClass() == UK2Node_CallArrayFunction::StaticClass()
+		&& static_cast<const UK2Node_CallFunction*>(ConditionPin->LinkedTo[0]->GetOwningNode())
+			->FunctionReference.GetMemberName() == TEXT("Array_IsEmpty"));
+
+	// False path: SetActiveWidgetIndex fed by Array_LastIndex, then Array_Remove.
+	const UEdGraphPin* ElsePin = BranchNode->FindPin(UEdGraphSchema_K2::PN_Else, EGPD_Output);
+	const UK2Node_CallFunction* SwitchNode = ElsePin && ElsePin->LinkedTo.Num() == 1
+		? Cast<UK2Node_CallFunction>(ElsePin->LinkedTo[0]->GetOwningNode())
+		: nullptr;
+	if (!TestNotNull(TEXT("Branch false path reaches SetActiveWidgetIndex"), SwitchNode)
+		|| !TestTrue(TEXT("Pop target is SetActiveWidgetIndex"),
+			SwitchNode && SwitchNode->FunctionReference.GetMemberName() == TEXT("SetActiveWidgetIndex")))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	const UEdGraphPin* IndexPin = SwitchNode->FindPin(TEXT("Index"), EGPD_Input);
+	TestTrue(TEXT("Pop index comes from Array_LastIndex"),
+		IndexPin && IndexPin->LinkedTo.Num() == 1
+		&& IndexPin->LinkedTo[0]->GetOwningNode()->GetClass() == UK2Node_CallArrayFunction::StaticClass()
+		&& static_cast<const UK2Node_CallFunction*>(IndexPin->LinkedTo[0]->GetOwningNode())
+			->FunctionReference.GetMemberName() == TEXT("Array_LastIndex"));
+
+	const UK2Node_CallFunction* RemoveNode = NextExecCall(SwitchNode);
+	TestTrue(TEXT("Pop continues into Array_Remove"),
+		RemoveNode && RemoveNode->FunctionReference.GetMemberName() == TEXT("Array_Remove"));
+	const UEdGraphPin* RemoveArrayPin = RemoveNode ? RemoveNode->FindPin(TEXT("TargetArray"), EGPD_Input) : nullptr;
+	TestTrue(TEXT("Array_Remove edits the history variable"),
+		RemoveArrayPin && RemoveArrayPin->LinkedTo.Num() == 1
+		&& Cast<UK2Node_VariableGet>(RemoveArrayPin->LinkedTo[0]->GetOwningNode())
+		&& Cast<UK2Node_VariableGet>(RemoveArrayPin->LinkedTo[0]->GetOwningNode())->GetVarName()
+			== FName(Design2UMGPrototypeGraphWiring::NavHistoryVariableName));
+
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
+// Phase 3 runtime smoke (latent-pump pattern; this fixture has no transition, so switches are
+// immediate): navigate once pushes the current index 0, BACK pops it and returns to page 0.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeBackRuntimeSmokeTest,
+	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.BackRuntimeSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaPrototypeBackRuntimeSmokeTest::RunTest(const FString& Parameters)
+{
+	FDesignDocument Document;
+	FUMGWidgetData Data;
+	if (!TestTrue(TEXT("Convert navigate+back prototype fixture"), ConvertPrototype(NavigateBackPrototypeJson(), Document, Data)))
+	{
+		return false;
+	}
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/ProtoNavWiringBackSmoke");
+	DeleteGeneratedAssetsAtPath(OutputPath);
+
+	FUMGPrototypeNavigationData NavigationData;
+	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(
+		Data, OutputPath, nullptr, nullptr, &NavigationData);
+	if (!TestTrue(TEXT("Build navigate+back widget blueprint"), WBP != nullptr)
+		|| !TestTrue(TEXT("Save navigate+back widget blueprint"),
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	UWidgetBlueprintGeneratedClass* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(WBP->GeneratedClass);
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	UUserWidget* WidgetInstance = GeneratedClass && World ? CreateWidget<UUserWidget>(World, GeneratedClass) : nullptr;
+	if (!TestTrue(TEXT("Widget instance created"), WidgetInstance != nullptr))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	WidgetInstance->TakeWidget();
+
+	UWidgetSwitcher* Switcher = Cast<UWidgetSwitcher>(
+		WidgetInstance->WidgetTree ? WidgetInstance->WidgetTree->FindWidget(FName(*NavigationData.SwitcherWidgetName)) : nullptr);
+	UButton* NavButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("nav_button"))) : nullptr;
+	UButton* BackButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("back_button"))) : nullptr;
+	if (!TestTrue(TEXT("Switcher exists"), Switcher != nullptr)
+		|| !TestTrue(TEXT("Navigate button exists"), NavButton != nullptr)
+		|| !TestTrue(TEXT("Back button exists"), BackButton != nullptr))
+	{
+		WidgetInstance->RemoveFromParent();
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	FArrayProperty* HistoryProperty = FindFProperty<FArrayProperty>(
+		GeneratedClass, FName(Design2UMGPrototypeGraphWiring::NavHistoryVariableName));
+	const auto HistoryNum = [HistoryProperty, WidgetInstance]()
+	{
+		return HistoryProperty ? FScriptArrayHelper(HistoryProperty, HistoryProperty->ContainerPtrToValuePtr<void>(WidgetInstance)).Num() : -1;
+	};
+
+	TestEqual(TEXT("History starts empty"), HistoryNum(), 0);
+	TestEqual(TEXT("Initial active page"), Switcher->GetActiveWidgetIndex(), 0);
+
+	NavButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Navigate switches to page 1 immediately (no transition)"), Switcher->GetActiveWidgetIndex(), 1);
+	TestEqual(TEXT("Navigate pushed the left page index"), HistoryNum(), 1);
+	if (HistoryProperty)
+	{
+		FScriptArrayHelper Helper(HistoryProperty, HistoryProperty->ContainerPtrToValuePtr<void>(WidgetInstance));
+		TestEqual(TEXT("Pushed value is the page that was left"), Helper.Num() == 1 ? *reinterpret_cast<int32*>(Helper.GetRawPtr(0)) : INDEX_NONE, 0);
+	}
+
+	BackButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Back returns to page 0"), Switcher->GetActiveWidgetIndex(), 0);
+	TestEqual(TEXT("Back popped the history entry"), HistoryNum(), 0);
+
+	// Empty-history guard: a second BACK must not move the page.
+	BackButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Second back is a no-op on an empty history"), Switcher->GetActiveWidgetIndex(), 0);
+	TestEqual(TEXT("History stays empty"), HistoryNum(), 0);
+
+	WidgetInstance->RemoveFromParent();
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
+// Phase 3 keyboard wiring: generated OnKeyDown/OnKeyUp override function graphs, one key-equality
+// Branch per key code guarding the Navigate chain, CDO flagged focusable, and the compiled
+// overrides callable via ProcessEvent.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeKeyboardGraphWiringTest,
+	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.Keyboard",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaPrototypeKeyboardGraphWiringTest::RunTest(const FString& Parameters)
+{
+	FDesignDocument Document;
+	FUMGWidgetData Data;
+	if (!TestTrue(TEXT("Convert keyboard prototype fixture"), ConvertPrototype(KeyboardNavigatePrototypeJson(), Document, Data)))
+	{
+		return false;
+	}
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/ProtoNavWiringKeyboard");
+	DeleteGeneratedAssetsAtPath(OutputPath);
+
+	FUMGPrototypeNavigationData NavigationData;
+	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(
+		Data, OutputPath, nullptr, nullptr, &NavigationData);
+	if (!TestTrue(TEXT("Build keyboard widget blueprint"), WBP != nullptr)
+		|| !TestTrue(TEXT("Save keyboard widget blueprint"),
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	// One generated override graph per event kind, all engine-standard node classes inside.
+	for (const TCHAR* EventName : { TEXT("OnKeyDown"), TEXT("OnKeyUp") })
+	{
+		const UEdGraph* KeyGraph = nullptr;
+		for (const UEdGraph* Graph : WBP->FunctionGraphs)
+		{
+			if (Graph && Graph->GetFName() == FName(EventName))
+			{
+				KeyGraph = Graph;
+			}
+		}
+		if (!TestNotNull(FString::Printf(TEXT("Generated %s override graph exists"), EventName), KeyGraph))
+		{
+			DeleteGeneratedAssetsAtPath(OutputPath);
+			return false;
+		}
+		bool bFoundEntry = false;
+		bool bFoundResult = false;
+		for (const UEdGraphNode* Node : KeyGraph->Nodes)
+		{
+			if (!Node)
+			{
+				continue;
+			}
+			const UClass* NodeClass = Node->GetClass();
+			TestTrue(
+				*FString::Printf(TEXT("Keyboard node class %s is an engine-standard node kind"), *NodeClass->GetName()),
+				NodeClass == UK2Node_FunctionEntry::StaticClass()
+				|| NodeClass == UK2Node_FunctionResult::StaticClass()
+				|| NodeClass == UK2Node_CallFunction::StaticClass()
+				|| NodeClass == UK2Node_CallArrayFunction::StaticClass()
+				|| NodeClass == UK2Node_VariableGet::StaticClass()
+				|| NodeClass == UK2Node_IfThenElse::StaticClass());
+			bFoundEntry |= Cast<UK2Node_FunctionEntry>(Node) != nullptr;
+			bFoundResult |= Cast<UK2Node_FunctionResult>(Node) != nullptr;
+		}
+		TestTrue(FString::Printf(TEXT("%s graph has entry and result terminators"), EventName), bFoundEntry && bFoundResult);
+	}
+
+	// The OnKeyDown branch: entry -> Branch, key literal "N", tail reaches the switch call.
+	const UEdGraph* KeyDownGraph = nullptr;
+	for (const UEdGraph* Graph : WBP->FunctionGraphs)
+	{
+		if (Graph && Graph->GetFName() == FName(TEXT("OnKeyDown")))
+		{
+			KeyDownGraph = Graph;
+		}
+	}
+	const UK2Node_FunctionEntry* EntryNode = nullptr;
+	for (const UEdGraphNode* Node : KeyDownGraph->Nodes)
+	{
+		if (const UK2Node_FunctionEntry* Entry = Cast<UK2Node_FunctionEntry>(Node))
+		{
+			EntryNode = Entry;
+		}
+	}
+	const UEdGraphPin* EntryThenPin = EntryNode ? EntryNode->FindPin(UEdGraphSchema_K2::PN_Then, EGPD_Output) : nullptr;
+	const UK2Node_IfThenElse* BranchNode = EntryThenPin && EntryThenPin->LinkedTo.Num() == 1
+		? Cast<UK2Node_IfThenElse>(EntryThenPin->LinkedTo[0]->GetOwningNode())
+		: nullptr;
+	if (!TestNotNull(TEXT("OnKeyDown entry feeds a key Branch"), BranchNode))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	const UK2Node_CallFunction* KeyEqualsNode = nullptr;
+	for (const UEdGraphNode* Node : KeyDownGraph->Nodes)
+	{
+		if (const UK2Node_CallFunction* Candidate = Cast<UK2Node_CallFunction>(Node))
+		{
+			if (Candidate->FunctionReference.GetMemberName() == TEXT("EqualEqual_KeyKey"))
+			{
+				KeyEqualsNode = Candidate;
+			}
+		}
+	}
+	if (!TestNotNull(TEXT("Key equality call authored"), KeyEqualsNode))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	const UEdGraphPin* BPin = KeyEqualsNode->FindPin(TEXT("B"), EGPD_Input);
+	TestTrue(TEXT("Key literal pin carries the resolved FKey name"),
+		BPin && BPin->DefaultValue == TEXT("N"));
+
+	// Compiled overrides exist and the class defaults are focusable so keys can reach the widget.
+	UWidgetBlueprintGeneratedClass* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(WBP->GeneratedClass);
+	TestNotNull(TEXT("Compiled class carries the OnKeyDown override"),
+		GeneratedClass ? GeneratedClass->FindFunctionByName(TEXT("OnKeyDown")) : nullptr);
+	TestNotNull(TEXT("Compiled class carries the OnKeyUp override"),
+		GeneratedClass ? GeneratedClass->FindFunctionByName(TEXT("OnKeyUp")) : nullptr);
+	const UUserWidget* WidgetCDO = GeneratedClass ? GeneratedClass->GetDefaultObject<UUserWidget>() : nullptr;
+	TestTrue(TEXT("Generated class CDO is focusable"), WidgetCDO && WidgetCDO->IsFocusable());
+
+	// Runtime: drive both overrides through ProcessEvent with the FKeyEvent parms layout.
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	UUserWidget* WidgetInstance = GeneratedClass && World ? CreateWidget<UUserWidget>(World, GeneratedClass) : nullptr;
+	if (!TestTrue(TEXT("Widget instance created"), WidgetInstance != nullptr))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	WidgetInstance->TakeWidget();
+	UWidgetSwitcher* Switcher = Cast<UWidgetSwitcher>(
+		WidgetInstance->WidgetTree ? WidgetInstance->WidgetTree->FindWidget(FName(*NavigationData.SwitcherWidgetName)) : nullptr);
+	if (!TestNotNull(TEXT("Switcher exists"), Switcher))
+	{
+		WidgetInstance->RemoveFromParent();
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	struct FOnKeyDownParms { FGeometry MyGeometry; FKeyEvent InKeyEvent; FEventReply ReturnValue; };
+	const auto ProcessKeyEvent = [WidgetInstance, GeneratedClass](const FKey Key, const TCHAR* FunctionName)
+	{
+		FOnKeyDownParms Parms;
+		Parms.InKeyEvent = FKeyEvent(Key, FModifierKeysState(), 0, false, 0, 0);
+		if (UFunction* Function = GeneratedClass->FindFunctionByName(FunctionName))
+		{
+			WidgetInstance->ProcessEvent(Function, &Parms);
+		}
+	};
+	ProcessKeyEvent(EKeys::N, TEXT("OnKeyDown"));
+	TestEqual(TEXT("Key N down switches to page 1"), Switcher->GetActiveWidgetIndex(), 1);
+	ProcessKeyEvent(EKeys::M, TEXT("OnKeyUp"));
+	TestEqual(TEXT("Key M up switches back to page 0"), Switcher->GetActiveWidgetIndex(), 0);
+
+	WidgetInstance->RemoveFromParent();
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
+// Phase 3 spike: prove that a UUserWidget::OnKeyDown override (BlueprintImplementableEvent with an
+// FEventReply return value, hence NOT placeable as an ubergraph event node) is expressible as a
+// generated function graph that compiles and lands on the generated class. Keyboard wiring is only
+// implemented if this passes.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeKeyDownOverrideSpikeTest,
+	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.KeyDownOverrideSpike",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaPrototypeKeyDownOverrideSpikeTest::RunTest(const FString& Parameters)
+{
+	FDesignDocument Document;
+	FUMGWidgetData Data;
+	if (!TestTrue(TEXT("Convert navigate prototype fixture"), ConvertPrototype(NavigateNoTransitionJson(), Document, Data)))
+	{
+		return false;
+	}
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/ProtoNavKeyDownSpike");
+	DeleteGeneratedAssetsAtPath(OutputPath);
+
+	FUMGPrototypeNavigationData NavigationData;
+	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(
+		Data, OutputPath, nullptr, nullptr, &NavigationData);
+	if (!TestTrue(TEXT("Build spike widget blueprint"), WBP != nullptr)
+		|| !TestTrue(TEXT("Save spike widget blueprint"),
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+
+	// Engine-canonical override authoring (SMyBlueprint::ImplementFunction path for functions that
+	// cannot be placed as events): CreateNewGraph + AddFunctionGraph seeds entry/result terminators.
+	UEdGraph* KeyGraph = FBlueprintEditorUtils::CreateNewGraph(
+		WBP, FName(TEXT("OnKeyDown")), UEdGraph::StaticClass(), UEdGraphSchema_K2::StaticClass());
+	FBlueprintEditorUtils::AddFunctionGraph(
+		WBP, KeyGraph, /*bIsUserCreated=*/false, UUserWidget::StaticClass());
+
+	bool bFoundEntry = false;
+	bool bFoundResult = false;
+	for (const UEdGraphNode* Node : KeyGraph->Nodes)
+	{
+		bFoundEntry |= Cast<UK2Node_FunctionEntry>(Node) != nullptr;
+		bFoundResult |= Cast<UK2Node_FunctionResult>(Node) != nullptr;
+	}
+	TestTrue(TEXT("OnKeyDown graph seeds a function entry node"), bFoundEntry);
+	TestTrue(TEXT("OnKeyDown graph seeds a function result node for the FEventReply return"), bFoundResult);
+
+	const EBlueprintCompileOptions CompileOptions =
+		EBlueprintCompileOptions::SkipDefaultObjectValidation |
+		EBlueprintCompileOptions::SkipFiBSearchMetaUpdate;
+	FKismetEditorUtilities::CompileBlueprint(WBP, CompileOptions);
+	if (!TestTrue(TEXT("OnKeyDown override graph compiles"),
+			WBP->Status == BS_UpToDate || WBP->Status == BS_UpToDateWithWarnings))
+	{
+		DeleteGeneratedAssetsAtPath(OutputPath);
+		return false;
+	}
+	TestNotNull(TEXT("Generated class carries the compiled OnKeyDown override"),
+		Cast<UWidgetBlueprintGeneratedClass>(WBP->GeneratedClass)
+			? Cast<UWidgetBlueprintGeneratedClass>(WBP->GeneratedClass)->FindFunctionByName(TEXT("OnKeyDown"))
+			: nullptr);
 
 	DeleteGeneratedAssetsAtPath(OutputPath);
 	return true;
