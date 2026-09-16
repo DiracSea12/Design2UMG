@@ -327,7 +327,8 @@ void FDesign2UMGComponentMappingBuildState::RecordCreatedWidget(
 	CreatedWidgetNames.Add(CreatedWidget->GetFName().ToString());
 
 	// mapped instances were already registered in TryCreateMappedWidget (including inputs backfill); not recorded again here.
-	if (IsMappedNode(Node))
+	if (IsMappedNode(Node) && MappedInstances.ContainsByPredicate([CreatedWidget](const FDesign2UMGMappedInstanceRecord& Record)
+		{ return Record.WidgetName == CreatedWidget->GetName(); }))
 	{
 		return;
 	}

@@ -1859,6 +1859,12 @@ def main():
         rebuild_best,
         validate_run_tool,
         verify.write_json,
+        expected_case_names={
+            case["name"] for case in (
+                batch_discovery.discover_pen_cases(design_root, "", "")
+                + batch_discovery.discover_figma_export_cases(effective_figma_export_roots, "", "")
+            )
+        },
         print_paths=True,
     )
     historical_validation = history_result["validation"]

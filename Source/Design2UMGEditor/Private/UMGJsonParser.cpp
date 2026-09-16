@@ -392,6 +392,10 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 		{
 			OutBrush.OutlineThickness = FloatVal;
 		}
+		if (const TSharedPtr<FJsonValue> Margin = DesignJsonUtils::TryGetField(*BrushObject, UMGPropertyKeys::BrushMargin); Margin.IsValid())
+		{
+			OutBrush.Margin = ParsePaddingValue(Margin);
+		}
 		if (DesignJsonUtils::TryGetString(*BrushObject, UMGPropertyKeys::DrawAs, Str))
 		{
 			ESlateBrushDrawType::Type DrawAs = ESlateBrushDrawType::NoDrawType;

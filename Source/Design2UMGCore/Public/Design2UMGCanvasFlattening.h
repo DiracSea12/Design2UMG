@@ -12,6 +12,7 @@ namespace Design2UMGCanvasFlattening
 	{
 		int32 MergedNestedCanvasCount = 0;
 		int32 RemovedEmptyCanvasCount = 0;
+		int32 RemovedRedundantSizeCarrierCount = 0;
 	};
 
 	/**

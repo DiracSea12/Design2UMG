@@ -439,6 +439,7 @@ namespace
 		AddOptionalFloat(Fields, TEXT("OutlineCornerRadius"), Brush.OutlineCornerRadius);
 		AddOptionalVector4(Fields, TEXT("CornerRadii"), Brush.CornerRadii);
 		AddOptionalFloat(Fields, TEXT("OutlineThickness"), Brush.OutlineThickness);
+		AddOptionalMargin(Fields, TEXT("BrushMargin"), Brush.Margin);
 		if (Brush.DrawAs.IsSet())
 		{
 			AddString(Fields, TEXT("DrawAs"), BrushDrawTypeName(Brush.DrawAs.GetValue()));
@@ -581,7 +582,8 @@ namespace
 		AddString(Fields, TEXT("SourceNodeName"), Source.SourceNodeName);
 		AddString(Fields, TEXT("SourceNodeType"), Source.SourceNodeType);
 		AddString(Fields, TEXT("ComponentId"), Source.ComponentId);
-		AddString(Fields, TEXT("ComponentSetId"), Source.ComponentSetId);
+			AddString(Fields, TEXT("ComponentSetId"), Source.ComponentSetId);
+			AddString(Fields, TEXT("ComponentSetKey"), Source.ComponentSetKey);
 		AddString(Fields, TEXT("MainComponentKey"), Source.MainComponentKey);
 		AddString(Fields, TEXT("ComponentPropertiesJson"), Source.ComponentPropertiesJson);
 		AddString(Fields, TEXT("VariantPropertiesJson"), Source.VariantPropertiesJson);

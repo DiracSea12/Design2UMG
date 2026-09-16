@@ -10,7 +10,6 @@ struct FResolvedRichTextRun
 	FString FontFamily;
 	FString TypefaceFontName;
 	TOptional<float> FontSize;
-	float DesignFontSize = 0.0f;
 	TOptional<float> LetterSpacing;
 	bool bUnderline = false;
 	bool bStrikethrough = false;

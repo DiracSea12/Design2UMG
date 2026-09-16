@@ -10,6 +10,7 @@
 #include "PencilConnector.h"
 
 struct FDesignDocument;
+class FJsonObject;
 
 namespace Design2UMGEditorImportServices
 {
@@ -23,9 +24,11 @@ namespace Design2UMGEditorImportServices
 			FString InFileKey,
 			const FString& Token,
 			const uint32 InGeneration,
-			const FDesign2UMGImportSettingsSnapshot& InSettingsSnapshot)
+			const FDesign2UMGImportSettingsSnapshot& InSettingsSnapshot,
+			FString InSelectedRootId = FString())
 			: Owner(InOwner)
 			, FileKey(MoveTemp(InFileKey))
+			, SelectedRootId(MoveTemp(InSelectedRootId))
 			, Generation(InGeneration)
 			, Client(MakeUnique<FFigmaHttpClient>())
 			, SettingsSnapshot(InSettingsSnapshot)
@@ -40,9 +43,23 @@ namespace Design2UMGEditorImportServices
 
 		void Start();
 		void CancelRequests();
+#if WITH_DEV_AUTOMATION_TESTS
+		/** Observe the completed dependency source without opening import UI in transport tests. */
+		TFunction<void(const FString&, const TMap<FString, FString>&)> AutomationComponentsResolved;
+#endif
 
 	private:
 		void HandleFileResponse(const bool bSuccess, const FString& Body);
+		void SelectImportRootAndResolve(const FString& PreparedSource);
+		void BeginResolveSelectedRoot(const FString& RootId);
+		void ResolveMissingComponentDefinitions();
+		void ParseResolvedComponentFile();
+		void RecordDependencyFailure(const FString& Key, const FString& Reason);
+		void FailComponentImport(const FString& Reason);
+		TSharedPtr<FJsonObject> ComponentSource;
+		TSet<FString> AttemptedComponentKeys;
+		TSet<FString> ResolvedLibraryFiles;
+		TMap<FString, FString> ComponentImageUrls;
 		void HandleImagesResolved(const TSharedRef<FDesignDocument>& Document, const bool bImagesResolved);
 		void HandleVectorsExported(
 			const TSharedRef<FDesignDocument>& Document,
@@ -52,6 +69,7 @@ namespace Design2UMGEditorImportServices
 
 		FFigmaImportService& Owner;
 		FString FileKey;
+		FString SelectedRootId;
 		uint32 Generation = 0;
 		TUniquePtr<FFigmaHttpClient> Client;
 		FDesign2UMGImportSettingsSnapshot SettingsSnapshot;

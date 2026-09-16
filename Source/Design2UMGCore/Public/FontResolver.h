@@ -49,6 +49,8 @@ struct DESIGN2UMGCORE_API FFontResolver
 
 	/** Look up an explicit PostScript/family mapping before exact /Game family asset matching. */
 	static FString FindFontAssetPath(const FString& FontFamily, const FString& PostScriptName);
+	/** Stable, collision-resistant package name shared by automatic import and family lookup. */
+	static FString MakeImportedFamilyPackageName(const FString& FontFamily);
 
 	/** Look up configured project default font before engine default fallback. */
 	static FString FindDefaultFontAssetPath();

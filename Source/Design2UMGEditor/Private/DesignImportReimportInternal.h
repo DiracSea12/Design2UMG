@@ -44,7 +44,8 @@ namespace DesignImportPipeline
 	 */
 	struct FReimportSession
 	{
-		FDesignDocument& Document;
+		/** Null when the outer component batch owns diagnostic reporting. */
+		FDesignDocument* Document;
 		const FDesignReimportRequest& Request;
 		FUMGWidgetData& Data;
 		const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings;
@@ -237,7 +238,14 @@ namespace DesignImportPipeline
 		const FReimportApplySharedState& Shared,
 		TSet<FString>& UpdatedD2UOwned,
 		const TArray<FString>& KeepAsIsWidgetNames);
+	void EnsureReimportWidgetGuids(UWidgetBlueprint* WBP);
 	void FinalizeReimportedAssetState(UWidgetBlueprint* WBP, FIntPoint DesignSize);
+	/** Apply the existing ownership merge without saving; caller owns transaction completion. */
+	FDesignReimportResult ApplyPreparedReimport(
+		const FReimportSession& Session, UWidgetBlueprint* WBP,
+		const FDesign2UMGGenerationManifestSidecar& Manifest,
+		FDesign2UMGGenerationOutput& GenerationOutput,
+		FUMGPrototypeNavigationData& Navigation, int32& TransactionIndex);
 	FDesignReimportResult SaveReimportedAsset(
 		const FReimportSession& Session,
 		const FString& TargetPackage,

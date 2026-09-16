@@ -66,7 +66,8 @@ namespace ProceduralShapeGeneratorAssets
 		float CornerRadius,
 		float BlurRadius,
 		float BlurPadding,
-		UObject* Outer);
+		UObject* Outer,
+		bool bEllipse = false);
 	UTexture2D* GenerateBoxShadow(
 		int32 Width,
 		int32 Height,
@@ -77,7 +78,8 @@ namespace ProceduralShapeGeneratorAssets
 		float RBL,
 		float BlurRadius,
 		float BlurPadding,
-		UObject* Outer);
+		UObject* Outer,
+		bool bEllipse = false);
 
 	UTexture2D* GeneratePlaceholderHatch(
 		int32 Width,

@@ -9,6 +9,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
+#include "Misc/SecureHash.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 
@@ -54,6 +55,14 @@ namespace
 
 namespace Design2UMGGenerationManifest
 {
+	FString ComputeSavedAssetHash(const FString& AssetPackageName)
+	{
+		TArray<uint8> Bytes;
+		if (!FFileHelper::LoadFileToArray(Bytes, *FPackageName::LongPackageNameToFilename(AssetPackageName, TEXT(".uasset")))) return FString();
+		FSHAHash Hash;
+		FSHA1::HashBuffer(Bytes.GetData(), Bytes.Num(), Hash.Hash);
+		return Hash.ToString();
+	}
 	FString BuildSidecarPathForAsset(const FString& AssetPackageName)
 	{
 		return FPackageName::LongPackageNameToFilename(AssetPackageName, TEXT(".d2u.json"));
@@ -74,6 +83,13 @@ namespace Design2UMGGenerationManifest
 #endif
 		TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
 		Root->SetNumberField(TEXT("schemaVersion"), ManifestSchemaVersion);
+		Root->SetBoolField(TEXT("componentBatchRoot"), Payload.bComponentBatchRoot);
+		if (Payload.bWholeAssetOwned)
+		{
+			const FString Hash = ComputeSavedAssetHash(AssetPackageName);
+			if (Hash.IsEmpty()) return false;
+			Root->SetStringField(TEXT("generatedAssetHash"), Hash);
+		}
 		Root->SetStringField(TEXT("provider"), Payload.Provider);
 		Root->SetStringField(TEXT("documentScope"), Payload.DocumentScope);
 
@@ -170,6 +186,8 @@ namespace Design2UMGGenerationManifest
 		}
 
 		OutSidecar.SchemaVersion = static_cast<int32>(Root->GetNumberField(TEXT("schemaVersion")));
+		Root->TryGetStringField(TEXT("generatedAssetHash"), OutSidecar.GeneratedAssetHash);
+		Root->TryGetBoolField(TEXT("componentBatchRoot"), OutSidecar.bComponentBatchRoot);
 		if (OutSidecar.SchemaVersion != ManifestSchemaVersion)
 		{
 			OutError = FString::Printf(
@@ -196,14 +214,17 @@ namespace Design2UMGGenerationManifest
 		// (switcher/overlay hosts); reimport then uses the new IR root as the scope (conversion of the same document is deterministic).
 
 		const TArray<TSharedPtr<FJsonValue>>* Instances = nullptr;
+		TSet<FString> DesignIds;
+		TSet<FString> WidgetNames;
 		if (Root->TryGetArrayField(TEXT("instances"), Instances) && Instances)
 		{
 			for (const TSharedPtr<FJsonValue>& Value : *Instances)
 			{
-				const TSharedPtr<FJsonObject> Instance = Value->AsObject();
+				const TSharedPtr<FJsonObject> Instance = Value.IsValid() && Value->Type == EJson::Object ? Value->AsObject() : nullptr;
 				if (!Instance.IsValid())
 				{
-					continue;
+					OutError = TEXT("generation manifest contains a non-object instance: ") + SidecarPath;
+					return false;
 				}
 
 				FDesign2UMGGenerationManifestSidecar::FInstanceRecord Record;
@@ -212,7 +233,17 @@ namespace Design2UMGGenerationManifest
 				Instance->TryGetStringField(TEXT("widgetName"), Record.WidgetName);
 				Instance->TryGetStringField(TEXT("mappedKey"), Record.MappedKey);
 				Instance->TryGetStringField(TEXT("mappedClass"), Record.MappedClass);
-				Record.bMatchedAtSetLevel = Instance->GetBoolField(TEXT("matchedAtSetLevel"));
+				Instance->TryGetBoolField(TEXT("matchedAtSetLevel"), Record.bMatchedAtSetLevel);
+				if ((Record.Kind != Design2UMGManifestKinds::Generated && Record.Kind != Design2UMGManifestKinds::Mapped)
+					|| Record.DesignNodeId.IsEmpty() || Record.WidgetName.IsEmpty()
+					|| DesignIds.Contains(Record.DesignNodeId) || WidgetNames.Contains(Record.WidgetName)
+					|| (Record.Kind == Design2UMGManifestKinds::Mapped && (Record.MappedKey.IsEmpty() || Record.MappedClass.IsEmpty())))
+				{
+					OutError = TEXT("generation manifest contains an invalid or duplicate instance identity: ") + SidecarPath;
+					return false;
+				}
+				DesignIds.Add(Record.DesignNodeId);
+				WidgetNames.Add(Record.WidgetName);
 
 				// inputs are read back as declarations only; a value field from historical versions is ignored per the schema consolidation rule.
 				const TArray<TSharedPtr<FJsonValue>>* Inputs = nullptr;
@@ -246,7 +277,21 @@ namespace Design2UMGGenerationManifest
 		{
 			for (const TSharedPtr<FJsonValue>& OwnedValue : *D2UOwned)
 			{
-				OutSidecar.D2UOwned.Add(OwnedValue->AsString());
+				FString Name;
+				if (!OwnedValue.IsValid() || !OwnedValue->TryGetString(Name) || Name.IsEmpty() || OutSidecar.D2UOwned.Contains(Name))
+				{
+					OutError = TEXT("generation manifest contains an invalid or duplicate owned widget: ") + SidecarPath;
+					return false;
+				}
+				OutSidecar.D2UOwned.Add(Name);
+			}
+		}
+		for (const FString& Name : WidgetNames)
+		{
+			if (!OutSidecar.D2UOwned.Contains(Name))
+			{
+				OutError = TEXT("generation manifest instance is absent from owned widgets: ") + Name;
+				return false;
 			}
 		}
 		return true;

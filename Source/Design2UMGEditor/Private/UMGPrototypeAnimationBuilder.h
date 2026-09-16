@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 
 class UWidgetBlueprint;
+class UWidgetAnimation;
 struct FUMGWidgetNode;
 struct FUMGPrototypeNavigationData;
 struct FUMGPrototypeTransitionData;
@@ -17,6 +18,8 @@ struct FUMGPrototypeTransitionData;
  */
 namespace UMGPrototypeAnimationBuilder
 {
+	/** The same ownership rule used when replacing generated navigation animations. */
+	bool IsGeneratedNavigationAnimation(const UWidgetAnimation* Animation);
 	/**
 	 * Regenerate-safe length of one transition half. The wiring's Delay literal must equal the
 	 * created animations' length, so both read this single rule.

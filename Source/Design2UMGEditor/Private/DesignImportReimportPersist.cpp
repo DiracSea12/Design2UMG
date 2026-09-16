@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignImportReimportInternal.h"
+#include "GeneratedAssetLifecycle.h"
 
 #include "DesignImportDiagnosticReport.h"
 #include "DesignImportPlanning.h"
@@ -12,7 +13,6 @@
 #include "Animation/WidgetAnimation.h"
 #include "Editor.h"
 #include "HAL/FileManager.h"
-#include "HAL/PlatformFileManager.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Misc/PackageName.h"
@@ -67,42 +67,8 @@ namespace DesignImportPipeline
 			return bMappedKind;
 		}
 
-		/**
-		 * Pre-save writability check (the Perforce-unchecked-out target scenario):
-		 * file exists and the read-only attribute is set = not writable; a missing file counts as writable (the save
-		 * creates it then; there is no predictable read-only state). Interception must happen up front: the engine's
-		 * SavePackage on a read-only uasset hits a fatal appError - the editor simply crashes; it cannot become a
-		 * diagnostic + rollback inside the product. The write probe ("open in append mode, then close": creates no
-		 * file, changes no content, only verifies a write handle is obtainable) is enabled for the sidecar only
-		 * (bAllowWriteProbe): once the uasset is loaded from disk by this process (the reimport main path's normal
-		 * state), the engine's read handle on the file has no write sharing, so an OpenWrite probe necessarily fails - a false positive would block saves that could succeed (the engine save path itself can write).
-		 * Real external locks / IO failures on the uasset are caught by the SavePackage failure path (already in FailSaveWithRollback).
-		 */
-		bool IsFileWritableForSave(const FString& InPath, bool bAllowWriteProbe, FString& OutReason)
-		{
-			if (!IFileManager::Get().FileExists(*InPath))
-			{
-				return true;
-			}
-			if (IFileManager::Get().IsReadOnly(*InPath))
-			{
-				OutReason = FString::Printf(TEXT("'%s' is read-only"), *InPath);
-				return false;
-			}
-			if (!bAllowWriteProbe)
-			{
-				return true;
-			}
-			IFileHandle* Probe = FPlatformFileManager::Get().GetPlatformFile().OpenWrite(
-				*InPath, /*bAppend=*/true, /*bAllowRead=*/false);
-			if (!Probe)
-			{
-				OutReason = FString::Printf(TEXT("write probe failed on '%s'"), *InPath);
-				return false;
-			}
-			delete Probe;
-			return true;
-		}
+
+
 	}
 
 	// ---------------------------------------------------------------------------
@@ -125,13 +91,21 @@ namespace DesignImportPipeline
 			Request.SettingsSnapshot.IsSet()
 				? Request.SettingsSnapshot.GetValue()
 				: FDesign2UMGImportSettingsSnapshot::FromSettings(UDesign2UMGSettings::Get());
-		const FReimportSession Session{ Document, Request, Data, SettingsSnapshot.GenerationSettings };
+		const FReimportSession Session{ &Document, Request, Data, SettingsSnapshot.GenerationSettings };
 
 		// 2) Re-parse the source (image parsing + Convert into the new IR).
 		FImportAnalysisInput AnalysisInput;
 		AnalysisInput.bResolveImages = true;
 		AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
 		const FImportAnalysisResult AnalysisResult = AnalyzeImport(Document, AnalysisInput);
+		if (!AnalysisResult.ErrorMessage.IsEmpty())
+		{
+			AddReimportDiagnostic(Result.Diagnostics, TEXT("reimport_font_preparation_failed"), AnalysisResult.ErrorMessage);
+			Result.ComponentMappingDiagnostics = SettingsSnapshot.GenerationSettings.ComponentMapping.ValidationDiagnostics;
+			DesignImportDiagnosticReport::WriteReimport(Document, Data,
+				FPackageName::ObjectPathToPackageName(Request.TargetAssetPath), Result.Diagnostics, &Result.ComponentMappingDiagnostics);
+			return Result;
+		}
 		Data = AnalysisResult.Data;
 
 		// 3) Locate the target asset + read the manifest.
@@ -311,7 +285,7 @@ namespace DesignImportPipeline
 		DesignSize = FIntPoint(
 			FMath::CeilToInt(PreparedScopeRoot.Bounds.W),
 			FMath::CeilToInt(PreparedScopeRoot.Bounds.H));
-		if (DesignSize.X <= 1 || DesignSize.Y <= 1)
+		if (DesignSize.X <= 0 || DesignSize.Y <= 0)
 		{
 			return HandleFullConflict(
 				TEXT("new source did not provide a valid root design size"),
@@ -438,6 +412,28 @@ namespace DesignImportPipeline
 	 * refresh the CDO preview size when the design root size changed (written back by SaveWidgetBlueprint after compiling);
 	 * backfill missing variable GUIDs of generation-chain-created widgets with the compiler's own deterministic rule.
 	 */
+	void EnsureReimportWidgetGuids(UWidgetBlueprint* WBP)
+	{
+		// Widgets newly created by this round's generation chain (plus test injections via ConstructWidget) have no
+		// variable GUID, and the compiler ensures on missing entries. Backfill with the compiler's own deterministic
+		// rule; existing GUIDs stay untouched. Modify first to capture the GUID map's pre-transaction state: on a
+		// save-failure rollback the map restores with the asset, or the post-rollback recompile would trip the compiler's ensure on a "deleted widget's leftover GUID".
+		if (WBP->WidgetTree)
+		{
+			WBP->Modify();
+			WBP->ForEachSourceWidget([WBP](UWidget* TreeWidget)
+			{
+				const FName WidgetName = TreeWidget->GetFName();
+				if (!WBP->WidgetVariableNameToGuidMap.Contains(WidgetName))
+				{
+					WBP->WidgetVariableNameToGuidMap.Add(
+						WidgetName, FGuid::NewDeterministicGuid(TreeWidget->GetPathName()));
+				}
+			});
+		}
+
+	}
+
 	void FinalizeReimportedAssetState(UWidgetBlueprint* WBP, FIntPoint DesignSize)
 	{
 		if (UUserWidget* CDO = Cast<UUserWidget>(
@@ -451,23 +447,7 @@ namespace DesignImportPipeline
 			CDO->DesignSizeMode = EDesignPreviewSizeMode::Custom;
 		}
 
-		// Widgets newly created by this round's generation chain (plus test injections via ConstructWidget) have no
-		// variable GUID, and the compiler ensures on missing entries. Backfill with the compiler's own deterministic
-		// rule; existing GUIDs stay untouched. Modify first to capture the GUID map's pre-transaction state: on a
-		// save-failure rollback the map restores with the asset, or the post-rollback recompile would trip the compiler's ensure on a "deleted widget's leftover GUID".
-		if (WBP->WidgetTree)
-		{
-			WBP->Modify();
-			WBP->WidgetTree->ForEachWidget([WBP](UWidget* TreeWidget)
-			{
-				const FName WidgetName = TreeWidget->GetFName();
-				if (!WBP->WidgetVariableNameToGuidMap.Contains(WidgetName))
-				{
-					WBP->WidgetVariableNameToGuidMap.Add(
-						WidgetName, FGuid::NewDeterministicGuid(TreeWidget->GetPathName()));
-				}
-			});
-		}
+		EnsureReimportWidgetGuids(WBP);
 
 		// Generated transition animations follow the same rule as widgets: a non-empty GUID map makes the
 		// compiler ensure on animations missing from it, so backfill them deterministically too (same
@@ -519,8 +499,8 @@ namespace DesignImportPipeline
 				EBlueprintCompileOptions::SkipDefaultObjectValidation | EBlueprintCompileOptions::SkipFiBSearchMetaUpdate);
 			Result.bSucceeded = false;
 			// Reimport finished: per-node diagnostics land in the structured report (the same exit as import; see design.md sections 0/6).
-			DesignImportDiagnosticReport::WriteReimport(
-			Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics);
+			if (Session.Document) DesignImportDiagnosticReport::WriteReimport(
+			*Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics);
 		};
 
 		// 11a) Pre-check: do not enter the save flow when the target file is not writable. The uasset checks only its
@@ -532,13 +512,13 @@ namespace DesignImportPipeline
 		{
 			FString WritabilityBlockers;
 			FString Reason;
-			if (!IsFileWritableForSave(
+			if (!GeneratedAssetLifecycle::IsFileWritableForSave(
 				FPackageName::LongPackageNameToFilename(TargetPackage, FPackageName::GetAssetPackageExtension()),
 				/*bAllowWriteProbe=*/false, Reason))
 			{
 				WritabilityBlockers = Reason;
 			}
-			if (!IsFileWritableForSave(
+			if (!GeneratedAssetLifecycle::IsFileWritableForSave(
 				Design2UMGGenerationManifest::BuildSidecarPathForAsset(TargetPackage),
 				/*bAllowWriteProbe=*/true, Reason))
 			{
@@ -596,8 +576,8 @@ namespace DesignImportPipeline
 					TEXT("Asset %s was saved but its generation manifest could not be written; the asset and the manifest may be inconsistent"),
 					*TargetPackage));
 			Result.bSucceeded = false;
-			DesignImportDiagnosticReport::WriteReimport(
-			Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics);
+			if (Session.Document) DesignImportDiagnosticReport::WriteReimport(
+			*Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics);
 			return Result;
 		}
 
@@ -614,8 +594,8 @@ namespace DesignImportPipeline
 				TEXT("Reimport of %s applied (manifest updated)"),
 				*TargetPackage));
 		// Reimport finished: per-node diagnostics land in the structured report (the same exit as import; see design.md sections 0/6).
-		DesignImportDiagnosticReport::WriteReimport(
-			Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics);
+		if (Session.Document) DesignImportDiagnosticReport::WriteReimport(
+			*Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics);
 		return Result;
 	}
 }

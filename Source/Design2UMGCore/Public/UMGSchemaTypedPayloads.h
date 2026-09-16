@@ -174,6 +174,7 @@ struct FUMGVisualBrushData
 	TOptional<float> OutlineCornerRadius;
 	TOptional<FVector4> CornerRadii;
 	TOptional<float> OutlineThickness;
+	TOptional<FMargin> Margin;
 	TOptional<ESlateBrushDrawType::Type> DrawAs;
 	TOptional<FLinearColor> BrushColor;
 	TOptional<FLinearColor> OutlineColor;

@@ -29,6 +29,8 @@
 #include "WidgetBlueprint.h"
 #include "Dom/JsonObject.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Fonts/FontCache.h"
+#include "Misc/AutomationTest.h"
 #include "HAL/FileManager.h"
 #include "Misc/App.h"
 #include "Misc/FileHelper.h"
@@ -355,8 +357,12 @@ namespace
 			return false;
 		}
 
-		FFontResolver::FindMissingFonts(OutDocument);
 		OutAnalysis = DesignImportPipeline::AnalyzeImport(OutDocument, FImportAnalysisInput{ true });
+		if (!OutAnalysis.ErrorMessage.IsEmpty())
+		{
+			OutError = OutAnalysis.ErrorMessage;
+			return false;
+		}
 		return true;
 	}
 
@@ -381,6 +387,9 @@ namespace
 			if (FSlateRenderer* SlateRenderer = FSlateApplication::Get().GetRenderer())
 			{
 				SlateRenderer->FlushFontCache(TEXT("Design2UMG automation transient reset"));
+				// FlushFontCache only queues a request. Complete the reset before GC
+				// and before measuring fonts for the next source.
+				SlateRenderer->GetFontCache()->ConditionalFlushCache();
 			}
 		}
 		FFontResolver::ClearCache();
@@ -1190,3 +1199,18 @@ namespace Design2UMGAutomationRender
 	}
 }
 
+
+#if WITH_DEV_AUTOMATION_TESTS
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDesign2UMGFontResetSynchronousTest,
+	"Design2UMG.Automation.FontResetCompletesSynchronously",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FDesign2UMGFontResetSynchronousTest::RunTest(const FString&)
+{
+	FSlateRenderer* Renderer = FSlateApplication::Get().GetRenderer();
+	Renderer->FlushFontCache(TEXT("Font reset regression test"));
+	ResetAutomationTransientState();
+	return TestFalse(TEXT("No pending font flush remains before parsing the next case"),
+		Renderer->GetFontCache()->ConditionalFlushCache());
+}
+#endif

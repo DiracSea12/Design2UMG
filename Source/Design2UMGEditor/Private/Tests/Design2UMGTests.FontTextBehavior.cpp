@@ -202,15 +202,26 @@ bool FFontResolverProjectFontOnlyLookupTest::RunTest(const FString& Parameters)
 	FFontResolver::RegisterFontAssetPath(NonProjectOnlyFamily, TEXT("/Engine/EngineFonts/Roboto.Roboto"));
 	TestTrue(TEXT("Explicit engine font registration must not become a project match"),
 		FFontResolver::FindFontAssetPath(NonProjectOnlyFamily).IsEmpty());
-	TestEqual(TEXT("Missing project font falls back to matching engine UFont asset"),
-		FFontResolver::FindFontAssetPath(TEXT("Roboto")),
-		TEXT("/Engine/EngineFonts/Roboto.Roboto"));
-	const FString ExpectedEngineTypeface = FFontResolver::FindBestTypefaceForAssetPath(TEXT("/Engine/EngineFonts/Roboto.Roboto"), TEXT("500"));
-	TestFalse(TEXT("Engine fallback test asset exposes a selectable typeface"),
-		ExpectedEngineTypeface.IsEmpty());
-	TestEqual(TEXT("Engine fallback uses requested typeface selection for the resolved asset"),
-		FFontResolver::FindBestTypeface(TEXT("Roboto"), TEXT("500")),
-		ExpectedEngineTypeface);
+	// Use an in-memory engine asset with a unique family. Real projects may already
+	// contain Roboto, which must take priority over its engine counterpart.
+	UFont* EngineFont = LoadObject<UFont>(nullptr, TEXT("/Engine/EngineFonts/Roboto.Roboto"));
+	if (TestNotNull(TEXT("Engine font fixture source is available"), EngineFont))
+	{
+		const FString EngineFamily = TEXT("D2UEngineLookup") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+		UPackage* EnginePackage = CreatePackage(*(TEXT("/Engine/EngineFonts/") + EngineFamily));
+		UFont* EngineFixture = DuplicateObject<UFont>(EngineFont, EnginePackage, FName(*EngineFamily));
+		FAssetRegistryModule::AssetCreated(EngineFixture);
+		const FString EnginePath = EngineFixture->GetPathName();
+		TestEqual(TEXT("Missing project font falls back to matching engine UFont asset"),
+			FFontResolver::FindFontAssetPath(EngineFamily), EnginePath);
+		const FString ExpectedEngineTypeface = FFontResolver::FindBestTypefaceForAssetPath(EnginePath, TEXT("500"));
+		TestFalse(TEXT("Engine fallback test asset exposes a selectable typeface"), ExpectedEngineTypeface.IsEmpty());
+		TestEqual(TEXT("Engine fallback uses requested typeface selection for the resolved asset"),
+			FFontResolver::FindBestTypeface(EngineFamily, TEXT("500")), ExpectedEngineTypeface);
+		FAssetRegistryModule::AssetDeleted(EngineFixture);
+		EngineFixture->ClearFlags(RF_Public | RF_Standalone);
+		EngineFixture->MarkAsGarbage();
+	}
 
 	const FString AutomationOnlyFamily = TEXT("D2UAutomationOnlyFont");
 	FFontResolver::RegisterFontAssetPath(
@@ -472,6 +483,8 @@ bool FExplicitPostScriptMeasurementGenerationParityTest::RunTest(const FString& 
 		ExpectedFont.Size = TextWidget->TextStyle.FontSize;
 		ExpectedTextBlock->SetText(FText::FromString(TextWidget->Text.Text.Get(DesignNode->Text.Content)));
 		ExpectedTextBlock->SetFont(ExpectedFont);
+		// Match generation: transparent default shadows must not add layout extent.
+		ExpectedTextBlock->SetShadowOffset(FVector2D::ZeroVector);
 		if (TextWidget->Text.LineHeightPercentage.IsSet())
 		{
 			ExpectedTextBlock->SetLineHeightPercentage(TextWidget->Text.LineHeightPercentage.GetValue());
@@ -482,6 +495,7 @@ bool FExplicitPostScriptMeasurementGenerationParityTest::RunTest(const FString& 
 		ExpectedSlateWidget->SlatePrepass(1.0f);
 		const FVector2D ExpectedSize = ExpectedSlateWidget->GetDesiredSize();
 		const FVector2D ConvertedSize(TextWidget->Bounds.W, TextWidget->Bounds.H);
+		AddInfo(FString::Printf(TEXT("Explicit typeface bounds: converted=%s expected=%s"), *ConvertedSize.ToString(), *ExpectedSize.ToString()));
 		bPassed &= TestTrue(TEXT("Converted bounds match the generated font asset, typeface, and line height"),
 			ConvertedSize.Equals(ExpectedSize, 0.01f));
 	}
@@ -521,6 +535,8 @@ bool FExplicitPostScriptMeasurementGenerationParityTest::RunTest(const FString& 
 		ExpectedTextBlock->SetText(FText::FromString(
 			DefaultTypefaceWidget->Text.Text.Get(DefaultTypefaceDesignNode->Text.Content)));
 		ExpectedTextBlock->SetFont(ExpectedFont);
+		// Match generation: transparent default shadows must not add layout extent.
+		ExpectedTextBlock->SetShadowOffset(FVector2D::ZeroVector);
 		if (DefaultTypefaceWidget->Text.LineHeightPercentage.IsSet())
 		{
 			ExpectedTextBlock->SetLineHeightPercentage(
@@ -532,6 +548,7 @@ bool FExplicitPostScriptMeasurementGenerationParityTest::RunTest(const FString& 
 		ExpectedSlateWidget->SlatePrepass(1.0f);
 		const FVector2D ExpectedSize = ExpectedSlateWidget->GetDesiredSize();
 		const FVector2D ConvertedSize(DefaultTypefaceWidget->Bounds.W, DefaultTypefaceWidget->Bounds.H);
+		AddInfo(FString::Printf(TEXT("Default typeface bounds: converted=%s expected=%s"), *ConvertedSize.ToString(), *ExpectedSize.ToString()));
 		bPassed &= TestTrue(TEXT("Empty-weight converted bounds match generated default typeface and line height"),
 			ConvertedSize.Equals(ExpectedSize, 0.01f));
 	}

@@ -8,6 +8,5 @@ namespace TextStyleUtils
 {
 	DESIGN2UMGCORE_API int32 ConvertLetterSpacingPxToTracking(
 		float PixelSpacing,
-		float DesignFontSize,
 		float AppliedFontSize);
 }

@@ -15,7 +15,6 @@
 #include "Components/NamedSlotInterface.h"
 #include "Components/PanelSlot.h"
 #include "Components/PanelWidget.h"
-#include "Components/SizeBox.h"
 #include "Components/UniformGridPanel.h"
 #include "Components/VerticalBox.h"
 
@@ -378,10 +377,7 @@ namespace
 		{
 			if (UPanelSlot* ContentSlot = Content->SetContent(ChildWidget))
 			{
-				if (!Content->IsA<USizeBox>())
-				{
-					FUMGWidgetUtils::ApplySlotProperties(ContentSlot, ChildNode.Slot);
-				}
+				FUMGWidgetUtils::ApplySlotProperties(ContentSlot, ChildNode.Slot);
 			}
 
 			if (UBorder* Border = Cast<UBorder>(Content))

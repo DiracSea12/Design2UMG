@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGWidgetUtils.h"
+#include "Design2UMGComponentBlueprints.h"
 #include "Design2UMGGenerationSettingsSnapshot.h"
 #include "Design2UMGComponentMappingGeneration.h"
 #include "WidgetTreeChildBuilder.h"
@@ -71,7 +72,7 @@ namespace
 {
 	bool IsValidEffectiveDesignSize(const FIntPoint& Size)
 	{
-		return Size.X > 1 && Size.Y > 1;
+		return Size.X > 0 && Size.Y > 0;
 	}
 
 	FIntPoint SanitizeEffectiveDesignSize(const FIntPoint& InSize)
@@ -228,6 +229,7 @@ UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWid
 
 	// Component Mapping hits take priority: attach as a project WBP class instance; the component's internal subtree is not expanded;
 	// on class-missing/load-failure TryCreateMappedWidget has already logged a diagnostic and returned empty, and the plain path continues.
+	TOptional<FDesign2UMGGenerationSettingsSnapshot> MappingFallbackSettings;
 	if (ComponentMappingState
 		&& Node.HasSourceData()
 		&& !Node.Source().MappedComponentKey.IsEmpty())
@@ -238,10 +240,39 @@ UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWid
 			ComponentMappingState->OnWidgetConstructed(MappedInstance);
 			return MappedInstance;
 		}
+		if (GenerationSettings && GenerationSettings->ComponentBlueprints)
+		{
+			// Mapping cuts off automatic dependency planning. On mapping failure, render
+			// the supplied subtree normally, including its descendants, as diagnosed above.
+			MappingFallbackSettings = *GenerationSettings;
+			MappingFallbackSettings->ComponentBlueprints.Reset();
+			GenerationSettings = &MappingFallbackSettings.GetValue();
+		}
 	}
 
+	if (GenerationSettings && GenerationSettings->ComponentBlueprints)
+	{
+		auto& Context = *GenerationSettings->ComponentBlueprints;
+		const FString Key = Context.ResolveKey(Node);
+		if (!Key.IsEmpty())
+		{
+			const auto* Component = Context.Components.Find(Key);
+			UClass* Class = Component ? LoadObject<UClass>(nullptr, *Component->ClassPath) : nullptr;
+			if (!Class)
+			{
+				Context.Error = FString::Printf(TEXT("Component '%s' for node '%s' has no generated class"), *Key, *Node.Id);
+				UE_LOG(LogDesign2UMG, Error, TEXT("%s"), *Context.Error);
+				return nullptr;
+			}
+			// Blueprint templates must not initialize a transient runtime tree before slot bindings are authored.
+			UUserWidget* Instance = CastChecked<UUserWidget>(WidgetTree->ConstructWidget<UWidget>(Class, WidgetName));
+			if (!Context.ApplyInstance(Instance, WidgetTree, Node, *GenerationSettings, TextureMap, ExplicitDesignSize, ComponentMappingState)) return nullptr;
+			if (ComponentMappingState) ComponentMappingState->OnWidgetConstructed(Instance);
+			return Instance;
+		}
+	}
 	UClass* WidgetClass = ResolveWidgetClass(Node.Type);
-	if (GenerationSettings)
+	if (GenerationSettings && (!Node.HasSourceData() || Node.Source().MappedComponentKey.IsEmpty()))
 	{
 		// Name-based ClassOverride applies only to ordinary nodes that did not hit a Component Mapping.
 		if (UClass* Override = GenerationSettings->FindClassOverride(Node.Name, ClassOverrideCache))
@@ -293,6 +324,10 @@ UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWid
 	}
 
 	UWidget* NewWidget = WidgetTree->ConstructWidget<UWidget>(WidgetClass, WidgetName);
+	if (GenerationSettings && GenerationSettings->ComponentBlueprints)
+	{
+		if (UNamedSlot* NamedSlot = Cast<UNamedSlot>(NewWidget)) NamedSlot->bExposeOnInstanceOnly = true;
+	}
 	if (!NewWidget)
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to construct widget: %s"), *Node.Name);
@@ -346,7 +381,12 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 		}
 	}
 
-	ApplyWidgetProperties(NewWidget, Node);
+	const bool AutomaticComponent = GenerationSettings && GenerationSettings->ComponentBlueprints
+		&& NewWidget->IsA<UUserWidget>() && Node.HasSourceData() && Node.Source().MappedComponentKey.IsEmpty()
+		&& !GenerationSettings->ComponentBlueprints->ResolveKey(Node).IsEmpty();
+	// The child blueprint root (or its instance override) owns source visuals. Applying them
+	// again to the UserWidget wrapper would multiply opacity and repeat render transforms.
+	if (!AutomaticComponent) ApplyWidgetProperties(NewWidget, Node);
 
 	// mapped instances: explicit design-facing inputs are written after generic properties (declared values win over design defaults).
 	if (ComponentMappingState
@@ -412,7 +452,7 @@ TOptional<FVector2D> FUMGWidgetUtils::GetBlueprintDesignTimeSize(UWidgetBlueprin
 	{
 		if (const UUserWidget* CDO = Cast<UUserWidget>(WidgetBlueprint->GeneratedClass->GetDefaultObject()))
 		{
-			if (CDO->DesignTimeSize.X > 1.0f && CDO->DesignTimeSize.Y > 1.0f)
+			if (CDO->DesignTimeSize.X > 0.0f && CDO->DesignTimeSize.Y > 0.0f)
 			{
 				return CDO->DesignTimeSize;
 			}

@@ -379,5 +379,35 @@ bool FVisualMapperTranslucentStrokeCompositesOverSolidFillTest::RunTest(const FS
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperStrokeBrushSelectionTest,
+	"Design2UMG.VisualMapper.StrokeBrushSelection",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperStrokeBrushSelectionTest::RunTest(const FString&)
+{
+	FDesignStroke Stroke;
+	Stroke.Thickness.bUniform = true;
+	Stroke.Thickness.Uniform = 2.0f;
+	Stroke.Fill = FDesignFill::FromColor(TEXT("#FF0000"));
+	for (int32 Variant = 0; Variant < 6; ++Variant)
+	{
+		FUMGWidgetNode Widget;
+		switch (Variant)
+		{
+		case 0: Widget.Brush.BrushColor = FLinearColor::White; break;
+		case 1: Widget.Brush.Image.TexturePath = TEXT("synthetic-image.png"); break;
+		case 2: Widget.Brush.Gradient.Type = TEXT("linear"); break;
+		case 3: Widget.Brush.MaterialRef = TEXT("/Game/SyntheticMaterial"); break;
+		case 4: Widget.Brush.DrawAs = ESlateBrushDrawType::Image; break;
+		case 5: Widget.Brush.DrawAs = ESlateBrushDrawType::RoundedBox; break;
+		}
+		VisualMapper::ApplyStroke(Widget, Stroke);
+		const ESlateBrushDrawType::Type Expected = Variant == 4 ? ESlateBrushDrawType::Image
+			: (Variant == 0 || Variant == 5 ? ESlateBrushDrawType::RoundedBox : ESlateBrushDrawType::Box);
+		TestEqual(FString::Printf(TEXT("Stroke brush selection variant %d"), Variant),
+			Widget.Brush.DrawAs.Get(ESlateBrushDrawType::NoDrawType), Expected);
+	}
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
 

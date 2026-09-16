@@ -103,9 +103,11 @@ bool FVisualMapperBoxShadowRenderOwnershipTest::RunTest(const FString& Parameter
 
 	const FUMGWidgetNode& Shadow = Wrapped.Children[0];
 	TestEqual(TEXT("Box shadow is the first overlay child"), Shadow.Type, FString(TEXT("Image")));
-	TestTrue(TEXT("Shadow image retains the source brush colour"),
+	TestTrue(TEXT("Precoloured shadow texture uses a neutral image tint"),
 		Shadow.Brush.BrushColor.IsSet()
-		&& Shadow.Brush.BrushColor.GetValue().Equals(FLinearColor::Black));
+		&& Shadow.Brush.BrushColor.GetValue().Equals(FLinearColor::White));
+	TestTrue(TEXT("Shadow colour is retained in texture generation parameters"),
+		Shadow.Brush.MaterialParams.Get(FString()).Contains(TEXT("#000000FF")));
 	TestTrue(TEXT("Shadow fills with negative padding so it can extend past the wrapper, and keeps the raw source offset"),
 		Shadow.Slot.HorizontalAlignment == EUMGSlotHorizontalAlignment::Fill
 			&& Shadow.Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Fill
@@ -362,10 +364,59 @@ bool FVisualMapperBoxShadowMultiLayerSingleOverlayTest::RunTest(const FString& P
 	// The later source layer renders below the earlier one, matching the stacking the retired per-layer nesting produced.
 	TestEqual(TEXT("Second shadow layer renders below the first"), Wrapped.Children[0].Id, FString(TEXT("multi_shadow_source_shadow1")));
 	TestEqual(TEXT("First shadow layer renders above the second"), Wrapped.Children[1].Id, FString(TEXT("multi_shadow_source_shadow0")));
-	TestTrue(TEXT("Second shadow layer keeps its own colour"),
+	TestTrue(TEXT("Second shadow layer keeps its own baked colour without a second tint"),
 		Wrapped.Children[0].Brush.BrushColor.IsSet()
-		&& Wrapped.Children[0].Brush.BrushColor.GetValue().Equals(FLinearColor::Red));
+		&& Wrapped.Children[0].Brush.BrushColor.GetValue().Equals(FLinearColor::White)
+		&& Wrapped.Children[0].Brush.MaterialParams.Get(FString()).Contains(TEXT("#FF0000FF")));
 	TestEqual(TEXT("Content stays on top with a single content suffix"), Wrapped.Children[2].Id, FString(TEXT("multi_shadow_source_content")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperSubtreePaintBoundsTest,
+	"Design2UMG.VisualMapper.SubtreePaintBounds",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperSubtreePaintBoundsTest::RunTest(const FString&)
+{
+	const auto Root = MakeFixedNode(EDesignNodeType::Frame, 100, 80);
+	const auto Middle = MakeFixedNode(EDesignNodeType::Frame, 20, 20);
+	const auto Leaf = MakeFixedNode(EDesignNodeType::Rectangle, 20, 20);
+	Root->LayoutData.Layout = Middle->LayoutData.Layout = EDesignLayout::None;
+	Middle->Transform.SetPosition(80, 60);
+	FDesignEffect Effect;
+	Effect.Type = EDesignEffectType::Shadow;
+	Effect.Shadow.OffsetY = 20;
+	Leaf->Visual.Effects.Add(Effect);
+	Middle->Children.Add(Leaf);
+	Root->Children.Add(Middle);
+	FUMGBoxShadowLayerData Shadow;
+	Shadow.Offset.X = 100;
+	const auto CapturePadding = [&]()
+	{
+		FUMGWidgetNode Widget;
+		Widget.Type = TEXT("CanvasPanel");
+		Widget.Bounds.W = 100;
+		Widget.Bounds.H = 80;
+		const FUMGWidgetNode Wrapped = VisualMapper::WrapWithBoxShadow(MoveTemp(Widget), Root, {Shadow});
+		TestEqual(TEXT("Source layout width unchanged"), Wrapped.Bounds.W, 100.0f);
+		TestEqual(TEXT("Source layout height unchanged"), Wrapped.Bounds.H, 80.0f);
+		return Wrapped.Children[0].Slot.Padding;
+	};
+	TestEqual(TEXT("Nested descendant paints beyond layout bottom"), CapturePadding().Bottom, -21.0f);
+	Middle->LayoutData.SetClipValue(true);
+	TestEqual(TEXT("Clipped descendant does not enlarge capture"), CapturePadding().Bottom, -1.0f);
+	Middle->LayoutData.SetClipValue(false);
+	Middle->Transform.SetPosition(0, 0);
+	Middle->Transform.Rotation = 90;
+	// The parent shadow is displaced entirely rightwards, so it adds no left gutter.
+	TestEqual(TEXT("Rotation moves descendant overflow to the left"), CapturePadding().Left, -20.0f);
+	Middle->Transform.Rotation = 0;
+	TestEqual(TEXT("Contained absolute children need no extra bottom padding"), CapturePadding().Bottom, -1.0f);
+	Root->LayoutData.Layout = EDesignLayout::Horizontal;
+	TestEqual(TEXT("Flow children reserve outsets at their eventual layout edge"), CapturePadding().Bottom, -21.0f);
+	Root->LayoutData.Layout = EDesignLayout::None;
+	Root->Visual.Stroke.Align = EDesignStrokeAlign::Outside;
+	Root->Visual.Stroke.Thickness.Uniform = 6;
+	TestEqual(TEXT("Outside stroke remains inside the capture"), CapturePadding().Left, -6.0f);
 	return true;
 }
 

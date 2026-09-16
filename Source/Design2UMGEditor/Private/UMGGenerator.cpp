@@ -1,6 +1,8 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGGenerator.h"
+#include "Design2UMGComponentBlueprints.h"
+#include "FigmaComponentDependencies.h"
 #include "Design2UMGGenerationSettingsSnapshot.h"
 #include "Design2UMGComponentMappingGeneration.h"
 #include "Design2UMGGenerationManifest.h"
@@ -213,9 +215,12 @@ UWidgetBlueprint* FUMGGenerator::GenerateWidgetBlueprint(
 	FUMGPrototypeNavigationData NavigationData;
 	UWidgetBlueprint* WBP = BuildWidgetBlueprint(
 		WidgetData, PackagePath, GenerationSettings, &GenerationOutput, &NavigationData);
+	const FString BuiltPath = GetPathNameSafe(WBP);
 	if (WBP && !SaveWidgetBlueprint(WBP, &GenerationOutput, &NavigationData))
 	{
-		return nullptr;
+		GenerationOutput.MappingDiagnostics.Add({TEXT("generation_save_failed"),
+			FString::Printf(TEXT("Asset batch save failed for '%s'; inspect dependency and recovery diagnostics"), *BuiltPath)});
+		WBP = nullptr;
 	}
 	if (OutGenerationOutput)
 	{
@@ -229,8 +234,64 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 	const FString& PackagePath,
 	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings,
 	FDesign2UMGGenerationOutput* OutGenerationOutput,
-	FUMGPrototypeNavigationData* OutNavigationData)
+	FUMGPrototypeNavigationData* OutNavigationData,
+	UWidgetBlueprint* ExistingGeneratedBlueprint)
 {
+	if (WidgetData.HasSourceDocumentData()
+		&& WidgetData.SourceDocument().Provider == DesignComponentMapping::ProviderFigma
+		&& WidgetData.SourceDocument().ComponentDependenciesJson.IsEmpty()
+		&& (!GenerationSettings || !GenerationSettings->ComponentBlueprints))
+	{
+		const FDesign2UMGGenerationSettingsSnapshot Effective = GenerationSettings ? *GenerationSettings
+			: FDesign2UMGGenerationSettingsSnapshot::FromSettings(*UDesign2UMGSettings::Get());
+		TArray<FString> Unresolved;
+		TFunction<void(const FUMGWidgetNode&)> Collect = [&](const FUMGWidgetNode& Node)
+		{
+			if (Node.HasSourceData() && Node.Source().SourceNodeType == TEXT("INSTANCE"))
+			{
+				DesignComponentMapping::FDesignComponentIdentity Identity;
+				bool AtSet = false;
+				if (DesignComponentMapping::TryResolveFigmaComponentIdentity(Node.Source(),
+					WidgetData.SourceDocument().DocumentScope, Identity)
+					&& Effective.ComponentMapping.Table.Match(Identity, AtSet)) return;
+				Unresolved.AddUnique(Identity.ComponentKey.IsEmpty() ? Node.Id : Identity.ComponentKey);
+			}
+			for (const auto& Child : Node.Children) Collect(Child);
+		};
+		Collect(WidgetData.RootWidget);
+		if (!Unresolved.IsEmpty())
+		{
+			const FString Error = TEXT("Missing component dependency data for: ") + FString::Join(Unresolved, TEXT(", "));
+			UE_LOG(LogDesign2UMG, Error, TEXT("Component import failed: %s"), *Error);
+			if (OutGenerationOutput) OutGenerationOutput->MappingDiagnostics.Add({TEXT("component_generation_failed"), Error});
+			return nullptr;
+		}
+	}
+	if (WidgetData.HasSourceDocumentData()
+		&& !WidgetData.SourceDocument().ComponentDependenciesJson.IsEmpty()
+		&& (!GenerationSettings || !GenerationSettings->ComponentBlueprints))
+	{
+		FigmaComponentDependencies::FCatalog Catalog;
+		FString BundleError;
+		const bool bParsed = FigmaComponentDependencies::Parse(
+			WidgetData.SourceDocument().ComponentDependenciesJson, Catalog, BundleError);
+		TFunction<bool(const FUMGWidgetNode&)> HasInstance = [&](const FUMGWidgetNode& Node)
+		{
+			if (Node.HasSourceData() && Node.Source().SourceNodeType == TEXT("INSTANCE")) return true;
+			for (const auto& Child : Node.Children) if (HasInstance(Child)) return true;
+			return false;
+		};
+		// Empty exporter metadata is not an instruction to replace an ordinary page.
+		// Malformed bundles and unresolved instances still take the diagnostic path.
+		// Definitions outside the selected tree do not change ordinary import ownership.
+		if (!bParsed || HasInstance(WidgetData.RootWidget))
+		{
+			FDesign2UMGGenerationOutput LocalGenerationOutput;
+			return FDesign2UMGComponentBlueprintContext::Build(
+				WidgetData, PackagePath, GenerationSettings,
+				OutGenerationOutput ? OutGenerationOutput : &LocalGenerationOutput, OutNavigationData);
+		}
+	}
 	FString AssetName = ObjectTools::SanitizeObjectName(WidgetData.WidgetName);
 	FString FullPath = PackagePath / AssetName;
 
@@ -239,7 +300,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 	IAssetRegistry& AR = ARM.Get();
 
 	FString TestPath = FullPath + TEXT(".") + AssetName;
-	if (AR.GetAssetByObjectPath(FSoftObjectPath(TestPath)).IsValid())
+	if (!ExistingGeneratedBlueprint && AR.GetAssetByObjectPath(FSoftObjectPath(TestPath)).IsValid())
 	{
 		int32 Suffix = 1;
 		FString NewName;
@@ -268,6 +329,31 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 		UE_LOG(LogDesign2UMG, Warning, TEXT("Output path already contained an asset with this name; auto-renamed to %s."), *AssetName);
 	}
 
+	// Prepare persistent effects before touching an existing WidgetTree.
+	UMGGeneratorRootHandoff::FPreparedRoot PreparedRoot =
+		UMGGeneratorRootHandoff::PrepareRootForBuild(WidgetData, PackagePath, AssetName);
+	const FUMGWidgetNode& PreparedRootRef = PreparedRoot.Root;
+	const FIntPoint& DesignSize = PreparedRoot.DesignSize;
+	if (!PreparedRoot.ErrorMessage.IsEmpty())
+	{
+		if (OutGenerationOutput)
+		{
+			OutGenerationOutput->MappingDiagnostics.Add({TEXT("resource_preparation_failed"), PreparedRoot.ErrorMessage});
+		}
+		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to generate '%s': %s"), *WidgetData.WidgetName, *PreparedRoot.ErrorMessage);
+		return nullptr;
+	}
+	if (DesignSize.X <= 0 || DesignSize.Y <= 0)
+	{
+		if (OutGenerationOutput)
+		{
+			OutGenerationOutput->MappingDiagnostics.Add({TEXT("invalid_root_design_size"), FString::Printf(
+				TEXT("Widget '%s' source node '%s' did not provide a valid root design size"),
+				*WidgetData.WidgetName, *PreparedRootRef.GetStableDesignNodeId())});
+		}
+		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to generate '%s': source data did not provide a valid root design size"), *WidgetData.WidgetName);
+		return nullptr;
+	}
 	UPackage* Package = CreatePackage(*FullPath);
 	if (!Package)
 	{
@@ -279,7 +365,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 			*FullPath);
 		return nullptr;
 	}
-	UWidgetBlueprint* WBP = Cast<UWidgetBlueprint>(
+	UWidgetBlueprint* WBP = ExistingGeneratedBlueprint ? ExistingGeneratedBlueprint : Cast<UWidgetBlueprint>(
 		FKismetEditorUtilities::CreateBlueprint(
 			UUserWidget::StaticClass(), Package, FName(*AssetName),
 			BPTYPE_Normal, UWidgetBlueprint::StaticClass(),
@@ -297,11 +383,19 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 			*FullPath,
 			WBP ? 1 : 0,
 			(WBP && WBP->WidgetTree) ? 1 : 0);
-		GeneratedAssetLifecycle::DiscardUnsavedAsset(WBP);
+		DiscardNewlyCreatedAsset(WBP, !ExistingGeneratedBlueprint);
 		Package->ClearDirtyFlag();
 		return nullptr;
 	}
-	Package->MarkAsNewlyCreated();
+	if (!ExistingGeneratedBlueprint)
+	{
+		Package->MarkAsNewlyCreated();
+	}
+	else
+	{
+		WBP->WidgetTree->Rename(nullptr, GetTransientPackage(), REN_DontCreateRedirectors | REN_NonTransactional);
+		WBP->WidgetTree = NewObject<UWidgetTree>(WBP, TEXT("WidgetTree"), RF_Transactional);
+	}
 
 	WBP->Modify();
 	WBP->WidgetTree->Modify();
@@ -311,19 +405,6 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 	const FDesign2UMGGenerationSettingsSnapshot& EffectiveGenerationSettings =
 		ResolveGenerationSettingsSnapshot(GenerationSettings, FallbackGenerationSettings);
 
-	// Non-const: Component Mapping matching writes the hit Key into this root-node copy (affects this generation only).
-	UMGGeneratorRootHandoff::FPreparedRoot PreparedRoot =
-		UMGGeneratorRootHandoff::PrepareRootForBuild(WidgetData, PackagePath, AssetName);
-	const FUMGWidgetNode& PreparedRootRef = PreparedRoot.Root;
-	const FIntPoint& DesignSize = PreparedRoot.DesignSize;
-	if (DesignSize.X <= 1 || DesignSize.Y <= 1)
-	{
-		UE_LOG(LogDesign2UMG, Error,
-			TEXT("Failed to generate '%s': source data did not provide a valid root design size"),
-			*WidgetData.WidgetName);
-		GeneratedAssetLifecycle::DiscardUnsavedAsset(WBP);
-		return nullptr;
-	}
 
 	// Component Mapping: before generation, run two-tier matching on the IR (PreparedRoot is a copy of the
 	// WidgetData; markers affect this generation only) and write the hit Keys; no config / non-Figma documents make it a no-op, so the plain generation path is unchanged.
@@ -369,7 +450,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 	// Use the shared widget creation path.
 	UWidget* Root = UMGGeneratorRootHandoff::CreateRootWidget(
 		WBP, PreparedRoot, &MappingBuildState, &EffectiveGenerationSettings);
-	if (!Root)
+	if (!Root || (EffectiveGenerationSettings.ComponentBlueprints && !EffectiveGenerationSettings.ComponentBlueprints->Error.IsEmpty()))
 	{
 		UE_LOG(LogDesign2UMG, Error,
 			TEXT("Failed to create root widget for widget '%s': package path '%s', asset name '%s', WidgetBlueprint '%s', root type '%s', root name '%s', root id '%s'. The design may contain unsupported node types."),
@@ -380,7 +461,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 			*PreparedRootRef.Type,
 			*PreparedRootRef.Name,
 			*PreparedRootRef.Id);
-		GeneratedAssetLifecycle::DiscardUnsavedAsset(WBP);
+		DiscardNewlyCreatedAsset(WBP, !ExistingGeneratedBlueprint);
 		return nullptr;
 	}
 	WBP->WidgetTree->RootWidget = Root;
@@ -398,6 +479,12 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 	ApplyDesignPreviewSize(WBP, DesignSize, TEXT("pre-compile"));
 
 	Package->MarkPackageDirty();
+	if (EffectiveGenerationSettings.ComponentBlueprints)
+	{
+		// Dependency compilation can also compile this parent before its own save begins.
+		// Its regenerated source tree must not retain the previous tree's variable GUID map.
+		WBP->WidgetVariableNameToGuidMap.Empty();
+	}
 
 	// Assemble the generation output: the manifest payload (mapped instances + top-level generated nodes) and mapping diagnostics.
 	if (OutGenerationOutput)
@@ -436,7 +523,7 @@ namespace
 }
 #endif
 
-bool FUMGGenerator::SaveWidgetBlueprint(
+bool FUMGGenerator::SaveSingleWidgetBlueprint(
 	UWidgetBlueprint* WBP,
 	FDesign2UMGGenerationOutput* GenerationOutput,
 	const FUMGPrototypeNavigationData* PrototypeNavigation)
@@ -466,7 +553,7 @@ bool FUMGGenerator::SaveWidgetBlueprint(
 	}
 
 	FIntPoint DesiredDesignSize = ReadDesignPreviewSize(WBP);
-	if (DesiredDesignSize.X <= 1 || DesiredDesignSize.Y <= 1)
+	if (DesiredDesignSize.X <= 0 || DesiredDesignSize.Y <= 0)
 	{
 		UE_LOG(LogDesign2UMG, Error,
 			TEXT("SaveWidgetBlueprint: missing valid DesignTimeSize for %s; source design size is required"),
@@ -549,6 +636,7 @@ bool FUMGGenerator::SaveWidgetBlueprint(
 				TEXT("Generation manifest sidecar could not be written for %s; the asset itself was saved"),
 				*Design2UMGGenerationManifest::BuildSidecarPathForAsset(AssetPackageName));
 			GenerationOutput->MappingDiagnostics.Add(MoveTemp(Diagnostic));
+			if (GenerationOutput->Manifest.bWholeAssetOwned || GenerationOutput->Manifest.bComponentBatchRoot) return false;
 		}
 	}
 

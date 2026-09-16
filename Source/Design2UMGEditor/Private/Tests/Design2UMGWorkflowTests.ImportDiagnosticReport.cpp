@@ -8,6 +8,7 @@
 #include "FontResolver.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 #include "UMGSchema.h"
+#include "UMGPropertyKeys.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Dom/JsonObject.h"
 #include "Engine/Font.h"
@@ -170,6 +171,60 @@ namespace
 		}
 		return nullptr;
 	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImportDiagnosticReportGenerationFailureTest,
+	"Design2UMG.Import.ImportDiagnosticReportGenerationFailure",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FImportDiagnosticReportGenerationFailureTest::RunTest(const FString&)
+{
+	for (const EDesignBlueprintGenerationMode Mode : {
+		EDesignBlueprintGenerationMode::BlueprintOnly,
+		EDesignBlueprintGenerationMode::BlueprintAndPng,
+		EDesignBlueprintGenerationMode::BlueprintAndCompiledPng})
+	{
+		const FString ReportDir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Design2UMG/ImportReports"));
+		TArray<FString> ReportsBefore;
+		IFileManager::Get().FindFilesRecursive(ReportsBefore, *ReportDir, TEXT("*.import_report.json"), true, false, false);
+		TSet<FString> ExistingReports;
+		for (const FString& Report : ReportsBefore) ExistingReports.Add(Report);
+
+		FUMGWidgetData Data;
+		Data.WidgetName = TEXT("WBP_FailedImportReport");
+		Data.RootWidget.Name = TEXT("FailedCaptureRoot");
+		Data.RootWidget.Type = TEXT("RetainerBox");
+		Data.RootWidget.Bounds.W = 0;
+		Data.RootWidget.Bounds.H = 100;
+		Data.RootWidget.Effect.EffectMaterial = UMGPropertyKeys::RetainerSubtreeShadowEffectRef;
+		FArtifactGenerationRequest Request;
+		Request.OutputPath = TEXT("/Temp/FailedImportReport_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+		Request.Generation.Mode = Mode;
+		Request.DiagnosticDocument = FDesignDocument();
+		AddExpectedError(TEXT("has no valid capture size"), EAutomationExpectedErrorFlags::Contains, 1);
+		if (Mode != EDesignBlueprintGenerationMode::BlueprintAndCompiledPng)
+		{
+			AddExpectedError(TEXT("DesignImportUtils: Widget Blueprint build failed"), EAutomationExpectedErrorFlags::Contains, 1);
+		}
+		const FArtifactGenerationResult Result = DesignImportPipeline::GenerateArtifacts(Data, Request);
+		TestFalse(TEXT("Generation fails"), Result.bSucceeded);
+		TestTrue(TEXT("Failed import has no generated asset"), Result.GeneratedAssetPath.IsEmpty());
+		const FString ReportPath = FindNewImportReport(ReportDir, ExistingReports);
+		if (!TestFalse(TEXT("Failed import still writes a diagnostic report"), ReportPath.IsEmpty())) return false;
+		TSharedPtr<FJsonObject> Report;
+		if (!LoadImportReportJson(*this, ReportPath, Report)) return false;
+		const TSharedPtr<FJsonObject>* Mapping = nullptr;
+		if (!TestTrue(TEXT("Report contains component diagnostics"), Report->TryGetObjectField(TEXT("componentMapping"), Mapping))) return false;
+		const TArray<TSharedPtr<FJsonValue>>* Entries = nullptr;
+		if (!TestTrue(TEXT("Report contains diagnostic entries"), (*Mapping)->TryGetArrayField(TEXT("entries"), Entries))) return false;
+		TestTrue(TEXT("Written report identifies the failed node and concrete reason"), Entries->ContainsByPredicate([](const TSharedPtr<FJsonValue>& Value)
+		{
+			const TSharedPtr<FJsonObject> Entry = Value->AsObject();
+			return Entry->GetStringField(TEXT("kind")) == TEXT("resource_preparation_failed")
+				&& Entry->GetStringField(TEXT("message")).Contains(TEXT("FailedCaptureRoot"))
+				&& Entry->GetStringField(TEXT("message")).Contains(TEXT("has no valid capture size"));
+		}));
+	}
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImportDiagnosticReportStructureTest,
@@ -410,7 +465,9 @@ bool FImportDiagnosticReportEngineFontFallbackWarnsTest::RunTest(const FString& 
 	TextNode->Id = TEXT("engine_fallback_text");
 	TextNode->Name = TEXT("Engine Fallback Text");
 	TextNode->Type = EDesignNodeType::Text;
-	TextNode->Text.FontFamily = TEXT("Roboto");
+	// Use an absent family: imported project fonts must not accidentally satisfy the fallback fixture.
+	TextNode->Text.FontFamily = TEXT("D2UAbsentFont_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	TestTrue(TEXT("Fixture family has no matching asset"), FFontResolver::FindFontAssetPath(TextNode->Text.FontFamily).IsEmpty());
 	TextNode->Text.FontWeight = TEXT("500");
 	Document.Children.Add(TextNode);
 

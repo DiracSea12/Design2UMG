@@ -20,7 +20,7 @@ namespace
 		Source.SourceNodeId = TEXT("1:2");
 		Source.SourceNodeType = TEXT("INSTANCE");
 		Source.ComponentId = ComponentId;
-		Source.ComponentSetId = ComponentSetId;
+		Source.ComponentSetKey = ComponentSetId;
 		Source.MainComponentKey = MainComponentKey;
 		return Source;
 	}
@@ -80,6 +80,13 @@ bool FDesignComponentMappingIdentityExtractionTest::RunTest(const FString&)
 	const FString Scope = TEXT("file-key-1");
 
 	FDesignComponentIdentity Identity;
+	FUMGSourceNodeData PublishedSource = MakeInstanceSource(TEXT("12:34"), TEXT("published-set-key"), TEXT("component-key-1"));
+	PublishedSource.ComponentSetId = TEXT("56:78");
+	TestTrue(TEXT("Published set identity resolves"), TryResolveFigmaComponentIdentity(PublishedSource, Scope, Identity));
+	TestEqual(TEXT("Published set key is distinct from locator"), Identity.ComponentSetKey, FString(TEXT("published-set-key")));
+	PublishedSource.ComponentSetKey.Reset();
+	TestTrue(TEXT("Component still resolves without published set"), TryResolveFigmaComponentIdentity(PublishedSource, Scope, Identity));
+	TestTrue(TEXT("Set locator is not substituted for missing published key"), Identity.ComponentSetKey.IsEmpty());
 	TestTrue(TEXT("instance with mainComponentKey resolves"),
 		TryResolveFigmaComponentIdentity(
 			MakeInstanceSource(TEXT("12:34"), TEXT("56:78"), TEXT("component-key-1")),

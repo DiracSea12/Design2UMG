@@ -5,6 +5,7 @@
 
 #include "Factories/MaterialFactoryNew.h"
 #include "HAL/FileManager.h"
+#include "HAL/CriticalSection.h"
 #include "MaterialDomain.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceConstant.h"
@@ -21,9 +22,31 @@
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
 #include "UObject/StrongObjectPtr.h"
+#include "UMGSchema.h"
+#include "UMGPropertyKeys.h"
+#include "Misc/SecureHash.h"
+#include "MaterialShared.h"
 
 namespace
 {
+	bool ValidateCompiledSubtreeMaterial(UMaterial* Material, const FString& NodeName, FString& OutError)
+	{
+		const FMaterialResource* Resource = Material->GetMaterialResource(GMaxRHIShaderPlatform);
+		if (Resource && !Resource->GetCompileErrors().IsEmpty())
+		{
+			OutError = FString::Printf(TEXT("Subtree shadow '%s' material '%s' shader compilation failed: %s"),
+				*NodeName, *Material->GetPathName(), *FString::Join(Resource->GetCompileErrors(), TEXT("; ")));
+			return false;
+		}
+		if (!Resource || !Resource->GetGameThreadShaderMap() || !Resource->GetGameThreadShaderMap()->IsValidForRendering())
+		{
+			OutError = FString::Printf(TEXT("Subtree shadow '%s' material '%s' has no renderable shader map after compilation"),
+				*NodeName, *Material->GetPathName());
+			return false;
+		}
+		return true;
+	}
+
 	TStrongObjectPtr<UMaterial> GForegroundBlurRetainerMaterial;
 	TStrongObjectPtr<UMaterial> GGeometryMaskRetainerMaterial;
 	TStrongObjectPtr<UMaterial> GInnerShadowRetainerMaterial;
@@ -112,6 +135,165 @@ namespace
 		Material->GetExpressionCollection().AddExpression(Mask);
 		return Mask;
 	}
+}
+
+Design2UMGEffectMaterialBuilder::FSubtreeShadowKernel Design2UMGEffectMaterialBuilder::MakeSubtreeShadowKernel(float Sigma)
+{
+	// Keep the full three-sigma extent instead of truncating wide shadows. A
+	// wider kernel changes sample spacing, never the output radius or opacity.
+	constexpr int32 MaxRadius = 32;
+	const float Extent = FMath::CeilToFloat(Sigma * 3.0f);
+	const int32 Radius = static_cast<int32>(FMath::Min(Extent, static_cast<float>(MaxRadius)));
+	const int32 SamplesPerAxis = 2 * Radius + 1; // Worst-case unaligned grid cannot pack adjacent taps.
+	return {Radius, Radius > 0 ? Extent / Radius : 1.0f, FMath::Square(SamplesPerAxis)};
+}
+
+bool Design2UMGEffectMaterialBuilder::PrepareSubtreeShadowMaterials(FUMGWidgetNode& Root, FString& OutError)
+{
+	for (FUMGWidgetNode& Child : Root.Children)
+	{
+		if (!PrepareSubtreeShadowMaterials(Child, OutError)) return false;
+	}
+	if (Root.Effect.EffectMaterial.Get(FString()) != UMGPropertyKeys::RetainerSubtreeShadowEffectRef) return true;
+	if (Root.Bounds.W <= 0.0f || Root.Bounds.H <= 0.0f)
+	{
+		OutError = FString::Printf(TEXT("Subtree shadow '%s' has no valid capture size"), *Root.Name);
+		return false;
+	}
+	FString Code = TEXT("// Subtree shadow v1: all layers sample the original composed alpha.\nfloat4 Base = Texture.SampleLevel(TextureSampler, UV, 0);\nfloat4 Shadow = float4(0,0,0,0);\n");
+	for (int32 Index = Root.Shadow.BoxShadows.Num() - 1; Index >= 0; --Index)
+	{
+		const FUMGBoxShadowLayerData& Layer = Root.Shadow.BoxShadows[Index];
+		if (!FMath::IsNearlyZero(Layer.Spread))
+		{
+			OutError = FString::Printf(TEXT("Subtree shadow '%s' layer %d uses spread, which is not yet represented"), *Root.Name, Index);
+			return false;
+		}
+		Code += FString::Printf(TEXT("{ float2 Shifted = UV - float2(%.9f,%.9f); float Alpha = 0;\n"),
+			Layer.Offset.X / Root.Bounds.W, Layer.Offset.Y / Root.Bounds.H);
+		const float Sigma = Layer.Blur * 0.5f;
+		if (!FMath::IsFinite(Sigma) || Sigma < 0.0f || Sigma > MAX_flt / 3.0f)
+		{
+			OutError = FString::Printf(TEXT("Subtree shadow '%s' layer %d has invalid blur"), *Root.Name, Index);
+			return false;
+		}
+		if (Sigma < 0.5f)
+		{
+			Code += TEXT("if (all(Shifted >= 0) && all(Shifted <= 1)) Alpha = Texture.SampleLevel(TextureSampler, Shifted, 0).a;\n");
+		}
+		else
+		{
+			const FSubtreeShadowKernel Kernel = MakeSubtreeShadowKernel(Sigma);
+			const int32 Radius = Kernel.Radius;
+			const float GaussianDenominator = 2.0f * FMath::Square(Sigma / Kernel.Step);
+			double AxisWeightSum = 0.0;
+			for (int32 Tap = -Radius; Tap <= Radius; ++Tap)
+			{
+				AxisWeightSum += FMath::Exp(-static_cast<double>(Tap * Tap) / GaussianDenominator);
+			}
+			const double TotalWeight = AxisWeightSum * AxisWeightSum;
+			// Bilinear packing requires adjacent texel centers, not merely adjacent
+			// integration indices. Preserve the discrete integral for other grids.
+			Code += FString::Printf(TEXT(
+				"uint Tw,Th; Texture.GetDimensions(Tw,Th); float2 TexelSize=float2(Tw,Th); "
+				"float2 Origin=Shifted*TexelSize-0.5; float2 StepInTexels=float2(%.9f,%.9f)*TexelSize; "
+				"if(all(Origin==round(Origin)) && all(StepInTexels==float2(1,1))) {\n"),
+				Kernel.Step / Root.Bounds.W, Kernel.Step / Root.Bounds.H);
+			Code += FString::Printf(TEXT(
+				"float TotalWeight=%.17g; [loop] for(int y=-%d;y<=%d;y+=2) { int y1=min(y+1,%d); "
+				"float wy0=exp(-float(y*y)/%.9f); float wy1=(y1==y)?0:exp(-float(y1*y1)/%.9f); "
+				"float py0=Shifted.y+y*%.9f; float py1=Shifted.y+y1*%.9f; "
+				"wy0=(py0>=0&&py0<=1)?wy0:0; wy1=(py1>=0&&py1<=1)?wy1:0; float wy=wy0+wy1; if(wy<=0) continue; float py=(py0*wy0+py1*wy1)/wy; "
+				"[loop] for(int x=-%d;x<=%d;x+=2) { int x1=min(x+1,%d); "
+				"float wx0=exp(-float(x*x)/%.9f); float wx1=(x1==x)?0:exp(-float(x1*x1)/%.9f); "
+				"float px0=Shifted.x+x*%.9f; float px1=Shifted.x+x1*%.9f; "
+				"wx0=(px0>=0&&px0<=1)?wx0:0; wx1=(px1>=0&&px1<=1)?wx1:0; float wx=wx0+wx1; if(wx<=0) continue; float px=(px0*wx0+px1*wx1)/wx; "
+				"Alpha+=Texture.SampleLevel(TextureSampler,float2(px,py),0).a*wx*wy; }} Alpha/=TotalWeight;\n"),
+				TotalWeight, Radius, Radius, Radius,
+				GaussianDenominator, GaussianDenominator,
+				Kernel.Step / Root.Bounds.H, Kernel.Step / Root.Bounds.H,
+				Radius, Radius, Radius,
+				GaussianDenominator, GaussianDenominator,
+				Kernel.Step / Root.Bounds.W, Kernel.Step / Root.Bounds.W);
+			Code += FString::Printf(TEXT(
+				"} else { float WeightSum=0; [loop] for(int y=-%d;y<=%d;++y) { [loop] for(int x=-%d;x<=%d;++x) { float Weight=exp(-float(x*x+y*y)/%.9f); float2 P=Shifted+float2(x*%.9f,y*%.9f); if(all(P>=0)&&all(P<=1)) Alpha+=Texture.SampleLevel(TextureSampler,P,0).a*Weight; WeightSum+=Weight; }} Alpha/=WeightSum; }\n"),
+				Radius, Radius, Radius, Radius, GaussianDenominator,
+				Kernel.Step / Root.Bounds.W, Kernel.Step / Root.Bounds.H);
+		}
+		Code += FString::Printf(TEXT("float A=saturate(Alpha*%.9f); Shadow=float4(float3(%.9f,%.9f,%.9f)*A+Shadow.rgb*(1-A),A+Shadow.a*(1-A)); }\n"),
+			Layer.Color.A, Layer.Color.R, Layer.Color.G, Layer.Color.B);
+	}
+	Code += TEXT("return float4(Base.rgb+Shadow.rgb*(1-Base.a),Base.a+Shadow.a*(1-Base.a));");
+	const FString Name = TEXT("D2U_SubtreeShadow_") + FMD5::HashAnsiString(*Code);
+	const FString PackageName = TEXT("/Game/Design2UMG/GeneratedMaterials/") + Name;
+	const FString ObjectPath = PackageName + TEXT(".") + Name;
+	const FString Filename = FPackageName::LongPackageNameToFilename(PackageName, FPackageName::GetAssetPackageExtension());
+	// Independent editor processes share this content-addressed asset. Hold the
+	// lock across the first load and save so a waiting process loads the winner.
+	const FString LockName = TEXT("Design2UMG_Shadow_") + FMD5::HashAnsiString(*FPaths::ConvertRelativePathToFull(Filename));
+	FSystemWideCriticalSection AssetLock(LockName, FTimespan::FromMinutes(2));
+	if (!AssetLock.IsValid())
+	{
+		OutError = TEXT("Timed out acquiring shared subtree shadow material: ") + ObjectPath;
+		return false;
+	}
+	UMaterial* Material = LoadObject<UMaterial>(nullptr, *ObjectPath);
+	if (Material)
+	{
+		const FMaterialResource* Resource = Material->GetMaterialResource(GMaxRHIShaderPlatform);
+		if (!Resource || !Resource->GetGameThreadShaderMap() || !Resource->GetGameThreadShaderMap()->IsValidForRendering())
+		{
+			Material->CacheShaders(EMaterialShaderPrecompileMode::Synchronous);
+		}
+		Material->EnsureIsComplete();
+		if (!ValidateCompiledSubtreeMaterial(Material, Root.Name, OutError)) return false;
+	}
+	if (!Material)
+	{
+		UPackage* Package = CreatePackage(*PackageName);
+		Material = Cast<UMaterial>(GetMutableDefault<UMaterialFactoryNew>()->FactoryCreateNew(
+			UMaterial::StaticClass(), Package, FName(*Name), RF_Public | RF_Standalone, nullptr, GWarn));
+		if (!Material)
+		{
+			OutError = TEXT("Failed to create subtree shadow material: ") + ObjectPath;
+			return false;
+		}
+		Material->MaterialDomain = EMaterialDomain::MD_UI;
+		Material->BlendMode = EBlendMode::BLEND_AlphaComposite;
+		Material->SetShadingModel(EMaterialShadingModel::MSM_Unlit);
+		UMaterialExpressionCustom* Shader = NewObject<UMaterialExpressionCustom>(Material);
+		Shader->OutputType = ECustomMaterialOutputType::CMOT_Float4;
+		Shader->Code = Code;
+		Material->GetExpressionCollection().AddExpression(Shader);
+		AddCustomInput<UMaterialExpressionTextureObjectParameter>(Material, Shader, TEXT("Texture"));
+		AddCustomInput<UMaterialExpressionTextureCoordinate>(Material, Shader, TEXT("UV"));
+		Material->GetEditorOnlyData()->EmissiveColor.Expression = AddComponentMask(Material, Shader, true, true, true, false);
+		Material->GetEditorOnlyData()->Opacity.Expression = AddComponentMask(Material, Shader, false, false, false, true);
+		Material->PreEditChange(nullptr);
+		Material->PostEditChange();
+		Material->CacheShaders(EMaterialShaderPrecompileMode::Synchronous);
+		Material->EnsureIsComplete();
+		if (!ValidateCompiledSubtreeMaterial(Material, Root.Name, OutError))
+		{
+			Material->ClearFlags(RF_Public | RF_Standalone);
+			Material->MarkAsGarbage();
+			return false;
+		}
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(Filename), true);
+		FSavePackageArgs Args;
+		Args.TopLevelFlags = RF_Public | RF_Standalone;
+		Args.SaveFlags = SAVE_NoError;
+		if (!UPackage::SavePackage(Package, Material, *Filename, Args))
+		{
+			OutError = TEXT("Failed to persist subtree shadow material: ") + Filename;
+			Material->ClearFlags(RF_Public | RF_Standalone);
+			Material->MarkAsGarbage();
+			return false;
+		}
+	}
+	Root.Effect.EffectMaterial = ObjectPath;
+	Root.Shadow.BoxShadows.Reset();
+	return true;
 }
 
 UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateForegroundBlurRetainerMaterial()

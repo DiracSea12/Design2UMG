@@ -408,6 +408,10 @@ namespace
 	{
 		AppendVerboseFloat(Dump, UMGPropertyKeys::OutlineThickness, Brush.OutlineThickness.GetValue());
 	}
+	if (Brush.Margin.IsSet())
+	{
+		AppendVerboseProperty(Dump, UMGPropertyKeys::BrushMargin, Design2UMGWidgetNodeAccess::SerializeWidgetMargin(Brush.Margin.GetValue(), 9));
+	}
 	if (Brush.Gradient.HasAny())
 	{
 		AppendVerboseProperty(Dump, UMGPropertyKeys::MaterialRef, Design2UMGWidgetNodeAccess::GetGradientMaterialRef(Brush.Gradient));

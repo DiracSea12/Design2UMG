@@ -69,6 +69,7 @@ struct FUMGSourceNodeData
 	UPROPERTY() FString SourceNodeType;
 	UPROPERTY() FString ComponentId;
 	UPROPERTY() FString ComponentSetId;
+	UPROPERTY() FString ComponentSetKey;
 	UPROPERTY() FString MainComponentKey;
 	UPROPERTY() FString ComponentPropertiesJson;
 	UPROPERTY() FString VariantPropertiesJson;
@@ -109,6 +110,9 @@ struct FUMGSourceDocumentData
 
 	UPROPERTY() FString ComponentsJson;
 	UPROPERTY() FString ComponentSetsJson;
+	UPROPERTY() FString ComponentDependenciesJson;
+	UPROPERTY() TMap<FString, FString> ResolvedComponentImageUrls;
+	UPROPERTY() FString SourceFilePath;
 
 	/** Document-level design source identity: "figma" | "pencil" (canonical values in DesignComponentMapping::Provider*). Written by the Converter in StampDocumentComponentIdentity. */
 	UPROPERTY() FString Provider;

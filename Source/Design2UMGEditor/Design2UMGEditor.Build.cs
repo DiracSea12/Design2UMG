@@ -7,6 +7,7 @@ public class Design2UMGEditor : ModuleRules
 	public Design2UMGEditor(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+		AddEngineThirdPartyPrivateStaticDependencies(Target, "FreeType2");
 
 		// Public dependencies are limited to types exposed by Public/*.h:
 		// module entrypoint, preview contracts, UUserWidget surfaces, and

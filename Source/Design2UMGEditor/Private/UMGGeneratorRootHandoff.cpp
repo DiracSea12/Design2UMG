@@ -5,6 +5,7 @@
 #include "Design2UMGComponentMappingGeneration.h"
 #include "Design2UMGLog.h"
 #include "PreBuildResourceNormalizer.h"
+#include "Design2UMGEffectMaterialBuilder.h"
 #include "UMGWidgetUtils.h"
 #include "Blueprint/WidgetTree.h"
 #include "WidgetBlueprint.h"
@@ -18,10 +19,14 @@ namespace UMGGeneratorRootHandoff
 	{
 		FPreparedRoot Prepared;
 		Prepared.Root = WidgetData.RootWidget;
+		if (!Design2UMGEffectMaterialBuilder::PrepareSubtreeShadowMaterials(Prepared.Root, Prepared.ErrorMessage))
+		{
+			return Prepared;
+		}
 
 		const int32 RootWidth = FMath::CeilToInt(Prepared.Root.Bounds.W);
 		const int32 RootHeight = FMath::CeilToInt(Prepared.Root.Bounds.H);
-		const bool bHasValidRootSize = RootWidth >= 2 && RootHeight >= 2;
+		const bool bHasValidRootSize = RootWidth > 0 && RootHeight > 0;
 		if (!bHasValidRootSize)
 		{
 			UE_LOG(LogDesign2UMG, Error,

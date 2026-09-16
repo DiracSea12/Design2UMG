@@ -14,6 +14,7 @@ struct FDesignComponentInstanceData
 	UPROPERTY() bool bInInstanceSubtree = false;
 	UPROPERTY() FString ComponentId;
 	UPROPERTY() FString ComponentSetId;
+	UPROPERTY() FString ComponentSetKey;
 	UPROPERTY() FString MainComponentKey;
 	UPROPERTY() FString ComponentPropertiesJson;
 	UPROPERTY() FString VariantPropertiesJson;
@@ -145,6 +146,9 @@ struct FDesignSourceDocumentData
 	UPROPERTY() FString SourceFilePath;
 	UPROPERTY() FString ComponentsJson;
 	UPROPERTY() FString ComponentSetsJson;
+	/** Full reusable definitions, resolved instance identities and source errors; not layout children. */
+	UPROPERTY() FString ComponentDependenciesJson;
+	UPROPERTY() TMap<FString, FString> ResolvedComponentImageUrls;
 	UPROPERTY() FString PrototypeStartNodeId;
 	UPROPERTY() FString PrototypeDeviceJson;
 	UPROPERTY() TArray<FDesignFlowStartingPoint> FlowStartingPoints;

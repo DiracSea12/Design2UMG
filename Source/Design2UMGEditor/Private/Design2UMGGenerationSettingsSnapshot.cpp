@@ -9,6 +9,7 @@ FDesign2UMGGenerationSettingsSnapshot FDesign2UMGGenerationSettingsSnapshot::Fro
 {
 	FDesign2UMGGenerationSettingsSnapshot Snapshot;
 	Snapshot.ClassOverrides = Settings.ClassOverrides;
+	Snapshot.ComponentConversionSettings = FDesign2UMGConversionSettings::FromSettings(&Settings);
 	// Read the project-level Component Mapping ini once per import request when building the snapshot; it flows into the generation chain with the snapshot.
 	Snapshot.ComponentMapping = Design2UMGComponentMappingConfig::Load();
 	return Snapshot;

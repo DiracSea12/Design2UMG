@@ -39,6 +39,7 @@ struct FImportAnalysisInput
 struct FImportAnalysisResult
 {
 	FUMGWidgetData Data;
+	FString ErrorMessage;
 	FString ImageReport;
 	TOptional<FDesign2UMGImportSettingsSnapshot> SettingsSnapshot;
 };

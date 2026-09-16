@@ -10,6 +10,8 @@
 #include "DesignImportPipeline.h"
 #include "DesignImportUtils.h"
 #include "FigmaParser.h"
+#include "FigmaComponentDependencies.h"
+#include "DesignJsonUtils.h"
 #include "DesignReferenceExpansion.h"
 #include "UMGPropertyKeys.h"
 #include "UMGValueParsing.h"
@@ -489,17 +491,42 @@ namespace Design2UMGLocalFigmaImport
 			return false;
 		}
 
+		TSharedPtr<FJsonObject> Root;
+		if (DesignJsonUtils::TryParseObject(JsonStr, Root)
+			&& Root->HasField(TEXT("document"))
+			&& !Root->HasField(TEXT("design2umgComponentDependencies")))
+		{
+			// Standard REST files need the same dependency inventory as remote imports.
+			// Never replace an exporter's existing bundle (including an invalid one).
+			const FString FileKey = DesignJsonUtils::GetString(Root, TEXT("fileKey"));
+			const FString Scope = FileKey.IsEmpty() ? FPaths::ConvertRelativePathToFull(JsonFilePath) : FileKey;
+			FString Prepared;
+			if (!FigmaComponentDependencies::PrepareRestFile(JsonStr, Scope, Prepared, OutError)) return false;
+			JsonStr = MoveTemp(Prepared);
+		}
 		if (!FFigmaParser::ParseDocument(JsonStr, ParsedDocument))
 		{
 			OutError = FString::Printf(TEXT("Failed to parse Figma JSON: %s"), *JsonFilePath);
 			return false;
 		}
+		ResolveDocumentImages(ParsedDocument, JsonFilePath);
+		if (!FilterDocumentToTargetNode(ParsedDocument, TargetNodeId, OutDocument, OutError))
+		{
+			return false;
+		}
+
+		NormalizeSingleRootDocumentToOrigin(OutDocument);
+		return true;
+	}
+
+	void ResolveDocumentImages(FDesignDocument& ParsedDocument, const FString& JsonFilePath)
+	{
 		const FString ResolvedSourceFilePath = FPaths::ConvertRelativePathToFull(JsonFilePath);
 		ParsedDocument.MutableSourceDocument().SourceFilePath = ResolvedSourceFilePath;
 		ParsedDocument.Metadata.Add(TEXT("design.sourceFilePath"), ResolvedSourceFilePath);
 		ParsedDocument.Metadata.Add(TEXT("source.filePath"), ResolvedSourceFilePath);
 
-		const FString ImagesDir = FPaths::GetPath(JsonFilePath) / TEXT("images");
+		const FString ImagesDir = FPaths::GetPath(ResolvedSourceFilePath) / TEXT("images");
 		const FString SourceDocumentIdentity = DesignImageBakeUtils::BuildSourceDocumentIdentity(JsonFilePath);
 		TMap<FString, FString> ImageRefToLocalPath;
 		const int32 VecCount = InjectVectorImageFills(ParsedDocument.Children, ImagesDir, ImageRefToLocalPath);
@@ -529,13 +556,6 @@ namespace Design2UMGLocalFigmaImport
 			ImageRefToLocalPath.Num(), VecCount, ImageRefToLocalPath.Num() - VecCount, BlendDerivedCount, LayerBlurDerivedCount);
 
 		FFigmaParser::ApplyImageUrls(ParsedDocument, ImageRefToLocalPath);
-		if (!FilterDocumentToTargetNode(ParsedDocument, TargetNodeId, OutDocument, OutError))
-		{
-			return false;
-		}
-
-		NormalizeSingleRootDocumentToOrigin(OutDocument);
-		return true;
 	}
 
 	bool BuildLocalFigmaWidgetData(
@@ -555,7 +575,13 @@ namespace Design2UMGLocalFigmaImport
 		const FDesign2UMGImportSettingsSnapshot SettingsSnapshot =
 			FDesign2UMGImportSettingsSnapshot::FromSettings(UDesign2UMGSettings::Get());
 		AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
-		OutData = DesignImportPipeline::AnalyzeImport(ParsedDoc, AnalysisInput).Data;
+		const FImportAnalysisResult Analysis = DesignImportPipeline::AnalyzeImport(ParsedDoc, AnalysisInput);
+		if (!Analysis.ErrorMessage.IsEmpty())
+		{
+			OutError = Analysis.ErrorMessage;
+			return false;
+		}
+		OutData = Analysis.Data;
 
 		if (OutData.RootWidget.Children.Num() == 0)
 		{

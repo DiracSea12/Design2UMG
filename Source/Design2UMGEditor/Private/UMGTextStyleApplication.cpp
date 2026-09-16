@@ -12,6 +12,7 @@
 #include "Brushes/SlateColorBrush.h"
 #include "Components/EditableTextBox.h"
 #include "Components/RichTextBlock.h"
+#include "Components/TextBlock.h"
 #include "Components/TextWidgetTypes.h"
 #include "Dom/JsonObject.h"
 #include "Engine/DataTable.h"
@@ -133,12 +134,10 @@ namespace UMGTextStyleApplication
 
 		if (Node.TextStyle.LetterSpacing.IsSet())
 		{
-			const float DesignFontSize = Node.TextStyle.SourceFontSize;
-			if (FontInfo.Size > 0 || DesignFontSize > 0.0f)
+			if (FontInfo.Size > 0)
 			{
 				FontInfo.LetterSpacing = TextStyleUtils::ConvertLetterSpacingPxToTracking(
 					Node.TextStyle.LetterSpacing.GetValue(),
-					DesignFontSize,
 					FontInfo.Size);
 			}
 			bFontChanged = true;
@@ -217,6 +216,12 @@ namespace UMGTextStyleApplication
 		}
 
 		FTextBlockStyle DefaultStyle = ResolveRichTextBaseStyle(RichTextBlock);
+		// Unlike UTextBlock, a fresh URichTextBlock has no font. Use the same
+		// native starting font before applying the resolved source font and style.
+		if (!DefaultStyle.Font.HasValidFont())
+		{
+			DefaultStyle.Font = GetDefault<UTextBlock>()->GetFont();
+		}
 		if (Node.Text.Color.IsSet())
 		{
 			DefaultStyle.ColorAndOpacity = FSlateColor(NormalizeTypedTextColor(Node.Text.Color.GetValue()));
@@ -266,9 +271,9 @@ namespace UMGTextStyleApplication
 		{
 			return;
 		}
-
-		StyleSet->EmptyTable();
+		// A new table has no row schema; initialize it before EmptyTable uses that schema.
 		StyleSet->RowStruct = FRichTextStyleRow::StaticStruct();
+		StyleSet->EmptyTable();
 
 		const FTextBlockStyle BaseStyle = ResolveRichTextBaseStyle(RichTextBlock);
 		for (const auto& Pair : RootObject->Values)
@@ -311,15 +316,12 @@ namespace UMGTextStyleApplication
 					bFontChanged = true;
 				}
 			}
-			double DesignFontSize = 0.0;
 			if (RowObject->TryGetNumberField(UMGPropertyKeys::LetterSpacing, NumberValue))
 			{
-				RowObject->TryGetNumberField(UMGPropertyKeys::DesignFontSize, DesignFontSize);
-				if (FontInfo.Size > 0 || DesignFontSize > 0.0)
+				if (FontInfo.Size > 0)
 				{
 					FontInfo.LetterSpacing = TextStyleUtils::ConvertLetterSpacingPxToTracking(
 						static_cast<float>(NumberValue),
-						static_cast<float>(DesignFontSize),
 						FontInfo.Size);
 				}
 				bFontChanged = true;

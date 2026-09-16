@@ -13,6 +13,9 @@
 #include "Components/Image.h"
 #include "Components/Widget.h"
 #include "Components/TextBlock.h"
+#include "Components/RetainerBox.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/Material.h"
 #include "Editor.h"
 #include "Engine/Font.h"
 #include "Engine/FontFace.h"
@@ -438,6 +441,29 @@ bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8
 	Widget->AddToRoot();
 
 	TSharedRef<SWidget> SlateWidget = Widget->TakeWidget();
+	// Retainer dynamic materials exist only after the Slate tree is built.
+	// Offscreen rendering must finish their shaders and refresh the parent
+	// uniforms before drawing; a valid shader map alone does not prepare them.
+	TSet<UMaterial*> PreparedRetainerMaterials;
+	if (Widget->WidgetTree)
+	{
+		Widget->WidgetTree->ForEachWidgetAndDescendants([&PreparedRetainerMaterials](UWidget* Child)
+		{
+			if (URetainerBox* Retainer = Cast<URetainerBox>(Child))
+			{
+				if (UMaterialInstanceDynamic* Effect = Retainer->GetEffectMaterial())
+				{
+					UMaterial* Material = Effect->GetMaterial();
+					if (!PreparedRetainerMaterials.Contains(Material))
+					{
+						Material->EnsureIsComplete();
+						Material->RecacheUniformExpressions(true);
+						PreparedRetainerMaterials.Add(Material);
+					}
+				}
+			}
+		});
+	}
 	const FVector2D DesignSize = GetBlueprintDesignSize(WidgetBP);
 	const FIntPoint LayoutPixelSize = ResolveDesignLayoutPixelSize(DesignSize);
 	const bool bHasValidDesignSize = DesignSize.X > 1.0f && DesignSize.Y > 1.0f && IsValidRenderSize(LayoutPixelSize);

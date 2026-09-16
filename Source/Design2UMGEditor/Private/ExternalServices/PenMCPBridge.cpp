@@ -240,7 +240,9 @@ bool FPenMCPBridge::ConvertFromMCP(
 	FImportAnalysisInput AnalysisInput;
 	AnalysisInput.bResolveImages = false;
 	AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
-	OutData = DesignImportPipeline::AnalyzeImport(Document, AnalysisInput).Data;
+	const FImportAnalysisResult Analysis = DesignImportPipeline::AnalyzeImport(Document, AnalysisInput);
+	if (!Analysis.ErrorMessage.IsEmpty()) return false;
+	OutData = Analysis.Data;
 	return true;
 }
 

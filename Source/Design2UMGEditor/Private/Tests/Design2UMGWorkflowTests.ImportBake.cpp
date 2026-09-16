@@ -126,7 +126,7 @@ bool FFigmaTargetNodeAndImageMappingWorkflowTest::RunTest(const FString& Paramet
 	FFigmaParser::CollectImageRefs(Document, ImageRefs);
 	TestEqual(TEXT("Filtered node keeps one mapped image ref"), ImageRefs.Num(), 1);
 	TestTrue(TEXT("Mapped image ref should become local png path"),
-		ImageRefs.Contains(FPaths::Combine(TempImagesDir, TEXT("img_card_bg_002.png"))));
+		ImageRefs.Contains(FPaths::ConvertRelativePathToFull(FPaths::Combine(TempImagesDir, TEXT("img_card_bg_002.png")))));
 
 	FUMGWidgetData Data = DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{false}).Data;
 	TestFalse(TEXT("Filtered figma target yields widget name"), Data.WidgetName.IsEmpty());

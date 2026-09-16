@@ -164,6 +164,12 @@ public:
 
 	/** All widget names created by this generation run (including nested leaves; data source of manifest.d2uOwned for reimport). */
 	const TSet<FString>& GetCreatedWidgetNames() const { return CreatedWidgetNames; }
+	/** Collect ownership of instance-slot widgets built in a separate mapping scope. */
+	void IncludeOwnedWidgets(const FDesign2UMGComponentMappingBuildState& Other)
+	{
+		CreatedWidgetNames.Append(Other.GetCreatedWidgetNames());
+	}
+
 
 	const TArray<FDesign2UMGMappedInstanceRecord>& GetMappedInstances() const { return MappedInstances; }
 	const TArray<FDesign2UMGGeneratedInstanceRecord>& GetTopLevelGenerated() const { return TopLevelGenerated; }

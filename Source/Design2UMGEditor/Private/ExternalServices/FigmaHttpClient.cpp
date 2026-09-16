@@ -35,6 +35,11 @@ void FFigmaHttpClient::GetFileImages(const FString& FileKey, FOnComplete OnCompl
 	SendGet(FString::Printf(TEXT("%s/v1/files/%s/images"), *FigmaApiBase, *FileKey), MoveTemp(OnComplete));
 }
 
+void FFigmaHttpClient::GetComponent(const FString& ComponentKey, FOnComplete OnComplete)
+{
+	SendGet(FString::Printf(TEXT("%s/v1/components/%s"), *FigmaApiBase, *FGenericPlatformHttp::UrlEncode(ComponentKey)), MoveTemp(OnComplete));
+}
+
 void FFigmaHttpClient::ExportImages(const FString& FileKey, const TArray<FString>& NodeIds, FOnComplete OnComplete)
 {
 	// Figma node ids can contain characters that are not URL-safe (e.g. ':');

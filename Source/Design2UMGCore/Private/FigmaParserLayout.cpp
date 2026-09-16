@@ -3,7 +3,6 @@
 #include "FigmaParserLayout.h"
 
 #include "DesignJsonUtils.h"
-#include "DesignSchemaSourceExtensions.h"
 #include "FigmaParserLayoutBounds.h"
 #include "FigmaParserMetadata.h"
 #include "ParserSharedSemantics.h"
@@ -194,76 +193,15 @@ namespace
 		}
 	}
 
-	bool IsStretchAutoLayoutChild(const FDesignNode& ParentNode, const TSharedPtr<FDesignNode>& Child)
-	{
-		if (!Child.IsValid() || Child->LayoutData.bAbsoluteLayoutPositioning)
-		{
-			return false;
-		}
-
-		if (Child->LayoutData.SelfAlignment.Get(EDesignAxisAlignment::Start) == EDesignAxisAlignment::Fill)
-		{
-			return true;
-		}
-
-		if (ParentNode.LayoutData.Layout == EDesignLayout::Vertical)
-		{
-			return Child->Transform.Width.IsFill();
-		}
-
-		if (ParentNode.LayoutData.Layout == EDesignLayout::Horizontal)
-		{
-			return Child->Transform.Height.IsFill();
-		}
-
-		return false;
-	}
-
-	bool ShouldTopLevelFigmaInstancePaddingWrapAtRuntime(const FDesignNode& Node)
-	{
-		bool bHasStretchAutoChild = false;
-		bool bHasNonStretchAutoChild = false;
-		for (const TSharedPtr<FDesignNode>& Child : Node.Children)
-		{
-			if (!Child.IsValid() || Child->LayoutData.bAbsoluteLayoutPositioning)
-			{
-				continue;
-			}
-
-			if (IsStretchAutoLayoutChild(Node, Child))
-			{
-				bHasStretchAutoChild = true;
-			}
-			else
-			{
-				bHasNonStretchAutoChild = true;
-			}
-
-			if (bHasStretchAutoChild && bHasNonStretchAutoChild)
-			{
-				return true;
-			}
-		}
-
-		return false;
-	}
-
-	bool ShouldFigmaAutoLayoutPaddingWrapAtRuntime(const FDesignNode& Node, const bool bHasInstanceAncestor)
+	bool ShouldFigmaAutoLayoutPaddingWrapAtRuntime(const FDesignNode& Node)
 	{
 		if (Node.LayoutData.Layout != EDesignLayout::Horizontal && Node.LayoutData.Layout != EDesignLayout::Vertical)
 		{
 			return false;
 		}
 
-		if (bHasInstanceAncestor)
-		{
-			return false;
-		}
-
-		if (Node.Source().ComponentInstance.bIsInstance)
-		{
-			return ShouldTopLevelFigmaInstancePaddingWrapAtRuntime(Node);
-		}
+		// Native horizontal/vertical boxes have no container padding property.
+		// Auto-layout children need a real padding surface, including instance trees.
 
 		for (const TSharedPtr<FDesignNode>& Child : Node.Children)
 		{
@@ -464,11 +402,11 @@ void ParsePosition(
 	}
 }
 
-void FinalizeNodePaddingRuntimeWrap(FDesignNode& Node, bool bInsideInstanceSubtree)
+void FinalizeNodePaddingRuntimeWrap(FDesignNode& Node)
 {
 	if (Node.LayoutData.Layout == EDesignLayout::Horizontal || Node.LayoutData.Layout == EDesignLayout::Vertical)
 	{
-		Node.LayoutData.PaddingRequiresRuntimeWrap = ShouldFigmaAutoLayoutPaddingWrapAtRuntime(Node, bInsideInstanceSubtree);
+		Node.LayoutData.PaddingRequiresRuntimeWrap = ShouldFigmaAutoLayoutPaddingWrapAtRuntime(Node);
 	}
 	else if (Node.LayoutData.Layout == EDesignLayout::Wrap || Node.LayoutData.Layout == EDesignLayout::Grid)
 	{

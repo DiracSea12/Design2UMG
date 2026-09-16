@@ -23,6 +23,11 @@ namespace
 		{
 			TextBlock->SetShadowOffset(Shadow.ShadowOffset.GetValue());
 		}
+		else if (!Shadow.ShadowColorAndOpacity.IsSet() && TextBlock->GetShadowColorAndOpacity().A == 0.0f)
+		{
+			// Slate counts even a transparent shadow offset in desired size.
+			TextBlock->SetShadowOffset(FVector2D::ZeroVector);
+		}
 		if (Shadow.ShadowColorAndOpacity.IsSet())
 		{
 			TextBlock->SetShadowColorAndOpacity(Shadow.ShadowColorAndOpacity.GetValue());

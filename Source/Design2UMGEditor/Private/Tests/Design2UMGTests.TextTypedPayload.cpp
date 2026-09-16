@@ -238,6 +238,26 @@ namespace
 }
 
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextBlockSourceShadowExtentTest,
+	"Design2UMG.PropertyApplier.TextBlockSourceShadowExtent",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FTextBlockSourceShadowExtentTest::RunTest(const FString&)
+{
+	UTextBlock* Widget = NewObject<UTextBlock>(GetTransientPackageAsObject());
+	FUMGWidgetNode Node;
+	Node.Type = TEXT("TextBlock");
+	Node.Text.Text = TEXT("Source label");
+	FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node);
+	TestEqual(TEXT("No source shadow contributes no invisible layout extent"), Widget->GetShadowOffset(), FVector2D::ZeroVector);
+	Node.Shadow.ShadowOffset = FVector2D(2.0f, 3.0f);
+	Node.Shadow.ShadowColorAndOpacity = FLinearColor(0.0f, 0.0f, 0.0f, 0.5f);
+	FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node);
+	TestEqual(TEXT("Authored shadow offset is preserved"), Widget->GetShadowOffset(), FVector2D(2.0f, 3.0f));
+	TestEqual(TEXT("Authored shadow opacity is preserved"), Widget->GetShadowColorAndOpacity().A, 0.5f);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextBlockUsesTypedTextPayloadParityTest,
 	"Design2UMG.PropertyApplier.TextBlockUsesTypedTextPayload",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -552,7 +572,7 @@ bool FRichTextBlockStyleRowsApplicationTest::RunTest(const FString& Parameters)
 	Node.Text.WrapTextAt = 180.0f;
 	Node.Text.LineHeightPercentage = 1.25f;
 	Node.Text.Color = FLinearColor(0.1f, 0.2f, 0.3f, 1.0f);
-	Node.Text.RichTextStyleRowsJson = TEXT("{\"d2u_run_0\":{\"Color\":\"#112233FF\"},\"d2u_run_1\":{\"FontSize\":22.5,\"DesignFontSize\":22.5,\"Color\":\"#224466FF\",\"Underline\":true,\"Href\":\"https://docs.example.com\"},\"d2u_run_2\":{\"FontSize\":0.375,\"DesignFontSize\":0.5}}");
+	Node.Text.RichTextStyleRowsJson = TEXT("{\"d2u_run_0\":{\"Color\":\"#112233FF\"},\"d2u_run_1\":{\"FontSize\":22.5,\"Color\":\"#224466FF\",\"Underline\":true,\"Href\":\"https://docs.example.com\"},\"d2u_run_2\":{\"FontSize\":0.375}}");
 	Node.TextStyle.FontSize = 18.0f;
 	Node.TextStyle.SourceFontSize = 18.0f;
 	Node.TextStyle.LetterSpacing = 1.5f;
@@ -963,7 +983,11 @@ bool FTextStyleLetterSpacingOptionalSemanticsTest::RunTest(const FString& Parame
 	if (ScaledNegativeWidget)
 	{
 		FUMGWidgetUtils::ApplyWidgetProperties(ScaledNegativeWidget, ScaledNegativeNode);
-		TestEqual(TEXT("Design font size owns scaled negative letter-spacing conversion"), ScaledNegativeWidget->GetFont().LetterSpacing, -62);
+		// SlateTextShaper applies tracking * FontInfo.Size / 1000 and truncates to pixels.
+		// The source's 20px declaration must not replace the applied 12pt size here.
+		TestEqual(TEXT("Applied point size owns scaled negative letter-spacing conversion"), ScaledNegativeWidget->GetFont().LetterSpacing, -105);
+		TestEqual(TEXT("Scaled tracking preserves the requested negative pixel gap"),
+			static_cast<int32>(ScaledNegativeWidget->GetFont().LetterSpacing * ScaledNegativeWidget->GetFont().Size / 1000.0f), -1);
 	}
 
 	URichTextBlock* RichTextWidget = NewTextFamilyWidget<URichTextBlock>(*this, TEXT("Rich text spacing widget created"));
@@ -971,7 +995,7 @@ bool FTextStyleLetterSpacingOptionalSemanticsTest::RunTest(const FString& Parame
 	{
 		UMGTextStyleApplication::ApplyRichTextStyleRows(
 			RichTextWidget,
-			TEXT("{\"row\":{\"FontSize\":12.0,\"DesignFontSize\":20.0,\"LetterSpacing\":-1.25}}"));
+			TEXT("{\"row\":{\"FontSize\":12.0,\"LetterSpacing\":-1.25}}"));
 		const UDataTable* StyleSet = RichTextWidget->GetTextStyleSet();
 		const FRichTextStyleRow* Row = StyleSet
 			? StyleSet->FindRow<FRichTextStyleRow>(TEXT("row"), TEXT("LetterSpacingConversion"))
@@ -979,7 +1003,9 @@ bool FTextStyleLetterSpacingOptionalSemanticsTest::RunTest(const FString& Parame
 		TestNotNull(TEXT("Rich text spacing row created"), Row);
 		if (Row)
 		{
-			TestEqual(TEXT("Rich text row uses shared pixel-spacing conversion"), Row->TextStyle.Font.LetterSpacing, -62);
+			TestEqual(TEXT("Rich text row uses shared applied-size conversion"), Row->TextStyle.Font.LetterSpacing, -105);
+			TestEqual(TEXT("Rich text tracking preserves the requested negative pixel gap"),
+				static_cast<int32>(Row->TextStyle.Font.LetterSpacing * Row->TextStyle.Font.Size / 1000.0f), -1);
 		}
 	}
 
@@ -1024,7 +1050,7 @@ bool FRichTextTypedJsonRoundTripTest::RunTest(const FString& Parameters)
 	SourceNode.Id = TEXT("typed_rich_text");
 	SourceNode.Name = TEXT("TypedRichText");
 	SourceNode.Text.Text = TEXT("<d2u_run_0>Hello </><d2u_run_1 href=\"https://docs.example.com\">Docs</>");
-	SourceNode.Text.RichTextStyleRowsJson = TEXT("{\"d2u_run_0\":{\"Color\":\"#112233FF\",\"DesignFontSize\":18.0,\"FontFamily\":\"/Game/Design2UMG/Fonts/Geist.Geist\",\"FontSize\":27.0,\"TypefaceFontName\":\"Regular\"},\"d2u_run_1\":{\"Color\":\"#224466FF\",\"DesignFontSize\":18.0,\"FontFamily\":\"/Game/Design2UMG/Fonts/Geist.Geist\",\"FontSize\":27.0,\"Href\":\"https://docs.example.com\",\"TypefaceFontName\":\"Bold\",\"Underline\":true}}");
+	SourceNode.Text.RichTextStyleRowsJson = TEXT("{\"d2u_run_0\":{\"Color\":\"#112233FF\",\"FontFamily\":\"/Game/Design2UMG/Fonts/Geist.Geist\",\"FontSize\":27.0,\"TypefaceFontName\":\"Regular\"},\"d2u_run_1\":{\"Color\":\"#224466FF\",\"FontFamily\":\"/Game/Design2UMG/Fonts/Geist.Geist\",\"FontSize\":27.0,\"Href\":\"https://docs.example.com\",\"TypefaceFontName\":\"Bold\",\"Underline\":true}}");
 	SourceNode.Text.FontFamily = TEXT("/Game/Design2UMG/Fonts/Geist.Geist");
 	SourceNode.Text.TypefaceFontName = TEXT("Regular");
 	SourceNode.Text.Justification = TEXT("Center");

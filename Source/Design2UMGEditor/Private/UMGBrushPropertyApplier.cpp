@@ -273,6 +273,11 @@ namespace UMGBrushPropertyApplier
 			Brush.OutlineSettings.Width = FMath::Max(0.0f, Node.Brush.OutlineThickness.GetValue());
 			bBrushChanged = true;
 		}
+		if (Node.Brush.Margin.IsSet())
+		{
+			Brush.Margin = Node.Brush.Margin.GetValue();
+			bBrushChanged = true;
+		}
 
 		if (Node.Brush.OutlineColor.IsSet())
 		{

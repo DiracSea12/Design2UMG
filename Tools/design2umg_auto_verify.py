@@ -27,7 +27,7 @@ from design2umg_verify_lib.editor_driver_writer import write_editor_driver_scrip
 from design2umg_verify_lib.json_io import load_json as helper_load_json
 from design2umg_verify_lib.json_io import write_json as helper_write_json
 from design2umg_verify_lib.run_history import write_historical_best_validation
-from PIL import Image, ImageChops, ImageFilter, ImageStat
+from PIL import Image, ImageChops, ImageStat
 
 
 STABLE_VISUAL_FILTER = "closing_max3_min3"
@@ -2520,20 +2520,31 @@ def load_rgba(path: Path) -> Image.Image:
 
 
 def apply_stable_visual_tolerance(image: Image.Image) -> Image.Image:
-    return image.filter(ImageFilter.MaxFilter(3)).filter(ImageFilter.MinFilter(3))
+    # A square max/min kernel is separable. Four one-dimensional passes give
+    # exactly the same channel extrema, without sorting nine values per pixel.
+    width, height = image.size
+    for maximum in (True, False):
+        combine = ImageChops.lighter if maximum else ImageChops.darker
+        neutral = (0, 0, 0, 0) if maximum else (255, 255, 255, 255)
+        for vertical in (False, True):
+            padded = Image.new('RGBA', (width + 2, height + 2), neutral)
+            padded.paste(image, (1, 1))
+            before = (1, 0, width + 1, height) if vertical else (0, 1, width, height + 1)
+            after = (1, 2, width + 1, height + 2) if vertical else (2, 1, width + 2, height + 1)
+            image = combine(combine(image, padded.crop(before)), padded.crop(after))
+    return image
 
 
 def normalize_fully_transparent_rgb(reference_canvas: Image.Image, candidate_canvas: Image.Image) -> tuple[Image.Image, Image.Image]:
     reference = reference_canvas.copy()
     candidate = candidate_canvas.copy()
-    reference_pixels = reference.load()
-    candidate_pixels = candidate.load()
-
-    for y in range(reference.height):
-        for x in range(reference.width):
-            if reference_pixels[x, y][3] == 0 and candidate_pixels[x, y][3] == 0:
-                reference_pixels[x, y] = (0, 0, 0, 0)
-                candidate_pixels[x, y] = (0, 0, 0, 0)
+    # Clear only pixels transparent in BOTH images, using native byte operations
+    # instead of holding Python's GIL for every pixel.
+    transparent = ImageChops.lighter(reference.getchannel('A'), candidate.getchannel('A')).point(
+        [255] + [0] * 255
+    )
+    reference.paste((0, 0, 0, 0), (0, 0), transparent)
+    candidate.paste((0, 0, 0, 0), (0, 0), transparent)
 
     return reference, candidate
 
@@ -2570,13 +2581,18 @@ def build_diff(reference: Image.Image, candidate: Image.Image, pixel_tolerance: 
     reference_canvas, candidate_canvas = normalize_fully_transparent_rgb(reference_canvas, candidate_canvas)
 
     raw_metrics = measure_canvas_diff(reference_canvas, candidate_canvas, pixel_tolerance)
-    stable_metrics = measure_canvas_diff(
-        *normalize_fully_transparent_rgb(
-            apply_stable_visual_tolerance(reference_canvas),
-            apply_stable_visual_tolerance(candidate_canvas),
-        ),
-        pixel_tolerance,
-    )
+    # Zero absolute error proves byte equality after transparent normalization;
+    # applying the same deterministic filter to both images remains identical.
+    if raw_metrics['mean_abs_error'] == 0:
+        stable_metrics = raw_metrics
+    else:
+        stable_metrics = measure_canvas_diff(
+            *normalize_fully_transparent_rgb(
+                apply_stable_visual_tolerance(reference_canvas),
+                apply_stable_visual_tolerance(candidate_canvas),
+            ),
+            pixel_tolerance,
+        )
 
     amplified = raw_metrics["max_rgb"].point(lambda value: min(255, value * 4))
     diff_overlay = Image.merge(
@@ -2867,6 +2883,8 @@ def finalize_single_run_history(output_dir: Path, args, report_path: Path) -> No
         rebuild_best,
         validate_run_tool,
         write_json,
+        expected_case_names={case_name},
+        publish_global_manifest=False,
     )
 
 

@@ -1,5 +1,13 @@
 # Design2UMG Validation Protocol
 
+## 当前输入基线（2026-09-15 用户确认）
+
+当前 81-case 基线为 `G:/UE5/FPSRoguelike/Saved/Design2UMG/Automation/review-batch-transaction-full-20260915`。当前输入与参考文件已逐项核验，原始 PNG、评分公式、阈值、成绩文件均不改写。后续完整回归显式使用该目录作为 `--reference-root`。
+
+`Automation/_baseline.json` 是小型一次性登记指针，绑定该 run 的 summary/run_scope SHA256 与登记时间；`ReferenceCache/CURRENT.json` 同步指向它。历史重建只纳入该登记基线和登记之后的有效运行。不同源/有效参考身份不强行比较；同身份的既有历史会保留，A→B→A 不得把回来的 A 当全新基线。候选运行不能自己移动登记起点。缺失输入身份、弱参考来源、缺报告或同输入退步仍阻断。
+
+仓库巨型 `design2umg_pinned_baseline.json` 已删除，消费者不再依赖该文件。下文旧阶段与旧 run 的记录只作历史背景，不覆盖本节已明确的当前基线。
+
 Chinese companion: [ValidationProtocol.zh-CN.md](ValidationProtocol.zh-CN.md)
 
 Last verified: 2026-05-18
@@ -281,15 +289,18 @@ That means:
   - `python Tools/design2umg_compatibility_selftest.py`
   - `python Tools/design2umg_diagnostics_selftest.py`
   - `python Tools/design2umg_run_history_selftest.py`
+- `python Tools/design2umg_evidence_epoch_selftest.py`
   - `python Tools/design2umg_batch_report_contract_selftest.py`
   - `python Tools/design2umg_determinism_smoke_selftest.py`
 - together they cover discovery filtering, default Figma export root resolution, run-scope writing, shard sizing, completeness aggregation, compatibility-rule routing, diagnostic stderr shape, historical-best helper ownership, batch summary shape, and batch timing-history persistence
 - import diagnostic report JSON is a separate contract from those helper stderr lines; see `Docs/ImportDiagnosticContract.md`
 
 If the active render-size or pipeline-determinism rules changed, rebuild the admissible best manifest first:
-`python Tools/design2umg_rebuild_admissible_best.py`
+`python Tools/design2umg_rebuild_admissible_best.py --automation-root <run-history-root> --design-root <design-corpus-root> --figma-export-root <figma-export-corpus>`
 
-`Tools/design2umg_pinned_baseline.json` is an old pinned baseline for the pre-Phase-10 evidence rule. It must not be used as the Phase 10 release gate. If the current validator reports `historical_best_render_size_rule_incompatible` against that file, treat it as incompatible evidence, not as proof that the new code regressed.
+Historical coverage uses the discovered case names, not a fixed count. Full batch history checks discover the entire configured corpus even when the current execution is filtered. A single-source invocation checks its requested case. Complete pinned coverage requires the requested names exactly; matching counts alone are insufficient. When the corpus changes, verified pinned entries remain available and missing newly discovered cases are reported explicitly. Historical entries from other scopes remain preserved and are listed separately from missing current cases. Discovery does not manufacture missing scores or waive source-identity checks.
+
+Historical-best evidence is rebuilt from admitted run history. Source artifact and effective-reference hashes define an evidence epoch: an identity change seeds the current result as the new epoch baseline, while later runs with the same identity are compared normally. Results from different identities are retained as diagnostics but are never compared.
 
 The older `_admissible_best_20260407_47.json` example is obsolete and must not be used for current formal gate validation.
 

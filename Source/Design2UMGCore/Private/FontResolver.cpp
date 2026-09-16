@@ -11,6 +11,7 @@
 #include "Components/Widget.h"
 #include "Engine/Font.h"
 #include "Misc/PackageName.h"
+#include "Misc/SecureHash.h"
 #include "Misc/ScopeLock.h"
 
 #define LOCTEXT_NAMESPACE "FontResolver"
@@ -413,6 +414,17 @@ namespace
 		return Cache;
 	}
 
+	void IndexProjectFontsForFamily(const FString& Family)
+	{
+		FFontResolverCache& Cache = GetFontResolverCache();
+		Cache.BuildProjectFontAssetIndexIfNeeded();
+		const FString ImportedName = FPackageName::GetLongPackageAssetName(FFontResolver::MakeImportedFamilyPackageName(Family));
+		for (const FString& Path : Cache.GetIndexedFontAssetPathsSnapshot(NormalizeFontLookupKey(ImportedName)))
+		{
+			Cache.AddIndexedFontAssetPath(NormalizeFontLookupKey(Family), Path);
+		}
+	}
+
 	bool TryGetIndexedFontAssetPath(const FString& NormalizedFamily, FString& OutPath)
 	{
 		const TArray<FString> IndexedPaths = GetFontResolverCache().GetIndexedFontAssetPathsSnapshot(NormalizedFamily);
@@ -437,7 +449,7 @@ namespace
 			return false;
 		}
 
-		GetFontResolverCache().BuildProjectFontAssetIndexIfNeeded();
+		IndexProjectFontsForFamily(FontFamily);
 		return TryGetIndexedFontAssetPath(LookupKey, OutPath);
 	}
 
@@ -459,7 +471,7 @@ namespace
 			Cache.RemoveFontAssetCachePath(NormalizedFamily);
 		}
 
-		Cache.BuildProjectFontAssetIndexIfNeeded();
+		IndexProjectFontsForFamily(FontFamily);
 		if (!NormalizedFamily.IsEmpty())
 		{
 			FString IndexedPath;
@@ -546,11 +558,13 @@ namespace
 		AssetRegistryModule.Get().GetAssetsByClass(UFont::StaticClass()->GetClassPathName(), FontAssets, true);
 
 		TSet<FString> MatchingObjectPaths;
+		const FString ImportedName = NormalizeFontLookupKey(FPackageName::GetLongPackageAssetName(FFontResolver::MakeImportedFamilyPackageName(Family)));
 		for (const FAssetData& Asset : FontAssets)
 		{
 			const FString ObjectPath = Asset.GetObjectPathString();
 			if (IsProjectFontAssetPath(ObjectPath)
-				&& NormalizeFontLookupKey(Asset.AssetName.ToString()) == NormalizedFamily)
+				&& (NormalizeFontLookupKey(Asset.AssetName.ToString()) == NormalizedFamily
+					|| NormalizeFontLookupKey(Asset.AssetName.ToString()) == ImportedName))
 			{
 				MatchingObjectPaths.Add(ObjectPath);
 			}
@@ -809,6 +823,15 @@ namespace
 
 }
 
+FString FFontResolver::MakeImportedFamilyPackageName(const FString& FontFamily)
+{
+	FString Name = FontFamily;
+	for (const TCHAR Invalid : FString(INVALID_OBJECTNAME_CHARACTERS)) Name.ReplaceCharInline(Invalid, TEXT('_'));
+	const FTCHARToUTF8 Identity(*FontFamily.ToLower().TrimStartAndEnd());
+	return TEXT("/Game/Design2UMG/Fonts/") + Name + TEXT("_")
+		+ FMD5::HashBytes(reinterpret_cast<const uint8*>(Identity.Get()), Identity.Length());
+}
+
 FString FFontResolver::FindFontAssetPath(const FString& FontFamily, const FString& PostScriptName)
 {
 	FString ExplicitPath;
@@ -855,7 +878,7 @@ bool FFontResolver::HasInvalidProjectFontAsset(const FString& FontFamily)
 		return false;
 	}
 
-	GetFontResolverCache().BuildProjectFontAssetIndexIfNeeded();
+	IndexProjectFontsForFamily(FontFamily);
 	const TArray<FString> IndexedPaths = GetFontResolverCache().GetIndexedFontAssetPathsSnapshot(LookupKey);
 	return IndexedPaths.Num() == 1 && !IsLoadableProjectFontPath(IndexedPaths[0]);
 }

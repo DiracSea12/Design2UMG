@@ -74,6 +74,7 @@ namespace UMGPropertyKeys
 	inline constexpr const TCHAR* OutlineColor = TEXT("OutlineColor");
 	inline constexpr const TCHAR* OutlineCornerRadius = TEXT("OutlineCornerRadius");
 	inline constexpr const TCHAR* OutlineThickness = TEXT("OutlineThickness");
+	inline constexpr const TCHAR* BrushMargin = TEXT("BrushMargin");
 	inline constexpr const TCHAR* PadBottom = TEXT("PadBottom");
 	inline constexpr const TCHAR* PadLeft = TEXT("PadLeft");
 	inline constexpr const TCHAR* PadRight = TEXT("PadRight");
@@ -135,6 +136,7 @@ namespace UMGPropertyKeys
 	inline constexpr const TCHAR* RetainerForegroundBlurEffectRef = TEXT("d2u.retainer.foreground_blur");
 	inline constexpr const TCHAR* RetainerGeometryMaskEffectRef = TEXT("d2u.retainer.geometry_mask");
 	inline constexpr const TCHAR* RetainerInnerShadowEffectRef = TEXT("d2u.retainer.inner_shadow");
+	inline constexpr const TCHAR* RetainerSubtreeShadowEffectRef = TEXT("d2u.retainer.subtree_shadow");
 	// Image-ref prefix marking synthetic vector-raster fills baked by local import.
 	inline constexpr const TCHAR* VectorRasterImageRefPrefix = TEXT("vec_");
 }

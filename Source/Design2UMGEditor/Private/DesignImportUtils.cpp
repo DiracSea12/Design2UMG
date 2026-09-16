@@ -418,6 +418,10 @@ namespace
 		Progress.AdvanceAfterMutation(0.5f, LOCTEXT("GenerateProgressSave", "Saving generated assets"));
 		if (!FUMGGenerator::SaveWidgetBlueprint(WBP, &GenerationOutput, &Built.PrototypeNavigation))
 		{
+			if (OutGenerationOutput)
+			{
+				*OutGenerationOutput = MoveTemp(GenerationOutput);
+			}
 			IFileManager::Get().Delete(*OutPng, false, true);
 			UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint compile or save failed after PNG render"));
 			return false;
@@ -537,6 +541,7 @@ namespace
 		const FString& OutputPath,
 		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings,
 		const bool bLogBuildFailure,
+		FDesign2UMGGenerationOutput* OutGenerationOutput,
 		TFunctionRef<bool(FBuiltBlueprint&& Built, FGenerationProgress& Progress)> Stage)
 	{
 		bool bCancelAfterMutation = false;
@@ -558,6 +563,10 @@ namespace
 					Data, FinalPath, GenerationSettings, &Built.GenerationOutput, &Built.PrototypeNavigation);
 				if (!Built.WidgetBlueprint)
 				{
+					if (OutGenerationOutput)
+					{
+						*OutGenerationOutput = MoveTemp(Built.GenerationOutput);
+					}
 					if (bLogBuildFailure)
 					{
 						UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint build failed"));
@@ -799,6 +808,10 @@ UWidgetBlueprint* DesignImportUtils::GenerateBlueprint(
 				Data, FinalPath, GenerationSettings, &GenerationOutput, &NavigationData);
 			if (!BuiltWBP)
 			{
+				if (OutGenerationOutput)
+				{
+					*OutGenerationOutput = MoveTemp(GenerationOutput);
+				}
 				UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint build failed"));
 				FDesign2UMGNotification::Error(LOCTEXT("GenFailed", "Design2UMG: Widget Blueprint generation failed"));
 				return nullptr;
@@ -807,6 +820,10 @@ UWidgetBlueprint* DesignImportUtils::GenerateBlueprint(
 			Progress.AdvanceAfterMutation(1.0f, LOCTEXT("GenerateProgressSave", "Saving generated assets"));
 			if (!FUMGGenerator::SaveWidgetBlueprint(BuiltWBP, &GenerationOutput, &NavigationData))
 			{
+				if (OutGenerationOutput)
+				{
+					*OutGenerationOutput = MoveTemp(GenerationOutput);
+				}
 				UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget Blueprint compile or save failed"));
 				FDesign2UMGNotification::Error(LOCTEXT("SaveFailed", "Design2UMG: Widget Blueprint compile or save failed"));
 				return nullptr;
@@ -859,6 +876,7 @@ bool DesignImportUtils::GenerateBlueprintAndPng(
 		OutputPath,
 		GenerationSettings,
 		true,
+		OutGenerationOutput,
 		[&](FBuiltBlueprint&& Built, FGenerationProgress& Progress) -> bool
 		{
 			return BuildTransientPreviewThenSave(
@@ -962,6 +980,7 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 		OutputPath,
 		GenerationSettings,
 		false,
+		OutGenerationOutput,
 		[&](FBuiltBlueprint&& Built, FGenerationProgress& Progress) -> bool
 		{
 			return SaveThenRenderCompiled(

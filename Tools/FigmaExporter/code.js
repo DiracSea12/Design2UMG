@@ -222,30 +222,29 @@ function serializeEffect(effect) {
     return out;
 }
 // ── Text Style Aggregation ──
-function buildTextStyle(node) {
-    var _a, _b;
-    const style = {};
-    style.fontFamily = node.fontName !== figma.mixed ? node.fontName.family : 'Inter';
-    style.fontPostScriptName = '';
-    style.fontWeight = node.fontWeight !== figma.mixed ? node.fontWeight : 400;
-    style.fontSize = node.fontSize !== figma.mixed ? node.fontSize : 14;
-    style.textAlignHorizontal = node.textAlignHorizontal || 'LEFT';
-    style.textAlignVertical = node.textAlignVertical || 'TOP';
-    style.textCase = node.textCase !== figma.mixed ? node.textCase : 'ORIGINAL';
-    style.textDecoration = node.textDecoration !== figma.mixed ? node.textDecoration : 'NONE';
-    style.letterSpacing = node.letterSpacing !== figma.mixed
-        ? node.letterSpacing.value || 0 : 0;
-    style.paragraphSpacing = (_a = node.paragraphSpacing) !== null && _a !== void 0 ? _a : 0;
-    style.paragraphIndent = (_b = node.paragraphIndent) !== null && _b !== void 0 ? _b : 0;
-    if (node.lineHeight !== figma.mixed) {
-        const lh = node.lineHeight;
-        style.lineHeightUnit = lh.unit === 'PIXELS' ? 'PIXELS' : lh.unit === 'PERCENT' ? 'FONT_SIZE_%' : 'AUTO';
-        style.lineHeightPx = lh.unit === 'PIXELS' ? lh.value : 0;
+function buildTextStyle(node, first) {
+    if (!first && [node.fontName, node.fontWeight, node.fontSize, node.textCase,
+        node.textDecoration, node.letterSpacing, node.lineHeight].includes(figma.mixed)) {
+        throw new Error(`Text ${node.id}: mixed style has no resolved character segment`);
     }
-    else {
-        style.lineHeightUnit = 'AUTO';
-        style.lineHeightPx = 0;
-    }
+    const fontName = node.fontName !== figma.mixed ? node.fontName : first.fontName;
+    const fontSize = node.fontSize !== figma.mixed ? node.fontSize : first.fontSize;
+    const spacing = node.letterSpacing !== figma.mixed ? node.letterSpacing : first.letterSpacing;
+    const height = node.lineHeight !== figma.mixed ? node.lineHeight : first.lineHeight;
+    const style = {
+        fontFamily: fontName.family, fontPostScriptName: '',
+        fontWeight: node.fontWeight !== figma.mixed ? node.fontWeight : first.fontWeight,
+        fontSize, textAlignHorizontal: node.textAlignHorizontal || 'LEFT',
+        textAlignVertical: node.textAlignVertical || 'TOP',
+        textCase: node.textCase !== figma.mixed ? node.textCase : first.textCase,
+        textDecoration: node.textDecoration !== figma.mixed ? node.textDecoration : first.textDecoration,
+        letterSpacing: spacing.unit === 'PERCENT' ? spacing.value * fontSize / 100 : spacing.value,
+        paragraphSpacing: node.paragraphSpacing, paragraphIndent: node.paragraphIndent,
+        lineHeightUnit: height.unit === 'PERCENT' ? 'FONT_SIZE_%' : height.unit,
+        lineHeightPx: height.unit === 'PIXELS' ? height.value : 0,
+    };
+    if (height.unit === 'PERCENT')
+        style.lineHeightPercentFontSize = height.value;
     return style;
 }
 // ── Node Serialization ──
@@ -417,6 +416,7 @@ function serializeNode(node) {
             const componentSet = instanceNode.mainComponent.parent;
             if (componentSet && componentSet.type === 'COMPONENT_SET') {
                 out.componentSetId = componentSet.id;
+                out.componentSetKey = componentSet.key;
             }
         }
         setIfDefined(out, 'componentProperties', cloneJsonSafe(instanceNode.componentProperties));
@@ -429,7 +429,46 @@ function serializeNode(node) {
     if (node.type === 'TEXT') {
         const tn = node;
         out.characters = tn.characters;
-        out.style = buildTextStyle(tn);
+        const segments = tn.characters ? tn.getStyledTextSegments([
+            'fontName', 'fontWeight', 'fontStyle', 'fontSize', 'fills', 'lineHeight',
+            'letterSpacing', 'textDecoration', 'textCase', 'hyperlink',
+        ]) : [];
+        out.style = buildTextStyle(tn, segments[0]);
+        if (segments.length > 1) {
+            out.characterStyleOverrides = new Array(tn.characters.length);
+            out.styleOverrideTable = {};
+            const styleIds = new Map();
+            for (const segment of segments) {
+                const row = {
+                    fontFamily: segment.fontName.family, fontStyle: segment.fontName.style,
+                    fontWeight: segment.fontWeight, fontSize: segment.fontSize,
+                    italic: segment.fontStyle === 'ITALIC',
+                    fills: segment.fills.map(serializePaint), textDecoration: segment.textDecoration,
+                    letterSpacing: segment.letterSpacing.unit === 'PERCENT'
+                        ? segment.letterSpacing.value * segment.fontSize / 100 : segment.letterSpacing.value,
+                    lineHeightUnit: segment.lineHeight.unit === 'PERCENT' ? 'FONT_SIZE_%' : segment.lineHeight.unit,
+                };
+                if (segment.lineHeight.unit === 'PIXELS')
+                    row.lineHeightPx = segment.lineHeight.value;
+                if (segment.lineHeight.unit === 'PERCENT')
+                    row.lineHeightPercentFontSize = segment.lineHeight.value;
+                if (segment.textCase !== out.style.textCase)
+                    row.textCase = segment.textCase;
+                if (segment.hyperlink)
+                    row.hyperlink = segment.hyperlink.type === 'URL'
+                        ? { type: 'URL', url: segment.hyperlink.value } : { type: 'NODE', nodeID: segment.hyperlink.value };
+                const signature = JSON.stringify(row);
+                let id = styleIds.get(signature);
+                if (id === undefined) {
+                    id = styleIds.size + 1;
+                    styleIds.set(signature, id);
+                    out.styleOverrideTable[String(id)] = row;
+                }
+                out.characterStyleOverrides.fill(id, segment.start, segment.end);
+            }
+            if (tn.fills === figma.mixed)
+                out.fills = segments[0].fills.map(serializePaint);
+        }
         out.textAutoResize = tn.textAutoResize || 'NONE';
         setIfDefined(out, 'textTruncation', tn.textTruncation);
         setIfDefined(out, 'maxLines', tn.maxLines);
@@ -656,6 +695,127 @@ async function exportReferencePng(node, scale) {
     }
     return bytes;
 }
+async function collectComponentDependencyImages(bundle, images) {
+    const hashes = new Set();
+    function collect(node) {
+        for (const paint of [...(node.fills || []), ...(node.strokes || [])]) {
+            if (paint.type === 'IMAGE' && typeof paint.imageRef === 'string')
+                hashes.add(paint.imageRef);
+        }
+        for (const child of node.children || [])
+            collect(child);
+    }
+    for (const definition of bundle.definitions)
+        collect(definition.document);
+    for (const hash of hashes) {
+        if (images.has(hash))
+            continue;
+        try {
+            const image = figma.getImageByHash(hash);
+            if (!image)
+                throw new Error('Source image is unavailable');
+            const bytes = await image.getBytesAsync();
+            if (bytes.length === 0)
+                throw new Error('Source image is empty');
+            images.set(hash, bytes);
+        }
+        catch (error) {
+            bundle.errors.push({ kind: 'component_image_unavailable', nodeId: hash,
+                message: `${hash}: ${error instanceof Error ? error.message : String(error)}` });
+        }
+    }
+}
+// Component definitions are separate from the selected layout tree. Instance nodes
+// retain their resolved appearance; definitions supply reusable defaults and dependencies.
+async function collectComponentDependencies(root) {
+    const result = {
+        schemaVersion: 1, definitions: [], instances: {}, errors: [],
+    };
+    const active = new Set();
+    const completed = new Set();
+    function identity(component) {
+        var _a;
+        const set = ((_a = component.parent) === null || _a === void 0 ? void 0 : _a.type) === 'COMPONENT_SET' ? component.parent : undefined;
+        return { id: component.id, key: component.key, componentSetId: set === null || set === void 0 ? void 0 : set.id, componentSetKey: set === null || set === void 0 ? void 0 : set.key };
+    }
+    async function visitDefinition(component) {
+        const source = identity(component);
+        // Unpublished local components still have a document-local node identity.
+        const token = source.key || source.id;
+        if (active.has(token)) {
+            result.errors.push({ kind: 'component_cycle', nodeId: component.id,
+                message: `Component dependency cycle at ${component.id} (${component.name})` });
+            return;
+        }
+        if (completed.has(token))
+            return;
+        active.add(token);
+        try {
+            // Node ids are file-local. Remote definitions can contain the same node id
+            // as another definition or the selected file, so resolve each tree separately.
+            const instances = {};
+            await visitChildren(component, instances);
+            const exported = await component.exportAsync({ format: 'JSON_REST_V1' });
+            const document = unwrapRestExportResponse(exported, component.id);
+            if (!document || document.id !== component.id || document.type !== 'COMPONENT') {
+                throw new Error('Component export did not contain its complete definition');
+            }
+            applyComponentIdentities(document, instances);
+            result.definitions.push(Object.assign(Object.assign({}, source), { document }));
+        }
+        catch (error) {
+            result.errors.push({ kind: 'component_export_failed', nodeId: component.id,
+                message: `${component.id} (${component.name}): ${error instanceof Error ? error.message : String(error)}` });
+        }
+        finally {
+            active.delete(token);
+            completed.add(token);
+        }
+    }
+    async function visitChildren(node, instances) {
+        if ('children' in node) {
+            for (const child of node.children)
+                await visit(child, instances);
+        }
+    }
+    async function visit(node, instances) {
+        if (node.type === 'INSTANCE') {
+            try {
+                const main = await node.getMainComponentAsync();
+                if (!main)
+                    throw new Error('Main component is missing or inaccessible');
+                instances[node.id] = identity(main);
+                await visitDefinition(main);
+            }
+            catch (error) {
+                result.errors.push({ kind: 'component_unavailable', nodeId: node.id,
+                    message: `${node.id} (${node.name}): ${error instanceof Error ? error.message : String(error)}` });
+            }
+        }
+        else if (node.type === 'COMPONENT') {
+            await visitDefinition(node);
+            return;
+        }
+        // Resolved instance children may contain a component swap absent from the main definition.
+        await visitChildren(node, instances);
+    }
+    await visit(root, result.instances);
+    return result;
+}
+function applyComponentIdentities(node, identities) {
+    const source = identities[node.id];
+    if (node.type === 'INSTANCE' && source) {
+        node.componentId = source.id;
+        if (source.key)
+            node.mainComponentKey = source.key;
+        if (source.componentSetId)
+            node.componentSetId = source.componentSetId;
+        if (source.componentSetKey)
+            node.componentSetKey = source.componentSetKey;
+    }
+    for (const child of node.children || [])
+        applyComponentIdentities(child, identities);
+}
 const testApi = {
     attachRenderFallbackMetadata,
     indexRestNodes,
@@ -666,6 +826,8 @@ const testApi = {
     serializeNode,
     unwrapRestExportResponse,
     collectReferencedComponents,
+    collectComponentDependencies,
+    collectComponentDependencyImages,
     collectImages,
     exportReferencePng,
     shouldExportNodeRenderFallback,
@@ -700,6 +862,8 @@ if (typeof figma !== 'undefined') {
             const components = {};
             const componentSets = {};
             collectReferencedComponents(root, components, componentSets);
+            const componentDependencies = await collectComponentDependencies(root);
+            applyComponentIdentities(serialized, componentDependencies.instances);
             const document = {
                 document: {
                     id: '0:0',
@@ -715,6 +879,8 @@ if (typeof figma !== 'undefined') {
                 name: figma.root.name,
                 version: '0',
                 schemaVersion: 0,
+                fileKey: figma.fileKey,
+                design2umgComponentDependencies: componentDependencies,
             };
             if (Object.keys(components).length > 0) {
                 document.components = components;
@@ -728,6 +894,7 @@ if (typeof figma !== 'undefined') {
             await collectImages(root, images, scale, (text) => {
                 figma.ui.postMessage({ type: 'progress', percent: 50, text });
             }, restNodesById);
+            await collectComponentDependencyImages(componentDependencies, images);
             figma.ui.postMessage({ type: 'progress', percent: 70, text: 'Rendering reference PNG...' });
             const reference = await exportReferencePng(root, scale);
             figma.ui.postMessage({ type: 'progress', percent: 80, text: 'Preparing download...' });

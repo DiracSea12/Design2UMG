@@ -245,10 +245,10 @@ bool FFigmaFlowPaddingUsesBorderWrapperTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaInstanceSubtreePaddingSkipsBorderWrapperTest,
-	"Design2UMG.FigmaParser.InstanceSubtreePaddingSkipsBorderWrapper",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaInstanceSubtreePaddingUsesBorderWrapperTest,
+	"Design2UMG.FigmaParser.InstanceSubtreePaddingUsesBorderWrapper",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaInstanceSubtreePaddingSkipsBorderWrapperTest::RunTest(const FString& Parameters)
+bool FFigmaInstanceSubtreePaddingUsesBorderWrapperTest::RunTest(const FString& Parameters)
 {
 	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 400, 300,
 		MakeContainerNode(TEXT("inst_root"), TEXT("Card Instance"), TEXT("INSTANCE"), 0, 0, 300, 120,
@@ -270,8 +270,9 @@ bool FFigmaInstanceSubtreePaddingSkipsBorderWrapperTest::RunTest(const FString& 
 		return false;
 	}
 
-	TestEqual(TEXT("Instance subtree flow keeps direct horizontal container"), FlowWidget->Type, TEXT("HorizontalBox"));
-	TestEqual(TEXT("Instance subtree flow keeps direct padding on the container"), GetWidgetProperty(*FlowWidget, TEXT("Padding")), TEXT("24.0,8.0,12.0,16.0"));
+	TestEqual(TEXT("Instance subtree flow uses a real padding surface"), FlowWidget->Type, TEXT("Border"));
+	TestTrue(TEXT("Instance padding keeps horizontal flow inside"), FlowWidget->Children.Num() == 1 && FlowWidget->Children[0].Type == TEXT("HorizontalBox"));
+	TestEqual(TEXT("Instance subtree flow padding reaches its border"), GetWidgetProperty(*FlowWidget, TEXT("Padding")), TEXT("24.0,8.0,12.0,16.0"));
 	return true;
 }
 
@@ -316,10 +317,10 @@ bool FFigmaTopLevelInstanceMixedStretchPaddingUsesBorderWrapperTest::RunTest(con
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaTopLevelInstanceUniformStretchPaddingSkipsBorderWrapperTest,
-	"Design2UMG.FigmaParser.TopLevelInstanceUniformStretchPaddingSkipsBorderWrapper",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaTopLevelInstanceUniformStretchPaddingUsesBorderWrapperTest,
+	"Design2UMG.FigmaParser.TopLevelInstanceUniformStretchPaddingUsesBorderWrapper",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaTopLevelInstanceUniformStretchPaddingSkipsBorderWrapperTest::RunTest(const FString& Parameters)
+bool FFigmaTopLevelInstanceUniformStretchPaddingUsesBorderWrapperTest::RunTest(const FString& Parameters)
 {
 	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 400, 320,
 		MakeContainerNode(TEXT("inst_app_root"), TEXT("App bar"), TEXT("INSTANCE"), 0, 0, 320, 112, FString::Printf(
@@ -349,8 +350,8 @@ bool FFigmaTopLevelInstanceUniformStretchPaddingSkipsBorderWrapperTest::RunTest(
 		return false;
 	}
 
-	TestEqual(TEXT("Uniform-stretch top-level instance keeps direct vertical container"), RootInstance->Type, TEXT("VerticalBox"));
-	TestEqual(TEXT("Uniform-stretch top-level instance keeps direct padding"), GetWidgetProperty(*RootInstance, TEXT("Padding")), TEXT("0.0,0.0,0.0,12.0"));
+	TestEqual(TEXT("Uniform-stretch top-level instance uses a real padding surface"), RootInstance->Type, TEXT("Border"));
+	TestEqual(TEXT("Uniform-stretch top-level instance padding reaches its border"), GetWidgetProperty(*RootInstance, TEXT("Padding")), TEXT("0.0,0.0,0.0,12.0"));
 	return true;
 }
 

@@ -171,6 +171,11 @@ namespace Design2UMGConverterPrivate
 			}
 
 			const FConversionContext ActiveContext = Context.WithNodeTheme(Node);
+			for (const FString& Warning : Node->Text.ParseWarnings)
+			{
+				Context.State.Warnings.AddUnique(FString::Printf(
+					TEXT("Text node '%s' (%s): %s"), *Node->Name, *Node->Id, *Warning));
+			}
 			const Design2UMGConverterInternal::FFlowChildPreResolutionResolver PreResolutionResolver = BuildPreResolutionResolver(ActiveContext);
 
 			// Refs are expanded before visual/layout work so children inherit the active theme and measured sizes together.
@@ -556,10 +561,11 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 	{
 		Design2UMGCanvasFlattening::FFlattenStats FlattenStats;
 		Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Result.RootWidget, FlattenStats);
-		if (FlattenStats.MergedNestedCanvasCount > 0 || FlattenStats.RemovedEmptyCanvasCount > 0)
+		if (FlattenStats.MergedNestedCanvasCount > 0 || FlattenStats.RemovedEmptyCanvasCount > 0
+			|| FlattenStats.RemovedRedundantSizeCarrierCount > 0)
 		{
-			UE_LOG(LogDesign2UMG, Log, TEXT("Convert: flattened %d nested bare canvas panels, removed %d empty canvas panels"),
-				FlattenStats.MergedNestedCanvasCount, FlattenStats.RemovedEmptyCanvasCount);
+			UE_LOG(LogDesign2UMG, Log, TEXT("Convert: flattened %d nested bare canvas panels, removed %d empty canvas panels and %d redundant size carriers"),
+				FlattenStats.MergedNestedCanvasCount, FlattenStats.RemovedEmptyCanvasCount, FlattenStats.RemovedRedundantSizeCarrierCount);
 		}
 		Result.IconFontMappingChanges.Upserts = MoveTemp(State.PendingIconFontMappings);
 		Result.IconFontMappingChanges.Removals = MoveTemp(State.PrunedInvalidMappings);
@@ -568,11 +574,15 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 	Design2UMGConverterInternal::FConversionContext RootContext(State);
 	const Design2UMGConverterPrivate::FNodeConversionOrchestrator NodeOrchestrator(RootContext);
 
-	if (!Document.SourceDocument().ComponentsJson.IsEmpty() || !Document.SourceDocument().ComponentSetsJson.IsEmpty())
+	if (!Document.SourceDocument().ComponentsJson.IsEmpty() || !Document.SourceDocument().ComponentSetsJson.IsEmpty()
+		|| !Document.SourceDocument().ComponentDependenciesJson.IsEmpty())
 	{
 		FUMGSourceDocumentData& SourceDocument = Result.MutableSourceDocument();
 		SourceDocument.ComponentsJson = Document.SourceDocument().ComponentsJson;
 		SourceDocument.ComponentSetsJson = Document.SourceDocument().ComponentSetsJson;
+		SourceDocument.ComponentDependenciesJson = Document.SourceDocument().ComponentDependenciesJson;
+		SourceDocument.ResolvedComponentImageUrls = Document.SourceDocument().ResolvedComponentImageUrls;
+		SourceDocument.SourceFilePath = Document.SourceDocument().SourceFilePath;
 	}
 
 	// Deep-copy children so conversion never mutates the caller's source tree through shared refs.
@@ -682,4 +692,3 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 	FinalizeResult();
 	return Result;
 }
-

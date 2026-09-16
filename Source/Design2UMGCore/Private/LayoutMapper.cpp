@@ -11,6 +11,42 @@
 
 namespace
 {
+	bool TryFoldSingleFlowChildIntoSizeBox(FUMGWidgetNode& SizeBox, FUMGWidgetNode& Flow)
+	{
+		const bool bHorizontal = Flow.Type == UMGWidgetTypes::HorizontalBox;
+		if ((!bHorizontal && Flow.Type != UMGWidgetTypes::VerticalBox)
+			|| Flow.Children.Num() != 1 || Flow.WidgetStyle.HasAny()
+			|| Flow.Effect.HasAny() || Flow.Shadow.HasAny() || Flow.WidgetState.HasAny()
+			|| (Flow.HasSourceData() && (Flow.Source().bMappedComponentCandidate || Flow.Source().IsFigmaInstance()))) return false;
+
+		// A positive-weight single fill slot uses all available space in either
+		// container, including undersized runtime allocations. Auto slots differ:
+		// a box panel permits main-axis overflow but a SizeBox alignment clamps it.
+		if (Flow.Children[0].Slot.SizeRule != EUMGSlotSizeRule::Fill
+			|| Flow.Children[0].Slot.FillWeight <= 0.f) return false;
+
+		FUMGWidgetNode Content = MoveTemp(Flow.Children[0]);
+		if (bHorizontal)
+		{
+			Content.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
+		}
+		else
+		{
+			Content.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
+		}
+		Content.Slot.SizeRule = EUMGSlotSizeRule::Auto;
+		Content.Slot.FillWeight = 1.f;
+		SizeBox.Id = Flow.Id;
+		SizeBox.Name = Flow.Name;
+		SizeBox.Render = MoveTemp(Flow.Render);
+		if (Flow.HasSourceData())
+		{
+			SizeBox.MutableSource() = Flow.Source();
+		}
+		SizeBox.Children.Add(MoveTemp(Content));
+		return true;
+	}
+
 	bool UsesWrappingText(const TSharedPtr<FDesignNode>& Node)
 	{
 		if (!Node.IsValid())
@@ -350,12 +386,11 @@ FUMGWidgetNode LayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, const
 		SizeBox.Bounds.H = SourceTextBoxHeight;
 	}
 	SizeBox.Slot = MoveTemp(ChildWidget.Slot);
-	if (ChildWidget.HasSourceData())
-	{
-		SizeBox.MutableSource() = ChildWidget.Source();
-	}
 	ChildWidget.Slot = FUMGSlotData();
-	SizeBox.Children.Add(MoveTemp(ChildWidget));
+	if (!TryFoldSingleFlowChildIntoSizeBox(SizeBox, ChildWidget))
+	{
+		SizeBox.Children.Add(MoveTemp(ChildWidget));
+	}
 	return SizeBox;
 }
 

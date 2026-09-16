@@ -183,7 +183,7 @@ namespace
 		Request.TypefaceName = ResolvedFont.TypefaceName;
 		Request.bRequiresResolvedFontAsset = ResolvedFont.bRequiresResolvedFontAsset;
 		Request.LetterSpacing = (Node->Text.LetterSpacing.IsSet() && Node->Text.LetterSpacing.GetValue() != 0.0f && FontSize > 0.0f)
-			? TextStyleUtils::ConvertLetterSpacingPxToTracking(Node->Text.LetterSpacing.GetValue(), Node->Text.FontSize, FontSize)
+			? TextStyleUtils::ConvertLetterSpacingPxToTracking(Node->Text.LetterSpacing.GetValue(), FontSize)
 			: 0;
 		Request.TextAlign = Node->Text.TextAlign;
 		Request.bApplyExplicitLineHeight = LineHeightPercentageOverride.IsSet();
@@ -207,6 +207,8 @@ namespace
 			if (!ProbeTextBlock.IsValid())
 			{
 				ProbeTextBlock = TStrongObjectPtr<UTextBlock>(NewObject<UTextBlock>());
+				// Source layout measures text, not UTextBlock's invisible default shadow extent.
+				ProbeTextBlock->SetShadowOffset(FVector2D::ZeroVector);
 			}
 			return *ProbeTextBlock;
 		}
@@ -353,83 +355,45 @@ bool TextMeasurementRuntimeProbe::TryMeasureTextBlockDesiredSize(const FTextBloc
 	return true;
 }
 
-bool TextMeasurementRuntimeProbe::TryReadLineGapEm(const FString& FontAssetPath, const FString& TypefaceName, float& OutLineGapEm)
+bool TextMeasurementRuntimeProbe::TryReadLineGapEm(const FSlateFontInfo& FontInfo, float& OutLineGapEm)
 {
 	OutLineGapEm = 0.0f;
-	if (FontAssetPath.IsEmpty())
-	{
-		return false;
-	}
+	const FCompositeFont* CompositeFont = FontInfo.GetCompositeFont();
+	if (!CompositeFont) return false;
 
-	// Cached per (asset, typeface); invalidated on font reimport or module shutdown
-	// (see the cache contract at GLineGapEmCache above).
-	const FString CacheKey = TypefaceName.IsEmpty()
-		? FontAssetPath
-		: FontAssetPath + TEXT("|") + TypefaceName;
+	const FTypeface& Typeface = CompositeFont->DefaultTypeface;
+	const FTypefaceEntry* Entry = Typeface.Fonts.FindByPredicate(
+		[&FontInfo](const FTypefaceEntry& Candidate) { return Candidate.Name == FontInfo.TypefaceFontName; });
+	if (!Entry && !Typeface.Fonts.IsEmpty()) Entry = &Typeface.Fonts[0];
+	if (!Entry) return false;
+
+	// Cache the selected face, whether asset-backed or a Slate filename-backed face.
+	// Font reimport and module shutdown invalidate this cache as before.
+	const UObject* FaceAsset = Entry->Font.GetFontFaceAsset();
+	const FString CacheKey = FaceAsset
+		? TEXT("asset:") + FaceAsset->GetPathName()
+		: TEXT("file:") + Entry->Font.GetFontFilename();
 	if (const TOptional<float>* Cached = GLineGapEmCache.Find(CacheKey))
 	{
-		if (Cached->IsSet())
-		{
-			OutLineGapEm = Cached->GetValue();
-		}
+		if (Cached->IsSet()) OutLineGapEm = Cached->GetValue();
 		return Cached->IsSet();
 	}
 
 	TOptional<float> Parsed;
-	const UFont* Font = LoadObject<UFont>(nullptr, *FontAssetPath);
-	if (Font)
+	float LineGapEm = 0.0f;
+	const FFontFaceDataConstPtr FaceData = Entry->Font.GetFontFaceData();
+	if (FaceData.IsValid() && FaceData->HasData())
 	{
-		// Same face-picking rule as the Slate composite font cache: exact typeface
-		// entry match, otherwise the primary (first) entry of the default typeface.
-		const FTypeface& DefaultTypeface = Font->CompositeFont.DefaultTypeface;
-		const FTypefaceEntry* SelectedEntry = nullptr;
-		if (!TypefaceName.IsEmpty())
-		{
-			SelectedEntry = DefaultTypeface.Fonts.FindByPredicate(
-				[&TypefaceName](const FTypefaceEntry& Entry)
-				{
-					return Entry.Name == FName(*TypefaceName);
-				});
-		}
-		if (!SelectedEntry && DefaultTypeface.Fonts.Num() > 0)
-		{
-			SelectedEntry = &DefaultTypeface.Fonts[0];
-		}
-
-		if (SelectedEntry)
-		{
-			// Asset-backed faces expose their data directly; filename-backed faces
-			// (the Slate composite font cache reads those from disk) are read from
-			// the same file here so both storage forms resolve identically.
-			const FFontFaceDataConstPtr FaceData = SelectedEntry->Font.GetFontFaceData();
-			if (FaceData.IsValid() && FaceData->HasData())
-			{
-				float LineGapEm = 0.0f;
-				if (TryParseHheaLineGapEm(FaceData->GetData(), LineGapEm))
-				{
-					Parsed = LineGapEm;
-				}
-			}
-			else
-			{
-				TArray<uint8> FontFileData;
-				if (FFileHelper::LoadFileToArray(FontFileData, *SelectedEntry->Font.GetFontFilename()))
-				{
-					float LineGapEm = 0.0f;
-					if (TryParseHheaLineGapEm(FontFileData, LineGapEm))
-					{
-						Parsed = LineGapEm;
-					}
-				}
-			}
-		}
+		if (TryParseHheaLineGapEm(FaceData->GetData(), LineGapEm)) Parsed = LineGapEm;
 	}
-
+	else
+	{
+		TArray<uint8> Bytes;
+		if (FFileHelper::LoadFileToArray(Bytes, *Entry->Font.GetFontFilename())
+			&& TryParseHheaLineGapEm(Bytes, LineGapEm)) Parsed = LineGapEm;
+	}
 	GLineGapEmCache.Add(CacheKey, Parsed);
-	if (Parsed.IsSet())
-	{
-		OutLineGapEm = Parsed.GetValue();
-	}
+	if (Parsed.IsSet()) OutLineGapEm = Parsed.GetValue();
 	return Parsed.IsSet();
 }
 

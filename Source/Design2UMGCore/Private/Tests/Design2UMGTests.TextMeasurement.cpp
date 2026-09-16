@@ -5,7 +5,6 @@
 #include "DesignSchema.h"
 #include "DesignSchemaSourceExtensions.h"
 #include "FontResolver.h"
-#include "Fonts/FontMeasure.h"
 #include "Fonts/SlateFontInfo.h"
 #include "Framework/Application/SlateApplication.h"
 #include "HAL/FileManager.h"
@@ -13,6 +12,7 @@
 #include "Misc/Paths.h"
 #include "Styling/SlateTypes.h"
 #include "TextMeasurement.h"
+#include "Widgets/Text/STextBlock.h"
 
 #include <limits>
 
@@ -69,9 +69,14 @@ namespace
 			FontInfo.TypefaceFontName = FName(*TypefaceName);
 		}
 
-		const TSharedRef<FSlateFontMeasure> FontMeasure =
-			FSlateApplication::Get().GetRenderer()->GetFontMeasureService();
-		OutSize = FontMeasure->Measure(TextMeasurement::PrepareRuntimeTextContent(Node->Text.Content), FontInfo);
+		const TSharedRef<STextBlock> TextWidget = SNew(STextBlock)
+			.Font(FontInfo)
+			// Source text without a shadow has no extra invisible layout extent.
+			.ShadowOffset(FVector2D::ZeroVector)
+			.ApplyLineHeightToBottomLine(false)
+			.Text(FText::FromString(TextMeasurement::PrepareRuntimeTextContent(Node->Text.Content)));
+		TextWidget->SlatePrepass(1.0f);
+		OutSize = TextWidget->GetDesiredSize();
 		return FMath::IsFinite(OutSize.X) && OutSize.X > 0.0f
 			&& FMath::IsFinite(OutSize.Y) && OutSize.Y > 0.0f;
 	}
@@ -150,6 +155,7 @@ bool FTextMeasurementRuntimeProbeFractionalSizeConsistencyTest::RunTest(const FS
 	TestFalse(TEXT("The fractional and rounded probes are observably different"), ExactSize.Equals(RoundedSize, 0.01f));
 
 	const FVector2D ProductionSize = TextMeasurement::MeasureTextNodeSize(Node, 0.0f);
+	AddInfo(FString::Printf(TEXT("Fractional measurement: production=%s direct=%s rounded=%s"), *ProductionSize.ToString(), *ExactSize.ToString(), *RoundedSize.ToString()));
 	TestTrue(TEXT("Production measurement uses the resolved fractional size"), ProductionSize.Equals(ExactSize, 0.01f));
 
 	const TSharedPtr<FDesignNode> SubpixelNode = MakeTextNode(TEXT("subpixel_probe_consistency"), 0.5f);
@@ -167,6 +173,7 @@ bool FTextMeasurementRuntimeProbeFractionalSizeConsistencyTest::RunTest(const FS
 		return false;
 	}
 	const FVector2D ProductionSubpixelSize = TextMeasurement::MeasureTextNodeSize(SubpixelNode, 0.0f);
+	AddInfo(FString::Printf(TEXT("Subpixel measurement: production=%s direct=%s"), *ProductionSubpixelSize.ToString(), *DirectSubpixelSize.ToString()));
 	TestTrue(TEXT("Production probe preserves the 0.375 point size"),
 		ProductionSubpixelSize.Equals(DirectSubpixelSize, 0.01f));
 	return true;
@@ -228,7 +235,7 @@ bool FTextMeasurementWrappedLayoutContractTest::RunTest(const FString&)
 
 	TestEqual(TEXT("Wrapped text keeps the source wrap width"), TextMeasurement::ResolveTextWrapAt(Node, 0.0f), 630.0f);
 	TestTrue(TEXT("Wrapped text applies its explicit source line height"),
-		TextMeasurement::ShouldApplyExplicitLineHeight(Node, ResolvedFontSize, 630.0f));
+		TextMeasurement::ShouldApplyExplicitLineHeight(Node));
 	const FVector2D MeasuredSize = TextMeasurement::MeasureTextNodeSize(Node, 0.0f);
 	TestTrue(TEXT("Wrapped text remains measurable"), MeasuredSize.X > 0.0f && MeasuredSize.Y > 0.0f);
 
@@ -238,9 +245,7 @@ bool FTextMeasurementWrappedLayoutContractTest::RunTest(const FString&)
 	ExplicitHeightNode->Transform.bSourceHasHeight = true;
 	TestTrue(TEXT("Text with an explicit source height keeps line-height behavior"),
 		TextMeasurement::ShouldApplyExplicitLineHeight(
-			ExplicitHeightNode,
-			TextMeasurement::ResolveTextFontSizeForUMG(ExplicitHeightNode),
-			630.0f));
+			ExplicitHeightNode));
 
 	TSharedPtr<FDesignNode> SmallNode = MakeTextNode(TEXT("small_wrapped_line_range_contract"), 12.0f);
 	SmallNode->Text.Content = TEXT("Advanced analytics and priority support.");
@@ -274,9 +279,7 @@ bool FTextMeasurementWrappedLayoutContractTest::RunTest(const FString&)
 		1469.0f);
 	TestTrue(TEXT("Authored line breaks apply the explicit source line height"),
 		TextMeasurement::ShouldApplyExplicitLineHeight(
-			AuthoredBreakNode,
-			TextMeasurement::ResolveTextFontSizeForUMG(AuthoredBreakNode),
-			1469.0f));
+			AuthoredBreakNode));
 	return true;
 }
 

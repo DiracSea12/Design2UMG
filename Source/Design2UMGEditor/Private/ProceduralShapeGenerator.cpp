@@ -387,6 +387,24 @@ namespace
 		UObject* Outer)
 	{
 		const FString Shape = Request.MaterialRef.ToLower();
+		if (Shape == TEXT("horizontalstroke"))
+		{
+			UTexture2D* Texture = ProceduralShapeGeneratorAssets::CreateTransientTexture(Width, Height, Outer);
+			if (!Texture) return nullptr;
+			Texture->Filter = TF_Nearest;
+			TArray<FColor> Pixels;
+			Pixels.SetNumUninitialized(Width * Height);
+			for (int32 Y = 0; Y < Height; ++Y)
+			{
+				for (int32 X = 0; X < Width; ++X)
+				{
+					const bool Edge = Y < Height / 3 || Y >= Height - Height / 3;
+					Pixels[Y * Width + X] = Edge ? FColor::White : FColor::Transparent;
+				}
+			}
+			ProceduralShapeGeneratorAssets::FillTextureData(Texture, Pixels);
+			return Texture;
+		}
 
 		if (Shape == TEXT("circle") || Shape == TEXT("ellipse"))
 		{
@@ -476,7 +494,7 @@ namespace
 			}
 			return ProceduralShapeGeneratorAssets::GenerateAngularGradient(Width, Height, P.RotationDeg, P.MultiStops, Outer);
 		}
-		if (Shape == TEXT("boxshadow"))
+		if (Shape == TEXT("boxshadow") || Shape == TEXT("ellipseshadow"))
 		{
 			const float BlurPx = Request.ShadowBlur.Get(0.0f);
 			if (P.CornerRadii[0] >= 0.0f)
@@ -491,7 +509,8 @@ namespace
 					P.CornerRadii[3],
 					BlurPx,
 					P.BoxShadowBlurPadding,
-					Outer);
+					Outer,
+					Shape == TEXT("ellipseshadow"));
 			}
 
 			return ProceduralShapeGeneratorAssets::GenerateBoxShadow(
@@ -501,7 +520,8 @@ namespace
 				P.CornerRadius,
 				BlurPx,
 				P.BoxShadowBlurPadding,
-				Outer);
+				Outer,
+				Shape == TEXT("ellipseshadow"));
 		}
 		if (Shape == TEXT("placeholderhatch"))
 		{

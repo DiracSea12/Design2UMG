@@ -19,6 +19,60 @@ namespace
 	// Material reference identifier used as an internal ProceduralShapeGenerator key, not an asset path.
 	const TCHAR* MatRef_RoundedRect = TEXT("roundedrect");
 
+	// Bounds relative to the node's layout origin, before its own render transform.
+	FBox2D SubtreePaintBounds(const FDesignNode& Node, bool bIncludeOwnShadows)
+	{
+		const FVector2D Size(Node.Transform.Width.Value, Node.Transform.Height.Value);
+		FBox2D Content(FVector2D::ZeroVector, Size);
+		if (Node.Visual.Stroke.Align != EDesignStrokeAlign::Inside)
+		{
+			FMargin Stroke = VisualMapperStrokeSupport::GetStrokeHalfInsets(Node.Visual.Stroke.Thickness);
+			if (Node.Visual.Stroke.Align == EDesignStrokeAlign::Outside) Stroke = Stroke * 2.0f;
+			Content += FBox2D(FVector2D(-Stroke.Left, -Stroke.Top), Size + FVector2D(Stroke.Right, Stroke.Bottom));
+		}
+		if (!Node.LayoutData.ExplicitClip.Get(false))
+		{
+			for (const TSharedPtr<FDesignNode>& Child : Node.Children)
+			{
+				if (!Child.IsValid() || !Child->Transform.bEnabled) continue;
+				const FBox2D ChildPaint = SubtreePaintBounds(*Child, true);
+				const FVector2D ChildSize(Child->Transform.Width.Value, Child->Transform.Height.Value);
+				const FVector2D Pivot = ChildSize * 0.5;
+				FBox2D Transformed(ForceInit);
+				for (int32 Corner = 0; Corner < 4; ++Corner)
+				{
+					FVector2D Point((Corner & 1) ? ChildPaint.Max.X : ChildPaint.Min.X,
+						(Corner & 2) ? ChildPaint.Max.Y : ChildPaint.Min.Y);
+					Point -= Pivot;
+					if (Child->Transform.bFlipX) Point.X = -Point.X;
+					if (Child->Transform.bFlipY) Point.Y = -Point.Y;
+					Transformed += Point.GetRotated(Child->Transform.Rotation) + Pivot;
+				}
+				Content += FBox2D(Transformed.Min + FVector2D(Child->Transform.X, Child->Transform.Y),
+					Transformed.Max + FVector2D(Child->Transform.X, Child->Transform.Y));
+				if (Node.LayoutData.Layout != EDesignLayout::None && !Child->LayoutData.bAbsoluteLayoutPositioning)
+				{
+					// Flow placement is resolved by UMG. Reserve each child's paint
+					// outsets at either edge instead of assuming its source position.
+					Content += FBox2D(FVector2D(FMath::Min(0.0, Transformed.Min.X), FMath::Min(0.0, Transformed.Min.Y)),
+						Size + FVector2D(FMath::Max(0.0, Transformed.Max.X - ChildSize.X), FMath::Max(0.0, Transformed.Max.Y - ChildSize.Y)));
+				}
+			}
+		}
+		FBox2D Paint = Content;
+		if (bIncludeOwnShadows)
+		{
+			for (const FDesignEffect& Effect : Node.Visual.Effects)
+			{
+				if (!Effect.bEnabled || Effect.Type != EDesignEffectType::Shadow || Effect.Shadow.bInner) continue;
+				const double Radius = Effect.Shadow.Blur * 1.5 + FMath::Max(0.0f, Effect.Shadow.Spread);
+				const FVector2D Offset(Effect.Shadow.OffsetX, Effect.Shadow.OffsetY);
+				Paint += FBox2D(Content.Min + Offset - FVector2D(Radius), Content.Max + Offset + FVector2D(Radius));
+			}
+		}
+		return Paint;
+	}
+
 	// UV step fallback for an invalid node, where no size can be resolved.
 	// No derivation on record; fixed when the foreground-blur UV mapping
 	// was introduced.
@@ -101,6 +155,7 @@ namespace
 		return Brush.OutlineCornerRadius.IsSet()
 			|| Brush.CornerRadii.IsSet()
 			|| Brush.OutlineThickness.IsSet()
+			|| Brush.Margin.IsSet()
 			|| Brush.DrawAs.IsSet()
 			|| Brush.BrushColor.IsSet()
 			|| Brush.OutlineColor.IsSet()
@@ -204,8 +259,11 @@ namespace
 		const FString ShadowSuffix = BuildIndexedShadowSuffix(ShadowIndex);
 		Shadow.Id = SourceId + ShadowSuffix;
 		Shadow.Name = SourceName + ShadowSuffix;
-		Shadow.Brush.BrushColor = ShadowLayer.Color;
-		Shadow.Brush.MaterialRef = (Blur > 0.0f) ? TEXT("boxshadow") : MatRef_RoundedRect;
+		// The procedural texture already contains the shadow colour and alpha.
+		// Keep its image tint neutral when that texture is persisted and rebound.
+		Shadow.Brush.BrushColor = FLinearColor::White;
+		Shadow.Brush.MaterialRef = Node->Type == EDesignNodeType::Ellipse
+			? TEXT("ellipseshadow") : ((Blur > 0.0f) ? TEXT("boxshadow") : MatRef_RoundedRect);
 		Shadow.Shadow.ShadowBlur = Blur;
 
 		if (bDeclaredShape)
@@ -569,7 +627,9 @@ namespace
 			|| !IsPromotableFlowPanelType(Widget.Type)
 			|| !VisibleChildren[0].IsValid()
 			|| VisibleChildren[0]->LayoutData.bAbsoluteLayoutPositioning
-			|| VisibleChildren[0]->Transform.HasExplicitPosition()
+			|| (VisibleChildren[0]->Transform.HasExplicitPosition()
+				&& (Widget.Children.Num() != 1 || Widget.Children[0].Slot.SizeRule != EUMGSlotSizeRule::Fill
+					|| Widget.Children[0].Slot.FillWeight <= 0.f))
 			|| HasEnabledInnerShadow(*Node)
 			|| Widget.WidgetStyle.HasAny()
 			|| Widget.HasSourceData())
@@ -577,6 +637,9 @@ namespace
 			return false;
 		}
 
+		// A fill slot ignores authored x/y and retains its allocation when promoted.
+		// Auto slots with explicit positions stay in the flow panel: Border and
+		// box-panel main-axis overflow differ when runtime space is reduced.
 		if (Node->LayoutData.JustifyContent == EDesignJustifyContent::Start)
 		{
 			if (Widget.Children.Num() != 1)
@@ -904,7 +967,12 @@ void VisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FDesignStroke& Stro
 
 	if (!Widget.Brush.DrawAs.IsSet())
 	{
-		Widget.Brush.DrawAs = ESlateBrushDrawType::Box;
+		// Slate draws OutlineSettings only for RoundedBox, including zero-radius
+		// rectangles. Resource-backed brushes keep their existing rendering path.
+		const bool bResourceBrush = Widget.Brush.MaterialRef.IsSet()
+			|| Widget.Brush.Image.HasAny() || Widget.Brush.Gradient.HasAny();
+		Widget.Brush.DrawAs = bResourceBrush
+			? ESlateBrushDrawType::Box : ESlateBrushDrawType::RoundedBox;
 	}
 
 	Widget.Brush.OutlineThickness = Thickness;
@@ -948,10 +1016,17 @@ FUMGWidgetNode VisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TShar
 
 	TransferBorderStrokeProperties(Border, Widget);
 
-	// Outside stroke: visual bounds from the parser already include the stroke expansion,
-	// so do NOT expand Border.Bounds again. Only add StrokePadding so the centered UMG
-	// outline doesn't eat into content space.
-	ApplyOutsideStrokePaddingToBorder(Border, Widget);
+	// Absolute positions measured from expanded visual bounds already include the
+	// outside stroke inset. Border padding would apply an additional offset.
+	if (Node->LayoutData.Layout == EDesignLayout::None
+		&& Node->LayoutData.bChildPositionsRelativeToVisualBounds)
+	{
+		Widget.WidgetStyle.StrokeMargin.Reset();
+	}
+	else
+	{
+		ApplyOutsideStrokePaddingToBorder(Border, Widget);
+	}
 	TransferWrapperRenderProperties(Border, Widget, Node);
 	TransferBorderBoxShadowProperties(Border, Widget);
 	int32 PromotedContentIndex = INDEX_NONE;
@@ -977,7 +1052,11 @@ FUMGWidgetNode VisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TShar
 	}
 
 	const bool bNeedsExplicitStroke =
-		(VisualMapperStrokeSupport::NeedsExplicitSideStroke(Node)
+		(Node->Visual.Stroke.HasStroke()
+			&& Node->Visual.Stroke.Align == EDesignStrokeAlign::Inside
+			&& !Node->Visual.CornerRadius.HasRadius()
+			&& !HasPlaceholderSurfaceChildren(Node))
+		|| (VisualMapperStrokeSupport::NeedsExplicitSideStroke(Node)
 			&& !HasPlaceholderSurfaceChildren(Node)
 			&& !HasOpaqueSolidFill(Node))
 		|| (Node.IsValid()
@@ -1096,6 +1175,54 @@ FUMGWidgetNode VisualMapper::WrapWithBoxShadow(
 	Wrapper.Bounds = Widget.Bounds;
 	Wrapper.Slot = Widget.Slot;
 	TransferWrapperRenderProperties(Wrapper, Widget, Node);
+
+	if (!Node->Children.IsEmpty() && Node->Visual.Fills.IsEmpty())
+	{
+		FMargin Gutter;
+		for (const FUMGBoxShadowLayerData& Shadow : ShadowLayers)
+		{
+			const float Radius = FMath::CeilToFloat(Shadow.Blur * 1.5f + FMath::Abs(Shadow.Spread)) + 1.0f;
+			Gutter.Left = FMath::Max(Gutter.Left, Radius - Shadow.Offset.X);
+			Gutter.Right = FMath::Max(Gutter.Right, Radius + Shadow.Offset.X);
+			Gutter.Top = FMath::Max(Gutter.Top, Radius - Shadow.Offset.Y);
+			Gutter.Bottom = FMath::Max(Gutter.Bottom, Radius + Shadow.Offset.Y);
+		}
+		const FBox2D ContentBounds = SubtreePaintBounds(*Node, false);
+		Gutter.Left = FMath::CeilToFloat(Gutter.Left + FMath::Max(0.0, -ContentBounds.Min.X));
+		Gutter.Top = FMath::CeilToFloat(Gutter.Top + FMath::Max(0.0, -ContentBounds.Min.Y));
+		Gutter.Right = FMath::CeilToFloat(Gutter.Right + FMath::Max(0.0, ContentBounds.Max.X - Node->Transform.Width.Value));
+		Gutter.Bottom = FMath::CeilToFloat(Gutter.Bottom + FMath::Max(0.0, ContentBounds.Max.Y - Node->Transform.Height.Value));
+		FUMGWidgetNode Retainer;
+		Retainer.Type = UMGWidgetTypes::RetainerBox;
+		Retainer.Id = Widget.Id + TEXT("_subtreeshadow");
+		Retainer.Name = Widget.Name + TEXT("_subtreeshadow");
+		Retainer.Bounds.W = Node->Transform.Width.Value + Gutter.Left + Gutter.Right;
+		Retainer.Bounds.H = Node->Transform.Height.Value + Gutter.Top + Gutter.Bottom;
+		Retainer.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
+		Retainer.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
+		Retainer.Slot.Padding = FMargin(-Gutter.Left, -Gutter.Top, -Gutter.Right, -Gutter.Bottom);
+		Retainer.Effect.bRetainRendering = true;
+		Retainer.Effect.EffectMaterial = UMGPropertyKeys::RetainerSubtreeShadowEffectRef;
+		Retainer.Effect.TextureParameter = TEXT("Texture");
+		Retainer.Shadow.BoxShadows = ShadowLayers;
+
+		FUMGWidgetNode Padded;
+		Padded.Type = UMGWidgetTypes::Border;
+		Padded.Id = Widget.Id + TEXT("_shadowpadding");
+		Padded.Name = Widget.Name + TEXT("_shadowpadding");
+		Padded.Brush.BrushColor = FLinearColor::Transparent;
+		Padded.WidgetStyle.Padding = Gutter;
+		Widget.Id += Design2UMGGeneratedNameSuffixes::Content();
+		Widget.Name += Design2UMGGeneratedNameSuffixes::Content();
+		Widget.Bounds = FDesignPixelBounds();
+		Widget.Slot = FUMGSlotData();
+		Widget.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
+		Widget.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
+		Padded.Children.Add(MoveTemp(Widget));
+		Retainer.Children.Add(MoveTemp(Padded));
+		Wrapper.Children.Add(MoveTemp(Retainer));
+		return Wrapper;
+	}
 
 	// All shadow layers live in this single overlay. Later source layers render
 	// below earlier ones, matching the stacking the retired per-layer nesting produced.

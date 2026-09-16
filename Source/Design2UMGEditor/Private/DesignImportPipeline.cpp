@@ -66,7 +66,7 @@ namespace DesignImportPipeline
 			const FUMGWidgetData& Data,
 			const FArtifactGenerationResult& Result)
 		{
-			if (!Request.DiagnosticDocument.IsSet() || (!Result.bSucceeded && Result.GeneratedAssetPath.IsEmpty()))
+			if (!Request.DiagnosticDocument.IsSet())
 			{
 				return;
 			}
@@ -196,6 +196,11 @@ namespace DesignImportPipeline
 			const TOptional<FDesignDocument>& DiagnosticDocument)
 		{
 			FDesignImportExecutionResult Result;
+			if (!AnalysisResult.ErrorMessage.IsEmpty())
+			{
+				Result.ErrorMessage = AnalysisResult.ErrorMessage;
+				return Result;
+			}
 			const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr;
 			FDesign2UMGImportSettingsSnapshot FallbackSettingsSnapshot;
 			if (AnalysisResult.SettingsSnapshot.IsSet())

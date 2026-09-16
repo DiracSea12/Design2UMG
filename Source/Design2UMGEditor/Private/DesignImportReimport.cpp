@@ -5,6 +5,9 @@
 #include "Design2UMGPrototypeGraphWiring.h"
 #include "UMGPrototypeAnimationBuilder.h"
 #include "UMGSchemaSourceExtensions.h"
+#include "Design2UMGComponentBlueprints.h"
+#include "DesignImportDiagnosticReport.h"
+#include "Misc/PackageName.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/PanelWidget.h"
@@ -31,9 +34,59 @@ namespace DesignImportPipeline
 		{
 			return MoveTemp(*Early);
 		}
+		SettingsSnapshot.GenerationSettings.ComponentConversionSettings = SettingsSnapshot.ConversionSettings;
 		const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings = SettingsSnapshot.GenerationSettings;
-		const FReimportSession Session{ Document, Request, Data, GenerationSettings };
+		const FReimportSession Session{ &Document, Request, Data, GenerationSettings };
+		if (!Manifest.bComponentBatchRoot && !Manifest.GeneratedAssetHash.IsEmpty())
+		{
+			Result.bFullConflict = true;
+			AddReimportDiagnostic(Result.Diagnostics, TEXT("reimport_component_batch_root_required"),
+				TEXT("Select the parent WBP created by the original import to update this component and its dependencies together. This selected asset is a generated child WBP; its saved content was left unchanged."));
+			DesignImportDiagnosticReport::WriteReimport(Document, Data, TargetPackage, Result.Diagnostics);
+			return Result;
+		}
+		if (Manifest.bComponentBatchRoot)
+		{
+			if (Data.SourceDocument().ComponentDependenciesJson.IsEmpty())
+			{
+				Result.bFullConflict = true;
+				AddReimportDiagnostic(Result.Diagnostics, TEXT("reimport_component_dependencies_missing"),
+					TEXT("This asset owns a component batch; the new source is missing its dependency bundle"));
+				return Result;
+			}
+			FDesign2UMGGenerationOutput Output;
+			FUMGPrototypeNavigationData Navigation;
+			UWidgetBlueprint* Updated = FDesign2UMGComponentBlueprintContext::Build(Data,
+				FPackageName::GetLongPackagePath(TargetPackage), &GenerationSettings, &Output, &Navigation, WBP);
+			Result.bSucceeded = Updated && FUMGGenerator::SaveWidgetBlueprint(Updated, &Output, &Navigation);
+			Result.UpdatedBlueprint = Result.bSucceeded ? Updated : nullptr;
+			Result.ComponentMappingDiagnostics = MoveTemp(Output.MappingDiagnostics);
+			Result.bFullConflict = Result.ComponentMappingDiagnostics.ContainsByPredicate(
+				[](const FDesign2UMGMappingDiagnostic& Diagnostic) { return Diagnostic.Kind == TEXT("component_asset_conflict"); });
+			AddReimportDiagnostic(Result.Diagnostics, Result.bSucceeded ? TEXT("reimport_completed") : TEXT("reimport_component_batch_failed"),
+				FString::Printf(TEXT("Component batch update %s: %s"), Result.bSucceeded ? TEXT("completed") : TEXT("failed; see component diagnostics"), *TargetPackage));
+			DesignImportDiagnosticReport::WriteReimport(Document, Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics);
+			return Result;
+		}
 
+		FDesign2UMGGenerationOutput GenerationOutput;
+		FUMGPrototypeNavigationData ReimportNavigation;
+		int32 TransactionIndex = INDEX_NONE;
+		Result = ApplyPreparedReimport(Session, WBP, Manifest, GenerationOutput, ReimportNavigation, TransactionIndex);
+		if (!Result.bSucceeded) return Result;
+		// 11) Writability pre-check + save + FailSaveWithRollback.
+		return SaveReimportedAsset(
+			Session, TargetPackage, WBP, GenerationOutput, ReimportNavigation, TransactionIndex, Result);
+	}
+	FDesignReimportResult ApplyPreparedReimport(
+		const FReimportSession& Session, UWidgetBlueprint* WBP,
+		const FDesign2UMGGenerationManifestSidecar& Manifest,
+		FDesign2UMGGenerationOutput& GenerationOutput,
+		FUMGPrototypeNavigationData& ReimportNavigation, int32& TransactionIndex)
+	{
+		FDesignReimportResult Result;
+		const auto& Data = Session.Data;
+		const auto& GenerationSettings = Session.GenerationSettings;
 		// 4)-5) Scope matching, source-root location and host continuation.
 		const FUMGWidgetNode* ScopeRoot = nullptr;
 		bool bPrototypeHostContinued = false;
@@ -60,7 +113,7 @@ namespace DesignImportPipeline
 		}
 
 		// 9) Apply the update plan inside an editor transaction.
-		const int32 TransactionIndex = BeginReimportApplyTransaction(WBP);
+		TransactionIndex = BeginReimportApplyTransaction(WBP);
 
 		// Generated prototype navigation wiring is plugin-owned transient content, re-authored by the
 		// save (step 11) from the new source. Clear it before the tree updates so the safe-delete /
@@ -121,7 +174,7 @@ namespace DesignImportPipeline
 		// 9h) Re-author the generated transition animations for the updated tree (name-prefix purge inside
 		// keeps regenerates from accumulating); the enriched navigation copy carries the animation names
 		// into the save, whose wiring plays them around the page switch.
-		FUMGPrototypeNavigationData ReimportNavigation = Session.Data.PrototypeNavigation();
+		ReimportNavigation = Session.Data.PrototypeNavigation();
 		UMGPrototypeAnimationBuilder::GenerateNavigationAnimations(WBP, PreparedScopeRoot, ReimportNavigation);
 
 		// Mapping diagnostics exit (aligned with the import path's UMGGenerator assembly): the ini validation
@@ -131,12 +184,12 @@ namespace DesignImportPipeline
 		Result.ComponentMappingDiagnostics.Append(MappingBuildState.GetDiagnostics());
 
 		// 10) Assemble the post-reimport manifest payload + asset finalization (CDO preview size, variable GUIDs).
-		FDesign2UMGGenerationOutput GenerationOutput = BuildReimportManifestPayload(
+		GenerationOutput = BuildReimportManifestPayload(
 			Manifest, bPrototypeHostContinued, Data, Shared, UpdatedD2UOwned, KeepAsIsWidgetNames);
 		FinalizeReimportedAssetState(WBP, DesignSize);
 
-		// 11) Writability pre-check + save + FailSaveWithRollback.
-		return SaveReimportedAsset(
-			Session, TargetPackage, WBP, GenerationOutput, ReimportNavigation, TransactionIndex, Result);
+		Result.bSucceeded = true;
+		return Result;
 	}
+
 }

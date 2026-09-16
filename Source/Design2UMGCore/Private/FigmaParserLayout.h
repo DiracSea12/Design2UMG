@@ -18,5 +18,5 @@ namespace FigmaParserInternal
 		const FNodeBounds* ParentCoordinateBounds,
 		FDesignNode& OutNode,
 		bool bParentHasAutoLayout);
-	void FinalizeNodePaddingRuntimeWrap(FDesignNode& Node, bool bInsideInstanceSubtree);
+	void FinalizeNodePaddingRuntimeWrap(FDesignNode& Node);
 }

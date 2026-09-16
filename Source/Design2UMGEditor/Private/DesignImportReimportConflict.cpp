@@ -3,6 +3,8 @@
 #include "DesignImportReimportInternal.h"
 
 #include "DesignImportDiagnosticReport.h"
+#include "UMGPrototypeAnimationBuilder.h"
+#include "Animation/WidgetAnimation.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Blueprint/WidgetTree.h"
@@ -19,16 +21,7 @@ namespace DesignImportPipeline
 		void CollectSubtreeWidgets(UWidget* SubtreeRoot, TFunctionRef<void(UWidget*)> Visitor)
 		{
 			Visitor(SubtreeRoot);
-			if (UPanelWidget* Panel = Cast<UPanelWidget>(SubtreeRoot))
-			{
-				for (int32 Index = 0; Index < Panel->GetChildrenCount(); ++Index)
-				{
-					if (UWidget* Child = Panel->GetChildAt(Index))
-					{
-						CollectSubtreeWidgets(Child, Visitor);
-					}
-				}
-			}
+			UWidgetTree::ForWidgetAndChildren(SubtreeRoot, Visitor);
 		}
 
 		/** Whether any widget in the subtree is referenced by project bindings (WBP Bindings reference by ObjectName). */
@@ -50,6 +43,16 @@ namespace DesignImportPipeline
 				if (SubtreeNames.Contains(EditorBinding.ObjectName))
 				{
 					return true;
+				}
+			}
+			for (const UWidgetAnimation* Animation : WBP->Animations)
+			{
+				if (!Animation || UMGPrototypeAnimationBuilder::IsGeneratedNavigationAnimation(Animation)) continue;
+				for (const FWidgetAnimationBinding& Binding : Animation->GetBindings())
+				{
+					// UE resolves both widget and panel-slot animation targets through WidgetName.
+					// AnimationGuid identifies the movie-scene binding, not a widget-tree object.
+					if (!Binding.bIsRootWidget && SubtreeNames.Contains(Binding.WidgetName.ToString())) return true;
 				}
 			}
 			return false;
@@ -140,6 +143,7 @@ namespace DesignImportPipeline
 		{
 			RemovedNames.Add(RemovedWidget->GetFName().ToString());
 		});
+		EnsureReimportWidgetGuids(WBP);
 		FWidgetBlueprintEditorUtils::DeleteWidgets(
 			WBP, { SubtreeRoot }, FWidgetBlueprintEditorUtils::EDeleteWidgetWarningType::DeleteSilently);
 		for (const FString& RemovedName : RemovedNames)
@@ -202,8 +206,8 @@ namespace DesignImportPipeline
 
 		if (!Session.Request.bGenerateResolutionCopy)
 		{
-			DesignImportDiagnosticReport::WriteReimport(
-				Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics);
+			if (Session.Document) DesignImportDiagnosticReport::WriteReimport(
+				*Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics);
 			return Result;
 		}
 
@@ -218,8 +222,8 @@ namespace DesignImportPipeline
 				FString::Printf(
 					TEXT("Resolution copy skipped: %s already exists"),
 					*(PackageDir / CopyName)));
-			DesignImportDiagnosticReport::WriteReimport(
-				Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics);
+			if (Session.Document) DesignImportDiagnosticReport::WriteReimport(
+				*Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics);
 			return Result;
 		}
 
@@ -247,8 +251,8 @@ namespace DesignImportPipeline
 		}
 		// The copy-generation chain's mapping diagnostics (ini validation, hits, the copy's own sidecar write failure) land in the report.
 		Result.ComponentMappingDiagnostics.Append(GenerationOutput.MappingDiagnostics);
-		DesignImportDiagnosticReport::WriteReimport(
-			Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics);
+		if (Session.Document) DesignImportDiagnosticReport::WriteReimport(
+			*Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics);
 		return Result;
 	}
 }

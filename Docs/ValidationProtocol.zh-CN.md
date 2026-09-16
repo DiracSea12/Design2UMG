@@ -1,5 +1,13 @@
 # Design2UMG Validation Protocol
 
+## 当前输入基线（2026-09-15 用户确认）
+
+当前 81-case 基线为 `G:/UE5/FPSRoguelike/Saved/Design2UMG/Automation/review-batch-transaction-full-20260915`。当前输入与参考文件已逐项核验，原始 PNG、评分公式、阈值、成绩文件均不改写。后续完整回归显式使用该目录作为 `--reference-root`。
+
+`Automation/_baseline.json` 是小型一次性登记指针，绑定该 run 的 summary/run_scope SHA256 与登记时间；`ReferenceCache/CURRENT.json` 同步指向它。历史重建只纳入该登记基线和登记之后的有效运行。不同源/有效参考身份不强行比较；同身份的既有历史会保留，A→B→A 不得把回来的 A 当全新基线。候选运行不能自己移动登记起点。缺失输入身份、弱参考来源、缺报告或同输入退步仍阻断。
+
+仓库巨型 `design2umg_pinned_baseline.json` 已删除，消费者不再依赖该文件。下文旧阶段与旧 run 的记录只作历史背景，不覆盖本节已明确的当前基线。
+
 English canonical: [ValidationProtocol.md](ValidationProtocol.md)
 
 Last verified: 2026-05-18

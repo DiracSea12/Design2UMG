@@ -5,8 +5,10 @@
 #include "CoreMinimal.h"
 #include "Design2UMGSettings.h"
 #include "Design2UMGComponentMappingConfig.h"
+#include "Design2UMGConverter.h"
 
 class UClass;
+class FDesign2UMGComponentBlueprintContext;
 struct FDesignPreviewMaterializationSettingsSnapshot;
 
 struct FDesign2UMGGenerationSettingsSnapshot
@@ -19,6 +21,8 @@ struct FDesign2UMGGenerationSettingsSnapshot
 	 * preview materialization (preview narrowing) carries no mapping.
 	 */
 	FDesign2UMGComponentMappingConfig ComponentMapping;
+	FDesign2UMGConversionSettings ComponentConversionSettings = FDesign2UMGConversionSettings::Defaults();
+	TSharedPtr<FDesign2UMGComponentBlueprintContext> ComponentBlueprints;
 
 	static FDesign2UMGGenerationSettingsSnapshot FromSettings(const UDesign2UMGSettings& Settings);
 	static FDesign2UMGGenerationSettingsSnapshot FromMaterializationSettings(

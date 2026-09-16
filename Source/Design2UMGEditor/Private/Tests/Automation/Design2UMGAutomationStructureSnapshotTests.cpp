@@ -12,6 +12,7 @@
 #include "Components/Image.h"
 #include "Components/Overlay.h"
 #include "Components/RetainerBox.h"
+#include "Components/RichTextBlock.h"
 #include "Components/SizeBox.h"
 #include "Dom/JsonValue.h"
 #include "Serialization/JsonSerializer.h"
@@ -540,6 +541,26 @@ bool FDesignIdentityVariantConversionParityTest::RunTest(const FString& Paramete
 			JsonObjectsEqual(BaselineStructureSnapshot, VariantStructureSnapshot));
 	}
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRichTextStructureSnapshotTest,
+	"Design2UMG.Automation.RichTextStructureSnapshot",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FRichTextStructureSnapshotTest::RunTest(const FString&)
+{
+	UWidgetTree* Tree = NewObject<UWidgetTree>();
+	URichTextBlock* Text = Tree->ConstructWidget<URichTextBlock>(URichTextBlock::StaticClass(), TEXT("StyledLabel"));
+	Tree->RootWidget = Text;
+	Text->SetText(FText::FromString(TEXT("<accent>A&amp;B</> &lt;C&gt;")));
+	const TSharedPtr<FJsonObject> Snapshot = Design2UMGAutomationStructureSnapshot::BuildWidgetTreeStructureSnapshot(Tree);
+	if (!TestTrue(TEXT("Snapshot exists"), Snapshot.IsValid())) return false;
+	TestEqual(TEXT("Native rich text counts as one text node"), Snapshot->GetIntegerField(TEXT("text_nodes")), 1);
+	const TArray<TSharedPtr<FJsonValue>>& Visible = Snapshot->GetArrayField(TEXT("visible_texts"));
+	if (!TestEqual(TEXT("Visible text is recorded"), Visible.Num(), 1)) return false;
+	TestEqual(TEXT("Markup is excluded and entities decoded using Slate semantics"), Visible[0]->AsString(), FString(TEXT("A&B <C>")));
+	const TArray<TSharedPtr<FJsonValue>>& Nodes = Snapshot->GetArrayField(TEXT("structure_nodes"));
+	TestEqual(TEXT("Native type is classified without waiving structure checks"), Nodes[0]->AsObject()->GetStringField(TEXT("kind")), FString(TEXT("text")));
 	return true;
 }
 

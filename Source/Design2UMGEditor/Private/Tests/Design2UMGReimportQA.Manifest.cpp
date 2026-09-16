@@ -225,6 +225,16 @@ bool FSafeReimportQAManifestLoadRejectsBadSidecarsTest::RunTest(const FString&)
 		TEXT("{\"schemaVersion\":1,\"provider\":\"figma\",\"documentScope\":\"s\",\"sourceRoot\":{},\"instances\":[],\"d2uOwned\":[]}")));
 	TestFalse(TEXT("empty instances rejected"), Design2UMGGenerationManifest::TryLoadSidecarForAsset(Package, Sidecar, Error));
 	TestTrue(TEXT("empty-instances reason"), Error.Contains(TEXT("records no instances")));
+	for (const FString& Instances : {
+		FString(TEXT("[{}]")),
+		FString(TEXT("[null]")),
+		FString(TEXT("[{\"kind\":\"generated\",\"designNodeId\":\"a\",\"widgetName\":\"A\"},{\"kind\":\"generated\",\"designNodeId\":\"a\",\"widgetName\":\"B\"}]")) })
+	{
+		const FString Json = TEXT("{\"schemaVersion\":1,\"provider\":\"figma\",\"documentScope\":\"s\",\"instances\":")
+			+ Instances + TEXT(",\"d2uOwned\":[\"A\",\"B\"]}");
+		TestTrue(TEXT("Write semantically invalid manifest"), QAWriteFileString(SidecarPath, Json));
+		TestFalse(TEXT("Invalid instance identity is rejected"), Design2UMGGenerationManifest::TryLoadSidecarForAsset(Package, Sidecar, Error));
+	}
 
 	IFileManager::Get().Delete(*SidecarPath, false, true);
 	return true;
@@ -477,4 +487,3 @@ bool FSafeReimportQAManifestWriteFailurePropagatesTest::RunTest(const FString&)
 }
 
 #endif
-

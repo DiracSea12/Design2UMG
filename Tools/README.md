@@ -27,10 +27,10 @@ These files support release governance, historical-best validation, or internal 
 - `design2umg_compatibility_selftest.py`
 - `design2umg_diagnostics_selftest.py`
 - `design2umg_run_history_selftest.py`
+- `design2umg_evidence_epoch_selftest.py`
 - `design2umg_batch_report_contract_selftest.py`
 - `design2umg_structure_guard_selftest.py`
 - `design2umg_validation_helpers_selftest.py`
-- `design2umg_pinned_baseline.json`
 - `Release/`
 
 ## Python dependencies
@@ -50,6 +50,7 @@ python Tools/design2umg_validation_helpers_selftest.py
 python Tools/design2umg_compatibility_selftest.py
 python Tools/design2umg_diagnostics_selftest.py
 python Tools/design2umg_run_history_selftest.py
+python Tools/design2umg_evidence_epoch_selftest.py
 python Tools/design2umg_batch_report_contract_selftest.py
 python Tools/design2umg_determinism_smoke_selftest.py
 ```

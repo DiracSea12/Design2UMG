@@ -89,6 +89,9 @@ void ApplyNodeLayoutProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNo
 
 void ApplyNodeTextStyleProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver)
 {
+	// Pencil's paragraph renderer distributes authored line-height leading on both sides.
+	OutNode.Text.bSourceHalfLeadingBaseline = true;
+	OutNode.Text.bSourceRoundLineHeightToPixels = true;
 	FString FontFamily;
 	if (JsonObj->TryGetStringField(TEXT("fontFamily"), FontFamily))
 		OutNode.Text.FontFamily = Resolver.ResolveString(FontFamily);

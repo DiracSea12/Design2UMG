@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import time
 from pathlib import Path
@@ -19,11 +20,6 @@ from design2umg_verify_lib.evidence_contract import collect_source_input
 from design2umg_verify_lib.json_io import file_signature
 from design2umg_verify_lib.json_io import load_json
 from design2umg_verify_lib.json_io import write_json
-from design2umg_verify_lib.manifest_paths import (
-    default_pinned_baseline_path as helper_default_pinned_baseline_path,
-    iter_manifest_case_report_paths as helper_iter_manifest_case_report_paths,
-)
-
 
 METRIC_FIELDS = (
     ("stable_changed_ratio", "stable_changed_ratio"),
@@ -35,62 +31,57 @@ METRIC_EPSILON = 1e-9
 DEFAULT_PIXEL_TOLERANCE = 6
 CACHE_FILENAME = "_admissible_best_cache.json"
 CACHE_VERSION = 3
-PINNED_BASELINE_FILENAME = "design2umg_pinned_baseline.json"
-FORMAL_CASE_COUNT = 71
+EVIDENCE_EPOCH_FIELDS = (
+    "source_design_artifact_hash",
+    "reference_image_hash",
+)
 
 
-def resolve_admissible_best_manifest(automation_root: Path) -> tuple[Path, dict, str]:
-    output_path = automation_root / "_admissible_best_latest.json"
-    pinned_path = helper_default_pinned_baseline_path(Path(__file__), PINNED_BASELINE_FILENAME)
-    if pinned_path.is_file():
-        pinned_manifest = load_json(pinned_path)
-        pinned_cases = pinned_manifest.get("cases") or {}
-        pinned_scope_count = pinned_manifest.get("scope_case_count", pinned_manifest.get("case_count"))
-        if pinned_scope_count != FORMAL_CASE_COUNT:
-            pinned_manifest["scope_case_count"] = FORMAL_CASE_COUNT
-        if len(pinned_cases) != FORMAL_CASE_COUNT:
-            manifest = rebuild_historical_best_manifest(automation_root)
-            manifest["pinned_baseline_source"] = str(pinned_path)
-            manifest["pinned_baseline_skipped_by_reason"] = {"pinned_case_count_incomplete": len(pinned_cases)}
-            manifest["formal_scope_case_count"] = FORMAL_CASE_COUNT
-            write_json(output_path, manifest)
-            return output_path, manifest, f"{pinned_path} (incomplete pinned case set)"
-        skipped_by_reason: dict[str, int] = {}
-        for case in pinned_cases.values():
-            case_skip_reasons: set[str] = set()
-            report_paths = helper_iter_manifest_case_report_paths(case, pinned_path)
-            if not report_paths:
-                case_skip_reasons.add("report_missing")
+def evidence_epoch_identity(source_input: dict) -> dict:
+    return {field: source_input.get(field) or "" for field in EVIDENCE_EPOCH_FIELDS}
 
-            for report_path in report_paths:
-                compatibility = evaluate_report_compatibility(report_path)
-                rule_status = compatibility["render_size"]
-                if not rule_status.get("compatible"):
-                    case_skip_reasons.add(rule_status.get("reason", "render_size_rule_incompatible"))
-                    continue
 
-                pipeline_rule_status = compatibility["pipeline_determinism"]
-                if not pipeline_rule_status.get("compatible"):
-                    case_skip_reasons.add(pipeline_rule_status.get("reason", "pipeline_determinism_rule_incompatible"))
+def same_evidence_epoch(left: dict, right: dict) -> bool:
+    return all(left.get(field) and left.get(field) == right.get(field) for field in EVIDENCE_EPOCH_FIELDS)
+def resolve_admissible_best_manifest(
+    automation_root: Path,
+    *,
+    expected_case_names: set[str],
+    output_path: Path | None = None,
+) -> tuple[Path, dict, str]:
+    """Build the dynamic history view for the currently discovered case set."""
+    expected_names = set(expected_case_names)
+    if not expected_names:
+        raise ValueError("Historical validation requires a nonempty discovered case set")
 
-            for reason in case_skip_reasons:
-                skipped_by_reason[reason] = skipped_by_reason.get(reason, 0) + 1
-
-        if not skipped_by_reason:
-            pinned_manifest["render_size_rule"] = render_rule.DESIGN_SIZE_RENDER_RULE
-            pinned_manifest["pipeline_determinism_rule"] = render_rule.PIPELINE_DETERMINISM_RULE
-            write_json(output_path, pinned_manifest)
-            return output_path, pinned_manifest, str(pinned_path)
-
-        manifest = rebuild_historical_best_manifest(automation_root)
-        manifest["pinned_baseline_source"] = str(pinned_path)
-        manifest["pinned_baseline_skipped_by_reason"] = skipped_by_reason
-        write_json(output_path, manifest)
-        return output_path, manifest, f"{pinned_path} (skipped incompatible pinned entries)"
-
+    output_path = output_path or (automation_root / "_admissible_best_latest.json")
     manifest = rebuild_historical_best_manifest(automation_root)
+    historical_names = set(manifest.get("cases") or {})
+    manifest["scope_case_count"] = len(expected_names)
+    manifest["formal_scope_case_count"] = len(expected_names)
+    manifest["scope_case_names"] = sorted(expected_names)
+    manifest["scope_missing_cases"] = sorted(expected_names - historical_names)
+    manifest["scope_extra_historical_cases"] = sorted(historical_names - expected_names)
+    manifest["render_size_rule"] = render_rule.DESIGN_SIZE_RENDER_RULE
+    manifest["pipeline_determinism_rule"] = render_rule.PIPELINE_DETERMINISM_RULE
     write_json(output_path, manifest)
-    return output_path, manifest, str(output_path)
+    return output_path, manifest, "dynamic_history"
+
+
+def load_baseline_anchor(automation_root: Path) -> tuple[Path | None, float]:
+    """An explicit user acceptance starts a new history window, not a moving baseline."""
+    pointer_path = automation_root / "_baseline.json"
+    if not pointer_path.is_file():
+        return None, 0.0
+    pointer = load_json(pointer_path)
+    name = pointer.get("run")
+    if pointer.get("schema") != 1 or not isinstance(name, str) or Path(name).name != name:
+        raise ValueError(f"Invalid baseline pointer: {pointer_path}")
+    root = automation_root / name
+    for filename, field in (("summary.json", "summary_sha256"), ("run_scope.json", "scope_sha256")):
+        if hashlib.sha256((root / filename).read_bytes()).hexdigest() != pointer.get(field):
+            raise ValueError(f"Accepted baseline evidence changed: {root / filename}")
+    return root, float(pointer["accepted_at_unix"])
 
 
 def load_cache(path: Path) -> dict:
@@ -201,7 +192,7 @@ def load_historical_validation(run_root: Path) -> dict | None:
     return payload if isinstance(payload, dict) else None
 
 
-def classify_summary_admissibility(run_root: Path, summary: dict) -> tuple[bool, str]:
+def classify_summary_admissibility(run_root: Path, summary: dict, *, accepted_baseline: bool = False) -> tuple[bool, str]:
     blocked_cases = summary.get("blocked_cases")
     if isinstance(blocked_cases, int) and blocked_cases > 0:
         return False, "summary_blocked_cases"
@@ -223,21 +214,31 @@ def classify_summary_admissibility(run_root: Path, summary: dict) -> tuple[bool,
             return False, "summary_no_regression_failed"
 
     historical_validation = load_historical_validation(run_root)
+    total = summary.get("total")
+    if (not isinstance(total, int) or total <= 0 or not isinstance(no_regression, dict)
+            or no_regression.get("available") != total or no_regression.get("failed") != 0):
+        return False, "summary_no_regression_unavailable"
+    if accepted_baseline:
+        return True, "user_accepted_baseline"
+    if historical_validation is None:
+        return False, "historical_validation_unavailable"
     if historical_validation is not None:
         if bool(historical_validation.get("blocked")):
             return False, "historical_validation_blocked"
         historical_regressions = historical_validation.get("historical_best_regressions") or []
         if isinstance(historical_regressions, list) and historical_regressions:
             return False, "historical_validation_regressed"
+        if historical_validation.get("historical_best_checked") is not True:
+            return False, "historical_validation_unavailable"
 
     return True, "summary_admissible"
 
 
-def classify_run_inclusion(run_root: Path, summary: dict) -> tuple[bool, str]:
+def classify_run_inclusion(run_root: Path, summary: dict, *, accepted_baseline: bool = False) -> tuple[bool, str]:
     run_scope = load_run_scope(run_root)
     if run_scope is not None:
         if bool(run_scope.get("formal_admissible_candidate")):
-            summary_admissible, summary_reason = classify_summary_admissibility(run_root, summary)
+            summary_admissible, summary_reason = classify_summary_admissibility(run_root, summary, accepted_baseline=accepted_baseline)
             if not summary_admissible:
                 return False, summary_reason
             return True, "run_scope"
@@ -247,7 +248,11 @@ def classify_run_inclusion(run_root: Path, summary: dict) -> tuple[bool, str]:
 
 
 def iter_run_roots(automation_root: Path):
-    for child in sorted(automation_root.iterdir(), key=lambda item: item.name.lower()):
+    def run_order(item: Path) -> tuple[float, str]:
+        summary_path = item / "summary.json"
+        return (summary_path.stat().st_mtime if summary_path.is_file() else 0.0, item.name.lower())
+
+    for child in sorted(automation_root.iterdir(), key=run_order):
         if not child.is_dir():
             continue
         if not (child / "summary.json").is_file():
@@ -267,6 +272,7 @@ def build_case_entry(case_name: str) -> dict:
         "structure_passed": True,
         "metric_sources": {},
         "admitted_sources": [],
+        "evidence_epoch_identity": {},
         "source_runs": [],
         "updated_at": "",
         "updated_timestamp": 0.0,
@@ -338,6 +344,7 @@ def collect_best_cases(automation_root: Path, cache_payload: dict) -> tuple[
 ]:
     metric_cache = cache_payload.setdefault("entries", {})
     best_cases: dict[str, dict] = {}
+    epochs_by_case: dict[str, dict[tuple[str, str], dict]] = {}
     source_runs: list[str] = []
     skipped_runs: list[str] = []
     included_runs_by_reason: dict[str, int] = {"run_scope": 0}
@@ -356,8 +363,12 @@ def collect_best_cases(automation_root: Path, cache_payload: dict) -> tuple[
         "pipeline_determinism_rule_incompatible": 0,
     }
 
+    accepted_root, accepted_at = load_baseline_anchor(automation_root)
     for run_root in iter_run_roots(automation_root):
         summary_path = run_root / "summary.json"
+        is_accepted_baseline = run_root == accepted_root
+        if accepted_root is not None and not is_accepted_baseline and summary_path.stat().st_mtime <= accepted_at:
+            continue
         try:
             summary = load_json(summary_path)
         except EvidenceReadError as exc:
@@ -368,7 +379,7 @@ def collect_best_cases(automation_root: Path, cache_payload: dict) -> tuple[
         if not isinstance(cases, list) or not cases:
             continue
 
-        include_run, inclusion_reason = classify_run_inclusion(run_root, summary)
+        include_run, inclusion_reason = classify_run_inclusion(run_root, summary, accepted_baseline=is_accepted_baseline)
         if not include_run:
             skipped_runs.append(run_root.name)
             skipped_runs_by_reason[inclusion_reason] = skipped_runs_by_reason.get(inclusion_reason, 0) + 1
@@ -416,7 +427,18 @@ def collect_best_cases(automation_root: Path, cache_payload: dict) -> tuple[
                 "source_input": collect_source_input(run_root, case_name, run_scope, summary, report, report_path),
             }
 
-            entry = best_cases.setdefault(case_name, build_case_entry(case_name))
+            candidate_epoch = evidence_epoch_identity(candidate_source["source_input"])
+            # Keep each input's selected source while visiting interleaved runs.
+            # The public view defaults to the latest epoch; admitted sources retain
+            # the other epochs so a returning input is never silently reseeded.
+            epoch_key = tuple(candidate_epoch[field] for field in EVIDENCE_EPOCH_FIELDS)
+            epochs = epochs_by_case.setdefault(case_name, {})
+            entry = epochs.get(epoch_key)
+            if entry is None:
+                entry = build_case_entry(case_name)
+                entry["evidence_epoch_identity"] = candidate_epoch
+                epochs[epoch_key] = entry
+            best_cases[case_name] = entry
             entry["render_size_rule"] = render_rule.DESIGN_SIZE_RENDER_RULE
             entry["pipeline_determinism_rule"] = render_rule.PIPELINE_DETERMINISM_RULE
             entry["structure_required"] = bool(entry.get("structure_required")) or candidate_source["structure_required"]
@@ -461,10 +483,11 @@ def collect_best_cases(automation_root: Path, cache_payload: dict) -> tuple[
             entry["stable_mean_abs_error"] = candidate_source["stable_mae"]
             entry["mean_abs_error"] = candidate_source["mae"]
 
-    for entry in best_cases.values():
+    for case_name, entry in best_cases.items():
         entry.pop("updated_timestamp", None)
         entry["admitted_sources"] = sorted(
-            entry.get("admitted_sources") or [],
+            [source for epoch in epochs_by_case[case_name].values()
+             for source in epoch["admitted_sources"]],
             key=lambda source: (
                 source.get("stable_changed_ratio") is None,
                 source.get("stable_changed_ratio") if source.get("stable_changed_ratio") is not None else 0.0,
@@ -555,6 +578,8 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Output JSON path. Defaults to <automation-root>/_admissible_best_latest.json",
     )
+    parser.add_argument("--design-root", required=True, help="Design corpus directory used for full case discovery.")
+    parser.add_argument("--figma-export-root", action="append", default=[], help="Figma export corpus (repeatable).")
     return parser.parse_args()
 
 
@@ -568,7 +593,17 @@ def main() -> None:
     if not automation_root.is_dir():
         raise RuntimeError(f"Automation root not found: {automation_root}")
 
-    manifest = rebuild_historical_best_manifest(automation_root)
+    from design2umg_verify_lib import batch_discovery
+
+    design_root = Path(args.design_root).resolve()
+    if not design_root.is_dir():
+        raise RuntimeError(f"Design root not found: {design_root}")
+    export_roots = batch_discovery.resolve_default_figma_export_roots(design_root, args.figma_export_root)
+    discovered = batch_discovery.discover_pen_cases(design_root, "", "")
+    discovered.extend(batch_discovery.discover_figma_export_cases(export_roots, "", ""))
+    _, manifest, _ = resolve_admissible_best_manifest(
+        automation_root, expected_case_names={case["name"] for case in discovered}
+    )
     output_path = (
         Path(args.output_json).resolve()
         if args.output_json

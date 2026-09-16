@@ -9,6 +9,7 @@
 #include "DesignImageBakeUtils.h"
 #include "DesignRemoteImageImporter.h"
 #include "FontResolver.h"
+#include "DesignLocalFontImport.h"
 #include "UMGJsonParser.h"
 
 namespace
@@ -91,11 +92,30 @@ namespace DesignImportPlanning
 			Result.SettingsSnapshot = *Input.SettingsSnapshot;
 		}
 
+		// A document whose only top-level node is a reusable library entry (e.g. a selected
+		// Figma component definition exported as the design root) is being imported as the
+		// asset body; the converter would otherwise skip that root and emit an empty assembly.
+		if (Document.Children.Num() == 1 && Document.Children[0].IsValid() && Document.Children[0]->bReusable)
+		{
+			Document.Children[0]->bReusable = false;
+		}
+
 		const FDesign2UMGConversionSettings& ConversionSettings =
 			Result.SettingsSnapshot.IsSet()
 				? Result.SettingsSnapshot->ConversionSettings
 				: BuildFallbackConversionSettings();
+		TArray<FString> FontWarnings;
+		if (!DesignLocalFontImport::Prepare(Document, FontWarnings, Result.ErrorMessage))
+		{
+			UE_LOG(LogDesign2UMG, Error, TEXT("%s"), *Result.ErrorMessage);
+			return Result;
+		}
 		PrepareDocumentForGeneration(Document, Result.Data, ConversionSettings);
+		Result.Data.Warnings.Append(FontWarnings);
+		if (Result.SettingsSnapshot.IsSet())
+		{
+			Result.SettingsSnapshot->GenerationSettings.ComponentConversionSettings = ConversionSettings;
+		}
 		if (Input.bResolveImages)
 		{
 			ResolveImages(Result.Data, &Result.ImageReport);

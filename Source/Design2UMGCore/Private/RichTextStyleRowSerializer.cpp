@@ -23,7 +23,6 @@ bool RichTextStyleRowSerializer::Serialize(const TArray<FResolvedRichTextRun>& R
 		if (Run.FontSize.IsSet())
 		{
 			RowObject->SetNumberField(UMGPropertyKeys::FontSize, Run.FontSize.GetValue());
-			RowObject->SetNumberField(UMGPropertyKeys::DesignFontSize, Run.DesignFontSize > 0.0f ? Run.DesignFontSize : Run.FontSize.GetValue());
 		}
 		if (Run.LetterSpacing.IsSet())
 		{

@@ -29,6 +29,8 @@ public:
 
 	/** GET /v1/files/:key - Fetch the full file payload. */
 	void GetFile(const FString& FileKey, FOnComplete OnComplete);
+	/** Resolve a published component to its source file and node. */
+	void GetComponent(const FString& ComponentKey, FOnComplete OnComplete);
 
 	/** GET /v1/files/:key/images - Official "get file image fills" endpoint (imageRef -> URL map). */
 	void GetFileImages(const FString& FileKey, FOnComplete OnComplete);

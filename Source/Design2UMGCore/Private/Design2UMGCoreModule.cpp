@@ -5,6 +5,7 @@
 
 #include "Editor.h"
 #include "Engine/Font.h"
+#include "Engine/FontFace.h"
 #include "Misc/CoreDelegates.h"
 #include "Modules/ModuleManager.h"
 #include "Subsystems/ImportSubsystem.h"
@@ -60,10 +61,8 @@ private:
 
 	void HandleAssetReimported(UObject* ReimportedObject)
 	{
-		// Cache keys are font asset paths; a reimported UFont may have changed its
-		// metrics, so clear the whole map (avoids key-format coupling) - it repopulates
-		// lazily on the next read.
-		if (ReimportedObject && ReimportedObject->IsA<UFont>())
+		// Both composite font and individual face imports can change measured metrics.
+		if (ReimportedObject && (ReimportedObject->IsA<UFont>() || ReimportedObject->IsA<UFontFace>()))
 		{
 			TextMeasurementRuntimeProbe::ClearLineGapEmCache();
 		}

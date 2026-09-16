@@ -3,6 +3,7 @@
 #include "Design2UMGEditorImportServices.h"
 
 #include "Design2UMGEditorImportOrchestrator.h"
+#include "Design2UMGEditorImportFrameSelection.h"
 #include "Design2UMGEditorImportRequestSetup.h"
 #include "Design2UMGEditorImportSupport.h"
 #include "Design2UMGEditorMcpImportPayload.h"
@@ -10,6 +11,11 @@
 #include "Design2UMGLog.h"
 #include "FigmaImageExporter.h"
 #include "FigmaParser.h"
+#include "FigmaComponentDependencies.h"
+#include "DesignJsonUtils.h"
+#include "DesignSchemaSourceExtensions.h"
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonSerializer.h"
 #include "Misc/App.h"
 #include "Widgets/Notifications/SNotificationList.h"
 
@@ -151,14 +157,89 @@ namespace Design2UMGEditorImportServices
 			return;
 		}
 
-		FDesignDocument ParsedDocument;
-		if (!FFigmaParser::ParseDocument(Body, ParsedDocument))
+		FString PreparedSource;
+		FString DependencyError;
+		if (!FigmaComponentDependencies::PrepareRestFile(Body, FileKey, PreparedSource, DependencyError)
+			|| !DesignJsonUtils::TryParseObject(PreparedSource, ComponentSource))
 		{
+			UE_LOG(LogDesign2UMG, Error, TEXT("Figma dependency preparation failed: %s"), *DependencyError);
 			Design2UMGEditorImportSupport::ShowNotification(LOCTEXT("FigmaParseFailed", "Design2UMG: Failed to parse Figma file"), SNotificationItem::CS_Fail);
 			Design2UMGEditorUnattendedExit::ExitUnattendedWithStatus(false, TEXT("Unattended mode: figma parse failed; exiting with status 1"));
 			return;
 		}
 
+		ResolvedLibraryFiles.Add(FileKey);
+		SelectImportRootAndResolve(PreparedSource);
+	}
+
+	void FFigmaImportSession::SelectImportRootAndResolve(const FString& PreparedSource)
+	{
+		if (!SelectedRootId.IsEmpty())
+		{
+			BeginResolveSelectedRoot(SelectedRootId);
+			return;
+		}
+
+		FDesignDocument SelectionDocument;
+		if (!FFigmaParser::ParseDocument(PreparedSource, SelectionDocument))
+		{
+			FailComponentImport(TEXT("Failed to parse Figma file before component dependency resolution"));
+			return;
+		}
+		const TArray<FDesignFrameInfo> Frames = ExtractTopFrames(SelectionDocument);
+		if (Frames.IsEmpty())
+		{
+			FailComponentImport(TEXT("No importable Figma roots found"));
+			return;
+		}
+		if (FApp::IsUnattended() && Frames.Num() > 1)
+		{
+			FailComponentImport(TEXT("Unattended Figma import requires a selected root"));
+			return;
+		}
+
+		const FString SingleRootId = Frames.Num() == 1 ? Frames[0].Id : FString();
+		Design2UMGEditorImportFrameSelection::ExecuteFrameImport(
+			Frames,
+			LOCTEXT("FigmaFrameSelectorTitle", "Select Figma Frame to Import"),
+			LOCTEXT("FigmaFrameSelectorHint", "This file contains multiple frames. Double-click to import:"),
+			[Self = AsShared(), SingleRootId](const FString& FrameId)
+			{
+				Self->BeginResolveSelectedRoot(FrameId.IsEmpty() ? SingleRootId : FrameId);
+			});
+	}
+
+	void FFigmaImportSession::BeginResolveSelectedRoot(const FString& RootId)
+	{
+		if (IsCancelled()) return;
+		FString Error;
+		if (!FigmaComponentDependencies::FilterRestFileToSelectedRoot(ComponentSource, RootId, Error))
+		{
+			FailComponentImport(Error);
+			return;
+		}
+		SelectedRootId = RootId;
+		ResolveMissingComponentDefinitions();
+	}
+
+	void FFigmaImportSession::ParseResolvedComponentFile()
+	{
+		FString Source;
+		FJsonSerializer::Serialize(ComponentSource.ToSharedRef(), TJsonWriterFactory<>::Create(&Source));
+#if WITH_DEV_AUTOMATION_TESTS
+		if (AutomationComponentsResolved)
+		{
+			AutomationComponentsResolved(Source, ComponentImageUrls);
+			return;
+		}
+#endif
+		FDesignDocument ParsedDocument;
+		if (!FFigmaParser::ParseDocument(Source, ParsedDocument))
+		{
+			FailComponentImport(TEXT("Failed to parse resolved Figma component file"));
+			return;
+		}
+		ParsedDocument.MutableSourceDocument().ResolvedComponentImageUrls = ComponentImageUrls;
 		const TSharedRef<FDesignDocument> Document = MakeShared<FDesignDocument>(MoveTemp(ParsedDocument));
 		FFigmaImageExporter::ResolveImageRefs(
 			*Client,
@@ -168,6 +249,13 @@ namespace Design2UMGEditorImportServices
 			{
 				Self->HandleImagesResolved(Document, bImagesResolved);
 			});
+	}
+
+	void FFigmaImportSession::FailComponentImport(const FString& Reason)
+	{
+		UE_LOG(LogDesign2UMG, Error, TEXT("Figma component import failed: %s"), *Reason);
+		Design2UMGEditorImportSupport::ShowNotification(FText::FromString(TEXT("Design2UMG: ") + Reason), SNotificationItem::CS_Fail);
+		Design2UMGEditorUnattendedExit::ExitUnattendedWithStatus(false, *Reason);
 	}
 
 	void FFigmaImportSession::HandleImagesResolved(const TSharedRef<FDesignDocument>& Document, const bool bImagesResolved)
@@ -225,6 +313,12 @@ namespace Design2UMGEditorImportServices
 		AnalysisInput.bResolveImages = ImportRequest.bResolveImages;
 		AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
 		const FImportAnalysisResult AnalysisResult = DesignImportPipeline::AnalyzeImport(*Document, AnalysisInput);
+		if (!AnalysisResult.ErrorMessage.IsEmpty())
+		{
+			Design2UMGEditorImportSupport::ShowNotification(FText::FromString(AnalysisResult.ErrorMessage), SNotificationItem::CS_Fail);
+			Design2UMGEditorUnattendedExit::ExitUnattendedWithStatus(false, TEXT("Font preparation failed"));
+			return;
+		}
 		if (AnalysisResult.Data.RootWidget.Children.Num() == 0)
 		{
 			Design2UMGEditorImportSupport::ShowNotification(LOCTEXT("FigmaNoFrames", "Design2UMG: No frames found in Figma file"), SNotificationItem::CS_Fail);

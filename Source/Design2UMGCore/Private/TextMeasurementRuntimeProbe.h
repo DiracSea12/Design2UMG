@@ -33,13 +33,8 @@ namespace TextMeasurementRuntimeProbe
 	bool TryMeasureText(const FTextMeasureRequest& Request, FVector2D& OutSize);
 	bool TryMeasureTextBlockDesiredSize(const FTextBlockMeasureRequest& Request, FVector2D& OutSize);
 
-	/**
-	 * Reads the font's hhea lineGap in em units from the resolved font asset's raw TTF
-	 * data (face picked by TypefaceName using the same rule as the Slate composite font
-	 * cache: exact typeface-entry match, else the primary entry). Returns false when the
-	 * font asset or its TTF bytes cannot be loaded.
-	 */
-	bool TryReadLineGapEm(const FString& FontAssetPath, const FString& TypefaceName, float& OutLineGapEm);
+	/** Reads hhea lineGap from the same selected face as the measured Slate font. */
+	bool TryReadLineGapEm(const FSlateFontInfo& FontInfo, float& OutLineGapEm);
 
 	/**
 	 * Module-lifecycle hooks owned by FDesign2UMGCoreModule: release the rooted probe

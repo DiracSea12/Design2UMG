@@ -264,6 +264,7 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeBrushPayload(const FUMGVisu
 	if (B.OutlineCornerRadius.IsSet())   { BJ->SetNumberField(UMGPropertyKeys::OutlineCornerRadius, B.OutlineCornerRadius.GetValue()); bHasAny = true; }
 	if (B.CornerRadii.IsSet())           { BJ->SetStringField(UMGPropertyKeys::CornerRadii, Design2UMGWidgetNodeAccess::SerializeWidgetVector4(B.CornerRadii.GetValue(), 2)); bHasAny = true; }
 	if (B.OutlineThickness.IsSet())    { BJ->SetNumberField(UMGPropertyKeys::OutlineThickness, B.OutlineThickness.GetValue()); bHasAny = true; }
+	if (B.Margin.IsSet()) { BJ->SetStringField(UMGPropertyKeys::BrushMargin, Design2UMGWidgetNodeAccess::SerializeWidgetMargin(B.Margin.GetValue(), 9)); bHasAny = true; }
 	if (B.DrawAs.IsSet())              { BJ->SetStringField(UMGPropertyKeys::DrawAs, Design2UMGWidgetNodeAccess::SerializeDrawAs(B.DrawAs.GetValue())); bHasAny = true; }
 	if (B.BrushColor.IsSet())          { BJ->SetStringField(UMGPropertyKeys::BrushColor, Design2UMGWidgetNodeAccess::SerializeWidgetColor(B.BrushColor.GetValue())); bHasAny = true; }
 	if (B.OutlineColor.IsSet())        { BJ->SetStringField(UMGPropertyKeys::OutlineColor, Design2UMGWidgetNodeAccess::SerializeWidgetColor(B.OutlineColor.GetValue())); bHasAny = true; }

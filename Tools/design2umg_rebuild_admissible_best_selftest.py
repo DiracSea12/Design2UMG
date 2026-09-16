@@ -112,36 +112,38 @@ def make_run(
     if binary_bound:
         report["binary_binding"] = binary_binding_payload()
     write_json(report_path, report)
+    case_results = [
+        {
+            "name": "case_a",
+            "report_path": str(report_path),
+            "stable_changed_ratio": stable_changed_ratio,
+            "changed_ratio": changed_ratio,
+            "stable_mae": stable_mae,
+            "mae": mae,
+            "structure_required": True,
+            "structure_passed": True,
+        }
+    ]
     write_json(
         run_root / "summary.json",
         {
-            "total": 71,
+            "total": len(case_results),
             "blocked_cases": blocked_cases,
             "completeness": {
                 "blocked": completeness_blocked,
-                "discovered_total": 71,
-                "reported_total": 71,
+                "discovered_total": len(case_results),
+                "reported_total": len(case_results),
             },
             "no_regression": {
                 "available": no_regression_available,
                 "failed": no_regression_failed,
             },
-            "cases": [
-                {
-                    "name": "case_a",
-                    "report_path": str(report_path),
-                    "stable_changed_ratio": stable_changed_ratio,
-                    "changed_ratio": changed_ratio,
-                    "stable_mae": stable_mae,
-                    "mae": mae,
-                    "structure_required": True,
-                    "structure_passed": True,
-                }
-            ],
+            "cases": case_results,
         },
     )
-    if historical_validation is not None:
-        write_json(run_root / "validation_against_historical_best.json", historical_validation)
+    write_json(run_root / "validation_against_historical_best.json", historical_validation if historical_validation is not None else {
+        "historical_best_checked": True, "blocked": False, "historical_best_regressions": [],
+    })
     return run_root
 
 
@@ -462,11 +464,10 @@ def assert_same_source_input_mismatch_denies_quarantine() -> None:
             0.10,
             source_hash="different-source",
         )
-
         validation = validate_run.validate_run(current_run, admissible_best_path=manifest_path)
-        assert validation["blocked"], validation
-        assert validation["historical_best_status"] == "blocked", validation
-        assert "historical_best_content_identity_incompatible" in validation["blocked_reasons"], validation
+        assert not validation["blocked"], validation
+        assert validation["historical_best_status"] == "pass_with_new_evidence_epoch", validation
+        assert validation["historical_best_epoch_seeded_cases"] == ["case_a"], validation
         assert validation["historical_best_identity_incompatible_cases"], validation
         assert not validation["historical_best_regressions"], validation
         assert not validation["historical_best_quarantined_one_off_sources"], validation
@@ -484,14 +485,12 @@ def assert_historical_best_identity_contract() -> None:
             source_hash="source-b",
         )
         source_mismatch = validate_run.validate_run(source_mismatch_run, admissible_best_path=best_path)
-        assert source_mismatch["blocked"], source_mismatch
-        assert "historical_best_content_identity_incompatible" in source_mismatch["blocked_reasons"], source_mismatch
-        assert source_mismatch["historical_best_identity_incompatible_cases"], source_mismatch
+        assert not source_mismatch["blocked"], source_mismatch
+        assert source_mismatch["historical_best_epoch_seeded_cases"] == ["case_a"], source_mismatch
         assert {
             item["field"]
             for item in source_mismatch["historical_best_identity_incompatible_cases"][0]["mismatches"]
         } == {"source_signature.sha1"}, source_mismatch
-        assert not source_mismatch["historical_best_regressions"], source_mismatch
 
         reference_mismatch_run = make_current_validation_run(
             automation_root,
@@ -500,20 +499,18 @@ def assert_historical_best_identity_contract() -> None:
             reference_hash="reference-b",
         )
         reference_mismatch = validate_run.validate_run(reference_mismatch_run, admissible_best_path=best_path)
-        assert reference_mismatch["blocked"], reference_mismatch
-        assert "historical_best_content_identity_incompatible" in reference_mismatch["blocked_reasons"], reference_mismatch
-        assert reference_mismatch["historical_best_identity_incompatible_cases"], reference_mismatch
+        assert not reference_mismatch["blocked"], reference_mismatch
+        assert reference_mismatch["historical_best_epoch_seeded_cases"] == ["case_a"], reference_mismatch
         assert {
             item["field"]
             for item in reference_mismatch["historical_best_identity_incompatible_cases"][0]["mismatches"]
         } == {"effective_reference_signature.sha1"}, reference_mismatch
-        assert not reference_mismatch["historical_best_regressions"], reference_mismatch
 
-        matching_run = make_current_validation_run(automation_root, "_formal_current_identity_match", 0.1)
+        matching_run = make_current_validation_run(automation_root, "_formal_current_matching", 0.1)
         matching = validate_run.validate_run(matching_run, admissible_best_path=best_path)
         assert not matching["blocked"], matching
         assert matching["historical_best_status"] == "normal_pass", matching
-        assert not matching["historical_best_identity_incompatible_cases"], matching
+        assert not matching["historical_best_epoch_seeded_cases"], matching
 
 
 def assert_missing_required_source_input_field_denies_quarantine(field_name: str) -> None:
@@ -529,20 +526,17 @@ def assert_missing_required_source_input_field_denies_quarantine(field_name: str
             0.10,
             missing_source_compare_field=field_name,
         )
-
         validation = validate_run.validate_run(current_run, admissible_best_path=manifest_path)
-        assert validation["blocked"], validation
-        assert validation["historical_best_status"] == "blocked", validation
-        expected_reason = (
-            "historical_best_content_identity_incompatible"
-            if field_name == "reference_image_hash"
-            else "historical_best_regression"
-        )
-        assert expected_reason in validation["blocked_reasons"], validation
         if field_name == "reference_image_hash":
-            assert validation["historical_best_identity_incompatible_cases"], validation
-            assert not validation["historical_best_regressions"], validation
-        assert not validation["historical_best_quarantined_one_off_sources"], validation
+            # Missing evidence is not a new, fully identified input epoch.
+            assert validation["blocked"], validation
+            assert "current_evidence_identity_missing" in validation["blocked_reasons"], validation
+            assert not validation["historical_best_epoch_seeded_cases"], validation
+        else:
+            assert validation["blocked"], validation
+            assert validation["historical_best_status"] == "blocked", validation
+            assert "historical_best_regression" in validation["blocked_reasons"], validation
+            assert not validation["historical_best_quarantined_one_off_sources"], validation
 
 
 def assert_historical_best_status_normal_pass() -> None:
@@ -609,7 +603,7 @@ def main() -> None:
         make_run(automation_root, "_formal_good")
         make_run(automation_root, "_formal_blocked_cases", blocked_cases=1)
         make_run(automation_root, "_formal_completeness_blocked", completeness_blocked=True)
-        make_run(automation_root, "_formal_no_regression_failed", no_regression_available=71, no_regression_failed=1)
+        make_run(automation_root, "_formal_no_regression_failed", no_regression_available=1, no_regression_failed=1)
         make_run(
             automation_root,
             "_formal_historical_blocked",
@@ -677,4 +671,14 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    with tempfile.TemporaryDirectory() as temp:
+        run = make_run(Path(temp), "missing_evidence")
+        summary = rebuild.load_json(run / "summary.json")
+        summary["no_regression"] = {"available": 0, "failed": 0}
+        assert not rebuild.classify_summary_admissibility(run, summary)[0], "Zero evidence is not a pass"
+        summary.pop("no_regression")
+        assert not rebuild.classify_summary_admissibility(run, summary)[0], "Missing evidence is not a pass"
+        summary["no_regression"] = {"available": 1, "failed": 0}
+        (run / "validation_against_historical_best.json").unlink(missing_ok=True)
+        assert not rebuild.classify_summary_admissibility(run, summary)[0], "Missing historical validation is not a pass"
     main()

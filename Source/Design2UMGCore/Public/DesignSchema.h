@@ -20,14 +20,10 @@ struct FDesignTextNodeData
 	FString FontWeight = TEXT("normal");
 	FString FontStyle = TEXT("normal");
 	float LineHeight = 0.0f;
-	/**
-	 * Source renderers differ in how the first-line baseline sits inside the line
-	 * box: Figma centers the natural line box within the authored line height
-	 * (half-leading), while Pencil keeps the natural ascent at the top of the
-	 * line box. Set by the source parsers; drives the first-line baseline shift
-	 * resolved in RuntimeProbeSizing.
-	 */
+	/** Source parsers opt into half-leading placement; other sources retain natural ascent-top placement. */
 	bool bSourceHalfLeadingBaseline = false;
+	/** Round authored fontSize * lineHeight to pixels after resolving instance font-size overrides. */
+	bool bSourceRoundLineHeightToPixels = false;
 	TOptional<float> LetterSpacing;
 	EDesignTextAlign TextAlign = EDesignTextAlign::Left;
 	EDesignTextAlignVertical TextAlignVertical = EDesignTextAlignVertical::Top;
@@ -37,6 +33,8 @@ struct FDesignTextNodeData
 	bool bTruncateOverflow = false;
 	FString Href;
 	TArray<FDesignTextRun> TextRuns;
+	/** Source text properties that were not represented faithfully during parsing. */
+	TArray<FString> ParseWarnings;
 	FString IconFontName;
 	FString IconFontFamily;
 	int32 IconWeight = 400;
@@ -66,6 +64,8 @@ struct FDesignLayoutNodeData
 	EDesignAlignItems AlignItems = EDesignAlignItems::Start;
 	EDesignOverflow Overflow = EDesignOverflow::None;
 	bool bAbsoluteLayoutPositioning = false;
+	// Absolute child coordinates use the expanded visual bounds as their origin.
+	bool bChildPositionsRelativeToVisualBounds = false;
 	TOptional<bool> ExplicitClip;
 	bool bSemanticPlaceholderSurface = false;
 	float LayoutGrow = -1.0f;

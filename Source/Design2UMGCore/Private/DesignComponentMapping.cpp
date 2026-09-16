@@ -70,7 +70,7 @@ namespace DesignComponentMapping
 		OutIdentity.Provider = ProviderFigma;
 		OutIdentity.DocumentScope = DocumentScope;
 		OutIdentity.ComponentKey = ComponentKey;
-		OutIdentity.ComponentSetKey = SourceNode.ComponentSetId;
+		OutIdentity.ComponentSetKey = SourceNode.ComponentSetKey;
 		return true;
 	}
 

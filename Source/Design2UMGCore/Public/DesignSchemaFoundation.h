@@ -532,6 +532,18 @@ struct FDesignTextRun
 {
 	GENERATED_BODY()
 
+	/** Distinguishes inherited paint from an explicitly empty (transparent) override. */
+	UPROPERTY()
+	bool bHasFillOverride = false;
+
+	/** Effective visible paints in source order, using the shared fill representation. */
+	UPROPERTY()
+	TArray<FDesignFill> Fills;
+
+	/** Empty inherits the node fill; otherwise an explicit RGBA color. */
+	UPROPERTY()
+	FString Color;
+
 	UPROPERTY()
 	FString Content;
 

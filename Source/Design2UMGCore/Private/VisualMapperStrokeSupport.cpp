@@ -159,7 +159,8 @@ namespace
 	{
 		return Type == UMGWidgetTypes::CanvasPanel
 			|| Type == UMGWidgetTypes::HorizontalBox
-			|| Type == UMGWidgetTypes::VerticalBox;
+			|| Type == UMGWidgetTypes::VerticalBox
+			|| Type == UMGWidgetTypes::SizeBox;
 	}
 
 	bool HasExplicitStrokeSurfacePaint(const FUMGVisualBrushData& Brush)
@@ -168,6 +169,7 @@ namespace
 			|| Brush.OutlineCornerRadius.IsSet()
 			|| Brush.CornerRadii.IsSet()
 			|| Brush.OutlineThickness.IsSet()
+			|| Brush.Margin.IsSet()
 			|| Brush.OutlineColor.IsSet()
 			|| Brush.MaterialRef.IsSet()
 			|| Brush.MaterialParams.IsSet()
@@ -195,10 +197,13 @@ namespace
 		FUMGWidgetStyleData AppliedBorderStyle = BorderSurface.WidgetStyle;
 		// These four fields were transferred from the content when the synthetic
 		// Border was created; they do not give a paint-free surface a separate duty.
-		AppliedBorderStyle.WidthOverride.Reset();
-		AppliedBorderStyle.HeightOverride.Reset();
-		AppliedBorderStyle.ImageMode.Reset();
-		AppliedBorderStyle.ImageTransform.Reset();
+		if (BorderSurface.Children[0].Type != UMGWidgetTypes::SizeBox)
+		{
+			AppliedBorderStyle.WidthOverride.Reset();
+			AppliedBorderStyle.HeightOverride.Reset();
+			AppliedBorderStyle.ImageMode.Reset();
+			AppliedBorderStyle.ImageTransform.Reset();
+		}
 
 		return !AppliedBorderStyle.HasAny()
 			&& BorderSurface.TextStyle.FontSize == 0.0f
@@ -216,6 +221,9 @@ namespace
 	FUMGWidgetNode PromoteExplicitStrokeSurfaceContent(FUMGWidgetNode& BorderSurface)
 	{
 		FUMGWidgetNode Content = MoveTemp(BorderSurface.Children[0]);
+		// A SizeBox already owns the child's constraints. The removable surface
+		// has no style in this branch, so do not clear those constraints with it.
+		if (Content.Type == UMGWidgetTypes::SizeBox) return Content;
 		Content.WidgetStyle.WidthOverride = BorderSurface.WidgetStyle.WidthOverride;
 		Content.WidgetStyle.HeightOverride = BorderSurface.WidgetStyle.HeightOverride;
 		Content.WidgetStyle.ImageMode = BorderSurface.WidgetStyle.ImageMode;
@@ -267,6 +275,56 @@ namespace
 			Height,
 			HorizontalAlignment,
 			VerticalAlignment));
+	}
+
+	void FoldStrokeOverlayIntoCanvas(FUMGWidgetNode& Overlay, const FDesignNode& Source)
+	{
+		if (!Source.Transform.Width.IsFixed() || !Source.Transform.Height.IsFixed()
+			|| Overlay.Children.IsEmpty()) return;
+		const FUMGWidgetNode& Content = Overlay.Children[0];
+		if (Content.Type != UMGWidgetTypes::CanvasPanel || Content.HasSourceData()
+			|| Content.WidgetStyle.HasAny()
+			|| Content.Render.HasAny() || Content.Effect.HasAny() || Content.Shadow.HasAny()
+			|| Content.WidgetState.HasAny()) return;
+
+		// Only the synthetic, fill-aligned canvas is removed. Authored children keep
+		// their identities and canvas slots; decorations are appended in paint order.
+		TArray<FUMGWidgetNode> Children = MoveTemp(Overlay.Children[0].Children);
+		for (int32 Index = 1; Index < Overlay.Children.Num(); ++Index)
+		{
+			FUMGWidgetNode& Stroke = Overlay.Children[Index];
+			const EUMGSlotHorizontalAlignment H = Stroke.Slot.HorizontalAlignment;
+			const EUMGSlotVerticalAlignment V = Stroke.Slot.VerticalAlignment;
+			Stroke.Slot = FUMGSlotData();
+			Stroke.Slot.Offsets = FUMGOffsetsData();
+			Stroke.Slot.Offsets.Right = 0.f;
+			Stroke.Slot.Offsets.Bottom = 0.f;
+			if (H == EUMGSlotHorizontalAlignment::Fill)
+			{
+				Stroke.Slot.Anchors.Max.X = 1.f;
+			}
+			else
+			{
+				const float Anchor = H == EUMGSlotHorizontalAlignment::Right ? 1.f : 0.f;
+				Stroke.Slot.Anchors.Min.X = Stroke.Slot.Anchors.Max.X = Anchor;
+				Stroke.Slot.Alignment.X = Anchor;
+				Stroke.Slot.Offsets.Right = FMath::Min(Source.Transform.Width.Value, Stroke.WidgetStyle.WidthOverride.Get(1.f));
+			}
+			if (V == EUMGSlotVerticalAlignment::Fill)
+			{
+				Stroke.Slot.Anchors.Max.Y = 1.f;
+			}
+			else
+			{
+				const float Anchor = V == EUMGSlotVerticalAlignment::Bottom ? 1.f : 0.f;
+				Stroke.Slot.Anchors.Min.Y = Stroke.Slot.Anchors.Max.Y = Anchor;
+				Stroke.Slot.Alignment.Y = Anchor;
+				Stroke.Slot.Offsets.Bottom = FMath::Min(Source.Transform.Height.Value, Stroke.WidgetStyle.HeightOverride.Get(1.f));
+			}
+			Children.Add(MoveTemp(Stroke));
+		}
+		Overlay.Type = UMGWidgetTypes::CanvasPanel;
+		Overlay.Children = MoveTemp(Children);
 	}
 }
 
@@ -364,8 +422,35 @@ namespace VisualMapperStrokeSupport
 			Overlay.Children.Add(MoveTemp(Border));
 		}
 
+
+		const float TopThickness = GetStrokeSideThicknessInternal(Node->Visual.Stroke.Thickness, EStrokeSide::Top);
+		const float BottomThickness = GetStrokeSideThicknessInternal(Node->Visual.Stroke.Thickness, EStrokeSide::Bottom);
+		const bool bCombineHorizontalSides = TopThickness >= 1.0f
+			&& TopThickness == BottomThickness
+			&& TopThickness == FMath::RoundToFloat(TopThickness)
+			&& Overlay.Bounds.H >= 2.0f * TopThickness;
+		if (bCombineHorizontalSides)
+		{
+			// Opposite horizontal sides share a mask. Keep left/right draws independent
+			// for their individual widths and overlapping translucent corners.
+			FUMGWidgetNode Outline;
+			Outline.Type = UMGWidgetTypes::Border;
+			Outline.Id = Overlay.Id + TEXT("_stroke_horizontal");
+			Outline.Name = Overlay.Name + TEXT("_stroke_horizontal");
+			Outline.Brush.DrawAs = ESlateBrushDrawType::Box;
+			Outline.Brush.MaterialRef = TEXT("horizontalstroke");
+			Outline.Brush.Margin = FMargin(1.0f / 3.0f);
+			Outline.WidgetStyle.WidthOverride = TopThickness * 3.0f;
+			Outline.WidgetStyle.HeightOverride = TopThickness * 3.0f;
+			Outline.WidgetStyle.Visibility = TEXT("HitTestInvisible");
+			Outline.Brush.BrushColor = StrokeColor;
+			ResetChildToFill(Outline);
+			Overlay.Children.Add(MoveTemp(Outline));
+		}
+
 		for (const FExplicitStrokeSideSpec& SideSpec : ExplicitStrokeSideSpecs)
 		{
+			if (bCombineHorizontalSides && SideSpec.bHorizontalLine) continue;
 			const float Thickness = GetStrokeSideThicknessInternal(Node->Visual.Stroke.Thickness, SideSpec.Side);
 			const float Width = SideSpec.bHorizontalLine ? 1.0f : Thickness;
 			const float Height = SideSpec.bHorizontalLine ? Thickness : 1.0f;
@@ -379,6 +464,7 @@ namespace VisualMapperStrokeSupport
 				SideSpec.VerticalAlignment);
 		}
 
+		FoldStrokeOverlayIntoCanvas(Overlay, *Node);
 		return Overlay;
 	}
 }

@@ -54,6 +54,7 @@ namespace
 		{
 			Target.ComponentId = Source.ComponentId;
 			Target.ComponentSetId = Source.ComponentSetId;
+			Target.ComponentSetKey = Source.ComponentSetKey;
 			Target.MainComponentKey = Source.MainComponentKey;
 			Target.ComponentPropertiesJson = Source.ComponentPropertiesJson;
 			Target.VariantPropertiesJson = Source.VariantPropertiesJson;

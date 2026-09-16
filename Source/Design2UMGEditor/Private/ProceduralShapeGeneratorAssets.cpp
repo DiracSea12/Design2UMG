@@ -133,6 +133,30 @@ namespace
 		}
 	}
 
+	void GenerateEllipseMask(TArray<float>& OutAlpha, const int32 Width, const int32 Height)
+	{
+		OutAlpha.SetNumUninitialized(Width * Height);
+		// Coverage sampling preserves both axes; a rounded rectangle is not an ellipse.
+		constexpr int32 Samples = 4;
+		for (int32 Y = 0; Y < Height; ++Y)
+		{
+			for (int32 X = 0; X < Width; ++X)
+			{
+				int32 Inside = 0;
+				for (int32 SY = 0; SY < Samples; ++SY)
+				{
+					const float NY = 2.0f * (Y + (SY + 0.5f) / Samples) / Height - 1.0f;
+					for (int32 SX = 0; SX < Samples; ++SX)
+					{
+						const float NX = 2.0f * (X + (SX + 0.5f) / Samples) / Width - 1.0f;
+						Inside += (NX * NX + NY * NY <= 1.0f) ? 1 : 0;
+					}
+				}
+				OutAlpha[Y * Width + X] = static_cast<float>(Inside) / (Samples * Samples);
+			}
+		}
+	}
+
 	void GaussianBlurAlpha(TArray<float>& Alpha, int32 Width, int32 Height, float Sigma)
 	{
 		if (Sigma < 0.5f)
@@ -594,7 +618,8 @@ namespace ProceduralShapeGeneratorAssets
 		float CornerRadius,
 		float BlurRadius,
 		float BlurPadding,
-		UObject* Outer)
+		UObject* Outer,
+		bool bEllipse)
 	{
 		return GenerateBoxShadow(
 			Width,
@@ -606,7 +631,8 @@ namespace ProceduralShapeGeneratorAssets
 			CornerRadius,
 			BlurRadius,
 			BlurPadding,
-			Outer);
+			Outer,
+			bEllipse);
 	}
 
 	UTexture2D* GenerateBoxShadow(
@@ -619,14 +645,16 @@ namespace ProceduralShapeGeneratorAssets
 		float RBL,
 		float BlurRadius,
 		float BlurPadding,
-		UObject* Outer)
+		UObject* Outer,
+		bool bEllipse)
 	{
 		TArray<float> Alpha;
 		const bool bHasExplicitBlurPadding = BlurPadding >= 0.0f;
 		if (!bHasExplicitBlurPadding)
 		{
 			const float HalfMin = FMath::Min(Width, Height) * 0.5f;
-			GenerateRoundedRectMask(Alpha, Width, Height, HalfMin * RTL, HalfMin * RTR, HalfMin * RBR, HalfMin * RBL);
+			if (bEllipse) GenerateEllipseMask(Alpha, Width, Height);
+			else GenerateRoundedRectMask(Alpha, Width, Height, HalfMin * RTL, HalfMin * RTR, HalfMin * RBR, HalfMin * RBL);
 		}
 		else
 		{
@@ -641,7 +669,8 @@ namespace ProceduralShapeGeneratorAssets
 			const float ShapeHalfMin = FMath::Min(ShapeWidth, ShapeHeight) * 0.5f;
 
 			TArray<float> InnerAlpha;
-			GenerateRoundedRectMask(
+			if (bEllipse) GenerateEllipseMask(InnerAlpha, ShapeWidth, ShapeHeight);
+			else GenerateRoundedRectMask(
 				InnerAlpha,
 				ShapeWidth,
 				ShapeHeight,

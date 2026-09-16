@@ -316,6 +316,11 @@ float ResolvePhaseDurationSeconds(const FUMGPrototypeTransitionData& Transition)
 	return FMath::Max(Transition.DurationSeconds * 0.5f, 1.0f / 120.0f);
 }
 
+bool IsGeneratedNavigationAnimation(const UWidgetAnimation* Animation)
+{
+	return Animation && Animation->GetName().StartsWith(PrototypeAnimationPrefix);
+}
+
 void RemoveGeneratedAnimations(UWidgetBlueprint* WidgetBlueprint)
 {
 	if (!WidgetBlueprint)
@@ -327,7 +332,7 @@ void RemoveGeneratedAnimations(UWidgetBlueprint* WidgetBlueprint)
 	TArray<UWidgetAnimation*> StaleAnimations;
 	WidgetBlueprint->Animations.RemoveAll([&StaleAnimations](UWidgetAnimation* Animation)
 	{
-		if (Animation && Animation->GetName().StartsWith(PrototypeAnimationPrefix))
+		if (IsGeneratedNavigationAnimation(Animation))
 		{
 			StaleAnimations.Add(Animation);
 			return true;

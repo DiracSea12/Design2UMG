@@ -206,6 +206,41 @@ def evaluate_historical_best_identity(current_case: dict, best_case: dict) -> di
     }
 
 
+
+def select_case_evidence_epoch(current_case: dict, best_case: dict) -> dict:
+    """Select this input's history, including an epoch revisited after another input."""
+    source_hash = (current_case.get("source_signature") or {}).get("sha1")
+    reference_hash = (current_case.get("effective_reference_signature") or {}).get("sha1")
+    if not source_hash or not reference_hash:
+        return best_case
+    sources = [source for source in best_case.get("admitted_sources", [])
+               if (source.get("source_input") or {}).get("source_design_artifact_hash") == source_hash
+               and (source.get("source_input") or {}).get("reference_image_hash") == reference_hash]
+    if not sources:
+        return best_case
+    selected = dict(best_case, admitted_sources=sources)
+    if evaluate_historical_best_identity(current_case, best_case)["compatible"]:
+        return selected
+    source = min(sources, key=lambda item: (
+        item.get("stable_changed_ratio") is None,
+        item.get("stable_changed_ratio") or 0.0,
+        item.get("changed_ratio") is None,
+        item.get("changed_ratio") or 0.0,
+        -item.get("timestamp", 0.0), item.get("run", ""), item.get("report_path", "")))
+    selected.update(run=source["run"], report_path=source["report_path"])
+    selected["metric_sources"] = {}
+    for _, metric in METRIC_PAIRS:
+        selected[metric] = source.get(metric)
+        if source.get(metric) is not None:
+            selected["metric_sources"][metric] = {
+                "run": source["run"], "report_path": source["report_path"],
+                "value": source[metric], "timestamp": source.get("timestamp", 0.0),
+                "source_input": source["source_input"],
+                "binary_binding": source.get("binary_binding") or {},
+            }
+    return selected
+
+
 def source_matches_metric_source(source: dict, metric_source: dict) -> bool:
     if not metric_source:
         return False
@@ -392,6 +427,7 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
         "historical_best_missing_cases": [],
         "historical_best_incompatible_cases": [],
         "historical_best_identity_incompatible_cases": [],
+        "historical_best_epoch_seeded_cases": [],
         "historical_best_degraded_authority_cases": [],
         "historical_best_regressions": [],
         "render_size_rule_checked": False,
@@ -568,10 +604,16 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
             for case_name in case_names_to_check:
                 best_case = best_cases.get(case_name)
                 current_case = summary_cases_by_name.get(case_name)
-                if best_case is None or current_case is None:
+                if current_case is None:
                     result["historical_best_missing_cases"].append(case_name)
                     continue
 
+                if not (current_case.get("source_signature") or {}).get("sha1") or not (current_case.get("effective_reference_signature") or {}).get("sha1"):
+                    append_blocked_reason(result, "current_evidence_identity_missing",
+                                          f"{case_name} is missing source or reference identity; it cannot seed an input baseline.")
+                    continue
+                if best_case is not None:
+                    best_case = select_case_evidence_epoch(current_case, best_case)
                 resolved_current_metrics = resolve_case_metrics(output_root, case_name, current_case)
                 current_report_path = Path(resolved_current_metrics.get("report_path", ""))
                 current_report = load_json(current_report_path) if current_report_path.is_file() else {}
@@ -590,6 +632,10 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
                     )
                     continue
 
+                if best_case is None:
+                    # New identities may seed only after current evidence is validated.
+                    result["historical_best_epoch_seeded_cases"].append(case_name)
+                    continue
                 current_compatibility = evaluate_report_compatibility(current_report_path)
                 best_compatibility = evaluate_report_compatibility(Path(best_case.get("report_path", "")))
                 current_rule = current_compatibility["render_size"]
@@ -624,6 +670,7 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
                             **identity,
                         }
                     )
+                    result["historical_best_epoch_seeded_cases"].append(case_name)
                     continue
 
                 regressions = []
@@ -673,6 +720,13 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
                     else:
                         result["historical_best_quarantined_one_off_sources"].append(quarantine)
 
+            if result["historical_best_degraded_authority_cases"]:
+                append_blocked_reason(
+                    result, "historical_best_degraded_authority",
+                    "Current references do not have the required verification authority.",
+                    count=len(result["historical_best_degraded_authority_cases"]),
+                    detail_field="historical_best_degraded_authority_cases",
+                )
             if result["historical_best_missing_cases"]:
                 append_blocked_reason(
                     result,
@@ -700,24 +754,6 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
                     detail_field="historical_best_pipeline_determinism_incompatible_cases",
                     action="Inspect both current and historical-best compare reports for the listed determinism metadata before judging regressions.",
                 )
-            if result["historical_best_identity_incompatible_cases"]:
-                append_blocked_reason(
-                    result,
-                    "historical_best_content_identity_incompatible",
-                    f"{len(result['historical_best_identity_incompatible_cases'])} case(s) are not comparable because source or effective-reference identity differs or is missing.",
-                    count=len(result["historical_best_identity_incompatible_cases"]),
-                    detail_field="historical_best_identity_incompatible_cases",
-                    action="Inspect source_signature.sha1 and effective_reference_signature.sha1 for the current case and every historical-best metric source.",
-                )
-            if result["historical_best_degraded_authority_cases"]:
-                append_blocked_reason(
-                    result,
-                    "historical_best_degraded_authority",
-                    f"{len(result['historical_best_degraded_authority_cases'])} case(s) use degraded reference authority and cannot be admitted as historical-best parity evidence.",
-                    count=len(result["historical_best_degraded_authority_cases"]),
-                    detail_field="historical_best_degraded_authority_cases",
-                    action="Re-run those cases with strong or external_export_nodes reference authority before using them for historical-best validation.",
-                )
             if result["historical_best_regressions"]:
                 append_blocked_reason(
                     result,
@@ -731,6 +767,8 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
     if result["historical_best_checked"]:
         if result["blocked_reasons"] or result["historical_best_regressions"]:
             result["historical_best_status"] = "blocked"
+        elif result["historical_best_epoch_seeded_cases"]:
+            result["historical_best_status"] = "pass_with_new_evidence_epoch"
         elif result["historical_best_quarantined_one_off_sources"]:
             result["historical_best_status"] = "pass_with_quarantined_one_off_best"
         else:

@@ -6,6 +6,7 @@
 #include "LayoutMapper.h"
 #include "DesignSchema.h"
 #include "UMGSchema.h"
+#include "UMGSchemaSourceExtensions.h"
 
 namespace
 {
@@ -18,6 +19,41 @@ namespace
 		Node->Transform.Y = Y;
 		return Node;
 	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLayoutCarrierComponentIdentityTest,
+	"Design2UMG.Unit.LayoutMapper.ComponentIdentityOwnership",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FLayoutCarrierComponentIdentityTest::RunTest(const FString&)
+{
+	for (const bool bFillChild : {false, true})
+	{
+		FUMGWidgetNode Instance;
+		Instance.Id = Instance.Name = TEXT("instance");
+		Instance.Type = TEXT("HorizontalBox");
+		Instance.Bounds.W = 100;
+		Instance.Bounds.H = 40;
+		Instance.MutableSource().SourceNodeId = TEXT("instance");
+		Instance.MutableSource().SourceNodeType = TEXT("INSTANCE");
+		Instance.MutableSource().MainComponentKey = TEXT("component-key");
+		FUMGWidgetNode Child;
+		Child.Type = TEXT("TextBlock");
+		Child.Slot.SizeRule = bFillChild ? EUMGSlotSizeRule::Fill : EUMGSlotSizeRule::Auto;
+		Child.Slot.FillWeight = 1.f;
+		Instance.Children.Add(MoveTemp(Child));
+		const auto Source = MakeNode(EDesignSizeMode::Fixed, 100, EDesignSizeMode::Fixed, 40);
+		const FUMGWidgetNode Carrier = LayoutMapper::WrapWithSizeBox(MoveTemp(Instance), Source, EDesignLayout::Horizontal);
+		TestFalse(TEXT("Added layout carrier does not duplicate component source identity"), Carrier.HasSourceData());
+		if (!TestEqual(TEXT("Carrier contains the component boundary"), Carrier.Children.Num(), 1)) continue;
+		TestEqual(TEXT("Component boundary is not folded into its child"), Carrier.Children[0].Id, FString(TEXT("instance")));
+		TestTrue(TEXT("Component boundary retains source metadata"), Carrier.Children[0].HasSourceData());
+		if (Carrier.Children[0].HasSourceData())
+		{
+			TestEqual(TEXT("Component boundary retains its reusable identity"), Carrier.Children[0].Source().MainComponentKey, FString(TEXT("component-key")));
+		}
+	}
+	return true;
 }
 
 // ---------------------------------------------------------------------------

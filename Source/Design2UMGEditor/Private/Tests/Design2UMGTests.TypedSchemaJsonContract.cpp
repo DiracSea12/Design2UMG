@@ -401,6 +401,7 @@ bool FWidgetDataRoundTripDeepEqualityTest::RunTest(const FString& Parameters)
 	ImageChild.Brush.OutlineCornerRadius = 6.0f;
 	ImageChild.Brush.CornerRadii = FVector4(4.0f, 8.0f, 12.0f, 16.0f);
 	ImageChild.Brush.OutlineThickness = 2.0f;
+	ImageChild.Brush.Margin = FMargin(1.0f / 3.0f);
 	ImageChild.Brush.DrawAs = ESlateBrushDrawType::Image;
 	ImageChild.Brush.BrushColor = FLinearColor(0.0f, 0.0f, 1.0f, 1.0f);
 	ImageChild.Brush.OutlineColor = FLinearColor(1.0f, 1.0f, 1.0f, 1.0f);
@@ -533,6 +534,7 @@ bool FWidgetDataRoundTripDeepEqualityTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Brush outline corner radius round-trips"), ParsedImage.Brush.OutlineCornerRadius.IsSet() && FMath::IsNearlyEqual(ParsedImage.Brush.OutlineCornerRadius.GetValue(), ImageChild.Brush.OutlineCornerRadius.GetValue()));
 	TestTrue(TEXT("Brush corner radii round-trip"), ParsedImage.Brush.CornerRadii.IsSet() && ParsedImage.Brush.CornerRadii.GetValue().Equals(ImageChild.Brush.CornerRadii.GetValue(), 0.0001f));
 	TestTrue(TEXT("Brush outline thickness round-trips"), ParsedImage.Brush.OutlineThickness.IsSet() && FMath::IsNearlyEqual(ParsedImage.Brush.OutlineThickness.GetValue(), ImageChild.Brush.OutlineThickness.GetValue()));
+	TestTrue(TEXT("Brush slicing margin round-trips without precision loss"), ParsedImage.Brush.Margin.IsSet() && ParsedImage.Brush.Margin.GetValue() == ImageChild.Brush.Margin.GetValue());
 	TestTrue(TEXT("Brush draw-as round-trips"), ParsedImage.Brush.DrawAs.IsSet() && ParsedImage.Brush.DrawAs.GetValue() == ESlateBrushDrawType::Image);
 	TestTrue(TEXT("Brush color round-trips"), ParsedImage.Brush.BrushColor.IsSet() && ParsedImage.Brush.BrushColor.GetValue().Equals(ImageChild.Brush.BrushColor.GetValue(), 0.0001f));
 	TestTrue(TEXT("Brush outline color round-trips"), ParsedImage.Brush.OutlineColor.IsSet() && ParsedImage.Brush.OutlineColor.GetValue().Equals(ImageChild.Brush.OutlineColor.GetValue(), 0.0001f));

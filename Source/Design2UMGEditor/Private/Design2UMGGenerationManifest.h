@@ -30,6 +30,8 @@ namespace Design2UMGManifestKinds
  */
 struct FDesign2UMGGenerationManifestPayload
 {
+	bool bWholeAssetOwned = false;
+	bool bComponentBatchRoot = false;
 	FString Provider;
 	FString DocumentScope;
 	FString SourceRootNodeId;
@@ -43,6 +45,8 @@ struct FDesign2UMGGenerationManifestPayload
 /** Generation record deserialized from the sidecar (input of the reimport pipeline). */
 struct FDesign2UMGGenerationManifestSidecar
 {
+	FString GeneratedAssetHash;
+	bool bComponentBatchRoot = false;
 	int32 SchemaVersion = 0;
 	FString Provider;
 	FString DocumentScope;
@@ -79,6 +83,7 @@ struct FDesign2UMGGenerationManifestSidecar
 
 namespace Design2UMGGenerationManifest
 {
+	FString ComputeSavedAssetHash(const FString& AssetPackageName);
 	/** Manifest sidecar file name suffix (<AssetName>.d2u.json). */
 	FString BuildSidecarPathForAsset(const FString& AssetPackageName);
 

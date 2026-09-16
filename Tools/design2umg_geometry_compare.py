@@ -62,8 +62,8 @@ REPORT_NAME = "geometry_golden_report.json"
 DUMP_NAME = "geometry_dump.json"
 IR_DUMP_NAME = "ir_dump.json"
 TOLERANCE_PX = 0.75
-SOURCE_TEXT_TYPES = frozenset({"TextBlock", "IconFont"})
-RUNTIME_TEXT_CLASSES = frozenset({"TextBlock", "Design2UMGConstrainedTextBlock"})
+SOURCE_TEXT_TYPES = frozenset({"TextBlock", "RichTextBlock", "IconFont"})
+RUNTIME_TEXT_CLASSES = frozenset({"TextBlock", "RichTextBlock", "Design2UMGConstrainedTextBlock"})
 
 # Synthetic carrier wrappers (Design2UMGGeneratedNameSuffixes literals); their
 # geometry is generated structure, not source layout.

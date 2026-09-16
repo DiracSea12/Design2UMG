@@ -9,12 +9,22 @@
 
 class UWidgetBlueprint;
 struct FUMGPrototypeNavigationData;
+struct FDesign2UMGGenerationOutput;
+
+struct FDesign2UMGGeneratedComponent
+{
+	UWidgetBlueprint* Blueprint = nullptr;
+	TSharedPtr<FDesign2UMGGenerationOutput> Output;
+};
 
 /** Structured output of one generation: the manifest payload (sidecar written after a successful save) + Component Mapping diagnostics. */
 struct FDesign2UMGGenerationOutput
 {
 	FDesign2UMGGenerationManifestPayload Manifest;
 	TArray<FDesign2UMGMappingDiagnostic> MappingDiagnostics;
+	TArray<FDesign2UMGGeneratedComponent> Components;
+	/** Completed build transaction, used only to roll back this batch after a failed save. */
+	FGuid ComponentBatchTransactionId;
 };
 
 class FUMGGenerator
@@ -35,7 +45,8 @@ public:
 		const FString& PackagePath,
 		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr,
 		FDesign2UMGGenerationOutput* OutGenerationOutput = nullptr,
-		FUMGPrototypeNavigationData* OutNavigationData = nullptr);
+		FUMGPrototypeNavigationData* OutNavigationData = nullptr,
+		UWidgetBlueprint* ExistingGeneratedBlueprint = nullptr);
 
 	/**
 	 * Compile and save the WBP; when a generation output is passed in, atomically write the manifest sidecar next to the asset after a successful save.
@@ -61,5 +72,11 @@ public:
 	 */
 	static void ArmAutomationSaveFailureOnce();
 #endif
+
+	/** Failure cleanup for component batches whose existing assets passed the clean/owned preflight. */
+	static bool RestoreUnsavedComponentBatch(const TArray<UWidgetBlueprint*>& Assets, FDesign2UMGGenerationOutput* Output);
+private:
+	static bool SaveSingleWidgetBlueprint(UWidgetBlueprint* WBP, FDesign2UMGGenerationOutput* GenerationOutput,
+		const FUMGPrototypeNavigationData* PrototypeNavigation);
 };
 

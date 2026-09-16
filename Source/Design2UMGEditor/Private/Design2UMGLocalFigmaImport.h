@@ -9,6 +9,7 @@ struct FUMGWidgetData;
 
 namespace Design2UMGLocalFigmaImport
 {
+	void ResolveDocumentImages(FDesignDocument& Document, const FString& JsonFilePath);
 	bool LoadLocalFigmaDocument(
 		const FString& JsonFilePath,
 		FDesignDocument& OutDocument,

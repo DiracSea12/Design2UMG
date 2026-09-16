@@ -91,7 +91,7 @@ namespace DesignComponentMapping
 	/**
 	 * Extract the Figma component identity from the UMG-side source-data sidecar.
 	 * Rules: instance nodes take the component identity (mainComponentKey first, componentId when absent);
-	 * component definition nodes take their own id as ComponentKey; ComponentSetKey always comes from componentSetId.
+	 * component definition nodes take their own id as ComponentKey; ComponentSetKey is the published set identity; componentSetId is only a node locator.
 	 * Returns false when no non-empty ComponentKey can be extracted (not a mapped candidate).
 	 */
 	DESIGN2UMGCORE_API bool TryResolveFigmaComponentIdentity(

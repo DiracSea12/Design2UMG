@@ -151,7 +151,7 @@ bool FTextWidgetBuilderLineHeightBaselineShiftContractTest::RunTest(const FStrin
 	Settings->ExplicitFontMappings.Empty();
 
 	// Reuse the real project font asset: the baseline shift reads hhea metrics
-	// from the resolved font face, which only authored (asset-backed) faces carry.
+	// from the resolved font face, independent of its storage location.
 	UFont* Font = LoadObject<UFont>(nullptr, TEXT("/Game/Design2UMG/Fonts/Poppins.Poppins"));
 	if (!TestNotNull(TEXT("Baseline shift project font asset loaded"), Font))
 	{
@@ -171,7 +171,7 @@ bool FTextWidgetBuilderLineHeightBaselineShiftContractTest::RunTest(const FStrin
 	Node->Text.FontFamily = TEXT("D2UBaselineShiftProbe");
 	Node->Text.FontSize = 64.0f;
 	Node->Text.LineHeight = 0.89f;
-	// Set by the Figma parser for its half-leading first-line placement.
+	// Set by parsers whose source paragraph renderer uses half-leading placement.
 	Node->Text.bSourceHalfLeadingBaseline = true;
 	Node->Text.TextGrowth = EDesignTextGrowth::FixedWidthHeight;
 
@@ -184,32 +184,63 @@ bool FTextWidgetBuilderLineHeightBaselineShiftContractTest::RunTest(const FStrin
 	{
 		TestTrue(TEXT("Baseline shift is finite"),
 			FMath::IsFinite(Widget.Text.LineHeightBaselineShift.GetValue()));
+		TextMeasurementRuntimeProbe::FTextMeasureRequest FontMetrics;
+		FontMetrics.Text = TEXT("DATA ANALYTICS");
+		FontMetrics.FontSize = 48.0f;
+		FontMetrics.FontAssetPath = Font->GetPathName();
+		FVector2D NaturalFontSize;
+		float LineGapEm = 0.0f;
+		if (TestTrue(TEXT("Natural font metrics are available"),
+			TextMeasurementRuntimeProbe::TryMeasureText(FontMetrics, NaturalFontSize))
+			&& TestTrue(TEXT("Font line gap is available"),
+				TextMeasurementRuntimeProbe::TryReadLineGapEm(TextMeasurementRuntimeProbe::BuildFontInfo(FontMetrics), LineGapEm)))
+		{
+			const float ExpectedShift = -((NaturalFontSize.Y - Node->Text.FontSize * Node->Text.LineHeight)
+				+ LineGapEm * Node->Text.FontSize) / 2.0f;
+			TestTrue(TEXT("Baseline alignment uses font metrics, not invisible widget shadow extents"),
+				FMath::IsNearlyEqual(Widget.Text.LineHeightBaselineShift.GetValue(), ExpectedShift, 0.001f));
+		}
 	}
 
-	// The baseline difference is a placement fact of the first line, so the shift
-	// also applies to single-line labels whose line advance stays at the natural
-	// height (no LineHeightPercentage).
+	// Explicit source line height applies to a single-line label as well.
 	Node->Text.Content = TEXT("HOME");
 	const FUMGWidgetNode LabelWidget = Design2UMGTextWidgetBuilder::CreateTextWidget(Node);
-	TestFalse(TEXT("Single-line label keeps natural line advance"),
+	TestTrue(TEXT("Single-line label keeps explicit source line height"),
 		LabelWidget.Text.LineHeightPercentage.IsSet());
 	TestEqual(TEXT("Single-line label still gets the baseline shift"),
 		LabelWidget.Text.LineHeightBaselineShift.IsSet(), bMultiLineShift);
 
-	// Pencil keeps the natural ascent at the top of its line boxes, which already
-	// matches Slate, so its parser leaves the flag off and no shift is generated.
+	// A source using natural ascent-top placement needs no baseline translation.
 	Node->Text.bSourceHalfLeadingBaseline = false;
 	const FUMGWidgetNode AscentTopWidget = Design2UMGTextWidgetBuilder::CreateTextWidget(Node);
 	TestFalse(TEXT("Ascent-top sources get no baseline shift"),
 		AscentTopWidget.Text.LineHeightBaselineShift.IsSet());
 
-	// A fallback font (no resolvable source asset) breaks the metric basis of the
-	// shift, so no shift is generated for it either.
+	// Measure the actual rendered face even when it is supplied by Slate rather
+	// than a project font asset. This does not change which font is selected.
 	Node->Text.bSourceHalfLeadingBaseline = true;
 	Node->Text.FontFamily = TEXT("D2UBaselineShiftUnmappedFamily");
 	const FUMGWidgetNode FallbackWidget = Design2UMGTextWidgetBuilder::CreateTextWidget(Node);
-	TestFalse(TEXT("Unresolvable font families get no baseline shift"),
-		FallbackWidget.Text.LineHeightBaselineShift.IsSet());
+	TestTrue(TEXT("Default Slate face retains half-leading alignment"), FallbackWidget.Text.LineHeightBaselineShift.IsSet());
+	Node->Text.FontFamily = TEXT("Roboto");
+	const FUMGWidgetNode EngineFontWidget = Design2UMGTextWidgetBuilder::CreateTextWidget(Node);
+	TestTrue(TEXT("Engine fonts retain half-leading alignment"), EngineFontWidget.Text.LineHeightBaselineShift.IsSet());
+	TextMeasurementRuntimeProbe::FTextMeasureRequest EngineMetrics;
+	EngineMetrics.Text = Node->Text.Content;
+	EngineMetrics.FontSize = 48.0f;
+	EngineMetrics.FontAssetPath = EngineFontWidget.Text.FontFamily.Get(FString());
+	EngineMetrics.TypefaceName = EngineFontWidget.Text.TypefaceFontName.Get(FString());
+	FVector2D EngineNaturalSize;
+	float EngineLineGapEm = 0.0f;
+	if (TestTrue(TEXT("Resolved engine font metrics readable"), TextMeasurementRuntimeProbe::TryMeasureText(EngineMetrics, EngineNaturalSize))
+		&& TestTrue(TEXT("Engine font line gap readable"), TextMeasurementRuntimeProbe::TryReadLineGapEm(TextMeasurementRuntimeProbe::BuildFontInfo(EngineMetrics), EngineLineGapEm)))
+	{
+		const float ExpectedShift = -((EngineNaturalSize.Y - Node->Text.FontSize * Node->Text.LineHeight)
+			+ EngineLineGapEm * Node->Text.FontSize) / 2.0f;
+		TestTrue(TEXT("Engine font shift uses the same metric rule as project fonts"),
+			EngineFontWidget.Text.LineHeightBaselineShift.IsSet()
+			&& FMath::IsNearlyEqual(EngineFontWidget.Text.LineHeightBaselineShift.GetValue(), ExpectedShift, 0.001f));
+	}
 
 	Settings->ExplicitFontMappings = SavedMappings;
 	FFontResolver::ClearCache();
@@ -264,6 +295,24 @@ bool FTextWidgetBuilderRichTextRunFontSizeConversionContractTest::RunTest(const 
 		FMath::IsNearlyEqual(static_cast<float>(ValidFontSize), 12.0f, 0.001f));
 	TestFalse(TEXT("Invalid explicit run size does not inherit or bypass conversion"),
 		(*InvalidRow)->HasField(UMGPropertyKeys::FontSize));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextWidgetBuilderMultilineMarkupTest,
+	"Design2UMG.TextWidgetBuilder.MultilineMarkup",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTextWidgetBuilderMultilineMarkupTest::RunTest(const FString&)
+{
+	const TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Text, 200.0f, 120.0f);
+	Node->Text.FontSize = 16.0f;
+	Node->Text.Content = TEXT("A&B\r\n\r\n<C>");
+	FDesignTextRun& Run = Node->Text.TextRuns.AddDefaulted_GetRef();
+	Run.Content = Node->Text.Content;
+	Run.bUnderline = true;
+	const FUMGWidgetNode Widget = Design2UMGTextWidgetBuilder::CreateTextWidget(Node);
+	TestEqual(TEXT("Each nonempty line has balanced tags; blank lines remain blank"),
+		Widget.Text.Text.Get(FString()),
+		FString(TEXT("<d2u_run_0>A&amp;B</>\r\n\r\n<d2u_run_0>&lt;C&gt;</>")));
 	return true;
 }
 

@@ -21,8 +21,13 @@
 #include "Components/SizeBox.h"
 #include "Components/Spacer.h"
 #include "Components/TextBlock.h"
+#include "Components/RichTextBlock.h"
+#include "Framework/Text/RichTextMarkupProcessing.h"
 #include "Components/Widget.h"
 #include "Dom/JsonObject.h"
+#include "Editor.h"
+#include "WidgetBlueprint.h"
+#include "UObject/StrongObjectPtr.h"
 
 namespace Design2UMGAutomationStructureSnapshot
 {
@@ -460,7 +465,7 @@ namespace Design2UMGAutomationStructureSnapshot
 			{
 				return TEXT("unknown");
 			}
-			if (Cast<UTextBlock>(Widget))
+			if (Cast<UTextBlock>(Widget) || Cast<URichTextBlock>(Widget))
 			{
 				return TEXT("text");
 			}
@@ -487,6 +492,27 @@ namespace Design2UMGAutomationStructureSnapshot
 				return TEXT("container");
 			}
 			return TEXT("other");
+		}
+
+		FString ResolveWidgetStructureText(const URichTextBlock* TextBlock)
+		{
+			TArray<FTextLineParseResults> Lines;
+			FString Decoded;
+			FDefaultRichTextMarkupParser::GetStaticInstance()->Process(Lines, TextBlock->GetText().ToString(), Decoded);
+			FString PlainText;
+			for (int32 LineIndex = 0; LineIndex < Lines.Num(); ++LineIndex)
+			{
+				if (LineIndex > 0) PlainText.AppendChar(TEXT('\n'));
+				for (const FTextRunParseResults& Run : Lines[LineIndex].Runs)
+				{
+					const FTextRange& Range = Run.Name.IsEmpty() ? Run.OriginalRange : Run.ContentRange;
+					if (Range.BeginIndex != INDEX_NONE && Range.EndIndex > Range.BeginIndex)
+					{
+						PlainText.Append(Decoded.Mid(Range.BeginIndex, Range.Len()));
+					}
+				}
+			}
+			return NormalizeStructureText(PlainText);
 		}
 
 		FString ResolveWidgetStructureText(const UTextBlock* TextBlock)
@@ -678,6 +704,11 @@ namespace Design2UMGAutomationStructureSnapshot
 						Stats.VisibleTexts.Add(Text);
 					}
 				}
+				else if (const URichTextBlock* RichText = Cast<URichTextBlock>(Widget))
+				{
+					const FString Text = ResolveWidgetStructureText(RichText);
+					if (!Text.IsEmpty()) Stats.VisibleTexts.Add(Text);
+				}
 			}
 			else if (Kind == TEXT("visual"))
 			{
@@ -779,6 +810,20 @@ namespace Design2UMGAutomationStructureSnapshot
 		if (!WidgetTree || !WidgetTree->RootWidget)
 		{
 			return nullptr;
+		}
+
+		// Blueprint templates omit nested instance trees. Snapshot a compiled instance
+		// so named-slot overrides and the rendered child text are included exactly once.
+		if (UWidgetBlueprint* Blueprint = Cast<UWidgetBlueprint>(WidgetTree->GetOuter()))
+		{
+			UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+			if (!World || !Blueprint->GeneratedClass) return nullptr;
+			TStrongObjectPtr<UUserWidget> Instance(NewObject<UUserWidget>(World, Blueprint->GeneratedClass));
+			if (!Instance->Initialize()) return nullptr;
+			Instance->TakeWidget();
+			const auto Snapshot = BuildWidgetTreeStructureSnapshot(Instance->WidgetTree);
+			Instance->ReleaseSlateResources(true);
+			return Snapshot;
 		}
 
 		FStructureSnapshotStats Stats;

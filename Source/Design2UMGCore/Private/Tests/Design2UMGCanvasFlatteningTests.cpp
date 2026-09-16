@@ -320,4 +320,48 @@ bool FCanvasFlatteningRemoveEmptyCanvasTest::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCanvasFixedSizeCarrierTest,
+	"Design2UMG.Unit.CanvasFlattening.FixedSizeCarrier",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FCanvasFixedSizeCarrierTest::RunTest(const FString&)
+{
+	for (int32 Boundary = 0; Boundary < 10; ++Boundary)
+	{
+		FUMGWidgetNode Root;
+		Root.Type = Boundary == 1 ? UMGWidgetTypes::CanvasPanel : UMGWidgetTypes::SizeBox;
+		Root.WidgetStyle.WidthOverride = 100.f; Root.WidgetStyle.HeightOverride = 80.f;
+		FUMGWidgetNode Canvas = MakeCanvas(TEXT("canvas"), 0, 0);
+		FUMGWidgetNode Carrier;
+		Carrier.Type = UMGWidgetTypes::SizeBox;
+		Carrier.Id = TEXT("carrier"); Carrier.WidgetStyle.WidthOverride = 70.f;
+		Carrier.WidgetStyle.HeightOverride = 50.f;
+		Carrier.Slot.Offsets = {8.f, 9.f, 70.f, 50.f};
+		FUMGWidgetNode Content = MakeLeaf(TEXT("content"), 0, 0);
+		Content.MutableSource().SourceNodeId = TEXT("source");
+		if (Boundary == 2) Root.Type = UMGWidgetTypes::VerticalBox;
+		if (Boundary == 3) Carrier.Slot.bAutoSize = true;
+		if (Boundary == 4) Content.Slot.Padding = FMargin(3.f);
+		if (Boundary == 5) Carrier.MutableSource().SourceNodeId = TEXT("owned-panel");
+		if (Boundary == 6) Content.MutableSource().bMappedComponentCandidate = true;
+		if (Boundary == 7) Carrier.Render.RenderOpacity = 0.5f;
+		if (Boundary == 8) Root.MutableSource().bMappedComponentCandidate = true;
+		if (Boundary == 9) Content.MutableSource().SourceNodeType = TEXT("INSTANCE");
+		Carrier.Children.Add(MoveTemp(Content)); Canvas.Children.Add(MoveTemp(Carrier)); Root.Children.Add(MoveTemp(Canvas));
+		Design2UMGCanvasFlattening::FFlattenStats Stats;
+		Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Root, Stats);
+		const bool bExpectedFold = Boundary < 2;
+		TestEqual(TEXT("Only supported parent allocation boundary permits folding"), Stats.RemovedRedundantSizeCarrierCount, bExpectedFold ? 1 : 0);
+		const FUMGWidgetNode& Result = Root.Children[0].Children[0];
+		TestEqual(TEXT("Size carrier retained on excluded cases"), Result.Type, FString(bExpectedFold ? UMGWidgetTypes::Image : UMGWidgetTypes::SizeBox));
+		if (bExpectedFold)
+		{
+			TestEqual(TEXT("Content identity preserved"), Result.Id, FString(TEXT("content")));
+			TestEqual(TEXT("Explicit canvas offset preserved"), Result.Slot.Offsets.Left, 8.f);
+			TestEqual(TEXT("Explicit canvas width preserved"), Result.Slot.Offsets.Right, 70.f);
+		}
+	}
+	return true;
+}
+
 #endif

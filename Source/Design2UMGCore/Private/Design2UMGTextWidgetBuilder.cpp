@@ -14,6 +14,7 @@
 #include "Engine/Font.h"
 #include "Misc/PackageName.h"
 #include "RichTextStyleRowSerializer.h"
+#include "Framework/Text/TextRange.h"
 
 namespace
 {
@@ -223,7 +224,8 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 
 	const auto TextRunNeedsRichText = [](const FDesignTextRun& Run)
 	{
-		return !Run.FontFamily.IsEmpty()
+		return !Run.Color.IsEmpty()
+			|| !Run.FontFamily.IsEmpty()
 			|| !Run.FontPostScriptName.IsEmpty()
 			|| Run.FontSize.IsSet()
 			|| !Run.FontWeight.IsEmpty()
@@ -281,12 +283,12 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 			Result.FontFamily = ResolvedFont.FontAssetPath;
 			Result.TypefaceFontName = ResolvedFont.TypefaceName;
 		}
-		else if (!Run->FontWeight.IsEmpty())
+		else if (!Run->FontWeight.IsEmpty() || !Run->FontStyle.IsEmpty())
 		{
 			Result.TypefaceFontName = TextFontResolution::Resolve(
 				InNode->Text.FontFamily,
 				InNode->Text.FontPostScriptName,
-				Run->FontWeight,
+				Run->FontWeight.IsEmpty() ? InNode->Text.FontWeight : Run->FontWeight,
 				Run->FontStyle.IsEmpty() ? InNode->Text.FontStyle : Run->FontStyle).TypefaceName;
 		}
 
@@ -295,7 +297,6 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 		const TOptional<float> ResolvedSourceFontSize = TextFontResolution::ResolveSourceFontSizeForUMG(SourceFontSize);
 		if (ResolvedSourceFontSize.IsSet())
 		{
-			Result.DesignFontSize = SourceFontSize;
 			if (bRunHasFontSize)
 			{
 				Result.FontSize = ResolvedSourceFontSize.GetValue();
@@ -308,7 +309,11 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 
 		const FDesignFill& PrimaryFill = InNode->Visual.TopmostFill();
 		const bool bHasNodeColor = PrimaryFill.Type == EDesignFillType::Color;
-		if (bHasNodeColor)
+		if (Run && !Run->Color.IsEmpty())
+		{
+			Result.Color = Design2UMGWidgetNodeAccess::SerializeWidgetColor(FUMGValueParser::ParseColor(Run->Color));
+		}
+		else if (bHasNodeColor)
 		{
 			Result.Color = Design2UMGWidgetNodeAccess::SerializeWidgetColor(FUMGValueParser::ParseColor(PrimaryFill.SolidColor));
 			if (Result.Color->IsEmpty())
@@ -359,18 +364,31 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 		TSet<FString> UniqueHrefs;
 		for (const FResolvedRichTextRun& Run : Runs)
 		{
-			Result.Markup.AppendChar(TEXT('<'));
-			Result.Markup.Append(Run.RowName);
+			FString OpeningTag = TEXT("<") + Run.RowName;
 			if (!Run.Href.IsEmpty())
 			{
-				Result.Markup.Append(TEXT(" href=\""));
-				Result.Markup.Append(EscapeRichTextAttribute(Run.Href));
-				Result.Markup.AppendChar(TEXT('"'));
+				OpeningTag.Append(TEXT(" href=\""));
+				OpeningTag.Append(EscapeRichTextAttribute(Run.Href));
+				OpeningTag.AppendChar(TEXT('"'));
 				UniqueHrefs.Add(Run.Href);
 			}
-			Result.Markup.AppendChar(TEXT('>'));
-			Result.Markup.Append(EscapeRichTextText(Run.Content));
-			Result.Markup.Append(TEXT("</>"));
+			OpeningTag.AppendChar(TEXT('>'));
+			// Slate parses markup separately per line. A tag spanning a line boundary
+			// is rendered literally, so reuse the same style row in each nonempty line.
+			TArray<FTextRange> Lines;
+			FTextRange::CalculateLineRangesFromString(Run.Content, Lines);
+			int32 PreviousEnd = 0;
+			for (const FTextRange& Line : Lines)
+			{
+				Result.Markup.Append(Run.Content.Mid(PreviousEnd, Line.BeginIndex - PreviousEnd));
+				if (!Line.IsEmpty())
+				{
+					Result.Markup.Append(OpeningTag);
+					Result.Markup.Append(EscapeRichTextText(Run.Content.Mid(Line.BeginIndex, Line.Len())));
+					Result.Markup.Append(TEXT("</>"));
+				}
+				PreviousEnd = Line.EndIndex;
+			}
 		}
 
 		if (UniqueHrefs.Num() == 1)

@@ -152,6 +152,8 @@ bool FPenParserTextNodeTest::RunTest(const FString&)
 	TestEqual(TEXT("TextAlign"), Node->Text.TextAlign, EDesignTextAlign::Center);
 	TestEqual(TEXT("TextGrowth"), Node->Text.TextGrowth, EDesignTextGrowth::FixedWidthHeight);
 	TestEqual(TEXT("Missing Pencil line height remains zero"), Node->Text.LineHeight, 0.0f);
+	TestTrue(TEXT("Pencil text uses half-leading baseline placement"), Node->Text.bSourceHalfLeadingBaseline);
+	TestTrue(TEXT("Pencil text retains its source line-height rounding rule"), Node->Text.bSourceRoundLineHeightToPixels);
 
 	const FString ExplicitLineHeightJson = TEXT(R"JSON(
 {
@@ -172,6 +174,7 @@ bool FPenParserTextNodeTest::RunTest(const FString&)
 	if (ExplicitDoc.Children.Num() == 1 && ExplicitDoc.Children[0].IsValid())
 	{
 		TestEqual(TEXT("Explicit Pencil line height is preserved"), ExplicitDoc.Children[0]->Text.LineHeight, 1.0f);
+		TestTrue(TEXT("Explicit Pencil line height retains half-leading placement"), ExplicitDoc.Children[0]->Text.bSourceHalfLeadingBaseline);
 	}
 
 	return true;

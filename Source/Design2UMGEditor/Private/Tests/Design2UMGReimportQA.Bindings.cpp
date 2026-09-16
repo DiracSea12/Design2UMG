@@ -7,6 +7,11 @@
 #include "Design2UMGGenerationManifest.h"
 #include "Design2UMGWidgetBindingTools.h"
 #include "DesignImportPipeline.h"
+#include "DesignImportReimportInternal.h"
+#include "Animation/WidgetAnimation.h"
+#include "Animation/WidgetAnimationBinding.h"
+#include "MovieScene.h"
+#include "Components/NamedSlot.h"
 #include "UMGGenerator.h"
 #include "Tests/Design2UMGMappingQAWidget.h"
 
@@ -246,6 +251,66 @@ bool FSafeReimportQABindingFunctionNameCollisionTest::RunTest(const FString&)
 	TestNotNull(TEXT("bound function resolvable on the generated class"),
 		WBP->GeneratedClass ? WBP->GeneratedClass->FindFunctionByName(Binding->FunctionName) : nullptr);
 
+	QAWipeOutput(OutputDir);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQANamedSlotOwnershipTest,
+	"Design2UMG.SafeReimportQA.NamedSlotOwnership", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FSafeReimportQANamedSlotOwnershipTest::RunTest(const FString&)
+{
+	UWidgetBlueprint* Blueprint = NewObject<UWidgetBlueprint>(GetTransientPackage());
+	Blueprint->WidgetTree = NewObject<UWidgetTree>(Blueprint);
+	UUserWidget* Host = Blueprint->WidgetTree->ConstructWidget<UUserWidget>(UDesign2UMGMappingQAWidget::StaticClass(), TEXT("SlotHost"));
+	Blueprint->WidgetTree->RootWidget = Host;
+	Host->WidgetTree = NewObject<UWidgetTree>(Host);
+	UNamedSlot* Slot = Host->WidgetTree->ConstructWidget<UNamedSlot>(UNamedSlot::StaticClass(), TEXT("Content"));
+	Host->WidgetTree->RootWidget = Slot;
+	UTextBlock* Manual = Blueprint->WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Manual"));
+	Host->SetContentForSlot(TEXT("Content"), Manual);
+	TestTrue(TEXT("Fixture contains real named-slot binding"), Host->GetContentForSlot(TEXT("Content")) == Manual);
+	TSet<FString> Owned{TEXT("SlotHost")};
+	FString Reason;
+	TestFalse(TEXT("Handmade slot content prevents deletion"), DesignImportPipeline::IsSubtreePurelyD2UOwned(Blueprint, Host, Owned, Reason));
+	TestTrue(TEXT("Conflict identifies hidden content"), Reason.Contains(TEXT("Manual")));
+	Owned.Add(TEXT("Manual"));
+	TestTrue(TEXT("Wholly generated slot content permits deletion"), DesignImportPipeline::IsSubtreePurelyD2UOwned(Blueprint, Host, Owned, Reason));
+	FDelegateEditorBinding Binding;
+	Binding.ObjectName = TEXT("Manual");
+	Binding.PropertyName = TEXT("Text");
+	Blueprint->Bindings.Add(Binding);
+	TestFalse(TEXT("Bound content in slot prevents deletion"), DesignImportPipeline::IsSubtreePurelyD2UOwned(Blueprint, Host, Owned, Reason));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportQAAnimationOwnershipTest,
+	"Design2UMG.SafeReimportQA.AnimationOwnership", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FSafeReimportQAAnimationOwnershipTest::RunTest(const FString&)
+{
+	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/QAAnimationOwnership");
+	const FString Keep = MakeQAText(TEXT("keep"), TEXT("Keeper"), 250, 24, TEXT("Keep"));
+	const FString Animated = MakeQAText(TEXT("animated"), TEXT("Animated"), 24, 24, TEXT("Animate"));
+	UWidgetBlueprint* Blueprint = QAImport(MakeQADoc(Animated + TEXT(",") + Keep), nullptr, OutputDir);
+	if (!TestNotNull(TEXT("Animation fixture imported"), Blueprint)) return false;
+	UWidget* Target = Blueprint->WidgetTree->FindWidget(TEXT("Animated"));
+	if (!TestNotNull(TEXT("Animation target exists"), Target)) return false;
+	UWidgetAnimation* Animation = NewObject<UWidgetAnimation>(Blueprint, TEXT("UserAnimation"), RF_Transactional);
+	Animation->MovieScene = NewObject<UMovieScene>(Animation);
+	const FGuid Guid = Animation->MovieScene->AddPossessable(TEXT("Animated"), Target->GetClass());
+	FWidgetAnimationBinding Binding;
+	Binding.WidgetName = Target->GetFName();
+	Binding.AnimationGuid = Guid;
+	Binding.bIsRootWidget = false;
+	Animation->AnimationBindings.Add(Binding);
+	Blueprint->Animations.Add(Animation);
+	Blueprint->WidgetVariableNameToGuidMap.Add(Animation->GetFName(), FGuid::NewGuid());
+	const FString Package = Blueprint->GetOutermost()->GetName();
+	const FDesignReimportResult Result = QAReimport(MakeQADoc(Keep), nullptr, Package);
+	TestTrue(TEXT("Per-node animation conflict permits remaining import"), Result.bSucceeded);
+	TestTrue(TEXT("Animated target preserved"), Blueprint->WidgetTree->FindWidget(TEXT("Animated")) == Target);
+	TestTrue(TEXT("Animation retained"), Blueprint->Animations.Contains(Animation));
+	TestEqual(TEXT("Animation binding intact"), Animation->GetBindings().Num(), 1);
+	TestTrue(TEXT("Animation prevents node removal"), QACountKind(Result, TEXT("reimport_remove_conflict")) > 0);
 	QAWipeOutput(OutputDir);
 	return true;
 }

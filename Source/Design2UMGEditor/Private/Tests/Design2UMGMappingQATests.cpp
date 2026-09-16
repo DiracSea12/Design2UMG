@@ -56,7 +56,7 @@ namespace
 		Node.MutableSource().SourceNodeId = NodeId;
 		Node.MutableSource().SourceNodeType = TEXT("INSTANCE");
 		Node.MutableSource().ComponentId = TEXT("12:34");
-		Node.MutableSource().ComponentSetId = TEXT("56:78");
+		Node.MutableSource().ComponentSetKey = TEXT("56:78");
 		Node.MutableSource().MainComponentKey = TEXT("qa-main-key");
 		Node.MutableSource().bMappedComponentCandidate = true;
 		return Node;

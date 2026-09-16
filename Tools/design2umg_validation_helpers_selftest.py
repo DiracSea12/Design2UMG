@@ -1138,6 +1138,9 @@ def test_runtime_project_fails_closed_without_explicit_input() -> None:
 
 
 def main() -> None:
+    # Rich text remains subject to text geometry correspondence on both sides.
+    assert "RichTextBlock" in geometry_compare.SOURCE_TEXT_TYPES
+    assert "RichTextBlock" in geometry_compare.RUNTIME_TEXT_CLASSES
     test_discovery_and_run_scope_contracts()
     test_completeness_contract()
     test_transparent_rgb_does_not_count_as_visible_change()

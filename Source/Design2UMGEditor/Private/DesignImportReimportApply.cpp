@@ -3,6 +3,8 @@
 #include "DesignImportReimportInternal.h"
 
 #include "Design2UMGSettings.h"
+#include "Design2UMGComponentBlueprints.h"
+#include "Design2UMGGenerationSettingsSnapshot.h"
 #include "UMGSchemaSourceExtensions.h"
 #include "UMGValueParsing.h"
 #include "UMGWidgetUtils.h"
@@ -310,13 +312,10 @@ namespace DesignImportPipeline
 		 */
 		bool TryMatchChildByBaseName(
 			const FUMGWidgetNode& Child,
-			TMap<FString, int32>& BaseConsumed,
 			TArray<UWidget*>& OwnedChildren,
 			FNestedChildrenMatch& Out)
 		{
 			const FString BaseName = FUMGWidgetUtils::SanitizeWidgetName(Child.Name, Child.Type).ToString();
-			const int32 Consumed = BaseConsumed.FindOrAdd(BaseName);
-			BaseConsumed[BaseName] = Consumed + 1;
 
 			TArray<UWidget*> Candidates;
 			for (UWidget* OwnedChild : OwnedChildren)
@@ -332,10 +331,10 @@ namespace DesignImportPipeline
 					< FUMGWidgetUtils::GetWidgetNameSuffixRank(B.GetFName().ToString(), BaseName);
 			});
 
-			if (Consumed < Candidates.Num())
+			if (!Candidates.IsEmpty())
 			{
-				Out.Matched.Add({ &Child, Candidates[Consumed] });
-				OwnedChildren.RemoveSingle(Candidates[Consumed]);
+				Out.Matched.Add({ &Child, Candidates[0] });
+				OwnedChildren.RemoveSingle(Candidates[0]);
 				return true;
 			}
 			return false;
@@ -374,11 +373,10 @@ namespace DesignImportPipeline
 			while (true)
 			{
 				TArray<const FUMGWidgetNode*> RoundUnmatched;
-				TMap<FString, int32> BaseConsumed;
 				for (const FUMGWidgetNode* Child : PendingChildren)
 				{
 					if (TryMatchChildByManifestRecord(*Child, Panel, Shared, OwnedChildren, Out) == EManifestMatchOutcome::Unhandled
-						&& !TryMatchChildByBaseName(*Child, BaseConsumed, OwnedChildren, Out))
+						&& !TryMatchChildByBaseName(*Child, OwnedChildren, Out))
 					{
 						RoundUnmatched.Add(Child);
 					}
@@ -595,6 +593,67 @@ namespace DesignImportPipeline
 		}
 	}
 
+	namespace
+	{
+		UWidget* RefreshAutomaticInstance(const FUMGWidgetNode& Node, UWidget* Widget,
+			const FReimportApplySharedState& Shared)
+		{
+			const auto& ComponentContext = Shared.GenerationSettings->ComponentBlueprints;
+
+			UUserWidget* Instance = Cast<UUserWidget>(Widget);
+			const auto* Component = ComponentContext->Components.Find(ComponentContext->ResolveKey(Node));
+			if (!Instance || !Component)
+			{
+				ComponentContext->Error = TEXT("Automatic instance no longer matches generated widget: ") + Node.Name;
+				return nullptr;
+			}
+			TArray<FName> Slots;
+			Instance->GetSlotNames(Slots);
+			TSet<FString> UpdatedOwned = *Shared.OwnedNames;
+			FString ConflictReason;
+			for (const FName Slot : Slots)
+			{
+				if (UWidget* Content = Instance->GetContentForSlot(Slot))
+				{
+					if (!IsSubtreePurelyD2UOwned(Shared.WBP, Content, UpdatedOwned, ConflictReason))
+					{
+						ComponentContext->Error = TEXT("Instance override contains user changes: ") + Node.Name + TEXT("; ") + ConflictReason;
+						return nullptr;
+					}
+				}
+			}
+			if (Instance->GetClass()->GetPathName() != Component->ClassPath)
+			{
+				UPanelWidget* Parent = Instance->GetParent();
+				if (!Parent || !IsSubtreePurelyD2UOwned(Shared.WBP, Instance, UpdatedOwned, ConflictReason))
+				{
+					ComponentContext->Error = TEXT("Component swap conflicts with user content: ") + Node.Name + TEXT("; ") + ConflictReason;
+					return nullptr;
+				}
+				const int32 Index = Parent->GetChildIndex(Instance);
+				DeleteD2UOwnedSubtreeSilently(Shared.WBP, Instance, UpdatedOwned);
+				Widget = FUMGWidgetUtils::CreateWidgetRecursive(Shared.WidgetTree, Node, Parent, nullptr,
+					&Shared.DesignSize, Shared.MappingBuildState, nullptr, Shared.GenerationSettings);
+				if (!Widget) return nullptr;
+				Parent->ShiftChild(Index, Widget);
+			}
+			else
+			{
+				for (const FName Slot : Slots)
+				{
+					if (UWidget* Content = Instance->GetContentForSlot(Slot))
+					{
+						Instance->SetContentForSlot(Slot, nullptr);
+						DeleteD2UOwnedSubtreeSilently(Shared.WBP, Content, UpdatedOwned);
+					}
+				}
+				if (!ComponentContext->ApplyInstance(Instance, Shared.WidgetTree, Node, *Shared.GenerationSettings,
+					nullptr, &Shared.DesignSize, Shared.MappingBuildState)) return nullptr;
+			}
+			return Widget;
+		}
+	}
+
 	void RefreshNodeByKind(
 		const FUMGWidgetNode& Node,
 		UWidget* Widget,
@@ -609,16 +668,34 @@ namespace DesignImportPipeline
 				RefreshMappedInstance(MappedInstance, Node, Shared);
 				return;
 			}
+			if (Shared.GenerationSettings->ComponentBlueprints)
+			{
+				// A failed explicit mapping was expanded normally, not generated as a child WBP.
+				// Its descendants were also excluded from automatic dependency planning.
+				FDesign2UMGGenerationSettingsSnapshot Settings = *Shared.GenerationSettings;
+				Settings.ComponentBlueprints.Reset();
+				FReimportApplySharedState Ordinary = Shared;
+				Ordinary.GenerationSettings = &Settings;
+				RefreshNodeByKind(Node, Widget, Ordinary, NestedMoveCandidates, NewlyCreatedWidgets);
+				return;
+			}
 		}
 
 		Widget->Modify();
 		ApplySlotForNode(Widget, Node, Shared);
-		FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node);
+		const auto ComponentContext = Shared.GenerationSettings->ComponentBlueprints;
+		const FString AutomaticKey = ComponentContext ? ComponentContext->ResolveKey(Node) : FString();
+		if (!AutomaticKey.IsEmpty())
+		{
+			Widget = RefreshAutomaticInstance(Node, Widget, Shared);
+			if (!Widget) return;
+		}
+		else FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node);
 		if (UImage* ImageWidget = Cast<UImage>(Widget))
 		{
 			FWidgetResourceBinder::BindImageResource(ImageWidget, Node, nullptr);
 		}
-		RefreshChildWidgets(Node, Widget, Shared, NestedMoveCandidates, NewlyCreatedWidgets);
+		if (AutomaticKey.IsEmpty()) RefreshChildWidgets(Node, Widget, Shared, NestedMoveCandidates, NewlyCreatedWidgets);
 
 		// Only top-level generation relations (hung under the host root) enter the manifest instances; nested nodes only refresh properties.
 		if (Shared.HostPanel && Widget->GetParent() == Shared.HostPanel)

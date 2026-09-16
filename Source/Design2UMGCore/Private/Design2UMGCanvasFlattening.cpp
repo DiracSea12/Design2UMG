@@ -8,6 +8,50 @@
 
 namespace
 {
+	bool IsUnpaddedFill(const FUMGSlotData& Slot)
+	{
+		return Slot.HorizontalAlignment == EUMGSlotHorizontalAlignment::Fill
+			&& Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Fill && Slot.Padding == FMargin(0.f);
+	}
+
+	bool IsRedundantSizeCarrier(const FUMGWidgetNode& Carrier)
+	{
+		if (Carrier.Type != UMGWidgetTypes::SizeBox || Carrier.Children.Num() != 1 || Carrier.Slot.bAutoSize
+			|| !IsUnpaddedFill(Carrier.Children[0].Slot) || Carrier.Render.HasAny()
+			|| Carrier.WidgetState.HasAny() || Carrier.Effect.HasAny() || Carrier.Shadow.HasAny()
+			|| Carrier.Text.HasAny() || Carrier.Path.HasAny() || Carrier.ScrollBox.HasAny()) return false;
+		const FUMGWidgetNode& Content = Carrier.Children[0];
+		// An added sizing wrapper has no source identity of its own. Never remove
+		// a source-owned panel or cross the component boundary of its content.
+		if (Carrier.HasSourceData() || !Content.HasSourceData() || Content.Source().SourceNodeId.IsEmpty()
+			|| Content.Source().bMappedComponentCandidate || Content.Source().IsFigmaInstance()) return false;
+		FUMGWidgetStyleData OtherStyle = Carrier.WidgetStyle;
+		OtherStyle.WidthOverride.Reset(); OtherStyle.HeightOverride.Reset();
+		OtherStyle.MinDesiredWidth.Reset(); OtherStyle.MinDesiredHeight.Reset();
+		return !OtherStyle.HasAny();
+	}
+
+	void FoldCanvasSizeCarriers(FUMGWidgetNode& Node, bool bDesiredSizeIgnored,
+		Design2UMGCanvasFlattening::FFlattenStats& Stats)
+	{
+		const bool bNativeParent = !(Node.HasSourceData()
+			&& (Node.Source().bMappedComponentCandidate || Node.Source().IsFigmaInstance()));
+		for (FUMGWidgetNode& Child : Node.Children)
+		{
+			const bool bChildDesiredSizeIgnored = bNativeParent && ((Node.Type == UMGWidgetTypes::CanvasPanel && !Child.Slot.bAutoSize)
+				|| (Node.Type == UMGWidgetTypes::SizeBox && Node.WidgetStyle.WidthOverride.IsSet()
+					&& Node.WidgetStyle.HeightOverride.IsSet() && IsUnpaddedFill(Child.Slot)));
+			FoldCanvasSizeCarriers(Child, bChildDesiredSizeIgnored, Stats);
+			if (bNativeParent && Node.Type == UMGWidgetTypes::CanvasPanel && bDesiredSizeIgnored && IsRedundantSizeCarrier(Child))
+			{
+				FUMGWidgetNode Content = MoveTemp(Child.Children[0]);
+				Content.Slot = Child.Slot;
+				Child = MoveTemp(Content);
+				++Stats.RemovedRedundantSizeCarrierCount;
+			}
+		}
+	}
+
 	// Depth 0 is the root's direct children, depth 1 their children. Nodes at or above
 	// this depth are preserved; deeper bare canvases merge into their canvas parent.
 	constexpr int32 MaxPreservedDepth = 2;
@@ -139,4 +183,8 @@ namespace
 void Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(FUMGWidgetNode& Root, FFlattenStats& OutStats)
 {
 	FlattenNode(Root, 0, OutStats);
+	// Run after canvas flattening so the parent allocation boundary stays intact.
+	// A collapsed promoted child can change this canvas's desired size; its
+	// parent must ignore that value in both measurement and arrangement.
+	FoldCanvasSizeCarriers(Root, false, OutStats);
 }

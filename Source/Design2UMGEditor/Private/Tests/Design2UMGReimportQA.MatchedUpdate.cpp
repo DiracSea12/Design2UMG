@@ -183,7 +183,7 @@ bool FSafeReimportQASiblingNameCorrespondenceTest::RunTest(const FString&)
 			FString::Printf(
 				TEXT("%s,%s"),
 				*MakeQAText(TEXT("qa_title_a"), TEXT("Title"), 32, 32, TEXT("First")),
-				*MakeQAText(TEXT("qa_title_b"), TEXT("Title"), 32, 60, SecondText))));
+				*MakeQAText(TEXT("qa_title_b"), TEXT("Title"), 32, 60, SecondText))) + TEXT(",") + MakeQAText(TEXT("qa_keep"), TEXT("Keeper"), 260, 24, TEXT("Keep")));
 	};
 
 	UWidgetBlueprint* WBP = QAImport(BuildDoc(TEXT("Second")), nullptr, OutputDir);
@@ -203,12 +203,17 @@ bool FSafeReimportQASiblingNameCorrespondenceTest::RunTest(const FString&)
 	}
 	TestEqual(TEXT("v1 first text"), TitleA->GetText().ToString(), FString(TEXT("First")));
 	TestEqual(TEXT("v1 second text"), TitleB->GetText().ToString(), FString(TEXT("Second")));
+	UTextBlock* OriginalA = TitleA;
+	UTextBlock* OriginalB = TitleB;
 
 	const FDesignReimportResult Result = QAReimport(BuildDoc(TEXT("Second v2")), nullptr, TargetPackage);
 	TestTrue(TEXT("reimport succeeds"), Result.bSucceeded);
 
 	TitleA = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Title")));
 	TitleB = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Title_1")));
+	TestTrue(TEXT("First same-name object retained"), TitleA == OriginalA);
+	TestTrue(TEXT("Second same-name object retained"), TitleB == OriginalB);
+	TestNull(TEXT("Repeated import creates no extra same-name node"), WBP->WidgetTree->FindWidget(TEXT("Title_2")));
 	if (TestNotNull(TEXT("Title still present"), TitleA) && TestNotNull(TEXT("Title_1 still present"), TitleB))
 	{
 		TestEqual(TEXT("first same-name sibling keeps its own design node value"), TitleA->GetText().ToString(), FString(TEXT("First")));
@@ -557,4 +562,3 @@ bool FSafeReimportQADiskLoadedAssetTest::RunTest(const FString&)
 }
 
 #endif
-

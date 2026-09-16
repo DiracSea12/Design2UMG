@@ -230,7 +230,7 @@ namespace FigmaParserMetadata
 		for (const TCHAR* Key : {
 			 TEXT("counterAxisAlignContent"), TEXT("layoutPositioning"), TEXT("layoutWrap"), TEXT("layoutAlign"),
 			 TEXT("primaryAxisSizingMode"), TEXT("counterAxisSizingMode"), TEXT("gridRowsSizing"), TEXT("gridColumnsSizing"),
-			 TEXT("gridChildHorizontalAlign"), TEXT("gridChildVerticalAlign"), TEXT("mainComponentKey"), TEXT("componentSetId") })
+			 TEXT("gridChildHorizontalAlign"), TEXT("gridChildVerticalAlign"), TEXT("mainComponentKey"), TEXT("componentSetId"), TEXT("componentSetKey") })
 		{
 			AddExtensionIfNonEmpty(Extensions, Key, GetString(Obj, Key));
 		}

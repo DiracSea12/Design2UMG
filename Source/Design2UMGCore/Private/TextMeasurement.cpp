@@ -5,7 +5,6 @@
 #include "DesignSchema.h"
 
 #include "DesignNodeSemantics.h"
-#include "TextStyleUtils.h"
 #include "ParserSharedSemantics.h"
 
 namespace
@@ -50,44 +49,9 @@ bool TextMeasurement::IsWrappingTextMode(const TSharedPtr<FDesignNode>& Node)
 		|| ParserSharedSemantics::HasFillWidthAutoTextGrowth(*Node);
 }
 
-bool TextMeasurement::ShouldApplyExplicitLineHeight(const TSharedPtr<FDesignNode>& Node, float ProbeFontSize, float ParentContentWidth)
+bool TextMeasurement::ShouldApplyExplicitLineHeight(const TSharedPtr<FDesignNode>& Node)
 {
-	if (!Node.IsValid() || !FMath::IsFinite(Node->Text.LineHeight) || Node->Text.LineHeight <= 0.0f)
-	{
-		return false;
-	}
-
-	if (Node->Text.Content.Contains(TEXT("\n")))
-	{
-		return true;
-	}
-
-	if (!IsWrappingTextMode(Node))
-	{
-		return false;
-	}
-
-	const float WidthLimit = ResolveTextWidthHint(Node, ParentContentWidth);
-	if (WidthLimit <= 0.0f)
-	{
-		return false;
-	}
-
-	const float EffectiveProbeFontSize = ProbeFontSize > 0.0f ? ProbeFontSize : Node->Text.FontSize;
-	const int32 LetterSpacingTracking = (EffectiveProbeFontSize > 0.0f
-		&& Node->Text.LetterSpacing.IsSet()
-		&& Node->Text.LetterSpacing.GetValue() != 0.0f)
-		? TextStyleUtils::ConvertLetterSpacingPxToTracking(Node->Text.LetterSpacing.GetValue(), Node->Text.FontSize, EffectiveProbeFontSize)
-		: 0;
-	const FVector2D UnwrappedSize = RuntimeProbe::MeasureTextSize(
-		Node->Text.Content,
-		EffectiveProbeFontSize,
-		Node->Text.FontFamily,
-		Node->Text.FontPostScriptName,
-		Node->Text.FontWeight,
-		Node->Text.FontStyle,
-		LetterSpacingTracking);
-	return UnwrappedSize.X > WidthLimit;
+	return Node.IsValid() && FMath::IsFinite(Node->Text.LineHeight) && Node->Text.LineHeight > 0.0f;
 }
 
 FResolvedTextLayoutForUMG TextMeasurementInternal::ResolveTextLayoutForUMG(
@@ -161,28 +125,11 @@ FVector2D TextMeasurement::MeasureTextNodeSize(const TSharedPtr<FDesignNode>& No
 	{
 		return FVector2D::ZeroVector;
 	}
-	const int32 LetterSpacingTracking = (AppliedFontSize > 0.0f && Node->Text.LetterSpacing.IsSet() && Node->Text.LetterSpacing.GetValue() != 0.0f)
-		? TextStyleUtils::ConvertLetterSpacingPxToTracking(Node->Text.LetterSpacing.GetValue(), Node->Text.FontSize, AppliedFontSize)
-		: 0;
-	const FVector2D UnwrappedSize = RuntimeProbe::MeasureTextSize(
-		PrepareRuntimeTextContent(Node->Text.Content),
-		AppliedFontSize,
-		Node->Text.FontFamily,
-		Node->Text.FontPostScriptName,
-		Node->Text.FontWeight,
-		Node->Text.FontStyle,
-		LetterSpacingTracking);
-
-	const float WrapTextAt = ResolvedLayout.WrapTextAt;
-	if (WrapTextAt <= 0.0f && !Node->Text.Content.Contains(TEXT("\n")))
+	// FontMeasure omits tracking; measure the shaped widget for every line count.
+	const FVector2D MeasuredSize = MeasureResolvedTextNodeDesiredSize(Node, ResolvedLayout);
+	if (MeasuredSize.X > 0.0f && MeasuredSize.Y > 0.0f)
 	{
-		return UnwrappedSize;
-	}
-
-	const FVector2D WrappedSize = MeasureResolvedTextNodeDesiredSize(Node, ResolvedLayout);
-	if (WrappedSize.X > 0.0f && WrappedSize.Y > 0.0f)
-	{
-		return WrappedSize;
+		return MeasuredSize;
 	}
 
 	return FVector2D::ZeroVector;

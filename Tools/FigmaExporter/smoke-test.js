@@ -113,6 +113,7 @@ const textNode = {
   componentPropertyReferences: { characters: 'prop1' },
   explicitVariableModes: { '1': '2:3' },
   resolvedVariableModes: { '1': '2:4' },
+  getStyledTextSegments() { return [{ ...this, start: 0, end: this.characters.length }]; },
 };
 const textOut = api.serializeNode(textNode);
 assert.equal(textOut.maskType, undefined);

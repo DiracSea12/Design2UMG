@@ -16,6 +16,7 @@ namespace UMGGeneratorRootHandoff
 	{
 		FUMGWidgetNode Root;
 		FIntPoint DesignSize = FIntPoint::ZeroValue;
+		FString ErrorMessage;
 	};
 
 	FPreparedRoot PrepareRootForBuild(

@@ -210,7 +210,7 @@ bool FPenRichTextConverterUsesRichTextBlockTest::RunTest(const FString& Paramete
 
 	// Fixed key order matching the serializer's runtime-property set
 	static const TCHAR* const KeyOrder[] = {
-		TEXT("Color"), TEXT("DesignFontSize"), TEXT("FontFamily"), TEXT("FontSize"),
+		TEXT("Color"), TEXT("FontFamily"), TEXT("FontSize"),
 		TEXT("Href"), TEXT("LetterSpacing"), TEXT("Strikethrough"), TEXT("TypefaceFontName"), TEXT("Underline")
 	};
 
@@ -254,7 +254,7 @@ bool FPenRichTextConverterUsesRichTextBlockTest::RunTest(const FString& Paramete
 	}
 
 	const FString ExpectedSnapshot =
-		TEXT("d2u_run_0{Color=#112233FF;DesignFontSize=18.0;FontSize=13.5;LetterSpacing=0.0}")
+		TEXT("d2u_run_0{Color=#112233FF;FontSize=13.5;LetterSpacing=0.0}")
 		TEXT("|d2u_run_1{Color=#112233FF;FontFamily=/Game/Design2UMG/Fonts/Inter.Inter;Href=https://docs.example.com;LetterSpacing=0.0;TypefaceFontName=Bold;Underline=true}");
 
 	TestEqual(TEXT("Rich text style rows snapshot matches"), Snapshot, ExpectedSnapshot);

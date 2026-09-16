@@ -621,6 +621,7 @@ static void ApplyInstanceTrackingData(
 		OutNode.Metadata.Add(TEXT("instanceComponentId"), ComponentId);
 	}
 	Private::SetStringFieldIfPresent(NodeObj, TEXT("componentSetId"), ComponentInstance.ComponentSetId);
+	Private::SetStringFieldIfPresent(NodeObj, TEXT("componentSetKey"), ComponentInstance.ComponentSetKey);
 	Private::SetStringFieldIfPresent(NodeObj, TEXT("mainComponentKey"), ComponentInstance.MainComponentKey);
 	SetJsonFieldIfPresent(NodeObj, TEXT("componentProperties"), ComponentInstance.ComponentPropertiesJson);
 	SetJsonFieldIfPresent(NodeObj, TEXT("variantProperties"), ComponentInstance.VariantPropertiesJson);
@@ -816,6 +817,8 @@ TSharedPtr<FDesignNode> ParseNode(
 	const bool bHasNodeCoordinateBounds = bParentAutoLayout
 		? TryReadBounds(GetObject(NodeObj, TEXT("absoluteBoundingBox")), NodeCoordinateBounds)
 		: TryGetVisualBounds(NodeObj, ParentObj, NodeCoordinateBounds);
+	Node->LayoutData.bChildPositionsRelativeToVisualBounds =
+		!bParentAutoLayout && bHasNodeCoordinateBounds;
 	ParseNodeChildren(
 		NodeObj,
 		FigmaType,
@@ -827,7 +830,7 @@ TSharedPtr<FDesignNode> ParseNode(
 		*Node);
 
 	FigmaParserMetadata::ApplyFigmaSemanticHints(NodeObj, *Node);
-	FinalizeNodePaddingRuntimeWrap(*Node, bInsideInstanceSubtree);
+	FinalizeNodePaddingRuntimeWrap(*Node);
 
 	return Node;
 }
@@ -925,6 +928,7 @@ bool ParseDocument(const FString& FigmaJson, FDesignDocument& OutDocument)
 	AddJsonExtensionIfPresent(Root, OutDocument.Metadata, TEXT("componentSets"), TEXT("componentSets"));
 	SetJsonFieldIfPresent(Root, TEXT("components"), OutDocument.MutableSourceDocument().ComponentsJson);
 	SetJsonFieldIfPresent(Root, TEXT("componentSets"), OutDocument.MutableSourceDocument().ComponentSetsJson);
+	SetJsonFieldIfPresent(Root, TEXT("design2umgComponentDependencies"), OutDocument.MutableSourceDocument().ComponentDependenciesJson);
 	MergePrototypeDocumentData(DocObj, OutDocument.MutableSourceDocument());
 	MergePrototypeDocumentData(Root, OutDocument.MutableSourceDocument());
 
@@ -1044,6 +1048,10 @@ void CollectImageRefsRecursive(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSe
 
 void ApplyImageUrls(FDesignDocument& Document, const TMap<FString, FString>& ImageRefToUrl)
 {
+	if (!Document.SourceDocument().ComponentDependenciesJson.IsEmpty())
+	{
+		Document.MutableSourceDocument().ResolvedComponentImageUrls.Append(ImageRefToUrl);
+	}
 	ApplyImageUrlsRecursive(Document.Children, ImageRefToUrl);
 }
 

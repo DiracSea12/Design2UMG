@@ -149,6 +149,7 @@ namespace
 			&& !Brush.BrushColor.GetValue().Equals(FLinearColor::Transparent);
 		return bHasVisibleBrushColor
 			|| Brush.OutlineThickness.IsSet()
+			|| Brush.Margin.IsSet()
 			|| Brush.OutlineColor.IsSet()
 			|| Brush.MaterialRef.IsSet()
 			|| Brush.MaterialParams.IsSet()

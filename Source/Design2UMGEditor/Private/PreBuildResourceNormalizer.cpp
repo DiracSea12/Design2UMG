@@ -382,7 +382,9 @@ namespace
 				if (ExtractTextureRawData(Generated, RawData, RawW, RawH))
 				{
 					FString ObjectPath;
-					if (CreateOrUpdatePathTextureAsset(TextureImportPath, Plan.AssetName, RawData, RawW, RawH, Plan.Filter, ObjectPath))
+					const TextureFilter Filter = Plan.Kind == FTextureMaterializationPlan::EKind::Procedural
+						? Generated->Filter.GetValue() : Plan.Filter;
+					if (CreateOrUpdatePathTextureAsset(TextureImportPath, Plan.AssetName, RawData, RawW, RawH, Filter, ObjectPath))
 					{
 						ApplyMaterializedTextureToNode(Node, ObjectPath, Plan.Kind);
 						Cache.Add(Plan.Key, ObjectPath);

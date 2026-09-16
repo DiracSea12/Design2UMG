@@ -1,19 +1,11 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGLog.h"
-#include "FontResolver.h"
+#include "DesignLocalFontImport.h"
 
-#include "AssetRegistry/AssetRegistryModule.h"
-#include "Engine/Font.h"
-#include "Fonts/CompositeFont.h"
 #include "HAL/FileManager.h"
 #include "HAL/IConsoleManager.h"
-#include "Misc/PackageName.h"
 #include "Misc/Parse.h"
-#include "Misc/Paths.h"
-#include "UObject/Package.h"
-#include "UObject/SavePackage.h"
-#include "UObject/UObjectGlobals.h"
 
 namespace
 {
@@ -45,73 +37,13 @@ namespace
 			return;
 		}
 
-		const FString FontAssetName = FPackageName::GetLongPackageAssetName(FontPackageName);
-
-		UPackage* Package = nullptr;
-		UFont* Font = Cast<UFont>(StaticLoadObject(
-			UFont::StaticClass(), nullptr, *(FontPackageName + TEXT(".") + FontAssetName)));
-		const bool bCreatedNew = Font == nullptr;
-		if (Font)
+		DesignLocalFontImport::FFace Face;
+		Face.Path = TtfPath;
+		FString Error;
+		const bool bSaved = DesignLocalFontImport::ImportFace(Face, FontPackageName, Error, TypefaceName);
+		if (!bSaved)
 		{
-			Package = Font->GetOutermost();
-		}
-		else
-		{
-			Package = CreatePackage(*FontPackageName);
-			Font = Package ? NewObject<UFont>(Package, FName(*FontAssetName), RF_Public | RF_Standalone) : nullptr;
-		}
-
-		if (!Font || !Package)
-		{
-			UE_LOG(LogDesign2UMG, Error, TEXT("BuildFontFamily: failed to create or load font asset '%s'"), *FontPackageName);
-			return;
-		}
-
-		Font->FontCacheType = EFontCacheType::Runtime;
-
-		const FName TypefaceKey(*TypefaceName);
-		const FTypefaceEntry NewEntry(
-			TypefaceKey,
-			TtfPath,
-			EFontHinting::Default,
-			EFontLoadingPolicy::LazyLoad);
-
-		FCompositeFont& CompositeFont = Font->GetMutableInternalCompositeFont();
-		if (FTypefaceEntry* Existing = CompositeFont.DefaultTypeface.Fonts.FindByPredicate(
-			[TypefaceKey](const FTypefaceEntry& Entry) { return Entry.Name == TypefaceKey; }))
-		{
-			*Existing = NewEntry;
-		}
-		else
-		{
-			CompositeFont.DefaultTypeface.Fonts.Add(NewEntry);
-		}
-
-		if (bCreatedNew)
-		{
-			FAssetRegistryModule::AssetCreated(Font);
-		}
-
-		Package->MarkPackageDirty();
-
-		const FString PackageFileName = FPackageName::LongPackageNameToFilename(
-			FontPackageName,
-			FPackageName::GetAssetPackageExtension());
-		IFileManager::Get().MakeDirectory(*FPaths::GetPath(PackageFileName), true);
-		FSavePackageArgs SaveArgs;
-		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
-		const bool bSaved = UPackage::SavePackage(Package, Font, *PackageFileName, SaveArgs);
-
-		UE_LOG(LogDesign2UMG, Display,
-			TEXT("BuildFontFamily: %s font '%s' with typeface '%s' -> '%s' (save %s)"),
-			bCreatedNew ? TEXT("created") : TEXT("updated"),
-			*FontPackageName, *TypefaceName, *TtfPath,
-			bSaved ? TEXT("succeeded") : TEXT("failed"));
-
-		if (bSaved)
-		{
-			// Newly written assets must be visible to in-process font resolution.
-			FFontResolver::ClearCache();
+			UE_LOG(LogDesign2UMG, Error, TEXT("BuildFontFamily: %s"), *Error);
 		}
 	}
 
