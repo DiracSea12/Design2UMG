@@ -3,6 +3,7 @@
 #include "Misc/AutomationTest.h"
 #include "DesignSchema.h"
 #include "FigmaParser.h"
+#include "FigmaComponentDependencies.h"
 #include "Design2UMGLocalFigmaImport.h"
 #include "DesignImportPipeline.h"
 #include "DesignImportUtils.h"
@@ -225,7 +226,10 @@ bool FFigmaSourceImportWorkflowTest::RunTest(const FString& Parameters)
 	}
 
 	FDesignDocument Document;
-	TestTrue(TEXT("Parse raw Figma json"), FFigmaParser::ParseDocument(RawJson, Document));
+	FString PreparedJson, DependencyError;
+	if (!TestTrue(TEXT("Prepare REST component definitions"), FigmaComponentDependencies::PrepareRestFile(
+		RawJson, TEXT("source-workflow-fixture"), PreparedJson, DependencyError))) return false;
+	TestTrue(TEXT("Parse prepared Figma source"), FFigmaParser::ParseDocument(PreparedJson, Document));
 	TestTrue(TEXT("Parsed Figma source should contain children"), Document.Children.Num() > 0);
 
 	FUMGWidgetData Data = DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{false}).Data;

@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Design2UMGSettings.h"
 #include "UMGSchema.h"
+#include "FontResolver.h"
 
 struct FDesignDocument;
 
@@ -12,6 +13,7 @@ struct DESIGN2UMGCORE_API FDesign2UMGConversionSettings
 {
 	UDesign2UMGSettings::FResolvedPlaceholderHatchStyle PlaceholderHatchStyle;
 	float LuminosityFitOpacityCap = UDesign2UMGSettings::CanonicalLuminosityFitOpacityCap;
+	FDesign2UMGFontMappings ExplicitFontMappings;
 	TMap<FString, FString> IconFontAssetPaths;
 	FString DefaultIconFontAssetPath;
 	FString MissingIconFontPlaceholder;
@@ -22,6 +24,9 @@ struct DESIGN2UMGCORE_API FDesign2UMGConversionSettings
 
 /**
  * Converts shared design IR into normalized UMG generation IR.
+ * Font mapping policy is captured by Settings and passed through measurement and rich-text generation.
+ * Conversion runs on the game thread and still requires the current project font assets and Slate renderer;
+ * it is not a renderer-independent pure function.
  */
 class DESIGN2UMGCORE_API FDesign2UMGConverter
 {

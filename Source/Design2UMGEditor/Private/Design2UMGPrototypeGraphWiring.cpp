@@ -709,47 +709,8 @@ namespace
 	}
 }
 
-void WireSimplePrototypeBindings(
-	UWidgetBlueprint* WBP,
-	const FUMGPrototypeNavigationData& NavigationData,
-	TArray<FString>& OutWarnings)
+namespace
 {
-	if (!WBP || !WBP->WidgetTree)
-	{
-		return;
-	}
-
-	// Re-wiring is clear-then-author: a regenerate over the same blueprint must not accumulate nodes.
-	ClearGeneratedBindings(WBP);
-
-	if (NavigationData.ClickBindings.Num() == 0)
-	{
-		return;
-	}
-
-	UEdGraph* Ubergraph = WBP->UbergraphPages.Num() > 0 ? WBP->UbergraphPages[0] : nullptr;
-	if (!Ubergraph)
-	{
-		UE_LOG(LogDesign2UMG, Verbose,
-			TEXT("PrototypeNavigation wiring skipped for %s: blueprint has no ubergraph"),
-			*WBP->GetName());
-		return;
-	}
-
-	const FEngineFunctions Functions;
-
-	// Shared tree resolution: tree widgets are stable across the skeleton refresh below, so they are
-	// resolved once; class properties are read after any refresh instead of cached across it.
-	const FString SwitcherBaseName = FUMGWidgetUtils::SanitizeWidgetName(
-		NavigationData.SwitcherWidgetName, TEXT("WidgetSwitcher")).ToString();
-	UWidgetSwitcher* Switcher = FUMGWidgetUtils::FindUniqueTreeWidget<UWidgetSwitcher>(
-		WBP->WidgetTree, SwitcherBaseName);
-	UOverlay* OverlayHost = FUMGWidgetUtils::FindUniqueTreeWidget<UOverlay>(
-		WBP->WidgetTree, FUMGWidgetUtils::SanitizeWidgetName(
-			NavigationData.OverlayHostWidgetName, TEXT("Overlay")).ToString());
-
-	// Pass 1 - resolve every candidate binding without touching the blueprint, so the (potentially
-	// skeleton-refreshing) history variable creation below cannot invalidate cached properties.
 	struct FResolvedBinding
 	{
 		int32 BindingIndex = INDEX_NONE;
@@ -773,6 +734,41 @@ void WireSimplePrototypeBindings(
 		float DelaySeconds = 0.0f;
 		bool bTransitionChain = false;
 	};
+
+	struct FBindingPlan
+	{
+		UWidgetSwitcher* Switcher = nullptr;
+		UOverlay* OverlayHost = nullptr;
+		TArray<FResolvedBinding> MouseBindings;
+		TArray<FResolvedBinding> KeyboardBindings;
+		FString SwitcherBaseName;
+	};
+
+	// Created only after all skeleton-refreshing mutations are complete.
+	struct FBindingGraphTargets
+	{
+		FArrayProperty* HistoryProperty = nullptr;
+		FObjectProperty* SwitcherProperty = nullptr;
+		FObjectProperty* OverlayHostProperty = nullptr;
+		TArray<UWidget*> OverlayHostPages;
+	};
+
+FBindingPlan ResolveBindingPlan(UWidgetBlueprint* WBP,
+	const FUMGPrototypeNavigationData& NavigationData, const FEngineFunctions& Functions,
+	TArray<FString>& OutWarnings)
+{
+	// Shared tree resolution: tree widgets are stable across the skeleton refresh below, so they are
+	// resolved once; class properties are read after any refresh instead of cached across it.
+	const FString SwitcherBaseName = FUMGWidgetUtils::SanitizeWidgetName(
+		NavigationData.SwitcherWidgetName, TEXT("WidgetSwitcher")).ToString();
+	UWidgetSwitcher* Switcher = FUMGWidgetUtils::FindUniqueTreeWidget<UWidgetSwitcher>(
+		WBP->WidgetTree, SwitcherBaseName);
+	UOverlay* OverlayHost = FUMGWidgetUtils::FindUniqueTreeWidget<UOverlay>(
+		WBP->WidgetTree, FUMGWidgetUtils::SanitizeWidgetName(
+			NavigationData.OverlayHostWidgetName, TEXT("Overlay")).ToString());
+
+	// Pass 1 - resolve every candidate binding without touching the blueprint, so the (potentially
+	// skeleton-refreshing) history variable creation below cannot invalidate cached properties.
 	TArray<FResolvedBinding> MouseBindings;
 	TArray<FResolvedBinding> KeyboardBindings;
 
@@ -990,6 +986,17 @@ void WireSimplePrototypeBindings(
 		}
 	}
 
+	return {Switcher, OverlayHost, MoveTemp(MouseBindings), MoveTemp(KeyboardBindings), SwitcherBaseName};
+}
+
+FBindingGraphTargets PrepareBindingGraphTargets(UWidgetBlueprint* WBP,
+	const FUMGPrototypeNavigationData& NavigationData, FBindingPlan& Plan,
+	TArray<FString>& OutWarnings)
+{
+	UWidgetSwitcher* Switcher = Plan.Switcher;
+	UOverlay* OverlayHost = Plan.OverlayHost;
+	auto& MouseBindings = Plan.MouseBindings;
+	auto& KeyboardBindings = Plan.KeyboardBindings;
 	// Pass 2 - structural preparation, all in one place because each mutation needs the same
 	// skeleton refresh (which recreates the class properties, so it must precede pass 3's caching):
 	//   1. The overlay host and its hosted pages must be exposed as variables: UOverlay and the
@@ -1115,6 +1122,21 @@ void WireSimplePrototypeBindings(
 		? FindFProperty<FObjectProperty>(WBP->SkeletonGeneratedClass, OverlayHost->GetFName())
 		: nullptr;
 
+	return {HistoryProperty, SwitcherProperty, OverlayHostProperty, MoveTemp(OverlayHostPages)};
+}
+
+int32 WireMouseBindings(UWidgetBlueprint* WBP, UEdGraph* Ubergraph,
+	const FUMGPrototypeNavigationData& NavigationData, const FEngineFunctions& Functions,
+	const FBindingPlan& Plan, const FBindingGraphTargets& Targets, TArray<FString>& OutWarnings)
+{
+	UWidgetSwitcher* Switcher = Plan.Switcher;
+	const FString& SwitcherBaseName = Plan.SwitcherBaseName;
+	UOverlay* OverlayHost = Plan.OverlayHost;
+	const auto& MouseBindings = Plan.MouseBindings;
+	FObjectProperty* SwitcherProperty = Targets.SwitcherProperty;
+	FObjectProperty* OverlayHostProperty = Targets.OverlayHostProperty;
+	FArrayProperty* HistoryProperty = Targets.HistoryProperty;
+	const auto& OverlayHostPages = Targets.OverlayHostPages;
 	int32 WiredCount = 0;
 
 	// One bound-event + action chain for one trigger of a resolved binding. A trigger whose widget
@@ -1559,6 +1581,18 @@ void WireSimplePrototypeBindings(
 		}
 	}
 
+	return WiredCount;
+}
+
+bool WireKeyboardBindings(UWidgetBlueprint* WBP,
+	const FUMGPrototypeNavigationData& NavigationData, const FEngineFunctions& Functions,
+	const FBindingPlan& Plan, const FBindingGraphTargets& Targets, TArray<FString>& OutWarnings)
+{
+	UWidgetSwitcher* Switcher = Plan.Switcher;
+	UOverlay* OverlayHost = Plan.OverlayHost;
+	const auto& KeyboardBindings = Plan.KeyboardBindings;
+	FObjectProperty* SwitcherProperty = Targets.SwitcherProperty;
+	FArrayProperty* HistoryProperty = Targets.HistoryProperty;
 	// Keyboard wiring: one generated function-graph override per event kind. OnKeyDown/OnKeyUp are
 	// BlueprintImplementableEvents returning FEventReply, so they cannot live in the ubergraph; the
 	// engine-standard encoding is an override function graph (the editor's own path for such
@@ -1993,6 +2027,44 @@ void WireSimplePrototypeBindings(
 		}
 		bKeyboardWired = true;
 	}
+
+	return bKeyboardWired;
+}
+} // namespace
+
+void WireSimplePrototypeBindings(
+	UWidgetBlueprint* WBP,
+	const FUMGPrototypeNavigationData& NavigationData,
+	TArray<FString>& OutWarnings)
+{
+	if (!WBP || !WBP->WidgetTree)
+	{
+		return;
+	}
+
+	// Re-wiring is clear-then-author: a regenerate over the same blueprint must not accumulate nodes.
+	ClearGeneratedBindings(WBP);
+
+	if (NavigationData.ClickBindings.Num() == 0)
+	{
+		return;
+	}
+
+	UEdGraph* Ubergraph = WBP->UbergraphPages.Num() > 0 ? WBP->UbergraphPages[0] : nullptr;
+	if (!Ubergraph)
+	{
+		UE_LOG(LogDesign2UMG, Verbose,
+			TEXT("PrototypeNavigation wiring skipped for %s: blueprint has no ubergraph"),
+			*WBP->GetName());
+		return;
+	}
+
+	const FEngineFunctions Functions;
+
+	FBindingPlan Plan = ResolveBindingPlan(WBP, NavigationData, Functions, OutWarnings);
+	const FBindingGraphTargets Targets = PrepareBindingGraphTargets(WBP, NavigationData, Plan, OutWarnings);
+	const int32 WiredCount = WireMouseBindings(WBP, Ubergraph, NavigationData, Functions, Plan, Targets, OutWarnings);
+	const bool bKeyboardWired = WireKeyboardBindings(WBP, NavigationData, Functions, Plan, Targets, OutWarnings);
 
 	// The class must be focusable for key events to reach the override at all; written on the class
 	// defaults CDO before the final compile so it serializes (same pattern as the design preview

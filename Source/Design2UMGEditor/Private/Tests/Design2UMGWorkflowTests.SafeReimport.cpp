@@ -555,8 +555,21 @@ bool FSafeReimportKindChangedTest::RunTest(const FString&)
 {
 	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/SafeReimportKindChanged");
 
-	// v1: no mapping config -> the component instance takes the plain expansion (generated).
-	const FString V1 = MakeReimportDoc(MakeMappedButtonNode(24, 24, TEXT("Checkout")));
+	const auto MakeKindChangeDocument = []()
+	{
+		FString Json = MakeReimportDoc(MakeMappedButtonNode(24, 24, TEXT("Checkout")));
+		const FString Definition = FString::Printf(TEXT(
+			"{\"id\":\"11:22\",\"type\":\"COMPONENT\",\"name\":\"ButtonDefinition\","
+			"\"absoluteBoundingBox\":{\"x\":0,\"y\":0,\"width\":120,\"height\":44},"
+			"\"children\":[%s]}"), *MakeTextNode(TEXT("re_btn_1_label"), TEXT("Label"), 8, 12, TEXT("Default")));
+		Json.InsertAt(1, FString::Printf(TEXT(
+			"\"design2umgComponentDependencies\":{\"schemaVersion\":1,\"errors\":[],"
+			"\"instances\":{\"re_btn_1\":{\"id\":\"11:22\",\"key\":\"reimport-component-key\"}},"
+			"\"definitions\":[{\"id\":\"11:22\",\"key\":\"reimport-component-key\",\"document\":%s}]},"), *Definition));
+		return Json;
+	};
+	// v1: no mapping config -> a generated native component instance.
+	const FString V1 = MakeKindChangeDocument();
 	UWidgetBlueprint* WBP = ImportFromJson(V1, nullptr, OutputPath);
 	if (!TestTrue(TEXT("v1 import generates"), WBP != nullptr))
 	{
@@ -568,7 +581,7 @@ bool FSafeReimportKindChangedTest::RunTest(const FString&)
 		WBP->WidgetTree->FindWidget(TEXT("Label")));
 
 	// v2: mapping added -> the same design node becomes mapped; the old subtree is purely D2U-owned -> replaced.
-	const FString V2 = MakeReimportDoc(MakeMappedButtonNode(24, 24, TEXT("Checkout")));
+	const FString V2 = MakeKindChangeDocument();
 	FDesignReimportResult Result = ReimportFromJson(V2, MappedTestClassPath, TargetPackage);
 	TestTrue(TEXT("v2 reimport succeeds"), Result.bSucceeded);
 	TestTrue(TEXT("Kind change diagnosed"), CountReimportDiagnostics(Result, TEXT("reimport_kind_changed")) == 1);
@@ -596,7 +609,7 @@ bool FSafeReimportKindChangedTest::RunTest(const FString&)
 	}
 
 	// v3: mapping removed -> back to generated expansion; likewise replaced.
-	const FString V3 = MakeReimportDoc(MakeMappedButtonNode(24, 24, TEXT("Checkout")));
+	const FString V3 = MakeKindChangeDocument();
 	Result = ReimportFromJson(V3, nullptr, TargetPackage);
 	TestTrue(TEXT("v3 reimport succeeds"), Result.bSucceeded);
 	TestTrue(TEXT("Reverse kind change diagnosed"), CountReimportDiagnostics(Result, TEXT("reimport_kind_changed")) == 1);

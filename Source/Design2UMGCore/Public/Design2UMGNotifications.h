@@ -14,10 +14,11 @@ DECLARE_DELEGATE_OneParam(FDesign2UMGMessageNotificationHandler, const FText&);
  */
 struct DESIGN2UMGCORE_API FDesign2UMGNotification
 {
-	static void RegisterSuccessHandler(FDesign2UMGSuccessNotificationHandler InHandler);
-	static void RegisterWarningHandler(FDesign2UMGMessageNotificationHandler InHandler);
-	static void RegisterErrorHandler(FDesign2UMGMessageNotificationHandler InHandler);
-	static void RegisterInfoHandler(FDesign2UMGMessageNotificationHandler InHandler);
+	/** Replace a handler and return the previous one for scoped restoration. */
+	static FDesign2UMGSuccessNotificationHandler RegisterSuccessHandler(FDesign2UMGSuccessNotificationHandler InHandler);
+	static FDesign2UMGMessageNotificationHandler RegisterWarningHandler(FDesign2UMGMessageNotificationHandler InHandler);
+	static FDesign2UMGMessageNotificationHandler RegisterErrorHandler(FDesign2UMGMessageNotificationHandler InHandler);
+	static FDesign2UMGMessageNotificationHandler RegisterInfoHandler(FDesign2UMGMessageNotificationHandler InHandler);
 	static void ResetHandlers();
 
 	static void Success(const FText& Message, const FString& AssetPath = TEXT(""));

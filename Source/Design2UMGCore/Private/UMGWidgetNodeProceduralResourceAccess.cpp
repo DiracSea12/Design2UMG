@@ -15,7 +15,7 @@ namespace Design2UMGWidgetNodeProceduralResourceAccess
 		if (Node.Brush.Gradient.HasAny())
 		{
 			Result.MaterialRef = Design2UMGWidgetNodeAccess::GetGradientMaterialRef(Node.Brush.Gradient);
-			Result.MaterialParams = Design2UMGWidgetNodeAccess::SerializeGradientMaterialParams(Node.Brush.Gradient);
+			Result.Gradient = Node.Brush.Gradient;
 		}
 		else if (Node.Brush.MaterialRef.IsSet())
 		{

@@ -36,13 +36,13 @@ namespace
 		const FString InstanceOneJson = MakeContainerNode(TEXT("btn_inst_1"), TEXT("PrimaryButton"), TEXT("INSTANCE"), 24, 24, 120, 44,
 			MakeTextNode(TEXT("btn_inst_1_label"), TEXT("Label"), 32, 32, 80, 20, TEXT("Checkout"), ButtonStyleJson),
 			FString::Printf(
-				TEXT(",\"componentId\":\"12:34\",\"componentSetId\":\"56:78\",\"mainComponentKey\":\"component-key-primary\","
+				TEXT(",\"componentId\":\"12:34\",\"componentSetId\":\"56:78\",\"componentSetKey\":\"published-set-key\",\"mainComponentKey\":\"component-key-primary\","
 					 "\"componentProperties\":{\"label\":{\"type\":\"TEXT\",\"value\":\"Checkout\"}},\"fills\":[%s]"),
 				*MakeSolidFillJson(0.1, 0.4, 0.9)));
 		const FString InstanceTwoJson = MakeContainerNode(TEXT("btn_inst_2"), TEXT("PrimaryButton"), TEXT("INSTANCE"), 24, 88, 120, 44,
 			MakeTextNode(TEXT("btn_inst_2_label"), TEXT("Label"), 32, 96, 80, 20, TEXT("Pay Now"), ButtonStyleJson),
 			FString::Printf(
-				TEXT(",\"componentId\":\"12:34\",\"componentSetId\":\"56:78\",\"mainComponentKey\":\"component-key-primary\","
+				TEXT(",\"componentId\":\"12:34\",\"componentSetId\":\"56:78\",\"componentSetKey\":\"published-set-key\",\"mainComponentKey\":\"component-key-primary\","
 					 "\"componentProperties\":{\"label\":{\"type\":\"TEXT\",\"value\":\"Pay Now\"}},\"fills\":[%s]"),
 				*MakeSolidFillJson(0.1, 0.4, 0.9)));
 		const FString PlainCardJson = MakeContainerNode(TEXT("plain_card"), TEXT("PlainCard"), TEXT("FRAME"), 180, 24, 140, 108,
@@ -144,10 +144,10 @@ bool FComponentMappingIRSetLevelMarkingTest::RunTest(const FString&)
 
 	FDesign2UMGComponentMappingConfig Config;
 	DesignComponentMapping::FComponentMappingEntry& Entry = Config.Table.Entries.AddDefaulted_GetRef();
-	Entry.Key = FString::Printf(TEXT("figma|%s|56:78"), TestScope);
+	Entry.Key = FString::Printf(TEXT("figma|%s|published-set-key"), TestScope);
 	Entry.Provider = TEXT("figma");
 	Entry.DocumentScope = TestScope;
-	Entry.ComponentKey = TEXT("56:78");
+	Entry.ComponentKey = TEXT("published-set-key");
 	Entry.WidgetClass = TEXT("/Script/Design2UMGEditor.Design2UMGMappedComponentTestWidget");
 
 	FDesign2UMGComponentMappingBuildState BuildState(Config);
@@ -162,7 +162,7 @@ bool FComponentMappingIRSetLevelMarkingTest::RunTest(const FString&)
 	}
 	TestEqual(TEXT("Set-level key matches the instance"),
 		InstanceWidget->Source().MappedComponentKey,
-		FString::Printf(TEXT("figma|%s|56:78"), TestScope));
+		FString::Printf(TEXT("figma|%s|published-set-key"), TestScope));
 	return true;
 }
 

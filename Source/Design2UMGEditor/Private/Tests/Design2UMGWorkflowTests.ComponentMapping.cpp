@@ -479,7 +479,7 @@ bool FComponentMappingManifestWriteFailureTest::RunTest(const FString&)
 	DeleteGeneratedAssetsAtPath(OutputPath);
 	DeleteOutputDirectory(OutputPath);
 
-	const FDesign2UMGGenerationSettingsSnapshot Settings;
+	const FDesign2UMGGenerationSettingsSnapshot Settings = MakeMappingGenerationSettings();
 	FDesign2UMGGenerationOutput GenerationOutput;
 	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(Data, OutputPath, &Settings, &GenerationOutput);
 	if (!TestTrue(TEXT("Build blueprint for the manifest failure case"), WBP != nullptr))

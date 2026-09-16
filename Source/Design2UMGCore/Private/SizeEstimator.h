@@ -3,6 +3,7 @@
 #pragma once
 
 #include "DesignSchema.h"
+#include "FontResolver.h"
 
 namespace SizeEstimator
 {
@@ -12,8 +13,8 @@ namespace SizeEstimator
 	float ComputeChildContentWidthHint(const TSharedPtr<FDesignNode>& Node, const TSharedPtr<FDesignNode>& Child, float ParentContentWidth);
 	void SetResolvedNodeDimension(const TSharedPtr<FDesignNode>& Node, bool bWidth, float Pixels, bool bKeepSourceDimension = false);
 	void PromoteFitNodeDimension(const TSharedPtr<FDesignNode>& Node, bool bWidth, float Pixels);
-	FVector2D EstimateNodeSize(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth = 0.0f);
-	FVector2D EstimateContentSize(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth = 0.0f);
+	FVector2D EstimateNodeSize(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth = 0.0f, const FDesign2UMGFontMappings* FontMappings = nullptr);
+	FVector2D EstimateContentSize(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth = 0.0f, const FDesign2UMGFontMappings* FontMappings = nullptr);
 
 	/**
 	 * Mutating promotion pass: resolves fit-content sizes (expanding Refs through the
@@ -26,5 +27,6 @@ namespace SizeEstimator
 	FVector2D PromoteFitContentSizes(
 		const TSharedPtr<FDesignNode>& Node,
 		const FDesignDocument& Doc,
-		FRefExpansionResolver RefResolver);
+		FRefExpansionResolver RefResolver,
+		const FDesign2UMGFontMappings* FontMappings = nullptr);
 }

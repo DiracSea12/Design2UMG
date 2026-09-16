@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "FontResolver.h"
 #include "Misc/Crc.h"
 #include "DesignTreeLimits.h"
 #include "Design2UMGLog.h"
@@ -59,6 +60,7 @@ namespace Design2UMGConverterInternal
 
 	struct FConversionSettingsSnapshot
 	{
+		FDesign2UMGFontMappings FontMappings;
 		UDesign2UMGSettings::FResolvedPlaceholderHatchStyle PlaceholderHatchStyle;
 		FVisualMapperOptions VisualMapperOptions;
 		Design2UMGTextWidgetBuilder::FIconFontSettingsSnapshot IconFont;

@@ -297,7 +297,7 @@ Design2UMGNodeWidgetFactory::FBuildResult Design2UMGNodeWidgetFactory::CreateWid
 	{
 	case EDesignNodeType::Text:
 		{
-			Result.Widget = Design2UMGTextWidgetBuilder::CreateTextWidget(Node);
+			Result.Widget = Design2UMGTextWidgetBuilder::CreateTextWidget(Node, Args.FontMappings);
 			if (Design2UMGSourceMetadata::IsFigmaTextPathNode(Node))
 			{
 				if (Node->Name.IsEmpty())
@@ -320,6 +320,7 @@ Design2UMGNodeWidgetFactory::FBuildResult Design2UMGNodeWidgetFactory::CreateWid
 	case EDesignNodeType::IconFont:
 		{
 			Design2UMGTextWidgetBuilder::FIconFontBuildArgs IconFontArgs;
+			IconFontArgs.FontMappings = Args.FontMappings;
 			IconFontArgs.ExistingWarnedFamilies = Args.ExistingWarnedFamilies;
 			IconFontArgs.SettingsSnapshot = Args.IconFontSettingsSnapshot;
 

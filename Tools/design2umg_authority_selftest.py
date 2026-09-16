@@ -1,4 +1,5 @@
 import design2umg_auto_verify as verify
+from design2umg_verify_lib import pencil_mcp
 import io
 import json
 import os
@@ -128,7 +129,7 @@ def test_discover_mcp_server_searches_editor_extension_dirs():
             server_path = extension_dir / "mcp-server-windows-x64.exe"
             server_path.touch()
             os.environ["USERPROFILE"] = temp_dir
-            assert_equal(Path(verify.discover_mcp_server("")), server_path)
+            assert_equal(Path(pencil_mcp.discover_mcp_server("")), server_path)
     finally:
         if original_userprofile is None:
             os.environ.pop("USERPROFILE", None)
@@ -137,14 +138,14 @@ def test_discover_mcp_server_searches_editor_extension_dirs():
 
 
 def test_discover_mcp_server_prefers_latest_suffixed_version():
-    original_glob = verify.glob.glob
+    original_glob = pencil_mcp.glob.glob
     old_server = r"C:\Users\test\.editor-a\extensions\highagency.pencildev-0.6.35-universal\out\mcp-server-windows-x64.exe"
     current_server = r"C:\Users\test\.editor-b\extensions\highagency.pencildev-0.6.61-universal\out\mcp-server-windows-x64.exe"
     try:
-        verify.glob.glob = lambda _pattern: [old_server, current_server]
-        assert_equal(verify.discover_mcp_server(""), current_server)
+        pencil_mcp.glob.glob = lambda _pattern: [old_server, current_server]
+        assert_equal(pencil_mcp.discover_mcp_server(""), current_server)
     finally:
-        verify.glob.glob = original_glob
+        pencil_mcp.glob.glob = original_glob
 
 
 def test_synchronize_pencil_vscode_alias_uses_temporary_home():
@@ -159,18 +160,18 @@ def test_synchronize_pencil_vscode_alias_uses_temporary_home():
             alias_path = apps_dir / "vscode"
 
             source_path.write_text("first registration", encoding="utf-8")
-            assert_equal(verify.synchronize_pencil_vscode_alias(), True)
+            assert_equal(pencil_mcp.synchronize_pencil_vscode_alias(), True)
             assert_equal(alias_path.read_text(encoding="utf-8"), "first registration")
 
             source_path.write_text("updated registration", encoding="utf-8")
-            assert_equal(verify.synchronize_pencil_vscode_alias(), True)
+            assert_equal(pencil_mcp.synchronize_pencil_vscode_alias(), True)
             assert_equal(alias_path.read_text(encoding="utf-8"), "updated registration")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["HOME"] = temp_dir
             os.environ["USERPROFILE"] = temp_dir
             alias_path = Path(temp_dir) / ".pencil" / "apps" / "vscode"
-            assert_equal(verify.synchronize_pencil_vscode_alias(), False)
+            assert_equal(pencil_mcp.synchronize_pencil_vscode_alias(), False)
             assert_equal(alias_path.exists(), False)
     finally:
         for name, value in saved_environment.items():
@@ -181,9 +182,9 @@ def test_synchronize_pencil_vscode_alias_uses_temporary_home():
 
 
 def test_pencil_mcp_client_uses_stdio_transport():
-    original_popen = verify.subprocess.Popen
-    original_discover = verify.discover_pencil_app_candidates
-    original_sync_alias = verify.synchronize_pencil_vscode_alias
+    original_popen = pencil_mcp.subprocess.Popen
+    original_discover = pencil_mcp.discover_pencil_app_candidates
+    original_sync_alias = pencil_mcp.synchronize_pencil_vscode_alias
     captured_args = []
     startup_events = []
     process = FakeMcpProcess(stderr="[MCP] Starting server in stdio mode\n")
@@ -194,47 +195,47 @@ def test_pencil_mcp_client_uses_stdio_transport():
         return process
 
     try:
-        verify.subprocess.Popen = fake_popen
-        verify.discover_pencil_app_candidates = lambda _app, _path="": ["cursor"]
-        verify.synchronize_pencil_vscode_alias = lambda: startup_events.append("alias") or True
-        with verify.PencilMcpClient("mcp-server.exe", "cursor") as client:
+        pencil_mcp.subprocess.Popen = fake_popen
+        pencil_mcp.discover_pencil_app_candidates = lambda _app, _path="": ["cursor"]
+        pencil_mcp.synchronize_pencil_vscode_alias = lambda: startup_events.append("alias") or True
+        with pencil_mcp.PencilMcpClient("mcp-server.exe", "cursor") as client:
             assert_equal(client.call_tool("get_editor_state", {}), "tool result")
     finally:
-        verify.subprocess.Popen = original_popen
-        verify.discover_pencil_app_candidates = original_discover
-        verify.synchronize_pencil_vscode_alias = original_sync_alias
+        pencil_mcp.subprocess.Popen = original_popen
+        pencil_mcp.discover_pencil_app_candidates = original_discover
+        pencil_mcp.synchronize_pencil_vscode_alias = original_sync_alias
 
     assert_equal(startup_events, ["alias", "process"])
     assert_equal(captured_args[0][0], ["mcp-server.exe", "-app", "cursor"])
-    assert_equal(captured_args[0][1]["stdin"], verify.subprocess.PIPE)
-    assert_equal(captured_args[0][1]["stdout"], verify.subprocess.PIPE)
-    assert_equal(captured_args[0][1]["stderr"], verify.subprocess.PIPE)
+    assert_equal(captured_args[0][1]["stdin"], pencil_mcp.subprocess.PIPE)
+    assert_equal(captured_args[0][1]["stdout"], pencil_mcp.subprocess.PIPE)
+    assert_equal(captured_args[0][1]["stderr"], pencil_mcp.subprocess.PIPE)
 
 
 def test_pencil_mcp_client_reports_process_startup_error():
-    original_popen = verify.subprocess.Popen
-    original_discover = verify.discover_pencil_app_candidates
-    original_sync_alias = verify.synchronize_pencil_vscode_alias
+    original_popen = pencil_mcp.subprocess.Popen
+    original_discover = pencil_mcp.discover_pencil_app_candidates
+    original_sync_alias = pencil_mcp.synchronize_pencil_vscode_alias
     process = FakeMcpProcess(returncode=2, stderr="flag provided but not defined: -invalid\n")
     try:
-        verify.subprocess.Popen = lambda _args, **_kwargs: process
-        verify.discover_pencil_app_candidates = lambda _app, _path="": ["cursor"]
-        verify.synchronize_pencil_vscode_alias = lambda: False
+        pencil_mcp.subprocess.Popen = lambda _args, **_kwargs: process
+        pencil_mcp.discover_pencil_app_candidates = lambda _app, _path="": ["cursor"]
+        pencil_mcp.synchronize_pencil_vscode_alias = lambda: False
         try:
-            with verify.PencilMcpClient("mcp-server.exe", "cursor"):
+            with pencil_mcp.PencilMcpClient("mcp-server.exe", "cursor"):
                 pass
         except RuntimeError as exc:
             assert_contains(str(exc), "flag provided but not defined: -invalid")
             return
     finally:
-        verify.subprocess.Popen = original_popen
-        verify.discover_pencil_app_candidates = original_discover
-        verify.synchronize_pencil_vscode_alias = original_sync_alias
+        pencil_mcp.subprocess.Popen = original_popen
+        pencil_mcp.discover_pencil_app_candidates = original_discover
+        pencil_mcp.synchronize_pencil_vscode_alias = original_sync_alias
     raise AssertionError("expected Pencil MCP startup failure")
 
 
 def test_order_pencil_app_candidates():
-    ordered = verify.order_pencil_app_candidates(
+    ordered = pencil_mcp.order_pencil_app_candidates(
         {"visual_studio_code", "cursor", "antigravity"},
         {"cursor"},
     )
@@ -243,11 +244,11 @@ def test_order_pencil_app_candidates():
 
 
 def test_discover_pencil_app_candidates_prefers_document_host_then_foreground():
-    original_read = verify.read_pencil_registered_apps
-    original_observations = verify.describe_pencil_app_runtime_observations
+    original_read = pencil_mcp.read_pencil_registered_apps
+    original_observations = pencil_mcp.describe_pencil_app_runtime_observations
     try:
-        verify.read_pencil_registered_apps = lambda: {"visual_studio_code", "cursor", "antigravity"}
-        verify.describe_pencil_app_runtime_observations = lambda _path="": {
+        pencil_mcp.read_pencil_registered_apps = lambda: {"visual_studio_code", "cursor", "antigravity"}
+        pencil_mcp.describe_pencil_app_runtime_observations = lambda _path="": {
             "visual_studio_code": {
                 "running": True,
                 "foreground": True,
@@ -284,21 +285,21 @@ def test_discover_pencil_app_candidates_prefers_document_host_then_foreground():
                 "window_titles": [],
             },
         }
-        ordered = verify.discover_pencil_app_candidates("", r"G:\SampleProject\Designs\pencil-shadcn.pen")
+        ordered = pencil_mcp.discover_pencil_app_candidates("", r"G:\SampleProject\Designs\pencil-shadcn.pen")
     finally:
-        verify.read_pencil_registered_apps = original_read
-        verify.describe_pencil_app_runtime_observations = original_observations
+        pencil_mcp.read_pencil_registered_apps = original_read
+        pencil_mcp.describe_pencil_app_runtime_observations = original_observations
 
     assert_equal(ordered[0], "antigravity")
     assert_equal(ordered[1], "visual_studio_code")
 
 
 def test_discover_pencil_app_candidates_prefers_compatible_pen_window_without_document_hint():
-    original_read = verify.read_pencil_registered_apps
-    original_observations = verify.describe_pencil_app_runtime_observations
+    original_read = pencil_mcp.read_pencil_registered_apps
+    original_observations = pencil_mcp.describe_pencil_app_runtime_observations
     try:
-        verify.read_pencil_registered_apps = lambda: {"visual_studio_code", "cursor", "antigravity"}
-        verify.describe_pencil_app_runtime_observations = lambda _path="": {
+        pencil_mcp.read_pencil_registered_apps = lambda: {"visual_studio_code", "cursor", "antigravity"}
+        pencil_mcp.describe_pencil_app_runtime_observations = lambda _path="": {
             "visual_studio_code": {
                 "running": True,
                 "foreground": True,
@@ -335,25 +336,25 @@ def test_discover_pencil_app_candidates_prefers_compatible_pen_window_without_do
                 "window_titles": [],
             },
         }
-        ordered = verify.discover_pencil_app_candidates("")
+        ordered = pencil_mcp.discover_pencil_app_candidates("")
     finally:
-        verify.read_pencil_registered_apps = original_read
-        verify.describe_pencil_app_runtime_observations = original_observations
+        pencil_mcp.read_pencil_registered_apps = original_read
+        pencil_mcp.describe_pencil_app_runtime_observations = original_observations
 
     assert_equal(ordered[0], "antigravity")
     assert_equal(ordered[1], "visual_studio_code")
 
 
 def test_discover_pencil_app_candidates_keeps_clean_fallback_without_runtime_hits():
-    original_read = verify.read_pencil_registered_apps
-    original_observations = verify.describe_pencil_app_runtime_observations
+    original_read = pencil_mcp.read_pencil_registered_apps
+    original_observations = pencil_mcp.describe_pencil_app_runtime_observations
     try:
-        verify.read_pencil_registered_apps = lambda: set()
-        verify.describe_pencil_app_runtime_observations = lambda _path="": {}
-        ordered = verify.discover_pencil_app_candidates("")
+        pencil_mcp.read_pencil_registered_apps = lambda: set()
+        pencil_mcp.describe_pencil_app_runtime_observations = lambda _path="": {}
+        ordered = pencil_mcp.discover_pencil_app_candidates("")
     finally:
-        verify.read_pencil_registered_apps = original_read
-        verify.describe_pencil_app_runtime_observations = original_observations
+        pencil_mcp.read_pencil_registered_apps = original_read
+        pencil_mcp.describe_pencil_app_runtime_observations = original_observations
 
     assert_equal(ordered, ["visual_studio_code"])
 

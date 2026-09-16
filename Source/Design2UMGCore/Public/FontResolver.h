@@ -10,6 +10,8 @@ struct FDesignNode;
 struct FDesignFont;
 class UFont;
 
+using FDesign2UMGFontMappings = TMap<FString, TSoftObjectPtr<UFont>>;
+
 struct DESIGN2UMGCORE_API FFontResolutionDiagnostic
 {
 	FString DeclarationKey;
@@ -47,8 +49,10 @@ struct DESIGN2UMGCORE_API FFontResolver
 	/** Look up an explicit or exact /Game UFont asset path for a font family name. Returns empty if not found or ambiguous. */
 	static FString FindFontAssetPath(const FString& FontFamily);
 
-	/** Look up an explicit PostScript/family mapping before exact /Game family asset matching. */
-	static FString FindFontAssetPath(const FString& FontFamily, const FString& PostScriptName);
+	/** Look up PostScript/family mappings before exact /Game matching. Supplying a mapping snapshot
+	 * avoids reading the settings CDO; nullptr is the standalone editor lookup API. */
+	static FString FindFontAssetPath(const FString& FontFamily, const FString& PostScriptName,
+		const FDesign2UMGFontMappings* ExplicitMappings = nullptr);
 	/** Stable, collision-resistant package name shared by automatic import and family lookup. */
 	static FString MakeImportedFamilyPackageName(const FString& FontFamily);
 
@@ -78,7 +82,8 @@ struct DESIGN2UMGCORE_API FFontResolver
 	static FString FindItalicTypefaceForAssetPath(const FString& FontAssetPath, const FString& RequestedWeight, const FString& FontFamily);
 
 	/** Return true when the declaration is covered by an explicit settings mapping, even if the mapped asset is invalid. */
-	static bool HasExplicitFontMapping(const FString& FontFamily, const FString& PostScriptName = FString());
+	static bool HasExplicitFontMapping(const FString& FontFamily, const FString& PostScriptName = FString(),
+		const FDesign2UMGFontMappings* ExplicitMappings = nullptr);
 
 	/** Return true when exactly one same-name project UFont exists but is rejected as unusable. */
 	static bool HasInvalidProjectFontAsset(const FString& FontFamily);

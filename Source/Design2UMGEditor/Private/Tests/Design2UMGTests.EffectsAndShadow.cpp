@@ -309,9 +309,14 @@ bool FFigmaDropShadowConvertsToBoxShadowWrapperTest::RunTest(const FString& Para
 	const FUMGWidgetNode& Shadow = Data.RootWidget.Children[0];
 	TestEqual(TEXT("Figma outer shadow synthetic shadow node is image"), Shadow.Type, TEXT("Image"));
 	TestTrue(TEXT("Figma outer shadow synthetic blur typed"), Shadow.Shadow.ShadowBlur.IsSet() && FMath::IsNearlyEqual(Shadow.Shadow.ShadowBlur.GetValue(), 10.0f, 0.001f));
-	TestTrue(TEXT("Figma outer shadow keeps its source brush colour"),
+	TestTrue(TEXT("Precoloured shadow texture has neutral tint, so alpha is not multiplied twice"),
 		Shadow.Brush.BrushColor.IsSet()
-		&& Shadow.Brush.BrushColor.GetValue().Equals(FLinearColor(0.0f, 0.0f, 0.0f, 0.2f)));
+		&& Shadow.Brush.BrushColor.GetValue().Equals(FLinearColor::White));
+	TSharedPtr<FJsonObject> ShadowParams;
+	if (!TestTrue(TEXT("Shadow texture parameters parse"), FJsonSerializer::Deserialize(
+		TJsonReaderFactory<>::Create(Shadow.Brush.MaterialParams.Get(FString())), ShadowParams))) return false;
+	TestTrue(TEXT("Texture generation retains the source shadow colour and alpha"),
+		FUMGValueParser::ParseColor(ShadowParams->GetStringField(TEXT("Color"))).Equals(FLinearColor(0, 0, 0, 0.2f)));
 	TestTrue(TEXT("Figma outer shadow remains a fill child with its source offset"),
 		Shadow.Slot.HorizontalAlignment == EUMGSlotHorizontalAlignment::Fill
 		&& Shadow.Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Fill

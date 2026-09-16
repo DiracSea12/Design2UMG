@@ -4,6 +4,8 @@
 
 #include "CoreMinimal.h"
 #include "UMGSchema.h"
+#include "UObject/StrongObjectPtr.h"
+#include "Materials/MaterialInterface.h"
 
 class UWidget;
 class UWidgetBlueprint;
@@ -17,6 +19,8 @@ namespace UMGGeneratorRootHandoff
 		FUMGWidgetNode Root;
 		FIntPoint DesignSize = FIntPoint::ZeroValue;
 		FString ErrorMessage;
+		// Own dependencies until the constructed WidgetTree takes over; all exit paths release them.
+		TArray<TStrongObjectPtr<UMaterialInterface>> Materials;
 	};
 
 	FPreparedRoot PrepareRootForBuild(

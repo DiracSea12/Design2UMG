@@ -51,10 +51,31 @@ namespace
 	TStrongObjectPtr<UMaterial> GGeometryMaskRetainerMaterial;
 	TStrongObjectPtr<UMaterial> GInnerShadowRetainerMaterial;
 
-	// Per-unique-geometry instances that were rooted AND saved to /Game. They are
-	// recoverable via LoadObject, so the root is only an in-session crutch; the
-	// ledger lets the generator drop it once the owning asset save completed.
-	TArray<TWeakObjectPtr<UMaterialInstanceConstant>> GRootedGeometryMaskInstances;
+#if WITH_DEV_AUTOMATION_TESTS
+	bool GFailGeometryMaskSaveOnce = false;
+#endif
+
+	bool SaveGeometryMaskAsset(UObject* Asset, const FString& FileName)
+	{
+		UPackage* Package = Asset->GetOutermost();
+		FSavePackageArgs SaveArgs;
+		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+		bool bForceFailure = false;
+#if WITH_DEV_AUTOMATION_TESTS
+		bForceFailure = GFailGeometryMaskSaveOnce;
+		GFailGeometryMaskSaveOnce = false;
+#endif
+		if (!bForceFailure && UPackage::SavePackage(Package, Asset, *FileName, SaveArgs)) return true;
+
+		// A failed new asset must not be returned by LoadObject on the next attempt.
+		Asset->RemoveFromRoot();
+		Asset->ClearFlags(RF_Public | RF_Standalone);
+		Asset->Rename(nullptr, GetTransientPackage(), REN_DontCreateRedirectors | REN_NonTransactional);
+		Asset->MarkAsGarbage();
+		Package->SetDirtyFlag(false);
+		return false;
+	}
+
 
 	// Fallback UV step for the retainer blur when no node size can be resolved at bind time.
 	// Same value and provenance as InvalidNodeBlurUVStepComponent in VisualMapper.cpp.
@@ -144,7 +165,7 @@ Design2UMGEffectMaterialBuilder::FSubtreeShadowKernel Design2UMGEffectMaterialBu
 	constexpr int32 MaxRadius = 32;
 	const float Extent = FMath::CeilToFloat(Sigma * 3.0f);
 	const int32 Radius = static_cast<int32>(FMath::Min(Extent, static_cast<float>(MaxRadius)));
-	const int32 SamplesPerAxis = 2 * Radius + 1; // Worst-case unaligned grid cannot pack adjacent taps.
+	const int32 SamplesPerAxis = 2 * Radius + 1; // Full discrete kernel, including both endpoints.
 	return {Radius, Radius > 0 ? Extent / Radius : 1.0f, FMath::Square(SamplesPerAxis)};
 }
 
@@ -186,37 +207,11 @@ bool Design2UMGEffectMaterialBuilder::PrepareSubtreeShadowMaterials(FUMGWidgetNo
 			const FSubtreeShadowKernel Kernel = MakeSubtreeShadowKernel(Sigma);
 			const int32 Radius = Kernel.Radius;
 			const float GaussianDenominator = 2.0f * FMath::Square(Sigma / Kernel.Step);
-			double AxisWeightSum = 0.0;
-			for (int32 Tap = -Radius; Tap <= Radius; ++Tap)
-			{
-				AxisWeightSum += FMath::Exp(-static_cast<double>(Tap * Tap) / GaussianDenominator);
-			}
-			const double TotalWeight = AxisWeightSum * AxisWeightSum;
-			// Bilinear packing requires adjacent texel centers, not merely adjacent
-			// integration indices. Preserve the discrete integral for other grids.
+			// Evaluate the discrete kernel in one arithmetic order for every texel.
+			// Packing taps into bilinear samples is mathematically equivalent but changes
+			// floating-point rounding at alpha quantization boundaries.
 			Code += FString::Printf(TEXT(
-				"uint Tw,Th; Texture.GetDimensions(Tw,Th); float2 TexelSize=float2(Tw,Th); "
-				"float2 Origin=Shifted*TexelSize-0.5; float2 StepInTexels=float2(%.9f,%.9f)*TexelSize; "
-				"if(all(Origin==round(Origin)) && all(StepInTexels==float2(1,1))) {\n"),
-				Kernel.Step / Root.Bounds.W, Kernel.Step / Root.Bounds.H);
-			Code += FString::Printf(TEXT(
-				"float TotalWeight=%.17g; [loop] for(int y=-%d;y<=%d;y+=2) { int y1=min(y+1,%d); "
-				"float wy0=exp(-float(y*y)/%.9f); float wy1=(y1==y)?0:exp(-float(y1*y1)/%.9f); "
-				"float py0=Shifted.y+y*%.9f; float py1=Shifted.y+y1*%.9f; "
-				"wy0=(py0>=0&&py0<=1)?wy0:0; wy1=(py1>=0&&py1<=1)?wy1:0; float wy=wy0+wy1; if(wy<=0) continue; float py=(py0*wy0+py1*wy1)/wy; "
-				"[loop] for(int x=-%d;x<=%d;x+=2) { int x1=min(x+1,%d); "
-				"float wx0=exp(-float(x*x)/%.9f); float wx1=(x1==x)?0:exp(-float(x1*x1)/%.9f); "
-				"float px0=Shifted.x+x*%.9f; float px1=Shifted.x+x1*%.9f; "
-				"wx0=(px0>=0&&px0<=1)?wx0:0; wx1=(px1>=0&&px1<=1)?wx1:0; float wx=wx0+wx1; if(wx<=0) continue; float px=(px0*wx0+px1*wx1)/wx; "
-				"Alpha+=Texture.SampleLevel(TextureSampler,float2(px,py),0).a*wx*wy; }} Alpha/=TotalWeight;\n"),
-				TotalWeight, Radius, Radius, Radius,
-				GaussianDenominator, GaussianDenominator,
-				Kernel.Step / Root.Bounds.H, Kernel.Step / Root.Bounds.H,
-				Radius, Radius, Radius,
-				GaussianDenominator, GaussianDenominator,
-				Kernel.Step / Root.Bounds.W, Kernel.Step / Root.Bounds.W);
-			Code += FString::Printf(TEXT(
-				"} else { float WeightSum=0; [loop] for(int y=-%d;y<=%d;++y) { [loop] for(int x=-%d;x<=%d;++x) { float Weight=exp(-float(x*x+y*y)/%.9f); float2 P=Shifted+float2(x*%.9f,y*%.9f); if(all(P>=0)&&all(P<=1)) Alpha+=Texture.SampleLevel(TextureSampler,P,0).a*Weight; WeightSum+=Weight; }} Alpha/=WeightSum; }\n"),
+				"float WeightSum=0; [loop] for(int y=-%d;y<=%d;++y) { [loop] for(int x=-%d;x<=%d;++x) { float Weight=exp(-float(x*x+y*y)/%.9f); float2 P=Shifted+float2(x*%.9f,y*%.9f); if(all(P>=0)&&all(P<=1)) Alpha+=Texture.SampleLevel(TextureSampler,P,0).a*Weight; WeightSum+=Weight; }} Alpha/=WeightSum;\n"),
 				Radius, Radius, Radius, Radius, GaussianDenominator,
 				Kernel.Step / Root.Bounds.W, Kernel.Step / Root.Bounds.H);
 		}
@@ -559,14 +554,14 @@ return Filtered * Mask;
 		MaterialPackageName,
 		FPackageName::GetAssetPackageExtension());
 	IFileManager::Get().MakeDirectory(*FPaths::GetPath(MaterialFileName), true);
-	FSavePackageArgs SaveArgs;
-	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
-	if (!UPackage::SavePackage(MaterialPackage, Material, *MaterialFileName, SaveArgs))
+	if (!SaveGeometryMaskAsset(Material, MaterialFileName))
 	{
 		UE_LOG(LogDesign2UMG, Warning, TEXT("Failed to save geometry mask material package: %s"), *MaterialFileName);
+		return nullptr;
 	}
 
 	GGeometryMaskRetainerMaterial.Reset(Material);
+	Material->RemoveFromRoot();
 	return Material;
 }
 
@@ -594,13 +589,13 @@ UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateGeometryMaskReta
 		return ExistingInstance;
 	}
 
-	UMaterialInstanceConstant* Instance = NewObject<UMaterialInstanceConstant>(
+	TStrongObjectPtr<UMaterialInstanceConstant> Instance(NewObject<UMaterialInstanceConstant>(
 		CreatePackage(*PackageName),
 		*InstanceName,
-		RF_Public | RF_Standalone);
+		RF_Public | RF_Standalone));
 	if (!Instance)
 	{
-		return BaseMaterial;
+		return nullptr;
 	}
 
 	Instance->SetParentEditorOnly(BaseMaterial, false);
@@ -620,34 +615,45 @@ UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateGeometryMaskReta
 	Instance->ForceRecompileForRendering(EMaterialShaderPrecompileMode::Synchronous);
 	Instance->CacheShaders(EMaterialShaderPrecompileMode::Synchronous);
 	Instance->EnsureIsComplete();
-	Instance->AddToRoot();
 
 	const FString PackageFileName = FPackageName::LongPackageNameToFilename(
 		PackageName,
 		FPackageName::GetAssetPackageExtension());
 	IFileManager::Get().MakeDirectory(*FPaths::GetPath(PackageFileName), true);
-	FSavePackageArgs SaveArgs;
-	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
-	if (!UPackage::SavePackage(Instance->GetOutermost(), Instance, *PackageFileName, SaveArgs))
+	if (!SaveGeometryMaskAsset(Instance.Get(), PackageFileName))
 	{
-		// Unsaved instance keeps its root (old behavior): no disk copy exists to reload from.
 		UE_LOG(LogDesign2UMG, Warning, TEXT("Failed to save geometry mask material instance: %s"), *PackageFileName);
-		return Instance;
+		return nullptr;
 	}
 
-	GRootedGeometryMaskInstances.Add(Instance);
-	return Instance;
+	return Instance.Get();
 }
 
-void Design2UMGEffectMaterialBuilder::ReleaseRootedGeometryMaskInstances()
+#if WITH_DEV_AUTOMATION_TESTS
+void Design2UMGEffectMaterialBuilder::ArmGeometryMaskSaveFailureOnce()
 {
-	for (const TWeakObjectPtr<UMaterialInstanceConstant>& WeakInstance : GRootedGeometryMaskInstances)
-	{
-		if (UMaterialInstanceConstant* Instance = WeakInstance.Get())
-		{
-			Instance->RemoveFromRoot();
-		}
-	}
+	GFailGeometryMaskSaveOnce = true;
+}
+#endif
 
-	GRootedGeometryMaskInstances.Empty();
+bool Design2UMGEffectMaterialBuilder::PrepareGeometryMaskMaterials(
+	FUMGWidgetNode& Root, TArray<TStrongObjectPtr<UMaterialInterface>>& Materials, FString& OutError)
+{
+	for (FUMGWidgetNode& Child : Root.Children)
+	{
+		if (!PrepareGeometryMaskMaterials(Child, Materials, OutError)) return false;
+	}
+	FUMGEffectData& Effect = Root.Effect;
+	if (Effect.EffectMaterial.Get(FString()) != UMGPropertyKeys::RetainerGeometryMaskEffectRef) return true;
+	UMaterialInterface* Material = Effect.GeometryMaskShape.IsSet() && Effect.GeometryMaskSize.IsSet() && Effect.GeometryMaskCornerRadii.IsSet()
+		? GetOrCreateGeometryMaskRetainerMaterial(Effect.GeometryMaskShape.GetValue(), Effect.GeometryMaskSize.GetValue(), Effect.GeometryMaskCornerRadii.GetValue())
+		: GetOrCreateGeometryMaskRetainerMaterial();
+	if (!Material)
+	{
+		OutError = FString::Printf(TEXT("Failed to create or persist geometry mask material for '%s'"), *Root.Name);
+		return false;
+	}
+	Materials.Emplace(Material);
+	Effect.EffectMaterial = Material->GetPathName();
+	return true;
 }

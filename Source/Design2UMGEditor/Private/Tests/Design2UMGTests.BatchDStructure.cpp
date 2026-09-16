@@ -9,6 +9,7 @@
 #include "PencilConnector.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/ScopeExit.h"
 #include "Dom/JsonObject.h"
 #include "UMGGeneratorRootHandoff.h"
 #include "WidgetBlueprint.h"
@@ -59,18 +60,21 @@ namespace
 	{
 		TArray<FString> Warnings;
 		TArray<FString> Successes;
+		FDesign2UMGMessageNotificationHandler PreviousWarning;
+		FDesign2UMGSuccessNotificationHandler PreviousSuccess;
 
 		FScopedNotificationCapture()
 		{
-			FDesign2UMGNotification::RegisterWarningHandler(
+			PreviousWarning = FDesign2UMGNotification::RegisterWarningHandler(
 				FDesign2UMGMessageNotificationHandler::CreateRaw(this, &FScopedNotificationCapture::OnWarning));
-			FDesign2UMGNotification::RegisterSuccessHandler(
+			PreviousSuccess = FDesign2UMGNotification::RegisterSuccessHandler(
 				FDesign2UMGSuccessNotificationHandler::CreateRaw(this, &FScopedNotificationCapture::OnSuccess));
 		}
 
 		~FScopedNotificationCapture()
 		{
-			FDesign2UMGNotification::ResetHandlers();
+			FDesign2UMGNotification::RegisterWarningHandler(MoveTemp(PreviousWarning));
+			FDesign2UMGNotification::RegisterSuccessHandler(MoveTemp(PreviousSuccess));
 		}
 
 		void OnWarning(const FText& Message)
@@ -83,6 +87,48 @@ namespace
 			Successes.Add(Message.ToString());
 		}
 	};
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNotificationCaptureRestoresHandlersTest,
+	"Design2UMG.BatchD.NotificationCaptureRestoresHandlers",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FNotificationCaptureRestoresHandlersTest::RunTest(const FString&)
+{
+	int32 Warnings = 0, Successes = 0, Errors = 0;
+	auto PreviousWarning = FDesign2UMGNotification::RegisterWarningHandler(
+		FDesign2UMGMessageNotificationHandler::CreateLambda([&](const FText&) { ++Warnings; }));
+	auto PreviousSuccess = FDesign2UMGNotification::RegisterSuccessHandler(
+		FDesign2UMGSuccessNotificationHandler::CreateLambda([&](const FText&, const FString&) { ++Successes; }));
+	auto PreviousError = FDesign2UMGNotification::RegisterErrorHandler(
+		FDesign2UMGMessageNotificationHandler::CreateLambda([&](const FText&) { ++Errors; }));
+	ON_SCOPE_EXIT
+	{
+		FDesign2UMGNotification::RegisterWarningHandler(MoveTemp(PreviousWarning));
+		FDesign2UMGNotification::RegisterSuccessHandler(MoveTemp(PreviousSuccess));
+		FDesign2UMGNotification::RegisterErrorHandler(MoveTemp(PreviousError));
+	};
+	const FText Message = FText::FromString(TEXT("Scoped notification"));
+	{
+		FScopedNotificationCapture Outer;
+		{
+			FScopedNotificationCapture Inner;
+			FDesign2UMGNotification::Warning(Message);
+			TestEqual(TEXT("Inner scope receives the warning"), Inner.Warnings.Num(), 1);
+			TestEqual(TEXT("Outer scope is temporarily replaced"), Outer.Warnings.Num(), 0);
+		}
+		FDesign2UMGNotification::Warning(Message);
+		FDesign2UMGNotification::Success(Message);
+		FDesign2UMGNotification::Error(Message);
+		TestEqual(TEXT("Outer warning handler is restored"), Outer.Warnings.Num(), 1);
+		TestEqual(TEXT("Outer success handler is restored"), Outer.Successes.Num(), 1);
+	}
+	FDesign2UMGNotification::Warning(Message);
+	FDesign2UMGNotification::Success(Message);
+	FDesign2UMGNotification::Error(Message);
+	TestEqual(TEXT("Original warning handler is restored"), Warnings, 1);
+	TestEqual(TEXT("Original success handler is restored"), Successes, 1);
+	TestEqual(TEXT("Unrelated error handler survives both scopes"), Errors, 2);
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDUMGGeneratorRootHandoffSmokeTest,

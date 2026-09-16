@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "FontResolver.h"
 
 struct FDesignNode;
 
@@ -14,13 +15,13 @@ namespace TextMeasurement
 	/** Decide whether explicit line height should be applied for the node. */
 	bool ShouldApplyExplicitLineHeight(const TSharedPtr<FDesignNode>& Node);
 	/** Resolve the UMG runtime font size for a design text node. */
-	float ResolveTextFontSizeForUMG(const TSharedPtr<FDesignNode>& Node);
+	float ResolveTextFontSizeForUMG(const TSharedPtr<FDesignNode>& Node, const FDesign2UMGFontMappings* FontMappings = nullptr);
 	/** Resolve the UMG wrap width for a design text node. */
 	float ResolveTextWrapAt(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth);
 	/** Return whether AutoWrapText should be enabled. */
 	bool ShouldAutoWrapText(const TSharedPtr<FDesignNode>& Node);
 	/** Estimate runtime text size for layout conversion. */
-	FVector2D MeasureTextNodeSize(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth);
+	FVector2D MeasureTextNodeSize(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth, const FDesign2UMGFontMappings* FontMappings = nullptr);
 	/** Normalize source text for runtime UMG display. */
 	FString PrepareRuntimeTextContent(const FString& Text);
 }

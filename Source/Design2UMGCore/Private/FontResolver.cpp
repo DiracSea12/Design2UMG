@@ -183,26 +183,27 @@ namespace
 		return EExplicitFontMappingResult::Resolved;
 	}
 
-	EExplicitFontMappingResult TryResolveExplicitFontMapping(const FString& Family, const FString& PostScriptName, FString& OutPath)
+	EExplicitFontMappingResult TryResolveExplicitFontMapping(const FString& Family, const FString& PostScriptName, FString& OutPath, const FDesign2UMGFontMappings* ExplicitMappings = nullptr)
 	{
-		const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
-		if (!Settings)
+		const UDesign2UMGSettings* Settings = ExplicitMappings ? nullptr : UDesign2UMGSettings::Get();
+		const FDesign2UMGFontMappings* Mappings = ExplicitMappings ? ExplicitMappings : Settings ? &Settings->ExplicitFontMappings : nullptr;
+		if (!Mappings)
 		{
 			return EExplicitFontMappingResult::NoMapping;
 		}
 
-		const auto TryResolveMappingKey = [&Settings, &OutPath](const FString& Key)
+		const auto TryResolveMappingKey = [Mappings, &OutPath](const FString& Key)
 		{
 			const FString TrimmedKey = Key.TrimStartAndEnd();
 			if (TrimmedKey.IsEmpty())
 			{
 				return EExplicitFontMappingResult::NoMapping;
 			}
-			if (const TSoftObjectPtr<UFont>* FontAsset = Settings->ExplicitFontMappings.Find(TrimmedKey))
+			if (const TSoftObjectPtr<UFont>* FontAsset = Mappings->Find(TrimmedKey))
 			{
 				return ResolveExplicitFontMappingAsset(*FontAsset, OutPath);
 			}
-			for (const TPair<FString, TSoftObjectPtr<UFont>>& Pair : Settings->ExplicitFontMappings)
+			for (const TPair<FString, TSoftObjectPtr<UFont>>& Pair : *Mappings)
 			{
 				if (Pair.Key.Equals(TrimmedKey, ESearchCase::IgnoreCase))
 				{
@@ -221,10 +222,11 @@ namespace
 		return TryResolveMappingKey(Family);
 	}
 
-	bool HasExplicitFontMappingKey(const FString& Key)
+	bool HasExplicitFontMappingKey(const FString& Key, const FDesign2UMGFontMappings* ExplicitMappings = nullptr)
 	{
-		const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
-		if (!Settings)
+		const UDesign2UMGSettings* Settings = ExplicitMappings ? nullptr : UDesign2UMGSettings::Get();
+		const FDesign2UMGFontMappings* Mappings = ExplicitMappings ? ExplicitMappings : Settings ? &Settings->ExplicitFontMappings : nullptr;
+		if (!Mappings)
 		{
 			return false;
 		}
@@ -235,12 +237,12 @@ namespace
 			return false;
 		}
 
-		if (Settings->ExplicitFontMappings.Contains(TrimmedKey))
+		if (Mappings->Contains(TrimmedKey))
 		{
 			return true;
 		}
 
-		for (const TPair<FString, TSoftObjectPtr<UFont>>& Pair : Settings->ExplicitFontMappings)
+		for (const TPair<FString, TSoftObjectPtr<UFont>>& Pair : *Mappings)
 		{
 			if (Pair.Key.Equals(TrimmedKey, ESearchCase::IgnoreCase))
 			{
@@ -832,10 +834,10 @@ FString FFontResolver::MakeImportedFamilyPackageName(const FString& FontFamily)
 		+ FMD5::HashBytes(reinterpret_cast<const uint8*>(Identity.Get()), Identity.Length());
 }
 
-FString FFontResolver::FindFontAssetPath(const FString& FontFamily, const FString& PostScriptName)
+FString FFontResolver::FindFontAssetPath(const FString& FontFamily, const FString& PostScriptName, const FDesign2UMGFontMappings* ExplicitMappings)
 {
 	FString ExplicitPath;
-	const EExplicitFontMappingResult MappingResult = TryResolveExplicitFontMapping(FontFamily, PostScriptName, ExplicitPath);
+	const EExplicitFontMappingResult MappingResult = TryResolveExplicitFontMapping(FontFamily, PostScriptName, ExplicitPath, ExplicitMappings);
 	if (MappingResult == EExplicitFontMappingResult::Resolved)
 	{
 		return ExplicitPath;
@@ -865,9 +867,9 @@ FString FFontResolver::FindDefaultFontAssetPath()
 	return FString();
 }
 
-bool FFontResolver::HasExplicitFontMapping(const FString& FontFamily, const FString& PostScriptName)
+bool FFontResolver::HasExplicitFontMapping(const FString& FontFamily, const FString& PostScriptName, const FDesign2UMGFontMappings* ExplicitMappings)
 {
-	return HasExplicitFontMappingKey(PostScriptName) || HasExplicitFontMappingKey(FontFamily);
+	return HasExplicitFontMappingKey(PostScriptName, ExplicitMappings) || HasExplicitFontMappingKey(FontFamily, ExplicitMappings);
 }
 
 bool FFontResolver::HasInvalidProjectFontAsset(const FString& FontFamily)

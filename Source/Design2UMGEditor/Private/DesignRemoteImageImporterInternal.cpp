@@ -29,16 +29,6 @@ namespace DesignRemoteImageImporterInternal
 		// report was introduced to keep failure summaries bounded.
 		constexpr int32 MaxResolveReportMessages = 32;
 
-		bool TryAddWithinLimit(const uint64 Current, const uint64 Increment, const uint64 Limit, uint64& OutTotal)
-		{
-			if (Increment > Limit || Current > Limit - Increment)
-			{
-				return false;
-			}
-			OutTotal = Current + Increment;
-			return true;
-		}
-
 		bool IsIpv4Literal(const FString& Host)
 		{
 			bool bHasDigit = false;
@@ -106,43 +96,6 @@ namespace DesignRemoteImageImporterInternal
 
 	}
 
-	bool FImageOperationBudget::ConsumeCompressedBytes(const uint64 ByteCount, FString& OutError)
-	{
-		uint64 NewTotal = 0;
-		if (!TryAddWithinLimit(TotalCompressedBytes, ByteCount, Limits.MaxTotalCompressedBytes, NewTotal))
-		{
-			OutError = FString::Printf(
-				TEXT("Total compressed image data exceeds the operation limit (%llu bytes)"),
-				static_cast<unsigned long long>(Limits.MaxTotalCompressedBytes));
-			return false;
-		}
-		TotalCompressedBytes = NewTotal;
-		OutError.Reset();
-		return true;
-	}
-
-	bool FImageOperationBudget::ConsumeDecodedPixels(const int64 PixelCount, FString& OutError)
-	{
-		if (PixelCount < 0 || static_cast<uint64>(PixelCount) > TNumericLimits<uint64>::Max() / Bgra8BytesPerPixel)
-		{
-			OutError = TEXT("Decoded image size is invalid");
-			return false;
-		}
-
-		const uint64 DecodedBytes = static_cast<uint64>(PixelCount) * Bgra8BytesPerPixel;
-		uint64 NewTotal = 0;
-		if (!TryAddWithinLimit(TotalDecodedBytes, DecodedBytes, Limits.MaxTotalDecodedBytes, NewTotal))
-		{
-			OutError = FString::Printf(
-				TEXT("Total decoded image data exceeds the operation limit (%llu bytes)"),
-				static_cast<unsigned long long>(Limits.MaxTotalDecodedBytes));
-			return false;
-		}
-		TotalDecodedBytes = NewTotal;
-		OutError.Reset();
-		return true;
-	}
-
 	void FResolveReport::AddMessage(const FString& Message)
 	{
 			if (Messages.Num() < MaxResolveReportMessages)
@@ -170,7 +123,7 @@ namespace DesignRemoteImageImporterInternal
 
 	bool FImagePayloadIO::ValidateCompressedByteCount(
 		const uint64 ByteCount,
-		const FImageResourceLimits& Limits,
+		const DesignImageResources::FImageResourceLimits& Limits,
 		FString& OutError)
 	{
 		OutError.Reset();
@@ -188,7 +141,7 @@ namespace DesignRemoteImageImporterInternal
 	bool FImagePayloadIO::ValidateDimensions(
 		const int32 Width,
 		const int32 Height,
-		const FImageResourceLimits& Limits,
+		const DesignImageResources::FImageResourceLimits& Limits,
 		FString& OutError)
 	{
 		OutError.Reset();
@@ -223,7 +176,7 @@ namespace DesignRemoteImageImporterInternal
 
 	bool FImagePayloadIO::ValidateUrlCount(
 		const int32 UrlCount,
-		const FImageResourceLimits& Limits,
+		const DesignImageResources::FImageResourceLimits& Limits,
 		FString& OutError)
 	{
 		OutError.Reset();
@@ -274,7 +227,7 @@ namespace DesignRemoteImageImporterInternal
 
 	bool FImagePayloadIO::LoadLocalFile(
 		const FString& FilePath,
-		const FImageResourceLimits& Limits,
+		const DesignImageResources::FImageResourceLimits& Limits,
 		TArray<uint8>& OutData,
 		FString& OutError)
 	{
@@ -328,7 +281,7 @@ namespace DesignRemoteImageImporterInternal
 			const TSharedRef<FDownloadState, ESPMode::ThreadSafe>& State,
 			const FHttpResponsePtr& Response,
 			const bool bWasSuccessful,
-			const FImageResourceLimits& Limits)
+			const DesignImageResources::FImageResourceLimits& Limits)
 		{
 			if (State->bPayloadLimitExceeded)
 			{
@@ -372,7 +325,7 @@ namespace DesignRemoteImageImporterInternal
 		const TArray<FString>& Urls,
 		const float TimeoutSeconds,
 		const bool bAllowUnsafeRemoteUrls,
-		const FImageResourceLimits& Limits,
+		const DesignImageResources::FImageResourceLimits& Limits,
 		TMap<FString, FUrlDownloadResult>& OutResults)
 	{
 		struct FPendingRequest
@@ -584,12 +537,12 @@ namespace DesignRemoteImageImporterInternal
 
 	bool FImagePayloadIO::DecodeToBGRA8(
 		const TArray<uint8>& CompressedData,
-		const FImageResourceLimits& Limits,
+		const DesignImageResources::FImageResourceLimits& Limits,
 		int32& OutWidth,
 		int32& OutHeight,
 		TArray64<uint8>& OutRawData,
 		FString& OutError,
-		FImageOperationBudget* OperationBudget)
+		DesignImageResources::FImageOperationBudget* OperationBudget)
 	{
 		OutWidth = 0;
 		OutHeight = 0;

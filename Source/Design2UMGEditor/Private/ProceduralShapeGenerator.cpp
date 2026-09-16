@@ -3,12 +3,15 @@
 #include "ProceduralShapeGenerator.h"
 
 #include "ProceduralShapeGeneratorAssets.h"
+#include "DesignImageResourceLimits.h"
+#include "Design2UMGLog.h"
 #include "UMGValueParsing.h"
 #include "DesignJsonUtils.h"
 #include "Dom/JsonObject.h"
 #include "Engine/Texture2D.h"
 #include "ImageCore.h"
 #include "TextureResource.h"
+#include <cmath>
 
 namespace
 {
@@ -48,6 +51,8 @@ namespace
 
 #if WITH_EDITORONLY_DATA
 		FImage SourceImage;
+		if (Texture->Source.IsValid()
+			&& !DesignImageResources::FImageResourceLimits().AllowsDimensions(Texture->Source.GetSizeX(), Texture->Source.GetSizeY())) return false;
 		if (Texture->Source.IsValid() && Texture->Source.GetMipImage(SourceImage, 0))
 		{
 			SourceImage.ChangeFormat(ERawImageFormat::BGRA8, SourceImage.GammaSpace);
@@ -75,6 +80,7 @@ namespace
 		FTexture2DMipMap& Mip = PlatformData->Mips[0];
 		OutWidth = Mip.SizeX;
 		OutHeight = Mip.SizeY;
+		if (!DesignImageResources::FImageResourceLimits().AllowsDimensions(OutWidth, OutHeight)) return false;
 		const int64 PixelCount = static_cast<int64>(OutWidth) * static_cast<int64>(OutHeight);
 		const int64 ExpectedBytes = PixelCount * sizeof(FColor);
 		if (OutWidth <= 0 || OutHeight <= 0 || Mip.BulkData.GetBulkDataSize() < ExpectedBytes)
@@ -96,6 +102,11 @@ namespace
 	}
 }
 
+void FProceduralShapeGenerator::ReleaseTransientTexture(UTexture2D* Texture)
+{
+	ProceduralShapeGeneratorAssets::ReleaseTransientTexture(Texture);
+}
+
 void FProceduralShapeGenerator::ReleaseTransientTextures()
 {
 	ProceduralShapeGeneratorAssets::ReleaseTransientTextures();
@@ -115,9 +126,20 @@ UTexture2D* FProceduralShapeGenerator::ApplyAffineCrop(
 	float D,
 	float TY,
 	int32 OutW,
-	int32 OutH)
+	int32 OutH,
+	FString* OutError)
 {
-	if (!Source || OutW <= 0 || OutH <= 0)
+	if (OutError) OutError->Reset();
+	if (!DesignImageResources::FImageResourceLimits().AllowsDimensions(OutW, OutH)
+		|| !FMath::IsFinite(A) || !FMath::IsFinite(B) || !FMath::IsFinite(TX)
+		|| !FMath::IsFinite(C) || !FMath::IsFinite(D) || !FMath::IsFinite(TY))
+	{
+		const FString Error = TEXT("Invalid or excessive affine crop dimensions or transform");
+		if (OutError) *OutError = Error;
+		else UE_LOG(LogDesign2UMG, Warning, TEXT("%s"), *Error);
+		return nullptr;
+	}
+	if (!Source)
 	{
 		return nullptr;
 	}
@@ -195,9 +217,7 @@ UTexture2D* FProceduralShapeGenerator::ApplyAffineCrop(
 
 namespace
 {
-	// Parsed payload of a procedural-resource request's MaterialParams JSON.
-	// Field defaults double as the fallbacks when the payload is absent or
-	// only partially populated.
+	// Rendering parameters shared by typed gradients and explicit shape inputs.
 	struct FMaterialRefParams
 	{
 		FLinearColor Color = FLinearColor::White;
@@ -234,6 +254,48 @@ namespace
 	float NormalizePercentageOrFraction(const double Value)
 	{
 		return Value > 1.0 ? static_cast<float>(Value) / 100.0f : static_cast<float>(Value);
+	}
+
+	void ApplyGradientParams(const FUMGVisualBrushData::FGradientData& Gradient, FMaterialRefParams& P)
+	{
+		if (Gradient.Stops.IsEmpty()) return;
+		// Preserve established raster precision without serializing the internal request.
+		// Typed IR retains full precision; quantization belongs at the rendering boundary.
+		const auto Coordinate = [](double Value) -> float
+		{
+			return static_cast<float>(std::nearbyint(Value * 10000.0) / 10000.0);
+		};
+		const auto Color = [](const FLinearColor& Value)
+		{
+			return FLinearColor::FromSRGBColor(Value.ToFColor(true));
+		};
+		P.ColorStart = Color(Gradient.Stops[0].Color);
+		P.ColorEnd = Color(Gradient.Stops.Last().Color);
+		P.RotationDeg = Coordinate(Gradient.Rotation.Get(0.0f));
+		const bool bLinear = !Gradient.Type.IsSet() || Gradient.Type.GetValue().Equals(TEXT("Linear"), ESearchCase::IgnoreCase);
+		if (bLinear && Gradient.StartPoint.IsSet() && Gradient.EndPoint.IsSet())
+		{
+			P.LinearStart = FVector2D(Coordinate(Gradient.StartPoint.GetValue().X), Coordinate(Gradient.StartPoint.GetValue().Y));
+			P.LinearEnd = FVector2D(Coordinate(Gradient.EndPoint.GetValue().X), Coordinate(Gradient.EndPoint.GetValue().Y));
+			P.bHasLinearStartX = P.bHasLinearStartY = P.bHasLinearEndX = P.bHasLinearEndY = true;
+		}
+		if (Gradient.Type.IsSet() && Gradient.Type.GetValue().Equals(TEXT("Radial"), ESearchCase::IgnoreCase))
+		{
+			const FVector2D Center = Gradient.Center.Get(FVector2D(0.5f, 0.5f));
+			const FVector2D Size = Gradient.Size.Get(FVector2D(1.0f, 1.0f));
+			P.RadialCenter = FVector2D(Coordinate(Center.X), Coordinate(Center.Y));
+			P.RadialSize = FVector2D(FMath::Max(KINDA_SMALL_NUMBER, Coordinate(Size.X)), FMath::Max(KINDA_SMALL_NUMBER, Coordinate(Size.Y)));
+		}
+		// The two-color renderer uses the first/last colors at its endpoints.
+		if (Gradient.Stops.Num() > 2)
+		{
+			P.MultiStops.Reserve(Gradient.Stops.Num());
+			for (const auto& Stop : Gradient.Stops) P.MultiStops.Add({Coordinate(Stop.Position), Color(Stop.Color)});
+			P.MultiStops.Sort([](const FGeneratedGradientStop& Left, const FGeneratedGradientStop& Right)
+			{
+				return Left.Position < Right.Position;
+			});
+		}
 	}
 
 	void ParseMaterialRefParams(const FUMGProceduralResourceRequest& Request, FMaterialRefParams& P)
@@ -384,8 +446,10 @@ namespace
 		FMaterialRefParams& P,
 		const int32 Width,
 		const int32 Height,
-		UObject* Outer)
+		UObject* Outer,
+		bool& bRecognized)
 	{
+		bRecognized = true;
 		const FString Shape = Request.MaterialRef.ToLower();
 		if (Shape == TEXT("horizontalstroke"))
 		{
@@ -546,16 +610,35 @@ namespace
 				Outer);
 		}
 
+		bRecognized = false;
 		return nullptr;
 	}
 }
 
-UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(const FUMGProceduralResourceRequest& Request, UObject* Outer)
+UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(
+	const FUMGProceduralResourceRequest& Request, UObject* Outer, FString* OutError)
 {
+	if (OutError) OutError->Reset();
+	const DesignImageResources::FImageResourceLimits Limits;
+	FIntPoint Size;
+	if (!Limits.TryGetPixelSize(Request.WidthOverride.Get(64.0f), Request.HeightOverride.Get(64.0f), Size))
+	{
+		const FString Error = TEXT("Invalid or excessive procedural texture dimensions");
+		if (OutError) *OutError = Error;
+		else UE_LOG(LogDesign2UMG, Warning, TEXT("%s"), *Error);
+		return nullptr;
+	}
 	FMaterialRefParams P;
-	ParseMaterialRefParams(Request, P);
+	if (Request.Gradient.HasAny()) ApplyGradientParams(Request.Gradient, P);
+	else ParseMaterialRefParams(Request, P);
 
-	const int32 Width = FMath::Max(1, FMath::RoundToInt(Request.WidthOverride.Get(64.0f)));
-	const int32 Height = FMath::Max(1, FMath::RoundToInt(Request.HeightOverride.Get(64.0f)));
-	return DispatchMaterialRefShape(Request, P, Width, Height, Outer);
+	bool bRecognized = false;
+	UTexture2D* Texture = DispatchMaterialRefShape(Request, P, Size.X, Size.Y, Outer, bRecognized);
+	if (!Texture && bRecognized)
+	{
+		const FString Error = FString::Printf(TEXT("Failed to generate procedural texture '%s'"), *Request.MaterialRef);
+		if (OutError) *OutError = Error;
+		else UE_LOG(LogDesign2UMG, Warning, TEXT("%s"), *Error);
+	}
+	return Texture;
 }

@@ -7,7 +7,11 @@
 class FPreBuildResourceNormalizer
 {
 public:
-	static void NormalizePathTextures(FUMGWidgetNode& Root, const FString& TextureImportPath, const FString& AssetPrefix);
-	static void NormalizeProceduralTextures(FUMGWidgetNode& Root, const FString& TextureImportPath, const FString& AssetPrefix);
-	static void NormalizeImageTransformTextures(FUMGWidgetNode& Root, const FString& TextureImportPath, const FString& AssetPrefix);
+	static bool ValidatePathTextureBudget(const FUMGWidgetNode& Root, FString& OutError);
+	static bool NormalizePathTextures(FUMGWidgetNode& Root, const FString& TextureImportPath, const FString& AssetPrefix, FString* OutError = nullptr);
+	static bool NormalizeProceduralTextures(FUMGWidgetNode& Root, const FString& TextureImportPath, const FString& AssetPrefix, FString* OutError = nullptr);
+	static bool NormalizeImageTransformTextures(FUMGWidgetNode& Root, const FString& TextureImportPath, const FString& AssetPrefix, FString* OutError = nullptr);
+#if WITH_DEV_AUTOMATION_TESTS
+	static void ArmTextureSaveFailureOnce();
+#endif
 };

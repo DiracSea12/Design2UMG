@@ -144,10 +144,11 @@ namespace
 		const FString& FontPostScriptName,
 		const FString& FontWeight,
 		const FString& FontStyle,
-		const int32 LetterSpacing)
+		const int32 LetterSpacing,
+		const FDesign2UMGFontMappings* FontMappings)
 	{
 		const TextFontResolution::FResolvedFontSelection ResolvedFont =
-			TextFontResolution::Resolve(FontFamily, FontPostScriptName, FontWeight, FontStyle);
+			TextFontResolution::Resolve(FontFamily, FontPostScriptName, FontWeight, FontStyle, FontMappings);
 		TextMeasurementRuntimeProbe::FTextMeasureRequest Request;
 		Request.Text = Text;
 		Request.FontSize = FontSize;
@@ -164,7 +165,8 @@ namespace
 		const FString& Text,
 		const float WrapTextAt,
 		const bool bAutoWrapText,
-		const TOptional<float> LineHeightPercentageOverride = {})
+		const TOptional<float> LineHeightPercentageOverride,
+		const FDesign2UMGFontMappings* FontMappings)
 	{
 		TextMeasurementRuntimeProbe::FTextBlockMeasureRequest Request;
 		if (!Node.IsValid())
@@ -176,7 +178,7 @@ namespace
 			Node->Text.FontFamily,
 			Node->Text.FontPostScriptName,
 			Node->Text.FontWeight,
-			Node->Text.FontStyle);
+			Node->Text.FontStyle, FontMappings);
 		Request.Text = Text;
 		Request.FontSize = FontSize;
 		Request.FontAssetPath = ResolvedFont.FontAssetPath;
@@ -239,7 +241,8 @@ FVector2D MeasureTextSize(
 	const FString& FontPostScriptName,
 	const FString& FontWeight,
 	const FString& FontStyle,
-	int32 LetterSpacing)
+	int32 LetterSpacing,
+	const FDesign2UMGFontMappings* FontMappings)
 {
 	if (!IsFinitePositive(FontSize))
 	{
@@ -249,7 +252,7 @@ FVector2D MeasureTextSize(
 	const FString RuntimeText = TextMeasurement::PrepareRuntimeTextContent(Text);
 	FVector2D MeasuredSize = FVector2D::ZeroVector;
 	const TextMeasurementRuntimeProbe::FTextMeasureRequest Request =
-		BuildTextMeasureRequest(RuntimeText, FontSize, FontFamily, FontPostScriptName, FontWeight, FontStyle, LetterSpacing);
+		BuildTextMeasureRequest(RuntimeText, FontSize, FontFamily, FontPostScriptName, FontWeight, FontStyle, LetterSpacing, FontMappings);
 	if (TextMeasurementRuntimeProbe::TryMeasureText(Request, MeasuredSize))
 	{
 		return MeasuredSize;
@@ -264,7 +267,8 @@ FVector2D MeasureUMGTextBlockDesiredSize(
 	const FString& Text,
 	float WrapTextAt,
 	bool bAutoWrapText,
-	TOptional<float> LineHeightPercentageOverride)
+	TOptional<float> LineHeightPercentageOverride,
+	const FDesign2UMGFontMappings* FontMappings)
 {
 	const FString RuntimeText = TextMeasurement::PrepareRuntimeTextContent(Text);
 	if (!Node.IsValid() || !IsFinitePositive(FontSize))
@@ -280,7 +284,7 @@ FVector2D MeasureUMGTextBlockDesiredSize(
 			RuntimeText,
 			WrapTextAt,
 			bAutoWrapText,
-			LineHeightPercentageOverride),
+			LineHeightPercentageOverride, FontMappings),
 		MeasuredSize)
 		? MeasuredSize
 		: FVector2D::ZeroVector;

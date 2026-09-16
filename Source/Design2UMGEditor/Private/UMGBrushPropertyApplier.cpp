@@ -122,14 +122,17 @@ namespace UMGBrushPropertyApplier
 			const float StrokeThickness = Node.Path.StrokeThickness.Get(0.0f);
 			const FString StrokeCap = Node.Path.StrokeCap.Get(DesignPathRasterDefaults::StrokeCap);
 			const FString StrokeJoin = Node.Path.StrokeJoin.Get(DesignPathRasterDefaults::StrokeJoin);
-			const int32 PathPixelWidth = FMath::Max(1, FMath::RoundToInt(Node.WidgetStyle.WidthOverride.Get(static_cast<float>(DesignPathRasterDefaults::DefaultPixelSize))));
-			const int32 PathPixelHeight = FMath::Max(1, FMath::RoundToInt(Node.WidgetStyle.HeightOverride.Get(static_cast<float>(DesignPathRasterDefaults::DefaultPixelSize))));
-			constexpr int32 PathSupersample = DesignPathRasterDefaults::Supersample;
+			FIntPoint RasterSize;
+			if (!FDesignPathRasterizer::TryGetRasterSize(
+				Node.WidgetStyle.WidthOverride.Get(static_cast<float>(DesignPathRasterDefaults::DefaultPixelSize)),
+				Node.WidgetStyle.HeightOverride.Get(static_cast<float>(DesignPathRasterDefaults::DefaultPixelSize)), RasterSize)) return;
+			const int32 PathPixelWidth = RasterSize.X / DesignPathRasterDefaults::Supersample;
+			const int32 PathPixelHeight = RasterSize.Y / DesignPathRasterDefaults::Supersample;
 
 			if (UTexture2D* Texture = FDesignPathRasterizer::Rasterize(
 				Node.Path.Geometry.GetValue(),
-				PathPixelWidth * PathSupersample,
-				PathPixelHeight * PathSupersample,
+				RasterSize.X,
+				RasterSize.Y,
 				FillColor,
 				FillRule,
 				StrokeColor,

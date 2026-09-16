@@ -19,7 +19,9 @@ namespace UMGGeneratorRootHandoff
 	{
 		FPreparedRoot Prepared;
 		Prepared.Root = WidgetData.RootWidget;
-		if (!Design2UMGEffectMaterialBuilder::PrepareSubtreeShadowMaterials(Prepared.Root, Prepared.ErrorMessage))
+		if (!FPreBuildResourceNormalizer::ValidatePathTextureBudget(Prepared.Root, Prepared.ErrorMessage)
+			|| !Design2UMGEffectMaterialBuilder::PrepareGeometryMaskMaterials(Prepared.Root, Prepared.Materials, Prepared.ErrorMessage)
+			|| !Design2UMGEffectMaterialBuilder::PrepareSubtreeShadowMaterials(Prepared.Root, Prepared.ErrorMessage))
 		{
 			return Prepared;
 		}
@@ -41,9 +43,9 @@ namespace UMGGeneratorRootHandoff
 			Prepared.DesignSize.X, Prepared.DesignSize.Y,
 			Prepared.Root.Bounds.W, Prepared.Root.Bounds.H);
 
-		FPreBuildResourceNormalizer::NormalizePathTextures(Prepared.Root, PackagePath / TEXT("D2U_PathTextures"), AssetName);
-		FPreBuildResourceNormalizer::NormalizeProceduralTextures(Prepared.Root, PackagePath / TEXT("D2U_ProceduralTextures"), AssetName);
-		FPreBuildResourceNormalizer::NormalizeImageTransformTextures(Prepared.Root, PackagePath / TEXT("D2U_ImageTransforms"), AssetName);
+		if (!FPreBuildResourceNormalizer::NormalizePathTextures(Prepared.Root, PackagePath / TEXT("D2U_PathTextures"), AssetName, &Prepared.ErrorMessage)) return Prepared;
+		if (!FPreBuildResourceNormalizer::NormalizeProceduralTextures(Prepared.Root, PackagePath / TEXT("D2U_ProceduralTextures"), AssetName, &Prepared.ErrorMessage)) return Prepared;
+		if (!FPreBuildResourceNormalizer::NormalizeImageTransformTextures(Prepared.Root, PackagePath / TEXT("D2U_ImageTransforms"), AssetName, &Prepared.ErrorMessage)) return Prepared;
 		return Prepared;
 	}
 

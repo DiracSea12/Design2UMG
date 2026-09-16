@@ -56,9 +56,9 @@ namespace
 		return false;
 	}
 
-	void ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
+	void ApplyTextProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node, const FDesign2UMGFontMappings* FontMappings)
 	{
-		const FResolvedTextLayoutForUMG ResolvedLayout = TextMeasurementInternal::ResolveTextLayoutForUMG(Node);
+		const FResolvedTextLayoutForUMG ResolvedLayout = TextMeasurementInternal::ResolveTextLayoutForUMG(Node, 0.0f, FontMappings);
 		const float ResolvedFontSize = ResolvedLayout.FontSize;
 		if (ResolvedFontSize > 0)
 		{
@@ -70,7 +70,7 @@ namespace
 			Node->Text.FontFamily,
 			Node->Text.FontPostScriptName,
 			Node->Text.FontWeight,
-			Node->Text.FontStyle);
+			Node->Text.FontStyle, FontMappings);
 		if (!ResolvedFont.FontAssetPath.IsEmpty())
 		{
 			Widget.Text.FontFamily = ResolvedFont.FontAssetPath;
@@ -154,7 +154,7 @@ namespace
 			// centering/bottom alignment.
 			if (Node->Transform.Height.Value > 0.0f)
 			{
-				const FVector2D MeasuredTextSize = TextMeasurement::MeasureTextNodeSize(Node, 0.0f);
+				const FVector2D MeasuredTextSize = TextMeasurement::MeasureTextNodeSize(Node, 0.0f, FontMappings);
 				const float ContentHeight = MeasuredTextSize.Y;
 				const float SlackHeight = Node->Transform.Height.Value - ContentHeight;
 				if (ContentHeight > 0.0f && SlackHeight > 0.0f)
@@ -201,7 +201,7 @@ FString Design2UMGTextWidgetBuilder::FIconFontSettingsSnapshot::FindIconFontAsse
 	return FString();
 }
 
-FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FDesignNode>& Node)
+FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FDesignNode>& Node, const FDesign2UMGFontMappings* FontMappings)
 {
 	FUMGWidgetNode Widget;
 
@@ -261,7 +261,7 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 	};
 
 	const auto BuildResolvedRichTextRun =
-		[](const TSharedPtr<FDesignNode>& InNode, const FDesignTextRun* Run, int32 RunIndex, float ResolvedNodeFontSize)
+		[FontMappings](const TSharedPtr<FDesignNode>& InNode, const FDesignTextRun* Run, int32 RunIndex, float ResolvedNodeFontSize)
 	{
 		FResolvedRichTextRun Result;
 		Result.RowName = FString::Printf(TEXT("d2u_run_%d"), RunIndex);
@@ -279,7 +279,7 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 				EffectiveFontFamily,
 				EffectivePostScriptName,
 				EffectiveFontWeight,
-				EffectiveFontStyle);
+				EffectiveFontStyle, FontMappings);
 			Result.FontFamily = ResolvedFont.FontAssetPath;
 			Result.TypefaceFontName = ResolvedFont.TypefaceName;
 		}
@@ -289,7 +289,7 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 				InNode->Text.FontFamily,
 				InNode->Text.FontPostScriptName,
 				Run->FontWeight.IsEmpty() ? InNode->Text.FontWeight : Run->FontWeight,
-				Run->FontStyle.IsEmpty() ? InNode->Text.FontStyle : Run->FontStyle).TypefaceName;
+				Run->FontStyle.IsEmpty() ? InNode->Text.FontStyle : Run->FontStyle, FontMappings).TypefaceName;
 		}
 
 		const bool bRunHasFontSize = Run && Run->FontSize.IsSet();
@@ -339,7 +339,7 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 	};
 
 	const auto BuildRichTextContent =
-		[&BuildResolvedRichTextRun, &EscapeRichTextAttribute, &EscapeRichTextText](const TSharedPtr<FDesignNode>& InNode)
+		[&BuildResolvedRichTextRun, &EscapeRichTextAttribute, &EscapeRichTextText, FontMappings](const TSharedPtr<FDesignNode>& InNode)
 	{
 		FGeneratedRichTextContent Result;
 		if (!InNode.IsValid())
@@ -347,7 +347,7 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 			return Result;
 		}
 
-		const float ResolvedNodeFontSize = TextMeasurement::ResolveTextFontSizeForUMG(InNode);
+		const float ResolvedNodeFontSize = TextMeasurement::ResolveTextFontSizeForUMG(InNode, FontMappings);
 		TArray<FResolvedRichTextRun> Runs;
 		if (InNode->Text.TextRuns.Num() > 0)
 		{
@@ -408,7 +408,7 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 	const FGeneratedRichTextContent RichTextContent = bUseRichTextBlock ? BuildRichTextContent(Node) : FGeneratedRichTextContent();
 	Widget.Type = bUseRichTextBlock ? UMGWidgetTypes::RichTextBlock : UMGWidgetTypes::TextBlock;
 	Widget.Text.Text = bUseRichTextBlock ? RichTextContent.Markup : TextMeasurement::PrepareRuntimeTextContent(Node->Text.Content);
-	ApplyTextProperties(Widget, Node);
+	ApplyTextProperties(Widget, Node, FontMappings);
 	if (bUseRichTextBlock && RichTextContent.bHasStyleRows)
 	{
 		Widget.Text.RichTextStyleRowsJson = RichTextContent.StyleRowsJson;
@@ -511,7 +511,7 @@ Design2UMGTextWidgetBuilder::FIconFontBuildResult Design2UMGTextWidgetBuilder::C
 	// but IconFontAssetMap is not explicitly configured.
 	if (AssetPath.IsEmpty() && !Node->Text.IconFontFamily.IsEmpty())
 	{
-		FString ResolvedAssetPath = FFontResolver::FindFontAssetPath(Node->Text.IconFontFamily);
+		FString ResolvedAssetPath = FFontResolver::FindFontAssetPath(Node->Text.IconFontFamily, FString(), Args.FontMappings);
 		FString ValidResolvedPath;
 		if (TryNormalizeValidFontAssetPath(ResolvedAssetPath, ValidResolvedPath))
 		{
@@ -539,7 +539,8 @@ Design2UMGTextWidgetBuilder::FIconFontBuildResult Design2UMGTextWidgetBuilder::C
 		ResolvedIconGlyph = FFontResolver::FindKnownIconGlyph(Node->Text.IconFontFamily, Node->Text.IconFontName);
 		const bool bUsingFallbackFontAsset = bUsedDefaultIconPath;
 		FString WeightToken = ResolveIconTypefaceWeightToken(Node, bUsingFallbackFontAsset);
-		FString Typeface = FFontResolver::FindBestTypeface(Node->Text.IconFontFamily, WeightToken);
+		FString Typeface = FFontResolver::FindBestTypefaceForAssetPath(
+			FFontResolver::FindFontAssetPath(Node->Text.IconFontFamily, FString(), Args.FontMappings), WeightToken);
 		if (Typeface.IsEmpty())
 		{
 			Typeface = DesignTypeMapper::MapFontWeight(WeightToken).ToString();

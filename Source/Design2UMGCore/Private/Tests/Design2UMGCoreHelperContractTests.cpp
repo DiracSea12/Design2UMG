@@ -367,7 +367,9 @@ bool FGradientTypedPayloadMaterialParamsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Typed procedural request exposes gradient material data"),
 		Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Widget, Request));
 	TestEqual(TEXT("Request material ref"), Request.MaterialRef, FString(TEXT("radialgradient")));
-	TestEqual(TEXT("Request material params"), Request.MaterialParams.Get(FString()), MaterialParams);
+	TestFalse(TEXT("Internal gradient request does not serialize JSON"), Request.MaterialParams.IsSet());
+	TestEqual(TEXT("Typed gradient stop count preserved"), Request.Gradient.Stops.Num(), Widget.Brush.Gradient.Stops.Num());
+	TestEqual(TEXT("Typed gradient center preserved"), Request.Gradient.Center.GetValue(), Widget.Brush.Gradient.Center.GetValue());
 
 	TSharedPtr<FDesignNode> LinearNode = MakeShared<FDesignNode>();
 	LinearNode->Id = TEXT("linear_gradient_payload_source");
@@ -405,9 +407,8 @@ bool FGradientTypedPayloadMaterialParamsTest::RunTest(const FString& Parameters)
 	FUMGProceduralResourceRequest ExistingParamsRequest;
 	TestTrue(TEXT("Typed procedural request still builds when legacy raw material params are present"),
 		Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Widget, ExistingParamsRequest));
-	TestEqual(TEXT("Typed gradient descriptor keeps precedence over legacy raw material params"),
-		ExistingParamsRequest.MaterialParams.Get(FString()),
-		MaterialParams);
+	TestFalse(TEXT("Typed gradient takes precedence over raw material params"), ExistingParamsRequest.MaterialParams.IsSet());
+	TestEqual(TEXT("Gradient rotation remains typed"), ExistingParamsRequest.Gradient.Rotation.GetValue(), Widget.Brush.Gradient.Rotation.GetValue());
 
 	FUMGWidgetNode ExplicitParamsNode;
 	ExplicitParamsNode.Type = TEXT("Image");

@@ -171,14 +171,20 @@ bool FFigmaInstanceMetadataWorkflowTest::RunTest(const FString& Parameters)
 			MakeTextNode(TEXT("inst1_txt"), TEXT("Label"), 28, 40, 120, 24, TEXT("Instance text"),
 				TEXT("\"fontFamily\":\"Inter\",\"fontSize\":16,\"fontWeight\":500,\"textAlignHorizontal\":\"LEFT\",\"textAlignVertical\":\"TOP\",\"textDecoration\":\"NONE\",\"letterSpacing\":0,\"lineHeightUnit\":\"AUTO\",\"lineHeightPx\":0")),
 			FString::Printf(
-				TEXT(",\"componentId\":\"12:34\",\"componentSetId\":\"56:78\",\"mainComponentKey\":\"component-key-1\","
+				TEXT(",\"componentId\":\"12:34\",\"componentSetId\":\"56:78\",\"mainComponentKey\":\"nav_item_component\","
 					 "\"componentProperties\":{\"title\":{\"type\":\"TEXT\",\"value\":\"Hello\"}},"
 					 "\"variantProperties\":{\"Active\":\"True\",\"Size\":\"Small\"},"
 					 "\"overrides\":[{\"id\":\"inst1_txt\",\"path\":[\"characters\"],\"value\":\"Override\"}],"
 					 "\"isExposedInstance\":true,\"fills\":[%s]"),
 				*MakeSolidFillJson(0.18, 0.35, 0.95))),
-		TEXT(",\"components\":{\"12:34\":{\"key\":\"nav_item_component\",\"name\":\"NavItem\",\"componentPropertyDefinitions\":{\"title\":{\"type\":\"TEXT\"}}}},"
-			 "\"componentSets\":{\"56:78\":{\"key\":\"nav_item_variants\",\"name\":\"NavItemVariants\",\"variantGroupProperties\":{\"Active\":{\"values\":[\"True\",\"False\"]}}}}"));
+		FString::Printf(TEXT(",\"fileKey\":\"instance-metadata-fixture\",\"components\":{\"12:34\":{\"key\":\"nav_item_component\",\"name\":\"NavItem\",\"componentPropertyDefinitions\":{\"title\":{\"type\":\"TEXT\"}}}},"
+			 "\"componentSets\":{\"56:78\":{\"key\":\"nav_item_variants\",\"name\":\"NavItemVariants\",\"variantGroupProperties\":{\"Active\":{\"values\":[\"True\",\"False\"]}}}},"
+			 "\"design2umgComponentDependencies\":{\"schemaVersion\":1,\"errors\":[],"
+			 "\"instances\":{\"inst1\":{\"id\":\"12:34\",\"key\":\"nav_item_component\"}},"
+			 "\"definitions\":[{\"id\":\"12:34\",\"key\":\"nav_item_component\",\"document\":%s}]}"),
+			*MakeContainerNode(TEXT("12:34"), TEXT("NavItem"), TEXT("COMPONENT"), 0, 0, 160, 64,
+				MakeTextNode(TEXT("inst1_txt"), TEXT("Label"), 12, 16, 120, 24, TEXT("Default text"),
+					TEXT("\"fontFamily\":\"Inter\",\"fontSize\":16,\"fontWeight\":500")))));
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Parse figma instance metadata fixture"), FFigmaParser::ParseDocument(Json, Document));

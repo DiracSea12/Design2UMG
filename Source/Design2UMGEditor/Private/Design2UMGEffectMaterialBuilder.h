@@ -3,6 +3,7 @@
 #pragma once
 
 #include "UMGSchemaTypedPayloads.h"
+#include "UObject/StrongObjectPtr.h"
 
 class UMaterialInterface;
 struct FUMGWidgetNode;
@@ -26,7 +27,11 @@ namespace Design2UMGEffectMaterialBuilder
 	UMaterialInterface* GetOrCreateInnerShadowRetainerMaterial();
 	/** Persist subtree effects before modifying a generated WidgetTree. */
 	bool PrepareSubtreeShadowMaterials(FUMGWidgetNode& Root, FString& OutError);
+	/** Resolve persisted mask dependencies before creating or replacing a WidgetTree. */
+	bool PrepareGeometryMaskMaterials(FUMGWidgetNode& Root,
+		TArray<TStrongObjectPtr<UMaterialInterface>>& Materials, FString& OutError);
+#if WITH_DEV_AUTOMATION_TESTS
+	void ArmGeometryMaskSaveFailureOnce();
+#endif
 
-	/** Drop the root of every saved geometry mask instance; the /Game copy is reloaded on demand. */
-	void ReleaseRootedGeometryMaskInstances();
 }

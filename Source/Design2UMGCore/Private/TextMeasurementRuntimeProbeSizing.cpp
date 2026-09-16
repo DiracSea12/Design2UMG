@@ -30,12 +30,13 @@ namespace
 	bool TryMeasureNaturalLineHeight(
 		const TSharedPtr<FDesignNode>& Node,
 		const float FontSize,
-		float& OutNaturalLineHeight)
+		float& OutNaturalLineHeight,
+		const FDesign2UMGFontMappings* FontMappings)
 	{
 		FString SingleLineText = TextMeasurement::PrepareRuntimeTextContent(Node->Text.Content);
 		SingleLineText.ReplaceInline(TEXT("\n"), TEXT(" "));
 		const FVector2D NaturalLineSize = RuntimeProbe::MeasureUMGTextBlockDesiredSize(
-			Node, FontSize, SingleLineText, 0.0f, false);
+			Node, FontSize, SingleLineText, 0.0f, false, {}, FontMappings);
 		if (!IsFinitePositive(NaturalLineSize.Y))
 		{
 			return false;
@@ -46,14 +47,14 @@ namespace
 	}
 
 	/** Reads the actual resolved face's line gap, including engine fonts. */
-	bool TryResolveHheaLineGapPx(const TSharedPtr<FDesignNode>& Node, float& OutLineGapPx)
+	bool TryResolveHheaLineGapPx(const TSharedPtr<FDesignNode>& Node, float& OutLineGapPx, const FDesign2UMGFontMappings* FontMappings)
 	{
 		OutLineGapPx = 0.0f;
 		const TextFontResolution::FResolvedFontSelection ResolvedFont = TextFontResolution::Resolve(
 			Node->Text.FontFamily,
 			Node->Text.FontPostScriptName,
 			Node->Text.FontWeight,
-			Node->Text.FontStyle);
+			Node->Text.FontStyle, FontMappings);
 		TextMeasurementRuntimeProbe::FTextMeasureRequest Request;
 		Request.FontAssetPath = ResolvedFont.FontAssetPath;
 		Request.TypefaceName = ResolvedFont.TypefaceName;
@@ -74,7 +75,8 @@ namespace
 
 FResolvedTextLayoutForUMG ResolveTextLayoutForUMGInternal(
 	const TSharedPtr<FDesignNode>& Node,
-	const float WrapTextAt)
+	const float WrapTextAt,
+	const FDesign2UMGFontMappings* FontMappings)
 {
 	FResolvedTextLayoutForUMG Result;
 	Result.WrapTextAt = WrapTextAt;
@@ -99,19 +101,19 @@ FResolvedTextLayoutForUMG ResolveTextLayoutForUMGInternal(
 	const bool bHasSourceLineHeight = TextMeasurement::ShouldApplyExplicitLineHeight(Node)
 		&& IsFinitePositive(SourceLineHeight);
 	if (bHasSourceLineHeight
-		&& TryMeasureNaturalLineHeight(Node, Result.FontSize, NaturalLineHeight))
+		&& TryMeasureNaturalLineHeight(Node, Result.FontSize, NaturalLineHeight, FontMappings))
 	{
 		Result.LineHeightPercentage = SourceLineHeight / NaturalLineHeight;
 
 		float LineGapPx = 0.0f;
 		if (Node->Text.bSourceHalfLeadingBaseline
-			&& TryResolveHheaLineGapPx(Node, LineGapPx))
+			&& TryResolveHheaLineGapPx(Node, LineGapPx, FontMappings))
 		{
 			FString SingleLineText = TextMeasurement::PrepareRuntimeTextContent(Node->Text.Content);
 			SingleLineText.ReplaceInline(TEXT("\n"), TEXT(" "));
 			// Baselines use font ascent/descent, not UTextBlock's shadow-expanded desired size.
 			const float NaturalFontHeight = RuntimeProbe::MeasureTextSize(SingleLineText, Result.FontSize,
-				Node->Text.FontFamily, Node->Text.FontPostScriptName, Node->Text.FontWeight, Node->Text.FontStyle).Y;
+				Node->Text.FontFamily, Node->Text.FontPostScriptName, Node->Text.FontWeight, Node->Text.FontStyle, 0, FontMappings).Y;
 			// Slate keeps the first-line baseline at the font's natural ascent no
 			// matter how LineHeightPercentage rescales the line box (FTextLayout
 			// places blocks by the unscaled MaxAboveBaseline). A half-leading

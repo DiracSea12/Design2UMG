@@ -8,7 +8,8 @@
 #include "Kismet2/KismetEditorUtilities.h"
 #include "ImageUtils.h"
 #include "ImageCore.h"
-#include "PreBuildResourceNormalizer.h"
+#include "Misc/ScopeExit.h"
+#include "Tests/Design2UMGTestAssetCleanup.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FShadowOpacityRuntimeTest,
@@ -37,10 +38,9 @@ bool FShadowOpacityRuntimeTest::RunTest(const FString&)
 		FDesignDocument Document;
 		if (!TestTrue(TEXT("Parse source shadow"), FFigmaParser::ParseDocument(SourceJson, Document))) return false;
 		FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
-		FPreBuildResourceNormalizer::NormalizeProceduralTextures(Data.RootWidget,
-			TEXT("/Game/Design2UMG/Automation/ShadowOpacityFixture"), TEXT("ShadowOpacityProbe"));
-		UWidgetBlueprint* Blueprint = FUMGGenerator::BuildWidgetBlueprint(Data,
-			TEXT("/Temp/Design2UMGShadowOpacity_") + FGuid::NewGuid().ToString(EGuidFormats::Digits));
+		const FString Folder = TEXT("/Game/Design2UMG/Automation/ShadowOpacity_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+		ON_SCOPE_EXIT { Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(Folder); };
+		UWidgetBlueprint* Blueprint = FUMGGenerator::BuildWidgetBlueprint(Data, Folder);
 		if (!TestNotNull(TEXT("Build native widget"), Blueprint)) return false;
 		FKismetEditorUtilities::CompileBlueprint(Blueprint);
 		TArray<uint8> Png;

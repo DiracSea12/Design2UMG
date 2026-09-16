@@ -83,8 +83,8 @@ bool FProceduralResourceRequestBuildsTypedRequestTest::RunTest(const FString& Pa
 		TEXT("Typed-first procedural request can be built from descriptor-backed brush data"),
 		Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Node, Request));
 	TestEqual(TEXT("Gradient descriptor resolves to material ref"), Request.MaterialRef, FString(TEXT("radialgradient")));
-	TestTrue(TEXT("Gradient descriptor resolves material params"), Request.MaterialParams.IsSet());
-	TestEqual(TEXT("Request material params match typed descriptor"), Request.MaterialParams.Get(FString()), DescriptorMaterialParams);
+	TestFalse(TEXT("Gradient request does not serialize material params"), Request.MaterialParams.IsSet());
+	TestEqual(TEXT("Request preserves typed gradient rotation"), Request.Gradient.Rotation.GetValue(), Node.Brush.Gradient.Rotation.GetValue());
 	TestTrue(TEXT("Width override preserved"), Request.WidthOverride.IsSet() && FMath::IsNearlyEqual(Request.WidthOverride.GetValue(), 64.0f));
 	TestTrue(TEXT("Height override preserved"), Request.HeightOverride.IsSet() && FMath::IsNearlyEqual(Request.HeightOverride.GetValue(), 32.0f));
 	TestTrue(TEXT("Shadow blur preserved"), Request.ShadowBlur.IsSet() && FMath::IsNearlyEqual(Request.ShadowBlur.GetValue(), 12.0f));
@@ -92,7 +92,7 @@ bool FProceduralResourceRequestBuildsTypedRequestTest::RunTest(const FString& Pa
 	TestTrue(TEXT("Brush color preserved through typed request serialization"),
 		Request.BrushColor.IsSet() && Request.BrushColor.GetValue().Equals(ExpectedTypedBrushColor, 0.0001f));
 
-	TestTrue(TEXT("Typed request keeps radial center"), Request.MaterialParams.GetValue().Contains(TEXT("\"CenterX\":0.2500")));
+	TestEqual(TEXT("Typed request keeps radial center"), Request.Gradient.Center.GetValue(), Node.Brush.Gradient.Center.GetValue());
 	TestEqual(TEXT("Typed request width override value"), Request.WidthOverride.GetValue(), 64.0f);
 	return true;
 }

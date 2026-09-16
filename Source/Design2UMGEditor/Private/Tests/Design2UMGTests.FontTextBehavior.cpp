@@ -356,7 +356,7 @@ bool FExplicitFontMappingMissingTypefaceDoesNotAutoSubstituteTest::RunTest(const
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Explicit missing typeface fixture parses"), FPenParser::ParseDocument(Json, Doc));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::FromSettings(Settings));
 	const FUMGWidgetNode* TextWidget = FindWidgetById(Data.RootWidget, TEXT("explicit_missing_typeface"));
 	TestNotNull(TEXT("Converted explicit-mapping text exists"), TextWidget);
 	if (TextWidget)
@@ -448,7 +448,7 @@ bool FExplicitPostScriptMeasurementGenerationParityTest::RunTest(const FString& 
 		DefaultTypefaceDesignNode->Text.FontWeight.Empty();
 	}
 	TestTrue(TEXT("PostScript measurement parity design node exists"), DesignNode.IsValid());
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::FromSettings(Settings));
 	const FUMGWidgetNode* TextWidget = FindWidgetById(Data.RootWidget, TEXT("postscript_measurement_parity"));
 	const FUMGWidgetNode* DefaultTypefaceWidget =
 		FindWidgetById(Data.RootWidget, TEXT("postscript_default_typeface_parity"));
@@ -621,7 +621,7 @@ bool FTextRunPostScriptNameTriggersRichTextBlockTest::RunTest(const FString& Par
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Run-level PostScript fixture parses"), FPenParser::ParseDocument(Json, Doc));
-	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::FromSettings(Settings));
 	const FUMGWidgetNode* TextWidget = FindWidgetById(Data.RootWidget, TEXT("postscript_run_text"));
 	TestNotNull(TEXT("Converted run-level PostScript text exists"), TextWidget);
 	if (TextWidget)

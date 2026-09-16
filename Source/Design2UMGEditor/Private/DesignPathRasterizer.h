@@ -4,12 +4,18 @@
 
 #include "CoreMinimal.h"
 #include "DesignPathRasterDefaults.h"
+#include "DesignImageResourceLimits.h"
 
 class UTexture2D;
 
 class FDesignPathRasterizer
 {
 public:
+	// Limits apply to final supersampled pixels, as in the external image decode path.
+	static constexpr int32 MaxRasterDimension = DesignImageResources::FImageResourceLimits::DefaultMaxDimension;
+	static constexpr int64 MaxRasterPixels = DesignImageResources::FImageResourceLimits::DefaultMaxPixels;
+	static bool IsRasterSizeAllowed(int64 Width, int64 Height);
+	static bool TryGetRasterSize(float Width, float Height, FIntPoint& OutSize);
 	static UTexture2D* Rasterize(
 		const FString& Geometry,
 		int32 Width,
@@ -19,7 +25,9 @@ public:
 		const TOptional<FLinearColor>& StrokeColor = TOptional<FLinearColor>(),
 		float StrokeWidth = 0.0f,
 		const FString& StrokeCap = DesignPathRasterDefaults::StrokeCap,
-		const FString& StrokeJoin = DesignPathRasterDefaults::StrokeJoin);
+		const FString& StrokeJoin = DesignPathRasterDefaults::StrokeJoin,
+		FString* OutError = nullptr);
 	static void FlushPendingTextureUpdates();
 	static void ClearCache();
+	static int64 GetCachedPixelCount();
 };

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "FontResolver.h"
 #include "DesignSchema.h"
 #include "UMGSchema.h"
 
@@ -19,6 +20,7 @@ namespace Design2UMGTextWidgetBuilder
 
 	struct FIconFontBuildArgs
 	{
+		const FDesign2UMGFontMappings* FontMappings = nullptr;
 		const TSet<FString>* ExistingWarnedFamilies = nullptr;
 		const FIconFontSettingsSnapshot* SettingsSnapshot = nullptr;
 	};
@@ -33,7 +35,7 @@ namespace Design2UMGTextWidgetBuilder
 		bool bMissingSettingsSnapshot = false;
 	};
 
-	FUMGWidgetNode CreateTextWidget(const TSharedPtr<FDesignNode>& Node);
+	FUMGWidgetNode CreateTextWidget(const TSharedPtr<FDesignNode>& Node, const FDesign2UMGFontMappings* FontMappings = nullptr);
 	FIconFontBuildResult CreateIconFontWidget(
 		const TSharedPtr<FDesignNode>& Node,
 		const FIconFontBuildArgs& Args = FIconFontBuildArgs());

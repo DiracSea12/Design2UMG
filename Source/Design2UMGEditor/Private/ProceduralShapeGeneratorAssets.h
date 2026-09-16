@@ -16,6 +16,7 @@ namespace ProceduralShapeGeneratorAssets
 	};
 
 	void ReleaseTransientTextures();
+	void ReleaseTransientTexture(UTexture2D* Texture);
 	void FlushPendingTextureUpdates();
 
 	UTexture2D* CreateTransientTexture(int32 Width, int32 Height, UObject* Outer);
@@ -58,6 +59,10 @@ namespace ProceduralShapeGeneratorAssets
 		const FVector2D& SizeScale,
 		float RotationDeg,
 		UObject* Outer);
+
+	// Discrete CPU convolution is limited to 32 KiB of coefficients and 2^30 taps.
+	// This check does not allocate; both direct callers and the generator use it.
+	bool TryGetShadowKernelRadius(int32 Width, int32 Height, float BlurRadius, int32& OutRadius);
 
 	UTexture2D* GenerateBoxShadow(
 		int32 Width,

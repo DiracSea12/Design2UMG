@@ -8,6 +8,7 @@
 #include "Hash/CityHash.h"
 #include "RenderingThread.h"
 #include "TextureResource.h"
+#include "Serialization/MemoryWriter.h"
 
 // --- Path cache (file-local) ---
 struct FPathPoint
@@ -42,49 +43,32 @@ namespace
 	struct FPathCacheEntry
 	{
 		TWeakObjectPtr<UTexture2D> Texture;
-		FString Signature;
+		TArray<uint8> Signature;
 	};
 
-	FString MakeCacheSignature(
-		const FString& Geometry,
-		int32 W,
-		int32 H,
-		const TOptional<FLinearColor>& FillColor,
-		const FString& Rule,
-		const TOptional<FLinearColor>& StrokeColor,
-		float StrokeWidth,
-		const FString& StrokeCap,
-		const FString& StrokeJoin)
+	TArray<uint8> MakeCacheSignature(
+		FString Geometry, int32 Width, int32 Height, TOptional<FLinearColor> FillColor,
+		FString Rule, TOptional<FLinearColor> StrokeColor, float StrokeWidth,
+		FString StrokeCap, FString StrokeJoin)
 	{
-		const auto FormatColor = [](const TOptional<FLinearColor>& Color) -> FString
-		{
-			return Color.IsSet()
-				? FString::Printf(TEXT("%.4f,%.4f,%.4f,%.4f"), Color->R, Color->G, Color->B, Color->A)
-				: FString(TEXT("unset"));
-		};
-		return FString::Printf(
-			TEXT("%s|%d|%d|%s|%s|%s|%.4f|%s|%s"),
-			*Geometry, W, H,
-			*FormatColor(FillColor), *Rule,
-			*FormatColor(StrokeColor), StrokeWidth,
-			*StrokeCap, *StrokeJoin);
+		TArray<uint8> Signature;
+		FMemoryWriter Writer(Signature);
+		Writer << Geometry << Width << Height << FillColor << Rule << StrokeColor
+			<< StrokeWidth << StrokeCap << StrokeJoin;
+		return Signature;
 	}
 
-	uint64 MakeCacheKey(const FString& Signature)
+	uint64 MakeCacheKey(const TArray<uint8>& Signature)
 	{
-		return CityHash64(reinterpret_cast<const char*>(*Signature), Signature.Len() * sizeof(TCHAR));
+		return CityHash64(reinterpret_cast<const char*>(Signature.GetData()), Signature.Num());
 	}
 
 	TMap<uint64, FPathCacheEntry> GPathCache;
 	int32 GCacheHits = 0;
 	int32 GCacheMisses = 0;
 	bool bHasPendingTextureUpdates = false;
-	// Upper bound on cached path textures so repeated rasterization with varying shape
-	// parameters cannot grow the cache (and its rooted UTexture2Ds) without limit.
-	// EvictStale() first drops entries whose texture is already GC'd, then removes
-	// arbitrary map entries while over capacity - there is no recency tracking, so
-	// overflow eviction is unordered, only bounded. 256 is a fixed round capacity
-	// chosen when the cache was introduced, not a measured optimum.
+	// Retain at most one raster budget (256 MiB of BGRA8), also bounded by entry count.
+	// Eviction is unordered; a miss merely regenerates the same deterministic texture.
 	constexpr int32 GMaxCacheEntries = 256;
 
 	int64 CountFilledPixels(const TArray<FColor>& Pixels)
@@ -265,22 +249,20 @@ namespace
 		}
 	}
 
-	void EvictStale()
+	void MakeCacheRoom(int64 IncomingPixels)
 	{
 		for (auto It = GPathCache.CreateIterator(); It; ++It)
 		{
-			if (!It->Value.Texture.IsValid())
-				It.RemoveCurrent();
+			if (!It->Value.Texture.IsValid()) It.RemoveCurrent();
 		}
-		if (GPathCache.Num() > GMaxCacheEntries)
+		int64 Pixels = FDesignPathRasterizer::GetCachedPixelCount();
+		for (auto It = GPathCache.CreateIterator(); It
+			&& (GPathCache.Num() >= GMaxCacheEntries || Pixels > FDesignPathRasterizer::MaxRasterPixels - IncomingPixels); ++It)
 		{
-			int32 ToRemove = GPathCache.Num() - GMaxCacheEntries;
-			for (auto It = GPathCache.CreateIterator(); ToRemove > 0 && It; ++It, --ToRemove)
-			{
-				if (UTexture2D* Tex = It->Value.Texture.Get())
-					Tex->RemoveFromRoot();
-				It.RemoveCurrent();
-			}
+			UTexture2D* Texture = It->Value.Texture.Get();
+			Pixels -= static_cast<int64>(Texture->GetSizeX()) * Texture->GetSizeY();
+			Texture->RemoveFromRoot();
+			It.RemoveCurrent();
 		}
 	}
 
@@ -308,49 +290,36 @@ namespace
 
 namespace
 {
-	float ParseFloat(const TCHAR*& P)
+	bool ReadFloat(const TCHAR*& P, float& OutValue)
 	{
-		while (*P == TEXT(' ') || *P == TEXT(',') || *P == TEXT('\t') || *P == TEXT('\n') || *P == TEXT('\r'))
-			++P;
-		return FCString::Atof(P);
-	}
-
-	void AdvancePastNumber(const TCHAR*& P)
-	{
-		while (*P == TEXT(' ') || *P == TEXT(',') || *P == TEXT('\t') || *P == TEXT('\n') || *P == TEXT('\r'))
-			++P;
-		if (*P == TEXT('-') || *P == TEXT('+'))
-			++P;
-		bool bHasDot = false;
-		while ((*P >= TEXT('0') && *P <= TEXT('9')) || (*P == TEXT('.') && !bHasDot))
+		while (*P == TEXT(' ') || *P == TEXT(',') || *P == TEXT('\t') || *P == TEXT('\n') || *P == TEXT('\r')) ++P;
+		const TCHAR* Start = P;
+		if (*P == TEXT('-') || *P == TEXT('+')) ++P;
+		bool bHasDigit = false;
+		while (*P >= TEXT('0') && *P <= TEXT('9')) { bHasDigit = true; ++P; }
+		if (*P == TEXT('.'))
 		{
-			if (*P == TEXT('.')) bHasDot = true;
 			++P;
+			while (*P >= TEXT('0') && *P <= TEXT('9')) { bHasDigit = true; ++P; }
 		}
-		// scientific notation
+		if (!bHasDigit) return false;
 		if (*P == TEXT('e') || *P == TEXT('E'))
 		{
 			++P;
 			if (*P == TEXT('-') || *P == TEXT('+')) ++P;
+			if (*P < TEXT('0') || *P > TEXT('9')) return false;
 			while (*P >= TEXT('0') && *P <= TEXT('9')) ++P;
 		}
+		OutValue = FCString::Atof(Start);
+		return P > Start && FMath::IsFinite(OutValue);
 	}
 
-	float ReadFloat(const TCHAR*& P)
+	bool ReadFlag(const TCHAR*& P, bool& OutValue)
 	{
-		float V = ParseFloat(P);
-		AdvancePastNumber(P);
-		return V;
-	}
-
-	bool ReadFlag(const TCHAR*& P)
-	{
-		while (*P == TEXT(' ') || *P == TEXT(',') || *P == TEXT('\t') || *P == TEXT('\n') || *P == TEXT('\r'))
-			++P;
-		bool V = (*P == TEXT('1'));
-		if (*P == TEXT('0') || *P == TEXT('1'))
-			++P;
-		return V;
+		while (*P == TEXT(' ') || *P == TEXT(',') || *P == TEXT('\t') || *P == TEXT('\n') || *P == TEXT('\r')) ++P;
+		if (*P != TEXT('0') && *P != TEXT('1')) return false;
+		OutValue = *P++ == TEXT('1');
+		return true;
 	}
 
 	bool IsCommandChar(TCHAR C)
@@ -373,6 +342,7 @@ namespace
 
 bool ParsePathData(const FString& Data, TArray<TArray<FPathPoint>>& OutSubPaths, FBox2D& OutBounds)
 {
+	OutSubPaths.Reset();
 	OutBounds.Init();
 	const TCHAR* P = *Data;
 	FPathPoint Current = {0, 0};
@@ -398,7 +368,12 @@ bool ParsePathData(const FString& Data, TArray<TArray<FPathPoint>>& OutSubPaths,
 		OutBounds += FVector2D(X, Y);
 	};
 
-	bool bLastRelative = false;
+	const auto Fail = [&]()
+	{
+		OutSubPaths.Reset();
+		OutBounds.Init();
+		return false;
+	};
 
 	while (*P)
 	{
@@ -406,35 +381,33 @@ bool ParsePathData(const FString& Data, TArray<TArray<FPathPoint>>& OutSubPaths,
 			++P;
 		if (!*P) break;
 
+		const TCHAR* IterationStart = P;
 		TCHAR Cmd = *P;
-		if (!IsCommandChar(Cmd))
-		{
-			// Implicit lineto inherits the previous command's relative/absolute mode.
-			if (ActivePath)
-			{
-				float X = ReadFloat(P);
-				float Y = ReadFloat(P);
-				if (bLastRelative) { X += Current.X; Y += Current.Y; }
-				AddPoint(X, Y);
-				continue;
-			}
-			++P;
-			continue;
-		}
+		if (!IsCommandChar(Cmd)) return Fail();
 		++P;
 
 		bool bRelative = (Cmd >= TEXT('a') && Cmd <= TEXT('z'));
-		bLastRelative = bRelative;
 		TCHAR CmdUpper = bRelative ? (Cmd - 32) : Cmd;
 
+		if ((LastCmd == 0 && CmdUpper != TEXT('M')) || (CmdUpper != TEXT('Z') && !HasMoreNumbers(P))) return Fail();
+
 		auto Abs = [&](float V, float Base) -> float { return bRelative ? Base + V : V; };
+		const auto ReadPoint = [&](FPathPoint& Point)
+		{
+			float X, Y;
+			if (!ReadFloat(P, X) || !ReadFloat(P, Y)) return false;
+			Point = {Abs(X, Current.X), Abs(Y, Current.Y)};
+			return FMath::IsFinite(Point.X) && FMath::IsFinite(Point.Y);
+		};
 
 		switch (CmdUpper)
 		{
 		case TEXT('M'):
 		{
-			float X = ReadFloat(P);
-			float Y = ReadFloat(P);
+			float X;
+			if (!ReadFloat(P, X)) return Fail();
+			float Y;
+			if (!ReadFloat(P, Y)) return Fail();
 			X = Abs(X, Current.X);
 			Y = Abs(Y, Current.Y);
 			Current = {X, Y};
@@ -445,8 +418,8 @@ bool ParsePathData(const FString& Data, TArray<TArray<FPathPoint>>& OutSubPaths,
 			// subsequent coords are implicit lineto
 			while (HasMoreNumbers(P))
 			{
-				X = ReadFloat(P);
-				Y = ReadFloat(P);
+				if (!ReadFloat(P, X)) return Fail();
+				if (!ReadFloat(P, Y)) return Fail();
 				AddPoint(Abs(X, Current.X), Abs(Y, Current.Y));
 			}
 			LastCmd = TEXT('M');
@@ -455,8 +428,10 @@ bool ParsePathData(const FString& Data, TArray<TArray<FPathPoint>>& OutSubPaths,
 		case TEXT('L'):
 			while (HasMoreNumbers(P))
 			{
-				float X = ReadFloat(P);
-				float Y = ReadFloat(P);
+				float X;
+				if (!ReadFloat(P, X)) return Fail();
+				float Y;
+				if (!ReadFloat(P, Y)) return Fail();
 				AddPoint(Abs(X, Current.X), Abs(Y, Current.Y));
 			}
 			LastCmd = TEXT('L');
@@ -464,7 +439,8 @@ bool ParsePathData(const FString& Data, TArray<TArray<FPathPoint>>& OutSubPaths,
 		case TEXT('H'):
 			while (HasMoreNumbers(P))
 			{
-				float X = ReadFloat(P);
+				float X;
+				if (!ReadFloat(P, X)) return Fail();
 				AddPoint(Abs(X, Current.X), Current.Y);
 			}
 			LastCmd = TEXT('H');
@@ -472,7 +448,8 @@ bool ParsePathData(const FString& Data, TArray<TArray<FPathPoint>>& OutSubPaths,
 		case TEXT('V'):
 			while (HasMoreNumbers(P))
 			{
-				float Y = ReadFloat(P);
+				float Y;
+				if (!ReadFloat(P, Y)) return Fail();
 				AddPoint(Current.X, Abs(Y, Current.Y));
 			}
 			LastCmd = TEXT('V');
@@ -480,9 +457,12 @@ bool ParsePathData(const FString& Data, TArray<TArray<FPathPoint>>& OutSubPaths,
 		case TEXT('C'):
 			while (HasMoreNumbers(P))
 			{
-				FPathPoint P1 = {Abs(ReadFloat(P), Current.X), Abs(ReadFloat(P), Current.Y)};
-				FPathPoint P2 = {Abs(ReadFloat(P), Current.X), Abs(ReadFloat(P), Current.Y)};
-				FPathPoint P3 = {Abs(ReadFloat(P), Current.X), Abs(ReadFloat(P), Current.Y)};
+				FPathPoint P1;
+				if (!ReadPoint(P1)) return Fail();
+				FPathPoint P2;
+				if (!ReadPoint(P2)) return Fail();
+				FPathPoint P3;
+				if (!ReadPoint(P3)) return Fail();
 				EnsurePath();
 				SampleCubicBezier(Current, P1, P2, P3, *ActivePath);
 				LastControl = P2;
@@ -498,8 +478,10 @@ bool ParsePathData(const FString& Data, TArray<TArray<FPathPoint>>& OutSubPaths,
 				FPathPoint P1 = (LastCmd == TEXT('C') || LastCmd == TEXT('S'))
 					? FPathPoint{2 * Current.X - LastControl.X, 2 * Current.Y - LastControl.Y}
 					: Current;
-				FPathPoint P2 = {Abs(ReadFloat(P), Current.X), Abs(ReadFloat(P), Current.Y)};
-				FPathPoint P3 = {Abs(ReadFloat(P), Current.X), Abs(ReadFloat(P), Current.Y)};
+				FPathPoint P2;
+				if (!ReadPoint(P2)) return Fail();
+				FPathPoint P3;
+				if (!ReadPoint(P3)) return Fail();
 				EnsurePath();
 				SampleCubicBezier(Current, P1, P2, P3, *ActivePath);
 				LastControl = P2;
@@ -511,8 +493,10 @@ bool ParsePathData(const FString& Data, TArray<TArray<FPathPoint>>& OutSubPaths,
 		case TEXT('Q'):
 			while (HasMoreNumbers(P))
 			{
-				FPathPoint P1 = {Abs(ReadFloat(P), Current.X), Abs(ReadFloat(P), Current.Y)};
-				FPathPoint P2 = {Abs(ReadFloat(P), Current.X), Abs(ReadFloat(P), Current.Y)};
+				FPathPoint P1;
+				if (!ReadPoint(P1)) return Fail();
+				FPathPoint P2;
+				if (!ReadPoint(P2)) return Fail();
 				EnsurePath();
 				SampleQuadBezier(Current, P1, P2, *ActivePath);
 				LastControl = P1;
@@ -527,7 +511,8 @@ bool ParsePathData(const FString& Data, TArray<TArray<FPathPoint>>& OutSubPaths,
 				FPathPoint P1 = (LastCmd == TEXT('Q') || LastCmd == TEXT('T'))
 					? FPathPoint{2 * Current.X - LastControl.X, 2 * Current.Y - LastControl.Y}
 					: Current;
-				FPathPoint P2 = {Abs(ReadFloat(P), Current.X), Abs(ReadFloat(P), Current.Y)};
+				FPathPoint P2;
+				if (!ReadPoint(P2)) return Fail();
 				EnsurePath();
 				SampleQuadBezier(Current, P1, P2, *ActivePath);
 				LastControl = P1;
@@ -539,12 +524,18 @@ bool ParsePathData(const FString& Data, TArray<TArray<FPathPoint>>& OutSubPaths,
 		case TEXT('A'):
 			while (HasMoreNumbers(P))
 			{
-				float Rx = ReadFloat(P);
-				float Ry = ReadFloat(P);
-				float Rot = ReadFloat(P);
-				bool bLarge = ReadFlag(P);
-				bool bSweep = ReadFlag(P);
-				FPathPoint To = {Abs(ReadFloat(P), Current.X), Abs(ReadFloat(P), Current.Y)};
+				float Rx;
+				if (!ReadFloat(P, Rx)) return Fail();
+				float Ry;
+				if (!ReadFloat(P, Ry)) return Fail();
+				float Rot;
+				if (!ReadFloat(P, Rot)) return Fail();
+				bool bLarge;
+				if (!ReadFlag(P, bLarge)) return Fail();
+				bool bSweep;
+				if (!ReadFlag(P, bSweep)) return Fail();
+				FPathPoint To;
+				if (!ReadPoint(To)) return Fail();
 				EnsurePath();
 				SampleArc(Current, Rx, Ry, Rot, bLarge, bSweep, To, *ActivePath);
 				Current = To;
@@ -562,16 +553,18 @@ bool ParsePathData(const FString& Data, TArray<TArray<FPathPoint>>& OutSubPaths,
 			LastCmd = TEXT('Z');
 			break;
 		default:
-			UE_LOG(LogDesign2UMG, Warning, TEXT("DesignPathRasterizer: unsupported SVG command '%c'"), Cmd);
-			// Skip trailing numbers so they don't get parsed as implicit lineto
-			while (HasMoreNumbers(P))
-			{
-				ReadFloat(P);
-			}
-			break;
+			return Fail();
 		}
+		if (P <= IterationStart) return Fail();
 	}
 
+	for (const auto& Path : OutSubPaths)
+	{
+		for (const FPathPoint& Point : Path)
+		{
+			if (!FMath::IsFinite(Point.X) || !FMath::IsFinite(Point.Y)) return Fail();
+		}
+	}
 	return OutSubPaths.Num() > 0;
 }
 
@@ -691,7 +684,7 @@ void ScanlineFill(
 	FColor FillColor,
 	bool bEvenOdd)
 {
-	OutPixels.SetNumZeroed(Width * Height);
+	OutPixels.SetNumZeroed(static_cast<int32>(static_cast<int64>(Width) * Height));
 
 	struct FEdge
 	{
@@ -779,6 +772,33 @@ void ScanlineFill(
 	}
 }
 
+bool FDesignPathRasterizer::IsRasterSizeAllowed(int64 Width, int64 Height)
+{
+	return DesignImageResources::FImageResourceLimits().AllowsDimensions(Width, Height);
+}
+
+bool FDesignPathRasterizer::TryGetRasterSize(float Width, float Height, FIntPoint& OutSize)
+{
+	OutSize = FIntPoint::ZeroValue;
+	constexpr int32 Supersample = DesignPathRasterDefaults::Supersample;
+	// Check before float-to-int conversion or supersampling multiplication.
+	if (!FMath::IsFinite(Width) || !FMath::IsFinite(Height) || Width <= 0.0f || Height <= 0.0f
+		|| Width > MaxRasterDimension / Supersample || Height > MaxRasterDimension / Supersample)
+	{
+		UE_LOG(LogDesign2UMG, Warning, TEXT("DesignPathRasterizer: invalid or excessive path texture size %.3fx%.3f"), Width, Height);
+		return false;
+	}
+	const int64 RasterWidth = static_cast<int64>(FMath::Max(1, FMath::RoundToInt(Width))) * Supersample;
+	const int64 RasterHeight = static_cast<int64>(FMath::Max(1, FMath::RoundToInt(Height))) * Supersample;
+	if (!IsRasterSizeAllowed(RasterWidth, RasterHeight))
+	{
+		UE_LOG(LogDesign2UMG, Warning, TEXT("DesignPathRasterizer: path texture exceeds the pixel budget (%lldx%lld)"), RasterWidth, RasterHeight);
+		return false;
+	}
+	OutSize = FIntPoint(static_cast<int32>(RasterWidth), static_cast<int32>(RasterHeight));
+	return true;
+}
+
 UTexture2D* FDesignPathRasterizer::Rasterize(
 	const FString& Geometry,
 	int32 Width,
@@ -788,11 +808,19 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 	const TOptional<FLinearColor>& StrokeColor,
 	float StrokeWidth,
 	const FString& StrokeCap,
-	const FString& StrokeJoin)
+	const FString& StrokeJoin,
+	FString* OutError)
 {
 	check(IsInGameThread());
-	if (Geometry.IsEmpty() || Width <= 0 || Height <= 0)
+	if (OutError) OutError->Reset();
+	if (Geometry.IsEmpty()) return nullptr;
+	if (!IsRasterSizeAllowed(Width, Height))
+	{
+		if (OutError) *OutError = TEXT("Invalid or excessive path raster dimensions");
+		UE_LOG(LogDesign2UMG, Warning, TEXT("DesignPathRasterizer: invalid or excessive raster size %dx%d (max dimension %d, max pixels %lld)"),
+			Width, Height, MaxRasterDimension, MaxRasterPixels);
 		return nullptr;
+	}
 
 	const bool bHasVisibleFill = HasVisibleColor(FillColor);
 	const bool bHasVisibleStroke = HasVisibleColor(StrokeColor) && StrokeWidth > KINDA_SMALL_NUMBER;
@@ -802,7 +830,7 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 	}
 
 	// --- Cache lookup ---
-	const FString CacheSignature = MakeCacheSignature(Geometry, Width, Height, FillColor, FillRule, StrokeColor, StrokeWidth, StrokeCap, StrokeJoin);
+	const TArray<uint8> CacheSignature = MakeCacheSignature(Geometry, Width, Height, FillColor, FillRule, StrokeColor, StrokeWidth, StrokeCap, StrokeJoin);
 	const uint64 CacheKey = MakeCacheKey(CacheSignature);
 	if (FPathCacheEntry* Found = GPathCache.Find(CacheKey))
 	{
@@ -811,6 +839,7 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 			++GCacheHits;
 			return Found->Texture.Get();
 		}
+		if (UTexture2D* Texture = Found->Texture.Get()) Texture->RemoveFromRoot();
 		GPathCache.Remove(CacheKey);
 	}
 	++GCacheMisses;
@@ -819,6 +848,7 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 	FBox2D Bounds;
 	if (!ParsePathData(Geometry, SubPaths, Bounds))
 	{
+		if (OutError) *OutError = TEXT("Failed to parse path data");
 		UE_LOG(LogDesign2UMG, Warning, TEXT("DesignPathRasterizer: failed to parse path data"));
 		return nullptr;
 	}
@@ -852,8 +882,9 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 		}
 	}
 
+	MakeCacheRoom(static_cast<int64>(Width) * Height);
 	TArray<FColor> Pixels;
-	Pixels.SetNumZeroed(Width * Height);
+	Pixels.SetNumZeroed(static_cast<int32>(static_cast<int64>(Width) * Height));
 
 	const bool bEvenOdd = FillRule.Equals(TEXT("evenodd"), ESearchCase::IgnoreCase);
 	if (bHasVisibleFill)
@@ -929,7 +960,6 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 	bHasPendingTextureUpdates = true;
 
 	// --- Cache write ---
-	EvictStale();
 	GPathCache.Add(CacheKey, FPathCacheEntry{Texture, CacheSignature});
 
 	return Texture;
@@ -957,3 +987,14 @@ void FDesignPathRasterizer::ClearCache()
 }
 
 
+
+int64 FDesignPathRasterizer::GetCachedPixelCount()
+{
+	int64 Pixels = 0;
+	for (const auto& Pair : GPathCache)
+	{
+		if (const UTexture2D* Texture = Pair.Value.Texture.Get())
+			Pixels += static_cast<int64>(Texture->GetSizeX()) * Texture->GetSizeY();
+	}
+	return Pixels;
+}

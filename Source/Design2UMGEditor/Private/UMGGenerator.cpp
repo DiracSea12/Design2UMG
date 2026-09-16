@@ -646,7 +646,6 @@ bool FUMGGenerator::SaveSingleWidgetBlueprint(
 	// in-memory object - so the per-import root ledgers can be dropped here. Failed saves
 	// return above and keep the roots (old behavior).
 	FProceduralShapeGenerator::ReleaseTransientTextures();
-	Design2UMGEffectMaterialBuilder::ReleaseRootedGeometryMaskInstances();
 
 	UE_LOG(LogDesign2UMG, Log, TEXT("Saved Widget Blueprint at %s"), *FullPath);
 	return true;

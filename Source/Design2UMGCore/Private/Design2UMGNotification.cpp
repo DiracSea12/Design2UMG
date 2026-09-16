@@ -44,24 +44,32 @@ namespace
 	}
 }
 
-void FDesign2UMGNotification::RegisterSuccessHandler(FDesign2UMGSuccessNotificationHandler InHandler)
+FDesign2UMGSuccessNotificationHandler FDesign2UMGNotification::RegisterSuccessHandler(FDesign2UMGSuccessNotificationHandler InHandler)
 {
+	FDesign2UMGSuccessNotificationHandler Previous = MoveTemp(GSuccessHandler);
 	GSuccessHandler = MoveTemp(InHandler);
+	return Previous;
 }
 
-void FDesign2UMGNotification::RegisterWarningHandler(FDesign2UMGMessageNotificationHandler InHandler)
+FDesign2UMGMessageNotificationHandler FDesign2UMGNotification::RegisterWarningHandler(FDesign2UMGMessageNotificationHandler InHandler)
 {
+	FDesign2UMGMessageNotificationHandler Previous = MoveTemp(GWarningHandler);
 	GWarningHandler = MoveTemp(InHandler);
+	return Previous;
 }
 
-void FDesign2UMGNotification::RegisterErrorHandler(FDesign2UMGMessageNotificationHandler InHandler)
+FDesign2UMGMessageNotificationHandler FDesign2UMGNotification::RegisterErrorHandler(FDesign2UMGMessageNotificationHandler InHandler)
 {
+	FDesign2UMGMessageNotificationHandler Previous = MoveTemp(GErrorHandler);
 	GErrorHandler = MoveTemp(InHandler);
+	return Previous;
 }
 
-void FDesign2UMGNotification::RegisterInfoHandler(FDesign2UMGMessageNotificationHandler InHandler)
+FDesign2UMGMessageNotificationHandler FDesign2UMGNotification::RegisterInfoHandler(FDesign2UMGMessageNotificationHandler InHandler)
 {
+	FDesign2UMGMessageNotificationHandler Previous = MoveTemp(GInfoHandler);
 	GInfoHandler = MoveTemp(InHandler);
+	return Previous;
 }
 
 void FDesign2UMGNotification::ResetHandlers()

@@ -6,6 +6,8 @@
 #include "UMGWidgetUtils.h"
 #include "ImageUtils.h"
 #include "ImageCore.h"
+#include "Misc/ScopeExit.h"
+#include "Tests/Design2UMGTestAssetCleanup.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaNestedStretchPaddingRuntimeTest,
@@ -14,23 +16,47 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaNestedStretchPaddingRuntimeTest,
 
 bool FFigmaNestedStretchPaddingRuntimeTest::RunTest(const FString&)
 {
- const FString Json = TEXT(R"JSON({"document":{"id":"root","type":"FRAME","name":"PaddingProbe",
- "absoluteBoundingBox":{"x":0,"y":0,"width":128,"height":80},"children":[
- {"id":"outer","type":"INSTANCE","name":"Outer","componentId":"outer-component",
- "absoluteBoundingBox":{"x":10,"y":10,"width":100,"height":40},"children":[
- {"id":"inner","type":"INSTANCE","name":"Inner","componentId":"inner-component",
+ const FString Content = TEXT(R"JSON({"id":"content","type":"RECTANGLE","name":"Content",
+ "layoutSizingHorizontal":"FILL","layoutSizingVertical":"FIXED",
+ "absoluteBoundingBox":{"x":22,"y":18,"width":76,"height":24},
+ "fills":[{"type":"SOLID","color":{"r":1,"g":1,"b":1},"opacity":1}]})JSON");
+ const auto MakeInner = [&Content](const TCHAR* Id, const TCHAR* Type)
+ {
+  return FString::Printf(TEXT(R"JSON({"id":"%s","type":"%s","name":"Inner",
+ %s
  "absoluteBoundingBox":{"x":10,"y":10,"width":100,"height":40},"layoutMode":"VERTICAL",
- "paddingLeft":12,"paddingRight":12,"paddingTop":8,"paddingBottom":8,"children":[
- {"id":"content","type":"RECTANGLE","name":"Content","layoutSizingHorizontal":"FILL",
- "layoutSizingVertical":"FIXED","absoluteBoundingBox":{"x":22,"y":18,"width":76,"height":24},
- "fills":[{"type":"SOLID","color":{"r":1,"g":1,"b":1},"opacity":1}]}]}]}]}})JSON");
+ "paddingLeft":12,"paddingRight":12,"paddingTop":8,"paddingBottom":8,"children":[%s]})JSON"), Id, Type,
+  FCString::Strcmp(Type, TEXT("INSTANCE")) == 0 ? TEXT("\"componentId\":\"inner-component\",\"mainComponentKey\":\"inner-component\",") : TEXT(""), *Content);
+ };
+ const FString InnerInstance = MakeInner(TEXT("inner"), TEXT("INSTANCE"));
+ const auto MakeOuter = [&InnerInstance](const TCHAR* Id, const TCHAR* Type)
+ {
+  return FString::Printf(TEXT(R"JSON({"id":"%s","type":"%s","name":"Outer",
+ %s
+ "absoluteBoundingBox":{"x":10,"y":10,"width":100,"height":40},"children":[%s]})JSON"), Id, Type,
+  FCString::Strcmp(Type, TEXT("INSTANCE")) == 0 ? TEXT("\"componentId\":\"outer-component\",\"mainComponentKey\":\"outer-component\",") : TEXT(""), *InnerInstance);
+ };
+ const FString Json = FString::Printf(TEXT(R"JSON({"fileKey":"padding-runtime-fixture",
+ "document":{"id":"root","type":"FRAME","name":"PaddingProbe",
+ "absoluteBoundingBox":{"x":0,"y":0,"width":128,"height":80},"children":[%s]},
+ "design2umgComponentDependencies":{"schemaVersion":1,"errors":[],
+ "instances":{"outer":{"id":"outer-component","key":"outer-component"},
+ "inner":{"id":"inner-component","key":"inner-component"}},
+ "definitions":[
+ {"id":"inner-component","key":"inner-component","document":%s},
+ {"id":"outer-component","key":"outer-component","document":%s}]}})JSON"),
+ *MakeOuter(TEXT("outer"), TEXT("INSTANCE")),
+ *MakeInner(TEXT("inner-component"), TEXT("COMPONENT")),
+ *MakeOuter(TEXT("outer-component"), TEXT("COMPONENT")));
+
  auto CheckRuntime = [this](const FString& CaseJson, int32 OutsideStrokeInset)
  {
  FDesignDocument Document;
  if (!TestTrue(TEXT("Source fixture parses"), FFigmaParser::ParseDocument(CaseJson, Document))) return false;
  const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
- UWidgetBlueprint* Blueprint = FUMGGenerator::GenerateWidgetBlueprint(Data,
-  TEXT("/Game/Design2UMG/Automation/PaddingProbe_") + FGuid::NewGuid().ToString(EGuidFormats::Digits));
+ const FString OutputPath = TEXT("/Game/Design2UMG/Automation/PaddingProbe_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+ ON_SCOPE_EXIT { Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(OutputPath); };
+ UWidgetBlueprint* Blueprint = FUMGGenerator::GenerateWidgetBlueprint(Data, OutputPath);
  if (!TestNotNull(TEXT("Native widget blueprint generated"), Blueprint)) return false;
  TArray<uint8> Png;
  FIntPoint Size;

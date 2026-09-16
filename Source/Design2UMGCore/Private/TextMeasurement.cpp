@@ -56,15 +56,16 @@ bool TextMeasurement::ShouldApplyExplicitLineHeight(const TSharedPtr<FDesignNode
 
 FResolvedTextLayoutForUMG TextMeasurementInternal::ResolveTextLayoutForUMG(
 	const TSharedPtr<FDesignNode>& Node,
-	const float ParentContentWidth)
+	const float ParentContentWidth,
+	const FDesign2UMGFontMappings* FontMappings)
 {
 	const float WrapTextAt = TextMeasurement::ResolveTextWrapAt(Node, ParentContentWidth);
-	return RuntimeProbeSizing::ResolveTextLayoutForUMGInternal(Node, WrapTextAt);
+	return RuntimeProbeSizing::ResolveTextLayoutForUMGInternal(Node, WrapTextAt, FontMappings);
 }
 
-float TextMeasurement::ResolveTextFontSizeForUMG(const TSharedPtr<FDesignNode>& Node)
+float TextMeasurement::ResolveTextFontSizeForUMG(const TSharedPtr<FDesignNode>& Node, const FDesign2UMGFontMappings* FontMappings)
 {
-	return TextMeasurementInternal::ResolveTextLayoutForUMG(Node).FontSize;
+	return TextMeasurementInternal::ResolveTextLayoutForUMG(Node, 0.0f, FontMappings).FontSize;
 }
 
 float TextMeasurement::ResolveTextWrapAt(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth)
@@ -100,7 +101,8 @@ namespace
 {
 	FVector2D MeasureResolvedTextNodeDesiredSize(
 		const TSharedPtr<FDesignNode>& Node,
-		const FResolvedTextLayoutForUMG& ResolvedLayout)
+		const FResolvedTextLayoutForUMG& ResolvedLayout,
+		const FDesign2UMGFontMappings* FontMappings)
 	{
 		return RuntimeProbe::MeasureUMGTextBlockDesiredSize(
 			Node,
@@ -108,25 +110,25 @@ namespace
 			TextMeasurement::PrepareRuntimeTextContent(Node->Text.Content),
 			ResolvedLayout.WrapTextAt,
 			TextMeasurement::ShouldAutoWrapText(Node),
-			ResolvedLayout.LineHeightPercentage);
+			ResolvedLayout.LineHeightPercentage, FontMappings);
 	}
 }
 
-FVector2D TextMeasurement::MeasureTextNodeSize(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth)
+FVector2D TextMeasurement::MeasureTextNodeSize(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth, const FDesign2UMGFontMappings* FontMappings)
 {
 	if (!Node.IsValid())
 	{
 		return FVector2D::ZeroVector;
 	}
 
-	const FResolvedTextLayoutForUMG ResolvedLayout = TextMeasurementInternal::ResolveTextLayoutForUMG(Node, ParentContentWidth);
+	const FResolvedTextLayoutForUMG ResolvedLayout = TextMeasurementInternal::ResolveTextLayoutForUMG(Node, ParentContentWidth, FontMappings);
 	const float AppliedFontSize = ResolvedLayout.FontSize;
 	if (!FMath::IsFinite(AppliedFontSize) || AppliedFontSize <= 0.0f)
 	{
 		return FVector2D::ZeroVector;
 	}
 	// FontMeasure omits tracking; measure the shaped widget for every line count.
-	const FVector2D MeasuredSize = MeasureResolvedTextNodeDesiredSize(Node, ResolvedLayout);
+	const FVector2D MeasuredSize = MeasureResolvedTextNodeDesiredSize(Node, ResolvedLayout, FontMappings);
 	if (MeasuredSize.X > 0.0f && MeasuredSize.Y > 0.0f)
 	{
 		return MeasuredSize;

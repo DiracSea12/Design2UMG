@@ -60,7 +60,14 @@ namespace DesignImportPipeline
 				FPackageName::GetLongPackagePath(TargetPackage), &GenerationSettings, &Output, &Navigation, WBP);
 			Result.bSucceeded = Updated && FUMGGenerator::SaveWidgetBlueprint(Updated, &Output, &Navigation);
 			Result.UpdatedBlueprint = Result.bSucceeded ? Updated : nullptr;
-			Result.ComponentMappingDiagnostics = MoveTemp(Output.MappingDiagnostics);
+			// Batch generation also carries the page ownership merge events. Route those
+			// back to the reimport channel rather than hiding them among mapping hits.
+			for (FDesign2UMGMappingDiagnostic& Diagnostic : Output.MappingDiagnostics)
+			{
+				auto& Destination = Diagnostic.Kind.StartsWith(TEXT("reimport_"))
+					? Result.Diagnostics : Result.ComponentMappingDiagnostics;
+				Destination.Add(MoveTemp(Diagnostic));
+			}
 			Result.bFullConflict = Result.ComponentMappingDiagnostics.ContainsByPredicate(
 				[](const FDesign2UMGMappingDiagnostic& Diagnostic) { return Diagnostic.Kind == TEXT("component_asset_conflict"); });
 			AddReimportDiagnostic(Result.Diagnostics, Result.bSucceeded ? TEXT("reimport_completed") : TEXT("reimport_component_batch_failed"),

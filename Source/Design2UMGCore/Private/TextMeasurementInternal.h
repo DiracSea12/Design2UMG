@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "FontResolver.h"
 
 struct FDesignNode;
 
@@ -23,7 +24,8 @@ namespace TextMeasurementInternal
 {
 	FResolvedTextLayoutForUMG ResolveTextLayoutForUMG(
 		const TSharedPtr<FDesignNode>& Node,
-		float ParentContentWidth = 0.0f);
+		float ParentContentWidth = 0.0f,
+		const FDesign2UMGFontMappings* FontMappings = nullptr);
 }
 
 namespace RuntimeProbe
@@ -35,18 +37,21 @@ namespace RuntimeProbe
 		const FString& FontPostScriptName,
 		const FString& FontWeight,
 		const FString& FontStyle = FString(),
-		int32 LetterSpacing = 0);
+		int32 LetterSpacing = 0,
+		const FDesign2UMGFontMappings* FontMappings = nullptr);
 	FVector2D MeasureUMGTextBlockDesiredSize(
 		const TSharedPtr<FDesignNode>& Node,
 		float FontSize,
 		const FString& Text,
 		float WrapTextAt = 0.0f,
 		bool bAutoWrapText = false,
-		TOptional<float> LineHeightPercentageOverride = {});
+		TOptional<float> LineHeightPercentageOverride = {},
+		const FDesign2UMGFontMappings* FontMappings = nullptr);
 }
 namespace RuntimeProbeSizing
 {
 	FResolvedTextLayoutForUMG ResolveTextLayoutForUMGInternal(
 		const TSharedPtr<FDesignNode>& Node,
-		float WrapTextAt);
+		float WrapTextAt,
+		const FDesign2UMGFontMappings* FontMappings = nullptr);
 }

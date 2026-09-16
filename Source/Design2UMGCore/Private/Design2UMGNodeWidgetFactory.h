@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "FontResolver.h"
 #include "DesignSchema.h"
 #include "UMGSchema.h"
 
@@ -15,6 +16,7 @@ namespace Design2UMGNodeWidgetFactory
 {
 	struct FBuildArgs
 	{
+		const FDesign2UMGFontMappings* FontMappings = nullptr;
 		const TSet<FString>* ExistingWarnedFamilies = nullptr;
 		const Design2UMGTextWidgetBuilder::FIconFontSettingsSnapshot* IconFontSettingsSnapshot = nullptr;
 	};

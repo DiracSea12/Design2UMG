@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "FontResolver.h"
 #include "DesignSchema.h"
 #include "UMGSchema.h"
 
@@ -16,7 +17,10 @@ namespace Design2UMGConverterInternal
 		FFlowChildPreResolutionResolver(
 			const FDesignDocument& InDocument,
 			const TMap<FString, FString>& InThemeContext,
-			TSharedPtr<FRefExpansionCache> InExpansionCache = nullptr);
+			TSharedPtr<FRefExpansionCache> InExpansionCache = nullptr,
+			const FDesign2UMGFontMappings* InFontMappings = nullptr);
+
+		const FDesign2UMGFontMappings* GetFontMappings() const { return FontMappings; }
 
 		TSharedPtr<FDesignNode> ExpandRef(const TSharedPtr<FDesignNode>& Node) const;
 		TSharedPtr<FDesignNode> ResolveExpandedChild(const TSharedPtr<FDesignNode>& Child, bool bPreComputeFitContent) const;
@@ -32,5 +36,6 @@ namespace Design2UMGConverterInternal
 		const FDesignDocument& Document;
 		const TMap<FString, FString>& ThemeContext;
 		TSharedPtr<FRefExpansionCache> ExpansionCache;
+		const FDesign2UMGFontMappings* FontMappings;
 	};
 }

@@ -23,7 +23,7 @@
 namespace
 {
 	using DesignRemoteImageImporterInternal::FImagePayloadIO;
-	using DesignRemoteImageImporterInternal::FImageResourceLimits;
+	using DesignImageResources::FImageResourceLimits;
 	using DesignRemoteImageImporterInternal::FResolveContext;
 	using DesignRemoteImageImporterInternal::FUrlDownloadResult;
 
@@ -863,7 +863,7 @@ void FDesignRemoteImageImporter::ResolveTransientTextures(const FUMGWidgetNode& 
 	TSet<FString> Urls;
 	CollectRemoteUrls(RootNode, Urls);
 	const FImageResourceLimits ImageLimits;
-	DesignRemoteImageImporterInternal::FImageOperationBudget OperationBudget(ImageLimits);
+	DesignImageResources::FImageOperationBudget OperationBudget(ImageLimits);
 	bool bTextureResourceUpdatePending = false;
 	FString LimitError;
 	if (!FImagePayloadIO::ValidateUrlCount(Urls.Num(), ImageLimits, LimitError))

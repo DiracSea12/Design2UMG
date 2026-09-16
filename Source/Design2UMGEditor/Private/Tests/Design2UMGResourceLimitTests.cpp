@@ -17,8 +17,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDesign2UMGRemoteImageResourceLimitsTest::RunTest(const FString& Parameters)
 {
 	using DesignRemoteImageImporterInternal::FImagePayloadIO;
-	using DesignRemoteImageImporterInternal::FImageOperationBudget;
-	using DesignRemoteImageImporterInternal::FImageResourceLimits;
+	using DesignImageResources::FImageOperationBudget;
+	using DesignImageResources::FImageResourceLimits;
 
 	FImageResourceLimits Limits;
 	Limits.MaxCompressedBytes = 8;

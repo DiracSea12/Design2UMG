@@ -3,6 +3,7 @@
 #include "UMGImageCropUtils.h"
 
 #include "ProceduralShapeGenerator.h"
+#include "DesignImageResourceLimits.h"
 #include "UMGPropertyKeys.h"
 #include "UMGWidgetNodeAccess.h"
 
@@ -40,8 +41,12 @@ bool UMGImageCropUtils::TryBuildCropRequest(const FUMGWidgetNode& Node, FImageCr
 
 	const float CropWidth = Node.WidgetStyle.WidthOverride.Get(64.0f);
 	const float CropHeight = Node.WidgetStyle.HeightOverride.Get(64.0f);
-	OutRequest.OutputWidth = FMath::Max(1, FMath::RoundToInt(CropWidth));
-	OutRequest.OutputHeight = FMath::Max(1, FMath::RoundToInt(CropHeight));
+	FIntPoint OutputSize;
+	// An invalid pixel size remains zero. UV-only cropping needs no raster; the
+	// affine materialization path reports this invalid size before allocating.
+	DesignImageResources::FImageResourceLimits().TryGetPixelSize(CropWidth, CropHeight, OutputSize);
+	OutRequest.OutputWidth = OutputSize.X;
+	OutRequest.OutputHeight = OutputSize.Y;
 	return true;
 }
 

@@ -14,6 +14,7 @@ namespace
 	{
 		int32 EstimateDepth = 0;
 		int32 PrecomputeDepth = 0;
+		const FDesign2UMGFontMappings* FontMappings = nullptr;
 	};
 
 	bool ShouldSkipNodeForSizing(const TSharedPtr<FDesignNode>& Node)
@@ -108,7 +109,7 @@ namespace
 				&& Node->Text.FontSize > 0
 				&& !Node->Text.Content.IsEmpty())
 			{
-				const FVector2D Measured = TextMeasurement::MeasureTextNodeSize(Node, ParentContentWidth);
+				const FVector2D Measured = TextMeasurement::MeasureTextNodeSize(Node, ParentContentWidth, State.FontMappings);
 				MergeEstimatedDimension(W, Node->Transform.Width, Measured.X, bNeedWidthEstimate);
 				MergeEstimatedDimension(H, Node->Transform.Height, Measured.Y, bNeedHeightEstimate);
 			}
@@ -314,7 +315,7 @@ namespace
 				&& Node->Text.FontSize > 0
 				&& !Node->Text.Content.IsEmpty())
 			{
-				const FVector2D Measured = TextMeasurement::MeasureTextNodeSize(Node, ParentContentWidth);
+				const FVector2D Measured = TextMeasurement::MeasureTextNodeSize(Node, ParentContentWidth, State.FontMappings);
 				MergeEstimatedDimension(W, Node->Transform.Width, Measured.X);
 				MergeEstimatedDimension(H, Node->Transform.Height, Measured.Y);
 			}
@@ -397,23 +398,27 @@ namespace
 	}
 }
 
-FVector2D SizeEstimator::EstimateNodeSize(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth)
+FVector2D SizeEstimator::EstimateNodeSize(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth, const FDesign2UMGFontMappings* FontMappings)
 {
 	FSizeEstimatorState State;
+	State.FontMappings = FontMappings;
 	return EstimateNodeSizeImpl(Node, ParentContentWidth, State);
 }
 
-FVector2D SizeEstimator::EstimateContentSize(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth)
+FVector2D SizeEstimator::EstimateContentSize(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth, const FDesign2UMGFontMappings* FontMappings)
 {
 	FSizeEstimatorState State;
+	State.FontMappings = FontMappings;
 	return EstimateContentSizeImpl(Node, ParentContentWidth, State);
 }
 
 FVector2D SizeEstimator::PromoteFitContentSizes(
 	const TSharedPtr<FDesignNode>& Node,
 	const FDesignDocument& Doc,
-	FRefExpansionResolver RefResolver)
+	FRefExpansionResolver RefResolver,
+	const FDesign2UMGFontMappings* FontMappings)
 {
 	FSizeEstimatorState State;
+	State.FontMappings = FontMappings;
 	return PromoteFitContentSizesImpl(Node, Doc, 0.0f, State, &RefResolver);
 }

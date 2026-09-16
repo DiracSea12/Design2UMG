@@ -305,7 +305,7 @@ namespace
 
 		const float ChildContentWidth = SizeEstimator::ComputeChildContentWidthHint(ParentNode, Child, 0.0f);
 		const TSharedPtr<FDesignNode> EstimateChild = PreResolutionResolver.ResolveExpandedChild(Child, false);
-		const FVector2D Estimate = SizeEstimator::EstimateNodeSize(EstimateChild, ChildContentWidth);
+		const FVector2D Estimate = SizeEstimator::EstimateNodeSize(EstimateChild, ChildContentWidth, PreResolutionResolver.GetFontMappings());
 		SizeEstimator::PromoteFitNodeDimension(Child, true, Estimate.X);
 		SizeEstimator::PromoteFitNodeDimension(Child, false, Estimate.Y);
 		if (Estimate.X > 0.0f || Estimate.Y > 0.0f)
@@ -321,10 +321,12 @@ namespace Design2UMGConverterInternal
 	FFlowChildPreResolutionResolver::FFlowChildPreResolutionResolver(
 		const FDesignDocument& InDocument,
 		const TMap<FString, FString>& InThemeContext,
-		TSharedPtr<FRefExpansionCache> InExpansionCache)
+		TSharedPtr<FRefExpansionCache> InExpansionCache,
+		const FDesign2UMGFontMappings* InFontMappings)
 		: Document(InDocument)
 		, ThemeContext(InThemeContext)
 		, ExpansionCache(InExpansionCache.IsValid() ? MoveTemp(InExpansionCache) : MakeShared<FRefExpansionCache>())
+		, FontMappings(InFontMappings)
 	{
 	}
 
@@ -418,7 +420,7 @@ namespace Design2UMGConverterInternal
 			// available parent width), so reuse the Expanded snapshot but let
 			// each caller measure it for its own context.
 			TSharedPtr<FDesignNode> WorkingExpanded = MakeWorkingCopy(Child);
-			SizeEstimator::PromoteFitContentSizes(WorkingExpanded, Document, RefResolver);
+			SizeEstimator::PromoteFitContentSizes(WorkingExpanded, Document, RefResolver, FontMappings);
 			MarkFitContentPrecomputed(Child);
 			return WorkingExpanded;
 		}

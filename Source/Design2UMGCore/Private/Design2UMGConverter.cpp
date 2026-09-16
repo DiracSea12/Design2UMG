@@ -44,6 +44,7 @@ namespace Design2UMGConverterPrivate
 	FConversionSettingsSnapshot BuildConversionSettingsSnapshot(const FDesign2UMGConversionSettings& Settings)
 	{
 		FConversionSettingsSnapshot Snapshot;
+		Snapshot.FontMappings = Settings.ExplicitFontMappings;
 		Snapshot.PlaceholderHatchStyle = Settings.PlaceholderHatchStyle;
 		Snapshot.VisualMapperOptions.LuminosityFitOpacityCap = Settings.LuminosityFitOpacityCap;
 		Snapshot.IconFont.IconFontAssetPaths = Settings.IconFontAssetPaths;
@@ -215,7 +216,8 @@ namespace Design2UMGConverterPrivate
 			return Design2UMGConverterInternal::FFlowChildPreResolutionResolver(
 				Context.State.Document,
 				Context.ThemeContext,
-				Context.State.RefExpansionCache);
+				Context.State.RefExpansionCache,
+				&Context.State.SettingsSnapshot.FontMappings);
 		}
 
 		FUMGWidgetNode ConvertExpandedRefNode(
@@ -237,7 +239,7 @@ namespace Design2UMGConverterPrivate
 					PreResolutionResolver.MarkFitContentPrecomputed(RefNode);
 					return ExpandedRef;
 				};
-			SizeEstimator::PromoteFitContentSizes(Expanded, ActiveContext.State.Document, RefResolver);
+			SizeEstimator::PromoteFitContentSizes(Expanded, ActiveContext.State.Document, RefResolver, &ActiveContext.State.SettingsSnapshot.FontMappings);
 			PreResolutionResolver.MarkFitContentPrecomputed(Node);
 			return ConvertNode(Expanded, ActiveContext, ParentLayout);
 		}
@@ -475,6 +477,7 @@ namespace Design2UMGConverterPrivate
 			}
 
 			Design2UMGNodeWidgetFactory::FBuildArgs BuildArgs;
+			BuildArgs.FontMappings = &State.SettingsSnapshot.FontMappings;
 			BuildArgs.ExistingWarnedFamilies = &State.WarnedFamilies;
 			BuildArgs.IconFontSettingsSnapshot = &State.SettingsSnapshot.IconFont;
 
@@ -525,6 +528,7 @@ FDesign2UMGConversionSettings FDesign2UMGConversionSettings::FromSettings(const 
 		return Settings;
 	}
 
+	Settings.ExplicitFontMappings = SourceSettings->ExplicitFontMappings;
 	Settings.PlaceholderHatchStyle = SourceSettings->ResolvePlaceholderHatchStyle();
 	Settings.LuminosityFitOpacityCap = SourceSettings->ResolveLuminosityFitOpacityCap();
 	Settings.DefaultIconFontAssetPath = SourceSettings->DefaultIconFontAssetPath;
@@ -636,7 +640,8 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 	const Design2UMGConverterInternal::FFlowChildPreResolutionResolver RootPreResolutionResolver(
 		Document,
 		RootThemeContext,
-		State.RefExpansionCache);
+		State.RefExpansionCache,
+		&State.SettingsSnapshot.FontMappings);
 	const auto RefResolver =
 		[&RootPreResolutionResolver](const TSharedPtr<FDesignNode>& RefNode)
 		{
@@ -646,7 +651,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 		};
 	for (const auto& Child : VisibleChildren)
 	{
-		SizeEstimator::PromoteFitContentSizes(Child, Document, RefResolver);
+		SizeEstimator::PromoteFitContentSizes(Child, Document, RefResolver, &State.SettingsSnapshot.FontMappings);
 	}
 
 	TArray<FUMGWidgetNode> RenderWidgets;

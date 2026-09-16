@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "ProceduralShapeGeneratorAssets.h"
+#include "DesignImageResourceLimits.h"
 
 #include "Design2UMGLog.h"
 #include "Engine/Texture2D.h"
@@ -157,20 +158,20 @@ namespace
 		}
 	}
 
-	void GaussianBlurAlpha(TArray<float>& Alpha, int32 Width, int32 Height, float Sigma)
+	void GaussianBlurAlpha(TArray<float>& Alpha, int32 Width, int32 Height, float Sigma, int32 KernelRadius)
 	{
-		if (Sigma < 0.5f)
+		if (KernelRadius == 0)
 		{
 			return;
 		}
 
-		const int32 KernelRadius = FMath::CeilToInt(Sigma * 3.0f);
 		TArray<float> Kernel;
 		Kernel.SetNumUninitialized(KernelRadius * 2 + 1);
 		float Sum = 0.0f;
 		for (int32 Index = -KernelRadius; Index <= KernelRadius; ++Index)
 		{
-			const float Value = FMath::Exp(-(Index * Index) / (2.0f * Sigma * Sigma));
+			const float Offset = static_cast<float>(Index);
+			const float Value = FMath::Exp(-(Offset * Offset) / (2.0f * Sigma * Sigma));
 			Kernel[Index + KernelRadius] = Value;
 			Sum += Value;
 		}
@@ -214,6 +215,18 @@ namespace
 
 namespace ProceduralShapeGeneratorAssets
 {
+	void ReleaseTransientTexture(UTexture2D* Texture)
+	{
+		// Only release resources owned by this generator, never an imported source texture.
+		const int32 Index = GRootedTextures.IndexOfByPredicate(
+			[Texture](const TWeakObjectPtr<UTexture2D>& Entry) { return Entry.Get() == Texture; });
+		if (Texture && Index != INDEX_NONE)
+		{
+			Texture->RemoveFromRoot();
+			GRootedTextures.RemoveAtSwap(Index);
+		}
+	}
+
 	void ReleaseTransientTextures()
 	{
 		FlushPendingTextureUpdates();
@@ -247,6 +260,11 @@ namespace ProceduralShapeGeneratorAssets
 
 	UTexture2D* CreateTransientTexture(int32 Width, int32 Height, UObject* Outer)
 	{
+		if (!DesignImageResources::FImageResourceLimits().AllowsDimensions(Width, Height))
+		{
+			UE_LOG(LogDesign2UMG, Warning, TEXT("Invalid or excessive generated raster dimensions: %dx%d"), Width, Height);
+			return nullptr;
+		}
 		UTexture2D* Texture = UTexture2D::CreateTransient(Width, Height, PF_B8G8R8A8, NAME_None);
 		if (Texture)
 		{
@@ -611,6 +629,24 @@ namespace ProceduralShapeGeneratorAssets
 		});
 	}
 
+	bool TryGetShadowKernelRadius(int32 Width, int32 Height, float BlurRadius, int32& OutRadius)
+	{
+		OutRadius = 0;
+		constexpr int32 MaxKernelRadius = 4095; // 8191 float coefficients, under 32 KiB.
+		constexpr int64 MaxFilterSamples = 1ll << 30;
+		if (!DesignImageResources::FImageResourceLimits().AllowsDimensions(Width, Height)
+			|| !FMath::IsFinite(BlurRadius) || BlurRadius < 0.0f) return false;
+		const float Sigma = BlurRadius * 0.5f;
+		if (Sigma < 0.5f) return true;
+		// Reject before ceil-to-int, coefficient allocation, or the two raster sweeps.
+		if (Sigma > MaxKernelRadius / 3.0f) return false;
+		const int32 Radius = FMath::CeilToInt(Sigma * 3.0f);
+		const int64 SamplesPerPixel = 2ll * (2ll * Radius + 1);
+		if (static_cast<int64>(Width) * Height > MaxFilterSamples / SamplesPerPixel) return false;
+		OutRadius = Radius;
+		return true;
+	}
+
 	UTexture2D* GenerateBoxShadow(
 		int32 Width,
 		int32 Height,
@@ -648,6 +684,17 @@ namespace ProceduralShapeGeneratorAssets
 		UObject* Outer,
 		bool bEllipse)
 	{
+		if (!DesignImageResources::FImageResourceLimits().AllowsDimensions(Width, Height))
+		{
+			UE_LOG(LogDesign2UMG, Warning, TEXT("Invalid or excessive shadow mask dimensions: %dx%d"), Width, Height);
+			return nullptr;
+		}
+		int32 KernelRadius;
+		if (!TryGetShadowKernelRadius(Width, Height, BlurRadius, KernelRadius))
+		{
+			UE_LOG(LogDesign2UMG, Warning, TEXT("Invalid or excessive CPU shadow blur workload: %dx%d blur=%g"), Width, Height, BlurRadius);
+			return nullptr;
+		}
 		TArray<float> Alpha;
 		const bool bHasExplicitBlurPadding = BlurPadding >= 0.0f;
 		if (!bHasExplicitBlurPadding)
@@ -700,7 +747,7 @@ namespace ProceduralShapeGeneratorAssets
 			}
 		}
 
-		GaussianBlurAlpha(Alpha, Width, Height, BlurRadius * 0.5f);
+		GaussianBlurAlpha(Alpha, Width, Height, BlurRadius * 0.5f, KernelRadius);
 
 		const FColor Shadow = ShadowColor.ToFColor(true);
 		return GenerateShapeTexture(Width, Height, Outer, [&Alpha, Width, Shadow](int32 X, int32 Y)
@@ -743,8 +790,15 @@ namespace ProceduralShapeGeneratorAssets
 		UObject* Outer)
 	{
 		constexpr int32 PlaceholderSupersample = 2;
-		const int32 RasterWidth = FMath::Max(1, Width * PlaceholderSupersample);
-		const int32 RasterHeight = FMath::Max(1, Height * PlaceholderSupersample);
+		const int64 RasterWidth64 = static_cast<int64>(Width) * PlaceholderSupersample;
+		const int64 RasterHeight64 = static_cast<int64>(Height) * PlaceholderSupersample;
+		if (!DesignImageResources::FImageResourceLimits().AllowsDimensions(RasterWidth64, RasterHeight64))
+		{
+			UE_LOG(LogDesign2UMG, Warning, TEXT("Invalid or excessive supersampled placeholder dimensions"));
+			return nullptr;
+		}
+		const int32 RasterWidth = static_cast<int32>(RasterWidth64);
+		const int32 RasterHeight = static_cast<int32>(RasterHeight64);
 		const int32 RasterInsetPx = InsetPx * PlaceholderSupersample;
 		const int32 RasterStripeWidthPx = FMath::Max(1, StripeWidthPx * PlaceholderSupersample);
 
