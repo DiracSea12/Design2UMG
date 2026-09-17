@@ -15,6 +15,8 @@
 #include "ImageUtils.h"
 #include "ImageCore.h"
 #include "UMGGenerator.h"
+#include "GeneratedAssetLifecycle.h"
+#include "Tests/Design2UMGTestAssetCleanup.h"
 #include "UMGWidgetUtils.h"
 #include "Tests/Design2UMGMappingQAWidget.h"
 #include "Automation/Design2UMGAutomationStructureSnapshot.h"
@@ -33,6 +35,7 @@
 #include "Editor/Transactor.h"
 #include "WidgetBlueprint.h"
 #include "Misc/FileHelper.h"
+#include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonSerializer.h"
 #include "Dom/JsonObject.h"
@@ -407,6 +410,10 @@ bool FComponentBlueprintReimportTest::RunTest(const FString&)
 	AddExpectedError(TEXT("GenerationManifest: failed to write manifest"), EAutomationExpectedErrorFlags::Contains, 1);
 	const FDesignReimportResult SaveFailure = DesignImportPipeline::Reimport(FailedUpdate, Request);
 	TestFalse(TEXT("Sidecar save failure fails the complete batch"), SaveFailure.bSucceeded);
+	TestTrue(TEXT("Batch did not commit"), SaveFailure.Commit.Status == EDesign2UMGCommitStatus::NotCommitted);
+	TestTrue(TEXT("Asset files restored"), SaveFailure.Commit.Asset == EDesign2UMGFileState::Restored);
+	TestTrue(TEXT("Manifests restored"), SaveFailure.Commit.Manifest == EDesign2UMGFileState::Restored);
+	TestTrue(TEXT("Memory restored independently"), SaveFailure.Commit.Memory == EDesign2UMGMemoryState::Restored);
 	TestEqual(TEXT("Failed batch reimport leaves no committed undo entry"),
 		GEditor->Trans->GetQueueLength() - GEditor->Trans->GetUndoCount(), UndoEntriesBeforeSaveFailure);
 	TestEqual(TEXT("Failed batch is not available for redo"), GEditor->Trans->GetUndoCount(), UndoCountBeforeSaveFailure);
@@ -1238,7 +1245,7 @@ bool FComponentPageUserContentTest::RunTest(const FString&)
 	Event->CreateNewGuid();
 	Graph->AddNode(Event);
 	Event->AllocateDefaultPins();
-	if (!TestTrue(TEXT("Save user changes independently of generator manifest"), FUMGGenerator::SaveWidgetBlueprint(Blueprint))) return false;
+	if (!TestTrue(TEXT("Save user changes independently of generator manifest"), FUMGGenerator::SaveWidgetBlueprint(Blueprint).IsSuccess())) return false;
 	FDesignDocument Updated;
 	FFigmaParser::ParseDocument(MakeComponentImportJson(TEXT("AfterUserEdit")), Updated);
 	UWidgetBlueprint* Result = FUMGGenerator::GenerateWidgetBlueprint(
@@ -1339,12 +1346,36 @@ bool FComponentMappingFailureFallbackTest::RunTest(const FString&)
 	TestTrue(TEXT("First instance content preserved"), Texts.Contains(TEXT("Confirm")));
 	TestTrue(TEXT("Second instance content preserved"), Texts.Contains(TEXT("Cancel")));
 	Runtime->ReleaseSlateResources(true);
+	// Initial import may fall back, but a failed mapped target cannot commit a reimport.
+	const FString Package = Blueprint->GetOutermost()->GetName();
+	const FString AssetPath = FPackageName::LongPackageNameToFilename(Package, FPackageName::GetAssetPackageExtension());
+	const FString SidecarPath = Design2UMGGenerationManifest::BuildSidecarPathForAsset(Package);
+	TArray<uint8> AssetBefore, SidecarBefore;
+	if (!TestTrue(TEXT("Read saved asset"), FFileHelper::LoadFileToArray(AssetBefore, *AssetPath))
+		|| !TestTrue(TEXT("Read saved manifest"), FFileHelper::LoadFileToArray(SidecarBefore, *SidecarPath))) return false;
+	const TArray<UWidget*> OriginalWidgets = Blueprint->GetAllSourceWidgets();
 	FDesignDocument Updated;
 	FFigmaParser::ParseDocument(MakeSource(TEXT("Updated fallback")), Updated);
-	Blueprint = FUMGGenerator::GenerateWidgetBlueprint(
+	AddExpectedError(TEXT("Page ownership merge failed"), EAutomationExpectedErrorFlags::Contains, 1);
+	UWidgetBlueprint* Reimported = FUMGGenerator::GenerateWidgetBlueprint(
 		FDesign2UMGConverter::Convert(Updated, FDesign2UMGConversionSettings::Defaults()), Folder, &Settings, &Output);
-	if (!TestNotNull(TEXT("Mapping fallback reimports"), Blueprint)) return false;
-	TestTrue(TEXT("Fallback text updates"), FindText(Blueprint->WidgetTree).Contains(TEXT("Updated fallback")));
+	TestNull(TEXT("Invalid mapped target fails the component batch reimport"), Reimported);
+	TestTrue(TEXT("Class failure reaches batch diagnostics"), Output.MappingDiagnostics.ContainsByPredicate(
+		[](const FDesign2UMGMappingDiagnostic& D) { return D.Kind == TEXT("mapping_class_unavailable"); }));
+	TestFalse(TEXT("Failed batch has no completion or replacement success"), Output.MappingDiagnostics.ContainsByPredicate(
+		[](const FDesign2UMGMappingDiagnostic& D) { return D.Kind == TEXT("reimport_kind_changed") || D.Kind == TEXT("reimport_completed"); }));
+	for (UWidget* Widget : OriginalWidgets)
+	{
+		TestTrue(TEXT("Original widget identity preserved"), Blueprint->WidgetTree->FindWidget(Widget->GetFName()) == Widget);
+	}
+	TestEqual(TEXT("No orphan widgets after failed batch"), Blueprint->GetAllSourceWidgets().Num(), OriginalWidgets.Num());
+	TestTrue(TEXT("Previous fallback text retained"), FindText(Blueprint->WidgetTree).Contains(TEXT("Cancel")));
+	TestFalse(TEXT("Failed reimport did not apply changed text"), FindText(Blueprint->WidgetTree).Contains(TEXT("Updated fallback")));
+	TArray<uint8> AssetAfter, SidecarAfter;
+	TestTrue(TEXT("Saved asset remains readable"), FFileHelper::LoadFileToArray(AssetAfter, *AssetPath));
+	TestTrue(TEXT("Saved manifest remains readable"), FFileHelper::LoadFileToArray(SidecarAfter, *SidecarPath));
+	TestTrue(TEXT("Asset bytes unchanged"), AssetAfter == AssetBefore);
+	TestTrue(TEXT("Manifest bytes unchanged"), SidecarAfter == SidecarBefore);
 	return true;
 }
 
@@ -1386,7 +1417,7 @@ bool FComponentRemovedSlotUserContentTest::RunTest(const FString&)
 	Manual->SetText(FText::FromString(TEXT("Keep this user content")));
 	Instances[0]->SetContentForSlot(RemovedSlot, Manual);
 	Blueprint->WidgetVariableNameToGuidMap.Add(Manual->GetFName(), FGuid::NewGuid());
-	if (!TestTrue(TEXT("User content saved"), FUMGGenerator::SaveWidgetBlueprint(Blueprint))) return false;
+	if (!TestTrue(TEXT("User content saved"), FUMGGenerator::SaveWidgetBlueprint(Blueprint).IsSuccess())) return false;
 	const FString ChildPackage = Output.Components[0].Blueprint->GetOutermost()->GetName();
 	const FString ChildHash = Design2UMGGenerationManifest::ComputeSavedAssetHash(ChildPackage);
 	const FString ParentHash = Design2UMGGenerationManifest::ComputeSavedAssetHash(Blueprint->GetOutermost()->GetName());
@@ -1408,7 +1439,7 @@ bool FComponentRemovedSlotUserContentTest::RunTest(const FString&)
 	TestEqual(TEXT("Child asset untouched"), Design2UMGGenerationManifest::ComputeSavedAssetHash(ChildPackage), ChildHash);
 	TestEqual(TEXT("Parent asset untouched"), Design2UMGGenerationManifest::ComputeSavedAssetHash(Blueprint->GetOutermost()->GetName()), ParentHash);
 	TestTrue(TEXT("Old binding still present"), Instances[0]->GetContentForSlot(RemovedSlot) == Manual);
-	TestTrue(TEXT("Saving after rejected update retains valid old slot"), FUMGGenerator::SaveWidgetBlueprint(Blueprint));
+	TestTrue(TEXT("Saving after rejected update retains valid old slot"), FUMGGenerator::SaveWidgetBlueprint(Blueprint).IsSuccess());
 	UUserWidget* Runtime = NewObject<UUserWidget>(GEditor->GetEditorWorldContext().World(), Blueprint->GeneratedClass);
 	Runtime->TakeWidget();
 	TArray<FString> Texts;
@@ -1441,6 +1472,70 @@ bool FComponentSlotConflictReloadTest::RunTest(const FString&)
 	for (UUserWidget* Instance : FindInstances(Runtime->WidgetTree)) Texts.Append(FindText(Instance->WidgetTree));
 	TestTrue(TEXT("Reloaded manual content executes"), Texts.Contains(TEXT("Keep this user content")));
 	Runtime->ReleaseSlateResources(true);
+	return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentBatchIncompleteRecoveryTest,
+	"Design2UMG.CommitResult.BatchIncompleteRecovery", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FComponentBatchIncompleteRecoveryTest::RunTest(const FString&)
+{
+	AddExpectedError(TEXT("Error moving file"), EAutomationExpectedErrorFlags::Contains, 2);
+	AddExpectedError(TEXT("GenerationManifest: failed to finalize manifest"), EAutomationExpectedErrorFlags::Contains, 2);
+	for (const bool bFailUndo : {true, false})
+	{
+		const FString Folder = TEXT("/Game/Design2UMG/Automation/IncompleteBatch_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+		ON_SCOPE_EXIT { Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(Folder); };
+		FDesignDocument Document;
+		if (!FFigmaParser::ParseDocument(MakeComponentImportJson(TEXT("Before")), Document)) return false;
+		FDesign2UMGImportSettingsSnapshot Settings;
+		Settings.ConversionSettings = FDesign2UMGConversionSettings::Defaults();
+		FDesign2UMGGenerationOutput Output;
+		UWidgetBlueprint* Blueprint = FUMGGenerator::GenerateWidgetBlueprint(
+			FDesign2UMGConverter::Convert(Document, Settings.ConversionSettings), Folder, &Settings.GenerationSettings, &Output);
+		if (!TestNotNull(TEXT("Initial batch imported"), Blueprint) || !TestEqual(TEXT("One dependency"), Output.Components.Num(), 1)) return false;
+		const FString RootPackage = Blueprint->GetOutermost()->GetName();
+		const FString ChildPackage = Output.Components[0].Blueprint->GetOutermost()->GetName();
+		TMap<FString, TArray<uint8>> Originals;
+		for (const FString& Package : {ChildPackage, RootPackage})
+		{
+			for (const FString& Path : {FPackageName::LongPackageNameToFilename(Package, TEXT(".uasset")),
+				Design2UMGGenerationManifest::BuildSidecarPathForAsset(Package)})
+			{
+				if (!TestTrue(TEXT("Original file readable"), FFileHelper::LoadFileToArray(Originals.Add(Path), *Path))) return false;
+			}
+		}
+		FDesignDocument Updated;
+		if (!FFigmaParser::ParseDocument(MakeComponentImportJson(TEXT("After")).Replace(TEXT("Default"), TEXT("ChangedDefault")), Updated)) return false;
+		FDesignReimportRequest Request;
+		Request.TargetAssetPath = RootPackage;
+		Request.SettingsSnapshot = Settings;
+		const int32 UndoEntries = GEditor->Trans->GetQueueLength() - GEditor->Trans->GetUndoCount();
+		Design2UMGGenerationManifest::ArmAutomationSidecarFinalizeFailureOnce();
+		if (bFailUndo) GeneratedAssetLifecycle::ArmAutomationUndoFailureOnce();
+		else FUMGGenerator::ArmAutomationBatchRestoreFailureOnce();
+		const FDesignReimportResult Result = DesignImportPipeline::Reimport(Updated, Request);
+		TestFalse(TEXT("Incomplete recovery is not success"), Result.bSucceeded);
+		TestTrue(TEXT("Recovery explicitly incomplete"), Result.Commit.Status == EDesign2UMGCommitStatus::RollbackIncomplete);
+		TestTrue(TEXT("Manifest restoration independent of other failures"), Result.Commit.Manifest == EDesign2UMGFileState::Restored);
+		TestTrue(TEXT("Asset recovery reflects the injected failure"), Result.Commit.Asset == (bFailUndo
+			? EDesign2UMGFileState::Restored : EDesign2UMGFileState::Indeterminate));
+		TestTrue(TEXT("Memory recovery reflects undo failure versus skipped undo"), Result.Commit.Memory == (bFailUndo
+			? EDesign2UMGMemoryState::RecoveryFailed : EDesign2UMGMemoryState::Modified));
+		const FString ChildFile = FPackageName::LongPackageNameToFilename(ChildPackage, TEXT(".uasset"));
+		for (const auto& Original : Originals)
+		{
+			TArray<uint8> Bytes;
+			TestTrue(TEXT("File readable after attempted recovery"), FFileHelper::LoadFileToArray(Bytes, *Original.Key));
+			if (!bFailUndo && Original.Key == ChildFile)
+				TestTrue(TEXT("Skipped file restore really leaves changed bytes"), Bytes != Original.Value);
+			else TestTrue(TEXT("Reported restored files match original bytes"), Bytes == Original.Value);
+		}
+		TestFalse(TEXT("Incomplete recovery never emits batch-restored diagnostic"), Result.ComponentMappingDiagnostics.ContainsByPredicate(
+			[](const FDesign2UMGMappingDiagnostic& Diagnostic) { return Diagnostic.Kind == TEXT("component_batch_restored"); }));
+		if (GEditor->Trans->GetQueueLength() - GEditor->Trans->GetUndoCount() > UndoEntries)
+			TestTrue(TEXT("Caller can undo retained batch changes"), GEditor->UndoTransaction(false));
+	}
 	return true;
 }
 

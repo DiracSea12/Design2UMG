@@ -22,6 +22,7 @@ namespace
 #if WITH_DEV_AUTOMATION_TESTS
 	// Test injection: see Design2UMGGenerationManifest::ArmAutomationSidecarWriteFailureOnce.
 	std::atomic<bool> bAutomationSidecarWriteFailureArmed{ false };
+	std::atomic<bool> bAutomationSidecarFinalizeFailureArmed{ false };
 #endif
 
 	TSharedRef<FJsonObject> BuildMappedInstanceObject(const FDesign2UMGMappedInstanceRecord& Record)
@@ -68,7 +69,7 @@ namespace Design2UMGGenerationManifest
 		return FPackageName::LongPackageNameToFilename(AssetPackageName, TEXT(".d2u.json"));
 	}
 
-	bool WriteSidecarForAsset(
+	EDesign2UMGFileState WriteSidecarForAsset(
 		const FString& AssetPackageName,
 		const FDesign2UMGGenerationManifestPayload& Payload)
 	{
@@ -78,7 +79,7 @@ namespace Design2UMGGenerationManifest
 			UE_LOG(LogDesign2UMG, Error,
 				TEXT("GenerationManifest: failed to write manifest %s (automation-injected sidecar write failure)"),
 				*BuildSidecarPathForAsset(AssetPackageName));
-			return false;
+			return EDesign2UMGFileState::Unchanged;
 		}
 #endif
 		TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
@@ -87,7 +88,7 @@ namespace Design2UMGGenerationManifest
 		if (Payload.bWholeAssetOwned)
 		{
 			const FString Hash = ComputeSavedAssetHash(AssetPackageName);
-			if (Hash.IsEmpty()) return false;
+			if (Hash.IsEmpty()) return EDesign2UMGFileState::Unchanged;
 			Root->SetStringField(TEXT("generatedAssetHash"), Hash);
 		}
 		Root->SetStringField(TEXT("provider"), Payload.Provider);
@@ -126,7 +127,7 @@ namespace Design2UMGGenerationManifest
 		if (!FJsonSerializer::Serialize(Root, Writer))
 		{
 			UE_LOG(LogDesign2UMG, Error, TEXT("GenerationManifest: failed to serialize manifest for %s"), *AssetPackageName);
-			return false;
+			return EDesign2UMGFileState::Unchanged;
 		}
 
 		const FString SidecarPath = BuildSidecarPathForAsset(AssetPackageName);
@@ -136,25 +137,33 @@ namespace Design2UMGGenerationManifest
 		{
 			UE_LOG(LogDesign2UMG, Error, TEXT("GenerationManifest: failed to write temp manifest %s"), *TempPath);
 			IFileManager::Get().Delete(*TempPath, false, true);
-			return false;
+			return EDesign2UMGFileState::Unchanged;
 		}
 
-		// Atomic replace: write a temp file, then Move it onto the final path in one step - no half-written manifest.
+#if WITH_DEV_AUTOMATION_TESTS
+		if (bAutomationSidecarFinalizeFailureArmed.exchange(false)) IFileManager::Get().Delete(*TempPath, false, true);
+#endif
+		// Move may delete the destination before it fails; never promise the previous sidecar survived.
 		if (!IFileManager::Get().Move(*SidecarPath, *TempPath, true))
 		{
 			UE_LOG(LogDesign2UMG, Error, TEXT("GenerationManifest: failed to finalize manifest %s"), *SidecarPath);
 			IFileManager::Get().Delete(*TempPath, false, true);
-			return false;
+			return EDesign2UMGFileState::Indeterminate;
 		}
 
 		UE_LOG(LogDesign2UMG, Log, TEXT("GenerationManifest: wrote %s"), *SidecarPath);
-		return true;
+		return EDesign2UMGFileState::Saved;
 	}
 
 #if WITH_DEV_AUTOMATION_TESTS
 	void ArmAutomationSidecarWriteFailureOnce()
 	{
 		bAutomationSidecarWriteFailureArmed.store(true);
+	}
+
+	void ArmAutomationSidecarFinalizeFailureOnce()
+	{
+		bAutomationSidecarFinalizeFailureArmed.store(true);
 	}
 #endif
 

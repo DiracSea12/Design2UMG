@@ -302,14 +302,8 @@ namespace Design2UMGEditorImportOrchestrator
 			Request.bGenerateResolutionCopy = bGenerateResolutionCopy;
 			const FDesignReimportResult Result = DesignImportPipeline::Reimport(Document, Request);
 
-			if (Result.bSucceeded)
-			{
-				bOk = true;
-			}
-			else if (Result.bFullConflict && !Result.ResolutionCopyPath.IsEmpty())
-			{
-				bOk = true;
-			}
+			bOk = Result.Commit.IsSuccess()
+				|| (Result.ResolutionCopyCommit.IsSet() && Result.ResolutionCopyCommit->IsSuccess());
 		}
 
 		Design2UMGEditorUnattendedExit::ExitUnattendedWithStatus(

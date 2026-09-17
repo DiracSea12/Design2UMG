@@ -24,7 +24,7 @@ struct FWidgetTreeChildBuildContext
 
 namespace FWidgetTreeChildBuilder
 {
-	void BuildChildren(
+	bool BuildChildren(
 		UWidgetTree* WidgetTree,
 		UWidget* ParentWidget,
 		const FUMGWidgetNode& Node,

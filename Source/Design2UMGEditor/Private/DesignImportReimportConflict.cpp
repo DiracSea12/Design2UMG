@@ -189,6 +189,7 @@ namespace DesignImportPipeline
 		TArray<FDesign2UMGMappingDiagnostic>&& PriorDiagnostics)
 	{
 		FDesignReimportResult Result;
+		Result.Commit.AssetPath = Session.Request.TargetAssetPath;
 		Result.Diagnostics = MoveTemp(PriorDiagnostics);
 		// ini validation diagnostics were produced during snapshot resolution (step 1); the early-exit report must carry
 		// them, or they vanish from the report when a config error stacks onto an asset-level conflict.
@@ -202,12 +203,13 @@ namespace DesignImportPipeline
 				*TargetPackage,
 				*Reason));
 		Result.bFullConflict = true;
+		Result.Commit.Status = EDesign2UMGCommitStatus::Conflict;
 		Result.bSucceeded = false;
 
 		if (!Session.Request.bGenerateResolutionCopy)
 		{
 			if (Session.Document) DesignImportDiagnosticReport::WriteReimport(
-				*Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics);
+				*Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics, &Result.Commit);
 			return Result;
 		}
 
@@ -223,23 +225,25 @@ namespace DesignImportPipeline
 					TEXT("Resolution copy skipped: %s already exists"),
 					*(PackageDir / CopyName)));
 			if (Session.Document) DesignImportDiagnosticReport::WriteReimport(
-				*Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics);
+				*Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics, &Result.Commit);
 			return Result;
 		}
 
 		Session.Data.WidgetName = CopyName;
 		FDesign2UMGGenerationOutput GenerationOutput;
-		UWidgetBlueprint* CopyBlueprint = FUMGGenerator::GenerateWidgetBlueprint(
+		FUMGGenerator::GenerateWidgetBlueprint(
 			Session.Data, PackageDir, &Session.GenerationSettings, &GenerationOutput);
-		if (CopyBlueprint)
+		Result.ResolutionCopyCommit = GenerationOutput.Commit;
+		if (GenerationOutput.Commit.Asset == EDesign2UMGFileState::Saved)
 		{
-			Result.ResolutionCopyPath = CopyBlueprint->GetPathName();
+			Result.ResolutionCopyPath = GenerationOutput.Commit.AssetPath;
 			AddReimportDiagnostic(
 				Result.Diagnostics,
 				ReimportDiagnosticKinds::ResolutionCopy,
 				FString::Printf(
-					TEXT("Resolution copy generated at %s (original untouched); reason: %s"),
+					TEXT("Resolution copy saved at %s (original untouched, metadata %s); reason: %s"),
 					*Result.ResolutionCopyPath,
+					GenerationOutput.Commit.Manifest == EDesign2UMGFileState::Saved ? TEXT("saved") : TEXT("not updated"),
 					*Reason));
 		}
 		else
@@ -252,7 +256,7 @@ namespace DesignImportPipeline
 		// The copy-generation chain's mapping diagnostics (ini validation, hits, the copy's own sidecar write failure) land in the report.
 		Result.ComponentMappingDiagnostics.Append(GenerationOutput.MappingDiagnostics);
 		if (Session.Document) DesignImportDiagnosticReport::WriteReimport(
-			*Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics);
+			*Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics, &Result.Commit);
 		return Result;
 	}
 }

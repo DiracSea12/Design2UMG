@@ -23,6 +23,16 @@ namespace DesignImportPipeline
 		UE_LOG(LogDesign2UMG, Log, TEXT("Reimport[%s]: %s"), Kind, *Message);
 	}
 
+	void AddReimportDegradation(
+		const FReimportApplySharedState& Shared,
+		const TCHAR* Kind,
+		const FString& Message)
+	{
+		check(Shared.Diagnostics && Shared.bHasDegradation);
+		*Shared.bHasDegradation = true;
+		AddReimportDiagnostic(*Shared.Diagnostics, Kind, Message);
+	}
+
 	/** "Real design node" = has a source identity (non-empty SourceNodeId); synthetic wrapper/pass-through layers do not. */
 	bool HasRealSourceIdentity(const FUMGWidgetNode& Node)
 	{

@@ -34,12 +34,12 @@
 
 namespace
 {
-	void DiscardNewlyCreatedAsset(UObject* Asset, const bool bWasNewlyCreated)
+	EDesign2UMGMemoryState DiscardNewlyCreatedAsset(UObject* Asset, const bool bWasNewlyCreated)
 	{
-		if (bWasNewlyCreated)
-		{
-			GeneratedAssetLifecycle::DiscardUnsavedAsset(Asset);
-		}
+		if (!Asset) return EDesign2UMGMemoryState::Unchanged;
+		if (!bWasNewlyCreated) return EDesign2UMGMemoryState::Modified;
+		return GeneratedAssetLifecycle::DiscardUnsavedAsset(Asset)
+			? EDesign2UMGMemoryState::Restored : EDesign2UMGMemoryState::RecoveryFailed;
 	}
 
 	void DumpTemplateTextBlockFontState(const TCHAR* Stage, UWidgetBlueprint* WidgetBlueprint)
@@ -216,7 +216,7 @@ UWidgetBlueprint* FUMGGenerator::GenerateWidgetBlueprint(
 	UWidgetBlueprint* WBP = BuildWidgetBlueprint(
 		WidgetData, PackagePath, GenerationSettings, &GenerationOutput, &NavigationData);
 	const FString BuiltPath = GetPathNameSafe(WBP);
-	if (WBP && !SaveWidgetBlueprint(WBP, &GenerationOutput, &NavigationData))
+	if (WBP && !SaveWidgetBlueprint(WBP, &GenerationOutput, &NavigationData).IsSuccess())
 	{
 		GenerationOutput.MappingDiagnostics.Add({TEXT("generation_save_failed"),
 			FString::Printf(TEXT("Asset batch save failed for '%s'; inspect dependency and recovery diagnostics"), *BuiltPath)});
@@ -373,6 +373,11 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 		)
 	);
 
+	if (OutGenerationOutput && WBP)
+	{
+		OutGenerationOutput->Commit.AssetPath = WBP->GetPathName();
+		OutGenerationOutput->Commit.Memory = EDesign2UMGMemoryState::Modified;
+	}
 	if (!WBP || !WBP->WidgetTree)
 	{
 		UE_LOG(LogDesign2UMG, Error,
@@ -383,7 +388,13 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 			*FullPath,
 			WBP ? 1 : 0,
 			(WBP && WBP->WidgetTree) ? 1 : 0);
-		DiscardNewlyCreatedAsset(WBP, !ExistingGeneratedBlueprint);
+		const EDesign2UMGMemoryState Memory = DiscardNewlyCreatedAsset(WBP, !ExistingGeneratedBlueprint);
+		if (OutGenerationOutput)
+		{
+			OutGenerationOutput->Commit.Memory = Memory;
+			if (Memory == EDesign2UMGMemoryState::RecoveryFailed)
+				OutGenerationOutput->Commit.Status = EDesign2UMGCommitStatus::RollbackIncomplete;
+		}
 		Package->ClearDirtyFlag();
 		return nullptr;
 	}
@@ -461,7 +472,13 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 			*PreparedRootRef.Type,
 			*PreparedRootRef.Name,
 			*PreparedRootRef.Id);
-		DiscardNewlyCreatedAsset(WBP, !ExistingGeneratedBlueprint);
+		const EDesign2UMGMemoryState Memory = DiscardNewlyCreatedAsset(WBP, !ExistingGeneratedBlueprint);
+		if (OutGenerationOutput)
+		{
+			OutGenerationOutput->Commit.Memory = Memory;
+			if (Memory == EDesign2UMGMemoryState::RecoveryFailed)
+				OutGenerationOutput->Commit.Status = EDesign2UMGCommitStatus::RollbackIncomplete;
+		}
 		return nullptr;
 	}
 	WBP->WidgetTree->RootWidget = Root;
@@ -502,6 +519,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 		// Sorting keeps the manifest text stable across two imports of the same input (the sidecar stays diffable).
 		OutGenerationOutput->Manifest.D2UOwnedNames = MappingBuildState.GetCreatedWidgetNames().Array();
 		OutGenerationOutput->Manifest.D2UOwnedNames.Sort();
+		OutGenerationOutput->bHasDegradation = MappingBuildState.HasDegradation();
 
 		OutGenerationOutput->MappingDiagnostics = EffectiveGenerationSettings.ComponentMapping.ValidationDiagnostics;
 		OutGenerationOutput->MappingDiagnostics.Append(MappingBuildState.GetDiagnostics());
@@ -523,16 +541,20 @@ namespace
 }
 #endif
 
-bool FUMGGenerator::SaveSingleWidgetBlueprint(
+FDesign2UMGCommitResult FUMGGenerator::SaveSingleWidgetBlueprint(
 	UWidgetBlueprint* WBP,
 	FDesign2UMGGenerationOutput* GenerationOutput,
 	const FUMGPrototypeNavigationData* PrototypeNavigation)
 {
+	FDesign2UMGCommitResult Result;
 	if (!WBP)
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("SaveWidgetBlueprint: Widget Blueprint is null"));
-		return false;
+		return Result;
 	}
+
+	Result.AssetPath = WBP->GetPathName();
+	Result.Memory = EDesign2UMGMemoryState::Modified;
 
 #if WITH_DEV_AUTOMATION_TESTS
 	if (bAutomationSaveFailureArmed.exchange(false))
@@ -540,11 +562,17 @@ bool FUMGGenerator::SaveSingleWidgetBlueprint(
 		UE_LOG(LogDesign2UMG, Error,
 			TEXT("SaveWidgetBlueprint: failed to save %s (automation-injected save failure)"),
 			*WBP->GetPathName());
-		return false;
+		return Result;
 	}
 #endif
 
 	const bool bWasNewlyCreated = WBP->GetOutermost()->HasAnyPackageFlags(PKG_NewlyCreated);
+	const auto DiscardFailedAsset = [&]()
+	{
+		Result.Memory = DiscardNewlyCreatedAsset(WBP, bWasNewlyCreated);
+		if (Result.Memory == EDesign2UMGMemoryState::RecoveryFailed)
+			Result.Status = EDesign2UMGCommitStatus::RollbackIncomplete;
+	};
 
 	WBP->Modify();
 	if (WBP->WidgetTree)
@@ -558,8 +586,8 @@ bool FUMGGenerator::SaveSingleWidgetBlueprint(
 		UE_LOG(LogDesign2UMG, Error,
 			TEXT("SaveWidgetBlueprint: missing valid DesignTimeSize for %s; source design size is required"),
 			*WBP->GetPathName());
-		DiscardNewlyCreatedAsset(WBP, bWasNewlyCreated);
-		return false;
+		DiscardFailedAsset();
+		return Result;
 	}
 
 	// Compile after rendering; transient texture data may already be gone at this point.
@@ -580,6 +608,14 @@ bool FUMGGenerator::SaveSingleWidgetBlueprint(
 	{
 		TArray<FString> WiringWarnings;
 		Design2UMGPrototypeGraphWiring::WireSimplePrototypeBindings(WBP, *PrototypeNavigation, WiringWarnings);
+		if (GenerationOutput && WiringWarnings.Num() > 0)
+		{
+			GenerationOutput->bHasDegradation = true;
+			for (FString& Warning : WiringWarnings)
+			{
+				GenerationOutput->MappingDiagnostics.Add({TEXT("prototype_wiring_skipped"), MoveTemp(Warning)});
+			}
+		}
 	}
 
 	const EBlueprintCompileOptions CompileOptions =
@@ -592,8 +628,8 @@ bool FUMGGenerator::SaveSingleWidgetBlueprint(
 			TEXT("SaveWidgetBlueprint: compilation failed for %s (status=%d)"),
 			*WBP->GetPathName(),
 			static_cast<int32>(WBP->Status));
-		DiscardNewlyCreatedAsset(WBP, bWasNewlyCreated);
-		return false;
+		DiscardFailedAsset();
+		return Result;
 	}
 	DumpTemplateTextBlockFontState(TEXT("template-postcompile"), WBP);
 	ApplyDesignPreviewSize(WBP, DesiredDesignSize, TEXT("post-compile"));
@@ -610,25 +646,32 @@ bool FUMGGenerator::SaveSingleWidgetBlueprint(
 			TEXT("SaveWidgetBlueprint: failed to save %s to %s"),
 			*FullPath,
 			*FileName);
-		if (!bPackageFileExisted)
+		// A failed save does not establish the final bytes of an existing package.
+		Result.Asset = EDesign2UMGFileState::Indeterminate;
+		Result.Status = EDesign2UMGCommitStatus::RollbackIncomplete;
+		if (!bPackageFileExisted && IFileManager::Get().Delete(*FileName, false, true))
 		{
-			IFileManager::Get().Delete(*FileName, false, true);
+			Result.Asset = EDesign2UMGFileState::Restored;
+			Result.Status = EDesign2UMGCommitStatus::NotCommitted;
 		}
-		DiscardNewlyCreatedAsset(WBP, bWasNewlyCreated);
-		return false;
+		DiscardFailedAsset();
+		return Result;
 	}
+	Result.Asset = EDesign2UMGFileState::Saved;
+	Result.Status = WBP->Status == BS_UpToDateWithWarnings || (GenerationOutput && GenerationOutput->bHasDegradation)
+		? EDesign2UMGCommitStatus::SucceededWithDegradation : EDesign2UMGCommitStatus::Succeeded;
 	if (bWasNewlyCreated)
 	{
 		GeneratedAssetLifecycle::RegisterSavedAsset(WBP);
 	}
 
-	// After a successful asset save, write the generation-record sidecar (atomic write; no half-written file on failure).
-	// The asset itself was saved successfully: a sidecar write failure does not change the import-success semantics;
-	// it only feeds the failure into structured diagnostics (visible in the import report) instead of a silent UE_LOG.
+	// After a successful asset save, write the generation-record sidecar and retain its file outcome.
+	// Metadata failure is a partial commit, not a failed asset save or ordinary success.
 	if (GenerationOutput)
 	{
 		const FString AssetPackageName = WBP->GetOutermost()->GetName();
-		if (!Design2UMGGenerationManifest::WriteSidecarForAsset(AssetPackageName, GenerationOutput->Manifest))
+		Result.Manifest = Design2UMGGenerationManifest::WriteSidecarForAsset(AssetPackageName, GenerationOutput->Manifest);
+		if (Result.Manifest != EDesign2UMGFileState::Saved)
 		{
 			FDesign2UMGMappingDiagnostic Diagnostic;
 			Diagnostic.Kind = Design2UMGManifestKinds::ManifestWriteFailedDiagnostic;
@@ -636,7 +679,7 @@ bool FUMGGenerator::SaveSingleWidgetBlueprint(
 				TEXT("Generation manifest sidecar could not be written for %s; the asset itself was saved"),
 				*Design2UMGGenerationManifest::BuildSidecarPathForAsset(AssetPackageName));
 			GenerationOutput->MappingDiagnostics.Add(MoveTemp(Diagnostic));
-			if (GenerationOutput->Manifest.bWholeAssetOwned || GenerationOutput->Manifest.bComponentBatchRoot) return false;
+			Result.Status = EDesign2UMGCommitStatus::CommittedWithMetadataFailure;
 		}
 	}
 
@@ -648,7 +691,7 @@ bool FUMGGenerator::SaveSingleWidgetBlueprint(
 	FProceduralShapeGenerator::ReleaseTransientTextures();
 
 	UE_LOG(LogDesign2UMG, Log, TEXT("Saved Widget Blueprint at %s"), *FullPath);
-	return true;
+	return Result;
 }
 
 #if WITH_DEV_AUTOMATION_TESTS

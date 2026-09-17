@@ -64,7 +64,7 @@ bool FSafeReimportQAManifestInputSchemaTest::RunTest(const FString&)
 	}
 	Payload.D2UOwnedNames = { TEXT("W1"), TEXT("G1") };
 
-	if (!TestTrue(TEXT("WriteSidecarForAsset succeeds"), Design2UMGGenerationManifest::WriteSidecarForAsset(Package, Payload)))
+	if (!TestTrue(TEXT("WriteSidecarForAsset succeeds"), Design2UMGGenerationManifest::WriteSidecarForAsset(Package, Payload) == EDesign2UMGFileState::Saved))
 	{
 		IFileManager::Get().Delete(*SidecarPath, false, true);
 		return false;
@@ -288,6 +288,10 @@ bool FSafeReimportQASaveFailureRollbackTest::RunTest(const FString&)
 	const FDesignReimportResult Result = QAReimport(V2, nullptr, TargetPackage);
 
 	TestFalse(TEXT("reimport reports failure"), Result.bSucceeded);
+	TestTrue(TEXT("Failed save did not commit"), Result.Commit.Status == EDesign2UMGCommitStatus::NotCommitted);
+	TestTrue(TEXT("Asset file unchanged"), Result.Commit.Asset == EDesign2UMGFileState::Unchanged);
+	TestTrue(TEXT("Manifest unchanged"), Result.Commit.Manifest == EDesign2UMGFileState::Unchanged);
+	TestTrue(TEXT("Memory explicitly restored"), Result.Commit.Memory == EDesign2UMGMemoryState::Restored);
 	TestFalse(TEXT("failure is not a full conflict"), Result.bFullConflict);
 	TestNull(TEXT("no updated blueprint on failure"), Result.UpdatedBlueprint);
 	TestEqual(TEXT("save failure diagnosed once"), QACountKind(Result, TEXT("reimport_save_failed")), 1);
@@ -314,6 +318,7 @@ bool FSafeReimportQASaveFailureRollbackTest::RunTest(const FString&)
 	// The asset was not poisoned: retrying the same v2 immediately applies successfully.
 	const FDesignReimportResult Retry = QAReimport(V2, nullptr, TargetPackage);
 	TestTrue(TEXT("retry after rollback succeeds"), Retry.bSucceeded);
+	TestNotNull(TEXT("Retry reuses the rolled-back widget name without an orphan collision"), WBP->WidgetTree->FindWidget(TEXT("FreshText")));
 	if (UTextBlock* Head = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Head"))))
 	{
 		TestEqual(TEXT("retry applies the design update"), Head->GetText().ToString(), FString(TEXT("Head v2")));
@@ -463,6 +468,11 @@ bool FSafeReimportQAManifestWriteFailurePropagatesTest::RunTest(const FString&)
 	const FDesignReimportResult Result = QAReimport(BuildDoc(TEXT("half-v2")), nullptr, TargetPackage);
 
 	TestFalse(TEXT("manifest write failure is not reported as success"), Result.bSucceeded);
+	TestTrue(TEXT("Metadata failure remains a partial commit"), Result.Commit.Status == EDesign2UMGCommitStatus::CommittedWithMetadataFailure);
+	TestTrue(TEXT("Asset saved"), Result.Commit.Asset == EDesign2UMGFileState::Saved);
+	TestTrue(TEXT("Manifest not updated"), Result.Commit.Manifest == EDesign2UMGFileState::Unchanged);
+	TestTrue(TEXT("Saved memory was not rolled back"), Result.Commit.Memory == EDesign2UMGMemoryState::Modified);
+	TestEqual(TEXT("Saved blueprint remains accessible"), Result.UpdatedBlueprint, WBP);
 	TestFalse(TEXT("not a full conflict"), Result.bFullConflict);
 	TestEqual(TEXT("save failure diagnosed once"), QACountKind(Result, TEXT("reimport_save_failed")), 1);
 	TestTrue(TEXT("diagnostic states asset/manifest inconsistency"),

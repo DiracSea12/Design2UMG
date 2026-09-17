@@ -83,6 +83,10 @@ bool FSafeReimportQANestedStructureBoundaryTest::RunTest(const FString&)
 	TestNotNull(TEXT("design-removed nested node preserved"), WBP->WidgetTree->FindWidget(TEXT("Tail")));
 	TestEqual(TEXT("no removal performed"), QACountKind(Result, TEXT("reimport_removed")), 0);
 	TestEqual(TEXT("no removal conflict"), QACountKind(Result, TEXT("reimport_remove_conflict")), 0);
+	TestEqual(TEXT("nested preserve reports partial sync"), QACountKind(Result, TEXT("reimport_partial_sync")), 1);
+	TestTrue(TEXT("nested preserve raises explicit degradation"), Result.bHasDegradation);
+	TestEqual(TEXT("nested preserve is not plain success"), Result.Commit.Status,
+		EDesign2UMGCommitStatus::SucceededWithDegradation);
 
 	FDesign2UMGGenerationManifestSidecar Sidecar;
 	if (TestTrue(TEXT("manifest reloads"), QALoadSidecar(TargetPackage, Sidecar)))

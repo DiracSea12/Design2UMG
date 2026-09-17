@@ -565,7 +565,7 @@ bool FDesign2UMGMappingQAManifestFieldSerializationTest::RunTest(const FString&)
 	const FString SidecarPath = Design2UMGGenerationManifest::BuildSidecarPathForAsset(PackageName);
 	IFileManager::Get().Delete(*SidecarPath, false, true);
 	TestTrue(TEXT("manifest sidecar written"),
-		Design2UMGGenerationManifest::WriteSidecarForAsset(PackageName, Payload));
+		Design2UMGGenerationManifest::WriteSidecarForAsset(PackageName, Payload) == EDesign2UMGFileState::Saved);
 
 	TSharedPtr<FJsonObject> Manifest;
 	FString Json;

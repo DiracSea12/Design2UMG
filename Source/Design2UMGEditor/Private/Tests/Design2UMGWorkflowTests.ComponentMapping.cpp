@@ -455,7 +455,7 @@ bool FComponentMappingPrototypeInertTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// Sidecar write failure: the asset saved successfully and the import semantics hold; the write failure feeds into
+// Sidecar write failure: the saved asset is reported as a partial commit; the write failure also feeds into
 // structured diagnostics (GenerationOutput.MappingDiagnostics, visible in the import report), and no half-written file remains.
 // ---------------------------------------------------------------------------
 
@@ -495,10 +495,14 @@ bool FComponentMappingManifestWriteFailureTest::RunTest(const FString&)
 	const FString TempPath = SidecarPath + TEXT(".tmp");
 	IFileManager::Get().MakeDirectory(*TempPath, true);
 
-	const bool bSaved = FUMGGenerator::SaveWidgetBlueprint(WBP, &GenerationOutput);
+	const FDesign2UMGCommitResult Commit = FUMGGenerator::SaveWidgetBlueprint(WBP, &GenerationOutput);
 	IFileManager::Get().DeleteDirectory(*TempPath, false, true);
 
-	TestTrue(TEXT("Asset save still succeeds when the sidecar cannot be written"), bSaved);
+	TestTrue(TEXT("Asset is saved when the sidecar cannot be written"), Commit.Asset == EDesign2UMGFileState::Saved);
+	TestTrue(TEXT("Metadata failure is an explicit partial commit"), Commit.Status == EDesign2UMGCommitStatus::CommittedWithMetadataFailure);
+	TestFalse(TEXT("Partial commit is not ordinary success"), Commit.IsSuccess());
+	TestTrue(TEXT("Memory remains at the saved state"), Commit.Memory == EDesign2UMGMemoryState::Modified);
+	TestTrue(TEXT("Manifest was not committed"), Commit.Manifest == EDesign2UMGFileState::Unchanged);
 
 	int32 ManifestFailureDiagnostics = 0;
 	FString FailureMessage;

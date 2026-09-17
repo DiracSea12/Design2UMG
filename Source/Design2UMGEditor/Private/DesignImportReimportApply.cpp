@@ -71,7 +71,7 @@ namespace DesignImportPipeline
 			const UUserWidget* Instance,
 			const FUMGWidgetNode& Node,
 			const TArray<FDesign2UMGMappedInputRecord>& InputRecords,
-			TArray<FDesign2UMGMappingDiagnostic>& Diagnostics)
+			const FReimportApplySharedState& Shared)
 		{
 			const auto bInputTargets = [&InputRecords](const TCHAR* PropertyName)
 			{
@@ -106,7 +106,7 @@ namespace DesignImportPipeline
 
 			if (Divergences.Num() > 0)
 			{
-				AddReimportDiagnostic(Diagnostics, ReimportDiagnosticKinds::MappedAttrKept,
+				AddReimportDegradation(Shared, ReimportDiagnosticKinds::MappedAttrKept,
 					FString::Printf(
 						TEXT("Mapped instance '%s' (%s) own visual attributes kept as project-side, not refreshed: %s"),
 						*Instance->GetName(), *GetDesignNodeId(Node), *FString::Join(Divergences, TEXT("; "))));
@@ -159,8 +159,8 @@ namespace DesignImportPipeline
 				Shared.MappingBuildState->FindEntryForKey(Node.Source().MappedComponentKey);
 			if (!Entry)
 			{
-				AddReimportDiagnostic(
-					*Shared.Diagnostics, ReimportDiagnosticKinds::InputSkipped,
+				AddReimportDegradation(
+					Shared, ReimportDiagnosticKinds::InputSkipped,
 					FString::Printf(
 						TEXT("Mapping entry for key '%s' disappeared on reimport; inputs of '%s' left as-is"),
 						*Node.Source().MappedComponentKey,
@@ -172,7 +172,7 @@ namespace DesignImportPipeline
 			Design2UMGComponentMappingGeneration::ApplyMappedComponentInputsToInstance(
 				Instance, Node, *Entry, &InputRecords, *Shared.Diagnostics);
 
-			ReportMappedOwnAttrDivergence(Instance, Node, InputRecords, *Shared.Diagnostics);
+			ReportMappedOwnAttrDivergence(Instance, Node, InputRecords, Shared);
 
 			FDesign2UMGMappedInstanceRecord Record;
 			Record.DesignNodeId = ProspectiveDesignNodeId;
@@ -445,10 +445,10 @@ namespace DesignImportPipeline
 		 * Nested move decision and execution (the unmatched-child path of RefreshChildWidgets): when the candidate
 		 * pool holds a same-named owned subtree no longer expected by the design elsewhere, move it over wholesale
 		 * (identity preserved). mapped candidates never move (instantiation semantics; rebuilt directly).
-		 * Returns true = handled (move succeeded / move rejected / move failed and rehung - no rebuild either way);
-		 * returns false = no candidate in the pool; the generation chain rebuilds.
+		 * Unset = no candidate; true = moved or conflict-kept; false = structural failure.
+		 * A failed move never falls through to creation of a duplicate.
 		 */
-		bool TryNestedMoveChild(
+		TOptional<bool> TryNestedMoveChild(
 			const FUMGWidgetNode& Child,
 			const FString& BaseName,
 			UPanelWidget* Panel,
@@ -473,14 +473,14 @@ namespace DesignImportPipeline
 			}
 			if (!MoveSource)
 			{
-				return false;
+				return {};
 			}
 
 			FString ConflictReason;
 			if (!IsMoveSourceOwned(Shared, MoveSource, ConflictReason))
 			{
-				AddReimportDiagnostic(
-					*Shared.Diagnostics, ReimportDiagnosticKinds::MoveConflict,
+				AddReimportDegradation(
+					Shared, ReimportDiagnosticKinds::MoveConflict,
 					FString::Printf(
 						TEXT("Nested move of '%s' into '%s' skipped: %s; widget kept in place, no copy created"),
 						*MoveSource->GetName(), *ParentWidget->GetName(), *ConflictReason));
@@ -488,42 +488,16 @@ namespace DesignImportPipeline
 			}
 
 			UPanelWidget* OldParent = MoveSource->GetParent();
-			if (OldParent)
+			if (!MoveReimportWidget(MoveSource, Panel, Child, Shared)
+				|| !RefreshNodeByKind(Child, MoveSource, Shared, NestedMoveCandidates, NewlyCreatedWidgets))
 			{
-				OldParent->Modify();
+				return false;
 			}
-			MoveSource->Modify();
-			Panel->Modify();
-			Shared.WidgetTree->RemoveWidget(MoveSource);
-			if (Panel->AddChild(MoveSource))
-			{
-				// After the move, refresh properties/slots and the whole subtree per the new design node (including nested diagnostics).
-				RefreshNodeByKind(Child, MoveSource, Shared, NestedMoveCandidates, NewlyCreatedWidgets);
-				AddReimportDiagnostic(
-					*Shared.Diagnostics, ReimportDiagnosticKinds::Moved,
-					FString::Printf(
-						TEXT("Widget '%s' moved from '%s' under '%s' (nested, both endpoints D2U-owned); widget identity preserved"),
-						*MoveSource->GetName(),
-						OldParent ? *OldParent->GetName() : TEXT("(none)"),
-						*ParentWidget->GetName()));
-			}
-			else
-			{
-				// Defensive: if it cannot be added back, rehang under the original parent (the source side was already judged D2U-owned); never leave an orphan widget.
-				if (OldParent)
-				{
-					OldParent->AddChild(MoveSource);
-				}
-				else if (Shared.HostPanel)
-				{
-					Shared.HostPanel->AddChild(MoveSource);
-				}
-				AddReimportDiagnostic(
-					*Shared.Diagnostics, ReimportDiagnosticKinds::MoveConflict,
-					FString::Printf(
-						TEXT("Nested move of '%s' into '%s' failed to attach; widget restored under its previous parent"),
-						*MoveSource->GetName(), *ParentWidget->GetName()));
-			}
+			AddReimportDiagnostic(
+				*Shared.Diagnostics, ReimportDiagnosticKinds::Moved,
+				FString::Printf(
+					TEXT("Widget '%s' moved from '%s' under '%s' (nested, both endpoints D2U-owned); widget identity preserved"),
+					*MoveSource->GetName(), *OldParent->GetName(), *ParentWidget->GetName()));
 			return true;
 		}
 
@@ -532,27 +506,23 @@ namespace DesignImportPipeline
 		 * RefreshChildWidgets): mapped candidates instantiate as usual and their names enter the new d2uOwned;
 		 * manifest instances already inside the subtree are pruned (rehung by reparent).
 		 */
-		void CreateNestedChildWidget(
+		bool CreateNestedChildWidget(
 			const FUMGWidgetNode& Child,
 			UPanelWidget* Panel,
 			UWidget* ParentWidget,
 			const FReimportApplySharedState& Shared,
 			TMap<FString, UWidget*>& NewlyCreatedWidgets)
 		{
-		FUMGWidgetNode PrunedChild = Child;
-		PruneManifestInstanceChildren(PrunedChild, *Shared.InstancesById);
-		UWidget* CreatedWidget = FUMGWidgetUtils::CreateWidgetRecursive(
-			Shared.WidgetTree, PrunedChild, Panel, nullptr, &Shared.DesignSize, Shared.MappingBuildState,
-			nullptr, Shared.GenerationSettings);
-			if (CreatedWidget)
-			{
-				NewlyCreatedWidgets.Add(GetDesignNodeId(Child), CreatedWidget);
-				AddReimportDiagnostic(
-					*Shared.Diagnostics, ReimportDiagnosticKinds::Added,
-					FString::Printf(
-						TEXT("New design node '%s' (%s) added under '%s'"),
-						*Child.Name, *GetDesignNodeId(Child), *ParentWidget->GetName()));
-			}
+			FUMGWidgetNode PrunedChild = Child;
+			PruneManifestInstanceChildren(PrunedChild, *Shared.InstancesById);
+			UWidget* CreatedWidget = CreateReimportWidget(PrunedChild, Panel, Shared);
+			if (!CreatedWidget) return false;
+			NewlyCreatedWidgets.Add(GetDesignNodeId(Child), CreatedWidget);
+			AddReimportDiagnostic(
+				*Shared.Diagnostics, ReimportDiagnosticKinds::Added,
+				FString::Printf(TEXT("New design node '%s' (%s) added under '%s'"),
+					*Child.Name, *GetDesignNodeId(Child), *ParentWidget->GetName()));
+			return true;
 		}
 
 		/**
@@ -563,7 +533,7 @@ namespace DesignImportPipeline
 		 * design-added nested nodes first consult the nested move candidates (spec R3: move the widget and preserve
 		 * identity when both endpoints are D2U-owned; conflict and no copy when the source side holds project content); only then does the generation chain rebuild.
 		 */
-		void RefreshChildWidgets(
+		bool RefreshChildWidgets(
 			const FUMGWidgetNode& Node,
 			UWidget* Widget,
 			const FReimportApplySharedState& Shared,
@@ -573,88 +543,34 @@ namespace DesignImportPipeline
 			UPanelWidget* Panel = Cast<UPanelWidget>(Widget);
 			if (!Panel)
 			{
-				return;
+				return true;
 			}
 
 			const FNestedChildrenMatch Match = MatchNestedChildren(Node, Panel, Shared);
 			for (const FNestedChildrenMatch::FMatchedPair& Pair : Match.Matched)
 			{
-				RefreshNodeByKind(*Pair.Child, Pair.Widget, Shared, NestedMoveCandidates, NewlyCreatedWidgets);
+				if (!RefreshNodeByKind(*Pair.Child, Pair.Widget, Shared, NestedMoveCandidates, NewlyCreatedWidgets)) return false;
 			}
 
 			for (const FUMGWidgetNode* Child : Match.UnmatchedDesignChildren)
 			{
 				const FString BaseName = FUMGWidgetUtils::SanitizeWidgetName(Child->Name, Child->Type).ToString();
-				if (!TryNestedMoveChild(*Child, BaseName, Panel, Widget, Shared, NestedMoveCandidates, NewlyCreatedWidgets))
+				const TOptional<bool> Moved = TryNestedMoveChild(
+					*Child, BaseName, Panel, Widget, Shared, NestedMoveCandidates, NewlyCreatedWidgets);
+				if (Moved.IsSet())
 				{
-					CreateNestedChildWidget(*Child, Panel, Widget, Shared, NewlyCreatedWidgets);
+					if (!Moved.GetValue()) return false;
+				}
+				else if (!CreateNestedChildWidget(*Child, Panel, Widget, Shared, NewlyCreatedWidgets))
+				{
+					return false;
 				}
 			}
+			return true;
 		}
 	}
 
-	namespace
-	{
-		UWidget* RefreshAutomaticInstance(const FUMGWidgetNode& Node, UWidget* Widget,
-			const FReimportApplySharedState& Shared)
-		{
-			const auto& ComponentContext = Shared.GenerationSettings->ComponentBlueprints;
-
-			UUserWidget* Instance = Cast<UUserWidget>(Widget);
-			const auto* Component = ComponentContext->Components.Find(ComponentContext->ResolveKey(Node));
-			if (!Instance || !Component)
-			{
-				ComponentContext->Error = TEXT("Automatic instance no longer matches generated widget: ") + Node.Name;
-				return nullptr;
-			}
-			TArray<FName> Slots;
-			Instance->GetSlotNames(Slots);
-			TSet<FString> UpdatedOwned = *Shared.OwnedNames;
-			FString ConflictReason;
-			for (const FName Slot : Slots)
-			{
-				if (UWidget* Content = Instance->GetContentForSlot(Slot))
-				{
-					if (!IsSubtreePurelyD2UOwned(Shared.WBP, Content, UpdatedOwned, ConflictReason))
-					{
-						ComponentContext->Error = TEXT("Instance override contains user changes: ") + Node.Name + TEXT("; ") + ConflictReason;
-						return nullptr;
-					}
-				}
-			}
-			if (Instance->GetClass()->GetPathName() != Component->ClassPath)
-			{
-				UPanelWidget* Parent = Instance->GetParent();
-				if (!Parent || !IsSubtreePurelyD2UOwned(Shared.WBP, Instance, UpdatedOwned, ConflictReason))
-				{
-					ComponentContext->Error = TEXT("Component swap conflicts with user content: ") + Node.Name + TEXT("; ") + ConflictReason;
-					return nullptr;
-				}
-				const int32 Index = Parent->GetChildIndex(Instance);
-				DeleteD2UOwnedSubtreeSilently(Shared.WBP, Instance, UpdatedOwned);
-				Widget = FUMGWidgetUtils::CreateWidgetRecursive(Shared.WidgetTree, Node, Parent, nullptr,
-					&Shared.DesignSize, Shared.MappingBuildState, nullptr, Shared.GenerationSettings);
-				if (!Widget) return nullptr;
-				Parent->ShiftChild(Index, Widget);
-			}
-			else
-			{
-				for (const FName Slot : Slots)
-				{
-					if (UWidget* Content = Instance->GetContentForSlot(Slot))
-					{
-						Instance->SetContentForSlot(Slot, nullptr);
-						DeleteD2UOwnedSubtreeSilently(Shared.WBP, Content, UpdatedOwned);
-					}
-				}
-				if (!ComponentContext->ApplyInstance(Instance, Shared.WidgetTree, Node, *Shared.GenerationSettings,
-					nullptr, &Shared.DesignSize, Shared.MappingBuildState)) return nullptr;
-			}
-			return Widget;
-		}
-	}
-
-	void RefreshNodeByKind(
+	bool RefreshNodeByKind(
 		const FUMGWidgetNode& Node,
 		UWidget* Widget,
 		const FReimportApplySharedState& Shared,
@@ -666,7 +582,7 @@ namespace DesignImportPipeline
 			if (UUserWidget* MappedInstance = Cast<UUserWidget>(Widget))
 			{
 				RefreshMappedInstance(MappedInstance, Node, Shared);
-				return;
+				return true;
 			}
 			if (Shared.GenerationSettings->ComponentBlueprints)
 			{
@@ -676,26 +592,26 @@ namespace DesignImportPipeline
 				Settings.ComponentBlueprints.Reset();
 				FReimportApplySharedState Ordinary = Shared;
 				Ordinary.GenerationSettings = &Settings;
-				RefreshNodeByKind(Node, Widget, Ordinary, NestedMoveCandidates, NewlyCreatedWidgets);
-				return;
+				return RefreshNodeByKind(Node, Widget, Ordinary, NestedMoveCandidates, NewlyCreatedWidgets);
 			}
 		}
 
-		Widget->Modify();
-		ApplySlotForNode(Widget, Node, Shared);
 		const auto ComponentContext = Shared.GenerationSettings->ComponentBlueprints;
 		const FString AutomaticKey = ComponentContext ? ComponentContext->ResolveKey(Node) : FString();
 		if (!AutomaticKey.IsEmpty())
 		{
 			Widget = RefreshAutomaticInstance(Node, Widget, Shared);
-			if (!Widget) return;
+			if (!Widget) return false;
 		}
-		else FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node);
+		Widget->Modify();
+		ApplySlotForNode(Widget, Node, Shared);
+		if (AutomaticKey.IsEmpty()) FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node);
 		if (UImage* ImageWidget = Cast<UImage>(Widget))
 		{
 			FWidgetResourceBinder::BindImageResource(ImageWidget, Node, nullptr);
 		}
-		if (AutomaticKey.IsEmpty()) RefreshChildWidgets(Node, Widget, Shared, NestedMoveCandidates, NewlyCreatedWidgets);
+		if (AutomaticKey.IsEmpty()
+			&& !RefreshChildWidgets(Node, Widget, Shared, NestedMoveCandidates, NewlyCreatedWidgets)) return false;
 
 		// Only top-level generation relations (hung under the host root) enter the manifest instances; nested nodes only refresh properties.
 		if (Shared.HostPanel && Widget->GetParent() == Shared.HostPanel)
@@ -711,5 +627,5 @@ namespace DesignImportPipeline
 			FString::Printf(
 				TEXT("D2U-owned node '%s' (%s) refreshed from design (layout/slot/visual/text)"),
 				*Node.Name, *GetDesignNodeId(Node)));
-	}
-}
+		return true;
+	}}

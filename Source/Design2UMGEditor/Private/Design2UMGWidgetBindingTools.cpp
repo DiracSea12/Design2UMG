@@ -154,7 +154,7 @@ namespace Design2UMGWidgetBindingTools
 				return;
 			}
 			// Compile + save go through the same path as the generation chain (including compile-time binding validation); no generation manifest is written.
-			if (!FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr))
+			if (!FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr).IsSuccess())
 			{
 				UE_LOG(LogDesign2UMG, Error,
 					TEXT("Binding '%s'.'%s' -> '%s' added but compile/save failed for %s"),

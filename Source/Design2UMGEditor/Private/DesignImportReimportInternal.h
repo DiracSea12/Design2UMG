@@ -21,6 +21,9 @@ namespace DesignImportPipeline
 	// Update plan
 	// ---------------------------------------------------------------------------
 
+	// Recorded identities: Matched = PropertyUpdate, plus Move when the parent changes;
+	// KindChanged = Replace; Removed = Remove. Add is discovered from unmatched new nodes
+	// in ApplyAddedTopLevelNodes / RefreshChildWidgets, so it has no old manifest record.
 	enum class EReimportPlanAction : uint8
 	{
 		Matched,      // designNodeId present on both sides with the same kind -> update D2U-owned properties/layout (incl. the reparent decision)
@@ -57,6 +60,9 @@ namespace DesignImportPipeline
 	 */
 	namespace ReimportDiagnosticKinds
 	{
+		inline constexpr const TCHAR* PrepareFailed = TEXT("reimport_prepare_failed");
+		inline constexpr const TCHAR* AttachFailed = TEXT("reimport_attach_failed");
+		inline constexpr const TCHAR* ApplyFailed = TEXT("reimport_apply_failed");
 		inline constexpr const TCHAR* Added = TEXT("reimport_added");
 		inline constexpr const TCHAR* Completed = TEXT("reimport_completed");
 		inline constexpr const TCHAR* FullConflict = TEXT("reimport_full_conflict");
@@ -70,6 +76,7 @@ namespace DesignImportPipeline
 		inline constexpr const TCHAR* NodeMissing = TEXT("reimport_node_missing");
 		inline constexpr const TCHAR* PrototypeHostContinued = TEXT("reimport_prototype_host_continued");
 		inline constexpr const TCHAR* PrototypeGraphConflict = TEXT("reimport_prototype_graph_conflict");
+		inline constexpr const TCHAR* PartialSync = TEXT("reimport_partial_sync");
 		inline constexpr const TCHAR* RemoveConflict = TEXT("reimport_remove_conflict");
 		inline constexpr const TCHAR* Removed = TEXT("reimport_removed");
 		inline constexpr const TCHAR* ResolutionCopy = TEXT("reimport_resolution_copy");
@@ -102,6 +109,8 @@ namespace DesignImportPipeline
 		const TMap<FString, const FDesign2UMGGenerationManifestSidecar::FInstanceRecord*>* InstancesById = nullptr;
 		FDesign2UMGComponentMappingBuildState* MappingBuildState = nullptr;
 		TArray<FDesign2UMGMappingDiagnostic>* Diagnostics = nullptr;
+		/** Monotonic non-fatal partial-sync signal; diagnostics explain the concrete cause. */
+		bool* bHasDegradation = nullptr;
 		TArray<FDesign2UMGMappedInstanceRecord>* UpdatedMappedRecords = nullptr;
 		TArray<FDesign2UMGGeneratedInstanceRecord>* UpdatedGeneratedRecords = nullptr;
 		/** Manifest instance widget names still alive in this round's update plan (the second gate of the 9a/9b whole delete). */
@@ -115,6 +124,10 @@ namespace DesignImportPipeline
 	// DesignImportReimportDiagnostics.cpp
 	void AddReimportDiagnostic(
 		TArray<FDesign2UMGMappingDiagnostic>& Diagnostics,
+		const TCHAR* Kind,
+		const FString& Message);
+	void AddReimportDegradation(
+		const FReimportApplySharedState& Shared,
 		const TCHAR* Kind,
 		const FString& Message);
 	bool HasRealSourceIdentity(const FUMGWidgetNode& Node);
@@ -141,6 +154,18 @@ namespace DesignImportPipeline
 		const FReimportSession& Session,
 		TArray<FDesign2UMGMappingDiagnostic>&& PriorDiagnostics);
 
+	bool DiscardDetachedReimportWidgets(UWidgetTree* WidgetTree, const TSet<UObject*>& ExistingObjects,
+		TArray<FDesign2UMGMappingDiagnostic>& Diagnostics);
+	// DesignImportReimportBuild.cpp: construction is detached; ownership is committed after attachment.
+	UWidget* CreateReimportWidget(const FUMGWidgetNode& Node, UPanelWidget* Parent,
+		const FReimportApplySharedState& Shared);
+	UWidget* ReplaceReimportWidget(const FUMGWidgetNode& Node, UWidget* OldWidget,
+		const FReimportApplySharedState& Shared, TSet<FString>& UpdatedD2UOwned);
+	bool MoveReimportWidget(UWidget* Widget, UPanelWidget* Target, const FUMGWidgetNode& Node,
+		const FReimportApplySharedState& Shared);
+	UWidget* RefreshAutomaticInstance(const FUMGWidgetNode& Node, UWidget* Widget,
+		const FReimportApplySharedState& Shared);
+
 	// DesignImportReimportApply.cpp
 	void ApplySlotForNode(UWidget* Widget, const FUMGWidgetNode& Node, const FReimportApplySharedState& Shared);
 	bool IsMappedClassConflict(
@@ -153,7 +178,7 @@ namespace DesignImportPipeline
 		UPanelWidget* Panel,
 		const FReimportApplySharedState& Shared,
 		TSet<FString>& OutExpected);
-	void RefreshNodeByKind(
+	bool RefreshNodeByKind(
 		const FUMGWidgetNode& Node,
 		UWidget* Widget,
 		const FReimportApplySharedState& Shared,
@@ -163,22 +188,22 @@ namespace DesignImportPipeline
 	// DesignImportReimportStages.cpp
 	FDesign2UMGMappedInstanceRecord ManifestRecordToMappedRecord(
 		const FDesign2UMGGenerationManifestSidecar::FInstanceRecord& Record);
-	void ApplyRemovedPlanEntries(
+	bool ApplyRemovedPlanEntries(
 		const TArray<FReimportPlanEntry>& Plan,
 		const FReimportApplySharedState& Shared,
 		TSet<FString>& UpdatedD2UOwned,
 		TArray<FString>& KeepAsIsWidgetNames);
-	void ApplyKindChangedPlanEntries(
+	bool ApplyKindChangedPlanEntries(
 		const TArray<FReimportPlanEntry>& Plan,
 		const FReimportApplySharedState& Shared,
 		TSet<FString>& UpdatedD2UOwned,
 		TArray<FString>& KeepAsIsWidgetNames,
 		TMap<FString, UWidget*>& NewlyCreatedWidgets);
-	void ApplyAddedTopLevelNodes(
+	bool ApplyAddedTopLevelNodes(
 		const FUMGWidgetNode& PreparedScopeRoot,
 		const FReimportApplySharedState& Shared,
 		TMap<FString, UWidget*>& NewlyCreatedWidgets);
-	void ApplyReparentPlanEntries(
+	bool ApplyReparentPlanEntries(
 		const TArray<FReimportPlanEntry>& Plan,
 		const FUMGWidgetNode& PreparedScopeRoot,
 		const FReimportApplySharedState& Shared,
@@ -187,7 +212,7 @@ namespace DesignImportPipeline
 	TArray<UWidget*> CollectNestedMoveCandidates(
 		const FUMGWidgetNode& PreparedScopeRoot,
 		const FReimportApplySharedState& Shared);
-	void ApplyMatchedPlanEntries(
+	bool ApplyMatchedPlanEntries(
 		const TArray<FReimportPlanEntry>& Plan,
 		const FReimportApplySharedState& Shared,
 		const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings,
@@ -213,7 +238,7 @@ namespace DesignImportPipeline
 		FDesignReimportResult& Result,
 		const FUMGWidgetNode*& ScopeRoot,
 		bool& bPrototypeHostContinued);
-	void BuildReimportUpdatePlan(
+	bool BuildReimportUpdatePlan(
 		const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings,
 		const FUMGWidgetData& Data,
 		const FDesign2UMGGenerationManifestSidecar& Manifest,

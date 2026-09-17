@@ -26,7 +26,7 @@ bool FDesign2UMGSaveWidgetBlueprintFailureTest::RunTest(const FString& Parameter
 {
 	AddExpectedError(TEXT("Widget Blueprint is null"), EAutomationExpectedErrorFlags::Contains, 1);
 	AddExpectedError(TEXT("missing valid DesignTimeSize"), EAutomationExpectedErrorFlags::Contains, 1);
-	TestFalse(TEXT("Null Blueprint cannot be reported as saved"), FUMGGenerator::SaveWidgetBlueprint(nullptr));
+	TestFalse(TEXT("Null Blueprint cannot be reported as saved"), FUMGGenerator::SaveWidgetBlueprint(nullptr).IsSuccess());
 
 	UWidgetBlueprint* BlueprintWithoutDesignSize = NewObject<UWidgetBlueprint>(GetTransientPackage());
 	TestNotNull(TEXT("Transient Blueprint created"), BlueprintWithoutDesignSize);
@@ -34,7 +34,7 @@ bool FDesign2UMGSaveWidgetBlueprintFailureTest::RunTest(const FString& Parameter
 	{
 		TestFalse(
 			TEXT("Blueprint without a source design size cannot be reported as saved"),
-			FUMGGenerator::SaveWidgetBlueprint(BlueprintWithoutDesignSize));
+			FUMGGenerator::SaveWidgetBlueprint(BlueprintWithoutDesignSize).IsSuccess());
 	}
 	return true;
 }
@@ -78,7 +78,7 @@ bool FDesign2UMGFailedSaveDiscardsUnsavedAssetTest::RunTest(const FString& Param
 	GeneratedCDO->DesignTimeSize = FVector2D::ZeroVector;
 
 	AddExpectedError(TEXT("missing valid DesignTimeSize"), EAutomationExpectedErrorFlags::Contains, 2);
-	TestFalse(TEXT("Invalid Blueprint save fails"), FUMGGenerator::SaveWidgetBlueprint(Blueprint));
+	TestFalse(TEXT("Invalid Blueprint save fails"), FUMGGenerator::SaveWidgetBlueprint(Blueprint).IsSuccess());
 	TestFalse(TEXT("Failed save leaves no registered asset"), AssetRegistry.GetAssetByObjectPath(OriginalObjectPath).IsValid());
 	TestFalse(TEXT("Failed save clears the target package dirty flag"), TargetPackage->IsDirty());
 	TestEqual(TEXT("Failed save moves the Blueprint out of the target package"), Blueprint->GetOutermost(), GetTransientPackage());
@@ -90,7 +90,7 @@ bool FDesign2UMGFailedSaveDiscardsUnsavedAssetTest::RunTest(const FString& Param
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
 	}
-	TestTrue(TEXT("Existing Blueprint baseline save succeeds"), FUMGGenerator::SaveWidgetBlueprint(ExistingBlueprint));
+	TestTrue(TEXT("Existing Blueprint baseline save succeeds"), FUMGGenerator::SaveWidgetBlueprint(ExistingBlueprint).IsSuccess());
 	UPackage* ExistingPackage = ExistingBlueprint->GetOutermost();
 	const FSoftObjectPath ExistingObjectPath(ExistingBlueprint);
 	TestTrue(TEXT("Existing Blueprint is registered before save"), AssetRegistry.GetAssetByObjectPath(ExistingObjectPath).IsValid());
@@ -103,7 +103,7 @@ bool FDesign2UMGFailedSaveDiscardsUnsavedAssetTest::RunTest(const FString& Param
 		return false;
 	}
 	ExistingCDO->DesignTimeSize = FVector2D::ZeroVector;
-	TestFalse(TEXT("Invalid existing Blueprint save fails"), FUMGGenerator::SaveWidgetBlueprint(ExistingBlueprint));
+	TestFalse(TEXT("Invalid existing Blueprint save fails"), FUMGGenerator::SaveWidgetBlueprint(ExistingBlueprint).IsSuccess());
 	TestEqual(TEXT("Failed save keeps an existing Blueprint in its package"), ExistingBlueprint->GetOutermost(), ExistingPackage);
 	TestTrue(TEXT("Failed save keeps an existing Blueprint registered"), AssetRegistry.GetAssetByObjectPath(ExistingObjectPath).IsValid());
 
@@ -188,7 +188,7 @@ bool FDesign2UMGReloadSkipsDirtyBlueprintPackageTest::RunTest(const FString& Par
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
 	}
-	if (!TestTrue(TEXT("Baseline save succeeds"), FUMGGenerator::SaveWidgetBlueprint(Blueprint)))
+	if (!TestTrue(TEXT("Baseline save succeeds"), FUMGGenerator::SaveWidgetBlueprint(Blueprint).IsSuccess()))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
@@ -233,7 +233,7 @@ bool FDesign2UMGReloadSkipsDirtyBlueprintPackageTest::RunTest(const FString& Par
 	}
 
 	// Clean-package control: after saving the edit, the reload path must run again.
-	if (!TestTrue(TEXT("Save after the skipped reload succeeds"), FUMGGenerator::SaveWidgetBlueprint(Loaded)))
+	if (!TestTrue(TEXT("Save after the skipped reload succeeds"), FUMGGenerator::SaveWidgetBlueprint(Loaded).IsSuccess()))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;

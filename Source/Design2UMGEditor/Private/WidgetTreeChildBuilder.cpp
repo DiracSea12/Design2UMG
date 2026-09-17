@@ -3,14 +3,9 @@
 
 #include "UMGWidgetUtils.h"
 #include "Design2UMGLog.h"
-#include "UMGPropertyKeys.h"
-#include "UMGValueParsing.h"
-#include "UMGWidgetNodeAccess.h"
 #include "WidgetLayoutAdapter.h"
 
 #include "Blueprint/WidgetTree.h"
-#include "Components/Border.h"
-#include "Components/ContentWidget.h"
 #include "Components/GridPanel.h"
 #include "Components/NamedSlotInterface.h"
 #include "Components/PanelSlot.h"
@@ -187,7 +182,7 @@ namespace
 			Context.GenerationSettings);
 	}
 
-	void BuildPanelChildren(
+	bool BuildPanelChildren(
 		UWidgetTree* WidgetTree,
 		UPanelWidget* Panel,
 		const FUMGWidgetNode& Node,
@@ -207,12 +202,13 @@ namespace
 				FUMGWidgetNode ChildCopy = Child;
 				ChildCopy.Slot.Row = SlotIndex->X;
 				ChildCopy.Slot.Column = SlotIndex->Y;
-				CreateChildWidget(WidgetTree, ChildCopy, Panel, Context);
+				if (!CreateChildWidget(WidgetTree, ChildCopy, Panel, Context)) return false;
 				continue;
 			}
 
-			CreateChildWidget(WidgetTree, Child, Panel, Context);
+			if (!CreateChildWidget(WidgetTree, Child, Panel, Context)) return false;
 		}
+		return true;
 	}
 
 	FName ResolveNamedSlotTarget(
@@ -261,7 +257,7 @@ namespace
 		return NAME_None;
 	}
 
-	void AppendToNamedSlot(
+	bool AppendToNamedSlot(
 		UWidgetTree* WidgetTree,
 		INamedSlotInterface* NamedSlotHost,
 		const FUMGWidgetNode& HostNode,
@@ -269,36 +265,31 @@ namespace
 		UWidget* ChildWidget,
 		const FUMGWidgetNode& ChildNode)
 	{
+		UWidget* Content = ChildWidget;
 		if (UWidget* Existing = NamedSlotHost->GetContentForSlot(SlotName))
 		{
 			if (UPanelWidget* Panel = Cast<UPanelWidget>(Existing))
 			{
-				if (UPanelSlot* NewSlot = Panel->AddChild(ChildWidget))
-				{
-					FUMGWidgetUtils::ApplySlotProperties(NewSlot, ChildNode.Slot);
-				}
-				return;
+				UPanelSlot* NewSlot = Panel->AddChild(ChildWidget);
+				if (!NewSlot) return false;
+				FUMGWidgetUtils::ApplySlotProperties(NewSlot, ChildNode.Slot);
+				return true;
 			}
 
 			const FName WrapName = FUMGWidgetUtils::SanitizeWidgetName(
-				HostNode.Name + TEXT("_SlotWrap_") + SlotName.ToString(),
-				TEXT("SlotWrap"));
-			if (UVerticalBox* WrapBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), WrapName))
-			{
-				WrapBox->AddChild(Existing);
-				if (UPanelSlot* NewSlot = WrapBox->AddChild(ChildWidget))
-				{
-					FUMGWidgetUtils::ApplySlotProperties(NewSlot, ChildNode.Slot);
-				}
-				NamedSlotHost->SetContentForSlot(SlotName, WrapBox);
-			}
-			return;
+				HostNode.Name + TEXT("_SlotWrap_") + SlotName.ToString(), TEXT("SlotWrap"));
+			UVerticalBox* WrapBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), WrapName);
+			if (!WrapBox || !WrapBox->AddChild(Existing)) return false;
+			UPanelSlot* NewSlot = WrapBox->AddChild(ChildWidget);
+			if (!NewSlot) return false;
+			FUMGWidgetUtils::ApplySlotProperties(NewSlot, ChildNode.Slot);
+			Content = WrapBox;
 		}
-
-		NamedSlotHost->SetContentForSlot(SlotName, ChildWidget);
+		NamedSlotHost->SetContentForSlot(SlotName, Content);
+		return NamedSlotHost->GetContentForSlot(SlotName) == Content;
 	}
 
-	void BuildNamedSlotChildren(
+	bool BuildNamedSlotChildren(
 		UWidgetTree* WidgetTree,
 		INamedSlotInterface* NamedSlotHost,
 		const FUMGWidgetNode& Node,
@@ -314,7 +305,7 @@ namespace
 				UE_LOG(LogDesign2UMG, Warning, TEXT("NamedSlot host '%s' has no slot names but has %d child widgets."),
 					*Node.Name, Node.Children.Num());
 			}
-			return;
+			return Node.Children.IsEmpty();
 		}
 
 		int32 NextSlotIndex = 0;
@@ -323,7 +314,7 @@ namespace
 			UWidget* ChildWidget = CreateChildWidget(WidgetTree, ChildNode, nullptr, Context);
 			if (!ChildWidget)
 			{
-				continue;
+				return false;
 			}
 
 			bool bFallbackAppend = false;
@@ -337,7 +328,7 @@ namespace
 			{
 				UE_LOG(LogDesign2UMG, Warning, TEXT("NamedSlot host '%s' has no available slot; child widget '%s' was skipped."),
 					*Node.Name, *ChildNode.Name);
-				continue;
+				return false;
 			}
 
 			if (FWidgetLayoutAdapter::HasMeaningfulSlot(ChildNode.Slot))
@@ -357,46 +348,16 @@ namespace
 					*TargetSlot.ToString(), *Node.Name, *ChildNode.Name);
 			}
 
-			AppendToNamedSlot(WidgetTree, NamedSlotHost, Node, TargetSlot, ChildWidget, ChildNode);
+			if (!AppendToNamedSlot(WidgetTree, NamedSlotHost, Node, TargetSlot, ChildWidget, ChildNode)) return false;
 		}
+		return true;
 	}
 
-	void BuildContentWidgetChild(
-		UWidgetTree* WidgetTree,
-		UContentWidget* Content,
-		const FUMGWidgetNode& Node,
-		const FWidgetTreeChildBuildContext& Context)
-	{
-		if (Node.Children.Num() == 0)
-		{
-			return;
-		}
-
-		const FUMGWidgetNode& ChildNode = Node.Children[0];
-		if (UWidget* ChildWidget = CreateChildWidget(WidgetTree, ChildNode, nullptr, Context))
-		{
-			if (UPanelSlot* ContentSlot = Content->SetContent(ChildWidget))
-			{
-				FUMGWidgetUtils::ApplySlotProperties(ContentSlot, ChildNode.Slot);
-			}
-
-			if (UBorder* Border = Cast<UBorder>(Content))
-			{
-				Border->SetHorizontalAlignment(FUMGValueParser::ToSlateHorizontalAlignment(ChildNode.Slot.HorizontalAlignment));
-				Border->SetVerticalAlignment(FUMGValueParser::ToSlateVerticalAlignment(ChildNode.Slot.VerticalAlignment));
-			}
-		}
-
-		if (Node.Children.Num() > 1)
-		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("ContentWidget '%s' ignoring %d extra children"), *Node.Name, Node.Children.Num() - 1);
-		}
-	}
 }
 
 namespace FWidgetTreeChildBuilder
 {
-	void BuildChildren(
+	bool BuildChildren(
 		UWidgetTree* WidgetTree,
 		UWidget* ParentWidget,
 		const FUMGWidgetNode& Node,
@@ -404,19 +365,12 @@ namespace FWidgetTreeChildBuilder
 	{
 		if (UPanelWidget* Panel = Cast<UPanelWidget>(ParentWidget))
 		{
-			BuildPanelChildren(WidgetTree, Panel, Node, Context);
-			return;
+			return BuildPanelChildren(WidgetTree, Panel, Node, Context);
 		}
-
 		if (INamedSlotInterface* NamedSlotHost = Cast<INamedSlotInterface>(ParentWidget))
 		{
-			BuildNamedSlotChildren(WidgetTree, NamedSlotHost, Node, Context);
-			return;
+			return BuildNamedSlotChildren(WidgetTree, NamedSlotHost, Node, Context);
 		}
-
-		if (UContentWidget* Content = Cast<UContentWidget>(ParentWidget))
-		{
-			BuildContentWidgetChild(WidgetTree, Content, Node, Context);
-		}
+		return Node.Children.IsEmpty();
 	}
 }

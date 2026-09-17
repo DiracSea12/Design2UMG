@@ -1,6 +1,9 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "GeneratedAssetLifecycle.h"
+#include "Editor.h"
+#include "Editor/Transactor.h"
+#include <atomic>
 #include "HAL/FileManager.h"
 #include "HAL/PlatformFileManager.h"
 
@@ -9,8 +12,34 @@
 #include "UObject/Package.h"
 #include "UObject/UObjectGlobals.h"
 
+namespace
+{
+#if WITH_DEV_AUTOMATION_TESTS
+	std::atomic<bool> bAutomationUndoFailureArmed{false};
+#endif
+}
+
 namespace GeneratedAssetLifecycle
 {
+	bool UndoOwnedTransaction(const FGuid& TransactionId)
+	{
+		if (!GEditor || !GEditor->Trans || !TransactionId.IsValid() || GEditor->IsTransactionActive()) return false;
+		const int32 Last = GEditor->Trans->GetQueueLength() - GEditor->Trans->GetUndoCount() - 1;
+		const FTransaction* Transaction = Last >= 0 ? GEditor->Trans->GetTransaction(Last) : nullptr;
+		if (!Transaction || Transaction->GetId() != TransactionId) return false;
+#if WITH_DEV_AUTOMATION_TESTS
+		if (bAutomationUndoFailureArmed.exchange(false)) return false;
+#endif
+		return GEditor->UndoTransaction(false);
+	}
+
+#if WITH_DEV_AUTOMATION_TESTS
+	void ArmAutomationUndoFailureOnce()
+	{
+		bAutomationUndoFailureArmed.store(true);
+	}
+#endif
+
 	bool IsFileWritableForSave(const FString& InPath, bool bAllowWriteProbe, FString& OutReason)
 	{
 		if (!IFileManager::Get().FileExists(*InPath))
@@ -37,11 +66,11 @@ namespace GeneratedAssetLifecycle
 		return true;
 	}
 
-	void DiscardUnsavedAsset(UObject* Asset)
+	bool DiscardUnsavedAsset(UObject* Asset)
 	{
 		if (!Asset)
 		{
-			return;
+			return true;
 		}
 
 		UPackage* OriginalPackage = Asset->GetOutermost();
@@ -57,6 +86,7 @@ namespace GeneratedAssetLifecycle
 		{
 			OriginalPackage->ClearDirtyFlag();
 		}
+		return bMovedToTransientPackage;
 	}
 
 	void RegisterSavedAsset(UObject* Asset)

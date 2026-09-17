@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Design2UMGCommitResult.h"
 
 struct FDesignDocument;
 struct FDesign2UMGMappingDiagnostic;
@@ -20,6 +21,7 @@ namespace DesignImportDiagnosticReport
 		FString RequestedRenderPngPath;
 		FString GeneratedAssetPath;
 		FString RenderPngPath;
+		TOptional<FDesign2UMGCommitResult> Commit;
 	};
 
 	void Write(
@@ -40,5 +42,6 @@ namespace DesignImportDiagnosticReport
 		const FUMGWidgetData& Data,
 		const FString& TargetAssetPath,
 		const TArray<FDesign2UMGMappingDiagnostic>& ReimportDiagnostics,
-		const TArray<FDesign2UMGMappingDiagnostic>* ComponentMappingDiagnostics = nullptr);
+		const TArray<FDesign2UMGMappingDiagnostic>* ComponentMappingDiagnostics = nullptr,
+		const FDesign2UMGCommitResult* Commit = nullptr);
 }

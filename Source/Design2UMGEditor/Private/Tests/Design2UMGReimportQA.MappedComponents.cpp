@@ -63,6 +63,9 @@ bool FSafeReimportQAMappedClassChangeTest::RunTest(const FString&)
 		*MakeQAText(TEXT("qa_keep"), TEXT("Keeper"), 200, 24, TEXT("Keep"))));
 	const FDesignReimportResult Result = QAReimport(V2, QAOtherMappedClassPath, TargetPackage);
 	TestTrue(TEXT("reimport itself succeeds (conflict is per-node)"), Result.bSucceeded);
+	TestTrue(TEXT("mapped class conflict raises explicit degradation"), Result.bHasDegradation);
+	TestEqual(TEXT("mapped class conflict is not plain success"), Result.Commit.Status,
+		EDesign2UMGCommitStatus::SucceededWithDegradation);
 
 	UDesign2UMGMappingQAWidget* MappedAfter = MappedWeak.Get();
 	if (TestNotNull(TEXT("mapped instance kept (not destroyed, not replaced)"), MappedAfter))
@@ -284,8 +287,17 @@ bool FSafeReimportQAMappingDiagnosticsSurfacedTest::RunTest(const FString&)
 		Request.SettingsSnapshot->GenerationSettings.ComponentMapping.ValidationDiagnostics.Add(
 			MoveTemp(ValidationDiagnostic));
 	}
+	UDesign2UMGMappingQAWidget* OriginalInstance = QAFindMappedInstance(WBP);
+	FString OriginalManifest;
+	QAReadFileString(Design2UMGGenerationManifest::BuildSidecarPathForAsset(TargetPackage), OriginalManifest);
 	const FDesignReimportResult Result = DesignImportPipeline::Reimport(Document, Request);
-	TestTrue(TEXT("reimport itself succeeds (class fallback is a per-node path)"), Result.bSucceeded);
+	TestFalse(TEXT("unavailable mapped class aborts reimport before mutation"), Result.bSucceeded);
+	TestTrue(TEXT("original mapped instance retained"), QAFindMappedInstance(WBP) == OriginalInstance);
+	TestEqual(TEXT("no false kind-change success"), QACountKind(Result, TEXT("reimport_kind_changed")), 0);
+	TestEqual(TEXT("no false completion"), QACountKind(Result, TEXT("reimport_completed")), 0);
+	FString CurrentManifest;
+	QAReadFileString(Design2UMGGenerationManifest::BuildSidecarPathForAsset(TargetPackage), CurrentManifest);
+	TestEqual(TEXT("manifest unchanged after class-load failure"), CurrentManifest, OriginalManifest);
 
 	// Result exit: the ini validation diagnostic + the BuildState-collected match/fallback diagnostics are all in ComponentMappingDiagnostics.
 	auto HasMappingDiagnostic = [&Result](const TCHAR* Kind, const TCHAR* Substring = nullptr)

@@ -12,6 +12,7 @@
 #include "Blueprint/WidgetTree.h"
 #include "Animation/WidgetAnimation.h"
 #include "Editor.h"
+#include "Editor/Transactor.h"
 #include "HAL/FileManager.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
@@ -39,35 +40,30 @@ namespace DesignImportPipeline
 			return nullptr;
 		}
 
-		/** Whether the IR node is in the "instantiable mapped form": hit a mapping Key and the mapped class is currently loadable. */
-		bool IsMappedKind(
-			const FUMGWidgetNode& Node,
-			const FDesign2UMGComponentMappingConfig& MappingConfig,
-			TMap<FString, bool>& MappedKindCache)
+		bool ValidateReimportMappedClasses(const FUMGWidgetNode& Node,
+			FDesign2UMGComponentMappingBuildState& BuildState, TSet<FString>& CheckedKeys)
 		{
-			if (!Node.HasSourceData() || Node.Source().MappedComponentKey.IsEmpty())
+			if (Node.HasSourceData() && !Node.Source().MappedComponentKey.IsEmpty())
 			{
-				return false;
+				const FString& Key = Node.Source().MappedComponentKey;
+				if (CheckedKeys.Contains(Key)) return true;
+				CheckedKeys.Add(Key);
+				const auto* Entry = BuildState.FindEntryForKey(Key);
+				if (!Entry || !FSoftClassPath(Entry->WidgetClass).TryLoadClass<UUserWidget>())
+				{
+					BuildState.AddDiagnostic(TEXT("mapping_class_unavailable"), FString::Printf(
+						TEXT("Mapping '%s' for node '%s' cannot load class '%s'; reimport left the existing asset unchanged"),
+						*Key, *Node.Name, Entry ? *Entry->WidgetClass : TEXT("(missing entry)")));
+					return false;
+				}
+				return true; // A mapped instance owns its implementation; its design children are not built.
 			}
-
-			const FString& Key = Node.Source().MappedComponentKey;
-			if (bool* Cached = MappedKindCache.Find(Key))
+			for (const FUMGWidgetNode& Child : Node.Children)
 			{
-				return *Cached;
+				if (!ValidateReimportMappedClasses(Child, BuildState, CheckedKeys)) return false;
 			}
-
-			bool bMappedKind = false;
-			if (const DesignComponentMapping::FComponentMappingEntry* Entry =
-				MappingConfig.Table.FindEntryByKey(Key))
-			{
-				UClass* WidgetClass = FSoftClassPath(Entry->WidgetClass).TryLoadClass<UUserWidget>();
-				bMappedKind = WidgetClass != nullptr && WidgetClass->IsChildOf<UUserWidget>();
-			}
-			MappedKindCache.Add(Key, bMappedKind);
-			return bMappedKind;
+			return true;
 		}
-
-
 
 	}
 
@@ -103,7 +99,7 @@ namespace DesignImportPipeline
 			AddReimportDiagnostic(Result.Diagnostics, TEXT("reimport_font_preparation_failed"), AnalysisResult.ErrorMessage);
 			Result.ComponentMappingDiagnostics = SettingsSnapshot.GenerationSettings.ComponentMapping.ValidationDiagnostics;
 			DesignImportDiagnosticReport::WriteReimport(Document, Data,
-				FPackageName::ObjectPathToPackageName(Request.TargetAssetPath), Result.Diagnostics, &Result.ComponentMappingDiagnostics);
+				FPackageName::ObjectPathToPackageName(Request.TargetAssetPath), Result.Diagnostics, &Result.ComponentMappingDiagnostics, &Result.Commit);
 			return Result;
 		}
 		Data = AnalysisResult.Data;
@@ -199,7 +195,7 @@ namespace DesignImportPipeline
 	}
 
 	/** Steps 6)-7): Component Mapping two-tier match (on an IR copy) + update-plan construction. */
-	void BuildReimportUpdatePlan(
+	bool BuildReimportUpdatePlan(
 		const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings,
 		const FUMGWidgetData& Data,
 		const FDesign2UMGGenerationManifestSidecar& Manifest,
@@ -216,7 +212,8 @@ namespace DesignImportPipeline
 			PreparedScopeRoot, GenerationSettings.ComponentMapping, Data, MappingBuildState);
 
 		// 7) Update plan: manifest instances <-> new IR nodes paired by designNodeId.
-		TMap<FString, bool> MappedKindCache;
+		TSet<FString> CheckedMappingKeys;
+		if (!ValidateReimportMappedClasses(PreparedScopeRoot, MappingBuildState, CheckedMappingKeys)) return false;
 		for (const FDesign2UMGGenerationManifestSidecar::FInstanceRecord& Record : Manifest.Instances)
 		{
 			InstancesById.Add(Record.DesignNodeId, &Record);
@@ -224,9 +221,8 @@ namespace DesignImportPipeline
 			FReimportPlanEntry Entry;
 			Entry.ManifestRecord = &Record;
 			Entry.NewNode = FindNodeByDesignId(PreparedScopeRoot, Record.DesignNodeId);
-			Entry.bNewKindMapped = Entry.NewNode
-				? IsMappedKind(*Entry.NewNode, GenerationSettings.ComponentMapping, MappedKindCache)
-				: false;
+			Entry.bNewKindMapped = Entry.NewNode && Entry.NewNode->HasSourceData()
+				&& !Entry.NewNode->Source().MappedComponentKey.IsEmpty();
 
 			if (!Entry.NewNode)
 			{
@@ -252,6 +248,7 @@ namespace DesignImportPipeline
 				AliveInstanceWidgetNames.Add(Entry.ManifestRecord->WidgetName);
 			}
 		}
+		return true;
 	}
 
 	/** Step 8): structural sanity check; failure exits early as a full conflict. */
@@ -473,34 +470,40 @@ namespace DesignImportPipeline
 		int32 TransactionIndex,
 		FDesignReimportResult& Result)
 	{
-		// 11) Pre-save writability pre-check + compile + save + write the new manifest.
-		// Unified save-failure exit: transaction rollback + one recompile pulling the generated class back in line with the template tree + a reimport_save_failed diagnostic.
+		const auto WriteReport = [&]()
+		{
+			if (Session.Document) DesignImportDiagnosticReport::WriteReimport(
+				*Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics, &Result.Commit);
+		};
 		const auto FailSaveWithRollback = [&](const FString& Reason)
 		{
-			// The rollback state is reported as the transaction ownership really is: with no own transaction (transacting
-			// unavailable or nested inside an active outer transaction), no End/Undo happens; the disk is untouched and the in-memory changes stay in place.
-			FString RollbackNote;
+			FString RollbackNote = TEXT("; no reimport-owned editor transaction; in-memory changes remain for the caller to recover");
 			if (TransactionIndex != INDEX_NONE)
 			{
+				const FGuid TransactionId = GUndo ? GUndo->GetContext().TransactionId : FGuid();
 				GEditor->EndTransaction();
-				GEditor->UndoTransaction();
-				RollbackNote = TEXT("; transaction rolled back, asset keeps its pre-reimport state, manifest not updated");
+				TransactionIndex = INDEX_NONE;
+				bool bRestored = GeneratedAssetLifecycle::UndoOwnedTransaction(TransactionId);
+				if (bRestored)
+				{
+					// The generated class is not restored by the template-tree transaction.
+					FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WBP);
+					FKismetEditorUtilities::CompileBlueprint(WBP,
+						EBlueprintCompileOptions::SkipDefaultObjectValidation | EBlueprintCompileOptions::SkipFiBSearchMetaUpdate);
+					bRestored = WBP->Status == BS_UpToDate || WBP->Status == BS_UpToDateWithWarnings;
+				}
+				Result.Commit.Memory = bRestored ? EDesign2UMGMemoryState::Restored : EDesign2UMGMemoryState::RecoveryFailed;
+				if (!bRestored) Result.Commit.Status = EDesign2UMGCommitStatus::RollbackIncomplete;
+				RollbackNote = bRestored
+					? TEXT("; transaction rolled back, asset keeps its pre-reimport state in memory")
+					: TEXT("; transaction undo or restored blueprint compile failed; memory recovery incomplete");
 			}
-			else
-			{
-				RollbackNote = TEXT("; save not completed and no reimport-owned editor transaction was open (transacting unavailable or nested inside an active transaction); asset on disk keeps its previous state, in-memory changes remain, manifest not updated");
-			}
+			RollbackNote += Result.Commit.Asset == EDesign2UMGFileState::Indeterminate
+				? TEXT("; asset file state is indeterminate, manifest not updated")
+				: TEXT("; asset file unchanged, manifest not updated");
 			AddReimportDiagnostic(Result.Diagnostics, ReimportDiagnosticKinds::SaveFailed, Reason + RollbackNote);
-			// The rollback restores only the template tree; class objects produced by compiling do not roll back with it -
-			// one recompile pulls the generated class back into the state of the (restored) template tree.
-			FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WBP);
-			FKismetEditorUtilities::CompileBlueprint(
-				WBP,
-				EBlueprintCompileOptions::SkipDefaultObjectValidation | EBlueprintCompileOptions::SkipFiBSearchMetaUpdate);
 			Result.bSucceeded = false;
-			// Reimport finished: per-node diagnostics land in the structured report (the same exit as import; see design.md sections 0/6).
-			if (Session.Document) DesignImportDiagnosticReport::WriteReimport(
-			*Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics);
+			WriteReport();
 		};
 
 		// 11a) Pre-check: do not enter the save flow when the target file is not writable. The uasset checks only its
@@ -537,65 +540,34 @@ namespace DesignImportPipeline
 			}
 		}
 
-		// 11b) Compile + save + write the new manifest; failure = transaction rollback, asset keeps its original state, manifest not updated.
-		// The new source's prototype navigation (with the re-authored transition animation names) re-authors
-		// the graph wiring (the pre-apply clear in Reimport() removed the previous generation's nodes inside
-		// this same transaction).
-		if (!FUMGGenerator::SaveWidgetBlueprint(WBP, &GenerationOutput, &PrototypeNavigation))
+		Result.Commit = FUMGGenerator::SaveWidgetBlueprint(WBP, &GenerationOutput, &PrototypeNavigation);
+		Result.bHasDegradation |= GenerationOutput.bHasDegradation || !Session.Data.Warnings.IsEmpty();
+		if (Result.Commit.Status == EDesign2UMGCommitStatus::Succeeded && Result.bHasDegradation)
+			Result.Commit.Status = EDesign2UMGCommitStatus::SucceededWithDegradation;
+		Result.Diagnostics.Append(GenerationOutput.MappingDiagnostics);
+		if (Result.Commit.Asset != EDesign2UMGFileState::Saved)
 		{
-			FailSaveWithRollback(FString::Printf(
-				TEXT("Save/compile failed for %s"),
-				*TargetPackage));
+			FailSaveWithRollback(FString::Printf(TEXT("Save/compile failed for %s"), *TargetPackage));
 			return Result;
 		}
 
-		// 11c) Sidecar write-failure propagation: uasset on disk but manifest not updated = asset and record out of
-		//      sync, which must not be reported as success (IO failures the pre-check cannot catch, like a full disk, land
-		//      here). The disk already holds the new asset: memory is not rolled back (that would desync memory and disk); the transaction concludes normally.
-		const bool bManifestWriteFailed = GenerationOutput.MappingDiagnostics.ContainsByPredicate(
-			[](const FDesign2UMGMappingDiagnostic& Diagnostic)
-			{
-				return Diagnostic.Kind == Design2UMGManifestKinds::ManifestWriteFailedDiagnostic;
-			});
-		if (bManifestWriteFailed)
-		{
-			for (const FDesign2UMGMappingDiagnostic& Diagnostic : GenerationOutput.MappingDiagnostics)
-			{
-				if (Diagnostic.Kind == Design2UMGManifestKinds::ManifestWriteFailedDiagnostic)
-				{
-					Result.Diagnostics.Add(Diagnostic);
-				}
-			}
-			if (TransactionIndex != INDEX_NONE)
-			{
-				GEditor->EndTransaction();
-			}
-			AddReimportDiagnostic(
-				Result.Diagnostics, ReimportDiagnosticKinds::SaveFailed,
-				FString::Printf(
-					TEXT("Asset %s was saved but its generation manifest could not be written; the asset and the manifest may be inconsistent"),
-					*TargetPackage));
-			Result.bSucceeded = false;
-			if (Session.Document) DesignImportDiagnosticReport::WriteReimport(
-			*Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics);
-			return Result;
-		}
-
-		if (TransactionIndex != INDEX_NONE)
-		{
-			GEditor->EndTransaction();
-		}
-
+		// Once the asset is saved, do not undo memory into a state that disagrees with disk.
+		if (TransactionIndex != INDEX_NONE) GEditor->EndTransaction();
 		Result.UpdatedBlueprint = WBP;
-		Result.bSucceeded = true;
-		AddReimportDiagnostic(
-			Result.Diagnostics, ReimportDiagnosticKinds::Completed,
-			FString::Printf(
-				TEXT("Reimport of %s applied (manifest updated)"),
-				*TargetPackage));
-		// Reimport finished: per-node diagnostics land in the structured report (the same exit as import; see design.md sections 0/6).
-		if (Session.Document) DesignImportDiagnosticReport::WriteReimport(
-			*Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics);
+		Result.bSucceeded = Result.Commit.IsSuccess();
+		if (Result.Commit.Status == EDesign2UMGCommitStatus::CommittedWithMetadataFailure)
+		{
+			AddReimportDiagnostic(Result.Diagnostics, ReimportDiagnosticKinds::SaveFailed,
+				FString::Printf(TEXT("Asset %s was saved but its generation manifest could not be written; the asset and the manifest may be inconsistent"),
+					*TargetPackage));
+		}
+		else
+		{
+			AddReimportDiagnostic(Result.Diagnostics, ReimportDiagnosticKinds::Completed,
+				FString::Printf(TEXT("Reimport of %s applied%s (manifest updated)"), *TargetPackage,
+					Result.Commit.Status == EDesign2UMGCommitStatus::SucceededWithDegradation ? TEXT(" with degradation") : TEXT("")));
+		}
+		WriteReport();
 		return Result;
 	}
 }

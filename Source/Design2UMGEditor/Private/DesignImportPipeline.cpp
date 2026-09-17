@@ -81,6 +81,7 @@ namespace DesignImportPipeline
 				: Result.RenderPngPath;
 			Artifacts.GeneratedAssetPath = Result.GeneratedAssetPath;
 			Artifacts.RenderPngPath = Result.RenderPngPath;
+			Artifacts.Commit = Result.Commit;
 			DesignImportDiagnosticReport::Write(
 				Request.DiagnosticDocument.GetValue(),
 				Data,
@@ -142,6 +143,16 @@ namespace DesignImportPipeline
 				break;
 			}
 
+			Result.Commit = GenerationOutput.Commit;
+			if (Result.Commit.IsSuccess() && !Data.Warnings.IsEmpty())
+				Result.Commit.Status = EDesign2UMGCommitStatus::SucceededWithDegradation;
+			Result.bSucceeded = Result.bSucceeded && Result.Commit.IsSuccess();
+			if (Result.ErrorMessage.IsEmpty() && Result.Commit.Status == EDesign2UMGCommitStatus::CommittedWithMetadataFailure)
+				Result.ErrorMessage = TEXT("The asset was saved, but its generation manifest was not updated: ") + Result.Commit.AssetPath;
+			if (Result.ErrorMessage.IsEmpty() && Result.Commit.Status == EDesign2UMGCommitStatus::RollbackIncomplete)
+				Result.ErrorMessage = TEXT("Save failed and recovery is incomplete: ") + Result.Commit.AssetPath;
+			if (Result.Commit.Asset == EDesign2UMGFileState::Saved)
+				Result.GeneratedAssetPath = Result.Commit.AssetPath;
 			Result.ComponentMappingDiagnostics = MoveTemp(GenerationOutput.MappingDiagnostics);
 			if (!Result.bSucceeded
 				&& Result.ComponentMappingDiagnostics.Num() == 0
@@ -255,6 +266,7 @@ namespace DesignImportPipeline
 			FArtifactGenerationRuntimeResult RuntimeResult;
 			const FArtifactGenerationResult GenerationResult =
 				GenerateArtifactsInternal(Data, GenerationRequest, GenerationSettings, &RuntimeResult);
+			Result.Commit = GenerationResult.Commit;
 			Result.bSucceeded = GenerationResult.bSucceeded;
 			Result.ErrorMessage = GenerationResult.ErrorMessage;
 			Result.GeneratedBlueprint = RuntimeResult.GeneratedBlueprint;

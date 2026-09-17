@@ -22,6 +22,44 @@ namespace DesignImportDiagnosticReport
 {
 	namespace
 	{
+		const TCHAR* CommitStatusName(EDesign2UMGCommitStatus Status)
+		{
+			switch (Status)
+			{
+			case EDesign2UMGCommitStatus::Succeeded: return TEXT("succeeded");
+			case EDesign2UMGCommitStatus::SucceededWithDegradation: return TEXT("succeeded_with_degradation");
+			case EDesign2UMGCommitStatus::NotCommitted: return TEXT("not_committed");
+			case EDesign2UMGCommitStatus::CommittedWithMetadataFailure: return TEXT("committed_with_metadata_failure");
+			case EDesign2UMGCommitStatus::RollbackIncomplete: return TEXT("rollback_incomplete");
+			case EDesign2UMGCommitStatus::Conflict: return TEXT("conflict");
+			}
+			return TEXT("unknown");
+		}
+
+		const TCHAR* FileStateName(EDesign2UMGFileState State)
+		{
+			switch (State)
+			{
+			case EDesign2UMGFileState::Unchanged: return TEXT("unchanged");
+			case EDesign2UMGFileState::Saved: return TEXT("saved");
+			case EDesign2UMGFileState::Restored: return TEXT("restored");
+			case EDesign2UMGFileState::Indeterminate: return TEXT("indeterminate");
+			}
+			return TEXT("unknown");
+		}
+
+		const TCHAR* MemoryStateName(EDesign2UMGMemoryState State)
+		{
+			switch (State)
+			{
+			case EDesign2UMGMemoryState::Unchanged: return TEXT("unchanged");
+			case EDesign2UMGMemoryState::Modified: return TEXT("modified");
+			case EDesign2UMGMemoryState::Restored: return TEXT("restored");
+			case EDesign2UMGMemoryState::RecoveryFailed: return TEXT("recovery_failed");
+			}
+			return TEXT("unknown");
+		}
+
 		FString ResolveDocumentSourceFilePath(const FDesignDocument& Document)
 		{
 			if (!Document.SourceDocument().SourceFilePath.IsEmpty())
@@ -614,6 +652,18 @@ namespace DesignImportDiagnosticReport
 			Root->SetStringField(TEXT("renderPngPath"), Artifacts.RenderPngPath);
 			Output->SetStringField(TEXT("renderPngPath"), Artifacts.RenderPngPath);
 		}
+		if (Artifacts.Commit.IsSet())
+		{
+			const FDesign2UMGCommitResult& Commit = Artifacts.Commit.GetValue();
+			TSharedRef<FJsonObject> Outcome = MakeShared<FJsonObject>();
+			Outcome->SetStringField(TEXT("status"), CommitStatusName(Commit.Status));
+			Outcome->SetBoolField(TEXT("succeeded"), Commit.IsSuccess());
+			Outcome->SetStringField(TEXT("assetState"), FileStateName(Commit.Asset));
+			Outcome->SetStringField(TEXT("manifestState"), FileStateName(Commit.Manifest));
+			Outcome->SetStringField(TEXT("memoryState"), MemoryStateName(Commit.Memory));
+			if (!Commit.AssetPath.IsEmpty()) Outcome->SetStringField(TEXT("assetPath"), Commit.AssetPath);
+			Root->SetObjectField(TEXT("outcome"), Outcome);
+		}
 
 		TArray<FString> Recommendations;
 		TArray<TSharedPtr<FJsonValue>> SkippedNodeValues;
@@ -763,11 +813,13 @@ namespace DesignImportDiagnosticReport
 		const FUMGWidgetData& Data,
 		const FString& TargetAssetPath,
 		const TArray<FDesign2UMGMappingDiagnostic>& ReimportDiagnostics,
-		const TArray<FDesign2UMGMappingDiagnostic>* ComponentMappingDiagnostics)
+		const TArray<FDesign2UMGMappingDiagnostic>* ComponentMappingDiagnostics,
+		const FDesign2UMGCommitResult* Commit)
 	{
 		// requestedOutputPath carries the reimport target asset; its diagnostics go to the reimport section.
 		FImportReportArtifacts Artifacts;
 		Artifacts.RequestedOutputPath = TargetAssetPath;
+		if (Commit) Artifacts.Commit = *Commit;
 		Write(Document, Data, Artifacts, ComponentMappingDiagnostics, &ReimportDiagnostics);
 	}
 }

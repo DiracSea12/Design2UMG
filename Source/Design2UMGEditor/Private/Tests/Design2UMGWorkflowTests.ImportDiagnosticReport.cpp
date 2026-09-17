@@ -212,6 +212,11 @@ bool FImportDiagnosticReportGenerationFailureTest::RunTest(const FString&)
 		if (!TestFalse(TEXT("Failed import still writes a diagnostic report"), ReportPath.IsEmpty())) return false;
 		TSharedPtr<FJsonObject> Report;
 		if (!LoadImportReportJson(*this, ReportPath, Report)) return false;
+		const TSharedPtr<FJsonObject>* Outcome = nullptr;
+		if (!TestTrue(TEXT("Pipeline report contains final outcome"), Report->TryGetObjectField(TEXT("outcome"), Outcome) && Outcome)) return false;
+		TestEqual(TEXT("Failed pipeline report exposes typed commit status"),
+			(*Outcome)->GetStringField(TEXT("status")), TEXT("not_committed"));
+		TestFalse(TEXT("Failed pipeline report is not reported as success"), (*Outcome)->GetBoolField(TEXT("succeeded")));
 		const TSharedPtr<FJsonObject>* Mapping = nullptr;
 		if (!TestTrue(TEXT("Report contains component diagnostics"), Report->TryGetObjectField(TEXT("componentMapping"), Mapping))) return false;
 		const TArray<TSharedPtr<FJsonValue>>* Entries = nullptr;

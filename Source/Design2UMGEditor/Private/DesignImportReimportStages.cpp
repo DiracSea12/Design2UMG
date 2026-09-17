@@ -45,7 +45,7 @@ namespace DesignImportPipeline
 		return Mapped;
 	}
 
-	void ApplyRemovedPlanEntries(
+	bool ApplyRemovedPlanEntries(
 		const TArray<FReimportPlanEntry>& Plan,
 		const FReimportApplySharedState& Shared,
 		TSet<FString>& UpdatedD2UOwned,
@@ -81,8 +81,8 @@ namespace DesignImportPipeline
 				Widget, *Shared.AliveInstanceWidgetNames, Entry.ManifestRecord->WidgetName, LiveNames))
 			{
 				KeepAsIsWidgetNames.Add(Entry.ManifestRecord->WidgetName);
-				AddReimportDiagnostic(
-					*Shared.Diagnostics, ReimportDiagnosticKinds::RemoveConflict,
+				AddReimportDegradation(
+					Shared, ReimportDiagnosticKinds::RemoveConflict,
 					FString::Printf(
 						TEXT("Design removed node '%s' (%s) preserved: its subtree still hosts live design instance(s) (%s); they keep their widgets and follow their own update plan"),
 						*Entry.ManifestRecord->WidgetName,
@@ -95,8 +95,8 @@ namespace DesignImportPipeline
 			if (!IsSubtreePurelyD2UOwned(Shared.WBP, Widget, *Shared.OwnedNames, ConflictReason))
 			{
 				KeepAsIsWidgetNames.Add(Entry.ManifestRecord->WidgetName);
-				AddReimportDiagnostic(
-					*Shared.Diagnostics, ReimportDiagnosticKinds::RemoveConflict,
+				AddReimportDegradation(
+					Shared, ReimportDiagnosticKinds::RemoveConflict,
 					FString::Printf(
 						TEXT("Design removed node '%s' (%s) preserved: %s"),
 						*Entry.ManifestRecord->WidgetName,
@@ -106,6 +106,14 @@ namespace DesignImportPipeline
 			}
 
 			const TSet<FString> RemovedNames = DeleteD2UOwnedSubtreeSilently(Shared.WBP, Widget, UpdatedD2UOwned);
+			bool bStillAttached = false;
+			Shared.WidgetTree->ForEachWidget([&](UWidget* Current) { bStillAttached |= Current == Widget; });
+			if (bStillAttached)
+			{
+				AddReimportDiagnostic(*Shared.Diagnostics, ReimportDiagnosticKinds::ApplyFailed,
+					TEXT("Safe delete did not detach widget: ") + Entry.ManifestRecord->WidgetName);
+				return false;
+			}
 			// Besides the subtree root, the diagnostic also names the other widget names inside the subtree: in the
 			// single-page empty-root scenario the deleted manifest instance is a host synthetic layer (<root>_inner, no
 			// source node id) - reporting only it would lose the identities of the actually deleted design nodes; widget
@@ -124,9 +132,10 @@ namespace DesignImportPipeline
 					*Entry.ManifestRecord->DesignNodeId,
 					*SubtreeSuffix));
 		}
+		return true;
 	}
 
-	void ApplyKindChangedPlanEntries(
+	bool ApplyKindChangedPlanEntries(
 		const TArray<FReimportPlanEntry>& Plan,
 		const FReimportApplySharedState& Shared,
 		TSet<FString>& UpdatedD2UOwned,
@@ -157,8 +166,8 @@ namespace DesignImportPipeline
 			if (!IsSubtreePurelyD2UOwned(Shared.WBP, OldWidget, *Shared.OwnedNames, ConflictReason))
 			{
 				KeepAsIsWidgetNames.Add(Entry.ManifestRecord->WidgetName);
-				AddReimportDiagnostic(
-					*Shared.Diagnostics, ReimportDiagnosticKinds::KindConflict,
+				AddReimportDegradation(
+					Shared, ReimportDiagnosticKinds::KindConflict,
 					FString::Printf(
 						TEXT("Kind change of '%s' (%s -> %s) preserved as-is: %s"),
 						*Entry.ManifestRecord->WidgetName,
@@ -172,8 +181,8 @@ namespace DesignImportPipeline
 			if (!ParentPanel)
 			{
 				KeepAsIsWidgetNames.Add(Entry.ManifestRecord->WidgetName);
-				AddReimportDiagnostic(
-					*Shared.Diagnostics, ReimportDiagnosticKinds::KindConflict,
+				AddReimportDegradation(
+					Shared, ReimportDiagnosticKinds::KindConflict,
 					FString::Printf(
 						TEXT("Kind change of '%s' skipped: parent is not a panel"),
 						*Entry.ManifestRecord->WidgetName));
@@ -187,8 +196,8 @@ namespace DesignImportPipeline
 				OldWidget, *Shared.AliveInstanceWidgetNames, Entry.ManifestRecord->WidgetName, LiveNames))
 			{
 				KeepAsIsWidgetNames.Add(Entry.ManifestRecord->WidgetName);
-				AddReimportDiagnostic(
-					*Shared.Diagnostics, ReimportDiagnosticKinds::KindConflict,
+				AddReimportDegradation(
+					Shared, ReimportDiagnosticKinds::KindConflict,
 					FString::Printf(
 						TEXT("Kind change of '%s' (%s -> %s) preserved as-is: old subtree still hosts live design instance(s) (%s)"),
 						*Entry.ManifestRecord->WidgetName,
@@ -198,19 +207,12 @@ namespace DesignImportPipeline
 				continue;
 			}
 
-			DeleteD2UOwnedSubtreeSilently(Shared.WBP, OldWidget, UpdatedD2UOwned);
-
-			// The new-form subtree likewise prunes already-present manifest instances (rehung by reparent; not generated twice).
+			// Prepare and attach first; only a committed replacement may delete the old subtree.
 			FUMGWidgetNode PrunedNewForm = *Entry.NewNode;
 			PruneManifestInstanceChildren(PrunedNewForm, *Shared.InstancesById);
-			UWidget* NewWidget = FUMGWidgetUtils::CreateWidgetRecursive(
-				Shared.WidgetTree, PrunedNewForm, ParentPanel, nullptr, &Shared.DesignSize, Shared.MappingBuildState,
-				nullptr, Shared.GenerationSettings);
-			if (NewWidget)
-			{
-				ApplySlotForNode(NewWidget, PrunedNewForm, Shared);
-				NewlyCreatedWidgets.Add(Entry.ManifestRecord->DesignNodeId, NewWidget);
-			}
+			UWidget* NewWidget = ReplaceReimportWidget(PrunedNewForm, OldWidget, Shared, UpdatedD2UOwned);
+			if (!NewWidget) return false;
+			NewlyCreatedWidgets.Add(Entry.ManifestRecord->DesignNodeId, NewWidget);
 			AddReimportDiagnostic(
 				*Shared.Diagnostics, ReimportDiagnosticKinds::KindChanged,
 				FString::Printf(
@@ -220,9 +222,10 @@ namespace DesignImportPipeline
 					*Entry.ManifestRecord->Kind,
 					Entry.bNewKindMapped ? Design2UMGManifestKinds::Mapped : Design2UMGManifestKinds::Generated));
 		}
+		return true;
 	}
 
-	void ApplyAddedTopLevelNodes(
+	bool ApplyAddedTopLevelNodes(
 		const FUMGWidgetNode& PreparedScopeRoot,
 		const FReimportApplySharedState& Shared,
 		TMap<FString, UWidget*>& NewlyCreatedWidgets)
@@ -244,22 +247,18 @@ namespace DesignImportPipeline
 				// Prune manifest instances already inside the subtree (they are rehung by reparent, not generated twice).
 				FUMGWidgetNode PrunedChild = Child;
 				PruneManifestInstanceChildren(PrunedChild, *Shared.InstancesById);
-				UWidget* NewWidget = FUMGWidgetUtils::CreateWidgetRecursive(
-					Shared.WidgetTree, PrunedChild, Shared.HostPanel, nullptr, &Shared.DesignSize, Shared.MappingBuildState,
-					nullptr, Shared.GenerationSettings);
-				if (NewWidget)
-				{
-					NewlyCreatedWidgets.Add(GetDesignNodeId(Child), NewWidget);
-					AddReimportDiagnostic(
-						*Shared.Diagnostics, ReimportDiagnosticKinds::Added,
-						FString::Printf(
-							TEXT("New design node '%s' (%s) added under the page host root"),
-							*Child.Name, *GetDesignNodeId(Child)));
-				}
+				UWidget* NewWidget = CreateReimportWidget(PrunedChild, Shared.HostPanel, Shared);
+				if (!NewWidget) return false;
+				NewlyCreatedWidgets.Add(GetDesignNodeId(Child), NewWidget);
+				AddReimportDiagnostic(
+					*Shared.Diagnostics, ReimportDiagnosticKinds::Added,
+					FString::Printf(
+						TEXT("New design node '%s' (%s) added under the page host root"),
+						*Child.Name, *GetDesignNodeId(Child)));
 			}
 		}
+		return true;
 	}
-
 	namespace
 	{
 		/** Result of the reparent target-parent resolution. */
@@ -361,7 +360,7 @@ namespace DesignImportPipeline
 		}
 	}
 
-	void ApplyReparentPlanEntries(
+	bool ApplyReparentPlanEntries(
 		const TArray<FReimportPlanEntry>& Plan,
 		const FUMGWidgetNode& PreparedScopeRoot,
 		const FReimportApplySharedState& Shared,
@@ -403,8 +402,8 @@ namespace DesignImportPipeline
 			}
 			if (!Resolution.TargetPanel || Resolution.bUnresolvable)
 			{
-				AddReimportDiagnostic(
-					*Shared.Diagnostics, ReimportDiagnosticKinds::MoveConflict,
+				AddReimportDegradation(
+					Shared, ReimportDiagnosticKinds::MoveConflict,
 					FString::Printf(
 						TEXT("Reparent of '%s' skipped: new design parent is not clearly D2U-owned; structure preserved"),
 						*Entry.ManifestRecord->WidgetName));
@@ -419,8 +418,8 @@ namespace DesignImportPipeline
 				FString SourceConflictReason;
 				if (!IsMoveSourceOwned(Shared, Widget, SourceConflictReason))
 				{
-					AddReimportDiagnostic(
-						*Shared.Diagnostics, ReimportDiagnosticKinds::MoveConflict,
+					AddReimportDegradation(
+						Shared, ReimportDiagnosticKinds::MoveConflict,
 						FString::Printf(
 							TEXT("Reparent of '%s' skipped: %s; structure preserved"),
 							*Entry.ManifestRecord->WidgetName, *SourceConflictReason));
@@ -433,8 +432,8 @@ namespace DesignImportPipeline
 					Cast<UContentWidget>(TargetPanel) && TargetPanel->GetChildrenCount() > 0;
 				if (bTargetSingleContentOccupied)
 				{
-					AddReimportDiagnostic(
-						*Shared.Diagnostics, ReimportDiagnosticKinds::MoveConflict,
+					AddReimportDegradation(
+						Shared, ReimportDiagnosticKinds::MoveConflict,
 						FString::Printf(
 							TEXT("Reparent of '%s' skipped: target '%s' is a single-content widget whose slot is already occupied; structure preserved"),
 							*Entry.ManifestRecord->WidgetName,
@@ -442,44 +441,16 @@ namespace DesignImportPipeline
 					continue;
 				}
 
-				if (UPanelWidget* OldPanel = Widget->GetParent())
-				{
-					OldPanel->Modify();
-				}
-				Widget->Modify();
-				TargetPanel->Modify();
-				Shared.WidgetTree->RemoveWidget(Widget);
-				if (TargetPanel->AddChild(Widget))
-				{
-					// After the move, drop the new slot first; the full refresh (properties/inputs/manifest record) is done
-					// uniformly by 9e (this node is a Matched entry, so 9e finds it by widgetName for sure; refreshing here
-					// too would write the mapped record twice into the new manifest).
-					ApplySlotForNode(Widget, *Entry.NewNode, Shared);
-					AddReimportDiagnostic(
-						*Shared.Diagnostics, ReimportDiagnosticKinds::Moved,
-						FString::Printf(
-							TEXT("Widget '%s' reparented under '%s' (both endpoints D2U-owned); widget identity preserved"),
-							*Entry.ManifestRecord->WidgetName,
-							*TargetPanel->GetName()));
-				}
-				else
-				{
-					// Defensive: if it cannot be added back, rehang under the host root; never leave an orphan widget.
-					if (Shared.HostPanel)
-					{
-						Shared.HostPanel->AddChild(Widget);
-					}
-					AddReimportDiagnostic(
-						*Shared.Diagnostics, ReimportDiagnosticKinds::MoveConflict,
-						FString::Printf(
-							TEXT("Reparent of '%s' to '%s' failed to attach; widget restored under the page host root"),
-							*Entry.ManifestRecord->WidgetName,
-							*TargetPanel->GetName()));
-				}
+				if (!MoveReimportWidget(Widget, TargetPanel, *Entry.NewNode, Shared)) return false;
+				AddReimportDiagnostic(
+					*Shared.Diagnostics, ReimportDiagnosticKinds::Moved,
+					FString::Printf(
+						TEXT("Widget '%s' reparented under '%s' (both endpoints D2U-owned); widget identity preserved"),
+						*Entry.ManifestRecord->WidgetName, *TargetPanel->GetName()));
 			}
 		}
+		return true;
 	}
-
 	TArray<UWidget*> CollectNestedMoveCandidates(
 		const FUMGWidgetNode& PreparedScopeRoot,
 		const FReimportApplySharedState& Shared)
@@ -541,7 +512,7 @@ namespace DesignImportPipeline
 		return NestedMoveCandidates;
 	}
 
-	void ApplyMatchedPlanEntries(
+	bool ApplyMatchedPlanEntries(
 		const TArray<FReimportPlanEntry>& Plan,
 		const FReimportApplySharedState& Shared,
 		const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings,
@@ -572,8 +543,8 @@ namespace DesignImportPipeline
 				if (IsMappedClassConflict(Widget, Entry.ManifestRecord, NewMappedClass))
 				{
 					Shared.UpdatedMappedRecords->Add(ManifestRecordToMappedRecord(*Entry.ManifestRecord));
-					AddReimportDiagnostic(
-						*Shared.Diagnostics, ReimportDiagnosticKinds::MappedClassConflict,
+					AddReimportDegradation(
+						Shared, ReimportDiagnosticKinds::MappedClassConflict,
 						FString::Printf(
 							TEXT("Mapped class change on '%s' (%s): instance kept as '%s', manifest recorded '%s', mapping now points to '%s'; not replaced in v1"),
 							*Entry.ManifestRecord->WidgetName,
@@ -585,10 +556,10 @@ namespace DesignImportPipeline
 				}
 			}
 
-			RefreshNodeByKind(*Entry.NewNode, Widget, Shared, NestedMoveCandidates, NewlyCreatedWidgets);
+			if (!RefreshNodeByKind(*Entry.NewNode, Widget, Shared, NestedMoveCandidates, NewlyCreatedWidgets)) return false;
 		}
+		return true;
 	}
-
 	void ReportNestedRemovalLeftovers(
 		const FReimportApplySharedState& Shared,
 		const TArray<UWidget*>& NestedMoveCandidates)
@@ -596,18 +567,24 @@ namespace DesignImportPipeline
 		// 9g) nested-delete leftover diagnostics: owned subtrees in the candidate pool unconsumed by moves = nested nodes
 		//     the new design no longer expects. With project content (project children / developer bindings) -> kept +
 		//     conflict diagnostic naming them (spec R3 "Removed node contains project-side content" is not top-level-limited);
-		//     purely D2U nested subtrees keep their current state with no diagnostic (nested deletion is outside the safe-delete scope; the accepted granularity).
+		//     purely D2U nested subtrees are still outside the v1 safe-delete scope, but preserving them is a partial sync and must be reported.
 		for (UWidget* Orphan : NestedMoveCandidates)
 		{
 			FString ConflictReason;
 			if (!IsSubtreePurelyD2UOwned(Shared.WBP, Orphan, *Shared.OwnedNames, ConflictReason))
 			{
-				AddReimportDiagnostic(
-					*Shared.Diagnostics, ReimportDiagnosticKinds::RemoveConflict,
+				AddReimportDegradation(
+					Shared, ReimportDiagnosticKinds::RemoveConflict,
 					FString::Printf(
 						TEXT("Design-removed nested node '%s' preserved: %s"),
 						*Orphan->GetName(), *ConflictReason));
+				continue;
 			}
+			AddReimportDegradation(
+				Shared, ReimportDiagnosticKinds::PartialSync,
+				FString::Printf(
+					TEXT("Design-removed nested D2U-owned node '%s' preserved because nested deletion is outside the safe-delete scope"),
+					*Orphan->GetName()));
 		}
 	}
 }

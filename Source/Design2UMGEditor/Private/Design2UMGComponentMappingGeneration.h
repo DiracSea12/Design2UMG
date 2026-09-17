@@ -174,11 +174,14 @@ public:
 	const TArray<FDesign2UMGMappedInstanceRecord>& GetMappedInstances() const { return MappedInstances; }
 	const TArray<FDesign2UMGGeneratedInstanceRecord>& GetTopLevelGenerated() const { return TopLevelGenerated; }
 	const TArray<FDesign2UMGMappingDiagnostic>& GetDiagnostics() const { return Diagnostics; }
+	void MarkDegraded() { bHasDegradation = true; }
+	bool HasDegradation() const { return bHasDegradation; }
 
 private:
 	const FDesign2UMGComponentMappingConfig* Config = nullptr;
 	TWeakObjectPtr<UWidget> RootWidget;
 	bool bRootPending = false;
+	bool bHasDegradation = false;
 	/** Single container recording both mapped instance bodies and nodes inside hit subtrees (key = IR node Id). */
 	TMap<FString, FMappedNodeMark> MappedNodes;
 	/** All widget names created this run (except the page host root); an ownership record, top-level or nested alike. */

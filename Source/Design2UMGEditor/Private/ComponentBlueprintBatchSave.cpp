@@ -10,34 +10,31 @@
 #include "Editor.h"
 #include "Editor/Transactor.h"
 #include "Kismet2/KismetEditorUtilities.h"
+#include <atomic>
 
 namespace
 {
+#if WITH_DEV_AUTOMATION_TESTS
+	std::atomic<bool> bAutomationBatchRestoreFailureArmed{false};
+#endif
 	struct FOriginalFile
 	{
 		FString Path;
 		TArray<uint8> Bytes;
 		bool Existed = false;
+		bool bManifest = false;
 	};
 }
 
-bool FUMGGenerator::RestoreUnsavedComponentBatch(const TArray<UWidgetBlueprint*>& Assets, FDesign2UMGGenerationOutput* Output)
+EDesign2UMGMemoryState FUMGGenerator::RestoreUnsavedComponentBatch(const TArray<UWidgetBlueprint*>& Assets, FDesign2UMGGenerationOutput* Output)
 {
 	if (Output && Output->ComponentBatchTransactionId.IsValid())
 	{
-		const int32 Last = GEditor->Trans->GetQueueLength() - GEditor->Trans->GetUndoCount() - 1;
-		const FTransaction* Transaction = Last >= 0 ? GEditor->Trans->GetTransaction(Last) : nullptr;
-		if (GEditor->IsTransactionActive() || !Transaction || Transaction->GetId() != Output->ComponentBatchTransactionId)
+		if (!GeneratedAssetLifecycle::UndoOwnedTransaction(Output->ComponentBatchTransactionId))
 		{
 			Output->MappingDiagnostics.Add({TEXT("component_batch_recovery_incomplete"),
-				TEXT("Editor changes followed the batch build; automatic undo was skipped to preserve those changes")});
-			return false;
-		}
-		const bool Undone = GEditor->UndoTransaction(false);
-		if (!Undone)
-		{
-			Output->MappingDiagnostics.Add({TEXT("component_batch_recovery_incomplete"), TEXT("Editor undo did not restore the component batch")});
-			return false;
+				TEXT("Batch undo failed or its transaction is no longer current; in-memory recovery is incomplete")});
+			return EDesign2UMGMemoryState::RecoveryFailed;
 		}
 		Output->ComponentBatchTransactionId.Invalidate();
 		bool Restored = true;
@@ -55,11 +52,12 @@ bool FUMGGenerator::RestoreUnsavedComponentBatch(const TArray<UWidgetBlueprint*>
 					Output->MappingDiagnostics.Add({TEXT("component_batch_recovery_incomplete"), TEXT("Restored blueprint failed to compile: ") + Asset->GetPathName()});
 				}
 			}
-			else GeneratedAssetLifecycle::DiscardUnsavedAsset(Asset);
+			else Restored &= GeneratedAssetLifecycle::DiscardUnsavedAsset(Asset);
 		}
 		Output->Components.Reset();
-		return Restored;
+		return Restored ? EDesign2UMGMemoryState::Restored : EDesign2UMGMemoryState::RecoveryFailed;
 	}
+	bool Restored = true;
 	TArray<UPackage*> ExistingPackages;
 	for (UWidgetBlueprint* Asset : Assets)
 	{
@@ -73,30 +71,51 @@ bool FUMGGenerator::RestoreUnsavedComponentBatch(const TArray<UWidgetBlueprint*>
 			Asset->WidgetVariableNameToGuidMap.Empty();
 			ExistingPackages.AddUnique(Asset->GetOutermost());
 		}
-		else GeneratedAssetLifecycle::DiscardUnsavedAsset(Asset);
+		else Restored &= GeneratedAssetLifecycle::DiscardUnsavedAsset(Asset);
 	}
 	if (Output) Output->Components.Reset();
-	if (ExistingPackages.IsEmpty()) return true;
+	if (ExistingPackages.IsEmpty()) return !Restored ? EDesign2UMGMemoryState::RecoveryFailed
+		: (Assets.IsEmpty() ? EDesign2UMGMemoryState::Unchanged : EDesign2UMGMemoryState::Restored);
 	FText ReloadError;
-	const bool Restored = UPackageTools::ReloadPackages(ExistingPackages, ReloadError, EReloadPackagesInteractionMode::AssumePositive);
-	if (!Restored && Output) Output->MappingDiagnostics.Add({TEXT("component_reload_failed"), ReloadError.ToString()});
-	return Restored;
+	const bool Reloaded = UPackageTools::ReloadPackages(ExistingPackages, ReloadError, EReloadPackagesInteractionMode::AssumePositive);
+	if (!Reloaded && Output) Output->MappingDiagnostics.Add({TEXT("component_reload_failed"), ReloadError.ToString()});
+	Restored &= Reloaded;
+	return Restored ? EDesign2UMGMemoryState::Restored : EDesign2UMGMemoryState::RecoveryFailed;
 }
 
-bool FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP, FDesign2UMGGenerationOutput* Output,
+FDesign2UMGCommitResult FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP, FDesign2UMGGenerationOutput* Output,
 	const FUMGPrototypeNavigationData* Navigation)
 {
-	if (!WBP || !Output || (!Output->Manifest.bWholeAssetOwned && !Output->Manifest.bComponentBatchRoot))
-		return SaveSingleWidgetBlueprint(WBP, Output, Navigation);
+	FDesign2UMGCommitResult Result = WBP && Output && (Output->Manifest.bWholeAssetOwned || Output->Manifest.bComponentBatchRoot)
+		? SaveComponentBlueprintBatch(WBP, Output, Navigation) : SaveSingleWidgetBlueprint(WBP, Output, Navigation);
+	if (Output) Output->Commit = Result;
+	return Result;
+}
 
+FDesign2UMGCommitResult FUMGGenerator::SaveComponentBlueprintBatch(UWidgetBlueprint* WBP, FDesign2UMGGenerationOutput* Output,
+	const FUMGPrototypeNavigationData* Navigation)
+{
+	FDesign2UMGCommitResult Result;
+	Result.AssetPath = WBP->GetPathName();
+	Result.Memory = EDesign2UMGMemoryState::Modified;
 	TArray<UWidgetBlueprint*> Assets;
 	for (const auto& Component : Output->Components) Assets.Add(Component.Blueprint);
 	Assets.Add(WBP);
+	const auto RestoreMemory = [&]()
+	{
+		Result.Memory = RestoreUnsavedComponentBatch(Assets, Output);
+		Result.Status = Result.Memory == EDesign2UMGMemoryState::RecoveryFailed
+			? EDesign2UMGCommitStatus::RollbackIncomplete : EDesign2UMGCommitStatus::NotCommitted;
+	};
 	TArray<FOriginalFile> Originals;
 	TArray<UWidgetBlueprint*> NewAssets;
 	for (UWidgetBlueprint* Asset : Assets)
 	{
-		if (!Asset) return false;
+		if (!Asset)
+		{
+			RestoreMemory();
+			return Result;
+		}
 		const FString Package = Asset->GetOutermost()->GetName();
 		const FString AssetFile = FPackageName::LongPackageNameToFilename(Package, FPackageName::GetAssetPackageExtension());
 		if (!IFileManager::Get().FileExists(*AssetFile)) NewAssets.Add(Asset);
@@ -106,61 +125,87 @@ bool FUMGGenerator::SaveWidgetBlueprint(UWidgetBlueprint* WBP, FDesign2UMGGenera
 			if (!GeneratedAssetLifecycle::IsFileWritableForSave(Path, Path != AssetFile, WriteError))
 			{
 				Output->MappingDiagnostics.Add({TEXT("component_save_blocked"), WriteError});
-				RestoreUnsavedComponentBatch(Assets, Output);
-				return false;
+				RestoreMemory();
+				return Result;
 			}
 			FOriginalFile& Original = Originals.AddDefaulted_GetRef();
 			Original.Path = Path;
+			Original.bManifest = Path != AssetFile;
 			Original.Existed = IFileManager::Get().FileExists(*Path);
 			if (Original.Existed && !FFileHelper::LoadFileToArray(Original.Bytes, *Path))
 			{
 				Output->MappingDiagnostics.Add({TEXT("component_backup_failed"), TEXT("Could not preserve original asset file: ") + Path});
-				RestoreUnsavedComponentBatch(Assets, Output);
-				return false;
+				RestoreMemory();
+				return Result;
 			}
 		}
 	}
 	bool Saved = true;
+	bool Degraded = false;
 	for (auto& Component : Output->Components)
 	{
-		if (!SaveSingleWidgetBlueprint(Component.Blueprint, Component.Output.Get(), nullptr))
+		const FDesign2UMGCommitResult SavedComponent = SaveSingleWidgetBlueprint(Component.Blueprint, Component.Output.Get(), nullptr);
+		Component.Output->Commit = SavedComponent;
+		Degraded |= SavedComponent.Status == EDesign2UMGCommitStatus::SucceededWithDegradation;
+		if (!SavedComponent.IsSuccess())
 		{
-			Output->MappingDiagnostics.Add({TEXT("component_save_failed"), TEXT("Failed to save dependency: ") + Component.Blueprint->GetPathName()});
+			Output->MappingDiagnostics.Add({TEXT("component_save_failed"), TEXT("Failed to save dependency: ") + SavedComponent.AssetPath});
 			Saved = false;
 			break;
 		}
 	}
-	if (Saved) Saved = SaveSingleWidgetBlueprint(WBP, Output, Navigation);
 	if (Saved)
 	{
+		Result = SaveSingleWidgetBlueprint(WBP, Output, Navigation);
+		Saved = Result.IsSuccess();
+	}
+	if (Saved)
+	{
+		if (Degraded) Result.Status = EDesign2UMGCommitStatus::SucceededWithDegradation;
 		Output->ComponentBatchTransactionId.Invalidate();
-		return true;
+		return Result;
 	}
 
-	bool Restored = true;
+	// Disk recovery and memory recovery are separate outcomes.
+	Result.Asset = EDesign2UMGFileState::Restored;
+	Result.Manifest = EDesign2UMGFileState::Restored;
 	for (const FOriginalFile& Original : Originals)
 	{
-		const bool FileRestored = Original.Existed
+		bool bSkipRestore = false;
+#if WITH_DEV_AUTOMATION_TESTS
+		bSkipRestore = bAutomationBatchRestoreFailureArmed.exchange(false);
+#endif
+		const bool FileRestored = !bSkipRestore && (Original.Existed
 			? FFileHelper::SaveArrayToFile(Original.Bytes, *Original.Path)
-			: IFileManager::Get().Delete(*Original.Path, false, true);
+			: IFileManager::Get().Delete(*Original.Path, false, true));
 		if (!FileRestored)
 		{
-			Restored = false;
+			(Original.bManifest ? Result.Manifest : Result.Asset) = EDesign2UMGFileState::Indeterminate;
 			Output->MappingDiagnostics.Add({TEXT("component_restore_failed"), TEXT("Failed to restore file: ") + Original.Path});
 		}
 	}
-	if (Restored)
+	if (Result.Asset == EDesign2UMGFileState::Restored && Result.Manifest == EDesign2UMGFileState::Restored)
 	{
-		// Reload restored packages together so dependent generated classes are reinstanced consistently.
-		Restored = RestoreUnsavedComponentBatch(Assets, Output);
+		RestoreMemory();
 	}
 	else
 	{
-		for (UWidgetBlueprint* NewAsset : NewAssets) GeneratedAssetLifecycle::DiscardUnsavedAsset(NewAsset);
-		Output->Components.Reset();
+		Result.Status = EDesign2UMGCommitStatus::RollbackIncomplete;
+		bool bNewAssetsDiscarded = true;
+		for (UWidgetBlueprint* NewAsset : NewAssets) bNewAssetsDiscarded &= GeneratedAssetLifecycle::DiscardUnsavedAsset(NewAsset);
+		if (!bNewAssetsDiscarded) Result.Memory = EDesign2UMGMemoryState::RecoveryFailed;
+		else if (NewAssets.Num() == Assets.Num()) Result.Memory = EDesign2UMGMemoryState::Restored;
 	}
 	Output->Components.Reset();
+	const bool Restored = Result.Status != EDesign2UMGCommitStatus::RollbackIncomplete;
 	Output->MappingDiagnostics.Add({Restored ? TEXT("component_batch_restored") : TEXT("component_batch_recovery_incomplete"),
 		Restored ? TEXT("Batch save failed; original asset files and manifests restored") : TEXT("Batch save failed; recovery requires attention to the reported files")});
-	return false;
+	return Result;
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+void FUMGGenerator::ArmAutomationBatchRestoreFailureOnce()
+{
+	bAutomationBatchRestoreFailureArmed.store(true);
+}
+#endif

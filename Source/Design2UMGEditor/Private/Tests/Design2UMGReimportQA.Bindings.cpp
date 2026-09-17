@@ -235,7 +235,7 @@ bool FSafeReimportQABindingFunctionNameCollisionTest::RunTest(const FString&)
 
 	// After compiling and saving (the same path as the generation chain): the function resolves on the generated class and the binding was not stripped.
 	if (!TestTrue(TEXT("compile + save succeeds with the collision binding"),
-			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr)))
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr).IsSuccess()))
 	{
 		QAWipeOutput(OutputDir);
 		return false;

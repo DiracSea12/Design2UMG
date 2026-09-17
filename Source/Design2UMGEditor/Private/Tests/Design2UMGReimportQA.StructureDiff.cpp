@@ -473,6 +473,9 @@ bool FSafeReimportQAMoveBoundaryConflictTest::RunTest(const FString&)
 
 	const FDesignReimportResult Result = QAReimport(V2, nullptr, TargetPackage);
 	TestTrue(TEXT("reimport itself succeeds (conflict is per-node)"), Result.bSucceeded);
+	TestTrue(TEXT("move conflict raises explicit degradation"), Result.bHasDegradation);
+	TestEqual(TEXT("move conflict is not plain success"), Result.Commit.Status,
+		EDesign2UMGCommitStatus::SucceededWithDegradation);
 
 	UWidget* Mover = WBP->WidgetTree->FindWidget(TEXT("Mover"));
 	TestNotNull(TEXT("mover still exists"), Mover);

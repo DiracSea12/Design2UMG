@@ -3,16 +3,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Design2UMGCommitResult.h"
 #include "Design2UMGComponentMappingGeneration.h"
 
 class UWidgetBlueprint;
 
-/**
- * Canonical values for sidecar instance kinds and the "sidecar write failed" diagnostic kind.
- * The write side (GenerationManifest serialization / UMGGenerator diagnostics) and the read side (reimport
- * reconciliation and save-outcome decisions) share this one set of constants: these strings are a cross-file
- * protocol - changing a literal on either end would silently break reconciliation (e.g. reimport reporting a failed sidecar write as success).
- */
+/** Canonical sidecar instance kinds and diagnostic names. Save outcomes use the typed result, not these strings. */
 namespace Design2UMGManifestKinds
 {
 	constexpr const TCHAR* Mapped = TEXT("mapped");
@@ -24,7 +20,7 @@ namespace Design2UMGManifestKinds
 /**
  * Minimal generation record (sidecar manifest) payload:
  * schemaVersion/provider/documentScope/sourceRoot/instances(kind=mapped|generated)/d2uOwned。
- * assembled by BuildWidgetBlueprint and atomically written to <AssetName>.d2u.json after a successful import/reimport asset save.
+ * assembled by BuildWidgetBlueprint and written to <AssetName>.d2u.json after a successful import/reimport asset save.
  * Property values never enter the manifest: reimport updates properties by "re-convert by designNodeId, then diff";
  * the inputs record keeps declarations only (source/target/valueKind), not design values.
  */
@@ -94,13 +90,15 @@ namespace Design2UMGGenerationManifest
 	 * (a genuinely read-only sidecar is caught by reimport's pre-save check, so that branch is unreachable otherwise).
 	 */
 	void ArmAutomationSidecarWriteFailureOnce();
+	/** Remove the completed temp file before replacement to exercise the real finalization failure path. */
+	void ArmAutomationSidecarFinalizeFailureOnce();
 #endif
 
 	/**
-	 * Called after a successful import save: atomically writes the manifest next to the asset (temp file, then replace);
-	 * on failure no half-written file remains. Returns whether the write succeeded.
+	 * Write via a temp file, then replace the sidecar. Failures before replacement leave it Unchanged;
+	 * a failed replacement is Indeterminate because the file manager may already have removed the old file.
 	 */
-	bool WriteSidecarForAsset(
+	EDesign2UMGFileState WriteSidecarForAsset(
 		const FString& AssetPackageName,
 		const FDesign2UMGGenerationManifestPayload& Payload);
 

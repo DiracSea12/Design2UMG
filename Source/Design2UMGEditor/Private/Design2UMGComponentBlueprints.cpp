@@ -264,12 +264,20 @@ UWidgetBlueprint* FDesign2UMGComponentBlueprintContext::Build(const FUMGWidgetDa
 		GEditor->EndTransaction();
 		BatchTransactionIndex = INDEX_NONE;
 	};
-	auto Fail = [&](const TCHAR* Kind = TEXT("component_generation_failed")) -> UWidgetBlueprint*
+	auto Fail = [&](const TCHAR* Kind = TEXT("component_generation_failed"),
+		EDesign2UMGCommitStatus FailureStatus = EDesign2UMGCommitStatus::NotCommitted) -> UWidgetBlueprint*
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("Component import failed: %s"), *Context.Error);
 		if (Output) Output->MappingDiagnostics.Add({Kind, Context.Error});
 		if (Output) EndBatchTransaction(*Output);
-		FUMGGenerator::RestoreUnsavedComponentBatch(TouchedAssets, Output);
+		const EDesign2UMGMemoryState Memory = FUMGGenerator::RestoreUnsavedComponentBatch(TouchedAssets, Output);
+		if (Output)
+		{
+			Output->Commit.Memory = Memory;
+			Output->Commit.Status = Memory == EDesign2UMGMemoryState::RecoveryFailed
+				? EDesign2UMGCommitStatus::RollbackIncomplete : FailureStatus;
+			if (TargetBlueprint) Output->Commit.AssetPath = TargetBlueprint->GetPathName();
+		}
 		return nullptr;
 	};
 	FigmaComponentDependencies::FCatalog Catalog;
@@ -398,19 +406,19 @@ UWidgetBlueprint* FDesign2UMGComponentBlueprintContext::Build(const FUMGWidgetDa
 		if (!SetKey.IsEmpty()) Component.PackageFolder /= StableName(Context.DocumentScope, SetKey);
 		UWidgetBlueprint* ExistingComponent = nullptr;
 		if (!ResolveExistingComponentFolder(ComponentFolders, Component.Data.WidgetName, Component.PackageFolder, Context.Error)
-			|| !FindExisting(Component.Data, Component.PackageFolder, ExistingComponent, Context.Error)) return Fail(TEXT("component_asset_conflict"));
+			|| !FindExisting(Component.Data, Component.PackageFolder, ExistingComponent, Context.Error)) return Fail(TEXT("component_asset_conflict"), EDesign2UMGCommitStatus::Conflict);
 		Existing.Add(Key, ExistingComponent);
 	}
 	FUMGWidgetData RootData = Data;
 	RootData.WidgetName = TargetBlueprint ? TargetBlueprint->GetName()
 		: StableName(Context.DocumentScope, TEXT("root|") + Data.RootWidget.GetStableDesignNodeId());
 	UWidgetBlueprint* ExistingRoot = nullptr;
-	if (!FindExisting(RootData, Folder, ExistingRoot, Context.Error, false)) return Fail(TEXT("component_asset_conflict"));
+	if (!FindExisting(RootData, Folder, ExistingRoot, Context.Error, false)) return Fail(TEXT("component_asset_conflict"), EDesign2UMGCommitStatus::Conflict);
 	FDesign2UMGGenerationManifestSidecar RootManifest;
 	if (ExistingRoot && (!Design2UMGGenerationManifest::TryLoadSidecarForAsset(
 		ExistingRoot->GetOutermost()->GetName(), RootManifest, Context.Error)
 		|| !ValidateExistingInstanceContent(ExistingRoot, RootManifest, Context.Error)))
-		return Fail(TEXT("component_asset_conflict"));
+		return Fail(TEXT("component_asset_conflict"), EDesign2UMGCommitStatus::Conflict);
 	FDesign2UMGGenerationOutput Result;
 	// Keep dependency and page edits in one editor transaction. It is closed
 	// before Build returns; the output never owns a live editor transaction.
@@ -420,7 +428,7 @@ UWidgetBlueprint* FDesign2UMGComponentBlueprintContext::Build(const FUMGWidgetDa
 		if (GEditor->IsTransactionActive())
 		{
 			Context.Error = TEXT("Finish the active editor transaction before importing a component batch");
-			return Fail(TEXT("component_transaction_busy"));
+			return Fail(TEXT("component_transaction_busy"), EDesign2UMGCommitStatus::Conflict);
 		}
 		BatchTransactionIndex = GEditor->BeginTransaction(TEXT("Design2UMG Component Batch"),
 			NSLOCTEXT("Design2UMG", "ComponentBatchTransaction", "Design2UMG Component Batch"), ExistingRoot);
@@ -463,6 +471,7 @@ UWidgetBlueprint* FDesign2UMGComponentBlueprintContext::Build(const FUMGWidgetDa
 			const FDesignReimportResult Updated = DesignImportPipeline::ApplyPreparedReimport(
 				Session, Existing[Key], Manifest, *Generated.Output, ComponentNavigation, TransactionIndex);
 			if (TransactionIndex != INDEX_NONE) GEditor->EndTransaction();
+			Generated.Output->Commit = Updated.Commit;
 			Generated.Output->MappingDiagnostics.Append(Updated.Diagnostics);
 			Generated.Output->MappingDiagnostics.Append(Updated.ComponentMappingDiagnostics);
 			if (Updated.bSucceeded) Generated.Blueprint = Existing[Key];
@@ -481,7 +490,8 @@ UWidgetBlueprint* FDesign2UMGComponentBlueprintContext::Build(const FUMGWidgetDa
 					FString::Printf(TEXT("Component '%s': %s"), *Key, *Diagnostic.Message)});
 			}
 			if (Context.Error.IsEmpty()) Context.Error = TEXT("Failed to build component: ") + Key;
-			return Fail();
+			return Fail(TEXT("component_generation_failed"), Generated.Output->Commit.Status == EDesign2UMGCommitStatus::Conflict
+				? EDesign2UMGCommitStatus::Conflict : EDesign2UMGCommitStatus::NotCommitted);
 		}
 		TouchedAssets.AddUnique(Generated.Blueprint);
 		{
@@ -529,7 +539,8 @@ UWidgetBlueprint* FDesign2UMGComponentBlueprintContext::Build(const FUMGWidgetDa
 			Output->MappingDiagnostics.Append(Updated.Diagnostics);
 			Output->MappingDiagnostics.Append(Updated.ComponentMappingDiagnostics);
 			if (Context.Error.IsEmpty()) Context.Error = TEXT("Page ownership merge failed: ") + Request.TargetAssetPath;
-			return Fail(TEXT("component_asset_conflict"));
+			return Fail(TEXT("component_asset_conflict"), Updated.bFullConflict
+				? EDesign2UMGCommitStatus::Conflict : EDesign2UMGCommitStatus::NotCommitted);
 		}
 		Result.Manifest = MoveTemp(UpdatedOutput.Manifest);
 		if (Navigation) *Navigation = MoveTemp(UpdatedNavigation);
@@ -555,6 +566,8 @@ UWidgetBlueprint* FDesign2UMGComponentBlueprintContext::Build(const FUMGWidgetDa
 		}
 	}
 	Result.Manifest.bComponentBatchRoot = true;
+	Result.Commit.Memory = EDesign2UMGMemoryState::Modified;
+	if (Root) Result.Commit.AssetPath = Root->GetPathName();
 	EndBatchTransaction(Result);
 	if (Output) *Output = MoveTemp(Result);
 	if (!Root)

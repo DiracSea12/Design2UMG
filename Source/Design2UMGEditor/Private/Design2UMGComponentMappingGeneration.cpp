@@ -558,6 +558,7 @@ namespace Design2UMGComponentMappingGeneration
 		// The same diagnostic goes into BuildState (import report exit) and the optional OutDiagnostics (reimport report exit).
 		const auto ReportBoth = [&BuildState, OutDiagnostics](const TCHAR* Kind, const FString& Message)
 		{
+			BuildState.MarkDegraded();
 			BuildState.AddDiagnostic(Kind, Message);
 			if (OutDiagnostics)
 			{

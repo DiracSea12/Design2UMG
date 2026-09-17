@@ -219,7 +219,7 @@ namespace
 		FDesignReimportRequest Request;
 		Request.TargetAssetPath = TargetPackage;
 		FDesignReimportResult Result = DesignImportPipeline::Reimport(Document, Request);
-		if (Result.bFullConflict && !Result.bSucceeded)
+		if (Result.Commit.Status == EDesign2UMGCommitStatus::Conflict)
 		{
 			const EAppReturnType::Type Choice = FMessageDialog::Open(
 				EAppMsgCategory::Warning,
@@ -236,26 +236,36 @@ namespace
 			}
 		}
 
-		if (Result.bSucceeded)
+		const bool bHasCopyResult = Result.ResolutionCopyCommit.IsSet();
+		const FDesign2UMGCommitResult& Commit = bHasCopyResult ? Result.ResolutionCopyCommit.GetValue() : Result.Commit;
+		if (Commit.IsSuccess())
 		{
-			FDesign2UMGNotification::Success(LOCTEXT("ReimportDone", "Design2UMG: reimport applied (see Output Log for the node report)"));
+			const FText Message = bHasCopyResult
+				? FText::Format(LOCTEXT("ReimportCopyDone", "Design2UMG: resolution copy generated at {0}"), FText::FromString(Commit.AssetPath))
+				: LOCTEXT("ReimportDone", "Design2UMG: reimport applied (see Output Log for the node report)");
+			if (Commit.Status == EDesign2UMGCommitStatus::SucceededWithDegradation) FDesign2UMGNotification::Warning(Message);
+			else FDesign2UMGNotification::Success(Message);
 		}
-		else if (!Result.bFullConflict)
+		else if (Commit.Status == EDesign2UMGCommitStatus::CommittedWithMetadataFailure)
 		{
-			FDesign2UMGNotification::Error(LOCTEXT("ReimportFailed", "Design2UMG: reimport failed; asset kept its previous state"));
+			FDesign2UMGNotification::Error(FText::Format(LOCTEXT("ReimportMetadataFailed",
+				"Design2UMG: asset saved at {0}, but its manifest was not updated; see Output Log before retrying"), FText::FromString(Commit.AssetPath)));
 		}
-		else if (Result.bFullConflict && !Result.ResolutionCopyPath.IsEmpty())
+		else if (Commit.Status == EDesign2UMGCommitStatus::RollbackIncomplete)
 		{
-			FDesign2UMGNotification::Success(FText::Format(
-				LOCTEXT("ReimportCopyDone", "Design2UMG: resolution copy generated at {0}"),
-				FText::FromString(Result.ResolutionCopyPath)));
+			FDesign2UMGNotification::Error(LOCTEXT("ReimportRecoveryIncomplete",
+				"Design2UMG: reimport failed and recovery is incomplete; inspect Output Log before saving or retrying"));
+		}
+		else if (Commit.Status == EDesign2UMGCommitStatus::Conflict)
+		{
+			FDesign2UMGNotification::Warning(LOCTEXT("ReimportFullConflictKept",
+				"Design2UMG: reimport hit a full conflict; the asset kept its previous state (see Output Log for details)"));
 		}
 		else
 		{
-			// Full conflict with no copy: the user answered No in the conflict dialog, or answered Yes but copy generation failed.
-			FDesign2UMGNotification::Warning(LOCTEXT(
-				"ReimportFullConflictKept",
-				"Design2UMG: reimport hit a full conflict; the asset kept its previous state (see Output Log for details)"));
+			FDesign2UMGNotification::Error(Commit.Memory == EDesign2UMGMemoryState::Modified
+				? LOCTEXT("ReimportNotCommittedMemoryRetained", "Design2UMG: reimport not committed; unsaved in-memory changes remain")
+				: LOCTEXT("ReimportNotCommitted", "Design2UMG: reimport not committed; see Output Log for details"));
 		}
 	}
 

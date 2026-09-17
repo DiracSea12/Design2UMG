@@ -401,7 +401,8 @@ namespace
 			IFileManager::Get().Delete(*OutPng, false, true);
 			UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportUtils: Widget PNG render failed"));
 			// Save the Blueprint even when rendering fails so the issue can be inspected.
-			if (FUMGGenerator::SaveWidgetBlueprint(WBP, &GenerationOutput, &Built.PrototypeNavigation) && OutGeneratedAssetPath)
+			FUMGGenerator::SaveWidgetBlueprint(WBP, &GenerationOutput, &Built.PrototypeNavigation);
+			if (GenerationOutput.Commit.Asset == EDesign2UMGFileState::Saved && OutGeneratedAssetPath)
 			{
 				*OutGeneratedAssetPath = WBP->GetPathName();
 			}
@@ -416,8 +417,10 @@ namespace
 
 		// Save the Blueprint after successful rendering.
 		Progress.AdvanceAfterMutation(0.5f, LOCTEXT("GenerateProgressSave", "Saving generated assets"));
-		if (!FUMGGenerator::SaveWidgetBlueprint(WBP, &GenerationOutput, &Built.PrototypeNavigation))
+		if (!FUMGGenerator::SaveWidgetBlueprint(WBP, &GenerationOutput, &Built.PrototypeNavigation).IsSuccess())
 		{
+			if (OutGeneratedAssetPath && GenerationOutput.Commit.Asset == EDesign2UMGFileState::Saved)
+				*OutGeneratedAssetPath = GenerationOutput.Commit.AssetPath;
 			if (OutGenerationOutput)
 			{
 				*OutGenerationOutput = MoveTemp(GenerationOutput);
@@ -459,8 +462,10 @@ namespace
 		FDesign2UMGGenerationOutput GenerationOutput = MoveTemp(Built.GenerationOutput);
 
 		Progress.AdvanceAfterMutation(0.5f, LOCTEXT("GenerateProgressSave", "Saving generated assets"));
-		if (!FUMGGenerator::SaveWidgetBlueprint(WidgetBlueprint, &GenerationOutput, &Built.PrototypeNavigation))
+		if (!FUMGGenerator::SaveWidgetBlueprint(WidgetBlueprint, &GenerationOutput, &Built.PrototypeNavigation).IsSuccess())
 		{
+			if (OutGeneratedAssetPath && GenerationOutput.Commit.Asset == EDesign2UMGFileState::Saved)
+				*OutGeneratedAssetPath = GenerationOutput.Commit.AssetPath;
 			// Build-time diagnostics (mapping validation/hits) move out with GenerationOutput; they are not lost on the failure path.
 			if (OutGenerationOutput)
 			{
@@ -818,7 +823,7 @@ UWidgetBlueprint* DesignImportUtils::GenerateBlueprint(
 			}
 
 			Progress.AdvanceAfterMutation(1.0f, LOCTEXT("GenerateProgressSave", "Saving generated assets"));
-			if (!FUMGGenerator::SaveWidgetBlueprint(BuiltWBP, &GenerationOutput, &NavigationData))
+			if (!FUMGGenerator::SaveWidgetBlueprint(BuiltWBP, &GenerationOutput, &NavigationData).IsSuccess())
 			{
 				if (OutGenerationOutput)
 				{

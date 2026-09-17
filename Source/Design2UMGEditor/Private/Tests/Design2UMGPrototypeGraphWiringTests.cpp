@@ -563,7 +563,7 @@ bool FFigmaPrototypeNavigateGraphWiringTest::RunTest(const FString& Parameters)
 		Data, OutputPath, nullptr, nullptr, &NavigationData);
 	if (!TestTrue(TEXT("Build navigate widget blueprint"), WBP != nullptr)
 		|| !TestTrue(TEXT("Initial save with transition wiring succeeds"),
-			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData).IsSuccess()))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
@@ -917,7 +917,7 @@ bool FFigmaPrototypeWiringRegenerateIsIdempotentTest::RunTest(const FString& Par
 	}
 
 	if (!TestTrue(TEXT("Initial save with wiring succeeds"),
-		FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+		FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData).IsSuccess()))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
@@ -1087,7 +1087,7 @@ bool FFigmaPrototypeNavigateSlideTransitionTest::RunTest(const FString& Paramete
 		Data, OutputPath, nullptr, nullptr, &NavigationData);
 	if (!TestTrue(TEXT("Build slide navigate widget blueprint"), WBP != nullptr)
 		|| !TestTrue(TEXT("Save with slide transition wiring succeeds"),
-			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData).IsSuccess()))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
@@ -1169,7 +1169,7 @@ bool FFigmaPrototypeNavigateNoTransitionDirectWiringTest::RunTest(const FString&
 		Data, OutputPath, nullptr, nullptr, &NavigationData);
 	if (!TestTrue(TEXT("Build no-transition widget blueprint"), WBP != nullptr)
 		|| !TestTrue(TEXT("Save with direct wiring succeeds"),
-			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData).IsSuccess()))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
@@ -1240,7 +1240,7 @@ bool FFigmaPrototypeOverlayGraphWiringTest::RunTest(const FString& Parameters)
 		Data, OutputPath, nullptr, nullptr, &NavigationData);
 	if (!TestTrue(TEXT("Build overlay widget blueprint"), WBP != nullptr)
 		|| !TestTrue(TEXT("Save overlay widget blueprint"),
-			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData).IsSuccess()))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
@@ -1329,7 +1329,7 @@ bool FFigmaPrototypeBackGraphWiringTest::RunTest(const FString& Parameters)
 		Data, OutputPath, nullptr, nullptr, &NavigationData);
 	if (!TestTrue(TEXT("Build navigate+back widget blueprint"), WBP != nullptr)
 		|| !TestTrue(TEXT("Save navigate+back widget blueprint"),
-			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData).IsSuccess()))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
@@ -1433,7 +1433,7 @@ bool FFigmaPrototypeBackRuntimeSmokeTest::RunTest(const FString& Parameters)
 		Data, OutputPath, nullptr, nullptr, &NavigationData);
 	if (!TestTrue(TEXT("Build navigate+back widget blueprint"), WBP != nullptr)
 		|| !TestTrue(TEXT("Save navigate+back widget blueprint"),
-			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData).IsSuccess()))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
@@ -1518,7 +1518,7 @@ bool FFigmaPrototypeKeyboardGraphWiringTest::RunTest(const FString& Parameters)
 		Data, OutputPath, nullptr, nullptr, &NavigationData);
 	if (!TestTrue(TEXT("Build keyboard widget blueprint"), WBP != nullptr)
 		|| !TestTrue(TEXT("Save keyboard widget blueprint"),
-			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData).IsSuccess()))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
@@ -1681,7 +1681,7 @@ bool FFigmaPrototypeKeyboardMixedGraphPreservedTest::RunTest(const FString& Para
 		Data, OutputPath, nullptr, nullptr, &NavigationData);
 	if (!TestTrue(TEXT("Build keyboard widget blueprint"), WBP != nullptr)
 		|| !TestTrue(TEXT("Save keyboard widget blueprint"),
-			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData).IsSuccess()))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
@@ -1734,6 +1734,18 @@ bool FFigmaPrototypeKeyboardMixedGraphPreservedTest::RunTest(const FString& Para
 		WiringWarnings.ContainsByPredicate([](const FString& Warning)
 		{
 			return Warning.Contains(TEXT("OnKeyDown")) && Warning.Contains(TEXT("already exists"));
+		}));
+
+	FDesign2UMGGenerationOutput SaveOutput;
+	const FDesign2UMGCommitResult SaveResult = FUMGGenerator::SaveWidgetBlueprint(WBP, &SaveOutput, &NavigationData);
+	TestEqual(TEXT("Save promotes a wiring skip to degradation"), SaveResult.Status,
+		EDesign2UMGCommitStatus::SucceededWithDegradation);
+	TestTrue(TEXT("Save output carries the wiring degradation signal"), SaveOutput.bHasDegradation);
+	TestTrue(TEXT("Save output surfaces the wiring skip diagnostic"),
+		SaveOutput.MappingDiagnostics.ContainsByPredicate([](const FDesign2UMGMappingDiagnostic& Diagnostic)
+		{
+			return Diagnostic.Kind == TEXT("prototype_wiring_skipped")
+				&& Diagnostic.Message.Contains(TEXT("OnKeyDown"));
 		}));
 
 	DeleteGeneratedAssetsAtPath(OutputPath);
@@ -1794,6 +1806,9 @@ bool FFigmaPrototypeKeyboardMixedGraphReimportPreservedTest::RunTest(const FStri
 	Request.TargetAssetPath = TargetPackage;
 	const FDesignReimportResult Result = DesignImportPipeline::Reimport(Document, Request);
 	TestTrue(TEXT("Reimport with a mixed keyboard graph succeeds"), Result.bSucceeded);
+	TestTrue(TEXT("Preserved mixed graph raises explicit degradation"), Result.bHasDegradation);
+	TestEqual(TEXT("Preserved mixed graph is not plain success"), Result.Commit.Status,
+		EDesign2UMGCommitStatus::SucceededWithDegradation);
 
 	UEdGraph* KeyDownGraphAfter = nullptr;
 	for (UEdGraph* Graph : WBP->FunctionGraphs)
@@ -1846,7 +1861,7 @@ bool FFigmaPrototypeKeyDownOverrideSpikeTest::RunTest(const FString& Parameters)
 		Data, OutputPath, nullptr, nullptr, &NavigationData);
 	if (!TestTrue(TEXT("Build spike widget blueprint"), WBP != nullptr)
 		|| !TestTrue(TEXT("Save spike widget blueprint"),
-			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData).IsSuccess()))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
@@ -1910,7 +1925,7 @@ bool FFigmaPrototypeBackMultiStepRuntimeSmokeTest::RunTest(const FString& Parame
 		Data, OutputPath, nullptr, nullptr, &NavigationData);
 	if (!TestTrue(TEXT("Build multi-step navigate+back widget blueprint"), WBP != nullptr)
 		|| !TestTrue(TEXT("Save multi-step navigate+back widget blueprint"),
-			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData).IsSuccess()))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
@@ -1989,7 +2004,7 @@ bool FFigmaPrototypeOverlayRuntimeSmokeTest::RunTest(const FString& Parameters)
 		Data, OutputPath, nullptr, nullptr, &NavigationData);
 	if (!TestTrue(TEXT("Build overlay widget blueprint"), WBP != nullptr)
 		|| !TestTrue(TEXT("Save overlay widget blueprint"),
-			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData).IsSuccess()))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
@@ -2091,7 +2106,7 @@ bool FFigmaPrototypeOverlayOnlyPageNavigateRuntimeSmokeTest::RunTest(const FStri
 		Data, OutputPath, nullptr, nullptr, &NavigationData);
 	if (!TestTrue(TEXT("Build overlay-only navigate widget blueprint"), WBP != nullptr)
 		|| !TestTrue(TEXT("Save overlay-only navigate widget blueprint"),
-			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData).IsSuccess()))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
@@ -2174,7 +2189,7 @@ bool FFigmaPrototypeDualTargetOverlayMirrorRuntimeSmokeTest::RunTest(const FStri
 		Data, OutputPath, nullptr, &GenerationOutput, &NavigationData);
 	if (!TestTrue(TEXT("Build dual-target overlay widget blueprint"), WBP != nullptr)
 		|| !TestTrue(TEXT("Save dual-target overlay widget blueprint"),
-			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData).IsSuccess()))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
@@ -2335,7 +2350,7 @@ bool FFigmaPrototypeInitialPageOverlayMirrorRuntimeSmokeTest::RunTest(const FStr
 		Data, OutputPath, nullptr, nullptr, &NavigationData);
 	if (!TestTrue(TEXT("Build initial-page overlay widget blueprint"), WBP != nullptr)
 		|| !TestTrue(TEXT("Save initial-page overlay widget blueprint"),
-			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData).IsSuccess()))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
@@ -2496,7 +2511,7 @@ bool FFigmaPrototypeDualTargetOverlayMappedComponentTest::RunTest(const FString&
 		Data, OutputPath, &Settings, nullptr, &NavigationData);
 	if (!TestTrue(TEXT("Build dual-target mapped-component widget blueprint"), WBP != nullptr)
 		|| !TestTrue(TEXT("Save dual-target mapped-component widget blueprint"),
-			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData).IsSuccess()))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
@@ -2544,7 +2559,7 @@ bool FFigmaPrototypeBackClosesOverlayRuntimeSmokeTest::RunTest(const FString& Pa
 		Data, OutputPath, nullptr, nullptr, &NavigationData);
 	if (!TestTrue(TEXT("Build navigate+overlay+back widget blueprint"), WBP != nullptr)
 		|| !TestTrue(TEXT("Save navigate+overlay+back widget blueprint"),
-			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData).IsSuccess()))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
@@ -2644,7 +2659,7 @@ bool FFigmaPrototypeMoveOutTransitionRuntimeSmokeTest::RunTest(const FString& Pa
 		Data, OutputPath, nullptr, nullptr, &NavigationData);
 	if (!TestTrue(TEXT("Build MOVE_OUT widget blueprint"), WBP != nullptr)
 		|| !TestTrue(TEXT("Save MOVE_OUT widget blueprint"),
-			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData).IsSuccess()))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
@@ -2787,7 +2802,7 @@ bool FFigmaPrototypeMoveInTransitionRuntimeSmokeTest::RunTest(const FString& Par
 		Data, OutputPath, nullptr, nullptr, &NavigationData);
 	if (!TestTrue(TEXT("Build MOVE_IN widget blueprint"), WBP != nullptr)
 		|| !TestTrue(TEXT("Save MOVE_IN widget blueprint"),
-			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData)))
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData).IsSuccess()))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;

@@ -347,7 +347,10 @@ UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWid
 		ClassOverrideCache,
 		GenerationSettings
 	};
-	FWidgetTreeChildBuilder::BuildChildren(WidgetTree, NewWidget, Node, Context);
+	if (!FWidgetTreeChildBuilder::BuildChildren(WidgetTree, NewWidget, Node, Context))
+	{
+		return nullptr;
+	}
 
 	return NewWidget;
 }
@@ -365,20 +368,23 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 	// Add to the parent container and apply slot properties.
 	if (ParentWidget)
 	{
-		if (UPanelSlot* Slot = ParentWidget->AddChild(NewWidget))
+		UPanelSlot* Slot = ParentWidget->AddChild(NewWidget);
+		if (!Slot)
 		{
-			const FUMGSlotData SlotData = FWidgetLayoutAdapter::Resolve(
-				Node, ParentWidget, WidgetTree, EffectiveDesignSize, false);
-			UE_LOG(LogDesign2UMG, Verbose,
-				TEXT("CreateWidgetSlot: '%s' anc=(%.2f,%.2f)-(%.2f,%.2f) off=(%.1f,%.1f,%.1f,%.1f) align=(%.2f,%.2f) auto=%d"),
-				*Node.Name,
-				SlotData.Anchors.Min.X, SlotData.Anchors.Min.Y,
-				SlotData.Anchors.Max.X, SlotData.Anchors.Max.Y,
-				SlotData.Offsets.Left, SlotData.Offsets.Top, SlotData.Offsets.Right, SlotData.Offsets.Bottom,
-				SlotData.Alignment.X, SlotData.Alignment.Y,
-				SlotData.bAutoSize ? 1 : 0);
-			ApplySlotProperties(Slot, SlotData);
+			UE_LOG(LogDesign2UMG, Warning, TEXT("Could not attach widget '%s' to '%s'"), *Node.Name, *ParentWidget->GetName());
+			return nullptr;
 		}
+		const FUMGSlotData SlotData = FWidgetLayoutAdapter::Resolve(
+			Node, ParentWidget, WidgetTree, EffectiveDesignSize, false);
+		UE_LOG(LogDesign2UMG, Verbose,
+			TEXT("CreateWidgetSlot: '%s' anc=(%.2f,%.2f)-(%.2f,%.2f) off=(%.1f,%.1f,%.1f,%.1f) align=(%.2f,%.2f) auto=%d"),
+			*Node.Name,
+			SlotData.Anchors.Min.X, SlotData.Anchors.Min.Y,
+			SlotData.Anchors.Max.X, SlotData.Anchors.Max.Y,
+			SlotData.Offsets.Left, SlotData.Offsets.Top, SlotData.Offsets.Right, SlotData.Offsets.Bottom,
+			SlotData.Alignment.X, SlotData.Alignment.Y,
+			SlotData.bAutoSize ? 1 : 0);
+		ApplySlotProperties(Slot, SlotData);
 	}
 
 	const bool AutomaticComponent = GenerationSettings && GenerationSettings->ComponentBlueprints
